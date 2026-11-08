@@ -23,7 +23,7 @@ from .sessions import refresh_sessions
 from .github import already_merged, finish, gh, github, merged_here, own_work, pr_adopt, pr_open, pr_pending, pr_problem, pr_view, update_main, watch_main
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
-    own_path, parent_for, resume_argv, retag_tabs, set_branch, tab_title, task_tabs,
+    own_path, parent_for, resume_argv, REVIEW_READS, review_reads, retag_tabs, set_branch, tab_title, task_tabs,
 )
 from .store import is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
 from .queues import after_refs, parse_after, queue_reason, set_after
@@ -462,6 +462,7 @@ def gate_step(s, t):
     argv = argv_for({**rv, "perm": "read-only" if rv["agent"] == "codex" else "plan"})
     diff = git(wt, "diff", f"{t['start']}..{head}")[1]
     cmd = f"{ht} review {ref} --folder {folder}"
+    check = (settings_for(s, t.get("space"))["tasks"].get("check") or "").strip()
     prompt = "\n\n".join([
         instructions("reviewer"), f"The task, {ref}:\n" + ((t.get("prompt") or "").strip() or t["title"]),
         f"Review commit {head} in {wt}. Its diff (git diff {t['start']}..{head})" + (", cut: run it for the rest" if len(diff) > 20000 else "")
@@ -470,9 +471,12 @@ def gate_step(s, t):
         f"`{cmd} --pass` or `{cmd} --changes \"<each finding with its level and proof>\" --must-fix <how many are at or above "
         f"Must fix>`. It is taken only from this terminal while {head[:7]} is the worktree's HEAD with nothing uncommitted. "
         f"Then end with your findings as your last message."
+        + (f" Your shell runs without asking only {', '.join(REVIEW_READS)}" + (f" and this folder's check, `{check}`" if check else "")
+           + ": anything else waits on a prompt nobody here can answer." if rv["agent"] in ("agy", "claude") else "")
         + (" Codex's sandbox can't reach Herdr: give that command sandbox_permissions \"require_escalated\"." if rv["agent"] == "codex" else "")])
     live = workers(s, t)
-    a = launch(s, t, argv, t.get("space"), prompt, parent=live[-1]["address"] if live else None, role="reviewer")
+    a = launch(s, t, argv, t.get("space"), prompt, parent=live[-1]["address"] if live else None, role="reviewer",
+               reads=review_reads(check))
     t.setdefault("review_runs", []).append({"round": len(runs) + 1, "head": head, "address": a["address"], "cli": agent_key(argv),
                                             "model": rv.get("model") or None, "at": now()})
     t["progress"] = {"text": fit("Herdr's reviewer is on it"), "at": now(), "set": now(), "by": "herdr"}

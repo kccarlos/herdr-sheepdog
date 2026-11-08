@@ -36,6 +36,16 @@ OWN = ["ready", "reviewed", "status", "alert", "feedback", "show", "list", "wher
 # using one by name never ask either, as Shepherdr's secret commands. Written by its full path or
 # its bare name. Reviewers get none (launch() skips own_argv for them; herdr-secret refuses them).
 SECRET = ["ask", "run", "env", "list"]
+# A gate reviewer's shell (FAC-36): read-only commands, and the folder's check (review_reads).
+REVIEW_READS = ["git log", "git diff", "git show", "git status", "git blame", "ls", "cat", "grep", "rg", "find", "sed -n",
+                "head", "tail", "wc"]
+
+
+def review_reads(check):
+    """REVIEW_READS and each part of the folder's check as written: agy and Claude Code allow a
+    compound line part by part (split at ;, &&, ||, | and line breaks outside quotes)."""
+    parts = re.split(r"""(?:&&|\|\||[;|\n])(?=(?:[^'"]|'[^']*'|"(?:\\.|[^"\\])*")*$)""", check or "")
+    return REVIEW_READS + [p.strip() for p in parts if p.strip()]
 
 
 def secret_path():
@@ -68,14 +78,15 @@ def own_rules(path, verbs=OWN):
     return rules
 
 
-def own_argv(argv, worktree=None, verbs=OWN, cwd=None):
+def own_argv(argv, worktree=None, verbs=OWN, cwd=None, reads=None):
     """An agent's argv with its own herdr-task commands allowed (Claude Code and Codex, and agy,
     which also trusts `worktree`, the one herdr-task made for the task; verbs: the herdr-task verbs allowed;
-    cwd: the folder agy runs in, which a relative --settings file is read from)."""
+    cwd: the folder agy runs in, which a relative --settings file is read from; reads: a reviewer's
+    commands (review_reads), which for agy take the place of the person's own list)."""
     path, out = own_path(), list(argv)
     k = agent_key(out)
     if k == "claude":
-        rules = own_rules(path, verbs)
+        rules = own_rules(path, verbs) + [f"Bash({r}:*)" for r in reads or []]
         if not rules:
             return out
         if "--settings" in out[:-1]:
@@ -113,6 +124,8 @@ def own_argv(argv, worktree=None, verbs=OWN, cwd=None):
                 theirs = list(json.load(f)["permissions"]["allow"])
         except (OSError, ValueError, KeyError, TypeError):
             theirs = []
+        if reads is not None:  # a reviewer: none of the person's rules, which may write (sed, npm ci)
+            theirs = [f"command({r})" for r in reads]
         trusted = {"trustedWorkspaces": [worktree]} if worktree else {}  # skips agy's "Trust this folder?" for it
         cur, spans = None, []  # every `--settings X` / `--settings=X` becomes one, at the first one's place
         for j, a in enumerate(out):
@@ -630,20 +643,20 @@ def folder_for(s, task):
     return path
 
 
-def launch(s, task, argv, space, message=None, parent=None, resume=None, role=None):
+def launch(s, task, argv, space, message=None, parent=None, resume=None, role=None, reads=None):
     """Starts one agent for the task with no tab or pane of its own (a space can hold thousands
     of tasks): an hc child of `parent`, which parent_for() makes the space's coordinator, reached
     through the Tasks panel. Labels: herdr.task (its task), herdr.task.space (its space; never
     herdr.space, which Herdr gives a pane), herdr.agent, herdr.coordinator (its coordinator's tab,
     which keeps it under a restarted coordinator) and herdr.role=reviewer for a reviewer, kept
-    apart from the task's agents. Returns its record."""
+    apart from the task's agents; reads: a reviewer's read-only commands (review_reads). Returns its record."""
     key = s.key(task)
     cmd, folder = list(resume or argv), folder_for(s, task)
     if not role:
         cmd = own_argv(cmd, folder if task.get("mode") == "worktree" else None, cwd=folder)
     elif role == "reviewer" and agent_key(cmd) in ("agy", "claude"):
-        # a read-only reviewer: its worktree trusted, only its verdict allowed (herdr-task review)
-        cmd = own_argv(cmd, folder if task.get("mode") == "worktree" else None, verbs=("review",), cwd=folder)
+        # a read-only reviewer: its worktree trusted, its verdict (herdr-task review) and `reads` allowed
+        cmd = own_argv(cmd, folder if task.get("mode") == "worktree" else None, verbs=("review",), cwd=folder, reads=reads)
     if message:
         cmd = cmd + (["-i", message] if agent_key(cmd) == "agy" else [message])  # agy reads prompts only from -i
     labels = ["--label", f"herdr.task={key}", "--label", f"herdr.task.space={bare(space)}",

@@ -1739,6 +1739,38 @@ class GateReview(unittest.TestCase):
         self.ready()  # again while its reviewer works: no second one
         self.assertEqual(len(self.runs), 1)
 
+    def test_the_reviewer_may_run_reads_and_the_check_and_nothing_that_writes(self):
+        # FAC-36: agy's --settings list replaces the person's own (which here may write); the check is allowed part by part
+        from unittest import mock
+        import herdr_task.launch as launch
+        import herdr_task.settings as settings
+        home = tempfile.mkdtemp(dir=self.root)
+        os.makedirs(os.path.join(home, ".gemini", "antigravity-cli"))
+        with open(os.path.join(home, ".gemini", "antigravity-cli", "settings.json"), "w") as f:
+            json.dump({"permissions": {"allow": ["command(sed)", "command(npm ci)", "command(git diff)"]}}, f)
+        conf = os.path.join(home, "shepherdr.json")
+        check = 'export PATH="$HOME/n/bin:$PATH"; bin/sync-shared --check && python3 -m unittest discover -s test'
+        with open(conf, "w") as f:
+            json.dump({"spaces": {"sp1": {"folder": self.main, "tasks": {"check": check}}}}, f)
+        with mock.patch.object(launch, "HOME", home), mock.patch.object(settings, "SETTINGS", conf):
+            self.ready()
+        cmd = self.runs[0][self.runs[0].index("--") + 1:]
+        allow = json.loads(cmd[cmd.index("--settings") + 1])["permissions"]["allow"]
+        self.assertEqual([r for r in allow if "herdr-task" not in r],
+                         [f"command({c})" for c in launch.REVIEW_READS]
+                         + ['command(export PATH="$HOME/n/bin:$PATH")', "command(bin/sync-shared --check)",
+                            "command(python3 -m unittest discover -s test)"])
+        self.assertEqual([r.split()[-1] for r in allow if "herdr-task" in r], ["review)"])
+        self.assertIn(check, cmd[cmd.index("-i") + 1])  # and the prompt says what runs without asking
+        # a worker still gets the person's own list; a claude reviewer gets the same commands as Bash rules
+        with mock.patch.object(launch, "HOME", home):
+            worker = json.loads(launch.own_argv(["agy"])[2])["permissions"]["allow"]
+            claude = launch.own_argv(["claude", "--settings", '{"fastMode": false}'], verbs=("review",), reads=["git diff", "sed -n"])
+        self.assertIn("command(sed)", worker)
+        got = json.loads(claude[2])
+        self.assertEqual(got["fastMode"], False)
+        self.assertEqual(got["permissions"]["allow"][1:], ["Bash(git diff:*)", "Bash(sed -n:*)"])
+
     def test_a_verdict_from_another_terminal_is_refused(self):
         self.ready()
         for by in ("term-9", "w1", None):
