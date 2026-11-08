@@ -238,21 +238,6 @@ type App struct {
 // login service to start it).
 const ReasonUpdate = "update installed"
 
-// Idle returns "" when nobody is using the daemon, else why not: a voice
-// client (browser or phone) is connected, the orchestrator is in a turn,
-// or an approval question is open. The update restart waits for "".
-func (a *App) Idle() string {
-	switch {
-	case a.web != nil && a.web.VoiceClientConnected():
-		return "a voice client is connected"
-	case a.brain.Busy():
-		return "the orchestrator is working"
-	case a.store != nil && a.store.Snapshot().PendingAction != nil:
-		return "an approval question is open"
-	}
-	return ""
-}
-
 // ReasonServiceHandoff is the restart reason that hands the daemon over
 // to the login service: serve installs the service and exits instead of
 // building the daemon again.

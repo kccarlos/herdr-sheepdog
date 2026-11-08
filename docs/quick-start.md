@@ -257,11 +257,10 @@ straight away. It asks nothing. From a source checkout it prints the steps
 instead: `git pull` in your clone, then `make install`.
 
 If you upgrade another way (`brew upgrade`, rerunning the installer), the
-daemon notices that its program was replaced and restarts into it as soon as
-nobody is using it: no voice client connected, no orchestrator turn running,
-no approval waiting, no demo running. Turn that off with
-`update.auto_restart = false` ([CONFIG.md](../CONFIG.md)); `sheepdog update`
-then restarts it.
+daemon notices within a minute that its program was replaced and restarts
+into it right away; a voice session drops for a few seconds and reconnects.
+Turn that off with `update.auto_restart = false` ([CONFIG.md](../CONFIG.md));
+`sheepdog update` then restarts it.
 
 `update.check = false` turns the daily check and its notices off.
 

@@ -527,7 +527,7 @@ before a line is written.
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
 | `update.check` | `SHEEPDOG_UPDATE_CHECK` | `true` | Once a day (and shortly after the daemon starts, when the last check is older than a day) the daemon asks `api.github.com` for the latest `v*` release of `kccarlos/herdr-sheepdog` and, when a newer one exists, shows a notice in `sheepdog status`, and the setup and voice pages. The result is cached in `<data_dir>/update-check.json`. One request, nothing personal sent ([privacy](docs/privacy.md)). The voice never speaks it. `false` turns the check and every notice off. |
-| `update.auto_restart` | `SHEEPDOG_UPDATE_AUTO_RESTART` | `true` | After an upgrade (the `sheepdog` executable on disk changed) the daemon restarts itself into the new one, but only while it is idle: no voice client connected, no orchestrator turn running, no approval waiting, no demo running on the setup page. It checks every minute and never interrupts a live session. `false` leaves the restart to you (`sheepdog update` restarts it); the pages and `sheepdog status` still say the update is installed. `sheepdog update` itself always restarts the daemon right away. |
+| `update.auto_restart` | `SHEEPDOG_UPDATE_AUTO_RESTART` | `true` | After an upgrade (the `sheepdog` executable on disk changed) the daemon restarts itself into the new one right away (it checks every minute); only a demo running on the setup page holds it back. A voice session drops for a few seconds and reconnects. `false` leaves the restart to you (`sheepdog update` restarts it); the pages and `sheepdog status` still say the update is installed. `sheepdog update` itself always restarts the daemon right away. |
 
 
 ## `[panel]`

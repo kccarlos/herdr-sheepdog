@@ -52,7 +52,7 @@ Privacy & Security, Microphone, enable your browser. Browsers ask per origin, so
 `127.0.0.1:7777` and `localhost:7777` are separate.
 
 **How do I update or remove it?** sheepdog tells you when a new version exists
-and restarts itself into it when idle ([quick-start.md](quick-start.md#update)).
+and restarts itself into it once it is installed ([quick-start.md](quick-start.md#update)).
 `sheepdog update` installs it and restarts the daemon;
 `sheepdog uninstall` removes it ([commands.md](commands.md)).
 
