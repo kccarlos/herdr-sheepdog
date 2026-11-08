@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"io"
@@ -397,4 +398,35 @@ func (d *fakeDemo) State() DemoState {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return DemoState{Running: d.on}
+}
+
+func TestHerdrBackendSwitch(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	f := newSetupFixture(t, cfg)
+	f.h.srv.deps.HerdrBackend = config.HerdrBackendHerdr
+	f.h.srv.deps.HerdrBackends = func(context.Context) []string { return []string{config.HerdrBackendHC} }
+
+	if code, body := f.h.sendJSON(http.MethodPut, "/api/herdr/backend", map[string]any{"backend": "tmux"}, nil); code != http.StatusBadRequest {
+		t.Fatalf("bad backend = %d %s, want 400", code, body)
+	}
+	if code, body := f.h.sendJSON(http.MethodPut, "/api/herdr/backend", map[string]any{"backend": "herdr"}, nil); code != http.StatusConflict || !strings.Contains(body, "herdr-tui is not running") {
+		t.Fatalf("unavailable backend = %d %s, want 409 not running", code, body)
+	}
+	f.h.srv.deps.HerdrOverride = "set by SHEEPDOG_HERDR_BACKEND in the environment"
+	if code, body := f.h.sendJSON(http.MethodPut, "/api/herdr/backend", map[string]any{"backend": "hc"}, nil); code != http.StatusConflict || !strings.Contains(body, "SHEEPDOG_HERDR_BACKEND") {
+		t.Fatalf("overridden = %d %s, want 409 override reason", code, body)
+	}
+	f.h.srv.deps.HerdrOverride = ""
+	var out map[string]string
+	if code, body := f.h.sendJSON(http.MethodPut, "/api/herdr/backend", map[string]any{"backend": "hc"}, &out); code != http.StatusOK || out["backend"] != "hc" {
+		t.Fatalf("switch to hc = %d %s, want 200 hc", code, body)
+	}
+	if reason := f.waitRestart(t); !strings.Contains(reason, "hc") {
+		t.Errorf("restart reason = %q, want hc", reason)
+	}
+	data, err := os.ReadFile(f.env)
+	if err != nil || !strings.Contains(string(data), "SHEEPDOG_HERDR_BACKEND=hc") {
+		t.Errorf("env file = %q (%v), want SHEEPDOG_HERDR_BACKEND=hc", string(data), err)
+	}
 }

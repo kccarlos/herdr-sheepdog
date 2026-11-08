@@ -544,6 +544,17 @@ public final class DaemonClient: @unchecked Sendable {
         return settings
     }
 
+    /// `PUT /api/herdr/backend {"backend": "herdr"|"hc"}`.
+    @discardableResult
+    public func setHerdrBackend(_ kind: HerdrBackendSwitch.Kind) async throws -> String {
+        struct Reply: Decodable { let backend: String }
+        let data = try JSONSerialization.data(withJSONObject: ["backend": kind.rawValue])
+        guard let reply = try await sendJSON(Reply.self, path: "/api/herdr/backend", method: "PUT", body: data, what: "the herdr backend reply") else {
+            throw DaemonError.rejected(status: 404, message: "this daemon cannot switch herdr")
+        }
+        return reply.backend
+    }
+
     /// One JSON request: 2xx decodes, 404 is `nil` (an older daemon), 401
     /// is the token, anything else carries the daemon's own words.
     private func sendJSON<T: Decodable>(_ type: T.Type, path: String, query: [URLQueryItem] = [], method: String = "GET", body: Data? = nil, what: String) async throws -> T? {

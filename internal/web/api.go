@@ -5,13 +5,16 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/lang"
+	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/panelsync"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
@@ -40,9 +43,11 @@ type StateResponse struct {
 	Now     time.Time  `json:"now"`
 	// VoiceProvider and VoiceModel are the voice model behind /ws
 	// ("off" and "" with --voice=off).
-	VoiceProvider string `json:"voice_provider"`
-	VoiceModel    string `json:"voice_model"`
-	HerdrBackend  string `json:"herdr_backend,omitempty"`
+	VoiceProvider        string   `json:"voice_provider"`
+	VoiceModel           string   `json:"voice_model"`
+	HerdrBackend         string   `json:"herdr_backend,omitempty"`
+	HerdrBackends        []string `json:"herdr_backends,omitempty"`
+	HerdrBackendOverride string   `json:"herdr_backend_override,omitempty"`
 	// ConversationStartedAt is when the current conversation began: the
 	// last "New conversation" reset, or daemon start.
 	ConversationStartedAt time.Time `json:"conversation_started_at"`
@@ -152,6 +157,10 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	agents := s.deps.Store.List()
 	hs := s.hub.state()
 	views, counts, mutes := s.agentViews(r.Context(), agents)
+	var herdrBackends []string
+	if s.deps.HerdrBackends != nil {
+		herdrBackends = s.deps.HerdrBackends(r.Context())
+	}
 	writeJSON(w, http.StatusOK, StateResponse{
 		Agents:                views,
 		AttentionCounts:       counts,
@@ -164,6 +173,8 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Brain:                 s.brainInfo(),
 		Herdr:                 s.deps.HerdrMode,
 		HerdrBackend:          s.deps.HerdrBackend,
+		HerdrBackends:         herdrBackends,
+		HerdrBackendOverride:  s.deps.HerdrOverride,
 		Version:               s.deps.Version,
 		Now:                   s.deps.Now().UTC(),
 		VoiceProvider:         s.voiceProvider(),
@@ -172,6 +183,47 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Update:                s.updateStatus(),
 		Panel:                 s.panelState(),
 	})
+}
+
+func (s *Server) handleHerdrBackend(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Backend string `json:"backend"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		return
+	}
+	b := strings.TrimSpace(req.Backend)
+	if b != config.HerdrBackendHerdr && b != config.HerdrBackendHC {
+		writeError(w, http.StatusBadRequest, "backend must be herdr or hc")
+		return
+	}
+	if s.deps.HerdrOverride != "" {
+		writeError(w, http.StatusConflict, s.deps.HerdrOverride)
+		return
+	}
+	if s.deps.Setup == nil || s.deps.Setup.EnvPath == "" {
+		writeError(w, http.StatusConflict, "no environment file is configured")
+		return
+	}
+	var up []string
+	if s.deps.HerdrBackends != nil {
+		up = s.deps.HerdrBackends(r.Context())
+	}
+	if !slices.Contains(up, b) {
+		name := "herdr-tui"
+		if b == config.HerdrBackendHC {
+			name = "herdr-core"
+		}
+		writeError(w, http.StatusConflict, name+" is not running")
+		return
+	}
+	if err := onboard.UpsertEnvFile(s.deps.Setup.EnvPath, map[string]string{"SHEEPDOG_HERDR_BACKEND": b}); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"backend": b})
+	s.restartSoon("herdr backend: " + b)
 }
 
 // MuteRequest is the body of POST /api/voice/mute.

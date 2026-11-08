@@ -247,5 +247,32 @@ final class DaemonModelTests: XCTestCase {
             XCTAssertFalse(error.message.contains("Error Domain"), "no raw errors in front of the user")
         }
     }
+
+    func testHerdrBackendSwitchAvailabilityAndReadOnlyReason() throws {
+        let json = """
+        {"agents":[],"voice":{"mode":"off","status":"closed","muted":false,"stalled":false,"client_connected":false},
+        "herdr":"socket","herdr_backend":"herdr","herdr_backends":["herdr"]}
+        """
+        let state = try DaemonClient.decoder.decode(DaemonState.self, from: Data(json.utf8))
+        let sw = try XCTUnwrap(HerdrBackendSwitch(state: state))
+        XCTAssertEqual(sw.current, .tui)
+        XCTAssertEqual(sw.currentLabel, "tui")
+        XCTAssertFalse(sw.isReadOnly)
+        XCTAssertEqual(sw.options.map(\.title), ["tui", "core (not running)"])
+        XCTAssertEqual(sw.options.map(\.canSelect), [false, false])
+
+        let bothUp = DaemonState(agents: [], voice: state.voice, herdrBackend: "herdr", herdrBackends: ["herdr", "hc"])
+        let swBoth = try XCTUnwrap(HerdrBackendSwitch(state: bothUp))
+        XCTAssertEqual(swBoth.options.map(\.title), ["tui", "core"])
+        XCTAssertEqual(swBoth.options.map(\.canSelect), [false, true])
+
+        let overridden = DaemonState(agents: [], voice: state.voice, herdrBackend: "hc", herdrBackends: ["herdr", "hc"], herdrBackendOverride: "set by SHEEPDOG_HERDR_BACKEND in the environment")
+        let swOver = try XCTUnwrap(HerdrBackendSwitch(state: overridden))
+        XCTAssertTrue(swOver.isReadOnly)
+        XCTAssertEqual(swOver.readOnlyReason, "set by SHEEPDOG_HERDR_BACKEND in the environment")
+
+        let legacy = DaemonState(agents: [], voice: state.voice)
+        XCTAssertNil(HerdrBackendSwitch(state: legacy))
+    }
 }
 
