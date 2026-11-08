@@ -65,9 +65,10 @@ def own_rules(path):
     return rules
 
 
-def own_argv(argv, worktree=None, with_own=True):
+def own_argv(argv, worktree=None, with_own=True, cwd=None):
     """An agent's argv with its own herdr-task commands allowed (Claude Code and Codex, and agy,
-    which also trusts `worktree`, the one herdr-task made for the task; with_own=False: no own rules, agy only)."""
+    which also trusts `worktree`, the one herdr-task made for the task; with_own=False: no own rules, agy only;
+    cwd: the folder agy runs in, which a relative --settings file is read from)."""
     path, out = own_path(), list(argv)
     k = agent_key(out)
     if k == "claude":
@@ -110,23 +111,39 @@ def own_argv(argv, worktree=None, with_own=True):
         except (OSError, ValueError, KeyError, TypeError):
             theirs = []
         trusted = {"trustedWorkspaces": [worktree]} if worktree else {}  # skips agy's "Trust this folder?" for it
-        cur, i = None, 0
-        if "--settings" in out[:-1]:
-            i = out.index("--settings")
+        cur, spans = None, []  # every `--settings X` / `--settings=X` becomes one, at the first one's place
+        for j, a in enumerate(out):
+            if a == "--settings" and j + 1 < len(out):
+                n, val = 2, out[j + 1]
+            elif a.startswith("--settings="):
+                n, val = 1, a[len("--settings="):]
+            else:
+                continue
+            spans.append((j, n))
             try:
-                cur = json.loads(out[i + 1])
+                got = json.loads(val)
             except ValueError:
                 try:
-                    with open(os.path.expanduser(out[i + 1])) as f:
-                        cur = json.load(f)
+                    with open(os.path.join(cwd or "", os.path.expanduser(val))) as f:
+                        got = json.load(f)
                 except (OSError, ValueError):
-                    pass
+                    continue
+            if isinstance(got, dict):  # a later one wins per key, but its allow and trust lists add to the earlier ones
+                old = cur or {}
+                allow = list((old.get("permissions") or {}).get("allow") or []) + list((got.get("permissions") or {}).get("allow") or [])
+                cur = {**old, **got, "permissions": {**(old.get("permissions") or {}), **(got.get("permissions") or {}), "allow": allow},
+                       "trustedWorkspaces": list(old.get("trustedWorkspaces") or []) + list(got.get("trustedWorkspaces") or [])}
+                if not cur["trustedWorkspaces"]:
+                    del cur["trustedWorkspaces"]
         if isinstance(cur, dict):
             perms = dict(cur.get("permissions") or {})
             perms["allow"] = list(perms.get("allow") or []) + theirs + own
             if worktree:
-                trusted = {"trustedWorkspaces": list(cur.get("trustedWorkspaces") or []) + [worktree]}
-            out[i + 1] = json.dumps({**cur, **trusted, "permissions": perms})
+                trusted = {"trustedWorkspaces": list(dict.fromkeys(list(cur.get("trustedWorkspaces") or []) + [worktree]))}
+            for j, n in reversed(spans[1:]):
+                del out[j:j + n]
+            i, n = spans[0]
+            out[i:i + n] = ["--settings", json.dumps({**cur, **trusted, "permissions": perms})]
             return out
         return out[:1] + ["--settings", json.dumps({**trusted, "permissions": {"allow": theirs + own}})] + out[1:]
     return out
@@ -617,9 +634,9 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     key = s.key(task)
     cmd, folder = list(resume or argv), folder_for(s, task)
     if not role:
-        cmd = own_argv(cmd, folder if task.get("mode") == "worktree" else None)
+        cmd = own_argv(cmd, folder if task.get("mode") == "worktree" else None, cwd=folder)
     elif role == "reviewer" and agent_key(cmd) == "agy" and task.get("mode") == "worktree":
-        cmd = own_argv(cmd, folder, with_own=False)  # a read-only reviewer: its worktree trusted, none of the worker's own rules
+        cmd = own_argv(cmd, folder, with_own=False, cwd=folder)  # a read-only reviewer: its worktree trusted, none of the worker's own rules
     if message:
         cmd = cmd + (["-i", message] if agent_key(cmd) == "agy" else [message])  # agy reads prompts only from -i
     labels = ["--label", f"herdr.task={key}", "--label", f"herdr.task.space={bare(space)}",
