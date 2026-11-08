@@ -29,6 +29,7 @@ case "\${1:-}" in
 version) echo "sheepdog v9.9.9" ;;
 status) [ -z "\${SHEEPDOG_FAKE_STATUS_RUNNING:-}" ] || exit 0; exit 1 ;;
 setup) echo setup >>"$work/setup-ran" ;;
+restart) echo restart >>"$work/restart-ran"; [ -z "\${SHEEPDOG_FAKE_RESTART_FAILS:-}" ] || exit 1 ;;
 *) exit 1 ;;
 esac
 EOF
@@ -63,12 +64,38 @@ Darwin_arm64 | Linux_x86_64 | Linux_amd64)
 	if [ ! -e "$work/setup-ran" ]; then rc=0; else rc=1; fi
 	check "NO_SETUP runs no setup" "$rc"
 
-	# A running old daemon gets the restart instruction.
+	# A running old daemon is restarted by the new binary; without a
+	# config, setup is still the next step.
 	out=$(HOME=$home SHELL=/bin/zsh PATH="$bin:$PATH" SHEEPDOG_INSTALL_DIR=$bin \
 		SHEEPDOG_FAKE_STATUS_RUNNING=1 SHEEPDOG_RELEASE_URL="file://$rel" \
 		SHEEPDOG_NO_SETUP=1 sh "$here/install.sh" 2>&1) && rc=0 || rc=$?
+	if [ -e "$work/restart-ran" ]; then rc=0; else rc=1; fi
+	check "running daemon is restarted" "$rc"
+	case "$out" in *"Next: sheepdog setup"*) rc=0 ;; *) rc=1 ;; esac
+	check "unconfigured install still offers setup" "$rc"
+	rm -f "$work/restart-ran"
+
+	# A failed restart falls back to the instruction.
+	out=$(HOME=$home SHELL=/bin/zsh PATH="$bin:$PATH" SHEEPDOG_INSTALL_DIR=$bin \
+		SHEEPDOG_FAKE_STATUS_RUNNING=1 SHEEPDOG_FAKE_RESTART_FAILS=1 SHEEPDOG_RELEASE_URL="file://$rel" \
+		SHEEPDOG_NO_SETUP=1 sh "$here/install.sh" 2>&1) && rc=0 || rc=$?
 	case "$out" in *"Restart it to use the new version: sheepdog restart"*) rc=0 ;; *) rc=1 ;; esac
-	check "running daemon gets the restart line" "$rc"
+	check "failed restart gets the restart line" "$rc"
+	rm -f "$work/restart-ran"
+
+	# An upgrade of a configured install: no setup step, the daemon is
+	# restarted, no restart instruction.
+	mkdir -p "$home/.config/sheepdog"
+	: >"$home/.config/sheepdog/config.toml"
+	out=$(HOME=$home SHELL=/bin/zsh PATH="$bin:$PATH" SHEEPDOG_INSTALL_DIR=$bin \
+		SHEEPDOG_FAKE_STATUS_RUNNING=1 SHEEPDOG_RELEASE_URL="file://$rel" \
+		sh "$here/install.sh" 2>&1) && rc=0 || rc=$?
+	check "configured upgrade installs" "$rc"
+	if [ -e "$work/restart-ran" ] && [ ! -e "$work/setup-ran" ]; then rc=0; else rc=1; fi
+	check "configured upgrade restarts and runs no setup" "$rc"
+	case "$out" in *"sheepdog setup"* | *"Restart it to use"*) rc=1 ;; *) rc=0 ;; esac
+	check "configured upgrade prints no setup or restart step" "$rc"
+	rm -rf "$home/.config" "$work/restart-ran"
 
 	# Another sheepdog earlier on PATH: said, and the new one still runs.
 	other=$work/other

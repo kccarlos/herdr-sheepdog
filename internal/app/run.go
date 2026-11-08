@@ -74,6 +74,10 @@ func (a *App) Run(ctx context.Context) (err error) {
 		wg.Add(1)
 		go func() { defer wg.Done(); a.runWatcher(inner) }()
 	}
+	if a.awaitHerdr != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); a.awaitHerdr(inner) }()
+	}
 	if a.marksRun != nil {
 		wg.Add(1)
 		go func() { defer wg.Done(); a.marksRun(inner) }()

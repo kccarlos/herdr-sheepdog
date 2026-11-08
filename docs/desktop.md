@@ -83,11 +83,12 @@ Install the daemon with the one-liner from
 [the quick start](quick-start.md#herdr-app-on-herdr-core)
 or `brew install kccarlos/tap/sheepdog`, then run `sheepdog setup`.
 
-### 2. Choose herdr-core if both backends are installed
+### 2. Choose herdr-core if both backends are running
 
-Interactive `sheepdog setup` asks whether to use `herdr-core` or
-[herdr-tui](https://github.com/herdrdev/herdr) whenever both are installed
-(even if one was already pinned) and restarts a running daemon when you switch.
+`sheepdog setup` uses the herdr that is running, or the only one installed,
+without asking. It asks whether to use `herdr-core` or
+[herdr-tui](https://github.com/herdrdev/herdr) only when both are running and
+none is pinned yet, and restarts a running daemon when it pins one.
 For non-interactive or manual configuration, see
 [`herdr.backend`](../CONFIG.md#herdr).
 
@@ -98,7 +99,7 @@ panel, offers the Sheepdog layout and switches herdr-app to it, and optionally
 adds a keyboard shortcut (`Cmd+Shift+S` on macOS, `Ctrl+Shift+S` on Linux) in
 `~/.config/herdr-app/keys.json` that focuses the panel (or opens its window when
 collapsed to the narrow rail) without overwriting an existing binding unless you
-confirm. The layout is herdr-app's usual window with the panel docked on the
+confirm. After a "no" to the shortcut, setup does not ask again until the panel is removed (`sheepdog uninstall`) and installed anew. The layout is herdr-app's usual window with the panel docked on the
 right.
 
 #### Updating the panel

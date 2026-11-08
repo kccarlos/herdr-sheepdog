@@ -81,12 +81,13 @@ a browser through the SSH tunnel described in
 
 The installer supports Apple silicon macOS and x86-64 Linux. It offers to run
 `sheepdog setup` when a terminal is available; otherwise it prints the next
-step. For another platform, [build from source](#other-ways-to-install).
+step. Run again over a set-up install, it upgrades without asking and
+restarts a running daemon. For another platform, [build from source](#other-ways-to-install).
 
 ## Set up in your browser
 
 `sheepdog setup` prints which herdr program (`herdr-tui` or `herdr-core`)
-Sheepdog will use, and asks which one to use whenever both are installed
+Sheepdog will use, and asks which one to use only when both are running
 (agents in the other one will not appear in Sheepdog); the setting is
 [`herdr.backend`](../CONFIG.md#herdr). Setup starts the daemon if needed,
 confirms the herdr backend it connected to, and opens this page:

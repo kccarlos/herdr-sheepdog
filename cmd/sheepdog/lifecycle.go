@@ -157,12 +157,28 @@ func runStart(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	return l.start(ctx)
 }
 
-func (l *lifecycle) start(ctx context.Context) int {
-	if info, pidKnown, ok := l.running(ctx); ok {
+func (l *lifecycle) start(ctx context.Context) int { return l.launch(ctx, 0) }
+
+// restart restarts the daemon: in one step through the login service when
+// it runs under it (nothing is unloaded), otherwise stop and start.
+func (l *lifecycle) restart(ctx context.Context) int {
+	if info, pidKnown, running := l.running(ctx); running && pidKnown && l.serviceInstalled() && l.mgr.Runs(ctx) {
+		return l.launch(ctx, info.PID)
+	}
+	if code := l.stop(ctx); code != 0 {
+		return code
+	}
+	return l.start(ctx)
+}
+
+// launch starts the daemon, or with oldPID restarts the login service's
+// daemon of that pid, and waits for it to answer.
+func (l *lifecycle) launch(ctx context.Context, oldPID int) int {
+	if info, pidKnown, ok := l.running(ctx); ok && oldPID == 0 {
 		fprintln(l.out, alreadyRunning(info, pidKnown))
 		return 0
 	}
-	if msg := portBusyMessage(ctx, l.cfg, l.cfg.Web.Port); msg != "" {
+	if msg := portBusyMessage(ctx, l.cfg, l.cfg.Web.Port); msg != "" && oldPID == 0 {
 		fprintln(l.errw, msg)
 		return 1
 	}
@@ -178,7 +194,13 @@ func (l *lifecycle) start(ctx context.Context) int {
 	from, logFrom := fileSize(stdio), fileSize(logFile)
 	var exited <-chan error
 	how := "in the background"
-	if l.serviceInstalled() {
+	if oldPID != 0 {
+		if err := l.mgr.Restart(ctx); err != nil {
+			fprintf(l.errw, "sheepdog restart: the login service did not restart: %v\n", err)
+			return 1
+		}
+		how = "again by the login service"
+	} else if l.serviceInstalled() {
 		if _, _, err := l.mgr.Start(ctx); err != nil {
 			fprintf(l.errw, "sheepdog start: the login service did not start: %v\n", err)
 			return 1
@@ -192,7 +214,7 @@ func (l *lifecycle) start(ctx context.Context) int {
 		}
 		exited = ch
 	}
-	info, err := l.waitUp(ctx, exited)
+	info, err := l.waitUp(ctx, exited, oldPID)
 	if err != nil {
 		fprintf(l.errw, "sheepdog did not start: %v\n", err)
 		tail := newOutput(stdio, from)
@@ -215,12 +237,13 @@ func (l *lifecycle) start(ctx context.Context) int {
 }
 
 // waitUp waits until the daemon holds its lock, has written its URL and
-// answers /api/hello, or exited reports that the detached process died.
-func (l *lifecycle) waitUp(ctx context.Context, exited <-chan error) (daemon.Info, error) {
+// answers /api/hello (a pid other than oldPID), or exited reports that the
+// detached process died.
+func (l *lifecycle) waitUp(ctx context.Context, exited <-chan error, oldPID int) (daemon.Info, error) {
 	ctx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
 	for {
-		if info, ok := daemon.Running(l.cfg.DataDir); ok && info.URL != "" {
+		if info, ok := daemon.Running(l.cfg.DataDir); ok && info.URL != "" && info.PID != oldPID {
 			if _, err := daemon.GetHello(ctx, info.URL); err == nil {
 				return info, nil
 			}
@@ -383,14 +406,15 @@ func waitGone(ctx context.Context, dataDir string, pid int, d time.Duration) boo
 	return false
 }
 
-// runRestart implements `sheepdog restart`: stop (when running), start.
+// runRestart implements `sheepdog restart`.
 func runRestart(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("restart", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
 		fprintln(stderr, "usage: sheepdog restart [--config PATH] [--env-file PATH]")
 		fprintln(stderr, "")
-		fprintln(stderr, "Stops the daemon when it runs, then starts it (sheepdog stop, sheepdog start).")
+		fprintln(stderr, "Restarts the daemon: through the login service in one step when it runs")
+		fprintln(stderr, "under it, otherwise stops it when it runs and starts it (sheepdog stop, start).")
 	}
 	configPath, envFile := lifecycleFlags(fs)
 	if err := fs.Parse(args); err != nil {
@@ -400,10 +424,7 @@ func runRestart(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	if !ok {
 		return code
 	}
-	if code := l.stop(ctx); code != 0 {
-		return code
-	}
-	return l.start(ctx)
+	return l.restart(ctx)
 }
 
 // flagExit maps a flag parse error to an exit code (help: 0).
