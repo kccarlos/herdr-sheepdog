@@ -143,7 +143,8 @@ type Deps struct {
 	BrainProviders []ProviderInfo
 	// HerdrMode and VoiceMode are reported by /api/state ("socket"|"mock",
 	// "gemini"|"off").
-	HerdrMode, HerdrBackend, VoiceMode string
+	HerdrMode, HerdrBackend, HerdrOverride, VoiceMode string
+	HerdrBackends                                     func(context.Context) []string
 	// SystemPrompt and Aliases are what GET /api/voice/system_prompt
 	// answers: the voice system prompt the session runs with (or would,
 	// with --voice=off) and the aliases rendered into it. SystemPrompt is
@@ -556,6 +557,7 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"PUT /api/voice/provider", accessDevice, s.handleSetVoiceProvider},
 		route{"GET /api/brain/models", accessDevice, s.handleBrainModels},
 		route{"PUT /api/brain/model", accessDevice, s.handleSetBrainModel},
+		route{"PUT /api/herdr/backend", accessDevice, s.handleHerdrBackend},
 		route{"GET /api/settings", accessDevice, s.handleGetSettings},
 		route{"PUT /api/settings", accessDevice, s.handlePutSettings},
 		route{"POST /api/pending/cancel", accessDevice, s.handleCancel},

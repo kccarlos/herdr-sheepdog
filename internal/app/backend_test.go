@@ -90,9 +90,32 @@ func TestStateReportsChosenHerdrBackend(t *testing.T) {
 		cancel()
 		<-done
 	}()
-	var st map[string]any
+	var st StateView
 	getJSON(t, a.URL()+"/api/state", &st)
-	if st["herdr"] != HerdrSocket || st["herdr_backend"] != config.HerdrBackendHC {
-		t.Errorf("/api/state = %v, want herdr=socket herdr_backend=hc", st)
+	if st.Herdr != HerdrSocket || st.HerdrBackend != config.HerdrBackendHC || len(st.HerdrBackends) != 1 || st.HerdrBackends[0] != config.HerdrBackendHC || st.HerdrBackendOverride != "" {
+		t.Errorf("/api/state = %+v, want herdr=socket herdr_backend=hc herdr_backends=[hc] override=\"\"", st)
+	}
+}
+
+type StateView struct {
+	Herdr                string   `json:"herdr"`
+	HerdrBackend         string   `json:"herdr_backend"`
+	HerdrBackends        []string `json:"herdr_backends"`
+	HerdrBackendOverride string   `json:"herdr_backend_override"`
+}
+
+func TestHerdrOverrideReason(t *testing.T) {
+	a := &App{opts: Options{Herdr: HerdrMock}}
+	if got := a.herdrOverride(); got != "set by --herdr=mock" {
+		t.Errorf("mock override = %q", got)
+	}
+	t.Setenv("SHEEPDOG_HERDR_BACKEND", "hc")
+	a = &App{opts: Options{Herdr: HerdrSocket}}
+	if got := a.herdrOverride(); got != "set by SHEEPDOG_HERDR_BACKEND in the environment" {
+		t.Errorf("process env override = %q", got)
+	}
+	a = &App{opts: Options{Herdr: HerdrSocket, EnvFileNames: []string{"SHEEPDOG_HERDR_BACKEND"}}}
+	if got := a.herdrOverride(); got != "" {
+		t.Errorf("env file should not count as override, got %q", got)
 	}
 }

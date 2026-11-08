@@ -291,6 +291,7 @@ func (a *App) wire() error {
 		deps.Watcher = a.wref
 	}
 	deps.Term, deps.HerdrBackend = a.term, a.herdrBackend
+	deps.HerdrBackends, deps.HerdrOverride = a.herdrBackends, a.herdrOverride()
 	deps.Shell, deps.Files, deps.Advertise = cfg.Web.Shell, cfg.Web.Files, cfg.Web.Advertise
 	deps.TailscaleHTTPS, deps.TailscaleCert = cfg.Web.TailscaleHTTPS, web.TailscaleCertCLI(cfg.DataDir, cfg.Web.Port)
 	deps.TailscaleFunnel = web.TailscaleFunnelCLI()

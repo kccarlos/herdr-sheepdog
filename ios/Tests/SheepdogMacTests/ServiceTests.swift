@@ -296,4 +296,31 @@ final class StatusItemControllerTests: XCTestCase {
         c.update(DaemonState(agents: [], voice: DaemonState.VoiceInfo(mode: "off", status: "off")))
         XCTAssertEqual(c.state.kind, .off)
     }
+
+    func testHerdrRowsAndConfirmedSwitch() async {
+        let (c, _) = make()
+        let v = DaemonState.VoiceInfo(mode: "off", status: "off")
+        c.update(DaemonState(agents: [], voice: v, herdrBackend: "herdr", herdrBackends: ["herdr"]))
+        let rows1 = StatusItemController.rows(for: c.state, loginItemEnabled: false)
+        XCTAssertTrue(rows1.contains(.status("herdr: tui")))
+        XCTAssertTrue(rows1.contains(.item(title: "tui", action: .selectHerdr(.tui), enabled: false, checked: true)))
+        XCTAssertTrue(rows1.contains(.item(title: "core (not running)", action: .selectHerdr(.core), enabled: false, checked: false)))
+
+        c.update(DaemonState(agents: [], voice: v, herdrBackend: "hc", herdrBackends: ["herdr", "hc"], herdrBackendOverride: "set by --herdr=mock"))
+        let rows2 = StatusItemController.rows(for: c.state, loginItemEnabled: false)
+        XCTAssertTrue(rows2.contains(.status("herdr: core (set by --herdr=mock)")))
+
+        c.update(DaemonState(agents: [], voice: v, herdrBackend: "herdr", herdrBackends: ["herdr", "hc"]))
+        var switched: [HerdrBackendSwitch.Kind] = []
+        let done = expectation(description: "switched")
+        c.confirmHerdrSwitch = { _ in false }
+        c.switchHerdr = { kind in switched.append(kind); done.fulfill() }
+        c.perform(.selectHerdr(.core))
+        XCTAssertTrue(switched.isEmpty)
+
+        c.confirmHerdrSwitch = { _ in true }
+        c.perform(.selectHerdr(.core))
+        await fulfillment(of: [done], timeout: 1)
+        XCTAssertEqual(switched, [.core])
+    }
 }

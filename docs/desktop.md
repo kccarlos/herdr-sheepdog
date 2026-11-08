@@ -53,6 +53,8 @@ state and how many agents need you. From its menu you can:
   You can choose Control+Space or Control+Option+Space instead.
 - **Open the panel**, choose **Launch at login**, or quit the app. Launch at
   login is off until you turn it on.
+- **herdr: tui / core** to switch the daemon between running herdr-tui and
+  herdr-core backends after confirming.
 - **Update** when the menu says **Update available**. It does what
   `sheepdog update` does: the daemon installs the release the way sheepdog was
   installed, upgrades Sheepdog.app when Homebrew installed it, and restarts

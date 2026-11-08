@@ -707,6 +707,9 @@ public struct DaemonState: Codable, Equatable, Sendable {
     public var questions: [PendingAction]?
     public var voice: VoiceInfo
     public var herdr: String?
+    public var herdrBackend: String?
+    public var herdrBackends: [String]?
+    public var herdrBackendOverride: String?
     public var version: String?
     /// The orchestrator's current model, when the daemon reports one.
     public var brain: BrainInfo?
@@ -729,6 +732,9 @@ public struct DaemonState: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case agents, voice, herdr, version, brain, update, questions
+        case herdrBackend = "herdr_backend"
+        case herdrBackends = "herdr_backends"
+        case herdrBackendOverride = "herdr_backend_override"
         case attentionCounts = "attention_counts"
         case spaceMutes = "space_mutes"
         case pendingAction = "pending_action"
@@ -737,7 +743,7 @@ public struct DaemonState: Codable, Equatable, Sendable {
         case conversationStartedAt = "conversation_started_at"
     }
 
-    public init(agents: [Agent], pendingAction: PendingAction? = nil, questions: [PendingAction]? = nil, voice: VoiceInfo, herdr: String? = nil, version: String? = nil, brain: BrainInfo? = nil, voiceProvider: String? = nil, voiceModel: String? = nil, conversationStartedAt: Date? = nil, update: UpdateInfo? = nil, attentionCounts: AttentionCounts? = nil, spaceMutes: [SpaceMute]? = nil) {
+    public init(agents: [Agent], pendingAction: PendingAction? = nil, questions: [PendingAction]? = nil, voice: VoiceInfo, herdr: String? = nil, herdrBackend: String? = nil, herdrBackends: [String]? = nil, herdrBackendOverride: String? = nil, version: String? = nil, brain: BrainInfo? = nil, voiceProvider: String? = nil, voiceModel: String? = nil, conversationStartedAt: Date? = nil, update: UpdateInfo? = nil, attentionCounts: AttentionCounts? = nil, spaceMutes: [SpaceMute]? = nil) {
         self.update = update
         self.attentionCounts = attentionCounts
         self.spaceMutes = spaceMutes
@@ -746,6 +752,9 @@ public struct DaemonState: Codable, Equatable, Sendable {
         self.questions = questions
         self.voice = voice
         self.herdr = herdr
+        self.herdrBackend = herdrBackend
+        self.herdrBackends = herdrBackends
+        self.herdrBackendOverride = herdrBackendOverride
         self.version = version
         self.brain = brain
         self.voiceProvider = voiceProvider
@@ -766,6 +775,47 @@ public struct DaemonState: Codable, Equatable, Sendable {
     public func pendingQuestion(for paneID: String) -> String? {
         guard let p = pendingAction, p.paneID == paneID else { return nil }
         return p.question ?? p.spokenSummary
+    }
+}
+
+/// The herdr backend switch row in iOS Settings and the Mac menu bar,
+/// derived from `/api/state`.
+public struct HerdrBackendSwitch: Equatable, Sendable {
+    public static let confirmMessage = "Switching disconnects the voice for a few seconds. Agents and open approval questions from the other herdr leave the list until you switch back."
+
+    public enum Kind: String, CaseIterable, Equatable, Sendable {
+        case tui = "herdr"
+        case core = "hc"
+
+        public var label: String { self == .tui ? "tui" : "core" }
+        public var fullName: String { self == .tui ? "herdr-tui" : "herdr-core" }
+    }
+
+    public struct Option: Equatable, Identifiable, Sendable {
+        public var id: String { kind.rawValue }
+        public let kind: Kind
+        public let running: Bool
+        public let current: Bool
+
+        public var title: String { running ? kind.label : "\(kind.label) (not running)" }
+        public var canSelect: Bool { running && !current }
+    }
+
+    public let current: Kind?
+    public let options: [Option]
+    public let readOnlyReason: String?
+
+    public var currentLabel: String { current?.label ?? "mock" }
+    public var isReadOnly: Bool { readOnlyReason != nil }
+
+    public init?(state: DaemonState) {
+        let override = state.herdrBackendOverride?.trimmed
+        let current = state.herdrBackend.flatMap(Kind.init(rawValue:))
+        guard current != nil || (override != nil && override?.isEmpty == false) else { return nil }
+        let running = Set(state.herdrBackends ?? [])
+        self.current = current
+        self.options = Kind.allCases.map { Option(kind: $0, running: running.contains($0.rawValue), current: $0 == current) }
+        self.readOnlyReason = (override?.isEmpty == false) ? override : nil
     }
 }
 
