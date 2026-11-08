@@ -20,7 +20,7 @@ test('an installed upgrade says to restart, and mentions the auto restart', () =
   const m = bannerModel({ current: 'v1.0.0', restart_pending: true, restart_to: 'v1.1.0', auto_restart: true, available: true, latest: 'v1.1.0' });
   assert.match(m.text, /v1\.1\.0 is installed/);
   assert.match(m.text, /restarts itself when idle/);
-  assert.equal(m.code, 'sheepdog restart');
+  assert.equal(m.code, 'sheepdog update');
   const manual = bannerModel({ restart_pending: true, restart_to: 'v1.1.0' });
   assert.match(manual.text, /To finish, run/);
 });

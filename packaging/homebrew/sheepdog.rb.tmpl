@@ -35,7 +35,7 @@ class Sheepdog < Formula
         sheepdog setup             # set up keys, checks and start at login
         sheepdog doctor            # check the setup
         sheepdog service install   # run it at login
-      After `brew upgrade`, run `sheepdog restart` (or it restarts itself when idle).
+      `sheepdog update` upgrades it and restarts the running daemon in one step.
     EOS
   end
 

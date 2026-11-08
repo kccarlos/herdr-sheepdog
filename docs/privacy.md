@@ -91,7 +91,8 @@ request carries nothing about you, your agents or your setup beyond what any
 web request carries (your IP address, and a generic user agent). The answer
 is cached in `~/.local/share/sheepdog/update-check.json`. Turn it off with
 `update.check = false` ([CONFIG.md](../CONFIG.md)); `sheepdog update` makes
-the same request when you run it.
+the same request when you run it, then downloads the release from github.com
+(or runs Homebrew or herdr, which download it).
 
 ## What is stored on your computer
 

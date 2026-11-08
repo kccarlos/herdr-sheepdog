@@ -225,6 +225,16 @@ func stableExecutable() (string, error) {
 			return link, nil
 		}
 	}
+	// A herdr plugin's folder is replaced and removed by `herdr plugin
+	// update`; plugin-fetch.sh points ~/.local/bin/sheepdog at the new one.
+	if home, err := os.UserHomeDir(); err == nil && fileExists(filepath.Join(filepath.Dir(filepath.Dir(exe)), "herdr-plugin.toml")) {
+		link := filepath.Join(home, ".local", "bin", "sheepdog")
+		a, errA := filepath.EvalSymlinks(link)
+		b, errB := filepath.EvalSymlinks(exe)
+		if errA == nil && errB == nil && a == b && link != exe {
+			return link, nil
+		}
+	}
 	if strings.Contains(exe, string(filepath.Separator)+"go-build") {
 		return "", errors.New("this sheepdog was built by `go run` into a temp dir; install it (go install ./cmd/sheepdog) or pass --binary")
 	}

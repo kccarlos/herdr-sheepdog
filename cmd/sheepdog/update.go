@@ -7,11 +7,13 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
 	"github.com/kccarlos/herdr-sheepdog/internal/update"
 )
 
@@ -64,18 +66,13 @@ func fileExists(p string) bool {
 
 // upgradeSteps says how to upgrade for an install method.
 func upgradeSteps(m installMethod) []string {
-	switch m.Kind {
-	case "herdr plugin":
-		return []string{"herdr plugin update kccarlos.sheepdog", "sheepdog restart"}
-	case "homebrew":
-		return []string{"brew upgrade sheepdog", "sheepdog restart"}
-	case "source":
+	if m.Kind == "source" {
 		// A checkout with herdr-plugin.toml may also be what herdr
 		// installed or linked as the plugin: give both ways.
 		root := filepath.Dir(filepath.Dir(m.Path))
-		return []string{"git -C " + root + " pull && make -C " + root + " build   (a checkout you cloned)", "herdr plugin update kccarlos.sheepdog   (if herdr installed it)", "sheepdog restart"}
+		return []string{"git -C " + root + " pull && make -C " + root + " build   (a checkout you cloned)", "herdr plugin update kccarlos.sheepdog   (if herdr installed it)"}
 	}
-	return []string{upgradeCommand(m), "sheepdog restart"}
+	return []string{upgradeCommand(m)}
 }
 
 // updateDataDir is the data directory the update cache lives in ("" when
@@ -96,12 +93,16 @@ var errNoRelease = update.ErrNoRelease
 
 // latestRelease is the newest v* release (ios-v* tags, drafts and
 // prereleases are ignored).
+// SHEEPDOG_RELEASE_API replaces the API root (a test release server).
 func latestRelease(ctx context.Context) (release, error) {
-	return update.Latest(ctx, releaseClient, releaseAPI)
+	api := releaseAPI
+	if v := os.Getenv("SHEEPDOG_RELEASE_API"); v != "" {
+		api = v
+	}
+	return update.Latest(ctx, releaseClient, api)
 }
 
-// upgradeCommand is the one command that upgrades for m (the "how" of the
-// update notice), without the restart step.
+// upgradeCommand is the one command that upgrades for m by hand.
 func upgradeCommand(m installMethod) string {
 	switch m.Kind {
 	case "herdr plugin":
@@ -123,16 +124,18 @@ func upgradeCommand(m installMethod) string {
 	return command
 }
 
-// runUpdate implements `sheepdog update`: it checks the latest release
-// and says how to upgrade; it never changes anything.
+// runUpdate implements `sheepdog update`: it checks the latest release,
+// installs it without asking (a source checkout gets the steps instead)
+// and restarts a running daemon that is not on the installed version.
 func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
 		fprintln(stderr, "usage: sheepdog update")
 		fprintln(stderr, "")
-		fprintln(stderr, "Checks the latest release on GitHub ("+releaseRepo+") and prints how to")
-		fprintln(stderr, "upgrade for the way this sheepdog was installed. It changes nothing itself.")
+		fprintln(stderr, "Checks the latest release on GitHub ("+releaseRepo+"), installs it the way this")
+		fprintln(stderr, "sheepdog was installed (installer, Homebrew, herdr plugin; Sheepdog.app too when")
+		fprintln(stderr, "Homebrew installed it) and restarts a running daemon. A source checkout gets the steps.")
 	}
 	if err := fs.Parse(args); err != nil {
 		return flagExit(err)
@@ -162,7 +165,17 @@ func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		fprintf(stdout, "The latest release is %s; this is a development build (%s), which cannot be compared.\n", r.TagName, version)
 	case okL && !update.Newer(latest, cur):
 		fprintf(stdout, "sheepdog %s is up to date (latest release %s).\n", version, r.TagName)
-		return 0
+		if m.Kind == "source" {
+			return 0
+		}
+		return finishUpdate(ctx, version, stdout, stderr)
+	case m.Kind != "source":
+		fprintf(stdout, "Installing sheepdog %s (you have %s)\n", r.TagName, version)
+		if err := update.Install(ctx, m.Kind, m.Path, r.TagName, stdout); err != nil {
+			fprintf(stderr, "Could not update: %v\n", err)
+			return 1
+		}
+		return finishUpdate(ctx, r.TagName, stdout, stderr)
 	default:
 		fprintf(stdout, "sheepdog %s is available (you have %s): %s\n", r.TagName, version, r.HTMLURL)
 	}
@@ -170,5 +183,39 @@ func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	for _, s := range upgradeSteps(m) {
 		fprintf(stdout, "  %s\n", s)
 	}
+	return 0
+}
+
+// finishUpdate restarts a running daemon that is not on version want
+// right away, then says which version runs, as the daemon (or, when none
+// runs, the installed program) reports it.
+func finishUpdate(ctx context.Context, want string, stdout, stderr io.Writer) int {
+	l, code, ok := loadLifecycle(ctx, "restart", "", "", io.Discard, stderr)
+	if !ok {
+		return code
+	}
+	info, _, running := l.running(ctx)
+	if !running {
+		exe, _ := osExecutable()
+		installed, _ := update.ProbeVersion(ctx, update.LaunchPath(os.Args[0], exe, exec.LookPath))
+		fprintf(stdout, "sheepdog %s is installed; the daemon is not running (sheepdog start).\n", update.VersionOf(installed))
+		return 0
+	}
+	if h, err := daemon.GetHello(ctx, info.URL); err != nil || h.Version != want {
+		if code := runRestart(ctx, nil, stdout, stderr); code != 0 {
+			return code
+		}
+		info, _, _ = l.running(ctx)
+	}
+	h, err := daemon.GetHello(ctx, info.URL)
+	if err != nil {
+		fprintf(stderr, "The daemon does not answer at %s: %v\n", info.URL, err)
+		return 1
+	}
+	if h.Version != want {
+		fprintf(stderr, "sheepdog %s is still running, not %s; see sheepdog doctor.\n", h.Version, want)
+		return 1
+	}
+	fprintf(stdout, "sheepdog %s is running.\n", h.Version)
 	return 0
 }

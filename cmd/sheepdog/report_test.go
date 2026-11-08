@@ -189,6 +189,9 @@ func TestUpdate(t *testing.T) {
 	updateDataDir = func() string { return cache }
 	osExecutable = func() (string, error) { return "/opt/homebrew/Cellar/sheepdog/0.1.0/bin/sheepdog", nil }
 	version = "v0.1.0"
+	// Never the user's daemon on the default port, never the real brew.
+	t.Setenv("SHEEPDOG_WEB_PORT", fmt.Sprint(freePort(t)))
+	brewLog := fakeUpdateTools(t, "v0.2.0")
 
 	status, body = 404, `{"message":"Not Found"}`
 	code, out, _ := runCLI("update")
@@ -197,8 +200,11 @@ func TestUpdate(t *testing.T) {
 	}
 	status, body = 200, `[{"tag_name":"ios-v9.0.0","html_url":"https://example/ios"},{"tag_name":"v0.2.0","html_url":"https://github.com/kccarlos/herdr-sheepdog/releases/tag/v0.2.0"}]`
 	code, out, _ = runCLI("update")
-	if code != 0 || !strings.Contains(out, "sheepdog v0.2.0 is available (you have v0.1.0)") || !strings.Contains(out, "brew upgrade sheepdog") {
+	if code != 0 || !strings.Contains(out, "Installing sheepdog v0.2.0 (you have v0.1.0)") || !strings.Contains(out, "sheepdog v0.2.0 is installed; the daemon is not running") {
 		t.Errorf("newer: exit %d %q", code, out)
+	}
+	if b, _ := os.ReadFile(brewLog); !strings.HasPrefix(string(b), "brew update\nbrew upgrade kccarlos/tap/sheepdog\n") {
+		t.Errorf("brew ran:\n%s", b)
 	}
 	version = "v0.2.0"
 	if code, out, _ = runCLI("update"); code != 0 || !strings.Contains(out, "is up to date") {
@@ -228,7 +234,7 @@ func TestDetectInstallAndUpgradeSteps(t *testing.T) {
 	if defaultBinary.Kind != "binary" || upgradeCommand(defaultBinary) != wantCommand {
 		t.Errorf("default binary: %+v, command %q", defaultBinary, upgradeCommand(defaultBinary))
 	}
-	if steps := upgradeSteps(defaultBinary); len(steps) != 2 || steps[0] != wantCommand || steps[1] != "sheepdog restart" {
+	if steps := upgradeSteps(defaultBinary); len(steps) != 1 || steps[0] != wantCommand {
 		t.Errorf("default binary steps: %q", steps)
 	}
 	customBinary := detectInstall(filepath.Join(home, "opt", "bin", "sheepdog"))
