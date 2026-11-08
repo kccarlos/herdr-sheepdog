@@ -5,7 +5,7 @@ import json
 import os
 import re
 
-from .base import hc_json, HOME, now, RANK, SHELLS
+from .base import hc_json, HOME, now, RANK, run, SHELLS
 
 
 # ---- live agents ----------------------------------------------------------------------------
@@ -138,6 +138,33 @@ def task_status(task, live):
 
 
 STOPPED = "Agent stopped"
+
+
+# ---- Claude Code's folder-trust question (FAC-2) ----------------------------------------------
+# Without the window nobody sees a CLI's own startup screens (core/screens.js reads them for the
+# window's chat and the web app): a worker in a new worktree can sit at Claude Code's folder-trust
+# question with no status reported, which reads Working forever. Herdr never answers it for the
+# person: the scheduler reads the screen of a Claude worker that hasn't started yet (no status, no
+# turn), and while it asks, the task needs the person (its attention), in the panel and the web app
+# alike, and automations hear needs-you (diff_events), not a failure.
+TRUST_ASK = "Claude Code asks to trust its folder: answer it in its terminal"
+TRUST_SCREEN = re.compile(r"Yes, I trust this folder|Do you trust the files in this folder\?")
+
+
+def trust_check(task, live):
+    """Sets or clears the task's attention for the trust question; True when it changed. live:
+    its running agents (hc records). Another problem already shown is left as it is."""
+    asks = any(TRUST_SCREEN.search(run(["hc", "read", k["address"], "--lines", "40"]).stdout or "")
+               for k in live if not status_word(k) and not k.get("turn") and agent_running(k)
+               and (k.get("labels") or {}).get("herdr.agent", "claude") == "claude"
+               and (k.get("labels") or {}).get("herdr.role") != "reviewer")
+    if asks and not task.get("attention"):
+        task["attention"], task["attention_at"] = TRUST_ASK, now()
+        return True
+    if not asks and task.get("attention") == TRUST_ASK:
+        task.pop("attention")
+        return True
+    return False
 
 
 # ---- a Ready task back at work ----------------------------------------------------------------

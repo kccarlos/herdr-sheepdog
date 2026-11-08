@@ -10,7 +10,7 @@ import time
 
 from .base import Fail, guard, hc_json, now, PR_EVERY, run, SHELLS, STORE
 from .settings import machine_name, worker_argv
-from .agents import agent_log, agent_running, busy_again, detail, held_ask, live_agents, status_word, task_status
+from .agents import agent_log, agent_running, busy_again, detail, held_ask, live_agents, status_word, task_status, trust_check
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
 from .github import already_merged, finish, github, merged_here, pr_merged, pr_pending, pr_problem, pr_view, watch_main
@@ -408,6 +408,11 @@ def retry_pass(report):
                     else:
                         t.pop("retry", None)
                     s.dirty = True
+                # Its worker waits at Claude Code's folder-trust question: Needs you (trust_check).
+                if trust_check(t, [k for k in mine if agent_running(k)]):
+                    s.dirty = True
+                    if t.get("attention"):
+                        report["attention"].append(t["id"])
                 progress_clock(s, t, task_status(t, [k for k in mine if agent_running(k)])[0])
     if rows != old:
         tmp = f"{RETRIES}.{os.getpid()}.tmp"

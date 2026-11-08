@@ -14,7 +14,7 @@ import time
 from .base import ENTRY, Fail, guard, hc_json, now, STORE
 from .when import parse_at
 from .settings import bare, settings_for, worker_argv, worktrees_on
-from .agents import agent_running, live_agents, starting, status_of, task_status
+from .agents import agent_running, live_agents, starting, status_of, task_status, TRUST_ASK
 from .sessions import session_of
 from .launch import default_space
 from .store import locate, open_store, read_list, Store, store_files
@@ -433,10 +433,12 @@ def diff_events(facts, seen):
                 out.append(("ready", f))
             if f["state"] == "done" and prev["state"] != "done" and f.get("merged"):
                 out.append(("merged", f))
-            if f.get("attention") and f.get("attention") != prev.get("attention"):
+            # Its worker waiting at Claude Code's folder-trust question (trust_check) is no failure.
+            if f.get("attention") and f.get("attention") != prev.get("attention") and f["attention"] != TRUST_ASK:
                 out.append(("failed", f))
-            # Needs you: its agent asks something, or waits for a reply (the status people see).
-            if needs in ("asks", "reply") and prev.get("needs") not in ("asks", "reply"):
+            # Needs you: its agent asks something (its folder's trust too), or waits for a reply (the status people see).
+            asks = lambda x: x.get("needs") in ("asks", "reply") or x.get("attention") == TRUST_ASK
+            if asks(f) and not asks(prev):
                 out.append(("needs-you", f))
             stalled = f["state"] == "running" and ((status == "stopped" and not f.get("starting")) or (cur["quiet"] and now() - cur["quiet"] >= STALL_MS))
             if stalled and not prev.get("stalled"):

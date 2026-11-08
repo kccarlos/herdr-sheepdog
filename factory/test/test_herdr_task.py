@@ -1831,6 +1831,90 @@ class FastOffIsSaid(unittest.TestCase):
         self.assertIn('{"fastMode": false}', argv_for({"agent": "claude", "fast": False}))
 
 
+class FolderTrustQuestion(unittest.TestCase):
+    """FAC-2: a Claude Code worker started without the window in a new worktree can sit at its
+    folder-trust question, reporting no status: Needs you with the reason, not Working forever.
+    The screen is Claude Code 2.1.319's real one (hc read, a throwaway core); hc read is faked."""
+
+    SCREEN = ("─" * 80 + "\n Accessing workspace:\n /tmp/wt\n Quick safety check: Is this a project you created or one"
+              " you trust? (Like your own code, a well-known open source project, or work from your team). If not, take a"
+              " moment to review what's in this\n folder first.\n Claude Code'll be able to read, edit, and execute files"
+              " here.\n Security guide\n ❯ No, exit\n   Yes, I trust this folder\n Enter to confirm · Esc to cancel\n")
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.agents as agents
+        self.agents = agents
+        self.clock = 1_800_000_000_000
+        p = mock.patch.object(agents, "now", lambda: self.clock)
+        p.start()
+        self.addCleanup(p.stop)
+        self.screen = self.SCREEN
+        self.reads = []
+
+        def read(argv, **kw):
+            self.reads.append(argv)
+            return subprocess.CompletedProcess(argv, 0, self.screen, "")
+        r = mock.patch.object(agents, "run", read)
+        r.start()
+        self.addCleanup(r.stop)
+        # Started 10 minutes ago: past STARTING_MS, so only its agents' status speaks.
+        self.task = {"id": 2, "title": "Fix", "state": "running", "started": self.clock - 600_000,
+                     "agents": [{"address": "t1", "at": self.clock - 600_000}]}
+        # As hc get shows it: the agent runs, has reported nothing and taken no turn.
+        self.live = [{"address": "t1", "status": None, "turn": 0, "reported": False, "agent": "env",
+                      "foreground": {"name": "2.1.319"}, "labels": {"herdr.role": "worker", "herdr.agent": "claude"}}]
+
+    def check(self):
+        self.agents.trust_check(self.task, self.live)
+        return self.agents.task_status(self.task, self.live)
+
+    def test_the_trust_question_needs_you(self):
+        st, needs, why = self.check()
+        self.assertEqual((st, needs), ("needs", "attention"))
+        self.assertIn("trust", why)
+        # Claude Code's older wording too
+        self.task.pop("attention")
+        self.screen = " Do you trust the files in this folder?\n ❯ 1. Yes, proceed\n   2. No, exit\n"
+        self.assertEqual(self.check()[:2], ("needs", "attention"))
+
+    def test_answered_it_works_again(self):
+        self.check()
+        self.screen = "❯ \n ⏵⏵ auto mode on\n"
+        self.live[0].update(status={"state": "working"}, turn=0)
+        self.assertEqual(self.check(), ("working", None, None))
+        self.assertNotIn("attention", self.task)
+
+    def test_only_an_agent_that_has_not_started(self):
+        # Reported a status or took a turn: its screen is never read (its own output may quote the question).
+        for change in ({"status": {"state": "idle"}}, {"turn": 1}):
+            self.reads.clear()
+            k = dict(self.live[0], **change)
+            self.agents.trust_check(self.task, [k])
+            self.assertEqual(self.reads, [], change)
+            self.assertNotIn("attention", self.task)
+        # Another CLI's worker (agy, Codex): its screen is never read either.
+        self.reads.clear()
+        self.agents.trust_check(self.task, [dict(self.live[0], labels={"herdr.role": "worker", "herdr.agent": "agy"})])
+        self.assertEqual(self.reads, [])
+        self.assertNotIn("attention", self.task)
+        # Another problem already shown stays as it is.
+        self.task["attention"] = "Checks failing"
+        self.agents.trust_check(self.task, self.live)
+        self.assertEqual(self.task["attention"], "Checks failing")
+
+    def test_automations_hear_needs_you_not_a_failure(self):
+        from herdr_task.automations import diff_events
+        seen = {}
+        facts = lambda: [{"id": 2, "state": "running", "status": "idle", "needs": self.agents.task_status(self.task, self.live)[1],
+                          "attention": self.task.get("attention"), "merged": False, "automation": None, "starting": False}]
+        diff_events(facts(), seen)
+        self.agents.trust_check(self.task, self.live)
+        self.assertEqual([e for e, _ in diff_events(facts(), seen)], ["needs-you"])
+        self.assertEqual([e for e, _ in diff_events(facts(), seen)], [])  # said once
+
+
 class AgyWorker(unittest.TestCase):
     """Antigravity CLI (agy) as a task's agent: its argv, own commands, resume and conversation id."""
 
