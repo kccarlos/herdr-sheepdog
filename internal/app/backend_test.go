@@ -45,6 +45,41 @@ func TestChooseBackend(t *testing.T) {
 	}
 }
 
+// TestAwaitFirstHerdr: with neither herdr running at startup, auto takes
+// whichever answers first: herdr-core restarts the daemon (so auto picks
+// it), herdr-tui (or both) ends the wait on the backend it already uses.
+func TestAwaitFirstHerdr(t *testing.T) {
+	up, down := fakePinger{}, fakePinger{down: true}
+	for _, tc := range []struct {
+		name        string
+		old, core   fakePinger
+		wantRestart bool
+	}{
+		{"herdr-core first", down, up, true},
+		{"herdr-tui first", up, down, false},
+		{"both", up, up, false},
+	} {
+		var restarted []string
+		done := make(chan struct{})
+		go func() {
+			awaitFirstHerdr(context.Background(), tc.old, tc.core, time.Millisecond, func(r string) { restarted = append(restarted, r) })
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: did not return", tc.name)
+		}
+		if (len(restarted) == 1) != tc.wantRestart {
+			t.Errorf("%s: restarts = %q, want restart %v", tc.name, restarted, tc.wantRestart)
+		}
+	}
+	// Neither: it keeps asking until the context ends, without a restart.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	awaitFirstHerdr(ctx, down, down, time.Millisecond, func(string) { t.Error("restarted with neither running") })
+}
+
 // herdr-core's live terminal is listed only while its core can attach, and
 // its bridge needs no herdr binary.
 func TestHCTermStartsABridgeWithoutHerdrBin(t *testing.T) {

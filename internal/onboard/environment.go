@@ -321,39 +321,31 @@ type BackendAdvice struct {
 }
 
 // AdviseBackend chooses whether to pin a backend or ask, using what is
-// installed and what is running.
+// installed and what is running: a pin is kept, one running or one
+// installed is pinned, both running is asked, and both installed with
+// neither running is left to auto (whichever starts first).
 func AdviseBackend(cfg config.Config, env Environment) BackendAdvice {
 	if cfg.Herdr.Backend == config.HerdrBackendHerdr || cfg.Herdr.Backend == config.HerdrBackendHC {
 		return BackendAdvice{}
 	}
-	const (
-		whyBothRunning = "Both are running, and auto would pick herdr-tui."
-		whyCoreRunning = "Only herdr-core is running, so pinning it avoids waiting for herdr-tui after a restart."
-		whyApp         = "herdr-app uses herdr-core, but only herdr-tui is running."
-		whyBoth        = "Both are installed, so choose the one Sheepdog should start with."
-		whyCore        = "Only herdr-core is installed, so Sheepdog should wait for herdr-core."
-	)
+	old, core := env.OldHerdr, env.HerdrCore
 	switch {
-	case env.OldHerdr.Answers && env.HerdrCore.Answers:
+	case old.Answers && core.Answers:
 		def := config.HerdrBackendHerdr
 		if env.HerdrApp {
 			def = config.HerdrBackendHC
 		}
-		return BackendAdvice{Ask: true, Default: def, Why: whyBothRunning}
-	case env.HerdrCore.Answers:
-		return BackendAdvice{Set: config.HerdrBackendHC, Why: whyCoreRunning}
-	case env.OldHerdr.Answers:
-		if env.HerdrApp && env.HerdrCore.Installed {
-			return BackendAdvice{Ask: true, Default: config.HerdrBackendHC, Why: whyApp}
-		}
-	case env.HerdrCore.Installed && env.OldHerdr.Installed:
-		def := config.HerdrBackendHerdr
-		if env.HerdrApp {
-			def = config.HerdrBackendHC
-		}
-		return BackendAdvice{Ask: true, Default: def, Why: whyBoth}
-	case env.HerdrCore.Installed:
-		return BackendAdvice{Set: config.HerdrBackendHC, Why: whyCore}
+		return BackendAdvice{Ask: true, Default: def, Why: "Both are running, and auto would pick herdr-tui."}
+	case core.Answers:
+		return BackendAdvice{Set: config.HerdrBackendHC, Why: "Only herdr-core is running, so Sheepdog uses it."}
+	case old.Answers:
+		return BackendAdvice{Set: config.HerdrBackendHerdr, Why: "Only herdr-tui is running, so Sheepdog uses it."}
+	case core.Installed && old.Installed:
+		return BackendAdvice{Why: "Both are installed and neither is running: Sheepdog uses whichever starts first."}
+	case core.Installed:
+		return BackendAdvice{Set: config.HerdrBackendHC, Why: "Only herdr-core is installed, so Sheepdog uses it."}
+	case old.Installed:
+		return BackendAdvice{Set: config.HerdrBackendHerdr, Why: "Only herdr-tui is installed, so Sheepdog uses it."}
 	}
 	return BackendAdvice{}
 }

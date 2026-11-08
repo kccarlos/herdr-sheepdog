@@ -58,6 +58,8 @@ type Marker struct {
 	PreviousLayout string `json:"previous_layout,omitempty"`
 	// Keybinding records an opt-in keys.json shortcut setup added.
 	Keybinding *KeybindingRecord `json:"keybinding,omitempty"`
+	// KeyDeclined: the user said no to that shortcut, so setup does not ask again.
+	KeyDeclined bool `json:"key_declined,omitempty"`
 }
 
 // State is what /api/state reports as `panel`.
@@ -383,6 +385,7 @@ func replacePanel(home string, ev evaluation, src Source) (int, error) {
 	mk := newMarker(src, ev.emb, ev.marker.Layout)
 	mk.PreviousLayout = ev.marker.PreviousLayout
 	mk.Keybinding = ev.marker.Keybinding
+	mk.KeyDeclined = ev.marker.KeyDeclined
 	stage, err := buildStage(home, dir, ev.emb, ev.marker, ev.hasMk, &mk)
 	if err != nil {
 		return 0, err
@@ -436,6 +439,7 @@ func Record(home string, src Source) error {
 		Files:          map[string]string{},
 		PreviousLayout: prev.PreviousLayout,
 		Keybinding:     prev.Keybinding,
+		KeyDeclined:    prev.KeyDeclined,
 	}
 	rels := make([]string, 0, len(emb))
 	for rel := range emb {
