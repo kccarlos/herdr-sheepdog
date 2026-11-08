@@ -821,7 +821,9 @@ def start_again(s, t, space, key=None, argv_json=None, message=None, parent=None
     same = prev and agent_key(argv) == prev.get("agent")
     res = resume_argv(argv, prev["session"]) if same and prev.get("session") else None
     if res:
-        return launch(s, t, argv, space, message, parent=parent, resume=res), True
+        a = launch(s, t, argv, space, message, parent=parent, resume=res)
+        a["session"] = prev["session"]  # the same conversation from the start (agent_log, before a pass sees its pid)
+        return a, True
     text = handoff(s, t, prev, parent, argv) + (("\n\n" + message) if message else "")
     t["review_gate"] = True
     return launch(s, t, argv, space, text, parent=parent), False

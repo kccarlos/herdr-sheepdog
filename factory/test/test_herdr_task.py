@@ -1930,6 +1930,24 @@ class AgyWorker(unittest.TestCase):
         t["agents"][1]["log"] = "/c1b.jsonl"
         self.assertEqual(agent_log(t), "/c1b.jsonl")
 
+    def test_a_resumed_agent_has_its_session_from_the_start(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        import herdr_task.commands as C
+        from herdr_task.agents import agent_log
+        t = {"id": 1, "agents": [{"address": "w1", "agent": "claude", "argv": ["claude"], "at": 1, "session": "S", "log": "/S.jsonl"}]}
+
+        def launch(s, task, argv, space, message=None, parent=None, resume=None, role=None):
+            a = {"address": "w2", "agent": "claude", "argv": argv, "at": 2}
+            task["agents"].append(a)
+            return a
+        with mock.patch.object(C, "launch", launch), mock.patch.object(C, "unarchive", lambda s, t: None), \
+                mock.patch.object(C, "parent_for", lambda p, sp: p):
+            a, resumed = C.start_again(SimpleNamespace(), t, "sp1")
+        self.assertTrue(resumed)
+        self.assertEqual(a["session"], "S")
+        self.assertEqual(agent_log(t), "/S.jsonl")
+
     def test_resume_by_conversation(self):
         from herdr_task.launch import resume_argv
         self.assertEqual(resume_argv(["agy", "--mode", "plan"], "abc"), ["agy", "--mode", "plan", "--conversation", "abc"])
