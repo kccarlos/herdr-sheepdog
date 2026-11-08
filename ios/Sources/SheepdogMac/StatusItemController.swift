@@ -16,6 +16,7 @@ public struct MenuItemSpec: Equatable {
         /// Take the voice from the phone: connect `/ws`.
         case useHere
         case selectHotkey(HotkeyShortcut)
+        case selectHerdr(HerdrBackendSwitch.Kind)
         case openMicrophoneSettings
         /// Run the update (`MacUpdater`).
         case updateApp
@@ -69,6 +70,17 @@ public final class StatusItemController: NSObject {
         rows += HotkeyShortcut.allCases.map {
             .item(title: $0.title, action: .selectHotkey($0), enabled: true, checked: $0 == hotkey)
         }
+        if let herdr = state.herdr {
+            rows.append(.separator)
+            if let reason = herdr.readOnlyReason {
+                rows.append(.status("herdr: \(herdr.currentLabel) (\(reason))"))
+            } else {
+                rows.append(.status("herdr: \(herdr.currentLabel)"))
+                rows += herdr.options.map {
+                    .item(title: $0.title, action: .selectHerdr($0.kind), enabled: $0.canSelect, checked: $0.current)
+                }
+            }
+        }
         rows += [
             .separator,
             .item(title: "Launch at login", action: .toggleLoginItem, enabled: true, checked: loginItemEnabled),
@@ -92,6 +104,19 @@ public final class StatusItemController: NSObject {
     public private(set) var state = MenuBarState(state: nil)
     /// A newer release than this app and daemon, from `/api/state`.
     public private(set) var offer: MacUpdateOffer?
+    public var confirmHerdrSwitch: (HerdrBackendSwitch.Kind) -> Bool = { kind in
+        let alert = NSAlert()
+        alert.messageText = "Switch to \(kind.fullName)?"
+        alert.informativeText = HerdrBackendSwitch.confirmMessage
+        alert.addButton(withTitle: "Switch")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+    public var switchHerdr: (HerdrBackendSwitch.Kind) async throws -> Void = { kind in
+        let client = DaemonClient(endpoint: DaemonLocator().endpoint)
+        defer { client.invalidate() }
+        _ = try await client.setHerdrBackend(kind)
+    }
 
     public init(
         source: DaemonStatusSource,
@@ -201,6 +226,22 @@ public final class StatusItemController: NSObject {
         case let .selectHotkey(shortcut):
             hotkey.select(shortcut)
             render()
+        case let .selectHerdr(kind):
+            guard state.herdr?.options.first(where: { $0.kind == kind })?.canSelect == true,
+                  confirmHerdrSwitch(kind) else { return }
+            let switchHerdr = switchHerdr
+            let log = log
+            Task {
+                do {
+                    try await switchHerdr(kind)
+                } catch {
+                    log.log("could not switch herdr: \(error.localizedDescription)")
+                    let alert = NSAlert()
+                    alert.messageText = "Could not switch to \(kind.fullName)"
+                    alert.informativeText = RequestFailure(error, linkUsable: true).message
+                    alert.runModal()
+                }
+            }
         case .openMicrophoneSettings:
             voice.openMicrophoneSettings()
         case .updateApp:

@@ -356,7 +356,9 @@ With one computer, none of this shows: no names and no Talk to.
   About. **Try the demo** is at the bottom.
 - **Settings, Models.** Switch the voice and the orchestrator
   ([models.md](models.md)). **Settings, Languages** sets the languages you
-  speak, most preferred first.
+  speak, most preferred first. **herdr** switches the computer between
+  herdr-tui (`tui`) and herdr-core (`core`) when the other one is running,
+  after confirming.
 - **Update notice.** When the daemon knows of a newer sheepdog, the top of
   Settings says so in one line, with the command to run on your computer
   (for example "sheepdog v0.1.5 is available. To update, run this on your
