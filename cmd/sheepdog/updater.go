@@ -44,7 +44,7 @@ var (
 		case "darwin":
 			return os.Getenv("XPC_SERVICE_NAME") == service.Label
 		case "linux":
-			return os.Getenv("INVOCATION_ID") != ""
+			return inServiceCgroup("/proc/self/cgroup")
 		}
 		return false
 	}
@@ -255,4 +255,20 @@ func printCLINotices(ctx context.Context, l *lifecycle, w io.Writer, now time.Ti
 	}
 	fprintf(w, "sheepdog %s is available (you have %s). To update: %s\n", st.Latest, st.Current, st.How)
 	update.NoticeShown(l.cfg.DataDir, now)
+}
+
+// inServiceCgroup reports whether the cgroup file (/proc/self/cgroup)
+// puts this process in sheepdog's systemd unit. INVOCATION_ID alone is not
+// enough: shells started from other units inherit it.
+func inServiceCgroup(path string) bool {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.HasSuffix(strings.TrimSpace(line), "/"+service.Unit) {
+			return true
+		}
+	}
+	return false
 }
