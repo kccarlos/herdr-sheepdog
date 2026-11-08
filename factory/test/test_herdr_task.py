@@ -2271,7 +2271,7 @@ class AutomationFromAnotherMachine(unittest.TestCase):
         import herdr_task.home as home
         import herdr_task.autopilot as ap
         self.au, self.argparse, self.io, self.redirect = au, argparse, io, contextlib.redirect_stdout
-        self.tmp = tempfile.mkdtemp()
+        self.tmp = os.path.realpath(tempfile.mkdtemp())
         self.a_store, self.b_store = os.path.join(self.tmp, "a-tasks"), os.path.join(self.tmp, "b-tasks")
         self.a_folder, self.b_folder = os.path.join(self.tmp, "a-app"), os.path.join(self.tmp, "shepherdr")
         for f in (self.a_folder, self.b_folder):
