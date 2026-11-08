@@ -319,3 +319,29 @@ func TestStatusShowsUpdateLines(t *testing.T) {
 func listenOn(port int) (net.Listener, error) {
 	return net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 }
+
+// TestInServiceCgroup: only sheepdog's own unit counts as the service; a
+// shell in another unit (which also has INVOCATION_ID) does not.
+func TestInServiceCgroup(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name, content string
+		want          bool
+	}{
+		{"own unit", "0::/user.slice/user-1001.slice/user@1001.service/app.slice/sheepdog.service\n", true},
+		{"terminal unit", "0::/user.slice/user-1001.slice/user@1001.service/app.slice/app-gnome-terminal.scope\n", false},
+		{"ssh session", "0::/user.slice/user-1001.slice/session-4.scope\n", false},
+		{"cgroup v1", "12:pids:/user.slice/user@1001.service/sheepdog.service\n1:name=systemd:/user.slice/user@1001.service/sheepdog.service\n", true},
+	} {
+		p := filepath.Join(dir, tc.name)
+		if err := os.WriteFile(p, []byte(tc.content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := inServiceCgroup(p); got != tc.want {
+			t.Errorf("%s: inServiceCgroup = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	if inServiceCgroup(filepath.Join(dir, "missing")) {
+		t.Error("a missing cgroup file counts as the service")
+	}
+}

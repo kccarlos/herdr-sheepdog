@@ -100,8 +100,9 @@ once `App.Idle()` and the setup demo say the daemon is idle. Idle means none of:
 
 How it restarts (`restartForUpdate`):
 
-- **Under the login service** (`XPC_SERVICE_NAME` is the launchd label, or systemd's
-  `INVOCATION_ID` is set): shut down cleanly and exit with code 75. launchd's `KeepAlive` restarts
+- **Under the login service** (`XPC_SERVICE_NAME` is the launchd label, or `/proc/self/cgroup`
+  puts the process in `sheepdog.service`; `INVOCATION_ID` alone is not enough, since shells started
+  from other systemd units inherit it): shut down cleanly and exit with code 75. launchd's `KeepAlive` restarts
   after any exit (10 s throttle); systemd's `Restart=on-failure` needs a non-zero exit, hence 75
   (EX_TEMPFAIL). The unit files did not change, so installed services keep working.
 - **Otherwise** (`sheepdog start`, `sheepdog serve` in a terminal): release the single-instance lock,
