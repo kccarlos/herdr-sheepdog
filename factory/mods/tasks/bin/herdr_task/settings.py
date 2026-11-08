@@ -10,7 +10,7 @@ from .base import Fail, HOME, MAX_RUNNING
 
 
 # What each agent key starts by default. Unknown keys run as themselves; --argv overrides.
-AGENTS = {"claude": ["claude"], "codex": ["codex", "--no-daemon"]}
+AGENTS = {"claude": ["claude"], "codex": ["codex", "--no-daemon"], "agy": ["agy"]}
 
 
 # ---- the person's settings ------------------------------------------------------------------
@@ -192,6 +192,18 @@ def argv_for(pick):
             a += ["-s", "read-only", "-a", "on-request"]
         elif perm:
             a += ["-s", "workspace-write", "-a", "on-request"]
+        return a
+    if agent == "agy":
+        a = ["agy"]
+        if pick.get("model"):
+            a += ["--model", pick["model"]]
+        if pick.get("effort"):
+            a += ["--effort", pick["effort"]]
+        perm = pick.get("perm")
+        if perm == "full":
+            a.append("--dangerously-skip-permissions")
+        else:
+            a += ["--mode", "plan" if perm == "plan" else "accept-edits"]
         return a
     return [agent] if agent else None
 

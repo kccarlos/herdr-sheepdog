@@ -51,6 +51,9 @@ def session_of(pid):
         elif shutil.which("lsof"):
             files = [l[1:] for l in run(["lsof", "-p", p, "-Fn"]).stdout.split("\n") if l.startswith("n")]
         for f in files:
+            m = re.search(r"/antigravity-cli/conversations/([0-9a-f-]{36})\.db$", f)
+            if m:
+                return m.group(1), None  # agy's transcript is that sqlite db, which no chat reads
             m = re.search(r"/rollout-.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$", f)
             if m:
                 return m.group(1), f
@@ -146,6 +149,8 @@ def find_log(a, ref, folders, taken=()):
     or None: by its session when it has one, else the earliest log of its kind that started from
     its launch on (until it ended) and whose first message names its task."""
     import glob
+    if a.get("agent") == "agy":
+        return None  # a sqlite db, not a Claude or Codex log
     kind = "codex" if a.get("agent") == "codex" else "claude"
     if a.get("session"):
         return log_by_session(kind, a["session"])

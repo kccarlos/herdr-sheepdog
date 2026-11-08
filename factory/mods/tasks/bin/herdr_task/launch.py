@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-from .base import ENTRY, Fail, git, hc_json, now, run, WORKTREES
+from .base import ENTRY, Fail, HOME, git, hc_json, now, run, WORKTREES
 from .settings import agent_key, ASSISTANT_TEMPLATES, bare, BRANCH_PATTERN, branch_pattern_problem, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
@@ -99,6 +99,28 @@ def own_argv(argv):
         key = "/<session-flags>/config.toml:permission_request:0:0"
         return out[:1] + ["-c", f"hooks.PermissionRequest=[{{hooks=[{{type=\"command\",command={json.dumps(hook)},timeout={ASK_TIMEOUT}}}]}}]",
                           "-c", f"hooks.state={{{json.dumps(key)}={{trusted_hash=\"sha256:{digest}\"}}}}"] + out[1:]
+    if k == "agy":
+        # agy's --settings allow list replaces the person's own (~/.gemini/antigravity-cli): it carries
+        # the argv's own --settings rules, then the person's, then these.
+        own = [re.sub(r":\*\)$", ")", r.replace("Bash(", "command(", 1)) for r in own_rules(path)]
+        try:
+            with open(os.path.join(HOME, ".gemini", "antigravity-cli", "settings.json")) as f:
+                theirs = list(json.load(f)["permissions"]["allow"])
+        except (OSError, ValueError, KeyError, TypeError):
+            theirs = []
+        cur, i = None, 0
+        if "--settings" in out[:-1]:
+            i = out.index("--settings")
+            try:
+                cur = json.loads(out[i + 1])
+            except ValueError:
+                pass
+        if isinstance(cur, dict):
+            perms = dict(cur.get("permissions") or {})
+            perms["allow"] = list(perms.get("allow") or []) + theirs + own
+            out[i + 1] = json.dumps({**cur, "permissions": perms})
+            return out
+        return out[:1] + ["--settings", json.dumps({"permissions": {"allow": theirs + own}})] + out[1:]
     return out
 
 
@@ -191,6 +213,8 @@ def resume_argv(argv, session):
         return argv + ["--resume", session]
     if k == "codex":
         return [argv[0], "resume"] + argv[1:] + [session]
+    if k == "agy":
+        return argv + ["--conversation", session]
     return None
 
 
@@ -587,7 +611,7 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     if not role:
         cmd = own_argv(cmd)
     if message:
-        cmd = cmd + [message]
+        cmd = cmd + (["-i", message] if agent_key(cmd) == "agy" else [message])  # agy reads prompts only from -i
     labels = ["--label", f"herdr.task={key}", "--label", f"herdr.task.space={bare(space)}",
               "--label", f"herdr.agent={agent_key(argv)}"]
     ctab = coordinator_tab(parent)

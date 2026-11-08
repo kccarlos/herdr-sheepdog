@@ -1830,6 +1830,88 @@ class FastOffIsSaid(unittest.TestCase):
         self.assertIn('{"fastMode": false}', argv_for({"agent": "claude", "fast": False}))
 
 
+class AgyWorker(unittest.TestCase):
+    """Antigravity CLI (agy) as a task's agent: its argv, own commands, resume and conversation id."""
+
+    def setUp(self):
+        sys.path.insert(0, BIN)
+        self.home = tempfile.mkdtemp()
+
+    def test_its_argv(self):
+        from herdr_task.settings import argv_for, agent_argv
+        self.assertEqual(argv_for({"agent": "agy", "model": "gemini-4-argon-medium", "effort": "high", "perm": "full"}),
+                         ["agy", "--model", "gemini-4-argon-medium", "--effort", "high", "--dangerously-skip-permissions"])
+        self.assertEqual(argv_for({"agent": "agy", "perm": "plan"}), ["agy", "--mode", "plan"])
+        self.assertEqual(argv_for({"agent": "agy", "perm": "auto"}), ["agy", "--mode", "accept-edits"])
+        self.assertEqual(agent_argv("agy"), ["agy"])
+
+    def test_own_commands_join_the_global_allow_list(self):
+        from unittest import mock
+        from herdr_task import launch
+        d = os.path.join(self.home, ".gemini", "antigravity-cli")
+        os.makedirs(d)
+        with open(os.path.join(d, "settings.json"), "w") as f:
+            json.dump({"permissions": {"allow": ["command(go test)"]}}, f)
+        with mock.patch.object(launch, "HOME", self.home), \
+                mock.patch.object(launch, "own_path", lambda: "/x/herdr-task"), \
+                mock.patch.object(launch, "secret_path", lambda: None), mock.patch.object(launch, "browser_path", lambda: None):
+            out = launch.own_argv(["agy", "--mode", "accept-edits"])
+            self.assertEqual(out[:2], ["agy", "--settings"])
+            allow = json.loads(out[2])["permissions"]["allow"]
+            self.assertEqual(allow[0], "command(go test)")
+            self.assertIn("command(/x/herdr-task status)", allow)
+            self.assertEqual(out[3:], ["--mode", "accept-edits"])
+            # an --settings already there: its allow list, then the global one, then its own
+            mine = launch.own_argv(["agy", "--settings", json.dumps({"permissions": {"allow": ["command(ls)"]}, "x": 1})])
+            self.assertEqual(mine.count("--settings"), 1)
+            merged = json.loads(mine[2])
+            self.assertEqual(merged["permissions"]["allow"][:2], ["command(ls)", "command(go test)"])
+            self.assertIn("command(/x/herdr-task status)", merged["permissions"]["allow"])
+            self.assertEqual(merged["x"], 1)
+            os.unlink(os.path.join(d, "settings.json"))  # missing file: only its own rules
+            allow = json.loads(launch.own_argv(["agy"])[2])["permissions"]["allow"]
+            self.assertNotIn("command(go test)", allow)
+            self.assertIn("command(/x/herdr-task status)", allow)
+
+    def test_its_first_message_is_a_prompt_not_an_argument(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        import herdr_task.launch as L
+        ran = []
+
+        def run(argv, *a, **k):
+            ran.append(argv)
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"address": "t9"}), "")
+        s = SimpleNamespace(key=lambda t: "dev#6", dirty=False)
+        with mock.patch.object(L, "run", run), mock.patch.object(L, "folder_for", lambda s, t: "/tmp"), \
+                mock.patch.object(L, "agent_name", lambda *a: "dev-6-fake"), mock.patch.object(L, "track", lambda *a: None), \
+                mock.patch.object(L, "coordinator_tab", lambda a: None), mock.patch.object(L, "own_argv", lambda a: a), \
+                mock.patch.object(L, "in_shell", lambda a: a), mock.patch.object(L, "low_priority", lambda a, n: a):
+            L.launch(s, {"id": 6, "title": "fake", "agents": []}, ["agy", "--mode", "plan"], "sp1", "Your task")
+            L.launch(s, {"id": 7, "title": "fake", "agents": []}, ["claude"], "sp1", "Your task")
+        self.assertEqual(ran[0][-4:], ["--mode", "plan", "-i", "Your task"])  # agy reads prompts only from -i
+        self.assertEqual(ran[1][-2:], ["claude", "Your task"])
+
+    def test_resume_by_conversation(self):
+        from herdr_task.launch import resume_argv
+        self.assertEqual(resume_argv(["agy", "--mode", "plan"], "abc"), ["agy", "--mode", "plan", "--conversation", "abc"])
+
+    def test_its_conversation_is_the_db_it_holds_open(self):
+        from unittest import mock
+        import herdr_task.sessions as sessions
+        cid = "0199aaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        base = "/Users/me/.gemini/antigravity-cli/conversations/" + cid
+        lsof = "\n".join("n" + base + x for x in (".db", ".db-wal", ".db-shm"))
+        with mock.patch.object(sessions, "HOME", self.home), mock.patch.object(sessions, "kids", lambda pid: []), \
+                mock.patch.object(sessions.shutil, "which", lambda n: "/usr/sbin/lsof"), \
+                mock.patch.object(sessions, "run", lambda argv: mock.Mock(stdout=lsof)), \
+                mock.patch.object(sessions.os.path, "isdir", lambda p: False):
+            self.assertEqual(sessions.session_of(42), (cid, None))
+            # its log is not Claude's: not found by session, nor by looking in a Claude folder
+            self.assertIsNone(sessions.find_log({"agent": "agy", "session": cid}, "ELIA-5", ["/Users/me"]))
+            self.assertIsNone(sessions.find_log({"agent": "agy", "at": 1}, "ELIA-5", ["/Users/me"]))
+
+
 class AcceptCardArtifacts(unittest.TestCase):
     """SHEP-96: the Accept card links the task's other artifacts (a research report) beside its proof."""
 
