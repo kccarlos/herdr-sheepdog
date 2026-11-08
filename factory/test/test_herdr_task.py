@@ -3710,3 +3710,62 @@ class Asks(unittest.TestCase):
         [msg] = self.held()[asker]
         self.assertEqual(msg["text"], f'<herdr-news task="FAC-9" event="answer" key="{out["id"]}">'
                                       f'Ask {out["id"]} answered: Ship (asked: Ship it tonight?)</herdr-news>')
+
+
+class HandoffsAtTheFloor(unittest.TestCase):
+    """FAC-23: when a usage pool reaches its floor, each running task whose worker is on it gets a
+    handoff from git and its chat, saved under the store. A throwaway git repo and store; hc never runs."""
+
+    def setUp(self):
+        import shutil
+        sys.path.insert(0, BIN)
+        import herdr_task.handoff as handoff
+        self.handoff = handoff
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.store_dir = os.path.join(self.root, "store")
+        main, self.wt = os.path.join(self.root, "repo"), os.path.join(self.root, "wt")
+        git = lambda cwd, *a: subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True, check=True).stdout.strip()
+        git(self.root, "init", "-q", "-b", "main", main)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false")):
+            git(main, "config", k, v)
+        git(main, "commit", "-q", "--allow-empty", "-m", "base")
+        git(main, "worktree", "add", "-q", "-b", "task/1", self.wt, "HEAD")
+        start = git(self.wt, "rev-parse", "HEAD")
+        git(self.wt, "commit", "-q", "--allow-empty", "-m", "Add the pool picker")
+        with open(os.path.join(self.wt, "half-done.py"), "w") as f:
+            f.write("x = 1\n")
+        log = os.path.join(self.root, "chat.jsonl")
+        with open(log, "w") as f:
+            for d in ({"type": "user", "message": {"content": "the brief"}},
+                      {"type": "user", "message": {"content": "Use the soonest weekly reset"}},
+                      {"type": "assistant", "message": {"content": [{"type": "text", "text": "Picker half done"}]}}):
+                f.write(json.dumps(d) + "\n")
+        worker = lambda i, argv, **kw: dict({"id": i, "title": f"T{i}", "state": "running", "mode": "worktree", "worktree": self.wt,
+                                             "branch": "task/1", "base": "main", "start": start,
+                                             "agents": [{"address": f"a{i}", "agent": argv[0], "argv": argv, "log": log}]}, **kw)
+        self.store = Store([worker(1, ["claude", "--model", "opus"]), worker(2, ["codex", "--no-daemon", "-m", "gpt-5.5"]),
+                            worker(3, ["agy", "--model", "claude-x", "--model", "gemini-4-argon-high"]), worker(4, ["agy", "--model", "claude-sonnet-5-5-medium"]),
+                            worker(5, ["claude"], state="ready"), worker(6, ["agy"])])
+        self.store.loc["folder"], self.store.path = main, os.path.join(self.store_dir, "f.json")
+
+    def test_only_the_pools_running_tasks_get_one(self):
+        got = {p: [h["task"] for h in self.handoff.handoffs(self.store, p, self.store.data["tasks"])]
+               for p in ("claude", "codex", "antigravity-gemini", "antigravity-claude-gpt")}
+        self.assertEqual(got, {"claude": ["SHEP-1"], "codex": ["SHEP-2"], "antigravity-gemini": ["SHEP-3"],
+                               "antigravity-claude-gpt": ["SHEP-4"]})
+
+    def test_the_handoff_has_the_work_and_chat_and_is_saved_per_task(self):
+        [h] = self.handoff.handoffs(self.store, "claude", self.store.data["tasks"])
+        for words in ("Add the pool picker", "half-done.py", "person: Use the soonest weekly reset",
+                      "agent: Picker half done", "the claude pool reached its floor", self.wt):
+            self.assertIn(words, h["text"])
+        self.assertNotIn("the brief", h["text"])
+        self.assertEqual(h["path"], os.path.join(self.store_dir, "handoffs", "f-1.md"))
+        with open(h["path"]) as f:
+            self.assertEqual(f.read(), h["text"] + "\n")
+
+    def test_agy_on_its_own_default_has_no_pool_and_no_pool_gets_none(self):
+        self.assertIsNone(self.handoff.pool_of({"agent": "agy", "argv": ["agy"]}))
+        self.assertEqual(self.handoff.handoffs(self.store, None, self.store.data["tasks"]), [])
+        self.assertFalse(os.path.exists(os.path.join(self.store_dir, "handoffs")))
