@@ -95,10 +95,7 @@ func runSetup(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		if _, pidKnown, running := l.running(ctx); running && (pidKnown || l.serviceInstalled()) {
 			fprintln(stdout, "")
 			fprintln(stdout, "Restarting the running daemon so it uses the new settings…")
-			if code := l.stop(ctx); code != 0 {
-				return code
-			}
-			if code := l.start(ctx); code != 0 {
+			if code := l.restart(ctx); code != 0 {
 				return code
 			}
 		}
@@ -191,10 +188,7 @@ func setupTerminal(ctx context.Context, configPath, envFile string, asked bool, 
 	if _, pidKnown, running := l.running(ctx); running && (pidKnown || l.serviceInstalled()) {
 		fprintln(stdout, "")
 		fprintln(stdout, "Restarting the running daemon so it uses the new settings…")
-		if code := l.stop(ctx); code != 0 {
-			return code
-		}
-		if code := l.start(ctx); code != 0 {
+		if code := l.restart(ctx); code != 0 {
 			return code
 		}
 	}
@@ -289,10 +283,9 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 	}
 
 	advice := onboard.AdviseBackend(cfg, env)
-	both := (env.OldHerdr.Installed || env.OldHerdr.Answers) && (env.HerdrCore.Installed || env.HerdrCore.Answers)
-	asking := o.Interactive && o.Prompt != nil && both
+	asking := o.Interactive && o.Prompt != nil && advice.Ask
 	fprintln(o.Out, "")
-	if advice.Why != "" && (!asking || advice.Ask) {
+	if advice.Why != "" {
 		fprintln(o.Out, advice.Why)
 	}
 	curKind, _ := app.ResolveBackend(cfg.Herdr.Backend, env.OldHerdr.Answers, env.HerdrCore.Answers)
@@ -311,9 +304,7 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 		if err != nil {
 			return false, err
 		}
-		if chosen != def || advice.Set != "" || advice.Ask {
-			pin = chosen
-		}
+		pin = chosen
 	case advice.Set != "":
 		pin = advice.Set
 	case advice.Ask:
@@ -339,6 +330,17 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 		*o.Chosen = resolvedKind
 	}
 
+	src := panelsync.Source{Panel: o.Panel, Layout: o.Layout, Version: version}
+	if env.HerdrApp && env.Panel == onboard.PanelOutdated && cfg.Panel.AutoUpdate {
+		// The daemon would replace it anyway (panel.auto_update), so only a
+		// panel the user changed, or one without a marker, is asked about.
+		if res, err := panelsync.Sync(env.HerdrAppHome, src); err == nil && res.State.Installed && !res.State.Modified {
+			env.Panel = onboard.PanelCurrent
+			if res.Updated {
+				fprintln(o.Out, "Updated the Sheepdog panel for herdr-app (panel.auto_update).")
+			}
+		}
+	}
 	installedPanel := env.Panel == onboard.PanelCurrent
 	if env.HerdrApp && (env.Panel == onboard.PanelMissing || env.Panel == onboard.PanelOutdated) {
 		install := !o.Interactive
@@ -372,7 +374,6 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 		switched := setupSheepdogLayout(ctx, env, o)
 		// Say what was installed, so the daemon can keep it current after an
 		// upgrade (docs/dev/update.md).
-		src := panelsync.Source{Panel: o.Panel, Layout: o.Layout, Version: version}
 		if err := panelsync.Record(env.HerdrAppHome, src); err != nil {
 			fprintf(o.Out, "Warning: could not record the panel install: %v\n", err)
 		}
@@ -395,6 +396,9 @@ func setupEnvironment(ctx context.Context, cfg config.Config, envPath string, o 
 
 func setupBackendLine(want string, oldUp, coreUp bool) (kind, line string) {
 	kind, why := app.ResolveBackend(want, oldUp, coreUp)
+	if !oldUp && !coreUp && why != "pinned" {
+		return kind, "herdr backend: neither is running; Sheepdog uses whichever starts first."
+	}
 	if (kind == config.HerdrBackendHC && !coreUp) || (kind != config.HerdrBackendHC && !oldUp) {
 		why += "; not running"
 	}
@@ -519,11 +523,17 @@ func setupSheepdogShortcut(env onboard.Environment, o setupEnvironmentOptions) {
 		fprintf(o.Out, "Warning: could not inspect %s/keys.json: %v\n", env.HerdrAppHome, err)
 		return
 	}
-	if ks.AlreadyOurs {
+	if mk, _ := panelsync.ReadMarker(filepath.Join(env.HerdrAppHome, "mods", "sheepdog")); ks.AlreadyOurs || mk.KeyDeclined {
 		return
 	}
 	yes, err := o.Prompt.yesNo(fmt.Sprintf("Add a keyboard shortcut (%s) in herdr-app to focus the Sheepdog panel?", key), false)
-	if err != nil || !yes {
+	if err != nil {
+		return
+	} else if !yes {
+		// Remembered in the panel marker, so later runs do not ask again.
+		if err := panelsync.RecordKeyDeclined(env.HerdrAppHome); err != nil {
+			fprintf(o.Out, "Warning: could not remember the answer: %v\n", err)
+		}
 		return
 	}
 	if ks.Bound {

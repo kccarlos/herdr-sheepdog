@@ -22,7 +22,7 @@
 |---|---|
 | `sheepdog start` | Start the daemon in the background (through the login service if installed). Does nothing if it already runs. |
 | `sheepdog stop` | Stop it. With the login service, it stays stopped until the next login or `sheepdog start`. |
-| `sheepdog restart` | Stop, then start. Reads the env file the last run loaded (not the `./.env` of the directory you are in); `--env-file PATH` overrides it. |
+| `sheepdog restart` | Stop, then start; with the login service, one restart through launchd or systemd (nothing is unloaded). Reads the env file the last run loaded (not the `./.env` of the directory you are in); `--env-file PATH` overrides it. |
 | `sheepdog status` | Running or not: pid, version, URL, models, herdr, phones, last error, and which env file the keys came from (with a warning when it is not `~/.config/sheepdog/.env`). `--json` for scripts. Exit 0 running, 3 not running, 1 error. |
 | `sheepdog logs` | The runtime log. `-f` follows, `-n N` sets the lines (default 100). |
 | `sheepdog open` | Open the voice page; `sheepdog open setup` and `sheepdog open debug` open the others. Over SSH it opens nothing and prints the `ssh -N -L` line that reaches the page. |
@@ -32,7 +32,7 @@
 
 | Command | What it does |
 |---|---|
-| `sheepdog update` | Check for a new release now and print how to upgrade for the way you installed it. Changes nothing. The daemon also checks once a day and shows the result in `sheepdog status` ([quick-start.md](quick-start.md#update)). |
+| `sheepdog update` | Check for a new release now; if there is one, install it the way you installed sheepdog (installer, Homebrew, herdr plugin; on a Mac also Sheepdog.app when Homebrew installed it) and restart the running daemon. Asks nothing. A source checkout gets the steps instead. The daemon also checks once a day and shows the result in `sheepdog status` ([quick-start.md](quick-start.md#update)). |
 | `sheepdog uninstall` | Stop, remove the login service, the `~/.local/bin/sheepdog` link, and unchanged `herdr-app` panel/layout/shortcut files (restoring your previous layout if `sheepdog` was active), ask before deleting config and data, then print the herdr-tui command that finishes the job. `--dry-run` previews every step without changing anything; `--yes` deletes without asking; `--keep-data` keeps config and data. |
 | `sheepdog service install` | Start at login (launchd on macOS, `systemd --user` on Linux). Also `uninstall`, `start`, `status`, `logs`; `install --dry-run` prints the unit. |
 | `sheepdog data clear` | Delete the event log and transcripts (`--events`, the default) or everything under the data directory (`--all`). Asks first; `--yes` skips. Stop the daemon first. |

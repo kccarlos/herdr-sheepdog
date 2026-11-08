@@ -294,7 +294,7 @@ struct SessionBanners: View {
                 .padding(.bottom, 8)
                 .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
         } else if let notice = model.notices.update?.notice, notice.text != dismissedUpdate {
-            UpdateBanner(notice: notice) {
+            UpdateBanner(notice: notice, update: model.installUpdate) {
                 withAnimation(Theme.ease(reduceMotion: reduceMotion)) { dismissedUpdate = notice.text }
             }
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)

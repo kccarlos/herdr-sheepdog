@@ -81,12 +81,13 @@ a browser through the SSH tunnel described in
 
 The installer supports Apple silicon macOS and x86-64 Linux. It offers to run
 `sheepdog setup` when a terminal is available; otherwise it prints the next
-step. For another platform, [build from source](#other-ways-to-install).
+step. Run again over a set-up install, it upgrades without asking and
+restarts a running daemon. For another platform, [build from source](#other-ways-to-install).
 
 ## Set up in your browser
 
 `sheepdog setup` prints which herdr program (`herdr-tui` or `herdr-core`)
-Sheepdog will use, and asks which one to use whenever both are installed
+Sheepdog will use, and asks which one to use only when both are running
 (agents in the other one will not appear in Sheepdog); the setting is
 [`herdr.backend`](../CONFIG.md#herdr). Setup starts the daemon if needed,
 confirms the herdr backend it connected to, and opens this page:
@@ -240,29 +241,28 @@ each key from the environment; see [commands.md](commands.md#flags-of-sheepdog-i
 
 sheepdog checks for a new release once a day (one request to
 `api.github.com`, nothing personal sent; [privacy.md](privacy.md)). When there
-is one, `sheepdog status` and the setup and voice pages
-say so, with the command for the way you installed. The voice never
-speaks it. Update with the command for your install method:
+is one, `sheepdog status` says so, and the setup and voice pages, the iPhone
+app and the Mac menu bar app show an **Update** button that does the same as
+`sheepdog update` below. The voice never speaks it. To update from a terminal,
+run:
 
-| You installed with | Update with |
-|---|---|
-| One-line installer | Rerun the installer |
-| herdr-tui plugin | `herdr plugin update kccarlos.sheepdog` |
-| Homebrew | `brew upgrade sheepdog` |
-| From source | `git pull` in your clone, then `make install` |
-| Manual release download | Download the new archive from the release page and replace the binary |
+```sh
+sheepdog update
+```
 
-Then the running daemon has to start the new version:
+It installs the new release the way you installed sheepdog (the installer's
+binary, with its sha256 checked; Homebrew; or the herdr plugin), upgrades
+Sheepdog.app too when Homebrew installed it, and restarts the running daemon
+straight away. It asks nothing. From a source checkout it prints the steps
+instead: `git pull` in your clone, then `make install`.
 
-- **It restarts itself.** The daemon notices within a minute that its
-  program was replaced and restarts into it right away. A voice session
-  drops for a few seconds and reconnects.
-  Turn it off with `update.auto_restart = false` ([CONFIG.md](../CONFIG.md)).
-- **Or restart it yourself:** `sheepdog restart`. Any command that finds the
-  daemon older than the installed program says so and prints this.
+If you upgrade another way (`brew upgrade`, rerunning the installer), the
+daemon notices within a minute that its program was replaced and restarts
+into it right away; a voice session drops for a few seconds and reconnects.
+Turn that off with `update.auto_restart = false` ([CONFIG.md](../CONFIG.md));
+`sheepdog update` then restarts it.
 
 `update.check = false` turns the daily check and its notices off.
-`sheepdog update` checks right now and prints the steps.
 
 ## Other ways to install
 
@@ -281,8 +281,7 @@ The installer above is the supported path. The daemon is also a plain binary:
   macOS 14 or newer). It talks to the daemon above, so install that too.
   `brew upgrade --cask sheepdog-app` updates it and restarts it if it was running.
 
-Then run `sheepdog setup`. `sheepdog update` prints the upgrade steps for the
-way you installed.
+Then run `sheepdog setup`. `sheepdog update` upgrades any of these in place.
 
 Next: [pair your iPhone](iphone-app.md), [choose other models](models.md),
 [use it away from home](remote-access.md).

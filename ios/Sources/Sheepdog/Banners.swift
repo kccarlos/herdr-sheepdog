@@ -60,11 +60,18 @@ struct BannerView: View {
 /// hides it until the next version; Settings keeps it.
 struct UpdateBanner: View {
     let notice: UpdateNotice
+    var update: () -> Void = {}
     let dismiss: () -> Void
     @State private var copied = false
 
     var body: some View {
         NoticeCard(tint: Theme.working, disc: nil, symbol: "arrow.down", message: notice.text, hint: notice.after.map { LocalizedStringKey($0) }, dismiss: dismiss) {
+            if let action = notice.action {
+                Button(action, action: update)
+                    .buttonStyle(NoticeButtonStyle())
+                    .accessibilityHint("Installs the update on your computer and restarts Sheepdog.")
+                    .accessibilityIdentifier("updateNotice.update")
+            }
             if let command = notice.command {
                 Button {
                     UIPasteboard.general.string = command

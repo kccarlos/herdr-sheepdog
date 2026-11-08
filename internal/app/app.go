@@ -96,6 +96,8 @@ type Options struct {
 	Version string
 	// Update, when set, is the update notice /api/state reports.
 	Update func() update.Status
+	// InstallUpdate, when set, backs POST /api/update.
+	InstallUpdate func() error
 	// Panel, when set, is the herdr-app panel state /api/state reports.
 	Panel func() panelsync.State
 	// Stderr receives one-line warnings; nil means os.Stderr.
@@ -226,6 +228,9 @@ type App struct {
 	restartOnce   sync.Once
 	restartReason string
 	herdrBackend  string
+	// awaitHerdr, set when auto found neither herdr running, runs until
+	// one answers (awaitFirstHerdr).
+	awaitHerdr func(context.Context)
 }
 
 // ReasonUpdate is the restart reason that moves the daemon into a new

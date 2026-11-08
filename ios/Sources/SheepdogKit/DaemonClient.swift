@@ -427,6 +427,13 @@ public final class DaemonClient: @unchecked Sendable {
         }
     }
 
+    /// `POST /api/update`: the daemon installs the newest release and
+    /// restarts (what `sheepdog update` does); progress is `/api/state`'s
+    /// `update`. `nil` from a daemon that predates it (404).
+    public func installUpdate() async throws -> UpdateInfo? {
+        try await sendJSON(UpdateInfo.self, path: "/api/update", method: "POST", what: "the update reply")
+    }
+
     /// `GET /api/events?n=&type=` — the newest `limit` events of the
     /// daemon's current run (its in-memory ring, 2 000 events), oldest
     /// first; `type` is a prefix filter (`voice.push` matches

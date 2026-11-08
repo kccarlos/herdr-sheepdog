@@ -489,6 +489,63 @@ func TestSetupEnvironmentKeybindingOptInAndConflict(t *testing.T) {
 	}
 }
 
+// TestSetupEnvironmentRemembersNoAndAutoUpdatesPanel: a "no" to the
+// shortcut question is not asked again, even after the panel is updated;
+// with panel.auto_update an outdated, unchanged panel is updated without a
+// question, and one the user changed is still asked about.
+func TestSetupEnvironmentRemembersNoAndAutoUpdatesPanel(t *testing.T) {
+	appHome := filepath.Join(t.TempDir(), "herdr-app")
+	cfg := setupTestConfig()
+	cfg.Herdr.Backend = config.HerdrBackendHC
+	cfg.Panel.AutoUpdate = true
+	const shortcutQ, panelQ = "Add a keyboard shortcut", "Install the Sheepdog panel for herdr-app?"
+	run := func(panel fstest.MapFS, input string) string {
+		t.Helper()
+		var out bytes.Buffer
+		_, err := setupEnvironment(context.Background(), cfg, filepath.Join(appHome, ".env"), setupEnvironmentOptions{
+			Probe: setupTestProbe(appHome, false, false), Panel: panel, Layout: []byte("layout"),
+			Prompt: newPrompter(strings.NewReader(input), &out), Interactive: true, Out: &out,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	newer := func(main string) fstest.MapFS {
+		p := setupTestPanel()
+		p["mods/sheepdog/main.js"] = &fstest.MapFile{Data: []byte(main), Mode: 0o644}
+		return p
+	}
+	main := filepath.Join(appHome, "mods", "sheepdog", "main.js")
+
+	// Install the panel, skip the layout, say no to the shortcut.
+	if out := run(setupTestPanel(), "y\nn\nn\n"); !strings.Contains(out, shortcutQ) {
+		t.Fatalf("first run did not offer the shortcut:\n%s", out)
+	}
+	if out := run(setupTestPanel(), "n\n"); strings.Contains(out, shortcutQ) {
+		t.Errorf("the declined shortcut was asked again:\n%s", out)
+	}
+	// A newer, unchanged panel is updated without the panel question, and
+	// the "no" survives the update.
+	out := run(newer("main2"), "n\n")
+	if got, _ := os.ReadFile(main); strings.Contains(out, panelQ) || strings.Contains(out, shortcutQ) || string(got) != "main2" || !strings.Contains(out, "Updated the Sheepdog panel for herdr-app (panel.auto_update).") {
+		t.Errorf("auto-update run: main.js=%q\n%s", got, out)
+	}
+	if mk, err := panelsync.ReadMarker(filepath.Dir(main)); err != nil || !mk.KeyDeclined {
+		t.Errorf("marker after the update = %+v, %v", mk, err)
+	}
+	// A panel the user changed is still asked about.
+	if err := os.WriteFile(main, []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := run(newer("main3"), "n\n"); !strings.Contains(out, panelQ) {
+		t.Errorf("a changed panel was not asked about:\n%s", out)
+	}
+	if got, _ := os.ReadFile(main); string(got) != "mine" {
+		t.Errorf("the changed panel was replaced: %q", got)
+	}
+}
+
 func setupBackendProbe(appHome string, oldInstalled, oldRunning, coreInstalled, coreRunning, appInstalled bool) onboard.Probe {
 	p := setupTestProbe(appHome, oldRunning, coreRunning)
 	p.LookPath = func(name string) (string, error) {
@@ -528,7 +585,7 @@ func TestSetupEnvironmentBackendChoice(t *testing.T) {
 		forbidText                 []string
 	}{
 		{
-			name:          "pinned herdr with both installed and herdr-app asks, default is pin, keep writes nothing",
+			name:          "pinned herdr with both running and herdr-app never asks",
 			backend:       config.HerdrBackendHerdr,
 			oldInstalled:  true,
 			oldRunning:    true,
@@ -536,150 +593,41 @@ func TestSetupEnvironmentBackendChoice(t *testing.T) {
 			coreRunning:   true,
 			appInstalled:  true,
 			interactive:   true,
-			input:         "\nn\n",
+			input:         "n\n",
 			wantChosen:    config.HerdrBackendHerdr,
-			wantChanged:   false,
-			wantText: []string{
-				"Agents running in the other herdr will not appear in Sheepdog.",
-				"Which herdr should Sheepdog use:",
-				"1) herdr-core (hc) — herdr-app",
-				"2) herdr-tui (current)",
-				"choice [2]:",
-				"herdr backend: using herdr-tui (pinned).",
-			},
-			forbidText: []string{"Set SHEEPDOG_HERDR_BACKEND=", "pinned: herdr.backend=", "pinned: SHEEPDOG_HERDR_BACKEND="},
+			wantText:      []string{"herdr backend: using herdr-tui (pinned)."},
+			forbidText:    []string{"Which herdr", "choice [", "Set SHEEPDOG_HERDR_BACKEND="},
 		},
 		{
-			name:          "pinned hc without herdr-app omits herdr-app from label and keep leaves env file untouched",
-			backend:       config.HerdrBackendHC,
-			oldInstalled:  true,
-			oldRunning:    true,
-			coreInstalled: true,
-			coreRunning:   true,
-			appInstalled:  false,
-			interactive:   true,
-			input:         "\n",
-			preEnv:        "KEEP_ME=1\n",
-			wantChosen:    config.HerdrBackendHC,
-			wantChanged:   false,
-			wantText: []string{
-				"Agents running in the other herdr will not appear in Sheepdog.",
-				"1) herdr-core (hc) (current)",
-				"2) herdr-tui",
-				"choice [1]:",
-				"herdr backend: using herdr-core (pinned).",
-			},
-			forbidText: []string{"Set SHEEPDOG_HERDR_BACKEND=", "herdr-core (hc) — herdr-app", "pinned: herdr.backend="},
-		},
-		{
-			name:           "pinned herdr changed to hc writes env, reports change and says not running",
-			backend:        config.HerdrBackendHerdr,
-			oldInstalled:   true,
-			oldRunning:     true,
-			coreInstalled:  true,
-			coreRunning:    false,
-			interactive:    true,
-			input:          "1\n",
-			preEnv:         "KEEP_ME=1\n",
-			wantChosen:     config.HerdrBackendHC,
-			wantChanged:    true,
-			wantEnvBackend: config.HerdrBackendHC,
-			wantText: []string{
-				"1) herdr-core (hc)\n",
-				"2) herdr-tui (current)",
-				"choice [2]:",
-				"Set SHEEPDOG_HERDR_BACKEND=hc in ",
-				"herdr backend: using herdr-core (pinned; not running).",
-			},
-			forbidText: []string{"herdr-core (hc) — herdr-app", "pinned: SHEEPDOG_HERDR_BACKEND=", "pinned: herdr.backend="},
-		},
-		{
-			name:           "pinned hc changed to herdr with herdr-app writes env and reports change",
-			backend:        config.HerdrBackendHC,
-			oldInstalled:   true,
-			oldRunning:     true,
-			coreInstalled:  true,
-			coreRunning:    true,
-			appInstalled:   true,
-			interactive:    true,
-			input:          "2\nn\n",
-			wantChosen:     config.HerdrBackendHerdr,
-			wantChanged:    true,
-			wantEnvBackend: config.HerdrBackendHerdr,
-			wantText: []string{
-				"1) herdr-core (hc) — herdr-app (current)",
-				"choice [1]:",
-				"Set SHEEPDOG_HERDR_BACKEND=herdr in ",
-				"herdr backend: using herdr-tui (pinned).",
-			},
-			forbidText: []string{"pinned: SHEEPDOG_HERDR_BACKEND=", "pinned: herdr.backend="},
-		},
-		{
-			name:          "plain auto with both installed and only herdr-tui running asks, keep default leaves auto unpinned",
-			backend:       config.HerdrBackendAuto,
-			oldInstalled:  true,
-			oldRunning:    true,
-			coreInstalled: true,
-			coreRunning:   false,
-			appInstalled:  false,
-			interactive:   true,
-			input:         "\n",
-			preEnv:        "KEEP_ME=1\n",
-			wantChosen:    config.HerdrBackendHerdr,
-			wantChanged:   false,
-			wantText: []string{
-				"Which herdr should Sheepdog use:",
-				"1) herdr-core (hc)\n",
-				"2) herdr-tui (current)",
-				"choice [2]:",
-				"herdr backend: using herdr-tui (auto: only herdr-tui is running).",
-			},
-			forbidText: []string{"Set SHEEPDOG_HERDR_BACKEND=", "pinned", "herdr-core (hc) — herdr-app"},
-		},
-		{
-			name:           "plain auto with both installed writes env when user picks non-default",
+			name:           "auto with both running asks, default herdr-core with herdr-app, and pins the answer",
 			backend:        config.HerdrBackendAuto,
 			oldInstalled:   true,
 			oldRunning:     true,
-			coreInstalled:  true,
-			coreRunning:    false,
-			appInstalled:   false,
-			interactive:    true,
-			input:          "1\n",
-			wantChosen:     config.HerdrBackendHC,
-			wantChanged:    true,
-			wantEnvBackend: config.HerdrBackendHC,
-			wantText: []string{
-				"Set SHEEPDOG_HERDR_BACKEND=hc in ",
-				"herdr backend: using herdr-core (pinned; not running).",
-			},
-		},
-		{
-			name:           "auto with both installed and only herdr-core running asks without contradicting reason and pins default",
-			backend:        config.HerdrBackendAuto,
-			oldInstalled:   true,
-			oldRunning:     false,
 			coreInstalled:  true,
 			coreRunning:    true,
 			appInstalled:   true,
 			interactive:    true,
 			input:          "\nn\n",
+			preEnv:         "KEEP_ME=1\n",
 			wantChosen:     config.HerdrBackendHC,
 			wantChanged:    true,
 			wantEnvBackend: config.HerdrBackendHC,
 			wantText: []string{
-				"1) herdr-core (hc) — herdr-app (current)",
+				"Both are running, and auto would pick herdr-tui.",
+				"Agents running in the other herdr will not appear in Sheepdog.",
+				"Which herdr should Sheepdog use:",
+				"1) herdr-core (hc) — herdr-app",
+				"2) herdr-tui (current)",
 				"choice [1]:",
 				"Set SHEEPDOG_HERDR_BACKEND=hc in ",
 				"herdr backend: using herdr-core (pinned).",
 			},
-			forbidText: []string{"Only herdr-core is running, so pinning it"},
 		},
 		{
-			name:           "auto with both installed and only herdr-core running lets user pick herdr-tui without contradiction",
+			name:           "auto with both running pins herdr-tui when picked",
 			backend:        config.HerdrBackendAuto,
 			oldInstalled:   true,
-			oldRunning:     false,
+			oldRunning:     true,
 			coreInstalled:  true,
 			coreRunning:    true,
 			interactive:    true,
@@ -687,11 +635,56 @@ func TestSetupEnvironmentBackendChoice(t *testing.T) {
 			wantChosen:     config.HerdrBackendHerdr,
 			wantChanged:    true,
 			wantEnvBackend: config.HerdrBackendHerdr,
-			wantText: []string{
-				"Set SHEEPDOG_HERDR_BACKEND=herdr in ",
-				"herdr backend: using herdr-tui (pinned; not running).",
-			},
-			forbidText: []string{"Only herdr-core is running, so pinning it"},
+			wantText:       []string{"1) herdr-core (hc)\n", "choice [2]:", "Set SHEEPDOG_HERDR_BACKEND=herdr in ", "herdr backend: using herdr-tui (pinned)."},
+		},
+		{
+			name:           "auto with only herdr-tui running pins it without asking, even with herdr-core and herdr-app installed",
+			backend:        config.HerdrBackendAuto,
+			oldInstalled:   true,
+			oldRunning:     true,
+			coreInstalled:  true,
+			appInstalled:   true,
+			interactive:    true,
+			input:          "n\n",
+			wantChosen:     config.HerdrBackendHerdr,
+			wantChanged:    true,
+			wantEnvBackend: config.HerdrBackendHerdr,
+			wantText:       []string{"Only herdr-tui is running, so Sheepdog uses it.", "Set SHEEPDOG_HERDR_BACKEND=herdr in ", "herdr backend: using herdr-tui (pinned)."},
+			forbidText:     []string{"Which herdr", "choice ["},
+		},
+		{
+			name:           "auto with only herdr-core running pins it without asking",
+			backend:        config.HerdrBackendAuto,
+			oldInstalled:   true,
+			coreInstalled:  true,
+			coreRunning:    true,
+			interactive:    true,
+			wantChosen:     config.HerdrBackendHC,
+			wantChanged:    true,
+			wantEnvBackend: config.HerdrBackendHC,
+			wantText:       []string{"Only herdr-core is running, so Sheepdog uses it.", "herdr backend: using herdr-core (pinned)."},
+			forbidText:     []string{"Which herdr", "choice ["},
+		},
+		{
+			name:          "auto with both installed and neither running neither asks nor pins",
+			backend:       config.HerdrBackendAuto,
+			oldInstalled:  true,
+			coreInstalled: true,
+			interactive:   true,
+			preEnv:        "KEEP_ME=1\n",
+			wantChosen:    config.HerdrBackendHerdr,
+			wantText:      []string{"Both are installed and neither is running: Sheepdog uses whichever starts first.", "herdr backend: neither is running; Sheepdog uses whichever starts first."},
+			forbidText:    []string{"Which herdr", "choice [", "Set SHEEPDOG_HERDR_BACKEND="},
+		},
+		{
+			name:           "auto with only herdr-tui installed pins it",
+			backend:        config.HerdrBackendAuto,
+			oldInstalled:   true,
+			interactive:    true,
+			wantChosen:     config.HerdrBackendHerdr,
+			wantChanged:    true,
+			wantEnvBackend: config.HerdrBackendHerdr,
+			wantText:       []string{"Only herdr-tui is installed, so Sheepdog uses it.", "herdr backend: using herdr-tui (pinned; not running)."},
 		},
 		{
 			name:          "non-interactive pinned leaves env file untouched and never prompts",
@@ -706,28 +699,6 @@ func TestSetupEnvironmentBackendChoice(t *testing.T) {
 			wantChanged:   false,
 			wantText:      []string{"herdr backend: using herdr-tui (pinned)."},
 			forbidText:    []string{"choice [", "Which herdr", "Set SHEEPDOG_HERDR_BACKEND=", "herdr.backend="},
-		},
-		{
-			name:         "one backend installed does not ask",
-			backend:      config.HerdrBackendHerdr,
-			oldInstalled: true,
-			oldRunning:   true,
-			interactive:  true,
-			wantChosen:   config.HerdrBackendHerdr,
-			wantChanged:  false,
-			wantText:     []string{"herdr backend: using herdr-tui (pinned)."},
-			forbidText:   []string{"choice [", "Which herdr", "herdr.backend="},
-		},
-		{
-			name:         "auto with only herdr-tui running names resolved backend without asking",
-			backend:      config.HerdrBackendAuto,
-			oldInstalled: true,
-			oldRunning:   true,
-			interactive:  true,
-			wantChosen:   config.HerdrBackendHerdr,
-			wantChanged:  false,
-			wantText:     []string{"herdr backend: using herdr-tui (auto: only herdr-tui is running)."},
-			forbidText:   []string{"choice [", "Which herdr"},
 		},
 		{
 			name:          "auto with both running non-interactive names resolved backend and keeps advice",
@@ -746,17 +717,6 @@ func TestSetupEnvironmentBackendChoice(t *testing.T) {
 				"herdr backend: using herdr-tui (auto: both herdr-tui and herdr-core are running).",
 			},
 			forbidText: []string{"choice ["},
-		},
-		{
-			name:         "auto with neither running names herdr-tui and says not running",
-			backend:      config.HerdrBackendAuto,
-			oldInstalled: true,
-			oldRunning:   false,
-			interactive:  true,
-			wantChosen:   config.HerdrBackendHerdr,
-			wantChanged:  false,
-			wantText:     []string{"herdr backend: using herdr-tui (auto: neither answers, waiting for herdr-tui; not running)."},
-			forbidText:   []string{"choice ["},
 		},
 		{
 			name:          "pinned but not running says so",

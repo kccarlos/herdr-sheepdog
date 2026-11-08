@@ -18,6 +18,13 @@ import (
 // backendProbe bounds each socket check of herdr.backend = auto.
 const backendProbe = time.Second
 
+// firstHerdrPoll is how often auto asks both sockets again while neither
+// has answered since startup (awaitFirstHerdr).
+const firstHerdrPoll = 2 * time.Second
+
+// reasonNeither is auto's reason when neither socket answers.
+const reasonNeither = "auto: neither answers, uses whichever starts first"
+
 // hcTermOff is /term's answer when herdr-core is not running or is too old
 // to attach (the app shows the screen).
 const hcTermOff = "the live terminal needs a running herdr-core that has terminal.attach"
@@ -39,6 +46,9 @@ func (a *App) newBackend(cfg config.Config) (b herdr.Backend, term *web.TermDeps
 		socket = hcSocket
 	}
 	a.log.Log("daemon", "daemon.herdr_backend", "", map[string]any{"backend": kind, "reason": reason, "socket": socket})
+	if reason == reasonNeither {
+		a.awaitHerdr = func(ctx context.Context) { awaitFirstHerdr(ctx, old, core, firstHerdrPoll, a.RequestRestart) }
+	}
 	if kind == config.HerdrBackendHC {
 		return core, hcTerm(core, cfg.Supervisor.ProjectRoots)
 	}
@@ -130,6 +140,28 @@ func (a *App) herdrOverride() string {
 	return ""
 }
 
+// awaitFirstHerdr asks both sockets every poll until one answers. The
+// daemon already waits on herdr-tui, so herdr-tui first (or both) ends
+// the wait; herdr-core first restarts the daemon, whose auto then picks it.
+func awaitFirstHerdr(ctx context.Context, old, core pinger, poll time.Duration, restart func(string)) {
+	t := time.NewTicker(poll)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		switch kind, reason := chooseBackend(ctx, config.HerdrBackendAuto, old, core); {
+		case reason == reasonNeither:
+			continue
+		case kind == config.HerdrBackendHC:
+			restart("herdr-core answered first")
+		}
+		return
+	}
+}
+
 // ResolveBackend resolves herdr.backend ("herdr", "hc" or "auto") from
 // which sockets answer, returning the backend kind and reason.
 func ResolveBackend(want string, oldUp, coreUp bool) (kind, reason string) {
@@ -145,5 +177,5 @@ func ResolveBackend(want string, oldUp, coreUp bool) (kind, reason string) {
 	case oldUp:
 		return config.HerdrBackendHerdr, "auto: only herdr-tui is running"
 	}
-	return config.HerdrBackendHerdr, "auto: neither answers, waiting for herdr-tui"
+	return config.HerdrBackendHerdr, reasonNeither
 }

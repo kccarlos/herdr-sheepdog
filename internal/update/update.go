@@ -1,7 +1,8 @@
-// Package update tells the user a newer sheepdog exists and notices when
-// an upgrade replaced the running daemon's executable (docs/dev/update.md).
+// Package update tells the user a newer sheepdog exists, installs it
+// (Install, for `sheepdog update`) and notices when an upgrade replaced
+// the running daemon's executable (docs/dev/update.md).
 //
-// Nothing here changes what is installed. The daemon asks GitHub for the
+// The daemon asks GitHub for the
 // latest v* release once a day (Run), caches the answer in the data
 // directory (<data_dir>/update-check.json), and reports it as a Status in
 // /api/state. A second loop (AutoRestart) restarts the daemon into a new
@@ -190,6 +191,12 @@ type Status struct {
 	// AutoRestart: the daemon restarts itself when idle
 	// (config update.auto_restart).
 	AutoRestart bool `json:"auto_restart,omitempty"`
+	// CanInstall: POST /api/update can install it (not a source checkout).
+	CanInstall bool `json:"can_install,omitempty"`
+	// State is "installing" while POST /api/update runs and "failed",
+	// with Error, when it did not finish.
+	State string `json:"state,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // Compute is the Status for the running version current and cache c.
@@ -217,6 +224,8 @@ type Tracker struct {
 	restart        bool
 	restartTo      string
 	restartBlocked bool
+	canInstall     bool
+	state, err     string
 }
 
 // NewTracker loads the cache from dir.
@@ -232,7 +241,27 @@ func (t *Tracker) Status() Status {
 	defer t.mu.Unlock()
 	s := Compute(t.current, t.cache, t.how)
 	s.RestartPending, s.RestartTo, s.AutoRestart = t.restart, t.restartTo, t.auto && !t.restartBlocked
+	s.CanInstall, s.State, s.Error = t.canInstall, t.state, t.err
 	return s
+}
+
+// SetCanInstall records whether POST /api/update can install a release.
+func (t *Tracker) SetCanInstall(ok bool) {
+	t.mu.Lock()
+	t.canInstall = ok
+	t.mu.Unlock()
+}
+
+// SetInstall records POST /api/update's progress: state "installing"
+// (false when one already runs), "failed" with err, or "".
+func (t *Tracker) SetInstall(state, err string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if state == "installing" && t.state == state {
+		return false
+	}
+	t.state, t.err = state, err
+	return true
 }
 
 // SetCache records a fresh answer.

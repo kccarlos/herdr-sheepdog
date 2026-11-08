@@ -152,6 +152,20 @@ type VoiceClientInfo struct {
 	Since    time.Time `json:"since"`
 }
 
+// handleUpdate starts the update (Deps.InstallUpdate); its progress is
+// /api/state's update. 409 with the reason when there is nothing to do.
+func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	if s.deps.InstallUpdate == nil || s.deps.Update == nil {
+		writeError(w, http.StatusNotFound, "this daemon cannot update itself")
+		return
+	}
+	if err := s.deps.InstallUpdate(); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, s.deps.Update())
+}
+
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	snap := s.deps.Store.Snapshot()
 	agents := s.deps.Store.List()

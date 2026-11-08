@@ -459,7 +459,7 @@ func printUpdate(row func(k, v string), r statusReport) {
 		if u.RestartTo != "" {
 			to = " (" + u.RestartTo + ")"
 		}
-		msg := "update installed" + to + ", restart to finish: sheepdog restart"
+		msg := "update installed" + to + ", to finish: sheepdog update"
 		if u.AutoRestart {
 			msg += " (or it restarts itself when idle)"
 		}
@@ -468,6 +468,6 @@ func printUpdate(row func(k, v string), r statusReport) {
 	}
 	if u.Available {
 		row("update", fmt.Sprintf("%s is available (you have %s)", u.Latest, u.Current))
-		row("", "to update: "+u.How+", then sheepdog restart")
+		row("", "to update: "+u.How)
 	}
 }
