@@ -770,8 +770,9 @@ public struct DaemonState: Codable, Equatable, Sendable {
 }
 
 /// `/api/state`'s `update` (daemon docs/dev/update.md): whether a newer
-/// daemon release exists and whether one is installed but not running yet.
-/// Display only. The Go side omits the false and empty fields.
+/// daemon release exists, whether one is installed but not running yet, and
+/// the progress of `POST /api/update`. The Go side omits the false and
+/// empty fields.
 public struct UpdateInfo: Codable, Equatable, Sendable {
     public var current: String?
     public var latest: String?
@@ -783,15 +784,24 @@ public struct UpdateInfo: Codable, Equatable, Sendable {
     public var restartTo: String?
     /// The daemon restarts itself into an installed update when idle.
     public var autoRestart: Bool
+    /// `POST /api/update` can install it (not a source checkout).
+    public var canInstall: Bool
+    /// "installing" or "failed" (with `error`) after `POST /api/update`.
+    public var state: String?
+    public var error: String?
 
     enum CodingKeys: String, CodingKey {
-        case current, latest, available, how
+        case current, latest, available, how, state, error
         case restartPending = "restart_pending"
         case restartTo = "restart_to"
         case autoRestart = "auto_restart"
+        case canInstall = "can_install"
     }
 
-    public init(current: String? = nil, latest: String? = nil, available: Bool = false, how: String? = nil, restartPending: Bool = false, restartTo: String? = nil, autoRestart: Bool = false) {
+    public init(current: String? = nil, latest: String? = nil, available: Bool = false, how: String? = nil, restartPending: Bool = false, restartTo: String? = nil, autoRestart: Bool = false, canInstall: Bool = false, state: String? = nil, error: String? = nil) {
+        self.canInstall = canInstall
+        self.state = state
+        self.error = error
         self.current = current
         self.latest = latest
         self.available = available
@@ -810,25 +820,36 @@ public struct UpdateInfo: Codable, Equatable, Sendable {
         restartPending = try c.decodeIfPresent(Bool.self, forKey: .restartPending) ?? false
         restartTo = try c.decodeIfPresent(String.self, forKey: .restartTo)
         autoRestart = try c.decodeIfPresent(Bool.self, forKey: .autoRestart) ?? false
+        canInstall = try c.decodeIfPresent(Bool.self, forKey: .canInstall) ?? false
+        state = try c.decodeIfPresent(String.self, forKey: .state)
+        error = try c.decodeIfPresent(String.self, forKey: .error)
     }
 
-    /// The one line Settings shows, or nil when there is nothing to say.
-    /// It says what the daemon will actually do: it never installs an
-    /// update itself, it only restarts into one that was installed
-    /// (`update.auto_restart`), and only while no one is using it.
+    /// The one line Settings and the banner show, or nil when there is
+    /// nothing to say. `action` is the button that sends `POST /api/update`
+    /// (what `sheepdog update` does); a source checkout, or a daemon too old
+    /// to update itself, gets the command instead.
     public var notice: UpdateNotice? {
         func trimmed(_ s: String?) -> String? {
             guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
             return t
         }
+        let to = (trimmed(restartTo) ?? trimmed(latest)).map { "sheepdog \($0)" } ?? "A new sheepdog"
+        switch state {
+        case "installing":
+            return UpdateNotice(text: "Installing \(to)… Sheepdog restarts when it is done.", command: nil)
+        case "failed":
+            return UpdateNotice(text: "The update to \(to) did not finish: \(trimmed(error) ?? "no reason given").", command: nil, action: "Try again")
+        default:
+            break
+        }
         if restartPending {
-            let to = trimmed(restartTo).map { "sheepdog \($0)" } ?? "A new sheepdog"
-            if autoRestart {
-                return UpdateNotice(text: "\(to) is installed and restarts itself when no one is using it.", command: nil)
-            }
-            return UpdateNotice(text: "\(to) is installed. To finish, run this on your computer:", command: "sheepdog restart")
+            return UpdateNotice(text: "\(to) is installed.", command: nil, action: "Restart now")
         }
         guard available, let latest = trimmed(latest) else { return nil }
+        if canInstall {
+            return UpdateNotice(text: "sheepdog \(latest) is available.", command: nil, action: "Update")
+        }
         let after = autoRestart ? "It then restarts itself when idle." : nil
         if let how = trimmed(how) {
             return UpdateNotice(text: "sheepdog \(latest) is available. To update, run this on your computer:", command: how, after: after)
@@ -843,11 +864,14 @@ public struct UpdateNotice: Equatable, Sendable {
     public var text: String
     public var command: String?
     public var after: String?
+    /// The title of the button that starts the update, or nil for none.
+    public var action: String?
 
-    public init(text: String, command: String?, after: String? = nil) {
+    public init(text: String, command: String?, after: String? = nil, action: String? = nil) {
         self.text = text
         self.command = command
         self.after = after
+        self.action = action
     }
 
     /// The whole notice as one sentence run, for VoiceOver.

@@ -6,6 +6,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -86,6 +88,54 @@ func startUpdateWatchers(ctx context.Context, cfg config.Config, tr *update.Trac
 		Logf:      logf,
 	}
 	go r.Run(ctx)
+}
+
+// installNow is POST /api/update: what `sheepdog update` does, run by the
+// daemon. It refuses when there is nothing to do, then installs in the
+// background (update.Install, as runUpdate does) and restarts at once
+// through trigger, the update restart, without waiting for idle. A restart
+// already pending skips the install. note logs an event, so clients read
+// /api/state again.
+func installNow(ctx context.Context, tr *update.Tracker, trigger func(from, to string) error, note func(typ string, fields map[string]any), out io.Writer) func() error {
+	exe, _ := osExecutable()
+	m := detectInstall(exe)
+	tr.SetCanInstall(m.Kind != "source")
+	return func() error {
+		st := tr.Status()
+		switch {
+		case st.RestartPending:
+		case !st.Available:
+			return fmt.Errorf("sheepdog %s is up to date", version)
+		case !st.CanInstall:
+			return fmt.Errorf("this sheepdog is a source checkout; update it with: %s", st.How)
+		}
+		if !tr.SetInstall("installing", "") {
+			return errors.New("an update is already being installed")
+		}
+		note("update.installing", map[string]any{"to": st.Latest})
+		from, cur := versionString(version, commit, date), version
+		go func() {
+			var err error
+			if !st.RestartPending {
+				err = update.Install(ctx, m.Kind, m.Path, st.Latest, out)
+			}
+			line := ""
+			if err == nil {
+				line, err = update.ProbeVersion(ctx, update.LaunchPath(os.Args[0], exe, exec.LookPath))
+			}
+			if err == nil && line == from {
+				err = errors.New("the installed sheepdog is still " + cur)
+			}
+			if err == nil {
+				err = trigger(from, line)
+			}
+			if err != nil {
+				tr.SetInstall("failed", err.Error())
+				note("update.failed", map[string]any{"error": err.Error()})
+			}
+		}()
+		return nil
+	}
 }
 
 // updateRestart is what restartForUpdate needs from runServe.

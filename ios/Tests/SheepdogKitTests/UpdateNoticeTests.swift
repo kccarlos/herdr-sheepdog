@@ -41,15 +41,26 @@ final class UpdateNoticeTests: XCTestCase {
         XCTAssertNil(n.after)
     }
 
-    func testInstalledRestartsItselfWhenIdle() throws {
-        let n = try XCTUnwrap(try state(#"{"current":"v0.1.4","latest":"v0.1.5","available":true,"restart_pending":true,"restart_to":"v0.1.5","auto_restart":true}"#).update?.notice)
-        XCTAssertEqual(n.text, "sheepdog v0.1.5 is installed and restarts itself when no one is using it.")
-        XCTAssertNil(n.command)
+    func testAnInstallableUpdateOffersTheButton() throws {
+        let n = try XCTUnwrap(try state(#"{"current":"v0.1.4","latest":"v0.1.5","available":true,"how":"sheepdog update","can_install":true}"#).update?.notice)
+        XCTAssertEqual(n.text, "sheepdog v0.1.5 is available.")
+        XCTAssertEqual(n.action, "Update")
+        XCTAssertNil(n.command, "no command when the button does it")
     }
 
-    func testInstalledWithoutAutoRestartNamesTheCommand() throws {
-        let n = try XCTUnwrap(try state(#"{"current":"v0.1.4","available":false,"restart_pending":true}"#).update?.notice)
-        XCTAssertEqual(n.text, "A new sheepdog is installed. To finish, run this on your computer:")
-        XCTAssertEqual(n.command, "sheepdog restart")
+    func testInstallingAndFailed() throws {
+        let installing = try XCTUnwrap(try state(#"{"current":"v0.1.4","latest":"v0.1.5","available":true,"can_install":true,"state":"installing"}"#).update?.notice)
+        XCTAssertEqual(installing.text, "Installing sheepdog v0.1.5… Sheepdog restarts when it is done.")
+        XCTAssertNil(installing.action)
+        let failed = try XCTUnwrap(try state(#"{"current":"v0.1.4","latest":"v0.1.5","available":true,"can_install":true,"state":"failed","error":"brew upgrade kccarlos/tap/sheepdog: exit status 1"}"#).update?.notice)
+        XCTAssertEqual(failed.text, "The update to sheepdog v0.1.5 did not finish: brew upgrade kccarlos/tap/sheepdog: exit status 1.")
+        XCTAssertEqual(failed.action, "Try again")
+    }
+
+    func testInstalledOffersARestartNotACommand() throws {
+        let n = try XCTUnwrap(try state(#"{"current":"v0.1.4","available":false,"restart_pending":true,"restart_to":"v0.1.5"}"#).update?.notice)
+        XCTAssertEqual(n.text, "sheepdog v0.1.5 is installed.")
+        XCTAssertEqual(n.action, "Restart now")
+        XCTAssertNil(n.command)
     }
 }

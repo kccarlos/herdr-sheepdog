@@ -11,11 +11,46 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 )
+
+// TestMain keeps the real brew and herdr out of reach: PATH is an empty
+// directory unless a test puts fakes on it (fakeTools).
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "update-test-path")
+	if err != nil {
+		panic(err)
+	}
+	_ = os.Setenv("PATH", dir)
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// Every command Install runs, the Sheepdog.app check included, goes through
+// the one runner (PR 2's test reached the real brew past it).
+func TestInstallRunsEveryCommandThroughTheRunner(t *testing.T) {
+	var ran []string
+	command = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		ran = append(ran, name+" "+strings.Join(args, " "))
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+	}
+	t.Cleanup(func() { command = exec.CommandContext })
+	if err := Install(context.Background(), "homebrew", "/x/sheepdog", "v9.9.9", io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"brew update", "brew upgrade kccarlos/tap/sheepdog"}
+	if runtime.GOOS == "darwin" {
+		want = append(want, "brew list --cask kccarlos/tap/sheepdog-app", "brew upgrade --cask kccarlos/tap/sheepdog-app")
+	}
+	if strings.Join(ran, "\n") != strings.Join(want, "\n") {
+		t.Errorf("ran %q, want %q", ran, want)
+	}
+}
 
 // fakeRelease serves tag's archive (whose sheepdog prints `reports`) and
 // checksums.txt (with sum, or the archive's real sha256 when sum is "").

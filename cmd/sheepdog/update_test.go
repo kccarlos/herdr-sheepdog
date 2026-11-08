@@ -1,13 +1,20 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/update"
 )
 
 // fakeUpdateTools puts a logging brew and herdr (no Sheepdog.app cask) on
@@ -107,5 +114,85 @@ func TestStableExecutableOutlivesAHerdrPluginUpdate(t *testing.T) {
 	_ = os.RemoveAll(filepath.Dir(filepath.Dir(filepath.Dir(first))))
 	if _, err := os.Stat(recorded); err != nil {
 		t.Errorf("the login service would run %s, gone after the update: %v", recorded, err)
+	}
+}
+
+// POST /api/update does what `sheepdog update` does: refuses when there is
+// nothing to install or a source checkout, otherwise installs in the
+// background, then asks for the update restart at once; a second press
+// while it runs is refused, and a failure is reported in the status.
+func TestInstallNowInstallsThenRestarts(t *testing.T) {
+	oldVersion, oldExe := version, osExecutable
+	t.Cleanup(func() { version, osExecutable = oldVersion, oldExe })
+	version = "v0.1.0"
+	osExecutable = func() (string, error) { return "/opt/homebrew/Cellar/sheepdog/0.1.0/bin/sheepdog", nil }
+	log := fakeUpdateTools(t, "v0.2.0")
+	tracker := func(tag string) *update.Tracker {
+		tr := update.NewTracker(t.TempDir(), "v0.1.0", "sheepdog update", false)
+		tr.SetCache(update.Cache{Tag: tag})
+		return tr
+	}
+	var mu sync.Mutex
+	var notes []string
+	note := func(typ string, _ map[string]any) { mu.Lock(); notes = append(notes, typ); mu.Unlock() }
+	restarted := make(chan string, 1)
+	trigger := func(_, to string) error { restarted <- to; return nil }
+
+	if err := installNow(context.Background(), tracker("v0.1.0"), trigger, note, io.Discard)(); err == nil || !strings.Contains(err.Error(), "up to date") {
+		t.Errorf("nothing newer: %v", err)
+	}
+	tr := tracker("v0.2.0")
+	start := installNow(context.Background(), tr, trigger, note, io.Discard)
+	if !tr.Status().CanInstall {
+		t.Error("a Homebrew install cannot install")
+	}
+	if err := start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := start(); err == nil || tr.Status().State != "installing" {
+		t.Errorf("second press: %v, state %q", err, tr.Status().State)
+	}
+	select {
+	case to := <-restarted:
+		if update.VersionOf(to) != "v0.2.0" {
+			t.Errorf("restarted into %q", to)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no restart after the install")
+	}
+	if b, _ := os.ReadFile(log); string(b) != "brew update\nbrew upgrade kccarlos/tap/sheepdog\n" {
+		t.Errorf("ran:\n%s", b)
+	}
+
+	// The restart cannot start: the status says why.
+	tr = tracker("v0.2.0")
+	done := make(chan struct{})
+	failing := func(_, _ string) error { defer close(done); return errors.New("no restart today") }
+	if err := installNow(context.Background(), tr, failing, note, io.Discard)(); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	for i := 0; i < 100 && tr.Status().State != "failed"; i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if st := tr.Status(); st.State != "failed" || st.Error != "no restart today" {
+		t.Errorf("failure: %+v", st)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(notes, " ") != "update.installing update.installing update.failed" {
+		t.Errorf("events: %v", notes)
+	}
+
+	// A source checkout gets the steps, not an install.
+	root := t.TempDir()
+	for _, f := range []string{"go.mod", "herdr-plugin.toml"} {
+		_ = os.WriteFile(filepath.Join(root, f), nil, 0o644)
+	}
+	osExecutable = func() (string, error) { return filepath.Join(root, "bin", "sheepdog"), nil }
+	tr = update.NewTracker(t.TempDir(), "v0.1.0", "git pull", false)
+	tr.SetCache(update.Cache{Tag: "v0.2.0"})
+	if err := installNow(context.Background(), tr, trigger, note, io.Discard)(); err == nil || !strings.Contains(err.Error(), "git pull") {
+		t.Errorf("source checkout: %v", err)
 	}
 }

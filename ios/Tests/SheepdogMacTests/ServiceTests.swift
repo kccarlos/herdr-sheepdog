@@ -170,7 +170,7 @@ final class StatusItemControllerTests: XCTestCase {
     }
 
     func testTheUpdateRowShowsOnlyWhenThereIsAnOffer() {
-        let offer = MacUpdateOffer(info: UpdateInfo(current: "v0.2.5", latest: "v0.2.6", available: true), appVersion: "0.2.5")
+        let offer = MacUpdateOffer(info: UpdateInfo(current: "v0.2.5", latest: "v0.2.6", available: true))
         let idle = StatusItemController.rows(for: MenuBarState(state: listening), loginItemEnabled: false, update: MacUpdatePresentation(offer: offer, state: .idle))
         XCTAssertTrue(idle.contains(.item(title: "Update available — v0.2.6", action: .updateApp, enabled: true, checked: false)))
         let busy = StatusItemController.rows(for: MenuBarState(state: listening), loginItemEnabled: false, update: MacUpdatePresentation(offer: offer, state: .upgrading))
@@ -178,8 +178,6 @@ final class StatusItemControllerTests: XCTestCase {
         XCTAssertFalse(items(busy).contains { $0.title.hasPrefix("Update") })
         let none = StatusItemController.rows(for: MenuBarState(state: listening), loginItemEnabled: false)
         XCTAssertFalse(items(none).contains { $0.title.hasPrefix("Update") })
-        let restart = StatusItemController.rows(for: MenuBarState(state: listening), loginItemEnabled: false, update: MacUpdatePresentation(offer: nil, state: .restartNeeded))
-        XCTAssertTrue(restart.contains(.item(title: "Restart to finish updating", action: .updateApp, enabled: true, checked: false)))
     }
 
     func testTheVoiceRowsWithTheDaemonUpAndNoSessionHere() {
@@ -282,6 +280,14 @@ final class StatusItemControllerTests: XCTestCase {
         hotkey.onAction?(.toggleMute)
         XCTAssertEqual(voice.pushToTalkCalls, [true, false])
         XCTAssertEqual(voice.routes, [.toggleMute])
+    }
+
+    func testTheUpdateItemAsksTheDaemon() async {
+        let (c, source) = make()
+        c.update(DaemonState(agents: [], voice: DaemonState.VoiceInfo(mode: "off", status: "off"), version: "v0.2.5", update: UpdateInfo(current: "v0.2.5", latest: "v0.2.6", available: true, canInstall: true)))
+        c.perform(.updateApp)
+        for _ in 0 ..< 100 where source.installs == 0 { await Task.yield() }
+        XCTAssertEqual(source.installs, 1)
     }
 
     func testUpdateFollowsTheDaemon() {

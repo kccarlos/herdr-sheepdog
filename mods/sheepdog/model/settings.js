@@ -284,7 +284,7 @@ export function updateNotice(update) {
   if (update.restart_pending) {
     const to = trimmed(update.restart_to) ? `sheepdog ${trimmed(update.restart_to)}` : "A new sheepdog";
     if (update.auto_restart) return { text: `${to} is installed and restarts itself when no one is using it.`, command: "", after: "" };
-    return { text: `${to} is installed. To finish, run this on your computer:`, command: "sheepdog restart", after: "" };
+    return { text: `${to} is installed. To finish, run this on your computer:`, command: "sheepdog update", after: "" };
   }
   if (!update.available || !trimmed(update.latest)) return null;
   const after = update.auto_restart ? "It then restarts itself when idle." : "";

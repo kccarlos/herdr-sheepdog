@@ -10,6 +10,8 @@ public protocol DaemonStatusSource: AnyObject {
     var onEvent: (@MainActor (DaemonEvent) -> Void)? { get set }
     func start()
     func stop()
+    /// `POST /api/update` on the local daemon (nil: too old for it).
+    func installUpdate() async throws -> UpdateInfo?
 }
 
 /// `GET /api/state` kept fresh by the `/events` stream, over Kit's
@@ -54,6 +56,10 @@ public final class DaemonStatusMonitor: DaemonStatusSource {
     public func stop() {
         loop?.cancel()
         loop = nil
+    }
+
+    public func installUpdate() async throws -> UpdateInfo? {
+        try await client.installUpdate()
     }
 
     /// One connection: read the state, then re-read it on every event until
