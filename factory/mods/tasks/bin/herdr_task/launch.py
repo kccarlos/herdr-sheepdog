@@ -65,9 +65,9 @@ def own_rules(path):
     return rules
 
 
-def own_argv(argv, worktree=None):
+def own_argv(argv, worktree=None, with_own=True):
     """An agent's argv with its own herdr-task commands allowed (Claude Code and Codex, and agy,
-    which also trusts `worktree`, the one herdr-task made for the task)."""
+    which also trusts `worktree`, the one herdr-task made for the task; with_own=False: no own rules, agy only)."""
     path, out = own_path(), list(argv)
     k = agent_key(out)
     if k == "claude":
@@ -103,7 +103,7 @@ def own_argv(argv, worktree=None):
     if k == "agy":
         # agy's --settings allow list replaces the person's own (~/.gemini/antigravity-cli): it carries
         # the argv's own --settings rules, then the person's, then these.
-        own = [re.sub(r":\*\)$", ")", r.replace("Bash(", "command(", 1)) for r in own_rules(path)]
+        own = [re.sub(r":\*\)$", ")", r.replace("Bash(", "command(", 1)) for r in own_rules(path) if with_own]
         try:
             with open(os.path.join(HOME, ".gemini", "antigravity-cli", "settings.json")) as f:
                 theirs = list(json.load(f)["permissions"]["allow"])
@@ -618,6 +618,8 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     cmd, folder = list(resume or argv), folder_for(s, task)
     if not role:
         cmd = own_argv(cmd, folder if task.get("mode") == "worktree" else None)
+    elif role == "reviewer" and agent_key(cmd) == "agy" and task.get("mode") == "worktree":
+        cmd = own_argv(cmd, folder, with_own=False)  # a read-only reviewer: its worktree trusted, none of the worker's own rules
     if message:
         cmd = cmd + (["-i", message] if agent_key(cmd) == "agy" else [message])  # agy reads prompts only from -i
     labels = ["--label", f"herdr.task={key}", "--label", f"herdr.task.space={bare(space)}",

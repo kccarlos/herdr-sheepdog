@@ -85,7 +85,15 @@ SUBAGENTS_RULE = ("read-only, as your own helper agent that people can watch and
 WORKER_MD_BEFORE_FEEDBACK = WORKER_MD_BEFORE_SUBAGENTS.replace(SUBAGENTS_OLD, SUBAGENTS_RULE)
 # Since agents offer feedback for Shepherdr itself through their Assistant (SHEP-78).
 FEEDBACK_RULE = ("- Shepherdr itself misbehaving, not your task's own code (a Shepherdr, herdr-task, web app or window feature that doesn't work as meant, a Herdr command failing like a bug, the person frustrated with Shepherdr, or a \"Shepherdr feedback:\" line in your reviewer's findings): run the `herdr-task feedback` command given at the end of your brief, once per problem, then carry on. It returns at once and your Assistant asks the person whether to file it; never file an issue yourself, and put no secrets, private paths or whole logs in it.\n")
-WORKER_MD = WORKER_MD_BEFORE_FEEDBACK + FEEDBACK_RULE
+WORKER_MD_BEFORE_AGY = WORKER_MD_BEFORE_FEEDBACK + FEEDBACK_RULE
+# Since an agy reviewer needs -i for its prompt and your worktree trusted (FAC-5).
+AGY_OLD = "or `claude --permission-mode plan` (never"
+AGY_RULE = ("`claude --permission-mode plan`, or, for agy, `agy --settings '{\"trustedWorkspaces\":[\"<your worktree>\"],"
+            "\"permissions\":{\"allow\":[<the allow list in ~/.gemini/antigravity-cli/settings.json, read only>]}}'` with the prompt "
+            "after `-i` (agy rejects a positional prompt, and --settings replaces its own allow list; it gets none of your own rules) "
+            "(never")
+AGY_LABEL = ("herdr.agent=<codex or claude>", "herdr.agent=<codex, claude or agy>")
+WORKER_MD = WORKER_MD_BEFORE_AGY.replace(AGY_OLD, "or " + AGY_RULE).replace(*AGY_LABEL)
 
 REVIEWER_MD_BEFORE_SUBAGENT = """You review one Herdr task's work before it can merge. Read only: never edit files, commit or push.
 - Read the task, then the diff of its branch against its base, and run the project's checks.
@@ -112,7 +120,7 @@ OLD_WORKER_READY = """You work on one Herdr task. Stay within the task's scope a
 - When the work is finished, run the `herdr-task ready` command given at the end of your brief, with a short summary. That puts the task in Ready for the person, who accepts it. Never mark a task done yourself.
 """
 OLD_WORKER_MD = OLD_WORKER_READY.split("- When the work is finished")[0]
-OLD_WORKERS = (WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
+OLD_WORKERS = (WORKER_MD_BEFORE_AGY, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
 
 
 TEMPLATE_HEADS = {
