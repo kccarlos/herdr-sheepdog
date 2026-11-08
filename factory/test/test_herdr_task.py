@@ -2,6 +2,7 @@
 a throwaway) its commands start. On a person's machine herdr-task never runs with another HOME."""
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -2310,6 +2311,60 @@ class Revive(unittest.TestCase):
         self.crash("t5")
         self.tick()
         self.assertTrue(self.sent[0][1].startswith("""cd /wt && HERDR_BROWSER_TASK='dev#6' claude --settings '{"a":1}' --resume S1 'Herdr restarted"""), self.sent[0][1])
+
+    def agy_worker(self, cid="0199aaaa-bbbb-cccc-dddd-eeeeeeeeeeee"):
+        """A kept agy worker (FAC-7) in a temp home: its conversation is a db no chat reads, so no log."""
+        import herdr_task.launch as launch
+        for mod in (self.r, launch):
+            p = self.mock.patch.object(mod, "HOME", self.dir)
+            p.start()
+            self.addCleanup(p.stop)
+        conv = os.path.join(self.dir, ".gemini", "antigravity-cli", "conversations")
+        os.makedirs(conv, exist_ok=True)
+        self.db = os.path.join(conv, cid + ".db")
+        open(self.db, "w").close()
+        self.terms["t5"] = {"address": "t5", "state": "live", "pid": 500, "cwd": "/wt", "name": "shep-6-web",
+                            "argv": ["sh", "-c", "low", "herdr-low", "env", "HERDR_BROWSER_TASK=dev#6", "/bin/zsh", "-lic", "x", "/bin/zsh",
+                                     "agy", "--settings", '{"trustedWorkspaces":["/wt"]}', "--mode", "accept-edits", "-i", "Brief..."],
+                            "status": {"state": "working"}, "foreground": {"pid": 501, "name": "agy", "argv": ["agy"], "cwd": "/wt"},
+                            "labels": {"herdr.task": "dev#6", "herdr.agent": "agy"}}
+        self.tasks["dev#6"].update(mode="worktree", worktree="/wt",
+                                   agents=[{"address": "t5", "agent": "agy", "argv": ["agy", "--mode", "accept-edits"], "session": cid, "log": None}])
+        self.sessions[501] = (cid, None)
+        return cid
+
+    def test_an_agy_worker_resumes_its_own_conversation(self):
+        """Its exact conversation (never agy -c, which another agy in the folder can take), trusting its worktree."""
+        cid = self.agy_worker()
+        self.tick()
+        rec = json.loads(self.terms["t5"]["labels"]["herdr.resume"])
+        self.assertEqual((rec["kind"], rec["session"], rec["argv"]),
+                         ("agy", cid, ["agy", "--settings", '{"trustedWorkspaces":["/wt"]}', "--mode", "accept-edits"]))
+        self.crash("t5")
+        report = self.tick()
+        self.assertEqual(report["revived"], [{"terminal": "t5", "how": "resume", "session": cid}])
+        self.assertEqual(self.sent, [("t5", "cd /wt && HERDR_BROWSER_TASK='dev#6' agy --settings '{\"trustedWorkspaces\":[\"/wt\"]}' "
+                                            f"--mode accept-edits --conversation {cid} -i 'Herdr restarted (a crash, power loss or reboot) "
+                                            "while you were working, and your session is resumed. Carry on where you left off.'")])
+
+    def test_an_agy_worker_lost_before_any_record_resumes_trusting_its_worktree(self):
+        cid = self.agy_worker()
+        self.crash("t5")
+        self.tick()
+        line = self.sent[0][1]
+        self.assertIn(f"--conversation {cid} -i 'Herdr restarted", line)
+        settings = json.loads(shlex.split(line)[shlex.split(line).index("--settings") + 1])
+        self.assertEqual(settings["trustedWorkspaces"], ["/wt"])
+
+    def test_an_agy_worker_whose_conversation_is_gone_starts_anew(self):
+        self.agy_worker()
+        self.tick()
+        os.unlink(self.db)
+        self.crash("t5")
+        self.tick()
+        line = self.sent[0][1]
+        self.assertNotIn("--conversation", line)
+        self.assertIn("--mode accept-edits -i '<restart>Your earlier session is gone", line)
 
     def test_an_assistant_lost_before_any_record_starts_anew(self):
         """Lost before this change (or before its first record): a new Assistant, never a bare shell."""

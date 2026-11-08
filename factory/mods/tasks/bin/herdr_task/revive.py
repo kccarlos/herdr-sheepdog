@@ -21,7 +21,7 @@ from .base import HOME, hc_json, now, run, SHELLS
 from .agents import agent_running, status_word
 from .sessions import session_of
 from .settings import ASSISTANT_TEMPLATES
-from .launch import CLEAN_ENV
+from .launch import CLEAN_ENV, resume_argv as launch_resume
 
 LABEL = "herdr.resume"
 # Claude Code: "No conversation found with session ID: …". Codex: "ERROR: No saved session found with ID …"
@@ -44,15 +44,18 @@ CLAUDE_VALUE = {"--add-dir", "--mcp-config", "--append-system-prompt", "--system
                 "--model", "--effort", "--settings", "--permission-mode"}
 CODEX_VALUE = {"-c", "--config", "-m", "--model", "-p", "--profile", "-s", "--sandbox", "-a", "--ask-for-approval",
                "-C", "--cd", "--add-dir", "-i", "--image", "--enable", "--disable", "--local-provider", "--oss"}
+# agy's (agy --help); its first message is -i's value, and --conversation names what it resumed.
+AGY_VALUE = {"--add-dir", "--agent", "--effort", "--input-format", "--json-schema", "--log-file", "--mode", "--model",
+             "--output-format", "--print-timeout", "--project", "--settings"}
 
 
 def kind_of(word):
     b = os.path.basename(str(word))
-    return b if b in ("claude", "codex") else None
+    return b if b in ("claude", "codex", "agy") else None
 
 
 def base_argv(argv):
-    """(kind, argv) for starting the agent in `argv` again: from its claude or codex word on, without
+    """(kind, argv) for starting the agent in `argv` again: from its claude, codex or agy word on, without
     what resumed a conversation or its first message (core/agents.js freshArgv), or (None, None)."""
     argv = list(argv or [])
     at = next((i for i, a in enumerate(argv) if (i == 0 or not str(a).startswith("-")) and kind_of(a)), None)
@@ -70,6 +73,17 @@ def base_argv(argv):
                 i += 1
                 continue
             if a in CLAUDE_VALUE and i + 1 < len(rest):
+                out += [a, rest[i + 1]]
+                i += 2
+                continue
+        elif kind == "agy":
+            if a in ("--conversation", "-i", "--prompt-interactive"):
+                i += 2
+                continue
+            if re.match(r"^--(conversation|prompt-interactive)=", a) or a in ("--continue", "-c"):
+                i += 1
+                continue
+            if a in AGY_VALUE and i + 1 < len(rest):
                 out += [a, rest[i + 1]]
                 i += 2
                 continue
@@ -91,12 +105,21 @@ def base_argv(argv):
     return kind, out
 
 
+def first(kind, message):
+    """A first message's words (agy takes one only from -i)."""
+    return [] if not message else ["-i", message] if kind == "agy" else [message]
+
+
 def resume_argv(kind, argv, session, message=None):
     """argv (base_argv's) resuming `session`, with a first message when given."""
-    tail = [message] if message else []
-    if kind == "claude":
-        return [*argv, "--resume", session, *tail]
-    return [argv[0], "resume", *argv[1:], session, *tail]
+    return [*launch_resume(argv, session), *first(kind, message)]
+
+
+def alive(rec):
+    """Its session is still on disk: its log, or agy's conversation (a db no chat reads, so no log)."""
+    if rec.get("kind") == "agy":
+        return os.path.isfile(os.path.join(HOME, ".gemini", "antigravity-cli", "conversations", f"{rec['session']}.db"))
+    return bool(rec.get("log")) and os.path.isfile(rec["log"])
 
 
 def lost_message(ref=None, template=None):
@@ -200,7 +223,7 @@ def task_record(k, t):
     if not kind:
         return None
     if (k.get("labels") or {}).get("herdr.role") != "reviewer":
-        argv = own_argv(argv)
+        argv = own_argv(argv, t.get("worktree") if t.get("mode") == "worktree" else None)
     return {"kind": kind, "session": a.get("session"), "log": a.get("log"), "argv": argv, "cwd": k.get("cwd"),
             "pid": None, "working": t.get("state") == "running", "shell": True}
 
@@ -255,7 +278,7 @@ def plan(k, rec, running):
         rec = task_record(k, task) if task else None
     if rec and rec.get("session") and rec["session"] in running:
         return ("running", None, False)
-    if rec and rec.get("session") and rec.get("log") and os.path.isfile(rec["log"]):
+    if rec and rec.get("session") and alive(rec):
         return ("resume", resume_argv(rec["kind"], rec["argv"], rec["session"], CUT if rec.get("working") else None), not rec.get("shell"))
     # Its session is gone: a new one, with the handover (and an Assistant's role, its template's words).
     command, template = template_of() if assistant else (None, None)
@@ -263,7 +286,7 @@ def plan(k, rec, running):
     if not argv:
         return None
     # Without a record, an Assistant starts as its template does: without the person's shell.
-    return ("fresh", [*argv, lost_message(task_ref(k), template)], not (rec or {}).get("shell"))
+    return ("fresh", [*argv, *first(kind_of(argv[0]), lost_message(task_ref(k), template))], not (rec or {}).get("shell"))
 
 
 def revive_pass(report):
