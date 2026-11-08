@@ -331,10 +331,10 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 					if sdemo.State().Running {
 						return "the setup page's demo is running"
 					}
-					if a := cur.Load(); a != nil {
-						return a.Idle()
+					if cur.Load() == nil {
+						return "starting"
 					}
-					return "starting"
+					return ""
 				},
 				func(from, to string) error {
 					a := cur.Load()

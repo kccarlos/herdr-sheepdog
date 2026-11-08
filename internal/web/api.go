@@ -335,10 +335,6 @@ func (s *Server) updateStatus() *update.Status {
 	return &st
 }
 
-// VoiceClientConnected reports whether a browser or phone holds the voice
-// connection now.
-func (s *Server) VoiceClientConnected() bool { return s.hub.state().client }
-
 // conversationStartedAt is StateResponse's conversation_started_at (the
 // zero time when there is no supervisor).
 func (s *Server) conversationStartedAt() time.Time {

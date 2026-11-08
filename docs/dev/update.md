@@ -34,9 +34,9 @@ identity. A path that does not resolve at the moment (an upgrade in progress) is
 
 `update.Restarter` checks every minute. On a change it runs `<launch path> version`, shows
 `restart_pending` (and `restart_to`) in `/api/state`, and, with `update.auto_restart` on, restarts
-once `App.Idle()` and the setup demo say the daemon is idle. Idle means none of: a voice client
-(browser or phone) connected to `/ws`; an orchestrator turn or its after-turn work running
-(`brain.Busy`); an approval question open (`pending_action`); the setup page's demo running.
+right away, unless the setup page's demo is running. It does not wait for a voice session, an
+orchestrator turn or an open approval: a connected voice client reconnects to the new daemon, and an
+open question is still on the agent's screen.
 
 How it restarts (`restartForUpdate`):
 

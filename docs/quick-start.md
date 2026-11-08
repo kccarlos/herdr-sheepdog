@@ -254,10 +254,9 @@ speaks it. Update with the command for your install method:
 
 Then the running daemon has to start the new version:
 
-- **It restarts itself when idle.** The daemon notices that its program was
-  replaced and restarts into it as soon as nobody is using it: no voice
-  client connected, no orchestrator turn running, no approval waiting, no
-  demo running. It checks every minute and never interrupts a live session.
+- **It restarts itself.** The daemon notices within a minute that its
+  program was replaced and restarts into it right away. A voice session
+  drops for a few seconds and reconnects.
   Turn it off with `update.auto_restart = false` ([CONFIG.md](../CONFIG.md)).
 - **Or restart it yourself:** `sheepdog restart`. Any command that finds the
   daemon older than the installed program says so and prints this.
