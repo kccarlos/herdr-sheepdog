@@ -34,6 +34,7 @@ from .scheduler import ensure_scheduler
 from .proof import evidence, find_proof
 from .when import when_from
 from .templates import instructions
+from .budget import budget_lines, budget_pass, recap_refusal
 
 
 # ---- commands -------------------------------------------------------------------------------
@@ -242,6 +243,7 @@ def cmd_show(args):
                     + (" (ready refused: out of rounds)" if v.get("review_out") else ""))
     if v.get("agents_md"):
         text.append(f"for AGENTS.md: {v['agents_md']}")
+    text += budget_lines(t)
     if checks_line(t):
         text.append(checks_line(t))
     if v.get("pr"):
@@ -355,7 +357,7 @@ def cmd_ready(args):
                 raise Fail(f"{wt} has uncommitted changes. Commit them, then run ready again.")
             t["head"] = git(wt, "rev-parse", "HEAD")[1]
             own_work(s, t)
-        refused = review_refusal(s, t, wt)
+        refused = recap_refusal(s, t) or review_refusal(s, t, wt)
         if refused:
             # Kept (the task's line says why it waits); refused after the store is saved.
             s.dirty = True
@@ -859,7 +861,9 @@ def record_verdict(s, t, rn, passed, must, text):
     for k in ("review_out", "progress"):
         t.pop(k, None)
     s.dirty = True
-    if passed:
+    if t.get("mode") == "worktree" and budget_pass(s, t):  # a recap first: no next round, no merge, no fixing
+        msg = f"{s.ref(t)}: review round {rn['round']} {'passed' if passed else 'asked for changes'}; {t['recap']['title']}."
+    elif passed:
         msg = f"{s.ref(t)}: review round {rn['round']} passed. " + (gate_step(s, t) or finalize(s, t))
     else:
         sent, _ = tell(s, t, (f"Herdr's review round {rn['round']} of {s.ref(t)} ({rn['head'][:7]}) found what must be fixed:\n"

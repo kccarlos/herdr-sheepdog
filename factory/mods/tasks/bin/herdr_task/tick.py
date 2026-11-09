@@ -27,6 +27,7 @@ from .ghnews import main_pass, pr_deliver, pr_news
 from .scheduler import SCHEDULER
 from .revive import revive_pass
 from .checks import checks_pass
+from .budget import budget_pass
 
 
 def at_work(s, t):
@@ -63,7 +64,7 @@ def facts(s, t, report):
             report.setdefault("github_error", []).append(f"{s.ref(t)}: {e}")
         # Kept up to date while it is back at work too (a fix pushed: the problem goes away), so its
         # agent going quiet with the problem still there reads Needs you (on_it()).
-        if t["state"] in ("ready", "running") and problem != t.get("attention"):
+        if t["state"] in ("ready", "running") and problem != t.get("attention") and not t.get("recap"):  # a recap first
             if problem:
                 t["attention"], t["attention_at"] = problem, now()
                 report["attention"].append(t["id"])
@@ -128,6 +129,10 @@ def tick_store(s, report):
             back_pass(s, t, report)
         if t.get("worktree") and t["state"] in ("running", "ready"):
             facts(s, t, report)
+            try:
+                budget_pass(s, t)  # FAC-54: not converging, or far over its estimate: recap first
+            except Exception as e:  # never stops the tick
+                report.setdefault("budget_error", []).append(f"{s.ref(t)}: {e}")
             if t["state"] == "ready" and (t.get("pr") or {}).get("news"):
                 try:
                     pr_deliver(s, t, report)

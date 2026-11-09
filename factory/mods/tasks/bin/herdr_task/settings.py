@@ -269,7 +269,8 @@ SET_KEYS = {"review": "review", "brief.review": "review", "merge": "merge", "bri
             "agent": "agent", "task.agent": "agent", "model": "model", "task.model": "model", "effort": "effort", "task.effort": "effort",
             "reviewer": "reviewer", "reviewer.agent": "reviewer", "reviewer.model": "reviewer_model", "reviewer.effort": "reviewer_effort",
             "reviewer_model": "reviewer_model", "reviewer_effort": "reviewer_effort",
-            "proof": "proof", "brief.proof": "proof"}
+            "proof": "proof", "brief.proof": "proof",
+            "estimate.time": "estimate_time", "estimate.tokens": "estimate_tokens"}
 # The Proof line (as Shepherdr's skill asks of its task agents), on and off.
 PROOF_WORDS = {"on": "show verifiable proof in one recipe artifact: each proof with a one-line caption, real and from this work now, "
                      "plus a \"Not proven\" list; then say ready with --proof <its id>",
@@ -287,7 +288,7 @@ def set_task(t, key, value):
     """One --set key=value (or flag) on task t; an empty value or "default" goes back to Settings'."""
     field = SET_KEYS.get(key.strip().lower())
     if not field:
-        raise Fail(f"--set takes review, review.rounds, review.min, review.mustFix, merge, proof, agent, model, effort or reviewer settings, not {key!r}.")
+        raise Fail(f"--set takes review, review.rounds, review.min, review.mustFix, merge, proof, estimate.time, estimate.tokens, agent, model, effort or reviewer settings, not {key!r}.")
     v = value.strip().strip("\"'").strip()
     sets = t.setdefault("set", {})
     if not v or v.lower() == "default":
@@ -314,6 +315,10 @@ def set_task(t, key, value):
         if low not in MUST_VALUES:
             raise Fail("review.mustFix is blocker, major or minor.")
         sets[field] = MUST_VALUES[low]
+    elif field in ("estimate_time", "estimate_tokens"):  # the task's own fields, read by budget.py
+        from .budget import parse_time, parse_tokens
+        sets.pop(field, None)
+        t[field] = (parse_time if field == "estimate_time" else parse_tokens)(v)
     elif field == "merge":
         if low not in MERGE_VALUES:
             raise Fail('merge is "on its own", "after checks" or "ask me first".')

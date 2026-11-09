@@ -2236,6 +2236,179 @@ class GateReview(unittest.TestCase):
         self.assertIn(" reviewed ", closing_line(self.store, plain))
 
 
+class LoopBreaker(GateReview):
+    """FAC-54: a task whose herdr-task rounds don't converge, or that is far over its estimate, stops
+    as Needs you "Recap required"; ready refuses until the Assistant decides (continue once)."""
+
+    def rounds(self, *rows, since=0):
+        self.task["reviews"] = [{"round": i + 1, "head": "h", "started_by": "herdr-task", "verdict": v, "must_fix": n,
+                                 "report": rep, "at": since + i + 1} for i, (v, n, rep) in enumerate(rows)]
+
+    def why(self):
+        from herdr_task.budget import triggers
+        return triggers(self.store, self.task)
+
+    def test_review_triggers_and_their_edges(self):
+        self.rounds(("changes", 3, "a.py"))
+        self.assertEqual(self.why(), [])  # one round of findings is normal
+        self.rounds(("changes", 3, "a.py"), ("pass", 0, ""))
+        self.assertEqual(self.why(), [])
+        self.rounds(("changes", 3, "x/a.py:4"), ("changes", 2, "b.ts"))
+        self.assertEqual(len(self.why()), 1)
+        self.assertIn("round 2 still has 2", self.why()[0])
+        self.rounds(("changes", 2, "x/a.py:4"), ("changes", 2, "x/a.py:9"))
+        self.assertEqual(len(self.why()), 3)
+        self.assertTrue(any("didn't drop" in w for w in self.why()) and any("x/a.py" in w for w in self.why()))
+        self.rounds(("changes", 2, "x/a.py"), ("pass", 0, ""), ("changes", 1, "c.md"))  # same file only once each, dropping
+        self.assertEqual([w[:12] for w in self.why()], ["review round"])
+        self.rounds(("changes", 2, "a.py"), ("pass", 0, ""), ("changes", 1, "a.py"))
+        self.assertTrue(any("same file" in w for w in self.why()))
+        # an agent's own `reviewed` rounds and rounds before the last decision don't count
+        self.rounds(("changes", 2, "a.py"), ("changes", 2, "a.py"))
+        self.task["reviews"][0]["started_by"] = "agent"
+        self.assertEqual(self.why(), [])
+        self.rounds(("changes", 2, "a.py"), ("changes", 2, "a.py"))
+        self.task["recaps"] = [{"decision": "continue", "why": "w", "at": 1}]
+        self.assertEqual(self.why(), [])
+
+    def test_time_trigger_edge(self):
+        from unittest import mock
+        import herdr_task.budget as budget
+        self.task.update(started=1000, estimate_time=60000)
+        with mock.patch.object(budget, "now", lambda: 1000 + 120000):
+            self.assertEqual(self.why(), [])
+        with mock.patch.object(budget, "now", lambda: 1000 + 120001):
+            self.assertIn("time estimate (2m of 1m)", self.why()[0])
+        with mock.patch.object(budget, "now", lambda: 1000 + 10 ** 7):
+            self.task["state"] = "ready"  # waiting for the person's Accept: no time counts
+            self.assertEqual(self.why(), [])
+            self.task["state"] = "running"
+            self.task["recaps"] = [{"decision": "continue", "why": "w", "at": 1000 + 10 ** 7 - 120000}]
+            self.assertEqual(self.why(), [])  # counts from the decision, not the start
+        self.task.pop("estimate_time")
+        with mock.patch.object(budget, "now", lambda: 10 ** 12):
+            self.assertEqual(self.why(), [])
+
+    def test_token_sum_from_a_transcript_and_its_edge(self):
+        d = os.path.join(self.root, ".claude", "projects", "wt")
+        os.makedirs(d)
+        log = os.path.join(d, "s.jsonl")
+        use = {"input_tokens": 100, "cache_creation_input_tokens": 400, "cache_read_input_tokens": 1000, "output_tokens": 60}
+        line = lambda mid: json.dumps({"type": "assistant", "message": {"id": mid, "usage": use}}) + "\n"
+        with open(log, "w") as f:  # one response logged twice (two content blocks), a user line, a half-written line
+            f.write(line("m1") + line("m1") + json.dumps({"type": "user", "message": {"content": "hi"}}) + "\n" + line("m2")[:30])
+        self.task["agents"] = [{"address": "w1", "log": log}, {"address": "g", "log": "/elsewhere/gemini.json"}]
+        self.task["estimate_tokens"] = 500  # 100 + 500 + 100 + 300 = 1000 per response
+        self.assertEqual(self.why(), [])  # 1000 is not over 2 x 500
+        self.assertEqual(self.task["tokens"][log]["sum"], 1000)
+        with open(log, "a") as f:
+            f.write(line("m2")[30:])
+        self.assertIn("token estimate (2k of 500)", self.why()[0])
+        self.assertEqual(self.task["tokens"][log]["sum"], 2000)
+        self.task["recaps"] = [{"decision": "continue", "why": "w", "at": 1, "tokens": 1500}]
+        self.assertEqual(self.why(), [])  # 500 since the decision
+        self.task.pop("recaps")
+        self.task["agents"].append({"address": "w2", "log": log})  # a resumed session: the same log, counted once
+        self.assertIn("(2k of 500)", self.why()[0])
+        from herdr_task.settings import set_task
+        set_task(self.task, "estimate.tokens", "3M")
+        set_task(self.task, "estimate.time", "1h30m")
+        self.assertEqual((self.task["estimate_tokens"], self.task["estimate_time"]), (3000000, 5400000))
+        with self.assertRaises(self.commands.Fail):
+            set_task(self.task, "estimate.tokens", "lots")
+
+    def test_a_ready_task_goes_back_to_work_and_the_recap_stays_first(self):
+        from herdr_task.budget import budget_pass
+        from herdr_task.agents import task_status
+        self.rounds(("changes", 2, "a.py"), ("changes", 2, "a.py"))
+        self.task.update(state="ready", auto_merge="checks", pr={"number": 7})
+        self.assertNotIn("recap", self.task)
+        with __import__("unittest").mock.patch.object(self.commands, "workers", lambda s, t: []):
+            self.assertTrue(budget_pass(self.store, self.task))
+        self.assertEqual(self.task["state"], "running")  # never mergeable while (or after) a recap is open
+        self.assertNotIn("auto_merge", self.task)
+        self.task["attention"] = "Checks failing: a check."
+        budget_pass(self.store, self.task)
+        self.assertTrue(self.task["attention"].startswith("Recap required"))
+        # its worker said a status line and went idle: still Needs you, not Working
+        self.task["progress"] = {"set": self.task["attention_at"] + 1, "left": 3600000, "text": "Wrote RECAP.md"}
+        idle = [{"address": "w1", "status": {"state": "idle"}, "labels": {}}]
+        self.assertEqual(task_status(self.task, idle)[0], "needs")
+
+    def test_a_reviewer_in_flight_when_a_recap_opens_never_passes_it_on(self):
+        from unittest import mock
+        import herdr_task.budget as budget
+        self.ready()
+        self.task.update(started=1000, estimate_time=60000)
+        with mock.patch.object(budget, "now", lambda: 200000), mock.patch.object(self.commands, "workers", lambda s, t: []):
+            budget.budget_pass(self.store, self.task)  # over its time while round 1 is being reviewed
+        self.verdict("term-1", passed=True)
+        self.assertEqual(len(self.task["review_runs"]), 1)  # no next round started
+        self.assertEqual(self.task["state"], "running")
+        self.task.update(state="ready", auto_merge="checks")  # however it got there
+        budget.budget_pass(self.store, self.task)
+        self.assertEqual(self.task["state"], "running")
+        self.assertNotIn("auto_merge", self.task)
+
+    def recap(self, decide=None, why="w"):
+        import argparse
+        from unittest import mock
+        import herdr_task.store as store
+        import herdr_task.launch as launch
+        import herdr_task.output as output
+        out = []
+        with mock.patch.object(store, "open_store", lambda args, write=True: self.store), \
+                mock.patch.object(launch, "caller_labels", lambda: {}), \
+                mock.patch.object(output, "say", lambda args, v, msg: out.append(msg)):
+            from herdr_task.budget import cmd_recap
+            cmd_recap(argparse.Namespace(id="SHEP-13", json=False, folder=None, decide=decide, why=why))
+        return out[-1]
+
+    def test_second_must_fix_round_stops_ready_until_continue_then_again(self):
+        from unittest import mock
+        self.ready()
+        self.verdict("term-1", passed=False, changes="major: gate.txt says hi", must_fix=1)
+        self.assertNotIn("recap", self.task)
+        self.assertIn("Fix these", self.told[-1])
+        self.head = self.change("better")
+        with mock.patch.object(self.commands, "workers", lambda s, t: [{"address": "w1"}]):
+            self.ready()
+            self.verdict("term-2", passed=False, changes="major: gate.txt still says hi", must_fix=1)
+        self.assertTrue(self.task["attention"].startswith("Recap required: review round 2 still has 1"))
+        self.assertIn("RECAP.md", self.told[-1])
+        self.assertIn("Don't fix anything more", self.told[-1])
+        self.assertIn("gate.txt still says hi", self.told[-1])  # the findings, for the recap
+        self.assertEqual(self.task["recap"]["round"], 2)
+        with self.assertRaises(self.commands.Fail) as e:
+            self.ready()
+        self.assertIn("Assistant decides", str(e.exception))
+        self.assertIn("no RECAP.md yet", self.recap())
+        with open(os.path.join(self.wt, "RECAP.md"), "w") as f:
+            f.write("Goal: a gate.")
+        self.assertIn("Goal: a gate.", self.recap())
+        with self.assertRaises(self.commands.Fail):
+            self.recap("continue", why=" ")
+        self.assertIn("decided: continue", self.recap("continue", why="one more, the premise was right"))
+        self.assertNotIn("recap", self.task)
+        self.assertNotIn("attention", self.task)
+        self.assertEqual(self.why(), [])  # the count starts afresh
+        # two more non-converging rounds: Recap required again, and continue is refused
+        at = self.task["recaps"][-1]["at"]
+        self.rounds(("changes", 1, "a.py"), ("changes", 1, "b.py"), since=at)
+        from herdr_task.budget import budget_pass
+        self.assertTrue(budget_pass(self.store, self.task))
+        self.assertEqual(self.task["attention"], "Recap required again: change direction")
+        with self.assertRaises(self.commands.Fail) as e:
+            self.recap("continue")
+        self.assertIn("one continue", str(e.exception))
+        self.assertIn("decided: split", self.recap("split", why="two tasks"))
+        self.assertEqual([d["decision"] for d in self.task["recaps"]], ["continue", "split"])
+
+
+for _name in [n for n in vars(GateReview) if n.startswith("test_")]:
+    setattr(LoopBreaker, _name, None)  # its setUp only: GateReview's own tests run once, there
+
+
 class SandboxedReviewer(unittest.TestCase):
     """FAC-49: which reviewers run under sandbox-exec (GateReview patches this choice)."""
 

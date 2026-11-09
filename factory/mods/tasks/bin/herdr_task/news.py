@@ -140,7 +140,7 @@ def news_pass(report, folder=None):
                 current[key] = cur
                 prev = mine.get(str(t["id"]))
                 mine[str(t["id"])] = {"status": cur["status"], "stall": cur["stall"] or (prev or {}).get("stall"),
-                                      **({"needs": v["needs"]} if v.get("needs") else {})}
+                                      **({"needs": v["needs"]} if v.get("needs") else {}), **({"recap": True} if t.get("recap") else {})}
                 # Its backup took over (takeover()): told once; on a first look, old news.
                 b = t.get("backup") or {}
                 backup = s.write and b.get("state") == "started" and not b.get("told")
@@ -155,7 +155,7 @@ def news_pass(report, folder=None):
                 if v["status"] == "working" and ((prev or {}).get("status") in ("ready", "merging")
                                                  or (prev or {}).get("needs") == "attention" and t.get("attention")):
                     event = "working-again"
-                if event and (prev or {}).get("status") != v["status"]:
+                if event and ((prev or {}).get("status") != v["status"] or t.get("recap") and not (prev or {}).get("recap")):
                     lines.append((event, news_line(s, t, v, event)))
                 if stall and stall[0] != (prev or {}).get("stall"):
                     lines.append(("stalled", news_line(s, t, v, "stalled", stall[1])))

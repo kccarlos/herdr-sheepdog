@@ -26,6 +26,7 @@ from .home import cmd_home
 from .assistant_settings import cmd_session_note
 from .feedback import cmd_feedback
 from .ask import cmd_ask, cmd_ask_pane
+from .budget import cmd_recap, DECISIONS
 
 
 # ---- another machine ------------------------------------------------------------------------
@@ -229,6 +230,9 @@ def main():
     c = cmd("reviewed", cmd_reviewed, "a task's agent records one review round of its current commit (Review: on): ready then "
                                       "accepts that commit; uses one of its Review rounds")
     c.add_argument("--report", help="the round's findings in a line (levels, what was fixed)")
+    c = cmd("recap", cmd_recap, "the Assistant decides a task's open recap (Recap required): no flags prints it and its RECAP.md")
+    c.add_argument("--decide", choices=DECISIONS, help="continue (once per task), split, new (approach) or drop: the last three only record")
+    c.add_argument("--why", help="why, in one line")
     cmd("review-more", cmd_review_more, "the Assistant gives a task one more review round, once all are used (never its own agent)")
     c = cmd("status", cmd_status, "a task's agent says what it's doing now, at the start and each natural step: status 4 \"Fixing the two failing tests\" --done 40 --left 5m")
     c.add_argument("text", help=f"what it is doing, at most {LINE_MAX} characters (longer is cut at a word)")
