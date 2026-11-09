@@ -1526,6 +1526,45 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         self.assertEqual(self.tick_once(), ("done", True))
 
 
+class AcceptKeepsLaterCommits(unittest.TestCase):
+    """FAC-55: Accept on a pull request never deletes a commit made after ready. A real throwaway git
+    repo with the real merge_now and finish; only gh, pr_view and the main-branch upkeep are mocked."""
+
+    setUp_repo, git, commit = MergedOnlyWithOwnWork.setUp, MergedOnlyWithOwnWork.git, MergedOnlyWithOwnWork.commit
+
+    def setUp(self):
+        self.setUp_repo()
+        import herdr_task.github as github
+        self.mock = __import__("unittest").mock
+        self.ready_at = self.commit(self.task["worktree"], "ready")
+        self.task.update(head=self.ready_at, state="ready", pr={"number": 7, "repo": "o/r", "checked": 5})
+        self.merges = []
+        view = {"state": "OPEN", "mergeable": "MERGEABLE", "statusCheckRollup": [], "headRefOid": self.ready_at}
+        for mod, name, value in ((self.commands, "pr_view", lambda t: view), (self.commands, "finish", github.finish),
+                                 (self.commands, "gh", lambda *a, **k: (self.merges.append(a), (True, "", ""))[1]),
+                                 (self.commands, "watch_main", lambda *a: None), (self.commands, "update_main", lambda *a: None),
+                                 (github, "live_agents", lambda key: [])):
+            p = self.mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def branches(self):
+        return self.git(self.main, "branch", "--list", "task/1")
+
+    def test_a_commit_after_ready_is_kept_and_nothing_merges(self):
+        later = self.commit(self.task["worktree"], "after ready")
+        self.assertEqual(self.commands.merge_now(self.store, self.task),
+                         "task/1 has moved on since it said ready: its agent says ready again first.")
+        self.assertEqual((self.merges, self.task["state"]), ([], "ready"))
+        self.assertEqual(self.git(self.main, "rev-parse", "task/1"), later)
+        self.assertTrue(os.path.isdir(self.task["worktree"]))
+
+    def test_the_normal_case_merges_at_the_ready_commit(self):
+        self.assertIsNone(self.commands.merge_now(self.store, self.task))
+        self.assertEqual(self.merges[0][-2:], ("--match-head-commit", self.ready_at))
+        self.assertEqual((self.task["state"], self.branches()), ("done", ""))
+
+
 class TimeLeft(unittest.TestCase):
     """Every status gives the time left, a rough guess beats none (SHEP-13): the minutes show from
     the first one, one without --left asks for it, and every brief and template says so. In memory."""

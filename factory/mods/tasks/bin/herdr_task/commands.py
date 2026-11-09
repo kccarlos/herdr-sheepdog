@@ -1134,6 +1134,10 @@ def merge_now(s, t):
     s.dirty = True
     if not v:
         return f"Couldn't reach pull request #{n} on GitHub."
+    head = t.get("head")
+    # A commit made here after ready was never pushed: merging would delete it with the branch.
+    if head and branch_tip(s, t) != head:
+        return f"{t.get('branch')} has moved on since it said ready: its agent says ready again first."
     if v.get("state") != "MERGED":
         problem = pr_problem(v)
         if problem:
@@ -1142,7 +1146,7 @@ def merge_now(s, t):
         if pr_pending(v):
             return "Checks are still running."
         ok, _, err = gh("pr", "merge", n, "--repo", repo, "--squash", "--delete-branch",
-                        "--match-head-commit", v.get("headRefOid") or "")
+                        "--match-head-commit", head or v.get("headRefOid") or "")
         # A one-off GitHub error can come after the merge went through: asked again.
         again = None if ok else pr_view(t)
         if not ok and (again or {}).get("state") == "MERGED":
