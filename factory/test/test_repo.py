@@ -398,12 +398,13 @@ class SessionNote(unittest.TestCase):
 
 
 class VmScripts(unittest.TestCase):
-    """FAC-51: vm/provision.sh and vm/guest.sh build the factory's Tart images; both parse, and the timeout shim
+    """FAC-51: vm/provision.sh and vm/guest.sh build the factory's Tart images (FAC-56: factory-vm.sh and its guest
+    side run the long-lived factory VM); all parse, and the timeout shim
     guest.sh writes into the image (macOS has no timeout) runs a command and ends one that runs too long."""
 
     def test_each_parses(self):
         import subprocess
-        for f in ("provision.sh", "guest.sh"):
+        for f in ("provision.sh", "guest.sh", "factory-vm.sh", "factory-vm-guest.sh"):
             out = subprocess.run(["bash", "-n", J("vm", f)], capture_output=True, text=True)
             self.assertEqual(out.returncode, 0, f"vm/{f}: {out.stderr}")
 
