@@ -1830,6 +1830,113 @@ class GateReview(unittest.TestCase):
         self.assertEqual(len(self.runs), 1)
         self.assertEqual(self.task["state"], "running")
 
+    def prompt(self, i):
+        cmd = self.runs[i][self.runs[i].index("--") + 1:]
+        return cmd[cmd.index("-i") + 1]
+
+    def test_round_2_after_a_fix_carries_only_the_delta_and_the_earlier_findings(self):
+        # FAC-53: round 1 has the whole change, a later round what changed since the last reviewed head
+        self.ready()
+        self.assertIn("gate.txt", self.prompt(0))
+        self.assertIn("say \"hi\"", self.prompt(0))
+        self.verdict("term-1", passed=False, changes="needs a second line", must_fix=1)
+        new = self.change("say \"hi\" $HOME `date`\nsecond line")
+        self.ready()
+        p = self.prompt(1)
+        self.assertIn(f"git diff {self.head}..{new}", p)
+        self.assertIn("+second line", p)
+        self.assertIn("round 1", p)
+        self.assertIn("changes: needs a second line", p)
+        self.verdict("term-2")  # round 3 is another pass of the same head: still the delta, still the earlier rounds
+        p = self.prompt(2)
+        self.assertIn(f"git diff {self.head}..{new}", p)
+        self.assertIn("changes: needs a second line", p)
+
+    def test_after_a_rebase_only_the_rebase_delta(self):
+        self.ready()
+        self.verdict("term-1", passed=False, changes="fix it", must_fix=1)
+        self.git(self.main, "checkout", "-q", "main")
+        with open(os.path.join(self.main, "other.txt"), "w") as f:
+            f.write("moved base")
+        self.git(self.main, "add", "other.txt")
+        self.git(self.main, "commit", "-q", "-m", "base moved")
+        self.git(self.wt, "rebase", "-q", "main")
+        self.change("fixed")
+        self.ready()
+        p = self.prompt(1)
+        self.assertIn("base moved", p)
+        self.assertNotIn("other.txt", p)  # the base's own commit isn't in the delta
+        self.assertIn("+fixed", p)
+
+    def test_after_the_base_is_merged_in_the_delta_has_none_of_its_commits(self):
+        self.ready()
+        self.verdict("term-1", passed=False, changes="fix it", must_fix=1)
+        with open(os.path.join(self.main, "other.txt"), "w") as f:
+            f.write("moved base")
+        self.git(self.main, "add", "other.txt")
+        self.git(self.main, "commit", "-q", "-m", "base moved")
+        self.git(self.wt, "merge", "-q", "--no-edit", "main")
+        self.change("fixed")
+        self.ready()
+        p = self.prompt(1)
+        self.assertIn("+fixed", p)
+        self.assertNotIn("+moved base", p)
+
+    def test_the_base_is_the_remotes_when_it_is_ahead_of_the_local_one(self):
+        self.git(self.main, "update-ref", "refs/remotes/origin/main", self.git(self.main, "rev-parse", "main"))
+        self.git(self.main, "remote", "add", "origin", self.main)
+        self.git(self.main, "checkout", "-q", "-b", "up", "main")
+        with open(os.path.join(self.main, "up.txt"), "w") as f:
+            f.write("upstream pr")
+        self.git(self.main, "add", "up.txt")
+        self.git(self.main, "commit", "-q", "-m", "pr")
+        self.git(self.main, "update-ref", "refs/remotes/origin/main", self.git(self.main, "rev-parse", "up"))
+        self.git(self.main, "checkout", "-q", "main")
+        self.git(self.wt, "reset", "-q", "--hard", "origin/main")  # a worktree made from the remote's base
+        self.change("mine")
+        self.ready()
+        self.assertIn("+mine", self.prompt(0))
+        self.assertNotIn("upstream pr", self.prompt(0))
+
+    def test_earlier_findings_are_kept_whole_and_an_amend_on_the_same_base_is_a_plain_delta(self):
+        self.ready()
+        report = "1. [major] a.txt: " + "long " * 60 + "2. [major] b.txt: second finding"
+        self.verdict("term-1", passed=False, changes=report, must_fix=2)
+        self.git(self.wt, "commit", "-q", "--amend", "-m", "amended")
+        self.change("amended again")
+        self.ready()
+        p = self.prompt(1)
+        self.assertIn("2. [major] b.txt: second finding", p)
+        self.assertNotIn("base moved", p)
+
+    def test_a_rebase_delta_names_its_files(self):
+        self.ready()
+        self.verdict("term-1", passed=False, changes="fix it", must_fix=1)
+        self.git(self.main, "checkout", "-q", "main")
+        with open(os.path.join(self.main, "other.txt"), "w") as f:
+            f.write("moved base")
+        self.git(self.main, "add", "other.txt")
+        self.git(self.main, "commit", "-q", "-m", "base moved")
+        self.git(self.wt, "rebase", "-q", "main")
+        self.change("fixed")
+        self.ready()
+        self.assertIn("+++ now/gate.txt", self.prompt(1))
+
+    def test_an_idle_reviewer_of_an_older_head_doesnt_block_the_next(self):
+        self.ready()
+        self.change("moved on")
+        self.reviewer_term = {"state": "live", "agent": "agy", "foreground": {"name": "agy"}, "status": {"state": "idle"}}
+        self.ready()
+        self.assertEqual(len(self.runs), 2)
+
+    def test_no_second_reviewer_while_one_is_live_even_for_an_older_head(self):
+        self.ready()
+        self.change("moved on")  # a new head, round 1's reviewer still alive and unfinished
+        self.reviewer_term = {"state": "live", "agent": "agy", "foreground": {"name": "agy"}}
+        self.ready()
+        self.assertEqual(len(self.runs), 1)
+        self.assertEqual(len(self.task["review_runs"]), 1)
+
     def test_a_reviewer_gone_without_a_verdict_doesnt_stop_the_next(self):
         self.ready()
         self.reviewer_term = {"state": "live", "agent": "zsh", "foreground": {"name": "zsh"}}  # its CLI exited, the kept shell stays
