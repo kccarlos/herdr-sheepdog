@@ -395,3 +395,32 @@ class SessionNote(unittest.TestCase):
         out, asked = self.run_hook(None, "")
         self.assertEqual(out, "")
         self.assertFalse(asked)
+
+
+class VmScripts(unittest.TestCase):
+    """FAC-51: vm/provision.sh and vm/guest.sh build the factory's Tart images; both parse, and the timeout shim
+    guest.sh writes into the image (macOS has no timeout) runs a command and ends one that runs too long."""
+
+    def test_each_parses(self):
+        import subprocess
+        for f in ("provision.sh", "guest.sh"):
+            out = subprocess.run(["bash", "-n", J("vm", f)], capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0, f"vm/{f}: {out.stderr}")
+
+    def test_timeout_shim(self):
+        import subprocess
+        import tempfile
+        import time
+        with open(J("vm", "guest.sh")) as f:
+            src = f.read()
+        shim = re.search(r"cat >\.local/bin/timeout <<'EOF'\n(.*?)\nEOF\n", src, re.S).group(1)
+        path = os.path.join(tempfile.mkdtemp(), "timeout")
+        with open(path, "w") as f:
+            f.write(shim + "\n")
+        os.chmod(path, 0o755)
+        out = subprocess.run([path, "5", "echo", "works"], capture_output=True, text=True)
+        self.assertEqual((out.returncode, out.stdout), (0, "works\n"))
+        t = time.time()
+        out = subprocess.run([path, "--kill-after=3", "1s", "sleep", "10"], capture_output=True, text=True)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertLess(time.time() - t, 5)
