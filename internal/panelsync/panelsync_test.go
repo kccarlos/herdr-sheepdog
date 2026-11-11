@@ -445,9 +445,35 @@ func TestNoMarkerIsTreatedAsModified(t *testing.T) {
 	if s := res.State; !s.Modified || !s.UpdateAvailable || s.Version != "" {
 		t.Fatalf("state %+v", s)
 	}
-	// Identical to this build: nothing to report.
-	if s := Evaluate(home, Source{Panel: panelFS("old main", "gone.js"), Version: "v1.0.0"}); s.Modified || s.UpdateAvailable {
+	// Identical to this build: still modified (no marker), no update available.
+	if s := Evaluate(home, Source{Panel: panelFS("old main", "gone.js"), Version: "v1.0.0"}); !s.Modified || s.UpdateAvailable {
 		t.Fatalf("identical, no marker: %+v", s)
+	}
+}
+
+func TestRemovedFileOnlyTriggersUpdate(t *testing.T) {
+	home, _ := installOld(t)
+	dir := filepath.Join(home, "mods", "sheepdog")
+	// New release drops model/gone.js without modifying any remaining embedded file.
+	droppedOnly := Source{Panel: panelFS("old main", ""), Layout: []byte(`{"v":1}`), Version: "v1.1.0"}
+	if s := Evaluate(home, droppedOnly); !s.Installed || s.Modified || !s.UpdateAvailable || s.Version != "v1.0.0" {
+		t.Fatalf("before sync: %+v", s)
+	}
+	res, err := Sync(home, droppedOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Updated || res.From != "v1.0.0" || res.To != "v1.1.0" {
+		t.Fatalf("sync result: %+v", res)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "model", "gone.js")); !os.IsNotExist(err) {
+		t.Fatalf("removed file model/gone.js remained on disk: %v", err)
+	}
+	if m, err := ReadMarker(dir); err != nil || m.Version != "v1.1.0" {
+		t.Fatalf("marker after sync: %+v, %v", m, err)
+	}
+	if s := Evaluate(home, droppedOnly); s.Modified || s.UpdateAvailable || s.Version != "v1.1.0" {
+		t.Fatalf("after sync: %+v", s)
 	}
 }
 
@@ -470,7 +496,7 @@ func TestMissingFolderCreatesNothing(t *testing.T) {
 }
 
 func TestSymlinkedPanelIsNeverReplaced(t *testing.T) {
-	home, _ := installOld(t)
+	home, old := installOld(t)
 	dir := filepath.Join(home, "mods", "sheepdog")
 	checkout := filepath.Join(t.TempDir(), "checkout")
 	if err := os.Rename(dir, checkout); err != nil {
@@ -478,6 +504,10 @@ func TestSymlinkedPanelIsNeverReplaced(t *testing.T) {
 	}
 	if err := os.Symlink(checkout, dir); err != nil {
 		t.Fatal(err)
+	}
+	// Even when the symlink target's files match the embedded panel, State.Modified is true.
+	if s := Evaluate(home, old); !s.Installed || !s.Modified || s.UpdateAvailable {
+		t.Fatalf("symlink matching embedded: %+v", s)
 	}
 	res, err := Sync(home, newer())
 	if err != nil || res.Updated || !res.State.Modified {
