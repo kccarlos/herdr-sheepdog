@@ -20,7 +20,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-export TART_HOME="${TART_HOME:-/Volumes/kcan - Data/vms/tart}"
+export TART_HOME="${TART_HOME:-/Volumes/Ext/dev/vms/tart}"
 
 LOGROOT="${SHEEPDOG_NIGHTLY_LOGS:-$HOME/Library/Logs/sheepdog-nightly}"
 VM="${SHEEPDOG_NIGHTLY_VM:-sd-qa}"

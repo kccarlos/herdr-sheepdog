@@ -17,7 +17,7 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 CLONE="${SHEEPDOG_NIGHTLY_CLONE:-$HOME/.sheepdog-nightly/herdr-sheepdog}"
 URL="https://github.com/kccarlos/herdr-sheepdog"
 REF=origin/main
-TART_HOME_V="${TART_HOME:-/Volumes/kcan - Data/vms/tart}"
+TART_HOME_V="${TART_HOME:-/Volumes/Ext/dev/vms/tart}"
 DOMAIN="gui/$(id -u)"
 
 while [ $# -gt 0 ]; do
