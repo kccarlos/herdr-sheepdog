@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from .base import guard, hc_json, now, run, STORE
 from .settings import bare
 from .agents import (
-    agent_log, agent_running, detail, from_person, live_agents, log_tail, said, starting, status_word,
+    agent_log, agent_running, detail, from_person, live_agents, log_tail, REVIEWER_FAILED, said, starting, status_word,
     STATUSES,
 )
 from .sessions import session_of
@@ -138,9 +138,11 @@ def news_pass(report, folder=None):
                     s.dirty = True
                 cur = {"status": v["status"], "why": v.get("why"), "stall": stall[0] if stall else None}
                 current[key] = cur
+                rf = (t.get("attention") or "").startswith(REVIEWER_FAILED)
                 prev = mine.get(str(t["id"]))
                 mine[str(t["id"])] = {"status": cur["status"], "stall": cur["stall"] or (prev or {}).get("stall"),
-                                      **({"needs": v["needs"]} if v.get("needs") else {}), **({"recap": True} if t.get("recap") else {})}
+                                      **({"needs": v["needs"]} if v.get("needs") else {}), **({"recap": True} if t.get("recap") else {}),
+                                      **({"reviewer_failed": True} if rf else {})}
                 # Its backup took over (takeover()): told once; on a first look, old news.
                 b = t.get("backup") or {}
                 backup = s.write and b.get("state") == "started" and not b.get("told")
@@ -155,7 +157,8 @@ def news_pass(report, folder=None):
                 if v["status"] == "working" and ((prev or {}).get("status") in ("ready", "merging")
                                                  or (prev or {}).get("needs") == "attention" and t.get("attention")):
                     event = "working-again"
-                if event and ((prev or {}).get("status") != v["status"] or t.get("recap") and not (prev or {}).get("recap")):
+                if event and ((prev or {}).get("status") != v["status"] or t.get("recap") and not (prev or {}).get("recap")
+                              or rf and not (prev or {}).get("reviewer_failed")):
                     lines.append((event, news_line(s, t, v, event)))
                 if stall and stall[0] != (prev or {}).get("stall"):
                     lines.append(("stalled", news_line(s, t, v, "stalled", stall[1])))

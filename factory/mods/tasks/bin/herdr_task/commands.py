@@ -18,7 +18,8 @@ from .settings import (
     task_settings, worker_argv, worktrees_on,
 )
 from .agents import (
-    agent_running, busy_again, detail, fit, LINE_MAX, live_agents, ready_turns, STATUSES, status_word, SUMMARY_MAX, WORKING_AGAIN,
+    agent_running, busy_again, detail, fit, LINE_MAX, live_agents, ready_turns, REVIEWER_FAILED, STARTING_MS, STATUSES,
+    status_word, SUMMARY_MAX, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
 from .github import already_merged, finish, gh, github, merged_here, own_work, pr_adopt, pr_open, pr_pending, pr_problem, pr_view, update_main, watch_main
@@ -428,10 +429,42 @@ def cmd_ready(args):
 REVIEWED = ("report", "pass", "changes")  # a recorded review round (report: the agent's own reviewed)
 
 
+SIGN_IN_SCREEN = re.compile(r"(?im)^[\s│┃╭╮╰╯─⚠!✗✖•*]*(?:error:\s*)?sign in required(?:[:.!—\s][^\n\"'`]*?)?[\s│┃╭╮╰╯─]*$")
+
+
+def sign_in_screen(screen):
+    return bool(SIGN_IN_SCREEN.search("\n".join((screen or "").splitlines()[-60:])))
+
+
+def failed_addresses(t):
+    return {f["address"] for f in t.get("review_failures") or [] if f.get("address")}
+
+
+def open_runs(t):
+    done, failed = {r["round"] for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"}, failed_addresses(t)
+    return [r for r in t.get("review_runs") or [] if r["round"] not in done and r["address"] not in failed]
+
+
+def fail_run(s, t, rn, why):
+    if rn["address"] not in failed_addresses(t):
+        t.setdefault("review_failures", []).append({"round": rn["round"], "head": rn["head"], "address": rn["address"],
+                                                    "cli": rn["cli"], "model": rn.get("model"), "why": why, "at": now()})
+        s.dirty = True
+
+
+def fallback_reviewer(s, t, failed_cli):
+    """A different CLI than `failed_cli` for the round's second try (FAC-59)."""
+    if failed_cli == "claude":
+        cfg = settings_for(s, t.get("space")).get("reviewer") or {}
+        return {"agent": "agy", "model": cfg.get("model") if cfg.get("agent") == "agy" else None, "effort": None}
+    return {"agent": "claude", "model": "opus", "effort": None}
+
+
 def rounds_used(t, gate=False):
-    """Review rounds used: in a gate folder, the reviewers herdr-task started (review_runs)."""
+    """Review rounds used: in a gate folder, the reviewers herdr-task started that didn't fail without a verdict."""
     if gate:
-        return len(t.get("review_runs") or [])
+        failed = failed_addresses(t)
+        return sum(1 for r in t.get("review_runs") or [] if r["address"] not in failed)
     return sum(1 for r in t.get("reviews") or [] if r.get("result") in REVIEWED)
 
 
@@ -493,37 +526,45 @@ def gate_step(s, t):
         raise Fail(f"{s.ref(t)} has no worktree to review: start it first.")
     back_to_work(s, t, "a new commit to review")  # a Ready task's unreviewed commit never stays mergeable
     t.pop("auto_merge", None)
+    inspect_runs(s, t)
+    if gate_passes(t, head) >= need:
+        return f"{s.ref(t)} is ready." if t.get("state") in ("ready", "done") else None
+    if t.get("recap"):
+        return f"{s.ref(t)}: {t['recap']['title']}."
     mine = [r for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"]
-    runs, done = t.get("review_runs") or [], {r["round"] for r in mine}
     if mine and mine[-1]["head"] == head and mine[-1]["verdict"] == "changes":
         return f"{s.ref(t)}: Herdr's reviewer asked for changes to {head[:7]}: fix them, commit, then run ready again."
     # Never two reviewers at once (FAC-53): a live one on any head, even an older one, holds the next round back.
-    def running(r):
-        k = hc_json("get", r["address"]) or {}
-        if r["round"] in done or k.get("state") != "live" or not agent_running(k):
-            return False
-        if r["head"] != head and status_word(k) in ("idle", "done"):
-            end_reviewer(r["address"])  # its turn ended on an older head: its verdict can never apply, it mustn't block this one
-            return False
-        return True
-    busy = next((r for r in runs if running(r)), None)
+    busy = next(iter(open_runs(t)), None)
     if busy:
         return (f"{s.ref(t)}: Herdr's reviewer ({busy['address']}) is still reviewing {busy['head'][:7]}; no second one starts. "
                 + ("Its findings come to you as a message." if busy["head"] == head else "Run ready again once it finishes."))
-    on, rounds = review_limits(s, t)
-    if len(runs) >= rounds:
+    used, (_, rounds) = rounds_used(t, True), review_limits(s, t)
+    round_n = used + 1
+    since = max(t.get("reviewer_at") or 0, t.get("reopened_at") or 0)
+    fails = [f for f in t.get("review_failures") or []
+             if f["round"] == round_n and f["head"] == head and (f.get("at") or 0) > since]
+    if len(fails) >= 2:
+        why = (f"{REVIEWER_FAILED} " + ", ".join(f"{f['cli']} ({f['why']})" for f in fails[:2]))[:120]
+        t["attention"], t["attention_at"] = why, now()
+        t.pop("progress", None)
+        s.dirty = True
+        return f"{s.ref(t)}: {why}."
+    if used >= rounds:
         t["review_out"] = now()
         return (f"{s.ref(t)}: all {rounds} review rounds are used and {head[:7]} has {gate_passes(t, head)} of {need} passing "
                 f"rounds. Say why in your chat and end your turn: only your Assistant can add a round (herdr-task review-more).")
     rows = {x["label"]: x["value"] for x in task_settings(s, t)}
-    rv, wt, ref, ht, folder = rows["Reviewer"], t["worktree"], s.ref(t), own_path(), shlex.quote(s.loc["folder"])
+    rv = fallback_reviewer(s, t, fails[-1]["cli"]) if fails else rows["Reviewer"]
+    wt, ref, ht, folder = t["worktree"], s.ref(t), own_path(), shlex.quote(s.loc["folder"])
     sand = sandboxes([rv["agent"]])  # agy on a Mac: sandboxed, nothing prompts, its verdict read from its terminal
     # Claude Code's plan mode blocks every command, the verdict's `herdr-task review` too, so a Claude reviewer
     # runs in auto mode: its allow list (the verdict, its reads) runs, the rest goes past auto mode's checks.
     perm = "read-only" if rv["agent"] == "codex" else "full" if sand else "auto" if rv["agent"] == "claude" else "plan"
     argv = argv_for({**rv, "perm": perm})
-    at = now()
-    code = round_code({"round": len(runs) + 1, "head": head, "at": at}) if sand else None
+    runs = t.get("review_runs") or []
+    at = max(now(), (runs[-1]["at"] + 1) if runs else 0)
+    code = round_code({"round": round_n, "head": head, "at": at}) if sand else None
     shown, diff = review_diff(wt, t.get("base") or "main", head, mine)
     cmd = f"{ht} review {ref} --folder {folder}"
     check = (settings_for(s, t.get("space"))["tasks"].get("check") or "").strip()
@@ -548,10 +589,10 @@ def gate_step(s, t):
     live = workers(s, t)
     a = launch(s, t, argv, t.get("space"), prompt, parent=live[-1]["address"] if live else None, role="reviewer",
                reads=review_reads(check))
-    t.setdefault("review_runs", []).append({"round": len(runs) + 1, "head": head, "address": a["address"], "cli": agent_key(argv),
+    t.setdefault("review_runs", []).append({"round": round_n, "head": head, "address": a["address"], "cli": agent_key(argv),
                                             "model": rv.get("model") or None, "at": at})
     t["progress"] = {"text": fit("Herdr's reviewer is on it"), "at": now(), "set": now(), "by": "herdr"}
-    return f"{s.ref(t)}: Herdr started review round {len(runs) + 1} of {head[:7]} ({a['address']}); its findings come to you as a message."
+    return f"{s.ref(t)}: Herdr started review round {round_n} of {head[:7]} ({a['address']}); its findings come to you as a message."
 
 
 def review_refusal(s, t, wt):
@@ -873,8 +914,7 @@ def gate_verdict(s, t, args, text):
     me = os.environ.get("HC_TERMINAL_ID")
     if t["state"] == "done":
         raise Fail(f"{s.ref(t)} is already done.")
-    done = {r["round"] for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"}
-    rn = next((r for r in reversed(t.get("review_runs") or []) if me and r["address"] == me and r["round"] not in done), None)
+    rn = next((r for r in reversed(open_runs(t)) if me and r["address"] == me), None)
     if not rn:
         raise Fail(f"Only the reviewer herdr-task started for {s.ref(t)}'s open review round records it, from its own terminal.")
     must = args.must_fix if args.must_fix is not None else (0 if args.passed else None)
@@ -948,27 +988,62 @@ def read_verdict(screen, code):
     return not must, must, "\n".join(x.strip() for x in lines[begin + 1:end]).strip()
 
 
+def inspect_runs(s, t):
+    """Reads verdicts of finished sandboxed reviewers, and marks open runs whose terminal is gone or
+    whose agent ended without a verdict (or stopped on 'Sign in required') as failed (FAC-49, FAC-59)."""
+    for rn in list(open_runs(t)):
+        k = hc_json("get", rn["address"]) or {}
+        if k.get("state") != "live":
+            code = k.get("exit_code")
+            why = ("Sign in required" if k.get("state") == "finished" and sign_in_screen(
+                       run(["hc", "read", rn["address"], "--lines", "80"]).stdout) else
+                   f"exited ({code})" if k.get("state") == "finished" and type(code) is int else
+                   "exited" if k.get("state") == "finished" else "terminal gone")
+            fail_run(s, t, rn, why)
+            if k.get("state") == "finished":
+                end_reviewer(rn["address"])
+            continue
+        st, alive = status_word(k), agent_running(k)
+        if alive and st == "working":  # never read mid-turn
+            continue
+        screen = None
+        if sandboxes([rn["cli"]]) and st != "blocked":
+            screen = run(["hc", "read", rn["address"], "--lines", "400"]).stdout or ""
+            got = read_verdict(screen, round_code(rn))
+            if got:
+                before, dirty = json.loads(json.dumps(t)), s.dirty
+                try:
+                    record_verdict(s, t, rn, *got)
+                except Exception:  # nothing half recorded: a later tick tries again, its reviewer still there
+                    t.clear()
+                    t.update(before)
+                    s.dirty = dirty
+                    if git(t.get("worktree") or "", "rev-parse", "HEAD")[1] in ("", rn["head"]):
+                        raise
+                    fail_run(s, t, rn, "head moved on")
+                end_reviewer(rn["address"])  # recorded, or its head moved on: its verdict never applies
+                continue
+        if screen is None:
+            screen = run(["hc", "read", rn["address"], "--lines", "400"]).stdout or ""
+        why = ("Sign in required" if sign_in_screen(screen) else "exited without a verdict" if not alive else
+               "ended without a verdict" if st in ("idle", "done") and (k.get("turn") != 0 or now() - (rn.get("at") or 0) >= STARTING_MS) else None)
+        if why:
+            fail_run(s, t, rn, why)
+            end_reviewer(rn["address"])
+
+
 def gate_reads(s, t):
-    """Verdicts of sandboxed reviewers (FAC-49), which can't run herdr-task: read with hc read from
-    each open round's own terminal (G2: only that run's terminal counts), then that reviewer ends."""
-    done = {r["round"] for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"}
-    for rn in list(t.get("review_runs") or []):
-        k = (hc_json("get", rn["address"]) or {}) if sandboxes([rn["cli"]]) and rn["round"] not in done else {}
-        if k.get("state") != "live" or status_word(k) in ("working", "blocked"):  # read only once its turn is over
-            continue
-        got = read_verdict(run(["hc", "read", rn["address"], "--lines", "400"]).stdout, round_code(rn))
-        if not got:
-            continue
-        before, dirty = json.loads(json.dumps(t)), s.dirty
-        try:
-            record_verdict(s, t, rn, *got)
-        except Exception:  # nothing half recorded: a later tick tries again, its reviewer still there
-            t.clear()
-            t.update(before)
-            s.dirty = dirty
-            if git(t.get("worktree") or "", "rev-parse", "HEAD")[1] in ("", rn["head"]):
-                raise
-        end_reviewer(rn["address"])  # recorded, or its head moved on: its verdict never applies
+    """Verdicts of sandboxed reviewers (FAC-49), and dead-reviewer detection + fallback (FAC-59)."""
+    inspect_runs(s, t)
+    need, head, wt = gate_min(s, t), t.get("head"), t.get("worktree") or ""
+    mine = [r for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"]
+    if (not need or not head or gate_passes(t, head) >= need or open_runs(t)
+            or t.get("recap") or t.get("review_out") or (t.get("attention") or "").startswith(REVIEWER_FAILED)
+            or (mine and mine[-1]["head"] == head and mine[-1]["verdict"] == "changes")
+            or not any(r["head"] == head for r in t.get("review_runs") or [])):
+        return
+    if os.path.isdir(wt) and git(wt, "rev-parse", "HEAD")[1] == head and not git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
+        gate_step(s, t)
 
 
 def cmd_state(args, state):
@@ -976,7 +1051,7 @@ def cmd_state(args, state):
         t = s.find(args.id)
         if state == "reopen":
             state = "running" if t.get("started") and t["state"] not in ("queued", "scheduled") else "todo"
-            for k in ("reviews", "review", "review_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at"):
+            for k in ("reviews", "review", "review_runs", "review_failures", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
@@ -1012,7 +1087,12 @@ def cmd_edit(args):
             with open(args.prompt_file) as f:
                 t["prompt"] = f.read()
         pick = [t.get(k) for k in ("agent", "model", "effort")]
+        rev_pick = [t.get(k) for k in ("reviewer", "reviewer_model", "reviewer_effort")]
         set_opts(t, args)
+        if [t.get(k) for k in ("reviewer", "reviewer_model", "reviewer_effort")] != rev_pick:
+            t["reviewer_at"] = max(now(), max((f.get("at") or 0 for f in t.get("review_failures") or []), default=0))
+            if (t.get("attention") or "").startswith(REVIEWER_FAILED):
+                t.pop("attention", None)
         if [t.get(k) for k in ("agent", "model", "effort")] != pick:
             # The next agent started for it runs on the new choice (start_again), a queued one too.
             t["pick_at"] = now()

@@ -220,9 +220,12 @@ def busy_again(task, live):
 ON_IT_MS = 30 * 60000  # how long an agent's own status line counts, or its own time left if longer
 
 
+REVIEWER_FAILED = "Reviewer failed twice:"
+
+
 def on_it(task, live):
     """live: its running agents (hc records). Cheap: the task's record and their status only."""
-    if task.get("recap"):  # a recap waits for the Assistant, whatever its worker does (FAC-54)
+    if task.get("recap") or (task.get("attention") or "").startswith(REVIEWER_FAILED):  # waits for the Assistant (FAC-54, FAC-59)
         return False
     if any(status_word(k) in ("working", "blocked") and (k.get("labels") or {}).get("herdr.role") != "reviewer"
            for k in live):
@@ -530,8 +533,10 @@ def starting(task):
     last = (task.get("agents") or [None])[-1]
     if last and last.get("ended"):
         return False
+    failed = {f.get("address") for f in task.get("review_failures") or []}
+    runs = [r for r in task.get("review_runs") or [] if r.get("address") not in failed]
     at = max([x for x in (task.get("started"), (last or {}).get("at"), (task.get("review") or {}).get("at"),
-                                ((task.get("review_runs") or [None])[-1] or {}).get("at")) if isinstance(x, (int, float))] or [0])
+                          (runs[-1] if runs else {}).get("at")) if isinstance(x, (int, float))] or [0])
     return now() - at < STARTING_MS
 
 

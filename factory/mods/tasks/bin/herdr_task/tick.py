@@ -10,7 +10,7 @@ import time
 
 from .base import Fail, guard, hc_json, now, PR_EVERY, run, SHELLS, STORE
 from .settings import machine_name, worker_argv
-from .agents import agent_log, agent_running, busy_again, detail, held_ask, live_agents, status_word, task_status, trust_check
+from .agents import agent_log, agent_running, busy_again, detail, held_ask, live_agents, REVIEWER_FAILED, status_word, task_status, trust_check
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
 from .github import already_merged, finish, github, merged_here, pr_merged, pr_pending, pr_problem, pr_view, watch_main
@@ -65,7 +65,8 @@ def facts(s, t, report):
             report.setdefault("github_error", []).append(f"{s.ref(t)}: {e}")
         # Kept up to date while it is back at work too (a fix pushed: the problem goes away), so its
         # agent going quiet with the problem still there reads Needs you (on_it()).
-        if t["state"] in ("ready", "running") and problem != t.get("attention") and not t.get("recap"):  # a recap first
+        if (t["state"] in ("ready", "running") and problem != t.get("attention") and not t.get("recap")
+                and not (t.get("attention") or "").startswith(REVIEWER_FAILED)):  # a recap or gate failure first
             if problem:
                 t["attention"], t["attention_at"] = problem, now()
                 report["attention"].append(t["id"])
@@ -150,10 +151,13 @@ def tick_store(s, report):
             except Exception as e:  # never stops the tick
                 report.setdefault("checks_error", []).append(f"{s.ref(t)}: {e}")
         if t.get("review_runs") and t["state"] in ("running", "ready"):
+            had = t.get("attention")
             try:
-                gate_reads(s, t)  # a sandboxed reviewer's verdict, from its terminal
+                gate_reads(s, t)  # a sandboxed reviewer's verdict, or a dead reviewer's fallback
             except Exception as e:  # never stops the tick
                 report.setdefault("review_error", []).append(f"{s.ref(t)}: {e}")
+            if t.get("attention") and t.get("attention") != had:
+                report.setdefault("attention", []).append(t["id"])
     due_pass(s, report)
     queued = sorted((t for t in s.data["tasks"] if t["state"] == "queued"), key=lambda t: t.get("queued_at") or 0)
     n = running_count(s) if queued else 0
