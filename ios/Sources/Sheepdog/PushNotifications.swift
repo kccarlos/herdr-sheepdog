@@ -499,22 +499,29 @@ final class PushCoordinator: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: - UNUserNotificationCenterDelegate
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        let userInfo = notification.request.content.userInfo
-        let payload = PushPayload(userInfo: userInfo)
-        return await MainActor.run {
+    // The completion-handler forms, called back on the main thread: UIKit
+    // asserts when they come from another thread, and the async forms'
+    // thunk called them from wherever the method finished (a tap from the
+    // lock screen crashed on it).
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        let payload = PushPayload(userInfo: notification.request.content.userInfo)
+        Task { @MainActor in
             // Suppress only when the target computer's live stream / screen
             // or voice already shows this update in the foreground.
-            (model?.shouldSuppressForegroundPush(payload) ?? false) ? [] : [.banner, .list, .sound]
+            completionHandler((model?.shouldSuppressForegroundPush(payload) ?? false) ? [] : [.banner, .list, .sound])
         }
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        let userInfo = response.notification.request.content.userInfo
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                            withCompletionHandler completionHandler: @escaping () -> Void) {
+        let payload = PushPayload(userInfo: response.notification.request.content.userInfo)
         let action = response.actionIdentifier
         let identifier = response.notification.request.identifier
-        guard let payload = PushPayload(userInfo: userInfo) else { return }
-        await handle(action: action, payload: payload, notificationID: identifier)
+        Task { @MainActor in
+            if let payload { await handle(action: action, payload: payload, notificationID: identifier) }
+            completionHandler()
+        }
     }
 
     func handle(action: String, payload: PushPayload, notificationID: String) async {
