@@ -26,6 +26,7 @@ from .takeover import cant_go_on, takeover
 from .ghnews import main_pass, pr_deliver, pr_news
 from .scheduler import SCHEDULER
 from .revive import revive_pass
+from .watchdog import watchdog_pass
 from .checks import checks_pass
 from .budget import budget_pass, record_ci
 
@@ -487,6 +488,10 @@ def cmd_tick(args):
         news_pass(report, args.folder)
     except Exception as e:  # never stops the queue
         report["news_error"] = str(e)
+    try:
+        watchdog_pass(report)
+    except Exception as e:  # never stops the queue
+        report["watchdog_error"] = str(e)
     try:
         end_done_pass(report, args.folder)
         memory_guard(report)

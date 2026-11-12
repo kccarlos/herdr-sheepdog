@@ -24,7 +24,7 @@ from .output import say
 from .scheduler import ensure_scheduler, script_hash
 from .commands import begin
 from .news import news_pass
-from .tick import end_done_pass, lost_logs_pass, memory_guard, retry_pass, tick_store
+from .tick import end_done_pass, lost_logs_pass, memory_guard, retry_pass, tick_store, watchdog_pass
 from .backups import backup_pass
 from .machines import machines_pass
 from .takeover import cli_check_pass
@@ -677,6 +677,10 @@ def one_pass(report):
             autopilot_pass(report)
         except Exception as e:  # never stops the scheduler
             print(f"{time.strftime('%H:%M:%S')} autopilot: {e}", flush=True)
+        try:
+            watchdog_pass(report)
+        except Exception as e:  # never stops the scheduler
+            print(f"{time.strftime('%H:%M:%S')} watchdog: {e}", flush=True)
         try:
             machines_pass(report)
         except Exception as e:  # never stops the scheduler

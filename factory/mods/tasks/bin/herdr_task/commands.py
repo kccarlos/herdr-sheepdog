@@ -764,12 +764,17 @@ def cmd_alert(args):
             pre = None
         ref = f"{pre}-{n}" if pre else None
     # The label holds what a toast shows (inbox.js cuts it again to fit).
-    alert = {"id": secrets.token_hex(4), "at": now(), "title": title[:120], "body": body[:300],
-             **({"task": ref} if ref else {}), **({"about": True} if args.task else {})}
-    r = run(["hc", "label", me, f"{ALERT}={json.dumps(alert, ensure_ascii=False, separators=(',', ':'))}"])
+    say(args, send_alert(me, title, body, task=ref, about=bool(args.task)), "Alert sent.")
+
+
+def send_alert(terminal, title, body="", task=None, about=False):
+    """Sets herdr.alert on `terminal`, reaching every Herdr client with a toast and a sound."""
+    alert = {"id": secrets.token_hex(4), "at": now(), "title": " ".join(str(title).split())[:120],
+             "body": " ".join(str(body).split())[:300], **({"task": task} if task else {}), **({"about": True} if about else {})}
+    r = run(["hc", "label", terminal, f"{ALERT}={json.dumps(alert, ensure_ascii=False, separators=(',', ':'))}"])
     if r.returncode != 0:
         raise Fail((r.stderr or r.stdout).strip() or "hc label failed")
-    say(args, alert, "Alert sent.")
+    return alert
 
 
 def back_to_work(s, t, why, said=WORKING_AGAIN):
