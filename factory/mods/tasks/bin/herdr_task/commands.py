@@ -34,7 +34,7 @@ from .scheduler import ensure_scheduler
 from .proof import evidence, find_proof
 from .when import when_from
 from .templates import instructions
-from .budget import budget_lines, budget_pass, recap_refusal
+from .budget import budget_lines, budget_pass, recap_refusal, record_ci
 
 
 # ---- commands -------------------------------------------------------------------------------
@@ -925,7 +925,7 @@ def cmd_state(args, state):
         t = s.find(args.id)
         if state == "reopen":
             state = "running" if t.get("started") and t["state"] not in ("queued", "scheduled") else "todo"
-            for k in ("reviews", "review", "review_runs", "review_out", "auto_merge", "merged", "nothing_to_merge", "accepted_at"):
+            for k in ("reviews", "review", "review_runs", "review_out", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
@@ -1146,6 +1146,9 @@ def merge_now(s, t):
     if head and branch_tip(s, t) != head:
         return f"{t.get('branch')} has moved on since it said ready: its agent says ready again first."
     if v.get("state") != "MERGED":
+        record_ci(s, t, v, now())
+        if t.get("mode") == "worktree" and budget_pass(s, t):
+            return t["recap"]["title"]
         problem = pr_problem(v)
         if problem:
             t["attention"], t["attention_at"] = problem, now()

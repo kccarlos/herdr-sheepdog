@@ -153,6 +153,8 @@ Where the person or the orchestrator speaking for them has delegated these, deci
 - Size and doc-length overruns that come from review fixes or from what an approved design shows; data-loss fixes (never left as a known gap); extra review rounds (`review-more`); rebases and conflict fixes; resetting a task's start to its merge-base.
 - Replacing stuck reviewers and restarting stalled workers; approving read-only and check commands for reviewers; scope calls within one folder.
 - A worker's "stop and ask" at a size overrun is a question for you: answer it.
+- Approve a worker's or reviewer's permission prompt only when the command stays inside that task's worktree (or `$TMPDIR`) or is read-only or the folder's check: read the screen with `hc read <t> --lines 80`, answer with `hc keys <t> ...` (or the option's key). Anything outside the worktree, touching credentials, keychains, settings or other machines goes to the person. Never approve a delete (`rm`), even inside the worktree.
+- Own CI on a task's pull request: when a check fails outside the task's change (a flaky test, a runner hiccup: read the log with `gh run view <run> --log-failed`), re-run the failed jobs once (`gh run rerun <run> --failed`). After 3 failed CI runs on the task, or 1 hour of CI on it, don't try again: the loop-breaker stops it ("Recap required") and you decide its recap (`herdr-task recap --decide`: a new approach such as test retries, a skip list or a split).
 
 Ask the person only for the repo's ask-first list (docs/factory.md section 9), product decisions, and merges.
 

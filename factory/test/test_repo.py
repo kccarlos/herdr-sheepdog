@@ -291,6 +291,32 @@ class Repo(unittest.TestCase):
         self.assertIn(v, open(J("RECIPE.md")).read())
         self.assertIn(v, open(J("README.md")).read())
 
+    def test_assistant_decide_yourself_rules(self):
+        """FAC-57: templates/assistant.md's Decide yourself section keeps its existing standing rules
+        and carries the in-worktree prompt approval rule and PR CI ownership + loop-breaker rule."""
+        with open(J("templates", "assistant.md"), encoding="utf-8") as fh:
+            text = fh.read()
+        sec = text.split("## Decide yourself / Ask only for\n", 1)[1].split("\n## ", 1)[0]
+        for words in (
+            "review-more",
+            '"stop and ask" at a size overrun',
+            "hc read <t> --lines 80",
+            "hc keys <t>",
+            "$TMPDIR",
+            "read-only",
+            "folder's check",
+            "credentials, keychains, settings or other machines goes to the person",
+            "Never approve a delete (`rm`)",
+            "gh run view <run> --log-failed",
+            "gh run rerun <run> --failed",
+            "3 failed CI runs",
+            "1 hour of CI",
+            "Recap required",
+            "herdr-task recap --decide",
+            "docs/factory.md section 9",
+        ):
+            self.assertIn(words, sec)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2419,6 +2419,114 @@ class LoopBreaker(GateReview):
         self.assertIn("decided: split", self.recap("split", why="two tasks"))
         self.assertEqual([d["decision"] for d in self.task["recaps"]], ["continue", "split"])
 
+    def test_ci_triggers_window_and_recap_reset(self):
+        from unittest import mock
+        import herdr_task.budget as budget
+        run = lambda sha, rid, failed, at: {"sha": sha, "run": rid, "failed": failed, "at": at}
+        clock = [5000]
+        with mock.patch.object(budget, "now", lambda: clock[0]), \
+                mock.patch.object(self.commands, "workers", lambda s, t: [{"address": "w1"}]):
+            self.task["ci_runs"] = [run("a", "1", True, 1000)]
+            self.assertEqual(self.why(), [])
+            self.task["ci_runs"].append(run("a", "1", True, 2000))
+            self.assertEqual(self.why(), [])  # 2 failed runs don't trigger
+            self.task["ci_runs"].append(run("b", "2", False, 3000))
+            self.assertEqual(self.why(), [])  # passing runs don't count as failures
+            self.task["ci_runs"] = [run("a", "1", True, 1000), run("a", "1", True, 2000), run("b", "2", True, 3000)]
+            self.assertEqual(self.why(), ["3 failed CI runs"])
+            # 1h window from the first CI run in the current window while CI is red (or still pending after a failure)
+            self.task["ci_runs"] = [run("a", "1", True, 1000)]
+            clock[0] = 1000 + 3599999
+            self.assertEqual(self.why(), [])
+            clock[0] = 1000 + 3600000
+            self.assertEqual(self.why(), ["1h on CI"])
+            self.task["ci_runs"].append(run("b", "2", False, 2000))  # green on latest sha: waiting for Accept isn't a CI loop
+            clock[0] = 1000 + 10 ** 7
+            self.task["state"] = "ready"
+            self.assertEqual(self.why(), [])
+            self.task["state"] = "running"
+            self.assertEqual(self.why(), [])
+            self.task["ci_pending"] = True  # another workflow on sha b still running past 1h
+            self.assertEqual(self.why(), ["1h on CI"])
+            self.task.pop("ci_pending")
+            # a recap decision resets both the failed-run count and the 1h window
+            self.task["ci_runs"] = [run("a", "1", True, 1000), run("a", "1", True, 2000), run("a", "1", True, 3000)]
+            clock[0] = 1000 + 3600000
+            self.assertTrue(budget.budget_pass(self.store, self.task))
+            self.assertEqual(self.task["attention"], "Recap required: 3 failed CI runs")
+            self.assertIn("decided: continue", self.recap("continue", why="turn on test retries"))
+            self.assertEqual(self.why(), [])
+            at = self.task["recaps"][-1]["at"]
+            self.task["ci_runs"] += [run("b", "3", True, at + 10), run("b", "3", True, at + 20)]
+            self.assertEqual(self.why(), [])  # 2 after the decision: still under 3
+            self.task["ci_runs"].append(run("b", "3", True, at + 30))
+            self.assertEqual(self.why(), ["3 failed CI runs"])
+
+    def test_pr_ci_recorded_from_pr_view_counts_reruns_and_stops_for_recap(self):
+        from unittest import mock
+        import herdr_task.budget as budget
+        import herdr_task.github as github
+        import herdr_task.tick as tick
+        clock, gh_calls, rollup = [1_000_000], [], []
+        self.task.update(state="running", pr={"number": 7, "repo": "o/r", "checked": 0})
+        url = lambda rid, job: f"https://github.com/o/r/actions/runs/{rid}/job/{job}"
+
+        def gh_run(argv, **kw):
+            gh_calls.append(argv)
+            if argv[1:3] == ["pr", "view"]:
+                body = {"state": "OPEN", "mergeable": "MERGEABLE", "headRefOid": self.head, "statusCheckRollup": rollup, "mergeCommit": None}
+                return subprocess.CompletedProcess(argv, 0, json.dumps(body), "")
+            return subprocess.CompletedProcess(argv, 0, "[]" if argv[1] == "api" else "failed test log", "")
+
+        def step(dt=60_000):
+            clock[0] += dt
+            report = {"done": [], "attention": []}
+            tick.facts(self.store, self.task, report)
+            budget.budget_pass(self.store, self.task)
+
+        worker = [{"address": "w1", "state": "live", "agent": "agy", "foreground": {"name": "agy"},
+                   "status": {"state": "idle"}, "labels": {"herdr.role": "worker"}}]
+        with mock.patch.object(github, "run", gh_run), mock.patch.object(tick, "now", lambda: clock[0]), \
+                mock.patch.object(budget, "now", lambda: clock[0]), mock.patch.object(self.commands, "now", lambda: clock[0]), \
+                mock.patch.object(self.commands, "live_agents", lambda key: worker):
+            # cancelled runs (including a fast green job beside a cancelled one) don't count
+            rollup[:] = [{"name": "lint", "conclusion": "SUCCESS", "detailsUrl": url(500, 1)},
+                         {"name": "test", "conclusion": "CANCELLED", "detailsUrl": url(500, 2)}]
+            step()
+            self.assertNotIn("ci_runs", self.task)
+            self.assertEqual(len(gh_calls), 1)  # one gh pr view per tick, nothing extra
+            # attempt 1 on run 501 fails; looking again with nothing changed doesn't count it twice
+            rollup[:] = [{"name": "test", "conclusion": "FAILURE", "detailsUrl": url(501, 1), "completedAt": "t1"}]
+            step()
+            step()
+            self.assertEqual([(r["run"], r["failed"]) for r in self.task["ci_runs"]], [("501", True)])
+            self.assertEqual(len(gh_calls), 3)
+            # `gh run rerun 501 --failed`: goes pending, then fails again -> attempt 2 on the same run id
+            rollup[:] = [{"name": "test", "status": "IN_PROGRESS", "detailsUrl": url(501, 1)}]
+            step()
+            self.assertTrue(self.task.get("ci_pending"))
+            rollup[:] = [{"name": "test", "conclusion": "FAILURE", "detailsUrl": url(501, 1), "completedAt": "t1"}]
+            step()
+            self.assertNotIn("ci_pending", self.task)
+            self.assertEqual(len(self.task["ci_runs"]), 2)
+            self.assertNotIn("recap", self.task)
+            # fast re-run of 501 on a Ready task finishes between ticks (new job/completedAt): attempt 3 -> Recap required
+            self.task.update(state="ready", auto_merge="checks", ready_at=clock[0])
+            rollup[:] = [{"name": "test", "conclusion": "FAILURE", "detailsUrl": url(501, 2), "completedAt": "t2"}]
+            step(dt=150_000)
+            self.assertEqual(len(self.task["ci_runs"]), 3)
+            self.assertEqual(self.task["state"], "running")
+            self.assertNotIn("auto_merge", self.task)
+            self.assertNotIn("news", self.task["pr"])
+            self.assertEqual(self.task["attention"], "Recap required: 3 failed CI runs")
+            for words in ("3 failed CI runs", "Don't fix anything more or re-run CI.", "CI checks failed", "RECAP.md"):
+                self.assertIn(words, self.told[-1])
+            # after `recap --decide continue`, the still-unchanged failed check isn't counted again in the new window
+            self.recap("continue", why="retry flaky tests in workflow")
+            step()
+            self.assertNotIn("recap", self.task)
+            self.assertEqual(self.why(), [])
+
 
 for _name in [n for n in vars(GateReview) if n.startswith("test_")]:
     setattr(LoopBreaker, _name, None)  # its setUp only: GateReview's own tests run once, there

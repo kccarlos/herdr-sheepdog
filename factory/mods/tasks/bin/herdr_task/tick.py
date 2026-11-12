@@ -27,7 +27,7 @@ from .ghnews import main_pass, pr_deliver, pr_news
 from .scheduler import SCHEDULER
 from .revive import revive_pass
 from .checks import checks_pass
-from .budget import budget_pass
+from .budget import budget_pass, record_ci
 
 
 def at_work(s, t):
@@ -56,6 +56,7 @@ def facts(s, t, report):
             finish(s, t)
             report["done"].append(t["id"])
             return
+        record_ci(s, t, v, now())
         problem = pr_problem(v)
         t["_pr_fresh"] = not problem and not pr_pending(v)
         try:

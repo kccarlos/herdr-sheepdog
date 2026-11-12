@@ -1,6 +1,7 @@
-"""The loop-breaker (FAC-54): a task whose herdr-task review rounds aren't converging, or that is
-far over its own estimate, stops as Needs you "Recap required"; its worker writes RECAP.md and
-the Assistant decides (recap --decide). docs/factory.md 11b: recap, then decide; never grind."""
+"""The loop-breaker (FAC-54, FAC-57): a task whose herdr-task review rounds aren't converging,
+whose pull request CI keeps failing, or that is far over its own estimate, stops as Needs you
+"Recap required"; its worker writes RECAP.md and the Assistant decides (recap --decide).
+docs/factory.md 11b, 12b: recap, then decide; never grind."""
 
 import json
 import os
@@ -8,8 +9,12 @@ import re
 import shlex
 
 from .base import Fail, now
+from .github import BAD, PENDING
 
 DECISIONS = ("continue", "split", "new", "drop")
+CI_FAIL_LIMIT = 3
+CI_WINDOW_MS = 3600000
+RUN_URL = re.compile(r"/actions/runs/(\d+)")
 # Claude tokens in input equivalents, as docs/factory-cost-report-2026-11-08.md weighs them.
 WEIGHTS = {"input_tokens": 1, "cache_creation_input_tokens": 1.25, "cache_read_input_tokens": 0.1, "output_tokens": 5}
 FILE = re.compile(r"[\w-]+(?:/[\w.-]+)*\.([A-Za-z]\w{0,5})\b")
@@ -97,6 +102,62 @@ def rounds_since(t):
     return [r for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task" and (r.get("at") or 0) > since]
 
 
+def ci_since(t):
+    """Pull request CI runs recorded after the task's last recap decision."""
+    since = ((t.get("recaps") or [{}])[-1]).get("at", 0)
+    return [r for r in t.get("ci_runs") or [] if (r.get("at") or 0) > since]
+
+
+def record_ci(s, t, v, at=None):
+    """Records finished CI runs on the task's open pull request (v: pr_view's answer) as a small
+    list of {sha, run, failed, at}. Re-running the same run id goes pending or changes its job
+    or completion time, so it counts as another attempt; cancelled runs without a failure don't."""
+    if not v or v.get("state") != "OPEN":
+        return
+    rows, head = v.get("statusCheckRollup") or [], v.get("headRefOid") or ""
+    if not rows:
+        if t.pop("ci_pending", None) is not None:
+            s.dirty = True
+        return
+    at = now() if at is None else at
+    groups, pending = {}, False
+    for c in rows:
+        if not isinstance(c, dict):
+            continue
+        m = RUN_URL.search(c.get("detailsUrl") or c.get("targetUrl") or "")
+        rid = m.group(1) if m else None
+        groups.setdefault((f"run:{rid}" if rid else f"sha:{head or 'pr'}", rid), []).append(c)
+    seen = t.setdefault("ci_seen", {})
+    for (key, rid), cs in groups.items():
+        if any((c.get("status") or c.get("state") or "").upper() in PENDING and not (c.get("conclusion") or "") for c in cs):
+            pending = True
+            if seen.pop(key, None) is not None:
+                s.dirty = True
+            continue
+        words = [(c.get("conclusion") or c.get("state") or "").upper() for c in cs]
+        failed = any(w in BAD - {"CANCELLED"} for w in words)
+        if not any(words) or (not failed and "CANCELLED" in words):
+            continue
+        sig = "|".join(sorted(f"{c.get('name') or c.get('context') or ''}:{(c.get('conclusion') or c.get('state') or '').upper()}:"
+                              f"{c.get('detailsUrl') or c.get('targetUrl') or ''}:{c.get('completedAt') or c.get('startedAt') or ''}" for c in cs))
+        if seen.get(key) == sig:
+            continue
+        seen[key] = sig
+        while len(seen) > 50:
+            seen.pop(next(iter(seen)))
+        entry = {"sha": head, **({"run": rid} if rid else {}), "failed": failed, "at": at}
+        t["ci_runs"] = (t.get("ci_runs") or [])[-49:] + [entry]
+        s.dirty = True
+    if bool(t.get("ci_pending")) != pending:
+        if pending:
+            t["ci_pending"] = True
+        else:
+            t.pop("ci_pending", None)
+        s.dirty = True
+    if not seen:
+        t.pop("ci_seen", None)
+
+
 def triggers(s, t):
     """Why this task should stop for a recap, most telling first; [] when it is converging."""
     why, rounds = [], rounds_since(t)
@@ -111,6 +172,15 @@ def triggers(s, t):
     again = sorted(set.union(set(), *[x & y for i, x in enumerate(flagged) for y in flagged[i + 1:]]))
     if again:
         why.append("the same file flagged in two rounds: " + ", ".join(again[:3]))
+    ci = ci_since(t)
+    failed_ci = [r for r in ci if r.get("failed")]
+    if len(failed_ci) >= CI_FAIL_LIMIT:
+        why.append(f"{len(failed_ci)} failed CI runs")
+    last_sha = ci[-1].get("sha") if ci else None
+    still_red = (any(r.get("failed") for r in {r.get("run"): r for r in ci if r.get("sha") == last_sha}.values())
+                 if last_sha else bool(ci and ci[-1].get("failed")))
+    if ci and (still_red or (failed_ci and t.get("ci_pending"))) and now() - (ci[0].get("at") or 0) >= CI_WINDOW_MS:
+        why.append("1h on CI")
     # Budgets count from the last decision (else from its start); time only while it works, not
     # while it waits in Ready for the person.
     est, dec = t.get("estimate_time"), (t.get("recaps") or [{}])[-1]
@@ -160,16 +230,22 @@ def unmergeable(s, t):
     """Never mergeable while a recap is open, nor after it (drop, split): Working until its next ready."""
     from .commands import back_to_work
     back_to_work(s, t, "a recap is required")
-    if t.pop("auto_merge", None) is not None:
+    am, news = t.pop("auto_merge", None), (t.get("pr") or {}).pop("news", None)
+    if am is not None or news is not None:
         s.dirty = True
 
 
 def stop_words(s, t, why, again):
     wt = t.get("worktree") or "the worktree"
-    return (f"Stop {s.ref(t)}: Herdr's loop-breaker says recap first ({'; '.join(why)}).{last_findings(t)}Don't fix anything more. "
-            f"Write RECAP.md at {wt}/RECAP.md, untracked and never committed, half a page at most: the goal, what was "
-            f"tried round by round, the recurring findings and the premise behind them, and the options (one more round, "
-            f"split, new approach, drop). Then end your turn and wait: your Assistant decides what happens next."
+    ci = any("CI" in w for w in why)
+    what = ("what was tried across the CI runs, which CI checks failed and why, and the options (new approach such as test "
+            "retries or a skip list, one more round, split, drop)" if ci else
+            "what was tried round by round, the recurring findings and the premise behind them, and the options (one more "
+            "round, split, new approach, drop)")
+    return (f"Stop {s.ref(t)}: Herdr's loop-breaker says recap first ({'; '.join(why)}).{last_findings(t)}Don't fix anything more"
+            + (" or re-run CI. " if ci else ". ")
+            + f"Write RECAP.md at {wt}/RECAP.md, untracked and never committed, half a page at most: the goal, {what}. "
+            + "Then end your turn and wait: your Assistant decides what happens next."
             + (" This is the second recap: one more round of the same is no longer an option." if again else ""))
 
 
