@@ -2046,6 +2046,12 @@ class GateReview(unittest.TestCase):
         self.assertIn("read-only", cmd)
         self.assertIn("require_escalated", cmd[-1])
 
+    def test_a_claude_reviewer_runs_in_auto_mode_so_its_verdict_can_run(self):
+        self.task["reviewer"], self.task["reviewer_model"] = "claude", None
+        self.ready()
+        cmd = self.runs[0][self.runs[0].index("--") + 1:]
+        self.assertEqual(cmd[cmd.index("--permission-mode") + 1], "auto")  # plan mode blocks `herdr-task review`
+
     def test_out_of_rounds_starts_none(self):
         self.task["set"]["review_rounds"] = 1
         self.ready()

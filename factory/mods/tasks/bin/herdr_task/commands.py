@@ -518,7 +518,10 @@ def gate_step(s, t):
     rows = {x["label"]: x["value"] for x in task_settings(s, t)}
     rv, wt, ref, ht, folder = rows["Reviewer"], t["worktree"], s.ref(t), own_path(), shlex.quote(s.loc["folder"])
     sand = sandboxes([rv["agent"]])  # agy on a Mac: sandboxed, nothing prompts, its verdict read from its terminal
-    argv = argv_for({**rv, "perm": "read-only" if rv["agent"] == "codex" else "full" if sand else "plan"})
+    # Claude Code's plan mode blocks every command, the verdict's `herdr-task review` too, so a Claude reviewer
+    # runs in auto mode: its allow list (the verdict, its reads) runs, the rest goes past auto mode's checks.
+    perm = "read-only" if rv["agent"] == "codex" else "full" if sand else "auto" if rv["agent"] == "claude" else "plan"
+    argv = argv_for({**rv, "perm": perm})
     at = now()
     code = round_code({"round": len(runs) + 1, "head": head, "at": at}) if sand else None
     shown, diff = review_diff(wt, t.get("base") or "main", head, mine)
