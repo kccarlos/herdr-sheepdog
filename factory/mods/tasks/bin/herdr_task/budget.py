@@ -1,20 +1,22 @@
-"""The loop-breaker (FAC-54, FAC-57): a task whose herdr-task review rounds aren't converging,
-whose pull request CI keeps failing, or that is far over its own estimate, stops as Needs you
-"Recap required"; its worker writes RECAP.md and the Assistant decides (recap --decide).
-docs/factory.md 11b, 12b: recap, then decide; never grind."""
+"""The loop-breaker (FAC-54, FAC-57, FAC-63): a task whose herdr-task review rounds aren't
+converging, whose pull request CI keeps failing, or that is far over its own estimate (time,
+tokens, or change size on ready), stops as Needs you "Recap required"; its worker writes RECAP.md
+and the Assistant decides (recap --decide). docs/factory.md 11b, 12b: recap, then decide."""
 
 import json
 import os
 import re
 import shlex
 
-from .base import Fail, now
+from .base import Fail, git, now
 from .github import BAD, PENDING
 
 DECISIONS = ("continue", "split", "new", "drop")
 CI_FAIL_LIMIT = 3
 CI_WINDOW_MS = 3600000
 RUN_URL = re.compile(r"/actions/runs/(\d+)")
+SIZE_LINE = re.compile(r"(?im)^[\s>*+-]*\**size(?:\s+limit)?\**\s*:\s*(.+)")
+BRIEF_LINES = re.compile(r"(?i)(?<![\w.-])~?\s*(\d+(?:,\d{3})*)(?:\s*(?:[-–—]|to)\s*~?\s*(\d+(?:,\d{3})*))?\s+lines\b")
 # Claude tokens in input equivalents, as docs/factory-cost-report-2026-11-08.md weighs them.
 WEIGHTS = {"input_tokens": 1, "cache_creation_input_tokens": 1.25, "cache_read_input_tokens": 0.1, "output_tokens": 5}
 FILE = re.compile(r"[\w-]+(?:/[\w.-]+)*\.([A-Za-z]\w{0,5})\b")
@@ -35,6 +37,67 @@ def parse_tokens(text):
     if not m or not float(m.group(1)):
         raise Fail(f"estimate.tokens is like 3M or 800k, not {text!r}.")
     return int(float(m.group(1)) * {"": 1, "k": 1000, "m": 1000000}[m.group(2)])
+
+
+def parse_lines(text):
+    """300, ~300, 300 lines: line count for estimate.lines."""
+    m = re.fullmatch(r"~?\s*(\d+(?:,\d{3})*)\s*(?:lines?)?", str(text).strip().lower())
+    n = int(m.group(1).replace(",", "")) if m else 0
+    if not n:
+        raise Fail(f"estimate.lines is like 300, not {text!r}.")
+    return n
+
+
+def brief_lines(text):
+    """Largest line count in a brief's size phrase ('about 150-300 lines', '~300 lines', '300 lines'); None when none."""
+    def scan(src):
+        nums = [int(g.replace(",", "")) for m in BRIEF_LINES.finditer(src) for g in m.groups() if g]
+        return max((n for n in nums if n > 0), default=None)
+    for line in SIZE_LINE.findall(text or ""):
+        if (n := scan(line.split(". ")[0]) or scan(line)) is not None:
+            return n
+    return scan(text or "")
+
+
+def size_estimate(t):
+    """The task's line-count estimate: --set estimate.lines, else read from its brief; None when neither sets one."""
+    return int(t["estimate_lines"]) if t.get("estimate_lines") else brief_lines(t.get("prompt") or "")
+
+
+def ignored_size_file(path):
+    """Generated and lock files left out of a task's change size."""
+    p = re.sub(r"/+", "/", re.sub(r"\{[^{}]*=>\s*([^{}]*)\}", r"\1", path.strip('"')).split(" => ", 1)[-1]).lstrip("/")
+    name = os.path.basename(p)
+    return (name in ("package-lock.json", "bun.lockb", "pnpm-lock.yaml", "npm-shrinkwrap.json")
+            or name.endswith(".lock") or p.startswith("web/generated/") or "/web/generated/" in p)
+
+
+def change_lines(t):
+    """Added + deleted lines in a worktree task's diff from its merge-base with base to HEAD,
+    leaving out generated and lock files; None when the task has no live worktree."""
+    wt = t.get("worktree") if t.get("mode") == "worktree" else None
+    if not wt or not os.path.isdir(wt):
+        return None
+    from .commands import fork_of
+    ok, head, _ = git(wt, "rev-parse", "--verify", "--quiet", "HEAD")
+    if not ok or not head:
+        return None
+    mb = fork_of(wt, t.get("base") or "main", head)
+    if not mb and t.get("start"):
+        ok_mb, out_mb, _ = git(wt, "merge-base", t["start"], head)
+        mb = out_mb if ok_mb and out_mb else t["start"]
+    if not mb:
+        return None
+    ok, out, _ = git(wt, "-c", "core.quotePath=false", "diff", "--numstat", f"{mb}..{head}")
+    if not ok:
+        return None
+    total = 0
+    for line in out.splitlines():
+        parts = line.split("\t", 2)
+        if len(parts) == 3 and not ignored_size_file(parts[2]):
+            a, r, _ = parts
+            total += (int(a) if a.isdigit() else 0) + (int(r) if r.isdigit() else 0)
+    return total
 
 
 def tokens_words(n):
@@ -194,31 +257,56 @@ def triggers(s, t):
     return list(dict.fromkeys(why))
 
 
-def budget_pass(s, t):
-    """The tick's look at a running or ready worktree task: a trigger opens a recap once, makes the
-    task Needs you and tells its worker to stop and write RECAP.md. True when one is open."""
-    from .commands import back_to_work, tell, workers  # commands imports this module
-    if t.get("recap"):
-        if t.get("attention") != t["recap"]["title"]:  # something else changed it: the recap still waits
-            t["attention"], t["attention_at"] = t["recap"]["title"], now()
-            s.dirty = True
-        unmergeable(s, t)
-        return True
-    why = triggers(s, t)
-    if not why:
-        return False
+def size_triggers(t):
+    """Why ready stops this worktree task for size, or []. After recap --decide continue, doesn't fire again for that decision."""
+    est, dec = size_estimate(t), (t.get("recaps") or [{}])[-1]
+    if not est or (dec.get("decision") == "continue" and (
+            not dec.get("reasons") or any("twice its size" in r for r in dec["reasons"]) or (dec.get("lines") or 0) > 2 * est)):
+        return []
+    n = change_lines(t)
+    return [f"change is {n} lines, over twice its size ({est})"] if n is not None and n > 2 * est else []
+
+
+def keep_recap(s, t):
+    if t.get("attention") != t["recap"]["title"]:  # something else changed it: the recap still waits
+        t["attention"], t["attention_at"] = t["recap"]["title"], now()
+        s.dirty = True
+    unmergeable(s, t)
+    return True
+
+
+def open_recap(s, t, why):
+    from .commands import tell, workers  # commands imports this module
     unmergeable(s, t)
     again = bool(t.get("recaps"))
     title = ("Recap required again: change direction" if again else f"Recap required: {why[0]}")[:120]
     t["recap"] = {"at": now(), "reasons": why, "round": len(rounds_since(t)), "title": title}
     t["attention"], t["attention_at"] = title, now()
     s.dirty = True
-    if workers(s, t):
+    me = os.environ.get("HC_TERMINAL_ID")
+    if [w for w in workers(s, t) if w.get("address") != me]:
         try:
             t["recap"]["told"] = tell(s, t, stop_words(s, t, why, again), None)[0]
         except Fail:
             pass
     return True
+
+
+def budget_pass(s, t):
+    """The tick's look at a running or ready worktree task: a trigger opens a recap once, makes the
+    task Needs you and tells its worker to stop and write RECAP.md. True when one is open."""
+    if t.get("recap"):
+        return keep_recap(s, t)
+    why = triggers(s, t)
+    return open_recap(s, t, why) if why else False
+
+
+def size_pass(s, t):
+    """ready's size check on a worktree task: past twice its size estimate opens a recap."""
+    if t.get("recap"):
+        return keep_recap(s, t)
+    why = size_triggers(t)
+    return open_recap(s, t, why) if why else False
 
 
 def last_findings(t):
@@ -238,8 +326,11 @@ def unmergeable(s, t):
 def stop_words(s, t, why, again):
     wt = t.get("worktree") or "the worktree"
     ci = any("CI" in w for w in why)
+    size = any("twice its size" in w for w in why)
     what = ("what was tried across the CI runs, which CI checks failed and why, and the options (new approach such as test "
             "retries or a skip list, one more round, split, drop)" if ci else
+            "what drove the size, which files hold most of the change, and the options (continue as one change, split, "
+            "new approach, drop)" if size else
             "what was tried round by round, the recurring findings and the premise behind them, and the options (one more "
             "round, split, new approach, drop)")
     return (f"Stop {s.ref(t)}: Herdr's loop-breaker says recap first ({'; '.join(why)}).{last_findings(t)}Don't fix anything more"
@@ -251,9 +342,18 @@ def stop_words(s, t, why, again):
 
 def budget_lines(t):
     """show's lines: the task's estimate, its open recap and its past decisions."""
+    sz = size_estimate(t)
     est = [w for k, f in (("estimate_time", time_words), ("estimate_tokens", tokens_words)) if t.get(k) for w in [f(t[k])]]
-    lines = [f"estimate: {', '.join(est)}" + (f" (Claude tokens so far: {tokens_words(int(sum(c.get('sum', 0) for c in t['tokens'].values())))})"
-                                             if t.get("tokens") else "")] if est else []
+    if sz:
+        est.append(f"{sz} lines")
+    lines = []
+    if est:
+        so_far = ([f"Claude tokens so far: {tokens_words(int(sum(c.get('sum', 0) for c in t['tokens'].values())))}"]
+                  if t.get("tokens") else [])
+        cur = change_lines(t) if sz else None
+        if cur is not None:
+            so_far.append(f"current size: {cur} lines")
+        lines.append(f"estimate: {', '.join(est)}" + (f" ({'; '.join(so_far)})" if so_far else ""))
     if t.get("recap"):
         lines.append(f"recap open: {t['recap']['title']} (the Assistant decides: recap --decide)")
     lines += [f"recap decided: {d['decision']} ({d['why']})" for d in t.get("recaps") or []]
@@ -261,8 +361,10 @@ def budget_lines(t):
 
 
 def recap_refusal(s, t):
-    if t.get("recap"):
-        return (f"{s.ref(t)} needs a recap first: write RECAP.md (untracked) at your worktree's root, end your turn and "
+    rc = t.get("recap")
+    if rc:
+        why = f" ({'; '.join(rc['reasons'])})" if rc.get("reasons") else ""
+        return (f"{s.ref(t)} needs a recap first{why}: write RECAP.md (untracked) at your worktree's root, end your turn and "
                 f"wait; your Assistant decides what happens next.")
     return None
 
@@ -297,8 +399,10 @@ def cmd_recap(args):
         if args.decide == "continue" and t.get("recaps"):
             raise Fail(f"{s.ref(t)} already had its one continue after a recap: split it, give it a new approach, or drop it.")
         found = last_findings(t)  # before the decision starts the round count afresh
+        cur = change_lines(t)
         t.setdefault("recaps", []).append({"decision": args.decide, "why": " ".join(args.why.split())[:300], "at": now(),
-                                           "reasons": rc.get("reasons", []), "tokens": token_sum(s, t)})
+                                           "reasons": rc.get("reasons", []), "tokens": token_sum(s, t),
+                                           **({"lines": cur} if cur is not None else {})})
         t.pop("recap")
         if (t.get("attention") or "").startswith("Recap required"):
             t.pop("attention", None)

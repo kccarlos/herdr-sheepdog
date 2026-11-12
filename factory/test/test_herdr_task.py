@@ -2918,6 +2918,91 @@ class LoopBreaker(GateReview):
             self.assertNotIn("recap", self.task)
             self.assertEqual(self.why(), [])
 
+    def test_brief_size_estimate_and_set_override(self):
+        from herdr_task.budget import brief_lines, size_estimate
+        from herdr_task.settings import set_task
+        for text, want in (("One change of about 150-300 lines.", 300), ("Keep to ~300 lines.", 300),
+                           ("At most 300 lines total.", 300), ("About 150–300 lines or 150 to 300 lines.", 300),
+                           ("Field note: 7,191 lines over 27 files.\n- Size: about 150-300 lines. Stop past ~400.", 300),
+                           ("Say why in 1 line; hc read --lines 400.", None)):
+            self.assertEqual(brief_lines(text), want, text)
+        self.task["prompt"] = "Keep this change to about 150-300 lines."
+        self.assertEqual(size_estimate(self.task), 300)
+        set_task(self.task, "estimate.lines", "80")
+        self.assertEqual(size_estimate(self.task), 80)  # --set wins over the brief
+        for bad in ("0", "-10", "lots"):
+            with self.assertRaises(self.commands.Fail):
+                set_task(self.task, "estimate.lines", bad)
+        set_task(self.task, "estimate.lines", "default")
+        self.assertNotIn("estimate_lines", self.task)
+        self.assertEqual(size_estimate(self.task), 300)
+
+    def test_ready_measures_diff_ignores_locks_refuses_past_twice_size_until_continue(self):
+        import argparse
+        from unittest import mock
+        from herdr_task.budget import budget_lines, change_lines
+        from herdr_task.settings import set_task
+
+        def write_all(root, files, msg):
+            for rel, body in files.items():
+                p = os.path.join(root, rel)
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                with open(p, "w") as f:
+                    f.write(body)
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-q", "-m", msg)
+            return self.git(root, "rev-parse", "HEAD")
+
+        mb = write_all(self.main, {"src.py": "".join(f"old {i}\n" for i in range(5))}, "seed")
+        write_all(self.main, {"other.py": "x\n" * 40}, "later on main")  # past merge-base: never counted against the task
+        self.git(self.wt, "reset", "--hard", mb)
+        self.task["start"] = mb
+        self.task["prompt"] = "Field note: 7,191 lines.\n- Size: about 5-10 lines."
+        # 5 deleted + 15 added = 20 lines (at 2x of 10); lock and generated files don't count
+        noise = "lock\n" * 50
+        self.head = write_all(self.wt, {"src.py": "".join(f"new {i}\n" for i in range(15)), "package-lock.json": noise,
+                                        "bun.lockb": noise, "Cargo.lock": noise, "web/generated/plugins.ts": noise}, "at 2x")
+        self.assertEqual(change_lines(self.task), 20)
+        self.ready()
+        self.assertNotIn("recap", self.task)
+        # 21 lines (> 2x of 10): opens a recap and ready refuses with recap_refusal's words
+        self.head = write_all(self.wt, {"src.py": "".join(f"new {i}\n" for i in range(16))}, "over 2x")
+        self.assertEqual(change_lines(self.task), 21)
+        with mock.patch.object(self.commands, "workers", lambda s, t: [{"address": "w1"}]):
+            with self.assertRaises(self.commands.Fail) as e:
+                self.ready()
+        for words in ("change is 21 lines, over twice its size (10)", "write RECAP.md (untracked)", "Assistant decides"):
+            self.assertIn(words, str(e.exception))
+        self.assertEqual(self.task["recap"]["reasons"], ["change is 21 lines, over twice its size (10)"])
+        self.assertEqual(self.task["attention"], "Recap required: change is 21 lines, over twice its size (10)")
+        self.assertIn("change is 21 lines, over twice its size (10)", self.told[-1])
+        # show's budget lines include the size estimate and current size
+        from herdr_task.output import view as real_view
+        shown = []
+        with mock.patch.object(self.commands, "view", real_view), \
+                mock.patch.object(self.commands, "say", lambda args, v, text: shown.append(text)):
+            self.commands.cmd_show(argparse.Namespace(id="SHEP-13", json=False, folder=None, evidence=False))
+        self.assertIn("estimate: 10 lines (current size: 21 lines)", budget_lines(self.task))
+        self.assertIn("estimate: 10 lines (current size: 21 lines)", shown[-1])
+        # --set wins over the brief when no recap is open; continue lets >2x through without firing again
+        self.assertIn("decided: continue", self.recap("continue", why="one cohesive change"))
+        self.ready()
+        self.head = write_all(self.wt, {"src.py": "".join(f"new {i}\n" for i in range(18))}, "review fix")
+        self.ready()  # doesn't fire again for that continue decision
+        self.assertNotIn("recap", self.task)
+        self.task["recaps"] = [{"decision": "split", "why": "two tasks", "at": 1, "reasons": ["change is 21 lines, over twice its size (10)"]}]
+        with self.assertRaises(self.commands.Fail):
+            self.ready()  # split does not waive the 2x size limit
+        self.task.pop("recap", None)
+        self.task.pop("recaps", None)
+        set_task(self.task, "estimate.lines", "20")
+        self.ready()  # 23 <= 2 * 20: --set wins over the 10-line brief
+        self.assertNotIn("recap", self.task)
+        set_task(self.task, "estimate.lines", "default")
+        self.task["prompt"] = "Make the gate."  # no size phrase in brief: no limit
+        self.ready()
+        self.assertNotIn("recap", self.task)
+
 
 for _name in [n for n in vars(GateReview) if n.startswith("test_")]:
     setattr(LoopBreaker, _name, None)  # its setUp only: GateReview's own tests run once, there

@@ -35,7 +35,7 @@ from .scheduler import ensure_scheduler
 from .proof import evidence, find_proof
 from .when import when_from
 from .templates import instructions
-from .budget import budget_lines, budget_pass, recap_refusal, record_ci
+from .budget import budget_lines, budget_pass, recap_refusal, record_ci, size_pass
 
 
 # ---- commands -------------------------------------------------------------------------------
@@ -358,6 +358,7 @@ def cmd_ready(args):
                 raise Fail(f"{wt} has uncommitted changes. Commit them, then run ready again.")
             t["head"] = git(wt, "rev-parse", "HEAD")[1]
             own_work(s, t)
+            size_pass(s, t)
         refused = recap_refusal(s, t) or review_refusal(s, t, wt)
         if refused:
             # Kept (the task's line says why it waits); refused after the store is saved.
