@@ -21,19 +21,25 @@ import sys
 import termios
 import tty
 
+from . import base as _base, store as _store
 from .base import ENTRY, Fail, now, run, STORE
 from .output import say
 
-ASKS = os.path.join(STORE, "asks")
+_DEFAULT_ASKS, _DEFAULT_RUN = os.path.join(STORE, "asks"), run
+ASKS = _DEFAULT_ASKS
 # Sheepdog's rail refuses an approving answer whose words open with one of these (supervisor/inputs.go negativeWords)
 NEGATIVE = {"no", "nope", "nah", "don't", "dont", "stop", "cancel", "never", "deny", "decline", "reject", "wait", "hold", "negative"}
 MSG_MAX = 300  # the question in the OSC report, cut: hc refuses an overlong sequence
 
 
+def asks_dir():
+    return ASKS if ASKS != _DEFAULT_ASKS else os.path.join(_store.STORE, "asks")
+
+
 def path_of(ask_id):
     if not ask_id or not all(c.isalnum() for c in ask_id):
         raise Fail(f"no such ask: {ask_id}")
-    return os.path.join(ASKS, f"{ask_id}.json")
+    return os.path.join(asks_dir(), f"{ask_id}.json")
 
 
 def load(ask_id):
@@ -45,7 +51,7 @@ def load(ask_id):
 
 
 def save(rec):
-    os.makedirs(ASKS, exist_ok=True)
+    os.makedirs(asks_dir(), exist_ok=True)
     tmp = f"{path_of(rec['id'])}.{os.getpid()}.tmp"
     with open(tmp, "w") as f:
         json.dump(rec, f)
@@ -76,23 +82,28 @@ def cmd_ask(args):
     first = " ".join(words[:2]) if words[:2] == ["do", "not"] else (words or [""])[0]
     if first in NEGATIVE | {"do not"} and not any(o.lower().startswith("yes") for o in options):
         raise Fail(f'Sheepdog can\'t tap a recommended option that starts with "{first}" unless another option starts with "Yes": reword it or add one.')
-    if not os.environ.get("HC_TERMINAL_ID"):  # the answer's news goes to the asker's terminal
+    checklist, to = getattr(args, "checklist", None), getattr(args, "to", None) or os.environ.get("HC_TERMINAL_ID")
+    if not to and not checklist:  # the answer's news goes to the asker's terminal
         raise Fail("Run it from an agent's own terminal (there's no HC_TERMINAL_ID here).")
     rec = {"id": secrets.token_hex(3), "question": question, "options": options, "recommend": recommend,
-           "task": args.task, "to": os.environ.get("HC_TERMINAL_ID"), "at": now()}
+           "task": args.task, "to": to, "at": now(), **({"checklist": checklist} if checklist else {})}
     save(rec)
     # The pane gets the core's environment, not ours: the store goes along in its command.
     labels = ["--label", "herdr.role=ask", "--label", f"herdr.ask={rec['id']}"]
+    env_kv = [f"HERDR_TASK_STORE={os.path.dirname(asks_dir())}"] + (
+        [f"HERDR_TASK_SETTINGS={__import__('herdr_task.settings', fromlist=['SETTINGS']).SETTINGS}"] if checklist else [])
+    runner, r = run if run is not _DEFAULT_RUN else _base.run, None
     try:
-        r = run(["hc", "run", "--bg", "--json", "--no-notify", "--outlive-parent", "--name", f"ask-{rec['id']}", *labels, "--",
-                 "env", f"HERDR_TASK_STORE={STORE}", sys.executable, ENTRY, "_ask-pane", rec["id"]], check=True)
+        r = runner(["hc", "run", "--bg", "--json", "--no-notify", "--outlive-parent", "--name", f"ask-{rec['id']}", *labels, "--",
+                    "env", *env_kv, sys.executable, ENTRY, "_ask-pane", rec["id"]], check=True)
         rec = {**load(rec["id"]), "terminal": json.loads(r.stdout)["address"]}  # the pane may have saved since
     except (Fail, OSError, ValueError, KeyError, TypeError) as e:
         os.unlink(path_of(rec["id"]))  # no pane, no ask
-        raise Fail(f"couldn't start the ask pane: {e if isinstance(e, (Fail, OSError)) else (r.stderr or r.stdout).strip() or 'no terminal in its answer'}")
+        raise Fail(f"couldn't start the ask pane: {e if isinstance(e, (Fail, OSError)) or r is None else (r.stderr or r.stdout).strip() or 'no terminal in its answer'}")
     save(rec)
     say(args, {"id": rec["id"], "terminal": rec["terminal"]},
         f"Asked ({rec['id']}): its pane is {rec['terminal']}. The answer comes to you as news; carry on with other work.")
+    return rec
 
 
 def report(state, kind=None, msg=None):
@@ -168,6 +179,11 @@ def cmd_ask_pane(args):
     report("working")
     rec = {**load(args.id), "answer": answer, "answered_at": now()}  # as saved now (ask adds its terminal)
     save(rec)
+    if rec.get("checklist"):
+        try:
+            __import__("herdr_task.project", fromlist=["apply_checklist_answer"]).apply_checklist_answer(rec)
+        except Fail:
+            pass
     if rec.get("to"):
         try:
             sent = send_or_hold(rec["to"], news_line(rec), "news")

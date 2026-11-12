@@ -18,9 +18,9 @@ def json_dict(raw):
     except ValueError:
         return None
 
-def try_run(*args):
+def try_run(*args, cwd=None):
     try:
-        return base.run(list(args))
+        return base.run(list(args), cwd=cwd)
     except OSError:
         return None
 
@@ -29,7 +29,7 @@ def coord_for_repo(repo, space_id=None):
         if space_id and (found := coordinator_in(st.bare(space_id))):
             return found, (base.hc_json("get", found) or {}).get("labels") or {}
         for addr in coordinators():
-            if (k := base.hc_json("get", addr) or {}).get("state") == "live" and k.get("cwd") and os.path.realpath(k["cwd"]) == repo:
+            if (k := base.hc_json("get", addr) or {}).get("state") == "live" and (k.get("labels") or {}).get("herdr.role") != "ask" and k.get("cwd") and os.path.realpath(k["cwd"]) == repo:
                 return addr, k.get("labels") or {}
     except OSError:
         pass
@@ -226,15 +226,203 @@ def sync_autopilot(repo, space_id, name, old_ids, want_on, asst_changed, dry):
             ap.cmd_autopilot(argparse.Namespace(autopilot="on", space=bare_id, everywhere=False, json=True, name=name, space_folder=repo))
     return True, True, f"Autopilot: on for {bare_id} (heartbeat -> docs/requirements.md)"
 
+NOT_READY = {"not yet", "not set up yet", "no"}
+ans_yes = lambda v: str(v or "").strip().lower().startswith(("yes", "on", "true", "1"))
+fmt_pick = lambda p: f"{(p or {}).get('agent') or 'claude'}/{p['model']}" if (p or {}).get("model") else ((p or {}).get("agent") or "claude")
+def read_text(p):
+    with open(p, errors="replace") as f:
+        return f.read()
+
+def ap_is_on(repo, space_id):
+    bare_id, ap_spaces = st.bare(space_id), (read_list(ap.STATE) or {}).get("spaces") or {}
+    return any(isinstance(v, dict) and v.get("on") and (k == bare_id or ("/" not in k and v.get("folder") == repo)) for k, v in ap_spaces.items())
+
+def detect_ios(repo):
+    for root, dirs, files in os.walk(repo) if os.path.isdir(repo) else ():
+        rel = os.path.relpath(root, repo)
+        for x in [d for d in dirs if d.endswith(".xcodeproj")]:
+            txt = read_text(pbx) if os.path.isfile(pbx := os.path.join(root, x, "project.pbxproj")) else ""
+            if not txt or re.search(r"iphoneos|IPHONEOS_DEPLOYMENT_TARGET|TARGETED_DEVICE_FAMILY", txt, re.I) or "macosx" not in txt.lower():
+                return True
+        if "Package.swift" in files and re.search(r"\.iOS\b|\biOS\b", re.sub(r"//.*|/\*[\s\S]*?\*/", "", read_text(os.path.join(root, "Package.swift")))):
+            return True
+        dirs[:] = [] if rel != "." and rel.count(os.sep) >= 1 else [d for d in sorted(dirs) if not d.startswith(".") and d not in ("node_modules", "DerivedData", "Pods") and not d.endswith(".xcodeproj")]
+    return False
+
+def check_github_secrets(repo):
+    has_git = os.path.isdir(repo) and (os.path.exists(os.path.join(repo, ".git")) or locate(repo)["kind"] == "repo")
+    remotes = base.git(repo, "remote")[1].split() if has_git else []
+    remote = "origin" if "origin" in remotes else (remotes[0] if remotes else "")
+    ok_head = bool(has_git and base.git(repo, "rev-parse", "--verify", "--quiet", "HEAD")[0])
+    branch = br if (br := base.git(repo, "rev-parse", "--abbrev-ref", "HEAD")[1] if ok_head else "") and br != "HEAD" else "main"
+    pushed = bool(remote and ok_head and (base.git(repo, "merge-base", "--is-ancestor", "HEAD", "@{u}")[0]
+                  or base.git(repo, "merge-base", "--is-ancestor", "HEAD", f"refs/remotes/{remote}/{branch}")[0]))
+    rv = try_run(base.GH, "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner", cwd=repo) if remote else None
+    gh_repo = ((json_dict(rv.stdout) or {}).get("nameWithOwner") or next(iter((rv.stdout or "").strip().splitlines()), "") or "ok") if rv and rv.returncode == 0 else ""
+    wf_dir = os.path.join(repo, ".github", "workflows")
+    wfs = sorted(f for f in os.listdir(wf_dir) if f.endswith((".yml", ".yaml")) and os.path.isfile(os.path.join(wf_dir, f))) if os.path.isdir(wf_dir) else []
+    ref_sec = sorted({a or b for f in wfs for a, b in re.findall(r"\bsecrets(?:\.([A-Za-z_][A-Za-z0-9_]*)|\[\s*['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]\s*\])",
+                      read_text(os.path.join(wf_dir, f))) if not (a or b).upper().startswith("GITHUB_")})
+    sr = try_run(base.GH, "secret", "list", cwd=repo) if ref_sec and (gh_repo or remote) else None
+    raw = (sr.stdout or "").strip() if sr and sr.returncode == 0 else ""
+    names = re.findall(r'"name"\s*:\s*"([^"]+)"', raw) if raw.startswith("[") else [ln.split()[0] for ln in raw.splitlines() if ln.strip() and ln.split()[0] != "NAME"]
+    have = {t for t in names if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", t)}
+    miss_sec = [n for n in ref_sec if n not in have]
+    sec_ok, gh_ok = (not ref_sec or (sr is not None and sr.returncode == 0 and not miss_sec)), bool(remote and gh_repo and pushed and wfs)
+    gh_miss = (["no GitHub repo"] if not (remote and gh_repo) else ([] if pushed else [f"{branch} not pushed"])) + ([] if wfs else ["no CI workflow"])
+    gh_steps = ([f"Create and push the GitHub repo: gh repo create --source {shlex.quote(repo)} --private --push"] if not (remote and gh_repo)
+                else ([] if pushed else [f"Push {branch} to {remote}: git -C {shlex.quote(repo)} push -u {remote} {branch}"])) + ([] if wfs else [f"Add a CI workflow under {wf_dir}"])
+    sec_steps = [] if sec_ok else [f"Set CI secret{'s' if len(miss_sec) != 1 else ''} on GitHub: " + " && ".join(f"gh secret set {n}" for n in miss_sec)]
+    return ((gh_ok, f"{gh_repo} (pushed, {len(wfs)} workflow{'s' if len(wfs) != 1 else ''})" if gh_ok else ", ".join(gh_miss), gh_steps),
+            (sec_ok, (f"set: {', '.join(ref_sec)}" if ref_sec else "none referenced") if sec_ok else f"missing: {', '.join(miss_sec)}", sec_steps, ref_sec, miss_sec))
+
+def checklist_cards(ios, layer):
+    w, r = fmt_pick((layer or {}).get("worker") or FACTORY_WORKER), fmt_pick((layer or {}).get("reviewer") or FACTORY_REVIEWER)
+    dflt = f"Keep defaults: worker {w}, reviewer {r}"
+    ios_c = [("apple_signin", "Apple sign-in", "Is Apple sign-in ready on this Mac for unattended iOS builds?",
+              ["Yes, signed in", "Local simulator only tonight", "Not yet"], "Yes, signed in", True,
+              "Sign in to Apple / App Store Connect on this Mac (Xcode > Settings > Accounts or asc web auth login)"),
+             ("app_record", "App Store app record", "Do the App Store Connect app record and internal TestFlight group exist?",
+              ["Yes, app record is ready", "Skip TestFlight tonight", "Not yet"], "Yes, app record is ready", True,
+              "Create the App Store Connect app record and internal TestFlight group"),
+             ("app_store_profile", "App Store profile", "Is the App Store provisioning profile ready for this bundle ID?",
+              ["Yes, profile is ready", "Skip App Store signing tonight", "Not yet"], "Yes, profile is ready", True,
+              "Create or install the App Store provisioning profile (IOS_APP_STORE)")] if ios else []
+    return ios_c + [
+        ("service_account", "Service account", "Which service account should night runs use for runtime secrets?",
+         ["1Password service account", "herdr-secret only", "No runtime secrets needed", "Not set up yet"], "1Password service account", True,
+         "Set up the night-run service account or add needed keys with herdr-secret"),
+        ("milestone_gates", "Milestone gates", "Which milestone gates may the Assistant pass on its own tonight?",
+         ["M0 and M1", "All milestones except release", "M0 only", "None, ask me at each gate"], "M0 and M1", False, None),
+        ("design_pass", "Design pass", "Run a Claude Opus design pass before UI milestones?", ["Yes", "No"], "Yes", False, None),
+        ("model_routing", "Model routing", f"Model routing for tonight (defaults: worker {w}, reviewer {r})?",
+         [dflt, "Usage-aware: pick the pool that resets soonest", "Claude workers and Claude Opus reviewers"], dflt, False, None),
+        ("autopilot", "Autopilot", "Turn Autopilot on for the night?", ["Yes", "No"], "Yes", False, None)]
+
+def save_project(repo, space_id, name, edit):
+    if not isinstance(cfg := (read_list(st.SETTINGS) if os.path.exists(st.SETTINGS) else {}), dict) or cfg.get("pushed_from"):
+        return None
+    spaces = dict(cfg.get("spaces") or {})
+    sid = next((k for k, v in spaces.items() if "/" not in k and isinstance(v, dict) and v.get("folder") == repo), None) or st.bare(space_id or "") or auto_prefix(os.path.basename(repo)).lower()
+    cur = {"folder": repo, "name": name or os.path.basename(repo), **dict(spaces.get(sid) or {})}
+    cur["project"] = edit(dict(cur.get("project") or {}))
+    os.makedirs(os.path.dirname(st.SETTINGS), exist_ok=True)
+    with open(tmp := f"{st.SETTINGS}.{os.getpid()}.tmp", "w") as f:
+        json.dump({**cfg, "version": 1, "spaces": {**spaces, sid: cur}}, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, st.SETTINGS)
+    return sid, cur["name"]
+
+def apply_checklist_answer(rec):
+    chk, answer = rec.get("checklist") or {}, str(rec.get("answer") or "").strip()
+    if not (repo := chk.get("folder")) or not (key := chk.get("item")) or not answer:
+        return
+    upd = lambda p: {**{k: v for k, v in p.items() if k != "asks"}, key: answer,
+                     **({"asks": a} if (a := {k: v for k, v in (p.get("asks") or {}).items() if k != key}) else {})}
+    if (res := save_project(repo, chk.get("space"), chk.get("name"), upd)) and key == "autopilot" and ans_yes(answer):
+        sync_autopilot(repo, res[0], res[1], [], True, False, False)
+
+def try_load_ask(ask_mod, aid):
+    try:
+        return ask_mod.load(aid) if aid else {}
+    except Fail:
+        return {}
+
+def run_checklist(repo, space_id=None, name=None, assistant=None, ap_hint=None, dry=False):
+    from . import ask as ask_mod
+    if not isinstance(cfg := (read_list(st.SETTINGS) if os.path.exists(st.SETTINGS) else {}), dict):
+        raise Fail(f"Can't read {st.SETTINGS} (fix invalid JSON first).")
+    if cfg.get("pushed_from") and not dry:
+        raise Fail("This machine's Shepherdr settings are a pushed copy: run the checklist from the window's machine.")
+    spaces = cfg.get("spaces") or {}
+    if not space_id:
+        pfx = (read_list(store_path(repo)[1]) or {}).get("prefix") or auto_prefix(os.path.basename(repo))
+        space_id = next((k for k, v in spaces.items() if "/" not in k and isinstance(v, dict) and v.get("folder") == repo), None) or ensure_space(repo, os.path.basename(repo), pfx, cfg, True)[0]
+    bare_id = st.bare(space_id)
+    layer = dict(spaces.get(bare_id) or next((v for k, v in spaces.items() if "/" not in k and isinstance(v, dict) and v.get("folder") == repo), None) or {})
+    name, old_proj = name or layer.get("name") or os.path.basename(repo), dict(layer.get("project") or {})
+    proj, asks, changed, ap_ans = dict(old_proj), dict(old_proj.get("asks") or {}), False, False
+    for k, aid in list(asks.items()):
+        if not (rec := try_load_ask(ask_mod, aid)) or "answer" in rec:
+            asks.pop(k, None)
+        if "answer" in rec:
+            proj[k] = rec["answer"]
+            if k == "autopilot" and ans_yes(rec["answer"]):
+                ap_ans, changed = True, sync_autopilot(repo, bare_id, name, [], True, False, dry)[1] or changed
+    ap_now = True if (dry and (ap_hint or ap_ans)) else ap_is_on(repo, bare_id)
+    if ap_now:
+        proj["autopilot"] = "Yes"
+    elif not ap_ans and ans_yes(proj.get("autopilot")):
+        proj.pop("autopilot", None)
+    ios = detect_ios(repo)
+    (gh_ok, gh_det, gh_steps), (sec_ok, sec_det, sec_steps, ref_sec, miss_sec) = check_github_secrets(repo)
+    items = [{"key": "github", "label": "GitHub repo", "ready": gh_ok, "detail": gh_det},
+             {"key": "ci_secrets", "label": "CI secrets", "ready": sec_ok, "detail": sec_det, "referenced": ref_sec, "missing": miss_sec}]
+    person_steps, asked, ask_err = [*gh_steps, *sec_steps], [], None
+    to_term = os.environ.get("HC_TERMINAL_ID") or assistant or (None if dry else coord_for_repo(repo, bare_id)[0])
+    cards = checklist_cards(ios, layer)
+    for key, label, question, options, recommend, needs_ready, pstep in cards:
+        if val := str(proj.get(key) or "").strip():
+            rdy = val.lower() not in NOT_READY if needs_ready else True
+            person_steps += [pstep] if (not rdy and pstep) else []
+            items.append({"key": key, "label": label, "ready": rdy, "detail": "on" if (key == "autopilot" and ap_now) else val, "answer": val})
+            continue
+        person_steps += [pstep] if pstep else []
+        aid = asks.get(key)
+        if (t := try_load_ask(ask_mod, aid).get("terminal")) and (base.hc_json("get", t) or {}).get("state") == "live":
+            det = f"waiting on card {aid} ({t})"
+        elif dry:
+            asks.pop(key, None)
+            det = "would ask card"
+        else:
+            asks.pop(key, None)
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    rec = ask_mod.cmd_ask(argparse.Namespace(
+                        show=None, question=question, option=options, recommend=recommend, task=None, json=True,
+                        to=to_term, checklist={"folder": repo, "space": bare_id, "name": name, "item": key}))
+                asks[key] = rec["id"]
+                asked.append({"item": key, "id": rec["id"], "terminal": rec["terminal"]})
+                det = f"asked card {rec['id']} ({rec['terminal']})"
+            except Fail as e:
+                ask_err, det = ask_err or str(e), "needs answer"
+        items.append({"key": key, "label": label, "ready": False, "detail": det})
+    card_keys = [c[0] for c in cards]
+    kept_asks = {k: asks[k] for k in card_keys if k in asks}
+    new_proj = {"ios": ios, "github": gh_ok, "ci_secrets": sec_ok,
+                **{k: proj[k] for k in card_keys if str(proj.get(k) or "").strip()}, **({"asks": kept_asks} if kept_asks else {})}
+    if new_proj != old_proj:
+        changed = True
+        if not dry:
+            save_project(repo, bare_id, name, lambda _: new_proj)
+    rdy_items, miss_items = [x for x in items if x["ready"]], [x for x in items if not x["ready"]]
+    lines = [f"Checklist for {name} ({bare_id}): {len(rdy_items)} ready, {len(miss_items)} missing" + (" — ready for an unattended night." if not miss_items else "")]
+    for title, grp in (("Ready:", rdy_items), ("Missing:", miss_items)):
+        if grp:
+            lines += [title, *(f"- {x['label']}: {x['detail']}" for x in grp)]
+    if person_steps:
+        lines += ["Steps for you:", *(f"- {s}" for s in person_steps)]
+    if ask_err:
+        lines.append(f"Cards not opened: {ask_err}")
+    return {"folder": repo, "space": bare_id, "ios": ios, "ok": not miss_items, "ready": [x["key"] for x in rdy_items],
+            "missing": [x["key"] for x in miss_items], "asked": asked, "steps": person_steps, "items": items,
+            "project": new_proj, "autopilot": ap_now, "dry_run": dry, "changed": changed, "lines": lines}
+
 def cmd_project(args):
-    if args.project != "start":
-        raise Fail("Usage: herdr-task project start <folder>")
+    if args.project not in ("start", "checklist"):
+        raise Fail("Usage: herdr-task project start|checklist [<folder>]")
     dry, raw = bool(getattr(args, "dry_run", False)), args.folder if args.folder is not None else getattr(args, "folder_opt", None)
     if raw is not None and (not raw.strip() or "\0" in raw):
         raise Fail("Pick a folder.")
     path = os.path.realpath(os.path.expanduser((raw or os.getcwd()).strip()))
     if path in ("/", os.path.realpath(base.HOME)) or (os.path.exists(path) and not os.path.isdir(path)):
         raise Fail("Pick a project folder, not ~ or /." if os.path.isdir(path) else f"Not a folder: {path}")
+    if args.project == "checklist":
+        if not os.path.isdir(path):
+            raise Fail(f"No such folder: {path}")
+        loc = locate(path)
+        chk = run_checklist(loc["folder"] if loc["kind"] == "repo" or raw is None else path, dry=dry)
+        return say(args, {k: v for k, v in chk.items() if k != "lines"}, "\n".join(f"[dry-run] {x}" if dry else x for x in chk["lines"]))
     pre = locate(path)["folder"] if os.path.isdir(path) and (os.path.exists(os.path.join(path, ".git")) or (raw is None and locate(path)["kind"] == "repo")) else path
     req_info = None if os.path.isfile(os.path.join(pre, "docs", "requirements.md")) else parse_req(getattr(args, "requirements", None))
     if not isinstance(cfg := (read_list(st.SETTINGS) if os.path.exists(st.SETTINGS) else {}), dict):
@@ -247,8 +435,10 @@ def cmd_project(args):
     layer, c5, old_ids, l5 = ensure_settings(repo, space_id, name, args.check, cfg, dry)
     assistant, c6, l6 = ensure_assistant(repo, space_id, dry)
     ap_on, c7, l7 = sync_autopilot(repo, space_id, name, old_ids, bool(args.autopilot), c6, dry)
-    lines, changed = [l1, l2, l3, l4, l5, l6, *([l7] if l7 else [])], any((c1, c2, c3, c4, c5, c6, c7))
+    chk = run_checklist(repo, space_id=space_id, name=(args.name or "").strip() or layer.get("name") or name, assistant=assistant, ap_hint=ap_on, dry=dry)
+    lines, changed = [l1, l2, l3, l4, l5, l6, *([l7] if l7 else [])], any((c1, c2, c3, c4, c5, c6, c7, chk["changed"]))
     out = {"folder": repo, "name": name, "prefix": prefix, "space": st.bare(space_id), "space_step": space_step,
            "assistant": assistant, "check": (layer.get("tasks") or {}).get("check"), "requirements": req_path,
-           "autopilot": ap_on, "dry_run": dry, "changed": changed, "steps": lines}
-    say(args, out, "\n".join(f"[dry-run] {x}" if dry else x for x in lines))
+           "autopilot": chk["autopilot"], "checklist": {k: v for k, v in chk.items() if k != "lines"},
+           "dry_run": dry, "changed": changed, "steps": lines}
+    say(args, out, "\n".join(f"[dry-run] {x}" if dry else x for x in [*lines, *chk["lines"]]))

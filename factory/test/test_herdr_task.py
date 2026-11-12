@@ -5783,20 +5783,26 @@ class ProjectStart(unittest.TestCase):
         import contextlib, io, pathlib
         from unittest import mock
         sys.path.insert(0, BIN)
-        import herdr_task.autopilot as ap, herdr_task.base as base, herdr_task.cli as cli
-        import herdr_task.project as project, herdr_task.settings as st, herdr_task.store as store
-        self.ap, self.base, self.cli, self.project, self.st, self.store = ap, base, cli, project, st, store
+        import herdr_task.ask as ask_mod, herdr_task.autopilot as ap, herdr_task.base as base, herdr_task.cli as cli
+        import herdr_task.news as news_mod, herdr_task.project as project, herdr_task.settings as st, herdr_task.store as store
+        self.ask_mod, self.ap, self.base, self.cli, self.project, self.st, self.store = ask_mod, ap, base, cli, project, st, store
         self.io, self.redirect, self.exit_stack, self.mock, self.Path = io, contextlib.redirect_stdout, contextlib.ExitStack, mock, pathlib.Path
         self.tmp = os.path.realpath(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.store_dir, self.settings_file = os.path.join(self.tmp, "tasks"), os.path.join(self.tmp, "shepherdr.json")
         self.app_home, self.templates, self.beats = (os.path.join(self.tmp, x) for x in ("app-home", "templates", "beats"))
         self.window, self.terms, self.calls, self.seen_tpl = [], {}, [], {}
+        self.gh_repo, self.gh_secrets = None, ""
 
         def fake_run(argv, cwd=None, check=False, timeout=None):
             if argv[0] == "git":
                 return subprocess.run(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
             self.calls.append(list(argv))
+            if argv[0] == "gh":
+                if argv[1:3] == ["repo", "view"]:
+                    return subprocess.CompletedProcess(argv, 0 if self.gh_repo else 1, json.dumps({"nameWithOwner": self.gh_repo}) if self.gh_repo else "", "")
+                if argv[1:3] == ["secret", "list"]:
+                    return subprocess.CompletedProcess(argv, 0 if self.gh_secrets is not None else 1, self.gh_secrets or "", "")
             if argv[:2] == ["herdr-app", "ls"]:
                 return subprocess.CompletedProcess(argv, 1, "", "no window") if self.window is None else \
                     subprocess.CompletedProcess(argv, 0, json.dumps({"spaces": self.window}), "")
@@ -5817,19 +5823,22 @@ class ProjectStart(unittest.TestCase):
                 tpl, addr = argv[-1], f"t{len(self.terms) + 1}"
                 if os.path.isfile(tp := os.path.join(self.templates, f"{tpl}.md")):
                     self.seen_tpl[tpl] = self.Path(tp).read_text()
-                self.terms[addr] = {"address": addr, "state": "live", "cwd": argv[argv.index("--cwd") + 1],
+                self.terms[addr] = {"address": addr, "state": "live", "cwd": argv[argv.index("--cwd") + 1] if "--cwd" in argv else (cwd or ""),
                                     "template": tpl, "labels": lbs, "status": {"state": "idle"}, "turn": 1}
                 return subprocess.CompletedProcess(argv, 0, json.dumps({"address": addr}), "")
             raise AssertionError(f"unexpected command: {argv}")
 
-        for obj, k, v in ((base, "run", fake_run), (base, "APP_HOME", self.app_home), (store, "STORE", self.store_dir),
-                          (st, "SETTINGS", self.settings_file), (st, "TEMPLATES", self.templates),
+        for obj, k, v in ((base, "run", fake_run), (base, "GH", "gh"), (base, "APP_HOME", self.app_home), (store, "STORE", self.store_dir),
+                          (st, "SETTINGS", self.settings_file), (st, "TEMPLATES", self.templates), (news_mod, "send_or_hold", lambda *_, **__: "sent"),
                           (ap, "STORE", self.store_dir), (ap, "STATE", os.path.join(self.store_dir, ".autopilot.json")),
                           (ap, "HEARTBEATS", self.beats), (ap, "run", fake_run), (ap, "typing", lambda *_: None),
                           (ap, "ensure_scheduler", lambda quiet=False: {}), (ap, "news_send", lambda *_, **__: True)):
             p = mock.patch.object(obj, k, v)
             p.start()
             self.addCleanup(p.stop)
+        pe = mock.patch.dict(os.environ, {"HC_TERMINAL_ID": ""})
+        pe.start()
+        self.addCleanup(pe.stop)
 
     def put(self, path, data):
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -5863,9 +5872,11 @@ class ProjectStart(unittest.TestCase):
         self.assertTrue(any("CLAUDECODE" in v for v in self.seen_tpl.values()) and os.listdir(self.templates) == ["assistant.md"])
         self.assertIn("docs/requirements.md", self.ap.heartbeat_of("sp1")[0])
         self.assertTrue(self.store.read_list(self.ap.STATE)["spaces"]["sp1"]["on"])
+        self.assertEqual((out["checklist"]["ready"], len(out["checklist"]["asked"])), (["ci_secrets", "autopilot"], 4))
         before = len(self.calls)
         text2 = self.start(repo, "--requirements", "https://example.com/other", "--check", "pytest", "--autopilot")
-        self.assertTrue(all("found" in line for line in text2.strip().splitlines()), text2)
+        self.assertTrue(all("found" in line for line in text2.strip().splitlines()[:7]), text2)
+        self.assertIn("Checklist for My App (sp1): 2 ready, 5 missing", text2)
         self.assertEqual([c for c in self.calls[before:] if c[:2] in (["hc", "run"], ["herdr-app", "do"])], [])
         self.assertEqual(self.Path(repo, "docs", "requirements.md").read_text(), "# Goal\nShip v1.\n")
 
@@ -5904,6 +5915,77 @@ class ProjectStart(unittest.TestCase):
             self.assertIn(f"[dry-run] {w}", text)
         self.assertFalse(os.path.exists(sb))
         self.assertEqual([c for c in self.calls if c[:2] in (["hc", "run"], ["herdr-app", "do"])], [])
+
+    def checklist(self, *argv):
+        buf = self.io.StringIO()
+        with self.mock.patch.object(sys, "argv", ["herdr-task", "project", "checklist", *argv]), self.redirect(buf):
+            self.assertEqual(self.cli.main(), 0)
+        return buf.getvalue()
+
+    def answer_card(self, ask_id, choice, terminal):
+        buf = self.io.StringIO()
+        with self.mock.patch.object(sys, "argv", ["herdr-task", "_ask-pane", ask_id]), \
+                self.mock.patch.object(sys, "stdin", self.io.StringIO(f"{choice}\n")), self.redirect(buf):
+            self.assertEqual(self.cli.main(), 0)
+        self.terms[terminal]["state"] = "exited"
+
+    def test_autodetects_github_secrets_asks_cards_records_answers_and_turns_on_autopilot(self):
+        bare, repo = os.path.join(self.tmp, "remote.git"), os.path.join(self.tmp, "web-app")
+        subprocess.run(["git", "init", "-q", "--bare", bare], check=True)
+        self.put(os.path.join(repo, "package.json"), {"scripts": {"test": "vitest"}})
+        self.put(os.path.join(repo, ".github", "workflows", "ci.yml"),
+                 "jobs:\n  test:\n    env:\n      T: ${{ secrets.GITHUB_TOKEN }}\n      A: ${{ secrets.API_KEY }}\n      S: ${{ secrets.SENTRY_DSN }}\n")
+        self.start(repo, "--name", "Web App")
+        subprocess.run(["git", "-C", repo, "add", "."], check=True)
+        subprocess.run(["git", "-C", repo, "-c", "user.name=H", "-c", "user.email=h@x", "commit", "-q", "-m", "ci"], check=True)
+        subprocess.run(["git", "-C", repo, "remote", "add", "origin", bare], check=True)
+        subprocess.run(["git", "-C", repo, "push", "-q", "-u", "origin", "main"], check=True)
+        self.gh_repo, self.gh_secrets = "acme/web-app", "NAME\tUPDATED\nAPI_KEY\t2026-11-12T00:00:00Z\n"
+        out1 = json.loads(self.checklist(repo, "--json"))
+        self.assertFalse(out1["ios"])
+        self.assertEqual(out1["ready"], ["github"])
+        self.assertNotIn("apple_signin", [x["key"] for x in out1["items"]])
+        sec_item = next(x for x in out1["items"] if x["key"] == "ci_secrets")
+        self.assertEqual((sec_item["referenced"], sec_item["missing"]), (["API_KEY", "SENTRY_DSN"], ["SENTRY_DSN"]))
+        self.assertTrue(any("gh secret set SENTRY_DSN" in s for s in out1["steps"]))
+        asks = self.store.read_list(self.settings_file)["spaces"]["sp1"]["project"]["asks"]
+        self.assertEqual(list(asks), ["service_account", "milestone_gates", "design_pass", "model_routing", "autopilot"])
+        mr_rec = self.ask_mod.load(asks["model_routing"])
+        self.assertIn("agy/gemini-4-carbon-high", mr_rec["question"])
+        self.assertIn("agy/gemini-4-argon-high", mr_rec["recommend"])
+        self.assertFalse(bool((self.store.read_list(self.ap.STATE) or {}).get("spaces", {}).get("sp1", {}).get("on")))
+        for k, choice in (("service_account", "1"), ("milestone_gates", "2"), ("design_pass", "2"), ("model_routing", "1"), ("autopilot", "1")):
+            self.answer_card(asks[k], choice, self.ask_mod.load(asks[k])["terminal"])
+        self.assertTrue(self.store.read_list(self.ap.STATE)["spaces"]["sp1"]["on"])
+        self.assertIn("docs/requirements.md", self.ap.heartbeat_of("sp1")[0])
+        self.gh_secrets = "API_KEY\t2026-11-12\nSENTRY_DSN\t2026-11-12\n"
+        text2 = self.checklist(repo)
+        self.assertIn("7 ready, 0 missing — ready for an unattended night.", text2)
+        out2 = json.loads(self.checklist(repo, "--json"))
+        self.assertEqual((out2["ok"], out2["missing"], out2["asked"], out2["steps"]), (True, [], [], []))
+        with self.store.Store(self.store.locate(repo), write=False) as s:
+            proj = self.st.settings_for(s, "sp1")["project"]
+        self.assertEqual((proj["service_account"], proj["milestone_gates"], proj["design_pass"], proj["autopilot"], "asks" in proj),
+                         ("1Password service account", "All milestones except release", "No", "Yes", False))
+
+    def test_ios_only_for_ios_projects_and_lists_person_steps(self):
+        mac_pkg, ios_pkg, mac_xc, ios_xc = (os.path.join(self.tmp, x) for x in ("mac-pkg", "ios-pkg", "mac-xc", "ios-xc"))
+        self.put(os.path.join(mac_pkg, "Package.swift"), "// .iOS(.v17)\nlet p = Package(platforms: [.macOS(.v14)])\n")
+        self.put(os.path.join(ios_pkg, "Package.swift"), "let p = Package(platforms: [.iOS(.v17)])\n")
+        self.put(os.path.join(mac_xc, "Mac.xcodeproj", "project.pbxproj"), "SDKROOT = macosx;\n")
+        self.put(os.path.join(ios_xc, "ios", "App.xcodeproj", "project.pbxproj"), "IPHONEOS_DEPLOYMENT_TARGET = 17.0;\n")
+        self.assertEqual([self.project.detect_ios(p) for p in (mac_pkg, ios_pkg, mac_xc, ios_xc)], [False, True, False, True])
+        out = json.loads(self.checklist(ios_xc, "--json"))
+        self.assertTrue(out["ios"])
+        self.assertEqual([a["item"] for a in out["asked"]][:3], ["apple_signin", "app_record", "app_store_profile"])
+        self.assertEqual(len(out["asked"]), 8)
+        for words in ("gh repo create", "CI workflow", "Apple / App Store Connect", "app record", "provisioning profile"):
+            self.assertTrue(any(words in s for s in out["steps"]), out["steps"])
+        ap_ask = out["asked"][0]
+        self.answer_card(ap_ask["id"], "3", ap_ask["terminal"])  # "Not yet"
+        out2 = json.loads(self.checklist(ios_xc, "--json"))
+        self.assertIn("apple_signin", out2["missing"])
+        self.assertEqual(out2["asked"], [])
 
 
 class Watchdog(unittest.TestCase):

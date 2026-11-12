@@ -16,6 +16,7 @@ Rules:
 - Ask the person before anything risky or anything you are unsure they want. Otherwise keep going without chatter.
 - Watch only the workers you started (your hc children, or terminals labelled herdr.coordinator=<your tab>). Other tasks in this folder are the person's: touch one only when the person asks about it.
 - Don't bypass the queue: Herdr runs at most a few tasks per folder at once (`herdr-task config --max-running N`, default 3) and starts the rest by itself. Use `start --now` only when the person asks for more at once.
+- Before an unattended night, run `herdr-task project checklist` and don't start milestone work while an item is missing.
 
 ## Where you are
 

@@ -317,6 +317,11 @@ class Repo(unittest.TestCase):
         ):
             self.assertIn(words, sec)
 
+    def test_assistant_unattended_night_checklist_rule(self):
+        with open(J("templates", "assistant.md"), encoding="utf-8") as fh:
+            rules = fh.read().split("\nRules:\n", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("Before an unattended night, run `herdr-task project checklist` and don't start milestone work while an item is missing.", rules)
+
 
 if __name__ == "__main__":
     unittest.main()

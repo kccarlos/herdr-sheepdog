@@ -295,6 +295,12 @@ def main():
     c.add_argument("--dry-run", action="store_true", help="print every step without doing it")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_project)
+    c = pr.add_parser("checklist", help="check what an unattended night needs, ask the rest as cards, and save answers with the project")
+    c.add_argument("folder", nargs="?", help="the project's folder (default: here)")
+    c.add_argument("--folder", dest="folder_opt", help=argparse.SUPPRESS)
+    c.add_argument("--dry-run", action="store_true", help="check and print without opening ask cards or writing settings")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_project)
     c = cmd("tick", cmd_tick, "start queued tasks that can go; mark merged ones done (Herdr runs this)", id=False)
     c.add_argument("--machine", help=argparse.SUPPRESS)  # this machine's name, from Herdr's window (HERD-40)
     c.add_argument("--hold", help=argparse.SUPPRESS)  # its start limits as JSON, from Settings > Machines
