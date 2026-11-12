@@ -532,7 +532,7 @@ def brief(s, task, parent=None, space=None, argv=None):
                                     settings_block(s, task, space, argv)] if x)
 
 
-def handoff(s, task, prev, parent=None, argv=None):
+def handoff(s, task, prev, parent=None, argv=None, space=None):
     lines = [f"You are taking over task {s.ref(task)} \"{task['title']}\" from another agent.", instructions("worker")]
     lines.append(where_line(task))
     lines.append("The task:\n" + ((task.get("prompt") or "").strip() or task["title"]))
@@ -540,10 +540,10 @@ def handoff(s, task, prev, parent=None, argv=None):
         lines.append(f"The previous agent ({prev.get('agent') or 'agent'}) kept its session log at {prev['log']}: read the recent part to pick up where it left off.")
     elif prev:
         lines.append(f"The previous agent ({prev.get('agent') or 'agent'}) left no session log; check the folder's state (git status, git log) before you continue.")
-    lines.append(notes_part("Before you continue, if it isn't done yet", notes(s, task, "start")))
-    lines.append(notes_part("Before you say ready", notes(s, task, "finish")))
+    lines.append(notes_part("Before you continue, if it isn't done yet", notes(s, task, "start", space)))
+    lines.append(notes_part("Before you say ready", notes(s, task, "finish", space)))
     lines.append(closing_line(s, task, parent, argv))
-    lines.append(settings_block(s, task, None, argv))
+    lines.append(settings_block(s, task, space, argv))
     return "\n\n".join(x for x in lines if x)
 
 

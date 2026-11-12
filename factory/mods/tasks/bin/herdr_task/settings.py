@@ -212,15 +212,17 @@ def worker_pick(s, task, space=None, agent=None):
     """What a task's agent runs on, {agent, model, effort, fast, perm}: Settings' worker, then the
     task's own --agent / --model / --effort, then `agent` (start --agent). Another CLI than
     Settings' starts from its own defaults (models and permissions differ per CLI)."""
-    pick = dict(settings_for(s, space)["worker"] or {})
-    for key in (task.get("agent"), agent):
-        if key and key != pick.get("agent"):
-            pick = {"agent": key}
+    w = dict(settings_for(s, space)["worker"] or {})
+    pick = dict(w)
+    if task.get("agent") and task["agent"] != pick.get("agent"):
+        pick = {"agent": task["agent"]}
     if not pick.get("agent") and not pick.get("argv"):
         pick["agent"] = "claude"
     for k in ("model", "effort"):
         if task.get(k):
             pick[k] = task[k]
+    if agent and agent != pick.get("agent"):
+        pick = dict(w) if w.get("agent") == agent else {"agent": agent}
     return pick
 
 

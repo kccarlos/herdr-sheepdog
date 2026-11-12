@@ -5054,6 +5054,202 @@ class AskPane(unittest.TestCase):
             run.assert_not_called()
 
 
+class Resume(unittest.TestCase):
+    """FAC-61: herdr-task resume rebuilds argv from current settings and sends a continue line."""
+
+    def setUp(self):
+        import argparse
+        import contextlib
+        import io
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.base as base
+        import herdr_task.commands as commands
+        import herdr_task.launch as launch
+        import herdr_task.settings as settings
+        import herdr_task.store as store
+        import herdr_task.templates as templates
+        self.argparse, self.io, self.redirect = argparse, io, contextlib.redirect_stdout
+        self.commands, self.launch, self.settings, self.store_mod = commands, launch, settings, store
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="resume-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.repo = os.path.join(self.tmp, "repo")
+        os.makedirs(self.repo)
+        subprocess.run(["git", "-C", self.repo, "init", "-q", "-b", "main"], check=True)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false")):
+            subprocess.run(["git", "-C", self.repo, "config", k, v], check=True)
+        subprocess.run(["git", "-C", self.repo, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+        self.settings_file = os.path.join(self.tmp, "shepherdr.json")
+        self.runs, self.live = [], []
+
+        def fake_hc(argv, *a, **kw):
+            if argv[:2] == ["hc", "run"]:
+                self.runs.append(argv)
+                return subprocess.CompletedProcess(argv, 0, json.dumps({"address": f"t{len(self.runs)}"}), "")
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+        patches = [
+            (settings, "SETTINGS", self.settings_file),
+            (base, "STORE", os.path.join(self.tmp, "tasks")),
+            (store, "STORE", os.path.join(self.tmp, "tasks")),
+            (launch, "WORKTREES", os.path.join(self.tmp, "worktrees")),
+            (launch, "HOME", self.tmp),
+            (launch, "own_path", lambda: "/bin/herdr-task"),
+            (commands, "own_path", lambda: "/bin/herdr-task"),
+            (launch, "secret_path", lambda: None),
+            (launch, "browser_path", lambda: None),
+            (launch, "in_shell", lambda a: a),
+            (launch, "low_priority", lambda a, n: a),
+            (launch, "clean_env", lambda a: a),
+            (launch, "track", lambda *a: None),
+            (launch, "hc_json", lambda *a: None),
+            (launch, "run", fake_hc),
+            (commands, "run", fake_hc),
+            (commands, "live_agents", lambda key: list(self.live)),
+            (commands, "detail", lambda k: k),
+            (commands, "ensure_scheduler", lambda quiet=False: {}),
+            (templates, "TEMPLATES", os.path.join(ROOT, "templates")),
+        ]
+        for mod, name, val in patches:
+            p = mock.patch.object(mod, name, val)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def write_worker(self, worker):
+        with open(self.settings_file, "w") as f:
+            json.dump({"spaces": {"sp1": {"folder": self.repo, "worker": worker}}}, f)
+
+    def call(self, fn, **kw):
+        out = self.io.StringIO()
+        with self.redirect(out):
+            fn(self.argparse.Namespace(folder=self.repo, json=True, **kw))
+        return json.loads(out.getvalue())
+
+    def launched_cmd(self, idx=-1):
+        hc = self.runs[idx]
+        env_idx = hc.index("env")
+        return hc[env_idx + 2:]  # after ["env", "HERDR_BROWSER_TASK=..."]
+
+    def started_task(self, worker, session="0199-sid", **add_kw):
+        self.write_worker(worker)
+        add_defaults = dict(title="Build loop", prompt="Ship it.", prompt_file=None, here=False, worktree=True,
+                            space="sp1", base=None, branch=None, start_notes=None, finish_notes=None, after=None,
+                            at=None, in_=None, agent=None, model=None, effort=None, reviewer=None,
+                            reviewer_model=None, reviewer_effort=None, set=None)
+        add_defaults.update(add_kw)
+        v = self.call(self.commands.cmd_add, **add_defaults)
+        ref = f"REPO-{v['id']}"
+        self.call(self.commands.cmd_start, id=ref, here=False, worktree=False, branch=None, space="sp1",
+                  agent=None, argv=None, parent=None, at=None, in_=None, now=True)
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref)) as s:
+            if session:
+                s.find(ref)["agents"][-1]["session"] = session
+                s.dirty = True
+        return ref
+
+    def test_resume_rebuilds_argv_from_settings_and_sends_continue_line(self):
+        ref = self.started_task({"agent": "agy", "model": "gemini-4-argon-high", "perm": "auto"})
+        self.assertIn("accept-edits", self.launched_cmd())
+        # Space settings change to perm: full (--dangerously-skip-permissions).
+        self.write_worker({"agent": "agy", "model": "gemini-4-argon-high", "perm": "full"})
+        out = self.call(self.commands.cmd_resume, id=ref, space=None, agent=None, argv=None, parent=None)
+        self.assertTrue(out["resumed"])
+        cmd = self.launched_cmd()
+        self.assertIn("--dangerously-skip-permissions", cmd)
+        self.assertNotIn("accept-edits", cmd)
+        self.assertIn("--conversation", cmd)
+        self.assertEqual(cmd[cmd.index("--conversation") + 1], "0199-sid")
+        self.assertEqual(cmd[-2], "-i")
+        self.assertIn(f"Herdr resumed you: carry on with {ref} where you left off", cmd[-1])
+        self.assertIn(f"`/bin/herdr-task ready {ref} --folder ", cmd[-1])
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+            last = s.find(ref)["agents"][-1]
+            self.assertEqual(last["argv"], ["agy", "--model", "gemini-4-argon-high", "--dangerously-skip-permissions"])
+            self.assertEqual(last["session"], "0199-sid")
+
+    def test_fresh_handoff_when_session_missing_or_cli_changed_without_duplicate_continue(self):
+        # Same CLI, no recorded session: fresh start with new argv and handoff, continue line not sent twice.
+        ref = self.started_task({"agent": "agy", "perm": "auto"}, session=None)
+        self.write_worker({"agent": "agy", "perm": "full"})
+        out = self.call(self.commands.cmd_resume, id=ref, space=None, agent=None, argv=None, parent=None)
+        self.assertFalse(out["resumed"])
+        cmd = self.launched_cmd()
+        self.assertIn("--dangerously-skip-permissions", cmd)
+        self.assertNotIn("--conversation", cmd)
+        self.assertEqual(cmd[-2], "-i")
+        self.assertIn(f"You are taking over task {ref}", cmd[-1])
+        self.assertNotIn("Herdr resumed you:", cmd[-1])
+        self.assertEqual(cmd[-1].count(f"/bin/herdr-task ready {ref}"), 1)
+        # Settings switch CLI from agy to claude: fresh claude agent with handoff, no agy conversation.
+        ref2 = self.started_task({"agent": "agy", "perm": "full"}, session="0199-sid2")
+        self.write_worker({"agent": "claude", "model": "opus", "perm": "bypassPermissions"})
+        out2 = self.call(self.commands.cmd_resume, id=ref2, space=None, agent=None, argv=None, parent=None)
+        self.assertFalse(out2["resumed"])
+        cmd2 = self.launched_cmd()
+        self.assertEqual(cmd2[0], "claude")
+        self.assertIn("--dangerously-skip-permissions", cmd2)
+        self.assertNotIn("--resume", cmd2)
+        self.assertIn(f"You are taking over task {ref2}", cmd2[-1])
+        self.assertNotIn("Herdr resumed you:", cmd2[-1])
+        # And if handoff ever omitted the ready command, resume still appends continue_line once.
+        from unittest import mock
+        with mock.patch.object(self.commands, "handoff", lambda *a, **kw: "Short handoff."):
+            self.call(self.commands.cmd_resume, id=ref2, space=None, agent=None, argv=None, parent=None)
+        self.assertIn(f"Short handoff.\n\nHerdr resumed you: carry on with {ref2}", self.launched_cmd()[-1])
+
+    def test_agent_and_argv_flags_still_win(self):
+        ref = self.started_task({"agent": "agy", "model": "gemini-4-argon-high", "perm": "full"},
+                                agent="agy", model="gemini-4-argon-high")
+        # --agent claude overrides both task's agy+model and space's agy worker (without passing agy's model to claude).
+        out = self.call(self.commands.cmd_resume, id=ref, space=None, agent="claude", argv=None, parent=None)
+        self.assertFalse(out["resumed"])
+        cmd = self.launched_cmd()
+        self.assertEqual(cmd[0], "claude")
+        self.assertNotIn("gemini-4-argon-high", cmd)
+        # Record a claude session on that agent; resuming with --agent claude while space is agy still resumes claude.
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref)) as s:
+            s.find(ref)["agents"][-1]["session"] = "claude-s1"
+            s.dirty = True
+        out2 = self.call(self.commands.cmd_resume, id=ref, space=None, agent="claude", argv=None, parent=None)
+        self.assertTrue(out2["resumed"])
+        cmd2 = self.launched_cmd()
+        self.assertEqual(cmd2[0], "claude")
+        self.assertEqual(cmd2[cmd2.index("--resume") + 1], "claude-s1")
+        self.assertIn(f"Herdr resumed you: carry on with {ref}", cmd2[-1])
+        # --argv wins over settings too, and still sends the continue line on a resumed session.
+        out3 = self.call(self.commands.cmd_resume, id=ref, space=None, agent=None,
+                         argv=json.dumps(["claude", "--model", "sonnet"]), parent=None)
+        self.assertTrue(out3["resumed"])
+        cmd3 = self.launched_cmd()
+        self.assertEqual(cmd3[cmd3.index("--model") + 1], "sonnet")
+        self.assertEqual(cmd3[cmd3.index("--resume") + 1], "claude-s1")
+        self.assertIn(f"Herdr resumed you: carry on with {ref}", cmd3[-1])
+        # Conversely, --agent agy on a claude task picks up the space's agy worker settings (perm: full, model).
+        ref2 = self.started_task({"agent": "agy", "model": "gemini-4-argon-high", "perm": "full"},
+                                 agent="claude", model="sonnet")
+        self.call(self.commands.cmd_resume, id=ref2, space=None, agent="agy", argv=None, parent=None)
+        cmd4 = self.launched_cmd()
+        self.assertEqual(cmd4[0], "agy")
+        self.assertIn("--dangerously-skip-permissions", cmd4)
+        self.assertEqual(cmd4[cmd4.index("--model") + 1], "gemini-4-argon-high")
+
+    def test_switch_and_tell_keep_their_existing_behaviour(self):
+        ref = self.started_task({"agent": "agy", "perm": "auto"}, session="0199-sid")
+        self.write_worker({"agent": "agy", "perm": "full"})
+        # switch without --agent keeps prev["argv"] and sends no continue line.
+        out = self.call(self.commands.cmd_switch, id=ref, space=None, agent=None, argv=None, parent=None, keep=False)
+        self.assertTrue(out["resumed"])
+        cmd = self.launched_cmd()
+        self.assertIn("accept-edits", cmd)
+        self.assertNotIn("-i", cmd)
+        # tell with no live worker starts again with tell's own message once, not continue_line.
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref)) as s:
+            t = s.find(ref)
+            self.commands.tell(s, t, "Please rebase onto main.", self.argparse.Namespace(space=None, agent=None, argv=None))
+        cmd2 = self.launched_cmd()
+        self.assertEqual(cmd2[-2:], ["-i", "Please rebase onto main."])
+
+
 class BusyWorkerDelivery(unittest.TestCase):
     """FAC-60: messages herdr-task sends a busy agy worker follow hc send with alt+m when its turn
     offers it, or re-deliver via held_pass once its turn ends if still pending; typing holds and

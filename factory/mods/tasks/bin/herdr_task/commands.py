@@ -1033,23 +1033,36 @@ def last_agent(t):
     return t["agents"][-1] if t["agents"] else None
 
 
-def start_again(s, t, space, key=None, argv_json=None, message=None, parent=None):
+def continue_line(s, t):
+    done = "finished and committed" if t.get("mode") == "worktree" else "finished"
+    folder = (getattr(s, "loc", None) or {}).get("folder")
+    where = f" --folder {shlex.quote(folder)}" if folder else ""
+    return (f"Herdr resumed you: carry on with {s.ref(t)} where you left off; run "
+            f"`{own_path()} ready {s.ref(t)}{where}` when it's {done}.")
+
+
+def start_again(s, t, space, key=None, argv_json=None, message=None, parent=None, resuming=False):
     """Starts an agent for the task: the last agent's own session when it's the same kind of agent
-    and the session is known; else a fresh one with a handoff. `message` goes after either."""
+    and the session is known; else a fresh one with a handoff. `message` goes after either; `resuming`
+    (`herdr-task resume`) rebuilds argv from the current settings and wakes a resumed session."""
     unarchive(s, t)
     prev = last_agent(t)
     parent = parent_for(parent or (prev or {}).get("parent"), space)
-    # The last agent's argv again, unless the task's agent, model or effort changed since (edit).
-    keep = prev and prev.get("argv") and (t.get("pick_at") or 0) <= (prev.get("at") or 0)
+    # The last agent's argv again (switch, tell), unless `resuming` or edit changed its pick.
+    keep = not resuming and prev and prev.get("argv") and (t.get("pick_at") or 0) <= (prev.get("at") or 0)
     argv = agent_argv(None, argv_json) if argv_json else worker_argv(s, t, space, key) if key else \
         (prev["argv"] if keep else worker_argv(s, t, space))
     same = prev and agent_key(argv) == prev.get("agent")
     res = resume_argv(argv, prev["session"]) if same and prev.get("session") else None
     if res:
-        a = launch(s, t, argv, space, message, parent=parent, resume=res)
+        msg = message or (continue_line(s, t) if resuming else None)
+        a = launch(s, t, argv, space, msg, parent=parent, resume=res)
         a["session"] = prev["session"]  # the same conversation from the start (agent_log, before a pass sees its pid)
         return a, True
-    text = handoff(s, t, prev, parent, argv) + (("\n\n" + message) if message else "")
+    text = handoff(s, t, prev, parent, argv, space)
+    extra = message or (continue_line(s, t) if resuming and f"ready {s.ref(t)}" not in text else None)
+    if extra:
+        text += "\n\n" + extra
     t["review_gate"] = True
     return launch(s, t, argv, space, text, parent=parent), False
 
@@ -1066,7 +1079,7 @@ def cmd_resume(args):
         if t["state"] == "done":
             t["state"] = "running"
         back_to_work(s, t, "resumed")
-        a, resumed = start_again(s, t, space, args.agent, args.argv, parent=args.parent)
+        a, resumed = start_again(s, t, space, args.agent, args.argv, parent=args.parent, resuming=True)
         v = view(s, t)
     say(args, {**v, "terminal": a["address"], "space": space, "parent": a.get("parent"), "resumed": resumed},
         f"{s.ref(t)} {'resumed its session' if resumed else 'started with a handoff'}: {a['address']}")
