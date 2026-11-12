@@ -31,6 +31,7 @@ struct AgentWindowMenu: View, Equatable {
     var actionsAvailable: Bool
     /// The daemon lists feature `files`.
     var filesAvailable: Bool
+    var changesAvailable = true
     var working: Bool
     var others: [Other]
     /// iPad's Open in New Window (fixed for a pane's life).
@@ -40,7 +41,7 @@ struct AgentWindowMenu: View, Equatable {
     static func == (a: Self, b: Self) -> Bool {
         a.style == b.style && a.observing == b.observing && a.shellCwd == b.shellCwd
             && a.canResetTextSize == b.canResetTextSize && a.actionsAvailable == b.actionsAvailable
-            && a.filesAvailable == b.filesAvailable
+            && a.filesAvailable == b.filesAvailable && a.changesAvailable == b.changesAvailable
             && a.working == b.working && a.others == b.others && (a.extra == nil) == (b.extra == nil)
     }
 
@@ -82,8 +83,10 @@ struct AgentWindowMenu: View, Equatable {
             Button { perform(.files) } label: { Label("Files", systemImage: "folder") }
                 .accessibilityIdentifier("agentScreen.menu.files")
         }
-        Button { perform(.changes) } label: { Label("Changes", systemImage: "plusminus") }
-            .accessibilityIdentifier("agentScreen.menu.changes")
+        if changesAvailable {
+            Button { perform(.changes) } label: { Label("Changes", systemImage: "plusminus") }
+                .accessibilityIdentifier("agentScreen.menu.changes")
+        }
         if let shellCwd {
             Button { perform(.shell(cwd: shellCwd)) } label: { Label("Open shell here", systemImage: "apple.terminal") }
                 .accessibilityIdentifier("agentScreen.menu.shell")

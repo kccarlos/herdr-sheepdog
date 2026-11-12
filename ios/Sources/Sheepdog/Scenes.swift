@@ -165,6 +165,7 @@ final class SceneUI {
 /// Where an agent's or a shell's window opens.
 enum WindowRequest: Hashable {
     case agent(String)
+    case remoteAgent(String, computer: String)
     /// A new agent: on iPad it opens beside the focused pane.
     case newAgent(String)
     case shell(cwd: String?)

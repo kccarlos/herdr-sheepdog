@@ -62,6 +62,7 @@ shard-4  SheepdogUITests/ChangesDemoUITests            # 77
 shard-4  SheepdogUITests/DemoUITests                   # 46
 shard-4  SheepdogUITests/CardLabelUITests
 shard-4  SheepdogUITests/ComputersUITests
+shard-4  SheepdogUITests/RemoteAgentWindowUITests
 shard-4  SheepdogUITests/LinkStatusUITests
 shard-4  SheepdogUITests/ConversationPaneSwitchUITests
 shard-4  SheepdogUITests/AgentScreenUITests            # 2

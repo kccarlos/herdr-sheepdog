@@ -81,6 +81,8 @@ struct MainView: View {
             case let .agent(paneID):
                 ui.detailPath = NavigationPath()
                 ui.show(paneID)
+            case let .remoteAgent(paneID, computer):
+                ui.detailPath.append(AgentWindowRoute(paneID: paneID, computer: computer))
             case let .newAgent(paneID):
                 // A new agent opens beside the current pane.
                 ui.detailPath = NavigationPath()
@@ -93,6 +95,8 @@ struct MainView: View {
         switch request {
         case let .agent(paneID), let .newAgent(paneID):
             model.navigation.path.append(AgentWindowRoute(paneID: paneID))
+        case let .remoteAgent(paneID, computer):
+            model.navigation.path.append(AgentWindowRoute(paneID: paneID, computer: computer))
         case let .shell(cwd):
             model.navigation.path.append(ShellRoute(cwd: cwd))
         }
@@ -197,8 +201,8 @@ struct PhoneRootView: View {
             }
             .navigationDestination(for: AgentWindowRoute.self) { route in
                 Group {
-                    if let agent = model.flock.all.first(where: { $0.paneID == route.paneID }) {
-                        AgentScreenView(agent: agent)
+                    if let agent = model.agent(for: route) {
+                        AgentScreenView(agent: agent, computer: route.computer)
                     } else {
                         AgentGoneView()
                     }

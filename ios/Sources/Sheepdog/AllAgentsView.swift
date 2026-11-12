@@ -249,7 +249,7 @@ struct AllAgentsView: View {
                     primary: agent.paneID == first,
                     voiceQuestion: computer == nil && question?.pending.id == model.approval?.pending.id,
                     showsEarlier: true,
-                    showsWindowButton: computer == nil,
+                    computer: computer,
                     expanded: Binding(
                         get: { model.agentsModel.expandedAgents.contains(key) },
                         set: { open in

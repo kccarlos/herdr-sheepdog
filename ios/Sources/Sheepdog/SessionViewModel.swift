@@ -443,8 +443,10 @@ final class SessionViewModel: ObservableObject {
     /// the app switches meanwhile (decision 6), with its dedup key
     /// (`key(computerID)`), timeout, idempotency key and safe retry.
     func action<T>(_ key: (String) -> String, _ kind: ActionRunner.Kind, idempotencyKey: String? = nil,
+                   computer: String? = nil,
                    _ body: @escaping @Sendable (DaemonClient) async throws -> T) async throws -> T {
-        guard settings.endpoint != nil, let model = fleet.current else { throw DaemonError.malformed("no daemon address set") }
+        let target = computer == nil ? fleet.current : computer.flatMap { fleet.model($0) }
+        guard settings.endpoint != nil, let model = target else { throw DaemonError.malformed("no daemon address set") }
         return try await model.actions.run(key(model.id), kind, as: DaemonClient.self, idempotencyKey: idempotencyKey, body)
     }
 
@@ -891,6 +893,7 @@ final class SessionViewModel: ObservableObject {
     /// on its own (refreshing on its events). Nothing is rebuilt.
     func attachCurrent() {
         let current = fleet.current
+        if let id = current?.id { dropRemoteHub(id) }
         for model in fleet.models where model !== current { detach(model) }
         updateDemands()
         // The voice's `/ws` and the terminal's `/term` are the current
@@ -950,7 +953,7 @@ final class SessionViewModel: ObservableObject {
         model.eventsSince = nil
         model.approvalErrorName = nil
         voice.detach(from: model)
-        model.attach(.term, nil)
+        model.attach(.term, remoteHubs[model.id])
     }
 
     /// `/api/hello` for the current computer, kept on its model.
@@ -1376,26 +1379,30 @@ final class SessionViewModel: ObservableObject {
 
     /// `GET /api/agents/{pane}/screen` for `AgentScreenView`. Throws when no
     /// daemon is configured.
-    func agentScreen(paneID: String, hash: String?) async throws -> AgentScreen? {
+    func agentScreen(paneID: String, hash: String?, computer: String? = nil) async throws -> AgentScreen? {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
+        if let id = computer {
+            guard let target = session(id) else { throw DaemonError.malformed("no daemon address set") }
+            return try await target.request(as: DaemonClient.self) { try await $0.agentScreen(paneID: paneID, hash: hash) }
+        }
         return try await current { try await $0.agentScreen(paneID: paneID, hash: hash) }
     }
 
     private var inputSeq = 0
 
     /// `POST /api/agents/{pane}/input` with a prompt.
-    func agentInput(paneID: String, text: String) async throws -> AgentInputReply {
+    func agentInput(paneID: String, text: String, computer: String? = nil) async throws -> AgentInputReply {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
-        return try await action({ ActionRunner.Key.input($0, paneID) + ":" + text }, .input) { try await $0.agentInput(paneID: paneID, text: text) }
+        return try await action({ ActionRunner.Key.input($0, paneID) + ":" + text }, .input, computer: computer) { try await $0.agentInput(paneID: paneID, text: text) }
     }
 
     /// `POST /api/agents/{pane}/input` with keys.
-    func agentInput(paneID: String, keys: [AgentKey]) async throws -> AgentInputReply {
+    func agentInput(paneID: String, keys: [AgentKey], computer: String? = nil) async throws -> AgentInputReply {
         guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
         // Keys are not idempotent: every press is its own action.
         inputSeq += 1
         let seq = inputSeq
-        return try await action({ ActionRunner.Key.input($0, paneID) + ":\(seq)" }, .input) { try await $0.agentInput(paneID: paneID, keys: keys) }
+        return try await action({ ActionRunner.Key.input($0, paneID) + ":\(seq)" }, .input, computer: computer) { try await $0.agentInput(paneID: paneID, keys: keys) }
     }
 
     /// `GET /api/agents/{pane}/changes` (the changes view).
@@ -1459,6 +1466,7 @@ final class SessionViewModel: ObservableObject {
         }
         return hub
     }()
+    var remoteHubs: [String: TermHub] = [:]
 
     private func setShellOffered(_ offered: Bool?) {
         agentsModel.setShellOffered(offered)
@@ -1510,8 +1518,9 @@ final class SessionViewModel: ObservableObject {
 
     /// What a failed request says where it was made: a timeout while the
     /// link is online is one slow answer, not an unreachable computer.
-    func requestFailure(_ error: Error) -> RequestFailure {
-        RequestFailure(error, linkUsable: link.isUsable, name: showsComputerLabels ? currentComputerName : nil)
+    func requestFailure(_ error: Error, for computer: String? = nil) -> RequestFailure {
+        if let id = computer, let other = session(id) { return other.failure(error) }
+        return RequestFailure(error, linkUsable: link.isUsable, name: showsComputerLabels ? currentComputerName : nil)
     }
 
     /// Whether the agent window can go live (`/term`). A pure read: the
@@ -1525,6 +1534,17 @@ final class SessionViewModel: ObservableObject {
 
     /// `/api/hello`'s reason when the live terminal is unavailable.
     var termUnavailableReason: String? { linkModel.hello?.termUnavailable }
+
+    func termAvailability(for computer: String? = nil) -> TermAvailability {
+        guard let id = computer else { return termAvailability }
+        let model = session(id)
+        return TermAvailability.from(handshake: .idle, remembered: model?.hello?.features ?? model?.features)
+    }
+
+    func termUnavailableReason(for computer: String? = nil) -> String? {
+        guard let id = computer else { return termUnavailableReason }
+        return session(id)?.hello?.termUnavailable
+    }
 
     // MARK: - Update
 

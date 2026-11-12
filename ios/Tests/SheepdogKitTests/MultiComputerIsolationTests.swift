@@ -330,6 +330,142 @@ final class MultiComputerIsolationTests: XCTestCase {
         workRuntime.stop()
     }
 
+    // MARK: - Remote agent windows
+
+    func testAgentWindowRouteDecodesLegacyJSONWithoutComputer() throws {
+        let legacy = try JSONDecoder().decode(AgentWindowRoute.self, from: Data(#"{"paneID":"%1"}"#.utf8))
+        XCTAssertEqual(legacy.paneID, "%1")
+        XCTAssertNil(legacy.computer)
+
+        let remote = AgentWindowRoute(paneID: "%1", computer: "home-id")
+        let encoded = try JSONEncoder().encode(remote)
+        let decoded = try JSONDecoder().decode(AgentWindowRoute.self, from: encoded)
+        XCTAssertEqual(decoded, remote)
+    }
+
+    func testRemoteTermHubPerComputerStaysAttachedAndDisconnectsWhenCurrentOrRemoved() async throws {
+        let model = makeSessionModel()
+        let work = PairedComputer(daemonID: "work-id", name: "Work Mac", addresses: ["192.0.2.10:7777"], pin: "pin_w", deviceID: "dw", pairedAt: Date())
+        let home = PairedComputer(daemonID: "home-id", name: "Home Mac", addresses: ["198.51.100.20:7777"], pin: "pin_h", deviceID: "dh", pairedAt: Date())
+        let lab = PairedComputer(daemonID: "lab-id", name: "Lab Mac", addresses: ["198.51.100.30:7777"], pin: "pin_l", deviceID: "dl", pairedAt: Date())
+        model.settings.computers.save(work, address: "192.0.2.10:7777")
+        model.settings.computers.save(home, address: "198.51.100.20:7777")
+        model.settings.computers.save(lab, address: "198.51.100.30:7777")
+        model.settings.computers.currentID = "work-id"
+        model.settings.hasBeenConfigured = true
+        model.computersChanged()
+        model.endpointChanged()
+
+        XCTAssertTrue(model.termHub(for: nil) === model.termHub)
+        XCTAssertTrue(model.termHub(for: "work-id") === model.termHub)
+
+        let homeHub = model.termHub(for: "home-id")
+        let labHub = model.termHub(for: "lab-id")
+        XCTAssertFalse(homeHub === model.termHub)
+        XCTAssertFalse(labHub === model.termHub)
+        XCTAssertFalse(homeHub === labHub)
+        XCTAssertTrue(model.termHub(for: "home-id") === homeHub)
+
+        // Inject transport-backed hubs so we can open channels without network sockets.
+        let homeEndpoint = try XCTUnwrap(model.settings.computers.endpoint(for: "home-id"))
+        let labEndpoint = try XCTUnwrap(model.settings.computers.endpoint(for: "lab-id"))
+        let spyHomeHub = TermHub(endpoint: homeEndpoint, makeTransport: { SpyTermTransport(request: $0) })
+        let spyLabHub = TermHub(endpoint: labEndpoint, makeTransport: { SpyTermTransport(request: $0) })
+        model.remoteHubs["home-id"] = spyHomeHub
+        model.remoteHubs["lab-id"] = spyLabHub
+        model.session("home-id")?.attach(.term, spyHomeHub)
+        model.session("lab-id")?.attach(.term, spyLabHub)
+
+        // Re-running attachCurrent() must not detach remote hubs from their ComputerModels.
+        let homeTermSpy = ChannelClientSpy()
+        model.session("home-id")?.attach(.term, homeTermSpy)
+        let tokenBefore = try XCTUnwrap(homeTermSpy.lastReporter?.token)
+        model.session("home-id")?.attach(.term, spyHomeHub)
+        model.attachCurrent()
+        XCTAssertTrue(model.termHub(for: "home-id") === spyHomeHub)
+        XCTAssertTrue(model.termHub(for: "lab-id") === spyLabHub)
+        // Prove spyHomeHub is STILL attached on home-id's ComputerModel after attachCurrent():
+        // ComputerModel.attach(.term, spyHomeHub) is a no-op (does not bump nextClientToken) ONLY if spyHomeHub is still attached.
+        model.session("home-id")?.attach(.term, spyHomeHub)
+        model.session("home-id")?.attach(.term, homeTermSpy)
+        XCTAssertEqual(homeTermSpy.lastReporter?.token, tokenBefore + 2, "spyHomeHub must stay attached across attachCurrent()")
+        model.session("home-id")?.attach(.term, spyHomeHub)
+
+        // Unknown/unpaired computer ID must not cache a remote hub or allow connecting to 127.0.0.1:7777.
+        let unknownHub = model.termHub(for: "missing-id")
+        XCTAssertNil(model.remoteHubs["missing-id"])
+        XCTAssertFalse(unknownHub.socket.allowed)
+
+        var homeClosed: [TermCloseReason] = []
+        let homeCh = try XCTUnwrap(spyHomeHub.open(paneID: "%1", mode: .control, cols: 80, rows: 24) { event in
+            if case let .closed(_, reason, _) = event { homeClosed.append(reason) }
+        })
+        var labClosed: [TermCloseReason] = []
+        let labCh = try XCTUnwrap(spyLabHub.open(paneID: "%1", mode: .control, cols: 80, rows: 24) { event in
+            if case let .closed(_, reason, _) = event { labClosed.append(reason) }
+        })
+        XCTAssertEqual(spyHomeHub.openChannels, [homeCh])
+        XCTAssertEqual(spyLabHub.openChannels, [labCh])
+
+        // Removing Lab Mac disconnects its remote hub and closes its channel with .gone.
+        model.settings.computers.remove("lab-id")
+        model.computersChanged()
+        XCTAssertNil(model.remoteHubs["lab-id"])
+        XCTAssertEqual(labClosed, [.gone])
+        XCTAssertEqual(spyLabHub.openChannels, [])
+        XCTAssertEqual(homeClosed, [], "other remote computer's hub must remain open")
+
+        // Switching to Home Mac disconnects its remote hub (now owned by model.termHub).
+        model.switchComputer(to: "home-id")
+        XCTAssertNil(model.remoteHubs["home-id"])
+        XCTAssertEqual(homeClosed, [.gone])
+        XCTAssertEqual(spyHomeHub.openChannels, [])
+        XCTAssertTrue(model.termHub(for: "home-id") === model.termHub)
+    }
+
+    func testRoutedAgentInputReachesOnlyTargetComputerWithCollidingPaneID() async throws {
+        let model = makeSessionModel()
+        let work = PairedComputer(daemonID: "work-id", name: "Work Mac", addresses: ["192.0.2.10:7777"], pin: "pin_w", deviceID: "dw", pairedAt: Date())
+        let home = PairedComputer(daemonID: "home-id", name: "Home Mac", addresses: ["198.51.100.20:7777"], pin: "pin_h", deviceID: "dh", pairedAt: Date())
+        model.settings.computers.save(work, address: "192.0.2.10:7777")
+        model.settings.computers.save(home, address: "198.51.100.20:7777")
+        model.settings.computers.currentID = "work-id"
+        model.settings.hasBeenConfigured = true
+        model.computersChanged()
+        model.endpointChanged()
+
+        let workCreds = model.settings.computers.credentials(for: "work-id")
+        workCreds.adopt(SessionTicket(ticket: "tw", expires: Date().addingTimeInterval(3600)))
+        let workEndpoint = try XCTUnwrap(model.settings.computers.endpoint(for: "work-id"))
+        let homeCreds = model.settings.computers.credentials(for: "home-id")
+        homeCreds.adopt(SessionTicket(ticket: "th", expires: Date().addingTimeInterval(3600)))
+        let homeEndpoint = try XCTUnwrap(model.settings.computers.endpoint(for: "home-id"))
+
+        let workModel = makeStubbedComputerModel(id: "work-id", name: "Work Mac", endpoint: workEndpoint)
+        let homeModel = makeStubbedComputerModel(id: "home-id", name: "Home Mac", endpoint: homeEndpoint)
+        workModel.accept(DaemonState(agents: [Agent(paneID: "%1", alias: "work-auth", state: .idle)], pendingAction: nil, voice: .init(mode: "gemini", status: "ready")))
+        homeModel.accept(DaemonState(agents: [Agent(paneID: "%1", alias: "home-auth", state: .idle)], pendingAction: nil, voice: .init(mode: "gemini", status: "ready")))
+        model.fleet.set([workModel, homeModel])
+        model.fleet.makeCurrent("work-id")
+
+        XCTAssertEqual(model.agent(for: AgentWindowRoute(paneID: "%1"))?.alias, "work-auth")
+        XCTAssertEqual(model.agent(for: AgentWindowRoute(paneID: "%1", computer: "work-id"))?.alias, "work-auth")
+        XCTAssertEqual(model.agent(for: AgentWindowRoute(paneID: "%1", computer: "home-id"))?.alias, "home-auth")
+
+        let timedOut = DaemonError.timedOut(endpoint: "198.51.100.20:7777")
+        XCTAssertEqual(model.requestFailure(timedOut, for: "home-id").title, "Couldn't reach Home Mac")
+
+        _ = try await model.agentInput(paneID: "%1", text: "status on home", computer: "home-id")
+        _ = try await model.agentInput(paneID: "%1", keys: [.enter], computer: "home-id")
+        XCTAssertEqual(IsolationStub.recordedHostPaths, [
+            "198.51.100.20:/api/agents/%1/input",
+            "198.51.100.20:/api/agents/%1/input",
+        ])
+
+        workModel.stop()
+        homeModel.stop()
+    }
+
     // MARK: - Helpers
 
     private func makeStubbedComputerModel(id: String, name: String, endpoint: DaemonEndpoint) -> ComputerModel {
@@ -419,7 +555,8 @@ private final class IsolationStub: URLProtocol {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var state = (
         mode: Mode.immediate,
-        waiting: [() -> Void]()
+        waiting: [() -> Void](),
+        recordedHostPaths: [String]()
     )
 
     static var mode: Mode {
@@ -429,6 +566,10 @@ private final class IsolationStub: URLProtocol {
 
     static var waitingCount: Int {
         lock.withLock { state.waiting.count }
+    }
+
+    static var recordedHostPaths: [String] {
+        lock.withLock { state.recordedHostPaths }
     }
 
     static func releaseAll() {
@@ -442,7 +583,7 @@ private final class IsolationStub: URLProtocol {
 
     static func reset() {
         releaseAll()
-        lock.withLock { state.mode = .immediate }
+        lock.withLock { state = (mode: .immediate, waiting: [], recordedHostPaths: []) }
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -462,6 +603,9 @@ private final class IsolationStub: URLProtocol {
 
     private func finish() {
         guard let url = request.url else { return }
+        if let host = url.host, url.path.hasPrefix("/api/agents/") {
+            Self.lock.withLock { Self.state.recordedHostPaths.append("\(host):\(url.path)") }
+        }
         let body: [String: Any]
         switch url.path {
         case "/api/voice/providers":

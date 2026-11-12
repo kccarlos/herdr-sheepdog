@@ -7,6 +7,7 @@ import UIKit
 /// the agent's current row.
 struct AgentWindowRoute: Hashable, Codable {
     let paneID: String
+    var computer: String? = nil
 }
 
 /// An agent's live terminal window (docs/dev/design/phone-terminal.md
@@ -18,17 +19,19 @@ struct AgentWindowRoute: Hashable, Codable {
 /// `/term` connection stays (`TermHub`) and only the channel changes.
 struct AgentScreenView: View {
     let agent: Agent
+    var computer: String? = nil
     /// On iPad: the window is a pane in the detail, with its own header.
     var pane: PaneChrome?
     @EnvironmentObject private var model: SessionViewModel
     @State private var paneID: String?
 
     var body: some View {
+        let remote = computer == model.currentComputerID ? nil : computer
         let current = paneID.flatMap { id in model.flock.all.first { $0.paneID == id } } ?? agent
-        AgentWindowView(agent: current, pane: pane) { id in
+        AgentWindowView(agent: current, computer: remote, pane: pane) { id in
             if let switchTo = pane?.onSwitch { switchTo(id) } else { paneID = id }
         }
-        .id(current.paneID)
+        .id("\(remote ?? "")|\(current.paneID)")
     }
 }
 
@@ -107,6 +110,7 @@ struct AgentWindowInputs: Equatable {
 /// nothing in the window.
 private struct AgentWindowView: View {
     let agent: Agent
+    let computer: String?
     let pane: PaneChrome?
     let onSwitch: (String) -> Void
 
@@ -114,30 +118,33 @@ private struct AgentWindowView: View {
 
     var body: some View {
         let inputs = inputs
-        AgentWindowContent(agent: agent, pane: pane, onSwitch: onSwitch, model: model, inputs: inputs)
+        AgentWindowContent(agent: agent, computer: computer, pane: pane, onSwitch: onSwitch, model: model, inputs: inputs)
             .equatable()
             // Opening the window is looking at the agent: what it finished
             // is seen, and so is each turn that ends while it stays open.
-            .modifier(SeenWhileVisible(paneID: agent.paneID, visible: inputs.live.hasAttention, attention: inputs.live.attention))
+            .modifier(SeenWhileVisible(paneID: agent.paneID, visible: computer == nil && inputs.live.hasAttention, attention: inputs.live.attention))
     }
 
     private var inputs: AgentWindowInputs {
-        let live = model.flock.all.first { $0.paneID == agent.paneID } ?? agent
+        let live = model.agent(for: AgentWindowRoute(paneID: agent.paneID, computer: computer)) ?? agent
+        let computerName = computer.flatMap { model.session($0)?.name } ?? model.currentComputerName
         let computerLine: String? = model.showsComputerLabels
-            ? [model.currentComputerName, live.workspaceLabel?.trimmedOrNil].compactMap { $0 }.joined(separator: " · ")
+            ? [computerName, live.workspaceLabel?.trimmedOrNil].compactMap { $0 }.joined(separator: " · ")
             : nil
         return AgentWindowInputs(
             live: live,
             // Any open question of this agent, not only the one the voice is on.
-            approval: model.questionCard(for: agent.paneID),
-            voiceQuestionID: model.approval?.pending.id,
+            approval: computer.map { model.remoteCard(computer: $0, paneID: agent.paneID) } ?? model.questionCard(for: agent.paneID),
+            voiceQuestionID: computer == nil ? model.approval?.pending.id : nil,
             computerLine: computerLine,
-            shellShown: model.shellEntryShown,
-            actionsAvailable: model.agentActionsAvailable,
-            filesAvailable: model.filesAvailable,
-            others: model.flock.running.filter { $0.paneID != agent.paneID }
-                .map { .init(paneID: $0.paneID, name: $0.displayName, blocked: $0.state == .blocked) },
-            handshake: model.linkModel.handshake,
+            shellShown: computer == nil && model.shellEntryShown,
+            actionsAvailable: computer == nil && model.agentActionsAvailable,
+            filesAvailable: computer == nil && model.filesAvailable,
+            others: computer == nil
+                ? model.flock.running.filter { $0.paneID != agent.paneID }
+                    .map { .init(paneID: $0.paneID, name: $0.displayName, blocked: $0.state == .blocked) }
+                : [],
+            handshake: computer == nil ? model.linkModel.handshake : .idle,
             pane: pane?.key
         )
     }
@@ -149,6 +156,7 @@ private struct AgentWindowView: View {
 /// reaches it only as `inputs`.
 private struct AgentWindowContent: View, Equatable {
     let agent: Agent
+    let computer: String?
     let pane: PaneChrome?
     let onSwitch: (String) -> Void
     /// For actions only; what the window shows comes from `inputs`.
@@ -156,7 +164,7 @@ private struct AgentWindowContent: View, Equatable {
     let inputs: AgentWindowInputs
 
     static func == (a: Self, b: Self) -> Bool {
-        a.agent.paneID == b.agent.paneID && a.model === b.model && a.inputs == b.inputs
+        a.agent.paneID == b.agent.paneID && a.computer == b.computer && a.model === b.model && a.inputs == b.inputs
     }
 
     @State private var box: LazyWindow
@@ -175,14 +183,15 @@ private struct AgentWindowContent: View, Equatable {
     @State private var questionArea: CGFloat = 0
     @FocusState private var promptFocused: Bool
 
-    init(agent: Agent, pane: PaneChrome?, onSwitch: @escaping (String) -> Void, model: SessionViewModel, inputs: AgentWindowInputs) {
+    init(agent: Agent, computer: String? = nil, pane: PaneChrome?, onSwitch: @escaping (String) -> Void, model: SessionViewModel, inputs: AgentWindowInputs) {
         self.agent = agent
+        self.computer = computer
         self.pane = pane
         self.onSwitch = onSwitch
         self.model = model
         self.inputs = inputs
         let paneID = agent.paneID
-        _box = State(initialValue: LazyWindow { AgentWindowController(paneID: paneID) })
+        _box = State(initialValue: LazyWindow { AgentWindowController(paneID: paneID, computer: computer) })
     }
 
     /// The agent as the app lists it now.
@@ -236,7 +245,7 @@ private struct AgentWindowContent: View, Equatable {
             }
             terminal
             if let approval {
-                let ownerID = model.currentComputerID
+                let ownerID = computer ?? model.currentComputerID
                 FloatingQuestions(cards: [approval], voiceQuestionID: inputs.voiceQuestionID, area: questionArea) { id, index in model.answer(question: id, option: index, on: ownerID) }
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
@@ -321,6 +330,7 @@ private struct AgentWindowContent: View, Equatable {
             canResetTextSize: window.fontSize != SwiftTermSurface.defaultFontSize,
             actionsAvailable: inputs.actionsAvailable,
             filesAvailable: inputs.filesAvailable,
+            changesAvailable: computer == nil,
             working: live.state == .working,
             others: inputs.others,
             extra: pane?.extraMenu,
@@ -493,13 +503,15 @@ private struct AgentWindowContent: View, Equatable {
                     onSend: sendPrompt,
                     onStop: { window.stop(actions: inputs.actionsAvailable) },
                     leading: {
-                        AttachButton(upload: { data, fileName, type in
-                            try await model.uploadAttachment(paneID: agent.paneID, data: data, fileName: fileName, mimeType: type)
-                        }, onAttached: { reply in
-                            prompt = Attachments.inserting(reply.path, into: prompt)
-                        })
-                        .disabled(!window.canOperate)
-                        .padding(.bottom, 2)
+                        if computer == nil {
+                            AttachButton(upload: { data, fileName, type in
+                                try await model.uploadAttachment(paneID: agent.paneID, data: data, fileName: fileName, mimeType: type)
+                            }, onAttached: { reply in
+                                prompt = Attachments.inserting(reply.path, into: prompt)
+                            })
+                            .disabled(!window.canOperate)
+                            .padding(.bottom, 2)
+                        }
                     }
                 )
             }
@@ -748,6 +760,7 @@ final class AgentWindowController {
     static let fontSizeKey = "agentWindow.fontSize"
 
     let paneID: String
+    let computer: String?
     /// A phone shell's window: opens `.newShell(cwd:)`, not an agent's pane.
     let isShell: Bool
     let shellCwd: String?
@@ -784,14 +797,16 @@ final class AgentWindowController {
     var typing = false
 
     @ObservationIgnored weak var model: SessionViewModel?
+    @ObservationIgnored private(set) var hub: TermHub?
     /// A tap, a key or a prompt in this window (iPad: focuses its pane).
     @ObservationIgnored var onActivity: (() -> Void)?
     @ObservationIgnored private var channel: Int?
     @ObservationIgnored private var snapshotTask: Task<Void, Never>?
     @ObservationIgnored private var pushes: ScreenStreamRouter.Subscription?
 
-    init(paneID: String, shell: Bool = false, shellCwd: String? = nil) {
+    init(paneID: String, computer: String? = nil, shell: Bool = false, shellCwd: String? = nil) {
         self.paneID = paneID
+        self.computer = computer
         self.isShell = shell
         self.shellCwd = shellCwd
         let saved = UserDefaults.standard.double(forKey: Self.fontSizeKey)
@@ -833,16 +848,19 @@ final class AgentWindowController {
     func attach(model: SessionViewModel) {
         guard self.model == nil else { return }
         self.model = model
-        pushes = model.screenRouter.subscribe(paneID: paneID) { [weak self] event in
-            guard let self, self.state.snapshotRunning else { return }
-            switch event {
-            case let .frame(frame): self.applySnapshot(frame)
-            case let .error(message, _): self.snapshot.fail(message: message)
+        self.hub = model.termHub(for: computer)
+        if computer == nil {
+            pushes = model.screenRouter.subscribe(paneID: paneID) { [weak self] event in
+                guard let self, self.state.snapshotRunning else { return }
+                switch event {
+                case let .frame(frame): self.applySnapshot(frame)
+                case let .error(message, _): self.snapshot.fail(message: message)
+                }
             }
         }
         // A size that arrived before the model did.
         // (Before its first layout the view still holds SwiftTerm's 80 × 24.)
-        run(mutate { $0.start(model.termAvailability, termUnavailable: model.termUnavailableReason) })
+        run(mutate { $0.start(model.termAvailability(for: computer), termUnavailable: model.termUnavailableReason(for: computer)) })
         if surface.view.bounds.width > 0, surface.cols > 0, surface.rows > 0, state.cols == 0 {
             run(mutate { $0.sizeChanged(cols: surface.cols, rows: surface.rows) })
         }
@@ -856,14 +874,14 @@ final class AgentWindowController {
 
     func enteredBackground() {
         run(mutate { $0.enteredBackground() })
-        model?.termHub.disconnectIfIdle()
+        hub?.disconnectIfIdle()
     }
 
     func becameActive() { run(mutate { $0.becameActive() }) }
 
     func availabilityChanged() {
         guard let model else { return }
-        run(mutate { $0.availabilityChanged(model.termAvailability, termUnavailable: model.termUnavailableReason) })
+        run(mutate { $0.availabilityChanged(model.termAvailability(for: computer), termUnavailable: model.termUnavailableReason(for: computer)) })
     }
 
     func takeOver() { run(mutate { $0.takeOver() }) }
@@ -891,7 +909,7 @@ final class AgentWindowController {
         Task {
             beginSend()
             do {
-                let reply = try await model.agentInput(paneID: paneID, keys: [key])
+                let reply = try await model.agentInput(paneID: paneID, keys: [key], computer: computer)
                 finishSend(reply)
                 Haptics.answered()
             } catch {
@@ -908,7 +926,7 @@ final class AgentWindowController {
         run(mutate { $0.willSendInput() })
         beginSend()
         do {
-            let reply = try await model.agentInput(paneID: paneID, text: text)
+            let reply = try await model.agentInput(paneID: paneID, text: text, computer: computer)
             finishSend(reply)
             Haptics.answered()
             return true
@@ -920,7 +938,7 @@ final class AgentWindowController {
 
     func sendRaw(_ bytes: [UInt8]) {
         onActivity?()
-        guard state.takesRawInput, let channel, let hub = model?.termHub else { return }
+        guard state.takesRawInput, let channel, let hub else { return }
         run(mutate { $0.willSendInput() })
         hub.send(input: bytes, ch: channel)
     }
@@ -958,7 +976,7 @@ final class AgentWindowController {
         // Before `attach`, which reads the surface's size itself.
         guard model != nil else { return }
         run(mutate { $0.sizeChanged(cols: cols, rows: rows) })
-        if let channel { model?.termHub.resize(ch: channel, cols: cols, rows: rows) }
+        if let channel { hub?.resize(ch: channel, cols: cols, rows: rows) }
         if state.phase == .snapshot, !snapshot.text.isEmpty { drawSnapshot() }
     }
 
@@ -967,7 +985,7 @@ final class AgentWindowController {
     private func tapped(col: Int, row: Int) {
         onActivity?()
         guard state.takesRawInput, let channel else { return }
-        model?.termHub.click(ch: channel, col: col, row: row)
+        hub?.click(ch: channel, col: col, row: row)
     }
 
     /// The surface redrew. High-frequency (each frame): the text is read
@@ -1013,7 +1031,7 @@ final class AgentWindowController {
             // `.close` then `.open` replaces it in order.
             switch command {
             case let .open(mode, takeover):
-                guard let hub = model?.termHub else { continue }
+                guard let hub else { continue }
                 let target: TermMessage.Target = isShell ? .newShell(cwd: shellCwd) : .pane(paneID)
                 let ch = hub.open(target: target, mode: mode, cols: state.cols, rows: state.rows, takeover: takeover) { [weak self] event in
                     self?.handle(event)
@@ -1024,14 +1042,14 @@ final class AgentWindowController {
                     run(mutate { $0.closed(.refused("too_many")) })
                 }
             case .close:
-                if let channel { model?.termHub.close(ch: channel) }
+                if let channel { hub?.close(ch: channel) }
                 channel = nil
             case .startSnapshot:
                 startSnapshot()
             case .stopSnapshot:
                 stopSnapshot()
             case let .scroll(dir, lines):
-                if let channel { model?.termHub.scroll(ch: channel, dir, lines: lines) }
+                if let channel { hub?.scroll(ch: channel, dir, lines: lines) }
             }
         }
     }
@@ -1066,11 +1084,12 @@ final class AgentWindowController {
     private func startSnapshot() {
         guard snapshotTask == nil, let model else { return }
         let paneID = self.paneID
+        let computer = self.computer
         snapshotTask = Task { [weak self] in
-            model.openAgentScreen(paneID: paneID)
-            defer { model.closeAgentScreen(paneID: paneID) }
+            if computer == nil { model.openAgentScreen(paneID: paneID) }
+            defer { if computer == nil { model.closeAgentScreen(paneID: paneID) } }
             while !Task.isCancelled {
-                if model.agentScreenStreaming(paneID: paneID) {
+                if computer == nil, model.agentScreenStreaming(paneID: paneID) {
                     try? await Task.sleep(nanoseconds: 500_000_000)
                     continue
                 }
@@ -1090,7 +1109,7 @@ final class AgentWindowController {
     private func refreshSnapshot() async {
         guard let model else { return }
         do {
-            if let frame = try await model.agentScreen(paneID: paneID, hash: snapshot.hashForNextRead) {
+            if let frame = try await model.agentScreen(paneID: paneID, hash: snapshot.hashForNextRead, computer: computer) {
                 applySnapshot(frame)
             } else {
                 snapshot.markUnsupported()
@@ -1099,7 +1118,7 @@ final class AgentWindowController {
         } catch is CancellationError {
             return
         } catch {
-            snapshot.fail(error)
+            snapshot.fail(message: model.requestFailure(error, for: computer).message)
             if snapshot.text.isEmpty { feedMessage(snapshot.error ?? "No screen.") }
         }
     }

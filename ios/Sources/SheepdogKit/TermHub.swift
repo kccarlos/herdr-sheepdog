@@ -51,12 +51,16 @@ public final class TermHub: LinkChannelClient {
             socket.move(to: endpoint)
             return
         }
+        disconnect(updatingTo: endpoint)
+    }
+
+    public func disconnect(updatingTo endpoint: DaemonEndpoint? = nil) {
         lingerTask?.cancel()
         lingerTask = nil
         let closing = handlers
         handlers.removeAll()
         socket.disconnect()
-        socket.update(endpoint: endpoint)
+        if let endpoint { socket.update(endpoint: endpoint) }
         for (ch, handler) in closing.sorted(by: { $0.key < $1.key }) {
             handler(.closed(ch: ch, reason: .gone, canTakeOver: false))
         }
