@@ -261,7 +261,7 @@ private struct FlockScrollContent: View {
                         question: remoteCard(computer.id, agent.paneID),
                         primary: false,
                         voiceQuestion: false,
-                        showsWindowButton: false,
+                        computer: computer.id,
                         expanded: Binding(
                             get: { expanded.contains("\(computer.id)|\(agent.paneID)") },
                             set: { open in
@@ -438,8 +438,8 @@ struct AgentCard: View {
     var voiceQuestion = true
     /// iPad: the expanded card also lists up to 3 earlier messages.
     var showsEarlier = false
-    /// Another computer's agent has no window here (Talk to that computer).
-    var showsWindowButton = true
+    /// Another computer's daemon id; nil for the current computer.
+    var computer: String? = nil
     @Binding var expanded: Bool
     let answer: (String, Int) -> Void
 
@@ -451,7 +451,7 @@ struct AgentCard: View {
 
     private var waiting: Bool { question != nil }
     /// This computer's own agent: pin and unread are written here only.
-    private var controllable: Bool { showsWindowButton && agent.hasAttention }
+    private var controllable: Bool { computer == nil && agent.hasAttention }
     private var showsDetails: Bool { !waiting && expanded }
     private var tint: Color { Theme.color(for: agent.state) }
 
@@ -470,7 +470,7 @@ struct AgentCard: View {
                 .accessibilityHint(waiting ? "" : (expanded ? "Hides the details" : "Shows the details"))
                 .accessibilityAddTraits(waiting ? [] : .isButton)
                 .accessibilityIdentifier("flock.agent.\(agent.alias).toggle")
-                if showsWindowButton { windowButton }
+                windowButton
             }
             if let question {
                 if agent.isMuted { heldNotice }
@@ -670,7 +670,7 @@ struct AgentCard: View {
     /// The round window button: opens the agent's live terminal.
     private var windowButton: some View {
         Button {
-            openWindow(.agent(agent.paneID))
+            openWindow(computer.map { .remoteAgent(agent.paneID, computer: $0) } ?? .agent(agent.paneID))
         } label: {
             Image(systemName: "apple.terminal")
                 .font(.system(size: 16, weight: .medium))
@@ -693,7 +693,7 @@ struct AgentCard: View {
     // MARK: - Expanded
 
     /// This computer's own agent, on a daemon that has the file browser.
-    private var showsBrowse: Bool { showsWindowButton && model.filesAvailable }
+    private var showsBrowse: Bool { computer == nil && model.filesAvailable }
 
     /// The way into the agent's files and changes (design: EntryCard), from
     /// the details, where the user is reading what the agent did.

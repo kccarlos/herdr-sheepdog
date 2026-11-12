@@ -58,6 +58,13 @@ struct IPadRootView: View {
                         .navigationDestination(for: ShellRoute.self) { route in
                             ShellWindowView(route: route)
                         }
+                        .navigationDestination(for: AgentWindowRoute.self) { route in
+                            if let agent = model.agent(for: route) {
+                                AgentScreenView(agent: agent, computer: route.computer)
+                            } else {
+                                AgentGoneView()
+                            }
+                        }
                 }
             }
             .modifier(SplitStyle(portrait: portrait))

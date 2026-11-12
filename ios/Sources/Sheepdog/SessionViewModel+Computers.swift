@@ -32,6 +32,7 @@ extension SessionViewModel {
                                    fingerprint: "\(endpoint.display)|\(endpoint.secure)"), at: 0)
         }
         for gone in fleet.models where !next.contains(where: { $0 === gone }) {
+            dropRemoteHub(gone.id)
             fingerprints[gone.id] = nil
             endpoints[gone.id] = nil
         }
@@ -49,6 +50,7 @@ extension SessionViewModel {
         if let existing = fleet.model(id) {
             existing.rename(name)
             if fingerprints[id] != fingerprint {
+                dropRemoteHub(id)
                 existing.renew(addresses: addresses, certExpires: certExpires)
             } else {
                 existing.setAddresses(addresses)
@@ -135,6 +137,31 @@ extension SessionViewModel {
 
     /// Another computer's model (nil for the current one).
     func session(_ id: String) -> ComputerModel? { others.first { $0.id == id } }
+
+    func termHub(for computer: String? = nil) -> TermHub {
+        guard let id = computer, !id.isEmpty, id != currentComputerID else { return termHub }
+        if let existing = remoteHubs[id] { return existing }
+        guard let session = session(id), let base = endpoints[id] ?? settings.computers.endpoint(for: id) else {
+            let disabled = TermHub(endpoint: DaemonEndpoint(host: "127.0.0.1"))
+            disabled.socket.allow(false, reporter: nil)
+            return disabled
+        }
+        let hub = TermHub(endpoint: base.at(session.link.addressInUse))
+        remoteHubs[id] = hub
+        session.attach(.term, hub)
+        return hub
+    }
+
+    func dropRemoteHub(_ id: String) {
+        guard let hub = remoteHubs.removeValue(forKey: id) else { return }
+        fleet.model(id)?.attach(.term, nil)
+        hub.disconnect()
+    }
+
+    func agent(for route: AgentWindowRoute) -> Agent? {
+        if let id = route.computer, id != currentComputerID { return session(id)?.agents.first { $0.paneID == route.paneID } }
+        return flock.all.first { $0.paneID == route.paneID }
+    }
 
     /// The capsule's name: the voice's with one computer, the current
     /// computer's with several (the voice itself never names one).

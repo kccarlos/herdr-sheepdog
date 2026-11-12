@@ -213,8 +213,8 @@ private struct AgentWindowContent: View {
 
     var body: some View {
         Group {
-            if let route, let agent = model.flock.all.first(where: { $0.paneID == route.paneID }) {
-                AgentScreenView(agent: agent, pane: PaneChrome(
+            if let route, let agent = model.agent(for: route) {
+                AgentScreenView(agent: agent, computer: route.computer, pane: PaneChrome(
                     onGone: { dismissWindow() },
                     extraMenu: AnyView(
                         Button {
@@ -225,7 +225,7 @@ private struct AgentWindowContent: View {
                         .accessibilityIdentifier("agentWindow.closeWindow")
                     )
                 ))
-                .id(route.paneID)
+                .id(route)
             } else {
                 ContentUnavailableView {
                     Label("That agent is gone", systemImage: "terminal")

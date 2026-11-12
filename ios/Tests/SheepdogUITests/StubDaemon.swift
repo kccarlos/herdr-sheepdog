@@ -42,6 +42,8 @@ final class StubDaemon {
     private var seen: [String] = []
     /// The lines typed so far (`POST /api/turn`'s `text`).
     private var typed: [String] = []
+    /// Terminal screen snapshots by pane id (`GET /api/agents/<pane>/screen`).
+    var screens: [String: String] = [:]
 
     /// How many requests started with `prefix` ("POST /api/turn").
     func requests(_ prefix: String) -> Int {
@@ -171,6 +173,16 @@ final class StubDaemon {
                 let payload = #"{"name":"to_supervisor","spoken":"# + Self.json(reply.spoken) + #","options":["# + options + "]}"
                 let event = #"{"id":"# + String(1_790_127_648_456_893 + idBase) + #","ts":"2026-10-23T09:00:30.000Z","source":"voice","type":"voice.tool_result","payload":"# + payload + "}"
                 return http(200, "application/json", "[" + event + "]")
+            }
+            if path.hasPrefix("/api/agents/") {
+                let raw = path.dropFirst("/api/agents/".count).prefix { $0 != "/" && $0 != "?" }
+                let pane = String(raw).removingPercentEncoding ?? String(raw)
+                if path.contains("/screen"), let text = lock.withLock({ screens[pane] }) {
+                    return http(200, "application/json", #"{"pane_id":"# + Self.json(pane) + #","alias":"agent","state":"working","text":"# + Self.json(text) + #","hash":"h1"}"#)
+                }
+                if path.contains("/input") {
+                    return http(200, "application/json", #"{"kind":"prompt","spoken":"Sent."}"#)
+                }
             }
             return http(404, "application/json", #"{"error":"not found"}"#)
         }
