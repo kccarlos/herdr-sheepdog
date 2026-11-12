@@ -208,7 +208,10 @@ func TestDoctorCommand(t *testing.T) {
 	port := l.Addr().(*net.TCPAddr).Port
 	_ = l.Close()
 	cfgPath := filepath.Join(dir, "config.toml")
-	body := "[herdr]\nsocket = " + strconv.Quote(filepath.Join(dir, "no.sock")) + "\n[web]\nport = " + strconv.Itoa(port) + "\n"
+	// hc_socket too: left empty it follows the machine's own herdr-core, which
+	// answers on a host that runs one (the Linux nightly box) and turns the
+	// expected herdr failure into an ok.
+	body := "[herdr]\nsocket = " + strconv.Quote(filepath.Join(dir, "no.sock")) + "\nhc_socket = " + strconv.Quote(filepath.Join(dir, "no-hc.sock")) + "\n[web]\nport = " + strconv.Itoa(port) + "\n"
 	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
