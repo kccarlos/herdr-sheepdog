@@ -27,6 +27,7 @@ from .assistant_settings import cmd_session_note
 from .feedback import cmd_feedback
 from .ask import cmd_ask, cmd_ask_pane
 from .budget import cmd_recap, DECISIONS
+from .project import cmd_project
 
 
 # ---- another machine ------------------------------------------------------------------------
@@ -283,6 +284,17 @@ def main():
     cmd("rm", cmd_rm, "remove a task")
     c = cmd("config", cmd_config, "this folder's settings", id=False)
     c.add_argument("--prefix", help="task ids' prefix, 2 to 5 letters (HAT -> HAT-4); unique on this machine")
+    pr = sub.add_parser("project", help="start a factory project in one command (repo, settings, requirements, space, Assistant)").add_subparsers(dest="project")
+    c = pr.add_parser("start", help="make sure the folder is a git repo, set factory defaults, import requirements, create or find its space and Assistant")
+    c.add_argument("folder", nargs="?", help="the project's folder (default: here)")
+    c.add_argument("--folder", dest="folder_opt", help=argparse.SUPPRESS)
+    c.add_argument("--name", help="the project and space name (default: the folder's)")
+    c.add_argument("--requirements", help="a file (copied) or URL (saved as a link line) imported into docs/requirements.md")
+    c.add_argument("--check", help="the check command the gate runs (default: detected from package.json, Makefile, unittest or xcodebuild)")
+    c.add_argument("--autopilot", action="store_true", help="turn Autopilot on for the space, pointing its heartbeat at docs/requirements.md")
+    c.add_argument("--dry-run", action="store_true", help="print every step without doing it")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_project)
     c = cmd("tick", cmd_tick, "start queued tasks that can go; mark merged ones done (Herdr runs this)", id=False)
     c.add_argument("--machine", help=argparse.SUPPRESS)  # this machine's name, from Herdr's window (HERD-40)
     c.add_argument("--hold", help=argparse.SUPPRESS)  # its start limits as JSON, from Settings > Machines

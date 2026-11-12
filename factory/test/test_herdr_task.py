@@ -5775,6 +5775,137 @@ class BusyWorkerDelivery(unittest.TestCase):
         self.assertIn(["hc", "keys", "t1", "ctrl+enter"], self.calls)
 
 
+class ProjectStart(unittest.TestCase):
+    """`herdr-task project start` (herdr_task/project.py): repo init, factory settings, check detection,
+    requirements import, space & Assistant creation, Autopilot heartbeat, idempotence and --dry-run."""
+
+    def setUp(self):
+        import contextlib, io, pathlib
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.autopilot as ap, herdr_task.base as base, herdr_task.cli as cli
+        import herdr_task.project as project, herdr_task.settings as st, herdr_task.store as store
+        self.ap, self.base, self.cli, self.project, self.st, self.store = ap, base, cli, project, st, store
+        self.io, self.redirect, self.exit_stack, self.mock, self.Path = io, contextlib.redirect_stdout, contextlib.ExitStack, mock, pathlib.Path
+        self.tmp = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.store_dir, self.settings_file = os.path.join(self.tmp, "tasks"), os.path.join(self.tmp, "shepherdr.json")
+        self.app_home, self.templates, self.beats = (os.path.join(self.tmp, x) for x in ("app-home", "templates", "beats"))
+        self.window, self.terms, self.calls, self.seen_tpl = [], {}, [], {}
+
+        def fake_run(argv, cwd=None, check=False, timeout=None):
+            if argv[0] == "git":
+                return subprocess.run(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
+            self.calls.append(list(argv))
+            if argv[:2] == ["herdr-app", "ls"]:
+                return subprocess.CompletedProcess(argv, 1, "", "no window") if self.window is None else \
+                    subprocess.CompletedProcess(argv, 0, json.dumps({"spaces": self.window}), "")
+            if argv[:3] == ["herdr-app", "do", "space.new"]:
+                sid = f"sp{len(self.window) + 1}"
+                self.window.append({"id": sid, "name": argv[argv.index("--name") + 1], "folder": argv[argv.index("--folder") + 1]})
+                return subprocess.CompletedProcess(argv, 0, json.dumps({"space": sid}), "")
+            if argv[:2] == ["hc", "ls"]:
+                return subprocess.CompletedProcess(argv, 0, json.dumps({"terminals": list(self.terms.values())}), "")
+            if argv[:2] == ["hc", "get"]:
+                t = self.terms.get(argv[2])
+                return subprocess.CompletedProcess(argv, 0 if t else 1, json.dumps(t) if t else "", "")
+            if argv[:2] == ["hc", "label"]:
+                self.terms[argv[2]]["labels"].update(x.split("=", 1) for x in argv[3:])
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            if argv[:2] == ["hc", "run"]:
+                lbs = {k: v for i, a in enumerate(argv) if a == "--label" for k, v in [argv[i + 1].split("=", 1)]}
+                tpl, addr = argv[-1], f"t{len(self.terms) + 1}"
+                if os.path.isfile(tp := os.path.join(self.templates, f"{tpl}.md")):
+                    self.seen_tpl[tpl] = self.Path(tp).read_text()
+                self.terms[addr] = {"address": addr, "state": "live", "cwd": argv[argv.index("--cwd") + 1],
+                                    "template": tpl, "labels": lbs, "status": {"state": "idle"}, "turn": 1}
+                return subprocess.CompletedProcess(argv, 0, json.dumps({"address": addr}), "")
+            raise AssertionError(f"unexpected command: {argv}")
+
+        for obj, k, v in ((base, "run", fake_run), (base, "APP_HOME", self.app_home), (store, "STORE", self.store_dir),
+                          (st, "SETTINGS", self.settings_file), (st, "TEMPLATES", self.templates),
+                          (ap, "STORE", self.store_dir), (ap, "STATE", os.path.join(self.store_dir, ".autopilot.json")),
+                          (ap, "HEARTBEATS", self.beats), (ap, "run", fake_run), (ap, "typing", lambda *_: None),
+                          (ap, "ensure_scheduler", lambda quiet=False: {}), (ap, "news_send", lambda *_, **__: True)):
+            p = mock.patch.object(obj, k, v)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def put(self, path, data):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        self.Path(path).write_text(data if isinstance(data, str) else json.dumps(data))
+        return path
+
+    def start(self, *argv):
+        buf = self.io.StringIO()
+        with self.mock.patch.object(sys, "argv", ["herdr-task", "project", "start", *argv]), self.redirect(buf):
+            self.assertEqual(self.cli.main(), 0)
+        return buf.getvalue()
+
+    def test_starts_project_autopilot_and_second_run_is_noop(self):
+        self.put(os.path.join(self.templates, "assistant.md"), "---\nname: assistant\ncommand: exec claude\n---\nCoordinate.\n")
+        self.put(os.path.join(self.app_home, "shared.json"), {"coordinator.slots": {"s1": {"pane": "p9", "space": "sp1", "tab": "tb2"}}})
+        self.put(self.settings_file, {"version": 1, "everywhere": {"worker": {"agent": "claude", "model": "opus", "effort": "high"}}})
+        repo = os.path.join(self.tmp, "my-app")
+        self.put(os.path.join(repo, "package.json"), {"scripts": {"test": "vitest"}})
+        spec = self.put(os.path.join(self.tmp, "spec.md"), "# Goal\nShip v1.\n")
+        out = json.loads(self.start(repo, "--name", "My App", "--requirements", spec, "--autopilot", "--json"))
+        self.assertEqual((out["changed"], out["prefix"], out["space"], out["assistant"], out["check"], out["autopilot"]),
+                         (True, "MA", "sp1", "t1", "npm test", True))
+        self.assertEqual(self.base.git(repo, "rev-parse", "--abbrev-ref", "HEAD")[1], "main")
+        self.assertEqual(self.Path(repo, "docs", "requirements.md").read_text(), "# Goal\nShip v1.\n")
+        with self.store.Store(self.store.locate(repo), write=False) as s:
+            cfg = self.st.settings_for(s, "sp1")
+            self.assertEqual((cfg["tasks"]["merge"], cfg["tasks"]["review_min"], cfg["tasks"]["check"]), ("checks", 2, "npm test"))
+            self.assertEqual((cfg["reviewer"]["agent"], cfg["reviewer"]["model"]), ("agy", "gemini-4-argon-high"))
+            self.assertEqual(self.st.worker_argv(s, {}, "sp1"), ["agy", "--model", "gemini-4-carbon-high", "--dangerously-skip-permissions"])
+        self.assertEqual((self.terms["t1"]["labels"]["herdr.chat"], self.terms["t1"]["labels"]["herdr.coordinator.space"]), ("p9", "sp1"))
+        self.assertTrue(any("CLAUDECODE" in v for v in self.seen_tpl.values()) and os.listdir(self.templates) == ["assistant.md"])
+        self.assertIn("docs/requirements.md", self.ap.heartbeat_of("sp1")[0])
+        self.assertTrue(self.store.read_list(self.ap.STATE)["spaces"]["sp1"]["on"])
+        before = len(self.calls)
+        text2 = self.start(repo, "--requirements", "https://example.com/other", "--check", "pytest", "--autopilot")
+        self.assertTrue(all("found" in line for line in text2.strip().splitlines()), text2)
+        self.assertEqual([c for c in self.calls[before:] if c[:2] in (["hc", "run"], ["herdr-app", "do"])], [])
+        self.assertEqual(self.Path(repo, "docs", "requirements.md").read_text(), "# Goal\nShip v1.\n")
+
+    def test_detects_checks_url_requirements_and_no_window_fallback(self):
+        m, py, xc = (os.path.join(self.tmp, x) for x in ("mk", "py", "xc"))
+        self.put(os.path.join(m, "package.json"), {"scripts": {"test": 'echo "Error: no test specified" && exit 1'}})
+        self.put(os.path.join(m, "Makefile"), "build:\n\tcc a.c\ntest:\n\t./a.out\n")
+        self.put(os.path.join(py, "test", "test_x.py"), "")
+        os.makedirs(os.path.join(xc, "Demo.xcodeproj"))
+        self.assertEqual((self.project.detect_check(m), self.project.detect_check(py), self.project.detect_check(xc)),
+                         ("make test", "python3 -m unittest discover -s test", "xcodebuild test -project Demo.xcodeproj -scheme Demo"))
+        self.window, fresh = None, os.path.join(self.tmp, "headless-app")
+        out = json.loads(self.start(fresh, "--requirements", "https://example.com/spec", "--check", "cargo test", "--autopilot", "--json"))
+        self.assertTrue("herdr-app do space.new" in out["space_step"] and out["check"] == "cargo test")
+        self.assertEqual(self.Path(fresh, "docs", "requirements.md").read_text(), "[https://example.com/spec](https://example.com/spec)\n")
+        self.assertFalse(json.loads(self.start(fresh, "--autopilot", "--json"))["changed"])
+        self.assertIsNotNone(self.store.read_list(self.ap.STATE)["spaces"]["ha"].get("pending"))
+        self.terms["t1"]["foreground"], self.window = {"name": "claude"}, [{"id": "sp2", "name": "headless-app", "folder": fresh}]
+        self.put(os.path.join(self.app_home, "shared.json"), {"coordinator.slots": {"s2": {"pane": "p2", "space": "sp2"}}})
+        out2 = json.loads(self.start(fresh, "--json"))
+        self.assertEqual((out2["space"], out2["assistant"], out2["autopilot"], self.project.coordinator_in("sp2")), ("sp2", "t1", True, "t1"))
+        self.assertEqual((self.terms["t1"]["labels"]["herdr.chat"], list(self.store.read_list(self.ap.STATE)["spaces"])), ("p2", ["sp2"]))
+        self.assertEqual(self.store.read_list(self.ap.STATE)["spaces"]["sp2"]["inflight"]["to"], "t1")
+        self.assertFalse(json.loads(self.start(fresh, "--autopilot", "--json"))["changed"])
+
+    def test_dry_run_prints_steps_and_writes_nothing(self):
+        spec = self.put(os.path.join(self.tmp, "spec.md"), "Spec\n")
+        sb, target = os.path.join(self.tmp, "untouched"), os.path.join(self.tmp, "untouched", "proj")
+        with self.exit_stack() as es:
+            for o, k, v in ((self.store, "STORE", f"{sb}/tasks"), (self.st, "SETTINGS", f"{sb}/shepherdr.json"),
+                            (self.ap, "STORE", f"{sb}/tasks"), (self.ap, "STATE", f"{sb}/tasks/.autopilot.json"), (self.ap, "HEARTBEATS", f"{sb}/beats")):
+                es.enter_context(self.mock.patch.object(o, k, v))
+            text = self.start(target, "--requirements", spec, "--autopilot", "--dry-run")
+        for w in ("Git repo: would create", "Tasks: would set prefix", "Requirements: would copy",
+                  "Space: would create", "Settings: would write", "Assistant: would start", "Autopilot: would set heartbeat"):
+            self.assertIn(f"[dry-run] {w}", text)
+        self.assertFalse(os.path.exists(sb))
+        self.assertEqual([c for c in self.calls if c[:2] in (["hc", "run"], ["herdr-app", "do"])], [])
+
+
 class Watchdog(unittest.TestCase):
     """FAC-62: watchdog restarts a stuck local Assistant once with restart.sh and alerts on repeat."""
 
