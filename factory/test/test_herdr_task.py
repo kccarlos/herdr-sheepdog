@@ -1727,7 +1727,7 @@ class GateReview(unittest.TestCase):
         import herdr_task.templates as templates
         import herdr_task.settings as settings
         import contract_gate_evidence as contract
-        self.commands, self.contract = commands, contract
+        self.commands, self.contract, self.real_tell = commands, contract, commands.tell
         self.root = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.root, True)
         self.main, self.wt = os.path.join(self.root, "repo"), os.path.join(self.root, "wt")
@@ -1757,10 +1757,11 @@ class GateReview(unittest.TestCase):
                                  (commands, "live_agents", lambda key: []), (commands, "detail", lambda k: k),
                                  (commands, "github", lambda s: None), (commands, "already_merged", lambda *a: None),
                                  (commands, "own_work", lambda *a: None), (commands, "guard", lambda *a: None),
-                                 (commands, "tell", lambda s, t, msg, args: self.told.append(msg) or ("w1", False)),
+                                 (commands, "tell", lambda s, t, msg, args, start=True: self.told.append(msg) or ("w1", False)),
                                  (launch, "run", hc_run), (launch, "hc_json", lambda *a: None),
                                  (launch, "low_priority", lambda argv, name: argv), (templates, "TEMPLATES", tdir),
                                  (settings, "SETTINGS", os.path.join(tdir, "none.json")),
+                                 (launch, "UNSANDBOXED_FLAG", os.path.join(tdir, "none")),
                                  (commands, "hc_json", lambda *a: self.reviewer_term),
                                  (commands, "sandboxes", lambda argv: False), (launch, "sandboxes", lambda argv: False),
                                  (commands, "subprocess", mock.Mock())):  # no real `hc kill` of a reviewer
@@ -2302,6 +2303,177 @@ class GateReview(unittest.TestCase):
         self.assertNotIn("herdr-task", settings.settings_block(self.store, plain).split("- Review:")[1].split("\n")[0])
         self.assertIn(" reviewed ", closing_line(self.store, plain))
 
+    def test_a_pass_tells_the_worker_starts_the_next_round_and_final_pass_tells_merging(self):
+        from unittest import mock
+        from herdr_task import agents
+        self.ready()
+        self.verdict("term-1")
+        self.assertEqual(len(self.task["review_runs"]), 2)
+        self.assertEqual(self.told, [
+            "Herdr's review round 1 of SHEP-13 passed (1 of 2 passing). Round 2 has started; its findings come to you as a message, nothing to do meanwhile."
+        ])
+        self.commands.tell_pass(self.store, self.task, 1, "duplicate")
+        self.assertEqual(len(self.told), 1)  # never sent twice for the same round
+        # Final needed pass: tells merging (with what finalize did) in one plain line, and its ack turn doesn't mark Ready as Working again.
+        idle = [{"address": "w1", "status": "idle", "turn": 6, "labels": {}}]
+        with mock.patch.object(self.commands, "live_agents", lambda key: idle), \
+                mock.patch.object(self.commands, "ready_turns", agents.ready_turns):
+            self.verdict("term-2")
+        self.assertEqual(self.task["state"], "ready")
+        self.assertEqual(len(self.told), 2)
+        self.assertNotIn("\n", self.told[-1])
+        self.assertTrue(self.told[-1].startswith("Herdr's review round 2 of SHEP-13 passed: SHEP-13 goes on to merging (2 of 2 passing). SHEP-13 is ready."))
+        self.assertIn("Tasks panel", self.told[-1])
+        self.commands.tell_pass(self.store, self.task, 2, "duplicate")
+        self.assertEqual(len(self.told), 2)
+        self.assertFalse(agents.busy_again(self.task, [{"address": "w1", "status": "working", "turn": 6, "labels": {}}]))
+        self.assertTrue(agents.busy_again(self.task, [{"address": "w1", "status": "working", "turn": 7, "labels": {}}]))
+
+    def test_a_pass_never_starts_a_worker_when_none_is_live(self):
+        from unittest import mock
+        started = []
+        self.sandbox()
+        self.ready()
+        with mock.patch.object(self.commands, "tell", self.real_tell), \
+                mock.patch.object(self.commands, "workers", lambda s, t: []), \
+                mock.patch.object(self.commands, "start_again",
+                                  lambda *a, **k: (started.append(k.get("message")), ({"address": "w2"}, True))[1]):
+            for i in (0, 1):  # neither an intermediate pass nor the final pass starts a worker when none is live
+                code = self.commands.round_code(self.task["review_runs"][i])
+                self.screen(f"{code} pass\n")
+                self.commands.gate_reads(self.store, self.task)
+            self.assertEqual(self.task["state"], "ready")
+            self.assertEqual(started, [])
+            # Round 1 changes, by contrast, still starts a worker when none is live.
+            self.change("another")
+            for k in ("reviews", "review_runs", "verdict_told"):
+                self.task.pop(k, None)
+            self.ready()
+            code3 = self.commands.round_code(self.task["review_runs"][0])
+            self.screen(f"fix x\n{code3} changes 1\n")
+            self.commands.gate_reads(self.store, self.task)
+            self.assertEqual(len(started), 1)
+            self.assertIn("Fix these", started[0])
+
+    def test_end_reviewer_exits_0_without_exit_1(self):
+        import time
+        from types import SimpleNamespace
+        from unittest import mock
+        import herdr_task.launch as launch
+        with mock.patch.object(self.commands, "workers", lambda s, t: [{"address": "w1"}]):
+            self.ready()
+        hc_argv = self.runs[0]
+        self.assertIn("--no-notify", hc_argv)
+        self.assertNotIn("--keep", hc_argv)
+        self.assertTrue(any('trap "exit 0" HUP TERM' in a for a in hc_argv))
+        self.assertFalse(any('exec "$0" -i' in a for a in hc_argv))
+
+        real = os.path.realpath
+        bindir, home, sb_root = (real(tempfile.mkdtemp(dir=self.root)) for _ in range(3))
+        ready_file, log_file, target_file = (os.path.join(bindir, n) for n in ("ready", "hc.jsonl", "pid"))
+        cli = os.path.join(bindir, "agy")
+        with open(cli, "w") as f:
+            f.write(f"#!/usr/bin/env python3\nimport time\nopen({ready_file!r}, 'w').write('ok')\ntime.sleep(30)\n")
+        os.chmod(cli, 0o755)
+        fake_hc = os.path.join(bindir, "hc")
+        with open(fake_hc, "w") as f:
+            f.write(f"""#!/usr/bin/env python3
+import json, os, signal, sys
+with open({target_file!r}) as fh:
+    p = int(fh.read())
+alive = True
+try:
+    os.kill(p, 0)
+except ProcessLookupError:
+    alive = False
+with open({log_file!r}, "a") as fh:
+    fh.write(json.dumps([sys.argv[1:], os.environ.get("HC_TERMINAL_ID"), alive]) + "\\n")
+if sys.argv[1] == "rm":
+    sys.exit(1 if alive else 0)
+if sys.argv[1] == "kill" and alive:
+    import subprocess as sp
+    os.kill(p, signal.SIGHUP)
+    for c in sp.run(["pgrep", "-P", str(p)], capture_output=True, text=True).stdout.split():
+        try:
+            os.killpg(int(c), signal.SIGHUP)
+        except OSError:
+            pass
+    os.killpg(p, signal.SIGHUP)
+""")
+        os.chmod(fake_hc, 0o755)
+        fast_sh = self.commands.END_REVIEWER_SH.replace("sleep 4", "sleep 0.05").replace("sleep 2", "sleep 0.1")
+        env = {**os.environ, "HOME": home, "SHELL": "/bin/sh", "PATH": bindir + ":" + os.environ["PATH"]}
+
+        def run_case(argv, give_pid=True):
+            for p in (ready_file, log_file):
+                if os.path.exists(p):
+                    os.remove(p)
+            proc = subprocess.Popen(argv, cwd=self.wt, env=env, start_new_session=True,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.addCleanup(lambda p=proc: p.poll() is None and p.kill())
+            with open(target_file, "w") as fh:
+                fh.write(str(proc.pid))
+            for _ in range(50):
+                if os.path.exists(ready_file):
+                    break
+                time.sleep(0.05)
+            self.assertTrue(os.path.exists(ready_file))
+            self.reviewer_term = {"state": "live", "parent": "w1", **({"pid": proc.pid} if give_pid else {})}
+            popens = []
+            real_sub = SimpleNamespace(DEVNULL=subprocess.DEVNULL,
+                                       Popen=lambda *a, **k: (popens.append(subprocess.Popen(*a, **k)), popens[-1])[1])
+            with mock.patch.object(self.commands, "END_REVIEWER_SH", fast_sh), \
+                    mock.patch.object(self.commands, "subprocess", real_sub), \
+                    mock.patch.dict(os.environ, env, clear=True):
+                self.commands.end_reviewer("term-1")
+            self.assertEqual(proc.wait(timeout=5), 0)  # clean exit 0, never exit 1 or signal death
+            popens[0].wait(timeout=5)
+            with open(log_file) as fh:
+                return [json.loads(l) for l in fh]
+
+        with mock.patch.dict(os.environ, {"SHELL": "/bin/sh"}):
+            sh_argv = launch.reviewer_shell([cli])
+        # 1) Local pid stopped with TERM: exits 0 on its own before the second hc rm, no hc kill needed.
+        calls = run_case(sh_argv, give_pid=True)
+        self.assertEqual(calls, [[["rm", "term-1"], "w1", True], [["rm", "term-1"], "w1", False]])
+        # 2) Without a local pid (mock/remote hc), fallback hc kill sends SIGHUP: trap still exits 0, as parent w1.
+        calls = run_case(sh_argv, give_pid=False)
+        self.assertEqual([c[:2] for c in calls], [[["rm", "term-1"], "w1"], [["kill", "term-1"], "w1"], [["rm", "term-1"], "w1"]])
+        # 3) Sandboxed agy reviewer on macOS: exits 0 and cleans up its sandbox temp dir.
+        if sys.platform == "darwin" and os.path.exists("/usr/bin/sandbox-exec"):
+            g = os.path.join(home, ".gemini", "antigravity-cli")
+            os.makedirs(os.path.join(g, "cache"))
+            for fn in ("antigravity-oauth-token", "cache/onboarding.json"):
+                with open(os.path.join(g, fn), "w") as fh:
+                    fh.write("{}")
+            # Inside sandbox-exec, write the ready marker into $TMPDIR (worktree/bindir are read-only there).
+            with open(cli, "w") as f:
+                f.write("#!/bin/sh\necho ok > \"$TMPDIR/ready\"\nsleep 30\n")
+            with mock.patch.object(launch, "SANDBOX_ROOT", sb_root), mock.patch.object(launch, "HOME", home), \
+                    mock.patch.dict(os.environ, {"SHELL": "/bin/sh"}):
+                sb_argv = launch.reviewer_shell(launch.sandboxed([cli, "-i", "hi"], self.wt))
+            proc = subprocess.Popen(sb_argv, cwd=self.wt, env=env, start_new_session=True,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.addCleanup(lambda p=proc: p.poll() is None and p.kill())
+            with open(target_file, "w") as fh:
+                fh.write(str(proc.pid))
+            for _ in range(60):
+                if os.listdir(sb_root) and os.path.exists(os.path.join(sb_root, os.listdir(sb_root)[0], "ready")):
+                    break
+                time.sleep(0.05)
+            self.assertEqual(len(os.listdir(sb_root)), 1)
+            self.reviewer_term = {"state": "live", "parent": "w1", "pid": proc.pid}
+            popens = []
+            real_sub = SimpleNamespace(DEVNULL=subprocess.DEVNULL,
+                                       Popen=lambda *a, **k: (popens.append(subprocess.Popen(*a, **k)), popens[-1])[1])
+            with mock.patch.object(self.commands, "END_REVIEWER_SH", fast_sh), \
+                    mock.patch.object(self.commands, "subprocess", real_sub), \
+                    mock.patch.dict(os.environ, env, clear=True):
+                self.commands.end_reviewer("term-1")
+            self.assertEqual(proc.wait(timeout=5), 0)
+            popens[0].wait(timeout=5)
+            self.assertEqual(os.listdir(sb_root), [])
+
 
 class LoopBreaker(GateReview):
     """FAC-54: a task whose herdr-task rounds don't converge, or that is far over its estimate, stops
@@ -2798,6 +2970,7 @@ class Scheduled(unittest.TestCase):
         queued task stayed Queued with no reason. The folder's git call now gives up, the tick ends."""
         import threading
         import time
+        from types import SimpleNamespace
         from unittest import mock
         import herdr_task.automations as au
         import herdr_task.autopilot as ap

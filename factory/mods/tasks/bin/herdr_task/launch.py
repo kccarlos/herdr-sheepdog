@@ -258,7 +258,7 @@ def cmd_allow(args):
 SANDBOX_ROOT = f"/private/tmp/herdr-review-{os.getuid()}" if hasattr(os, "getuid") else ""
 SANDBOX_SH = r"""root=$1 profile=$2 wt=$3 git=$4 nvm=$5 core=$6; shift 6
 mkdir -p -m 700 "$root" && d=$(mktemp -d "$root/$$.XXXXXX") || exit 1
-trap 'rm -rf "$d"' EXIT; trap 'exit 1' HUP INT TERM
+trap 'rm -rf "$d"' EXIT; trap 'exit 1' INT; trap 'exit 0' HUP TERM
 g="$HOME/.gemini/antigravity-cli" a="$d/.gemini/antigravity-cli"; mkdir -p "$a/cache"
 cp -p "$g/antigravity-oauth-token" "$a/"; cp -p "$g/cache/onboarding.json" "$a/cache/"
 dev=$(xcode-select -p 2>/dev/null || echo /Library/Developer/CommandLineTools); agy=$(realpath "$(command -v "$1")")
@@ -342,6 +342,17 @@ def in_shell(argv):
     if name == "fish":
         return [sh, flag, " ".join(shlex.quote(a) for a in argv) + "; exec fish -i"]
     return argv
+
+
+def reviewer_shell(argv):
+    """in_shell() for a reviewer: no interactive shell stays when its CLI exits, and end_reviewer's
+    TERM/HUP stops it with exit code 0 instead of a hangup exit 1."""
+    out = in_shell(argv)
+    if len(out) >= 3 and out[2] == '"$@"; exec "$0" -i':
+        return [*out[:2], 'trap "exit 0" HUP TERM; "$@"', *out[3:]]
+    if len(out) == 3 and out[2].endswith("; exec fish -i"):
+        return [*out[:2], "function _end --on-signal HUP --on-signal TERM; exit 0; end; " + out[2][:-len("; exec fish -i")]]
+    return out
 
 
 # ---- workers run at low priority (HERD-61) ---------------------------------------------------
@@ -727,11 +738,13 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
         labels += ["--label", f"herdr.role={role}"]
     if sand:  # never revived (revive.watched): it would come back unsandboxed
         labels += ["--label", "herdr.sandbox=1"]
-    rel = ["--parent", parent, "--outlive-parent"] if parent else ["--no-parent"]
+    rel = ["--parent", parent, "--outlive-parent", *(["--no-notify"] if role == "reviewer" else [])] if parent else ["--no-parent"]
+    keep = [] if role == "reviewer" else ["--keep"]
+    sh = reviewer_shell(cmd) if role == "reviewer" else in_shell(cmd)
     name = agent_name(s, task, "review" if role else None)
     # HERDR_BROWSER_TASK: which task's browser herdr-browser drives (HERD-57), for it and its children.
-    r = run(["hc", "run", "--bg", "--json", "--keep", "--cwd", folder, "--name", name,
-             *labels, *rel, "--", *low_priority(clean_env(["env", f"HERDR_BROWSER_TASK={key}", *in_shell(cmd)]), name)])
+    r = run(["hc", "run", "--bg", "--json", *keep, "--cwd", folder, "--name", name,
+             *labels, *rel, "--", *low_priority(clean_env(["env", f"HERDR_BROWSER_TASK={key}", *sh]), name)])
     try:
         out = json.loads(r.stdout)
     except ValueError:

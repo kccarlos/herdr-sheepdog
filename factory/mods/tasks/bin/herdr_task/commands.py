@@ -828,10 +828,43 @@ def cmd_review(args):
     say(args, v, msg)
 
 
+END_REVIEWER_SH = ('sleep 4; hc rm "$1" >/dev/null 2>&1 || { '
+                   'if [ -n "$2" ]; then kill -TERM "$2" 2>/dev/null; '
+                   'for c in $(pgrep -P "$2" 2>/dev/null); do kill -TERM "$c" 2>/dev/null; kill -TERM -"$c" 2>/dev/null; done; '
+                   'kill -TERM -"$2" 2>/dev/null; sleep 2; hc rm "$1" >/dev/null 2>&1 && exit 0; fi; '
+                   'hc kill "$1" >/dev/null 2>&1; sleep 2; hc rm "$1" >/dev/null 2>&1; }')
+
+
 def end_reviewer(me):
+    """Stops a finished reviewer so its shell traps TERM and exits 0 (hc: reason 'exited', exit_code 0),
+    with HC_TERMINAL_ID set to its parent so any fallback hc kill never types an exit note into the worker."""
     guard(["hc"])
-    subprocess.Popen(["sh", "-c", 'sleep 4; hc kill "$1" >/dev/null 2>&1; sleep 2; hc rm "$1" >/dev/null 2>&1', "x", me],
+    k = hc_json("get", me) or {}
+    pid = str(k["pid"]) if "/" not in str(me) and type(k.get("pid")) is int and k["pid"] > 1 else ""
+    env = {x: v for x, v in os.environ.items() if x != "HC_TERMINAL_ID"}
+    if k.get("parent"):
+        env["HC_TERMINAL_ID"] = k["parent"]
+    subprocess.Popen(["sh", "-c", END_REVIEWER_SH, "x", me, pid], env=env,
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def tell_pass(s, t, round_n, line):
+    """Tells a live worker a passing gate round once (never starting a worker just for a pass)."""
+    told = t.setdefault("verdict_told", [])
+    if round_n in told:
+        return None
+    turns = dict(ready_turns(live_agents(s.key(t)))) if t.get("state") == "ready" else None
+    try:
+        sent, _ = tell(s, t, " ".join(line.split()), None, False)
+    except Fail:
+        return None
+    if sent:
+        told.append(round_n)
+        if turns and t.get("state") == "ready":
+            if sent in turns:
+                turns[sent] += 1
+            t["ready_turns"] = turns
+    return sent
 
 
 def gate_verdict(s, t, args, text):
@@ -867,12 +900,30 @@ def record_verdict(s, t, rn, passed, must, text):
     if t.get("mode") == "worktree" and budget_pass(s, t):  # a recap first: no next round, no merge, no fixing
         msg = f"{s.ref(t)}: review round {rn['round']} {'passed' if passed else 'asked for changes'}; {t['recap']['title']}."
     elif passed:
-        msg = f"{s.ref(t)}: review round {rn['round']} passed. " + (gate_step(s, t) or finalize(s, t))
+        ref, need, k = s.ref(t), gate_min(s, t), gate_passes(t, rn["head"])
+        before = len(t.get("review_runs") or [])
+        step = gate_step(s, t)
+        if step:
+            runs = t.get("review_runs") or []
+            rest = (f"Round {runs[-1]['round']} has started; its findings come to you as a message, nothing to do meanwhile."
+                    if len(runs) > before else step)
+            line = f"Herdr's review round {rn['round']} of {ref} passed ({k} of {need} passing). {rest}"
+            msg = f"{ref}: review round {rn['round']} passed. {step}"
+        else:
+            fin = finalize(s, t)
+            line = f"Herdr's review round {rn['round']} of {ref} passed: {ref} goes on to merging ({k} of {need} passing). {fin}"
+            msg = f"{ref}: review round {rn['round']} passed. {fin}"
+        tell_pass(s, t, rn["round"], line)
     else:
-        sent, _ = tell(s, t, (f"Herdr's review round {rn['round']} of {s.ref(t)} ({rn['head'][:7]}) found what must be fixed:\n"
-                              f"{text.strip()}\n\nFix these, commit, then run `{own_path()} ready {s.ref(t)} --folder "
-                              f"{shlex.quote(s.loc['folder'])}` again."), None)
-        msg = f"{s.ref(t)}: findings sent to {sent}."
+        told = t.setdefault("verdict_told", [])
+        sent = None
+        if rn["round"] not in told:
+            sent, _ = tell(s, t, (f"Herdr's review round {rn['round']} of {s.ref(t)} ({rn['head'][:7]}) found what must be fixed:\n"
+                                  f"{text.strip()}\n\nFix these, commit, then run `{own_path()} ready {s.ref(t)} --folder "
+                                  f"{shlex.quote(s.loc['folder'])}` again."), None)
+            if sent:
+                told.append(rn["round"])
+        msg = f"{s.ref(t)}: findings sent to {sent}." if sent else f"{s.ref(t)}: review round {rn['round']} asked for changes."
     return msg
 
 
@@ -901,7 +952,7 @@ def gate_reads(s, t):
     """Verdicts of sandboxed reviewers (FAC-49), which can't run herdr-task: read with hc read from
     each open round's own terminal (G2: only that run's terminal counts), then that reviewer ends."""
     done = {r["round"] for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"}
-    for rn in t.get("review_runs") or []:
+    for rn in list(t.get("review_runs") or []):
         k = (hc_json("get", rn["address"]) or {}) if sandboxes([rn["cli"]]) and rn["round"] not in done else {}
         if k.get("state") != "live" or status_word(k) in ("working", "blocked"):  # read only once its turn is over
             continue
@@ -925,7 +976,7 @@ def cmd_state(args, state):
         t = s.find(args.id)
         if state == "reopen":
             state = "running" if t.get("started") and t["state"] not in ("queued", "scheduled") else "todo"
-            for k in ("reviews", "review", "review_runs", "review_out", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at"):
+            for k in ("reviews", "review", "review_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
@@ -1116,8 +1167,8 @@ def workers(s, t):
             if agent_running(k) and (k.get("labels") or {}).get("herdr.role") != "reviewer"]
 
 
-def tell(s, t, msg, args):
-    """Sends the task's worker a message, or starts one with it when none is left.
+def tell(s, t, msg, args, start=True):
+    """Sends the task's worker a message, or starts one with it when none is left (when `start`).
     Returns (terminal, started)."""
     unarchive(s, t)
     live = workers(s, t)
@@ -1127,6 +1178,8 @@ def tell(s, t, msg, args):
         if not send_or_hold(live[-1]["address"], msg):
             raise Fail(f"hc send to {live[-1]['address']} failed")
         return live[-1]["address"], False
+    if not start:
+        return None, False
     space = bare(args.space) if getattr(args, "space", None) else (t.get("space") or default_space())
     a, _ = start_again(s, t, space, getattr(args, "agent", None), getattr(args, "argv", None), message=msg)
     return a["address"], True
