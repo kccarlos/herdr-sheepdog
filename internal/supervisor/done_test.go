@@ -89,6 +89,7 @@ func TestDoneEndingInQuestionBecomesBlock(t *testing.T) {
 			if row.LastResult != nil || row.LastBlock == nil || row.LastBlock.Question != "run this command" {
 				t.Errorf("row = %+v", row)
 			}
+			h.playText(p.SpokenSummary)
 			if res := h.say("yes"); res.Spoken != "Told auth yes." {
 				t.Errorf("answer = %+v", res)
 			}
@@ -269,6 +270,7 @@ func TestFinishAfterApproval(t *testing.T) {
 			h := newHarness(t, func(c *Config) { c.Chattiness = string(Chatty) })
 			h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 			h.block("w5:p1", "codex-approval-prompt.screen.txt")
+			h.playText(h.lastPushText())
 			h.say("yes")
 			if got := h.sendKeysRequests(); len(got) != 1 {
 				t.Fatalf("keys = %v", got)
@@ -290,6 +292,7 @@ func TestFinishAfterApproval(t *testing.T) {
 		h := newHarness(t, func(c *Config) { c.Chattiness = string(Chatty) })
 		h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 		h.block("w5:p1", "codex-approval-prompt.screen.txt")
+		h.playText(h.lastPushText())
 		h.say("no")
 		if got := h.sendKeysRequests(); len(got) != 1 {
 			t.Fatalf("keys = %v", got)
@@ -318,11 +321,13 @@ func TestFinishAfterApproval(t *testing.T) {
 		h := newHarness(t, func(c *Config) { c.Chattiness = string(Chatty) })
 		h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 		h.block("w5:p1", "codex-approval-prompt.screen.txt")
+		h.playText(h.lastPushText())
 		h.say("no")
 		h.transition("w5:p1", herdr.StateBlocked, herdr.StateIdle)
 		h.transition("w5:p1", herdr.StateIdle, herdr.StateWorking)
 		h.clock.Advance(time.Minute)
 		h.block("w5:p1", "codex-approval-prompt.screen.txt")
+		h.playText(h.lastPushText())
 		h.say("yes")
 		before := len(h.pusher.all())
 		h.srv.SetScreen("w5:p1", fixture(t, "codex-after-approval.screen.txt"))

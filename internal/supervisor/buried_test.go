@@ -11,12 +11,37 @@ import (
 )
 
 // speak is the voice sending a spoken push to the model and finishing
-// the turn that read it (the --heard-echo order: push, transcript, turn
-// complete).
+// the turn that read it (push, transcript, turn complete, client played).
 func (h *harness) speak(text string) {
-	h.sup.OnVoiceEvent(voice.EventPush{Text: text, Urgency: voice.UrgencyIdle})
+	ev := voice.EventPush{Text: text, Urgency: voice.UrgencyIdle}
+	for _, p := range h.pusher.all() {
+		if p.Text == text && p.Urgency != voice.UrgencySilent {
+			ev = p
+		}
+	}
+	h.sup.OnVoiceEvent(ev)
 	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: text, Final: true})
 	h.sup.OnVoiceEvent(voice.EventTurnComplete{})
+	h.playText(text)
+}
+
+// playText hands text's tagged push to the voice (or, for a line that was
+// not pushed, such as a tool result, the pending question) and plays it.
+func (h *harness) playText(text string) {
+	handed := false
+	for _, p := range h.pusher.all() {
+		if p.Text == text && p.PendingID != "" && p.Urgency != voice.UrgencySilent {
+			h.sup.OnVoiceEvent(p)
+			_, open := h.store.Question(p.PendingID)
+			cur, _ := h.pending()
+			handed = handed || open || cur.ID == p.PendingID
+		}
+	}
+	if p, ok := h.pending(); !handed && ok && !p.Held && !h.sup.heldQuestion(p.ID) {
+		h.sup.OnVoiceEvent(voice.EventPush{Text: text, Urgency: voice.UrgencyIdle, PendingID: p.ID})
+	}
+	now := h.clock.Now()
+	h.sup.OnVoiceEvent(voice.EventPlayed{Text: text, Start: now, End: now})
 }
 
 // lastPushText is the newest spoken push the supervisor handed out.

@@ -160,7 +160,7 @@ func (s *Supervisor) clearPending(p state.PendingAction, reason string) {
 	}
 	if p.Kind == state.PendingAnswerPrompt {
 		s.dropQuestionLocked(p)
-		s.closedLocked() // displaced.go: also when the list had dropped it already
+		s.syncToldLocked() // displaced.go: also when the list had dropped it already
 	}
 	s.invalidateBriefingLocked()
 	s.log.Log(logSource, "pending.cancelled", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "reason": reason})
@@ -178,7 +178,7 @@ func (s *Supervisor) dropQuestionLocked(p state.PendingAction) {
 	if err := s.store.DropQuestion(p.PaneID); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
-	s.closedLocked() // displaced.go
+	s.syncToldLocked() // displaced.go
 }
 
 // questionByID finds an open answer_prompt by id: the one the voice is
@@ -301,11 +301,14 @@ func (s *Supervisor) registerRevivedQuestionLocked(p state.PendingAction) {
 	if p.Kind != state.PendingAnswerPrompt {
 		return
 	}
-	if _, ok := s.openByIDLocked(p.ID); ok {
+	if cur, has := s.store.Pending(); has && cur.ID == p.ID {
 		return
 	}
 	var old *state.PendingAction
 	for _, q := range s.store.Questions() {
+		if q.ID == p.ID {
+			return
+		}
 		if q.PaneID == p.PaneID {
 			cp := q
 			old = &cp

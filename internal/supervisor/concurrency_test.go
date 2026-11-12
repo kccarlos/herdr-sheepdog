@@ -158,6 +158,9 @@ func TestSendKeysAndReviveReadDoNotHoldMu(t *testing.T) {
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.addAgent("w6:p1", "docs", "codex", herdr.StateWorking)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	if p, ok := h.pending(); ok {
+		h.playText(p.SpokenSummary)
+	}
 	h.block("w6:p1", "codex-approval-prompt.screen.txt")
 	// Clear the pending slot so AnswerPrompt goes through revivePrompt (Read) + answerKeys (SendKeys).
 	if err := h.store.ClearPending(); err != nil {
@@ -373,6 +376,7 @@ func TestPollRepromptStopsOnShutdown(t *testing.T) {
 		},
 	}
 
+	h.playText(h.lastPushText())
 	h.say("yes")
 
 	select {

@@ -62,6 +62,9 @@ func TestOpenCheckFollowsThePendingPrompt(t *testing.T) {
 	if h.sup.OpenCheck(map[string]any{tagEventID: "evt-other"}) {
 		t.Error("another event's line reported open")
 	}
+	if p, ok := h.pending(); ok {
+		h.playText(p.SpokenSummary)
+	}
 	h.say("yes")
 	if _, has := h.pending(); has {
 		t.Fatal("the prompt is still pending after yes")

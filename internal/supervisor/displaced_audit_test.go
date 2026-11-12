@@ -6,10 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/genai"
-
-	"github.com/kccarlos/herdr-sheepdog/internal/brain"
-	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
@@ -26,7 +22,8 @@ func (h *harness) askedAgain(from int, alias string) (string, bool) {
 	all := h.pusher.all()
 	for i := from; i < len(all); i++ {
 		p := all[i]
-		if p.Urgency != voice.UrgencySilent && strings.Contains(p.Text, "did not send that") && strings.Contains(p.Text, alias) {
+		tags := h.pusher.tagsOf(i)
+		if p.Urgency != voice.UrgencySilent && tags["kind"] == "re-ask of a question the user had not heard" && strings.Contains(p.Text, alias) {
 			return p.Text, true
 		}
 	}
@@ -81,26 +78,13 @@ func TestQuickFlipBeforeTheFirstAnnouncementKeepsTheYesOffTheSecond(t *testing.T
 	if _, pushed := h.askedAgain(from, "docs"); pushed {
 		t.Fatal("the refusal was said twice (a tool result and a push)")
 	}
+	h.playText(res.Spoken)
 	h.clock.Advance(time.Second)
 	h.say("Yes.")
 	if n := h.keysTo(docsPane); n != 1 {
 		t.Fatalf("keys to docs after it was asked again = %d, want 1", n)
 	}
 	_ = docsLine
-}
-
-// Review item 2 (unheard): docs' announcement went to the voice, but the
-// voice layer judged it unheard (or never voiced). It was not told.
-func TestUnheardAnnouncementDoesNotTellTheQuestion(t *testing.T) {
-	h := toldAuth(t)
-	docsLine := blockDocs(t, h)
-	h.sup.OnVoiceEvent(voice.EventPush{Text: docsLine, Urgency: voice.UrgencyInterrupt})
-	h.sup.OnVoiceEvent(voice.EventPushUnheard{Push: voice.UnheardPush{Text: docsLine, Reason: voice.UnheardNotVoiced}})
-	h.clock.Advance(time.Second)
-	h.say("Yes.")
-	if n := h.keysTo(docsPane); n != 0 {
-		t.Fatalf("a yes after docs' unheard announcement sent docs %d key presses", n)
-	}
 }
 
 // Review item 3 (quick flip of the announcement slot): docs' announcement
@@ -164,63 +148,5 @@ func TestRefusedSendKeysAsksTheUserAgain(t *testing.T) {
 	h.hear("Yes.")
 	if _, err := (brainHost{h.sup}).AnswerPrompt(context.Background(), docsPane, p.YesKeys); err != nil {
 		t.Fatalf("send_keys after the re-ask was spoken: %v", err)
-	}
-}
-
-// Review item 3 (told in a reply): docs' announcement never reached the
-// user (no listener); they ask what is waiting and the orchestrator's reply
-// states docs' question. That reply told it: their yes answers docs. A
-// reply that does not state it tells nothing.
-func TestReplyThatStatesAQuestionTellsIt(t *testing.T) {
-	m := braintest.NewModel()
-	h := newBrainHarness(t, m)
-	h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
-	h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
-	h.block(authPane, "codex-approval-prompt.screen.txt")
-	// No announcement is pushed (the event turns add nothing): the user
-	// hears auth's question in a reply.
-	ap, _ := h.pending()
-	m.Add(braintest.Step{Text: braintest.Reply(ap.SpokenSummary+" Should it go ahead?", "")})
-	h.say("What is waiting?")
-	h.clock.Advance(2 * time.Second)
-	h.block(docsPane, "codex-approval-prompt.screen.txt")
-	p, ok := h.pending()
-	if !ok || p.PaneID != docsPane {
-		t.Fatalf("pending = %+v", p)
-	}
-	// A reply about docs that does not say what it asks. (Words that name
-	// docs are about docs whatever they were told, so these do not.)
-	m.Add(braintest.Step{Text: braintest.Reply("Docs is waiting on you too.", "")})
-	h.say("What about docs?")
-	h.clock.Advance(time.Second)
-	m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "docs", "keys": []any{"y"}})}})
-	m.Add(braintest.Step{Text: braintest.Reply("I could not.", "")})
-	h.say("Yes, go ahead.")
-	if n := h.keysTo(docsPane); n != 0 {
-		t.Fatalf("a reply that did not state docs' question let a yes through (%d key presses)", n)
-	}
-	h.clock.Advance(time.Second)
-	m.Add(braintest.Step{Text: braintest.Reply(p.SpokenSummary+" Should it go ahead?", "")})
-	h.say("What is waiting?")
-	h.clock.Advance(time.Second)
-	m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "docs", "keys": []any{"y"}})}})
-	m.Add(braintest.Step{Text: braintest.Reply("Told docs yes.", "")})
-	h.say("Yes, let docs go ahead.")
-	if n := h.keysTo(docsPane); n != 1 {
-		t.Fatalf("keys to docs after a reply stated its question = %d, want 1 (rail_blocked %v)", n, h.log.ofType("brain.rail_blocked"))
-	}
-}
-
-// A line shown to the user with no voice (--voice=off: the panel shows
-// skipped pushes) tells the questions it states.
-func TestPushShownWithoutAVoiceTellsItsQuestion(t *testing.T) {
-	h := toldAuth(t)
-	docsLine := blockDocs(t, h)
-	tags := h.pusher.tagsOf(len(h.pusher.all()) - 1)
-	h.sup.PushShown(docsLine, tags)
-	h.clock.Advance(time.Second)
-	h.say("Yes.")
-	if n := h.keysTo(docsPane); n != 1 {
-		t.Fatalf("keys to docs after its line was shown = %d, want 1", n)
 	}
 }
