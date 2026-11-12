@@ -53,12 +53,23 @@ def detail(k):
     return hc_json("get", k["address"]) or k
 
 
+AGENT_BINS = ("claude", "claude-code", "codex", "agy", "antigravity")
+AGENT_VER = re.compile(r"^\d+(?:\.\d+)+$")  # Claude Code's native binary is named by its version
+
+
+def _cmd_shell(fg):
+    """A shell running a `-c` command rather than waiting interactively after an agent exited."""
+    argv = (fg or {}).get("argv") or []
+    return any(a in ("-c", "-lc", "-ic", "-lic") for a in argv[1:3])
+
+
 def agent_running(k):
-    if "herdr-sandbox" in ((k.get("foreground") or {}).get("argv") or [])[:4]:
+    fg = k.get("foreground") or {}
+    if "herdr-sandbox" in (fg.get("argv") or [])[:4]:
         return True  # a sandboxed reviewer's launcher (launch.SANDBOX_SH), alive while its agy runs
-    fg = (k.get("foreground") or {}).get("name") or ""
-    if fg:
-        return os.path.basename(fg) not in SHELLS
+    name = os.path.basename(fg.get("name") or "").lstrip("-")
+    if name:
+        return name not in SHELLS or _cmd_shell(fg)
     return bool(k.get("agent")) and k.get("agent") not in SHELLS
 
 
@@ -127,11 +138,14 @@ def task_status(task, live):
     # before its first message lands. Working, until it ends or STARTING_MS pass.
     if starting(task):
         return "working", None, None
-    # Quiet without saying ready, but on its own work (SHEP-53): a background shell, Monitor or
-    # agent still running, or its fresh status line says it waits on CI or a review: Working, its
-    # status line shown, unless its last message asks the person something.
-    if live and own_work(task, live):
+    # Quiet without saying ready, but on its own work (SHEP-53, FAC-60): a helper reviewer at work
+    # keeps it Working; a background job of its own (hc get's foreground or status msg, its log's
+    # background shells/Monitors, or its fresh status line) shows Waiting on a background job,
+    # unless its last message asks the person something.
+    if live and helper_working(task, live):
         return "working", None, None
+    if live and own_work(task, live):
+        return "working", None, WAITING_BG
     # Quiet without saying ready: alive, it ended its turn (view() says on what: its question or
     # its last sentence); its process gone, the agent stopped.
     if live:
@@ -530,6 +544,7 @@ def starting(task):
 # review round 1", "Codex reviewing the change"), and no background job of its ended since.
 # It asks the person something (a question tool or permission: blocked; its last message asks):
 # Needs you all the same. As core/tasks.js place() with task.own_work, which news_pass keeps.
+WAITING_BG = "Waiting on a background job"
 BG_LOG_BYTES = 1048576
 BG_MAX_MS = 3 * 3600_000  # a background job started longer ago than this no longer counts
 BG_STARTED = re.compile(r"Command running in background with ID: (\w+)|Monitor started \(task (\w+)|Async agent launched[\s\S]*?agentId: (\w+)")
@@ -537,8 +552,12 @@ BG_ENDED = re.compile(r"<task-id>(\w+)</task-id>(?:(?!</task-notification>)[\s\S
 CODEX_RUNNING = re.compile(r"Process running with session ID (\d+)")
 CODEX_OBJECT = re.compile(r"\{[^{}]*\"session_id\"\s*:\s*(\d+)[^{}]*\}")
 CODEX_EXITED = re.compile(r"\"exit_code\"\s*:|Process exited with code")
-WAITS_ON = re.compile(r"\b(wait\w*|watch\w*|polling)\b.*\b(ci|checks?|reviews?|reviewer|build|tests?|background|jobs?|deploy\w*|"
-                      r"release|github|pipeline|actions?|run|workflow)\b|\breviewing\b", re.I)
+WAITS_ON = re.compile(
+    r"\b(wait\w*|watch\w*|polling)\b.*\b(ci|checks?|reviews?|reviewer|build\w*|tests?|background|jobs?|deploy\w*|"
+    r"release|github|pipeline|actions?|run|workflow|simulator|xcodebuild)\b|\breviewing\b|"
+    r"\b(build\w*|run\w*|test\w*) in (?:the )?background\b|"
+    r"\bbackground (?:job|shell|build|test|check|process|command|run)\w*(?:\s+(?:is\s+)?(?:running|in progress|active)\b|:)|"
+    r"\b(?:build|tests?|checks?|ci|xcodebuild)\s+(?:is\s+)?(?:running|in progress)\b", re.I)
 WAITS_ON_PERSON = re.compile(r"\b(you|your|yours|person|human|answer|reply|approv\w*|decid\w*|decision|confirm\w*|ok|okay|"
                              r"input|accept\w*|sign(?:ed)?[- ]?in|login|a go|go-ahead)\b", re.I)
 _bg_cache = {}
@@ -641,20 +660,47 @@ def waits_on_own(task, address=None, ended=0):
     return bool(WAITS_ON.search(text)) and not WAITS_ON_PERSON.search(text)
 
 
+def fg_job(k):
+    """hc get's foreground is a command or subshell still running in the worker's terminal."""
+    fg = k.get("foreground") or {}
+    argv = fg.get("argv") or []
+    if any(x in argv[:4] for x in ("herdr-sandbox", "herdr-clean")) or any('exec "$0"' in str(x) for x in argv[1:4]):
+        return False
+    name = os.path.basename(fg.get("name") or (argv[0] if argv else "")).lstrip("-")
+    if not name or name in AGENT_BINS or AGENT_VER.match(name):
+        return False
+    if name in SHELLS:
+        return _cmd_shell(fg)
+    return not (name in ("node", "bun") and (not argv or any(b in str(a).lower() for a in argv[:3] for b in AGENT_BINS)))
+
+
+def status_waits(k, ended=0):
+    """hc get's fresh status/report msg says the worker waits on a background job, build or check."""
+    at = k.get("status_ms") or 0
+    if at and (at < ended or now() - at >= ON_IT_MS):
+        return False
+    return any(isinstance(b, dict) and b.get("msg") and WAITS_ON.search(str(b["msg"])) and not WAITS_ON_PERSON.search(str(b["msg"]))
+               for b in (k.get("status"), k.get("report")))
+
+
+def helper_working(task, live):
+    for k in live:
+        if (k.get("labels") or {}).get("herdr.role") != "reviewer" and status_word(k) != "blocked":
+            address, key = k.get("address"), (k.get("labels") or {}).get("herdr.task")
+            if key and any(parent_of(h) == address and status_word(h) in ("working", "blocked") for h in live_helpers(key)):
+                if not last_question(task, address):
+                    return True
+    return False
+
+
 def own_work(task, live):
-    """Its quiet agent is on its own work (above), and its last message asks the person nothing.
-    A helper of its own at work (its reviewer, SHEP-54) counts too."""
+    """Its quiet worker waits on a background job of its own, and its last message asks nothing."""
     for k in live:
         if (k.get("labels") or {}).get("herdr.role") == "reviewer" or status_word(k) == "blocked":
             continue
         address = k.get("address")
-        key = (k.get("labels") or {}).get("herdr.task")
-        if key and any(parent_of(h) == address and status_word(h) in ("working", "blocked") for h in live_helpers(key)):
-            if not last_question(task, address):
-                return True
-            continue
         log = agent_log(task, address) or agent_log(task)
         jobs, ended = background_jobs(log) if log else ({}, 0)
-        if (jobs or waits_on_own(task, address, ended)) and not last_question(task, address):
+        if (fg_job(k) or status_waits(k, ended) or jobs or waits_on_own(task, address, ended)) and not last_question(task, address):
             return True
     return False

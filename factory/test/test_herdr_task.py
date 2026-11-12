@@ -1017,13 +1017,13 @@ class OwnBackgroundWork(unittest.TestCase):
     def test_idle_with_a_background_shell_is_working(self):
         self.background(-300_000)
         self.say(-200_000, "Review is running in the background; I'll pick it up when it ends.")
-        self.assertEqual(self.status(), ("working", None, None))
+        self.assertEqual(self.status(), ("working", None, "Waiting on a background job"))
         # a Monitor counts the same
         self.lines[:] = self.lines[:1]
         self.stamp(-300_000, {"type": "user", "toolUseResult": {"taskId": "m1", "timeoutMs": 900000, "persistent": False},
                               "message": {"role": "user", "content": [{"tool_use_id": "toolu_2", "type": "tool_result",
                                                                        "content": "Monitor started (task m1, expires in 15m)"}]}})
-        self.assertEqual(self.status(), ("working", None, None))
+        self.assertEqual(self.status(), ("working", None, "Waiting on a background job"))
 
     def test_idle_with_a_question_needs_you_even_with_a_background_shell(self):
         self.background(-300_000)
@@ -1069,7 +1069,7 @@ class OwnBackgroundWork(unittest.TestCase):
                                                                    "arguments": json.dumps({"cmd": "gh run watch", "yield_time_ms": 1000})}})
         self.stamp(-300_000, {"type": "response_item", "payload": {"type": "function_call_output", "call_id": "c1",
                                                                    "output": "Process running with session ID 42"}})
-        self.assertEqual(self.status(), ("working", None, None))
+        self.assertEqual(self.status(), ("working", None, "Waiting on a background job"))
         self.stamp(-100_000, {"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "c2", "output": [
             {"type": "input_text", "text": json.dumps({"chunk_id": "a", "session_id": 42, "exit_code": 0, "output": ""})}]}})
         self.assertEqual(self.status()[:2], ("needs", "reply"))
@@ -1084,7 +1084,59 @@ class OwnBackgroundWork(unittest.TestCase):
             key = ref = lambda self, t: "X-7"
         with self.mock.patch.object(output, "waiting_for", lambda s, t: []), self.mock.patch.object(output, "waiting_ext", lambda t: []):
             v = output.view(S(), self.task, [dict(k, foreground={"name": "claude"}) for k in self.idle])
-        self.assertEqual((v["status"], v["own_work"]), ("working", True))
+        self.assertEqual((v["status"], v["why"], v["own_work"]), ("working", "Waiting on a background job", True))
+        self.assertIn("(Waiting on a background job)", output.line(v))
+
+    def test_hc_get_foreground_and_status_msg_show_waiting_on_a_background_job(self):
+        agy = {"id": 8, "title": "Build", "state": "running", "started": self.clock - 3600_000,
+               "agents": [{"address": "t1", "at": self.clock - 3600_000}]}
+        for fg in ({"name": "xcodebuild", "argv": ["xcodebuild", "test"]}, {"name": "sh", "argv": ["sh", "-c", "npm test"]}):
+            k = {"address": "t1", "status": {"state": "done", "app": "agy"}, "foreground": fg, "labels": {"herdr.agent": "agy"}}
+            self.assertTrue(self.agents.agent_running(k))
+            self.assertEqual(self.agents.task_status(agy, [k]), ("working", None, "Waiting on a background job"))
+        self.assertFalse(self.agents.agent_running({"foreground": {"name": "zsh", "argv": ["-zsh"]}}))
+        for fg in ({"name": "agy"}, {"name": "2.1.319"}, {"name": "node", "argv": ["node", "/opt/agy/cli.js"]}):
+            k = {"address": "t1", "status": {"state": "done"}, "foreground": fg}
+            self.assertEqual(self.agents.task_status(agy, [k])[:2], ("needs", "reply"))
+        for msg, want in (("Building in the background", "working"), ("Waiting on CI checks", "working"),
+                          ("Waiting for your reply", "needs"), ("Implementing background-job status", "needs")):
+            k = {"address": "t1", "status": {"state": "done", "msg": msg}, "status_ms": self.clock - 60_000, "foreground": {"name": "agy"}}
+            self.assertEqual(self.agents.task_status(agy, [k])[0], want, msg)
+
+    def test_news_and_automations_never_tell_needs_you_for_background_job(self):
+        import herdr_task.automations as au, herdr_task.news as news, herdr_task.store as store
+        repo, sdir = os.path.join(self.dir, "repo"), os.path.join(self.dir, "store")
+        os.makedirs(repo); os.makedirs(sdir)
+        term, sent = {"address": "t1", "state": "live", "status": {"state": "working"}, "foreground": {"name": "agy"}, "labels": {"herdr.agent": "agy"}}, []
+        ps = [self.mock.patch.object(m, n, v) for m, n, v in (
+            (store, "STORE", sdir), (news, "STORE", sdir), (news, "NEWS", os.path.join(sdir, ".news.json")),
+            (news, "HELD", os.path.join(sdir, ".held.json")), (news, "now", lambda: self.clock),
+            (news, "live_agents", lambda k: [term]), (news, "detail", lambda k: term), (news, "coordinator_in", lambda s: "c1"),
+            (news, "hc_json", lambda *a: {"state": "live", "turn": 1}), (news, "news_send", lambda to, m, check=True: sent.append(m) or True),
+            (au, "live_agents", lambda k: [term]), (au, "detail", lambda k: term))]
+        for p in ps:
+            p.start(); self.addCleanup(p.stop)
+        with store.Store(store.locate(repo), write=True) as s:
+            s.data.update(prefix="WUKO", tasks=[{"id": 1, "title": "Build", "state": "running", "space": "sp1",
+                                                 "started": self.clock - 600_000, "agents": [{"address": "t1", "at": self.clock - 600_000}]}])
+            s.dirty = True; term["labels"]["herdr.task"] = f"{s.slug}#1"
+        seen = {}
+        with store.Store(store.locate(repo), write=False) as s:
+            self.assertEqual(au.events_in(s, seen), [])
+        news.news_pass({}, repo)
+        term.update(status={"state": "done"}, foreground={"name": "sh", "argv": ["sh", "-c", "xcodebuild test"]})
+        for _ in range(2):
+            self.clock += 10_000; news.news_pass({}, repo)
+        self.assertEqual(sent, [])
+        with store.Store(store.locate(repo), write=False) as s:
+            self.assertTrue(s.data["tasks"][0].get("own_work"))
+            self.assertEqual(au.events_in(s, seen), [])
+        term["foreground"] = {"name": "agy"}
+        for _ in range(2):
+            self.clock += 10_000; news.news_pass({}, repo)
+        self.assertIn('event="needs-you"', sent[0])
+        with store.Store(store.locate(repo), write=False) as s:
+            self.assertEqual([ev for ev, _ in au.events_in(s, seen)], ["needs-you"])
 
 
 class WorkersOwnHelpers(OwnBackgroundWork):
@@ -5000,3 +5052,103 @@ class AskPane(unittest.TestCase):
             with self.assertRaisesRegex(ask.Fail, "short word in parentheses"):
                 ask.cmd_ask(args(["Switch (v2)", "Ship"], "Ship"))
             run.assert_not_called()
+
+
+class BusyWorkerDelivery(unittest.TestCase):
+    """FAC-60: messages herdr-task sends a busy agy worker follow hc send with alt+m when its turn
+    offers it, or re-deliver via held_pass once its turn ends if still pending; typing holds and
+    other CLIs keep their behaviour. hc is mocked; no real terminals."""
+
+    def setUp(self):
+        import shutil
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.commands as commands
+        import herdr_task.news as news
+        self.commands, self.news, self.mock = commands, news, mock
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.clock = 1_800_000_000_000
+        self.term = {"address": "t1", "state": "live", "status": {"state": "working"}, "turn": 2,
+                     "labels": {"herdr.agent": "agy"}}
+        self.screens, self.raw, self.calls = [""], "", []
+
+        def fake_run(argv, **_):
+            self.calls.append(list(argv))
+            out = self.screens.pop(0) if argv[:2] == ["hc", "read"] and len(self.screens) > 1 else self.screens[0]
+            return subprocess.CompletedProcess(argv, 0, out if argv[:2] == ["hc", "read"] else "", "")
+
+        for obj, name, val in ((news, "STORE", self.tmp), (news, "HELD", os.path.join(self.tmp, ".held.json")),
+                               (news, "POLL_DELAYS", (0,)), (news, "now", lambda: self.clock),
+                               (news, "guard", lambda *_: None), (news, "hc_json", lambda *_: dict(self.term)),
+                               (news, "screen_raw", lambda *_: self.raw), (news, "run", fake_run),
+                               (news.subprocess, "run", fake_run)):
+            p = mock.patch.object(obj, name, val)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def held(self):
+        try:
+            with open(self.news.HELD) as f:
+                return json.load(f)
+        except OSError:
+            return {}
+
+    def test_busy_agy_worker_gets_alt_m_when_its_turn_offers_it(self):
+        import argparse
+        self.screens = ["▸ Rebase onto main  (alt+m to send immediately)\n  Press up to edit queued messages\n", "> Rebase onto main\n"]
+        s = type("S", (), {"dirty": False, "ref": lambda _, t: "FAC-1"})()
+        t = {"id": 1, "title": "Fix", "state": "running"}
+        with self.mock.patch.object(self.commands, "workers", lambda *_: [self.term]):
+            self.assertEqual(self.commands.tell(s, t, "Rebase onto main", argparse.Namespace(space=None)), ("t1", False))
+        self.assertIn(["hc", "send", "t1", "Rebase onto main"], self.calls)
+        self.assertIn(["hc", "keys", "t1", "alt+m"], self.calls)
+        self.assertEqual(self.held(), {})
+
+    def test_busy_agy_worker_without_alt_m_redelivers_once_turn_ends(self):
+        self.screens = ["Working on step 3…\n"]
+        self.assertEqual(self.news.send_or_hold("t1", "Contract updated in a1b2c3"), "sent")
+        self.assertNotIn(["hc", "keys", "t1", "alt+m"], self.calls)
+        self.assertEqual(self.held()["t1"][0]["pending"], 3)
+        self.calls.clear()
+        # Still in turn 2: waits.
+        self.news.held_pass({})
+        self.assertEqual(self.calls, [])
+        # Turn 2 ends without agy starting turn 3: re-delivered once.
+        self.term.update(status={"state": "done"}, turn=3)
+        report = {}
+        self.news.held_pass(report)
+        self.assertEqual(self.calls, [["hc", "send", "t1", "Contract updated in a1b2c3"]])
+        self.assertEqual(report["held"], [{"to": "t1", "messages": 1}])
+        self.assertEqual(self.held(), {})
+
+    def test_pending_dropped_when_agy_already_started_the_next_turn(self):
+        self.screens = ["Working…\n"]
+        self.news.send_or_hold("t1", "Check contract")
+        self.calls.clear()
+        self.term.update(status={"state": "working"}, turn=3)
+        self.news.held_pass({})
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.held(), {})
+
+    def test_held_while_typing_and_other_clis_unchanged(self):
+        self.term["labels"] = {"herdr.agent": "agy", self.news.TYPING: str(self.clock - 1000)}
+        self.assertEqual(self.news.send_or_hold("t1", "Pointer to docs/x.md"), "held")
+        self.assertEqual(self.calls, [])
+        # Typing stops while agy is still busy and offers alt+m: held_pass sends and presses alt+m.
+        self.term["labels"] = {"herdr.agent": "agy"}
+        self.screens = ["▸ Pointer to docs/x.md  (alt+m to send immediately)\n", "> Pointer to docs/x.md\n"]
+        self.news.held_pass({})
+        self.assertIn(["hc", "send", "t1", "Pointer to docs/x.md"], self.calls)
+        self.assertIn(["hc", "keys", "t1", "alt+m"], self.calls)
+        self.assertEqual(self.held(), {})
+        # Idle agy and busy claude: no alt+m; claude news_send keeps ctrl+enter.
+        self.calls.clear()
+        self.term.update(status={"state": "done"})
+        self.news.send_or_hold("t1", "Continue")
+        self.assertEqual(self.calls, [["hc", "send", "t1", "Continue"]])
+        self.calls.clear()
+        self.term.update(status={"state": "working"}, labels={"herdr.agent": "claude"})
+        self.screens = ["ctrl+enter to send now\n"]
+        self.assertTrue(self.news.news_send("t1", "<herdr-news/>"))
+        self.assertIn(["hc", "keys", "t1", "ctrl+enter"], self.calls)

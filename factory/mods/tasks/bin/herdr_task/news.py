@@ -246,27 +246,66 @@ def news_read(quiet):
             break
 
 
-def news_send(address, text, check=True):
-    """Delivers news as the chat delivers the person's words: typed in, sent at once mid-turn (for
-    Claude Code its "send now", Ctrl+Enter). Not as a message from this terminal: no <hc from>.
-    False when it can't take it now (a dialog of its own is open, or the person is writing to it:
-    typing()): tried again next time. check=False: typing() was just asked."""
-    if check and typing(address):
-        return False
-    env = {k: v for k, v in os.environ.items() if k != "HC_TERMINAL_ID"}
-    guard(["hc"])
-    r = subprocess.run(["hc", "send", address, text], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+POLL_DELAYS = (0.15, 0.3, 0.3, 0.3)
+AGY_SEND_NOW = re.compile(r"alt\+m\b", re.I)
+AGY_QUEUED = re.compile(r"alt\+m\b|queued messages", re.I)
+
+
+def cli_of(k):
+    lb = (k.get("labels") or {}).get("herdr.agent")
+    if lb:
+        return lb
+    fg, st = k.get("foreground") or {}, k.get("status") if isinstance(k.get("status"), dict) else {}
+    raw = " ".join(str(x or "") for x in (st.get("app"), k.get("agent"), fg.get("name"), *(fg.get("argv") or [])[:1], *(k.get("argv") or [])[:1])).lower()
+    return "agy" if "agy" in raw or "antigravity" in raw else "codex" if "codex" in raw else "claude"
+
+
+def turn_moved(k, after_turn):
+    t = k.get("turn") or 0
+    return t > after_turn or (status_word(k) == "working" and t >= after_turn)
+
+
+def deliver(address, text, how="send", from_held=False):
+    """Types text into address now; for a busy agy worker, presses alt+m when offered or keeps it
+    pending in HELD to re-deliver once its turn ends. Returns "sent", "pending" or False."""
+    before = hc_json("get", address) or {}
+    if how == "news":
+        env = {k: v for k, v in os.environ.items() if k != "HC_TERMINAL_ID"}
+        guard(["hc"])
+        r = subprocess.run(["hc", "send", address, text], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    else:
+        r = run(["hc", "send", address, text])
     if r.returncode != 0:
         return False
-    k = hc_json("get", address) or {}
-    if (k.get("labels") or {}).get("herdr.agent", "claude") == "claude" and status_word(k) == "working":
-        for i in range(4):
-            time.sleep(0.3 if i else 0.15)
-            screen = run(["hc", "read", address, "--lines", "40"]).stdout
-            if re.search(r"ctrl\+enter to send now", screen, re.I):
+    if cli_of(before) == "agy" and status_word(before) == "working":
+        after_turn = (before.get("turn") or 0) + 1
+        for delay in POLL_DELAYS:
+            time.sleep(delay)
+            if AGY_SEND_NOW.search(run(["hc", "read", address, "--lines", "40"]).stdout or ""):
+                run(["hc", "keys", address, "alt+m"])
+                time.sleep(POLL_DELAYS[0])
+                if not AGY_QUEUED.search(run(["hc", "read", address, "--lines", "40"]).stdout or ""):
+                    return "sent"
+                break
+        if turn_moved(hc_json("get", address) or before, after_turn):
+            return "sent"
+        if not from_held:
+            hold(address, text, how, pending=after_turn)
+        return "pending"
+    k = hc_json("get", address) or before if how == "news" else before
+    if how == "news" and cli_of(k) == "claude" and status_word(k) == "working":
+        for delay in POLL_DELAYS:
+            time.sleep(delay)
+            if re.search(r"ctrl\+enter to send now", run(["hc", "read", address, "--lines", "40"]).stdout or "", re.I):
                 run(["hc", "keys", address, "ctrl+enter"])
                 break
-    return True
+    return "sent"
+
+
+def news_send(address, text, check=True):
+    """Delivers news as the chat delivers the person's words: typed in, sent mid-turn (Claude Ctrl+Enter,
+    agy alt+m or at turn end), without <hc from>. False when typing() or refused."""
+    return False if (check and typing(address)) else bool(deliver(address, text, "news"))
 
 
 # ---- the person is writing ------------------------------------------------------------------
@@ -367,6 +406,14 @@ def typed_input(raw):
     return "\n".join(out).strip()
 
 
+def chat_typing(k):
+    try:
+        at = int((k.get("labels") or {}).get(TYPING) or 0)
+    except ValueError:
+        at = 0
+    return bool(at and now() - at < TYPING_KEEP_MS)
+
+
 def typing(address, k=None, there=None):
     """Why the person is writing to this agent now, else None: "chat" (its chat box holds unsent
     words) or "input" (its CLI's input line holds text they typed). k: its hc get, when at hand."""
@@ -380,11 +427,7 @@ def typing(address, k=None, there=None):
             k = hc_json("get", address)
     if not k or k.get("state") != "live":
         return None
-    try:
-        at = int((k.get("labels") or {}).get(TYPING) or 0)
-    except ValueError:
-        at = 0
-    if at and now() - at < TYPING_KEEP_MS:
+    if chat_typing(k):
         return "chat"
     return "input" if typed_input(screen_raw(address, there)) else None
 
@@ -407,11 +450,14 @@ def held_messages():
         os.replace(tmp, HELD)
 
 
-def hold(address, text, how="send"):
-    """Keeps a message for an agent the person is writing to; held_pass sends it once they've
-    stopped. how: "send" (a plain hc send, as an agent's message) or "news" (news_send)."""
+def hold(address, text, how="send", pending=None):
+    """Keeps a message for an agent (`pending` = after_turn when typed into a busy agy worker whose
+    turn didn't take alt+m, else while the person is writing to it); held_pass delivers it."""
+    item = {"text": text, "how": how, "at": now()}
+    if pending is not None:
+        item["pending"] = pending
     with held_messages() as held:
-        held.setdefault(address, []).append({"text": text, "how": how, "at": now()})
+        held.setdefault(address, []).append(item)
 
 
 def send_or_hold(address, text, how="send"):
@@ -420,14 +466,13 @@ def send_or_hold(address, text, how="send"):
     if typing(address):
         hold(address, text, how)
         return "held"
-    if how == "news":
-        return "sent" if news_send(address, text, check=False) else None
-    return "sent" if run(["hc", "send", address, text]).returncode == 0 else None
+    return "sent" if deliver(address, text, how) else None
 
 
 def held_pass(report):
-    """Sends what was held for agents the person no longer writes to, one message per agent and
-    kind. Dropped once its agent has ended, or after NEWS_KEEP_MS."""
+    """Sends what was held for agents the person no longer writes to, and re-delivers messages left
+    pending behind a busy agy worker once its turn ends. Dropped once its agent has ended, once agy
+    already started a turn with it, or after NEWS_KEEP_MS."""
     if not os.path.exists(HELD):
         return
     with held_messages() as held:
@@ -437,16 +482,39 @@ def held_pass(report):
             if not k or k.get("state") != "live":
                 held.pop(addr)
                 continue
-            if typing(addr, k):
+            items[:] = [x for x in items if "pending" not in x or not turn_moved(k, x["pending"])]
+            if not items:
+                held.pop(addr)
                 continue
-            for how in ("news", "send"):
-                batch = [x for x in items if x.get("how", "send") == how]
-                if not batch:
+            ready_pending = status_word(k) in ("idle", "done")
+            if all("pending" in x for x in items) and not ready_pending:
+                continue
+            if chat_typing(k):
+                continue
+            inp = typed_input(screen_raw(addr))
+            if inp:
+                own = [x for x in items if "pending" in x and ready_pending
+                       and x["text"].strip() and inp.splitlines()[0] == x["text"].strip().splitlines()[0]]
+                if own and run(["hc", "keys", addr, "enter"]).returncode == 0:
+                    items[:] = [x for x in items if x not in own]
+                    report.setdefault("held", []).append({"to": addr, "messages": len(own)})
+                if not items:
+                    held.pop(addr)
+                continue
+            for pending in (True, False):
+                if pending and not ready_pending:
                     continue
-                text = "\n\n".join(x["text"] for x in batch)
-                ok = news_send(addr, text, check=False) if how == "news" else run(["hc", "send", addr, text]).returncode == 0
-                if ok:
-                    items[:] = [x for x in items if x not in batch]
-                    report.setdefault("held", []).append({"to": addr, "messages": len(batch)})
+                for how in ("news", "send"):
+                    batch = [x for x in items if ("pending" in x) == pending and x.get("how", "send") == how]
+                    if not batch:
+                        continue
+                    text = "\n\n".join(x["text"] for x in batch)
+                    res = deliver(addr, text, how, from_held=True)
+                    if res == "sent":
+                        items[:] = [x for x in items if x not in batch]
+                        report.setdefault("held", []).append({"to": addr, "messages": len(batch)})
+                    elif res == "pending":
+                        items[:] = [x for x in items if x not in batch] + [{"text": text, "how": how, "at": now(),
+                                                                            "pending": (k.get("turn") or 0) + 1}]
             if not items:
                 held.pop(addr)

@@ -14,7 +14,7 @@ import time
 from .base import ENTRY, Fail, guard, hc_json, now, STORE
 from .when import parse_at
 from .settings import bare, settings_for, worker_argv, worktrees_on
-from .agents import agent_running, live_agents, starting, status_of, task_status, TRUST_ASK
+from .agents import agent_running, detail, live_agents, starting, status_of, task_status, TRUST_ASK
 from .sessions import session_of
 from .launch import default_space
 from .store import locate, open_store, read_list, Store, store_files
@@ -397,7 +397,7 @@ def matches(a, t):
 
 def task_facts(s, t):
     """How a task is now, as events read it. Another machine's come this way too (`auto feed`)."""
-    live = [k for k in live_agents(s.key(t))] if t["state"] in ("running", "ready") else []
+    live = [detail(k) if "foreground" not in k else k for k in live_agents(s.key(t))] if t["state"] in ("running", "ready") else []
     working_ones = [k for k in live if agent_running(k)]
     return {"id": t["id"], "ref": s.ref(t), "title": t["title"], "branch": t.get("branch"), "state": t["state"],
             "status": status_of(t, working_ones) if t["state"] == "running" else t["state"],
