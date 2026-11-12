@@ -273,8 +273,16 @@ def sandboxes(argv):
     return agent_key(argv) == "agy" and sys.platform == "darwin" and os.path.exists("/usr/bin/sandbox-exec")
 
 
+# The person's opt-out: with this file, an agy reviewer runs with skipped permissions as itself, outside
+# sandbox-exec, so it signs in as the person's agy does (agy keeps its sign-in in the keychain, which
+# the sandbox can't reach). Its brief still says read only; the rest (verdict from its terminal) is the same.
+UNSANDBOXED_FLAG = os.path.join(HOME, ".herdr", "agy-review-unsandboxed")
+
+
 def sandboxed(argv, worktree):
-    """argv (agy's) run under reviewer.sb in a temp dir of its own (SANDBOX_SH)."""
+    """argv (agy's) run under reviewer.sb in a temp dir of its own (SANDBOX_SH); as it is with UNSANDBOXED_FLAG."""
+    if os.path.exists(UNSANDBOXED_FLAG):
+        return list(argv)
     import pkgutil
     common = git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")[1] or worktree
     real = os.path.realpath

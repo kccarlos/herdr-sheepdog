@@ -2113,6 +2113,15 @@ class GateReview(unittest.TestCase):
         self.assertIsNone(self.commands.read_verdict(prompt, code))  # its echoed prompt is never a verdict
         self.valid()
 
+    def test_the_unsandboxed_flag_runs_the_agy_reviewer_as_itself(self):
+        from unittest import mock
+        import herdr_task.launch as launch
+        flag = os.path.join(self.wt, "agy-review-unsandboxed")
+        with mock.patch.object(launch, "UNSANDBOXED_FLAG", flag):
+            self.assertEqual(launch.sandboxed(["agy", "-i", "hi"], self.wt)[:3], ["sh", "-c", launch.SANDBOX_SH])
+            open(flag, "w").close()
+            self.assertEqual(launch.sandboxed(["agy", "-i", "hi"], self.wt), ["agy", "-i", "hi"])
+
     def test_its_verdict_is_read_from_its_own_terminal(self):
         self.sandbox()
         self.ready()
