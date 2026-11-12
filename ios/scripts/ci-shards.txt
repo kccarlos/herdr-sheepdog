@@ -52,6 +52,7 @@ shard-3  SheepdogUITests/ShellDemoUITests              # 113
 shard-3  SheepdogUITests/CardsUITests                  # 86
 shard-3  SheepdogUITests/FlockTypingUITests            # 48
 shard-3  SheepdogUITests/NewConversationUITests        # 41
+shard-3  SheepdogUITests/NewWithoutVoiceUITests        # 15
 
 # about 474; the recording and screenshot classes skip themselves in CI
 shard-4  SheepdogUITests/VoiceRobustnessUITests        # 146
