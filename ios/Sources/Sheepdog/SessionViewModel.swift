@@ -1496,8 +1496,9 @@ final class SessionViewModel: ObservableObject {
     /// Rename, Stop, Close).
     var agentActionsAvailable: Bool {
         if demo != nil { return true }
-        if case let .ready(_, _, features) = linkModel.handshake { return features.contains(AgentAction.feature) }
-        return fleet.current?.features?.contains(AgentAction.feature) ?? false
+        return DaemonFeatureSupport.has(AgentAction.feature, handshake: linkModel.handshake,
+                                        helloFeatures: linkModel.hello?.features,
+                                        remembered: fleet.current?.features)
     }
 
     /// Runs `body` against the daemon (the agent actions). Throws when no
@@ -1517,7 +1518,9 @@ final class SessionViewModel: ObservableObject {
     /// features are remembered where the handshake lands (`publish`).
     var termAvailability: TermAvailability {
         if demo != nil { return .yes }
-        return TermAvailability.from(handshake: linkModel.handshake, remembered: fleet.current?.features)
+        // `/api/hello` lists the features before any voice session opens.
+        return TermAvailability.from(handshake: linkModel.handshake,
+                                     remembered: linkModel.hello?.features ?? fleet.current?.features)
     }
 
     /// `/api/hello`'s reason when the live terminal is unavailable.
