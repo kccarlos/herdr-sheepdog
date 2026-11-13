@@ -1030,6 +1030,23 @@ def agy_bg_tasks(address):
     return bool(AGY_BG_TASKS.search("\n".join(lines[max(len(lines) - 3, rules[-1] + 1 if rules else 0):])))
 
 
+_BG_ITEMS = r"(\d+\s+(?:shells?|monitors?)(?:\s*,\s*\d+\s+(?:shells?|monitors?))*)"
+CLAUDE_BG_SHELLS = (re.compile(r"^\s*[^\w\s]\s+\w+ for \S.*·\s*" + _BG_ITEMS + r"\s+still\s+running\s*$"),  # "✻ Crunched for 2m 55s · done 9:38 AM · 2 shells, 1 monitor still running"
+                    re.compile(r"^\s*⏵⏵.*·\s*" + _BG_ITEMS + r"\s*(?:·|$)"))  # "⏵⏵ auto mode on · 2 shells, 1 monitor · ↓ to manage"
+
+
+def claude_bg_shells(screen):
+    """Claude Code's footer shows its background shells (FAC-79): its status line after a finished turn and its mode
+    line. Only those two kinds of line in the last lines of the screen count, never prose the reviewer printed."""
+    lines = [ln.rstrip() for ln in (screen or "").splitlines() if ln.strip()]
+    for ln in lines[-5:]:
+        for rx in CLAUDE_BG_SHELLS:
+            m = rx.match(ln)
+            if m and any(int(n) for n in re.findall(r"(\d+)\s+(?:shell|monitor)", m.group(1))):
+                return True
+    return False
+
+
 def codex_working(k):
     """Whether a Codex agent has a process of its own running under it: a background terminal or a
     command of its code mode, but not its code-mode host (SHEP-207). Its pid unknown: True, so its

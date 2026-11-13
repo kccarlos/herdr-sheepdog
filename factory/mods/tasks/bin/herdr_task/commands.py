@@ -18,7 +18,7 @@ from .settings import (
     task_settings, worker_argv, worktrees_on,
 )
 from .agents import (
-    agent_log, agent_running, background_jobs, busy_again, detail, fit, LINE_MAX, live_agents, ready_turns,
+    agent_log, agent_running, agy_bg_tasks, background_jobs, busy_again, claude_bg_shells, detail, fit, LINE_MAX, live_agents, ready_turns,
     REVIEWER_FAILED, STARTING_MS, STATUSES, status_word, SUMMARY_MAX, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
@@ -1134,6 +1134,56 @@ def sign_in_why(s, t, rn):
     return "Sign in required"
 
 
+BG_WAIT_MS, NUDGE_GRACE_MS, QUIET_MS = 15 * 60_000, 3 * 60_000, 60_000  # FAC-79
+NUDGE_TEXT = "Your check has finished or is taking too long: record your verdict now with what you have."
+
+
+def reviewer_job(rn, screen):
+    """A reviewer's own background job still shows on its screen: Claude Code's shell footer, agy's task count."""
+    return claude_bg_shells(screen) if rn["cli"] == "claude" else bool(agy_bg_tasks(rn["address"])) if rn["cli"] == "agy" else False
+
+
+def nudge_reviewer(s, w, rn):
+    """The one nudge. Remembered only once hc took it (a refused send is tried again at the next tick, until the
+    grace has passed since the first try: then the reviewer fails as if nudged); the grace after it starts there."""
+    from .news import send_or_hold
+    s.dirty = True
+    try:
+        sent = send_or_hold(rn["address"], NUDGE_TEXT)
+    except (OSError, Fail):
+        sent = None
+    t0 = now()
+    if sent:
+        w["nudged_at"] = t0
+    elif t0 - w.setdefault("try_at", t0) >= NUDGE_GRACE_MS:
+        w["nudged_at"] = w["try_at"]
+
+
+def still_waiting(s, t, rn, screen):
+    """FAC-79: an idle reviewer with no verdict is not failed while its own background job still runs (Claude Code
+    starts a turn by itself when the job ends). The job shown for BG_WAIT_MS, or gone with the reviewer still
+    idle for QUIET_MS (agy starts no turn by itself): one nudge to record the verdict, then NUDGE_GRACE_MS more.
+    Its clocks and the nudge sent (at most one per run, even if the reviewer worked on after it) are the task's
+    `review_wait` for that run's address (never on the run record itself: that is the gate's contract)."""
+    if (t.get("review_wait") or {}).get("address") != rn["address"]:
+        t.pop("review_wait", None)
+    w, t0 = t.get("review_wait") or {}, now()
+    if w.get("nudged_at"):
+        return t0 - w["nudged_at"] < NUDGE_GRACE_MS
+    job = reviewer_job(rn, screen)
+    if not job and not w:  # never had a job: ended without a verdict, as before
+        return False
+    w = t.setdefault("review_wait", {"address": rn["address"]})
+    s.dirty = True
+    if job:
+        w.pop("idle_at", None)
+        if t0 - w.setdefault("bg_at", t0) >= BG_WAIT_MS:
+            nudge_reviewer(s, w, rn)
+    elif t0 - w.setdefault("idle_at", t0) >= QUIET_MS:
+        nudge_reviewer(s, w, rn)
+    return not (w.get("nudged_at") and now() - w["nudged_at"] >= NUDGE_GRACE_MS)  # a nudge given up on: no wait left
+
+
 def inspect_runs(s, t):
     """Reads verdicts of finished sandboxed reviewers, and marks open runs whose terminal is gone or
     whose agent ended without a verdict (or stopped on 'Sign in required') as failed (FAC-49, FAC-59)."""
@@ -1151,6 +1201,9 @@ def inspect_runs(s, t):
             continue
         st, alive = status_word(k), agent_running(k)
         if alive and st == "working":  # never read mid-turn
+            w = t.get("review_wait") or {}  # the job clocks restart, the nudge sent stays remembered: at most one a run
+            if any([w.pop("bg_at", None), w.pop("idle_at", None), w.pop("try_at", None)]):
+                s.dirty = True
             continue
         screen = None
         if sandboxes([rn["cli"]]) and st != "blocked":
@@ -1172,7 +1225,8 @@ def inspect_runs(s, t):
         if screen is None:
             screen = screen_of(rn["address"], 400)
         why = (sign_in_why(s, t, rn) if sign_in_screen(screen) else "exited without a verdict" if not alive else
-               "ended without a verdict" if st in ("idle", "done") and (k.get("turn") != 0 or now() - (rn.get("at") or 0) >= STARTING_MS) else None)
+               "ended without a verdict" if st in ("idle", "done") and (k.get("turn") != 0 or now() - (rn.get("at") or 0) >= STARTING_MS)
+               and not still_waiting(s, t, rn, screen) else None)
         if why:
             fail_run(s, t, rn, why, screen)  # captured before end_reviewer closes the terminal
             end_reviewer(rn["address"])
@@ -1201,7 +1255,7 @@ def cmd_state(args, state):
             # pull request merged and close it again at once) until its agent says ready.
             if t["state"] == "done" and t.get("merged"):
                 t["kept_open"] = True
-            for k in ("reviews", "review", "review_runs", "review_failures", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "merge_queued"):
+            for k in ("reviews", "review", "review_runs", "review_failures", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "merge_queued", "review_wait"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
