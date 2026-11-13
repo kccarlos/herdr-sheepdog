@@ -1,6 +1,6 @@
 """Starting a factory project in one command (`herdr-task project start`, docs/factory.md 12b.4)."""
 
-import argparse, contextlib, io, json, os, re, shlex, shutil
+import argparse, contextlib, io, json, os, re, shlex, shutil, urllib.parse
 from . import autopilot as ap, base, settings as st
 from .base import Fail
 from .github import push_remote, remote_repo
@@ -12,6 +12,16 @@ FACTORY_WORKER = {"agent": "agy", "model": "gemini-4-carbon-high", "effort": "",
 FACTORY_REVIEWER = {"agent": "agy", "model": "gemini-4-argon-high", "effort": "", "fast": False}
 FACTORY_TASKS = {"merge": "checks", "review_min": 2}
 HEARTBEAT_HEAD = "Requirements: read docs/requirements.md and build toward it milestone by milestone.\n\n"
+HEARTBEAT_EXPORT_HEAD = (
+    "Requirements (to export first): docs/requirements.md links a claude.ai artifact or doc (marked to export), "
+    "which non-Claude workers can't read. Before planning tasks, read that claude.ai URL yourself and export its "
+    "content as Markdown into docs/requirements.md (keep the source URL linked at the top, remove the to-export "
+    "marker, and commit docs/requirements.md), then build toward it milestone by milestone.\n\n"
+)
+TO_EXPORT_MARKER = (
+    "Status: to export — claude.ai artifact or doc (only Claude agents can read it; agy and Codex workers can't). "
+    "Export its content into `docs/requirements.md`, keeping the source link above, before planning tasks.\n"
+)
 
 def json_dict(raw):
     try:
@@ -60,14 +70,23 @@ def detect_check(repo):
             return f"xcodebuild test {flag} {shlex.quote(hit)} -scheme {shlex.quote(os.path.splitext(os.path.basename(hit))[0])}"
     return ""
 
+def is_claude_url(url):
+    u = urllib.parse.urlsplit((url or "").strip())
+    h = (u.hostname or "").lower()
+    return u.scheme in ("http", "https") and (h == "claude.ai" or h.endswith(".claude.ai"))
+
+def req_needs_export(repo):
+    p = os.path.join(repo, "docs", "requirements.md")
+    return bool(os.path.isfile(p) and re.search(r"(?mi)^status:\s*to export\b", read_text(p)))
+
 def parse_req(req):
     if not (src := (req or "").strip()):
         return None
     if re.match(r"^https?://\S+$", src, re.I):
-        return True, src
+        return ("claude" if is_claude_url(src) else "url"), src
     if not os.path.isfile(p := os.path.realpath(os.path.expanduser(src))):
         raise Fail(f"No such requirements file: {req}")
-    return False, p
+    return "file", p
 
 def ensure_repo(path, raw_given, dry):
     has_git = os.path.isdir(path) and (os.path.exists(os.path.join(path, ".git")) or (not raw_given and locate(path)["kind"] == "repo"))
@@ -101,16 +120,22 @@ def ensure_prefix(repo, given_name, dry):
 def ensure_requirements(repo, req_info, dry):
     dest = os.path.join(repo, "docs", "requirements.md")
     if os.path.isfile(dest) or not req_info:
-        return (dest if os.path.isfile(dest) else None), False, f"Requirements: {'found docs/requirements.md' if os.path.isfile(dest) else 'none given'}"
-    is_url, src = req_info
+        exp = req_needs_export(repo)
+        found = "found docs/requirements.md (marked to export)" if exp else "found docs/requirements.md"
+        return (dest if os.path.isfile(dest) else None), False, exp, f"Requirements: {found if os.path.isfile(dest) else 'none given'}"
+    kind, src = req_info
+    to_export = kind == "claude"
     if not dry:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        if is_url:
-            with open(dest, "w") as f:
-                f.write(f"[{src}]({src})\n")
-        else:
+        if kind == "file":
             shutil.copyfile(src, dest)
-    return dest, True, f"Requirements: {'would ' + ('save link to ' if is_url else 'copy ') + src + ' into' if dry else ('saved link in' if is_url else 'copied to')} docs/requirements.md"
+        else:
+            with open(dest, "w") as f:
+                f.write(f"[{src}]({src})\n" + (f"\n{TO_EXPORT_MARKER}" if to_export else ""))
+    note = " (marked to export)" if to_export else ""
+    step = (f"Requirements: would {'copy ' + src if kind == 'file' else 'save link to ' + src} into docs/requirements.md{note}" if dry
+            else f"Requirements: {'copied to' if kind == 'file' else 'saved link in'} docs/requirements.md{note}")
+    return dest, True, to_export, step
 
 def ensure_space(repo, name, prefix, cfg, dry):
     step = f"herdr-app do space.new --folder {shlex.quote(repo)} --name {shlex.quote(name)}"
@@ -197,12 +222,19 @@ def ensure_assistant(repo, space_id, dry):
         raise Fail("hc isn't on PATH (install herdr-core first)." if r is None else ((r.stderr or r.stdout).strip() or "Couldn't start the Assistant."))
     return out["address"], True, f"Assistant: started {out['address']}"
 
-def sync_autopilot(repo, space_id, name, old_ids, want_on, asst_changed, dry):
+def sync_autopilot(repo, space_id, name, old_ids, want_on, asst_changed, dry, to_export=None):
+    if to_export is None:
+        to_export = req_needs_export(repo)
     bare_id, ap_spaces = st.bare(space_id), (read_list(ap.STATE) or {}).get("spaces") or {}
     stale = [k for k, v in ap_spaces.items() if k != bare_id and "/" not in k and (k in old_ids or (isinstance(v, dict) and v.get("folder") == repo))]
     cur = {**{kk: vv for k in stale for kk, vv in (ap_spaces.get(k) or {}).items()}, **dict(ap_spaces.get(bare_id) or {})}
-    was_on = bool(cur.get("on"))
-    has_beat = want_on and any(bool((ap.autopilot_layers(st.read_settings(), k)[1].get("heartbeat") or "").strip()) for k in (bare_id, *old_ids))
+    was_on, want_beat = bool(cur.get("on")), bool(want_on or to_export)
+    cfg_now = st.read_settings() if want_beat else {}
+    plain_beat = (HEARTBEAT_HEAD + ap.STARTER).strip()
+    has_beat = want_beat and any(bool(b := (ap.autopilot_layers(cfg_now, k)[1].get("heartbeat") or "").strip())
+                                 and not (to_export and b == plain_beat) for k in (bare_id, *old_ids))
+    head = HEARTBEAT_EXPORT_HEAD if to_export else HEARTBEAT_HEAD
+    beat_desc = "export into docs/requirements.md before planning tasks" if to_export else "docs/requirements.md"
     def move():
         with ap.state(write=True) as d:
             m = {**{kk: vv for k in stale for kk, vv in (d["spaces"].pop(k, None) or {}).items()}, **dict(d["spaces"].get(bare_id) or {})}
@@ -210,22 +242,29 @@ def sync_autopilot(repo, space_id, name, old_ids, want_on, asst_changed, dry):
             d["spaces"][bare_id] = m
             if m.get("on") and m.get("pending"):
                 ap.deliver(bare_id, m)
-    if not want_on or (has_beat and was_on and not stale):
+    need_beat, need_on = want_beat and not has_beat, want_on and not was_on
+    if not need_beat and not need_on:
         if (stale or (asst_changed and was_on and cur.get("pending"))) and not dry:
             move()
-        line = f"Autopilot: {'would move' if dry else 'moved'} to {bare_id}" if stale else (f"Autopilot: found on for {bare_id}" if (want_on or was_on) else None)
+        line = (f"Autopilot: {'would move' if dry else 'moved'} to {bare_id}" if stale else
+                f"Autopilot: found on for {bare_id}" if (want_on or was_on) else
+                f"Autopilot: found heartbeat for {bare_id}" if want_beat else None)
         return (True if want_on else was_on), bool(stale), line
     if dry:
-        parts = (["move to " + bare_id] if stale and was_on else []) + ([] if has_beat else ["set heartbeat -> docs/requirements.md"]) + ([] if was_on else [f"turn on for {bare_id}"])
-        return True, True, f"Autopilot: would {' and '.join(parts)}"
-    if not has_beat:
-        st.write_autopilot(bare_id, {"heartbeat": HEARTBEAT_HEAD + ap.STARTER})
+        parts = ((["move to " + bare_id] if stale and was_on else [])
+                 + ([f"set heartbeat -> {beat_desc}"] if need_beat else [])
+                 + ([f"turn on for {bare_id}"] if need_on else []))
+        return (True if want_on else was_on), True, f"Autopilot: would {' and '.join(parts)}"
+    if need_beat:
+        st.write_autopilot(bare_id, {"heartbeat": head + ap.STARTER})
     if stale or (was_on and not cur.get("folder")):
         move()
-    if not was_on:
+    if need_on:
         with contextlib.redirect_stdout(io.StringIO()):
             ap.cmd_autopilot(argparse.Namespace(autopilot="on", space=bare_id, everywhere=False, json=True, name=name, space_folder=repo))
-    return True, True, f"Autopilot: on for {bare_id} (heartbeat -> docs/requirements.md)"
+    if want_on or was_on:
+        return True, True, f"Autopilot: on for {bare_id} (heartbeat -> {beat_desc})"
+    return False, True, f"Autopilot: set heartbeat for {bare_id} ({beat_desc})"
 
 NOT_READY = {"not yet", "not set up yet", "no"}
 ans_yes = lambda v: str(v or "").strip().lower().startswith(("yes", "on", "true", "1"))
@@ -435,11 +474,11 @@ def cmd_project(args):
     repo, c1, l1 = ensure_repo(path, raw is not None, dry)
     name = (args.name or "").strip() or os.path.basename(repo)
     prefix, c2, l2 = ensure_prefix(repo, args.name, dry)
-    req_path, c3, l3 = ensure_requirements(repo, req_info, dry)
+    req_path, c3, to_export, l3 = ensure_requirements(repo, req_info, dry)
     space_id, c4, space_step, l4 = ensure_space(repo, name, prefix, cfg, dry)
     layer, c5, old_ids, l5 = ensure_settings(repo, space_id, name, args.check, cfg, dry)
     assistant, c6, l6 = ensure_assistant(repo, space_id, dry)
-    ap_on, c7, l7 = sync_autopilot(repo, space_id, name, old_ids, bool(args.autopilot), c6, dry)
+    ap_on, c7, l7 = sync_autopilot(repo, space_id, name, old_ids, bool(args.autopilot), c6, dry, to_export)
     chk = run_checklist(repo, space_id=space_id, name=(args.name or "").strip() or layer.get("name") or name, assistant=assistant, ap_hint=ap_on, dry=dry)
     lines, changed = [l1, l2, l3, l4, l5, l6, *([l7] if l7 else [])], any((c1, c2, c3, c4, c5, c6, c7, chk["changed"]))
     out = {"folder": repo, "name": name, "prefix": prefix, "space": st.bare(space_id), "space_step": space_step,

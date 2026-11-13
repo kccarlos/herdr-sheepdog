@@ -7896,6 +7896,63 @@ class ProjectStart(unittest.TestCase):
         self.assertIn("apple_signin", out2["missing"])
         self.assertEqual(out2["asked"], [])
 
+    def test_claude_ai_requirements_marks_to_export_and_sets_export_instruction(self):
+        for good in ("https://claude.ai/artifact/Y769bCQJQT6wuRri9bLurD", "https://claude.ai/doc/abc-123",
+                     "https://www.claude.ai/public/artifacts/xyz", "https://claude.ai/design/d1"):
+            self.assertTrue(self.project.is_claude_url(good), good)
+        for bad in ("https://example.com/spec", "https://example.com/spec?ref=https://claude.ai/artifact/x",
+                    "https://notclaude.ai/doc/x", "https://claude.ai.evil.com/doc/x", ""):
+            self.assertFalse(self.project.is_claude_url(bad), bad)
+
+        art_url = "https://claude.ai/artifact/Y769bCQJQT6wuRri9bLurD"
+        dry_dir = os.path.join(self.tmp, "dry-claude")
+        dry_txt = self.start(dry_dir, "--requirements", art_url, "--autopilot", "--dry-run")
+        self.assertIn(f"[dry-run] Requirements: would save link to {art_url} into docs/requirements.md (marked to export)", dry_txt)
+        self.assertIn("[dry-run] Autopilot: would set heartbeat -> export into docs/requirements.md before planning tasks and turn on", dry_txt)
+        self.assertFalse(os.path.exists(dry_dir))
+
+        # claude.ai artifact URL with --autopilot: keeps link line, marks to export, sets export-first heartbeat, idempotent on rerun.
+        r1 = os.path.join(self.tmp, "claude-art")
+        out1 = json.loads(self.start(r1, "--requirements", art_url, "--autopilot", "--json"))
+        req1 = self.Path(r1, "docs", "requirements.md").read_text()
+        self.assertTrue(req1.startswith(f"[{art_url}]({art_url})\n"), req1)
+        self.assertIn("Status: to export", req1)
+        self.assertTrue(self.project.req_needs_export(r1))
+        beat1 = self.ap.heartbeat_of(out1["space"])[0]
+        self.assertTrue(beat1.startswith(self.project.HEARTBEAT_EXPORT_HEAD))
+        self.assertIn("Before planning tasks", beat1)
+        self.assertIn("export its content as Markdown into docs/requirements.md", beat1)
+        rerun = self.start(r1, "--requirements", art_url, "--autopilot")
+        self.assertTrue(all("found" in ln for ln in rerun.strip().splitlines()[:7]), rerun)
+        self.assertFalse(json.loads(self.start(r1, "--autopilot", "--json"))["changed"])
+
+        # claude.ai doc URL without --autopilot: still pre-seeds the export heartbeat, stays off until checklist Yes.
+        doc_url = "https://claude.ai/doc/req-doc-42"
+        r2 = os.path.join(self.tmp, "claude-doc")
+        out2 = json.loads(self.start(r2, "--requirements", doc_url, "--json"))
+        self.assertFalse(out2["autopilot"])
+        self.assertIn("Status: to export", self.Path(r2, "docs", "requirements.md").read_text())
+        self.assertTrue(self.ap.heartbeat_of(out2["space"])[0].startswith(self.project.HEARTBEAT_EXPORT_HEAD))
+        self.assertFalse(json.loads(self.start(r2, "--json"))["changed"])
+        ap_card = next(a for a in out2["checklist"]["asked"] if a["item"] == "autopilot")
+        self.answer_card(ap_card["id"], "1", ap_card["terminal"])
+        self.assertTrue(self.store.read_list(self.ap.STATE)["spaces"][out2["space"]]["on"])
+        self.assertTrue(self.ap.heartbeat_of(out2["space"])[0].startswith(self.project.HEARTBEAT_EXPORT_HEAD))
+
+        # Plain URL (even mentioning claude.ai in query) and local file behave exactly as before.
+        plain_url = "https://example.com/spec?from=claude.ai"
+        r3, r4 = os.path.join(self.tmp, "plain-url"), os.path.join(self.tmp, "local-file")
+        spec_file = self.put(os.path.join(self.tmp, "local.md"), "# Spec\nBuild it.\n")
+        out3 = json.loads(self.start(r3, "--requirements", plain_url, "--autopilot", "--json"))
+        out4 = json.loads(self.start(r4, "--requirements", spec_file, "--autopilot", "--json"))
+        self.assertEqual(self.Path(r3, "docs", "requirements.md").read_text(), f"[{plain_url}]({plain_url})\n")
+        self.assertEqual(self.Path(r4, "docs", "requirements.md").read_text(), "# Spec\nBuild it.\n")
+        for r, o in ((r3, out3), (r4, out4)):
+            self.assertFalse(self.project.req_needs_export(r))
+            beat = self.ap.heartbeat_of(o["space"])[0]
+            self.assertTrue(beat.startswith(self.project.HEARTBEAT_HEAD))
+            self.assertNotIn("to export", beat)
+
 
 class Watchdog(unittest.TestCase):
     """FAC-62: watchdog restarts a stuck local Assistant once with restart.sh and alerts on repeat."""

@@ -291,7 +291,7 @@ def main():
     c.add_argument("folder", nargs="?", help="the project's folder (default: here)")
     c.add_argument("--folder", dest="folder_opt", help=argparse.SUPPRESS)
     c.add_argument("--name", help="the project and space name (default: the folder's)")
-    c.add_argument("--requirements", help="a file (copied) or URL (saved as a link line) imported into docs/requirements.md")
+    c.add_argument("--requirements", help="a file (copied) or URL (saved as a link line; a claude.ai URL is marked to export first) imported into docs/requirements.md")
     c.add_argument("--check", help="the check command the gate runs (default: detected from package.json, Makefile, unittest or xcodebuild)")
     c.add_argument("--autopilot", action="store_true", help="turn Autopilot on for the space, pointing its heartbeat at docs/requirements.md")
     c.add_argument("--dry-run", action="store_true", help="print every step without doing it")

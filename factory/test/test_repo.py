@@ -377,6 +377,31 @@ class Repo(unittest.TestCase):
                       "one review round", "Ready / Accept card", "never on design or doc tasks"):
             self.assertIn(words, text)
 
+    def test_assistant_claude_ai_artifact_export_rules(self):
+        """FAC-71: templates/assistant.md tells the Assistant to export claude.ai artifacts/docs into
+        docs/<project>/... before a non-Claude worker starts, and design tasks deliver repo files as Done."""
+        with open(J("templates", "assistant.md"), encoding="utf-8") as fh:
+            text = fh.read()
+        rules = text.split("\nRules:\n", 1)[1].split("\n## ", 1)[0]
+        for words in (
+            "only Claude agents can read claude.ai",
+            "Before a non-Claude worker starts a task that depends on a claude.ai artifact or doc",
+            "docs/<project>/…",
+            "Markdown for text; images or a written spec for designs",
+            "source URL linked at the top",
+            "briefs point at the repo copy, never only at a claude.ai link",
+            "marked `to export`",
+        ):
+            self.assertIn(words, rules)
+        workers = text.split("## Start the workers (one per task)\n", 1)[1].split("\n## ", 1)[0]
+        for words in (
+            "deliver the canvas as repo files too under `docs/<project>/design/…`",
+            "as part of Done",
+            "repo files shown in your proof",
+            "approved repo files under `docs/<project>/design/…`, never only at a claude.ai link",
+        ):
+            self.assertIn(words, workers)
+
 
 if __name__ == "__main__":
     unittest.main()
