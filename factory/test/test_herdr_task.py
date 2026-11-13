@@ -8527,3 +8527,108 @@ class OpenQuestionSurvivesDone(unittest.TestCase):
              __import__("contextlib").redirect_stdout(buf):
             self.commands.cmd_show(__import__("argparse").Namespace(id="WUKO-11", folder=self.main, json=False, evidence=False))
         self.assertIn("log: Kept t1 open", buf.getvalue())
+
+
+class SimulatorPool(unittest.TestCase):
+    """FAC-72: each task leases one iOS simulator from a folder's fixed pool, and freeing shuts it down."""
+
+    U1, U2 = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+
+    def setUp(self):
+        import contextlib, io
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.cli as cli, herdr_task.github as github, herdr_task.launch as launch
+        import herdr_task.settings as settings, herdr_task.simulators as sims, herdr_task.store as store
+        self.cli, self.github, self.launch, self.sims, self.store = cli, github, launch, sims, store
+        self.io, self.out_r, self.err_r = io, contextlib.redirect_stdout, contextlib.redirect_stderr
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="sim-pool-"))
+        self.repo, self.store_dir, self.settings_file, self.bin_dir, self.xc_log = [
+            os.path.join(self.tmp, n) for n in ("wukong-mind", "tasks", "settings.json", "bin", "xcrun.jsonl")]
+        os.makedirs(self.repo); os.makedirs(self.bin_dir)
+        subprocess.run(["git", "init", "-q", "-b", "main", self.repo], check=True)
+        devs = {"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-18-2": [
+            {"name": "WukongMind 1", "udid": self.U1, "isAvailable": True, "state": "Shutdown"},
+            {"name": "WukongMind 2", "udid": self.U2, "isAvailable": True, "state": "Booted"}]}}
+        xcrun = os.path.join(self.bin_dir, "xcrun")
+        with open(xcrun, "w") as f:
+            f.write(f"#!{sys.executable}\nimport json, sys\nopen({self.xc_log!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                    f"if sys.argv[1:4] == ['simctl', 'list', 'devices']: print(json.dumps({devs!r}))\n")
+        os.chmod(xcrun, 0o755)
+        for p in (mock.patch.dict(os.environ, {"PATH": f"{self.bin_dir}:{os.environ['PATH']}"}),
+                  mock.patch.object(settings, "SETTINGS", self.settings_file), mock.patch.object(store, "STORE", self.store_dir),
+                  mock.patch.object(github, "live_agents", lambda *_: []), mock.patch.object(github, "live_helpers", lambda *_: [])):
+            p.start(); self.addCleanup(p.stop)
+
+    def set_pool(self, pool):
+        with open(self.settings_file, "w") as f:
+            json.dump({"spaces": {"sp1": {"folder": self.repo, "tasks": {"simulators": pool}}}}, f)
+
+    def run_cli(self, *argv, env=None):
+        from unittest import mock
+        out, err = self.io.StringIO(), self.io.StringIO()
+        with mock.patch.dict(os.environ, env or {}), mock.patch.object(sys, "argv", ["herdr-task", *argv]), \
+                self.out_r(out), self.err_r(err):
+            return self.cli.main(), out.getvalue(), err.getvalue()
+
+    def shutdowns(self):
+        with open(self.xc_log) as f:
+            return [a[2] for a in (json.loads(ln) for ln in f) if a[:2] == ["simctl", "shutdown"]]
+
+    def test_no_pool_says_feature_is_off_and_prompt_adds_only_with_pool(self):
+        self.assertEqual(self.run_cli("add", "First", "--folder", self.repo)[0], 0)
+        self.assertEqual((r := self.run_cli("simulator", "list", "--folder", self.repo))[0], 0)
+        self.assertIn("feature is off", r[1].lower())
+        self.assertEqual((r := self.run_cli("simulator", "lease", "--folder", self.repo, env={"HERDR_BROWSER_TASK": "other-repo#99"}))[0], 1)
+        self.assertIn("feature is off", r[2].lower())
+        with self.store.Store(self.store.locate(self.repo), write=False) as s:
+            t = s.find("1")
+            self.assertNotIn("simulator lease", self.launch.closing_line(s, t))
+            self.set_pool(["WukongMind 1", self.U2])
+            for phrase in ("simulator lease", "never create or boot another", "simulator release"):
+                self.assertIn(phrase, self.launch.closing_line(s, t))
+        self.assertTrue("simulator" in self.launch.OWN and self.launch.own_command("/x/herdr-task", "/x/herdr-task simulator lease WM-1"))
+
+    def test_lease_refusal_release_and_automatic_cleanup_on_end_and_tick(self):
+        from unittest import mock
+        self.set_pool(["WukongMind 1", self.U2])
+        for title in ("One", "Two", "Three", "Four", "Five", "Six", "Seven"):
+            self.assertEqual(self.run_cli("add", title, "--folder", self.repo)[0], 0)
+        with self.store.Store(self.store.locate(self.repo), write=False) as s:
+            slug = s.slug
+        rc, out1, _ = self.run_cli("simulator", "lease", "--json", env={"HERDR_BROWSER_TASK": f"{slug}#1"})
+        j1 = json.loads(out1)
+        self.assertEqual((rc, j1["task"], j1["name"], j1["udid"]), (0, "WM-1", "WukongMind 1", self.U1))
+        self.assertEqual(json.loads(self.run_cli("simulator", "lease", "WM-2", "--folder", self.repo, "--json")[1])["udid"], self.U2)
+        lst = json.loads(self.run_cli("simulator", "list", "--folder", self.repo, "--json")[1])["simulators"]
+        self.assertEqual([(r["udid"], r["holder"]) for r in lst], [(self.U1, "WM-1"), (self.U2, "WM-2")])
+        rc, _, err = self.run_cli("simulator", "lease", "WM-3", "--folder", self.repo)
+        self.assertEqual((rc, "WM-1" in err and "WM-2" in err), (1, True))
+        # Release frees U1 + shuts down so WM-3 can lease it; done & rm free and shut down too.
+        self.assertEqual(self.run_cli("simulator", "release", env={"HERDR_BROWSER_TASK": f"{slug}#1"})[0], 0)
+        self.assertEqual(self.shutdowns(), [self.U1])
+        self.assertEqual(json.loads(self.run_cli("simulator", "lease", "WM-3", "--folder", self.repo, "--json")[1])["udid"], self.U1)
+        self.assertEqual(self.run_cli("done", "WM-2", "--folder", self.repo)[0], 0)
+        self.assertEqual(self.run_cli("rm", "WM-3", "--folder", self.repo)[0], 0)
+        self.assertEqual(self.shutdowns(), [self.U1, self.U2, self.U1])
+        # Concurrent child processes serialize on the store lock; merged/stopped/gone tasks & missing xcrun clean up.
+        cmd = "import sys; sys.path.insert(0, sys.argv[1]); from herdr_task.cli import main; sys.argv = sys.argv[2:]; raise SystemExit(main())"
+        env = {**os.environ, "HERDR_TASK_STORE": self.store_dir, "HERDR_TASK_SETTINGS": self.settings_file, "PATH": f"{self.bin_dir}:{os.environ['PATH']}"}
+        ps = [subprocess.Popen([sys.executable, "-c", cmd, BIN, "herdr-task", "simulator", "lease", k, "--folder", self.repo, "--json"],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env) for k in ("WM-4", "WM-5")]
+        u4, u5 = [json.loads(p.communicate(timeout=15)[0])["udid"] for p in ps]
+        self.assertEqual({u4, u5}, {self.U1, self.U2})
+        with self.store.Store(self.store.locate(self.repo), write=True) as s:
+            self.github.finish(s, s.find("4"))
+            s.find("5").update(state="running", started=1, agents=[{"address": "t5", "agent": "claude", "at": 1}])
+        with mock.patch.object(self.sims, "hc_json", lambda *_: {"terminals": []}):
+            rep = {}; self.sims.simulator_pass(rep, self.repo)
+            self.assertEqual([x["udid"] for x in rep["simulators_released"]], [u5])
+        self.run_cli("simulator", "lease", "WM-6", "--folder", self.repo)
+        with self.store.Store(self.store.locate(self.repo), write=True) as s:
+            s.data["tasks"] = [t for t in s.data["tasks"] if t["id"] != 6]; s.dirty = True
+        rep = {}; self.sims.simulator_pass(rep, self.repo)
+        self.assertEqual(([x["udid"] for x in rep["simulators_released"]], self.shutdowns()[-3:]), ([self.U1], [u4, u5, self.U1]))
+        self.run_cli("simulator", "lease", "WM-7", "--folder", self.repo)
+        with mock.patch.object(self.sims.shutil, "which", lambda c: None if c == "xcrun" else shutil.which(c)):
+            self.assertEqual(self.run_cli("done", "WM-7", "--folder", self.repo)[0], 0)

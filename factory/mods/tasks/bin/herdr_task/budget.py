@@ -407,6 +407,9 @@ def cmd_recap(args):
         if (t.get("attention") or "").startswith("Recap required"):
             t.pop("attention", None)
             t.pop("attention_at", None)
+        if args.decide == "drop":
+            from .simulators import release_task
+            release_task(s, t)
         s.dirty = True
         told = None
         if args.decide == "continue":

@@ -590,9 +590,11 @@ def finish(s, task, even_if_busy=False):
     """Done, its branch merged: removes the worktree and branch when nothing is left uncommitted
     there and no agent still works in it: none mid-turn (mid_turn()), and (unless the person merged
     from Herdr) none running at all. Else tidy_done() removes them once its agents ended."""
+    from .simulators import release_task
     task["state"], task["done_at"] = "done", now()
     for k in ("attention", "merge_requested", "queue", "queued_at", "merge_queued", "kept_open"):
         task.pop(k, None)
+    release_task(s, task)
     s.dirty = True
     if not task.get("worktree") or mid_turn(s, task) or (not even_if_busy and any(agent_running(k) for k in live_agents(s.key(task)))):
         return

@@ -38,6 +38,7 @@ from .proof import evidence, find_proof
 from .when import when_from
 from .templates import instructions
 from .budget import budget_lines, budget_pass, recap_refusal, record_ci, size_pass
+from .simulators import release_task
 
 
 # ---- commands -------------------------------------------------------------------------------
@@ -247,6 +248,8 @@ def cmd_show(args):
         text.append("comes after: " + ", ".join(v["after_refs"]))
     if kind:
         text.append(f"review kind: {kind} (1 review round)")
+    if v.get("simulator"):
+        text.append(f"simulator: {v['simulator']['name']} ({v['simulator']['udid']})")
     if v.get("review_rounds"):
         r = v["review_rounds"]
         text.append(f"review rounds: {r['used']} of {r['of']} used" + (f" ({r['added']} added by the assistant)" if r["added"] else "")
@@ -1166,6 +1169,8 @@ def cmd_state(args, state):
             unarchive(s, t)
         for k in ("merge_requested", "attention", "queue", "queued_at", "progress", "retry", "scheduled_for", "held") if state != "running" else ("attention", "scheduled_for"):
             t.pop(k, None)
+        if state != "running":
+            release_task(s, t)
         s.dirty = True
         v = view(s, t)
     say(args, v, f"{s.ref(t)} is done." if state == "done" else f"{s.ref(t)} is {state}.")
@@ -1256,6 +1261,7 @@ def cmd_config(args):
 def cmd_rm(args):
     with open_store(args) as s:
         t = s.find(args.id)
+        release_task(s, t)
         s.data["tasks"].remove(t)
         for o in s.data["tasks"]:
             if t["id"] in (o.get("after") or []):

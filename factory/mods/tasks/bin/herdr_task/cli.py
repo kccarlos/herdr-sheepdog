@@ -28,6 +28,7 @@ from .feedback import cmd_feedback
 from .ask import cmd_ask, cmd_ask_pane
 from .budget import cmd_recap, DECISIONS
 from .project import cmd_project
+from .simulators import cmd_simulator
 
 
 # ---- another machine ------------------------------------------------------------------------
@@ -286,6 +287,19 @@ def main():
     cmd("rm", cmd_rm, "remove a task")
     c = cmd("config", cmd_config, "this folder's settings", id=False)
     c.add_argument("--prefix", help="task ids' prefix, 2 to 5 letters (HAT -> HAT-4); unique on this machine")
+    si = sub.add_parser("simulator", help="this folder's fixed iOS simulator pool: lease one per task, release it, or list holders")
+    si.set_defaults(fn=cmd_simulator, simulator="list", folder=None, json=False, id=None, task_opt=None)
+    sp = si.add_subparsers(dest="simulator")
+    for name, help in (("lease", "lease a free simulator from this folder's pool for a task"),
+                       ("release", "release a task's simulator lease and shut the simulator down"),
+                       ("list", "show this folder's simulator pool and which task holds each")):
+        c = sp.add_parser(name, help=help)
+        if name != "list":
+            c.add_argument("id", nargs="?", help="task id (default: this worker's own task)")
+            c.add_argument("--task", dest="task_opt", help="task id (same as positional id)")
+        c.add_argument("--folder", help="the task folder (default: here)")
+        c.add_argument("--json", action="store_true")
+        c.set_defaults(fn=cmd_simulator)
     pr = sub.add_parser("project", help="start a factory project in one command (repo, settings, requirements, space, Assistant)").add_subparsers(dest="project")
     c = pr.add_parser("start", help="make sure the folder is a git repo, set factory defaults, import requirements, create or find its space and Assistant")
     c.add_argument("folder", nargs="?", help="the project's folder (default: here)")

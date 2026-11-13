@@ -24,7 +24,7 @@ OLD_INSTRUCTIONS = os.path.join(HOME, ".herdr", "instructions")
 ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants started before the rename
 DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "review_min": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": "",
-                      "worktree_root": "", "check": ""},
+                      "worktree_root": "", "check": "", "simulators": []},
             "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {}, "project": {},
             "agents": {"reactions": True, "suggestions": True, "feedback": True, "feedback_repo": "eliasstravik/shepherdr"}}
 LEVELS = ["blocker", "major", "minor"]
@@ -125,7 +125,7 @@ def settings_for(s, space=None):
     machine-only rows, read by machine_limits/machine_option); ones set before still apply here. Written by the settings window (~/.config/shepherdr/settings.json); herdr-task only
     reads them."""
     everywhere, machine, pick = settings_layers(s, space)
-    out = {k: dict(v) for k, v in DEFAULTS.items()}
+    out = {k: {kk: list(vv) if isinstance(vv, list) else vv for kk, vv in v.items()} for k, v in DEFAULTS.items()}
 
     def merge(part):
         for k, v in (part or {}).items():
@@ -571,6 +571,13 @@ def space_base(s, space=None):
     """The branch a space's new tasks branch from and merge into (Shepherdr settings > Tasks >
     Base branch, per space); "" when unset: the folder's current branch."""
     return str(settings_for(s, space)["tasks"].get("base") or "").strip()
+
+
+def simulator_pool(s, space=None):
+    """This folder's fixed iOS simulator pool (Settings' tasks.simulators: names or UDIDs); [] means off."""
+    raw = settings_for(s, space)["tasks"].get("simulators")
+    items = raw.split(",") if isinstance(raw, str) else (raw if isinstance(raw, (list, tuple)) else [])
+    return [str(x).strip() for x in items if str(x).strip()]
 
 
 # Shepherdr settings > Tasks > Branch names (tasks.branch, #570): a folder's new task branches.

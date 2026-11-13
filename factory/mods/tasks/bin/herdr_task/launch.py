@@ -31,7 +31,7 @@ from .browsers import browser_line, browser_path
 
 # How long Codex waits on the permission hook: as the chat's card waits (ask-hook.sh).
 ASK_TIMEOUT = 1800
-OWN = ["ready", "reviewed", "status", "alert", "feedback", "show", "list", "where"]
+OWN = ["ready", "reviewed", "status", "alert", "feedback", "simulator", "show", "list", "where"]
 # herdr-secret's agent commands (~/.config/herdr-app/bin/herdr-secret): asking for a secret and
 # using one by name never ask either, as Shepherdr's secret commands. Written by its full path or
 # its bare name. Reviewers get none (launch() skips own_argv for them; herdr-secret refuses them).
@@ -586,7 +586,7 @@ def retag_tabs(s):
     return name_tabs(pairs)
 
 
-def closing_line(s, task, parent=None, argv=None):
+def closing_line(s, task, parent=None, argv=None, space=None):
     """How the worker finishes: every task, worktree or in the folder, says ready with a summary.
     It names this herdr-task by its full path: only that form runs without asking (own_argv)."""
     done = "finished and committed" if task.get("mode") == "worktree" else "finished"
@@ -610,13 +610,15 @@ def closing_line(s, task, parent=None, argv=None):
     text += (f" Only for what truly can't wait, `{ht} alert \"<what, a few words>\" --body \"<why>\"` reaches the person at once "
              f"(a toast and a sound); a question waits in your chat instead.")
     from .feedback import feedback_on
-    if feedback_on(task.get("space")):
+    if feedback_on(space or task.get("space")):
         text += (f" A problem in Shepherdr itself, not this task's code: `{ht} feedback \"<one line>\" --details \"<goal, what was "
                  f"tried, what went wrong, expected, suggested fix>\"` returns at once and your Assistant offers the person to file "
                  f"it; carry on.")
     text += (f" Your herdr-task command is {ht}: write that full path each time (never the bare name), as one plain command; "
              f"then its {', '.join(OWN)} commands run without asking.")
+    from .simulators import simulator_line
     text += browser_line()
+    text += simulator_line(s, task, space)
     if secret_path():
         text += (" Secrets (keys, tokens, passwords) are used by name, never seen: `herdr-secret ask NAME --why \"…\"` "
                  "(then end your turn), `herdr-secret run NAME -- <command>`, `herdr-secret list`; these run without asking too.")
@@ -644,7 +646,7 @@ def brief(s, task, parent=None, space=None, argv=None):
         start += f"\n(The main folder is {s.loc['folder']}.)"
     body = "Your task, " + s.ref(task) + ":\n" + ((task.get("prompt") or "").strip() or task["title"])
     finish = notes_part("Before you say ready", notes(s, task, "finish", space))
-    return "\n\n".join(x for x in [instructions("worker"), start, body, where_line(task), finish, closing_line(s, task, parent, argv),
+    return "\n\n".join(x for x in [instructions("worker"), start, body, where_line(task), finish, closing_line(s, task, parent, argv, space),
                                     settings_block(s, task, space, argv)] if x)
 
 
@@ -658,7 +660,7 @@ def handoff(s, task, prev, parent=None, argv=None, space=None):
         lines.append(f"The previous agent ({prev.get('agent') or 'agent'}) left no session log; check the folder's state (git status, git log) before you continue.")
     lines.append(notes_part("Before you continue, if it isn't done yet", notes(s, task, "start", space)))
     lines.append(notes_part("Before you say ready", notes(s, task, "finish", space)))
-    lines.append(closing_line(s, task, parent, argv))
+    lines.append(closing_line(s, task, parent, argv, space))
     lines.append(settings_block(s, task, space, argv))
     return "\n\n".join(x for x in lines if x)
 
