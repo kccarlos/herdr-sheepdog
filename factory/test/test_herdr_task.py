@@ -4218,19 +4218,19 @@ class LoopBreaker(GateReview):
         with mock.patch.object(self.commands, "workers", lambda s, t: [{"address": "w1"}]):
             with self.assertRaises(self.commands.Fail) as e:
                 self.ready()
-        for words in ("change is 21 lines, over twice its size (10)", "write RECAP.md (untracked)", "Assistant decides"):
+        for words in ("change is 21 lines (plus 200 generated), over twice its size (10)", "write RECAP.md (untracked)", "Assistant decides"):
             self.assertIn(words, str(e.exception))
-        self.assertEqual(self.task["recap"]["reasons"], ["change is 21 lines, over twice its size (10)"])
-        self.assertEqual(self.task["attention"], "Recap required: change is 21 lines, over twice its size (10)")
-        self.assertIn("change is 21 lines, over twice its size (10)", self.told[-1])
+        self.assertEqual(self.task["recap"]["reasons"], ["change is 21 lines (plus 200 generated), over twice its size (10)"])
+        self.assertEqual(self.task["attention"], "Recap required: change is 21 lines (plus 200 generated), over twice its size (10)")
+        self.assertIn("change is 21 lines (plus 200 generated), over twice its size (10)", self.told[-1])
         # show's budget lines include the size estimate and current size
         from herdr_task.output import view as real_view
         shown = []
         with mock.patch.object(self.commands, "view", real_view), \
                 mock.patch.object(self.commands, "say", lambda args, v, text: shown.append(text)):
             self.commands.cmd_show(argparse.Namespace(id="SHEP-13", json=False, folder=None, evidence=False))
-        self.assertIn("estimate: 10 lines (current size: 21 lines)", budget_lines(self.task))
-        self.assertIn("estimate: 10 lines (current size: 21 lines)", shown[-1])
+        self.assertIn("estimate: 10 lines (current size: 21 lines (plus 200 generated))", budget_lines(self.task))
+        self.assertIn("estimate: 10 lines (current size: 21 lines (plus 200 generated))", shown[-1])
         # --set wins over the brief when no recap is open; continue lets >2x through without firing again
         self.assertIn("decided: continue", self.recap("continue", why="one cohesive change"))
         self.ready()
@@ -4249,6 +4249,39 @@ class LoopBreaker(GateReview):
         self.task["prompt"] = "Make the gate."  # no size phrase in brief: no limit
         self.ready()
         self.assertNotIn("recap", self.task)
+
+    def test_size_check_counts_source_lines_and_reports_generated_ones_apart(self):
+        """FAC-82: a WukongMind-like diff (project.pbxproj, .xcstrings, a repo-marked file, source) counts only source."""
+        from herdr_task.budget import change_lines, change_sizes, size_triggers
+        with tempfile.TemporaryDirectory() as d:
+            def commit(files, msg):
+                for rel, body in files.items():
+                    os.makedirs(os.path.dirname(os.path.join(d, rel)) or d, exist_ok=True)
+                    with open(os.path.join(d, rel), "w") as f:
+                        f.write(body)
+                self.git(d, "add", ".")
+                self.git(d, "commit", "-q", "-m", msg)
+            self.git(d, "init", "-q", "-b", "main")
+            self.git(d, "config", "user.email", "t@example.com")
+            self.git(d, "config", "user.name", "t")
+            commit({"App/App.swift": "old\n", ".gitattributes": "*.snap linguist-generated=true\nkeep.snap -linguist-generated\n"}, "seed")
+            start = self.git(d, "rev-parse", "HEAD")
+            self.git(d, "checkout", "-q", "-b", "task")
+            commit({"App/App.swift": "".join(f"line {i}\n" for i in range(120)),
+                    "App.xcodeproj/project.pbxproj": "obj\n" * 700, "App/Localizable.xcstrings": "{}\n" * 300,
+                    "Tests/a.snap": "snap\n" * 40, "keep.snap": "mine\n" * 5,
+                    "Package.resolved": "pin\n" * 20, "plain.txt": "text\n" * 3}, "work")
+            t = {"worktree": d, "mode": "worktree", "base": "main", "start": start, "prompt": "Size: about 60 lines."}
+            # 120 source + 1 deleted + 5 keep.snap (unset again) + 3 plain; 700+300 generated
+            self.assertEqual(change_sizes(t), (129, 1060))
+            self.assertEqual(change_lines(t), 129)
+            self.assertEqual(size_triggers(t), ["change is 129 lines (plus 1,060 generated), over twice its size (60)"])
+            t["prompt"] = "Size: about 65 lines."  # 129 <= 2 * 65: the generated lines alone never trip it
+            self.assertEqual(size_triggers(t), [])
+            commit({"gen.lock": "x\n"}, "lock")
+            self.assertEqual(change_sizes(t), (129, 1061))
+            t["prompt"] = "Make it."
+            self.assertEqual(size_triggers(t), [])
 
 
 for _name in [n for n in vars(GateReview) if n.startswith("test_")]:

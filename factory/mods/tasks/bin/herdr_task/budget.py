@@ -64,17 +64,36 @@ def size_estimate(t):
     return int(t["estimate_lines"]) if t.get("estimate_lines") else brief_lines(t.get("prompt") or "")
 
 
+GENERATED_NAMES = ("package-lock.json", "bun.lockb", "pnpm-lock.yaml", "npm-shrinkwrap.json", "Package.resolved", "Cargo.lock",
+                   "Gemfile.lock", "poetry.lock", "go.sum", "uv.lock", "yarn.lock")
+GENERATED_SUFFIXES = (".lock", ".pbxproj", ".xcstrings", ".xcworkspacedata")  # an XcodeGen project.yml writes the .pbxproj
+
+
+def size_path(path):
+    """A numstat path as it is now: a rename's new name, no quotes."""
+    return re.sub(r"/+", "/", re.sub(r"\{[^{}]*=>\s*([^{}]*)\}", r"\1", path.strip('"')).split(" => ", 1)[-1]).lstrip("/")
+
+
 def ignored_size_file(path):
-    """Generated and lock files left out of a task's change size."""
-    p = re.sub(r"/+", "/", re.sub(r"\{[^{}]*=>\s*([^{}]*)\}", r"\1", path.strip('"')).split(" => ", 1)[-1]).lstrip("/")
-    name = os.path.basename(p)
-    return (name in ("package-lock.json", "bun.lockb", "pnpm-lock.yaml", "npm-shrinkwrap.json")
-            or name.endswith(".lock") or p.startswith("web/generated/") or "/web/generated/" in p)
+    """Generated and lock files left out of a task's change size, by name alone."""
+    p = size_path(path)
+    return (os.path.basename(p) in GENERATED_NAMES or p.endswith(GENERATED_SUFFIXES)
+            or p.startswith("web/generated/") or "/web/generated/" in p)
 
 
-def change_lines(t):
-    """Added + deleted lines in a worktree task's diff from its merge-base with base to HEAD,
-    leaving out generated and lock files; None when the task has no live worktree."""
+def marked_generated(wt, paths):
+    """The paths the repo's own .gitattributes marks generated: linguist-generated (set or true) or -diff."""
+    if not paths:
+        return set()
+    ok, out, _ = git(wt, "check-attr", "-z", "linguist-generated", "diff", "--", *paths)
+    f = out.split("\0") if ok else []
+    return {f[i] for i in range(0, len(f) - 2, 3) if (f[i + 1], f[i + 2]) in (("linguist-generated", "set"),
+            ("linguist-generated", "true"), ("diff", "unset"))}
+
+
+def change_sizes(t):
+    """(counted, generated): added + deleted lines in a worktree task's diff from its merge-base with base to HEAD,
+    split by whether the file is generated; None when the task has no live worktree."""
     wt = t.get("worktree") if t.get("mode") == "worktree" else None
     if not wt or not os.path.isdir(wt):
         return None
@@ -91,13 +110,26 @@ def change_lines(t):
     ok, out, _ = git(wt, "-c", "core.quotePath=false", "diff", "--numstat", f"{mb}..{head}")
     if not ok:
         return None
-    total = 0
-    for line in out.splitlines():
-        parts = line.split("\t", 2)
-        if len(parts) == 3 and not ignored_size_file(parts[2]):
-            a, r, _ = parts
-            total += (int(a) if a.isdigit() else 0) + (int(r) if r.isdigit() else 0)
-    return total
+    rows = [(size_path(parts[2]), parts) for parts in (line.split("\t", 2) for line in out.splitlines()) if len(parts) == 3]
+    marked = marked_generated(wt, [p for p, _ in rows if not ignored_size_file(p)])
+    counted = generated = 0
+    for p, (a, r, _) in rows:
+        n = (int(a) if a.isdigit() else 0) + (int(r) if r.isdigit() else 0)
+        if ignored_size_file(p) or p in marked:
+            generated += n
+        else:
+            counted += n
+    return counted, generated
+
+
+def change_lines(t):
+    """The counted lines of change_sizes: what the size check compares; None when the task has no live worktree."""
+    sizes = change_sizes(t)
+    return None if sizes is None else sizes[0]
+
+
+def plus_generated(generated):
+    return f" (plus {generated:,} generated)" if generated else ""
 
 
 def tokens_words(n):
@@ -263,8 +295,9 @@ def size_triggers(t):
     if not est or (dec.get("decision") == "continue" and (
             not dec.get("reasons") or any("twice its size" in r for r in dec["reasons"]) or (dec.get("lines") or 0) > 2 * est)):
         return []
-    n = change_lines(t)
-    return [f"change is {n} lines, over twice its size ({est})"] if n is not None and n > 2 * est else []
+    sizes = change_sizes(t)
+    n, gen = sizes or (None, 0)
+    return [f"change is {n:,} lines{plus_generated(gen)}, over twice its size ({est})"] if n is not None and n > 2 * est else []
 
 
 def keep_recap(s, t):
@@ -350,9 +383,9 @@ def budget_lines(t):
     if est:
         so_far = ([f"Claude tokens so far: {tokens_words(int(sum(c.get('sum', 0) for c in t['tokens'].values())))}"]
                   if t.get("tokens") else [])
-        cur = change_lines(t) if sz else None
+        cur = change_sizes(t) if sz else None
         if cur is not None:
-            so_far.append(f"current size: {cur} lines")
+            so_far.append(f"current size: {cur[0]:,} lines{plus_generated(cur[1])}")
         lines.append(f"estimate: {', '.join(est)}" + (f" ({'; '.join(so_far)})" if so_far else ""))
     if t.get("recap"):
         lines.append(f"recap open: {t['recap']['title']} (the Assistant decides: recap --decide)")
