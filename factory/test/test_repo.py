@@ -369,6 +369,13 @@ class Repo(unittest.TestCase):
             rules = fh.read().split("\nRules:\n", 1)[1].split("\n## ", 1)[0]
         self.assertIn("Before an unattended night, run `herdr-task project checklist` and don't start milestone work while an item is missing.", rules)
 
+    def test_assistant_design_and_doc_review_kind_rule(self):
+        with open(J("templates", "assistant.md"), encoding="utf-8") as fh:
+            text = fh.read()
+        for words in ("review.kind=design|doc", "--set review.kind=design", "--set review.kind=doc",
+                      "one review round", "Ready / Accept card", "never on design or doc tasks"):
+            self.assertIn(words, text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8069,6 +8069,144 @@ class Watchdog(unittest.TestCase):
         self.assertEqual(self.restarts, [("c1", "c2", "p1")])
 
 
+class DesignAndDocReview(unittest.TestCase):
+    """FAC-69: design and doc tasks (--set review.kind=design|doc) get 1 review round and review_min 1,
+    overriding the space's settings, and review-more refuses and tells the Assistant to hand to the person."""
+
+    git, change, ready, verdict, env = GateReview.git, GateReview.change, GateReview.ready, GateReview.verdict, GateReview.env
+
+    def setUp(self):
+        GateReview.setUp(self)
+        from herdr_task import settings
+        self.settings = settings
+        with open(settings.SETTINGS, "w") as f:
+            json.dump({"everywhere": {"tasks": {"review_rounds": 5, "review_min": 2, "merge": "checks"}}}, f)
+        self.task.pop("set", None)
+
+    def show_out(self, as_json=False):
+        import argparse, io
+        from unittest import mock
+        from herdr_task import output
+        buf = io.StringIO()
+        with mock.patch.object(self.commands, "view", output.view), mock.patch.object(self.commands, "say", output.say), \
+                mock.patch("sys.stdout", buf):
+            self.commands.cmd_show(argparse.Namespace(id="SHEP-13", json=as_json, folder=None, evidence=False))
+        return json.loads(buf.getvalue()) if as_json else buf.getvalue()
+
+    def review_more(self):
+        import argparse
+        from unittest import mock
+        sent = []
+        with mock.patch("herdr_task.news.send_or_hold", lambda to, msg: sent.append(msg) or True), \
+                mock.patch.object(self.commands, "workers", lambda s, t: [{"address": "w1"}]), \
+                mock.patch.object(self.commands, "caller_labels", lambda: {}):
+            self.commands.cmd_review_more(argparse.Namespace(id="SHEP-13", json=True, folder=None))
+        return sent
+
+    def test_design_and_doc_kinds_override_space_and_normal_tasks_are_unchanged(self):
+        # Normal task: keeps the space's 5 rounds and min 2.
+        self.assertEqual((self.settings.gate_min(self.store, self.task), self.settings.review_limits(self.store, self.task)),
+                         (2, (True, 5)))
+        for raw, canon in (("design", "design"), ("doc", "doc"), ("docs", "doc")):
+            self.settings.set_task(self.task, "review.kind", raw)
+            self.assertEqual(self.task["set"], {"review_kind": canon})
+            self.assertEqual(self.settings.review_kind(self.task), canon)
+            self.assertEqual(self.settings.gate_min(self.store, self.task), 1)
+            self.assertEqual(self.settings.review_limits(self.store, self.task), (True, 1))
+        # Also overrides a space where review is off by default (review_rounds=0, review_min=0).
+        with open(self.settings.SETTINGS, "w") as f:
+            json.dump({"everywhere": {"tasks": {"review_rounds": 0, "review_min": 0}}}, f)
+        self.assertEqual((self.settings.gate_min(self.store, self.task), self.settings.review_limits(self.store, self.task)),
+                         (1, (True, 1)))
+        with self.assertRaises(self.settings.Fail):
+            self.settings.set_task(self.task, "review.kind", "backend")
+        self.settings.set_task(self.task, "review.kind", "")
+        self.assertNotIn("set", self.task)
+        self.assertEqual((self.settings.gate_min(self.store, self.task), self.settings.review_limits(self.store, self.task)),
+                         (0, (False, 0)))
+
+    def test_show_and_json_report_kind_and_one_round(self):
+        normal_txt, normal_js = self.show_out(False), self.show_out(True)
+        self.assertNotIn("review kind:", normal_txt)
+        self.assertIn("review rounds: 0 of 5 used", normal_txt)
+        self.assertNotIn("review_kind", normal_js)
+        self.assertEqual(normal_js["review_rounds"], {"used": 0, "of": 5, "added": 0})
+
+        self.settings.set_task(self.task, "review.kind", "design")
+        txt, js = self.show_out(False), self.show_out(True)
+        self.assertIn("review kind: design (1 review round)", txt)
+        self.assertIn("review rounds: 0 of 1 used", txt)
+        self.assertIn("needs 1 passing round;", txt)
+        self.assertIn("- Review kind: design (1 review round, then the person reviews it) (set by the assistant for this task)", txt)
+        self.assertIn("- Review rounds: at most 1 (set by the assistant for this task)", txt)
+        self.assertEqual(js["review_kind"], "design")
+        self.assertEqual(js["review_rounds"], {"used": 0, "of": 1, "added": 0, "min": 1, "kind": "design"})
+
+    def test_one_round_gate_and_review_more_refusal_vs_normal_task(self):
+        # Design task: 1 passing round puts it straight in Ready (no round 2), and review-more refuses.
+        self.settings.set_task(self.task, "review.kind", "design")
+        with self.assertRaises(self.commands.Fail) as err:
+            self.review_more()
+        self.assertNotIn("\n", str(err.exception))
+        self.assertIn("design task (1 review round)", str(err.exception))
+        self.assertIn("Ready / Accept card", str(err.exception))
+        self.assertNotIn("review_rounds_added", self.task)
+        self.ready()
+        self.assertEqual(len(self.runs), 1)
+        self.verdict("term-1", passed=True)
+        self.assertEqual((self.task["state"], len(self.runs)), ("ready", 1))
+
+        # Doc task whose 1 round asks for changes: stops after round 1, persists review_out on disk across
+        # cmd_ready's two open_store blocks, review-more refuses, and handing to Ready / Accept card
+        # (--set review=off) waits for the person instead of auto-merging.
+        import argparse
+        from unittest import mock
+        from herdr_task import store as task_store
+        self.task.update(state="running", set={"review_kind": "doc"})
+        for k in ("reviews", "review_runs", "verdict_told", "ready_at", "auto_merge"):
+            self.task.pop(k, None)
+        self.runs.clear()
+        self.change("doc draft")
+        self.ready()
+        self.verdict("term-1", passed=False, changes="tighten intro", must_fix=1)
+        self.change("doc tightened")
+        sdir = os.path.join(self.root, "store")
+        with mock.patch.object(task_store, "STORE", sdir), \
+                mock.patch.object(self.commands, "open_store", task_store.open_store):
+            with task_store.open_store(argparse.Namespace(folder=self.main)) as s:
+                s.data.update(prefix="SHEP", tasks=[json.loads(json.dumps(self.task))])
+                s.dirty = True
+            self.commands.cmd_ready(argparse.Namespace(id="SHEP-13", json=True, folder=self.main, summary="The gate.",
+                                                       details=None, proof=None, agents_md=None))
+            with task_store.open_store(argparse.Namespace(folder=self.main), write=False) as s:
+                on_disk = s.find("SHEP-13")
+        self.assertTrue(on_disk.get("review_out"))
+        self.task.update(on_disk)
+        self.assertEqual((self.task["state"], len(self.runs), bool(self.task.get("review_out"))), ("running", 1, True))
+        with self.assertRaises(self.commands.Fail) as err2:
+            self.review_more()
+        self.assertNotIn("\n", str(err2.exception))
+        self.assertIn("doc task (1 review round)", str(err2.exception))
+        self.assertIn("Ready / Accept card", str(err2.exception))
+        self.assertNotIn("review_rounds_added", self.task)
+        self.settings.set_task(self.task, "review", "off")
+        self.ready()
+        self.assertEqual(self.task["state"], "ready")
+        self.assertNotIn("auto_merge", self.task)
+
+        # Normal task: review-more still adds a round once its rounds are used.
+        self.task.update(state="running", set={"review_rounds": 1, "review_min": 2})
+        for k in ("reviews", "review_runs", "verdict_told", "ready_at", "review_out"):
+            self.task.pop(k, None)
+        self.runs.clear()
+        self.change("code change")
+        self.ready()
+        self.verdict("term-1", passed=True)
+        sent = self.review_more()
+        self.assertEqual(self.task["review_rounds_added"], 1)
+        self.assertEqual(len(sent), 1)
+
+
 class GhAlwaysNamesForkRepo(unittest.TestCase):
     """FAC-68: every repo-targeting gh call names the fork's repo from the push remote, never upstream."""
 

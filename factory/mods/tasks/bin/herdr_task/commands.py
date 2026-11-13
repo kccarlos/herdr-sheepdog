@@ -14,7 +14,7 @@ import time
 from .checks import checks_line
 from .base import Fail, git, guard, hc_json, now, run, STORE, stop_note, VERSION
 from .settings import (
-    agent_argv, agent_key, argv_for, bare, gate_min, merge_policy, MUST_WORDS, review_limits, set_opts, settings_block, settings_for, space_base,
+    agent_argv, agent_key, argv_for, bare, gate_min, merge_policy, MUST_WORDS, review_kind, review_limits, set_opts, settings_block, settings_for, space_base,
     task_settings, worker_argv, worktrees_on,
 )
 from .agents import (
@@ -223,9 +223,14 @@ def cmd_show(args):
         if t["state"] == "queued":
             v["reason"] = queue_reason(s, t)
         v["settings"] = task_settings(s, t)
+        kind = review_kind(t)
+        if kind:
+            v["review_kind"] = kind
         on, rounds = review_limits(s, t)
+        gate = gate_min(s, t)
         if on:
-            v["review_rounds"] = {"used": rounds_used(t, bool(gate_min(s, t))), "of": rounds, "added": int(t.get("review_rounds_added") or 0)}
+            v["review_rounds"] = {"used": rounds_used(t, bool(gate)), "of": rounds, "added": int(t.get("review_rounds_added") or 0),
+                                  **({"min": gate, "kind": kind} if kind else {})}
         v["after_refs"] = after_refs(s, t)
         block = settings_block(s, t)
         if getattr(args, "evidence", False):
@@ -240,6 +245,8 @@ def cmd_show(args):
         text.append(f"merges into: {v['base']} (" + ("its space's base branch" if v.get("base_by") == "space" else "set for this task") + ")")
     if v.get("after_refs"):
         text.append("comes after: " + ", ".join(v["after_refs"]))
+    if kind:
+        text.append(f"review kind: {kind} (1 review round)")
     if v.get("review_rounds"):
         r = v["review_rounds"]
         text.append(f"review rounds: {r['used']} of {r['of']} used" + (f" ({r['added']} added by the assistant)" if r["added"] else "")
@@ -540,7 +547,8 @@ def gate_step(s, t):
     if not head or not os.path.isdir(t.get("worktree") or ""):
         raise Fail(f"{s.ref(t)} has no worktree to review: start it first.")
     back_to_work(s, t, "a new commit to review")  # a Ready task's unreviewed commit never stays mergeable
-    t.pop("auto_merge", None)
+    if t.pop("auto_merge", None) is not None:
+        s.dirty = True
     inspect_runs(s, t)
     if gate_passes(t, head) >= need:
         return f"{s.ref(t)} is ready." if t.get("state") in ("ready", "done") else None
@@ -567,6 +575,10 @@ def gate_step(s, t):
         return f"{s.ref(t)}: {why}."
     if used >= rounds:
         t["review_out"] = now()
+        s.dirty = True
+        if kind := review_kind(t):
+            return (f"{s.ref(t)} is a {kind} task (1 review round) and its round is used. "
+                    "Say what changed in your chat and end your turn: your Assistant hands it to the person.")
         return (f"{s.ref(t)}: all {rounds} review rounds are used and {head[:7]} has {gate_passes(t, head)} of {need} passing "
                 f"rounds. Say why in your chat and end your turn: only your Assistant can add a round (herdr-task review-more).")
     rows = {x["label"]: x["value"] for x in task_settings(s, t)}
@@ -636,6 +648,9 @@ def review_refusal(s, t, wt):
         what += f" (rounds are recorded on {', '.join(seen)})"
     if rounds_used(t) >= rounds:
         t["review_out"] = now()
+        if kind := review_kind(t):
+            return (f"{s.ref(t)} is a {kind} task (1 review round) and its round is used. "
+                    "Say what changed in your chat, set your status line to it, and end your turn: your Assistant hands it to the person.")
         return (f"All {rounds} review rounds are used and {what} isn't reviewed. Say why in your chat, set your status line to "
                 f"it, and end your turn: only your Assistant can add a round (herdr-task review-more {ref}).")
     return (f"Review is on and {what} isn't reviewed. Have it reviewed as your brief says, fix what must be fixed, record the "
@@ -724,17 +739,19 @@ def cmd_reviewed(args):
 def cmd_review_more(args):
     """The Assistant gives a task exactly one more review round (as Shepherdr's `task review-more`):
     only once all its rounds are used. The limit stops an agent reviewing for ever, so the task's
-    own agent can never raise it. Its agent is told."""
+    own agent can never raise it. Design and doc tasks get one round only and go to the person."""
     labels = caller_labels()
     with open_store(args) as s:
         t = s.find(args.id)
         if labels.get("herdr.task") == s.key(t) or labels.get("herdr.role") == "reviewer":
             raise Fail("A task's own agent can't add review rounds: say why in your chat and end your turn; your Assistant decides.")
+        if t["state"] == "done":
+            raise Fail(f"{s.ref(t)} is already done; it needs no more review.")
+        if kind := review_kind(t):
+            raise Fail(f"{s.ref(t)} is a {kind} task (1 review round): don't add another round; hand it to the person on its Ready / Accept card (if round 1 asked for changes, edit --set review=off lets ready put it there).")
         on, rounds = review_limits(s, t)
         if not on:
             raise Fail(f"Review is off for {s.ref(t)}.")
-        if t["state"] == "done":
-            raise Fail(f"{s.ref(t)} is already done; it needs no more review.")
         used = rounds_used(t, bool(gate_min(s, t)))
         if used < rounds:
             raise Fail(f"{s.ref(t)} has used {used} of {rounds} review rounds; add one only when they are all used.")
@@ -890,7 +907,8 @@ def finalize(s, t):
         except Fail as e:
             t["attention"] = str(e)
             return f"{s.ref(t)} {READY_BUT} {e} Tell the person."
-    policy = merge_policy(s, t)
+    policy = ("ask" if review_kind(t) and any(r.get("started_by") == "herdr-task" for r in t.get("reviews") or [])
+              and not gate_passes(t, t.get("head")) else merge_policy(s, t))
     if policy in ("auto", "checks"):
         t["auto_merge"] = policy
         if t.get("pr"):

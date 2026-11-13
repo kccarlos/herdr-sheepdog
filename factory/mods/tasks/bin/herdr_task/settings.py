@@ -267,6 +267,7 @@ MERGE_WORDS = {"ask": "ask the person first: they accept it in the Tasks panel, 
 MUST_WORDS = {"blocker": "blocker", "major": "major and up (blocker, major)", "minor": "everything (blocker, major, minor)"}
 # --set's keys (Shepherdr's spellings too) and the task fields they set.
 SET_KEYS = {"review": "review", "brief.review": "review", "merge": "merge", "brief.merge": "merge",
+            "review.kind": "review_kind", "review-kind": "review_kind", "review_kind": "review_kind", "kind": "review_kind",
             "rounds": "review_rounds", "review.rounds": "review_rounds", "review-rounds": "review_rounds", "review_rounds": "review_rounds",
             "review.min": "review_min", "review_min": "review_min",
             "mustfix": "must_fix", "must-fix": "must_fix", "must_fix": "must_fix", "review.mustfix": "must_fix",
@@ -287,13 +288,19 @@ MUST_VALUES = {"blocker": "blocker", "blockers": "blocker", "critical": "blocker
                "minor": "minor", "trivial": "minor", "everything": "minor"}
 EFFORTS = {"none", "minimal", "lowest", "low", "medium", "high", "xhigh", "max", "ultra"}
 ONOFF = {"on": "on", "yes": "on", "true": "on", "1": "on", "off": "off", "no": "off", "false": "off", "0": "off"}
+REVIEW_KINDS = {"design": "design", "doc": "doc", "docs": "doc"}
+
+
+def review_kind(t):
+    """A design or doc task's kind (--set review.kind=design|doc), or None."""
+    return REVIEW_KINDS.get(str((t.get("set") or {}).get("review_kind") or "").lower())
 
 
 def set_task(t, key, value):
     """One --set key=value (or flag) on task t; an empty value or "default" goes back to Settings'."""
     field = SET_KEYS.get(key.strip().lower())
     if not field:
-        raise Fail(f"--set takes review, review.rounds, review.min, review.mustFix, merge, proof, estimate.time, estimate.tokens, estimate.lines, agent, model, effort or reviewer settings, not {key!r}.")
+        raise Fail(f"--set takes review, review.kind, review.rounds, review.min, review.mustFix, merge, proof, estimate.time, estimate.tokens, estimate.lines, agent, model, effort or reviewer settings, not {key!r}.")
     v = value.strip().strip("\"'").strip()
     sets = t.setdefault("set", {})
     if not v or v.lower() == "default":
@@ -307,6 +314,10 @@ def set_task(t, key, value):
         if low not in ONOFF:
             raise Fail(f"{field} is on or off.")
         sets[field] = ONOFF[low]
+    elif field == "review_kind":
+        if low not in REVIEW_KINDS:
+            raise Fail("review.kind is design or doc.")
+        sets[field] = REVIEW_KINDS[low]
     elif field == "review_rounds":
         m = re.fullmatch(r"(\d+)\s*(rounds?)?", low)
         if not m or not 0 <= int(m.group(1)) <= 10:
@@ -430,17 +441,20 @@ def task_settings(s, t, space=None, argv=None):
     def add(label, text, value, by):
         lines.append({"label": label, "text": text, "value": value, "by": by})
 
+    kind = review_kind(t)
     rounds_cfg = int(k.get("review_rounds") or 0)
     gate = gate_min(s, t, space)
     # The Review its brief gave (keep_review): a setting changed while it runs is for tasks added
     # later, as the change's notice says (#750); the Assistant's own --set for it still wins.
-    kept = t.get("brief_review") if not gate and "review" not in sets and "review_rounds" not in sets else None
-    if gate:  # a gate folder: herdr-task reviews (FAC-13)
-        on, rev_by = True, "task" if "review_min" in sets else by_layer(s, space, "tasks", "review_min", gate, 0)
+    kept = t.get("brief_review") if not gate and "review" not in sets and "review_rounds" not in sets and not kind else None
+    if gate:  # a gate folder (or review.kind): herdr-task reviews (FAC-13, FAC-69)
+        on, rev_by = True, "task" if "review_min" in sets or kind else by_layer(s, space, "tasks", "review_min", gate, 0)
     elif "review" in sets:
         on, rev_by = sets["review"] == "on", "task"
     elif "review_rounds" in sets:
         on, rev_by = sets["review_rounds"] > 0, "task"
+    elif kind:
+        on, rev_by = True, "task"
     elif kept:
         on, rev_by = bool(kept.get("on")), kept.get("by")
     else:
@@ -448,8 +462,10 @@ def task_settings(s, t, space=None, argv=None):
     here = t.get("mode") != "worktree"
     add("Review", "off" if not on else "on" if not gate else (
         f"herdr-task's own: once you say ready it starts the reviewer itself, for your final commit, and needs {gate} passing "
-        f"rounds; start no reviewer of your own and don't run `reviewed`. Findings come to you as a message: fix them, commit, "
-        f"ready again"), on, rev_by)
+        f"round{'' if gate == 1 else 's'}; start no reviewer of your own and don't run `reviewed`. Findings come to you as a "
+        f"message: fix them, commit, ready again"), on, rev_by)
+    if kind:
+        add("Review kind", f"{kind} (1 review round, then the person reviews it)", kind, "task")
     # What it runs on: the given argv, else its last agent's, else what it would start with.
     argv = argv or (t["agents"][-1].get("argv") if t.get("agents") else None) or worker_argv(s, t, space)
     agent = agent_key(argv)
@@ -480,10 +496,11 @@ def task_settings(s, t, space=None, argv=None):
         add("Reviewer", text, {"agent": who, "model": rv.get("model"), "effort": rv.get("effort"), "command": cmd}, rv_by)
         must = sets.get("must_fix") or (k.get("must_fix") if k.get("must_fix") in LEVELS else "major")
         add("Must fix", MUST_WORDS[must], must, "task" if "must_fix" in sets else by_layer(s, space, "tasks", "must_fix", must, "major"))
-        rounds = sets.get("review_rounds") or (kept or {}).get("rounds") or max(rounds_cfg or 3, gate)
+        rounds = (sets.get("review_rounds") or max(1, gate)) if kind else (
+            sets.get("review_rounds") or (kept or {}).get("rounds") or max(rounds_cfg or 3, gate))
         more = int(t.get("review_rounds_added") or 0)
         add("Review rounds", f"at most {rounds + more}" + (f" ({more} added by the assistant)" if more else ""), rounds + more,
-            "task" if "review_rounds" in sets else (kept or {}).get("rounds_by") if kept else
+            "task" if "review_rounds" in sets or kind else (kept or {}).get("rounds_by") if kept else
             by_layer(s, space, "tasks", "review_rounds", rounds, 3))
     policy = sets.get("merge") or (k.get("merge") if k.get("merge") in MERGE_WORDS else "ask")
     m_by = "task" if "merge" in sets else by_layer(s, space, "tasks", "merge", policy, "ask")
@@ -520,7 +537,11 @@ def gate_min(s, t, space=None):
     if t.get("mode") != "worktree":
         return 0
     sets = t.get("set") or {}
-    return int(sets["review_min"] if "review_min" in sets else settings_for(s, space or t.get("space"))["tasks"].get("review_min") or 0)
+    if "review_min" in sets:
+        return int(sets["review_min"])
+    if review_kind(t):
+        return 0 if sets.get("review") == "off" or sets.get("review_rounds") == 0 else 1
+    return int(settings_for(s, space or t.get("space"))["tasks"].get("review_min") or 0)
 
 
 def keep_review(s, t, space=None):
