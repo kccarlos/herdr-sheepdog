@@ -290,9 +290,12 @@ def ensure_assistant(repo, space_id, dry):
             src = f.read()
         if (m := re.match(r"\A---\n([\s\S]*?)\n---\n?", src)) and (cm := re.search(r"(?m)^command:[ \t]*(.+)$", m.group(1))):
             tpl_name, one_path = f"herdr-assistant-{os.getpid()}", os.path.join(st.TEMPLATES, f"herdr-assistant-{os.getpid()}.md")
+            cmd_text = re.sub(r'^exec\s+', '', cm.group(1).strip())
+            # FAC-87: no auto-update mid-run (before exec: exec takes an assignment as the program)
+            pre = "DISABLE_AUTOUPDATER=1 " if re.match(r'(\S*/)?claude(\s|$)', cmd_text) else ""
             with open(one_path, "w") as f:
                 f.write(f"---\nname: {tpl_name}\ndescription: One-off assistant start.\n"
-                        f"command: {CLEAN_ENV} exec {re.sub(r'^exec\\s+', '', cm.group(1).strip())}\n---\n{src[m.end():]}")
+                        f"command: {CLEAN_ENV} {pre}exec {cmd_text}\n---\n{src[m.end():]}")
     try:
         r = try_run("hc", "run", "--bg", "--json", "--no-parent", "--keep", "--cwd", repo, "--name", f"{bare_id}-assistant",
                     *[x for p in kv for x in ("--label", p)], tpl_name)

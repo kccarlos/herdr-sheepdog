@@ -21,7 +21,7 @@ from .base import HOME, hc_json, now, run, SHELLS
 from .agents import agent_running, status_word
 from .sessions import session_of
 from .settings import ASSISTANT_TEMPLATES
-from .launch import CLEAN_ENV, resume_argv as launch_resume
+from .launch import CLEAN_ENV, no_update_env, resume_argv as launch_resume
 
 LABEL = "herdr.resume"
 # Claude Code: "No conversation found with session ID: …". Codex: "ERROR: No saved session found with ID …"
@@ -323,7 +323,8 @@ def revive_pass(report):
         rec = dict(rec or {}, pid=k.get("pid"), how=how, sent=now())
         if argv:
             shell = (k.get("argv") or [""])[0]
-            r = run(["hc", "send", k["address"], shell_line(shell, rec.get("cwd") or k.get("cwd"), env_of(k), argv, direct)],
+            r = run(["hc", "send", k["address"], shell_line(shell, rec.get("cwd") or k.get("cwd"),
+                                                              {**env_of(k), **dict(w.split("=", 1) for w in no_update_env(argv))}, argv, direct)],
                     env=without_caller())
             if r.returncode != 0:
                 report.setdefault("revive_failed", []).append({"terminal": k["address"], "why": (r.stderr or r.stdout).strip()})

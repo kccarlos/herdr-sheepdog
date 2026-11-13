@@ -436,6 +436,19 @@ CLEAN_ENV = ("for v in $(env | sed -nE 's/^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_[A
              "grep -vE '^CLAUDE_CODE_(USE|SKIP|DISABLE|ENABLE|MAX|OAUTH|CLIENT|API)_'); do unset \"$v\"; done;")
 
 
+# ---- agents never update themselves mid-run (FAC-87, field note 40) ----------------------------
+# A self-updated binary makes macOS ask on the desktop whether it may use a removable volume, and
+# every new agent there hangs until someone clicks Allow. Updating stays the owner's job. Only
+# Claude Code has a switch (DISABLE_AUTOUPDATER); Codex and agy list none in --help or config, so
+# they get nothing.
+NO_UPDATE = {"claude": ["DISABLE_AUTOUPDATER=1"]}
+
+
+def no_update_env(argv):
+    """The env words that stop argv's agent CLI auto-updating; none for one without a switch."""
+    return NO_UPDATE.get(agent_key(argv), [])
+
+
 def clean_env(argv):
     """argv run without a parent Claude Code session's markers (CLEAN_ENV)."""
     return ["sh", "-c", CLEAN_ENV + ' exec "$@"', "herdr-clean", *argv]
@@ -890,7 +903,7 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     name = agent_name(s, task, "review" if role else None)
     # HERDR_BROWSER_TASK: which task's browser herdr-browser drives (HERD-57), for it and its children.
     r = run(["hc", "run", "--bg", "--json", *keep, "--cwd", folder, "--name", name,
-             *labels, *rel, "--", *low_priority(clean_env(["env", f"HERDR_BROWSER_TASK={key}", *sh]), name)])
+             *labels, *rel, "--", *low_priority(clean_env(["env", f"HERDR_BROWSER_TASK={key}", *no_update_env(cmd), *sh]), name)])
     try:
         out = json.loads(r.stdout)
     except ValueError:

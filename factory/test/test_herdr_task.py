@@ -3246,6 +3246,12 @@ class GateReview(unittest.TestCase):
         cmd = self.runs[0][self.runs[0].index("--") + 1:]
         self.assertEqual(cmd[cmd.index("--permission-mode") + 1], "auto")  # plan mode blocks `herdr-task review`
 
+    def test_a_claude_reviewer_never_auto_updates_but_a_codex_one_has_no_switch(self):
+        """FAC-87: Claude has DISABLE_AUTOUPDATER; Codex has none to set."""
+        self.task["reviewer"], self.task["reviewer_model"] = "claude", None
+        self.ready()
+        self.assertIn("DISABLE_AUTOUPDATER=1", self.runs[0])
+
     def test_out_of_rounds_starts_none(self):
         self.task["set"]["review_rounds"] = 1
         self.ready()
@@ -5487,7 +5493,7 @@ class Revive(unittest.TestCase):
         self.crash("t1")
         report = self.tick()
         self.assertEqual(report["revived"], [{"terminal": "t1", "how": "resume", "session": "S1"}])
-        self.assertEqual(self.sent, [("t1", "cd /home/me/app && command claude --model opus --resume S1")])
+        self.assertEqual(self.sent, [("t1", "cd /home/me/app && DISABLE_AUTOUPDATER=1 command claude --model opus --resume S1")])
         # Once: the next tick types nothing again, even while the agent starts.
         self.tick()
         self.assertEqual(len(self.sent), 1)
@@ -5531,7 +5537,7 @@ class Revive(unittest.TestCase):
         with self.mock.patch.object(self.r, "template_of", lambda name="assistant": ("claude", "---\ncommand: claude\n---\nYou are the Assistant.")):
             self.tick()
         line = self.sent[0][1]
-        self.assertTrue(line.startswith("cd /home/me/app && command claude --model opus '<restart>Your earlier session is gone"), line)
+        self.assertTrue(line.startswith("cd /home/me/app && DISABLE_AUTOUPDATER=1 command claude --model opus '<restart>Your earlier session is gone"), line)
         self.assertIn("You are the Assistant.", line)
         self.assertNotIn("--resume", line)
 
@@ -5567,7 +5573,7 @@ class Revive(unittest.TestCase):
         self.tick()
         self.crash("t5")
         self.tick()
-        self.assertTrue(self.sent[0][1].startswith("""cd /wt && HERDR_BROWSER_TASK='dev#6' claude --settings '{"a":1}' --resume S1 'Herdr restarted"""), self.sent[0][1])
+        self.assertTrue(self.sent[0][1].startswith("""cd /wt && DISABLE_AUTOUPDATER=1 HERDR_BROWSER_TASK='dev#6' claude --settings '{"a":1}' --resume S1 'Herdr restarted"""), self.sent[0][1])
 
     def agy_worker(self, cid="0199aaaa-bbbb-cccc-dddd-eeeeeeeeeeee"):
         """A kept agy worker (FAC-7) in a temp home: its conversation is a db no chat reads, so no log."""
@@ -5631,7 +5637,7 @@ class Revive(unittest.TestCase):
             self.tick()
             self.tick()
         self.assertEqual(len(self.sent), 1)
-        self.assertTrue(self.sent[0][1].startswith("cd /home/me && command claude '<restart>"), self.sent[0][1])
+        self.assertTrue(self.sent[0][1].startswith("cd /home/me && DISABLE_AUTOUPDATER=1 command claude '<restart>"), self.sent[0][1])
 
     def test_other_terminals_are_left_alone(self):
         self.terms["t9"] = {"address": "t9", "state": "live", "pid": 9, "argv": ["/bin/bash"], "foreground": {"pid": 9, "name": "bash"}, "labels": {}}
@@ -5646,7 +5652,7 @@ class Revive(unittest.TestCase):
         self.tick()
         self.crash("t1")
         self.tick()
-        self.assertEqual(self.sent, [("t1", "cd /home/me && claude --dangerously-skip-permissions --resume S1")])
+        self.assertEqual(self.sent, [("t1", "cd /home/me && DISABLE_AUTOUPDATER=1 claude --dangerously-skip-permissions --resume S1")])
 
     def test_a_finished_tasks_worker_stays_a_shell(self):
         self.terms["t5"] = {"address": "t5", "state": "live", "pid": 500, "cwd": "/wt", "name": "shep-6-web", "argv": ["claude", "Brief"],
@@ -5665,7 +5671,7 @@ class Revive(unittest.TestCase):
         self.crash("t5")
         with self.mock.patch("herdr_task.launch.own_argv", lambda argv, *_, **__: argv):
             self.tick()
-        self.assertTrue(self.sent[0][1].startswith("cd /wt && HERDR_BROWSER_TASK='dev#6' claude --resume S1 'Herdr restarted"), self.sent)
+        self.assertTrue(self.sent[0][1].startswith("cd /wt && DISABLE_AUTOUPDATER=1 HERDR_BROWSER_TASK='dev#6' claude --resume S1 'Herdr restarted"), self.sent)
 
 
 class AutomationFromAnotherMachine(unittest.TestCase):
@@ -7861,7 +7867,19 @@ class Resume(unittest.TestCase):
     def launched_cmd(self, idx=-1):
         hc = self.runs[idx]
         env_idx = hc.index("env")
-        return hc[env_idx + 2:]  # after ["env", "HERDR_BROWSER_TASK=..."]
+        i = env_idx + 1
+        while "=" in hc[i].split("/")[0]:  # after ["env", "HERDR_BROWSER_TASK=...", "DISABLE_AUTOUPDATER=1"]
+            i += 1
+        return hc[i:]
+
+    def env_words(self, idx=-1):
+        hc = self.runs[idx]
+        i = hc.index("env") + 1
+        out = []
+        while "=" in hc[i].split("/")[0]:
+            out.append(hc[i])
+            i += 1
+        return out
 
     def started_task(self, worker, session="0199-sid", **add_kw):
         self.write_worker(worker)
@@ -7899,6 +7917,19 @@ class Resume(unittest.TestCase):
             last = s.find(ref)["agents"][-1]
             self.assertEqual(last["argv"], ["agy", "--model", "gemini-4-argon-high", "--dangerously-skip-permissions"])
             self.assertEqual(last["session"], "0199-sid")
+
+    def test_claude_launch_and_resume_never_auto_update(self):
+        """FAC-87: a self-updated Claude binary makes macOS ask about a removable volume and every new agent hangs."""
+        ref = self.started_task({"agent": "claude"})
+        self.assertIn("DISABLE_AUTOUPDATER=1", self.env_words())
+        self.call(self.commands.cmd_resume, id=ref, space=None, agent=None, argv=None, parent=None)
+        self.assertIn("DISABLE_AUTOUPDATER=1", self.env_words())
+        self.assertEqual(self.launched_cmd()[0], "claude")
+
+    def test_an_agent_without_an_update_switch_gets_nothing_extra(self):
+        self.started_task({"agent": "agy", "perm": "auto"})
+        self.assertEqual([w.split("=")[0] for w in self.env_words()], ["HERDR_BROWSER_TASK"])
+        self.assertEqual(self.launch.no_update_env(["codex", "exec"]), [])
 
     def test_fresh_handoff_when_session_missing_or_cli_changed_without_duplicate_continue(self):
         # Same CLI, no recorded session: fresh start with new argv and handoff, continue line not sent twice.
@@ -8243,6 +8274,7 @@ class ProjectStart(unittest.TestCase):
             self.assertEqual(self.st.worker_argv(s, {}, "sp1"), ["agy", "--model", "gemini-4-carbon-high", "--dangerously-skip-permissions"])
         self.assertEqual((self.terms["t1"]["labels"]["herdr.chat"], self.terms["t1"]["labels"]["herdr.coordinator.space"]), ("p9", "sp1"))
         self.assertTrue(any("CLAUDECODE" in v for v in self.seen_tpl.values()) and os.listdir(self.templates) == ["assistant.md"])
+        self.assertTrue(any("DISABLE_AUTOUPDATER=1 exec claude" in v for v in self.seen_tpl.values()))  # FAC-87: before exec
         self.assertIn("docs/requirements.md", self.ap.heartbeat_of("sp1")[0])
         self.assertTrue(self.store.read_list(self.ap.STATE)["spaces"]["sp1"]["on"])
         self.assertEqual((out["checklist"]["ready"], len(out["checklist"]["asked"])), (["ci_secrets", "disk", "autopilot"], 4))
