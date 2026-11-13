@@ -12,7 +12,7 @@ import sys
 import time
 
 from .checks import checks_line
-from .base import Fail, git, guard, hc_json, now, run, STORE, stop_note, VERSION
+from .base import Fail, git, guard, hc_json, kill_agent, now, run, STORE, stop_note, VERSION
 from .settings import (
     agent_argv, agent_key, argv_for, bare, codex_review_argv, gate_min, merge_policy, MUST_WORDS, review_kind, review_limits, set_opts, settings_block, settings_for, space_base,
     task_settings, worker_argv, worktrees_on,
@@ -1459,7 +1459,7 @@ SWITCH_NUDGE = ("Shepherdr restarted your session on a new agent (the task's age
 def end_agent(s, t, address):
     """Ends a task's agent (its terminal, shell and all); hc kill returns once it's gone."""
     stop_note("switch-kill", task=s.ref(t), terminal=address, by="switch")
-    run(["hc", "kill", address])
+    kill_agent(address, run)
 
 
 def cmd_switch(args):

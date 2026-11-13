@@ -5,6 +5,7 @@ import io
 import json
 import os
 import pwd
+import signal
 import subprocess
 import time
 import zipfile
@@ -200,6 +201,48 @@ def hc_json(*args):
         return json.loads(r.stdout)
     except ValueError:
         return None
+GROUP_GRACE_S = 3  # SIGTERM to an agent's process group, then SIGKILL this long after
+
+
+def agent_pid(address):
+    """The pid of the agent in terminal `address` (hc get's foreground), None if unknown."""
+    if "/" in address:  # another machine's agent: its pid means nothing here
+        return None
+    try:
+        pid = ((hc_json("get", address) or {}).get("foreground") or {}).get("pid")
+    except Fail:
+        return None
+    return pid if isinstance(pid, int) and pid > 1 else None
+
+
+def end_group(pid):
+    """Best effort: ends the process group `pid` leads (agy's children too), SIGTERM then SIGKILL. Only a group whose leader is `pid` itself, never our own."""
+    try:
+        if not pid or pid <= 1:
+            return
+        try:
+            led = os.getpgid(pid)
+        except ProcessLookupError:
+            led = pid  # the leader is already gone; its children may still hold the group
+        if led != pid or pid == os.getpgrp():
+            return
+        os.killpg(pid, signal.SIGTERM)
+        for _ in range(GROUP_GRACE_S * 5):
+            time.sleep(0.2)
+            os.killpg(pid, 0)  # raises once the group is gone
+        os.killpg(pid, signal.SIGKILL)
+    except (OSError, ValueError):
+        pass
+
+
+def kill_agent(address, runner=None):
+    """`hc kill address` (through `runner`, default run), then its process group too, so an agent's children don't orphan."""
+    pid = agent_pid(address)
+    r = (runner or run)(["hc", "kill", address])
+    end_group(pid)
+    return r
+
+
 APP_HOME = os.path.join(HOME, ".config", "herdr-app")
 # Where a machine that only runs tasks keeps the chat's question-card hook (mods/chat/ask-hook.sh
 # and ask-end.py), synced there beside herdr-task (machines.manifest; launch.ask_hook runs it).

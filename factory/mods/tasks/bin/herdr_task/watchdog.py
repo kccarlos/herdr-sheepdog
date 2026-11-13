@@ -1,10 +1,10 @@
 """Watchdog: restarts a live Assistant that is stuck, or alerts the person (FAC-62)."""
 
-import hashlib, json, os, re, subprocess
+import hashlib, json, os, re, subprocess, time
 
 from . import news
 from .agents import agent_running, detail, held_ask, live_agents, STARTING_MS, status_word, task_status
-from .base import addon_off, APP_HOME, Fail, guard, hc_json, HOME, now, PACKAGE, probe_volume, run, STORE, volume_of
+from .base import addon_off, agent_pid, APP_HOME, end_group, Fail, guard, hc_json, HOME, now, PACKAGE, probe_volume, run, STORE, volume_of
 from .commands import send_alert
 from .news import send_or_hold, stall_of, typing
 from .settings import bare
@@ -13,6 +13,7 @@ from .store import read_list, store_files
 STUCK_MS = 30 * 60000              # Needs you / Failed / Stalled, or "working" with an unchanged screen
 RESTART_COOLDOWN_MS = 2 * 3600000  # stuck again within 2 hours of a restart: alert instead of restarting
 NEWS_GRACE_MS = STARTING_MS        # time after news lands for the Assistant to start its turn
+OUTAGE_WINDOW_MS = 15 * 60000       # new agents counted for a factory-wide blank-start outage
 WATCHDOG = os.path.join(STORE, ".watchdog.json")
 TEMPLATE_LABEL = "herdr.template"  # the hash of assistant.md an Assistant started with, set when the watchdog first sees it (FAC-78)
 API_ERROR = re.compile(r"API Error[: ]|Please run /login|\boverloaded\b|rate.?limit(?:ed| reached| exceeded|_error)", re.I)
@@ -28,9 +29,50 @@ def restart_assistant(k):
     env = {x: v for x, v in os.environ.items() if x not in ("HC_TERMINAL_ID", "HERDR_RESTART_CHAT", "HERDR_RESTART_RESUME")}
     if (k.get("labels") or {}).get("herdr.chat"):
         env["HERDR_RESTART_CHAT"] = k["labels"]["herdr.chat"]
+    pid = agent_pid(k["address"])
     r = subprocess.run(["bash", script, k["address"]], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=120)
     nxt = ((r.stdout or "").strip().splitlines() or [""])[-1].strip()
+    if r.returncode == 0:
+        end_group(pid)  # the old agent's children (agy's) don't orphan
     return nxt if r.returncode == 0 and nxt else None
+
+
+def blank_starts(lists):
+    """Agents herdr-task started in the last 15 minutes: ([still blank: no turn, an empty screen past STARTING_MS], [started fine: a turn])."""
+    blank, good = [], []
+    for slug, _, tasks in lists:
+        for t in tasks:
+            if t.get("archived") or t.get("state") not in ("running", "ready"):
+                continue
+            for a in live_agents(f"{slug}#{t['id']}"):
+                k = detail(a)
+                age = now() - (k.get("created_ms") or 0)
+                if not k.get("created_ms") or age >= OUTAGE_WINDOW_MS:
+                    continue
+                if k.get("turn"):
+                    good.append(k["created_ms"])
+                elif age >= STARTING_MS and not (run(["hc", "read", k["address"], "--lines", "40"]).stdout or "").strip():
+                    blank.append(k)
+    return blank, good
+
+
+def outage_pass(report, lists, coords, prev):
+    """A factory-wide outage (2+ new agents all blank): alerts once per spell. Returns the spell's record, None when there is none. A new agent that starts fine ends it."""
+    blank, good = blank_starts(lists)
+    if prev:
+        return None if any(c > prev["since"] for c in good) else prev
+    if len(blank) < 2 or not coords:
+        return None
+    since = min(k["created_ms"] for k in blank)
+    if any(c > since for c in good):  # a start went fine after the first blank one: not all blank
+        return None
+    title = f"New agents start blank: {len(blank)} since {time.strftime('%H:%M', time.localtime(since / 1000))}; likely herdr-core or an agent CLI update"
+    try:
+        send_alert(coords[0]["address"], title, about=True)
+    except Fail:
+        return None
+    report.setdefault("watchdog", []).append({"action": "outage", "title": title})
+    return {"since": since, "at": now(), "count": len(blank)}
 
 
 def template_info():
@@ -130,7 +172,8 @@ def watchdog_pass(report):
             for x in d.get("tasks") or []:
                 if not x.get("archived") and x.get("state") in ("running", "queued", "todo") and x.get("space"):
                     folders.setdefault(bare(x["space"]), d["folder"])
-    state = {s: dict(r) for s, r in prev_all.items() if isinstance(r, dict) and r.get("restarted_at") and now() - r["restarted_at"] < RESTART_COOLDOWN_MS}
+    outage = outage_pass(report, lists, coords, prev_all.get("_outage") if isinstance(prev_all.get("_outage"), dict) else None)
+    state = {s: dict(r) for s, r in prev_all.items() if s != "_outage" and isinstance(r, dict) and r.get("restarted_at") and now() - r["restarted_at"] < RESTART_COOLDOWN_MS}
 
     for item in coords:
         addr = item["address"]
@@ -200,7 +243,7 @@ def watchdog_pass(report):
             if not why and tpl and tpl_has and tpl_has != tpl and st in ("idle", "done", None) and not booting and rec.get("template") != tpl:
                 why = "running an old Assistant template"
 
-        if why and not _wake_inflight(ap_spaces, space, addr, k, ap) and not typing(addr, k):
+        if why and not outage and not _wake_inflight(ap_spaces, space, addr, k, ap) and not typing(addr, k):
             in_cooldown = bool(rec.get("restarted_at") and now() - rec["restarted_at"] < RESTART_COOLDOWN_MS)
             old_tpl = why == "running an old Assistant template"  # an idle one only; never an alert
             nxt = None if in_cooldown or alert_only else restart_assistant(k)
@@ -234,6 +277,8 @@ def watchdog_pass(report):
     for s, r in prev_all.items():  # a stall spell stays until a probe answers, even while its Assistant is away
         if isinstance(r, dict) and r.get("stall") and s not in state:
             state[s] = dict(r)
+    if outage:
+        state["_outage"] = outage
     if state != prev_all:
         os.makedirs(os.path.dirname(WATCHDOG), exist_ok=True)
         tmp = f"{WATCHDOG}.{os.getpid()}.tmp"

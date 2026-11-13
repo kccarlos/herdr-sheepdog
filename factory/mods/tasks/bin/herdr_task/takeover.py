@@ -4,7 +4,7 @@ import json
 import os
 import re
 
-from .base import APP_HOME, beside_store, git, hc_json, now, run, STORE, stop_note
+from .base import APP_HOME, beside_store, git, hc_json, kill_agent, now, run, STORE, stop_note
 from .settings import AGENTS, argv_for, settings_for
 from .agents import fit, from_person, log_tail, said
 from .provider import provider_cut, provider_error
@@ -230,7 +230,7 @@ def takeover(s, t, k, row, log, report):
     t["backup"].update(state="started", address=a["address"])
     # The old agent is stuck: end it (its terminal, shell and all), as switch does.
     stop_note("takeover-kill", task=s.ref(t), terminal=k["address"], why=row.get("reason"))
-    run(["hc", "kill", k["address"]])
+    kill_agent(k["address"], run)
     report.setdefault("backups_started", []).append({"task": f"{s.loc['folder']}#{t['id']}", "from": running, "to": kind,
                                                      "why": t["backup"]["why"], "terminal": a["address"]})
     return None

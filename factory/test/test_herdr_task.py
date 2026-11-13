@@ -8703,6 +8703,51 @@ class Watchdog(unittest.TestCase):
             self.assertEqual(len(self.alerts), 2)
         self.assertEqual(pv.call_count, 4)
 
+    def blank(self, addr, tid, age_ms=3 * 60000, **extra):
+        self.worker(addr, tid, status="idle", turn=0, created_ms=self.clock - age_ms, **extra)
+
+    def test_two_blank_starts_alert_once_and_hold_off_restarts_until_a_good_start(self):
+        t1 = {"id": 1, "title": "Auth", "state": "running", "space": "shop", "attention": "Need API key", "attention_at": self.clock - 40 * 60000}
+        rows = [t1, {"id": 2, "title": "Pay", "state": "running", "space": "other"}, {"id": 3, "title": "Ship", "state": "running", "space": "shop"}]
+        self.save_tasks(*rows, delivered={1: {"to": "c1", "turn": 2, "at": self.clock - 40 * 60000, "event": "needs-you"}})  # would restart
+        self.blank("w2", 2)
+        self.worker("w3", 3, status="working", turn=1, created_ms=self.clock - 3 * 60000)  # a start that went fine is no blank one
+        self.tick()
+        self.assertEqual((len(self.alerts), len(self.restarts)), (0, 1))  # one blank start is no outage
+        self.terms.pop("c2")
+        self.terms.pop("w3")
+        self.coord("c1", chat="p1")
+        self.Path(self.store, ".watchdog.json").unlink()
+        self.blank("w3", 3)
+        rep = self.tick()
+        self.assertEqual((len(self.alerts), [x["action"] for x in rep["watchdog"]]), (1, ["outage"]))
+        self.assertRegex(self.alerts[0][1]["title"], r"^New agents start blank: 2 since \d\d:\d\d; likely herdr-core")
+        self.assertIn("_outage", json.loads(self.Path(self.store, ".watchdog.json").read_text()))
+        self.clock += 5 * 60000
+        self.terms["w2"]["created_ms"] += 5 * 60000
+        self.terms["w3"]["created_ms"] += 5 * 60000
+        self.assertEqual((self.tick(), len(self.alerts), len(self.restarts)), ({}, 1, 1))  # once per spell, no Assistant restart in it
+        self.worker("w4", 3, status="working", turn=1, created_ms=self.clock - 1000)  # a new agent starts fine: the spell is over
+        self.tick()
+        self.assertNotIn("_outage", json.loads(self.Path(self.store, ".watchdog.json").read_text()))
+
+    def test_a_good_start_between_two_blank_ones_is_no_outage(self):
+        self.save_tasks(*[{"id": i, "title": "T", "state": "running", "space": "shop"} for i in (1, 2, 3)])
+        self.blank("w1", 1, age_ms=5 * 60000)
+        self.worker("w2", 2, status="working", turn=1, created_ms=self.clock - 3 * 60000)
+        self.blank("w3", 3, age_ms=2 * 60000 + 30000)
+        self.assertEqual((self.tick(), self.alerts), ({}, []))
+        self.assertNotIn("_outage", json.loads(self.Path(self.store, ".watchdog.json").read_text()) if os.path.exists(os.path.join(self.store, ".watchdog.json")) else {})
+
+    def test_a_restart_ends_the_old_agents_group(self):
+        from unittest import mock
+        self.terms["c1"]["foreground"]["pid"] = 4242
+        self.save_tasks({"id": 1, "title": "Auth", "state": "running", "space": "shop", "attention": "x", "attention_at": self.clock - 40 * 60000},
+                        delivered={1: {"to": "c1", "turn": 2, "at": self.clock - 40 * 60000, "event": "needs-you"}})
+        with mock.patch.object(self.wd, "end_group") as eg:
+            self.tick()
+        self.assertEqual((len(self.restarts), eg.call_args_list), (1, [mock.call(4242)]))
+
     def test_a_stall_spell_survives_the_assistant_being_away(self):
         from unittest import mock
         self.save_tasks({"id": 1, "title": "Auth", "state": "running", "space": "shop"})
@@ -9367,3 +9412,42 @@ class SimulatorPool(unittest.TestCase):
         self.run_cli("simulator", "lease", "WM-7", "--folder", self.repo)
         with mock.patch.object(self.sims.shutil, "which", lambda c: None if c == "xcrun" else shutil.which(c)):
             self.assertEqual(self.run_cli("done", "WM-7", "--folder", self.repo)[0], 0)
+
+
+class EndGroup(unittest.TestCase):
+    """FAC-86: ending an agent ends its process group, and only a group its own pid leads."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.base as base
+        self.base, self.mock = base, mock
+
+    def test_a_group_led_by_the_agent_gets_term_then_kill(self):
+        with self.mock.patch.object(self.base.os, "getpgid", return_value=4242), self.mock.patch.object(self.base.os, "getpgrp", return_value=1), \
+                self.mock.patch.object(self.base.os, "killpg") as kp, self.mock.patch.object(self.base.time, "sleep"):
+            self.base.end_group(4242)
+        sigs = [c.args for c in kp.call_args_list]
+        self.assertEqual((sigs[0], sigs[-1]), ((4242, self.base.signal.SIGTERM), (4242, self.base.signal.SIGKILL)))
+
+    def test_another_machines_agent_has_no_local_pid(self):
+        with self.mock.patch.object(self.base, "hc_json", return_value={"foreground": {"pid": 4242}}) as hj:
+            self.assertEqual((self.base.agent_pid("vm/t5"), hj.call_count, self.base.agent_pid("t5")), (None, 0, 4242))
+
+    def test_our_own_group_and_a_follower_are_left_alone(self):
+        with self.mock.patch.object(self.base.os, "getpgid", return_value=4242), self.mock.patch.object(self.base.os, "getpgrp", return_value=4242), \
+                self.mock.patch.object(self.base.os, "killpg") as kp:
+            self.base.end_group(4242)  # our own group
+        with self.mock.patch.object(self.base.os, "getpgid", return_value=77), self.mock.patch.object(self.base.os, "getpgrp", return_value=1), \
+                self.mock.patch.object(self.base.os, "killpg") as kp2:
+            self.base.end_group(4242)  # a process in somebody else's group
+        self.assertEqual((kp.call_count, kp2.call_count), (0, 0))
+
+    def test_kill_agent_kills_the_terminal_then_the_group_and_a_gone_group_is_fine(self):
+        calls = []
+        runs = lambda a, **k: calls.append(a) or self.mock.Mock(returncode=0, stdout="")
+        with self.mock.patch.object(self.base, "hc_json", return_value={"foreground": {"pid": 4242}}), self.mock.patch.object(self.base, "run", runs), \
+                self.mock.patch.object(self.base.os, "getpgid", side_effect=ProcessLookupError), self.mock.patch.object(self.base.os, "getpgrp", return_value=1), \
+                self.mock.patch.object(self.base.os, "killpg", side_effect=[None, ProcessLookupError]) as kp, self.mock.patch.object(self.base.time, "sleep"):
+            self.base.kill_agent("t1")
+        self.assertEqual((calls, kp.call_count), ([["hc", "kill", "t1"]], 2))  # the leader's gone, the group answered once then vanished

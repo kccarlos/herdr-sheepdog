@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-from .base import ASK_HOME, ENTRY, Fail, HOME, git, hc_json, now, run, WORKTREES
+from .base import ASK_HOME, ENTRY, Fail, HOME, git, hc_json, kill_agent, now, run, WORKTREES
 from .settings import agent_key, ASSISTANT_TEMPLATES, by_layer, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, gate_min, keep_review, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
@@ -861,7 +861,7 @@ def send_when_clear(address, message, tries=60):
         elif CODEX_READY.search(screen):
             return run(["hc", "send", address, message])
         time.sleep(1)
-    run(["hc", "kill", address])
+    kill_agent(address, run)
     raise Fail("the Codex reviewer never showed its prompt box (trust screen or startup stuck)")
 
 
