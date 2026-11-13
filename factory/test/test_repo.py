@@ -388,6 +388,15 @@ class Repo(unittest.TestCase):
                       "one review round", "Ready / Accept card", "never on design or doc tasks"):
             self.assertIn(words, text)
 
+    def test_assistant_checks_apple_agreements_before_a_release(self):
+        """FAC-77 (field note 36): an expired Apple agreement is a take-over for the person, never a re-run."""
+        with open(J("templates", "assistant.md"), encoding="utf-8") as fh:
+            text = fh.read()
+        rules = text.split("\nRules:\n", 1)[1].split("\n## ", 1)[0]
+        for words in ("Before an iOS release run", "HTTP 403 from App Store Connect", "`asc apps list`",
+                      "agreement is missing or has expired", "take-over for the person", "never a re-run"):
+            self.assertIn(words, rules)
+
     def test_assistant_claude_ai_artifact_export_rules(self):
         """FAC-71: templates/assistant.md tells the Assistant to export claude.ai artifacts/docs into
         docs/<project>/... before a non-Claude worker starts, and design tasks deliver repo files as Done."""

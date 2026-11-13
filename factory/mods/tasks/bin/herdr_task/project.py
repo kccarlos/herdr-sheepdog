@@ -1,6 +1,6 @@
 """Starting a factory project in one command (`herdr-task project start`, docs/factory.md 12b.4)."""
 
-import argparse, contextlib, fnmatch, io, json, os, re, shlex, shutil, urllib.parse
+import argparse, contextlib, fnmatch, io, json, os, re, shlex, shutil, subprocess, urllib.parse
 from . import autopilot as ap, base, settings as st
 from .base import Fail
 from .github import push_remote, remote_repo
@@ -348,7 +348,7 @@ def sync_autopilot(repo, space_id, name, old_ids, want_on, asst_changed, dry, to
         return True, True, f"Autopilot: on for {bare_id} (heartbeat -> {beat_desc})"
     return False, True, f"Autopilot: set heartbeat for {bare_id} ({beat_desc})"
 
-NOT_READY = {"not yet", "not set up yet", "no"}
+NOT_READY = {"not yet", "not set up yet", "no", "not checked"}
 ans_yes = lambda v: str(v or "").strip().lower().startswith(("yes", "on", "true", "1"))
 fmt_pick = lambda p: f"{(p or {}).get('agent') or 'claude'}/{p['model']}" if (p or {}).get("model") else ((p or {}).get("agent") or "claude")
 def read_text(p):
@@ -402,6 +402,20 @@ def check_github_secrets(repo):
     return ((gh_ok, f"{gh_repo} (pushed, {len(wfs)} workflow{'s' if len(wfs) != 1 else ''})" if gh_ok else ", ".join(gh_miss), gh_steps),
             (sec_ok, (f"set: {', '.join(ref_sec)}" if ref_sec else "none referenced") if sec_ok else f"missing: {', '.join(miss_sec)}", sec_steps, ref_sec, miss_sec))
 
+ASC_TIMEOUT = 20
+AGREEMENT_STEP = "Accept any pending agreement in App Store Connect > Business; releases fail with HTTP 403 until then"
+
+def probe_asc_agreements():
+    """Best effort, read-only: None = not checked (no asc, another failure, timeout), else the line naming an expired agreement or ''."""
+    if not shutil.which("asc"):
+        return None
+    try:
+        r = base.run(["asc", "apps", "list"], timeout=ASC_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    line = next((ln.strip() for ln in f"{r.stdout}\n{r.stderr}".splitlines() if re.search(r"agreement is missing or has expired", ln, re.I)), "")
+    return line if line else ("" if r.returncode == 0 else None)
+
 def checklist_cards(ios, layer, gates=(), branch="main"):
     w, r = fmt_pick((layer or {}).get("worker") or FACTORY_WORKER), fmt_pick((layer or {}).get("reviewer") or FACTORY_REVIEWER)
     dflt = f"Keep defaults: worker {w}, reviewer {r}"
@@ -413,7 +427,10 @@ def checklist_cards(ios, layer, gates=(), branch="main"):
               "Create the App Store Connect app record and internal TestFlight group"),
              ("app_store_profile", "App Store profile", "Is the App Store provisioning profile ready for this bundle ID?",
               ["Yes, profile is ready", "Skip App Store signing tonight", "Not yet"], "Yes, profile is ready", True,
-              "Create or install the App Store provisioning profile (IOS_APP_STORE)")] if ios else []
+              "Create or install the App Store provisioning profile (IOS_APP_STORE)"),
+             ("asc_agreements", "App Store Connect agreements", "Are the App Store Connect agreements current (App Store Connect > Business)?",
+              ["Yes, checked today", "Not checked"], "Yes, checked today", True,
+              AGREEMENT_STEP)] if ios else []
     return ios_c + [
         ("service_account", "Service account", "Which service account should night runs use for runtime secrets?",
          ["1Password service account", "herdr-secret only", "No runtime secrets needed", "Not set up yet"], "1Password service account", True,
@@ -489,7 +506,12 @@ def run_checklist(repo, space_id=None, name=None, assistant=None, ap_hint=None, 
     person_steps, asked, ask_err = [*gh_steps, *sec_steps], [], None
     to_term = os.environ.get("HC_TERMINAL_ID") or assistant or (None if dry else coord_for_repo(repo, bare_id)[0])
     cards = checklist_cards(ios, layer, release_gates(repo, br := base_branch(repo)), br)
+    agreements = probe_asc_agreements() if ios else None
     for key, label, question, options, recommend, needs_ready, pstep in cards:
+        if key == "asc_agreements" and agreements is not None:
+            items.append({"key": key, "label": label, "ready": not agreements, "detail": agreements or "asc apps list: agreements current"})
+            person_steps += [AGREEMENT_STEP] if agreements else []
+            continue
         if val := str(proj.get(key) or "").strip():
             rdy = val.lower() not in NOT_READY if needs_ready else True
             person_steps += [pstep] if (not rdy and pstep) else []

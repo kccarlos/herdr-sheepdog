@@ -7874,7 +7874,7 @@ class ProjectStart(unittest.TestCase):
         self.gh_repo, self.gh_secrets = None, ""
 
         def fake_run(argv, cwd=None, check=False, timeout=None):
-            if argv[0] == "git":
+            if argv[0] in ("git", "asc"):
                 return subprocess.run(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
             self.calls.append(list(argv))
             if argv[0] == "gh":
@@ -7915,9 +7915,18 @@ class ProjectStart(unittest.TestCase):
             p = mock.patch.object(obj, k, v)
             p.start()
             self.addCleanup(p.stop)
-        pe = mock.patch.dict(os.environ, {"HC_TERMINAL_ID": ""})
+        # A real asc on this machine must never run: PATH holds only a scratch dir plus the dirs without asc.
+        self.asc_bin = os.path.join(self.tmp, "asc-bin")
+        os.makedirs(self.asc_bin)
+        path = os.pathsep.join([self.asc_bin] + [d for d in os.environ["PATH"].split(os.pathsep) if not os.access(os.path.join(d, "asc"), os.X_OK)])
+        pe = mock.patch.dict(os.environ, {"HC_TERMINAL_ID": "", "PATH": path})
         pe.start()
         self.addCleanup(pe.stop)
+
+    def fake_asc(self, out="", code=0, sleep=0):
+        """A fake `asc` first on PATH: prints out, exits with code (after sleep seconds); the arguments it got go to asc-args."""
+        f = self.put(os.path.join(self.asc_bin, "asc"), f'#!/bin/sh\necho "$@" >> "{self.tmp}/asc-args"\nsleep {sleep}\ncat <<\'EOF\'\n{out}\nEOF\nexit {code}\n')
+        os.chmod(f, 0o755)
 
     def put(self, path, data):
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -8060,7 +8069,7 @@ class ProjectStart(unittest.TestCase):
         out1 = json.loads(self.checklist(repo, "--json"))
         self.assertFalse(out1["ios"])
         self.assertEqual(out1["ready"], ["github"])
-        self.assertNotIn("apple_signin", [x["key"] for x in out1["items"]])
+        self.assertFalse({"apple_signin", "asc_agreements"} & {x["key"] for x in out1["items"]})
         sec_item = next(x for x in out1["items"] if x["key"] == "ci_secrets")
         self.assertEqual((sec_item["referenced"], sec_item["missing"]), (["API_KEY", "SENTRY_DSN"], ["SENTRY_DSN"]))
         self.assertTrue(any("gh secret set SENTRY_DSN" in s for s in out1["steps"]))
@@ -8093,8 +8102,8 @@ class ProjectStart(unittest.TestCase):
         self.assertEqual([self.project.detect_ios(p) for p in (mac_pkg, ios_pkg, mac_xc, ios_xc)], [False, True, False, True])
         out = json.loads(self.checklist(ios_xc, "--json"))
         self.assertTrue(out["ios"])
-        self.assertEqual([a["item"] for a in out["asked"]][:3], ["apple_signin", "app_record", "app_store_profile"])
-        self.assertEqual(len(out["asked"]), 8)
+        self.assertEqual([a["item"] for a in out["asked"]][:4], ["apple_signin", "app_record", "app_store_profile", "asc_agreements"])
+        self.assertEqual(len(out["asked"]), 9)
         for words in ("gh repo create", "CI workflow", "Apple / App Store Connect", "app record", "provisioning profile"):
             self.assertTrue(any(words in s for s in out["steps"]), out["steps"])
         ap_ask = out["asked"][0]
@@ -8102,6 +8111,35 @@ class ProjectStart(unittest.TestCase):
         out2 = json.loads(self.checklist(ios_xc, "--json"))
         self.assertIn("apple_signin", out2["missing"])
         self.assertEqual(out2["asked"], [])
+
+    def test_ios_checklist_probes_asc_agreements(self):
+        """FAC-77 (field note 36): `asc apps list` saying an agreement expired fails the item before the night; anything else asks the owner."""
+        ios = os.path.join(self.tmp, "ios-app")
+        self.put(os.path.join(ios, "App.xcodeproj", "project.pbxproj"), "IPHONEOS_DEPLOYMENT_TARGET = 17.0;\n")
+        item = lambda: next(x for x in json.loads(self.checklist(ios, "--json", "--dry-run"))["items"] if x["key"] == "asc_agreements")
+        gone = "Error: A required agreement is missing or has expired. This request will not succeed until it is fixed."
+        self.fake_asc(gone, 1)
+        bad = item()
+        self.assertEqual((bad["ready"], bad["detail"]), (False, gone))
+        out = json.loads(self.checklist(ios, "--json", "--dry-run"))
+        self.assertIn("asc_agreements", out["missing"])
+        self.assertTrue(any("Business" in s and "HTTP 403" in s for s in out["steps"]))
+        self.assertEqual(self.Path(self.tmp, "asc-args").read_text().splitlines()[0], "apps list")
+        self.fake_asc("ID  NAME\n1   Demo", 0)
+        self.assertTrue(item()["ready"])
+        for out_, code in (("Error: network is down", 1), ("", 2)):  # another failure: not checked, the owner is asked
+            self.fake_asc(out_, code)
+            self.assertEqual((item()["ready"], item()["detail"]), (False, "would ask card"))
+        self.fake_asc("agreement is missing or has expired", 0, sleep=5)  # a slow asc: timed out, not checked
+        with self.mock.patch.object(self.project, "ASC_TIMEOUT", 1):
+            self.assertEqual(item()["detail"], "would ask card")
+        os.remove(os.path.join(self.asc_bin, "asc"))  # no asc at all
+        self.assertEqual((item()["ready"], item()["detail"]), (False, "would ask card"))
+        asked = json.loads(self.checklist(ios, "--json"))["asked"]
+        ask = self.ask_mod.load(next(a["id"] for a in asked if a["item"] == "asc_agreements"))
+        self.assertEqual((ask["options"][:2], ask["recommend"]), (["Yes, checked today", "Not checked"], "Yes, checked today"))
+        self.answer_card(ask["id"], "2", ask["terminal"])  # "Not checked" stays missing
+        self.assertIn("asc_agreements", json.loads(self.checklist(ios, "--json"))["missing"])
 
     def test_claude_ai_requirements_marks_to_export_and_sets_export_instruction(self):
         for good in ("https://claude.ai/artifact/Y769bCQJQT6wuRri9bLurD", "https://claude.ai/doc/abc-123",
