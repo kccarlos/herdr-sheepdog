@@ -263,6 +263,10 @@ def cmd_show(args):
         text.append(f"pull request: #{v['pr']['number']} {v['pr']['url']}")
     if v.get("why") and v["status"] == "needs":
         text.append(f"needs the person: {v['why']}")
+        fail = next((f for f in reversed(v.get("review_failures") or []) if f.get("tail")), None)
+        if fail and str(v["why"]).startswith(REVIEWER_FAILED):  # what its reviewer last showed (FAC-75)
+            text.append(f"  {fail['cli']} reviewer's last screen ({fail['why']}):")
+            text += [f"    {x}" for x in fail["tail"].splitlines()[-8:]]
     if v.get("proof"):
         text.append(f"proof: {v['proof']['title']} ({v['proof']['id']})")
     if v.get("archived"):
@@ -474,10 +478,39 @@ def open_runs(t):
     return [r for r in t.get("review_runs") or [] if r["round"] not in done and r["address"] not in failed]
 
 
-def fail_run(s, t, rn, why):
+TAIL_LINES, TAIL_BYTES = 40, 4096
+
+
+def screen_of(address, lines):
+    """What `hc read` shows of a terminal, or "" when it can't be read: best effort, never blocks the gate."""
+    try:
+        r = run(["hc", "read", address, "--lines", str(lines)])
+        return (r.stdout or "") if r.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def screen_tail(screen):
+    """A failed reviewer's last screen, kept to find out why it ended: the last TAIL_LINES non-empty lines, TAIL_BYTES at most."""
+    out = "\n".join([x.rstrip() for x in (screen or "").splitlines() if x.strip()][-TAIL_LINES:])
+    return out.encode("utf-8")[-TAIL_BYTES:].decode("utf-8", "ignore").lstrip("\n")
+
+
+def tail_gist(tail, width=100):
+    """The first meaningful line of a tail (one with a letter or digit in it, box borders cut off), or None."""
+    for x in (tail or "").splitlines():
+        x = x.strip(" │┃╭╮╰╯─\t")
+        if re.search(r"\w", x):
+            return x if len(x) <= width else x[:width - 1] + "…"
+    return None
+
+
+def fail_run(s, t, rn, why, screen=None):
     if rn["address"] not in failed_addresses(t):
+        tail = screen_tail(screen)
         t.setdefault("review_failures", []).append({"round": rn["round"], "head": rn["head"], "address": rn["address"],
-                                                    "cli": rn["cli"], "model": rn.get("model"), "why": why, "at": now()})
+                                                    "cli": rn["cli"], "model": rn.get("model"), "why": why, "at": now(),
+                                                    **({"tail": tail} if tail else {})})
         s.dirty = True
 
 
@@ -576,6 +609,8 @@ def gate_step(s, t):
              if f["round"] == round_n and f["head"] == head and (f.get("at") or 0) > since]
     if len(fails) >= 2:
         why = (f"{REVIEWER_FAILED} " + ", ".join(f"{f['cli']} ({f['why']})" for f in fails[:2]))[:120]
+        # What each last saw, one line each, so the Assistant can tell sign-in from a refusal or a crash (FAC-75).
+        why += "".join(f" · {f['cli']} saw: {g}" for f in fails[:2] if (g := tail_gist(f.get("tail"))))
         t["attention"], t["attention_at"] = why, now()
         t.pop("progress", None)
         s.dirty = True
@@ -1099,11 +1134,11 @@ def inspect_runs(s, t):
         k = hc_json("get", rn["address"]) or {}
         if k.get("state") != "live":
             code = k.get("exit_code")
-            why = ("Sign in required" if k.get("state") == "finished" and sign_in_screen(
-                       run(["hc", "read", rn["address"], "--lines", "80"]).stdout) else
+            gone = screen_of(rn["address"], 80) if k.get("state") == "finished" else ""
+            why = ("Sign in required" if sign_in_screen(gone) else
                    f"exited ({code})" if k.get("state") == "finished" and type(code) is int else
                    "exited" if k.get("state") == "finished" else "terminal gone")
-            fail_run(s, t, rn, why)
+            fail_run(s, t, rn, why, gone)  # its last screen read before end_reviewer closes it
             if k.get("state") == "finished":
                 end_reviewer(rn["address"])
             continue
@@ -1112,7 +1147,7 @@ def inspect_runs(s, t):
             continue
         screen = None
         if sandboxes([rn["cli"]]) and st != "blocked":
-            screen = run(["hc", "read", rn["address"], "--lines", "400"]).stdout or ""
+            screen = screen_of(rn["address"], 400)
             got = read_verdict(screen, round_code(rn))
             if got:
                 before, dirty = json.loads(json.dumps(t)), s.dirty
@@ -1128,11 +1163,11 @@ def inspect_runs(s, t):
                 end_reviewer(rn["address"])  # recorded, or its head moved on: its verdict never applies
                 continue
         if screen is None:
-            screen = run(["hc", "read", rn["address"], "--lines", "400"]).stdout or ""
+            screen = screen_of(rn["address"], 400)
         why = ("Sign in required" if sign_in_screen(screen) else "exited without a verdict" if not alive else
                "ended without a verdict" if st in ("idle", "done") and (k.get("turn") != 0 or now() - (rn.get("at") or 0) >= STARTING_MS) else None)
         if why:
-            fail_run(s, t, rn, why)
+            fail_run(s, t, rn, why, screen)  # captured before end_reviewer closes the terminal
             end_reviewer(rn["address"])
 
 

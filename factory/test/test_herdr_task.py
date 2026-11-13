@@ -3689,6 +3689,88 @@ if sys.argv[1] == "kill" and alive:
         self.assertEqual(len(self.runs), 3)
         self.valid()
 
+    # ---- FAC-75: a failed reviewer's last screen is kept, shown and told ----
+
+    def test_a_reviewer_that_ends_without_a_verdict_keeps_its_last_screen(self):
+        import argparse
+        from unittest import mock
+        import herdr_task.commands as commands
+        busy = "\n\n".join(f"line {i}" for i in range(100))
+        self.sandbox()
+        self.ready()
+        self.screen(f"{busy}\n│  ╭───╮  │\n  Error: model refused the request  \n\n")
+        self.reviewer_term = {"state": "live", "agent": "agy", "status": {"state": "idle"}, "turn": 1}
+        self.commands.gate_reads(self.store, self.task)
+        fail = self.task["review_failures"][0]
+        self.assertEqual(fail["why"], "ended without a verdict")
+        lines = fail["tail"].splitlines()
+        self.assertEqual(len(lines), commands.TAIL_LINES)
+        self.assertTrue(all(x.strip() for x in lines))
+        self.assertEqual(lines[-1].strip(), "Error: model refused the request")
+        self.assertLessEqual(len(fail["tail"].encode()), commands.TAIL_BYTES)
+        self.assertNotIn("line 0", fail["tail"])
+        self.assertEqual(self.task["review_runs"][-1]["cli"], "claude")  # the fallback went on as before
+        self.assertEqual(commands.screen_tail("x" * 10_000).encode().__len__(), commands.TAIL_BYTES)
+        # A finished (closed) terminal is read before end_reviewer closes it.
+        order = []
+        self.task.pop("review_failures"), self.task.pop("review_runs")
+        self.runs.clear()
+        self.ready()
+        self.screen("Segmentation fault\n")
+        self.reviewer_term = {"state": "finished", "exit_code": 139}
+        with mock.patch.object(commands, "end_reviewer", lambda a: order.append(("closed", len(order)))), \
+                mock.patch.object(commands, "fail_run", lambda s, t, rn, why, screen=None: order.append((why, screen))):
+            self.commands.inspect_runs(self.store, self.task)
+        self.assertEqual(order, [("exited (139)", "Segmentation fault\n"), ("closed", 1)])
+
+    def test_show_and_the_needs_you_message_carry_the_reviewers_last_screen(self):
+        import argparse
+        import io
+        from contextlib import redirect_stdout
+        from unittest import mock
+        import herdr_task.output as output
+        fails = [{"round": 1, "address": "term-1", "cli": "agy", "why": "ended without a verdict",
+                  "tail": "  │ Error: 429 model is overloaded │\nmore"},
+                 {"round": 1, "address": "term-2", "cli": "claude", "why": "terminal gone"}]
+        self.ready()
+        self.task["review_failures"] = [{**f, "head": self.head, "at": self.commands.now() + 10 + i} for i, f in enumerate(fails)]
+        self.task["review_runs"] = [{"round": 1, "head": self.head, "address": f["address"], "cli": f["cli"], "at": 1} for f in fails]
+        self.commands.gate_reads(self.store, self.task)  # two failures on one round: the Assistant is told
+        why = self.task["attention"]
+        self.assertTrue(why.startswith("Reviewer failed twice: agy (ended without a verdict), claude (terminal gone)"), why)
+        self.assertIn("agy saw: Error: 429 model is overloaded", why)  # the first meaningful line, one each
+        self.assertNotIn("claude saw", why)
+        self.assertEqual(self.commands.tail_gist("│ ─── │\n\n"), None)
+        with mock.patch.object(self.commands, "view", output.view), mock.patch.object(self.commands, "say", output.say), \
+                mock.patch.object(self.commands, "settings_block", lambda s, t: ""):
+            for js in (False, True):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    self.commands.cmd_show(argparse.Namespace(id="SHEP-13", json=js, folder=None, evidence=False))
+                if js:
+                    self.assertEqual(json.loads(out.getvalue())["review_failures"][0]["tail"], fails[0]["tail"])
+                else:
+                    lines = out.getvalue().splitlines()
+                    i = next(i for i, x in enumerate(lines) if x.startswith("needs the person: Reviewer failed twice"))
+                    self.assertEqual(lines[i + 1:i + 4], ["  agy reviewer's last screen (ended without a verdict):",
+                                                          "      │ Error: 429 model is overloaded │", "    more"])
+
+    def test_a_reviewer_screen_that_cant_be_read_stores_no_tail_and_the_gate_goes_on(self):
+        from unittest import mock
+        self.sandbox()
+        self.ready()
+        for broken in (lambda argv, **k: subprocess.CompletedProcess(argv, 1, "garbage", "no such terminal"),
+                       mock.Mock(side_effect=OSError("hc is gone"))):
+            self.task.pop("review_failures", None), self.task.pop("review_runs", None)
+            self.runs.clear()
+            self.reviewer_term = {"state": "live", "agent": "agy", "status": {"state": "idle"}, "turn": 1}
+            with mock.patch.object(self.commands, "run", broken):
+                self.ready()
+                self.commands.gate_reads(self.store, self.task)
+            self.assertEqual(self.task["review_failures"][0]["why"], "ended without a verdict")
+            self.assertNotIn("tail", self.task["review_failures"][0])
+            self.assertEqual([r["cli"] for r in self.task["review_runs"]], ["agy", "claude"])
+
     def test_a_live_reviewer_still_working_is_left_alone(self):
         from unittest import mock
         import herdr_task.agents as agents
