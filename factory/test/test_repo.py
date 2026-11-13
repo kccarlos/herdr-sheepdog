@@ -368,6 +368,14 @@ class Repo(unittest.TestCase):
         ):
             self.assertIn(words, sec)
 
+    def test_assistant_inherited_suite_rule(self):
+        """FAC-74: measure an inherited suite's flakiness on the base and turn on retries first; gate a new fork's release workflow."""
+        with open(J("templates", "assistant.md"), encoding="utf-8") as fh:
+            sec = fh.read().split("## Decide yourself / Ask only for\n", 1)[1].split("\n## ", 1)[0]
+        for words in ("Inherited suite (a fork)", "measure its flakiness on the base first", "turn on test retries in CI before tasks start",
+                      "a new fork's release workflow stays gated (manual dispatch or tags) until signing is proven"):
+            self.assertIn(words, sec)
+
     def test_assistant_unattended_night_checklist_rule(self):
         with open(J("templates", "assistant.md"), encoding="utf-8") as fh:
             rules = fh.read().split("\nRules:\n", 1)[1].split("\n## ", 1)[0]

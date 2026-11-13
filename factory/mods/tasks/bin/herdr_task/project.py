@@ -1,6 +1,6 @@
 """Starting a factory project in one command (`herdr-task project start`, docs/factory.md 12b.4)."""
 
-import argparse, contextlib, io, json, os, re, shlex, shutil, urllib.parse
+import argparse, contextlib, fnmatch, io, json, os, re, shlex, shutil, urllib.parse
 from . import autopilot as ap, base, settings as st
 from .base import Fail
 from .github import push_remote, remote_repo
@@ -22,6 +22,86 @@ TO_EXPORT_MARKER = (
     "Status: to export — claude.ai artifact or doc (only Claude agents can read it; agy and Codex workers can't). "
     "Export its content into `docs/requirements.md`, keeping the source link above, before planning tasks.\n"
 )
+
+RELEASE_NAME = re.compile(r"release|deploy|publish|upload|testflight", re.I)
+RELEASE_STEP = re.compile(r"fastlane|altool|\basc\b|exportArchive|gh release|npm publish|wrangler (?:deploy|publish)|action-gh-release|create-release|testflight|pages-deploy", re.I)
+_indent = lambda ln: len(ln) - len(ln.lstrip())
+
+def yaml_list(lines, key):
+    """Values of `key:` in a few YAML lines (inline `[a, b]` or `- a` items); None when the key is absent."""
+    for i, ln in enumerate(lines):
+        if m := re.search(rf"\b{key}:\s*(.*)$", ln):
+            if m.group(1).strip():
+                return [v.strip(" '\"") for v in m.group(1).strip(" []{}").split(",") if v.strip(" '\"")]
+            out = []
+            for nxt in lines[i + 1:]:
+                if not (d := re.match(r"\s*-\s*(.+)", nxt)):
+                    break
+                out.append(d.group(1).strip(" '\""))
+            return out
+    return None
+
+def pushes_to(text, branch):
+    """Does this workflow's `on:` run on a push to `branch`? (plain text scan: no YAML parser)"""
+    lines = [re.sub(r"\s#.*$|^\s*#.*$", "", ln).rstrip() for ln in text.splitlines()]
+    start = next((i for i, ln in enumerate(lines) if re.match(r"""(?:on|"on"|'on')\s*:""", ln)), None)
+    if start is None:
+        return False
+    head, body = re.sub(r"""^\S+\s*:\s*""", "", lines[start]), []
+    for ln in lines[start + 1:]:
+        if ln.strip() and _indent(ln) == 0:
+            break
+        body.append(ln)
+    if head.strip():
+        return bool(re.search(r"\bpush\b", head)) and not re.search(r"\bpush\s*:\s*\{[^}]*tags", head)
+    for i, ln in enumerate(body):
+        if m := re.match(r"\s*(?:-\s*)?push\b\s*:?\s*(.*)$", ln):
+            kids = [m.group(1)]
+            for k in body[i + 1:]:
+                if k.strip() and _indent(k) <= _indent(ln):
+                    break
+                kids.append(k)
+            only, skip = yaml_list(kids, "branches"), yaml_list(kids, "branches-ignore")
+            if only is None and skip is None:
+                return yaml_list(kids, "tags") is None
+            return any(fnmatch.fnmatchcase(branch, g) for g in only) if only is not None else not any(fnmatch.fnmatchcase(branch, g) for g in skip)
+    return False
+
+def releases(text):
+    lines = [re.sub(r"\s#.*$|^\s*#.*$", "", ln).rstrip() for ln in text.splitlines()]
+    names = [m.group(1) for ln in lines if (m := re.match(r"name:\s*(.+)", ln))]
+    if (j := next((i for i, ln in enumerate(lines) if re.match(r"jobs:\s*$", ln)), None)) is not None:
+        rest = [ln for ln in lines[j + 1:] if ln.strip()]
+        ji = _indent(rest[0]) if rest else 0
+        names += [m.group(1) for ln in rest if ji and (m := re.fullmatch(rf"\s{{{ji}}}([\w-]+):", ln) or re.fullmatch(rf"\s{{{ji + 2}}}name:\s*(.+)", ln))]
+    return bool(any(RELEASE_NAME.search(n) for n in names) or RELEASE_STEP.search("\n".join(lines)))
+
+def base_branch(repo):
+    ok, ref, _ = base.git(repo, "symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD")
+    if ok and ref.strip().startswith("origin/"):
+        return ref.strip()[7:]
+    ok, br, _ = base.git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    return br.strip() if ok and br.strip() not in ("", "HEAD") else "main"
+
+def release_gates(repo, branch):
+    """Workflow files that release/deploy/publish/upload and run on every push to `branch`."""
+    wf_dir = os.path.join(repo, ".github", "workflows")
+    files = sorted(f for f in os.listdir(wf_dir) if f.endswith((".yml", ".yaml"))) if os.path.isdir(wf_dir) else []
+    return [f for f in files if os.path.isfile(p := os.path.join(wf_dir, f)) and (t := read_text(p)) and releases(t) and pushes_to(t, branch)]
+
+def base_health(repo):
+    """Heartbeat instruction for an inherited codebase (a fork with history); empty for a new folder."""
+    if not os.path.isdir(repo) or not (n := base.git(repo, "rev-list", "--count", "HEAD"))[0] or int(n[1] or 0) < 2:
+        return ""
+    br = base_branch(repo)
+    remote = push_remote(repo, br) or ""
+    slug = (remote_repo(repo, remote) if remote else None) or "<owner/name>"
+    gates = release_gates(repo, br)
+    return (f"Inherited codebase: before feature tasks, run one base-health task: measure the inherited suite on the base "
+            f"(recent CI runs: `gh run list --branch {br} --repo {slug}`, plus the check run 3 times, locally or in CI), "
+            f"list the flaky tests in docs/flaky-tests.md and turn on test retries in CI."
+            + (f" In the same task, gate {', '.join(gates)} (it runs on every push to {br}) to manual dispatch or tags until signing/deploy is proven." if gates else "")
+            + "\n\n")
 
 def json_dict(raw):
     try:
@@ -230,11 +310,12 @@ def sync_autopilot(repo, space_id, name, old_ids, want_on, asst_changed, dry, to
     cur = {**{kk: vv for k in stale for kk, vv in (ap_spaces.get(k) or {}).items()}, **dict(ap_spaces.get(bare_id) or {})}
     was_on, want_beat = bool(cur.get("on")), bool(want_on or to_export)
     cfg_now = st.read_settings() if want_beat else {}
-    plain_beat = (HEARTBEAT_HEAD + ap.STARTER).strip()
+    health = base_health(repo)
+    plain_beat = (HEARTBEAT_HEAD + health + ap.STARTER).strip()
     has_beat = want_beat and any(bool(b := (ap.autopilot_layers(cfg_now, k)[1].get("heartbeat") or "").strip())
                                  and not (to_export and b == plain_beat) for k in (bare_id, *old_ids))
-    head = HEARTBEAT_EXPORT_HEAD if to_export else HEARTBEAT_HEAD
-    beat_desc = "export into docs/requirements.md before planning tasks" if to_export else "docs/requirements.md"
+    head = (HEARTBEAT_EXPORT_HEAD if to_export else HEARTBEAT_HEAD) + health
+    beat_desc = ("export into docs/requirements.md before planning tasks" if to_export else "docs/requirements.md") + (", base-health task first" if health else "")
     def move():
         with ap.state(write=True) as d:
             m = {**{kk: vv for k in stale for kk, vv in (d["spaces"].pop(k, None) or {}).items()}, **dict(d["spaces"].get(bare_id) or {})}
@@ -320,7 +401,7 @@ def check_github_secrets(repo):
     return ((gh_ok, f"{gh_repo} (pushed, {len(wfs)} workflow{'s' if len(wfs) != 1 else ''})" if gh_ok else ", ".join(gh_miss), gh_steps),
             (sec_ok, (f"set: {', '.join(ref_sec)}" if ref_sec else "none referenced") if sec_ok else f"missing: {', '.join(miss_sec)}", sec_steps, ref_sec, miss_sec))
 
-def checklist_cards(ios, layer):
+def checklist_cards(ios, layer, gates=(), branch="main"):
     w, r = fmt_pick((layer or {}).get("worker") or FACTORY_WORKER), fmt_pick((layer or {}).get("reviewer") or FACTORY_REVIEWER)
     dflt = f"Keep defaults: worker {w}, reviewer {r}"
     ios_c = [("apple_signin", "Apple sign-in", "Is Apple sign-in ready on this Mac for unattended iOS builds?",
@@ -341,7 +422,9 @@ def checklist_cards(ios, layer):
         ("design_pass", "Design pass", "Run a Claude Opus design pass before UI milestones?", ["Yes", "No"], "Yes", False, None),
         ("model_routing", "Model routing", f"Model routing for tonight (defaults: worker {w}, reviewer {r})?",
          [dflt, "Usage-aware: pick the pool that resets soonest", "Claude workers and Claude Opus reviewers"], dflt, False, None),
-        ("autopilot", "Autopilot", "Turn Autopilot on for the night?", ["Yes", "No"], "Yes", False, None)]
+        ("autopilot", "Autopilot", "Turn Autopilot on for the night?", ["Yes", "No"], "Yes", False, None),
+        *[("gate_" + re.sub(r"\W+", "_", f), f"Gate {f}", f"{f} runs on every push to {branch}: gate it (manual dispatch or tags) until signing/deploy is proven?",
+           ["Gate it in the first task", "Leave it, it's proven"], "Gate it in the first task", False, None) for f in gates]]
 
 def save_project(repo, space_id, name, edit):
     if not isinstance(cfg := (read_list(st.SETTINGS) if os.path.exists(st.SETTINGS) else {}), dict) or cfg.get("pushed_from"):
@@ -404,7 +487,7 @@ def run_checklist(repo, space_id=None, name=None, assistant=None, ap_hint=None, 
              {"key": "ci_secrets", "label": "CI secrets", "ready": sec_ok, "detail": sec_det, "referenced": ref_sec, "missing": miss_sec}]
     person_steps, asked, ask_err = [*gh_steps, *sec_steps], [], None
     to_term = os.environ.get("HC_TERMINAL_ID") or assistant or (None if dry else coord_for_repo(repo, bare_id)[0])
-    cards = checklist_cards(ios, layer)
+    cards = checklist_cards(ios, layer, release_gates(repo, br := base_branch(repo)), br)
     for key, label, question, options, recommend, needs_ready, pstep in cards:
         if val := str(proj.get(key) or "").strip():
             rdy = val.lower() not in NOT_READY if needs_ready else True
@@ -480,9 +563,10 @@ def cmd_project(args):
     assistant, c6, l6 = ensure_assistant(repo, space_id, dry)
     ap_on, c7, l7 = sync_autopilot(repo, space_id, name, old_ids, bool(args.autopilot), c6, dry, to_export)
     chk = run_checklist(repo, space_id=space_id, name=(args.name or "").strip() or layer.get("name") or name, assistant=assistant, ap_hint=ap_on, dry=dry)
-    lines, changed = [l1, l2, l3, l4, l5, l6, *([l7] if l7 else [])], any((c1, c2, c3, c4, c5, c6, c7, chk["changed"]))
+    health = base_health(repo).strip()
+    lines, changed = [l1, l2, l3, l4, l5, l6, *([l7] if l7 else []), *([f"Base health: {health}"] if health else [])], any((c1, c2, c3, c4, c5, c6, c7, chk["changed"]))
     out = {"folder": repo, "name": name, "prefix": prefix, "space": st.bare(space_id), "space_step": space_step,
-           "assistant": assistant, "check": (layer.get("tasks") or {}).get("check"), "requirements": req_path,
+           "assistant": assistant, "base_health": health, "check": (layer.get("tasks") or {}).get("check"), "requirements": req_path,
            "autopilot": chk["autopilot"], "checklist": {k: v for k, v in chk.items() if k != "lines"},
            "dry_run": dry, "changed": changed, "steps": lines}
     say(args, out, "\n".join(f"[dry-run] {x}" if dry else x for x in [*lines, *chk["lines"]]))

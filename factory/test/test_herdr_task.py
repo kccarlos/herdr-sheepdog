@@ -7827,6 +7827,42 @@ class ProjectStart(unittest.TestCase):
         self.assertFalse(os.path.exists(sb))
         self.assertEqual([c for c in self.calls if c[:2] in (["hc", "run"], ["herdr-app", "do"])], [])
 
+    def fork(self, name, workflows, commits=2):
+        repo = os.path.join(self.tmp, name)
+        for f, text in workflows.items():
+            self.put(os.path.join(repo, ".github", "workflows", f), text)
+        subprocess.run(["git", "init", "-q", "--initial-branch=main", repo], check=True)
+        for n in range(commits):
+            subprocess.run(["git", "-C", repo, "-c", "user.name=H", "-c", "user.email=h@x", "commit", "-q", "--allow-empty", "-m", f"c{n}"], check=True)
+        return repo
+
+    def test_release_workflow_on_push_to_main_gets_a_gate_item_and_base_health_instruction(self):
+        """FAC-74 (field notes 28, 29): a fork's release workflow that runs on every push to main is flagged;
+        an inherited repo's Assistant is told to measure the base's flaky tests first."""
+        rel = "name: Release\non:\n  push:\n    branches: [main]\njobs:\n  ship:\n    steps:\n      - run: fastlane beta\n"
+        tags = "name: Release\non:\n  push:\n    tags:\n      - 'v*'\njobs:\n  ship:\n    steps:\n      - run: gh release create v1\n"
+        manual = "name: Deploy\non: workflow_dispatch\njobs:\n  ship:\n    steps:\n      - run: npx wrangler deploy\n"
+        other = "name: Publish\non:\n  push:\n    branches:\n      - dev\njobs:\n  p:\n    steps:\n      - run: npm publish\n"
+        ci = "name: CI\non: [push, pull_request]\njobs:\n  test:\n    steps:\n      - uses: actions/upload-artifact@v4\n      - run: npm test\n"
+        for text, hit in ((rel, True), (tags, False), (manual, False), (other, False), (ci, False)):
+            self.assertEqual(self.project.releases(text) and self.project.pushes_to(text, "main"), hit, text)
+        self.assertTrue(self.project.pushes_to("on:\n  push:\n  pull_request:\n", "main") and self.project.pushes_to("on:\n  push:\n    branches-ignore: [dev]\n", "main"))
+        out = lambda *a: json.loads(self.start(*a, "--autopilot", "--dry-run", "--json"))
+        o1 = out(self.fork("fork1", {"release.yml": rel, "ci.yml": ci, "tags.yml": tags}))
+        keys = [x["key"] for x in o1["checklist"]["items"]]
+        self.assertEqual([k for k in keys if k.startswith("gate_")], ["gate_release_yml"])
+        self.assertIn("gate_release_yml", keys)
+        self.assertIn("gh run list --branch main --repo", o1["base_health"])
+        for words in ("base-health task", "docs/flaky-tests.md", "3 times", "test retries in CI", "gate release.yml"):
+            self.assertIn(words, o1["base_health"])
+        self.assertTrue(any("Base health: Inherited codebase" in x for x in o1["steps"]))
+        o2 = out(self.fork("fork2", {"ci.yml": ci, "tags.yml": tags, "manual.yml": manual}))
+        self.assertFalse([x for x in o2["checklist"]["items"] if x["key"].startswith("gate_")])
+        self.assertIn("base-health task", o2["base_health"])
+        self.assertNotIn("gate ", o2["base_health"])
+        o3 = out(self.fork("fresh", {}, commits=1))
+        self.assertEqual(o3["base_health"], "")
+
     def checklist(self, *argv):
         buf = self.io.StringIO()
         with self.mock.patch.object(sys, "argv", ["herdr-task", "project", "checklist", *argv]), self.redirect(buf):
