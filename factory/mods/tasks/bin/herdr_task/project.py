@@ -12,6 +12,8 @@ FACTORY_WORKER = {"agent": "agy", "model": "gemini-4-carbon-high", "effort": "",
 FACTORY_REVIEWER = {"agent": "agy", "model": "gemini-4-argon-high", "effort": "", "fast": False}
 # reviewer_sandbox off: a sandboxed agy reviewer can't sign in (agy keeps its sign-in in the keychain), and FACTORY_REVIEWER is agy
 FACTORY_TASKS = {"merge": "checks", "review_min": 2, "reviewer_sandbox": False}
+IOS_START_NOTE = "iOS: lease a simulator with `herdr-task simulator lease <task>` and use only that one; never create or erase simulators."
+IOS_FINISH_NOTE = "iOS: release it with `herdr-task simulator release <task>`."
 HEARTBEAT_HEAD = "Requirements: read docs/requirements.md and build toward it milestone by milestone.\n\n"
 HEARTBEAT_EXPORT_HEAD = (
     "Requirements (to export first): docs/requirements.md links a claude.ai artifact or doc (marked to export), "
@@ -250,6 +252,12 @@ def ensure_settings(repo, space_id, name, given_check, d, dry):
     for k, v in (*FACTORY_TASKS.items(), *((("check", chk),) if chk else ())):
         if tasks.get(k) is None or (k == "check" and not tasks.get("check")):
             tasks[k], changed = v, True
+    mach = (d.get("machines") or {}).get(d.get("here") or st.LOCAL_MACHINE) or {}
+    for k, key, line in (("start_notes", "simulator lease", IOS_START_NOTE), ("finish_notes", "simulator release", IOS_FINISH_NOTE)) if detect_ios(repo) else ():
+        # What the folder runs with now: its own notes, else the machine's, else Everywhere's (a folder value replaces them).
+        cur = next((str(v) for v in (tasks.get(k), (mach.get("tasks") or {}).get(k), (d.get("everywhere") or {}).get("tasks", {}).get(k)) if str(v or "").strip()), "")
+        if key not in cur:  # appended to the person's notes, once
+            tasks[k], changed = "\n".join(x for x in (cur.strip(), line) if x), True
     if tasks != (layer.get("tasks") or {}):
         layer["tasks"] = tasks
     chk_words = f"check: {tasks['check']}" if tasks.get("check") else "check: none"

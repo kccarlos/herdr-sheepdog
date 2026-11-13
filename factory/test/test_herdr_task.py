@@ -8435,6 +8435,40 @@ class ProjectStart(unittest.TestCase):
         self.assertEqual((proj["service_account"], proj["milestone_gates"], proj["design_pass"], proj["autopilot"], "asks" in proj),
                          ("1Password service account", "All milestones except release", "No", "Yes", False))
 
+    def notes(self, repo):
+        with self.store.Store(self.store.locate(repo), write=False) as s:
+            t = self.st.settings_for(s, "sp1")["tasks"]
+        return t.get("start_notes"), t.get("finish_notes")
+
+    def test_project_start_adds_the_simulator_lines_once_and_keeps_notes(self):
+        self.put(os.path.join(self.templates, "assistant.md"), "---\nname: assistant\ncommand: exec claude\n---\nCoordinate.\n")
+        ios, mac = os.path.join(self.tmp, "ios-app"), os.path.join(self.tmp, "mac-app")
+        self.put(os.path.join(ios, "App.xcodeproj", "project.pbxproj"), "IPHONEOS_DEPLOYMENT_TARGET = 17.0;\n")
+        self.put(os.path.join(mac, "Mac.xcodeproj", "project.pbxproj"), "SDKROOT = macosx;\n")
+        self.start(mac, "--json")
+        self.assertEqual(self.notes(mac), ("", ""))
+        self.start(ios, "--json")
+        start, finish = self.notes(ios)
+        self.assertEqual((start, finish), (self.project.IOS_START_NOTE, self.project.IOS_FINISH_NOTE))
+        self.assertIn("herdr-task simulator lease <task>", start)
+        self.assertIn("herdr-task simulator release <task>", finish)
+        cfg = self.store.read_list(self.settings_file)
+        t = next(v for v in cfg["spaces"].values() if v.get("folder") == ios)["tasks"]
+        t["start_notes"], t["finish_notes"] = "bun install", "tell the person"
+        self.put(self.settings_file, cfg)
+        self.start(ios, "--json")
+        self.start(ios, "--json")
+        self.assertEqual(self.notes(ios), (f"bun install\n{self.project.IOS_START_NOTE}", f"tell the person\n{self.project.IOS_FINISH_NOTE}"))
+        # Notes set at Everywhere are kept too: the folder's value would replace them.
+        ios2 = os.path.join(self.tmp, "ios-two")
+        self.put(os.path.join(ios2, "App.xcodeproj", "project.pbxproj"), "IPHONEOS_DEPLOYMENT_TARGET = 17.0;\n")
+        cfg = self.store.read_list(self.settings_file)
+        cfg["everywhere"] = {"tasks": {"start_notes": "every start"}}
+        self.put(self.settings_file, cfg)
+        self.start(ios2, "--json")
+        self.start(ios2, "--json")
+        self.assertEqual(self.notes(ios2), (f"every start\n{self.project.IOS_START_NOTE}", self.project.IOS_FINISH_NOTE))
+
     def test_ios_only_for_ios_projects_and_lists_person_steps(self):
         mac_pkg, ios_pkg, mac_xc, ios_xc = (os.path.join(self.tmp, x) for x in ("mac-pkg", "ios-pkg", "mac-xc", "ios-xc"))
         self.put(os.path.join(mac_pkg, "Package.swift"), "// .iOS(.v17)\nlet p = Package(platforms: [.macOS(.v14)])\n")
@@ -9412,6 +9446,15 @@ class SimulatorPool(unittest.TestCase):
         self.run_cli("simulator", "lease", "WM-7", "--folder", self.repo)
         with mock.patch.object(self.sims.shutil, "which", lambda c: None if c == "xcrun" else shutil.which(c)):
             self.assertEqual(self.run_cli("done", "WM-7", "--folder", self.repo)[0], 0)
+
+    def test_done_releases_a_lease_the_worker_forgot(self):
+        self.set_pool(["WukongMind 1"])
+        self.assertEqual(self.run_cli("add", "First", "--folder", self.repo)[0], 0)
+        self.assertEqual(self.run_cli("simulator", "lease", "WM-1", "--folder", self.repo)[0], 0)
+        self.assertEqual(self.run_cli("done", "WM-1", "--folder", self.repo)[0], 0)
+        self.assertEqual(self.shutdowns(), [self.U1])
+        lst = json.loads(self.run_cli("simulator", "list", "--folder", self.repo, "--json")[1])["simulators"]
+        self.assertEqual([r["holder"] for r in lst], [None])
 
 
 class EndGroup(unittest.TestCase):
