@@ -188,7 +188,7 @@ func TestSubscribeFleetEvents(t *testing.T) {
 	expectClosed(t, ch)
 }
 
-func TestSubscribeFleetSkipsRemoteTerminals(t *testing.T) {
+func TestSubscribeFleetIncludesRemoteTerminals(t *testing.T) {
 	b, srv := newBackend(t)
 	srv.Add(reported("m/t1", "claude-code", "idle"))
 	ctx, cancel := context.WithCancel(testContext(t))
@@ -196,7 +196,8 @@ func TestSubscribeFleetSkipsRemoteTerminals(t *testing.T) {
 
 	ch := b.SubscribeFleet(ctx)
 	awaitSubscribers(t, srv, 1)
-	srv.SetStatus("m/t1", &hc.Status{State: "working", App: "claude-code"})
 	srv.Finish("m/t1", "exited")
-	expectNone(t, ch, 150*time.Millisecond)
+	if ev := receive(t, ch); ev.Kind != herdr.FleetPaneExited || ev.PaneID != "m~t1" {
+		t.Fatalf("finished event = %+v, want FleetPaneExited for m~t1", ev)
+	}
 }

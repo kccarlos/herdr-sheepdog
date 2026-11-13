@@ -53,6 +53,8 @@ voice session, `SceneCoordinator`, "Take it back"),
    got the prompt once and kept the grant across a re-signed update.
 4. v1: the daemon runs on the same computer as herdr-app; the panel reaches
    it over loopback without auth. Remote machines' agents are not watched.
+   (Since then the daemon watches agents on machines added with
+   `hc machine add`; see [desktop.md](../../desktop.md#agents-on-other-machines).)
    Switching computers is v2 (through a loopback proxy in Sheepdog.app that
    the panel talks to); the panel's data layer is built around one base URL
    so that v2 only swaps it.

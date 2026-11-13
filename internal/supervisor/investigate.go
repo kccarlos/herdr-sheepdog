@@ -146,6 +146,12 @@ func (s *Supervisor) startInvestigation(ctx context.Context, paneID string, req 
 	if err != nil {
 		return brain.InvestigationStart{}, err
 	}
+	// An agent on an added machine (pane id "box~t4") has its files and
+	// session there: a local read-only fork would start in a folder this
+	// computer does not have. Its screen is still readable.
+	if strings.Contains(paneID, "~") {
+		return brain.InvestigationStart{}, errors.New("investigate: the agent runs on another machine; read its screen instead")
+	}
 	workspace := s.workspaceDir(ctx, row)
 	if workspace == "" {
 		workspace = row.Cwd

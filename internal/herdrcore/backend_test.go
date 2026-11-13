@@ -90,6 +90,8 @@ func TestListAgentsMapping(t *testing.T) {
 		"t4": {"codex", herdr.StateBlocked},
 		"t6": {"custom", herdr.StateUnknown},
 		"t9": {"codex", herdr.StateUnknown},
+		// A terminal on an added machine, as a slash-free pane id.
+		"m~t1": {"claude", herdr.StateIdle},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("agents = %+v, want panes of %v", got, want)
@@ -131,8 +133,8 @@ func TestSnapshot(t *testing.T) {
 	for _, p := range snap.Panes {
 		panes[p.PaneID] = p
 	}
-	if len(panes) != 8 {
-		t.Fatalf("panes = %+v, want 8 live local terminals", panes)
+	if len(panes) != 9 {
+		t.Fatalf("panes = %+v, want 9 live terminals (8 local, 1 remote)", panes)
 	}
 	if p := panes["t3"]; p.Agent != "" || p.Status != herdr.StateUnknown {
 		t.Fatalf("shell pane = %+v", p)
@@ -140,11 +142,11 @@ func TestSnapshot(t *testing.T) {
 	if p := panes["t1"]; p.Agent != "claude" || p.Status != herdr.StateWorking || p.Cwd != "/work/now" {
 		t.Fatalf("agent pane = %+v", p)
 	}
-	if len(snap.Agents) != 5 {
-		t.Fatalf("agents = %d, want 5", len(snap.Agents))
+	if len(snap.Agents) != 6 {
+		t.Fatalf("agents = %d, want 6", len(snap.Agents))
 	}
-	if _, ok := panes["m/t1"]; ok {
-		t.Fatal("remote terminal listed")
+	if _, ok := panes["m~t1"]; !ok {
+		t.Fatal("remote terminal m/t1 not listed as m~t1")
 	}
 }
 
