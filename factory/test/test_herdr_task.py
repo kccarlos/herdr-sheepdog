@@ -8197,11 +8197,11 @@ class ProjectStart(unittest.TestCase):
         self.assertTrue(any("CLAUDECODE" in v for v in self.seen_tpl.values()) and os.listdir(self.templates) == ["assistant.md"])
         self.assertIn("docs/requirements.md", self.ap.heartbeat_of("sp1")[0])
         self.assertTrue(self.store.read_list(self.ap.STATE)["spaces"]["sp1"]["on"])
-        self.assertEqual((out["checklist"]["ready"], len(out["checklist"]["asked"])), (["ci_secrets", "autopilot"], 4))
+        self.assertEqual((out["checklist"]["ready"], len(out["checklist"]["asked"])), (["ci_secrets", "disk", "autopilot"], 4))
         before = len(self.calls)
         text2 = self.start(repo, "--requirements", "https://example.com/other", "--check", "pytest", "--autopilot")
         self.assertTrue(all("found" in line for line in text2.strip().splitlines()[:7]), text2)
-        self.assertIn("Checklist for My App (sp1): 2 ready, 5 missing", text2)
+        self.assertIn("Checklist for My App (sp1): 3 ready, 5 missing", text2)
         self.assertEqual([c for c in self.calls[before:] if c[:2] in (["hc", "run"], ["herdr-app", "do"])], [])
         self.assertEqual(self.Path(repo, "docs", "requirements.md").read_text(), "# Goal\nShip v1.\n")
 
@@ -8283,6 +8283,32 @@ class ProjectStart(unittest.TestCase):
             self.assertEqual(self.cli.main(), 0)
         return buf.getvalue()
 
+    def test_checklist_shows_a_stalled_repo_disk_and_notes_an_external_volume(self):
+        repo = os.path.join(self.tmp, "web-app")
+        os.makedirs(repo)
+        with self.mock.patch.object(self.base, "probe_volume", return_value="the disk is stalling"):
+            out = self.project.run_checklist(repo, dry=True, ap_hint=True)
+        disk = next(x for x in out["items"] if x["key"] == "disk")
+        self.assertEqual((disk["ready"], disk["detail"], "disk" in out["missing"]), (False, "the disk is stalling", True))
+        self.assertIn("Wake or fix the disk", " ".join(out["steps"]))
+        self.assertFalse([ln for ln in out["lines"] if "external volume" in ln])
+        with self.mock.patch.object(self.base, "probe_volume", return_value=None):
+            ok = self.project.run_checklist(repo, dry=True, ap_hint=True)
+            ext = self.project.run_checklist("/Volumes/Ext/web-app", dry=True, ap_hint=True)
+        self.assertIn("disk", ok["ready"])
+        self.assertIn("Note: factory repo is on an external volume (/Volumes/Ext): a stall or a permission prompt stops the night; the internal disk is safer", ext["lines"])
+
+    def test_a_stalled_disk_stops_checklist_and_start_before_any_repo_read(self):
+        repo = os.path.join(self.tmp, "web-app")
+        os.makedirs(repo)
+        with self.mock.patch.object(self.base, "probe_volume", return_value="the disk is stalling"), \
+                self.mock.patch.object(self.project, "locate", side_effect=AssertionError("read the repo")):
+            out = json.loads(self.checklist(repo, "--json"))
+            self.assertEqual((out["ok"], out["missing"]), (False, ["disk"]))
+            self.assertIn("the disk is stalling", self.checklist(repo))
+            with self.mock.patch.object(sys, "argv", ["herdr-task", "project", "start", repo]):
+                self.assertNotEqual(self.cli.main(), 0)
+
     def answer_card(self, ask_id, choice, terminal):
         buf = self.io.StringIO()
         with self.mock.patch.object(sys, "argv", ["herdr-task", "_ask-pane", ask_id]), \
@@ -8304,7 +8330,7 @@ class ProjectStart(unittest.TestCase):
         self.gh_repo, self.gh_secrets = "acme/web-app", "NAME\tUPDATED\nAPI_KEY\t2026-11-12T00:00:00Z\n"
         out1 = json.loads(self.checklist(repo, "--json"))
         self.assertFalse(out1["ios"])
-        self.assertEqual(out1["ready"], ["github"])
+        self.assertEqual(out1["ready"], ["github", "disk"])
         self.assertFalse({"apple_signin", "asc_agreements"} & {x["key"] for x in out1["items"]})
         sec_item = next(x for x in out1["items"] if x["key"] == "ci_secrets")
         self.assertEqual((sec_item["referenced"], sec_item["missing"]), (["API_KEY", "SENTRY_DSN"], ["SENTRY_DSN"]))
@@ -8321,7 +8347,7 @@ class ProjectStart(unittest.TestCase):
         self.assertIn("docs/requirements.md", self.ap.heartbeat_of("sp1")[0])
         self.gh_secrets = "API_KEY\t2026-11-12\nSENTRY_DSN\t2026-11-12\n"
         text2 = self.checklist(repo)
-        self.assertIn("7 ready, 0 missing — ready for an unattended night.", text2)
+        self.assertIn("8 ready, 0 missing — ready for an unattended night.", text2)
         out2 = json.loads(self.checklist(repo, "--json"))
         self.assertEqual((out2["ok"], out2["missing"], out2["asked"], out2["steps"]), (True, [], [], []))
         with self.store.Store(self.store.locate(repo), write=False) as s:
@@ -8435,6 +8461,42 @@ class ProjectStart(unittest.TestCase):
             self.assertNotIn("to export", beat)
 
 
+class ProbeVolume(unittest.TestCase):
+    """FAC-83: probe_volume names a stalled disk without ever waiting on a stuck child."""
+
+    def probe(self, hung):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.base as base
+        made = []
+        class Child:
+            def __init__(self, argv, **kw):
+                self.folder, self.killed = argv[-1], False
+                made.append(self)
+            def wait(self, timeout=None):
+                if self.folder in hung:
+                    raise subprocess.TimeoutExpired("sh", timeout)
+            def kill(self):
+                self.killed = True
+        with mock.patch.object(base.subprocess, "Popen", Child), mock.patch.dict(os.environ, {"TMPDIR": "/scratch-tmp"}):
+            return base.probe_volume("/Volumes/Ext/repo", timeout=1), made
+
+    def test_answers_in_time(self):
+        self.assertEqual(self.probe(set())[0], None)
+
+    def test_repo_stalls_while_tmpdir_answers(self):
+        why, made = self.probe({"/Volumes/Ext/repo"})
+        self.assertIn("/Volumes/Ext", why)
+        self.assertIn("the disk is stalling, or a macOS permission prompt may be waiting for a new process to reach it", why)
+        self.assertEqual([c.killed for c in made], [True, False])
+
+    def test_both_stall(self):
+        why, made = self.probe({"/Volumes/Ext/repo", "/scratch-tmp"})
+        self.assertIn("too busy or stuck", why)
+        self.assertNotIn("disk is stalling", why)
+        self.assertTrue(all(c.killed for c in made))
+
+
 class Watchdog(unittest.TestCase):
     """FAC-62: watchdog restarts a stuck local Assistant once with restart.sh and alerts on repeat."""
 
@@ -8539,6 +8601,39 @@ class Watchdog(unittest.TestCase):
                         delivered={3: {"to": "c2", "turn": 2, "at": self.clock - 40 * 60000, "event": "stalled", "stall": f"quiet:{self.clock - 60 * 60000}"}})
         self.tick()
         self.assertEqual(len(self.restarts), 2)
+
+    def test_a_stalled_disk_alerts_once_per_spell_and_blocks_restarts(self):
+        from unittest import mock
+        t1 = {"id": 1, "title": "Auth", "state": "running", "space": "shop", "attention": "Need API key", "attention_at": self.clock - 40 * 60000}
+        self.save_tasks(t1, delivered={1: {"to": "c1", "turn": 2, "at": self.clock - 40 * 60000, "event": "needs-you"}})  # would restart if the disk answered
+        answers = ["/Volumes/Ext is stalling"]
+        with mock.patch.object(self.wd, "probe_volume", side_effect=lambda *_: answers[0]) as pv:
+            rep = self.tick()
+            self.assertEqual((len(self.alerts), self.restarts, [x["action"] for x in rep["watchdog"]]), (1, [], ["disk-stalled"]))
+            self.assertIn(self.tmp, self.alerts[0][1]["title"])
+            self.assertIn("/Volumes/Ext is stalling", self.alerts[0][1]["title"])
+            self.clock += 5 * 60000
+            self.assertEqual((self.tick(), len(self.alerts), self.restarts), ({}, 1, []))
+            self.assertIn("stall", json.loads(self.Path(self.store, ".watchdog.json").read_text())["shop"])
+            answers[0] = None  # recovered: the spell clears and the stuck Assistant is restarted
+            self.tick()
+            self.assertEqual((len(self.restarts), "stall" in json.loads(self.Path(self.store, ".watchdog.json").read_text()).get("shop", {})), (1, False))
+            answers[0] = "/Volumes/Ext is stalling"  # a new spell alerts again
+            self.tick()
+            self.assertEqual(len(self.alerts), 2)
+        self.assertEqual(pv.call_count, 4)
+
+    def test_a_stall_spell_survives_the_assistant_being_away(self):
+        from unittest import mock
+        self.save_tasks({"id": 1, "title": "Auth", "state": "running", "space": "shop"})
+        with mock.patch.object(self.wd, "probe_volume", return_value="stalling"):
+            self.tick()
+            del self.terms["c1"]
+            self.tick()
+            self.assertIn("stall", json.loads(self.Path(self.store, ".watchdog.json").read_text())["shop"])
+            self.coord("c1", chat="p1")
+            self.tick()
+        self.assertEqual(len(self.alerts), 1)
 
     def test_ready_behind_and_turn_since_news(self):
         queued = {"id": 2, "title": "Follow-up", "state": "queued", "space": "shop", "after": [1]}

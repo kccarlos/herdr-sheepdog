@@ -153,6 +153,40 @@ def run(args, cwd=None, check=False, env=None, timeout=None):
     return r
 
 
+def volume_of(path):
+    """'/Volumes/Ext' for a path on an external volume, else None."""
+    parts = os.path.abspath(path or "").split(os.sep)
+    return os.sep.join(parts[:3]) if len(parts) > 2 and parts[1] == "Volumes" and parts[2] else None
+
+
+def _answers(folder, timeout):
+    """Does a quick `git status` (or `ls`) in `folder` answer in time? A stuck child may not die on kill (uninterruptible I/O), so it's never waited for."""
+    try:
+        p = subprocess.Popen(["sh", "-c", 'git -C "$1" status --porcelain >/dev/null 2>&1 || ls "$1" >/dev/null 2>&1; exit 0', "sh", folder],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return True  # can't even start it: not a stalled disk
+    try:
+        p.wait(timeout=timeout)
+        return True
+    except subprocess.TimeoutExpired:
+        try:
+            p.kill()
+        except OSError:
+            pass
+        return False
+
+
+def probe_volume(repo, timeout=10):
+    """None when the repo's folder answers in time, else a short reason (a stalled disk or a waiting macOS permission prompt, FAC-83)."""
+    if _answers(repo, timeout):
+        return None
+    where = volume_of(repo) or repo
+    if _answers(os.environ.get("TMPDIR") or "/tmp", timeout):
+        return f"{where} did not answer in {timeout}s while $TMPDIR did: the disk is stalling, or a macOS permission prompt may be waiting for a new process to reach it"
+    return f"{where} and $TMPDIR did not answer in {timeout}s: this machine is too busy or stuck to start new processes"
+
+
 def git(cwd, *args, timeout=None):
     r = run(["git", "-C", cwd, *args], timeout=timeout)
     return r.returncode == 0, r.stdout.strip(), r.stderr.strip()

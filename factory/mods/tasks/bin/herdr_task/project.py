@@ -505,6 +505,9 @@ def run_checklist(repo, space_id=None, name=None, assistant=None, ap_hint=None, 
              {"key": "ci_secrets", "label": "CI secrets", "ready": sec_ok, "detail": sec_det, "referenced": ref_sec, "missing": miss_sec}]
     person_steps, asked, ask_err = [*gh_steps, *sec_steps], [], None
     to_term = os.environ.get("HC_TERMINAL_ID") or assistant or (None if dry else coord_for_repo(repo, bare_id)[0])
+    stall = base.probe_volume(repo)
+    items.append({"key": "disk", "label": "Repo disk", "ready": not stall, "detail": stall or "answers in time"})
+    person_steps += [f"Wake or fix the disk holding {repo}: {stall}"] if stall else []
     cards = checklist_cards(ios, layer, release_gates(repo, br := base_branch(repo)), br)
     agreements = probe_asc_agreements() if ios else None
     for key, label, question, options, recommend, needs_ready, pstep in cards:
@@ -552,6 +555,9 @@ def run_checklist(repo, space_id=None, name=None, assistant=None, ap_hint=None, 
             lines += [title, *(f"- {x['label']}: {x['detail']}" for x in grp)]
     if person_steps:
         lines += ["Steps for you:", *(f"- {s}" for s in person_steps)]
+    vol = base.volume_of(repo)
+    if vol:
+        lines.append(f"Note: factory repo is on an external volume ({vol}): a stall or a permission prompt stops the night; the internal disk is safer")
     if ask_err:
         lines.append(f"Cards not opened: {ask_err}")
     return {"folder": repo, "space": bare_id, "ios": ios, "ok": not miss_items, "ready": [x["key"] for x in rdy_items],
@@ -564,7 +570,16 @@ def cmd_project(args):
     dry, raw = bool(getattr(args, "dry_run", False)), args.folder if args.folder is not None else getattr(args, "folder_opt", None)
     if raw is not None and (not raw.strip() or "\0" in raw):
         raise Fail("Pick a folder.")
-    path = os.path.realpath(os.path.expanduser((raw or os.getcwd()).strip()))
+    path = os.path.abspath(os.path.expanduser((raw or os.getcwd()).strip()))
+    stall = base.probe_volume(path)
+    path = os.path.realpath(path) if not stall else path
+    if stall:  # before any read of the repo: those would hang on a stalled disk (FAC-83)
+        if args.project == "start":
+            raise Fail(f"Can't start: {stall}")
+        step = f"Wake or fix the disk holding {path}: {stall}"
+        return say(args, {"folder": path, "ok": False, "ready": [], "missing": ["disk"], "steps": [step],
+                          "items": [{"key": "disk", "label": "Repo disk", "ready": False, "detail": stall}]},
+                   f"Checklist for {os.path.basename(path)}: 0 ready, 1 missing\nMissing:\n- Repo disk: {stall}\nSteps for you:\n- {step}")
     if path in ("/", os.path.realpath(base.HOME)) or (os.path.exists(path) and not os.path.isdir(path)):
         raise Fail("Pick a project folder, not ~ or /." if os.path.isdir(path) else f"Not a folder: {path}")
     if args.project == "checklist":

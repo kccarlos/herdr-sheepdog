@@ -4,7 +4,7 @@ import hashlib, json, os, re, subprocess
 
 from . import news
 from .agents import agent_running, detail, held_ask, live_agents, STARTING_MS, status_word, task_status
-from .base import addon_off, APP_HOME, Fail, guard, hc_json, HOME, now, PACKAGE, run, STORE
+from .base import addon_off, APP_HOME, Fail, guard, hc_json, HOME, now, PACKAGE, probe_volume, run, STORE, volume_of
 from .commands import send_alert
 from .news import send_or_hold, stall_of, typing
 from .settings import bare
@@ -124,6 +124,12 @@ def watchdog_pass(report):
     lists = [(os.path.basename(p)[:-5], d.get("prefix") or "TASK", d.get("tasks") or []) for p in store_files() for d in [read_list(p)] if isinstance(d, dict)]
     coords = [k for k in ls.get("terminals") or [] if k.get("state") == "live" and "/" not in (k.get("address") or "/")]
     live_addrs = {k["address"] for k in coords}
+    folders, probes = {}, {}  # space -> folder with work waiting; volume (or folder) -> this pass's probe answer
+    for p in store_files():
+        if isinstance(d := read_list(p), dict) and d.get("folder"):
+            for x in d.get("tasks") or []:
+                if not x.get("archived") and x.get("state") in ("running", "queued", "todo") and x.get("space"):
+                    folders.setdefault(bare(x["space"]), d["folder"])
     state = {s: dict(r) for s, r in prev_all.items() if isinstance(r, dict) and r.get("restarted_at") and now() - r["restarted_at"] < RESTART_COOLDOWN_MS}
 
     for item in coords:
@@ -145,6 +151,23 @@ def watchdog_pass(report):
             rec["space"] = space
         if rec.get("alerted") and (rec["alerted"].get("address") != addr or (k.get("turn") or 0) > (rec["alerted"].get("turn") or 0)):
             rec.pop("alerted", None)
+
+        if space and space in folders:  # a stalled disk: a restart would hang too, so alert once per spell and leave it be (FAC-83)
+            key = volume_of(folders[space]) or folders[space]
+            if key not in probes:
+                probes[key] = probe_volume(folders[space])
+            if probes[key]:
+                if not rec.get("stall"):
+                    title = f"{folders[space]} is not answering: {probes[key]}"
+                    try:
+                        send_alert(addr, title, body=probes[key], about=True)
+                        rec["stall"] = {"volume": key, "at": now()}
+                        report.setdefault("watchdog", []).append({"action": "disk-stalled", "address": addr, "space": space, "title": title})
+                    except Fail:
+                        pass
+                state[slot] = rec
+                continue
+        rec.pop("stall", None)
 
         st, why, alert_only, api_why = status_word(k), None, False, None
         tpl, tpl_ms = template_info()
@@ -208,6 +231,9 @@ def watchdog_pass(report):
                         pass
         state[slot] = rec
 
+    for s, r in prev_all.items():  # a stall spell stays until a probe answers, even while its Assistant is away
+        if isinstance(r, dict) and r.get("stall") and s not in state:
+            state[s] = dict(r)
     if state != prev_all:
         os.makedirs(os.path.dirname(WATCHDOG), exist_ok=True)
         tmp = f"{WATCHDOG}.{os.getpid()}.tmp"
