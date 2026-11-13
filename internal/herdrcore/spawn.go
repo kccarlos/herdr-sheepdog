@@ -69,6 +69,11 @@ func (b *Backend) openShell(ctx context.Context, cwd, space, role string, size *
 
 // ProcessInfo reports the terminal's shell and foreground program.
 func (b *Backend) ProcessInfo(ctx context.Context, paneID string) (herdr.ProcessInfo, error) {
+	if hc.IsRemote(paneID) {
+		// Its PIDs are another machine's: matching them against this
+		// machine's processes would read the wrong session log.
+		return herdr.ProcessInfo{PaneID: paneID}, nil
+	}
 	t, err := b.client.Get(ctx, paneID)
 	if err != nil {
 		return herdr.ProcessInfo{}, translate(err)
