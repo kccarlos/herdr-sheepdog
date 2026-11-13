@@ -828,6 +828,30 @@ def folder_for(s, task):
     return path
 
 
+# Codex's "Trust this folder?" screen: whatever opens the reviewer's prompt first must wait it out, or the prompt
+# typed while it shows is lost (FAC-80). Only a reviewer's own task repository ever shows it.
+CODEX_TRUST = re.compile(r"Trust this folder|Do you trust the contents|Yes, continue", re.I)
+CODEX_READY = re.compile(r"^\s*[›>]\s|\bcontext left\b|\? for shortcuts", re.I | re.M)  # its input box, once startup is over
+
+
+def send_when_clear(address, message, tries=60):
+    """Sends a Codex reviewer its prompt once its screen shows the input box and no trust dialog (answering a
+    dialog with enter, once). Never sent blind: if that doesn't come within `tries` seconds the reviewer is
+    ended and the launch fails (the gate tries its second CLI)."""
+    answered = False
+    for _ in range(tries):
+        screen = run(["hc", "read", address, "--lines", "40"]).stdout or ""
+        if CODEX_TRUST.search(screen):
+            if not answered:
+                run(["hc", "keys", address, "enter"])
+                answered = True
+        elif CODEX_READY.search(screen):
+            return run(["hc", "send", address, message])
+        time.sleep(1)
+    run(["hc", "kill", address])
+    raise Fail("the Codex reviewer never showed its prompt box (trust screen or startup stuck)")
+
+
 def launch(s, task, argv, space, message=None, parent=None, resume=None, role=None, reads=None):
     """Starts one agent for the task with no tab or pane of its own (a space can hold thousands
     of tasks): an hc child of `parent`, which parent_for() makes the space's coordinator, reached
@@ -846,7 +870,8 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     elif role == "reviewer" and agent_key(cmd) in ("agy", "claude"):
         # a read-only reviewer: its worktree trusted, its verdict (herdr-task review) and `reads` allowed
         cmd = own_argv(cmd, folder if task.get("mode") == "worktree" else None, verbs=("review",), cwd=folder, reads=reads)
-    if message:
+    held = message if role == "reviewer" and agent_key(cmd) == "codex" else None
+    if message and not held:
         cmd = cmd + (["-i", message] if agent_key(cmd) == "agy" else [message])  # agy reads prompts only from -i
     if sand:
         cmd = sandboxed(cmd, folder, reviewer_sandbox(s, space)[0])
@@ -872,6 +897,8 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
         out = {}
     if r.returncode != 0 or not out.get("address"):
         raise Fail((r.stderr or r.stdout).strip() or "hc run failed")
+    if held:
+        send_when_clear(out["address"], held)
     a = {"address": out["address"], "agent": agent_key(argv), "argv": argv, "at": now()}
     if parent:
         a["parent"] = parent

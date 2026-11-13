@@ -14,7 +14,7 @@ import time
 from .checks import checks_line
 from .base import Fail, git, guard, hc_json, now, run, STORE, stop_note, VERSION
 from .settings import (
-    agent_argv, agent_key, argv_for, bare, gate_min, merge_policy, MUST_WORDS, review_kind, review_limits, set_opts, settings_block, settings_for, space_base,
+    agent_argv, agent_key, argv_for, bare, codex_review_argv, gate_min, merge_policy, MUST_WORDS, review_kind, review_limits, set_opts, settings_block, settings_for, space_base,
     task_settings, worker_argv, worktrees_on,
 )
 from .agents import (
@@ -630,7 +630,7 @@ def gate_step(s, t):
     # Claude Code's plan mode blocks every command, the verdict's `herdr-task review` too, so a Claude reviewer
     # runs in auto mode: its allow list (the verdict, its reads) runs, the rest goes past auto mode's checks.
     perm = "read-only" if rv["agent"] == "codex" else "full" if sand else "auto" if rv["agent"] == "claude" else "plan"
-    argv = argv_for({**rv, "perm": perm})
+    argv = codex_review_argv(rv, wt) if rv["agent"] == "codex" else argv_for({**rv, "perm": perm})
     runs = t.get("review_runs") or []
     at = max(now(), (runs[-1]["at"] + 1) if runs else 0)
     code = round_code({"round": round_n, "head": head, "at": at}) if sand else None
@@ -654,7 +654,7 @@ def gate_step(s, t):
         f"Then end with your findings as your last message."
         + (f" Your shell runs without asking only {', '.join(REVIEW_READS)}" + (f" and this folder's check, `{check}`" if check else "")
            + ": anything else waits on a prompt nobody here can answer." if rv["agent"] in ("agy", "claude") else "")
-        + (" Codex's sandbox can't reach Herdr: give that command sandbox_permissions \"require_escalated\"." if rv["agent"] == "codex" else ""))])
+        + (" Run every command as it is, never with sandbox_permissions \"require_escalated\": nothing here asks, and a request for more is refused. Edit nothing." if rv["agent"] == "codex" else ""))])
     live = workers(s, t)
     a = launch(s, t, argv, t.get("space"), prompt, parent=live[-1]["address"] if live else None, role="reviewer",
                reads=review_reads(check))

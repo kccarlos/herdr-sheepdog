@@ -3174,12 +3174,71 @@ class GateReview(unittest.TestCase):
         self.verdict("term-1", passed=False, changes="fix edge case", must_fix=1)
         self.assertEqual(agents.task_status(self.task, idle)[:2], ("needs", "reply"))
 
-    def test_a_codex_reviewer_is_told_to_escalate_its_verdict(self):
-        self.task["reviewer"], self.task["reviewer_model"] = "codex", None
-        self.ready()
-        cmd = self.runs[0][self.runs[0].index("--") + 1:]
-        self.assertIn("read-only", cmd)
-        self.assertIn("require_escalated", cmd[-1])
+    def codex_run(self, model):
+        """Starts a Codex gate reviewer; returns (its argv, the prompt held for it)."""
+        from unittest import mock
+        import herdr_task.launch as launch
+        sent = []
+        self.task["reviewer"], self.task["reviewer_model"] = "codex", model
+        with mock.patch.object(launch, "send_when_clear", lambda address, message: sent.append(message)):
+            self.ready()
+        return self.runs[0][self.runs[0].index("--") + 1:], sent
+
+    def test_a_codex_reviewer_runs_unattended_on_the_worktree(self):
+        """FAC-80: its worktree and repo root trusted, nothing asks (never, workspace-write so the check and
+        `herdr-task review` run), and it is told not to escalate."""
+        cmd, sent = self.codex_run("gpt-5.5")
+        self.assertEqual(cmd[cmd.index("-a") + 1], "never")
+        self.assertEqual(cmd[cmd.index("-s") + 1], "workspace-write")
+        self.assertEqual(cmd[cmd.index("--disable") + 1], "hooks")
+        trust = next(a for a in cmd if a.startswith("projects="))
+        scratch = cmd[cmd.index("-C") + 1]  # not the worktree: that stays read-only to it
+        self.assertNotEqual(scratch, self.wt)
+        for root in (self.wt, os.path.realpath(self.main), scratch):  # the repo's root as git resolves it
+            self.assertIn(json.dumps(root) + '={trust_level="trusted"}', trust)
+        self.assertEqual(cmd[cmd.index("-m") + 1], "gpt-5.5")
+        self.assertIn(self.head, sent[0])
+        self.assertIn("never with sandbox_permissions", sent[0])
+        self.assertNotIn(sent[0], cmd)  # not on the command line: it waits for the trust screen
+
+    def test_another_clis_model_is_not_passed_to_codex(self):
+        cmd, _ = self.codex_run("claude-sonnet-5-5-high")
+        self.assertNotIn("-m", cmd)
+        reviewer = next(x for x in self.settings_rows() if x["label"] == "Reviewer")
+        self.assertIn("claude-sonnet-5-5-high is another CLI's", reviewer["text"])
+        self.assertIsNone(reviewer["value"]["model"])
+
+    def settings_rows(self):
+        from herdr_task import settings
+        return settings.task_settings(self.store, self.task)
+
+    def test_the_prompt_waits_for_codex_trust_screen(self):
+        from unittest import mock
+        import herdr_task.launch as launch
+        screens = iter(["", "Starting Codex...", "Trust this folder? 1. Yes, continue", "Trust this folder? 1. Yes, continue",
+                        "› Ask Codex"])
+        calls = []
+
+        def hc(argv, **k):
+            calls.append(argv[1])
+            return subprocess.CompletedProcess(argv, 0, next(screens) if argv[1] == "read" else "", "")
+        with mock.patch.object(launch, "run", hc), mock.patch.object(launch.time, "sleep", lambda n: None):
+            launch.send_when_clear("t1", "THE PROMPT")
+        self.assertEqual(calls, ["read", "read", "read", "keys", "read", "read", "send"])  # answered once, sent last
+
+    def test_the_prompt_is_never_sent_while_the_trust_screen_stays(self):
+        from unittest import mock
+        import herdr_task.launch as launch
+        calls = []
+
+        def hc(argv, **k):
+            calls.append(argv[1])
+            return subprocess.CompletedProcess(argv, 0, "Trust this folder?" if argv[1] == "read" else "", "")
+        with mock.patch.object(launch, "run", hc), mock.patch.object(launch.time, "sleep", lambda n: None):
+            with self.assertRaises(launch.Fail):
+                launch.send_when_clear("t1", "THE PROMPT", tries=3)
+        self.assertNotIn("send", calls)
+        self.assertEqual(calls[-1], "kill")
 
     def test_a_claude_reviewer_runs_in_auto_mode_so_its_verdict_can_run(self):
         self.task["reviewer"], self.task["reviewer_model"] = "claude", None

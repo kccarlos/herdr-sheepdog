@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shlex
+import tempfile
 import shutil
 
 from .base import Fail, git, HOME, MAX_RUNNING, WHERE
@@ -156,6 +157,31 @@ def worktrees_on(s, space=None):
     """Tasks here get a git worktree each: in a git repo, unless the person's Shepherdr settings
     turn worktrees off for it (then it works in the folder itself, as a folder without git)."""
     return s.loc["kind"] == "repo" and settings_for(s, space)["tasks"].get("worktrees") is not False
+
+
+# Models only another CLI knows (a reviewer model left from agy or Claude): Codex on a ChatGPT account refuses them.
+FOREIGN_MODEL = re.compile(r"(?:claude|gemini)-", re.I)
+
+
+def codex_review_argv(pick, folder):
+    """A Codex gate reviewer's argv (FAC-80), unattended on a task worktree: nothing may wait for a person.
+    - Trust: its worktree, its repository's root (a worktree's .git file points there, and Codex asks to trust
+      that root) and its scratch folder as a `projects` table, for this run only; hooks off (a new hook stops
+      it on "Hooks need review").
+    - Approvals: --ask-for-approval never, so it never asks. Read-only would then fail the check (temp dirs, git
+      caches) and `herdr-task review` (reaches hc), and an escalation would wait for a person. So it runs
+      workspace-write with -C an empty scratch folder: the only writable places are that folder and the temp
+      dirs, and the worktree (read everywhere) stays read-only to it."""
+    scratch = tempfile.mkdtemp(prefix="herdr-review-")
+    a = ["codex", "--no-daemon", "--disable", "hooks", "-C", scratch]
+    roots = list(dict.fromkeys(trust_roots(folder) + trust_roots(scratch)))
+    a += ["-c", "projects={" + ",".join(f'{json.dumps(r)}={{trust_level="trusted"}}' for r in roots) + "}"]
+    if pick.get("model") and not FOREIGN_MODEL.match(pick["model"]):
+        a += ["-m", pick["model"]]
+    if pick.get("effort"):
+        a += ["-c", f'model_reasoning_effort="{pick["effort"]}"']
+    a += ["-c", 'service_tier="default"', "-s", "workspace-write", "-a", "never"]
+    return a
 
 
 def argv_for(pick):
@@ -399,7 +425,7 @@ def trust_roots(folder):
     the repository root")."""
     if not folder:
         return []
-    out = [folder]
+    out = [folder] + [r for r in (os.path.realpath(folder),) if r != folder]  # Codex may match the resolved path
     ok, common, _ = git(folder, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if ok and common:
         root = os.path.dirname(common) if os.path.basename(common) == ".git" else \
@@ -483,10 +509,15 @@ def task_settings(s, t, space=None, argv=None):
                 rv[f] = t[f"reviewer_{f}"]
         want = rv.get("agent") or other_cli(agent)
         who = want
+        dropped = None
+        if want == "codex" and FOREIGN_MODEL.match(rv.get("model") or ""):
+            dropped, rv = rv["model"], {**rv, "model": None}
         if want != agent and cli_here(want) == "signed-out":
             # Signed out here, it would sit at its sign-in screen and never review (#745): the task's own CLI does.
             who, rv = agent, {}
         text = who + (f", model {rv['model']}" if rv.get("model") else "") + (f", effort {rv['effort']}" if rv.get("effort") else "")
+        if dropped and who == "codex":
+            text += f" (model {dropped} is another CLI's, not passed to Codex)"
         if who != want:
             text += (f" (your own CLI: {CLI_NAMES.get(want, want)} isn't signed in here; the person runs "
                      f"`{LOGIN.get(want, want + ' login')}` on this machine, then asks for the review again)")
