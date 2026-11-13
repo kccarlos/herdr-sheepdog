@@ -7,7 +7,7 @@ import shutil
 import tempfile
 
 from .base import Fail, GH, git, hc_json, now, run, STORE
-from .agents import agent_running, live_agents, live_helpers, status_word
+from .agents import agent_running, live_agents, live_helpers, open_question, status_word
 
 
 # ---- GitHub ---------------------------------------------------------------------------------
@@ -578,10 +578,12 @@ def own_work(s, task):
 
 
 def mid_turn(s, task):
-    """Its agent, or a helper of its own, is mid-turn (working, or asking): its folder stays until the
-    turn ends (SHEP-188). Even when the merge came from Herdr itself (even_if_busy)."""
+    """Its agent, or a helper of its own, is mid-turn (working, or asking), or has an open question
+    waiting to be rescued: its folder stays until the turn ends (SHEP-188, FAC-70). Even when the
+    merge came from Herdr itself (even_if_busy)."""
     key = s.key(task)
-    return any(status_word(k) in ("working", "blocked") for k in live_agents(key) + live_helpers(key))
+    agents = live_agents(key)
+    return any(status_word(k) in ("working", "blocked") for k in agents + live_helpers(key)) or any(open_question(task, k) for k in agents)
 
 
 def finish(s, task, even_if_busy=False):

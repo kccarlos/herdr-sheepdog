@@ -8330,3 +8330,143 @@ class GhAlwaysNamesForkRepo(unittest.TestCase):
                     ("api", "repos/{owner}/{repo}/pulls"), ("api", "repos//commits/abc")):
             self.assertFalse(self.github.gh(*bad)[0], bad)
         self.assertEqual(len(self.calls()), 2)
+
+
+class OpenQuestionSurvivesDone(unittest.TestCase):
+    """FAC-70 (field note 31): a worker's open question on a Done task moves into `herdr-task ask`
+    before `end_done` closes the worker, or leaves the worker alive with why in the task's log."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.agents as agents, herdr_task.ask as ask, herdr_task.base as base
+        import herdr_task.commands as commands, herdr_task.github as github, herdr_task.store as store, herdr_task.tick as tick
+        self.agents, self.ask, self.base, self.commands, self.github, self.store, self.tick = agents, ask, base, commands, github, store, tick
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.main, self.wt = os.path.join(self.root, "repo"), os.path.join(self.root, "wt")
+        self.store_dir, self.app_home = os.path.join(self.root, "tasks"), os.path.join(self.root, "app")
+        g = lambda *a, cwd=self.main: subprocess.run(["git", "-C", cwd, *a], check=True)
+        subprocess.run(["git", "init", "-q", "-b", "main", self.main], check=True)
+        for k, v in (("user.name", "T"), ("user.email", "t@x"), ("commit.gpgsign", "false")):
+            g("config", k, v)
+        g("commit", "-q", "--allow-empty", "-m", "base")
+        g("worktree", "add", "-q", "-b", "task/11", self.wt, "HEAD")
+        g("commit", "-q", "--allow-empty", "-m", "release prep", cwd=self.wt)
+        g("merge", "-q", "--ff-only", "task/11")
+        self.live, self.panes, self.fail_ask = [], [], False
+        live = lambda key: list(self.live)
+        for p in (mock.patch.dict(os.environ, {"HERDR_TASK_STORE": self.store_dir, "HERDR_APP_HOME": self.app_home}),
+                  mock.patch.object(base, "STORE", self.store_dir), mock.patch.object(store, "STORE", self.store_dir),
+                  mock.patch.object(ask, "ASKS", os.path.join(self.store_dir, "asks")),
+                  mock.patch.object(ask, "run", self.hc_run),
+                  mock.patch.object(github, "live_agents", live), mock.patch.object(github, "live_helpers", lambda *_: []),
+                  mock.patch.object(github, "hc_json", lambda *_: {"terminals": self.live + self.panes}),
+                  mock.patch.object(tick, "live_agents", live), mock.patch.object(tick, "detail", lambda k: k),
+                  mock.patch.object(tick, "refresh_sessions", lambda *_: None), mock.patch.object(tick, "quiet_hc", self.kill_term),
+                  mock.patch.object(tick.time, "sleep", lambda *_: None)):
+            p.start(); self.addCleanup(p.stop)
+
+    def hc_run(self, cmd, check=False):
+        if self.fail_ask:
+            raise self.base.Fail("hc server unreachable")
+        addr = f"t-ask-{len(self.panes) + 1}"
+        self.panes.append({"address": addr, "state": "live", "cmd": cmd})
+        return subprocess.CompletedProcess(cmd, 0, json.dumps({"address": addr}), "")
+
+    def kill_term(self, verb, k):
+        if verb == "kill":
+            self.live = [x for x in self.live if x.get("address") != k.get("address")]
+        return subprocess.CompletedProcess(["hc", verb, k["address"]], 0, "", "")
+
+    def put_task(self, **extra):
+        log = os.path.join(self.root, "session.jsonl")
+        t = {"id": 11, "title": "Ship release", "state": "ready", "mode": "worktree", "worktree": self.wt,
+             "branch": "task/11", "base": "main", "merged": True, "space": "sp1",
+             "agents": [{"address": "t1", "parent": "t0", "log": log}], **extra}
+        with self.store.Store(self.store.locate(self.main), write=True) as s:
+            s.data.update(prefix="WUKO", tasks=[t]); s.dirty = True
+        return log
+
+    def sweep(self):
+        with self.store.Store(self.store.locate(self.main), write=True) as s:
+            s.data["tasks"][0]["done_at"] = self.base.now() - self.tick.DONE_GRACE_MS - 1000; s.dirty = True
+        report = {}
+        self.tick.end_done_pass(report, folder=self.main)
+        return report
+
+    def test_open_card_becomes_herdr_task_ask_and_closes_worker_then_worktree(self):
+        self.put_task(merged=False, pr={"number": 11, "repo": "o/r"})
+        self.live = [{"address": "t1", "parent": "t0", "state": "live", "agent": "claude", "status": "working",
+                      "cwd": self.wt, "labels": {"herdr.role": "worker"}}]
+        req_dir = os.path.join(self.app_home, "data", "chat-asks", "req")
+        os.makedirs(req_dir, exist_ok=True)
+        with open(os.path.join(req_dir, "t1.1700000000.99.json"), "w") as f:
+            json.dump({"tool_name": "AskUserQuestion", "tool_input": {"questions": [{
+                "question": "Push release tag v1.2.0 now?",
+                "options": [{"label": "Push tag (v1)"}, {"label": "Hold off (Recommended)"}]}]}}, f)
+        with unittest.mock.patch.object(self.commands, "pr_view", lambda t: {"state": "MERGED", "mergeCommit": {"oid": "a1"}}), \
+             unittest.mock.patch.object(self.commands, "note_checks", lambda *_: None), \
+             unittest.mock.patch.object(self.commands, "watch_main", lambda *_: None), \
+             unittest.mock.patch.object(self.commands, "update_main", lambda *_: None):
+            with self.store.Store(self.store.locate(self.main), write=True) as s:
+                self.assertIsNone(self.commands.merge_now(s, s.data["tasks"][0]))
+        self.assertTrue(os.path.isdir(self.wt))
+        r1 = self.sweep()
+        self.assertEqual((self.live, len(self.panes), len(r1["asked"])), ([], 1, 1))
+        rec = self.ask.load(r1["asked"][0]["id"])
+        self.assertEqual((rec["task"], rec["to"], rec["recommend"]), ("WUKO-11", "t0", "Hold off"))
+        self.assertIn("WUKO-11", rec["question"])
+        self.assertIn("Push release tag v1.2.0 now?", rec["question"])
+        self.assertEqual(rec["options"], ["Yes — Push tag — v1", "Hold off"])
+        self.assertFalse(any("herdr.task=" in str(a) for a in self.panes[0]["cmd"]))
+        self.sweep()
+        self.assertFalse(os.path.isdir(self.wt))
+
+    def test_terminal_waiting_on_input_with_question_produces_ask(self):
+        log = self.put_task()
+        with open(log, "w") as f:
+            f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Should I push the v1.2.0 tag to origin?"}]}}) + "\n")
+        self.live = [{"address": "t1", "parent": "t0", "state": "live", "agent": "claude", "status": "idle",
+                      "cwd": self.wt, "labels": {"herdr.role": "worker"}}]
+        with self.store.Store(self.store.locate(self.main), write=True) as s:
+            self.github.finish(s, s.data["tasks"][0], even_if_busy=True)
+        self.assertTrue(os.path.isdir(self.wt))
+        r = self.sweep()
+        rec = self.ask.load(r["asked"][0]["id"])
+        self.assertEqual((self.live, rec["task"]), ([], "WUKO-11"))
+        self.assertIn("Should I push the v1.2.0 tag to origin?", rec["question"])
+
+    def test_worker_with_no_open_question_closes_as_today(self):
+        log = self.put_task(ready_turns={"t1": 1})
+        with open(log, "w") as f:
+            f.write(json.dumps({"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "Fixed 'Why did it fail?' in tick.py.\nAll tests pass.\n<hc suggest=\"Ship it?\"/>"}]}}) + "\n")
+        self.live = [{"address": "t1", "parent": "t0", "state": "live", "agent": "claude", "status": "idle", "turn": 1,
+                      "cwd": self.wt, "labels": {"herdr.role": "worker"}}]
+        with self.store.Store(self.store.locate(self.main), write=True) as s:
+            self.github.finish(s, s.data["tasks"][0], even_if_busy=True)
+        self.assertFalse(os.path.isdir(self.wt))
+        r = self.sweep()
+        self.assertEqual((self.live, self.panes, "asked" in r), ([], [], False))
+
+    def test_failed_ask_leaves_worker_alive_and_logs_why(self):
+        self.fail_ask = True
+        self.put_task(state="done", done_at=1000)
+        self.live = [{"address": "t1", "parent": "t0", "state": "live", "agent": "claude",
+                      "status": {"state": "blocked", "kind": "question", "msg": "Push release tag v1.2.0?"},
+                      "cwd": self.wt, "labels": {"herdr.role": "worker"}}]
+        r1, r2 = self.sweep(), self.sweep()
+        self.assertEqual((len(self.live), os.path.isdir(self.wt), len(r1["kept_open"])), (1, True, 1))
+        with self.store.Store(self.store.locate(self.main), write=False) as s:
+            t = s.data["tasks"][0]
+            self.assertNotIn("ended_at", t)
+            self.assertEqual(len(t["log"]), 1)
+            self.assertIn("hc server unreachable", t["log"][0]["text"])
+        buf = __import__("io").StringIO()
+        with unittest.mock.patch.object(self.commands, "live_agents", lambda *_: list(self.live)), \
+             unittest.mock.patch.object(self.commands, "detail", lambda k: k), \
+             unittest.mock.patch.object(self.commands, "refresh_sessions", lambda *_: None), \
+             __import__("contextlib").redirect_stdout(buf):
+            self.commands.cmd_show(__import__("argparse").Namespace(id="WUKO-11", folder=self.main, json=False, evidence=False))
+        self.assertIn("log: Kept t1 open", buf.getvalue())

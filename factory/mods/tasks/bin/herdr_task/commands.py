@@ -266,6 +266,10 @@ def cmd_show(args):
         text.append(f"archived: {time.strftime('%Y-%m-%d %H:%M', time.localtime(v['archived'] / 1000))} (still kept; writing to it brings it back)")
     for k in v["live"]:
         text.append(f"agent: {k['address']} {k['status'] or ''}")
+    for a in v.get("asks") or []:
+        text.append(f"ask: {a['id']} ({a['terminal']}) — {a['question']}")
+    for entry in v.get("log") or []:
+        text.append(f"log: {entry['text'] if isinstance(entry, dict) else entry}")
     if v.get("prompt"):
         text.append("\n" + v["prompt"].strip())
     text.append("\n" + block)

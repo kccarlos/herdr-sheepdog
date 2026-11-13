@@ -82,11 +82,13 @@ def cmd_ask(args):
     first = " ".join(words[:2]) if words[:2] == ["do", "not"] else (words or [""])[0]
     if first in NEGATIVE | {"do not"} and not any(o.lower().startswith("yes") for o in options):
         raise Fail(f'Sheepdog can\'t tap a recommended option that starts with "{first}" unless another option starts with "Yes": reword it or add one.')
-    checklist, to = getattr(args, "checklist", None), getattr(args, "to", None) or os.environ.get("HC_TERMINAL_ID")
-    if not to and not checklist:  # the answer's news goes to the asker's terminal
+    checklist, origin = getattr(args, "checklist", None), getattr(args, "origin", None)
+    to = getattr(args, "to", None) or (None if origin else os.environ.get("HC_TERMINAL_ID"))
+    if not to and not checklist and not origin:  # the answer's news goes to the asker's terminal
         raise Fail("Run it from an agent's own terminal (there's no HC_TERMINAL_ID here).")
     rec = {"id": secrets.token_hex(3), "question": question, "options": options, "recommend": recommend,
-           "task": args.task, "to": to, "at": now(), **({"checklist": checklist} if checklist else {})}
+           "task": args.task, "to": to, "at": now(),
+           **({"checklist": checklist} if checklist else {}), **({"origin": origin} if origin else {})}
     save(rec)
     # The pane gets the core's environment, not ours: the store goes along in its command.
     labels = ["--label", "herdr.role=ask", "--label", f"herdr.ask={rec['id']}"]
@@ -182,6 +184,11 @@ def cmd_ask_pane(args):
     if rec.get("checklist"):
         try:
             __import__("herdr_task.project", fromlist=["apply_checklist_answer"]).apply_checklist_answer(rec)
+        except Fail:
+            pass
+    if not rec.get("to") and (rec.get("origin") or {}).get("space"):
+        try:
+            rec["to"] = __import__("herdr_task.launch", fromlist=["coordinator_in"]).coordinator_in(rec["origin"]["space"])
         except Fail:
             pass
     if rec.get("to"):

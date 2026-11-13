@@ -449,7 +449,7 @@ def spoken(text):
     return CHAT_TAGS.sub("", str(text or "")).strip()
 
 
-def asking_sentence(text):
+def asking_sentence(text, limit=LINE_MAX):
     """The last sentence of a message that asks (ends in "?"), or "" when it asks without one. A
     short one ("Go?", "Shall I?") says nothing alone: the sentence before it makes it a question
     ("I'll take the window 30s to test the menu. Go?" -> "I'll take the window 30s to test the menu?")."""
@@ -462,10 +462,10 @@ def asking_sentence(text):
         before = sentences[i - 1] if i else ""
         if len(ask) >= SHORT_ASK or not before:
             return ask
-        if len(f"{before} {ask}") <= LINE_MAX:
+        if len(f"{before} {ask}") <= limit:
             return f"{before} {ask}"
         before = before.rstrip(" .:;!,")
-        return before + "?" if len(before) < LINE_MAX else fit(before, LINE_MAX - 1).rstrip("…") + "…?"
+        return before + "?" if len(before) < limit else fit(before, limit - 1).rstrip("…") + "…?"
     return ""
 
 
@@ -562,6 +562,34 @@ def permission_words(tool, value, cwd=None):
     return f"Use {m.group(1)}: {m.group(2)}" if m else (f"Use {tool}" if tool else None)
 
 
+QUESTION_TOOLS = ("AskUserQuestion", "request_user_input", "ask_question")
+ASK_NEGATIVE = {"no", "nope", "nah", "don't", "dont", "stop", "cancel", "never", "deny", "decline", "reject", "wait", "hold", "negative", "do not"}
+
+
+def pending_call(task, address):
+    """The tool call an agent's session log left open: (name, input dict), or (None, {})."""
+    done, pending = set(), None
+    for d in log_tail(agent_log(task, address), 131072):
+        c = (d.get("message") or {}).get("content") if d.get("type") in ("assistant", "user") and not d.get("isSidechain") else None
+        for x in c if isinstance(c, list) else []:
+            if isinstance(x, dict) and x.get("type") == "tool_result":
+                done.add(x.get("tool_use_id"))
+            elif isinstance(x, dict) and x.get("type") == "tool_use":
+                pending = x
+        p = d.get("payload") or {}
+        if d.get("type") == "response_item" and p.get("type") in ("function_call", "custom_tool_call"):
+            try:
+                args = json.loads(p.get("arguments") or "{}")
+            except (TypeError, ValueError):
+                args = {}
+            pending = {"id": p.get("call_id"), "name": p.get("name"), "input": args if isinstance(args, dict) else {}}
+        elif d.get("type") == "response_item" and p.get("type") in ("function_call_output", "custom_tool_call_output"):
+            done.add(p.get("call_id"))
+    if pending and pending.get("id") not in done:
+        return pending.get("name"), pending.get("input") if isinstance(pending.get("input"), dict) else {}
+    return None, {}
+
+
 def ask_reason(task, address, req=None, kind=None, msg=None):
     """Why a blocked agent waits, in at most LINE_MAX characters: signed out when its own report
     says so (OSC 7501 kind auth); else from the ask Herdr's hook holds (req: Claude's
@@ -574,28 +602,10 @@ def ask_reason(task, address, req=None, kind=None, msg=None):
     if isinstance(req, dict):
         tool, value = req.get("tool_name"), req.get("tool_input") if isinstance(req.get("tool_input"), dict) else {}
     if not tool:
-        done, pending = set(), None
-        for d in log_tail(agent_log(task, address), 131072):
-            c = (d.get("message") or {}).get("content") if d.get("type") in ("assistant", "user") and not d.get("isSidechain") else None
-            for x in c if isinstance(c, list) else []:
-                if isinstance(x, dict) and x.get("type") == "tool_result":
-                    done.add(x.get("tool_use_id"))
-                elif isinstance(x, dict) and x.get("type") == "tool_use":
-                    pending = x
-            p = d.get("payload") or {}
-            if d.get("type") == "response_item" and p.get("type") in ("function_call", "custom_tool_call"):
-                try:
-                    args = json.loads(p.get("arguments") or "{}")
-                except (TypeError, ValueError):
-                    args = {}
-                pending = {"id": p.get("call_id"), "name": p.get("name"), "input": args if isinstance(args, dict) else {}}
-            elif d.get("type") == "response_item" and p.get("type") in ("function_call_output", "custom_tool_call_output"):
-                done.add(p.get("call_id"))
-        if pending and pending.get("id") not in done:
-            tool, value = pending.get("name"), pending.get("input") if isinstance(pending.get("input"), dict) else {}
+        tool, value = pending_call(task, address)
     if tool == "ExitPlanMode":
         return REASONS["plan"]
-    if tool in ("AskUserQuestion", "request_user_input"):
+    if tool in QUESTION_TOOLS:
         qs = value.get("questions") if isinstance(value.get("questions"), list) else []
         q = qs[0].get("question") if qs and isinstance(qs[0], dict) else None
         return fit(q) if q else REASONS["question"]
@@ -612,9 +622,13 @@ def ask_reason(task, address, req=None, kind=None, msg=None):
 
 def held_ask(address):
     """The ask Herdr's chat hook holds for this terminal (mods/chat/ask-hook.sh), or None."""
-    d = os.path.join(HOME, ".config", "herdr-app", "data", "chat-asks", "req")
+    if not address:
+        return None
+    base = os.path.join(os.environ.get("HERDR_APP_HOME") or os.path.join(HOME, ".config", "herdr-app"), "data", "chat-asks")
+    d, ans = os.path.join(base, "req"), os.path.join(base, "ans")
     try:
-        names = sorted(n for n in os.listdir(d) if n.startswith(address + ".") and n.endswith(".json"))
+        names = sorted(n for n in os.listdir(d) if n.startswith(address + ".") and n.endswith(".json")
+                       and not os.path.exists(os.path.join(ans, n)))
     except OSError:
         return None
     for n in reversed(names):
@@ -623,6 +637,102 @@ def held_ask(address):
                 return json.load(f)
         except (OSError, ValueError):
             continue
+    return None
+
+
+def _ask_shape(question, options=(), recommend=None, defaults=("Yes, go ahead", "No, skip")):
+    """Shapes a worker's question and options for `herdr-task ask` (FAC-70)."""
+    q = fit(" ".join(str(question or "").split()), 260)
+    if not q:
+        return None
+    strip = lambda s: re.sub(r"\s\(([a-z0-9]{1,6})\)$", r" — \1",
+                             re.sub(r"^\(recommended\)\s*|\s*\(recommended\)$", "", s, flags=re.I).strip(), flags=re.I)
+    cleaned, rec = [], strip(" ".join(str(recommend).split())) if recommend else None
+    for raw in options or []:
+        raw_s = " ".join(str(raw.get("label") if isinstance(raw, dict) else raw or "").split())
+        s = strip(raw_s)
+        if s and s not in cleaned:
+            cleaned.append(s)
+            if not rec and re.search(r"^\(recommended\)\s*|\s*\(recommended\)$", raw_s, re.I):
+                rec = s
+    cleaned = (cleaned + [d for d in defaults if d not in cleaned])[:max(2, min(9, len(cleaned)))]
+    rec = rec if rec in cleaned else cleaned[0]
+    words = [w.strip(".!?,;:") for w in rec.lower().split()]
+    first = " ".join(words[:2]) if words[:2] == ["do", "not"] else (words or [""])[0]
+    if first in ASK_NEGATIVE and not any(o.lower().startswith("yes") for o in cleaned):
+        idx = next((i for i, o in enumerate(cleaned) if o != rec and (o.lower().split() or [""])[0].strip(".!?,;:") not in ASK_NEGATIVE), None)
+        cleaned = ([*cleaned[:idx], f"Yes — {cleaned[idx]}", *cleaned[idx + 1:]] if idx is not None and f"Yes — {cleaned[idx]}" not in cleaned
+                   else ["Yes, go ahead", *[o for o in cleaned if o != "Yes, go ahead"]][:9])
+    return {"question": q, "options": cleaned, "recommend": rec if rec in cleaned else cleaned[-1]}
+
+
+def _tool_question(task, tool, value, cwd=None):
+    if tool == "ExitPlanMode":
+        return _ask_shape("Approve the agent's plan?", defaults=("Yes, approve", "No, skip"))
+    if tool in QUESTION_TOOLS:
+        qs = [q for q in (value.get("questions") if isinstance(value.get("questions"), list) else []) if isinstance(q, dict) and str(q.get("question") or "").strip()]
+        q_text = "; ".join(str(q["question"]).strip() for q in qs) or " ".join(str(value.get("question") or "").split()) or REASONS["question"]
+        return _ask_shape(q_text, qs[0].get("options") if qs and isinstance(qs[0].get("options"), list) else [])
+    words = permission_words(tool, value, cwd or task.get("worktree") or task.get("folder")) if tool else None
+    desc = " ".join(str(value.get("description") or "").split())
+    text = f"{desc} ({words})?" if desc and words and desc.lower() not in words.lower() else f"Allow {words}?" if words else "Allow the agent's tool request?"
+    return _ask_shape(text, defaults=("Yes, allow", "No, skip")) if tool else None
+
+
+def full_question(task, address=None, ready_turn=False):
+    """The full question an idle agent's last message asks (up to 260 chars), or None."""
+    for d in reversed(log_tail(agent_log(task, address), 65536)):
+        if from_person(d) is not None:
+            return None
+        text = re.sub(r"```.*?(```|$)", "", spoken(said(d)), flags=re.S).strip()
+        if not text:
+            continue
+        lines = [x.strip(" *_`>-#") for x in text.split("\n") if x.strip(" *_`>-#")]
+        if (not lines or not lines[-1].rstrip(" *_`\"')]").endswith("?")) if ready_turn else not re.search(r"\?(?=[\s*_`\"')\]]|$)", text):
+            return None
+        return asking_sentence(text, limit=260) or None
+    return None
+
+
+def open_question(task, k):
+    """An open question from live worker terminal `k` (its held card, an open question/permission
+    tool call, a blocked prompt, or an unanswered question at the end of its turn), shaped for
+    `herdr-task ask` (FAC-70), or None when `k` isn't asking."""
+    fg = k.get("foreground") or {}
+    if ((k.get("labels") or {}).get("herdr.role") in ("reviewer", "coordinator", "ask")
+            or (fg.get("name") and not agent_running(k)) or (not fg.get("name") and k.get("agent") in SHELLS)):
+        return None
+    address, st = k.get("address"), k.get("status") if isinstance(k.get("status"), dict) else {}
+    kind, msg, word = st.get("kind"), " ".join(str(st.get("msg") or "").split()), status_word(k)
+    req = held_ask(address)
+    if isinstance(req, dict):
+        if q := _tool_question(task, req.get("tool_name"), req.get("tool_input") if isinstance(req.get("tool_input"), dict) else {}, req.get("cwd")):
+            return q
+    tool, value = pending_call(task, address)
+    if tool in (*QUESTION_TOOLS, "ExitPlanMode") or (tool and word == "blocked" and kind != "auth"):
+        return _tool_question(task, tool, value)
+    if word == "blocked" and kind != "auth":
+        if kind == "permission":
+            m = re.match(r"^approve\s+(\S+?):\s*(.+)$", str(msg or "").strip(), re.I)
+            text = ("Allow " + {"Bash": "Run: ", "WebFetch": "Fetch "}.get(m.group(1), m.group(1) + " ") + m.group(2) + "?") if m else (msg or "Allow the agent's permission request?")
+            return _ask_shape(text, defaults=("Yes, allow", "No, skip"))
+        if kind == "plan":
+            return _ask_shape(msg or "Approve the agent's plan?", defaults=("Yes, approve", "No, skip"))
+        return _ask_shape(msg or full_question(task, address) or own_line(task, address) or "Question left open when the task finished — check its chat?")
+    if word in ("idle", "done"):
+        log = agent_log(task, address) or agent_log(task)
+        if fg_job(k) or (log and (background_jobs(log)[0] or open_tool(log))):
+            return None
+        try:
+            key = (k.get("labels") or {}).get("herdr.task")
+            if (key and any(parent_of(h) == address and status_word(h) in ("working", "blocked") for h in live_helpers(key))) \
+                    or (address and cli_of(k) == "agy" and agy_bg_tasks(address)):
+                return None
+        except (OSError, Fail):
+            pass
+        rturns = task.get("ready_turns") or {}
+        q = full_question(task, address, ready_turn=address in rturns and rturns.get(address) == (k.get("turn") or 0))
+        return _ask_shape(q) if q else None
     return None
 
 

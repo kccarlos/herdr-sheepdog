@@ -361,6 +361,7 @@ class Repo(unittest.TestCase):
             "Recap required",
             "herdr-task recap --decide",
             "docs/factory.md section 9",
+            "Release asks belong before merge, not after",
         ):
             self.assertIn(words, sec)
 

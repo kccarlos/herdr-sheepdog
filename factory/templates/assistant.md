@@ -164,7 +164,7 @@ Where the person or the orchestrator speaking for them has delegated these, deci
 - Approve a worker's or reviewer's permission prompt only when the command stays inside that task's worktree (or `$TMPDIR`) or is read-only or the folder's check: read the screen with `hc read <t> --lines 80`, answer with `hc keys <t> ...` (or the option's key). Anything outside the worktree, touching credentials, keychains, settings or other machines goes to the person. Never approve a delete (`rm`), even inside the worktree.
 - Own CI on a task's pull request: when a check fails outside the task's change (a flaky test, a runner hiccup: read the log with `gh run view <run> --log-failed`), re-run the failed jobs once (`gh run rerun <run> --failed`). After 3 failed CI runs on the task, or 1 hour of CI on it, don't try again: the loop-breaker stops it ("Recap required") and you decide its recap (`herdr-task recap --decide`: a new approach such as test retries, a skip list or a split).
 
-Ask the person only for the repo's ask-first list (docs/factory.md section 9), product decisions, and merges.
+Ask the person only for the repo's ask-first list (docs/factory.md section 9), product decisions, and merges. Release asks belong before merge, not after: merging makes a task Done and ends its worker.
 
 ## Usage insights
 

@@ -1,7 +1,10 @@
 """Tick: one pass over the tasks (start queued ones, finish merged ones, retry cut turns, hand a
 task whose CLI can't go on to its backup)."""
 
+import argparse
+import contextlib
 import fcntl
+import io
 import json
 import os
 import secrets
@@ -11,14 +14,14 @@ import time
 from .base import Fail, git, guard, hc_json, now, PR_EVERY, run, SHELLS, STORE, stop_note
 from .settings import machine_name, worker_argv
 from .agents import (
-    agent_log, agent_running, busy_again, detail, held_ask, last_question, live_agents, own_work, ready_turns,
-    REVIEWER_FAILED, status_word, task_status,
+    agent_log, agent_running, busy_again, detail, fit, held_ask, last_question, live_agents, open_question, own_work,
+    ready_turns, REVIEWER_FAILED, status_word, task_status,
 )
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
 from .github import (already_merged, BEHIND, drop_branch, finish, github, merged_here, needs_approval, note_checks, pr_merged, pr_pending, pr_problem,
                      pr_repo, pr_view, pr_wait, queue_entry, task_github, tidy_done, tidy_due, update_main, watch_main)
-from .launch import default_space, sweep_sandboxes
+from .launch import default_space, parent_for, sweep_sandboxes
 from .store import locate, read_list, Store, store_files
 from .queues import machine_hold, refresh_ext, running_count, set_hold, waiting_ext, waiting_for
 from .archive import archive_pass
@@ -323,10 +326,50 @@ GUARD_FILE = os.path.join(STORE, ".memory-guard.json")
 GUARD_ALERT_EVERY_MS = 30 * 60000
 
 
+def rescue_question(s, t, k, q, report):
+    """Copies an open question `q` from Done task `t`'s worker `k` into `herdr-task ask` before `k`
+    closes (FAC-70). True once the ask exists; False if it couldn't be made (logs why and keeps `k`)."""
+    from . import ask as ask_mod
+    ref, addr = s.ref(t), k["address"]
+    if any(a.get("from") == addr and a.get("question") == q["question"] for a in t.get("asks") or []):
+        return True
+    parent = k.get("parent") or next((a.get("parent") for a in reversed(t.get("agents") or []) if a.get("parent")), None)
+    space = t.get("space")
+    try:
+        to = parent_for(parent, space) or parent
+    except Fail:
+        to = parent
+    question = q["question"] if ref in q["question"] else fit(f"{ref}: {q['question']}", ask_mod.MSG_MAX)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            rec = ask_mod.cmd_ask(argparse.Namespace(
+                show=None, question=question, option=q["options"], recommend=q["recommend"],
+                task=ref, to=to, json=True, origin={"terminal": addr, "space": space, "folder": s.loc["folder"]}))
+    except (Fail, OSError) as e:
+        why = str(e)
+        line = f"Kept {addr} open (open question: {q['question']}): {why}"
+        logs = t.setdefault("log", [])
+        if not any((x.get("text") if isinstance(x, dict) else x) == line for x in logs):
+            logs.append({"at": now(), "terminal": addr, "question": q["question"], "why": why, "text": line})
+            s.dirty = True
+            stop_note("kept-open", task=ref, terminal=addr, question=q["question"], why=why)
+        report.setdefault("kept_open", []).append({"task": ref, "terminal": addr, "why": why})
+        return False
+    t.setdefault("asks", []).append({"id": rec["id"], "terminal": rec["terminal"], "from": addr,
+                                     "question": q["question"], "at": now()})
+    t.setdefault("log", []).append({"at": now(), "terminal": addr, "ask": rec["id"], "question": q["question"],
+                                    "text": f"Moved open question from {addr} to ask {rec['id']}: {q['question']}"})
+    s.dirty = True
+    stop_note("end-done-ask", task=ref, terminal=addr, ask=rec["id"], question=q["question"])
+    report.setdefault("asked", []).append({"task": ref, "id": rec["id"], "terminal": rec["terminal"], "from": addr})
+    return True
+
+
 def end_done(s, t, report, pressed=False):
     """Ends what is left of one Done task's agents now, or what may end: a shell at once, an agent
     once it's idle (or working past DONE_WORKING_MS); under memory pressure (pressed) every idle
-    one at once. Returns the addresses it ended."""
+    one at once. An open question on a worker moves into `herdr-task ask` first, or keeps the worker
+    alive when the ask can't be made (FAC-70). Returns the addresses it ended."""
     done_at = t.get("done_at") or 0
     if not pressed and now() - done_at < DONE_GRACE_MS:
         return []
@@ -340,7 +383,10 @@ def end_done(s, t, report, pressed=False):
     refresh_sessions(s, t, live)
     ended = []
     for k in live:
-        if agent_running(k) and status_word(k) == "working" and now() - done_at < DONE_WORKING_MS:
+        q = open_question(t, k)
+        if not q and agent_running(k) and status_word(k) == "working" and now() - done_at < DONE_WORKING_MS:
+            continue
+        if q and not rescue_question(s, t, k, q, report):
             continue
         if quiet_hc("kill", k).returncode == 0:
             stop_note("end-done", task=s.ref(t), terminal=k["address"], status=status_word(k), pressed=pressed)
