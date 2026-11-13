@@ -10,7 +10,8 @@ from .store import auto_prefix, locate, prefixes_in_use, read_list, Store, store
 
 FACTORY_WORKER = {"agent": "agy", "model": "gemini-4-carbon-high", "effort": "", "fast": False, "perm": "full"}
 FACTORY_REVIEWER = {"agent": "agy", "model": "gemini-4-argon-high", "effort": "", "fast": False}
-FACTORY_TASKS = {"merge": "checks", "review_min": 2}
+# reviewer_sandbox off: a sandboxed agy reviewer can't sign in (agy keeps its sign-in in the keychain), and FACTORY_REVIEWER is agy
+FACTORY_TASKS = {"merge": "checks", "review_min": 2, "reviewer_sandbox": False}
 HEARTBEAT_HEAD = "Requirements: read docs/requirements.md and build toward it milestone by milestone.\n\n"
 HEARTBEAT_EXPORT_HEAD = (
     "Requirements (to export first): docs/requirements.md links a claude.ai artifact or doc (marked to export), "

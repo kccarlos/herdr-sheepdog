@@ -16,7 +16,7 @@ import sys
 import time
 
 from .base import ASK_HOME, ENTRY, Fail, HOME, git, hc_json, now, run, WORKTREES
-from .settings import agent_key, ASSISTANT_TEMPLATES, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, gate_min, keep_review, notes, notes_part, review_limits, settings_block, settings_for
+from .settings import agent_key, ASSISTANT_TEMPLATES, by_layer, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, gate_min, keep_review, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
 from .github import finish, remote_of
@@ -379,9 +379,19 @@ def sandboxes(argv):
 UNSANDBOXED_FLAG = os.path.join(HOME, ".herdr", "agy-review-unsandboxed")
 
 
-def sandboxed(argv, worktree):
-    """argv (agy's) run under reviewer.sb in a temp dir of its own (SANDBOX_SH); as it is with UNSANDBOXED_FLAG."""
+def reviewer_sandbox(s, space=None):
+    """(on, by): do agy reviewers here run sandboxed? Settings' Tasks > Reviewer sandbox (tasks.reviewer_sandbox: on
+    unless set off, per folder, machine or everywhere; by says which), and UNSANDBOXED_FLAG still counts as off (by "flag")."""
     if os.path.exists(UNSANDBOXED_FLAG):
+        return False, "flag"
+    on = settings_for(s, space)["tasks"].get("reviewer_sandbox") is not False
+    return on, by_layer(s, space, "tasks", "reviewer_sandbox", on, True)
+
+
+def sandboxed(argv, worktree, setting=True):
+    """argv (agy's) run under reviewer.sb in a temp dir of its own (SANDBOX_SH); as it is with the Reviewer
+    sandbox setting off (setting=False) or UNSANDBOXED_FLAG."""
+    if not setting or os.path.exists(UNSANDBOXED_FLAG):
         return list(argv)
     import pkgutil
     common = git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")[1] or worktree
@@ -839,7 +849,7 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     if message:
         cmd = cmd + (["-i", message] if agent_key(cmd) == "agy" else [message])  # agy reads prompts only from -i
     if sand:
-        cmd = sandboxed(cmd, folder)
+        cmd = sandboxed(cmd, folder, reviewer_sandbox(s, space)[0])
     labels = ["--label", f"herdr.task={key}", "--label", f"herdr.task.space={bare(space)}",
               "--label", f"herdr.agent={agent_key(argv)}"]
     ctab = coordinator_tab(parent)

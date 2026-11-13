@@ -3263,6 +3263,92 @@ class GateReview(unittest.TestCase):
             open(flag, "w").close()
             self.assertEqual(launch.sandboxed(["agy", "-i", "hi"], self.wt), ["agy", "-i", "hi"])
 
+    # ---- FAC-76: whether agy reviewers run sandboxed is a setting (tasks.reviewer_sandbox), the flag file counts as off ----
+
+    def box_settings(self, **layers):
+        """Writes the settings file (a patched path): layers like everywhere={...} or space={...} hold tasks values."""
+        from herdr_task import settings
+        d = {"everywhere": {"tasks": layers["everywhere"]}} if "everywhere" in layers else {}
+        if "space" in layers:
+            d["spaces"] = {"sp1": {"folder": self.main, "tasks": layers["space"]}}
+        with open(settings.SETTINGS, "w") as f:
+            json.dump(d, f)
+
+    def box_row(self):
+        from herdr_task import settings
+        row = {x["label"]: x for x in settings.task_settings(self.store, self.task)}["Reviewer sandbox"]
+        block = [x for x in settings.settings_block(self.store, self.task).splitlines() if x.startswith("- Reviewer sandbox")]
+        return row["value"], row["by"], block[0]
+
+    def reviewer_is_sandboxed(self):
+        import herdr_task.launch as launch
+        self.runs.clear()
+        self.ready()
+        return launch.SANDBOX_SH in self.runs[0]
+
+    def test_the_reviewer_sandbox_is_on_by_default(self):
+        self.sandbox()
+        self.assertEqual(self.box_row()[:2], (True, None))
+        self.assertIn("on: the agy reviewer runs in a sandbox", self.box_row()[2])
+        self.assertTrue(self.reviewer_is_sandboxed())
+
+    def test_the_setting_off_runs_the_agy_reviewer_as_itself(self):
+        self.sandbox()
+        self.box_settings(space={"reviewer_sandbox": False})
+        value, by, text = self.box_row()
+        self.assertEqual((value, by), (False, "folder"))
+        self.assertTrue(text.endswith("outside the sandbox (this folder's setting)"), text)
+        self.assertFalse(self.reviewer_is_sandboxed())
+        self.assertIn("agy", self.runs[0])
+        self.assertIn("--dangerously-skip-permissions", self.runs[0])
+
+    def test_the_setting_everywhere_off(self):
+        self.sandbox()
+        self.box_settings(everywhere={"reviewer_sandbox": False})
+        self.assertEqual(self.box_row()[:2], (False, "all"))
+        self.assertTrue(self.box_row()[2].endswith("(your setting everywhere)"))
+        self.assertFalse(self.reviewer_is_sandboxed())
+
+    def test_a_folders_own_on_wins_over_everywhere_off(self):
+        self.sandbox()
+        self.box_settings(everywhere={"reviewer_sandbox": False}, space={"reviewer_sandbox": True})  # the default says nothing
+        self.assertEqual(self.box_row()[:2], (True, None))
+        self.assertTrue(self.reviewer_is_sandboxed())
+
+    def test_the_flag_file_counts_as_off_and_says_so(self):
+        from unittest import mock
+        import herdr_task.launch as launch
+        self.sandbox()
+        flag = os.path.join(self.root, "agy-review-unsandboxed")
+        open(flag, "w").close()
+        self.box_settings(space={"reviewer_sandbox": True})  # the flag still wins: tonight's machines run unchanged
+        with mock.patch.object(launch, "UNSANDBOXED_FLAG", flag):
+            self.assertEqual(self.box_row()[:2], (False, "flag"))
+            self.assertTrue(self.box_row()[2].endswith("(the flag file ~/.herdr/agy-review-unsandboxed)"))
+            self.assertFalse(self.reviewer_is_sandboxed())
+
+    def test_no_reviewer_sandbox_line_for_a_reviewer_that_is_never_sandboxed(self):
+        from herdr_task import settings
+        self.task["reviewer"] = "claude"
+        self.assertNotIn("Reviewer sandbox", [x["label"] for x in settings.task_settings(self.store, self.task)])
+
+    def test_a_sandboxed_sign_in_failure_names_the_setting_to_turn_off(self):
+        self.sandbox()
+        self.ready()
+        self.screen("  │  Sign in required                              │  \n")
+        self.reviewer_term = {"state": "live", "agent": "agy", "status": {"state": "blocked", "kind": "auth"}, "turn": 0}
+        self.commands.gate_reads(self.store, self.task)
+        self.assertEqual(self.task["review_failures"][0]["why"], "Sign in required: turn Reviewer sandbox off")
+
+    def test_the_sign_in_failure_of_an_unsandboxed_reviewer_has_no_such_hint(self):
+        self.sandbox()
+        self.box_settings(space={"reviewer_sandbox": False})
+        self.ready()
+        self.screen("  │  Sign in required                              │  \n")
+        self.reviewer_term = {"state": "live", "agent": "agy", "status": {"state": "blocked", "kind": "auth"}, "turn": 0}
+        self.commands.gate_reads(self.store, self.task)
+        self.assertEqual(self.task["review_failures"][0]["why"], "Sign in required")
+
     def test_its_verdict_is_read_from_its_own_terminal(self):
         self.sandbox()
         self.ready()
@@ -3596,7 +3682,7 @@ if sys.argv[1] == "kill" and alive:
         self.reviewer_term = {"state": "live", "agent": "agy", "status": {"state": "blocked", "kind": "auth"}, "turn": 0}
         self.commands.gate_reads(self.store, self.task)
         self.assertEqual(self.told, [])
-        self.assertEqual(self.task["review_failures"][0]["why"], "Sign in required")
+        self.assertEqual(self.task["review_failures"][0]["why"], "Sign in required: turn Reviewer sandbox off")
         self.assertEqual([(r["round"], r["cli"], r["model"]) for r in self.task["review_runs"]],
                          [(1, "agy", "gemini-4-argon-high"), (1, "claude", "opus")])
         # Reverse direction: when claude ends its turn with no verdict, fallback runs agy with the space's agy model.
@@ -7859,6 +7945,7 @@ class ProjectStart(unittest.TestCase):
         with self.store.Store(self.store.locate(repo), write=False) as s:
             cfg = self.st.settings_for(s, "sp1")
             self.assertEqual((cfg["tasks"]["merge"], cfg["tasks"]["review_min"], cfg["tasks"]["check"]), ("checks", 2, "npm test"))
+            self.assertIs(cfg["tasks"]["reviewer_sandbox"], False)  # sandboxed agy can't sign in today (FAC-76)
             self.assertEqual((cfg["reviewer"]["agent"], cfg["reviewer"]["model"]), ("agy", "gemini-4-argon-high"))
             self.assertEqual(self.st.worker_argv(s, {}, "sp1"), ["agy", "--model", "gemini-4-carbon-high", "--dangerously-skip-permissions"])
         self.assertEqual((self.terms["t1"]["labels"]["herdr.chat"], self.terms["t1"]["labels"]["herdr.coordinator.space"]), ("p9", "sp1"))
