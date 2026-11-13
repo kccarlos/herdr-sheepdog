@@ -8215,13 +8215,14 @@ class Watchdog(unittest.TestCase):
         self.store = os.path.join(self.tmp, "tasks")
         os.makedirs(self.store)
         self.slug, self.clock, self.terms, self.screens, self.raw, self.restarts, self.alerts = store.slug_of(self.tmp), 1_800_000_000_000, {}, {}, "", [], []
+        self.sent, self.tpl = [], "tpl-new"
         def fake_sub(args, env=None, **kw):
             if args[0] == "git":
                 return real_sub(args, env=env, **kw)
             if args[0] == "bash" and os.path.basename(args[1]) == "restart.sh":
                 old, nxt, prev = args[2], f"c{len(self.restarts) + 2}", self.terms.pop(args[2])
                 self.restarts.append((old, nxt, (env or {}).get("HERDR_RESTART_CHAT")))
-                lbs = {k: v for k, v in prev["labels"].items() if not ((env or {}).get("HERDR_RESTART_CHAT") and k == "herdr.space")}
+                lbs = {k: v for k, v in prev["labels"].items() if not ((env or {}).get("HERDR_RESTART_CHAT") and k == "herdr.space") and k != "herdr.template"}
                 self.terms[nxt] = {**prev, "address": nxt, "turn": 0, "status": {"state": "idle"}, "created_ms": self.clock, "labels": lbs}
                 return subprocess.CompletedProcess(args, 0, f"{nxt}\n", "")
             if args[:2] == ["hc", "ls"]:
@@ -8231,6 +8232,8 @@ class Watchdog(unittest.TestCase):
                 return subprocess.CompletedProcess(args, 0 if (t := self.terms.get(args[2])) else 1, json.dumps(t) if t else "", "")
             if args[:2] == ["hc", "read"]:
                 return subprocess.CompletedProcess(args, 0, self.screens.get(args[2], ""), "")
+            if args[:2] == ["hc", "send"]:
+                self.sent.append((args[2], args[3]))
             if args[:2] == ["hc", "label"]:
                 k, v = args[3].split("=", 1)
                 self.terms[args[2]].setdefault("labels", {})[k] = v
@@ -8242,6 +8245,7 @@ class Watchdog(unittest.TestCase):
         patches = ([p_(m, "now", lambda: self.clock) for m in (base, agents, news, commands, watchdog)]
                    + [p_(m, "STORE", self.store) for m in (store, watchdog, news)]
                    + [p_(subprocess, "run", fake_sub), p_(watchdog, "WATCHDOG", os.path.join(self.store, ".watchdog.json")),
+                      p_(watchdog, "template_info", lambda: (self.tpl, self.clock - 5 * 60000)),
                       p_(news, "NEWS", os.path.join(self.store, ".news.json")), p_(news, "HELD", os.path.join(self.store, ".held.json")),
                       p_(autopilot, "STATE", os.path.join(self.store, ".autopilot.json")), p_(news, "POLL_DELAYS", (0,)),
                       p_(news, "screen_raw", lambda *_: self.raw),
@@ -8369,6 +8373,81 @@ class Watchdog(unittest.TestCase):
         self.clock += 29 * 60000  # 31m after entering Failed/Needs you: restarts once
         self.tick()
         self.assertEqual(self.restarts, [("c1", "c2", "p1")])
+
+    def test_api_error_gets_one_nudge_then_one_restart_then_an_alert(self):
+        err = "● Working on SHOP-1\n  ⎿  API Error: 403 (Cloudflare) · Please run /login\n\n❯ \n"
+        self.save_tasks({"id": 1, "title": "Auth", "state": "running", "space": "shop"})
+        self.screens["c1"] = "● Done, SHOP-1 is running\n❯ \n"
+        self.assertEqual((self.tick(), self.sent), ({}, []))  # no error: left alone
+        self.screens["c1"] = err
+        rep = self.tick()
+        self.assertEqual((self.sent, self.restarts, [x["action"] for x in rep["watchdog"]]), ([("c1", self.wd.NUDGE)], [], ["nudged"]))
+        self.tick()  # the nudge has had no time yet: no second nudge, no restart
+        self.assertEqual((len(self.sent), self.restarts), (1, []))
+        self.clock += 3 * 60000
+        rep = self.tick()  # still on the error: restarted with its handoff
+        self.assertEqual((self.restarts, len(self.sent)), ([("c1", "c2", "p1")], 1))
+        self.terms["c2"].update(turn=1)
+        self.screens["c2"] = err
+        self.clock += 3 * 60000
+        rep = self.tick()  # the new one hits it too: alert, no more restarts
+        self.assertEqual((len(self.restarts), len(self.alerts), [x["action"] for x in rep["watchdog"]]), (1, 1, ["alerted"]))
+        self.assertIn("stopped on an API error", self.alerts[0][1]["title"])
+        self.clock += 10 * 60000
+        self.tick()
+        self.assertEqual((len(self.restarts), len(self.alerts), len(self.sent)), (1, 1, 1))
+
+    def test_a_nudge_that_worked_is_not_followed_by_a_restart(self):
+        err = "  ⎿  API Error: 403 (Cloudflare) · Please run /login\n"
+        self.save_tasks({"id": 1, "title": "Auth", "state": "running", "space": "shop"})
+        self.screens["c1"] = err + "\n❯ \n"
+        self.tick()
+        self.assertEqual(len(self.sent), 1)
+        self.screens["c1"] = f"{err}\n❯ {self.wd.NUDGE}\n\n● Back on it, SHOP-1 is running.\n\n❯ \n"  # recovered: the old error is still in the tail
+        self.clock += 3 * 60000
+        self.assertEqual((self.tick(), self.restarts, self.alerts), ({}, [], []))
+        self.screens["c1"] += err  # a fresh error after that: a new spell, a new nudge, not a restart
+        self.tick()
+        self.assertEqual((len(self.sent), self.restarts), (2, []))
+
+    def test_api_error_is_not_acted_on_without_work_waiting_or_when_signed_out(self):
+        self.screens["c1"] = "  ⎿  API Error: 529 overloaded_error\n❯ \n"
+        self.save_tasks({"id": 1, "title": "Auth", "state": "done", "space": "shop"})
+        self.assertEqual((self.tick(), self.sent), ({}, []))
+        self.save_tasks({"id": 1, "title": "Auth", "state": "running", "space": "shop"})
+        self.terms["c1"]["status"] = {"state": "working"}  # mid-turn: never nudged
+        self.assertEqual((self.tick(), self.sent), ({}, []))
+        self.terms["c1"]["status"] = {"state": "done"}
+        self.screens["c1"] = "  ⎿  API Error: 401 · Invalid API key · Please run /login\n❯ \n"
+        self.tick()
+        self.clock += 3 * 60000
+        rep = self.tick()  # signed out: the nudge failed, so an alert and no restart
+        self.assertEqual((len(self.sent), self.restarts, len(self.alerts), [x["action"] for x in rep["watchdog"]]), (1, [], 1, ["alerted"]))
+
+    def test_idle_assistant_on_an_old_template_restarts_once(self):
+        self.terms["c1"].update(created_ms=self.clock - 60 * 60000, labels={**self.terms["c1"]["labels"], "herdr.template": "tpl-old"})
+        self.terms["c1"]["status"] = {"state": "working"}
+        self.screens["c1"] = "busy\n"
+        self.assertEqual((self.tick(), self.restarts), ({}, []))  # mid-turn: not restarted
+        self.terms["c1"]["status"] = {"state": "done"}
+        rep = self.tick()
+        self.assertEqual((self.restarts, rep["watchdog"][0]["why"]), ([("c1", "c2", "p1")], "running an old Assistant template"))
+        self.assertEqual(self.terms["c2"]["labels"].get("herdr.template"), None)
+        self.clock += 60000
+        self.tick()  # the new one is labelled with the current template at first sight: left alone
+        self.assertEqual((len(self.restarts), self.terms["c2"]["labels"]["herdr.template"]), (1, "tpl-new"))
+        self.terms["c2"]["labels"]["herdr.template"] = "tpl-old"  # still old after a restart: not tried again for the same template
+        self.clock += self.wd.RESTART_COOLDOWN_MS + 60000
+        self.tick()
+        self.assertEqual(len(self.restarts), 1)
+        self.tpl = "tpl-newer"  # a new change reaches it
+        self.tick()
+        self.assertEqual(len(self.restarts), 2)
+
+    def test_assistant_started_before_the_template_changed_is_labelled_unknown_and_restarted(self):
+        self.terms["c1"]["created_ms"] = self.clock - 60 * 60000  # no label: older than the template file
+        rep = self.tick()
+        self.assertEqual((self.restarts, rep["watchdog"][0]["why"]), ([("c1", "c2", "p1")], "running an old Assistant template"))
 
 
 class DesignAndDocReview(unittest.TestCase):

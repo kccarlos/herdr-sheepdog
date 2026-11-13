@@ -1,12 +1,12 @@
 """Watchdog: restarts a live Assistant that is stuck, or alerts the person (FAC-62)."""
 
-import hashlib, json, os, subprocess
+import hashlib, json, os, re, subprocess
 
 from . import news
 from .agents import agent_running, detail, held_ask, live_agents, STARTING_MS, status_word, task_status
-from .base import addon_off, APP_HOME, Fail, guard, hc_json, now, PACKAGE, run, STORE
+from .base import addon_off, APP_HOME, Fail, guard, hc_json, HOME, now, PACKAGE, run, STORE
 from .commands import send_alert
-from .news import stall_of, typing
+from .news import send_or_hold, stall_of, typing
 from .settings import bare
 from .store import read_list, store_files
 
@@ -14,6 +14,10 @@ STUCK_MS = 30 * 60000              # Needs you / Failed / Stalled, or "working" 
 RESTART_COOLDOWN_MS = 2 * 3600000  # stuck again within 2 hours of a restart: alert instead of restarting
 NEWS_GRACE_MS = STARTING_MS        # time after news lands for the Assistant to start its turn
 WATCHDOG = os.path.join(STORE, ".watchdog.json")
+TEMPLATE_LABEL = "herdr.template"  # the hash of assistant.md an Assistant started with, set when the watchdog first sees it (FAC-78)
+API_ERROR = re.compile(r"API Error[: ]|Please run /login|\boverloaded\b|rate.?limit(?:ed| reached| exceeded|_error)", re.I)
+SIGNED_OUT = re.compile(r"not logged in|invalid (?:x-)?api key|authentication_error|oauth token .*expired|credit balance", re.I)  # a retry can't fix it
+NUDGE = "Carry on with what you were doing; the last turn hit an API error."
 
 
 def restart_assistant(k):
@@ -27,6 +31,25 @@ def restart_assistant(k):
     r = subprocess.run(["bash", script, k["address"]], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=120)
     nxt = ((r.stdout or "").strip().splitlines() or [""])[-1].strip()
     return nxt if r.returncode == 0 and nxt else None
+
+
+def template_info():
+    """(hash, mtime in ms) of the installed assistant template, (None, 0) without one."""
+    path = os.path.join(HOME, ".config", "herdr-core", "templates", "assistant.md")
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha1(f.read()).hexdigest()[:16], int(os.path.getmtime(path) * 1000)
+    except OSError:
+        return None, 0
+
+
+def api_error(addr, lines=15):
+    """The API-error line an Assistant's last turn ended on (the tail of its screen), else None."""
+    r = run(["hc", "read", addr, "--lines", "80"])
+    tail = [x.strip() for x in (r.stdout or "").splitlines() if x.strip()][-lines:] if r.returncode == 0 else []
+    # Only an error after our nudge counts: one above it was handled by the turn the nudge started.
+    tail = tail[max((i + 1 for i, x in enumerate(tail) if NUDGE[:13] in x), default=0):]
+    return next((x for x in reversed(tail) if API_ERROR.search(x)), None)
 
 
 def _condition(slug, prefix, t, tasks, lists):
@@ -123,7 +146,12 @@ def watchdog_pass(report):
         if rec.get("alerted") and (rec["alerted"].get("address") != addr or (k.get("turn") or 0) > (rec["alerted"].get("turn") or 0)):
             rec.pop("alerted", None)
 
-        st, why = status_word(k), None
+        st, why, alert_only, api_why = status_word(k), None, False, None
+        tpl, tpl_ms = template_info()
+        tpl_has = labels.get(TEMPLATE_LABEL)
+        if tpl and not tpl_has and k.get("created_ms"):  # first sight: it started before the template changed, or not
+            tpl_has = tpl if k["created_ms"] >= tpl_ms else "unknown"
+            run(["hc", "label", addr, f"{TEMPLATE_LABEL}={tpl_has}"])
         if st == "working":
             r = run(["hc", "read", addr, "--lines", "80"])
             if r.returncode == 0:
@@ -135,19 +163,36 @@ def watchdog_pass(report):
             rec.pop("screen", None), rec.pop("screen_since", None)
             booting = not k.get("turn") and k.get("created_ms") and now() - k["created_ms"] < STARTING_MS
             if st in ("idle", "done", None) and space and not booting and not held_data.get(addr) and not (retries.get(addr) or {}).get("due"):
-                why = _stuck_task(space, addr, k, rec, lists, news_data, live_addrs)
+                spell, err = rec.get("api") or {}, None
+                if any(not x.get("archived") and bare(x.get("space") or "") == space and x.get("state") in ("running", "queued", "todo") for _, _, o in lists for x in o):
+                    err = api_error(addr)
+                if not err:
+                    rec.pop("api", None)  # no error (or no work waiting): the spell is over
+                elif not spell and not typing(addr, k) and not _wake_inflight(ap_spaces, space, addr, k, ap) and send_or_hold(addr, NUDGE, "news") == "sent":
+                    rec["api"] = {"stage": "nudged", "at": now()}
+                    report.setdefault("watchdog", []).append({"action": "nudged", "address": addr, "space": space, "why": f"stopped on an API error: {err[:80]}"})
+                elif (spell.get("stage") == "nudged" and now() - spell.get("at", 0) >= NEWS_GRACE_MS) or spell.get("stage") == "restarted":
+                    api_why, alert_only = f"stopped on an API error: {err[:80]}", spell.get("stage") == "restarted" or bool(SIGNED_OUT.search(err))
+                why = api_why or _stuck_task(space, addr, k, rec, lists, news_data, live_addrs)
+            if not why and tpl and tpl_has and tpl_has != tpl and st in ("idle", "done", None) and not booting and rec.get("template") != tpl:
+                why = "running an old Assistant template"
 
         if why and not _wake_inflight(ap_spaces, space, addr, k, ap) and not typing(addr, k):
             in_cooldown = bool(rec.get("restarted_at") and now() - rec["restarted_at"] < RESTART_COOLDOWN_MS)
-            nxt = None if in_cooldown else restart_assistant(k)
+            old_tpl = why == "running an old Assistant template"  # an idle one only; never an alert
+            nxt = None if in_cooldown or alert_only else restart_assistant(k)
             if nxt:
                 if slot == addr:
                     state.pop(slot, None)
                     slot = nxt
-                rec = {"address": nxt, "space": space, "restarted_at": now(), "restarted_to": nxt, "restarted_from": {"address": addr, "turn": k.get("turn") or 0}}
+                rec = {"address": nxt, "space": space, "restarted_at": now(), "restarted_to": nxt, "restarted_from": {"address": addr, "turn": k.get("turn") or 0},
+                       **({"api": {"stage": "restarted", "at": now()}} if api_why else {}), "template": tpl}
                 report.setdefault("watchdog", []).append({"action": "restarted", "from": addr, "to": nxt, "space": space, "why": why})
-            else:
+            elif old_tpl:
                 if not in_cooldown:
+                    rec["template"] = tpl  # one try per template; in the cooldown, the next pass tries
+            else:
+                if not in_cooldown and not alert_only:
                     rec["restarted_at"] = now()
                 if not rec.get("alerted"):
                     sp_name = (ap_spaces.get(space) or {}).get("name") if space else None
@@ -156,6 +201,8 @@ def watchdog_pass(report):
                     try:
                         send_alert(addr, title, body=why, about=True)
                         rec["alerted"] = {"address": addr, "turn": k.get("turn") or 0, "at": now()}
+                        if api_why:
+                            rec["api"] = {"stage": "alerted", "at": now()}
                         report.setdefault("watchdog", []).append({"action": "alerted", "address": addr, "space": space, "title": title})
                     except Fail:
                         pass
