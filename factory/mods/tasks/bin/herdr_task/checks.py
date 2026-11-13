@@ -7,7 +7,7 @@ import shutil
 import tempfile
 
 from .base import git, hc_json, now, run
-from .github import gh
+from .github import gh, pr_repo
 from .settings import gate_min, settings_for
 
 LIMIT_MS = 20 * 60000
@@ -18,9 +18,10 @@ CI_WINDOW_MS = 10 * 60000
 def ci_of(t, sha):
     """GitHub's state for sha on the task's pull request: {state, url}, or None without one."""
     pr = t.get("pr")
-    if not pr:
+    repo = pr_repo(t) if pr else None
+    if not pr or not repo:
         return None
-    ok, out, _ = gh("api", f"repos/{pr['repo']}/commits/{sha}/check-runs?per_page=100")
+    ok, out, _ = gh("api", f"repos/{repo}/commits/{sha}/check-runs?per_page=100")
     try:
         runs = json.loads(out)["check_runs"] if ok else None
     except (ValueError, KeyError):
@@ -60,6 +61,8 @@ def checks_pass(s, t):
             s.dirty = True
             return
         if not stale:
+            if t.get("pr"):
+                pr_repo(t, s)
             tail = run(["hc", "read", c["address"], "--lines", "200"]).stdout.rstrip()
             code = k.get("exit_code")
             t.setdefault("checks", []).append({
@@ -78,6 +81,7 @@ def checks_pass(s, t):
     state = ((last or {}).get("ci") or {}).get("state")
     # pending (or unknown) until GitHub answers; "none" a while, as GitHub registers a push's runs late
     if last and (state in (None, "pending") or state == "none" and now() - last["finished_at"] < CI_WINDOW_MS):
+        pr_repo(t, s)
         ci = ci_of(t, sha)
         if ci != mine[-1]["ci"]:
             mine[-1]["ci"], s.dirty = ci, True

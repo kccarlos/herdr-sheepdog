@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 
 from .base import Fail, GH, git, hc_json, now, run, STORE
 from .agents import agent_running, live_agents, live_helpers, status_word
@@ -11,45 +12,155 @@ from .agents import agent_running, live_agents, live_helpers, status_word
 
 # ---- GitHub ---------------------------------------------------------------------------------
 
-def gh(*args, cwd=None):
+REPO_CMDS = {"pr", "issue", "run", "release", "secret", "variable", "workflow", "label", "ruleset", "cache", "attestation", "deploy-key"}
+
+
+def _flag_repo(args):
+    for i, a in enumerate(args):
+        s = str(a)
+        if s in ("--repo", "-R"):
+            return str(args[i + 1]) if i + 1 < len(args) else ""
+        if s.startswith("--repo=") or (s.startswith("-R") and len(s) > 2):
+            return s.split("=", 1)[1] if s.startswith("--") else s[2:]
+    return None
+
+
+def _bad_api_arg(a):
+    s = str(a).lstrip("/").split("?", 1)[0]
+    segs = s.split("/")
+    return "{owner}" in str(a) or "{repo}" in str(a) or (s.startswith("repos") and (s == "repos" or (segs[0] == "repos" and (len(segs) < 3 or not segs[1] or not segs[2]))))
+
+
+def gh(*args, repo=None, cwd=None):
+    # Every repo-targeting gh call names its repo explicitly, so an `upstream` remote or gh's default can't redirect it.
+    if args and args[0] in REPO_CMDS and not (args[0] in ("secret", "variable") and any(f in args for f in ("--org", "-o", "--user", "-u"))):
+        target = _flag_repo(args)
+        if target is None and repo:
+            args, target = (*args[:2], "--repo", repo, *args[2:]), repo
+        if not target or "/" not in str(target):
+            return False, "", "gh call is missing --repo <owner/name>"
+    elif args[:2] == ("repo", "view"):
+        if (len(args) <= 2 or str(args[2]).startswith("-")) and repo:
+            args = (*args[:2], repo, *args[2:])
+        if len(args) <= 2 or str(args[2]).startswith("-") or "/" not in str(args[2]):
+            return False, "", "gh repo view is missing <owner/name>"
+    elif args and args[0] == "api":
+        if repo and "/" in str(repo):
+            owner, _, name = str(repo).partition("/")
+            args = tuple(str(a).replace("{owner}", owner).replace("{repo}", name) if not str(a).startswith("query=") else a for a in args)
+        if any(_bad_api_arg(a) for i, a in enumerate(args[1:], 1) if not str(a).startswith("query=") and args[i - 1] not in ("-q", "--jq", "-f", "--raw-field")):
+            return False, "", "gh api call has unresolved {owner}/{repo}"
+    gh_bin = GH if GH != "gh" else (os.environ.get("HERDR_TASK_GH") or "gh")
+    where = cwd if cwd and os.path.isdir(cwd) else (STORE if os.path.isdir(STORE) else tempfile.gettempdir())
+    kw = {"cwd": where, **({"env": {k: v for k, v in os.environ.items() if k != "GH_REPO"}} if "GH_REPO" in os.environ else {})}
     # gh not installed (or not on this caller's PATH, as a background service's): it doesn't work here, said plainly
     try:
-        r = run([GH, *args], cwd=cwd or STORE)
+        r = run([gh_bin, *args], **kw)
     except FileNotFoundError:
         return False, "", "gh isn't installed here (GitHub CLI)"
     return r.returncode == 0, r.stdout.strip(), (r.stderr or r.stdout).strip()
 
 
-def github(s):
-    """The repo on GitHub ("owner/name") when it has a GitHub remote and gh works there; asked
-    again after an hour. None: tasks merge locally."""
-    if s.loc["kind"] != "repo" or not shutil.which(GH):
+def repo_from_url(url):
+    """GitHub "owner/name" from a remote URL (HTTPS, SSH, or an SSH host alias for GitHub), else None."""
+    u = str(url or "").strip()
+    ssh = not u.startswith(("http://", "https://", "git://"))
+    m = (re.match(r"^(?:https?|ssh|git)://(?:[^/@]+@)?([^/:]+)(?::\d+)?/(.+)$", u) if "://" in u
+         else re.match(r"^(?:[^/@:]+@)?([A-Za-z0-9._-]{2,}):/?(.+)$", u))
+    if not m:
+        return None
+    host, path = m.group(1).lower(), re.sub(r"\.git$", "", m.group(2).strip("/"))
+    gh_host = (os.environ.get("GH_HOST") or "").strip().lower()
+    if (any(x in host for x in ("gitlab", "bitbucket", "codeberg", "sr.ht", "sourcehut")) if ssh else not ("github" in host or (gh_host and host == gh_host))):
+        return None
+    parts = path.split("/")
+    return path if len(parts) == 2 and all(re.fullmatch(r"[A-Za-z0-9._-]+", p) and p not in (".", "..") for p in parts) else None
+
+
+def repo_from_pr_url(url):
+    m = re.match(r"^https?://[^/]+/([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/pull/\d+", str(url or "").strip())
+    return m.group(1) if m else None
+
+
+def push_remote(main, branch=None):
+    """The remote `branch` (or `main`) pushes to; never `upstream` unless configured as the push remote."""
+    if not (names := git(main, "remote")[1].split()):
+        return None
+    br = branch or git(main, "symbolic-ref", "--quiet", "--short", "HEAD")[1]
+    cfg = lambda key: git(main, "config", "--get", key)[1]
+    for r, allow_up in (((cfg(f"branch.{br}.pushRemote"), True),) if br else ()) + ((cfg("remote.pushDefault"), True),) + (((cfg(f"branch.{br}.remote"), False),) if br else ()):
+        if r and r in names and (allow_up or r != "upstream"):
+            return r
+    return "origin" if "origin" in names else next((n for n in names if n != "upstream"), None)
+
+
+def remote_of(main, branch=None):
+    return push_remote(main, branch) or "origin"
+
+
+def remote_repo(main, remote):
+    """GitHub "owner/name" for `remote` in `main` (its pushurl first when set, else url), or None."""
+    if not remote:
+        return None
+    if push_u := git(main, "config", "--get", f"remote.{remote}.pushurl")[1]:
+        return repo_from_url(push_u) or (repo_from_url(git(main, "config", "--get", f"remote.{remote}.url")[1]) if os.path.exists(push_u) else None)
+    return repo_from_url(git(main, "config", "--get", f"remote.{remote}.url")[1])
+
+
+def github(s, task=None):
+    """The repo on GitHub ("owner/name") from the remote the task (or folder) pushes to, when gh works
+    there; asked again after an hour. None: tasks merge locally."""
+    pr_r = ((task or {}).get("pr") or {}).get("repo")
+    gh_bin = GH if GH != "gh" else (os.environ.get("HERDR_TASK_GH") or "gh")
+    if s.loc["kind"] != "repo" or not shutil.which(gh_bin):
+        return None
+    if pr_r and "/" in pr_r:
+        return pr_r
+    wt = (task or {}).get("worktree")
+    folder = wt if wt and os.path.isdir(wt) else s.loc["folder"]
+    if not (slug := remote_repo(folder, push_remote(folder, ((task or {}).get("pr") or {}).get("branch") or (task or {}).get("branch")))):
         return None
     g = s.data.get("github") or {}
-    if g and now() - g.get("at", 0) < 3600000:
+    if g and (g.get("from") or g.get("repo") or "").lower() == slug.lower() and now() - g.get("at", 0) < 3600000:
         return g.get("repo")
-    ok, out, _ = gh("repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner", cwd=s.loc["folder"])
-    s.data["github"] = {"repo": out if ok and out else None, "at": now()}
+    ok, out, _ = gh("repo", "view", slug, "--json", "nameWithOwner", "-q", ".nameWithOwner")
+    try:
+        repo = (json.loads(out).get("nameWithOwner") or slug) if ok and out.startswith("{") else (out.splitlines()[0].strip() if ok and out.strip() else (slug if ok else None))
+    except ValueError:
+        repo = slug
+    s.data["github"] = {"repo": repo, "from": slug, "at": now()}
     s.dirty = True
-    return s.data["github"]["repo"]
+    return repo
 
 
-def remote_of(main):
-    names = git(main, "remote")[1].split()
-    return "origin" if "origin" in names else (names[0] if names else "origin")
+_github = github
+
+
+def task_github(fn, s, task=None):
+    return fn(s, task) if fn is _github else fn(s)
+
+
+def pr_repo(task, s=None, fn=None):
+    pr = (task or {}).get("pr") or {}
+    repo = pr.get("repo") or repo_from_pr_url(pr.get("url")) or (task_github(fn or github, s, task) if s is not None else None)
+    if repo and task and isinstance(task.get("pr"), dict) and not task["pr"].get("repo"):
+        task["pr"]["repo"] = repo
+    return repo
 
 
 def pr_open(s, task, repo, summary=None):
     """Pushes the task's branch and opens its pull request (or keeps the open one, also one opened
     by hand or by its agent for the branch: SHEP-13's "already exists")."""
     wt, br = task["worktree"], task["branch"]
+    repo = pr_repo(task) or repo
     # Continuing a pull request already open on another branch, its work pushed there (#828): that
     # one is the task's, never a second with the same commits.
     if not (task.get("pr") or {}).get("number") and pr_at_tip(task, repo):
         if summary:
-            gh("pr", "comment", str(task["pr"]["number"]), "--repo", repo, "--body", summary)
+            gh("pr", "comment", str(task["pr"]["number"]), "--repo", task["pr"]["repo"], "--body", summary)
         return task["pr"]
-    remote = remote_of(s.loc["folder"])
+    folder = wt if wt and os.path.isdir(wt) else s.loc["folder"]
+    remote = remote_of(folder, br)
     # The pull request it continues (#828) gets its new commits on its own branch, never forced.
     to = (task.get("pr") or {}).get("branch") or br
     # Already there at its exact tip (pushed by hand): no second push through its hooks (#795).
@@ -62,6 +173,7 @@ def pr_open(s, task, repo, summary=None):
             raise Fail(f"Couldn't push {br}" + (f" to {to}" if to != br else "") + f": {err}")
     pr = task.get("pr") or {}
     if pr.get("number"):
+        pr["repo"] = repo
         ok, out, _ = gh("pr", "view", str(pr["number"]), "--repo", repo, "--json", "state", "-q", ".state")
         if ok and out == "OPEN":
             if summary:
@@ -73,7 +185,7 @@ def pr_open(s, task, repo, summary=None):
             return pr_open(s, task, repo, summary)
     if pr_adopt(task, repo):
         if summary:
-            gh("pr", "comment", str(task["pr"]["number"]), "--repo", repo, "--body", summary)
+            gh("pr", "comment", str(task["pr"]["number"]), "--repo", task["pr"]["repo"], "--body", summary)
         return task["pr"]
     # SHEP-59: never a second pull request for a branch that already had one merged (one at its tip
     # is done before this: already_merged()); commits made since go on a new branch.
@@ -117,6 +229,9 @@ def pr_adopt(task, repo):
     """The open pull request for the task's branch, opened by hand or by its agent, recorded on the
     task; None when there is none (SHEP-13: ready failed with "already exists"). Only one from this
     repo (never a fork's branch of the same name), into the task's base, at the branch's tip here."""
+    repo = repo or pr_repo(task)
+    if not repo:
+        return None
     ok, out, _ = gh("pr", "list", "--repo", repo, "--head", task["branch"], "--state", "open",
                     "--json", "number,url,isCrossRepository,baseRefName,headRefOid")
     tip_ok, tip, _ = git(task["worktree"], "rev-parse", task["branch"])
@@ -134,8 +249,9 @@ def pr_adopt(task, repo):
 def pr_at_tip(task, repo):
     """An open pull request from this repo, into the task's base, on another branch whose head is
     exactly the task branch's tip: recorded on the task, else None (#828)."""
+    repo = repo or pr_repo(task)
     ok, tip, _ = git(task["worktree"], "rev-parse", "--verify", "--quiet", f"refs/heads/{task['branch']}")
-    if not (ok and tip):
+    if not (repo and ok and tip):
         return None
     ok, out, _ = gh("pr", "list", "--repo", repo, "--state", "open", "--search", tip,
                     "--json", "number,url,isCrossRepository,baseRefName,headRefName,headRefOid")
@@ -153,6 +269,9 @@ def pr_at_tip(task, repo):
 def pr_merged(task, repo):
     """The merged pull request for the task's branch (from this repo, into its base), or None
     (SHEP-59: a squash merge leaves the branch's commits out of the base)."""
+    repo = repo or pr_repo(task)
+    if not repo:
+        return None
     ok, out, _ = gh("pr", "list", "--repo", repo, "--head", task["branch"], "--state", "merged",
                     "--json", "number,url,isCrossRepository,baseRefName,headRefOid,mergeCommit")
     try:
@@ -171,7 +290,7 @@ def landed(s, task):
     main, base = s.loc["folder"], task.get("base") or "main"
     ok, tip, _ = git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{task.get('branch')}")
     tip = tip if ok and tip else task.get("head")
-    for ref in (base, f"refs/remotes/{remote_of(main)}/{base}"):
+    for ref in (base, f"refs/remotes/{remote_of(main, task.get('branch'))}/{base}"):
         ok, tree, _ = git(main, "merge-tree", "--write-tree", ref, tip)
         has, have, _ = git(main, "rev-parse", "--verify", "--quiet", f"{ref}^{{tree}}")
         if ok and has and tree and tree.split()[0] == have:
@@ -185,13 +304,14 @@ def already_merged(s, task):
     pull request ({} when merged without one), or None. Its pull request is recorded on the task."""
     if merged_here(s, task):
         return {}
-    repo = github(s)
+    repo = task_github(github, s, task)
     tip = task.get("head")
     if repo:
         main = s.loc["folder"]
-        git(main, "fetch", "--quiet", remote_of(main), task.get("base") or "main")
+        git(main, "fetch", "--quiet", remote_of(main, task.get("branch")), task.get("base") or "main")
         tip = git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{task.get('branch')}")[1] or tip
         if task.get("pr"):
+            pr_repo(task, s, github)
             v = pr_view(task)
             if v and v.get("state") == "MERGED" and v.get("headRefOid") == tip:
                 return {**task["pr"], "mergeCommit": v.get("mergeCommit")}
@@ -223,7 +343,10 @@ def pr_view(task):
     (statusCheckRollup) unreadable here (SHEP-179): the rest still read, the checks asked another way (check_rows());
     neither works: "checks_unknown" set, never a wait for checks nobody can see."""
     pr = task["pr"]
-    view = lambda fields: gh("pr", "view", str(pr["number"]), "--repo", pr["repo"], "--json", fields)
+    repo = pr_repo(task)
+    if not repo:
+        return None
+    view = lambda fields: gh("pr", "view", str(pr["number"]), "--repo", repo, "--json", fields)
     ok, out, err = view(VIEW + ",statusCheckRollup")
     rest = not ok and denied(err)
     if rest:
@@ -235,7 +358,7 @@ def pr_view(task):
     if not isinstance(v, dict):
         return v
     if rest:
-        rows, whole = check_rows(pr["repo"], v.get("headRefOid"))
+        rows, whole = check_rows(repo, v.get("headRefOid"))
         v["statusCheckRollup"] = rows
         if not whole:
             v["checks_unknown"] = True
@@ -339,7 +462,10 @@ def queue_entry(task):
     itself (it joins the queue once its checks pass), "reason": why the queue last removed it}, or
     None when GitHub couldn't say."""
     pr = task["pr"]
-    owner, _, name = pr["repo"].partition("/")
+    repo = pr_repo(task)
+    if not repo or "/" not in repo:
+        return None
+    owner, _, name = repo.partition("/")
     ok, out, _ = gh("api", "graphql", "-f", f"query={QUEUE_QUERY}", "-f", f"owner={owner}", "-f", f"name={name}",
                     "-F", f"n={pr['number']}")
     try:
@@ -358,7 +484,7 @@ def drop_branch(s, task):
     (gh refuses that flag on a queue, #801). Already gone (the repo deletes merged branches): fine."""
     if task.get("branch"):
         main = s.loc["folder"]
-        git(main, "push", "--quiet", remote_of(main), "--delete", task["branch"])
+        git(main, "push", "--quiet", remote_of(main, task["branch"]), "--delete", task["branch"])
 
 
 # A pull request just pushed can show no checks for a few seconds before GitHub starts them: none
@@ -395,7 +521,7 @@ def pr_wait(v, since):
 def update_main(s, task):
     """After a merge on GitHub: the base branch here catches up when it's checked out and clean."""
     main, base = s.loc["folder"], task.get("base") or "main"
-    remote = remote_of(main)
+    remote = remote_of(main, task.get("branch"))
     git(main, "fetch", remote, base)
     ok, cur, _ = git(main, "symbolic-ref", "--short", "HEAD")
     if ok and cur == base and not git(main, "status", "--porcelain", "--untracked-files=no")[1]:
@@ -414,9 +540,12 @@ def watch_main(s, task, sha=None):
     hours (ghnews.main_pass), so the Assistant hears once if it goes red (as Shepherdr)."""
     if not task.get("pr"):
         return
+    repo = pr_repo(task, s, github)
+    if not repo:
+        return
     base = task.get("base") or "main"
     w = s.data.setdefault("main_watch", {}).setdefault(base, {})
-    w.update(repo=task["pr"]["repo"], until=now() + MAIN_WATCH_MS, space=task.get("space") or w.get("space"))
+    w.update(repo=repo, until=now() + MAIN_WATCH_MS, space=task.get("space") or w.get("space"))
     merged = [m for m in w.get("merged") or [] if now() - (m.get("at") or 0) < 24 * 3600000]
     merged.append({"ref": s.ref(task), "title": task["title"], "pr": task["pr"]["number"], "at": now(), **({"sha": sha} if sha else {})})
     w["merged"] = merged[-30:]
@@ -442,7 +571,7 @@ def own_work(s, task):
     ok, tip, _ = git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")
     tip = tip if ok and tip else task.get("head")
     if tip and tip != start and tip != task.get("own") and not any(
-            git(main, "merge-base", "--is-ancestor", tip, ref)[0] for ref in (base, f"refs/remotes/{remote_of(main)}/{base}")):
+            git(main, "merge-base", "--is-ancestor", tip, ref)[0] for ref in (base, f"refs/remotes/{remote_of(main, br)}/{base}")):
         task["own"] = tip
         s.dirty = True
     return task.get("own")
@@ -512,7 +641,7 @@ def tidy_done(s, t, report=None):
     ok, tip, _ = git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}") if br else (False, "", "")
     base = t.get("base") or "main"
     newer = ok and tip and tip != t.get("own") and not any(
-        git(main, "merge-base", "--is-ancestor", tip, ref)[0] for ref in (base, f"refs/remotes/{remote_of(main)}/{base}"))
+        git(main, "merge-base", "--is-ancestor", tip, ref)[0] for ref in (base, f"refs/remotes/{remote_of(main, br)}/{base}"))
     if busy or newer or not remove_worktree(s, t):
         t["worktree_kept"] = now()
         s.dirty = True

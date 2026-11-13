@@ -7,7 +7,7 @@ import re
 
 from .base import now
 from .agents import status_word
-from .github import BAD, gh
+from .github import BAD, gh, github, pr_repo, task_github
 from .launch import coordinator_in
 from .commands import workers
 from .news import news_send
@@ -51,6 +51,8 @@ def when(text):
 def pr_comments(repo, n):
     """A pull request's published reviews and comments with words, oldest first: {id, at, who,
     body, url, state?, where?}; None when GitHub didn't answer. Pending reviews are left out."""
+    if not repo:
+        return None
     reviews = api_pages(f"repos/{repo}/pulls/{n}/reviews")
     lines = api_pages(f"repos/{repo}/pulls/{n}/comments")
     notes = api_pages(f"repos/{repo}/issues/{n}/comments")
@@ -83,6 +85,8 @@ def run_id(url):
 
 def log_tail(repo, run):
     """The end of a failed run's failed steps' log, or None."""
+    if not repo:
+        return None
     ok, out, _ = gh("run", "view", str(run), "--repo", repo, "--log-failed")
     if not ok or not out:
         return None
@@ -104,7 +108,8 @@ def pr_news(s, t, v, report):
     passed on to its resting agent once (pr_deliver). Read at most every PR_NEWS_EVERY, and only
     while its agent rests: news for an agent at work would be stale by the time it looks."""
     pr = t.get("pr")
-    if t["state"] != "ready" or not pr or not v or v.get("state") != "OPEN":
+    repo = pr_repo(t, s, github) if pr else None
+    if t["state"] != "ready" or not pr or not repo or not v or v.get("state") != "OPEN":
         return
     since = t.get("ready_at") or 0
     w = pr.get("watch") or {}
@@ -212,7 +217,10 @@ def main_check(s, base, w, report):
     """One look at a watched base branch on GitHub: its newest commit whose push runs all finished
     decides. Red for the first time since it was green: news for the Assistant (w["notice"]),
     with the failing runs, the end of a failed log and what merged since it was last green."""
-    repo = w["repo"]
+    repo = w.get("repo") or task_github(github, s)
+    if not repo:
+        return
+    w["repo"] = repo
     ok, out, _ = gh("api", f"repos/{repo}/commits?sha={base}&per_page=50", "--jq", "map(.sha)")
     try:
         history = json.loads(out) if ok else None

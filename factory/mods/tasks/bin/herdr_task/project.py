@@ -3,6 +3,7 @@
 import argparse, contextlib, io, json, os, re, shlex, shutil
 from . import autopilot as ap, base, settings as st
 from .base import Fail
+from .github import push_remote, remote_repo
 from .launch import CLEAN_ENV, coordinators, coordinator_in
 from .output import say
 from .store import auto_prefix, locate, prefixes_in_use, read_list, Store, store_path
@@ -252,18 +253,21 @@ def detect_ios(repo):
 def check_github_secrets(repo):
     has_git = os.path.isdir(repo) and (os.path.exists(os.path.join(repo, ".git")) or locate(repo)["kind"] == "repo")
     remotes = base.git(repo, "remote")[1].split() if has_git else []
-    remote = "origin" if "origin" in remotes else (remotes[0] if remotes else "")
     ok_head = bool(has_git and base.git(repo, "rev-parse", "--verify", "--quiet", "HEAD")[0])
     branch = br if (br := base.git(repo, "rev-parse", "--abbrev-ref", "HEAD")[1] if ok_head else "") and br != "HEAD" else "main"
-    pushed = bool(remote and ok_head and (base.git(repo, "merge-base", "--is-ancestor", "HEAD", "@{u}")[0]
+    remote = (push_remote(repo, branch) or "") if has_git else ""
+    pushed = bool(remote and ok_head and (("upstream" not in remotes and base.git(repo, "merge-base", "--is-ancestor", "HEAD", "@{u}")[0])
                   or base.git(repo, "merge-base", "--is-ancestor", "HEAD", f"refs/remotes/{remote}/{branch}")[0]))
-    rv = try_run(base.GH, "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner", cwd=repo) if remote else None
-    gh_repo = ((json_dict(rv.stdout) or {}).get("nameWithOwner") or next(iter((rv.stdout or "").strip().splitlines()), "") or "ok") if rv and rv.returncode == 0 else ""
+    slug = remote_repo(repo, remote) if remote else None
+    rv = (try_run(base.GH, "repo", "view", slug, "--json", "nameWithOwner", "-q", ".nameWithOwner") if slug
+          else try_run(base.GH, "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner", cwd=repo) if remote and "upstream" not in remotes else None)
+    gh_repo = ((json_dict(rv.stdout) or {}).get("nameWithOwner") or next(iter((rv.stdout or "").strip().splitlines()), "") or slug or "ok") if rv and rv.returncode == 0 else ""
+    target = (gh_repo if "/" in gh_repo else "") or slug or ""
     wf_dir = os.path.join(repo, ".github", "workflows")
     wfs = sorted(f for f in os.listdir(wf_dir) if f.endswith((".yml", ".yaml")) and os.path.isfile(os.path.join(wf_dir, f))) if os.path.isdir(wf_dir) else []
     ref_sec = sorted({a or b for f in wfs for a, b in re.findall(r"\bsecrets(?:\.([A-Za-z_][A-Za-z0-9_]*)|\[\s*['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]\s*\])",
                       read_text(os.path.join(wf_dir, f))) if not (a or b).upper().startswith("GITHUB_")})
-    sr = try_run(base.GH, "secret", "list", cwd=repo) if ref_sec and (gh_repo or remote) else None
+    sr = try_run(base.GH, "secret", "list", *(("--repo", target) if target else ()), cwd=repo if not target else None) if ref_sec and (target or (remote and "upstream" not in remotes)) else None
     raw = (sr.stdout or "").strip() if sr and sr.returncode == 0 else ""
     names = re.findall(r'"name"\s*:\s*"([^"]+)"', raw) if raw.startswith("[") else [ln.split()[0] for ln in raw.splitlines() if ln.strip() and ln.split()[0] != "NAME"]
     have = {t for t in names if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", t)}
@@ -272,7 +276,8 @@ def check_github_secrets(repo):
     gh_miss = (["no GitHub repo"] if not (remote and gh_repo) else ([] if pushed else [f"{branch} not pushed"])) + ([] if wfs else ["no CI workflow"])
     gh_steps = ([f"Create and push the GitHub repo: gh repo create --source {shlex.quote(repo)} --private --push"] if not (remote and gh_repo)
                 else ([] if pushed else [f"Push {branch} to {remote}: git -C {shlex.quote(repo)} push -u {remote} {branch}"])) + ([] if wfs else [f"Add a CI workflow under {wf_dir}"])
-    sec_steps = [] if sec_ok else [f"Set CI secret{'s' if len(miss_sec) != 1 else ''} on GitHub: " + " && ".join(f"gh secret set {n}" for n in miss_sec)]
+    sec_steps = [] if sec_ok else [f"Set CI secret{'s' if len(miss_sec) != 1 else ''} on GitHub: "
+                                   + " && ".join(f"gh secret set {n}" + (f" --repo {target}" if target else "") for n in miss_sec)]
     return ((gh_ok, f"{gh_repo} (pushed, {len(wfs)} workflow{'s' if len(wfs) != 1 else ''})" if gh_ok else ", ".join(gh_miss), gh_steps),
             (sec_ok, (f"set: {', '.join(ref_sec)}" if ref_sec else "none referenced") if sec_ok else f"missing: {', '.join(miss_sec)}", sec_steps, ref_sec, miss_sec))
 

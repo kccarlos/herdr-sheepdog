@@ -17,7 +17,7 @@ from .agents import (
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
 from .github import (already_merged, BEHIND, drop_branch, finish, github, merged_here, needs_approval, note_checks, pr_merged, pr_pending, pr_problem,
-                     pr_view, pr_wait, queue_entry, tidy_done, tidy_due, update_main, watch_main)
+                     pr_repo, pr_view, pr_wait, queue_entry, task_github, tidy_done, tidy_due, update_main, watch_main)
 from .launch import default_space, sweep_sandboxes
 from .store import locate, read_list, Store, store_files
 from .queues import machine_hold, refresh_ext, running_count, set_hold, waiting_ext, waiting_for
@@ -81,6 +81,7 @@ def facts(s, t, report):
             return
         pr["checked"] = now()
         s.dirty = True
+        pr_repo(t, s, github)
         v = pr_view(t)
         if not v:
             return
@@ -152,7 +153,7 @@ def facts(s, t, report):
 def squash_merged(s, t):
     """A Working task's branch whose pull request (opened by its agent) merged at its tip: that
     pull request, recorded on the task, or None."""
-    repo = github(s)
+    repo = task_github(github, s, t)
     found = pr_merged(t, repo) if repo else None
     if not found or found.get("headRefOid") != (t.get("own") or t.get("head")):
         return None

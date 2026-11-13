@@ -8067,3 +8067,128 @@ class Watchdog(unittest.TestCase):
         self.clock += 29 * 60000  # 31m after entering Failed/Needs you: restarts once
         self.tick()
         self.assertEqual(self.restarts, [("c1", "c2", "p1")])
+
+
+class GhAlwaysNamesForkRepo(unittest.TestCase):
+    """FAC-68: every repo-targeting gh call names the fork's repo from the push remote, never upstream."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.base as base, herdr_task.checks as checks, herdr_task.commands as commands
+        import herdr_task.ghnews as ghnews, herdr_task.github as github, herdr_task.project as project, herdr_task.store as store
+        self.base, self.checks, self.commands, self.ghnews, self.github, self.project, self.store = base, checks, commands, ghnews, github, project, store
+        self.tmp = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.store_dir, self.bin_dir, self.bare, self.main, self.wt = (os.path.join(self.tmp, x) for x in ("tasks", "bin", "fork.git", "main", "wt"))
+        for d in (self.store_dir, self.bin_dir):
+            os.makedirs(d)
+        self.log, fake_gh = os.path.join(self.tmp, "gh.jsonl"), os.path.join(self.bin_dir, "gh")
+        with open(fake_gh, "w") as f:
+            f.write("#!/usr/bin/env python3\nimport json, os, sys\nargs = sys.argv[1:]\n"
+                    f"prior = open({self.log!r}).read() if os.path.exists({self.log!r}) else ''\n"
+                    f"with open({self.log!r}, 'a') as lg: lg.write(json.dumps({{'argv': args, 'gh_repo': os.environ.get('GH_REPO')}}) + '\\n')\n"
+                    "if args[:2] == ['repo', 'view']:\n"
+                    "    slug = args[2] if len(args) > 2 and not args[2].startswith('-') else 'eliasstravik/shepherdr'\n"
+                    "    print(slug if '-q' in args else json.dumps({'nameWithOwner': slug}))\n"
+                    "elif args[:1] in (['pr'], ['run'], ['secret']):\n"
+                    "    r = args[args.index('--repo') + 1] if '--repo' in args else sys.exit('missing --repo')\n"
+                    "    if args[:2] == ['pr', 'list']: print('[]')\n"
+                    "    elif args[:2] == ['pr', 'create']: print(f'https://github.com/{r}/pull/50')\n"
+                    "    elif args[:2] == ['pr', 'view']:\n"
+                    "        if os.environ.get('DENY_ROLLUP') and 'statusCheckRollup' in ','.join(args):\n"
+                    "            sys.stderr.write('GraphQL: Resource not accessible by integration\\n'); sys.exit(1)\n"
+                    "        st = 'MERGED' if '\"merge\"' in prior else 'OPEN'\n"
+                    "        print(json.dumps({'state': st, 'mergeable': 'MERGEABLE', 'headRefOid': os.environ.get('FAKE_HEAD', ''), 'mergeCommit': {'oid': 'abc1234'},\n"
+                    "                          'mergeStateStatus': 'CLEAN', 'statusCheckRollup': [{'name': 'check', 'status': 'COMPLETED', 'conclusion': 'SUCCESS'}]}))\n"
+                    "    elif args[:2] == ['run', 'list']: print(json.dumps([{'headSha': 'deadbeef', 'status': 'completed', 'conclusion': 'failure', 'url': f'https://github.com/{r}/actions/runs/9', 'workflowName': 'Check', 'databaseId': 9}]))\n"
+                    "    elif args[:2] == ['run', 'view']: print('step failed')\n"
+                    "    elif args[:2] == ['secret', 'list']: print('API_KEY\\t2026-11-12')\n"
+                    "elif args[:1] == ['api']:\n"
+                    "    p = next((x for x in args[1:] if not x.startswith('-')), '')\n"
+                    "    print(json.dumps({'login': 'fork'} if p == 'user' else {'check_runs': [{'name': 'check', 'status': 'completed', 'conclusion': 'success'}]} if 'check-runs' in p\n"
+                    "          else {'statuses': []} if p.endswith('/status') else [[]] if '--slurp' in args else ['deadbeef'] if '/commits?' in p else {}))\n"
+                    "elif args[:1] == ['auth']: print('Logged in')\n")
+        os.chmod(fake_gh, 0o755)
+        g = lambda *a, cwd=self.main: subprocess.run(["git", "-C", cwd, *a], check=True)
+        subprocess.run(["git", "init", "-q", "--bare", self.bare], check=True)
+        subprocess.run(["git", "init", "-q", "-b", "kc-factory", self.main], check=True)
+        for k, v in (("user.name", "H"), ("user.email", "h@x"), (f"url.{self.bare}.insteadOf", "git@github-fork:fork/shepherdr.git")):
+            g("config", k, v)
+        with open(os.path.join(self.main, "a.txt"), "w") as f:
+            f.write("base\n")
+        g("add", "."); g("commit", "-q", "-m", "init")
+        g("remote", "add", "origin", "git@github-fork:fork/shepherdr.git")
+        g("remote", "add", "upstream", "https://github.com/eliasstravik/shepherdr.git")
+        g("config", "remote.upstream.pushurl", "DISABLED"); g("push", "-q", "-u", "origin", "kc-factory")
+        self.start_sha = subprocess.check_output(["git", "-C", self.main, "rev-parse", "HEAD"], text=True).strip()
+        g("worktree", "add", "-q", "-b", "task/68-demo", self.wt, "kc-factory")
+        with open(os.path.join(self.wt, "a.txt"), "w") as f:
+            f.write("change\n")
+        g("commit", "-q", "-am", "FAC-68: change", cwd=self.wt)
+        self.tip = subprocess.check_output(["git", "-C", self.wt, "rev-parse", "HEAD"], text=True).strip()
+        env = {"PATH": f"{self.bin_dir}:{os.environ['PATH']}", "FAKE_HEAD": self.tip, "GH_REPO": "eliasstravik/shepherdr"}
+        for p in (mock.patch.dict(os.environ, env), mock.patch.object(base, "GH", "gh"), mock.patch.object(github, "GH", "gh"),
+                  mock.patch.object(store, "STORE", self.store_dir), mock.patch.object(github, "STORE", self.store_dir),
+                  mock.patch.object(github, "live_agents", lambda *_: []), mock.patch.object(github, "live_helpers", lambda *_: [])):
+            p.start(); self.addCleanup(p.stop)
+
+    def calls(self):
+        with open(self.log) as f:
+            return [json.loads(ln) for ln in f]
+
+    def test_pr_create_view_checks_news_and_merge_carry_fork_repo(self):
+        t = {"id": 68, "title": "Demo", "state": "ready", "mode": "worktree", "worktree": self.wt,
+             "branch": "task/68-demo", "base": "kc-factory", "start": self.start_sha, "head": self.tip}
+        with self.store.Store(self.store.locate(self.main), write=True) as s:
+            s.data.update(prefix="FAC", github={"repo": "eliasstravik/shepherdr", "at": self.base.now()}, tasks=[t])
+            self.assertEqual((self.github.github(s, t), self.github.github(s, t)), ("fork/shepherdr", "fork/shepherdr"))
+            self.assertEqual(self.github.pr_open(s, t, "fork/shepherdr", "Summary"),
+                             {"number": 50, "url": "https://github.com/fork/shepherdr/pull/50", "repo": "fork/shepherdr"})
+            self.assertEqual(self.github.pr_view(t)["state"], "OPEN")
+            with unittest.mock.patch.dict(os.environ, {"DENY_ROLLUP": "1"}):
+                self.assertEqual(self.github.pr_view(t)["statusCheckRollup"][0]["conclusion"], "SUCCESS")
+            self.assertEqual(self.checks.ci_of(t, self.tip)["state"], "success")
+            self.assertEqual((self.ghnews.pr_comments("fork/shepherdr", 50), self.ghnews.log_tail("fork/shepherdr", 9)), ([], "step failed"))
+            self.ghnews.main_check(s, "kc-factory", {"space": "s"}, {})
+            self.assertIsNone(self.commands.merge_now(s, t))
+            self.assertEqual(t["state"], "done")
+        argvs = [c["argv"] for c in self.calls()]
+        self.assertTrue(all(c["gh_repo"] is None for c in self.calls()))
+        self.assertEqual([a for a in argvs if a[:2] == ["repo", "view"]], [["repo", "view", "fork/shepherdr", "--json", "nameWithOwner", "-q", ".nameWithOwner"]])
+        for sub in (["pr", "create"], ["pr", "view"], ["pr", "merge"], ["run", "list"], ["run", "view"]):
+            matched = [a for a in argvs if a[:2] == sub]
+            self.assertTrue(matched and all("--repo" in a and a[a.index("--repo") + 1] == "fork/shepherdr" for a in matched), (sub, matched))
+        apis = [a for a in argvs if a[:1] == ["api"]]
+        self.assertTrue(apis and all("repos/fork/shepherdr/" in " ".join(a) for a in apis), apis)
+        self.assertFalse(any("eliasstravik/shepherdr" in " ".join(a) for a in argvs), argvs)
+
+    def test_push_remote_overrides_and_upstream_never_picked_unless_push_remote(self):
+        os.makedirs(wf := os.path.join(self.main, ".github", "workflows"))
+        with open(os.path.join(wf, "ci.yml"), "w") as f:
+            f.write("env:\n  K: ${{ secrets.API_KEY }}\n")
+        (gh_ok, gh_note, _), (sec_ok, _, _, _, miss) = self.project.check_github_secrets(self.main)
+        self.assertEqual((gh_ok, sec_ok, miss, "fork/shepherdr" in gh_note), (True, True, [], True))
+        self.assertTrue(any(c["argv"][:4] == ["secret", "list", "--repo", "fork/shepherdr"] for c in self.calls()))
+        t = {"id": 69, "branch": "task/68-demo", "worktree": self.wt}
+        g = lambda *a: subprocess.run(["git", "-C", self.main, *a], check=True)
+        g("remote", "add", "myfork", "https://github.com/myfork/shepherdr.git")
+        g("config", "branch.task/68-demo.pushRemote", "myfork")
+        with self.store.Store(self.store.locate(self.main), write=False) as s:
+            self.assertEqual(self.github.github(s, t), "myfork/shepherdr")
+        g("config", "--unset", "branch.task/68-demo.pushRemote"); g("remote", "remove", "origin"); g("remote", "remove", "myfork")
+        g("config", "--unset", "remote.upstream.pushurl")
+        before = len(self.calls() if os.path.exists(self.log) else [])
+        with self.store.Store(self.store.locate(self.main), write=False) as s:
+            self.assertIsNone(self.github.github(s, t))
+            self.assertEqual(len(self.calls()), before)
+            g("config", "remote.pushDefault", "upstream")
+            self.assertEqual(self.github.github(s, t), "eliasstravik/shepherdr")
+
+    def test_non_repo_gh_calls_stay_unchanged_and_unguarded_repo_calls_refuse(self):
+        self.assertEqual((self.github.gh("auth", "status")[:2], self.github.gh("api", "user")[0]), ((True, "Logged in"), True))
+        self.assertEqual([c["argv"] for c in self.calls()], [["auth", "status"], ["api", "user"]])
+        for bad in (("pr", "view", "50"), ("repo", "view", "--json", "nameWithOwner"),
+                    ("api", "repos/{owner}/{repo}/pulls"), ("api", "repos//commits/abc")):
+            self.assertFalse(self.github.gh(*bad)[0], bad)
+        self.assertEqual(len(self.calls()), 2)

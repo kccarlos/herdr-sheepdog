@@ -23,7 +23,7 @@ from .agents import (
 )
 from .sessions import refresh_sessions
 from .github import (already_merged, drop_branch, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
-                     pr_pending, pr_problem, pr_view, remote_of, update_main, watch_main)
+                     pr_pending, pr_problem, pr_repo, pr_view, remote_of, task_github, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
@@ -657,7 +657,7 @@ def base_merges_only(s, t, wt, reviewed, head):
     tree is exactly what git's own merge of its two parents gives. Nothing of its own to review; a
     merge with conflicts, or with anything changed beyond the plain merge, still needs a round."""
     main, base = s.loc["folder"], t.get("base") or "main"
-    bases = [base, f"refs/remotes/{remote_of(main)}/{base}"]
+    bases = [base, f"refs/remotes/{remote_of(main, t.get('branch'))}/{base}"]
     c = head
     for _ in range(100):
         if c in reviewed:
@@ -878,7 +878,7 @@ def finalize(s, t):
         t.pop("auto_merge", None)
         return msg + (" Nothing to merge (no commits beyond its base)." if t.get("nothing_to_merge") else "") + \
             " The person accepts it in the Tasks panel."
-    repo = github(s) if wt and os.path.isdir(wt) else None
+    repo = task_github(github, s, t) if wt and os.path.isdir(wt) else None
     if repo:
         try:
             pr = pr_open(s, t, repo, t.get("summary"))
@@ -1412,8 +1412,8 @@ def merge_now(s, t):
     couldn't, or None when it's merged (and the task done). A base branch with GitHub's merge
     queue (#742, #801, #802): the pull request joins the queue and the task stays Merging until
     GitHub merged it (the tick finishes it then, and deletes its branch there)."""
-    n, repo = str(t["pr"]["number"]), t["pr"]["repo"]
-    v = pr_view(t)
+    n, repo = str(t["pr"]["number"]), pr_repo(t, s, github)
+    v = pr_view(t) if repo else None
     s.dirty = True
     if not v:
         return f"Couldn't reach pull request #{n} on GitHub."
@@ -1517,7 +1517,7 @@ def in_base(s, t):
     while the local main is behind: SHEP-23, #737). Nothing to merge, and never merged."""
     tip, main, base = branch_tip(s, t), s.loc["folder"], t.get("base") or "main"
     return bool(tip) and (tip == t.get("start") or any(
-        git(main, "merge-base", "--is-ancestor", tip, ref)[0] for ref in (base, f"refs/remotes/{remote_of(main)}/{base}")))
+        git(main, "merge-base", "--is-ancestor", tip, ref)[0] for ref in (base, f"refs/remotes/{remote_of(main, t.get('branch'))}/{base}")))
 
 
 def ff_merge(s, t):
@@ -1551,7 +1551,7 @@ def cmd_accept(args):
             back = back_to_work(s, t, "its agent is at work again", auto=True)
         # One its agent opened itself, which ready couldn't open again ("already exists"): adopted.
         elif (not t.get("pr") and "already exists" in (t.get("attention") or "")
-              and (repo := github(s)) and pr_adopt(t, repo)):
+              and (repo := task_github(github, s, t)) and pr_adopt(t, repo)):
             t.pop("attention", None)
             s.dirty = True
         # A pull request's problems are read fresh (merge_now()): one fixed since, or a merge that
