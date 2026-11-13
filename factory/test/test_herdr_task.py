@@ -6054,6 +6054,8 @@ class Feedback(unittest.TestCase):
         self.assertEqual(len(self.held), 1)
 
     def test_the_chat_reads_it_as_a_news_row(self):
+        if home_guard.NODE is None:
+            self.skipTest("no working node (home_guard.NODE)")
         self.say("Status lines vanish after a restart")
         js = ("const m = await import(process.argv[1]); const t = process.argv[2];"
             "const r = [...t.matchAll(/<herdr-news\\b([^>]*)>([\\s\\S]*?)<\\/herdr-news\\s*>/g)].length;"

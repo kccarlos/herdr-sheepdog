@@ -4,7 +4,10 @@ import home_guard  # noqa: F401  (first: every test on a throwaway home, never t
 import json
 import os
 import re
+import subprocess
+import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 J = lambda *p: os.path.join(ROOT, *p)
@@ -584,8 +587,38 @@ class TestsOnAThrowawayHome(unittest.TestCase):
         for k in ("HC_TERMINAL_SOCKET", "HC_TERMINAL_ID", "HERDR_APP_HOME"):
             self.assertNotIn(k, os.environ)
 
+    def test_a_node_that_fails_under_the_throwaway_home_is_replaced_by_the_one_mise_names(self):
+        # SHEP-FAC-73: on the Mac, node was mise's shim, which exits 1 under a throwaway HOME (untrusted config).
+        with tempfile.TemporaryDirectory() as d:
+            def script(rel, body):
+                path = os.path.join(d, rel)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w") as f:
+                    f.write("#!/bin/sh\n" + body + "\n")
+                os.chmod(path, 0o755)
+                return path
+            script("shims/node", "echo 'mise ERROR not trusted' >&2; exit 1")
+            real = script("installs/node", "exit 0")
+            script("shims/mise", f'[ "$1 $2" = "which node" ] && echo {real}')
+            env = dict(os.environ, PATH=os.path.join(d, "shims") + os.pathsep + "/usr/bin:/bin")
+            with mock.patch.dict(os.environ, env):
+                self.assertEqual(home_guard.find_node(dict(os.environ)), real)
+            script("shims/mise", "exit 1")  # mise has no node either: none, so the node tests skip
+            with mock.patch.dict(os.environ, env):
+                self.assertIsNone(home_guard.find_node(dict(os.environ)))
+            os.remove(os.path.join(d, "shims", "mise"))
+            with mock.patch.dict(os.environ, env):
+                self.assertIsNone(home_guard.find_node(dict(os.environ)))
+            script("shims/node", "exit 0")  # a node that works is used as it is
+            with mock.patch.dict(os.environ, env):
+                self.assertEqual(home_guard.find_node(dict(os.environ)), os.path.join(d, "shims", "node"))
+
+    def test_the_run_has_a_working_node_or_the_node_tests_skip(self):
+        if home_guard.NODE is None:
+            self.skipTest("no working node on this machine")
+        subprocess.run(["node", "-e", "0"], check=True, capture_output=True)
+
     def test_touching_the_real_home_fails_at_once(self):
-        import subprocess
         hook = os.path.join(home_guard.REAL, ".local", "share", "herdr", "ask", "ask-hook.sh")
         with self.assertRaises(home_guard.RealHome):
             open(hook)
