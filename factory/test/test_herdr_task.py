@@ -9451,3 +9451,94 @@ class EndGroup(unittest.TestCase):
                 self.mock.patch.object(self.base.os, "killpg", side_effect=[None, ProcessLookupError]) as kp, self.mock.patch.object(self.base.time, "sleep"):
             self.base.kill_agent("t1")
         self.assertEqual((calls, kp.call_count), ([["hc", "kill", "t1"]], 2))  # the leader's gone, the group answered once then vanished
+
+class ReviewTheCommitGitHubHas(unittest.TestCase):
+    """FAC-88 (note 45): a review round and a merge are of the commit the pull request holds. A real throwaway
+    repo with a bare origin; only hc and gh are faked (gh answers headRefOid from the bare origin)."""
+
+    setUp_gate, git, change, ready = GateReview.setUp, GateReview.git, GateReview.change, GateReview.ready
+    env = GateReview.env
+
+    def setUp(self):
+        from unittest import mock
+        self.setUp_gate()
+        import herdr_task.github as github
+        self.github, self.mock = github, mock
+        self.origin = os.path.join(self.root, "origin.git")
+        self.git(self.root, "init", "-q", "--bare", self.origin)
+        self.git(self.main, "remote", "add", "origin", self.origin)
+        self.git(self.wt, "push", "-q", "-u", "origin", "task/13")
+        self.task["pr"] = {"number": 9, "repo": "o/r", "checked": 5}
+        self.merges = []
+
+        def fake_gh(*a, **k):
+            if a[:2] == ("pr", "view"):
+                return True, self.git(self.origin, "rev-parse", "refs/heads/task/13"), ""
+            self.merges.append(a)
+            return True, "", ""
+        for mod, name, value in ((github, "gh", fake_gh), (self.commands, "gh", fake_gh),
+                                 (self.commands, "finish", lambda s, t, even_if_busy=False: t.update(state="done")),
+                                 (self.commands, "watch_main", lambda *a: None), (self.commands, "update_main", lambda *a: None)):
+            p = mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def pushed(self):
+        return self.git(self.origin, "rev-parse", "refs/heads/task/13")
+
+    def test_a_merge_nobody_pushed_is_pushed_before_the_review_starts(self):
+        local = self.change("merged main here")
+        self.assertNotEqual(self.pushed(), local)
+        self.ready()
+        self.assertEqual((self.pushed(), len(self.runs)), (local, 1))
+
+    def test_a_failed_push_stops_ready_with_gits_error(self):
+        self.git(self.main, "remote", "set-url", "origin", os.path.join(self.root, "gone.git"))
+        self.change("never pushed")
+        with self.assertRaises(self.commands.Fail) as e:
+            self.ready()
+        self.assertIn("Couldn't push task/13", str(e.exception))
+        self.assertEqual(self.runs, [])
+
+    def merging(self, view_head):
+        self.task.update(state="ready", head=self.git(self.wt, "rev-parse", "HEAD"))
+        view = {"state": "OPEN", "mergeable": "MERGEABLE", "statusCheckRollup": [], "headRefOid": view_head}
+        p = self.mock.patch.object(self.commands, "pr_view", lambda t: {"state": "MERGED"} if self.merges else view)
+        p.start()
+        self.addCleanup(p.stop)
+        return self.commands.merge_now(self.store, self.task)
+
+    def test_a_pass_the_pr_doesnt_contain_is_pushed_then_merged(self):
+        local = self.change("reviewed but unpushed")
+        old = self.pushed()
+        self.assertEqual(self.merging(old), self.commands.CHECKS_RUNNING)  # pushed; its checks haven't run yet
+        self.assertEqual((self.pushed(), self.merges, self.task["pr"]["checked"]), (local, [], 0))
+        self.assertIsNone(self.merging(local))  # the next tick's fresh view
+        self.assertEqual(self.merges[0][-2:], ("--match-head-commit", local))
+
+    def test_a_pass_the_pr_doesnt_contain_and_cant_be_pushed_is_flagged(self):
+        other = os.path.join(self.root, "other")
+        self.git(self.root, "clone", "-q", self.origin, other)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false")):
+            self.git(other, "config", k, v)
+        self.git(other, "checkout", "-q", "-b", "x", "origin/task/13")
+        self.git(other, "commit", "-q", "--allow-empty", "-m", "someone else's")
+        self.git(other, "push", "-q", "origin", "x:task/13")
+        theirs, local = self.pushed(), self.change("reviewed, diverged")
+        why = self.merging(theirs)
+        self.assertEqual(why, f"The PR's head isn't the reviewed commit: GitHub has {theirs[:7]}, reviewed {local[:7]}")
+        self.assertEqual((self.task["attention"], self.merges, self.pushed()), (why, [], theirs))
+
+    def test_a_conflict_clears_on_the_next_tick_after_the_push(self):
+        import herdr_task.tick as tick
+        local = self.change("merged main")
+        self.task.update(state="ready", head=local, attention="It conflicts with the base branch.")
+        self.assertIsNone(self.github.pr_head_problem(self.store, self.task, "o/r", local))
+        self.assertEqual((self.pushed(), self.task["pr"]["checked"]), (local, 0))
+        view = {"state": "OPEN", "mergeable": "MERGEABLE", "statusCheckRollup": [], "headRefOid": local}
+        for name, value in (("pr_view", lambda t: view), ("live_agents", lambda key: []), ("pr_repo", lambda *a: "o/r")):
+            p = self.mock.patch.object(tick, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        tick.facts(self.store, self.task, {"attention": [], "done": []})
+        self.assertNotIn("attention", self.task)

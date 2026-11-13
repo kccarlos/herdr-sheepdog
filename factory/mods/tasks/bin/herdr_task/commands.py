@@ -22,7 +22,7 @@ from .agents import (
     REVIEWER_FAILED, STARTING_MS, STATUSES, status_word, SUMMARY_MAX, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
-from .github import (already_merged, drop_branch, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
+from .github import (already_merged, pr_head_problem, push_branch, drop_branch, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
                      pr_pending, pr_problem, pr_repo, pr_view, remote_of, task_github, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
@@ -637,6 +637,8 @@ def gate_step(s, t):
                     "Say what changed in your chat and end your turn: your Assistant hands it to the person.")
         return (f"{s.ref(t)}: all {rounds} review rounds are used and {head[:7]} has {gate_passes(t, head)} of {need} passing "
                 f"rounds. Say why in your chat and end your turn: only your Assistant can add a round (herdr-task review-more).")
+    if (t.get("pr") or {}).get("number"):  # FAC-88: the reviewer reads the commit GitHub has: pushed first, or ready stops
+        push_branch(s, t)
     rows = {x["label"]: x["value"] for x in task_settings(s, t)}
     rv = fallback_reviewer(s, t, fails[-1]["cli"]) if fails else rows["Reviewer"]
     wt, ref, ht, folder = t["worktree"], s.ref(t), own_path(), shlex.quote(s.loc["folder"])
@@ -955,6 +957,8 @@ def finalize(s, t):
     if repo:
         try:
             pr = pr_open(s, t, repo, t.get("summary"))
+            if why := pr_head_problem(s, t, repo, t.get("head")):
+                raise Fail(why[0].upper() + why[1:] + ".")
             pr["checked"] = 0
             # Working until its checks are done and GitHub knows it can merge (the tick: pr_wait()).
             pr["wait"] = PR_CHECKS_RUNNING
@@ -1563,6 +1567,11 @@ def merge_now(s, t):
     # A commit made here after ready was never pushed: merging would delete it with the branch.
     if head and branch_tip(s, t) != head:
         return f"{t.get('branch')} has moved on since it said ready: its agent says ready again first."
+    if v.get("state") != "MERGED" and (why := pr_head_problem(s, t, repo, head, v.get("headRefOid"))):
+        t["attention"], t["attention_at"] = why[0].upper() + why[1:], now()
+        return t["attention"]
+    if v.get("state") != "MERGED" and head and v.get("headRefOid") not in (None, "", head):
+        return CHECKS_RUNNING  # just pushed: this view is of the old head; the next tick reads the new one and merges
     note_checks(s, t, v)
     queue = False
     if v.get("state") != "MERGED":

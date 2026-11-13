@@ -148,17 +148,9 @@ def pr_repo(task, s=None, fn=None):
     return repo
 
 
-def pr_open(s, task, repo, summary=None):
-    """Pushes the task's branch and opens its pull request (or keeps the open one, also one opened
-    by hand or by its agent for the branch: SHEP-13's "already exists")."""
+def push_branch(s, task):
+    """Pushes the task's branch to where its pull request reads it; Fail with git's error when it can't."""
     wt, br = task["worktree"], task["branch"]
-    repo = pr_repo(task) or repo
-    # Continuing a pull request already open on another branch, its work pushed there (#828): that
-    # one is the task's, never a second with the same commits.
-    if not (task.get("pr") or {}).get("number") and pr_at_tip(task, repo):
-        if summary:
-            gh("pr", "comment", str(task["pr"]["number"]), "--repo", task["pr"]["repo"], "--body", summary)
-        return task["pr"]
     folder = wt if wt and os.path.isdir(wt) else s.loc["folder"]
     remote = remote_of(folder, br)
     # The pull request it continues (#828) gets its new commits on its own branch, never forced.
@@ -171,6 +163,49 @@ def pr_open(s, task, repo, summary=None):
             git(wt, "push", remote, f"{br}:refs/heads/{to}")
         if not ok:
             raise Fail(f"Couldn't push {br}" + (f" to {to}" if to != br else "") + f": {err}")
+
+
+def pr_head_problem(s, task, repo, head, theirs=None):
+    """FAC-88: a review of `head` must be of the commit GitHub has. None when the pull request's head is `head`
+    (or can't be read); else pushes the branch when it is ahead and holds `head`, and says why when it still isn't."""
+    pr = task.get("pr") or {}
+    if not (head and pr.get("number") and repo):
+        return None
+    ask = lambda: gh("pr", "view", str(pr["number"]), "--repo", repo, "--json", "headRefOid", "-q", ".headRefOid")
+    if not theirs:
+        ok, theirs, _ = ask()
+        if not ok:
+            return None
+    if not theirs or theirs == head:
+        return None
+    wt = task.get("worktree") or ""
+    ahead = os.path.isdir(wt) and git(wt, "rev-parse", f"refs/heads/{task.get('branch')}")[1] == head \
+        and git(wt, "merge-base", "--is-ancestor", theirs, head)[0]
+    if ahead:
+        try:
+            push_branch(s, task)
+        except Fail as e:
+            return str(e)
+        pr["checked"] = 0  # the next tick reads its state again (a conflict the push cleared goes away)
+        s.dirty = True
+        ok, theirs, _ = ask()
+        if not ok or theirs == head:
+            return None
+    return f"the PR's head isn't the reviewed commit: GitHub has {theirs[:7]}, reviewed {head[:7]}"
+
+
+def pr_open(s, task, repo, summary=None):
+    """Pushes the task's branch and opens its pull request (or keeps the open one, also one opened
+    by hand or by its agent for the branch: SHEP-13's "already exists")."""
+    wt, br = task["worktree"], task["branch"]
+    repo = pr_repo(task) or repo
+    # Continuing a pull request already open on another branch, its work pushed there (#828): that
+    # one is the task's, never a second with the same commits.
+    if not (task.get("pr") or {}).get("number") and pr_at_tip(task, repo):
+        if summary:
+            gh("pr", "comment", str(task["pr"]["number"]), "--repo", task["pr"]["repo"], "--body", summary)
+        return task["pr"]
+    push_branch(s, task)
     pr = task.get("pr") or {}
     if pr.get("number"):
         pr["repo"] = repo
