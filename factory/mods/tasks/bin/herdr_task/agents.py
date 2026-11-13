@@ -5,7 +5,7 @@ import json
 import os
 import re
 
-from .base import hc_json, HOME, now, RANK, run, SHELLS
+from .base import Fail, hc_json, HOME, now, RANK, run, SHELLS
 
 
 # ---- live agents ----------------------------------------------------------------------------
@@ -57,6 +57,15 @@ AGENT_BINS = ("claude", "claude-code", "codex", "agy", "antigravity")
 AGENT_VER = re.compile(r"^\d+(?:\.\d+)+$")  # Claude Code's native binary is named by its version
 
 
+def cli_of(k):
+    lb = (k.get("labels") or {}).get("herdr.agent")
+    if lb:
+        return lb
+    fg, st = k.get("foreground") or {}, k.get("status") if isinstance(k.get("status"), dict) else {}
+    raw = " ".join(str(x or "") for x in (st.get("app"), k.get("agent"), fg.get("name"), *(fg.get("argv") or [])[:1], *(k.get("argv") or [])[:1])).lower()
+    return "agy" if "agy" in raw or "antigravity" in raw else "codex" if "codex" in raw else "claude"
+
+
 def _cmd_shell(fg):
     """A shell running a `-c` command rather than waiting interactively after an agent exited."""
     argv = (fg or {}).get("argv") or []
@@ -87,7 +96,7 @@ def status_of(task, live):
             best = st
     if task["state"] == "ready":
         return "ready"
-    return best or "stopped"
+    return best or ("working" if review_running(task) else "stopped")
 
 
 # What people see a task as: one of eight, derived, never stored. From the task's record (todo,
@@ -138,6 +147,8 @@ def task_status(task, live):
     # before its first message lands. Working, until it ends or STARTING_MS pass.
     if starting(task):
         return "working", None, None
+    if review_running(task):
+        return "working", None, None if (task.get("progress") or {}).get("text") else REVIEWER_ON_IT
     # Quiet without saying ready, but on its own work (SHEP-53, FAC-60): a helper reviewer at work
     # keeps it Working; a background job of its own (hc get's foreground or status msg, its log's
     # background shells/Monitors, or its fresh status line) shows Waiting on a background job,
@@ -526,6 +537,18 @@ def held_ask(address):
 
 
 STARTING_MS = 90_000
+REVIEWER_ON_IT = "Herdr's reviewer is on it"
+
+
+def review_running(task):
+    """A herdr-task review round for this task's head is still open (FAC-66)."""
+    head = task.get("head")
+    if not head:
+        return False
+    done = {r.get("round") for r in task.get("reviews") or [] if r.get("started_by") == "herdr-task"}
+    failed = {f.get("address") for f in task.get("review_failures") or [] if f.get("address")}
+    return any(r.get("head") == head and r.get("round") not in done and r.get("address") not in failed
+               for r in task.get("review_runs") or [])
 
 
 def starting(task):
@@ -698,14 +721,32 @@ def helper_working(task, live):
     return False
 
 
+AGY_BG_TASKS = re.compile(r"\b[1-9]\d*\s+task\(s\)(?!\w)")
+BOX_RULE = re.compile(r"^\s*(?:[─━]{8,}|╰[─━]{8,}╯)\s*$")
+
+
+def agy_bg_tasks(address):
+    """agy's footer shows active background work ("1 task(s) · /tasks") below its input box."""
+    try:
+        out = run(["hc", "read", address, "--lines", "0"]).stdout or ""
+    except (OSError, Fail):
+        return False
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    rules = [i for i, ln in enumerate(lines) if BOX_RULE.match(ln)]
+    return bool(AGY_BG_TASKS.search("\n".join(lines[max(len(lines) - 3, rules[-1] + 1 if rules else 0):])))
+
+
 def own_work(task, live):
     """Its quiet worker waits on a background job of its own, and its last message asks nothing."""
+    if review_running(task):
+        return False
     for k in live:
         if (k.get("labels") or {}).get("herdr.role") == "reviewer" or status_word(k) == "blocked":
             continue
         address = k.get("address")
         log = agent_log(task, address) or agent_log(task)
         jobs, ended = background_jobs(log) if log else ({}, 0)
-        if (fg_job(k) or status_waits(k, ended) or jobs or waits_on_own(task, address, ended)) and not last_question(task, address):
+        if (fg_job(k) or status_waits(k, ended) or jobs or waits_on_own(task, address, ended)
+                or (address and cli_of(k) == "agy" and agy_bg_tasks(address))) and not last_question(task, address):
             return True
     return False

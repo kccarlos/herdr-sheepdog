@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from .base import guard, hc_json, now, run, STORE
 from .settings import bare
 from .agents import (
-    agent_log, agent_running, detail, from_person, live_agents, log_tail, REVIEWER_FAILED, said, starting, status_word,
+    agent_log, agent_running, cli_of, detail, from_person, live_agents, log_tail, REVIEWER_FAILED, said, starting, status_word,
     STATUSES,
 )
 from .sessions import session_of
@@ -265,15 +265,6 @@ AGY_SEND_NOW = re.compile(r"alt\+m\b", re.I)
 AGY_QUEUED = re.compile(r"alt\+m\b|queued messages", re.I)
 
 
-def cli_of(k):
-    lb = (k.get("labels") or {}).get("herdr.agent")
-    if lb:
-        return lb
-    fg, st = k.get("foreground") or {}, k.get("status") if isinstance(k.get("status"), dict) else {}
-    raw = " ".join(str(x or "") for x in (st.get("app"), k.get("agent"), fg.get("name"), *(fg.get("argv") or [])[:1], *(k.get("argv") or [])[:1])).lower()
-    return "agy" if "agy" in raw or "antigravity" in raw else "codex" if "codex" in raw else "claude"
-
-
 def turn_moved(k, after_turn):
     t = k.get("turn") or 0
     return t > after_turn or (status_word(k) == "working" and t >= after_turn)
@@ -336,10 +327,10 @@ def news_send(address, text, check=True):
 TYPING = "herdr.typing"
 TYPING_KEEP_MS = 5 * 60000     # unsent words untouched this long hold nothing any more
 HELD = os.path.join(STORE, ".held.json")  # {address: [{text, how, at}]}: held_pass sends them
-ESCAPES = re.compile(r"\x1b(?:\[([0-9;:?<=>!]*)[ -/]*([@-~])|\][^\x07\x1b]*(?:\x07|\x1b\\)|P[^\x1b]*\x1b\\|[()*+][0-9A-Za-z]|.)"
+ESCAPES = re.compile(r"\x1b(?:\[([0-9;:?<=>!]*)([ -/]*)([@-~])|\][^\x07\x1b]*(?:\x07|\x1b\\)|P[^\x1b]*\x1b\\|[()*+][0-9A-Za-z]|.)"
                      r"|[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]|[\r\n]|[^\x1b\x00-\x1f\x7f]+", re.S)
-PROMPT = re.compile(r"^\s*[❯›>]\s")   # Claude Code's input line, Codex's
-RULE = re.compile(r"^\s*[─━]{8,}")     # Claude Code's box edge
+PROMPT = re.compile(r"^ ?[❯›>](?:\s|$)")  # Claude Code's ❯, Codex's ›, agy's >
+RULE = re.compile(r"^\s*[─━]{8,}\s*$")    # Claude Code's and agy's box edge
 
 
 def screen_raw(address, there=None):
@@ -368,57 +359,103 @@ def screen_raw(address, there=None):
     return out.decode("utf-8", "replace")
 
 
+def _muted_fg(fg):
+    return (fg == 90 or (isinstance(fg, tuple) and (fg[1] == 8 or 238 <= fg[1] <= 248 if fg[0] == 5
+            else max(fg[1:]) - min(fg[1:]) <= 8 and 90 <= fg[1] <= 165)))
+
+
 def screen_rows(raw):
-    """A repaint's rows: {row: {col: (char, dim)}}. Only what a repaint uses: text, line ends,
-    cursor moves, clears and SGR's dim."""
-    rows, row, col, dim = {}, 0, 0, False
+    """A repaint's rows: {row: {col: (char, muted)}}. Tracks text, line ends, cursor moves,
+    clears, and muted placeholder styles (SGR dim and grey placeholder foregrounds)."""
+    rows, row, col, dim, fg = {}, 0, 0, False, None
     for m in ESCAPES.finditer(raw):
-        s, op = m.group(0), m.group(2)
+        s, p1, im, op = m.group(0), m.group(1) or "", m.group(2), m.group(3)
         if s[0] == "\x1b":
+            if not op or im or (p1 and p1[0] in "?><=!"):
+                continue
             if op == "m":
-                ps, i = (m.group(1) or "0").replace(":", ";").split(";"), 0
+                ps, i = (p1 or "0").split(";"), 0
                 while i < len(ps):
-                    if ps[i] in ("38", "48", "58"):  # a color: 38;5;n or 38;2;r;g;b
-                        i += 3 if ps[i + 1:i + 2] == ["5"] else 5
+                    sub = ps[i].split(":")
+                    n = int(sub[0]) if sub[0].isdigit() else 0
+                    if n in (38, 48, 58):
+                        q = sub[1:] if len(sub) > 1 else ps[i + 1:]
+                        rgb = q[-3:] if len(sub) > 1 else q[1:4]
+                        if n == 38 and q[:1] == ["5"] and len(q) > 1 and q[1].isdigit():
+                            fg = (5, int(q[1]))
+                        elif n == 38 and q[:1] == ["2"] and len(q) >= 4 and all(x.isdigit() for x in rgb):
+                            fg = (2, int(rgb[0]), int(rgb[1]), int(rgb[2]))
+                        i += 1 if len(sub) > 1 else (3 if q[:1] == ["5"] else 5 if q[:1] == ["2"] else 1)
                         continue
-                    dim = True if ps[i] == "2" else False if ps[i] in ("", "0", "22") else dim
+                    dim = False if n in (0, 22) else True if n == 2 else dim
+                    fg = None if n in (0, 39) else n if (30 <= n <= 37 or 90 <= n <= 97) else fg
                     i += 1
-            elif op in ("H", "f") and not (m.group(1) or "").startswith("?"):
-                a = (m.group(1) or "").split(";")
-                row, col = int(a[0] or 1) - 1, int(a[1] or 1) - 1 if len(a) > 1 and a[1] else 0
-            elif op == "G":
-                col = int(m.group(1) or 1) - 1
-            elif op == "J" and m.group(1) in ("2", "3"):
-                rows = {}
+            else:
+                a = p1.split(";")
+                n = (int(a[0]) or 1) if a[0].isdigit() else 1
+                if op in ("H", "f"):
+                    row, col = n - 1, ((int(a[1]) or 1) if len(a) > 1 and a[1].isdigit() else 1) - 1
+                elif op in ("G", "d"):
+                    row, col = (n - 1, col) if op == "d" else (row, n - 1)
+                elif op in ("A", "B", "E", "F"):
+                    row = max(0, row - n) if op in ("A", "F") else row + n
+                    col = 0 if op in ("E", "F") else col
+                elif op in ("C", "D"):
+                    col = col + n if op == "C" else max(0, col - n)
+                elif op == "J" and p1 in ("", "0", "2", "3"):
+                    rows = {} if p1 in ("2", "3") else {r: {c: v for c, v in l.items() if r < row or c < col}
+                                                        for r, l in rows.items() if r <= row}
+                elif op == "K" and p1 in ("", "0", "1", "2"):
+                    rows[row] = {} if p1 == "2" else {c: v for c, v in rows.get(row, {}).items()
+                                                      if (c > col if p1 == "1" else c < col)}
         elif s == "\r":
             col = 0
         elif s == "\n":
             row, col = row + 1, 0
         elif s[0] >= " ":
-            line = rows.setdefault(row, {})
+            line, muted = rows.setdefault(row, {}), dim or _muted_fg(fg)
             for ch in s:
-                line[col] = (ch, dim)
+                line[col] = (ch, muted)
                 col += 1
     return rows
 
 
 def typed_input(raw):
     """What the person typed in an agent CLI's input line on this screen (Claude Code's ❯ box,
-    Codex's ›): the bottom-most prompt line and the lines under it, without the CLI's dim
-    placeholder or suggestion. '' when it's empty or there's none."""
+    Codex's ›, agy's >): the live prompt box's lines, without the CLI's dim or grey placeholder
+    or suggestion. '' when it's empty or there's none."""
     rows = screen_rows(raw)
-    text = {r: "".join(ch for _, (ch, _) in sorted(line.items())).replace("\xa0", " ") for r, line in rows.items()}
+    if not rows:
+        return ""
+    last = max(rows)
+    text = {r: "".join(line.get(c, (" ", True))[0] for c in range(min(max(line), 500) + 1)).replace("\xa0", " ") if line else ""
+            for r, line in rows.items()}
     marks = [r for r in sorted(rows) if PROMPT.match(text[r])]
     if not marks:
         return ""
-    top, out = marks[-1], []
-    for r in range(top, max(rows) + 1):
-        if r != top and (RULE.match(text.get(r, "")) or not text.get(r, "").strip()):
-            break
-        cs = sorted(rows.get(r, {}).items())
-        if r == top:
-            cs = cs[PROMPT.match(text[r]).end():]
-        out.append("".join(ch for _, (ch, dim) in cs if not dim))
+    def box_end(r):
+        end = next((k for k in range(r + 1, last + 1) if RULE.match(text.get(k, ""))), None) if RULE.match(text.get(r - 1, "")) else None
+        if end is None or len(text[r - 1].strip()) != len(text[end].strip()):
+            return None
+        after = [text[k].strip() for k in range(end + 1, last + 1) if text.get(k, "").strip()]
+        d = next((i for i, x in enumerate(after) if RULE.match(x)), None)
+        if d and all(x.startswith(("●", "○")) for x in after[:d]):
+            after = after[d + 1:]
+        return end if len(after) <= 2 and not any(RULE.match(x) for x in after) else None
+    framed = [(r, end) for r in marks if (end := box_end(r)) is not None]
+    if framed:
+        top, end = framed[-1]
+    else:
+        top = marks[-1]
+        if text[top].lstrip().startswith((">", "❯")) and len(rows) > 1:
+            return ""
+        end = next((k for k in range(top + 1, last + 2) if RULE.match(text.get(k, "")) or not text.get(k, "").strip()), last + 1)
+        if sum(1 for k in range(end, last + 1) if text.get(k, "").strip()) > 2:
+            return ""
+    out = []
+    for r in range(top, end):
+        cut = PROMPT.match(text[r]).end() if r == top else 0
+        out.append("".join(ch for c, (ch, muted) in sorted(rows.get(r, {}).items()) if c >= cut and not muted))
     return "\n".join(out).strip()
 
 
