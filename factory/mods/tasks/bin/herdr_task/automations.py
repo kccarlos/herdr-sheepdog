@@ -11,10 +11,10 @@ import sys
 import threading
 import time
 
-from .base import ENTRY, Fail, guard, hc_json, now, STORE
+from .base import ENTRY, Fail, guard, hc_json, layout, now, STORE, WHERE
 from .when import parse_at
-from .settings import bare, settings_for, worker_argv, worktrees_on
-from .agents import agent_running, detail, live_agents, starting, status_of, task_status, TRUST_ASK
+from .settings import bare, set_task, settings_for, SET_KEYS, worker_argv, worktrees_on
+from .agents import agent_running, detail, live_agents, starting, status_of, task_status
 from .sessions import session_of
 from .launch import default_space
 from .store import locate, open_store, read_list, Store, store_files
@@ -205,7 +205,7 @@ def find_auto(s, ref):
 
 
 def auto_view(s, a):
-    v = {k: a.get(k) for k in ("id", "title", "prompt", "mode", "agent", "on", "match", "space", "paused",
+    v = {k: a.get(k) for k in ("id", "title", "prompt", "mode", "agent", "set", "on", "match", "space", "paused",
                                 "next_run", "last_run", "last_task", "last_error", "runs", "created")}
     # machine: None here; herdr-task --on <machine> names it (cli.remote), so a list across machines says whose it is
     v.update(ref=auto_ref(s, a), **{"from": from_text(a["from"]) if a.get("from") else None}, folder=s.loc["folder"], machine=None, prefix=s.prefix, every=(a.get("every") or {}).get("text"),
@@ -256,6 +256,24 @@ def set_auto_fields(s, a, args, adding=False):
         a["space"] = bare(args.space)
     if args.parent:
         a["parent"] = args.parent
+    if getattr(args, "set", None):
+        # Each task it adds gets these (#744: review=off for a run that only reads); checked now.
+        sets = dict(a.get("set") or {})
+        for pair in args.set:
+            if "=" not in pair:
+                raise Fail(f"--set takes key=value, not {pair!r}.")
+            k, v = pair.split("=", 1)
+            set_task({}, k, v)
+            field = SET_KEYS[k.strip().lower()]
+            key = next(x for x, f in SET_KEYS.items() if f == field)  # one name per setting
+            v = v.strip().strip("\"'").strip()
+            if not v or v.lower() == "default":
+                sets.pop(key, None)
+            else:
+                sets[key] = v
+        a["set"] = sets
+        if not sets:
+            a.pop("set")
     if not a.get("every") and not a.get("on"):
         raise Fail("Say when it runs: --every \"weekdays 9:00\" and/or --on ready,merged. " + HOW)
     if a.get("from") and not a.get("on"):
@@ -358,6 +376,8 @@ def fire(s, a, why, brief=None):
     t["automation"] = a["id"]
     if a.get("agent"):
         t["agent"] = a["agent"]
+    for k, v in (a.get("set") or {}).items():
+        set_task(t, k, v)
     space = a.get("space")
     run_rec = {"at": now(), "why": why, "task": s.ref(t)}
     if a.get("from") and why.split(":")[0] in EVENTS:
@@ -433,11 +453,10 @@ def diff_events(facts, seen):
                 out.append(("ready", f))
             if f["state"] == "done" and prev["state"] != "done" and f.get("merged"):
                 out.append(("merged", f))
-            # Its worker waiting at Claude Code's folder-trust question (trust_check) is no failure.
-            if f.get("attention") and f.get("attention") != prev.get("attention") and f["attention"] != TRUST_ASK:
+            if f.get("attention") and f.get("attention") != prev.get("attention"):
                 out.append(("failed", f))
             # Needs you: its agent asks something (its folder's trust too), or waits for a reply (the status people see).
-            asks = lambda x: x.get("needs") in ("asks", "reply") or x.get("attention") == TRUST_ASK
+            asks = lambda x: x.get("needs") in ("asks", "reply")
             if asks(f) and not asks(prev):
                 out.append(("needs-you", f))
             stalled = f["state"] == "running" and ((status == "stopped" and not f.get("starting")) or (cur["quiet"] and now() - cur["quiet"] >= STALL_MS))
@@ -712,12 +731,18 @@ def cmd_scheduler(args):
         say(args, {"running": True}, "Another scheduler is running.")
         return
     started = script_hash()
+    on_layout = WHERE.migrated
+    test = bool(os.environ.get("HERDR_TASK_STORE"))
     with open(os.path.join(STORE, ".scheduler.json"), "w") as f:
         json.dump({"pid": os.getpid(), "hash": started, "at": now(), "terminal": os.environ.get("HC_TERMINAL_ID")}, f)
     print(f"herdr-automations: watching {STORE} every 15 s.", flush=True)
     while True:
         report = {"started": [], "done": [], "attention": [], "fired": []}
         try:
+            if not test:
+                layout.heal_back(WHERE)       # rolled back: what was written at the new paths just after, taken back
+                for k in layout.heal(WHERE):  # an older writer's file at an old path: taken in
+                    print(f"{time.strftime('%H:%M:%S')} took in {k} written at its old path", flush=True)
             one_pass(report)
         except Exception as e:  # one bad list never stops the rest
             print(f"{time.strftime('%H:%M:%S')} error: {e}", flush=True)
@@ -745,8 +770,8 @@ def cmd_scheduler(args):
             say(args, report, None)
             return
         time.sleep(15)
-        # Updated: carry on as the new version.
-        if script_hash() != started:
+        # Updated, or this machine's data moved since: carry on as the new version, on the new paths.
+        if script_hash() != started or (not test and WHERE.migrated != on_layout):
             fcntl.flock(me, fcntl.LOCK_UN)
             os.execv(sys.executable, [sys.executable, ENTRY, "scheduler"])
 

@@ -17,6 +17,7 @@ Rules:
 - Watch only the workers you started (your hc children, or terminals labelled herdr.coordinator=<your tab>). Other tasks in this folder are the person's: touch one only when the person asks about it.
 - Don't bypass the queue: Herdr runs at most a few tasks per folder at once (`herdr-task config --max-running N`, default 3) and starts the rest by itself. Use `start --now` only when the person asks for more at once.
 - Before an unattended night, run `herdr-task project checklist` and don't start milestone work while an item is missing.
+- Suggested next message, when your Settings block says "Suggested next message: on": end each reply with one line of its own, last in the reply, holding `<hc suggest="…"/>`: the one short message the person would most likely send next (their next message to you), in their own words, as a tab-complete would ("yes, merge it", "show me the diff", "try again on main"). One line, under about 60 characters. Write none when there's no sensible next message, when you ask a multiple-choice question that already has its own cards, or when the reply is only a notice. Never write it when the Settings block says off. The chat shows it greyed out in the box; its words never show as text.
 
 ## Where you are
 
@@ -47,7 +48,8 @@ for ID in $A $B; do herdr-task start "$ID" --folder "$REPO" --space "$SPACE" --p
 ```
 
 - Add every task first (with `--after` where it applies), then start them all. A queued task starts by itself later, with the same agent, space and you as its parent: never start it again.
-- In a git repo a task gets its own worktree and branch by default (`mode: "worktree"` in the result); with worktrees off, or without git, it works in the folder itself (`mode: "here"`). Use `--here` only when the person says to work in the repo itself; the person's setting wins over `--worktree`.
+- In a git repo a task gets its own worktree and branch by default (`mode: "worktree"` in the result); with worktrees off, or without git, it works in the folder itself (`mode: "here"`). Use `--here` only when the person says to work in the repo itself, or for a research-only task (below); the person's setting wins over `--worktree`.
+- A research-only task (reading, web research, comparing, analysing; no code or file changes asked for) starts with `--here`: no worktree, branch or pull request. Its brief says to change no files and commit nothing, and to publish the result as a Shepherdr artifact (`herdr-artifact`), or what the person asked for, with its link in the ready summary and its id as `--proof` (the Accept card links to it); never a report file in the repo.
 - Long prompt: write it to a file and pass `--prompt-file <file>`.
 - Every brief ends with a Settings block that herdr-task writes from the person's settings: one plain line per setting that shapes how the agent works (Review on or off, Reviewer, Must fix, Review rounds, Merge, Base, Proof, Agent). The agent runs its own review (a subagent or another CLI) and fixes what's found before it says ready; herdr-task starts no reviewers. A line that differs from the default says who changed it. `herdr-task show HAT-1` prints the block.
 - A wish about how one task is reviewed, proven or merged ("skip the review", "one review round", "no proof needed", "ask me before merging"): `--set` on `add` (or `edit` before it starts), so the block says it, rather than only words in the prompt. Keys: `review=on|off`, `review.rounds=1..10`, `review.mustFix=blocker|major|minor`, `merge="on its own"|"after checks"|"ask me first"`, `proof=on|off` (a proof artifact, always a recipe, the person's Accept card links to; on by default); `--set key=` goes back to the person's setting. Example: `herdr-task add "Fix login" --prompt "..." --set review.rounds=1 --set merge="ask me first"`. Change the settings themselves only when the person asks (they're theirs).
@@ -114,6 +116,9 @@ herdr-task alert "Deploy is down" --body "why"  # only what truly can't wait: a 
 
 Run exactly what was asked, for exactly the tasks named. If a command refuses (checks failing, conflicts), say why and offer the fix; don't work around it.
 - Keep waiting while any of your tasks runs or waits in the queue. When all are finished, stop and wait for the person.
+- Show things in the chat: a picture or a short video you or a task made goes right in your message as a Markdown image of its file (`![The new card](/abs/path/card.png)`; an .mp4, .webm or .mov plays in place; a short clip beats an animated GIF), so the person sees it without opening anything. An artifact stays the lasting record; its card in the chat previews its first pictures and lines.
+- To show the person an artifact made in this space (a proof, a report), wherever they are: `herdr-artifact open <id>` opens it on the screen they use and prints its link; give them that link too (`herdr-artifact list --all` finds the id).
+- To look at an artifact yourself, as the person sees it: `herdr-artifact preview <id>` prints a link on 127.0.0.1 to the web app's viewer on this machine (the person's link may lead to a machine this one can't reach); open it in a browser at a phone's and a desktop's width and screenshot it. A worker checks its own the same way before ready.
 
 ## Automations
 
@@ -127,6 +132,7 @@ herdr-task auto add "Look at failures" --prompt "<brief>" --on failed --json
 - `--every`: "weekdays 9:00", "daily 9:00,17:30", "mon,thu 8:15", "every 30 minutes", "every 2 hours on weekdays from 8:00 to 18:00", "hourly", "once 2026-11-05 9:00", "once tomorrow 9:00" (this machine's time zone; unknown words are refused: fix and retry).
 - `--on`: added, ready, failed, needs-you, merged, stalled (this folder's tasks; its own runs never set it off). `--match "words"` or `--match "branch:task/*"` narrows it.
 - `--from vm-b:~/dev/app` (with `--on`): hear another folder's task events instead, on a machine linked to this one (`herdr-task machines`) or a folder here; each event fires one run, its brief naming the task, title and machine.
+- `--set review=off` (any `add --set` key, repeatable): each run's task gets it. Turn Review off for a run that only reads (a sweep, a report).
 - Its runs start in this space with you as their parent, so their news comes to you like any worker's; the queue and the Tasks-at-once limit apply.
 - `auto list --json`, `auto show|pause|resume|run-now|rm HAT-A1`, `auto edit HAT-A1 [same flags] [--title]`. Pause, change or remove one only when the person asks.
 - Automations run with Herdr closed. If the person turned automations off in Shepherdr settings, say so instead of adding one.
@@ -158,6 +164,16 @@ Where the person or the orchestrator speaking for them has delegated these, deci
 - Own CI on a task's pull request: when a check fails outside the task's change (a flaky test, a runner hiccup: read the log with `gh run view <run> --log-failed`), re-run the failed jobs once (`gh run rerun <run> --failed`). After 3 failed CI runs on the task, or 1 hour of CI on it, don't try again: the loop-breaker stops it ("Recap required") and you decide its recap (`herdr-task recap --decide`: a new approach such as test retries, a skip list or a split).
 
 Ask the person only for the repo's ask-first list (docs/factory.md section 9), product decisions, and merges.
+
+## Usage insights
+
+When the person asks how they use Shepherdr, or for tips to work better in it, read their own data and answer with a few concrete suggestions, each backed by what you found ("You open Settings about 9 times a day for Autopilot: its header switch does that in one click"). It is theirs alone: read it only when they ask, never quote their messages' words, and never send it anywhere (no web search, issue, feedback, shared artifact or other service).
+- Screens, switches, clicks, features, errors and how long asks waited: `~/.local/state/shepherdr/service/usage.jsonl` (older lines in `usage.1.jsonl`; on a machine whose Shepherdr is older, in `~/.herdr/shepherdr/`), one JSON object per line: `at` (ms), `kind` (view, act, send, feature, error, ask), `from` (web, phone, window, voice, terminal), ids (`space`, `task`, `tab`, `artifact`, `section`), `type`, `key`, `n`, `ms` (time on a view, or an ask's wait). Read it with `jq` or python.
+- Tasks and their timings: `herdr-task list --all --json` (and `--archived`): `created`, `started`, `ready_at`, `accepted_at`, `done_at`, `reopened_at`, `reviews`.
+- Autopilot wakes: `~/.local/share/shepherdr/tasks/.autopilot.json` (or `~/.herdr/tasks/` on an older one) (each space's last wakes: `at`, `reason`, `outcome`).
+- Messages: count and time the person's turns in the agents' own logs (Claude Code `~/.claude/projects/*/*.jsonl`, Codex `~/.codex/sessions`), never their words. The usage log has the sends from the web, a phone, the window and calls; the rest were typed in a terminal.
+- Other machines: the same files there (`hc exec --on <machine> -- sh -c 'cat ~/.local/state/shepherdr/service/usage.jsonl 2>/dev/null || cat ~/.herdr/shepherdr/usage.jsonl'`), when the person asks about them too.
+- An empty log: Usage insights may be off (Settings > Window > Add-ons); say so. Deleting it is the Delete under that switch, or, when the person asks you, on each machine: `d=~/.local/state/shepherdr/service; [ -d $d ] || d=~/.herdr/shepherdr; rm -f $d/usage.jsonl $d/usage.1.jsonl && touch $d/usage.deleted` (the touch keeps older events still on their way from coming back).
 
 ## Secrets
 

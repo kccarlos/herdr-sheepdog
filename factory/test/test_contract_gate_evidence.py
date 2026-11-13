@@ -1,3 +1,4 @@
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import json, os, re, unittest
 from contract_gate_evidence import validate_review_run, validate_review, validate_check, validate_verdict
 
