@@ -800,7 +800,22 @@ func (s *Supervisor) announceHeld(path string) {
 				continue
 			}
 			ctx, cancel := context.WithTimeout(s.life, 2*time.Minute)
-			s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: q.SpokenSummary, pending: q.ID, queued: announced > 0})
+			var screen string
+			if read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines); err == nil {
+				screen = read.Text
+			}
+			if s.paneMuted(ctx, q.PaneID) || !s.heldQuestion(q.ID) {
+				cancel()
+				continue
+			}
+			row, ok = s.store.Get(q.PaneID)
+			if !ok || (row.State != herdr.StateBlocked && row.State != herdr.StateDone && row.State != herdr.StateIdle) {
+				cancel()
+				continue
+			}
+			a := announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: q.SpokenSummary, screen: screen, pending: q.ID, queued: announced > 0}
+			s.promoteHeld(a)
+			s.announce(ctx, a)
 			cancel()
 			announced++
 		}

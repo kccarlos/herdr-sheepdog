@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/genai"
+
 	"github.com/kccarlos/herdr-sheepdog/internal/attention"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
@@ -466,5 +468,97 @@ func TestMutedKeptPromiseStillPushesToThePhone(t *testing.T) {
 	got := w.fn.all()
 	if len(got) != 1 || got[0].Kind != push.KindDone || !strings.HasPrefix(got[0].Text, "As you asked:") {
 		t.Errorf("notifications = %+v", got)
+	}
+}
+
+// A held question in a muted space is omitted from briefingText so it is not
+// exposed in utterance requests or status replies and cannot be promoted by a
+// status reply repeating the briefing.
+func TestBriefingOmitsHeldQuestionInMutedSpace(t *testing.T) {
+	m := braintest.NewModel()
+	w := newMuteWorld(t, m, Quiet)
+	w.mute(t)
+	w.block("w5:p1", "claude-permission-prompt.screen.txt")
+	qs := w.store.Questions()
+	if len(qs) != 1 || !w.sup.heldQuestion(qs[0].ID) {
+		t.Fatalf("question not held: %+v", qs)
+	}
+	if got := w.roster(); got != "One agent: auth is blocked at a prompt." {
+		t.Errorf("briefing = %q, want held question omitted", got)
+	}
+	m.Add(braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
+		if strings.Contains(call.Text(), qs[0].Question) {
+			t.Errorf("utterance request leaked held question %q:\n%s", qs[0].Question, call.Text())
+		}
+		return braintest.Response(braintest.Step{Text: braintest.Reply(w.roster(), "")}), nil
+	}})
+	w.say("what's the status?")
+	if !w.sup.heldQuestion(qs[0].ID) {
+		t.Fatal("status reply repeating briefing promoted the held question")
+	}
+	if p, ok := w.store.Pending(); ok {
+		t.Fatalf("pending = %+v, want none", p)
+	}
+}
+
+// Unmuting a space promotes its held question and includes the pane screen
+// before running the orchestrator's announce turn, so the turn sees Pending,
+// LastBlock, Screen, and PromptWaiting, and the question does not stay Held if
+// the turn skips speaking.
+func TestUnmutePromotesHeldQuestionBeforeAnnounceTurn(t *testing.T) {
+	m := braintest.NewModel()
+	var turnText string
+	m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
+		turnText = call.Text()
+		return braintest.Response(*braintest.NothingToAdd()), nil
+	}}
+	w := newMuteWorld(t, m, Quiet)
+	w.mute(t)
+	w.srv.SetScreen("w5:p1", fixture(t, "claude-permission-prompt.screen.txt"))
+	w.transition("w5:p1", herdr.StateWorking, herdr.StateDone)
+	qs := w.store.Questions()
+	if len(qs) != 1 || !w.sup.heldQuestion(qs[0].ID) {
+		t.Fatalf("question not held: %+v", qs)
+	}
+	if _, err := w.sup.SetSpaceMute(context.Background(), "auth", false, nil, ViaPhone); err != nil {
+		t.Fatal(err)
+	}
+	w.sup.replies.Wait()
+
+	if !strings.Contains(turnText, "WAITING FOR AN ANSWER") {
+		t.Errorf("announce turn did not see Pending:\n%s", turnText)
+	}
+	if !strings.Contains(turnText, "The screen the supervisor read for this event:") {
+		t.Errorf("announce turn did not receive pane screen:\n%s", turnText)
+	}
+	if !strings.Contains(turnText, "The agent's prompt is still open, waiting for the user's answer.") {
+		t.Errorf("announce turn did not see PromptWaiting:\n%s", turnText)
+	}
+	if w.sup.heldQuestion(qs[0].ID) {
+		t.Errorf("question %s remained held after unmute when orchestrator skipped", qs[0].ID)
+	}
+	if p, ok := w.store.Pending(); !ok || p.ID != qs[0].ID || p.Held {
+		t.Errorf("pending after unmute = %+v, %v; want promoted %s", p, ok, qs[0].ID)
+	}
+}
+
+// A done -> idle transition (the user looked at the pane in herdr) keeps a
+// question recorded while the pane was done, along with its held state.
+func TestDoneToIdlePreservesDoneQuestionAndHeldState(t *testing.T) {
+	w := newMuteWorld(t, nil, Quiet)
+	w.mute(t)
+	w.srv.SetScreen("w5:p1", fixture(t, "claude-permission-prompt.screen.txt"))
+	w.transition("w5:p1", herdr.StateWorking, herdr.StateDone)
+	qs := w.store.Questions()
+	if len(qs) != 1 || !w.sup.heldQuestion(qs[0].ID) {
+		t.Fatalf("question not held on done: %+v", qs)
+	}
+
+	w.transition("w5:p1", herdr.StateDone, herdr.StateIdle)
+	if got := w.store.Questions(); len(got) != 1 || got[0].ID != qs[0].ID {
+		t.Fatalf("questions after done -> idle = %+v, want %s preserved", got, qs[0].ID)
+	}
+	if !w.sup.heldQuestion(qs[0].ID) {
+		t.Fatalf("held state for %s was dropped on done -> idle", qs[0].ID)
 	}
 }

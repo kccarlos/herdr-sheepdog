@@ -181,6 +181,10 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 		}
 	}
 	if t.To != "" && a.State != t.To {
+		from := t.From
+		if from == "" {
+			from = a.State
+		}
 		at := t.At
 		if at.IsZero() {
 			at = s.now()
@@ -189,9 +193,13 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 		if t.To == herdr.StateBlocked {
 			a.LastBlock = &Block{SeenAt: at}
 		} else {
-			// Off blocked: no question of this pane is open any more.
-			delete(s.table.Questions, t.PaneID)
-			if a.LastBlock != nil && !a.LastBlock.Answered && t.From == herdr.StateBlocked {
+			if from == herdr.StateBlocked || t.To == herdr.StateWorking || t.To == herdr.StateUnknown {
+				// Off blocked, or back to working/exited: no question of this
+				// pane is open any more. A done -> idle edge (the user looked
+				// at the pane in herdr) keeps a prompt recorded on done.
+				delete(s.table.Questions, t.PaneID)
+			}
+			if a.LastBlock != nil && !a.LastBlock.Answered && (from == herdr.StateBlocked || t.To == herdr.StateWorking) {
 				// Left the prompt by any route (answered, cancelled, exited).
 				a.LastBlock.Answered = true
 			}
