@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -5362,6 +5363,143 @@ class ReviewedNamesItsCommit(unittest.TestCase):
             with self.assertRaises(Exception):
                 self.reviewed(bad)
         self.assertNotIn("reviews", self.task)
+
+class GateEndToEnd(GateReview):
+    """FAC-91 (field note 20): the gate end to end per reviewer CLI. ready launches the reviewer through the real launch
+    code; the fake CLI under test/fake_cli runs as a real process with its real argv and prompt, prints its CLI's screen
+    and runs the verdict command it was told; the gate reads that screen and takes the verdict. Only hc is faked."""
+
+    def setUp(self):
+        from unittest import mock
+        GateReview.setUp(self)
+        import herdr_task.launch as launch
+        self.fake = os.path.join(ROOT, "test", "fake_cli")
+        self.dir, self.procs = tempfile.mkdtemp(dir=self.root), []
+        self.go, self.log = os.path.join(self.dir, "go"), os.path.join(self.dir, "log")
+        self.mode = "pass"
+        self.task["set"]["review_min"] = 1
+        self.addCleanup(lambda: [(p.kill(), p.wait()) for p in self.procs])
+        for mod, name, value in ((launch, "run", self.hc_run), (self.commands, "run", self.hc_read),
+                                 (self.commands, "own_path", lambda: os.path.join(self.fake, "herdr-task"))):
+            p = mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def hc_run(self, argv, **k):  # `hc run`: the launch command after `--` runs for real with the fakes first on PATH, its terminal a file
+        if argv[:2] == ["hc", "send"]:  # Codex's prompt, typed once its input box shows
+            with open(os.path.join(self.dir, argv[2] + ".sent"), "w") as f:
+                f.write(argv[3])
+        if argv[:2] != ["hc", "run"]:  # launch's own `hc read`/`hc keys`/`hc send` of a terminal
+            return self.hc_read(argv)
+        self.runs.append(argv)
+        addr = f"term-{len(self.runs)}"
+        cmd = argv[argv.index("--") + 1:]
+        env = {**os.environ, "PATH": self.fake + os.pathsep + os.environ["PATH"], "FAKE_SCREEN": os.path.join(self.dir, addr), "FAKE_LOG": self.log, "FAKE_GO": self.go,
+               "FAKE_MODE": self.mode, "FAKE_TAIL": os.path.join(ROOT, "test", "fixtures", "fac78_claude_reviewer_tail.txt")}
+        with open(env["FAKE_SCREEN"], "w") as out:
+            self.procs.append(subprocess.Popen(cmd, cwd=self.wt, env=env, stdout=out, stderr=subprocess.STDOUT,
+                                               stdin=subprocess.DEVNULL))
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"address": addr}), "")
+
+    def hc_read(self, argv, **k):
+        screen = os.path.join(self.dir, argv[2]) if argv[:2] == ["hc", "read"] else None
+        return subprocess.CompletedProcess(argv, 0, self.slurp(screen) if screen and os.path.exists(screen) else "", "")
+
+    def slurp(self, path):
+        with open(path) as f:
+            return f.read()
+
+    def until(self, what):
+        for _ in range(200):
+            if what():
+                return
+            time.sleep(0.05)
+        self.fail("the fake CLI never got there: " + self.slurp(os.path.join(self.dir, f"term-{len(self.runs)}"))[-300:])
+
+    def screen_has(self, n, words):
+        path = os.path.join(self.dir, f"term-{n}")
+        return os.path.exists(path) and words in self.slurp(path)
+
+    def argv_of(self, n):
+        self.until(lambda: os.path.exists(os.path.join(self.dir, f"term-{n}.argv")))
+        with open(os.path.join(self.dir, f"term-{n}.argv")) as f:
+            return json.load(f)
+
+    def take_verdict(self, n):
+        """The fake CLI ran the prompt's verdict command (a stand-in herdr-task logging it): apply what it logged, from its terminal."""
+        self.procs[n - 1].wait(timeout=10)
+        self.assertEqual(self.procs[n - 1].returncode, 0)
+        line = self.slurp(self.log).split("\n")[-2]
+        self.assertIn("review SHEP-13", line)
+        self.assertTrue(line.endswith(" --pass"), line)
+        self.verdict(f"term-{n}")
+
+    def test_claude_ends_its_turn_with_a_shell_running_then_records_the_verdict(self):  # FAC-79
+        self.task.update(reviewer="claude", reviewer_model="opus")
+        self.mode = "shell"
+        self.ready()
+        argv = self.argv_of(1)
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "auto")  # plan mode would block the verdict command
+        self.until(lambda: self.screen_has(1, "1 shell still running"))
+        self.reviewer_term = {"state": "live", "agent": "claude", "status": {"state": "done"}, "turn": 3}
+        self.commands.gate_reads(self.store, self.task)  # idle, no verdict, its shell running: waits, no failure
+        self.assertNotIn("review_failures", self.task)
+        self.assertEqual(len(self.runs), 1)
+        open(self.go, "w").close()  # the shell ends and it records its verdict
+        self.take_verdict(1)
+        self.assertEqual([(r["verdict"], r["by"]) for r in self.task["reviews"]], [("pass", "term-1")])
+        self.assertNotIn("review_failures", self.task)
+        self.valid()
+
+    def test_codex_leaves_an_untracked_file_in_the_worktree_and_the_pass_is_taken(self):
+        self.task.update(reviewer="codex", reviewer_model="gpt-5")
+        self.ready()
+        argv = self.argv_of(1)
+        self.assertEqual([argv[argv.index(f) + 1] for f in ("-s", "-a", "--disable")], ["workspace-write", "never", "hooks"])
+        self.assertIn("--no-daemon", argv)
+        self.take_verdict(1)  # the check that refuses a dirty tree ignores untracked files, as a RECAP.md is
+        self.assertTrue(os.path.exists(os.path.join(self.wt, "untracked.txt")))
+        self.assertIn("?? untracked.txt", self.git(self.wt, "status", "--porcelain"))
+        self.assertEqual([r["verdict"] for r in self.task["reviews"]], ["pass"])
+        self.valid()
+
+    def test_agy_hits_a_quota_error_and_the_round_goes_to_claude(self):  # FAC-81
+        self.mode = "quota"
+        self.ready()
+        argv = self.argv_of(1)
+        self.assertEqual((argv[argv.index("--mode") + 1], "-i" in argv), ("plan", True))
+        self.until(lambda: self.screen_has(1, "Individual quota reached"))
+        self.reviewer_term = {"state": "live", "agent": "agy", "status": {"state": "error"}, "turn": 1}
+        self.commands.gate_reads(self.store, self.task)
+        self.assertEqual(self.task["review_failures"][0]["why"], "quota reached (resets in 10h55m44s)")
+        self.mode, self.reviewer_term = "pass", {"state": "live", "agent": "claude", "status": {"state": "working"}}
+        self.ready()  # the next reviewer: another CLI, same round
+        self.assertEqual([r["cli"] for r in self.task["review_runs"]], ["agy", "claude"])
+        self.take_verdict(2)
+        self.assertEqual([(r["verdict"], r["by"]) for r in self.task["reviews"]], [("pass", "term-2")])
+        self.valid()
+
+    def test_agy_ends_with_the_sandboxed_verdict_block_and_the_gate_reads_it(self):
+        from unittest import mock
+        import herdr_task.launch as launch
+        self.sandbox()  # agy on a Mac: sandboxed, so no herdr-task; the launch's wrap itself (sandbox-exec) is left out
+        flag = os.path.join(self.dir, "unsandboxed")
+        open(flag, "w").close()
+        self.mode = "block"
+        with mock.patch.object(launch, "UNSANDBOXED_FLAG", flag):
+            self.ready()
+        argv = self.argv_of(1)
+        self.assertIn("trustedWorkspaces", argv[argv.index("--settings") + 1])
+        self.until(lambda: self.screen_has(1, " pass\n"))
+        self.reviewer_term = {"state": "live", "agent": "agy", "status": {"state": "idle"}, "turn": 1}
+        self.commands.gate_reads(self.store, self.task)  # reads the begin and pass lines off its terminal
+        self.assertEqual([(r["verdict"], r["by"], r["must_fix"]) for r in self.task["reviews"]], [("pass", "term-1", 0)])
+        self.assertNotIn("review_failures", self.task)
+        self.valid()
+
+
+for _name in [n for n in vars(GateReview) if n.startswith("test_")]:
+    setattr(GateEndToEnd, _name, None)  # its setUp and helpers only
 
 
 if __name__ == "__main__":
