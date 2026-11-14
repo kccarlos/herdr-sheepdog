@@ -349,6 +349,7 @@ class Repo(unittest.TestCase):
         sec = text.split("## Decide yourself / Ask only for\n", 1)[1].split("\n## ", 1)[0]
         for words in (
             "review-more",
+            "accept <id> --owner-approved",
             '"stop and ask" at a size overrun',
             "hc read <t> --lines 80",
             "hc keys <t>",

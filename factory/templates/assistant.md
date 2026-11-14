@@ -161,6 +161,7 @@ Report as the heartbeat says, in one or two lines of what you did and chose, nev
 
 Where the person or the orchestrator speaking for them has delegated these, decide, log in a line and carry on; chat context is lost on compaction, so this is the standing rule:
 - Size and doc-length overruns that come from review fixes or from what an approved design shows; data-loss fixes (never left as a known gap); extra review rounds (`review-more`, never on design or doc tasks); rebases and conflict fixes; resetting a task's start to its merge-base.
+- A task out of review rounds that the owner explicitly approved: `herdr-task accept <id> --owner-approved "<who/where, quoting the approval>"` (never without that approval; checks and conflicts still refuse).
 - Replacing stuck reviewers and restarting stalled workers; approving read-only and check commands for reviewers; scope calls within one folder.
 - A worker's "stop and ask" at a size overrun is a question for you: answer it.
 - Approve a worker's or reviewer's permission prompt only when the command stays inside that task's worktree (or `$TMPDIR`) or is read-only or the folder's check: read the screen with `hc read <t> --lines 80`, answer with `hc keys <t> ...` (or the option's key). Anything outside the worktree, touching credentials, keychains, settings or other machines goes to the person. Never approve a delete (`rm`), even inside the worktree.

@@ -272,6 +272,7 @@ def main():
     c = cmd("accept", cmd_accept, "the person's Accept on a Ready task: merges first when there is something to merge, then done")
     agent_opts(c)
     c.add_argument("--space")
+    c.add_argument("--owner-approved", metavar="NOTE", help="Assistant: a task out of review rounds, after the owner's explicit approval (who/where, one line)")
     cmd("reopen", lambda a: cmd_state(a, "reopen"), "undo done or ready; a queued or scheduled task goes back to to do")
     cmd("unarchive", cmd_unarchive, "bring an archived task back into its list (only when the person asks; writing to it does too)")
     c = cmd("edit", cmd_edit, "change a task")

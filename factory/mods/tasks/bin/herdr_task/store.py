@@ -318,6 +318,9 @@ def open_store(args, write=True):
         m = re.fullmatch(r"([A-Za-z]+[0-9]*)-[Aa]?[0-9]+", str(ref).strip())
         if m:
             folder = prefixes_in_use().get(m.group(1).upper())
+            if not folder and locate(None)["kind"] != "repo":
+                # Not any folder's prefix, and the shell is outside a repo: never guess a folder (FAC-93).
+                raise Fail(f"{ref}: which folder? pass --folder (no task list here has the prefix {m.group(1).upper()}).")
     return Store(locate(folder), write)
 
 

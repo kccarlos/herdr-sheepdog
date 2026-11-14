@@ -1709,19 +1709,32 @@ def ff_merge(s, t):
     return git(main, "fetch", ".", f"{br}:{base}")[0]
 
 
+def out_of_rounds(t):
+    return bool(t.get("review_out")) and t["state"] not in ("ready", "done")
+
+
+def not_ready(s, t):
+    hint = (' out of review rounds: accept --owner-approved "<who/where>" once the owner approved it.'
+            if out_of_rounds(t) else "")
+    return Fail(f"{s.ref(t)} isn't ready ({t['state']}); only a Ready task can be accepted." + hint)
+
+
 def cmd_accept(args):
     """The person's Accept on a Ready task (the one thing they do in the Tasks panel): Done at
     once when there is nothing to merge, else merged first, as the merge settings say how: a pull
     request is squash-merged on GitHub (or merges once its checks pass); a local branch is
     fast-forwarded when it can be, else its agent merges it (rebase, checks) and marks it done."""
     error, how, sent, started, back = None, "done", None, False, False
+    owner = (getattr(args, "owner_approved", None) or "").strip()
     with open_store(args) as s:
         t = s.find(args.id)
-        if t["state"] != "ready":
-            raise Fail(f"{s.ref(t)} isn't ready ({t['state']}); only a Ready task can be accepted.")
+        if t["state"] != "ready" and not (owner and out_of_rounds(t)):
+            raise not_ready(s, t)
         # Its agent at work again since it said ready: never accepted half done. Working again
         # (saved), and refused after the store is.
-        if busy_again(t, [detail(k) for k in live_agents(s.key(t))]):
+        if t["state"] != "ready":
+            pass  # out of rounds and the owner approved: its agent has nothing more to say (checks below stay)
+        elif busy_again(t, [detail(k) for k in live_agents(s.key(t))]):
             back = back_to_work(s, t, "its agent is at work again", auto=True)
         # One its agent opened itself, which ready couldn't open again ("already exists"): adopted.
         elif (not t.get("pr") and "already exists" in (t.get("attention") or "")
@@ -1738,8 +1751,15 @@ def cmd_accept(args):
     by = "assistant" if os.environ.get("HERDR_TASK_BY") == "assistant" or (me and is_coordinator(hc_json("get", me) or {})) else "person"
     with open_store(args) as s:
         t = s.find(args.id)
+        if t["state"] != "ready" and not (owner and out_of_rounds(t)):
+            raise not_ready(s, t)
         if t["state"] != "ready":
-            raise Fail(f"{s.ref(t)} isn't ready ({t['state']}); only a Ready task can be accepted.")
+            # The owner's word, kept on the task; the merge below still needs green checks and no conflict.
+            t["owner_approved"] = {"by": "Assistant", "at": now(), "note": owner}
+            t.pop("review_out", None)
+            # Ready now (the owner's accept stands for the reviews): a merge waiting on checks or approval
+            # is picked up by the tick, which only merges Ready tasks, and a retry is a plain accept.
+            t["state"], t["ready_at"] = "ready", now()
         t.pop("attention", None)
         wt = t.get("worktree") if t.get("mode") == "worktree" else None
         t["accepted_at"] = now()

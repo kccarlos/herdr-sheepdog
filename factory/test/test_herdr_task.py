@@ -25,6 +25,16 @@ class HerdrTask(unittest.TestCase):
             with open(f, "rb") as fh:
                 compile(fh.read(), f, "exec")
 
+    def test_an_unknown_prefix_outside_a_repo_asks_for_the_folder(self):
+        """FAC-93: `accept ZZZ-1` from a non-repo shell never guesses the current folder's list."""
+        code = ("import sys, argparse; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
+                "import herdr_task.store as st;"
+                "st.prefixes_in_use = lambda skip=None: {};"
+                "st.locate = lambda p: {'folder': '/x', 'kind': 'folder', 'name': 'x', 'common': None};"
+                "\ntry:\n st.open_store(argparse.Namespace(id='ZZZ-1', folder=None))\nexcept st.Fail as e: print(e)")
+        out = subprocess.run([sys.executable, "-c", code, BIN], capture_output=True, text=True)
+        self.assertIn("which folder? pass --folder", out.stdout, out.stderr)
+
     def test_addon_off(self):
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             json.dump({"everywhere": {"off": ["browser"]}}, f)
@@ -889,6 +899,47 @@ class BackToWork(unittest.TestCase):
         self.assertIn("is working again", str(no.exception))
         self.assertEqual(t["state"], "running")
         self.assertNotIn("accepted_at", t)
+
+    def out_task(self):
+        t = self.pr_task()
+        t.update(state="running", review_out=5)
+        return t
+
+    def test_accept_out_of_rounds_refuses_and_names_the_flag(self):
+        t = self.out_task()
+        with self.assertRaises(self.commands.Fail) as no:
+            self.commands.cmd_accept(self.args())
+        self.assertIn('out of review rounds: accept --owner-approved "<who/where>" once the owner approved it', str(no.exception))
+        self.assertNotIn("owner_approved", t)
+        with self.assertRaises(self.commands.Fail):  # a flag on a task that isn't out of rounds changes nothing
+            self.pr_task().update(state="running", review_out=None) or self.commands.cmd_accept(self.args(owner_approved="x"))
+
+    def test_accept_owner_approved_merges_and_records_it(self):
+        t = self.out_task()
+        fine = {"state": "OPEN", "mergeable": "MERGEABLE", "statusCheckRollup": [], "headRefOid": "abc"}
+        self.merging([fine, {"state": "MERGED", "mergeCommit": {"oid": "f00"}}], [(True, "", "")])
+        self.commands.cmd_accept(self.args(owner_approved="owner in chat, 2026-11-13"))
+        self.assertEqual((t["state"], t.get("merged")), ("done", True))
+        self.assertEqual((t["owner_approved"]["note"], bool(t["owner_approved"]["at"])), ("owner in chat, 2026-11-13", True))
+
+    def test_accept_owner_approved_waiting_on_checks_is_ready_for_the_tick(self):
+        t = self.out_task()
+        pending = {"state": "OPEN", "mergeable": "MERGEABLE", "headRefOid": "abc",
+                   "statusCheckRollup": [{"name": "check", "status": "IN_PROGRESS"}]}
+        self.merging([pending], [])
+        self.commands.cmd_accept(self.args(owner_approved="owner said so"))
+        self.assertEqual((t["state"], t.get("auto_merge")), ("ready", "checks"))
+        self.assertEqual(t["owner_approved"]["note"], "owner said so")
+
+    def test_accept_owner_approved_still_refuses_a_red_check(self):
+        t = self.out_task()
+        red = {"state": "OPEN", "mergeable": "MERGEABLE", "headRefOid": "abc",
+               "statusCheckRollup": [{"name": "check", "conclusion": "FAILURE"}]}
+        done = self.merging([red, red], [])
+        with self.assertRaises(SystemExit):
+            self.commands.cmd_accept(self.args(owner_approved="owner said so"))
+        self.assertEqual((t["state"], done), ("ready", []))  # a retry is a plain accept
+        self.assertIn("Checks failing", t["attention"])
 
     def test_the_tick_takes_it_back_and_the_news_says_so(self):
         t = self.ready(space="sp1")
