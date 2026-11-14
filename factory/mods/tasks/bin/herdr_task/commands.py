@@ -26,7 +26,7 @@ from .github import (already_merged, pr_head_problem, push_branch, drop_branch, 
                      pr_pending, pr_problem, pr_repo, pr_view, remote_of, task_github, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
-    base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
+    base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, is_coordinator, launch, name_tabs,
     own_path, parent_for, resume_argv, REVIEW_READS, review_reads, retag_tabs, reviewer_sandbox, sandboxes, set_branch, tab_title, task_tabs,
 )
 from .store import is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
@@ -37,7 +37,7 @@ from .scheduler import ensure_scheduler
 from .proof import evidence, find_proof
 from .when import when_from
 from .templates import instructions
-from .budget import budget_lines, budget_pass, merge_only_step, recap_refusal, record_ci, size_pass
+from .budget import budget_lines, budget_pass, change_sizes, merge_only_step, recap_refusal, record_ci, size_estimate, size_pass
 from .simulators import release_task
 
 
@@ -382,6 +382,9 @@ def cmd_ready(args):
                 raise Fail(f"{wt} has uncommitted changes. Commit them, then run ready again.")
             t["head"] = git(wt, "rev-parse", "HEAD")[1]
             own_work(s, t)
+            sizes, est = change_sizes(t), size_estimate(t)
+            if sizes is not None and (sizes != (0, 0) or not t.get("size") or not merged_here(s, t)):
+                t["size"] = {"changed": sizes[0], "generated": sizes[1], **({"estimate": est} if est is not None else {})}
             size_pass(s, t)
         refused = recap_refusal(s, t) or review_refusal(s, t, wt)
         if refused:
@@ -939,7 +942,7 @@ def back_to_work(s, t, why, said=WORKING_AGAIN, auto=False):
     if t["state"] != "ready":
         return False
     t["state"] = "running"
-    for k in ("ready_turns", "merge_requested"):
+    for k in ("ready_turns", "merge_requested", *(() if auto else ("accepted_by",))):
         t.pop(k, None)
     t["back"] = {"at": now(), "why": why, **({"auto": True, "progress": t.get("progress")} if auto else {})}
     # by: Herdr's words, not its agent's (on_it() counts only an agent's own line).
@@ -955,7 +958,7 @@ def finalize(s, t):
     """Ready: on GitHub its pull request opens; then the merge policy in Settings decides who
     merges: auto (now), checks (once its checks pass) or ask (the person). Returns what to say."""
     t["state"], t["ready_at"] = "ready", now()
-    for k in ("attention", "merge_requested", "review"):
+    for k in ("attention", "merge_requested", "review", "accepted_by"):
         t.pop(k, None)
     (t.get("pr") or {}).pop("wait", None)
     s.dirty = True
@@ -1291,10 +1294,12 @@ def cmd_state(args, state):
             # pull request merged and close it again at once) until its agent says ready.
             if t["state"] == "done" and t.get("merged"):
                 t["kept_open"] = True
-            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "merge_queued", "review_wait"):
+            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
+        if state == "done" and t.get("auto_merge") and not t.get("accepted_by"):
+            t["accepted_by"] = "auto"
         t["state"] = state
         t[{"done": "done_at", "running": "reopened_at", "todo": "reopened_at"}[state]] = now()
         if state != "done":
@@ -1622,6 +1627,8 @@ def merge_now(s, t):
             v = again
         elif ok:
             t["merge_queued"] = now()
+            if t.get("auto_merge") and not t.get("accepted_by"):
+                t["accepted_by"] = "auto"
             t.pop("attention", None)
             t["pr"]["checked"] = 0
             return IN_QUEUE
@@ -1635,6 +1642,8 @@ def merge_now(s, t):
     if queue or t.get("merge_queued"):
         drop_branch(s, t)
     t["merged"] = True
+    if t.get("auto_merge") and not t.get("accepted_by"):
+        t["accepted_by"] = "auto"
     finish(s, t, even_if_busy=True)
     return None
 
@@ -1725,6 +1734,8 @@ def cmd_accept(args):
             raise Fail(f"{s.ref(t)} needs attention first: {t['attention']}")
     if back:
         raise Fail(f"{s.ref(t)} is working again: its agent took up more work after it said ready. Accept it once it says ready again.")
+    me = os.environ.get("HC_TERMINAL_ID")
+    by = "assistant" if os.environ.get("HERDR_TASK_BY") == "assistant" or (me and is_coordinator(hc_json("get", me) or {})) else "person"
     with open_store(args) as s:
         t = s.find(args.id)
         if t["state"] != "ready":
@@ -1758,6 +1769,8 @@ def cmd_accept(args):
             how = "agent"
             t["merge_requested"] = now()
             sent, started = tell(s, t, local_merge_msg(s, t), args)
+        if not error:
+            t["accepted_by"] = by
         v = view(s, t)
     if error:
         say(args, {**v, "error": error}, None) if args.json else print(f"herdr-task: {error}", file=sys.stderr)

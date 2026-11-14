@@ -8,9 +8,9 @@ import shutil
 import subprocess
 import sys
 
-from .base import bundle, Fail, guard, run, STORE, sync_held, VERSION
+from .base import bundle, Fail, guard, hc_json, run, STORE, sync_held, VERSION
 from .agents import LINE_MAX, SUMMARY_MAX
-from .launch import cmd_allow, name_tabs
+from .launch import cmd_allow, is_coordinator, name_tabs
 from .commands import (
     cmd_accept, cmd_add, cmd_alert, cmd_config, cmd_edit, cmd_fix, cmd_list, cmd_merge, cmd_ready,
     cmd_resume, cmd_review, cmd_review_more, cmd_reviewed, cmd_rm, cmd_show, cmd_start, cmd_state, cmd_status,
@@ -95,7 +95,8 @@ def remote_run(machine, argv, timeout=None):
         install()
     install_secret(machine)
     wait = ["--timeout", str(timeout)] if timeout else []
-    call = ["hc", "exec", "--on", machine, *wait, "--", "sh", "-c", 'exec "$HOME/.local/bin/herdr-task" "$@"', "herdr-task", *argv]
+    by = "HERDR_TASK_BY=assistant " if argv[:1] == ["accept"] and (me := os.environ.get("HC_TERMINAL_ID")) and is_coordinator(hc_json("get", me) or {}) else ""
+    call = ["hc", "exec", "--on", machine, *wait, "--", "sh", "-c", f'{by}exec "$HOME/.local/bin/herdr-task" "$@"', "herdr-task", *argv]
     r = run(call)
     if r.returncode == 127 or "not found" in r.stderr and not r.stdout:
         install()

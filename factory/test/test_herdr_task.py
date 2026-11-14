@@ -9869,3 +9869,84 @@ class MergeOnlyReviewRounds(unittest.TestCase):
         self.assertIn("recap", self.task)
         self.assertTrue(any("same file flagged in two rounds: app.py" in r for r in self.task["recap"]["reasons"]))
         self.valid()
+
+
+class BoardSnapshotStore(unittest.TestCase):
+    """FAC-92: ready stores counted/generated/estimate line numbers on the task so they survive
+    worktree removal, and accept / auto-merge record accepted_by ('person', 'assistant', 'auto')."""
+
+    setUp, git, change, ready = GateReview.setUp, GateReview.git, GateReview.change, GateReview.ready
+    verdict, env = GateReview.verdict, GateReview.env
+    write_wt = MergeOnlyReviewRounds.write_wt
+
+    def test_ready_stores_size_split_and_estimate_and_reopen_clears_it(self):
+        from unittest import mock
+        import herdr_task.github as gh_mod
+        self.task["prompt"] = "Prep board data.\n\nSize: about 150-250 lines including tests.\n"
+        self.task["set"] = {"review_min": 0}
+        self.write_wt(".gitattributes", "gen/*.json linguist-generated\n")
+        self.write_wt("src.py", "a = 1\nb = 2\nc = 3\n")
+        self.write_wt("App.xcodeproj/project.pbxproj", "// p1\n// p2\n")
+        self.write_wt("gen/out.json", "{\n  \"x\": 1\n}\n")
+        self.git(self.wt, "commit", "-q", "-m", "add code and generated")
+        self.ready()
+        # GateReview.setUp wrote 1 line to f.txt + 1 line .gitattributes + 3 lines src.py = 5 counted; 2 pbxproj + 3 gen = 5 generated.
+        self.assertEqual(self.task["size"], {"changed": 5, "generated": 5, "estimate": 250})
+        self.git(self.main, "merge", "--ff-only", "task/13")
+        with mock.patch.object(gh_mod, "live_agents", lambda k: []), mock.patch.object(gh_mod, "live_helpers", lambda k: []):
+            gh_mod.finish(self.store, self.task, even_if_busy=True)
+        self.assertFalse(os.path.exists(self.wt))
+        self.assertEqual(self.task["size"], {"changed": 5, "generated": 5, "estimate": 250})
+        self.commands.cmd_state(self.commands.argparse.Namespace(id=13, json=False), "reopen")
+        self.assertNotIn("size", self.task)
+
+    def test_accepted_by_records_person_assistant_and_auto(self):
+        from unittest import mock
+        import herdr_task.github as gh_mod
+        fine = {"state": "OPEN", "mergeable": "MERGEABLE", "statusCheckRollup": [], "headRefOid": "abc"}
+        pend = {"state": "OPEN", "mergeable": "MERGEABLE", "statusCheckRollup": [{"name": "ci", "status": "IN_PROGRESS"}], "headRefOid": "abc"}
+        merged = {"state": "MERGED", "mergeCommit": {"oid": "f00"}}
+        ns = self.commands.argparse.Namespace(id=13, json=False, space=None, agent=None, argv=None)
+        with mock.patch.object(gh_mod, "live_agents", lambda k: []), mock.patch.object(gh_mod, "live_helpers", lambda k: []), \
+             mock.patch.object(self.commands, "watch_main", lambda *a: None), mock.patch.object(self.commands, "update_main", lambda *a: None), \
+             mock.patch.object(self.commands, "branch_tip", lambda s, t: "abc"):
+            # 1. Failed accept leaves accepted_by unset; person accept sets "person".
+            self.task.update(state="ready", mode="worktree", worktree=self.wt, head="abc", pr={"number": 8, "repo": "o/r"})
+            with mock.patch.object(self.commands, "pr_view", lambda t: None), self.assertRaises(SystemExit):
+                self.commands.cmd_accept(self.commands.argparse.Namespace(id=13, json=True, space=None, agent=None, argv=None))
+            self.assertNotIn("accepted_by", self.task)
+            self.task.update(state="ready", mode="folder", worktree=None)
+            self.task.pop("pr", None)
+            self.commands.cmd_accept(ns)
+            self.assertEqual(self.task.get("accepted_by"), "person")
+            # 2. Assistant accept sets "assistant" (locally and across --on via HERDR_TASK_BY).
+            self.task.update(state="ready")
+            self.task.pop("accepted_by", None)
+            with mock.patch.dict(os.environ, {"HC_TERMINAL_ID": "t-coord"}), mock.patch.object(self.commands, "hc_json", lambda *a: {"labels": {"herdr.role": "coordinator"}}):
+                self.commands.cmd_accept(ns)
+            self.assertEqual(self.task.get("accepted_by"), "assistant")
+            self.task.update(state="ready")
+            self.commands.back_to_work(self.store, self.task, "fix")
+            self.assertNotIn("accepted_by", self.task)
+            self.task.update(state="ready")
+            with mock.patch.dict(os.environ, {"HERDR_TASK_BY": "assistant"}, clear=False):
+                self.commands.cmd_accept(ns)
+            self.assertEqual(self.task.get("accepted_by"), "assistant")
+            # 3. Person accept waiting on PR checks keeps "person" when merge_now finishes later.
+            views = [pend, fine, merged]
+            self.task.update(state="ready", mode="worktree", worktree=self.wt, head="abc", pr={"number": 9, "repo": "o/r"})
+            self.task.pop("accepted_by", None)
+            with mock.patch.object(self.commands, "pr_view", lambda t: views.pop(0)), mock.patch.object(self.commands, "gh", lambda *a, **k: (True, "", "")):
+                self.commands.cmd_accept(ns)
+                self.assertEqual((self.task["state"], self.task.get("auto_merge"), self.task.get("accepted_by")), ("ready", "checks", "person"))
+                self.assertIsNone(self.commands.merge_now(self.store, self.task))
+            self.assertEqual((self.task["state"], self.task.get("accepted_by")), ("done", "person"))
+            # 4. Merge-after-checks without manual accept records "auto", and reopen clears it.
+            views = [fine, merged]
+            self.task.update(state="ready", auto_merge="checks", pr={"number": 10, "repo": "o/r"})
+            self.task.pop("accepted_by", None)
+            with mock.patch.object(self.commands, "pr_view", lambda t: views.pop(0)), mock.patch.object(self.commands, "gh", lambda *a, **k: (True, "", "")):
+                self.assertIsNone(self.commands.merge_now(self.store, self.task))
+            self.assertEqual((self.task["state"], self.task.get("accepted_by")), ("done", "auto"))
+            self.commands.cmd_state(self.commands.argparse.Namespace(id=13, json=False), "reopen")
+            self.assertNotIn("accepted_by", self.task)
