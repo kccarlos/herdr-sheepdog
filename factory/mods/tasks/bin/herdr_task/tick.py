@@ -12,7 +12,7 @@ import subprocess
 import time
 
 from .base import Fail, git, guard, hc_json, now, PR_EVERY, run, SHELLS, STORE, stop_note
-from .settings import machine_name, worker_argv
+from .settings import machine_name, remove_build_dir, worker_argv
 from .agents import (
     agent_log, agent_running, busy_again, detail, fit, held_ask, last_question, live_agents, open_question, own_work,
     ready_turns, REVIEWER_FAILED, status_word, task_status,
@@ -378,6 +378,7 @@ def end_done(s, t, report, pressed=False):
     live = [detail(k) for k in live_agents(s.key(t))]
     live = [k for k in live if k.get("address") != me and (k.get("labels") or {}).get("herdr.role") != "coordinator"]
     if not live:
+        remove_build_dir(s, t)
         t["ended_at"] = now()
         s.dirty = True
         return []

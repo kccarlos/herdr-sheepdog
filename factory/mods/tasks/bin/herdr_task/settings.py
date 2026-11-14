@@ -552,6 +552,12 @@ def task_settings(s, t, space=None, argv=None):
     proof = sets["proof"] == "on" if "proof" in sets else k.get("proof") is not False
     add("Proof", PROOF_WORDS["on" if proof else "off"], proof,
         "task" if "proof" in sets else by_layer(s, space, "tasks", "proof", proof, True))
+    bdir = build_dir_of(s)
+    if bdir:
+        ref = s.ref(t) if hasattr(s, "ref") else f"{(s.get('prefix') if isinstance(s, dict) else getattr(s, 'prefix', None)) or 'T'}-{t['id']}"
+        if TASK_KEY_RE.fullmatch(ref):
+            add("Build output", f"{bdir}/{ref}/ (e.g. xcodebuild -derivedDataPath there); never the default DerivedData.",
+                f"{bdir}/{ref}/", "folder")
     model, effort = argv_model(argv)
     text = agent + (f", model {model}" if model else "") + (f", effort {effort}" if effort else "")
     a_by = "task" if any(t.get(f) for f in ("agent", "model", "effort")) else \
@@ -616,6 +622,72 @@ def simulator_pool(s, space=None):
     raw = settings_for(s, space)["tasks"].get("simulators")
     items = raw.split(",") if isinstance(raw, str) else (raw if isinstance(raw, (list, tuple)) else [])
     return [str(x).strip() for x in items if str(x).strip()]
+
+
+TASK_KEY_RE = re.compile(r"[A-Za-z]+[0-9]*-[0-9]+")
+
+
+def build_dir_of(s):
+    """This folder's build-output directory (`herdr-task config --build-dir`), or None."""
+    d = s if isinstance(s, dict) else getattr(s, "data", None)
+    raw = str(((d or {}).get("config") or {}).get("build_dir") or "").strip()
+    p = os.path.normpath(os.path.expanduser(raw)) if raw else ""
+    return p if p and p != os.sep else None
+
+
+def ensure_build_dir(s, task):
+    """Creates <build-dir>/<task-key>/ when a task starts, if this folder sets a build dir."""
+    bdir = build_dir_of(s)
+    ref = s.ref(task) if bdir and hasattr(s, "ref") else ""
+    if not bdir or not TASK_KEY_RE.fullmatch(ref):
+        return None
+    target = os.path.join(bdir, ref)
+    if os.path.islink(target):
+        raise Fail(f"Build output path {target} is a symlink; refusing to use it.")
+    try:
+        os.makedirs(target, exist_ok=True)
+    except OSError as e:
+        raise Fail(f"Can't create build output folder {target}: {e}")
+    return target
+
+
+def _rmtree_strict(top):
+    if os.path.islink(top) or not os.path.isdir(top):
+        return False
+    try:
+        os.chmod(top, 0o700)
+    except OSError:
+        pass
+    with os.scandir(top) as it:
+        for e in it:
+            if e.is_symlink():
+                os.unlink(e.path)
+            elif e.is_dir(follow_symlinks=False):
+                _rmtree_strict(e.path)
+            else:
+                try:
+                    os.unlink(e.path)
+                except PermissionError:
+                    os.chmod(e.path, 0o600)
+                    os.unlink(e.path)
+    os.rmdir(top)
+    return True
+
+
+def remove_build_dir(s, task):
+    """Removes <build-dir>/<task-key>/ on done when resolved directly under the build dir."""
+    bdir = build_dir_of(s)
+    ref = s.ref(task) if bdir and hasattr(s, "ref") else ""
+    entry = os.path.join(bdir, ref) if bdir and TASK_KEY_RE.fullmatch(ref) else ""
+    if not entry or not os.path.isdir(bdir) or os.path.islink(entry) or not os.path.isdir(entry):
+        return False
+    real_bdir, real_entry = os.path.realpath(bdir), os.path.realpath(entry)
+    if real_bdir == os.sep or real_entry == real_bdir or os.path.dirname(real_entry) != real_bdir or os.path.basename(real_entry) != ref:
+        return False
+    try:
+        return _rmtree_strict(real_entry)
+    except OSError:
+        return False
 
 
 # Shepherdr settings > Tasks > Branch names (tasks.branch, #570): a folder's new task branches.

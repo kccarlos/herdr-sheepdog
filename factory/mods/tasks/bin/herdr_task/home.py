@@ -19,7 +19,7 @@ import subprocess
 import threading
 
 from .base import APP_HOME, Fail, guard, HOME, hc_json, now, run, STORE, WHERE
-from .settings import LOCAL_MACHINE, SETTINGS
+from .settings import build_dir_of, LOCAL_MACHINE, SETTINGS, TASK_KEY_RE
 from .output import say
 from .store import is_task_list, read_list, store_files
 
@@ -160,11 +160,52 @@ def assistant_in(space):
     return coordinator_in(space)
 
 
+def _human_bytes(n):
+    return next((f"{n / s:.1f} {u}" for u, s in (("GB", 2 ** 30), ("MB", 2 ** 20), ("KB", 2 ** 10)) if n >= s), f"{n} B")
+
+
+def _dir_bytes(top):
+    total, stack = 0, [top]
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as it:
+                for e in it:
+                    if e.is_symlink():
+                        continue
+                    elif e.is_dir(follow_symlinks=False):
+                        stack.append(e.path)
+                    else:
+                        total += e.stat(follow_symlinks=False).st_size
+        except OSError:
+            pass
+    return total
+
+
+def task_builds(n=5):
+    """Biggest <build-dir>/<task-key> folders across configured task stores: [{task, path, bytes, size}]."""
+    seen, found = set(), []
+    for p in store_files():
+        d = read_list(p)
+        bdir = build_dir_of(d) if is_task_list(d) else None
+        if not bdir or not os.path.isdir(bdir) or os.path.realpath(bdir) in seen:
+            continue
+        seen.add(os.path.realpath(bdir))
+        try:
+            with os.scandir(bdir) as it:
+                for e in it:
+                    if not e.is_symlink() and e.is_dir(follow_symlinks=False) and TASK_KEY_RE.fullmatch(e.name):
+                        if (sz := _dir_bytes(e.path)) > 0:
+                            found.append({"task": e.name, "path": os.path.join(bdir, e.name), "bytes": sz, "size": _human_bytes(sz)})
+        except OSError:
+            pass
+    return sorted(found, key=lambda x: (-x["bytes"], x["task"]))[:n]
+
+
 def local_report(candidates=None, since=None, news_only=False):
     """This machine's facts: {machine, home, space, assistant, health, top, stuck, worktrees,
     news}. candidates: [[space id, folder]] of this machine's spaces; the first at the home folder
     is the home space. since: news log lines after this time (ms); None: none."""
-    from .machine import sample
+    from .machine import ALERT, sample
     out = {"home": HOME, "at": now()}
     real = os.path.realpath(HOME)
     space = next((sid for sid, folder in candidates or [] if folder and os.path.realpath(folder) == real), None)
@@ -178,8 +219,9 @@ def local_report(candidates=None, since=None, news_only=False):
             log = []
         out["news"] = [x for x in log if x.get("at", 0) > since]
     if not news_only:
-        rows = processes()
-        out.update({"health": sample(), "top": top(rows), "stuck": stuck(rows), "worktrees": leftover_worktrees()})
+        rows, h = processes(), sample()
+        out.update({"health": h, "top": top(rows), "stuck": stuck(rows), "worktrees": leftover_worktrees(),
+                    "builds": task_builds() if h["disk"] > ALERT["disk"] else []})
     return out
 
 
@@ -274,9 +316,12 @@ def health_lines(name, rep, st):
         t = rep.get("top") or {}
         uses = "; ".join(x for x in (f"most memory: {', '.join(t['memory'])}" if t.get("memory") else "",
                                      f"most CPU: {', '.join(t['cpu'])}" if t.get("cpu") else "") if x)
+        builds = rep.get("builds") or []
         for kind, what in events:
             words = f"{names[kind]} {'crossed its alert limit' if what == 'over' else 'is back under its alert limit'}"
             text = f"{words}. Now: {meters_words(h)}." + (f" {uses[0].upper()}{uses[1:]}." if uses and what == "over" else "")
+            if kind == "disk" and what == "over" and builds:
+                text += " Biggest task build folders: " + ", ".join(f"{b['path']} ({b['size']})" for b in builds) + "."
             if what == "over":
                 text += " Inspect the machine before changing tasks."
             out.append((tagged("herdr-health", text, machine=name or "", event=f"{kind}-{what}"), f"{words} ({names[kind]} {h[kind]}%)"))

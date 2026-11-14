@@ -289,6 +289,7 @@ def main():
     cmd("rm", cmd_rm, "remove a task")
     c = cmd("config", cmd_config, "this folder's settings", id=False)
     c.add_argument("--prefix", help="task ids' prefix, 2 to 5 letters (HAT -> HAT-4); unique on this machine")
+    c.add_argument("--build-dir", help="per-task build output folder (<path>/<task-key>/, cleaned on done; \"\" clears)")
     si = sub.add_parser("simulator", help="this folder's fixed iOS simulator pool: lease one per task, release it, or list holders")
     si.set_defaults(fn=cmd_simulator, simulator="list", folder=None, json=False, id=None, task_opt=None)
     sp = si.add_subparsers(dest="simulator")

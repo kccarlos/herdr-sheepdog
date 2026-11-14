@@ -10001,3 +10001,99 @@ class BoardSnapshotStore(unittest.TestCase):
             self.assertEqual((self.task["state"], self.task.get("accepted_by")), ("done", "auto"))
             self.commands.cmd_state(self.commands.argparse.Namespace(id=13, json=False), "reopen")
             self.assertNotIn("accepted_by", self.task)
+
+
+class BuildOutput(unittest.TestCase):
+    """FAC-85: per-folder build-output directory, Settings line, strict cleanup on done, and disk-over news."""
+
+    def setUp(self):
+        import contextlib, io, pathlib
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        from herdr_task import base, cli, commands, github, home, launch, settings, store
+        self.cli, self.home, self.mock, self.io, self.redirect, self.Path = cli, home, mock, io, contextlib.redirect_stdout, pathlib.Path
+        self.root = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.repo, self.bdir = os.path.join(self.root, "app"), os.path.join(self.root, "builds")
+        store_dir, wt_root, cfg_path = (os.path.join(self.root, x) for x in ("store", "wts", "settings.json"))
+        subprocess.run(["git", "init", "-q", "-b", "main", self.repo], check=True)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false")):
+            subprocess.run(["git", "-C", self.repo, "config", k, v], check=True)
+        subprocess.run(["git", "-C", self.repo, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+        self.put(cfg_path, json.dumps({"everywhere": {"tasks": {"worktree_root": wt_root, "proof": False}}}))
+        self.briefs = []
+
+        def fake_launch(s, t, argv, space, text, parent=None, resume=None):
+            self.briefs.append(text)
+            t.setdefault("agents", []).append(a := {"address": f"t{t['id']}", "agent": "claude", "argv": argv, "at": 1})
+            return a
+        for mod, name, val in ((store, "STORE", store_dir), (base, "STORE", store_dir), (settings, "SETTINGS", cfg_path), (home, "SETTINGS", cfg_path),
+                               (commands, "launch", fake_launch), (commands, "ensure_scheduler", lambda **k: {}), (commands, "retag_tabs", lambda s: []),
+                               (commands, "live_agents", lambda k: []), (commands, "queue_reason", lambda *a: None), (commands, "parent_for", lambda p, sp: p),
+                               (launch, "caller_labels", lambda: {}), (github, "live_agents", lambda k: []), (github, "live_helpers", lambda k: [])):
+            self.enterContext(mock.patch.object(mod, name, val))
+
+    def put(self, path, data="x"):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        self.Path(path).write_bytes(data) if isinstance(data, bytes) else self.Path(path).write_text(data)
+        return path
+
+    def run_cli(self, *argv):
+        with self.mock.patch.object(sys, "argv", ["herdr-task", *argv, "--folder", self.repo]), self.redirect(out := self.io.StringIO()):
+            self.assertEqual(self.cli.main(), 0)
+        return out.getvalue()
+
+    def test_settings_line_shows_only_with_build_dir_and_start_creates_it(self):
+        self.run_cli("config", "--prefix", "APP")
+        self.run_cli("add", "Build screen")
+        self.assertNotIn("Build output:", self.run_cli("show", "APP-1"))
+        self.run_cli("config", "--build-dir", self.bdir)
+        line = f"Build output: {self.bdir}/APP-1/ (e.g. xcodebuild -derivedDataPath there); never the default DerivedData."
+        self.assertIn(line, self.run_cli("show", "APP-1"))
+        self.assertFalse(os.path.exists(os.path.join(self.bdir, "APP-1")))
+        self.run_cli("start", "APP-1", "--space", "sp1")
+        self.assertTrue(os.path.isdir(os.path.join(self.bdir, "APP-1")) and line in self.briefs[-1])
+        self.run_cli("config", "--build-dir", "")
+        self.assertNotIn("Build output:", self.run_cli("show", "APP-1"))
+
+    def test_done_removes_exact_task_folder_without_following_symlinks(self):
+        self.run_cli("config", "--prefix", "APP", "--build-dir", self.bdir)
+        for title in ("First", "Second", "Third"):
+            self.run_cli("add", title, "--here")
+        self.run_cli("start", "APP-1", "--space", "sp1")
+        keep_out = self.put(os.path.join(self.root, "outside", "keep.txt"), "safe")
+        outside, sib_link = os.path.dirname(keep_out), os.path.join(self.bdir, "link-out")
+        os.chmod(self.put(os.path.join(self.bdir, "APP-1", "DerivedData", "obj.o")), 0o444)
+        os.symlink(outside, os.path.join(self.bdir, "APP-1", "escape"))
+        sib = self.put(os.path.join(self.bdir, "APP-2", "other.o"), "y")
+        os.symlink(outside, sib_link)
+        self.run_cli("ready", "APP-1", "--summary", "Built it")
+        self.run_cli("accept", "APP-1")
+        self.assertFalse(os.path.exists(os.path.join(self.bdir, "APP-1")))
+        self.assertTrue(os.path.isdir(self.bdir) and os.path.isfile(sib) and os.path.islink(sib_link) and os.path.isfile(keep_out))
+        os.symlink(outside, os.path.join(self.bdir, "APP-3"))
+        self.run_cli("done", "APP-3")
+        self.assertTrue(os.path.islink(os.path.join(self.bdir, "APP-3")) and os.path.isfile(keep_out))
+
+    def test_no_build_dir_removes_nothing(self):
+        self.run_cli("config", "--prefix", "APP")
+        self.run_cli("add", "Keep files", "--here")
+        f = self.put(os.path.join(self.bdir, "APP-1", "keep.bin"), "stay")
+        self.run_cli("done", "APP-1")
+        self.assertTrue(os.path.isfile(f))
+
+    def test_disk_over_news_lists_biggest_task_folders(self):
+        self.run_cli("config", "--prefix", "APP", "--build-dir", self.bdir)
+        for key, kb in (("APP-1", 2), ("APP-2", 12), ("APP-3", 6)):
+            self.put(os.path.join(self.bdir, key, "bin"), b"x" * (kb * 1024))
+        os.symlink(os.path.dirname(self.put(os.path.join(self.root, "ext", "huge"), b"x" * 50000)), os.path.join(self.bdir, "APP-9"))
+        h = {"cpu": 10, "load": 0.4, "cores": 8, "memory": 40, "disk": 95, "disks": [{"path": "home", "pct": 95, "free_gb": 5}]}
+        with self.mock.patch.object(self.home, "processes", return_value=[]), self.mock.patch.object(self.home, "leftover_worktrees", return_value=[]):
+            with self.mock.patch("herdr_task.machine.sample", return_value={**h, "disk": 50}), self.mock.patch.object(self.home, "task_builds", side_effect=AssertionError):
+                self.assertEqual(self.home.local_report()["builds"], [])
+            with self.mock.patch("herdr_task.machine.sample", return_value=h):
+                line = next(l for l, _ in self.home.health_lines("", self.home.local_report(), {}) if 'event="disk-over"' in l)
+                shutil.rmtree(self.bdir)
+                empty = next(l for l, _ in self.home.health_lines("", self.home.local_report(), {}) if 'event="disk-over"' in l)
+        self.assertTrue(line.index(f"{self.bdir}/APP-2") < line.index(f"{self.bdir}/APP-3") < line.index(f"{self.bdir}/APP-1"))
+        self.assertTrue("APP-9" not in line and "Biggest task build folders" not in empty)
