@@ -37,7 +37,7 @@ from .scheduler import ensure_scheduler
 from .proof import evidence, find_proof
 from .when import when_from
 from .templates import instructions
-from .budget import budget_lines, budget_pass, recap_refusal, record_ci, size_pass
+from .budget import budget_lines, budget_pass, merge_only_step, recap_refusal, record_ci, size_pass
 from .simulators import release_task
 
 
@@ -536,11 +536,17 @@ def fallback_reviewer(s, t, failed_cli):
     return {"agent": "claude", "model": "opus", "effort": None}
 
 
+def next_round(t):
+    """The next gate review run's number: 1 past the runs that didn't fail without a verdict."""
+    failed = failed_addresses(t)
+    return sum(1 for r in t.get("review_runs") or [] if r["address"] not in failed) + 1
+
+
 def rounds_used(t, gate=False):
-    """Review rounds used: in a gate folder, the reviewers herdr-task started that didn't fail without a verdict."""
+    """Review rounds used: in a gate folder, the non-merge-only reviewers herdr-task started that didn't fail without a verdict."""
     if gate:
-        failed = failed_addresses(t)
-        return sum(1 for r in t.get("review_runs") or [] if r["address"] not in failed)
+        skip = failed_addresses(t) | set(t.get("merge_only_runs") or ())
+        return sum(1 for r in t.get("review_runs") or [] if r["address"] not in skip)
     return sum(1 for r in t.get("reviews") or [] if r.get("result") in REVIEWED)
 
 
@@ -560,7 +566,7 @@ def fork_of(wt, base, tip):
     return mbs[1] if len(mbs) > 1 and git(wt, "merge-base", "--is-ancestor", mbs[0], mbs[1])[0] else (mbs[0] if mbs else "")
 
 
-def review_diff(wt, base, head, mine):
+def review_diff(wt, base, head, mine, merge_only=False):
     """(what the diff is, the diff) for a gate round (FAC-53). Round 1 and a re-review of the same head: the whole
     change from the merge-base (never the stored start, stale after a rebase). Later: only what changed since the last
     reviewed head, and a line of the earlier findings. If the base moved (a rebase, or the base merged in), the
@@ -575,7 +581,9 @@ def review_diff(wt, base, head, mine):
     if not old:  # nothing reviewed before this head (another pass of it), or it's gone: the whole change, with the earlier rounds
         return (f"{whole[0]}. Earlier rounds, to know what was fixed: {earlier}", whole[1])
     if old == mb:
-        what, out = f"Only what changed since the last reviewed head {prev[:7]} (git diff {prev}..{head})", git(wt, "diff", f"{prev}..{head}")[1]
+        what = (f"Since the last reviewed head {prev[:7]}, merge of {base} only; review the conflict resolution (git diff {prev}..{head})"
+                if merge_only else f"Only what changed since the last reviewed head {prev[:7]} (git diff {prev}..{head})")
+        out = git(wt, "diff", f"{prev}..{head}")[1]
     else:
         import difflib
         def files(text):
@@ -585,7 +593,9 @@ def review_diff(wt, base, head, mine):
                 out[lines[0].split(" b/")[-1]] = lines[1:]
             return out
         then, now_ = (files(git(wt, "diff", f"{x}..{y}")[1]) for x, y in ((old, prev), (mb, head)))
-        what = (f"The branch's base moved since the last reviewed head {prev[:7]}; only how the task's own change differs now "
+        what = (f"Since the last reviewed head {prev[:7]}, merge of {base} only; review the conflict resolution "
+                f"(its diff {old[:7]}..{prev[:7]} against {mb[:7]}..{head[:7]})" if merge_only else
+                f"The branch's base moved since the last reviewed head {prev[:7]}; only how the task's own change differs now "
                 f"(its diff {old[:7]}..{prev[:7]} against {mb[:7]}..{head[:7]})")
         out = "\n".join(l for f in sorted({*then, *now_}) for l in difflib.unified_diff(
             then.get(f, []), now_.get(f, []), f"reviewed/{f}", f"now/{f}", lineterm="", n=2)) or "(none)"
@@ -616,8 +626,10 @@ def gate_step(s, t):
     if busy:
         return (f"{s.ref(t)}: Herdr's reviewer ({busy['address']}) is still reviewing {busy['head'][:7]}; no second one starts. "
                 + ("Its findings come to you as a message." if busy["head"] == head else "Run ready again once it finishes."))
+    wt, base = t["worktree"], t.get("base") or "main"
+    merge_only = merge_only_step(wt, base, head, mine, t.get("branch"))
     used, (_, rounds) = rounds_used(t, True), review_limits(s, t)
-    round_n = used + 1
+    round_n = next_round(t)
     since = max(t.get("reviewer_at") or 0, t.get("reopened_at") or 0)
     fails = [f for f in t.get("review_failures") or []
              if f["round"] == round_n and f["head"] == head and (f.get("at") or 0) > since]
@@ -629,7 +641,7 @@ def gate_step(s, t):
         t.pop("progress", None)
         s.dirty = True
         return f"{s.ref(t)}: {why}."
-    if used >= rounds:
+    if not merge_only and used >= rounds:
         t["review_out"] = now()
         s.dirty = True
         if kind := review_kind(t):
@@ -641,7 +653,7 @@ def gate_step(s, t):
         push_branch(s, t)
     rows = {x["label"]: x["value"] for x in task_settings(s, t)}
     rv = fallback_reviewer(s, t, fails[-1]["cli"]) if fails else rows["Reviewer"]
-    wt, ref, ht, folder = t["worktree"], s.ref(t), own_path(), shlex.quote(s.loc["folder"])
+    ref, ht, folder = s.ref(t), own_path(), shlex.quote(s.loc["folder"])
     sand = sandboxes([rv["agent"]])  # agy on a Mac: sandboxed, nothing prompts, its verdict read from its terminal
     # Claude Code's plan mode blocks every command, the verdict's `herdr-task review` too, so a Claude reviewer
     # runs in auto mode: its allow list (the verdict, its reads) runs, the rest goes past auto mode's checks.
@@ -650,7 +662,7 @@ def gate_step(s, t):
     runs = t.get("review_runs") or []
     at = max(now(), (runs[-1]["at"] + 1) if runs else 0)
     code = round_code({"round": round_n, "head": head, "at": at}) if sand else None
-    shown, diff = review_diff(wt, t.get("base") or "main", head, mine)
+    shown, diff = review_diff(wt, base, head, mine, merge_only)
     cmd = f"{ht} review {ref} --folder {folder}"
     check = (settings_for(s, t.get("space"))["tasks"].get("check") or "").strip()
     prompt = "\n\n".join([
@@ -676,6 +688,8 @@ def gate_step(s, t):
                reads=review_reads(check))
     t.setdefault("review_runs", []).append({"round": round_n, "head": head, "address": a["address"], "cli": agent_key(argv),
                                             "model": rv.get("model") or None, "at": at})
+    if merge_only:
+        t.setdefault("merge_only_runs", []).append(a["address"])
     t["progress"] = {"text": fit("Herdr's reviewer is on it"), "at": now(), "set": now(), "by": "herdr"}
     return f"{s.ref(t)}: Herdr started review round {round_n} of {head[:7]} ({a['address']}); its findings come to you as a message."
 
@@ -1277,7 +1291,7 @@ def cmd_state(args, state):
             # pull request merged and close it again at once) until its agent says ready.
             if t["state"] == "done" and t.get("merged"):
                 t["kept_open"] = True
-            for k in ("reviews", "review", "review_runs", "review_failures", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "merge_queued", "review_wait"):
+            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "merge_queued", "review_wait"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True

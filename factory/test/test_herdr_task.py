@@ -9585,3 +9585,149 @@ class ReviewTheCommitGitHubHas(unittest.TestCase):
             self.addCleanup(p.stop)
         tick.facts(self.store, self.task, {"attention": [], "done": []})
         self.assertNotIn("attention", self.task)
+
+
+class MergeOnlyReviewRounds(unittest.TestCase):
+    """FAC-89 (note 46): merges of the base branch after a passed round whose only extra changes are
+    generated files get a delta review without using a review round or tripping the loop-breaker."""
+
+    setUp, git, change, ready = GateReview.setUp, GateReview.git, GateReview.change, GateReview.ready
+    verdict, valid, env = GateReview.verdict, GateReview.valid, GateReview.env
+
+    def prompt_of(self, idx=-1):
+        cmd = self.runs[idx][self.runs[idx].index("--") + 1:]
+        return cmd[cmd.index("-i") + 1]
+
+    def advance_base(self, rel="base_note.txt", content="from main\n"):
+        full = os.path.join(self.main, rel)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w") as f:
+            f.write(content)
+        self.git(self.main, "add", rel)
+        self.git(self.main, "commit", "-q", "-m", f"main {rel}")
+        return self.git(self.main, "rev-parse", "HEAD")
+
+    def write_wt(self, rel, content):
+        full = os.path.join(self.wt, rel)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w") as f:
+            f.write(content)
+        self.git(self.wt, "add", rel)
+
+    def test_clean_and_pbxproj_merges_use_no_round_nor_fire_out_of_rounds(self):
+        import herdr_task.output as output
+        self.task["set"] = {"review_min": 2, "review_rounds": 2}
+        self.write_wt(".gitattributes", "gen/*.swift linguist-generated\n")
+        self.write_wt("App.xcodeproj/project.pbxproj", "// task pbx 1\n")
+        self.write_wt("gen/schema.swift", "// task gen 1\n")
+        self.git(self.wt, "commit", "-q", "-m", "project files")
+        self.ready()
+        self.verdict("term-1", passed=True)
+        self.verdict("term-2", passed=True)
+        self.assertEqual((self.task["state"], self.commands.rounds_used(self.task, True)), ("ready", 2))
+
+        # 1. Clean main merge at 2/2 rounds used: reviewed as a merge-only delta, uses 0 rounds.
+        self.advance_base("other.py", "x = 1\n")
+        self.git(self.wt, "merge", "--no-ff", "-q", "-m", "merge main cleanly", "main")
+        self.ready()
+        self.assertNotIn("review_out", self.task)
+        self.assertIn("merge of main only; review the conflict resolution", self.prompt_of())
+        self.assertEqual(self.commands.rounds_used(self.task, True), 2)
+        self.verdict("term-3", passed=True)
+        self.assertIn("merge of main only; review the conflict resolution", self.prompt_of())
+        self.verdict("term-4", passed=True)
+        self.assertEqual((self.task["state"], self.commands.rounds_used(self.task, True)), ("ready", 2))
+
+        # 2. Cascade of two base merges (clean + conflicting *.pbxproj and linguist-generated): still 0 rounds.
+        self.advance_base("second.py", "y = 2\n")
+        self.git(self.wt, "merge", "--no-ff", "-q", "-m", "merge main again", "main")
+        self.advance_base("App.xcodeproj/project.pbxproj", "// main pbx 2\n")
+        self.advance_base("gen/schema.swift", "// main gen 2\n")
+        subprocess.run(["git", "-C", self.wt, "merge", "--no-commit", "main"], capture_output=True)
+        self.write_wt("App.xcodeproj/project.pbxproj", "// regenerated pbx 3\n")
+        self.write_wt("gen/schema.swift", "// regenerated gen 3\n")
+        self.git(self.wt, "commit", "-q", "-m", "merge main and regenerate project")
+        self.ready()
+        self.assertNotIn("review_out", self.task)
+        self.assertIn("merge of main only; review the conflict resolution", self.prompt_of())
+        self.assertIn("regenerated pbx 3", self.prompt_of())
+        self.verdict("term-5", passed=True)
+        self.verdict("term-6", passed=True)
+        live = [{"address": "w1", "agent": "claude", "status": {"state": "idle"}, "status_ms": 1}]
+        v = output.view(self.store, self.task, live=live)
+        self.assertEqual((v["status"], v.get("why"), self.commands.rounds_used(self.task, True)), ("ready", None, 2))
+        self.valid()
+
+    def test_hand_resolved_source_conflict_or_edit_uses_a_round_and_stops_at_limit(self):
+        import herdr_task.output as output
+        self.task["set"] = {"review_min": 2, "review_rounds": 4}
+        self.write_wt("src.py", "v = 'task'\n")
+        self.git(self.wt, "commit", "-q", "-m", "add src")
+        self.ready()
+        self.verdict("term-1", passed=True)
+        self.verdict("term-2", passed=True)
+        self.assertEqual(self.commands.rounds_used(self.task, True), 2)
+
+        # Real conflict in src.py: counts as normal rounds (3 and 4 of 4).
+        self.advance_base("src.py", "v = 'main'\n")
+        rc = subprocess.run(["git", "-C", self.wt, "merge", "--no-commit", "main"], capture_output=True).returncode
+        self.assertNotEqual(rc, 0)
+        self.write_wt("src.py", "v = 'main+task'\n")
+        self.git(self.wt, "commit", "-q", "-m", "resolve src.py conflict")
+        self.ready()
+        self.assertNotIn("merge of main only", self.prompt_of())
+        self.assertEqual(self.commands.rounds_used(self.task, True), 3)
+        self.verdict("term-3", passed=True)
+        self.verdict("term-4", passed=True)
+        self.assertEqual((self.task["state"], self.commands.rounds_used(self.task, True)), ("ready", 4))
+
+        # At 4/4 used, a clean merge with a hand edit in a source file hits "Out of review rounds".
+        self.advance_base("clean.py", "ok = True\n")
+        self.git(self.wt, "merge", "--no-commit", "--no-ff", "-q", "main")
+        self.write_wt("src.py", "v = 'sneaked edit'\n")
+        self.git(self.wt, "commit", "-q", "-m", "merge with hand edit")
+        for r in self.task["review_runs"]:
+            r["at"] = 1
+        self.ready()
+        self.assertEqual(len(self.runs), 4)
+        self.assertIn("review_out", self.task)
+        live = [{"address": "w1", "agent": "claude", "status": {"state": "idle"}, "status_ms": 1}]
+        self.assertEqual(output.view(self.store, self.task, live=live).get("why"), "Out of review rounds")
+        self.valid()
+
+    def test_unpassed_round_and_loop_breaker_same_file_flagged(self):
+        from herdr_task.budget import triggers
+        self.task["set"] = {"review_min": 2, "review_rounds": 6}
+        self.write_wt("app.py", "a = 1\n")
+        self.git(self.wt, "commit", "-q", "-m", "app v1")
+        self.ready()
+        self.verdict("term-1", passed=False, changes="[major] app.py broken", must_fix=1)
+
+        # Merging main on top of an unpassed round still counts as a normal round.
+        self.advance_base("docs.txt", "hi\n")
+        self.git(self.wt, "merge", "--no-ff", "-q", "-m", "merge before fixing", "main")
+        self.ready()
+        self.assertNotIn("merge of main only", self.prompt_of())
+        self.assertEqual(self.commands.rounds_used(self.task, True), 2)
+        self.verdict("term-2", passed=True)
+        self.verdict("term-3", passed=True)
+        self.assertEqual((self.task["state"], self.commands.rounds_used(self.task, True)), ("ready", 3))
+
+        # Now after passing, a merge-only round that flags app.py again does NOT trip "same file flagged in two rounds".
+        self.advance_base("more.txt", "yo\n")
+        self.git(self.wt, "merge", "--no-ff", "-q", "-m", "clean merge", "main")
+        self.ready()
+        self.assertEqual(self.commands.rounds_used(self.task, True), 3)
+        self.verdict("term-4", passed=False, changes="[major] app.py regression in merge", must_fix=1)
+        self.assertNotIn("recap", self.task)
+        self.assertEqual(triggers(self.store, self.task), [])
+
+        # A real hand-fix commit after that flagging app.py DOES trip the loop-breaker.
+        self.write_wt("app.py", "a = 2\n")
+        self.git(self.wt, "commit", "-q", "-m", "fix app")
+        self.ready()
+        self.assertEqual(self.commands.rounds_used(self.task, True), 4)
+        self.verdict("term-5", passed=False, changes="[major] app.py still broken", must_fix=1)
+        self.assertIn("recap", self.task)
+        self.assertTrue(any("same file flagged in two rounds: app.py" in r for r in self.task["recap"]["reasons"]))
+        self.valid()

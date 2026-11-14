@@ -9,9 +9,10 @@ import re
 import shlex
 
 from .base import Fail, git, now
-from .github import BAD, PENDING
+from .github import BAD, PENDING, remote_of
 
 DECISIONS = ("continue", "split", "new", "drop")
+SHA = re.compile(r"[0-9a-f]{40}")
 CI_FAIL_LIMIT = 3
 CI_WINDOW_MS = 3600000
 RUN_URL = re.compile(r"/actions/runs/(\d+)")
@@ -89,6 +90,45 @@ def marked_generated(wt, paths):
     f = out.split("\0") if ok else []
     return {f[i] for i in range(0, len(f) - 2, 3) if (f[i + 1], f[i + 2]) in (("linguist-generated", "set"),
             ("linguist-generated", "true"), ("diff", "unset"))}
+
+
+def generated_only(wt, paths):
+    """Whether every path in `paths` is generated (by name or .gitattributes)."""
+    rest = [size_path(p) for p in paths if p and not ignored_size_file(p)]
+    return not rest or set(rest) <= marked_generated(wt, rest)
+
+
+def merge_only_step(wt, base, head, mine, branch=None):
+    """FAC-89: whether `head` since the last reviewed head before it (which passed) is only merges of `base`
+    whose trees differ from git's clean merge of their two parents only in generated files (and had no
+    conflicts outside generated files)."""
+    prev = next((r["head"] for r in reversed(mine or ()) if r.get("head") and r["head"] != head), None)
+    if not prev or not wt or not os.path.isdir(wt):
+        return False
+    last_prev = next((r for r in reversed(mine) if r.get("head") == prev), None)
+    if not last_prev or last_prev.get("verdict") != "pass":
+        return False
+    bases = (base, f"refs/remotes/{remote_of(wt, branch)}/{base}")
+    c = head
+    for _ in range(100):
+        if c == prev:
+            return c != head
+        ok, line, _ = git(wt, "rev-list", "--parents", "-n", "1", c)
+        parts = line.split() if ok else []
+        if len(parts) != 3:
+            return False
+        _, first, other = parts
+        if not any(git(wt, "merge-base", "--is-ancestor", other, b)[0] for b in bases):
+            return False
+        _, mt, _ = git(wt, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", first, other)
+        mp = [p for p in mt.split("\0") if p]
+        if not mp or not SHA.fullmatch(mp[0]):
+            return False
+        ok_d, dt, _ = git(wt, "diff-tree", "-r", "--no-commit-id", "--name-only", "--no-renames", "-z", mp[0], c)
+        if not ok_d or not generated_only(wt, {*mp[1:], *(p for p in dt.split("\0") if p)}):
+            return False
+        c = first
+    return False
 
 
 def change_sizes(t):
@@ -192,9 +232,15 @@ def token_sum(s, t):
 
 
 def rounds_since(t):
-    """herdr-task's own review rounds recorded after the task's last recap decision."""
+    """herdr-task's own non-merge-only review rounds recorded after the task's last recap decision."""
     since = ((t.get("recaps") or [{}])[-1]).get("at", 0)
-    return [r for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task" and (r.get("at") or 0) > since]
+    mine = [r for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"]
+    skip = set(t.get("merge_only_runs") or ())
+    known = {r.get("address") for r in t.get("review_runs") or [] if r.get("address")}
+    wt = t.get("worktree") if t.get("mode") == "worktree" else None
+    base, br = t.get("base") or "main", t.get("branch")
+    return [r for i, r in enumerate(mine) if (r.get("at") or 0) > since and r.get("by") not in skip
+            and not (r.get("by") not in known and SHA.fullmatch(r.get("head") or "") and merge_only_step(wt, base, r["head"], mine[:i], br))]
 
 
 def ci_since(t):
