@@ -14,8 +14,8 @@ import time
 from .checks import checks_line
 from .base import Fail, git, guard, hc_json, kill_agent, now, run, STORE, stop_note, VERSION
 from .settings import (
-    agent_argv, agent_key, argv_for, bare, build_dir_of, codex_review_argv, ensure_build_dir, gate_min, merge_policy, MUST_WORDS,
-    remove_build_dir, review_kind, review_limits, set_opts, settings_block, settings_for, space_base,
+    agent_argv, agent_key, argv_for, bare, build_dir_of, codex_review_argv, ensure_build_dir, gate_min, merge_policy,
+    merge_wait_why, MUST_WORDS, remove_build_dir, review_kind, review_limits, set_opts, settings_block, settings_for, space_base,
     task_settings, worker_argv, worktrees_on,
 )
 from .agents import (
@@ -221,6 +221,9 @@ def cmd_show(args):
         # says it's Working, not Ready.
         if busy_again(t, live):
             back_to_work(s, t, "its agent is at work again")
+        if t.get("auto_merge") and not t.get("accepted_by") and merge_wait_why(s, t):
+            t.pop("auto_merge", None)
+            s.dirty = True
         v = view(s, t, live)
         if t["state"] == "queued":
             v["reason"] = queue_reason(s, t)
@@ -986,8 +989,7 @@ def finalize(s, t):
         except Fail as e:
             t["attention"] = str(e)
             return f"{s.ref(t)} {READY_BUT} {e} Tell the person."
-    policy = ("ask" if review_kind(t) and any(r.get("started_by") == "herdr-task" for r in t.get("reviews") or [])
-              and not gate_passes(t, t.get("head")) else merge_policy(s, t))
+    policy = merge_policy(s, t)
     if policy in ("auto", "checks"):
         t["auto_merge"] = policy
         if t.get("pr"):
@@ -1127,7 +1129,8 @@ def record_verdict(s, t, rn, passed, must, text):
             msg = f"{ref}: review round {rn['round']} passed. {step}"
         else:
             fin = finalize(s, t)
-            line = f"Herdr's review round {rn['round']} of {ref} passed: {ref} goes on to merging ({k} of {need} passing). {fin}"
+            what = f"{ref} waits in Ready for Accept" if merge_wait_why(s, t) else f"{ref} goes on to merging"
+            line = f"Herdr's review round {rn['round']} of {ref} passed: {what} ({k} of {need} passing). {fin}"
             msg = f"{ref}: review round {rn['round']} passed. {fin}"
         tell_pass(s, t, rn["round"], line)
     else:
@@ -1340,6 +1343,8 @@ def cmd_edit(args):
         pick = [t.get(k) for k in ("agent", "model", "effort")]
         rev_pick = [t.get(k) for k in ("reviewer", "reviewer_model", "reviewer_effort")]
         set_opts(t, args)
+        if t.get("auto_merge") and not t.get("accepted_by") and merge_policy(s, t) == "ask":
+            t.pop("auto_merge", None)
         if [t.get(k) for k in ("reviewer", "reviewer_model", "reviewer_effort")] != rev_pick:
             t["reviewer_at"] = max(now(), max((f.get("at") or 0 for f in t.get("review_failures") or []), default=0))
             if (t.get("attention") or "").startswith(REVIEWER_FAILED):

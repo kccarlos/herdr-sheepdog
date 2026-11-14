@@ -10097,3 +10097,101 @@ class BuildOutput(unittest.TestCase):
                 empty = next(l for l, _ in self.home.health_lines("", self.home.local_report(), {}) if 'event="disk-over"' in l)
         self.assertTrue(line.index(f"{self.bdir}/APP-2") < line.index(f"{self.bdir}/APP-3") < line.index(f"{self.bdir}/APP-1"))
         self.assertTrue("APP-9" not in line and "Biggest task build folders" not in empty)
+
+
+class DesignDocAndOpenAskWaitForAccept(unittest.TestCase):
+    """FAC-94 (note 48): design/doc tasks and tasks with open owner asks always stop at Ready for Accept,
+    whatever the Merge setting; code tasks still auto-merge, and the Settings block says why."""
+
+    setUp_gate, git, change, ready = GateReview.setUp, GateReview.git, GateReview.change, GateReview.ready
+    verdict, env = GateReview.verdict, GateReview.env
+
+    def setUp(self):
+        from unittest import mock
+        self.setUp_gate()
+        import herdr_task.agents as agents, herdr_task.ask as ask, herdr_task.github as github
+        import herdr_task.output as output, herdr_task.settings as settings, herdr_task.tick as tick
+        self.agents, self.ask, self.output, self.settings, self.tick = agents, ask, output, settings, tick
+        self.origin, self.asks_dir = os.path.join(self.root, "origin.git"), os.path.join(self.root, "asks")
+        self.git(self.root, "init", "-q", "--bare", self.origin)
+        self.git(self.main, "remote", "add", "origin", self.origin)
+        self.git(self.main, "push", "-q", "-u", "origin", "main")
+        self.git(self.wt, "push", "-q", "-u", "origin", "task/13")
+        with open(settings.SETTINGS, "w") as f:
+            json.dump({"spaces": {"sp1": {"folder": self.main, "tasks": {"merge": "checks", "review_min": 2, "review_rounds": 5}}}}, f)
+        self.task["set"], self.merges = {}, []
+
+        def fake_gh(*a, **k):
+            if a[:2] in (("pr", "list"), ("pr", "create")):
+                return True, ("[]" if a[1] == "list" else "https://github.com/o/r/pull/13"), ""
+            if a[:2] == ("pr", "view"):
+                oid = self.git(self.origin, "rev-parse", "refs/heads/main" if self.merges else "refs/heads/task/13")
+                return True, (oid if "-q" in a else json.dumps({
+                    "state": "MERGED" if self.merges else "OPEN", "mergeable": "MERGEABLE", "mergeCommit": {"oid": oid},
+                    "headRefOid": oid, "comments": [], "reviews": [],
+                    "statusCheckRollup": [{"name": "check", "status": "COMPLETED", "conclusion": "SUCCESS"}]})), ""
+            if a[:2] == ("pr", "merge"):
+                self.merges.append(a)
+                self.git(self.origin, "update-ref", "refs/heads/main", self.git(self.origin, "rev-parse", "refs/heads/task/13"))
+                return True, "", ""
+            return True, "o/r", ""
+
+        for mod, name, val in ((github, "gh", fake_gh), (self.commands, "gh", fake_gh),
+                               (self.commands, "github", lambda s: "o/r"), (tick, "github", lambda s: "o/r"),
+                               (github, "live_agents", lambda *_: []), (github, "live_helpers", lambda *_: []),
+                               (tick, "live_agents", lambda *_: []), (ask, "ASKS", self.asks_dir)):
+            p = mock.patch.object(mod, name, val); p.start(); self.addCleanup(p.stop)
+
+    def merge_line(self):
+        row = {x["label"]: x for x in self.settings.task_settings(self.store, self.task)}["Merge"]
+        line = next(l for l in self.settings.settings_block(self.store, self.task).splitlines() if l.startswith("- Merge:"))
+        return row["value"], row["by"], line
+
+    def tick_green(self):
+        self.task["pr"]["checked"], rep = 0, {"done": [], "attention": []}
+        self.tick.tick_store(self.store, rep)
+        return rep
+
+    def test_design_and_doc_tasks_wait_in_ready_under_after_checks_and_auto(self):
+        for i, (kind, extra, rounds) in enumerate((("design", {"review_min": 2, "review_rounds": 2}, 2),
+                                                   ("doc", {"merge": "auto"}, 1)), 1):
+            with self.subTest(kind=kind):
+                if i > 1:
+                    self.setUp()
+                self.task["set"] = {"review_kind": kind, **extra}
+                self.assertEqual(self.merge_line(), ("ask", None, "- Merge: ask me first (design/doc tasks always wait for your Accept)"))
+                self.ready()
+                for r in range(1, rounds + 1):
+                    self.verdict(f"term-{r}")
+                self.assertIn("SHEP-13 waits in Ready for Accept", self.told[-1])
+                self.assertNotIn("auto_merge", self.task)
+                rep = self.tick_green()
+                self.assertEqual((self.merges, rep["done"], self.task["state"]), ([], [], "ready"))
+                self.assertEqual(self.agents.task_status(self.task, []), ("ready", None, None))
+                self.assertEqual(self.output.view(self.store, self.task, [])["status"], "ready")
+        self.env("HC_TERMINAL_ID", None)
+        self.commands.cmd_accept(self.commands.argparse.Namespace(id="SHEP-13", json=True, space=None, agent=None, argv=None))
+        self.assertEqual((len(self.merges), self.task["state"], self.task.get("accepted_by"), os.path.isdir(self.wt)), (1, "done", "person", False))
+
+    def test_code_task_still_auto_merges_under_after_checks(self):
+        self.assertEqual(self.merge_line(), ("checks", "folder",
+            "- Merge: after checks: once you say ready, Herdr merges it when its checks pass (this folder's setting)"))
+        self.ready(); self.verdict("term-1"); self.verdict("term-2")
+        self.assertEqual(self.task.get("auto_merge"), "checks")
+        rep = self.tick_green()
+        self.assertEqual((len(self.merges), rep["done"], self.task["state"], self.task.get("accepted_by"), os.path.isdir(self.wt)),
+                         (1, [13], "done", "auto", False))
+
+    def test_open_owner_ask_waits_in_ready_until_accepted(self):
+        self.task["agents"] = [{"address": "w1", "parent": "t-coord"}]
+        self.ask.save({"id": "a1", "question": "Ship SHEP-13?", "options": ["Yes", "No"], "recommend": "Yes", "task": "SHEP-13", "to": "t-coord", "at": 1})
+        self.assertEqual(self.merge_line(), ("ask", None, "- Merge: ask me first (tasks with open questions always wait for your Accept)"))
+        self.ready(); self.verdict("term-1"); self.verdict("term-2")
+        self.assertNotIn("auto_merge", self.task)
+        self.assertEqual((self.tick_green()["done"], self.merges, self.agents.task_status(self.task, [])), ([], [], ("ready", None, None)))
+        self.task["auto_merge"] = "checks"  # ask opened after ready also clears auto_merge on tick; answered asks don't block
+        self.ask.save({"id": "a1", "question": "Ship SHEP-13?", "options": ["Yes", "No"], "recommend": "Yes", "task": "SHEP-13", "to": "t-coord", "at": 1, "answer": "Yes"})
+        self.ask.save({"id": "a2", "question": "Keep old route?", "options": ["Yes", "No"], "recommend": "Yes", "task": None, "to": "w1", "at": 2})
+        self.assertEqual((self.tick_green()["done"], self.merges, "auto_merge" in self.task), ([], [], False))
+        self.ask.save({"id": "a2", "question": "Keep old route?", "options": ["Yes", "No"], "recommend": "Yes", "task": None, "to": "w1", "at": 2, "answer": "Yes"})
+        self.assertEqual(self.merge_line()[:2], ("checks", "folder"))

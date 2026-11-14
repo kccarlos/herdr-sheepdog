@@ -545,7 +545,8 @@ def task_settings(s, t, space=None, argv=None):
     if here:
         add("Merge", "nothing to merge: you work in the folder itself, and the person accepts it", policy, m_by)
     else:
-        add("Merge", MERGE_WORDS[policy], policy, m_by)
+        why = merge_wait_why(s, t)
+        add("Merge", f"ask me first ({why})" if why else MERGE_WORDS[policy], "ask" if why else policy, None if why else m_by)
         if t.get("base_set"):
             add("Base", f"{t['base']}: your branch starts from it and merges into it", t["base"],
                 "folder" if t.get("base_by") == "space" else "task")
@@ -711,8 +712,20 @@ def branch_pattern_problem(pattern):
     return None
 
 
+def merge_wait_why(s, t):
+    """Why a task always waits in Ready for the person's Accept, whatever Settings' merge; or None."""
+    if review_kind(t):
+        return "design/doc tasks always wait for your Accept"
+    from .ask import open_asks
+    if open_asks(s, t):
+        return "tasks with open questions always wait for your Accept"
+    return None
+
+
 def merge_policy(s, t):
-    """How a ready task merges: its own --set merge, else Settings' (auto, checks or ask)."""
+    """How a ready task merges: ask for design/doc tasks or open owner asks; else --set merge or Settings'."""
+    if merge_wait_why(s, t):
+        return "ask"
     p = (t.get("set") or {}).get("merge") or settings_for(s, t.get("space"))["tasks"].get("merge")
     return p if p in MERGE_WORDS else "ask"
 

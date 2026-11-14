@@ -58,6 +58,42 @@ def save(rec):
     os.replace(tmp, path_of(rec["id"]))
 
 
+def open_asks(s, t):
+    """Unanswered `herdr-task ask` records for task `t` (by `--task`, `t["asks"]`, or its worker/Assistant)."""
+    try:
+        names = sorted(n for n in os.listdir(asks_dir()) if n.endswith(".json"))
+    except OSError:
+        return []
+    ref = s.ref(t).upper() if s and hasattr(s, "ref") else ""
+    key = s.key(t).lower() if s and hasattr(s, "key") else ""
+    folder = os.path.realpath(f) if (f := (getattr(s, "loc", None) or {}).get("folder")) else None
+    ids = {a.get("id") for a in t.get("asks") or [] if isinstance(a, dict) and a.get("id")}
+    workers = {a.get("address") for a in t.get("agents") or [] if isinstance(a, dict) and a.get("address")}
+    terms = workers | {a.get("parent") for a in t.get("agents") or [] if isinstance(a, dict) and a.get("parent")}
+    ref_re = re.compile(rf"(?<![A-Z0-9-]){re.escape(ref)}(?![A-Z0-9])", re.I) if ref else None
+    out = []
+    for name in names:
+        try:
+            with open(os.path.join(asks_dir(), name)) as f:
+                rec = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(rec, dict) or rec.get("answer") is not None:
+            continue
+        orig_f = (rec.get("origin") or {}).get("folder")
+        if orig_f and folder and os.path.realpath(orig_f) != folder and rec.get("id") not in ids:
+            continue
+        rt = str(rec.get("task") or "").strip()
+        bare_n = rt.lstrip("#")
+        if ((ref and rt.upper() == ref) or (key and rt.lower() == key) or rec.get("id") in ids
+                or (not rt and not rec.get("checklist")
+                    and (rec.get("to") in workers or (rec.get("to") in terms and bool(ref_re and ref_re.search(str(rec.get("question") or ""))))))
+                or (bare_n.isdigit() and int(bare_n) == t.get("id")
+                    and ((orig_f and folder and os.path.realpath(orig_f) == folder) or rec.get("to") in terms))):
+            out.append(rec)
+    return out
+
+
 def news_line(rec):
     attr = lambda x: str(x).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
     text = f"Ask {rec['id']} answered: {rec['answer']} (asked: {rec['question']})"
