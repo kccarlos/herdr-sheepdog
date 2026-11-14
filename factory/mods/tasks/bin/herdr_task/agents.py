@@ -158,6 +158,10 @@ def task_status(task, live):
         return "needs", "asks", REASONS["question"]
     if trust_asked(live):
         return "needs", "asks", REASONS["trust"]
+    # Out of review rounds (FAC-95, note 49): it waits on its Assistant (review-more, accept
+    # --owner-approved, reopen) whatever its agent does meanwhile: busy, a background job, its own line.
+    if st == "running" and task.get("review_out"):
+        return "needs", "reply", out_of_rounds_why(task)
     if busy_again(task, live):
         return "working", None, WORKING_AGAIN
     if task.get("attention"):
@@ -201,6 +205,13 @@ def task_status(task, live):
 
 
 STOPPED = "Agent stopped"
+OUT_OF_ROUNDS = "Out of review rounds: wants one more"
+
+
+def out_of_rounds_why(task):
+    """Why a task out of review rounds waits: a design or doc task goes to the person, others want a round."""
+    from .settings import review_kind
+    return "Out of review rounds: for the person" if review_kind(task) else OUT_OF_ROUNDS
 
 
 # ---- Ready only when the person must act (SHEP-175) ----------------------------------------------

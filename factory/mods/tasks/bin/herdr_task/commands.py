@@ -234,8 +234,9 @@ def cmd_show(args):
         on, rounds = review_limits(s, t)
         gate = gate_min(s, t)
         if on:
+            auto = len(t.get("review_auto_grants") or [])
             v["review_rounds"] = {"used": rounds_used(t, bool(gate)), "of": rounds, "added": int(t.get("review_rounds_added") or 0),
-                                  **({"min": gate, "kind": kind} if kind else {})}
+                                  **({"min": gate, "kind": kind} if kind else {}), **({"auto": auto} if auto else {})}
         v["after_refs"] = after_refs(s, t)
         block = settings_block(s, t)
         if getattr(args, "evidence", False):
@@ -256,7 +257,8 @@ def cmd_show(args):
         text.append(f"simulator: {v['simulator']['name']} ({v['simulator']['udid']})")
     if v.get("review_rounds"):
         r = v["review_rounds"]
-        text.append(f"review rounds: {r['used']} of {r['of']} used" + (f" ({r['added']} added by the assistant)" if r["added"] else "")
+        by = [f"{n} added by {who}" for n, who in ((r["added"] - r.get("auto", 0), "the assistant"), (r.get("auto", 0), "Herdr itself")) if n]
+        text.append(f"review rounds: {r['used']} of {r['of']} used" + (f" ({', '.join(by)})" if by else "")
                     + (" (ready refused: out of rounds)" if v.get("review_out") else ""))
     if v.get("agents_md"):
         text.append(f"for AGENTS.md: {v['agents_md']}")
@@ -649,6 +651,9 @@ def gate_step(s, t):
         t.pop("progress", None)
         s.dirty = True
         return f"{s.ref(t)}: {why}."
+    granted = not merge_only and used >= rounds and auto_grant(s, t, mine, rounds, head)
+    if granted:
+        rounds += 1
     if not merge_only and used >= rounds:
         t["review_out"] = now()
         s.dirty = True
@@ -699,7 +704,33 @@ def gate_step(s, t):
     if merge_only:
         t.setdefault("merge_only_runs", []).append(a["address"])
     t["progress"] = {"text": fit("Herdr's reviewer is on it"), "at": now(), "set": now(), "by": "herdr"}
-    return f"{s.ref(t)}: Herdr started review round {round_n} of {head[:7]} ({a['address']}); its findings come to you as a message."
+    added = (f" Herdr added this round itself (its last round passed; auto-grant {len(t['review_auto_grants'])} of {AUTO_GRANTS})."
+             if granted else "")
+    return (f"{s.ref(t)}: Herdr started review round {round_n} of {head[:7]} ({a['address']}); its findings come to you as a message."
+            + added)
+
+
+AUTO_GRANTS = 2  # FAC-95: rounds Herdr adds itself per task, then the Assistant decides (review-more)
+
+
+def auto_grant(s, t, mine, rounds, head):
+    """Out of rounds with its last round passed (zero findings at Must fix: it only needs more passes,
+    e.g. after a rebase), Herdr adds one round itself, as review-more does, at most AUTO_GRANTS times a
+    task; never for a design or doc task (the person reviews those). Recorded on the task for show."""
+    grants = t.get("review_auto_grants") or []
+    if review_kind(t) or not mine or mine[-1].get("verdict") != "pass" or len(grants) >= AUTO_GRANTS:
+        return False
+    t["review_rounds_added"] = int(t.get("review_rounds_added") or 0) + 1
+    t["review_auto_grants"] = [*grants, {"at": now(), "head": head, "after_round": mine[-1].get("round")}]
+    t.pop("review_out", None)
+    s.dirty = True
+    live = workers(s, t)
+    if live and live[-1]["address"] != os.environ.get("HC_TERMINAL_ID"):  # its own ready's output tells it
+        from .news import send_or_hold
+        send_or_hold(live[-1]["address"],
+                     f"Herdr added one review round to {s.ref(t)} itself (its last round passed; auto-grant {len(grants) + 1} "
+                     f"of {AUTO_GRANTS}): {rounds + 1} in all. Herdr's reviewer starts it now: nothing to do meanwhile.")
+    return True
 
 
 def review_refusal(s, t, wt):

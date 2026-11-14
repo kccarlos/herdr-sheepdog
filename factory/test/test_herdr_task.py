@@ -3167,6 +3167,7 @@ class GateReview(unittest.TestCase):
         import argparse
         from unittest import mock
         self.task["set"]["review_rounds"] = 1
+        self.task["review_auto_grants"] = [{"at": 1, "head": "x"}] * 2  # FAC-95: Herdr's own extra rounds used up
         self.ready()
         self.verdict("term-1")
         self.assertNotIn("progress", self.task)  # its "reviewer is on it" line is gone: it waits for a round
@@ -3306,6 +3307,7 @@ class GateReview(unittest.TestCase):
 
     def test_out_of_rounds_starts_none(self):
         self.task["set"]["review_rounds"] = 1
+        self.task["review_auto_grants"] = [{"at": 1, "head": "x"}] * 2  # FAC-95: Herdr's own extra rounds used up
         self.ready()
         self.verdict("term-1")
         self.assertEqual(len(self.runs), 1)
@@ -9256,6 +9258,7 @@ class DesignAndDocReview(unittest.TestCase):
 
         # Normal task: review-more still adds a round once its rounds are used.
         self.task.update(state="running", set={"review_rounds": 1, "review_min": 2})
+        self.task["review_auto_grants"] = [{"at": 1, "head": "x"}] * 2  # FAC-95: Herdr's own extra rounds used up
         for k in ("reviews", "review_runs", "verdict_told", "ready_at", "review_out"):
             self.task.pop(k, None)
         self.runs.clear()
@@ -9265,6 +9268,96 @@ class DesignAndDocReview(unittest.TestCase):
         sent = self.review_more()
         self.assertEqual(self.task["review_rounds_added"], 1)
         self.assertEqual(len(sent), 1)
+
+
+class OutOfRoundsAutoGrant(unittest.TestCase):
+    """FAC-95 (note 49): out of rounds with its last round passed, Herdr adds a round itself (at most twice a task) and
+    tells the worker; otherwise, or for a design task, it shows Needs you "Out of review rounds", even while its agent works."""
+
+    git, change, ready, verdict, env, valid = (GateReview.git, GateReview.change, GateReview.ready, GateReview.verdict,
+                                               GateReview.env, GateReview.valid)
+    show_out = DesignAndDocReview.show_out
+
+    def setUp(self):
+        from unittest import mock
+        GateReview.setUp(self)
+        self.sent = []
+        for target, value in (("herdr_task.news.send_or_hold", lambda to, msg: self.sent.append((to, msg)) or True),
+                              ("herdr_task.commands.workers", lambda s, t: [{"address": "w1"}])):
+            p = mock.patch(target, value)
+            p.start()
+            self.addCleanup(p.stop)
+        self.task["set"] = {"review_min": 2, "review_rounds": 1}
+
+    def status(self, worker="working", **k):
+        from herdr_task import agents
+        live = [{"address": "w1", "status": {"state": worker, **k}, "status_ms": agents.now()}]
+        return agents.task_status(self.task, live)
+
+    def test_a_passing_last_round_gets_one_more_round_and_the_worker_is_told(self):
+        self.ready()
+        self.verdict("term-1", passed=True)  # 1 of 2 passing, its 1 round used
+        self.assertEqual(len(self.runs), 2)  # Herdr started round 2 itself
+        self.assertNotIn("review_out", self.task)
+        self.assertEqual((self.task["review_rounds_added"], len(self.task["review_auto_grants"])), (1, 1))
+        self.assertEqual([to for to, _ in self.sent], ["w1"])
+        self.assertIn("Herdr added one review round to SHEP-13 itself", self.sent[0][1])
+        self.assertIn("auto-grant 1 of 2", self.sent[0][1])
+        self.verdict("term-2", passed=True)
+        self.assertEqual(self.task["state"], "ready")
+        self.valid()
+        txt, js = self.show_out(False), self.show_out(True)
+        self.assertIn("review rounds: 2 of 2 used (1 added by Herdr itself)", txt)
+        self.assertEqual(js["review_rounds"], {"used": 2, "of": 2, "added": 1, "auto": 1})
+
+    def test_a_third_time_it_needs_you(self):
+        self.task["set"]["review_min"] = 4
+        self.ready()
+        for n in (1, 2, 3):
+            self.verdict(f"term-{n}", passed=True)
+        self.assertEqual(len(self.runs), 3)  # two rounds added, no third
+        self.assertEqual(len(self.task["review_auto_grants"]), 2)
+        self.assertTrue(self.task.get("review_out"))
+        self.assertEqual(self.status("idle"), ("needs", "reply", "Out of review rounds: wants one more"))
+        self.assertIn("1 added by the assistant", self.review_more_text())
+
+    def review_more_text(self):
+        import argparse
+        from unittest import mock
+        with mock.patch.object(self.commands, "caller_labels", lambda: {}):
+            self.commands.cmd_review_more(argparse.Namespace(id="SHEP-13", json=True, folder=None))
+        return self.show_out(False)
+
+    def test_open_findings_need_you_even_while_its_agent_works(self):
+        self.ready()
+        self.verdict("term-1", passed=False, changes="- major: broken", must_fix=1)
+        self.env("HC_TERMINAL_ID", "w1")
+        self.change("fixed")
+        self.ready()  # its 1 round used, the last one asked for changes: no round added
+        self.assertEqual(len(self.runs), 1)
+        self.assertTrue(self.task.get("review_out"))
+        self.assertNotIn("review_auto_grants", self.task)
+        self.assertEqual(self.sent, [])
+        why = ("needs", "reply", "Out of review rounds: wants one more")
+        self.assertEqual(self.status("working"), why)
+        self.assertEqual(self.status("idle", msg="waiting for CI"), why)  # its status msg says it waits: still Needs you
+        from herdr_task import output
+        live = [{"address": "w1", "status": {"state": "working"}}]
+        self.task["progress"] = {"text": "Waiting on review-more", "set": 1, "at": 1}
+        self.assertEqual(output.view(self.store, self.task, live=live)["why"], why[2])
+
+    def test_a_design_task_is_never_auto_granted(self):
+        from herdr_task import settings
+        settings.set_task(self.task, "review.kind", "design")
+        mine = [{"round": 1, "head": self.head, "verdict": "pass", "started_by": "herdr-task"}]
+        self.assertFalse(self.commands.auto_grant(self.store, self.task, mine, 1, self.head))
+        self.ready()
+        self.verdict("term-1", passed=False, changes="- major: unclear", must_fix=1)
+        self.change("clearer")
+        self.ready()
+        self.assertEqual(len(self.runs), 1)
+        self.assertNotIn("review_auto_grants", self.task)
+        self.assertEqual(self.status("idle"), ("needs", "reply", "Out of review rounds: for the person"))
 
 
 class GhAlwaysNamesForkRepo(unittest.TestCase):
@@ -9850,6 +9943,7 @@ class MergeOnlyReviewRounds(unittest.TestCase):
     def test_hand_resolved_source_conflict_or_edit_uses_a_round_and_stops_at_limit(self):
         import herdr_task.output as output
         self.task["set"] = {"review_min": 2, "review_rounds": 4}
+        self.task["review_auto_grants"] = [{"at": 1, "head": "x"}] * 2  # FAC-95: Herdr's own extra rounds used up
         self.write_wt("src.py", "v = 'task'\n")
         self.git(self.wt, "commit", "-q", "-m", "add src")
         self.ready()
@@ -9881,7 +9975,7 @@ class MergeOnlyReviewRounds(unittest.TestCase):
         self.assertEqual(len(self.runs), 4)
         self.assertIn("review_out", self.task)
         live = [{"address": "w1", "agent": "claude", "status": {"state": "idle"}, "status_ms": 1}]
-        self.assertEqual(output.view(self.store, self.task, live=live).get("why"), "Out of review rounds")
+        self.assertEqual(output.view(self.store, self.task, live=live).get("why"), "Out of review rounds: wants one more")
         self.valid()
 
     def test_unpassed_round_and_loop_breaker_same_file_flagged(self):
