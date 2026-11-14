@@ -799,7 +799,8 @@ BG_HINTS = ("<task-notification>", "task_id", "backgroundTaskId", "timeoutMs", "
             "exit_code", "Process exited", "cell_id", "cell ID")
 BG_MAX_MS = 3 * 3600_000  # a background job started longer ago than this no longer counts
 BG_STARTED = re.compile(r"Command running in background with ID: (\w+)|Monitor started \(task (\w+)|Async agent launched[\s\S]*?agentId: (\w+)")
-BG_ENDED = re.compile(r"<task-id>(\w+)</task-id>(?:(?!</task-notification>)[\s\S])*?<status>(\w+)</status>")
+# A Monitor that expired says so in its <event>, with no <status> (FAC-96: WUKO-67's stayed running).
+BG_ENDED = re.compile(r"<task-id>(\w+)</task-id>(?:(?!</task-notification>)[\s\S])*?(?:<status>(\w+)</status>|\[Monitor expired\b)")
 CODEX_RUNNING = re.compile(r"Process running with session ID (\d+)")
 CODEX_EXITED = re.compile(r"\"exit_code\"\s*:|Process exited with code")
 # Codex 0.163+ code mode (SHEP-207): a script starts commands and polls them with tools.exec_command /
@@ -1084,12 +1085,15 @@ def codex_working(k):
     return False
 
 
-def own_work(task, live, ready=False):
+def own_work(task, live, ready=False, since=0):
     """Its quiet agent is on its own work (above). What really runs (a background job, a command
     open in the foreground, an agy background task, a helper of its own at work: SHEP-54) counts
     whatever its last message says: a plain question with work still running is no ask yet
     (SHEP-148; asking for real is its question tool or a permission: blocked). Its status line or
-    status msg alone counts only when its last message asks nothing, and never for a Ready task."""
+    status msg alone counts only when its last message asks nothing, and never for a Ready task.
+    since: background jobs its log says started before then don't count (FAC-96: one already listed
+    while it sat Ready, like an expired Monitor, never held its merge); a Ready task its own turn
+    took back and settle_back() made Ready again keeps that cut (settled_at)."""
     if not ready and review_running(task):
         return False
     for k in live:
@@ -1101,6 +1105,8 @@ def own_work(task, live, ready=False):
             return True
         log = agent_log(task, address) or agent_log(task)
         jobs, ended = background_jobs(log) if log else ({}, 0)
+        cut = since or (task.get("settled_at") or 0 if ready else 0)
+        jobs = {i: at for i, at in jobs.items() if at >= cut}
         # Codex's jobs are only what its process tree shows (SHEP-207): a session the log says is
         # still open, with no process of the agent running, is over.
         if any(i.startswith("codex:") for i in jobs) and not codex_working(k):

@@ -855,6 +855,94 @@ class BackToWork(unittest.TestCase):
         self.tick.tick_store(self.store, {"started": []})
         self.assertEqual(t["state"], "running")
 
+    def woken_after_ready(self, head="abc"):
+        """FAC-96 (note 50): a Ready task set to merge once its checks pass, its pull request open on
+        head abc, and a Monitor of its agent's still listed from before it said ready. Returns the
+        task, its repo ({head, dirty}) and the merges the tick made."""
+        t = self.ready(mode="worktree", worktree=tempfile.mkdtemp(), branch="b", head=head, auto_merge="checks",
+                       pr={"number": 9, "repo": "o/r", "url": "u", "checked": 0})
+        repo, merged, self.jobs = {"head": head, "dirty": ""}, [], {"monitor1": 0}
+        for mod, name, value in ((self.tick, "git", lambda cwd, *a: (True, repo["head"] if a[0] == "rev-parse" else repo["dirty"], "")),
+                                 (self.tick, "pr_view", lambda t: {"state": "OPEN", "mergeable": "MERGEABLE", "headRefOid": head,
+                                                                   "statusCheckRollup": [{"name": "check", "conclusion": "SUCCESS"}]}),
+                                 (self.tick, "pr_news", lambda *a: None),
+                                 (self.tick, "merge_now", lambda s, t: merged.append(t["head"])),
+                                 (self.agents, "agent_log", lambda task, address=None: "/log"),
+                                 (self.agents, "background_jobs", lambda log: (dict(self.jobs), 0))):
+            p = self.mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        return t, repo, merged
+
+    def worker(self, st, turn):
+        return [dict(self.agent({"address": "t1", "status": st, "turn": turn, "role": "worker"}), agent="claude",
+                     status={"state": st, "msg": "Waiting on a background job"})]
+
+    def test_a_wake_up_after_ready_with_nothing_new_still_merges(self):
+        """FAC-96: its own expired Monitor's notice wakes the agent (seen by the tick, or by a show first);
+        the turn ends with the same head: Ready again, and the pending merge goes once checks pass."""
+        for take_back in ("tick", "show"):
+            t, repo, merged = self.woken_after_ready()
+            self.live = self.worker("working", 5)
+            if take_back == "show":
+                with self.mock.patch.object(self.commands, "view", lambda s, t, live=None: dict(t, status="working", folder="/main", ref="SHEP-7", live=[])):
+                    self.commands.cmd_show(self.args())
+            else:
+                self.tick.tick_store(self.store, {"started": [], "done": []})
+            self.assertEqual((t["state"], t["back"].get("auto"), t["auto_merge"], merged), ("running", True, "checks", []), take_back)
+            self.live = self.worker("idle", 6)
+            report = {"started": [], "done": []}
+            self.tick.tick_store(self.store, report)
+            self.assertEqual((t["state"], report.get("ready_again"), merged), ("ready", ["SHEP-7"], ["abc"]), take_back)
+
+    def test_ready_again_without_a_merge_reads_ready(self):
+        """"Ask me first": Ready again, the Monitor listed before the wake-up still no work of its own."""
+        t, repo, merged = self.woken_after_ready()
+        t.pop("auto_merge")
+        self.live = self.worker("working", 5)
+        self.tick.tick_store(self.store, {"started": [], "done": []})
+        self.live = self.worker("idle", 6)
+        self.tick.tick_store(self.store, {"started": [], "done": []})
+        self.assertEqual((t["state"], self.agents.task_status(t, self.live), merged), ("ready", ("ready", None, None), []))
+
+    def test_only_a_job_started_in_the_woken_turn_holds_it(self):
+        """A Monitor started after ready but before the wake-up was listed while it sat Ready: no new work.
+        One started in the woken turn still runs: Working, its merge still pending, until it ends."""
+        for started, state, done in (("between", "ready", ["abc"]), ("after", "running", [])):
+            t, repo, merged = self.woken_after_ready()
+            self.jobs = {"monitor2": 2}  # after ready_at (1)
+            self.live = self.worker("working", 5)
+            self.tick.tick_store(self.store, {"started": [], "done": []})
+            if started == "after":
+                self.jobs = {"monitor2": t["back"]["at"] + 1}
+            self.live = self.worker("idle", 6)
+            self.tick.tick_store(self.store, {"started": [], "done": []})
+            self.assertEqual((t["state"], t.get("auto_merge"), merged), (state, "checks", done), started)
+
+    def test_a_new_commit_after_ready_drops_the_pending_merge(self):
+        t, repo, merged = self.woken_after_ready()
+        self.live = self.worker("working", 5)
+        self.tick.tick_store(self.store, {"started": [], "done": []})
+        repo["head"] = "def"
+        self.live = self.worker("idle", 6)
+        self.tick.tick_store(self.store, {"started": [], "done": []})
+        self.assertEqual((t["state"], t.get("auto_merge"), merged), ("running", None, []))
+
+    def test_a_fix_the_assistant_asked_for_still_takes_it_back(self):
+        """Asked while Ready, or while its agent's own wake-up already had it Working: Working until its next ready."""
+        for woken in (False, True):
+            t, repo, merged = self.woken_after_ready()
+            self.store.loc["folder"] = "/main"
+            if woken:
+                self.live = self.worker("working", 5)
+                self.tick.tick_store(self.store, {"started": [], "done": []})
+            with self.mock.patch.object(self.commands, "tell", lambda s, t, msg, args: ("t1", False)):
+                self.commands.cmd_fix(self.args(reason="Checks failing: test."))
+            self.assertNotIn("auto", t["back"], woken)
+            self.live = self.worker("idle", 6)
+            self.tick.tick_store(self.store, {"started": [], "done": []})
+            self.assertEqual((t["state"], merged), ("running", []), woken)
+
     def test_ready_keeps_each_agents_next_turn(self):
         turns = self.agents.ready_turns([{"address": "t1", "status": {"state": "working"}, "turn": 4},
                                          {"address": "t2", "status": "idle", "turn": 2}])
@@ -1311,6 +1399,12 @@ class OwnBackgroundWork(unittest.TestCase):
                               "message": {"role": "user", "content": [{"tool_use_id": "toolu_2", "type": "tool_result",
                                                                        "content": "Monitor started (task m1, expires in 15m)"}]}})
         self.assertEqual(self.status(), ("working", None, "Waiting on a background job"))
+        # FAC-96: it expired (Claude Code's notice has no <status>, as WUKO-67's log): over
+        self.stamp(-100_000, {"type": "queue-operation", "operation": "enqueue", "content":
+                              "<task-notification>\n<task-id>m1</task-id>\n<summary>Monitor event: \"unit test failures\"</summary>\n"
+                              "<event>[Monitor expired after 15m with 1 event delivered. Re-arm it if you still need the watch.]</event>\n"
+                              "</task-notification>"})
+        self.assertEqual(self.agents.background_jobs(self.log)[0], {})
 
     def test_a_plain_question_needs_you_once_nothing_runs(self):
         """SHEP-148: a plain question with its own work still running is no ask yet (asking for real

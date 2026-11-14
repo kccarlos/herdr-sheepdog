@@ -179,7 +179,9 @@ def settle_back(s, t, report):
     """A Ready task its agent's own turn took back to work (back_pass(): a message in its chat,
     a background job's notice waking it) is Ready again once that turn ended with nothing new: its
     branch where it said ready, nothing uncommitted, no question asked, no work of its own left
-    running (SHEP-133). Else it stays Working, and Needs you once its agent stays quiet."""
+    running (SHEP-133). Else it stays Working, and Needs you once its agent stays quiet.
+    Its pending auto-merge stays meanwhile and goes in the same tick once Ready (FAC-96); a new
+    commit, uncommitted changes or a question drop it until its next ready."""
     b = t.get("back") or {}
     if t["state"] != "running" or not b.get("auto") or t.get("attention") or t.get("retry"):
         return False
@@ -190,9 +192,17 @@ def settle_back(s, t, report):
     if not live or any(status_word(k) not in ("idle", "done") for k in live):
         return False
     ok, head, _ = git(wt, "rev-parse", "HEAD")
-    if not ok or head != t["head"] or git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
+    if not ok:
         return False
-    if any(last_question(t, k.get("address")) for k in live) or own_work(t, live):
+    if head != t["head"] or git(wt, "status", "--porcelain", "--untracked-files=no")[1] \
+            or any(last_question(t, k.get("address")) for k in live):
+        # FAC-96: new work since ready: its merge waits for its next ready.
+        if t.pop("auto_merge", None) is not None:
+            s.dirty = True
+        return False
+    # Its hard signs only: Herdr's own line stands in for its status line, and a job already
+    # listed while it sat Ready (an expired Monitor whose notice woke it) is no new work (FAC-96).
+    if own_work(t, live, ready=True, since=b.get("at") or 0):
         return False
     t["state"], t["ready_turns"] = "ready", ready_turns(live)
     if b.get("progress"):
@@ -200,6 +210,11 @@ def settle_back(s, t, report):
     else:
         t.pop("progress", None)
     t.pop("back", None)
+    # Jobs listed before the wake-up stay no work of its own while it's Ready (own_work()), and its
+    # pull request is read again in this tick, so a pending merge can go now (FAC-96).
+    t["settled_at"] = b.get("at") or 0
+    if t.get("pr"):
+        t["pr"]["checked"] = 0
     s.dirty = True
     report.setdefault("ready_again", []).append(s.ref(t))
     return True

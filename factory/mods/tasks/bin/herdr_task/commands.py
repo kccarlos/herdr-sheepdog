@@ -219,8 +219,8 @@ def cmd_show(args):
         refresh_sessions(s, t, live)
         # Back at work since it said ready: saved at once, so the Accept card (which reads this)
         # says it's Working, not Ready.
-        if busy_again(t, live):
-            back_to_work(s, t, "its agent is at work again")
+        if busy_again(t, live):  # its agent's own turn, as the tick's back_pass() (FAC-96)
+            back_to_work(s, t, "its agent is at work again", auto=True)
         if t.get("auto_merge") and not t.get("accepted_by") and merge_wait_why(s, t):
             t.pop("auto_merge", None)
             s.dirty = True
@@ -420,7 +420,7 @@ def cmd_ready(args):
                 # "For AGENTS.md": what the next agent would need about setting up or testing this
                 # repo; the Assistant decides whether it goes into the repo's AGENTS.md.
                 t["agents_md"] = note[:300]
-            for k in ("attention", "attention_at", "handed_at", "fix_requested", "progress", "retry", "review_out", "back"):
+            for k in ("attention", "attention_at", "handed_at", "fix_requested", "progress", "retry", "review_out", "back", "settled_at"):
                 t.pop(k, None)
             # Its agents' turns now: a later turn of theirs takes it back to work (busy_again()).
             t["ready_turns"] = ready_turns(live_agents(s.key(t)))
@@ -975,7 +975,8 @@ def back_to_work(s, t, why, said=WORKING_AGAIN, auto=False):
     ready. why: what took it back, for its Assistant's news ("SHEP-7 is working again: why").
     auto: only its agent's own turn took it back (a message, a background job's notice), not a
     fix asked for: Ready again when that turn changed nothing (tick's settle_back())."""
-    if t["state"] != "ready":
+    # A fix or resume asked for while its agent's own turn has it (FAC-96) is a fix asked for.
+    if t["state"] != "ready" and (auto or not (t.get("back") or {}).get("auto")):
         return False
     t["state"] = "running"
     for k in ("ready_turns", "merge_requested", *(() if auto else ("accepted_by",))):
