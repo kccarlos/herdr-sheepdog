@@ -2487,6 +2487,81 @@ class TimeLeft(unittest.TestCase):
         self.assertNotEqual(templates.WORKER_MD_BEFORE_OFTEN, templates.WORKER_MD)
 
 
+class WorkersAskThroughHerdrTask(unittest.TestCase):
+    """FAC-97 (field note 51): workers ask with `herdr-task ask`, never their CLI's blocking question
+    tool; one blocked in that dialog anyway reads Needs you with every question in its why and news."""
+
+    QS = ["Which palette?", "Serif or sans headings?", "Dark mode at launch?", "Keep the old logo?"]
+
+    def setUp(self):
+        sys.path.insert(0, BIN)
+        import unittest.mock
+        from herdr_task import agents, news, output
+        self.agents, self.news, self.output = agents, news, output
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        self.log = os.path.join(d, "s.jsonl")
+        self.held = [None]
+        for mod, name, value in ((agents, "agent_log", lambda task, address=None: self.log),
+                                 (output, "held_ask", lambda address: self.held[0]),
+                                 (output, "progress_clock", lambda *a: None), (agents, "_live", lambda key: [])):
+            p = unittest.mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_the_worker_template_says_herdr_task_ask(self):
+        with open(os.path.join(ROOT, "templates", "worker.md")) as f:
+            worker = f.read()
+        self.assertIn('herdr-task ask "<question>" --option A --option B --recommend A', worker)
+        self.assertIn("one ask per question", worker)
+        self.assertNotIn("question tool (it answers", worker)  # the size overrun asks through herdr-task ask too
+        self.assertIn("ask your Assistant with `herdr-task ask`", worker)
+        for line in worker.splitlines():
+            if "AskUserQuestion" in line:
+                self.assertIn("Never your CLI's own blocking question tool", line)
+        from herdr_task import templates
+        self.assertNotIn("AskUserQuestion", templates.WORKER_MD)
+        with open(os.path.join(ROOT, "templates", "assistant.md")) as f:
+            self.assertIn("your question tool", f.read())  # the Assistant's own stays
+
+    def view(self, call, status_line="needs owner choices"):
+        with open(self.log, "w") as f:
+            f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_q", **call}]}}) + "\n")
+        t = {"id": 77, "title": "Design", "state": "running", "agents": [{"address": "t1"}],
+             "progress": {"text": status_line, "at": 1, "set": 1}}
+        live = [{"address": "t1", "agent": "claude", "status": {"state": "blocked"}, "turn": 3,
+                 "foreground": {"name": "claude"}, "labels": {"herdr.role": "worker"}}]
+        v = self.output.view(Store([t]), t, live)
+        return v, self.news.news_line(Store([t]), t, v, "needs-you")
+
+    def test_a_blocking_dialog_shows_every_question_in_why_and_news(self):
+        v, line = self.view({"name": "AskUserQuestion", "input": {"questions": [{"question": q, "options": []} for q in self.QS]}})
+        self.assertEqual((v["status"], v["needs"]), ("needs", "asks"))
+        self.assertTrue(v["why"].startswith("Asked in a blocking dialog (4 questions): "), v["why"])
+        for q in self.QS:
+            self.assertIn(q, v["why"])
+            self.assertIn(q, line)
+        self.assertNotIn("needs owner choices", v["why"])
+        # long questions (WUKO-77's ran 300+ characters each) share the room: every one still shows
+        long = [f"Question {i}: " + "a long design choice " * 20 for i in range(1, 5)]
+        v, line = self.view({"name": "AskUserQuestion", "input": {"questions": [{"question": q} for q in long]}})
+        self.assertLessEqual(len(v["why"]), self.agents.DIALOG_MAX)
+        for i in range(1, 5):
+            self.assertIn(f"Question {i}:", v["why"])
+            self.assertIn(f"Question {i}:", line)
+        # the ask Herdr's hook holds says the same, with nothing in the log
+        open(self.log, "w").close()
+        self.held[0] = {"tool_name": "AskUserQuestion", "tool_input": {"questions": [{"question": q} for q in self.QS[:2]]}}
+        self.assertEqual(self.view({"name": "Read", "input": {}})[0]["why"],
+                         "Asked in a blocking dialog (2 questions): Which palette? | Serif or sans headings?")
+
+    def test_a_permission_prompt_reads_as_before(self):
+        v, _ = self.view({"name": "Bash", "input": {"command": "npm test"}}, status_line="")
+        self.assertEqual(v["why"], "Run: npm test")
+        v, _ = self.view({"name": "Bash", "input": {"command": "npm test"}})
+        self.assertEqual(v["why"], "Needs owner choices")  # its own status line still wins over a permission
+
+
 class ReviewAsAHelperAgent(unittest.TestCase):
     """SHEP-54: workers run their review as an interactive hc child people see, never headless; an
     unedited earlier worker or reviewer template gets today's words."""

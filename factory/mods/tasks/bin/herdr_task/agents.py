@@ -601,6 +601,33 @@ def pending_call(task, address):
     return None, {}
 
 
+# A worker blocked in its CLI's own question dialog (field note 51): every question it holds goes in
+# its Needs-you why and news, so the Assistant can relay them all; this many characters at most,
+# shared out so a long first question never hides the rest (WUKO-77's ran 300+ characters each).
+DIALOG_MAX = 480
+
+
+def dialog_why(tool, value):
+    """"Asked in a blocking dialog (4 questions): q1 | q2 …" for a question tool's call, else None."""
+    if tool not in QUESTION_TOOLS or not isinstance(value, dict):
+        return None
+    qs = [" ".join(str(q.get("question") or "").split()) for q in value.get("questions") or [] if isinstance(q, dict)]
+    qs = [q for q in qs if q] or ([" ".join(str(value.get("question") or "").split())] if value.get("question") else [])
+    if not qs:
+        return None
+    head = f"Asked in a blocking dialog ({len(qs)} questions): " if len(qs) > 1 else "Asked in a blocking dialog: "
+    share = max(LINE_MAX, (DIALOG_MAX - len(head) - 3 * (len(qs) - 1)) // len(qs))
+    return fit(head + " | ".join(fit(q, share) for q in qs), DIALOG_MAX)
+
+
+def blocking_dialog(task, address, req=None):
+    """dialog_why() of the question dialog an agent's pane is blocked on: the ask Herdr's hook holds
+    (req), else the tool call its log left open. None when it isn't one (a permission, a plan)."""
+    if isinstance(req, dict) and req.get("tool_name"):
+        return dialog_why(req.get("tool_name"), req.get("tool_input"))
+    return dialog_why(*pending_call(task, address)) if address else None
+
+
 def ask_reason(task, address, req=None, kind=None, msg=None):
     """Why a blocked agent waits, in at most LINE_MAX characters: signed out when its own report
     says so (OSC 7501 kind auth); else from the ask Herdr's hook holds (req: Claude's
@@ -617,9 +644,7 @@ def ask_reason(task, address, req=None, kind=None, msg=None):
     if tool == "ExitPlanMode":
         return REASONS["plan"]
     if tool in QUESTION_TOOLS:
-        qs = value.get("questions") if isinstance(value.get("questions"), list) else []
-        q = qs[0].get("question") if qs and isinstance(qs[0], dict) else None
-        return fit(q) if q else REASONS["question"]
+        return dialog_why(tool, value) or REASONS["question"]
     if tool:
         words = permission_words(tool, value, req.get("cwd") if isinstance(req, dict) else (task.get("worktree") or task.get("folder")))
         return fit(words) if words else REASONS["permission"]

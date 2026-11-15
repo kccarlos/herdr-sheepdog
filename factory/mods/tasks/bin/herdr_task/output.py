@@ -4,7 +4,7 @@ import json
 
 from .base import now
 from .agents import (
-    agent_running, detail, live_helpers, out_of_rounds_why, ask_reason, held_ask, last_words, own_line, own_work, status_word, STATUSES, task_status,
+    agent_running, detail, live_helpers, out_of_rounds_why, ask_reason, blocking_dialog, held_ask, last_words, own_line, own_work, status_word, STATUSES, task_status,
 )
 from .queues import waiting_ext, waiting_for
 
@@ -22,7 +22,8 @@ def view(s, task, live=None):
         # Why it waits, at most LINE_MAX characters: a standard reason or its own question.
         k = next((k for k in running if status_word(k) == "blocked"), None)
         st = k.get("status") if k and isinstance(k.get("status"), dict) else {}
-        v["why"] = own_line(task, k and k["address"]) or (ask_reason(task, k["address"], held_ask(k["address"]), st.get("kind"), st.get("msg")) if k else v["why"])
+        # Blocked in its CLI's question dialog: every question, before its own status line (field note 51).
+        v["why"] = (k and blocking_dialog(task, k["address"], held_ask(k["address"]))) or own_line(task, k and k["address"]) or (ask_reason(task, k["address"], held_ask(k["address"]), st.get("kind"), st.get("msg")) if k else v["why"])
     if v["needs"] == "reply":
         # Refused ready with its rounds used up (review_refusal): the Assistant can add one.
         v["why"] = (out_of_rounds_why(task) if task.get("review_out") else None) or own_line(task) or last_words(task)
