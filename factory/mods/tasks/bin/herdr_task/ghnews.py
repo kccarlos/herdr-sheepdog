@@ -7,7 +7,7 @@ import re
 
 from .base import now
 from .agents import status_word
-from .github import BAD, gh, github, pr_repo, task_github
+from .github import BAD, DRIFTED, gh, github, pr_repo, synced_head, task_github
 from .launch import coordinator_in
 from .commands import workers
 from .news import news_send
@@ -157,6 +157,8 @@ def pr_news(s, t, v, report):
     for c in news_checks[:10]:
         name, url = c.get("name") or c.get("context") or "A check", c.get("detailsUrl") or c.get("targetUrl") or ""
         lines.append(f"- Check \"{name}\" failed: {url}")
+    if news_checks and synced_head(t, repo, head):
+        lines.append(f"- {DRIFTED.strip()}")  # FAC-98: the base drifted, not its own work
     tail = None
     for c in news_checks:
         rid = run_id(c.get("detailsUrl") or c.get("targetUrl"))

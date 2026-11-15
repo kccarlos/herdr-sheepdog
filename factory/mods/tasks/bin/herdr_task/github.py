@@ -158,7 +158,9 @@ def push_branch(s, task):
     # Already there at its exact tip (pushed by hand): no second push through its hooks (#795).
     has, tip, _ = git(wt, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")
     seen, there, _ = git(wt, "ls-remote", remote, f"refs/heads/{to}")
-    if not (has and tip and seen and there.split()[:1] == [tip]):
+    # FAC-98: GitHub's update-branch merged its base into it there: nothing of its own to push (a push would
+    # drop that merge).
+    if not (has and tip and seen and (there.split()[:1] == [tip] or tip == task.get("head") and synced_head(task, pr_repo(task), there.split()[0] if there.split() else ""))):
         ok, _, err = git(wt, "push", "--force-with-lease", "-u", remote, br) if to == br else \
             git(wt, "push", remote, f"{br}:refs/heads/{to}")
         if not ok:
@@ -176,7 +178,7 @@ def pr_head_problem(s, task, repo, head, theirs=None):
         ok, theirs, _ = ask()
         if not ok:
             return None
-    if not theirs or theirs == head:
+    if not theirs or theirs == head or synced_head(task, repo, theirs):  # FAC-98: brought up to date with its base
         return None
     wt = task.get("worktree") or ""
     ahead = os.path.isdir(wt) and git(wt, "rev-parse", f"refs/heads/{task.get('branch')}")[1] == head \
@@ -474,6 +476,63 @@ def pr_problem(v):
     if v.get("mergeStateStatus") == "BEHIND":
         return BEHIND
     return None
+
+
+# FAC-98 (note 52): two pull requests each green on its own can break their base together. Before Herdr merges one
+# whose head lacks the base's tip, GitHub's update-branch merges the base in (a merge commit, never a rebase or force
+# push) and the merge waits for the checks on that new head. Merge-only: no review round, its agent isn't woken.
+SYNC_GRACE_MS = 2 * 60000  # update-branch is asynchronous: the old head may show this long after it was asked
+SYNC_CHECKS_MS = 5 * 60000  # the updated head's checks may take this long to show; none by then: none will
+DRIFTED = (" They failed after Herdr brought the branch up to date with its base (the base moved on since): "
+           "pull the branch first (git pull), fix, then say ready again.")
+UPDATE_CONFLICT = "Herdr couldn't bring it up to date with its base branch (a conflict?)"
+
+
+def pr_behind(task, repo, head):
+    """FAC-98: how many of its base branch's commits the pull request's head lacks (GitHub's compare), or 0 when
+    GitHub can't say."""
+    ok, out, _ = gh("api", f"repos/{repo}/compare/{task.get('base') or 'main'}...{head}", "--jq", ".behind_by")
+    try:
+        return int(out) if ok else 0
+    except ValueError:
+        return 0
+
+
+def pr_update_branch(task, repo, head):
+    """FAC-98: GitHub's update-branch for its pull request at `head` (only while that is still its head). The pending
+    merge stays; the tick merges once the new head's checks pass. Returns (ok, error)."""
+    ok, _, err = gh("api", "-X", "PUT", f"repos/{repo}/pulls/{task['pr']['number']}/update-branch",
+                    "-f", f"expected_head_sha={head}")
+    if ok:
+        task["pr"]["synced"] = {"from": task.get("head"), "asked": head, "at": now()}
+        task["pr"]["checked"] = 0
+    return ok, err
+
+
+def synced_head(task, repo, theirs):
+    """FAC-98: `theirs` when it is the merge commit the last update-branch made (its first parent the head that was
+    asked: the ready head, or an earlier update's), "" when GitHub couldn't say, else None."""
+    pr, head = task.get("pr") or {}, task.get("head")
+    sy = pr.get("synced") or {}
+    if not (head and theirs and repo) or theirs == head or sy.get("from") != head:
+        return None
+    if sy.get("to") == theirs:
+        return theirs
+    ok, out, _ = gh("api", f"repos/{repo}/commits/{theirs}", "--jq", "[.parents[].sha] | join(\" \")")
+    if not ok:
+        return ""
+    if out.split()[:1] == [sy.get("asked")]:
+        sy["to"] = theirs
+        return theirs
+    return None
+
+
+def task_problem(task, v, repo):
+    """pr_problem(), saying when its checks failed on the head Herdr brought up to date with its base (FAC-98)."""
+    p = pr_problem(v)
+    if p and p.startswith("Checks failing") and synced_head(task, repo, v.get("headRefOid")):
+        p += DRIFTED
+    return p
 
 
 def pr_pending(v):

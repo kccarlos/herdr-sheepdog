@@ -24,7 +24,7 @@ from .agents import (
 )
 from .sessions import refresh_sessions
 from .github import (already_merged, pr_head_problem, push_branch, drop_branch, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
-                     pr_pending, pr_problem, pr_repo, pr_view, remote_of, task_github, update_main, watch_main)
+                     pr_pending, pr_problem, pr_repo, pr_behind, pr_update_branch, synced_head, task_problem, SYNC_CHECKS_MS, SYNC_GRACE_MS, UPDATE_CONFLICT, pr_view, remote_of, task_github, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, is_coordinator, launch, name_tabs,
@@ -1640,10 +1640,14 @@ def merge_now(s, t):
     # A commit made here after ready was never pushed: merging would delete it with the branch.
     if head and branch_tip(s, t) != head:
         return f"{t.get('branch')} has moved on since it said ready: its agent says ready again first."
-    if v.get("state") != "MERGED" and (why := pr_head_problem(s, t, repo, head, v.get("headRefOid"))):
+    # FAC-98: a head GitHub's update-branch made from the ready head stands for it.
+    synced = synced_head(t, repo, v.get("headRefOid")) if v.get("state") != "MERGED" else None
+    if synced == "":
+        return CHECKS_RUNNING  # GitHub couldn't say whether its head is Herdr's update: asked again next tick
+    if v.get("state") != "MERGED" and not synced and (why := pr_head_problem(s, t, repo, head, v.get("headRefOid"))):
         t["attention"], t["attention_at"] = why[0].upper() + why[1:], now()
         return t["attention"]
-    if v.get("state") != "MERGED" and head and v.get("headRefOid") not in (None, "", head):
+    if v.get("state") != "MERGED" and head and v.get("headRefOid") not in (None, "", head, synced):
         return CHECKS_RUNNING  # just pushed: this view is of the old head; the next tick reads the new one and merges
     note_checks(s, t, v)
     queue = False
@@ -1651,7 +1655,7 @@ def merge_now(s, t):
         record_ci(s, t, v, now())
         if t.get("mode") == "worktree" and budget_pass(s, t):
             return t["recap"]["title"]
-        problem = pr_problem(v)
+        problem = task_problem(t, v, repo)
         if problem:
             t["attention"], t["attention_at"] = problem, now()
             t.pop("merge_queued", None)
@@ -1665,9 +1669,22 @@ def merge_now(s, t):
             return WAITS_APPROVAL
         t["pr"].pop("needs_approval", None)
         base = t.get("base") or "main"
-        merge = lambda *extra: gh("pr", "merge", n, "--repo", repo, "--squash", *extra,
-                                  "--match-head-commit", head or v.get("headRefOid") or "")
+        at = synced or head or v.get("headRefOid") or ""
+        merge = lambda *extra: gh("pr", "merge", n, "--repo", repo, "--squash", *extra, "--match-head-commit", at)
         queue = uses_queue(s, base)
+        sy = t["pr"].get("synced") or {}
+        if sy.get("from") == head and (now() - (sy.get("at") or 0) < SYNC_GRACE_MS and not synced
+                                       or synced and not v.get("statusCheckRollup") and now() - (sy.get("at") or 0) < SYNC_CHECKS_MS):
+            return CHECKS_RUNNING  # FAC-98: GitHub still updating it, or its new head's checks yet to show
+        # FAC-98 (note 52): checks ran on its head, not on it with its base's tip: brought up to date first (a merge
+        # queue tests the combination itself), merged once the new head's checks pass.
+        if not queue and v.get("statusCheckRollup") and at and pr_behind(t, repo, at):
+            ok, err = pr_update_branch(t, repo, at)
+            if not ok:
+                t["attention"], t["attention_at"] = f"{UPDATE_CONFLICT}: {err}", now()
+                return t["attention"]
+            t["pr"]["wait"] = CHECKS_RUNNING
+            return CHECKS_RUNNING
         ok, _, err = merge() if queue else merge("--delete-branch")
         if not ok and not queue and "merge queue" in err:
             # gh refuses --delete-branch on a merge queue: asked again without it, which queues it.
