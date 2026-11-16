@@ -10545,6 +10545,106 @@ class SimulatorPool(unittest.TestCase):
         self.assertEqual([r["holder"] for r in lst], [None])
 
 
+class DeviceWait(unittest.TestCase):
+    """FAC-110: a task waiting only on the physical iPhone says so as Needs you, alerts once, and the tick clears it
+    (and tells its worker) once a paired device is available; unknown availability never clears it."""
+
+    run_cli, U1, U2 = SimulatorPool.run_cli, SimulatorPool.U1, SimulatorPool.U2
+
+    def setUp(self):
+        from unittest import mock
+        SimulatorPool.setUp(self)
+        import herdr_task.agents as agents, herdr_task.commands as commands, herdr_task.devices as devices, herdr_task.news as news
+        self.agents, self.devices, self.mock, self.alerts, self.sent, self.clock = agents, devices, mock, [], [], 10_000_000
+        self.worker = {"address": "t5", "status": {"state": "idle"}, "foreground": {"pid": 100, "name": "claude"}, "labels": {}}
+        for p in (mock.patch.object(commands, "send_alert", lambda *a, **k: self.alerts.append(a) or {}),
+                  mock.patch.object(devices, "now", lambda: self.clock),
+                  mock.patch.object(agents, "live_agents", lambda key: [self.worker]), mock.patch.object(agents, "detail", lambda k: k),
+                  mock.patch.object(news, "send_or_hold", lambda addr, text, how="send": self.sent.append((addr, text)) or "sent")):
+            p.start(); self.addCleanup(p.stop)
+        self.assertEqual(self.run_cli("add", "Device check", "--folder", self.repo)[0], 0)
+        with self.store.Store(self.store.locate(self.repo), write=True) as s:
+            self.slug = s.slug
+            s.find("1").update(state="running", started=1, agents=[{"address": "t5", "agent": "claude", "at": 1}])
+            s.dirty = True
+        self.env = {"HERDR_BROWSER_TASK": f"{self.slug}#1", "HC_TERMINAL_ID": "t5"}
+
+    def task(self):
+        with self.store.Store(self.store.locate(self.repo), write=False) as s:
+            return s.find("1")
+
+    def tick(self, answer):
+        calls = []
+        self.devices.device_pass({}, self.repo, check=lambda: calls.append(1) or answer)
+        return len(calls)
+
+    def test_the_wait_shows_as_needs_you_with_its_reason_and_alerts_once(self):
+        import herdr_task.output as output
+        for _ in range(2):
+            self.assertEqual(self.run_cli("device-wait", "unlock and trust the iPhone", env=self.env)[0], 0)
+        self.assertEqual(len(self.alerts), 1)
+        self.assertEqual(self.alerts[0][1], "Device not available: unlock and trust the iPhone")
+        t = dict(self.task(), progress={"text": "Waiting on the iPhone", "set": 1})  # its own status line doesn't hide it
+        why = "Device not available: unlock and trust the iPhone"
+        self.assertEqual(self.agents.task_status(t, [self.worker]), ("needs", "reply", why))
+        with self.store.Store(self.store.locate(self.repo), write=False) as s, \
+                self.mock.patch.object(output, "waiting_for", lambda s, t: []), self.mock.patch.object(output, "waiting_ext", lambda t: []), \
+                self.mock.patch.object(output, "subagents", lambda key: []):
+            v = output.view(s, t, [self.worker])
+        self.assertEqual((v["status"], v["why"]), ("needs", why))
+        self.assertTrue("device-wait" in self.launch.OWN and self.launch.own_command("/x/herdr-task", "/x/herdr-task device-wait --clear"))
+        self.assertEqual(self.run_cli("device-wait", "--clear", env=self.env)[0], 0)
+        self.assertNotIn("device_wait", self.task())
+
+    def test_a_tick_that_finds_the_device_clears_it_and_tells_the_worker(self):
+        self.run_cli("device-wait", "unlock and trust the iPhone", env=self.env)
+        self.assertEqual(self.tick(True), 1)
+        self.assertNotIn("device_wait", self.task())
+        self.assertEqual(self.sent, [("t5", "The device is available now: carry on with the device check.")])
+        self.assertEqual(len(self.alerts), 1)
+
+    def test_a_wait_again_soon_after_a_clear_neither_alerts_nor_loops(self):
+        self.run_cli("device-wait", "unlock the iPhone", env=self.env)
+        self.tick(True)
+        self.clock += 60_000  # still locked, though devicectl read it as available: it waits again
+        self.run_cli("device-wait", "unlock the iPhone", env=self.env)
+        self.clock += 60_000
+        self.assertEqual(self.tick(True), 1)
+        self.assertIn("device_wait", self.task())
+        self.assertEqual((len(self.alerts), len(self.sent)), (1, 1))
+        for answer in (False, True):
+            self.clock += 60_000
+            self.tick(answer)
+        self.assertNotIn("device_wait", self.task())
+        self.assertEqual(len(self.sent), 2)
+
+    def test_unknown_never_clears(self):
+        self.run_cli("device-wait", "connect the iPhone", env=self.env)
+        self.assertEqual(self.tick(None), 1)
+        self.assertEqual(self.tick(True), 0)  # at most once a minute
+        for _ in range(3):
+            self.clock += 60_000
+            self.tick(None)
+        self.assertIn("device_wait", self.task())
+        self.assertEqual(self.sent, [])
+        with self.mock.patch.object(self.devices.sys, "platform", "linux"):
+            self.assertIsNone(self.devices.device_available())
+
+    def test_device_available_reads_devicectl_json(self):
+        out = os.path.join(self.tmp, "devicectl.json")
+        with open(os.path.join(self.bin_dir, "xcrun"), "w") as f:
+            f.write(f"#!{sys.executable}\nimport sys\nsys.stdout.write(open({out!r}).read())\n")
+        dev = lambda tunnel: {"identifier": "X", "connectionProperties": {"pairingState": "paired", "tunnelState": tunnel}}
+        with self.mock.patch.object(self.devices.sys, "platform", "darwin"):
+            for body, want in ((json.dumps({"result": {"devices": [dev("connected")]}}), True),
+                               (json.dumps({"result": {"devices": [dev("disconnected")]}}), True),  # "available (paired)"
+                               (json.dumps({"result": {"devices": [dev("unavailable")]}}), False),
+                               ("not json", None)):
+                with open(out, "w") as f:
+                    f.write(body)
+                self.assertIs(self.devices.device_available(), want)
+
+
 class EndGroup(unittest.TestCase):
     """FAC-86: ending an agent ends its process group, and only a group its own pid leads."""
 

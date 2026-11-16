@@ -27,6 +27,7 @@ from .queues import cap_for, machine_hold, refresh_ext, running_count, set_hold,
 from .archive import archive_pass
 from .browsers import browser_pass
 from .simulators import simulator_pass
+from .devices import device_pass
 from .output import progress_clock, say
 from .commands import back_to_work, begin, gate_reads, merge_now, MERGE_FAILED, start_nudge, START_WINDOW_MS
 from .news import news_pass, send_or_hold, typing
@@ -737,6 +738,7 @@ def cmd_tick(args):
         sweep_sandboxes()  # temp dirs of sandboxed reviewers that ended without their trap
         browser_pass(report)
         simulator_pass(report, args.folder)
+        device_pass(report, args.folder)
     except Exception as e:  # never stops the queue
         report["browser_error"] = str(e)
     say(args, report, "; ".join(f"{k}: {v}" for k, v in report.items() if v) or "Nothing to do.")

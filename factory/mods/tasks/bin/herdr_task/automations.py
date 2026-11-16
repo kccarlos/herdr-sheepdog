@@ -26,6 +26,7 @@ from .commands import begin
 from .news import news_pass
 from .tick import end_done_pass, lost_logs_pass, memory_guard, retry_pass, tick_store, watchdog_pass
 from .simulators import simulator_pass
+from .devices import device_pass
 from .backups import backup_pass
 from .machines import machines_pass
 from .takeover import cli_check_pass
@@ -679,6 +680,7 @@ def one_pass(report):
             end_done_pass(report)
             memory_guard(report)
             simulator_pass(report)
+            device_pass(report)
         except Exception as e:  # never stops the scheduler
             print(f"{time.strftime('%H:%M:%S')} ending done agents: {e}", flush=True)
         try:

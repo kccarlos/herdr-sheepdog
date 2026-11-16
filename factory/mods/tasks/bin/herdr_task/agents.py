@@ -162,6 +162,9 @@ def task_status(task, live):
     # --owner-approved, reopen) whatever its agent does meanwhile: busy, a background job, its own line.
     if st == "running" and task.get("review_out"):
         return "needs", "reply", out_of_rounds_why(task)
+    # Waits on the physical device (FAC-110, herdr-task device-wait): locked, untrusted or not connected.
+    if st == "running" and live and (task.get("device_wait") or {}).get("why"):
+        return "needs", "reply", device_why(task)
     if back_at_work(task, live):
         return "working", None, WORKING_AGAIN
     if task.get("attention"):
@@ -210,6 +213,7 @@ def task_status(task, live):
 
 
 STOPPED = "Agent stopped"
+device_why = lambda task: f"Device not available: {(task.get('device_wait') or {}).get('why')}"
 OUT_OF_ROUNDS = "Out of review rounds: wants one more"
 
 
