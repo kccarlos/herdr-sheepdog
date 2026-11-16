@@ -13,7 +13,7 @@ import time
 
 from .checks import checks_line
 from .base import Fail, git, guard, hc_json, kill_agent, now, run, STORE, stop_note, VERSION
-from .settings import (
+from .settings import (write_max_running, 
     accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, bare, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
     fable_due, gate_min, merge_hold, merge_policy,
     merge_wait_why, MUST_WORDS, remove_build_dir, review_kind, review_limits, set_opts, settings_block, settings_for, space_base,
@@ -32,7 +32,7 @@ from .launch import (
     own_path, parent_for, resume_argv, REVIEW_READS, review_reads, retag_tabs, reviewer_sandbox, sandboxes, set_branch, tab_title, task_tabs,
 )
 from .store import is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
-from .queues import after_refs, parse_after, queue_reason, set_after
+from .queues import after_refs, parse_after, queue_reason, running_count, set_after, urgent
 from .archive import unarchive
 from .output import line, minutes, say, view
 from .scheduler import ensure_scheduler
@@ -235,6 +235,8 @@ def cmd_show(args):
             v["auto_accepted"] = t["auto_accepted"]
         if t["state"] == "queued":
             v["reason"] = queue_reason(s, t)
+        elif urgent(t) and t["state"] == "running" and running_count(s) > s.max_running():
+            v["urgent_past_cap"] = True  # FAC-103: it took the folder's one extra slot
         v["settings"] = task_settings(s, t)
         kind = review_kind(t)
         if kind:
@@ -261,6 +263,8 @@ def cmd_show(args):
         text.append("comes after: " + ", ".join(v["after_refs"]))
     if kind:
         text.append(f"review kind: {kind} (1 review round)")
+    if v.get("urgent_past_cap"):
+        text.append("priority: runs past the cap as urgent")
     if v.get("simulator"):
         text.append(f"simulator: {v['simulator']['name']} ({v['simulator']['udid']})")
     if v.get("review_rounds"):
@@ -1520,6 +1524,14 @@ def cmd_config(args):
                 s.dirty = True
         if not cfg:
             s.data.pop("config", None)
+        for pair in getattr(args, "set", None) or []:  # FAC-103: the folder's "Tasks at once" from the CLI
+            k, eq, v = pair.partition("=")
+            if not eq or k.strip().lower() not in ("tasks.max_running", "max_running"):
+                raise Fail(f"config --set takes tasks.max_running=N, not {pair!r}.")
+            v = v.strip().strip("\"'")
+            if v and v.lower() != "default" and not (v.isdigit() and 1 <= int(v) <= 50):
+                raise Fail("tasks.max_running is 1 to 50 (\"default\": Settings' above this space).")
+            write_max_running(s, getattr(args, "space", None), int(v) if v.isdigit() else None)
         out = {"folder": s.loc["folder"], "prefix": s.prefix, "max_running": s.max_running(), "settings": settings_for(s),
                "worktrees": worktrees_on(s), "build_dir": build_dir_of(s)}
     out["rename"] = retag_tabs(s) if tabs else []

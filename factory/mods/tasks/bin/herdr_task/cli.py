@@ -175,7 +175,7 @@ def main():
         c.add_argument("--reviewer-effort", help="the reviewer's effort")
         c.add_argument("--set", action="append", metavar="KEY=VALUE",
                        help="one task's setting, a line of its brief's Settings block: review=on|off, review.kind=design|doc, "
-                            "review.rounds=1..10, review.mustFix=blocker|major|minor, proof=on|off, "
+                            "review.rounds=1..10, review.mustFix=blocker|major|minor, proof=on|off, priority=urgent|normal, "
                             "merge=\"on its own\"|\"after checks\"|\"ask me first\" (\"\": Settings' again)")
         c.add_argument("--base", help="the branch its worktree branches from and merges into (default: its space's Base branch "
                                       "setting, else the folder's current branch)")
@@ -290,6 +290,9 @@ def main():
     c = cmd("config", cmd_config, "this folder's settings", id=False)
     c.add_argument("--prefix", help="task ids' prefix, 2 to 5 letters (HAT -> HAT-4); unique on this machine")
     c.add_argument("--build-dir", help="per-task build output folder (<path>/<task-key>/, cleaned on done; \"\" clears)")
+    c.add_argument("--set", action="append", metavar="KEY=VALUE",
+                   help="tasks.max_running=N: Settings' \"Tasks at once\" for this folder's space (\"default\": Settings' above it again)")
+    c.add_argument("--space", help="the space whose setting --set writes (default: the one working in this folder)")
     si = sub.add_parser("simulator", help="this folder's fixed iOS simulator pool: lease one per task, release it, or list holders")
     si.set_defaults(fn=cmd_simulator, simulator="list", folder=None, json=False, id=None, task_opt=None)
     sp = si.add_subparsers(dest="simulator")
@@ -361,7 +364,7 @@ def main():
             c.add_argument("--parent", help="its tasks' agents' parent (default: you)")
             c.add_argument("--set", action="append", metavar="KEY=VALUE",
                            help="a setting for each task it adds, as add --set: review=on|off, review.kind=design|doc, "
-                                "review.rounds=1..10, proof=on|off, merge=..., ... (\"\": Settings' again)")
+                                "review.rounds=1..10, proof=on|off, priority=urgent|normal, merge=..., ... (\"\": Settings' again)")
             g = c.add_mutually_exclusive_group()
             g.add_argument("--here", action="store_true")
             g.add_argument("--worktree", action="store_true")

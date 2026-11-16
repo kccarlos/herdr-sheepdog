@@ -90,6 +90,44 @@ def write_autopilot(space, values):
     os.replace(tmp, SETTINGS)
 
 
+def write_max_running(s, space, value):
+    """FAC-103: `config --set tasks.max_running=N`, the folder's "Tasks at once" as the window writes it:
+    in the space layer of the space working in this folder (--space's when given). None unsets it
+    there. Returns the space id. Refused on a pushed copy, as write_autopilot, and on a file that
+    is there but unreadable (writing would lose every other setting in it)."""
+    try:
+        with open(SETTINGS) as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        d = {}
+    except (OSError, ValueError) as e:
+        raise Fail(f"Can't read {SETTINGS} ({e}): not changing it.")
+    if not isinstance(d, dict):
+        raise Fail(f"{SETTINGS} isn't a settings object: not changing it.")
+    if d.get("pushed_from"):
+        raise Fail("This machine's Shepherdr settings are a copy from the machine whose window sets them: change Tasks at once in Settings there.")
+    spaces = d.setdefault("spaces", {})
+    folder = s.loc["folder"]
+    sid = bare(space) if space else next((k for k, v in spaces.items() if isinstance(v, dict) and v.get("folder") == folder), None)
+    if not sid:
+        raise Fail(f"No space works in {folder} in Shepherdr settings: pass --space <id>.")
+    layer = spaces.setdefault(sid, {})
+    if layer.get("folder") not in (None, folder):
+        raise Fail(f"Space {sid} works in {layer['folder']}, not {folder}.")
+    layer["folder"] = folder
+    tasks = dict(layer.get("tasks") or {})
+    tasks.pop("max_running", None) if value is None else tasks.update(max_running=value)
+    layer.update(tasks=tasks) if tasks else layer.pop("tasks", None)
+    d["version"] = 1
+    os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
+    tmp = f"{SETTINGS}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(d, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, SETTINGS)
+    return sid
+
+
 def reactions_on(space=None, d=None):
     """Settings › Agents › Reactions in a space, for every agent there (reactions.py): the space's
     own, else Everywhere's, else on. A layer's agents.reactions, else what SHEP-42 kept as
@@ -124,8 +162,8 @@ def settings_for(s, space=None):
     """The settings for this folder's tasks: Shepherdr settings' Everywhere, then this machine's,
     then the override of the space working in this folder (--space's when several do): the most
     specific wins. The window no longer writes agent or task values for a machine (only its
-    machine-only rows, read by machine_limits/machine_option); ones set before still apply here. Written by the settings window (~/.config/shepherdr/settings.json); herdr-task only
-    reads them."""
+    machine-only rows, read by machine_limits/machine_option); ones set before still apply here. Written by the settings window (~/.config/shepherdr/settings.json); herdr-task
+    writes only Autopilot (write_autopilot) and a folder's "Tasks at once" (write_max_running)."""
     everywhere, machine, pick = settings_layers(s, space)
     out = {k: {kk: list(vv) if isinstance(vv, list) else vv for kk, vv in v.items()} for k, v in DEFAULTS.items()}
 
@@ -303,7 +341,10 @@ SET_KEYS = {"review": "review", "brief.review": "review", "merge": "merge", "bri
             "reviewer_model": "reviewer_model", "reviewer-model": "reviewer_model",
             "reviewer_effort": "reviewer_effort", "reviewer-effort": "reviewer_effort",
             "proof": "proof", "brief.proof": "proof", "auto_accept": "auto_accept", "auto-accept": "auto_accept", "autoaccept": "auto_accept",
-            "estimate.time": "estimate_time", "estimate.tokens": "estimate_tokens", "estimate.lines": "estimate_lines"}
+            "estimate.time": "estimate_time", "estimate.tokens": "estimate_tokens", "estimate.lines": "estimate_lines",
+            "priority": "priority", "task.priority": "priority"}
+# FAC-103: an urgent task starts before normal queued ones, one slot past the folder's cap if it must.
+PRIORITY_WORDS = "urgent: starts before normal queued tasks, in one slot past this folder's \"Tasks at once\" cap if it must"
 # The Reviewer sandbox line: whether an agy reviewer here runs sandboxed (tasks.reviewer_sandbox, or the flag file).
 REVIEWER_BOX_WORDS = {"on": "on: the agy reviewer runs in a sandbox; agy's keychain sign-in isn't there, so it can stop at \"Sign in required\" (turn it off in Settings)",
                       "off": "off: the agy reviewer runs as the person's own agy, outside the sandbox"}
@@ -334,7 +375,7 @@ def set_task(t, key, value):
     """One --set key=value (or flag) on task t; an empty value or "default" goes back to Settings'."""
     field = SET_KEYS.get(key.strip().lower())
     if not field:
-        raise Fail(f"--set takes review, review.kind, review.rounds, review.min, review.mustFix, merge, proof, auto_accept, estimate.time, estimate.tokens, estimate.lines, agent, model, effort or reviewer settings, not {key!r}.")
+        raise Fail(f"--set takes review, review.kind, review.rounds, review.min, review.mustFix, merge, proof, auto_accept, priority, estimate.time, estimate.tokens, estimate.lines, agent, model, effort or reviewer settings, not {key!r}.")
     v = value.strip().strip("\"'").strip()
     sets = t.setdefault("set", {})
     if not v or v.lower() == "default":
@@ -344,7 +385,11 @@ def set_task(t, key, value):
             t.pop("set", None)
         return
     low = v.lower()
-    if field in ("review", "proof", "auto_accept"):
+    if field == "priority":
+        if low not in ("urgent", "normal"):
+            raise Fail("priority is urgent or normal.")
+        sets.pop(field, None) if low == "normal" else sets.update(priority="urgent")  # normal: no setting at all
+    elif field in ("review", "proof", "auto_accept"):
         if low not in ONOFF:
             raise Fail(f"{field} is on or off.")
         sets[field] = ONOFF[low]
@@ -574,6 +619,8 @@ def task_settings(s, t, space=None, argv=None):
     a_by = "task" if any(t.get(f) for f in ("agent", "model", "effort")) else \
         by_layer(s, space, "worker", None, bool(cfg.get("worker")), False)
     add("Agent", text, {"agent": agent, "model": model, "effort": effort}, a_by)
+    if sets.get("priority") == "urgent":
+        add("Priority", PRIORITY_WORDS, "urgent", "task")
     # Suggested next message (SHEP-186): the reply ends with the words the person would likely send next (templates/worker.md)
     sug = (cfg.get("agents") or {}).get("suggestions") is not False
     add("Suggested next message", "on (your reply ends with the message you'd likely send next, shown greyed out in the box)" if sug

@@ -168,9 +168,22 @@ def queue_reason(s, task):
     if wait:
         return "after " + ", ".join(wait)
     n = running_count(s, task)
-    if n >= s.max_running():
-        return f"{n} tasks are running here" if n != 1 else "1 task is running here"
+    if n >= cap_for(s, task):
+        busy = f"{n} tasks are running here" if n != 1 else "1 task is running here"
+        return f"{busy}; urgent: starts next" if urgent(task) else busy
     return machine_hold()
+
+
+def urgent(task):
+    """FAC-103: --set priority=urgent."""
+    return (task.get("set") or {}).get("priority") == "urgent"
+
+
+def cap_for(s, task):
+    """How many may run here for this task to start: the folder's cap, one more for an urgent task.
+    Normal tasks never start at the cap, so the running count stays within cap + 1: one urgent
+    task past the cap per folder, a second waits."""
+    return s.max_running() + (1 if urgent(task) else 0)
 
 
 # ---- the machine's room (HERD-40) -------------------------------------------------------------

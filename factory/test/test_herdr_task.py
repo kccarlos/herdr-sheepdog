@@ -5038,6 +5038,110 @@ class Scheduled(unittest.TestCase):
             self.assertEqual(self.tick_at(v["scheduled_for"] + 1000), [])
             self.assertEqual(self.task(2)["state"], "queued")
 
+    def busy_folder(self, running, queued):
+        """FAC-103: `running` tasks at work, then `queued` (title, urgent) queued in that order (oldest first)."""
+        import time
+        for i in range(running):
+            self.add(f"Busy {i}")
+        for title, urgent in queued:
+            self.add(title, set=["priority=urgent"] if urgent else None)
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            for i in range(1, running + 1):
+                s.find(i).update(state="running", agents=[{"address": f"t{i}", "at": int(time.time() * 1000)}])
+            for j in range(len(queued)):
+                s.find(running + 1 + j).update(state="queued", queued_at=10 + j)
+            s.dirty = True
+
+    def test_an_urgent_task_starts_before_an_older_normal_one(self):
+        from unittest import mock
+        self.busy_folder(1, [("Normal", False), ("Urgent", True)])
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 2):
+            self.assertEqual(self.tick_at(None), ["APP-3"])
+        self.assertEqual(self.task(2)["state"], "queued")
+
+    def test_without_priority_the_queue_is_oldest_first_within_the_cap(self):
+        from unittest import mock
+        self.busy_folder(1, [("Older", False), ("Newer", False)])
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 2):
+            self.assertEqual(self.tick_at(None), ["APP-2"])
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1):
+            self.assertEqual(self.tick_at(None), [])  # at the cap: nothing more starts
+        self.assertEqual(self.task(3)["state"], "queued")
+
+    def test_at_the_cap_one_urgent_task_takes_one_extra_slot_and_a_second_waits(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        import herdr_task.settings as settings
+        self.busy_folder(2, [("Normal", False), ("Urgent A", True), ("Urgent B", True)])
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 2), \
+                mock.patch.object(queues, "working", lambda s, t: t["state"] == "running"):
+            self.assertEqual(self.tick_at(None), ["APP-4"])
+            self.assertEqual(self.tick_at(None), [])
+            self.assertEqual([self.task(i)["state"] for i in (3, 4, 5)], ["queued", "running", "queued"])
+            v = self.run_cmd(self.commands.cmd_show, id="5", evidence=False)
+            self.assertEqual(v["reason"], "3 tasks are running here; urgent: starts next")
+            self.assertEqual(self.run_cmd(self.commands.cmd_show, id="3", evidence=False)["reason"], "3 tasks are running here")
+            v = self.run_cmd(self.commands.cmd_show, id="4", evidence=False)
+            self.assertTrue(v["urgent_past_cap"])
+            self.assertIn({"label": "Priority", "text": settings.PRIORITY_WORDS, "value": "urgent", "by": "task"}, v["settings"])
+            out = self.io.StringIO()
+            with self.redirect(out):
+                self.commands.cmd_show(self.argparse.Namespace(folder=self.folder, json=False, id="4", evidence=False))
+            self.assertIn("priority: runs past the cap as urgent", out.getvalue())
+            self.assertIn("- Priority: urgent: starts before normal queued tasks", out.getvalue())
+
+    def test_start_of_an_urgent_task_at_the_cap_goes_now(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        self.busy_folder(1, [])
+        self.add("Fix CI", set=["priority=urgent"])
+        self.add("Feature")
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "working", lambda s, t: t["state"] == "running"):
+            self.assertFalse(self.run_cmd(self.commands.cmd_start, id="2").get("queued"))
+            self.assertEqual(self.run_cmd(self.commands.cmd_start, id="3")["reason"], "2 tasks are running here")
+        with self.assertRaises(self.Fail):
+            self.add("Bad", set=["priority=asap"])
+        self.run_cmd(self.commands.cmd_edit, id="2", set=["priority=normal"])
+        self.assertNotIn("set", self.task(2))
+
+    def test_config_set_max_running_changes_how_many_start(self):
+        import herdr_task.settings as settings
+        self.busy_folder(1, [("A", False), ("B", False), ("C", False)])
+        folder = self.store_mod.locate(self.folder)["folder"]
+        with open(settings.SETTINGS, "w") as f:
+            json.dump({"version": 1, "spaces": {"sp1": {"folder": folder, "name": "App"}},
+                       "everywhere": {"tasks": {"max_running": 2}}}, f)
+        from unittest import mock
+        import herdr_task.queues as queues
+        p = mock.patch.object(queues, "working", lambda s, t: t["state"] == "running")
+        p.start()
+        self.addCleanup(p.stop)
+        self.assertEqual(self.tick_at(None), ["APP-2"])
+        v = self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["tasks.max_running=4"])
+        self.assertEqual(v["max_running"], 4)
+        with open(settings.SETTINGS) as f:
+            d = json.load(f)
+        self.assertEqual(d["spaces"]["sp1"], {"folder": folder, "name": "App", "tasks": {"max_running": 4}})
+        self.assertEqual(self.tick_at(None), ["APP-3", "APP-4"])
+        v = self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["tasks.max_running=default"])
+        self.assertEqual(v["max_running"], 2)  # Everywhere's again
+        with open(settings.SETTINGS) as f:
+            self.assertNotIn("tasks", json.load(f)["spaces"]["sp1"])
+        for bad in (["tasks.max_running=0"], ["tasks.merge=auto"], ["tasks.max_running"]):
+            with self.assertRaises(self.Fail):
+                self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=bad)
+        os.remove(settings.SETTINGS)
+        with self.assertRaises(self.Fail):  # no space works here and none was named
+            self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["tasks.max_running=3"])
+        for text in ('{"spaces": {"sp1": {"folder": "x"}', json.dumps({"pushed_from": "mini", "spaces": {}})):
+            with open(settings.SETTINGS, "w") as f:  # a broken file, a pushed copy: left as they are
+                f.write(text)
+            with self.assertRaises(self.Fail):
+                self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, space="sp1", set=["tasks.max_running=3"])
+            with open(settings.SETTINGS) as f:
+                self.assertEqual(f.read(), text)
+
     def four_tasks(self):
         """FAC-10's folder: two tasks went ready then done, one still works, the fourth is queued."""
         import time

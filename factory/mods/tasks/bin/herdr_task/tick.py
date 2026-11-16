@@ -23,7 +23,7 @@ from .github import (already_merged, BEHIND, drop_branch, finish, github, merged
                      pr_repo, pr_view, pr_wait, CI_STOPPED, queue_entry, task_problem, task_github, tidy_done, tidy_due, update_main, watch_main)
 from .launch import default_space, parent_for, sweep_sandboxes
 from .store import locate, read_list, Store, store_files
-from .queues import machine_hold, refresh_ext, running_count, set_hold, waiting_ext, waiting_for
+from .queues import cap_for, machine_hold, refresh_ext, running_count, set_hold, urgent, waiting_ext, waiting_for
 from .archive import archive_pass
 from .browsers import browser_pass
 from .simulators import simulator_pass
@@ -278,7 +278,8 @@ def tick_store(s, report):
             if t.get("attention") and t.get("attention") != had:
                 report.setdefault("attention", []).append(t["id"])
     due_pass(s, report)
-    queued = sorted((t for t in s.data["tasks"] if t["state"] == "queued"), key=lambda t: t.get("queued_at") or 0)
+    # Urgent ones first (FAC-103), then oldest first.
+    queued = sorted((t for t in s.data["tasks"] if t["state"] == "queued"), key=lambda t: (not urgent(t), t.get("queued_at") or 0))
     n = running_count(s) if queued else 0
     budget = [3]  # other machines asked this pass, at most
     for t in queued:
@@ -286,7 +287,7 @@ def tick_store(s, report):
         if not waits:
             refresh_ext(s, t, budget=budget)
             waits = bool(waiting_ext(t))
-        if waits or n >= s.max_running():
+        if waits or n >= cap_for(s, t):
             if t.pop("held", None):  # waits for something else now
                 s.dirty = True
             continue
