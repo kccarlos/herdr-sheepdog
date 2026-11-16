@@ -13,7 +13,7 @@ from .base import guard, hc_json, now, run, STORE
 from .settings import bare
 from .agents import (
     agent_log, agent_running, cli_of, detail, from_person, live_agents, log_tail, REVIEWER_FAILED, said, starting, status_word,
-    STATUSES, trust_asked,
+    STATUSES, trust_asked, WORKING_AGAIN,
 )
 from .sessions import session_of
 from .launch import coordinator_in
@@ -35,6 +35,10 @@ NEWS = os.path.join(STORE, ".news.json")
 NEWS_SETTLE_MS = 5000          # a line waits this long for others of the same moment
 NEWS_KEEP_MS = 6 * 3600000     # undelivered (no Assistant to tell) this long: dropped
 QUIET_MS = 20 * 60000          # Working with nothing happening this long: stalled
+# A Ready task its agent's own turn took back to work (back_pass(): auto) told only once that lasts
+# this long (FAC-107): a turn that ends with nothing new sooner is Ready again with no news at all,
+# not a working-again and a ready line.
+BACK_HOLD_MS = 3 * 60000
 
 
 def activity(task, live):
@@ -153,7 +157,15 @@ def news_pass(report, folder=None):
                 current[key] = cur
                 rf = (t.get("attention") or "").startswith(REVIEWER_FAILED)
                 prev = mine.get(str(t["id"]))
-                mine[str(t["id"])] = {"status": cur["status"], "stall": cur["stall"] or (prev or {}).get("stall"),
+                b = t.get("back") or {}
+                hold = (v["status"] == "working" and (prev or {}).get("status") in ("ready", "merging")
+                        and (t["state"] == "ready" and v.get("why") == WORKING_AGAIN and not t.get("attention")
+                             or t["state"] == "running" and b.get("auto") and now() - (b.get("at") or 0) < BACK_HOLD_MS))
+                # held, then Ready: the same ready (settle_back()) is no news; a new one (its fix, then ready) is
+                held_at = (prev or {}).get("held_ready_at")
+                fresh = not hold and held_at is not None and v["status"] == "ready" and t.get("ready_at") != held_at
+                mine[str(t["id"])] = {"status": prev["status"] if hold else cur["status"], "stall": cur["stall"] or (prev or {}).get("stall"),
+                                      **({"held_ready_at": held_at or t.get("ready_at") or 0} if hold else {}),
                                       **({"needs": v["needs"]} if v.get("needs") else {}), **({"recap": True} if t.get("recap") else {}),
                                       **({"reviewer_failed": True} if rf else {})}
                 # Its backup took over (takeover()): told once; on a first look, old news.
@@ -167,10 +179,12 @@ def news_pass(report, folder=None):
                 lines = [("backup", news_line(s, t, v, "backup", backup_news(t)))] if backup else []
                 # Taken back to work after it said ready (back_to_work(), busy_again()): told as it happens.
                 # Its agent took up what needed the person (failing checks: on_it()) too.
-                if v["status"] == "working" and ((prev or {}).get("status") in ("ready", "merging")
+                if hold:
+                    event = None  # FAC-107: still told as it was until its turn lasts (BACK_HOLD_MS)
+                elif v["status"] == "working" and ((prev or {}).get("status") in ("ready", "merging")
                                                  or (prev or {}).get("needs") == "attention" and t.get("attention")):
                     event = "working-again"
-                if event and ((prev or {}).get("status") != v["status"] or t.get("recap") and not (prev or {}).get("recap")
+                if event and ((prev or {}).get("status") != v["status"] or fresh or t.get("recap") and not (prev or {}).get("recap")
                               or rf and not (prev or {}).get("reviewer_failed")):
                     lines.append((event, news_line(s, t, v, event)))
                 if stall and stall[0] != (prev or {}).get("stall"):

@@ -701,6 +701,147 @@ class SchedulerRound(unittest.TestCase):
         self.assertEqual(len(ran), 1)
 
 
+class IdleCompaction(unittest.TestCase):
+    """FAC-107: a Ready task's worker woken by Claude Code's idle compaction (or another stray wake)
+    stays Ready with no news; a real turn (a commit) flips it as before. Real logs (FAC-101's records)
+    in a temp folder; hc and git are never run."""
+
+    def setUp(self):
+        OwnBackgroundWork.setUp(self)
+        import herdr_task.tick as tick
+        self.tick = tick
+        self.repo = {"head": "abc", "dirty": ""}
+        fake_git = lambda cwd, *a: (True, self.repo["head"] if a[0] == "rev-parse" else self.repo["dirty"], "")
+        self.live = []
+        for mod, name, value in ((self.agents, "git", fake_git), (tick, "git", fake_git), (tick, "now", lambda: self.clock),
+                                 (tick, "live_agents", lambda key: self.live), (tick, "detail", lambda k: k)):
+            p = self.mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        self.lines = []
+        self.stamp(-1800_000, {"type": "user", "message": {"role": "user", "content": "Fix the bug"}})
+        self.stamp(-1700_000, {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Ready."}]}})
+        self.stamp(-1700_000, {"type": "system", "subtype": "turn_duration"})
+        self.task.update(state="ready", ready_at=self.clock - 1700_000, ready_turns={"t1": 5}, mode="worktree",
+                         worktree=self.dir, head="abc", progress={"text": "Ready", "at": 1, "set": 1})
+        self.store = type("S", (), {"dirty": False, "data": {"tasks": [self.task]}, "key": lambda *_: "X#7", "ref": lambda *_: "X-7"})()
+
+    def stamp(self, ago, d):
+        OwnBackgroundWork.stamp(self, ago, d)
+
+    def worker(self, st="working", turn=5, ago=90_000):
+        return [{"address": "t1", "status": {"state": st}, "turn": turn, "status_ms": self.clock - ago,
+                 "labels": {"herdr.role": "worker"}, "agent": "claude"}]
+
+    def test_claude_workers_get_idle_compaction_off(self):
+        import herdr_task.launch as launch
+        with self.mock.patch.object(launch, "secret_path", lambda: None), self.mock.patch.object(launch, "browser_path", lambda: None):
+            argv = launch.own_argv(["claude", "--model", "opus"])
+            self.assertIs(json.loads(argv[argv.index("--settings") + 1])["idleCompaction"], False)
+            mine = launch.own_argv(["claude", "--settings", '{"idleCompaction": true}'])
+            self.assertIs(json.loads(mine[2])["idleCompaction"], True)  # the argv's own value wins
+            review = launch.own_argv(["claude"], verbs=("review",))
+            self.assertNotIn("idleCompaction", json.loads(review[2]))  # a reviewer's own run: untouched
+
+    def test_an_idle_compaction_keeps_it_ready_without_news(self):
+        # compacting now: nothing in its log since its last turn, a minute and a half at work
+        self.live = self.worker()
+        self.assertEqual(self.agents.task_status(self.task, self.live)[0], "ready")
+        # done compacting: FAC-101's records (the boundary says "auto"; the notice says idle)
+        self.stamp(-5_000, {"type": "system", "subtype": "compact_boundary", "compactMetadata": {"trigger": "auto"}})
+        self.stamp(-5_000, {"type": "user", "isCompactSummary": True, "message": {"role": "user", "content": "This session is being continued"}})
+        for _ in range(3):  # the files it re-reads: big enough to push its last turn's end out of the tail read
+            self.stamp(-5_000, {"type": "attachment", "attachment": {"content": "x" * 60_000}})
+        self.stamp(-5_000, {"type": "system", "subtype": "informational", "content": "Compacted while idle, before the prompt cache expired"})
+        self.assertEqual(self.agents.task_status(self.task, self.live)[0], "ready")
+        report = {}
+        self.tick.back_pass(self.store, self.task, report)
+        self.assertEqual((self.task["state"], report), ("ready", {}))
+        # kept for the window: its busyAgain() leaves that turn out too
+        self.assertEqual(self.task["stray_since"], {"t1": self.clock - 90_000})
+        self.assertFalse(self.agents.busy_again(self.task, self.live))
+        # over, nothing new: Ready; its next wake (a new stint, even on the same turn count) is judged afresh
+        self.live = self.worker("idle", 6)
+        self.assertEqual(self.agents.task_status(self.task, self.live)[0], "ready")
+        self.stamp(-70_000, {"type": "user", "message": {"role": "user", "content": "Also handle the empty case"}})
+        self.live = self.worker(ago=70_000)
+        self.assertEqual(self.agents.task_status(self.task, self.live), ("working", None, "Working again"))
+
+    def test_a_short_stray_turn_stays_ready_and_a_commit_flips_it(self):
+        # woken by a message, ten seconds in, nothing changed: still Ready, though it set a status line
+        # once since ready (an earlier wake's): only one in this stint at work counts
+        self.task["progress"] = {"text": "Round 1 passed", "at": self.clock - 600_000, "set": self.clock - 600_000}
+        self.stamp(-10_000, {"type": "user", "message": {"role": "user", "content": "<hc from=\"t9\">Round 2 passed</hc>"}})
+        self.live = self.worker(ago=10_000)
+        self.tick.back_pass(self.store, self.task, {})
+        self.assertEqual((self.task["state"], self.task.get("stray_since")), ("ready", None))
+        # it commits: Working again at once, as before
+        self.repo["head"] = "def"
+        report = {}
+        self.tick.back_pass(self.store, self.task, report)
+        self.assertEqual((self.task["state"], report["working_again"]), ("running", ["X-7"]))
+
+    def test_a_long_real_turn_flips_it(self):
+        self.stamp(-70_000, {"type": "user", "message": {"role": "user", "content": "Also handle the empty case"}})
+        self.live = self.worker(ago=70_000)
+        self.assertEqual(self.agents.task_status(self.task, self.live), ("working", None, "Working again"))
+
+    def test_a_flip_that_reverts_tells_nothing_and_one_that_lasts_tells_once(self):
+        import herdr_task.news as news, herdr_task.store as store
+        repo, sdir = os.path.join(self.dir, "repo"), os.path.join(self.dir, "store")
+        os.makedirs(repo); os.makedirs(sdir)
+        term, sent = {"address": "t1", "state": "live", "status": {"state": "idle"}, "turn": 5, "status_ms": self.clock - 600_000,
+                      "foreground": {"name": "claude"}, "labels": {"herdr.role": "worker"}}, []
+        for m, n, v in ((store, "STORE", sdir), (news, "STORE", sdir), (news, "NEWS", os.path.join(sdir, ".news.json")),
+                        (news, "HELD", os.path.join(sdir, ".held.json")), (news, "now", lambda: self.clock),
+                        (news, "live_agents", lambda k: [term]), (news, "detail", lambda k: term), (news, "coordinator_in", lambda s: "c1"),
+                        (news, "hc_json", lambda *a: {"state": "live", "turn": 1}),
+                        (news, "news_send", lambda to, m, check=True: sent.append(m) or True)):
+            p = self.mock.patch.object(m, n, v)
+            p.start(); self.addCleanup(p.stop)
+
+        said_ready = self.clock - 1700_000
+
+        def task(**kw):
+            with store.Store(store.locate(repo), write=True) as s:
+                s.data.update(prefix="X", tasks=[{"id": 7, "title": "Fix", "space": "sp1", "ready_turns": {"t1": 5},
+                                                  "agents": [{"address": "t1"}], **{"ready_at": said_ready, **kw}}])
+                s.dirty = True
+
+        def passes(n=2, step=10_000):
+            for _ in range(n):
+                self.clock += step
+                news.news_pass({}, repo)
+
+        task(state="ready")
+        passes()
+        self.assertEqual(sent, [])
+        # taken back by its agent's own turn (back_pass), Ready again a minute later: no news at all
+        back = lambda: {"back": {"at": self.clock, "why": "its agent is at work again", "auto": True}}
+        task(state="running", **back())
+        term.update(status={"state": "working"}, status_ms=self.clock)
+        passes(6)
+        task(state="ready")
+        term.update(status={"state": "idle"}, turn=6, status_ms=self.clock)
+        passes()
+        self.assertEqual(sent, [])
+        # a real fix inside the hold, then ready again (a new ready_at): that ready is told
+        task(state="running", **back())
+        term.update(status={"state": "working"}, status_ms=self.clock)
+        passes(3)
+        task(state="ready", ready_at=self.clock)
+        term.update(status={"state": "idle"}, turn=7, status_ms=self.clock)
+        passes()
+        self.assertEqual(len(sent), 1)
+        self.assertIn('event="ready"', sent[0])
+        # one that lasts: told once, a single line
+        task(state="running", ready_at=self.clock, **back())
+        term.update(status={"state": "working"}, turn=7, status_ms=self.clock)
+        passes(25)
+        self.assertEqual(len(sent), 2)
+        self.assertIn('event="working-again"', sent[1])
+
+
 class BackToWork(unittest.TestCase):
     """A Ready task that goes back to work is Working again (busy_again(), back_to_work()), and
     Accept retries a merge that failed once. In memory: hc, git and gh are never run."""
@@ -732,7 +873,8 @@ class BackToWork(unittest.TestCase):
 
     def agent(self, a):
         """A case's agent as hc gives it."""
-        return {"address": a["address"], "status": {"state": a["status"]}, "turn": a["turn"], "labels": {"herdr.role": a["role"]}}
+        return {"address": a["address"], "status": {"state": a["status"]}, "turn": a["turn"], "labels": {"herdr.role": a["role"]},
+                **({"status_ms": a["since"]} if "since" in a else {})}
 
     def ready(self, **more):
         t = {"id": 7, "title": "Web client", "state": "ready", "ready_at": 1, "ready_turns": {"t1": 5}, "agents": [], **more}
@@ -747,7 +889,7 @@ class BackToWork(unittest.TestCase):
         """The cases core/tasks.test.js checks busyAgain() on."""
         with self.mock.patch.object(self.agents, "now", lambda: self.cases["now"]):
             for c in self.cases["cases"]:
-                self.assertEqual(self.agents.busy_again(c["task"], [self.agent(a) for a in c["live"]]), c["expect"], c["name"])
+                self.assertEqual(self.agents.back_at_work(c["task"], [self.agent(a) for a in c["live"]]), c["expect"], c["name"])
 
     def test_its_status_is_working_again(self):
         t = self.ready()
@@ -986,6 +1128,16 @@ class BackToWork(unittest.TestCase):
             self.commands.cmd_accept(self.args())
         self.assertIn("is working again", str(no.exception))
         self.assertEqual(t["state"], "running")
+        self.assertNotIn("accepted_at", t)
+
+    def test_accept_in_a_turn_with_no_real_sign_refuses_without_a_flip(self):
+        """FAC-107: Accept during a turn ten seconds in (maybe a stray wake) is refused, Ready kept: no flip, no news."""
+        t = self.ready()
+        self.live = [dict(self.agent({"address": "t1", "status": "working", "turn": 5, "role": "worker"}), status_ms=self.agents.now() - 10_000)]
+        with self.assertRaises(self.commands.Fail) as no:
+            self.commands.cmd_accept(self.args())
+        self.assertIn("Accept it once that turn ends", str(no.exception))
+        self.assertEqual((t["state"], t.get("back")), ("ready", None))
         self.assertNotIn("accepted_at", t)
 
     def out_task(self):

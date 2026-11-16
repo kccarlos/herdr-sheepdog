@@ -133,6 +133,8 @@ def own_argv(argv, folder=None, verbs=OWN, cwd=None, reads=None):
             perms["allow"] = list(perms.get("allow") or []) + [r for r in rules if r not in (perms.get("allow") or [])]
             merged["permissions"] = perms
         if verbs is OWN:
+            # FAC-107: no idle compaction (it wakes a Ready task's worker); a value the argv sets wins
+            merged.setdefault("idleCompaction", False)
             hooks = dict(cur.get("hooks") or {}) if isinstance(cur.get("hooks"), dict) else {}
             asks = list(hooks.get("PermissionRequest") or [])
             if not any(" _allow --command " in str(h.get("command", "")) for e in asks if isinstance(e, dict)

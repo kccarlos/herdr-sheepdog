@@ -20,7 +20,7 @@ from .settings import (write_max_running,
     task_settings, worker_argv, worker_pick, worktrees_on, set_task, argv_model, AGENTS,
 )
 from .agents import (
-    agent_log, agent_running, agy_bg_tasks, background_jobs, busy_again, claude_bg_shells, detail, fit, LINE_MAX, live_agents, ready_turns,
+    agent_log, agent_running, agy_bg_tasks, back_at_work, background_jobs, busy_again, claude_bg_shells, detail, fit, LINE_MAX, live_agents, ready_turns,
     REVIEWER_FAILED, STARTING_MS, STATUSES, status_word, SUMMARY_MAX, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
@@ -223,7 +223,7 @@ def cmd_show(args):
         refresh_sessions(s, t, live)
         # Back at work since it said ready: saved at once, so the Accept card (which reads this)
         # says it's Working, not Ready.
-        if busy_again(t, live):  # its agent's own turn, as the tick's back_pass() (FAC-96)
+        if back_at_work(t, live):  # its agent's own turn, as the tick's back_pass() (FAC-96, FAC-107)
             back_to_work(s, t, "its agent is at work again", auto=True)
         if t.get("auto_merge") and not t.get("accepted_by") and merge_hold(s, t):
             t.pop("auto_merge", None)
@@ -1015,7 +1015,7 @@ def back_to_work(s, t, why, said=WORKING_AGAIN, auto=False):
     if t["state"] != "ready" and (auto or not (t.get("back") or {}).get("auto")):
         return False
     t["state"] = "running"
-    for k in ("ready_turns", "merge_requested", *(() if auto else ("accepted_by",))):
+    for k in ("ready_turns", "stray_since", "merge_requested", *(() if auto else ("accepted_by",))):
         t.pop(k, None)
     t["back"] = {"at": now(), "why": why, **({"auto": True, "progress": t.get("progress")} if auto else {})}
     # by: Herdr's words, not its agent's (on_it() counts only an agent's own line).
@@ -2012,7 +2012,7 @@ def cmd_accept(args):
     once when there is nothing to merge, else merged first, as the merge settings say how: a pull
     request is squash-merged on GitHub (or merges once its checks pass); a local branch is
     fast-forwarded when it can be, else its agent merges it (rebase, checks) and marks it done."""
-    error, how, sent, started, back = None, "done", None, False, False
+    error, how, sent, started, back, mid = None, "done", None, False, False, False
     owner = (getattr(args, "owner_approved", None) or "").strip()
     with open_store(args) as s:
         t = s.find(args.id)
@@ -2022,8 +2022,12 @@ def cmd_accept(args):
         # (saved), and refused after the store is.
         if t["state"] != "ready":
             pass  # out of rounds and the owner approved: its agent has nothing more to say (checks below stay)
-        elif busy_again(t, [detail(k) for k in live_agents(s.key(t))]):
-            back = back_to_work(s, t, "its agent is at work again", auto=True)
+        elif busy_again(t, live := [detail(k) for k in live_agents(s.key(t))]):
+            # FAC-107: a turn with no real sign yet (maybe a stray wake) is refused as it stands, no flip
+            if back_at_work(t, live):
+                back = back_to_work(s, t, "its agent is at work again", auto=True)
+            else:
+                mid = True
         # One its agent opened itself, which ready couldn't open again ("already exists"): adopted.
         elif (not t.get("pr") and "already exists" in (t.get("attention") or "")
               and (repo := task_github(github, s, t)) and pr_adopt(t, repo)):
@@ -2033,6 +2037,8 @@ def cmd_accept(args):
         # failed once, doesn't stand in the way. Without one, only a failed try doesn't.
         elif t.get("attention") and not t.get("pr") and not t["attention"].startswith(("Couldn't ask for the merge", MERGE_FAILED)):
             raise Fail(f"{s.ref(t)} needs attention first: {t['attention']}")
+    if mid:
+        raise Fail(f"{s.ref(t)}'s agent is in a turn since it said ready. Accept it once that turn ends.")
     if back:
         raise Fail(f"{s.ref(t)} is working again: its agent took up more work after it said ready. Accept it once it says ready again.")
     me = os.environ.get("HC_TERMINAL_ID")

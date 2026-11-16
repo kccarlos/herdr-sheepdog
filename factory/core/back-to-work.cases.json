@@ -1,5 +1,5 @@
 {
-  "about": "When a Ready task is back at work (Working again, no Accept): core/tasks.js busyAgain() and herdr-task's busy_again() both pass these (core/tasks.test.js, test/test_herdr_task.py). now is fixed; each agent is { address, status, turn, role }.",
+  "about": "When a Ready task is back at work (Working again, no Accept): core/tasks.js busyAgain() and herdr-task's busy_again() both pass these (core/tasks.test.js, test/test_herdr_task.py). now is fixed; each agent is { address, status, turn, role, since (hc's status_ms) }.",
   "now": 1800000000000,
   "cases": [
     { "name": "still finishing the turn it said ready in",
@@ -32,6 +32,18 @@
     { "name": "a ready said before turns were kept, long ago",
       "task": { "state": "ready", "ready_at": 1799999000000 },
       "live": [{ "address": "t1", "status": "working", "turn": 7, "role": "worker" }], "expect": true },
+    { "name": "a later turn ten seconds in: maybe a stray wake (FAC-107)",
+      "task": { "state": "ready", "ready_at": 1799999000000, "ready_turns": { "t1": 5 } },
+      "live": [{ "address": "t1", "status": "working", "turn": 5, "role": "worker", "since": 1799999990000 }], "expect": false },
+    { "name": "a later turn a minute in: work",
+      "task": { "state": "ready", "ready_at": 1799999000000, "ready_turns": { "t1": 5 } },
+      "live": [{ "address": "t1", "status": "working", "turn": 5, "role": "worker", "since": 1799999939000 }], "expect": true },
+    { "name": "a turn herdr-task found only an idle compaction",
+      "task": { "state": "ready", "ready_at": 1799999000000, "ready_turns": { "t1": 5 }, "stray_since": { "t1": 1799999800000 } },
+      "live": [{ "address": "t1", "status": "working", "turn": 5, "role": "worker", "since": 1799999800000 }], "expect": false },
+    { "name": "its next wake after that one: judged afresh",
+      "task": { "state": "ready", "ready_at": 1799999000000, "ready_turns": { "t1": 5 }, "stray_since": { "t1": 1799999800000 } },
+      "live": [{ "address": "t1", "status": "working", "turn": 5, "role": "worker", "since": 1799999900000 }], "expect": true },
     { "name": "already Working",
       "task": { "state": "running", "ready_turns": { "t1": 5 } },
       "live": [{ "address": "t1", "status": "working", "turn": 9, "role": "worker" }], "expect": false }
