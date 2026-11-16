@@ -25,7 +25,8 @@ OLD_INSTRUCTIONS = os.path.join(HOME, ".herdr", "instructions")
 ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants started before the rename
 DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "review_min": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": "",
-                      "worktree_root": "", "check": "", "simulators": [], "reviewer_sandbox": True},
+                      "worktree_root": "", "check": "", "simulators": [], "reviewer_sandbox": True,
+                      "auto_accept": True},
             "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {}, "project": {},
             "agents": {"reactions": True, "suggestions": True, "feedback": True, "feedback_repo": "eliasstravik/shepherdr"}}
 LEVELS = ["blocker", "major", "minor"]
@@ -301,7 +302,7 @@ SET_KEYS = {"review": "review", "brief.review": "review", "merge": "merge", "bri
             "reviewer": "reviewer", "reviewer.agent": "reviewer", "reviewer.model": "reviewer_model", "reviewer.effort": "reviewer_effort",
             "reviewer_model": "reviewer_model", "reviewer-model": "reviewer_model",
             "reviewer_effort": "reviewer_effort", "reviewer-effort": "reviewer_effort",
-            "proof": "proof", "brief.proof": "proof",
+            "proof": "proof", "brief.proof": "proof", "auto_accept": "auto_accept", "auto-accept": "auto_accept", "autoaccept": "auto_accept",
             "estimate.time": "estimate_time", "estimate.tokens": "estimate_tokens", "estimate.lines": "estimate_lines"}
 # The Reviewer sandbox line: whether an agy reviewer here runs sandboxed (tasks.reviewer_sandbox, or the flag file).
 REVIEWER_BOX_WORDS = {"on": "on: the agy reviewer runs in a sandbox; agy's keychain sign-in isn't there, so it can stop at \"Sign in required\" (turn it off in Settings)",
@@ -310,6 +311,10 @@ REVIEWER_BOX_WORDS = {"on": "on: the agy reviewer runs in a sandbox; agy's keych
 PROOF_WORDS = {"on": "show verifiable proof in one recipe artifact: each proof with a one-line caption, real and from this work now, "
                      "plus a \"Not proven\" list; then say ready with --proof <its id>",
                "off": "not needed for this task: no proof artifact; say in your summary how you checked it"}
+AUTO_ACCEPT_WORDS = {"off": "off: the person accepts it",
+                     "owner": "on, but {why}: the person accepts it",
+                     "fable": "on: after its review, a Fable round judges it as the owner would; its pass merges it, its findings come back to you",
+                     "engine": "on: with its passing review rounds on your final commit, green CI and its proof, Herdr accepts and merges it"}
 MERGE_VALUES = {"ask": "ask", "ask me first": "ask", "ask first": "ask", "ask the person first": "ask", "wait": "ask",
                 "checks": "checks", "after checks": "checks", "after github checks": "checks", "after checks pass": "checks",
                 "auto": "auto", "on its own": "auto", "merge it": "auto", "at once": "auto"}
@@ -329,7 +334,7 @@ def set_task(t, key, value):
     """One --set key=value (or flag) on task t; an empty value or "default" goes back to Settings'."""
     field = SET_KEYS.get(key.strip().lower())
     if not field:
-        raise Fail(f"--set takes review, review.kind, review.rounds, review.min, review.mustFix, merge, proof, estimate.time, estimate.tokens, estimate.lines, agent, model, effort or reviewer settings, not {key!r}.")
+        raise Fail(f"--set takes review, review.kind, review.rounds, review.min, review.mustFix, merge, proof, auto_accept, estimate.time, estimate.tokens, estimate.lines, agent, model, effort or reviewer settings, not {key!r}.")
     v = value.strip().strip("\"'").strip()
     sets = t.setdefault("set", {})
     if not v or v.lower() == "default":
@@ -339,7 +344,7 @@ def set_task(t, key, value):
             t.pop("set", None)
         return
     low = v.lower()
-    if field in ("review", "proof"):
+    if field in ("review", "proof", "auto_accept"):
         if low not in ONOFF:
             raise Fail(f"{field} is on or off.")
         sets[field] = ONOFF[low]
@@ -547,6 +552,11 @@ def task_settings(s, t, space=None, argv=None):
     else:
         why = merge_wait_why(s, t)
         add("Merge", f"ask me first ({why})" if why else MERGE_WORDS[policy], "ask" if why else policy, None if why else m_by)
+        if why or policy == "ask":  # FAC-99: who takes the person's Accept
+            from .ask import open_asks
+            on, gate = auto_accept_on(s, t), owner_gate(s, t, open_asks(s, t))
+            add("Auto-accept", AUTO_ACCEPT_WORDS["off" if not on else "owner" if gate else "fable" if why else "engine"].format(why=gate),
+                on, "task" if "auto_accept" in sets else by_layer(s, space, "tasks", "auto_accept", on, True))
         if t.get("base_set"):
             add("Base", f"{t['base']}: your branch starts from it and merges into it", t["base"],
                 "folder" if t.get("base_by") == "space" else "task")
@@ -722,12 +732,103 @@ def merge_wait_why(s, t):
     return None
 
 
+# FAC-99: asks only the owner answers (herdr-task ask --kind): their task never auto-accepts.
+OWNER_ASK_KINDS = ("release", "paid-key", "delete", "install", "reset", "owner", "decision", "gate", "rule")
+FABLE_CHANGES = 2  # Fable's change requests on a task, then the person decides
+FABLE = {"agent": "claude", "model": "claude-fable-5-2", "effort": None}
+
+
+def auto_accept_on(s, t):
+    """tasks.auto_accept (on by default), or the task's own --set auto_accept=on|off."""
+    v = (t.get("set") or {}).get("auto_accept")
+    return v == "on" if v else settings_for(s, t.get("space"))["tasks"].get("auto_accept") is not False
+
+
+def owner_gate(s, t, asks):
+    """Why only the person may accept this task (auto-accept off, or an open owner ask), or None."""
+    if not auto_accept_on(s, t):
+        return "auto-accept is off"
+    kinds = sorted({a.get("kind") for a in asks if a.get("kind") in OWNER_ASK_KINDS})
+    if kinds:
+        return f"an open {'/'.join(kinds)} question is yours to answer"
+    # Only a plan question its own worker raised is Fable's to judge; one its Assistant asked is the person's.
+    workers = {a.get("address") for a in t.get("agents") or [] if isinstance(a, dict)}
+    return "an open question its Assistant asked is yours to answer" if any(a.get("to") not in workers for a in asks) else None
+
+
+def fable_runs(t):
+    """The terminals of Fable's review rounds (its review_runs, by model)."""
+    return {r.get("address") for r in t.get("review_runs") or [] if r.get("model") == FABLE["model"]}
+
+
+def fable_said(t, verdict):
+    """How many of Fable's rounds on this task gave this verdict."""
+    fable = fable_runs(t)
+    return sum(1 for r in t.get("reviews") or [] if r.get("by") in fable and r.get("verdict") == verdict)
+
+
+def fable_due(s, t):
+    """A judgement task (design/doc, or open plan questions) that auto-accept hands to a Fable round."""
+    from .ask import open_asks
+    asks = open_asks(s, t)
+    return (t.get("mode") == "worktree" and bool(review_kind(t) or asks) and not owner_gate(s, t, asks)
+            and fable_said(t, "changes") < FABLE_CHANGES)
+
+
+def accept_bar(s, t):
+    """(who accepts, why not): ("engine"|"fable", None) when auto-accept takes the person's place,
+    else (None, what's missing). Green CI is checked where it merges (merge_now)."""
+    from .ask import open_asks
+    asks, head = open_asks(s, t), t.get("head")
+    if why := owner_gate(s, t, asks):
+        return None, why
+    if t.get("mode") != "worktree" or t.get("nothing_to_merge"):
+        return None, "nothing to merge"
+    revs = [r for r in t.get("reviews") or [] if head and r.get("head") == head]
+    if review_kind(t) or asks:
+        ok = any(r.get("by") in fable_runs(t) and r.get("verdict") == "pass" for r in revs)
+        return ("fable", None) if ok else (None, "Fable asked for changes twice" if fable_said(t, "changes") >= FABLE_CHANGES
+                                           else "waits for Fable's review round")
+    gate = gate_min(s, t)  # at least one passing round, even with review off
+    got = sum(1 for r in revs if ((r.get("started_by") == "herdr-task" and r.get("verdict") == "pass") if gate else
+                                  r.get("result") in ("report", "pass")))
+    if got < max(1, gate):
+        return None, f"{got} of {max(1, gate)} passing review rounds on its final commit"
+    sets = t.get("set") or {}
+    if (sets["proof"] == "on" if "proof" in sets else settings_for(s, t.get("space"))["tasks"].get("proof") is not False) \
+            and not t.get("proof"):
+        return None, "no proof artifact attached"
+    if not t.get("pr"):
+        return None, "no pull request, so no CI to check"
+    return "engine", None
+
+
 def merge_policy(s, t):
-    """How a ready task merges: ask for design/doc tasks or open owner asks; else --set merge or Settings'."""
-    if merge_wait_why(s, t):
-        return "ask"
+    """How a ready task merges: --set merge or Settings'; one that would wait for the person (ask,
+    design/doc, open asks) merges after checks when auto-accept's bar holds (FAC-99)."""
     p = (t.get("set") or {}).get("merge") or settings_for(s, t.get("space"))["tasks"].get("merge")
-    return p if p in MERGE_WORDS else "ask"
+    p = p if p in MERGE_WORDS else "ask"
+    if p != "ask" and not merge_wait_why(s, t):
+        return p
+    return "checks" if accept_bar(s, t)[0] else "ask"
+
+
+def merge_hold(s, t):
+    """A pending merge to drop: the task now waits for the person (FAC-94's waits, or auto-accept's bar no longer met)."""
+    return merge_policy(s, t) == "ask"
+
+
+def auto_accepter(s, t):
+    """"engine"/"fable" when auto-accept is what lets this task merge (else it waits for the person), else None."""
+    p = (t.get("set") or {}).get("merge") or settings_for(s, t.get("space"))["tasks"].get("merge")
+    if p in ("auto", "checks") and not merge_wait_why(s, t):
+        return None
+    return accept_bar(s, t)[0]
+
+
+def accepted_word(t):
+    """Who accepted a task merged without the person: "engine"/"fable" (FAC-99), else "auto"."""
+    return (t.get("auto_accepted") or {}).get("by") or "auto"
 
 def agent_argv(key, argv_json=None):
     if argv_json:

@@ -14,7 +14,8 @@ import time
 from .checks import checks_line
 from .base import Fail, git, guard, hc_json, kill_agent, now, run, STORE, stop_note, VERSION
 from .settings import (
-    agent_argv, agent_key, argv_for, bare, build_dir_of, codex_review_argv, ensure_build_dir, gate_min, merge_policy,
+    accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, bare, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
+    fable_due, gate_min, merge_hold, merge_policy,
     merge_wait_why, MUST_WORDS, remove_build_dir, review_kind, review_limits, set_opts, settings_block, settings_for, space_base,
     task_settings, worker_argv, worktrees_on,
 )
@@ -25,7 +26,7 @@ from .agents import (
 from .sessions import refresh_sessions
 from .github import (already_merged, pr_head_problem, push_branch, drop_branch, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
                      pr_pending, pr_problem, pr_repo, pr_behind, pr_update_branch, synced_head, task_problem, SYNC_CHECKS_MS, SYNC_GRACE_MS, UPDATE_CONFLICT, pr_view, remote_of, task_github, update_main, watch_main)
-from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
+from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING, NO_CHECKS_MS
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, is_coordinator, launch, name_tabs,
     own_path, parent_for, resume_argv, REVIEW_READS, review_reads, retag_tabs, reviewer_sandbox, sandboxes, set_branch, tab_title, task_tabs,
@@ -212,6 +213,9 @@ def set_notes(t, args):
             t.pop(f"{which}_notes", None)
 
 
+ACCEPTERS = {"engine": "the engine", "fable": "Fable review"}  # FAC-99: who auto-accepted it
+
+
 def cmd_show(args):
     with open_store(args, write="try") as s:
         t = s.find(args.id)
@@ -221,10 +225,14 @@ def cmd_show(args):
         # says it's Working, not Ready.
         if busy_again(t, live):  # its agent's own turn, as the tick's back_pass() (FAC-96)
             back_to_work(s, t, "its agent is at work again", auto=True)
-        if t.get("auto_merge") and not t.get("accepted_by") and merge_wait_why(s, t):
+        if t.get("auto_merge") and not t.get("accepted_by") and merge_hold(s, t):
             t.pop("auto_merge", None)
             s.dirty = True
         v = view(s, t, live)
+        if t["state"] == "ready" and not t.get("auto_merge") and not t.get("accepted_by"):
+            v["accept_wait"] = t.get("accept_wait") or accept_bar(s, t)[1]  # FAC-99: why the person accepts it
+        if t.get("auto_accepted"):
+            v["auto_accepted"] = t["auto_accepted"]
         if t["state"] == "queued":
             v["reason"] = queue_reason(s, t)
         v["settings"] = task_settings(s, t)
@@ -275,6 +283,13 @@ def cmd_show(args):
             text += [f"    {x}" for x in fail["tail"].splitlines()[-8:]]
     if v.get("proof"):
         text.append(f"proof: {v['proof']['title']} ({v['proof']['id']})")
+    if v.get("accept_wait"):
+        text.append(f"waits for the person's Accept: {v['accept_wait']}")
+    if aa := v.get("auto_accepted"):
+        text.append(f"accepted by {ACCEPTERS.get(aa['by'], aa['by'])} at {time.strftime('%Y-%m-%d %H:%M', time.localtime(aa['at'] / 1000))}: "
+                    f"head {str(aa.get('head'))[:7]}" + (f" (merged as {aa['merged_head'][:7]})" if aa.get("merged_head") not in (None, aa.get("head")) else "")
+                    + f", review rounds {', '.join(map(str, aa.get('rounds') or [])) or 'none'}, CI {', '.join(aa.get('ci') or []) or 'none'}"
+                    + f", proof {aa.get('proof') or 'none'}")
     if v.get("archived"):
         text.append(f"archived: {time.strftime('%Y-%m-%d %H:%M', time.localtime(v['archived'] / 1000))} (still kept; writing to it brings it back)")
     for k in v["live"]:
@@ -615,7 +630,7 @@ def review_diff(wt, base, head, mine, merge_only=False):
 def gate_step(s, t):
     """A gate folder's ready (FAC-13): None once its head has review.min passing rounds from
     herdr-task's own reviewer; else starts the next one for that head (or says why it waits)."""
-    need, head = gate_min(s, t), t.get("head")
+    need, head = gate_need(s, t), t.get("head")
     if not need or gate_passes(t, head) >= need:
         return None
     if not head or not os.path.isdir(t.get("worktree") or ""):
@@ -651,10 +666,12 @@ def gate_step(s, t):
         t.pop("progress", None)
         s.dirty = True
         return f"{s.ref(t)}: {why}."
-    granted = not merge_only and used >= rounds and auto_grant(s, t, mine, rounds, head)
+    # FAC-99: a judgement task's last round is Fable's, judging it as the owner would; never capped by its rounds.
+    fable = not merge_only and fable_due(s, t) and (fable_said(t, "changes") or gate_passes(t, head) >= need - 1)
+    granted = not merge_only and not fable and used >= rounds and auto_grant(s, t, mine, rounds, head)
     if granted:
         rounds += 1
-    if not merge_only and used >= rounds:
+    if not merge_only and not fable and used >= rounds:
         t["review_out"] = now()
         s.dirty = True
         if kind := review_kind(t):
@@ -665,7 +682,7 @@ def gate_step(s, t):
     if (t.get("pr") or {}).get("number"):  # FAC-88: the reviewer reads the commit GitHub has: pushed first, or ready stops
         push_branch(s, t)
     rows = {x["label"]: x["value"] for x in task_settings(s, t)}
-    rv = fallback_reviewer(s, t, fails[-1]["cli"]) if fails else rows["Reviewer"]
+    rv = FABLE if fable else fallback_reviewer(s, t, fails[-1]["cli"]) if fails else rows["Reviewer"]
     ref, ht, folder = s.ref(t), own_path(), shlex.quote(s.loc["folder"])
     sand = sandboxes([rv["agent"]])  # agy on a Mac: sandboxed, nothing prompts, its verdict read from its terminal
     # Claude Code's plan mode blocks every command, the verdict's `herdr-task review` too, so a Claude reviewer
@@ -682,7 +699,8 @@ def gate_step(s, t):
         instructions("reviewer"), f"The task, {ref}:\n" + ((t.get("prompt") or "").strip() or t["title"]),
         f"Review commit {head} in {wt}. {shown}" + (", cut: run it for the rest" if len(diff) > 20000 else "")
         + f":\n{diff[:20000]}",
-        f"Must fix: {MUST_WORDS[rows['Must fix']]}. Herdr started you, not the worker. "
+        *([FABLE_WORDS] if fable else []),
+        f"Must fix: {MUST_WORDS[rows.get('Must fix') or 'major']}. Herdr started you, not the worker. "
         + (f"You run in a sandbox: you can read only this worktree, its git history and the system's tools, write only in "
            f"$TMPDIR, and can't reach Herdr. When done, end your last message with your findings, each with its level and "
            f"proof, between two lines of their own: first one holding only this round's code and the word begin, last one "
@@ -708,6 +726,18 @@ def gate_step(s, t):
              if granted else "")
     return (f"{s.ref(t)}: Herdr started review round {round_n} of {head[:7]} ({a['address']}); its findings come to you as a message."
             + added)
+
+
+FABLE_WORDS = ("This round is Fable's (FAC-99): you stand in for the owner at their Accept. Judge it as they would: does it do "
+               "what they asked, the way they'd want, and is it safe to merge without them? Pass only if you would accept it in "
+               "their place; anything they'd send back is a finding at Must fix.")
+
+
+def gate_need(s, t):
+    """Passing rounds herdr-task's reviewer gives a head: review.min, plus Fable's round for a judgement task."""
+    if not fable_due(s, t):
+        return gate_min(s, t)
+    return 1 if fable_said(t, "changes") else gate_min(s, t) + 1  # after its changes, Fable alone reviews the fix
 
 
 AUTO_GRANTS = 2  # FAC-95: rounds Herdr adds itself per task, then the Assistant decides (review-more)
@@ -995,7 +1025,7 @@ def finalize(s, t):
     """Ready: on GitHub its pull request opens; then the merge policy in Settings decides who
     merges: auto (now), checks (once its checks pass) or ask (the person). Returns what to say."""
     t["state"], t["ready_at"] = "ready", now()
-    for k in ("attention", "merge_requested", "review", "accepted_by"):
+    for k in ("attention", "merge_requested", "review", "accepted_by", "auto_accepted", "accept_wait"):
         t.pop(k, None)
     (t.get("pr") or {}).pop("wait", None)
     s.dirty = True
@@ -1051,7 +1081,7 @@ def cmd_review(args):
             text = f.read()
     with open_store(args) as s:
         t = s.find(args.id)
-        if gate_min(s, t):  # herdr-task's own reviewer in a gate folder (FAC-13)
+        if gate_need(s, t):  # herdr-task's own reviewer in a gate folder (FAC-13), or Fable's round (FAC-99)
             return gate_verdict(s, t, args, text)
         rv = t.pop("review", None) or {}
         cfg = settings_for(s, t.get("space"))["tasks"]
@@ -1150,7 +1180,7 @@ def record_verdict(s, t, rn, passed, must, text):
     if t.get("mode") == "worktree" and budget_pass(s, t):  # a recap first: no next round, no merge, no fixing
         msg = f"{s.ref(t)}: review round {rn['round']} {'passed' if passed else 'asked for changes'}; {t['recap']['title']}."
     elif passed:
-        ref, need, k = s.ref(t), gate_min(s, t), gate_passes(t, rn["head"])
+        ref, need, k = s.ref(t), gate_need(s, t), gate_passes(t, rn["head"])
         before = len(t.get("review_runs") or [])
         step = gate_step(s, t)
         if step:
@@ -1161,7 +1191,7 @@ def record_verdict(s, t, rn, passed, must, text):
             msg = f"{ref}: review round {rn['round']} passed. {step}"
         else:
             fin = finalize(s, t)
-            what = f"{ref} waits in Ready for Accept" if merge_wait_why(s, t) else f"{ref} goes on to merging"
+            what = f"{ref} waits in Ready for Accept" if merge_wait_why(s, t) and merge_policy(s, t) == "ask" else f"{ref} goes on to merging"
             line = f"Herdr's review round {rn['round']} of {ref} passed: {what} ({k} of {need} passing). {fin}"
             msg = f"{ref}: review round {rn['round']} passed. {fin}"
         tell_pass(s, t, rn["round"], line)
@@ -1311,7 +1341,7 @@ def inspect_runs(s, t):
 def gate_reads(s, t):
     """Verdicts of sandboxed reviewers (FAC-49), and dead-reviewer detection + fallback (FAC-59)."""
     inspect_runs(s, t)
-    need, head, wt = gate_min(s, t), t.get("head"), t.get("worktree") or ""
+    need, head, wt = gate_need(s, t), t.get("head"), t.get("worktree") or ""
     mine = [r for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"]
     if (not need or not head or gate_passes(t, head) >= need or open_runs(t)
             or t.get("recap") or t.get("review_out") or (t.get("attention") or "").startswith(REVIEWER_FAILED)
@@ -1331,12 +1361,12 @@ def cmd_state(args, state):
             # pull request merged and close it again at once) until its agent says ready.
             if t["state"] == "done" and t.get("merged"):
                 t["kept_open"] = True
-            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait"):
+            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
         if state == "done" and t.get("auto_merge") and not t.get("accepted_by"):
-            t["accepted_by"] = "auto"
+            t["accepted_by"] = accepted_word(t)
         t["state"] = state
         t[{"done": "done_at", "running": "reopened_at", "todo": "reopened_at"}[state]] = now()
         if state != "done":
@@ -1626,11 +1656,12 @@ def uses_queue(s, base):
     return bool(q) and now() - q < QUEUE_DAY
 
 
-def merge_now(s, t):
+def merge_now(s, t, accepting=False):
     """Merges the task's pull request on GitHub (squash) and tidies up here. Returns why it
     couldn't, or None when it's merged (and the task done). A base branch with GitHub's merge
     queue (#742, #801, #802): the pull request joins the queue and the task stays Merging until
-    GitHub merged it (the tick finishes it then, and deletes its branch there)."""
+    GitHub merged it (the tick finishes it then, and deletes its branch there). accepting: the person's own
+    Accept or merge, never an auto-accept."""
     n, repo = str(t["pr"]["number"]), pr_repo(t, s, github)
     v = pr_view(t) if repo else None
     s.dirty = True
@@ -1685,6 +1716,19 @@ def merge_now(s, t):
                 return t["attention"]
             t["pr"]["wait"] = CHECKS_RUNNING
             return CHECKS_RUNNING
+        if not accepting and not t.get("accepted_by") and (by := auto_accepter(s, t)):  # FAC-99: its evidence, on the head merged
+            if not v.get("statusCheckRollup"):
+                if t["pr"].get("wait") or now() - (t.get("ready_at") or 0) < NO_CHECKS_MS:
+                    return CHECKS_RUNNING  # its checks may not show yet
+                t.pop("auto_merge", None)
+                t["accept_wait"] = "no CI checks ran on it, so it waits for your Accept"
+                return t["accept_wait"]
+            t["auto_accepted"] = {
+                "by": by, "at": now(), "head": head, "merged_head": at, "proof": (t.get("proof") or {}).get("id"),
+                "rounds": [r["round"] for r in t.get("reviews") or [] if r.get("head") == head
+                           and (r.get("verdict") == "pass" or r.get("result") in ("report", "pass"))],
+                "ci": sorted({str(e.get("run") or e["sha"][:7]) for e in t.get("ci_runs") or []
+                              if e.get("sha") == v.get("headRefOid") and not e.get("failed")})}
         ok, _, err = merge() if queue else merge("--delete-branch")
         if not ok and not queue and "merge queue" in err:
             # gh refuses --delete-branch on a merge queue: asked again without it, which queues it.
@@ -1699,7 +1743,7 @@ def merge_now(s, t):
         elif ok:
             t["merge_queued"] = now()
             if t.get("auto_merge") and not t.get("accepted_by"):
-                t["accepted_by"] = "auto"
+                t["accepted_by"] = accepted_word(t)
             t.pop("attention", None)
             t["pr"]["checked"] = 0
             return IN_QUEUE
@@ -1714,7 +1758,7 @@ def merge_now(s, t):
         drop_branch(s, t)
     t["merged"] = True
     if t.get("auto_merge") and not t.get("accepted_by"):
-        t["accepted_by"] = "auto"
+        t["accepted_by"] = accepted_word(t)
     finish(s, t, even_if_busy=True)
     return None
 
@@ -1729,7 +1773,7 @@ def cmd_merge(args):
         if t.get("pr"):
             # On GitHub: Herdr merges the pull request itself (squash), then tidies up here.
             how = "github"
-            error = merge_now(s, t)
+            error = merge_now(s, t, accepting=True)
             if error == IN_QUEUE:
                 how, error = "queue", None
             elif error == CHECKS_RUNNING:
@@ -1840,7 +1884,7 @@ def cmd_accept(args):
             finish(s, t)
         elif t.get("pr"):
             how = "github"
-            error = merge_now(s, t)
+            error = merge_now(s, t, accepting=True)
             if error == IN_QUEUE:
                 how, error = "queue", None
             elif error in (CHECKS_RUNNING, WAITS_APPROVAL):

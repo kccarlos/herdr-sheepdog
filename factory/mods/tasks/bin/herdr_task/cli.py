@@ -496,6 +496,8 @@ def main():
     c.add_argument("--option", action="append", help="an answer to pick by number (repeatable)")
     c.add_argument("--recommend", help="the option you recommend")
     c.add_argument("--task", help="the task it is about (FAC-3)")
+    c.add_argument("--kind", choices=("release", "paid-key", "delete", "install", "reset", "owner"),
+                   help="an ask only the owner answers (FAC-99): its task never auto-accepts while it is open")
     c.add_argument("--show", metavar="ID")
     c = sub.add_parser("_ask-pane")  # the ask pane's program (ask.py)
     c.add_argument("id")

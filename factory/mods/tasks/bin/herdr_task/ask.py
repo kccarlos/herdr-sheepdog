@@ -123,7 +123,7 @@ def cmd_ask(args):
     if not to and not checklist and not origin:  # the answer's news goes to the asker's terminal
         raise Fail("Run it from an agent's own terminal (there's no HC_TERMINAL_ID here).")
     rec = {"id": secrets.token_hex(3), "question": question, "options": options, "recommend": recommend,
-           "task": args.task, "to": to, "at": now(),
+           "task": args.task, "to": to, "at": now(), **({"kind": k} if (k := getattr(args, "kind", None)) else {}),
            **({"checklist": checklist} if checklist else {}), **({"origin": origin} if origin else {})}
     save(rec)
     # The pane gets the core's environment, not ours: the store goes along in its command.

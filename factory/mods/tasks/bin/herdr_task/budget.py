@@ -301,7 +301,9 @@ def record_ci(s, t, v, at=None):
 
 def triggers(s, t):
     """Why this task should stop for a recap, most telling first; [] when it is converging."""
-    why, rounds = [], rounds_since(t)
+    from .settings import fable_runs  # FAC-99: Fable's round judges as the owner would; its changes are no loop
+    fable = fable_runs(t)
+    why, rounds = [], [r for r in rounds_since(t) if r.get("by") not in fable]
     last = rounds[-1] if rounds else None
     if last and len(rounds) >= 2 and last.get("verdict") == "changes":
         why.append(f"review round {len(rounds)} still has {last.get('must_fix') or 'some'} finding(s) at Must fix")
