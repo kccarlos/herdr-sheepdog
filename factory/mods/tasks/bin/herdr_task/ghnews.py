@@ -161,7 +161,7 @@ def pr_news(s, t, v, report):
         name, url = c.get("name") or c.get("context") or "A check", c.get("detailsUrl") or c.get("targetUrl") or ""
         if ci:
             again = "Herdr re-ran it once already. " if (pr.get("ci_rerun") or {}).get("ok") else ""
-            lines.append(f"- {stop_words(t, c)} {again}This is CI infrastructure (likely the job's timeout), not your "
+            lines.append(f"- {stop_words(t, c)} {again}This is CI infrastructure (a job over its time limit, or a cancel), not your "
                          f"code: don't chase a test failure; say so in one line. {url}")
         else:
             lines.append(f"- Check \"{name}\" failed: {url}")

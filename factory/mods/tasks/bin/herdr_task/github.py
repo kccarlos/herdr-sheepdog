@@ -531,7 +531,9 @@ def synced_head(task, repo, theirs):
 
 
 # FAC-102 (WukongMind): a check GitHub cancelled or timed out, not superseded (latest_checks()), is CI, not code: no
-# test failed. Re-run once per head; stopped again, it needs the person, its likely cause the job's timeout.
+# test failed. Re-run once per head, but only a check cancelled from outside (runner lost, superseded). FAC-112: one that
+# ran to its own timeout-minutes (conclusion TIMED_OUT, or CANCELLED after about the workflow file's timeout-minutes:
+# GitHub reports a job's own timeout as cancelled) mostly hits it again, so it goes to the Assistant at once, no re-run.
 STOPPED = {"CANCELLED", "TIMED_OUT"}
 CI_STOPPED = 'CI "'  # such a reason's start
 RERUN_SHOW_MS = 10 * 60000  # a re-run whose jobs don't show by then won't
@@ -589,14 +591,22 @@ def job_timeout(folder, job):
     return None
 
 
-def stop_words(task, c):
-    """'CI "check" timed out after 46m: …', with the job's timeout when its workflow file (in the task's worktree) says."""
+def hit_limit(task, c):
+    """(hit its own time limit, minutes it ran, the job's timeout-minutes or None): TIMED_OUT, or it ran to within a
+    minute of the timeout-minutes its workflow file (in the task's worktree) gives it."""
     name = c.get("name") or c.get("context") or "a check"
     a, b = _ms(c.get("startedAt")), _ms(c.get("completedAt"))
     took = int(b - a) // 60000 if a and b and b >= a else None
     limit = job_timeout(task.get("worktree"), name)
-    reached = bool(limit and took is not None and took >= limit - 1)
-    timed = word(c) == "TIMED_OUT" or reached
+    reached = bool((limit or 360) and took is not None and took >= (limit or 360) - 1)  # GitHub's default is 360
+    return word(c) == "TIMED_OUT" or reached, took, limit
+
+
+def stop_words(task, c):
+    """'CI "check" timed out after 46m: …', with the job's timeout when its workflow file (in the task's worktree) says."""
+    name = c.get("name") or c.get("context") or "a check"
+    timed, took, limit = hit_limit(task, c)
+    reached = bool(timed and limit and took is not None and took >= limit - 1)
     text = f'CI "{name}" ' + ("timed out" if timed else "was cancelled")
     if took is not None:
         text += " after " + (f"{took // 60}h {took % 60}m" if took >= 60 else f"{took}m")
@@ -614,6 +624,15 @@ def ci_stopped(task, v, repo):
     def hold():
         for c in stopped:
             c.update(status="IN_PROGRESS", conclusion="")
+    slow = [c for c in stopped if hit_limit(task, c)[0]]
+    if slow:  # FAC-112: its own time limit, not a hiccup: a re-run would mostly take as long again
+        name, _, limit = (slow[0].get("name") or slow[0].get("context") or "a check"), 0, hit_limit(task, slow[0])[2]
+        return (f"{stop_words(task, slow[0])} Job \"{name}\" hit its {limit}-min limit: too long, not a hiccup, so Herdr "
+                "did not re-run it. A CI problem in " + ", ".join(f'"{c.get("name") or c.get("context")}"' for c in slow[:3]) +
+                ": add a fix task to speed up or split the job (or raise its timeout-minutes) instead of sending code back."
+                if limit else
+                f"{stop_words(task, slow[0])} Job \"{name}\" hit its time limit: too long, not a hiccup, so Herdr did not "
+                "re-run it. A CI problem: add a fix task to speed up or split the job instead of sending code back.")
     rr = pr.get("ci_rerun") or {}
     if rr.get("head") != head:
         if pr_pending(v):  # gh refuses a run still in progress: the one re-run waits for it
@@ -627,8 +646,8 @@ def ci_stopped(task, v, repo):
         return hold()  # the stop the re-run was asked for still shows
     names = ", ".join(f'"{c.get("name") or c.get("context")}"' for c in stopped[:3])
     again = "Herdr re-ran it once and it stopped again" if rr.get("ok") else "Herdr couldn't re-run it"
-    return (f"{stop_words(task, stopped[0])} {again}: a CI-infrastructure problem in {names} (likely the job's "
-            "timeout), not a code failure. Add a fix task for the CI job instead of sending code back.")
+    return (f"{stop_words(task, stopped[0])} {again}: a CI-infrastructure problem in {names}, "
+            "not a code failure. Add a fix task for the CI job instead of sending code back.")
 
 
 def task_problem(task, v, repo):

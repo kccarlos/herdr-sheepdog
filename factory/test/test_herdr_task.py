@@ -3130,55 +3130,84 @@ class CiStopped(PrLooks):
         with open(self.gh_log) as f:
             return [a for a in map(json.loads, f) if a[:2] == ["run", "rerun"]]
 
-    def test_a_stop_is_re_run_once_then_needs_you_as_a_ci_problem(self):
-        import herdr_task.github as github
+    def workflow(self, minutes=45):
         os.makedirs(os.path.join(self.dir, ".github", "workflows"))
         with open(os.path.join(self.dir, ".github", "workflows", "ci.yml"), "w") as f:
             f.write("name: Check\non: [pull_request]\njobs:\n  check:\n    name: check\n    runs-on: ubuntu-latest\n"
-                    "    timeout-minutes: 45\n    steps:\n      - name: test\n        run: make test\n")
+                    f"    timeout-minutes: {minutes}\n    steps:\n      - name: test\n        run: make test\n")
+
+    def test_an_outside_cancel_is_re_run_once_then_needs_you_as_a_ci_problem(self):
+        import herdr_task.github as github
+        self.workflow()
         t = self.said_ready()
-        # GitHub cancels a job that reached its timeout-minutes: re-run once, Working meanwhile, nothing for anyone
-        self.github_says(checks=[self.stop(conclusion="CANCELLED")])
+        # cancelled after 12m of a 45m limit (runner lost): re-run once, Working meanwhile, nothing for anyone
+        self.github_says(checks=[self.stop(conclusion="CANCELLED", end="10:12")])
         self.assertEqual(self.look(t, after=1000), ("working", "Checks running", None))
         self.assertEqual(self.reruns(), [["run", "rerun", "500", "--failed", "--repo", "o/r"]])
         self.assertNotIn("attention", t)
         self.assertEqual(self.sent, [])
         # the stop it re-ran still shows: still running (never merged past it), and never re-run again
         self.assertEqual(self.look(t), ("working", "Checks running", None))
-        v = {"state": "OPEN", "headRefOid": "abc", "statusCheckRollup": [self.stop(conclusion="CANCELLED")]}
+        v = {"state": "OPEN", "headRefOid": "abc", "statusCheckRollup": [self.stop(conclusion="CANCELLED", end="10:12")]}
         self.assertIsNone(github.task_problem(t, v, "o/r"))
         self.assertTrue(github.pr_pending(v))
         self.assertEqual(len(self.reruns()), 1)
-        # stopped again on the same head: the timeout reason, back to its agent as CI (not a test failure), no re-run
-        self.github_says(checks=[self.stop(job=2, conclusion="CANCELLED", start="11:00", end="11:46")])
+        # cancelled again on the same head: CI, not a test failure, no second re-run
+        self.github_says(checks=[self.stop(job=2, conclusion="CANCELLED", start="11:00", end="11:12")])
         self.assertEqual(self.look(t, after=1000), ("working", "Back to its agent to fix", None))
         self.assertEqual(len(self.reruns()), 1)
-        why = ('CI "check" timed out after 46m (its timeout-minutes is 45, so the job\'s timeout was reached), not a '
-               'failing test. Herdr re-ran it once and it stopped again: a CI-infrastructure problem in "check" (likely '
-               "the job's timeout), not a code failure. Add a fix task for the CI job instead of sending code back.")
+        why = ('CI "check" was cancelled after 12m (cancelled on GitHub or its runner was lost), not a failing test. '
+               'Herdr re-ran it once and it stopped again: a CI-infrastructure problem in "check", not a code failure. '
+               "Add a fix task for the CI job instead of sending code back.")
         self.assertEqual(t["attention"], why)
         self.assertFalse(any(e["failed"] for e in t.get("ci_runs") or []))  # no failed CI attempts toward a recap
         self.tick.pr_deliver(self.store, t, {})
         told = self.sent[-1][1]
-        self.assertIn('CI "check" timed out after 46m', told)
+        self.assertIn('CI "check" was cancelled after 12m', told)
         self.assertIn("not your code: don't chase a test failure", told)
         self.assertNotIn("failed:", told)
-        # its agent quiet: Needs you, and the Assistant's news says it's CI infrastructure, naming the job
         self.assertEqual(self.look(t, after=10 * 60_000), ("needs", why, "needs-you"))
         v, event, _ = self.news.news_state(self.store, t, None)  # the real view(), its why uncut
-        self.assertIn('a CI-infrastructure problem in "check" (likely the job', self.news.news_line(self.store, t, v, event))
+        self.assertIn('a CI-infrastructure problem in "check"', self.news.news_line(self.store, t, v, event))
         # a later green run clears it
         self.github_says(checks=[ChecksBeforeReady.PASSED])
         self.assertEqual(self.look(t), ("ready", None, "ready"))
         self.assertNotIn("attention", t)
 
-    def test_a_stop_that_cant_be_re_run_says_so_at_once(self):
+    def test_a_job_that_hit_its_own_time_limit_is_not_re_run(self):
+        # FAC-112: GitHub reports a job's own timeout as cancelled; 46m on a 45m limit is that, so no re-run at all
+        self.workflow()
         t = self.said_ready()
-        self.github_says(checks=[self.stop(url=False, end="10:12")])
+        self.github_says(checks=[self.stop(conclusion="CANCELLED")])
+        self.assertEqual(self.look(t, after=1000), ("working", "Back to its agent to fix", None))
+        self.assertEqual((self.reruns(), t["pr"].get("ci_rerun")), ([], None))
+        self.assertTrue(t["attention"].startswith('CI "check" timed out after 46m (its timeout-minutes is 45, so the '
+                                                  "job's timeout was reached), not a failing test."))
+        self.assertIn('Job "check" hit its 45-min limit: too long, not a hiccup', t["attention"])
+        self.tick.pr_deliver(self.store, t, {})
+        self.assertIn("its timeout-minutes is 45", self.sent[-1][1])
+
+    def test_a_job_with_no_timeout_minutes_counts_githubs_360_default(self):
+        t = self.said_ready()
+        self.github_says(checks=[self.stop(conclusion="CANCELLED", start="10:00", end="16:00")])
         self.look(t, after=1000)
         self.assertEqual(self.reruns(), [])
-        self.assertTrue(t["attention"].startswith('CI "check" timed out after 12m (likely the job\'s timeout), not a '
-                                                  "failing test. Herdr couldn't re-run it: a CI-infrastructure problem"))
+        self.assertIn("too long, not a hiccup", t["attention"])
+
+    def test_a_timed_out_conclusion_is_not_re_run_either(self):
+        t = self.said_ready()  # no workflow file to give a limit: the conclusion says it
+        self.github_says(checks=[self.stop(conclusion="TIMED_OUT", end="10:12")])
+        self.look(t, after=1000)
+        self.assertEqual(self.reruns(), [])
+        self.assertIn('Job "check" hit its time limit: too long, not a hiccup', t["attention"])
+
+    def test_a_stop_that_cant_be_re_run_says_so_at_once(self):
+        t = self.said_ready()
+        self.github_says(checks=[self.stop(url=False, conclusion="CANCELLED", end="10:12")])
+        self.look(t, after=1000)
+        self.assertEqual(self.reruns(), [])
+        self.assertTrue(t["attention"].startswith('CI "check" was cancelled after 12m (cancelled on GitHub or its runner '
+                                                  "was lost), not a failing test. Herdr couldn't re-run it: a CI-infrastructure problem"))
 
     def test_a_failure_is_unchanged_and_never_re_run(self):
         t = self.said_ready()
