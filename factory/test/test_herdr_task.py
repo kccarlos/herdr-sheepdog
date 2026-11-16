@@ -8278,6 +8278,24 @@ class Resume(unittest.TestCase):
             self.assertEqual(last["argv"], ["agy", "--model", "gemini-4-argon-high", "--dangerously-skip-permissions"])
             self.assertEqual(last["session"], "0199-sid")
 
+    def test_a_resumed_agy_worker_idle_at_turn_0_gets_one_nudge(self):
+        """FAC-100 (note 14): a resumed agy session sits at turn 0 until it hears something: the tick nudges it once."""
+        from unittest import mock
+        import herdr_task.news as news
+        ref = self.started_task({"agent": "agy", "perm": "auto"})
+        self.call(self.commands.cmd_resume, id=ref, space=None, agent=None, argv=None, parent=None)
+        sends, t0 = [], time.time() * 1000
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref)) as s:
+            t = s.find(ref)
+            addr = t["agents"][-1]["address"]
+            term = {"address": addr, "state": "live", "agent": "agy", "turn": 0, "status": {"state": "idle"}}
+            for off in (5_000, 45_000, 60_000, 120_000):
+                with mock.patch.object(self.commands, "now", lambda: t0 + off), \
+                        mock.patch.object(self.commands, "hc_json", lambda *a: dict(term) if a[:2] == ("get", addr) else None), \
+                        mock.patch.object(news, "send_or_hold", lambda a, m, how="send": sends.append((a, m)) or "sent"):
+                    self.commands.start_nudge(s, t)
+        self.assertEqual(sends, [(addr, self.commands.RESUME_START_NUDGE)])
+
     def test_claude_launch_and_resume_never_auto_update(self):
         """FAC-87: a self-updated Claude binary makes macOS ask about a removable volume and every new agent hangs."""
         ref = self.started_task({"agent": "claude"})
@@ -10740,3 +10758,113 @@ class AutoAccept(unittest.TestCase):
         self.assertEqual(len(self.runs), 3)
         self.verdict("term-3")
         self.assertEqual((self.tick_green()["done"], self.task["accepted_by"]), ([13], "fable"))
+
+
+class AgyStartNudge(unittest.TestCase):
+    """FAC-100: an agy worker idle at turn 0 after its start gets one nudge; still idle after it, Needs you says so."""
+
+    def setUp(self):
+        from types import SimpleNamespace
+        sys.path.insert(0, BIN)
+        import herdr_task.commands as commands
+        import herdr_task.news as news
+        import herdr_task.output as output
+        self.c, self.news, self.output = commands, news, output
+        self.t0 = 1_000_000_000
+        self.term = {"address": "w1", "state": "live", "agent": "agy", "turn": 0, "status": {"state": "blocked", "kind": "auth"}}
+        self.screen, self.sends = "> ", []
+        self.task = {"id": 5, "title": "x", "state": "running", "started": self.t0,
+                     "agents": [{"address": "w1", "agent": "agy", "argv": ["agy"], "at": self.t0}]}
+        self.s = SimpleNamespace(dirty=False, data={"tasks": [self.task]}, loc={"folder": "/f"}, prefix="FAC",
+                                 key=lambda t: "f#5", ref=lambda t: "FAC-5")
+
+    def tick(self, off):
+        from unittest import mock
+        with mock.patch.object(self.c, "now", lambda: self.t0 + off), \
+                mock.patch.object(self.c, "hc_json", lambda *a: dict(self.term) if a[:2] == ("get", "w1") else None), \
+                mock.patch.object(self.c, "screen_of", lambda addr, n: self.screen), \
+                mock.patch.object(self.news, "send_or_hold", lambda addr, text, how="send": self.sends.append((addr, text)) or "sent"):
+            self.c.start_nudge(self.s, self.task)
+
+    def why(self, off):
+        from unittest import mock
+        import herdr_task.agents as agents
+        k = {**self.term, "status_ms": self.t0}
+        with mock.patch.object(self.c, "now", lambda: self.t0 + off), mock.patch.object(agents, "now", lambda: self.t0 + off), \
+                mock.patch.object(self.output, "now", lambda: self.t0 + off), mock.patch.object(self.c, "screen_of", lambda a, n: self.screen), \
+                mock.patch.object(agents, "own_line", lambda *a, **kw: None), mock.patch.object(agents, "pending_call", lambda *a: (None, {})), \
+                mock.patch.object(self.output, "own_line", lambda *a, **kw: None), mock.patch.object(self.output, "blocking_dialog", lambda *a: None), \
+                mock.patch.object(self.output, "held_ask", lambda a: None), mock.patch.object(agents, "last_question", lambda *a: None), \
+                mock.patch.object(self.output, "subagents", lambda key: []):
+            v = self.output.view(self.s, self.task, [k])
+        return v["status"], v["why"]
+
+    def test_an_idle_agy_worker_at_turn_0_gets_exactly_one_nudge(self):
+        c = self.c
+        self.tick(c.START_QUIET_MS - 1)  # still in its startup window: none yet
+        self.assertEqual(self.sends, [])
+        for off in range(c.START_QUIET_MS, c.START_WINDOW_MS, 15_000):
+            self.tick(off)
+        self.assertEqual(self.sends, [("w1", c.START_NUDGE)])
+        self.assertEqual(self.task["agents"][0]["start_nudged"], self.t0 + c.START_QUIET_MS)
+        self.assertTrue(self.s.dirty)
+
+    def test_one_that_starts_by_itself_gets_none(self):
+        self.term.update(turn=1, status={"state": "working"})
+        for off in range(0, self.c.START_WINDOW_MS, 15_000):
+            self.tick(off)
+        self.term.update(status={"state": "idle"})  # a turn ran and ended: still none
+        self.tick(self.c.START_QUIET_MS * 2)
+        self.assertEqual(self.sends, [])
+
+    def test_claude_and_codex_workers_are_left_alone(self):
+        for cli in ("claude", "codex"):
+            self.task["agents"][0]["agent"], self.term["agent"] = cli, cli
+            self.tick(self.c.START_QUIET_MS * 2)
+        self.assertEqual(self.sends, [])
+
+    def test_still_idle_after_the_nudge_needs_you_with_its_own_reason(self):
+        c = self.c
+        self.tick(c.START_QUIET_MS)
+        self.assertEqual(self.why(c.START_QUIET_MS + c.START_GRACE_MS - 1)[1], "Signed out")  # the grace: as before
+        self.assertEqual(self.why(c.START_QUIET_MS + c.START_GRACE_MS), ("needs", c.START_STUCK))
+        self.term["status"] = {"state": "idle"}  # idle, not blocked: the same reason
+        self.assertEqual(self.why(c.START_QUIET_MS + c.START_GRACE_MS), ("needs", c.START_STUCK))
+        self.term.update(turn=1)  # it started after all: its own reason again
+        self.assertNotEqual(self.why(c.START_QUIET_MS + c.START_GRACE_MS)[1], c.START_STUCK)
+
+    def test_a_real_sign_in_still_shows_signed_out(self):
+        c = self.c
+        self.tick(c.START_QUIET_MS)  # nudged while its screen still showed the prompt
+        self.screen = "╭──╮\n│ Sign in required │\n╰──╯"
+        self.assertEqual(self.why(c.START_QUIET_MS + c.START_GRACE_MS * 2), ("needs", "Signed out"))
+        # a sign-in screen at nudge time: no nudge (it could pick a sign-in option), Signed out as before
+        self.task["agents"][0].pop("start_nudged")
+        self.sends.clear()
+        self.tick(c.START_QUIET_MS * 3)
+        self.assertEqual((self.sends, self.why(c.START_QUIET_MS * 3 + c.START_GRACE_MS)[1]), ([], "Signed out"))
+
+    def test_another_dialog_at_turn_0_gets_no_nudge_and_keeps_its_reason(self):
+        self.term["status"] = {"state": "blocked", "kind": "permission"}  # a trust or first-run screen
+        for off in range(0, self.c.START_WINDOW_MS, 15_000):
+            self.tick(off)
+        self.assertEqual(self.sends, [])
+        self.task["agents"][0]["start_nudged"] = self.t0  # even had it been nudged: its own reason stays
+        self.assertNotEqual(self.why(self.c.START_GRACE_MS * 2)[1], self.c.START_STUCK)
+
+    def test_a_resumed_agy_worker_gets_one_nudge(self):
+        c = self.c
+        self.task["agents"][0].update(start_nudged=self.t0 + c.START_QUIET_MS, ended=self.t0 + 60_000)
+        later = self.t0 + 3_600_000  # herdr-task resume: a new agent record for the same session, at turn 0
+        self.task["agents"].append({"address": "w1", "agent": "agy", "argv": ["agy"], "at": later, "session": "s-1"})
+        for off in range(0, c.START_WINDOW_MS, 15_000):
+            self.tick(3_600_000 + off)
+        self.assertEqual(self.sends, [("w1", c.RESUME_START_NUDGE)])
+
+    def test_the_tick_opens_a_folder_with_an_agy_worker_still_starting(self):
+        from unittest import mock
+        import herdr_task.tick as tick
+        with mock.patch.object(tick, "now", lambda: self.t0 + 60_000):
+            self.assertTrue(tick.starts_now(self.task))
+            self.task["agents"][0]["start_nudged"] = self.t0
+            self.assertFalse(tick.starts_now(self.task))

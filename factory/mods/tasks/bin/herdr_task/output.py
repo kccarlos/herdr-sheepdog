@@ -27,6 +27,9 @@ def view(s, task, live=None):
     if v["needs"] == "reply":
         # Refused ready with its rounds used up (review_refusal): the Assistant can add one.
         v["why"] = (out_of_rounds_why(task) if task.get("review_out") else None) or own_line(task) or last_words(task)
+    if v["needs"] in ("asks", "reply") and task["state"] == "running" and running:
+        from .commands import start_stuck  # FAC-100: an agy worker that never started, not "Signed out"
+        v["why"] = next(filter(None, (start_stuck(task, k) for k in running)), None) or v["why"]
     # Quiet but on its own background work (SHEP-53), or said ready but not at rest yet (SHEP-148):
     # Working; kept on the task for the Tasks panel (core/tasks.js place()).
     v["own_work"] = (v["status"] == "working" and task["state"] in ("running", "ready") and bool(running)

@@ -1286,6 +1286,57 @@ def still_waiting(s, t, rn, screen):
     return not (w.get("nudged_at") and now() - w["nudged_at"] >= NUDGE_GRACE_MS)  # a nudge given up on: no wait left
 
 
+# FAC-100: agy often starts idle (briefly "blocked (auth)", its brief or a resumed session's first message dropped) and
+# runs no turn until someone writes to it. Past START_QUIET_MS still at turn 0: one nudge; START_GRACE_MS on, still at
+# turn 0: Needs you, saying so (unless it really is signed out). Only within START_WINDOW_MS of its start.
+START_QUIET_MS, START_GRACE_MS, START_WINDOW_MS = 30_000, 90_000, 10 * 60_000
+START_NUDGE = "Start on the brief above."
+RESUME_START_NUDGE = "Carry on where you left off."
+START_STUCK = "agy didn't start its first turn"
+
+
+def start_idle(k):
+    """Idle, or blocked on agy's startup auth report; never another dialog (trust, a first-run screen): a nudge could pick in it."""
+    st = k.get("status") if isinstance(k.get("status"), dict) else {}
+    return status_word(k) in ("idle", "done") or (status_word(k) == "blocked" and st.get("kind") == "auth")
+
+
+def start_nudge(s, t):
+    """One nudge for the task's newest agy worker idle at turn 0 past START_QUIET_MS (field on its agent record, so a
+    resumed or switched agent gets its own). A refused send, or a real sign-in screen, is tried again next tick."""
+    a = (t.get("agents") or [None])[-1]
+    if t.get("state") != "running" or not a or a.get("agent") != "agy" or a.get("ended") or a.get("start_nudged"):
+        return
+    age = now() - (a.get("at") or 0)
+    if not START_QUIET_MS <= age < START_WINDOW_MS:
+        return
+    k = hc_json("get", a["address"]) or {}
+    if k.get("state") != "live" or not agent_running(k) or k.get("turn") or not start_idle(k):
+        return
+    if sign_in_screen(screen_of(a["address"], 60)):  # pressing on a real sign-in screen could pick a sign-in option
+        return
+    from .news import send_or_hold
+    try:
+        sent = send_or_hold(a["address"], RESUME_START_NUDGE if a.get("session") else START_NUDGE)
+    except (OSError, Fail):
+        sent = None
+    if sent:
+        a["start_nudged"] = now()
+        s.dirty = True
+
+
+def start_stuck(t, k):
+    """START_STUCK when live agent k is the task's agy worker, nudged START_GRACE_MS ago and still at turn 0; else None.
+    Signed out for real (its auth report still on and a sign-in screen showing) stays Signed out."""
+    a = next((x for x in reversed(t.get("agents") or []) if x.get("address") == (k or {}).get("address")), None)
+    if not a or a.get("agent") != "agy" or not a.get("start_nudged") or k.get("turn") or not start_idle(k) or now() - a["start_nudged"] < START_GRACE_MS:
+        return None
+    st = k.get("status") if isinstance(k.get("status"), dict) else {}
+    if st.get("kind") == "auth" and sign_in_screen(screen_of(k["address"], 60)):
+        return None
+    return START_STUCK
+
+
 def inspect_runs(s, t):
     """Reads verdicts of finished sandboxed reviewers, and marks open runs whose terminal is gone or
     whose agent ended without a verdict (or stopped on 'Sign in required') as failed (FAC-49, FAC-59)."""

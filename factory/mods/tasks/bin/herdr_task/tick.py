@@ -28,7 +28,7 @@ from .archive import archive_pass
 from .browsers import browser_pass
 from .simulators import simulator_pass
 from .output import progress_clock, say
-from .commands import back_to_work, begin, gate_reads, merge_now, MERGE_FAILED
+from .commands import back_to_work, begin, gate_reads, merge_now, MERGE_FAILED, start_nudge, START_WINDOW_MS
 from .news import news_pass, typing
 from .takeover import cant_go_on, takeover
 from .ghnews import main_pass, pr_deliver, pr_news
@@ -240,6 +240,11 @@ def tick_store(s, report):
             back_pass(s, t, report)
         elif t["state"] == "running" and (t.get("back") or {}).get("auto"):
             settle_back(s, t, report)
+        if t["state"] == "running" and t.get("agents"):
+            try:
+                start_nudge(s, t)  # FAC-100: an agy worker idle at turn 0 gets one nudge
+            except Exception as e:  # never stops the tick
+                report.setdefault("start_nudge_error", []).append(f"{s.ref(t)}: {e}")
         if t.get("worktree") and t["state"] in ("running", "ready"):
             facts(s, t, report)
             try:
@@ -309,6 +314,13 @@ def tick_store(s, report):
             main_pass(s, report)
         except Exception as e:  # never stops the tick
             report["main_error"] = str(e)
+
+
+def starts_now(t):
+    """A running task whose agy worker started within START_WINDOW_MS and wasn't nudged yet (start_nudge)."""
+    a = (t.get("agents") or [{}])[-1]
+    return (t.get("state") == "running" and a.get("agent") == "agy" and not a.get("start_nudged") and not a.get("ended")
+            and now() - (a.get("at") or 0) < START_WINDOW_MS)
 
 
 def lost_log(t, a):
@@ -651,7 +663,7 @@ def cmd_tick(args):
         d = read_list(p)
         tasks = (d or {}).get("tasks") or []
         if not d or not os.path.isdir(d.get("folder") or "") or not (d.get("main_watch") or any(
-                t.get("state") in ("queued", "scheduled", "ready") or t.get("check_run") or (t.get("worktree") and t.get("state") == "running") for t in tasks)):
+                t.get("state") in ("queued", "scheduled", "ready") or t.get("check_run") or (t.get("worktree") and t.get("state") == "running") or starts_now(t) for t in tasks)):
             continue
         try:
             with Store(locate(d["folder"])) as s:
