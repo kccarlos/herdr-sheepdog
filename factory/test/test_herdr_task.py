@@ -11030,6 +11030,154 @@ class UpToDateBeforeMerge(unittest.TestCase):
         self.assertFalse(any("/compare/" in str(x) for a in gh["calls"] for x in a))
 
 
+
+class SyncBehindBase(unittest.TestCase):
+    """FAC-111 (WUKO-130 B1): tasks.sync. full: update-branch and a whole CI run, as FAC-98. cheap: the folder's
+    tasks.check runs here on the head merged with the base's tip, then merges; a conflict or a failing check goes
+    back to the worker. off: merged as it is. A real origin, clone and task branch; only gh and hc are faked."""
+
+    setUp, ready, github, go, updates = (UpToDateBeforeMerge.setUp, UpToDateBeforeMerge.ready, UpToDateBeforeMerge.github,
+                                         UpToDateBeforeMerge.go, UpToDateBeforeMerge.updates)
+
+    def sh(self, cwd, *a):
+        return subprocess.run(["git", "-C", cwd, *a], check=True, capture_output=True, text=True).stdout.strip()
+
+    def repo(self, sync, check, head_file=("a.txt", "task\n"),
+             base_file=("b.txt", "base\n"), move_base=True, origin_repo="o/r"):
+        """origin with main at m0; the task branch b one commit on (head_file); main then one more (base_file)."""
+        import herdr_task.checks as checks
+        import herdr_task.github as github
+        d = tempfile.mkdtemp(prefix="sync-")
+        self.addCleanup(shutil.rmtree, d, True)
+        origin, main, other = (os.path.join(d, x) for x in ("origin.git", "main", "other"))
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", origin], check=True)
+        subprocess.run(["git", "clone", "-q", origin, main], check=True, capture_output=True)
+        self.sh(main, "config", "user.email", "t@t"), self.sh(main, "config", "user.name", "t")
+        with open(os.path.join(main, "README"), "w") as f:
+            f.write("x\n")
+        self.sh(main, "add", "."), self.sh(main, "commit", "-qm", "m0"), self.sh(main, "push", "-q", "origin", "main")
+        self.sh(main, "checkout", "-qb", "b")
+        with open(os.path.join(main, head_file[0]), "w") as f:
+            f.write(head_file[1])
+        self.sh(main, "add", "."), self.sh(main, "commit", "-qm", "task")
+        head = self.sh(main, "rev-parse", "HEAD")
+        self.sh(main, "checkout", "-q", "main")
+        subprocess.run(["git", "clone", "-q", origin, other], check=True, capture_output=True)
+        self.sh(other, "config", "user.email", "t@t"), self.sh(other, "config", "user.name", "t")
+        with open(os.path.join(other, base_file[0]), "w") as f:
+            f.write(base_file[1])
+        if move_base:
+            self.sh(other, "add", "."), self.sh(other, "commit", "-qm", "base moved"), self.sh(other, "push", "-q", "origin", "main")
+        self.store.loc = {**(getattr(self.store, "loc", None) or {}), "folder": main}
+        tasks = {"sync": sync, "check": check}
+        for mod, name, value in ((checks, "settings_for", lambda s, space=None: {"tasks": tasks}),
+                                 (github, "remote_repo", lambda main, remote: origin_repo)):
+            p = self.mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        t, gh = self.github()
+        gh["head"] = t["head"] = head
+        self.main, self.head = main, head
+        return t, gh
+
+    def leftovers(self):
+        """The folder untouched: one worktree, main checked out, the task branch still at its head."""
+        self.assertEqual(len(self.sh(self.main, "worktree", "list").splitlines()), 1)
+        self.assertEqual((self.sh(self.main, "rev-parse", "--abbrev-ref", "HEAD"), self.sh(self.main, "rev-parse", "b")),
+                         ("main", self.head))
+        self.assertEqual(self.sh(self.main, "status", "--porcelain"), "")
+
+    def test_full_is_the_default_and_updates_the_branch(self):
+        import herdr_task.checks as checks
+        self.assertEqual(self.commands.settings_for(self.store)["tasks"]["sync"], "full")
+        t, gh = self.repo("full", check="true")
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], len(self.updates(gh))), ("ready", None, 1))
+        self.assertEqual(checks.sync_mode(self.store, {**t, "space": None}), "full")
+
+    def test_cheap_checks_the_merge_here_and_merges_the_head(self):
+        t, gh = self.repo("cheap", check="test -f a.txt && test -f b.txt && touch made-by-check")
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], self.updates(gh), t.get("attention")), ("done", self.head, [], None))
+        self.leftovers()
+
+    def test_cheap_a_check_failing_only_on_the_merge_needs_attention(self):
+        """The check passes on the head alone and on the base alone; only their merge fails it."""
+        t, gh = self.repo("cheap", check="! { test -f a.txt && test -f b.txt; }")
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], self.updates(gh)), ("ready", None, []))
+        self.assertTrue(t["attention"].startswith(self.commands.SYNC_FAILED), t["attention"])
+        self.assertIn("exited 1 on " + self.head[:8] + " merged with main", t["attention"])
+        self.assertIn("Merge main into the branch (never rebase)", t["attention"])
+        self.assertEqual(self.agents.task_status(t, [])[0], "needs")
+        self.leftovers()
+        # the next tick neither checks again nor merges, nor clears it
+        with self.mock.patch.object(self.commands, "sync_check", lambda *a: self.fail("checked again")):
+            self.go(gh)
+        self.assertEqual((gh["merged"], t["attention"][:20]), (None, self.commands.SYNC_FAILED[:20]))
+
+    def test_cheap_a_conflict_needs_attention_as_an_update_conflict_does(self):
+        t, gh = self.repo("cheap", check="true", head_file=("a.txt", "task\n"), base_file=("a.txt", "base\n"))
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], self.updates(gh)), ("ready", None, []))
+        self.assertTrue(t["attention"].startswith(self.commands.UPDATE_CONFLICT + ": a conflict in a.txt"), t["attention"])
+        self.assertEqual(self.agents.task_status(t, [])[0], "needs")
+        self.leftovers()
+
+    def test_cheap_that_cant_check_falls_back_to_full(self):
+        t, gh = self.repo("cheap", check="true")
+        self.sh(self.main, "remote", "set-url", "origin", "/nonexistent/origin.git")
+        self.assert_full(t, gh)
+
+    def test_cheap_checks_a_committed_merge(self):
+        """A check reading git status (a drift check) sees a clean, committed merge, not one in progress."""
+        t, gh = self.repo("cheap", check='test -z "$(git status --porcelain)" && git rev-parse -q --verify HEAD^2')
+        self.go(gh)
+        self.assertEqual((gh["merged"], t.get("attention")), (self.head, None))
+        self.leftovers()
+
+    def assert_full(self, t, gh):
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], len(self.updates(gh)), t.get("attention")), ("ready", None, 1, None))
+        self.leftovers()
+
+    def test_cheap_never_merges_unchecked_on_a_stale_base(self):
+        """GitHub says behind but the base here isn't ahead (stale, or another repo's): full, never the head alone."""
+        t, gh = self.repo("cheap", check="true", move_base=False)
+        self.assert_full(t, gh)
+
+    def test_cheap_on_another_repos_remote_is_full(self):
+        t, gh = self.repo("cheap", check="true", origin_repo="fork/r")
+        self.assert_full(t, gh)
+
+    def test_cheap_a_slow_check_is_full(self):
+        import herdr_task.checks as checks
+        t, gh = self.repo("cheap", check="sleep 3")
+        with self.mock.patch.object(checks, "SYNC_LIMIT_S", 1):
+            self.assert_full(t, gh)
+
+    def test_cheap_a_check_that_cant_run_here_is_full(self):
+        t, gh = self.repo("cheap", check="no-such-program-here")
+        self.assert_full(t, gh)
+
+    def test_cheap_without_a_check_is_full(self):
+        t, gh = self.repo("cheap", check="  ")
+        self.go(gh)
+        self.assertEqual((gh["merged"], len(self.updates(gh))), (None, 1))
+
+    def test_off_merges_as_it_is_without_checking(self):
+        t, gh = self.repo("off", check="false")
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], self.updates(gh)), ("done", self.head, []))
+        self.assertFalse(any("/compare/" in str(x) for a in gh["calls"] for x in a))
+
+    def test_cheap_up_to_date_merges_without_checking(self):
+        t, gh = self.repo("cheap", check="false")
+        gh["behind"] = 0
+        with self.mock.patch.object(self.commands, "sync_check", lambda *a: self.fail("checked")):
+            self.go(gh)
+        self.assertEqual((t["state"], gh["merged"]), ("done", self.head))
+
 class MergeOnlyReviewRounds(unittest.TestCase):
     """FAC-89 (note 46): merges of the base branch after a passed round whose only extra changes are
     generated files get a delta review without using a review round or tripping the loop-breaker."""

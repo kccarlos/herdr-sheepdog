@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 
-from .checks import checks_line
+from .checks import checks_line, sync_check, sync_mode, SYNC_FAILED
 from .base import Fail, git, guard, hc_json, kill_agent, now, run, STORE, stop_note, VERSION
 from .settings import (write_max_running, 
     accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, bare, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
@@ -1907,7 +1907,18 @@ def merge_now(s, t, accepting=False):
             return CHECKS_RUNNING  # FAC-98: GitHub still updating it, or its new head's checks yet to show
         # FAC-98 (note 52): checks ran on its head, not on it with its base's tip: brought up to date first (a merge
         # queue tests the combination itself), merged once the new head's checks pass.
-        if not queue and v.get("statusCheckRollup") and at and pr_behind(t, repo, at):
+        # FAC-111: tasks.sync cheap checks it merged with the base here instead, off merges it as it is.
+        mode = sync_mode(s, t)
+        behind = mode != "off" and not queue and v.get("statusCheckRollup") and at and pr_behind(t, repo, at)
+        if behind and mode == "cheap":
+            checked, why = sync_check(s, t, at, repo)
+            fix = f"Merge {t.get('base') or 'main'} into the branch (never rebase), fix, then say ready again."
+            if checked in ("conflict", "fail"):
+                t["attention"] = f"{UPDATE_CONFLICT}: a conflict in {why}. {fix}" if checked == "conflict" else f"{SYNC_FAILED}: {why}\n{fix}"
+                t["attention_at"] = now()
+                return t["attention"]
+            behind = checked != "pass"  # cheap couldn't check (no fetch, a slow check): full, as before
+        if behind:
             ok, err = pr_update_branch(t, repo, at)
             if not ok:
                 t["attention"], t["attention_at"] = f"{UPDATE_CONFLICT}: {err}", now()
