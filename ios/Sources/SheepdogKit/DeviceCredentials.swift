@@ -74,12 +74,31 @@ public final class DeviceCredentials: @unchecked Sendable {
     public let daemonID: String
     private let account: String
     private let secrets: SecretStore
+    private struct Signing {
+        var task: Task<SessionTicket, Error>
+        var waiters: Int
+    }
+
     private let lock = NSLock()
     private let updating = NSLock()
     private var loaded = false
     private var cached: PairedComputer?
     private var ticket: SessionTicket?
-    private var signing: Task<SessionTicket, Error>?
+    private var signing: [URL: Signing] = [:]
+    private var _protocolClasses: [AnyClass] = []
+
+    var protocolClasses: [AnyClass] {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _protocolClasses
+        }
+        set {
+            lock.lock()
+            _protocolClasses = newValue
+            lock.unlock()
+        }
+    }
 
     public init(daemonID: String, secrets: SecretStore) {
         self.daemonID = daemonID
@@ -109,9 +128,10 @@ public final class DeviceCredentials: @unchecked Sendable {
             loaded = true
             cached = newValue
             ticket = nil
-            signing?.cancel()
-            signing = nil
+            let tasks = signing.values.map(\.task)
+            signing.removeAll()
             lock.unlock()
+            for task in tasks { task.cancel() }
         }
     }
 
@@ -211,7 +231,10 @@ public final class DeviceCredentials: @unchecked Sendable {
     }
 
     /// A ticket for the computer, signing in at `base` when there is none
-    /// or it is about to expire. Concurrent callers share one sign-in.
+    /// or it is about to expire. Concurrent callers on the same address
+    /// share one sign-in; concurrent probes on different addresses sign in
+    /// against their own `base` and share the resulting ticket once any
+    /// address succeeds.
     public func ticket(base: URL, now: Date = Date()) async throws -> SessionTicket {
         guard let computer else { throw PairingProblem.noKey }
         let task: Task<SessionTicket, Error>
@@ -220,8 +243,10 @@ public final class DeviceCredentials: @unchecked Sendable {
             lock.unlock()
             return ticket
         }
-        if let signing {
-            task = signing
+        if var existing = signing[base] {
+            existing.waiters += 1
+            signing[base] = existing
+            task = existing.task
         } else {
             task = Task {
                 guard let key = DeviceKey.load(daemonID: computer.daemonID) else { throw PairingProblem.noKey }
@@ -233,13 +258,17 @@ public final class DeviceCredentials: @unchecked Sendable {
                 return try await auth.signIn(daemonID: computer.daemonID, pins: { [weak self] in self?.pins ?? [computer.pin] },
                                              deviceID: computer.deviceID, key: key)
             }
-            signing = task
+            signing[base] = Signing(task: task, waiters: 1)
         }
         lock.unlock()
         do {
-            let fresh = try await task.value
+            let fresh = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                self.cancelSigningWaiter(base: base, task: task)
+            }
             lock.lock()
-            if signing == task { signing = nil }
+            if signing[base]?.task == task { signing.removeValue(forKey: base) }
             ticket = fresh
             lock.unlock()
             var learned: Date?
@@ -255,10 +284,27 @@ public final class DeviceCredentials: @unchecked Sendable {
             return fresh
         } catch {
             lock.lock()
-            if signing == task { signing = nil }
+            if signing[base]?.task == task { signing.removeValue(forKey: base) }
             lock.unlock()
             throw error
         }
+    }
+
+    private func cancelSigningWaiter(base: URL, task: Task<SessionTicket, Error>) {
+        lock.lock()
+        guard var entry = signing[base], entry.task == task else {
+            lock.unlock()
+            return
+        }
+        entry.waiters -= 1
+        if entry.waiters <= 0 {
+            signing.removeValue(forKey: base)
+            lock.unlock()
+            task.cancel()
+            return
+        }
+        signing[base] = entry
+        lock.unlock()
     }
 
     /// Forgets the computer and this phone's key for it (Remove).
@@ -277,7 +323,10 @@ public final class DeviceCredentials: @unchecked Sendable {
 
     /// A pinned ephemeral session with a request timeout.
     public func session(timeout: TimeInterval) -> URLSession {
-        URLSession(configuration: Self.ephemeral(timeout: timeout), delegate: trust, delegateQueue: nil)
+        let config = Self.ephemeral(timeout: timeout)
+        let classes = protocolClasses
+        if !classes.isEmpty { config.protocolClasses = classes }
+        return URLSession(configuration: config, delegate: trust, delegateQueue: nil)
     }
 
     /// An ephemeral configuration with a request timeout.
