@@ -14,8 +14,8 @@ import time
 from .base import Fail, git, guard, hc_json, now, PR_EVERY, run, SHELLS, STORE, stop_note
 from .settings import machine_name, merge_hold, remove_build_dir, worker_argv
 from .agents import (
-    agent_log, agent_running, busy_again, detail, fit, held_ask, last_question, live_agents, open_question, own_work,
-    ready_turns, REVIEWER_FAILED, status_word, task_status,
+    agent_log, agent_running, BG_ENDED_MSG, BG_NUDGE_MS, busy_again, detail, ended_jobs, fit, held_ask, last_question, live_agents, open_question, own_work,
+    ready_turns, REVIEWER_FAILED, status_word, task_status, WAITING_BG,
 )
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
@@ -29,7 +29,7 @@ from .browsers import browser_pass
 from .simulators import simulator_pass
 from .output import progress_clock, say
 from .commands import back_to_work, begin, gate_reads, merge_now, MERGE_FAILED, start_nudge, START_WINDOW_MS
-from .news import news_pass, typing
+from .news import news_pass, send_or_hold, typing
 from .takeover import cant_go_on, takeover
 from .ghnews import main_pass, pr_deliver, pr_news
 from .scheduler import SCHEDULER
@@ -541,6 +541,26 @@ def retry_one(row, k, log, report):
     return row
 
 
+def bg_ended_pass(s, t, live):
+    """FAC-106: a worker Waiting on a background job whose jobs all ended, quiet for BG_NUDGE_MS since, is told
+    once per job (agents.ended_jobs()); task_status() shows Needs you if no turn follows."""
+    if not live or task_status(t, live) != ("working", None, WAITING_BG):
+        return
+    told = (t.get("bg_told") or {}).get("ids") or []
+    for k in live:
+        if (k.get("labels") or {}).get("herdr.role") == "reviewer" or status_word(k) not in ("idle", "done"):
+            continue
+        quiet = k.get("status_ms") or 0
+        jobs = {i: j for i, j in ended_jobs(t, k).items() if i not in told}
+        if not jobs or not quiet or now() - quiet < BG_NUDGE_MS:
+            continue
+        msg = BG_ENDED_MSG[len(jobs) > 1].format(", ".join(jobs.values()))
+        if send_or_hold(k["address"], msg):
+            t["bg_told"] = {"ids": told + list(jobs), "at": now(), "address": k["address"], "turn": k.get("turn") or 0}
+            s.dirty = True
+        return
+
+
 def retry_pass(report):
     """Provider retries for every live coordinator and task worker here: a turn its provider cut
     off (its own log says so) gets "carry on" after 1, 2, 4 and 8 minutes; the fifth cut, or an
@@ -623,6 +643,7 @@ def retry_pass(report):
                     else:
                         t.pop("retry", None)
                     s.dirty = True
+                bg_ended_pass(s, t, [k for k in mine if agent_running(k)])
                 progress_clock(s, t, task_status(t, [k for k in mine if agent_running(k)])[0])
     if rows != old:
         tmp = f"{RETRIES}.{os.getpid()}.tmp"

@@ -191,6 +191,11 @@ def task_status(task, live):
     # unless its last message asks the person something.
     if live and helper_working(task, live):
         return "working", None, None
+    # Told its background job ended (FAC-106, bg_ended_pass): Waiting on it a while longer, then Needs you
+    # if it still took no turn since.
+    told = task.get("bg_told") if st == "running" else None
+    if told and told.get("at") and any(k.get("address") == told.get("address") for k in live) and not turn_since(told, live):
+        return ("working", None, WAITING_BG) if now() - told["at"] < BG_GRACE_MS else ("needs", "reply", BG_ENDED_WHY)
     if live and own_work(task, live):
         return "working", None, WAITING_BG
     # Just gone quiet (SHEP-133): still Working for GRACE_MS, as its agent often ends a turn a
@@ -866,6 +871,64 @@ def _text(x):
     return ""
 
 
+# ---- a background job that ended while its worker sat quiet (FAC-106) -----------------------------
+# A worker shown Waiting on a background job whose jobs all ended without a notice in its log (Claude
+# Code's shell for it, or Codex's process, gone: WUKO-79, WUKO-99) and that took no turn for BG_NUDGE_MS is
+# told once per job (tick's bg_ended_pass, kept as task["bg_told"]); no turn BG_GRACE_MS after that:
+# Needs you, saying so. While any job of its own still runs, it is left alone.
+BG_NUDGE_MS = BG_GRACE_MS = 5 * 60000
+BG_ENDED_WHY = "Waits on a background job that ended"
+BG_ENDED_MSG = ("Your background job {} ended (no longer running); check its output and carry on.",
+                "Your background jobs {} ended (no longer running); check their output and carry on.")
+
+
+def turn_since(told, live):
+    """Its told agent took a turn since: a finished turn more, or its status changed after."""
+    return any(k.get("address") == told.get("address") and ((k.get("turn") or 0) > (told.get("turn") or 0)
+                                                          or (k.get("status_ms") or 0) > told["at"]) for k in live)
+
+
+def descendants(k):
+    """The args of every process under its agent, or None when its pid is unknown."""
+    pid = (k.get("foreground") or {}).get("pid") or (k.get("address") and (detail(k).get("foreground") or {}).get("pid"))
+    if not pid:
+        return None
+    children, out, todo = {}, [], [str(pid)]
+    for line in run(["ps", "-axo", "pid=,ppid=,args="]).stdout.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) >= 2:
+            children.setdefault(parts[1], []).append(parts)
+    while todo:
+        for parts in children.pop(todo.pop(), []):
+            todo.append(parts[0])
+            out.append(parts[2] if len(parts) > 2 else "")
+    return out
+
+
+def ended_jobs(task, k):
+    """{id: name} of the background jobs its agent's log says still run whose process is gone (Claude Code's
+    shell for it, Codex's process; an ended one's notice already ends Waiting on a background job); {} while
+    any of its own still runs, or might (a background agent or WebSocket Monitor: no process; its pid unknown)."""
+    if fg_job(k) or (k.get("address") and cli_of(k) == "agy" and agy_bg_tasks(k["address"])):
+        return {}
+    log = agent_log(task, k.get("address")) or agent_log(task)
+    running = background_jobs(log)[0] if log else {}
+    jobs, out = (_bg_cache.get(log) or {}).get("jobs") or {}, {}
+    shells = [i for i in running if not i.startswith("codex:")]
+    if any((jobs.get(i) or {"opaque": True})["opaque"] for i in shells):
+        return {}
+    if shells:
+        procs = descendants(k)
+        if procs is None or any("shell-snapshots" in a for a in procs):
+            return {}
+        out.update({i: jobs[i]["name"] for i in shells})
+    codex = [i for i in running if i.startswith("codex:")]
+    if codex and codex_working(k):
+        return {}
+    out.update({i: i for i in codex})
+    return out
+
+
 def background_jobs(log):
     """(running, last_ended): its agent's background jobs still running by its session log ({id:
     started ms}), and when the last one ended (ms, or 0). Read as the log grows: only what was
@@ -914,6 +977,7 @@ def _bg_scan(lines, seen):
     running, calls, ended = seen["running"], seen["calls"], seen["ended"]
     cells = seen.setdefault("cells", {})  # Codex code-mode cell id -> the session ids its wait polls
     opened = seen.setdefault("open", {})
+    jobs, names = seen.setdefault("jobs", {}), seen.setdefault("names", {})  # FAC-106: each job's name, and whether a process shows it
     for raw in lines:
         # Claude Code keeps a copy of each request it sends (api-request-blob): every call and
         # result so far again, never news of one.
@@ -923,6 +987,17 @@ def _bg_scan(lines, seen):
             stamp = TIMESTAMP.search(raw)
             for m in TOOL_USE.finditer(raw):
                 opened[m.group(1)] = (m.group(2), (_ms(stamp.group(1)) if stamp else None) or now())
+            if '"Bash"' in raw or '"Monitor"' in raw:  # a Bash may go to the background later (its timeout)
+                try:
+                    content = (json.loads(raw).get("message") or {}).get("content") or []
+                except (ValueError, AttributeError):
+                    content = []
+                for c in content if isinstance(content, list) else []:
+                    if isinstance(c, dict) and c.get("type") == "tool_use" and isinstance(c.get("input"), dict):
+                        inp = c["input"]  # a WebSocket Monitor has no process of its own to look for
+                        names[c.get("id")] = (" ".join(str(inp.get("description") or inp.get("command") or "").split())[:80], "ws" in inp)
+                for i in list(names)[:-100]:
+                    names.pop(i)
         if '"tool_use_id"' in raw:
             for m in TOOL_DONE.finditer(raw):
                 opened.pop(m.group(1), None)
@@ -948,12 +1023,17 @@ def _bg_scan(lines, seen):
                 if isinstance(r, dict):
                     ids = [r.get("backgroundTaskId") or (r.get("taskId") if r.get("timeoutMs") is not None else None)
                            or (r.get("agentId") if r.get("isAsync") else None)]
+                tid = None
                 for c in (d.get("message") or {}).get("content") or []:
                     if isinstance(c, dict) and c.get("type") == "tool_result":
+                        tid = tid or c.get("tool_use_id")
                         m = BG_STARTED.match(_text(c.get("content")).strip())
                         ids += [next(g for g in m.groups() if g)] if m else []
                 for i in filter(None, ids):
                     running.setdefault(str(i), at)
+                    name, ws = names.pop(tid, None) or (None, False)
+                    jobs.setdefault(str(i), {"at": at, "name": name or str(i), "opaque": ws or "Async agent launched" in raw
+                                             or bool(isinstance(r, dict) and r.get("isAsync"))})
             # Codex: a process left running has a session id until an output says it exited.
             p = d.get("payload") or {}
             if d.get("type") == "response_item" and p.get("type") in ("function_call", "custom_tool_call"):
@@ -965,6 +1045,8 @@ def _bg_scan(lines, seen):
                 if _codex_output(_text(p.get("output")), polled, cells, running, at):
                     ended = max(ended, at)
     seen["ended"] = ended
+    for i in [i for i, j in jobs.items() if now() - j["at"] >= BG_MAX_MS]:
+        jobs.pop(i)
 
 
 def _codex_output(text, polled, cells, running, at):
@@ -1131,7 +1213,9 @@ def own_work(task, live, ready=False, since=0):
         log = agent_log(task, address) or agent_log(task)
         jobs, ended = background_jobs(log) if log else ({}, 0)
         cut = since or (task.get("settled_at") or 0 if ready else 0)
-        jobs = {i: at for i, at in jobs.items() if at >= cut}
+        told = task.get("bg_told") or {}
+        gone = set(told.get("ids") or []) if told.get("at") and turn_since(told, live) else set()
+        jobs = {i: at for i, at in jobs.items() if at >= cut and i not in gone}
         # Codex's jobs are only what its process tree shows (SHEP-207): a session the log says is
         # still open, with no process of the agent running, is over.
         if any(i.startswith("codex:") for i in jobs) and not codex_working(k):

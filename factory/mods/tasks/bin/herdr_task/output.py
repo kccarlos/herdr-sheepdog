@@ -4,7 +4,7 @@ import json
 
 from .base import now
 from .agents import (
-    agent_running, detail, live_helpers, out_of_rounds_why, ask_reason, blocking_dialog, held_ask, last_words, own_line, own_work, status_word, STATUSES, task_status,
+    agent_running, BG_ENDED_WHY, detail, live_helpers, out_of_rounds_why, ask_reason, blocking_dialog, held_ask, last_words, own_line, own_work, status_word, STATUSES, task_status,
 )
 from .queues import waiting_ext, waiting_for
 
@@ -26,7 +26,8 @@ def view(s, task, live=None):
         v["why"] = (k and blocking_dialog(task, k["address"], held_ask(k["address"]))) or own_line(task, k and k["address"]) or (ask_reason(task, k["address"], held_ask(k["address"]), st.get("kind"), st.get("msg")) if k else v["why"])
     if v["needs"] == "reply":
         # Refused ready with its rounds used up (review_refusal): the Assistant can add one.
-        v["why"] = (out_of_rounds_why(task) if task.get("review_out") else None) or own_line(task) or last_words(task)
+        v["why"] = (out_of_rounds_why(task) if task.get("review_out") else None) or (v["why"] if v["why"] == BG_ENDED_WHY else None) \
+            or own_line(task) or last_words(task)
     if v["needs"] in ("asks", "reply") and task["state"] == "running" and running:
         from .commands import start_stuck  # FAC-100: an agy worker that never started, not "Signed out"
         v["why"] = next(filter(None, (start_stuck(task, k) for k in running)), None) or v["why"]

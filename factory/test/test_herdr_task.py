@@ -1765,6 +1765,91 @@ class NoFalseNeedsYou(unittest.TestCase):
         self.assertEqual(list(self.agents.background_jobs(self.log)[0]), ["b1"])
 
 
+class BackgroundJobEnded(unittest.TestCase):
+    """FAC-106: a worker Waiting on a background job that ended (its shell gone, or its notice with no turn
+    after) is told once; no turn after that shows Needs you; one whose job still runs is left alone."""
+
+    stamp, status = OwnBackgroundWork.stamp, OwnBackgroundWork.status
+
+    def setUp(self):
+        OwnBackgroundWork.setUp(self)
+        import herdr_task.tick as tick
+        self.tick, self.sent, self.ps = tick, [], ""
+        m = self.mock
+        for p in (m.patch.object(self.agents, "run", lambda a, **_: subprocess.CompletedProcess(a, 0, self.ps if a[0] == "ps" else "", "")),
+                  m.patch.object(tick, "now", lambda: self.clock),
+                  m.patch.object(tick, "send_or_hold", lambda addr, text: self.sent.append((addr, text)) or "sent")):
+            p.start()
+            self.addCleanup(p.stop)
+        self.idle = [dict(self.idle[0], foreground={"pid": 100, "name": "claude"}, status_ms=self.clock - 600_000, turn=3)]
+        self.store = type("S", (), {"dirty": False})()
+        self.stamp(-900_000, {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "toolu_9", "name": "Bash", "input": {
+                "command": "scripts/remote-test.sh", "description": "Remote tests", "run_in_background": True}}]}})
+        self.stamp(-900_000, {"type": "user", "toolUseResult": {"backgroundTaskId": "b9"}, "message": {"role": "user", "content": [
+            {"tool_use_id": "toolu_9", "type": "tool_result", "content": "Command running in background with ID: b9."}]}})
+
+    def nudge(self):
+        self.agents._bg_cache.clear()
+        self.tick.bg_ended_pass(self.store, self.task, self.idle)
+
+    def test_its_only_job_gone_gets_one_nudge_then_needs_you(self):
+        self.ps = "100 1 claude\n101 100 node mcp-server.js\n"  # its shell for b9 is gone
+        self.assertEqual(self.status(), ("working", None, "Waiting on a background job"))
+        self.nudge()
+        self.nudge()
+        self.assertEqual(self.sent, [("t1", "Your background job Remote tests ended (no longer running); check its output and carry on.")])
+        self.assertEqual(self.task["bg_told"]["ids"], ["b9"])
+        self.assertEqual(self.status(), ("working", None, "Waiting on a background job"))
+        self.clock += 5 * 60000
+        self.assertEqual(self.status(), ("needs", "reply", "Waits on a background job that ended"))
+        # the Tasks panel and list say so too, not its stale status line (news_pass keeps v["why"] as t["waits"])
+        import herdr_task.output as output
+        self.task["progress"] = {"text": "Waiting on remote tests", "set": self.clock - 1200_000}
+
+        class S:
+            write, loc, prefix = False, {"folder": "/f"}, "X"
+            key = ref = lambda self, t: "X-7"
+        with self.mock.patch.object(output, "waiting_for", lambda s, t: []), self.mock.patch.object(output, "waiting_ext", lambda t: []):
+            v = output.view(S(), self.task, self.idle)
+        self.assertEqual((v["needs"], v["why"], v["own_work"]), ("reply", "Waits on a background job that ended", False))
+        # a told agent no longer there (a takeover) never pins it
+        self.assertNotEqual(self.status([dict(self.idle[0], address="t2")])[2], "Waits on a background job that ended")
+        # it took a turn since: no longer waiting on b9, and never told about it again
+        self.idle = [dict(self.idle[0], turn=4, status_ms=self.clock - 600_000)]
+        self.assertEqual(self.status()[0:2], ("needs", "reply"))
+        self.assertNotEqual(self.status()[2], "Waits on a background job that ended")
+        self.nudge()
+        self.assertEqual(len(self.sent), 1)
+
+    def test_a_job_still_running_gets_none(self):
+        self.ps = "100 1 claude\n102 100 /bin/zsh -c source /Users/x/.claude/shell-snapshots/snapshot-zsh-1.sh && eval 'scripts/remote-test.sh'\n"
+        self.clock += 3600_000
+        self.idle[0]["status_ms"] = self.clock - 3000_000
+        self.nudge()
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.status(), ("working", None, "Waiting on a background job"))
+
+    def test_not_before_it_was_quiet_a_few_minutes_nor_with_a_background_agent(self):
+        self.ps = "100 1 claude\n"
+        self.idle[0]["status_ms"] = self.clock - 120_000
+        self.nudge()
+        self.assertEqual(self.sent, [])
+        self.idle[0]["status_ms"] = self.clock - 600_000
+        self.stamp(-500_000, {"type": "user", "toolUseResult": {"agentId": "a1", "isAsync": True}, "message": {"role": "user", "content": [
+            {"tool_use_id": "toolu_8", "type": "tool_result", "content": "Async agent launched successfully.\nagentId: a1"}]}})
+        self.nudge()
+        self.assertEqual(self.sent, [])
+        # nor a WebSocket Monitor (no process shows it)
+        self.lines[:] = self.lines[:-1]
+        self.stamp(-500_000, {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "toolu_7", "name": "Monitor", "input": {"ws": {"url": "wss://x"}, "description": "deploy events"}}]}})
+        self.stamp(-500_000, {"type": "user", "toolUseResult": {"taskId": "m2", "timeoutMs": 900000}, "message": {"role": "user", "content": [
+            {"tool_use_id": "toolu_7", "type": "tool_result", "content": "Monitor started (task m2, expires in 15m)"}]}})
+        self.nudge()
+        self.assertEqual(self.sent, [])
+
+
 class WorkersOwnHelpers(OwnBackgroundWork):
     """SHEP-54: a worker runs its review as an hc child (herdr.task, herdr.role=reviewer, its
     terminal the parent). Never one of the task's agents (no second worker, nothing it says counts as
