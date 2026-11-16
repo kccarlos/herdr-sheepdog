@@ -663,13 +663,27 @@ def where_line(task):
     return f"You work in {task['worktree']} on branch {task['branch']}{base}."
 
 
+CHANGES_HEAD = "Brief changes (newest last, these win over the brief above):"
+
+
+def stamp(ms):
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ms / 1000))
+
+
+def task_text(task):
+    """The task's brief as given, then its dated amendments (FAC-109, `edit --amend`): what workers and reviewers judge by."""
+    text = (task.get("prompt") or "").strip() or task["title"]
+    changes = [f"- {stamp(a['at'])}: {a['text']}" for a in task.get("amendments") or []]
+    return "\n\n".join([text, CHANGES_HEAD + "\n" + "\n".join(changes)]) if changes else text
+
+
 def brief(s, task, parent=None, space=None, argv=None):
     instructions("reviewer")  # the file its review's reviewer gets (WORKER_MD)
     keep_review(s, task, space)
     start = notes_part("Before you start", notes(s, task, "start", space))
     if start and task.get("worktree"):
         start += f"\n(The main folder is {s.loc['folder']}.)"
-    body = "Your task, " + s.ref(task) + ":\n" + ((task.get("prompt") or "").strip() or task["title"])
+    body = "Your task, " + s.ref(task) + ":\n" + task_text(task)
     finish = notes_part("Before you say ready", notes(s, task, "finish", space))
     return "\n\n".join(x for x in [instructions("worker"), start, body, where_line(task), finish, closing_line(s, task, parent, argv, space),
                                     settings_block(s, task, space, argv)] if x)
@@ -678,7 +692,7 @@ def brief(s, task, parent=None, space=None, argv=None):
 def handoff(s, task, prev, parent=None, argv=None, space=None):
     lines = [f"You are taking over task {s.ref(task)} \"{task['title']}\" from another agent.", instructions("worker")]
     lines.append(where_line(task))
-    lines.append("The task:\n" + ((task.get("prompt") or "").strip() or task["title"]))
+    lines.append("The task:\n" + task_text(task))
     from .handoff import work_context
     lines.append(work_context(s, task, prev))
     if prev and prev.get("log"):

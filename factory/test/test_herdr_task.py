@@ -4686,6 +4686,91 @@ if sys.argv[1] == "kill" and alive:
             self.assertEqual(claude_bg_shells(text), want, text)
 
 
+class AmendBrief(unittest.TestCase):
+    """FAC-109: `edit --amend` keeps the brief, adds dated changes the reviewer and `show` see, and tells a running
+    task's agent (tell faked), never a todo one's. GateReview's setting, without rerunning its tests."""
+    setUp, env, git, change, ready = GateReview.setUp, GateReview.env, GateReview.git, GateReview.change, GateReview.ready
+
+    def edit(self, text):
+        import argparse
+        from unittest import mock
+        with mock.patch.object(self.commands, "view", lambda s, t, live=None: {**t, "status": t["state"]}), \
+                mock.patch.object(self.commands, "task_tabs", lambda *a: []), mock.patch.object(self.commands, "name_tabs", lambda *a: []):
+            self.commands.cmd_edit(argparse.Namespace(**{k: None for k in (
+                "folder", "title", "prompt", "prompt_file", "agent", "model", "effort", "reviewer", "reviewer_model",
+                "reviewer_effort", "set", "base", "start_notes", "finish_notes", "after", "at", "in_", "branch")},
+                id="SHEP-13", json=True, here=False, worktree=False, amend=text))
+
+    def show(self):
+        import argparse
+        from unittest import mock
+        out = []
+        with mock.patch.object(self.commands, "say", lambda args, v, text: out.append((v, text))), \
+                mock.patch.object(self.commands, "view", lambda s, t, live=None: {**t, "status": t["state"], "folder": self.main,
+                                                                                   "live": [], "worktree": None, "ref": "SHEP-13"}):
+            self.commands.cmd_show(argparse.Namespace(id="SHEP-13", json=False, folder=None, evidence=False))
+        return out[0]
+
+    def test_amend_stores_and_shows_keeping_the_brief(self):
+        self.edit("Only the login half; the signup half is WUKO-108.")
+        self.edit("Drop the dark-mode part.")
+        self.assertEqual(self.task["prompt"], "Make the gate.")
+        self.assertEqual([a["text"] for a in self.task["amendments"]],
+                         ["Only the login half; the signup half is WUKO-108.", "Drop the dark-mode part."])
+        self.assertTrue(all(isinstance(a["at"], int) for a in self.task["amendments"]))
+        v, text = self.show()
+        self.assertEqual([a["text"] for a in v["amendments"]], [a["text"] for a in self.task["amendments"]])  # --json
+        brief, head = text.index("Make the gate."), text.index("Brief changes (newest last, these win over the brief above):")
+        self.assertLess(brief, head)
+        self.assertLess(text.index("Only the login half"), text.index("Drop the dark-mode part."))
+        self.assertGreater(text.index("Only the login half"), head)
+        with self.assertRaises(self.commands.Fail):
+            self.edit("  ")
+
+    def test_the_reviewer_prompt_has_the_amendment_after_the_brief(self):
+        self.edit("Only the login half.")
+        self.ready()
+        cmd = self.runs[0][self.runs[0].index("--") + 1:]
+        prompt = cmd[cmd.index("-i") + 1]
+        brief = prompt.index("Make the gate.")
+        head = prompt.index("Brief changes (newest last, these win over the brief above):")
+        self.assertLess(brief, head)
+        self.assertLess(head, prompt.index("Only the login half."))
+        self.assertLess(prompt.index("Only the login half."), prompt.index(f"Review commit {self.head}"))
+
+    def test_a_running_tasks_agent_is_told(self):
+        self.edit("Only the login half.")
+        self.assertEqual(len(self.told), 1)
+        self.assertIn("The brief of SHEP-13 changed: Only the login half.", self.told[0])
+
+    def test_the_real_tell_sends_through_hc_without_starting_one(self):
+        from unittest import mock
+        import herdr_task.news as news
+        sent = []
+        with mock.patch.object(self.commands, "tell", self.real_tell), \
+                mock.patch.object(self.commands, "workers", lambda s, t: [{"address": "w1"}]), \
+                mock.patch.object(news, "send_or_hold", lambda to, msg: sent.append((to, msg)) or True), \
+                mock.patch.object(self.commands, "start_again", mock.Mock(side_effect=AssertionError("started"))):
+            self.edit("Only the login half.")
+        self.assertEqual(sent, [("w1", "The brief of SHEP-13 changed: Only the login half.\n"
+                                       "Work to it from now on; your reviewer judges by it too.")])
+
+    def test_a_failed_send_keeps_the_change(self):
+        from unittest import mock
+        with mock.patch.object(self.commands, "tell", mock.Mock(side_effect=self.commands.Fail("hc send failed"))):
+            self.edit("Only the login half.")
+        self.assertEqual([a["text"] for a in self.task["amendments"]], ["Only the login half."])
+
+    def test_amend_on_a_todo_task_sends_nothing(self):
+        self.task["state"] = "todo"
+        self.edit("Only the login half.")
+        self.assertEqual(self.told, [])
+        self.assertEqual(len(self.task["amendments"]), 1)
+        from herdr_task.launch import task_text
+        self.assertTrue(task_text(self.task).endswith("Only the login half."))  # the worker's brief at start has it
+
+
+
 class LoopBreaker(GateReview):
     """FAC-54: a task whose herdr-task rounds don't converge, or that is far over its estimate, stops
     as Needs you "Recap required"; ready refuses until the Assistant decides (continue once)."""

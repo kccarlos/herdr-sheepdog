@@ -282,6 +282,8 @@ def main():
     c.add_argument("--title")
     c.add_argument("--prompt")
     c.add_argument("--prompt-file")
+    c.add_argument("--amend", help="add a dated change to the brief (kept beside it; the reviewer judges by both); "
+                                   "a running task's agent is told at once")
     task_opts(c)
     notes_opts(c)
     c.add_argument("--after", help="start only once these tasks are done: 3,5, WEB-2, vm-b:HAT-12 (\"\" clears)")

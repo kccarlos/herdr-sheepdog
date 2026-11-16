@@ -29,7 +29,7 @@ from .github import (already_merged, pr_head_problem, push_branch, drop_branch, 
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING, ci_awaited, NO_CHECKS_MS, NO_CI_RUN
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, is_coordinator, launch, name_tabs,
-    own_path, parent_for, resume_argv, REVIEW_READS, review_reads, retag_tabs, reviewer_sandbox, sandboxes, set_branch, tab_title, task_tabs,
+    own_path, parent_for, resume_argv, stamp, task_text, REVIEW_READS, review_reads, retag_tabs, reviewer_sandbox, sandboxes, set_branch, tab_title, task_tabs,
 )
 from .store import is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
 from .queues import after_refs, parse_after, queue_reason, running_count, set_after, urgent
@@ -240,6 +240,8 @@ def cmd_show(args):
         elif urgent(t) and t["state"] == "running" and running_count(s) > s.max_running():
             v["urgent_past_cap"] = True  # FAC-103: it took the folder's one extra slot
         v["settings"] = task_settings(s, t)
+        if t.get("amendments"):
+            v["amendments"] = t["amendments"]
         kind = review_kind(t)
         if kind:
             v["review_kind"] = kind
@@ -306,6 +308,9 @@ def cmd_show(args):
         text.append(f"log: {entry['text'] if isinstance(entry, dict) else entry}")
     if v.get("prompt"):
         text.append("\n" + v["prompt"].strip())
+    if v.get("amendments"):
+        text.append("\nBrief changes (newest last, these win over the brief above):")
+        text += [f"- {stamp(a['at'])}: {a['text']}" for a in v["amendments"]]
     text.append("\n" + block)
     say(args, v, "\n".join(text))
 
@@ -702,7 +707,7 @@ def gate_step(s, t):
     cmd = f"{ht} review {ref} --folder {folder}"
     check = (settings_for(s, t.get("space"))["tasks"].get("check") or "").strip()
     prompt = "\n\n".join([
-        instructions("reviewer"), f"The task, {ref}:\n" + ((t.get("prompt") or "").strip() or t["title"]),
+        instructions("reviewer"), f"The task, {ref}:\n" + task_text(t),
         f"Review commit {head} in {wt}. {shown}" + (", cut: run it for the rest" if len(diff) > 20000 else "")
         + f":\n{diff[:20000]}",
         *([FABLE_WORDS] if fable else []),
@@ -1493,13 +1498,37 @@ def cmd_edit(args):
         if t["mode"] != "worktree" and not t.get("worktree"):
             t.pop("branch", None)
         set_branch(s, t, getattr(args, "branch", None))
+        sent = amend(s, t, args)  # last: its agent is told only of an edit that saves
         s.dirty = True
         tabs = task_tabs(s, t) if t["title"] != old else []
         v = view(s, t)
     left = name_tabs([(tab, tab_title(s, t)) for tab in tabs])
     if at:
         ensure_scheduler_quietly()
-    say(args, {**v, "rename": left}, f"{s.ref(t)} saved" + (f": {v['why']}." if v["status"] == "scheduled" else "."))
+    say(args, {**v, "rename": left, **({"sent": sent} if sent is not None else {})},
+        f"{s.ref(t)} saved" + (f": {v['why']}." if v["status"] == "scheduled" else ".")
+        + (f" Its agent was told the brief changed ({sent})." if sent else "")
+        + (" Its agent couldn't be told; the change is kept for its reviewer." if sent is False else ""))
+
+
+def amend(s, t, args):
+    """FAC-109: `edit --amend` keeps the brief as it was and adds a dated change, which its reviewer judges by too;
+    a running task's agent is told at once. Returns the terminal told, False when the send failed (the change
+    is kept), else None."""
+    text = (getattr(args, "amend", None) or "").strip()
+    if not text:
+        if getattr(args, "amend", None) is not None:
+            raise Fail("--amend needs the change, in words.")
+        return None
+    t.setdefault("amendments", []).append({"at": now(), "text": text})
+    s.dirty = True
+    if t["state"] != "running":
+        return None
+    try:
+        return tell(s, t, f"The brief of {s.ref(t)} changed: {text}\nWork to it from now on; your reviewer judges by it too.",
+                    args, start=False)[0]
+    except Fail:
+        return False
 
 
 def cmd_config(args):
