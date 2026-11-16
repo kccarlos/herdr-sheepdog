@@ -19,6 +19,7 @@ from .sessions import session_of
 from .launch import coordinator_in
 from .store import locate, read_list, Store, store_files
 from .output import line, minutes, view
+from .github import NO_CI_RUN
 from .takeover import backup_news
 
 
@@ -72,7 +73,8 @@ def news_line(s, t, v, event, words=None):
     attr = lambda x: str(x).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
     note = " ".join(str(t.get("agents_md") or "").split())
     said = " ".join(str(t.get("summary") or "").split())
-    text = {"ready": f"{ref} is ready: {title}" + (f" · {said}" if said else "") + (f" · For AGENTS.md: {note}" if note else ""),
+    no_ci = f" · Waits for the person's Accept: {NO_CI_RUN}" if (t.get("pr") or {}).get("no_ci") else ""  # FAC-105
+    text = {"ready": f"{ref} is ready: {title}" + (f" · {said}" if said else "") + (f" · For AGENTS.md: {note}" if note else "") + no_ci,
             "needs-you": f"{ref} needs you: {v.get('why') or 'Needs you'} ({title})",
             "failed": f"{ref} failed: {v.get('why') or 'Agent stopped'} ({title})",
             "stalled": f"{ref} {words} ({title})",

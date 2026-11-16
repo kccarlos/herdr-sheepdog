@@ -8,7 +8,7 @@ import os
 import re
 
 from .base import Fail, HOME, git, WHERE
-from .github import BAD, CANT_READ_CHECKS, PENDING, pr_view
+from .github import BAD, CANT_READ_CHECKS, NO_CI_RUN, PENDING, pr_view
 
 ARTIFACTS = WHERE.path("artifacts")
 # Files named on the card, and commits.
@@ -91,6 +91,8 @@ def checks_of(t):
     if v.get("checks_unknown"):
         # SHEP-179: this machine's GitHub token can't read its checks: never said to pass
         return {"state": "unknown", "text": CANT_READ_CHECKS}
+    if not rows and t["pr"].get("no_ci"):
+        return {"state": "unknown", "text": NO_CI_RUN}  # FAC-105: CI is set up, but nothing ran
     if not rows:
         return {"state": "none", "text": "No checks on its pull request"}
     return {"state": "passed", "text": f"All {len(rows)} passed"}

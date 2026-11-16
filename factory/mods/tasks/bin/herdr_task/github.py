@@ -1,6 +1,7 @@
 """GitHub and merging: pull requests, checks, and finishing a merged task."""
 
 import datetime
+import fnmatch
 import json
 import os
 import re
@@ -693,12 +694,102 @@ NO_CHECKS_MS = 30000
 # SHEP-179: checks that can't be read here, while GitHub blocks the merge: Working this long at most, then Ready.
 UNKNOWN_CHECKS_MS = 20 * 60000
 CHECKS_RUNNING, GITHUB_LOOKS, BACK_TO_AGENT = "Checks running", "Waiting for GitHub", "Back to its agent to fix"
+# FAC-105: a base whose workflows run on its pull requests, yet none ran on this one this long after ready:
+# never read as passing (Actions disabled on the repo, or not triggered); it waits for the person.
+NO_CI_RUN_MS = 5 * 60000
+NO_CI_RUN = "No CI run appeared for this PR; GitHub Actions may be disabled or not triggered"
+_ON = re.compile(r"""^(?:on|"on"|'on'|true)\s*:\s*(.*)$""")
+_CI_SEEN = {}  # "<base commit>:<base>" -> whether its workflows run on a pull request to it
 
 
-def pr_wait(v, since):
+def _indent(line):
+    return len(line) - len(line.lstrip())
+
+
+def _items(lines, i):
+    """The list a `key:` at lines[i] holds: inline ([a, b] or a) or the `- a` lines under it (or at its own indent)."""
+    rest = lines[i].split(":", 1)[1].strip()
+    if rest:
+        return [x.strip(" '\"") for x in rest.strip("[]").split(",") if x.strip()]
+    out = []
+    for line in lines[i + 1:]:
+        if _indent(line) < _indent(lines[i]) or _indent(line) == _indent(lines[i]) and not line.lstrip().startswith("-"):
+            break
+        if line.strip().startswith("-"):
+            out.append(line.strip()[1:].strip(" '\""))
+    return out
+
+
+def runs_on_pr(text, base):
+    """Whether a workflow file's `on:` runs it on a pull request to `base`: pull_request present, its branches
+    absent or matching base, branches-ignore not. A small reader of the usual forms, no YAML library."""
+    lines = [x for x in (re.sub(r"\s+#.*$", "", x).rstrip() for x in text.splitlines()) if x.strip() and not x.lstrip().startswith("#")]
+    for i, line in enumerate(lines):
+        m = _indent(line) == 0 and _ON.match(line)
+        if not m:
+            continue
+        if m.group(1):  # on: pull_request · on: [push, pull_request]
+            return "pull_request" in re.findall(r"[\w-]+", m.group(1))
+        block = []
+        for x in lines[i + 1:]:
+            if _indent(x) == 0 and not x.startswith("-"):  # on:\n- pull_request: a list at on's own indent
+                break
+            block.append(x)
+        for j, b in enumerate(block):
+            if b.strip().lstrip("-").strip().split(":")[0].strip(" '\"") != "pull_request":
+                continue
+            sub = []
+            for x in block[j + 1:]:
+                if _indent(x) <= _indent(b):
+                    break
+                sub.append(x)
+            keys = {x.strip().split(":")[0]: k for k, x in enumerate(sub) if ":" in x}
+            match = lambda key: any(fnmatch.fnmatchcase(base, p) for p in _items(sub, keys[key]) if not p.startswith("!"))
+            if "branches-ignore" in keys and match("branches-ignore"):
+                return False
+            return "branches" not in keys or match("branches")
+        return False
+    return False
+
+
+def ci_expected(s, task):
+    """FAC-105: the task's base branch (as fetched here: its remote's copy, else the local branch) has a workflow
+    in .github/workflows that runs on a pull request to it. Cached per base commit."""
+    main, base = s.loc["folder"], task.get("base") or "main"
+    for ref in (f"{remote_of(main, task.get('branch'))}/{base}", base):
+        ok, sha, _ = git(main, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
+        if ok and sha:
+            break
+    else:
+        return False
+    key = f"{sha}:{base}"
+    if key not in _CI_SEEN:
+        ok, names, _ = git(main, "ls-tree", "--name-only", sha, ".github/workflows/")
+        _CI_SEEN[key] = ok and any(runs_on_pr(git(main, "show", f"{sha}:{n}")[1], base)
+                                   for n in names.splitlines() if n.endswith((".yml", ".yaml")))
+    return _CI_SEEN[key]
+
+
+def ci_awaited(s, task, v):
+    """FAC-105: no check on its pull request (v) yet, and its base's workflows say one should run."""
+    return not v.get("statusCheckRollup") and not v.get("checks_unknown") and ci_expected(s, task)
+
+
+def ci_runs_on(task, v):
+    """FAC-105: GitHub Actions has a run for its pull request's head commit (its checks just don't show yet)."""
+    ok, out, _ = gh("run", "list", "--repo", pr_repo(task), "--branch", (task["pr"].get("branch") or task.get("branch") or ""),
+                    "--json", "headSha", "--limit", "20")
+    try:
+        return ok and any(r.get("headSha") == v.get("headRefOid") for r in json.loads(out))
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+def pr_wait(v, since, ci=False):
     """SHEP-175: what a Ready task's pull request (v: pr_view's answer) still waits on before the
     person has anything to do, in a few words, or None once its checks are done and GitHub knows it
-    can merge. A problem (pr_problem()) goes back to its agent: Working still, never Ready first."""
+    can merge. A problem (pr_problem()) goes back to its agent: Working still, never Ready first. ci: a check is
+    expected (ci_awaited()), so none waits NO_CI_RUN_MS, not NO_CHECKS_MS (FAC-105)."""
     if v.get("state") != "OPEN":
         return None
     if pr_problem(v):
@@ -707,7 +798,7 @@ def pr_wait(v, since):
         return CHECKS_RUNNING
     if (v.get("mergeable") or "").upper() not in ("MERGEABLE",):
         return GITHUB_LOOKS
-    if not v.get("statusCheckRollup") and now() - (since or 0) < NO_CHECKS_MS:
+    if not v.get("statusCheckRollup") and now() - (since or 0) < (NO_CI_RUN_MS if ci else NO_CHECKS_MS):
         return CHECKS_RUNNING
     if v.get("checks_unknown") and v.get("mergeStateStatus") == "BLOCKED" and not needs_approval(v) \
             and now() - (since or 0) < UNKNOWN_CHECKS_MS:

@@ -11143,6 +11143,105 @@ class AutoAccept(unittest.TestCase):
         self.assertEqual((self.tick_green()["done"], self.task["accepted_by"]), ([13], "fable"))
 
 
+class NoCIRunWithCISetUp(unittest.TestCase):
+    """FAC-105: a base whose workflow runs on pull requests, and no check on the PR NO_CI_RUN_MS after ready: no merge
+    under "after checks" or auto-accept, the reason in show, the Accept card and the ready news; the person's Accept
+    still merges. No such workflow: merges as before (SHEP-175); checks that show late merge normally."""
+
+    setUp_fac94, tick_green = DesignDocAndOpenAskWaitForAccept.setUp, DesignDocAndOpenAskWaitForAccept.tick_green
+    setUp_gate, git, change, ready, verdict, env = (GateReview.setUp, GateReview.git, GateReview.change, GateReview.ready,
+                                                    GateReview.verdict, GateReview.env)
+
+    def setUp(self):
+        from unittest import mock
+        self.setUp_fac94()
+        import herdr_task.github as github, herdr_task.news as news, herdr_task.proof as proof
+        self.github, self.news, self.proof, self.rows, self.shown = github, news, proof, [], []
+        view = lambda t: {"state": "MERGED" if self.merges else "OPEN", "mergeable": "MERGEABLE", "headRefOid": self.head,
+                          "statusCheckRollup": self.rows}
+        for mod, name, val in ((self.commands, "pr_view", view), (self.tick, "pr_view", view), (proof, "pr_view", view),
+                               (self.commands, "view", self.output.view),  # the real status line
+                               (self.commands, "say", lambda args, v, text: self.shown.append((v, text)))):
+            p = mock.patch.object(mod, name, val); p.start(); self.addCleanup(p.stop)
+
+    def workflow(self, on):
+        os.makedirs(os.path.join(self.main, ".github", "workflows"))
+        with open(os.path.join(self.main, ".github", "workflows", "check.yml"), "w") as f:
+            f.write(f"name: Check\n\non:\n{on}\njobs:\n  check:\n    runs-on: ubuntu-latest\n")
+        self.git(self.main, "add", ".github"); self.git(self.main, "commit", "-q", "-m", "ci")
+        self.git(self.main, "push", "-q", "origin", "main")
+
+    def age(self, ms):
+        self.task["ready_at"] -= ms
+
+    def show(self):
+        self.commands.cmd_show(self.commands.argparse.Namespace(id="SHEP-13", json=True, folder=None, space=None, evidence=False))
+        return self.shown[-1][0].get("accept_wait")
+
+    def test_after_checks_waits_says_why_and_late_checks_still_merge(self):
+        self.workflow("  pull_request:\n    branches: [main]  # PRs to main\n  push:\n")
+        self.ready(); self.verdict("term-1"); self.verdict("term-2")
+        self.assertEqual(self.task.get("auto_merge"), "checks")
+        self.age(self.commands.NO_CHECKS_MS)  # past SHEP-175's wait: still Working, never merged
+        self.assertEqual((self.tick_green()["done"], self.merges, self.task["pr"].get("wait")), ([], [], "Checks running"))
+        self.age(self.github.NO_CI_RUN_MS)
+        self.assertEqual((self.tick_green()["done"], self.merges, self.task["state"]), ([], [], "ready"))
+        self.assertEqual((self.task["pr"].get("no_ci"), "wait" in self.task["pr"], "auto_merge" in self.task), ("checks", False, False))
+        self.assertEqual((self.agents.task_status(self.task, [])[0], self.output.view(self.store, self.task, [])["status"],
+                          self.news.news_state(self.store, self.task, [])[1]), ("ready", "ready", "ready"))  # Ready, told
+        why = self.github.NO_CI_RUN
+        self.assertEqual(self.show(), why)
+        self.assertIn(f"waits for the person's Accept: {why}", self.shown[-1][1])
+        self.assertEqual(self.proof.checks_of(self.task), {"state": "unknown", "text": why})
+        self.assertIn(why, self.news.news_line(self.store, self.task, {}, "ready"))
+        self.assertEqual((self.tick_green()["done"], self.merges), ([], []))  # every tick, not just once
+        self.rows.append({"name": "check", "status": "COMPLETED", "conclusion": "SUCCESS"})  # a run shows up at last
+        self.assertEqual((self.tick_green()["done"], len(self.merges), "no_ci" in self.task["pr"]), ([13], 1, False))
+        self.assertEqual(self.task["accepted_by"], "auto")
+
+    def test_auto_accept_agrees_and_the_persons_accept_merges(self):
+        from unittest import mock
+        with open(self.settings.SETTINGS, "w") as f:
+            json.dump({"spaces": {"sp1": {"folder": self.main, "tasks": {"review_min": 2, "review_rounds": 5}}}}, f)
+        p = mock.patch.object(self.commands, "find_proof", lambda *a: {"id": "art1", "title": "Gate · Proof"}); p.start(); self.addCleanup(p.stop)
+        self.workflow("  - push\n  - pull_request\n")
+        self.ready(); self.verdict("term-1"); self.verdict("term-2")
+        self.assertEqual(self.task.get("auto_merge"), "checks")
+        self.age(self.github.NO_CI_RUN_MS)
+        self.assertEqual((self.tick_green()["done"], self.merges, "auto_accepted" in self.task), ([], [], False))
+        self.assertEqual(self.commands.merge_now(self.store, self.task), self.github.NO_CI_RUN)
+        self.assertEqual(self.show(), self.github.NO_CI_RUN)
+        self.commands.cmd_accept(self.commands.argparse.Namespace(id="SHEP-13", json=True, space=None, agent=None, argv=None))
+        self.assertEqual((len(self.merges), self.task["accepted_by"], "auto_accepted" in self.task), (1, "person", False))
+
+    def test_no_pull_request_workflow_merges_as_today(self):
+        self.workflow("  push:\n    branches: [main]\n  pull_request:\n    branches: [release]\n")
+        self.ready(); self.verdict("term-1"); self.verdict("term-2")
+        self.age(self.commands.NO_CHECKS_MS)
+        self.assertEqual((self.tick_green()["done"], len(self.merges), "no_ci" in self.task["pr"]), ([13], 1, False))
+
+    def test_the_workflow_reader_knows_the_usual_on_forms(self):
+        forms = {"on: pull_request": True, "on: [push, pull_request]": True, "on: push": False,
+                 "'on':\n  pull_request:\n    branches:\n      - main\n": True,
+                 "on:\n  pull_request:\n    branches:\n    - main\n": True,  # a list at its key's own indent
+                 "on:\n- push\n- pull_request\n": True, "on:\n  - push\n  - pull_request\n": True,
+                 "on:\n  pull_request:\n    branches:\n    - rel/*\n    types: [opened]\n": False,
+                 "on:\n  pull_request:\n    branches-ignore: [main]\n": False,
+                 "on:\n  pull_request_target:\n  push:\n": False,
+                 "on:\n  pull_request:\n    types: [opened]  # any base\njobs:\n  x:\n    branches: [nope]\n": True}
+        for text, runs in forms.items():
+            self.assertEqual(self.github.runs_on_pr(text, "main"), runs, text)
+
+    def test_a_run_for_its_head_that_doesnt_show_yet_keeps_it_working(self):
+        from unittest import mock
+        self.workflow("  pull_request:\n")
+        self.ready(); self.verdict("term-1"); self.verdict("term-2")
+        self.age(self.github.NO_CI_RUN_MS)
+        runs = json.dumps([{"headSha": self.head}])
+        with mock.patch.object(self.github, "gh", lambda *a: (True, runs, "") if a[:2] == ("run", "list") else (True, "o/r", "")):
+            self.assertEqual((self.tick_green()["done"], self.task["pr"].get("wait"), "no_ci" in self.task["pr"]), ([], "Checks running", False))
+
+
 class AgyStartNudge(unittest.TestCase):
     """FAC-100: an agy worker idle at turn 0 after its start gets one nudge; still idle after it, Needs you says so."""
 

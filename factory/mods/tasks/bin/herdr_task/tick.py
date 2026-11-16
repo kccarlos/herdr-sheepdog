@@ -19,8 +19,8 @@ from .agents import (
 )
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
-from .github import (already_merged, BEHIND, drop_branch, finish, github, merged_here, needs_approval, note_checks, pr_merged, pr_pending, pr_problem,
-                     pr_repo, pr_view, pr_wait, CI_STOPPED, queue_entry, task_problem, task_github, tidy_done, tidy_due, update_main, watch_main)
+from .github import (already_merged, BEHIND, CHECKS_RUNNING, ci_awaited, ci_runs_on, drop_branch, finish, github, merged_here, needs_approval, note_checks, pr_merged, pr_pending, pr_problem,
+                     pr_repo, pr_view, pr_wait, CI_STOPPED, queue_entry, task_problem, task_github, tidy_done, tidy_due, update_main, watch_main, UNKNOWN_CHECKS_MS)
 from .launch import default_space, parent_for, sweep_sandboxes
 from .store import locate, read_list, Store, store_files
 from .queues import cap_for, machine_hold, refresh_ext, running_count, set_hold, urgent, waiting_ext, waiting_for
@@ -114,7 +114,21 @@ def facts(s, t, report):
         t["_pr_fresh"] = not problem and not pr_pending(v) and not needs_approval(v)
         # Ready only once its checks are done and GitHub knows it can merge (SHEP-175): Working till then.
         if t["state"] == "ready":
-            wait = pr_wait(v, t.get("ready_at"))
+            ci = v.get("state") == "OPEN" and ci_awaited(s, t, v)
+            # FAC-105: timed from its newest head Herdr made (FAC-98's update-branch), else from ready.
+            since = max(t.get("ready_at") or 0, (pr.get("synced") or {}).get("at") or 0) if ci else t.get("ready_at")
+            wait = pr_wait(v, since, ci)
+            if ci and not wait and not pr.get("no_ci"):
+                # FAC-105: its base's workflows run on pull requests, yet none ran on it: Ready for the person, its
+                # pending merge set aside (kept in no_ci), the reason told; an Actions run for its head not shown yet waits.
+                if ci_runs_on(t, v) and now() - since < UNKNOWN_CHECKS_MS:
+                    wait = CHECKS_RUNNING
+                else:
+                    pr["no_ci"], s.dirty = t.pop("auto_merge", None) or True, True
+            elif not ci and (held := pr.pop("no_ci", None)):
+                s.dirty = True
+                if held is not True and not t.get("accepted_by"):
+                    t.setdefault("auto_merge", held)  # its checks showed after all: merges by itself as it would have
             if wait != pr.get("wait"):
                 if wait:
                     pr["wait"] = wait

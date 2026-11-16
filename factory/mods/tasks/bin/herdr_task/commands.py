@@ -26,7 +26,7 @@ from .agents import (
 from .sessions import refresh_sessions
 from .github import (already_merged, pr_head_problem, push_branch, drop_branch, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
                      pr_pending, pr_problem, pr_repo, pr_behind, pr_update_branch, synced_head, task_problem, SYNC_CHECKS_MS, SYNC_GRACE_MS, UPDATE_CONFLICT, pr_view, remote_of, task_github, update_main, watch_main)
-from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING, NO_CHECKS_MS
+from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING, ci_awaited, NO_CHECKS_MS, NO_CI_RUN
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, is_coordinator, launch, name_tabs,
     own_path, parent_for, resume_argv, REVIEW_READS, review_reads, retag_tabs, reviewer_sandbox, sandboxes, set_branch, tab_title, task_tabs,
@@ -231,6 +231,8 @@ def cmd_show(args):
         v = view(s, t, live)
         if t["state"] == "ready" and not t.get("auto_merge") and not t.get("accepted_by"):
             v["accept_wait"] = t.get("accept_wait") or accept_bar(s, t)[1]  # FAC-99: why the person accepts it
+        if t["state"] == "ready" and (t.get("pr") or {}).get("no_ci") and not t.get("accepted_by"):
+            v["accept_wait"] = NO_CI_RUN  # FAC-105: its merge (after checks or auto-accept) holds for the person
         if t.get("auto_accepted"):
             v["auto_accepted"] = t["auto_accepted"]
         if t["state"] == "queued":
@@ -1032,6 +1034,7 @@ def finalize(s, t):
     for k in ("attention", "merge_requested", "review", "accepted_by", "auto_accepted", "accept_wait"):
         t.pop(k, None)
     (t.get("pr") or {}).pop("wait", None)
+    (t.get("pr") or {}).pop("no_ci", None)
     s.dirty = True
     wt = t.get("worktree")
     msg = f"{s.ref(t)} is ready."
@@ -1882,6 +1885,10 @@ def merge_now(s, t, accepting=False):
                 return t["attention"]
             t["pr"]["wait"] = CHECKS_RUNNING
             return CHECKS_RUNNING
+        if not accepting and not t.get("accepted_by") and t.get("auto_merge") != "auto" and ci_awaited(s, t, v):
+            # FAC-105: CI is set up for its base but no check ran on it: never merged as if they passed (the tick
+            # decides when it's missing); the person's Accept still merges it.
+            return NO_CI_RUN if t["pr"].get("no_ci") else CHECKS_RUNNING
         if not accepting and not t.get("accepted_by") and (by := auto_accepter(s, t)):  # FAC-99: its evidence, on the head merged
             if not v.get("statusCheckRollup"):
                 if t["pr"].get("wait") or now() - (t.get("ready_at") or 0) < NO_CHECKS_MS:
