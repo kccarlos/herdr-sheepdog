@@ -677,6 +677,8 @@ def handoff(s, task, prev, parent=None, argv=None, space=None):
     lines = [f"You are taking over task {s.ref(task)} \"{task['title']}\" from another agent.", instructions("worker")]
     lines.append(where_line(task))
     lines.append("The task:\n" + ((task.get("prompt") or "").strip() or task["title"]))
+    from .handoff import work_context
+    lines.append(work_context(s, task, prev))
     if prev and prev.get("log"):
         lines.append(f"The previous agent ({prev.get('agent') or 'agent'}) kept its session log at {prev['log']}: read the recent part to pick up where it left off.")
     elif prev:

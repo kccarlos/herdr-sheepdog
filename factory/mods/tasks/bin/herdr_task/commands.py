@@ -17,7 +17,7 @@ from .settings import (write_max_running,
     accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, bare, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
     fable_due, gate_min, merge_hold, merge_policy,
     merge_wait_why, MUST_WORDS, remove_build_dir, review_kind, review_limits, set_opts, settings_block, settings_for, space_base,
-    task_settings, worker_argv, worktrees_on,
+    task_settings, worker_argv, worker_pick, worktrees_on, set_task, argv_model, AGENTS,
 )
 from .agents import (
     agent_log, agent_running, agy_bg_tasks, background_jobs, busy_again, claude_bg_shells, detail, fit, LINE_MAX, live_agents, ready_turns,
@@ -1632,44 +1632,147 @@ def end_agent(s, t, address):
     kill_agent(address, run)
 
 
-def cmd_switch(args):
-    with open_store(args) as s:
-        t = s.find(args.id)
-        live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)]
-        refresh_sessions(s, t, live)
-        old = live[-1] if live else None
-        labels = (old or {}).get("labels") or {}
-        # A given --space wins: the task moves there (#837); else the old agent's own space.
-        space = ((bare(args.space) if args.space else None) or labels.get("herdr.task.space") or labels.get("herdr.space")
-                 or t.get("space") or default_space())
-        if t["state"] in ("todo", "scheduled", "queued", "done"):
-            t["state"] = "running"
-            t.setdefault("started", now())
-            t.pop("queue", None)
-            t.pop("scheduled_for", None)
-        ended = []
-        # An agent switching itself can't end first: that would end this command too.
-        me = os.environ.get("HC_TERMINAL_ID")
-        own = bool(old and me and old["address"].split("/")[-1] == me)
-        if old and not args.keep and not own:
-            # The old agent ends before the new one starts (SHEP-211): the new one may resume the same session,
-            # and killing the old one after that cut the session's turn short under the new agent, which then
-            # sat on "Interrupted" with nothing to do. Its worktree and session stay for the new agent.
-            end_agent(s, t, old["address"])
-            ended.append(old["address"])
-        try:
-            a, resumed = start_again(s, t, space, args.agent, args.argv, parent=args.parent, nudge=SWITCH_NUDGE)
-        except Fail as e:
-            if ended:
-                raise Fail(f"{e} The old agent {ended[0]} already ended: its work is kept, `herdr-task resume "
-                           f"{s.ref(t)}` starts it again.")
-            raise
-        v = view(s, t)
-    if own and not args.keep:
+def retarget(s, t, agent, model):
+    """Sets the task's agent (and model) as edit does: the next agent started for it, queued too, runs on it.
+    Another CLI drops the old model (unless --model gives one) and effort: their words differ per CLI."""
+    if agent != worker_pick(s, t, t.get("space")).get("agent"):
+        set_task(t, "model", model or "")
+        set_task(t, "effort", "")
+    elif model:
+        set_task(t, "model", model)
+    set_task(t, "agent", agent)
+    t["pick_at"] = now()
+    q = t.get("queue") or {}
+    if q.get("argv") and not q.get("custom"):
+        q["argv"] = worker_argv(s, t, q.get("space"))
+    s.dirty = True
+
+
+def switch_one(s, t, args, live):
+    """Replaces the task's agent (`live`: its running agents, oldest first). Returns (data, line, own): own is
+    the caller's own agent, ended after the store is saved."""
+    refresh_sessions(s, t, live)
+    old = live[-1] if live else None
+    labels = (old or {}).get("labels") or {}
+    # A given --space wins: the task moves there (#837); else the old agent's own space.
+    space = ((bare(args.space) if args.space else None) or labels.get("herdr.task.space") or labels.get("herdr.space")
+             or t.get("space") or default_space())
+    if t["state"] in ("todo", "scheduled", "queued", "done"):
+        t["state"] = "running"
+        t.setdefault("started", now())
+        t.pop("queue", None)
+        t.pop("scheduled_for", None)
+    ended = []
+    # An agent switching itself can't end first: that would end this command too.
+    me = os.environ.get("HC_TERMINAL_ID")
+    own = bool(old and me and old["address"].split("/")[-1] == me)
+    if old and not args.keep and not own:
+        # The old agent ends before the new one starts (SHEP-211): the new one may resume the same session,
+        # and killing the old one after that cut the session's turn short under the new agent, which then
+        # sat on "Interrupted" with nothing to do. Its worktree and session stay for the new agent.
         end_agent(s, t, old["address"])
         ended.append(old["address"])
-    say(args, {**v, "terminal": a["address"], "space": space, "parent": a.get("parent"), "resumed": resumed, "ended": ended},
-        f"{s.ref(t)}: {a['agent']} {a['address']} {'resumed its session' if resumed else 'took over'}" + (f", {old['address']} ended" if ended else ""))
+    # A --model rides on the task's own pick (retarget), which start_again then reads.
+    key = None if getattr(args, "model", None) else args.agent
+    try:
+        a, resumed = start_again(s, t, space, key, args.argv, parent=args.parent, nudge=SWITCH_NUDGE)
+    except Fail as e:
+        if ended:
+            raise Fail(f"{e} The old agent {ended[0]} already ended: its work is kept, `herdr-task resume "
+                       f"{s.ref(t)}` starts it again.")
+        raise
+    data = {**view(s, t), "terminal": a["address"], "space": space, "parent": a.get("parent"), "resumed": resumed, "ended": ended}
+    return data, f"{s.ref(t)}: {a['agent']} {a['address']} {'resumed its session' if resumed else 'took over'}", \
+        old["address"] if own and not args.keep else None
+
+
+def ended_line(data, own):
+    if own:
+        data["ended"].append(own)
+    return f", {', '.join(data['ended'])} ended" if data["ended"] else ""
+
+
+def cmd_switch(args):
+    if getattr(args, "all", False):
+        return switch_all(args)
+    if not args.id:
+        raise Fail("Name a task, or give --all --from <cli[:model]> --agent <cli>.")
+    if getattr(args, "dry_run", False) or getattr(args, "from_", None) or getattr(args, "reviewer", False):
+        raise Fail("--dry-run, --from and --reviewer go with --all.")
+    with open_store(args) as s:
+        t = s.find(args.id)
+        if getattr(args, "model", None):
+            retarget(s, t, args.agent or worker_pick(s, t, t.get("space")).get("agent"), args.model)
+        live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)]
+        data, text, own = switch_one(s, t, args, live)
+    if own:
+        end_agent(s, t, own)
+    say(args, data, text + ended_line(data, own))
+
+
+def matches(pick, want):
+    """A task's {agent, model} against --from's cli[:model]: the same CLI, and the same model when one is named."""
+    cli, _, model = want.partition(":")
+    return (pick.get("agent") or "").lower() == cli.strip().lower() and \
+        (not model.strip() or (pick.get("model") or "").lower() == model.strip().lower())
+
+
+def switch_all(args):
+    """FAC-104: every task of the folder not done whose agent matches --from moves to --agent: a task with a
+    worker at work is switched (with a handoff when the CLI changes); any other is edited, so its next agent
+    runs on the new choice. Reviewers only with --reviewer."""
+    if args.id or not args.from_ or not args.agent:
+        raise Fail("switch --all takes --from <cli[:model]> and --agent <cli>, and no task id.")
+    if args.argv:
+        raise Fail("switch --all takes --agent and --model, not --argv.")
+    if args.agent not in AGENTS:
+        raise Fail(f"--agent is one of {', '.join(AGENTS)}, not {args.agent!r}.")
+    lines, out, owns = [], [], []
+    with open_store(args, write=not args.dry_run) as s:
+        for t in s.data.get("tasks") or []:
+            if t.get("state") == "done" or t.get("archived"):
+                continue
+            live = workers(s, t) if t.get("state") == "running" else []  # Ready and the rest: edited
+            prev = last_agent(t)
+            if live and prev and prev.get("argv"):
+                pick = {"agent": prev.get("agent") or agent_key(prev["argv"]), "model": argv_model(prev["argv"])[0]}
+            else:
+                pick = worker_pick(s, t, t.get("space"))
+            rev = args.reviewer and t.get("reviewer") and matches({"agent": t["reviewer"], "model": t.get("reviewer_model")}, args.from_)
+            if not matches(pick, args.from_) and not rev:
+                continue
+            what = "switch" if live and matches(pick, args.from_) else "edit"
+            row = {"task": s.ref(t), "action": what, "from": pick.get("agent"), "to": args.agent, "reviewer": bool(rev)}
+            line = f"{s.ref(t)}: {what} {pick.get('agent')} -> {args.agent}" + (" (reviewer too)" if rev else "")
+            if args.dry_run:
+                lines.append(line + " (dry run)")
+                out.append(row)
+                continue
+            if rev:
+                set_task(t, "reviewer", args.agent)
+                set_task(t, "reviewer_model", args.model or "")
+                t["reviewer_at"] = now()  # as edit: earlier reviewer failures no longer hold it
+                s.dirty = True
+            if not matches(pick, args.from_):
+                lines.append(line.replace(f": {what} ", ": reviewer ", 1))
+                out.append(row)
+                continue
+            retarget(s, t, args.agent, args.model)
+            if what == "switch":
+                try:
+                    data, text, own = switch_one(s, t, argparse.Namespace(**{**vars(args), "agent": None, "keep": False}), live)
+                    line = text + (f", {', '.join(data['ended'])} ended" if data["ended"] else "")
+                    if own:
+                        owns.append((t, own))
+                        line += f", {own} ends last"
+                except Fail as e:
+                    line = f"{s.ref(t)}: switch failed: {e}"
+                    row["error"] = str(e)
+            lines.append(line)
+            out.append(row)
+    for t, own in owns:
+        end_agent(s, t, own)
+    say(args, {"tasks": out, "dry_run": bool(args.dry_run)}, "\n".join(lines) or f"No task here runs on {args.from_}.")
 
 
 def workers(s, t):

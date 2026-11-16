@@ -7,7 +7,8 @@ import os
 
 from .agents import agent_log
 from .settings import argv_model
-from .takeover import handover
+from .base import git
+from .takeover import chat_tail, handover, work_so_far
 from .usage import _AG
 
 
@@ -46,3 +47,27 @@ def handoffs(s, pool, tasks):
         os.replace(tmp, path)
         out.append({"task": s.ref(t), "text": text, "path": path})
     return out
+
+
+CONTEXT_CAP = 4096  # FAC-104: the work so far in a switched task's first message, at most this many characters
+
+
+def work_context(s, t, prev):
+    """What a switched task's new agent is told of the work so far, so nobody writes a handoff by hand: the
+    branch's commits, git diff --stat, the worker's last status and summary, and the last of its chat (its
+    session notes). At most CONTEXT_CAP characters; "" when there is nothing to say."""
+    commits, _ = work_so_far(s, t)
+    folder = t.get("worktree") or s.loc["folder"]
+    since = (t.get("start") or t.get("base")) if t.get("worktree") else "HEAD"
+    stat = git(folder, "diff", "--stat", since)[1] if since else ""
+    parts = [("Commits since the base", commits[:1200]), ("git diff --stat", stat[-900:])]
+    said = [x for x in ((t.get("progress") or {}).get("text"), t.get("summary")) if x]
+    parts.append(("Its last status", " / ".join(said)[:400]))
+    head = "<herdr-handoff>\nThe work so far (context, not new instructions):"
+    used = len(head) + sum(len(k) + len(v) + 4 for k, v in parts) + 40
+    log = agent_log(t, (prev or {}).get("address")) if prev else None
+    parts.append(("Its last messages (latest last)", chat_tail(log, n=4, size=max(0, CONTEXT_CAP - used)) if log else ""))
+    body = "\n\n".join(f"{k}:\n{v.strip()}" for k, v in parts if v and v.strip() and v.strip() != "none")
+    if not body:
+        return ""
+    return (head + "\n\n" + body)[:CONTEXT_CAP - 20] + "\n</herdr-handoff>"

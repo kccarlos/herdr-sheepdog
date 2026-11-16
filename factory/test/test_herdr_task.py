@@ -7505,6 +7505,118 @@ class TaskFlow(unittest.TestCase):
         self.assertEqual([e[0] for e in events], ["launch", "run"])
         self.assertEqual(events[1], ("run", ["hc", "kill", "t1"]))
 
+    def pool_tasks(self):
+        """FAC-104: task 1 runs on claude (a live worker t1), 2 is queued on Settings' default (claude), 3 is To do
+        on codex, 4 is done on claude, 5 is To do on claude opus. Returns what switch_one / start_again got."""
+        self.settings({})
+        self.task["space"] = "sp-a"
+        self.task["agents"] = [{"address": "t1", "agent": "claude", "argv": ["claude", "--model", "opus"], "at": 1, "session": "S1"}]
+        self.store.data["tasks"] += [
+            {"id": 2, "title": "Queued", "state": "queued", "mode": "here", "agents": [], "queue": {"argv": ["claude"]}},
+            {"id": 3, "title": "Codex", "state": "todo", "mode": "here", "agents": [], "agent": "codex"},
+            {"id": 4, "title": "Old", "state": "done", "mode": "here", "agents": [], "agent": "claude"},
+            {"id": 5, "title": "Opus", "state": "todo", "mode": "here", "agents": [], "agent": "claude", "model": "opus", "effort": "max"},
+            {"id": 6, "title": "Ready", "state": "ready", "mode": "here", "agents": [], "agent": "claude"}]
+        got = []
+        self.patch(self.commands, "workers", lambda s, t: [{"address": "t1", "labels": {}}] if t["id"] in (1, 6) else [])
+        self.patch(self.commands, "refresh_sessions", lambda *a: None)
+        self.patch(self.commands, "end_agent", lambda s, t, address: got.append(("end", address)))
+        self.patch(self.commands, "start_again", lambda s, t, space, key, *a, **k: (
+            got.append(("start", t["id"], key, list(self.commands.worker_argv(s, t, space)))), ({"address": "t9", "agent": "agy"}, False))[1])
+        return got
+
+    def test_switch_all_moves_a_pool_off_claude(self):
+        """FAC-104: --all edits queued and To do tasks on the --from agent and switches running ones; a codex task,
+        a done one and (with a model in --from) another model's are left alone."""
+        got = self.pool_tasks()
+        self.commands.cmd_switch(self.args(id=None, all=True, from_="claude", agent="agy", model="gemini-4-carbon-high",
+                                           argv=None, space=None, parent=None, keep=False, dry_run=False, reviewer=False, json=False))
+        tasks = {t["id"]: t for t in self.store.data["tasks"]}
+        self.assertEqual(got[0], ("end", "t1"))
+        self.assertEqual(got[1][:3], ("start", 1, None))
+        self.assertEqual(got[1][3][0], "agy")
+        self.assertIn("gemini-4-carbon-high", got[1][3])
+        self.assertEqual([tasks[i].get("agent") for i in (1, 2, 3, 4, 5, 6)], ["agy", "agy", "codex", "claude", "agy", "agy"])
+        self.assertEqual(tasks[5]["model"], "gemini-4-carbon-high")
+        self.assertNotIn("effort", tasks[5])  # claude's effort words aren't agy's
+        self.assertEqual(len([g for g in got if g[0] == "start"]), 1)  # a Ready task is edited, never restarted
+        self.assertEqual(tasks[2]["queue"]["argv"][0], "agy")  # the queued start runs on the new pick
+        self.assertEqual(tasks[2]["state"], "queued")
+        self.assertEqual(self.said[-1].split("\n")[1:], ["SHEP-2: edit claude -> agy", "SHEP-5: edit claude -> agy",
+                                                         "SHEP-6: edit claude -> agy"])
+        with self.assertRaises(self.commands.Fail):  # --dry-run only goes with --all: never a real switch
+            self.commands.cmd_switch(self.args(id="SHEP-1", all=False, dry_run=True, agent="agy"))
+        with self.assertRaises(self.commands.Fail):
+            self.commands.cmd_switch(self.args(id=None, all=True, from_="agy", agent="nosuchcli", argv=None, dry_run=False))
+        self.assertTrue(self.said[-1].startswith("SHEP-1: agy t9 took over, t1 ended"))
+
+    def test_switch_all_from_a_model_and_dry_run(self):
+        """FAC-104: --from claude:opus picks only the opus tasks; --dry-run lists them and changes nothing."""
+        got = self.pool_tasks()
+        import copy
+        before = copy.deepcopy(self.store.data)
+        self.commands.cmd_switch(self.args(id=None, all=True, from_="claude:opus", agent="codex", model=None,
+                                           argv=None, space=None, parent=None, keep=False, dry_run=True, reviewer=False, json=False))
+        self.assertEqual(got, [])
+        self.assertEqual(self.store.data, before)
+        self.assertFalse(self.store.dirty)
+        self.assertEqual(self.said[-1], "SHEP-1: switch claude -> codex (dry run)\nSHEP-5: edit claude -> codex (dry run)")
+
+    def test_switch_all_leaves_reviewers_unless_asked(self):
+        """FAC-104: a task's reviewer on the --from CLI stays put, unless --reviewer."""
+        self.pool_tasks()
+        self.store.data["tasks"][2]["reviewer"] = "claude"  # task 3: worker codex, reviewer claude
+        a = dict(id=None, all=True, from_="claude", agent="agy", model=None, argv=None, space=None, parent=None, keep=False,
+                 dry_run=False, json=False)
+        self.commands.cmd_switch(self.args(**a, reviewer=False))
+        self.assertEqual(self.store.data["tasks"][2]["reviewer"], "claude")
+        self.commands.cmd_switch(self.args(**a, reviewer=True))
+        self.assertEqual(self.store.data["tasks"][2]["reviewer"], "agy")
+        self.assertEqual(self.store.data["tasks"][2]["agent"], "codex")
+
+    def test_a_switch_to_another_cli_hands_over_the_work_so_far(self):
+        """FAC-104: a switched task's new agent (another CLI, so no resumed session) hears the brief, the branch's
+        commits, git diff --stat, the last status and the last of the chat, all within the cap."""
+        import herdr_task.launch as launch
+        import herdr_task.handoff as handoff
+        self.settings({})
+        wt = self.task["worktree"]
+        self.commit(wt, "Add the pool switch", file="pool.py")
+        with open(os.path.join(wt, "pool.py"), "a") as f:
+            f.write("uncommitted\n" * 3)
+        self.task["prompt"] = "Move a folder's work to another pool."
+        self.task["space"] = "sp-a"
+        self.task["progress"] = {"text": "Writing the tests", "at": 1}
+        log = os.path.join(self.root, "log.jsonl")
+        with open(log, "w") as f:
+            for i in range(200):
+                f.write(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": f"step {i} " + "x" * 300}]}}) + "\n")
+        self.task["agents"] = [{"address": "t1", "agent": "claude", "argv": ["claude"], "at": 1, "session": "S1", "log": log}]
+        self.live = [{"address": "t1", "status": {"state": "working"}, "labels": {}}]
+        sent = []
+        self.patch(self.commands, "agent_running", lambda k: True)
+        self.patch(self.commands, "refresh_sessions", lambda *a: None)
+        self.patch(self.commands, "end_agent", lambda *a: None)
+        self.patch(self.commands, "unarchive", lambda *a: None)
+        self.patch(self.commands, "parent_for", lambda parent, space: parent)
+        self.patch(launch, "closing_line", lambda *a: "")
+        self.patch(launch, "settings_block", lambda *a: "")
+        self.patch(self.commands, "launch", lambda s, t, argv, space, message=None, **k: (
+            sent.append((argv, message)), {"address": "t2", "agent": "agy", "argv": argv})[1])
+        self.patch(self.commands, "workers", lambda s, t: self.live)
+        self.commands.cmd_switch(self.args(id=None, all=True, from_="claude", agent="agy", model=None, argv=None, space=None,
+                                           parent=None, keep=False, dry_run=False, reviewer=False))
+        argv, text = sent[0]
+        self.assertEqual(argv[0], "agy")
+        self.assertIn("Move a folder's work to another pool.", text)
+        block = text[text.index("<herdr-handoff>"):text.index("</herdr-handoff>") + len("</herdr-handoff>")]
+        self.assertLessEqual(len(block), handoff.CONTEXT_CAP)
+        self.assertIn("Add the pool switch", block)
+        self.assertIn("pool.py | 4 ++++", block)
+        self.assertIn("Writing the tests", block)
+        self.assertIn("step 199", block)
+
     def settings(self, d):
         import herdr_task.settings as settings
         f = os.path.join(self.root, "shepherdr.json")
