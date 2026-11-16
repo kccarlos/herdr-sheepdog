@@ -1227,9 +1227,10 @@ class BackToWork(unittest.TestCase):
             v = github.pr_view(self.pr_task())
         self.assertEqual([c.get("conclusion") or c.get("state") for c in v["statusCheckRollup"]], ["SUCCESS", "SUCCESS"])
         self.assertIsNone(github.pr_problem(v))
-        # a cancelled run with no newer one still fails
+        # a cancelled run with no newer one still stops it, as a CI problem (FAC-102)
         lone = [dict(rollup[0], name="lint")] + rollup[1:]
-        self.assertEqual(github.pr_problem({"statusCheckRollup": github.latest_checks(lone)}), "Checks failing: lint.")
+        self.assertEqual(github.pr_problem({"statusCheckRollup": github.latest_checks(lone)}),
+                         'CI "lint" was cancelled (cancelled on GitHub or its runner was lost), not a failing test.')
 
     # #802, #844: a merge GitHub reports never closes a task under its live agent, nor one reopened after it.
     def test_a_working_task_whose_pull_request_merged_stays_open_while_its_agent_is_there(self):
@@ -2878,6 +2879,85 @@ class ChecksBeforeReady(PrLooks):
         self.assertEqual(self.agents.task_status(t, self.live), ("working", None, "Merges once its checks pass"))
         t["merge_requested"] = 1
         self.assertEqual(self.agents.task_status(t, self.live), ("working", None, "Merging"))
+
+
+class CiStopped(PrLooks):
+    """FAC-102 (WukongMind): a check GitHub cancelled or timed out reads as a CI problem, not a code failure: one
+    automatic re-run per head, then Needs you with the CI-infrastructure reason, naming the job."""
+
+    def stop(self, job=1, conclusion="TIMED_OUT", start="10:00", end="10:46", url=True):
+        return {"name": "check", "status": "COMPLETED", "conclusion": conclusion, "startedAt": f"2026-11-14T{start}:00Z",
+                "completedAt": f"2026-11-14T{end}:00Z", "detailsUrl": f"https://github.com/o/r/actions/runs/500/job/{job}" if url else ""}
+
+    def reruns(self):
+        with open(self.gh_log) as f:
+            return [a for a in map(json.loads, f) if a[:2] == ["run", "rerun"]]
+
+    def test_a_stop_is_re_run_once_then_needs_you_as_a_ci_problem(self):
+        import herdr_task.github as github
+        os.makedirs(os.path.join(self.dir, ".github", "workflows"))
+        with open(os.path.join(self.dir, ".github", "workflows", "ci.yml"), "w") as f:
+            f.write("name: Check\non: [pull_request]\njobs:\n  check:\n    name: check\n    runs-on: ubuntu-latest\n"
+                    "    timeout-minutes: 45\n    steps:\n      - name: test\n        run: make test\n")
+        t = self.said_ready()
+        # GitHub cancels a job that reached its timeout-minutes: re-run once, Working meanwhile, nothing for anyone
+        self.github_says(checks=[self.stop(conclusion="CANCELLED")])
+        self.assertEqual(self.look(t, after=1000), ("working", "Checks running", None))
+        self.assertEqual(self.reruns(), [["run", "rerun", "500", "--failed", "--repo", "o/r"]])
+        self.assertNotIn("attention", t)
+        self.assertEqual(self.sent, [])
+        # the stop it re-ran still shows: still running (never merged past it), and never re-run again
+        self.assertEqual(self.look(t), ("working", "Checks running", None))
+        v = {"state": "OPEN", "headRefOid": "abc", "statusCheckRollup": [self.stop(conclusion="CANCELLED")]}
+        self.assertIsNone(github.task_problem(t, v, "o/r"))
+        self.assertTrue(github.pr_pending(v))
+        self.assertEqual(len(self.reruns()), 1)
+        # stopped again on the same head: the timeout reason, back to its agent as CI (not a test failure), no re-run
+        self.github_says(checks=[self.stop(job=2, conclusion="CANCELLED", start="11:00", end="11:46")])
+        self.assertEqual(self.look(t, after=1000), ("working", "Back to its agent to fix", None))
+        self.assertEqual(len(self.reruns()), 1)
+        why = ('CI "check" timed out after 46m (its timeout-minutes is 45, so the job\'s timeout was reached), not a '
+               'failing test. Herdr re-ran it once and it stopped again: a CI-infrastructure problem in "check" (likely '
+               "the job's timeout), not a code failure. Add a fix task for the CI job instead of sending code back.")
+        self.assertEqual(t["attention"], why)
+        self.assertFalse(any(e["failed"] for e in t.get("ci_runs") or []))  # no failed CI attempts toward a recap
+        self.tick.pr_deliver(self.store, t, {})
+        told = self.sent[-1][1]
+        self.assertIn('CI "check" timed out after 46m', told)
+        self.assertIn("not your code: don't chase a test failure", told)
+        self.assertNotIn("failed:", told)
+        # its agent quiet: Needs you, and the Assistant's news says it's CI infrastructure, naming the job
+        self.assertEqual(self.look(t, after=10 * 60_000), ("needs", why, "needs-you"))
+        v, event, _ = self.news.news_state(self.store, t, None)  # the real view(), its why uncut
+        self.assertIn('a CI-infrastructure problem in "check" (likely the job', self.news.news_line(self.store, t, v, event))
+        # a later green run clears it
+        self.github_says(checks=[ChecksBeforeReady.PASSED])
+        self.assertEqual(self.look(t), ("ready", None, "ready"))
+        self.assertNotIn("attention", t)
+
+    def test_a_stop_that_cant_be_re_run_says_so_at_once(self):
+        t = self.said_ready()
+        self.github_says(checks=[self.stop(url=False, end="10:12")])
+        self.look(t, after=1000)
+        self.assertEqual(self.reruns(), [])
+        self.assertTrue(t["attention"].startswith('CI "check" timed out after 12m (likely the job\'s timeout), not a '
+                                                  "failing test. Herdr couldn't re-run it: a CI-infrastructure problem"))
+
+    def test_a_failure_is_unchanged_and_never_re_run(self):
+        t = self.said_ready()
+        self.github_says(checks=[ChecksBeforeReady.FAILED, dict(self.stop(conclusion="CANCELLED"), name="lint")])
+        self.assertEqual(self.look(t, after=1000), ("working", "Back to its agent to fix", None))
+        self.assertEqual((t["attention"], self.reruns(), t["pr"].get("ci_rerun")), ("Checks failing: check, lint.", [], None))
+        self.tick.pr_deliver(self.store, t, {})
+        self.assertIn('Check "check" failed', self.sent[-1][1])
+        self.assertNotIn("CI infrastructure", self.sent[-1][1])
+
+    def test_a_superseded_cancelled_run_is_still_ignored(self):
+        t = self.said_ready()
+        self.github_says(checks=[dict(self.stop(conclusion="CANCELLED"), workflowName="Check"),
+                                 dict(ChecksBeforeReady.PASSED, workflowName="Check", startedAt="2026-11-14T10:01:00Z")])
+        self.assertEqual(self.look(t), ("ready", None, "ready"))
+        self.assertEqual((self.reruns(), t.get("attention")), ([], None))
 
 
 class ChecksUnreadable(PrLooks):
@@ -4612,7 +4692,9 @@ class LoopBreaker(GateReview):
                          {"name": "test", "conclusion": "CANCELLED", "detailsUrl": url(500, 2)}]
             step()
             self.assertNotIn("ci_runs", self.task)
-            self.assertEqual(len(gh_calls), 1)  # one gh pr view per tick, nothing extra
+            # one gh pr view per tick; the lone cancelled run re-run once (FAC-102), nothing else
+            self.assertEqual(gh_calls.pop()[1:], ["run", "rerun", "500", "--failed", "--repo", "o/r"])
+            self.assertEqual(len(gh_calls), 1)
             # attempt 1 on run 501 fails; looking again with nothing changed doesn't count it twice
             rollup[:] = [{"name": "test", "conclusion": "FAILURE", "detailsUrl": url(501, 1), "completedAt": "t1"}]
             step()

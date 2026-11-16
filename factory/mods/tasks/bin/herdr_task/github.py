@@ -1,5 +1,6 @@
 """GitHub and merging: pull requests, checks, and finishing a merged task."""
 
+import datetime
 import json
 import os
 import re
@@ -468,10 +469,11 @@ def pr_problem(v):
     if v.get("mergeable") == "CONFLICTING":
         return "It conflicts with the base branch."
     checks = v.get("statusCheckRollup") or []
-    bad = [c.get("name") or c.get("context") or "a check" for c in checks
-           if (c.get("conclusion") or c.get("state") or "").upper() in BAD]
-    if bad:
+    bad = [c.get("name") or c.get("context") or "a check" for c in checks if word(c) in BAD]
+    if any(word(c) in BAD - STOPPED for c in checks):  # a real failure: as ever, stopped ones listed too
         return "Checks failing: " + ", ".join(bad[:3]) + (" and more." if len(bad) > 3 else ".")
+    if stopped := stopped_checks(v):
+        return stop_words({}, stopped[0])  # FAC-102: CI, not code (task_problem() re-runs it once)
     # #743: the base requires it up to date with itself (GitHub says BEHIND only under that rule).
     if v.get("mergeStateStatus") == "BEHIND":
         return BEHIND
@@ -527,9 +529,113 @@ def synced_head(task, repo, theirs):
     return None
 
 
+# FAC-102 (WukongMind): a check GitHub cancelled or timed out, not superseded (latest_checks()), is CI, not code: no
+# test failed. Re-run once per head; stopped again, it needs the person, its likely cause the job's timeout.
+STOPPED = {"CANCELLED", "TIMED_OUT"}
+CI_STOPPED = 'CI "'  # such a reason's start
+RERUN_SHOW_MS = 10 * 60000  # a re-run whose jobs don't show by then won't
+
+
+def word(c):
+    return (c.get("conclusion") or c.get("state") or "").upper()
+
+
+def stopped_checks(v):
+    return [c for c in v.get("statusCheckRollup") or [] if word(c) in STOPPED]
+
+
+def _ms(text):
+    try:
+        return datetime.datetime.strptime(str(text), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp() * 1000
+    except ValueError:
+        return None
+
+
+def job_timeout(folder, job):
+    """The timeout-minutes a workflow file in folder gives the job (by its key or name), or None. A line scan, no YAML."""
+    if not folder:
+        return None
+    d = os.path.join(folder, ".github", "workflows")
+    try:
+        files = sorted(f for f in os.listdir(d) if f.endswith((".yml", ".yaml")))
+    except OSError:
+        return None
+    job = re.sub(r" \(.*\)$", "", job or "")  # a matrix job: "test (ubuntu)"
+    for f in files:
+        try:
+            with open(os.path.join(d, f)) as fh:
+                lines = fh.read().splitlines()
+        except OSError:
+            continue
+        jobs, on, ind, cur = [], False, None, None
+        for line in lines:
+            text = line.strip()
+            if not text or text.startswith("#"):
+                continue
+            at = len(line) - len(line.lstrip())
+            if at == 0:
+                on, cur = text.startswith("jobs:"), None
+            elif on and at == (ind := ind or at):
+                cur = {"key": text.rstrip(":").strip()}
+                jobs.append(cur)
+            elif on and cur is not None and at == cur.setdefault("at", at):
+                m = re.match(r"(name|timeout-minutes):\s*['\"]?([^'\"#]*?)['\"]?\s*(#.*)?$", text)
+                if m:
+                    cur[m.group(1)] = m.group(2)
+        for j in jobs:
+            if job in (j["key"], j.get("name")) and str(j.get("timeout-minutes", "")).isdigit():
+                return int(j["timeout-minutes"])
+    return None
+
+
+def stop_words(task, c):
+    """'CI "check" timed out after 46m: …', with the job's timeout when its workflow file (in the task's worktree) says."""
+    name = c.get("name") or c.get("context") or "a check"
+    a, b = _ms(c.get("startedAt")), _ms(c.get("completedAt"))
+    took = int(b - a) // 60000 if a and b and b >= a else None
+    limit = job_timeout(task.get("worktree"), name)
+    reached = bool(limit and took is not None and took >= limit - 1)
+    timed = word(c) == "TIMED_OUT" or reached
+    text = f'CI "{name}" ' + ("timed out" if timed else "was cancelled")
+    if took is not None:
+        text += " after " + (f"{took // 60}h {took % 60}m" if took >= 60 else f"{took}m")
+    why = (f"its timeout-minutes is {limit}, so the job's timeout was reached" if reached
+           else "likely the job's timeout" if timed else "cancelled on GitHub or its runner was lost")
+    return f"{text} ({why}), not a failing test."
+
+
+def ci_stopped(task, v, repo):
+    """FAC-102: its stopped checks re-run once per head (gh run rerun --failed), shown as still running while that
+    shows; a stop again on that head (or no re-run possible): the CI-infrastructure reason. None while it waits."""
+    stopped, pr, head = stopped_checks(v), task.setdefault("pr", {}), v.get("headRefOid") or ""
+    sig = lambda c: f"{c.get('detailsUrl') or c.get('targetUrl') or ''}|{c.get('completedAt') or ''}"
+
+    def hold():
+        for c in stopped:
+            c.update(status="IN_PROGRESS", conclusion="")
+    rr = pr.get("ci_rerun") or {}
+    if rr.get("head") != head:
+        if pr_pending(v):  # gh refuses a run still in progress: the one re-run waits for it
+            return hold()
+        runs = sorted({m.group(1) for c in stopped if (m := re.search(r"/actions/runs/(\d+)", c.get("detailsUrl") or ""))})
+        ok = bool(runs) and all(gh("run", "rerun", r, "--failed", "--repo", repo)[0] for r in runs)
+        rr = pr["ci_rerun"] = {"head": head, "runs": runs, "rows": [sig(c) for c in stopped], "at": now(), "ok": ok}
+        if ok:
+            return hold()
+    elif rr.get("ok") and now() - (rr.get("at") or 0) < RERUN_SHOW_MS and all(sig(c) in rr.get("rows", []) for c in stopped):
+        return hold()  # the stop the re-run was asked for still shows
+    names = ", ".join(f'"{c.get("name") or c.get("context")}"' for c in stopped[:3])
+    again = "Herdr re-ran it once and it stopped again" if rr.get("ok") else "Herdr couldn't re-run it"
+    return (f"{stop_words(task, stopped[0])} {again}: a CI-infrastructure problem in {names} (likely the job's "
+            "timeout), not a code failure. Add a fix task for the CI job instead of sending code back.")
+
+
 def task_problem(task, v, repo):
-    """pr_problem(), saying when its checks failed on the head Herdr brought up to date with its base (FAC-98)."""
+    """pr_problem(), saying when its checks failed on the head Herdr brought up to date with its base (FAC-98); a
+    cancelled or timed-out check re-run once (FAC-102)."""
     p = pr_problem(v)
+    if p and p.startswith(CI_STOPPED):
+        p = ci_stopped(task, v, repo)
     if p and p.startswith("Checks failing") and synced_head(task, repo, v.get("headRefOid")):
         p += DRIFTED
     return p

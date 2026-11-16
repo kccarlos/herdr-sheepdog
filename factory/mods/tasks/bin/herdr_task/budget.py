@@ -9,7 +9,7 @@ import re
 import shlex
 
 from .base import Fail, git, now
-from .github import BAD, PENDING, remote_of
+from .github import BAD, PENDING, remote_of, STOPPED
 
 DECISIONS = ("continue", "split", "new", "drop")
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -276,8 +276,8 @@ def record_ci(s, t, v, at=None):
                 s.dirty = True
             continue
         words = [(c.get("conclusion") or c.get("state") or "").upper() for c in cs]
-        failed = any(w in BAD - {"CANCELLED"} for w in words)
-        if not any(words) or (not failed and "CANCELLED" in words):
+        failed = any(w in BAD - STOPPED for w in words)  # FAC-102: a timeout is CI, not a failed attempt
+        if not any(words) or (not failed and any(w in STOPPED for w in words)):
             continue
         sig = "|".join(sorted(f"{c.get('name') or c.get('context') or ''}:{(c.get('conclusion') or c.get('state') or '').upper()}:"
                               f"{c.get('detailsUrl') or c.get('targetUrl') or ''}:{c.get('completedAt') or c.get('startedAt') or ''}" for c in cs))

@@ -7,7 +7,7 @@ import re
 
 from .base import now
 from .agents import status_word
-from .github import BAD, DRIFTED, gh, github, pr_repo, synced_head, task_github
+from .github import BAD, DRIFTED, gh, github, pr_repo, stop_words, STOPPED, synced_head, task_github, word
 from .launch import coordinator_in
 from .commands import workers
 from .news import news_send
@@ -118,7 +118,10 @@ def pr_news(s, t, v, report):
         # the same commit, the base's, aren't news again); a new commit's are.
         w = {"since": since, "seen": [], "checked": 0, "failed": w.get("failed"), "conflict": w.get("conflict")}
     checks = v.get("statusCheckRollup") or []
-    failed = [c for c in checks if (c.get("conclusion") or c.get("state") or "").upper() in BAD - {"CANCELLED"}]
+    # FAC-102: with no real failure, a cancelled or timed-out check is here only once Herdr's one re-run is used
+    # (task_problem() runs first), told as CI; beside a real failure, as ever.
+    ci = not any(word(c) in BAD - STOPPED for c in checks)
+    failed = [c for c in checks if word(c) in (STOPPED if ci else BAD - {"CANCELLED"})]
     head = v.get("headRefOid") or ""
     mark = f"{head}:" + ",".join(sorted(c.get("name") or c.get("context") or "check" for c in failed)) if failed else None
     # A conflict with its base goes back to its agent too (SHEP-175), once per commit.
@@ -156,11 +159,16 @@ def pr_news(s, t, v, report):
                      "ready command again.")
     for c in news_checks[:10]:
         name, url = c.get("name") or c.get("context") or "A check", c.get("detailsUrl") or c.get("targetUrl") or ""
-        lines.append(f"- Check \"{name}\" failed: {url}")
-    if news_checks and synced_head(t, repo, head):
+        if ci:
+            again = "Herdr re-ran it once already. " if (pr.get("ci_rerun") or {}).get("ok") else ""
+            lines.append(f"- {stop_words(t, c)} {again}This is CI infrastructure (likely the job's timeout), not your "
+                         f"code: don't chase a test failure; say so in one line. {url}")
+        else:
+            lines.append(f"- Check \"{name}\" failed: {url}")
+    if news_checks and not ci and synced_head(t, repo, head):
         lines.append(f"- {DRIFTED.strip()}")  # FAC-98: the base drifted, not its own work
     tail = None
-    for c in news_checks:
+    for c in [] if ci else news_checks:
         rid = run_id(c.get("detailsUrl") or c.get("targetUrl"))
         tail = log_tail(pr["repo"], rid) if rid else None
         if tail:

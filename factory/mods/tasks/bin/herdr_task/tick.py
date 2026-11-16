@@ -20,7 +20,7 @@ from .agents import (
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
 from .github import (already_merged, BEHIND, drop_branch, finish, github, merged_here, needs_approval, note_checks, pr_merged, pr_pending, pr_problem,
-                     pr_repo, pr_view, pr_wait, queue_entry, task_problem, task_github, tidy_done, tidy_due, update_main, watch_main)
+                     pr_repo, pr_view, pr_wait, CI_STOPPED, queue_entry, task_problem, task_github, tidy_done, tidy_due, update_main, watch_main)
 from .launch import default_space, parent_for, sweep_sandboxes
 from .store import locate, read_list, Store, store_files
 from .queues import machine_hold, refresh_ext, running_count, set_hold, waiting_ext, waiting_for
@@ -134,7 +134,7 @@ def facts(s, t, report):
                 t["attention"], t["attention_at"] = problem, now()
                 t.pop("merge_queued", None)
                 report["attention"].append(t["id"])
-            elif t.get("attention", "").startswith(("Checks failing", "It conflicts", "The pull request was closed", MERGE_FAILED, BEHIND)):
+            elif t.get("attention", "").startswith(("Checks failing", CI_STOPPED, "It conflicts", "The pull request was closed", MERGE_FAILED, BEHIND)):
                 t.pop("attention")
     elif merged_here(s, t) and not at_work(s, t):
         t["merged"] = True
