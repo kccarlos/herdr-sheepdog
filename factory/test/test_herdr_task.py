@@ -4648,7 +4648,7 @@ class LoopBreaker(GateReview):
         self.assertEqual(self.task["state"], "running")
         self.assertNotIn("auto_merge", self.task)
 
-    def recap(self, decide=None, why="w"):
+    def recap(self, decide=None, why="w", small=False):
         import argparse
         from unittest import mock
         import herdr_task.store as store
@@ -4659,7 +4659,7 @@ class LoopBreaker(GateReview):
                 mock.patch.object(launch, "caller_labels", lambda: {}), \
                 mock.patch.object(output, "say", lambda args, v, msg: out.append(msg)):
             from herdr_task.budget import cmd_recap
-            cmd_recap(argparse.Namespace(id="SHEP-13", json=False, folder=None, decide=decide, why=why))
+            cmd_recap(argparse.Namespace(id="SHEP-13", json=False, folder=None, decide=decide, why=why, small=small))
         return out[-1]
 
     def test_second_must_fix_round_stops_ready_until_continue_then_again(self):
@@ -4701,6 +4701,90 @@ class LoopBreaker(GateReview):
         self.assertIn("one continue", str(e.exception))
         self.assertIn("decided: split", self.recap("split", why="two tasks"))
         self.assertEqual([d["decision"] for d in self.task["recaps"]], ["continue", "split"])
+
+    def second_recap(self):
+        """A task that had its one continue and is stopped for a recap again (two non-converging rounds)."""
+        from unittest import mock
+        from herdr_task.budget import budget_pass
+        self.task["recaps"] = [{"decision": "continue", "why": "w", "at": 1}]
+        self.rounds(("changes", 1, "a.py"), ("changes", 1, "b.py"), since=1)
+        with mock.patch.object(self.commands, "workers", lambda s, t: []):
+            self.assertTrue(budget_pass(self.store, self.task))
+
+    def test_a_second_continue_small_is_bounded_and_a_third_is_refused(self):
+        """FAC-108: a second recap can continue once more with --small: 1 more round, 60 more lines."""
+        from unittest import mock
+        from herdr_task.budget import budget_lines, change_lines, size_triggers
+        self.task.pop("recaps", None)
+        self.task["recap"] = {"title": "Recap required: x", "reasons": ["x"]}
+        with self.assertRaises(self.commands.Fail) as e:
+            self.recap("continue", small=True)  # the first continue needs no --small, and stays as it was
+        self.assertIn("first continue needs none", str(e.exception))
+        self.task.pop("recap")
+        self.second_recap()
+        with self.assertRaises(self.commands.Fail) as e:
+            self.recap("continue")  # a plain second continue: refused as before, with the hint
+        self.assertIn("one continue", str(e.exception))
+        self.assertIn("--decide continue --small", str(e.exception))
+        with self.assertRaises(self.commands.Fail):
+            self.recap("split", small=True)
+        cur = change_lines(self.task)
+        self.assertIsNotNone(cur)
+        with mock.patch.object(self.commands, "workers", lambda s, t: [{"address": "w1"}]):
+            self.assertIn("decided: continue", self.recap("continue", why="a nit after the rebase", small=True))
+        dec = self.task["recaps"][-1]
+        self.assertEqual((dec["small"], dec["max_rounds"], dec["max_lines"], dec["lines"]), (True, 1, cur + 60, cur))
+        self.assertIn("at most 1 more review round and 60 more changed lines", self.told[-1])
+        self.assertIn("recap decided: continue --small (a nit after the rebase)", budget_lines(self.task))
+        self.assertEqual(self.why(), [])
+        self.assertEqual(size_triggers(self.task), [])
+        # the extra round, for real, still has Must-fix findings: past the bound, a recap again, not "Fix these"
+        self.head = self.change("the nit")
+        self.task["reviews"] = []  # second_recap's stand-in rounds: numbered like the real runs
+        with mock.patch.object(self.commands, "workers", lambda s, t: [{"address": "w1"}]):
+            self.ready()
+            self.assertEqual(self.task["review_runs"][-1]["head"], self.head)  # ready started the extra round
+            self.verdict(self.task["review_runs"][-1]["address"], passed=False, changes="major: still a nit", must_fix=1)
+        self.assertIn("past the small continue's bound", self.task["recap"]["reasons"][0])
+        self.assertEqual(self.task["attention"], "Recap required again: change direction")
+        self.assertIn("RECAP.md", self.told[-1])
+        self.assertNotIn("Fix these", self.told[-1])
+        for small in (False, True):  # no third continue in any form, and the refusal names the bound
+            with self.assertRaises(self.commands.Fail) as e:
+                self.recap("continue", small=small)
+            self.assertIn("no third continue", str(e.exception))
+            self.assertIn("extra review round still has Must-fix", str(e.exception))
+        self.assertIn("decided: split", self.recap("split", why="two tasks"))
+        self.assertEqual([d["decision"] for d in self.task["recaps"]], ["continue", "continue", "split"])
+
+    def test_a_small_continue_past_60_more_lines_recaps_with_only_split_new_or_drop(self):
+        from unittest import mock
+        from herdr_task.budget import change_lines
+        self.ready()
+        self.second_recap()
+        self.recap("continue", why="a one-line test fix", small=True)
+        bound = self.task["recaps"][-1]["max_lines"]
+        def extra(k):  # a new file of k lines: exactly k more changed lines
+            with open(os.path.join(self.wt, "extra.txt"), "w") as f:
+                f.write("".join(f"line {i}\n" for i in range(k)))
+            self.git(self.wt, "add", "extra.txt")
+            self.git(self.wt, "commit", "-q", "-m", "extra")
+            return self.git(self.wt, "rev-parse", "HEAD")
+        self.head = extra(60)
+        self.assertEqual(change_lines(self.task), bound)
+        self.ready()  # at the bound: no recap
+        self.assertNotIn("recap", self.task)
+        self.head = extra(61)
+        self.assertEqual(change_lines(self.task), bound + 1)
+        with mock.patch.object(self.commands, "workers", lambda s, t: [{"address": "w1"}]):
+            with self.assertRaises(self.commands.Fail):
+                self.ready()
+        self.assertIn(f"over its {bound:,} (60 more than at the decision)", self.task["recap"]["reasons"][0])
+        with self.assertRaises(self.commands.Fail) as e:
+            self.recap("continue", small=True)
+        self.assertIn("no third continue", str(e.exception))
+        self.assertIn(f"over its {bound:,}", str(e.exception))
+        self.assertIn("decided: drop", self.recap("drop", why="not worth it"))
 
     def test_ci_triggers_window_and_recap_reset(self):
         from unittest import mock

@@ -14,6 +14,7 @@ from .github import BAD, PENDING, remote_of, STOPPED
 DECISIONS = ("continue", "split", "new", "drop")
 SHA = re.compile(r"[0-9a-f]{40}")
 CI_FAIL_LIMIT = 3
+SMALL_ROUNDS, SMALL_LINES = 1, 60  # FAC-108: a second continue --small's bound
 CI_WINDOW_MS = 3600000
 RUN_URL = re.compile(r"/actions/runs/(\d+)")
 SIZE_LINE = re.compile(r"(?im)^[\s>*+-]*\**size(?:\s+limit)?\**\s*:\s*(.+)")
@@ -327,6 +328,9 @@ def triggers(s, t):
     # Budgets count from the last decision (else from its start); time only while it works, not
     # while it waits in Ready for the person.
     est, dec = t.get("estimate_time"), (t.get("recaps") or [{}])[-1]
+    if dec.get("small") and [r for r in rounds if r.get("verdict") == "changes"]:
+        why.append(f"past the small continue's bound: its {dec.get('max_rounds', SMALL_ROUNDS)} extra review round still "
+                   f"has Must-fix findings")
     began = dec.get("at") or t.get("started")
     if est and began and t["state"] == "running" and now() - began > 2 * est:
         why.append(f"over twice its time estimate ({time_words(now() - began)} of {time_words(est)})")
@@ -340,6 +344,10 @@ def triggers(s, t):
 def size_triggers(t):
     """Why ready stops this worktree task for size, or []. After recap --decide continue, doesn't fire again for that decision."""
     est, dec = size_estimate(t), (t.get("recaps") or [{}])[-1]
+    if dec.get("small") and dec.get("max_lines") is not None:
+        n = change_lines(t)
+        return ([f"past the small continue's bound: change is {n:,} lines, over its {dec['max_lines']:,} "
+                 f"({SMALL_LINES} more than at the decision)"] if n is not None and n > dec["max_lines"] else [])
     if not est or (dec.get("decision") == "continue" and (
             not dec.get("reasons") or any("twice its size" in r for r in dec["reasons"]) or (dec.get("lines") or 0) > 2 * est)):
         return []
@@ -437,7 +445,7 @@ def budget_lines(t):
         lines.append(f"estimate: {', '.join(est)}" + (f" ({'; '.join(so_far)})" if so_far else ""))
     if t.get("recap"):
         lines.append(f"recap open: {t['recap']['title']} (the Assistant decides: recap --decide)")
-    lines += [f"recap decided: {d['decision']} ({d['why']})" for d in t.get("recaps") or []]
+    lines += [f"recap decided: {d['decision']}{' --small' if d.get('small') else ''} ({d['why']})" for d in t.get("recaps") or []]
     return lines
 
 
@@ -466,7 +474,7 @@ def cmd_recap(args):
             except OSError:
                 text = None
             lines = [f"{s.ref(t)}: " + (rc["title"] if rc else "no recap open")] + [f"- {x}" for x in (rc or {}).get("reasons", [])]
-            lines += [f"decided: {d['decision']} ({d['why']})" for d in t.get("recaps") or []]
+            lines += [f"decided: {d['decision']}{' --small' if d.get('small') else ''} ({d['why']})" for d in t.get("recaps") or []]
             lines += ["", text.strip()] if text else ["(no RECAP.md yet)"] if rc else []
             say(args, {"recap": rc, "recaps": t.get("recaps") or [], "recap_md": text}, "\n".join(lines))
             return
@@ -477,13 +485,30 @@ def cmd_recap(args):
             raise Fail(f"{s.ref(t)} has no recap open.")
         if not (args.why or "").strip():
             raise Fail("Say why in one line: --why \"…\".")
+        small = bool(getattr(args, "small", False))
+        if small and args.decide != "continue":
+            raise Fail("--small goes with --decide continue only.")
         if args.decide == "continue" and t.get("recaps"):
-            raise Fail(f"{s.ref(t)} already had its one continue after a recap: split it, give it a new approach, or drop it.")
+            if any(d.get("small") for d in t["recaps"]):
+                why = rc.get("reasons") or ["a recap again"]
+                past = "went past its bound" if any(w.startswith("past the small continue's bound") for w in why) else "stopped again"
+                raise Fail(f"{s.ref(t)} already had its small continue and {past} ({'; '.join(why)}): "
+                           f"no third continue; split it, give it a new approach, or drop it.")
+            if not any(d.get("decision") == "continue" for d in t["recaps"]):
+                raise Fail(f"{s.ref(t)} already had a recap decided without continue: split it, give it a new approach, or drop it.")
+            if not small:
+                raise Fail(f"{s.ref(t)} already had its one continue after a recap: split it, give it a new approach, or drop it. "
+                           f"For a small follow-up fix (a nit, a one-line test fix): --decide continue --small "
+                           f"(at most {SMALL_ROUNDS} more review round and {SMALL_LINES} more lines).")
+        elif small:
+            raise Fail(f"--small is for a second continue; {s.ref(t)}'s first continue needs none.")
         found = last_findings(t)  # before the decision starts the round count afresh
         cur = change_lines(t)
+        bound = ({"small": True, "max_rounds": SMALL_ROUNDS, "max_lines": cur + SMALL_LINES if cur is not None else None}
+                 if small else {})
         t.setdefault("recaps", []).append({"decision": args.decide, "why": " ".join(args.why.split())[:300], "at": now(),
                                            "reasons": rc.get("reasons", []), "tokens": token_sum(s, t),
-                                           **({"lines": cur} if cur is not None else {})})
+                                           **({"lines": cur} if cur is not None else {}), **bound})
         t.pop("recap")
         if (t.get("attention") or "").startswith("Recap required"):
             t.pop("attention", None)
@@ -497,8 +522,11 @@ def cmd_recap(args):
             from .commands import tell, workers
             from .launch import own_path
             if workers(s, t):
+                limit = (f"This is a small follow-up, bounded: at most {SMALL_ROUNDS} more review round"
+                         + (f" and {SMALL_LINES} more changed lines (up to {bound['max_lines']:,})" if bound["max_lines"] is not None else "")
+                         + "; past either, the task stops for a recap with only split, new approach or drop left. ") if small else ""
                 told = tell(s, t, f"Your Assistant read the recap of {s.ref(t)} and says go on: {args.why.strip()}"
-                                  f"{found}Carry on, then run `{own_path()} ready {s.ref(t)} --folder {shlex.quote(s.loc['folder'])}` again.", None)[0]
+                                  f"{found}{limit}Carry on, then run `{own_path()} ready {s.ref(t)} --folder {shlex.quote(s.loc['folder'])}` again.", None)[0]
     say(args, {"decision": args.decide, "told": told},
         f"{s.ref(t)}: recap decided: {args.decide}" + (f"; told {told}." if told else "." if args.decide == "continue" else
                                                        "; act on it yourself (new tasks, a new brief, or the person's cancel)."))

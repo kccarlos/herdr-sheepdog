@@ -237,6 +237,8 @@ def main():
     c.add_argument("--commit", help="the commit the round reviewed, when fixes were committed since (default: HEAD)")
     c = cmd("recap", cmd_recap, "the Assistant decides a task's open recap (Recap required): no flags prints it and its RECAP.md")
     c.add_argument("--decide", choices=DECISIONS, help="continue (once per task), split, new (approach) or drop: the last three only record")
+    c.add_argument("--small", action="store_true", help="with continue, on a second recap: once, for a small follow-up fix "
+                                                        "(at most 1 more review round and 60 more changed lines)")
     c.add_argument("--why", help="why, in one line")
     cmd("review-more", cmd_review_more, "the Assistant gives a task one more review round, once all are used (never its own agent)")
     c = cmd("status", cmd_status, "a task's agent says what it's doing now, at the start, each natural step and at least every 5 minutes: status 4 \"Fixing the two failing tests\" --done 40 --left 5m")
