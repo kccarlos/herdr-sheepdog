@@ -365,7 +365,7 @@ BAD = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP
 PENDING = {"QUEUED", "IN_PROGRESS", "PENDING", "WAITING", "REQUESTED", "EXPECTED"}
 
 
-VIEW = "state,mergeable,headRefOid,mergeCommit,reviewDecision,mergeStateStatus"
+VIEW = "state,mergeable,headRefOid,mergeCommit,reviewDecision,mergeStateStatus,isCrossRepository"
 # SHEP-179: a token that may read a pull request but not its checks (a fine-grained one without Checks: read, as
 # the exe.dev GitHub integration's) gets GitHub's "Resource not accessible" for them: a permission, never a blip.
 DENIED = ("resource not accessible", "http 403", "must have", "not have permission", "insufficient scope")
@@ -401,6 +401,9 @@ def pr_view(task):
         v["statusCheckRollup"] = rows
         if not whole:
             v["checks_unknown"] = True
+    if not rest and not v.get("statusCheckRollup") and v.get("headRefOid"):
+        # FAC-115: no rollup row, yet a run of any event (push, workflow_dispatch) may sit on the head commit
+        v["statusCheckRollup"] = check_rows(repo, v["headRefOid"])[0]
     if v.get("statusCheckRollup"):
         v["statusCheckRollup"] = latest_checks(v["statusCheckRollup"])
     return v
@@ -771,15 +774,22 @@ def runs_on_pr(text, base):
     return False
 
 
-def ci_expected(s, task):
-    """FAC-105: the task's base branch (as fetched here: its remote's copy, else the local branch) has a workflow
-    in .github/workflows that runs on a pull request to it. Cached per base commit."""
+def base_commit(s, task):
+    """The task's base branch as fetched here (its remote's copy, else the local branch): (commit, base) or (None, base)."""
     main, base = s.loc["folder"], task.get("base") or "main"
     for ref in (f"{remote_of(main, task.get('branch'))}/{base}", base):
         ok, sha, _ = git(main, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
         if ok and sha:
-            break
-    else:
+            return sha, base
+    return None, base
+
+
+def ci_expected(s, task):
+    """FAC-105: the task's base branch (as fetched here: its remote's copy, else the local branch) has a workflow
+    in .github/workflows that runs on a pull request to it. Cached per base commit."""
+    main = s.loc["folder"]
+    sha, base = base_commit(s, task)
+    if not sha:
         return False
     key = f"{sha}:{base}"
     if key not in _CI_SEEN:
@@ -787,6 +797,50 @@ def ci_expected(s, task):
         _CI_SEEN[key] = ok and any(runs_on_pr(git(main, "show", f"{sha}:{n}")[1], base)
                                    for n in names.splitlines() if n.endswith((".yml", ".yaml")))
     return _CI_SEEN[key]
+
+
+STARTED_CI = "Started CI by hand: no run appeared"
+_DISPATCH = re.compile(r"(?m)^\s*(?:-\s*)?workflow_dispatch\b|^(?:on|true)\s*:.*\bworkflow_dispatch\b")
+
+
+def dispatch_file(s, task):
+    """FAC-115: a workflow file (name) on the base that has workflow_dispatch and runs on pull requests to it."""
+    main = s.loc["folder"]
+    sha, base = base_commit(s, task)
+    if not sha:
+        return None
+    ok, names, _ = git(main, "ls-tree", "--name-only", sha, ".github/workflows/")
+    for n in names.splitlines() if ok else []:
+        if n.endswith((".yml", ".yaml")):
+            text = git(main, "show", f"{sha}:{n}")[1]
+            if _DISPATCH.search(text) and runs_on_pr(text, base):
+                return os.path.basename(n)
+    return None
+
+
+def ci_dispatch(s, task, v):
+    """FAC-115: no run appeared on the head: start its workflow once per head commit (gh workflow run <file> --ref
+    <head branch>) when the repo has one with workflow_dispatch that runs on pull requests to the base and Actions
+    are enabled. Never for a fork's head. Returns STARTED_CI while that run is awaited, else None (FAC-105's wait)."""
+    pr, head = task.setdefault("pr", {}), v.get("headRefOid") or ""
+    done = pr.get("ci_dispatched") or {}
+    if done.get("head") == head:
+        return STARTED_CI if done.get("ok") and now() - (done.get("at") or 0) < UNKNOWN_CHECKS_MS else None
+    branch, repo = pr.get("branch") or task.get("branch") or "", pr_repo(task)
+    if not (head and branch and repo) or v.get("isCrossRepository"):
+        return None
+    ok, out, _ = gh("api", f"repos/{repo}/actions/permissions")
+    try:
+        enabled = ok and bool(json.loads(out).get("enabled"))
+    except (ValueError, AttributeError):
+        enabled = False
+    name = dispatch_file(s, task) if enabled else None
+    if not name:
+        return None
+    ok = gh("workflow", "run", name, "--repo", repo, "--ref", branch)[0]
+    pr["ci_dispatched"] = {"head": head, "file": name, "at": now(), "ok": ok}
+    s.dirty = True
+    return STARTED_CI if ok else None
 
 
 def ci_awaited(s, task, v):

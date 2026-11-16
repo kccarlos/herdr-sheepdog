@@ -19,7 +19,7 @@ from .agents import (
 )
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
-from .github import (already_merged, BEHIND, CHECKS_RUNNING, ci_awaited, ci_runs_on, drop_branch, finish, github, merged_here, needs_approval, note_checks, pr_merged, pr_pending, pr_problem,
+from .github import (already_merged, BEHIND, CHECKS_RUNNING, ci_awaited, ci_dispatch, ci_runs_on, drop_branch, finish, github, merged_here, needs_approval, note_checks, pr_merged, pr_pending, pr_problem,
                      pr_repo, pr_view, pr_wait, CI_STOPPED, queue_entry, task_problem, task_github, tidy_done, tidy_due, update_main, watch_main, UNKNOWN_CHECKS_MS)
 from .launch import default_space, parent_for, sweep_sandboxes
 from .store import locate, read_list, Store, store_files
@@ -124,6 +124,8 @@ def facts(s, t, report):
                 # pending merge set aside (kept in no_ci), the reason told; an Actions run for its head not shown yet waits.
                 if ci_runs_on(t, v) and now() - since < UNKNOWN_CHECKS_MS:
                     wait = CHECKS_RUNNING
+                elif started := ci_dispatch(s, t, v):  # FAC-115: none ran, so Herdr started its workflow once for this head
+                    wait = started
                 else:
                     pr["no_ci"], s.dirty = t.pop("auto_merge", None) or True, True
             elif not ci and (held := pr.pop("no_ci", None)):

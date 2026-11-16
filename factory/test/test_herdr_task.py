@@ -11840,6 +11840,99 @@ class NoCIRunWithCISetUp(unittest.TestCase):
             self.assertEqual((self.tick_green()["done"], self.task["pr"].get("wait"), "no_ci" in self.task["pr"]), ([], "Checks running", False))
 
 
+class CIRunOnTheHeadCounts(unittest.TestCase):
+    """FAC-115: a green run on the PR's head commit counts, whatever event started it; with none and a dispatchable
+    workflow, Herdr starts it once per head (never for a fork's head, Actions off or no workflow_dispatch)."""
+
+    setUp_fac94, tick_green = DesignDocAndOpenAskWaitForAccept.setUp, DesignDocAndOpenAskWaitForAccept.tick_green
+    workflow, age = NoCIRunWithCISetUp.workflow, NoCIRunWithCISetUp.age
+    setUp_gate, git, change, ready, verdict, env = (GateReview.setUp, GateReview.git, GateReview.change, GateReview.ready,
+                                                    GateReview.verdict, GateReview.env)
+    ON = "  pull_request:\n  workflow_dispatch:\n"
+
+    def setUp(self):
+        from unittest import mock
+        NoCIRunWithCISetUp.setUp(self)
+        self.calls, self.runs_on, self.actions, self.cross = [], {}, True, False
+
+    def live(self):
+        """After the PR is open and reviewed: the real pr_view over a fake gh with these checks."""
+        from unittest import mock
+        self.prev_gh = self.github.gh
+        for mod, name, val in ((self.commands, "pr_view", self.github.pr_view), (self.tick, "pr_view", self.github.pr_view),
+                               (self.github, "gh", self.gh)):
+            p = mock.patch.object(mod, name, val); p.start(); self.addCleanup(p.stop)
+
+    def gh(self, *a):
+        self.calls.append(a)
+        if a[:2] == ("pr", "view"):
+            return True, json.dumps({"state": "MERGED" if self.merges else "OPEN", "mergeable": "MERGEABLE",
+                                     "headRefOid": self.head, "isCrossRepository": self.cross, "statusCheckRollup": []}), ""
+        if a[0] == "api" and "/check-runs" in a[1]:
+            sha = a[1].split("/commits/")[1].split("/")[0]
+            return True, json.dumps({"check_runs": self.runs_on.get(sha, [])}), ""
+        if a[0] == "api" and a[1].endswith("/commits/" + self.head + "/status") or a[0] == "api" and "/status" in a[1]:
+            return True, json.dumps({"statuses": []}), ""
+        if a[0] == "api" and a[1].endswith("/actions/permissions"):
+            return True, json.dumps({"enabled": self.actions}), ""
+        if a[:2] == ("workflow", "run"):
+            return True, "", ""
+        if a[:2] == ("run", "list"):
+            return True, "[]", ""
+        return self.prev_gh(*a)
+
+    def dispatches(self):
+        return [c for c in self.calls if c[:2] == ("workflow", "run")]
+
+    def green(self, sha):
+        return [{"name": "check", "status": "completed", "conclusion": "success"}]
+
+    def wait_for_it(self):
+        self.ready(); self.verdict("term-1"); self.verdict("term-2"); self.live()
+        self.age(self.github.NO_CI_RUN_MS)
+
+    def test_a_dispatch_run_green_on_the_head_counts_and_merges(self):
+        self.workflow(self.ON)
+        self.ready(); self.verdict("term-1"); self.verdict("term-2"); self.live()
+        self.runs_on[self.head] = self.green(self.head)
+        self.assertEqual((self.tick_green()["done"], len(self.merges), self.dispatches()), ([13], 1, []))
+
+    def test_a_run_on_an_older_commit_doesnt_count(self):
+        self.workflow(self.ON)
+        self.runs_on["0" * 40] = self.green("0" * 40)
+        self.wait_for_it()
+        self.assertEqual((self.tick_green()["done"], self.merges), ([], []))
+
+    def test_no_run_starts_the_workflow_once_per_head(self):
+        self.workflow(self.ON)
+        self.wait_for_it()
+        for _ in range(3):
+            self.assertEqual((self.tick_green()["done"], self.task["pr"].get("wait")), ([], self.github.STARTED_CI))
+        self.assertEqual(len(self.dispatches()), 1)
+        self.assertEqual(self.dispatches()[0][:3], ("workflow", "run", "check.yml"))
+        self.assertEqual((self.dispatches()[0][-2:], "no_ci" in self.task["pr"]), (("--ref", self.task["branch"]), False))
+        self.assertEqual(self.task["pr"]["ci_dispatched"]["head"], self.head)
+        self.runs_on[self.head] = self.green(self.head)  # the run shows: it merges
+        self.assertEqual((self.tick_green()["done"], len(self.merges), len(self.dispatches())), ([13], 1, 1))
+
+    def test_actions_off_or_no_dispatch_keeps_the_no_ci_wait(self):
+        self.actions = False
+        self.workflow(self.ON)
+        self.wait_for_it()
+        self.assertEqual((self.tick_green()["done"], self.dispatches(), bool(self.task["pr"].get("no_ci"))), ([], [], True))
+
+    def test_a_workflow_without_workflow_dispatch_keeps_the_no_ci_wait(self):
+        self.workflow("  pull_request:\n")
+        self.wait_for_it()
+        self.assertEqual((self.tick_green()["done"], self.dispatches(), bool(self.task["pr"].get("no_ci"))), ([], [], True))
+
+    def test_a_fork_head_never_dispatches(self):
+        self.cross = True
+        self.workflow(self.ON)
+        self.wait_for_it()
+        self.assertEqual((self.tick_green()["done"], self.dispatches(), bool(self.task["pr"].get("no_ci"))), ([], [], True))
+
+
 class AgyStartNudge(unittest.TestCase):
     """FAC-100: an agy worker idle at turn 0 after its start gets one nudge; still idle after it, Needs you says so."""
 
