@@ -9893,9 +9893,18 @@ class ProjectStart(unittest.TestCase):
         for flag in ("docs skip", "at most 3 heavy jobs per PR (found 4)", "queue not cancel on main", "base flakiness measured first (docs/flaky-tests.md)"):
             self.assertIn(flag, det1)
         self.assertTrue(any("notes 23, 28" in s for s in steps1))
-        # _has_docs_skip does not match across sections (e.g. paths-ignore on ios/** plus a job step mentioning docs).
+        # _has_docs_skip only counts pull_request triggers and does not scan across steps or jobs.
         self.assertFalse(self.project._has_docs_skip(
             "on:\n  pull_request:\n    paths-ignore: ['ios/**']\njobs:\n  build:\n    steps:\n      - run: make docs\n"
+        ))
+        self.assertFalse(self.project._has_docs_skip(
+            "on:\n  push:\n    branches: [main]\n    paths-ignore: ['docs/**']\n  pull_request:\n    branches: [main]\n"
+        ))
+        self.assertFalse(self.project._has_docs_skip(
+            "jobs:\n  filter:\n    steps:\n      - uses: dorny/paths-filter@v3\n        with:\n          filters: 'any: [\"**\"]'\n      - run: mkdocs build -d site/docs/\n"
+        ))
+        self.assertTrue(self.project._has_docs_skip(
+            "on:\n  pull_request:\n    paths-ignore: ['docs/**']\n"
         ))
 
         # 3. Fixed workflow + docs/flaky-tests.md + path-filter job -> <=3 heavy PR jobs, 1 summary check, docs skip, safe concurrency on main, flaky baseline noted.
@@ -14322,10 +14331,11 @@ class DocsOnlyCommitsExempt(unittest.TestCase):
         return subprocess.check_output(["git", "-C", folder, "rev-parse", "HEAD"], text=True).strip()
 
     def test_docs_only_commits_helper_classification(self):
-        # Nested /doc/ /docs/ or code inside docs/ is NOT docs-only; doc suffixes and docs/ media/prose are.
-        for bad in ("internal/doc/parser.go", "src/docs/handler.ts", "docs/conf.py", "notes.txt", "scripts/build.sh"):
+        # Prompts/templates and nested non-doc code paths are NOT docs-only; root docs, READMEs, and docs/ prose/media are.
+        for bad in ("internal/doc/parser.go", "src/docs/handler.ts", "docs/conf.py", "notes.txt", "scripts/build.sh",
+                    "prompts/assistant.md", "prompts/svp/RULES.md", "factory/templates/reviewer.md"):
             self.assertFalse(self.budget.is_doc_file(bad), bad)
-        for good in ("README.md", "docs/guide.md", "docs/img/arch.png", "doc/notes.txt", "internal/doc/README.md"):
+        for good in ("README.md", "docs/guide.md", "docs/img/arch.png", "doc/notes.txt", "ios/README.md", "ios/docs/dev/status.md"):
             self.assertTrue(self.budget.is_doc_file(good), good)
         h_code = self.commit(self.wt, "app.py", "v = 2\n", "code change")
         h_doc1 = self.commit(self.wt, "docs/guide.md", "# Guide\n", "docs md")
@@ -14575,6 +14585,8 @@ class CIRunnerCap(unittest.TestCase):
             gh_runs.append({"headBranch": "ext-2", "event": "pull_request", "status": "in_progress"})
             res = self.commands.merge_now(s, t_run1)
             self.assertIn(self.github.CI_CAP_WAIT, res)
+            self.assertIn(self.github.CI_CAP_WAIT, self.agents.ready_wait(t_run1, []))
+            self.assertEqual(self.agents.task_status(t_run1, [])[2], res)
             self.assertEqual(updated, [])
             self.commands.merge_now(s, t_run1, accepting=True)
             self.assertEqual(updated, [t_run1["id"]])

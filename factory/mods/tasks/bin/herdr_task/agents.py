@@ -279,10 +279,14 @@ def ready_wait(task, live):
         return MERGING
     if task.get("merge_queued") and task.get("pr"):
         return IN_QUEUE_LINE
+    wait = (task.get("pr") or {}).get("wait") or ""
+    from .github import CI_CAP_WAIT
+    if wait.startswith(CI_CAP_WAIT):
+        return wait
     if task.get("auto_merge") and task.get("pr") and not task.get("merged"):
         # #743: waits calmly for a review GitHub requires
         return APPROVAL_LINE if task["pr"].get("needs_approval") else MERGES_ITSELF
-    return (task.get("pr") or {}).get("wait") or None
+    return wait or None
 
 
 # ---- a short grace before Needs you (SHEP-133) ------------------------------------------------

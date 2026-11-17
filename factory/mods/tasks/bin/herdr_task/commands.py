@@ -2154,6 +2154,8 @@ def merge_now(s, t, accepting=False):
             and git(wt_dir, "rev-parse", f"refs/heads/{t.get('branch')}")[1] == head
             and git(wt_dir, "merge-base", "--is-ancestor", theirs, head)[0]):
         if hold := ci_cap_hold(s, t, repo):
+            t["pr"]["wait"] = hold
+            s.dirty = True
             return hold
     if v.get("state") != "MERGED" and not synced and (why := pr_head_problem(s, t, repo, head, theirs)):
         t["attention"], t["attention_at"] = why[0].upper() + why[1:], now()
@@ -2210,6 +2212,8 @@ def merge_now(s, t, accepting=False):
             behind = checked != "pass"
         if behind:
             if not accepting and (hold := ci_cap_hold(s, t, repo)):
+                t["pr"]["wait"] = hold
+                s.dirty = True
                 return hold
             if fallback_why and not t.get("sync_fallback"):
                 t["sync_fallback"] = {"from": "cheap", "to": "full", "why": f"tasks.sync fell back from cheap to full ({fallback_why})", "at": now()}
@@ -2219,6 +2223,9 @@ def merge_now(s, t, accepting=False):
                 return t["attention"]
             t["pr"]["wait"] = CHECKS_RUNNING
             return CHECKS_RUNNING
+        if (t["pr"].get("wait") or "").startswith(CI_CAP_WAIT):
+            t["pr"].pop("wait", None)
+            s.dirty = True
         if not accepting and not t.get("accepted_by") and t.get("auto_merge") != "auto" and ci_awaited(s, t, v):
             # FAC-105: CI is set up for its base but no check ran on it: never merged as if they passed (the tick
             # decides when it's missing); the person's Accept still merges it.

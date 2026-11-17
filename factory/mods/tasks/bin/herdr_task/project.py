@@ -128,12 +128,30 @@ def _workflow_jobs(text):
 def _has_docs_skip(text):
     """Whether a PR workflow skips or filters docs-only changes."""
     lines = [re.sub(r"\s#.*$|^\s*#.*$", "", ln).rstrip() for ln in text.splitlines()]
+    # Flow-style inline mapping inside on: pull_request / pull_request_target
+    joined = "\n".join(lines)
+    if re.search(r"pull_request(?:_target)?\s*:\s*\{[^{}]*(?:paths-ignore\s*:[^{}]*(?:docs|\*\.md)|paths\s*:[^{}]*(?:!docs|!\*\*?/\*\.md|!\*\.md))", joined):
+        return True
+    on_ind = pr_ind = None
     for i, ln in enumerate(lines):
-        if m := re.search(r"^(\s*)(paths-ignore|paths)\s*:(.*)$", ln):
-            ind, key, rest = len(m.group(1)), m.group(2), m.group(3)
+        if not ln.strip():
+            continue
+        ind = _indent(ln)
+        if on_ind is not None and ind <= on_ind:
+            on_ind = pr_ind = None
+        if pr_ind is not None and ind <= pr_ind:
+            pr_ind = None
+        if ind == 0 and re.match(r"on\s*:\s*(?:\{.*)?$", ln):
+            on_ind = 0
+            continue
+        if on_ind is not None and ind > on_ind and re.match(r"\s*pull_request(?:_target)?\s*:", ln):
+            pr_ind = ind
+            continue
+        if pr_ind is not None and ind > pr_ind and (m := re.search(r"^(\s*)(paths-ignore|paths)\s*:(.*)$", ln)):
+            key_ind, key, rest = len(m.group(1)), m.group(2), m.group(3)
             block = [rest]
             for nxt in lines[i + 1:]:
-                if nxt.strip() and _indent(nxt) <= ind:
+                if nxt.strip() and _indent(nxt) <= key_ind:
                     break
                 block.append(nxt)
             body = "\n".join(block)
@@ -141,8 +159,15 @@ def _has_docs_skip(text):
                 return True
             if key == "paths" and re.search(r"(?:!docs|!\*\*?/\*\.md|!\*\.md)", body):
                 return True
-        elif "paths-filter" in ln:
-            for nxt in lines[i:i + 15]:
+        if "paths-filter" in ln:
+            # Scan only within the current step / filters block, bounded by indentation or next list item.
+            step_ind = len(re.match(r"^(\s*(?:-\s*)?)", ln).group(1))
+            for nxt in lines[i + 1:]:
+                if not nxt.strip():
+                    continue
+                nind = _indent(nxt)
+                if nind < step_ind or (nind == step_ind and nxt.lstrip().startswith("- ")):
+                    break
                 if re.search(r"(?:!docs|!\*\*?/\*\.md|!\*\.md|docs/)", nxt):
                     return True
     return False
