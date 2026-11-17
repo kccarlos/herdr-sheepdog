@@ -19,13 +19,10 @@ from .commands import (
     cmd_switch, cmd_unarchive, cmd_where,
 )
 from .tick import cmd_tick
-from .backups import cmd_backup, cmd_restore_spaces
 from .automations import auto_list, cmd_auto, cmd_scheduler, cmd_track, EVENTS, HOW
 from .machines import cmd_assistants, cmd_machines, cmd_sync_auto, cmd_tell
 from .autopilot import cmd_autopilot, cmd_complete, cmd_progress
-from .home import cmd_home
 from .assistant_settings import cmd_session_note
-from .feedback import cmd_feedback
 from .ask import cmd_ask, cmd_ask_pane
 from .budget import cmd_recap, DECISIONS
 from .project import cmd_project
@@ -268,27 +265,6 @@ def main():
     c.add_argument("title", help="what can't wait, a few words")
     c.add_argument("--body", help="why, a line or two")
     c.add_argument("--task", help="the task it's about (an Assistant's alert about one of its tasks always reaches the person)")
-    c = cmd("feedback", cmd_feedback, "a problem in Shepherdr itself (not the project's): feedback \"<one line>\" --details \"goal, what "
-            "was tried, what went wrong, expected, suggested fix\" returns at once and your Assistant offers the person to file it "
-            "on GitHub; an Assistant gets whether to offer, and files it only on the person's yes (--file)", id=False)
-    c.add_argument("line", nargs="?", default="", help="the problem in one line")
-    c.add_argument("--details", help="goal, what was tried, what went wrong, expected, suggested fix (no secrets, no logs whole)")
-    c.add_argument("--key", help="the problem's key, as its news line or an earlier answer gave it")
-    g = c.add_mutually_exclusive_group()
-    g.add_argument("--file", action="store_true", help="Assistant, after the person's yes: search open issues for a duplicate, then file it")
-    g.add_argument("--no", action="store_true", help="Assistant: the person said no; never offered again")
-    g.add_argument("--later", action="store_true", help="Assistant on an Autopilot wake: offer it once the person is back")
-    g.add_argument("--list", action="store_true", help="what waits to be offered in this space")
-    for f, words in (("goal", "what they were trying to do"), ("happened", "what went wrong"), ("tried", "what was tried"),
-                     ("expected", "what should have happened"), ("fix", "a suggested fix"), ("repro", "minimal steps to reproduce")):
-        c.add_argument(f"--{f}", help=f"--file: {words}")
-    c.add_argument("--title", help="--file: the issue's title (default: the one line)")
-    c.add_argument("--surface", choices=["web", "window", "both"], help="--file: where the person used Shepherdr")
-    c.add_argument("--repo", help=argparse.SUPPRESS)  # a test's throwaway repo; Settings' otherwise
-    h = c.add_mutually_exclusive_group()
-    h.add_argument("--new", action="store_true", help="--file: file it even though duplicates are open")
-    h.add_argument("--comment", type=int, metavar="N", help="--file: add it as a comment on open issue N instead")
-    c.add_argument("--dry-run", action="store_true", help="--file: show the redacted draft and duplicates, file nothing")
     cmd("done", lambda a: cmd_state(a, "done"), "mark done (the person's call: only when they ask; agents finish with ready)")
     c = cmd("accept", cmd_accept, "the person's Accept on a Ready task: merges first when there is something to merge, then done")
     agent_opts(c)
@@ -369,9 +345,6 @@ def main():
     c = cmd("scheduler", cmd_scheduler, "run automations and the queue (herdr-core keeps one as herdr-automations)", id=False)
     c.add_argument("--ensure", action="store_true", help="start it if automations need it and it isn't running")
     c.add_argument("--once", action="store_true", help="one round, then exit")
-    cmd("backup", cmd_backup, "save a backup of every connected machine's spaces and the sidebar now (the scheduler does every 10 minutes)", id=False)
-    c = cmd("restore-spaces", cmd_restore_spaces, "dry run: what a backup would recreate (no backup: list them)", id=False)
-    c.add_argument("backup", nargs="?", help="a backup's name or folder, or latest")
     au = sub.add_parser("auto", help="automations: a saved task that a time or an event adds again").add_subparsers(dest="auto")
 
     def auto_cmd(name, help, id=True, fields=False):
@@ -473,23 +446,6 @@ def main():
     c.add_argument("--go", action="store_true", help="try each listed host once now (ssh, batch mode); at most once every 10 minutes")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_machines)
-    ho = sub.add_parser("home", help="a machine's home Assistant: show (default) says whether you are one and how the machine is now")
-    ho.set_defaults(fn=cmd_home, home=None, json=False)
-    hs = ho.add_subparsers(dest="home")
-    c = hs.add_parser("show", help="whether you are this machine's home Assistant (or the main machine's), its health, stuck processes and leftover worktrees")
-    c.add_argument("--json", action="store_true")
-    c.set_defaults(fn=cmd_home)
-    c = hs.add_parser("report")  # the main machine's round reads another machine with it
-    c.add_argument("--spaces")
-    c.add_argument("--since", type=int)
-    c.add_argument("--news-only", action="store_true")
-    c.add_argument("--json", action="store_true")
-    c.set_defaults(fn=cmd_home)
-    c = hs.add_parser("pass", help="one home round now (the scheduler runs one every minute)")
-    c.add_argument("--only", help="just this machine (local or its name)")
-    c.add_argument("--to", help="send everything to this Assistant instead (a test's own)")
-    c.add_argument("--json", action="store_true")
-    c.set_defaults(fn=cmd_home)
     c = sub.add_parser("assistants", help="every live Assistant on every machine reachable from here: its address (machine/terminal), space and folder")
     c.add_argument("--refresh", action="store_true", help="look again now")
     c.add_argument("--json", action="store_true")
@@ -541,10 +497,6 @@ def main():
     c = sub.add_parser("_session-note")  # the chat's SessionStart hook (mods/chat/session-note.sh): an Assistant's extra words
     c.add_argument("terminal")
     c.set_defaults(fn=cmd_session_note, json=False)
-    c = sub.add_parser("_hold-news")  # feedback's report, queued for its Assistant in the background (feedback.queue_news)
-    c.add_argument("to")
-    c.add_argument("text")
-    c.set_defaults(fn=lambda a: __import__("herdr_task.news", fromlist=["hold"]).hold(a.to, a.text, "news"), json=False)
     c = cmd("sandbox", cmd_sandbox, "whether Codex's sandbox (bwrap) can start on this machine, and the fix for it when it can't "
             "(asked once and kept; --check asks again)", id=False)
     c.add_argument("--check", action="store_true", help="ask again now")

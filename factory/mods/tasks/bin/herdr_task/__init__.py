@@ -27,7 +27,6 @@ before it:
                going red after merges, to the Assistant.
   tick         Tick: one pass over the tasks (start queued ones, finish merged ones, retry cut
                turns).
-  backups      Backups of every machine's spaces, and restoring them.
   machines     Other machines: the task tools kept in step there (sync), the reach map hop by
                hop, the Assistants on every reachable machine and messages between them.
   automations  Automations (a saved task added again by a time or an event), and the scheduler's

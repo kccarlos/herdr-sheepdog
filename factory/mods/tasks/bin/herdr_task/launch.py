@@ -20,7 +20,6 @@ from .settings import agent_key, ASSISTANT_TEMPLATES, by_layer, trust_roots, bar
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
 from .github import finish, remote_of
-from .browsers import browser_line, browser_path
 
 
 # ---- an agent's own herdr-task commands never ask -------------------------------------------
@@ -31,7 +30,7 @@ from .browsers import browser_line, browser_path
 
 # How long Codex waits on the permission hook: as the chat's card waits (ask-hook.sh).
 ASK_TIMEOUT = 1800
-OWN = ["ready", "reviewed", "status", "alert", "feedback", "simulator", "device-wait", "show", "list", "where"]
+OWN = ["ready", "reviewed", "status", "alert", "simulator", "device-wait", "show", "list", "where"]
 # herdr-secret's agent commands (~/.config/herdr-app/bin/herdr-secret): asking for a secret and
 # using one by name never ask either, as Shepherdr's secret commands. Written by its full path or
 # its bare name. Reviewers get none (launch() skips own_argv for them; herdr-secret refuses them).
@@ -80,10 +79,6 @@ def own_rules(path, verbs=OWN):
     sp = secret_path()
     for p in [sp, "herdr-secret"] if sp and re.fullmatch(r"[\w@%+=:,./-]+", sp) else []:
         rules += [f"Bash({p} {verb}:*)" for verb in SECRET]
-    # The task's browser (HERD-57): every herdr-browser command, as the brief writes it.
-    bp = browser_path()
-    for p in [bp, "herdr-browser"] if bp and re.fullmatch(r"[\w@%+=:,./-]+", bp) else []:
-        rules += [f"Bash({p}:*)"]
     return rules
 
 
@@ -279,9 +274,6 @@ def own_command(path, text, sandboxed=False):
         words.append(UNQUOTE.sub(lambda g: g.group(1) if g.group(1) is not None else re.sub(r"\\(.)", r"\1", g.group(2)), m.group(0)))
         at = m.end()
     if len(words) >= 2 and words[0] == path and words[1] in OWN:
-        return True
-    bp = browser_path()
-    if bp and len(words) >= 2 and words[0] in (bp, "herdr-browser"):
         return True
     ap = artifact_path()
     if sandboxed and len(words) >= 2 and words[0] in (ap, "herdr-artifact") and words[1] in ARTIFACT and "--custom" not in words:
@@ -715,15 +707,9 @@ def closing_line(s, task, parent=None, argv=None, space=None):
              f"a rough guess beats none.")
     text += (f" Only for what truly can't wait, `{ht} alert \"<what, a few words>\" --body \"<why>\"` reaches the person at once "
              f"(a toast and a sound); a question waits in your chat instead.")
-    from .feedback import feedback_on
-    if feedback_on(space or task.get("space")):
-        text += (f" A problem in Shepherdr itself, not this task's code: `{ht} feedback \"<one line>\" --details \"<goal, what was "
-                 f"tried, what went wrong, expected, suggested fix>\"` returns at once and your Assistant offers the person to file "
-                 f"it; carry on.")
     text += (f" Your herdr-task command is {ht}: write that full path each time (never the bare name), as one plain command; "
              f"then its {', '.join(OWN)} commands run without asking.")
     from .simulators import simulator_line
-    text += browser_line()
     text += simulator_line(s, task, space)
     if secret_path():
         text += (" Secrets (keys, tokens, passwords) are used by name, never seen: `herdr-secret ask NAME --why \"…\"` "

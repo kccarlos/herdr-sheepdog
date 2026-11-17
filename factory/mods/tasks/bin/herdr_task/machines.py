@@ -24,7 +24,41 @@ import sys
 import threading
 import time
 
-from .base import addon_off, APP_HOME, ASK_HOME, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, layout, now, PACKAGE, run, STORE, WHERE
+from .base import addon_off, APP_HOME, ASK_HOME, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, now, PACKAGE, run, STORE, WHERE
+
+
+def _shep_py():
+    table = {
+        ".herdr/shepherdr.json": ("config", "settings.json"),
+        ".herdr/model-picks.json": ("config", "model-picks.json"),
+        ".herdr/tasks": ("data", "tasks"),
+        ".herdr/artifacts": ("data", "artifacts"),
+        ".herdr/vault.json": ("data", "secrets/vault.json"),
+        ".herdr/secret-remote": ("data", "secrets/remote"),
+        ".herdr/tools.json": ("data", "tools.json"),
+        ".herdr/shepherdr": ("state", "service"),
+        ".herdr/secret-drop": ("state", "secret-drop"),
+        ".herdr/secret-served": ("state", "secret-served"),
+        ".herdr/cli-check.json": ("state", "cli-check.json"),
+        ".herdr/machine-hold.json": ("state", "machine-hold.json"),
+    }
+    return f"""
+def SHEP(rel, _t={table!r}):
+    H, E = os.path.expanduser("~"), os.environ
+    a = lambda v: E.get(v) if (E.get(v) or "").startswith("/") else None
+    one = a("SHEPHERDR_HOME")
+    R = dict((k, os.path.join(one, k)) for k in ("config", "data", "state")) if one else {{
+        "config": os.path.join(a("XDG_CONFIG_HOME") or os.path.join(H, ".config"), "shepherdr"),
+        "data": os.path.join(a("XDG_DATA_HOME") or os.path.join(H, ".local", "share"), "shepherdr"),
+        "state": os.path.join(a("XDG_STATE_HOME") or os.path.join(H, ".local", "state"), "shepherdr")}}
+    for old, (base, new) in _t.items():
+        if rel == old or rel.startswith(old + "/"):
+            return os.path.join(R[base], new + rel[len(old):])
+    return os.path.join(H, rel)
+"""
+
+
+_SHEP_PY = _shep_py()
 from .news import news_send, send_or_hold, typing
 
 
@@ -165,7 +199,7 @@ import base64, hashlib, json, os, shutil, subprocess, sys, time
 x = json.loads(sys.stdin.read())
 H = os.path.expanduser("~")
 P = lambda r: os.path.join(H, r)
-''' + layout.PY + r'''
+''' + _SHEP_PY + r'''
 # Shepherdr's own files (the stamp, the secrets' marks) where they are on that machine: its own
 # folders once its data moved there, else ~/.herdr (SHEP: herdr_task/layout.py).
 def sha(p):
@@ -512,7 +546,7 @@ PROBE = r'''
 import json, os, shutil, socket, subprocess, sys, threading
 o = json.loads(sys.argv[1])
 H = os.path.expanduser("~")
-''' + layout.PY + r'''
+''' + _SHEP_PY + r'''
 def sh(argv, inp=None, timeout=20):
     try:
         r = subprocess.run(argv, input=inp, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)

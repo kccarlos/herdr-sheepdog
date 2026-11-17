@@ -18,7 +18,7 @@ from unittest import mock
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.join(ROOT, "mods", "tasks", "bin"))
-from herdr_task import machines  # noqa: E402
+from herdr_task import base, machines  # noqa: E402
 
 
 def load(name, path):
@@ -35,21 +35,21 @@ M3, MINI, VM = "id-m3", "id-mini", "id-vm"
 
 
 class Machine(unittest.TestCase):
-    """A throwaway machine: its ~/.herdr and herdr-core state folder."""
+    """A throwaway machine: its XDG Shepherdr and herdr-core state folders."""
 
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="shep-secret-main-")
-        self.herdr = os.path.join(self.dir, "home", ".herdr")
+        self.secrets = os.path.join(self.dir, "home", ".local", "share", "shepherdr", "secrets")
+        self.drop = os.path.join(self.dir, "home", ".local", "state", "shepherdr", "secret-drop")
         self.core = os.path.join(self.dir, "state", "herdr-core", "default")
-        os.makedirs(self.herdr)
+        os.makedirs(self.secrets)
         os.makedirs(self.core)
-        self.patches = [mock.patch.object(secret, "HERDR", self.herdr), mock.patch.object(secret, "CORE", self.core),
-                        mock.patch.object(secret, "VAULT", os.path.join(self.herdr, "vault.json")),
-                        mock.patch.object(secret, "REMOTE_MARK", os.path.join(self.herdr, "secret-remote")),
-                        mock.patch.object(secret, "DROP", os.path.join(self.herdr, "secret-drop")),
+        self.patches = [mock.patch.object(secret, "CORE", self.core),
+                        mock.patch.object(secret, "VAULT", os.path.join(self.secrets, "vault.json")),
+                        mock.patch.object(secret, "REMOTE_MARK", os.path.join(self.secrets, "remote")),
+                        mock.patch.object(secret, "DROP", self.drop),
                         mock.patch.object(machines, "HOME", os.path.join(self.dir, "home")),
-                        # its Shepherdr paths: that home's, not moved yet (the old ~/.herdr ones)
-                        mock.patch.object(machines, "WHERE", machines.layout.Where(home=os.path.join(self.dir, "home"), env={})),
+                        mock.patch.object(machines, "WHERE", base.Where(home=os.path.join(self.dir, "home"), env={})),
                         mock.patch.dict(os.environ, {"XDG_STATE_HOME": os.path.join(self.dir, "state")})]
         os.environ.pop("HC_SESSION", None)
         for p in self.patches:
@@ -68,13 +68,13 @@ class Machine(unittest.TestCase):
             docs["shepherdr.host"] = {"value": {"id": host, "at": 1}, "version": 1}
         with open(os.path.join(self.core, "docs.json"), "w") as f:
             json.dump(docs, f)
-        mk = os.path.join(self.herdr, "secret-remote")
+        mk = os.path.join(self.secrets, "remote")
         if mark:
             open(mk, "a").close()
         elif os.path.exists(mk):
             os.unlink(mk)
         if vault is not None:
-            with open(os.path.join(self.herdr, "vault.json"), "w") as f:
+            with open(os.path.join(self.secrets, "vault.json"), "w") as f:
                 json.dump({"version": 1, "secrets": vault}, f)
 
 
@@ -179,7 +179,7 @@ class Mark(Machine):
         payload = {"op": "install", "stamp": ".herdr/tasks/.sync-stamp.json", "files": [], "links": [], "version": "v", "from": "m3",
                    "touch": [{"path": ".herdr/secret-remote", "unless": ".herdr/vault.json", "unless_main": True}]}
         env = {"PATH": os.environ.get("PATH", ""), "HOME": home, "XDG_STATE_HOME": os.path.join(self.dir, "state")}
-        mark = os.path.join(home, ".herdr", "secret-remote")
+        mark = os.path.join(home, ".local", "share", "shepherdr", "secrets", "remote")
         for me, rec, marked in ((MINI, {"id": MINI, "at": 2}, False), (VM, {"id": MINI, "at": 2}, True), (VM, None, True)):
             self.be(me, rec)
             r = subprocess.run([sys.executable, "-c", machines.INSTALL], input=json.dumps(payload), env=env, capture_output=True, text=True)

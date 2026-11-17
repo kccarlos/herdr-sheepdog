@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 
-from .base import ENTRY, Fail, guard, hc_json, layout, now, STORE, WHERE
+from .base import ENTRY, Fail, guard, hc_json, now, STORE
 from .when import parse_at
 from .settings import bare, set_task, settings_for, SET_KEYS, worker_argv, worktrees_on
 from .agents import agent_running, detail, live_agents, starting, status_of, task_status
@@ -27,7 +27,6 @@ from .news import news_pass
 from .tick import end_done_pass, lost_logs_pass, memory_guard, retry_pass, tick_store, watchdog_pass
 from .simulators import simulator_pass
 from .devices import device_pass
-from .backups import backup_pass
 from .machines import machines_pass
 from .takeover import cli_check_pass
 
@@ -715,10 +714,6 @@ def one_pass(report):
         except Exception as e:  # never stops the scheduler
             print(f"{time.strftime('%H:%M:%S')} lost logs: {e}", flush=True)
         try:
-            backup_pass(report)
-        except Exception as e:  # never stops the scheduler
-            print(f"{time.strftime('%H:%M:%S')} backup: {e}", flush=True)
-        try:
             cli_check_pass(report)
         except Exception as e:  # never stops the scheduler
             print(f"{time.strftime('%H:%M:%S')} cli check: {e}", flush=True)
@@ -735,11 +730,6 @@ def one_pass(report):
             machines_pass(report)
         except Exception as e:  # never stops the scheduler
             print(f"{time.strftime('%H:%M:%S')} machines: {e}", flush=True)
-        try:
-            from .home import home_pass
-            home_pass(report)
-        except Exception as e:  # never stops the scheduler
-            print(f"{time.strftime('%H:%M:%S')} home: {e}", flush=True)
         tmp = f"{SEEN}.{os.getpid()}.tmp"
         with open(tmp, "w") as f:
             json.dump(seen_all, f)
@@ -762,18 +752,12 @@ def cmd_scheduler(args):
         say(args, {"running": True}, "Another scheduler is running.")
         return
     started = script_hash()
-    on_layout = WHERE.migrated
-    test = bool(os.environ.get("HERDR_TASK_STORE"))
     with open(os.path.join(STORE, ".scheduler.json"), "w") as f:
         json.dump({"pid": os.getpid(), "hash": started, "at": now(), "terminal": os.environ.get("HC_TERMINAL_ID")}, f)
     print(f"herdr-automations: watching {STORE} every 15 s.", flush=True)
     while True:
         report = {"started": [], "done": [], "attention": [], "fired": []}
         try:
-            if not test:
-                layout.heal_back(WHERE)       # rolled back: what was written at the new paths just after, taken back
-                for k in layout.heal(WHERE):  # an older writer's file at an old path: taken in
-                    print(f"{time.strftime('%H:%M:%S')} took in {k} written at its old path", flush=True)
             one_pass(report)
         except Exception as e:  # one bad list never stops the rest
             print(f"{time.strftime('%H:%M:%S')} error: {e}", flush=True)
@@ -783,14 +767,8 @@ def cmd_scheduler(args):
             print(f"{time.strftime('%H:%M:%S')} started {f['ref']}", flush=True)
         for f in report.get("news") or []:
             print(f"{time.strftime('%H:%M:%S')} news to {f['to']}: {len(f['lines'])} line(s)", flush=True)
-        for f in report.get("backups") or []:
-            print(f"{time.strftime('%H:%M:%S')} backup {f}", flush=True)
         for f in report.get("backups_started") or []:
             print(f"{time.strftime('%H:%M:%S')} {f['task']}: {f['to']} took over from {f['from']} ({f['why']})", flush=True)
-        for f in report.get("home") or []:
-            print(f"{time.strftime('%H:%M:%S')} home news to {f['to']}: {len(f['lines'])} line(s)", flush=True)
-        for m, e in (report.get("home_errors") or {}).items():
-            print(f"{time.strftime('%H:%M:%S')} home: {m}: {e}", flush=True)
         for f in report.get("ended") or []:
             print(f"{time.strftime('%H:%M:%S')} {f['task']} is done: ended {', '.join(f['terminals'])}", flush=True)
         if (report.get("memory_guard") or {}).get("alert"):
@@ -801,8 +779,8 @@ def cmd_scheduler(args):
             say(args, report, None)
             return
         time.sleep(15)
-        # Updated, or this machine's data moved since: carry on as the new version, on the new paths.
-        if script_hash() != started or (not test and WHERE.migrated != on_layout):
+        # Updated since: carry on as the new version.
+        if script_hash() != started:
             fcntl.flock(me, fcntl.LOCK_UN)
             os.execv(sys.executable, [sys.executable, ENTRY, "scheduler"])
 
