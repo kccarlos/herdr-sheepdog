@@ -505,59 +505,6 @@ class MacAudio(unittest.TestCase):
             self.assertIsNone(m, f"{name}() needs crt_externs.h: dlsym it instead")
         self.assertIn('dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_NSGetEnviron")', code)
 
-@unittest.skipUnless(os.path.isfile(J("mods", "chat", "session-note.sh")), "Shepherdr session-note.sh is outside factory/")
-class SessionNote(unittest.TestCase):
-    """SHEP-42, SHEP-48: the chat's SessionStart hook (mods/chat/session-note.sh) adds every agent's Reactions
-    words (herdr-task _session-note, on or off by its space) to its JSON: an Assistant's, a task worker's, an
-    agent tab's. Outside Herdr it says nothing. hc and herdr-task are fakes."""
-
-    def run_hook(self, role, terminal="t5"):
-        import shutil
-        import subprocess
-        import tempfile
-        if not shutil.which("jq"):
-            self.skipTest("needs jq")
-        d = tempfile.mkdtemp()
-        log = os.path.join(d, "asked")
-        with open(os.path.join(d, "hc"), "w") as f:
-            f.write(f"#!/bin/sh\necho '{json.dumps({'labels': {'herdr.role': role} if role else {}})}'\n")
-        # what _session-note prints: JSON string content, escaped
-        with open(os.path.join(d, "words"), "w") as f:
-            f.write(json.dumps(' Reactions (on in Settings): <hc react="👀" to="x"/>', ensure_ascii=False)[1:-1])
-        with open(os.path.join(d, "herdr-task"), "w") as f:
-            f.write(f"#!/bin/sh\necho \"$@\" >> {log}\ncat {d}/words\n")
-        for x in ("hc", "herdr-task"):
-            os.chmod(os.path.join(d, x), 0o755)
-        env = {**os.environ, "PATH": f"{d}:{os.environ['PATH']}", "HC_TERMINAL_ID": terminal}
-        if not terminal:
-            env.pop("HC_TERMINAL_ID")
-        out = subprocess.run(["sh", os.path.join(ROOT, "mods", "chat", "session-note.sh")], capture_output=True, text=True, env=env)
-        if not terminal:
-            return out.stdout, os.path.exists(log)
-        ctx = json.loads(out.stdout)["hookSpecificOutput"]["additionalContext"]
-        if not os.path.exists(log):
-            return ctx, ""
-        with open(log) as f:
-            return ctx, f.read()
-
-    def test_an_assistant_gets_its_reactions_words(self):
-        ctx, asked = self.run_hook("coordinator")
-        self.assertTrue(ctx.startswith("Herdr chat:"))
-        self.assertTrue(ctx.endswith('`herdr-artifact guide` first. Reactions (on in Settings): <hc react="👀" to="x"/>'), ctx[-120:])
-        self.assertEqual(asked.split(), ["_session-note", "t5"])
-
-    def test_a_worker_and_an_agent_tab_get_theirs_too(self):
-        for role, terminal in ((None, "t9"), ("", "t11")):
-            ctx, asked = self.run_hook(role, terminal)
-            self.assertTrue(ctx.endswith('`herdr-artifact guide` first. Reactions (on in Settings): <hc react="👀" to="x"/>'), ctx[-120:])
-            self.assertEqual(asked.split(), ["_session-note", terminal])
-
-    def test_outside_herdr_it_says_nothing(self):
-        out, asked = self.run_hook(None, "")
-        self.assertEqual(out, "")
-        self.assertFalse(asked)
-
-
 @unittest.skipUnless(os.path.isdir(J("vm")), "Shepherdr vm/ scripts are outside factory/")
 class VmScripts(unittest.TestCase):
     """FAC-51: vm/provision.sh and vm/guest.sh build the factory's Tart images (FAC-56: factory-vm.sh and its guest

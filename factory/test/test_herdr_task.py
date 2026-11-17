@@ -35,15 +35,21 @@ class HerdrTask(unittest.TestCase):
         out = subprocess.run([sys.executable, "-c", code, BIN], capture_output=True, text=True)
         self.assertIn("which folder? pass --folder", out.stdout, out.stderr)
 
-    def test_addon_off(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-            json.dump({"everywhere": {"off": ["browser"]}}, f)
-        code = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
-                "from herdr_task.base import addon_off; print(addon_off('browser'), addon_off('voice'))")
-        env = {**os.environ, "HERDR_TASK_SETTINGS": f.name}
-        out = subprocess.run([sys.executable, "-c", code, BIN], capture_output=True, text=True, env=env)
-        os.unlink(f.name)
-        self.assertEqual(out.stdout.split(), ["True", "False"], out.stderr)
+    def test_where_and_sheepdog_labels(self):
+        sys.path.insert(0, BIN)
+        from herdr_task import base
+        w = base.Where(home="/u", env={}, mac=False)
+        self.assertEqual(w.path("settings"), "/u/.config/sheepdog/settings.json")
+        self.assertEqual(w.path("tasks"), "/u/.local/share/sheepdog/tasks")
+        self.assertEqual((base.PROJECT_LABEL, base.ROLE_LABEL, base.TASK_LABEL),
+                         ("sheepdog.project", "sheepdog.role", "sheepdog.task"))
+        self.assertEqual(base.label_of({"sheepdog.role": "worker", "herdr.role": "old"}, "role"), "worker")
+        self.assertEqual(base.label_of({"herdr.role": "coordinator"}, "role"), "coordinator")
+        for gone in ("LEGACY", "APP_HOME", "ASK_HOME", "SYNC_HOLDS", "addon_off"):
+            self.assertFalse(hasattr(base, gone), gone)
+        self.assertNotIn("herdr-app", base.GUARDED)
+        from herdr_task import settings
+        self.assertTrue(settings.TEMPLATES.endswith(os.path.join(".config", "herdr-core", "templates")))
 
     def test_tell_takes_a_chat_mention(self):
         """A chat's #-mention (core/mentions.js) names its Assistant for tell-assistant: whole, its target, or #name."""
@@ -320,11 +326,11 @@ class Autopilot(unittest.TestCase):
         self.assertEqual(self.cmd("check", every="off")["every"], None)
         with self.assertRaises(self.ap.Fail):
             self.cmd("check", every="whenever")
-        # a copy the window pushed here: its machine holds the truth
         with open(self.settings_file, "w") as f:
             json.dump({"pushed_from": "herdr-app", "here": "vm"}, f)
-        with self.assertRaises(self.ap.Fail):
-            self.cmd("set", space="sp1", every="every 2 hours")
+        self.cmd("set", space="sp1", every="every 2 hours")
+        with open(self.settings_file) as f:
+            self.assertEqual(json.load(f)["spaces"]["sp1"]["autopilot"], {"every": "every 2 hours"})
 
     def test_complete_turns_it_off(self):
         import argparse
@@ -601,7 +607,7 @@ class RemoteInstall(unittest.TestCase):
         def write(argv, **kw):
             self.wrote.append(argv)
             return subprocess.CompletedProcess(argv, 0, b"", b"")
-        for name, value in (("run", run), ("STORE", self.store), ("sync_held", lambda: None), ("guard", lambda a: None),
+        for name, value in (("run", run), ("STORE", self.store), ("guard", lambda a: None),
                             ("install_secret", lambda m: None)):
             p = mock.patch.object(cli, name, value)
             p.start()
@@ -935,7 +941,7 @@ class ProjectId(unittest.TestCase):
             with store.Store(store.locate(repo)) as s:
                 s.new("Cart")
                 s.dirty = True
-            pid = git(repo, "config", "--local", "--get", "shepherdr.id")
+            pid = git(repo, "config", "--local", "--get", "sheepdog.id")
             self.assertTrue(pid)
             self.assertEqual(json.load(open(s.path))["project_id"], pid)
             os.rename(repo, os.path.join(tmp, "shop-renamed"))
@@ -2709,7 +2715,7 @@ class NewWorktrees(unittest.TestCase):
 
     def test_the_folders_pattern(self):
         self.write_settings({"everywhere": {"tasks": {"branch": "feat/{key}-{slug}"}},
-                             "spaces": {"sp1": {"folder": self.main, "tasks": {"branch": "{key}"}}}})
+                             "projects": {self.main: {"tasks": {"branch": "{key}"}}}})
         t, path = self.new_worktree(self.task("Fix login"))
         self.assertEqual(t["branch"], "SHEP-1")
         self.assertEqual(self.git(path, "rev-parse", "--abbrev-ref", "HEAD"), "SHEP-1")
@@ -3996,7 +4002,7 @@ class GateReview(unittest.TestCase):
         conf = os.path.join(home, "shepherdr.json")
         check = 'export PATH="$HOME/n/bin:$PATH"; bin/sync-shared --check && python3 -m unittest discover -s test'
         with open(conf, "w") as f:
-            json.dump({"spaces": {"sp1": {"folder": self.main, "tasks": {"check": check}}}}, f)
+            json.dump({"projects": {self.main: {"tasks": {"check": check}}}}, f)
         with mock.patch.object(launch, "HOME", home), mock.patch.object(settings, "SETTINGS", conf):
             self.ready()
         cmd = self.runs[0][self.runs[0].index("--") + 1:]
@@ -4417,11 +4423,11 @@ class GateReview(unittest.TestCase):
     # ---- FAC-76: whether agy reviewers run sandboxed is a setting (tasks.reviewer_sandbox), the flag file counts as off ----
 
     def box_settings(self, **layers):
-        """Writes the settings file (a patched path): layers like everywhere={...} or space={...} hold tasks values."""
+        """Writes the settings file (a patched path): layers like everywhere={...} or project/space={...} hold tasks values."""
         from herdr_task import settings
         d = {"everywhere": {"tasks": layers["everywhere"]}} if "everywhere" in layers else {}
-        if "space" in layers:
-            d["spaces"] = {"sp1": {"folder": self.main, "tasks": layers["space"]}}
+        if "project" in layers or "space" in layers:
+            d["projects"] = {self.main: {"tasks": layers.get("project", layers.get("space"))}}
         with open(settings.SETTINGS, "w") as f:
             json.dump(d, f)
 
@@ -4475,7 +4481,7 @@ class GateReview(unittest.TestCase):
         self.box_settings(space={"reviewer_sandbox": True})  # the flag still wins: tonight's machines run unchanged
         with mock.patch.object(launch, "UNSANDBOXED_FLAG", flag):
             self.assertEqual(self.box_row()[:2], (False, "flag"))
-            self.assertTrue(self.box_row()[2].endswith("(the flag file ~/.herdr/agy-review-unsandboxed)"))
+            self.assertTrue(self.box_row()[2].endswith("(the flag file ~/.config/sheepdog/agy-review-unsandboxed)"))
             self.assertFalse(self.reviewer_is_sandboxed())
 
     def test_no_reviewer_sandbox_line_for_a_reviewer_that_is_never_sandboxed(self):
@@ -4833,7 +4839,7 @@ if sys.argv[1] == "kill" and alive:
     def test_a_codex_failure_with_claude_at_0_falls_back_to_agy(self):
         from herdr_task import settings
         with open(settings.SETTINGS, "w") as f:
-            json.dump({"spaces": {"sp1": {"folder": self.main, "reviewer": {"agent": "claude", "model": "opus"}}}}, f)
+            json.dump({"projects": {self.main: {"reviewer": {"agent": "claude", "model": "opus"}}}}, f)
         self.task.update(reviewer="codex", reviewer_model=None)
         self.pools = [self.pool("claude", five=0.0), self.pool("codex")]
         self.ready()
@@ -4985,7 +4991,7 @@ if sys.argv[1] == "kill" and alive:
                          [(1, "agy", "gemini-4-argon-high"), (1, "codex", None)])
         # Reverse direction: when claude ends its turn with no verdict, fallback runs the space's agy with its model.
         with open(settings.SETTINGS, "w") as f:
-            json.dump({"spaces": {"sp1": {"folder": self.main, "reviewer": {"agent": "agy", "model": "gemini-4-argon-high"}}}}, f)
+            json.dump({"projects": {self.main: {"reviewer": {"agent": "agy", "model": "gemini-4-argon-high"}}}}, f)
         self.task.update(reviewer="claude", reviewer_model="opus")
         for k in ("review_runs", "review_failures", "reviews"):
             self.task.pop(k, None)
@@ -6162,7 +6168,7 @@ class Scheduled(unittest.TestCase):
         self.busy_folder(1, [("A", False), ("B", False), ("C", False)])
         folder = self.store_mod.locate(self.folder)["folder"]
         with open(settings.SETTINGS, "w") as f:
-            json.dump({"version": 1, "spaces": {"sp1": {"folder": folder, "name": "App"}},
+            json.dump({"version": 1, "projects": {folder: {"name": "App"}},
                        "everywhere": {"tasks": {"max_running": 2}}}, f)
         from unittest import mock
         import herdr_task.queues as queues
@@ -6174,23 +6180,24 @@ class Scheduled(unittest.TestCase):
         self.assertEqual(v["max_running"], 4)
         with open(settings.SETTINGS) as f:
             d = json.load(f)
-        self.assertEqual(d["spaces"]["sp1"], {"folder": folder, "name": "App", "tasks": {"max_running": 4}})
+        self.assertEqual(d["projects"][folder], {"name": "App", "tasks": {"max_running": 4}})
         self.assertEqual(self.tick_at(None), ["APP-3", "APP-4"])
         v = self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["tasks.max_running=default"])
         self.assertEqual(v["max_running"], 2)  # Everywhere's again
         with open(settings.SETTINGS) as f:
-            self.assertNotIn("tasks", json.load(f)["spaces"]["sp1"])
+            self.assertNotIn("tasks", json.load(f)["projects"][folder])
         for bad in (["tasks.max_running=0"], ["tasks.merge=auto"], ["tasks.max_running"]):
             with self.assertRaises(self.Fail):
                 self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=bad)
         os.remove(settings.SETTINGS)
-        with self.assertRaises(self.Fail):  # no space works here and none was named
-            self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["tasks.max_running=3"])
-        for text in ('{"spaces": {"sp1": {"folder": "x"}', json.dumps({"pushed_from": "mini", "spaces": {}})):
-            with open(settings.SETTINGS, "w") as f:  # a broken file, a pushed copy: left as they are
+        self.assertEqual(self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["tasks.max_running=3"])["max_running"], 3)
+        with open(settings.SETTINGS) as f:
+            self.assertEqual(json.load(f)["projects"][folder], {"tasks": {"max_running": 3}})
+        for text in ('{"projects": {"/x": {"name": "x"}', "[]"):
+            with open(settings.SETTINGS, "w") as f:  # a broken file: left as it is
                 f.write(text)
             with self.assertRaises(self.Fail):
-                self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, space="sp1", set=["tasks.max_running=3"])
+                self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["tasks.max_running=3"])
             with open(settings.SETTINGS) as f:
                 self.assertEqual(f.read(), text)
 
@@ -7662,9 +7669,9 @@ class AssistantSettings(unittest.TestCase):
         for target, name, value in [
             (settings, "SETTINGS", self.file), (aset, "SETTINGS", self.file),
             (aset, "STATE", os.path.join(self.dir, ".assistant-settings.json")), (aset, "hc_json", hc_json),
-            (aset, "run", run), (aset, "addon_off", lambda name: False),
+            (aset, "run", run),
             (aset, "coordinators", lambda: list(self.terminals)),
-            (aset, "autopilot_of", lambda space, cfg: self.auto.get(space, (False, "every 60 minutes", ""))),
+            (aset, "autopilot_of", lambda proj, cfg: self.auto.get(proj, (False, "every 60 minutes", ""))),
             (news, "news_send", lambda addr, text: self.sent.append((addr, text)) or True),
         ]:
             p = mock.patch.object(target, name, value)
@@ -7674,12 +7681,12 @@ class AssistantSettings(unittest.TestCase):
     def write(self, d):
         with open(self.file, "w") as f:
             json.dump(d, f)
-        # a change the pass looks at at once (the file's time), as the window's or the web's save
         self.saves = getattr(self, "saves", 0) + 1
         os.utime(self.file, (1700000000 + self.saves, 1700000000 + self.saves))
 
-    def assistant(self, addr="t5", space="sp1", turn=3, **labels):
-        self.terminals[addr] = {"state": "live", "turn": turn, "labels": {"herdr.role": "coordinator", "herdr.space": space, **labels}}
+    def assistant(self, addr="t5", project="/proj/sp1", turn=3, **labels):
+        self.terminals[addr] = {"state": "live", "turn": turn, "cwd": project,
+                                "labels": {"sheepdog.project": project, "sheepdog.role": "coordinator", **labels}}
 
     def line(self, note, label):
         return next(x for x in note.split("\n") if x.startswith(f"- {label}: "))
@@ -7692,89 +7699,75 @@ class AssistantSettings(unittest.TestCase):
                              ("Base branch", "the folder's checked-out branch"), ("Worktrees", "on"), ("Tasks at once", "10 per folder"),
                              ("Task notes", "none"), ("Autopilot", "off")]:
             self.assertTrue(self.line(note, label).startswith(f"- {label}: {words}"), self.line(note, label))
-        # nothing differs from Herdr's default: no line says who set it
         self.assertNotIn("; set for", note)
         self.assertNotIn("; your setting", note)
-        self.assertEqual(len(note.split("\n")), 11)  # head, 10 lines (Suggested next message included)
-        self.assertIn("- Suggested next message: on (end each reply", note)
+        self.assertNotIn("Suggested next message", note)
+        self.assertEqual(len(note.split("\n")), 10)  # head, 9 lines
 
-    def test_the_block_for_a_space_with_its_own(self):
+    def test_the_block_for_a_project_with_its_own(self):
         self.write({"everywhere": {"tasks": {"review_rounds": 2, "merge": "checks"}},
-                    "spaces": {"sp1": {"tasks": {"base": "dev", "start_notes": "bun install", "max_running": 3, "worktrees": False},
-                                       "worker": {"agent": "codex", "model": "gpt-5", "effort": "high"},
-                                       "reviewer": {"agent": "claude", "model": "opus"}},
-                               "sp2": {"tasks": {"merge": "auto"}}}})
-        self.auto["sp1"] = (True, "every 30 minutes", "Ship the beta")
+                    "projects": {"/proj/sp1": {"tasks": {"base": "dev", "start_notes": "bun install", "max_running": 3, "worktrees": False},
+                                               "worker": {"agent": "codex", "model": "gpt-5", "effort": "high"},
+                                               "reviewer": {"agent": "claude", "model": "opus"}},
+                                 "/proj/sp2": {"tasks": {"merge": "auto"}}}})
+        self.auto["/proj/sp1"] = (True, "every 30 minutes", "Ship the beta")
         self.assistant()
         note = self.aset.session_note("t5")
-        self.assertEqual(self.line(note, "Review"), "- Review: on, at most 2 rounds, must fix major and up (blocker, major), reviewer claude, model opus; set for this space")
+        self.assertEqual(self.line(note, "Review"), "- Review: on, at most 2 rounds, must fix major and up (blocker, major), reviewer claude, model opus; set for this project")
         self.assertEqual(self.line(note, "Merge"), "- Merge: after checks (Herdr merges a ready task once its checks pass); your setting everywhere")
         self.assertEqual(self.line(note, "Proof"), "- Proof: on")
-        self.assertEqual(self.line(note, "Task agent"), "- Task agent: codex, model gpt-5, effort high; set for this space")
+        self.assertEqual(self.line(note, "Task agent"), "- Task agent: codex, model gpt-5, effort high; set for this project")
         self.assertIn("- Base branch: dev ", note)
-        self.assertIn("- Worktrees: off (tasks work in the folder itself); set for this space", note)
+        self.assertIn("- Worktrees: off (tasks work in the folder itself); set for this project", note)
         self.assertIn("- Tasks at once: 3 per folder", note)
         self.assertIn("- Task notes: start notes set", note)
-        self.assertEqual(self.line(note, "Autopilot"), "- Autopilot: on, every 30 minutes, direction: Ship the beta; set for this space")
+        self.assertEqual(self.line(note, "Autopilot"), "- Autopilot: on, every 30 minutes, direction: Ship the beta; set for this project")
         labels = self.terminals["t5"]["labels"]
-        self.assertEqual(sorted(self.aset.parse(labels["herdr.settings"])),
-                         sorted(["review", "merge", "proof", "agent", "base", "worktrees", "max_running", "notes", "autopilot", "suggestions"]))
-        # another space inherits Everywhere's, with its own merge
-        self.assistant("t6", "sp2")
+        self.assertEqual(sorted(self.aset.parse(labels[self.aset.LABEL])),
+                         sorted(["review", "merge", "proof", "agent", "base", "worktrees", "max_running", "notes", "autopilot"]))
+        # another project inherits Everywhere's, with its own merge
+        self.assistant("t6", "/proj/sp2")
         other = self.aset.session_note("t6")
-        self.assertIn("- Merge: on its own (Herdr merges a ready task); set for this space", other)
+        self.assertIn("- Merge: on its own (Herdr merges a ready task); set for this project", other)
 
     def test_only_assistants_get_the_block(self):
-        self.terminals["t9"] = {"state": "live", "labels": {"herdr.task": "SHEP-1"}}
+        self.terminals["t9"] = {"state": "live", "labels": {"sheepdog.task": "SHEP-1"}}
         self.assertEqual(self.aset.session_note("t9"), "")
         self.assertEqual(self.aset.session_note("nope"), "")  # not a terminal here
-
-    def test_the_hook_text_is_json_ready(self):
-        import contextlib
-        import io
-        self.assistant()
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            self.aset.cmd_session_note(type("A", (), {"terminal": "t5"})())
-        ctx = json.loads('{"c":"base.' + out.getvalue() + '"}')["c"]
-        self.assertTrue(ctx.startswith("base. Your settings: "))
-        self.assertIn("\n- Review: off\n", ctx)
 
     def test_a_running_assistant_is_told_once_what_changed_in_one_message(self):
         self.assistant()
         self.aset.session_note("t5")
-        quiet = {}
-        self.aset.settings_pass({}, quiet)
+        self.aset.settings_pass({})
         self.assertEqual(self.sent, [])  # told at its start already
-        self.write({"everywhere": {"tasks": {"review_rounds": 3}}, "spaces": {"sp1": {"tasks": {"merge": "auto"}}}})
+        self.write({"everywhere": {"tasks": {"review_rounds": 3}}, "projects": {"/proj/sp1": {"tasks": {"merge": "auto"}}}})
         report = {}
-        self.aset.settings_pass(report, quiet)
+        self.aset.settings_pass(report)
         self.assertEqual(len(self.sent), 1)
         lines = self.sent[0][1].split("\n")
         self.assertEqual(len(lines), 2)
         self.assertRegex(lines[0], r'^<herdr-setting name="review" value="on" scope="everywhere">Review is now on, at most 3 rounds[^<]*'
                                    r'; your setting everywhere\. Tasks you add from now on get it; running ones keep their brief\.</herdr-setting>$')
-        self.assertRegex(lines[1], r'^<herdr-setting name="merge" value="auto" scope="space">Merge is now on its own[\s\S]*<hc no-reply/>\.</herdr-setting>$')
+        self.assertRegex(lines[1], r'^<herdr-setting name="merge" value="auto" scope="project">Merge is now on its own[\s\S]*<hc no-reply/>\.</herdr-setting>$')
         self.assertEqual(report["settings"], [{"to": "t5", "changed": ["review", "merge"]}])
 
     def test_a_save_that_changes_nothing_for_it_says_nothing(self):
         self.write({"everywhere": {"tasks": {"merge": "checks"}}})
         self.assistant()
         self.aset.session_note("t5")
-        # the same values saved again
         self.write({"everywhere": {"tasks": {"merge": "checks"}}})
-        self.aset.settings_pass({}, {})
-        # another space's change, and Everywhere's where this space sets its own
-        self.write({"everywhere": {"tasks": {"merge": "checks"}}, "spaces": {"sp2": {"tasks": {"merge": "auto"}}}})
-        self.aset.settings_pass({}, {})
+        self.aset.settings_pass({})
+        # another project's change, and Everywhere's where this project sets its own
+        self.write({"everywhere": {"tasks": {"merge": "checks"}}, "projects": {"/proj/sp2": {"tasks": {"merge": "auto"}}}})
+        self.aset.settings_pass({})
         self.write({"everywhere": {"tasks": {"merge": "checks"}, "worker": {"agent": "codex"}},
-                    "spaces": {"sp1": {"worker": {"agent": "claude", "model": "opus"}}}})
-        self.aset.settings_pass({}, {})
-        self.assertEqual(len(self.sent), 1)  # only the last: sp1's own agent
-        self.assertIn('name="agent" value="claude/opus" scope="space"', self.sent[0][1])
+                    "projects": {"/proj/sp1": {"worker": {"agent": "claude", "model": "opus"}}}})
+        self.aset.settings_pass({})
+        self.assertEqual(len(self.sent), 1)  # only the last: /proj/sp1's own agent
+        self.assertIn('name="agent" value="claude/opus" scope="project"', self.sent[0][1])
         self.write({"everywhere": {"tasks": {"merge": "checks"}, "worker": {"agent": "codex"}},
-                    "spaces": {"sp1": {"worker": {"agent": "claude", "model": "opus"}}}})
-        self.aset.settings_pass({}, {})
+                    "projects": {"/proj/sp1": {"worker": {"agent": "claude", "model": "opus"}}}})
+        self.aset.settings_pass({})
         self.assertEqual(len(self.sent), 1)
 
     def test_back_to_the_default_says_so(self):
@@ -7782,20 +7775,20 @@ class AssistantSettings(unittest.TestCase):
         self.assistant()
         self.aset.session_note("t5")
         self.write({})
-        self.aset.settings_pass({}, {})
+        self.aset.settings_pass({})
         self.assertIn('<herdr-setting name="proof" value="on" scope="everywhere">Proof is now on; Herdr\'s default.', self.sent[0][1])
 
     def test_one_started_before_gets_the_whole_block_once_it_has_had_a_turn(self):
-        self.assistant("t5", "sp1")
-        self.assistant("t6", "sp2")
-        self.assistant("t7", "sp1", turn=0)  # just started: its hook tells it
-        self.write({"spaces": {"sp2": {"tasks": {"merge": "auto"}}}})
-        self.aset.settings_pass({}, {})
+        self.assistant("t5", "/proj/sp1")
+        self.assistant("t6", "/proj/sp2")
+        self.assistant("t7", "/proj/sp1", turn=0)  # just started
+        self.write({"projects": {"/proj/sp2": {"tasks": {"merge": "auto"}}}})
+        self.aset.settings_pass({})
         self.assertEqual([a for a, _ in self.sent], ["t5", "t6"])
         self.assertTrue(self.sent[0][1].startswith('<herdr-setting name="all">Your settings: '))
-        self.assertNotIn("herdr.settings", self.terminals["t7"]["labels"])
-        self.write({"spaces": {"sp2": {"tasks": {"merge": "auto"}}}})
-        self.aset.settings_pass({}, {})
+        self.assertNotIn(self.aset.LABEL, self.terminals["t7"]["labels"])
+        self.write({"projects": {"/proj/sp2": {"tasks": {"merge": "auto"}}}})
+        self.aset.settings_pass({})
         self.assertEqual(len(self.sent), 2)
 
     def test_busy_with_the_person_tries_again_next_time(self):
@@ -7804,17 +7797,26 @@ class AssistantSettings(unittest.TestCase):
         self.aset.session_note("t5")
         self.write({"everywhere": {"tasks": {"merge": "auto"}}})
         with mock.patch.object(self.news, "news_send", lambda addr, text: False):
-            self.aset.settings_pass({}, {})
+            self.aset.settings_pass({})
         self.write({"everywhere": {"tasks": {"merge": "auto"}}})
-        self.aset.settings_pass({}, {})
+        self.aset.settings_pass({})
         self.assertEqual(len(self.sent), 1)
         self.assertIn('name="merge" value="auto"', self.sent[0][1])
 
-    def test_chat_tags_hide_the_message(self):
-        """Every line is one <herdr-…> tag: the chat shows nothing of it (core/chat-log.js strips Herdr's tags)."""
-        rs = self.aset.rows("sp1", {}, (False, "", ""))
-        for line in self.aset.notice(rs).split("\n"):
-            self.assertRegex(line, r'^<herdr-setting name="\w+" value="[^"]*" scope="\w+">[^\n]*</herdr-setting>$')
+    def test_spaces_fallback_merges_with_projects_until_sdf9(self):
+        self.write({"spaces": {"s1": {"folder": "/proj/sp1", "tasks": {"merge": "auto", "review_rounds": 2}}}})
+        self.terminals["t8"] = {"state": "live", "turn": 3, "cwd": "/elsewhere",
+                                "labels": {"herdr.role": "coordinator", "herdr.coordinator.space": "vm/s1"}}
+        note_old = self.aset.session_note("t8")
+        self.assertIn("- Merge: on its own (Herdr merges a ready task); set for this project", note_old)
+        self.assertIn("- Review: on, at most 2 rounds", note_old)
+        self.settings.write_max_running({"folder": "/proj/sp1"}, None, 3)
+        self.terminals["t5"] = {"state": "live", "turn": 3, "cwd": "/elsewhere",
+                                "labels": {"sheepdog.project": "proj-sp1", "sheepdog.role": "coordinator"}}
+        note_merged = self.aset.session_note("t5")
+        self.assertIn("- Merge: on its own (Herdr merges a ready task); set for this project", note_merged)
+        self.assertIn("- Review: on, at most 2 rounds", note_merged)
+        self.assertIn("- Tasks at once: 3 per folder (more wait and start by themselves); set for this project", note_merged)
 
 
 class CodexAsksOnTheCard(unittest.TestCase):
@@ -8266,15 +8268,39 @@ class TaskFlow(unittest.TestCase):
         self.patch(settings, "SETTINGS", f)
         return settings
 
-    def test_suggested_next_message_in_the_brief(self):
-        """SHEP-186: a worker's brief says whether its replies end with a suggested next message: on by default,
-        and off when Settings › Agents turns it off (the agent then writes no suggest line)."""
-        settings = self.settings({})
-        self.assertIn("- Suggested next message: on (your reply ends with the message you'd likely send next",
-                      settings.settings_block(self.store, self.task))
-        settings = self.settings({"everywhere": {"agents": {"suggestions": False}}})
-        self.assertIn("- Suggested next message: off (no suggested next message) (your setting everywhere)",
-                      settings.settings_block(self.store, self.task))
+    def test_settings_layers_everywhere_machine_project(self):
+        folder = self.store.loc["folder"]
+        settings = self.settings({"everywhere": {"tasks": {"merge": "ask", "base": "dev", "proof": False}},
+                                  "machines": {"local": {"tasks": {"merge": "checks", "proof": True}}},
+                                  "projects": {folder: {"tasks": {"merge": "auto"}}}})
+        cfg = settings.settings_for(self.store)
+        self.assertEqual((cfg["tasks"]["merge"], cfg["tasks"]["proof"], cfg["tasks"]["base"]), ("auto", True, "dev"))
+        self.assertEqual(settings.project_base(self.store), "dev")
+        self.assertNotIn("Suggested next message", settings.settings_block(self.store, self.task))
+        settings.write_autopilot(folder, {"every": "every 30 minutes"})
+        self.assertEqual(settings.autopilot_layers(settings.read_settings(), folder)[1], {"every": "every 30 minutes"})
+        # Legacy spaces[id] from project.py stays visible when write_max_running writes projects[folder]
+        settings = self.settings({"spaces": {"s1": {"folder": folder, "tasks": {"merge": "auto", "check": "make test", "max_running": 5}}}})
+        settings.write_max_running(self.store, None, 3)
+        tcfg = settings.settings_for(self.store)["tasks"]
+        self.assertEqual((tcfg["merge"], tcfg["check"], tcfg["max_running"]), ("auto", "make test", 3))
+        settings.write_max_running(self.store, None, None)
+        tcfg = settings.settings_for(self.store)["tasks"]
+        self.assertEqual((tcfg["merge"], tcfg["check"], tcfg["max_running"]), ("auto", "make test", 10))
+        # Takeover reads backup from projects[folder] while forwarding space to launch.py until SDF-7
+        import herdr_task.takeover as takeover
+        self.settings({"projects": {folder: {"backup": {"agent": "agy", "argv": ["agy"]}}}})
+        seen = {}
+        self.patch(takeover, "parent_for", lambda p, sp: seen.setdefault("parent", sp) or "c1")
+        self.patch(takeover, "brief", lambda s, t, p, sp, a: seen.setdefault("brief", sp) or "B")
+        self.patch(takeover, "launch", lambda s, t, a, sp, txt, parent=None: seen.setdefault("launch", sp) and {"address": "t9"})
+        self.patch(takeover, "kill_agent", lambda *_: None)
+        self.patch(takeover, "stop_note", lambda *_, **__: None)
+        t_row = {"id": 9, "title": "x", "space": "sp12", "agents": [{"address": "t8", "agent": "claude", "parent": "c1"}]}
+        res = takeover.takeover(self.store, t_row, {"address": "t8", "labels": {"sheepdog.agent": "claude", "herdr.task.space": "sp12"}},
+                                {"reason": "Out of allowance until 5pm"}, None, {})
+        self.assertIsNone(res)
+        self.assertEqual((seen["parent"], seen["brief"], seen["launch"], t_row["backup"]["to"]), ("sp12", "sp12", "sp12", "agy"))
 
     def test_a_running_task_keeps_its_briefs_review(self):
         """#750: Review turned on everywhere while a task runs: its brief said off, so show and ready say off too."""
@@ -8880,7 +8906,7 @@ class Checks(unittest.TestCase):
                 self.cwds.append(cwd)
                 p = subprocess.run(args[args.index("--") + 1:], cwd=cwd, capture_output=True, text=True)
                 self.terms[f"t{len(self.terms) + 1}"] = {"state": "finished", "exit_code": p.returncode, "out": p.stdout,
-                                                         "labels": [a for a in args if a.startswith("herdr.")]}
+                                                         "labels": [a for a in args if a.startswith(("sheepdog.", "herdr."))]}
                 out = json.dumps({"address": f"t{len(self.terms)}"})
             elif args[:2] == ["hc", "read"]:
                 out = self.terms[args[2]]["out"]
@@ -8922,8 +8948,11 @@ class Checks(unittest.TestCase):
         self.assertEqual(len(self.terms), 1)
         self.assertNotEqual(self.cwds[0], self.repo)
         self.assertFalse(os.path.exists(os.path.join(self.repo, "ran")))
+        self.assertIn("sheepdog.project=dev", self.terms["t1"]["labels"])
+        self.assertIn("sheepdog.role=checks", self.terms["t1"]["labels"])
         self.assertIn("herdr.role=checks", self.terms["t1"]["labels"])
         self.assertIn("herdr.checks=dev#14", self.terms["t1"]["labels"])
+        self.assertNotIn("sheepdog.task=dev#14", self.terms["t1"]["labels"])
         self.assertNotIn("herdr.task=dev#14", self.terms["t1"]["labels"])
         self.assertIn("running", self.c.checks_line(self.t))
         self.tick()  # finished: recorded, cleaned up
@@ -9209,7 +9238,7 @@ class Resume(unittest.TestCase):
 
     def write_worker(self, worker):
         with open(self.settings_file, "w") as f:
-            json.dump({"spaces": {"sp1": {"folder": self.repo, "worker": worker}}}, f)
+            json.dump({"projects": {self.repo: {"worker": worker}}}, f)
 
     def call(self, fn, **kw):
         out = self.io.StringIO()
@@ -9593,7 +9622,7 @@ class ProjectStart(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 0, json.dumps({"address": addr}), "")
             raise AssertionError(f"unexpected command: {argv}")
 
-        for obj, k, v in ((base, "run", fake_run), (base, "GH", "gh"), (base, "APP_HOME", self.app_home), (store, "STORE", self.store_dir),
+        for obj, k, v in ((base, "run", fake_run), (base, "GH", "gh"), (project, "APP_HOME", self.app_home), (store, "STORE", self.store_dir),
                           (st, "SETTINGS", self.settings_file), (st, "TEMPLATES", self.templates), (news_mod, "send_or_hold", lambda *_, **__: "sent"),
                           (ap, "STORE", self.store_dir), (ap, "STATE", os.path.join(self.store_dir, ".autopilot.json")),
                           (ap, "HEARTBEATS", self.beats), (ap, "run", fake_run), (ap, "typing", lambda *_: None),
@@ -10838,7 +10867,7 @@ class SimulatorPool(unittest.TestCase):
 
     def set_pool(self, pool):
         with open(self.settings_file, "w") as f:
-            json.dump({"spaces": {"sp1": {"folder": self.repo, "tasks": {"simulators": pool}}}}, f)
+            json.dump({"projects": {self.repo: {"tasks": {"simulators": pool}}}}, f)
 
     def run_cli(self, *argv, env=None):
         from unittest import mock
@@ -10855,7 +10884,7 @@ class SimulatorPool(unittest.TestCase):
         self.assertEqual(self.run_cli("add", "First", "--folder", self.repo)[0], 0)
         self.assertEqual((r := self.run_cli("simulator", "list", "--folder", self.repo))[0], 0)
         self.assertIn("feature is off", r[1].lower())
-        self.assertEqual((r := self.run_cli("simulator", "lease", "--folder", self.repo, env={"HERDR_BROWSER_TASK": "other-repo#99"}))[0], 1)
+        self.assertEqual((r := self.run_cli("simulator", "lease", "--folder", self.repo, env={"SHEEPDOG_TASK": "other-repo#99"}))[0], 1)
         self.assertIn("feature is off", r[2].lower())
         with self.store.Store(self.store.locate(self.repo), write=False) as s:
             t = s.find("1")
@@ -10872,7 +10901,7 @@ class SimulatorPool(unittest.TestCase):
             self.assertEqual(self.run_cli("add", title, "--folder", self.repo)[0], 0)
         with self.store.Store(self.store.locate(self.repo), write=False) as s:
             slug = s.slug
-        rc, out1, _ = self.run_cli("simulator", "lease", "--json", env={"HERDR_BROWSER_TASK": f"{slug}#1"})
+        rc, out1, _ = self.run_cli("simulator", "lease", "--json", env={"SHEEPDOG_TASK": f"{slug}#1"})
         j1 = json.loads(out1)
         self.assertEqual((rc, j1["task"], j1["name"], j1["udid"]), (0, "WM-1", "WukongMind 1", self.U1))
         self.assertEqual(json.loads(self.run_cli("simulator", "lease", "WM-2", "--folder", self.repo, "--json")[1])["udid"], self.U2)
@@ -10881,7 +10910,7 @@ class SimulatorPool(unittest.TestCase):
         rc, _, err = self.run_cli("simulator", "lease", "WM-3", "--folder", self.repo)
         self.assertEqual((rc, "WM-1" in err and "WM-2" in err), (1, True))
         # Release frees U1 + shuts down so WM-3 can lease it; done & rm free and shut down too.
-        self.assertEqual(self.run_cli("simulator", "release", env={"HERDR_BROWSER_TASK": f"{slug}#1"})[0], 0)
+        self.assertEqual(self.run_cli("simulator", "release", env={"SHEEPDOG_TASK": f"{slug}#1"})[0], 0)
         self.assertEqual(self.shutdowns(), [self.U1])
         self.assertEqual(json.loads(self.run_cli("simulator", "lease", "WM-3", "--folder", self.repo, "--json")[1])["udid"], self.U1)
         self.assertEqual(self.run_cli("done", "WM-2", "--folder", self.repo)[0], 0)
@@ -10941,7 +10970,7 @@ class DeviceWait(unittest.TestCase):
             self.slug = s.slug
             s.find("1").update(state="running", started=1, agents=[{"address": "t5", "agent": "claude", "at": 1}])
             s.dirty = True
-        self.env = {"HERDR_BROWSER_TASK": f"{self.slug}#1", "HC_TERMINAL_ID": "t5"}
+        self.env = {"SHEEPDOG_TASK": f"{self.slug}#1", "HC_TERMINAL_ID": "t5"}
 
     def task(self):
         with self.store.Store(self.store.locate(self.repo), write=False) as s:
@@ -11918,8 +11947,8 @@ class DesignDocAndOpenAskWaitForAccept(unittest.TestCase):
         self.git(self.main, "push", "-q", "-u", "origin", "main")
         self.git(self.wt, "push", "-q", "-u", "origin", "task/13")
         with open(settings.SETTINGS, "w") as f:
-            json.dump({"spaces": {"sp1": {"folder": self.main, "tasks": {"merge": "checks", "review_min": 2, "review_rounds": 5,
-                                                                          "auto_accept": False}}}}, f)  # FAC-99 off: FAC-94's waits stand
+            json.dump({"projects": {self.main: {"tasks": {"merge": "checks", "review_min": 2, "review_rounds": 5,
+                                                          "auto_accept": False}}}}, f)  # FAC-99 off: FAC-94's waits stand
         self.task["set"], self.merges = {}, []
 
         def fake_gh(*a, **k):
@@ -12012,7 +12041,7 @@ class AutoAccept(unittest.TestCase):
         from unittest import mock
         self.setUp_fac94()
         with open(self.settings.SETTINGS, "w") as f:
-            json.dump({"spaces": {"sp1": {"folder": self.main, "tasks": {"review_min": 2, "review_rounds": 5}}}}, f)
+            json.dump({"projects": {self.main: {"tasks": {"review_min": 2, "review_rounds": 5}}}}, f)
         self.proof = {"id": "art1", "title": "Gate · Proof"}
         p = mock.patch.object(self.commands, "find_proof", lambda *a: self.proof)
         p.start(); self.addCleanup(p.stop)
@@ -12048,7 +12077,7 @@ class AutoAccept(unittest.TestCase):
 
     def test_fable_pass_counts_in_a_folder_without_a_review_gate(self):
         with open(self.settings.SETTINGS, "w") as f:
-            json.dump({"spaces": {"sp1": {"folder": self.main, "tasks": {}}}}, f)
+            json.dump({"projects": {self.main: {"tasks": {}}}}, f)
         self.task["set"] = {}
         self.ask.save({"id": "a2", "question": "Keep the old route?", "options": ["Yes", "No"], "recommend": "Yes", "task": "SHEP-13",
                        "to": "w1", "at": 2})
@@ -12198,7 +12227,7 @@ class NoCIRunWithCISetUp(unittest.TestCase):
     def test_auto_accept_agrees_and_the_persons_accept_merges(self):
         from unittest import mock
         with open(self.settings.SETTINGS, "w") as f:
-            json.dump({"spaces": {"sp1": {"folder": self.main, "tasks": {"review_min": 2, "review_rounds": 5}}}}, f)
+            json.dump({"projects": {self.main: {"tasks": {"review_min": 2, "review_rounds": 5}}}}, f)
         p = mock.patch.object(self.commands, "find_proof", lambda *a: {"id": "art1", "title": "Gate · Proof"}); p.start(); self.addCleanup(p.stop)
         self.workflow("  - push\n  - pull_request\n")
         self.ready(); self.verdict("term-1"); self.verdict("term-2")

@@ -273,8 +273,10 @@ def ensure_settings(repo, space_id, name, given_check, d, dry):
     os.replace(tmp, st.SETTINGS)
     return layer, True, old_ids, f"Settings: wrote factory defaults for {bare_id} ({chk_words})"
 
+APP_HOME = os.path.join(base.HOME, ".config", "herdr-app")  # compatibility shim until SDF-9
+
 def ensure_assistant(repo, space_id, dry):
-    bare_id, shared = st.bare(space_id), read_list(os.path.join(base.APP_HOME, "shared.json"))
+    bare_id, shared = st.bare(space_id), read_list(os.path.join(APP_HOME, "shared.json"))
     slots = (shared.get("coordinator.slots") if isinstance(shared, dict) else None) or {}
     slot, rec = next(((k, v) for k, v in (slots.items() if isinstance(slots, dict) else [])
                       if isinstance(v, dict) and v.get("pane") and v.get("space") in (space_id, bare_id)), (None, None))
