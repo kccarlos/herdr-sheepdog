@@ -1,0 +1,75 @@
+[
+ {
+  "source": "oauth",
+  "provider": "codex",
+  "resetCredits": {
+   "available": 0
+  },
+  "rateWindowLabels": {
+   "secondary": "Weekly"
+  },
+  "usage": {
+   "loginMethod": "plus",
+   "tertiary": null,
+   "primary": null,
+   "codexResetCredits": {
+    "availableCount": 0,
+    "updatedAt": "2026-11-08T16:37:55Z",
+    "credits": []
+   },
+   "identity": {
+    "providerID": "codex",
+    "accountEmail": "user@example.com",
+    "loginMethod": "plus"
+   },
+   "planObservation": {
+    "source": "usage_response",
+    "rawPlan": "plus",
+    "observedAt": "2026-11-08T16:37:55Z"
+   },
+   "providerCost": {
+    "updatedAt": "2026-11-08T16:37:55Z",
+    "balanceUpdatedAt": "2026-11-08T16:37:55Z",
+    "limit": 0,
+    "used": 0,
+    "currencyCode": "Credits",
+    "period": "Extra usage"
+   },
+   "updatedAt": "2026-11-08T16:37:55Z",
+   "dataConfidence": "exact",
+   "accountEmail": "user@example.com",
+   "secondary": {
+    "windowMinutes": 10080,
+    "resetDescription": "7:43\u202fPM",
+    "resetsAt": "2026-11-09T03:43:26Z",
+    "usedPercent": 100
+   }
+  },
+  "credits": {
+   "remaining": 0,
+   "updatedAt": "2026-11-08T16:37:55Z",
+   "balanceIsWorkspace": false,
+   "events": [],
+   "creditsAvailable": false,
+   "balanceReadSucceeded": true
+  },
+  "openaiDashboard": {
+   "creditsRemaining": 0,
+   "dailyBreakdown": [],
+   "updatedAt": "2026-11-08T16:10:40Z",
+   "accountID": "",
+   "creditEvents": [],
+   "signedInEmail": "user@example.com",
+   "usageBreakdown": [],
+   "creditsAvailable": false,
+   "accountPlan": "Plus",
+   "primaryLimit": {
+    "usedPercent": 100,
+    "resetsAt": "2026-11-09T03:43:27Z",
+    "windowMinutes": 10080,
+    "resetDescription": "7:43\u202fPM"
+   }
+  },
+  "version": "0.167.0"
+ }
+]

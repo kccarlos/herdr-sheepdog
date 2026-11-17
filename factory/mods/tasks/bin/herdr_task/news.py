@@ -1,0 +1,619 @@
+"""News: what changed in a space's tasks, told to its Assistant."""
+
+import fcntl
+import json
+import os
+import re
+import select
+import subprocess
+import time
+from contextlib import contextmanager
+
+from .base import guard, hc_json, now, run, STORE
+from .settings import bare
+from .agents import (
+    agent_log, agent_running, asking, cli_of, detail, from_person, live_agents, log_tail, REVIEWER_FAILED, said, starting,
+    status_word, STATUSES, trust_asked, WORKING_AGAIN,
+)
+from .sessions import session_of
+from .launch import coordinator_in
+from .store import locate, read_list, Store, store_files
+from .output import line, minutes, view
+from .github import NO_CI_RUN
+from .takeover import backup_news
+
+
+# ---- news -----------------------------------------------------------------------------------
+# Herdr itself tells a space's Assistant (its coordinator) when one of its tasks needs the person
+# (with the reason), is Ready, is Done, failed, or went quiet: one tagged line each, and the lines
+# of one moment as one message (as Shepherdr's task news); workers don't report. The status is
+# the one people see (view(): task_status() and its reason, as `list` and the Tasks panel). Each
+# task's last told status is kept in .news.json, so a change is told once, also across restarts.
+# A line goes only if its task still says so when it's sent: a status that flickers tells nothing.
+
+NEWS = os.path.join(STORE, ".news.json")
+NEWS_SETTLE_MS = 5000          # a line waits this long for others of the same moment
+NEWS_KEEP_MS = 6 * 3600000     # undelivered (no Assistant to tell) this long: dropped
+QUIET_MS = 20 * 60000          # Working with nothing happening this long: stalled
+# A Ready task its agent's own turn took back to work (back_pass(): auto) told only once that lasts
+# this long (FAC-107): a turn that ends with nothing new sooner is Ready again with no news at all,
+# not a working-again and a ready line.
+BACK_HOLD_MS = 3 * 60000
+
+
+def activity(task, live):
+    """When its agent last did something: its session log written, its status changed, a report."""
+    times = [task.get("started") or 0, ((task.get("agents") or [{}])[-1] or {}).get("at") or 0,
+             (task.get("progress") or {}).get("at") or 0]
+    times += [k.get("status_ms") or 0 for k in live]
+    log = agent_log(task)
+    try:
+        times.append(int(os.path.getmtime(log) * 1000) if log else 0)
+    except OSError:
+        pass
+    return max(times)
+
+
+def stall_of(task, v, live):
+    """(mark, words) when a Working task went quiet (QUIET_MS) or is far past its own time left
+    (as Shepherdr: its report's minutes, plus as many again, at least 20, gone by); else None.
+    The mark says which stall it is: the same one is told once."""
+    if v["status"] != "working" or task["state"] != "running" or starting(task) or task.get("retry"):
+        return None
+    last = activity(task, live)
+    if now() - last >= QUIET_MS:
+        return f"quiet:{last}", f"went quiet: nothing for {(now() - last) // 60000} min"
+    p = task.get("progress") or {}
+    if isinstance(p.get("left"), (int, float)) and p.get("at"):
+        eta = p["left"] // 60000
+        gone = (now() - p["at"]) // 60000
+        if gone > eta + max(eta, 20):
+            return f"late:{p['at']}", f"is far past its time: said {minutes(eta)} left, {minutes(gone)} ago"
+    return None
+
+
+def news_line(s, t, v, event, words=None):
+    ref, title = s.ref(t), " ".join(t["title"].split())
+    attr = lambda x: str(x).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+    note = " ".join(str(t.get("agents_md") or "").split())
+    said = " ".join(str(t.get("summary") or "").split())
+    no_ci = f" · Waits for the person's Accept: {NO_CI_RUN}" if (t.get("pr") or {}).get("no_ci") else ""  # FAC-105
+    text = {"ready": f"{ref} is ready: {title}" + (f" · {said}" if said else "") + (f" · For AGENTS.md: {note}" if note else "") + no_ci,
+            "needs-you": f"{ref} needs you: {v.get('why') or 'Needs you'} ({title})",
+            "failed": f"{ref} failed: {v.get('why') or 'Agent stopped'} ({title})",
+            "stalled": f"{ref} {words} ({title})",
+            "working-again": f"{ref} is working again: {(t.get('back') or {}).get('why') or 'its agent is at work again'} ({title})",
+            "backup": f"{ref} backup: {words} ({title})",
+            "done": f"{ref} is done" + (": merged" + ({"engine": ", accepted by the engine", "fable": ", accepted by Fable review"}
+                                                       .get(t.get("accepted_by"), "")) if t.get("merged") else ": nothing to merge" if t.get("nothing_to_merge")
+                                        else ": accepted" if t.get("accepted_at") else "") + f" ({title})"}[event]
+    return f'<herdr-news task="{attr(ref)}" event="{event}">{text.replace("<", "‹").replace(">", "›")}</herdr-news>'
+
+
+def news_state(s, t, live):
+    """What news would say of this task now: {status, why, event, stall}, with live = its running agents."""
+    if t["state"] in ("running", "ready"):
+        v = view(s, t, live)
+    else:
+        v = {"status": t["state"] if t["state"] in STATUSES else "todo", "needs": None, "why": None}
+    event = {"ready": "ready", "done": "done", "needs": "needs-you"}.get(v["status"])
+    if event == "needs-you" and (v["needs"] in ("stopped", "provider") or str(v.get("why") or "").startswith("Couldn't start")):
+        event = "failed"
+    stall = stall_of(t, v, live) if v["status"] == "working" else None
+    return v, event, stall
+
+
+def news_pass(report, folder=None):
+    """Notes each task's status; queues a line for each change worth telling, and sends the lines
+    that settled, one message per Assistant. Runs inside the tick lock (scheduler, tick)."""
+    try:
+        with open(NEWS) as f:
+            state = json.load(f)
+    except (OSError, ValueError):
+        state = {}
+    seen, outbox, quiet = state.setdefault("seen", {}), state.setdefault("outbox", []), state.setdefault("quiet", {})
+    delivered = state.setdefault("delivered", {})
+    current = {}  # key -> (status, stall mark), to check queued lines against
+    for path in store_files(folder):
+        d = read_list(path)
+        if not d or not os.path.isdir(d.get("folder") or ""):
+            continue
+        active = any(t.get("state") in ("running", "ready") for t in d.get("tasks") or [])
+        with Store(locate(d["folder"]), write=active) as s:
+            mine = seen.setdefault(s.slug, {})
+            # The first look at a list only notes how its tasks are: old news isn't news.
+            first = "_init" not in mine
+            mine["_init"] = True
+            for t in s.data["tasks"]:
+                key = f"{s.slug}#{t['id']}"
+                live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)] if t["state"] in ("running", "ready") else []
+                v, event, stall = news_state(s, t, live)
+                # The Tasks panel reads the store, not the log: why its agent waits (its own status
+                # line, its question, its last words), as `list` says it, it shows from here.
+                waits = v["why"] if v.get("needs") in ("reply", "asks") else None
+                if s.write and t.get("waits") != waits:
+                    if waits:
+                        t["waits"] = waits
+                    else:
+                        t.pop("waits", None)
+                    s.dirty = True
+                # Claude Code's folder-trust dialog (#755): Needs you in the Tasks panel too (its agent
+                # reports no status while it shows).
+                trust = trust_asked(live) if v.get("needs") == "asks" else None
+                if s.write and t.get("trust_ask") != trust:
+                    if trust:
+                        t["trust_ask"] = trust
+                    else:
+                        t.pop("trust_ask", None)
+                    s.dirty = True
+                # #995: its question or permission held on the chat's card while its agent reads
+                # working (Codex, until its hook returns): Needs you in the Tasks panel too.
+                held = next((k["address"] for k in live if status_word(k) != "blocked" and asking(k)), None) \
+                    if v.get("needs") == "asks" else None
+                if s.write and t.get("held_ask") != held:
+                    if held:
+                        t["held_ask"] = held
+                    else:
+                        t.pop("held_ask", None)
+                    s.dirty = True
+                # Quiet on its own background work (SHEP-53): Working in the Tasks panel too.
+                if s.write and bool(t.get("own_work")) != bool(v.get("own_work")):
+                    if v.get("own_work"):
+                        t["own_work"] = True
+                    else:
+                        t.pop("own_work", None)
+                    s.dirty = True
+                cur = {"status": v["status"], "why": v.get("why"), "stall": stall[0] if stall else None}
+                current[key] = cur
+                rf = (t.get("attention") or "").startswith(REVIEWER_FAILED)
+                prev = mine.get(str(t["id"]))
+                b = t.get("back") or {}
+                hold = (v["status"] == "working" and (prev or {}).get("status") in ("ready", "merging")
+                        and (t["state"] == "ready" and v.get("why") == WORKING_AGAIN and not t.get("attention")
+                             or t["state"] == "running" and b.get("auto") and now() - (b.get("at") or 0) < BACK_HOLD_MS))
+                # held, then Ready: the same ready (settle_back()) is no news; a new one (its fix, then ready) is
+                held_at = (prev or {}).get("held_ready_at")
+                fresh = not hold and held_at is not None and v["status"] == "ready" and t.get("ready_at") != held_at
+                mine[str(t["id"])] = {"status": prev["status"] if hold else cur["status"], "stall": cur["stall"] or (prev or {}).get("stall"),
+                                      **({"held_ready_at": held_at or t.get("ready_at") or 0} if hold else {}),
+                                      **({"needs": v["needs"]} if v.get("needs") else {}), **({"recap": True} if t.get("recap") else {}),
+                                      **({"reviewer_failed": True} if rf else {})}
+                # Its backup took over (takeover()): told once; on a first look, old news.
+                b = t.get("backup") or {}
+                backup = s.write and b.get("state") == "started" and not b.get("told")
+                if backup:
+                    b["told"] = True
+                    s.dirty = True
+                if first or t.get("archived") or not t.get("space"):
+                    continue
+                lines = [("backup", news_line(s, t, v, "backup", backup_news(t)))] if backup else []
+                # Taken back to work after it said ready (back_to_work(), busy_again()): told as it happens.
+                # Its agent took up what needed the person (failing checks: on_it()) too.
+                if hold:
+                    event = None  # FAC-107: still told as it was until its turn lasts (BACK_HOLD_MS)
+                elif v["status"] == "working" and ((prev or {}).get("status") in ("ready", "merging")
+                                                 or (prev or {}).get("needs") == "attention" and t.get("attention")):
+                    event = "working-again"
+                if event and ((prev or {}).get("status") != v["status"] or fresh or t.get("recap") and not (prev or {}).get("recap")
+                              or rf and not (prev or {}).get("reviewer_failed")):
+                    lines.append((event, news_line(s, t, v, event)))
+                if stall and stall[0] != (prev or {}).get("stall"):
+                    lines.append(("stalled", news_line(s, t, v, "stalled", stall[1])))
+                for ev, text in lines:
+                    # A newer word on the same task replaces one not sent yet.
+                    # A backup's line stands apart: it neither replaces nor is replaced.
+                    outbox[:] = [x for x in outbox if not (x["key"] == key and "backup" not in (ev, x["event"])
+                                                           and (x["event"] == ev or ev != "stalled"))]
+                    outbox.append({"key": key, "space": bare(t["space"]), "folder": os.path.basename(s.loc["folder"]), "event": ev, "status": v["status"],
+                                   "stall": stall[0] if ev == "stalled" else None, "text": text, "at": now()})
+            ids = {str(t["id"]) for t in s.data["tasks"]}
+            for k in [k for k in mine if k not in ids and k != "_init"]:
+                mine.pop(k)
+    report.setdefault("news", [])
+    # Still true? A line whose task moved on since (or was removed) goes unsaid.
+    def holds(x):
+        c = current.get(x["key"])
+        if (folder and c is None) or x.get("event") == "backup":
+            return True  # another folder's task: not looked at this time; a backup's line is news either way
+        return bool(c) and (c["stall"] == x.get("stall") if x.get("event") == "stalled" else c["status"] == x.get("status"))
+    outbox[:] = [x for x in outbox if holds(x) and now() - x["at"] < NEWS_KEEP_MS]
+    for k in [k for k, v in delivered.items() if not isinstance(v, dict) or not holds({**v, "key": k})]:
+        delivered.pop(k)
+    for space in dict.fromkeys(x["space"] for x in outbox):
+        batch = [x for x in outbox if x["space"] == space]
+        if now() - min(x["at"] for x in batch) < NEWS_SETTLE_MS:
+            continue
+        to = coordinator_in(space)
+        k = hc_json("get", to) if to else None
+        got = news_send(to, "\n".join(x["text"] for x in batch)) if to else False
+        if got:
+            outbox[:] = [x for x in outbox if x not in batch]
+            base_turn = ((k or {}).get("turn") or 0) + (1 if got in ("pending", "queued") else 0)
+            idle = bool(k) and status_word(k) in ("idle", "done")
+            for x in batch:
+                if x["event"] != "backup":
+                    delivered[x["key"]] = {"to": to, "turn": base_turn, "at": now(), "since": x["at"],
+                                           "event": x["event"], "status": x["status"], "stall": x.get("stall"),
+                                           "idle": idle, **({"pending": True} if got == "pending" else {})}
+            report["news"].append({"to": to, "lines": [x["text"] for x in batch]})
+            # Kept for the main machine's home Assistant, which keeps every machine's overview.
+            try:
+                from .home import log_news
+                log_news([{"at": now(), "space": space, "folder": batch[0].get("folder"), "to": to, "lines": [x["text"] for x in batch]}])
+            except Exception:  # never stops the news
+                pass
+            # Read before the news: a <no-reply> to it leaves it read (news_read()).
+            read = (k.get("labels") or {}).get(READ) if k else None
+            if k and str(read) == str(k.get("turn")) and to not in quiet:
+                quiet[to] = {"turn": k.get("turn"), "at": now()}
+    # Settings changed for a space: its running Assistant told once, in one message (assistant_settings.py).
+    try:
+        from .assistant_settings import settings_pass
+        settings_pass(report, quiet)
+    except Exception as e:  # never stops the news
+        report["settings_error"] = str(e)
+    # Reactions changed for a space: every other running agent its hook taught told once (reactions.py).
+    try:
+        from .reactions import reactions_pass
+        reactions_pass(report, quiet)
+    except Exception as e:  # never stops the news
+        report["reactions_error"] = str(e)
+    news_read(quiet)
+    held_pass(report, delivered)
+    tmp = f"{NEWS}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(state, f)
+    os.replace(tmp, NEWS)
+
+
+READ = "herdr.chat.read"  # the Assistant's turn last read (mods/chat/unread.js)
+NO_REPLY = re.compile(r"^\s*(?:<hc\s+no-reply\b[^>]*/>|</?no-reply\b[^\n]*)\s*$")
+
+
+def news_read(quiet):
+    """Unread is a new turn of the Assistant's (mods/chat/unread.js). News it answered only with
+    <no-reply> shows nothing, so it isn't new: an Assistant read before the news is read after
+    it too. quiet = {address: {turn, at}}, the ones told while read; done ones leave it."""
+    for addr, q in list(quiet.items()):
+        k = hc_json("get", addr) or {}
+        if k.get("state") != "live" or now() - q["at"] > 30 * 60000:
+            quiet.pop(addr)
+            continue
+        if status_word(k) == "working" or (k.get("turn") or 0) <= (q.get("turn") or 0):
+            continue
+        quiet.pop(addr)
+        if str((k.get("labels") or {}).get(READ)) != str(q["turn"]):
+            continue  # read since, or changed by someone else
+        log = session_of((k.get("foreground") or {}).get("pid") or "")[1] if (k.get("foreground") or {}).get("pid") else None
+        for d in reversed(log_tail(log, 65536)):
+            if from_person(d) is not None:
+                break
+            text = said(d)
+            if text is None or not text:
+                continue
+            if all(NO_REPLY.match(line) for line in text.split("\n") if line.strip()):
+                run(["hc", "label", addr, f"{READ}={k.get('turn')}"])
+            break
+
+
+POLL_DELAYS = (0.15, 0.3, 0.3, 0.3)
+AGY_SEND_NOW = re.compile(r"alt\+m\b", re.I)
+AGY_QUEUED = re.compile(r"alt\+m\b|queued messages", re.I)
+
+
+def turn_moved(k, after_turn):
+    t = k.get("turn") or 0
+    return t > after_turn or (status_word(k) == "working" and t >= after_turn)
+
+
+def deliver(address, text, how="send", from_held=False):
+    """Types text into address now; for a busy agy worker, presses alt+m when offered or keeps it
+    pending in HELD to re-deliver once its turn ends. Returns "sent", "pending" or False."""
+    before = hc_json("get", address) or {}
+    if how == "news":
+        env = {k: v for k, v in os.environ.items() if k != "HC_TERMINAL_ID"}
+        guard(["hc"])
+        r = subprocess.run(["hc", "send", address, text], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    else:
+        r = run(["hc", "send", address, text])
+    if r.returncode != 0:
+        return False
+    if cli_of(before) == "agy" and status_word(before) == "working":
+        after_turn = (before.get("turn") or 0) + 1
+        for delay in POLL_DELAYS:
+            time.sleep(delay)
+            if AGY_SEND_NOW.search(run(["hc", "read", address, "--lines", "40"]).stdout or ""):
+                run(["hc", "keys", address, "alt+m"])
+                time.sleep(POLL_DELAYS[0])
+                if not AGY_QUEUED.search(run(["hc", "read", address, "--lines", "40"]).stdout or ""):
+                    return "sent"
+                break
+        if turn_moved(hc_json("get", address) or before, after_turn):
+            return "sent" if from_held or how != "news" else "queued"
+        if not from_held:
+            hold(address, text, how, pending=after_turn)
+        return "pending"
+    k = hc_json("get", address) or before if how == "news" else before
+    if how == "news" and status_word(before) == "working":
+        if cli_of(k) == "claude":
+            for delay in POLL_DELAYS:
+                time.sleep(delay)
+                if re.search(r"ctrl\+enter to send now", run(["hc", "read", address, "--lines", "40"]).stdout or "", re.I):
+                    run(["hc", "keys", address, "ctrl+enter"])
+                    return "sent"
+        return "sent" if from_held else "queued"
+    return "sent"
+
+
+def news_send(address, text, check=True):
+    """Delivers news as the chat delivers the person's words: typed in, sent mid-turn (Claude Ctrl+Enter,
+    agy alt+m or at turn end), without <hc from>. False when typing() or refused."""
+    return False if (check and typing(address)) else deliver(address, text, "news")
+
+
+# ---- the person is writing ------------------------------------------------------------------
+# Nothing automatic is typed into an agent while the person writes to it (HERD-71): news,
+# autopilot wakes, the overview, GitHub news, another Assistant's words, a task's messages. They
+# wait until the person has sent or cleared what they wrote, then go as one message. Writing is
+# its chat box holding unsent words (mods/chat labels the terminal herdr.typing=<ms>, again each
+# minute while they stay, removed once they're gone), or the CLI's own input line holding text
+# typed in its terminal (read off the screen: the CLI's dim placeholder or suggestion isn't
+# theirs). hc send itself also waits until no key went in for ~3 s.
+
+TYPING = "herdr.typing"
+TYPING_KEEP_MS = 5 * 60000     # unsent words untouched this long hold nothing any more
+HELD = os.path.join(STORE, ".held.json")  # {address: [{text, how, at}]}: held_pass sends them
+ESCAPES = re.compile(r"\x1b(?:\[([0-9;:?<=>!]*)([ -/]*)([@-~])|\][^\x07\x1b]*(?:\x07|\x1b\\)|P[^\x1b]*\x1b\\|[()*+][0-9A-Za-z]|.)"
+                     r"|[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]|[\r\n]|[^\x1b\x00-\x1f\x7f]+", re.S)
+PROMPT = re.compile(r"^ ?[❯›>](?:\s|$)")  # Claude Code's ❯, Codex's ›, agy's >
+RULE = re.compile(r"^\s*[─━]{8,}\s*$")    # Claude Code's and agy's box edge
+
+
+def screen_raw(address, there=None):
+    """Its screen as herdr-core repaints it for a watcher (hc attach --observe: never types or
+    resizes), colors and all; '' when it can't be read. there: runs a command on its machine
+    (machines.py's routes)."""
+    if there:
+        return there(["sh", "-c", 'hc attach --observe "$1" </dev/null 2>/dev/null & p=$!; sleep 1; kill $p 2>/dev/null; wait $p 2>/dev/null; true',
+                      "sh", address]).stdout or ""
+    guard(["hc"])
+    env = {k: v for k, v in os.environ.items() if k != "HC_TERMINAL_ID"}
+    p = subprocess.Popen(["hc", "attach", "--observe", address], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    out, start, last = b"", time.time(), None
+    try:
+        while time.time() - start < 3:
+            if select.select([p.stdout], [], [], 0.15)[0]:
+                b = os.read(p.stdout.fileno(), 65536)
+                if not b:
+                    break
+                out, last = out + b, time.time()
+            elif last and time.time() - last > 0.25:
+                break  # the repaint is all there
+    finally:
+        p.kill()
+        p.wait()
+    return out.decode("utf-8", "replace")
+
+
+def _muted_fg(fg):
+    return (fg == 90 or (isinstance(fg, tuple) and (fg[1] == 8 or 238 <= fg[1] <= 248 if fg[0] == 5
+            else max(fg[1:]) - min(fg[1:]) <= 8 and 90 <= fg[1] <= 165)))
+
+
+def screen_rows(raw):
+    """A repaint's rows: {row: {col: (char, muted)}}. Tracks text, line ends, cursor moves,
+    clears, and muted placeholder styles (SGR dim and grey placeholder foregrounds)."""
+    rows, row, col, dim, fg = {}, 0, 0, False, None
+    for m in ESCAPES.finditer(raw):
+        s, p1, im, op = m.group(0), m.group(1) or "", m.group(2), m.group(3)
+        if s[0] == "\x1b":
+            if not op or im or (p1 and p1[0] in "?><=!"):
+                continue
+            if op == "m":
+                ps, i = (p1 or "0").split(";"), 0
+                while i < len(ps):
+                    sub = ps[i].split(":")
+                    n = int(sub[0]) if sub[0].isdigit() else 0
+                    if n in (38, 48, 58):
+                        q = sub[1:] if len(sub) > 1 else ps[i + 1:]
+                        rgb = q[-3:] if len(sub) > 1 else q[1:4]
+                        if n == 38 and q[:1] == ["5"] and len(q) > 1 and q[1].isdigit():
+                            fg = (5, int(q[1]))
+                        elif n == 38 and q[:1] == ["2"] and len(q) >= 4 and all(x.isdigit() for x in rgb):
+                            fg = (2, int(rgb[0]), int(rgb[1]), int(rgb[2]))
+                        i += 1 if len(sub) > 1 else (3 if q[:1] == ["5"] else 5 if q[:1] == ["2"] else 1)
+                        continue
+                    dim = False if n in (0, 22) else True if n == 2 else dim
+                    fg = None if n in (0, 39) else n if (30 <= n <= 37 or 90 <= n <= 97) else fg
+                    i += 1
+            else:
+                a = p1.split(";")
+                n = (int(a[0]) or 1) if a[0].isdigit() else 1
+                if op in ("H", "f"):
+                    row, col = n - 1, ((int(a[1]) or 1) if len(a) > 1 and a[1].isdigit() else 1) - 1
+                elif op in ("G", "d"):
+                    row, col = (n - 1, col) if op == "d" else (row, n - 1)
+                elif op in ("A", "B", "E", "F"):
+                    row = max(0, row - n) if op in ("A", "F") else row + n
+                    col = 0 if op in ("E", "F") else col
+                elif op in ("C", "D"):
+                    col = col + n if op == "C" else max(0, col - n)
+                elif op == "J" and p1 in ("", "0", "2", "3"):
+                    rows = {} if p1 in ("2", "3") else {r: {c: v for c, v in l.items() if r < row or c < col}
+                                                        for r, l in rows.items() if r <= row}
+                elif op == "K" and p1 in ("", "0", "1", "2"):
+                    rows[row] = {} if p1 == "2" else {c: v for c, v in rows.get(row, {}).items()
+                                                      if (c > col if p1 == "1" else c < col)}
+        elif s == "\r":
+            col = 0
+        elif s == "\n":
+            row, col = row + 1, 0
+        elif s[0] >= " ":
+            line, muted = rows.setdefault(row, {}), dim or _muted_fg(fg)
+            for ch in s:
+                line[col] = (ch, muted)
+                col += 1
+    return rows
+
+
+def typed_input(raw):
+    """What the person typed in an agent CLI's input line on this screen (Claude Code's ❯ box,
+    Codex's ›, agy's >): the live prompt box's lines, without the CLI's dim or grey placeholder
+    or suggestion. '' when it's empty or there's none."""
+    rows = screen_rows(raw)
+    if not rows:
+        return ""
+    last = max(rows)
+    text = {r: "".join(line.get(c, (" ", True))[0] for c in range(min(max(line), 500) + 1)).replace("\xa0", " ") if line else ""
+            for r, line in rows.items()}
+    marks = [r for r in sorted(rows) if PROMPT.match(text[r])]
+    if not marks:
+        return ""
+    def box_end(r):
+        end = next((k for k in range(r + 1, last + 1) if RULE.match(text.get(k, ""))), None) if RULE.match(text.get(r - 1, "")) else None
+        if end is None or len(text[r - 1].strip()) != len(text[end].strip()):
+            return None
+        after = [text[k].strip() for k in range(end + 1, last + 1) if text.get(k, "").strip()]
+        d = next((i for i, x in enumerate(after) if RULE.match(x)), None)
+        if d and all(x.startswith(("●", "○")) for x in after[:d]):
+            after = after[d + 1:]
+        return end if len(after) <= 2 and not any(RULE.match(x) for x in after) else None
+    framed = [(r, end) for r in marks if (end := box_end(r)) is not None]
+    if framed:
+        top, end = framed[-1]
+    else:
+        top = marks[-1]
+        if text[top].lstrip().startswith((">", "❯")) and len(rows) > 1:
+            return ""
+        end = next((k for k in range(top + 1, last + 2) if RULE.match(text.get(k, "")) or not text.get(k, "").strip()), last + 1)
+        if sum(1 for k in range(end, last + 1) if text.get(k, "").strip()) > 2:
+            return ""
+    out = []
+    for r in range(top, end):
+        cut = PROMPT.match(text[r]).end() if r == top else 0
+        out.append("".join(ch for c, (ch, muted) in sorted(rows.get(r, {}).items()) if c >= cut and not muted))
+    return "\n".join(out).strip()
+
+
+def chat_typing(k):
+    try:
+        at = int((k.get("labels") or {}).get(TYPING) or 0)
+    except ValueError:
+        at = 0
+    return bool(at and now() - at < TYPING_KEEP_MS)
+
+
+def typing(address, k=None, there=None):
+    """Why the person is writing to this agent now, else None: "chat" (its chat box holds unsent
+    words) or "input" (its CLI's input line holds text they typed). k: its hc get, when at hand."""
+    if k is None:
+        if there:
+            try:
+                k = json.loads(there(["hc", "get", address, "--json"]).stdout or "null")
+            except ValueError:
+                k = None
+        else:
+            k = hc_json("get", address)
+    if not k or k.get("state") != "live":
+        return None
+    if chat_typing(k):
+        return "chat"
+    return "input" if typed_input(screen_raw(address, there)) else None
+
+
+@contextmanager
+def held_messages():
+    """HELD under its lock (the scheduler and an agent's herdr-task may both write it)."""
+    os.makedirs(STORE, exist_ok=True)
+    with open(HELD + ".lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            with open(HELD) as f:
+                held = json.load(f)
+        except (OSError, ValueError):
+            held = {}
+        yield held
+        tmp = f"{HELD}.{os.getpid()}.tmp"
+        with open(tmp, "w") as f:
+            json.dump(held, f)
+        os.replace(tmp, HELD)
+
+
+def hold(address, text, how="send", pending=None):
+    """Keeps a message for an agent (`pending` = after_turn when typed into a busy agy worker whose
+    turn didn't take alt+m, else while the person is writing to it); held_pass delivers it."""
+    item = {"text": text, "how": how, "at": now()}
+    if pending is not None:
+        item["pending"] = pending
+    with held_messages() as held:
+        held.setdefault(address, []).append(item)
+
+
+def send_or_hold(address, text, how="send"):
+    """Sends it now, or holds it while the person is writing to that agent. Returns "sent",
+    "held", or None when it couldn't go (hc refused it)."""
+    if typing(address):
+        hold(address, text, how)
+        return "held"
+    return "sent" if deliver(address, text, how) else None
+
+
+def held_pass(report, delivered=None):
+    """Sends what was held for agents the person no longer writes to, and re-delivers messages left
+    pending behind a busy agy worker once its turn ends. Dropped once its agent has ended, once agy
+    already started a turn with it, or after NEWS_KEEP_MS."""
+    if not os.path.exists(HELD):
+        return
+    pend_docs = lambda addr: [d for d in (delivered or {}).values() if isinstance(d, dict) and d.get("to") == addr and d.get("pending")]
+    unpend = lambda addr, k: [d.update(at=now(), turn=k.get("turn") or 0, idle=True) or d.pop("pending", None) for d in pend_docs(addr)]
+    with held_messages() as held:
+        for addr, items in list(held.items()):
+            items[:] = [x for x in items if now() - (x.get("at") or 0) < NEWS_KEEP_MS]
+            k = hc_json("get", addr) if items else None
+            if not k or k.get("state") != "live":
+                held.pop(addr)
+                continue
+            had_news = any("pending" in x and x.get("how") == "news" for x in items)
+            items[:] = [x for x in items if "pending" not in x or not turn_moved(k, x["pending"])]
+            if had_news and not any("pending" in x and x.get("how") == "news" for x in items):
+                for d in pend_docs(addr):
+                    d.pop("pending", None)
+            if not items:
+                held.pop(addr)
+                continue
+            ready_pending = status_word(k) in ("idle", "done")
+            if all("pending" in x for x in items) and not ready_pending:
+                continue
+            if chat_typing(k):
+                continue
+            inp = typed_input(screen_raw(addr))
+            if inp:
+                own = [x for x in items if "pending" in x and ready_pending
+                       and x["text"].strip() and inp.splitlines()[0] == x["text"].strip().splitlines()[0]]
+                if own and run(["hc", "keys", addr, "enter"]).returncode == 0:
+                    items[:] = [x for x in items if x not in own]
+                    if any(x.get("how") == "news" for x in own):
+                        unpend(addr, k)
+                    report.setdefault("held", []).append({"to": addr, "messages": len(own)})
+                if not items:
+                    held.pop(addr)
+                continue
+            for pending in (True, False):
+                if pending and not ready_pending:
+                    continue
+                for how in ("news", "send"):
+                    batch = [x for x in items if ("pending" in x) == pending and x.get("how", "send") == how]
+                    if not batch:
+                        continue
+                    text = "\n\n".join(x["text"] for x in batch)
+                    res = deliver(addr, text, how, from_held=True)
+                    if res == "sent":
+                        items[:] = [x for x in items if x not in batch]
+                        if pending and how == "news":
+                            unpend(addr, k)
+                        report.setdefault("held", []).append({"to": addr, "messages": len(batch)})
+                    elif res == "pending":
+                        items[:] = [x for x in items if x not in batch] + [{"text": text, "how": how, "at": now(),
+                                                                            "pending": (k.get("turn") or 0) + 1}]
+            if not items:
+                held.pop(addr)

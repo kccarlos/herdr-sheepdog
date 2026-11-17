@@ -1,0 +1,38 @@
+he normal state. If its last message says "API Error handling" or "overloaded queue", the spell starts. This happens before any real error.
+  • Proof: scratch test in $TMPDIR/rev/test_scratch.py, subclassing Watchdog. The screen was ● SHOP-1 is running: it fixes the API Error handling in the client and the overloaded queue.\n  Waiting
+  for the worker to report.\n❯ \n, with task SHOP-1 running.
+      • Pass 1 sent [('c1', 'Carry on with what you were doing; the last turn hit an API error.')] and reported {'action': 'nudged', ... 'why': 'stopped on an API error: ● SHOP-1 is running: it
+      fixes the API Error handling…'}.
+      • After +3 min, pass 2 restarted: restarts == [('c1','c2','p1')], reported as {'action': 'restarted', ... 'why': 'stopped on an API error: …'}. A third pass would alert.
+  • Fix: match only the line Claude Code prints for an error, anchored at the line start (glyphs and spaces allowed before it): re.compile(r"^\W*API Error(?: \([^)]*\))?:", re.I). Please run /login,
+  overloaded_error and rate_limit_error only count inside such a line; they always appear in it. Drop the bare \boverloaded\b and rate.?limit(ed) alternatives. Add a test with a screen that
+  mentions these words in prose and expect no nudge.
+  2. major: an Assistant that recovered after the nudge is still restarted.
+  • Where: mods/tasks/bin/herdr_task/watchdog.py, lines 164-173. The error line stays in the 15-line tail after recovery, and nothing tells "the last turn ended on it" from "it scrolled past".
+  • Proof: scratch test test_recovered_after_nudge. Pass 1 on the real error screen nudged. Then turn went 2→3 and the screen became:
+    ⎿  API Error: 403 (Cloudflare) · Please run /login
+    ❯ Carry on with what you were doing; the last turn hit an API error.
+    ● Resuming: SHOP-1 is still running, nothing to do until the worker reports.
+    ────────────
+    ❯
+    ────────────
+      ? for shortcuts
+  At +3 min the watchdog reported {'action': 'restarted', 'from': 'c1', 'to': 'c2', ... 'why': 'stopped on an API error: ⎿  API Error: 403 …'} with restarts == [('c1','c2','p1')]. A healthy
+  Assistant that did what the nudge asked is restarted.
+  • Fix: in api_error(), look only at the lines after the last echoed input line (a line starting ❯  followed by text, which the nudge produces). The error then counts only when it is the last
+  output before an empty prompt, which is "the last turn ended on it". Add a test: error, nudge, recovered screen, +3 min, expect no restart.
+  Hypotheses checked and disproved:
+  • The nudge text itself matches API_ERROR. It doesn't: API error. is followed by ., not : or a space.
+  • The "alerted" stage loops. It doesn't: neither api branch fires, so no second nudge or restart.
+  • The template restart loops. It doesn't: rec["template"] is kept across the restart and the cooldown, and restart.sh does not copy herdr.template, so the new Assistant is relabelled at first
+  sight.
+  • A restart where restart.sh fails (no space or tab) alerts. It doesn't: the old_tpl branch never alerts and records the template, so there is no retry.
+  • Template path mismatch. template_info() reads ~/.config/herdr-core/templates/assistant.md, which is the same path mods/coordinator/restart.sh uses.
+  • bin/sync-shared --check prints "all 256 copies match" (rc 0), and cd test && python3 -m unittest test_repo gives 43 tests, OK.
+  Not run in my sandbox: herdr-app check, shepherdr doctor, the full python3 -m unittest discover -s test and the node check loop. Herdr runs the full check, and your worker runs the "proof from a
+  scratch store" step.
+  R8ff808a9 changes, 2 findings at or above Must fix
+ How's the CLI experience so far? Help us improve:
+ [1] Good  [2] Fine  [3] Bad  [0] Skip
+? for shortcuts                                                                                                                                                          auto · Claude Sonnet 5.5 · high
+[hc] incomplete: older output may be missing

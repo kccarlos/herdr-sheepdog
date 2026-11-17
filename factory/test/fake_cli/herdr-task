@@ -1,0 +1,3 @@
+#!/bin/sh
+# Stand-in for `herdr-task review …` run by a fake reviewer: the gate test applies the logged verdict itself.
+printf '%s\n' "$*" >> "$FAKE_LOG"

@@ -1,0 +1,125 @@
+"""Output: a task as JSON and as one line of text."""
+
+import json
+
+from .base import now
+from .agents import (
+    agent_running, asking, BG_ENDED_WHY, detail, device_why, live_helpers, out_of_rounds_why, ask_reason, blocking_dialog, held_ask,
+    last_words, own_line, own_work, OUT_OF_ROUNDS, status_word, STATUSES, task_status,
+)
+from .queues import waiting_ext, waiting_for
+
+
+# ---- output ---------------------------------------------------------------------------------
+
+def view(s, task, live=None):
+    known, live = live is not None, live if live is not None else []
+    running = [k for k in live if agent_running(k)]
+    v = dict(task)
+    v["key"] = s.key(task)
+    v["folder"] = s.loc["folder"]
+    v["status"], v["needs"], v["why"] = task_status(task, running)
+    if v["needs"] == "asks":
+        # Why it waits, at most LINE_MAX characters: a standard reason or its own question.
+        k = next((k for k in running if status_word(k) == "blocked"), None) or next((k for k in running if asking(k)), None)
+        st = k.get("status") if k and isinstance(k.get("status"), dict) else {}
+        # Blocked in its CLI's question dialog: every question, before its own status line (field note 51).
+        v["why"] = (k and blocking_dialog(task, k["address"], held_ask(k["address"]))) or own_line(task, k and k["address"]) or (ask_reason(task, k["address"], held_ask(k["address"]), st.get("kind"), st.get("msg")) if k else v["why"])
+    if v["needs"] == "reply":
+        # Refused ready with its rounds used up (review_refusal): the Assistant can add one.
+        v["why"] = (out_of_rounds_why(task) if task.get("review_out") else None) or (v["why"] if v["why"] == BG_ENDED_WHY else None) \
+            or (v["why"] if task.get("device_wait") and v["why"] == device_why(task) else None) \
+            or own_line(task) or last_words(task)
+    if v["needs"] in ("asks", "reply") and task["state"] == "running" and running:
+        from .commands import start_stuck  # FAC-100: an agy worker that never started, not "Signed out"
+        v["why"] = next(filter(None, (start_stuck(task, k) for k in running)), None) or v["why"]
+    # Quiet but on its own background work (SHEP-53), or said ready but not at rest yet (SHEP-148):
+    # Working; kept on the task for the Tasks panel (core/tasks.js place()).
+    v["own_work"] = (v["status"] == "working" and task["state"] in ("running", "ready") and bool(running)
+                     and all(status_word(k) in ("idle", "done") for k in running)
+                     and own_work(task, running, ready=task["state"] == "ready"))
+    if known:
+        progress_clock(s, task, v["status"])
+    v["report"] = report_of(task, v["status"])
+    v["status_text"] = STATUSES[v["status"]]
+    v["live"] = [{"address": k["address"], "status": (k.get("status") or {}).get("state") if isinstance(k.get("status"), dict) else k.get("status"),
+                  "tab": (k.get("labels") or {}).get("herdr.tab"), "role": (k.get("labels") or {}).get("herdr.role") or "worker"} for k in running]
+    # Its worker's own helper agents (SHEP-54: a reviewer it started as an hc child), for the Tasks panel.
+    v["subagents"] = subagents(s.key(task)) if known and running and task["state"] in ("running", "ready") else []
+    v["ref"], v["prefix"] = s.ref(task), s.prefix
+    v["waiting_for"] = waiting_for(s, task)
+    v["waiting_ext"] = waiting_ext(task)
+    return v
+
+
+def subagent(k):
+    """One helper as people see it: its role, its CLI, its status (working, needs, done) and since when."""
+    lb = k.get("labels") or {}
+    st = k.get("status")
+    st = st.get("state") if isinstance(st, dict) else st
+    cli = lb.get("herdr.agent") or ("codex" if "codex" in str(k.get("agent") or "") else "claude" if k.get("agent") else None)
+    return {"address": k["address"], "parent": k.get("parent"), "role": lb.get("herdr.role") or "helper", "agent": cli,
+            "name": k.get("name"), "status": "working" if st == "working" else "needs" if st == "blocked" else "done",
+            "at": k.get("created_ms")}
+
+
+def subagents(key):
+    return [subagent(detail(k)) for k in live_helpers(key)]
+
+
+def progress_clock(s, task, status):
+    """A task's minutes left count down while it works and stop while it waits on the person: the
+    report's clock (at) moves on by the time it waited (paused_at), noted whenever it's looked at."""
+    p = task.get("progress")
+    if not p or not s.write:
+        return
+    if status == "needs" and not p.get("paused_at"):
+        p["paused_at"] = now()
+        s.dirty = True
+    elif status != "needs" and p.get("paused_at"):
+        p["at"] = p.get("at", now()) + now() - p.pop("paused_at")
+        s.dirty = True
+
+
+# Minutes left show from the agent's very first estimate on, a rough guess beats none (as
+# core/tasks.js estimated(), SHEP-13).
+def estimated(p):
+    return isinstance(p.get("left"), (int, float))
+
+
+def report_of(task, status):
+    """What its agent last reported (herdr-task status), as shown: {text, done, left (minutes, or
+    None), paused}; None once it is ready, waits for a go or for other tasks."""
+    p = task.get("progress")
+    if not p or status not in ("working", "needs") or task["state"] != "running":
+        return None
+    left = None
+    if estimated(p):
+        rem = max(0, p["left"] - ((p.get("paused_at") or now()) - p.get("at", now())))
+        left = 0 if rem < 60000 else -(-rem // 60000)
+    return {"text": p.get("text", ""), "done": p.get("done"), "left": left, "paused": status == "needs"}
+
+
+def minutes(n):
+    return "<1m" if n < 1 else f"{n}m" if n < 60 else f"{round(n / 60)}h"
+
+
+def say(args, data, text):
+    if getattr(args, "json", False):
+        print(json.dumps(data, indent=None))
+    elif text:
+        print(text)
+
+
+def line(v):
+    word = v.get("status_text") or v["state"]
+    extra = v.get("why") or ""
+    if v["status"] in ("ready", "merging") and not extra:
+        extra = f"PR #{v['pr']['number']}" if v.get("pr") else v.get("branch") or ""
+    elif v["status"] == "queued":
+        wait = [f"{v['prefix']}-{i}" for i in v.get("waiting_for") or []] + (v.get("waiting_ext") or [])
+        extra = v.get("reason") or ("after " + ", ".join(wait) if wait else "")
+    elif v["status"] == "working" and v.get("report") and not extra:
+        w = v["report"]
+        extra = w["text"] + (f" · {w['done']}%" if w.get("done") is not None else "") + (f" · ~{minutes(w['left'])} left" if w.get("left") is not None else "")
+    return f"{v['ref']:<7} {word:<9} {v['title']}" + (f"  ({extra})" if extra else "")

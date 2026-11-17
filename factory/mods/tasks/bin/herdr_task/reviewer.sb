@@ -1,0 +1,43 @@
+;; An agy reviewer herdr-task starts (FAC-49): macOS sandbox-exec, so the OS holds the limits and
+;; agy runs with --dangerously-skip-permissions. Its HOME is TMP, this run's temp dir holding agy's
+;; whole state (a copy of its sign-in), removed when it ends (launch.SANDBOX_SH). Params, real
+;; paths: TMP, WORKTREE, GITDIR (the repo's git common dir), AGY (agy's binary), DEVDIR (Xcode's
+;; tools, for git), NVM (~/.nvm/versions), CORE (herdr-core's sockets, under XDG_STATE_HOME or ~/.local/state).
+(version 1)
+(allow default)
+
+;; Reads: only the worktree, its git dir, this run's temp dir, agy and the system's tools. Any
+;; path's metadata (stat) stays readable, so paths resolve; no other folder lists or opens.
+(deny file-read-data)
+(allow file-read-data
+  (literal "/")
+  (subpath (param "TMP"))
+  (subpath (param "WORKTREE"))
+  (subpath (param "GITDIR"))
+  (literal (param "AGY"))
+  (subpath (param "NVM"))
+  (subpath "/usr")
+  (subpath "/bin")
+  (subpath "/sbin")
+  (subpath "/System")
+  (subpath "/Library")
+  (subpath "/opt/homebrew")
+  (subpath (param "DEVDIR"))
+  (subpath "/private/etc")
+  (subpath "/private/var/db/timezone")
+  (literal "/private/var/run/resolv.conf")
+  (subpath "/dev"))
+;; Not even there: .env files (herdr-secret env writes secrets into one). After the allows: the last match wins.
+(deny file-read-data (regex #"/\.env(\.[^/]*)?$"))
+
+;; Writes: only this run's temp dir, /dev/null and the terminal; the worktree and repo stay read-only.
+(deny file-write*)
+(allow file-write*
+  (subpath (param "TMP"))
+  (literal "/dev/null")
+  (literal "/dev/tty")
+  (literal "/dev/ptmx")
+  (regex #"^/dev/ttys[0-9]+$"))
+
+;; No driving hc: herdr-core's sockets can't be reached. The internet (the Gemini API) can.
+(deny network-outbound (remote unix-socket (subpath (param "CORE"))))
