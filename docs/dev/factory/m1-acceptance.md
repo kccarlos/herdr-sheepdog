@@ -1,0 +1,73 @@
+# Milestone 1 acceptance (SDF-13)
+
+Phase 1's exit test from the design: *the whole Python suite passes with no herdr-app installed; on a Linux VM and a clean Tart VM with only hc and one CLI, a task goes from `add` to a merged PR.* An agent that wrote none of milestone 1 ran it on 2026-11-17 against `main` at `4cacc91a` (after SDF-10, SDF-11 and SDF-12). This page records what was run, what passed and the gaps found. Background: [engine-audit.md](engine-audit.md) section 6.
+
+## Machines
+
+| Machine | What is installed | Agent CLI |
+|---|---|---|
+| Mac (host) | Everything, so `herdr-app` was taken off `PATH` for the run; the suite's own throwaway `HOME` hides `~/.config/herdr-app` | — |
+| Linux VM (`ssh oci`, Ubuntu 24.04, arm64) | hc 0.1.17, claude, codex, uv 0.12.1, git, Python 3.12. No herdr-app, no gh, no make | claude (Haiku) |
+| Tart VM (a clone of `factory-base-2026-11-08`, macOS 26.6) | Stripped to hc 0.1.18 and agy: herdr-app, the Herdr window, `~/.config/herdr-app`, claude and codex removed from the clone. Homebrew git, gh (signed in) and Python 3.15 stay | agy (Gemini 4 Carbon) |
+
+The `sheepdog-oci` ssh name in the brief is stale; the Linux VM is `oci`. The original VM images were not changed: the Tart work ran on a clone.
+
+## 1. The suite without herdr-app
+
+The command is `make test-factory` on the Mac. On the VMs it is the same `uv run` line without `make` (Linux has no make).
+
+| Machine | Result |
+|---|---|
+| Mac, `herdr-app` off `PATH` | 739 tests, OK, 34 skipped |
+| Linux VM (no herdr-app at all) | 739 tests, 2 failures, then OK with 33 skipped after the fix below |
+| Tart VM (stripped clone) | 739 tests, OK, 33 skipped |
+
+Skips, all for a stated reason:
+
+- On every machine: 28 tests whose Shepherdr window, web or vm files are outside `factory/`, and 1 test that runs only on CI.
+- On macOS: 3 bwrap (Linux sandbox) tests and 1 "no `/proc`". On the Mac host only, the hc ask-pane end-to-end test also skipped: hc was not found on the test's `PATH`. It ran and passed on the Tart VM.
+- On Linux: 1 sandbox-exec (macOS) test, 1 "no working node", and the 2 `make`-dependent tests below. No skip hides a herdr-app dependency. The test files mention herdr-app only to keep the person's real `~/.config/herdr-app` out of reach (`home_guard.py`, `test_repo.py`), to set `HERDR_APP_HOME` for `restart.sh` (`test_restart.py`) and to list words the templates must not contain (`test_replay.py`).
+
+**Fixed here:** `SyncBehindBase.test_empty_check_derives_from_makefile_test_target` and `…_falls_back_while_merge_regression_fails` derive `make test` from a Makefile and failed with exit 127 on a machine without `make`. They now skip when `make` is missing.
+
+## 2. From `add` to merged, by hand on each VM
+
+Recipe on each VM:
+
+1. Copy a `sheepdog` built from this commit and run `sheepdog factory doctor` in a fresh git repo.
+2. Run `herdr-task config --prefix DEMO`.
+3. Add a one-line task, `herdr-task add "Add HELLO.md" --prompt "Create HELLO.md … then run herdr-task ready"`.
+4. Run `herdr-task start DEMO-1`, wait for Ready, then `herdr-task accept DEMO-1` (the tester plays the owner).
+
+| Step | Linux (claude) | Tart (agy) |
+|---|---|---|
+| `factory doctor` | All ok after installing a newer uv; warns about gh and codexbar | Fails until uv is installed and `hc server start` is run, then all ok |
+| `start` → worker runs | Needed 2 key presses in the worker's terminal (finding 2) | Started `claude`, which is not installed (finding 1). After `switch --agent agy`, it stopped on a permission prompt (finding 3). Ran once `worker.perm=full` was set |
+| Worker commits and runs `ready` | Yes, with a proof file | Yes |
+| `accept` | "merged into main; done" | "merged into main; done" |
+
+Both VMs reached a commit on `main` in local-merge mode: there is no GitHub remote, so no pull request. The pull-request leg is in section 3.
+
+## 3. Pull request on GitHub
+
+Pending: this leg needs a throwaway GitHub repo and a login for it on each VM, which only the owner can provide.
+
+## Findings
+
+Severity levels follow the reviewer template: **major** means someone would hit it, **minor** means it is rarely hit or cosmetic.
+
+1. **Major: the default worker CLI is `claude` even where it is not installed.** On a machine with only agy, `start` says "DEMO-1 started", the worker terminal prints `command not found: claude`, and the task sits in Working. Doctor already knows which CLIs are ready (`agent clis: 1 ready (agy)`). Not fixed here. Picking an installed CLI as the default broke `switch --all --from claude` and other code that reads "no agent set" as claude (`agents.py`, `settings.py`). It needs a decision, probably in phase 2: doctor or `project start` writes the worker setting, or `start` refuses a CLI that is not on `PATH`.
+2. **Major: a Claude worker on a fresh machine stops on two first-run dialogs.** The first is the folder-trust dialog; the engine sees it and shows "Asks to trust this folder", but nobody answers it. The second is the one-time Bypass Permissions confirmation; during it the engine still shows Working. Codex gets its trust through `-c projects=…` and agy through `--settings`, but Claude gets nothing. Unattended, the task waits for ever. Here the tester pressed the keys, 2 step-ins.
+3. **Major: plain `add`/`start` use the person-facing defaults, not the factory's.** An agy worker in accept-edits mode stops on every command (field note 13). Only `project start` writes the factory defaults (`perm: full` and the agy worker), and it also starts a coordinator whose template runs `claude`, so on an agy-only machine it cannot finish. Here `herdr-task config --set worker.perm=full` was set by hand.
+4. **Major (phase 2): doctor unpacks the engine but puts neither `herdr-task` nor `herdr-secret` on `PATH`.** Both start with `#!/usr/bin/env python3`, which is the system Python (3.15 on Tart, 3.12 on Linux), not the pinned 3.14.8 that doctor installed. Workers call `herdr-task` by its full engine path, so the run used a two-line wrapper that execs the managed Python. This belongs to phase 2's one install.
+5. **Minor: prerequisites beyond "hc and one CLI".** uv was missing on Tart. uv 0.12.1 on Linux cannot download CPython 3.14.8 (`No download found`); 0.13.9 can. git and, for a pull request, gh are also needed. Doctor names uv and gh with a fix line; it does not check the uv version.
+6. **Minor: with Review off, auto-accept still waits for a review round.** `show` says "waits for the person's Accept: 0 of 1 passing review rounds" and the Settings block says Review: off. The default merge setting asks the person first anyway, so nothing merges by itself.
+7. **Minor: Shepherdr words remain.** The worker brief's Merge line and `commands.py` still say "they accept it in the Tasks panel" (`assistant_settings.MERGE_SHORT`). `templates.py`'s `REVIEWER_SANDBOX` line names `herdr-app check`. `mods/coordinator/restart.sh` reads `HERDR_APP_HOME`/`~/.config/herdr-app`, a known phase 2 item (design section 5). These are prompt and template texts, so changing them needs the replay evidence from [template-replay.md](template-replay.md). They are left for a follow-up.
+8. **Minor: herdr-task refuses a private hc session.** With `HC_SESSION` set it says "refusing to run hc". This is by design (`base.not_real`), but it means a test on a shared machine has to use the default hc session. The Linux run did that and removed only its own terminals.
+9. **Info: older hc on the VMs.** The VMs run hc 0.1.17 and 0.1.18, the Mac 0.1.21. Both worked for this path. On Tart, `hc server start` printed "run hc update to finish installing Herdr Core".
+
+## Not proven
+
+- Unattended runs: every run above had the tester answering dialogs, changing one setting and accepting as the owner. Phase 2 (doctor, coordinator lease) is what removes those step-ins.
+- `project start` with a coordinator on either VM.
+- Review rounds (Review was off) and CI checks (the demo repos have no CI).
