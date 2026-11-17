@@ -16,7 +16,7 @@ from .agents import (
 )
 from .launch import coordinator_in
 from .store import locate, read_list, Store, store_files
-from .output import line, minutes, view
+from .output import minutes, view
 from .github import NO_CI_RUN
 from .takeover import backup_news
 

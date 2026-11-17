@@ -190,7 +190,8 @@ def task_ref(k):
 def env_of(k):
     """What the agent's launch set besides its argv: the task key (launch.launch)."""
     key = label_of(k.get("labels"), "task")
-    return {"SHEEPDOG_TASK": key} if key else {}
+    # HERDR_BROWSER_TASK stays beside SHEEPDOG_TASK until SDF-11 converts worker.md.
+    return {"SHEEPDOG_TASK": key, "HERDR_BROWSER_TASK": key} if key else {}
 
 
 def record_of(k):

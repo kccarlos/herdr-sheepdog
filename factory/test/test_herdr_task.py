@@ -7133,7 +7133,7 @@ class Revive(unittest.TestCase):
 
     def test_a_worker_resumes_with_its_task_browser(self):
         self.terms["t5"] = {"address": "t5", "state": "live", "pid": 500, "cwd": "/wt", "name": "shep-6-web",
-                            "argv": ["sh", "-c", "low", "herdr-low", "env", "SHEEPDOG_TASK=dev#6", "/bin/bash", "-ic", "x", "/bin/bash",
+                            "argv": ["sh", "-c", "low", "herdr-low", "env", "SHEEPDOG_TASK=dev#6", "HERDR_BROWSER_TASK=dev#6", "/bin/bash", "-ic", "x", "/bin/bash",
                                      "claude", "--settings", '{"a":1}', "Brief..."],
                             "status": {"state": "working"}, "foreground": {"pid": 501, "name": "claude", "argv": ["claude"], "cwd": "/wt"},
                             "labels": {"sheepdog.task": "dev#6", "sheepdog.agent": "claude"}}
@@ -7141,8 +7141,7 @@ class Revive(unittest.TestCase):
         self.tick()
         self.crash("t5")
         self.tick()
-        self.assertTrue(self.sent[0][1].startswith("""cd /wt && DISABLE_AUTOUPDATER=1 SHEEPDOG_TASK='dev#6' claude --settings '{"a":1}' --resume S1 'Herdr restarted"""), self.sent[0][1])
-        self.assertNotIn("HERDR_BROWSER_TASK", self.sent[0][1])
+        self.assertTrue(self.sent[0][1].startswith("""cd /wt && DISABLE_AUTOUPDATER=1 HERDR_BROWSER_TASK='dev#6' SHEEPDOG_TASK='dev#6' claude --settings '{"a":1}' --resume S1 'Herdr restarted"""), self.sent[0][1])
 
     def agy_worker(self, cid="0199aaaa-bbbb-cccc-dddd-eeeeeeeeeeee"):
         """A kept agy worker (FAC-7) in a temp home: its conversation is a db no chat reads, so no log."""
@@ -7156,7 +7155,7 @@ class Revive(unittest.TestCase):
         self.db = os.path.join(conv, cid + ".db")
         open(self.db, "w").close()
         self.terms["t5"] = {"address": "t5", "state": "live", "pid": 500, "cwd": "/wt", "name": "shep-6-web",
-                            "argv": ["sh", "-c", "low", "herdr-low", "env", "SHEEPDOG_TASK=dev#6", "/bin/zsh", "-lic", "x", "/bin/zsh",
+                            "argv": ["sh", "-c", "low", "herdr-low", "env", "SHEEPDOG_TASK=dev#6", "HERDR_BROWSER_TASK=dev#6", "/bin/zsh", "-lic", "x", "/bin/zsh",
                                      "agy", "--settings", '{"trustedWorkspaces":["/wt"]}', "--mode", "accept-edits", "-i", "Brief..."],
                             "status": {"state": "working"}, "foreground": {"pid": 501, "name": "agy", "argv": ["agy"], "cwd": "/wt"},
                             "labels": {"sheepdog.task": "dev#6", "sheepdog.agent": "agy"}}
@@ -7175,7 +7174,7 @@ class Revive(unittest.TestCase):
         self.crash("t5")
         report = self.tick()
         self.assertEqual(report["revived"], [{"terminal": "t5", "how": "resume", "session": cid}])
-        self.assertEqual(self.sent, [("t5", "cd /wt && SHEEPDOG_TASK='dev#6' agy --settings '{\"trustedWorkspaces\":[\"/wt\"]}' "
+        self.assertEqual(self.sent, [("t5", "cd /wt && HERDR_BROWSER_TASK='dev#6' SHEEPDOG_TASK='dev#6' agy --settings '{\"trustedWorkspaces\":[\"/wt\"]}' "
                                             f"--mode accept-edits --conversation {cid} -i 'Herdr restarted (a crash, power loss or reboot) "
                                             "while you were working, and your session is resumed. Carry on where you left off.'")])
 
@@ -7240,7 +7239,7 @@ class Revive(unittest.TestCase):
         self.crash("t5")
         with self.mock.patch("herdr_task.launch.own_argv", lambda argv, *_, **__: argv):
             self.tick()
-        self.assertTrue(self.sent[0][1].startswith("cd /wt && DISABLE_AUTOUPDATER=1 SHEEPDOG_TASK='dev#6' claude --resume S1 'Herdr restarted"), self.sent)
+        self.assertTrue(self.sent[0][1].startswith("cd /wt && DISABLE_AUTOUPDATER=1 HERDR_BROWSER_TASK='dev#6' SHEEPDOG_TASK='dev#6' claude --resume S1 'Herdr restarted"), self.sent)
         with self.mock.patch.object(self.r, "TEMPLATES", os.path.join(self.dir, "missing")):
             cmd, tpl = self.r.template_of("assistant")
             self.assertEqual(cmd, "claude")
