@@ -13824,7 +13824,20 @@ class InstalledCliAndMissingRefusal(unittest.TestCase):
         self.assertEqual(self.agents.cli_of({"foreground": {"name": "codex"}}), "codex")
         self.assertIsNone(self.agents.cli_of({"foreground": {"name": "zsh", "argv": ["-zsh"]}}))
         self.assertIsNone(self.agents.cli_of({"address": "t1"}))
-        self.assertIsNone(self.sessions.find_log({"at": 1000}, "REPO-1", [self.repo]))
+
+    def test_short_path_finds_cli_in_home_local_bin(self):
+        """hc exec runs herdr-task with a short PATH (/usr/bin:/bin); ~/.local/bin CLIs are still found."""
+        local_bin = os.path.join(self.tmp, ".local", "bin")
+        os.makedirs(local_bin, exist_ok=True)
+        fake_claude = os.path.join(local_bin, "claude")
+        with open(fake_claude, "w") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(fake_claude, 0o755)
+        with (self.mock.patch.object(self.settings.shutil, "which", self.real_which),
+              self.mock.patch.dict(os.environ, {"HOME": self.tmp, "PATH": "/usr/bin:/bin"})):
+            self.assertIn("claude", self.settings.installed_clis())
+            self.assertEqual(self.settings.default_worker_agent(), "claude")
+            self.assertIsNone(self.settings.cli_missing_reason(["claude"]))
 
     def test_missing_cli_refused_with_reason_and_needs_you_then_config_fixes_it(self):
         self.installed = {"codex", "agy"}
@@ -14036,7 +14049,7 @@ class ClaudeStartupTrustAndDialogs(unittest.TestCase):
         self.assertEqual(os.stat(cfg_path).st_mode & 0o777, 0o600)
         self.assertEqual((saved["numStartups"], saved["oauthAccount"]), (4, {"accountUuid": "u-1"}))
         self.assertIs(saved["hasCompletedOnboarding"], True)
-        self.assertIs(saved["bypassPermissionsModeAccepted"], True)
+        self.assertNotIn("bypassPermissionsModeAccepted", saved)
         self.assertEqual(saved["projects"]["/keep"]["allowedTools"], ["Read"])
         self.assertIs(saved["projects"][wt]["hasTrustDialogAccepted"], True)
         self.assertIs(saved["projects"][repo]["hasTrustDialogAccepted"], True)

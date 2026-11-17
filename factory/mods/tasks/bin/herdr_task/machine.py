@@ -226,8 +226,13 @@ SOON = 3600 * 1000
 WEEK = 7 * 86400 * 1000
 DUE = {"state": "unknown", "why": "Its sign-in is due for renewal: the next agent here will do it"}
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-PATHS = [os.path.join(HOME, ".local", "bin"), "/usr/local/bin", "/opt/homebrew/bin", os.path.join(HOME, ".npm-global", "bin"),
-         os.path.join(HOME, ".bun", "bin"), os.path.join(HOME, ".claude", "local")]
+def cli_paths(home=None):
+    h = home or os.environ.get("HOME") or HOME
+    return [os.path.join(h, ".local", "bin"), "/usr/local/bin", "/opt/homebrew/bin", os.path.join(h, ".npm-global", "bin"),
+            os.path.join(h, ".bun", "bin"), os.path.join(h, ".claude", "local")]
+
+
+PATHS = cli_paths()
 
 
 def now_ms():
@@ -236,7 +241,7 @@ def now_ms():
 
 def which(name):
     """The CLI's real program: hc exec's PATH is short, and a mise wrapper can't start sealed."""
-    path = os.pathsep.join([os.environ.get("PATH", "")] + PATHS)
+    path = os.pathsep.join([os.environ.get("PATH", "")] + cli_paths())
     found = shutil.which(name, path=path)
     if found and "/mise/" in found and ("/shims/" in found or "/command-wrappers/" in found):
         mise = shutil.which("mise", path=path)

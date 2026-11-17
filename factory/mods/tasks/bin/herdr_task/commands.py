@@ -347,13 +347,14 @@ def start_refusal(s, t, argv):
     return None
 
 
-def note_missing_cli(s, t, argv, record=True):
-    if not (why := cli_missing_reason(argv)):
-        return None
-    if record and t["state"] in ("todo", "queued", "running"):
-        t["attention"], s.dirty = f"Couldn't start: {why}", True
-        t.pop("attention_at", None)
-    return f"Can't start {s.ref(t)}: {why}"
+def fail_if_missing_cli(s, t, argv, record=True):
+    if why := cli_missing_reason(argv):
+        if record and t["state"] in ("todo", "queued", "running"):
+            t["attention"], s.dirty = f"Couldn't start: {why}", True
+            t.pop("attention_at", None)
+            if hasattr(s, "save"):
+                s.save()
+        raise Fail(f"Can't start {s.ref(t)}: {why}")
 
 
 def begin(s, t, argv, space=None, parent=None):
@@ -389,7 +390,6 @@ def just_started(t):
 
 
 def cmd_start(args):
-    refused = None
     with open_store(args) as s:
         t = s.find(args.id)
         live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)] or [a for a in [just_started(t)] if a]
@@ -421,13 +421,10 @@ def cmd_start(args):
             t["queue"] = plan
             s.dirty = True
             v = view(s, t)
-        elif refused := note_missing_cli(s, t, argv):
-            pass
         else:
+            fail_if_missing_cli(s, t, argv)
             a = begin(s, t, argv, parent=parent)
             v = view(s, t)
-    if refused:
-        raise Fail(refused)
     # The scheduler starts queued tasks and tells the Assistant its tasks' news.
     try:
         ensure_scheduler(quiet=True)
@@ -1803,7 +1800,6 @@ RESUME_NUDGE = ("Shepherdr resumed your session because your agent had stopped. 
 
 
 def cmd_resume(args):
-    refused = None
     with open_store(args) as s:
         t = s.find(args.id)
         live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)] or [a for a in [just_started(t)] if a]
@@ -1811,21 +1807,19 @@ def cmd_resume(args):
             raise Fail(f"{s.ref(t)} still has an agent ({live[0]['address']}). Use switch to replace it.")
         if t["state"] in ("todo", "scheduled", "queued"):
             raise Fail(f"{s.ref(t)} hasn't started. Use start.")
-        if not (refused := note_missing_cli(s, t, resolve_again_argv(s, t, args.agent, args.argv, resuming=True))):
-            if t["state"] == "done":
-                t["state"] = "running"
-            gone = [k["address"] for k in live_agents(s.key(t))]  # its agents' terminals, none running an agent
-            back_to_work(s, t, "resumed")
-            a, resumed = start_again(s, t, args.agent, args.argv, parent=args.parent, resuming=True)
-            # #1022: the old agent's terminal, its plain shell left (with the status it last reported when
-            # it died mid-turn), kept counting as the task's agent: it goes, as switch ends the one it replaces.
-            for address in gone:
-                if address != a["address"]:
-                    stop_note("resume-retire", task=s.ref(t), terminal=address, by="resume")
-                    run(["hc", "kill", address])
-            v = view(s, t)
-    if refused:
-        raise Fail(refused)
+        fail_if_missing_cli(s, t, resolve_again_argv(s, t, args.agent, args.argv, resuming=True))
+        if t["state"] == "done":
+            t["state"] = "running"
+        gone = [k["address"] for k in live_agents(s.key(t))]  # its agents' terminals, none running an agent
+        back_to_work(s, t, "resumed")
+        a, resumed = start_again(s, t, args.agent, args.argv, parent=args.parent, resuming=True)
+        # #1022: the old agent's terminal, its plain shell left (with the status it last reported when
+        # it died mid-turn), kept counting as the task's agent: it goes, as switch ends the one it replaces.
+        for address in gone:
+            if address != a["address"]:
+                stop_note("resume-retire", task=s.ref(t), terminal=address, by="resume")
+                run(["hc", "kill", address])
+        v = view(s, t)
     say(args, {**v, "terminal": a["address"], "parent": a.get("parent"), "resumed": resumed},
         f"{s.ref(t)} {'resumed its session' if resumed else 'started with a handoff'}: {a['address']}")
 
@@ -1909,17 +1903,14 @@ def cmd_switch(args):
         raise Fail("Name a task, or give --all --from <cli[:model]> --agent <cli>.")
     if getattr(args, "dry_run", False) or getattr(args, "from_", None) or getattr(args, "reviewer", False):
         raise Fail("--dry-run, --from and --reviewer go with --all.")
-    refused = None
     with open_store(args) as s:
         t = s.find(args.id)
         live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)]
         probe = resolve_again_argv(s, t, args.agent or (worker_pick(s, t).get("agent") if getattr(args, "model", None) else None), args.argv)
-        if not (refused := note_missing_cli(s, t, probe, record=not live)):
-            if getattr(args, "model", None):
-                retarget(s, t, args.agent or worker_pick(s, t).get("agent"), args.model)
-            data, text, own = switch_one(s, t, args, live)
-    if refused:
-        raise Fail(refused)
+        fail_if_missing_cli(s, t, probe, record=not live)
+        if getattr(args, "model", None):
+            retarget(s, t, args.agent or worker_pick(s, t).get("agent"), args.model)
+        data, text, own = switch_one(s, t, args, live)
     if own:
         end_agent(s, t, own)
     say(args, data, text + ended_line(data, own))

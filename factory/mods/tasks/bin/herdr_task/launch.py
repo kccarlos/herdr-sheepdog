@@ -94,22 +94,21 @@ def claude_config_path():
         return primary
 
 
-def _trusted(d, roots, bypass=False):
+def _trusted(d, roots):
     p = d.get("projects") if isinstance(d, dict) else None
     return (isinstance(p, dict) and d.get("hasCompletedOnboarding") is True
-            and (not bypass or d.get("bypassPermissionsModeAccepted") is True)
             and all(isinstance(p.get(r), dict) and p[r].get("hasTrustDialogAccepted") is True for r in roots))
 
 
-def claude_trust(folder, bypass=False):
-    """Sets first-run onboarding, bypass consent and folder trust in Claude's .claude.json before launch."""
+def claude_trust(folder):
+    """Sets first-run onboarding and folder trust in Claude's .claude.json before launch."""
     roots = [r for r in trust_roots(folder) if r not in {"", os.sep, HOME, os.path.realpath(HOME)}]
-    if not roots and not bypass:
+    if not roots:
         return
     path = os.path.realpath(p) if os.path.islink(p := claude_config_path()) else p
     try:
         with open(path) as f:
-            if _trusted(json.load(f), roots, bypass):
+            if _trusted(json.load(f), roots):
                 return
     except FileNotFoundError:
         pass
@@ -133,13 +132,10 @@ def claude_trust(folder, bypass=False):
             pass
         except (OSError, ValueError):
             return
-        if not isinstance(d, dict) or (d.get("projects") is not None and not isinstance(d.get("projects"), dict)) or _trusted(d, roots, bypass):
+        if not isinstance(d, dict) or (d.get("projects") is not None and not isinstance(d.get("projects"), dict)) or _trusted(d, roots):
             return
         d.setdefault("hasCompletedOnboarding", True)
-        if bypass:
-            d["bypassPermissionsModeAccepted"] = True
-        if roots:
-            d["projects"] = {**(p := dict(d.get("projects") or {})), **{r: {**(p[r] if isinstance(p.get(r), dict) else {}), "hasTrustDialogAccepted": True} for r in roots}}
+        d["projects"] = {**(p := dict(d.get("projects") or {})), **{r: {**(p[r] if isinstance(p.get(r), dict) else {}), "hasTrustDialogAccepted": True} for r in roots}}
         tmp = f"{path}.{os.getpid()}.tmp"
         try:
             with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode or 0o600), "w") as f:
@@ -158,32 +154,24 @@ def own_argv(argv, folder=None, verbs=OWN, cwd=None, reads=None):
     path, out = own_path(), list(argv)
     k = agent_key(out)
     if k == "claude":
+        claude_trust(folder)
         rules = own_rules(path, verbs) + [f"Bash({r}:*)" for r in reads or []]
         bypass = "--allow-dangerously-skip-permissions" in out or claude_mode(out, cwd or folder) in (None, "bypassPermissions")
-        claude_trust(folder, bypass=bypass)
         if not rules and verbs is not OWN and not bypass:
             return out
-        cur, spans = {}, []
-        for j, a in enumerate(out):
-            if a == "--settings" and j + 1 < len(out):
-                n, val = 2, out[j + 1]
-            elif a.startswith("--settings="):
-                n, val = 1, a[len("--settings="):]
-            else:
-                continue
+        cur, i = {}, None
+        if "--settings" in out[:-1]:
+            i = out.index("--settings")
             try:
-                got = json.loads(val)
+                cur = json.loads(out[i + 1])
             except ValueError:
                 try:
-                    with open(os.path.join(cwd or "", os.path.expanduser(val))) as f:
-                        got = json.load(f)
+                    with open(os.path.expanduser(out[i + 1])) as f:
+                        cur = json.load(f)
                 except (OSError, ValueError):
-                    continue
-            if isinstance(got, dict):
-                spans.append((j, n))
-                allow = list((cur.get("permissions") or {}).get("allow") or []) + list((got.get("permissions") or {}).get("allow") or [])
-                cur = {**cur, **got, **({"permissions": {**(cur.get("permissions") or {}), **(got.get("permissions") or {}), "allow": allow}}
-                                        if cur.get("permissions") or got.get("permissions") else {})}
+                    cur = None
+            if not isinstance(cur, dict):
+                cur, i = {}, None
         merged = dict(cur)
         if rules:
             perms = dict(cur.get("permissions") or {})
@@ -194,11 +182,8 @@ def own_argv(argv, folder=None, verbs=OWN, cwd=None, reads=None):
             merged.setdefault("idleCompaction", False)
         if bypass:
             merged.setdefault("skipDangerousModePermissionPrompt", True)
-        if spans:
-            for j, n in reversed(spans[1:]):
-                del out[j:j + n]
-            i, n = spans[0]
-            out[i:i + n] = ["--settings", json.dumps(merged)]
+        if i is not None:
+            out[i + 1] = json.dumps(merged)
             return out
         return out[:1] + ["--settings", json.dumps(merged)] + out[1:]
     if k == "codex":
@@ -436,8 +421,10 @@ def claude_mode(argv, folder=None):
             return argv[i + 1]
         if a.startswith("--permission-mode="):
             return a.split("=", 1)[1]
-    found = [argv[i + 1] if a == "--settings" else a.split("=", 1)[1] for i, a in enumerate(argv)
-             if (a == "--settings" and i + 1 < len(argv)) or a.startswith("--settings=")]
+    found = []
+    for i, a in enumerate(argv[:-1]):
+        if a == "--settings":
+            found.append(argv[i + 1])
     home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude")
     files = ([os.path.join(folder, ".claude", "settings.local.json"), os.path.join(folder, ".claude", "settings.json")] if folder else []) \
         + [os.path.join(home, "settings.json")]
@@ -446,7 +433,7 @@ def claude_mode(argv, folder=None):
             if src.lstrip().startswith("{"):
                 d = json.loads(src)
             else:
-                with open(os.path.join(folder or "", os.path.expanduser(src))) as f:
+                with open(os.path.expanduser(src)) as f:
                     d = json.load(f)
         except (OSError, ValueError):
             continue

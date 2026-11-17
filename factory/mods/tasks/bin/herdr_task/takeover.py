@@ -5,7 +5,7 @@ import os
 import re
 
 from .base import beside_store, git, hc_json, kill_agent, label_of, now, run, stop_note
-from .settings import AGENTS, argv_for, cli_missing_reason, default_worker_agent, settings_for
+from .settings import AGENTS, argv_for, default_worker_agent, settings_for
 from .agents import cli_of, fit, from_person, log_tail, said
 from .provider import provider_cut, provider_error
 from .launch import brief, launch, parent_for
@@ -125,8 +125,6 @@ def backup_for(s, t, running):
     if want == "off":
         return None, "no backup"
     if want and want != running:
-        if cli_missing_reason(backup_argv(s, t, want)):
-            return None, "backup not installed"
         if want in NAMES and here_state(want) in ("missing", "signed-out"):
             return None, f"backup {'signed out' if here_state(want) == 'signed-out' else 'not installed'}"
         return want, None

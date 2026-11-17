@@ -202,10 +202,9 @@ def find_log(a, ref, folders, taken=()):
     or None: by its session when it has one, else the earliest log of its kind that started from
     its launch on (until it ended) and whose first message names its task."""
     import glob
-    from .settings import agent_key
-    kind = a.get("agent") or (agent_key(a["argv"]) if a.get("argv") else None)
-    if kind == "agy" or kind not in ("claude", "codex"):
-        return None  # a sqlite db, or not a Claude/Codex log
+    if a.get("agent") == "agy":
+        return None  # a sqlite db, not a Claude or Codex log
+    kind = "codex" if a.get("agent") == "codex" else "claude"
     if a.get("session"):
         return log_by_session(kind, a["session"])
     at = a.get("at")

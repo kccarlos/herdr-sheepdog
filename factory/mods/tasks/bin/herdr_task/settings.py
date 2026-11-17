@@ -9,35 +9,37 @@ import tempfile
 import shutil
 import subprocess
 
+from . import machine
 from .base import Fail, git, HOME, MAX_RUNNING, WHERE
 
 
 # What each agent key starts by default. Unknown keys run as themselves; --argv overrides.
 AGENTS = {"claude": ["claude"], "codex": ["codex", "--no-daemon"], "agy": ["agy"]}
+_WHICH = shutil.which
+
+
+def cli_which(prog):
+    return prog and (shutil.which(prog) or (machine.which(prog) if shutil.which is _WHICH else None))
 
 
 def installed_clis():
-    """The known agent CLIs (claude, codex, agy) found on PATH, in AGENTS order."""
-    return [k for k in AGENTS if shutil.which(k)]
+    """The known agent CLIs (claude, codex, agy) installed here, in AGENTS order."""
+    return [k for k in AGENTS if cli_which(k)]
 
 
 def default_worker_agent():
     """The effective worker CLI when none is set: the first installed CLI in AGENTS, else 'claude'."""
-    found = installed_clis()
-    return found[0] if found else "claude"
+    return (installed_clis() or ["claude"])[0]
 
 
 def cli_missing_reason(argv):
-    """Why `argv`'s CLI can't be launched (not on PATH), naming installed CLIs and the fix; or None."""
-    prog = (argv or [""])[0]
-    if prog and shutil.which(prog):
+    """Why `argv`'s CLI can't be launched (not installed), naming installed CLIs and the fix; or None."""
+    if cli_which((argv or [""])[0]):
         return None
-    cli = agent_key(argv) if argv else "claude"
-    have = installed_clis()
+    cli, have = (agent_key(argv) if argv else "claude"), installed_clis()
     if have:
-        pick = have[0]
         return (f"{cli} isn't installed on PATH (installed: {', '.join(have)}). "
-                f"Set an installed CLI with `herdr-task config --set worker.agent={pick}` (or pass `--agent {pick}`).")
+                f"Set an installed CLI with `herdr-task config --set worker.agent={have[0]}` (or pass `--agent {have[0]}`).")
     return (f"{cli} isn't installed on PATH (none of {', '.join(AGENTS)} found on PATH). "
             "Install claude, codex or agy, or set `herdr-task config --set worker.agent=<cli>`.")
 
