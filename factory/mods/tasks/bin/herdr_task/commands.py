@@ -38,7 +38,8 @@ from .launch import (
 from .store import bare_by_mistake, is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
 from .queues import after_refs, parse_after, queue_reason, running_count, set_after, urgent
 from .archive import unarchive
-from .output import line, minutes, say, view
+from .output import inbox_line, line, minutes, say, view
+from .stage import STAGE_ORDER, STAGE_TABLE
 from .scheduler import ensure_scheduler
 from .proof import evidence, find_proof
 from .when import when_from
@@ -57,32 +58,40 @@ def cmd_where(args):
     say(args, {**loc, "slug": slug, "store": path, "prefix": st.prefix, "version": VERSION}, f"{loc['folder']}\n{path}")
 
 
+def _folder_views(folder, *, archived=False, inbox_only=False):
+    with Store(locate(folder), write="try") as s:
+        out = []
+        archived_count = sum(1 for t in s.data["tasks"] if t.get("archived"))
+        for t in s.data["tasks"]:
+            if bool(t.get("archived")) != archived:
+                continue
+            mine = live_agents(s.key(t)) if t["state"] in ("running", "ready") else []
+            if mine:
+                refresh_sessions(s, t, mine)
+            v = view(s, t, [detail(k) for k in mine] if mine else [])
+            if t["state"] == "queued":
+                v["reason"] = queue_reason(s, t)
+                if v.get("stage") == "queued" and v["reason"]:
+                    v["why_waiting"] = v["reason"]
+            if inbox_only and not v.get("inbox"):
+                continue
+            out.append(v)
+        if inbox_only:
+            out.sort(key=lambda v: (STAGE_ORDER.get(v.get("stage"), len(STAGE_TABLE)), v.get("id") or 0))
+        elif archived:
+            out.sort(key=lambda v: -(v.get("archived") or 0))
+        return {"folder": s.loc["folder"], "name": s.loc["name"], "kind": s.loc["kind"], "tasks": out,
+                **({} if archived or inbox_only else {"archived": archived_count})}
+
+
 def cmd_list(args):
     if args.all:
         folders = [d["folder"] for d in map(read_list, store_files()) if is_task_list(d)]
     else:
         folders = [locate(args.folder)["folder"]]
-    groups = []
-    for folder in folders:
-        if not os.path.isdir(folder):
-            continue
-        with Store(locate(folder), write="try") as s:
-            out = []
-            archived = sum(1 for t in s.data["tasks"] if t.get("archived"))
-            for t in s.data["tasks"]:
-                if bool(t.get("archived")) != args.archived:
-                    continue
-                mine = live_agents(s.key(t)) if t["state"] in ("running", "ready") else []
-                if mine:
-                    refresh_sessions(s, t, mine)
-                v = view(s, t, [detail(k) for k in mine] if mine else [])
-                if t["state"] == "queued":
-                    v["reason"] = queue_reason(s, t)
-                out.append(v)
-            if args.archived:
-                out.sort(key=lambda v: -(v.get("archived") or 0))
-            groups.append({"folder": s.loc["folder"], "name": s.loc["name"], "kind": s.loc["kind"], "tasks": out,
-                           **({} if args.archived else {"archived": archived})})
+    inbox_only = getattr(args, "inbox", False)
+    groups = [_folder_views(folder, archived=args.archived, inbox_only=inbox_only)
+              for folder in folders if os.path.isdir(folder)]
     if args.json:
         print(json.dumps(groups if args.all else groups[0]))
         return
@@ -90,16 +99,38 @@ def cmd_list(args):
         if args.all:
             print(f"{g['name']}  {g['folder']}")
         for v in g["tasks"]:
-            if v["state"] != "done" or args.all or args.archived:
-                print(("  " if args.all else "") + line(v))
-        hidden = sum(1 for v in g["tasks"] if v["state"] == "done") if not args.archived else 0
+            if inbox_only or v["state"] != "done" or args.all or args.archived:
+                print(("  " if args.all else "") + (inbox_line(v) if inbox_only else line(v)))
+        hidden = 0 if (args.archived or inbox_only) else sum(1 for v in g["tasks"] if v["state"] == "done")
         more = [f"{hidden} done"] if hidden and not args.all else []
         if g.get("archived") and not args.all:
             more.append(f"{g['archived']} archived: --archived lists them")
         if more:
             print(f"({'; '.join(more)})")
         elif not g["tasks"] and not args.all:
-            print("No archived tasks." if args.archived else "No tasks.")
+            print("Inbox is empty." if inbox_only else "No archived tasks." if args.archived else "No tasks.")
+
+
+def cmd_inbox(args):
+    """Show only owner-waiting tasks (the ordered stage table's inbox rows)."""
+    folders = [d["folder"] for d in map(read_list, store_files()) if is_task_list(d)] if args.all else [locate(args.folder)["folder"]]
+    groups = [_folder_views(folder, inbox_only=True) for folder in folders if os.path.isdir(folder)]
+    tasks = sorted([v for g in groups for v in g["tasks"]],
+                   key=lambda v: (STAGE_ORDER.get(v.get("stage"), len(STAGE_TABLE)), v.get("id") or 0))
+    if args.json:
+        payload = {"tasks": tasks, "projects": groups} if args.all else (groups[0] if groups else {"tasks": []})
+        print(json.dumps(payload))
+        return
+    if not tasks:
+        print("Inbox is empty.")
+        return
+    for g in groups:
+        if not g["tasks"]:
+            continue
+        if args.all:
+            print(f"{g['name']}  {g['folder']}")
+        for v in g["tasks"]:
+            print(("  " if args.all else "") + inbox_line(v))
 
 
 def cmd_add(args):
@@ -242,6 +273,8 @@ def cmd_show(args):
             v["auto_accepted"] = t["auto_accepted"]
         if t["state"] == "queued":
             v["reason"] = queue_reason(s, t)
+            if v.get("stage") == "queued" and v["reason"]:
+                v["why_waiting"] = v["reason"]
         elif urgent(t) and t["state"] == "running" and running_count(s) > s.max_running():
             v["urgent_past_cap"] = True  # FAC-103: it took the folder's one extra slot
         v["settings"] = task_settings(s, t)
@@ -262,6 +295,9 @@ def cmd_show(args):
             # What the Accept card shows: commits, files, checks and the proof (proof.py).
             v["evidence"] = evidence(s, t)
     text = [line(v), f"folder: {v['folder']}"]
+    if v.get("stage"):
+        why_w = f" ({v['why_waiting']})" if v.get("why_waiting") else ""
+        text.append(f"stage: {v['stage']}{why_w}" + (" [inbox]" if v.get("inbox") else ""))
     if v.get("worktree"):
         text.append(f"worktree: {v['worktree']} (branch {v['branch']}, base {v.get('base')})")
     elif v.get("branch") and v.get("mode") == "worktree":

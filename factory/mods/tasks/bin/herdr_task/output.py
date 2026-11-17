@@ -8,6 +8,7 @@ from .agents import (
     last_words, own_line, own_work, OUT_OF_ROUNDS, REASONS, status_word, STATUSES, task_status,
 )
 from .queues import waiting_ext, waiting_for
+from .stage import resolve_stage, STAGE_LABELS
 
 
 # ---- output ---------------------------------------------------------------------------------
@@ -18,13 +19,22 @@ def view(s, task, live=None):
     v = dict(task)
     v["key"] = s.key(task)
     v["folder"] = s.loc["folder"]
-    v["status"], v["needs"], v["why"] = task_status(task, running)
+    v["ref"], v["prefix"] = s.ref(task), s.prefix
+    wf = waiting_for(s, task)
+    we = waiting_ext(task)
+    v["waiting_for"] = wf
+    v["waiting_ext"] = we
+    deps = [f"{s.prefix}-{i}" for i in wf] + we
+    st = resolve_stage(task, running, store=s, deps=deps)
+    v["stage"] = st.stage
+    v["inbox"] = st.inbox
+    v["status"], v["needs"], v["why"] = st.status, st.needs, st.legacy_why
     if v["needs"] == "asks" and v["why"] not in (REASONS["trust"], REASONS["bypass"], REASONS["onboard"]):
         # Why it waits, at most LINE_MAX characters: a standard reason or its own question.
         k = next((k for k in running if status_word(k) == "blocked"), None) or next((k for k in running if asking(k)), None)
-        st = k.get("status") if k and isinstance(k.get("status"), dict) else {}
+        st_k = k.get("status") if k and isinstance(k.get("status"), dict) else {}
         # Blocked in its CLI's question dialog: every question, before its own status line (field note 51).
-        v["why"] = (k and blocking_dialog(task, k["address"])) or own_line(task, k and k["address"]) or (ask_reason(task, k["address"], None, st.get("kind"), st.get("msg")) if k else v["why"])
+        v["why"] = (k and blocking_dialog(task, k["address"])) or own_line(task, k and k["address"]) or (ask_reason(task, k["address"], None, st_k.get("kind"), st_k.get("msg")) if k else v["why"])
     if v["needs"] == "reply":
         # Refused ready with its rounds used up (review_refusal): the Assistant can add one.
         v["why"] = (out_of_rounds_why(task) if task.get("review_out") else None) or (v["why"] if v["why"] == BG_ENDED_WHY else None) \
@@ -33,6 +43,7 @@ def view(s, task, live=None):
     if v["needs"] in ("asks", "reply") and task["state"] == "running" and running:
         from .commands import start_stuck  # FAC-100: an agy worker that never started, not "Signed out"
         v["why"] = next(filter(None, (start_stuck(task, k) for k in running)), None) or v["why"]
+    v["why_waiting"] = st.why if st.stage in ("owner_answer", "owner_gate", "waiting_on_dep") else (v["why"] or st.why)
     # Quiet but on its own background work (SHEP-53), or said ready but not at rest yet (SHEP-148):
     # Working; kept on the task for the Tasks panel (core/tasks.js place()).
     v["own_work"] = (v["status"] == "working" and task["state"] in ("running", "ready") and bool(running)
@@ -46,10 +57,14 @@ def view(s, task, live=None):
                   "role": label_of(k.get("labels"), "role") or "worker"} for k in running]
     # Its worker's own helper agents (SHEP-54: a reviewer it started as an hc child).
     v["subagents"] = subagents(s.key(task)) if known and running and task["state"] in ("running", "ready") else []
-    v["ref"], v["prefix"] = s.ref(task), s.prefix
-    v["waiting_for"] = waiting_for(s, task)
-    v["waiting_ext"] = waiting_ext(task)
     return v
+
+
+def inbox_line(v):
+    """One line for `herdr-task inbox`: ref, owner-waiting stage label, title, and why."""
+    label = STAGE_LABELS.get(v.get("stage"), v.get("stage") or "Inbox")
+    why = v.get("why_waiting") or v.get("why") or ""
+    return f"{v['ref']:<7} {label:<12} {v['title']}" + (f"  ({why})" if why else "")
 
 
 def subagent(k):
