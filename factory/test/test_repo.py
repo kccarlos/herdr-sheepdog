@@ -81,14 +81,6 @@ class Repo(unittest.TestCase):
                 ctx, key = k.split(" ", 1)
                 self.assertIn(key, keys.get(ctx, {}), k)
 
-    def test_nothing_personal(self):
-        # The upstream repo's public name is fine (feedback's default repo, SHEP-78); the account elsewhere isn't.
-        bad = re.compile(r"/home/\w|/Users/\w|eliasstravik(?!/shepherdr\b)|\.ts\.net|prospecterra|thekiln|vm-stravik|skills-me")
-        for p in text_files():
-            with open(p, encoding="utf-8", errors="replace") as f:
-                for n, line in enumerate(f, 1):
-                    self.assertIsNone(bad.search(line), f"{os.path.relpath(p, ROOT)}:{n}: {line.strip()[:120]}")
-
     # Elements and components whose `title` is no hover popup: a dialog's or card's heading, a row's words, an
     # iframe's name for screen readers.
     TITLE_OK = {"Dialog", "CardShell", "TitleWhere", "Line", "iframe"}
@@ -131,11 +123,6 @@ class Repo(unittest.TestCase):
                                 if ".tooltip(" in line:
                                     found.append(f"{os.path.relpath(p, ROOT)}:{n}: .tooltip(")
         self.assertFalse(found, "hover tooltips (use aria-label, or show the words):\n" + "\n".join(found))
-
-    def test_no_leftovers(self):
-        for p in text_files():
-            name = os.path.basename(p)
-            self.assertNotRegex(name, r"\.bak|\.orig$|\.new$|^zz-", os.path.relpath(p, ROOT))
 
     def test_mod_imports_resolve(self):
         """Every relative import in a mod names a file inside that mod (shared copies included): a moved module
@@ -342,8 +329,18 @@ class Repo(unittest.TestCase):
 
 
 class FactoryRepo(unittest.TestCase):
-    test_nothing_personal = Repo.test_nothing_personal
-    test_no_leftovers = Repo.test_no_leftovers
+    def test_nothing_personal(self):
+        # The upstream repo's public name is fine (feedback's default repo, SHEP-78); the account elsewhere isn't.
+        bad = re.compile(r"/home/\w|/Users/\w|eliasstravik(?!/shepherdr\b)|\.ts\.net|prospecterra|thekiln|vm-stravik|skills-me")
+        for p in text_files():
+            with open(p, encoding="utf-8", errors="replace") as f:
+                for n, line in enumerate(f, 1):
+                    self.assertIsNone(bad.search(line), f"{os.path.relpath(p, ROOT)}:{n}: {line.strip()[:120]}")
+
+    def test_no_leftovers(self):
+        for p in text_files():
+            name = os.path.basename(p)
+            self.assertNotRegex(name, r"\.bak|\.orig$|\.new$|^zz-", os.path.relpath(p, ROOT))
 
     def test_assistant_decide_yourself_rules(self):
         """FAC-57: templates/assistant.md's Decide yourself section keeps its existing standing rules

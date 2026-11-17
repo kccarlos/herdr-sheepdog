@@ -8187,6 +8187,7 @@ class Feedback(unittest.TestCase):
         self.assertIn("already has this one", out)
         self.assertEqual(len(self.held), 1)
 
+    @unittest.skipUnless(os.path.isfile(os.path.join(ROOT, "core", "chat-log.js")), "Shepherdr core/chat-log.js is outside factory/")
     def test_the_chat_reads_it_as_a_news_row(self):
         if home_guard.NODE is None:
             self.skipTest("no working node (home_guard.NODE)")
