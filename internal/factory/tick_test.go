@@ -180,6 +180,59 @@ func TestHasStartedProjectAndPathIsolation(t *testing.T) {
 		if !customStore || !customSettings {
 			t.Fatalf("scratch paths must flag custom: store=%v settings=%v", customStore, customSettings)
 		}
+
+		// When XDG_DATA_HOME / XDG_CONFIG_HOME is set and DataDir is config.Default().DataDir
+		// (~/.local/share/sheepdog), ResolveFactoryPaths follows XDG rather than treating
+		// config.Default().DataDir as a --data-dir override.
+		xdgData := filepath.Join(t.TempDir(), "xdg-data")
+		xdgCfg := filepath.Join(t.TempDir(), "xdg-config")
+		xdgEnv := func(k string) string {
+			switch k {
+			case "XDG_DATA_HOME":
+				return xdgData
+			case "XDG_CONFIG_HOME":
+				return xdgCfg
+			default:
+				return ""
+			}
+		}
+		tasksDir, settingsPath, customStore, customSettings = ResolveFactoryPaths(defData, fakeHome, xdgEnv)
+		if tasksDir != filepath.Join(xdgData, "sheepdog", "tasks") || settingsPath != filepath.Join(xdgCfg, "sheepdog", "settings.json") {
+			t.Fatalf("XDG paths with default DataDir = (%q, %q)", tasksDir, settingsPath)
+		}
+		if customStore || customSettings {
+			t.Fatalf("XDG paths must not pin custom HERDR_TASK_*: store=%v settings=%v", customStore, customSettings)
+		}
+		xdgSup := NewTickSupervisor(TickOptions{DataDir: defData, Home: fakeHome, Getenv: xdgEnv})
+		env := xdgSup.tickEnv()
+		if env["XDG_DATA_HOME"] != xdgData || env["XDG_CONFIG_HOME"] != xdgCfg || env["HERDR_TASK_STORE"] != "" {
+			t.Fatalf("unexpected XDG tickEnv: %+v", env)
+		}
+		if got := xdgSup.storeLabelValue(); got != filepath.Join(xdgData, "sheepdog", "tasks") {
+			t.Fatalf("XDG storeLabelValue = %q", got)
+		}
+
+		// SHEEPDOG_FACTORY_HOME with default DataDir resolves to <root>/data/tasks and <root>/config/settings.json.
+		factoryHome := filepath.Join(t.TempDir(), "factory-home")
+		fhEnv := func(k string) string {
+			if k == "SHEEPDOG_FACTORY_HOME" {
+				return factoryHome
+			}
+			return ""
+		}
+		tasksDir, settingsPath, customStore, customSettings = ResolveFactoryPaths(defData, fakeHome, fhEnv)
+		if tasksDir != filepath.Join(factoryHome, "data", "tasks") || settingsPath != filepath.Join(factoryHome, "config", "settings.json") {
+			t.Fatalf("SHEEPDOG_FACTORY_HOME paths = (%q, %q)", tasksDir, settingsPath)
+		}
+		if customStore || customSettings {
+			t.Fatalf("SHEEPDOG_FACTORY_HOME paths flagged custom: store=%v settings=%v", customStore, customSettings)
+		}
+
+		// An explicit --data-dir still stays isolated even when XDG_DATA_HOME is set.
+		tasksDir, settingsPath, customStore, customSettings = ResolveFactoryPaths(scratchData, fakeHome, xdgEnv)
+		if tasksDir != filepath.Join(scratchData, "tasks") || settingsPath != filepath.Join(scratchData, "settings.json") || !customStore || !customSettings {
+			t.Fatalf("scratch paths under XDG = (%q, %q, %v, %v)", tasksDir, settingsPath, customStore, customSettings)
+		}
 	})
 }
 
@@ -385,10 +438,6 @@ func TestTickSupervisorAdoptsAcrossRestartAndReplacesOnUpgrade(t *testing.T) {
 	ctx3, cancel3 := context.WithCancel(context.Background())
 	done3 := make(chan struct{})
 	go func() { defer close(done3); sup3.Run(ctx3) }()
-	defer func() {
-		cancel3()
-		<-done3
-	}()
 
 	waitForCondition(t, 3*time.Second, "upgraded tick replacement", func() bool {
 		addr := sup3.TerminalAddress()
@@ -397,6 +446,36 @@ func TestTickSupervisorAdoptsAcrossRestartAndReplacesOnUpgrade(t *testing.T) {
 	evs := log3.snapshot()
 	if len(evs) == 0 || evs[0].payload["replaced"] != firstAddr || evs[0].payload["reason"] != "version_changed" {
 		t.Fatalf("expected version_changed replacement of %s, got %+v", firstAddr, evs)
+	}
+	upgradedAddr := sup3.TerminalAddress()
+	cancel3()
+	<-done3
+
+	// 4. Projects cleared while the daemon was stopped: a fresh daemon stops the
+	// orphaned Keep=true tick terminal on cold start, then stays quiet.
+	if err := os.Remove(filepath.Join(tasksDir, "demo.json")); err != nil {
+		t.Fatal(err)
+	}
+	log4 := &memLogger{}
+	sup4 := makeSup(srcV2, log4)
+	ctx4, cancel4 := context.WithCancel(context.Background())
+	done4 := make(chan struct{})
+	go func() { defer close(done4); sup4.Run(ctx4) }()
+	defer func() {
+		cancel4()
+		<-done4
+	}()
+
+	waitForCondition(t, 3*time.Second, "cold-start stop of orphaned tick", func() bool {
+		return log4.count("factory.tick_stopped") == 1
+	})
+	if _, err := client.Get(context.Background(), TickTerminalName); err == nil {
+		t.Fatalf("expected orphaned tick terminal %s to be removed on cold start", upgradedAddr)
+	}
+	reqsAfterStop := len(srv.Requests())
+	time.Sleep(80 * time.Millisecond)
+	if got := len(srv.Requests()); got != reqsAfterStop {
+		t.Fatalf("expected zero hc requests after cold-start stop, got %d new requests", got-reqsAfterStop)
 	}
 }
 

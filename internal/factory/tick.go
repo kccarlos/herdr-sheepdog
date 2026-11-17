@@ -87,19 +87,18 @@ func (o TickOptions) withDefaults() (TickOptions, bool, bool) {
 	if o.TempDir == "" {
 		o.TempDir = os.TempDir()
 	}
-	defDataDir, _ := defaultFactoryLocations(o.Home, getenv)
+	envDataDir, envSettings := defaultFactoryLocations(o.Home, getenv)
 	if o.DataDir == "" {
-		o.DataDir = defDataDir
+		o.DataDir = envDataDir
 	}
 	tasksDir, settingsPath, customStore, customSettings := ResolveFactoryPaths(o.DataDir, o.Home, getenv)
 	if strings.TrimSpace(o.TasksDir) != "" {
 		tasksDir = filepath.Clean(o.TasksDir)
-		customStore = !sameCleanPath(tasksDir, filepath.Join(defDataDir, "tasks"))
+		customStore = !sameCleanPath(tasksDir, filepath.Join(envDataDir, "tasks"))
 	}
 	if strings.TrimSpace(o.SettingsPath) != "" {
 		settingsPath = filepath.Clean(o.SettingsPath)
-		_, defSettings := defaultFactoryLocations(o.Home, getenv)
-		customSettings = !sameCleanPath(settingsPath, defSettings)
+		customSettings = !sameCleanPath(settingsPath, envSettings)
 	}
 	o.TasksDir = tasksDir
 	o.SettingsPath = settingsPath
@@ -145,12 +144,18 @@ func defaultFactoryLocations(home string, getenv func(string) string) (dataDir, 
 	return filepath.Join(dataRoot, "sheepdog"), filepath.Join(cfgRoot, "sheepdog", "settings.json")
 }
 
+func builtinDefaultDataDir(home string) string {
+	return filepath.Join(home, ".local", "share", "sheepdog")
+}
+
 // ResolveFactoryPaths resolves the task-store directory and settings.json path
-// for dataDir. When dataDir matches the standard XDG / SHEEPDOG_HOME location,
-// settingsPath uses the matching config root (~/.config/sheepdog/settings.json).
-// When dataDir is overridden (such as `sheepdog serve --data-dir` or a test's
-// temporary directory), settingsPath stays inside dataDir unless explicitly set
-// via HERDR_TASK_SETTINGS, so scratch daemons never read ~/.config/sheepdog.
+// for dataDir. When dataDir is the standard daemon DataDir (~/.local/share/sheepdog
+// from config.Default) or matches the XDG / SHEEPDOG_*_HOME data root, paths
+// follow the engine's XDG / SHEEPDOG_*_HOME resolution rules. When dataDir is
+// explicitly overridden (such as `sheepdog serve --data-dir` or a test's
+// temporary directory), both tasksDir and settingsPath stay inside dataDir
+// unless explicitly set via HERDR_TASK_STORE / HERDR_TASK_SETTINGS, so scratch
+// daemons never read ~/.config/sheepdog or ~/.local/share/sheepdog.
 func ResolveFactoryPaths(dataDir, home string, getenv func(string) string) (tasksDir, settingsPath string, customStore, customSettings bool) {
 	if getenv == nil {
 		getenv = os.Getenv
@@ -158,26 +163,30 @@ func ResolveFactoryPaths(dataDir, home string, getenv func(string) string) (task
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	defDataDir, defSettings := defaultFactoryLocations(home, getenv)
+	builtinData := builtinDefaultDataDir(home)
+	envDataDir, envSettings := defaultFactoryLocations(home, getenv)
 	if strings.TrimSpace(dataDir) == "" {
-		dataDir = defDataDir
+		dataDir = envDataDir
 	}
 	dataDir = filepath.Clean(dataDir)
-	isCustomData := !sameCleanPath(dataDir, defDataDir)
+	isCustomData := !sameCleanPath(dataDir, builtinData) && !sameCleanPath(dataDir, envDataDir)
 
 	if s := strings.TrimSpace(getenv("HERDR_TASK_STORE")); s != "" {
 		tasksDir = filepath.Clean(s)
-		customStore = !sameCleanPath(tasksDir, filepath.Join(defDataDir, "tasks"))
+		customStore = true
+	} else if !isCustomData {
+		tasksDir = filepath.Join(envDataDir, "tasks")
+		customStore = false
 	} else {
 		tasksDir = filepath.Join(dataDir, "tasks")
-		customStore = isCustomData
+		customStore = true
 	}
 
 	if p := strings.TrimSpace(getenv("HERDR_TASK_SETTINGS")); p != "" {
 		settingsPath = filepath.Clean(p)
-		customSettings = !sameCleanPath(settingsPath, defSettings)
+		customSettings = true
 	} else if !isCustomData {
-		settingsPath = defSettings
+		settingsPath = envSettings
 		customSettings = false
 	} else {
 		settingsPath = filepath.Join(dataDir, "settings.json")
@@ -291,13 +300,14 @@ type TickSupervisor struct {
 	client         *hc.Client
 	wake           chan struct{}
 
-	mu          sync.Mutex
-	managedAddr string
-	prepared    bool
-	eng         Engine
-	py          ManagedPython
-	startedAt   time.Time
-	backoff     time.Duration
+	mu              sync.Mutex
+	managedAddr     string
+	coldStopChecked bool
+	prepared        bool
+	eng             Engine
+	py              ManagedPython
+	startedAt       time.Time
+	backoff         time.Duration
 
 	lastErrStage string
 	lastErrMsg   string
@@ -442,6 +452,7 @@ func (s *TickSupervisor) reconcile(ctx context.Context) time.Duration {
 		s.mu.Lock()
 		firstAdopt := s.managedAddr != existing.Address
 		s.managedAddr = existing.Address
+		s.coldStopChecked = false
 		s.mu.Unlock()
 		if firstAdopt {
 			s.logEvent("factory.tick_adopted", existing.Address, map[string]any{
@@ -514,6 +525,7 @@ func (s *TickSupervisor) reconcile(ctx context.Context) time.Duration {
 	s.clearError()
 	s.mu.Lock()
 	s.managedAddr = created.Address
+	s.coldStopChecked = false
 	s.mu.Unlock()
 	s.startedAt = time.Now()
 	_ = s.advanceBackoff()
@@ -539,8 +551,12 @@ func (s *TickSupervisor) stopWhenNoProjects(ctx context.Context) {
 
 	s.mu.Lock()
 	prev := s.managedAddr
+	coldChecked := s.coldStopChecked
 	s.mu.Unlock()
-	if prev == "" {
+	// Stay completely off (zero hc calls) when factory has never unpacked an
+	// engine, and check once on cold start if a previous daemon left a Keep
+	// tick terminal running before all projects were cleared.
+	if prev == "" && (coldChecked || !dirExists(EnginesDir(s.opts.DataDir))) {
 		return
 	}
 
@@ -549,6 +565,7 @@ func (s *TickSupervisor) stopWhenNoProjects(ctx context.Context) {
 		if errors.Is(err, hc.ErrNotFound) {
 			s.mu.Lock()
 			s.managedAddr = ""
+			s.coldStopChecked = true
 			s.mu.Unlock()
 		}
 		return
@@ -556,6 +573,7 @@ func (s *TickSupervisor) stopWhenNoProjects(ctx context.Context) {
 	if t.Labels[LabelRole] != RoleTick || t.Labels[LabelStore] != s.storeLabelValue() {
 		s.mu.Lock()
 		s.managedAddr = ""
+		s.coldStopChecked = true
 		s.mu.Unlock()
 		return
 	}
@@ -564,8 +582,14 @@ func (s *TickSupervisor) stopWhenNoProjects(ctx context.Context) {
 	}
 	s.mu.Lock()
 	s.managedAddr = ""
+	s.coldStopChecked = true
 	s.mu.Unlock()
 	s.logEvent("factory.tick_stopped", t.Address, map[string]any{"reason": "no_projects"})
+}
+
+func dirExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
 }
 
 func (s *TickSupervisor) prepareRuntime(ctx context.Context) (Engine, ManagedPython, string, error) {
@@ -663,7 +687,7 @@ func (s *TickSupervisor) advanceBackoff() time.Duration {
 }
 
 func (s *TickSupervisor) storeLabelValue() string {
-	if s.customStore {
+	if s.customStore || !sameCleanPath(s.opts.TasksDir, filepath.Join(builtinDefaultDataDir(s.opts.Home), "tasks")) {
 		return s.opts.TasksDir
 	}
 	return ""
@@ -691,6 +715,14 @@ func (s *TickSupervisor) tickEnv() map[string]string {
 			env = map[string]string{}
 		}
 		env[k] = v
+	}
+	if !s.customStore || !s.customSettings {
+		for _, k := range []string{
+			"SHEEPDOG_FACTORY_HOME", "SHEEPDOG_HOME", "SHEPHERDR_HOME",
+			"XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME",
+		} {
+			set(k, strings.TrimSpace(s.opts.Getenv(k)))
+		}
 	}
 	if s.customStore {
 		set("HERDR_TASK_STORE", s.opts.TasksDir)

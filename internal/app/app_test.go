@@ -849,6 +849,8 @@ func TestBrainConfigKeyVars(t *testing.T) {
 }
 
 func TestAppFactoryTickOffUntilProjectStarted(t *testing.T) {
+	t.Setenv("HERDR_TASK_STORE", "")
+	t.Setenv("HERDR_TASK_SETTINGS", "")
 	srv := hctest.New(t)
 	cfg := testConfig(t)
 	cfg.Herdr.Backend = config.HerdrBackendHC

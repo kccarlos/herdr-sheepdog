@@ -644,6 +644,48 @@ class SchedulerRound(unittest.TestCase):
         self.assertIn("sweep", calls)
         self.assertIn(f"tick:{os.path.realpath(repo)}", calls)
 
+    def test_cmd_scheduler_waits_for_held_lock_unless_once_and_cli_check_creates_state_dir(self):
+        import argparse, contextlib, fcntl, io, threading
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.automations as au, herdr_task.takeover as tk
+
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        store = os.path.join(tmp, "tasks")
+        os.makedirs(store)
+
+        # 1. With --once, cmd_scheduler stays non-blocking when another holder has .scheduler.lock.
+        held = open(os.path.join(store, ".scheduler.lock"), "a")
+        self.addCleanup(held.close)
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        out = io.StringIO()
+        with mock.patch.object(au, "STORE", store), contextlib.redirect_stdout(out):
+            au.cmd_scheduler(argparse.Namespace(once=True, json=False))
+        self.assertIn("Another scheduler is running.", out.getvalue())
+
+        # 2. Without --once (daemon mode), cmd_scheduler waits on .scheduler.lock instead of exiting,
+        # then takes over cleanly once the previous holder releases the lock.
+        class StopLoop(BaseException):
+            pass
+
+        passes = []
+        threading.Timer(0.25, lambda: fcntl.flock(held, fcntl.LOCK_UN)).start()
+        with mock.patch.object(au, "STORE", store), \
+             mock.patch.object(au, "one_pass", lambda r: passes.append(1)), \
+             mock.patch("herdr_task.automations.time.sleep", side_effect=StopLoop), \
+             contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(StopLoop):
+                au.cmd_scheduler(argparse.Namespace(once=False, json=False))
+        self.assertEqual(passes, [1])
+        self.assertTrue(os.path.isfile(os.path.join(store, ".scheduler.json")))
+
+        # 3. takeover.write_checks creates missing state directories on a fresh install.
+        nested_check = os.path.join(tmp, "fresh-state", "sheepdog", "cli-check.json")
+        with mock.patch.object(tk, "CLI_CHECK", nested_check):
+            tk.write_checks({"at": 123, "machines": {}})
+        self.assertTrue(os.path.isfile(nested_check))
+
 
 class IdleCompaction(unittest.TestCase):
     """FAC-107: a Ready task's worker woken by Claude Code's idle compaction (or another stray wake)
