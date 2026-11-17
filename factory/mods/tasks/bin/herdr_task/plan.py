@@ -1,0 +1,447 @@
+"""SDF-31: milestones and the plan file. The coordinator writes a plan (milestones, each with its
+tasks); `plan apply` checks it as a whole and adds the tasks, `plan amend --reason` changes it
+later and logs why. The engine adds each milestone's acceptance task and derives its state;
+a split keeps the parent's place in the graph. docs/dev/factory/milestones.md."""
+
+import json
+import re
+
+from .base import Fail, now
+from .queues import working
+from .settings import set_task, worktrees_on
+
+GATES = ("auto", "fable", "owner")
+PLAN_MAX_LINES = 500  # a plan task's size estimate may not pass this (field notes 27, 42)
+MID = re.compile(r"M\d+")
+KEY = re.compile(r"[a-z][a-z0-9_-]*")
+REF = re.compile(r"(?:[A-Za-z]+[0-9]*-)?[0-9]+")
+TAG = re.compile(r"v\d+\.\d+\.\d+")
+NOT_STARTED = ("todo", "scheduled", "queued")
+M_KEYS = {"id", "title", "goal", "exit_test", "gate", "mandate", "ui", "release", "tasks"}
+T_KEYS = {"key", "title", "prompt", "lines", "after", "kind", "set", "split_of"}
+
+
+def load(path):
+    try:
+        with open(path) as f:
+            plan = json.load(f)
+    except OSError as e:
+        raise Fail(f"Couldn't read {path}: {e.strerror}.")
+    except ValueError as e:
+        raise Fail(f"{path} isn't JSON: {e}.")
+    if not isinstance(plan, dict) or set(plan) != {"milestones"} or not isinstance(plan["milestones"], list):
+        raise Fail('A plan file is one JSON object: {"milestones": [...]}.')
+    return plan
+
+
+def milestones(s):
+    return sorted(s.data.get("milestones") or [], key=lambda m: m["order"])
+
+
+def state_of(s, m, first_open):
+    """planned, active, validating or done: from its tasks' states, never stored."""
+    tasks = [t for t in s.data["tasks"] if t.get("milestone") == m["id"]]
+    acc = next((t for t in tasks if t.get("acceptance_of") == m["id"]), None)
+    work = [t for t in tasks if t is not acc]
+    if acc and acc["state"] == "done":
+        return "done"
+    if all(t["state"] == "done" for t in work):
+        return "validating"
+    if m["id"] == first_open or any(t["state"] not in NOT_STARTED for t in tasks):
+        return "active"
+    return "planned"
+
+
+def states(s):
+    """Each milestone's state; the first one not done is active even before its tasks start."""
+    done = {t["acceptance_of"] for t in s.data["tasks"] if t.get("acceptance_of") and t["state"] == "done"}
+    first = next((m["id"] for m in milestones(s) if m["id"] not in done), None)
+    return {m["id"]: state_of(s, m, first) for m in milestones(s)}
+
+
+def _resolve_ref(s, text):
+    """A task of this folder by its ref ("SDF-4", "4"), or None."""
+    m = re.fullmatch(r"(?:([A-Za-z]+[0-9]*)-)?([0-9]+)", text)
+    if not m or (m.group(1) and m.group(1).upper() != s.prefix):
+        return None
+    return next((t for t in s.data["tasks"] if t["id"] == int(m.group(2))), None)
+
+
+class Plan:
+    """One apply or amend, worked out in memory: every problem first, then the store is changed."""
+
+    def __init__(self, s, plan, amend):
+        self.s, self.amend, self.problems = s, amend, []
+        self.by_key = {t["plan_key"]: t for t in s.data["tasks"] if t.get("plan_key")}
+        self.old_ms = {m["id"]: m for m in s.data.get("milestones") or []}
+        self.ms, self.tasks = [], []  # (milestone entry), (task entry, milestone id)
+        self.check_shape(plan)
+        if not self.problems:
+            self.check_graph()
+
+    def bad(self, text):
+        self.problems.append(text)
+
+    # ---- shape ----------------------------------------------------------------------------
+    def check_shape(self, plan):
+        seen_m, seen_k = set(), set()
+        if not plan["milestones"]:
+            self.bad("The plan has no milestones.")
+        if not self.amend and self.old_ms:
+            return self.bad("This folder has a plan already: change it with plan amend --reason.")
+        for i, m in enumerate(plan["milestones"]):
+            if not isinstance(m, dict):
+                self.bad(f"Milestone {i + 1} isn't an object.")
+                continue
+            mid = m.get("id") if isinstance(m.get("id"), str) else f"#{i + 1}"
+            if extra := set(m) - M_KEYS:
+                self.bad(f"{mid}: unknown field(s) {', '.join(sorted(extra))} (a milestone's state is the engine's).")
+            if not MID.fullmatch(mid):
+                self.bad(f"{mid}: a milestone id is like M1.")
+            elif mid in seen_m:
+                self.bad(f"{mid} is in the plan twice.")
+            seen_m.add(mid)
+            for f in ("title", "goal", "exit_test", "mandate"):
+                if not isinstance(m.get(f), str) or not m[f].strip():
+                    self.bad(f"{mid}: {f} is missing.")
+            if m.get("gate") not in GATES:
+                self.bad(f"{mid}: gate is auto, fable or owner.")
+            if "release" in m and not (isinstance(m["release"], str) and TAG.fullmatch(m["release"])):
+                self.bad(f"{mid}: release is a tag like v1.2.0.")
+            if not isinstance(m.get("ui", False), bool):
+                self.bad(f"{mid}: ui is true or false.")
+            old = self.old_ms.get(mid)
+            if old and old["mandate"] != m.get("mandate"):
+                self.bad(f"{mid}'s mandate is the owner's words as said and stays; wider scope is a new milestone.")
+            self.ms.append(m)
+            if not isinstance(m.get("tasks"), list):
+                self.bad(f"{mid}: tasks is a list.")
+                continue
+            for j, t in enumerate(m["tasks"]):
+                key = t.get("key") if isinstance(t, dict) else None
+                if not isinstance(key, str) or not KEY.fullmatch(key):
+                    self.bad(f"{mid} task {j + 1}: key is a short lowercase name like api-route.")
+                    continue
+                if key in seen_k:
+                    self.bad(f"Task key {key} is in the plan twice.")
+                seen_k.add(key)
+                if extra := set(t) - T_KEYS:
+                    self.bad(f"{key}: unknown field(s) {', '.join(sorted(extra))}.")
+                self.tasks.append((t, mid))
+                self.check_task(t, mid)
+
+    def check_task(self, t, mid):
+        key, old = t["key"], self.by_key.get(t["key"])
+        if old and old["state"] not in NOT_STARTED:
+            for f, have in (("title", old["title"]), ("prompt", old.get("plan_prompt")), ("lines", old.get("estimate_lines"))):
+                if f in t and t[f] != have:
+                    self.bad(f"{key} ({self.s.ref(old)}) has started: change its brief with herdr-task edit --amend, not the plan.")
+                    break
+            if old.get("milestone") != mid:
+                self.bad(f"{key} ({self.s.ref(old)}) has started in {old.get('milestone')}; it can't move to {mid}.")
+            return
+        if old is None or "title" in t or "prompt" in t:
+            for f in ("title", "prompt"):
+                if not isinstance(t.get(f), str) or not t[f].strip():
+                    self.bad(f"{key}: {f} is missing.")
+        lines = t.get("lines", old.get("estimate_lines") if old else None)
+        if not isinstance(lines, int) or isinstance(lines, bool) or lines <= 0:
+            self.bad(f"{key}: lines (its size estimate in changed lines) is missing.")
+        elif lines > PLAN_MAX_LINES:
+            self.bad(f"{key}: {lines} lines is past the {PLAN_MAX_LINES}-line size limit; split it.")
+        if t.get("kind") not in (None, "design", "doc"):
+            self.bad(f"{key}: kind is design or doc.")
+        if not isinstance(t.get("after", []), list) or not all(isinstance(a, str) for a in t.get("after", [])):
+            self.bad(f"{key}: after is a list of task keys or refs.")
+        if not isinstance(t.get("set", {}), dict):
+            self.bad(f"{key}: set is an object of --set keys.")
+        else:
+            try:
+                for k, v in (t.get("set") or {}).items():
+                    set_task({}, k, str(v))
+            except Fail as e:
+                self.bad(f"{key}: {e}")
+
+    # ---- the graph ------------------------------------------------------------------------
+    def check_graph(self):
+        s, keys = self.s, {t["key"] for t, _ in self.tasks}
+        listed = {m["id"] for m in self.ms}
+        # Every not-done task of a milestone in this file is listed (drop one with herdr-task rm first).
+        split_parents = {}
+        for t, mid in self.tasks:
+            if "split_of" in t:
+                p = self.find(t["split_of"])
+                if p is None:
+                    self.bad(f"{t['key']}: split_of {t['split_of']} isn't a task of the plan.")
+                elif p.get("milestone") != mid:
+                    self.bad(f"{t['key']}: a split keeps the parent's place; {s.ref(p)} is in {p.get('milestone')}, not {mid}.")
+                elif p.get("plan_key") in keys:
+                    self.bad(f"{s.ref(p)} is split, so it can't stay in the plan as {p['plan_key']}.")
+                elif p["state"] not in NOT_STARTED + ("running",) or p.get("acceptance_of") or working(s, p):
+                    self.bad(f"{s.ref(p)} can't be split now ({p['state']}); stop its agent first if it is at work.")
+                else:
+                    split_parents.setdefault(p["id"], []).append(t["key"])
+        self.split_parents = split_parents
+        for old in s.data["tasks"]:
+            if (old.get("milestone") in listed and old.get("plan_key") and old["state"] != "done"
+                    and old["plan_key"] not in keys and old["id"] not in split_parents):
+                self.bad(f"{s.ref(old)} ({old['plan_key']}) is in {old['milestone']} but not in this file: list it, "
+                         f"split it, or remove it with herdr-task rm first.")
+        # Acceptance already started: no new work in that milestone.
+        for m in self.ms:
+            acc = self.acceptance(m["id"])
+            if acc and acc["state"] not in NOT_STARTED:
+                for t, mid in self.tasks:
+                    old = self.by_key.get(t["key"])
+                    if mid == m["id"] and (old is None or old.get("milestone") != mid):
+                        self.bad(f"{m['id']}'s acceptance ({s.ref(acc)}) has started: put {t['key']} in a new milestone.")
+        # Dangling refs, then loops over the plan's tasks and this folder's.
+        edges = {}
+        for t, mid in self.tasks:
+            deps = []
+            for a in t.get("after", self.old_after(t)):
+                o = None if a in keys else self.find(a)
+                if a in keys:
+                    deps.append(("k", a))
+                elif o is not None and o["id"] in split_parents:
+                    deps += [("k", k) for k in split_parents[o["id"]]]
+                elif o is not None:
+                    deps.append(("k", o["plan_key"]) if o.get("plan_key") in keys else ("i", o["id"]))
+                else:
+                    self.bad(f"{t['key']}: after {a} is neither a task key in this plan nor a task here.")
+            edges[("k", t["key"])] = deps
+        self.edges = edges
+        if not self.problems:
+            self.check_loops(edges)
+            self.check_ui(edges)
+
+    def old_after(self, t):
+        """An existing task listed without "after": the after it was given by the plan before."""
+        old = self.by_key.get(t["key"])
+        return [str(i) for i in (old or {}).get("plan_after") or []] if old else []
+
+    def find(self, text):
+        if text in self.by_key:
+            return self.by_key[text]
+        return _resolve_ref(self.s, text) if REF.fullmatch(text) else None
+
+    def acceptance(self, mid):
+        return next((t for t in self.s.data["tasks"] if t.get("acceptance_of") == mid), None)
+
+    def check_loops(self, edges):
+        known = {t["id"]: t for t in self.s.data["tasks"]}
+        def nexts(n):
+            if n[0] == "k":
+                return edges.get(n, [])
+            return [("i", i) for i in (known.get(n[1]) or {}).get("after") or []]
+        for start in edges:
+            seen, todo = set(), list(nexts(start))
+            while todo:
+                n = todo.pop()
+                if n == start:
+                    self.bad(f"{start[1]} would end up waiting for itself (a loop).")
+                    break
+                if n not in seen:
+                    seen.add(n)
+                    todo.extend(nexts(n))
+
+    def check_ui(self, edges):
+        """A UI milestone starts with a design task: it has one, and its other tasks come after one."""
+        for m in self.ms:
+            if not m.get("ui"):
+                continue
+            mine = [t for t, mid in self.tasks if mid == m["id"]]
+            design = {("k", t["key"]) for t in mine if self.kind(t) == "design"}
+            if not design:
+                self.bad(f"{m['id']} is a UI milestone: it needs a design task (kind design) first.")
+                continue
+            for t in mine:
+                if ("k", t["key"]) in design:
+                    continue
+                seen, todo = set(), list(edges.get(("k", t["key"]), []))
+                while todo and not (seen & design):
+                    n = todo.pop()
+                    if n not in seen:
+                        seen.add(n)
+                        todo.extend(edges.get(n, []))
+                if not seen & design:
+                    self.bad(f"{t['key']} in UI milestone {m['id']} must come after its design task.")
+
+    def kind(self, t):
+        old = self.by_key.get(t["key"])
+        return t.get("kind", ((old or {}).get("set") or {}).get("review_kind"))
+
+    # ---- changing the store ---------------------------------------------------------------
+    def write(self, reason=None):
+        s = self.s
+        from .commands import set_base
+        log = {"at": now(), "action": "amend" if self.amend else "apply", "added": [], "changed": []}
+        mode = "worktree" if worktrees_on(s) else "here"
+        # Milestones: new ones go after the old in file order; old ones keep their order and mandate.
+        top = max([m["order"] for m in self.old_ms.values()], default=0)
+        for m in self.ms:
+            rec = self.old_ms.get(m["id"])
+            if rec is None:
+                top += 1
+                rec = {"id": m["id"], "order": top, "mandate": m["mandate"], "created": now()}
+                s.data.setdefault("milestones", []).append(rec)
+            rec.update({f: m[f] for f in ("title", "goal", "exit_test", "gate")}, ui=bool(m.get("ui")))
+            rec.pop("release", None)
+            if m.get("release"):
+                rec["release"] = m["release"]
+        # Tasks: new ones added, todo ones updated; then each one's after from keys to ids.
+        for t, mid in self.tasks:
+            old = self.by_key.get(t["key"])
+            if old is None:
+                old = s.new(t["title"].strip(), "", mode)
+                old["plan_key"] = t["key"]
+                set_base(s, old, None, new=True)
+                self.by_key[t["key"]] = old
+                log["added"].append(s.ref(old))
+            elif old["state"] in NOT_STARTED and any(f in t for f in ("title", "prompt", "lines", "kind", "set", "after")) \
+                    or old.get("milestone") != mid:
+                log["changed"].append(s.ref(old))
+            if old["state"] in NOT_STARTED:
+                if "title" in t:
+                    old["title"] = t["title"].strip()
+                if "prompt" in t:
+                    old["plan_prompt"] = t["prompt"]
+                if "lines" in t:
+                    old["estimate_lines"] = t["lines"]
+                if "kind" in t:
+                    set_task(old, "review.kind", t["kind"] or "")
+                for k, v in (t.get("set") or {}).items():
+                    set_task(old, k, str(v))
+            old["milestone"] = mid
+            if "split_of" in t:
+                old["split_of"] = s.ref(self.find(t["split_of"]))
+        # A split: children take the parent's after, and whoever waited on the parent waits on them all.
+        splits = {}
+        for pid, kids in self.split_parents.items():
+            parent = next(t for t in s.data["tasks"] if t["id"] == pid)
+            ids = [self.by_key[k]["id"] for k in kids]
+            for k in kids:
+                c = self.by_key[k]
+                c["plan_after"] = list(dict.fromkeys((parent.get("plan_after") or []) + (c.get("plan_after") or [])))
+            for o in s.data["tasks"]:
+                for f in ("after", "plan_after"):
+                    if pid in (o.get(f) or []):
+                        o[f] = list(dict.fromkeys(x for i in o[f] for x in (ids if i == pid else [i])))
+            splits[s.ref(parent)] = [s.ref(self.by_key[k]) for k in kids]
+            from .simulators import release_task
+            release_task(s, parent)
+            s.data["tasks"].remove(parent)
+        for t, mid in self.tasks:
+            if "after" in t:
+                ids = [self.by_key[n[1]]["id"] if n[0] == "k" else n[1] for n in self.edges[("k", t["key"])]]
+                c = self.by_key[t["key"]]
+                c["plan_after"] = list(dict.fromkeys((c.get("plan_after") or []) + ids if "split_of" in t else ids))
+        self.link()
+        for t in s.data["tasks"]:
+            if t.get("plan_key") and t["state"] in NOT_STARTED and not t.get("acceptance_of"):
+                t["prompt"] = brief(s, t)
+        if splits:
+            log["split"] = splits
+        if reason:
+            log["reason"] = reason
+        s.data.setdefault("plan_log", []).append(log)
+        s.dirty = True
+        return log
+
+    def link(self):
+        """Each task's after: what the plan gave it, plus the previous milestone's acceptance for a
+        milestone's first tasks; each milestone's acceptance task comes after all its own tasks."""
+        s, mode = self.s, "worktree" if worktrees_on(self.s) else "here"
+        from .commands import set_base
+        prev = None
+        for m in milestones(s):
+            acc = self.acceptance(m["id"])
+            if acc is None:
+                acc = s.new(f"{m['id']} acceptance: {m['title']}", "", mode)
+                acc.update(acceptance_of=m["id"], milestone=m["id"])
+                set_base(s, acc, None, new=True)
+                if m.get("gate") == "owner":
+                    set_task(acc, "merge", "ask me first")
+                m["acceptance_task"] = acc["id"]
+            work = [t for t in s.data["tasks"] if t.get("milestone") == m["id"] and t is not acc]
+            ids = {t["id"] for t in work}
+            for t in work:
+                if t["state"] == "done" or not t.get("plan_key"):
+                    continue
+                own = [i for i in t.get("plan_after") or []]
+                roots = prev and not any(i in ids for i in own)
+                t["after"] = list(dict.fromkeys(own + ([prev["id"]] if roots else [])))
+            if acc["state"] in NOT_STARTED:
+                acc["after"] = sorted(ids)
+                acc["prompt"] = acceptance_brief(m)
+            prev = acc
+
+
+def brief(s, t):
+    """A plan task's brief: its milestone first, then the prompt the plan gave it."""
+    m = next((m for m in s.data.get("milestones") or [] if m["id"] == t.get("milestone")), None)
+    head = f"Milestone {m['id']}: {m['title']}. Its goal: {m['goal']}\n\n" if m else ""
+    return head + (t.get("plan_prompt") or "")
+
+
+def acceptance_brief(m):
+    lines = [f"# {m['id']} acceptance: {m['title']}", "",
+             f"Milestone {m['id']} is built: every task in it is merged. You did not write its code; check it with fresh eyes.",
+             "", f"Goal: {m['goal']}", f"Exit test: {m['exit_test']}", f"The owner's words: {m['mandate']}", "",
+             "Run the exit test on the merged base branch as the owner would, and prove the result as your Proof line says. "
+             "Change no product code here: a failure goes in your ready summary with what failed and how to see it."]
+    if m.get("gate") == "owner":
+        lines.append("This milestone's gate is the owner's: they accept it.")
+    if m.get("release"):
+        lines += ["", f"Release {m['release']}: once the exit test passes, ask before you say ready, never after "
+                      f"(an ask after the merge is lost when the task closes): "
+                      f"`herdr-task ask \"Release {m['release']}?\" --kind release --option Release --option Hold --recommend Release`."]
+    return "\n".join(lines) + "\n"
+
+
+def show(s):
+    st = states(s)
+    out = []
+    for m in milestones(s):
+        tasks = [t for t in s.data["tasks"] if t.get("milestone") == m["id"]]
+        out.append({**{k: m.get(k) for k in ("id", "title", "goal", "order", "exit_test", "gate", "mandate", "ui", "release")},
+                    "state": st[m["id"]], "acceptance_task": s.ref({"id": m["acceptance_task"]}) if m.get("acceptance_task") else None,
+                    "tasks": [{"ref": s.ref(t), "key": t.get("plan_key"), "title": t["title"], "state": t["state"],
+                               "after": [s.ref({"id": i}) for i in t.get("after") or []],
+                               **({"split_of": t["split_of"]} if t.get("split_of") else {})} for t in tasks]})
+    log = s.data.get("plan_log") or []
+    return {"milestones": out, "replans": sum(1 for x in log if x["action"] == "amend"), "log": log}
+
+
+def text_of(v):
+    if not v["milestones"]:
+        return "No plan here yet: write a plan file and run herdr-task plan apply <file>."
+    rows = []
+    for m in v["milestones"]:
+        rows.append(f"{m['id']} {m['title']} ({m['state']}, gate {m['gate']}): {m['goal']}")
+        for t in m["tasks"]:
+            after = f" after {', '.join(t['after'])}" if t["after"] else ""
+            rows.append(f"  {t['ref']}  {t['state']:<9} {t['title']}{after}")
+    rows.append(f"replans: {v['replans']}")
+    return "\n".join(rows)
+
+
+def cmd_plan(args):
+    from .output import say
+    from .store import open_store
+    with open_store(args, write=args.plan != "show") as s:
+        if args.plan == "show":
+            v = show(s)
+            return say(args, v, text_of(v))
+        if args.plan == "amend" and not (args.reason or "").strip():
+            raise Fail("plan amend needs --reason: why the plan changes, in a line.")
+        p = Plan(s, load(args.file), args.plan == "amend")
+        if p.problems:
+            raise Fail("The plan isn't applied:\n- " + "\n- ".join(p.problems))
+        if args.check:
+            s.dirty = False
+            return say(args, {"ok": True}, "The plan passes its checks; nothing was changed.")
+        log = p.write((args.reason or "").strip() or None)
+        v = show(s)
+    added = f"added {', '.join(log['added'])}" if log["added"] else "added nothing"
+    say(args, {**v, "applied": log}, f"Plan {log['action']}: {added}." + (f" Split: {log['split']}." if log.get("split") else "") + "\n" + text_of(v))

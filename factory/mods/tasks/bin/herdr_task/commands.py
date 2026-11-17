@@ -305,6 +305,8 @@ def cmd_show(args):
         text.append(f"merges into: {v['base']} (" + ("its project's base branch" if v.get("base_by") in ("project", "space") else "set for this task") + ")")
     if v.get("after_refs"):
         text.append("comes after: " + ", ".join(v["after_refs"]))
+    if v.get("milestone"):
+        text.append(f"milestone: {v['milestone']}" + (" (its acceptance task)" if v.get("acceptance_of") else ""))
     if kind:
         text.append(f"review kind: {kind} (1 review round)")
     if v.get("urgent_past_cap"):

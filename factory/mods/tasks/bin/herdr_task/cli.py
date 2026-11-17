@@ -24,6 +24,7 @@ from .machines import cmd_assistants, cmd_machines, cmd_sync_auto, cmd_tell
 from .autopilot import cmd_autopilot, cmd_complete, cmd_progress
 from .ask import cmd_ask, cmd_ask_pane
 from .budget import cmd_recap, DECISIONS
+from .plan import cmd_plan
 from .project import cmd_project
 from .simulators import cmd_simulator
 from .devices import cmd_device_wait
@@ -316,6 +317,19 @@ def main():
     c.add_argument("--dry-run", action="store_true", help="check and print without opening ask cards or writing settings")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_project)
+    pl = sub.add_parser("plan", help="the coordinator's milestone plan: apply a plan file, amend it with a reason, show it").add_subparsers(dest="plan")
+    for name, help in (("apply", "check a plan file (milestones and their tasks) as a whole and add its tasks, each milestone's acceptance task too"),
+                       ("amend", "change the plan from a plan file (new milestones and tasks, changed ones, splits); --reason is logged"),
+                       ("show", "the milestones, their states and tasks, and the replans")):
+        c = pl.add_parser(name, help=help)
+        if name != "show":
+            c.add_argument("file", help="the plan file (JSON: {\"milestones\": [...]})")
+            c.add_argument("--check", action="store_true", help="only check the plan file; change nothing")
+        if name == "amend":
+            c.add_argument("--reason", help="why the plan changes, in a line (required; kept in the plan's log)")
+        c.add_argument("--folder", help="the task folder (default: here)")
+        c.add_argument("--json", action="store_true")
+        c.set_defaults(fn=cmd_plan, id=None, reason=None, check=False)
     c = cmd("tick", cmd_tick, "start queued tasks that can go; mark merged ones done (Herdr runs this)", id=False)
     c.add_argument("--machine", help=argparse.SUPPRESS)  # this machine's name, from Herdr's window (HERD-40)
     c.add_argument("--hold", help=argparse.SUPPRESS)  # its start limits as JSON, from Settings > Machines
