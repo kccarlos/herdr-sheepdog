@@ -15,6 +15,7 @@ from .base import ENTRY, Fail, guard, hc_json, now, STORE
 from .when import parse_at
 from .settings import set_task, settings_for, SET_KEYS, worker_argv, worktrees_on
 from .agents import agent_running, detail, live_agents, starting, status_of, task_status
+from .stage import resolve_stage
 from .sessions import session_of
 from .store import locate, open_store, read_list, Store, store_files
 from .queues import queue_reason
@@ -413,9 +414,11 @@ def task_facts(s, t):
     """How a task is now, as events read it. Another machine's come this way too (`auto feed`)."""
     live = [detail(k) if "foreground" not in k else k for k in live_agents(s.key(t))] if t["state"] in ("running", "ready") else []
     working_ones = [k for k in live if agent_running(k)]
+    res = resolve_stage(t, working_ones, store=s)
     return {"id": t["id"], "ref": s.ref(t), "title": t["title"], "branch": t.get("branch"), "state": t["state"],
             "status": status_of(t, working_ones) if t["state"] == "running" else t["state"],
-            "needs": task_status(t, working_ones)[1], "attention": t.get("attention"), "merged": bool(t.get("merged")),
+            "stage": res.stage, "inbox": res.inbox,
+            "needs": res.needs, "attention": t.get("attention"), "merged": bool(t.get("merged")),
             "automation": t.get("automation"), "starting": bool(t["state"] == "running" and starting(t))}
 
 

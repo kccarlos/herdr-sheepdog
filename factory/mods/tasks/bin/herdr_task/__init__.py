@@ -20,6 +20,7 @@ before it:
   queues       Queues: tasks that come after others, and how many may run at once.
   archive      The archive: done tasks set aside after a while.
   output       Output: a task as JSON and as one line of text.
+  stage        One ordered stage table per task; owner-waiting rows are the inbox.
   scheduler    Identity and bundle hash of the tick terminal kept alive by the sheepdog daemon.
   commands     The task commands: add, start, status, ready, accept, merge and the rest.
   news         News: what changed in a space's tasks, told to its Assistant.
