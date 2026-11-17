@@ -33,7 +33,7 @@ export function applyNewest(history, page, requestedAt = 0) {
   const items = page.items ?? [];
   const serverIds = new Set(items.map((i) => i.id));
   const lower = page.next_before == null ? -Infinity : (items[0]?.id ?? -Infinity);
-  const upper = items.length ? items[items.length - 1].id : requestedAt;
+  const upper = Math.max(items[items.length - 1]?.id ?? -Infinity, requestedAt);
   const kept = history.items.filter((i) => !serverIds.has(i.id) && !(i.id >= lower && i.id <= upper));
   const holdsOlder = kept.some((i) => i.id < (items[0]?.id ?? requestedAt));
   const nextBefore = holdsOlder && page.next_before != null ? history.nextBefore : (page.next_before ?? null);

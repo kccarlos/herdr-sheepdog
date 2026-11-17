@@ -57,6 +57,14 @@ test("an empty newest page ends where the request began", () => {
   assert.deepEqual(ids(h), [500], "newer than the request, so kept");
 });
 
+test("a non-empty newest page drops optimistic items up to requestedAt while keeping items newer than the request", () => {
+  let h = applyNewest(emptyHistory(), page([100], null));
+  // Optimistic item 101 was folded before the refresh at 102; item 105 arrived while the request was in flight.
+  h = { ...h, items: [...h.items, it(101), it(105)] };
+  h = applyNewest(h, page([100], null), 102);
+  assert.deepEqual(ids(h), [100, 105]);
+});
+
 test("memory is bounded: paging back past it drops the oldest, so the newest stay and paging stops", () => {
   const many = Array.from({ length: MEMORY_CAPACITY - 1 }, (_, i) => it(1000 + i));
   let h = applyNewest(emptyHistory(), { items: many, next_before: 1000 });

@@ -81,6 +81,14 @@ export default class Sheepdog extends View {
       this.initLive(cx, base);
       this.initKeys(cx);
       cx.timer.every(250, (cx) => {
+        if (this.overlayRole === "panel") {
+          try {
+            setShared(PANEL_WINDOW_KEY, Date.now());
+          } catch {
+            // shared state errors must not break the timer
+          }
+        }
+        this.syncOutbox();
         this.pageBack(cx);
         // What has stayed long enough (a note, a settled card) goes.
         this.outbox.prune();

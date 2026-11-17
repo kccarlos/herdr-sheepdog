@@ -74,6 +74,26 @@ test("a shown line the daemon does not have after all is dropped by its page", a
   assert.deepEqual(store.getState().history.items.map((i) => i.id), [1, 60]);
 });
 
+test("replayed trailing transcript fragments after the newest server item are dropped on refresh", async () => {
+  const http = fakeHttp();
+  http.conversation = async () => ({
+    items: [it(100, { kind: "shepherd", text: "fix the login bug", via: "voice" })],
+    next_before: null,
+  });
+  const store = createStore({ http, now: () => 0 });
+  await store.refresh();
+  assert.equal(store.newestId(), 100);
+
+  // Opening /events?since=100 replays trailing fragments 101 and 102 of the merged turn.
+  const ev = (type, payload) => ({ type, ts: "2026-01-01T00:00:00Z", payload });
+  store.observe(ev("voice.transcript.in", { text: "login" }), 101);
+  store.observe(ev("voice.transcript.in", { text: " bug", final: true }), 102);
+  assert.deepEqual(store.getState().history.items.map((i) => i.id), [100, 101]);
+
+  await store.refresh({ state: false, conversation: true });
+  assert.deepEqual(store.getState().history.items.map((i) => i.id), [100]);
+});
+
 test("the rail's store, which has no timeline, ignores the words", () => {
   const store = createStore({ http: fakeHttp(), now: () => 0, conversation: false });
   store.observe({ type: "voice.text", payload: { text: "hi" } }, 5);
