@@ -28,6 +28,7 @@ export function createStore({ http, now = Date.now, pageSize = PAGE_SIZE, conver
   let queued = null; // what asked for another round while it ran
 
   let runs = noRuns(); // transcript fragments in progress (model/fragments.js)
+  let lastObservedId = 0; // highest event id handed to observe()
 
   // Tells subscribers only when a field really changed: every notification
   // redraws the panel, and most refetches bring what it already shows.
@@ -40,7 +41,7 @@ export function createStore({ http, now = Date.now, pageSize = PAGE_SIZE, conver
   // One round: /api/state and the newest conversation page together.
   async function round(want) {
     // Event ids are Unix microseconds; an empty page ends where this began.
-    const requestedAt = now() * 1000;
+    const requestedAt = Math.max(now() * 1000, lastObservedId);
     const [state, page] = await Promise.allSettled([
       want.state ? http.state() : null,
       want.conversation && conversation ? http.conversation({ limit: pageSize }) : null,
@@ -115,6 +116,7 @@ export function createStore({ http, now = Date.now, pageSize = PAGE_SIZE, conver
     // A daemon event: the suggested replies, which only its payload says, and
     // the words it carries, shown before the daemon's page has them.
     observe(event, id) {
+      if (typeof id === "number" && id > lastObservedId) lastObservedId = id;
       const replies = foldReply(snapshot.replies, event, id);
       if (replies !== snapshot.replies) set({ replies });
       // The question card follows the approval at once (the rail has it too).

@@ -66,3 +66,39 @@ func TestPanelLeavesOutTestsAndDocs(t *testing.T) {
 		}
 	}
 }
+
+func TestPanelHistoryApplyNewestUpperBound(t *testing.T) {
+	historyJS, err := fs.ReadFile(Panel, "mods/sheepdog/model/history.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(historyJS), "Math.max(items[items.length - 1]?.id ?? -Infinity, requestedAt)") {
+		t.Fatalf("history.js applyNewest does not bound upper with requestedAt when page.items is non-empty")
+	}
+	storeJS, err := fs.ReadFile(Panel, "mods/sheepdog/model/store.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(storeJS), "Math.max(now() * 1000,") {
+		t.Fatalf("store.js round does not bound requestedAt by the highest observed event ID")
+	}
+}
+
+func TestPanelWindowTimerRefreshesOutboxLease(t *testing.T) {
+	mainJS, err := fs.ReadFile(Panel, "mods/sheepdog/main.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	timerRe := regexp.MustCompile(`(?s)cx\.timer\.every\(250,\s*\(cx\)\s*=>\s*\{(.*?)\n\s*\}\);`)
+	m := timerRe.FindStringSubmatch(string(mainJS))
+	if m == nil {
+		t.Fatal("main.js has no 250ms timer block")
+	}
+	body := m[1]
+	if !strings.Contains(body, "setShared(PANEL_WINDOW_KEY, Date.now())") {
+		t.Fatalf("main.js 250ms timer does not refresh PANEL_WINDOW_KEY:\n%s", body)
+	}
+	if !strings.Contains(body, "this.syncOutbox()") {
+		t.Fatalf("main.js 250ms timer does not call this.syncOutbox():\n%s", body)
+	}
+}

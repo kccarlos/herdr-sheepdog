@@ -3,8 +3,9 @@
 // persistence across mod reloads: `make test-panel`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { register } from "node:module";
 import { DaemonError } from "../net/http.js";
-import { createOutbox, IDEM_TTL_MS, KEEP_MS, NOTE_MS, OUTBOX_KEY, OUTBOX_TTL_MS, pendingItems } from "./outbox.js";
+import { createOutbox, IDEM_TTL_MS, KEEP_MS, NOTE_MS, OUTBOX_KEY, OUTBOX_TTL_MS, PANEL_WINDOW_FRESH_MS, PANEL_WINDOW_KEY, pendingItems } from "./outbox.js";
 
 // An outbox over a scripted `turn`: each call takes the next outcome (a reply
 // object, a Promise/deferred, or an error to throw) and records its text and key.
@@ -579,4 +580,126 @@ test("a failed turn whose exchange already appeared in the stream is reconciled 
   await outbox.submit("hello");
   assert.deepEqual(outbox.getState().entries, []);
   assert.equal(outbox.getState().notice, null);
+});
+
+test("the panel window refreshes PANEL_WINDOW_KEY on its timer so the docked block stays inactive until the window closes", async () => {
+  const loaderSource = `
+    export async function resolve(specifier, context, nextResolve) {
+      if (specifier === "gpui-kit") {
+        return {
+          shortCircuit: true,
+          url: "data:text/javascript,export class View {} export const div = () => ({}); export const image = () => ({}); export const list = () => ({});",
+        };
+      }
+      if (specifier === "gpui-base") {
+        return {
+          shortCircuit: true,
+          url: "data:text/javascript,export const TextareaState = { new: (...a) => globalThis.__herdrTestHost.textarea(...a) }; export const Textarea = () => ({}); export const Scrollbar = () => ({}); export const h_flex = () => ({}); export const v_flex = () => ({});",
+        };
+      }
+      if (specifier === "herdr") {
+        return {
+          shortCircuit: true,
+          url: "data:text/javascript," + encodeURIComponent([
+            "export const closeOverlay = (...a) => globalThis.__herdrTestHost.closeOverlay?.(...a);",
+            "export const exec = (...a) => globalThis.__herdrTestHost.exec?.(...a);",
+            "export const focused = (...a) => globalThis.__herdrTestHost.focused?.(...a);",
+            "export const home = (...a) => globalThis.__herdrTestHost.home?.(...a);",
+            "export const nextCommand = (...a) => globalThis.__herdrTestHost.nextCommand?.(...a);",
+            "export const openOverlay = (...a) => globalThis.__herdrTestHost.openOverlay?.(...a);",
+            "export const props = (...a) => globalThis.__herdrTestHost.props?.(...a);",
+            "export const run = (...a) => globalThis.__herdrTestHost.run?.(...a);",
+            "export const setShared = (...a) => globalThis.__herdrTestHost.setShared?.(...a);",
+            "export const shared = (...a) => globalThis.__herdrTestHost.shared?.(...a);",
+            "export const theme = (...a) => globalThis.__herdrTestHost.theme?.(...a);",
+            "export const window = (...a) => globalThis.__herdrTestHost.window?.(...a);",
+          ].join("\\n")),
+        };
+      }
+      return nextResolve(specifier, context);
+    }
+  `;
+  register(`data:text/javascript,${encodeURIComponent(loaderSource)}`, import.meta.url);
+
+  const sharedState = new Map();
+  let currentProps = {};
+  globalThis.__herdrTestHost = {
+    props: () => currentProps,
+    shared: (k) => sharedState.get(k),
+    setShared: (k, v) => {
+      if (v == null) sharedState.delete(k);
+      else sharedState.set(k, v);
+    },
+    window: () => ({ platform: "linux" }),
+    home: () => "/tmp",
+    exec: async () => ({ code: 1, stdout: "", stderr: "" }),
+    textarea: () => ({
+      set_auto_grow() {},
+      set_value() {},
+      value: () => "",
+      on() {},
+      focus() {},
+      release() {},
+    }),
+  };
+
+  const { default: Sheepdog } = await import("../main.js");
+  const realDateNow = Date.now;
+  let clock = 1_000_000;
+  Date.now = () => clock;
+  try {
+    sharedState.set(OUTBOX_KEY, {
+      entries: [{ key: "k-win", text: "deploy", at: clock * 1000, phase: "queued", error: null, reuseKey: true }],
+    });
+
+    const makeCx = () => {
+      const timers = [];
+      const cx = {
+        timer: { every: (_ms, fn) => timers.push(fn) },
+        focus_handle: () => ({ focus() {}, is_focused: () => false }),
+        spawn: () => {},
+        notify: () => {},
+      };
+      return { cx, tick: () => timers.forEach((fn) => fn(cx)) };
+    };
+
+    currentProps = { role: "panel", overlay: "win-1", docked: true };
+    const winCx = makeCx();
+    const panelWin = new Sheepdog();
+    panelWin.init({}, winCx.cx);
+
+    currentProps = {};
+    const blockCx = makeCx();
+    const dockedBlock = new Sheepdog();
+    dockedBlock.init({}, blockCx.cx);
+    dockedBlock.sized = true;
+
+    assert.equal(panelWin.isOutboxOwner(), true);
+    assert.equal(dockedBlock.isOutboxOwner(), false);
+    assert.equal(panelWin.outbox.getState().entries.length, 1);
+    assert.equal(dockedBlock.outbox.getState().entries.length, 0);
+
+    // Advance past PANEL_WINDOW_FRESH_MS (10s) without any new outbox save(), firing the 250ms timers.
+    for (let i = 0; i < 5; i++) {
+      clock += PANEL_WINDOW_FRESH_MS / 4;
+      winCx.tick();
+      blockCx.tick();
+    }
+
+    assert.equal(sharedState.get(PANEL_WINDOW_KEY), clock, "panel window timer refreshed PANEL_WINDOW_KEY");
+    assert.equal(dockedBlock.isOutboxOwner(), false, "docked block does not steal ownership while panel window is open");
+    assert.equal(dockedBlock.outbox.getState().entries.length, 0, "docked block outbox stayed inactive");
+
+    // Closing the panel window clears PANEL_WINDOW_KEY, and the next block timer tick takes over the outbox.
+    await panelWin.close();
+    blockCx.tick();
+    assert.equal(dockedBlock.isOutboxOwner(), true);
+    assert.deepEqual(
+      dockedBlock.outbox.getState().entries.map((e) => e.key),
+      ["k-win"],
+    );
+  } finally {
+    Date.now = realDateNow;
+    delete globalThis.__herdrTestHost;
+  }
 });
