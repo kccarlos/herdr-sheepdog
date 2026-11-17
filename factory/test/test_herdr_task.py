@@ -11621,6 +11621,7 @@ class SyncBehindBase(unittest.TestCase):
         self.repo(None, check="")
         d = os.path.dirname(self.main)
         sf, st_dir = os.path.join(d, "settings.json"), os.path.join(d, "tasks")
+        self.store.loc = store_mod.locate(self.main)
         with self.mock.patch.object(st, "SETTINGS", sf), \
                 self.mock.patch.object(store_mod, "STORE", st_dir), \
                 self.mock.patch.object(checks, "settings_for", st.settings_for), \
