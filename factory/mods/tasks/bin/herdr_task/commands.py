@@ -1156,7 +1156,7 @@ def finalize(s, t):
         # for the person's Accept, whatever the merge setting; no pull request.
         t.pop("auto_merge", None)
         return msg + (" Nothing to merge (no commits beyond its base)." if t.get("nothing_to_merge") else "") + \
-            " The person accepts it in the Tasks panel."
+            " The person accepts it by voice or on the phone's ask card."
     if failed:
         t["attention"] = failed
         return f"{s.ref(t)} {READY_BUT} {failed} Tell the person."
@@ -1182,7 +1182,7 @@ def finalize(s, t):
             t["attention"] = f"Couldn't ask for the merge: {e}"
     else:
         t.pop("auto_merge", None)
-    return msg + " The person accepts it in the Tasks panel, which merges it."
+    return msg + " The person accepts it by voice or on the phone's ask card, which merges it."
 
 
 def cmd_review(args):
@@ -1743,7 +1743,7 @@ def start_again(s, t, key=None, argv_json=None, message=None, parent=None, resum
 
 # SHEP-189: what a resumed agent hears first. Its session comes back with no message, so without this
 # it sat idle until someone wrote to it.
-RESUME_NUDGE = ("Shepherdr resumed your session because your agent had stopped. Carry on where you left off: check "
+RESUME_NUDGE = ("Herdr resumed your session because your agent had stopped. Carry on where you left off: check "
                 "what is already done with `herdr-task show`, then keep going with the task.")
 
 
@@ -1773,7 +1773,7 @@ def cmd_resume(args):
 
 # SHEP-211: what a session resumed by switch hears first. Without it the new agent sat idle on the old one's
 # interrupted turn ("Interrupted · What should Claude do instead?") and the task showed a false "needs you".
-SWITCH_NUDGE = ("Shepherdr restarted your session on a new agent (the task's agent, model or settings changed), "
+SWITCH_NUDGE = ("Herdr restarted your session on a new agent (the task's agent, model or settings changed), "
                 "which stopped your last turn part-way. Nothing is wrong and nobody is waiting on you: carry on "
                 "where you left off (check what is already done with `herdr-task show` and git), then keep going "
                 "with the task.")

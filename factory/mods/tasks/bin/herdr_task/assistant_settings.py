@@ -19,7 +19,7 @@ EVERY_MS = 60000  # looked at again this often (Autopilot's switch is in its own
 
 HEAD = ("Your settings: (sheepdog factory settings for this project, the truth for every task you add; a task's own --set wins, "
         "and `herdr-task show <id>` says what one task has)")
-MERGE_SHORT = {"ask": "ask the person first (they accept it in the Tasks panel, which merges it)",
+MERGE_SHORT = {"ask": "ask the person first (they accept it by voice or on the phone's ask card, which merges it)",
                "checks": "after checks (Herdr merges a ready task once its checks pass)",
                "auto": "on its own (Herdr merges a ready task)"}
 BY = {"project": "set for this project", "machine": "this machine's setting", "everywhere": "your setting everywhere"}
