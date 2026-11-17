@@ -15,6 +15,7 @@
 | `sheepdog doctor --report` | A redacted diagnostic bundle for a bug report. `--out FILE` writes it (mode 0600); `--lines N` sets the log lines (default 200). |
 | `sheepdog pair` | The QR code the iPhone app scans. `--compact` for a small window, `--plain` for no colour. |
 | `sheepdog demo` | Three scripted agents, no herdr needed (needs the Gemini key: the one `sheepdog setup` saved, or `GEMINI_API_KEY`). `--port N`, `--no-open`. |
+| `sheepdog factory doctor` | Check unattended factory prerequisites for `[folder]` (default `.`) with one-line fixes: herdr-core (`hc`), a timed probe of the project volume inside herdr-core (naming any waiting macOS consent prompt), at least one logged-in agent CLI (`claude`, `codex` or `agy`) plus a canary start, `gh` login with the default repo pinned, and `codexbar`. Exit 1 on any FAIL. `--no-canary` spends no tokens; `--folder PATH`, `--config PATH`, `--hc-socket PATH`. |
 
 ## Run
 

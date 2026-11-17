@@ -113,7 +113,34 @@ type RunParams struct {
 	Labels   map[string]string `json:"labels,omitempty"`
 	Keep     bool              `json:"keep,omitempty"`
 	NoParent bool              `json:"no_parent,omitempty"`
+	NoNotify bool              `json:"no_notify,omitempty"`
+	Rm       bool              `json:"rm,omitempty"`
 	Size     *InitialSize      `json:"size,omitempty"`
+}
+
+// RemoveResult reports the removed terminal address from terminal.rm.
+type RemoveResult struct {
+	Removed string `json:"removed"`
+}
+
+// ExecParams selects the program and attributes for machine.exec.
+type ExecParams struct {
+	Argv    []string          `json:"argv,omitempty"`
+	Cwd     string            `json:"cwd,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	Timeout *float64          `json:"timeout,omitempty"`
+}
+
+// ExecResult is the captured outcome of machine.exec. Stdout and Stderr are
+// base64-encoded strings on the wire, which encoding/json decodes into []byte.
+type ExecResult struct {
+	Code      *int   `json:"code"`
+	Signal    *int   `json:"signal"`
+	Stdout    []byte `json:"stdout"`
+	Stderr    []byte `json:"stderr"`
+	MS        uint64 `json:"ms"`
+	TimedOut  bool   `json:"timed_out"`
+	Truncated bool   `json:"truncated"`
 }
 
 // Error is a JSON-RPC error returned by herdr-core.
@@ -151,6 +178,8 @@ func (e *Error) Is(target error) bool {
 		return e.Kind == "unavailable"
 	case ErrNameTaken:
 		return e.Kind == "name_taken"
+	case ErrLive:
+		return e.Kind == "live"
 	}
 	return false
 }
@@ -167,6 +196,8 @@ var (
 	ErrUnavailable = errors.New("hc: terminal is unavailable")
 	// ErrNameTaken matches a terminal name already in use.
 	ErrNameTaken = errors.New("hc: terminal name is taken")
+	// ErrLive matches terminal.rm on a terminal that has not exited yet.
+	ErrLive = errors.New("hc: terminal is live")
 )
 
 // SubscribeFilter narrows an event subscription.

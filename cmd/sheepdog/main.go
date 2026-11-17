@@ -81,6 +81,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runService(ctx, args[1:], stdout, stderr)
 	case "config":
 		return runConfig(ctx, args[1:], stdout, stderr)
+	case "factory":
+		return runFactory(ctx, args[1:], stdout, stderr)
 	case "dev":
 		return runDev(ctx, args[1:], stdout, stderr)
 	case "version", "--version":
@@ -173,6 +175,7 @@ func printUsage(w io.Writer) {
 	fprintln(w, "  doctor      check the setup, with fixes; --report: a redacted bundle for a bug report")
 	fprintln(w, "  pair        show the QR code the iOS app scans")
 	fprintln(w, "  demo        try it without herdr-tui or herdr-core: scripted workers (needs GEMINI_API_KEY)")
+	fprintln(w, "  factory     factory doctor: check agent CLIs, GitHub pin, volume access and herdr-core")
 	fprintln(w, "")
 	fprintln(w, "Run:")
 	fprintln(w, "  start       start the daemon in the background")
