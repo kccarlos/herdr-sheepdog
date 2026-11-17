@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import re
+import time
 
 from .base import Fail, git, hc_json, HOME, now, RANK, run, SHELLS
 
@@ -99,6 +100,23 @@ def runs_command(argv):
     return False
 
 
+def mid_turn_agents(records, look=None):
+    """Those of these hc records (hc ls is enough) mid-turn: working or asking, their agent still
+    there. #1022: an agent that died mid-turn (crashed, killed) leaves its plain shell, and hc keeps
+    the status it last reported ("working" for good, its ls even naming the dead agent), holding its
+    task in Working. So a record that says mid-turn is read in full (look: hc get) for what is in
+    front: a plain shell is no agent; fish running its agent (#780) still is."""
+    out = []
+    for k in records:
+        if status_word(k) not in ("working", "blocked"):
+            continue
+        full = k if (k.get("foreground") or {}).get("name") else (look or detail)(k)
+        if (full.get("foreground") or {}).get("name") and not agent_running(full):
+            continue
+        out.append(full)
+    return out
+
+
 def status_of(task, live):
     """A task's status now: its stored state, or for running tasks the most urgent agent status
     (blocked > done > working > idle), or "stopped" when no agent is left."""
@@ -134,10 +152,9 @@ def task_status(task, live):
         return "scheduled", None, starts_words(task.get("scheduled_for") or now(), now())
     if st not in ("running", "ready"):
         return (st if st in STATUSES else "todo"), None, None
-    states = []
-    for k in live:
-        x = k.get("status")
-        states.append(x.get("state") if isinstance(x, dict) else x)
+    # #995: a question or permission waiting on the chat's card counts as asking, whatever the
+    # agent's own status says (Codex reads working until its hook returns; Claude Code may too).
+    states = ["blocked" if asking(k) else status_word(k) for k in live]
     # A problem Herdr just found (SHEP-133): not Needs you before GRACE_MS have passed, while its
     # agent is told and takes it up; until then the task reads as it would without it. Recaps and
     # repeated reviewer failures wait on the Assistant right away (not the worker).
@@ -737,6 +754,11 @@ def ask_reason(task, address, req=None, kind=None, msg=None):
     return last_question(task, address) or REASONS["question"]
 
 
+# ask-hook.sh holds an ask at most 30 minutes (its loop, the hooks' timeout): a request file older
+# than that was left by a hook that was killed, and holds nothing.
+HELD_MAX_MS = 31 * 60_000
+
+
 def held_ask(address):
     """The ask Herdr's chat hook holds for this terminal (mods/chat/ask-hook.sh), or None."""
     if not address:
@@ -750,7 +772,10 @@ def held_ask(address):
         return None
     for n in reversed(names):
         try:
-            with open(os.path.join(d, n)) as f:
+            p = os.path.join(d, n)
+            if now() - os.path.getmtime(p) * 1000 > HELD_MAX_MS:
+                continue
+            with open(p) as f:
                 return json.load(f)
         except (OSError, ValueError):
             continue
@@ -853,6 +878,12 @@ def open_question(task, k):
     return None
 
 
+def asking(k):
+    """Whether a live agent asks the person now: its own status says blocked, or the chat's card
+    holds its question or permission (#995: a Codex agent reads working while its hook waits)."""
+    return status_word(k) == "blocked" or bool(k.get("address") and held_ask(k["address"]))
+
+
 STARTING_MS = 90_000
 REVIEWER_ON_IT = "Herdr's reviewer is on it"
 
@@ -908,15 +939,13 @@ BG_STARTED = re.compile(r"Command running in background with ID: (\w+)|Monitor s
 # A Monitor that expired says so in its <event>, with no <status> (FAC-96: WUKO-67's stayed running).
 BG_ENDED = re.compile(r"<task-id>(\w+)</task-id>(?:(?!</task-notification>)[\s\S])*?(?:<status>(\w+)</status>|\[Monitor expired\b)")
 CODEX_RUNNING = re.compile(r"Process running with session ID (\d+)")
-CODEX_EXITED = re.compile(r"\"exit_code\"\s*:|Process exited with code")
 # Codex 0.163+ code mode (SHEP-207): a script starts commands and polls them with tools.exec_command /
 # tools.write_stdin, all inside one exec call. Its output says "Script running with cell ID N" while
 # it waits, and a wait call names that cell; the script's results come as one JSON array, in the order
 # its calls were made, and a poll's result drops its session_id once the command has exited.
 CODEX_CELL = re.compile(r"Script running with cell ID (\d+)")
 CODEX_CELL_ARG = re.compile(r'"cell_id"\s*:\s*"?(\d+)')
-CODEX_SESSION_ARG = re.compile(r"session_id\W{0,4}(\d+)")
-CODEX_INNER = re.compile(r"\{[^{}]*\}")  # an object with no object inside: a result's own fields
+CODEX_SESSION_ARG = re.compile(r"session_id[\"']?\s*:\s*[\"']?(\d+)[\"']?\s*(?=[,}])")
 CODEX_HOST = "codex-code-mode-host"  # Codex's code-mode process: no job of its own
 WAITS_ON = re.compile(
     r"\b(wait\w*|watch\w*|polling)\b.*\b(ci|checks?|reviews?|reviewer|build\w*|tests?|background|jobs?|deploy\w*|"
@@ -1117,32 +1146,78 @@ def _bg_scan(lines, seen):
             elif d.get("type") == "response_item" and p.get("type") in ("function_call_output", "custom_tool_call_output"):
                 call = calls.get(p.get("call_id")) or ""
                 cell = CODEX_CELL_ARG.search(call)  # a wait on a code-mode cell: the sessions it polls
-                polled = cells.get(cell.group(1), []) if cell else CODEX_SESSION_ARG.findall(call)
-                if _codex_output(_text(p.get("output")), polled, cells, running, at):
+                polled = cells.get(cell.group(1), []) if cell else _codex_polled(call)
+                if _codex_output(p.get("output"), polled, cells, running, at):
                     ended = max(ended, at)
     seen["ended"] = ended
     for i in [i for i, j in jobs.items() if now() - j["at"] >= BG_MAX_MS]:
         jobs.pop(i)
 
 
-def _codex_output(text, polled, cells, running, at):
+def _codex_polled(call):
+    """Recognise literal polls and the numeric for-of batch emitted by Codex.
+
+    Keep command slots too: an exec_command result must never end a neighbouring poll.
+    Unknown JavaScript stays unresolved; never execute an agent's script to read its log.
+    """
+    loop = re.compile(r"for\s*\(const\s+(\w+)\s+of\s+\[([\d,\s]+)\]\s*\)\s*\{(.*?)\}\s*\}", re.S)
+    def expand(m):
+        body = m.group(3) + "}"
+        return "\n".join(re.sub(r"session_id\s*:\s*" + re.escape(m.group(1)) + r"\b",
+                                    "session_id:" + sid.strip(), body)
+                         for sid in m.group(2).split(",") if sid.strip())
+    call = loop.sub(expand, call)
+    slots = []
+    for m in re.finditer(r"tools\.(exec_command|write_stdin)\s*\(\s*\{([^{}]*)\}", call):
+        sid = CODEX_SESSION_ARG.search(m.group(2) + "}") if m.group(1) == "write_stdin" else None
+        slots.append(sid.group(1) if sid else None)
+    if slots:
+        return slots
+    try:  # legacy write_stdin takes a JSON argument object
+        sid = json.loads(call).get("session_id")
+        return [str(sid)] if isinstance(sid, (int, str)) and str(sid).isdigit() else []
+    except (ValueError, AttributeError):
+        return []
+
+
+def _codex_results(output):
+    """Read result envelopes, never JSON or session-id examples inside command stdout."""
+    results = []
+    blocks = output if isinstance(output, list) else [output]
+    def add(value):
+        if isinstance(value, list):
+            for item in value:
+                add(item)
+        elif isinstance(value, dict):
+            if value.get("status") == "fulfilled":
+                add(value.get("value"))
+            elif value.get("status") == "rejected":
+                results.append({})  # preserves its place in allSettled
+            elif "session_id" in value or "exit_code" in value:
+                results.append(value)
+    for block in blocks:
+        text = _text(block)
+        try:
+            add(json.loads(text))
+        except ValueError:
+            pass
+    return results
+
+
+def _codex_output(output, polled, cells, running, at):
     """One Codex output's word on the sessions it covers, applied to running ({"codex:<id>": started
     ms}). polled: the session ids the call that made it polled, in order (a code-mode script's
     calls, or a write_stdin's own). Returns True when a session ended."""
+    text = _text(output)
     ended = False
-    for m in CODEX_RUNNING.finditer(text):
-        running.setdefault("codex:" + m.group(1), at)
+    results = _codex_results(output)
+    # Legacy plain-text output only. Structured command stdout is not tool metadata.
+    if not results:
+        for m in CODEX_RUNNING.finditer(text):
+            running.setdefault("codex:" + m.group(1), at)
     cell = CODEX_CELL.search(text)
     if cell:
-        cells[cell.group(1)] = polled  # a wait call that names this cell polls these sessions
-    results = []
-    for m in CODEX_INNER.finditer(text):
-        try:
-            d = json.loads(m.group(0))
-        except ValueError:
-            continue
-        if isinstance(d, dict) and ("session_id" in d or "exit_code" in d):
-            results.append(d)
+        cells[cell.group(1)] = polled
     for i, d in enumerate(results):
         sid = d.get("session_id")
         if sid is None and len(results) == len(polled):
@@ -1150,12 +1225,12 @@ def _codex_output(text, polled, cells, running, at):
         if sid is None:
             continue
         key = "codex:" + str(sid)
-        if "exit_code" in d:
+        if d.get("exit_code") is not None:
             ended = running.pop(key, None) is not None or ended
-        else:
+        elif d.get("session_id") is not None:
             running.setdefault(key, at)
     # a poll of one session whose output says it exited (no session id in it, or the old format's text)
-    if len(polled) == 1 and CODEX_EXITED.search(text) and not any("session_id" in d for d in results):
+    if len(polled) == 1 and polled[0] is not None and not results and re.search(r"^Process exited with code", text, re.M):
         ended = running.pop("codex:" + str(polled[0]), None) is not None or ended
     return ended
 
@@ -1242,29 +1317,53 @@ def claude_bg_shells(screen):
     return False
 
 
+# Codex starts its tool servers (MCP servers from its config, its own runtime helpers) as its own
+# children within a second or two of starting, and they live as long as it does (#946). A command of
+# the agent's own starts in a turn, after the model answered: never this soon.
+CODEX_STARTUP_S = 5
+
+
+def _ps_started(stamp):
+    """ps's lstart ("Sun Nov 15 10:50:03 2026", in the C locale) as epoch seconds, or None."""
+    try:
+        return time.mktime(time.strptime(" ".join(stamp.split()), "%a %b %d %H:%M:%S %Y"))
+    except (ValueError, OverflowError):
+        return None
+
+
 def codex_working(k):
     """Whether a Codex agent has a process of its own running under it: a background terminal or a
-    command of its code mode, but not its code-mode host (SHEP-207). Its pid unknown: True, so its
-    log decides as before. One `ps` for all processes, so it works on macOS too."""
+    command of its code mode, but not its code-mode host (SHEP-207), nor what it started with itself:
+    its MCP servers and runtime helpers and all under them (#946: they kept finished jobs counting).
+    Its pid unknown: True, so its log decides as before. One `ps` for all processes, so it works on
+    macOS too."""
     fg = k.get("foreground") or {}
     if not fg.get("pid") and k.get("address"):
         fg = detail(k).get("foreground") or {}
     if not fg.get("pid"):
         return True
-    children = {}
-    for line in run(["ps", "-axo", "pid=,ppid=,args="]).stdout.splitlines():
-        parts = line.split(None, 2)
-        if len(parts) >= 2 and parts[1].isdigit():
-            children.setdefault(parts[1], []).append(parts)
-    todo, seen_pids = [str(fg["pid"])], set()
+    children, started = {}, {}
+    out = run(["ps", "-axo", "pid=,ppid=,lstart=,args="], env=dict(os.environ, LC_ALL="C", LANG="C")).stdout
+    for line in out.splitlines():
+        parts = line.split(None, 7)  # pid, ppid, the five words of lstart, args
+        if len(parts) >= 7 and parts[1].isdigit():
+            started[parts[0]] = _ps_started(" ".join(parts[2:7]))
+            children.setdefault(parts[1], []).append((parts[0], parts[7] if len(parts) > 7 else ""))
+    root = str(fg["pid"])
+    born = started.get(root)
+    todo, seen_pids = [root], set()
     while todo:
-        for parts in children.get(todo.pop(), []):
-            if parts[0] in seen_pids:
+        for pid, args in children.get(todo.pop(), []):
+            if pid in seen_pids:
                 continue
-            seen_pids.add(parts[0])
-            todo.append(parts[0])
-            if len(parts) > 2 and CODEX_HOST not in parts[2]:
-                return True
+            seen_pids.add(pid)
+            if CODEX_HOST in args:
+                todo.append(pid)  # its code mode's commands run under it
+                continue
+            at = started.get(pid)
+            if born is not None and at is not None and at - born <= CODEX_STARTUP_S:
+                continue  # started with Codex itself: a tool server, never a job (nor anything under it)
+            return True
     return False
 
 

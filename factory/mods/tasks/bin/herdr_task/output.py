@@ -4,7 +4,8 @@ import json
 
 from .base import now
 from .agents import (
-    agent_running, BG_ENDED_WHY, detail, device_why, live_helpers, out_of_rounds_why, ask_reason, blocking_dialog, held_ask, last_words, own_line, own_work, status_word, STATUSES, task_status,
+    agent_running, asking, BG_ENDED_WHY, detail, device_why, live_helpers, out_of_rounds_why, ask_reason, blocking_dialog, held_ask,
+    last_words, own_line, own_work, OUT_OF_ROUNDS, status_word, STATUSES, task_status,
 )
 from .queues import waiting_ext, waiting_for
 
@@ -20,7 +21,7 @@ def view(s, task, live=None):
     v["status"], v["needs"], v["why"] = task_status(task, running)
     if v["needs"] == "asks":
         # Why it waits, at most LINE_MAX characters: a standard reason or its own question.
-        k = next((k for k in running if status_word(k) == "blocked"), None)
+        k = next((k for k in running if status_word(k) == "blocked"), None) or next((k for k in running if asking(k)), None)
         st = k.get("status") if k and isinstance(k.get("status"), dict) else {}
         # Blocked in its CLI's question dialog: every question, before its own status line (field note 51).
         v["why"] = (k and blocking_dialog(task, k["address"], held_ask(k["address"]))) or own_line(task, k and k["address"]) or (ask_reason(task, k["address"], held_ask(k["address"]), st.get("kind"), st.get("msg")) if k else v["why"])

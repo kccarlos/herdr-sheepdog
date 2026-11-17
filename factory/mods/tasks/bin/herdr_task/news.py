@@ -12,8 +12,8 @@ from contextlib import contextmanager
 from .base import guard, hc_json, now, run, STORE
 from .settings import bare
 from .agents import (
-    agent_log, agent_running, cli_of, detail, from_person, live_agents, log_tail, REVIEWER_FAILED, said, starting, status_word,
-    STATUSES, trust_asked, WORKING_AGAIN,
+    agent_log, agent_running, asking, cli_of, detail, from_person, live_agents, log_tail, REVIEWER_FAILED, said, starting,
+    status_word, STATUSES, trust_asked, WORKING_AGAIN,
 )
 from .sessions import session_of
 from .launch import coordinator_in
@@ -145,6 +145,16 @@ def news_pass(report, folder=None):
                         t["trust_ask"] = trust
                     else:
                         t.pop("trust_ask", None)
+                    s.dirty = True
+                # #995: its question or permission held on the chat's card while its agent reads
+                # working (Codex, until its hook returns): Needs you in the Tasks panel too.
+                held = next((k["address"] for k in live if status_word(k) != "blocked" and asking(k)), None) \
+                    if v.get("needs") == "asks" else None
+                if s.write and t.get("held_ask") != held:
+                    if held:
+                        t["held_ask"] = held
+                    else:
+                        t.pop("held_ask", None)
                     s.dirty = True
                 # Quiet on its own background work (SHEP-53): Working in the Tasks panel too.
                 if s.write and bool(t.get("own_work")) != bool(v.get("own_work")):

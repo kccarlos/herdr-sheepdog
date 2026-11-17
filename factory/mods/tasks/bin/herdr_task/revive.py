@@ -111,7 +111,10 @@ def first(kind, message):
 
 
 def resume_argv(kind, argv, session, message=None):
-    """argv (base_argv's) resuming `session`, with a first message when given."""
+    """argv (base_argv's) resuming `session`, with a first message when given. Claude's argv as it was: a revive brings
+    back the session it had, never launch's #1056 permission mode for a switch."""
+    if kind == "claude":
+        return [*argv, "--resume", session, *first(kind, message)]
     return [*launch_resume(argv, session), *first(kind, message)]
 
 

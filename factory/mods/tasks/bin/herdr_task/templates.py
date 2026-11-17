@@ -117,7 +117,13 @@ WORKER_MD_BEFORE_NOREBASE = WORKER_MD_BEFORE_AGY.replace(AGY_OLD, AGY_RULE).repl
 NOREBASE_OLD = "(the reviewer of your own review is fine).\n"
 NOREBASE_RULE = ("(the reviewer of your own review is fine). Never rebase or force-push a branch that already has a pull request: "
                  "when it is behind or in conflict, merge main into it (a merge of main needs no force-push and no new review round).\n")
-WORKER_MD = WORKER_MD_BEFORE_NOREBASE.replace(NOREBASE_OLD, NOREBASE_RULE, 1)
+WORKER_MD_BEFORE_ASK = WORKER_MD_BEFORE_NOREBASE.replace(NOREBASE_OLD, NOREBASE_RULE, 1)
+# Since a Ready worker woken by GitHub news asks with herdr-task ask, so the person hears it (#1000; never its CLI's
+# blocking question tool, FAC-70/97).
+ASK_OLD = "Anything else: ask the person in one short message. Then run ready again."
+ASK_RULE = ("Anything else: ask with `herdr-task ask`, as below (a question in plain text reaches "
+            "nobody while the task is Ready). Then run ready again.")
+WORKER_MD = WORKER_MD_BEFORE_ASK.replace(ASK_OLD, ASK_RULE)
 
 REVIEWER_MD_BEFORE_SUBAGENT = """You review one Herdr task's work before it can merge. Read only: never edit files, commit or push.
 - Read the task, then the diff of its branch against its base, and run the project's checks.
@@ -150,7 +156,7 @@ OLD_WORKER_READY = """You work on one Herdr task. Stay within the task's scope a
 - When the work is finished, run the `herdr-task ready` command given at the end of your brief, with a short summary. That puts the task in Ready for the person, who accepts it. Never mark a task done yourself.
 """
 OLD_WORKER_MD = OLD_WORKER_READY.split("- When the work is finished")[0]
-OLD_WORKERS = (WORKER_MD_BEFORE_NOREBASE, WORKER_MD_BEFORE_AGY, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
+OLD_WORKERS = (WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_NOREBASE, WORKER_MD_BEFORE_AGY, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
 
 
 TEMPLATE_HEADS = {

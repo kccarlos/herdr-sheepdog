@@ -86,8 +86,6 @@ class Repo(unittest.TestCase):
         for p in text_files():
             with open(p, encoding="utf-8", errors="replace") as f:
                 for n, line in enumerate(f, 1):
-                    # the project's own public repo page (the one-time star card links to it, SHEP-79) is no personal value
-                    line = line.replace("https://github.com/eliasstravik/shepherdr\"", "\"")
                     self.assertIsNone(bad.search(line), f"{os.path.relpath(p, ROOT)}:{n}: {line.strip()[:120]}")
 
     # Elements and components whose `title` is no hover popup: a dialog's or card's heading, a row's words, an
@@ -336,7 +334,7 @@ class Repo(unittest.TestCase):
 
     def test_version_everywhere(self):
         v = re.search(r'^VERSION = "([^"]+)"', open(J("bin", "shepherdr")).read(), re.M).group(1)
-        self.assertEqual(v, "3.1.33")
+        self.assertEqual(v, "3.1.37")
         self.assertRegex(open(J("CHANGELOG.md")).read(), rf"(?m)^## {re.escape(v)}\b", "CHANGELOG's newest entry")
         self.assertIn(v, open(J("RECIPE.md")).read())
         self.assertIn(v, open(J("README.md")).read())

@@ -152,14 +152,18 @@ def own_argv(argv, folder=None, verbs=OWN, cwd=None, reads=None):
         # launch only: Codex's own key and hash for a -c hook (codex-rs/hooks discovery.rs
         # hook_hash, config fingerprint.rs version_for_toml), so no other hook is trusted by it.
         ident = {"event_name": "permission_request", "hooks": [{"async": False, "command": hook, "timeout": ASK_TIMEOUT, "type": "command"}]}
-        digest = hashlib.sha256(json.dumps(ident, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-        key = "/<session-flags>/config.toml:permission_request:0:0"
+        state = {"/<session-flags>/config.toml:permission_request:0:0": codex_hook_hash(ident)}
+        # #977: Shepherdr's own hooks in ~/.codex/hooks.json (the chat's question card) trusted for
+        # this launch too, else a new or updated one stops the worker at "Hooks need review" with
+        # nobody at its keys. Only ours, exactly as written there: the person's own stay theirs.
+        state.update(own_codex_hooks())
         # Its folder trusted for this run (#866: "Trust this folder?" would stop it before the brief, nobody at the
         # keys), its repository's root too: Codex asks for that one in a worktree. Skipped when argv says already.
         roots = [] if any(str(a).startswith("projects") for a in out) else trust_roots(folder)
         trust = ["-c", "projects={" + ",".join(f'{json.dumps(r)}={{trust_level="trusted"}}' for r in roots) + "}"] if roots else []
         return out[:1] + ["-c", f"hooks.PermissionRequest=[{{hooks=[{{type=\"command\",command={json.dumps(hook)},timeout={ASK_TIMEOUT}}}]}}]",
-                          "-c", f"hooks.state={{{json.dumps(key)}={{trusted_hash=\"sha256:{digest}\"}}}}", *trust] + out[1:]
+                          "-c", "hooks.state={" + ",".join(f'{json.dumps(k)}={{trusted_hash="sha256:{v}"}}' for k, v in state.items()) + "}",
+                          *trust] + out[1:]
     if k == "agy":
         # agy's --settings allow list replaces the person's own (~/.gemini/antigravity-cli): it carries
         # the argv's own --settings rules, then the person's, then these.
@@ -207,6 +211,45 @@ def own_argv(argv, folder=None, verbs=OWN, cwd=None, reads=None):
             out[i:i + n] = ["--settings", json.dumps({**cur, **trusted, "permissions": perms})]
             return out
         return out[:1] + ["--settings", json.dumps({**trusted, "permissions": {"allow": theirs + own}})] + out[1:]
+    return out
+
+
+def codex_hook_hash(ident):
+    """Codex's trusted_hash for one hook group (codex-rs/hooks discovery.rs hook_hash)."""
+    return hashlib.sha256(json.dumps(ident, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+# Codex's event names in hooks.state keys, from hooks.json's.
+CODEX_EVENTS = {"SessionStart": "session_start", "PermissionRequest": "permission_request"}
+
+
+def own_codex_hooks():
+    """{hooks.state key: hash} for Shepherdr's own hooks in Codex's hooks.json (the installer's
+    session-note.sh and ask-hook.sh), as Codex keys and hashes them; {} when there are none or
+    one has a shape whose hash we can't be sure of (it then asks, as before)."""
+    path = os.path.join(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), "hooks.json")
+    try:
+        with open(path) as f:
+            hooks = json.load(f).get("hooks") or {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+    out = {}
+    for event, name in CODEX_EVENTS.items():
+        groups = hooks.get(event) if isinstance(hooks, dict) else None
+        for g, group in enumerate(groups if isinstance(groups, list) else []):
+            entries = group.get("hooks") if isinstance(group, dict) else None
+            if not isinstance(entries, list) or len(entries) != 1 or set(group) - {"hooks", "matcher"}:
+                continue
+            h = entries[0]
+            cmd = h.get("command") if isinstance(h, dict) else None
+            if (not isinstance(cmd, str) or not re.search(r"/mods/chat/(session-note|ask-hook)\.sh'?$", cmd)
+                    or set(h) - {"type", "command", "timeout", "async"} or not isinstance(h.get("timeout"), int)):
+                continue
+            ident = {"event_name": name, "hooks": [{"async": bool(h.get("async", False)), "command": cmd,
+                                                    "timeout": h["timeout"], "type": h.get("type", "command")}]}
+            if group.get("matcher") is not None:
+                ident["matcher"] = group["matcher"]
+            out[f"{path}:{name}:{g}:0"] = codex_hook_hash(ident)
     return out
 
 
@@ -414,10 +457,48 @@ def sweep_sandboxes():
             pass
 
 
-def resume_argv(argv, session):
+def claude_mode(argv, folder=None):
+    """The permission mode a new Claude Code session would start in (#1056): argv's own flag, else the defaultMode of
+    its --settings, the folder's .claude/settings.local.json and .claude/settings.json, then the person's
+    (CLAUDE_CONFIG_DIR or ~/.claude), as Claude Code ranks them; "default" when none says."""
+    for i, a in enumerate(argv):
+        if a == "--dangerously-skip-permissions":
+            return None
+        if a == "--permission-mode" and i + 1 < len(argv):
+            return argv[i + 1]
+        if a.startswith("--permission-mode="):
+            return a.split("=", 1)[1]
+    found = []
+    for i, a in enumerate(argv[:-1]):
+        if a == "--settings":
+            found.append(argv[i + 1])
+    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    files = ([os.path.join(folder, ".claude", "settings.local.json"), os.path.join(folder, ".claude", "settings.json")] if folder else []) \
+        + [os.path.join(home, "settings.json")]
+    for src in found + files:
+        try:
+            if src.lstrip().startswith("{"):
+                d = json.loads(src)
+            else:
+                with open(os.path.expanduser(src)) as f:
+                    d = json.load(f)
+        except (OSError, ValueError):
+            continue
+        mode = ((d.get("permissions") or {}) if isinstance(d, dict) else {}).get("defaultMode")
+        if isinstance(mode, str) and mode:
+            return mode
+    return "default"
+
+
+def resume_argv(argv, session, folder=None):
+    """argv resuming `session`. Claude Code brings a resumed session back in the permission mode it ended in (#1056: a
+    switch replacing a stuck agent came up in plan or ask mode, not the person's auto): the mode a new one would get
+    is said, unless argv already says one."""
     k = agent_key(argv)
     if k == "claude":
-        return argv + ["--resume", session]
+        mode = claude_mode(argv, folder)
+        has = mode is None or any(a == "--permission-mode" or a.startswith("--permission-mode=") for a in argv)
+        return argv + ([] if has else ["--permission-mode", mode]) + ["--resume", session]
     if k == "codex":
         return [argv[0], "resume"] + argv[1:] + [session]
     if k == "agy":
@@ -686,7 +767,7 @@ def brief(s, task, parent=None, space=None, argv=None):
     body = "Your task, " + s.ref(task) + ":\n" + task_text(task)
     finish = notes_part("Before you say ready", notes(s, task, "finish", space))
     return "\n\n".join(x for x in [instructions("worker"), start, body, where_line(task), finish, closing_line(s, task, parent, argv, space),
-                                    settings_block(s, task, space, argv)] if x)
+                                    settings_block(s, task, space, argv, live=True)] if x)
 
 
 def handoff(s, task, prev, parent=None, argv=None, space=None):
@@ -702,7 +783,7 @@ def handoff(s, task, prev, parent=None, argv=None, space=None):
     lines.append(notes_part("Before you continue, if it isn't done yet", notes(s, task, "start", space)))
     lines.append(notes_part("Before you say ready", notes(s, task, "finish", space)))
     lines.append(closing_line(s, task, parent, argv, space))
-    lines.append(settings_block(s, task, space, argv))
+    lines.append(settings_block(s, task, space, argv, live=True))
     return "\n\n".join(x for x in lines if x)
 
 
@@ -842,6 +923,16 @@ def folder_for(s, task):
     # Its own base (--base) branches from that branch; else from what the folder has checked out.
     own = task.get("base") if task.get("base_set") else None
     base = base_ref(main, own) if own else current_base(main)
+    have = registered_worktree(main, path)
+    if have:
+        # #1023: its worktree is still there, registered with this repo, though the task no longer
+        # names it (its agent may have switched it to another branch): it goes on there, on the branch
+        # checked out now, never a failed "already exists".
+        br = have.get("branch") or branch
+        base = task.get("base") or base
+        start = task.get("start") or git(main, "merge-base", base, have.get("head") or br)[1] or have.get("head")
+        task.update(worktree=path, branch=br, base=base, start=start)
+        return path
     exists = git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")[0]
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if exists:
@@ -881,6 +972,22 @@ def send_when_clear(address, message, tries=60):
         time.sleep(1)
     kill_agent(address, run)
     raise Fail("the Codex reviewer never showed its prompt box (trust screen or startup stuck)")
+
+
+def registered_worktree(main, path):
+    """The worktree git has registered at path for the repo at main ({path, head, branch}: branch
+    None when detached), when its folder is there; else None."""
+    if not os.path.isdir(path):
+        return None
+    ok, out, _ = git(main, "worktree", "list", "--porcelain")
+    want = os.path.realpath(path)
+    for block in out.split("\n\n") if ok else []:
+        rows = dict((ln.split(" ", 1) + [""])[:2] for ln in block.splitlines() if ln.strip())
+        if rows.get("worktree") and os.path.realpath(rows["worktree"]) == want and "prunable" not in rows:
+            ref = rows.get("branch") or ""
+            return {"path": path, "head": rows.get("HEAD"),
+                    "branch": ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else None}
+    return None
 
 
 def launch(s, task, argv, space, message=None, parent=None, resume=None, role=None, reads=None):
