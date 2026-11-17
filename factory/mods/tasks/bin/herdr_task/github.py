@@ -64,10 +64,10 @@ def gh(*args, repo=None, cwd=None):
     return r.returncode == 0, r.stdout.strip(), (r.stderr or r.stdout).strip()
 
 
-def repo_from_url(url):
-    """GitHub "owner/name" from a remote URL (HTTPS, SSH, or an SSH host alias for GitHub), else None."""
+def repo_from_url(url, explicit_host=False):
+    """GitHub "owner/name" from a remote URL (HTTPS, SSH, or an SSH host alias for GitHub unless `explicit_host`), else None."""
     u = str(url or "").strip()
-    ssh = not u.startswith(("http://", "https://", "git://"))
+    ssh = not explicit_host and not u.startswith(("http://", "https://", "git://"))
     m = (re.match(r"^(?:https?|ssh|git)://(?:[^/@]+@)?([^/:]+)(?::\d+)?/(.+)$", u) if "://" in u
          else re.match(r"^(?:[^/@:]+@)?([A-Za-z0-9._-]{2,}):/?(.+)$", u))
     if not m:
@@ -101,16 +101,18 @@ def remote_of(main, branch=None):
     return push_remote(main, branch) or "origin"
 
 
-def remote_repo(main, remote):
+def remote_repo(main, remote, explicit_host=False):
     """GitHub "owner/name" for `remote` in `main` (its pushurl first when set, else url), or None."""
     if not remote:
         return None
     if push_u := git(main, "config", "--get", f"remote.{remote}.pushurl")[1]:
-        return repo_from_url(push_u) or (repo_from_url(git(main, "config", "--get", f"remote.{remote}.url")[1]) if os.path.exists(push_u) else None)
-    return repo_from_url(git(main, "config", "--get", f"remote.{remote}.url")[1])
+        return repo_from_url(push_u, explicit_host=explicit_host) or (
+            repo_from_url(git(main, "config", "--get", f"remote.{remote}.url")[1], explicit_host=explicit_host)
+            if os.path.exists(push_u) else None)
+    return repo_from_url(git(main, "config", "--get", f"remote.{remote}.url")[1], explicit_host=explicit_host)
 
 
-def remote_slug(s, task=None):
+def remote_slug(s, task=None, explicit_host=False):
     """GitHub "owner/name" from the task's or its base branch's push remote (without calling gh), else None."""
     if s.loc["kind"] != "repo":
         return None
@@ -124,7 +126,7 @@ def remote_slug(s, task=None):
     br = ((task or {}).get("pr") or {}).get("branch") or (task or {}).get("branch")
     base = (task or {}).get("base") or "main"
     for candidate in (br, base):
-        if slug := remote_repo(folder, push_remote(folder, candidate)):
+        if slug := remote_repo(folder, push_remote(folder, candidate), explicit_host=explicit_host):
             return slug
     return None
 
@@ -185,7 +187,7 @@ def github_unreachable(s):
 
 def github_required(s, task=None):
     """True when the folder or its base branch tracks a GitHub remote (merges must go through a PR)."""
-    return bool(remote_slug(s, task) or github_unreachable(s))
+    return bool(remote_slug(s, task, explicit_host=True) or github_unreachable(s))
 
 
 def github_refusal(s, task=None):

@@ -13720,6 +13720,19 @@ class AcceptGitHubPrPath(unittest.TestCase):
         self.assertFalse(os.path.isdir(local_wt))
         self.assertEqual(self.git(local_main, "branch", "--list", "task/1"), "")
 
+    def test_accept_non_github_ssh_remote_still_merges_locally(self):
+        self.git(self.main, "remote", "set-url", "origin", "git@git.example.com:team/proj.git")
+        self.git(self.main, "config", "--unset-all", f"url.{self.bare}.insteadOf")
+        self.git(self.main, "config", f"url.{self.bare}.insteadOf", "git@git.example.com:team/proj.git")
+        not_gh = lambda *a, **k: (False, "", "GraphQL: Could not resolve to a Repository with the name 'team/proj'.")
+        with self.mock.patch.object(self.github, "gh", not_gh), \
+                self.mock.patch.object(self.commands, "gh", not_gh):
+            self.commands.cmd_accept(self.args())
+        self.assertEqual((self.task["state"], self.task.get("merged")), ("done", True))
+        self.assertEqual(self.git(self.main, "rev-parse", "main"), self.tip)
+        self.assertFalse(os.path.isdir(self.wt))
+        self.assertEqual(self.git(self.main, "branch", "--list", "task/1-doc"), "")
+
     def test_accept_in_github_repo_never_falls_back_to_local_when_gh_unavailable(self):
         for mod in (self.github, self.commands):
             p = self.mock.patch.object(mod, "gh", lambda *a, **k: (False, "", "not logged in"))
