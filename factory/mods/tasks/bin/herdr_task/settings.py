@@ -53,17 +53,35 @@ def read_settings():
     return d if isinstance(d, dict) else {}
 
 
+def project_layer(d, folder=None, space=None):
+    """This project's raw layer: d["projects"][folder] merged per section over any legacy d["spaces"] entry."""
+    if not isinstance(d, dict):
+        return {}
+    projects = d.get("projects") if isinstance(d.get("projects"), dict) else {}
+    spaces = d.get("spaces") if isinstance(d.get("spaces"), dict) else {}
+    sid = bare(str(space)) if space and not os.path.isabs(str(space)) and space not in projects else None
+    sp = spaces.get(sid) if sid and isinstance(spaces.get(sid), dict) else None
+    if folder and sp and sp.get("folder") not in (None, folder):
+        sp = None
+    if sp and not folder and isinstance(sp.get("folder"), str):
+        folder = sp["folder"]
+    if not sp and folder:
+        sp = next((v for v in spaces.values() if isinstance(v, dict) and v.get("folder") == folder), None)
+    key = folder if folder and folder in projects else (space if space and space in projects else folder)
+    proj = projects.get(key) if key and isinstance(projects.get(key), dict) else None
+    out = dict(sp) if isinstance(sp, dict) else {}
+    for k, v in (proj or {}).items():
+        out[k] = {**out[k], **{kk: vv for kk, vv in v.items() if vv is not None}} if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
 def autopilot_layers(d, project=None):
     """(Everywhere's, the project's own) Autopilot in a settings file d: {every, events, heartbeat, direction},
-    each only when set. Keyed by project folder in d["projects"] (with a compatibility fallback to d["spaces"]
-    for callers not yet migrated in SDF-9)."""
+    each only when set. Keyed by project folder in d["projects"] (merged over any legacy d["spaces"] entry)."""
     def part(layer):
         a = (layer or {}).get("autopilot") if isinstance(layer, dict) else None
         return {k: v for k, v in a.items() if k in ("every", "events", "heartbeat", "direction") and v is not None} if isinstance(a, dict) else {}
-    own = None
-    if project:
-        projects = d.get("projects") or {}
-        own = projects.get(project) if project in projects else (d.get("spaces") or {}).get(project)
+    own = project_layer(d, project if project and os.path.isabs(str(project)) else None, project) if project else None
     return part(d.get("everywhere")), part(own)
 
 
@@ -122,6 +140,12 @@ def write_max_running(s, space=None, value=_UNSET):
     layer.update(tasks=tasks) if tasks else layer.pop("tasks", None)
     if not layer:
         projects.pop(folder, None)
+    if value is None and isinstance(d.get("spaces"), dict):
+        for v in d["spaces"].values():
+            if isinstance(v, dict) and v.get("folder") == folder and isinstance(v.get("tasks"), dict):
+                v["tasks"].pop("max_running", None)
+                if not v["tasks"]:
+                    v.pop("tasks", None)
     d["version"] = 1
     os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
     tmp = f"{SETTINGS}.{os.getpid()}.tmp"
@@ -134,28 +158,16 @@ def write_max_running(s, space=None, value=_UNSET):
 
 def settings_layers(s, space=None):
     """(Everywhere's, this machine's, this project's) raw settings, least specific first."""
-    try:
-        with open(SETTINGS) as f:
-            d = json.load(f)
-    except (OSError, ValueError):
-        d = {}
-    if not isinstance(d, dict):
-        d = {}
-    folder = _folder_of(s)
-    projects = d.get("projects") or {}
-    pick = projects.get(folder) if folder and isinstance(projects, dict) else None
-    if pick is None and folder:
-        spaces = d.get("spaces") or {}
-        if isinstance(spaces, dict):
-            pick = next((v for v in spaces.values() if isinstance(v, dict) and v.get("folder") == folder), None)
+    d = read_settings()
+    pick = project_layer(d, _folder_of(s), space)
     machine = (d.get("machines") or {}).get(d.get("here") or LOCAL_MACHINE)
-    return d.get("everywhere") or {}, machine or {}, pick or {}
+    return d.get("everywhere") or {}, machine or {}, pick
 
 
 def settings_for(s, space=None):
     """The settings for this project folder's tasks: Everywhere, then this machine's, then
     this project's override in d["projects"][folder] (most specific wins)."""
-    everywhere, machine, pick = settings_layers(s)
+    everywhere, machine, pick = settings_layers(s, space)
     out = {k: {kk: list(vv) if isinstance(vv, list) else vv for kk, vv in v.items()} for k, v in DEFAULTS.items()}
 
     def merge(part):

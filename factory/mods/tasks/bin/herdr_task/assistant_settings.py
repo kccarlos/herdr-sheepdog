@@ -9,7 +9,7 @@ import json
 import os
 
 from .base import hc_json, label_of, MAX_RUNNING, now, PROJECT_LABEL, run, STORE
-from .settings import DEFAULTS, LOCAL_MACHINE, MUST_WORDS, SETTINGS, agent_key, read_settings
+from .settings import DEFAULTS, LOCAL_MACHINE, MUST_WORDS, SETTINGS, agent_key, bare, project_layer, read_settings
 from .launch import coordinators, is_coordinator
 
 # What a coordinator was last told, on its terminal: "review:1a2b3c,merge:…", a short hash of each line.
@@ -40,7 +40,11 @@ def project_of(k, d=None):
     if cwd:
         exp = os.path.expanduser(cwd)
         return os.path.realpath(exp) if os.path.isdir(exp) else exp
-    return proj or None
+    sp = bare(labels.get("herdr.space") or labels.get("herdr.coordinator.space") or "")
+    spaces = (d or {}).get("spaces") if isinstance(d, dict) else None
+    if sp and isinstance(spaces, dict) and isinstance(spaces.get(sp), dict):
+        return spaces[sp].get("folder") or sp
+    return proj or sp or None
 
 
 def layers(d, project):
@@ -48,7 +52,7 @@ def layers(d, project):
     this project's own."""
     obj = lambda x: x if isinstance(x, dict) else {}
     machine = obj(obj(d.get("machines")).get(d.get("here") or LOCAL_MACHINE))
-    own = obj(obj(d.get("projects")).get(project)) if project else {}
+    own = project_layer(d, project if project and os.path.isabs(str(project)) else None, project) if project else {}
     return [("everywhere", obj(d.get("everywhere"))), ("machine", machine), ("project", own)]
 
 
@@ -76,9 +80,12 @@ def autopilot_of(project, cfg):
     """(on, schedule words, direction) of the project's Autopilot."""
     from . import autopilot as ap
     try:
+        sid = next((k for k, v in ((cfg or {}).get("spaces") or {}).items()
+                    if isinstance(v, dict) and v.get("folder") == project), None) if project else None
         with ap.state(write=False) as d:
-            rec = ((d.get("projects") or {}).get(project) or (d.get("spaces") or {}).get(project)) if project else None
-            eff = ap.resolve(d, rec, project, cfg)
+            key = sid if sid and not (d.get("projects") or {}).get(project) else project
+            rec = ((d.get("projects") or {}).get(project) or (d.get("spaces") or {}).get(key)) if project else None
+            eff = ap.resolve(d, rec, key, cfg)
         return eff["on"], ap.trigger_of(eff), ap.direction_of(project, cfg)
     except Exception:  # never stops a session's start
         return False, "", ""

@@ -7801,6 +7801,19 @@ class AssistantSettings(unittest.TestCase):
         self.assertEqual(len(self.sent), 1)
         self.assertIn('name="merge" value="auto"', self.sent[0][1])
 
+    def test_spaces_fallback_merges_with_projects_until_sdf9(self):
+        self.write({"spaces": {"s1": {"folder": "/proj/sp1", "tasks": {"merge": "auto", "review_rounds": 2}}}})
+        self.terminals["t8"] = {"state": "live", "turn": 3, "labels": {"herdr.role": "coordinator", "herdr.space": "vm/s1"}}
+        note_old = self.aset.session_note("t8")
+        self.assertIn("- Merge: on its own (Herdr merges a ready task); set for this project", note_old)
+        self.assertIn("- Review: on, at most 2 rounds", note_old)
+        self.settings.write_max_running({"folder": "/proj/sp1"}, None, 3)
+        self.assistant("t5", "/proj/sp1")
+        note_merged = self.aset.session_note("t5")
+        self.assertIn("- Merge: on its own (Herdr merges a ready task); set for this project", note_merged)
+        self.assertIn("- Review: on, at most 2 rounds", note_merged)
+        self.assertIn("- Tasks at once: 3 per folder (more wait and start by themselves); set for this project", note_merged)
+
 
 class CodexAsksOnTheCard(unittest.TestCase):
     """SHEP-91: a Codex worker's PermissionRequest hook (`herdr-task _allow`) allows its own commands, and hands anything
@@ -8262,6 +8275,14 @@ class TaskFlow(unittest.TestCase):
         self.assertNotIn("Suggested next message", settings.settings_block(self.store, self.task))
         settings.write_autopilot(folder, {"every": "every 30 minutes"})
         self.assertEqual(settings.autopilot_layers(settings.read_settings(), folder)[1], {"every": "every 30 minutes"})
+        # Legacy spaces[id] from project.py stays visible when write_max_running writes projects[folder]
+        settings = self.settings({"spaces": {"s1": {"folder": folder, "tasks": {"merge": "auto", "check": "make test", "max_running": 5}}}})
+        settings.write_max_running(self.store, None, 3)
+        tcfg = settings.settings_for(self.store)["tasks"]
+        self.assertEqual((tcfg["merge"], tcfg["check"], tcfg["max_running"]), ("auto", "make test", 3))
+        settings.write_max_running(self.store, None, None)
+        tcfg = settings.settings_for(self.store)["tasks"]
+        self.assertEqual((tcfg["merge"], tcfg["check"], tcfg["max_running"]), ("auto", "make test", 10))
 
     def test_a_running_task_keeps_its_briefs_review(self):
         """#750: Review turned on everywhere while a task runs: its brief said off, so show and ready say off too."""
