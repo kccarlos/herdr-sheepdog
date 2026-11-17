@@ -2,6 +2,8 @@
 
 Phase 1's exit test from the design: *the whole Python suite passes with no herdr-app installed; on a Linux VM and a clean Tart VM with only hc and one CLI, a task goes from `add` to a merged PR.* An agent that wrote none of milestone 1 ran it on 2026-11-17 against `main` at `4cacc91a` (after SDF-10, SDF-11 and SDF-12). This page records what was run, what passed and the gaps found. Background: [engine-audit.md](engine-audit.md) section 6.
 
+**Status: half met (not passed).** The Python suite passed without `herdr-app` on all three machines and a task reached `main` in local-merge mode on both VMs, but the GitHub pull-request leg (section 3) is not yet proven.
+
 ## Machines
 
 | Machine | What is installed | Agent CLI |
@@ -10,7 +12,7 @@ Phase 1's exit test from the design: *the whole Python suite passes with no herd
 | Linux VM (`ssh oci`, Ubuntu 24.04, arm64) | hc 0.1.17, claude, codex, uv 0.12.1, git, Python 3.12. No herdr-app, no gh, no make | claude (Haiku) |
 | Tart VM (a clone of `factory-base-2026-11-08`, macOS 26.6) | Stripped to hc 0.1.18 and agy: herdr-app, the Herdr window, `~/.config/herdr-app`, claude and codex removed from the clone. Homebrew git, gh (signed in) and Python 3.15 stay | agy (Gemini 4 Carbon) |
 
-The `sheepdog-oci` ssh name in the brief is stale; the Linux VM is `oci`. The original VM images were not changed: the Tart work ran on a clone.
+The `sheepdog-oci` ssh name in the brief is stale; the Linux test VM is `oci`. Unlike the stripped macOS test VM clone (which had only `hc` and `agy`), the Linux test VM had both `claude` and `codex` installed, not "only hc and one CLI". The original VM images were not changed: the Tart work ran on a clone.
 
 ## 1. The suite without herdr-app
 
@@ -60,6 +62,8 @@ With those, steps 1 to 5 above run in a clone of that repo, and the result is ch
 
 ## Findings
 
+**Fixed since:** findings 1 and 2 fixed by #646 (SDF-41); findings 6 and 7 fixed by #645 (SDF-42).
+
 Severity levels follow the reviewer template: **major** means someone would hit it, **minor** means it is rarely hit or cosmetic.
 
 1. **Major: the default worker CLI is `claude` even where it is not installed.** On a machine with only agy, `start` says "DEMO-1 started", the worker terminal prints `command not found: claude`, and the task sits in Working. Doctor already knows which CLIs are ready (`agent clis: 1 ready (agy)`). Not fixed here. Picking an installed CLI as the default broke `switch --all --from claude` and other code that reads "no agent set" as claude (`agents.py`, `settings.py`). It needs a decision, probably in phase 2: doctor or `project start` writes the worker setting, or `start` refuses a CLI that is not on `PATH`.
@@ -74,7 +78,7 @@ Severity levels follow the reviewer template: **major** means someone would hit 
 
 ## Not proven
 
-- **The merged pull request on either VM**, which is half of the phase 1 exit test (section 3). It needs a private throwaway repo and a token scoped to it.
+- **The merged pull request on either VM**, which is half of the phase 1 exit test (section 3). It needs a private throwaway repo and a token scoped to it. Follow-up: SDF-43.
 - Unattended runs: every run above had the tester answering dialogs, changing one setting and accepting as the owner. Phase 2 (doctor, coordinator lease) is what removes those step-ins.
 - `project start` with a coordinator on either VM.
 - Review rounds (Review was off) and CI checks (the demo repos have no CI).
