@@ -1,5 +1,5 @@
 """Shared ground: paths, Fail, the clock, this herdr-task's own files, and running programs
-(hc, herdr-app, git) only in the real environment."""
+(hc, git) only in the real environment."""
 
 import io
 import json
@@ -37,14 +37,14 @@ def _roots(home=None, env=None, mac=None):
     env = os.environ if env is None else env
     home = home or os.path.expanduser("~")
     mac = sys.platform == "darwin" if mac is None else mac
-    one = _abs(env.get("SHEPHERDR_HOME"))
+    one = _abs(env.get("SHEEPDOG_FACTORY_HOME") or env.get("SHEEPDOG_HOME") or env.get("SHEPHERDR_HOME"))
     if one:
         return {k: os.path.join(one, k) for k in ("config", "data", "state", "cache")}
-    x = lambda var, *dflt: os.path.join(_abs(env.get(var)) or os.path.join(home, *dflt), "shepherdr")
+    x = lambda var, *dflt: os.path.join(_abs(env.get(var)) or os.path.join(home, *dflt), "sheepdog")
     cache = _abs(env.get("XDG_CACHE_HOME"))
     return {"config": x("XDG_CONFIG_HOME", ".config"), "data": x("XDG_DATA_HOME", ".local", "share"),
             "state": x("XDG_STATE_HOME", ".local", "state"),
-            "cache": os.path.join(cache, "shepherdr") if cache else os.path.join(home, *(("Library", "Caches") if mac else (".cache",)), "shepherdr")}
+            "cache": os.path.join(cache, "sheepdog") if cache else os.path.join(home, *(("Library", "Caches") if mac else (".cache",)), "sheepdog")}
 
 
 class Where:
@@ -76,12 +76,24 @@ WORKTREES = WHERE.worktrees()
 
 
 def beside_store(kind, name):
-    """A herdr-task file kept beside the task lists: its own place in Shepherdr's folders, or beside a
+    """A herdr-task file kept beside the task lists: its own place in sheepdog's folders, or beside a
     test's own HERDR_TASK_STORE."""
     if os.environ.get("HERDR_TASK_STORE"):
         return os.path.join(os.path.dirname(STORE.rstrip("/")), name)
     return WHERE.path(kind)
-LEGACY = os.path.join(HOME, ".config", "herdr-app", "data", "tasks")
+
+
+PROJECT_LABEL = "sheepdog.project"
+ROLE_LABEL = "sheepdog.role"
+TASK_LABEL = "sheepdog.task"
+
+
+def label_of(labels, kind):
+    """Reads `sheepdog.<kind>` from an hc terminal's labels, falling back to `herdr.<kind>`."""
+    lbs = labels or {}
+    return lbs.get(f"sheepdog.{kind}") or lbs.get(f"herdr.{kind}")
+
+
 SHELLS = {"bash", "zsh", "fish", "sh", "dash", "ksh", "tcsh", "csh", "nu", "xonsh", "pwsh", "powershell", "elvish"}
 RANK = {"blocked": 4, "done": 3, "working": 2, "idle": 1}
 MAX_RUNNING = 10
@@ -92,39 +104,6 @@ PR_EVERY = 60000
 
 class Fail(Exception):
     pass
-
-
-# Shepherdr's installer (bin/shepherdr) puts this file here while it replaces helpers or templates,
-# and removes it once `shepherdr doctor` finds the install whole. Until then nothing copies a helper
-# to another machine: not the sync, not a command's self-copy (cli.remote, herdr-artifact's,
-# herdr-secret's install --on), so a half-done or wrong copy never reaches every machine.
-# It is in Shepherdr's state folder; an older installer's is at ~/.herdr/sync-hold: either holds.
-SYNC_HOLD = os.path.join(WHERE.roots["state"], "sync-hold")
-SYNC_HOLDS = (SYNC_HOLD, os.path.join(HOME, ".herdr", "sync-hold"))
-
-
-def sync_held():
-    """Why copies to other machines wait now (the hold's first line), or None."""
-    for p in SYNC_HOLDS:
-        try:
-            with open(p) as f:
-                return f.readline().strip() or "held by Shepherdr's installer"
-        except OSError:
-            continue
-    return None
-
-
-# Shepherdr's add-ons (lib/addons.json): one the person switched off in Shepherdr settings >
-# Window is in Everywhere's "off" (the settings file, or HERDR_TASK_SETTINGS), and its
-# background work here stops (autopilot, browsers, the sync to other machines).
-def addon_off(name):
-    path = os.environ.get("HERDR_TASK_SETTINGS") or WHERE.path("settings")
-    try:
-        with open(path) as f:
-            off = (json.load(f).get("everywhere") or {}).get("off")
-    except (OSError, ValueError, AttributeError):
-        return False
-    return isinstance(off, list) and name in off
 
 
 def now():
@@ -158,10 +137,9 @@ def stop_note(kind, **fields):
 
 
 # ---- the real environment -------------------------------------------------------------------
-# With a changed HOME, HERDR_APP_HOME or another herdr-core session (a test's), herdr-app and hc
-# could still reach the person's real window and core and overwrite every machine's spaces. So
-# herdr-task then refuses to run them at all, with why (HERD-55).
-GUARDED = {"hc", "herdr-core", "herdr-app"}
+# With a changed HOME or another herdr-core session (a test's), hc could still reach the person's
+# real herdr-core session. So herdr-task then refuses to run it at all, with why (HERD-55).
+GUARDED = {"hc", "herdr-core"}
 
 
 def real_home():
@@ -177,9 +155,6 @@ def not_real():
     same = lambda a, b: os.path.realpath(a) == os.path.realpath(b)
     if env.get("HOME") and not same(env["HOME"], home):
         return f"HOME is {env['HOME']}, not {home}"
-    app = env.get("HERDR_APP_HOME")
-    if app and not same(app, os.path.join(home, ".config", "herdr-app")):
-        return f"HERDR_APP_HOME is {app}"
     if env.get("HC_SESSION") not in (None, "", "default"):
         return f"HC_SESSION is {env['HC_SESSION']}"
     sock = env.get("HC_SOCKET")
@@ -189,12 +164,12 @@ def not_real():
 
 
 def guard(args):
-    """Refuses herdr-app and hc outside the real environment (see not_real)."""
+    """Refuses hc outside the real environment (see not_real)."""
     name = os.path.basename(args[0])
     why = not_real() if name in GUARDED else None
     if why:
-        raise Fail(f"refusing to run {name}: {why}. Run herdr-task with the real HOME, HERDR_APP_HOME, "
-                   "HC_SESSION and HC_SOCKET: changed ones can reach the real window and wipe its spaces.")
+        raise Fail(f"refusing to run {name}: {why}. Run herdr-task with the real HOME, "
+                   "HC_SESSION and HC_SOCKET: changed ones can reach the real herdr-core session.")
 
 
 def run(args, cwd=None, check=False, env=None, timeout=None):
@@ -294,10 +269,6 @@ def kill_agent(address, runner=None):
     return r
 
 
-APP_HOME = os.path.join(HOME, ".config", "herdr-app")
-# Where a machine that only runs tasks keeps the chat's question-card hook (mods/chat/ask-hook.sh
-# and ask-end.py), synced there beside herdr-task (machines.manifest; launch.ask_hook runs it).
-ASK_HOME = os.path.join(".local", "share", "herdr", "ask")
 # ---- this herdr-task ------------------------------------------------------------------------
 # herdr-task is a thin entry beside this package; on another machine it is one zipapp holding
 # both (remote installs it as ~/.local/bin/herdr-task). ENTRY is what runs it again (agents' own

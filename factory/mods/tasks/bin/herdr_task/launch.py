@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-from .base import ASK_HOME, ENTRY, Fail, HOME, git, hc_json, kill_agent, now, run, WORKTREES
+from .base import ENTRY, Fail, HOME, git, hc_json, kill_agent, now, run, WHERE, WORKTREES
 from .settings import agent_key, ASSISTANT_TEMPLATES, by_layer, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, gate_min, keep_review, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
@@ -331,7 +331,7 @@ def ask_hook():
     """The chat's question-card hook (mods/chat/ask-hook.sh): Herdr's app home's, else the copy a
     sync left on a machine that only runs tasks (ASK_HOME); None when there's neither."""
     app = os.environ.get("HERDR_APP_HOME") or os.path.join(os.path.expanduser("~"), ".config", "herdr-app")
-    for p in (os.path.join(app, "mods", "chat", "ask-hook.sh"), os.path.join(os.path.expanduser("~"), ASK_HOME, "ask-hook.sh")):
+    for p in (os.path.join(app, "mods", "chat", "ask-hook.sh"), os.path.join(os.path.expanduser("~"), ".local", "share", "herdr", "ask", "ask-hook.sh")):
         if os.path.isfile(p):
             return p
     return None
@@ -413,7 +413,7 @@ def sandboxes(argv):
 # The person's opt-out: with this file, an agy reviewer runs with skipped permissions as itself, outside
 # sandbox-exec, so it signs in as the person's agy does (agy keeps its sign-in in the keychain, which
 # the sandbox can't reach). Its brief still says read only; the rest (verdict from its terminal) is the same.
-UNSANDBOXED_FLAG = os.path.join(HOME, ".herdr", "agy-review-unsandboxed")
+UNSANDBOXED_FLAG = os.path.join(WHERE.roots["config"], "agy-review-unsandboxed")
 
 
 def reviewer_sandbox(s, space=None):
