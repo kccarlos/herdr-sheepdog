@@ -158,7 +158,7 @@ def sync_check(s, t, at, repo=None):
     ("error", why) when it couldn't check (fall back to full). Leaves the task's worktree, branch and folder alone."""
     from .github import remote_of, remote_repo
     main, base = s.loc["folder"], t.get("base") or "main"
-    cmd = resolve_check(s, t)[0]
+    cmd, source = resolve_check(s, t)
     remote = remote_of(main)
     if repo and remote_repo(main, remote) != repo:  # a fork's remote: its base isn't the pull request's
         return "error", f"{remote} isn't {repo}"
@@ -190,6 +190,15 @@ def sync_check(s, t, at, repo=None):
         if r.returncode in (126, 127):  # its program isn't on Herdr's PATH: not the code's fault
             return "error", f"`{cmd}` couldn't run here (exit {r.returncode})"
         if r.returncode:
+            if source != "setting":
+                if not (git(tmp, "reset", "--hard", at)[0] and git(tmp, "clean", "-ffdx")[0]):
+                    return "error", f"couldn't verify derived check `{cmd}` on {at[:8]}"
+                try:
+                    r_at = run(["sh", "-c", cmd], cwd=tmp, timeout=SYNC_LIMIT_S)
+                except subprocess.TimeoutExpired:
+                    return "error", f"the check ran longer than {SYNC_LIMIT_S // 60} minutes"
+                if r_at.returncode:
+                    return "error", f"derived check `{cmd}` also exited {r_at.returncode} on {at[:8]} here"
             tail = (r.stdout + r.stderr).strip()[-600:]
             return "fail", f"`{cmd}` exited {r.returncode} on {at[:8]} merged with {base} at {tip[:8]}" + (f":\n{tail}" if tail else "")
         return "pass", None

@@ -11523,6 +11523,39 @@ class SyncBehindBase(unittest.TestCase):
         self.assertEqual((t["state"], gh["merged"], self.updates(gh), t.get("sync_fallback")), ("done", self.head, [], None))
         self.leftovers()
 
+    def test_derived_check_env_failure_falls_back_while_merge_regression_fails(self):
+        # Derived check exiting non-zero on head alone (e.g. make exits 2 for missing venv/deps) falls back to full.
+        t, gh = self.repo("cheap", check="")
+        with open(os.path.join(self.main, "Makefile"), "w") as f:
+            f.write(".PHONY: test\ntest:\n\texit 2\n")
+        self.sh(self.main, "fetch", "-q", "origin", "main")
+        self.sh(self.main, "merge", "--ff-only", "-q", "origin/main")
+        self.sh(self.main, "add", "Makefile"), self.sh(self.main, "commit", "-qm", "makefile exit 2")
+        self.sh(self.main, "push", "-q", "origin", "main")
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], len(self.updates(gh)), t.get("attention")), ("ready", None, 1, None))
+        self.assertIn("cheap to full", (t.get("sync_fallback") or {}).get("why", ""))
+        self.leftovers()
+        # Derived check that passes on head alone and fails only when merged still fails cheap sync (SYNC_FAILED).
+        t2, gh2 = self.repo("cheap", check="")
+        mk = ".PHONY: test\ntest:\n\t! { test -f a.txt && test -f b.txt; }\n"
+        self.sh(self.main, "checkout", "-q", "b")
+        with open(os.path.join(self.main, "Makefile"), "w") as f:
+            f.write(mk)
+        self.sh(self.main, "add", "Makefile"), self.sh(self.main, "commit", "-qm", "makefile on branch")
+        gh2["head"] = t2["head"] = self.head = self.sh(self.main, "rev-parse", "HEAD")
+        self.sh(self.main, "checkout", "-q", "main")
+        self.sh(self.main, "fetch", "-q", "origin", "main")
+        self.sh(self.main, "merge", "--ff-only", "-q", "origin/main")
+        with open(os.path.join(self.main, "Makefile"), "w") as f:
+            f.write(mk)
+        self.sh(self.main, "add", "Makefile"), self.sh(self.main, "commit", "-qm", "makefile on main")
+        self.sh(self.main, "push", "-q", "origin", "main")
+        self.go(gh2)
+        self.assertTrue((t2.get("attention") or "").startswith(self.commands.SYNC_FAILED), t2.get("attention"))
+        self.assertIsNone(t2.get("sync_fallback"))
+        self.leftovers()
+
     def test_derive_check_reads_makefile_check_agents_md_and_ignores_prose(self):
         import herdr_task.checks as checks, herdr_task.settings as st
         d = tempfile.mkdtemp(prefix="derive-")
