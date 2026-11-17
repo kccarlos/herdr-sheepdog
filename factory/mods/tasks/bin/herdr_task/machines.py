@@ -526,14 +526,8 @@ if hc:
         if not m.get("temporary"):
             me["links"].append({"how": "herdr-core", "to": m.get("name"), "id": m.get("id"), "target": m.get("target"),
                                 "state": m.get("state"), "ok": m.get("state") == "connected"})
-    # Coordinators: live terminals labelled sheepdog.role=coordinator / herdr.role=coordinator, or started from the assistant template.
-    seen = {}
-    for args in (["--label", "sheepdog.role=coordinator"], ["--label", "herdr.role=coordinator"], []):
-        for t in (js(sh([hc, "ls", "--json"] + args)[1]) or {}).get("terminals") or []:
-            if "/" in t.get("address", "") or t.get("state") != "live":
-                continue
-            if args or t.get("template") in ("assistant", "coordinator"):
-                seen[t["address"]] = t
+    # Coordinators: each project's lease holder (the "coordinator" record in its task list, SDF-16), while live.
+    # A terminal that only looks like one (role labels, the assistant template, a tab name) is none (note 55).
     tasks_dir = SHEP("tasks")
     try:
         with open(SHEP("settings.json")) as f:
@@ -541,25 +535,27 @@ if hc:
     except Exception:
         projects = {}
     me["assistants"] = []
-    for a in seen:
-        k = js(sh([hc, "get", a, "--json"])[1]) or {}
-        lb = k.get("labels") or {}
-        role = lb.get("sheepdog.role") or lb.get("herdr.role")
-        if k.get("state") != "live" or role == "ask" or not (role == "coordinator" or k.get("template") in ("assistant", "coordinator")):
+    for fn in sorted(os.listdir(tasks_dir)) if os.path.isdir(tasks_dir) else []:
+        if not fn.endswith(".json") or fn.startswith("."):
             continue
-        proj = lb.get("sheepdog.project") or ""
-        folder = proj if proj.startswith("/") else None
-        if proj and not folder and "/" not in proj:
-            try:
-                with open(os.path.join(tasks_dir, proj + ".json")) as f:
-                    folder = json.load(f).get("folder")
-            except Exception:
-                pass
-        folder = folder or k.get("cwd")
+        try:
+            with open(os.path.join(tasks_dir, fn)) as f:
+                lst = json.load(f)
+        except Exception:
+            continue
+        lease = lst.get("coordinator") if isinstance(lst, dict) else None
+        a = lease.get("address") if isinstance(lease, dict) else None
+        if not a or "/" in a:
+            continue
+        k = js(sh([hc, "get", a, "--json"])[1]) or {}
+        if k.get("state") != "live" or (lease.get("created_ms") and k.get("created_ms") and lease["created_ms"] != k["created_ms"]):
+            continue
+        folder = lst.get("folder")
         p_cfg = projects.get(folder) if isinstance(projects, dict) and isinstance(projects.get(folder), dict) else {}
         p_name = p_cfg.get("name") or (os.path.basename(folder.rstrip("/")) if folder else None) or None
-        me["assistants"].append({"address": a, "project": proj or folder, "project_name": p_name,
-                                 "folder": folder, "template": k.get("template"), "name": k.get("name")})
+        # cwd: where the agent itself runs, which a listing shows as it is (note 55d)
+        me["assistants"].append({"address": a, "project": fn[:-5], "project_name": p_name, "folder": folder, "cwd": k.get("cwd"),
+                                 "template": k.get("template"), "name": k.get("name")})
 # Next hops: through each herdr-core link that works, to a machine nobody on the way looks at.
 if o["depth"] > 0 and core:
     look = [l for l in me["links"] if l.get("ok") and l.get("id") and l["how"] == "herdr-core" and l["id"] not in o["seen"]]
@@ -876,7 +872,8 @@ def cmd_assistants(args):
     if not rows:
         print("No live Assistants on any machine reachable from here.")
     for a in rows:
-        print(f"{a['target']:<28} {a.get('project_name') or '?':<20} {a.get('folder') or ''}")
+        runs = f"  (runs in {a['cwd']})" if a.get("cwd") and a["cwd"] != a.get("folder") else ""
+        print(f"{a['target']:<28} {a.get('project_name') or '?':<20} {a.get('folder') or ''}{runs}")
 
 
 def _find(rows, target):
