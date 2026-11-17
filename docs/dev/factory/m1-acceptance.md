@@ -2,7 +2,7 @@
 
 Phase 1's exit test from the design: *the whole Python suite passes with no herdr-app installed; on a Linux VM and a clean Tart VM with only hc and one CLI, a task goes from `add` to a merged PR.* An agent that wrote none of milestone 1 ran it on 2026-11-17 against `main` at `4cacc91a` (after SDF-10, SDF-11 and SDF-12). This page records what was run, what passed and the gaps found. Background: [engine-audit.md](engine-audit.md) section 6.
 
-**Status: met on the Linux test VM (SDF-43).** The Python suite passed without `herdr-app` on all three machines, local-merge mode reached `main` on both VMs, and the GitHub pull-request leg (section 3) is now proven on the Linux test VM with [`scripts/factory/m1-pr-acceptance.sh`](../../../scripts/factory/m1-pr-acceptance.sh) (no macOS test VM image was present in `tart list` during SDF-43). Until SDF-43 ran section 3, this exit test was half met, not passed.
+**Status: met on the Linux test VM; the macOS test VM's PR leg is still open (see Not proven).** The Python suite passed without `herdr-app` on all three machines, local-merge mode reached `main` on both VMs, and the GitHub pull-request leg (section 3) is now proven on the Linux test VM with [`scripts/factory/m1-pr-acceptance.sh`](../../../scripts/factory/m1-pr-acceptance.sh) (no macOS test VM image was present in `tart list` during SDF-43). Until SDF-43 ran section 3 on the Linux test VM, this exit test was half met, not passed.
 
 ## Machines
 
@@ -58,10 +58,10 @@ In SDF-13, neither VM could make or merge a pull request because the Linux test 
 - a private throwaway repo for the test, and
 - a fine-grained token scoped to that repo only (Contents and Pull requests, read and write), given through `herdr-secret` and removed after the run, plus `gh` on the Linux test VM.
 
-**Proven on the Linux test VM (SDF-43, 2026-11-17 against `main` at `5f712f72`):** with `gh` (`2.45.0`), `uv` (`0.13.9`), and `sheepdog` from `5f712f72` on the Linux test VM, [`scripts/factory/m1-pr-acceptance.sh`](../../../scripts/factory/m1-pr-acceptance.sh) cloned a private throwaway repo (`kccarlos/test_repo`) using a repo-scoped fine-grained `GH_TOKEN` passed via `herdr-secret`, ran steps 1–5 unattended (`claude` Haiku, `worker.perm=full`, 0 key presses after #646), accepted `DEMO-1` once PR #3 was open, waited for `herdr-task`'s `tick` to merge it after the 30s no-CI window, and verified the merged state on GitHub:
+**Proven on the Linux test VM (SDF-43, 2026-11-17 against `main` at `5f712f72`):** with `gh` (`2.45.0`), `uv` (`0.13.9`), and `sheepdog` from `5f712f72` on the Linux test VM, [`scripts/factory/m1-pr-acceptance.sh`](../../../scripts/factory/m1-pr-acceptance.sh) cloned a private throwaway repo (`kccarlos/test_repo`) using a repo-scoped fine-grained `GH_TOKEN` passed via `herdr-secret`, ran steps 1–5 unattended (`claude` Haiku, `worker.perm=full`, 0 key presses after #646), accepted `DEMO-1` once PR #4 was open, waited for `herdr-task`'s `tick` to merge it after the 30s no-CI window, and verified the merged state on GitHub:
 
 ```json
-{"mergeCommit":{"oid":"b1b834696db626bf8d9da91b96f7a645a94f98cf"},"mergedAt":"2026-11-17T17:14:37Z","number":3,"state":"MERGED","url":"https://github.com/kccarlos/test_repo/pull/3"}
+{"mergeCommit":{"oid":"a4165f11a83daa4f246cea19f711d1d6dcb9a5ab"},"mergedAt":"2026-11-17T17:20:48Z","number":4,"state":"MERGED","url":"https://github.com/kccarlos/test_repo/pull/4"}
 ```
 
 No macOS test VM image was present in `tart list` on the host Mac during SDF-43, so section 3 was not run on the macOS test VM.
@@ -84,7 +84,7 @@ Severity levels follow the reviewer template: **major** means someone would hit 
 
 ## Not proven
 
-- **The merged pull request on the macOS test VM** (follow-up: SDF-43 proved section 3 on the Linux test VM; `tart list` had no macOS test VM image available on the host Mac, and no separate macOS follow-up task is filed yet).
+- **The merged pull request on the macOS test VM** (follow-up: SDF-43 proved the Linux test VM leg and remains the reference run; no macOS test VM image was present in `tart list` on the host Mac, so the macOS leg still needs a follow-up task once an image is available).
 - Unattended runs on the macOS test VM (`agy` / `project start`): SDF-43's Linux PR run was unattended after #646, while the earlier SDF-13 runs had the tester answering dialogs, changing one setting, and accepting as the owner. Phase 2 (doctor, coordinator lease) removes the remaining step-ins.
 - `project start` with a coordinator on either VM.
 - Review rounds (Review was off) and CI checks (the demo repos have no CI).

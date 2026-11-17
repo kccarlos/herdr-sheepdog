@@ -85,6 +85,10 @@ BIN_DIR="$WORKDIR/bin"
 mkdir -p "$BIN_DIR"
 export PATH="$BIN_DIR:$PATH"
 HC_RESTARTED=0
+HC_RESTART_FLAGS=()
+if hc server restart --help 2>&1 | grep -q -- '--fresh'; then
+  HC_RESTART_FLAGS+=(--fresh)
+fi
 TASK_STARTED=0
 TASK_DONE=0
 TASK_ID="${PREFIX}-1"
@@ -95,7 +99,7 @@ cleanup() {
     herdr-task done "$TASK_ID" --folder "$REPO_DIR" </dev/null >/dev/null 2>&1 || true
   fi
   if [ "$HC_RESTARTED" -eq 1 ]; then
-    env -u GH_TOKEN -u GITHUB_TOKEN hc server restart </dev/null >/dev/null 2>&1 || true
+    env -u GH_TOKEN -u GITHUB_TOKEN hc server restart "${HC_RESTART_FLAGS[@]}" </dev/null >/dev/null 2>&1 || true
   fi
   if [ "$KEEP" -eq 0 ]; then
     rm -rf "$WORKDIR"
@@ -111,7 +115,7 @@ gh repo view "$REPO" --json nameWithOwner,isPrivate -q '"Repo: \(.nameWithOwner)
 
 # Ensure hc worker terminals inherit GH_TOKEN when gh is not otherwise logged in.
 if ! env -u GH_TOKEN -u GITHUB_TOKEN gh auth status >/dev/null 2>&1; then
-  hc server restart </dev/null >/dev/null 2>&1
+  hc server restart "${HC_RESTART_FLAGS[@]}" </dev/null >/dev/null 2>&1
   HC_RESTARTED=1
 fi
 
@@ -155,9 +159,9 @@ herdr-task config --folder "$REPO_DIR" --prefix "$PREFIX" --set worker.perm=full
 echo "==> Step 4: add $TASK_ID"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ADD_ARGS=(
-  add "Update HELLO.md"
+  add "Update HELLO.md ${RUN_ID}"
   --folder "$REPO_DIR"
-  --prompt "Write 'hello (${RUN_ID})' to HELLO.md and note it in docs/proof/${TASK_ID}.md, commit both, then run herdr-task ready ${TASK_ID} --folder ${REPO_DIR} --proof docs/proof/${TASK_ID}.md --summary \"Update HELLO.md (${RUN_ID})\""
+  --prompt "Write 'hello (${RUN_ID})' to HELLO.md and note it in docs/proof/${TASK_ID}.md, commit both, then run ${BIN_DIR}/herdr-task ready ${TASK_ID} --folder ${REPO_DIR} --proof docs/proof/${TASK_ID}.md --summary \"Update HELLO.md (${RUN_ID})\""
 )
 if [ -n "$AGENT" ]; then
   ADD_ARGS+=(--agent "$AGENT")
