@@ -494,6 +494,13 @@ DRIFTED = (" They failed after Herdr brought the branch up to date with its base
 UPDATE_CONFLICT = "Herdr couldn't bring it up to date with its base branch (a conflict?)"
 
 
+def main_red_hold(s, base):
+    """FAC-113: why merges (and update-branch) into `base` are held while its newest finished GitHub run is red
+    (the watch main_check keeps: ghnews.py), else None. Resumes by itself once main_check sees it green."""
+    red = ((s.data.get("main_watch") or {}).get(base) or {}).get("red")
+    return f"{base} is red since {red[:7]}: merges held until it's green." if red else None
+
+
 def pr_behind(task, repo, head):
     """FAC-98: how many of its base branch's commits the pull request's head lacks (GitHub's compare), or 0 when
     GitHub can't say."""

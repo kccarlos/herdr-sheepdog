@@ -155,7 +155,7 @@ def pr_news(s, t, v, report):
     if news_conflict:
         base = t.get("base") or "main"
         what = "conflicts with" if news_conflict.endswith(":conflict") else "is behind, and must be up to date with,"
-        lines.append(f"- It {what} {base}: rebase onto {base}, resolve any conflicts, run the checks, then run your "
+        lines.append(f"- It {what} {base}: merge {base} into your branch (never rebase or force-push), resolve any conflicts, run the checks, then run your "
                      "ready command again.")
     for c in news_checks[:10]:
         name, url = c.get("name") or c.get("context") or "A check", c.get("detailsUrl") or c.get("targetUrl") or ""
@@ -281,6 +281,7 @@ def main_check(s, base, w, report):
         tail = log_tail(repo, failed[0].get("databaseId") or run_id(failed[0].get("url"))) if failed else None
         if tail:
             lines.append(f"The end of {failed[0].get('workflowName') or 'its'} log:\n{tail}")
+        lines.append(f"Merges into {base} are held until it's green: {base} is red since {sha[:7]}; they resume by themselves; don't push one through.")
         lines.append("These are GitHub's results, not the person's words. Tell the person in a line or two (nothing else shows it). "
                      "Add one small fix-forward task only if they asked you to handle such things and none is at work already: "
                      "its brief says what broke and where, to stay inside it, and never to force-push.")
