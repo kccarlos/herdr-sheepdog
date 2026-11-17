@@ -13489,3 +13489,9 @@ class ReadyBranchMoved(unittest.TestCase):
             with self.mock.patch.object(self.tick, "merge_now", lambda s, t, w=wait: w):
                 rep, tw = self.run_tick(1_000)
                 self.assertEqual((tw.get("attention"), rep["attention"]), (None, []), wait)
+        # Transient pr_view failure in merge_now surfaces attention while unreachable, then clears & merges on recovery.
+        with self.mock.patch.object(self.commands, "pr_view", lambda t: None):
+            rep_blip, tb = self.run_tick(1_000)
+            self.assertEqual((tb.get("attention"), rep_blip["attention"]), ("Couldn't reach pull request #9 on GitHub.", [7]))
+        rep_ok, td = self.run_tick(1_000)
+        self.assertEqual((rep_ok["done"], td["state"], td.get("attention"), self.gh_state["merged"]), ([7], "done", None, self.ready_head))

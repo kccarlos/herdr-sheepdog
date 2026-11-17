@@ -188,7 +188,7 @@ def facts(s, t, report):
                 t["attention"], t["attention_at"] = problem, now()
                 t.pop("merge_queued", None)
                 report["attention"].append(t["id"])
-            elif t.get("attention", "").startswith(("Checks failing", CI_STOPPED, "It conflicts", "The pull request was closed", MERGE_FAILED, BEHIND)) \
+            elif t.get("attention", "").startswith(("Checks failing", CI_STOPPED, "It conflicts", "The pull request was closed", MERGE_FAILED, BEHIND, "Couldn't reach pull request")) \
                     or (t.get("attention") == CHECKS_NEVER and missing != "never"):
                 t.pop("attention")
         if t["state"] == "ready" and t.get("auto_merge") and missing == "never" and not t.get("attention") and not (ci and pr.get("wait")):
