@@ -78,6 +78,16 @@ class Machine(unittest.TestCase):
                 json.dump({"version": 1, "secrets": vault}, f)
 
 
+class ReviewerRail(unittest.TestCase):
+    def test_a_reviewer_by_either_label_prefix_cant_use_secrets(self):
+        """SDF-11: the worker template labels its reviewer sheepdog.role=reviewer; the rail reads either prefix."""
+        for labels in ({"sheepdog.role": "reviewer"}, {"herdr.role": "reviewer"}):
+            with self.assertRaises(secret.Fail) as e:
+                secret.space_of({"labels": labels}, None)
+            self.assertIn("Reviewers can't use secrets", str(e.exception))
+        self.assertIsNone(secret.space_of({"labels": {"sheepdog.role": "worker"}}, None))
+
+
 class Record(Machine):
     def test_the_record_wins_over_the_mark(self):
         # m3 named as the main one keeps them, a stray mark or not (it once made `herdr-secret set` refuse there)
