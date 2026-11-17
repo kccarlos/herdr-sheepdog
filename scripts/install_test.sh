@@ -20,7 +20,18 @@ home=$work/home
 bin=$work/bin
 rel=$work/rel
 pkg=$work/pkg
-mkdir -p "$home" "$rel" "$pkg"
+pre=$work/preinstalled
+mkdir -p "$home" "$rel" "$pkg" "$pre"
+
+# Preinstall a stub hc for the base release cases so Linux CI runners without
+# hc never touch the network; dedicated cases below test fetching missing hc.
+cat >"$pre/hc" <<'EOF'
+#!/bin/sh
+echo "hc 0.2.0"
+EOF
+chmod 755 "$pre/hc"
+PATH="$pre:$PATH"
+export PATH
 
 # The stub logs setup, and reports a running daemon only when asked.
 cat >"$pkg/sheepdog" <<EOF
@@ -186,6 +197,127 @@ EOF
 	check "pinned release installs" "$rc"
 	grep -q "https://github.com/kccarlos/herdr-sheepdog/releases/download/v0.1.18/checksums.txt" "$work/curl-urls"
 	check "pinned release uses the tag URL" "$?"
+
+	# 5b. Factory release: fetches hc if missing, fetches uv if missing,
+	# runs uv python install for the pinned version into sheepdog's data
+	# folder, repairs a broken install with --reinstall, and never calls
+	# system python3.
+	cleanup_run
+	sysbin=$work/sysbin
+	mkdir -p "$sysbin"
+	for tool in sh uname curl tar awk grep mktemp cp mv rm ln mkdir chmod dirname readlink sha256sum shasum printf cat tr sed cut head tail; do
+		tp=$(command -v "$tool" 2>/dev/null || true)
+		[ -z "$tp" ] || ln -sf "$tp" "$sysbin/$tool"
+	done
+	cat >"$sysbin/python3" <<EOF
+#!/bin/sh
+echo "poison-system-python3" >>"$work/poison-python3"
+exit 99
+EOF
+	chmod 755 "$sysbin/python3"
+
+	fpkg=$work/fpkg
+	frel=$work/frel
+	mkdir -p "$fpkg" "$frel"
+	cat >"$fpkg/sheepdog" <<EOF
+#!/bin/sh
+case "\${1:-} \${2:-}" in
+"version ") echo "sheepdog v9.9.9" ;;
+"status ") exit 1 ;;
+"factory python-version") echo "3.14.8" ;;
+"factory python-dir") echo "\${SHEEPDOG_DATA_DIR:-\$HOME/.local/share/sheepdog}/factory/python" ;;
+*) exit 1 ;;
+esac
+EOF
+	chmod 755 "$fpkg/sheepdog"
+	tar -C "$fpkg" -czf "$frel/sheepdog_v9.9.9_linux_amd64.tar.gz" sheepdog
+	tar -C "$fpkg" -czf "$frel/sheepdog_v9.9.9_darwin_arm64.tar.gz" sheepdog
+	(cd "$frel" && for f in *.tar.gz; do sum "$f"; done >checksums.txt)
+
+	cat >"$work/hc-install.sh" <<EOF
+#!/bin/sh
+set -eu
+echo "\${HC_INSTALL_DIR:-}" >>"$work/hc-fetched"
+mkdir -p "\$HC_INSTALL_DIR"
+cat >"\$HC_INSTALL_DIR/hc" <<'HCEOF'
+#!/bin/sh
+echo "hc 0.9.0"
+HCEOF
+chmod 755 "\$HC_INSTALL_DIR/hc"
+EOF
+
+	cat >"$work/fake-uv" <<EOF
+#!/bin/sh
+set -eu
+printf '%s\n' "\$*" >>"$work/uv-calls"
+install_dir=
+reinstall=0
+ver=
+while [ "\$#" -gt 0 ]; do
+	case "\$1" in
+	python | install | --no-bin | --managed-python | --no-config) shift ;;
+	--reinstall) reinstall=1; shift ;;
+	--install-dir) install_dir=\$2; shift 2 ;;
+	*) ver=\$1; shift ;;
+	esac
+done
+if [ -n "\${SHEEPDOG_TEST_NEED_REINSTALL:-}" ] && [ "\$reinstall" -eq 0 ]; then
+	exit 0
+fi
+mkdir -p "\$install_dir/cpython-\$ver-test/bin"
+printf '#!/bin/sh\necho "%s"\n' "\$ver" >"\$install_dir/cpython-\$ver-test/bin/python3.14"
+chmod 755 "\$install_dir/cpython-\$ver-test/bin/python3.14"
+ln -sf python3.14 "\$install_dir/cpython-\$ver-test/bin/python3"
+EOF
+	chmod 755 "$work/fake-uv"
+
+	cat >"$work/uv-install.sh" <<EOF
+#!/bin/sh
+set -eu
+echo "\${UV_INSTALL_DIR:-}:\${UV_NO_MODIFY_PATH:-}" >>"$work/uv-fetched"
+mkdir -p "\$UV_INSTALL_DIR"
+cp "$work/fake-uv" "\$UV_INSTALL_DIR/uv"
+chmod 755 "\$UV_INSTALL_DIR/uv"
+EOF
+
+	fhome=$work/fhome
+	mkdir -p "$fhome"
+	out=$(HOME=$fhome SHELL=/bin/zsh PATH="$sysbin" SHEEPDOG_INSTALL_DIR=$bin \
+		SHEEPDOG_RELEASE_URL="file://$frel" \
+		SHEEPDOG_HC_INSTALL_URL="file://$work/hc-install.sh" \
+		SHEEPDOG_UV_INSTALL_URL="file://$work/uv-install.sh" \
+		SHEEPDOG_NO_SETUP=1 sh "$here/install.sh" 2>&1) && rc=0 || rc=$?
+	check "factory install succeeds on bare PATH" "$rc"
+	if [ -x "$bin/hc" ] && [ -f "$work/hc-fetched" ]; then rc=0; else rc=1; fi
+	check "fetches hc into install_dir when missing" "$rc"
+	if grep -qx "$bin:1" "$work/uv-fetched" && [ -x "$bin/uv" ]; then rc=0; else rc=1; fi
+	check "fetches uv into install_dir with UV_NO_MODIFY_PATH=1" "$rc"
+	if grep -q "python install --install-dir $fhome/.local/share/sheepdog/factory/python --no-bin --managed-python --no-config 3.14.8" "$work/uv-calls"; then rc=0; else rc=1; fi
+	check "runs uv python install into sheepdog data folder" "$rc"
+	if [ -x "$fhome/.local/share/sheepdog/factory/python/cpython-3.14.8-test/bin/python3" ]; then rc=0; else rc=1; fi
+	check "pinned managed python binary exists in data folder" "$rc"
+	if [ ! -e "$work/poison-python3" ]; then rc=0; else rc=1; fi
+	check "never invokes system python3" "$rc"
+	case "$out" in *"Installed managed Python 3.14.8 into $fhome/.local/share/sheepdog/factory/python."*) rc=0 ;; *) rc=1 ;; esac
+	check "prints managed Python install confirmation" "$rc"
+
+	# Second run with hc and uv already in install_dir fetches neither again,
+	# and repairs a damaged Python installation with --reinstall.
+	rm -f "$work/hc-fetched" "$work/uv-fetched" "$work/uv-calls"
+	rm -f "$fhome/.local/share/sheepdog/factory/python/cpython-3.14.8-test/bin/python3.14"
+	out=$(HOME=$fhome SHELL=/bin/zsh PATH="$sysbin" SHEEPDOG_INSTALL_DIR=$bin \
+		SHEEPDOG_RELEASE_URL="file://$frel" \
+		SHEEPDOG_HC_INSTALL_URL="file://$work/hc-install.sh" \
+		SHEEPDOG_UV_INSTALL_URL="file://$work/uv-install.sh" \
+		SHEEPDOG_TEST_NEED_REINSTALL=1 \
+		SHEEPDOG_NO_SETUP=1 sh "$here/install.sh" 2>&1) && rc=0 || rc=$?
+	check "rerun with damaged python succeeds" "$rc"
+	if [ ! -e "$work/hc-fetched" ] && [ ! -e "$work/uv-fetched" ]; then rc=0; else rc=1; fi
+	check "skips fetching hc and uv when already present" "$rc"
+	if grep -q "python install --reinstall --install-dir $fhome/.local/share/sheepdog/factory/python --no-bin --managed-python --no-config 3.14.8" "$work/uv-calls"; then rc=0; else rc=1; fi
+	check "repairs damaged python with --reinstall" "$rc"
+	if [ ! -e "$work/poison-python3" ]; then rc=0; else rc=1; fi
+	check "rerun still never invokes system python3" "$rc"
 	;;
 *)
 	echo "skip supported-release cases on $(uname -s) $(uname -m)"
