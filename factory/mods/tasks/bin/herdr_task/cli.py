@@ -284,7 +284,7 @@ def main():
     c.add_argument("--prefix", help="task ids' prefix, 2 to 5 letters (HAT -> HAT-4); unique on this machine")
     c.add_argument("--build-dir", help="per-task build output folder (<path>/<task-key>/, cleaned on done; \"\" clears)")
     c.add_argument("--set", action="append", metavar="KEY=VALUE",
-                   help="tasks.max_running=N: Settings' \"Tasks at once\" for this folder's space (\"default\": Settings' above it again)")
+                   help="tasks.max_running=N or tasks.check=CMD for this folder (\"default\" clears)")
     c.add_argument("--space", help="the space whose setting --set writes (default: the one working in this folder)")
     si = sub.add_parser("simulator", help="this folder's fixed iOS simulator pool: lease one per task, release it, or list holders")
     si.set_defaults(fn=cmd_simulator, simulator="list", folder=None, json=False, id=None, task_opt=None)

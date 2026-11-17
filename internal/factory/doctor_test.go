@@ -801,3 +801,87 @@ func TestVolumeSignalExitAndParentFolderAndHCExecCanary(t *testing.T) {
 		t.Errorf("cleanReason UTF-8 = len %d runes, valid=%v", len([]rune(got)), !strings.ContainsRune(got, '\uFFFD'))
 	}
 }
+
+func TestCheckSync(t *testing.T) {
+	ctx := context.Background()
+	writeFile := func(dir, name, content string) {
+		t.Helper()
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("no derivable check warns with fallback and one-line fix", func(t *testing.T) {
+		home := t.TempDir()
+		repo := t.TempDir()
+		env := newFakeEnv("git")
+		env.handlers["git -C"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 1} }
+		r := CheckSync(ctx, DoctorOptions{Folder: repo, Home: home, TempDir: home, RunCommand: env.run}, true)
+		if r.Status != onboard.Warn || !strings.Contains(r.Detail, "falling back to full") || !strings.Contains(r.Fix, "herdr-task config --set tasks.check=") {
+			t.Fatalf("unexpected result: %+v", r)
+		}
+	})
+
+	t.Run("derives from Makefile test and check targets", func(t *testing.T) {
+		home := t.TempDir()
+		repo := t.TempDir()
+		env := newFakeEnv("git")
+		env.handlers["git -C"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 1} }
+		writeFile(repo, "Makefile", "build:\n\techo hi\ntest:\n\tgo test ./...\n")
+		r := CheckSync(ctx, DoctorOptions{Folder: repo, Home: home, TempDir: home, RunCommand: env.run}, true)
+		if r.Status != onboard.OK || !strings.Contains(r.Detail, "make test") {
+			t.Fatalf("Makefile test = %+v", r)
+		}
+		writeFile(repo, "Makefile", "check:\n\tpytest -q\n")
+		r = CheckSync(ctx, DoctorOptions{Folder: repo, Home: home, TempDir: home, RunCommand: env.run}, true)
+		if r.Status != onboard.OK || !strings.Contains(r.Detail, "make check") {
+			t.Fatalf("Makefile check = %+v", r)
+		}
+	})
+
+	t.Run("derives from AGENTS.md and ignores non-command prose", func(t *testing.T) {
+		home := t.TempDir()
+		repo := t.TempDir()
+		env := newFakeEnv("git")
+		env.handlers["git -C"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 1} }
+		writeFile(repo, "AGENTS.md", "# Rules\n- Tests use `StubDaemon`; see `ci`.\n## Testing\n```\ncd app\nnpm test\n```\n")
+		r := CheckSync(ctx, DoctorOptions{Folder: repo, Home: home, TempDir: home, RunCommand: env.run}, true)
+		if r.Status != onboard.Warn {
+			t.Fatalf("prose-only AGENTS.md should warn, got %+v", r)
+		}
+		writeFile(repo, "AGENTS.md", "# Rules\nRead `AGENTS.md` first.\n- **Run the tests**: `go test ./...` before ready.\n")
+		r = CheckSync(ctx, DoctorOptions{Folder: repo, Home: home, TempDir: home, RunCommand: env.run}, true)
+		if r.Status != onboard.OK || !strings.Contains(r.Detail, "go test ./...") || !strings.Contains(r.Detail, "AGENTS.md") {
+			t.Fatalf("AGENTS.md = %+v", r)
+		}
+	})
+
+	t.Run("respects configured tasks.check and explicit full or off", func(t *testing.T) {
+		home := t.TempDir()
+		repo := t.TempDir()
+		env := newFakeEnv("git")
+		env.handlers["git -C"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 1} }
+		cfg := filepath.Join(home, ".config", "sheepdog", "settings.json")
+		writeFile(filepath.Dir(cfg), "settings.json", `{"projects":{"`+repo+`":{"tasks":{"check":"pytest -q"}}}}`)
+		r := CheckSync(ctx, DoctorOptions{Folder: repo, Home: home, TempDir: home, RunCommand: env.run}, true)
+		if r.Status != onboard.OK || !strings.Contains(r.Detail, "cheap (check: pytest -q)") {
+			t.Fatalf("configured check = %+v", r)
+		}
+		writeFile(filepath.Dir(cfg), "settings.json", `{"everywhere":{"tasks":{"sync":"full"}}}`)
+		r = CheckSync(ctx, DoctorOptions{Folder: repo, Home: home, TempDir: home, RunCommand: env.run}, true)
+		if r.Status != onboard.OK || !strings.Contains(r.Detail, "full (explicitly set") {
+			t.Fatalf("explicit full = %+v", r)
+		}
+	})
+
+	t.Run("skips when project volume failed", func(t *testing.T) {
+		r := CheckSync(ctx, DoctorOptions{Folder: t.TempDir(), Home: t.TempDir()}, false)
+		if r.Status != onboard.Skip {
+			t.Fatalf("want Skip, got %+v", r)
+		}
+	})
+}

@@ -11493,13 +11493,144 @@ class SyncBehindBase(unittest.TestCase):
                          ("main", self.head))
         self.assertEqual(self.sh(self.main, "status", "--porcelain"), "")
 
-    def test_full_is_the_default_and_updates_the_branch(self):
+    def test_default_is_cheap(self):
         import herdr_task.checks as checks
-        self.assertEqual(self.commands.settings_for(self.store)["tasks"]["sync"], "full")
+        self.assertEqual(self.commands.settings_for(self.store)["tasks"]["sync"], "cheap")
+        t, gh = self.repo(None, check="true")
+        self.assertEqual(checks.sync_mode(self.store, {**t, "space": None}), "cheap")
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], self.updates(gh), t.get("sync_fallback")), ("done", self.head, [], None))
+
+    def test_full_updates_the_branch(self):
+        import herdr_task.checks as checks
         t, gh = self.repo("full", check="true")
         self.go(gh)
-        self.assertEqual((t["state"], gh["merged"], len(self.updates(gh))), ("ready", None, 1))
+        self.assertEqual((t["state"], gh["merged"], len(self.updates(gh)), t.get("sync_fallback")), ("ready", None, 1, None))
         self.assertEqual(checks.sync_mode(self.store, {**t, "space": None}), "full")
+
+    def test_empty_check_derives_from_makefile_test_target(self):
+        import herdr_task.checks as checks
+        t, gh = self.repo("cheap", check="")
+        with open(os.path.join(self.main, "Makefile"), "w") as f:
+            f.write(".PHONY: test\ntest:\n\ttest -f a.txt && test -f b.txt\n")
+        self.sh(self.main, "fetch", "-q", "origin", "main")
+        self.sh(self.main, "merge", "--ff-only", "-q", "origin/main")
+        self.sh(self.main, "add", "Makefile"), self.sh(self.main, "commit", "-qm", "makefile")
+        self.sh(self.main, "push", "-q", "origin", "main")
+        self.assertEqual(checks.resolve_check(self.store, t), ("make test", "Makefile"))
+        self.assertEqual(checks.sync_mode(self.store, t), "cheap")
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], self.updates(gh), t.get("sync_fallback")), ("done", self.head, [], None))
+        self.leftovers()
+
+    def test_derived_check_env_failure_falls_back_while_merge_regression_fails(self):
+        # Derived check exiting non-zero on head alone (e.g. make exits 2 for missing venv/deps) falls back to full.
+        t, gh = self.repo("cheap", check="")
+        with open(os.path.join(self.main, "Makefile"), "w") as f:
+            f.write(".PHONY: test\ntest:\n\texit 2\n")
+        self.sh(self.main, "fetch", "-q", "origin", "main")
+        self.sh(self.main, "merge", "--ff-only", "-q", "origin/main")
+        self.sh(self.main, "add", "Makefile"), self.sh(self.main, "commit", "-qm", "makefile exit 2")
+        self.sh(self.main, "push", "-q", "origin", "main")
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], len(self.updates(gh)), t.get("attention")), ("ready", None, 1, None))
+        self.assertIn("cheap to full", (t.get("sync_fallback") or {}).get("why", ""))
+        self.leftovers()
+        # Derived check that passes on head alone and fails only when merged still fails cheap sync (SYNC_FAILED).
+        t2, gh2 = self.repo("cheap", check="")
+        mk = ".PHONY: test\ntest:\n\t! { test -f a.txt && test -f b.txt; }\n"
+        self.sh(self.main, "checkout", "-q", "b")
+        with open(os.path.join(self.main, "Makefile"), "w") as f:
+            f.write(mk)
+        self.sh(self.main, "add", "Makefile"), self.sh(self.main, "commit", "-qm", "makefile on branch")
+        gh2["head"] = t2["head"] = self.head = self.sh(self.main, "rev-parse", "HEAD")
+        self.sh(self.main, "checkout", "-q", "main")
+        self.sh(self.main, "fetch", "-q", "origin", "main")
+        self.sh(self.main, "merge", "--ff-only", "-q", "origin/main")
+        with open(os.path.join(self.main, "Makefile"), "w") as f:
+            f.write(mk)
+        self.sh(self.main, "add", "Makefile"), self.sh(self.main, "commit", "-qm", "makefile on main")
+        self.sh(self.main, "push", "-q", "origin", "main")
+        self.go(gh2)
+        self.assertTrue((t2.get("attention") or "").startswith(self.commands.SYNC_FAILED), t2.get("attention"))
+        self.assertIsNone(t2.get("sync_fallback"))
+        self.leftovers()
+
+    def test_derive_check_reads_makefile_check_agents_md_and_ignores_prose(self):
+        import herdr_task.checks as checks, herdr_task.settings as st
+        d = tempfile.mkdtemp(prefix="derive-")
+        self.addCleanup(shutil.rmtree, d, True)
+        self.assertEqual(st.derive_check(d), ("", None))
+        with open(os.path.join(d, "AGENTS.md"), "w") as f:
+            f.write("# Guide\n- Tests use `StubDaemon`; see `ci`.\n## Testing\n```\ncd app\nnpm test\n```\n")
+        self.assertEqual(st.derive_check(d), ("", None))
+        with open(os.path.join(d, "AGENTS.md"), "w") as f:
+            f.write("# Guide\n- Read `AGENTS.md` first.\n- **Run the tests**: `pytest -q`.\n")
+        self.assertEqual(st.derive_check(d), ("pytest -q", "AGENTS.md"))
+        with open(os.path.join(d, "Makefile"), "w") as f:
+            f.write("check:\n\tpytest -q\n")
+        self.assertEqual(st.derive_check(d), ("make check", "Makefile"))
+        # checks_pass (gate local check) only runs an explicit tasks.check, never the derived sync command.
+        self.repo(None, check="")
+        with open(os.path.join(self.main, "Makefile"), "w") as f:
+            f.write("test:\n\ttrue\n")
+        self.store.data["tasks"][0].update(state="ready", worktree=self.main)
+        with self.mock.patch.object(checks, "gate_min", lambda *a: 1), \
+                self.mock.patch.object(checks, "run", lambda *a, **k: self.fail("checks_pass ran derived check")):
+            checks.checks_pass(self.store, self.store.data["tasks"][0])
+
+    def test_no_derivable_check_surfaces_fallback_once_in_status_and_news(self):
+        import herdr_task.news as news, herdr_task.output as output
+        t, gh = self.repo(None, check="")
+        t["space"] = "sp1"
+        self.store.write = True
+        news_file = os.path.join(os.path.dirname(self.main), ".news.json")
+        sent = []
+        with self.mock.patch.object(news, "NEWS", news_file), \
+                self.mock.patch.object(news, "NEWS_SETTLE_MS", 0), \
+                self.mock.patch.object(news, "live_agents", lambda key: []), \
+                self.mock.patch.object(news, "store_files", lambda folder=None: [os.path.join(os.path.dirname(self.main), "store.json")]), \
+                self.mock.patch.object(news, "Store", lambda loc, write=False: self.store), \
+                self.mock.patch.object(news, "read_list", lambda path: {"folder": self.main, "tasks": self.store.data["tasks"]}), \
+                self.mock.patch.object(news, "coordinator_in", lambda sp: "c1"), \
+                self.mock.patch.object(news, "hc_json", lambda *a: {"state": "live", "turn": 1, "status": {"state": "idle"}, "labels": {}}), \
+                self.mock.patch.object(news, "news_send", lambda to, text: sent.append((to, text)) or "sent"):
+            self.go(gh)
+            self.assertEqual((t["state"], len(self.updates(gh))), ("ready", 1))
+            fb = t.get("sync_fallback") or {}
+            self.assertEqual((fb.get("from"), fb.get("to")), ("cheap", "full"))
+            self.assertIn("tasks.check is empty", fb.get("why", ""))
+            v = output.view(self.store, t, [])
+            self.assertIn("cheap to full", output.line(v))
+            self.assertEqual(v["sync_fallback"]["why"], fb["why"])
+            news.news_pass({})  # first news pass initializes baseline without consuming sync_fallback.told
+            self.assertEqual(len(sent), 0)
+            self.assertFalse(fb.get("told"))
+            news.news_pass({})
+            self.assertEqual(len(sent), 1)
+            self.assertTrue(fb.get("told"))
+            self.assertIn('event="sync-fallback"', sent[0][1])
+            self.assertIn("cheap to full", sent[0][1])
+            # Second tick and news_pass never surface the fallback again.
+            self.go(gh)
+            news.news_pass({})
+            self.assertEqual(len(sent), 1)
+
+    def test_config_set_tasks_check_sets_and_clears_setting(self):
+        import herdr_task.checks as checks, herdr_task.settings as st, herdr_task.store as store_mod
+        self.repo(None, check="")
+        d = os.path.dirname(self.main)
+        sf, st_dir = os.path.join(d, "settings.json"), os.path.join(d, "tasks")
+        self.store.loc = store_mod.locate(self.main)
+        with self.mock.patch.object(st, "SETTINGS", sf), \
+                self.mock.patch.object(store_mod, "STORE", st_dir), \
+                self.mock.patch.object(checks, "settings_for", st.settings_for), \
+                self.mock.patch.object(self.commands, "settings_for", st.settings_for), \
+                self.mock.patch.object(self.commands, "open_store", lambda args, write=True: store_mod.Store(store_mod.locate(args.folder), write=write)):
+            self.commands.cmd_config(self.commands.argparse.Namespace(folder=self.main, prefix=None, build_dir=None, space=None, set=["tasks.check=pytest -q"], json=True))
+            self.assertEqual(checks.resolve_check(self.store, {}), ("pytest -q", "setting"))
+            self.commands.cmd_config(self.commands.argparse.Namespace(folder=self.main, prefix=None, build_dir=None, space=None, set=["tasks.check=default"], json=True))
+            self.assertEqual(checks.resolve_check(self.store, {}), ("", None))
 
     def test_cheap_checks_the_merge_here_and_merges_the_head(self):
         t, gh = self.repo("cheap", check="test -f a.txt && test -f b.txt && touch made-by-check")

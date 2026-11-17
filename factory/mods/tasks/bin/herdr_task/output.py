@@ -122,4 +122,6 @@ def line(v):
     elif v["status"] == "working" and v.get("report") and not extra:
         w = v["report"]
         extra = w["text"] + (f" · {w['done']}%" if w.get("done") is not None else "") + (f" · ~{minutes(w['left'])} left" if w.get("left") is not None else "")
+    if (fb := v.get("sync_fallback")) and v["status"] in ("working", "ready", "merging") and fb.get("why"):
+        extra = f"{extra}; {fb['why']}" if extra else fb["why"]
     return f"{v['ref']:<7} {word:<9} {v['title']}" + (f"  ({extra})" if extra else "")
