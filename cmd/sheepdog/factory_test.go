@@ -17,7 +17,8 @@ func TestFactoryCommandCLI(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
-	t.Setenv("SHEEPDOG_HC_SOCKET", "")
+	_ = os.Unsetenv("SHEEPDOG_HC_SOCKET")
+	t.Cleanup(func() { _ = os.Unsetenv("SHEEPDOG_HC_SOCKET") })
 
 	var gotOpts factory.DoctorOptions
 	var stubResults []onboard.Result
@@ -108,7 +109,7 @@ func TestFactoryCommandCLI(t *testing.T) {
 		}
 	})
 
-	t.Run("broken default config.toml fails instead of silently falling back", func(t *testing.T) {
+	t.Run("broken default config.toml fails even with --hc-socket", func(t *testing.T) {
 		defCfg := filepath.Join(home, ".config", "sheepdog", "config.toml")
 		if err := os.MkdirAll(filepath.Dir(defCfg), 0o700); err != nil {
 			t.Fatal(err)
@@ -121,6 +122,32 @@ func TestFactoryCommandCLI(t *testing.T) {
 		code := run(context.Background(), []string{"factory", "doctor"}, &out, &errBuf)
 		if code != 1 || !strings.Contains(out.String(), "FAIL  config") {
 			t.Fatalf("broken default config: code=%d out=%q", code, out.String())
+		}
+		out.Reset()
+		errBuf.Reset()
+		code = run(context.Background(), []string{"factory", "doctor", "--hc-socket", filepath.Join(home, "override.sock")}, &out, &errBuf)
+		if code != 1 || !strings.Contains(out.String(), "FAIL  config") {
+			t.Fatalf("broken default config with --hc-socket: code=%d out=%q", code, out.String())
+		}
+	})
+
+	t.Run("valid default config.toml supplies herdr.hc_socket without overriding canary model", func(t *testing.T) {
+		stubResults = []onboard.Result{{Name: "herdr-core", Status: onboard.OK, Detail: "ok"}}
+		defCfg := filepath.Join(home, ".config", "sheepdog", "config.toml")
+		if err := os.MkdirAll(filepath.Dir(defCfg), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		cfgSock := filepath.Join(home, "from-config.sock")
+		body := "[herdr]\nhc_socket = \"" + cfgSock + "\"\n"
+		if err := os.WriteFile(defCfg, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Remove(defCfg) })
+
+		var out, errBuf bytes.Buffer
+		code := run(context.Background(), []string{"factory", "doctor", "--no-canary"}, &out, &errBuf)
+		if code != 0 || gotOpts.HCSocket != cfgSock || gotOpts.ClaudeModel != "" {
+			t.Fatalf("valid default config: code=%d opts=%+v stderr=%s", code, gotOpts, errBuf.String())
 		}
 	})
 }

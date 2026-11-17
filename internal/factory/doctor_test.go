@@ -444,8 +444,8 @@ func TestCheckAgentCLIsMatrix(t *testing.T) {
 			t.Fatalf("expected canary timeout to fail doctor: %+v", rs)
 		}
 		cl := findResult(t, rs, "claude")
-		if cl.Status != onboard.Fail || !strings.Contains(cl.Detail, "Removable Volumes") {
-			t.Errorf("claude timeout = %+v", cl)
+		if cl.Status != onboard.Fail || !strings.Contains(cl.Detail, "Removable Volumes") || strings.Contains(cl.Detail, "inside herdr-core") {
+			t.Errorf("local claude timeout = %+v", cl)
 		}
 		if gate := findResult(t, rs, "agent clis"); gate.Status != onboard.Fail || !strings.Contains(gate.Detail, "claude") {
 			t.Errorf("agent clis gate on timeout = %+v, want Fail", gate)
@@ -641,55 +641,79 @@ func TestVolumeSignalExitAndParentFolderAndHCExecCanary(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
 
-	// A signal-killed probe terminal (nil ExitCode) must fail, not pass as exit 0.
+	// A signal-killed probe terminal (nil ExitCode) on darwin must report signal
+	// death rather than claiming a macOS TCC permission denial.
 	srvSig := hctest.New(t)
 	srvSig.OnRun = func(term hc.Terminal, _ hc.RunParams) {
 		srvSig.Finish(term.Address, "signal")
 	}
 	sigRes := CheckProjectVolume(ctx, DoctorOptions{
-		Folder: tmp, HCSocket: srvSig.Path, GOOS: "linux", TempDir: tmp, VolumeTimeout: time.Second,
+		Folder: "/Users/alice/Documents/repo", HCSocket: srvSig.Path, GOOS: "darwin", Home: "/Users/alice", TempDir: tmp, VolumeTimeout: time.Second,
 	})
-	if sigRes.Status != onboard.Fail {
-		t.Errorf("signal-killed probe = %+v, want Fail", sigRes)
+	if sigRes.Status != onboard.Fail || !strings.Contains(sigRes.Detail, "signal") || strings.Contains(sigRes.Detail, "denied") {
+		t.Errorf("signal-killed probe on darwin = %+v, want signal message without TCC denial", sigRes)
 	}
 
-	// Probing a not-yet-created child folder names the existing parent that answered,
-	// and default RunCommand executes CLI canaries through herdr-core's machine.exec.
-	newChild := filepath.Join(tmp, "not-created-yet")
-	binDir := t.TempDir()
-	fakeClaude := filepath.Join(binDir, "claude")
-	if err := os.WriteFile(fakeClaude, []byte("#!/bin/sh\nprintf '{\"loggedIn\":true}'\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	// Probing a not-yet-created child folder reads the resolved parent from inside
+	// herdr-core (even when the path does not exist locally) and runs both login
+	// checks and canaries through herdr-core's machine.exec without leaking caller
+	// PATH or credentials.
+	virtualParent := "/Volumes/VirtualSSD/work"
+	newChild := filepath.Join(virtualParent, "not-created-yet")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-caller-shell-only")
+	t.Setenv("OPENAI_API_KEY", "sk-caller-shell-only")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "caller-oauth-only")
 
 	srvExec := hctest.New(t)
 	srvExec.OnRun = func(term hc.Terminal, _ hc.RunParams) {
+		srvExec.SetScreen(term.Address, "<SD_DIR>"+virtualParent+"</SD_DIR>\n")
 		srvExec.FinishExit(term.Address, "exited", 0)
 	}
-	var execCwds []string
+	var (
+		execCwds []string
+		execArgv [][]string
+	)
 	srvExec.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		for _, forbidden := range []string{"PATH", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
+			if _, leaked := p.Env[forbidden]; leaked {
+				t.Errorf("machine.exec leaked caller env %s: %v", forbidden, p.Env)
+			}
+		}
 		execCwds = append(execCwds, p.Cwd)
+		execArgv = append(execArgv, append([]string(nil), p.Argv...))
 		zero := 0
-		return hc.ExecResult{
-			Code:   &zero,
-			Stdout: []byte(`{"subtype":"success","is_error":false,"result":"OK"}`),
-			MS:     15,
-		}, nil
+		if slices.Contains(p.Argv, "auth") && slices.Contains(p.Argv, "status") {
+			if p.Env["DISABLE_AUTOUPDATER"] != "1" {
+				t.Errorf("claude auth in hc missing DISABLE_AUTOUPDATER=1: %v", p.Env)
+			}
+			return hc.ExecResult{Code: &zero, Stdout: []byte(`{"loggedIn":true}`), MS: 5}, nil
+		}
+		if slices.Contains(p.Argv, "-p") {
+			if !slices.Contains(p.Argv, "haiku") {
+				t.Errorf("expected default haiku canary model, got argv=%v", p.Argv)
+			}
+			return hc.ExecResult{
+				Code:   &zero,
+				Stdout: []byte(`{"subtype":"success","is_error":false,"result":"OK"}`),
+				MS:     15,
+			}, nil
+		}
+		return hc.ExecResult{Code: &zero}, nil
 	}
 
-	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 	rs := Doctor(ctx, DoctorOptions{
 		Folder:   newChild,
 		HCSocket: srvExec.Path,
 		Canary:   true,
-		GOOS:     "linux",
+		GOOS:     "darwin",
+		Home:     "/Users/alice",
 		TempDir:  tmp,
 		LookPath: func(name string) (string, error) {
 			switch name {
 			case "hc":
 				return "/usr/bin/hc", nil
 			case "claude":
-				return fakeClaude, nil
+				return "/usr/local/bin/claude", nil
 			}
 			return "", os.ErrNotExist
 		},
@@ -698,14 +722,48 @@ func TestVolumeSignalExitAndParentFolderAndHCExecCanary(t *testing.T) {
 		AuthTimeout:   time.Second,
 	})
 	vol := findResult(t, rs, "project volume")
-	if vol.Status != onboard.OK || !strings.Contains(vol.Detail, "parent of") {
-		t.Errorf("new child volume = %+v, want parent named", vol)
+	if vol.Status != onboard.OK || !strings.Contains(vol.Detail, virtualParent+" (parent of "+newChild+")") {
+		t.Errorf("new child volume = %+v, want parent named from herdr-core probe", vol)
 	}
 	if cl := findResult(t, rs, "claude"); cl.Status != onboard.OK {
 		t.Errorf("claude via hc exec = %+v", cl)
 	}
-	if !slices.Contains(execCwds, tmp) {
-		t.Errorf("expected canary machine.exec in parent %q, got %v", tmp, execCwds)
+	if !slices.Contains(execCwds, virtualParent) || len(execArgv) < 2 {
+		t.Errorf("expected both auth and canary machine.exec calls (canary in %q), cwds=%v count=%d", virtualParent, execCwds, len(execArgv))
+	}
+
+	// A CLI on the caller's PATH that is missing from herdr-core's PATH (exit 127)
+	// fails with an explicit `hc server restart` fix rather than passing locally.
+	srvNarrowPath := hctest.New(t)
+	srvNarrowPath.OnRun = func(term hc.Terminal, _ hc.RunParams) {
+		srvNarrowPath.SetScreen(term.Address, "<SD_DIR>"+tmp+"</SD_DIR>\n")
+		srvNarrowPath.FinishExit(term.Address, "exited", 0)
+	}
+	srvNarrowPath.OnExec = func(_ hc.ExecParams) (hc.ExecResult, error) {
+		notFound := 127
+		return hc.ExecResult{Code: &notFound}, nil
+	}
+	narrowRs := Doctor(ctx, DoctorOptions{
+		Folder:   tmp,
+		HCSocket: srvNarrowPath.Path,
+		Canary:   false,
+		GOOS:     "darwin",
+		Home:     "/Users/alice",
+		TempDir:  tmp,
+		LookPath: func(name string) (string, error) {
+			if name == "hc" || name == "claude" {
+				return "/opt/homebrew/bin/" + name, nil
+			}
+			return "", os.ErrNotExist
+		},
+		VolumeTimeout: time.Second,
+		AuthTimeout:   time.Second,
+	})
+	if cl := findResult(t, narrowRs, "claude"); cl.Status != onboard.Warn || !strings.Contains(cl.Detail, "herdr-core's PATH") {
+		t.Errorf("narrow hc PATH claude = %+v", cl)
+	}
+	if gate := findResult(t, narrowRs, "agent clis"); gate.Status != onboard.Fail || !strings.Contains(gate.Fix, "hc server restart") {
+		t.Errorf("narrow hc PATH gate = %+v", gate)
 	}
 
 	// cleanReason truncates on rune boundaries rather than splitting multi-byte UTF-8.

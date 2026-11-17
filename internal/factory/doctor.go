@@ -31,17 +31,21 @@ const (
 	canaryPrompt         = "Reply with OK and nothing else."
 	defaultClaudeCanary  = "haiku"
 	maxCapturedBytes     = 8 << 10
+	probedDirStart       = "<SD_DIR>"
+	probedDirEnd         = "</SD_DIR>"
 )
 
 // probeScript walks up to the nearest existing directory for $1 (without
-// blocking the Go caller first), verifies it is a directory, and exercises
+// blocking the Go caller first), verifies it is a directory, reports the
+// resolved directory back to Doctor without local os.Stat calls, and exercises
 // chdir + lock-free git status / ls from inside an hc terminal.
-const probeScript = `d="$1"; while [ ! -e "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ]; do d=$(dirname "$d"); done; [ -d "$d" ] || exit 2; cd "$d" && (git --no-optional-locks status --porcelain --untracked-files=no >/dev/null 2>&1 || ls -a >/dev/null)`
+const probeScript = `d="$1"; while [ ! -e "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ]; do d=$(dirname "$d"); done; [ -d "$d" ] || exit 2; cd "$d" && case "$d" in /*) p="$d" ;; *) p="$PWD" ;; esac && printf '<SD_DIR>%s</SD_DIR>\n' "$p" && (git --no-optional-locks status --porcelain --untracked-files=no >/dev/null 2>&1 || ls -a >/dev/null)`
 
 // cleanExecScript strips daemon keys and parent Claude Code session markers
 // inside herdr-core's machine.exec while keeping CLAUDE_CODE_* auth/provider
-// settings (matching launch.py's CLEAN_ENV).
-const cleanExecScript = `for v in $(env | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p'); do case "$v" in CLAUDE_CODE_USE_*|CLAUDE_CODE_SKIP_*|CLAUDE_CODE_DISABLE_*|CLAUDE_CODE_ENABLE_*|CLAUDE_CODE_MAX_*|CLAUDE_CODE_OAUTH_*|CLAUDE_CODE_CLIENT_*|CLAUDE_CODE_API_*) ;; HERDR_*|SHEEPDOG_*|GEMINI_API_KEY*|VERTEX_*|DEEPSEEK_API_KEY|OPENAI_ORCH_API_KEY|GH_REPO|CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_*) unset "$v" ;; esac; done; exec "$@"`
+// settings (matching launch.py's CLEAN_ENV), and exits 127 cleanly when $1 is
+// missing from herdr-core's own PATH.
+const cleanExecScript = `for v in $(env | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p'); do case "$v" in CLAUDE_CODE_USE_*|CLAUDE_CODE_SKIP_*|CLAUDE_CODE_DISABLE_*|CLAUDE_CODE_ENABLE_*|CLAUDE_CODE_MAX_*|CLAUDE_CODE_OAUTH_*|CLAUDE_CODE_CLIENT_*|CLAUDE_CODE_API_*) ;; HERDR_*|SHEEPDOG_*|GEMINI_API_KEY*|VERTEX_*|DEEPSEEK_API_KEY|OPENAI_ORCH_API_KEY|GH_REPO|CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_*) unset "$v" ;; esac; done; command -v "$1" >/dev/null 2>&1 || exit 127; exec "$@"`
 
 // CommandOutput is the captured outcome of one child command run by Doctor.
 type CommandOutput struct {
@@ -129,10 +133,12 @@ func resSkip(name, detail string) onboard.Result {
 
 // Doctor runs the factory prerequisite checks in fixed order: herdr-core, the
 // timed project-volume probe inside herdr-core, agent CLI logins + canary
-// starts (executed inside herdr-core when it is up), gh login + pinned default
-// repo, and codexbar.
+// starts, gh login + pinned default repo, and codexbar. When herdr-core is up,
+// child probes execute inside herdr-core's own environment without copying the
+// caller shell's PATH or credentials.
 func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	customRunner := opts.RunCommand != nil
+	customLookPath := opts.LookPath != nil
 	o := opts.withDefaults()
 	var out []onboard.Result
 
@@ -141,19 +147,20 @@ func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	hcOK := hcRes.Status == onboard.OK
 
 	volRes := resSkip("project volume", "skipped until herdr-core is running")
+	var probedDir string
 	if hcOK {
-		volRes = CheckProjectVolume(ctx, o)
+		volRes, probedDir = checkProjectVolume(ctx, o)
 	}
 	out = append(out, volRes)
 
 	volumeOK := volRes.Status == onboard.OK
-	canaryOpt := o
-	if hcOK && !customRunner {
-		canaryOpt.RunCommand = hcExecRunner(o.HCSocket)
+	inHC := hcOK && !customRunner
+	if inHC {
+		o.RunCommand = hcExecRunner(o.HCSocket)
 	}
-	out = append(out, checkAgentCLIsWith(ctx, o, canaryOpt.RunCommand, volumeOK)...)
-	out = append(out, CheckGH(ctx, o, volumeOK))
-	out = append(out, CheckCodexbar(ctx, o))
+	out = append(out, checkAgentCLIs(ctx, o, inHC, customLookPath, volumeOK, probedDir)...)
+	out = append(out, checkGH(ctx, o, inHC, customLookPath, volumeOK, probedDir))
+	out = append(out, checkCodexbar(ctx, o, inHC, customLookPath))
 	return out
 }
 
@@ -178,16 +185,22 @@ func CheckHerdrCore(ctx context.Context, o DoctorOptions) onboard.Result {
 }
 
 type probeOutcome struct {
-	exitCode int
-	timedOut bool
-	duration time.Duration
-	err      error
+	exitCode  int
+	probedDir string
+	timedOut  bool
+	duration  time.Duration
+	err       error
 }
 
 // CheckProjectVolume runs a timed directory/git probe from inside a real
 // herdr-core terminal so macOS TCC prompts and external-SSD stalls (field
 // notes 39–40) are caught before unattended runs start.
 func CheckProjectVolume(ctx context.Context, o DoctorOptions) onboard.Result {
+	res, _ := checkProjectVolume(ctx, o)
+	return res
+}
+
+func checkProjectVolume(ctx context.Context, o DoctorOptions) (onboard.Result, string) {
 	o = o.withDefaults()
 	const name = "project volume"
 	client := hc.NewClient(o.HCSocket)
@@ -196,31 +209,38 @@ func CheckProjectVolume(ctx context.Context, o DoctorOptions) onboard.Result {
 	res := probeFolderInHC(ctx, client, o.TempDir, o.Folder, o.VolumeTimeout)
 	if res.err != nil {
 		return resFail(name, fmt.Sprintf("could not probe inside herdr-core: %s", cleanReason(res.err.Error())),
-			"run: hc server restart, then run sheepdog factory doctor again")
+			"run: hc server restart, then run sheepdog factory doctor again"), ""
 	}
 	if !res.timedOut {
-		switch res.exitCode {
-		case 0:
+		switch {
+		case res.exitCode == 0:
 			ms := res.duration.Milliseconds()
+			probed := res.probedDir
+			if probed == "" {
+				probed = o.Folder
+			}
 			targetDesc := o.Folder
-			if probed := existingDir(o.Folder, ""); probed != "" && probed != o.Folder {
+			if probed != o.Folder {
 				targetDesc = fmt.Sprintf("%s (parent of %s)", probed, o.Folder)
 			}
 			if o.GOOS == "darwin" {
 				if vol := externalVolume(o.Folder); vol != "" {
-					return resOK(name, fmt.Sprintf("%s answered inside herdr-core (%dms; external volume %s — internal disk is safer overnight)", targetDesc, ms, vol))
+					return resOK(name, fmt.Sprintf("%s answered inside herdr-core (%dms; external volume %s — internal disk is safer overnight)", targetDesc, ms, vol)), probed
 				}
 			}
-			return resOK(name, fmt.Sprintf("%s answered inside herdr-core (%dms)", targetDesc, ms))
-		case 2:
-			return resFail(name, fmt.Sprintf("%s is not a directory", o.Folder), "pass a project folder path")
+			return resOK(name, fmt.Sprintf("%s answered inside herdr-core (%dms)", targetDesc, ms)), probed
+		case res.exitCode == 2:
+			return resFail(name, fmt.Sprintf("%s is not a directory", o.Folder), "pass a project folder path"), ""
+		case res.exitCode < 0:
+			return resFail(name, fmt.Sprintf("probe for %s inside herdr-core was killed by a signal", o.Folder),
+				"run: hc server restart, then run sheepdog factory doctor again"), ""
 		default:
 			if o.GOOS == "darwin" {
 				prompt, fix := consentPrompt(o.Home, o.Folder)
-				return resFail(name, fmt.Sprintf("herdr-core was denied access to %s (%s)", o.Folder, prompt), fix)
+				return resFail(name, fmt.Sprintf("herdr-core was denied access to %s (%s)", o.Folder, prompt), fix), ""
 			}
 			return resFail(name, fmt.Sprintf("herdr-core could not read %s (exit %d)", o.Folder, res.exitCode),
-				fmt.Sprintf("check directory permissions and mount status for %s", o.Folder))
+				fmt.Sprintf("check directory permissions and mount status for %s", o.Folder)), ""
 		}
 	}
 
@@ -232,15 +252,15 @@ func CheckProjectVolume(ctx context.Context, o DoctorOptions) onboard.Result {
 			prompt, fix := consentPrompt(o.Home, o.Folder)
 			return resFail(name,
 				fmt.Sprintf("%s did not answer inside herdr-core within %s while %s did: disk stall or a %s permission prompt may be waiting", o.Folder, o.VolumeTimeout, o.TempDir, prompt),
-				fmt.Sprintf("click Allow on the waiting %s prompt on this Mac, or %s", prompt, fix))
+				fmt.Sprintf("click Allow on the waiting %s prompt on this Mac, or %s", prompt, fix)), ""
 		}
 		return resFail(name,
 			fmt.Sprintf("%s did not answer inside herdr-core within %s while %s did: the disk or mount is stalling", o.Folder, o.VolumeTimeout, o.TempDir),
-			fmt.Sprintf("check the disk or network mount backing %s", o.Folder))
+			fmt.Sprintf("check the disk or network mount backing %s", o.Folder)), ""
 	}
 	return resFail(name,
 		fmt.Sprintf("both %s and %s timed out inside herdr-core (%s)", o.Folder, o.TempDir, o.VolumeTimeout),
-		"restart herdr-core (hc server restart) and check system load")
+		"restart herdr-core (hc server restart) and check system load"), ""
 }
 
 func probeFolderInHC(ctx context.Context, client *hc.Client, tempDir, target string, timeout time.Duration) probeOutcome {
@@ -263,7 +283,12 @@ func probeFolderInHC(ctx context.Context, client *hc.Client, tempDir, target str
 	defer cleanupHCTerminal(client, t.Address)
 
 	if t.State == "finished" {
-		return probeOutcome{exitCode: derefExit(t.ExitCode), duration: time.Since(start)}
+		code := derefExit(t.ExitCode)
+		return probeOutcome{
+			exitCode:  code,
+			probedDir: readProbedDir(probeCtx, client, t.Address, code),
+			duration:  time.Since(start),
+		}
 	}
 
 	ticker := time.NewTicker(20 * time.Millisecond)
@@ -287,10 +312,39 @@ func probeFolderInHC(ctx context.Context, client *hc.Client, tempDir, target str
 				continue
 			}
 			if cur.State == "finished" {
-				return probeOutcome{exitCode: derefExit(cur.ExitCode), duration: time.Since(start)}
+				code := derefExit(cur.ExitCode)
+				return probeOutcome{
+					exitCode:  code,
+					probedDir: readProbedDir(probeCtx, client, t.Address, code),
+					duration:  time.Since(start),
+				}
 			}
 		}
 	}
+}
+
+func readProbedDir(ctx context.Context, client *hc.Client, address string, exitCode int) string {
+	if exitCode != 0 {
+		return ""
+	}
+	rr, err := client.Read(ctx, address, 20)
+	if err != nil {
+		return ""
+	}
+	i := strings.Index(rr.Text, probedDirStart)
+	if i < 0 {
+		return ""
+	}
+	rest := rr.Text[i+len(probedDirStart):]
+	j := strings.Index(rest, probedDirEnd)
+	if j < 0 {
+		return ""
+	}
+	raw := strings.ReplaceAll(strings.ReplaceAll(rest[:j], "\r", ""), "\n", "")
+	if raw == "" {
+		return ""
+	}
+	return filepath.Clean(raw)
 }
 
 func cleanupHCTerminal(client *hc.Client, address string) {
@@ -357,6 +411,7 @@ type cliProbeState int
 
 const (
 	cliMissing cliProbeState = iota
+	cliNotInHCPath
 	cliSignedOut
 	cliCanaryFailed
 	cliCanaryTimedOut
@@ -369,21 +424,33 @@ type cliOutcome struct {
 	result onboard.Result
 }
 
+type probeContext struct {
+	inHC           bool
+	customLookPath bool
+	canaryDir      string
+}
+
 // CheckAgentCLIs checks claude, codex and agy in parallel and appends the
 // `agent clis` gate: at least one CLI must be logged in and pass its canary
 // start (unless o.Canary is false), and no logged-in CLI may hang on a prompt.
 func CheckAgentCLIs(ctx context.Context, o DoctorOptions, volumeOK bool) []onboard.Result {
+	customLookPath := o.LookPath != nil
 	o = o.withDefaults()
-	return checkAgentCLIsWith(ctx, o, o.RunCommand, volumeOK)
+	return checkAgentCLIs(ctx, o, false, customLookPath, volumeOK, "")
 }
 
-func checkAgentCLIsWith(ctx context.Context, o DoctorOptions, canaryRun CommandFunc, volumeOK bool) []onboard.Result {
+func checkAgentCLIs(ctx context.Context, o DoctorOptions, inHC, customLookPath, volumeOK bool, probedDir string) []onboard.Result {
 	canaryDir := o.TempDir
 	if volumeOK {
-		canaryDir = existingDir(o.Folder, o.TempDir)
+		if probedDir != "" {
+			canaryDir = probedDir
+		} else {
+			canaryDir = existingDir(o.Folder, o.TempDir)
+		}
 	}
+	pctx := probeContext{inHC: inHC, customLookPath: customLookPath, canaryDir: canaryDir}
 
-	checks := []func(context.Context, DoctorOptions, CommandFunc, string) cliOutcome{
+	checks := []func(context.Context, DoctorOptions, probeContext) cliOutcome{
 		checkClaude,
 		checkCodex,
 		checkAgy,
@@ -392,24 +459,28 @@ func checkAgentCLIsWith(ctx context.Context, o DoctorOptions, canaryRun CommandF
 	var wg sync.WaitGroup
 	for i, fn := range checks {
 		wg.Add(1)
-		go func(idx int, check func(context.Context, DoctorOptions, CommandFunc, string) cliOutcome) {
+		go func(idx int, check func(context.Context, DoctorOptions, probeContext) cliOutcome) {
 			defer wg.Done()
-			outcomes[idx] = check(ctx, o, canaryRun, canaryDir)
+			outcomes[idx] = check(ctx, o, pctx)
 		}(i, fn)
 	}
 	wg.Wait()
 
 	var (
-		out       = make([]onboard.Result, 0, len(outcomes)+1)
-		ready     []string
-		timedOut  []string
-		installed int
-		loggedIn  int
+		out         = make([]onboard.Result, 0, len(outcomes)+1)
+		ready       []string
+		timedOut    []string
+		notInHCPath []string
+		installed   int
+		loggedIn    int
 	)
 	for _, oc := range outcomes {
 		out = append(out, oc.result)
 		if oc.state != cliMissing {
 			installed++
+		}
+		if oc.state == cliNotInHCPath {
+			notInHCPath = append(notInHCPath, oc.name)
 		}
 		if oc.state >= cliCanaryFailed {
 			loggedIn++
@@ -432,6 +503,10 @@ func checkAgentCLIsWith(ctx context.Context, o DoctorOptions, canaryRun CommandF
 	case installed == 0:
 		out = append(out, resFail("agent clis", "no agent CLI (claude, codex, agy) found on PATH",
 			"install claude, codex or agy and sign in (one CLI is enough)"))
+	case loggedIn == 0 && len(notInHCPath) > 0:
+		out = append(out, resFail("agent clis",
+			fmt.Sprintf("agent CLI on PATH locally, but not on herdr-core's PATH (%s)", strings.Join(notInHCPath, ", ")),
+			"run: hc server restart, then run sheepdog factory doctor again"))
 	case loggedIn == 0:
 		out = append(out, resFail("agent clis", "no agent CLI is logged in",
 			"sign in to at least one CLI: claude auth login, codex login, or agy"))
@@ -442,15 +517,42 @@ func checkAgentCLIsWith(ctx context.Context, o DoctorOptions, canaryRun CommandF
 	return out
 }
 
-func checkClaude(ctx context.Context, o DoctorOptions, canaryRun CommandFunc, canaryDir string) cliOutcome {
+func handleHCPathStatus(name string, authOut CommandOutput, o DoctorOptions, pctx probeContext) (cliOutcome, bool) {
+	if !pctx.inHC {
+		return cliOutcome{}, false
+	}
+	if authOut.Exit == 127 {
+		if _, err := o.LookPath(name); err == nil {
+			return cliOutcome{
+				name:   name,
+				state:  cliNotInHCPath,
+				result: resWarn(name, "on PATH locally, but not on herdr-core's PATH", "run: hc server restart"),
+			}, true
+		}
+		return cliOutcome{name: name, state: cliMissing, result: resSkip(name, "not on PATH")}, true
+	}
+	if !pctx.customLookPath && (authOut.Err != nil || authOut.TimedOut) {
+		if _, err := o.LookPath(name); err != nil {
+			return cliOutcome{name: name, state: cliMissing, result: resSkip(name, "not on PATH")}, true
+		}
+	}
+	return cliOutcome{}, false
+}
+
+func checkClaude(ctx context.Context, o DoctorOptions, pctx probeContext) cliOutcome {
 	const name = "claude"
-	if _, err := o.LookPath(name); err != nil {
-		return cliOutcome{name: name, state: cliMissing, result: resSkip(name, "not on PATH")}
+	if pctx.customLookPath || !pctx.inHC {
+		if _, err := o.LookPath(name); err != nil {
+			return cliOutcome{name: name, state: cliMissing, result: resSkip(name, "not on PATH")}
+		}
 	}
 	env := []string{"DISABLE_AUTOUPDATER=1"}
 	authCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	authOut := o.RunCommand(authCtx, o.TempDir, env, "claude", "auth", "status", "--json")
 	cancel()
+	if oc, done := handleHCPathStatus(name, authOut, o, pctx); done {
+		return oc
+	}
 	if !claudeLoggedIn(authOut) {
 		return cliOutcome{name: name, state: cliSignedOut, result: resWarn(name, "installed, not logged in", "run: claude auth login")}
 	}
@@ -459,7 +561,7 @@ func checkClaude(ctx context.Context, o DoctorOptions, canaryRun CommandFunc, ca
 	}
 	cCtx, cCancel := context.WithTimeout(ctx, o.CanaryTimeout)
 	defer cCancel()
-	cOut := canaryRun(cCtx, canaryDir, env,
+	cOut := o.RunCommand(cCtx, pctx.canaryDir, env,
 		"claude", "-p", canaryPrompt,
 		"--no-session-persistence",
 		"--model", o.ClaudeModel,
@@ -473,7 +575,7 @@ func checkClaude(ctx context.Context, o DoctorOptions, canaryRun CommandFunc, ca
 		"--max-budget-usd", "0.05",
 	)
 	if cOut.TimedOut && ctx.Err() == nil {
-		return cliOutcome{name: name, state: cliCanaryTimedOut, result: canaryTimeoutResult(name, o, canaryDir)}
+		return cliOutcome{name: name, state: cliCanaryTimedOut, result: canaryTimeoutResult(name, o, pctx.canaryDir, pctx.inHC)}
 	}
 	if errMsg := claudeCanaryError(cOut); errMsg != "" {
 		return cliOutcome{name: name, state: cliCanaryFailed, result: resWarn(name, "logged in, but canary start failed: "+errMsg, "run claude once in a terminal to check login and quota")}
@@ -525,14 +627,19 @@ func claudeCanaryError(out CommandOutput) string {
 	return ""
 }
 
-func checkCodex(ctx context.Context, o DoctorOptions, canaryRun CommandFunc, canaryDir string) cliOutcome {
+func checkCodex(ctx context.Context, o DoctorOptions, pctx probeContext) cliOutcome {
 	const name = "codex"
-	if _, err := o.LookPath(name); err != nil {
-		return cliOutcome{name: name, state: cliMissing, result: resSkip(name, "not on PATH")}
+	if pctx.customLookPath || !pctx.inHC {
+		if _, err := o.LookPath(name); err != nil {
+			return cliOutcome{name: name, state: cliMissing, result: resSkip(name, "not on PATH")}
+		}
 	}
 	authCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	authOut := o.RunCommand(authCtx, o.TempDir, nil, "codex", "login", "status")
 	cancel()
+	if oc, done := handleHCPathStatus(name, authOut, o, pctx); done {
+		return oc
+	}
 	combined := strings.ToLower(authOut.Stdout + "\n" + authOut.Stderr)
 	if authOut.Err != nil || authOut.TimedOut || authOut.Exit != 0 || strings.Contains(combined, "not logged in") {
 		return cliOutcome{name: name, state: cliSignedOut, result: resWarn(name, "installed, not logged in", "run: codex login")}
@@ -542,7 +649,7 @@ func checkCodex(ctx context.Context, o DoctorOptions, canaryRun CommandFunc, can
 	}
 	cCtx, cCancel := context.WithTimeout(ctx, o.CanaryTimeout)
 	defer cCancel()
-	cOut := canaryRun(cCtx, canaryDir, nil,
+	cOut := o.RunCommand(cCtx, pctx.canaryDir, nil,
 		"codex", "exec",
 		"--ephemeral",
 		"--sandbox", "read-only",
@@ -550,12 +657,12 @@ func checkCodex(ctx context.Context, o DoctorOptions, canaryRun CommandFunc, can
 		"--disable", "hooks",
 		"--color", "never",
 		"-c", "model_reasoning_effort=low",
-		"-C", canaryDir,
+		"-C", pctx.canaryDir,
 		"--json",
 		canaryPrompt,
 	)
 	if cOut.TimedOut && ctx.Err() == nil {
-		return cliOutcome{name: name, state: cliCanaryTimedOut, result: canaryTimeoutResult(name, o, canaryDir)}
+		return cliOutcome{name: name, state: cliCanaryTimedOut, result: canaryTimeoutResult(name, o, pctx.canaryDir, pctx.inHC)}
 	}
 	if cOut.Err != nil || cOut.Exit != 0 {
 		why := cleanReason(firstNonEmpty(codexErrorText(cOut.Stdout), cOut.Stderr, cOut.Stdout, fmt.Sprintf("exit %d", cOut.Exit)))
@@ -592,14 +699,19 @@ func codexErrorText(stdout string) string {
 
 var agyModelIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
-func checkAgy(ctx context.Context, o DoctorOptions, canaryRun CommandFunc, canaryDir string) cliOutcome {
+func checkAgy(ctx context.Context, o DoctorOptions, pctx probeContext) cliOutcome {
 	const name = "agy"
-	if _, err := o.LookPath(name); err != nil {
-		return cliOutcome{name: name, state: cliMissing, result: resSkip(name, "not on PATH")}
+	if pctx.customLookPath || !pctx.inHC {
+		if _, err := o.LookPath(name); err != nil {
+			return cliOutcome{name: name, state: cliMissing, result: resSkip(name, "not on PATH")}
+		}
 	}
 	authCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	authOut := o.RunCommand(authCtx, o.TempDir, nil, "agy", "models")
 	cancel()
+	if oc, done := handleHCPathStatus(name, authOut, o, pctx); done {
+		return oc
+	}
 	models := parseAgyModels(authOut.Stdout)
 	if authOut.Err != nil || authOut.TimedOut || authOut.Exit != 0 || len(models) == 0 {
 		return cliOutcome{name: name, state: cliSignedOut, result: resWarn(name, "installed, not logged in", "run agy without arguments and sign in")}
@@ -609,12 +721,12 @@ func checkAgy(ctx context.Context, o DoctorOptions, canaryRun CommandFunc, canar
 	}
 	model := pickAgyCanaryModel(models)
 	settingsBytes, _ := json.Marshal(map[string]any{
-		"trustedWorkspaces": []string{canaryDir},
+		"trustedWorkspaces": []string{pctx.canaryDir},
 		"permissions":       map[string]any{"allow": []string{}},
 	})
 	cCtx, cCancel := context.WithTimeout(ctx, o.CanaryTimeout)
 	defer cCancel()
-	cOut := canaryRun(cCtx, canaryDir, nil,
+	cOut := o.RunCommand(cCtx, pctx.canaryDir, nil,
 		"agy",
 		"--mode", "plan",
 		"--disable-slash-commands",
@@ -624,7 +736,7 @@ func checkAgy(ctx context.Context, o DoctorOptions, canaryRun CommandFunc, canar
 		"-p="+canaryPrompt,
 	)
 	if cOut.TimedOut && ctx.Err() == nil {
-		return cliOutcome{name: name, state: cliCanaryTimedOut, result: canaryTimeoutResult(name, o, canaryDir)}
+		return cliOutcome{name: name, state: cliCanaryTimedOut, result: canaryTimeoutResult(name, o, pctx.canaryDir, pctx.inHC)}
 	}
 	if cOut.Err != nil || cOut.Exit != 0 {
 		why := cleanReason(firstNonEmpty(cOut.Stderr, cOut.Stdout, fmt.Sprintf("exit %d", cOut.Exit)))
@@ -669,21 +781,29 @@ func pickAgyCanaryModel(models []string) string {
 	return models[0]
 }
 
-func canaryTimeoutResult(cliName string, o DoctorOptions, canaryDir string) onboard.Result {
+func canaryTimeoutResult(cliName string, o DoctorOptions, canaryDir string, inHC bool) onboard.Result {
+	where := ""
+	if inHC {
+		where = " inside herdr-core"
+	}
 	if o.GOOS == "darwin" {
 		prompt, fix := consentPrompt(o.Home, canaryDir)
+		if !inHC {
+			fix = fmt.Sprintf("run %s once in %s", cliName, canaryDir)
+		}
 		return resFail(cliName,
-			fmt.Sprintf("logged in, but canary start inside herdr-core timed out after %s (a %s prompt or first-run dialog may be waiting)", o.CanaryTimeout, prompt),
+			fmt.Sprintf("logged in, but canary start%s timed out after %s (a %s prompt or first-run dialog may be waiting)", where, o.CanaryTimeout, prompt),
 			fmt.Sprintf("click Allow on any waiting %s prompt on this Mac, or %s", prompt, fix))
 	}
 	return resFail(cliName,
-		fmt.Sprintf("logged in, but canary start timed out after %s", o.CanaryTimeout),
+		fmt.Sprintf("logged in, but canary start%s timed out after %s", where, o.CanaryTimeout),
 		fmt.Sprintf("run %s once in %s and check network access", cliName, canaryDir))
 }
 
-// hcExecRunner runs a canary command inside herdr-core (machine.exec) so macOS
-// attributes file-access consent prompts to herdr-core (as factory workers do)
-// without opening a visible terminal pane.
+// hcExecRunner runs a child command inside herdr-core (machine.exec) using
+// herdr-core's own PATH and credentials without opening a visible terminal
+// pane, so macOS attributes file-access consent prompts to herdr-core and
+// doctor catches missing PATH/auth entries that factory workers would hit.
 func hcExecRunner(socket string) CommandFunc {
 	return func(ctx context.Context, dir string, extraEnv []string, argv ...string) CommandOutput {
 		start := time.Now()
@@ -693,12 +813,11 @@ func hcExecRunner(socket string) CommandFunc {
 				sec = rem
 			}
 		}
-		envMap := forwardedAuthEnv(os.Environ(), extraEnv)
 		client := hc.NewClient(socket)
 		res, err := client.Exec(ctx, hc.ExecParams{
 			Argv:    append([]string{"sh", "-c", cleanExecScript, "sh"}, argv...),
 			Cwd:     dir,
-			Env:     envMap,
+			Env:     extraEnvMap(extraEnv),
 			Timeout: &sec,
 		})
 		dur := time.Since(start)
@@ -725,17 +844,11 @@ func hcExecRunner(socket string) CommandFunc {
 	}
 }
 
-func forwardedAuthEnv(environ, extraEnv []string) map[string]string {
-	m := map[string]string{}
-	for _, kv := range environ {
-		k, v, ok := strings.Cut(kv, "=")
-		if !ok {
-			continue
-		}
-		if k == "PATH" || k == "ANTHROPIC_API_KEY" || k == "OPENAI_API_KEY" || k == "CLAUDE_CONFIG_DIR" || k == "CODEX_HOME" || isClaudeAuthEnv(k) {
-			m[k] = v
-		}
+func extraEnvMap(extraEnv []string) map[string]string {
+	if len(extraEnv) == 0 {
+		return nil
 	}
+	m := make(map[string]string, len(extraEnv))
 	for _, kv := range extraEnv {
 		if k, v, ok := strings.Cut(kv, "="); ok {
 			m[k] = v
@@ -748,37 +861,60 @@ func forwardedAuthEnv(environ, extraEnv []string) map[string]string {
 // folder has a GitHub push remote — that `gh repo set-default` is pinned to
 // that push remote so an `upstream` or `github` remote cannot redirect PRs.
 func CheckGH(ctx context.Context, o DoctorOptions, volumeOK bool) onboard.Result {
+	customLookPath := o.LookPath != nil
 	o = o.withDefaults()
+	return checkGH(ctx, o, false, customLookPath, volumeOK, "")
+}
+
+func checkGH(ctx context.Context, o DoctorOptions, inHC, customLookPath, volumeOK bool, probedDir string) onboard.Result {
 	const name = "gh"
-	if _, err := o.LookPath("gh"); err != nil {
-		return resWarn(name, "gh is not on PATH (local-merge mode only)", "install GitHub CLI (https://cli.github.com) and run gh auth login")
+	missingRes := resWarn(name, "gh is not on PATH (local-merge mode only)", "install GitHub CLI (https://cli.github.com) and run gh auth login")
+	if customLookPath || !inHC {
+		if _, err := o.LookPath("gh"); err != nil {
+			return missingRes
+		}
 	}
 	authCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	authOut := o.RunCommand(authCtx, o.TempDir, nil, "gh", "auth", "status")
 	cancel()
+	if inHC && authOut.Exit == 127 {
+		if _, err := o.LookPath("gh"); err == nil {
+			return resWarn(name, "gh is on PATH locally, but not on herdr-core's PATH (local-merge mode only)", "run: hc server restart")
+		}
+		return missingRes
+	}
 	if authOut.Err != nil || authOut.TimedOut || authOut.Exit != 0 {
+		if inHC && !customLookPath && (authOut.Err != nil || authOut.TimedOut) {
+			if _, err := o.LookPath("gh"); err != nil {
+				return missingRes
+			}
+		}
 		return resWarn(name, "gh is not logged in (local-merge mode only)", "run: gh auth login")
 	}
 	if !volumeOK {
 		return resOK(name, "logged in (repo pin check skipped until project volume answers)")
 	}
 
-	repoRoot := gitLine(ctx, o, o.Folder, "rev-parse", "--show-toplevel")
+	gitDir := o.Folder
+	if probedDir != "" {
+		gitDir = probedDir
+	}
+	repoRoot := gitLine(ctx, o, gitDir, "rev-parse", "--show-toplevel")
 	if repoRoot == "" {
 		return resWarn(name, fmt.Sprintf("logged in; %s is not a git repo yet (local-merge mode only)", o.Folder),
 			"initialize git, add a GitHub origin remote and run gh repo set-default <owner/repo>")
 	}
 
-	remotes := strings.Fields(gitOut(ctx, o, o.Folder, "remote"))
-	pushRemote := resolvePushRemote(ctx, o, o.Folder, remotes)
-	slug := resolveRemoteSlug(ctx, o, o.Folder, pushRemote)
+	remotes := strings.Fields(gitOut(ctx, o, repoRoot, "remote"))
+	pushRemote := resolvePushRemote(ctx, o, repoRoot, remotes)
+	slug := resolveRemoteSlug(ctx, o, repoRoot, pushRemote)
 	if slug == "" {
 		return resWarn(name, fmt.Sprintf("logged in; no GitHub push remote in %s (local-merge mode only)", repoRoot),
 			fmt.Sprintf("add a GitHub origin remote and run in %s: gh repo set-default <owner/repo>", repoRoot))
 	}
 
 	vCtx, vCancel := context.WithTimeout(ctx, o.AuthTimeout)
-	viewOut := o.RunCommand(vCtx, o.Folder, nil, "gh", "repo", "set-default", "--view")
+	viewOut := o.RunCommand(vCtx, repoRoot, nil, "gh", "repo", "set-default", "--view")
 	vCancel()
 	combinedLower := strings.ToLower(viewOut.Stderr + "\n" + viewOut.Stdout)
 	if viewOut.Err != nil || viewOut.TimedOut || (viewOut.Exit != 0 && !strings.Contains(combinedLower, "no default")) {
@@ -926,18 +1062,38 @@ func RepoFromURL(rawURL, ghHost string) string {
 
 // CheckCodexbar reports whether `codexbar` is on PATH for reading quota pools.
 func CheckCodexbar(ctx context.Context, o DoctorOptions) onboard.Result {
+	customLookPath := o.LookPath != nil
 	o = o.withDefaults()
+	return checkCodexbar(ctx, o, false, customLookPath)
+}
+
+func checkCodexbar(ctx context.Context, o DoctorOptions, inHC, customLookPath bool) onboard.Result {
 	const name = "codexbar"
-	if _, err := o.LookPath("codexbar"); err != nil {
-		fix := "install codexbar and put it on PATH"
-		if o.GOOS == "darwin" {
-			fix = "install CodexBar (brew install --cask steipete/tap/codexbar) so codexbar is on PATH"
+	missingFix := "install codexbar and put it on PATH"
+	if o.GOOS == "darwin" {
+		missingFix = "install CodexBar (brew install --cask steipete/tap/codexbar) so codexbar is on PATH"
+	}
+	missingRes := resWarn(name, "codexbar is not on PATH (runs without quota facts; switches only on a provider error)", missingFix)
+	if customLookPath || !inHC {
+		if _, err := o.LookPath("codexbar"); err != nil {
+			return missingRes
 		}
-		return resWarn(name, "codexbar is not on PATH (runs without quota facts; switches only on a provider error)", fix)
 	}
 	vCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	vOut := o.RunCommand(vCtx, o.TempDir, nil, "codexbar", "--version")
 	cancel()
+	if inHC && vOut.Exit == 127 {
+		if _, err := o.LookPath("codexbar"); err == nil {
+			return resWarn(name, "codexbar is on PATH locally, but not on herdr-core's PATH (runs without quota facts)", "run: hc server restart")
+		}
+		return missingRes
+	}
+	if inHC && !customLookPath && (vOut.Err != nil || vOut.TimedOut) {
+		if _, err := o.LookPath("codexbar"); err != nil {
+			return missingRes
+		}
+		return resWarn(name, "could not check codexbar inside herdr-core", "run: hc server restart")
+	}
 	if ver := strings.TrimSpace(firstLine(vOut.Stdout)); ver != "" && vOut.Exit == 0 {
 		return resOK(name, fmt.Sprintf("on PATH (%s)", ver))
 	}

@@ -11,7 +11,6 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
-	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
 
@@ -83,19 +82,18 @@ func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	folder = resolveTargetFolder(folder, home)
 
-	socket, claudeModel, badCfg := resolveFactoryConfig(*hcSocket, *configPath, home)
+	socket, badCfg := resolveFactoryConfig(*hcSocket, *configPath, home)
 	if badCfg != nil {
 		fprintln(stdout, badCfg.Line())
 		return 1
 	}
 
 	results := factoryDoctorRunner(ctx, factory.DoctorOptions{
-		Folder:      folder,
-		HCSocket:    socket,
-		Canary:      !*noCanary,
-		ClaudeModel: claudeModel,
-		Home:        home,
-		GHHost:      os.Getenv("GH_HOST"),
+		Folder:   folder,
+		HCSocket: socket,
+		Canary:   !*noCanary,
+		Home:     home,
+		GHHost:   os.Getenv("GH_HOST"),
 	})
 	for _, r := range results {
 		fprintln(stdout, r.Line())
@@ -149,42 +147,34 @@ func resolveTargetFolder(raw, home string) string {
 	return filepath.Clean(f)
 }
 
-func resolveFactoryConfig(explicitSocket, configPath, home string) (socket, claudeModel string, badCfg *onboard.Result) {
-	cfgPath := strings.TrimSpace(configPath)
-	explicitSock := strings.TrimSpace(explicitSocket)
-	if cfgPath == "" && explicitSock == "" {
-		def := config.DefaultPath()
-		if _, err := os.Stat(def); err == nil {
-			cfgPath = def
+func resolveFactoryConfig(explicitSocket, configPath, home string) (socket string, badCfg *onboard.Result) {
+	explicitCfg := strings.TrimSpace(configPath)
+	cfgPath := explicitCfg
+	if cfgPath == "" {
+		cfgPath = config.DefaultPath()
+	} else if _, err := os.Stat(cfgPath); err != nil {
+		r := onboard.Result{
+			Name:   "config",
+			Status: onboard.Fail,
+			Detail: err.Error(),
+			Fix:    "pass an existing --config PATH",
 		}
+		return "", &r
 	}
-	var cfg config.Config
-	var hasCfg bool
-	if cfgPath != "" {
-		loaded, err := config.Load(cfgPath)
-		if err != nil {
-			r := onboard.Result{
-				Name:   "config",
-				Status: onboard.Fail,
-				Detail: err.Error(),
-				Fix:    "fix " + cfgPath + " or pass --config PATH",
-			}
-			return "", "", &r
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		r := onboard.Result{
+			Name:   "config",
+			Status: onboard.Fail,
+			Detail: err.Error(),
+			Fix:    "fix " + cfgPath + " or pass --config PATH",
 		}
-		cfg = loaded
-		hasCfg = true
-		claudeModel = strings.TrimSpace(cfg.CLI.ClaudeModel)
+		return "", &r
 	}
-	if explicitSock != "" {
-		return expandHomePath(explicitSock, home), claudeModel, nil
+	if explicitSock := strings.TrimSpace(explicitSocket); explicitSock != "" {
+		return expandHomePath(explicitSock, home), nil
 	}
-	if envSock := strings.TrimSpace(os.Getenv("SHEEPDOG_HC_SOCKET")); envSock != "" {
-		return expandHomePath(envSock, home), claudeModel, nil
-	}
-	if hasCfg {
-		return cfg.Herdr.HCSocketPath(), claudeModel, nil
-	}
-	return hc.DefaultSocket(os.Getenv, home, os.Getuid(), nil), "", nil
+	return expandHomePath(cfg.Herdr.HCSocketPath(), home), nil
 }
 
 func expandHomePath(p, home string) string {
