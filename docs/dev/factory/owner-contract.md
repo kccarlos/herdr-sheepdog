@@ -189,7 +189,7 @@ Top-level envelope: `{"protocol": 1, "rules": [Rule]}`. Standing rules live in o
 
 ### 2.5 `graph` (`owner graph --project <id|folder> --json` — Provisional Phase 4 Shape)
 
-> **Provisional until Phase 4 (`SDF-30`–`SDF-32`):** The `graph` resource is sketched here so the contract client (`SDF-22`) knows its top-level envelope, but its exact keys are **outside v1 strict extra-key enforcement until `SDF-32`** extends [`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json). The single-stage ordered table per task is defined in `SDF-30`, and milestone mandate fields (`mandate`, `observe`, `plan apply`, `plan amend`) are defined in `SDF-31`.
+> **Provisional until Phase 4 (`SDF-30`–`SDF-32`):** The `graph` resource is sketched here so the contract client (`SDF-22`) knows its top-level envelope, but its exact keys are **outside v1 strict extra-key enforcement until `SDF-32`** extends [`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json). The single-stage ordered table per task is defined in `SDF-30`. `SDF-31` defined the milestone fields, `plan apply` and `plan amend` ([milestones.md](milestones.md)). The mandate is one field, the owner's words; there is no `observe` mode.
 
 | Object / Field | Type | Provisional Shape (finalized in `SDF-30`–`SDF-32`) |
 |---|---|---|
@@ -198,7 +198,7 @@ Top-level envelope: `{"protocol": 1, "rules": [Rule]}`. Standing rules live in o
 | `updated_at`, `replans` | `int` | Latest update timestamp (epoch ms) and count of `plan amend` replans (`SDF-31`). |
 | `spoken_summary` | `string` | Code-built 1–3 sentence plain-words summary of active milestone, critical path, and blockers (`SDF-36`). |
 | `critical_path` | `object \| null` | `{"milestone": string, "tasks": string[], "remaining_ms": int, "remaining_text": string}` (`SDF-32`). |
-| `milestones[]` | `object[]` | `{"id", "title", "goal", "order", "exit_test", "gate": "auto"\|"fable"\|"owner", "state": "planned"\|"active"\|"validating"\|"done", "acceptance_task"}` plus `SDF-31`'s mandate fields. |
+| `milestones[]` | `object[]` | `{"id", "title", "goal", "order", "exit_test", "gate": "auto"\|"fable"\|"owner", "state": "planned"\|"active"\|"validating"\|"done", "acceptance_task", "mandate": string, "ui": bool, "release": string \| null}`. `state` is derived, never stored (`SDF-31`). |
 | `tasks[]` | `object[]` | `{"ref", "id", "title", "milestone", "kind", "stage", "why_waiting", "after": string[], "dependents": string[], "on_critical_path": bool, "estimate_ms", "left_ms", "done_pct"}`, where `stage` comes from `SDF-30`'s ordered stage table. |
 
 ---
