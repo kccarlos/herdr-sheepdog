@@ -15,6 +15,19 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
 
+func TestMain(m *testing.M) {
+	home, err := os.MkdirTemp("", "sheepdog-factory-test-home-")
+	if err != nil {
+		panic(err)
+	}
+	for _, k := range []string{"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"} {
+		_ = os.Setenv(k, home)
+	}
+	code := m.Run()
+	_ = os.RemoveAll(home)
+	os.Exit(code)
+}
+
 type fakeEnv struct {
 	mu       sync.Mutex
 	bins     map[string]bool
@@ -140,9 +153,17 @@ func TestDoctorAllGreenAndCleansUpProbeTerminal(t *testing.T) {
 	env.handlers["codexbar --version"] = func(string, []string, []string) CommandOutput {
 		return CommandOutput{Stdout: "CodexBar 0.84.0\n"}
 	}
+	dataDir := filepath.Join(tmp, "sheepdog-data")
+	pyHome := createManagedPythonStub(t, dataDir, PinnedPythonVersion())
+	pyExec := filepath.Join(pyHome, "bin", "python3")
+	env.handlers[pyExec+" -I"] = func(string, []string, []string) CommandOutput {
+		return CommandOutput{Stdout: PinnedPythonVersion() + "\n" + pyHome + "\n"}
+	}
 
 	rs := Doctor(context.Background(), DoctorOptions{
 		Folder:        proj,
+		DataDir:       dataDir,
+		Engine:        EngineSource{Version: "v0.3.0"},
 		HCSocket:      srv.Path,
 		Canary:        true,
 		GOOS:          "darwin",
@@ -161,6 +182,12 @@ func TestDoctorAllGreenAndCleansUpProbeTerminal(t *testing.T) {
 		t.Fatal("Doctor reported failure on green setup")
 	}
 
+	if r := findResult(t, rs, "engine"); r.Status != onboard.OK || !strings.Contains(r.Detail, "v0.3.0") {
+		t.Errorf("engine = %+v", r)
+	}
+	if r := findResult(t, rs, "python"); r.Status != onboard.OK || !strings.Contains(r.Detail, PinnedPythonVersion()) {
+		t.Errorf("python = %+v", r)
+	}
 	if r := findResult(t, rs, "herdr-core"); r.Status != onboard.OK {
 		t.Errorf("herdr-core = %+v", r)
 	}
@@ -703,6 +730,7 @@ func TestVolumeSignalExitAndParentFolderAndHCExecCanary(t *testing.T) {
 
 	rs := Doctor(ctx, DoctorOptions{
 		Folder:   newChild,
+		DataDir:  filepath.Join(tmp, "exec-data"),
 		HCSocket: srvExec.Path,
 		Canary:   true,
 		GOOS:     "darwin",
@@ -745,6 +773,7 @@ func TestVolumeSignalExitAndParentFolderAndHCExecCanary(t *testing.T) {
 	}
 	narrowRs := Doctor(ctx, DoctorOptions{
 		Folder:   tmp,
+		DataDir:  filepath.Join(tmp, "narrow-data"),
 		HCSocket: srvNarrowPath.Path,
 		Canary:   false,
 		GOOS:     "darwin",
