@@ -114,25 +114,21 @@ func (s *ProofStore) cutoffMillis() int64 {
 	return s.now().Add(-s.retention).UnixMilli()
 }
 
-func (s *ProofStore) pruneLocked() bool {
+func (s *ProofStore) pruneLocked() {
 	cutoff := s.cutoffMillis()
-	changed := false
 	kept := s.order[:0]
 	for _, id := range s.order {
 		p, ok := s.proofs[id]
 		if !ok {
-			changed = true
 			continue
 		}
 		if p.AnsweredAt < cutoff {
 			delete(s.proofs, id)
-			changed = true
 			continue
 		}
 		kept = append(kept, id)
 	}
 	s.order = kept
-	return changed
 }
 
 func (s *ProofStore) saveLocked() error {

@@ -268,7 +268,7 @@ func TestTapAnswersThePendingQuestion(t *testing.T) {
 	blockedAuth(t, h)
 	p, _ := h.pending()
 	h.clock.Advance(time.Second)
-	res, err := h.sup.AnswerTap(context.Background(), p.ID, 2)
+	res, err := h.sup.AnswerTap(context.Background(), p.ID, 2, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func TestTapAnswersThePendingQuestion(t *testing.T) {
 		t.Errorf("last push = %+v", last)
 	}
 	// The same id again: the question is gone.
-	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); !errors.Is(err, ErrPendingGone) {
+	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1, ""); !errors.Is(err, ErrPendingGone) {
 		t.Errorf("second tap err = %v, want ErrPendingGone", err)
 	}
 }
@@ -297,7 +297,7 @@ func TestTapRejectsStalePendingScreen(t *testing.T) {
 	blockedAuth(t, h)
 	p, _ := h.pending()
 	h.srv.SetScreen(p.PaneID, "No question here")
-	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); !errors.Is(err, ErrPendingGone) {
+	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1, ""); !errors.Is(err, ErrPendingGone) {
 		t.Fatalf("tap error = %v, want ErrPendingGone", err)
 	}
 	if got := h.sendKeysRequests(); len(got) != 0 {
@@ -316,7 +316,7 @@ func TestTapIsNotFreshInputForTheRelay(t *testing.T) {
 	blockedAuth(t, h)
 	p, _ := h.pending()
 	calls := len(m.Calls())
-	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); err != nil {
+	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	h.relay(h.pusher.last(t).Text)
@@ -371,10 +371,10 @@ func TestTapRejectsStaleIDsAndBadOptions(t *testing.T) {
 	h := newHarness(t)
 	blockedAuth(t, h)
 	p, _ := h.pending()
-	if _, err := h.sup.AnswerTap(context.Background(), "ap-nope", 1); !errors.Is(err, ErrPendingGone) {
+	if _, err := h.sup.AnswerTap(context.Background(), "ap-nope", 1, ""); !errors.Is(err, ErrPendingGone) {
 		t.Errorf("unknown id err = %v", err)
 	}
-	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 9); !errors.Is(err, ErrNoSuchOption) {
+	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 9, ""); !errors.Is(err, ErrNoSuchOption) {
 		t.Errorf("bad option err = %v", err)
 	}
 	if got := h.sendKeysRequests(); len(got) != 0 {
@@ -485,7 +485,7 @@ func TestTapAnswersAQuestionTheVoiceMovedPast(t *testing.T) {
 		t.Fatalf("questions = %+v", qs)
 	}
 	h.clock.Advance(time.Second)
-	if _, err := h.sup.AnswerTap(context.Background(), older.ID, 1); err != nil {
+	if _, err := h.sup.AnswerTap(context.Background(), older.ID, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := h.sendKeysRequests(); len(got) != 1 || got[0][0] != "w5:p1" {
@@ -513,7 +513,7 @@ func TestTapOnAStaleQuestionIsRefused(t *testing.T) {
 	h.block("w6:p1", "claude-bash-prompt.screen.txt")
 	h.srv.SetScreen("w5:p1", fixture(t, "claude-permission-prompt.screen.txt"))
 	h.clock.Advance(time.Second)
-	if _, err := h.sup.AnswerTap(context.Background(), older.ID, 1); !errors.Is(err, ErrPendingGone) {
+	if _, err := h.sup.AnswerTap(context.Background(), older.ID, 1, ""); !errors.Is(err, ErrPendingGone) {
 		t.Errorf("err = %v, want ErrPendingGone", err)
 	}
 	if got := h.sendKeysRequests(); len(got) != 0 {

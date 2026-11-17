@@ -17,6 +17,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
+	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
@@ -113,6 +114,10 @@ type Options struct {
 	// FactoryTickPoll overrides the factory tick supervisor's poll interval
 	// (default 10 s; tests use a shorter interval).
 	FactoryTickPoll time.Duration
+	// Factory and FactoryAskPoll override the owner contract v1 client and
+	// open-ask poll interval (tests).
+	Factory        *factory.Client
+	FactoryAskPoll time.Duration
 	// Querier, when set, answers run_cli and (when it implements
 	// supervisor.Investigator) investigations instead of the codex/claude
 	// CLIs found on PATH; CLI is then ignored. The voice bench's scratch
@@ -379,6 +384,27 @@ func (a *App) URL() string {
 		return ""
 	}
 	return "http://" + addr
+}
+
+// LoopbackURL returns the plain-HTTP loopback URL (`http://127.0.0.1:<port>`)
+// for local child processes such as `engine owner answer` ("" before Listen).
+func (a *App) LoopbackURL() string {
+	if a.web == nil {
+		return ""
+	}
+	addr := a.web.Addr()
+	if addr == "" {
+		return ""
+	}
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return a.URL()
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return a.URL()
+	}
+	return daemon.LocalURL(host, port)
 }
 
 // URLs returns every URL the daemon can be reached on: just URL() for a

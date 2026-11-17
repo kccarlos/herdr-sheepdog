@@ -356,7 +356,7 @@ func TestPromptLivesWhileThePaneIsBlocked(t *testing.T) {
 	if n := h.log.count("pending.expired") + h.log.count("pending.cancelled") + h.log.count("pending.replaced"); n != 0 {
 		t.Errorf("expired+cancelled+replaced = %d, want 0", n)
 	}
-	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); err != nil {
+	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1, ""); err != nil {
 		t.Fatalf("tap after 7.5 min: %v", err)
 	}
 	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0] != [2]string{"w5:p1", "y"} {
@@ -377,7 +377,7 @@ func TestPromptEndsWhenThePaneLeavesIt(t *testing.T) {
 		if _, has := h.pending(); has {
 			t.Fatal("pending survived the pane leaving its prompt")
 		}
-		if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); !errors.Is(err, ErrPendingGone) {
+		if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1, ""); !errors.Is(err, ErrPendingGone) {
 			t.Errorf("tap err = %v, want ErrPendingGone", err)
 		}
 	})
@@ -427,7 +427,7 @@ func TestPromptEndsWhenThePaneLeavesIt(t *testing.T) {
 		if !has || p.ID == old.ID || p.PaneID != "w5:p1" {
 			t.Fatalf("pending = %+v, want a new prompt on w5:p1", p)
 		}
-		if _, err := h.sup.AnswerTap(context.Background(), old.ID, 1); !errors.Is(err, ErrPendingGone) {
+		if _, err := h.sup.AnswerTap(context.Background(), old.ID, 1, ""); !errors.Is(err, ErrPendingGone) {
 			t.Errorf("tap on the old card err = %v, want ErrPendingGone", err)
 		}
 	})
@@ -881,7 +881,7 @@ func TestAskUserQuestionMetaOptionIsRailOnly(t *testing.T) {
 	if keys, _, err := mapAnswer(p, "no"); err != nil || strings.Join(keys, " ") != "2" {
 		t.Errorf("no = %v %v", keys, err)
 	}
-	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 3); err == nil {
+	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 3, ""); err == nil {
 		t.Error("a tap on the meta option was accepted")
 	}
 }

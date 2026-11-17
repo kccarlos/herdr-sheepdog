@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DaemonError } from "../net/http.js";
-import { createAnswers, GONE, labelOf, LINGER_MS, openQuestions, summaryOf } from "./questions.js";
+import { createAnswers, GONE, isFactoryAsk, labelOf, LINGER_MS, openQuestions, summaryOf } from "./questions.js";
 
 const option = (index, label, extra = {}) => ({ index, label, keys: [String(index)], default: index === 1, ...extra });
 const question = (id, extra = {}) => ({ id, kind: "answer_prompt", agent: "Codex", summary: "Allow it?", options: [option(1, "Yes"), option(2, "No")], ...extra });
@@ -123,4 +123,18 @@ test("a phase for a question that left while open is forgotten", async () => {
   await h.answers.answer(q, q.options[0]);
   h.answers.prune({ questions: [] });
   assert.deepEqual(h.answers.getState().phases, {});
+});
+
+test("factory asks (fask-*) float as readOnly status cards and never send loopback taps", async () => {
+  const h = harness([{ ok: true }]);
+  const fask = question("fask-ask002", { agent: "Beacon", summary: "Accept and merge BCN-33?" });
+  const regular = question("ap-1-1");
+  assert.equal(isFactoryAsk(fask), true);
+  assert.equal(isFactoryAsk(regular), false);
+
+  const cards = h.answers.cards({ questions: [fask, regular] });
+  assert.deepEqual(cards.map((c) => [c.pending.id, c.readOnly]), [["fask-ask002", true], ["ap-1-1", false]]);
+
+  await h.answers.answer(fask, fask.options[0]);
+  assert.deepEqual(h.calls, [], "desktop panel must not send tap requests for factory asks");
 });

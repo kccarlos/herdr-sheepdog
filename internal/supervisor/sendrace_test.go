@@ -183,7 +183,7 @@ func TestAnswerIsRecordedBeforeTheKeysGoOut(t *testing.T) {
 			return base.SendKeys(ctx, paneID, keys...)
 		},
 	}
-	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); err != nil {
+	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	if !answered {
@@ -208,7 +208,7 @@ func TestNewPromptDuringAnswerKeepsItsOwnRecord(t *testing.T) {
 			return err
 		},
 	}
-	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); err != nil {
+	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	row, _ := h.store.Get("w5:p1")
@@ -230,7 +230,7 @@ func TestFailedAnswerKeysLeaveTheBlockOpen(t *testing.T) {
 			return errors.New("socket gone")
 		},
 	}
-	_, _ = h.sup.AnswerTap(context.Background(), p.ID, 1)
+	_, _ = h.sup.AnswerTap(context.Background(), p.ID, 1, "")
 	row, _ := h.store.Get("w5:p1")
 	if row.LastBlock == nil || row.LastBlock.Answered || row.LastBlock.Answer != "" {
 		t.Errorf("block = %+v after a failed send, want it open", row.LastBlock)

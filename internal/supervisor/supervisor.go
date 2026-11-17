@@ -10,6 +10,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/attention"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/redact"
@@ -188,6 +189,12 @@ type Config struct {
 	WorkerLog *workerlog.Reader
 	// Redactor masks worker excerpts before they enter the persisted journal.
 	Redactor *redact.Redactor
+	// Factory and FactoryProofs connect the supervisor to the owner contract
+	// v1 engine and loopback AnswerProof store (factory.go); nil leaves factory
+	// ask polling off. FactoryPoll sets the open-ask poll cadence (default 2 s).
+	Factory       *factory.Client
+	FactoryProofs *factory.ProofStore
+	FactoryPoll   time.Duration
 
 	chattiness Chattiness // parsed Chattiness
 
@@ -273,6 +280,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.WorkerLog == nil {
 		c.WorkerLog = workerlog.New(workerlog.Options{})
+	}
+	if c.FactoryPoll <= 0 {
+		c.FactoryPoll = defaultFactoryPoll
 	}
 	return c
 }
@@ -460,6 +470,12 @@ type Supervisor struct {
 
 	// journal is the work journal's own bookkeeping (journal.go).
 	journal journalState
+
+	// factory ask sync & active /ws voice device bookkeeping (factory.go).
+	factorySyncMu sync.Mutex
+	factoryAsks   map[string]factory.Ask
+	factoryWarned map[string]bool
+	voiceDevice   string
 }
 
 // interruptGrace is how long after a user cancel a pane's working -> done
@@ -528,11 +544,20 @@ func (s *Supervisor) Run(ctx context.Context) {
 	defer expiry.Stop()
 	reconcile := time.NewTicker(s.cfg.SnapshotInterval)
 	defer reconcile.Stop()
+	var factoryCh <-chan time.Time
+	if s.cfg.Factory != nil {
+		ft := time.NewTicker(s.cfg.FactoryPoll)
+		defer ft.Stop()
+		factoryCh = ft.C
+	}
 	defer s.shutdown()
 	// Once at startup, the roster is already loaded (state.Open ran
 	// before New): catches a pane whose prompt changed while the daemon
 	// was down, which no post-answer poll ever ran for.
 	s.reconcileReprompts(ctx)
+	if s.cfg.Factory != nil {
+		_ = s.SyncFactoryAsks(ctx)
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -543,6 +568,8 @@ func (s *Supervisor) Run(ctx context.Context) {
 			s.remindBuriedPrompt()
 		case <-reconcile.C:
 			s.reconcileReprompts(ctx)
+		case <-factoryCh:
+			_ = s.SyncFactoryAsks(ctx)
 		}
 	}
 }
