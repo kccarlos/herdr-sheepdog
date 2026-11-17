@@ -85,9 +85,9 @@ BIN_DIR="$WORKDIR/bin"
 mkdir -p "$BIN_DIR"
 export PATH="$BIN_DIR:$PATH"
 HC_RESTARTED=0
-HC_RESTART_FLAGS=()
+HC_RESTART_FRESH=""
 if hc server restart --help 2>&1 | grep -q -- '--fresh'; then
-  HC_RESTART_FLAGS+=(--fresh)
+  HC_RESTART_FRESH="--fresh"
 fi
 TASK_STARTED=0
 TASK_DONE=0
@@ -99,7 +99,7 @@ cleanup() {
     herdr-task done "$TASK_ID" --folder "$REPO_DIR" </dev/null >/dev/null 2>&1 || true
   fi
   if [ "$HC_RESTARTED" -eq 1 ]; then
-    env -u GH_TOKEN -u GITHUB_TOKEN hc server restart "${HC_RESTART_FLAGS[@]}" </dev/null >/dev/null 2>&1 || true
+    env -u GH_TOKEN -u GITHUB_TOKEN hc server restart ${HC_RESTART_FRESH:+$HC_RESTART_FRESH} </dev/null >/dev/null 2>&1 || true
   fi
   if [ "$KEEP" -eq 0 ]; then
     rm -rf "$WORKDIR"
@@ -115,7 +115,7 @@ gh repo view "$REPO" --json nameWithOwner,isPrivate -q '"Repo: \(.nameWithOwner)
 
 # Ensure hc worker terminals inherit GH_TOKEN when gh is not otherwise logged in.
 if ! env -u GH_TOKEN -u GITHUB_TOKEN gh auth status >/dev/null 2>&1; then
-  hc server restart "${HC_RESTART_FLAGS[@]}" </dev/null >/dev/null 2>&1
+  hc server restart ${HC_RESTART_FRESH:+$HC_RESTART_FRESH} </dev/null >/dev/null 2>&1
   HC_RESTARTED=1
 fi
 
