@@ -13753,6 +13753,7 @@ class AcceptGitHubPrPath(unittest.TestCase):
         self.assertTrue(os.path.isdir(self.wt))
         # cmd_merge likewise goes the PR path instead of marking it done from local main.
         self.git(self.root, "--git-dir", self.bare, "branch", "-D", "task/1-doc")
+        self.git(self.main, "update-ref", "-d", "refs/remotes/origin/task/1-doc")
         self.task.pop("pr", None)
         self.task.pop("auto_merge", None)
         self.task["state"] = "running"
