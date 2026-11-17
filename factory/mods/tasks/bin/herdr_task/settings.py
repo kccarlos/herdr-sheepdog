@@ -175,44 +175,14 @@ def write_task_check(s, space=None, value=_UNSET):
     return _write_task_setting(s, "check", value)
 
 
-_SKIP_EXT = (".md", ".txt", ".json", ".yml", ".yaml", ".toml", ".xml", ".xcodeproj", ".xcworkspace")
-
-
-def _agents_md_command(text):
-    """Extracts a documented test/check command named in AGENTS.md, or ''."""
-    in_fence = in_test_section = False
-    for raw in text.splitlines():
-        s = raw.strip()
-        if s.startswith("```"):
-            in_fence = not in_fence
-            if not in_fence:
-                in_test_section = False
-            continue
-        if in_fence:
-            if in_test_section and s and not s.startswith("#"):
-                return s
-            continue
-        if re.match(r"^#{1,4}\s+", s):
-            in_test_section = bool(re.search(r"(?i)\b(tests?|testing|checks?)\b", s))
-            continue
-        if in_test_section and s:
-            in_test_section = False
-        if not re.search(r"(?i)\b(run\s+(the\s+)?(tests?|checks?)|test\s+command|check\s+command|tests?|checks?)\b", s):
-            continue
-        if re.match(r"^(?:[-*]\s*)?(?:\*\*)?(?:never|don't|do\s+not|avoid)\b", s, re.I):
-            continue
-        for m in re.finditer(r"`([^`\n]+)`", s):
-            cand = m.group(1).strip()
-            if (not cand or cand.endswith("/") or cand.endswith(_SKIP_EXT) or cand.startswith(("-", "<", "~", "…"))
-                    or "…" in cand or (" " not in cand and not cand.startswith("./") and "." in cand)):
-                continue
-            return cand
-    return ""
+_AGENTS_CHECK_RE = re.compile(
+    r"(?im)^(?:[-*]\s*)?(?:\*\*)?(?:check(?:\s+command)?|test(?:\s+command)?|tests?|run\s+(?:the\s+)?(?:tests?|checks?))(?:\*\*)?\s*:\s*`([^`\n]+)`(?:\s|$|[.,;])"
+)
 
 
 def derive_check(folder):
     """Derives a repo's check command from facts it already states (Makefile test/check target,
-    AGENTS.md, or package.json scripts.test), returning (cmd, source) or ('', None)."""
+    explicit AGENTS.md test/check line, or package.json scripts.test), returning (cmd, source) or ('', None)."""
     if not folder or not os.path.isdir(folder):
         return "", None
     for mk in ("Makefile", "makefile", "GNUmakefile"):
@@ -231,9 +201,8 @@ def derive_check(folder):
     if os.path.isfile(agents_md):
         try:
             with open(agents_md, errors="replace") as f:
-                cmd = _agents_md_command(f.read(262144))
-            if cmd:
-                return cmd, "AGENTS.md"
+                if m := _AGENTS_CHECK_RE.search(f.read(262144)):
+                    return m.group(1).strip(), "AGENTS.md"
         except OSError:
             pass
     pkg_path = os.path.join(folder, "package.json")

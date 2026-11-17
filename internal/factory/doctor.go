@@ -1242,8 +1242,8 @@ func readSyncSettings(settingsPath, folder string) (mode, check string) {
 	type layer struct {
 		Folder string `json:"folder"`
 		Tasks  struct {
-			Sync  string `json:"sync"`
-			Check string `json:"check"`
+			Sync  string  `json:"sync"`
+			Check *string `json:"check"`
 		} `json:"tasks"`
 	}
 	var doc struct {
@@ -1260,8 +1260,8 @@ func readSyncSettings(settingsPath, folder string) (mode, check string) {
 		if l.Tasks.Sync == "cheap" || l.Tasks.Sync == "full" || l.Tasks.Sync == "off" {
 			mode = l.Tasks.Sync
 		}
-		if c := strings.TrimSpace(l.Tasks.Check); c != "" {
-			check = c
+		if l.Tasks.Check != nil {
+			check = strings.TrimSpace(*l.Tasks.Check)
 		}
 	}
 	apply(doc.Everywhere)
@@ -1298,12 +1298,7 @@ func sameFolder(a, b string) bool {
 var (
 	makeTestTargetRe  = regexp.MustCompile(`(?m)^test[ \t]*:(?:[^=]|$)`)
 	makeCheckTargetRe = regexp.MustCompile(`(?m)^check[ \t]*:(?:[^=]|$)`)
-	agentsHeadingRe   = regexp.MustCompile(`^#{1,4}\s+`)
-	agentsTestWordsRe = regexp.MustCompile(`(?i)\b(run\s+(the\s+)?(tests?|checks?)|test\s+command|check\s+command|tests?|checks?)\b`)
-	agentsTestHeadRe  = regexp.MustCompile(`(?i)\b(tests?|testing|checks?)\b`)
-	agentsNegativeRe  = regexp.MustCompile(`(?i)^(?:[-*]\s*)?(?:\*\*)?(?:never|don't|do\s+not|avoid)\b`)
-	agentsBacktickRe  = regexp.MustCompile("`([^`\n]+)`")
-	agentsSkipExtRe   = regexp.MustCompile(`\.(?:md|txt|json|ya?ml|toml|xml|xc(?:odeproj|workspace))$`)
+	agentsCheckRe     = regexp.MustCompile("(?im)^(?:[-*]\\s*)?(?:\\*\\*)?(?:check(?:\\s+command)?|test(?:\\s+command)?|tests?|run\\s+(?:the\\s+)?(?:tests?|checks?))(?:\\*\\*)?\\s*:\\s*`([^`\n]+)`(?:\\s|$|[.,;])")
 )
 
 func deriveCheck(folder string) (string, string) {
@@ -1321,8 +1316,10 @@ func deriveCheck(folder string) (string, string) {
 		}
 	}
 	if b, err := os.ReadFile(filepath.Join(folder, "AGENTS.md")); err == nil {
-		if cmd := agentsMDCommand(string(b)); cmd != "" {
-			return cmd, "AGENTS.md"
+		if m := agentsCheckRe.FindStringSubmatch(string(b)); len(m) == 2 {
+			if cmd := strings.TrimSpace(m[1]); cmd != "" {
+				return cmd, "AGENTS.md"
+			}
 		}
 	}
 	if b, err := os.ReadFile(filepath.Join(folder, "package.json")); err == nil {
@@ -1336,46 +1333,6 @@ func deriveCheck(folder string) (string, string) {
 		}
 	}
 	return "", ""
-}
-
-func agentsMDCommand(text string) string {
-	inFence, inTestSection := false, false
-	for _, raw := range strings.Split(text, "\n") {
-		s := strings.TrimSpace(raw)
-		if strings.HasPrefix(s, "```") {
-			inFence = !inFence
-			if !inFence {
-				inTestSection = false
-			}
-			continue
-		}
-		if inFence {
-			if inTestSection && s != "" && !strings.HasPrefix(s, "#") {
-				return s
-			}
-			continue
-		}
-		if agentsHeadingRe.MatchString(s) {
-			inTestSection = agentsTestHeadRe.MatchString(s)
-			continue
-		}
-		if inTestSection && s != "" {
-			inTestSection = false
-		}
-		if !agentsTestWordsRe.MatchString(s) || agentsNegativeRe.MatchString(s) {
-			continue
-		}
-		for _, m := range agentsBacktickRe.FindAllStringSubmatch(s, -1) {
-			cand := strings.TrimSpace(m[1])
-			if cand == "" || strings.HasSuffix(cand, "/") || strings.Contains(cand, "…") ||
-				strings.HasPrefix(cand, "-") || strings.HasPrefix(cand, "<") || strings.HasPrefix(cand, "~") ||
-				agentsSkipExtRe.MatchString(cand) || (!strings.Contains(cand, " ") && !strings.HasPrefix(cand, "./") && strings.Contains(cand, ".")) {
-				continue
-			}
-			return cand
-		}
-	}
-	return ""
 }
 
 func existingDir(path, fallback string) string {

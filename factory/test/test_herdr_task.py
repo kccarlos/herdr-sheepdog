@@ -11524,16 +11524,27 @@ class SyncBehindBase(unittest.TestCase):
         self.leftovers()
 
     def test_derive_check_reads_makefile_check_agents_md_and_ignores_prose(self):
-        import herdr_task.settings as st
+        import herdr_task.checks as checks, herdr_task.settings as st
         d = tempfile.mkdtemp(prefix="derive-")
         self.addCleanup(shutil.rmtree, d, True)
         self.assertEqual(st.derive_check(d), ("", None))
         with open(os.path.join(d, "AGENTS.md"), "w") as f:
-            f.write("# Guide\n- Read `AGENTS.md` first.\n- **Run the tests**: `pytest -q` (and never skip `docs/README.md`).\n")
+            f.write("# Guide\n- Tests use `StubDaemon`; see `ci`.\n## Testing\n```\ncd app\nnpm test\n```\n")
+        self.assertEqual(st.derive_check(d), ("", None))
+        with open(os.path.join(d, "AGENTS.md"), "w") as f:
+            f.write("# Guide\n- Read `AGENTS.md` first.\n- **Run the tests**: `pytest -q`.\n")
         self.assertEqual(st.derive_check(d), ("pytest -q", "AGENTS.md"))
         with open(os.path.join(d, "Makefile"), "w") as f:
             f.write("check:\n\tpytest -q\n")
         self.assertEqual(st.derive_check(d), ("make check", "Makefile"))
+        # checks_pass (gate local check) only runs an explicit tasks.check, never the derived sync command.
+        self.repo(None, check="")
+        with open(os.path.join(self.main, "Makefile"), "w") as f:
+            f.write("test:\n\ttrue\n")
+        self.store.data["tasks"][0].update(state="ready", worktree=self.main)
+        with self.mock.patch.object(checks, "gate_min", lambda *a: 1), \
+                self.mock.patch.object(checks, "run", lambda *a, **k: self.fail("checks_pass ran derived check")):
+            checks.checks_pass(self.store, self.store.data["tasks"][0])
 
     def test_no_derivable_check_surfaces_fallback_once_in_status_and_news(self):
         import herdr_task.news as news, herdr_task.output as output

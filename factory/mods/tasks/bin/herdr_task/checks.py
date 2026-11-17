@@ -76,7 +76,7 @@ def checks_pass(s, t):
         t.pop("check_run")
         s.dirty = True
         return
-    cmd = resolve_check(s, t)[0]
+    cmd = (settings_for(s)["tasks"].get("check") or "").strip()
     mine = [r for r in t.get("checks") or [] if r["sha"] == sha]
     last = mine[-1] if mine and t.get("pr") else None
     state = ((last or {}).get("ci") or {}).get("state")

@@ -843,13 +843,18 @@ func TestCheckSync(t *testing.T) {
 		}
 	})
 
-	t.Run("derives from AGENTS.md", func(t *testing.T) {
+	t.Run("derives from AGENTS.md and ignores non-command prose", func(t *testing.T) {
 		home := t.TempDir()
 		repo := t.TempDir()
 		env := newFakeEnv("git")
 		env.handlers["git -C"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 1} }
-		writeFile(repo, "AGENTS.md", "# Rules\nRead `AGENTS.md` first.\n- **Run the tests**: `go test ./...` before ready.\n")
+		writeFile(repo, "AGENTS.md", "# Rules\n- Tests use `StubDaemon`; see `ci`.\n## Testing\n```\ncd app\nnpm test\n```\n")
 		r := CheckSync(ctx, DoctorOptions{Folder: repo, Home: home, TempDir: home, RunCommand: env.run}, true)
+		if r.Status != onboard.Warn {
+			t.Fatalf("prose-only AGENTS.md should warn, got %+v", r)
+		}
+		writeFile(repo, "AGENTS.md", "# Rules\nRead `AGENTS.md` first.\n- **Run the tests**: `go test ./...` before ready.\n")
+		r = CheckSync(ctx, DoctorOptions{Folder: repo, Home: home, TempDir: home, RunCommand: env.run}, true)
 		if r.Status != onboard.OK || !strings.Contains(r.Detail, "go test ./...") || !strings.Contains(r.Detail, "AGENTS.md") {
 			t.Fatalf("AGENTS.md = %+v", r)
 		}
