@@ -272,6 +272,8 @@ class Plan:
             return ms_of.get(n[1]) if n[0] == "k" else (known.get(n[1]) or {}).get("milestone")
 
         def nexts(n):
+            if n[0] == "i" and (known.get(n[1]) or {}).get("plan_key") in listed:
+                return nexts(("k", known[n[1]]["plan_key"]))  # one node per task, by key or by id
             if n[0] == "a":
                 return members.get(n[1], []) + ([("a", prev[n[1]])] if n[1] in prev else [])
             if n[0] == "i" and (known.get(n[1]) or {}).get("acceptance_of"):
@@ -285,6 +287,8 @@ class Plan:
             seen, todo = set(), list(nexts(start))
             while todo:
                 n = todo.pop()
+                if n[0] == "i" and (known.get(n[1]) or {}).get("plan_key") in listed:
+                    n = ("k", known[n[1]]["plan_key"])
                 if n == start:
                     self.bad(f"{start[1]} would end up waiting for itself (a loop; milestone order counts: "
                              f"a task can't wait for a later milestone's task).")

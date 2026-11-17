@@ -200,6 +200,18 @@ class Plans(unittest.TestCase):
         rc, v = self.run_cli("plan", "amend", "--reason", "x", plan=plan)
         self.assertIn("M2's acceptance (TST-%d) has started: its gate can't change now" % t["acc-M2"]["id"], v["error"])
 
+    def test_review_round_3_loop_through_an_existing_task(self):
+        self.run_cli("plan", "apply", plan={"milestones": [milestone("M1", [task("a")])]})
+        with self.open(True) as s:
+            a = next(t for t in s.data["tasks"] if t.get("plan_key") == "a")
+            other = s.new("Outside task", "", "worktree")
+            other["after"] = [a["id"]]
+            s.dirty = True
+            ref = s.ref(other)
+        plan = {"milestones": [milestone("M1", [task("a", after=[ref])])]}
+        rc, v = self.run_cli("plan", "amend", "--reason", "x", plan=plan)
+        self.assertIn("a would end up waiting for itself", v["error"])
+
     def test_check_only_changes_nothing(self):
         rc, v = self.run_cli("plan", "apply", "--check", plan=self.first_plan())
         self.assertEqual((rc, v), (0, {"ok": True}))
