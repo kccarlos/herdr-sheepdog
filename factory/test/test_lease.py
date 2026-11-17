@@ -237,6 +237,36 @@ class Reconcile(LeaseCase):
         lease.reconcile_pass(report := {})
         self.assertIsNone(report.get("coordinators"))
 
+    def test_a_restart_cut_short_ends_the_replaced_one_and_moves_its_news(self):
+        self.hc.term("c1", self.repo)
+        self.hc.term("n9", self.repo)
+        self.hc.term("w1", self.repo, parent="c1")
+        self.save([{"id": 1, "title": "Auth", "state": "running", "agents": [{"address": "w1", "parent": "c1"}]}],
+                  coordinator={"address": "n9", "created_ms": 1000, "previous": "c1", "previous_created_ms": 1000})  # claimed, then the tick stopped
+        with news.held_messages() as held:
+            held["c1"] = [{"text": "SHOP-1 is ready", "how": "news", "at": self.now}]
+        lease.reconcile_pass(report := {})
+        self.assertEqual((self.started(), report["coordinators"][0]["ended"], self.hc.terms["c1"]["state"]), ([], "c1", "exited"))
+        self.assertEqual(self.data()["tasks"][0]["agents"][0]["parent"], "n9")
+        with news.held_messages() as held:
+            self.assertEqual((held.get("c1"), [x["text"] for x in held["n9"]]), (None, ["SHOP-1 is ready"]))
+
+    def test_a_later_terminal_at_the_replaced_address_is_left_alone(self):
+        self.hc.term("c1", self.repo, created_ms=2000)  # not the one replaced (that one started at 1000)
+        self.hc.term("n9", self.repo)
+        self.save([{"id": 1, "title": "Auth", "state": "running"}],
+                  coordinator={"address": "n9", "created_ms": 1000, "previous": "c1", "previous_created_ms": 1000})
+        lease.reconcile_pass(report := {})
+        self.assertEqual((self.hc.terms["c1"]["state"], report.get("coordinators")), ("live", None))
+
+    def test_revive_never_takes_a_later_terminal_at_the_lease_address_for_the_coordinator(self):
+        import herdr_task.revive as revive
+        self.hc.term("c1", self.repo, created_ms=2000)
+        self.save([], coordinator={"address": "c1", "created_ms": 1000})
+        self.assertFalse(revive.watched(self.hc.terms["c1"]))
+        self.hc.terms["c1"]["created_ms"] = 1000
+        self.assertTrue(revive.watched(self.hc.terms["c1"]))
+
     def test_one_starts_before_any_owner_message_and_only_for_a_repo_with_open_tasks(self):
         self.save([{"id": 1, "title": "Auth", "state": "done"}])
         lease.reconcile_pass({})

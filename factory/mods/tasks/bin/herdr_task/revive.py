@@ -174,9 +174,18 @@ def write_record(k, rec):
 
 
 def coordinator_addresses():
-    """The terminals that hold a project's lease here (lease.py): the only coordinators revive brings back."""
+    """{address: created_ms} of the terminals that hold a project's lease here (lease.py): the only coordinators revive
+    brings back."""
     from .lease import leases
-    return {rec.get("address") for _, rec in leases() if rec.get("address")}
+    return {rec["address"]: rec.get("created_ms") for _, rec in leases() if rec.get("address")}
+
+
+def is_holder(k, coords):
+    """`k` is the lease's own terminal: its address, and no later terminal there (created_ms)."""
+    if k.get("address") not in coords:
+        return False
+    want = coords[k["address"]]
+    return not (want and k.get("created_ms") and want != k["created_ms"])
 
 
 def watched(k, coords=None):
@@ -185,7 +194,7 @@ def watched(k, coords=None):
     Assistant (its labels or template) holds no lease and is left as it is (note 55)."""
     labels = k.get("labels") or {}
     coords = coordinator_addresses() if coords is None else coords
-    return not label_of(labels, "sandbox") and (k.get("address") in coords or bool(label_of(labels, "task")))
+    return not label_of(labels, "sandbox") and (is_holder(k, coords) or bool(label_of(labels, "task")))
 
 
 def task_ref(k):
@@ -283,7 +292,7 @@ def plan(k, rec, running, coords=None):
     """What to type into `k` now: (how, argv, direct) or None (direct: shell_line's). `running`: the
     sessions agents run here now; `coords`: the lease holders' addresses."""
     labels = k.get("labels") or {}
-    assistant = k.get("address") in (coordinator_addresses() if coords is None else coords)
+    assistant = is_holder(k, coordinator_addresses() if coords is None else coords)
     # A task's agent only while its task is at work (Working, or Ready for follow-ups): a finished
     # task's stays a shell, as its end would leave it.
     has_task = bool(label_of(labels, "task"))

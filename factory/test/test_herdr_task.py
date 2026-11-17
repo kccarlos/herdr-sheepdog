@@ -7054,7 +7054,7 @@ class Revive(unittest.TestCase):
         self.leased = set()  # the projects' lease holders (SDF-16): the coordinators revive brings back
         for name, value in (("run", hc), ("hc_json", hc_json), ("session_of", lambda pid: self.sessions.get(pid, (None, None))),
                             ("task_of", lambda k: self.tasks.get(revive.label_of(k.get("labels"), "task"))),
-                            ("coordinator_addresses", lambda: set(self.leased))):
+                            ("coordinator_addresses", lambda: dict.fromkeys(self.leased))):
             p = mock.patch.object(revive, name, value)
             p.start()
             self.addCleanup(p.stop)

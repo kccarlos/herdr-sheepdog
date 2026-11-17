@@ -120,7 +120,7 @@ def claim(project, addr, replacing=None, **extra):
         if cur.get("address") not in (None, addr, replacing) and _live(cur):
             return False
         d[KEY] = {"address": addr, "created_ms": k.get("created_ms"), "since": now(), "template": template_info()[0],
-                  **({"previous": cur["address"]} if cur.get("address") not in (None, addr) else {}),
+                  **({"previous": cur["address"], "previous_created_ms": cur.get("created_ms")} if cur.get("address") not in (None, addr) else {}),
                   **({"starts": cur["starts"]} if cur.get("starts") else {}), **extra}
         return True
     return _edit(project, put)
@@ -332,11 +332,19 @@ def reconcile_pass(report):
             holders.add(k["address"])
             try:
                 remember_session(folder, k)
-                prev = lease.get("previous")
-                prev = prev if prev and prev != k["address"] and has_held(prev) and not _live({"address": prev}) else None
-                if prev or orphans(d, k["address"]):  # a recovery cut short before its workers or held news moved
+                prev = lease.get("previous") if lease.get("previous") not in (None, k["address"]) else None
+                # the replaced one still live (a restart cut short before it ended): the same terminal, not a later one there
+                replaced = _live({"address": prev, "created_ms": lease.get("previous_created_ms")}) if prev and lease.get("previous_created_ms") else None
+                if prev and (replaced or has_held(prev) or orphans(d, k["address"])):  # a handoff cut short: finish it
                     report.setdefault("coordinators", []).append({"action": "re-parented", "folder": folder, "to": k["address"],
                                                                   "workers": reparent(folder, prev, k["address"])})
+                    if replaced:  # never two coordinators: the replaced one ends, as the restart would have
+                        run(["hc", "kill", prev])
+                        run(["hc", "rm", prev])
+                        report["coordinators"][-1]["ended"] = prev
+                elif orphans(d, k["address"]):  # workers on a parent that is gone
+                    report.setdefault("coordinators", []).append({"action": "re-parented", "folder": folder, "to": k["address"],
+                                                                  "workers": reparent(folder, None, k["address"])})
             except (OSError, ValueError, Fail):
                 pass
             continue
