@@ -397,10 +397,10 @@ PRIORITY_WORDS = "urgent: starts before normal queued tasks, in one slot past th
 # The Reviewer sandbox line: whether an agy reviewer here runs sandboxed (tasks.reviewer_sandbox, or the flag file).
 REVIEWER_BOX_WORDS = {"on": "on: the agy reviewer runs in a sandbox; agy's keychain sign-in isn't there, so it can stop at \"Sign in required\" (turn it off in Settings)",
                       "off": "off: the agy reviewer runs as the person's own agy, outside the sandbox"}
-# The Proof line (as Shepherdr's skill asks of its task agents), on and off.
-PROOF_WORDS = {"on": "show verifiable proof in one recipe artifact: each proof with a one-line caption, real and from this work now, "
-                     "plus a \"Not proven\" list; then say ready with --proof <its id>",
-               "off": "not needed for this task: no proof artifact; say in your summary how you checked it"}
+# The Proof line (file-based proof linked from the PR), on and off.
+PROOF_WORDS = {"on": "commit verifiable proof files (Markdown, images, or recipe.json, e.g. docs/proof/<REF>.md or proof/<REF>/recipe.json): "
+                     "each proof with a one-line caption, real and from this work now, plus a \"Not proven\" list; then say ready with --proof <path>",
+               "off": "not needed for this task: no proof files; say in your summary how you checked it"}
 AUTO_ACCEPT_WORDS = {"off": "off: the person accepts it",
                      "owner": "on, but {why}: the person accepts it",
                      "fable": "on: after its review, a Fable round judges it as the owner would; its pass merges it, its findings come back to you",
@@ -996,7 +996,7 @@ def accept_bar(s, t):
     sets = t.get("set") or {}
     if (sets["proof"] == "on" if "proof" in sets else settings_for(s)["tasks"].get("proof") is not False) \
             and not t.get("proof"):
-        return None, "no proof artifact attached"
+        return None, "no proof attached"
     if not t.get("pr"):
         return None, "no pull request, so no CI to check"
     return "engine", None

@@ -193,10 +193,39 @@ def proof_files_of(s, t):
     return sorted(seen.values(), key=lambda r: (not r["is_proof"], -r["mtime"], r["id"]))
 
 
+def _uncommitted(files, base_dir):
+    """Subset/reason if any file in `files` is outside `base_dir` or not committed cleanly in git."""
+    real_base = os.path.realpath(base_dir)
+    rel_files = []
+    for f in files:
+        target = os.path.realpath(f if os.path.isabs(f) else os.path.join(real_base, f))
+        if target != real_base and not target.startswith(real_base + os.sep):
+            return "outside"
+        rel_files.append(os.path.relpath(target, real_base))
+    if not rel_files:
+        return "untracked"
+    if not git(real_base, "ls-files", "--error-unmatch", "--", *rel_files)[0]:
+        return "untracked"
+    ok, st_out, _ = git(real_base, "status", "--porcelain", "--", *rel_files)
+    if ok and st_out:
+        return "dirty"
+    return None
+
+
+def _require_committed(result, base_dir, s, t):
+    if t.get("mode") != "worktree" or s.loc["kind"] != "repo":
+        return
+    why = _uncommitted(result["files"], base_dir)
+    if why == "outside":
+        raise Fail(f"Proof {result['id']} is outside {base_dir}: keep proof files in the repo so the PR can link them.")
+    if why:
+        raise Fail(f"Commit your proof file(s) ({result['id']}) on the branch before ready so the PR can link them.")
+
+
 def find_proof(s, t, given=None):
     """The task's proof, {id, title, path, files, kind}: the file or folder given (ready --proof <path>),
     else the task's discovered proof file/folder (Markdown, image, or recipe.json). None: none found.
-    A custom panel (main.js) is refused."""
+    In worktree mode, proof files must be committed on the branch; custom panels (main.js) are refused."""
     base_dir, folder = _task_root(s, t), s.loc["folder"]
     if given is not None:
         raw = given.strip()
@@ -207,16 +236,31 @@ def find_proof(s, t, given=None):
             cand, base_dir = os.path.join(folder, raw), folder
         if not os.path.exists(cand):
             raise Fail(f"No proof file or folder {raw} in {base_dir}.")
-        return _inspect_proof(cand, base_dir, s, t)
+        result = _inspect_proof(cand, base_dir, s, t)
+        _require_committed(result, base_dir, s, t)
+        return result
     mine = [r for r in proof_files_of(s, t) if r["is_proof"]]
-    return _inspect_proof(mine[0]["abs"], base_dir, s, t) if mine else None
+    if not mine:
+        return None
+    result = _inspect_proof(mine[0]["abs"], base_dir, s, t)
+    _require_committed(result, base_dir, s, t)
+    return result
 
 
 def task_artifacts(s, t, proof=None):
     """The other files its agent wrote for this task (a research task's report), [{id, title}]:
     linked on its Accept card beside its proof (SHEP-96)."""
     skip = (proof or {}).get("id")
-    return [{"id": r["id"], "title": r["title"]} for r in proof_files_of(s, t) if r["id"] and r["id"] != skip]
+    base_dir = _task_root(s, t)
+    wt_repo = t.get("mode") == "worktree" and s.loc["kind"] == "repo"
+    out = []
+    for r in proof_files_of(s, t):
+        if not r["id"] or r["id"] == skip:
+            continue
+        if wt_repo and _uncommitted([r["id"]], base_dir):
+            continue
+        out.append({"id": r["id"], "title": r["title"]})
+    return out
 
 
 def numstat(out, files):

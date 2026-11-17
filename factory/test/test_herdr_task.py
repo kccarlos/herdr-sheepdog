@@ -6568,6 +6568,10 @@ class AcceptCardArtifacts(unittest.TestCase):
         with open(os.path.join(wt, "PROOF.md"), "w") as f:
             f.write("# Worktree Proof\n\nAll checks passed.\n")
         s, t = self._store(mode="worktree", wt=wt)
+        with self.assertRaisesRegex(self.base.Fail, "Commit your proof"):
+            self.proof.find_proof(s, t)
+        subprocess.run(["git", "-C", wt, "add", "PROOF.md"], check=True)
+        subprocess.run(["git", "-C", wt, "commit", "-q", "-m", "add proof"], check=True)
         found = self.proof.find_proof(s, t)
         self.assertEqual((found["id"], found["title"], found["kind"]), ("PROOF.md", "Worktree Proof", "markdown"))
 
@@ -8313,6 +8317,11 @@ class TaskFlow(unittest.TestCase):
         self.assertIn("- Checked the flow", body)
         self.assertIn(f"{ref}: Flow · Proof", body)
         self.assertLess(len(body), 400)
+        # File-based proof links to the branch blob on GitHub.
+        self.task["proof"] = {"id": "docs/proof/SHEP-1.md", "path": "docs/proof/SHEP-1.md",
+                              "title": f"{ref}: Flow · Proof", "files": ["docs/proof/SHEP-1.md"]}
+        linked = github.pr_body(self.store, self.task, "The flow works now", repo="o/r")
+        self.assertIn(f"[{ref}: Flow · Proof](https://github.com/o/r/blob/task/1/docs/proof/SHEP-1.md)", linked)
         # A title that already names the ref doesn't name it twice.
         self.assertEqual(github.pr_title(self.store, {**self.task, "title": f"{ref} Flow"}), f"{ref}: Flow")
 
@@ -12025,7 +12034,7 @@ class AutoAccept(unittest.TestCase):
         return stack
 
     def test_missing_proof_or_an_owner_ask_waits_for_the_person_and_says_why(self):
-        for why, prep in (("no proof artifact attached", lambda: setattr(self, "proof", None)),
+        for why, prep in (("no proof attached", lambda: setattr(self, "proof", None)),
                           ("an open release question is yours to answer", lambda: self.owner_ask("release")),
                           ("an open question its Assistant asked is yours to answer", lambda: self.owner_ask(None)),
                           ("auto-accept is off", lambda: self.task["set"].update(auto_accept="off"))):

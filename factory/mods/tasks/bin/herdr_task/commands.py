@@ -456,8 +456,7 @@ def cmd_ready(args):
                     t.pop("details", None)
             elif details:
                 t["details"] = details
-            # Its proof artifact (--proof <id>, else its newest one titled "... · Proof"), linked from
-            # the person's Accept card.
+            # Its proof file or folder (--proof <path>, else discovered for the task), linked from the PR.
             proof = find_proof(s, t, getattr(args, "proof", None))
             if proof:
                 t["proof"] = proof
@@ -510,8 +509,8 @@ def cmd_ready(args):
         if proof:
             msg += f" Proof: {proof['title']}."
         elif asked:
-            msg += (" No proof artifact found, and your Settings block asks for one: publish it (herdr-artifact), "
-                    "then run ready again with --proof <its id>.")
+            msg += (" No proof file found, and your Settings block asks for one: commit a Markdown file, image, "
+                    "or recipe.json (e.g. docs/proof/<REF>.md or proof/<REF>/recipe.json), then run ready again with --proof <path>.")
         v = view(s, t)
     say(args, v, msg)
     if msg.startswith(f"{s.ref(t)} {READY_BUT}"):
