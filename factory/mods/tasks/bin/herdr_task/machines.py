@@ -1,10 +1,10 @@
 """Machines: the same task tools on every machine (sync), what each machine reaches (the reach
-map, hop by hop), the Assistants there (the directory) and messages between them.
+map, hop by hop), the coordinators there (the directory) and messages between them.
 
 Reach is only what the person's own herdr-core links allow, seen from where each link starts: a
 machine's links (`hc machine ls` there), and through each, what that one links to, hop by hop over
 those same links. The map opens no new connection to anything (#967): no ssh, no Tailscale peers,
-nothing the person didn't add. With the Other machines add-on off it follows no link at all.
+nothing the person didn't add.
 Trying the ssh config's hosts and the online Tailscale peers (Find) runs only when the person asks,
 on this machine only, once per FIND_EVERY_MS, and says first what it will contact; what it finds
 is reported, never added to the map. Nothing here makes keys, trust, tunnels or listeners. One-way
@@ -24,17 +24,14 @@ import sys
 import threading
 import time
 
-from .base import bundle, ENTRY, Fail, guard, HOME, hc_json, now, PACKAGE, run, STORE, WHERE
-
-# Compatibility shims until SDF-9 adapts machines.py.
-APP_HOME = os.path.join(HOME, ".config", "herdr-app")
-ASK_HOME = os.path.join(".local", "share", "herdr", "ask")
-addon_off = lambda _name: False
-sync_held = lambda: None
+from .base import bundle, ENTRY, Fail, guard, HOME, hc_json, now, PACKAGE, STORE, WHERE
 
 
 def _shep_py():
     table = {
+        "settings.json": ("config", "settings.json"),
+        "tasks": ("data", "tasks"),
+        "tools.json": ("data", "tools.json"),
         ".herdr/shepherdr.json": ("config", "settings.json"),
         ".herdr/model-picks.json": ("config", "model-picks.json"),
         ".herdr/tasks": ("data", "tasks"),
@@ -69,20 +66,15 @@ from .news import news_send, send_or_hold, typing
 
 
 # ---- sync: the same task tools on every machine ---------------------------------------------
-# What a machine needs to run tasks: herdr-task (one zipapp), herdr-artifact (with its guide and
-# markup), herdr-secret (a remote copy: it asks the main machine), herdr-browser once it exists,
-# and the role templates. Each goes to the same place under that machine's home as here
-# (~/.local/bin/..., ~/.config/herdr-core/templates/...). A stamp there (tools.json in Shepherdr's data;
-# STAMP names its old place, which SHEP turns into wherever it is on that machine)
-# records what was installed (each file's sha256 and its source's time), so a machine that is
-# current is skipped, an older copy never replaces a newer one, and a template someone changed
-# there is kept (--force replaces it). Nothing else there is touched.
+# What a machine needs to run tasks: herdr-task (one zipapp), herdr-secret (a remote copy: it asks
+# the main machine), and the role templates. Each goes to the same place under that machine's home
+# as here (~/.local/bin/..., ~/.config/herdr-core/templates/...). A stamp there (tools.json in
+# sheepdog's data) records what was installed (each file's sha256 and its source's time), so a
+# machine that is current is skipped, an older copy never replaces a newer one, and a template
+# someone changed there is kept (--force replaces it). Nothing else there is touched.
 
 ROLES = ("assistant", "worker", "reviewer")
-ARTIFACT_HOME = ".local/share/herdr/artifacts"
-# The installed web app's artifact viewer in one file (bin/shepherdr installs web/dist there), synced beside herdr-artifact
-VIEWER_BUILT = os.path.join(".local", "share", "shepherdr", "web", "dist", "artifact-viewer.html")
-STAMP = ".herdr/tools.json"
+STAMP = "tools.json"
 MACHINES = os.path.join(STORE, ".machines.json")
 SYNC_DEBOUNCE_MS = 30000        # files changed here: wait until they stay put this long
 SYNC_RETRY_MS = 10 * 60000      # a machine whose sync failed: tried again after this
@@ -151,21 +143,6 @@ def manifest():
     sources = [ENTRY] + ([os.path.join(PACKAGE, n) for n in os.listdir(PACKAGE) if n.endswith(".py") or n == "reviewer.sb"] if os.path.isdir(PACKAGE) else [])
     add(".local/bin/herdr-task", bundle(), 0o755, sources, test=["--version"])
     links, touch = [], []
-    art = _real(".local/bin/herdr-artifact")
-    if art:
-        root = os.path.dirname(os.path.dirname(art))
-        add(f"{ARTIFACT_HOME}/bin/herdr-artifact", _read(art), 0o755, [art], test=["--version"])
-        for extra in ("ARTIFACTS.md", "markup.js"):
-            p = os.path.join(root, extra)
-            if os.path.isfile(p):
-                add(f"{ARTIFACT_HOME}/{extra}", _read(p), 0o644, [p])
-        # The web app's artifact viewer in one file (SHEP-149: herdr-artifact preview shows a machine's own
-        # artifacts there as the person sees them): the copy a sync left beside it, else the installed web app's.
-        viewer = next((p for p in (os.path.join(root, "viewer.html"), os.path.join(HOME, VIEWER_BUILT)) if os.path.isfile(p)), None)
-        if viewer:
-            add(f"{ARTIFACT_HOME}/viewer.html", _read(viewer), 0o644, [viewer])
-        # As here: ~/.local/bin/herdr-artifact leads to its folder, where its guide sits beside it.
-        links.append({"path": ".local/bin/herdr-artifact", "target": f"{ARTIFACT_HOME}/bin/herdr-artifact"})
     secret = _real(".local/bin/herdr-secret")
     if secret:
         add(".local/bin/herdr-secret", _read(secret), 0o755, [secret], test=["--help"])
@@ -174,16 +151,6 @@ def manifest():
         # marks nothing.
         if secrets_main_here():
             touch.append({"path": ".herdr/secret-remote", "unless": ".herdr/vault.json", "unless_main": True})
-    browser = _real(".local/bin/herdr-browser")
-    if browser:
-        add(".local/bin/herdr-browser", _read(browser), 0o755, [browser])
-    # The chat's question-card hook (SHEP-139): a task worker's own hook (herdr-task _allow) runs it,
-    # so a machine that only runs tasks asks on the card too. From Herdr's app home, else the copy
-    # a sync left here (this machine passes it on).
-    for name, mode in (("ask-hook.sh", 0o755), ("ask-end.py", 0o644)):
-        p = next((x for x in (os.path.join(APP_HOME, "mods", "chat", name), os.path.join(HOME, ASK_HOME, name)) if os.path.isfile(x)), None)
-        if p:
-            add(f"{ASK_HOME}/{name}", _read(p), mode, [p])
     for role in ROLES:
         rel = f".config/herdr-core/templates/{role}.md"
         p = os.path.join(HOME, rel)
@@ -219,17 +186,12 @@ try:
 except Exception:
     stamp = {}
 rec = stamp.get("files") or {}
-# The machine that holds herdr-task's source (Herdr's own folder, with its links into it) is
-# where copies come from: never written to.
-source = os.path.isdir(P(".config/herdr-app/mods/tasks/bin/herdr_task"))
-out = {"source": source, "files": {}, "links": {}, "stamp": {k: stamp.get(k) for k in ("version", "from", "at")},
+out = {"files": {}, "links": {}, "stamp": {k: stamp.get(k) for k in ("version", "from", "at")},
        "python": sys.version.split()[0], "os": os.uname().sysname, "home": H}
 for f in x["files"]:
     p, r = P(f["path"]), rec.get(f["path"]) or {}
     cur = sha(p)
-    if source:
-        st = "source here"
-    elif os.path.islink(p):
+    if os.path.islink(p):
         st = "own copy"
     elif cur == f["sha"]:
         st = "current"
@@ -269,9 +231,7 @@ for f in x["files"]:
 for l in x["links"]:
     p, t = P(l["path"]), P(l["target"])
     st = "current" if os.path.islink(p) and os.readlink(p) == t else "missing" if not os.path.lexists(p) else "behind"
-    if source:
-        st = "source here"
-    elif st == "behind" and os.path.islink(p) and not os.readlink(p).startswith(P(".local/share/herdr")):
+    if st == "behind" and os.path.islink(p) and not os.readlink(p).startswith(P(".local/share/sheepdog")):
         st = "own copy"
     if x["op"] == "install" and st != "current" and os.path.isfile(t):
         try:
@@ -298,7 +258,7 @@ def main_here():
     except Exception:
         return False
     return bool(rec.get("id")) and rec.get("id") == me
-if x["op"] == "install" and not source:
+if x["op"] == "install":
     for t in x["touch"]:
         if t.get("unless_main") and main_here():
             continue
@@ -348,8 +308,6 @@ OK = ("current", "installed", "own copy")
 
 
 def _verdict(res):
-    if res.get("source"):
-        return "source", ["holds herdr-task's source: copies come from there, it's never written to"]
     bad = {p: s for p, s in {**res["files"], **res["links"]}.items() if s not in OK}
     if not bad:
         return "current", []
@@ -364,15 +322,14 @@ def sync_machine(machine, m, op="install", force=False):
     try:
         res = _remote_python(machine, INSTALL, {**me, "op": "check", "files": [bare(f) for f in m["files"]]}, timeout=60)
         state, details = _verdict(res)
-        if op == "install" and state not in ("current", "source"):
+        if op == "install" and state != "current":
             need = {p for p, s in res["files"].items() if s in ("missing", "behind")}
             send = [{**bare(f), "data": base64.b64encode(f["data"]).decode()} if f["path"] in need else bare(f) for f in m["files"]]
             res = _remote_python(machine, INSTALL, {**me, "op": "install", "files": send}, timeout=180)
             state, details = _verdict(res)
             for f in m["files"]:
-                mark = {".local/bin/herdr-task": STORE, f"{ARTIFACT_HOME}/bin/herdr-artifact": WHERE.path("artifacts")}.get(f["path"])
-                if mark and res["files"].get(f["path"]) in ("current", "installed"):
-                    _mark(os.path.join(mark, ".remote", machine), hashlib.sha1(f["data"]).hexdigest())
+                if f["path"] == ".local/bin/herdr-task" and res["files"].get(f["path"]) in ("current", "installed"):
+                    _mark(os.path.join(STORE, ".remote", machine), hashlib.sha1(f["data"]).hexdigest())
     except Fail as e:
         return {"machine": machine, "state": "unreachable", "details": [str(e)], "version": m["version"]}
     return {"machine": machine, "state": state, "details": details, "version": m["version"], "installed": (res.get("stamp") or {}).get("version"),
@@ -411,9 +368,7 @@ def _save_state(update):
 
 
 def sync(names=None, op="install", force=False):
-    """Every connected machine (or those named), all at once: {version, machines: [...]}. While
-    an install holds copies (base.sync_held), an install round sends nothing: each is "held"."""
-    held = sync_held() if op != "check" else None
+    """Every connected machine (or those named), all at once: {version, machines: [...]}."""
     m = manifest()
     links = {x["name"]: x for x in connected_machines()}
     if names:
@@ -424,9 +379,6 @@ def sync(names=None, op="install", force=False):
     out = {}
 
     def one(name):
-        if held:
-            out[name] = {"machine": name, "state": "held", "details": [f"{held} (shepherdr doctor lets it go)"], "version": m["version"]}
-            return
         out[name] = sync_machine(name, m, op, force) if links[name].get("state") == "connected" else \
             {"machine": name, "state": "unreachable", "details": [f"herdr-core link {links[name].get('state')}"], "version": m["version"]}
     threads = [threading.Thread(target=one, args=(n,)) for n in targets]
@@ -440,7 +392,7 @@ def sync(names=None, op="install", force=False):
         for r in rows:
             e = d.setdefault("machines", {}).setdefault(r["machine"], {})
             e.update({"state": r["state"], "checked": now(), "details": r["details"]})
-            if r["state"] in ("current", "source"):
+            if r["state"] == "current":
                 e["synced"] = m["version"]
             elif e.get("synced") == m["version"]:
                 e.pop("synced")
@@ -461,10 +413,10 @@ def cmd_machines(args):
         else:
             print(f"Tools here: version {r['version']}." if r["machines"] else "No other machines connected here.")
             for x in r["machines"]:
-                word = {"current": "current", "source": "holds the source (left alone)", "drift": "out of date", "failed": "failed", "unreachable": "can't reach", "held": "held"}.get(x["state"], x["state"])
+                word = {"current": "current", "drift": "out of date", "failed": "failed", "unreachable": "can't reach"}.get(x["state"], x["state"])
                 more = f" (updated {len(x['changed'])} file(s))" if x.get("changed") else ""
                 print(f"  {x['machine']}: {word}{more}" + "".join(f"\n      {d}" for d in x["details"]))
-        if args.check and any(x["state"] not in ("current", "source") for x in r["machines"]):
+        if args.check and any(x["state"] != "current" for x in r["machines"]):
             raise SystemExit(1)
 
 
@@ -497,14 +449,11 @@ def _busy(name):
 def machines_pass(report):
     """Each round: after the tools here change (once they've stayed put SYNC_DEBOUNCE_MS), and
     when a machine connects, syncs the machines that need it; refreshes the reach map every
-    REACH_EVERY_MS. Both run detached: the round never waits on another machine. No syncs while
-    the machines add-on is off or an install holds them (base.SYNC_HOLD). The map's refresh only
-    asks herdr-core: this machine's links, and with the add-on on, the linked machines' over them."""
+    REACH_EVERY_MS. Both run detached: the round never waits on another machine."""
     ms = connected_machines()
     version = manifest()["version"]
     t = now()
     due = []
-    held = addon_off("machines") or sync_held()
 
     def look(d):
         if d.get("seen") != version:
@@ -515,7 +464,7 @@ def machines_pass(report):
             e = known.setdefault(m["name"], {})
             was = e.get("link")
             e["link"] = m.get("state")
-            if m.get("state") != "connected" or not stable or held:
+            if m.get("state") != "connected" or not stable:
                 continue
             if e.get("synced") != version and (was != "connected" or e.get("synced_try") != version or t - e.get("at", 0) >= SYNC_RETRY_MS):
                 due.append(m["name"])
@@ -564,12 +513,11 @@ def js(text):
     except Exception:
         return None
 hc = shutil.which("hc") or (os.path.join(H, ".local/bin/hc") if os.path.isfile(os.path.join(H, ".local/bin/hc")) else None)
-me = {"host": socket.gethostname(), "user": os.environ.get("USER") or os.path.basename(H), "os": os.uname().sysname, "hc": bool(hc), "links": []}
-me["home"] = H  # where Herdr names a space "Home" (a space with no name of its own)
+me = {"host": socket.gethostname(), "user": os.environ.get("USER") or os.path.basename(H), "os": os.uname().sysname, "hc": bool(hc), "links": [], "home": H}
 core = (js(sh([hc, "server", "status", "--json"])[1]) or {}).get("core") if hc else None
 me["core"] = core
 try:
-    with open(SHEP(".herdr/tools.json")) as f:
+    with open(SHEP("tools.json")) as f:
         me["tools"] = json.load(f).get("version")
 except Exception:
     me["tools"] = None
@@ -578,40 +526,40 @@ if hc:
         if not m.get("temporary"):
             me["links"].append({"how": "herdr-core", "to": m.get("name"), "id": m.get("id"), "target": m.get("target"),
                                 "state": m.get("state"), "ok": m.get("state") == "connected"})
-    # Assistants: live terminals labelled herdr.role=coordinator, or started from the assistant template.
+    # Coordinators: live terminals labelled sheepdog.role=coordinator / herdr.role=coordinator, or started from the assistant template.
     seen = {}
-    for args in (["--label", "herdr.role=coordinator"], []):
+    for args in (["--label", "sheepdog.role=coordinator"], ["--label", "herdr.role=coordinator"], []):
         for t in (js(sh([hc, "ls", "--json"] + args)[1]) or {}).get("terminals") or []:
             if "/" in t.get("address", "") or t.get("state") != "live":
                 continue
             if args or t.get("template") in ("assistant", "coordinator"):
                 seen[t["address"]] = t
-    # The spaces: the window's live list when a window here names some (`herdr-app ls`, as autopilot's window_spaces),
-    # else herdr-core's saved herdr-app document (docs.json), which a window may not have written since its last change.
-    spaces = []
-    if shutil.which("herdr-app"):
-        live = js(sh(["herdr-app", "ls"], timeout=10)[1]) or {}
-        if isinstance(live, dict) and isinstance(live.get("spaces"), list):
-            spaces = [s for s in live["spaces"] if isinstance(s, dict) and s.get("id") and not s.get("machine")]
-    if not spaces:
-        docs = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(H, ".local/state"), "herdr-core", "default", "docs.json")
-        try:
-            with open(docs) as f:
-                spaces = ((json.load(f).get("herdr-app") or {}).get("value") or {}).get("spaces") or []
-        except Exception:
-            spaces = []
-    me["spaces"] = [{"id": s.get("id"), "name": s.get("name"), "folder": s.get("folder"), "machine": s.get("machine"), "icon": s.get("icon")} for s in spaces]
-    names = {s["id"]: s for s in me["spaces"]}
+    tasks_dir = SHEP("tasks")
+    try:
+        with open(SHEP("settings.json")) as f:
+            projects = json.load(f).get("projects") or {}
+    except Exception:
+        projects = {}
     me["assistants"] = []
     for a in seen:
         k = js(sh([hc, "get", a, "--json"])[1]) or {}
         lb = k.get("labels") or {}
-        sp = lb.get("herdr.space") or lb.get("herdr.coordinator.space")
-        if k.get("state") != "live" or not (lb.get("herdr.role") == "coordinator" or k.get("template") in ("assistant", "coordinator")):
+        role = lb.get("sheepdog.role") or lb.get("herdr.role")
+        if k.get("state") != "live" or role == "ask" or not (role == "coordinator" or k.get("template") in ("assistant", "coordinator")):
             continue
-        s = names.get(sp) or {}
-        me["assistants"].append({"address": a, "space": sp, "space_name": s.get("name") or (os.path.basename(k.get("cwd") or "") or None),
-                                 "folder": s.get("folder") or k.get("cwd"), "template": k.get("template"), "name": k.get("name")})
+        proj = lb.get("sheepdog.project") or ""
+        folder = proj if proj.startswith("/") else None
+        if proj and not folder and "/" not in proj:
+            try:
+                with open(os.path.join(tasks_dir, proj + ".json")) as f:
+                    folder = json.load(f).get("folder")
+            except Exception:
+                pass
+        folder = folder or k.get("cwd")
+        p_cfg = projects.get(folder) if isinstance(projects, dict) and isinstance(projects.get(folder), dict) else {}
+        p_name = p_cfg.get("name") or (os.path.basename(folder.rstrip("/")) if folder else None) or None
+        me["assistants"].append({"address": a, "project": proj or folder, "project_name": p_name,
+                                 "folder": folder, "template": k.get("template"), "name": k.get("name")})
 # Next hops: through each herdr-core link that works, to a machine nobody on the way looks at.
 if o["depth"] > 0 and core:
     look = [l for l in me["links"] if l.get("ok") and l.get("id") and l["how"] == "herdr-core" and l["id"] not in o["seen"]]
@@ -646,10 +594,7 @@ def _reach_cache():
 
 
 def probe(depth=REACH_DEPTH, timeout=90):
-    """The reach map from this machine, hops and all, checked now. With the Other machines add-on
-    off: this machine alone, no link followed."""
-    if addon_off("machines"):
-        depth = 0
+    """The reach map from this machine, hops and all, checked now."""
     boot = "import sys; S = sys.stdin.read(); exec(S)"
     r = subprocess.run([sys.executable, "-c", boot, json.dumps({"depth": depth, "seen": [], "timeout": timeout})], input=PROBE,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout + 60)
@@ -841,9 +786,7 @@ def _try_host(h, ids):
 
 def find(go=False):
     """Find machines: without go, what it would contact (and the last run's answer); with go, try
-    each once now. Refused while the Other machines add-on is off, or within FIND_EVERY_MS of the last."""
-    if addon_off("machines"):
-        raise Fail("Find machines is off while the Other machines add-on is off: turn it on in Settings › Add-ons first")
+    each once now. Refused within FIND_EVERY_MS of the last."""
     linked = _linked()
     hosts = find_hosts(linked)
     last = _found()
@@ -912,8 +855,8 @@ def cmd_find(args):
 # ---- the Assistant directory and messages ---------------------------------------------------
 
 def directory(refresh=False, max_age=30000):
-    """Every live Assistant on every machine reachable from here: [{target, machine, route,
-    address, space, space_name, folder}]. target is how to address it (vm-demo/t3, laptop>vm-x/t3,
+    """Every live coordinator on every machine reachable from here: [{target, machine, route,
+    address, project, project_name, folder}]. target is how to address it (vm-demo/t3, laptop>vm-x/t3,
     t3 here)."""
     d = reach(refresh=refresh, max_age=max_age)
     rows = []
@@ -933,17 +876,18 @@ def cmd_assistants(args):
     if not rows:
         print("No live Assistants on any machine reachable from here.")
     for a in rows:
-        print(f"{a['target']:<28} {a.get('space_name') or '?':<20} {a.get('folder') or ''}")
+        print(f"{a['target']:<28} {a.get('project_name') or '?':<20} {a.get('folder') or ''}")
 
 
 def _find(rows, target):
     t = target.strip()
-    # A chat's #-mention, whole or its target: [#shop](space:vm-demo/sp1), space:vm-demo/sp1, #shop.
-    m = re.fullmatch(r"\[#[^\]]*\]\(space:([^)\s]+)\)", t)
-    t = m.group(1) if m else re.sub(r"^space:", "", t).lstrip("#")
-    hits = [a for a in rows if t in (a["target"], a.get("space"), f"{a['route']}/{a.get('space')}" if a["route"] else a.get("space"))]
+    m = re.fullmatch(r"\[#[^\]]*\]\((?:project|space):([^)\s]+)\)", t)
+    t = m.group(1) if m else re.sub(r"^(?:project|space):", "", t).lstrip("#")
+    keys = lambda a: [a["target"], *(x for v in (a.get("project"), a.get("folder")) if v
+                                     for x in (v, *([f"{a['route']}/{v}", f"{a['route']}:{v}"] if a.get("route") else [])))]
+    hits = [a for a in rows if t in keys(a)]
     if not hits:
-        hits = [a for a in rows if t == a.get("space_name") or (a["route"] and t == f"{a['route']}/{a.get('space_name')}")]
+        hits = [a for a in rows if t == a.get("project_name") or (a["route"] and t == f"{a['route']}/{a.get('project_name')}")]
     return hits
 
 
@@ -1019,7 +963,7 @@ def tell(target, text, sender=None):
     receiver = next((n["node"] for n in nodes(graph) if route_text(n["route"]) == (to["route"] or "")), {})
     back = _path_back(graph, (receiver.get("core") or {}).get("id"), here.get("id")) if to["route"] else []
     attrs = {"from": f"{'>'.join(back)}/{me}" if back else (me if back == [] else f"{here.get('name')}/{me}"),
-             "machine": here.get("name"), "space": (mine or {}).get("space_name") or (mine or {}).get("space") or "", "can-reply": "yes" if back is not None and me else "no"}
+             "machine": here.get("name"), "project": (mine or {}).get("project_name") or (mine or {}).get("folder") or "", "can-reply": "yes" if back is not None and me else "no"}
     esc = lambda s: str(s).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
     msg = "<herdr-assistant " + " ".join(f'{k}="{esc(v)}"' for k, v in attrs.items()) + ">" + text.replace("</herdr-assistant", "&lt;/herdr-assistant") + "</herdr-assistant>"
     held = False
@@ -1031,12 +975,12 @@ def tell(target, text, sender=None):
         ok = _deliver(to["route"].split(">"), to["how"], to["address"], msg)
     if not ok:
         raise Fail(f"couldn't deliver to {to['target']}")
-    return {"to": to["target"], "space": to.get("space_name"), "can_reply": attrs["can-reply"] == "yes", "from": attrs["from"], "held": held}
+    return {"to": to["target"], "project": to.get("project_name"), "folder": to.get("folder"), "can_reply": attrs["can-reply"] == "yes", "from": attrs["from"], "held": held}
 
 
 def cmd_tell(args):
     from .output import say
     r = tell(args.target, args.text)
-    say(args, r, ("Held for" if r.get("held") else "Sent to") + f" {r['to']}" + (f" ({r['space']})" if r.get("space") else "") +
+    say(args, r, ("Held for" if r.get("held") else "Sent to") + f" {r['to']}" + (f" ({r['project']})" if r.get("project") else "") +
         (": the person is writing to it; it goes once they've sent or cleared that" if r.get("held") else "") +
         ("." if r["can_reply"] else ". It can't reach this machine back, so it can't reply."))

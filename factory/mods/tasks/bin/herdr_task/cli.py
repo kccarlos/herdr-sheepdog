@@ -70,9 +70,9 @@ def remote_run(machine, argv, timeout=None):
 
     def install():
         guard(["hc"])
-        # A machine with Herdr's own install (its window's) holds herdr-task's source: copies come from there, it's
-        # never written to (machines.py, the same rule). Its link ~/.local/bin/herdr-task leads into that install.
-        there = run(["hc", "exec", "--on", machine, "--", "test", "-d", ".config/herdr-app/mods/tasks/bin/herdr_task"])
+        # A machine whose ~/.local/bin/herdr-task is a symlink (its own unpacked or checkout install)
+        # runs its own copy and is never overwritten (machines.py INSTALL, the same rule).
+        there = run(["hc", "exec", "--on", machine, "--", "test", "-L", target])
         if link.lost(there):
             raise Fail(f"Can't reach {machine}: its link is down, and nothing was run there. Try again once it's back.")
         if there.returncode == 0:
@@ -372,6 +372,7 @@ def main():
 
     def ap_cmd(name, help, everywhere=False):
         c = ap.add_parser(name, help=help)
+        c.add_argument("--folder", help="the project folder (default: here)")
         if everywhere:
             c.add_argument("--everywhere", action="store_true", help="Everywhere's: what every project works from unless it sets its own")
         c.add_argument("--name", help=argparse.SUPPRESS)
@@ -399,10 +400,12 @@ def main():
     ap_cmd("heartbeat", "the heartbeat this project works from (--everywhere: Everywhere's), and Everywhere's file from before (made with a starter when missing)", everywhere=True)
     c = sub.add_parser("progress", help="a coordinator on Autopilot saves its progress and next step: progress \"Started HAT-4; next: check its review\"")
     c.add_argument("text")
+    c.add_argument("--folder", help="the project folder (default: here)")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_progress)
     c = sub.add_parser("complete", help="a coordinator on Autopilot proved its heartbeat's stopping goal: turns Autopilot off")
     c.add_argument("evidence")
+    c.add_argument("--folder", help="the project folder (default: here)")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_complete)
     auto_cmd("rm", "remove it")
@@ -424,12 +427,12 @@ def main():
     c.add_argument("--go", action="store_true", help="try each listed host once now (ssh, batch mode); at most once every 10 minutes")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_machines)
-    c = sub.add_parser("assistants", help="every live Assistant on every machine reachable from here: its address (machine/terminal), space and folder")
+    c = sub.add_parser("assistants", help="every live coordinator on every machine reachable from here: its address (machine/terminal) and project folder")
     c.add_argument("--refresh", action="store_true", help="look again now")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_assistants)
-    c = sub.add_parser("tell-assistant", help="message another Assistant, here or on a machine reachable from here: tell-assistant vm-demo/t3 \"...\" (or its space)")
-    c.add_argument("target", help="its address as `assistants` lists it (t3, vm-demo/t3, laptop>vm-x/t3), or its space's name or id")
+    c = sub.add_parser("tell-assistant", help="message another coordinator, here or on a machine reachable from here: tell-assistant vm-demo/t3 \"...\" (or its project folder or name)")
+    c.add_argument("target", help="its address as `assistants` lists it (t3, vm-demo/t3, laptop>vm-x/t3), or its project folder or name")
     c.add_argument("text")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_tell)

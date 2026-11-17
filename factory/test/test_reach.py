@@ -64,10 +64,6 @@ class Reach(unittest.TestCase):
                   mock.patch.object(machines, "FOUND", os.path.join(store, ".found.json"), create=True)):
             p.start()
             self.addCleanup(p.stop)
-        self.off = []
-        p = mock.patch.object(machines, "addon_off", lambda n: n in self.off)
-        p.start()
-        self.addCleanup(p.stop)
 
     def calls(self, prog):
         with open(self.log) as f:
@@ -84,13 +80,11 @@ class Reach(unittest.TestCase):
         self.assertEqual([(l["how"], l["to"], l["ok"]) for l in links], [("herdr-core", "vm1", True)])
         self.assertIn("links", links[0]["next"])
 
-    def test_add_on_off_follows_no_link(self):
-        """The scheduler still refreshes this machine's own part (its spaces for #-mentions): nothing leaves it."""
-        self.off = ["machines"]
-        machines.probe(depth=machines.REACH_DEPTH, timeout=20)
+    def test_depth_zero_follows_no_link(self):
+        machines.probe(depth=0, timeout=20)
         self.assertEqual(self.calls("ssh"), [])
         self.assertEqual(self.calls("tailscale"), [])
-        self.assertEqual([c for c in self.calls("hc") if c.startswith("exec")], [], "add-on off: a hop went to another machine")
+        self.assertEqual([c for c in self.calls("hc") if c.startswith("exec")], [])
 
     def test_find_says_what_it_will_contact_first(self):
         r = machines.find(go=False)
@@ -110,12 +104,6 @@ class Reach(unittest.TestCase):
         # its answer stays out of the map: the scheduler's next refresh still contacts nobody new
         machines.probe(depth=machines.REACH_DEPTH, timeout=20)
         self.assertEqual(len(self.calls("ssh")), 3)
-
-    def test_find_refused_with_the_add_on_off(self):
-        self.off = ["machines"]
-        with self.assertRaisesRegex(base.Fail, "Other machines"):
-            machines.find(go=True)
-        self.assertEqual(self.calls("ssh"), [])
 
 
 if __name__ == "__main__":

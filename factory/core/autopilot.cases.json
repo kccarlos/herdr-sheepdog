@@ -2,14 +2,14 @@
   "about": "What applies in a space, from .autopilot.json (`file`: each space's switch, and Everywhere's schedule and events from before Settings kept them) and Shepherdr settings (`settings`: ~/.config/shepherdr/settings.json's \"autopilot\", Everywhere's and each space's own): core/autopilot.js pilotFor() and herdr-task's resolve() must both give `expect` (core/autopilot.test.js, test/test_herdr_task.py). A space's own wins, else Everywhere's in Settings, else Everywhere's from before, else the defaults; a space has its own on/off.",
   "cases": [
     {
-      "name": "nothing set: off, Everywhere's defaults",
+      "name": "nothing set: on by default, Everywhere's defaults",
       "file": {
         "version": 2,
-        "spaces": {}
+        "projects": {}
       },
-      "space": "sp1",
+      "project": "sp1",
       "expect": {
-        "on": false,
+        "on": true,
         "every": "every 60 minutes",
         "events": [],
         "own": []
@@ -28,14 +28,14 @@
             "ready"
           ]
         },
-        "spaces": {
+        "projects": {
           "sp1": {
             "on": true,
             "name": "web"
           }
         }
       },
-      "space": "sp1",
+      "project": "sp1",
       "expect": {
         "on": true,
         "every": "weekdays 9:00",
@@ -56,7 +56,7 @@
             "merged"
           ]
         },
-        "spaces": {
+        "projects": {
           "sp1": {
             "on": true,
             "every": {
@@ -68,7 +68,7 @@
           }
         }
       },
-      "space": "sp1",
+      "project": "sp1",
       "expect": {
         "on": true,
         "every": null,
@@ -79,7 +79,7 @@
       }
     },
     {
-      "name": "Everywhere can't turn a space on",
+      "name": "switched off in a project stays off",
       "file": {
         "version": 2,
         "everywhere": {
@@ -89,13 +89,16 @@
           },
           "events": []
         },
-        "spaces": {
+        "projects": {
+          "sp1": {
+            "on": false
+          },
           "sp2": {
             "on": true
           }
         }
       },
-      "space": "sp1",
+      "project": "sp1",
       "expect": {
         "on": false,
         "every": "every 60 minutes",
@@ -115,7 +118,7 @@
             "ready"
           ]
         },
-        "spaces": {
+        "projects": {
           "sp1": {
             "on": true
           }
@@ -131,7 +134,7 @@
           }
         }
       },
-      "space": "sp1",
+      "project": "sp1",
       "expect": {
         "on": true,
         "every": "every 30 minutes",
@@ -145,7 +148,7 @@
       "name": "a space's own schedule wins; its events follow Everywhere's",
       "file": {
         "version": 2,
-        "spaces": {
+        "projects": {
           "sp1": {
             "on": true
           },
@@ -163,7 +166,7 @@
             ]
           }
         },
-        "spaces": {
+        "projects": {
           "sp1": {
             "autopilot": {
               "every": "weekdays 9:00",
@@ -172,7 +175,7 @@
           }
         }
       },
-      "space": "sp1",
+      "project": "sp1",
       "expect": {
         "on": true,
         "every": "weekdays 9:00",
@@ -189,7 +192,7 @@
       "name": "another space follows Everywhere's",
       "file": {
         "version": 2,
-        "spaces": {
+        "projects": {
           "sp1": {
             "on": true
           },
@@ -207,7 +210,7 @@
             ]
           }
         },
-        "spaces": {
+        "projects": {
           "sp1": {
             "autopilot": {
               "every": "weekdays 9:00"
@@ -215,7 +218,7 @@
           }
         }
       },
-      "space": "sp2",
+      "project": "sp2",
       "expect": {
         "on": true,
         "every": "every 60 minutes",
@@ -229,7 +232,7 @@
       "name": "a space with no schedule of its own (\"\") and no events wakes only on Run now",
       "file": {
         "version": 2,
-        "spaces": {
+        "projects": {
           "sp1": {
             "on": true
           }
@@ -243,7 +246,7 @@
             ]
           }
         },
-        "spaces": {
+        "projects": {
           "sp1": {
             "autopilot": {
               "every": "",
@@ -252,7 +255,7 @@
           }
         }
       },
-      "space": "sp1",
+      "project": "sp1",
       "expect": {
         "on": true,
         "every": null,
@@ -267,7 +270,7 @@
       "name": "a space's own Direction: its own; an empty one is none",
       "file": {
         "version": 2,
-        "spaces": {
+        "projects": {
           "sp1": {
             "on": true
           },
@@ -282,7 +285,7 @@
             "direction": "Ship the docs"
           }
         },
-        "spaces": {
+        "projects": {
           "sp1": {
             "autopilot": {
               "direction": "Launch the shop"
@@ -295,7 +298,7 @@
           }
         }
       },
-      "space": "sp1",
+      "project": "sp1",
       "expect": {
         "on": true,
         "every": "every 60 minutes",
@@ -309,14 +312,14 @@
       "name": "an empty Direction is not the space's own",
       "file": {
         "version": 2,
-        "spaces": {
+        "projects": {
           "sp2": {
             "on": true
           }
         }
       },
       "settings": {
-        "spaces": {
+        "projects": {
           "sp2": {
             "autopilot": {
               "direction": "  "
@@ -324,7 +327,7 @@
           }
         }
       },
-      "space": "sp2",
+      "project": "sp2",
       "expect": {
         "on": true,
         "every": "every 60 minutes",

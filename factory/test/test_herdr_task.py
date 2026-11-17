@@ -51,16 +51,15 @@ class HerdrTask(unittest.TestCase):
         from herdr_task import settings
         self.assertTrue(settings.TEMPLATES.endswith(os.path.join(".config", "herdr-core", "templates")))
 
-    def test_tell_takes_a_chat_mention(self):
-        """A chat's #-mention (core/mentions.js) names its Assistant for tell-assistant: whole, its target, or #name."""
+    def test_tell_finds_by_address_project_and_folder(self):
         code = ("import sys, json; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
                 "from herdr_task.machines import _find;"
-                "rows = [{'target': 'vm-demo/t3', 'route': 'vm-demo', 'space': 'sp-shop', 'space_name': 'shop'},"
-                "        {'target': 't1', 'route': None, 'space': 'sp-web', 'space_name': 'web'}];"
+                "rows = [{'target': 'vm-demo/t3', 'route': 'vm-demo', 'project': 'proj-shop', 'project_name': 'shop', 'folder': '/repo/shop'},"
+                "        {'target': 't1', 'route': None, 'project': 'proj-web', 'project_name': 'web', 'folder': '/repo/web'}];"
                 "print(json.dumps([[a['target'] for a in _find(rows, t)] for t in sys.argv[2:]]))")
-        forms = ["[#shop](space:vm-demo/sp-shop)", "space:vm-demo/sp-shop", "vm-demo/sp-shop", "sp-shop", "#shop", "[#web](space:sp-web)", "#nope"]
+        forms = ["vm-demo/t3", "vm-demo:/repo/shop", "vm-demo/proj-shop", "vm-demo/shop", "shop", "/repo/web", "web", "#nope"]
         out = subprocess.run([sys.executable, "-c", code, BIN, *forms], capture_output=True, text=True)
-        self.assertEqual(json.loads(out.stdout), [["vm-demo/t3"]] * 5 + [["t1"], []], out.stderr)
+        self.assertEqual(json.loads(out.stdout), [["vm-demo/t3"]] * 5 + [["t1"], ["t1"], []], out.stderr)
 
     @unittest.skipUnless(CI, "runs only on CI: herdr-task never runs with a changed HOME on a person's machine")
     def test_commands_start(self):
@@ -72,8 +71,8 @@ class HerdrTask(unittest.TestCase):
 
 
 class Autopilot(unittest.TestCase):
-    """Autopilot's Everywhere and each space's own (herdr_task/autopilot.py), in a throwaway store,
-    heartbeat folder and settings file: herdr-app and hc are never run (the window's spaces are given)."""
+    """Autopilot's Everywhere and each project's own (herdr_task/autopilot.py), in a throwaway store,
+    heartbeat folder and settings file: hc is never run unless mocked."""
 
     def setUp(self):
         import contextlib
@@ -84,22 +83,24 @@ class Autopilot(unittest.TestCase):
         self.ap, self.io, self.redirect = ap, io, contextlib.redirect_stdout
         # real path: the code keys folders by it (store.locate), and /var is /private/var on macOS
         self.tmp = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self.lists = []  # the task lists a wake looks at (waiting())
         self.folder = os.path.join(self.tmp, "tt-repo")
+        self.folder2 = os.path.join(self.tmp, "other-repo")
         os.makedirs(self.folder)
+        os.makedirs(self.folder2)
         store = os.path.join(self.tmp, "tasks")
 
         def never(*a, **k):
             raise AssertionError("ran a program")
         import herdr_task.settings as settings
-        self.settings_file = os.path.join(self.tmp, "shepherdr.json")
+        self.settings_file = os.path.join(self.tmp, "settings.json")
         p = mock.patch.object(settings, "SETTINGS", self.settings_file)
         p.start()
         self.addCleanup(p.stop)
         for name, value in (("STORE", store), ("STATE", os.path.join(store, ".autopilot.json")),
-                            ("HEARTBEATS", os.path.join(self.tmp, "beats")), ("run", never), ("hc_json", never),
-                            ("space_info", lambda s: ("~", self.folder) if s == "sp1" else (None, None)),
-                            ("window_spaces", lambda: None), ("ensure_scheduler", self.scheduler),
+                            ("HEARTBEATS", os.path.join(self.tmp, "beats")), ("hc_json", never),
+                            ("ensure_scheduler", self.scheduler),
                             ("coordinator_in", lambda s: None), ("store_files", lambda: self.lists)):
             p = mock.patch.object(ap, name, value)
             p.start()
@@ -111,8 +112,8 @@ class Autopilot(unittest.TestCase):
 
     def cmd(self, sub, **kw):
         import argparse
-        args = argparse.Namespace(autopilot=sub, json=True, space=None, everywhere=False, every=None, on=None, heartbeat=None,
-                                  name=None, space_folder=None, here=False)
+        args = argparse.Namespace(autopilot=sub, json=True, folder=None, everywhere=False, every=None, on=None, heartbeat=None,
+                                  name=None, here=False)
         for k, v in kw.items():
             setattr(args, k, v)
         out = self.io.StringIO()
@@ -121,96 +122,95 @@ class Autopilot(unittest.TestCase):
         return json.loads(out.getvalue())
 
     def test_the_rule_is_cores(self):
-        """The cases core/autopilot.test.js checks pilotFor() on."""
         with open(os.path.join(ROOT, "core", "autopilot.cases.json")) as f:
             cases = json.load(f)["cases"]
         for c in cases:
-            eff = self.ap.resolve(c["file"], c["file"]["spaces"].get(c["space"]), c["space"], c.get("settings", {}))
+            eff = self.ap.resolve(c["file"], c["file"]["projects"].get(c["project"]), c["project"], c.get("settings", {}))
             got = {"on": eff["on"], "every": (eff["every"] or {}).get("text"), "events": eff["events"], "own": eff["own"]}
             self.assertEqual(got, c["expect"], c["name"])
 
     def test_a_spaces_old_settings_go(self):
-        """Version 1's per-space schedule and events (and a switch on Everywhere) go on the next
-        read; a space keeps its on/off and how its wakes went."""
+        """Version 1's per-entry schedule and events (and legacy space entries with a folder) migrate
+        to d["projects"] keyed by folder on the next read."""
         os.makedirs(self.ap.STORE)
         with open(self.ap.STATE, "w") as f:
             json.dump({"version": 1, "everywhere": {"on": True}, "spaces": {
-                "on1": {"on": True, "every": self.ap.parse_every("every 30 minutes"), "events": ["ready"], "next_run": 5},
-                "off1": {"on": False, "every": self.ap.parse_every("weekdays 9:00"), "events": []}}}, f)
+                "on1": {"on": True, "folder": self.folder, "every": self.ap.parse_every("every 30 minutes"), "events": ["ready"], "next_run": 5},
+                "off1": {"on": False, "folder": self.folder2, "every": self.ap.parse_every("weekdays 9:00"), "events": []}}}, f)
         with self.ap.state():
             pass
         with open(self.ap.STATE) as f:
             d = json.load(f)
         self.assertEqual(d["version"], 2)
         self.assertNotIn("on", d["everywhere"])
-        self.assertEqual(d["spaces"]["on1"]["on"], True)
-        for a in d["spaces"].values():
+        self.assertNotIn("spaces", d)
+        self.assertEqual(d["projects"][self.folder]["on"], True)
+        self.assertEqual(d["projects"][self.folder2]["on"], False)
+        for a in d["projects"].values():
             self.assertFalse({"every", "events"} & set(a))
-        on1 = next(v for v in self.cmd("list")["spaces"] if v["space"] == "on1")
+        on1 = next(v for v in self.cmd("list")["projects"] if v["project"] == self.folder)
         self.assertEqual((on1["on"], on1["every"], on1["events"]), (True, "every 60 minutes", []))
 
     def test_everywhere_unless_a_space_sets_its_own(self):
         e = self.cmd("set", everywhere=True, every="every 30 minutes", on="ready")
         self.assertEqual((e["everywhere"], e["every"], e["events"]), (True, "every 30 minutes", ["ready"]))
-        # kept in Shepherdr settings, with everything else there
         with open(self.settings_file) as f:
             self.assertEqual(json.load(f)["everywhere"]["autopilot"], {"every": "every 30 minutes", "events": ["ready"]})
-        v = self.cmd("show", space="sp1")
-        self.assertEqual((v["on"], v["every"], v["events"], v["own"]), (False, "every 30 minutes", ["ready"], []))
-        # switched on in its header: Everywhere's schedule, a next wake
-        v = self.cmd("on", space="sp1")
+        v = self.cmd("show", folder=self.folder)
+        self.assertEqual((v["on"], v["every"], v["events"], v["own"]), (True, "every 30 minutes", ["ready"], []))
+        v = self.cmd("on", folder=self.folder)
         self.assertEqual((v["on"], v["every"], v["heartbeat"]), (True, "every 30 minutes", self.ap.heartbeat_path()))
         self.assertTrue(v["next_run"])
         self.assertTrue(os.path.exists(self.ap.heartbeat_path()))
         # Everywhere's schedule changes reach it
         v0 = v["next_run"]
         self.cmd("set", everywhere=True, every="weekdays 9:07")
-        v = self.cmd("show", space="sp1")
+        v = self.cmd("show", folder=self.folder)
         self.assertEqual(v["every"], "weekdays 9:07")
         self.assertNotEqual(v["next_run"], v0)
         # its own schedule wins there (and gets its own next wake); its events still follow Everywhere's
-        v = self.cmd("set", space="sp1", every="every 2 hours")
+        v = self.cmd("set", folder=self.folder, every="every 2 hours")
         self.assertEqual((v["every"], v["events"], v["own"]), ("every 2 hours", ["ready"], ["every"]))
-        self.assertEqual(self.cmd("show", space="sp2")["every"], "weekdays 9:07")
+        self.assertEqual(self.cmd("show", folder=self.folder2)["every"], "weekdays 9:07")
         self.cmd("set", everywhere=True, every="every 60 minutes")
-        self.assertEqual(self.cmd("show", space="sp1")["every"], "every 2 hours")
+        self.assertEqual(self.cmd("show", folder=self.folder)["every"], "every 2 hours")
         # "default": back to Everywhere's
-        v = self.cmd("set", space="sp1", every="default")
+        v = self.cmd("set", folder=self.folder, every="default")
         self.assertEqual((v["every"], v["own"]), ("every 60 minutes", []))
         with open(self.settings_file) as f:
-            self.assertNotIn("sp1", json.load(f).get("spaces", {}))
+            self.assertNotIn(self.folder, json.load(f).get("projects", {}))
         # a schedule that isn't one is refused, and one written by hand is passed over
         with self.assertRaises(self.ap.Fail):
-            self.cmd("set", space="sp1", every="whenever")
-        self.assertEqual(self.ap.resolve({}, {}, "sp1", {"spaces": {"sp1": {"autopilot": {"every": "whenever"}}}})["every"]["text"], "every 60 minutes")
-        # Everywhere can't switch spaces on or off
+            self.cmd("set", folder=self.folder, every="whenever")
+        self.assertEqual(self.ap.resolve({}, {}, self.folder, {"projects": {self.folder: {"autopilot": {"every": "whenever"}}}})["every"]["text"], "every 60 minutes")
+        # Everywhere can't switch projects on or off
         for sub in ("on", "off", "run-now"):
             with self.assertRaises(self.ap.Fail):
                 self.cmd(sub, everywhere=True)
-        v = self.cmd("off", space="sp1")
+        v = self.cmd("off", folder=self.folder)
         self.assertEqual((v["on"], v["next_run"]), (False, None))
-        self.assertEqual([x["space"] for x in self.cmd("list")["spaces"]], ["sp1"])
+        self.assertEqual([x["project"] for x in self.cmd("list")["projects"]], [self.folder])
 
     def test_heartbeats(self):
-        """Everywhere's file from before, until Settings has one; a space's own wins there."""
+        """Everywhere's file from before, until Settings has one; a project's own wins there."""
         v = self.cmd("heartbeat")
         self.assertEqual((v["heartbeat"], v["heartbeat_from"], v["blank"]), (self.ap.heartbeat_path(), "file", False))
         with open(v["heartbeat"]) as f:
             self.assertEqual(f.read(), self.ap.STARTER)
         # the starter is a real heartbeat: a wake brings it as it is
-        self.assertIn("Push the project forward", self.ap.message("sp1", {}, ["run now"]))
+        self.assertIn("Push the project forward", self.ap.message(self.folder, {}, ["run now"]))
         with open(v["heartbeat"], "w") as f:
             f.write("Ship the docs.\n")
-        self.assertIn("Ship the docs.", self.ap.message("sp1", {}, ["run now"]))
+        self.assertIn("Ship the docs.", self.ap.message(self.folder, {}, ["run now"]))
         self.cmd("set", everywhere=True, heartbeat="Keep the tests green.")
-        self.cmd("set", space="sp1", heartbeat="Only the web app.")
-        one, two = self.ap.message("sp1", {}, ["run now"]), self.ap.message("sp2", {}, ["run now"])
+        self.cmd("set", folder=self.folder, heartbeat="Only the web app.")
+        one, two = self.ap.message(self.folder, {}, ["run now"]), self.ap.message(self.folder2, {}, ["run now"])
         self.assertIn("Only the web app.", one)
-        self.assertIn("this space's own", one)
+        self.assertIn("this project's own", one)
         self.assertIn("Keep the tests green.", two)
         self.assertNotIn("Ship the docs.", two)
-        self.assertEqual(self.cmd("heartbeat", space="sp1")["heartbeat_from"], "space")
-        self.assertEqual(self.cmd("show", space="sp1")["own"], ["heartbeat"])
+        self.assertEqual(self.cmd("heartbeat", folder=self.folder)["heartbeat_from"], "project")
+        self.assertEqual(self.cmd("show", folder=self.folder)["own"], ["heartbeat"])
 
     def test_old_starter_gets_the_new_one(self):
         """An earlier version's starter, never edited, stands for today's: the file is rewritten,
@@ -225,7 +225,7 @@ class Autopilot(unittest.TestCase):
             self.assertEqual(f.read(), self.ap.STARTER)
         with open(path, "w") as f:
             f.write("  " + old.strip() + "\n\n")
-        self.assertIn("Push the project forward", self.ap.message("sp1", {}, ["run now"]))
+        self.assertIn("Push the project forward", self.ap.message(self.folder, {}, ["run now"]))
         # edited, even a little: kept as the person wrote it
         edited = old.replace("Priorities:\n-", "Priorities:\n- the docs")
         with open(path, "w") as f:
@@ -234,15 +234,15 @@ class Autopilot(unittest.TestCase):
         self.cmd("list")
         with open(path) as f:
             self.assertEqual(f.read(), edited)
-        # in Settings, Everywhere's or a space's own: read as today's
-        self.cmd("set", space="sp1", heartbeat=old)
-        v = self.cmd("show", space="sp1")
+        # in Settings, Everywhere's or a project's own: read as today's
+        self.cmd("set", folder=self.folder, heartbeat=old)
+        v = self.cmd("show", folder=self.folder)
         self.assertEqual((v["heartbeat_text"], v["blank"]), (self.ap.STARTER, False))
-        self.assertIn("Push the project forward", self.ap.message("sp1", {}, ["run now"]))
+        self.assertIn("Push the project forward", self.ap.message(self.folder, {}, ["run now"]))
         # empty: no heartbeat, and a wake says so
-        self.cmd("set", space="sp1", heartbeat="")
-        self.assertTrue(self.cmd("show", space="sp1")["blank"])
-        self.assertIn("not written yet", self.ap.message("sp1", {}, ["run now"]))
+        self.cmd("set", folder=self.folder, heartbeat="")
+        self.assertTrue(self.cmd("show", folder=self.folder)["blank"])
+        self.assertIn("not written yet", self.ap.message(self.folder, {}, ["run now"]))
 
     def test_the_last_starter_upgrades_with_a_backup(self):
         """A machine still on the starter that said "Don't invent work" gets today's, the old one kept
@@ -269,7 +269,7 @@ class Autopilot(unittest.TestCase):
         with open(path) as f:
             self.assertEqual(f.read(), edited)
         self.assertFalse(os.path.exists(path + ".bak"))
-        self.assertIn("4. New tasks: only what I ask for", self.ap.message("sp1", {}, ["run now"]))
+        self.assertIn("4. New tasks: only what I ask for", self.ap.message(self.folder, {}, ["run now"]))
 
     def test_the_asking_starter_upgrades_with_a_backup(self):
         """3.1.5's starter (which told it to ask) becomes today's deciding one, kept as everywhere.md.bak;
@@ -296,7 +296,7 @@ class Autopilot(unittest.TestCase):
     def test_a_wake_decides_instead_of_asking(self):
         """The wake and the starter tell it to make the calls itself and never ask; only a take-over,
         for what's critical, goes to the person as an alert."""
-        m = self.ap.message("sp1", {}, ["schedule"])
+        m = self.ap.message(self.folder, {}, ["schedule"])
         for words in ("Never ask the person a question on a wake", "pick the best option", "Never ask me a question",
                       "Take over: the only time you stop for me", "herdr-task alert", "carry on with other work",
                       "answer it yourself"):
@@ -305,141 +305,42 @@ class Autopilot(unittest.TestCase):
             self.assertNotIn(words, m)
 
     def test_a_wake_drives_the_project(self):
-        """By default a wake asks for new tasks that push the project forward, toward the space's
-        Direction when it has one (else the project's own), and a quiet reply only when there's
-        truly nothing worth doing."""
-        m = self.ap.message("sp1", {}, ["schedule"])
+        m = self.ap.message(self.folder, {}, ["schedule"])
         for words in ("Push the project forward", "add and start the next most valuable", "Direction: none set",
                       "truly nothing worth doing", "Never merge, Accept"):
             self.assertIn(words, m)
         self.assertNotIn("Don't invent work", m)
-        self.cmd("set", space="sp1", direction="  Launch the\n shop  ")
-        v = self.cmd("show", space="sp1")
+        self.cmd("set", folder=self.folder, direction="  Launch the\n shop  ")
+        v = self.cmd("show", folder=self.folder)
         self.assertEqual((v["direction"], v["own"]), ("Launch the shop", ["direction"]))
-        self.assertIn("Direction (set by the person, Shepherdr settings > Autopilot): Launch the shop", self.ap.message("sp1", {}, ["schedule"]))
-        self.assertIn("Direction: none set", self.ap.message("sp2", {}, ["schedule"]))
-        self.cmd("set", space="sp1", direction="")
-        self.assertEqual(self.cmd("show", space="sp1")["direction"], "")
+        self.assertIn("Direction (set by the person, settings > Autopilot): Launch the shop", self.ap.message(self.folder, {}, ["schedule"]))
+        self.assertIn("Direction: none set", self.ap.message(self.folder2, {}, ["schedule"]))
+        self.cmd("set", folder=self.folder, direction="")
+        self.assertEqual(self.cmd("show", folder=self.folder)["direction"], "")
 
-    def test_check_and_pushed_copies(self):
+    def test_check_and_project_settings(self):
         self.assertEqual(self.cmd("check", every="Weekdays 9:00")["every"], "Weekdays 9:00")
         self.assertEqual(self.cmd("check", every="off")["every"], None)
         with self.assertRaises(self.ap.Fail):
             self.cmd("check", every="whenever")
-        with open(self.settings_file, "w") as f:
-            json.dump({"pushed_from": "herdr-app", "here": "vm"}, f)
-        self.cmd("set", space="sp1", every="every 2 hours")
+        self.cmd("set", folder=self.folder, every="every 2 hours")
         with open(self.settings_file) as f:
-            self.assertEqual(json.load(f)["spaces"]["sp1"]["autopilot"], {"every": "every 2 hours"})
+            self.assertEqual(json.load(f)["projects"][self.folder]["autopilot"], {"every": "every 2 hours"})
 
     def test_complete_turns_it_off(self):
         import argparse
-        self.cmd("on", space="sp1")
+        self.cmd("on", folder=self.folder)
         out = self.io.StringIO()
         with self.redirect(out):
-            self.ap.cmd_complete(argparse.Namespace(space="sp1", evidence="All docs merged.", json=True))
+            self.ap.cmd_complete(argparse.Namespace(folder=self.folder, everywhere=False, evidence="All docs merged.", json=True))
         v = json.loads(out.getvalue())
         self.assertEqual((v["on"], v["completed"]["text"]), (False, "All docs merged."))
 
-    def test_list_names_a_space_as_the_screens_do(self):
-        self.cmd("on", space="sp1")
-        args = __import__("argparse").Namespace(autopilot="list", json=False)
-        out = self.io.StringIO()
-        with self.redirect(out):
-            self.ap.cmd_autopilot(args)
-        lines = out.getvalue().splitlines()
-        self.assertTrue(lines[0].startswith("Everywhere: Every hour"), lines)
-        self.assertTrue(lines[1].startswith("tt-repo: Autopilot on"), lines)
-
     def test_on_starts_this_machines_scheduler(self):
-        self.cmd("on", space="sp1")
+        self.cmd("on", folder=self.folder)
         self.assertEqual(getattr(self, "schedulers", 0), 1)
-        self.cmd("off", space="sp1")
+        self.cmd("off", folder=self.folder)
         self.assertEqual(self.schedulers, 1)
-
-    def test_a_folder_told_from_another_machines_window(self):
-        # A VM has no window: the machine whose window lists the space says its name and folder.
-        v = self.cmd("on", space="sp7", name="exedev", space_folder=self.folder)
-        self.assertEqual((v["on"], v["name"], v["folder"]), (True, "exedev", self.folder))
-
-    def remote(self, answers):
-        """herdr-task on other machines, as cli.remote_run runs it: answers[machine](argv) -> its JSON out."""
-        from unittest import mock
-        import subprocess
-        import herdr_task.cli as cli
-        self.sent = []
-
-        def run(machine, argv, timeout=None):
-            self.sent.append((machine, argv))
-            out = answers[machine](argv)
-            return subprocess.CompletedProcess(argv, 0 if out is not None else 1, json.dumps(out) if out is not None else "", "" if out is not None else "hc: unreachable")
-        p = mock.patch.object(cli, "remote_run", run)
-        p.start()
-        self.addCleanup(p.stop)
-
-    def test_another_machines_space_is_switched_there(self):
-        from unittest import mock
-        win = [{"id": "sp1", "name": "~", "folder": self.folder},
-               {"id": "vm/sp9", "machine": "vm", "name": "exedev", "folder": "/home/exedev"}]
-        p = mock.patch.object(self.ap, "window_spaces", lambda: win)
-        p.start()
-        self.addCleanup(p.stop)
-        self.remote({"vm": lambda argv: {"space": "sp9", "on": argv[1] == "on", "name": "exedev", "trigger": "Every hour"}})
-        v = self.cmd("on", space="vm/sp9")
-        self.assertEqual(self.sent, [("vm", ["autopilot", "on", "--space", "sp9", "--json", "--name", "exedev", "--space-folder", "/home/exedev"])])
-        self.assertEqual((v["space"], v["machine"], v["on"]), ("vm/sp9", "vm", True))
-        # Nothing here wakes it: no record of it on this machine, and this machine's scheduler isn't asked.
-        self.assertFalse(os.path.exists(self.ap.STATE))
-        self.assertEqual(getattr(self, "schedulers", 0), 0)
-        self.cmd("run-now", space="vm/sp9")
-        self.assertEqual(self.sent[-1][1][:4], ["autopilot", "run-now", "--space", "sp9"])
-
-    def test_another_machines_refusal_is_said_here(self):
-        self.remote({"vm": lambda argv: {"error": "Autopilot is off in this space: turn it on first."}})
-        with self.assertRaises(self.ap.Fail) as e:
-            self.cmd("run-now", space="vm/sp9")
-        self.assertIn("turn it on first", str(e.exception))
-        self.remote({"vm": lambda argv: None})
-        with self.assertRaises(self.ap.Fail) as e:
-            self.cmd("off", space="vm/sp9")
-        self.assertIn("Couldn't reach vm", str(e.exception))
-
-    def test_another_machines_space_is_set_here_by_its_full_id(self):
-        self.remote({})
-        v = self.cmd("set", space="vm/sp9", every="every 2 hours")
-        with open(self.settings_file) as f:
-            self.assertEqual(json.load(f)["spaces"]["vm/sp9"]["autopilot"], {"every": "every 2 hours"})
-        self.assertEqual((v["space"], v["own"], self.sent), ("vm/sp9", ["every"], []))
-
-    def test_list_holds_every_machines_spaces(self):
-        from unittest import mock
-        self.cmd("on", space="sp1")
-        self.cmd("on", space="spgone")  # a space the window no longer lists
-        win = [{"id": "sp1", "name": "~", "folder": self.folder}, {"id": "sp2", "name": "docs", "folder": "/tmp/docs"},
-               {"id": "vm/sp9", "machine": "vm", "name": "exedev", "folder": "/home/exedev"},
-               {"id": "vm/sp8", "machine": "vm", "name": "~", "folder": "/home/exedev/dev/game"},
-               {"id": "mini/sp5", "machine": "mini", "name": "Home", "folder": "/Users/me"}]
-        p = mock.patch.object(self.ap, "window_spaces", lambda: win)
-        p.start()
-        self.addCleanup(p.stop)
-        self.remote({"vm": lambda argv: {"everywhere": {"trigger": "Every hour"},
-                                         "spaces": [{"space": "sp9", "on": True, "trigger": "Every hour", "next_run": None, "own": []}]},
-                     "mini": lambda argv: None})
-        out = self.cmd("list")
-        self.assertEqual(sorted(m for m, _ in self.sent), ["mini", "vm"])
-        self.assertTrue(all(argv == ["autopilot", "list", "--here", "--json"] for _, argv in self.sent))
-        got = {v["space"]: v for v in out["spaces"]}
-        self.assertEqual(list(got), ["sp1", "sp2", "vm/sp9", "vm/sp8", "mini/sp5"])
-        self.assertEqual([got[k]["on"] for k in ("sp1", "sp2", "vm/sp9", "vm/sp8")], [True, False, True, False])
-        self.assertTrue(got["mini/sp5"].get("unreachable"))
-        lines = [self.ap.line_of(v) for v in out["spaces"]]
-        self.assertTrue(lines[2].startswith("exedev on vm: Autopilot on"), lines)
-        self.assertTrue(lines[3].startswith("game on vm: Autopilot off"), lines)
-        self.assertEqual(lines[4], "Home on mini: can't tell, mini didn't answer")
-        # --here: this machine's only, nothing asked elsewhere
-        self.sent = []
-        self.assertEqual([v["space"] for v in self.cmd("list", here=True)["spaces"]], ["sp1", "sp2"])
-        self.assertEqual(self.sent, [])
 
     def test_the_parking_starter_upgrades_with_a_backup(self):
         """SHEP-40: 3.1.7's starter (whose quiet wakes parked behind an Accept with a bare no-reply)
@@ -461,8 +362,8 @@ class Autopilot(unittest.TestCase):
             self.assertIn(words, self.ap.STARTER)
         self.assertNotIn("Reply only <hc no-reply/>", self.ap.STARTER)
         # in Settings, as it was: read as today's
-        self.cmd("set", space="sp1", heartbeat=last)
-        self.assertEqual(self.cmd("show", space="sp1")["heartbeat_text"], self.ap.STARTER)
+        self.cmd("set", folder=self.folder, heartbeat=last)
+        self.assertEqual(self.cmd("show", folder=self.folder)["heartbeat_text"], self.ap.STARTER)
         # edited: kept, no backup
         os.remove(path + ".bak")
         edited = last.replace("At most 2 a wake", "At most 1 a wake")
@@ -477,21 +378,24 @@ class Autopilot(unittest.TestCase):
         """SHEP-40, tor-gameboy: TG-2 Ready, TG-3 queued after it and TG-4 after TG-3. The wake names
         what waits on the person, asks for work around it, a why on a quiet reply, and no self-made limits."""
         p = os.path.join(self.tmp, "tasks", "dev-tor-gameboy.json")
+        p2 = os.path.join(self.tmp, "tasks", "dev-other.json")
         os.makedirs(os.path.dirname(p), exist_ok=True)
         with open(p, "w") as f:
             json.dump({"folder": self.folder, "prefix": "TG", "tasks": [
-                {"id": 1, "state": "done", "space": "sp1"},
-                {"id": 2, "state": "ready", "space": "sp1"},
+                {"id": 1, "state": "done"},
+                {"id": 2, "state": "ready"},
                 {"id": 3, "state": "queued", "after": [2]},
                 {"id": 4, "state": "queued", "after": [3]},
-                {"id": 5, "state": "ready", "space": "sp1"},
-                {"id": 6, "state": "ready", "space": "sp9"},
-                {"id": 7, "state": "queued", "after": [6], "space": "sp9"}]}, f)
-        self.lists = [p]
-        a = {"folder": self.folder, "progress": {"text": "TG-3 queued behind it (Elias pace: one at a time).", "at": self.ap.now()}}
-        self.assertEqual(self.ap.waiting("sp1", a), ["TG-2 is Ready, waiting on the person's Accept; TG-3 and TG-4 wait behind it"])
-        self.assertEqual(self.ap.waiting("sp9", {}), ["TG-6 is Ready, waiting on the person's Accept; TG-7 waits behind it"])
-        m = self.ap.message("sp1", a, ["schedule"])
+                {"id": 5, "state": "ready"}]}, f)
+        with open(p2, "w") as f:
+            json.dump({"folder": self.folder2, "prefix": "TG", "tasks": [
+                {"id": 6, "state": "ready"},
+                {"id": 7, "state": "queued", "after": [6]}]}, f)
+        self.lists = [p, p2]
+        a = {"folder": self.folder, "progress": {"text": "TG-3 queued behind it (pace: one at a time).", "at": self.ap.now()}}
+        self.assertEqual(self.ap.waiting(self.folder, a), ["TG-2 is Ready, waiting on the person's Accept; TG-3 and TG-4 wait behind it"])
+        self.assertEqual(self.ap.waiting(self.folder2, {}), ["TG-6 is Ready, waiting on the person's Accept; TG-7 waits behind it"])
+        m = self.ap.message(self.folder, a, ["schedule"])
         for words in ("Waiting on the person:\n- TG-2 is Ready, waiting on the person's Accept; TG-3 and TG-4 wait behind it",
                       "never parks you", "work that doesn't need it", "say in one line what waits on the person's Accept",
                       "never a limit or pace of your own", "doesn't apply", '<hc no-reply why="..."/>',
@@ -499,13 +403,13 @@ class Autopilot(unittest.TestCase):
             self.assertIn(words, m)
         # nothing waiting: no such section
         self.lists = []
-        self.assertNotIn("Waiting on the person", self.ap.message("sp1", a, ["schedule"]))
+        self.assertNotIn("Waiting on the person", self.ap.message(self.folder, a, ["schedule"]))
 
     def wake(self, ago, turn=3):
-        """sp1 on, with a wake delivered to t9 `ago` ms back (its turn then: `turn`)."""
-        self.cmd("on", space="sp1")
+        """self.folder on, with a wake delivered to t9 `ago` ms back (its turn then: `turn`)."""
+        self.cmd("on", folder=self.folder)
         with self.ap.state() as d:
-            a = d["spaces"]["sp1"]
+            a = d["projects"][self.folder]
             a.pop("pending", None)  # the first wake switching on queued: this one stands for it
             a["inflight"] = {"at": self.ap.now() - ago, "reason": "schedule", "to": "t9", "turn": turn}
             self.ap.log_wake(a, "schedule", "Delivered", a["inflight"]["at"])
@@ -515,19 +419,17 @@ class Autopilot(unittest.TestCase):
         from unittest import mock
         k = {"state": "live", "foreground": {"name": "claude"}, **k}
         with mock.patch.object(self.ap, "hc_json", lambda *a: k), self.ap.state() as d:
-            self.ap.settle(d["spaces"]["sp1"])
-            return d["spaces"]["sp1"]
+            self.ap.settle(d["projects"][self.folder])
+            return d["projects"][self.folder]
 
     def test_a_wake_ends_with_its_turn(self):
-        """SHEP-34: the header leaves "Waking" once the wake's turn ends, by its count or, should
-        that miss it, the Assistant idle a while; else after the timeout."""
         done = {"turn": 4, "status": {"state": "done"}}
         self.wake(5000)
         self.assertIn("inflight", self.settled({"turn": 4, "status": {"state": "working"}}))
         a = self.settled(done)
         self.assertNotIn("inflight", a)
         self.assertEqual(a["last_wake"]["outcome"], "Turn ended, no progress saved")
-        self.assertEqual(self.cmd("show", space="sp1")["inflight"], None)
+        self.assertEqual(self.cmd("show", folder=self.folder)["inflight"], None)
         # its turn not counted: idle a while after the wake ends it, not at once
         self.wake(5000)
         self.assertIn("inflight", self.settled({"turn": 3, "status": {"state": "idle"}, "status_ms": self.ap.now() - 60000}))
@@ -536,7 +438,7 @@ class Autopilot(unittest.TestCase):
         a = self.settled({"turn": 3, "status": {"state": "done"}, "status_ms": self.ap.now() - 4000})
         self.assertNotIn("inflight", a)
         self.assertEqual(a["last_wake"]["outcome"], "Turn ended, no progress saved")
-        self.assertEqual(self.cmd("show", space="sp1")["inflight"], None)
+        self.assertEqual(self.cmd("show", folder=self.folder)["inflight"], None)
         # still working since the wake: not ended
         self.wake(5000)
         self.assertIn("inflight", self.settled({"turn": 3, "status": {"state": "working"}, "status_ms": self.ap.now() - 4000}))
@@ -556,21 +458,21 @@ class Autopilot(unittest.TestCase):
     def test_switching_on_wakes_at_once(self):
         """SHEP-5: switched on, its first wake goes now (not one interval later); already on, no second one."""
         from unittest import mock
-        v = self.cmd("on", space="sp1")
+        v = self.cmd("on", folder=self.folder)
         # no Assistant running yet: queued, said so, and still a scheduled wake after it
         self.assertEqual(v["pending"]["reasons"], ["switched on"])
         self.assertTrue(v["next_run"])
-        self.cmd("off", space="sp1")
-        self.assertEqual(self.cmd("show", space="sp1")["pending"], None)
+        self.cmd("off", folder=self.folder)
+        self.assertEqual(self.cmd("show", folder=self.folder)["pending"], None)
         k = {"state": "live", "foreground": {"name": "claude"}, "turn": 2, "status": {"state": "idle"}}
         sent = []
-        with mock.patch.object(self.ap, "hc_json", lambda *a: k), mock.patch.object(self.ap, "coordinator_in", lambda s: "t9"), \
+        with mock.patch.object(self.ap, "hc_json", lambda *a: k), mock.patch.object(self.ap, "coordinator_in", lambda s: "t9" if s == self.folder else None), \
                 mock.patch.object(self.ap, "typing", lambda *a: False), \
                 mock.patch.object(self.ap, "news_send", lambda to, m, check=True: sent.append(m) or True):
-            v = self.cmd("on", space="sp1")
+            v = self.cmd("on", folder=self.folder)
             self.assertEqual((len(sent), v["inflight"]["reason"]), (1, "switched on"))
             self.assertIn('reason="switched on"', sent[0])
-            self.cmd("on", space="sp1")
+            self.cmd("on", folder=self.folder)
         self.assertEqual(len(sent), 1)
 
     def test_run_now_goes_after_a_wake_whose_turn_ended(self):
@@ -579,10 +481,10 @@ class Autopilot(unittest.TestCase):
         self.wake(5000)
         k = {"state": "live", "foreground": {"name": "claude"}, "turn": 4, "status": {"state": "done"}}
         sent = []
-        with mock.patch.object(self.ap, "hc_json", lambda *a: k), mock.patch.object(self.ap, "coordinator_in", lambda s: "t9"), \
+        with mock.patch.object(self.ap, "hc_json", lambda *a: k), mock.patch.object(self.ap, "coordinator_in", lambda s: "t9" if s == self.folder else None), \
                 mock.patch.object(self.ap, "typing", lambda *a: False), \
                 mock.patch.object(self.ap, "news_send", lambda to, m, check=True: sent.append(to) or True):
-            v = self.cmd("run-now", space="sp1")
+            v = self.cmd("run-now", folder=self.folder)
         self.assertEqual(sent, ["t9"])
         self.assertEqual((v["inflight"]["reason"], v["inflight"]["turn"]), ("run now", 4))
         self.assertEqual([w["outcome"] for w in v["wakes"]], ["Turn ended, no progress saved", "Delivered"])
@@ -3447,7 +3349,7 @@ class ReadOnlyAutopilot(unittest.TestCase):
         os.makedirs(stash)
         state_file = os.path.join(stash, ".autopilot.json")
         with open(state_file, "w") as f:
-            json.dump({"version": 2, "spaces": {"sp1": {"on": True}}}, f)
+            json.dump({"version": 2, "projects": {"/proj/sp1": {"on": True}}}, f)
         real = builtins.open
 
         def ro(path, mode="r", *a, **k):
@@ -3459,11 +3361,11 @@ class ReadOnlyAutopilot(unittest.TestCase):
                 mock.patch.object(autopilot, "open", ro, create=True):
             # No lock file yet (read-only, so it can't be made): a read still works.
             with autopilot.state(write=False) as st:
-                self.assertTrue(st["spaces"]["sp1"]["on"])
+                self.assertTrue(st["projects"]["/proj/sp1"]["on"])
             # With a lock file there, a read takes it shared.
             open(os.path.join(stash, ".autopilot.lock"), "w").close()
             with autopilot.state(write=False) as st:
-                self.assertTrue(st["spaces"]["sp1"]["on"])
+                self.assertTrue(st["projects"]["/proj/sp1"]["on"])
             with self.assertRaises(autopilot.Fail) as e:
                 with autopilot.state(write=True):
                     pass
@@ -8465,51 +8367,6 @@ class TaskFlow(unittest.TestCase):
         self.assertTrue(agents.agent_running({"foreground": {"name": "claude", "argv": ["claude"]}}))
 
 
-class ReachProbeSpaces(unittest.TestCase):
-    """SHEP-185: a machine's reach map lists its spaces from the window's live list (herdr-app ls) when a window there
-    names some, else herdr-core's saved document; the probe runs for real with fake hc and herdr-app on PATH."""
-
-    def probe(self, live=None, saved=None):
-        sys.path.insert(0, BIN)
-        from herdr_task.machines import PROBE
-        root = tempfile.mkdtemp()
-        self.addCleanup(lambda: __import__("shutil").rmtree(root, ignore_errors=True))
-        bin_ = os.path.join(root, "bin")
-        os.makedirs(bin_)
-        state = os.path.join(root, "state", "herdr-core", "default")
-        os.makedirs(state)
-        with open(os.path.join(state, "docs.json"), "w") as f:
-            json.dump({"herdr-app": {"value": {"spaces": saved or []}, "version": 3}}, f)
-        hc = ('#!/bin/sh\ncase "$1 $2" in\n'
-              '"server status") echo \'{"core":{"id":"c-b","name":"vm-b"}}\' ;;\n'
-              '"machine ls") echo \'{"machines":[]}\' ;;\n'
-              '"ls --json") echo \'{"terminals":[]}\' ;;\n'
-              '*) echo "{}" ;;\nesac\n')
-        for name, body in (("hc", hc), ("herdr-app", None if live is None else '#!/bin/sh\necho \'%s\'\n' % json.dumps({"spaces": live}))):
-            if body is None:
-                continue
-            with open(os.path.join(bin_, name), "w") as f:
-                f.write(body)
-            os.chmod(os.path.join(bin_, name), 0o755)
-        env = {**os.environ, "PATH": bin_, "XDG_STATE_HOME": os.path.join(root, "state")}
-        out = subprocess.run([sys.executable, "-c", "import sys; S = sys.stdin.read(); exec(S)", json.dumps({"depth": 0, "seen": [], "timeout": 20})],
-                             input=PROBE, capture_output=True, text=True, env=env, timeout=120)
-        return json.loads(out.stdout.strip().splitlines()[-1])
-
-    def test_the_window_list_beats_a_saved_document_that_is_empty(self):
-        got = self.probe(live=[{"id": "sp1", "name": "", "folder": os.path.expanduser('~')}], saved=[])
-        self.assertEqual([(s["id"], s["folder"]) for s in got["spaces"]], [("sp1", os.path.expanduser('~'))])
-        self.assertEqual(got["home"], os.path.expanduser("~"))
-
-    def test_without_a_window_the_saved_document_is_read(self):
-        got = self.probe(live=None, saved=[{"id": "sp2", "name": "shop", "folder": "/base/shop"}])
-        self.assertEqual([(s["id"], s["name"]) for s in got["spaces"]], [("sp2", "shop")])
-
-    def test_a_window_without_spaces_falls_back_to_the_document(self):
-        got = self.probe(live=[], saved=[{"id": "sp3", "name": "lab", "folder": "/base/x"}])
-        self.assertEqual([s["id"] for s in got["spaces"]], ["sp3"])
-
-
 class StopLog(unittest.TestCase):
     """SHEP-189: the stop log keeps the last lines as JSON, and never raises into the work it logs."""
 
@@ -9434,7 +9291,7 @@ class BusyWorkerDelivery(unittest.TestCase):
 
 class ProjectStart(unittest.TestCase):
     """`herdr-task project start` (herdr_task/project.py): repo init, factory settings, check detection,
-    requirements import, space & Assistant creation, Autopilot heartbeat, idempotence and --dry-run."""
+    requirements import, coordinator creation in hc, Autopilot heartbeat, idempotence and --dry-run."""
 
     def setUp(self):
         import contextlib, io, pathlib
@@ -9446,9 +9303,9 @@ class ProjectStart(unittest.TestCase):
         self.io, self.redirect, self.exit_stack, self.mock, self.Path = io, contextlib.redirect_stdout, contextlib.ExitStack, mock, pathlib.Path
         self.tmp = os.path.realpath(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.store_dir, self.settings_file = os.path.join(self.tmp, "tasks"), os.path.join(self.tmp, "shepherdr.json")
-        self.app_home, self.templates, self.beats = (os.path.join(self.tmp, x) for x in ("app-home", "templates", "beats"))
-        self.window, self.terms, self.calls, self.seen_tpl = [], {}, [], {}
+        self.store_dir, self.settings_file = os.path.join(self.tmp, "tasks"), os.path.join(self.tmp, "settings.json")
+        self.templates, self.beats = (os.path.join(self.tmp, x) for x in ("templates", "beats"))
+        self.terms, self.calls, self.seen_tpl = {}, [], {}
         self.gh_repo, self.gh_secrets = None, ""
 
         def fake_run(argv, cwd=None, check=False, timeout=None):
@@ -9460,13 +9317,6 @@ class ProjectStart(unittest.TestCase):
                     return subprocess.CompletedProcess(argv, 0 if self.gh_repo else 1, json.dumps({"nameWithOwner": self.gh_repo}) if self.gh_repo else "", "")
                 if argv[1:3] == ["secret", "list"]:
                     return subprocess.CompletedProcess(argv, 0 if self.gh_secrets is not None else 1, self.gh_secrets or "", "")
-            if argv[:2] == ["herdr-app", "ls"]:
-                return subprocess.CompletedProcess(argv, 1, "", "no window") if self.window is None else \
-                    subprocess.CompletedProcess(argv, 0, json.dumps({"spaces": self.window}), "")
-            if argv[:3] == ["herdr-app", "do", "space.new"]:
-                sid = f"sp{len(self.window) + 1}"
-                self.window.append({"id": sid, "name": argv[argv.index("--name") + 1], "folder": argv[argv.index("--folder") + 1]})
-                return subprocess.CompletedProcess(argv, 0, json.dumps({"space": sid}), "")
             if argv[:2] == ["hc", "ls"]:
                 return subprocess.CompletedProcess(argv, 0, json.dumps({"terminals": list(self.terms.values())}), "")
             if argv[:2] == ["hc", "get"]:
@@ -9485,10 +9335,10 @@ class ProjectStart(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 0, json.dumps({"address": addr}), "")
             raise AssertionError(f"unexpected command: {argv}")
 
-        for obj, k, v in ((base, "run", fake_run), (base, "GH", "gh"), (project, "APP_HOME", self.app_home), (store, "STORE", self.store_dir),
+        for obj, k, v in ((base, "run", fake_run), (base, "GH", "gh"), (store, "STORE", self.store_dir),
                           (st, "SETTINGS", self.settings_file), (st, "TEMPLATES", self.templates), (news_mod, "send_or_hold", lambda *_, **__: "sent"),
                           (ap, "STORE", self.store_dir), (ap, "STATE", os.path.join(self.store_dir, ".autopilot.json")),
-                          (ap, "HEARTBEATS", self.beats), (ap, "run", fake_run), (ap, "typing", lambda *_: None),
+                          (ap, "HEARTBEATS", self.beats), (ap, "typing", lambda *_: None),
                           (ap, "ensure_scheduler", lambda quiet=False: {}), (ap, "news_send", lambda *_, **__: True)):
             p = mock.patch.object(obj, k, v)
             p.start()
@@ -9519,36 +9369,37 @@ class ProjectStart(unittest.TestCase):
 
     def test_starts_project_autopilot_and_second_run_is_noop(self):
         self.put(os.path.join(self.templates, "assistant.md"), "---\nname: assistant\ncommand: exec claude\n---\nCoordinate.\n")
-        self.put(os.path.join(self.app_home, "shared.json"), {"coordinator.slots": {"s1": {"pane": "p9", "space": "sp1", "tab": "tb2"}}})
         self.put(self.settings_file, {"version": 1, "everywhere": {"worker": {"agent": "claude", "model": "opus", "effort": "high"}}})
         repo = os.path.join(self.tmp, "my-app")
         self.put(os.path.join(repo, "package.json"), {"scripts": {"test": "vitest"}})
         spec = self.put(os.path.join(self.tmp, "spec.md"), "# Goal\nShip v1.\n")
         out = json.loads(self.start(repo, "--name", "My App", "--requirements", spec, "--autopilot", "--json"))
-        self.assertEqual((out["changed"], out["prefix"], out["space"], out["assistant"], out["check"], out["autopilot"]),
-                         (True, "MA", "sp1", "t1", "npm test", True))
+        self.assertEqual((out["changed"], out["prefix"], out["folder"], out["assistant"], out["check"], out["autopilot"]),
+                         (True, "MA", repo, "t1", "npm test", True))
+        self.assertNotIn("space", out)
         self.assertEqual(self.base.git(repo, "rev-parse", "--abbrev-ref", "HEAD")[1], "main")
         self.assertEqual(self.Path(repo, "docs", "requirements.md").read_text(), "# Goal\nShip v1.\n")
         with self.store.Store(self.store.locate(repo), write=False) as s:
-            cfg = self.st.settings_for(s, "sp1")
+            cfg = self.st.settings_for(s)
             self.assertEqual((cfg["tasks"]["merge"], cfg["tasks"]["review_min"], cfg["tasks"]["check"]), ("checks", 2, "npm test"))
             self.assertIs(cfg["tasks"]["reviewer_sandbox"], False)  # sandboxed agy can't sign in today (FAC-76)
             self.assertEqual((cfg["reviewer"]["agent"], cfg["reviewer"]["model"]), ("agy", "gemini-4-argon-high"))
-            self.assertEqual(self.st.worker_argv(s, {}, "sp1"), ["agy", "--model", "gemini-4-carbon-high", "--dangerously-skip-permissions"])
-        self.assertEqual((self.terms["t1"]["labels"]["herdr.chat"], self.terms["t1"]["labels"]["herdr.coordinator.space"]), ("p9", "sp1"))
-        self.assertTrue(any("CLAUDECODE" in v for v in self.seen_tpl.values()) and os.listdir(self.templates) == ["assistant.md"])
+            self.assertEqual(self.st.worker_argv(s, {}), ["agy", "--model", "gemini-4-carbon-high", "--dangerously-skip-permissions"])
+        self.assertEqual(self.terms["t1"]["labels"]["sheepdog.role"], "coordinator")
+        self.assertTrue(self.terms["t1"]["labels"]["sheepdog.project"])
+        self.assertTrue(any("CLAUDECODE" in v and "Your settings:" in v for v in self.seen_tpl.values()) and os.listdir(self.templates) == ["assistant.md"])
         self.assertTrue(any("DISABLE_AUTOUPDATER=1 exec claude" in v for v in self.seen_tpl.values()))  # FAC-87: before exec
-        self.assertIn("docs/requirements.md", self.ap.heartbeat_of("sp1")[0])
-        self.assertTrue(self.store.read_list(self.ap.STATE)["spaces"]["sp1"]["on"])
+        self.assertIn("docs/requirements.md", self.ap.heartbeat_of(repo)[0])
+        self.assertTrue(self.store.read_list(self.ap.STATE)["projects"][repo]["on"])
         self.assertEqual((out["checklist"]["ready"], len(out["checklist"]["asked"])), (["ci_secrets", "disk", "autopilot"], 4))
         before = len(self.calls)
         text2 = self.start(repo, "--requirements", "https://example.com/other", "--check", "pytest", "--autopilot")
-        self.assertTrue(all("found" in line for line in text2.strip().splitlines()[:7]), text2)
-        self.assertIn("Checklist for My App (sp1): 3 ready, 5 missing", text2)
-        self.assertEqual([c for c in self.calls[before:] if c[:2] in (["hc", "run"], ["herdr-app", "do"])], [])
+        self.assertTrue(all("found" in line for line in text2.strip().splitlines()[:6]), text2)
+        self.assertIn("Checklist for My App: 3 ready, 5 missing", text2)
+        self.assertEqual([c for c in self.calls[before:] if c[:2] == ["hc", "run"]], [])
         self.assertEqual(self.Path(repo, "docs", "requirements.md").read_text(), "# Goal\nShip v1.\n")
 
-    def test_detects_checks_url_requirements_and_no_window_fallback(self):
+    def test_detects_checks_url_requirements_and_headless_delivery(self):
         m, py, xc = (os.path.join(self.tmp, x) for x in ("mk", "py", "xc"))
         self.put(os.path.join(m, "package.json"), {"scripts": {"test": 'echo "Error: no test specified" && exit 1'}})
         self.put(os.path.join(m, "Makefile"), "build:\n\tcc a.c\ntest:\n\t./a.out\n")
@@ -9556,33 +9407,32 @@ class ProjectStart(unittest.TestCase):
         os.makedirs(os.path.join(xc, "Demo.xcodeproj"))
         self.assertEqual((self.project.detect_check(m), self.project.detect_check(py), self.project.detect_check(xc)),
                          ("make test", "python3 -m unittest discover -s test", "xcodebuild test -project Demo.xcodeproj -scheme Demo"))
-        self.window, fresh = None, os.path.join(self.tmp, "headless-app")
-        out = json.loads(self.start(fresh, "--requirements", "https://example.com/spec", "--check", "cargo test", "--autopilot", "--json"))
-        self.assertTrue("herdr-app do space.new" in out["space_step"] and out["check"] == "cargo test")
+        fresh = os.path.join(self.tmp, "headless-app")
+        out = json.loads(self.start(fresh, "--requirements", "https://example.com/spec", "--check", "cargo test", "--json"))
+        self.assertEqual((out["check"], out["autopilot"]), ("cargo test", True))
         self.assertEqual(self.Path(fresh, "docs", "requirements.md").read_text(), "[https://example.com/spec](https://example.com/spec)\n")
-        self.assertFalse(json.loads(self.start(fresh, "--autopilot", "--json"))["changed"])
-        self.assertIsNotNone(self.store.read_list(self.ap.STATE)["spaces"]["ha"].get("pending"))
-        self.terms["t1"]["foreground"], self.window = {"name": "claude"}, [{"id": "sp2", "name": "headless-app", "folder": fresh}]
-        self.put(os.path.join(self.app_home, "shared.json"), {"coordinator.slots": {"s2": {"pane": "p2", "space": "sp2"}}})
+        self.assertFalse(json.loads(self.start(fresh, "--json"))["changed"])
+        self.assertIsNotNone(self.store.read_list(self.ap.STATE)["projects"][fresh].get("pending"))
+        self.terms["t1"]["foreground"] = {"name": "claude"}
+        self.terms["t1"]["labels"].pop("sheepdog.project", None)  # re-attached on rerun and pending wake delivered
         out2 = json.loads(self.start(fresh, "--json"))
-        self.assertEqual((out2["space"], out2["assistant"], out2["autopilot"], self.project.coordinator_in("sp2")), ("sp2", "t1", True, "t1"))
-        self.assertEqual((self.terms["t1"]["labels"]["herdr.chat"], list(self.store.read_list(self.ap.STATE)["spaces"])), ("p2", ["sp2"]))
-        self.assertEqual(self.store.read_list(self.ap.STATE)["spaces"]["sp2"]["inflight"]["to"], "t1")
-        self.assertFalse(json.loads(self.start(fresh, "--autopilot", "--json"))["changed"])
+        self.assertEqual((out2["assistant"], out2["autopilot"], self.project.coordinator_in(fresh)), ("t1", True, "t1"))
+        self.assertEqual(self.store.read_list(self.ap.STATE)["projects"][fresh]["inflight"]["to"], "t1")
+        self.assertFalse(json.loads(self.start(fresh, "--json"))["changed"])
 
     def test_dry_run_prints_steps_and_writes_nothing(self):
         spec = self.put(os.path.join(self.tmp, "spec.md"), "Spec\n")
         sb, target = os.path.join(self.tmp, "untouched"), os.path.join(self.tmp, "untouched", "proj")
         with self.exit_stack() as es:
-            for o, k, v in ((self.store, "STORE", f"{sb}/tasks"), (self.st, "SETTINGS", f"{sb}/shepherdr.json"),
+            for o, k, v in ((self.store, "STORE", f"{sb}/tasks"), (self.st, "SETTINGS", f"{sb}/settings.json"),
                             (self.ap, "STORE", f"{sb}/tasks"), (self.ap, "STATE", f"{sb}/tasks/.autopilot.json"), (self.ap, "HEARTBEATS", f"{sb}/beats")):
                 es.enter_context(self.mock.patch.object(o, k, v))
             text = self.start(target, "--requirements", spec, "--autopilot", "--dry-run")
         for w in ("Git repo: would create", "Tasks: would set prefix", "Requirements: would copy",
-                  "Space: would create", "Settings: would write", "Assistant: would start", "Autopilot: would set heartbeat"):
+                  "Settings: would write", "Assistant: would start", "Autopilot: would set heartbeat"):
             self.assertIn(f"[dry-run] {w}", text)
         self.assertFalse(os.path.exists(sb))
-        self.assertEqual([c for c in self.calls if c[:2] in (["hc", "run"], ["herdr-app", "do"])], [])
+        self.assertEqual([c for c in self.calls if c[:2] == ["hc", "run"]], [])
 
     def fork(self, name, workflows, commits=2):
         repo = os.path.join(self.tmp, name)
@@ -9666,6 +9516,8 @@ class ProjectStart(unittest.TestCase):
         self.put(os.path.join(repo, ".github", "workflows", "ci.yml"),
                  "jobs:\n  test:\n    env:\n      T: ${{ secrets.GITHUB_TOKEN }}\n      A: ${{ secrets.API_KEY }}\n      S: ${{ secrets.SENTRY_DSN }}\n")
         self.start(repo, "--name", "Web App")
+        with self.mock.patch.object(sys, "argv", ["herdr-task", "autopilot", "off", "--folder", repo, "--json"]), self.redirect(self.io.StringIO()):
+            self.cli.main()
         subprocess.run(["git", "-C", repo, "add", "."], check=True)
         subprocess.run(["git", "-C", repo, "-c", "user.name=H", "-c", "user.email=h@x", "commit", "-q", "-m", "ci"], check=True)
         subprocess.run(["git", "-C", repo, "remote", "add", "origin", bare], check=True)
@@ -9678,29 +9530,29 @@ class ProjectStart(unittest.TestCase):
         sec_item = next(x for x in out1["items"] if x["key"] == "ci_secrets")
         self.assertEqual((sec_item["referenced"], sec_item["missing"]), (["API_KEY", "SENTRY_DSN"], ["SENTRY_DSN"]))
         self.assertTrue(any("gh secret set SENTRY_DSN" in s for s in out1["steps"]))
-        asks = self.store.read_list(self.settings_file)["spaces"]["sp1"]["project"]["asks"]
+        asks = self.store.read_list(self.settings_file)["projects"][repo]["project"]["asks"]
         self.assertEqual(list(asks), ["service_account", "milestone_gates", "design_pass", "model_routing", "autopilot"])
         mr_rec = self.ask_mod.load(asks["model_routing"])
         self.assertIn("agy/gemini-4-carbon-high", mr_rec["question"])
         self.assertIn("agy/gemini-4-argon-high", mr_rec["recommend"])
-        self.assertFalse(bool((self.store.read_list(self.ap.STATE) or {}).get("spaces", {}).get("sp1", {}).get("on")))
+        self.assertFalse(bool((self.store.read_list(self.ap.STATE) or {}).get("projects", {}).get(repo, {}).get("on")))
         for k, choice in (("service_account", "1"), ("milestone_gates", "2"), ("design_pass", "2"), ("model_routing", "1"), ("autopilot", "1")):
             self.answer_card(asks[k], choice, self.ask_mod.load(asks[k])["terminal"])
-        self.assertTrue(self.store.read_list(self.ap.STATE)["spaces"]["sp1"]["on"])
-        self.assertIn("docs/requirements.md", self.ap.heartbeat_of("sp1")[0])
+        self.assertTrue(self.store.read_list(self.ap.STATE)["projects"][repo]["on"])
+        self.assertIn("docs/requirements.md", self.ap.heartbeat_of(repo)[0])
         self.gh_secrets = "API_KEY\t2026-11-12\nSENTRY_DSN\t2026-11-12\n"
         text2 = self.checklist(repo)
         self.assertIn("8 ready, 0 missing — ready for an unattended night.", text2)
         out2 = json.loads(self.checklist(repo, "--json"))
         self.assertEqual((out2["ok"], out2["missing"], out2["asked"], out2["steps"]), (True, [], [], []))
         with self.store.Store(self.store.locate(repo), write=False) as s:
-            proj = self.st.settings_for(s, "sp1")["project"]
+            proj = self.st.settings_for(s)["project"]
         self.assertEqual((proj["service_account"], proj["milestone_gates"], proj["design_pass"], proj["autopilot"], "asks" in proj),
                          ("1Password service account", "All milestones except release", "No", "Yes", False))
 
     def notes(self, repo):
         with self.store.Store(self.store.locate(repo), write=False) as s:
-            t = self.st.settings_for(s, "sp1")["tasks"]
+            t = self.st.settings_for(s)["tasks"]
         return t.get("start_notes"), t.get("finish_notes")
 
     def test_project_start_adds_the_simulator_lines_once_and_keeps_notes(self):
@@ -9716,7 +9568,7 @@ class ProjectStart(unittest.TestCase):
         self.assertIn("herdr-task simulator lease <task>", start)
         self.assertIn("herdr-task simulator release <task>", finish)
         cfg = self.store.read_list(self.settings_file)
-        t = next(v for v in cfg["spaces"].values() if v.get("folder") == ios)["tasks"]
+        t = cfg["projects"][ios]["tasks"]
         t["start_notes"], t["finish_notes"] = "bun install", "tell the person"
         self.put(self.settings_file, cfg)
         self.start(ios, "--json")
@@ -9742,7 +9594,7 @@ class ProjectStart(unittest.TestCase):
         out = json.loads(self.checklist(ios_xc, "--json"))
         self.assertTrue(out["ios"])
         self.assertEqual([a["item"] for a in out["asked"]][:4], ["apple_signin", "app_record", "app_store_profile", "asc_agreements"])
-        self.assertEqual(len(out["asked"]), 9)
+        self.assertEqual(len(out["asked"]), 8)
         for words in ("gh repo create", "CI workflow", "Apple / App Store Connect", "app record", "provisioning profile"):
             self.assertTrue(any(words in s for s in out["steps"]), out["steps"])
         ap_ask = out["asked"][0]
@@ -9795,45 +9647,49 @@ class ProjectStart(unittest.TestCase):
         self.assertIn("[dry-run] Autopilot: would set heartbeat -> export into docs/requirements.md before planning tasks and turn on", dry_txt)
         self.assertFalse(os.path.exists(dry_dir))
 
-        # claude.ai artifact URL with --autopilot: keeps link line, marks to export, sets export-first heartbeat, idempotent on rerun.
+        # claude.ai artifact URL: keeps link line, marks to export, sets export-first heartbeat, idempotent on rerun.
         r1 = os.path.join(self.tmp, "claude-art")
         out1 = json.loads(self.start(r1, "--requirements", art_url, "--autopilot", "--json"))
         req1 = self.Path(r1, "docs", "requirements.md").read_text()
         self.assertTrue(req1.startswith(f"[{art_url}]({art_url})\n"), req1)
         self.assertIn("Status: to export", req1)
         self.assertTrue(self.project.req_needs_export(r1))
-        beat1 = self.ap.heartbeat_of(out1["space"])[0]
+        beat1 = self.ap.heartbeat_of(r1)[0]
         self.assertTrue(beat1.startswith(self.project.HEARTBEAT_EXPORT_HEAD))
         self.assertIn("Before planning tasks", beat1)
         self.assertIn("export its content as Markdown into docs/requirements.md", beat1)
         rerun = self.start(r1, "--requirements", art_url, "--autopilot")
-        self.assertTrue(all("found" in ln for ln in rerun.strip().splitlines()[:7]), rerun)
+        self.assertTrue(all("found" in ln for ln in rerun.strip().splitlines()[:6]), rerun)
         self.assertFalse(json.loads(self.start(r1, "--autopilot", "--json"))["changed"])
 
-        # claude.ai doc URL without --autopilot: still pre-seeds the export heartbeat, stays off until checklist Yes.
+        # claude.ai doc URL without --autopilot: Autopilot is on by default, and when switched off beforehand, stays off until checklist Yes.
         doc_url = "https://claude.ai/doc/req-doc-42"
         r2 = os.path.join(self.tmp, "claude-doc")
+        os.makedirs(r2)
+        with self.mock.patch.object(sys, "argv", ["herdr-task", "autopilot", "off", "--folder", r2, "--json"]), self.redirect(self.io.StringIO()):
+            self.cli.main()
         out2 = json.loads(self.start(r2, "--requirements", doc_url, "--json"))
         self.assertFalse(out2["autopilot"])
         self.assertIn("Status: to export", self.Path(r2, "docs", "requirements.md").read_text())
-        self.assertTrue(self.ap.heartbeat_of(out2["space"])[0].startswith(self.project.HEARTBEAT_EXPORT_HEAD))
+        self.assertTrue(self.ap.heartbeat_of(r2)[0].startswith(self.project.HEARTBEAT_EXPORT_HEAD))
         self.assertFalse(json.loads(self.start(r2, "--json"))["changed"])
         ap_card = next(a for a in out2["checklist"]["asked"] if a["item"] == "autopilot")
         self.answer_card(ap_card["id"], "1", ap_card["terminal"])
-        self.assertTrue(self.store.read_list(self.ap.STATE)["spaces"][out2["space"]]["on"])
-        self.assertTrue(self.ap.heartbeat_of(out2["space"])[0].startswith(self.project.HEARTBEAT_EXPORT_HEAD))
+        self.assertTrue(self.store.read_list(self.ap.STATE)["projects"][r2]["on"])
+        self.assertTrue(self.ap.heartbeat_of(r2)[0].startswith(self.project.HEARTBEAT_EXPORT_HEAD))
 
-        # Plain URL (even mentioning claude.ai in query) and local file behave exactly as before.
+        # Plain URL (even mentioning claude.ai in query) and local file behave as before.
         plain_url = "https://example.com/spec?from=claude.ai"
         r3, r4 = os.path.join(self.tmp, "plain-url"), os.path.join(self.tmp, "local-file")
         spec_file = self.put(os.path.join(self.tmp, "local.md"), "# Spec\nBuild it.\n")
-        out3 = json.loads(self.start(r3, "--requirements", plain_url, "--autopilot", "--json"))
-        out4 = json.loads(self.start(r4, "--requirements", spec_file, "--autopilot", "--json"))
+        out3 = json.loads(self.start(r3, "--requirements", plain_url, "--json"))
+        out4 = json.loads(self.start(r4, "--requirements", spec_file, "--json"))
         self.assertEqual(self.Path(r3, "docs", "requirements.md").read_text(), f"[{plain_url}]({plain_url})\n")
         self.assertEqual(self.Path(r4, "docs", "requirements.md").read_text(), "# Spec\nBuild it.\n")
         for r, o in ((r3, out3), (r4, out4)):
+            self.assertTrue(o["autopilot"])
             self.assertFalse(self.project.req_needs_export(r))
-            beat = self.ap.heartbeat_of(o["space"])[0]
+            beat = self.ap.heartbeat_of(r)[0]
             self.assertTrue(beat.startswith(self.project.HEARTBEAT_HEAD))
             self.assertNotIn("to export", beat)
 
@@ -9896,8 +9752,8 @@ class Watchdog(unittest.TestCase):
                 return real_sub(args, env=env, **kw)
             if args[0] == "bash" and os.path.basename(args[1]) == "restart.sh":
                 old, nxt, prev = args[2], f"c{len(self.restarts) + 2}", self.terms.pop(args[2])
-                self.restarts.append((old, nxt, (env or {}).get("HERDR_RESTART_CHAT")))
-                lbs = {k: v for k, v in prev["labels"].items() if not ((env or {}).get("HERDR_RESTART_CHAT") and k == "herdr.space") and k != "herdr.template"}
+                self.restarts.append((old, nxt))
+                lbs = {k: v for k, v in prev["labels"].items() if k not in ("sheepdog.template", "herdr.template")}
                 self.terms[nxt] = {**prev, "address": nxt, "turn": 0, "status": {"state": "idle"}, "created_ms": self.clock, "labels": lbs}
                 return subprocess.CompletedProcess(args, 0, f"{nxt}\n", "")
             if args[:2] == ["hc", "ls"]:
@@ -9928,15 +9784,17 @@ class Watchdog(unittest.TestCase):
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
-        self.coord("c1", chat="p1")
+        self.coord("c1")
 
-    def coord(self, addr="c1", space="shop", status="done", turn=2, chat=None):
-        self.terms[addr] = {"address": addr, "state": "live", "cwd": self.tmp if "/" not in addr else "/remote",
+    def coord(self, addr="c1", folder=None, status="done", turn=2):
+        folder = folder or (self.tmp if "/" not in addr else "/remote")
+        self.terms[addr] = {"address": addr, "state": "live", "cwd": folder,
                             "status": {"state": status}, "turn": turn, "foreground": {"name": "claude"},
-                            "labels": {"herdr.role": "coordinator", "herdr.space": space, **({"herdr.chat": chat} if chat else {})}}
+                            "labels": {"sheepdog.role": "coordinator", "sheepdog.project": self.slug if folder == self.tmp else folder,
+                                       "herdr.role": "coordinator"}}
 
     def worker(self, addr, tid, status="working", **extra):
-        self.terms[addr] = {"address": addr, "state": "live", "status": {"state": status}, "foreground": {"name": "claude"}, "labels": {"herdr.task": f"{self.slug}#{tid}"}, **extra}
+        self.terms[addr] = {"address": addr, "state": "live", "status": {"state": status}, "foreground": {"name": "claude"}, "labels": {"sheepdog.task": f"{self.slug}#{tid}"}, **extra}
 
     def save_tasks(self, *rows, delivered=None, inflight=None):
         put = lambda fn, d: self.Path(self.store, fn).write_text(json.dumps(d))
@@ -9944,27 +9802,28 @@ class Watchdog(unittest.TestCase):
         if delivered is not None:
             put(".news.json", {"delivered": {f"{self.slug}#{k}": v for k, v in delivered.items()}, "outbox": []})
         if inflight is not None:
-            put(".autopilot.json", {"version": 2, "spaces": {"shop": {"on": True, "inflight": inflight}}})
+            put(".autopilot.json", {"version": 2, "projects": {self.tmp: {"on": True, "name": "shop", "folder": self.tmp, "inflight": inflight}}})
 
     def tick(self):
         self.wd.watchdog_pass(report := {})
         return report
 
     def test_idle_with_stale_needs_you_restarts_once_and_second_time_alerts(self):
-        t1 = {"id": 1, "title": "Auth", "state": "running", "space": "shop", "attention": "Need API key", "attention_at": self.clock - 10 * 60000}
+        t1 = {"id": 1, "title": "Auth", "state": "running", "attention": "Need API key", "attention_at": self.clock - 10 * 60000}
         self.save_tasks(t1, delivered={1: {"to": "c1", "turn": 2, "at": self.clock - 10 * 60000, "event": "needs-you"}})
         self.tick()
         self.assertEqual(self.restarts, [])
         self.clock += 21 * 60000  # 31m in Needs you with no turn since news reached c1: restart once
         self.tick()
-        self.assertEqual((self.restarts, self.alerts, os.path.isfile(os.path.join(self.store, ".watchdog.json"))), ([("c1", "c2", "p1")], [], True))
+        self.assertEqual((self.restarts, self.alerts, os.path.isfile(os.path.join(self.store, ".watchdog.json"))), ([("c1", "c2")], [], True))
         self.terms["c2"].update(status={"state": "done"}, turn=1)
         self.clock += 35 * 60000  # c2 handled the handoff turn: pre-restart SHOP-1 doesn't re-trigger
         self.tick()
         self.assertEqual((len(self.restarts), len(self.alerts)), (1, 0))
-        # Stuck again within 2 hours (even after HERDR_RESTART_CHAT dropped herdr.space): alerts once, doesn't repeat.
-        t2 = {"id": 2, "title": "Pay", "state": "running", "space": "shop", "agents": [{"address": "w2", "at": self.clock - 5000, "ended": self.clock}]}
-        self.save_tasks(t1, t2, delivered={2: {"to": "c2", "turn": 1, "at": self.clock, "event": "failed"}})
+        # Stuck again within 2 hours (even if sheepdog.project label was missing on c2): alerts once, doesn't repeat.
+        self.terms["c2"]["labels"].pop("sheepdog.project", None)
+        t2 = {"id": 2, "title": "Pay", "state": "running", "agents": [{"address": "w2", "at": self.clock - 5000, "ended": self.clock}]}
+        self.save_tasks(t1, t2, delivered={2: {"to": "c2", "turn": 1, "at": self.clock, "event": "failed"}}, inflight=False)
         self.clock += 31 * 60000
         self.tick()
         self.assertEqual((len(self.restarts), len(self.alerts)), (1, 1))
@@ -9975,14 +9834,14 @@ class Watchdog(unittest.TestCase):
         self.terms["c2"]["turn"] = 2  # After a turn and past the 2-hour cooldown, a stalled task restarts again
         self.clock += self.wd.RESTART_COOLDOWN_MS
         self.worker("w3", 3, status_ms=self.clock - 60 * 60000)
-        self.save_tasks({"id": 3, "title": "Ship", "state": "running", "space": "shop", "started": self.clock - 60 * 60000, "agents": [{"address": "w3", "at": self.clock - 60 * 60000}]},
+        self.save_tasks({"id": 3, "title": "Ship", "state": "running", "started": self.clock - 60 * 60000, "agents": [{"address": "w3", "at": self.clock - 60 * 60000}]},
                         delivered={3: {"to": "c2", "turn": 2, "at": self.clock - 40 * 60000, "event": "stalled", "stall": f"quiet:{self.clock - 60 * 60000}"}})
         self.tick()
         self.assertEqual(len(self.restarts), 2)
 
     def test_a_stalled_disk_alerts_once_per_spell_and_blocks_restarts(self):
         from unittest import mock
-        t1 = {"id": 1, "title": "Auth", "state": "running", "space": "shop", "attention": "Need API key", "attention_at": self.clock - 40 * 60000}
+        t1 = {"id": 1, "title": "Auth", "state": "running", "attention": "Need API key", "attention_at": self.clock - 40 * 60000}
         self.save_tasks(t1, delivered={1: {"to": "c1", "turn": 2, "at": self.clock - 40 * 60000, "event": "needs-you"}})  # would restart if the disk answered
         answers = ["/Volumes/Ext is stalling"]
         with mock.patch.object(self.wd, "probe_volume", side_effect=lambda *_: answers[0]) as pv:
@@ -9992,10 +9851,10 @@ class Watchdog(unittest.TestCase):
             self.assertIn("/Volumes/Ext is stalling", self.alerts[0][1]["title"])
             self.clock += 5 * 60000
             self.assertEqual((self.tick(), len(self.alerts), self.restarts), ({}, 1, []))
-            self.assertIn("stall", json.loads(self.Path(self.store, ".watchdog.json").read_text())["shop"])
+            self.assertIn("stall", json.loads(self.Path(self.store, ".watchdog.json").read_text())[self.tmp])
             answers[0] = None  # recovered: the spell clears and the stuck Assistant is restarted
             self.tick()
-            self.assertEqual((len(self.restarts), "stall" in json.loads(self.Path(self.store, ".watchdog.json").read_text()).get("shop", {})), (1, False))
+            self.assertEqual((len(self.restarts), "stall" in json.loads(self.Path(self.store, ".watchdog.json").read_text()).get(self.tmp, {})), (1, False))
             answers[0] = "/Volumes/Ext is stalling"  # a new spell alerts again
             self.tick()
             self.assertEqual(len(self.alerts), 2)
@@ -10005,8 +9864,8 @@ class Watchdog(unittest.TestCase):
         self.worker(addr, tid, status="idle", turn=0, created_ms=self.clock - age_ms, **extra)
 
     def test_two_blank_starts_alert_once_and_hold_off_restarts_until_a_good_start(self):
-        t1 = {"id": 1, "title": "Auth", "state": "running", "space": "shop", "attention": "Need API key", "attention_at": self.clock - 40 * 60000}
-        rows = [t1, {"id": 2, "title": "Pay", "state": "running", "space": "other"}, {"id": 3, "title": "Ship", "state": "running", "space": "shop"}]
+        t1 = {"id": 1, "title": "Auth", "state": "running", "attention": "Need API key", "attention_at": self.clock - 40 * 60000}
+        rows = [t1, {"id": 2, "title": "Pay", "state": "running"}, {"id": 3, "title": "Ship", "state": "running"}]
         self.save_tasks(*rows, delivered={1: {"to": "c1", "turn": 2, "at": self.clock - 40 * 60000, "event": "needs-you"}})  # would restart
         self.blank("w2", 2)
         self.worker("w3", 3, status="working", turn=1, created_ms=self.clock - 3 * 60000)  # a start that went fine is no blank one
@@ -10014,7 +9873,7 @@ class Watchdog(unittest.TestCase):
         self.assertEqual((len(self.alerts), len(self.restarts)), (0, 1))  # one blank start is no outage
         self.terms.pop("c2")
         self.terms.pop("w3")
-        self.coord("c1", chat="p1")
+        self.coord("c1")
         self.Path(self.store, ".watchdog.json").unlink()
         self.blank("w3", 3)
         rep = self.tick()
@@ -10030,7 +9889,7 @@ class Watchdog(unittest.TestCase):
         self.assertNotIn("_outage", json.loads(self.Path(self.store, ".watchdog.json").read_text()))
 
     def test_a_good_start_between_two_blank_ones_is_no_outage(self):
-        self.save_tasks(*[{"id": i, "title": "T", "state": "running", "space": "shop"} for i in (1, 2, 3)])
+        self.save_tasks(*[{"id": i, "title": "T", "state": "running"} for i in (1, 2, 3)])
         self.blank("w1", 1, age_ms=5 * 60000)
         self.worker("w2", 2, status="working", turn=1, created_ms=self.clock - 3 * 60000)
         self.blank("w3", 3, age_ms=2 * 60000 + 30000)
@@ -10040,7 +9899,7 @@ class Watchdog(unittest.TestCase):
     def test_a_restart_ends_the_old_agents_group(self):
         from unittest import mock
         self.terms["c1"]["foreground"]["pid"] = 4242
-        self.save_tasks({"id": 1, "title": "Auth", "state": "running", "space": "shop", "attention": "x", "attention_at": self.clock - 40 * 60000},
+        self.save_tasks({"id": 1, "title": "Auth", "state": "running", "attention": "x", "attention_at": self.clock - 40 * 60000},
                         delivered={1: {"to": "c1", "turn": 2, "at": self.clock - 40 * 60000, "event": "needs-you"}})
         with mock.patch.object(self.wd, "end_group") as eg:
             self.tick()
@@ -10048,22 +9907,22 @@ class Watchdog(unittest.TestCase):
 
     def test_a_stall_spell_survives_the_assistant_being_away(self):
         from unittest import mock
-        self.save_tasks({"id": 1, "title": "Auth", "state": "running", "space": "shop"})
+        self.save_tasks({"id": 1, "title": "Auth", "state": "running"})
         with mock.patch.object(self.wd, "probe_volume", return_value="stalling"):
             self.tick()
             del self.terms["c1"]
             self.tick()
-            self.assertIn("stall", json.loads(self.Path(self.store, ".watchdog.json").read_text())["shop"])
-            self.coord("c1", chat="p1")
+            self.assertIn("stall", json.loads(self.Path(self.store, ".watchdog.json").read_text())[self.tmp])
+            self.coord("c1")
             self.tick()
         self.assertEqual(len(self.alerts), 1)
 
     def test_ready_behind_and_turn_since_news(self):
-        queued = {"id": 2, "title": "Follow-up", "state": "queued", "space": "shop", "after": [1]}
-        self.save_tasks({"id": 1, "title": "Base", "state": "todo", "space": "shop"}, queued)
+        queued = {"id": 2, "title": "Follow-up", "state": "queued", "after": [1]}
+        self.save_tasks({"id": 1, "title": "Base", "state": "todo"}, queued)
         self.news.news_pass({})
         self.terms["c1"]["status"] = {"state": "working"}  # working on turn 2 when news arrives (queued behind turn 3)
-        self.save_tasks({"id": 1, "title": "Base", "state": "ready", "space": "shop", "ready_at": self.clock}, queued)
+        self.save_tasks({"id": 1, "title": "Base", "state": "ready", "ready_at": self.clock}, queued)
         self.news.news_pass({})
         self.clock += 10000
         self.news.news_pass({})
@@ -10074,7 +9933,7 @@ class Watchdog(unittest.TestCase):
         self.assertEqual(self.restarts, [])
         self.terms["c1"]["turn"] = 3  # queued turn never ran (turn 3 == base_turn): restarted
         self.tick()
-        self.assertEqual(self.restarts, [("c1", "c2", "p1")])
+        self.assertEqual(self.restarts, [("c1", "c2")])
 
     def test_busy_changing_assistant_is_left_alone(self):
         self.terms["c1"]["status"] = {"state": "working"}
@@ -10089,8 +9948,8 @@ class Watchdog(unittest.TestCase):
         self.assertEqual(len(self.restarts), 1)
 
     def test_typing_autopilot_and_remote_assistants_hold_it(self):
-        self.coord("vm/c9", space="shop")
-        stale = {"id": 1, "title": "Fix", "state": "running", "space": "shop", "attention": "Ask", "attention_at": self.clock - 35 * 60000}
+        self.coord("vm/c9")
+        stale = {"id": 1, "title": "Fix", "state": "running", "attention": "Ask", "attention_at": self.clock - 35 * 60000}
         delivered = {1: {"to": "c1", "turn": 2, "at": self.clock - 35 * 60000, "event": "needs-you"}}
         self.save_tasks(stale, delivered=delivered)
         self.raw = "› wait a second\n"
@@ -10101,15 +9960,15 @@ class Watchdog(unittest.TestCase):
         self.assertEqual(self.restarts, [])
         self.save_tasks(stale, delivered=delivered, inflight=False)
         self.tick()
-        self.assertEqual((self.restarts, "vm/c9" in self.terms), ([("c1", "c2", "p1")], True))
+        self.assertEqual((self.restarts, "vm/c9" in self.terms), ([("c1", "c2")], True))
 
     def test_older_worker_or_attention_timestamps_wait_full_30m(self):
         t0 = self.clock
         for i in (1, 2, 3):
             self.worker(f"w{i}", i)
-        self.save_tasks({"id": 1, "title": "Build", "state": "running", "space": "shop", "started": t0, "agents": [{"address": "w1", "at": t0}]},
-                        {"id": 2, "title": "Ask", "state": "running", "space": "shop", "started": t0, "attention_at": t0, "agents": [{"address": "w2", "at": t0}]},
-                        {"id": 3, "title": "CI", "state": "running", "space": "shop", "started": t0, "attention": "Checks failed", "attention_at": t0, "agents": [{"address": "w3", "at": t0}]})
+        self.save_tasks({"id": 1, "title": "Build", "state": "running", "started": t0, "agents": [{"address": "w1", "at": t0}]},
+                        {"id": 2, "title": "Ask", "state": "running", "started": t0, "attention_at": t0, "agents": [{"address": "w2", "at": t0}]},
+                        {"id": 3, "title": "CI", "state": "running", "started": t0, "attention": "Checks failed", "attention_at": t0, "agents": [{"address": "w3", "at": t0}]})
         self.news.news_pass({})
         self.clock += 35 * 60000  # 35m later: w1 exits, w2 blocks (stale attention_at=t0), w3 ends without fixing attention
         self.terms.pop("w1")
@@ -10123,11 +9982,11 @@ class Watchdog(unittest.TestCase):
         self.assertEqual(self.restarts, [])
         self.clock += 29 * 60000  # 31m after entering Failed/Needs you: restarts once
         self.tick()
-        self.assertEqual(self.restarts, [("c1", "c2", "p1")])
+        self.assertEqual(self.restarts, [("c1", "c2")])
 
     def test_api_error_gets_one_nudge_then_one_restart_then_an_alert(self):
         err = "● Working on SHOP-1\n  ⎿  API Error: 403 (Cloudflare) · Please run /login\n\n❯ \n"
-        self.save_tasks({"id": 1, "title": "Auth", "state": "running", "space": "shop"})
+        self.save_tasks({"id": 1, "title": "Auth", "state": "running"})
         self.screens["c1"] = "● Done, SHOP-1 is running\n❯ \n"
         self.assertEqual((self.tick(), self.sent), ({}, []))  # no error: left alone
         self.screens["c1"] = err
@@ -10137,7 +9996,7 @@ class Watchdog(unittest.TestCase):
         self.assertEqual((len(self.sent), self.restarts), (1, []))
         self.clock += 3 * 60000
         rep = self.tick()  # still on the error: restarted with its handoff
-        self.assertEqual((self.restarts, len(self.sent)), ([("c1", "c2", "p1")], 1))
+        self.assertEqual((self.restarts, len(self.sent)), ([("c1", "c2")], 1))
         self.terms["c2"].update(turn=1)
         self.screens["c2"] = err
         self.clock += 3 * 60000
@@ -10150,7 +10009,7 @@ class Watchdog(unittest.TestCase):
 
     def test_a_nudge_that_worked_is_not_followed_by_a_restart(self):
         err = "  ⎿  API Error: 403 (Cloudflare) · Please run /login\n"
-        self.save_tasks({"id": 1, "title": "Auth", "state": "running", "space": "shop"})
+        self.save_tasks({"id": 1, "title": "Auth", "state": "running"})
         self.screens["c1"] = err + "\n❯ \n"
         self.tick()
         self.assertEqual(len(self.sent), 1)
@@ -10163,9 +10022,9 @@ class Watchdog(unittest.TestCase):
 
     def test_api_error_is_not_acted_on_without_work_waiting_or_when_signed_out(self):
         self.screens["c1"] = "  ⎿  API Error: 529 overloaded_error\n❯ \n"
-        self.save_tasks({"id": 1, "title": "Auth", "state": "done", "space": "shop"})
+        self.save_tasks({"id": 1, "title": "Auth", "state": "done"})
         self.assertEqual((self.tick(), self.sent), ({}, []))
-        self.save_tasks({"id": 1, "title": "Auth", "state": "running", "space": "shop"})
+        self.save_tasks({"id": 1, "title": "Auth", "state": "running"})
         self.terms["c1"]["status"] = {"state": "working"}  # mid-turn: never nudged
         self.assertEqual((self.tick(), self.sent), ({}, []))
         self.terms["c1"]["status"] = {"state": "done"}
@@ -10176,18 +10035,18 @@ class Watchdog(unittest.TestCase):
         self.assertEqual((len(self.sent), self.restarts, len(self.alerts), [x["action"] for x in rep["watchdog"]]), (1, [], 1, ["alerted"]))
 
     def test_idle_assistant_on_an_old_template_restarts_once(self):
-        self.terms["c1"].update(created_ms=self.clock - 60 * 60000, labels={**self.terms["c1"]["labels"], "herdr.template": "tpl-old"})
+        self.terms["c1"].update(created_ms=self.clock - 60 * 60000, labels={**self.terms["c1"]["labels"], "sheepdog.template": "tpl-old"})
         self.terms["c1"]["status"] = {"state": "working"}
         self.screens["c1"] = "busy\n"
         self.assertEqual((self.tick(), self.restarts), ({}, []))  # mid-turn: not restarted
         self.terms["c1"]["status"] = {"state": "done"}
         rep = self.tick()
-        self.assertEqual((self.restarts, rep["watchdog"][0]["why"]), ([("c1", "c2", "p1")], "running an old Assistant template"))
-        self.assertEqual(self.terms["c2"]["labels"].get("herdr.template"), None)
+        self.assertEqual((self.restarts, rep["watchdog"][0]["why"]), ([("c1", "c2")], "running an old Assistant template"))
+        self.assertEqual(self.terms["c2"]["labels"].get("sheepdog.template"), None)
         self.clock += 60000
         self.tick()  # the new one is labelled with the current template at first sight: left alone
-        self.assertEqual((len(self.restarts), self.terms["c2"]["labels"]["herdr.template"]), (1, "tpl-new"))
-        self.terms["c2"]["labels"]["herdr.template"] = "tpl-old"  # still old after a restart: not tried again for the same template
+        self.assertEqual((len(self.restarts), self.terms["c2"]["labels"]["sheepdog.template"]), (1, "tpl-new"))
+        self.terms["c2"]["labels"]["sheepdog.template"] = "tpl-old"  # still old after a restart: not tried again for the same template
         self.clock += self.wd.RESTART_COOLDOWN_MS + 60000
         self.tick()
         self.assertEqual(len(self.restarts), 1)
@@ -10198,7 +10057,7 @@ class Watchdog(unittest.TestCase):
     def test_assistant_started_before_the_template_changed_is_labelled_unknown_and_restarted(self):
         self.terms["c1"]["created_ms"] = self.clock - 60 * 60000  # no label: older than the template file
         rep = self.tick()
-        self.assertEqual((self.restarts, rep["watchdog"][0]["why"]), ([("c1", "c2", "p1")], "running an old Assistant template"))
+        self.assertEqual((self.restarts, rep["watchdog"][0]["why"]), ([("c1", "c2")], "running an old Assistant template"))
 
 
 class DesignAndDocReview(unittest.TestCase):

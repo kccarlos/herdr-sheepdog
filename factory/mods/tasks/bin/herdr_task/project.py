@@ -1,10 +1,10 @@
 """Starting a factory project in one command (`herdr-task project start`, docs/factory.md 12b.4)."""
 
 import argparse, contextlib, fnmatch, io, json, os, re, shlex, shutil, subprocess, urllib.parse
-from . import autopilot as ap, base, settings as st
+from . import assistant_settings as aset, autopilot as ap, base, settings as st
 from .base import Fail
 from .github import push_remote, remote_repo
-from .launch import CLEAN_ENV, coordinators, coordinator_in
+from .launch import CLEAN_ENV, coordinator_in
 from .output import say
 from .store import auto_prefix, locate, prefixes_in_use, read_list, Store, store_path
 
@@ -118,13 +118,10 @@ def try_run(*args, cwd=None):
     except OSError:
         return None
 
-def coord_for_repo(repo, space_id=None):
+def coord_for_repo(repo):
     try:
-        if space_id and (found := coordinator_in(st.bare(space_id))):
+        if found := coordinator_in(repo):
             return found, (base.hc_json("get", found) or {}).get("labels") or {}
-        for addr in coordinators():
-            if (k := base.hc_json("get", addr) or {}).get("state") == "live" and (k.get("labels") or {}).get("herdr.role") != "ask" and k.get("cwd") and os.path.realpath(k["cwd"]) == repo:
-                return addr, k.get("labels") or {}
     except OSError:
         pass
     return None, {}
@@ -220,30 +217,11 @@ def ensure_requirements(repo, req_info, dry):
             else f"Requirements: {'copied to' if kind == 'file' else 'saved link in'} docs/requirements.md{note}")
     return dest, True, to_export, step
 
-def ensure_space(repo, name, prefix, cfg, dry):
-    step = f"herdr-app do space.new --folder {shlex.quote(repo)} --name {shlex.quote(name)}"
-    r = try_run("herdr-app", "ls")
-    ls_out = json_dict(r.stdout) if r and r.returncode == 0 else None
-    for x in (ls_out.get("spaces") or []) if ls_out else []:
-        if x.get("id") and "/" not in x["id"] and not x.get("machine") and x.get("folder") and os.path.realpath(x["folder"]) == repo:
-            return x["id"], False, None, f"Space: found {x['id']} ({x.get('name') or name})"
-    lb = coord_for_repo(repo)[1]
-    sid = next((k for k, v in (cfg.get("spaces") or {}).items()
-                if "/" not in k and isinstance(v, dict) and v.get("folder") == repo), None) or st.bare(lb.get("herdr.coordinator.space") or lb.get("herdr.space") or "") or None
-    if ls_out is not None and dry:
-        return sid or prefix.lower(), True, None, f"Space: would create in Herdr window ({step})"
-    if ls_out is not None and (cr := try_run("herdr-app", "do", "space.new", "--folder", repo, "--name", name)):
-        if (out := json_dict(cr.stdout) if cr.returncode == 0 else None) and out.get("space") and not out.get("error"):
-            return st.bare(str(out["space"])), True, None, f"Space: created {st.bare(str(out['space']))} ({name})"
-    return sid or prefix.lower(), False, step, f"Space: creating a space needs the Herdr window; run `{step}` ({'found' if sid else 'using'} {sid or prefix.lower()})"
-
-def ensure_settings(repo, space_id, name, given_check, d, dry):
-    if d.get("pushed_from"):
-        raise Fail("This machine's Shepherdr settings are a pushed copy: start the project from the window's machine.")
-    bare_id, spaces = st.bare(space_id), dict(d.get("spaces") or {})
-    old_ids = [k for k, v in spaces.items() if k != bare_id and "/" not in k and isinstance(v, dict) and v.get("folder") == repo]
-    layer = {**{kk: vv for k in old_ids for kk, vv in spaces[k].items()}, **dict(spaces.get(bare_id) or {})}
-    changed = bool(old_ids)
+def ensure_settings(repo, name, given_check, d, dry):
+    projects, spaces = dict(d.get("projects") or {}), dict(d.get("spaces") or {})
+    old_ids = [k for k, v in spaces.items() if "/" not in k and isinstance(v, dict) and v.get("folder") == repo]
+    layer = {**{kk: vv for k in old_ids for kk, vv in spaces[k].items()}, **dict(projects.get(repo) or {})}
+    changed = bool(old_ids) or repo not in projects
     for k, v in (("folder", repo), ("name", name), ("worker", dict(FACTORY_WORKER)), ("reviewer", dict(FACTORY_REVIEWER))):
         if (layer.get(k) != v) if k == "folder" else not layer.get(k):
             layer[k], changed = v, True
@@ -262,52 +240,55 @@ def ensure_settings(repo, space_id, name, given_check, d, dry):
         layer["tasks"] = tasks
     chk_words = f"check: {tasks['check']}" if tasks.get("check") else "check: none"
     if not changed or dry:
-        return layer, changed, old_ids, f"Settings: {'would write factory defaults' if changed else 'found'} for {bare_id} ({chk_words})"
+        return layer, changed, old_ids, f"Settings: {'would write factory defaults' if changed else 'found'} for {repo} ({chk_words})"
     for k in old_ids:
         spaces.pop(k, None)
-    spaces[bare_id] = layer
+    projects[repo] = layer
+    out_d = {k: v for k, v in d.items() if k not in ("spaces", "pushed_from")}
+    if spaces:
+        out_d["spaces"] = spaces
+    out_d.update(version=1, projects=projects)
     os.makedirs(os.path.dirname(st.SETTINGS), exist_ok=True)
     with open(tmp := f"{st.SETTINGS}.{os.getpid()}.tmp", "w") as f:
-        json.dump({**d, "version": 1, "spaces": spaces}, f, indent=2)
+        json.dump(out_d, f, indent=2)
         f.write("\n")
     os.replace(tmp, st.SETTINGS)
-    return layer, True, old_ids, f"Settings: wrote factory defaults for {bare_id} ({chk_words})"
+    return layer, True, old_ids, f"Settings: wrote factory defaults for {repo} ({chk_words})"
 
-APP_HOME = os.path.join(base.HOME, ".config", "herdr-app")  # compatibility shim until SDF-9
-
-def ensure_assistant(repo, space_id, dry):
-    bare_id, shared = st.bare(space_id), read_list(os.path.join(APP_HOME, "shared.json"))
-    slots = (shared.get("coordinator.slots") if isinstance(shared, dict) else None) or {}
-    slot, rec = next(((k, v) for k, v in (slots.items() if isinstance(slots, dict) else [])
-                      if isinstance(v, dict) and v.get("pane") and v.get("space") in (space_id, bare_id)), (None, None))
-    kv = ([f"herdr.chat={rec['pane']}", f"herdr.chat.slot={slot}", f"herdr.chat.origin=slot:{slot}"]
-          + ([f"herdr.coordinator.tab={st.bare(str(rec['tab']))}"] if rec.get("tab") else []) if slot else []) \
-         + ["herdr.role=coordinator", f"herdr.coordinator.space={bare_id}"]
-    addr, cur_lb = coord_for_repo(repo, bare_id)
+def ensure_assistant(repo, prefix, dry):
+    slug, _ = store_path(repo)
+    kv = [f"{base.PROJECT_LABEL}={slug}", f"{base.ROLE_LABEL}=coordinator", "herdr.role=coordinator"]
+    addr, cur_lb = coord_for_repo(repo)
     if addr:
         if all(cur_lb.get(p.split("=", 1)[0]) == p.split("=", 1)[1] for p in kv):
             return addr, False, f"Assistant: found {addr}"
         if dry:
-            return addr, True, f"Assistant: would attach {addr} to {bare_id}"
+            return addr, True, f"Assistant: would attach {addr} to {repo}"
         if (r := try_run("hc", "label", addr, *kv)) is None or r.returncode != 0:
             raise Fail("hc isn't on PATH (install herdr-core first)." if r is None else ((r.stderr or r.stdout).strip() or f"Couldn't label {addr}."))
-        return addr, True, f"Assistant: attached {addr} to {bare_id}"
+        return addr, True, f"Assistant: attached {addr} to {repo}"
     if dry:
-        return None, True, f"Assistant: would start for {bare_id}" + (f" (slot {slot})" if slot else "")
+        return None, True, f"Assistant: would start for {repo}"
     tpl_name, one_path = "assistant", None
-    if os.path.isfile(tpl_src := os.path.join(st.TEMPLATES, "assistant.md")):
+    tpl_src = next((p for p in (os.path.join(st.TEMPLATES, "assistant.md"),
+                                os.path.normpath(os.path.join(base.PACKAGE, "..", "..", "..", "..", "templates", "assistant.md")))
+                    if os.path.isfile(p)), None)
+    if tpl_src:
         with open(tpl_src) as f:
             src = f.read()
         if (m := re.match(r"\A---\n([\s\S]*?)\n---\n?", src)) and (cm := re.search(r"(?m)^command:[ \t]*(.+)$", m.group(1))):
+            rs = aset.rows(repo, st.read_settings())
+            kv = [*kv, f"{aset.LABEL}={aset.digest(rs)}"]
             tpl_name, one_path = f"herdr-assistant-{os.getpid()}", os.path.join(st.TEMPLATES, f"herdr-assistant-{os.getpid()}.md")
             cmd_text = re.sub(r'^exec\s+', '', cm.group(1).strip())
             # FAC-87: no auto-update mid-run (before exec: exec takes an assignment as the program)
             pre = "DISABLE_AUTOUPDATER=1 " if re.match(r'(\S*/)?claude(\s|$)', cmd_text) else ""
+            os.makedirs(st.TEMPLATES, exist_ok=True)
             with open(one_path, "w") as f:
                 f.write(f"---\nname: {tpl_name}\ndescription: One-off assistant start.\n"
-                        f"command: {CLEAN_ENV} {pre}exec {cmd_text}\n---\n{src[m.end():]}")
+                        f"command: {CLEAN_ENV} {pre}exec {cmd_text}\n---\n{src[m.end():].rstrip()}\n\n{aset.block(rs)}\n")
     try:
-        r = try_run("hc", "run", "--bg", "--json", "--no-parent", "--keep", "--cwd", repo, "--name", f"{bare_id}-assistant",
+        r = try_run("hc", "run", "--bg", "--json", "--no-parent", "--keep", "--cwd", repo, "--name", f"{prefix.lower()}-assistant",
                     *[x for p in kv for x in ("--label", p)], tpl_name)
     finally:
         if one_path and os.path.exists(one_path):
@@ -316,50 +297,53 @@ def ensure_assistant(repo, space_id, dry):
         raise Fail("hc isn't on PATH (install herdr-core first)." if r is None else ((r.stderr or r.stdout).strip() or "Couldn't start the Assistant."))
     return out["address"], True, f"Assistant: started {out['address']}"
 
-def sync_autopilot(repo, space_id, name, old_ids, want_on, asst_changed, dry, to_export=None):
+def sync_autopilot(repo, name, old_ids, want_on, asst_changed, dry, to_export=None):
     if to_export is None:
         to_export = req_needs_export(repo)
-    bare_id, ap_spaces = st.bare(space_id), (read_list(ap.STATE) or {}).get("spaces") or {}
-    stale = [k for k, v in ap_spaces.items() if k != bare_id and "/" not in k and (k in old_ids or (isinstance(v, dict) and v.get("folder") == repo))]
-    cur = {**{kk: vv for k in stale for kk, vv in (ap_spaces.get(k) or {}).items()}, **dict(ap_spaces.get(bare_id) or {})}
-    was_on, want_beat = bool(cur.get("on")), bool(want_on or to_export)
+    raw_ap = read_list(ap.STATE) or {}
+    ap_projects, ap_spaces = raw_ap.get("projects") or {}, raw_ap.get("spaces") or {}
+    stale = [k for k, v in ap_spaces.items() if "/" not in k and (k in old_ids or (isinstance(v, dict) and v.get("folder") == repo))]
+    cur = {**{kk: vv for k in stale for kk, vv in (ap_spaces.get(k) or {}).items()}, **dict(ap_projects.get(repo) or {})}
+    was_on = bool(cur.get("on"))
+    want_on = True if want_on else (cur.get("on") is not False)
+    want_beat = bool(want_on or to_export)
     cfg_now = st.read_settings() if want_beat else {}
     health = base_health(repo)
     plain_beat = (HEARTBEAT_HEAD + health + ap.STARTER).strip()
     has_beat = want_beat and any(bool(b := (ap.autopilot_layers(cfg_now, k)[1].get("heartbeat") or "").strip())
-                                 and not (to_export and b == plain_beat) for k in (bare_id, *old_ids))
+                                 and not (to_export and b == plain_beat) for k in (repo, *old_ids))
     head = (HEARTBEAT_EXPORT_HEAD if to_export else HEARTBEAT_HEAD) + health
     beat_desc = ("export into docs/requirements.md before planning tasks" if to_export else "docs/requirements.md") + (", base-health task first" if health else "")
     def move():
         with ap.state(write=True) as d:
-            m = {**{kk: vv for k in stale for kk, vv in (d["spaces"].pop(k, None) or {}).items()}, **dict(d["spaces"].get(bare_id) or {})}
+            m = dict(d["projects"].get(repo) or {})
             m["name"], m["folder"] = m.get("name") or name, repo
-            d["spaces"][bare_id] = m
-            if m.get("on") and m.get("pending"):
-                ap.deliver(bare_id, m)
+            d["projects"][repo] = m
+            if m.get("on") is not False and m.get("pending"):
+                ap.deliver(repo, m)
     need_beat, need_on = want_beat and not has_beat, want_on and not was_on
     if not need_beat and not need_on:
         if (stale or (asst_changed and was_on and cur.get("pending"))) and not dry:
             move()
-        line = (f"Autopilot: {'would move' if dry else 'moved'} to {bare_id}" if stale else
-                f"Autopilot: found on for {bare_id}" if (want_on or was_on) else
-                f"Autopilot: found heartbeat for {bare_id}" if want_beat else None)
+        line = (f"Autopilot: {'would move' if dry else 'moved'} to {repo}" if stale else
+                f"Autopilot: found on for {repo}" if (want_on or was_on) else
+                f"Autopilot: found heartbeat for {repo}" if want_beat else None)
         return (True if want_on else was_on), bool(stale), line
     if dry:
-        parts = ((["move to " + bare_id] if stale and was_on else [])
+        parts = ((["move to " + repo] if stale and was_on else [])
                  + ([f"set heartbeat -> {beat_desc}"] if need_beat else [])
-                 + ([f"turn on for {bare_id}"] if need_on else []))
+                 + ([f"turn on for {repo}"] if need_on else []))
         return (True if want_on else was_on), True, f"Autopilot: would {' and '.join(parts)}"
     if need_beat:
-        st.write_autopilot(bare_id, {"heartbeat": head + ap.STARTER})
+        st.write_autopilot(repo, {"heartbeat": head + ap.STARTER})
     if stale or (was_on and not cur.get("folder")):
         move()
     if need_on:
         with contextlib.redirect_stdout(io.StringIO()):
-            ap.cmd_autopilot(argparse.Namespace(autopilot="on", space=bare_id, everywhere=False, json=True, name=name, space_folder=repo))
+            ap.cmd_autopilot(argparse.Namespace(autopilot="on", folder=repo, everywhere=False, json=True, name=name))
     if want_on or was_on:
-        return True, True, f"Autopilot: on for {bare_id} (heartbeat -> {beat_desc})"
-    return False, True, f"Autopilot: set heartbeat for {bare_id} ({beat_desc})"
+        return True, True, f"Autopilot: on for {repo} (heartbeat -> {beat_desc})"
+    return False, True, f"Autopilot: set heartbeat for {repo} ({beat_desc})"
 
 NOT_READY = {"not yet", "not set up yet", "no", "not checked"}
 ans_yes = lambda v: str(v or "").strip().lower().startswith(("yes", "on", "true", "1"))
@@ -368,9 +352,9 @@ def read_text(p):
     with open(p, errors="replace") as f:
         return f.read()
 
-def ap_is_on(repo, space_id):
-    bare_id, ap_spaces = st.bare(space_id), (read_list(ap.STATE) or {}).get("spaces") or {}
-    return any(isinstance(v, dict) and v.get("on") and (k == bare_id or ("/" not in k and v.get("folder") == repo)) for k, v in ap_spaces.items())
+def ap_is_on(repo):
+    with ap.state(write=False) as d:
+        return ap.resolve(d, d["projects"].get(repo), repo)["on"]
 
 def detect_ios(repo):
     for root, dirs, files in os.walk(repo) if os.path.isdir(repo) else ():
@@ -457,19 +441,21 @@ def checklist_cards(ios, layer, gates=(), branch="main"):
         *[("gate_" + re.sub(r"\W+", "_", f), f"Gate {f}", f"{f} runs on every push to {branch}: gate it (manual dispatch or tags) until signing/deploy is proven?",
            ["Gate it in the first task", "Leave it, it's proven"], "Gate it in the first task", False, None) for f in gates]]
 
-def save_project(repo, space_id, name, edit):
-    if not isinstance(cfg := (read_list(st.SETTINGS) if os.path.exists(st.SETTINGS) else {}), dict) or cfg.get("pushed_from"):
+def save_project(repo, name, edit):
+    if not isinstance(cfg := (read_list(st.SETTINGS) if os.path.exists(st.SETTINGS) else {}), dict):
         return None
-    spaces = dict(cfg.get("spaces") or {})
-    sid = next((k for k, v in spaces.items() if "/" not in k and isinstance(v, dict) and v.get("folder") == repo), None) or st.bare(space_id or "") or auto_prefix(os.path.basename(repo)).lower()
-    cur = {"folder": repo, "name": name or os.path.basename(repo), **dict(spaces.get(sid) or {})}
+    projects = dict(cfg.get("projects") or {})
+    cur = {"folder": repo, "name": name or os.path.basename(repo), **dict(st.project_layer(cfg, repo))}
     cur["project"] = edit(dict(cur.get("project") or {}))
+    projects[repo] = cur
+    out_d = {k: v for k, v in cfg.items() if k != "pushed_from"}
+    out_d.update(version=1, projects=projects)
     os.makedirs(os.path.dirname(st.SETTINGS), exist_ok=True)
     with open(tmp := f"{st.SETTINGS}.{os.getpid()}.tmp", "w") as f:
-        json.dump({**cfg, "version": 1, "spaces": {**spaces, sid: cur}}, f, indent=2)
+        json.dump(out_d, f, indent=2)
         f.write("\n")
     os.replace(tmp, st.SETTINGS)
-    return sid, cur["name"]
+    return repo, cur["name"]
 
 def apply_checklist_answer(rec):
     chk, answer = rec.get("checklist") or {}, str(rec.get("answer") or "").strip()
@@ -477,8 +463,12 @@ def apply_checklist_answer(rec):
         return
     upd = lambda p: {**{k: v for k, v in p.items() if k != "asks"}, key: answer,
                      **({"asks": a} if (a := {k: v for k, v in (p.get("asks") or {}).items() if k != key}) else {})}
-    if (res := save_project(repo, chk.get("space"), chk.get("name"), upd)) and key == "autopilot" and ans_yes(answer):
-        sync_autopilot(repo, res[0], res[1], [], True, False, False)
+    if (res := save_project(repo, chk.get("name"), upd)) and key == "autopilot":
+        if ans_yes(answer):
+            sync_autopilot(repo, res[1], [], True, False, False)
+        else:
+            with contextlib.redirect_stdout(io.StringIO()):
+                ap.cmd_autopilot(argparse.Namespace(autopilot="off", folder=repo, everywhere=False, json=True, name=res[1]))
 
 def try_load_ask(ask_mod, aid):
     try:
@@ -486,18 +476,11 @@ def try_load_ask(ask_mod, aid):
     except Fail:
         return {}
 
-def run_checklist(repo, space_id=None, name=None, assistant=None, ap_hint=None, dry=False):
+def run_checklist(repo, name=None, assistant=None, ap_hint=None, dry=False):
     from . import ask as ask_mod
     if not isinstance(cfg := (read_list(st.SETTINGS) if os.path.exists(st.SETTINGS) else {}), dict):
         raise Fail(f"Can't read {st.SETTINGS} (fix invalid JSON first).")
-    if cfg.get("pushed_from") and not dry:
-        raise Fail("This machine's Shepherdr settings are a pushed copy: run the checklist from the window's machine.")
-    spaces = cfg.get("spaces") or {}
-    if not space_id:
-        pfx = (read_list(store_path(repo)[1]) or {}).get("prefix") or auto_prefix(os.path.basename(repo))
-        space_id = next((k for k, v in spaces.items() if "/" not in k and isinstance(v, dict) and v.get("folder") == repo), None) or ensure_space(repo, os.path.basename(repo), pfx, cfg, True)[0]
-    bare_id = st.bare(space_id)
-    layer = dict(spaces.get(bare_id) or next((v for k, v in spaces.items() if "/" not in k and isinstance(v, dict) and v.get("folder") == repo), None) or {})
+    layer = dict(st.project_layer(cfg, repo))
     name, old_proj = name or layer.get("name") or os.path.basename(repo), dict(layer.get("project") or {})
     proj, asks, changed, ap_ans = dict(old_proj), dict(old_proj.get("asks") or {}), False, False
     for k, aid in list(asks.items()):
@@ -506,8 +489,8 @@ def run_checklist(repo, space_id=None, name=None, assistant=None, ap_hint=None, 
         if "answer" in rec:
             proj[k] = rec["answer"]
             if k == "autopilot" and ans_yes(rec["answer"]):
-                ap_ans, changed = True, sync_autopilot(repo, bare_id, name, [], True, False, dry)[1] or changed
-    ap_now = True if (dry and (ap_hint or ap_ans)) else ap_is_on(repo, bare_id)
+                ap_ans, changed = True, sync_autopilot(repo, name, [], True, False, dry)[1] or changed
+    ap_now = True if (dry and (ap_hint or ap_ans)) else ap_is_on(repo)
     if ap_now:
         proj["autopilot"] = "Yes"
     elif not ap_ans and ans_yes(proj.get("autopilot")):
@@ -517,7 +500,7 @@ def run_checklist(repo, space_id=None, name=None, assistant=None, ap_hint=None, 
     items = [{"key": "github", "label": "GitHub repo", "ready": gh_ok, "detail": gh_det},
              {"key": "ci_secrets", "label": "CI secrets", "ready": sec_ok, "detail": sec_det, "referenced": ref_sec, "missing": miss_sec}]
     person_steps, asked, ask_err = [*gh_steps, *sec_steps], [], None
-    to_term = os.environ.get("HC_TERMINAL_ID") or assistant or (None if dry else coord_for_repo(repo, bare_id)[0])
+    to_term = os.environ.get("HC_TERMINAL_ID") or assistant or (None if dry else coord_for_repo(repo)[0])
     stall = base.probe_volume(repo)
     items.append({"key": "disk", "label": "Repo disk", "ready": not stall, "detail": stall or "answers in time"})
     person_steps += [f"Wake or fix the disk holding {repo}: {stall}"] if stall else []
@@ -546,7 +529,7 @@ def run_checklist(repo, space_id=None, name=None, assistant=None, ap_hint=None, 
                 with contextlib.redirect_stdout(io.StringIO()):
                     rec = ask_mod.cmd_ask(argparse.Namespace(
                         show=None, question=question, option=options, recommend=recommend, task=None, json=True,
-                        to=to_term, checklist={"folder": repo, "space": bare_id, "name": name, "item": key}))
+                        to=to_term, checklist={"folder": repo, "name": name, "item": key}))
                 asks[key] = rec["id"]
                 asked.append({"item": key, "id": rec["id"], "terminal": rec["terminal"]})
                 det = f"asked card {rec['id']} ({rec['terminal']})"
@@ -560,9 +543,9 @@ def run_checklist(repo, space_id=None, name=None, assistant=None, ap_hint=None, 
     if new_proj != old_proj:
         changed = True
         if not dry:
-            save_project(repo, bare_id, name, lambda _: new_proj)
+            save_project(repo, name, lambda _: new_proj)
     rdy_items, miss_items = [x for x in items if x["ready"]], [x for x in items if not x["ready"]]
-    lines = [f"Checklist for {name} ({bare_id}): {len(rdy_items)} ready, {len(miss_items)} missing" + (" — ready for an unattended night." if not miss_items else "")]
+    lines = [f"Checklist for {name}: {len(rdy_items)} ready, {len(miss_items)} missing" + (" — ready for an unattended night." if not miss_items else "")]
     for title, grp in (("Ready:", rdy_items), ("Missing:", miss_items)):
         if grp:
             lines += [title, *(f"- {x['label']}: {x['detail']}" for x in grp)]
@@ -573,7 +556,7 @@ def run_checklist(repo, space_id=None, name=None, assistant=None, ap_hint=None, 
         lines.append(f"Note: factory repo is on an external volume ({vol}): a stall or a permission prompt stops the night; the internal disk is safer")
     if ask_err:
         lines.append(f"Cards not opened: {ask_err}")
-    return {"folder": repo, "space": bare_id, "ios": ios, "ok": not miss_items, "ready": [x["key"] for x in rdy_items],
+    return {"folder": repo, "ios": ios, "ok": not miss_items, "ready": [x["key"] for x in rdy_items],
             "missing": [x["key"] for x in miss_items], "asked": asked, "steps": person_steps, "items": items,
             "project": new_proj, "autopilot": ap_now, "dry_run": dry, "changed": changed, "lines": lines}
 
@@ -609,15 +592,14 @@ def cmd_project(args):
     name = (args.name or "").strip() or os.path.basename(repo)
     prefix, c2, l2 = ensure_prefix(repo, args.name, dry)
     req_path, c3, to_export, l3 = ensure_requirements(repo, req_info, dry)
-    space_id, c4, space_step, l4 = ensure_space(repo, name, prefix, cfg, dry)
-    layer, c5, old_ids, l5 = ensure_settings(repo, space_id, name, args.check, cfg, dry)
-    assistant, c6, l6 = ensure_assistant(repo, space_id, dry)
-    ap_on, c7, l7 = sync_autopilot(repo, space_id, name, old_ids, bool(args.autopilot), c6, dry, to_export)
-    chk = run_checklist(repo, space_id=space_id, name=(args.name or "").strip() or layer.get("name") or name, assistant=assistant, ap_hint=ap_on, dry=dry)
+    layer, c5, old_ids, l5 = ensure_settings(repo, name, args.check, cfg, dry)
+    assistant, c6, l6 = ensure_assistant(repo, prefix, dry)
+    ap_on, c7, l7 = sync_autopilot(repo, name, old_ids, bool(args.autopilot), c6, dry, to_export)
+    chk = run_checklist(repo, name=(args.name or "").strip() or layer.get("name") or name, assistant=assistant, ap_hint=ap_on, dry=dry)
     health = base_health(repo).strip()
-    lines, changed = [l1, l2, l3, l4, l5, l6, *([l7] if l7 else []), *([f"Base health: {health}"] if health else [])], any((c1, c2, c3, c4, c5, c6, c7, chk["changed"]))
-    out = {"folder": repo, "name": name, "prefix": prefix, "space": st.bare(space_id), "space_step": space_step,
-           "assistant": assistant, "base_health": health, "check": (layer.get("tasks") or {}).get("check"), "requirements": req_path,
+    lines, changed = [l1, l2, l3, l5, l6, *([l7] if l7 else []), *([f"Base health: {health}"] if health else [])], any((c1, c2, c3, c5, c6, c7, chk["changed"]))
+    out = {"folder": repo, "name": name, "prefix": prefix, "assistant": assistant, "base_health": health,
+           "check": (layer.get("tasks") or {}).get("check"), "requirements": req_path,
            "autopilot": chk["autopilot"], "checklist": {k: v for k, v in chk.items() if k != "lines"},
            "dry_run": dry, "changed": changed, "steps": lines}
     say(args, out, "\n".join(f"[dry-run] {x}" if dry else x for x in [*lines, *chk["lines"]]))

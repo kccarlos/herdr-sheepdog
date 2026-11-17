@@ -18,11 +18,11 @@ SCHEDULER = "herdr-automations"
 def ensure_scheduler(quiet=False):
     """Keeps one scheduler on this machine while any folder has automations or tasks at work (it
     runs the queue and tells Assistants their tasks' news): herdr-core runs it (hc run --keep) as
-    herdr-automations, outside Herdr's spaces."""
+    herdr-automations, outside any project."""
     need = any((d := read_list(p) or {}).get("automations") or any(t.get("state") in ("scheduled", "queued", "running", "ready") or t.get("check_run") for t in d.get("tasks") or [])
                for p in store_files())
-    # A space on Autopilot (STORE/.autopilot.json) is woken by it too.
-    need = need or any((v or {}).get("on") for v in ((read_list(os.path.join(STORE, ".autopilot.json")) or {}).get("spaces") or {}).values())
+    ap = read_list(os.path.join(STORE, ".autopilot.json")) or {}
+    need = need or any((v or {}).get("on") is not False for v in (ap.get("projects") or {}).values())
     k = hc_json("get", SCHEDULER)
     ok = bool(k and k.get("state") == "live" and "scheduler" in " ".join((k.get("foreground") or {}).get("argv") or k.get("argv") or []))
     if ok or not need:
