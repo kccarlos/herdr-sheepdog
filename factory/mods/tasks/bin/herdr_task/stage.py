@@ -19,6 +19,8 @@ class StageResult:
     status: str
     needs: Optional[str]
     legacy_why: Optional[str]
+    waits_on: Optional[object] = None
+    failed_checks: tuple = ()
 
 
 def _no_ci_run():
@@ -393,6 +395,12 @@ def resolve_stage(task, live=(), *, store=None, asks=None, deps=None, queue_why=
                 status=status,
                 needs=needs,
                 legacy_why=legacy_why,
+                waits_on=([*ctx["deps"]] if matched[0] == "waiting_on_dep" else
+                          "owner" if matched[1] else "CI" if matched[0] == "ci" else
+                          "coordinator" if matched[0] in ("blocked_or_failed", "idle", "queued") or
+                          (matched[0] == "working" and why and "review" in why.lower()) else
+                          "CI" if matched[0] == "working" and _gate_push_held(view_task) else None),
+                failed_checks=tuple((task.get("pr") or {}).get("failed_checks") or ()),
             )
         if matched is None:
             matched = (stage_name, inbox, label, why)

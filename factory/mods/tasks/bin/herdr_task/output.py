@@ -28,6 +28,7 @@ def view(s, task, live=None):
     st = resolve_stage(task, running, store=s, deps=deps)
     v["stage"] = st.stage
     v["inbox"] = st.inbox
+    v["waits_on"], v["failed_checks"] = st.waits_on, list(st.failed_checks)
     v["status"], v["needs"], v["why"] = st.status, st.needs, st.legacy_why
     if v["needs"] == "asks" and v["why"] not in (REASONS["trust"], REASONS["bypass"], REASONS["onboard"]):
         # Why it waits, at most LINE_MAX characters: a standard reason or its own question.
