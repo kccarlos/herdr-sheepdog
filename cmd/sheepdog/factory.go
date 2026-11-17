@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	herdrsheepdog "github.com/kccarlos/herdr-sheepdog"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
@@ -21,18 +22,20 @@ var factoryDoctorRunner = factory.Doctor
 func printFactoryUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog factory <doctor> [flags] [folder]")
 	fprintln(w, "")
-	fprintln(w, "  doctor   check unattended factory prerequisites and print one-line fixes:")
-	fprintln(w, "           herdr-core (hc), timed project-volume probe inside herdr-core")
-	fprintln(w, "           (macOS consent prompts and external-disk stalls), at least one")
-	fprintln(w, "           logged-in agent CLI (claude, codex or agy) plus a canary start")
-	fprintln(w, "           inside herdr-core, gh login with the default repo pinned, and")
-	fprintln(w, "           codexbar. Exit 1 on FAIL.")
+	fprintln(w, "  doctor   check unattended factory prerequisites, unpack the embedded engine")
+	fprintln(w, "           and install/repair the pinned CPython runtime with uv if missing:")
+	fprintln(w, "           embedded engine, uv-managed CPython in data_dir, herdr-core (hc),")
+	fprintln(w, "           timed project-volume probe inside herdr-core (macOS consent prompts")
+	fprintln(w, "           and external-disk stalls), at least one logged-in agent CLI (claude,")
+	fprintln(w, "           codex or agy) plus a canary start inside herdr-core, gh login with")
+	fprintln(w, "           the default repo pinned, and codexbar. Exit 1 on FAIL.")
 	fprintln(w, "")
 	fprintln(w, "flags:")
 	fprintln(w, "  --folder PATH      project folder to check (default . or [folder])")
 	fprintln(w, "  --config PATH      config file (default ~/.config/sheepdog/config.toml)")
 	fprintln(w, "  --hc-socket PATH   herdr-core socket (overrides config and HC_SOCKET)")
 	fprintln(w, "  --no-canary        skip the agent CLI canary start (no tokens spent)")
+	fprintln(w, "  --no-repair        check only; do not unpack the engine or run uv python install")
 }
 
 // runFactory dispatches the `sheepdog factory` command group.
@@ -44,6 +47,11 @@ func runFactory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	switch args[0] {
 	case "doctor":
 		return runFactoryDoctor(ctx, args[1:], stdout, stderr)
+	case "python-version":
+		fprintln(stdout, factory.PinnedPythonVersion())
+		return 0
+	case "python-dir":
+		return runFactoryPythonDir(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printFactoryUsage(stdout)
 		return 0
@@ -52,6 +60,29 @@ func runFactory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		printFactoryUsage(stderr)
 		return 2
 	}
+}
+
+func runFactoryPythonDir(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("factory python-dir", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "", "config file")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	home, _ := os.UserHomeDir()
+	_, dataDir, badCfg := resolveFactoryConfig("", *configPath, home)
+	if badCfg != nil {
+		if strings.TrimSpace(*configPath) != "" {
+			fprintln(stderr, badCfg.Line())
+			return 1
+		}
+		dataDir = filepath.Join(home, ".local", "share", "sheepdog")
+	}
+	fprintln(stdout, factory.PythonInstallDir(dataDir))
+	return 0
 }
 
 func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -63,6 +94,7 @@ func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writ
 	configPath := fs.String("config", "", "config file")
 	hcSocket := fs.String("hc-socket", "", "herdr-core socket")
 	noCanary := fs.Bool("no-canary", false, "skip agent CLI canary start")
+	noRepair := fs.Bool("no-repair", false, "do not unpack engine or run uv python install")
 	if err := fs.Parse(reordered); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -82,7 +114,7 @@ func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	folder = resolveTargetFolder(folder, home)
 
-	socket, badCfg := resolveFactoryConfig(*hcSocket, *configPath, home)
+	socket, dataDir, badCfg := resolveFactoryConfig(*hcSocket, *configPath, home)
 	if badCfg != nil {
 		fprintln(stdout, badCfg.Line())
 		return 1
@@ -90,6 +122,9 @@ func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writ
 
 	results := factoryDoctorRunner(ctx, factory.DoctorOptions{
 		Folder:   folder,
+		DataDir:  dataDir,
+		Engine:   factory.EngineSource{FS: herdrsheepdog.Factory, Version: version},
+		NoRepair: *noRepair,
 		HCSocket: socket,
 		Canary:   !*noCanary,
 		Home:     home,
@@ -147,7 +182,7 @@ func resolveTargetFolder(raw, home string) string {
 	return filepath.Clean(f)
 }
 
-func resolveFactoryConfig(explicitSocket, configPath, home string) (socket string, badCfg *onboard.Result) {
+func resolveFactoryConfig(explicitSocket, configPath, home string) (socket, dataDir string, badCfg *onboard.Result) {
 	explicitCfg := strings.TrimSpace(configPath)
 	cfgPath := explicitCfg
 	if cfgPath == "" {
@@ -159,7 +194,7 @@ func resolveFactoryConfig(explicitSocket, configPath, home string) (socket strin
 			Detail: err.Error(),
 			Fix:    "pass an existing --config PATH",
 		}
-		return "", &r
+		return "", "", &r
 	}
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
@@ -169,12 +204,13 @@ func resolveFactoryConfig(explicitSocket, configPath, home string) (socket strin
 			Detail: err.Error(),
 			Fix:    "fix " + cfgPath + " or pass --config PATH",
 		}
-		return "", &r
+		return "", "", &r
 	}
+	resolvedDataDir := expandHomePath(cfg.DataDir, home)
 	if explicitSock := strings.TrimSpace(explicitSocket); explicitSock != "" {
-		return expandHomePath(explicitSock, home), nil
+		return expandHomePath(explicitSock, home), resolvedDataDir, nil
 	}
-	return expandHomePath(cfg.Herdr.HCSocketPath(), home), nil
+	return expandHomePath(cfg.Herdr.HCSocketPath(), home), resolvedDataDir, nil
 }
 
 func expandHomePath(p, home string) string {

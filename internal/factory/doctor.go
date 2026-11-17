@@ -62,19 +62,23 @@ type CommandFunc func(ctx context.Context, dir string, extraEnv []string, argv .
 
 // DoctorOptions configures Doctor. Zero values use the current machine's defaults.
 type DoctorOptions struct {
-	Folder        string
-	HCSocket      string
-	Canary        bool
-	ClaudeModel   string
-	GOOS          string
-	Home          string
-	TempDir       string
-	GHHost        string
-	LookPath      func(string) (string, error)
-	RunCommand    CommandFunc
-	VolumeTimeout time.Duration
-	CanaryTimeout time.Duration
-	AuthTimeout   time.Duration
+	Folder               string
+	DataDir              string
+	Engine               EngineSource
+	NoRepair             bool
+	HCSocket             string
+	Canary               bool
+	ClaudeModel          string
+	GOOS                 string
+	Home                 string
+	TempDir              string
+	GHHost               string
+	LookPath             func(string) (string, error)
+	RunCommand           CommandFunc
+	VolumeTimeout        time.Duration
+	CanaryTimeout        time.Duration
+	AuthTimeout          time.Duration
+	PythonInstallTimeout time.Duration
 }
 
 func (o DoctorOptions) withDefaults() DoctorOptions {
@@ -90,6 +94,9 @@ func (o DoctorOptions) withDefaults() DoctorOptions {
 	}
 	if o.Home == "" {
 		o.Home, _ = os.UserHomeDir()
+	}
+	if o.DataDir == "" {
+		o.DataDir = filepath.Join(o.Home, ".local", "share", "sheepdog")
 	}
 	if o.TempDir == "" {
 		o.TempDir = os.TempDir()
@@ -112,6 +119,9 @@ func (o DoctorOptions) withDefaults() DoctorOptions {
 	if o.AuthTimeout <= 0 {
 		o.AuthTimeout = defaultAuthTimeout
 	}
+	if o.PythonInstallTimeout <= 0 {
+		o.PythonInstallTimeout = defaultPythonInstallTimeout
+	}
 	return o
 }
 
@@ -131,16 +141,20 @@ func resSkip(name, detail string) onboard.Result {
 	return onboard.Result{Name: name, Status: onboard.Skip, Detail: detail}
 }
 
-// Doctor runs the factory prerequisite checks in fixed order: herdr-core, the
-// timed project-volume probe inside herdr-core, agent CLI logins + canary
-// starts, gh login + pinned default repo, and codexbar. When herdr-core is up,
-// child probes execute inside herdr-core's own environment without copying the
-// caller shell's PATH or credentials.
+// Doctor runs the factory prerequisite checks in fixed order: embedded engine
+// unpack, uv-managed pinned CPython check/repair, herdr-core, the timed
+// project-volume probe inside herdr-core, agent CLI logins + canary starts, gh
+// login + pinned default repo, and codexbar. When herdr-core is up, child CLI
+// probes execute inside herdr-core's own environment without copying the caller
+// shell's PATH or credentials.
 func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	customRunner := opts.RunCommand != nil
 	customLookPath := opts.LookPath != nil
 	o := opts.withDefaults()
 	var out []onboard.Result
+
+	out = append(out, CheckEngine(o))
+	out = append(out, checkPython(ctx, o, customLookPath))
 
 	hcRes := CheckHerdrCore(ctx, o)
 	out = append(out, hcRes)
@@ -164,12 +178,88 @@ func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	return out
 }
 
+// CheckEngine verifies (and, unless o.NoRepair is true, unpacks/repairs) the
+// embedded factory engine for o.Engine.Version under <data_dir>/factory/engine/.
+func CheckEngine(o DoctorOptions) onboard.Result {
+	o = o.withDefaults()
+	const name = "engine"
+	if o.NoRepair {
+		eng, err := InspectEngine(o.DataDir, o.Engine)
+		if err != nil {
+			return resFail(name, cleanReason(err.Error()), "run: sheepdog factory doctor")
+		}
+		return resOK(name, fmt.Sprintf("%s ready (%s)", eng.VersionKey, eng.Dir))
+	}
+	eng, err := EnsureEngine(o.DataDir, o.Engine)
+	if err != nil {
+		return resFail(name, fmt.Sprintf("could not unpack factory engine: %s", cleanReason(err.Error())),
+			fmt.Sprintf("check free space and write permissions on %s", o.DataDir))
+	}
+	if eng.Unpacked {
+		return resOK(name, fmt.Sprintf("unpacked %s (%s)", eng.VersionKey, eng.Dir))
+	}
+	return resOK(name, fmt.Sprintf("%s ready (%s)", eng.VersionKey, eng.Dir))
+}
+
+// CheckPython verifies that the pinned CPython version in factory/.python-version
+// is installed inside <data_dir>/factory/python (never system python3) and,
+// unless o.NoRepair is true, installs or repairs it with `uv python install`.
+func CheckPython(ctx context.Context, o DoctorOptions) onboard.Result {
+	customLookPath := o.LookPath != nil
+	o = o.withDefaults()
+	return checkPython(ctx, o, customLookPath)
+}
+
+func checkPython(ctx context.Context, o DoctorOptions, customLookPath bool) onboard.Result {
+	const name = "python"
+	pinned, err := PinnedPythonVersionFor(o.Engine.FS)
+	if err != nil {
+		return resFail(name, cleanReason(err.Error()), "reinstall sheepdog")
+	}
+	var lp func(string) (string, error)
+	if customLookPath {
+		lp = o.LookPath
+	}
+	py, err := EnsurePython(ctx, PythonOptions{
+		DataDir:        o.DataDir,
+		PinnedVersion:  pinned,
+		Home:           o.Home,
+		TempDir:        o.TempDir,
+		NoRepair:       o.NoRepair,
+		LookPath:       lp,
+		RunCommand:     o.RunCommand,
+		ProbeTimeout:   o.AuthTimeout,
+		InstallTimeout: o.PythonInstallTimeout,
+	})
+	if err == nil {
+		if py.Repaired {
+			return resOK(name, fmt.Sprintf("CPython %s (installed with uv in %s)", py.Version, py.Executable))
+		}
+		return resOK(name, fmt.Sprintf("CPython %s (%s)", py.Version, py.Executable))
+	}
+	installDir := PythonInstallDir(o.DataDir)
+	var uvMissing *UVMissingError
+	if errors.As(err, &uvMissing) {
+		return resFail(name,
+			fmt.Sprintf("managed CPython %s is missing in %s, and uv is not on PATH", pinned, installDir),
+			"install uv (curl -LsSf https://astral.sh/uv/install.sh | sh), then run sheepdog factory doctor")
+	}
+	if o.NoRepair {
+		return resFail(name,
+			fmt.Sprintf("managed CPython %s is missing or broken in %s: %s", pinned, installDir, cleanReason(err.Error())),
+			"run: sheepdog factory doctor")
+	}
+	return resFail(name,
+		fmt.Sprintf("could not install managed CPython %s with uv: %s", pinned, cleanReason(err.Error())),
+		fmt.Sprintf("check network access and run: uv python install --reinstall --install-dir %s --no-bin --managed-python %s", installDir, pinned))
+}
+
 // CheckHerdrCore verifies that `hc` is on PATH and herdr-core's socket answers.
 func CheckHerdrCore(ctx context.Context, o DoctorOptions) onboard.Result {
 	o = o.withDefaults()
 	const name = "herdr-core"
 	if _, err := o.LookPath("hc"); err != nil {
-		return resFail(name, "hc is not on PATH", "install herdr-core from https://herdr.dev so hc is on PATH")
+		return resFail(name, "hc is not on PATH", "install herdr-core (curl -fsSL https://releases.herdr.dev/core/install.sh | sh) so hc is on PATH")
 	}
 	client := hc.NewClient(o.HCSocket)
 	client.Timeout = o.AuthTimeout
