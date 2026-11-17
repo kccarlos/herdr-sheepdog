@@ -675,14 +675,12 @@ class SchedulerRound(unittest.TestCase):
         sys.path.insert(0, BIN)
         import herdr_task.automations as au
         import herdr_task.autopilot as ap
-        import herdr_task.home as home
         store = tempfile.mkdtemp()
         ran = []
         patches = [mock.patch.object(au, "STORE", store), mock.patch.object(au, "SEEN", os.path.join(store, ".seen.json")),
-                   mock.patch.object(au, "store_files", lambda *a: []), mock.patch.object(ap, "autopilot_pass", ran.append),
-                   mock.patch.object(home, "home_pass", lambda r: None)]
+                   mock.patch.object(au, "store_files", lambda *a: []), mock.patch.object(ap, "autopilot_pass", ran.append)]
         patches += [mock.patch.object(au, n, lambda *a, **k: None) for n in (
-            "retry_pass", "archive_pass", "news_pass", "watchdog_pass", "end_done_pass", "memory_guard", "backup_pass", "cli_check_pass", "machines_pass")]
+            "retry_pass", "archive_pass", "news_pass", "watchdog_pass", "end_done_pass", "memory_guard", "cli_check_pass", "machines_pass")]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
@@ -735,7 +733,7 @@ class IdleCompaction(unittest.TestCase):
 
     def test_claude_workers_get_idle_compaction_off(self):
         import herdr_task.launch as launch
-        with self.mock.patch.object(launch, "secret_path", lambda: None), self.mock.patch.object(launch, "browser_path", lambda: None):
+        with self.mock.patch.object(launch, "secret_path", lambda: None):
             argv = launch.own_argv(["claude", "--model", "opus"])
             self.assertIs(json.loads(argv[argv.index("--settings") + 1])["idleCompaction"], False)
             mine = launch.own_argv(["claude", "--settings", '{"idleCompaction": true}'])
@@ -919,153 +917,37 @@ class AcceptWhenHcCantStart(unittest.TestCase):
             self.assertEqual(json.load(f)["tasks"][0]["state"], "ready")
 
 
-def home_round(home, machines_mod, world, here, store, cfg=None, at=None, down=()):
-    """One home round (home_pass) as machine `here` of a fake `world` runs it: {name: {core, window,
-    links (names it reads), linked_by, space, assistant, news, health}}. hc, herdr-app and the
-    other machines are never reached: their reports come from the world (`down`: not answering).
-    Returns [(to, line)] it sent. Also used for #1029's before/after proof."""
-    from unittest import mock
-    me = world[here]
-    sent = []
+class ProjectId(unittest.TestCase):
+    """A repo's tasks follow it when its folder is renamed: its id in .git/config, recorded in its list."""
 
-    def report(name, since, news_only):
-        w = world[name]
-        out = {"home": "/home/" + name, "at": 0, "space": w["space"], "assistant": w["assistant"], "core": w["core"],
-               "core_name": name, "overview": w["window"], "links": sorted(world[n]["core"] for n in w["links"]),
-               "linked_by": w["linked_by"]}
-        if since is not None:
-            out["news"] = [dict(x, at=since + 1) for x in w.get("news") or []]
-        if not news_only:
-            out.update(health=w["health"], top={}, stuck=[], worktrees=[])
-        return out
-
-    def remote(m, candidates, since, news_only, timeout=40):
-        if m in down:
-            raise home.Fail("timed out")
-        return report(m, since, news_only)
-
-    spaces = [{"id": (n + "/" if n != here else "") + world[n]["space"], "machine": None if n == here else n,
-               "name": "~", "folder": "/home/" + n} for n in world]
-    ls = mock.Mock(returncode=0, stdout=json.dumps({"spaces": spaces}))
-    patches = [mock.patch.object(home, "HOME_STATE", os.path.join(store, ".home-" + here + ".json")),
-               mock.patch.object(home, "main_here", lambda: me["window"]),
-               mock.patch.object(home, "read_settings", lambda: cfg or {}),
-               mock.patch.object(home, "run", lambda *a, **k: ls),
-               mock.patch.object(home, "local_report", lambda c, since=None, news_only=False: report(here, since, news_only)),
-               mock.patch.object(home, "remote_report", remote),
-               mock.patch.object(home, "deliver", lambda to, lines, quiet=None, idle_only=False: sent.extend((to, l) for l in lines) or True),
-               mock.patch.object(machines_mod, "connected_machines",
-                                 lambda: [{"name": n, "id": world[n]["core"], "state": "connected"} for n in me["links"]])]
-    if at is not None:
-        patches.append(mock.patch.object(home, "now", lambda: at))
-    for p in patches:
-        p.start()
-    try:
-        home.home_pass({}, force=True)
-    finally:
-        for p in patches:
-            p.stop()
-    return sent
-
-
-def home_world(mini_links_laptop=True):
-    """Two Macs with a window each: the laptop links to the mini (the hub, which the VM links to as
-    well); the mini links back unless told not to. Each has one task's news and a full disk."""
-    disk = {"cpu": 5, "load": 0.1, "cores": 8, "memory": 20, "disk": 97, "disks": []}
-    news = lambda task: [{"to": "t9", "space": "sp-shop", "folder": "~/shop",
-                          "lines": [f'<herdr-news task="{task}" event="ready">{task} is ready</herdr-news>']}]
-    return {"mini": {"core": "c-mini", "window": True, "links": ["laptop"] if mini_links_laptop else [], "linked_by": 2,
-                     "space": "sp1", "assistant": "t1", "news": news("SHOP-1"), "health": disk},
-            "laptop": {"core": "c-laptop", "window": True, "links": ["mini"], "linked_by": 1 if mini_links_laptop else 0,
-                       "space": "sp2", "assistant": "t2", "news": news("SHOP-2"), "health": disk}}
-
-
-class HomeLead(unittest.TestCase):
-    """#1029: with windows on two machines, the hub (the one the others link to) keeps the overview;
-    each window still tells its own home Assistant its own health. home_pass with a fake world."""
-
-    CFG = {"machines": {"mini": {"home": True}, "laptop": {"home": True}}}
-
-    def setUp(self):
-        sys.path.insert(0, BIN)
-        import herdr_task.home as home
-        import herdr_task.machines as machines
-        self.home, self.machines = home, machines
-        self.store = tempfile.mkdtemp()
-
-    def round(self, world, here, **kw):
-        return home_round(self.home, self.machines, world, here, self.store, cfg=self.CFG, **kw)
-
-    def overview(self, sent):
-        return [(to, l) for to, l in sent if l.startswith("<herdr-overview")]
-
-    def lead(self, name):
-        with open(os.path.join(self.store, f".home-{name}.json")) as f:
-            return json.load(f)["lead"]
-
-    def test_the_hub_leads_and_each_window_tells_its_own_health(self):
-        world = home_world()
-        mini, laptop = self.round(world, "mini"), self.round(world, "laptop")
-        # The mini (more machines link to it) leads: both machines' news and the laptop's health, once.
-        ov = self.overview(mini)
-        self.assertEqual({to for to, _ in ov}, {"t1"})
-        self.assertEqual(sorted(l.split(">", 1)[1].split("<")[0] for _, l in ov),
-                         ["Machine laptop: Disk crossed its alert limit (Disk 97%)", "laptop · ~/shop: SHOP-2 is ready", "~/shop: SHOP-1 is ready"])
-        self.assertEqual(self.overview(laptop), [], "the laptop sent the overview too")
-        # Health: each window tells its own home Assistant, never the other's.
-        health = lambda sent: [to for to, l in sent if l.startswith("<herdr-health")]
-        self.assertEqual(health(mini), ["t1"])
-        self.assertEqual(health(laptop), ["t2"])
-        self.assertEqual((self.lead("mini"), self.lead("laptop")), (None, "mini"))
-
-    def test_a_hub_that_doesnt_link_back_gets_the_others_news(self):
-        world = home_world(mini_links_laptop=False)
-        mini, laptop = self.round(world, "mini"), self.round(world, "laptop")
-        self.assertEqual([l.split(">", 1)[1].split("<")[0] for _, l in self.overview(mini)], ["~/shop: SHOP-1 is ready"])
-        # The laptop's own news, and only its own, goes to the mini's home Assistant over its link.
-        ov = self.overview(laptop)
-        self.assertEqual({to for to, _ in ov}, {"mini/t1"})
-        self.assertEqual(sorted(l.split(">", 1)[1].split("<")[0] for _, l in ov),
-                         ["Machine laptop: Disk crossed its alert limit (Disk 97%)", "laptop · ~/shop: SHOP-2 is ready"])
-        self.assertTrue(all('machine="laptop"' in l for _, l in ov))
-
-    def test_a_lone_window_leads(self):
-        world = {"mini": dict(home_world()["mini"], links=[], linked_by=0)}
-        sent = self.round(world, "mini")
-        self.assertEqual([l.split(">", 1)[1].split("<")[0] for _, l in self.overview(sent)], ["~/shop: SHOP-1 is ready"])
-        self.assertEqual({to for to, _ in sent}, {"t1"})
-
-    def test_two_way_ties_agree(self):
-        """Both link to each other and as many machines link to each: the lower core id leads, seen from either."""
-        world = home_world()
-        world["mini"]["linked_by"] = world["laptop"]["linked_by"] = 1
-        self.round(world, "mini"), self.round(world, "laptop")
-        self.assertEqual((self.lead("mini"), self.lead("laptop")), ("laptop", None))
-
-    def test_a_lead_gone_quiet_is_taken_over_later(self):
-        world, t = home_world(), 10 ** 12
-        self.round(world, "laptop", at=t)
-        # one missed answer: the laptop still gives way (nothing doubled), and waits to tell the mini
-        sent = self.round(world, "laptop", at=t + 60000, down=("mini",))
-        self.assertEqual(self.overview(sent), [])
-        # gone longer than LEAD_KEEP_MS: the laptop keeps the overview itself
-        sent = self.round(world, "laptop", at=t + self.home.LEAD_KEEP_MS + 120000, down=("mini",))
-        self.assertTrue(self.overview(sent))
-        self.assertEqual({to for to, _ in self.overview(sent)}, {"t2"})
-
-    def test_link_facts_counts_who_links_here(self):
+    def test_a_renamed_repo_keeps_its_tasks(self):
         from unittest import mock
-        core = tempfile.mkdtemp()
-        for name, d in (("core.json", {"id": "c-mini", "name": "mini"}),
-                        ("peers.json", {"c-laptop": {"name": "laptop", "calls_me": "mini"}, "c-vm": {"name": "vm", "calls_me": "mini"}})):
-            with open(os.path.join(core, name), "w") as f:
-                json.dump(d, f)
-        with mock.patch.object(self.machines, "_core_dir", lambda: core), \
-                mock.patch.object(self.machines, "connected_machines", lambda: [{"name": "laptop", "id": "c-laptop", "state": "connected"},
-                                                                               {"name": "old", "id": "c-old", "state": "disconnected"}]), \
-                mock.patch.object(self.home, "main_here", lambda: True), mock.patch.object(self.home, "read_settings", lambda: {}):
-            f = self.home.link_facts()
-        self.assertEqual(f, {"core": "c-mini", "core_name": "mini", "overview": True, "links": ["c-laptop"], "linked_by": 2})
+        sys.path.insert(0, BIN)
+        from herdr_task import store
+        tmp = tempfile.mkdtemp(prefix="shep-pid-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        repo = os.path.join(tmp, "shop")
+        os.makedirs(repo)
+        git = lambda cwd, *args: subprocess.run(
+            ["git", "-C", cwd, *args], check=True, capture_output=True, text=True).stdout.strip()
+        git(repo, "init", "-q", "-b", "main")
+        with mock.patch.object(store, "STORE", os.path.join(tmp, "tasks")):
+            with store.Store(store.locate(repo)) as s:
+                s.new("Cart")
+                s.dirty = True
+            pid = git(repo, "config", "--local", "--get", "shepherdr.id")
+            self.assertTrue(pid)
+            self.assertEqual(json.load(open(s.path))["project_id"], pid)
+            os.rename(repo, os.path.join(tmp, "shop-renamed"))
+            with store.Store(store.locate(os.path.join(tmp, "shop-renamed"))) as s2:
+                self.assertEqual(s2.path, s.path, "the same list, its slug and task keys kept")
+                self.assertEqual([t["title"] for t in s2.data["tasks"]], ["Cart"])
+            self.assertEqual(json.load(open(s.path))["folder"], os.path.realpath(os.path.join(tmp, "shop-renamed")))
+            # a second clone (its own .git/config, no id yet) gets its own list
+            other = os.path.join(tmp, "shop")
+            os.makedirs(other)
+            git(other, "init", "-q", "-b", "main")
+            self.assertNotEqual(store.store_path(store.locate(other)["folder"])[1], s.path)
 
 
 class BackToWork(unittest.TestCase):
@@ -5123,9 +5005,7 @@ if sys.argv[1] == "kill" and alive:
         from unittest import mock
         import herdr_task.agents as agents
         import herdr_task.assistant_settings as aset
-        import herdr_task.home as home
         import herdr_task.news as news
-        import herdr_task.reactions as reactions
         import herdr_task.store as store
         import herdr_task.tick as tick
         self.ready()
@@ -5155,8 +5035,7 @@ if sys.argv[1] == "kill" and alive:
         ps = [mock.patch.object(m, n, v) for m, n, v in (
             (agents, "hc_json", lambda *a: {}), (store, "STORE", sdir), (news, "STORE", sdir),
             (news, "NEWS", os.path.join(sdir, ".news.json")), (news, "HELD", os.path.join(sdir, ".held.json")),
-            (home, "NEWSLOG", os.path.join(sdir, ".newslog.json")), (aset, "settings_pass", lambda *a: None),
-            (reactions, "reactions_pass", lambda *a: None), (news, "now", lambda: clock[0]),
+            (aset, "settings_pass", lambda *a: None), (news, "now", lambda: clock[0]),
             (news, "live_agents", lambda k: worker), (news, "detail", lambda k: k),
             (news, "coordinator_in", lambda sp: "c1"), (news, "hc_json", lambda *a: {"state": "live", "turn": 1}),
             (news, "news_send", lambda to, m, check=True: sent.append((to, m)) or True))]
@@ -6345,7 +6224,6 @@ class Scheduled(unittest.TestCase):
         from unittest import mock
         import herdr_task.automations as au
         import herdr_task.autopilot as ap
-        import herdr_task.home as home
         self.four_tasks()
         store = os.path.join(self.tmp, "tasks")
         fakebin, hung, block = os.path.join(self.tmp, "bin"), os.path.join(self.tmp, "hung"), os.path.join(self.tmp, "block")
@@ -6361,12 +6239,12 @@ class Scheduled(unittest.TestCase):
                    mock.patch.object(self.store_mod, "GIT_WAIT_S", 1, create=True),
                    mock.patch.object(self.tick, "STORE", store), mock.patch.object(au, "STORE", store),
                    mock.patch.object(au, "SEEN", os.path.join(store, ".seen.json")), mock.patch.object(au, "LOCK_WAIT_S", 4),
-                   mock.patch.object(ap, "autopilot_pass", quiet), mock.patch.object(home, "home_pass", quiet),
+                   mock.patch.object(ap, "autopilot_pass", quiet),
                    mock.patch.object(au, "automations_pass", quiet)]
         patches += [mock.patch.object(self.tick, n, quiet) for n in (
-            "revive_pass", "retry_pass", "archive_pass", "news_pass", "watchdog_pass", "end_done_pass", "memory_guard", "lost_logs_pass", "browser_pass", "say")]
+            "revive_pass", "retry_pass", "archive_pass", "news_pass", "watchdog_pass", "end_done_pass", "memory_guard", "lost_logs_pass", "say")]
         patches += [mock.patch.object(au, n, quiet) for n in (
-            "retry_pass", "archive_pass", "news_pass", "watchdog_pass", "end_done_pass", "memory_guard", "lost_logs_pass", "backup_pass",
+            "retry_pass", "archive_pass", "news_pass", "watchdog_pass", "end_done_pass", "memory_guard", "lost_logs_pass",
             "cli_check_pass", "machines_pass")]
         for p in patches:
             p.start()
@@ -6558,7 +6436,7 @@ class AgyWorker(unittest.TestCase):
             json.dump({"permissions": {"allow": ["command(go test)"]}}, f)
         with mock.patch.object(launch, "HOME", self.home), \
                 mock.patch.object(launch, "own_path", lambda: "/x/herdr-task"), \
-                mock.patch.object(launch, "secret_path", lambda: None), mock.patch.object(launch, "browser_path", lambda: None):
+                mock.patch.object(launch, "secret_path", lambda: None):
             out = launch.own_argv(["agy", "--mode", "accept-edits"])
             self.assertEqual(out[:2], ["agy", "--settings"])
             allow = json.loads(out[2])["permissions"]["allow"]
@@ -6611,7 +6489,7 @@ class AgyWorker(unittest.TestCase):
         with open(f, "w") as fh:
             json.dump({"permissions": {"allow": ["command(ls)"]}}, fh)
         with mock.patch.object(launch, "HOME", self.home), mock.patch.object(launch, "own_path", lambda: "/x/herdr-task"), \
-                mock.patch.object(launch, "secret_path", lambda: None), mock.patch.object(launch, "browser_path", lambda: None):
+                mock.patch.object(launch, "secret_path", lambda: None):
             out = launch.own_argv(["agy", "--settings", f])
         self.assertEqual(out.count("--settings"), 1)
         allow = json.loads(out[out.index("--settings") + 1])["permissions"]["allow"]
@@ -6627,7 +6505,7 @@ class AgyWorker(unittest.TestCase):
             json.dump({"permissions": {"allow": ["command(ls)"]}}, fh)
         for flag in (["--settings", "role.json"], ["--settings=role.json"], ["--settings", '{"x": 1}'], ['--settings={"x": 1}']):
             with mock.patch.object(launch, "HOME", self.home), mock.patch.object(launch, "own_path", lambda: "/x/herdr-task"), \
-                    mock.patch.object(launch, "secret_path", lambda: None), mock.patch.object(launch, "browser_path", lambda: None):
+                    mock.patch.object(launch, "secret_path", lambda: None):
                 out = launch.own_argv(["agy"] + flag, "/wt/x", cwd=folder)  # the test's own cwd is not the folder
             self.assertEqual(sum(a.startswith("--settings") for a in out), 1, flag)
             merged = json.loads(out[out.index("--settings") + 1])
@@ -6637,7 +6515,7 @@ class AgyWorker(unittest.TestCase):
                 self.assertEqual(merged["permissions"]["allow"][0], "command(ls)")
         # several --settings become one that keeps all their rules, and the worktree is trusted once
         with mock.patch.object(launch, "HOME", self.home), mock.patch.object(launch, "own_path", lambda: "/x/herdr-task"), \
-                mock.patch.object(launch, "secret_path", lambda: None), mock.patch.object(launch, "browser_path", lambda: None):
+                mock.patch.object(launch, "secret_path", lambda: None):
             out = launch.own_argv(["agy", "--settings=role.json", "--settings", '{"trustedWorkspaces": ["/wt/x"], "permissions": {"allow": ["command(pwd)"]}}', "-m", "x"], "/wt/x", cwd=folder)
         self.assertEqual(sum(a.startswith("--settings") for a in out), 1)
         self.assertEqual(out[-2:], ["-m", "x"])
@@ -7413,7 +7291,6 @@ class AutomationFromAnotherMachine(unittest.TestCase):
         import herdr_task.store as store
         import herdr_task.settings as settings
         import herdr_task.machines as machines
-        import herdr_task.home as home
         import herdr_task.autopilot as ap
         self.au, self.argparse, self.io, self.redirect = au, argparse, io, contextlib.redirect_stdout
         self.tmp = os.path.realpath(tempfile.mkdtemp())
@@ -7461,10 +7338,10 @@ class AutomationFromAnotherMachine(unittest.TestCase):
                    mock.patch.object(au, "default_space", lambda: "sp1"),
                    mock.patch.object(au, "live_agents", lambda key: []),
                    mock.patch.object(machines, "connected_machines", lambda: [{"name": "vmb", "state": "connected"}]),
-                   mock.patch.object(ap, "autopilot_pass", lambda r: None), mock.patch.object(home, "home_pass", lambda r: None),
+                   mock.patch.object(ap, "autopilot_pass", lambda r: None),
                    mock.patch.dict(os.environ, {"HC_TERMINAL_ID": ""})]
         patches += [mock.patch.object(au, n, lambda *a, **k: None) for n in (
-            "tick_store", "retry_pass", "archive_pass", "news_pass", "watchdog_pass", "end_done_pass", "memory_guard", "backup_pass",
+            "tick_store", "retry_pass", "archive_pass", "news_pass", "watchdog_pass", "end_done_pass", "memory_guard",
             "cli_check_pass", "machines_pass")]
         for p in patches:
             p.start()
@@ -7740,113 +7617,6 @@ class LostLogs(unittest.TestCase):
         self.assertFalse(self.tick.lost_log(t, t["agents"][0]))
 
 
-class AgentReactions(unittest.TestCase):
-    """SHEP-48: Reactions for every agent: a task worker, an automation's run and a plain agent tab are
-    told by their space at the start (no settings block), and a running one its hook taught gets one
-    <herdr-setting name="reactions"> line when it changes, telling it to carry on. A throwaway settings
-    file and state; hc is faked (its terminals are dicts), nothing is sent."""
-
-    def setUp(self):
-        from unittest import mock
-        sys.path.insert(0, BIN)
-        import herdr_task.settings as settings
-        import herdr_task.reactions as reactions
-        import herdr_task.assistant_settings as aset
-        import herdr_task.news as news
-        self.settings, self.reactions, self.aset = settings, reactions, aset
-        self.dir = tempfile.mkdtemp()
-        self.file = os.path.join(self.dir, "shepherdr.json")
-        self.terminals, self.sent = {}, []
-
-        def hc_json(*args):
-            if args[0] == "ls":  # hc ls --label herdr.reactions=<v>
-                k, v = args[2].split("=", 1)
-                return {"terminals": [{"address": a, "state": t["state"]} for a, t in self.terminals.items()
-                                      if (t.get("labels") or {}).get(k) == v]}
-            return self.terminals.get(args[1]) if args[0] == "get" else None
-
-        def run(args, **_):
-            if args[:2] == ["hc", "label"]:
-                k, v = args[3].split("=", 1)
-                t = self.terminals[args[2]]
-                t["labels"] = {**(t.get("labels") or {}), k: v}
-            return subprocess.CompletedProcess(args, 0, "", "")
-
-        for target, name, value in [
-            (settings, "SETTINGS", self.file), (reactions, "SETTINGS", self.file),
-            (reactions, "STATE", os.path.join(self.dir, ".reactions.json")),
-            (reactions, "hc_json", hc_json), (aset, "hc_json", hc_json), (reactions, "run", run), (aset, "run", run),
-            (reactions, "addon_off", lambda name: False),
-            (news, "news_send", lambda addr, text: self.sent.append((addr, text)) or True),
-        ]:
-            p = mock.patch.object(target, name, value)
-            p.start()
-            self.addCleanup(p.stop)
-
-    def write(self, d):
-        with open(self.file, "w") as f:
-            json.dump(d, f)
-        self.saves = getattr(self, "saves", 0) + 1
-        os.utime(self.file, (1700000000 + self.saves, 1700000000 + self.saves))
-
-    def worker(self, addr="t9", space="sp1", turn=3, **labels):
-        """A task's agent (a worker, or an automation's run): its task's space on its terminal."""
-        self.terminals[addr] = {"state": "live", "turn": turn, "cwd": "/wt/task-1", "labels": {"herdr.task": "dev#1", "herdr.task.space": space, **labels}}
-
-    def test_every_agent_type_is_told_by_its_space(self):
-        """A task worker and an automation's run (their task's space), a plain agent tab (the space whose folder
-        holds its folder, else Everywhere's): the Assistant's Reactions words, on and off, without its block."""
-        self.worker("t9", "sp2")
-        self.worker("t10", "sp1", **{"herdr.task": "dev#auto-3"})
-        self.terminals["t11"] = {"state": "live", "cwd": "/repos/shop/web", "labels": {}}
-        self.terminals["t12"] = {"state": "live", "cwd": "/elsewhere"}
-        self.write({"spaces": {"sp2": {"agents": {"reactions": False}}, "sp4": {"folder": "/repos/shop", "agents": {"reactions": False}}}})
-        notes = {a: self.aset.session_note(a) for a in ("t9", "t10", "t11", "t12")}
-        from herdr_task.feedback import AGENT_NOTE
-        fb = "\n" + AGENT_NOTE  # Feedback offers (SHEP-78), on by default
-        self.assertEqual(notes, {"t9": self.reactions.OFF + fb, "t10": self.reactions.GUIDE + fb, "t11": self.reactions.OFF + fb, "t12": self.reactions.GUIDE + fb})
-        self.assertEqual([self.terminals[a]["labels"]["herdr.reactions"] for a in ("t9", "t10", "t11", "t12")], ["off", "on", "off", "on"])
-        self.write({"everywhere": {"agents": {"reactions": False}}})
-        for a in ("t9", "t10", "t11", "t12"):
-            self.assertIn("never react", self.aset.session_note(a))
-        for words in ("👀", "👍", "✅", "😂", "🙏", "<hc react=", "never more than one", "never instead of an answer", "<hc no-reply/>", "In to=, leave out double quotes",
-                      "most specific, delightful or funny emoji", "not a generic 👍 or 👀 by default", "🚀", "🔥", "🐛", "🧹", "🫡", "🤌", "🍿",
-                      "Keep it tasteful", "most messages get none"):
-            self.assertIn(words, self.reactions.GUIDE)
-        # the turned-on notice carries the same guidance
-        self.assertIn("most specific, delightful or funny emoji", self.reactions.TURNED_ON)
-
-    def test_running_agents_of_every_type_are_told_once(self):
-        """Workers, automation runs and agent tabs their hook taught are told once when it changes for their
-        space, and told to carry on; one never taught (started before) and Assistants (the settings pass
-        tells them) are left alone."""
-        self.worker("t9", "sp1", **{"herdr.reactions": "on"})
-        self.worker("t10", "sp2", **{"herdr.reactions": "on", "herdr.task": "dev#auto-3"})
-        self.terminals["t11"] = {"state": "live", "turn": 2, "cwd": "/repos/shop", "labels": {"herdr.reactions": "on"}}
-        self.worker("t12", "sp1")  # started before: no label
-        self.terminals["t5"] = {"state": "live", "turn": 3, "labels": {"herdr.role": "coordinator", "herdr.space": "sp1", "herdr.reactions": "on"}}
-        self.write({"spaces": {"sp1": {"agents": {"reactions": False}}, "sp4": {"folder": "/repos/shop", "agents": {"reactions": False}}}})
-        report = {}
-        self.reactions.reactions_pass(report, {})
-        self.assertEqual(sorted(a for a, _ in self.sent), ["t11", "t9"])
-        for _, w in self.sent:
-            self.assertRegex(w, r'^<herdr-setting name="reactions" value="off" scope="space">Reactions are now off[^<]*'
-                                r'<hc react> lines\)\. Nothing to answer: carry on with what you were doing; if nothing, reply only <hc no-reply/>\.</herdr-setting>$')
-        self.assertEqual(self.terminals["t9"]["labels"]["herdr.reactions"], "off")
-        self.assertEqual(self.terminals["t10"]["labels"]["herdr.reactions"], "on")
-        self.assertNotIn("herdr.reactions", self.terminals["t12"]["labels"])
-        self.assertEqual(self.terminals["t5"]["labels"]["herdr.reactions"], "on")
-        self.reactions.reactions_pass({}, {})  # the file didn't change: nothing again
-        self.write({"spaces": {"sp1": {"agents": {"reactions": False}}, "sp4": {"folder": "/repos/shop", "agents": {"reactions": False}}}, "tasks": {}})
-        self.reactions.reactions_pass({}, {})
-        self.assertEqual(len(self.sent), 2)
-        self.write({})  # back on: each told again, with the how
-        self.reactions.reactions_pass({}, {})
-        self.assertEqual(sorted(a for a, _ in self.sent[2:]), ["t11", "t9"])
-        self.assertIn('scope="everywhere">Reactions are now on', self.sent[2][1])
-        self.assertIn("👀", self.sent[2][1])
-
-
 class ReviewerFlagsSet(unittest.TestCase):
     """add/edit's --reviewer-model and --reviewer-effort flags set the task's fields (they used to fail)."""
 
@@ -7892,7 +7662,7 @@ class AssistantSettings(unittest.TestCase):
         for target, name, value in [
             (settings, "SETTINGS", self.file), (aset, "SETTINGS", self.file),
             (aset, "STATE", os.path.join(self.dir, ".assistant-settings.json")), (aset, "hc_json", hc_json),
-            (aset, "run", run), (aset.reactions, "run", run), (aset, "addon_off", lambda name: False),
+            (aset, "run", run), (aset, "addon_off", lambda name: False),
             (aset, "coordinators", lambda: list(self.terminals)),
             (aset, "autopilot_of", lambda space, cfg: self.auto.get(space, (False, "every 60 minutes", ""))),
             (news, "news_send", lambda addr, text: self.sent.append((addr, text)) or True),
@@ -7914,50 +7684,25 @@ class AssistantSettings(unittest.TestCase):
     def line(self, note, label):
         return next(x for x in note.split("\n") if x.startswith(f"- {label}: "))
 
-    def test_reactions_on_by_default_everywhere_and_a_space_sets_its_own(self):
-        self.assertTrue(self.settings.DEFAULTS["agents"]["reactions"])
-        self.assertTrue(self.settings.reactions_on("sp1"))
-        self.write({"everywhere": {"agents": {"reactions": False}}, "spaces": {"sp2": {"agents": {"reactions": True}}}})
-        self.assertFalse(self.settings.reactions_on("sp1"))
-        self.assertTrue(self.settings.reactions_on("vm/sp2"))
-        self.assertFalse(self.settings.reactions_on(None))
-
-    def test_the_assistants_reactions_from_before_still_apply(self):
-        """SHEP-48: SHEP-42 kept it as assistant.reactions: read where a layer has no agents.reactions (the
-        window and the web app move it on their next change), in reactions_on and the Assistant's block."""
-        self.write({"everywhere": {"assistant": {"reactions": False}}, "spaces": {"sp2": {"assistant": {"reactions": True}},
-                                                                                 "sp3": {"assistant": {"reactions": True}, "agents": {"reactions": False}}}})
-        self.assertFalse(self.settings.reactions_on("sp1"))
-        self.assertTrue(self.settings.reactions_on("sp2"))
-        self.assertFalse(self.settings.reactions_on("sp3"))
-        self.assistant("t5", "sp2")
-        self.assertIn("- Reactions: on", self.aset.session_note("t5"))
-        self.assistant("t6", "sp3")
-        self.assertIn("- Reactions: off (never react to the person's messages); set for this space", self.aset.session_note("t6"))
-        self.write({"everywhere": {"assistant": {"reactions": False}, "agents": {"reactions": True}}})
-        self.assertTrue(self.settings.reactions_on("sp1"))
-
     def test_the_block_by_default(self):
         self.assistant()
         note = self.aset.session_note("t5")
         self.assertTrue(note.startswith("Your settings: "))
         for label, words in [("Review", "off"), ("Merge", "ask the person first"), ("Proof", "on"), ("Task agent", "claude"),
                              ("Base branch", "the folder's checked-out branch"), ("Worktrees", "on"), ("Tasks at once", "10 per folder"),
-                             ("Task notes", "none"), ("Autopilot", "off"), ("Reactions", "on"),
-                             ("Feedback offers", "on (offer once to file a Shepherdr problem as an issue on eliasstravik/shepherdr")]:
+                             ("Task notes", "none"), ("Autopilot", "off")]:
             self.assertTrue(self.line(note, label).startswith(f"- {label}: {words}"), self.line(note, label))
         # nothing differs from Herdr's default: no line says who set it
         self.assertNotIn("; set for", note)
         self.assertNotIn("; your setting", note)
-        self.assertEqual(len(note.split("\n")), 14)  # head, 12 lines (Suggested next message included), the Reactions guide
+        self.assertEqual(len(note.split("\n")), 11)  # head, 10 lines (Suggested next message included)
         self.assertIn("- Suggested next message: on (end each reply", note)
 
     def test_the_block_for_a_space_with_its_own(self):
-        self.write({"everywhere": {"tasks": {"review_rounds": 2, "merge": "checks"}, "assistant": {"reactions": True}},
+        self.write({"everywhere": {"tasks": {"review_rounds": 2, "merge": "checks"}},
                     "spaces": {"sp1": {"tasks": {"base": "dev", "start_notes": "bun install", "max_running": 3, "worktrees": False},
                                        "worker": {"agent": "codex", "model": "gpt-5", "effort": "high"},
-                                       "reviewer": {"agent": "claude", "model": "opus"},
-                                       "assistant": {"reactions": False}},
+                                       "reviewer": {"agent": "claude", "model": "opus"}},
                                "sp2": {"tasks": {"merge": "auto"}}}})
         self.auto["sp1"] = (True, "every 30 minutes", "Ship the beta")
         self.assistant()
@@ -7971,27 +7716,17 @@ class AssistantSettings(unittest.TestCase):
         self.assertIn("- Tasks at once: 3 per folder", note)
         self.assertIn("- Task notes: start notes set", note)
         self.assertEqual(self.line(note, "Autopilot"), "- Autopilot: on, every 30 minutes, direction: Ship the beta; set for this space")
-        self.assertIn("- Reactions: off", note)
-        self.assertIn("never react", note.split("\n")[-1])
-        self.assertNotIn("👀", note)
         labels = self.terminals["t5"]["labels"]
-        self.assertEqual(labels["herdr.reactions"], "off")
         self.assertEqual(sorted(self.aset.parse(labels["herdr.settings"])),
-                         sorted(["review", "merge", "proof", "agent", "base", "worktrees", "max_running", "notes", "autopilot", "reactions", "suggestions", "feedback"]))
+                         sorted(["review", "merge", "proof", "agent", "base", "worktrees", "max_running", "notes", "autopilot", "suggestions"]))
         # another space inherits Everywhere's, with its own merge
         self.assistant("t6", "sp2")
         other = self.aset.session_note("t6")
         self.assertIn("- Merge: on its own (Herdr merges a ready task); set for this space", other)
-        self.assertIn("- Reactions: on", other)
-        self.assertIn("👀", other)
 
-    def test_only_assistants_get_the_block_other_agents_reactions_only(self):
+    def test_only_assistants_get_the_block(self):
         self.terminals["t9"] = {"state": "live", "labels": {"herdr.task": "SHEP-1"}}
-        note = self.aset.session_note("t9")
-        self.assertNotIn("Your settings", note)
-        from herdr_task.feedback import AGENT_NOTE
-        self.assertEqual(note, self.aset.reactions.GUIDE + "\n" + AGENT_NOTE)  # and Feedback (SHEP-78), on by default
-        self.assertEqual(self.terminals["t9"]["labels"], {"herdr.task": "SHEP-1", "herdr.reactions": "on"})
+        self.assertEqual(self.aset.session_note("t9"), "")
         self.assertEqual(self.aset.session_note("nope"), "")  # not a terminal here
 
     def test_the_hook_text_is_json_ready(self):
@@ -8004,7 +7739,6 @@ class AssistantSettings(unittest.TestCase):
         ctx = json.loads('{"c":"base.' + out.getvalue() + '"}')["c"]
         self.assertTrue(ctx.startswith("base. Your settings: "))
         self.assertIn("\n- Review: off\n", ctx)
-        self.assertIn('<hc react="👀"', ctx)
 
     def test_a_running_assistant_is_told_once_what_changed_in_one_message(self):
         self.assistant()
@@ -8012,7 +7746,7 @@ class AssistantSettings(unittest.TestCase):
         quiet = {}
         self.aset.settings_pass({}, quiet)
         self.assertEqual(self.sent, [])  # told at its start already
-        self.write({"everywhere": {"tasks": {"review_rounds": 3}}, "spaces": {"sp1": {"assistant": {"reactions": False}}}})
+        self.write({"everywhere": {"tasks": {"review_rounds": 3}}, "spaces": {"sp1": {"tasks": {"merge": "auto"}}}})
         report = {}
         self.aset.settings_pass(report, quiet)
         self.assertEqual(len(self.sent), 1)
@@ -8020,9 +7754,8 @@ class AssistantSettings(unittest.TestCase):
         self.assertEqual(len(lines), 2)
         self.assertRegex(lines[0], r'^<herdr-setting name="review" value="on" scope="everywhere">Review is now on, at most 3 rounds[^<]*'
                                    r'; your setting everywhere\. Tasks you add from now on get it; running ones keep their brief\.</herdr-setting>$')
-        self.assertRegex(lines[1], r'^<herdr-setting name="reactions" value="off" scope="space">Reactions are now off[\s\S]*<hc no-reply/>\.</herdr-setting>$')
-        self.assertEqual(report["settings"], [{"to": "t5", "changed": ["review", "reactions"]}])
-        self.assertEqual(self.terminals["t5"]["labels"]["herdr.reactions"], "off")
+        self.assertRegex(lines[1], r'^<herdr-setting name="merge" value="auto" scope="space">Merge is now on its own[\s\S]*<hc no-reply/>\.</herdr-setting>$')
+        self.assertEqual(report["settings"], [{"to": "t5", "changed": ["review", "merge"]}])
 
     def test_a_save_that_changes_nothing_for_it_says_nothing(self):
         self.write({"everywhere": {"tasks": {"merge": "checks"}}})
@@ -8053,17 +7786,15 @@ class AssistantSettings(unittest.TestCase):
         self.assertIn('<herdr-setting name="proof" value="on" scope="everywhere">Proof is now on; Herdr\'s default.', self.sent[0][1])
 
     def test_one_started_before_gets_the_whole_block_once_it_has_had_a_turn(self):
-        self.assistant("t5", "sp1", **{"herdr.reactions": "on"})
+        self.assistant("t5", "sp1")
         self.assistant("t6", "sp2")
         self.assistant("t7", "sp1", turn=0)  # just started: its hook tells it
-        self.write({"spaces": {"sp2": {"assistant": {"reactions": True}}}})
+        self.write({"spaces": {"sp2": {"tasks": {"merge": "auto"}}}})
         self.aset.settings_pass({}, {})
         self.assertEqual([a for a, _ in self.sent], ["t5", "t6"])
         self.assertTrue(self.sent[0][1].startswith('<herdr-setting name="all">Your settings: '))
-        self.assertNotIn("👀", self.sent[0][1])  # taught reactions already
-        self.assertIn("👀", self.sent[1][1])
         self.assertNotIn("herdr.settings", self.terminals["t7"]["labels"])
-        self.write({"spaces": {"sp2": {"assistant": {"reactions": True}}}})
+        self.write({"spaces": {"sp2": {"tasks": {"merge": "auto"}}}})
         self.aset.settings_pass({}, {})
         self.assertEqual(len(self.sent), 2)
 
@@ -8084,289 +7815,6 @@ class AssistantSettings(unittest.TestCase):
         rs = self.aset.rows("sp1", {}, (False, "", ""))
         for line in self.aset.notice(rs).split("\n"):
             self.assertRegex(line, r'^<herdr-setting name="\w+" value="[^"]*" scope="\w+">[^\n]*</herdr-setting>$')
-
-
-class NoStarPrompt(unittest.TestCase):
-    """SHEP-225 (#981): the one-time "Enjoying Shepherdr?" GitHub star card (SHEP-79) is gone: no command, no module,
-    no words in the Assistant's instructions; a settings file still holding its star_prompt reads as before."""
-
-    def test_gone(self):
-        self.assertFalse(os.path.exists(os.path.join(BIN, "herdr_task", "star.py")))
-        r = subprocess.run([sys.executable, os.path.join(BIN, "herdr-task"), "star", "check"], capture_output=True, text=True)
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("invalid choice", r.stderr)
-        with open(os.path.join(ROOT, "templates", "assistant.md")) as f:
-            words = f.read()
-        self.assertNotRegex(words, r"herdr-task star\b|Enjoying Shepherdr|GitHub star")
-
-    def test_an_old_settings_file_still_loads(self):
-        from unittest import mock
-        sys.path.insert(0, BIN)
-        import herdr_task.settings as settings
-        path = os.path.join(tempfile.mkdtemp(), "settings.json")
-        with open(path, "w") as f:
-            json.dump({"version": 1, "everywhere": {"star_prompt": {"asked": 1, "answer": "no"}, "tasks": {"merge": "checks"}}}, f)
-        with mock.patch.object(settings, "SETTINGS", path):
-            d = settings.read_settings()
-        self.assertEqual(d["everywhere"]["tasks"]["merge"], "checks")
-
-
-class Feedback(unittest.TestCase):
-    """SHEP-78: an agent's report of a problem in Shepherdr itself returns at once and reaches its
-    Assistant as a feedback news line; the Assistant offers once per problem, remembers the
-    person's No, searches for a duplicate before filing and files a redacted issue. A throwaway
-    store and settings file; hc and gh are faked, nothing is sent or filed. Made-up names only."""
-
-    def setUp(self):
-        import io
-        from unittest import mock
-        sys.path.insert(0, BIN)
-        import herdr_task.cli as cli
-        import herdr_task.feedback as fb
-        import herdr_task.launch as launch
-        import herdr_task.settings as settings
-        self.cli, self.fb, self.io, self.mock = cli, fb, io, mock
-        self.queue = fb.queue_news  # the real one (faked below)
-        self.dir = tempfile.mkdtemp()
-        self.file = os.path.join(self.dir, "shepherdr.json")
-        self.held, self.gh, self.issues = [], [], []
-        self.caller = {"labels": {"herdr.task": "dev#7", "herdr.task.space": "sp1", "herdr.agent": "codex"}, "name": "shep-7-fix"}
-        with open(os.path.join(self.dir, "dev.json"), "w") as f:
-            json.dump({"prefix": "SHEP", "tasks": [{"id": 7, "title": "Fix login"}]}, f)
-
-        def run(args, **_):
-            self.gh.append(args)
-            if args[1:3] == ["issue", "list"]:
-                return subprocess.CompletedProcess(args, 0, json.dumps(self.issues), "")
-            if "--body-file" in args:
-                with open(args[args.index("--body-file") + 1]) as f:
-                    self.body = f.read()
-                return subprocess.CompletedProcess(args, 0, "https://github.com/acme/shep/issues/42\n", "")
-            return subprocess.CompletedProcess(args, 1, "", "unexpected")
-
-        for target, name, value in [
-            (settings, "SETTINGS", self.file), (fb, "STATE", os.path.join(self.dir, ".feedback.json")), (fb, "STORE", self.dir),
-            (fb, "me", lambda: ("t9", self.caller)), (fb, "run", run), (fb, "cli_version", lambda agent: "0.9.1"),
-            (fb, "private_words", lambda: ["Jane Doe", "Jane", "janes-box"]), (fb, "shepherdr_version", lambda: "3.1.12"),
-            (launch, "caller_space", lambda: (self.caller.get("labels") or {}).get("herdr.task.space") or (self.caller.get("labels") or {}).get("herdr.space")),
-            (launch, "coordinator_in", lambda space: "t5" if space == "sp1" else None),
-            (fb, "queue_news", lambda to, text: self.held.append((to, text, "news"))),
-        ]:
-            p = mock.patch.object(target, name, value)
-            p.start()
-            self.addCleanup(p.stop)
-
-    def settings(self, d):
-        with open(self.file, "w") as f:
-            json.dump(d, f)
-
-    def assistant(self):
-        self.caller = {"labels": {"herdr.role": "coordinator", "herdr.space": "sp1", "herdr.agent": "claude"}, "name": "assistant"}
-
-    def say(self, *argv):
-        import contextlib
-        out, err = self.io.StringIO(), self.io.StringIO()
-        with self.mock.patch.object(sys, "argv", ["herdr-task", "feedback", *argv]), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = self.cli.main()
-        return code, out.getvalue() + err.getvalue()
-
-    def test_a_report_returns_at_once_and_reaches_the_assistant(self):
-        import time
-        t = time.time()
-        code, out = self.say("The Accept card shows an empty diff", "--details", "Goal: accept SHEP-7. Expected: its 3 files.")
-        self.assertLess(time.time() - t, 2)
-        self.assertEqual(code, 0)
-        self.assertIn("Carry on", out)
-        self.assertEqual(len(self.held), 1)
-        to, text, how = self.held[0]
-        self.assertEqual((to, how), ("t5", "news"))
-        self.assertRegex(text, r'^<herdr-news task="SHEP-7" event="feedback" key="[0-9a-f]{10}">SHEP-7 feedback: The Accept card shows an empty diff · '
-                               r'Goal: accept SHEP-7\. Expected: its 3 files\. \(Fix login\)</herdr-news>$')
-        # the same problem again (other small words): nothing more is sent
-        code, out = self.say("the accept card shows the empty diff")
-        self.assertIn("already has this one", out)
-        self.assertEqual(len(self.held), 1)
-
-    @unittest.skipUnless(os.path.isfile(os.path.join(ROOT, "core", "chat-log.js")), "Shepherdr core/chat-log.js is outside factory/")
-    def test_the_chat_reads_it_as_a_news_row(self):
-        if home_guard.NODE is None:
-            self.skipTest("no working node (home_guard.NODE)")
-        self.say("Status lines vanish after a restart")
-        js = ("const m = await import(process.argv[1]); const t = process.argv[2];"
-            "const r = [...t.matchAll(/<herdr-news\\b([^>]*)>([\\s\\S]*?)<\\/herdr-news\\s*>/g)].length;"
-            "const w = (await import(process.argv[3])).newsWords({ ref: 'SHEP-7', event: 'feedback', text: t.replace(/<[^>]*>/g, '') }, { title: 'Fix login' });"
-            "console.log(JSON.stringify([r, w]));")
-        out = subprocess.run(["node", "--input-type=module", "-e", js, os.path.join(ROOT, "core", "chat-log.js"), self.held[0][1],
-                              os.path.join(ROOT, "core", "chat-view.js")], capture_output=True, text=True)
-        if out.returncode:
-            self.skipTest(out.stderr[-300:])
-        n, words = json.loads(out.stdout)
-        self.assertEqual(n, 1)
-        self.assertEqual(words, {"mark": "other", "what": "feedback", "text": "Status lines vanish after a restart"})
-
-    def test_off_in_settings_sends_nothing(self):
-        self.settings({"spaces": {"sp1": {"agents": {"feedback": False}}}})
-        code, out = self.say("Status lines vanish after a restart")
-        self.assertEqual((code, self.held), (0, []))
-        self.assertIn("off in Settings", out)
-        self.assistant()
-        self.assertIn("off in Settings", self.say("Status lines vanish after a restart")[1])
-        self.assertIn("off in Settings", self.say("Status lines vanish after a restart", "--file", "--new")[1])
-        self.assertEqual(self.gh, [])
-        # Everywhere off, the space on: on there
-        self.settings({"everywhere": {"agents": {"feedback": False}}, "spaces": {"sp1": {"agents": {"feedback": True}}}})
-        self.assertTrue(self.fb.feedback_on("sp1"))
-        self.assertFalse(self.fb.feedback_on("sp2"))
-
-    def test_offered_once_and_no_is_remembered(self):
-        self.assistant()
-        code, out = self.say("Ready refuses a reviewed commit")
-        self.assertIn('"Leave feedback for Shepherdr about Ready refuses a reviewed commit?"', out)
-        self.assertIn("Already offered", self.say("ready refuses the reviewed commit")[1])
-        self.assertIn("Remembered", self.say("Ready refuses a reviewed commit", "--no")[1])
-        self.assertIn("said no", self.say("Ready refuses a reviewed commit")[1])
-        self.caller = {"labels": {"herdr.task": "dev#7", "herdr.task.space": "sp1"}}
-        self.assertIn("said no", self.say("Ready refuses a reviewed commit")[1])
-        self.assertEqual(self.held, [])
-
-    def test_only_an_assistant_files(self):
-        code, out = self.say("Ready refuses a reviewed commit", "--file")
-        self.assertEqual(code, 1)
-        self.assertIn("Only an Assistant", out)
-        self.assertEqual(self.gh, [])
-
-    def test_a_duplicate_is_offered_before_filing(self):
-        self.assistant()
-        self.issues = [{"number": 12, "title": "Ready refuses reviewed commits", "url": "https://github.com/acme/shep/issues/12"}]
-        code, out = self.say("Ready refuses a reviewed commit", "--file", "--happened", "It said no round was recorded.")
-        self.assertIn("#12 Ready refuses reviewed commits", out)
-        self.assertIn("--comment", out)
-        self.assertEqual([a[1:3] for a in self.gh], [["issue", "list"]])
-        self.assertIn("eliasstravik/shepherdr", self.gh[0])  # the default repo
-        self.assertEqual(self.gh[0][self.gh[0].index("--search") + 1], "ready refuses reviewed commit")
-        code, out = self.say("Ready refuses a reviewed commit", "--file", "--comment", "12", "--happened", "Again on 3.1.12.")
-        self.assertEqual(self.gh[-1][:4], ["gh", "issue", "comment", "12"])
-        self.assertIn("Commented: https://github.com/acme/shep/issues/42", out)
-        self.assertIn("Already filed", self.say("Ready refuses a reviewed commit")[1])
-
-    def test_the_issue_is_redacted_and_complete(self):
-        self.assistant()
-        self.settings({"everywhere": {"agents": {"feedback_repo": "https://github.com/acme/shep.git"}}})
-        code, out = self.say(
-            "Tasks panel loses a task's status line", "--file", "--surface", "web",
-            "--goal", "Watch SHEP-7 from my phone.",
-            "--happened", "Jane Doe saw it blank on janes-box.example.ts.net (100.101.1.2); log at /home/jane/.herdr/tasks/dev.json, "
-                          "token ghp_abcdefghijklmnopqrstuvwxyz012345, GH_TOKEN=s3cr3t, mail jane@example.com\n" + "\n".join(f"log line {i}" for i in range(60)),
-            "--tried", "Reloaded the page.", "--expected", "Its last status line.", "--fix", "Keep it in the store.",
-            "--repro", "1. Start a task\n2. Restart the service")
-        self.assertEqual(code, 0, out)
-        self.assertIn("Filed: https://github.com/acme/shep/issues/42", out)
-        create = self.gh[-1]
-        self.assertEqual(create[:5], ["gh", "issue", "create", "--repo", "acme/shep"])
-        self.assertEqual(create[create.index("--title") + 1], "Tasks panel loses a task's status line")
-        b = self.body
-        for head in ("## Goal", "## What happened", "## What was tried", "## Expected", "## Suggested fix", "## Steps to reproduce", "## Environment"):
-            self.assertIn(head, b)
-        for words in ("- Shepherdr: 3.1.12", "- Agent CLI: Claude Code 0.9.1", "- Used from: the web app", "1. Start a task", "… (cut)"):
-            self.assertIn(words, b)
-        for secret in ("Jane", "janes-box", "100.101.1.2", "/home/jane", "ghp_", "s3cr3t", "jane@example.com", "log line 40"):
-            self.assertNotIn(secret, b)
-        self.assertIn("~/.herdr/tasks/dev.json", b)
-        self.assertIn("GH_TOKEN=<redacted>", b)
-
-    def test_the_search_never_carries_a_secret(self):
-        """The duplicate search leaves the machine too: its words are redacted first."""
-        self.assistant()
-        self.say("Login fails with GH_TOKEN=supersecret123 for Jane", "--file")
-        q = self.gh[0][self.gh[0].index("--search") + 1]
-        self.assertEqual(q, "login fails token")
-        for w in ("supersecret123", "jane", "redacted", "name"):
-            self.assertNotIn(w, q.lower())
-
-    def test_filing_holds_no_lock_while_gh_runs(self):
-        """A worker's report while the Assistant's gh call is slow: it still returns at once."""
-        import fcntl
-        self.assistant()
-        locked = []
-
-        def gh(args, **_):
-            with open(self.fb.STATE + ".lock", "a") as lock:
-                try:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    locked.append(False)
-                    fcntl.flock(lock, fcntl.LOCK_UN)
-                except OSError:
-                    locked.append(True)
-            return subprocess.CompletedProcess(args, 0, "[]" if args[1:3] == ["issue", "list"] else "https://github.com/acme/shep/issues/9\n", "")
-        with self.mock.patch.object(self.fb, "run", gh):
-            code, out = self.say("Status lines vanish after a restart", "--file")
-        self.assertIn("Filed: https://github.com/acme/shep/issues/9", out)
-        self.assertTrue(locked and not any(locked), locked)  # every search and the create ran with the lock free
-        self.assertIn("Already filed: https://github.com/acme/shep/issues/9", self.say("Status lines vanish after a restart")[1])
-
-    def test_never_filed_twice(self):
-        """Filed (or a comment added): another --file of the same problem files nothing; one under way
-        holds a second off; one that found duplicates or failed leaves it as it was."""
-        self.assistant()
-        self.issues = [{"number": 12, "title": "Status lines vanish", "url": "https://github.com/acme/shep/issues/12"}]
-        self.say("Status lines vanish after a restart", "--file")  # duplicates: nothing filed, nothing held
-        self.assertNotIn("filing", open(self.fb.STATE).read())
-        self.say("Status lines vanish after a restart", "--file", "--comment", "12")
-        n = len(self.gh)
-        for again in (["--new"], ["--comment", "12"]):
-            code, out = self.say("Status lines vanish after a restart", "--file", *again)
-            self.assertIn("Already filed", out)
-        self.assertEqual(len(self.gh), n)
-        with self.fb.problems() as ps:
-            ps[self.fb.key_of("Ready hangs")] = {"line": "Ready hangs", "state": "filing", "at": self.fb.now()}
-        self.assertIn("being filed right now", self.say("Ready hangs", "--file", "--new")[1])
-        # a report or an offer while it's filed leaves it marked: a second --file still files nothing
-        self.assertIn("filing this one right now", self.say("Ready hangs")[1])
-        self.caller = {"labels": {"herdr.task": "dev#7", "herdr.task.space": "sp1"}}
-        self.assertIn("filing this one right now", self.say("Ready hangs")[1])
-        self.assistant()
-        self.assertIn("being filed right now", self.say("Ready hangs", "--file", "--comment", "12")[1])
-        self.assertEqual((len(self.gh), self.held), (n, []))
-
-    def test_a_report_queues_in_the_background(self):
-        """The news line goes to a detached herdr-task (_hold-news): a report never waits on the held messages' lock."""
-        calls = []
-        with self.mock.patch.object(self.fb.subprocess, "Popen", lambda args, **kw: calls.append((args, kw))):
-            self.queue("t5", "<herdr-news …>")
-        (args, kw), = calls
-        self.assertEqual(args[-3:], ["_hold-news", "t5", "<herdr-news …>"])
-        self.assertTrue(kw["start_new_session"])
-
-    def test_a_workers_details_and_cli_go_in_the_issue(self):
-        self.say("Status lines vanish after a restart", "--details", "Restarted the service; every status line went blank.")
-        self.assistant()
-        self.say("Status lines vanish after a restart", "--file", "--new", "--dry-run")
-        self.assertEqual(self.gh, [])
-        code, out = self.say("Status lines vanish after a restart", "--file", "--new")
-        self.assertIn("every status line went blank", self.body)
-        self.assertIn("- Agent CLI: Codex 0.9.1", self.body)
-
-    def test_autopilot_notes_it_for_later(self):
-        self.assistant()
-        self.assertIn("Noted", self.say("Status lines vanish after a restart", "--later")[1])
-        self.assertIn("later  Status lines vanish after a restart", self.say("--list")[1])
-
-    def test_every_role_is_told(self):
-        from herdr_task import templates, reactions, autopilot
-        with open(os.path.join(ROOT, "templates", "assistant.md")) as f:
-            a = f.read()
-        for words in ("## Feedback for Shepherdr", "Leave feedback for Shepherdr about", "--no", "--later", "duplicate", "--comment", "in the middle of something urgent"):
-            self.assertIn(words, a)
-        with open(os.path.join(ROOT, "templates", "worker.md")) as f:
-            self.assertIn(templates.FEEDBACK_RULE.strip(), f.read())
-        self.assertIn(templates.FEEDBACK_RULE, templates.WORKER_MD)
-        self.assertIn(templates.WORKER_MD_BEFORE_FEEDBACK, templates.OLD_WORKERS)
-        with open(os.path.join(ROOT, "templates", "reviewer.md")) as f:
-            self.assertIn(templates.REVIEWER_FEEDBACK.strip(), f.read())
-        self.assertIn("herdr-task feedback", self.fb.AGENT_NOTE)
-        with open(os.path.join(BIN, "herdr_task", "autopilot.py")) as f:
-            self.assertIn("herdr-task feedback", f.read())
-        self.assertIn("feedback", __import__("herdr_task.launch", fromlist=["OWN"]).OWN)
 
 
 class CodexAsksOnTheCard(unittest.TestCase):
@@ -9741,7 +9189,6 @@ class Resume(unittest.TestCase):
             (launch, "own_path", lambda: "/bin/herdr-task"),
             (commands, "own_path", lambda: "/bin/herdr-task"),
             (launch, "secret_path", lambda: None),
-            (launch, "browser_path", lambda: None),
             (launch, "in_shell", lambda a: a),
             (launch, "low_priority", lambda a, n: a),
             (launch, "clean_env", lambda a: a),
@@ -10543,8 +9990,8 @@ class Watchdog(unittest.TestCase):
         from unittest import mock
         sys.path.insert(0, BIN)
         import herdr_task.agents as agents, herdr_task.assistant_settings as aset, herdr_task.autopilot as autopilot
-        import herdr_task.base as base, herdr_task.commands as commands, herdr_task.home as home
-        import herdr_task.news as news, herdr_task.reactions as reactions, herdr_task.store as store, herdr_task.watchdog as watchdog
+        import herdr_task.base as base, herdr_task.commands as commands
+        import herdr_task.news as news, herdr_task.store as store, herdr_task.watchdog as watchdog
         self.news, self.wd, self.Path, real_sub = news, watchdog, Path, subprocess.run
         self.tmp = os.path.realpath(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -10585,7 +10032,7 @@ class Watchdog(unittest.TestCase):
                       p_(news, "NEWS", os.path.join(self.store, ".news.json")), p_(news, "HELD", os.path.join(self.store, ".held.json")),
                       p_(autopilot, "STATE", os.path.join(self.store, ".autopilot.json")), p_(news, "POLL_DELAYS", (0,)),
                       p_(news, "screen_raw", lambda *_: self.raw),
-                      *(p_(m, fn, noop) for m, fn in ((home, "log_news"), (aset, "settings_pass"), (reactions, "reactions_pass"), (base, "guard"), (news, "guard"), (watchdog, "guard"), (watchdog, "held_ask")))])
+                      *(p_(m, fn, noop) for m, fn in ((aset, "settings_pass"), (base, "guard"), (news, "guard"), (watchdog, "guard"), (watchdog, "held_ask")))])
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
@@ -12343,8 +11790,8 @@ class BuildOutput(unittest.TestCase):
         import contextlib, io, pathlib
         from unittest import mock
         sys.path.insert(0, BIN)
-        from herdr_task import base, cli, commands, github, home, launch, settings, store
-        self.cli, self.home, self.mock, self.io, self.redirect, self.Path = cli, home, mock, io, contextlib.redirect_stdout, pathlib.Path
+        from herdr_task import base, cli, commands, github, launch, machine, settings, store
+        self.cli, self.machine, self.store_mod, self.mock, self.io, self.redirect, self.Path = cli, machine, store, mock, io, contextlib.redirect_stdout, pathlib.Path
         self.root = os.path.realpath(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.root, True)
         self.repo, self.bdir = os.path.join(self.root, "app"), os.path.join(self.root, "builds")
@@ -12360,7 +11807,7 @@ class BuildOutput(unittest.TestCase):
             self.briefs.append(text)
             t.setdefault("agents", []).append(a := {"address": f"t{t['id']}", "agent": "claude", "argv": argv, "at": 1})
             return a
-        for mod, name, val in ((store, "STORE", store_dir), (base, "STORE", store_dir), (settings, "SETTINGS", cfg_path), (home, "SETTINGS", cfg_path),
+        for mod, name, val in ((store, "STORE", store_dir), (base, "STORE", store_dir), (settings, "SETTINGS", cfg_path),
                                (commands, "launch", fake_launch), (commands, "ensure_scheduler", lambda **k: {}), (commands, "retag_tabs", lambda s: []),
                                (commands, "live_agents", lambda k: []), (commands, "queue_reason", lambda *a: None), (commands, "parent_for", lambda p, sp: p),
                                (launch, "caller_labels", lambda: {}), (github, "live_agents", lambda k: []), (github, "live_helpers", lambda k: [])):
@@ -12420,17 +11867,36 @@ class BuildOutput(unittest.TestCase):
         for key, kb in (("APP-1", 2), ("APP-2", 12), ("APP-3", 6)):
             self.put(os.path.join(self.bdir, key, "bin"), b"x" * (kb * 1024))
         os.symlink(os.path.dirname(self.put(os.path.join(self.root, "ext", "huge"), b"x" * 50000)), os.path.join(self.bdir, "APP-9"))
-        h = {"cpu": 10, "load": 0.4, "cores": 8, "memory": 40, "disk": 95, "disks": [{"path": "home", "pct": 95, "free_gb": 5}]}
-        with self.mock.patch.object(self.home, "processes", return_value=[]), self.mock.patch.object(self.home, "leftover_worktrees", return_value=[]), \
-                self.mock.patch.object(self.home, "link_facts", return_value={}):
-            with self.mock.patch("herdr_task.machine.sample", return_value={**h, "disk": 50}), self.mock.patch.object(self.home, "task_builds", side_effect=AssertionError):
-                self.assertEqual(self.home.local_report()["builds"], [])
-            with self.mock.patch("herdr_task.machine.sample", return_value=h):
-                line = next(l for l, _ in self.home.health_lines("", self.home.local_report(), {}) if 'event="disk-over"' in l)
-                shutil.rmtree(self.bdir)
-                empty = next(l for l, _ in self.home.health_lines("", self.home.local_report(), {}) if 'event="disk-over"' in l)
-        self.assertTrue(line.index(f"{self.bdir}/APP-2") < line.index(f"{self.bdir}/APP-3") < line.index(f"{self.bdir}/APP-1"))
-        self.assertTrue("APP-9" not in line and "Biggest task build folders" not in empty)
+        builds = self.machine.task_builds()
+        self.assertEqual([b["task"] for b in builds], ["APP-2", "APP-3", "APP-1"])
+        self.assertEqual([b["path"] for b in builds], [f"{self.bdir}/APP-2", f"{self.bdir}/APP-3", f"{self.bdir}/APP-1"])
+        shutil.rmtree(self.bdir)
+        self.assertEqual(self.machine.task_builds(), [])
+
+    def test_leftover_worktrees_finds_old_done_and_unknown_worktrees(self):
+        wt_root = os.path.join(self.root, "wts")
+        old_wt = os.path.join(wt_root, "app", "task-1")
+        fresh_wt = os.path.join(wt_root, "app", "task-2")
+        unknown_wt = os.path.join(wt_root, "app", "orphan")
+        for p in (old_wt, fresh_wt, unknown_wt):
+            os.makedirs(p)
+        old_ts = time.time() - (self.machine.LEFTOVER_MS / 1000) - 3600
+        os.utime(unknown_wt, (old_ts, old_ts))
+        self.run_cli("config", "--prefix", "APP")
+        with self.store_mod.Store(self.store_mod.locate(self.repo), write=True) as s:
+            now_ms = int(time.time() * 1000)
+            s.data["tasks"] = [
+                {"id": 1, "title": "Old", "state": "done", "worktree": old_wt, "done_at": now_ms - self.machine.LEFTOVER_MS - 3600_000},
+                {"id": 2, "title": "Fresh", "state": "done", "worktree": fresh_wt, "done_at": now_ms - 60_000},
+            ]
+            s.dirty = True
+        with self.mock.patch.object(self.machine, "HOME", self.root):
+            found = {w["path"]: w for w in self.machine.leftover_worktrees()}
+        self.assertIn(old_wt.replace(self.root, "~", 1), found)
+        self.assertIn(unknown_wt.replace(self.root, "~", 1), found)
+        self.assertNotIn(fresh_wt.replace(self.root, "~", 1), found)
+        self.assertEqual(found[old_wt.replace(self.root, "~", 1)]["task"], "APP-1")
+        self.assertIsNone(found[unknown_wt.replace(self.root, "~", 1)]["task"])
 
 
 class DesignDocAndOpenAskWaitForAccept(unittest.TestCase):

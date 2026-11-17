@@ -35,7 +35,7 @@ REAL = os.path.realpath(_real_home())
 REAL_DIRS = [os.path.join(REAL, p) for p in (
     ".herdr", ".config/herdr-app", ".config/herdr-core", ".config/shepherdr", ".config/sheepdog",
     ".local/share/herdr", ".local/share/shepherdr", ".local/share/sheepdog", ".local/state/herdr-core",
-    ".local/state/shepherdr", ".cache/shepherdr", ".claude", ".codex")]
+    ".local/state/shepherdr", ".local/state/sheepdog", ".cache/shepherdr", ".cache/sheepdog", ".claude", ".codex")]
 # What the person's environment points at its own terminal, chat and agent with.
 DROP = ("HC_TERMINAL_SOCKET", "HC_TERMINAL_ID", "HC_SCOPE", "HC_SOCKET", "HC_SESSION", "HERDR_BROWSER_TASK",
         "HERDR_ASK_CHAINED", "HERDR_APP_HOME", "SHEPHERDR_HOME", "SHEPHERDR_DATA", "HERDR_TASK_STORE",

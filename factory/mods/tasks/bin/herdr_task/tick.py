@@ -27,7 +27,6 @@ from .launch import default_space, parent_for, sweep_sandboxes
 from .store import locate, read_list, Store, store_files
 from .queues import cap_for, machine_hold, refresh_ext, running_count, set_hold, urgent, waiting_ext, waiting_for
 from .archive import archive_pass
-from .browsers import browser_pass
 from .simulators import simulator_pass
 from .devices import device_pass
 from .output import progress_clock, say
@@ -806,7 +805,6 @@ def cmd_tick(args):
         report["logs_error"] = str(e)
     try:
         sweep_sandboxes()  # temp dirs of sandboxed reviewers that ended without their trap
-        browser_pass(report)
         simulator_pass(report, args.folder)
         device_pass(report, args.folder)
     except Exception as e:  # never stops the queue

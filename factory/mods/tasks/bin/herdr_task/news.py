@@ -236,12 +236,6 @@ def news_pass(report, folder=None):
                                            "event": x["event"], "status": x["status"], "stall": x.get("stall"),
                                            "idle": idle, **({"pending": True} if got == "pending" else {})}
             report["news"].append({"to": to, "lines": [x["text"] for x in batch]})
-            # Kept for the main machine's home Assistant, which keeps every machine's overview.
-            try:
-                from .home import log_news
-                log_news([{"at": now(), "space": space, "folder": batch[0].get("folder"), "to": to, "lines": [x["text"] for x in batch]}])
-            except Exception:  # never stops the news
-                pass
             # Read before the news: a <no-reply> to it leaves it read (news_read()).
             read = (k.get("labels") or {}).get(READ) if k else None
             if k and str(read) == str(k.get("turn")) and to not in quiet:
@@ -252,12 +246,6 @@ def news_pass(report, folder=None):
         settings_pass(report, quiet)
     except Exception as e:  # never stops the news
         report["settings_error"] = str(e)
-    # Reactions changed for a space: every other running agent its hook taught told once (reactions.py).
-    try:
-        from .reactions import reactions_pass
-        reactions_pass(report, quiet)
-    except Exception as e:  # never stops the news
-        report["reactions_error"] = str(e)
     news_read(quiet)
     held_pass(report, delivered)
     tmp = f"{NEWS}.{os.getpid()}.tmp"

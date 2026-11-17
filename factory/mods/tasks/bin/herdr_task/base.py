@@ -7,17 +7,68 @@ import os
 import pwd
 import signal
 import subprocess
+import sys
 import time
 import zipfile
 
-
-from . import layout
-
 VERSION = "1"
 HOME = os.path.expanduser("~")
-# Shepherdr's own folders (layout.py): ~/.local/share/shepherdr/tasks once this machine's data moved
-# there, else the old ~/.herdr/tasks (the entry moves it first, so a run sees one or the other).
-WHERE = layout.Where()
+_KINDS = {
+    "settings": ("config", "settings.json"),
+    "model-picks": ("config", "model-picks.json"),
+    "tasks": ("data", "tasks"),
+    "artifacts": ("data", "artifacts"),
+    "vault": ("data", "secrets/vault.json"),
+    "secret-remote": ("data", "secrets/remote"),
+    "tools": ("data", "tools.json"),
+    "service": ("state", "service"),
+    "secret-drop": ("state", "secret-drop"),
+    "secret-served": ("state", "secret-served"),
+    "cli-check": ("state", "cli-check.json"),
+    "machine-hold": ("state", "machine-hold.json"),
+}
+
+
+def _abs(p):
+    return p if p and os.path.isabs(p) else None
+
+
+def _roots(home=None, env=None, mac=None):
+    env = os.environ if env is None else env
+    home = home or os.path.expanduser("~")
+    mac = sys.platform == "darwin" if mac is None else mac
+    one = _abs(env.get("SHEPHERDR_HOME"))
+    if one:
+        return {k: os.path.join(one, k) for k in ("config", "data", "state", "cache")}
+    x = lambda var, *dflt: os.path.join(_abs(env.get(var)) or os.path.join(home, *dflt), "shepherdr")
+    cache = _abs(env.get("XDG_CACHE_HOME"))
+    return {"config": x("XDG_CONFIG_HOME", ".config"), "data": x("XDG_DATA_HOME", ".local", "share"),
+            "state": x("XDG_STATE_HOME", ".local", "state"),
+            "cache": os.path.join(cache, "shepherdr") if cache else os.path.join(home, *(("Library", "Caches") if mac else (".cache",)), "shepherdr")}
+
+
+class Where:
+    """Direct XDG paths for one home."""
+
+    def __init__(self, home=None, env=None, mac=None):
+        self.home = home or os.path.expanduser("~")
+        self.env = os.environ if env is None else env
+        self.roots = _roots(self.home, self.env, mac)
+
+    def path(self, kind):
+        base, rel = _KINDS[kind]
+        return os.path.join(self.roots[base], rel)
+
+    def worktrees(self, setting=None):
+        if setting:
+            return os.path.expanduser(setting)
+        return os.path.join(self.roots["data"], "worktrees")
+
+    def worktree_roots(self, setting=None):
+        return list(dict.fromkeys([self.worktrees(setting), os.path.join(self.roots["data"], "worktrees")]))
+
+
+WHERE = Where()
 # HERDR_TASK_STORE: another task list (a test's own), as HERDR_TASK_SETTINGS for settings.
 STORE = os.environ.get("HERDR_TASK_STORE") or WHERE.path("tasks")
 # Where new task worktrees go (a task keeps the one it has; Settings > Tasks > Worktree folder picks another).
