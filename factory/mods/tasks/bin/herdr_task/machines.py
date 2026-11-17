@@ -200,8 +200,7 @@ x = json.loads(sys.stdin.read())
 H = os.path.expanduser("~")
 P = lambda r: os.path.join(H, r)
 ''' + _SHEP_PY + r'''
-# Shepherdr's own files (the stamp, the secrets' marks) where they are on that machine: its own
-# folders once its data moved there, else ~/.herdr (SHEP: herdr_task/layout.py).
+# Direct XDG paths on that machine (matches base.Where).
 def sha(p):
     try:
         with open(p, "rb") as f:

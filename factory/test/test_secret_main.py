@@ -313,6 +313,12 @@ class Forward(Machine):
         with self.assertRaisesRegex(secret.Fail, "serve answers"):
             secret.serve("vm/t1")
 
+    def test_xdg_paths_match_base_where(self):
+        w = base.Where()
+        self.assertEqual(secret.SHEP(".herdr/vault.json"), w.path("vault"))
+        self.assertEqual(secret.SHEP(".herdr/secret-remote"), w.path("secret-remote"))
+        self.assertEqual(secret.SHEP(".herdr/secret-drop"), w.path("secret-drop"))
+
 
 if __name__ == "__main__":
     unittest.main()
