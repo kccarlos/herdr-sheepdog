@@ -518,9 +518,10 @@ class PidCheck(unittest.TestCase):
     def test_the_pid_check_reads_the_real_process_start(self):
         self.assertTrue(lease.pid_started_before(os.getpid(), (time.time() + 5) * 1000))
         self.assertFalse(lease.pid_started_before(os.getpid(), (time.time() - 3600) * 1000))  # it started later: a recycled pid
+        at = time.time() * 1000  # taken before the start: the process starts at or after it, however slow the runner
         p = subprocess.Popen(["sleep", "5"])
         self.addCleanup(p.kill)
-        self.assertFalse(lease.pid_started_before(p.pid, time.time() * 1000))  # started this very second: not "before"
+        self.assertFalse(lease.pid_started_before(p.pid, at))  # started in or after at's second: not "before"
         self.assertFalse(lease.pid_started_before(None, time.time() * 1000))
 
 
