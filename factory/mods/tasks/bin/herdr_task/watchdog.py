@@ -267,20 +267,21 @@ def watchdog_pass(report):
                 digest, prev = screen_digest(r.stdout), prev_all.get(slot) or {}
                 since = prev["screen_since"] if prev.get("address") == addr and prev.get("screen") == digest and prev.get("screen_since") else now()
                 rec["screen"], rec["screen_since"] = digest, since
-                last = max(since, log_ms(k))
-                quiet = rec.get("quiet") if (rec.get("quiet") or {}).get("since") == last else None
-                if now() - last >= QUIET_MS and not has_child(k, rec):  # note 53: Esc once, then a fresh session, then alert
-                    if not quiet:
-                        run(["hc", "interrupt", addr])
-                        rec["quiet"] = {"since": last, "at": now()}
-                        report.setdefault("watchdog", []).append({"action": "interrupted", "address": addr, "folder": folder,
-                                                                  "why": f"working with no child process and no output for {(now() - last) // 60000} min"})
-                    elif now() - quiet["at"] >= NEWS_GRACE_MS:
-                        why = f"working with no child process and no output for {(now() - last) // 60000} min"
-                elif now() - since >= STUCK_MS:
+                logged = log_ms(k)
+                last = logged or since  # its own output: the session log when there is one, else the screen
+                quiet = rec.get("quiet")
+                if quiet and logged > quiet["at"]:
+                    rec.pop("quiet", None)  # it wrote something after the Esc: at work again
+                elif quiet:
+                    if now() - quiet["at"] >= NEWS_GRACE_MS:  # still working, nothing written since the Esc
+                        why = f"working with no child process and no output for {(now() - quiet['since']) // 60000} min"
+                elif now() - last >= QUIET_MS and not has_child(k, rec):  # note 53: Esc once, then a fresh session, then alert
+                    run(["hc", "interrupt", addr])
+                    rec["quiet"] = {"since": last, "at": now()}
+                    report.setdefault("watchdog", []).append({"action": "interrupted", "address": addr, "folder": folder,
+                                                              "why": f"working with no child process and no output for {(now() - last) // 60000} min"})
+                if not why and not rec.get("quiet") and now() - since >= STUCK_MS:
                     why = f"working with an unchanged screen for {(now() - since) // 60000} min"
-                else:
-                    rec.pop("quiet", None)
         else:
             rec.pop("screen", None), rec.pop("screen_since", None), rec.pop("quiet", None)
             if st in ("idle", "done"):

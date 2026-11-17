@@ -153,6 +153,10 @@ class Lease(LeaseCase):
         self.assertEqual(launch.coordinator_in(self.repo), new)
         self.assertIn({"address": "t15g", "cwd": self.repo}, report["not_coordinator"])
         self.assertFalse([c for c in self.hc.calls if c[1] in ("kill", "label") and c[2] in ("t2gt", "t15g")])
+        # revive and the settings notices know only the holder
+        import herdr_task.revive as revive
+        self.assertEqual((revive.watched(self.hc.terms["t15g"]), revive.watched(self.hc.terms[new])), (False, True))
+        self.assertEqual(lease.live_holders(), [(new, self.repo)])
 
 
 class Reconcile(LeaseCase):
@@ -265,9 +269,29 @@ class Reconcile(LeaseCase):
             lease.reconcile_pass(report := {})
         self.assertEqual((self.started(), report["coordinators"][0]["action"]), ([], "disk-stalled"))
 
-    def test_a_kept_terminal_waiting_for_revive_is_not_replaced(self):
+    def test_a_kept_terminal_waiting_for_revive_is_not_replaced_until_it_stays_a_shell(self):
         self.hc.term("c1", self.repo, foreground={"name": "zsh"})  # hc gave it a shell; revive types its agent back
         self.save([{"id": 1, "title": "Auth", "state": "running"}], coordinator={"address": "c1", "created_ms": 1000})
+        lease.reconcile_pass({})
+        self.now += lease.SHELL_MS - 60000
+        lease.reconcile_pass({})
+        self.assertEqual(self.started(), [])
+        self.now += 60000  # still a bare shell: its agent never came back, or exited again
+        lease.reconcile_pass(report := {})
+        new = report["coordinators"][0]["to"]
+        self.assertEqual((launch.coordinator_in(self.repo), self.hc.terms["c1"]["state"]), (new, "exited"))
+        self.assertIn(["hc", "rm", "c1"], self.hc.calls)
+
+    def test_a_holder_whose_agent_came_back_is_left_alone(self):
+        self.hc.term("c1", self.repo, foreground={"name": "zsh"})
+        self.save([{"id": 1, "title": "Auth", "state": "running"}], coordinator={"address": "c1", "created_ms": 1000})
+        lease.reconcile_pass({})
+        self.hc.terms["c1"]["foreground"] = {"name": "claude"}  # revive typed it back
+        self.now += 5 * 60000
+        lease.reconcile_pass({})
+        self.assertNotIn("no_agent_since", lease.lease_of(self.repo))
+        self.hc.terms["c1"]["foreground"] = {"name": "zsh"}  # a later exit starts a new count
+        self.now += lease.SHELL_MS - 60000
         lease.reconcile_pass({})
         self.assertEqual(self.started(), [])
 
@@ -357,6 +381,27 @@ class StuckWorking(LeaseCase):
         self.assertEqual(self.restarts, [])  # it gets a moment to stop
         self.pass_(1)
         self.assertEqual((len(self.interrupts()), self.restarts), (1, ["c1"]))
+
+    def test_an_esc_that_only_repaints_still_leads_to_a_fresh_session(self):
+        self.pass_(0)
+        self.pass_(20)
+        self.assertEqual(len(self.interrupts()), 1)
+        self.hc.terms["c1"]["screen"] = "Interrupted\n✻ Checking SHOP-125 again… (21m · esc to interrupt)\n"  # repainted, still working
+        self.pass_(2)
+        self.assertEqual((len(self.interrupts()), self.restarts), (1, ["c1"]))
+
+    def test_output_in_its_log_after_the_esc_clears_it(self):
+        log = os.path.join(self.tmp, "session.jsonl")
+        with open(log, "w") as f:
+            f.write("{}\n")
+        os.utime(log, (self.now / 1000, self.now / 1000))
+        with mock.patch("herdr_task.sessions.session_of", lambda pid: ("s1", log)):
+            self.pass_(0)
+            self.pass_(20)
+            self.assertEqual(len(self.interrupts()), 1)
+            os.utime(log, ((self.now + 1000) / 1000, (self.now + 1000) / 1000))  # it wrote again
+            self.pass_(2)
+            self.assertEqual(self.restarts, [])
 
     def test_a_child_at_work_or_new_output_keeps_it(self):
         self.hc.terms["c1"]["status"] = {"state": "idle"}

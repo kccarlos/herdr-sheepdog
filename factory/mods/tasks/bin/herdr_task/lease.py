@@ -30,6 +30,8 @@ OPEN = ("running", "ready", "queued", "todo", "scheduled")  # a task in one of t
 START_GRACE_MS = 10 * 60000   # a coordinator started this recently that is gone again: no new start yet
 STARTS_PER_HOUR = 3           # more starts than this in an hour: stop starting, say so
 HOUR_MS = 3600000
+SHELL_MS = 15 * 60000         # a holder whose terminal is a shell with no agent this long (revive's resume failed, or its
+                              # agent exited after one): no coordinator, replaced (revive looks only 10 minutes)
 
 
 def _canon(p):
@@ -53,6 +55,21 @@ def lease_of(project):
     d = _store.read_list(p) if p else None
     rec = d.get(KEY) if isinstance(d, dict) else None
     return rec if isinstance(rec, dict) else {}
+
+
+def leases():
+    """[(folder, lease record)] of every task list here that has a lease."""
+    out = []
+    for p in _store.store_files():
+        d = _store.read_list(p)
+        if isinstance(d, dict) and isinstance(d.get(KEY), dict) and d.get("folder"):
+            out.append((d["folder"], d[KEY]))
+    return out
+
+
+def live_holders():
+    """[(address, folder)] of the live coordinators here: the lease holders."""
+    return [(k["address"], folder) for folder, rec in leases() for k in [_live(rec)] if k]
 
 
 def _live(rec):
@@ -281,6 +298,7 @@ def restart(folder, k, why=None):
         return None
     if not claim(folder, new, replacing=old):
         run(["hc", "kill", new])
+        run(["hc", "rm", new])
         return None
     reparent(folder, old, new)
     run(["hc", "kill", old])
@@ -300,7 +318,16 @@ def reconcile_pass(report):
         if not _store.is_task_list(d) or d.get("kind", "repo") != "repo" or not d.get("folder"):
             continue
         folder, lease = d["folder"], d.get(KEY) if isinstance(d.get(KEY), dict) else {}
-        k = _live(lease)
+        k, stale = _live(lease), None
+        if k:
+            from .agents import agent_running
+            if agent_running(k):
+                if lease.get("no_agent_since"):
+                    _edit(folder, lambda x: x.get(KEY, {}).pop("no_agent_since", None))
+            elif not lease.get("no_agent_since"):
+                _edit(folder, lambda x: x.get(KEY, {}).update(no_agent_since=now()))
+            elif now() - lease["no_agent_since"] >= SHELL_MS:
+                k, stale = None, k  # a shell, no agent: replaced below like a gone one
         if k:
             holders.add(k["address"])
             try:
@@ -332,9 +359,13 @@ def reconcile_pass(report):
             new = start(folder, d.get("prefix") or "TASK", handoff(folder, old, lease=lease))
             if not claim(folder, new, replacing=old, starts=[*starts, now()]):  # another start won the lease meanwhile
                 run(["hc", "kill", new])
+                run(["hc", "rm", new])
                 report.setdefault("coordinators", []).append({"action": "refused", "folder": folder, "address": new})
                 continue
             moved = reparent(folder, old, new)
+            if stale:  # the shell it left: ended, never two coordinators
+                run(["hc", "kill", old])
+                run(["hc", "rm", old])
         except (Fail, OSError, ValueError) as e:
             report.setdefault("coordinators", []).append({"action": "failed", "folder": folder, "why": str(e)})
             continue

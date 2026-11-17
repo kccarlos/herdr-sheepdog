@@ -7051,8 +7051,10 @@ class Revive(unittest.TestCase):
                 return json.loads(json.dumps(self.terms[args[1]]))
             raise AssertionError(f"hc {args}")
         self.tasks = {"dev#6": {"id": 6, "state": "running", "agents": []}}
+        self.leased = set()  # the projects' lease holders (SDF-16): the coordinators revive brings back
         for name, value in (("run", hc), ("hc_json", hc_json), ("session_of", lambda pid: self.sessions.get(pid, (None, None))),
-                            ("task_of", lambda k: self.tasks.get(revive.label_of(k.get("labels"), "task")))):
+                            ("task_of", lambda k: self.tasks.get(revive.label_of(k.get("labels"), "task"))),
+                            ("coordinator_addresses", lambda: set(self.leased))):
             p = mock.patch.object(revive, name, value)
             p.start()
             self.addCleanup(p.stop)
@@ -7063,6 +7065,7 @@ class Revive(unittest.TestCase):
                             "foreground": {"pid": agent_pid, "name": "claude", "argv": ["/opt/claude", "--model", "opus", "You are..."], "cwd": "/home/me/app"},
                             "labels": {"herdr.role": "coordinator", "herdr.chat": "p1"}}
         self.sessions[agent_pid] = ("S1", self.log)
+        self.leased.add(addr)
 
     def crash(self, addr, pid=200):
         """What the core does with a kept terminal whose program was lost: a shell, labels kept."""
@@ -7655,7 +7658,8 @@ class AssistantSettings(unittest.TestCase):
             (settings, "SETTINGS", self.file), (aset, "SETTINGS", self.file),
             (aset, "STATE", os.path.join(self.dir, ".assistant-settings.json")), (aset, "hc_json", hc_json),
             (aset, "run", run),
-            (aset, "coordinators", lambda: list(self.terminals)),
+            (__import__("herdr_task.lease", fromlist=["x"]), "live_holders",  # the lease holders (SDF-16)
+             lambda: [(a, t["cwd"]) for a, t in self.terminals.items() if (t.get("labels") or {}).get("sheepdog.role") == "coordinator"]),
             (aset, "autopilot_of", lambda proj, cfg: self.auto.get(proj, (False, "every 60 minutes", ""))),
             (news, "news_send", lambda addr, text: self.sent.append((addr, text)) or True),
         ]:
@@ -7790,13 +7794,14 @@ class AssistantSettings(unittest.TestCase):
 
     def test_spaces_fallback_merges_with_projects_until_sdf9(self):
         self.write({"spaces": {"s1": {"folder": "/proj/sp1", "tasks": {"merge": "auto", "review_rounds": 2}}}})
-        self.terminals["t8"] = {"state": "live", "turn": 3, "cwd": "/elsewhere",
-                                "labels": {"herdr.role": "coordinator", "herdr.coordinator.space": "vm/s1"}}
+        # t8 holds /proj/sp1's lease (SDF-16: the folder comes from the lease, not from its labels or cwd)
+        self.terminals["t8"] = {"state": "live", "turn": 3, "cwd": "/proj/sp1",
+                                "labels": {"sheepdog.role": "coordinator", "herdr.coordinator.space": "vm/s1"}}
         note_old = self.aset.session_note("t8")
         self.assertIn("- Merge: on its own (Herdr merges a ready task); set for this project", note_old)
         self.assertIn("- Review: on, at most 2 rounds", note_old)
         self.settings.write_max_running({"folder": "/proj/sp1"}, None, 3)
-        self.terminals["t5"] = {"state": "live", "turn": 3, "cwd": "/elsewhere",
+        self.terminals["t5"] = {"state": "live", "turn": 3, "cwd": "/proj/sp1",
                                 "labels": {"sheepdog.project": "proj-sp1", "sheepdog.role": "coordinator"}}
         note_merged = self.aset.session_note("t5")
         self.assertIn("- Merge: on its own (Herdr merges a ready task); set for this project", note_merged)

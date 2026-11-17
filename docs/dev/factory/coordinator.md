@@ -4,7 +4,7 @@ Each project (a repo folder) has exactly one coordinator: the Opus agent that pl
 
 ## Identity: the lease
 
-The project's task list (`<data_dir>/tasks/<slug>.json`) holds a `coordinator` record: the terminal's address and `created_ms`, when it took the lease, the template hash, and its last session id and log. The lease holder is the coordinator. `launch.coordinator_in()` returns it, and news, Autopilot wakes, GitHub news, asks and workers' parents all go through that function.
+The project's task list (`<data_dir>/tasks/<slug>.json`) holds a `coordinator` record: the terminal's address and `created_ms`, when it took the lease, the template hash, and its last session id and log. The lease holder is the coordinator. `launch.coordinator_in()` returns it, and news, Autopilot wakes, GitHub news, asks and workers' parents all go through that function. Three other places read the lease directly. Revive brings back only lease holders (and task agents). Settings notices go only to lease holders. `herdr-task assistants` lists the lease holders, with the agent's own cwd when it differs from the project folder.
 
 - Only the engine writes the lease, when it starts a coordinator: `herdr-task project start`, the reconcile pass and the watchdog's restart.
 - A second claimant is refused while the holder lives. A restart hands the lease on explicitly.
@@ -23,7 +23,7 @@ The handoff names the previous coordinator's session log and its saved screen (`
 
 `reconcile_pass` runs right after `revive_pass` and before the news and Autopilot passes. It looks at every repo project with an open task (running, ready, queued, to do or scheduled):
 
-1. **The holder's terminal is live:** nothing to do. A kept terminal that hc gave a shell counts too, because revive types its agent back. The holder's session and log are copied onto the lease for a later handoff.
+1. **The holder's terminal is live:** nothing to do. A kept terminal that hc gave a shell counts too while revive types its agent back, but only for 15 minutes. A holder that is still a bare shell after that (its resume failed, or its agent exited again) is replaced like a gone one, and the shell is ended. The holder's session and log are copied onto the lease for a later handoff.
 2. **No live holder:** a new coordinator starts with a handoff and takes the lease. No message from the owner is needed. First a timed probe of the repo's disk runs. If the disk is stalled, nothing starts (note 54 began with a disk stall).
 3. **Re-parenting:** workers whose parent was the old coordinator, or is gone, get the new one as their parent in their task's agent record. hc cannot change a terminal's parent. Messages held for the old coordinator move to the new one. A later tick finishes a recovery that was cut short: workers still on a dead parent, or news still held for the previous holder, move to the live holder.
 4. **Limits:** after a start, no new start for 10 minutes. A start blocks the tick until the new coordinator takes its first message (hc's own wait, up to 60 s). After 3 starts in an hour, the tick stops starting and reports `gave-up`.
@@ -36,12 +36,12 @@ The home folder and other plain folders are not projects, so no coordinator star
 
 | Condition | Action |
 |---|---|
-| "Working" with no child process and no output for 20 minutes (note 53) | `hc interrupt` once. Still stuck 90 s later: restart. Stuck again within 2 hours: alert |
+| "Working" with no child process and no output for 20 minutes (note 53) | `hc interrupt` once. Still working 90 s later with nothing new in its log (a repainted screen does not count): restart. Stuck again within 2 hours: alert |
 | "Working" with an unchanged screen for 30 minutes | Restart |
 
 These terms decide the first row:
 
-- **Output** means the session log's modification time, or the screen. A screen whose only change is the working line's spinner, timer or token count counts as unchanged.
+- **Output** means the session log's modification time when there is a log, else the screen. A screen whose only change is the working line's spinner, timer or token count counts as unchanged.
 - **A child** is a helper terminal at work, a command in its terminal, or a process under the agent that was not there while it was idle. An MCP server that always runs is no child. Without an idle baseline, any process under it counts as a child, which errs on the safe side.
 
 A restart (`lease.restart`) is engine code that replaced `mods/coordinator/restart.sh`, so it works headless. It starts the new coordinator in the repo folder with a handoff, hands on the lease, re-parents the workers, then ends the old one and its process group.
