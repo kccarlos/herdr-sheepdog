@@ -20,7 +20,7 @@ import shlex
 from .base import HOME, hc_json, label_of, now, PACKAGE, run, SHELLS
 from .agents import agent_running, status_word
 from .sessions import session_of
-from .settings import ASSISTANT_TEMPLATES, TEMPLATES
+from .settings import TEMPLATES
 from .launch import CLEAN_ENV, no_update_env, resume_argv as launch_resume
 
 LABEL = "herdr.resume"
@@ -173,12 +173,28 @@ def write_record(k, rec):
     return run(["hc", "label", k["address"], f"{LABEL}={json.dumps(rec, separators=(',', ':'))}"]).returncode == 0
 
 
-def watched(k):
-    """An Assistant or a task's agent (its worker or reviewer): what comes back. Never a sandboxed
-    reviewer (launch.sandboxed): it would come back outside its sandbox."""
+def coordinator_addresses():
+    """{address: created_ms} of the terminals that hold a project's lease here (lease.py): the only coordinators revive
+    brings back."""
+    from .lease import leases
+    return {rec["address"]: rec.get("created_ms") for _, rec in leases() if rec.get("address")}
+
+
+def is_holder(k, coords):
+    """`k` is the lease's own terminal: its address, and no later terminal there (created_ms)."""
+    if k.get("address") not in coords:
+        return False
+    want = coords[k["address"]]
+    return not (want and k.get("created_ms") and want != k["created_ms"])
+
+
+def watched(k, coords=None):
+    """A project's coordinator (its lease holder) or a task's agent (its worker or reviewer): what comes back. Never a
+    sandboxed reviewer (launch.sandboxed): it would come back outside its sandbox. A terminal that only looks like an
+    Assistant (its labels or template) holds no lease and is left as it is (note 55)."""
     labels = k.get("labels") or {}
-    return not label_of(labels, "sandbox") and (label_of(labels, "role") == "coordinator" or k.get("template") in ASSISTANT_TEMPLATES
-                                                or bool(label_of(labels, "task")))
+    coords = coordinator_addresses() if coords is None else coords
+    return not label_of(labels, "sandbox") and (is_holder(k, coords) or bool(label_of(labels, "task")))
 
 
 def task_ref(k):
@@ -272,11 +288,11 @@ def bare_shell(k):
     return len(argv) == 1 and os.path.basename(argv[0]) in SHELLS
 
 
-def plan(k, rec, running):
+def plan(k, rec, running, coords=None):
     """What to type into `k` now: (how, argv, direct) or None (direct: shell_line's). `running`: the
-    sessions agents run here now."""
+    sessions agents run here now; `coords`: the lease holders' addresses."""
     labels = k.get("labels") or {}
-    assistant = label_of(labels, "role") == "coordinator" or k.get("template") in ASSISTANT_TEMPLATES
+    assistant = is_holder(k, coordinator_addresses() if coords is None else coords)
     # A task's agent only while its task is at work (Working, or Ready for follow-ups): a finished
     # task's stays a shell, as its end would leave it.
     has_task = bool(label_of(labels, "task"))
@@ -314,7 +330,8 @@ def revive_pass(report):
     core gave a plain shell."""
     d = hc_json("ls") or {}
     mine = [k for k in d.get("terminals") or [] if "/" not in k.get("address", "") and k.get("state") == "live"]
-    terms = [x for x in (hc_json("get", k["address"]) for k in mine) if x and watched(x)]
+    coords = coordinator_addresses()
+    terms = [x for x in (hc_json("get", k["address"]) for k in mine) if x and watched(x, coords)]
     running, back = set(), []
     for k in terms:
         rec = read_record(k)
@@ -327,7 +344,7 @@ def revive_pass(report):
         elif restarted(k):
             back.append((k, rec))
     for k, rec in back:
-        step = plan(k, rec, running)
+        step = plan(k, rec, running, coords)
         if not step:
             continue
         how, argv, direct = step

@@ -4,7 +4,7 @@ import argparse, contextlib, fnmatch, io, json, os, re, shlex, shutil, subproces
 from . import assistant_settings as aset, autopilot as ap, base, settings as st
 from .base import Fail
 from .github import push_remote, remote_repo, runs_on_pr
-from .launch import CLEAN_ENV, coordinator_in
+from .launch import coordinator_in
 from .output import say
 from .store import auto_prefix, locate, prefixes_in_use, read_list, Store, store_path
 
@@ -416,46 +416,27 @@ def ensure_settings(repo, name, given_check, d, dry):
     return layer, True, old_ids, f"Settings: wrote factory defaults for {repo} ({chk_words})"
 
 def ensure_assistant(repo, prefix, dry):
-    slug, _ = store_path(repo)
-    kv = [f"{base.PROJECT_LABEL}={slug}", f"{base.ROLE_LABEL}=coordinator", "herdr.role=coordinator"]
-    addr, cur_lb = coord_for_repo(repo)
-    if addr:
-        if all(cur_lb.get(p.split("=", 1)[0]) == p.split("=", 1)[1] for p in kv):
+    """The project's coordinator: its lease holder, else one started in the repo folder that takes the lease
+    (lease.py). A terminal without the lease is never adopted, whatever its labels (note 55)."""
+    from . import lease
+    if addr := coordinator_in(repo):
+        kv, cur = lease.labels_for(store_path(repo)[0]), (base.hc_json("get", addr) or {}).get("labels") or {}
+        if all(cur.get(p.split("=", 1)[0]) == p.split("=", 1)[1] for p in kv):
             return addr, False, f"Assistant: found {addr}"
         if dry:
-            return addr, True, f"Assistant: would attach {addr} to {repo}"
+            return addr, True, f"Assistant: would label {addr} for {repo}"
+        # its labels back (revive brings back a terminal by its role label)
         if (r := try_run("hc", "label", addr, *kv)) is None or r.returncode != 0:
             raise Fail("hc isn't on PATH (install herdr-core first)." if r is None else ((r.stderr or r.stdout).strip() or f"Couldn't label {addr}."))
-        return addr, True, f"Assistant: attached {addr} to {repo}"
+        return addr, True, f"Assistant: labelled {addr} for {repo}"
     if dry:
         return None, True, f"Assistant: would start for {repo}"
-    tpl_name, one_path = "assistant", None
-    tpl_src = next((p for p in (os.path.join(st.TEMPLATES, "assistant.md"),
-                                os.path.normpath(os.path.join(base.PACKAGE, "..", "..", "..", "..", "templates", "assistant.md")))
-                    if os.path.isfile(p)), None)
-    if tpl_src:
-        with open(tpl_src) as f:
-            src = f.read()
-        if (m := re.match(r"\A---\n([\s\S]*?)\n---\n?", src)) and (cm := re.search(r"(?m)^command:[ \t]*(.+)$", m.group(1))):
-            rs = aset.rows(repo, st.read_settings())
-            kv = [*kv, f"{aset.LABEL}={aset.digest(rs)}"]
-            tpl_name, one_path = f"herdr-assistant-{os.getpid()}", os.path.join(st.TEMPLATES, f"herdr-assistant-{os.getpid()}.md")
-            cmd_text = re.sub(r'^exec\s+', '', cm.group(1).strip())
-            # FAC-87: no auto-update mid-run (before exec: exec takes an assignment as the program)
-            pre = "DISABLE_AUTOUPDATER=1 " if re.match(r'(\S*/)?claude(\s|$)', cmd_text) else ""
-            os.makedirs(st.TEMPLATES, exist_ok=True)
-            with open(one_path, "w") as f:
-                f.write(f"---\nname: {tpl_name}\ndescription: One-off assistant start.\n"
-                        f"command: {CLEAN_ENV} {pre}exec {cmd_text}\n---\n{src[m.end():].rstrip()}\n\n{aset.block(rs)}\n")
-    try:
-        r = try_run("hc", "run", "--bg", "--json", "--no-parent", "--keep", "--cwd", repo, "--name", f"{prefix.lower()}-assistant",
-                    *[x for p in kv for x in ("--label", p)], tpl_name)
-    finally:
-        if one_path and os.path.exists(one_path):
-            os.remove(one_path)
-    if r is None or not (out := json_dict(r.stdout) if r.returncode == 0 else None) or not out.get("address"):
-        raise Fail("hc isn't on PATH (install herdr-core first)." if r is None else ((r.stderr or r.stdout).strip() or "Couldn't start the Assistant."))
-    return out["address"], True, f"Assistant: started {out['address']}"
+    addr = lease.start(repo, prefix)
+    if not lease.claim(repo, addr):
+        try_run("hc", "kill", addr)
+        try_run("hc", "rm", addr)
+        raise Fail(f"Another Assistant took {repo} meanwhile.")
+    return addr, True, f"Assistant: started {addr}"
 
 def sync_autopilot(repo, name, old_ids, want_on, asst_changed, dry, to_export=None):
     if to_export is None:
