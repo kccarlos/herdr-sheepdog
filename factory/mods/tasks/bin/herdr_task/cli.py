@@ -279,7 +279,7 @@ def main():
     c.add_argument("--prefix", help="task ids' prefix, 2 to 5 letters (HAT -> HAT-4); unique on this machine")
     c.add_argument("--build-dir", help="per-task build output folder (<path>/<task-key>/, cleaned on done; \"\" clears)")
     c.add_argument("--set", action="append", metavar="KEY=VALUE",
-                   help="tasks.max_running=N, tasks.check=CMD, worker.agent=claude|codex|agy or worker.perm=full|auto|plan for this project folder (\"default\" clears)")
+                   help="tasks.max_running=N, tasks.ci_runner_cap=N, tasks.check=CMD, worker.agent=claude|codex|agy or worker.perm=full|auto|plan for this project folder (\"default\" clears)")
     si = sub.add_parser("simulator", help="this folder's fixed iOS simulator pool: lease one per task, release it, or list holders")
     si.set_defaults(fn=cmd_simulator, simulator="list", folder=None, json=False, id=None, task_opt=None)
     sp = si.add_subparsers(dest="simulator")
@@ -343,8 +343,7 @@ def main():
     c.add_argument("--changes-file")
     c.add_argument("--notes", help="suggestions with a pass")
     c.add_argument("--must-fix", type=int, help="findings at or above Must fix (herdr-task's own reviewer, FAC-13)")
-    c = cmd("scheduler", cmd_scheduler, "run automations and the queue (herdr-core keeps one as herdr-automations)", id=False)
-    c.add_argument("--ensure", action="store_true", help="start it if automations need it and it isn't running")
+    c = cmd("scheduler", cmd_scheduler, "run automations and the task tick loop (the sheepdog daemon keeps one as sheepdog-factory-tick)", id=False)
     c.add_argument("--once", action="store_true", help="one round, then exit")
     au = sub.add_parser("auto", help="automations: a saved task that a time or an event adds again").add_subparsers(dest="auto")
 

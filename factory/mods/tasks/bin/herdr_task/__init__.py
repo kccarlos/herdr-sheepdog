@@ -22,7 +22,7 @@ before it:
   output       Output: a task as JSON and as one line of text.
   stage        One ordered stage table per task; owner-waiting rows are the inbox.
   plan         Milestones and the plan file: plan apply, plan amend, plan show.
-  scheduler    Keeps the scheduler (herdr-automations) running on this machine.
+  scheduler    Identity and bundle hash of the tick terminal kept alive by the sheepdog daemon.
   commands     The task commands: add, start, status, ready, accept, merge and the rest.
   news         News: what changed in a space's tasks, told to its Assistant.
   ghnews       GitHub news: a Ready task's pull request news to its agent, and its base branch

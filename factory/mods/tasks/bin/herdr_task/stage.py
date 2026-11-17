@@ -54,6 +54,11 @@ def _quota_wait(task):
     return bool(q.get("head") == task.get("head") and task.get("head"))
 
 
+def _gate_push_held(task):
+    ph = task.get("push_held") or {}
+    return bool(task.get("state") == "running" and ph.get("gate"))
+
+
 def _owner_asks(store, task, asks):
     if asks is None:
         if store is not None and hasattr(store, "ref"):
@@ -143,7 +148,7 @@ def _is_working(ctx):
         return True
     if any(x not in ("idle", "done", "blocked") for x in ctx["states"]):
         return True
-    if agents.starting(task) or agents.review_running(task) or _quota_wait(task):
+    if agents.starting(task) or agents.review_running(task) or _quota_wait(task) or _gate_push_held(task):
         return True
     if live and agents.helper_working(task, live):
         return True
@@ -219,7 +224,7 @@ def _match_blocked_or_failed(ctx):
     if st == "running" and task.get("review_out"):
         why = agents.out_of_rounds_why(task)
         return why, "needs", "reply", why
-    if st == "running" and not live and not agents.starting(task) and not agents.review_running(task) and not _quota_wait(task):
+    if st == "running" and not live and not agents.starting(task) and not agents.review_running(task) and not _quota_wait(task) and not _gate_push_held(task):
         return agents.STOPPED, "needs", "stopped", agents.STOPPED
     return None
 
@@ -322,6 +327,9 @@ def _match_working(ctx):
     if _quota_wait(task):
         qw = task["review_quota_wait"]["text"]
         return qw, "working", None, qw
+    if _gate_push_held(task):
+        gw = task["push_held"].get("reason") or "Waiting for CI runner slot"
+        return gw, "working", None, gw
     if live and agents.helper_working(task, live):
         return None, "working", None, None
     if live and (agents.own_work(task, live) or (task.get("bg_told") and not agents.turn_since(task["bg_told"], live))):
