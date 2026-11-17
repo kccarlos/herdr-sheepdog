@@ -3,7 +3,7 @@
 import hashlib, json, os, re, subprocess, time
 
 from . import news
-from .agents import agent_running, detail, held_ask, live_agents, STARTING_MS, status_word, task_status
+from .agents import agent_running, detail, live_agents, STARTING_MS, status_word, task_status
 from .base import agent_pid, end_group, Fail, guard, hc_json, HOME, now, PACKAGE, probe_volume, run, STORE, volume_of
 from .commands import send_alert
 from .news import send_or_hold, stall_of, typing
@@ -174,7 +174,7 @@ def watchdog_pass(report):
 
     for item in coords:
         addr = item["address"]
-        k = None if held_ask(addr) else hc_json("get", addr)
+        k = hc_json("get", addr)
         if not k or k.get("state") != "live" or "/" in (k.get("address") or "/") or not agent_running(k):
             for s, r in (prev_all.items() if k is None else ()):
                 if isinstance(r, dict) and addr in (r.get("address"), r.get("restarted_to")):

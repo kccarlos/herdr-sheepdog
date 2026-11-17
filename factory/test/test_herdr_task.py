@@ -664,9 +664,10 @@ class AutomationMachine(unittest.TestCase):
     def test_here_it_names_none(self):
         import herdr_task.automations as au
         s = type("S", (), {"loc": {"folder": "/w"}, "prefix": "X", "data": {}})()
-        with __import__("unittest").mock.patch.object(au, "settings_for", lambda s, sp: {"automations": {}}):
+        with __import__("unittest").mock.patch.object(au, "settings_for", lambda s: {"automations": {}}):
             v = au.auto_view(s, {"id": 1, "title": "t"})
         self.assertIsNone(v["machine"])
+        self.assertNotIn("space", v)
 
 
 class SchedulerRound(unittest.TestCase):
@@ -2201,14 +2202,9 @@ class NoFalseNeedsYou(unittest.TestCase):
         self.assertEqual(self.agents.GRACE_MS, 20_000)
         agent = lambda a: {"address": a["address"], "status": {"state": a["status"]}, "turn": a["turn"],
                            "labels": {"herdr.role": a["role"]}, **({"status_ms": a["since"]} if "since" in a else {})}
-        held = {}  # #995: the card's request herdr-task reads, as the scheduler keeps it on the task (held_ask)
-        with self.mock.patch.object(self.agents, "now", lambda: g["now"]), \
-                self.mock.patch.object(self.agents, "held_ask", lambda address: held.get(address)):
+        with self.mock.patch.object(self.agents, "now", lambda: g["now"]):
             for i, c in enumerate(g["cases"]):
                 task = dict(c["task"], id=7)
-                held.clear()
-                if task.get("held_ask"):
-                    held[task["held_ask"]] = {"tool_name": "AskUserQuestion", "tool_input": {}}
                 if "log" in c:
                     # SHEP-148: an agent's real state, its session log written as Claude Code writes it
                     log = os.path.join(self.dir, f"case{i}.jsonl")
@@ -2221,24 +2217,6 @@ class NoFalseNeedsYou(unittest.TestCase):
                 # core reads task.own_work: what herdr-task's scheduler keeps from that same log
                 if "own_work" in c["task"]:
                     self.assertEqual(self.agents.own_work(task, live, ready=task["state"] == "ready"), c["task"]["own_work"], c["name"])
-
-    def test_a_question_on_the_card_needs_you_while_it_reads_working(self):
-        """#995: a worker sat on its AskUserQuestion card, the task Working (needs None) and then stalled. The card's
-        request (ask-hook.sh's file) makes it Needs you, with the question as its reason; one a killed hook left
-        behind, older than the hook's 30 minutes, doesn't."""
-        req = os.path.join(self.agents.HOME, ".config", "herdr-app", "data", "chat-asks", "req")
-        os.makedirs(req, exist_ok=True)
-        self.addCleanup(lambda: [os.remove(os.path.join(req, n)) for n in os.listdir(req)])
-        p = os.path.join(req, "t1.1799999000.42.json")
-        with open(p, "w") as f:
-            json.dump({"tool_name": "AskUserQuestion", "tool_input": {"questions": [{"question": "Scope or green?"}]}}, f)
-        working = [dict(self.idle[0], status={"state": "working"})]
-        os.utime(p, (self.clock / 1000 - 60, self.clock / 1000 - 60))
-        self.assertEqual(self.status(working)[:2], ("needs", "asks"))
-        self.assertTrue(self.agents.asking(working[0]))
-        self.assertTrue(self.agents.ask_reason(self.task, "t1", self.agents.held_ask("t1")).endswith("Scope or green?"))  # FAC-97's dialog prefix
-        os.utime(p, (self.clock / 1000 - 32 * 60, self.clock / 1000 - 32 * 60))
-        self.assertEqual(self.status(working), ("working", None, None))
 
     def test_a_quiet_agent_needs_you_once_the_grace_is_over(self):
         self.say(-3_000, "Done with the first part.")
@@ -2277,12 +2255,8 @@ class NoFalseNeedsYou(unittest.TestCase):
 
     def test_a_long_command_in_the_foreground_is_work(self):
         """HOME-1 read Needs you twice mid-turn: a 50 s and a 110 s Bash running in the foreground,
-        Claude Code read idle meanwhile. Its log has the call open: Working. A permission for it
-        held, Needs you; done, or open past FG_MAX_MS, quiet as before."""
-        held = {}
-        p = self.mock.patch.object(self.agents, "held_ask", lambda address: held.get(address))
-        p.start()
-        self.addCleanup(p.stop)
+        Claude Code read idle meanwhile. Its log has the call open: Working; done, or open past
+        FG_MAX_MS, quiet as before."""
         self.say(-60_000, "Passes. Finishing all 10, then the gallery.")
         # Claude Code's own compact lines, as its log writes them
         self.lines.append('{"parentUuid":"a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use",'
@@ -2291,9 +2265,6 @@ class NoFalseNeedsYou(unittest.TestCase):
         self.write()
         self.assertEqual(self.status(), ("working", None, "Waiting on a background job"))
         self.assertEqual(self.agents.open_tool(self.log)[0], "Bash")
-        held["t1"] = {"tool_name": "Bash", "tool_input": {"command": "./finish.sh"}}
-        self.assertEqual(self.status()[:2], ("needs", "asks"))  # #995: a permission held on the card asks
-        held.clear()
         # its result in: quiet, Needs you
         self.lines.append('{"parentUuid":"b","isSidechain":false,"type":"user","message":{"role":"user","content":[{"tool_use_id":'
                           '"toolu_9","type":"tool_result","content":"done"}]},"timestamp":"%s"}' % self.iso(-10_000))
@@ -7059,7 +7030,7 @@ class Revive(unittest.TestCase):
             raise AssertionError(f"hc {args}")
         self.tasks = {"dev#6": {"id": 6, "state": "running", "agents": []}}
         for name, value in (("run", hc), ("hc_json", hc_json), ("session_of", lambda pid: self.sessions.get(pid, (None, None))),
-                            ("task_of", lambda k: self.tasks.get((k.get("labels") or {}).get("herdr.task")))):
+                            ("task_of", lambda k: self.tasks.get(revive.label_of(k.get("labels"), "task")))):
             p = mock.patch.object(revive, name, value)
             p.start()
             self.addCleanup(p.stop)
@@ -7162,15 +7133,15 @@ class Revive(unittest.TestCase):
 
     def test_a_worker_resumes_with_its_task_browser(self):
         self.terms["t5"] = {"address": "t5", "state": "live", "pid": 500, "cwd": "/wt", "name": "shep-6-web",
-                            "argv": ["sh", "-c", "low", "herdr-low", "env", "HERDR_BROWSER_TASK=dev#6", "/bin/bash", "-ic", "x", "/bin/bash",
+                            "argv": ["sh", "-c", "low", "herdr-low", "env", "SHEEPDOG_TASK=dev#6", "HERDR_BROWSER_TASK=dev#6", "/bin/bash", "-ic", "x", "/bin/bash",
                                      "claude", "--settings", '{"a":1}', "Brief..."],
                             "status": {"state": "working"}, "foreground": {"pid": 501, "name": "claude", "argv": ["claude"], "cwd": "/wt"},
-                            "labels": {"herdr.task": "dev#6", "herdr.agent": "claude"}}
+                            "labels": {"sheepdog.task": "dev#6", "sheepdog.agent": "claude"}}
         self.sessions[501] = ("S1", self.log)
         self.tick()
         self.crash("t5")
         self.tick()
-        self.assertTrue(self.sent[0][1].startswith("""cd /wt && DISABLE_AUTOUPDATER=1 HERDR_BROWSER_TASK='dev#6' claude --settings '{"a":1}' --resume S1 'Herdr restarted"""), self.sent[0][1])
+        self.assertTrue(self.sent[0][1].startswith("""cd /wt && DISABLE_AUTOUPDATER=1 HERDR_BROWSER_TASK='dev#6' SHEEPDOG_TASK='dev#6' claude --settings '{"a":1}' --resume S1 'Herdr restarted"""), self.sent[0][1])
 
     def agy_worker(self, cid="0199aaaa-bbbb-cccc-dddd-eeeeeeeeeeee"):
         """A kept agy worker (FAC-7) in a temp home: its conversation is a db no chat reads, so no log."""
@@ -7184,10 +7155,10 @@ class Revive(unittest.TestCase):
         self.db = os.path.join(conv, cid + ".db")
         open(self.db, "w").close()
         self.terms["t5"] = {"address": "t5", "state": "live", "pid": 500, "cwd": "/wt", "name": "shep-6-web",
-                            "argv": ["sh", "-c", "low", "herdr-low", "env", "HERDR_BROWSER_TASK=dev#6", "/bin/zsh", "-lic", "x", "/bin/zsh",
+                            "argv": ["sh", "-c", "low", "herdr-low", "env", "SHEEPDOG_TASK=dev#6", "HERDR_BROWSER_TASK=dev#6", "/bin/zsh", "-lic", "x", "/bin/zsh",
                                      "agy", "--settings", '{"trustedWorkspaces":["/wt"]}', "--mode", "accept-edits", "-i", "Brief..."],
                             "status": {"state": "working"}, "foreground": {"pid": 501, "name": "agy", "argv": ["agy"], "cwd": "/wt"},
-                            "labels": {"herdr.task": "dev#6", "herdr.agent": "agy"}}
+                            "labels": {"sheepdog.task": "dev#6", "sheepdog.agent": "agy"}}
         self.tasks["dev#6"].update(mode="worktree", worktree="/wt",
                                    agents=[{"address": "t5", "agent": "agy", "argv": ["agy", "--mode", "accept-edits"], "session": cid, "log": None}])
         self.sessions[501] = (cid, None)
@@ -7203,7 +7174,7 @@ class Revive(unittest.TestCase):
         self.crash("t5")
         report = self.tick()
         self.assertEqual(report["revived"], [{"terminal": "t5", "how": "resume", "session": cid}])
-        self.assertEqual(self.sent, [("t5", "cd /wt && HERDR_BROWSER_TASK='dev#6' agy --settings '{\"trustedWorkspaces\":[\"/wt\"]}' "
+        self.assertEqual(self.sent, [("t5", "cd /wt && HERDR_BROWSER_TASK='dev#6' SHEEPDOG_TASK='dev#6' agy --settings '{\"trustedWorkspaces\":[\"/wt\"]}' "
                                             f"--mode accept-edits --conversation {cid} -i 'Herdr restarted (a crash, power loss or reboot) "
                                             "while you were working, and your session is resumed. Carry on where you left off.'")])
 
@@ -7268,7 +7239,11 @@ class Revive(unittest.TestCase):
         self.crash("t5")
         with self.mock.patch("herdr_task.launch.own_argv", lambda argv, *_, **__: argv):
             self.tick()
-        self.assertTrue(self.sent[0][1].startswith("cd /wt && DISABLE_AUTOUPDATER=1 HERDR_BROWSER_TASK='dev#6' claude --resume S1 'Herdr restarted"), self.sent)
+        self.assertTrue(self.sent[0][1].startswith("cd /wt && DISABLE_AUTOUPDATER=1 HERDR_BROWSER_TASK='dev#6' SHEEPDOG_TASK='dev#6' claude --resume S1 'Herdr restarted"), self.sent)
+        with self.mock.patch.object(self.r, "TEMPLATES", os.path.join(self.dir, "missing")):
+            cmd, tpl = self.r.template_of("assistant")
+            self.assertEqual(cmd, "claude")
+            self.assertTrue(tpl and "assistant" in tpl)
 
 
 class AutomationFromAnotherMachine(unittest.TestCase):
@@ -7329,7 +7304,7 @@ class AutomationFromAnotherMachine(unittest.TestCase):
                    mock.patch.object(settings, "SETTINGS", os.path.join(self.tmp, "a-settings.json")),
                    mock.patch.object(au.subprocess, "run", run), mock.patch.object(au, "guard", lambda a: None),
                    mock.patch.object(au, "begin", begin), mock.patch.object(au, "queue_reason", lambda s, t: None),
-                   mock.patch.object(au, "worker_argv", lambda s, t, space=None: ["claude"]),
+                   mock.patch.object(au, "worker_argv", lambda s, t: ["claude"]),
                    mock.patch.object(au, "ensure_scheduler", lambda quiet=False: {}),
                    mock.patch.object(au, "live_agents", lambda key: []),
                    mock.patch.object(machines, "connected_machines", lambda: [{"name": "vmb", "state": "connected"}]),
@@ -7362,7 +7337,7 @@ class AutomationFromAnotherMachine(unittest.TestCase):
 
     def auto(self, sub, **kw):
         args = self.argparse.Namespace(auto=sub, folder=self.a_folder, json=True, id=None, title=None, prompt=None,
-                                       prompt_file=None, every=None, on=None, match=None, agent=None, space=None,
+                                       prompt_file=None, every=None, on=None, match=None, agent=None,
                                        parent=None, here=False, worktree=False, from_=None)
         for k, v in kw.items():
             setattr(args, k, v)
@@ -7893,14 +7868,41 @@ class TaskFlow(unittest.TestCase):
                      "labels": {"sheepdog.role": "coordinator", "sheepdog.project": "repo-slug"}}]
         by_addr["c-slug"] = terms[0]
         self.assertEqual(launch.coordinator_in(self.main), "c-slug")
-        # And tick.rescue_question falls back to coordinator_in(s.loc['folder']) when task has no space and parent is dead
-        import herdr_task.tick as tick, herdr_task.ask as ask_mod
+        # And tick.rescue_question & ask.cmd_ask_pane route by project folder without space
+        import herdr_task.tick as tick, herdr_task.ask as ask_mod, herdr_task.ghnews as ghnews_mod, herdr_task.agents as agents_mod
         asked = []
         self.patch(tick, "parent_for", lambda p, proj=None: "c-slug" if proj == self.main else None)
-        self.patch(ask_mod, "cmd_ask", lambda ns: asked.append((ns.to, ns.origin["folder"])) or {"id": "a1", "terminal": "ta1"})
+        self.patch(ask_mod, "cmd_ask", lambda ns: asked.append((ns.to, ns.origin)) or {"id": "a1", "terminal": "ta1"})
         self.assertTrue(tick.rescue_question(self.store, self.task, {"address": "w1", "parent": "dead"},
                                              {"question": "Ship?", "options": ["Yes", "No"], "recommend": "Yes"}, {}))
-        self.assertEqual(asked, [("c-slug", self.main)])
+        self.assertEqual(asked, [("c-slug", {"terminal": "w1", "folder": self.main})])
+        # agents.live_agents resolves sheepdog.task labels without herdr.task
+        self.patch(agents_mod, "hc_json", lambda *a: {"terminals": [{"address": "w-sd", "state": "live"}]}
+                   if a == ("ls", "--label", "sheepdog.task=repo#1") else {"terminals": []})
+        self.assertEqual([k["address"] for k in agents_mod.live_agents("repo#1")], ["w-sd"])
+        # ghnews.main_pass delivers main-red to coordinator_in(folder) without space
+        delivered_main = []
+        self.patch(ghnews_mod, "news_send", lambda to, txt: delivered_main.append((to, txt)) or True)
+        self.store.data["main_watch"] = {"main": {"red": "deadbeef", "repo": "acme/repo", "checked": 1, "until": 9,
+                                                  "notice": {"text": "<herdr-news/>", "at": tick.now(), "folder": self.main}}}
+        ghnews_mod.main_pass(self.store, {})
+        self.assertEqual(delivered_main, [("c-slug", "<herdr-news/>")])
+        # ask.cmd_ask_pane resolves origin["folder"] via coordinator_in(folder) when to is None
+        import contextlib, io as _io, herdr_task.news as news_mod
+        self.patch(ask_mod, "ASKS", os.path.join(sdir, "asks"))
+        ask_mod.save({"id": "af1", "question": "Proceed?", "options": ["Yes", "No"], "recommend": "Yes",
+                      "task": "SHEP-1", "to": None, "origin": {"folder": self.main}})
+        sent_ask = []
+        self.patch(ask_mod, "read_answer", lambda n: "1")
+        self.patch(news_mod, "send_or_hold", lambda to, txt, how="send": sent_ask.append((to, txt)) or "sent")
+        with contextlib.redirect_stdout(_io.StringIO()):
+            ask_mod.cmd_ask_pane(SimpleNamespace(id="af1"))
+        self.assertEqual((sent_ask[0][0], ask_mod.load("af1")["to"]), ("c-slug", "c-slug"))
+        self.assertFalse(hasattr(news_mod, "READ") or hasattr(news_mod, "TYPING") or hasattr(agents_mod, "held_ask"))
+        # tick.retry_one keys retry rows by project folder rather than space
+        self.patch(tick, "provider_cut", lambda log: {"id": "c1", "text": "overloaded", "code": 529, "status": "overloaded", "tries": 1, "at": tick.now()})
+        rrow = tick.retry_one(None, {"address": "w1", "labels": {"sheepdog.role": "worker"}}, "/tmp/l", {"retries": []}, project=self.main)
+        self.assertEqual((rrow["project"], "space" in rrow), (self.main, False))
         # launch stamps sheepdog.{project,task,role,agent} and SHEEPDOG_TASK without space/tab
         ran = []
         self.patch(launch, "run", lambda argv, *a, **k: (ran.append(argv), subprocess.CompletedProcess(argv, 0, '{"address":"w1"}', ""))[1])
@@ -8400,8 +8402,8 @@ class TaskFlow(unittest.TestCase):
         import argparse
         from herdr_task import automations
         none = dict(title=None, prompt=None, prompt_file=None, every=None, on="ready", match=None, from_=None, agent=None,
-                    here=False, worktree=False, space=None, parent=None)
-        a = {"id": 1, "title": "Sweep", "prompt": "Read the open pull requests", "space": "sp1"}
+                    here=False, worktree=False, parent=None)
+        a = {"id": 1, "title": "Sweep", "prompt": "Read the open pull requests"}
         automations.set_auto_fields(self.store, a, argparse.Namespace(**none, set=["review=off", "reviewer.model=opus"]))
         self.assertEqual(a["set"], {"review": "off", "reviewer.model": "opus"})
         with self.assertRaises(Exception):
@@ -8410,7 +8412,7 @@ class TaskFlow(unittest.TestCase):
         self.assertEqual(a["set"], {"review": "off"})
         self.store.new = lambda title, prompt, mode: self.store.data["tasks"].append(
             {"id": 2, "title": title, "prompt": prompt, "mode": mode, "state": "todo", "agents": []}) or self.store.data["tasks"][-1]
-        for name, value in (("worker_argv", lambda s, t, space: ["claude"]), ("queue_reason", lambda s, t: None),
+        for name, value in (("worker_argv", lambda s, t: ["claude"]), ("queue_reason", lambda s, t: None),
                             ("begin", lambda *a, **k: None)):
             self.patch(automations, name, value)
         t = automations.fire(self.store, a, "every")
@@ -9354,11 +9356,11 @@ class BusyWorkerDelivery(unittest.TestCase):
         self.assertEqual(self.held(), {})
 
     def test_held_while_typing_and_other_clis_unchanged(self):
-        self.term["labels"] = {"herdr.agent": "agy", self.news.TYPING: str(self.clock - 1000)}
+        self.raw = "› hold on\n"
         self.assertEqual(self.news.send_or_hold("t1", "Pointer to docs/x.md"), "held")
         self.assertEqual(self.calls, [])
         # Typing stops while agy is still busy and offers alt+m: held_pass sends and presses alt+m.
-        self.term["labels"] = {"herdr.agent": "agy"}
+        self.raw = ""
         self.screens = ["▸ Pointer to docs/x.md  (alt+m to send immediately)\n", "> Pointer to docs/x.md\n"]
         self.news.held_pass({})
         self.assertIn(["hc", "send", "t1", "Pointer to docs/x.md"], self.calls)
@@ -9922,14 +9924,15 @@ class Watchdog(unittest.TestCase):
                       p_(news, "NEWS", os.path.join(self.store, ".news.json")), p_(news, "HELD", os.path.join(self.store, ".held.json")),
                       p_(autopilot, "STATE", os.path.join(self.store, ".autopilot.json")), p_(news, "POLL_DELAYS", (0,)),
                       p_(news, "screen_raw", lambda *_: self.raw),
-                      *(p_(m, fn, noop) for m, fn in ((aset, "settings_pass"), (base, "guard"), (news, "guard"), (watchdog, "guard"), (watchdog, "held_ask")))])
+                      *(p_(m, fn, noop) for m, fn in ((aset, "settings_pass"), (base, "guard"), (news, "guard"), (watchdog, "guard")))])
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
         self.coord("c1", chat="p1")
 
     def coord(self, addr="c1", space="shop", status="done", turn=2, chat=None):
-        self.terms[addr] = {"address": addr, "state": "live", "status": {"state": status}, "turn": turn, "foreground": {"name": "claude"},
+        self.terms[addr] = {"address": addr, "state": "live", "cwd": self.tmp if "/" not in addr else "/remote",
+                            "status": {"state": status}, "turn": turn, "foreground": {"name": "claude"},
                             "labels": {"herdr.role": "coordinator", "herdr.space": space, **({"herdr.chat": chat} if chat else {})}}
 
     def worker(self, addr, tid, status="working", **extra):
@@ -10090,10 +10093,7 @@ class Watchdog(unittest.TestCase):
         stale = {"id": 1, "title": "Fix", "state": "running", "space": "shop", "attention": "Ask", "attention_at": self.clock - 35 * 60000}
         delivered = {1: {"to": "c1", "turn": 2, "at": self.clock - 35 * 60000, "event": "needs-you"}}
         self.save_tasks(stale, delivered=delivered)
-        self.terms["c1"]["labels"][self.news.TYPING] = str(self.clock - 1000)
-        self.tick()
-        self.terms["c1"]["labels"].pop(self.news.TYPING)
-        self.raw = "❯ wait a second\n"
+        self.raw = "› wait a second\n"
         self.tick()
         self.raw = ""
         self.save_tasks(stale, delivered=delivered, inflight={"at": self.clock - 60000, "reason": "schedule", "to": "c1", "turn": 2})
@@ -10511,7 +10511,7 @@ class GhAlwaysNamesForkRepo(unittest.TestCase):
                 self.assertEqual(self.github.pr_view(t)["statusCheckRollup"][0]["conclusion"], "SUCCESS")
             self.assertEqual(self.checks.ci_of(t, self.tip)["state"], "success")
             self.assertEqual((self.ghnews.pr_comments("fork/shepherdr", 50), self.ghnews.log_tail("fork/shepherdr", 9)), ([], "step failed"))
-            self.ghnews.main_check(s, "kc-factory", {"space": "s"}, {})
+            self.ghnews.main_check(s, "kc-factory", {"folder": self.main}, {})
             self.assertIsNone(self.commands.merge_now(s, t))
             self.assertEqual(t["state"], "done")
         argvs = [c["argv"] for c in self.calls()]
@@ -10568,7 +10568,7 @@ class OpenQuestionSurvivesDone(unittest.TestCase):
         self.root = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.root, True)
         self.main, self.wt = os.path.join(self.root, "repo"), os.path.join(self.root, "wt")
-        self.store_dir, self.app_home = os.path.join(self.root, "tasks"), os.path.join(self.root, "app")
+        self.store_dir = os.path.join(self.root, "tasks")
         g = lambda *a, cwd=self.main: subprocess.run(["git", "-C", cwd, *a], check=True)
         subprocess.run(["git", "init", "-q", "-b", "main", self.main], check=True)
         for k, v in (("user.name", "T"), ("user.email", "t@x"), ("commit.gpgsign", "false")):
@@ -10579,7 +10579,7 @@ class OpenQuestionSurvivesDone(unittest.TestCase):
         g("merge", "-q", "--ff-only", "task/11")
         self.live, self.panes, self.fail_ask = [], [], False
         live = lambda key: list(self.live)
-        for p in (mock.patch.dict(os.environ, {"HERDR_TASK_STORE": self.store_dir, "HERDR_APP_HOME": self.app_home}),
+        for p in (mock.patch.dict(os.environ, {"HERDR_TASK_STORE": self.store_dir}),
                   mock.patch.object(base, "STORE", self.store_dir), mock.patch.object(store, "STORE", self.store_dir),
                   mock.patch.object(ask, "ASKS", os.path.join(self.store_dir, "asks")),
                   mock.patch.object(ask, "run", self.hc_run),
@@ -10605,7 +10605,7 @@ class OpenQuestionSurvivesDone(unittest.TestCase):
     def put_task(self, **extra):
         log = os.path.join(self.root, "session.jsonl")
         t = {"id": 11, "title": "Ship release", "state": "ready", "mode": "worktree", "worktree": self.wt,
-             "branch": "task/11", "base": "main", "merged": True, "space": "sp1",
+             "branch": "task/11", "base": "main", "merged": True,
              "agents": [{"address": "t1", "parent": "t0", "log": log}], **extra}
         with self.store.Store(self.store.locate(self.main), write=True) as s:
             s.data.update(prefix="WUKO", tasks=[t]); s.dirty = True
@@ -10619,15 +10619,15 @@ class OpenQuestionSurvivesDone(unittest.TestCase):
         return report
 
     def test_open_card_becomes_herdr_task_ask_and_closes_worker_then_worktree(self):
-        self.put_task(merged=False, pr={"number": 11, "repo": "o/r"})
-        self.live = [{"address": "t1", "parent": "t0", "state": "live", "agent": "claude", "status": "working",
-                      "foreground": {"name": "claude"}, "cwd": self.wt, "labels": {"herdr.role": "worker"}}]
-        req_dir = os.path.join(self.app_home, "data", "chat-asks", "req")
-        os.makedirs(req_dir, exist_ok=True)
-        with open(os.path.join(req_dir, "t1.1700000000.99.json"), "w") as f:
-            json.dump({"tool_name": "AskUserQuestion", "tool_input": {"questions": [{
-                "question": "Push release tag v1.2.0 now?",
-                "options": [{"label": "Push tag (v1)"}, {"label": "Hold off (Recommended)"}]}]}}, f)
+        log = self.put_task(merged=False, pr={"number": 11, "repo": "o/r"})
+        with open(log, "w") as f:
+            f.write(json.dumps({"type": "assistant", "isSidechain": False, "message": {"content": [
+                {"type": "tool_use", "id": "tu_1", "name": "AskUserQuestion", "input": {"questions": [{
+                    "question": "Push release tag v1.2.0 now?",
+                    "options": [{"label": "Push tag (v1)"}, {"label": "Hold off (Recommended)"}]}]}}]}}) + "\n")
+        self.live = [{"address": "t1", "parent": "t0", "state": "live", "agent": "claude",
+                      "status": {"state": "blocked", "kind": "question"},
+                      "foreground": {"name": "claude"}, "cwd": self.wt, "labels": {"sheepdog.role": "worker"}}]
         with unittest.mock.patch.object(self.commands, "pr_view", lambda t: {"state": "MERGED", "mergeCommit": {"oid": "a1"}}), \
              unittest.mock.patch.object(self.commands, "note_checks", lambda *_: None), \
              unittest.mock.patch.object(self.commands, "watch_main", lambda *_: None), \
