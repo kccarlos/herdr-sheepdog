@@ -3,7 +3,7 @@
 import os
 import re
 
-from .base import hc_json, now
+from .base import hc_json, label_of, now
 from .settings import settings_for
 from .agents import status_word
 from .store import locate, read_list, Store, store_files
@@ -34,7 +34,7 @@ def busy_task_keys():
     keys = set()
     for k in (hc_json("ls") or {}).get("terminals", []):
         if k.get("state") == "live" and status_word(k) in ("working", "blocked"):
-            key = ((hc_json("get", k["address"]) or {}).get("labels") or {}).get("herdr.task")
+            key = label_of((hc_json("get", k["address"]) or {}).get("labels"), "task")  # sheepdog.* or herdr.*
             if key:
                 keys.add(key)
     return keys

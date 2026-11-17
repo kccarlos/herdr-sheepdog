@@ -27,7 +27,32 @@ def verdict():
     subprocess.run(shlex.split(cmd), check=True)
 
 
-if cli == "claude":
+def replay():
+    """SDF-11's template replay: no model. Split the prompt it was started with into rules (a bullet, a numbered step or
+    a paragraph), take the first rule holding every word of the first cue set that matches one, and act on that rule
+    alone: log it and the commands it names in backticks (FAKE_LOG, one JSON line). No rule: exit 2."""
+    rules, cur = [], []
+    for line in prompt.splitlines():
+        if not line.strip() or re.match(r"\s*(- |\d+\. )", line):
+            rules.append(" ".join(cur))
+            cur = [line.strip()] if line.strip() else []
+        else:
+            cur.append(line.strip())
+    rules.append(" ".join(cur))
+    for cue in json.loads(env["FAKE_CUES"]):
+        rule = next((r for r in rules if all(w.lower() in r.lower() for w in cue)), None)
+        if rule:
+            with open(env["FAKE_LOG"], "a") as f:
+                f.write(json.dumps({"cue": cue, "rule": rule, "commands": re.findall(r"`([^`]+)`", rule)}) + "\n")
+            say("● Following: " + rule[:100])
+            sys.exit(0)
+    say("● No rule in my prompt covers this.")
+    sys.exit(2)
+
+
+if mode == "replay":
+    replay()
+elif cli == "claude":
     say("● Reading the diff", "● Bash(git diff)", "  ⎿  (no changes)")
     if mode == "shell":  # its turn ended with a shell of its own still running
         with open(env["FAKE_TAIL"]) as f:

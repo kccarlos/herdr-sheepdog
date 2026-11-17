@@ -3086,13 +3086,13 @@ class WorkersAskThroughHerdrTask(unittest.TestCase):
         self.assertIn("one ask per question", worker)
         self.assertNotIn("question tool (it answers", worker)  # the size overrun asks through herdr-task ask too
         self.assertIn("ask your Assistant with `herdr-task ask`", worker)
-        for line in worker.splitlines():
-            if "AskUserQuestion" in line:
-                self.assertIn("Never your CLI's own blocking question tool", line)
         from herdr_task import templates
-        self.assertNotIn("AskUserQuestion", templates.WORKER_MD)
+        for words in (worker, templates.WORKER_MD):  # SDF-11: the built-in default carries the rule too
+            for line in words.splitlines():
+                if "AskUserQuestion" in line:
+                    self.assertIn("Never your CLI's own blocking question tool", line)
         with open(os.path.join(ROOT, "templates", "assistant.md")) as f:
-            self.assertIn("your question tool", f.read())  # the Assistant's own stays
+            self.assertIn("you reach them only through `herdr-task ask`", f.read())  # nobody reads the Assistant's pane
 
     def view(self, call, status_line="needs owner choices"):
         with open(self.log, "w") as f:
@@ -3137,8 +3137,8 @@ class ReviewAsAHelperAgent(unittest.TestCase):
         with open(os.path.join(ROOT, "templates", "worker.md")) as f:
             worker = f.read()
         for words in (templates.WORKER_MD, worker):
-            self.assertIn("--label herdr.role=reviewer", words)
-            self.assertIn("herdr.task=$HERDR_BROWSER_TASK", words)
+            self.assertIn("--label sheepdog.role=reviewer", words)
+            self.assertIn("sheepdog.task=$SHEEPDOG_TASK", words)
             self.assertIn("codex --no-daemon --sandbox read-only", words)
             self.assertIn("claude --permission-mode plan", words)
             self.assertIn("exactly as the Reviewer line gives it", words)
@@ -3163,15 +3163,16 @@ class ReviewAsAHelperAgent(unittest.TestCase):
             self.assertEqual(templates.instructions("reviewer"), "My own words.")
 
     def test_the_reviewer_says_which_checks_its_sandbox_cant_run(self):
-        """#840: herdr-app check hangs and doctor can't reach the service in Codex's read-only sandbox."""
+        """#840: a check Codex's read-only sandbox can't run is listed, not waited on (SDF-11: no Shepherdr examples)."""
         sys.path.insert(0, BIN)
         from unittest import mock
         from herdr_task import templates
         with open(os.path.join(ROOT, "templates", "reviewer.md")) as f:
             words = f.read()
         for w in (words, templates.REVIEWER_MD):
-            self.assertIn("`herdr-app check` hangs there", w)
+            self.assertIn("such as one needing the network, a window or writes outside the folder", w)
             self.assertIn("Not run in my sandbox:", w)
+            self.assertNotIn("herdr-app", w)
         d = tempfile.mkdtemp()
         with open(os.path.join(d, "reviewer.md"), "w") as f:
             f.write(templates.TEMPLATE_HEADS["reviewer"] + templates.REVIEWER_MD_BEFORE_SANDBOX)
@@ -5434,6 +5435,21 @@ class LoopBreaker(GateReview):
             cmd_recap(argparse.Namespace(id="SHEP-13", json=False, folder=None, decide=decide, why=why, small=small))
         return out[-1]
 
+    def test_a_reviewer_or_the_tasks_own_agent_cant_decide_its_recap(self):
+        """SDF-11: the worker template labels its reviewer sheepdog.role=reviewer; the recap rail reads either prefix."""
+        import argparse
+        from unittest import mock
+        import herdr_task.store as store
+        import herdr_task.launch as launch
+        from herdr_task.budget import cmd_recap
+        self.task["recap"] = {"round": 2, "title": "Recap required", "reasons": []}
+        for labels in ({"sheepdog.role": "reviewer"}, {"sheepdog.task": self.store.key(self.task)}, {"herdr.role": "reviewer"}):
+            with mock.patch.object(store, "open_store", lambda args, write=True: self.store), \
+                    mock.patch.object(launch, "caller_labels", lambda: labels), self.assertRaises(self.commands.Fail) as e:
+                cmd_recap(argparse.Namespace(id="SHEP-13", json=False, folder=None, decide="continue", why="w", small=False))
+            self.assertIn("can't decide its recap", str(e.exception))
+        self.assertNotIn("recaps", self.task)
+
     def test_second_must_fix_round_stops_ready_until_continue_then_again(self):
         from unittest import mock
         self.ready()
@@ -6508,7 +6524,7 @@ class AgyWorker(unittest.TestCase):
             self.assertIn("after `-i`", words)
             self.assertIn("trustedWorkspaces", words)
             self.assertIn("agy rejects a positional prompt", words)
-            self.assertIn("herdr.agent=<codex, claude or agy>", words)
+            self.assertIn("sheepdog.agent=<codex, claude or agy>", words)
 
     def test_resume_by_conversation(self):
         from herdr_task.launch import resume_argv
