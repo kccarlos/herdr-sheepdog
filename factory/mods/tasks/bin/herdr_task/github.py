@@ -373,7 +373,7 @@ def pr_title(s, task):
 
 def pr_body(s, task, summary=None):
     """Short: the task's ref, what ready said (summary), the details and its proof's title. Never the
-    brief: that stays with the task in Shepherdr."""
+    brief: that stays with the task store."""
     lines = [f"Task: {s.ref(task)}"]
     if summary and summary.strip():
         lines += ["", "## Summary", "", summary.strip()]
@@ -381,7 +381,7 @@ def pr_body(s, task, summary=None):
         lines += ["", "## Details", "", task["details"].strip()]
     proof = (task.get("proof") or {}).get("title")
     if proof:
-        lines += ["", "## Proof", "", f"Shepherdr's proof artifact: {proof}"]
+        lines += ["", "## Proof", "", f"Proof artifact: {proof}"]
     return "\n".join(lines)
 
 
@@ -1192,15 +1192,17 @@ MAIN_WATCH_MS = 3 * 3600000  # how long main is watched after a task merges thro
 
 def watch_main(s, task, sha=None):
     """A task just merged through its pull request: its base branch on GitHub is watched for a few
-    hours (ghnews.main_pass), so the Assistant hears once if it goes red (as Shepherdr)."""
+    hours (ghnews.main_pass), so the project's coordinator hears once if it goes red."""
     if not task.get("pr"):
         return
     repo = pr_repo(task, s, github)
     if not repo:
         return
     base = task.get("base") or "main"
+    folder = (getattr(s, "loc", None) or {}).get("folder")
     w = s.data.setdefault("main_watch", {}).setdefault(base, {})
-    w.update(repo=repo, until=now() + MAIN_WATCH_MS, space=task.get("space") or w.get("space"))
+    w.pop("space", None)
+    w.update(repo=repo, until=now() + MAIN_WATCH_MS, folder=folder or w.get("folder"))
     merged = [m for m in w.get("merged") or [] if now() - (m.get("at") or 0) < 24 * 3600000]
     merged.append({"ref": s.ref(task), "title": task["title"], "pr": task["pr"]["number"], "at": now(), **({"sha": sha} if sha else {})})
     w["merged"] = merged[-30:]

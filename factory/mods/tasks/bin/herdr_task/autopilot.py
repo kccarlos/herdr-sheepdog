@@ -415,13 +415,16 @@ def space_info(space):
 
 
 def my_space(args):
-    """--space, else the caller's (an Assistant's own: its pane's, or its chat's). None: --everywhere."""
+    """--space / --folder, else the caller's (an Assistant's own). None: --everywhere."""
+    given = getattr(args, "space", None) or getattr(args, "folder", None)
     if getattr(args, "everywhere", False):
-        if getattr(args, "space", None):
-            raise Fail("Pass --space or --everywhere, not both.")
+        if given:
+            raise Fail("Pass --folder or --everywhere, not both.")
         return None
     if getattr(args, "space", None):
         return bare(args.space)
+    if getattr(args, "folder", None):
+        return folder_of(args.folder)
     labels = caller_labels()
     sp = labels.get("herdr.space") or labels.get("herdr.coordinator.space")
     if not sp:

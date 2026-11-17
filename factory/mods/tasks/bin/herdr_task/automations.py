@@ -16,7 +16,6 @@ from .when import parse_at
 from .settings import bare, set_task, settings_for, SET_KEYS, worker_argv, worktrees_on
 from .agents import agent_running, detail, live_agents, starting, status_of, task_status
 from .sessions import session_of
-from .launch import default_space
 from .store import locate, open_store, read_list, Store, store_files
 from .queues import queue_reason
 from .archive import archive_pass
@@ -254,7 +253,7 @@ def set_auto_fields(s, a, args, adding=False):
         if args.worktree and s.loc["kind"] != "repo":
             raise Fail("Worktrees need a git repo.")
         a["mode"] = "here" if args.here else "worktree"
-    if args.space:
+    if getattr(args, "space", None):
         a["space"] = bare(args.space)
     if args.parent:
         a["parent"] = args.parent
@@ -299,8 +298,6 @@ def cmd_auto(args):
             a = {"id": s.data.get("auto_next", 1), "title": args.title.strip(), "prompt": "", "created": now(), "paused": False,
                  "mode": "worktree" if s.loc["kind"] == "repo" else "here", "runs": []}
             set_auto_fields(s, a, args, adding=True)
-            if not a.get("space"):
-                a["space"] = default_space()
             if not a.get("parent") and os.environ.get("HC_TERMINAL_ID"):
                 a["parent"] = os.environ["HC_TERMINAL_ID"]
             s.data["auto_next"] = a["id"] + 1
@@ -380,13 +377,11 @@ def fire(s, a, why, brief=None):
         t["agent"] = a["agent"]
     for k, v in (a.get("set") or {}).items():
         set_task(t, k, v)
-    space = a.get("space")
+    space = a.get("space") or s.loc["folder"]
     run_rec = {"at": now(), "why": why, "task": s.ref(t)}
     if a.get("from") and why.split(":")[0] in EVENTS:
         run_rec["from"] = from_text(a["from"])
     try:
-        if not space:
-            raise Fail("It has no space to start in.")
         argv = worker_argv(s, t, space)
         parent = a.get("parent")
         reason = queue_reason(s, t)

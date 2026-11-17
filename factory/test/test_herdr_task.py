@@ -589,7 +589,7 @@ class Autopilot(unittest.TestCase):
 
 
 class RemoteInstall(unittest.TestCase):
-    """herdr-task --on installs itself on the other machine first, never over a machine that holds its source."""
+    """herdr-task --on installs itself on the other machine once per bundle digest, then runs directly."""
 
     def setUp(self):
         from unittest import mock
@@ -597,12 +597,10 @@ class RemoteInstall(unittest.TestCase):
         sys.path.insert(0, BIN)
         import herdr_task.cli as cli
         self.cli, self.store, self.ran, self.wrote = cli, tempfile.mkdtemp(), [], []
-        self.source = False
 
         def run(argv, cwd=None, check=False):
             self.ran.append(argv)
-            code = 0 if argv[:2] != ["hc", "exec"] or "test" not in argv else (0 if self.source else 1)
-            return subprocess.CompletedProcess(argv, code, "{}" if "test" not in argv else "", "")
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
 
         def write(argv, **kw):
             self.wrote.append(argv)
@@ -616,16 +614,11 @@ class RemoteInstall(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
 
-    def test_a_machine_without_the_source_gets_this_copy(self):
+    def test_first_run_installs_bundle_and_second_reuses_digest_mark(self):
         self.cli.remote_run("vm", ["autopilot", "list", "--json"])
+        self.cli.remote_run("vm", ["autopilot", "list", "--json"])
+        self.assertEqual(len(self.wrote), 1)
         self.assertEqual(self.wrote[0][:5], ["hc", "file", "write", "--on", "vm"])
-
-    def test_a_machine_holding_the_source_is_never_written_to(self):
-        self.source = True
-        self.cli.remote_run("mini", ["autopilot", "list", "--json"])
-        self.cli.remote_run("mini", ["autopilot", "list", "--json"])
-        self.assertEqual(self.wrote, [])
-        self.assertEqual(sum(1 for a in self.ran if "test" in a), 1)  # asked once, then remembered
         self.assertEqual(self.ran[-1][-3:], ["autopilot", "list", "--json"])
 
 
@@ -3179,9 +3172,7 @@ class WorkersAskThroughHerdrTask(unittest.TestCase):
         d = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, d, True)
         self.log = os.path.join(d, "s.jsonl")
-        self.held = [None]
         for mod, name, value in ((agents, "agent_log", lambda task, address=None: self.log),
-                                 (output, "held_ask", lambda address: self.held[0]),
                                  (output, "progress_clock", lambda *a: None), (agents, "_live", lambda key: [])):
             p = unittest.mock.patch.object(mod, name, value)
             p.start()
@@ -3227,11 +3218,6 @@ class WorkersAskThroughHerdrTask(unittest.TestCase):
         for i in range(1, 5):
             self.assertIn(f"Question {i}:", v["why"])
             self.assertIn(f"Question {i}:", line)
-        # the ask Herdr's hook holds says the same, with nothing in the log
-        open(self.log, "w").close()
-        self.held[0] = {"tool_name": "AskUserQuestion", "tool_input": {"questions": [{"question": q} for q in self.QS[:2]]}}
-        self.assertEqual(self.view({"name": "Read", "input": {}})[0]["why"],
-                         "Asked in a blocking dialog (2 questions): Which palette? | Serif or sans headings?")
 
     def test_a_permission_prompt_reads_as_before(self):
         v, _ = self.view({"name": "Bash", "input": {"command": "npm test"}}, status_line="")
@@ -5066,8 +5052,7 @@ if sys.argv[1] == "kill" and alive:
         self.assertIn(why, sent[0][1])
         # Editing --reviewer clears the block so the next tick starts the newly chosen reviewer.
         self.reviewer_term = {"state": "live", "agent": "claude"}
-        with mock.patch.object(self.commands, "view", lambda s, t, live=None: {**t, "status": "running"}), \
-                mock.patch.object(self.commands, "task_tabs", lambda *a: []), mock.patch.object(self.commands, "name_tabs", lambda *a: []):
+        with mock.patch.object(self.commands, "view", lambda s, t, live=None: {**t, "status": "running"}):
             self.commands.cmd_edit(argparse.Namespace(**{k: None for k in (
                 "folder", "title", "prompt", "prompt_file", "agent", "model", "effort", "reviewer_effort", "set", "base",
                 "start_notes", "finish_notes", "after", "at", "in_", "branch")},
@@ -5344,8 +5329,7 @@ class AmendBrief(unittest.TestCase):
     def edit(self, text):
         import argparse
         from unittest import mock
-        with mock.patch.object(self.commands, "view", lambda s, t, live=None: {**t, "status": t["state"]}), \
-                mock.patch.object(self.commands, "task_tabs", lambda *a: []), mock.patch.object(self.commands, "name_tabs", lambda *a: []):
+        with mock.patch.object(self.commands, "view", lambda s, t, live=None: {**t, "status": t["state"]}):
             self.commands.cmd_edit(argparse.Namespace(**{k: None for k in (
                 "folder", "title", "prompt", "prompt_file", "agent", "model", "effort", "reviewer", "reviewer_model",
                 "reviewer_effort", "set", "base", "start_notes", "finish_notes", "after", "at", "in_", "branch")},
@@ -5965,12 +5949,12 @@ class Scheduled(unittest.TestCase):
                         "--allow-empty", "-m", "base"], check=True)
         self.started, self.clock = [], None
 
-        def begin(s, t, argv, space, parent=None):
+        def begin(s, t, argv, space=None, parent=None):
             t["state"], t["started"] = "running", 1
             for k in ("queue", "queued_at", "held", "scheduled_for"):
                 t.pop(k, None)
             s.dirty = True
-            self.started.append((s.ref(t), argv, space, parent))
+            self.started.append((s.ref(t), argv, s.loc["folder"], parent))
             return {"address": "t9", "agent": "claude"}
 
         later = lambda: self.clock if self.clock is not None else int(__import__("time").time() * 1000)
@@ -5979,11 +5963,8 @@ class Scheduled(unittest.TestCase):
                    mock.patch.dict(os.environ, {"HC_TERMINAL_ID": ""}),
                    mock.patch.object(commands, "begin", begin), mock.patch.object(tick, "begin", begin),
                    mock.patch.object(commands, "ensure_scheduler", lambda quiet=False: {}),
-                   mock.patch.object(commands, "default_space", lambda: "sp1"),
-                   mock.patch.object(tick, "default_space", lambda: "sp1"),
-                   mock.patch.object(commands, "caller_space", lambda: None),
-                   mock.patch.object(commands, "worker_argv", lambda s, t, space, key=None: ["claude"]),
-                   mock.patch.object(tick, "worker_argv", lambda s, t, space, key=None: ["claude"]),
+                   mock.patch.object(commands, "worker_argv", lambda s, t, space=None, agent=None: ["claude"]),
+                   mock.patch.object(tick, "worker_argv", lambda s, t, space=None, agent=None: ["claude"]),
                    mock.patch.object(commands, "live_agents", lambda key: []),
                    mock.patch.object(queues, "live_agents", lambda key: []),
                    mock.patch.object(queues, "machine_hold", lambda: None),
@@ -6070,7 +6051,7 @@ class Scheduled(unittest.TestCase):
         self.assertEqual(self.tick_at(due - 60000), [])
         self.assertEqual(self.task(1)["state"], "scheduled")
         self.assertEqual(self.tick_at(due + 1000), ["APP-1"])
-        self.assertEqual(self.started, [("APP-1", ["claude"], "sp1", None)])  # the space it was added in
+        self.assertEqual(self.started, [("APP-1", ["claude"], os.path.realpath(self.folder), None)])
         t = self.task(1)
         self.assertEqual(t["state"], "running")
         self.assertNotIn("scheduled_for", t)
@@ -6302,7 +6283,7 @@ class Scheduled(unittest.TestCase):
     def test_start_at_now_reschedule_and_unschedule(self):
         self.add("Deploy")
         v = self.run_cmd(self.commands.cmd_start, id="1", at="2099-01-01 09:00", agent=None)
-        self.assertEqual((v["status"], v["queue"]["space"]), ("scheduled", "sp1"))
+        self.assertEqual((v["status"], v["queue"]["argv"]), ("scheduled", ["claude"]))
         v = self.run_cmd(self.commands.cmd_edit, id="1", in_="3h")
         self.assertEqual(v["status"], "scheduled")
         self.assertEqual(v["queue"]["argv"], ["claude"])  # what start would use, kept
@@ -6471,13 +6452,13 @@ class AgyWorker(unittest.TestCase):
         def run(argv, *a, **k):
             ran.append(argv)
             return subprocess.CompletedProcess(argv, 0, json.dumps({"address": "t9"}), "")
-        s = SimpleNamespace(key=lambda t: "dev#6", dirty=False)
+        s = SimpleNamespace(key=lambda t: "dev#6", loc={"folder": "/tmp"}, dirty=False)
         with mock.patch.object(L, "run", run), mock.patch.object(L, "folder_for", lambda s, t: "/tmp"), \
                 mock.patch.object(L, "agent_name", lambda *a: "dev-6-fake"), mock.patch.object(L, "track", lambda *a: None), \
-                mock.patch.object(L, "coordinator_tab", lambda a: None), mock.patch.object(L, "own_argv", lambda a, *_, **__: a), \
+                mock.patch.object(L, "own_argv", lambda a, *_, **__: a), \
                 mock.patch.object(L, "in_shell", lambda a: a), mock.patch.object(L, "low_priority", lambda a, n: a):
-            L.launch(s, {"id": 6, "title": "fake", "agents": []}, ["agy", "--mode", "plan"], "sp1", "Your task")
-            L.launch(s, {"id": 7, "title": "fake", "agents": []}, ["claude"], "sp1", "Your task")
+            L.launch(s, {"id": 6, "title": "fake", "agents": []}, ["agy", "--mode", "plan"], "Your task")
+            L.launch(s, {"id": 7, "title": "fake", "agents": []}, ["claude"], "Your task")
         self.assertEqual(ran[0][-4:], ["--mode", "plan", "-i", "Your task"])  # agy reads prompts only from -i
         self.assertEqual(ran[1][-2:], ["claude", "Your task"])
 
@@ -6561,13 +6542,13 @@ class AgyWorker(unittest.TestCase):
         from herdr_task.agents import agent_log
         t = {"id": 1, "agents": [{"address": "w1", "agent": "claude", "argv": ["claude"], "at": 1, "session": "S", "log": "/S.jsonl"}]}
 
-        def launch(s, task, argv, space, message=None, parent=None, resume=None, role=None):
+        def launch(s, task, argv, message=None, parent=None, resume=None, role=None):
             a = {"address": "w2", "agent": "claude", "argv": argv, "at": 2}
             task["agents"].append(a)
             return a
         with mock.patch.object(C, "launch", launch), mock.patch.object(C, "unarchive", lambda s, t: None), \
-                mock.patch.object(C, "parent_for", lambda p, sp: p):
-            a, resumed = C.start_again(SimpleNamespace(loc={"folder": "/w"}), t, "sp1")
+                mock.patch.object(C, "parent_for", lambda p, sp=None: p):
+            a, resumed = C.start_again(SimpleNamespace(loc={"folder": "/w"}), t)
         self.assertTrue(resumed)
         self.assertEqual(a["session"], "S")
         self.assertEqual(agent_log(t), "/S.jsonl")
@@ -6581,14 +6562,14 @@ class AgyWorker(unittest.TestCase):
         def run(argv, *a, **k):
             ran.append(argv)
             return subprocess.CompletedProcess(argv, 0, json.dumps({"address": "t9"}), "")
-        s = SimpleNamespace(key=lambda t: "dev#6", dirty=False)
+        s = SimpleNamespace(key=lambda t: "dev#6", loc={"folder": "/main"}, dirty=False)
         with mock.patch.object(L, "run", run), mock.patch.object(L, "folder_for", lambda s, t: "/wt/x" if t["mode"] == "worktree" else "/main"), \
                 mock.patch.object(L, "agent_name", lambda *a: "dev-6-fake"), mock.patch.object(L, "track", lambda *a: None), \
-                mock.patch.object(L, "coordinator_tab", lambda a: None), mock.patch.object(L, "HOME", self.home), \
+                mock.patch.object(L, "HOME", self.home), \
                 mock.patch.object(L, "in_shell", lambda a: a), mock.patch.object(L, "low_priority", lambda a, n: a), \
                 mock.patch.object(L, "sandboxes", lambda a: False):  # FAC-36's path, as off a Mac
             for mode, role in (("worktree", None), ("here", None), ("worktree", "reviewer")):
-                L.launch(s, {"id": 6, "mode": mode, "agents": []}, ["agy"], "sp1", role=role)
+                L.launch(s, {"id": 6, "mode": mode, "agents": []}, ["agy"], role=role)
         trusted = lambda hc: json.loads(hc[hc.index("--settings") + 1]).get("trustedWorkspaces") if "--settings" in hc else None
         self.assertEqual(trusted(ran[0]), ["/wt/x"])
         self.assertIsNone(trusted(ran[1]))
@@ -6999,13 +6980,13 @@ class CleanEnv(unittest.TestCase):
         def run(argv, *a, **k):
             ran.append(argv)
             return subprocess.CompletedProcess(argv, 0, json.dumps({"address": "t9"}), "")
-        s = SimpleNamespace(key=lambda t: "dev#6", dirty=False)
+        s = SimpleNamespace(key=lambda t: "dev#6", loc={"folder": "/tmp"}, dirty=False)
         task = {"id": 6, "title": "fake", "agents": []}
         with mock.patch.object(L, "run", run), mock.patch.object(L, "folder_for", lambda s, t: "/tmp"), \
                 mock.patch.object(L, "agent_name", lambda *a: "dev-6-fake"), mock.patch.object(L, "track", lambda *a: None), \
-                mock.patch.object(L, "coordinator_tab", lambda a: None), mock.patch.object(L, "own_argv", lambda a, *_, **__: a), \
+                mock.patch.object(L, "own_argv", lambda a, *_, **__: a), \
                 mock.patch.object(L, "in_shell", lambda a: a), mock.patch.object(L, "low_priority", lambda a, n: a):
-            L.launch(s, task, ["env"], "sp1")
+            L.launch(s, task, ["env"])
         hc = ran[0]
         self.assertEqual(hc[:2], ["hc", "run"])
         env = self.agent_env(hc[hc.index("--") + 1:])
@@ -7013,7 +6994,7 @@ class CleanEnv(unittest.TestCase):
             self.assertNotIn(k, env)
         for k, v in self.KEPT.items():
             self.assertEqual(env.get(k), v)
-        self.assertEqual(env.get("HERDR_BROWSER_TASK"), "dev#6")  # what the launch sets on purpose stays
+        self.assertEqual(env.get("SHEEPDOG_TASK"), "dev#6")  # what the launch sets on purpose stays
 
     def test_the_same_line_everywhere(self):
         """herdr-task, the window and the service (core/clean-env.js) and restart.sh clear the same names."""
@@ -7331,7 +7312,7 @@ class AutomationFromAnotherMachine(unittest.TestCase):
                 return real_run([sys.executable, "-c", b, BIN, os.path.join(BIN, "herdr-task"), *rest], env=self.b_env, **kw)
             return real_run(argv, **kw)
 
-        def begin(s, t, argv, space, parent=None):
+        def begin(s, t, argv, space=None, parent=None):
             t["state"], t["started"] = "running", 1
             self.started.append({"ref": s.ref(t), "prompt": t["prompt"]})
 
@@ -7340,9 +7321,8 @@ class AutomationFromAnotherMachine(unittest.TestCase):
                    mock.patch.object(settings, "SETTINGS", os.path.join(self.tmp, "a-settings.json")),
                    mock.patch.object(au.subprocess, "run", run), mock.patch.object(au, "guard", lambda a: None),
                    mock.patch.object(au, "begin", begin), mock.patch.object(au, "queue_reason", lambda s, t: None),
-                   mock.patch.object(au, "worker_argv", lambda s, t, space: ["claude"]),
+                   mock.patch.object(au, "worker_argv", lambda s, t, space=None: ["claude"]),
                    mock.patch.object(au, "ensure_scheduler", lambda quiet=False: {}),
-                   mock.patch.object(au, "default_space", lambda: "sp1"),
                    mock.patch.object(au, "live_agents", lambda key: []),
                    mock.patch.object(machines, "connected_machines", lambda: [{"name": "vmb", "state": "connected"}]),
                    mock.patch.object(ap, "autopilot_pass", lambda r: None),
@@ -7819,202 +7799,6 @@ class AssistantSettings(unittest.TestCase):
         self.assertIn("- Tasks at once: 3 per folder (more wait and start by themselves); set for this project", note_merged)
 
 
-class CodexAsksOnTheCard(unittest.TestCase):
-    """SHEP-91: a Codex worker's PermissionRequest hook (`herdr-task _allow`) allows its own commands, and hands anything
-    else to the chat's card (ask-hook.sh, marked HERDR_ASK_CHAINED), waiting as long as the card does."""
-
-    def run_allow(self, command, hook, home=None):
-        app = tempfile.mkdtemp()
-        if hook is not None:
-            os.makedirs(os.path.join(app, "mods", "chat"))
-            with open(os.path.join(app, "mods", "chat", "ask-hook.sh"), "w") as f:
-                f.write(hook)
-        code = ("import sys, types, argparse; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
-                "from herdr_task.launch import cmd_allow; cmd_allow(argparse.Namespace(command='/x/herdr-task'))")
-        req = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "turn_id": "t1"})
-        # its own HOME too: else, with no hook in the app home, cmd_allow falls back to ~/.local/share/herdr/ask's
-        # copy, and the real one files a real card for this test and waits on it forever (SHEP-147)
-        env = {**os.environ, "HERDR_APP_HOME": app, "HOME": home or app}
-        env.pop("HERDR_ASK_CHAINED", None)
-        return subprocess.run([sys.executable, "-c", code, BIN], input=req, capture_output=True, text=True, env=env)
-
-    def test_its_own_command_never_asks(self):
-        out = self.run_allow("/x/herdr-task status SHEP-1 hi", 'echo "should not run"')
-        self.assertEqual(json.loads(out.stdout)["hookSpecificOutput"]["decision"], {"behavior": "allow"}, out.stderr)
-
-    def test_anything_else_goes_to_the_card(self):
-        card = ('[ "$HERDR_ASK_CHAINED" = 1 ] || exit 0; grep -q "rm -rf build" || exit 0; '
-                'echo \'{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"no"}}}\'')
-        out = self.run_allow("rm -rf build", card)
-        self.assertEqual(json.loads(out.stdout)["hookSpecificOutput"]["decision"], {"behavior": "deny", "message": "no"}, out.stderr)
-        # no card answer (answered in the terminal, or no chat hook installed): no decision, Codex asks itself
-        self.assertEqual(self.run_allow("rm -rf build", "exit 0").stdout, "")
-        self.assertEqual(self.run_allow("rm -rf build", None).stdout, "")
-
-    def test_without_an_app_hook_the_synced_copy_answers(self):
-        """SHEP-147: a machine that only runs tasks has no app-home hook; cmd_allow falls back to the copy a sync left in
-        ~/.local/share/herdr/ask. It is HOME's own: a test's HOME, never the person's real one."""
-        home = tempfile.mkdtemp()
-        ask = os.path.join(home, ".local", "share", "herdr", "ask")
-        os.makedirs(ask)
-        with open(os.path.join(ask, "ask-hook.sh"), "w") as f:
-            f.write('[ "$HERDR_ASK_CHAINED" = 1 ] || exit 0; '
-                    'echo \'{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"synced"}}}\'')
-        out = self.run_allow("rm -rf build", None, home=home)
-        self.assertEqual(json.loads(out.stdout)["hookSpecificOutput"]["decision"]["message"], "synced", out.stderr)
-        # neither: nothing answers, and no other home's copy is asked
-        self.assertEqual(self.run_allow("rm -rf build", None, home=tempfile.mkdtemp()).stdout, "")
-        # this run itself: a throwaway HOME, so no test can reach the real copy (test/home_guard.py)
-        self.assertNotEqual(os.path.realpath(os.path.expanduser("~")), home_guard.REAL)
-
-    def test_a_claude_worker_asks_on_the_card_too(self):
-        # SHEP-139: a Claude worker's question tool (AskUserQuestion) reached the card only where ~/.claude/settings.json
-        # had Herdr's hook: a machine that only runs tasks (synced herdr-task, no Herdr app) showed just "Open terminal".
-        # Its launch now carries the same hook as Codex's, in its --settings, once, beside what was there.
-        sys.path.insert(0, BIN)
-        from herdr_task import launch
-        argv = launch.own_argv(["claude", "--settings", json.dumps({"fastMode": False, "hooks": {"Stop": [{"hooks": []}]}}), "go"])
-        st = json.loads(argv[argv.index("--settings") + 1])
-        [entry] = st["hooks"]["PermissionRequest"]
-        self.assertIn(" _allow --command ", entry["hooks"][0]["command"])
-        self.assertEqual(entry["hooks"][0]["timeout"], launch.ASK_TIMEOUT)
-        self.assertFalse(st["fastMode"])
-        self.assertIn("Stop", st["hooks"])
-        # resumed (its argv given again): still one hook, and its allow rules not repeated
-        again = launch.own_argv(argv)
-        st2 = json.loads(again[again.index("--settings") + 1])
-        self.assertEqual(len(st2["hooks"]["PermissionRequest"]), 1)
-        self.assertEqual(st2["permissions"]["allow"], st["permissions"]["allow"])
-        # no --settings of its own: one is added
-        plain = launch.own_argv(["claude", "go"])
-        self.assertIn("PermissionRequest", json.loads(plain[2])["hooks"])
-
-    def test_the_card_hook_where_only_tasks_run(self):
-        # no Herdr app home here: the copy a sync left in ~/.local/share/herdr/ask is the card's hook
-        home = tempfile.mkdtemp()
-        os.makedirs(os.path.join(home, ".local", "share", "herdr", "ask"))
-        hook = os.path.join(home, ".local", "share", "herdr", "ask", "ask-hook.sh")
-        with open(hook, "w") as f:
-            f.write("exit 0\n")
-        code = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
-                "from herdr_task.launch import ask_hook; print(ask_hook())")
-        env = {**os.environ, "HOME": home, "HERDR_APP_HOME": os.path.join(home, "none")}
-        out = subprocess.run([sys.executable, "-c", code, BIN], capture_output=True, text=True, env=env)
-        self.assertEqual(out.stdout.strip(), hook, out.stderr)
-
-    def test_a_sync_takes_the_card_hook_along(self):
-        sys.path.insert(0, BIN)
-        from herdr_task import machines
-        app = tempfile.mkdtemp()
-        os.makedirs(os.path.join(app, "mods", "chat"))
-        for name in ("ask-hook.sh", "ask-end.py"):
-            with open(os.path.join(app, "mods", "chat", name), "w") as f:
-                f.write(f"# {name}\n")
-        from unittest import mock
-        with mock.patch.object(machines, "APP_HOME", app):
-            files = {f["path"]: f for f in machines.manifest()["files"]}
-        self.assertEqual(files[".local/share/herdr/ask/ask-hook.sh"]["data"], b"# ask-hook.sh\n")
-        self.assertEqual(files[".local/share/herdr/ask/ask-hook.sh"]["mode"], 0o755)
-        self.assertIn(".local/share/herdr/ask/ask-end.py", files)
-
-    def test_codex_waits_as_long_as_the_card(self):
-        sys.path.insert(0, BIN)
-        from herdr_task import launch
-        argv = launch.own_argv(["codex", "--sandbox", "workspace-write"])
-        self.assertIn(f"timeout={launch.ASK_TIMEOUT}", argv[2])
-        self.assertEqual(launch.ASK_TIMEOUT, 1800)
-
-
-    def test_a_codex_workers_proof_and_commits_never_ask(self):
-        """#866: Codex's sandbox can't write Shepherdr's stores nor git's data, so a Codex worker runs its proof and
-        commits escalated: its own hook allows exactly those (not a Claude worker's, nor anything chained or riskier)."""
-        sys.path.insert(0, BIN)
-        from unittest import mock
-        from herdr_task import launch
-        with mock.patch.object(launch.shutil, "which", lambda n: None):
-            own = lambda c, sb=True: launch.own_command("/x/herdr-task", c, sb)  # noqa: E731
-            for c in ("herdr-artifact publish /tmp/p --title 'X · Proof'", "herdr-artifact guide", "herdr-artifact update a-1 /tmp/p",
-                      "git add calc.py", "git commit -m 'Fix add'", "/x/herdr-task ready SHEP-1 --summary hi"):
-                self.assertTrue(own(c), c)
-            for c in ("herdr-artifact publish /tmp/p --custom", "herdr-artifact rm a-1", "git push", "git -c core.hooksPath=/tmp commit",
-                      "git -C /elsewhere commit -m x", "git add . && git commit -m x", "git commit -m \"$(id)\"", "rm -rf build"):
-                self.assertFalse(own(c), c)
-            self.assertFalse(own("git commit -m x", False))
-            self.assertFalse(own("herdr-artifact publish /tmp/p", False))
-        # its review: the reviewer the brief's Reviewer line gives, read-only, and its own helpers only
-        from herdr_task.settings import reviewer_command
-        rv = reviewer_command("codex", folder=tempfile.mkdtemp())
-        with mock.patch.dict(os.environ, {"HERDR_BROWSER_TASK": "demo#1"}):
-            own = lambda c, sb=True: launch.own_command("/x/herdr-task", c, sb)  # noqa: E731
-            yes = [f"hc run --bg --name demo-1-review --label \"herdr.task=$HERDR_BROWSER_TASK\" --label herdr.role=reviewer "
-                   f"--label herdr.agent=codex -- {rv} 'Review it: \"ok\" & $x'",
-                   "hc run --bg --name demo-1-review -- claude --permission-mode plan --model opus 'review'",
-                   "hc wait demo-1-review --timeout 600", "hc read demo-1-review --lines 400", "hc kill demo-1-review"]
-            no = ["hc run --bg --name demo-1-review -- claude --permission-mode plan --dangerously-skip-permissions x",
-                  "hc run --bg --name demo-1-review -- codex --no-daemon --sandbox read-only --ask-for-approval never "
-                  "-c sandbox_mode=\"danger-full-access\" x",
-                  "hc run --bg --name demo-1-review -- sh -c 'rm -rf /'", "hc run --bg --name x -- claude --permission-mode plan x",
-                  "hc kill t15q", "hc send demo-1-review hi"]
-            for c in yes:
-                self.assertTrue(own(c), c)
-            for c in no:
-                self.assertFalse(own(c), c)
-            self.assertFalse(own(yes[2], False))
-        argv = launch.own_argv(["codex", "-s", "workspace-write"])
-        self.assertIn(" _allow --command ", argv[2])
-        self.assertIn(" --sandboxed", argv[2])
-        claude = json.loads(launch.own_argv(["claude", "go"])[2])["hooks"]["PermissionRequest"][0]["hooks"][0]["command"]
-        self.assertNotIn("--sandboxed", claude)
-
-    def test_a_codex_worker_never_stops_on_trust_this_folder(self):
-        """#866: a Codex worker in a folder Codex hasn't seen sat at "Trust this folder?", nobody at the keys."""
-        sys.path.insert(0, BIN)
-        from herdr_task import launch
-        d = os.path.realpath(tempfile.mkdtemp())
-        subprocess.run(["git", "init", "-q", d], check=True)
-        argv = launch.own_argv(["codex", "-s", "workspace-write"], d)
-        self.assertIn("projects={%s={trust_level=\"trusted\"}}" % json.dumps(d), argv)
-        # given already (the person's own argv): left as it is
-        mine = ["codex", "-c", "projects={}"]
-        self.assertEqual(sum(str(a).startswith("projects") for a in launch.own_argv(mine, d)), 1)
-        self.assertFalse(any(str(a).startswith("projects") for a in launch.own_argv(["codex"])))
-
-    def test_a_codex_worker_never_stops_on_shepherdrs_own_hooks(self):
-        """#977: Shepherdr's chat hooks in ~/.codex/hooks.json, new or updated, stopped a resumed Codex worker at
-        "Hooks need review" while the task showed Working. Its launch trusts exactly those, as Codex hashes them
-        (the hash below is what real Codex 0.163 wrote to config.toml on "Trust all")."""
-        sys.path.insert(0, BIN)
-        from unittest import mock
-        from herdr_task import launch
-        home = tempfile.mkdtemp()
-        note = "sh '/x/mods/chat/session-note.sh'"
-        with open(os.path.join(home, "hooks.json"), "w") as f:
-            json.dump({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": note, "timeout": 10}]}],
-                                 "PermissionRequest": [{"hooks": [{"type": "command", "command": "sh mine.sh", "timeout": 5}]},
-                                                       {"hooks": [{"type": "command", "command": "sh '/x/mods/chat/ask-hook.sh'",
-                                                                   "timeout": 1800}]}]}}, f)
-        with mock.patch.dict(os.environ, {"CODEX_HOME": home}):
-            argv = launch.own_argv(["codex", "-s", "workspace-write"])
-        [state] = [a for a in argv if str(a).startswith("hooks.state=")]
-        self.assertIn('%s={trusted_hash="sha256:27e15e7a6fd4251f1d46d945ad404948371404ab0a0d725f899e178a8417bbb4"}'
-                      % json.dumps(home + "/hooks.json:session_start:0:0"), state)
-        self.assertIn(json.dumps(home + "/hooks.json:permission_request:1:0"), state)
-        self.assertNotIn(":permission_request:0:0\"={", state.replace("/<session-flags>/config.toml:permission_request:0:0", ""))
-        self.assertIn('"/<session-flags>/config.toml:permission_request:0:0"', state)  # its own -c hook, as before
-        # no hooks.json: only its own -c hook
-        with mock.patch.dict(os.environ, {"CODEX_HOME": tempfile.mkdtemp()}):
-            [state] = [a for a in launch.own_argv(["codex"]) if str(a).startswith("hooks.state=")]
-        self.assertEqual(state.count("trusted_hash"), 1)
-
-    def test_a_claude_worker_never_compacts_while_idle(self):
-        """#1021: a Ready Claude worker flipped to Working about hourly: Claude Code's idle compaction is a turn."""
-        sys.path.insert(0, BIN)
-        from herdr_task import launch
-        st = json.loads(launch.own_argv(["claude", "go"])[2])
-        self.assertIs(st["idleCompaction"], False)
-        mine = launch.own_argv(["claude", "--settings", json.dumps({"idleCompaction": True}), "go"])
-        self.assertIs(json.loads(mine[2])["idleCompaction"], True)  # the person's own argv says otherwise: theirs
-
 class TaskFlow(unittest.TestCase):
     """SHEP-170's task flow fixes, in a throwaway git repo and store; hc and gh are never run."""
 
@@ -8065,34 +7849,81 @@ class TaskFlow(unittest.TestCase):
         import argparse
         return argparse.Namespace(**{"id": "SHEP-1", "json": True, "folder": None, **kw})
 
-    def test_switch_moves_the_task_to_the_given_space(self):
-        """#837: an explicit --space wins over the old agent's herdr.task.space label."""
-        self.task["space"] = "sp-a"
-        self.live = [{"address": "t1", "status": {"state": "working"}, "labels": {"herdr.task.space": "sp-a"}}]
-        got = []
-        self.patch(self.commands, "agent_running", lambda k: True)
-        self.patch(self.commands, "refresh_sessions", lambda *a: None)
-        self.patch(self.commands, "run", lambda *a, **k: None)
-        self.patch(self.commands, "start_again", lambda s, t, space, *a, **k: (got.append(space), ({"address": "t2", "agent": "claude"}, False))[1])
-        self.commands.cmd_switch(self.args(space="sp-b", agent="claude", argv=None, parent="t9", keep=False))
-        self.assertEqual(got, ["sp-b"])
-        got.clear()
-        self.commands.cmd_switch(self.args(space=None, agent="claude", argv=None, parent=None, keep=False))
-        self.assertEqual(got, ["sp-a"])  # none given: the old agent's own space
+    def test_project_folder_coordinators_labels_watch_main_and_cli_flags(self):
+        """SDF-7: coordinator_in resolves explicit sheepdog.project labels before terminal cwd, launch stamps
+        sheepdog.* labels without task['space']/tab, watch_main keys on folder, link drops star, and --space is gone."""
+        from types import SimpleNamespace
+        import herdr_task.cli as cli
+        import herdr_task.github as github
+        import herdr_task.launch as launch
+        import herdr_task.link as link
+        import herdr_task.output as output
+        other = os.path.join(self.root, "other")
+        os.makedirs(other)
+        terms = [
+            {"address": "c-other", "state": "live", "cwd": self.main,
+             "labels": {"sheepdog.role": "coordinator", "sheepdog.project": other}},
+            {"address": "c-main", "state": "live", "cwd": other,
+             "labels": {"sheepdog.role": "coordinator", "sheepdog.project": self.main}},
+        ]
+        by_addr = {t["address"]: t for t in terms}
+        self.patch(launch, "hc_json", lambda *a: {"terminals": terms} if a[:1] == ("ls",) else by_addr.get(a[1]) if a[:1] == ("get",) else None)
+        self.assertEqual(launch.coordinator_in(self.main), "c-main")
+        self.assertEqual(launch.parent_for(None, self.main), "c-main")
+        # launch stamps sheepdog.{project,task,role,agent} and SHEEPDOG_TASK without space/tab
+        ran = []
+        self.patch(launch, "run", lambda argv, *a, **k: (ran.append(argv), subprocess.CompletedProcess(argv, 0, '{"address":"w1"}', ""))[1])
+        self.patch(launch, "agent_name", lambda *a: "shep-1-worker")
+        self.patch(launch, "track", lambda *a: None)
+        self.patch(launch, "in_shell", lambda a: a)
+        self.patch(launch, "low_priority", lambda a, n: a)
+        launch.launch(self.store, self.task, ["claude"], "Work on it", parent="c-main")
+        hc = ran[0]
+        key = self.store.key(self.task)
+        for lbl in (f"sheepdog.project={key.partition('#')[0]}", f"sheepdog.task={key}",
+                    "sheepdog.role=worker", "sheepdog.agent=claude"):
+            self.assertIn(lbl, hc)
+        self.assertNotIn("space", self.task)
+        self.assertFalse(any("herdr.tab=" in x or "herdr.task.space=" in x for x in hc))
+        # output.view omits tab from live entries; link.ACTIONS omits star; cli rejects --space
+        self.patch(output, "subagents", lambda k: [])
+        live_row = output.view(self.store, self.task, [{"address": "w1", "agent": "claude", "status": {"state": "working"},
+                                                        "labels": {"sheepdog.role": "worker", "herdr.tab": "old"}}])["live"][0]
+        self.assertNotIn("tab", live_row)
+        self.assertNotIn("star", link.ACTIONS)
+        self.task["pr"] = {"number": 7, "repo": "acme/repo"}
+        github.watch_main(self.store, self.task)
+        self.assertEqual(self.store.data["main_watch"]["main"]["folder"], self.main)
+        self.assertNotIn("space", self.store.data["main_watch"]["main"])
+        import contextlib, io
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()), \
+                self.mock.patch.object(sys, "argv", ["herdr-task", "list", "--space", "sp1"]):
+            cli.main()
+        # Worker own_argv keeps Codex folder trust + _allow and Claude idleCompaction=False without ask-hook chaining
+        st = json.loads(launch.own_argv(["claude", "go"])[2])
+        self.assertIs(st["idleCompaction"], False)
+        self.assertNotIn("hooks", st)
+        real_main = os.path.realpath(self.main)
+        self.assertIn(f'projects={{{json.dumps(real_main)}={{trust_level="trusted"}}}}',
+                      launch.own_argv(["codex", "-s", "workspace-write"], real_main))
+        with self.mock.patch.dict(os.environ, {"SHEEPDOG_TASK": "demo#1"}):
+            self.assertTrue(launch.own_command("/x/herdr-task",
+                'hc run --bg --name demo-1-review --label "sheepdog.task=$SHEEPDOG_TASK" --label sheepdog.role=reviewer '
+                '--label sheepdog.agent=claude -- claude --permission-mode plan "review"', sandboxed=True))
 
     def switch_events(self, me=None):
         """cmd_switch with the old agent t1 mid-turn on session S1: what it ran, in order."""
-        self.live = [{"address": "t1", "status": {"state": "working"}, "labels": {"herdr.task.space": "sp-a"}}]
+        self.live = [{"address": "t1", "status": {"state": "working"}, "labels": {}}]
         self.task["agents"] = [{"address": "t1", "agent": "claude", "argv": ["claude"], "at": 1, "session": "S1"}]
         events = []
         self.patch(self.commands, "agent_running", lambda k: True)
         self.patch(self.commands, "refresh_sessions", lambda *a: None)
         self.patch(self.commands, "stop_note", lambda *a, **k: None)
         self.patch(self.commands, "unarchive", lambda *a: None)
-        self.patch(self.commands, "parent_for", lambda parent, space: parent)
+        self.patch(self.commands, "parent_for", lambda parent, project=None: parent)
         self.patch(self.commands, "run", lambda argv, **k: events.append(("run", argv)))
 
-        def launch(s, t, argv, space, message=None, parent=None, resume=None, role=None):
+        def launch(s, t, argv, message=None, parent=None, resume=None, role=None):
             events.append(("launch", resume, message))
             return {"address": "t2", "agent": "claude", "argv": argv}
         self.patch(self.commands, "launch", launch)
@@ -8100,8 +7931,7 @@ class TaskFlow(unittest.TestCase):
         if me:
             env["HC_TERMINAL_ID"] = me
         with self.mock.patch.dict(os.environ, env, clear=True):
-            self.commands.cmd_switch(self.args(space=None, agent=None, argv='["claude", "--model", "opus"]', parent=None,
-                                               keep=False))
+            self.commands.cmd_switch(self.args(agent=None, argv='["claude", "--model", "opus"]', parent=None, keep=False))
         return events
 
     def test_switch_ends_the_old_agent_before_resuming_its_session(self):
@@ -8164,8 +7994,8 @@ class TaskFlow(unittest.TestCase):
         self.patch(self.commands, "workers", lambda s, t: [{"address": "t1", "labels": {}}] if t["id"] in (1, 6) else [])
         self.patch(self.commands, "refresh_sessions", lambda *a: None)
         self.patch(self.commands, "end_agent", lambda s, t, address: got.append(("end", address)))
-        self.patch(self.commands, "start_again", lambda s, t, space, key, *a, **k: (
-            got.append(("start", t["id"], key, list(self.commands.worker_argv(s, t, space)))), ({"address": "t9", "agent": "agy"}, False))[1])
+        self.patch(self.commands, "start_again", lambda s, t, key=None, *a, **k: (
+            got.append(("start", t["id"], key, list(self.commands.worker_argv(s, t)))), ({"address": "t9", "agent": "agy"}, False))[1])
         return got
 
     def test_switch_all_moves_a_pool_off_claude(self):
@@ -8242,10 +8072,10 @@ class TaskFlow(unittest.TestCase):
         self.patch(self.commands, "refresh_sessions", lambda *a: None)
         self.patch(self.commands, "end_agent", lambda *a: None)
         self.patch(self.commands, "unarchive", lambda *a: None)
-        self.patch(self.commands, "parent_for", lambda parent, space: parent)
+        self.patch(self.commands, "parent_for", lambda parent, project=None: parent)
         self.patch(launch, "closing_line", lambda *a: "")
         self.patch(launch, "settings_block", lambda *a, **kw: "")
-        self.patch(self.commands, "launch", lambda s, t, argv, space, message=None, **k: (
+        self.patch(self.commands, "launch", lambda s, t, argv, message=None, **k: (
             sent.append((argv, message)), {"address": "t2", "agent": "agy", "argv": argv})[1])
         self.patch(self.commands, "workers", lambda s, t: self.live)
         self.commands.cmd_switch(self.args(id=None, all=True, from_="claude", agent="agy", model=None, argv=None, space=None,
@@ -8287,20 +8117,20 @@ class TaskFlow(unittest.TestCase):
         settings.write_max_running(self.store, None, None)
         tcfg = settings.settings_for(self.store)["tasks"]
         self.assertEqual((tcfg["merge"], tcfg["check"], tcfg["max_running"]), ("auto", "make test", 10))
-        # Takeover reads backup from projects[folder] while forwarding space to launch.py until SDF-7
+        # Takeover reads backup from projects[folder] and resolves parent/brief/launch by project folder
         import herdr_task.takeover as takeover
         self.settings({"projects": {folder: {"backup": {"agent": "agy", "argv": ["agy"]}}}})
         seen = {}
-        self.patch(takeover, "parent_for", lambda p, sp: seen.setdefault("parent", sp) or "c1")
-        self.patch(takeover, "brief", lambda s, t, p, sp, a: seen.setdefault("brief", sp) or "B")
-        self.patch(takeover, "launch", lambda s, t, a, sp, txt, parent=None: seen.setdefault("launch", sp) and {"address": "t9"})
+        self.patch(takeover, "parent_for", lambda p, proj=None: seen.setdefault("parent", proj) or "c1")
+        self.patch(takeover, "brief", lambda s, t, p, a: seen.setdefault("brief", s.loc["folder"]) or "B")
+        self.patch(takeover, "launch", lambda s, t, a, txt, parent=None: seen.setdefault("launch", s.loc["folder"]) and {"address": "t9"})
         self.patch(takeover, "kill_agent", lambda *_: None)
         self.patch(takeover, "stop_note", lambda *_, **__: None)
-        t_row = {"id": 9, "title": "x", "space": "sp12", "agents": [{"address": "t8", "agent": "claude", "parent": "c1"}]}
-        res = takeover.takeover(self.store, t_row, {"address": "t8", "labels": {"sheepdog.agent": "claude", "herdr.task.space": "sp12"}},
+        t_row = {"id": 9, "title": "x", "agents": [{"address": "t8", "agent": "claude", "parent": "c1"}]}
+        res = takeover.takeover(self.store, t_row, {"address": "t8", "labels": {"sheepdog.agent": "claude"}},
                                 {"reason": "Out of allowance until 5pm"}, None, {})
         self.assertIsNone(res)
-        self.assertEqual((seen["parent"], seen["brief"], seen["launch"], t_row["backup"]["to"]), ("sp12", "sp12", "sp12", "agy"))
+        self.assertEqual((seen["parent"], seen["brief"], seen["launch"], t_row["backup"]["to"]), (folder, folder, folder, "agy"))
 
     def test_a_running_task_keeps_its_briefs_review(self):
         """#750: Review turned on everywhere while a task runs: its brief said off, so show and ready say off too."""
@@ -9328,7 +9158,7 @@ class Resume(unittest.TestCase):
 
     def test_an_agent_without_an_update_switch_gets_nothing_extra(self):
         self.started_task({"agent": "agy", "perm": "auto"})
-        self.assertEqual([w.split("=")[0] for w in self.env_words()], ["HERDR_BROWSER_TASK"])
+        self.assertEqual([w.split("=")[0] for w in self.env_words()], ["SHEEPDOG_TASK"])
         self.assertEqual(self.launch.no_update_env(["codex", "exec"]), [])
 
     def test_fresh_handoff_when_session_missing_or_cli_changed_without_duplicate_continue(self):
@@ -11832,13 +11662,13 @@ class BuildOutput(unittest.TestCase):
         self.put(cfg_path, json.dumps({"everywhere": {"tasks": {"worktree_root": wt_root, "proof": False}}}))
         self.briefs = []
 
-        def fake_launch(s, t, argv, space, text, parent=None, resume=None):
+        def fake_launch(s, t, argv, text=None, parent=None, resume=None):
             self.briefs.append(text)
             t.setdefault("agents", []).append(a := {"address": f"t{t['id']}", "agent": "claude", "argv": argv, "at": 1})
             return a
         for mod, name, val in ((store, "STORE", store_dir), (base, "STORE", store_dir), (settings, "SETTINGS", cfg_path),
-                               (commands, "launch", fake_launch), (commands, "ensure_scheduler", lambda **k: {}), (commands, "retag_tabs", lambda s: []),
-                               (commands, "live_agents", lambda k: []), (commands, "queue_reason", lambda *a: None), (commands, "parent_for", lambda p, sp: p),
+                               (commands, "launch", fake_launch), (commands, "ensure_scheduler", lambda **k: {}),
+                               (commands, "live_agents", lambda k: []), (commands, "queue_reason", lambda *a: None), (commands, "parent_for", lambda p, sp=None: p),
                                (launch, "caller_labels", lambda: {}), (github, "live_agents", lambda k: []), (github, "live_helpers", lambda k: [])):
             self.enterContext(mock.patch.object(mod, name, val))
 
@@ -11860,7 +11690,7 @@ class BuildOutput(unittest.TestCase):
         line = f"Build output: {self.bdir}/APP-1/ (e.g. xcodebuild -derivedDataPath there); never the default DerivedData."
         self.assertIn(line, self.run_cli("show", "APP-1"))
         self.assertFalse(os.path.exists(os.path.join(self.bdir, "APP-1")))
-        self.run_cli("start", "APP-1", "--space", "sp1")
+        self.run_cli("start", "APP-1")
         self.assertTrue(os.path.isdir(os.path.join(self.bdir, "APP-1")) and line in self.briefs[-1])
         self.run_cli("config", "--build-dir", "")
         self.assertNotIn("Build output:", self.run_cli("show", "APP-1"))
@@ -11869,7 +11699,7 @@ class BuildOutput(unittest.TestCase):
         self.run_cli("config", "--prefix", "APP", "--build-dir", self.bdir)
         for title in ("First", "Second", "Third"):
             self.run_cli("add", title, "--here")
-        self.run_cli("start", "APP-1", "--space", "sp1")
+        self.run_cli("start", "APP-1")
         keep_out = self.put(os.path.join(self.root, "outside", "keep.txt"), "safe")
         outside, sib_link = os.path.dirname(keep_out), os.path.join(self.bdir, "link-out")
         os.chmod(self.put(os.path.join(self.bdir, "APP-1", "DerivedData", "obj.o")), 0o444)
@@ -12394,7 +12224,7 @@ class AgyStartNudge(unittest.TestCase):
                 mock.patch.object(self.output, "now", lambda: self.t0 + off), mock.patch.object(self.c, "screen_of", lambda a, n: self.screen), \
                 mock.patch.object(agents, "own_line", lambda *a, **kw: None), mock.patch.object(agents, "pending_call", lambda *a: (None, {})), \
                 mock.patch.object(self.output, "own_line", lambda *a, **kw: None), mock.patch.object(self.output, "blocking_dialog", lambda *a: None), \
-                mock.patch.object(self.output, "held_ask", lambda a: None), mock.patch.object(agents, "last_question", lambda *a: None), \
+                mock.patch.object(agents, "last_question", lambda *a: None), \
                 mock.patch.object(self.output, "subagents", lambda key: []):
             v = self.output.view(self.s, self.task, [k])
         return v["status"], v["why"]
@@ -12535,7 +12365,7 @@ class DoubleStart(unittest.TestCase):
         import time
         from unittest import mock
 
-        def begin(s, t, argv, space, parent=None):
+        def begin(s, t, argv, space=None, parent=None):
             t["state"], t["started"] = "running", 1
             for k in ("queue", "queued_at", "held", "scheduled_for"):
                 t.pop(k, None)

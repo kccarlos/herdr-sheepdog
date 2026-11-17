@@ -13,11 +13,11 @@ import time
 
 from . import sandbox
 from .checks import checks_line, sync_check, sync_mode, SYNC_FAILED
-from .base import Fail, git, guard, hc_json, kill_agent, now, run, STORE, stop_note, VERSION
-from .settings import (write_max_running, 
-    accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, bare, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
+from .base import Fail, git, guard, hc_json, kill_agent, label_of, now, run, STORE, stop_note, VERSION
+from .settings import (write_max_running,
+    accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
     fable_due, gate_min, merge_hold, merge_policy,
-    merge_wait_why, MUST_WORDS, remove_build_dir, review_kind, review_limits, reviewed_for_head, set_opts, settings_block, settings_for, space_base,
+    merge_wait_why, MUST_WORDS, project_base, remove_build_dir, review_kind, review_limits, reviewed_for_head, set_opts, settings_block, settings_for,
     task_settings, worker_argv, worker_pick, worktrees_on, set_task, argv_model, AGENTS,
 )
 from .agents import (
@@ -32,8 +32,8 @@ from .github import (already_merged, checks_missing, checks_since, expected_chec
                      SYNC_GRACE_MS, UPDATE_CONFLICT, pr_view, push_remote, remote_of, task_github, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING, ci_awaited, NO_CHECKS_MS, NO_CI_RUN
 from .launch import (
-    base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, is_coordinator, launch, name_tabs,
-    own_path, parent_for, resume_argv, stamp, task_text, REVIEW_READS, review_reads, retag_tabs, reviewer_sandbox, sandboxes, set_branch, tab_title, task_tabs,
+    base_ref, brief, caller_labels, current_base, folder_for, handoff, is_coordinator, launch,
+    own_path, parent_for, resume_argv, stamp, task_text, REVIEW_READS, review_reads, reviewer_sandbox, sandboxes, set_branch,
 )
 from .store import bare_by_mistake, is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
 from .queues import after_refs, parse_after, queue_reason, running_count, set_after, urgent
@@ -119,15 +119,13 @@ def cmd_add(args):
         mode = "here" if args.here or not worktrees_on(s) else "worktree"
         t = s.new(args.title.strip(), prompt, mode)
         set_opts(t, args)
-        space = bare(args.space) if args.space else caller_space()
-        set_base(s, t, args.base, space, new=True)
+        set_base(s, t, args.base, new=True)
         set_branch(s, t, getattr(args, "branch", None))
         set_notes(t, args)
         if args.after:
             set_after(s, t, *parse_after(s, args.after))
         if at:
-            # Started later by the scheduler, with no caller to ask: its space is kept now.
-            schedule(s, t, at, {"space": space or default_space()})
+            schedule(s, t, at, {})
         v = view(s, t)
     if at:
         ensure_scheduler_quietly()
@@ -136,7 +134,7 @@ def cmd_add(args):
 
 # ---- scheduled (SHEP-38) -----------------------------------------------------------------------
 # A task that starts by itself at a time (--at "fri 9:00", --in 6h): state "scheduled" with
-# scheduled_for (ms) and what start would use (queue: argv, space, parent). The scheduler's tick
+# scheduled_for (ms) and what start would use (queue: argv, parent). The scheduler's tick
 # (tick.py's due_pass) queues it once that time comes, also a time passed while the machine was
 # off, and the queue starts it as any queued task (after its --after tasks, when there's room).
 
@@ -175,21 +173,21 @@ def ensure_scheduler_quietly():
         pass
 
 
-def set_base(s, t, base, space=None, new=False):
+def set_base(s, t, base, new=False):
     """--base: the branch a worktree task branches from and merges into (its pull request's base).
-    Without it a new task takes its space's base branch (Shepherdr settings > Tasks > Base branch,
-    as Shepherdr's space.base: captured when added, so a later change only touches new tasks);
-    unset, the folder's current branch, kept unmarked. "" goes back to the folder's."""
+    Without it a new task takes its project's base branch (settings > tasks.base: captured when
+    added, so a later change only touches new tasks); unset, the folder's current branch, kept
+    unmarked. "" goes back to the folder's."""
     if base is None:
-        own = space_base(s, space) if new and t.get("mode") == "worktree" else ""
+        own = project_base(s) if new and t.get("mode") == "worktree" else ""
         main = s.loc["folder"]
         if own and own != current_base(main):
             try:
                 base_ref(main, own)
             except Fail as e:
-                raise Fail(f"This space's base branch is {own} (Shepherdr settings > Tasks > Base branch), but: {e} "
+                raise Fail(f"This project's base branch is {own} (settings > tasks.base), but: {e} "
                            "Change the setting, or pass --base.")
-            t["base"], t["base_set"], t["base_by"] = own, True, "space"
+            t["base"], t["base_set"], t["base_by"] = own, True, "project"
         return
     t.pop("base_by", None)
     base = base.strip()
@@ -269,7 +267,7 @@ def cmd_show(args):
     elif v.get("branch") and v.get("mode") == "worktree":
         text.append(f"branch: {v['branch']} (set for this task)")
     if v.get("base_set"):
-        text.append(f"merges into: {v['base']} (" + ("its space's base branch" if v.get("base_by") == "space" else "set for this task") + ")")
+        text.append(f"merges into: {v['base']} (" + ("its project's base branch" if v.get("base_by") in ("project", "space") else "set for this task") + ")")
     if v.get("after_refs"):
         text.append("comes after: " + ", ".join(v["after_refs"]))
     if kind:
@@ -322,23 +320,21 @@ def cmd_show(args):
     say(args, v, "\n".join(text))
 
 
-def begin(s, t, argv, space, parent=None):
+def begin(s, t, argv, space=None, parent=None):
     """Starts the task's first agent. Returns its record."""
     t["state"], t["started"] = "running", now()
     # Its brief teaches `reviewed`: ready waits for a review of its final commit (review_refusal).
     t["review_gate"] = True
     for k in ("queue", "queued_at", "attention", "held", "scheduled_for"):
         t.pop(k, None)
-    if t.get("mode") == "worktree" and not t.get("worktree") and not worktrees_on(s, space):
+    if t.get("mode") == "worktree" and not t.get("worktree") and not worktrees_on(s):
         t["mode"] = "here"
     folder_for(s, t)
     ensure_build_dir(s, t)
     if t.get("mode") != "worktree" and s.loc["kind"] == "repo":
-        # The folder's commit as it starts: still there, and nothing tracked changed, at ready means
-        # it changed nothing, so there is nothing to review (review_refusal, #744).
         t["folder_start"] = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None
-    parent = parent_for(parent, space)
-    return launch(s, t, argv, space, brief(s, t, parent, space, argv), parent=parent)
+    parent = parent_for(parent, s.loc["folder"])
+    return launch(s, t, argv, brief(s, t, parent, argv), parent=parent)
 
 
 # #1053: an agent just launched still shows its shell for a moment (agent_running() says no): a task
@@ -366,19 +362,15 @@ def cmd_start(args):
             t["mode"] = "worktree"
         set_branch(s, t, getattr(args, "branch", None))
         q = t.get("queue") or {}
-        space = bare(args.space) if args.space else (q.get("space") or default_space())
-        argv = agent_argv(None, args.argv) if args.argv else worker_argv(s, t, space, args.agent) if args.agent else \
-            (q.get("argv") or worker_argv(s, t, space))
+        argv = agent_argv(None, args.argv) if args.argv else worker_argv(s, t, agent=args.agent) if args.agent else \
+            (q.get("argv") or worker_argv(s, t))
         parent = args.parent or q.get("parent")
-        plan = {"argv": argv, "space": space, "parent": parent, **({"custom": True} if args.argv else {})}
+        plan = {"argv": argv, "parent": parent, **({"custom": True} if args.argv else {})}
         at = scheduled_at(args)
         if at:
-            # start --at / --in: it starts by itself then, as this start would now.
             schedule(s, t, at, plan)
             v = view(s, t)
             reason = "scheduled"
-        # A queued task started again goes now; otherwise it waits its turn. A scheduled one
-        # started now waits only for the queue (start --now: not even that).
         elif (reason := None if (t["state"] == "queued" or args.now) else queue_reason(s, t)):
             t["state"], t["queued_at"] = "queued", now()
             t.pop("scheduled_for", None)
@@ -386,9 +378,8 @@ def cmd_start(args):
             s.dirty = True
             v = view(s, t)
         else:
-            a = begin(s, t, argv, space, parent)
+            a = begin(s, t, argv, parent=parent)
             v = view(s, t)
-    # The scheduler starts queued tasks and tells the Assistant its tasks' news.
     try:
         ensure_scheduler(quiet=True)
     except Exception:
@@ -399,7 +390,7 @@ def cmd_start(args):
     if reason:
         say(args, {**v, "queued": True, "reason": reason}, f"{s.ref(t)} is queued ({reason}). It starts by itself when it can.")
         return
-    out = {**v, "terminal": a["address"], "space": space, "parent": a.get("parent")}
+    out = {**v, "terminal": a["address"], "parent": a.get("parent")}
     text = f"{s.ref(t)} started: {a['address']} in {folder_desc(t, s)}"
     # Codex's sandbox can't start here (SHEP-227, #998): whoever started it hears why and the fix, once per start.
     broken = sandbox.check() if sandbox.sandboxed(argv) else None
@@ -617,15 +608,15 @@ def quota_reset(pool):
 
 
 def fallback_reviewer(s, t, first, failed=()):
-    """(reviewer, None) for the round's next try (FAC-59, FAC-101): the first of the task's reviewer, the space's Reviewer,
+    """(reviewer, None) for the round's next try (FAC-59, FAC-101): the first of the task's reviewer, the project's Reviewer,
     codex, agy (Argon), claude opus that hasn't failed this round and whose pool has room. None left: (None, the soonest
     reset in ms) when the rest are out of quota, else (None, None)."""
     from .handoff import pool_of
-    cfg = settings_for(s, t.get("space")).get("reviewer") or {}
-    space = {"agent": cfg["agent"], "model": cfg.get("model"), "effort": cfg.get("effort")} if cfg.get("agent") else None
+    cfg = settings_for(s).get("reviewer") or {}
+    proj = {"agent": cfg["agent"], "model": cfg.get("model"), "effort": cfg.get("effort")} if cfg.get("agent") else None
     argon = cfg.get("model") if cfg.get("agent") == "agy" and cfg.get("model") else ARGON
     pools, seen, resets = {p["name"]: p for p in reviewer_pools()}, set(failed), []
-    for rv in (first, space, {"agent": "codex", "model": None, "effort": None},
+    for rv in (first, proj, {"agent": "codex", "model": None, "effort": None},
                {"agent": "agy", "model": argon, "effort": None}, {"agent": "claude", "model": "opus", "effort": None}):
         if not rv or rv["agent"] in seen:
             continue
@@ -782,7 +773,7 @@ def gate_step(s, t):
     code = round_code({"round": round_n, "head": head, "at": at}) if sand else None
     shown, diff = review_diff(wt, base, head, mine, merge_only)
     cmd = f"{ht} review {ref} --folder {folder}"
-    check = (settings_for(s, t.get("space"))["tasks"].get("check") or "").strip()
+    check = (settings_for(s)["tasks"].get("check") or "").strip()
     prompt = "\n\n".join([
         instructions("reviewer"), f"The task, {ref}:\n" + task_text(t),
         f"Review commit {head} in {wt}. {shown}" + (", cut: run it for the rest" if len(diff) > 20000 else "")
@@ -803,7 +794,7 @@ def gate_step(s, t):
            + ": anything else waits on a prompt nobody here can answer." if rv["agent"] in ("agy", "claude") else "")
         + (" Run every command as it is, never with sandbox_permissions \"require_escalated\": nothing here asks, and a request for more is refused. Edit nothing." if rv["agent"] == "codex" else ""))])
     live = workers(s, t)
-    a = launch(s, t, argv, t.get("space"), prompt, parent=live[-1]["address"] if live else None, role="reviewer",
+    a = launch(s, t, argv, prompt, parent=live[-1]["address"] if live else None, role="reviewer",
                reads=review_reads(check))
     t.setdefault("review_runs", []).append({"round": round_n, "head": head, "address": a["address"], "cli": agent_key(argv),
                                             "model": rv.get("model") or None, "at": at})
@@ -974,7 +965,7 @@ def cmd_review_more(args):
     labels = caller_labels()
     with open_store(args) as s:
         t = s.find(args.id)
-        if labels.get("herdr.task") == s.key(t) or labels.get("herdr.role") == "reviewer":
+        if label_of(labels, "task") == s.key(t) or label_of(labels, "role") == "reviewer":
             raise Fail("A task's own agent can't add review rounds: say why in your chat and end your turn; your Assistant decides.")
         if t["state"] == "done":
             raise Fail(f"{s.ref(t)} is already done; it needs no more review.")
@@ -1048,11 +1039,8 @@ ALERT = "herdr.alert"
 
 
 def cmd_alert(args):
-    """An agent tells the person something that can't wait (as Shepherdr's `shepherdr alert`): a
-    toast and a sound in every Herdr window. Never asks permission. A task's agent (or an alert
-    --task names) always reaches the person; an Assistant's follows its space's Notify (Off:
-    nothing). It sets the core label herdr.alert on the caller's own terminal, which every Herdr
-    client sees at once, here or on another machine; Herdr shows each new one once (inbox.js)."""
+    """An agent tells the person something that can't wait (kept as herdr.alert until Phase 3 SDF-24).
+    Never asks permission."""
     title, body = " ".join(str(args.title or "").split()), " ".join(str(args.body or "").split())
     if not title:
         raise Fail("Say what can't wait: herdr-task alert \"Deploy is down\" --body \"Checks fail on main since 12:40\"")
@@ -1066,9 +1054,9 @@ def cmd_alert(args):
     if args.task:
         with open_store(argparse.Namespace(folder=args.folder, id=args.task), write=False) as s:
             ref = s.ref(s.find(args.task))
-    elif labels.get("herdr.task"):
+    elif tkey := label_of(labels, "task"):
         # Its own task: "<slug>#<n>" -> HERD-44, from that list's prefix.
-        slug, _, n = labels["herdr.task"].rpartition("#")
+        slug, _, n = tkey.rpartition("#")
         try:
             with open(os.path.join(STORE, f"{slug}.json")) as f:
                 pre = json.load(f).get("prefix")
@@ -1186,7 +1174,7 @@ def cmd_review(args):
         if gate_need(s, t):  # herdr-task's own reviewer in a gate folder (FAC-13), or Fable's round (FAC-99)
             return gate_verdict(s, t, args, text)
         rv = t.pop("review", None) or {}
-        cfg = settings_for(s, t.get("space"))["tasks"]
+        cfg = settings_for(s)["tasks"]
         of = rv.get("of") or int(cfg.get("review_rounds") or 1)
         n = rv.get("round") or len(t.get("reviews") or []) + 1
         rec = {"round": n, "result": "pass" if args.passed else "changes", "text": (text or args.notes or "").strip(),
@@ -1333,7 +1321,7 @@ def read_verdict(screen, code):
 
 def sign_in_why(s, t, rn):
     """Why a reviewer stopped at the sign-in screen; a sandboxed agy one names the setting that fixes it (FAC-76)."""
-    if sandboxes([rn["cli"]]) and reviewer_sandbox(s, t.get("space"))[0]:
+    if sandboxes([rn["cli"]]) and reviewer_sandbox(s)[0]:
         return "Sign in required: turn Reviewer sandbox off"
     return "Sign in required"
 
@@ -1548,7 +1536,6 @@ def cmd_unarchive(args):
 def cmd_edit(args):
     with open_store(args) as s:
         t = s.find(args.id)
-        old = t["title"]
         if args.title is not None:
             t["title"] = args.title.strip() or t["title"]
         if args.prompt is not None:
@@ -1571,7 +1558,7 @@ def cmd_edit(args):
             t["pick_at"] = now()
             q = t.get("queue") or {}
             if q.get("argv") and not q.get("custom"):
-                q["argv"] = worker_argv(s, t, q.get("space"))
+                q["argv"] = worker_argv(s, t)
         set_base(s, t, args.base)
         set_notes(t, args)
         if args.after is not None:
@@ -1592,12 +1579,10 @@ def cmd_edit(args):
         set_branch(s, t, getattr(args, "branch", None))
         sent = amend(s, t, args)  # last: its agent is told only of an edit that saves
         s.dirty = True
-        tabs = task_tabs(s, t) if t["title"] != old else []
         v = view(s, t)
-    left = name_tabs([(tab, tab_title(s, t)) for tab in tabs])
     if at:
         ensure_scheduler_quietly()
-    say(args, {**v, "rename": left, **({"sent": sent} if sent is not None else {})},
+    say(args, {**v, **({"sent": sent} if sent is not None else {})},
         f"{s.ref(t)} saved" + (f": {v['why']}." if v["status"] == "scheduled" else ".")
         + (f" Its agent was told the brief changed ({sent})." if sent else "")
         + (" Its agent couldn't be told; the change is kept for its reviewer." if sent is False else ""))
@@ -1626,7 +1611,6 @@ def amend(s, t, args):
 def cmd_config(args):
     with open_store(args) as s:
         cfg = s.data.setdefault("config", {})
-        tabs = False
         if args.prefix is not None:
             new = args.prefix.strip().upper()
             if not re.fullmatch(r"[A-Z]{2,5}", new):
@@ -1636,7 +1620,7 @@ def cmd_config(args):
                 raise Fail(f"{new} is taken by {owner}.")
             if new != s.prefix:
                 s.data["prefix"] = new
-                s.dirty = tabs = True
+                s.dirty = True
         if getattr(args, "build_dir", None) is not None:
             raw = args.build_dir.strip()
             p = os.path.expanduser(raw) if raw else ""
@@ -1654,11 +1638,10 @@ def cmd_config(args):
                 raise Fail(f"config --set takes tasks.max_running=N, not {pair!r}.")
             v = v.strip().strip("\"'")
             if v and v.lower() != "default" and not (v.isdigit() and 1 <= int(v) <= 50):
-                raise Fail("tasks.max_running is 1 to 50 (\"default\": Settings' above this space).")
-            write_max_running(s, getattr(args, "space", None), int(v) if v.isdigit() else None)
+                raise Fail("tasks.max_running is 1 to 50 (\"default\": Settings' above this project).")
+            write_max_running(s, None, int(v) if v.isdigit() else None)
         out = {"folder": s.loc["folder"], "prefix": s.prefix, "max_running": s.max_running(), "settings": settings_for(s),
                "worktrees": worktrees_on(s), "build_dir": build_dir_of(s)}
-    out["rename"] = retag_tabs(s) if tabs else []
     n = out["max_running"]
     where = "a worktree each" if out["worktrees"] else "in the folder itself"
     extra = f", build output {out['build_dir']}" if out["build_dir"] else ""
@@ -1690,7 +1673,7 @@ def continue_line(s, t):
             f"`{own_path()} ready {s.ref(t)}{where}` when it's {done}.")
 
 
-def start_again(s, t, space, key=None, argv_json=None, message=None, parent=None, resuming=False, nudge=None):
+def start_again(s, t, key=None, argv_json=None, message=None, parent=None, resuming=False, nudge=None):
     """Starts an agent for the task: the last agent's own session when it's the same kind of agent
     and the session is known; else a fresh one with a handoff. `message` goes after either; `nudge`
     is a resumed session's first message when no `message` is given; `resuming` (`herdr-task resume`)
@@ -1698,24 +1681,24 @@ def start_again(s, t, space, key=None, argv_json=None, message=None, parent=None
     unarchive(s, t)
     ensure_build_dir(s, t)
     prev = last_agent(t)
-    parent = parent_for(parent or (prev or {}).get("parent"), space)
+    parent = parent_for(parent or (prev or {}).get("parent"), s.loc["folder"])
     # The last agent's argv again (switch, tell), unless `resuming` or edit changed its pick.
     keep = not resuming and prev and prev.get("argv") and (t.get("pick_at") or 0) <= (prev.get("at") or 0)
-    argv = agent_argv(None, argv_json) if argv_json else worker_argv(s, t, space, key) if key else \
-        (prev["argv"] if keep else worker_argv(s, t, space))
+    argv = agent_argv(None, argv_json) if argv_json else worker_argv(s, t, agent=key) if key else \
+        (prev["argv"] if keep else worker_argv(s, t))
     same = prev and agent_key(argv) == prev.get("agent")
     res = resume_argv(argv, prev["session"], folder_for(s, t)) if same and prev.get("session") else None
     if res:
         msg = message or nudge or (continue_line(s, t) if resuming else None)
-        a = launch(s, t, argv, space, msg, parent=parent, resume=res)
+        a = launch(s, t, argv, msg, parent=parent, resume=res)
         a["session"] = prev["session"]  # the same conversation from the start (agent_log, before a pass sees its pid)
         return a, True
-    text = handoff(s, t, prev, parent, argv, space)
+    text = handoff(s, t, prev, parent, argv)
     extra = message or (continue_line(s, t) if resuming and f"ready {s.ref(t)}" not in text else None)
     if extra:
         text += "\n\n" + extra
     t["review_gate"] = True
-    return launch(s, t, argv, space, text, parent=parent), False
+    return launch(s, t, argv, text, parent=parent), False
 
 
 # SHEP-189: what a resumed agent hears first. Its session comes back with no message, so without this
@@ -1732,12 +1715,11 @@ def cmd_resume(args):
             raise Fail(f"{s.ref(t)} still has an agent ({live[0]['address']}). Use switch to replace it.")
         if t["state"] in ("todo", "scheduled", "queued"):
             raise Fail(f"{s.ref(t)} hasn't started. Use start.")
-        space = bare(args.space) if args.space else (t.get("space") or default_space())
         if t["state"] == "done":
             t["state"] = "running"
         gone = [k["address"] for k in live_agents(s.key(t))]  # its agents' terminals, none running an agent
         back_to_work(s, t, "resumed")
-        a, resumed = start_again(s, t, space, args.agent, args.argv, parent=args.parent, resuming=True)
+        a, resumed = start_again(s, t, args.agent, args.argv, parent=args.parent, resuming=True)
         # #1022: the old agent's terminal, its plain shell left (with the status it last reported when
         # it died mid-turn), kept counting as the task's agent: it goes, as switch ends the one it replaces.
         for address in gone:
@@ -1745,7 +1727,7 @@ def cmd_resume(args):
                 stop_note("resume-retire", task=s.ref(t), terminal=address, by="resume")
                 run(["hc", "kill", address])
         v = view(s, t)
-    say(args, {**v, "terminal": a["address"], "space": space, "parent": a.get("parent"), "resumed": resumed},
+    say(args, {**v, "terminal": a["address"], "parent": a.get("parent"), "resumed": resumed},
         f"{s.ref(t)} {'resumed its session' if resumed else 'started with a handoff'}: {a['address']}")
 
 
@@ -1766,7 +1748,7 @@ def end_agent(s, t, address):
 def retarget(s, t, agent, model):
     """Sets the task's agent (and model) as edit does: the next agent started for it, queued too, runs on it.
     Another CLI drops the old model (unless --model gives one) and effort: their words differ per CLI."""
-    if agent != worker_pick(s, t, t.get("space")).get("agent"):
+    if agent != worker_pick(s, t).get("agent"):
         set_task(t, "model", model or "")
         set_task(t, "effort", "")
     elif model:
@@ -1775,7 +1757,7 @@ def retarget(s, t, agent, model):
     t["pick_at"] = now()
     q = t.get("queue") or {}
     if q.get("argv") and not q.get("custom"):
-        q["argv"] = worker_argv(s, t, q.get("space"))
+        q["argv"] = worker_argv(s, t)
     s.dirty = True
 
 
@@ -1784,10 +1766,6 @@ def switch_one(s, t, args, live):
     the caller's own agent, ended after the store is saved."""
     refresh_sessions(s, t, live)
     old = live[-1] if live else None
-    labels = (old or {}).get("labels") or {}
-    # A given --space wins: the task moves there (#837); else the old agent's own space.
-    space = ((bare(args.space) if args.space else None) or labels.get("herdr.task.space") or labels.get("herdr.space")
-             or t.get("space") or default_space())
     if t["state"] in ("todo", "scheduled", "queued", "done"):
         t["state"] = "running"
         t.setdefault("started", now())
@@ -1806,13 +1784,13 @@ def switch_one(s, t, args, live):
     # A --model rides on the task's own pick (retarget), which start_again then reads.
     key = None if getattr(args, "model", None) else args.agent
     try:
-        a, resumed = start_again(s, t, space, key, args.argv, parent=args.parent, nudge=SWITCH_NUDGE)
+        a, resumed = start_again(s, t, key, args.argv, parent=args.parent, nudge=SWITCH_NUDGE)
     except Fail as e:
         if ended:
             raise Fail(f"{e} The old agent {ended[0]} already ended: its work is kept, `herdr-task resume "
                        f"{s.ref(t)}` starts it again.")
         raise
-    data = {**view(s, t), "terminal": a["address"], "space": space, "parent": a.get("parent"), "resumed": resumed, "ended": ended}
+    data = {**view(s, t), "terminal": a["address"], "parent": a.get("parent"), "resumed": resumed, "ended": ended}
     return data, f"{s.ref(t)}: {a['agent']} {a['address']} {'resumed its session' if resumed else 'took over'}", \
         old["address"] if own and not args.keep else None
 
@@ -1833,7 +1811,7 @@ def cmd_switch(args):
     with open_store(args) as s:
         t = s.find(args.id)
         if getattr(args, "model", None):
-            retarget(s, t, args.agent or worker_pick(s, t, t.get("space")).get("agent"), args.model)
+            retarget(s, t, args.agent or worker_pick(s, t).get("agent"), args.model)
         live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)]
         data, text, own = switch_one(s, t, args, live)
     if own:
@@ -1868,7 +1846,7 @@ def switch_all(args):
             if live and prev and prev.get("argv"):
                 pick = {"agent": prev.get("agent") or agent_key(prev["argv"]), "model": argv_model(prev["argv"])[0]}
             else:
-                pick = worker_pick(s, t, t.get("space"))
+                pick = worker_pick(s, t)
             rev = args.reviewer and t.get("reviewer") and matches({"agent": t["reviewer"], "model": t.get("reviewer_model")}, args.from_)
             if not matches(pick, args.from_) and not rev:
                 continue
@@ -1909,7 +1887,7 @@ def switch_all(args):
 def workers(s, t):
     """The task's agents at work, reviewers left out (hc get's records, oldest first)."""
     return [k for k in map(detail, live_agents(s.key(t)))
-            if agent_running(k) and (k.get("labels") or {}).get("herdr.role") != "reviewer"]
+            if agent_running(k) and label_of(k.get("labels"), "role") != "reviewer"]
 
 
 def tell(s, t, msg, args, start=True):
@@ -1929,8 +1907,7 @@ def tell(s, t, msg, args, start=True):
         return live[-1]["address"], False
     if not start:
         return None, False
-    space = bare(args.space) if getattr(args, "space", None) else (t.get("space") or default_space())
-    a, _ = start_again(s, t, space, getattr(args, "agent", None), getattr(args, "argv", None), message=msg)
+    a, _ = start_again(s, t, getattr(args, "agent", None), getattr(args, "argv", None), message=msg)
     return a["address"], True
 
 

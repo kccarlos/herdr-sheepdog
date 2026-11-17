@@ -184,7 +184,7 @@ def news_pass(report, folder=None):
                 if backup:
                     b["told"] = True
                     s.dirty = True
-                if first or t.get("archived") or not t.get("space"):
+                if first or t.get("archived"):
                     continue
                 lines = [("backup", news_line(s, t, v, "backup", backup_news(t)))] if backup else []
                 # Taken back to work after it said ready (back_to_work(), busy_again()): told as it happens.
@@ -204,7 +204,7 @@ def news_pass(report, folder=None):
                     # A backup's line stands apart: it neither replaces nor is replaced.
                     outbox[:] = [x for x in outbox if not (x["key"] == key and "backup" not in (ev, x["event"])
                                                            and (x["event"] == ev or ev != "stalled"))]
-                    outbox.append({"key": key, "space": bare(t["space"]), "folder": os.path.basename(s.loc["folder"]), "event": ev, "status": v["status"],
+                    outbox.append({"key": key, "space": bare(t["space"]) if t.get("space") else s.loc["folder"], "folder": os.path.basename(s.loc["folder"]), "event": ev, "status": v["status"],
                                    "stall": stall[0] if ev == "stalled" else None, "text": text, "at": now()})
             ids = {str(t["id"]) for t in s.data["tasks"]}
             for k in [k for k in mine if k not in ids and k != "_init"]:

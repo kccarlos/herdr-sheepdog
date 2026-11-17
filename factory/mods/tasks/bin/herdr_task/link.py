@@ -22,7 +22,7 @@ import time
 from .base import run
 
 # What the person does from the window, the web app or a menu: run there whole, result read back.
-ACTIONS = {"add", "start", "done", "accept", "reopen", "unarchive", "edit", "rm", "review", "review-more", "star",
+ACTIONS = {"add", "start", "done", "accept", "reopen", "unarchive", "edit", "rm", "review", "review-more",
            "fix", "merge", "resume", "switch"}
 READS = {"list", "show", "where"}
 WAIT = 25.0      # the window stops a command at 30 s: answer before that

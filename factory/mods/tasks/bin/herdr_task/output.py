@@ -2,9 +2,9 @@
 
 import json
 
-from .base import now
+from .base import label_of, now
 from .agents import (
-    agent_running, asking, BG_ENDED_WHY, detail, device_why, live_helpers, out_of_rounds_why, ask_reason, blocking_dialog, held_ask,
+    agent_running, asking, BG_ENDED_WHY, detail, device_why, live_helpers, out_of_rounds_why, ask_reason, blocking_dialog,
     last_words, own_line, own_work, OUT_OF_ROUNDS, status_word, STATUSES, task_status,
 )
 from .queues import waiting_ext, waiting_for
@@ -24,7 +24,7 @@ def view(s, task, live=None):
         k = next((k for k in running if status_word(k) == "blocked"), None) or next((k for k in running if asking(k)), None)
         st = k.get("status") if k and isinstance(k.get("status"), dict) else {}
         # Blocked in its CLI's question dialog: every question, before its own status line (field note 51).
-        v["why"] = (k and blocking_dialog(task, k["address"], held_ask(k["address"]))) or own_line(task, k and k["address"]) or (ask_reason(task, k["address"], held_ask(k["address"]), st.get("kind"), st.get("msg")) if k else v["why"])
+        v["why"] = (k and blocking_dialog(task, k["address"])) or own_line(task, k and k["address"]) or (ask_reason(task, k["address"], None, st.get("kind"), st.get("msg")) if k else v["why"])
     if v["needs"] == "reply":
         # Refused ready with its rounds used up (review_refusal): the Assistant can add one.
         v["why"] = (out_of_rounds_why(task) if task.get("review_out") else None) or (v["why"] if v["why"] == BG_ENDED_WHY else None) \
@@ -43,8 +43,8 @@ def view(s, task, live=None):
     v["report"] = report_of(task, v["status"])
     v["status_text"] = STATUSES[v["status"]]
     v["live"] = [{"address": k["address"], "status": (k.get("status") or {}).get("state") if isinstance(k.get("status"), dict) else k.get("status"),
-                  "tab": (k.get("labels") or {}).get("herdr.tab"), "role": (k.get("labels") or {}).get("herdr.role") or "worker"} for k in running]
-    # Its worker's own helper agents (SHEP-54: a reviewer it started as an hc child), for the Tasks panel.
+                  "role": label_of(k.get("labels"), "role") or "worker"} for k in running]
+    # Its worker's own helper agents (SHEP-54: a reviewer it started as an hc child).
     v["subagents"] = subagents(s.key(task)) if known and running and task["state"] in ("running", "ready") else []
     v["ref"], v["prefix"] = s.ref(task), s.prefix
     v["waiting_for"] = waiting_for(s, task)
@@ -57,8 +57,8 @@ def subagent(k):
     lb = k.get("labels") or {}
     st = k.get("status")
     st = st.get("state") if isinstance(st, dict) else st
-    cli = lb.get("herdr.agent") or ("codex" if "codex" in str(k.get("agent") or "") else "claude" if k.get("agent") else None)
-    return {"address": k["address"], "parent": k.get("parent"), "role": lb.get("herdr.role") or "helper", "agent": cli,
+    cli = label_of(lb, "agent") or ("codex" if "codex" in str(k.get("agent") or "") else "claude" if k.get("agent") else None)
+    return {"address": k["address"], "parent": k.get("parent"), "role": label_of(lb, "role") or "helper", "agent": cli,
             "name": k.get("name"), "status": "working" if st == "working" else "needs" if st == "blocked" else "done",
             "at": k.get("created_ms")}
 
