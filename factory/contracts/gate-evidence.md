@@ -14,9 +14,10 @@ Unknown extra keys are rejected. `review_runs[].model` is a non-empty string, or
 ## `t["reviews"][]`: a review round
 ```json
 {"round": 1, "head": "0123456789abcdef0123456789abcdef01234567", "by": "term-7", "started_by": "herdr-task",
- "verdict": "pass", "must_fix": 0, "report": "No findings.", "at": 1762600600000}
+ "verdict": "pass", "must_fix": 0, "majors": 0, "cli": "agy", "model": "gemini-4-argon-high", "report": "No findings.", "at": 1762600600000}
 ```
 `verdict` is `pass` or `changes`. `must_fix` is the number of findings at or above the task's must-fix level.
+`majors` counts major and blocker findings, independently of the must-fix setting; null means an older in-flight reviewer did not report the count. `cli` and `model` identify the reviewer.
 `report` is at most 2000 chars; `must_fix` is 0 on a pass. This shape is only for rounds herdr-task recorded
 (`started_by` is "herdr-task"). A round a worker recorded itself (`herdr-task reviewed`, `started_by` absent, its
 existing shape) is not covered here and never counts for the gate.

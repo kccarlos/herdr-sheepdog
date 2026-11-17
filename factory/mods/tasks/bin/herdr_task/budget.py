@@ -310,10 +310,10 @@ def token_sum(s, t):
     return int(total)
 
 
-def rounds_since(t):
-    """herdr-task's own non-merge-only review rounds recorded after the task's last recap decision."""
-    since = ((t.get("recaps") or [{}])[-1]).get("at", 0)
-    mine = [r for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"]
+def rounds_since(t, all_rounds=False):
+    """Structured non-merge-only rounds recorded after the last recap decision."""
+    since = 0 if all_rounds else ((t.get("recaps") or [{}])[-1]).get("at", 0)
+    mine = [r for r in t.get("reviews") or [] if r.get("verdict") in ("pass", "changes") or r.get("result") == "report"]
     skip = set(t.get("merge_only_runs") or ())
     known = {r.get("address") for r in t.get("review_runs") or [] if r.get("address")}
     wt = t.get("worktree") if t.get("mode") == "worktree" else None
@@ -378,22 +378,23 @@ def record_ci(s, t, v, at=None):
         t.pop("ci_seen", None)
 
 
+NON_CONVERGENCE = "two rounds in a row with new majors: retro first"
+
+
+def review_nonconverging(t):
+    from .settings import fable_runs
+    fable = fable_runs(t)
+    rounds = [r for r in rounds_since(t, all_rounds=True) if r.get("by") not in fable]
+    return len(rounds) >= 3 and all((r.get("majors") or 0) > 0 for r in rounds[-2:])
+
+
 def triggers(s, t):
     """Why this task should stop for a recap, most telling first; [] when it is converging."""
     from .settings import fable_runs  # FAC-99: Fable's round judges as the owner would; its changes are no loop
     fable = fable_runs(t)
     why, rounds = [], [r for r in rounds_since(t) if r.get("by") not in fable]
-    last = rounds[-1] if rounds else None
-    if last and len(rounds) >= 2 and last.get("verdict") == "changes":
-        why.append(f"review round {len(rounds)} still has {last.get('must_fix') or 'some'} finding(s) at Must fix")
-    for a, b in zip(rounds, rounds[1:]):
-        if a.get("verdict") == b.get("verdict") == "changes":
-            if (b.get("must_fix") or 0) >= (a.get("must_fix") or 0):
-                why.append(f"Must-fix findings didn't drop ({a.get('must_fix')} then {b.get('must_fix')})")
-    flagged = [files_in(r.get("report")) for r in rounds if r.get("verdict") == "changes"]
-    again = sorted(set.union(set(), *[x & y for i, x in enumerate(flagged) for y in flagged[i + 1:]]))
-    if again:
-        why.append("the same file flagged in two rounds: " + ", ".join(again[:3]))
+    if review_nonconverging(t):
+        why.append(NON_CONVERGENCE)
     ci = ci_since(t)
     failed_ci = [r for r in ci if r.get("failed")]
     if len(failed_ci) >= CI_FAIL_LIMIT:
@@ -492,6 +493,9 @@ def unmergeable(s, t):
 
 def stop_words(s, t, why, again):
     wt = t.get("worktree") or "the worktree"
+    if why == [NON_CONVERGENCE]:
+        return (f"Stop {s.ref(t)}: {NON_CONVERGENCE}.{last_findings(t)}"
+                "End your turn and wait; your coordinator decides whether to split, change approach or drop the task.")
     ci = any("CI" in w for w in why)
     size = any("twice its size" in w for w in why)
     what = ("what was tried across the CI runs, which CI checks failed and why, and the options (new approach such as test "
@@ -530,6 +534,8 @@ def budget_lines(t):
 def recap_refusal(s, t):
     rc = t.get("recap")
     if rc:
+        if NON_CONVERGENCE in rc.get("reasons", []):
+            return f"{s.ref(t)}: {NON_CONVERGENCE}; the coordinator decides whether to split, change approach or drop it."
         why = f" ({'; '.join(rc['reasons'])})" if rc.get("reasons") else ""
         return (f"{s.ref(t)} needs a recap first{why}: write RECAP.md (untracked) at your worktree's root, end your turn and "
                 f"wait; your Assistant decides what happens next.")
@@ -561,6 +567,8 @@ def cmd_recap(args):
             raise Fail("A task's own agent can't decide its recap: your Assistant does.")
         if not rc:
             raise Fail(f"{s.ref(t)} has no recap open.")
+        if args.decide == "continue" and (NON_CONVERGENCE in rc.get("reasons", []) or review_nonconverging(t)):
+            raise Fail(f"{NON_CONVERGENCE}; choose split, new or drop.")
         if not (args.why or "").strip():
             raise Fail("Say why in one line: --why \"…\".")
         small = bool(getattr(args, "small", False))

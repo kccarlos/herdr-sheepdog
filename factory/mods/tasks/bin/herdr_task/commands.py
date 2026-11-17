@@ -43,7 +43,7 @@ from .stage import STAGE_ORDER, STAGE_TABLE
 from .proof import evidence, find_proof
 from .when import when_from
 from .templates import instructions
-from .budget import budget_lines, budget_pass, change_sizes, docs_only_commits, merge_only_commits, merge_only_step, recap_refusal, record_ci, size_estimate, size_pass
+from .budget import NON_CONVERGENCE, budget_lines, budget_pass, change_sizes, docs_only_commits, merge_only_commits, merge_only_step, recap_refusal, record_ci, review_nonconverging, size_estimate, size_pass
 from .simulators import release_task
 
 
@@ -881,12 +881,13 @@ def gate_step(s, t):
         + (f"You run in a sandbox: you can read only this worktree, its git history and the system's tools, write only in "
            f"$TMPDIR, and can't reach Herdr. When done, end your last message with your findings, each with its level and "
            f"proof, between two lines of their own: first one holding only this round's code and the word begin, last one "
-           f"holding only the code and your verdict: pass, or changes and how many findings are at or above Must fix. Herdr "
+           f"holding only the code and your verdict: pass N, or changes N M, where N is the count at or above Must fix "
+           f"and M is the count of major or blocker findings (pass N gives the major count). Herdr "
            f"reads it from this terminal while {head[:7]} is the worktree's HEAD with nothing uncommitted, and runs this "
            f"folder's check itself, outside the sandbox: don't run it here. This round's code is {code}." if sand else
         f"When done, record your verdict with one of "
         f"`{cmd} --pass` or `{cmd} --changes \"<each finding with its level and proof>\" --must-fix <how many are at or above "
-        f"Must fix>`. It is taken only from this terminal while {head[:7]} is the worktree's HEAD with nothing uncommitted. "
+        f"Must fix>`, with `--majors <number of major or blocker findings>` on either verdict. It is taken only from this terminal while {head[:7]} is the worktree's HEAD with nothing uncommitted. "
         f"Then end with your findings as your last message."
         + (f" Your shell runs without asking only {', '.join(REVIEW_READS)}" + (f" and this folder's check, `{check}`" if check else "")
            + ": anything else waits on a prompt nobody here can answer." if rv["agent"] in ("agy", "claude") else "")
@@ -976,7 +977,7 @@ def review_refusal(s, t, wt):
                 f"of its own: say why in your chat (what the fix changed), set your status line to it, and end your turn: only "
                 f"your Assistant can add a round (herdr-task review-more {ref}).")
     return (f"Review is on and {what} isn't reviewed. Have it reviewed as your brief says, fix what must be fixed, record the "
-            f"round with `{ht} reviewed {ref} --folder {folder} --report \"<findings, a line>\"` (on the commit you'd say "
+                f"round with `{ht} reviewed {ref} --folder {folder} --verdict pass|changes --majors N --report \"<findings, a line>\"` (on the commit you'd say "
             f"ready at), then run ready again. {rounds - rounds_used(t)} of {rounds} rounds left.")
 
 
@@ -1048,11 +1049,18 @@ def cmd_reviewed(args):
             head = git(wt, "rev-parse", "HEAD")[1]
         elif s.loc["kind"] == "repo":
             head = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None
+        verdict, majors = getattr(args, "verdict", "pass"), getattr(args, "majors", 0)
+        if verdict not in ("pass", "changes") or majors is None or majors < 0:
+            raise Fail("Say --verdict pass|changes and --majors N (a nonnegative count).")
         text = " ".join(str(args.report or "").split())[:2000]
+        reviewer = next((x["value"] for x in task_settings(s, t) if x["label"] == "Reviewer"), {})
         t.setdefault("reviews", []).append({"round": used + 1, "result": "report", "text": text, "at": now(), "head": head,
-                                            "by": os.environ.get("HC_TERMINAL_ID")})
+                                            "by": os.environ.get("HC_TERMINAL_ID"), "verdict": verdict, "must_fix": 0 if verdict == "pass" else None, "majors": majors,
+                                            "report": text, "cli": reviewer.get("agent"), "model": reviewer.get("model")})
         t.pop("review_out", None)
         s.dirty = True
+        if t.get("mode") == "worktree":
+            budget_pass(s, t)
         v = view(s, t)
     on_what = f" for commit {head[:7]}" if head else ""
     say(args, {**v, "round": used + 1, "rounds": rounds}, f"{s.ref(t)}: review round {used + 1} of {rounds} recorded{on_what}.")
@@ -1077,6 +1085,13 @@ def cmd_review_more(args):
         used = rounds_used(t, bool(gate_min(s, t)))
         if used < rounds:
             raise Fail(f"{s.ref(t)} has used {used} of {rounds} review rounds; add one only when they are all used.")
+        if review_nonconverging(t):
+            budget_pass(s, t)
+            s.save()  # persist the recap before returning the refusal
+            raise Fail(NON_CONVERGENCE)
+        if t.get("review_more_granted") or int(t.get("review_rounds_added") or 0) > len(t.get("review_auto_grants") or []):
+            raise Fail(f"{s.ref(t)} already received its one review-more round.")
+        t["review_more_granted"] = True
         t["review_rounds_added"] = int(t.get("review_rounds_added") or 0) + 1
         t.pop("review_out", None)
         s.dirty = True
@@ -1088,7 +1103,7 @@ def cmd_review_more(args):
             r = send_or_hold(live[-1]["address"],
                      f"Your Assistant added one review round to {s.ref(t)}: {rounds + 1} in all. " + (
                          f"Run `{ht} ready {s.ref(t)} --folder {folder}` again: Herdr starts its reviewer." if gate_min(s, t) else
-                         f"Have your final commit reviewed, record it with `{ht} reviewed {s.ref(t)} --folder {folder} --report "
+                         f"Have your final commit reviewed, record it with `{ht} reviewed {s.ref(t)} --folder {folder} --verdict pass|changes --majors N --report "
                          f"\"<findings, a line>\"`, then run ready again."))
             told = live[-1]["address"] if r else None
         v = view(s, t)
@@ -1375,20 +1390,23 @@ def gate_verdict(s, t, args, text):
     must = args.must_fix if args.must_fix is not None else (0 if args.passed else None)
     if must is None or must < 0 or bool(args.passed) != (must == 0):  # findings below Must fix never block
         raise Fail("Say --pass (nothing at Must fix; --notes for the rest), or --changes \"…\" --must-fix N: N (1 or more) findings at or above Must fix.")
-    msg = record_verdict(s, t, rn, bool(args.passed), must, text or args.notes or "")
+    majors = getattr(args, "majors", must)
+    if majors is None or majors < 0:
+        raise Fail("Say --majors N: the number of major or blocker findings (zero or more).")
+    msg = record_verdict(s, t, rn, bool(args.passed), must, text or args.notes or "", majors)
     end_reviewer(me)
     say(args, view(s, t), msg)
 
 
-def record_verdict(s, t, rn, passed, must, text):
+def record_verdict(s, t, rn, passed, must, text, majors=None):
     """Records review round rn's verdict (from its own terminal: gate_verdict, gate_reads) while the
     worktree's HEAD is still its head with nothing uncommitted; returns what happened."""
     wt = t.get("worktree") or ""
     if git(wt, "rev-parse", "HEAD")[1] != rn["head"] or git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
         raise Fail(f"{wt} has moved on from {rn['head'][:7]} or has uncommitted changes: this round's verdict no longer applies.")
     t.setdefault("reviews", []).append({"round": rn["round"], "head": rn["head"], "by": rn["address"], "started_by": "herdr-task",
-                                        "verdict": "pass" if passed else "changes", "must_fix": must,
-                                        "report": text.strip()[:2000], "at": now()})
+                                        "verdict": "pass" if passed else "changes", "must_fix": must, "majors": majors,
+                                        "report": text.strip()[:2000], "cli": rn.get("cli"), "model": rn.get("model"), "at": now()})
     for k in ("review_out", "progress"):
         t.pop(k, None)
     s.dirty = True
@@ -1430,18 +1448,19 @@ def round_code(rn):
 
 
 def read_verdict(screen, code):
-    """(passed, must_fix, findings) from a sandboxed reviewer's screen: its last line holding only
-    `code pass` or `code changes N` (0: a pass), the findings above it up to its `code begin` line
-    (else its last 80 lines); else None."""
+    """(passed, must_fix, findings, majors) from a sandboxed reviewer's marked final message.
+    Accept old markers too for reviews already in flight."""
     lines = screen.split("\n")
-    mark = re.compile(rf"^\W*{code}\s+(?:(begin)|(pass)|changes\s+(\d+))\W*$")
+    mark = re.compile(rf"^\W*{code}\s+(?:(begin)|(pass)(?:\s+(\d+))?|changes\s+(\d+)(?:\s+(\d+))?)\W*$")
     ends = [(i, m) for i, m in enumerate(map(mark.match, lines)) if m and not m.group(1)]
     if not ends:
         return None
     end, m = ends[-1]
     begin = max((i for i, x in enumerate(lines[:end]) if (y := mark.match(x)) and y.group(1)), default=max(-1, end - 81))
-    must = 0 if m.group(2) else int(m.group(3))
-    return not must, must, "\n".join(x.strip() for x in lines[begin + 1:end]).strip()
+    must = 0 if m.group(2) else int(m.group(4))
+    count = m.group(3) or m.group(5)
+    majors = int(count) if count is not None else None
+    return not must, must, "\n".join(x.strip() for x in lines[begin + 1:end]).strip(), majors
 
 
 def sign_in_why(s, t, rn):

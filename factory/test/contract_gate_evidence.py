@@ -40,11 +40,11 @@ def validate_review_run(r):
 
 def validate_review(r):
     # only rounds herdr-task recorded; a worker's own `reviewed` round has the old shape and is not validated
-    _check(r, ints=("round", "must_fix", "at"), strs=("by", "started_by"), shas=("head",),
-           enums={"verdict": ("pass", "changes")}, caps={"report": 2000})
+    _check(r, ints=("round", "must_fix", "at"), strs=("by", "started_by", "cli"), shas=("head",),
+           enums={"verdict": ("pass", "changes")}, caps={"report": 2000}, extra=("model", "majors"))
     if r["started_by"] != "herdr-task":
         raise ValueError("started_by must be 'herdr-task'")
-    if r["must_fix"] < 0 or r["round"] < 1 or (r["verdict"] == "pass" and r["must_fix"]):
+    if (r["majors"] is not None and (type(r["majors"]) is not int or r["majors"] < 0)) or r["must_fix"] < 0 or r["round"] < 1 or (r["verdict"] == "pass" and r["must_fix"]):
         raise ValueError("round starts at 1; must_fix is not negative and is 0 on a pass")
 
 
