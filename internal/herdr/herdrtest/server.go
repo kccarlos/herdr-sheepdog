@@ -156,6 +156,9 @@ func (s *Server) SetAgent(a herdr.AgentInfo) {
 	}
 	s.agents[a.PaneID] = a
 	p.PaneID, p.WorkspaceID, p.TabID, p.Status, p.Agent = a.PaneID, a.WorkspaceID, a.TabID, a.Status, a.Agent
+	if a.Labels != nil {
+		p.Labels = herdr.CloneLabels(a.Labels)
+	}
 	if a.TerminalID != "" {
 		p.TerminalID = a.TerminalID
 	}

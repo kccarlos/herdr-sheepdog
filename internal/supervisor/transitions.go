@@ -87,6 +87,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.brain.WorkerEventLinked(alias, string(from), string(t.To), t.Closed, eventLink(s.newEventID(t.PaneID)))
 	}
 
+	quiet := isFactoryQuietTransition(t, prev, row)
 	if t.Closed || t.Released {
 		s.mu.Lock()
 		if t.Closed {
@@ -101,7 +102,11 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 			if t.Released {
 				line = aliasOr(state.Say(prev)) + " has exited while it was busy."
 			}
-			s.push(t.PaneID, line, voice.UrgencyInterrupt)
+			if quiet {
+				s.logFactoryQuiet(t.PaneID, line)
+			} else {
+				s.push(t.PaneID, line, voice.UrgencyInterrupt)
+			}
 		}
 		return
 	}
@@ -133,7 +138,12 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.cfg.WorkerLog.Forget(t.PaneID)
 		s.journal.clearMissing(t.PaneID)
 		if wasBusy {
-			s.push(t.PaneID, alias+" has exited while it was busy.", voice.UrgencyInterrupt)
+			line := alias + " has exited while it was busy."
+			if quiet {
+				s.logFactoryQuiet(t.PaneID, line)
+			} else {
+				s.push(t.PaneID, line, voice.UrgencyInterrupt)
+			}
 		}
 	case herdr.StateWorking:
 		s.mu.Lock()
@@ -249,6 +259,10 @@ func (s *Supervisor) startedInstruction(paneID string, from herdr.State) (starte
 // speech of 2026-09-24 00:13:02. An instruction picked up long after it
 // was sent (the worker was busy) is news, spoken at idle as before.
 func (s *Supervisor) pushStarted(paneID, text string, justSent bool) {
+	if s.isFactoryQuiet(paneID) {
+		s.logFactoryQuiet(paneID, text)
+		return
+	}
 	if !justSent {
 		s.pushIf(pushStarted, paneID, text)
 		return
@@ -307,6 +321,10 @@ func (s *Supervisor) onDone(ctx context.Context, row state.Agent, instructed boo
 	// had the pane focused (herdr/src/pane/state.rs's "seen" bit): an
 	// "idle" promise is kept by this finish too, alongside "done".
 	alsoIdle := row.State == herdr.StateIdle
+	if s.isFactoryQuietRow(row) {
+		s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, alsoIdle: alsoIdle, owed: instructed, sentence: sentence, stopReason: stopReason, stopDetail: stopDetail})
+		return
+	}
 	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
 	if err != nil {
 		s.log.Log(logSource, "supervisor.done_error", row.PaneID, map[string]any{"stage": "read", "error": err.Error()})
@@ -392,6 +410,10 @@ func (s *Supervisor) recordResult(paneID, spoken, stopReason string) {
 // announces it.
 func (s *Supervisor) onBlocked(ctx context.Context, row state.Agent) {
 	alias := aliasOr(state.Say(row))
+	if s.isFactoryQuietRow(row) {
+		s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: alias + " is waiting at a prompt."})
+		return
+	}
 	s.touch(row.PaneID)
 	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
 	if err != nil {

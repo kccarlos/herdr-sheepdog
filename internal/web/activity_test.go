@@ -144,6 +144,30 @@ func TestActivityStepPushesChangesWhileAway(t *testing.T) {
 	}
 }
 
+func TestActivityIgnoresFactoryQuietTerminals(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	now := time.Now()
+	if _, _, err := h.srv.deps.Store.Apply(herdr.Transition{
+		PaneID: "t1", Agent: "codex", To: herdr.StateBlocked, At: now,
+		Labels: map[string]string{herdr.LabelFactoryProject: "proj", herdr.LabelFactoryRole: "worker", herdr.LabelFactoryTask: "proj#1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.srv.deps.Store.Apply(herdr.Transition{
+		PaneID: "t2", Agent: "claude", To: herdr.StateWorking, At: now,
+		Labels: map[string]string{herdr.LabelFactoryProject: "proj", herdr.LabelFactoryRole: "reviewer", herdr.LabelFactoryTask: "proj#1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st := h.srv.activityState()
+	if st.Waiting != 0 || st.Working != 0 || len(st.Rows) != 0 {
+		t.Fatalf("factory terminals leaked into activity state: %+v", st)
+	}
+	if n := h.srv.loudWaiting(); n != 0 {
+		t.Fatalf("loudWaiting = %d, want 0", n)
+	}
+}
+
 // An activity iOS has surely ended (8 hours) is forgotten.
 func TestActivityStepForgetsOldActivities(t *testing.T) {
 	sender, _ := push.New(push.Config{}, nil)

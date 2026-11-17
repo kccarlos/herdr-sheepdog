@@ -2,6 +2,7 @@ package herdrcore
 
 import (
 	"context"
+	"maps"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
@@ -34,9 +35,10 @@ type paneFeed struct {
 	out    chan<- herdr.StatusEvent
 
 	kind     string
-	space    string      // the terminal's herdr.space label
-	fallback bool        // the terminal is an agent that has not reported
-	last     herdr.State // the last state emitted (starts at unknown)
+	space    string            // the terminal's herdr.space label
+	labels   map[string]string // the terminal's labels
+	fallback bool              // the terminal is an agent that has not reported
+	last     herdr.State       // the last state emitted (starts at unknown)
 }
 
 func (f *paneFeed) serve(ctx context.Context, sub *hc.Subscription) bool {
@@ -81,6 +83,7 @@ func (f *paneFeed) seed(ctx context.Context, sub *hc.Subscription) bool {
 		}
 		f.kind = kindOf(t)
 		f.space = spaceOf(t)
+		f.labels = herdr.CloneLabels(t.Labels)
 		f.fallback = isPane(t) && needsFallback(t)
 		if f.fallback {
 			return f.poll(ctx)
@@ -112,6 +115,17 @@ func (f *paneFeed) handle(ctx context.Context, n hc.Notification) (done, alive b
 		return true, true
 	case n.Type == "finished" || n.Type == "lost":
 		f.fallback = false
+	case n.Type == "labels":
+		var data hc.LabelsData
+		if err := n.DecodeData(&data); err != nil {
+			return false, true
+		}
+		if data.Labels == nil {
+			f.labels = map[string]string{}
+		} else {
+			f.labels = maps.Clone(data.Labels)
+		}
+		f.space = f.labels[labelSpace]
 	case n.Type == "status":
 		var data hc.StatusData
 		if err := n.DecodeData(&data); err != nil {
@@ -132,7 +146,11 @@ func (f *paneFeed) handle(ctx context.Context, n hc.Notification) (done, alive b
 }
 
 func (f *paneFeed) emit(ctx context.Context, state herdr.State) bool {
-	ev := herdr.StatusEvent{PaneID: f.paneID, WorkspaceID: f.space, Agent: f.kind, State: state, At: time.Now(), Source: "socket"}
+	var labels map[string]string
+	if f.labels != nil {
+		labels = maps.Clone(f.labels)
+	}
+	ev := herdr.StatusEvent{PaneID: f.paneID, WorkspaceID: f.space, Agent: f.kind, State: state, At: time.Now(), Source: "socket", Labels: labels}
 	select {
 	case f.out <- ev:
 		return true

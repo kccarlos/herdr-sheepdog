@@ -121,7 +121,7 @@ func (s *Supervisor) AttentionState(ctx context.Context, agents []state.Agent) A
 		idx = s.folders(ctx)
 	}
 	for _, row := range agents {
-		a := attentionOf(row, marksOf(all, row), s.rowMuted(idx, row))
+		a := attentionOf(row, marksOf(all, row), s.isFactoryQuietRow(row) || s.rowMuted(idx, row))
 		out.Agents[row.PaneID] = a
 		switch {
 		case a.Group == attention.GroupNeedsYou:
@@ -614,11 +614,14 @@ func (s *Supervisor) folderOfPane(idx *folderIndex, row state.Agent) string {
 // it answers before any lookup. It may read herdr's workspaces; do not call
 // it with s.mu held.
 func (s *Supervisor) paneMuted(ctx context.Context, paneID string) bool {
-	if s.cfg.Mutes == nil || s.cfg.Mutes.Empty() {
-		return false
-	}
 	row, ok := s.store.Get(paneID)
 	if !ok {
+		return false
+	}
+	if s.isFactoryQuietRow(row) {
+		return true
+	}
+	if s.cfg.Mutes == nil || s.cfg.Mutes.Empty() {
 		return false
 	}
 	idx := s.folders(ctx)
@@ -647,11 +650,14 @@ func (s *Supervisor) paneMuted(ctx context.Context, paneID string) bool {
 // paneMutedCached is paneMuted from the folder index as it is, never
 // calling herdr: for log decoration, which runs under locks.
 func (s *Supervisor) paneMutedCached(paneID string) bool {
-	if s.cfg.Mutes == nil || s.cfg.Mutes.Empty() {
-		return false
-	}
 	row, ok := s.store.Get(paneID)
 	if !ok {
+		return false
+	}
+	if s.isFactoryQuietRow(row) {
+		return true
+	}
+	if s.cfg.Mutes == nil || s.cfg.Mutes.Empty() {
 		return false
 	}
 	s.idxMu.Lock()
