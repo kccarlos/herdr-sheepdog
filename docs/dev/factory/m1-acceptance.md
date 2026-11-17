@@ -51,7 +51,12 @@ Both VMs reached a commit on `main` in local-merge mode: there is no GitHub remo
 
 ## 3. Pull request on GitHub
 
-Pending: this leg needs a throwaway GitHub repo and a login for it on each VM, which only the owner can provide.
+Not run. Neither VM can make or merge a pull request as it stands. Linux has no gh and no GitHub credentials. The Tart image is signed in to gh with the owner's own account, which was not used. Credentials are the owner's call, and the owner was away, so the Assistant chose to skip this leg rather than create a repo or copy a login. Running it needs:
+
+- a private throwaway repo for the test, and
+- a fine-grained token scoped to that repo only (Contents and Pull requests, read and write), given through `herdr-secret` and removed after the run, plus gh on the Linux VM.
+
+With those, steps 1 to 5 above run in a clone of that repo, and the result is checked on GitHub (`gh pr view --json state,mergedAt`), not from an exit code.
 
 ## Findings
 
@@ -69,6 +74,7 @@ Severity levels follow the reviewer template: **major** means someone would hit 
 
 ## Not proven
 
+- **The merged pull request on either VM**, which is half of the phase 1 exit test (section 3). It needs a private throwaway repo and a token scoped to it.
 - Unattended runs: every run above had the tester answering dialogs, changing one setting and accepting as the owner. Phase 2 (doctor, coordinator lease) is what removes those step-ins.
 - `project start` with a coordinator on either VM.
 - Review rounds (Review was off) and CI checks (the demo repos have no CI).
