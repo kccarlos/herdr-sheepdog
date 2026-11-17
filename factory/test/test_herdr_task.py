@@ -11381,6 +11381,7 @@ class SyncBehindBase(unittest.TestCase):
         self.assertEqual((t["state"], gh["merged"], len(self.updates(gh)), t.get("sync_fallback")), ("ready", None, 1, None))
         self.assertEqual(checks.sync_mode(self.store, {**t, "space": None}), "full")
 
+    @unittest.skipUnless(shutil.which("make"), "needs make on this machine (a derived `make test` exits 127 without it)")
     def test_empty_check_derives_from_makefile_test_target(self):
         import herdr_task.checks as checks
         t, gh = self.repo("cheap", check="")
@@ -11396,6 +11397,7 @@ class SyncBehindBase(unittest.TestCase):
         self.assertEqual((t["state"], gh["merged"], self.updates(gh), t.get("sync_fallback")), ("done", self.head, [], None))
         self.leftovers()
 
+    @unittest.skipUnless(shutil.which("make"), "needs make on this machine (a derived `make test` exits 127 without it)")
     def test_derived_check_env_failure_falls_back_while_merge_regression_fails(self):
         # Derived check exiting non-zero on head alone (e.g. make exits 2 for missing venv/deps) falls back to full.
         t, gh = self.repo("cheap", check="")
