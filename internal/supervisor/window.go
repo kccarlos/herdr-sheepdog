@@ -160,6 +160,9 @@ func (s *Supervisor) WindowPrompt(ctx context.Context, paneID, text string) (Win
 	if text == "" || len(text) > WindowMaxText {
 		return WindowResult{}, fmt.Errorf("%w: the text must be 1 to %d bytes", ErrWindowInput, WindowMaxText)
 	}
+	if isFactoryPane(paneID) {
+		return WindowResult{}, fmt.Errorf("%w: window prompts cannot be sent directly to factory project %s", ErrWindowRefused, paneID)
+	}
 	row, ok := s.store.Get(paneID)
 	if !ok {
 		return WindowResult{}, ErrNoSuchAgent
@@ -226,7 +229,7 @@ func (s *Supervisor) WindowPrompt(ctx context.Context, paneID, text string) (Win
 // question, they answer it through the tap path (AnswerTap), so the
 // pending action is confirmed and cleared the way a card tap does;
 // otherwise they go to the pane as they are and the orchestrator is told.
-func (s *Supervisor) WindowKeys(ctx context.Context, paneID string, keys []string) (WindowResult, error) {
+func (s *Supervisor) WindowKeys(ctx context.Context, paneID string, keys []string, deviceID string) (WindowResult, error) {
 	if len(keys) == 0 || len(keys) > WindowMaxKeys {
 		return WindowResult{}, fmt.Errorf("%w: send 1 to %d keys", ErrWindowInput, WindowMaxKeys)
 	}
@@ -235,12 +238,29 @@ func (s *Supervisor) WindowKeys(ctx context.Context, paneID string, keys []strin
 			return WindowResult{}, fmt.Errorf("%w: key %q is not allowed", ErrWindowInput, k)
 		}
 	}
+	if isFactoryPane(paneID) {
+		if id, option, ok := s.windowAnswer(paneID, keys); ok {
+			res, err := s.AnswerTap(ctx, id, option, deviceID)
+			if err == nil {
+				return WindowResult{Kind: "answer", Spoken: res.Spoken}, nil
+			}
+			switch {
+			case errors.Is(err, ErrNotSent):
+				return WindowResult{Kind: "answer", Spoken: res.Spoken}, err
+			case errors.Is(err, ErrPendingGone):
+				return WindowResult{Kind: "answer"}, err
+			default:
+				return WindowResult{Kind: "answer"}, fmt.Errorf("%w: %v", ErrWindowRefused, err)
+			}
+		}
+		return WindowResult{}, fmt.Errorf("%w: raw keys cannot be sent to factory project %s", ErrWindowRefused, paneID)
+	}
 	row, ok := s.store.Get(paneID)
 	if !ok {
 		return WindowResult{}, ErrNoSuchAgent
 	}
 	if id, option, ok := s.windowAnswer(paneID, keys); ok {
-		res, err := s.AnswerTap(ctx, id, option)
+		res, err := s.AnswerTap(ctx, id, option, deviceID)
 		if err == nil {
 			return WindowResult{Kind: "answer", Spoken: res.Spoken}, nil
 		}

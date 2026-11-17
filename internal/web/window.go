@@ -96,7 +96,7 @@ func (s *Server) handleAgentInput(w http.ResponseWriter, r *http.Request) {
 		res, err = s.deps.Supervisor.WindowPrompt(ctx, pane, *req.Text)
 	default:
 		s.log.Log(logSource, "web.agent_input", pane, map[string]any{"kind": "keys", "keys": req.Keys})
-		res, err = s.deps.Supervisor.WindowKeys(ctx, pane, req.Keys)
+		res, err = s.deps.Supervisor.WindowKeys(ctx, pane, req.Keys, deviceOf(r))
 	}
 	if err != nil {
 		msg := err.Error()

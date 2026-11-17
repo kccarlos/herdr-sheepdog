@@ -435,18 +435,27 @@ func (s *Store) ClearPending() error {
 }
 
 // SetQuestion records p, an answer_prompt, as its pane's open question
-// (replacing an older one of the pane) and persists.
+// (replacing an older one of the pane) and persists. Factory owner asks
+// (`fask-*`) live in the factory store without a terminal Agent row and may
+// have more than one open ask per project, so they are keyed by p.ID.
 func (s *Store) SetQuestion(p PendingAction) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.table.Agents[p.PaneID]; !ok {
-		return nil
+	isFactory := strings.HasPrefix(p.ID, "fask-")
+	if !isFactory {
+		if _, ok := s.table.Agents[p.PaneID]; !ok {
+			return nil
+		}
 	}
 	if s.table.Questions == nil {
 		s.table.Questions = map[string]*PendingAction{}
 	}
 	p = p.clone()
-	s.table.Questions[p.PaneID] = &p
+	key := p.PaneID
+	if isFactory {
+		key = p.ID
+	}
+	s.table.Questions[key] = &p
 	return s.persist()
 }
 
@@ -458,6 +467,23 @@ func (s *Store) DropQuestion(paneID string) error {
 		return nil
 	}
 	delete(s.table.Questions, paneID)
+	return s.persist()
+}
+
+// DropQuestionID removes an open question by its PendingAction ID and persists.
+func (s *Store) DropQuestionID(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := false
+	for k, q := range s.table.Questions {
+		if k == id || (q != nil && q.ID == id) {
+			delete(s.table.Questions, k)
+			removed = true
+		}
+	}
+	if !removed {
+		return nil
+	}
 	return s.persist()
 }
 
@@ -485,7 +511,10 @@ func (s *Store) Questions() []PendingAction {
 		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
 			return out[i].CreatedAt.Before(out[j].CreatedAt)
 		}
-		return out[i].PaneID < out[j].PaneID
+		if out[i].PaneID != out[j].PaneID {
+			return out[i].PaneID < out[j].PaneID
+		}
+		return out[i].ID < out[j].ID
 	})
 	return out
 }

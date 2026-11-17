@@ -262,6 +262,7 @@ const (
 type PendingAction struct {
 	ID            string      `json:"id"`
 	PaneID        string      `json:"pane_id"`
+	Agent         string      `json:"agent,omitempty"`
 	Kind          PendingKind `json:"kind"`
 	SpokenSummary string      `json:"spoken_summary"`
 	PayloadText   string      `json:"payload_text"`

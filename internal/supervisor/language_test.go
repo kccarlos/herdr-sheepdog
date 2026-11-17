@@ -26,7 +26,7 @@ func TestCodeSentencesFollowTheShepherdsLanguage(t *testing.T) {
 		t.Errorf("block template = %q, want the Chinese one", p.SpokenSummary)
 	}
 	h.clock.Advance(time.Second)
-	res, err := h.sup.AnswerTap(context.Background(), p.ID, 1)
+	res, err := h.sup.AnswerTap(context.Background(), p.ID, 1, "")
 	if err != nil {
 		t.Fatal(err)
 	}
