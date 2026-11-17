@@ -13,7 +13,7 @@ import time
 
 from .base import ENTRY, Fail, guard, hc_json, now, STORE
 from .when import parse_at
-from .settings import bare, set_task, settings_for, SET_KEYS, worker_argv, worktrees_on
+from .settings import set_task, settings_for, SET_KEYS, worker_argv, worktrees_on
 from .agents import agent_running, detail, live_agents, starting, status_of, task_status
 from .sessions import session_of
 from .store import locate, open_store, read_list, Store, store_files
@@ -205,11 +205,11 @@ def find_auto(s, ref):
 
 
 def auto_view(s, a):
-    v = {k: a.get(k) for k in ("id", "title", "prompt", "mode", "agent", "set", "on", "match", "space", "paused",
+    v = {k: a.get(k) for k in ("id", "title", "prompt", "mode", "agent", "set", "on", "match", "paused",
                                 "next_run", "last_run", "last_task", "last_error", "from_error", "runs", "created")}
     # machine: None here; herdr-task --on <machine> names it (cli.remote), so a list across machines says whose it is
     v.update(ref=auto_ref(s, a), **{"from": from_text(a["from"]) if a.get("from") else None}, folder=s.loc["folder"], machine=None, prefix=s.prefix, every=(a.get("every") or {}).get("text"),
-             trigger=trigger_words(a), enabled=settings_for(s, a.get("space"))["automations"].get("enabled", True))
+             trigger=trigger_words(a), enabled=settings_for(s)["automations"].get("enabled", True))
     return v
 
 
@@ -253,8 +253,6 @@ def set_auto_fields(s, a, args, adding=False):
         if args.worktree and s.loc["kind"] != "repo":
             raise Fail("Worktrees need a git repo.")
         a["mode"] = "here" if args.here else "worktree"
-    if getattr(args, "space", None):
-        a["space"] = bare(args.space)
     if args.parent:
         a["parent"] = args.parent
     if getattr(args, "set", None):
@@ -377,20 +375,19 @@ def fire(s, a, why, brief=None):
         t["agent"] = a["agent"]
     for k, v in (a.get("set") or {}).items():
         set_task(t, k, v)
-    space = a.get("space") or s.loc["folder"]
     run_rec = {"at": now(), "why": why, "task": s.ref(t)}
     if a.get("from") and why.split(":")[0] in EVENTS:
         run_rec["from"] = from_text(a["from"])
     try:
-        argv = worker_argv(s, t, space)
+        argv = worker_argv(s, t)
         parent = a.get("parent")
         reason = queue_reason(s, t)
         if reason:
             t["state"], t["queued_at"] = "queued", now()
-            t["queue"] = {"argv": argv, "space": space, "parent": parent}
+            t["queue"] = {"argv": argv, "parent": parent}
             run_rec["queued"] = reason
         else:
-            begin(s, t, argv, space, parent)
+            begin(s, t, argv, parent=parent)
         a.pop("last_error", None)
     except Fail as e:
         run_rec["error"] = str(e)
@@ -616,7 +613,6 @@ def automations_pass(s, seen, report, feeds=None):
     enabled = settings_for(s)["automations"].get("enabled", True)
     happened = events_in(s, seen) if any(a.get("on") and not a.get("from") for a in autos) else []
     for a in autos:
-        on = settings_for(s, a.get("space"))["automations"].get("enabled", True) if a.get("space") else enabled
         whys = []
         if a.get("every") and a.get("next_run") and now() >= a["next_run"]:
             a["next_run"] = next_run(a["every"], now())
@@ -633,7 +629,7 @@ def automations_pass(s, seen, report, feeds=None):
                 # Its own tasks never set it off again (no endless chains).
                 if ev in (a.get("on") or []) and t.get("automation") != a["id"] and matches(a, t):
                     whys.append((f"{ev}: {s.ref(t)}", event_brief(ev, {"ref": s.ref(t), "title": t["title"]})))
-        if not on:
+        if not enabled:
             continue
         for why, brief in whys:
             t = fire(s, a, why, brief)

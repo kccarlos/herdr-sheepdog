@@ -22,7 +22,7 @@ import termios
 import tty
 
 from . import base as _base, store as _store
-from .base import ENTRY, Fail, now, run, STORE
+from .base import ENTRY, Fail, now, ROLE_LABEL, run, STORE
 from .output import say
 
 _DEFAULT_ASKS, _DEFAULT_RUN = os.path.join(STORE, "asks"), run
@@ -127,7 +127,8 @@ def cmd_ask(args):
            **({"checklist": checklist} if checklist else {}), **({"origin": origin} if origin else {})}
     save(rec)
     # The pane gets the core's environment, not ours: the store goes along in its command.
-    labels = ["--label", "herdr.role=ask", "--label", f"herdr.ask={rec['id']}"]
+    labels = ["--label", f"{ROLE_LABEL}=ask", "--label", f"sheepdog.ask={rec['id']}",
+              "--label", "herdr.role=ask", "--label", f"herdr.ask={rec['id']}"]
     env_kv = [f"HERDR_TASK_STORE={os.path.dirname(asks_dir())}"] + (
         [f"HERDR_TASK_SETTINGS={__import__('herdr_task.settings', fromlist=['SETTINGS']).SETTINGS}"] if checklist else [])
     runner, r = run if run is not _DEFAULT_RUN else _base.run, None
@@ -222,10 +223,12 @@ def cmd_ask_pane(args):
             __import__("herdr_task.project", fromlist=["apply_checklist_answer"]).apply_checklist_answer(rec)
         except Fail:
             pass
-    orig = rec.get("origin") or {}
-    if not rec.get("to") and (target := orig.get("space") or orig.get("folder")):
+    folder = (rec.get("origin") or {}).get("folder") or (rec.get("checklist") or {}).get("folder")
+    if not rec.get("to") and folder:
         try:
-            rec["to"] = __import__("herdr_task.launch", fromlist=["coordinator_in"]).coordinator_in(target)
+            rec["to"] = __import__("herdr_task.launch", fromlist=["coordinator_in"]).coordinator_in(folder)
+            if rec.get("to"):
+                save(rec)
         except Fail:
             pass
     if rec.get("to"):

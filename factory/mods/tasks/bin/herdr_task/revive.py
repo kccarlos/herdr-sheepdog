@@ -17,10 +17,10 @@ import os
 import re
 import shlex
 
-from .base import HOME, hc_json, now, run, SHELLS
+from .base import HOME, hc_json, label_of, now, PACKAGE, run, SHELLS
 from .agents import agent_running, status_word
 from .sessions import session_of
-from .settings import ASSISTANT_TEMPLATES
+from .settings import ASSISTANT_TEMPLATES, TEMPLATES
 from .launch import CLEAN_ENV, no_update_env, resume_argv as launch_resume
 
 LABEL = "herdr.resume"
@@ -177,20 +177,20 @@ def watched(k):
     """An Assistant or a task's agent (its worker or reviewer): what comes back. Never a sandboxed
     reviewer (launch.sandboxed): it would come back outside its sandbox."""
     labels = k.get("labels") or {}
-    return not labels.get("herdr.sandbox") and (labels.get("herdr.role") == "coordinator" or k.get("template") in ASSISTANT_TEMPLATES
-                                                or bool(labels.get("herdr.task")))
+    return not label_of(labels, "sandbox") and (label_of(labels, "role") == "coordinator" or k.get("template") in ASSISTANT_TEMPLATES
+                                                or bool(label_of(labels, "task")))
 
 
 def task_ref(k):
     """A task agent's task id (herdr-task names its agents shep-30-fix-login)."""
     m = re.match(r"^([a-z][a-z0-9]*)-(\d+)(?:-|$)", k.get("name") or "")
-    return f"{m.group(1).upper()}-{m.group(2)}" if m and (k.get("labels") or {}).get("herdr.task") else None
+    return f"{m.group(1).upper()}-{m.group(2)}" if m and label_of(k.get("labels"), "task") else None
 
 
 def env_of(k):
-    """What the agent's launch set besides its argv: a task's browser (launch.launch)."""
-    key = (k.get("labels") or {}).get("herdr.task")
-    return {"HERDR_BROWSER_TASK": key} if key else {}
+    """What the agent's launch set besides its argv: the task key (launch.launch)."""
+    key = label_of(k.get("labels"), "task")
+    return {"SHEEPDOG_TASK": key} if key else {}
 
 
 def record_of(k):
@@ -221,7 +221,7 @@ def task_of(k):
     """A task agent's task (read only), or None (gone, archived)."""
     from .store import read_list
     from .base import STORE
-    key = (k.get("labels") or {}).get("herdr.task") or ""
+    key = label_of(k.get("labels"), "task") or ""
     slug, _, n = key.rpartition("#")
     d = read_list(os.path.join(STORE, slug + ".json")) if slug and n.isdigit() else None
     return next((t for t in (d or {}).get("tasks") or [] if t.get("id") == int(n)), None)
@@ -234,18 +234,24 @@ def task_record(k, t):
     kind, argv = base_argv((a or {}).get("argv"))
     if not kind:
         return None
-    if (k.get("labels") or {}).get("herdr.role") != "reviewer":
+    if label_of(k.get("labels"), "role") != "reviewer":
         argv = own_argv(argv, t.get("worktree") if t.get("mode") == "worktree" else (None if kind == "agy" else k.get("cwd")), cwd=k.get("cwd"))
     return {"kind": kind, "session": a.get("session"), "log": a.get("log"), "argv": argv, "cwd": k.get("cwd"),
             "pid": None, "working": t.get("state") == "running", "shell": True}
 
 
 def template_of(name="assistant"):
-    """(command, text) of a herdr-core template on this machine."""
-    try:
-        with open(os.path.join(HOME, ".config", "herdr-core", "templates", f"{name}.md")) as f:
-            text = f.read()
-    except OSError:
+    """(command, text) of an agent template on this machine."""
+    bundled = os.path.normpath(os.path.join(PACKAGE, "..", "..", "..", "..", "templates", f"{name}.md"))
+    text = None
+    for path in (os.path.join(TEMPLATES, f"{name}.md"), bundled):
+        try:
+            with open(path) as f:
+                text = f.read()
+                break
+        except OSError:
+            continue
+    if text is None:
         return None, None
     head = re.match(r"^---\n([\s\S]*?)\n---", text)
     m = re.search(r"^command:[ \t]*(.+)$", head.group(1), re.M) if head else None
@@ -269,11 +275,12 @@ def plan(k, rec, running):
     """What to type into `k` now: (how, argv, direct) or None (direct: shell_line's). `running`: the
     sessions agents run here now."""
     labels = k.get("labels") or {}
-    assistant = labels.get("herdr.role") == "coordinator" or k.get("template") in ASSISTANT_TEMPLATES
+    assistant = label_of(labels, "role") == "coordinator" or k.get("template") in ASSISTANT_TEMPLATES
     # A task's agent only while its task is at work (Working, or Ready for follow-ups): a finished
     # task's stays a shell, as its end would leave it.
-    task = task_of(k) if labels.get("herdr.task") else None
-    if labels.get("herdr.task") and (task or {}).get("state") not in ("running", "ready"):
+    has_task = bool(label_of(labels, "task"))
+    task = task_of(k) if has_task else None
+    if has_task and (task or {}).get("state") not in ("running", "ready"):
         return None
     if rec and rec.get("pid") == k.get("pid"):
         # Typed here already: once more only when the resume said its session is gone.

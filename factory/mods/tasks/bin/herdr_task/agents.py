@@ -6,7 +6,7 @@ import os
 import re
 import time
 
-from .base import Fail, git, hc_json, HOME, now, RANK, run, SHELLS
+from .base import Fail, git, hc_json, HOME, label_of, now, RANK, run, SHELLS, TASK_LABEL
 
 
 # ---- live agents ----------------------------------------------------------------------------
@@ -26,15 +26,18 @@ def parent_of(k):
 def is_helper(k, mine=()):
     """hc ls gives no labels: a helper is also told by its parent, another terminal of the same task
     (a worker's parent is its Assistant, never the task's)."""
-    return bool(k.get("parent")) and ((k.get("labels") or {}).get("herdr.role") in HELPER_ROLES or parent_of(k) in mine)
+    return bool(k.get("parent")) and (label_of(k.get("labels"), "role") in HELPER_ROLES or parent_of(k) in mine)
 
 
 def _live(key):
-    d = hc_json("ls", "--label", f"herdr.task={key}") or {}
-    live = [dict(k, labels=dict(k.get("labels") or {}, **{"herdr.task": key}))
-            for k in d.get("terminals", []) if k.get("state") == "live"]
-    mine = {k.get("address") for k in live}
-    return [(k, is_helper(k, mine)) for k in live]
+    found = (hc_json("ls", "--label", f"{TASK_LABEL}={key}") or {}).get("terminals") or []
+    found += (hc_json("ls", "--label", f"herdr.task={key}") or {}).get("terminals") or []
+    by_addr = {}
+    for k in found:
+        if k.get("state") == "live" and k.get("address") not in by_addr:
+            by_addr[k["address"]] = dict(k, labels=dict(k.get("labels") or {}, **{TASK_LABEL: key, "herdr.task": key}))
+    mine = set(by_addr)
+    return [(k, is_helper(k, mine)) for k in by_addr.values()]
 
 
 def live_agents(key):
@@ -59,7 +62,7 @@ AGENT_VER = re.compile(r"^\d+(?:\.\d+)+$")  # Claude Code's native binary is nam
 
 
 def cli_of(k):
-    lb = (k.get("labels") or {}).get("herdr.agent")
+    lb = label_of(k.get("labels"), "agent")
     if lb:
         return lb
     fg, st = k.get("foreground") or {}, k.get("status") if isinstance(k.get("status"), dict) else {}
@@ -152,8 +155,6 @@ def task_status(task, live):
         return "scheduled", None, starts_words(task.get("scheduled_for") or now(), now())
     if st not in ("running", "ready"):
         return (st if st in STATUSES else "todo"), None, None
-    # #995: a question or permission waiting on the chat's card counts as asking, whatever the
-    # agent's own status says (Codex reads working until its hook returns; Claude Code may too).
     states = ["blocked" if asking(k) else status_word(k) for k in live]
     # A problem Herdr just found (SHEP-133): not Needs you before GRACE_MS have passed, while its
     # agent is told and takes it up; until then the task reads as it would without it. Recaps and
@@ -306,7 +307,7 @@ def busy_again(task, live):
     seen = task.get("ready_turns")
     if seen is None and now() - (task.get("ready_at") or 0) < STARTING_MS:
         return False
-    return any(status_word(k) == "working" and (k.get("labels") or {}).get("herdr.role") != "reviewer"
+    return any(status_word(k) == "working" and label_of(k.get("labels"), "role") != "reviewer"
                and (k.get("turn") or 0) >= (seen or {}).get(k.get("address"), 0) and not stray(task, k) for k in live)
 
 
@@ -365,7 +366,7 @@ def back_at_work(task, live):
         return False
     if task.get("ready_turns") is None:
         return True
-    return any(status_word(k) == "working" and (k.get("labels") or {}).get("herdr.role") != "reviewer" and later_turn(task, k)
+    return any(status_word(k) == "working" and label_of(k.get("labels"), "role") != "reviewer" and later_turn(task, k)
                and real_turn(task, k) for k in live)
 
 
@@ -391,7 +392,7 @@ def stray_since(task, live):
 def not_at_rest(task, live):
     """A Ready task's agent still at it: at work in the turn it said ready in, or its own work
     still running (own_work(), its hard signs only: no status line, a question asked doesn't end it)."""
-    if any(status_word(k) == "working" and (k.get("labels") or {}).get("herdr.role") != "reviewer"
+    if any(status_word(k) == "working" and label_of(k.get("labels"), "role") != "reviewer"
            and not later_turn(task, k) for k in live):
         return True  # a later turn is back_at_work()'s (FAC-107)
     return own_work(task, live, ready=True)
@@ -414,7 +415,7 @@ def on_it(task, live):
     """live: its running agents (hc records). Cheap: the task's record and their status only."""
     if task.get("recap") or (task.get("attention") or "").startswith(REVIEWER_FAILED):  # waits for the Assistant (FAC-54, FAC-59)
         return False
-    if any(status_word(k) in ("working", "blocked") and (k.get("labels") or {}).get("herdr.role") != "reviewer"
+    if any(status_word(k) in ("working", "blocked") and label_of(k.get("labels"), "role") != "reviewer"
            for k in live):
         return True
     if now() - (task.get("handed_at") or 0) < STARTING_MS:
@@ -460,8 +461,8 @@ def trust_asked(live):
     from .base import run
     for k in live:
         if (status_word(k) or k.get("turn")
-                or (k.get("labels") or {}).get("herdr.agent", "claude") != "claude"
-                or (k.get("labels") or {}).get("herdr.role") == "reviewer"):
+                or (label_of(k.get("labels"), "agent") or "claude") != "claude"
+                or label_of(k.get("labels"), "role") == "reviewer"):
             continue
         address = k.get("address")
         seen = _trust_seen.get(address)
@@ -756,34 +757,6 @@ def ask_reason(task, address, req=None, kind=None, msg=None):
     return last_question(task, address) or REASONS["question"]
 
 
-# ask-hook.sh holds an ask at most 30 minutes (its loop, the hooks' timeout): a request file older
-# than that was left by a hook that was killed, and holds nothing.
-HELD_MAX_MS = 31 * 60_000
-
-
-def held_ask(address):
-    """The ask Herdr's chat hook holds for this terminal (mods/chat/ask-hook.sh), or None."""
-    if not address:
-        return None
-    base = os.path.join(os.environ.get("HERDR_APP_HOME") or os.path.join(HOME, ".config", "herdr-app"), "data", "chat-asks")
-    d, ans = os.path.join(base, "req"), os.path.join(base, "ans")
-    try:
-        names = sorted(n for n in os.listdir(d) if n.startswith(address + ".") and n.endswith(".json")
-                       and not os.path.exists(os.path.join(ans, n)))
-    except OSError:
-        return None
-    for n in reversed(names):
-        try:
-            p = os.path.join(d, n)
-            if now() - os.path.getmtime(p) * 1000 > HELD_MAX_MS:
-                continue
-            with open(p) as f:
-                return json.load(f)
-        except (OSError, ValueError):
-            continue
-    return None
-
-
 def _ask_shape(question, options=(), recommend=None, defaults=("Yes, go ahead", "No, skip")):
     """Shapes a worker's question and options for `herdr-task ask` (FAC-70)."""
     q = fit(" ".join(str(question or "").split()), 260)
@@ -839,19 +812,15 @@ def full_question(task, address=None, ready_turn=False):
 
 
 def open_question(task, k):
-    """An open question from live worker terminal `k` (its held card, an open question/permission
-    tool call, a blocked prompt, or an unanswered question at the end of its turn), shaped for
-    `herdr-task ask` (FAC-70), or None when `k` isn't asking."""
+    """An open question from live worker terminal `k` (an open question/permission tool call, a
+    blocked prompt, or an unanswered question at the end of its turn), shaped for `herdr-task ask`
+    (FAC-70), or None when `k` isn't asking."""
     fg = k.get("foreground") or {}
-    if ((k.get("labels") or {}).get("herdr.role") in ("reviewer", "coordinator", "ask")
+    if (label_of(k.get("labels"), "role") in ("reviewer", "coordinator", "ask")
             or (fg.get("name") and not agent_running(k)) or (not fg.get("name") and k.get("agent") in SHELLS)):
         return None
     address, st = k.get("address"), k.get("status") if isinstance(k.get("status"), dict) else {}
     kind, msg, word = st.get("kind"), " ".join(str(st.get("msg") or "").split()), status_word(k)
-    req = held_ask(address)
-    if isinstance(req, dict):
-        if q := _tool_question(task, req.get("tool_name"), req.get("tool_input") if isinstance(req.get("tool_input"), dict) else {}, req.get("cwd")):
-            return q
     tool, value = pending_call(task, address)
     if tool in (*QUESTION_TOOLS, "ExitPlanMode") or (tool and word == "blocked" and kind != "auth"):
         return _tool_question(task, tool, value)
@@ -862,13 +831,13 @@ def open_question(task, k):
             return _ask_shape(text, defaults=("Yes, allow", "No, skip"))
         if kind == "plan":
             return _ask_shape(msg or "Approve the agent's plan?", defaults=("Yes, approve", "No, skip"))
-        return _ask_shape(msg or full_question(task, address) or own_line(task, address) or "Question left open when the task finished — check its chat?")
+        return _ask_shape(msg or full_question(task, address) or own_line(task, address) or "Question left open when the task finished — check its terminal?")
     if word in ("idle", "done"):
         log = agent_log(task, address) or agent_log(task)
         if fg_job(k) or (log and (background_jobs(log)[0] or open_tool(log))):
             return None
         try:
-            key = (k.get("labels") or {}).get("herdr.task")
+            key = label_of(k.get("labels"), "task")
             if (key and any(parent_of(h) == address and status_word(h) in ("working", "blocked") for h in live_helpers(key))) \
                     or (address and cli_of(k) == "agy" and agy_bg_tasks(address)):
                 return None
@@ -881,9 +850,8 @@ def open_question(task, k):
 
 
 def asking(k):
-    """Whether a live agent asks the person now: its own status says blocked, or the chat's card
-    holds its question or permission (#995: a Codex agent reads working while its hook waits)."""
-    return status_word(k) == "blocked" or bool(k.get("address") and held_ask(k["address"]))
+    """Whether a live agent asks the person now (its own status says blocked)."""
+    return status_word(k) == "blocked"
 
 
 STARTING_MS = 90_000
@@ -1280,8 +1248,8 @@ def status_waits(k, ended=0):
 
 def helper_working(task, live):
     for k in live:
-        if (k.get("labels") or {}).get("herdr.role") != "reviewer" and status_word(k) != "blocked":
-            address, key = k.get("address"), (k.get("labels") or {}).get("herdr.task")
+        if label_of(k.get("labels"), "role") != "reviewer" and status_word(k) != "blocked":
+            address, key = k.get("address"), label_of(k.get("labels"), "task")
             if key and any(parent_of(h) == address and status_word(h) in ("working", "blocked") for h in live_helpers(key)):
                 return True
     return False
@@ -1381,10 +1349,10 @@ def own_work(task, live, ready=False, since=0):
     if not ready and review_running(task):
         return False
     for k in live:
-        if (k.get("labels") or {}).get("herdr.role") == "reviewer" or status_word(k) == "blocked":
+        if label_of(k.get("labels"), "role") == "reviewer" or status_word(k) == "blocked":
             continue
         address = k.get("address")
-        key = (k.get("labels") or {}).get("herdr.task")
+        key = label_of(k.get("labels"), "task")
         if key and any(parent_of(h) == address and status_word(h) in ("working", "blocked") for h in live_helpers(key)):
             return True
         log = agent_log(task, address) or agent_log(task)
@@ -1402,8 +1370,7 @@ def own_work(task, live, ready=False, since=0):
         if not ready and (waits_on_own(task, address, ended) or status_waits(k, ended)) and not last_question(task, address):
             return True
         # Mid-turn, a long command of its own still running in the foreground: Herdr can read
-        # Claude Code idle then (SHEP-133: HOME-1 read Needs you during a 50 s Bash). Unless a
-        # permission for it waits on the person (the chat's hook holds it).
-        if log and open_tool(log) and not held_ask(address):
+        # Claude Code idle then (SHEP-133: HOME-1 read Needs you during a 50 s Bash).
+        if log and open_tool(log):
             return True
     return False

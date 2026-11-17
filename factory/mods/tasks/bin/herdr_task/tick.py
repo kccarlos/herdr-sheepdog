@@ -11,10 +11,10 @@ import secrets
 import subprocess
 import time
 
-from .base import Fail, git, guard, hc_json, now, PR_EVERY, run, SHELLS, STORE, stop_note
+from .base import Fail, git, guard, hc_json, label_of, now, PR_EVERY, PROJECT_LABEL, ROLE_LABEL, run, SHELLS, STORE, stop_note
 from .settings import machine_name, merge_hold, remove_build_dir, worker_argv
 from .agents import (
-    agent_log, agent_running, back_at_work, BG_ENDED_MSG, BG_NUDGE_MS, busy_again, detail, ended_jobs, fit, held_ask, last_question, live_agents,
+    agent_log, agent_running, back_at_work, BG_ENDED_MSG, BG_NUDGE_MS, busy_again, detail, ended_jobs, fit, last_question, live_agents,
     mid_turn_agents, open_question, own_work, stray_since, ready_turns, REVIEWER_FAILED, status_word, task_status, WAITING_BG,
 )
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
@@ -249,7 +249,7 @@ def back_pass(s, t, report):
     if not isinstance(seen, dict) or t.get("merge_requested"):
         return
     turned = [k for k in live if status_word(k) in ("idle", "done") and k.get("address") in seen
-              and (k.get("labels") or {}).get("herdr.role") != "reviewer" and (k.get("turn") or 0) > seen[k["address"]]]
+              and label_of(k.get("labels"), "role") != "reviewer" and (k.get("turn") or 0) > seen[k["address"]]]
     if not turned:
         return
     wt = t.get("worktree") if t.get("mode") == "worktree" else None
@@ -402,8 +402,7 @@ def tick_store(s, report):
             continue
         q = t.get("queue") or {}
         try:
-            sp = q.get("space") or t.get("space") or s.loc["folder"]
-            a = begin(s, t, q.get("argv") or worker_argv(s, t, sp), sp, q.get("parent"))
+            a = begin(s, t, q.get("argv") or worker_argv(s, t), parent=q.get("parent"))
         except Fail as e:
             t["attention"] = f"Couldn't start: {e}"
             s.dirty = True
@@ -467,9 +466,8 @@ def rescue_question(s, t, k, q, report):
     if any(a.get("from") == addr and a.get("question") == q["question"] for a in t.get("asks") or []):
         return True
     parent = k.get("parent") or next((a.get("parent") for a in reversed(t.get("agents") or []) if a.get("parent")), None)
-    space = t.get("space")
     try:
-        to = parent_for(parent, space or s.loc["folder"]) or parent
+        to = parent_for(parent, s.loc["folder"]) or parent
     except Fail:
         to = parent
     question = q["question"] if ref in q["question"] else fit(f"{ref}: {q['question']}", ask_mod.MSG_MAX)
@@ -477,7 +475,7 @@ def rescue_question(s, t, k, q, report):
         with contextlib.redirect_stdout(io.StringIO()):
             rec = ask_mod.cmd_ask(argparse.Namespace(
                 show=None, question=question, option=q["options"], recommend=q["recommend"],
-                task=ref, to=to, json=True, origin={"terminal": addr, "space": space, "folder": s.loc["folder"]}))
+                task=ref, to=to, json=True, origin={"terminal": addr, "folder": s.loc["folder"]}))
     except (Fail, OSError) as e:
         why = str(e)
         line = f"Kept {addr} open (open question: {q['question']}): {why}"
@@ -508,7 +506,7 @@ def end_done(s, t, report, pressed=False):
         return []
     me = os.environ.get("HC_TERMINAL_ID")
     live = [detail(k) for k in live_agents(s.key(t))]
-    live = [k for k in live if k.get("address") != me and (k.get("labels") or {}).get("herdr.role") != "coordinator"]
+    live = [k for k in live if k.get("address") != me and label_of(k.get("labels"), "role") != "coordinator"]
     if not live:
         remove_build_dir(s, t)
         t["ended_at"] = now()
@@ -619,9 +617,9 @@ RETRIES = os.path.join(STORE, ".retries.json")
 STALE_CUT_MS = 30 * 60000
 
 
-def retry_one(row, k, log, report):
+def retry_one(row, k, log, report, project=None):
     """One agent's provider retry: the row it has now (None: no cut). The row is
-    {address, role, space, log, cut, tries, reason, due | over, nudged}."""
+    {address, role, project, log, cut, tries, reason, due | over, nudged}."""
     addr = k["address"]
     cut = provider_cut(log) if log else None
     if not cut:
@@ -633,7 +631,8 @@ def retry_one(row, k, log, report):
         f = provider_error(cut["text"], cut["code"], cut["status"])
         wait = f["passing"] and cut["tries"] <= len(PROVIDER_WAITS) and PROVIDER_WAITS[cut["tries"] - 1]
         labels = k.get("labels") or {}
-        row = {"address": addr, "role": labels.get("herdr.role") or "worker", "space": labels.get("herdr.space"),
+        row = {"address": addr, "role": label_of(labels, "role") or "worker",
+               "project": project or labels.get(PROJECT_LABEL) or k.get("cwd"),
                "log": log, "cut": cut["id"], "tries": cut["tries"],
                "reason": f"{f['reason']}, still after {cut['tries']} tries" if f["passing"] and not wait else f["reason"],
                "at": now(), **({"due": now() + wait * 60000} if wait else {"over": True})}
@@ -654,7 +653,7 @@ def bg_ended_pass(s, t, live):
         return
     told = (t.get("bg_told") or {}).get("ids") or []
     for k in live:
-        if (k.get("labels") or {}).get("herdr.role") == "reviewer" or status_word(k) not in ("idle", "done"):
+        if label_of(k.get("labels"), "role") == "reviewer" or status_word(k) not in ("idle", "done"):
             continue
         quiet = k.get("status_ms") or 0
         jobs = {i: j for i, j in ended_jobs(t, k).items() if i not in told}
@@ -672,7 +671,7 @@ def retry_pass(report):
     off (its own log says so) gets "carry on" after 1, 2, 4 and 8 minutes; the fifth cut, or an
     error waiting can't fix, needs the person. Rows live in .retries.json; a task's row is also on
     the task (its "retry"), which its status reads. Reviewers are left alone, as are agents that
-    work, ask (a card Herdr holds) or were written to since (their log no longer ends on the cut)."""
+    work, ask or were written to since (their log no longer ends on the cut)."""
     report.setdefault("retries", [])
     try:
         with open(RETRIES) as f:
@@ -680,11 +679,15 @@ def retry_pass(report):
     except (OSError, ValueError):
         old = {}
     rows = {}
-    for k in (hc_json("ls", "--label", "herdr.role=coordinator") or {}).get("terminals", []):
-        if k.get("state") != "live" or "/" in k["address"] or held_ask(k["address"]):
+    coords = (hc_json("ls", "--label", f"{ROLE_LABEL}=coordinator") or {}).get("terminals", [])
+    coords += (hc_json("ls", "--label", "herdr.role=coordinator") or {}).get("terminals", [])
+    seen_coords = set()
+    for k in coords:
+        if k.get("state") != "live" or "/" in k["address"] or k["address"] in seen_coords:
             continue
+        seen_coords.add(k["address"])
         k = detail(k)
-        k["labels"] = dict(k.get("labels") or {}, **{"herdr.role": "coordinator"})
+        k["labels"] = dict(k.get("labels") or {}, **{ROLE_LABEL: "coordinator", "herdr.role": "coordinator"})
         if not agent_running(k) or status_word(k) == "blocked":
             continue
         pid = (k.get("foreground") or {}).get("pid")
@@ -711,7 +714,7 @@ def retry_pass(report):
                 mine = [detail(k) for k in live_agents(s.key(t))]
                 want = None
                 for k in mine:
-                    if (k.get("labels") or {}).get("herdr.role") == "reviewer" or not agent_running(k) or held_ask(k["address"]):
+                    if label_of(k.get("labels"), "role") == "reviewer" or not agent_running(k):
                         continue
                     if not agent_log(t, k["address"]):
                         refresh_sessions(s, t, [k])
@@ -722,7 +725,7 @@ def retry_pass(report):
                     b = t.get("backup") or {}
                     if b.get("state") == "started" and b.get("from_address") == k["address"]:
                         continue  # the agent its backup took over from, still ending
-                    row = retry_one(old.get(k["address"]), k, log, report)
+                    row = retry_one(old.get(k["address"]), k, log, report, project=s.loc["folder"])
                     if row and row.get("over") and not row.get("stale"):
                         row = takeover(s, t, k, row, log, report)
                     if row:
@@ -732,14 +735,14 @@ def retry_pass(report):
                         want = {x: row[x] for x in ("address", "reason", "tries", "due", "over") if x in row}
                 # SHEP-189: a running task whose agents were all running and now are not has gone
                 # "stopped". Logged once at the moment it happens: which terminals, what Herdr saw.
-                up = any(agent_running(k) and (k.get("labels") or {}).get("herdr.role") != "reviewer" for k in mine)
+                up = any(agent_running(k) and label_of(k.get("labels"), "role") != "reviewer" for k in mine)
                 if t.get("alive") and not up:
                     from .machine import sample
                     h = sample()
                     stop_note("gone", task=s.ref(t), memory=h["memory"], load=h["load"], terminals=[
                         {"address": k["address"], "state": k.get("state"), "status": status_word(k),
-                         "foreground": (k.get("foreground") or {}).get("name"), "role": (k.get("labels") or {}).get("herdr.role")}
-                        for k in mine if (k.get("labels") or {}).get("herdr.role") != "reviewer"])
+                         "foreground": (k.get("foreground") or {}).get("name"), "role": label_of(k.get("labels"), "role")}
+                        for k in mine if label_of(k.get("labels"), "role") != "reviewer"])
                 if bool(t.get("alive")) != up:
                     t["alive"] = up
                     s.dirty = True

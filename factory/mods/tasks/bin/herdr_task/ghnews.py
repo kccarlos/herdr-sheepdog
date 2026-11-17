@@ -1,5 +1,5 @@
 """GitHub news: what GitHub says about a Ready task's pull request, passed on to its resting agent,
-and its base branch going red after merges, told to the space's Assistant (as Shepherdr's)."""
+and its base branch going red after merges, told to the project's coordinator."""
 
 import datetime
 import json
@@ -287,8 +287,7 @@ def main_check(s, base, w, report):
                      "Add one small fix-forward task only if they asked you to handle such things and none is at work already: "
                      "its brief says what broke and where, to stay inside it, and never to force-push.")
         w["notice"] = {"text": f'<herdr-news event="main-red" branch="{attr(base)}">' + esc("\n".join(lines)) + "</herdr-news>",
-                       "at": now(), "folder": w.get("folder") or (getattr(s, "loc", None) or {}).get("folder"),
-                       **({"space": w["space"]} if w.get("space") else {})}
+                       "at": now(), "folder": w.get("folder") or (getattr(s, "loc", None) or {}).get("folder")}
         report.setdefault("main_red", []).append({"folder": s.loc["folder"], "branch": base, "commit": sha})
         return
 
@@ -308,7 +307,7 @@ def main_pass(s, report):
             main_check(s, base, w, report)
         n = w.get("notice")
         if n and not n.get("sent") and not n.get("dropped"):
-            to = coordinator_in(n.get("folder") or n.get("space") or (getattr(s, "loc", None) or {}).get("folder"))
+            to = coordinator_in(n.get("folder") or (getattr(s, "loc", None) or {}).get("folder"))
             if to and news_send(to, n["text"]):
                 n["sent"] = now()
                 s.dirty = True

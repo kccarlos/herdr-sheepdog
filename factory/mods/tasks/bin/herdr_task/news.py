@@ -1,4 +1,4 @@
-"""News: what changed in a space's tasks, told to its Assistant."""
+"""News: what changed in a project's tasks, told to its coordinator."""
 
 import fcntl
 import json
@@ -10,12 +10,10 @@ import time
 from contextlib import contextmanager
 
 from .base import guard, hc_json, now, run, STORE
-from .settings import bare
 from .agents import (
-    agent_log, agent_running, asking, cli_of, detail, from_person, live_agents, log_tail, REVIEWER_FAILED, said, starting,
+    agent_log, agent_running, cli_of, detail, live_agents, REVIEWER_FAILED, starting,
     status_word, STATUSES, trust_asked, WORKING_AGAIN,
 )
-from .sessions import session_of
 from .launch import coordinator_in
 from .store import locate, read_list, Store, store_files
 from .output import line, minutes, view
@@ -24,7 +22,7 @@ from .takeover import backup_news
 
 
 # ---- news -----------------------------------------------------------------------------------
-# Herdr itself tells a space's Assistant (its coordinator) when one of its tasks needs the person
+# Herdr itself tells a project's coordinator when one of its tasks needs the person
 # (with the reason), is Ready, is Done, failed, or went quiet: one tagged line each, and the lines
 # of one moment as one message (as Shepherdr's task news); workers don't report. The status is
 # the one people see (view(): task_status() and its reason, as `list` and the Tasks panel). Each
@@ -112,7 +110,7 @@ def news_pass(report, folder=None):
             state = json.load(f)
     except (OSError, ValueError):
         state = {}
-    seen, outbox, quiet = state.setdefault("seen", {}), state.setdefault("outbox", []), state.setdefault("quiet", {})
+    seen, outbox = state.setdefault("seen", {}), state.setdefault("outbox", [])
     delivered = state.setdefault("delivered", {})
     current = {}  # key -> (status, stall mark), to check queued lines against
     for path in store_files(folder):
@@ -146,16 +144,6 @@ def news_pass(report, folder=None):
                         t["trust_ask"] = trust
                     else:
                         t.pop("trust_ask", None)
-                    s.dirty = True
-                # #995: its question or permission held on the chat's card while its agent reads
-                # working (Codex, until its hook returns): Needs you in the Tasks panel too.
-                held = next((k["address"] for k in live if status_word(k) != "blocked" and asking(k)), None) \
-                    if v.get("needs") == "asks" else None
-                if s.write and t.get("held_ask") != held:
-                    if held:
-                        t["held_ask"] = held
-                    else:
-                        t.pop("held_ask", None)
                     s.dirty = True
                 # Quiet on its own background work (SHEP-53): Working in the Tasks panel too.
                 if s.write and bool(t.get("own_work")) != bool(v.get("own_work")):
@@ -211,7 +199,7 @@ def news_pass(report, folder=None):
                     outbox[:] = [x for x in outbox if not (x["key"] == key and ev not in ("backup", "sync-fallback")
                                                            and x["event"] not in ("backup", "sync-fallback")
                                                            and (x["event"] == ev or ev != "stalled"))]
-                    outbox.append({"key": key, "space": bare(t["space"]) if t.get("space") else None, "project": s.loc["folder"], "folder": os.path.basename(s.loc["folder"]), "event": ev, "status": v["status"],
+                    outbox.append({"key": key, "project": s.loc["folder"], "folder": os.path.basename(s.loc["folder"]), "event": ev, "status": v["status"],
                                    "stall": stall[0] if ev == "stalled" else None, "text": text, "at": now()})
             ids = {str(t["id"]) for t in s.data["tasks"]}
             for k in [k for k in mine if k not in ids and k != "_init"]:
@@ -226,12 +214,11 @@ def news_pass(report, folder=None):
     outbox[:] = [x for x in outbox if holds(x) and now() - x["at"] < NEWS_KEEP_MS]
     for k in [k for k, v in delivered.items() if not isinstance(v, dict) or not holds({**v, "key": k})]:
         delivered.pop(k)
-    route_of = lambda x: x.get("space") or x.get("project")
-    for target in dict.fromkeys(route_of(x) for x in outbox if route_of(x)):
-        batch = [x for x in outbox if route_of(x) == target]
+    for project in dict.fromkeys(x.get("project") for x in outbox if x.get("project")):
+        batch = [x for x in outbox if x.get("project") == project]
         if now() - min(x["at"] for x in batch) < NEWS_SETTLE_MS:
             continue
-        to = coordinator_in(target)
+        to = coordinator_in(project)
         k = hc_json("get", to) if to else None
         got = news_send(to, "\n".join(x["text"] for x in batch)) if to else False
         if got:
@@ -244,52 +231,17 @@ def news_pass(report, folder=None):
                                            "event": x["event"], "status": x["status"], "stall": x.get("stall"),
                                            "idle": idle, **({"pending": True} if got == "pending" else {})}
             report["news"].append({"to": to, "lines": [x["text"] for x in batch]})
-            # Read before the news: a <no-reply> to it leaves it read (news_read()).
-            read = (k.get("labels") or {}).get(READ) if k else None
-            if k and str(read) == str(k.get("turn")) and to not in quiet:
-                quiet[to] = {"turn": k.get("turn"), "at": now()}
-    # Settings changed for a space: its running Assistant told once, in one message (assistant_settings.py).
+    # Settings changed for a project: its running coordinator told once, in one message (assistant_settings.py).
     try:
         from .assistant_settings import settings_pass
-        settings_pass(report, quiet)
+        settings_pass(report)
     except Exception as e:  # never stops the news
         report["settings_error"] = str(e)
-    news_read(quiet)
     held_pass(report, delivered)
     tmp = f"{NEWS}.{os.getpid()}.tmp"
     with open(tmp, "w") as f:
         json.dump(state, f)
     os.replace(tmp, NEWS)
-
-
-READ = "herdr.chat.read"  # the Assistant's turn last read (mods/chat/unread.js)
-NO_REPLY = re.compile(r"^\s*(?:<hc\s+no-reply\b[^>]*/>|</?no-reply\b[^\n]*)\s*$")
-
-
-def news_read(quiet):
-    """Unread is a new turn of the Assistant's (mods/chat/unread.js). News it answered only with
-    <no-reply> shows nothing, so it isn't new: an Assistant read before the news is read after
-    it too. quiet = {address: {turn, at}}, the ones told while read; done ones leave it."""
-    for addr, q in list(quiet.items()):
-        k = hc_json("get", addr) or {}
-        if k.get("state") != "live" or now() - q["at"] > 30 * 60000:
-            quiet.pop(addr)
-            continue
-        if status_word(k) == "working" or (k.get("turn") or 0) <= (q.get("turn") or 0):
-            continue
-        quiet.pop(addr)
-        if str((k.get("labels") or {}).get(READ)) != str(q["turn"]):
-            continue  # read since, or changed by someone else
-        log = session_of((k.get("foreground") or {}).get("pid") or "")[1] if (k.get("foreground") or {}).get("pid") else None
-        for d in reversed(log_tail(log, 65536)):
-            if from_person(d) is not None:
-                break
-            text = said(d)
-            if text is None or not text:
-                continue
-            if all(NO_REPLY.match(line) for line in text.split("\n") if line.strip()):
-                run(["hc", "label", addr, f"{READ}={k.get('turn')}"])
-            break
 
 
 POLL_DELAYS = (0.15, 0.3, 0.3, 0.3)
@@ -349,15 +301,11 @@ def news_send(address, text, check=True):
 
 # ---- the person is writing ------------------------------------------------------------------
 # Nothing automatic is typed into an agent while the person writes to it (HERD-71): news,
-# autopilot wakes, the overview, GitHub news, another Assistant's words, a task's messages. They
-# wait until the person has sent or cleared what they wrote, then go as one message. Writing is
-# its chat box holding unsent words (mods/chat labels the terminal herdr.typing=<ms>, again each
-# minute while they stay, removed once they're gone), or the CLI's own input line holding text
-# typed in its terminal (read off the screen: the CLI's dim placeholder or suggestion isn't
-# theirs). hc send itself also waits until no key went in for ~3 s.
+# autopilot wakes, GitHub news, another Assistant's words, a task's messages. They wait until the
+# person has sent or cleared what they wrote, then go as one message. Writing is the CLI's own
+# input line holding text typed in its terminal (read off the screen: the CLI's dim placeholder
+# or suggestion isn't theirs). hc send itself also waits until no key went in for ~3 s.
 
-TYPING = "herdr.typing"
-TYPING_KEEP_MS = 5 * 60000     # unsent words untouched this long hold nothing any more
 HELD = os.path.join(STORE, ".held.json")  # {address: [{text, how, at}]}: held_pass sends them
 ESCAPES = re.compile(r"\x1b(?:\[([0-9;:?<=>!]*)([ -/]*)([@-~])|\][^\x07\x1b]*(?:\x07|\x1b\\)|P[^\x1b]*\x1b\\|[()*+][0-9A-Za-z]|.)"
                      r"|[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]|[\r\n]|[^\x1b\x00-\x1f\x7f]+", re.S)
@@ -491,17 +439,9 @@ def typed_input(raw):
     return "\n".join(out).strip()
 
 
-def chat_typing(k):
-    try:
-        at = int((k.get("labels") or {}).get(TYPING) or 0)
-    except ValueError:
-        at = 0
-    return bool(at and now() - at < TYPING_KEEP_MS)
-
-
 def typing(address, k=None, there=None):
-    """Why the person is writing to this agent now, else None: "chat" (its chat box holds unsent
-    words) or "input" (its CLI's input line holds text they typed). k: its hc get, when at hand."""
+    """Why the person is writing to this agent now, else None: "input" when its CLI's input line
+    holds text they typed. k: its hc get, when at hand."""
     if k is None:
         if there:
             try:
@@ -512,8 +452,6 @@ def typing(address, k=None, there=None):
             k = hc_json("get", address)
     if not k or k.get("state") != "live":
         return None
-    if chat_typing(k):
-        return "chat"
     return "input" if typed_input(screen_raw(address, there)) else None
 
 
@@ -579,8 +517,6 @@ def held_pass(report, delivered=None):
                 continue
             ready_pending = status_word(k) in ("idle", "done")
             if all("pending" in x for x in items) and not ready_pending:
-                continue
-            if chat_typing(k):
                 continue
             inp = typed_input(screen_raw(addr))
             if inp:
