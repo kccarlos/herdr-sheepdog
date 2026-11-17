@@ -1592,10 +1592,11 @@ def inspect_runs(s, t):
             if any([w.pop("bg_at", None), w.pop("idle_at", None), w.pop("try_at", None)]):
                 s.dirty = True
             continue
-        screen = None
+        screen, missing_majors = None, False
         if sandboxes([rn["cli"]]) and st != "blocked":
             screen = screen_of(rn["address"], 400)
             got = read_verdict(screen, round_code(rn))
+            missing_majors = bool(got and got[3] is None and rn.get("majors_required"))
             if got and (got[3] is not None or not rn.get("majors_required")):
                 before, dirty = json.loads(json.dumps(t)), s.dirty
                 try:
@@ -1615,8 +1616,8 @@ def inspect_runs(s, t):
         # FAC-81: only an agent in the error state, its own status message or last lines carrying a quota line
         stuck = (quota_why("\n".join([str(msg or "")] + screen.splitlines()[-5:])) or "reviewer error") if st == "error" else None
         why = (sign_in_why(s, t, rn) if sign_in_screen(screen) else stuck if alive and stuck else
-               "exited without a verdict" if not alive else
-               "ended without a verdict" if st in ("idle", "done") and (k.get("turn") != 0 or now() - (rn.get("at") or 0) >= STARTING_MS)
+               ("verdict missing major count" if missing_majors else "exited without a verdict") if not alive else
+               ("verdict missing major count" if missing_majors else "ended without a verdict") if st in ("idle", "done") and (k.get("turn") != 0 or now() - (rn.get("at") or 0) >= STARTING_MS)
                and not still_waiting(s, t, rn, screen) else None)
         if why:
             fail_run(s, t, rn, why, screen)  # captured before end_reviewer closes the terminal

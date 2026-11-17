@@ -4497,13 +4497,19 @@ class GateReview(unittest.TestCase):
         self.assertEqual(len(self.task["reviews"]), 1)
         self.valid()
 
-    def test_a_read_pass_starts_the_next_round_and_a_moved_head_records_none(self):
+    def test_missing_major_count_explains_failed_sandbox_round(self):
         self.sandbox()
         self.ready()
         code = self.commands.round_code(self.task["review_runs"][0])
         self.screen(f"{code} pass\n")
+        self.reviewer_term = {"state": "live", "agent": "agy", "status": {"state": "done"}, "turn": 1}
         self.commands.gate_reads(self.store, self.task)
-        self.assertNotIn("reviews", self.task)  # new rounds require an explicit major count
+        self.assertEqual(self.task["review_failures"][0]["why"], "verdict missing major count")
+
+    def test_a_read_pass_starts_the_next_round_and_a_moved_head_records_none(self):
+        self.sandbox()
+        self.ready()
+        code = self.commands.round_code(self.task["review_runs"][0])
         self.screen(f"**{code} pass 0**\n")
         self.commands.gate_reads(self.store, self.task)
         self.assertEqual([r["verdict"] for r in self.task["reviews"]], ["pass"])
@@ -7009,7 +7015,7 @@ class GateEndToEnd(GateReview):
             self.ready()
         argv = self.argv_of(1)
         self.assertIn("trustedWorkspaces", argv[argv.index("--settings") + 1])
-        self.until(lambda: self.screen_has(1, " pass\n"))
+        self.until(lambda: self.screen_has(1, " pass 0\n"))
         self.reviewer_term = {"state": "live", "agent": "agy", "status": {"state": "idle"}, "turn": 1}
         self.commands.gate_reads(self.store, self.task)  # reads the begin and pass lines off its terminal
         self.assertEqual([(r["verdict"], r["by"], r["must_fix"]) for r in self.task["reviews"]], [("pass", "term-1", 0)])
