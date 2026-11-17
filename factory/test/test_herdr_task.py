@@ -8285,6 +8285,20 @@ class TaskFlow(unittest.TestCase):
         settings.write_max_running(self.store, None, None)
         tcfg = settings.settings_for(self.store)["tasks"]
         self.assertEqual((tcfg["merge"], tcfg["check"], tcfg["max_running"]), ("auto", "make test", 10))
+        # Takeover reads backup from projects[folder] while forwarding space to launch.py until SDF-7
+        import herdr_task.takeover as takeover
+        self.settings({"projects": {folder: {"backup": {"agent": "agy", "argv": ["agy"]}}}})
+        seen = {}
+        self.patch(takeover, "parent_for", lambda p, sp: seen.setdefault("parent", sp) or "c1")
+        self.patch(takeover, "brief", lambda s, t, p, sp, a: seen.setdefault("brief", sp) or "B")
+        self.patch(takeover, "launch", lambda s, t, a, sp, txt, parent=None: seen.setdefault("launch", sp) and {"address": "t9"})
+        self.patch(takeover, "kill_agent", lambda *_: None)
+        self.patch(takeover, "stop_note", lambda *_, **__: None)
+        t_row = {"id": 9, "title": "x", "space": "sp12", "agents": [{"address": "t8", "agent": "claude", "parent": "c1"}]}
+        res = takeover.takeover(self.store, t_row, {"address": "t8", "labels": {"sheepdog.agent": "claude", "herdr.task.space": "sp12"}},
+                                {"reason": "Out of allowance until 5pm"}, None, {})
+        self.assertIsNone(res)
+        self.assertEqual((seen["parent"], seen["brief"], seen["launch"], t_row["backup"]["to"]), ("sp12", "sp12", "sp12", "agy"))
 
     def test_a_running_task_keeps_its_briefs_review(self):
         """#750: Review turned on everywhere while a task runs: its brief said off, so show and ready say off too."""
