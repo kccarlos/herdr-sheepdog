@@ -473,6 +473,36 @@ class RealGroup(LeaseCase):
         self.assertFalse(self._group_alive(proc.pid), "the sleeps the agent started were orphaned")
         self.assertEqual(lease.handoffs_of(lease.lease_of(self.repo)), [])
 
+    def test_a_rerun_after_the_verdict_ends_a_dead_leaders_group_but_never_a_reused_pid(self):
+        import signal
+        self.hc.real_ps = True
+        self.hc.term("n9", self.repo)
+        at = int(time.time() * 1000)
+        # the old agent: its group was judged (group=True), then the tick stopped; since then its leader died
+        old = subprocess.Popen(["sh", "-c", "sleep 60 & sleep 60 & wait"], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: os.killpg(old.pid, signal.SIGKILL) if self._group_alive(old.pid) else None)
+        time.sleep(0.3)
+        old.kill()
+        old.wait()
+        self.save([{"id": 1, "title": "Auth", "state": "running"}],
+                  coordinator={"address": "n9", "created_ms": 1000, "handoffs": [{"from": "c1", "pid": old.pid, "at": at + 5000, "group": True}]})
+        lease.finish_handoff(self.repo, "n9")
+        for _ in range(50):
+            if not self._group_alive(old.pid):
+                break
+            time.sleep(0.1)
+        self.assertFalse(self._group_alive(old.pid), "a dead leader's group lived on")
+        # a pid reused since the verdict: a live group leader that started after the record is left alone
+        time.sleep(1.1)
+        new = subprocess.Popen(["sh", "-c", "sleep 60 & wait"], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: os.killpg(new.pid, signal.SIGKILL) if self._group_alive(new.pid) else None)
+        self.save([{"id": 1, "title": "Auth", "state": "running"}],
+                  coordinator={"address": "n9", "created_ms": 1000, "handoffs": [{"from": "c1", "pid": new.pid, "at": at, "group": True}]})
+        lease.finish_handoff(self.repo, "n9")
+        time.sleep(0.5)
+        self.assertTrue(self._group_alive(new.pid), "a reused pid's group was killed")
+        self.assertEqual(lease.handoffs_of(lease.lease_of(self.repo)), [])
+
     @staticmethod
     def _group_alive(pgid):
         try:

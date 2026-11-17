@@ -46,14 +46,20 @@ def hc_get(addr):
     return ("gone" if re.search(r'"not_found"|\bno (?:such )?terminal\b', said) else "unknown"), None
 
 
+def pid_start(pid):
+    """When process `pid` started (seconds, ps's lstart, floored to the second), None when ps knows no such process
+    (or can't be read)."""
+    try:
+        r = base.run(["ps", "-o", "lstart=", "-p", str(int(pid))], env={**os.environ, "LC_ALL": "C"})
+        return time.mktime(time.strptime(" ".join(r.stdout.split()), "%a %b %d %H:%M:%S %Y")) if r.returncode == 0 else None
+    except (OSError, ValueError, TypeError, OverflowError, Fail):
+        return None
+
+
 def pid_started_before(pid, at_ms):
     """Whether process `pid` started before `at_ms` (ps's start time, to the second): the process a handoff record named,
     not a later one given its recycled pid. False when it can't be told."""
-    try:
-        r = base.run(["ps", "-o", "lstart=", "-p", str(int(pid))], env={**os.environ, "LC_ALL": "C"})
-        started = time.mktime(time.strptime(" ".join(r.stdout.split()), "%a %b %d %H:%M:%S %Y")) if r.returncode == 0 else None
-    except (OSError, ValueError, TypeError, OverflowError, Fail):
-        return False
+    started = pid_start(pid)
     return started is not None and (started + 1) * 1000 <= at_ms  # lstart is floored to the second
 
 KEY = "coordinator"
@@ -325,7 +331,11 @@ def finish_handoff(folder, new):
                 run(["hc", "rm", old])
         # its agent's children (agy's) don't orphan; only the process the record named, never a later one with its pid
         if h.get("pid") and h.get("group"):
-            end_group(h["pid"])
+            # a re-run may come long after the verdict: a live process at that pid that started since is someone else's
+            # (pid reused) and is left alone; no process there means the leader died, and its group still ends
+            started = pid_start(h["pid"])
+            if started is None or (started + 1) * 1000 <= h["at"]:
+                end_group(h["pid"])
         _edit(folder, lambda d: d.get(KEY, {}).update(handoffs=[x for x in handoffs_of(d.get(KEY, {})) if not _same(x, h)])
               if isinstance(d.get(KEY), dict) else None)
     return moved, ended
