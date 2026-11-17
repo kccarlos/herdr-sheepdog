@@ -92,7 +92,7 @@ class Plans(unittest.TestCase):
         self.assertEqual(t["acc-M1"]["after"], sorted([t["design"]["id"], t["api"]["id"], t["page"]["id"]]))
         # The next milestone's first task waits for this one's acceptance; its acceptance for its own tasks.
         self.assertEqual(t["ship"]["after"], [t["acc-M1"]["id"]])
-        self.assertEqual(t["acc-M2"]["after"], [t["ship"]["id"]])
+        self.assertEqual(t["acc-M2"]["after"], sorted([t["ship"]["id"], t["acc-M1"]["id"]]))
         self.assertEqual(t["design"]["set"]["review_kind"], "design")
         self.assertEqual(t["api"]["estimate_lines"], 200)
         self.assertTrue(t["api"]["prompt"].startswith("Milestone M1: Milestone M1. Its goal: goal of M1\n\nDo api."))
@@ -139,6 +139,38 @@ class Plans(unittest.TestCase):
         self.assertIn("M2 is a UI milestone: it needs a design task", err)
         self.assertIn("screen in UI milestone M3 must come after its design task", err)
         self.assertEqual(self.tasks(), {})
+
+    def test_review_round_1_findings(self):
+        # A loop through the engine's own edges: M1's task waiting for M2's would wait for M1's acceptance.
+        plan = {"milestones": [milestone("M1", [task("a", after=["b"])]), milestone("M2", [task("b")])]}
+        rc, v = self.run_cli("plan", "apply", plan=plan)
+        self.assertIn("a would end up waiting for itself", v["error"])
+        # The size limit can't be passed through set.
+        plan = {"milestones": [milestone("M1", [task("a", lines=10, set={"estimate.lines": "900"})])]}
+        rc, v = self.run_cli("plan", "apply", plan=plan)
+        self.assertIn("its size estimate is lines, not set", v["error"])
+        self.assertEqual(self.tasks(), {})
+        # An empty milestone keeps its place: its acceptance waits for the previous one.
+        plan = {"milestones": [milestone("M1", [task("a")]), milestone("M2", [])]}
+        rc, v = self.run_cli("plan", "apply", plan=plan)
+        self.assertEqual(rc, 0, v)
+        t = self.tasks()
+        self.assertEqual(t["acc-M2"]["after"], [t["acc-M1"]["id"]])
+        self.assertEqual({m["id"]: m["state"] for m in v["milestones"]}, {"M1": "active", "M2": "planned"})
+        # A gate changed by amend reaches the acceptance task, both ways.
+        plan["milestones"][1]["gate"] = "owner"
+        rc, v = self.run_cli("plan", "amend", "--reason", "the owner checks M2", plan=plan)
+        self.assertEqual(self.tasks()["acc-M2"]["set"]["merge"], "ask")
+        plan["milestones"][1]["gate"] = "auto"
+        rc, v = self.run_cli("plan", "amend", "--reason", "delegated", plan=plan)
+        self.assertNotIn("merge", self.tasks()["acc-M2"].get("set") or {})
+        # A started task's malformed after is a plan problem, not a crash.
+        with self.open(True) as s:
+            s.find(str(t["a"]["id"]))["state"] = "running"
+            s.dirty = True
+        plan["milestones"][0]["tasks"] = [{"key": "a", "after": 42}]
+        rc, v = self.run_cli("plan", "amend", "--reason", "x", plan=plan)
+        self.assertIn("a: after is a list", v["error"])
 
     def test_check_only_changes_nothing(self):
         rc, v = self.run_cli("plan", "apply", "--check", plan=self.first_plan())

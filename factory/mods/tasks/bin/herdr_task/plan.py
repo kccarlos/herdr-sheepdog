@@ -8,7 +8,7 @@ import re
 
 from .base import Fail, now
 from .agents import live_agents, status_word
-from .settings import set_task, worktrees_on
+from .settings import SET_KEYS, set_task, worktrees_on
 
 GATES = ("auto", "fable", "owner")
 PLAN_MAX_LINES = 500  # a plan task's size estimate may not pass this (field notes 27, 42)
@@ -45,7 +45,9 @@ def state_of(s, m, first_open):
     work = [t for t in tasks if t is not acc]
     if acc and acc["state"] == "done":
         return "done"
-    if all(t["state"] == "done" for t in work):
+    known = {t["id"]: t for t in s.data["tasks"]}
+    waits = [known[i] for i in (acc or {}).get("after") or [] if i in known] if acc else work
+    if all(t["state"] == "done" for t in waits):
         return "validating"
     if m["id"] == first_open or any(t["state"] not in NOT_STARTED for t in tasks):
         return "active"
@@ -141,6 +143,23 @@ class Plan:
 
     def check_task(self, t, mid):
         key, old = t["key"], self.by_key.get(t["key"])
+        if t.get("kind") not in (None, "design", "doc"):
+            self.bad(f"{key}: kind is design or doc.")
+        if not isinstance(t.get("after", []), list) or not all(isinstance(a, str) for a in t.get("after", [])):
+            self.bad(f"{key}: after is a list of task keys or refs.")
+        if not isinstance(t.get("split_of", ""), str) or (old and "split_of" in t):
+            self.bad(f"{key}: split_of names the one task a new task replaces.")
+        if not isinstance(t.get("set", {}), dict):
+            self.bad(f"{key}: set is an object of --set keys.")
+        else:
+            for k, v in (t.get("set") or {}).items():
+                if SET_KEYS.get(str(k).strip().lower()) == "estimate_lines":
+                    self.bad(f"{key}: its size estimate is lines, not set.")
+                    continue
+                try:
+                    set_task({}, k, str(v))
+                except Fail as e:
+                    self.bad(f"{key}: {e}")
         if old and old["state"] not in NOT_STARTED:
             for f, have in (("title", old["title"]), ("prompt", old.get("plan_prompt")), ("lines", old.get("estimate_lines"))):
                 if f in t and t[f] != have:
@@ -158,18 +177,6 @@ class Plan:
             self.bad(f"{key}: lines (its size estimate in changed lines) is missing.")
         elif lines > PLAN_MAX_LINES:
             self.bad(f"{key}: {lines} lines is past the {PLAN_MAX_LINES}-line size limit; split it.")
-        if t.get("kind") not in (None, "design", "doc"):
-            self.bad(f"{key}: kind is design or doc.")
-        if not isinstance(t.get("after", []), list) or not all(isinstance(a, str) for a in t.get("after", [])):
-            self.bad(f"{key}: after is a list of task keys or refs.")
-        if not isinstance(t.get("set", {}), dict):
-            self.bad(f"{key}: set is an object of --set keys.")
-        else:
-            try:
-                for k, v in (t.get("set") or {}).items():
-                    set_task({}, k, str(v))
-            except Fail as e:
-                self.bad(f"{key}: {e}")
 
     # ---- the graph ------------------------------------------------------------------------
     def check_graph(self):
@@ -239,17 +246,40 @@ class Plan:
         return next((t for t in self.s.data["tasks"] if t.get("acceptance_of") == mid), None)
 
     def check_loops(self, edges):
+        """No loop in the graph as it will be: the plan's own edges, this folder's tasks, and the edges the
+        engine adds (a milestone's first tasks wait for the previous acceptance; an acceptance waits for
+        its milestone's tasks and the previous acceptance)."""
         known = {t["id"]: t for t in self.s.data["tasks"]}
+        ms_of = {t["key"]: mid for t, mid in self.tasks}
+        order = [m["id"] for m in milestones(self.s)] + [m["id"] for m in self.ms if m["id"] not in self.old_ms]
+        prev = dict(zip(order[1:], order))
+        listed = set(ms_of)
+        members = {mid: [("k", k) for k, m in ms_of.items() if m == mid] for mid in order}
+        for t in self.s.data["tasks"]:
+            if (t.get("milestone") in members and not t.get("acceptance_of") and t.get("plan_key") not in listed
+                    and t["id"] not in self.split_parents):
+                members[t["milestone"]].append(("i", t["id"]))
+
+        def mid_of(n):
+            return ms_of.get(n[1]) if n[0] == "k" else (known.get(n[1]) or {}).get("milestone")
+
         def nexts(n):
-            if n[0] == "k":
-                return edges.get(n, [])
-            return [("i", i) for i in (known.get(n[1]) or {}).get("after") or []]
+            if n[0] == "a":
+                return members.get(n[1], []) + ([("a", prev[n[1]])] if n[1] in prev else [])
+            if n[0] == "i" and (known.get(n[1]) or {}).get("acceptance_of"):
+                return nexts(("a", known[n[1]]["acceptance_of"]))
+            deps = edges.get(n, []) if n[0] == "k" else [("i", i) for i in (known.get(n[1]) or {}).get("after") or []]
+            if n[0] == "k" and ms_of[n[1]] in prev and not any(mid_of(d) == ms_of[n[1]] for d in deps):
+                deps = deps + [("a", prev[ms_of[n[1]]])]
+            return deps
+
         for start in edges:
             seen, todo = set(), list(nexts(start))
             while todo:
                 n = todo.pop()
                 if n == start:
-                    self.bad(f"{start[1]} would end up waiting for itself (a loop).")
+                    self.bad(f"{start[1]} would end up waiting for itself (a loop; milestone order counts: "
+                             f"a task can't wait for a later milestone's task).")
                     break
                 if n not in seen:
                     seen.add(n)
@@ -370,8 +400,6 @@ class Plan:
                 acc = s.new(f"{m['id']} acceptance: {m['title']}", "", mode)
                 acc.update(acceptance_of=m["id"], milestone=m["id"])
                 set_base(s, acc, None, new=True)
-                if m.get("gate") == "owner":
-                    set_task(acc, "merge", "ask me first")
                 m["acceptance_task"] = acc["id"]
                 added.append(s.ref(acc))
             work = [t for t in s.data["tasks"] if t.get("milestone") == m["id"] and t is not acc]
@@ -383,8 +411,10 @@ class Plan:
                 roots = prev and not any(i in ids for i in own)
                 t["after"] = list(dict.fromkeys(own + ([prev["id"]] if roots else [])))
             if acc["state"] in NOT_STARTED:
-                acc["after"] = sorted(ids)
+                # It waits for the previous acceptance too, so an empty milestone keeps its place.
+                acc["after"] = sorted(ids | ({prev["id"]} if prev else set()))
                 acc["prompt"] = acceptance_brief(m)
+                set_task(acc, "merge", "ask me first" if m.get("gate") == "owner" else "")
             prev = acc
         return added
 
