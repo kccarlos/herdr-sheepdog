@@ -185,15 +185,13 @@ def news_pass(report, folder=None):
                 if backup:
                     b["told"] = True
                     s.dirty = True
-                fb = t.get("sync_fallback") or {}
-                sync_fb = s.write and fb.get("why") and not fb.get("told")
-                if sync_fb:
-                    fb["told"] = True
-                    s.dirty = True
                 if first or t.get("archived") or not t.get("space"):
                     continue
                 lines = [("backup", news_line(s, t, v, "backup", backup_news(t)))] if backup else []
-                if sync_fb:
+                fb = t.get("sync_fallback") or {}
+                if s.write and fb.get("why") and not fb.get("told"):
+                    fb["told"] = True
+                    s.dirty = True
                     lines.append(("sync-fallback", news_line(s, t, v, "sync-fallback", fb["why"])))
                 # Taken back to work after it said ready (back_to_work(), busy_again()): told as it happens.
                 # Its agent took up what needed the person (failing checks: on_it()) too.

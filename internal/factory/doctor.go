@@ -1322,16 +1322,6 @@ func deriveCheck(folder string) (string, string) {
 			}
 		}
 	}
-	if b, err := os.ReadFile(filepath.Join(folder, "package.json")); err == nil {
-		var pkg struct {
-			Scripts map[string]string `json:"scripts"`
-		}
-		if json.Unmarshal(b, &pkg) == nil {
-			if t := strings.TrimSpace(pkg.Scripts["test"]); t != "" && !strings.Contains(strings.ToLower(t), "no test specified") {
-				return "npm test", "package.json"
-			}
-		}
-	}
 	return "", ""
 }
 

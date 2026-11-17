@@ -312,7 +312,7 @@ The reference engine relies on **8 runtime mechanisms** implemented outside `mod
 
 ### Field notes since the move
 
-- **Field note 59 (`SDF-40`, cheap sync by default & silent fallback):** `FAC-111` shipped `tasks.sync` with default `"full"`, and `"cheap"` silently fell back to `"full"` in `sync_mode()` (`checks.py`) whenever `tasks.check` was empty — so no real project got cheap sync and behind PRs still hit full 20-minute CI re-runs. Default `tasks.sync` is now `"cheap"`; empty `tasks.check` derives from facts the repo already states (`Makefile` `test`/`check`, `AGENTS.md`, `package.json`), and any remaining fallback (`cheap -> full`) is surfaced once in `sheepdog factory doctor` (with `herdr-task config --set tasks.check=...`) and in the task's status and news.
+- **Field note 59 (`SDF-40`, cheap sync by default & silent fallback):** `FAC-111` shipped `tasks.sync` with default `"full"`, and `"cheap"` silently fell back to `"full"` in `sync_mode()` (`checks.py`) whenever `tasks.check` was empty — so no real project got cheap sync and behind PRs still hit full 20-minute CI re-runs. Default `tasks.sync` is now `"cheap"`; empty `tasks.check` derives from facts the repo already states (`Makefile` `test`/`check`, `AGENTS.md`), and any remaining fallback (`cheap -> full`) is surfaced once in `sheepdog factory doctor` (with `herdr-task config --set tasks.check=...`) and in the task's status and news.
 
 ---
 

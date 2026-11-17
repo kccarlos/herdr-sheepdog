@@ -54,10 +54,6 @@ def read_settings():
     return d if isinstance(d, dict) else {}
 
 
-def _same_folder(a, b):
-    return bool(a and b) and (a == b or os.path.realpath(a) == os.path.realpath(b))
-
-
 def project_layer(d, folder=None, space=None):
     """This project's raw layer: d["projects"][folder] merged per section over any legacy d["spaces"] entry."""
     if not isinstance(d, dict):
@@ -66,14 +62,13 @@ def project_layer(d, folder=None, space=None):
     spaces = d.get("spaces") if isinstance(d.get("spaces"), dict) else {}
     sid = bare(str(space)) if space and not os.path.isabs(str(space)) and space not in projects else None
     sp = spaces.get(sid) if sid and isinstance(spaces.get(sid), dict) else None
-    if folder and sp and sp.get("folder") is not None and not _same_folder(sp.get("folder"), folder):
+    if folder and sp and sp.get("folder") not in (None, folder):
         sp = None
     if sp and not folder and isinstance(sp.get("folder"), str):
         folder = sp["folder"]
     if not sp and folder:
-        sp = next((v for v in spaces.values() if isinstance(v, dict) and _same_folder(v.get("folder"), folder)), None)
-    key = (folder if folder and folder in projects else
-           next((k for k in projects if _same_folder(k, folder)), None) if folder else None) or (space if space and space in projects else folder)
+        sp = next((v for v in spaces.values() if isinstance(v, dict) and v.get("folder") == folder), None)
+    key = folder if folder and folder in projects else (space if space and space in projects else folder)
     proj = projects.get(key) if key and isinstance(projects.get(key), dict) else None
     out = dict(sp) if isinstance(sp, dict) else {}
     for k, v in (proj or {}).items():
@@ -136,16 +131,15 @@ def _write_task_setting(s, key, value):
     folder = _folder_of(s)
     if not folder:
         raise Fail("No project folder to configure.")
-    proj_key = folder if folder in projects else next((k for k in projects if _same_folder(k, folder)), folder)
-    layer = projects.setdefault(proj_key, {})
+    layer = projects.setdefault(folder, {})
     tasks = dict(layer.get("tasks") or {})
     tasks.pop(key, None) if value is None else tasks.update({key: value})
     layer.update(tasks=tasks) if tasks else layer.pop("tasks", None)
     if not layer:
-        projects.pop(proj_key, None)
+        projects.pop(folder, None)
     if value is None and isinstance(d.get("spaces"), dict):
         for v in d["spaces"].values():
-            if isinstance(v, dict) and _same_folder(v.get("folder"), folder) and isinstance(v.get("tasks"), dict):
+            if isinstance(v, dict) and v.get("folder") == folder and isinstance(v.get("tasks"), dict):
                 v["tasks"].pop(key, None)
                 if not v["tasks"]:
                     v.pop("tasks", None)
@@ -156,7 +150,7 @@ def _write_task_setting(s, key, value):
         json.dump(d, f, indent=2)
         f.write("\n")
     os.replace(tmp, SETTINGS)
-    return proj_key
+    return folder
 
 
 def write_max_running(s, space=None, value=_UNSET):
@@ -182,7 +176,7 @@ _AGENTS_CHECK_RE = re.compile(
 
 def derive_check(folder):
     """Derives a repo's check command from facts it already states (Makefile test/check target,
-    explicit AGENTS.md test/check line, or package.json scripts.test), returning (cmd, source) or ('', None)."""
+    or explicit AGENTS.md test/check line), returning (cmd, source) or ('', None)."""
     if not folder or not os.path.isdir(folder):
         return "", None
     for mk in ("Makefile", "makefile", "GNUmakefile"):
@@ -204,16 +198,6 @@ def derive_check(folder):
                 if m := _AGENTS_CHECK_RE.search(f.read(262144)):
                     return m.group(1).strip(), "AGENTS.md"
         except OSError:
-            pass
-    pkg_path = os.path.join(folder, "package.json")
-    if os.path.isfile(pkg_path):
-        try:
-            with open(pkg_path) as f:
-                pkg = json.load(f)
-            t = str(((pkg.get("scripts") if isinstance(pkg, dict) else None) or {}).get("test") or "").strip()
-            if t and "no test specified" not in t.lower():
-                return "npm test", "package.json"
-        except (OSError, ValueError):
             pass
     return "", None
 

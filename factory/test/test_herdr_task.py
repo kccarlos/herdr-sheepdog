@@ -11595,7 +11595,6 @@ class SyncBehindBase(unittest.TestCase):
                 self.mock.patch.object(news, "coordinator_in", lambda sp: "c1"), \
                 self.mock.patch.object(news, "hc_json", lambda *a: {"state": "live", "turn": 1, "status": {"state": "idle"}, "labels": {}}), \
                 self.mock.patch.object(news, "news_send", lambda to, text: sent.append((to, text)) or "sent"):
-            news.news_pass({})  # initialize news baseline
             self.go(gh)
             self.assertEqual((t["state"], len(self.updates(gh))), ("ready", 1))
             fb = t.get("sync_fallback") or {}
@@ -11604,8 +11603,12 @@ class SyncBehindBase(unittest.TestCase):
             v = output.view(self.store, t, [])
             self.assertIn("cheap to full", output.line(v))
             self.assertEqual(v["sync_fallback"]["why"], fb["why"])
+            news.news_pass({})  # first news pass initializes baseline without consuming sync_fallback.told
+            self.assertEqual(len(sent), 0)
+            self.assertFalse(fb.get("told"))
             news.news_pass({})
             self.assertEqual(len(sent), 1)
+            self.assertTrue(fb.get("told"))
             self.assertIn('event="sync-fallback"', sent[0][1])
             self.assertIn("cheap to full", sent[0][1])
             # Second tick and news_pass never surface the fallback again.
