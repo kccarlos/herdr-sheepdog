@@ -82,12 +82,17 @@ done
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/m1-pr-acceptance.XXXXXX")"
 REPO_DIR="$WORKDIR/repo"
 HC_RESTARTED=0
+TASK_STARTED=0
+TASK_DONE=0
 TASK_ID="${PREFIX}-1"
 
 cleanup() {
   local rc=$?
+  if [ "$KEEP" -eq 0 ] && [ "$TASK_STARTED" -eq 1 ] && [ "$TASK_DONE" -eq 0 ] && [ -d "$REPO_DIR" ]; then
+    herdr-task done "$TASK_ID" --folder "$REPO_DIR" </dev/null >/dev/null 2>&1 || true
+  fi
   if [ "$HC_RESTARTED" -eq 1 ]; then
-    env -u GH_TOKEN -u GITHUB_TOKEN hc server restart >/dev/null 2>&1 || true
+    env -u GH_TOKEN -u GITHUB_TOKEN hc server restart </dev/null >/dev/null 2>&1 || true
   fi
   if [ "$KEEP" -eq 0 ]; then
     rm -rf "$WORKDIR"
@@ -103,7 +108,7 @@ gh repo view "$REPO" --json nameWithOwner,isPrivate -q '"Repo: \(.nameWithOwner)
 
 # Ensure hc worker terminals inherit GH_TOKEN when gh is not otherwise logged in.
 if ! env -u GH_TOKEN -u GITHUB_TOKEN gh auth status >/dev/null 2>&1; then
-  hc server restart >/dev/null
+  hc server restart </dev/null >/dev/null 2>&1
   HC_RESTARTED=1
 fi
 
@@ -161,16 +166,21 @@ herdr-task "${ADD_ARGS[@]}"
 
 echo "==> Step 5: start $TASK_ID and wait for Ready"
 herdr-task start "$TASK_ID" --folder "$REPO_DIR"
+TASK_STARTED=1
 
 DEADLINE=$(( $(date +%s) + 300 ))
 STATE=""
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
-  SHOW_JSON="$(herdr-task show "$TASK_ID" --folder "$REPO_DIR" --json)"
+  if ! SHOW_JSON="$(herdr-task show "$TASK_ID" --folder "$REPO_DIR" --json 2>/dev/null)"; then
+    sleep 3
+    continue
+  fi
   STATE="$(python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("state",""))' <<<"$SHOW_JSON")"
   if [ "$STATE" = "ready" ]; then
     break
   fi
   if [ "$STATE" = "done" ]; then
+    TASK_DONE=1
     break
   fi
   NEEDS_YOU="$(python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("attention") or d.get("why") or d.get("needs") or "needs attention") if (d.get("attention") or d.get("status") == "needs") else "")' <<<"$SHOW_JSON")"
@@ -191,6 +201,31 @@ PR_NUM="$(python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("pr"
 echo "==> Task $TASK_ID is $STATE (PR #${PR_NUM:-none}); running accept"
 herdr-task accept "$TASK_ID" --folder "$REPO_DIR"
 
+MERGE_DEADLINE=$(( $(date +%s) + 120 ))
+while [ "$(date +%s)" -lt "$MERGE_DEADLINE" ]; do
+  if ! SHOW_JSON="$(herdr-task show "$TASK_ID" --folder "$REPO_DIR" --json 2>/dev/null)"; then
+    sleep 3
+    continue
+  fi
+  STATE="$(python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("state",""))' <<<"$SHOW_JSON")"
+  if [ "$STATE" = "done" ]; then
+    TASK_DONE=1
+    break
+  fi
+  NEEDS_YOU="$(python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("attention") or d.get("why") or d.get("needs") or "needs attention") if (d.get("attention") or d.get("status") == "needs") else "")' <<<"$SHOW_JSON")"
+  if [ -n "$NEEDS_YOU" ]; then
+    echo "Task $TASK_ID stalled during merge: $NEEDS_YOU" >&2
+    exit 1
+  fi
+  sleep 3
+done
+
+if [ "$STATE" != "done" ]; then
+  echo "Error: timed out waiting for $TASK_ID to finish merging (state=$STATE)" >&2
+  herdr-task show "$TASK_ID" --folder "$REPO_DIR" >&2 || true
+  exit 1
+fi
+
 if [ -z "$PR_NUM" ]; then
   SHOW_JSON="$(herdr-task show "$TASK_ID" --folder "$REPO_DIR" --json)"
   PR_NUM="$(python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("pr") or {}).get("number") or "")' <<<"$SHOW_JSON")"
@@ -208,7 +243,10 @@ printf '%s\n' "$PR_VIEW"
 python3 -c '
 import json, sys
 d = json.load(sys.stdin)
-assert d.get("state") == "MERGED", f"expected state=MERGED, got {d.get(\"state\")!r}"
-assert d.get("mergedAt"), "expected non-empty mergedAt"
-print(f"OK: PR #{d[\"number\"]} is MERGED at {d[\"mergedAt\"]}")
+state = d.get("state")
+num = d.get("number")
+merged_at = d.get("mergedAt")
+assert state == "MERGED", f"expected state=MERGED, got {state!r}"
+assert merged_at, "expected non-empty mergedAt"
+print(f"OK: PR #{num} is MERGED at {merged_at}")
 ' <<<"$PR_VIEW"
