@@ -505,6 +505,8 @@ def stop_words(s, t, why, again):
             "new approach, drop)" if size else
             "what was tried round by round, the recurring findings and the premise behind them, and the options (one more "
             "round, split, new approach, drop)")
+    if NON_CONVERGENCE in why:
+        what = what.replace("one more round, ", "").replace("continue as one change, ", "")
     return (f"Stop {s.ref(t)}: Herdr's loop-breaker says recap first ({'; '.join(why)}).{last_findings(t)}Don't fix anything more"
             + (" or re-run CI. " if ci else ". ")
             + f"Write RECAP.md at {wt}/RECAP.md, untracked and never committed, half a page at most: the goal, {what}. "
@@ -535,7 +537,7 @@ def budget_lines(t):
 def recap_refusal(s, t):
     rc = t.get("recap")
     if rc:
-        if NON_CONVERGENCE in rc.get("reasons", []):
+        if rc.get("reasons") == [NON_CONVERGENCE]:
             return f"{s.ref(t)}: {NON_CONVERGENCE}; stop and wait while the coordinator decides whether to split, change approach or drop it."
         why = f" ({'; '.join(rc['reasons'])})" if rc.get("reasons") else ""
         return (f"{s.ref(t)} needs a recap first{why}: write RECAP.md (untracked) at your worktree's root, end your turn and "

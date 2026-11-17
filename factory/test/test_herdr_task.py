@@ -4506,6 +4506,23 @@ class GateReview(unittest.TestCase):
         self.commands.gate_reads(self.store, self.task)
         self.assertEqual(self.task["review_failures"][0]["why"], "verdict missing major count")
 
+    def test_inconsistent_major_count_fails_sandbox_round(self):
+        self.sandbox()
+        self.ready()
+        code = self.commands.round_code(self.task["review_runs"][0])
+        self.screen(f"{code} changes 2 0\n")
+        self.reviewer_term = {"state": "live", "agent": "agy", "status": {"state": "done"}, "turn": 1}
+        self.commands.gate_reads(self.store, self.task)
+        self.assertEqual(self.task["review_failures"][0]["why"], "verdict and major count disagree")
+
+    def test_inconsistent_major_count_refuses_engine_verdict(self):
+        import argparse
+        self.ready()
+        self.env("HC_TERMINAL_ID", "term-1")
+        with self.assertRaises(self.commands.Fail):
+            self.commands.cmd_review(argparse.Namespace(id="SHEP-13", json=True, folder=None, passed=False,
+                changes="major", changes_file=None, notes=None, must_fix=2, majors=0))
+
     def test_a_read_pass_starts_the_next_round_and_a_moved_head_records_none(self):
         self.sandbox()
         self.ready()
@@ -5558,6 +5575,15 @@ class LoopBreaker(GateReview):
         self.assertFalse(budget_pass(self.store, self.task))
         self.task["reviews"].append({"round": 5, "verdict": "changes", "majors": 1, "at": at + 2})
         self.assertTrue(budget_pass(self.store, self.task))
+
+    def test_mixed_recap_keeps_worker_recap_without_continue(self):
+        from herdr_task.budget import NON_CONVERGENCE, recap_refusal, stop_words
+        why = [NON_CONVERGENCE, "over twice its time estimate (3h of 1h)"]
+        self.task["recap"] = {"reasons": why, "title": "Recap required"}
+        words = stop_words(self.store, self.task, why, False)
+        self.assertIn("RECAP.md", words)
+        self.assertNotIn("one more round", words)
+        self.assertIn("RECAP.md", recap_refusal(self.store, self.task))
 
     def second_recap(self):
         """A task that had its one continue and is stopped for a recap again (two non-converging rounds)."""
@@ -6891,6 +6917,16 @@ class ReviewedNamesItsCommit(unittest.TestCase):
         self.task["set"]["must_fix"] = "blocker"
         self.commands.cmd_reviewed(args)
         self.assertEqual(self.task["reviews"][-1]["majors"], 1)
+
+    def test_changes_without_majors_requires_minor_setting(self):
+        self.commit("reviewed change")
+        args = self.argparse.Namespace(id="SHEP-1", json=True, folder=None, report="finding", commit=None, verdict="changes", majors=0)
+        self.task["set"] = {"review": "on", "must_fix": "major"}
+        with self.assertRaises(self.commands.Fail):
+            self.commands.cmd_reviewed(args)
+        self.task["set"]["must_fix"] = "minor"
+        self.commands.cmd_reviewed(args)
+        self.assertEqual(self.task["reviews"][-1]["majors"], 0)
 
     def test_uncommitted_fixes_still_record_the_named_commit(self):
         a = self.commit("reactions on the left")

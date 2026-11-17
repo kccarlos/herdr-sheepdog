@@ -1014,6 +1014,14 @@ def base_merges_only(s, t, wt, reviewed, head):
     return False
 
 
+def invalid_major_count(s, t, passed, must, majors):
+    if majors is None:  # an engine reviewer already running before counts were introduced
+        return False
+    level = next((x["value"] for x in task_settings(s, t) if x["label"] == "Must fix"), "major")
+    return ((passed and majors > 0 and level != "blocker") or
+            (not passed and level != "minor" and majors < (must if must is not None else 1)))
+
+
 def cmd_reviewed(args):
     """A task's agent records one review round of its current commit (its own review: a helper agent
     it started as its hc child, as its brief says). Uses one of its Review rounds; `ready` then accepts that
@@ -1056,8 +1064,8 @@ def cmd_reviewed(args):
             raise Fail("Say --verdict pass|changes and --majors N (a nonnegative count).")
         text = " ".join(str(args.report or "").split())[:2000]
         settings = {x["label"]: x["value"] for x in task_settings(s, t)}
-        if verdict == "pass" and majors and settings.get("Must fix", "major") != "blocker":
-            raise Fail("A pass cannot have major or blocker findings when Must fix includes major.")
+        if invalid_major_count(s, t, verdict == "pass", None, majors):
+            raise Fail("The verdict and major count disagree with the Must fix setting.")
         reviewer = settings.get("Reviewer") or {}
         t.setdefault("reviews", []).append({"round": used + 1, "result": "report", "text": text, "at": now(), "head": head,
                                             "by": os.environ.get("HC_TERMINAL_ID"), "verdict": verdict, "must_fix": 0 if verdict == "pass" else None, "majors": majors,
@@ -1398,6 +1406,8 @@ def gate_verdict(s, t, args, text):
     majors = getattr(args, "majors", None)
     if (majors is None and rn.get("majors_required")) or (majors is not None and majors < 0):
         raise Fail("Say --majors N: the number of major or blocker findings (zero or more).")
+    if invalid_major_count(s, t, bool(args.passed), must, majors):
+        raise Fail("The verdict and major count disagree with the Must fix setting.")
     msg = record_verdict(s, t, rn, bool(args.passed), must, text or args.notes or "", majors)
     end_reviewer(me)
     say(args, view(s, t), msg)
@@ -1602,6 +1612,10 @@ def inspect_runs(s, t):
             screen = screen_of(rn["address"], 400)
             got = read_verdict(screen, round_code(rn))
             missing_majors = bool(got and got[3] is None and rn.get("majors_required"))
+            if got and got[3] is not None and invalid_major_count(s, t, got[0], got[1], got[3]):
+                fail_run(s, t, rn, "verdict and major count disagree", screen)
+                end_reviewer(rn["address"])
+                continue
             if got and (got[3] is not None or not rn.get("majors_required")):
                 before, dirty = json.loads(json.dumps(t)), s.dirty
                 try:
