@@ -166,7 +166,7 @@ func (c *Client) Projects(ctx context.Context) (ProjectsResponse, error) {
 	if !c.Active() {
 		return ProjectsResponse{Protocol: ProtocolVersion, Projects: []Project{}}, nil
 	}
-	raw, err := c.exec(ctx, c.opts.ReadTimeout, "owner", "projects", "--json")
+	raw, err := c.execRead(ctx, "owner", "projects", "--json")
 	if err != nil {
 		return ProjectsResponse{}, err
 	}
@@ -214,7 +214,7 @@ func (c *Client) execAsksRaw(ctx context.Context, filter AsksFilter) ([]byte, er
 		args = append(args, "--open")
 	}
 	args = append(args, "--json")
-	return c.exec(ctx, c.opts.ReadTimeout, args...)
+	return c.execRead(ctx, args...)
 }
 
 // Digest calls `owner digest [--project <p>] [--since <s>] --json` (§2.3).
@@ -227,7 +227,7 @@ func (c *Client) Digest(ctx context.Context, filter DigestFilter) (DigestRespons
 		args = append(args, "--since", s)
 	}
 	args = append(args, "--json")
-	raw, err := c.exec(ctx, c.opts.ReadTimeout, args...)
+	raw, err := c.execRead(ctx, args...)
 	if err != nil {
 		return DigestResponse{}, err
 	}
@@ -244,7 +244,7 @@ func (c *Client) Rules(ctx context.Context, project string) (RulesResponse, erro
 		args = append(args, "--project", p)
 	}
 	args = append(args, "--json")
-	raw, err := c.exec(ctx, c.opts.ReadTimeout, args...)
+	raw, err := c.execRead(ctx, args...)
 	if err != nil {
 		return RulesResponse{}, err
 	}
@@ -257,7 +257,7 @@ func (c *Client) Graph(ctx context.Context, project string) (GraphResponse, erro
 	if project == "" {
 		return GraphResponse{}, contractErr(CodeNotFound, ErrContractNotFound, "project is required")
 	}
-	raw, err := c.exec(ctx, c.opts.ReadTimeout, "owner", "graph", "--project", project, "--json")
+	raw, err := c.execRead(ctx, "owner", "graph", "--project", project, "--json")
 	if err != nil {
 		return GraphResponse{}, err
 	}
@@ -274,7 +274,7 @@ func (c *Client) Alerts(ctx context.Context, since string) (AlertsResponse, erro
 		args = append(args, "--since", s)
 	}
 	args = append(args, "--json")
-	raw, err := c.exec(ctx, c.opts.ReadTimeout, args...)
+	raw, err := c.execRead(ctx, args...)
 	if err != nil {
 		return AlertsResponse{}, err
 	}
@@ -296,7 +296,7 @@ func (c *Client) Answer(ctx context.Context, req AnswerRequest) (AnswerResponse,
 		args = append(args, "--proof", proof)
 	}
 	args = append(args, "--json")
-	raw, err := c.exec(ctx, c.opts.ActionTimeout, args...)
+	raw, err := c.execAction(ctx, args...)
 	if err != nil {
 		return AnswerResponse{}, err
 	}
@@ -324,7 +324,7 @@ func (c *Client) Say(ctx context.Context, project, text string) (SayResponse, er
 	if strings.TrimSpace(text) == "" {
 		return SayResponse{}, contractErr(CodeInvalidAsk, ErrInvalidAsk, "message text is empty")
 	}
-	raw, err := c.exec(ctx, c.opts.ActionTimeout, "owner", "say", project, text, "--json")
+	raw, err := c.execAction(ctx, "owner", "say", project, text, "--json")
 	if err != nil {
 		return SayResponse{}, err
 	}
@@ -357,7 +357,7 @@ func (c *Client) ProposeRule(ctx context.Context, req ProposeRuleRequest) (Propo
 		args = append(args, "--until", u)
 	}
 	args = append(args, "--json")
-	raw, err := c.exec(ctx, c.opts.ActionTimeout, args...)
+	raw, err := c.execAction(ctx, args...)
 	if err != nil {
 		return ProposeRuleResponse{}, err
 	}
@@ -370,14 +370,26 @@ func (c *Client) RevokeRule(ctx context.Context, ruleID string) (RevokeRuleRespo
 	if ruleID == "" {
 		return RevokeRuleResponse{}, contractErr(CodeNotFound, ErrContractNotFound, "rule_id is empty")
 	}
-	raw, err := c.exec(ctx, c.opts.ActionTimeout, "owner", "revoke-rule", ruleID, "--json")
+	raw, err := c.execAction(ctx, "owner", "revoke-rule", ruleID, "--json")
 	if err != nil {
 		return RevokeRuleResponse{}, err
 	}
 	return DecodeRevokeRuleResponse(raw)
 }
 
-func (c *Client) exec(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
+func (c *Client) execRead(ctx context.Context, args ...string) ([]byte, error) {
+	return c.exec(ctx, c.opts.ReadTimeout, true, args...)
+}
+
+// execAction runs a mutating `owner` subcommand (`answer`, `say`, `propose-rule`,
+// `revoke-rule`). On deadline or caller cancellation it detaches without sending
+// SIGKILL to the engine's process group so an in-flight merge or release unlock
+// finishes cleanly.
+func (c *Client) execAction(ctx context.Context, args ...string) ([]byte, error) {
+	return c.exec(ctx, c.opts.ActionTimeout, false, args...)
+}
+
+func (c *Client) exec(ctx context.Context, timeout time.Duration, killOnCancel bool, args ...string) ([]byte, error) {
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -390,7 +402,7 @@ func (c *Client) exec(ctx context.Context, timeout time.Duration, args ...string
 	if c.opts.Exec != nil {
 		stdout, stderr, exit, err = c.opts.Exec(runCtx, args...)
 	} else {
-		stdout, stderr, exit, err = c.execManaged(runCtx, args...)
+		stdout, stderr, exit, err = c.execManaged(runCtx, killOnCancel, args...)
 	}
 
 	trimmed := bytes.TrimSpace(stdout)
@@ -494,7 +506,7 @@ func (c *Client) childEnv(py ManagedPython, eng Engine) []string {
 	return base
 }
 
-func (c *Client) execManaged(ctx context.Context, args ...string) ([]byte, string, int, error) {
+func (c *Client) execManaged(ctx context.Context, killOnCancel bool, args ...string) ([]byte, string, int, error) {
 	eng, py, err := c.prepare(ctx)
 	if err != nil {
 		return nil, "", -1, err
@@ -512,11 +524,10 @@ func (c *Client) execManaged(ctx context.Context, args ...string) ([]byte, strin
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.WaitDelay = defaultWaitDelay
 
-	var stdout limitedBuffer
-	stdout.max = maxContractBytes
-	var stderr cappedBuffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := &limitedBuffer{max: maxContractBytes}
+	stderr := &cappedBuffer{}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	if err := cmd.Start(); err != nil {
 		return nil, "", -1, err
@@ -528,6 +539,11 @@ func (c *Client) execManaged(ctx context.Context, args ...string) ([]byte, strin
 
 	select {
 	case <-ctx.Done():
+		if !killOnCancel {
+			// Let the mutating engine command finish its unlock and be reaped
+			// by the done goroutine without racing on stdout/stderr buffers.
+			return nil, "", -1, ctx.Err()
+		}
 		if cmd.Process.Pid > 0 {
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		}

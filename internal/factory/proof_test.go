@@ -137,3 +137,29 @@ func TestProofStoreRefusesLocalDeviceTypedInputAndUnknownKind(t *testing.T) {
 		t.Fatalf("Count = %d, want 0 minted proofs", store.Count())
 	}
 }
+
+func TestProofStorePreservesExactPaddedOptionLabel(t *testing.T) {
+	store, err := NewProofStore("", func() time.Time { return time.UnixMilli(1763301030000) })
+	if err != nil {
+		t.Fatalf("NewProofStore: %v", err)
+	}
+	proof, err := store.Mint(MintInput{
+		AskID:       "ask002",
+		Project:     "beacon",
+		Kind:        AskKindGate,
+		OptionIndex: 1,
+		OptionLabel: " Accept ",
+		InputKind:   "tap",
+		InputSeq:    3,
+		DeviceID:    "dev-iphone-1",
+	})
+	if err != nil {
+		t.Fatalf("Mint(padded option): %v", err)
+	}
+	if _, _, status, err := store.Verify("ask002", proof.ProofID, " Accept "); err != nil || status != http.StatusOK {
+		t.Fatalf("Verify exact padded option: status=%d err=%v", status, err)
+	}
+	if _, reason, status, err := store.Verify("ask002", proof.ProofID, "Accept"); !errors.Is(err, ErrProofRejected) || status != http.StatusForbidden || reason != "option_mismatch" {
+		t.Fatalf("Verify trimmed mismatch: status=%d reason=%q err=%v", status, reason, err)
+	}
+}

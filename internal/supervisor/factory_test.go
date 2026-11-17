@@ -445,3 +445,131 @@ func TestFactoryAnswerTransportFailureRollsBackProofAndInput(t *testing.T) {
 		t.Fatalf("after retry: proofs=%d questions=%d", proofs.Count(), len(h.store.Questions()))
 	}
 }
+
+func TestFactorySlowUnlockPastActionTimeoutStillConfirmsRecordedAnswer(t *testing.T) {
+	ask := sampleGateAsk("ask002")
+	var proofs *factory.ProofStore
+	eng := newStubFactoryEngine(ask)
+	unlockDone := make(chan struct{})
+
+	h := newHarness(t, func(cfg *Config) {
+		var err error
+		proofs, err = factory.NewProofStore(t.TempDir(), cfg.Now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		baseClient := eng.client(t, proofs)
+		cfg.FactoryProofs = proofs
+		cfg.Factory = factory.NewClient(factory.ClientOptions{
+			DataDir:       t.TempDir(),
+			Getenv:        func(string) string { return "" },
+			ActionTimeout: 40 * time.Millisecond,
+			Exec: func(ctx context.Context, args ...string) ([]byte, string, int, error) {
+				if reflect.DeepEqual(args, []string{"owner", "asks", "--open", "--json"}) {
+					resp, err := baseClient.Asks(ctx, factory.AsksFilter{Open: true})
+					if err != nil {
+						return nil, err.Error(), 1, err
+					}
+					raw, _ := json.Marshal(resp)
+					return raw, "", 0, nil
+				}
+				// Record the ask answered immediately (as owner answer does before
+				// running a slow merge/tag unlock), then outlive ActionTimeout.
+				eng.mu.Lock()
+				a := eng.open["ask002"]
+				ans := a.Options[0]
+				by := "owner"
+				at := a.At + 1000
+				a.Status, a.Answer, a.AnsweredBy, a.AnsweredAt = "answered", &ans, &by, &at
+				eng.open["ask002"] = a
+				eng.mu.Unlock()
+
+				go func() {
+					time.Sleep(80 * time.Millisecond)
+					close(unlockDone)
+				}()
+				<-ctx.Done()
+				return nil, "", -1, ctx.Err()
+			},
+		})
+	})
+
+	if err := h.sup.SyncFactoryAsks(context.Background()); err != nil {
+		t.Fatalf("SyncFactoryAsks: %v", err)
+	}
+	h.clock.Advance(time.Second)
+
+	res, err := h.sup.AnswerTap(context.Background(), "fask-ask002", 1, "dev-iphone-1")
+	if err != nil {
+		t.Fatalf("AnswerTap(slow unlock) err = %v, want nil once ask is recorded answered", err)
+	}
+	if !strings.Contains(res.Spoken, "Beacon") {
+		t.Fatalf("Spoken = %q, want Beacon confirmation", res.Spoken)
+	}
+	if len(h.store.Questions()) != 0 {
+		t.Fatalf("Questions = %+v, want settled", h.store.Questions())
+	}
+	if proofs.Count() != 1 {
+		t.Fatalf("proofs.Count() = %d, want proof retained for async unlock", proofs.Count())
+	}
+	<-unlockDone
+}
+
+func TestFactoryDecisionAskWithTaskSurvivesColdCacheLookup(t *testing.T) {
+	folder := "/Users/me/projects/beacon"
+	task := "BCN-10"
+	ms := "M2"
+	ask := factory.Ask{
+		ID:        "ask001",
+		Project:   "beacon",
+		Name:      "Beacon",
+		Folder:    &folder,
+		Kind:      factory.AskKindDecision,
+		Gated:     false,
+		Question:  "Keep the offline cache in SQLite or plain JSON files?",
+		Options:   []string{"SQLite", "Plain JSON"},
+		Recommend: "SQLite",
+		Task:      &task,
+		Milestone: &ms,
+		Subject:   nil,
+		At:        1763300000000,
+		Status:    "open",
+	}
+
+	var proofs *factory.ProofStore
+	eng := newStubFactoryEngine(ask)
+	m := braintest.NewModel()
+	h := newBrainHarness(t, m, func(cfg *Config) {
+		var err error
+		proofs, err = factory.NewProofStore(t.TempDir(), cfg.Now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.FactoryProofs = proofs
+		cfg.Factory = eng.client(t, proofs)
+	})
+
+	if err := h.sup.SyncFactoryAsks(context.Background()); err != nil {
+		t.Fatalf("SyncFactoryAsks: %v", err)
+	}
+	p, _ := h.pending()
+	if p.Command != "BCN-10" {
+		t.Fatalf("decision ask Command = %q, want BCN-10", p.Command)
+	}
+	h.sup.OnVoiceEvent(voice.EventPush{Text: p.SpokenSummary, Urgency: voice.UrgencyInterrupt, PendingID: p.ID})
+
+	// Simulate daemon restart with cold in-memory factoryAsks map.
+	h.sup.mu.Lock()
+	clear(h.sup.factoryAsks)
+	h.sup.mu.Unlock()
+
+	h.clock.Advance(time.Second)
+	h.hear("option one")
+	echo, err := (brainHost{s: h.sup}).AnswerPrompt(context.Background(), "factory:beacon", []string{"1"})
+	if err != nil {
+		t.Fatalf("AnswerPrompt(decision ask with cold cache): %v", err)
+	}
+	if !strings.Contains(echo, "SQLite") {
+		t.Fatalf("echo = %q, want SQLite", echo)
+	}
+}

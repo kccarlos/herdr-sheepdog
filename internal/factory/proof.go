@@ -275,7 +275,6 @@ func (s *ProofStore) Count() int {
 func (s *ProofStore) Verify(askID, proofID, optionLabel string) (AnswerProof, string, int, error) {
 	askID = strings.TrimSpace(askID)
 	proofID = strings.TrimSpace(proofID)
-	optionLabel = strings.TrimSpace(optionLabel)
 
 	if askID == "" || !askIDRe.MatchString(askID) {
 		return AnswerProof{}, "invalid_ask_id", http.StatusForbidden,
@@ -285,7 +284,7 @@ func (s *ProofStore) Verify(askID, proofID, optionLabel string) (AnswerProof, st
 		return AnswerProof{}, "missing_proof", http.StatusForbidden,
 			contractErr(CodeProofRejected, ErrProofRejected, "missing proof parameter")
 	}
-	if optionLabel == "" {
+	if strings.TrimSpace(optionLabel) == "" {
 		return AnswerProof{}, "missing_option", http.StatusForbidden,
 			contractErr(CodeProofRejected, ErrProofRejected, "missing option parameter")
 	}

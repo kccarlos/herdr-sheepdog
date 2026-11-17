@@ -421,11 +421,18 @@ func (s *Supervisor) lookupFactoryAskLocked(p state.PendingAction) (factory.Ask,
 	project := strings.TrimPrefix(p.PaneID, FactoryPanePrefix)
 	kind := factory.AskKindDecision
 	if p.Command != "" {
-		head, _, _ := strings.Cut(p.Command, " · ")
-		kind = factory.AskKind(strings.TrimSpace(head))
-	}
-	if !factory.ValidAskKind(kind) {
-		return factory.Ask{}, factory.ErrUnknownAskKind
+		head, _, hasSep := strings.Cut(p.Command, " · ")
+		cand := factory.AskKind(strings.TrimSpace(head))
+		switch {
+		case factory.ValidAskKind(cand):
+			kind = cand
+		case !hasSep:
+			// A decision ask tied to a task or milestone stores only its ref
+			// (e.g. "BCN-33" or "M2") in Command without a kind prefix.
+			kind = factory.AskKindDecision
+		default:
+			return factory.Ask{}, factory.ErrUnknownAskKind
+		}
 	}
 	opts := make([]string, 0, len(p.Options))
 	rec := ""
@@ -562,10 +569,40 @@ func (s *Supervisor) answerFactoryAskLocked(
 	s.invalidateBriefingLocked()
 	s.mu.Unlock()
 	_, callErr := s.cfg.Factory.AnswerIndex(ctx, ask.ID, optIdx, proof.ProofID)
+	recordedWhileSlow := false
+	if callErr != nil &&
+		!errors.Is(callErr, factory.ErrAlreadyClosed) &&
+		!errors.Is(callErr, factory.ErrContractNotFound) &&
+		!errors.Is(callErr, factory.ErrProofRejected) &&
+		!errors.Is(callErr, factory.ErrProofRequired) &&
+		!errors.Is(callErr, factory.ErrInvalidOption) &&
+		!errors.Is(callErr, factory.ErrUnknownAskKind) {
+		// A slow merge or release unlock can outlive ActionTimeout after the
+		// engine already persisted status="answered". Re-check open asks before
+		// reporting a false send failure or deleting the proof.
+		checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		openResp, _, checkErr := s.cfg.Factory.AsksPartial(checkCtx, factory.AsksFilter{Open: true})
+		cancel()
+		if checkErr == nil {
+			stillOpen := false
+			for _, openAsk := range openResp.Asks {
+				if openAsk.ID == ask.ID && openAsk.Status == "open" {
+					stillOpen = true
+					break
+				}
+			}
+			if !stillOpen {
+				recordedWhileSlow = true
+				callErr = nil
+			}
+		}
+	}
 	s.mu.Lock()
 
 	if callErr != nil {
-		_ = s.cfg.FactoryProofs.Delete(proof.ProofID)
+		if !errors.Is(callErr, context.DeadlineExceeded) && !errors.Is(callErr, context.Canceled) {
+			_ = s.cfg.FactoryProofs.Delete(proof.ProofID)
+		}
 		if errors.Is(callErr, factory.ErrAlreadyClosed) || errors.Is(callErr, factory.ErrContractNotFound) {
 			delete(s.factoryAsks, p.ID)
 			if cur, has := s.store.Pending(); has && cur.ID == p.ID {
@@ -600,6 +637,9 @@ func (s *Supervisor) answerFactoryAskLocked(
 		"keys":     keys,
 		"via":      via,
 		"proof_id": proof.ProofID,
+	}
+	if recordedWhileSlow {
+		confirmed["unlock_async"] = true
 	}
 	for k, v := range extra {
 		confirmed[k] = v
