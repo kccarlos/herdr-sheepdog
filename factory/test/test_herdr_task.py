@@ -4016,6 +4016,7 @@ class GateReview(unittest.TestCase):
             self.runs.append(argv)
             return subprocess.CompletedProcess(argv, 0, json.dumps({"address": f"term-{len(self.runs)}"}), "")
         tdir = tempfile.mkdtemp(dir=self.root)
+        self.real_pools, self.real_send = commands.reviewer_pools, launch.send_when_clear
         for mod, name, value in ((commands, "open_store", lambda args, write=True: self.store),
                                  (commands, "view", lambda s, t, live=None: dict(t)), (commands, "say", lambda *a: None),
                                  (commands, "find_proof", lambda *a: None), (commands, "ready_turns", lambda *a: {}),
@@ -4031,10 +4032,13 @@ class GateReview(unittest.TestCase):
                                  (commands, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, "", "")),
                                  (agents, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, "", "")),
                                  (commands, "sandboxes", lambda argv: False), (launch, "sandboxes", lambda argv: False),
-                                 (commands, "subprocess", mock.Mock())):  # no real `hc kill` of a reviewer
+                                 (commands, "subprocess", mock.Mock()),  # no real `hc kill` of a reviewer
+                                 (launch, "send_when_clear", lambda address, message: None),  # a codex fallback's prompt
+                                 (commands, "reviewer_pools", lambda: self.pools)):  # FAC-101: no real codexbar
             p = mock.patch.object(mod, name, value)
             p.start()
             self.addCleanup(p.stop)
+        self.pools = []  # every pool unknown
         self.env("HC_TERMINAL_ID", None)
 
     def env(self, k, v):
@@ -4300,7 +4304,7 @@ class GateReview(unittest.TestCase):
         self.ready()
         self.reviewer_term = {"state": "live", "agent": "zsh", "foreground": {"name": "zsh"}}  # its CLI exited, the kept shell stays
         self.ready()
-        self.assertEqual([(r["round"], r["cli"]) for r in self.task["review_runs"]], [(1, "agy"), (1, "claude")])
+        self.assertEqual([(r["round"], r["cli"]) for r in self.task["review_runs"]], [(1, "agy"), (1, "codex")])
         self.assertEqual(self.commands.rounds_used(self.task, True), 1)
         self.valid()
 
@@ -4423,7 +4427,7 @@ class GateReview(unittest.TestCase):
             calls.append(argv[1])
             return subprocess.CompletedProcess(argv, 0, next(screens) if argv[1] == "read" else "", "")
         with mock.patch.object(launch, "run", hc), mock.patch.object(launch.time, "sleep", lambda n: None):
-            launch.send_when_clear("t1", "THE PROMPT")
+            self.real_send("t1", "THE PROMPT")
         self.assertEqual(calls, ["read", "read", "read", "keys", "read", "read", "send"])  # answered once, sent last
 
     def test_the_prompt_is_never_sent_while_the_trust_screen_stays(self):
@@ -4436,7 +4440,7 @@ class GateReview(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, "Trust this folder?" if argv[1] == "read" else "", "")
         with mock.patch.object(launch, "run", hc), mock.patch.object(launch.time, "sleep", lambda n: None):
             with self.assertRaises(launch.Fail):
-                launch.send_when_clear("t1", "THE PROMPT", tries=3)
+                self.real_send("t1", "THE PROMPT", tries=3)
         self.assertNotIn("send", calls)
         self.assertEqual(calls[-1], "kill")
 
@@ -4921,16 +4925,16 @@ if sys.argv[1] == "kill" and alive:
         self.assertEqual([(f["round"], f["address"], f["cli"], f["why"]) for f in self.task["review_failures"]],
                          [(1, "term-1", "agy", "exited (1)")])
         self.assertEqual([(r["round"], r["address"], r["cli"], r["model"]) for r in self.task["review_runs"]],
-                         [(1, "term-1", "agy", "gemini-4-argon-high"), (1, "term-2", "claude", "opus")])
+                         [(1, "term-1", "agy", "gemini-4-argon-high"), (1, "term-2", "codex", None)])
         cmd = self.runs[1][self.runs[1].index("--") + 1:]
-        self.assertEqual(cmd[cmd.index("--permission-mode") + 1], "auto")
+        self.assertIn("codex", cmd)
         self.assertEqual(self.commands.rounds_used(self.task, True), 1)
         with self.assertRaises(self.commands.Fail):
             self.verdict("term-1")  # the failed reviewer can never record a late verdict
         self.reviewer_term = {"state": "live", "agent": "agy"}
         self.verdict("term-2")  # round 1 passes on the fallback; round 2 still fits inside review_rounds=2
         self.assertEqual([(r["round"], r["cli"]) for r in self.task["review_runs"]],
-                         [(1, "agy"), (1, "claude"), (2, "agy")])
+                         [(1, "agy"), (1, "codex"), (2, "agy")])
         code3 = self.commands.round_code(self.task["review_runs"][2])
         self.screen(f"{code3} pass\n")
         self.commands.gate_reads(self.store, self.task)
@@ -4939,6 +4943,105 @@ if sys.argv[1] == "kill" and alive:
                          [(1, "term-2", "pass"), (2, "term-3", "pass")])
         self.assertEqual(self.commands.rounds_used(self.task, True), 2)
         self.valid()
+
+    # ---- FAC-101: the fallback skips pools out of quota, three tries on three CLIs, all empty waits for the reset ----
+
+    def pool(self, name, five=50.0, week=50.0, five_reset="2026-11-16T18:00:00Z", week_reset="2026-11-20T00:00:00Z"):
+        return {"name": name, "state": "ok", "five": five, "week": week, "five_reset": five_reset, "week_reset": week_reset}
+
+    def test_a_codex_failure_with_claude_at_0_falls_back_to_agy(self):
+        from herdr_task import settings
+        with open(settings.SETTINGS, "w") as f:
+            json.dump({"spaces": {"sp1": {"folder": self.main, "reviewer": {"agent": "claude", "model": "opus"}}}}, f)
+        self.task.update(reviewer="codex", reviewer_model=None)
+        self.pools = [self.pool("claude", five=0.0), self.pool("codex")]
+        self.ready()
+        self.reviewer_term = {"state": "gone"}
+        self.commands.gate_reads(self.store, self.task)
+        self.assertEqual([(r["cli"], r["model"]) for r in self.task["review_runs"]][1:], [("agy", "gemini-4-argon-high")])
+        self.assertEqual([f["cli"] for f in self.task["review_failures"]], ["codex"])
+        self.valid()
+
+    def test_three_tool_failures_on_three_clis_then_reviewer_failed(self):
+        self.ready()
+        self.reviewer_term = {"state": "gone"}
+        for _ in range(3):
+            self.commands.gate_reads(self.store, self.task)
+        self.assertEqual([r["cli"] for r in self.task["review_runs"]], ["agy", "codex", "claude"])
+        self.assertEqual(self.task["attention"], "Reviewer failed twice: agy (terminal gone), codex (terminal gone), claude (terminal gone)")
+        self.assertEqual(self.commands.rounds_used(self.task, True), 0)
+        self.commands.gate_reads(self.store, self.task)
+        self.assertEqual(len(self.runs), 3)  # no fourth try
+        self.assertEqual([(f["cli"], f["model"], f["why"]) for f in self.task["review_failures"]],
+                         [("agy", "gemini-4-argon-high", "terminal gone"), ("codex", None, "terminal gone"), ("claude", "opus", "terminal gone")])
+
+    def test_two_tool_failures_and_the_last_cli_out_of_quota_waits_for_its_reset(self):
+        self.pools = [self.pool("claude", five=0.0)]
+        self.ready()
+        self.reviewer_term = {"state": "gone"}
+        self.commands.gate_reads(self.store, self.task)
+        self.commands.gate_reads(self.store, self.task)  # the third try's CLI has no quota: a wait, not REVIEWER_FAILED
+        self.assertEqual([r["cli"] for r in self.task["review_runs"]], ["agy", "codex"])
+        self.assertTrue(self.task["review_quota_wait"]["text"].startswith("All reviewers are out of quota; retries at "))
+        self.assertNotIn("attention", self.task)
+
+    def test_all_pools_empty_waits_for_the_soonest_reset_then_retries(self):
+        from datetime import datetime
+        from unittest import mock
+        import herdr_task.agents as agents
+        import herdr_task.tick as tick
+        from herdr_task.when import clock_words
+        reset = "2026-11-16T18:00:00Z"
+        at = int(datetime.fromisoformat(reset.replace("Z", "+00:00")).timestamp() * 1000)
+        clock = [at - 3_600_000]
+        for mod in (self.commands, agents):
+            p = mock.patch.object(mod, "now", lambda: clock[0])
+            p.start()
+            self.addCleanup(p.stop)
+        self.pools = [self.pool("claude", five=0.0, five_reset="2026-11-16T19:00:00Z"),
+                      self.pool("codex", week=0.5, week_reset="2026-11-18T00:00:00Z"),
+                      self.pool("antigravity-gemini", five=3.0, five_reset=reset)]
+        self.ready()
+        want = "All reviewers are out of quota; retries at " + clock_words(at, clock[0])
+        self.assertEqual(self.runs, [])  # no try spent on an empty pool
+        self.assertEqual(self.task["review_quota_wait"]["text"], want)
+        self.assertEqual(agents.task_status(self.task, []), ("working", None, want))
+        self.assertEqual(self.task["progress"]["text"], "Reviewers out of quota till " + clock_words(at, clock[0]))
+        self.assertNotIn("attention", self.task)
+
+        def tick_at(ms):
+            clock[0] = ms
+            with mock.patch.object(agents, "hc_json", lambda *a: {}), mock.patch.object(tick, "github", lambda s: None):
+                tick.tick_store(self.store, {})
+        tick_at(at - 60_000)  # before the reset: still waits
+        self.assertEqual(self.runs, [])
+        self.head = self.task["head"] = self.change("a new commit during the wait")
+        self.ready()  # same reset: the wait moves to the new head, still Working
+        self.assertEqual(self.task["review_quota_wait"]["head"], self.head)
+        self.assertEqual(agents.task_status(self.task, [])[0], "working")
+        self.pools[2]["five"] = 100.0
+        tick_at(at + 1)  # the tick after the reset starts the reviewer
+        self.assertEqual([(r["cli"], r["model"], r["head"]) for r in self.task["review_runs"]], [("agy", "gemini-4-argon-high", self.head)])
+        self.assertNotIn("review_quota_wait", self.task)
+        self.valid()
+
+    def test_codexbar_missing_or_failing_means_unknown_and_skips_nothing(self):
+        from unittest import mock
+        bare, fake = tempfile.mkdtemp(dir=self.root), tempfile.mkdtemp(dir=self.root)
+        with open(os.path.join(fake, "codexbar"), "w") as f:
+            f.write("#!/bin/sh\nexit 1\n")
+        os.chmod(os.path.join(fake, "codexbar"), 0o755)
+        for path in (bare, fake):
+            with self.subTest(path=path), mock.patch.object(self.commands, "STORE", tempfile.mkdtemp(dir=self.root)), \
+                    mock.patch.dict(os.environ, {"PATH": path}):
+                pools = self.real_pools()
+                self.assertEqual({p["state"] for p in pools}, {"unknown"})
+                self.assertEqual(self.commands.fallback_reviewer(self.store, self.task, {"agent": "agy", "model": None}, ["agy"])[0]["agent"], "codex")
+        self.pools = pools
+        self.ready()
+        self.reviewer_term = {"state": "gone"}
+        self.commands.gate_reads(self.store, self.task)
+        self.assertEqual([r["cli"] for r in self.task["review_runs"]], ["agy", "codex"])
 
     def fail_on(self, screen, status):
         self.sandbox()
@@ -4961,7 +5064,7 @@ if sys.argv[1] == "kill" and alive:
                 f = self.fail_on(text, {"state": "error"})
                 self.assertEqual([(x["cli"], x["why"]) for x in f], [("agy", why)])
                 self.assertIn("usage limit" if "usage" in text else "quota", f[0]["tail"])
-                self.assertEqual(self.task["review_runs"][-1]["cli"], "claude")  # the next reviewer, no round used
+                self.assertEqual(self.task["review_runs"][-1]["cli"], "codex")  # the next reviewer, no round used
                 self.assertEqual(self.commands.rounds_used(self.task, True), 1)  # the fallback run counts, the failed one not
 
     def test_the_real_error_status_fails_at_once(self):
@@ -4998,8 +5101,8 @@ if sys.argv[1] == "kill" and alive:
         self.assertEqual(self.told, [])
         self.assertEqual(self.task["review_failures"][0]["why"], "Sign in required: turn Reviewer sandbox off")
         self.assertEqual([(r["round"], r["cli"], r["model"]) for r in self.task["review_runs"]],
-                         [(1, "agy", "gemini-4-argon-high"), (1, "claude", "opus")])
-        # Reverse direction: when claude ends its turn with no verdict, fallback runs agy with the space's agy model.
+                         [(1, "agy", "gemini-4-argon-high"), (1, "codex", None)])
+        # Reverse direction: when claude ends its turn with no verdict, fallback runs the space's agy with its model.
         with open(settings.SETTINGS, "w") as f:
             json.dump({"spaces": {"sp1": {"folder": self.main, "reviewer": {"agent": "agy", "model": "gemini-4-argon-high"}}}}, f)
         self.task.update(reviewer="claude", reviewer_model="opus")
@@ -5016,7 +5119,7 @@ if sys.argv[1] == "kill" and alive:
         self.assertIn("herdr.sandbox=1", self.runs[1])
         self.valid()
 
-    def test_two_failures_on_one_round_stop_and_tell_the_assistant(self):
+    def test_three_failures_on_one_round_stop_and_tell_the_assistant(self):
         import argparse
         from unittest import mock
         import herdr_task.agents as agents
@@ -5029,23 +5132,24 @@ if sys.argv[1] == "kill" and alive:
         self.ready()
         self.reviewer_term = {"state": "gone"}
         self.commands.gate_reads(self.store, self.task)
-        self.assertEqual([r["cli"] for r in self.task["review_runs"]], ["agy", "claude"])
+        self.commands.gate_reads(self.store, self.task)  # FAC-101: a third try on another CLI
+        self.assertEqual([r["cli"] for r in self.task["review_runs"]], ["agy", "codex", "claude"])
         self.reviewer_term = {"state": "live", "agent": "claude", "status": {"state": "done"}, "turn": 1}
         rep = {}
         with mock.patch.object(agents, "hc_json", lambda *a: {}), mock.patch.object(tick, "github", lambda s: None):
             tick.tick_store(self.store, rep)
-        self.assertEqual(len(self.runs), 2)  # no third reviewer
+        self.assertEqual(len(self.runs), 3)  # no fourth reviewer
         self.assertEqual(self.commands.rounds_used(self.task, True), 0)
         self.assertEqual(self.told, [])  # the worker isn't asked anything (field note 16)
         self.assertEqual(rep.get("attention"), [13])
-        why = "Reviewer failed twice: agy (terminal gone), claude (ended without a verdict)"
+        why = "Reviewer failed twice: agy (terminal gone), codex (terminal gone), claude (ended without a verdict)"
         self.assertEqual(self.task["attention"], why)
         worker = [{"address": "w1", "state": "live", "agent": "agy", "status": {"state": "working"}, "labels": {}}]
         self.assertEqual(agents.task_status(self.task, worker), ("needs", "attention", why))
         # Neither a later tick nor ready on the same head loops.
         self.commands.gate_reads(self.store, self.task)
         self.ready()
-        self.assertEqual(len(self.runs), 2)
+        self.assertEqual(len(self.runs), 3)
         self.assertEqual(self.task["attention"], why)
         # news_pass tells the space's Assistant once via needs-you, even if the task had already gone quiet.
         sdir, sent, clock = tempfile.mkdtemp(dir=self.root), [], [10_000]
@@ -5086,7 +5190,7 @@ if sys.argv[1] == "kill" and alive:
                 id="SHEP-13", json=True, reviewer="claude", reviewer_model="opus", here=False, worktree=False))
         self.assertNotIn("attention", self.task)
         self.commands.gate_reads(self.store, self.task)
-        self.assertEqual(len(self.runs), 3)
+        self.assertEqual(len(self.runs), 4)
         self.valid()
 
     # ---- FAC-75: a failed reviewer's last screen is kept, shown and told ----
@@ -5109,7 +5213,7 @@ if sys.argv[1] == "kill" and alive:
         self.assertEqual(lines[-1].strip(), "Error: model refused the request")
         self.assertLessEqual(len(fail["tail"].encode()), commands.TAIL_BYTES)
         self.assertNotIn("line 0", fail["tail"])
-        self.assertEqual(self.task["review_runs"][-1]["cli"], "claude")  # the fallback went on as before
+        self.assertEqual(self.task["review_runs"][-1]["cli"], "codex")  # the fallback went on (FAC-101's order)
         self.assertEqual(commands.screen_tail("x" * 10_000).encode().__len__(), commands.TAIL_BYTES)
         # A finished (closed) terminal is read before end_reviewer closes it.
         order = []
@@ -5131,13 +5235,14 @@ if sys.argv[1] == "kill" and alive:
         import herdr_task.output as output
         fails = [{"round": 1, "address": "term-1", "cli": "agy", "why": "ended without a verdict",
                   "tail": "  │ Error: 429 model is overloaded │\nmore"},
-                 {"round": 1, "address": "term-2", "cli": "claude", "why": "terminal gone"}]
+                 {"round": 1, "address": "term-2", "cli": "claude", "why": "terminal gone"},
+                 {"round": 1, "address": "term-3", "cli": "codex", "why": "exited (1)"}]
         self.ready()
         self.task["review_failures"] = [{**f, "head": self.head, "at": self.commands.now() + 10 + i} for i, f in enumerate(fails)]
         self.task["review_runs"] = [{"round": 1, "head": self.head, "address": f["address"], "cli": f["cli"], "at": 1} for f in fails]
-        self.commands.gate_reads(self.store, self.task)  # two failures on one round: the Assistant is told
+        self.commands.gate_reads(self.store, self.task)  # three failures on one round: the Assistant is told
         why = self.task["attention"]
-        self.assertTrue(why.startswith("Reviewer failed twice: agy (ended without a verdict), claude (terminal gone)"), why)
+        self.assertTrue(why.startswith("Reviewer failed twice: agy (ended without a verdict), claude (terminal gone), codex (exited (1))"), why)
         self.assertIn("agy saw: Error: 429 model is overloaded", why)  # the first meaningful line, one each
         self.assertNotIn("claude saw", why)
         self.assertEqual(self.commands.tail_gist("│ ─── │\n\n"), None)
@@ -5169,7 +5274,7 @@ if sys.argv[1] == "kill" and alive:
                 self.commands.gate_reads(self.store, self.task)
             self.assertEqual(self.task["review_failures"][0]["why"], "ended without a verdict")
             self.assertNotIn("tail", self.task["review_failures"][0])
-            self.assertEqual([r["cli"] for r in self.task["review_runs"]], ["agy", "claude"])
+            self.assertEqual([r["cli"] for r in self.task["review_runs"]], ["agy", "codex"])
 
     def test_a_live_reviewer_still_working_is_left_alone(self):
         from unittest import mock
@@ -5199,7 +5304,7 @@ if sys.argv[1] == "kill" and alive:
         with mock.patch.object(self.commands, "now", lambda: later):
             self.commands.gate_reads(self.store, self.task)
         self.assertEqual(self.task["review_failures"][0]["why"], "ended without a verdict")
-        self.assertEqual([r["cli"] for r in self.task["review_runs"]], ["agy", "claude"])
+        self.assertEqual([r["cli"] for r in self.task["review_runs"]], ["agy", "codex"])
         self.valid()
 
 
@@ -5235,7 +5340,7 @@ if sys.argv[1] == "kill" and alive:
         fail = self.task["review_failures"][0]
         self.assertEqual(fail["why"], "ended without a verdict")
         self.assertIn("1 shell still running", fail["tail"])  # the screen kept for FAC-75
-        self.assertEqual(self.task["review_runs"][-1]["cli"], "agy")  # the fallback goes on
+        self.assertEqual(self.task["review_runs"][-1]["cli"], "codex")  # the fallback goes on
         self.valid()
         # Claude starts a turn by itself when the job ends: working again clears the clocks, nothing was sent.
         self.task.pop("review_failures"), self.task.pop("review_runs"), self.runs.clear()
@@ -5265,7 +5370,7 @@ if sys.argv[1] == "kill" and alive:
         self.assertEqual(len(nudges), 1)  # never a second one, however long it goes on
         self.assertEqual(failed_at, c.BG_WAIT_MS // 60_000 + c.NUDGE_GRACE_MS // 60_000)  # 3 min after the nudge
         self.assertEqual(self.task["review_failures"][0]["why"], "ended without a verdict")
-        self.assertEqual([r["cli"] for r in self.task["review_runs"]], ["claude", "agy"])  # the fallback went on
+        self.assertEqual([r["cli"] for r in self.task["review_runs"]], ["claude", "codex", "agy"])  # the fallbacks went on
         self.valid()
 
     def test_a_refused_nudge_is_tried_again_and_the_grace_starts_when_it_is_delivered(self):
@@ -6857,6 +6962,7 @@ class GateEndToEnd(GateReview):
         self.task["set"]["review_min"] = 1
         self.addCleanup(lambda: [(p.kill(), p.wait()) for p in self.procs])
         for mod, name, value in ((launch, "run", self.hc_run), (self.commands, "run", self.hc_read),
+                                 (launch, "send_when_clear", self.real_send),  # the fake codex gets its prompt for real
                                  (self.commands, "own_path", lambda: os.path.join(self.fake, "herdr-task"))):
             p = mock.patch.object(mod, name, value)
             p.start()
@@ -6942,6 +7048,7 @@ class GateEndToEnd(GateReview):
 
     def test_agy_hits_a_quota_error_and_the_round_goes_to_claude(self):  # FAC-81
         self.mode = "quota"
+        self.pools = [{"name": "codex", "state": "ok", "five": 0.0, "week": 40.0, "five_reset": None, "week_reset": None}]  # FAC-101
         self.ready()
         argv = self.argv_of(1)
         self.assertEqual((argv[argv.index("--mode") + 1], "-i" in argv), ("plan", True))

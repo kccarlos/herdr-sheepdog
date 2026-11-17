@@ -587,12 +587,53 @@ def fail_run(s, t, rn, why, screen=None):
         s.dirty = True
 
 
-def fallback_reviewer(s, t, failed_cli):
-    """A different CLI than `failed_cli` for the round's second try (FAC-59)."""
-    if failed_cli == "claude":
-        cfg = settings_for(s, t.get("space")).get("reviewer") or {}
-        return {"agent": "agy", "model": cfg.get("model") if cfg.get("agent") == "agy" else None, "effort": None}
-    return {"agent": "claude", "model": "opus", "effort": None}
+REVIEW_TRIES, QUOTA_WAIT, QUOTA_RETRY_MS = 3, "All reviewers are out of quota", 10 * 60_000  # FAC-101
+ARGON = "gemini-4-argon-high"
+
+
+def reviewer_pools():
+    """codexbar's usage pools, cached a minute (usage.read); [] (every pool unknown) when it can't be read."""
+    from . import usage
+    try:
+        return usage.read(os.path.join(STORE, ".usage"))  # its own folder: no non-list file beside the task lists
+    except Exception:
+        return []
+
+
+def quota_reset(pool):
+    """False while a pool has room or is unknown; at its floor, when it resets (ms), or a retry soon if codexbar doesn't say."""
+    from . import usage
+    if not pool or pool.get("state") != "ok":
+        return False
+    low = [k for k, floor in (("week", usage.FLOOR_WEEK), ("five", usage.FLOOR_5H)) if pool.get(k) is not None and pool[k] <= floor]
+    if not low:
+        return False
+    try:
+        from datetime import datetime
+        return int(datetime.fromisoformat(str(pool[low[0] + "_reset"]).replace("Z", "+00:00")).timestamp() * 1000)
+    except (TypeError, ValueError):
+        return now() + QUOTA_RETRY_MS
+
+
+def fallback_reviewer(s, t, first, failed=()):
+    """(reviewer, None) for the round's next try (FAC-59, FAC-101): the first of the task's reviewer, the space's Reviewer,
+    codex, agy (Argon), claude opus that hasn't failed this round and whose pool has room. None left: (None, the soonest
+    reset in ms) when the rest are out of quota, else (None, None)."""
+    from .handoff import pool_of
+    cfg = settings_for(s, t.get("space")).get("reviewer") or {}
+    space = {"agent": cfg["agent"], "model": cfg.get("model"), "effort": cfg.get("effort")} if cfg.get("agent") else None
+    argon = cfg.get("model") if cfg.get("agent") == "agy" and cfg.get("model") else ARGON
+    pools, seen, resets = {p["name"]: p for p in reviewer_pools()}, set(failed), []
+    for rv in (first, space, {"agent": "codex", "model": None, "effort": None},
+               {"agent": "agy", "model": argon, "effort": None}, {"agent": "claude", "model": "opus", "effort": None}):
+        if not rv or rv["agent"] in seen:
+            continue
+        seen.add(rv["agent"])
+        reset = quota_reset(pools.get(pool_of({"agent": rv["agent"], "argv": [rv["agent"], "--model", rv.get("model") or ""]})))
+        if reset is False:
+            return rv, None
+        resets.append(reset)
+    return None, min(resets) if resets else None
 
 
 def next_round(t):
@@ -692,10 +733,13 @@ def gate_step(s, t):
     since = max(t.get("reviewer_at") or 0, t.get("reopened_at") or 0)
     fails = [f for f in t.get("review_failures") or []
              if f["round"] == round_n and f["head"] == head and (f.get("at") or 0) > since]
-    if len(fails) >= 2:
-        why = (f"{REVIEWER_FAILED} " + ", ".join(f"{f['cli']} ({f['why']})" for f in fails[:2]))[:120]
+    rows = {x["label"]: x["value"] for x in task_settings(s, t)}
+    pick, reset = (None, None) if len(fails) >= REVIEW_TRIES else fallback_reviewer(s, t, rows.get("Reviewer"), [f["cli"] for f in fails])
+    if not pick and not reset:
+        why = (f"{REVIEWER_FAILED} " + ", ".join(f"{f['cli']} ({f['why']})" for f in fails[:REVIEW_TRIES]))[:160]
         # What each last saw, one line each, so the Assistant can tell sign-in from a refusal or a crash (FAC-75).
-        why += "".join(f" · {f['cli']} saw: {g}" for f in fails[:2] if (g := tail_gist(f.get("tail"))))
+        why += "".join(f" · {f['cli']} saw: {g}" for f in fails[:REVIEW_TRIES] if (g := tail_gist(f.get("tail"))))
+        t.pop("review_quota_wait", None)
         t["attention"], t["attention_at"] = why, now()
         t.pop("progress", None)
         s.dirty = True
@@ -713,10 +757,19 @@ def gate_step(s, t):
                     "Say what changed in your chat and end your turn: your Assistant hands it to the person.")
         return (f"{s.ref(t)}: all {rounds} review rounds are used and {head[:7]} has {gate_passes(t, head)} of {need} passing "
                 f"rounds. Say why in your chat and end your turn: only your Assistant can add a round (herdr-task review-more).")
+    if not fable and not pick:  # FAC-101: no try spent on a reviewer with no quota; the tick retries
+        when = max(reset, now() + 60_000)
+        from .when import clock_words
+        at = clock_words(when, now())
+        text = f"{QUOTA_WAIT}; retries at {at}"
+        if [(t.get("review_quota_wait") or {}).get(k) for k in ("head", "text")] != [head, text]:  # a new head too
+            t["review_quota_wait"] = {"head": head, "until": when, "text": text}
+            t["progress"] = {"text": fit(f"Reviewers out of quota till {at}"), "at": now(), "set": now(), "by": "herdr"}
+            s.dirty = True
+        return f"{s.ref(t)}: {text}."
     if (t.get("pr") or {}).get("number"):  # FAC-88: the reviewer reads the commit GitHub has: pushed first, or ready stops
         push_branch(s, t)
-    rows = {x["label"]: x["value"] for x in task_settings(s, t)}
-    rv = FABLE if fable else fallback_reviewer(s, t, fails[-1]["cli"]) if fails else rows["Reviewer"]
+    rv = FABLE if fable else pick
     ref, ht, folder = s.ref(t), own_path(), shlex.quote(s.loc["folder"])
     sand = sandboxes([rv["agent"]])  # agy on a Mac: sandboxed, nothing prompts, its verdict read from its terminal
     # Claude Code's plan mode blocks every command, the verdict's `herdr-task review` too, so a Claude reviewer
@@ -756,6 +809,7 @@ def gate_step(s, t):
     if merge_only:
         t.setdefault("merge_only_runs", []).append(a["address"])
     t["progress"] = {"text": fit("Herdr's reviewer is on it"), "at": now(), "set": now(), "by": "herdr"}
+    t.pop("review_quota_wait", None)
     added = (f" Herdr added this round itself (its last round passed; auto-grant {len(t['review_auto_grants'])} of {AUTO_GRANTS})."
              if granted else "")
     return (f"{s.ref(t)}: Herdr started review round {round_n} of {head[:7]} ({a['address']}); its findings come to you as a message."
@@ -1444,7 +1498,8 @@ def gate_reads(s, t):
     if (not need or not head or gate_passes(t, head) >= need or open_runs(t)
             or t.get("recap") or t.get("review_out") or (t.get("attention") or "").startswith(REVIEWER_FAILED)
             or (mine and mine[-1]["head"] == head and mine[-1]["verdict"] == "changes")
-            or not any(r["head"] == head for r in t.get("review_runs") or [])):
+            or not (any(r["head"] == head for r in t.get("review_runs") or []) or (t.get("review_quota_wait") or {}).get("head") == head)
+            or (t.get("review_quota_wait") or {}).get("until", 0) > now()):  # FAC-101: out of quota, retried after the reset
         return
     if os.path.isdir(wt) and git(wt, "rev-parse", "HEAD")[1] == head and not git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
         gate_step(s, t)
@@ -1459,7 +1514,7 @@ def cmd_state(args, state):
             # pull request merged and close it again at once) until its agent says ready.
             if t["state"] == "done" and t.get("merged"):
                 t["kept_open"] = True
-            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait"):
+            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
@@ -1509,6 +1564,7 @@ def cmd_edit(args):
             t["reviewer_at"] = max(now(), max((f.get("at") or 0 for f in t.get("review_failures") or []), default=0))
             if (t.get("attention") or "").startswith(REVIEWER_FAILED):
                 t.pop("attention", None)
+            t.pop("review_quota_wait", None)
         if [t.get(k) for k in ("agent", "model", "effort")] != pick:
             # The next agent started for it runs on the new choice (start_again), a queued one too.
             t["pick_at"] = now()

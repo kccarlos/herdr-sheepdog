@@ -110,6 +110,12 @@ _real_env["HOME"] = REAL
 NODE = find_node(_real_env)
 if NODE and NODE != shutil.which("node"):
     os.environ["PATH"] = os.path.dirname(NODE) + os.pathsep + os.environ.get("PATH", "")
+# FAC-101: no test reads the person's real usage pools: a codexbar that fails (every pool unknown) goes first on PATH
+_fakes = tempfile.mkdtemp(prefix="shep-test-bin-")
+with open(os.path.join(_fakes, "codexbar"), "w") as _f:
+    _f.write("#!/bin/sh\nexit 1\n")
+os.chmod(os.path.join(_fakes, "codexbar"), 0o755)
+os.environ["PATH"] = _fakes + os.pathsep + os.environ.get("PATH", "")
 # git commits in throwaway repos need a name; the real ~/.gitconfig is out of reach now
 for k, v in (("GIT_AUTHOR_NAME", "Test"), ("GIT_AUTHOR_EMAIL", "test@example.invalid"),
              ("GIT_COMMITTER_NAME", "Test"), ("GIT_COMMITTER_EMAIL", "test@example.invalid")):

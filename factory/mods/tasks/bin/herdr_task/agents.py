@@ -205,6 +205,8 @@ def task_status(task, live):
         return "working", None, None
     if review_running(task):
         return "working", None, None if (task.get("progress") or {}).get("text") else REVIEWER_ON_IT
+    if (task.get("review_quota_wait") or {}).get("head") == task.get("head") and task.get("head"):  # FAC-101: waits for a reset
+        return "working", None, task["review_quota_wait"]["text"]
     # Quiet without saying ready, but on its own work (SHEP-53, FAC-60): a helper reviewer at work
     # keeps it Working; a background job of its own (hc get's foreground or status msg, its log's
     # background shells/Monitors, or its fresh status line) shows Waiting on a background job,
