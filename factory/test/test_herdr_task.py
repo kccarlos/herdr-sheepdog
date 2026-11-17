@@ -14177,9 +14177,9 @@ class ClaudeStartupTrustAndDialogs(unittest.TestCase):
 
 
 class TartHomeSetting(unittest.TestCase):
-    """SDF-44: tart_home reads TART_HOME env first, then machine.tart_home in settings.json."""
+    """SDF-44: machine.tart_home config and engine robustness fixes from the macOS VM run."""
 
-    def test_tart_home_env_and_config_setting(self):
+    def test_config_sets_and_clears_machine_tart_home(self):
         from unittest import mock
         sys.path.insert(0, BIN)
         import herdr_task.settings as settings
@@ -14196,18 +14196,76 @@ class TartHomeSetting(unittest.TestCase):
             "HERDR_TASK_STORE": store_dir,
             "HERDR_TASK_SETTINGS": settings_file,
         }
-        env.pop("TART_HOME", None)
         code = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]); "
                 "from herdr_task.cli import main; sys.argv[1:] = sys.argv[2:]; sys.exit(main())")
         run_cli = lambda *a: subprocess.run([sys.executable, "-c", code, BIN, *a], env=env, capture_output=True, text=True)
 
-        with mock.patch.object(settings, "SETTINGS", settings_file), mock.patch.dict(os.environ, env, clear=True):
-            self.assertEqual(settings.tart_home(), "")
+        with mock.patch.object(settings, "SETTINGS", settings_file):
+            self.assertIsNone(settings.machine_option("tart_home"))
             r = run_cli("config", "--folder", repo, "--set", "machine.tart_home=~/tart-vms")
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(settings.tart_home(), os.path.expanduser("~/tart-vms"))
-            with mock.patch.dict(os.environ, {"TART_HOME": "/tmp/override-tart"}):
-                self.assertEqual(settings.tart_home(), "/tmp/override-tart")
+            self.assertEqual(settings.machine_option("tart_home"), "~/tart-vms")
             r = run_cli("config", "--folder", repo, "--set", "machine.tart_home=default")
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(settings.tart_home(), "")
+            self.assertIsNone(settings.machine_option("tart_home"))
+
+    def test_base_run_git_non_interactive_and_devnull_stdin(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.base as base
+        calls = []
+        def fake_subproc(args, **kw):
+            calls.append((args, kw))
+            return subprocess.CompletedProcess(args, 0, "", "")
+        with mock.patch.object(base.subprocess, "run", fake_subproc):
+            base.git("/tmp/repo", "fetch", "origin", "main")
+        self.assertEqual(len(calls), 1)
+        _, kw = calls[0]
+        self.assertEqual(kw["stdin"], subprocess.DEVNULL)
+        self.assertEqual(kw["env"]["GIT_TERMINAL_PROMPT"], "0")
+        self.assertEqual(kw["env"]["GCM_INTERACTIVE"], "never")
+
+    def test_scheduler_waits_for_killed_shell_before_rm(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.scheduler as scheduler
+        tmp = os.path.realpath(tempfile.mkdtemp(prefix="sdf44-sched-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        seq = []
+        gets = [
+            {"state": "live", "foreground": {"argv": ["/bin/zsh", "-l"]}},
+            {"state": "live", "foreground": {"argv": ["/bin/zsh", "-l"]}},
+            {"state": "finished"},
+        ]
+        def fake_hc_json(*args):
+            seq.append(("hc_json", args))
+            return gets.pop(0) if gets else {"state": "finished"}
+        def fake_run(args, **kw):
+            seq.append(("run", list(args)))
+            return subprocess.CompletedProcess(args, 0, "", "")
+        with (mock.patch.object(scheduler, "STORE", tmp),
+              mock.patch.object(scheduler, "store_files", lambda: []),
+              mock.patch.object(scheduler, "read_list", lambda p: {"projects": {"/p": {"on": True}}}),
+              mock.patch.object(scheduler, "hc_json", fake_hc_json),
+              mock.patch.object(scheduler, "kill_agent", lambda name: seq.append(("kill_agent", name))),
+              mock.patch.object(scheduler, "run", fake_run),
+              mock.patch.object(scheduler.time, "sleep", lambda _: None)):
+            res = scheduler.ensure_scheduler()
+        self.assertTrue(res["started"])
+        kill_idx = next(i for i, x in enumerate(seq) if x == ("kill_agent", scheduler.SCHEDULER))
+        poll_idx = next(i for i, x in enumerate(seq) if x == ("hc_json", ("get", scheduler.SCHEDULER)) and i > kill_idx)
+        rm_idx = next(i for i, x in enumerate(seq) if x == ("run", ["hc", "rm", scheduler.SCHEDULER]))
+        self.assertLess(kill_idx, poll_idx)
+        self.assertLess(poll_idx, rm_idx)
+
+    def test_takeover_write_checks_creates_missing_parent_dir(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.takeover as takeover
+        tmp = os.path.realpath(tempfile.mkdtemp(prefix="sdf44-chk-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        chk = os.path.join(tmp, "nested", "state", "cli-check.json")
+        with mock.patch.object(takeover, "CLI_CHECK", chk):
+            takeover.write_checks({"at": 1, "machines": {}})
+        with open(chk) as f:
+            self.assertEqual(json.load(f), {"at": 1, "machines": {}})

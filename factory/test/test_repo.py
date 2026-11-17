@@ -635,3 +635,19 @@ class TartHomeScripts(unittest.TestCase):
             self.assertEqual(inst.returncode, 0, inst.stdout + inst.stderr)
             plist = open(os.path.join(fake_home, "Library", "LaunchAgents", "io.github.kccarlos.sheepdog-nightly.plist")).read()
             self.assertIn(f"<string>{tart_dir}</string>", plist)
+
+            # Protected base VMs and --vm == --vm-base are refused before touching tart.
+            os.remove(seen_file)
+            for bad_args in (
+                ["--vm", "factory-vm"],
+                ["--vm", "sd-qa-base"],
+                ["--vm", "sd-qa", "--vm-base", "sd-qa"],
+            ):
+                bad = subprocess.run(
+                    ["bash", R("scripts", "factory", "m1-pr-acceptance.sh"), "owner/repo", *bad_args],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(bad.returncode, 2, bad_args)
+                self.assertFalse(os.path.exists(seen_file), f"tart was called for {bad_args}")

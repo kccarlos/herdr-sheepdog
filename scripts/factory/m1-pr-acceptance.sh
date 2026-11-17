@@ -24,7 +24,7 @@ KEEP=0
 VM=""
 VM_BASE=""
 VM_USER="admin"
-VM_KEY="${HOME}/.ssh/tart_sdqa_ed25519"
+VM_KEY="${SHEEPDOG_NIGHTLY_VM_KEY:-}"
 SHEEPDOG_BIN=""
 
 while [ "$#" -gt 0 ]; do
@@ -102,33 +102,24 @@ export PATH="$HOME/.local/bin:/opt/homebrew/bin:$PATH"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_SH="$SCRIPT_DIR/../e2e/lib.sh"
 
-resolve_tart_home() {
+if [ -n "$VM" ]; then
+  case "$VM" in
+    sd-qa-base|factory-vm|factory-base-*)
+      echo "Error: refusing to run against protected base VM '$VM'; pass a clone name." >&2
+      exit 2
+      ;;
+  esac
+  if [ -n "$VM_BASE" ] && [ "$VM" = "$VM_BASE" ]; then
+    echo "Error: --vm and --vm-base cannot name the same VM ('$VM')." >&2
+    exit 2
+  fi
   if [ -f "$LIB_SH" ]; then
     # shellcheck source=scripts/e2e/lib.sh
     . "$LIB_SH"
-    e2e_resolve_tart_home
-    return 0
-  fi
-  if [ -n "${TART_HOME:-}" ]; then
-    printf '%s\n' "$TART_HOME"
-    return 0
-  fi
-  local cfg="${HERDR_TASK_SETTINGS:-${XDG_CONFIG_HOME:-$HOME/.config}/sheepdog/settings.json}"
-  [ -f "$cfg" ] && command -v python3 >/dev/null 2>&1 || return 0
-  python3 -c 'import json,os,sys
-try: d=json.load(open(sys.argv[1]))
-except Exception: sys.exit(0)
-if not isinstance(d,dict): sys.exit(0)
-k=d.get("here") or "local"; v=""
-for layer in ((d.get("everywhere") or {}).get("machine") or {}, ((d.get("machines") or {}).get(k) or {}).get("machine") or {}):
-  if isinstance(layer,dict) and layer.get("tart_home"): v=str(layer["tart_home"]).strip()
-if v: print(os.path.expanduser(v))' "$cfg" 2>/dev/null || true
-}
-
-if [ -n "$VM" ]; then
-  RESOLVED_TART_HOME="$(resolve_tart_home)"
-  if [ -n "$RESOLVED_TART_HOME" ]; then
-    export TART_HOME="$RESOLVED_TART_HOME"
+    RESOLVED_TART_HOME="$(e2e_resolve_tart_home)"
+    if [ -n "$RESOLVED_TART_HOME" ]; then
+      export TART_HOME="$RESOLVED_TART_HOME"
+    fi
   fi
   for cmd in tart ssh scp python3; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -142,7 +133,7 @@ if [ -n "$VM" ]; then
     exit 1
   fi
   VM_SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=30 -o ServerAliveCountMax=4 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
-  if [ -f "$VM_KEY" ]; then
+  if [ -n "$VM_KEY" ] && [ -f "$VM_KEY" ]; then
     VM_SSH_OPTS+=(-i "$VM_KEY")
   fi
   VM_STARTED_HERE=0

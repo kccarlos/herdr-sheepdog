@@ -1205,12 +1205,3 @@ def write_machine_option(name, value, machine=None):
         json.dump(d, f, indent=2)
         f.write("\n")
     os.replace(tmp, SETTINGS)
-
-
-def tart_home(env=None):
-    """Tart VM directory: TART_HOME from the environment, else machine.tart_home in settings.json."""
-    src = os.environ if env is None else env
-    raw = str(src.get("TART_HOME") or "").strip()
-    if not raw:
-        raw = str(machine_option("tart_home") or "").strip()
-    return os.path.expanduser(raw) if raw else ""
