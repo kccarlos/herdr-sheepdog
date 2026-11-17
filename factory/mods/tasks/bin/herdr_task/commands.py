@@ -29,7 +29,7 @@ from .github import (already_merged, checks_missing, checks_since, expected_chec
                      pr_for_branch, pr_head_problem, pr_merged_at_tip, push_branch,
                      drop_branch, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
                      pr_pending, pr_problem, pr_repo, pr_behind, main_red_hold, pr_update_branch, synced_head, task_problem, SYNC_CHECKS_MS,
-                     SYNC_GRACE_MS, UPDATE_CONFLICT, pr_view, remote_of, task_github, update_main, watch_main)
+                     SYNC_GRACE_MS, UPDATE_CONFLICT, pr_view, push_remote, remote_of, task_github, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING, ci_awaited, NO_CHECKS_MS, NO_CI_RUN
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, is_coordinator, launch, name_tabs,
@@ -2194,8 +2194,9 @@ def in_base(s, t, remote_only=False):
     own, or it only caught up with its base (`git merge --ff-only main` or `git rebase origin/main`
     while the local main is behind: SHEP-23, #737). Nothing to merge, and never merged."""
     tip, main, base = branch_tip(s, t), s.loc["folder"], t.get("base") or "main"
-    remote_ref = f"refs/remotes/{remote_of(main, t.get('branch'))}/{base}"
-    refs = (remote_ref,) if remote_only and git(main, "rev-parse", "--verify", "--quiet", remote_ref)[0] else (base, remote_ref)
+    remote = push_remote(main, t.get("branch")) or push_remote(main, base)
+    remote_ref = f"refs/remotes/{remote or 'origin'}/{base}"
+    refs = (remote_ref,) if remote_only and (remote or git(main, "rev-parse", "--verify", "--quiet", remote_ref)[0]) else (base, remote_ref)
     return bool(tip) and (tip == t.get("start") or any(
         git(main, "merge-base", "--is-ancestor", tip, ref)[0] for ref in refs))
 

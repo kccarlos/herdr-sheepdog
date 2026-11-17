@@ -13680,7 +13680,7 @@ class AcceptGitHubPrPath(unittest.TestCase):
         self.assertEqual(state["pushed_before_create"], self.tip)
         ref = self.store.ref(self.task)
         create = next(c for c in calls if c[:2] == ("pr", "create"))
-        self.assertEqual(create[create.index("--title") + 1], f"docs(factory): audit ({ref})")
+        self.assertEqual(create[create.index("--title") + 1], f"{ref}: docs(factory): audit")
         self.assertFalse(any(c[:2] == ("pr", "merge") for c in calls))
         # Checks still running: stays ready (auto_merge=checks), branch & worktree NOT deleted yet, local main untouched.
         self.assertEqual((self.task["state"], self.task.get("auto_merge"), self.task["pr"]["number"]), ("ready", "checks", 42))
@@ -13763,8 +13763,14 @@ class AcceptGitHubPrPath(unittest.TestCase):
         self.assertTrue(any(c[:2] == ("pr", "create") for c in calls2), calls2)
         self.assertTrue(any(c[:2] == ("pr", "merge") for c in calls2), calls2)
 
-    def test_pr_title_formats_conventional_and_plain_titles(self):
-        ref = self.store.ref(self.task)
-        self.assertEqual(self.github.pr_title(self.store, {"id": 1, "title": "docs(factory): audit"}), f"docs(factory): audit ({ref})")
-        self.assertEqual(self.github.pr_title(self.store, {"id": 1, "title": f"docs(factory): audit ({ref})"}), f"docs(factory): audit ({ref})")
-        self.assertEqual(self.github.pr_title(self.store, {"id": 1, "title": "Flow"}), f"{ref}: Flow")
+    def test_accept_never_checks_local_base_when_remote_ref_missing(self):
+        # Local main has task/1-doc, while refs/remotes/origin/main does not exist: never mark done locally.
+        self.git(self.main, "merge", "-q", "--ff-only", "task/1-doc")
+        self.git(self.main, "update-ref", "-d", "refs/remotes/origin/main")
+        calls, state = self.mock_gh(pending=True)
+        self.commands.cmd_accept(self.args())
+        self.assertEqual(state["pushed_before_create"], self.tip)
+        self.assertTrue(any(c[:2] == ("pr", "create") for c in calls), calls)
+        self.assertEqual(self.git(self.main, "branch", "--list", "--format=%(refname:short)", "task/1-doc"), "task/1-doc")
+        self.assertTrue(os.path.isdir(self.wt))
+        self.assertNotEqual(self.task.get("state"), "done")

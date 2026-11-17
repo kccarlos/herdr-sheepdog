@@ -360,18 +360,12 @@ def pr_describe(s, task, summary=None):
         gh("pr", "edit", str(pr["number"]), "--repo", pr["repo"], "--body", want)
 
 
-_CONVENTIONAL = re.compile(r"^(?:feat|fix|docs|chore|refactor|test|style|perf|build|ci|revert)(?:\([^)]+\))?!?:\s+\S", re.I)
-
-
 def pr_title(s, task):
     """The repo's commit titles read "SHEP-198: the task's title" (a squash merge adds "(#945)"): the
-    task's ref first, so the pull request stays findable by it, or "<type>(<scope>): <title> (<ref>)"
-    when the title is already a Conventional Commit."""
+    task's ref first, so the pull request stays findable by it."""
     ref = s.ref(task)
     title = " ".join(str(task.get("title") or "").split())
     rest = re.sub(rf"^{re.escape(ref)}\b[:\s-]*", "", title, flags=re.I)
-    if rest and _CONVENTIONAL.match(rest):
-        return rest if re.search(rf"\(\s*{re.escape(ref)}\s*\)\s*$", rest, re.I) else f"{rest} ({ref})"
     return f"{ref}: {rest or ref}"
 
 
