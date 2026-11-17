@@ -163,93 +163,10 @@ def _startup_auth(task, k):
 
 def task_status(task, live):
     """(status, needs, why): a STATUSES key; for Needs you what kind ("attention", "asks",
-    "reply", "stopped") and a one-line reason. live = its running agents (hc records)."""
-    st = task["state"]
-    if st == "scheduled":
-        from .when import starts_words
-        return "scheduled", None, starts_words(task.get("scheduled_for") or now(), now())
-    if st not in ("running", "ready"):
-        if st in ("todo", "queued") and task.get("attention"):
-            return "needs", "attention", task["attention"]
-        return (st if st in STATUSES else "todo"), None, None
-    states = ["working" if _startup_auth(task, k) else "blocked" if asking(k) else status_word(k) for k in live]
-    # A problem Herdr just found (SHEP-133): not Needs you before GRACE_MS have passed, while its
-    # agent is told and takes it up; until then the task reads as it would without it. Recaps and
-    # repeated reviewer failures wait on the Assistant right away (not the worker).
-    if (task.get("attention") and not task.get("recap")
-            and not (task.get("attention") or "").startswith(REVIEWER_FAILED)
-            and now() - (task.get("attention_at") or 0) < GRACE_MS):
-        return task_status({**task, "attention": None}, live)
-    # What Herdr found that stops it (failing checks, a conflict): Needs you, unless its agent is
-    # already on it (on_it()); then it is Working, with its agent's own status line.
-    if task.get("attention") and not on_it(task, live):
-        return "needs", "attention", task["attention"]
-    # Cut off by its provider (retry_pass): still Working while Herdr waits to tell it to carry
-    # on; Needs you once the tries are used up, or at once for what waiting can't fix.
-    r = task.get("retry") if st == "running" else None
-    if r and any(k.get("address") == r.get("address") for k in live) and ("blocked" not in states or r.get("over")):
-        return ("needs", "provider", r.get("reason")) if r.get("over") else ("working", None, retry_line(r))
-    if "blocked" in states:
-        return "needs", "asks", REASONS["question"]
-    _, dialog_why = startup_dialog(live)
-    if dialog_why:
-        return "needs", "asks", dialog_why
-    # Out of review rounds (FAC-95, note 49): it waits on its Assistant (review-more, accept
-    # --owner-approved, reopen) whatever its agent does meanwhile: busy, a background job, its own line.
-    if st == "running" and task.get("review_out"):
-        return "needs", "reply", out_of_rounds_why(task)
-    # Waits on the physical device (FAC-110, herdr-task device-wait): locked, untrusted or not connected.
-    if st == "running" and live and (task.get("device_wait") or {}).get("why"):
-        return "needs", "reply", device_why(task)
-    if back_at_work(task, live):
-        return "working", None, WORKING_AGAIN
-    if task.get("attention"):
-        return "working", None, WORKING_AGAIN if st == "ready" else None
-    if st == "ready":
-        # Nothing for the person yet (SHEP-175): its merge under way (asked, in GitHub's merge queue, or
-        # by itself), or its pull request's checks still running. Working, with what it waits for.
-        wait = ready_wait(task, live)
-        if wait:
-            return "working", None, wait
-        # Said ready but not at rest yet (SHEP-148): Working until it is, and only then Ready.
-        if live and not_at_rest(task, live):
-            return "working", None, None
-        return "ready", None, None
-    # An agent that hasn't reported yet is starting: working.
-    if any(x not in ("idle", "done", "blocked") for x in states):
-        return "working", None, None
-    # Just started: its terminal still runs the shell that starts the agent, or the agent is idle
-    # before its first message lands. Working, until it ends or STARTING_MS pass.
-    if starting(task):
-        return "working", None, None
-    if review_running(task):
-        return "working", None, None if (task.get("progress") or {}).get("text") else REVIEWER_ON_IT
-    if (task.get("review_quota_wait") or {}).get("head") == task.get("head") and task.get("head"):  # FAC-101: waits for a reset
-        return "working", None, task["review_quota_wait"]["text"]
-    if (task.get("push_held") or {}).get("gate"):
-        return "working", None, task["push_held"].get("reason") or "Waiting for CI runner slot"
-    # Quiet without saying ready, but on its own work (SHEP-53, FAC-60): a helper reviewer at work
-    # keeps it Working; a background job of its own (hc get's foreground or status msg, its log's
-    # background shells/Monitors, or its fresh status line) shows Waiting on a background job,
-    # unless its last message asks the person something.
-    if live and helper_working(task, live):
-        return "working", None, None
-    # Told its background job ended (FAC-106, bg_ended_pass): Waiting on it a while longer, then Needs you
-    # if it still took no turn since.
-    told = task.get("bg_told") if st == "running" else None
-    if told and told.get("at") and any(k.get("address") == told.get("address") for k in live) and not turn_since(told, live):
-        return ("working", None, WAITING_BG) if now() - told["at"] < BG_GRACE_MS else ("needs", "reply", BG_ENDED_WHY)
-    if live and own_work(task, live):
-        return "working", None, WAITING_BG
-    # Just gone quiet (SHEP-133): still Working for GRACE_MS, as its agent often ends a turn a
-    # moment before it says ready or takes up the next thing on its own.
-    if live and settling(live):
-        return "working", None, None
-    # Quiet without saying ready: alive, it ended its turn (view() says on what: its question or
-    # its last sentence); its process gone, the agent stopped.
-    if live:
-        return "needs", "reply", REASONS["reply"]
-    return "needs", "stopped", STOPPED
+    "reply", "stopped") and a one-line reason. Derived from the ordered stage table."""
+    from .stage import resolve_stage
+    res = resolve_stage(task, live)
+    return res.status, res.needs, res.legacy_why
 
 
 STOPPED = "Agent stopped"
