@@ -209,15 +209,13 @@ def takeover(s, t, k, row, log, report):
     if not kind:
         row["reason"] = fit(f"{head(row['reason'])}, {why}")
         return row
-    labels = k.get("labels") or {}
-    space = labels.get("herdr.task.space") or labels.get("herdr.space") or t.get("space")  # shim for launch.py until SDF-7
     argv = backup_argv(s, t, kind)
     t["backup"] = {"from": running, "to": kind, "why": row["reason"], "at": now(), "from_address": k["address"], "state": "starting"}
     s.dirty = True
     try:
-        parent = parent_for((t["agents"][-1] if t.get("agents") else {}).get("parent"), space)
-        text = handover(s, t, running, kind, row["reason"], log) + "\n\n" + brief(s, t, parent, space, argv)
-        a = launch(s, t, argv, space, text, parent=parent)
+        parent = parent_for((t["agents"][-1] if t.get("agents") else {}).get("parent"), s.loc["folder"])
+        text = handover(s, t, running, kind, row["reason"], log) + "\n\n" + brief(s, t, parent, argv)
+        a = launch(s, t, argv, text, parent=parent)
     except Exception as e:  # never a second try: the person decides
         t["backup"].update(state="failed", error=str(e)[:300])
         row["reason"] = fit(f"{head(row['reason'])}, backup didn't start")

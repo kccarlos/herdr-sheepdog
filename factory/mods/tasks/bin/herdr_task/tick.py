@@ -23,7 +23,7 @@ from .github import (already_merged, BEHIND, CHECKS_NEVER, CHECKS_RUNNING, check
                      expected_checks, finish, github, main_red_hold, merged_here, needs_approval, NO_CI_RUN, note_checks, pr_merged, pr_pending, pr_problem, pr_repo, pr_view,
                      pr_wait, CI_STOPPED, queue_entry, queue_merge, task_problem, task_github, tidy_done, tidy_due, update_main, watch_main,
                      UNKNOWN_CHECKS_MS)
-from .launch import default_space, parent_for, sweep_sandboxes
+from .launch import parent_for, sweep_sandboxes
 from .store import locate, read_list, Store, store_files
 from .queues import cap_for, machine_hold, refresh_ext, running_count, set_hold, urgent, waiting_ext, waiting_for
 from .archive import archive_pass
@@ -402,7 +402,7 @@ def tick_store(s, report):
             continue
         q = t.get("queue") or {}
         try:
-            sp = q.get("space") or t.get("space") or default_space()
+            sp = q.get("space") or t.get("space") or s.loc["folder"]
             a = begin(s, t, q.get("argv") or worker_argv(s, t, sp), sp, q.get("parent"))
         except Fail as e:
             t["attention"] = f"Couldn't start: {e}"
@@ -469,7 +469,7 @@ def rescue_question(s, t, k, q, report):
     parent = k.get("parent") or next((a.get("parent") for a in reversed(t.get("agents") or []) if a.get("parent")), None)
     space = t.get("space")
     try:
-        to = parent_for(parent, space) or parent
+        to = parent_for(parent, space or s.loc["folder"]) or parent
     except Fail:
         to = parent
     question = q["question"] if ref in q["question"] else fit(f"{ref}: {q['question']}", ask_mod.MSG_MAX)

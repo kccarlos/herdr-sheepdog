@@ -287,14 +287,15 @@ def main_check(s, base, w, report):
                      "Add one small fix-forward task only if they asked you to handle such things and none is at work already: "
                      "its brief says what broke and where, to stay inside it, and never to force-push.")
         w["notice"] = {"text": f'<herdr-news event="main-red" branch="{attr(base)}">' + esc("\n".join(lines)) + "</herdr-news>",
-                       "at": now(), "space": w.get("space")}
+                       "at": now(), "folder": w.get("folder") or (getattr(s, "loc", None) or {}).get("folder"),
+                       **({"space": w["space"]} if w.get("space") else {})}
         report.setdefault("main_red", []).append({"folder": s.loc["folder"], "branch": base, "commit": sha})
         return
 
 
 def main_pass(s, report):
     """Every watched base branch of this folder: checked every MAIN_EVERY while its watch lasts (or
-    while it is red), and its news delivered to the space's Assistant."""
+    while it is red), and its news delivered to the project's Assistant."""
     watch = s.data.get("main_watch") or {}
     for base, w in list(watch.items()):
         if now() > (w.get("until") or 0) and not w.get("red"):
@@ -307,7 +308,7 @@ def main_pass(s, report):
             main_check(s, base, w, report)
         n = w.get("notice")
         if n and not n.get("sent") and not n.get("dropped"):
-            to = coordinator_in(n.get("space"))
+            to = coordinator_in(n.get("folder") or n.get("space") or (getattr(s, "loc", None) or {}).get("folder"))
             if to and news_send(to, n["text"]):
                 n["sent"] = now()
                 s.dirty = True

@@ -803,9 +803,6 @@ def project_base(s, space=None):
     return str(settings_for(s)["tasks"].get("base") or "").strip()
 
 
-space_base = project_base  # compatibility shim for commands.py until SDF-7
-
-
 def simulator_pool(s, space=None):
     """This folder's fixed iOS simulator pool (Settings' tasks.simulators: names or UDIDs); [] means off."""
     raw = settings_for(s)["tasks"].get("simulators")

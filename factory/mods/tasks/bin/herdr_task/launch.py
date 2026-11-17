@@ -1,4 +1,4 @@
-"""Starting agents: their argv, labels, brief, tab and coordinator.
+"""Starting agents: their argv, labels, brief and coordinator.
 
 The launch allow-list ("an agent's own herdr-task commands never ask": OWN, own_rules, own_argv,
 cmd_allow) is the one place an agent's launch is given commands it may run without asking; allow
@@ -15,23 +15,21 @@ import subprocess
 import sys
 import time
 
-from .base import ENTRY, Fail, HOME, git, hc_json, kill_agent, now, run, WHERE, WORKTREES
-from .settings import agent_key, ASSISTANT_TEMPLATES, by_layer, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, gate_min, keep_review, notes, notes_part, review_limits, settings_block, settings_for
+from .base import ENTRY, Fail, HOME, git, hc_json, kill_agent, label_of, now, PROJECT_LABEL, ROLE_LABEL, run, STORE, TASK_LABEL, WHERE, WORKTREES
+from .settings import agent_key, ASSISTANT_TEMPLATES, by_layer, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, gate_min, keep_review, notes, notes_part, read_settings, review_limits, settings_block, settings_for
 from .templates import instructions
-from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
-from .github import finish, remote_of
+from .agents import LINE_MAX, SUMMARY_MAX
+from .github import remote_of
 
 
 # ---- an agent's own herdr-task commands never ask -------------------------------------------
-# As Shepherdr: at each launch the agent is allowed exactly this herdr-task's path, verb by verb,
-# without touching the person's CLI settings: Claude Code in the --settings it gets at launch,
-# Codex through a PermissionRequest hook given with -c (`herdr-task _allow` answers it, and hands
-# anything else to the chat's card: ask_card).
+# At each launch the agent is allowed exactly this herdr-task's path, verb by verb, without
+# touching the owner's CLI settings: Claude Code in --settings, Codex through a PermissionRequest
+# hook (`herdr-task _allow`), and agy in --settings.
 
-# How long Codex waits on the permission hook: as the chat's card waits (ask-hook.sh).
-ASK_TIMEOUT = 1800
+HOOK_TIMEOUT = 30
 OWN = ["ready", "reviewed", "status", "alert", "simulator", "device-wait", "show", "list", "where"]
-# herdr-secret's agent commands (~/.config/herdr-app/bin/herdr-secret): asking for a secret and
+# herdr-secret's agent commands (~/.local/bin/herdr-secret): asking for a secret and
 # using one by name never ask either, as Shepherdr's secret commands. Written by its full path or
 # its bare name. Reviewers get none (launch() skips own_argv for them; herdr-secret refuses them).
 SECRET = ["ask", "run", "env", "list"]
@@ -83,9 +81,8 @@ def own_rules(path, verbs=OWN):
 
 
 def ask_command(path, sandboxed=False):
-    """The PermissionRequest hook every task worker gets at launch (`herdr-task _allow`): its own
-    commands allowed, anything else (a permission, its question tool, a plan) on the chat's card.
-    sandboxed (Codex's): its proof and commits also run escalated, so they're its own too (#866)."""
+    """The PermissionRequest hook a sandboxed Codex worker gets at launch (`herdr-task _allow`):
+    its own commands, proof and commits allowed without asking (#866)."""
     return f"{shlex.quote(sys.executable)} {shlex.quote(ENTRY)} _allow --command {shlex.quote(path)}" + (" --sandboxed" if sandboxed else "")
 
 
@@ -95,19 +92,15 @@ def artifact_path():
 
 
 def own_argv(argv, folder=None, verbs=OWN, cwd=None, reads=None):
-    """An agent's argv with its own herdr-task commands allowed and its asks on the chat's card
-    (Claude Code, Codex, and agy, which also trusts `folder`). SHEP-139: a Claude worker gets the
-    card's hook in its --settings too, so a machine whose ~/.claude/settings.json lacks Shepherdr's
-    hook (one that only runs tasks) still asks on the card; ask-hook.sh's own copy steps aside for it.
-    verbs: the herdr-task verbs allowed; cwd: the folder agy runs in, which a relative --settings
-    file is read from; reads: a reviewer's commands (review_reads)."""
+    """An agent's argv with its own herdr-task commands allowed (Claude Code, Codex, and agy,
+    which also trusts `folder`). verbs: the herdr-task verbs allowed; cwd: the folder agy runs in,
+    which a relative --settings file is read from; reads: a reviewer's commands (review_reads)."""
     path, out = own_path(), list(argv)
     k = agent_key(out)
     if k == "claude":
         rules = own_rules(path, verbs) + [f"Bash({r}:*)" for r in reads or []]
         if not rules and verbs is not OWN:
             return out
-        hook = {"hooks": [{"type": "command", "command": ask_command(path), "timeout": ASK_TIMEOUT}]}
         cur, i = {}, None
         if "--settings" in out[:-1]:
             i = out.index("--settings")
@@ -120,7 +113,6 @@ def own_argv(argv, folder=None, verbs=OWN, cwd=None, reads=None):
                 except (OSError, ValueError):
                     cur = None
             if not isinstance(cur, dict):
-                # a settings file it can't read: left as it is, and these go in a --settings of their own
                 cur, i = {}, None
         merged = dict(cur)
         if rules:
@@ -130,33 +122,17 @@ def own_argv(argv, folder=None, verbs=OWN, cwd=None, reads=None):
         if verbs is OWN:
             # FAC-107: no idle compaction (it wakes a Ready task's worker); a value the argv sets wins
             merged.setdefault("idleCompaction", False)
-            hooks = dict(cur.get("hooks") or {}) if isinstance(cur.get("hooks"), dict) else {}
-            asks = list(hooks.get("PermissionRequest") or [])
-            if not any(" _allow --command " in str(h.get("command", "")) for e in asks if isinstance(e, dict)
-                       for h in e.get("hooks") or [] if isinstance(h, dict)):
-                asks.append(hook)
-            hooks["PermissionRequest"] = asks
-            merged["hooks"] = hooks
         if i is not None:
             out[i + 1] = json.dumps(merged)
             return out
         return out[:1] + ["--settings", json.dumps(merged)] + out[1:]
     if k == "codex":
         hook = ask_command(path, sandboxed=True)
-        # Codex runs a new hook only once trusted. This one hook's trust comes with it, for this
-        # launch only: Codex's own key and hash for a -c hook (codex-rs/hooks discovery.rs
-        # hook_hash, config fingerprint.rs version_for_toml), so no other hook is trusted by it.
-        ident = {"event_name": "permission_request", "hooks": [{"async": False, "command": hook, "timeout": ASK_TIMEOUT, "type": "command"}]}
+        ident = {"event_name": "permission_request", "hooks": [{"async": False, "command": hook, "timeout": HOOK_TIMEOUT, "type": "command"}]}
         state = {"/<session-flags>/config.toml:permission_request:0:0": codex_hook_hash(ident)}
-        # #977: Shepherdr's own hooks in ~/.codex/hooks.json (the chat's question card) trusted for
-        # this launch too, else a new or updated one stops the worker at "Hooks need review" with
-        # nobody at its keys. Only ours, exactly as written there: the person's own stay theirs.
-        state.update(own_codex_hooks())
-        # Its folder trusted for this run (#866: "Trust this folder?" would stop it before the brief, nobody at the
-        # keys), its repository's root too: Codex asks for that one in a worktree. Skipped when argv says already.
         roots = [] if any(str(a).startswith("projects") for a in out) else trust_roots(folder)
         trust = ["-c", "projects={" + ",".join(f'{json.dumps(r)}={{trust_level="trusted"}}' for r in roots) + "}"] if roots else []
-        return out[:1] + ["-c", f"hooks.PermissionRequest=[{{hooks=[{{type=\"command\",command={json.dumps(hook)},timeout={ASK_TIMEOUT}}}]}}]",
+        return out[:1] + ["-c", f"hooks.PermissionRequest=[{{hooks=[{{type=\"command\",command={json.dumps(hook)},timeout={HOOK_TIMEOUT}}}]}}]",
                           "-c", "hooks.state={" + ",".join(f'{json.dumps(k)}={{trusted_hash="sha256:{v}"}}' for k, v in state.items()) + "}",
                           *trust] + out[1:]
     if k == "agy":
@@ -214,40 +190,6 @@ def codex_hook_hash(ident):
     return hashlib.sha256(json.dumps(ident, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
 
-# Codex's event names in hooks.state keys, from hooks.json's.
-CODEX_EVENTS = {"SessionStart": "session_start", "PermissionRequest": "permission_request"}
-
-
-def own_codex_hooks():
-    """{hooks.state key: hash} for Shepherdr's own hooks in Codex's hooks.json (the installer's
-    session-note.sh and ask-hook.sh), as Codex keys and hashes them; {} when there are none or
-    one has a shape whose hash we can't be sure of (it then asks, as before)."""
-    path = os.path.join(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), "hooks.json")
-    try:
-        with open(path) as f:
-            hooks = json.load(f).get("hooks") or {}
-    except (OSError, ValueError, AttributeError):
-        return {}
-    out = {}
-    for event, name in CODEX_EVENTS.items():
-        groups = hooks.get(event) if isinstance(hooks, dict) else None
-        for g, group in enumerate(groups if isinstance(groups, list) else []):
-            entries = group.get("hooks") if isinstance(group, dict) else None
-            if not isinstance(entries, list) or len(entries) != 1 or set(group) - {"hooks", "matcher"}:
-                continue
-            h = entries[0]
-            cmd = h.get("command") if isinstance(h, dict) else None
-            if (not isinstance(cmd, str) or not re.search(r"/mods/chat/(session-note|ask-hook)\.sh'?$", cmd)
-                    or set(h) - {"type", "command", "timeout", "async"} or not isinstance(h.get("timeout"), int)):
-                continue
-            ident = {"event_name": name, "hooks": [{"async": bool(h.get("async", False)), "command": cmd,
-                                                    "timeout": h["timeout"], "type": h.get("type", "command")}]}
-            if group.get("matcher") is not None:
-                ident["matcher"] = group["matcher"]
-            out[f"{path}:{name}:{g}:0"] = codex_hook_hash(ident)
-    return out
-
-
 # One plain word: no expansion, redirect, separator or line break outside quotes, nor $ or ` inside.
 WORD = re.compile(r"""(?:[\w@%+=:,./-]+|'[^']*'|"(?:[^"\\$`]|\\["\\])*")+""")
 UNQUOTE = re.compile(r"""'([^']*)'|"((?:[^"\\]|\\.)*)\"""")
@@ -255,14 +197,14 @@ UNQUOTE = re.compile(r"""'([^']*)'|"((?:[^"\\]|\\.)*)\"""")
 
 def own_command(path, text, sandboxed=False):
     """Whether a shell command is exactly one of this herdr-task's own verbs: one simple command,
-    nothing that expands, redirects or chains (as Shepherdr's ownCommand). sandboxed (a Codex
-    worker's): herdr-artifact's proof verbs and git add/commit too."""
+    nothing that expands, redirects or chains. sandboxed (a Codex worker's): herdr-artifact's proof
+    verbs and git add/commit too."""
     if not isinstance(text, str):
         return False
-    task = os.environ.get("HERDR_BROWSER_TASK") or ""
+    task = os.environ.get("SHEEPDOG_TASK") or os.environ.get("HERDR_BROWSER_TASK") or ""
     if sandboxed and re.fullmatch(r"[\w#.@-]+", task):
-        # the reviewer's label as the brief writes it, its one variable: this worker's own task
-        text = text.replace('"herdr.task=$HERDR_BROWSER_TASK"', f'"herdr.task={task}"')
+        for var in ("$SHEEPDOG_TASK", "$HERDR_BROWSER_TASK"):
+            text = text.replace(f'"sheepdog.task={var}"', f'"sheepdog.task={task}"').replace(f'"herdr.task={var}"', f'"herdr.task={task}"')
     words, at, text = [], 0, text.strip()
     while at < len(text):
         if text[at] in " \t":
@@ -310,7 +252,7 @@ def helper_hc(words):
             j += 1
         elif opts[j] == "--name" and j + 1 < len(opts) and HELPER.fullmatch(opts[j + 1]):
             j += 2
-        elif opts[j] == "--label" and j + 1 < len(opts) and re.fullmatch(r"herdr\.(?:task=[\w#.@-]+|role=(?:reviewer|helper)|agent=(?:codex|claude))", opts[j + 1]):
+        elif opts[j] == "--label" and j + 1 < len(opts) and re.fullmatch(r"(?:sheepdog|herdr)\.(?:task=[\w#.@-]+|role=(?:reviewer|helper)|agent=(?:codex|claude))", opts[j + 1]):
             j += 2
         else:
             return False
@@ -327,41 +269,9 @@ def helper_hc(words):
     return False
 
 
-def ask_hook():
-    """The chat's question-card hook (mods/chat/ask-hook.sh): Herdr's app home's, else the copy a
-    sync left on a machine that only runs tasks (ASK_HOME); None when there's neither."""
-    app = os.environ.get("HERDR_APP_HOME") or os.path.join(os.path.expanduser("~"), ".config", "herdr-app")
-    for p in (os.path.join(app, "mods", "chat", "ask-hook.sh"), os.path.join(os.path.expanduser("~"), ".local", "share", "herdr", "ask", "ask-hook.sh")):
-        if os.path.isfile(p):
-            return p
-    return None
-
-
-def ask_card(raw):
-    """What the chat's card answers for a request (SHEP-91: a Codex worker's permission is answerable
-    in its chat, on the web too), or "" (no decision: Codex asks in its terminal). Codex runs every
-    hook it has and waits for all, so ask-hook.sh's own copy (~/.codex/hooks.json) steps aside for
-    an agent with this hook, and this one runs it, marked HERDR_ASK_CHAINED."""
-    hook = ask_hook()
-    if not hook:
-        return ""
-    try:
-        r = subprocess.run(["sh", hook], input=raw, capture_output=True, timeout=ASK_TIMEOUT - 10,
-                           env={**os.environ, "HERDR_ASK_CHAINED": "1"})
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    out = r.stdout.decode("utf-8", "replace").strip()
-    try:
-        json.loads(out)
-    except ValueError:
-        return ""
-    return out
-
-
 def cmd_allow(args):
-    """The PermissionRequest hook of a task worker (Claude Code and Codex, own_argv): allows this
-    launch's own herdr-task commands; anything else goes to the chat's card (ask_card), and without
-    one's answer the agent asks the person in its terminal as usual."""
+    """The PermissionRequest hook of a sandboxed Codex worker (own_argv): allows this launch's own
+    herdr-task commands, commits and helper reviewer without prompting."""
     raw = sys.stdin.buffer.read(1 << 20)
     try:
         data = json.loads(raw or b"{}")
@@ -372,14 +282,9 @@ def cmd_allow(args):
             f.write(json.dumps(data) + "\n")
     cmd = (data.get("tool_input") or {}).get("command") if isinstance(data.get("tool_input"), dict) else None
     if isinstance(cmd, list):
-        # ["bash", "-lc", "<command>"] as some tools pass it.
         cmd = cmd[2] if len(cmd) == 3 and cmd[1] in ("-c", "-lc") else shlex.join(cmd)
     if own_command(args.command, cmd, getattr(args, "sandboxed", False)):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}))
-        return
-    out = ask_card(raw)
-    if out:
-        print(out)
 
 
 # ---- starting agents ------------------------------------------------------------------------
@@ -421,8 +326,8 @@ def reviewer_sandbox(s, space=None):
     unless set off, per folder, machine or everywhere; by says which), and UNSANDBOXED_FLAG still counts as off (by "flag")."""
     if os.path.exists(UNSANDBOXED_FLAG):
         return False, "flag"
-    on = settings_for(s, space)["tasks"].get("reviewer_sandbox") is not False
-    return on, by_layer(s, space, "tasks", "reviewer_sandbox", on, True)
+    on = settings_for(s)["tasks"].get("reviewer_sandbox") is not False
+    return on, by_layer(s, None, "tasks", "reviewer_sandbox", on, True)
 
 
 def sandboxed(argv, worktree, setting=True):
@@ -611,80 +516,7 @@ def caller_labels():
     return (k or {}).get("labels") or {}
 
 
-def caller_space():
-    """The caller's own space from its labels (a pane's, a coordinator's behind a chat, a task
-    agent's), or None."""
-    labels = caller_labels()
-    return labels.get("herdr.space") or labels.get("herdr.coordinator.space") or labels.get("herdr.task.space") or None
-
-
-def default_space():
-    """The caller's space: its pane's, a coordinator's behind a chat, or a pane-less task agent's."""
-    labels = caller_labels()
-    sp = labels.get("herdr.space") or labels.get("herdr.coordinator.space") or labels.get("herdr.task.space")
-    if sp:
-        return sp
-    if shutil.which("herdr-app"):
-        r = run(["herdr-app", "status"])
-        try:
-            sp = json.loads(r.stdout).get("space")
-        except ValueError:
-            sp = None
-        if sp and "/" not in sp:
-            return sp
-    raise Fail("Which space? Pass --space <space id>.")
-
-
-def tab_title(s, task):
-    return f"{s.ref(task)} {task['title']}"
-
-
-def name_tab(tab, title):
-    """Names a tab once Herdr has seen it (it appears when the agent's labels are read)."""
-    if not shutil.which("herdr-app"):
-        return False
-    for _ in range(60):
-        if run(["herdr-app", "do", "tab.rename", "--id", tab, "--name", title]).returncode == 0:
-            return True
-        time.sleep(0.1)
-    return False
-
-
-def name_tabs(pairs):
-    """Names tabs [(tab, name)]; returns the ones left for the machine with the window (a call
-    through --on names them from there)."""
-    return [{"tab": tab, "name": name} for tab, name in pairs if tab and not name_tab(tab, name)]
-
-
-def task_tabs(s, task):
-    """The tabs its live agents are in (hc ls leaves labels out: hc get has them)."""
-    return sorted({(detail(k).get("labels") or {}).get("herdr.tab") for k in live_agents(s.key(task))} - {None})
-
-
-def retag_tabs(s):
-    """After the prefix changes: each running task's tab starts with its new id. A name someone
-    gave the tab is kept, only its old id ("#4", "HAT-4") swapped; elsewhere the id goes in front."""
-    names = {}
-    if shutil.which("herdr-app"):
-        try:
-            for sp in json.loads(run(["herdr-app", "ls"]).stdout).get("spaces", []):
-                for tb in sp.get("tabs", []):
-                    names[bare(tb["id"])] = tb.get("name") or ""
-        except ValueError:
-            pass
-    pairs = []
-    for t in s.data["tasks"]:
-        for tab in task_tabs(s, t):
-            old = names.get(tab)
-            if old is None or re.fullmatch(r"\d+", old):
-                pairs.append((tab, tab_title(s, t)))
-                continue
-            rest = re.sub(r"^(#\d+|[A-Z]+\d*-\d+)\s*", "", old)
-            pairs.append((tab, f"{s.ref(t)} {rest}".strip()))
-    return name_tabs(pairs)
-
-
-def closing_line(s, task, parent=None, argv=None, space=None):
+def closing_line(s, task, parent=None, argv=None):
     """How the worker finishes: every task, worktree or in the folder, says ready with a summary.
     It names this herdr-task by its full path: only that form runs without asking (own_argv)."""
     done = "finished and committed" if task.get("mode") == "worktree" else "finished"
@@ -705,12 +537,12 @@ def closing_line(s, task, parent=None, argv=None, space=None):
              f"\"<what you're doing now, at most {LINE_MAX} characters>\" --done <% of the whole task> --left <your best guess of how long is left, like 20m>`: "
              f"always give `--left`, from your very first status on, and revise it honestly each time from how the work is really going; "
              f"a rough guess beats none.")
-    text += (f" Only for what truly can't wait, `{ht} alert \"<what, a few words>\" --body \"<why>\"` reaches the person at once "
-             f"(a toast and a sound); a question waits in your chat instead.")
+    text += (f" Only for what truly can't wait, `{ht} alert \"<what, a few words>\" --body \"<why>\"` reaches the person at once; "
+             f"a question goes through `{ht} ask` instead.")
     text += (f" Your herdr-task command is {ht}: write that full path each time (never the bare name), as one plain command; "
              f"then its {', '.join(OWN)} commands run without asking.")
     from .simulators import simulator_line
-    text += simulator_line(s, task, space)
+    text += simulator_line(s, task)
     if secret_path():
         text += (" Secrets (keys, tokens, passwords) are used by name, never seen: `herdr-secret ask NAME --why \"…\"` "
                  "(then end your turn), `herdr-secret run NAME -- <command>`, `herdr-secret list`; these run without asking too.")
@@ -744,19 +576,19 @@ def task_text(task):
     return "\n\n".join([text, CHANGES_HEAD + "\n" + "\n".join(changes)]) if changes else text
 
 
-def brief(s, task, parent=None, space=None, argv=None):
+def brief(s, task, parent=None, argv=None):
     instructions("reviewer")  # the file its review's reviewer gets (WORKER_MD)
-    keep_review(s, task, space)
-    start = notes_part("Before you start", notes(s, task, "start", space))
+    keep_review(s, task)
+    start = notes_part("Before you start", notes(s, task, "start"))
     if start and task.get("worktree"):
         start += f"\n(The main folder is {s.loc['folder']}.)"
     body = "Your task, " + s.ref(task) + ":\n" + task_text(task)
-    finish = notes_part("Before you say ready", notes(s, task, "finish", space))
-    return "\n\n".join(x for x in [instructions("worker"), start, body, where_line(task), finish, closing_line(s, task, parent, argv, space),
-                                    settings_block(s, task, space, argv, live=True)] if x)
+    finish = notes_part("Before you say ready", notes(s, task, "finish"))
+    return "\n\n".join(x for x in [instructions("worker"), start, body, where_line(task), finish, closing_line(s, task, parent, argv),
+                                    settings_block(s, task, argv=argv, live=True)] if x)
 
 
-def handoff(s, task, prev, parent=None, argv=None, space=None):
+def handoff(s, task, prev, parent=None, argv=None):
     lines = [f"You are taking over task {s.ref(task)} \"{task['title']}\" from another agent.", instructions("worker")]
     lines.append(where_line(task))
     lines.append("The task:\n" + task_text(task))
@@ -766,10 +598,10 @@ def handoff(s, task, prev, parent=None, argv=None, space=None):
         lines.append(f"The previous agent ({prev.get('agent') or 'agent'}) kept its session log at {prev['log']}: read the recent part to pick up where it left off.")
     elif prev:
         lines.append(f"The previous agent ({prev.get('agent') or 'agent'}) left no session log; check the folder's state (git status, git log) before you continue.")
-    lines.append(notes_part("Before you continue, if it isn't done yet", notes(s, task, "start", space)))
-    lines.append(notes_part("Before you say ready", notes(s, task, "finish", space)))
-    lines.append(closing_line(s, task, parent, argv, space))
-    lines.append(settings_block(s, task, space, argv, live=True))
+    lines.append(notes_part("Before you continue, if it isn't done yet", notes(s, task, "start")))
+    lines.append(notes_part("Before you say ready", notes(s, task, "finish")))
+    lines.append(closing_line(s, task, parent, argv))
+    lines.append(settings_block(s, task, argv=argv, live=True))
     return "\n\n".join(x for x in lines if x)
 
 
@@ -879,12 +711,12 @@ def set_branch(s, t, name):
 
 
 def branch_for(s, task):
-    """A task's branch: its own (--branch), else its folder's pattern (Shepherdr settings > Tasks >
-    Branch names: {n} its number, {key} its id, {slug} its title's words), else task/{n}-{slug}."""
+    """A task's branch: its own (--branch), else its folder's pattern (settings > tasks.branch:
+    {n} its number, {key} its id, {slug} its title's words), else task/{n}-{slug}."""
     if task.get("branch"):
         return task["branch"]
     words = re.sub(r"[^a-z0-9]+", "-", task["title"].lower()).strip("-")[:40].strip("-") or "task"
-    pattern = str(settings_for(s, task.get("space"))["tasks"].get("branch") or "").strip()
+    pattern = str(settings_for(s)["tasks"].get("branch") or "").strip()
     if not pattern or branch_pattern_problem(pattern):
         pattern = BRANCH_PATTERN
     name = pattern.replace("{n}", str(task["id"])).replace("{key}", s.ref(task)).replace("{slug}", words)
@@ -902,9 +734,9 @@ def folder_for(s, task):
         raise Fail("Worktrees need a git repo. Use --here.")
     main = s.loc["folder"]
     branch = branch_for(s, task)
-    # New worktrees under Shepherdr's data (Settings > Tasks > Worktree folder: another root, a bigger disk);
+    # New worktrees under WORKTREES (or tasks.worktree_root);
     # a task that has one keeps it wherever it is (git keeps its absolute path).
-    root = os.path.expanduser(str(settings_for(s, task.get("space"))["tasks"].get("worktree_root") or "").strip()) or WORKTREES
+    root = os.path.expanduser(str(settings_for(s)["tasks"].get("worktree_root") or "").strip()) or WORKTREES
     path = os.path.join(root, os.path.basename(main), re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip("-"))
     # Its own base (--base) branches from that branch; else from what the folder has checked out.
     own = task.get("base") if task.get("base_set") else None
@@ -976,14 +808,12 @@ def registered_worktree(main, path):
     return None
 
 
-def launch(s, task, argv, space, message=None, parent=None, resume=None, role=None, reads=None):
-    """Starts one agent for the task with no tab or pane of its own (a space can hold thousands
-    of tasks): an hc child of `parent`, which parent_for() makes the space's coordinator, reached
-    through the Tasks panel. Labels: herdr.task (its task), herdr.task.space (its space; never
-    herdr.space, which Herdr gives a pane), herdr.agent, herdr.coordinator (its coordinator's tab,
-    which keeps it under a restarted coordinator) and herdr.role=reviewer for a reviewer, kept
-    apart from the task's agents; reads: a reviewer's read-only commands (review_reads). Returns its record."""
+def launch(s, task, argv, message=None, parent=None, resume=None, role=None, reads=None):
+    """Starts one agent for the task as an hc child of `parent` (the project's coordinator).
+    Stamps sheepdog.project, sheepdog.task, sheepdog.role and sheepdog.agent (plus herdr.*
+    compatibility labels); reads: a reviewer's read-only commands (review_reads). Returns its record."""
     key = s.key(task)
+    slug = getattr(s, "slug", None) or key.partition("#")[0]
     cmd, folder = list(resume or argv), folder_for(s, task)
     sand = role == "reviewer" and sandboxes(cmd)
     trust = folder if task.get("mode") == "worktree" or agent_key(cmd) != "agy" else None
@@ -998,23 +828,21 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     if message and not held:
         cmd = cmd + (["-i", message] if agent_key(cmd) == "agy" else [message])  # agy reads prompts only from -i
     if sand:
-        cmd = sandboxed(cmd, folder, reviewer_sandbox(s, space)[0])
-    labels = ["--label", f"herdr.task={key}", "--label", f"herdr.task.space={bare(space)}",
-              "--label", f"herdr.agent={agent_key(argv)}"]
-    ctab = coordinator_tab(parent)
-    if ctab:
-        labels += ["--label", f"herdr.coordinator={ctab}"]
+        cmd = sandboxed(cmd, folder, reviewer_sandbox(s)[0])
+    labels = ["--label", f"{PROJECT_LABEL}={slug}", "--label", f"{TASK_LABEL}={key}",
+              "--label", f"{ROLE_LABEL}={role or 'worker'}", "--label", f"sheepdog.agent={agent_key(argv)}",
+              "--label", f"herdr.task={key}", "--label", f"herdr.agent={agent_key(argv)}"]
     if role:
         labels += ["--label", f"herdr.role={role}"]
     if sand:  # never revived (revive.watched): it would come back unsandboxed
-        labels += ["--label", "herdr.sandbox=1"]
+        labels += ["--label", "sheepdog.sandbox=1", "--label", "herdr.sandbox=1"]
     rel = ["--parent", parent, "--outlive-parent", *(["--no-notify"] if role == "reviewer" else [])] if parent else ["--no-parent"]
     keep = [] if role == "reviewer" else ["--keep"]
     sh = reviewer_shell(cmd) if role == "reviewer" else in_shell(cmd)
     name = agent_name(s, task, "review" if role else None)
-    # HERDR_BROWSER_TASK: which task's browser herdr-browser drives (HERD-57), for it and its children.
+    # HERDR_BROWSER_TASK stays beside SHEEPDOG_TASK until SDF-8/SDF-11 convert revive.py and worker.md.
     r = run(["hc", "run", "--bg", "--json", *keep, "--cwd", folder, "--name", name,
-             *labels, *rel, "--", *low_priority(clean_env(["env", f"HERDR_BROWSER_TASK={key}", *no_update_env(cmd), *sh]), name)])
+             *labels, *rel, "--", *low_priority(clean_env(["env", f"SHEEPDOG_TASK={key}", f"HERDR_BROWSER_TASK={key}", *no_update_env(cmd), *sh]), name)])
     try:
         out = json.loads(r.stdout)
     except ValueError:
@@ -1031,50 +859,73 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
         task.setdefault("reviewers", []).append(a)
         return a
     task["agents"].append(a)
-    # A tab from before tasks had none stays with its old agent, not the task.
-    task["space"] = bare(space)
-    task.pop("tab", None)
     track(s, task, out["address"])
     return a
 
 
 def is_coordinator(k):
-    return (k.get("labels") or {}).get("herdr.role") == "coordinator" or k.get("template") in ASSISTANT_TEMPLATES
-
-
-def coordinator_tab(addr):
-    """The tab a coordinator lives in (a pane's herdr.tab, or behind a chat herdr.coordinator.tab),
-    or None when addr isn't a coordinator."""
-    k = hc_json("get", addr) if addr else None
-    if not k or not is_coordinator(k):
-        return None
-    labels = k.get("labels") or {}
-    return labels.get("herdr.tab") or labels.get("herdr.coordinator.tab")
+    return bool(k) and (label_of(k.get("labels"), "role") == "coordinator" or k.get("template") in ASSISTANT_TEMPLATES)
 
 
 def coordinators():
     """The live coordinators' addresses on this machine (without labels: hc get each)."""
     # Only coordinators get an hc get (labels): there can be thousands of terminals.
     found = [k for k in (hc_json("ls") or {}).get("terminals", []) if k.get("template") in ASSISTANT_TEMPLATES]
+    found += (hc_json("ls", "--label", f"{ROLE_LABEL}=coordinator") or {}).get("terminals", [])
     found += (hc_json("ls", "--label", "herdr.role=coordinator") or {}).get("terminals", [])
     return list(dict.fromkeys(k["address"] for k in found if k.get("state") == "live" and "/" not in k["address"]))
 
 
-def coordinator_in(space):
-    """The space's live coordinator on this machine, or None."""
-    if not space:
+def _canon(p):
+    if not p:
         return None
+    exp = os.path.expanduser(str(p))
+    return os.path.realpath(exp) if os.path.isdir(exp) else os.path.normpath(exp)
+
+
+def coordinator_in(project):
+    """The project folder's live coordinator on this machine, or None."""
+    if not project:
+        return None
+    raw = getattr(project, "loc", {}).get("folder") if hasattr(project, "loc") else str(project)
+    real = _canon(raw) if os.path.isabs(raw) else None
+    from .store import is_task_list, read_list, slug_of, store_path
+    slugs = {x for x in (getattr(project, "slug", None), slug_of(real) if real else None,
+                         store_path(real)[0] if real else None) if x}
+    want_sp = bare(raw) if not real else None
+    spaces = read_settings().get("spaces")
+    spaces = spaces if isinstance(spaces, dict) else {}
     for addr in coordinators():
         k = hc_json("get", addr) or {}
         labels = k.get("labels") or {}
-        if k.get("state") == "live" and bare(space) in (labels.get("herdr.space"), labels.get("herdr.coordinator.space")):
+        if k.get("state") != "live" or label_of(labels, "role") == "ask":
+            continue
+        proj = labels.get(PROJECT_LABEL)
+        sp = bare(labels.get("herdr.space") or labels.get("herdr.coordinator.space") or "")
+        if want_sp:
+            if proj == want_sp or sp == want_sp:
+                return addr
+            continue
+        if proj:
+            if proj in (raw, real, *slugs) or (os.path.isabs(proj) and _canon(proj) == real):
+                return addr
+            lst = read_list(os.path.join(STORE, proj + ".json")) if "/" not in proj else None
+            if is_task_list(lst) and _canon(lst.get("folder")) == real:
+                return addr
+            continue
+        sp_folder = (spaces.get(sp) or {}).get("folder") if sp and isinstance(spaces.get(sp), dict) else None
+        if sp_folder:
+            if _canon(sp_folder) == real:
+                return addr
+            continue
+        if _canon(k.get("cwd")) == real:
             return addr
     return None
 
 
-def parent_for(parent, space):
-    """A task agent's parent: `parent` while it's live, else the space's coordinator."""
-    return live_parent(parent) or coordinator_in(space)
+def parent_for(parent, project=None):
+    """A task agent's parent: `parent` while it's live, else the project's coordinator."""
+    return live_parent(parent) or coordinator_in(project)
 
 
 def agent_name(s, task, suffix=None):

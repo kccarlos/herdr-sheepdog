@@ -185,7 +185,7 @@ def news_pass(report, folder=None):
                 if backup:
                     b["told"] = True
                     s.dirty = True
-                if first or t.get("archived") or not t.get("space"):
+                if first or t.get("archived"):
                     continue
                 lines = [("backup", news_line(s, t, v, "backup", backup_news(t)))] if backup else []
                 fb = t.get("sync_fallback") or {}
@@ -211,7 +211,7 @@ def news_pass(report, folder=None):
                     outbox[:] = [x for x in outbox if not (x["key"] == key and ev not in ("backup", "sync-fallback")
                                                            and x["event"] not in ("backup", "sync-fallback")
                                                            and (x["event"] == ev or ev != "stalled"))]
-                    outbox.append({"key": key, "space": bare(t["space"]), "folder": os.path.basename(s.loc["folder"]), "event": ev, "status": v["status"],
+                    outbox.append({"key": key, "space": bare(t["space"]) if t.get("space") else None, "project": s.loc["folder"], "folder": os.path.basename(s.loc["folder"]), "event": ev, "status": v["status"],
                                    "stall": stall[0] if ev == "stalled" else None, "text": text, "at": now()})
             ids = {str(t["id"]) for t in s.data["tasks"]}
             for k in [k for k in mine if k not in ids and k != "_init"]:
@@ -226,11 +226,12 @@ def news_pass(report, folder=None):
     outbox[:] = [x for x in outbox if holds(x) and now() - x["at"] < NEWS_KEEP_MS]
     for k in [k for k, v in delivered.items() if not isinstance(v, dict) or not holds({**v, "key": k})]:
         delivered.pop(k)
-    for space in dict.fromkeys(x["space"] for x in outbox):
-        batch = [x for x in outbox if x["space"] == space]
+    route_of = lambda x: x.get("space") or x.get("project")
+    for target in dict.fromkeys(route_of(x) for x in outbox if route_of(x)):
+        batch = [x for x in outbox if route_of(x) == target]
         if now() - min(x["at"] for x in batch) < NEWS_SETTLE_MS:
             continue
-        to = coordinator_in(space)
+        to = coordinator_in(target)
         k = hc_json("get", to) if to else None
         got = news_send(to, "\n".join(x["text"] for x in batch)) if to else False
         if got:
