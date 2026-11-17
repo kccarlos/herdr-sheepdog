@@ -544,20 +544,30 @@ func (s *Supervisor) Run(ctx context.Context) {
 	defer expiry.Stop()
 	reconcile := time.NewTicker(s.cfg.SnapshotInterval)
 	defer reconcile.Stop()
-	var factoryCh <-chan time.Time
-	if s.cfg.Factory != nil {
-		ft := time.NewTicker(s.cfg.FactoryPoll)
-		defer ft.Stop()
-		factoryCh = ft.C
-	}
 	defer s.shutdown()
+	var factoryWG sync.WaitGroup
+	if s.cfg.Factory != nil {
+		factoryWG.Add(1)
+		go func() {
+			defer factoryWG.Done()
+			ft := time.NewTicker(s.cfg.FactoryPoll)
+			defer ft.Stop()
+			_ = s.SyncFactoryAsks(ctx)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ft.C:
+					_ = s.SyncFactoryAsks(ctx)
+				}
+			}
+		}()
+	}
+	defer factoryWG.Wait()
 	// Once at startup, the roster is already loaded (state.Open ran
 	// before New): catches a pane whose prompt changed while the daemon
 	// was down, which no post-answer poll ever ran for.
 	s.reconcileReprompts(ctx)
-	if s.cfg.Factory != nil {
-		_ = s.SyncFactoryAsks(ctx)
-	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -568,8 +578,6 @@ func (s *Supervisor) Run(ctx context.Context) {
 			s.remindBuriedPrompt()
 		case <-reconcile.C:
 			s.reconcileReprompts(ctx)
-		case <-factoryCh:
-			_ = s.SyncFactoryAsks(ctx)
 		}
 	}
 }

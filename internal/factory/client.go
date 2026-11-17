@@ -3,6 +3,8 @@ package factory
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,10 +21,13 @@ import (
 )
 
 const (
-	defaultReadTimeout   = 15 * time.Second
-	defaultActionTimeout = 30 * time.Second
-	maxContractBytes     = 8 << 20
+	defaultReadTimeout     = 15 * time.Second
+	defaultActionTimeout   = 30 * time.Second
+	maxContractBytes       = 8 << 20
+	maxAskInspectFileBytes = 256 << 10
 )
+
+var emptyAsksJSON = []byte(`{"protocol":1,"asks":[]}`)
 
 // ErrOwnerUnsupported indicates that the unpacked engine build predates `owner ... --json` (SDF-21).
 var ErrOwnerUnsupported = errors.New("factory: engine owner subcommand is not supported by this engine build")
@@ -78,6 +83,13 @@ type ProposeRuleRequest struct {
 	Until   string
 }
 
+type asksCacheEntry struct {
+	valid  bool
+	digest string
+	raw    []byte
+	err    error
+}
+
 // Client invokes `engine owner ... --json` over the unpacked factory engine and
 // uv-managed CPython, validating every response against owner contract v1.
 type Client struct {
@@ -85,10 +97,12 @@ type Client struct {
 	customStore    bool
 	customSettings bool
 
-	mu       sync.Mutex
-	prepared bool
-	eng      Engine
-	py       ManagedPython
+	mu                     sync.Mutex
+	prepared               bool
+	eng                    Engine
+	py                     ManagedPython
+	ownerUnsupportedDigest string
+	asksCache              [2]asksCacheEntry // slot 0: all asks, slot 1: open asks (when filter.Project == "")
 }
 
 // NewClient constructs an owner contract v1 Client.
@@ -178,9 +192,6 @@ func (c *Client) Asks(ctx context.Context, filter AsksFilter) (AsksResponse, err
 	if !c.Active() {
 		return AsksResponse{Protocol: ProtocolVersion, Asks: []Ask{}}, nil
 	}
-	if c.opts.Exec == nil && !hasAskFiles(c.opts.TasksDir) {
-		return AsksResponse{Protocol: ProtocolVersion, Asks: []Ask{}}, nil
-	}
 	raw, err := c.execAsksRaw(ctx, filter)
 	if err != nil {
 		return AsksResponse{}, err
@@ -195,9 +206,6 @@ func (c *Client) AsksPartial(ctx context.Context, filter AsksFilter) (AsksRespon
 	if !c.Active() {
 		return AsksResponse{Protocol: ProtocolVersion, Asks: []Ask{}}, nil, nil
 	}
-	if c.opts.Exec == nil && !hasAskFiles(c.opts.TasksDir) {
-		return AsksResponse{Protocol: ProtocolVersion, Asks: []Ask{}}, nil, nil
-	}
 	raw, err := c.execAsksRaw(ctx, filter)
 	if err != nil {
 		return AsksResponse{}, nil, err
@@ -207,14 +215,134 @@ func (c *Client) AsksPartial(ctx context.Context, filter AsksFilter) (AsksRespon
 
 func (c *Client) execAsksRaw(ctx context.Context, filter AsksFilter) ([]byte, error) {
 	args := []string{"owner", "asks"}
-	if p := strings.TrimSpace(filter.Project); p != "" {
-		args = append(args, "--project", p)
+	project := strings.TrimSpace(filter.Project)
+	if project != "" {
+		args = append(args, "--project", project)
 	}
 	if filter.Open {
 		args = append(args, "--open")
 	}
 	args = append(args, "--json")
-	return c.execRead(ctx, args...)
+
+	if c.opts.Exec != nil || project != "" {
+		return c.execRead(ctx, args...)
+	}
+	if c.isOwnerUnsupported() {
+		return nil, ErrOwnerUnsupported
+	}
+
+	digest, empty, allClosed, ok := inspectAsksStore(c.opts.TasksDir)
+	if ok && (empty || (filter.Open && allClosed)) {
+		return emptyAsksJSON, nil
+	}
+	slot := 0
+	if filter.Open {
+		slot = 1
+	}
+	if ok {
+		c.mu.Lock()
+		cached := c.asksCache[slot]
+		c.mu.Unlock()
+		if cached.valid && cached.digest == digest {
+			if cached.err != nil {
+				return nil, cached.err
+			}
+			return append([]byte(nil), cached.raw...), nil
+		}
+	}
+
+	raw, err := c.execRead(ctx, args...)
+	if ok {
+		var ce *ContractError
+		cacheable := err == nil || errors.As(err, &ce)
+		if cacheable {
+			if afterDigest, _, _, afterOK := inspectAsksStore(c.opts.TasksDir); afterOK && afterDigest == digest {
+				entry := asksCacheEntry{valid: true, digest: digest}
+				if err != nil {
+					entry.err = err
+				} else {
+					entry.raw = append([]byte(nil), raw...)
+				}
+				c.mu.Lock()
+				c.asksCache[slot] = entry
+				c.mu.Unlock()
+			}
+		}
+	}
+	return raw, err
+}
+
+// inspectAsksStore hashes `<tasksDir>/asks/*.json` and reports whether the
+// store has zero ask records (`empty`) or only explicitly closed records
+// (`allClosed`, i.e. every `.json` file parses with status `"answered"` or
+// `"cancelled"`). Because `owner asks` is strictly store-only (§1.2), an
+// unchanged digest guarantees identical CLI output without spawning Python.
+func inspectAsksStore(tasksDir string) (digest string, empty bool, allClosed bool, ok bool) {
+	if strings.TrimSpace(tasksDir) == "" {
+		return "", true, true, true
+	}
+	asksDir := filepath.Join(tasksDir, "asks")
+	entries, err := os.ReadDir(asksDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", true, true, true
+		}
+		return "", false, false, false
+	}
+	h := sha256.New()
+	allClosed = true
+	count := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return "", false, false, false
+		}
+		path := filepath.Join(asksDir, e.Name())
+		if info.Mode().IsRegular() && info.Size() <= maxAskInspectFileBytes {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				return "", false, false, false
+			}
+			count++
+			_, _ = h.Write([]byte(e.Name()))
+			_, _ = h.Write([]byte{0})
+			_, _ = h.Write([]byte(strconv.Itoa(len(data))))
+			_, _ = h.Write([]byte{':'})
+			_, _ = h.Write(data)
+			_, _ = h.Write([]byte{'\n'})
+			if allClosed {
+				var probe struct {
+					Status string `json:"status"`
+				}
+				if json.Unmarshal(data, &probe) != nil || (probe.Status != "answered" && probe.Status != "cancelled") {
+					allClosed = false
+				}
+			}
+			continue
+		}
+		count++
+		allClosed = false
+		_, _ = fmt.Fprintf(h, "%s\x00stat:%d:%d\n", e.Name(), info.Size(), info.ModTime().UnixNano())
+	}
+	if count == 0 {
+		return "", true, true, true
+	}
+	return hex.EncodeToString(h.Sum(nil)), false, allClosed, true
+}
+
+func (c *Client) isOwnerUnsupported() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.prepared && c.eng.Digest != "" && c.ownerUnsupportedDigest == c.eng.Digest
 }
 
 // Digest calls `owner digest [--project <p>] [--since <s>] --json` (§2.3).
@@ -417,7 +545,7 @@ func (c *Client) exec(ctx context.Context, timeout time.Duration, killOnCancel b
 				}
 			}
 		}
-		if strings.Contains(stderr, "invalid choice: 'owner'") {
+		if errors.Is(err, ErrOwnerUnsupported) || strings.Contains(stderr, "invalid choice: 'owner'") {
 			return nil, ErrOwnerUnsupported
 		}
 		if err != nil {
@@ -511,6 +639,14 @@ func (c *Client) execManaged(ctx context.Context, killOnCancel bool, args ...str
 	if err != nil {
 		return nil, "", -1, err
 	}
+	if len(args) > 0 && args[0] == "owner" {
+		c.mu.Lock()
+		unsupported := eng.Digest != "" && c.ownerUnsupportedDigest == eng.Digest
+		c.mu.Unlock()
+		if unsupported {
+			return nil, "", -1, ErrOwnerUnsupported
+		}
+	}
 	cwd := existingDir(c.opts.Home, existingDir(c.opts.TempDir, "."))
 	argv := make([]string, 0, 4+len(args))
 	argv = append(argv, py.Executable, "-I", "-B", eng.HerdrTask)
@@ -554,13 +690,22 @@ func (c *Client) execManaged(ctx context.Context, killOnCancel bool, args ...str
 		if ps := cmd.ProcessState; ps != nil {
 			exit = ps.ExitCode()
 		}
+		stderrStr := stderr.String()
+		if exit != 0 && len(args) > 0 && args[0] == "owner" && strings.Contains(stderrStr, "invalid choice: 'owner'") {
+			c.mu.Lock()
+			if eng.Digest != "" {
+				c.ownerUnsupportedDigest = eng.Digest
+			}
+			c.mu.Unlock()
+			return nil, stderrStr, exit, ErrOwnerUnsupported
+		}
 		if stdout.overflow {
-			return nil, stderr.String(), exit, fmt.Errorf("contract response exceeded %d bytes", maxContractBytes)
+			return nil, stderrStr, exit, fmt.Errorf("contract response exceeded %d bytes", maxContractBytes)
 		}
 		if waitErr != nil && exit < 0 && !errors.Is(waitErr, exec.ErrWaitDelay) {
-			return stdout.buf.Bytes(), stderr.String(), exit, waitErr
+			return stdout.buf.Bytes(), stderrStr, exit, waitErr
 		}
-		return stdout.buf.Bytes(), stderr.String(), exit, nil
+		return stdout.buf.Bytes(), stderrStr, exit, nil
 	}
 }
 
