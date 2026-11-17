@@ -119,7 +119,7 @@ def rows(project, d=None, auto=None):
             ("review", "Review", review, "on" if rounds > 0 else "off",
              [("tasks", "review_rounds"), ("tasks", "must_fix"), ("reviewer", None)]),
             ("merge", "Merge", MERGE_SHORT[merge], merge, [("tasks", "merge")]),
-            ("proof", "Proof", "on" if t.get("proof") is not False else "off (tasks show no proof artifact)",
+            ("proof", "Proof", "on" if t.get("proof") is not False else "off (tasks show no proof)",
              "off" if t.get("proof") is False else "on", [("tasks", "proof")]),
             ("agent", "Task agent", pick_words(cfg.get("worker"), "claude, its own default model and effort"),
              pick_words(cfg.get("worker"), "claude").replace(", model ", "/").replace(", effort ", "/"), [("worker", None)]),

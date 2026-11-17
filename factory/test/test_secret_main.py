@@ -132,7 +132,7 @@ class Mark(Machine):
         self.be(M3, None, vault=[])
         calls = []
         with mock.patch.object(secret.subprocess, "run", lambda a, **k: calls.append(list(a)) or types.SimpleNamespace(returncode=0, stdout="", stderr="")), \
-                mock.patch.object(secret, "sync_held", lambda: None), mock.patch("sys.stdout"):
+                mock.patch("sys.stdout"):
             secret.cmd_install("m3")
         script = calls[-1][-1]
         self.assertIn("herdr-secret\" mark-remote", script)
@@ -143,7 +143,7 @@ class Mark(Machine):
         self.be(M3, None)
         calls = []
         with mock.patch.object(secret.subprocess, "run", lambda a, **k: calls.append(list(a)) or types.SimpleNamespace(returncode=0, stdout="", stderr="")), \
-                mock.patch.object(secret, "sync_held", lambda: None), mock.patch("sys.stdout"):
+                mock.patch("sys.stdout"):
             secret.cmd_install("mini")
             self.assertNotIn("mark-remote", calls[-1][-1])
             # a record names a keeper: marked as before
@@ -203,18 +203,18 @@ class Forward(Machine):
         return run
 
     def args(self, *a):
-        return secret.main.__globals__["argparse"].Namespace(**{"machine": None, "space": None, "caller": None, "value_file": None, **dict(a)})
+        return secret.main.__globals__["argparse"].Namespace(**{"machine": None, "project": None, "caller": None, "value_file": None, **dict(a)})
 
     def test_set_goes_there_on_stdin(self):
         with mock.patch.object(secret, "hc_json", lambda *a: {"machines": [{"name": n, "id": i} for n, i in self.links.items()]}), \
                 mock.patch.object(secret.subprocess, "run", self.hc(b"Kept GITHUB_TOKEN.\n")), \
                 mock.patch.object(secret.sys, "stdin", types.SimpleNamespace(isatty=lambda: False, read=lambda: "ghp_value123\n")), mock.patch("sys.stdout"):
-            secret.cmd_set("GITHUB_TOKEN", self.args(("space", "vm/sp1")))
+            secret.cmd_set("GITHUB_TOKEN", self.args(("project", "dev-shop")))
         argv, stdin = self.calls[-1]
         self.assertEqual(argv[:6], ["hc", "exec", "--stdin", "--on", "mac-mini", "--timeout"])
         self.assertEqual(stdin, b"ghp_value123")
         self.assertNotIn("ghp_value123", " ".join(argv), "never in a command line")
-        self.assertEqual(argv[-6:-2], ["set", "GITHUB_TOKEN", "--space", "vm/sp1"])
+        self.assertEqual(argv[-6:-2], ["set", "GITHUB_TOKEN", "--project", "dev-shop"])
         self.assertEqual(json.loads(argv[-1]), {"id": M3, "links": self.links})
         with open(secret.VAULT) as f:
             self.assertEqual([e["name"] for e in json.load(f)["secrets"]], ["OLD"], "nothing kept here")
@@ -272,32 +272,31 @@ class Forward(Machine):
                 secret.cmd_names(True)
 
     def test_names_come_back_from_there(self):
-        rows = [{"name": "ELEVENLABS_API_KEY", "scope": "everywhere", "machine": None, "space": None, "at": 1}]
+        rows = [{"name": "ELEVENLABS_API_KEY", "scope": "everywhere", "machine": None, "project": None, "at": 1}]
         with mock.patch.object(secret, "hc_json", lambda *a: {"machines": [{"name": n, "id": i} for n, i in self.links.items()]}), \
                 mock.patch.object(secret.subprocess, "run", self.hc(json.dumps(rows).encode())), mock.patch.object(secret, "say") as said:
             secret.cmd_names(True)
         self.assertEqual(json.loads(said.call_args[0][0]), rows)
 
     def test_the_main_machine_renames_the_callers_words(self):
-        # on the Mac mini: m3's "this machine" is "m3", m3's own space "sp1" is "m3/sp1", m3's "vm/sp2" is "vm/sp2"
+        # on the Mac mini: m3's "this machine" is "m3", while project scope stays project-scoped without space renaming
         self.be(MINI, {"id": MINI, "at": 2}, mark=True, vault=[])
         caller = json.dumps({"id": M3, "links": {"mac-mini": MINI, "vm": VM}})
         with mock.patch.object(secret, "hc_json", lambda *a: {"machines": [{"name": "m3", "id": M3}, {"name": "vm", "id": VM}]}):
             self.assertEqual(secret.here_scope(self.args(("machine", ""), ("caller", caller))), ("machine", "m3", None))
             self.assertEqual(secret.here_scope(self.args(("machine", "mac-mini"), ("caller", caller))), ("machine", None, None))
-            self.assertEqual(secret.here_scope(self.args(("space", "sp1"), ("caller", caller))), ("space", None, "m3/sp1"))
-            self.assertEqual(secret.here_scope(self.args(("space", "vm/sp2"), ("caller", caller))), ("space", None, "vm/sp2"))
+            self.assertEqual(secret.here_scope(self.args(("project", "dev-shop"), ("caller", caller))), ("project", None, "dev-shop"))
             with self.assertRaisesRegex(secret.Fail, "doesn't link"):
                 secret.here_scope(self.args(("machine", "laptop"), ("caller", json.dumps({"id": M3, "links": {"laptop": "id-laptop"}}))))
             # and the list back in m3's words
             with open(secret.VAULT, "w") as f:
-                json.dump({"version": 1, "secrets": [{"name": "A", "scope": "space", "space": "m3/sp1", "value": "x"},
+                json.dump({"version": 1, "secrets": [{"name": "A", "scope": "project", "project": "dev-shop", "value": "x"},
                                                      {"name": "B", "scope": "machine", "machine": None, "value": "x"},
                                                      {"name": "C", "scope": "machine", "machine": "m3", "value": "x"}]}, f)
             with mock.patch.object(secret, "say") as said:
                 secret.cmd_names(True, caller)
             rows = {r["name"]: r for r in json.loads(said.call_args[0][0])}
-            self.assertEqual(rows["A"]["space"], "sp1")
+            self.assertEqual(rows["A"]["project"], "dev-shop")
             self.assertEqual(rows["B"]["machine"], "mac-mini")
             self.assertEqual(rows["C"]["machine"], None)
             self.assertNotIn("value", rows["A"])
@@ -318,6 +317,115 @@ class Forward(Machine):
         self.assertEqual(secret.SHEP(".herdr/vault.json"), w.path("vault"))
         self.assertEqual(secret.SHEP(".herdr/secret-remote"), w.path("secret-remote"))
         self.assertEqual(secret.SHEP(".herdr/secret-drop"), w.path("secret-drop"))
+
+
+class PromptAndProject(Machine):
+    """Project scope (--project / sheepdog.project) and Mac terminal prompts for `herdr-secret ask`."""
+
+    def test_project_scope_precedence_and_reviewer_refused(self):
+        self.be(M3, {"id": M3, "at": 1}, vault=[
+            {"name": "API_KEY", "scope": "everywhere", "machine": None, "project": None, "value": "global-val"},
+            {"name": "API_KEY", "scope": "machine", "machine": None, "project": None, "value": "machine-val"},
+            {"name": "API_KEY", "scope": "project", "machine": None, "project": "dev-shop", "value": "proj-val"},
+        ])
+        data = secret.load()
+        self.assertEqual(secret.pick(data, ["API_KEY"], None, "dev-shop")[0]["API_KEY"], "proj-val")
+        self.assertEqual(secret.pick(data, ["API_KEY"], None, "other-proj")[0]["API_KEY"], "machine-val")
+        # Folder path matches its slug too.
+        proj_dir = os.path.join(self.dir, "home", "dev", "shop")
+        os.makedirs(proj_dir)
+        with mock.patch.object(secret, "HOME", os.path.join(self.dir, "home")):
+            self.assertEqual(secret.pick(data, ["API_KEY"], None, proj_dir)[0]["API_KEY"], "proj-val")
+        # Reviewers cannot use secrets; sub-agents inherit parent's sheepdog.project.
+        with self.assertRaisesRegex(secret.Fail, "Reviewers can't use secrets"):
+            secret.project_of({"labels": {"sheepdog.role": "reviewer", "sheepdog.project": "dev-shop"}}, None)
+        with mock.patch.object(secret, "hc_json", lambda *a: {"labels": {"sheepdog.project": "dev-shop"}}):
+            self.assertEqual(secret.project_of({"labels": {}, "parent": "t1"}, None), "dev-shop")
+
+    def test_ask_opens_terminal_prompt_at_mac_locally(self):
+        self.be(M3, {"id": M3, "at": 1}, vault=[])
+        calls = []
+
+        def fake_run(argv, **k):
+            calls.append(list(argv))
+            if argv[:2] == ["hc", "run"]:
+                return types.SimpleNamespace(returncode=0, stdout='{"address":"t-prompt"}', stderr="")
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(secret, "me", lambda: {"address": "t-work", "labels": {"sheepdog.project": "dev-shop"}, "parent": None}), \
+                mock.patch.object(secret.subprocess, "run", fake_run), \
+                mock.patch.object(secret, "say") as said:
+            self.assertEqual(secret.cmd_ask("OPENAI_API_KEY", "run evals", False), 0)
+        label_call = next(c for c in calls if c[:2] == ["hc", "label"])
+        self.assertEqual(label_call, ["hc", "label", "t-work", "sheepdog.secret.ask.OPENAI_API_KEY=run evals"])
+        run_call = next(c for c in calls if c[:2] == ["hc", "run"])
+        self.assertIn("sheepdog.role=secret", run_call)
+        self.assertIn("sheepdog.secret=OPENAI_API_KEY", run_call)
+        self.assertIn("sheepdog.project=dev-shop", run_call)
+        self.assertIn("_prompt", run_call)
+        self.assertIn("OPENAI_API_KEY", run_call)
+        self.assertIn("terminal prompt at the Mac (t-prompt)", said.call_args[0][0])
+
+    def test_remote_ask_forwards_prompt_open_to_main_machine(self):
+        self.be(M3, {"id": MINI, "at": 2})
+        calls = []
+
+        def fake_run(argv, **k):
+            calls.append(list(argv))
+            if "exec" in argv:
+                return types.SimpleNamespace(returncode=0, stdout=b'{"address":"mac-prompt"}\n', stderr=b"")
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(secret, "me", lambda: {"address": "t-vm", "labels": {"sheepdog.project": "dev-shop"}, "parent": None}), \
+                mock.patch.object(secret, "hc_json", lambda *a: {"machines": [{"name": "mac-mini", "id": MINI}]}), \
+                mock.patch.object(secret.subprocess, "run", fake_run), \
+                mock.patch.object(secret, "say") as said:
+            self.assertEqual(secret.cmd_ask("OPENAI_API_KEY", "run evals", False), 0)
+        exec_call = next(c for c in calls if "exec" in c)
+        self.assertIn("prompt-open", exec_call)
+        self.assertIn("OPENAI_API_KEY", exec_call)
+        self.assertIn("--to", exec_call)
+        self.assertIn("t-vm", exec_call)
+        self.assertIn("mac-prompt", said.call_args[0][0])
+
+    def test_prompt_reads_value_saves_project_scope_clears_label_and_notifies(self):
+        self.be(M3, {"id": M3, "at": 1}, vault=[])
+        hc_calls = []
+
+        def fake_run(argv, **k):
+            hc_calls.append(list(argv))
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        ns = secret.main.__globals__["argparse"].Namespace(name="OPENAI_API_KEY", to="t-work", project="dev-shop", why="run evals")
+        buf = secret.main.__globals__["sys"]
+        out_chunks = []
+        fake_stdout = types.SimpleNamespace(write=out_chunks.append, flush=lambda: None)
+        with mock.patch.object(secret.subprocess, "run", fake_run), \
+                mock.patch.object(secret.sys, "stdin", types.SimpleNamespace(isatty=lambda: False, readline=lambda: "sk-secret-value-999\n")), \
+                mock.patch.object(secret.sys, "stdout", fake_stdout):
+            self.assertEqual(secret.cmd_prompt(ns), 0)
+        rendered = "".join(out_chunks)
+        self.assertIn("\x1b]7501;state=blocked:kind=secret:", rendered)
+        self.assertIn("\x1b]7501;state=working\x07", rendered)
+        self.assertNotIn("sk-secret-value-999", rendered)
+        with open(secret.VAULT) as f:
+            entries = json.load(f)["secrets"]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual((entries[0]["name"], entries[0]["scope"], entries[0]["project"], entries[0]["value"]),
+                         ("OPENAI_API_KEY", "project", "dev-shop", "sk-secret-value-999"))
+        self.assertIn(["hc", "label", "t-work", "sheepdog.secret.ask.OPENAI_API_KEY="], hc_calls)
+        send_call = next(c for c in hc_calls if c[:2] == ["hc", "send"])
+        self.assertEqual(send_call[2], "t-work")
+        self.assertNotIn("sk-secret-value-999", send_call[3])
+
+    def test_prompt_rejects_empty_value_without_saving(self):
+        self.be(M3, {"id": M3, "at": 1}, vault=[])
+        ns = secret.main.__globals__["argparse"].Namespace(name="OPENAI_API_KEY", to=None, project=None, why="")
+        with mock.patch.object(secret.sys, "stdin", types.SimpleNamespace(isatty=lambda: False, readline=lambda: "\n")), \
+                mock.patch.object(secret.sys, "stdout", types.SimpleNamespace(write=lambda *_: None, flush=lambda: None)):
+            with self.assertRaisesRegex(secret.Fail, "Empty value"):
+                secret.cmd_prompt(ns)
+        self.assertEqual(secret.load()["secrets"], [])
 
 
 if __name__ == "__main__":

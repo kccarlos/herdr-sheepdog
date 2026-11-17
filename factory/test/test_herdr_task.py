@@ -2717,19 +2717,18 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         own): the card's button then reads "Accept and merge", else plain "Accept"."""
         from unittest import mock
         import herdr_task.proof as proof
-        with mock.patch.object(proof, "artifacts_of", lambda folder: []):
-            merges = lambda: proof.evidence(self.store, self.task)["merges"]
-            self.assertFalse(merges())  # nothing of its own yet: Accept only marks it done
-            self.commit(self.task["worktree"], "its work")
+        merges = lambda: proof.evidence(self.store, self.task)["merges"]
+        self.assertFalse(merges())  # nothing of its own yet: Accept only marks it done
+        self.commit(self.task["worktree"], "its work")
+        self.assertTrue(merges())
+        self.git(self.main, "merge", "-q", "--ff-only", "task/1")  # merged by hand: nothing left to merge
+        self.assertFalse(merges())
+        self.task["pr"] = {"number": 7, "url": "https://example.com/pr/7"}  # an open pull request is merged
+        with mock.patch.object(proof, "checks_of", lambda t: {"state": "none", "text": ""}):
             self.assertTrue(merges())
-            self.git(self.main, "merge", "-q", "--ff-only", "task/1")  # merged by hand: nothing left to merge
-            self.assertFalse(merges())
-            self.task["pr"] = {"number": 7, "url": "https://example.com/pr/7"}  # an open pull request is merged
-            with mock.patch.object(proof, "checks_of", lambda t: {"state": "none", "text": ""}):
-                self.assertTrue(merges())
-            self.task.pop("pr")
-            self.task.update(mode="here")  # worked in the folder itself: never merges
-            self.assertFalse(merges())
+        self.task.pop("pr")
+        self.task.update(mode="here")  # worked in the folder itself: never merges
+        self.assertFalse(merges())
 
     def test_a_branch_caught_up_with_main_is_not_merged(self):
         self.commit(self.main, "another task merged")
@@ -6532,21 +6531,88 @@ class AgyWorker(unittest.TestCase):
 
 
 class AcceptCardArtifacts(unittest.TestCase):
-    """SHEP-96: the Accept card links the task's other artifacts (a research report) beside its proof."""
+    """SHEP-96 & SDF-10: file-based proof (Markdown, images, recipe.json) and task report files on the Accept card."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="shep-proof-")
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        sys.path.insert(0, BIN)
+        import herdr_task.base as base, herdr_task.proof as proof
+        self.base, self.proof = base, proof
+
+    def _store(self, mode="here", wt=None):
+        s = Store([{"id": 1, "title": "Reactions", "state": "ready", "started": 100,
+                    "mode": mode, **({"worktree": wt, "branch": "task/1"} if wt else {}), "agents": []}])
+        s.loc = {"folder": self.root, "kind": "repo" if wt else "folder", "name": "proj", "common": None}
+        return s, s.data["tasks"][0]
+
+    def _write(self, rel, data):
+        p = os.path.join(self.root, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        mode = "wb" if isinstance(data, bytes) else "w"
+        with open(p, mode) as f:
+            f.write(data)
+        return p
 
     def test_its_other_artifacts_since_it_started(self):
-        from unittest import mock
-        sys.path.insert(0, BIN)
-        import herdr_task.proof as proof
-        arts = [{"id": "report-0003", "title": "SHEP-1: Three options", "task": "SHEP-1", "at": 300},
-                {"id": "proof-0002", "title": "SHEP-1: Reactions · Proof", "task": "SHEP-1", "at": 200, "files": ["recipe.json"]},
-                {"id": "other-0004", "title": "SHEP-2: Elsewhere", "task": "SHEP-2", "at": 400},
-                {"id": "old-0001", "title": "SHEP-1: Before it started", "task": "SHEP-1", "at": 50}]
-        s = Store([{"id": 1, "title": "Reactions", "state": "ready", "started": 100, "agents": []}])
-        t = s.data["tasks"][0]
-        with mock.patch.object(proof, "artifacts_of", lambda folder: arts):
-            self.assertEqual(proof.task_artifacts(s, t, {"id": "proof-0002"}), [{"id": "report-0003", "title": "SHEP-1: Three options"}])
-            self.assertEqual([a["id"] for a in proof.task_artifacts(s, t)], ["report-0003", "proof-0002"])
+        self._write("proof/SHEP-1/after.png", b"\x89PNG\r\n\x1a\n")
+        self._write("proof/SHEP-1/recipe.json", json.dumps({"title": "SHEP-1: Reactions · Proof", "cover": "after.png"}))
+        self._write("docs/reports/SHEP-1-options.md", "# Three options\n\nDetails here.\n")
+        self._write("proof/SHEP-2/recipe.json", json.dumps({"title": "SHEP-2: Elsewhere"}))
+        s, t = self._store()
+        found = self.proof.find_proof(s, t)
+        self.assertEqual(found["id"], "proof/SHEP-1")
+        self.assertEqual(found["title"], "SHEP-1: Reactions · Proof")
+        self.assertEqual(found["files"], ["proof/SHEP-1/after.png", "proof/SHEP-1/recipe.json"])
+        self.assertEqual(self.proof.task_artifacts(s, t, found), [{"id": "docs/reports/SHEP-1-options.md", "title": "Three options"}])
+        self.assertEqual([a["id"] for a in self.proof.task_artifacts(s, t)], ["proof/SHEP-1", "docs/reports/SHEP-1-options.md"])
+
+    def test_markdown_image_and_recipe_validation_and_custom_panel_refused(self):
+        s, t = self._store()
+        # Markdown file extracts H1 heading; empty markdown is refused.
+        self._write("docs/proof/SHEP-1.md", "# Reactions Proof\n\nVerified locally.\n")
+        found = self.proof.find_proof(s, t, "docs/proof/SHEP-1.md")
+        self.assertEqual((found["id"], found["title"], found["kind"]), ("docs/proof/SHEP-1.md", "Reactions Proof", "markdown"))
+        self._write("docs/proof/empty.md", "   \n")
+        with self.assertRaisesRegex(self.base.Fail, "empty"):
+            self.proof.find_proof(s, t, "docs/proof/empty.md")
+
+        # Image file works when non-empty; 0-byte image is refused.
+        self._write("shots/after.png", b"\x89PNG\r\n\x1a\nok")
+        img = self.proof.find_proof(s, t, "shots/after.png")
+        self.assertEqual((img["id"], img["kind"]), ("shots/after.png", "image"))
+        self._write("shots/zero.png", b"")
+        with self.assertRaisesRegex(self.base.Fail, "empty"):
+            self.proof.find_proof(s, t, "shots/zero.png")
+
+        # Custom panel (main.js) and missing recipe targets are refused.
+        self._write("bad-panel/main.js", "export default function() {}\n")
+        self._write("bad-panel/recipe.json", json.dumps({"title": "Panel"}))
+        with self.assertRaisesRegex(self.base.Fail, "custom panel"):
+            self.proof.find_proof(s, t, "bad-panel")
+        self._write("bad-recipe/recipe.json", json.dumps({"title": "Bad", "cover": "../outside.png"}))
+        with self.assertRaisesRegex(self.base.Fail, "outside"):
+            self.proof.find_proof(s, t, "bad-recipe")
+        self._write("bad-json/recipe.json", "{not json")
+        with self.assertRaisesRegex(self.base.Fail, "valid JSON"):
+            self.proof.find_proof(s, t, "bad-json/recipe.json")
+
+    def test_worktree_auto_discovers_changed_proof_file(self):
+        subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True)
+        self._write("README.md", "base\n")
+        subprocess.run(["git", "-C", self.root, "add", "README.md"], check=True)
+        subprocess.run(["git", "-C", self.root, "commit", "-q", "-m", "init"], check=True)
+        wt = os.path.join(self.root, "wt")
+        subprocess.run(["git", "-C", self.root, "worktree", "add", "-q", "-b", "task/1", wt, "main"], check=True)
+        with open(os.path.join(wt, "PROOF.md"), "w") as f:
+            f.write("# Worktree Proof\n\nAll checks passed.\n")
+        s, t = self._store(mode="worktree", wt=wt)
+        with self.assertRaisesRegex(self.base.Fail, "Commit your proof"):
+            self.proof.find_proof(s, t)
+        subprocess.run(["git", "-C", wt, "add", "PROOF.md"], check=True)
+        subprocess.run(["git", "-C", wt, "commit", "-q", "-m", "add proof"], check=True)
+        found = self.proof.find_proof(s, t)
+        self.assertEqual((found["id"], found["title"], found["kind"]), ("PROOF.md", "Worktree Proof", "markdown"))
 
 
 class ReviewerFlags(unittest.TestCase):
@@ -8290,6 +8356,11 @@ class TaskFlow(unittest.TestCase):
         self.assertIn("- Checked the flow", body)
         self.assertIn(f"{ref}: Flow · Proof", body)
         self.assertLess(len(body), 400)
+        # File-based proof links to the branch blob on GitHub.
+        self.task["proof"] = {"id": "docs/proof/SHEP-1.md", "path": "docs/proof/SHEP-1.md",
+                              "title": f"{ref}: Flow · Proof", "files": ["docs/proof/SHEP-1.md"]}
+        linked = github.pr_body(self.store, self.task, "The flow works now", repo="o/r")
+        self.assertIn(f"[{ref}: Flow · Proof](https://github.com/o/r/blob/task/1/docs/proof/SHEP-1.md)", linked)
         # A title that already names the ref doesn't name it twice.
         self.assertEqual(github.pr_title(self.store, {**self.task, "title": f"{ref} Flow"}), f"{ref}: Flow")
 
@@ -12028,7 +12099,7 @@ class AutoAccept(unittest.TestCase):
         return stack
 
     def test_missing_proof_or_an_owner_ask_waits_for_the_person_and_says_why(self):
-        for why, prep in (("no proof artifact attached", lambda: setattr(self, "proof", None)),
+        for why, prep in (("no proof attached", lambda: setattr(self, "proof", None)),
                           ("an open release question is yours to answer", lambda: self.owner_ask("release")),
                           ("an open question its Assistant asked is yours to answer", lambda: self.owner_ask(None)),
                           ("auto-accept is off", lambda: self.task["set"].update(auto_accept="off"))):
