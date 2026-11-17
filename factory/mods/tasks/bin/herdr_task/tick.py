@@ -20,7 +20,7 @@ from .agents import (
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
 from .github import (already_merged, BEHIND, CHECKS_NEVER, CHECKS_RUNNING, checks_missing, checks_since, ci_awaited, ci_dispatch, ci_runs_on, drop_branch,
-                     expected_checks, finish, github, merged_here, needs_approval, note_checks, pr_merged, pr_pending, pr_problem, pr_repo, pr_view,
+                     expected_checks, finish, github, main_red_hold, merged_here, needs_approval, NO_CI_RUN, note_checks, pr_merged, pr_pending, pr_problem, pr_repo, pr_view,
                      pr_wait, CI_STOPPED, queue_entry, queue_merge, task_problem, task_github, tidy_done, tidy_due, update_main, watch_main,
                      UNKNOWN_CHECKS_MS)
 from .launch import default_space, parent_for, sweep_sandboxes
@@ -30,7 +30,8 @@ from .archive import archive_pass
 from .simulators import simulator_pass
 from .devices import device_pass
 from .output import progress_clock, say
-from .commands import back_to_work, begin, gate_reads, merge_now, MERGE_FAILED, start_nudge, START_WINDOW_MS
+from .commands import (advance_merge_only, back_to_work, begin, CHECKS_RUNNING as MERGE_CHECKS_RUNNING, gate_reads, IN_QUEUE,
+                       merge_now, MERGE_FAILED, start_nudge, START_WINDOW_MS, WAITS_APPROVAL)
 from .news import news_pass, send_or_hold, typing
 from .takeover import cant_go_on, takeover
 from .ghnews import main_pass, pr_deliver, pr_news
@@ -152,8 +153,8 @@ def facts(s, t, report):
         ci = False
         if t["state"] == "ready":
             ci = v.get("state") == "OPEN" and ci_awaited(s, t, v)
-            # FAC-105: timed from its newest head Herdr made (FAC-98's update-branch), else from ready.
-            since_ci = max(t.get("ready_at") or 0, (pr.get("synced") or {}).get("at") or 0)
+            # FAC-105: timed from its newest head Herdr made (FAC-98's update-branch, SDF-39's merge-only move), else from ready.
+            since_ci = max(t.get("ready_at") or 0, t.get("head_moved_at") or 0, (pr.get("synced") or {}).get("at") or 0)
             wait = pr_wait(v, since_ci if ci else since, expect, ci)
             if ci and not wait and not pr.get("no_ci"):
                 # FAC-105: its base's workflows run on pull requests, yet none ran on it: Ready for the person, its
@@ -252,9 +253,12 @@ def back_pass(s, t, report):
     if not turned:
         return
     wt = t.get("worktree") if t.get("mode") == "worktree" else None
-    moved = bool(wt and t.get("head") and os.path.isdir(wt)
-                 and (git(wt, "rev-parse", "HEAD")[1] != t["head"] or git(wt, "status", "--porcelain", "--untracked-files=no")[1]))
-    if moved or any(last_question(t, k["address"]) for k in turned):
+    dirty = bool(wt and os.path.isdir(wt) and git(wt, "status", "--porcelain", "--untracked-files=no")[1])
+    asked = any(last_question(t, k["address"]) for k in turned)
+    moved = dirty or bool(wt and t.get("head") and os.path.isdir(wt)
+                          and git(wt, "rev-parse", "HEAD")[1] != t["head"]
+                          and (asked or not advance_merge_only(s, t)))
+    if moved or asked:
         back_to_work(s, t, "its agent asked something" if not moved else "its agent changed its work", auto=True)
         report.setdefault("working_again", []).append(s.ref(t))
         return
@@ -281,8 +285,8 @@ def settle_back(s, t, report):
     ok, head, _ = git(wt, "rev-parse", "HEAD")
     if not ok:
         return False
-    if head != t["head"] or git(wt, "status", "--porcelain", "--untracked-files=no")[1] \
-            or any(last_question(t, k.get("address")) for k in live):
+    dirty = git(wt, "status", "--porcelain", "--untracked-files=no")[1]
+    if dirty or any(last_question(t, k.get("address")) for k in live) or (head != t["head"] and not advance_merge_only(s, t)):
         # FAC-96: new work since ready: its merge waits for its next ready.
         if t.pop("auto_merge", None) is not None:
             s.dirty = True
@@ -348,7 +352,15 @@ def tick_store(s, report):
                 s.dirty = True
             if t["state"] == "ready" and t.get("auto_merge") and t.get("pr") and not t.get("attention") and t.get("_pr_fresh") \
                     and not busy_again(t, [detail(k) for k in live_agents(s.key(t))]):  # FAC-107: not under a turn just begun
-                if not merge_now(s, t):
+                if err := merge_now(s, t):
+                    if (not t.get("attention") and t["state"] == "ready"
+                            and err not in (MERGE_CHECKS_RUNNING, WAITS_APPROVAL, IN_QUEUE, NO_CI_RUN, t.get("accept_wait"))
+                            and err != main_red_hold(s, t.get("base") or "main")):
+                        t["attention"], t["attention_at"] = err, now()
+                        s.dirty = True
+                    if t.get("attention"):
+                        report.setdefault("attention", []).append(t["id"])
+                else:
                     report["done"].append(t["id"])
             t.pop("_pr_fresh", None)
     for t in s.data["tasks"]:

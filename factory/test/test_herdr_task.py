@@ -13253,3 +13253,239 @@ class AcceptGitHubPrPath(unittest.TestCase):
         self.assertEqual(self.git(self.main, "branch", "--list", "--format=%(refname:short)", "task/1-doc"), "task/1-doc")
         self.assertTrue(os.path.isdir(self.wt))
         self.assertNotEqual(self.task.get("state"), "done")
+
+
+class ReadyBranchMoved(unittest.TestCase):
+    """SDF-39 (field note 58): a ready task whose branch moved on via base-merge-only commits moves
+    its ready head forward and merges once checks pass; any other merge_now() refusal in the tick
+    sets attention (Needs you) and emits news once instead of being dropped."""
+
+    git = AcceptGitHubPrPath.git
+
+    def write(self, folder, rel, text):
+        full = os.path.join(folder, rel)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w") as f:
+            f.write(text)
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.agents as agents, herdr_task.assistant_settings as aset, herdr_task.budget as budget
+        import herdr_task.commands as commands, herdr_task.github as github, herdr_task.ghnews as ghnews
+        import herdr_task.news as news, herdr_task.settings as settings, herdr_task.store as store, herdr_task.tick as tick
+        self.agents, self.commands, self.github, self.news, self.settings, self.store_mod, self.tick, self.mock = (
+            agents, commands, github, news, settings, store, tick, mock)
+        self.root = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.bare = os.path.join(self.root, "remote.git")
+        self.main = os.path.join(self.root, "main")
+        self.wt = os.path.join(self.root, "wt")
+        self.sdir = os.path.join(self.root, "store")
+        os.makedirs(self.sdir)
+        self.git(self.root, "init", "-q", "--bare", self.bare)
+        self.git(self.root, "init", "-q", "-b", "main", self.main)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false"),
+                     (f"url.{self.bare}.insteadOf", "git@github.com:o/r.git")):
+            self.git(self.main, "config", k, v)
+        self.write(self.main, "README.md", "base\n")
+        self.write(self.main, ".gitattributes", "gen/*.py linguist-generated\n")
+        self.git(self.main, "add", ".")
+        self.git(self.main, "commit", "-q", "-m", "init")
+        self.git(self.main, "remote", "add", "origin", "git@github.com:o/r.git")
+        self.git(self.main, "push", "-q", "-u", "origin", "main")
+        self.git(self.main, "worktree", "add", "-q", "-b", "task/1", self.wt, "main")
+        self.start = self.git(self.wt, "rev-parse", "HEAD")
+        self.write(self.wt, "feat.py", "x = 1\n")
+        self.write(self.wt, "gen/out.py", "g = 1\n")
+        self.git(self.wt, "add", ".")
+        self.git(self.wt, "commit", "-q", "-m", "feat: initial")
+        self.ready_head = self.git(self.wt, "rev-parse", "HEAD")
+        self.git(self.wt, "push", "-q", "-u", "origin", "task/1")
+        self.clock = [10_000_000]
+        self.gh_state = {"checks": {self.ready_head: "SUCCESS"}, "merged": None, "calls": []}
+        self.sent, self.live = [], []
+        sfile = os.path.join(self.root, "settings.json")
+        with open(sfile, "w") as f:
+            json.dump({"spaces": {"sp1": {"folder": self.main, "tasks": {"sync": "off"}}}}, f)
+
+        def fake_gh(*a, **k):
+            self.gh_state["calls"].append(a)
+            if a[:2] == ("repo", "view"):
+                return True, "o/r", ""
+            if a[:2] == ("pr", "view"):
+                remote_tip = self.git(self.root, "--git-dir", self.bare, "rev-parse", "task/1")
+                if "--json" in a and a[a.index("--json") + 1] == "headRefOid":
+                    return True, remote_tip, ""
+                st = self.gh_state["checks"].get(remote_tip, "IN_PROGRESS")
+                rollup = ([{"name": "ci", "status": "IN_PROGRESS"}] if st == "IN_PROGRESS"
+                          else [{"name": "ci", "status": "COMPLETED", "conclusion": st}] if st else [])
+                return True, json.dumps({
+                    "state": "MERGED" if self.gh_state["merged"] else "OPEN",
+                    "mergeable": "MERGEABLE", "headRefOid": remote_tip,
+                    "statusCheckRollup": rollup, "mergeCommit": {"oid": "m00"}, "mergeStateStatus": "CLEAN",
+                }), ""
+            if a[:2] == ("pr", "merge"):
+                self.gh_state["merged"] = a[a.index("--match-head-commit") + 1]
+                return True, "", ""
+            return True, "", ""
+
+        view = lambda t: json.loads(fake_gh("pr", "view", str(t["pr"]["number"]), "--repo", "o/r")[1])
+        patches = [
+            (settings, "SETTINGS", sfile),
+            (store, "STORE", self.sdir), (news, "STORE", self.sdir),
+            (news, "NEWS", os.path.join(self.sdir, ".news.json")), (news, "HELD", os.path.join(self.sdir, ".held.json")),
+            (aset, "settings_pass", lambda *a: None),
+            (news, "live_agents", lambda k: list(self.live)), (news, "detail", lambda k: k),
+            (news, "coordinator_in", lambda sp: "c1"),
+            (news, "news_send", lambda to, m, check=True: self.sent.append((to, m)) or True),
+            (tick, "live_agents", lambda k: list(self.live)), (tick, "detail", lambda k: k),
+            (tick, "hc_json", lambda *a: {}), (news, "hc_json", lambda *a: {"state": "live", "turn": 1}),
+            (agents, "hc_json", lambda *a: {}),
+            (github, "gh", fake_gh), (commands, "gh", fake_gh),
+            (tick, "pr_view", view), (commands, "pr_view", view),
+            (ghnews, "pr_comments", lambda *a: []), (ghnews, "gh", fake_gh),
+            (commands, "watch_main", lambda *a: None), (tick, "watch_main", lambda *a: None),
+            (commands, "update_main", lambda *a: None),
+            (github, "live_agents", lambda k: []), (github, "live_helpers", lambda k: []),
+            (github.shutil, "which", lambda x: "/usr/bin/gh"),
+            (commands, "find_proof", lambda *a: {"id": "art1", "title": "Proof"}),
+        ]
+        for mod in (agents, budget, commands, github, ghnews, news, tick):
+            patches.append((mod, "now", lambda: self.clock[0]))
+        for mod, name, val in patches:
+            p = mock.patch.object(mod, name, val)
+            p.start()
+            self.addCleanup(p.stop)
+        task = {
+            "id": 7, "title": "Fix branch move", "state": "ready", "space": "sp1",
+            "mode": "worktree", "worktree": self.wt, "branch": "task/1", "base": "main",
+            "start": self.start, "head": self.ready_head, "ready_at": self.clock[0],
+            "auto_merge": "checks", "proof": {"id": "art1", "title": "Proof"},
+            "reviews": [{"round": 1, "head": self.ready_head, "result": "report", "verdict": "pass"}],
+            "pr": {"number": 9, "repo": "o/r", "url": "https://github.com/o/r/pull/9", "checked": 0},
+            "agents": [], "ready_turns": {"w1": 5},
+        }
+        with store.Store(store.locate(self.main), write=True) as s:
+            s.data.update(prefix="SDF", tasks=[task])
+            s.dirty = True
+
+    def run_tick(self, advance_ms=0):
+        self.clock[0] += advance_ms
+        report = {"started": [], "done": [], "attention": []}
+        with self.store_mod.Store(self.store_mod.locate(self.main), write=True) as s:
+            if s.data["tasks"] and s.data["tasks"][0].get("pr"):
+                s.data["tasks"][0]["pr"]["checked"] = 0
+            self.tick.tick_store(s, report)
+            task = dict(s.data["tasks"][0])
+        self.news.news_pass(report, self.main)
+        return report, task
+
+    def test_base_merge_only_commit_after_ready_moves_head_and_merges(self):
+        # Advance main with both an independent file and a generated-file conflict, then merge into wt without saying ready again.
+        self.write(self.main, "other.py", "y = 2\n")
+        self.write(self.main, "gen/out.py", "g = 2\n")
+        self.git(self.main, "add", ".")
+        self.git(self.main, "commit", "-q", "-m", "main: advance")
+        self.git(self.main, "push", "-q", "origin", "main")
+        subprocess.run(["git", "-C", self.wt, "merge", "--no-commit", "main"], capture_output=True)
+        self.write(self.wt, "gen/out.py", "g = 3\n")
+        self.git(self.wt, "add", "gen/out.py")
+        self.git(self.wt, "commit", "-q", "-m", "merge main and regen")
+        merged_sha = self.git(self.wt, "rev-parse", "HEAD")
+        self.live = [{"address": "w1", "agent": "claude", "status": {"state": "idle"}, "turn": 6, "labels": {}}]
+
+        # Tick 1 (6m later): head moves to merged_sha, branch pushed to origin, waits for CI on new head (no false no_ci, no attention).
+        rep1, t1 = self.run_tick(6 * 60_000)
+        self.assertEqual((t1["state"], t1["head"], t1.get("attention"), rep1["attention"]), ("ready", merged_sha, None, []))
+        self.assertEqual(self.git(self.root, "--git-dir", self.bare, "rev-parse", "task/1"), merged_sha)
+        self.assertEqual(t1.get("auto_merge"), "checks")
+
+        # Tick 2: checks on merged_sha still running — auto_merge stays, no attention.
+        rep2, t2 = self.run_tick(30_000)
+        self.assertEqual((t2["state"], t2.get("auto_merge"), t2.get("attention"), self.gh_state["merged"]), ("ready", "checks", None, None))
+
+        # Tick 3: checks on merged_sha pass — task auto-accepts and merges at merged_sha!
+        self.gh_state["checks"][merged_sha] = "SUCCESS"
+        rep3, t3 = self.run_tick(30_000)
+        self.assertEqual((rep3["done"], t3["state"], t3.get("merged"), self.gh_state["merged"]), ([7], "done", True, merged_sha))
+        self.assertEqual((t3["auto_accepted"]["rounds"], t3["auto_accepted"]["merged_head"]), ([1], merged_sha))
+
+    def test_merge_now_and_settle_back_move_head_on_base_merge_without_ready(self):
+        # 1. With no live agent (same-turn or exited worker), merge_now() itself moves head and merges.
+        self.write(self.main, "other.py", "y = 2\n")
+        self.git(self.main, "add", "other.py")
+        self.git(self.main, "commit", "-q", "-m", "main: advance")
+        self.git(self.main, "push", "-q", "origin", "main")
+        self.git(self.wt, "merge", "--no-ff", "-q", "-m", "merge main cleanly", "main")
+        m1 = self.git(self.wt, "rev-parse", "HEAD")
+        self.git(self.wt, "push", "-q", "origin", "task/1")
+        self.gh_state["checks"][m1] = "SUCCESS"
+        rep, t = self.run_tick(1_000)
+        self.assertEqual((rep["done"], t["state"], t["head"], self.gh_state["merged"]), ([7], "done", m1, m1))
+
+        # 2. Agent wakes up (working -> back_to_work auto), merges main, goes idle: settle_back moves head and merges.
+        self.setUp()
+        self.gh_state["checks"][self.ready_head] = "IN_PROGRESS"
+        self.live = [{"address": "w1", "agent": "claude", "status": {"state": "working"}, "turn": 5, "labels": {}}]
+        self.write(self.main, "other2.py", "z = 3\n")
+        self.git(self.main, "add", "other2.py")
+        self.git(self.main, "commit", "-q", "-m", "main: advance 2")
+        self.git(self.wt, "merge", "--no-ff", "-q", "-m", "merge main in woken turn", "main")
+        m2 = self.git(self.wt, "rev-parse", "HEAD")
+        self.git(self.wt, "push", "-q", "origin", "task/1")
+        self.gh_state["checks"][m2] = "SUCCESS"
+        _, tw = self.run_tick(1_000)
+        self.assertEqual((tw["state"], tw["back"]["auto"]), ("running", True))
+        self.live = [{"address": "w1", "agent": "claude", "status": {"state": "idle"}, "turn": 6, "labels": {}}]
+        rep2, ts = self.run_tick(1_000)
+        self.assertEqual((rep2["done"], ts["state"], ts["head"], self.gh_state["merged"]), ([7], "done", m2, m2))
+
+    def test_real_commit_after_ready_sets_attention_and_emits_news_once(self):
+        self.gh_state["checks"][self.ready_head] = "IN_PROGRESS"
+        self.run_tick()  # initialize news baseline while Ready/Merges once its checks pass
+        self.assertEqual(self.sent, [])
+        self.gh_state["checks"][self.ready_head] = "SUCCESS"
+        self.write(self.wt, "feat.py", "x = 99\n")
+        self.git(self.wt, "add", "feat.py")
+        self.git(self.wt, "commit", "-q", "-m", "sneaked edit after ready")
+        want = "task/1 has moved on since it said ready: its agent says ready again first."
+
+        # Tick 1: merge_now refuses; tick sets attention (still in GRACE_MS so no news yet).
+        rep1, t1 = self.run_tick(1_000)
+        self.assertEqual((t1["attention"], rep1["attention"], self.sent), (want, [7], []))
+        # Tick 2 (+GRACE_MS): status becomes Needs you with the moved-on reason; news queues.
+        _, t2 = self.run_tick(self.agents.GRACE_MS)
+        self.assertEqual(self.agents.task_status(t2, []), ("needs", "attention", want))
+        # Tick 3 (+NEWS_SETTLE_MS): news emits exactly once.
+        self.run_tick(self.news.NEWS_SETTLE_MS)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn('event="needs-you"', self.sent[0][1])
+        self.assertIn(want, self.sent[0][1])
+        # Subsequent ticks: attention stays, no duplicate news.
+        for _ in range(4):
+            rep, tn = self.run_tick(30_000)
+            self.assertEqual((tn.get("attention"), rep["attention"], len(self.sent)), (want, [], 1))
+
+    def test_other_merge_now_refusal_in_tick_is_surfaced_not_dropped(self):
+        self.gh_state["checks"][self.ready_head] = "IN_PROGRESS"
+        self.run_tick()  # initialize news baseline
+        self.gh_state["checks"][self.ready_head] = "SUCCESS"
+        refusal = "Merge blocked by branch protection rule."
+        with self.mock.patch.object(self.tick, "merge_now", lambda s, t: refusal):
+            rep1, t1 = self.run_tick(1_000)
+            self.assertEqual((t1.get("attention"), rep1["attention"]), (refusal, [7]))
+        _, t2 = self.run_tick(self.agents.GRACE_MS)
+        self.assertEqual(self.agents.task_status(t2, []), ("needs", "attention", refusal))
+        self.run_tick(self.news.NEWS_SETTLE_MS)
+        self.run_tick(30_000)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn(refusal, self.sent[0][1])
+        # Non-attention waits from merge_now do not set attention.
+        with self.store_mod.Store(self.store_mod.locate(self.main), write=True) as s:
+            s.data["tasks"][0].pop("attention", None)
+            s.dirty = True
+        for wait in (self.commands.CHECKS_RUNNING, self.commands.WAITS_APPROVAL, self.commands.IN_QUEUE, self.github.NO_CI_RUN):
+            with self.mock.patch.object(self.tick, "merge_now", lambda s, t, w=wait: w):
+                rep, tw = self.run_tick(1_000)
+                self.assertEqual((tw.get("attention"), rep["attention"]), (None, []), wait)

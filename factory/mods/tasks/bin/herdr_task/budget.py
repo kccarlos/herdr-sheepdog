@@ -99,21 +99,17 @@ def generated_only(wt, paths):
     return not rest or set(rest) <= marked_generated(wt, rest)
 
 
-def merge_only_step(wt, base, head, mine, branch=None):
-    """FAC-89: whether `head` since the last reviewed head before it (which passed) is only merges of `base`
-    whose trees differ from git's clean merge of their two parents only in generated files (and had no
-    conflicts outside generated files)."""
-    prev = next((r["head"] for r in reversed(mine or ()) if r.get("head") and r["head"] != head), None)
-    if not prev or not wt or not os.path.isdir(wt):
-        return False
-    last_prev = next((r for r in reversed(mine) if r.get("head") == prev), None)
-    if not last_prev or last_prev.get("verdict") != "pass":
+def merge_only_commits(wt, base, since, head, branch=None):
+    """FAC-89: whether `head` since `since` (along first parents) is only merges of `base` whose trees
+    differ from git's clean merge of their two parents only in generated files (and had no conflicts
+    outside generated files)."""
+    if not since or not head or since == head or not wt or not os.path.isdir(wt):
         return False
     bases = (base, f"refs/remotes/{remote_of(wt, branch)}/{base}")
     c = head
     for _ in range(100):
-        if c == prev:
-            return c != head
+        if c == since:
+            return True
         ok, line, _ = git(wt, "rev-list", "--parents", "-n", "1", c)
         parts = line.split() if ok else []
         if len(parts) != 3:
@@ -130,6 +126,19 @@ def merge_only_step(wt, base, head, mine, branch=None):
             return False
         c = first
     return False
+
+
+def merge_only_step(wt, base, head, mine, branch=None):
+    """FAC-89: whether `head` since the last reviewed head before it (which passed) is only merges of `base`
+    whose trees differ from git's clean merge of their two parents only in generated files (and had no
+    conflicts outside generated files)."""
+    prev = next((r["head"] for r in reversed(mine or ()) if r.get("head") and r["head"] != head), None)
+    if not prev:
+        return False
+    last_prev = next((r for r in reversed(mine) if r.get("head") == prev), None)
+    if not last_prev or last_prev.get("verdict") != "pass":
+        return False
+    return merge_only_commits(wt, base, prev, head, branch)
 
 
 def change_sizes(t):
