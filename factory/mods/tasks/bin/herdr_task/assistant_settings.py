@@ -15,7 +15,6 @@ import sys
 from .base import addon_off, hc_json, MAX_RUNNING, now, run, STORE
 from .settings import DEFAULTS, LOCAL_MACHINE, MUST_WORDS, SETTINGS, agent_key, bare, read_settings
 from .launch import coordinators, is_coordinator
-from . import reactions
 
 # What an Assistant was last told, on its terminal: "review:1a2b3c,merge:…", a short hash of each line.
 LABEL = "herdr.settings"
@@ -100,11 +99,7 @@ def rows(space, d=None, auto=None):
         merge = t.get("merge") if t.get("merge") in MERGE_SHORT else "ask"
         notes = [w for w, k in (("start", "start_notes"), ("finish", "finish_notes")) if str(t.get(k) or "").strip()]
         a_on, a_every, a_dir = autopilot
-        reacting = (cfg.get("agents") or {}).get("reactions") is not False
-        offering = (cfg.get("agents") or {}).get("feedback") is not False
         suggesting = (cfg.get("agents") or {}).get("suggestions") is not False
-        from .feedback import feedback_repo
-        repo = feedback_repo(d)
         return [
             ("review", "Review", review, "on" if rounds > 0 else "off",
              [("tasks", "review_rounds"), ("tasks", "must_fix"), ("reviewer", None)]),
@@ -124,13 +119,8 @@ def rows(space, d=None, auto=None):
             ("autopilot", "Autopilot", ("on, " + a_every + (f", direction: {a_dir}" if a_dir else "")) if a_on
              else "off" + (f" (direction when on: {a_dir})" if a_dir else ""), "on" if a_on else "off",
              [("autopilot", "every"), ("autopilot", "events"), ("autopilot", "direction"), ("autopilot", None)]),
-            ("reactions", "Reactions", "on (react to some of the person's messages with one emoji)" if reacting
-             else "off (never react to the person's messages)", "on" if reacting else "off", [("agents", "reactions")]),
             ("suggestions", "Suggested next message", "on (end each reply with the message you'd likely send next, greyed out in the box)"
              if suggesting else "off (no suggested next message)", "on" if suggesting else "off", [("agents", "suggestions")]),
-            ("feedback", "Feedback offers", f"on (offer once to file a Shepherdr problem as an issue on {repo}, only on the person's yes)"
-             if offering else "off (never offer feedback for Shepherdr; file nothing)", "on" if offering else "off",
-             [("agents", "feedback"), ("agents", "feedback_repo")]),
         ]
     have = lines(resolve(ls), (on, every, direction))
     default = {x[0]: x[2] for x in lines(resolve([]), (False, every, ""))}
@@ -170,28 +160,21 @@ def notice(changed):
     <herdr-setting> line each (the chat strips Herdr's tags), the last saying nothing needs an answer."""
     out = []
     for i, r in enumerate(changed):
-        words = (reactions.TURNED_ON if r["value"] == "on" else reactions.TURNED_OFF) if r["key"] == "reactions" else \
-            f"{r['label']} is now {r['text']}" + (f"; {BY[r['by']]}" if r["by"] else "; Herdr's default") + \
-            ("." if r["key"] in ("autopilot", "feedback") else ". Tasks you add from now on get it; running ones keep their brief.")
+        words = (f"{r['label']} is now {r['text']}" + (f"; {BY[r['by']]}" if r["by"] else "; Herdr's default") +
+                 ("." if r["key"] == "autopilot" else ". Tasks you add from now on get it; running ones keep their brief."))
         end = f" {NOTICE_END}" if i == len(changed) - 1 else ""
         out.append(f'<herdr-setting name="{r["key"]}" value="{attr(r["value"])}" scope="{r["scope"]}">{words}{end}</herdr-setting>')
     return "\n".join(out)
 
 
 def session_note(terminal):
-    """What an Assistant's new session is told: its settings block, then the Reactions guide (when
-    and how with them on, never with them off); any other agent only the Reactions words
-    (reactions.agent_note); "" outside Herdr. Notes on its terminal what it was told."""
+    """What an Assistant's new session is told: its settings block; "" for other agents or outside Herdr."""
     k = hc_json("get", terminal) if terminal else None
-    if not k:
+    if not k or not is_coordinator(k):
         return ""
-    if not is_coordinator(k):
-        return reactions.agent_note(terminal, k)
     rs = rows(space_of(k))
-    on = next(r for r in rs if r["key"] == "reactions")["value"] == "on"
     run(["hc", "label", terminal, f"{LABEL}={digest(rs)}"])
-    run(["hc", "label", terminal, f"{reactions.LABEL}={'on' if on else 'off'}"])
-    return block(rs) + "\n" + (reactions.GUIDE if on else reactions.OFF)
+    return block(rs)
 
 
 def cmd_session_note(args):
@@ -243,9 +226,7 @@ def settings_pass(report, quiet):
             if not k.get("turn"):
                 continue  # just started: its hook is about to tell it
             # started before Assistants were told their settings: the whole block, once
-            on = next(r for r in rs if r["key"] == "reactions")["value"] == "on"
-            guide = reactions.GUIDE if on and labels.get(reactions.LABEL) != "on" else ""
-            text = (f'<herdr-setting name="all">{block(rs)}' + (f"\n{guide}" if guide else "") + f" {NOTICE_END}</herdr-setting>")
+            text = f'<herdr-setting name="all">{block(rs)} {NOTICE_END}</herdr-setting>'
             changed = [{"key": "all"}]
         else:
             changed = [r for r in rs if had.get(r["key"]) != now_digest[r["key"]]]
@@ -256,8 +237,6 @@ def settings_pass(report, quiet):
         if not news_send(addr, text):
             continue  # busy with the person: next time
         run(["hc", "label", addr, f"{LABEL}={digest(rs)}"])
-        on = next(r for r in rs if r["key"] == "reactions")["value"]
-        run(["hc", "label", addr, f"{reactions.LABEL}={on}"])
         report.setdefault("settings", []).append({"to": addr, "changed": [r["key"] for r in changed]})
         if str(labels.get(READ)) == str(k.get("turn")) and addr not in quiet:
             quiet[addr] = {"turn": k.get("turn"), "at": now()}

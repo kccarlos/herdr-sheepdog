@@ -27,6 +27,102 @@ MAC = sys.platform == "darwin"
 HOLD = {"start_load": 1.0, "start_memory": 80, "start_disk": 90}
 # Past these the sidebar's meter turns red (Shepherdr's alert limits).
 ALERT = {"load": 1.5, "memory": 90, "disk": 90}
+LEFTOVER_MS = 24 * 3600000     # a finished task's worktree this long after it finished: left over
+
+
+def _human_bytes(n):
+    return next((f"{n / s:.1f} {u}" for u, s in (("GB", 2 ** 30), ("MB", 2 ** 20), ("KB", 2 ** 10)) if n >= s), f"{n} B")
+
+
+def _dir_bytes(top):
+    total, stack = 0, [top]
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as it:
+                for e in it:
+                    if e.is_symlink():
+                        continue
+                    elif e.is_dir(follow_symlinks=False):
+                        stack.append(e.path)
+                    else:
+                        total += e.stat(follow_symlinks=False).st_size
+        except OSError:
+            pass
+    return total
+
+
+def task_builds(n=5):
+    """Biggest <build-dir>/<task-key> folders across configured task stores: [{task, path, bytes, size}]."""
+    from .settings import build_dir_of, TASK_KEY_RE
+    from .store import is_task_list, read_list, store_files
+    seen, found = set(), []
+    for p in store_files():
+        d = read_list(p)
+        bdir = build_dir_of(d) if is_task_list(d) else None
+        if not bdir or not os.path.isdir(bdir) or os.path.realpath(bdir) in seen:
+            continue
+        seen.add(os.path.realpath(bdir))
+        try:
+            with os.scandir(bdir) as it:
+                for e in it:
+                    if not e.is_symlink() and e.is_dir(follow_symlinks=False) and TASK_KEY_RE.fullmatch(e.name):
+                        if (sz := _dir_bytes(e.path)) > 0:
+                            found.append({"task": e.name, "path": os.path.join(bdir, e.name), "bytes": sz, "size": _human_bytes(sz)})
+        except OSError:
+            pass
+    return sorted(found, key=lambda x: (-x["bytes"], x["task"]))[:n]
+
+
+def leftover_worktrees():
+    """Task worktrees (<root>/<repo>/<branch>, in every root) whose task finished more than LEFTOVER_MS ago,
+    or that no task here knows: [{path, task, state, days, dirty}]. dirty: uncommitted work there,
+    never to be removed without the person."""
+    from .base import now, WHERE
+    from .settings import read_settings
+    from .store import is_task_list, read_list, store_files
+    known = {}
+    for p in store_files():
+        d = read_list(p)
+        if not is_task_list(d):
+            continue
+        for t in d.get("tasks") or []:
+            if t.get("worktree"):
+                known[os.path.realpath(t["worktree"])] = (f"{d.get('prefix') or 'T'}-{t['id']}", t)
+    out = []
+    pairs = []
+    for root in WHERE.worktree_roots(str((read_settings().get("everywhere") or {}).get("tasks", {}).get("worktree_root") or "").strip() or None):
+        try:
+            pairs += [(root, r) for r in sorted(os.listdir(root))]
+        except OSError:
+            pass
+    seen = set()
+    for wroot, repo in pairs:
+        try:
+            branches = sorted(os.listdir(os.path.join(wroot, repo)))
+        except OSError:
+            continue
+        for b in branches:
+            path = os.path.join(wroot, repo, b)
+            if os.path.realpath(path) in seen:
+                continue
+            seen.add(os.path.realpath(path))
+            if not os.path.isdir(path):
+                continue
+            ref, t = known.get(os.path.realpath(path), (None, None))
+            if t and (t.get("state") != "done" or now() - (t.get("done_at") or now()) < LEFTOVER_MS):
+                continue
+            if not t:
+                try:
+                    if now() - int(os.path.getmtime(path) * 1000) < LEFTOVER_MS:
+                        continue
+                except OSError:
+                    continue
+            r = subprocess.run(["git", "-C", path, "status", "--porcelain"], stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, universal_newlines=True)
+            out.append({"path": path.replace(HOME, "~", 1), "task": ref, "state": (t or {}).get("state"),
+                        "days": int((now() - ((t or {}).get("done_at") or now())) / 86400000) if t else None,
+                        "dirty": bool(r.stdout.strip()) if r.returncode == 0 else None})
+    return out
 
 
 # ---- health -------------------------------------------------------------------------------------
