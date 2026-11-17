@@ -172,6 +172,33 @@ class Plans(unittest.TestCase):
         rc, v = self.run_cli("plan", "amend", "--reason", "x", plan=plan)
         self.assertIn("a: after is a list", v["error"])
 
+    def test_review_round_2_findings(self):
+        self.run_cli("plan", "apply", plan=self.first_plan())
+        t = self.tasks()
+        # kind can't be undone through set: the design check judges what is written.
+        plan = self.first_plan()
+        plan["milestones"][0]["tasks"][0]["set"] = {"review.kind": "doc"}
+        rc, v = self.run_cli("plan", "amend", "--reason", "x", plan=plan)
+        self.assertIn("design: its kind is kind, not set", v["error"])
+        # A started task's waits can't change; listed as it is, it passes.
+        with self.open(True) as s:
+            s.find(str(t["api"]["id"]))["state"] = "running"
+            s.dirty = True
+        plan = self.first_plan()
+        plan["milestones"][0]["tasks"][1]["after"] = ["design", "page"]
+        rc, v = self.run_cli("plan", "amend", "--reason", "x", plan=plan)
+        self.assertIn("has started: what it waits for can't change now", v["error"])
+        plan = self.first_plan()
+        rc, v = self.run_cli("plan", "amend", "--reason", "same plan again", plan=plan)
+        self.assertEqual(rc, 0, v)
+        # Once a milestone's acceptance runs, its gate and exit test stay.
+        with self.open(True) as s:
+            s.find(str(t["acc-M2"]["id"]))["state"] = "running"
+            s.dirty = True
+        plan["milestones"][1]["gate"] = "owner"
+        rc, v = self.run_cli("plan", "amend", "--reason", "x", plan=plan)
+        self.assertIn("M2's acceptance (TST-%d) has started: its gate can't change now" % t["acc-M2"]["id"], v["error"])
+
     def test_check_only_changes_nothing(self):
         rc, v = self.run_cli("plan", "apply", "--check", plan=self.first_plan())
         self.assertEqual((rc, v), (0, {"ok": True}))

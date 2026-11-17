@@ -33,7 +33,7 @@ The plan file is JSON: `{"milestones": [...]}`. Unknown fields are refused, so a
 | `lines` | The size estimate, required, at most 500 (`PLAN_MAX_LINES`, field notes 27 and 42). It becomes `estimate.lines`, which `ready`'s size check reads. |
 | `after` | Plan keys, or refs of tasks in this folder (`SDF-4`). |
 | `kind` | `design` or `doc` (`review.kind`). |
-| `set` | Any `--set` key, such as `{"agent": "claude", "merge": "ask me first"}`, except `estimate.lines`: the size goes in `lines`. |
+| `set` | Any `--set` key, such as `{"agent": "claude", "merge": "ask me first"}`, except `estimate.lines` and `review.kind`: those go in `lines` and `kind`. |
 | `split_of` | In an amend only: the key or ref of the task this one replaces. |
 
 ## Checks
@@ -55,9 +55,9 @@ The plan file is JSON: `{"milestones": [...]}`. Unknown fields are refused, so a
 The file holds the milestones that change, each with all its open tasks, plus new milestones. Milestones the file leaves out stay as they are.
 
 - **A task still to do** can change its title, prompt, lines, kind, set and after.
-- **A started task** is listed by its `key` alone. Changing its brief is refused: use `herdr-task edit --amend`. It can't move to another milestone.
+- **A started task** is listed by its `key` alone. Changing its brief or what it waits for is refused (for the brief, use `herdr-task edit --amend`). It can't move to another milestone.
 - **A task that is still open** in a listed milestone and missing from the file is refused. Remove it with `herdr-task rm` first, or split it.
-- **A milestone whose acceptance task has started** takes no new tasks: put them in a new milestone.
+- **A milestone whose acceptance task has started** takes no new tasks (put them in a new milestone), and its exit test, gate and release stay as they are.
 
 ## A split keeps the parent's place
 

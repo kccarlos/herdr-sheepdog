@@ -153,8 +153,9 @@ class Plan:
             self.bad(f"{key}: set is an object of --set keys.")
         else:
             for k, v in (t.get("set") or {}).items():
-                if SET_KEYS.get(str(k).strip().lower()) == "estimate_lines":
-                    self.bad(f"{key}: its size estimate is lines, not set.")
+                field = SET_KEYS.get(str(k).strip().lower())
+                if field in ("estimate_lines", "review_kind"):
+                    self.bad(f"{key}: {'its size estimate is lines' if field == 'estimate_lines' else 'its kind is kind'}, not set.")
                     continue
                 try:
                     set_task({}, k, str(v))
@@ -167,6 +168,10 @@ class Plan:
                     break
             if old.get("milestone") != mid:
                 self.bad(f"{key} ({self.s.ref(old)}) has started in {old.get('milestone')}; it can't move to {mid}.")
+            if isinstance(t.get("after"), list):
+                now_after = {(self.find(a) or {"id": a})["id"] for a in t["after"]}
+                if now_after != set(old.get("plan_after") or []):
+                    self.bad(f"{key} ({self.s.ref(old)}) has started: what it waits for can't change now.")
             return
         if old is None or "title" in t or "prompt" in t:
             for f in ("title", "prompt"):
@@ -203,10 +208,14 @@ class Plan:
                     and old["plan_key"] not in keys and old["id"] not in split_parents):
                 self.bad(f"{s.ref(old)} ({old['plan_key']}) is in {old['milestone']} but not in this file: list it, "
                          f"split it, or remove it with herdr-task rm first.")
-        # Acceptance already started: no new work in that milestone.
+        # Acceptance already started: no new work in that milestone, and its test and gate stay.
         for m in self.ms:
             acc = self.acceptance(m["id"])
             if acc and acc["state"] not in NOT_STARTED:
+                old = self.old_ms[m["id"]]
+                for f in ("exit_test", "gate", "release"):
+                    if m.get(f) != old.get(f):
+                        self.bad(f"{m['id']}'s acceptance ({s.ref(acc)}) has started: its {f} can't change now.")
                 for t, mid in self.tasks:
                     old = self.by_key.get(t["key"])
                     if mid == m["id"] and (old is None or old.get("milestone") != mid):
