@@ -8,7 +8,7 @@ import os
 import re
 import shlex
 
-from .base import Fail, git, now
+from .base import Fail, git, label_of, now
 from .github import BAD, PENDING, remote_of, STOPPED
 
 DECISIONS = ("continue", "split", "new", "drop")
@@ -488,7 +488,7 @@ def cmd_recap(args):
             say(args, {"recap": rc, "recaps": t.get("recaps") or [], "recap_md": text}, "\n".join(lines))
             return
         labels = caller_labels()
-        if labels.get("herdr.task") == s.key(t) or labels.get("herdr.role") == "reviewer":
+        if label_of(labels, "task") == s.key(t) or label_of(labels, "role") == "reviewer":  # sheepdog.* or herdr.* (SDF-11)
             raise Fail("A task's own agent can't decide its recap: your Assistant does.")
         if not rc:
             raise Fail(f"{s.ref(t)} has no recap open.")

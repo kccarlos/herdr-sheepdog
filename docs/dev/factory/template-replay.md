@@ -90,3 +90,48 @@ Findings before the trim:
 - On a clean install, workers get the built-in default in `templates.py`. That default lacks the `herdr-task ask` rule (W1), the size-overrun rule (W2) and `device-wait` (W4), which only the bundled `worker.md` has. The built-in reviewer default lacks the evidence rules (R2).
 - Accept is "never accept", with no rule on the Auto-accept policy the engine applies (A6).
 - The prompts name commands the engine no longer has: `herdr-task feedback`, `herdr-task home`, `start/resume --space` and `config --max-running`.
+
+## The trim (SDF-11)
+
+The trim follows design section 7 and the SDF-11 rows of the [engine audit](engine-audit.md) (sections 4.1 to 4.3).
+
+- **Assistant** (219 to 180 lines). The identity is now "you coordinate one project; the owner doesn't read this pane; you reach them through `herdr-task ask`, `herdr-task alert` and the digest". Accept is now a policy kept in code: the task's Auto-accept line, otherwise the person, or a delegated `--owner-approved`. Autopilot is how the Assistant works, with no header switch. Dropped: Feedback for Shepherdr, Usage insights, Home space, suggested next message, showing media in chat, the Tasks panel, `herdr-app ls`, space and tab labels, and `--space`. `config --max-running` became `config --set tasks.max_running=N`.
+- **Worker** (34 to 24 lines). Dropped: the two herdr-app mod rules, artifact preview, chat media, the Browser view, Shepherdr feedback and suggestions. Its reviewer's labels are now `sheepdog.task=$SHEEPDOG_TASK` and `sheepdog.role=reviewer`. Proof and secrets no longer name the artifact viewer or the masked box: proof follows the Proof line and `herdr-task ready --help`, which SDF-10 changes along with the engine.
+- **Reviewer** (16 to 15 lines). Dropped the Shepherdr feedback line. The sandbox rule keeps "Not run in my sandbox:" without the `herdr-app check` and `shepherdr doctor` examples.
+- **Built-in defaults.** `WORKER_MD` and `REVIEWER_MD` in `templates.py` are now the bundled files word for word, and `test_templates.py` keeps them equal. A clean install therefore gets the ask, size-overrun, device-wait and evidence rules. An unedited earlier default is upgraded to today's; an edited one is left alone.
+- **Recap rail.** `herdr-task recap --decide` refuses a reviewer or the task's own agent by either label prefix (`budget.py`). It used to read only `herdr.*`, so a reviewer labelled `sheepdog.role=reviewer` by the new worker template would have passed it.
+
+## After
+
+Clean install:
+
+| Situation | Notes | Role | Result |
+|---|---|---|---|
+| W1: A worker needs the owner's choice between designs | 31, 51 | worker | pass |
+| W2: A worker's change passes its size limit | 27, 42 | worker | pass |
+| W3: A worker's pull request falls behind main with a conflict | 45, 46 | worker | pass |
+| W4: A worker's iPhone check fails because the phone is locked | 26 (FAC-110) | worker | pass |
+| R1: A read-only reviewer meets a check it can't run | #840 | reviewer | pass |
+| R2: A reviewer is tempted to raise a finding the worker already rejected | 32 | reviewer | pass |
+| A1: A release fails with HTTP 403 from App Store Connect | 36 | assistant | pass |
+| A2: A task runs out of review rounds after merging main in | 46, 49 | assistant | pass |
+| A3: A worker's permission prompt asks to run rm inside its worktree | 12, 13 | assistant | pass |
+| A4: A task's CI keeps failing on flaky tests | 28 | assistant | pass |
+| A5: An Autopilot wake arrives | 30, 53 | assistant | pass |
+| A6: A task is Ready with its rounds passed and CI green | 47, 48, 50 | assistant | pass |
+
+Passed 12 of 12.
+
+| Role | Commands the engine refuses | Shepherdr-only words |
+|---|---|---|
+| worker | none | none |
+| reviewer | none | none |
+| assistant | none | none |
+
+With the bundled files installed: Passed 12 of 12, with no refused commands and no Shepherdr-only words.
+
+## Not covered
+
+- **Model behaviour.** No model ran on these prompts. A live replay with a real CLI is still to do.
+- **Existing template files.** The engine still reads `~/.config/herdr-core/templates`. Where Shepherdr already put `worker.md`, `reviewer.md` or `assistant.md` there, as on the owner's Mac, those files win, so the trim reaches clean installs only. The upgrade matches only the engine's own earlier built-in defaults, never Shepherdr's installed files: live Shepherdr agents read those. `restart.sh` (Phase 2, SDF-16) and `herdr-task machines sync` still read that folder too.
+- **Settings block words.** The Settings block that `settings.py` and `assistant_settings.py` write still says "Tasks panel" in its Merge line. That text is outside the templates.
