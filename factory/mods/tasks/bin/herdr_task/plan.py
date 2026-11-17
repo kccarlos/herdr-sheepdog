@@ -494,4 +494,4 @@ def cmd_plan(args):
         log = p.write((args.reason or "").strip() or None)
         v = show(s)
     added = f"added {', '.join(log['added'])}" if log["added"] else "added nothing"
-    say(args, {**v, "applied": log}, f"Plan {log['action']}: {added}." + (f" Split: {log['split']}." if log.get("split") else "") + "\n" + text_of(v))
+    say(args, {**v, "applied": log}, f"Plan {log['action']}: {added}." + "".join(f" Split {p} into {', '.join(k)}." for p, k in (log.get("split") or {}).items()) + "\n" + text_of(v))
