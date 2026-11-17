@@ -6109,7 +6109,7 @@ class Scheduled(unittest.TestCase):
         with open(settings.SETTINGS) as f:
             self.assertEqual(json.load(f)["projects"][folder], {"worker": {"perm": "full"}})
         with self.store_mod.Store(self.store_mod.locate(self.folder), write=False) as s:
-            self.assertEqual(settings.worker_argv(s, {}), ["claude", "--settings", '{"fastMode": false}', "--dangerously-skip-permissions"])
+            self.assertEqual(settings.worker_argv(s, {}), ["claude", "--settings", '{"fastMode": false, "skipDangerousModePermissionPrompt": true}', "--dangerously-skip-permissions"])
             self.assertEqual(settings.worker_argv(s, {}, agent="agy"), ["agy", "--dangerously-skip-permissions"])
         self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worker.perm=default"])
         with open(settings.SETTINGS) as f:
@@ -13763,3 +13763,412 @@ class StartRefusesPoolAtZero(unittest.TestCase):
             self.call(self.commands.cmd_resume, id=ref, agent="claude", argv=None, parent=None)
         self.assertIn("claude pool is at 0%", str(ctx.exception))
         self.assertEqual(len(self.runs), 1)
+
+
+class InstalledCliAndMissingRefusal(unittest.TestCase):
+    """SDF-41: unset worker CLI resolves to an installed CLI; missing CLIs refuse with Needs you and config fix."""
+
+    def setUp(self):
+        import argparse, contextlib, io
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.agents as agents, herdr_task.assistant_settings as assistant_settings
+        import herdr_task.base as base, herdr_task.commands as commands, herdr_task.launch as launch
+        import herdr_task.news as news, herdr_task.output as output, herdr_task.queues as queues
+        import herdr_task.sessions as sessions, herdr_task.settings as settings, herdr_task.store as store
+        import herdr_task.templates as templates, herdr_task.tick as tick
+        self.argparse, self.io, self.redirect, self.mock = argparse, io, contextlib.redirect_stdout, mock
+        self.agents, self.assistant_settings, self.base = agents, assistant_settings, base
+        self.commands, self.launch, self.news, self.output = commands, launch, news, output
+        self.sessions, self.settings, self.store_mod, self.tick, self.Fail = sessions, settings, store, tick, base.Fail
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="sdf41-cli-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.repo = os.path.join(self.tmp, "repo")
+        os.makedirs(self.repo)
+        subprocess.run(["git", "-C", self.repo, "init", "-q", "-b", "main"], check=True)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.invalid"), ("commit.gpgsign", "false")):
+            subprocess.run(["git", "-C", self.repo, "config", k, v], check=True)
+        subprocess.run(["git", "-C", self.repo, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+        self.settings_file = os.path.join(self.tmp, "settings.json")
+        with open(self.settings_file, "w") as f:
+            json.dump({}, f)
+        self.installed = {"claude", "codex", "agy"}
+        self.real_which = shutil.which
+        self.runs, self.killed, self.live_map = [], [], {}
+
+        def fake_hc(argv, *a, **kw):
+            if argv[:2] == ["hc", "run"]:
+                self.runs.append(argv)
+                return subprocess.CompletedProcess(argv, 0, json.dumps({"address": f"t{len(self.runs)}"}), "")
+            if argv[:2] == ["hc", "kill"]:
+                self.killed.append(argv[2])
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+        for obj, name, val in (
+            (settings, "SETTINGS", self.settings_file),
+            (settings.shutil, "which", lambda prog: f"/usr/bin/{prog}" if prog in self.installed else None),
+            (base, "STORE", os.path.join(self.tmp, "tasks")),
+            (base, "hc_json", lambda *a: None),
+            (store, "STORE", os.path.join(self.tmp, "tasks")),
+            (launch, "STORE", os.path.join(self.tmp, "tasks")),
+            (launch, "WORKTREES", os.path.join(self.tmp, "worktrees")),
+            (launch, "HOME", self.tmp),
+            (launch, "own_path", lambda: "/bin/herdr-task"),
+            (commands, "own_path", lambda: "/bin/herdr-task"),
+            (launch, "secret_path", lambda: None),
+            (launch, "in_shell", lambda a: a),
+            (launch, "low_priority", lambda a, n: a),
+            (launch, "clean_env", lambda a: a),
+            (launch, "track", lambda *a: None),
+            (launch, "hc_json", lambda *a: None),
+            (launch, "run", fake_hc),
+            (commands, "run", fake_hc),
+            (commands, "live_agents", lambda key: list(self.live_map.get(key, []))),
+            (commands, "detail", lambda k: k),
+            (commands, "just_started", lambda t: None),
+            (commands, "ensure_scheduler", lambda quiet=False: {}),
+            (commands, "reviewer_pools", lambda: []),
+            (commands, "refresh_sessions", lambda *a: None),
+            (commands, "stop_note", lambda *a, **kw: None),
+            (queues, "live_agents", lambda key: []),
+            (queues, "machine_hold", lambda: None),
+            (tick, "machine_hold", lambda: None),
+            (templates, "TEMPLATES", os.path.join(ROOT, "templates")),
+        ):
+            p = mock.patch.object(obj, name, val)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def call(self, fn, **kw):
+        out = self.io.StringIO()
+        with self.redirect(out):
+            fn(self.argparse.Namespace(folder=self.repo, json=True, **kw))
+        return json.loads(out.getvalue())
+
+    def add(self, title="Build", **kw):
+        defaults = dict(title=title, prompt="Do it.", prompt_file=None, here=False, worktree=True,
+                        base=None, branch=None, start_notes=None, finish_notes=None, after=None,
+                        at=None, in_=None, agent=None, model=None, effort=None, reviewer=None,
+                        reviewer_model=None, reviewer_effort=None, set=None)
+        defaults.update(kw)
+        return f"REPO-{self.call(self.commands.cmd_add, **defaults)['id']}"
+
+    def start(self, ref, **kw):
+        defaults = dict(id=ref, here=False, worktree=False, branch=None, agent=None, argv=None, parent=None, at=None, in_=None, now=True)
+        defaults.update(kw)
+        return self.call(self.commands.cmd_start, **defaults)
+
+    def test_unset_agent_resolves_consistently_across_layers(self):
+        ref = self.add()
+        for have, expected in (({"agy"}, "agy"), ({"codex", "agy"}, "codex"), ({"claude", "agy"}, "claude"), (set(), "claude")):
+            self.installed = set(have)
+            with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+                t = s.find(ref)
+                self.assertEqual(self.settings.default_worker_agent(), expected)
+                self.assertEqual(self.settings.worker_pick(s, t)["agent"], expected)
+                self.assertEqual(self.settings.agent_key(self.settings.worker_argv(s, t)), expected)
+                agent_row = next(x for x in self.settings.task_settings(s, t) if x["label"] == "Agent")
+                self.assertEqual(agent_row["value"]["agent"], expected)
+                self.assertEqual(agent_row["text"].split(",")[0], expected)
+                w_row = next(r for r in self.assistant_settings.rows(self.repo, d={}) if r["key"] == "agent")
+                self.assertEqual(w_row["value"], expected)
+        # cli_of identifies explicit CLIs (including version-named Claude and fish -ic) and returns None on plain shells.
+        self.assertEqual(self.agents.cli_of({"foreground": {"name": "2.1.325"}}), "claude")
+        self.assertEqual(self.agents.cli_of({"foreground": {"name": "fish", "argv": ["fish", "-ic", "claude; exec fish -i"]}}), "claude")
+        self.assertEqual(self.agents.cli_of({"foreground": {"name": "agy"}}), "agy")
+        self.assertEqual(self.agents.cli_of({"foreground": {"name": "codex"}}), "codex")
+        self.assertIsNone(self.agents.cli_of({"foreground": {"name": "zsh", "argv": ["-zsh"]}}))
+        self.assertIsNone(self.agents.cli_of({"address": "t1"}))
+
+    def test_short_path_finds_cli_in_home_local_bin(self):
+        """hc exec runs herdr-task with a short PATH (/usr/bin:/bin); ~/.local/bin CLIs are still found."""
+        local_bin = os.path.join(self.tmp, ".local", "bin")
+        os.makedirs(local_bin, exist_ok=True)
+        fake_claude = os.path.join(local_bin, "claude")
+        with open(fake_claude, "w") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(fake_claude, 0o755)
+        with (self.mock.patch.object(self.settings.shutil, "which", self.real_which),
+              self.mock.patch.dict(os.environ, {"HOME": self.tmp, "PATH": "/usr/bin:/bin"})):
+            self.assertIn("claude", self.settings.installed_clis())
+            self.assertEqual(self.settings.default_worker_agent(), "claude")
+            self.assertIsNone(self.settings.cli_missing_reason(["claude"]))
+
+    def test_missing_cli_refused_with_reason_and_needs_you_then_config_fixes_it(self):
+        self.installed = {"codex", "agy"}
+        self.call(self.commands.cmd_config, prefix=None, build_dir=None, set=["worker.agent=claude"])
+        ref = self.add("Task one")
+        with self.assertRaises(self.Fail) as ctx:
+            self.start(ref)
+        msg = str(ctx.exception)
+        self.assertIn("claude isn't installed on PATH (installed: codex, agy)", msg)
+        self.assertIn("herdr-task config --set worker.agent=codex", msg)
+        self.assertEqual(self.runs, [])
+        shown = self.call(self.commands.cmd_show, id=ref, evidence=False)
+        self.assertEqual((shown["state"], shown["status"], shown["needs"]), ("todo", "needs", "attention"))
+        self.assertIn("claude isn't installed on PATH", shown["why"])
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+            v, event, _ = self.news.news_state(s, s.find(ref), [])
+            self.assertEqual((v["status"], event), ("needs", "failed"))
+
+        # Queued start in tick_store also refuses without launching and surfaces Needs you.
+        ref_q = self.add("Queued task")
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref_q)) as s:
+            tq = s.find(ref_q)
+            tq["state"], tq["queued_at"], tq["queue"] = "queued", 1, {"argv": ["claude"], "parent": None}
+            s.dirty = True
+        rep = {"started": [], "done": [], "attention": [], "fired": [], "retries": []}
+        with self.store_mod.Store(self.store_mod.locate(self.repo)) as s:
+            self.tick.tick_store(s, rep)
+        self.assertEqual((rep["started"], self.runs), ([], []))
+        shown_q = self.call(self.commands.cmd_show, id=ref_q, evidence=False)
+        self.assertEqual((shown_q["state"], shown_q["status"], shown_q["needs"]), ("queued", "needs", "attention"))
+
+        # config --set worker.agent=agy updates the folder setting, refreshes queued argv, and clears Couldn't start.
+        cfg = self.call(self.commands.cmd_config, prefix=None, build_dir=None, set=["worker.agent=agy"])
+        self.assertEqual(cfg["settings"]["worker"]["agent"], "agy")
+        shown_after = self.call(self.commands.cmd_show, id=ref, evidence=False)
+        self.assertEqual(shown_after["status"], "todo")
+        rep2 = {"started": [], "done": [], "attention": [], "fired": [], "retries": []}
+        with self.store_mod.Store(self.store_mod.locate(self.repo)) as s:
+            self.tick.tick_store(s, rep2)
+        self.assertEqual(len(rep2["started"]), 1)
+        self.start(ref)
+        self.assertEqual(len(self.runs), 2)
+        for r in self.runs:
+            self.assertIn("agy", r)
+
+        # Switch to a missing CLI never kills a live worker; resume on a missing CLI refuses cleanly.
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+            key = s.key(s.find(ref))
+        self.live_map[key] = [{"address": "t2", "foreground": {"name": "agy"}, "status": {"state": "working"}, "labels": {"sheepdog.agent": "agy"}}]
+        with self.assertRaises(self.Fail) as sw_ctx:
+            self.call(self.commands.cmd_switch, id=ref, all=False, dry_run=False, from_=None, reviewer=False,
+                      agent="claude", model=None, argv=None, parent=None, keep=False)
+        self.assertIn("claude isn't installed on PATH", str(sw_ctx.exception))
+        self.assertEqual(self.killed, [])  # live agy worker preserved
+        self.live_map[key] = []
+        with self.assertRaises(self.Fail) as res_ctx:
+            self.call(self.commands.cmd_resume, id=ref, agent="claude", argv=None, parent=None)
+        self.assertIn("claude isn't installed on PATH", str(res_ctx.exception))
+
+        # Zero CLIs on PATH names all three and the config command.
+        self.installed = set()
+        reason = self.settings.cli_missing_reason(["claude"])
+        self.assertIn("none of claude, codex, agy found on PATH", reason)
+        self.assertIn("herdr-task config --set worker.agent=<cli>", reason)
+
+    def test_subprocess_start_on_agy_only_path_refuses_missing_claude_and_starts_agy(self):
+        bin_dir = os.path.join(self.tmp, "only-agy-bin")
+        os.makedirs(bin_dir)
+        for tool in ("git", "sh", "env", "ls"):
+            real = self.real_which(tool)
+            if real:
+                os.symlink(real, os.path.join(bin_dir, tool))
+        agy_stub = os.path.join(bin_dir, "agy")
+        with open(agy_stub, "w") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(agy_stub, 0o755)
+        env = {**os.environ, "HOME": self.tmp, "PATH": bin_dir,
+               "HERDR_TASK_STORE": os.path.join(self.tmp, "sub-tasks"),
+               "HERDR_TASK_SETTINGS": os.path.join(self.tmp, "sub-settings.json")}
+        code = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]); "
+                "import herdr_task.commands as c; c.live_agents = lambda k: []; "
+                "from herdr_task.cli import main; sys.argv[1:] = sys.argv[2:]; sys.exit(main())")
+        run_cli = lambda *a: subprocess.run([sys.executable, "-c", code, BIN, *a], env=env, capture_output=True, text=True)
+        add = run_cli("add", "Subproc task", "--folder", self.repo, "--json")
+        self.assertEqual(add.returncode, 0, add.stdout + add.stderr)
+        tid = json.loads(add.stdout)["ref"]
+        # With unset worker.agent and only agy on PATH, show resolves Agent to agy.
+        shown = json.loads(run_cli("show", tid, "--folder", self.repo, "--json").stdout)
+        agent_row = next(x for x in shown["settings"] if x["label"] == "Agent")
+        self.assertEqual(agent_row["value"]["agent"], "agy")
+        # Explicitly requesting missing --agent claude refuses before touching hc, leaving task in Needs you.
+        bad = run_cli("start", tid, "--agent", "claude", "--now", "--folder", self.repo)
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertIn("claude isn't installed on PATH (installed: agy)", bad.stderr)
+        self.assertIn("herdr-task config --set worker.agent=agy", bad.stderr)
+        after = json.loads(run_cli("show", tid, "--folder", self.repo, "--json").stdout)
+        self.assertEqual((after["status"], after["needs"]), ("needs", "attention"))
+
+    def test_switch_all_from_claude_still_works_when_claude_not_installed(self):
+        self.installed = {"codex", "agy"}  # claude is NOT installed
+        r1 = self.add("Running claude")
+        r2 = self.add("Queued claude")
+        r3 = self.add("Todo codex", agent="codex")
+        r4 = self.add("Todo claude", agent="claude", model="opus", effort="max")
+        r5 = self.add("Stopped claude")
+        r6 = self.add("Unset todo")  # resolves to codex on this machine, not claude
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=r1)) as s:
+            t1 = s.find(r1)
+            t1.update(state="running", started=1, mode="here",
+                      agents=[{"address": "t-live", "agent": "claude", "argv": ["claude", "--model", "opus"], "at": 10}])
+            self.live_map[s.key(t1)] = [{"address": "t-live", "foreground": {"name": "2.1.325"}, "labels": {"sheepdog.agent": "claude"}}]
+            s.find(r2).update(state="queued", queued_at=2, mode="here", queue={"argv": ["claude"]})
+            s.find(r5).update(state="running", started=3, mode="here",
+                              agents=[{"address": "t-dead", "agent": "claude", "argv": ["claude"], "at": 5, "ended": 9}])
+            s.dirty = True
+        # Switching TO missing claude refuses up front without touching any task.
+        with self.assertRaises(self.Fail):
+            self.call(self.commands.cmd_switch, id=None, all=True, from_="codex", agent="claude", model=None,
+                      argv=None, space=None, parent=None, keep=False, dry_run=False, reviewer=False)
+        # Switching FROM claude to agy moves r1 (live switch), r2 (queued argv), r4 (explicit claude), r5 (stopped claude).
+        res = self.call(self.commands.cmd_switch, id=None, all=True, from_="claude", agent="agy", model="gemini-4-carbon-high",
+                        argv=None, space=None, parent=None, keep=False, dry_run=False, reviewer=False)
+        moved = {row["task"]: row["action"] for row in res["tasks"]}
+        self.assertEqual(moved, {r1: "switch", r2: "edit", r4: "edit", r5: "edit"})
+        self.assertEqual(self.killed, ["t-live"])
+        self.assertEqual(len(self.runs), 1)
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=r1), write=False) as s:
+            self.assertEqual(s.find(r2)["queue"]["argv"][0], "agy")
+            self.assertEqual(s.find(r3).get("agent"), "codex")
+            self.assertIsNone(s.find(r6).get("agent"))
+
+
+class ClaudeStartupTrustAndDialogs(unittest.TestCase):
+    """SDF-41: Claude gets folder trust + bypass permission acceptance up front; stuck dialogs read as Needs you."""
+
+    BYPASS_SCREEN = (
+        "╭──────────────────────────────────────────────────────────────────────────────╮\n"
+        "│ WARNING: Claude Code running in Bypass Permissions mode                      │\n"
+        "│                                                                              │\n"
+        "│ In Bypass Permissions mode, Claude Code will not ask for your approval       │\n"
+        "│ before running potentially dangerous commands.                               │\n"
+        "│                                                                              │\n"
+        "│ ❯ 1. No, exit                                                                │\n"
+        "│   2. Yes, I accept                                                           │\n"
+        "╰──────────────────────────────────────────────────────────────────────────────╯\n"
+    )
+    TRUST_SCREEN = (
+        " Accessing workspace:\n /tmp/wt\n"
+        " Quick safety check: Is this a project you created or one you trust?\n"
+        " ❯ 1. Yes, I trust this folder\n   2. No, exit\n"
+    )
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.agents as agents, herdr_task.base as base, herdr_task.launch as launch
+        import herdr_task.news as news, herdr_task.output as output, herdr_task.settings as settings, herdr_task.store as store
+        self.mock = mock
+        self.agents, self.base, self.launch, self.news, self.output, self.settings, self.store_mod = (
+            agents, base, launch, news, output, settings, store
+        )
+        agents._trust_seen.clear()
+        self.addCleanup(agents._trust_seen.clear)
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="sdf41-claude-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        for obj, name, val in (
+            (launch, "HOME", self.tmp),
+            (launch, "STORE", os.path.join(self.tmp, "tasks")),
+            (base, "STORE", os.path.join(self.tmp, "tasks")),
+            (store, "STORE", os.path.join(self.tmp, "tasks")),
+            (news, "NEWS", os.path.join(self.tmp, "tasks", ".news.json")),
+            (settings, "SETTINGS", os.path.join(self.tmp, "settings.json")),
+            (launch, "own_path", lambda: "/bin/herdr-task"),
+            (launch, "secret_path", lambda: None),
+        ):
+            p = mock.patch.object(obj, name, val)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_claude_launch_sets_folder_trust_and_skips_bypass_prompt(self):
+        repo = os.path.join(self.tmp, "repo")
+        wt = os.path.join(self.tmp, "wt")
+        os.makedirs(repo)
+        subprocess.run(["git", "-C", repo, "init", "-q", "-b", "main"], check=True)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.invalid"), ("commit.gpgsign", "false")):
+            subprocess.run(["git", "-C", repo, "config", k, v], check=True)
+        subprocess.run(["git", "-C", repo, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+        subprocess.run(["git", "-C", repo, "worktree", "add", "-q", "-b", "task/1", wt], check=True)
+
+        cfg_path = os.path.join(self.tmp, ".claude.json")
+        with open(cfg_path, "w") as f:
+            json.dump({"numStartups": 4, "oauthAccount": {"accountUuid": "u-1"},
+                       "projects": {"/keep": {"hasTrustDialogAccepted": True, "allowedTools": ["Read"]}}}, f)
+        os.chmod(cfg_path, 0o600)
+
+        raw = self.settings.argv_for({"agent": "claude", "perm": "full"})
+        self.assertIn("--dangerously-skip-permissions", raw)
+        self.assertIs(json.loads(raw[raw.index("--settings") + 1]).get("skipDangerousModePermissionPrompt"), True)
+
+        built = self.launch.own_argv(raw, wt, cwd=wt)
+        self.assertEqual(built.count("--settings"), 1)
+        merged = json.loads(built[built.index("--settings") + 1])
+        self.assertIs(merged["skipDangerousModePermissionPrompt"], True)
+        self.assertIs(merged["idleCompaction"], False)
+        self.assertTrue(any("herdr-task status" in r for r in merged["permissions"]["allow"]))
+
+        with open(cfg_path) as f:
+            saved = json.load(f)
+        self.assertEqual(os.stat(cfg_path).st_mode & 0o777, 0o600)
+        self.assertEqual((saved["numStartups"], saved["oauthAccount"]), (4, {"accountUuid": "u-1"}))
+        self.assertIs(saved["hasCompletedOnboarding"], True)
+        self.assertNotIn("bypassPermissionsModeAccepted", saved)
+        self.assertEqual(saved["projects"]["/keep"]["allowedTools"], ["Read"])
+        self.assertIs(saved["projects"][wt]["hasTrustDialogAccepted"], True)
+        self.assertIs(saved["projects"][repo]["hasTrustDialogAccepted"], True)
+
+        # Non-bypass permission mode omits skipDangerousModePermissionPrompt; bypassPermissions adds it.
+        auto_built = self.launch.own_argv(self.settings.argv_for({"agent": "claude", "perm": "auto"}), wt, cwd=wt)
+        self.assertNotIn("skipDangerousModePermissionPrompt", json.loads(auto_built[auto_built.index("--settings") + 1]))
+        bp_built = self.launch.own_argv(["claude", "--permission-mode", "bypassPermissions"], wt, cwd=wt)
+        self.assertIs(json.loads(bp_built[bp_built.index("--settings") + 1])["skipDangerousModePermissionPrompt"], True)
+
+        # CLAUDE_CONFIG_DIR is respected, and a malformed file is left untouched rather than clobbered.
+        alt = os.path.join(self.tmp, "claude-alt")
+        os.makedirs(alt)
+        with self.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": alt}):
+            self.launch.claude_trust(wt)
+            self.assertIn(f"CLAUDE_CONFIG_DIR={alt}", self.launch.no_update_env(["claude"]))
+            with open(os.path.join(alt, ".claude.json")) as f:
+                self.assertIs(json.load(f)["projects"][wt]["hasTrustDialogAccepted"], True)
+            broken = os.path.join(self.tmp, "broken-cfg")
+            os.makedirs(broken)
+            broken_file = os.path.join(broken, ".claude.json")
+            with open(broken_file, "w") as f:
+                f.write("{not-json")
+        with self.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": broken}):
+            self.launch.claude_trust(wt)
+        with open(broken_file) as f:
+            self.assertEqual(f.read(), "{not-json")
+
+    def test_claude_trust_and_bypass_dialogs_both_read_as_needs_you(self):
+        repo = os.path.join(self.tmp, "proj")
+        os.makedirs(repo)
+        clock = [1_800_000_000_000]
+        shown = [self.TRUST_SCREEN]
+        live = [{"address": "t1", "status": None, "turn": 0, "foreground": {"name": "2.1.325"},
+                 "labels": {"sheepdog.role": "worker", "sheepdog.agent": "claude"}}]
+        with self.store_mod.Store(self.store_mod.locate(repo)) as s:
+            t = s.new("Check startup dialogs", "Run.", "here")
+            t.update(state="running", started=clock[0] - 5_000, agents=[{"address": "t1", "agent": "claude", "at": clock[0] - 5_000}])
+            s.dirty = True
+            tid = t["id"]
+
+        with (self.mock.patch.object(self.agents, "now", lambda: clock[0]),
+              self.mock.patch.object(self.base, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 0, shown[0], "")),
+              self.mock.patch.object(self.news, "live_agents", lambda key: list(live)),
+              self.mock.patch.object(self.news, "detail", lambda k: k)):
+            with self.store_mod.Store(self.store_mod.locate(repo), write=False) as s:
+                t = s.find(tid)
+                self.assertEqual(self.agents.task_status(t, live), ("needs", "asks", "Asks to trust this folder"))
+                v = self.output.view(s, t, live)
+                self.assertEqual((v["status"], v["needs"], v["why"]), ("needs", "asks", "Asks to trust this folder"))
+
+            clock[0] += 6_000
+            shown[0] = self.BYPASS_SCREEN
+            with self.store_mod.Store(self.store_mod.locate(repo), write=False) as s:
+                t = s.find(tid)
+                self.assertEqual(self.agents.task_status(t, live), ("needs", "asks", "Asks to confirm bypass permissions"))
+                v = self.output.view(s, t, live)
+                self.assertEqual((v["status"], v["needs"], v["why"]), ("needs", "asks", "Asks to confirm bypass permissions"))
+            self.news.news_pass({}, folder=repo)
+            with self.store_mod.Store(self.store_mod.locate(repo), write=False) as s:
+                t = s.find(tid)
+                self.assertEqual((t.get("trust_ask"), t.get("waits")), ("t1", "Asks to confirm bypass permissions"))
+
+            # Once the worker starts a turn, quoting the dialog never triggers a false Needs you.
+            live[0] = {**live[0], "status": {"state": "working"}, "turn": 1}
+            with self.store_mod.Store(self.store_mod.locate(repo), write=False) as s:
+                self.assertEqual(self.agents.task_status(s.find(tid), live), ("working", None, None))

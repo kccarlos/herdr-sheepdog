@@ -9,7 +9,7 @@ import json
 import os
 
 from .base import hc_json, label_of, MAX_RUNNING, now, PROJECT_LABEL, run, STORE
-from .settings import DEFAULTS, LOCAL_MACHINE, MUST_WORDS, SETTINGS, agent_key, bare, project_layer, read_settings
+from .settings import DEFAULTS, LOCAL_MACHINE, MUST_WORDS, SETTINGS, agent_key, bare, default_worker_agent, project_layer, read_settings
 from .launch import coordinators, is_coordinator
 
 # What a coordinator was last told, on its terminal: "review:1a2b3c,merge:…", a short hash of each line.
@@ -115,14 +115,15 @@ def rows(project, d=None, auto=None):
         merge = t.get("merge") if t.get("merge") in MERGE_SHORT else "ask"
         notes = [w for w, k in (("start", "start_notes"), ("finish", "finish_notes")) if str(t.get(k) or "").strip()]
         a_on, a_every, a_dir = autopilot
+        dflt_agent = default_worker_agent()
         return [
             ("review", "Review", review, "on" if rounds > 0 else "off",
              [("tasks", "review_rounds"), ("tasks", "must_fix"), ("reviewer", None)]),
             ("merge", "Merge", MERGE_SHORT[merge], merge, [("tasks", "merge")]),
             ("proof", "Proof", "on" if t.get("proof") is not False else "off (tasks show no proof)",
              "off" if t.get("proof") is False else "on", [("tasks", "proof")]),
-            ("agent", "Task agent", pick_words(cfg.get("worker"), "claude, its own default model and effort"),
-             pick_words(cfg.get("worker"), "claude").replace(", model ", "/").replace(", effort ", "/"), [("worker", None)]),
+            ("agent", "Task agent", pick_words(cfg.get("worker"), f"{dflt_agent}, its own default model and effort"),
+             pick_words(cfg.get("worker"), dflt_agent).replace(", model ", "/").replace(", effort ", "/"), [("worker", None)]),
             ("base", "Base branch", f"{t['base']} (new tasks branch from it and merge into it)" if str(t.get("base") or "").strip()
              else "the folder's checked-out branch", str(t.get("base") or "").strip(), [("tasks", "base")]),
             ("worktrees", "Worktrees", "on (in a git repo, a worktree and branch per task)" if t.get("worktrees") is not False

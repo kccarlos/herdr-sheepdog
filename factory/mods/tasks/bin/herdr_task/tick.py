@@ -404,8 +404,12 @@ def tick_store(s, report):
         try:
             a = begin(s, t, q.get("argv") or worker_argv(s, t), parent=q.get("parent"))
         except Fail as e:
-            t["attention"] = f"Couldn't start: {e}"
-            s.dirty = True
+            why = f"Couldn't start: {e}"
+            if t.get("attention") != why:
+                t["attention"] = why
+                t.pop("attention_at", None)
+                s.dirty = True
+                report["attention"].append(t["id"])
             continue
         n += 1
         report["started"].append({"folder": s.loc["folder"], "id": t["id"], "ref": s.ref(t), "terminal": a["address"]})
