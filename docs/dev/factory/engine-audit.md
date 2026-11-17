@@ -103,8 +103,7 @@ The Python test directory `test/` contains `test/home_guard.py` (`117` lines via
 
 | Snapshot | `test_*.py` Files | Lines (`wc -l`) | Test Classes (`grep -c '^class '`) | `def test_*` Methods (`grep -c '^\s*def test_'`) | Loaded Test Cases (`unittest` loader) | Why Loader Count Exceeds `grep` |
 |---|---:|---:|---:|---:|---:|---|
-| **At `1a4e064e` (`FAC-116`, all `test_*.py`)** | **25** | **19,073** | **128** | **917** | **926** | `test_herdr_task.py` has **640** `def test_*` methods (`grep`) and **649** loaded test cases (`unittest` loader) because `CodexCodeMode` and subclassed test cases inherit/bind 9 additional test methods. |
-| *Pre-sync `6719157f` (`HEAD`, all `test_*.py`)* | *18* | *16,381* | *106* | *742* | *751* | `test_herdr_task.py` had **539** `def test_*` methods (`grep`) and **548** loaded test cases (`unittest` loader); in the dirty working tree without `DeviceWait` (5 tests, 100L), `test_herdr_task.py` had **534** `grep` / **543** loader (`16,281`L total). |
+| **At `1a4e064e` (`FAC-116`, all `test_*.py`)** | **25** | **19,073** | **150** | **917** | **926** | `test_herdr_task.py` has **640** `def test_*` methods (`grep`) and **649** loaded test cases (`unittest` loader) because `CodexCodeMode` and subclassed test cases inherit/bind 9 additional test methods. |
 
 ### Coverage per Engine Module
 
