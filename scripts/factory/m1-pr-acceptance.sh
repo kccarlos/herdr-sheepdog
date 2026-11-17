@@ -24,7 +24,7 @@ KEEP=0
 VM=""
 VM_BASE=""
 VM_USER="admin"
-VM_KEY="${SHEEPDOG_NIGHTLY_VM_KEY:-}"
+VM_KEY="${SHEEPDOG_NIGHTLY_VM_KEY:-$HOME/.ssh/tart_sdqa_ed25519}"
 SHEEPDOG_BIN=""
 
 while [ "$#" -gt 0 ]; do

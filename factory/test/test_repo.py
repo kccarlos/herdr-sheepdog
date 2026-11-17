@@ -651,3 +651,28 @@ class TartHomeScripts(unittest.TestCase):
                 )
                 self.assertEqual(bad.returncode, 2, bad_args)
                 self.assertFalse(os.path.exists(seen_file), f"tart was called for {bad_args}")
+
+            # When ~/.ssh/tart_sdqa_ed25519 exists and SHEEPDOG_NIGHTLY_VM_KEY is unset, ssh gets -i <key>.
+            ssh_dir = os.path.join(fake_home, ".ssh")
+            os.makedirs(ssh_dir, exist_ok=True)
+            vm_key = os.path.join(ssh_dir, "tart_sdqa_ed25519")
+            with open(vm_key, "w") as f:
+                f.write("dummy\n")
+            ssh_args_file = os.path.join(d, "ssh-args")
+            with open(tart_stub, "w") as f:
+                f.write(
+                    "#!/bin/sh\n"
+                    'if [ "$1" = "list" ]; then echo "sd-qa"; exit 0; fi\n'
+                    'if [ "$1" = "ip" ]; then echo "10.0.0.9"; exit 0; fi\n'
+                    "exit 1\n"
+                )
+            with open(os.path.join(fake_bin, "ssh"), "w") as f:
+                f.write(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{ssh_args_file}"\ncase "$*" in *" true") exit 0;; esac\nexit 1\n')
+            os.chmod(os.path.join(fake_bin, "ssh"), 0o755)
+            subprocess.run(
+                ["bash", R("scripts", "factory", "m1-pr-acceptance.sh"), "owner/repo", "--vm", "sd-qa"],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn(f"-i {vm_key}", open(ssh_args_file).read())
