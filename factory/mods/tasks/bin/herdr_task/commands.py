@@ -14,7 +14,7 @@ import time
 from . import sandbox
 from .checks import checks_line, resolve_check, sync_check, sync_mode, sync_plan, SYNC_FAILED
 from .base import Fail, git, guard, hc_json, kill_agent, label_of, now, run, STORE, stop_note, VERSION
-from .settings import (write_max_running, write_task_check, write_worker_perm, WORKER_PERMS,
+from .settings import (cli_missing_reason, write_max_running, write_task_check, write_worker_agent, write_worker_perm, WORKER_PERMS,
     accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
     fable_due, gate_min, merge_hold, merge_policy,
     merge_wait_why, MUST_WORDS, project_base, remove_build_dir, review_kind, review_limits, reviewed_for_head, set_opts, settings_block, settings_for,
@@ -338,14 +338,32 @@ def pool_empty_reason(argv):
     return f"the {pool_name} pool is at 0%" + (f" (resets {reset})" if reset else "")
 
 
+def start_refusal(s, t, argv):
+    """Why `t` cannot start an agent on `argv` right now (missing CLI or empty pool), or None."""
+    if why := cli_missing_reason(argv):
+        return f"Can't start {s.ref(t)}: {why}"
+    if why := pool_empty_reason(argv):
+        return f"Can't start {s.ref(t)}: {why}. Pick another CLI or model (--agent / --model)."
+    return None
+
+
+def note_missing_cli(s, t, argv, record=True):
+    if not (why := cli_missing_reason(argv)):
+        return None
+    if record and t["state"] in ("todo", "queued", "running"):
+        t["attention"], s.dirty = f"Couldn't start: {why}", True
+        t.pop("attention_at", None)
+    return f"Can't start {s.ref(t)}: {why}"
+
+
 def begin(s, t, argv, space=None, parent=None):
     """Starts the task's first agent. Returns its record."""
-    if why := pool_empty_reason(argv):
-        raise Fail(f"Can't start {s.ref(t)}: {why}. Pick another CLI or model (--agent / --model).")
+    if refused := start_refusal(s, t, argv):
+        raise Fail(refused)
     t["state"], t["started"] = "running", now()
     # Its brief teaches `reviewed`: ready waits for a review of its final commit (review_refusal).
     t["review_gate"] = True
-    for k in ("queue", "queued_at", "attention", "held", "scheduled_for"):
+    for k in ("queue", "queued_at", "attention", "attention_at", "held", "scheduled_for"):
         t.pop(k, None)
     if t.get("mode") == "worktree" and not t.get("worktree") and not worktrees_on(s):
         t["mode"] = "here"
@@ -371,6 +389,7 @@ def just_started(t):
 
 
 def cmd_start(args):
+    refused = None
     with open_store(args) as s:
         t = s.find(args.id)
         live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)] or [a for a in [just_started(t)] if a]
@@ -387,7 +406,7 @@ def cmd_start(args):
         argv = agent_argv(None, args.argv) if args.argv else worker_argv(s, t, agent=args.agent) if args.agent else \
             (q.get("argv") or worker_argv(s, t))
         parent = args.parent or q.get("parent")
-        plan = {"argv": argv, "parent": parent, **({"custom": True} if args.argv else {})}
+        plan = {"argv": argv, "parent": parent, **({"custom": True} if args.argv else {}), **({"agent": args.agent} if args.agent else {})}
         at = scheduled_at(args)
         if at:
             # start --at / --in: it starts by itself then, as this start would now.
@@ -402,9 +421,13 @@ def cmd_start(args):
             t["queue"] = plan
             s.dirty = True
             v = view(s, t)
+        elif refused := note_missing_cli(s, t, argv):
+            pass
         else:
             a = begin(s, t, argv, parent=parent)
             v = view(s, t)
+    if refused:
+        raise Fail(refused)
     # The scheduler starts queued tasks and tells the Assistant its tasks' news.
     try:
         ensure_scheduler(quiet=True)
@@ -1584,6 +1607,8 @@ def cmd_edit(args):
             q = t.get("queue") or {}
             if q.get("argv") and not q.get("custom"):
                 q["argv"] = worker_argv(s, t)
+            if (t.get("attention") or "").startswith("Couldn't start:") and not cli_missing_reason(worker_argv(s, t)):
+                t.pop("attention", None)
         set_base(s, t, args.base)
         set_notes(t, args)
         if args.after is not None:
@@ -1633,6 +1658,17 @@ def amend(s, t, args):
         return False
 
 
+def refresh_worker_plans(s):
+    for t in s.data.get("tasks") or []:
+        q = t.get("queue") or {}
+        if t.get("state") in ("queued", "scheduled") and q.get("argv") and not q.get("custom") and not q.get("agent") and not t.get("agent"):
+            q["argv"] = worker_argv(s, t)
+            s.dirty = True
+        if t.get("state") in ("todo", "queued") and (t.get("attention") or "").startswith("Couldn't start:") and not cli_missing_reason(q.get("argv") or worker_argv(s, t)):
+            t.pop("attention", None)
+            s.dirty = True
+
+
 def cmd_config(args):
     with open_store(args) as s:
         cfg = s.data.setdefault("config", {})
@@ -1660,17 +1696,27 @@ def cmd_config(args):
         for pair in getattr(args, "set", None) or []:  # FAC-103: folder settings from the CLI
             k, eq, v = pair.partition("=")
             key = k.strip().lower()
-            if not eq or key not in ("tasks.max_running", "max_running", "tasks.check", "check", "worker.perm"):
-                raise Fail(f"config --set takes tasks.max_running=N, tasks.check=CMD or worker.perm=MODE, not {pair!r}.")
+            if not eq or key not in ("tasks.max_running", "max_running", "tasks.check", "check", "worker.perm", "worker.agent"):
+                raise Fail(f"config --set takes tasks.max_running=N, tasks.check=CMD, worker.agent=CLI or worker.perm=MODE, not {pair!r}.")
             v = v.strip().strip("\"'")
+            low = v.lower()
+            if key == "worker.agent":
+                if not v or low == "default":
+                    write_worker_agent(s, None)
+                elif low in AGENTS:
+                    write_worker_agent(s, low)
+                else:
+                    raise Fail(f"worker.agent is {', '.join(AGENTS)} (\"default\": Settings' above this project).")
+                refresh_worker_plans(s)
+                continue
             if key == "worker.perm":
-                low = v.lower()
                 if not v or low == "default":
                     write_worker_perm(s, None)
                 elif low in WORKER_PERMS:
                     write_worker_perm(s, WORKER_PERMS[low])
                 else:
                     raise Fail("worker.perm is full, auto, plan, read-only, acceptEdits, bypassPermissions, dontAsk or manual (\"default\": Settings' above this project).")
+                refresh_worker_plans(s)
                 continue
             if key in ("tasks.check", "check"):
                 write_task_check(s, None, None if not v or v.lower() == "default" else v)
@@ -1711,18 +1757,22 @@ def continue_line(s, t):
             f"`{own_path()} ready {s.ref(t)}{where}` when it's {done}.")
 
 
+def resolve_again_argv(s, t, key=None, argv_json=None, resuming=False):
+    prev = last_agent(t)
+    keep = not resuming and prev and prev.get("argv") and (t.get("pick_at") or 0) <= (prev.get("at") or 0)
+    return agent_argv(None, argv_json) if argv_json else worker_argv(s, t, agent=key) if key else \
+        (prev["argv"] if keep else worker_argv(s, t))
+
+
 def start_again(s, t, key=None, argv_json=None, message=None, parent=None, resuming=False, nudge=None):
     """Starts an agent for the task: the last agent's own session when it's the same kind of agent
     and the session is known; else a fresh one with a handoff. `message` goes after either; `nudge`
     is a resumed session's first message when no `message` is given; `resuming` (`herdr-task resume`)
     rebuilds argv from the current settings and wakes a resumed session."""
     prev = last_agent(t)
-    # The last agent's argv again (switch, tell), unless `resuming` or edit changed its pick.
-    keep = not resuming and prev and prev.get("argv") and (t.get("pick_at") or 0) <= (prev.get("at") or 0)
-    argv = agent_argv(None, argv_json) if argv_json else worker_argv(s, t, agent=key) if key else \
-        (prev["argv"] if keep else worker_argv(s, t))
-    if why := pool_empty_reason(argv):
-        raise Fail(f"Can't start {s.ref(t)}: {why}. Pick another CLI or model (--agent / --model).")
+    argv = resolve_again_argv(s, t, key, argv_json, resuming)
+    if refused := start_refusal(s, t, argv):
+        raise Fail(refused)
     unarchive(s, t)
     ensure_build_dir(s, t)
     parent = parent_for(parent or (prev or {}).get("parent"), s.loc["folder"])
@@ -1732,13 +1782,18 @@ def start_again(s, t, key=None, argv_json=None, message=None, parent=None, resum
         msg = message or nudge or (continue_line(s, t) if resuming else None)
         a = launch(s, t, argv, msg, parent=parent, resume=res)
         a["session"] = prev["session"]  # the same conversation from the start (agent_log, before a pass sees its pid)
+        if (t.get("attention") or "").startswith("Couldn't start:"):
+            t.pop("attention", None)
         return a, True
     text = handoff(s, t, prev, parent, argv)
     extra = message or (continue_line(s, t) if resuming and f"ready {s.ref(t)}" not in text else None)
     if extra:
         text += "\n\n" + extra
     t["review_gate"] = True
-    return launch(s, t, argv, text, parent=parent), False
+    a = launch(s, t, argv, text, parent=parent)
+    if (t.get("attention") or "").startswith("Couldn't start:"):
+        t.pop("attention", None)
+    return a, False
 
 
 # SHEP-189: what a resumed agent hears first. Its session comes back with no message, so without this
@@ -1748,6 +1803,7 @@ RESUME_NUDGE = ("Shepherdr resumed your session because your agent had stopped. 
 
 
 def cmd_resume(args):
+    refused = None
     with open_store(args) as s:
         t = s.find(args.id)
         live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)] or [a for a in [just_started(t)] if a]
@@ -1755,18 +1811,21 @@ def cmd_resume(args):
             raise Fail(f"{s.ref(t)} still has an agent ({live[0]['address']}). Use switch to replace it.")
         if t["state"] in ("todo", "scheduled", "queued"):
             raise Fail(f"{s.ref(t)} hasn't started. Use start.")
-        if t["state"] == "done":
-            t["state"] = "running"
-        gone = [k["address"] for k in live_agents(s.key(t))]  # its agents' terminals, none running an agent
-        back_to_work(s, t, "resumed")
-        a, resumed = start_again(s, t, args.agent, args.argv, parent=args.parent, resuming=True)
-        # #1022: the old agent's terminal, its plain shell left (with the status it last reported when
-        # it died mid-turn), kept counting as the task's agent: it goes, as switch ends the one it replaces.
-        for address in gone:
-            if address != a["address"]:
-                stop_note("resume-retire", task=s.ref(t), terminal=address, by="resume")
-                run(["hc", "kill", address])
-        v = view(s, t)
+        if not (refused := note_missing_cli(s, t, resolve_again_argv(s, t, args.agent, args.argv, resuming=True))):
+            if t["state"] == "done":
+                t["state"] = "running"
+            gone = [k["address"] for k in live_agents(s.key(t))]  # its agents' terminals, none running an agent
+            back_to_work(s, t, "resumed")
+            a, resumed = start_again(s, t, args.agent, args.argv, parent=args.parent, resuming=True)
+            # #1022: the old agent's terminal, its plain shell left (with the status it last reported when
+            # it died mid-turn), kept counting as the task's agent: it goes, as switch ends the one it replaces.
+            for address in gone:
+                if address != a["address"]:
+                    stop_note("resume-retire", task=s.ref(t), terminal=address, by="resume")
+                    run(["hc", "kill", address])
+            v = view(s, t)
+    if refused:
+        raise Fail(refused)
     say(args, {**v, "terminal": a["address"], "parent": a.get("parent"), "resumed": resumed},
         f"{s.ref(t)} {'resumed its session' if resumed else 'started with a handoff'}: {a['address']}")
 
@@ -1806,6 +1865,10 @@ def switch_one(s, t, args, live):
     the caller's own agent, ended after the store is saved."""
     refresh_sessions(s, t, live)
     old = live[-1] if live else None
+    # A --model rides on the task's own pick (retarget), which start_again then reads.
+    key = None if getattr(args, "model", None) else args.agent
+    if refused := start_refusal(s, t, resolve_again_argv(s, t, key, args.argv)):
+        raise Fail(refused)
     if t["state"] in ("todo", "scheduled", "queued", "done"):
         t["state"] = "running"
         t.setdefault("started", now())
@@ -1821,8 +1884,6 @@ def switch_one(s, t, args, live):
         # sat on "Interrupted" with nothing to do. Its worktree and session stay for the new agent.
         end_agent(s, t, old["address"])
         ended.append(old["address"])
-    # A --model rides on the task's own pick (retarget), which start_again then reads.
-    key = None if getattr(args, "model", None) else args.agent
     try:
         a, resumed = start_again(s, t, key, args.argv, parent=args.parent, nudge=SWITCH_NUDGE)
     except Fail as e:
@@ -1848,12 +1909,17 @@ def cmd_switch(args):
         raise Fail("Name a task, or give --all --from <cli[:model]> --agent <cli>.")
     if getattr(args, "dry_run", False) or getattr(args, "from_", None) or getattr(args, "reviewer", False):
         raise Fail("--dry-run, --from and --reviewer go with --all.")
+    refused = None
     with open_store(args) as s:
         t = s.find(args.id)
-        if getattr(args, "model", None):
-            retarget(s, t, args.agent or worker_pick(s, t).get("agent"), args.model)
         live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)]
-        data, text, own = switch_one(s, t, args, live)
+        probe = resolve_again_argv(s, t, args.agent or (worker_pick(s, t).get("agent") if getattr(args, "model", None) else None), args.argv)
+        if not (refused := note_missing_cli(s, t, probe, record=not live)):
+            if getattr(args, "model", None):
+                retarget(s, t, args.agent or worker_pick(s, t).get("agent"), args.model)
+            data, text, own = switch_one(s, t, args, live)
+    if refused:
+        raise Fail(refused)
     if own:
         end_agent(s, t, own)
     say(args, data, text + ended_line(data, own))
@@ -1876,15 +1942,21 @@ def switch_all(args):
         raise Fail("switch --all takes --agent and --model, not --argv.")
     if args.agent not in AGENTS:
         raise Fail(f"--agent is one of {', '.join(AGENTS)}, not {args.agent!r}.")
+    if not args.dry_run and (why := cli_missing_reason([args.agent])):
+        raise Fail(f"Can't switch to {args.agent}: {why}")
     lines, out, owns = [], [], []
     with open_store(args, write=not args.dry_run) as s:
         for t in s.data.get("tasks") or []:
             if t.get("state") == "done" or t.get("archived"):
                 continue
             live = workers(s, t) if t.get("state") == "running" else []  # Ready and the rest: edited
-            prev = last_agent(t)
+            prev, q = last_agent(t), t.get("queue") or {}
             if live and prev and prev.get("argv"):
                 pick = {"agent": prev.get("agent") or agent_key(prev["argv"]), "model": argv_model(prev["argv"])[0]}
+            elif t.get("state") in ("queued", "scheduled") and not t.get("agent") and q.get("argv"):
+                pick = {"agent": agent_key(q["argv"]), "model": argv_model(q["argv"])[0]}
+            elif prev and not t.get("agent") and (t.get("pick_at") or 0) <= (prev.get("at") or 0):
+                pick = {"agent": prev.get("agent") or agent_key(prev.get("argv")), "model": argv_model(prev.get("argv") or [])[0]}
             else:
                 pick = worker_pick(s, t)
             rev = args.reviewer and t.get("reviewer") and matches({"agent": t["reviewer"], "model": t.get("reviewer_model")}, args.from_)

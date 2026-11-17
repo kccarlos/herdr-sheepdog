@@ -36,7 +36,7 @@ REAL_DIRS = [os.path.join(REAL, p) for p in (
     ".herdr", ".config/herdr-app", ".config/herdr-core", ".config/shepherdr", ".config/sheepdog",
     ".local/share/herdr", ".local/share/shepherdr", ".local/share/sheepdog", ".local/state/herdr-core",
     ".local/state/shepherdr", ".local/state/sheepdog", ".cache/shepherdr", ".cache/sheepdog",
-    "Library/Caches/shepherdr", "Library/Caches/sheepdog", ".claude", ".codex")]
+    "Library/Caches/shepherdr", "Library/Caches/sheepdog", ".claude", ".claude.json", ".codex")]
 # What the person's environment points at its own terminal, chat and agent with.
 DROP = ("HC_TERMINAL_SOCKET", "HC_TERMINAL_ID", "HC_SCOPE", "HC_SOCKET", "HC_SESSION", "HERDR_BROWSER_TASK", "SHEEPDOG_TASK",
         "HERDR_ASK_CHAINED", "HERDR_APP_HOME", "SHEEPDOG_FACTORY_HOME", "SHEEPDOG_HOME", "SHEPHERDR_HOME", "SHEPHERDR_DATA", "HERDR_TASK_STORE",
@@ -118,7 +118,12 @@ _fakes = tempfile.mkdtemp(prefix="shep-test-bin-")
 with open(os.path.join(_fakes, "codexbar"), "w") as _f:
     _f.write("#!/bin/sh\nexit 1\n")
 os.chmod(os.path.join(_fakes, "codexbar"), 0o755)
-os.environ["PATH"] = _fakes + os.pathsep + os.environ.get("PATH", "")
+_fake_clis = tempfile.mkdtemp(prefix="shep-test-clis-")
+for _cli in ("claude", "codex", "agy"):
+    with open(os.path.join(_fake_clis, _cli), "w") as _f:
+        _f.write("#!/bin/sh\nexit 0\n")
+    os.chmod(os.path.join(_fake_clis, _cli), 0o755)
+os.environ["PATH"] = _fakes + os.pathsep + os.environ.get("PATH", "") + os.pathsep + _fake_clis
 # git commits in throwaway repos need a name; the real ~/.gitconfig is out of reach now
 for k, v in (("GIT_AUTHOR_NAME", "Test"), ("GIT_AUTHOR_EMAIL", "test@example.invalid"),
              ("GIT_COMMITTER_NAME", "Test"), ("GIT_COMMITTER_EMAIL", "test@example.invalid")):

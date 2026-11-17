@@ -16,6 +16,32 @@ from .base import Fail, git, HOME, MAX_RUNNING, WHERE
 AGENTS = {"claude": ["claude"], "codex": ["codex", "--no-daemon"], "agy": ["agy"]}
 
 
+def installed_clis():
+    """The known agent CLIs (claude, codex, agy) found on PATH, in AGENTS order."""
+    return [k for k in AGENTS if shutil.which(k)]
+
+
+def default_worker_agent():
+    """The effective worker CLI when none is set: the first installed CLI in AGENTS, else 'claude'."""
+    found = installed_clis()
+    return found[0] if found else "claude"
+
+
+def cli_missing_reason(argv):
+    """Why `argv`'s CLI can't be launched (not on PATH), naming installed CLIs and the fix; or None."""
+    prog = (argv or [""])[0]
+    if prog and shutil.which(prog):
+        return None
+    cli = agent_key(argv) if argv else "claude"
+    have = installed_clis()
+    if have:
+        pick = have[0]
+        return (f"{cli} isn't installed on PATH (installed: {', '.join(have)}). "
+                f"Set an installed CLI with `herdr-task config --set worker.agent={pick}` (or pass `--agent {pick}`).")
+    return (f"{cli} isn't installed on PATH (none of {', '.join(AGENTS)} found on PATH). "
+            "Install claude, codex or agy, or set `herdr-task config --set worker.agent=<cli>`.")
+
+
 # ---- the person's settings ------------------------------------------------------------------
 
 SETTINGS = os.environ.get("HERDR_TASK_SETTINGS") or WHERE.path("settings")
@@ -168,6 +194,16 @@ def write_worker_perm(s, value):
     return _write_project_setting(s, "worker", "perm", value)
 
 
+def write_worker_agent(s, value):
+    """`config --set worker.agent=<cli>`: sets or clears the project folder's worker.agent."""
+    if value is not None:
+        cur = (project_layer(read_settings(), _folder_of(s)).get("worker") or {}).get("agent")
+        if cur and cur != value:
+            for k in ("model", "effort"):
+                _write_project_setting(s, "worker", k, None)
+    return _write_project_setting(s, "worker", "agent", value)
+
+
 def write_max_running(s, space=None, value=_UNSET):
     """FAC-103: `config --set tasks.max_running=N`, the project folder's "Tasks at once" in
     d["projects"][folder]. None unsets it there. Returns the project folder. Refused on a file
@@ -301,8 +337,11 @@ def argv_for(pick):
             a += ["--model", pick["model"]]
         if pick.get("effort"):
             a += ["--effort", pick["effort"]]
-        a += ["--settings", json.dumps({"fastMode": bool(pick.get("fast"))})]
         perm = pick.get("perm")
+        st = {"fastMode": bool(pick.get("fast"))}
+        if perm in ("full", "bypassPermissions"):
+            st["skipDangerousModePermissionPrompt"] = True
+        a += ["--settings", json.dumps(st)]
         if perm in ("full", "bypassPermissions"):
             a.append("--dangerously-skip-permissions")
         elif perm:
@@ -349,7 +388,7 @@ def worker_pick(s, task, space=None, agent=None):
     if task.get("agent") and task["agent"] != pick.get("agent"):
         pick = {"agent": task["agent"], **({"perm": w["perm"]} if w.get("perm") else {})}
     if not pick.get("agent") and not pick.get("argv"):
-        pick["agent"] = "claude"
+        pick["agent"] = default_worker_agent()
     for k in ("model", "effort"):
         if task.get(k):
             pick[k] = task[k]
@@ -364,7 +403,7 @@ def worker_argv(s, task, space=None, agent=None):
     if pick.get("argv") and not (task.get("model") or task.get("effort")):
         return argv_for(pick)
     pick.pop("argv", None)
-    pick.setdefault("agent", "claude")
+    pick.setdefault("agent", default_worker_agent())
     return argv_for(pick) or agent_argv(pick["agent"])
 
 
@@ -533,8 +572,8 @@ def cli_here(kind):
     return (((read_checks().get("machines") or {}).get("") or {}).get(kind))
 
 
-CLI_NAMES = {"claude": "Claude Code", "codex": "Codex"}
-LOGIN = {"claude": "claude auth login", "codex": "codex login"}
+CLI_NAMES = {"claude": "Claude Code", "codex": "Codex", "agy": "Antigravity"}
+LOGIN = {"claude": "claude auth login", "codex": "codex login", "agy": "agy"}
 
 
 def codex_models():
@@ -587,18 +626,18 @@ def codex_login_now():
 
 
 def trust_roots(folder):
-    """The folders Codex asks to trust for an agent started in folder: the folder itself and its git
-    repository's root, which for a worktree is the main checkout's (Codex: "Trusting will apply to
-    the repository root")."""
+    """The folders Codex and Claude Code ask to trust for an agent started in folder: the folder
+    itself and its git repository's root, which for a worktree is the main checkout's."""
     if not folder:
         return []
-    out = [folder] + [r for r in (os.path.realpath(folder),) if r != folder]  # Codex may match the resolved path
+    out = [folder] + [r for r in (os.path.realpath(folder),) if r != folder]
     ok, common, _ = git(folder, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if ok and common:
         root = os.path.dirname(common) if os.path.basename(common) == ".git" else \
             git(folder, "rev-parse", "--show-toplevel")[1]
-        if root and root not in out:
-            out.append(root)
+        for r in (root, os.path.realpath(root) if root else ""):
+            if r and r not in out:
+                out.append(r)
     return out
 
 
@@ -625,6 +664,16 @@ def reviewer_command(who, model=None, effort=None, folder=None):
     else:
         return None
     return shlex.join(a)
+
+
+def effective_argv(s, t, argv=None):
+    if argv:
+        return argv
+    if t.get("agents") and t["agents"][-1].get("argv"):
+        return t["agents"][-1]["argv"]
+    if t.get("state") in ("queued", "scheduled") and not t.get("agent") and (t.get("queue") or {}).get("argv"):
+        return t["queue"]["argv"]
+    return worker_argv(s, t)
 
 
 def task_settings(s, t, space=None, argv=None, live=False):
@@ -662,8 +711,8 @@ def task_settings(s, t, space=None, argv=None, live=False):
         f"message: fix them, commit, ready again"), on, rev_by)
     if kind:
         add("Review kind", f"{kind} (1 review round, then the person reviews it)", kind, "task")
-    # What it runs on: the given argv, else its last agent's, else what it would start with.
-    argv = argv or (t["agents"][-1].get("argv") if t.get("agents") else None) or worker_argv(s, t)
+    # What it runs on: the given argv, else its last agent's or queued plan's, else what it would start with.
+    argv = effective_argv(s, t, argv)
     agent = agent_key(argv)
     if on:
         rv = dict(cfg.get("reviewer") or {})
@@ -760,7 +809,7 @@ def settings_block(s, t, space=None, argv=None, live=False):
     lines = task_settings(s, t, argv=argv, live=live)
     rows = [f"- {x['label']}: {x['text']}" + (f" ({SET_BY[x['by']]})" if x["by"] else "") for x in lines]
     # Codex's sandbox can't start here (SHEP-227, #998): the worker hears it in its brief and tells the person.
-    word = sandbox_word(lines, argv or (t["agents"][-1].get("argv") if t.get("agents") else None) or worker_argv(s, t))
+    word = sandbox_word(lines, effective_argv(s, t, argv))
     if word:
         rows.append(f"- Sandbox: {word}")
     return "\n".join([SETTINGS_HEAD, *rows])

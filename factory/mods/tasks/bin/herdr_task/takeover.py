@@ -5,8 +5,8 @@ import os
 import re
 
 from .base import beside_store, git, hc_json, kill_agent, label_of, now, run, stop_note
-from .settings import AGENTS, argv_for, settings_for
-from .agents import fit, from_person, log_tail, said
+from .settings import AGENTS, argv_for, cli_missing_reason, default_worker_agent, settings_for
+from .agents import cli_of, fit, from_person, log_tail, said
 from .provider import provider_cut, provider_error
 from .launch import brief, launch, parent_for
 
@@ -125,6 +125,8 @@ def backup_for(s, t, running):
     if want == "off":
         return None, "no backup"
     if want and want != running:
+        if cli_missing_reason(backup_argv(s, t, want)):
+            return None, "backup not installed"
         if want in NAMES and here_state(want) in ("missing", "signed-out"):
             return None, f"backup {'signed out' if here_state(want) == 'signed-out' else 'not installed'}"
         return want, None
@@ -200,8 +202,8 @@ def takeover(s, t, k, row, log, report):
     if row.get("handled") or not takes_over(row.get("reason")):
         return row
     row["handled"] = True
-    running = label_of(k.get("labels"), "agent") or next(
-        (a.get("agent") for a in t.get("agents") or [] if a.get("address") == k["address"]), None) or "claude"
+    running = cli_of(k) or next(
+        (a.get("agent") for a in t.get("agents") or [] if a.get("address") == k["address"]), None) or default_worker_agent()
     if t.get("backup"):
         row["reason"] = fit(f"{head(row['reason'])}, backup too")
         return row

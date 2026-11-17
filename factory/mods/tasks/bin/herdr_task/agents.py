@@ -66,8 +66,16 @@ def cli_of(k):
     if lb:
         return lb
     fg, st = k.get("foreground") or {}, k.get("status") if isinstance(k.get("status"), dict) else {}
-    raw = " ".join(str(x or "") for x in (st.get("app"), k.get("agent"), fg.get("name"), *(fg.get("argv") or [])[:1], *(k.get("argv") or [])[:1])).lower()
-    return "agy" if "agy" in raw or "antigravity" in raw else "codex" if "codex" in raw else "claude"
+    fg_name = os.path.basename(str(fg.get("name") or "")).lstrip("-")
+    fg_args = (fg.get("argv") or [])[:4 if runs_command(fg.get("argv")) else 1]
+    raw = " ".join(str(x or "") for x in (st.get("app"), k.get("agent"), fg_name, *fg_args, *(k.get("argv") or [])[:1])).lower()
+    if "agy" in raw or "antigravity" in raw:
+        return "agy"
+    if "codex" in raw:
+        return "codex"
+    if "claude" in raw or AGENT_VER.match(fg_name):
+        return "claude"
+    return None
 
 
 def _cmd_shell(fg):
@@ -161,6 +169,8 @@ def task_status(task, live):
         from .when import starts_words
         return "scheduled", None, starts_words(task.get("scheduled_for") or now(), now())
     if st not in ("running", "ready"):
+        if st in ("todo", "queued") and task.get("attention"):
+            return "needs", "attention", task["attention"]
         return (st if st in STATUSES else "todo"), None, None
     states = ["working" if _startup_auth(task, k) else "blocked" if asking(k) else status_word(k) for k in live]
     # A problem Herdr just found (SHEP-133): not Needs you before GRACE_MS have passed, while its
@@ -181,8 +191,9 @@ def task_status(task, live):
         return ("needs", "provider", r.get("reason")) if r.get("over") else ("working", None, retry_line(r))
     if "blocked" in states:
         return "needs", "asks", REASONS["question"]
-    if trust_asked(live):
-        return "needs", "asks", REASONS["trust"]
+    _, dialog_why = startup_dialog(live)
+    if dialog_why:
+        return "needs", "asks", dialog_why
     # Out of review rounds (FAC-95, note 49): it waits on its Assistant (review-more, accept
     # --owner-approved, reopen) whatever its agent does meanwhile: busy, a background job, its own line.
     if st == "running" and task.get("review_out"):
@@ -454,31 +465,42 @@ LINE_MAX = 40
 # do (as Shepherdr's SUMMARY_MAX); the rest goes in --details or the proof.
 SUMMARY_MAX = 160
 REASONS = {"plan": "Plan to approve", "permission": "Asks permission", "question": "Question for you",
-           "reply": "Waits for your reply", "signed_out": "Signed out", "trust": "Asks to trust this folder"}
+           "reply": "Waits for your reply", "signed_out": "Signed out", "trust": "Asks to trust this folder",
+           "bypass": "Asks to confirm bypass permissions", "onboard": "Asks to finish first-run setup"}
 
-# Claude Code's folder-trust dialog (#755): shown before it reports any status, so to Herdr the
-# agent looked like it was starting, then Working, until it stalled. Read off its screen.
-TRUST = re.compile(r"Quick safety check|Do you trust the files in this folder|Yes, I trust this folder", re.I)
+# Claude Code's folder-trust (#755), Bypass Permissions confirmation, and first-run onboarding dialogs:
+# shown before any turn runs, so to Herdr the agent looked like it was starting, then Working, until it stalled.
+TRUST = re.compile(r"Quick safety check|Do you trust the files in this folder|Yes,\s+I trust this folder", re.I)
+BYPASS = re.compile(r"WARNING:\s+Claude\s+Code\s+running\s+in\s+Bypass\s+Permissions\s+mode|"
+                    r"Bypass\s+Permissions\s+mode[\s\S]{0,600}Yes,\s+I\s+accept", re.I)
+ONBOARD = re.compile(r"Choose the text style that looks best with your terminal|Syntax theme:.*ctrl\+t to disable", re.I)
 _trust_seen = {}
 
 
-def trust_asked(live):
-    """The address of a live agent showing Claude Code's folder-trust dialog, else None. Only an
-    agent that never reported a status nor took a turn: its screen is read at most every 5 s."""
+def startup_dialog(live):
+    """(address, reason) of a live Claude worker stuck on its folder-trust, bypass-permissions or
+    first-run onboarding dialog, else (None, None). Only a worker that reported no status and took no turn;
+    its screen is read at most every 5 s."""
     from .base import run
     for k in live:
         if (status_word(k) or k.get("turn")
-                or (label_of(k.get("labels"), "agent") or "claude") != "claude"
-                or label_of(k.get("labels"), "role") == "reviewer"):
+                or cli_of(k) not in (None, "claude") or label_of(k.get("labels"), "role") == "reviewer"):
             continue
         address = k.get("address")
         seen = _trust_seen.get(address)
         if not seen or now() - seen[0] > 5000:
             screen = run(["hc", "read", address, "--lines", "40"]).stdout or ""
-            seen = _trust_seen[address] = (now(), bool(TRUST.search(screen)))
+            why = (REASONS["trust"] if TRUST.search(screen) else REASONS["bypass"] if BYPASS.search(screen)
+                   else REASONS["onboard"] if ONBOARD.search(screen) else None)
+            seen = _trust_seen[address] = (now(), why)
         if seen[1]:
-            return address
-    return None
+            return address, seen[1]
+    return None, None
+
+
+def trust_asked(live):
+    """The address of a live agent showing a Claude Code first-run dialog (trust or bypass), else None."""
+    return startup_dialog(live)[0]
 
 
 def fit(text, n=LINE_MAX):

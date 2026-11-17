@@ -91,7 +91,7 @@ def news_line(s, t, v, event, words=None):
 
 def news_state(s, t, live):
     """What news would say of this task now: {status, why, event, stall}, with live = its running agents."""
-    if t["state"] in ("running", "ready"):
+    if t["state"] in ("running", "ready") or (t["state"] in ("todo", "queued") and t.get("attention")):
         v = view(s, t, live)
     else:
         v = {"status": t["state"] if t["state"] in STATUSES else "todo", "needs": None, "why": None}
@@ -117,7 +117,7 @@ def news_pass(report, folder=None):
         d = read_list(path)
         if not d or not os.path.isdir(d.get("folder") or ""):
             continue
-        active = any(t.get("state") in ("running", "ready") for t in d.get("tasks") or [])
+        active = any(t.get("state") in ("running", "ready") or (t.get("state") in ("todo", "queued") and t.get("attention")) for t in d.get("tasks") or [])
         with Store(locate(d["folder"]), write=active) as s:
             mine = seen.setdefault(s.slug, {})
             # The first look at a list only notes how its tasks are: old news isn't news.
@@ -283,7 +283,7 @@ def deliver(address, text, how="send", from_held=False):
         return "pending"
     k = hc_json("get", address) or before if how == "news" else before
     if how == "news" and status_word(before) == "working":
-        if cli_of(k) == "claude":
+        if cli_of(k) in (None, "claude"):
             for delay in POLL_DELAYS:
                 time.sleep(delay)
                 if re.search(r"ctrl\+enter to send now", run(["hc", "read", address, "--lines", "40"]).stdout or "", re.I):

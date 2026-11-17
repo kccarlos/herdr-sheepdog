@@ -93,7 +93,7 @@ def api_error(addr, lines=15):
 
 
 def _condition(slug, prefix, t, tasks, lists):
-    if t.get("state") not in ("running", "ready"):
+    if t.get("state") not in ("running", "ready") and not (t.get("state") in ("todo", "queued") and t.get("attention")):
         return None
     ref, live = f"{prefix}-{t['id']}", [w for w in map(detail, live_agents(f"{slug}#{t['id']}")) if agent_running(w)]
     status, needs, why = task_status(t, live)

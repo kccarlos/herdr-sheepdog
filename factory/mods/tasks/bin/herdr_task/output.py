@@ -4,8 +4,8 @@ import json
 
 from .base import label_of, now
 from .agents import (
-    agent_running, asking, BG_ENDED_WHY, detail, device_why, live_helpers, out_of_rounds_why, ask_reason, blocking_dialog,
-    last_words, own_line, own_work, OUT_OF_ROUNDS, status_word, STATUSES, task_status,
+    agent_running, asking, BG_ENDED_WHY, cli_of, detail, device_why, live_helpers, out_of_rounds_why, ask_reason, blocking_dialog,
+    last_words, own_line, own_work, OUT_OF_ROUNDS, REASONS, status_word, STATUSES, task_status,
 )
 from .queues import waiting_ext, waiting_for
 
@@ -19,7 +19,7 @@ def view(s, task, live=None):
     v["key"] = s.key(task)
     v["folder"] = s.loc["folder"]
     v["status"], v["needs"], v["why"] = task_status(task, running)
-    if v["needs"] == "asks":
+    if v["needs"] == "asks" and v["why"] not in (REASONS["trust"], REASONS["bypass"], REASONS["onboard"]):
         # Why it waits, at most LINE_MAX characters: a standard reason or its own question.
         k = next((k for k in running if status_word(k) == "blocked"), None) or next((k for k in running if asking(k)), None)
         st = k.get("status") if k and isinstance(k.get("status"), dict) else {}
@@ -57,7 +57,7 @@ def subagent(k):
     lb = k.get("labels") or {}
     st = k.get("status")
     st = st.get("state") if isinstance(st, dict) else st
-    cli = label_of(lb, "agent") or ("codex" if "codex" in str(k.get("agent") or "") else "claude" if k.get("agent") else None)
+    cli = cli_of(k)
     return {"address": k["address"], "parent": k.get("parent"), "role": label_of(lb, "role") or "helper", "agent": cli,
             "name": k.get("name"), "status": "working" if st == "working" else "needs" if st == "blocked" else "done",
             "at": k.get("created_ms")}

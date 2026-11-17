@@ -4,6 +4,8 @@ The launch allow-list ("an agent's own herdr-task commands never ask": OWN, own_
 cmd_allow) is the one place an agent's launch is given commands it may run without asking; allow
 another command (herdr-secret's, say) there."""
 
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -83,29 +85,105 @@ def ask_command(path, sandboxed=False):
     return f"{shlex.quote(sys.executable)} {shlex.quote(ENTRY)} _allow --command {shlex.quote(path)}" + (" --sandboxed" if sandboxed else "")
 
 
+def claude_config_path():
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    legacy, primary = os.path.join(cfg or os.path.join(HOME, ".claude"), ".config.json"), os.path.join(cfg or HOME, ".claude.json")
+    try:
+        return legacy if os.path.isfile(legacy) and os.path.getsize(legacy) > 0 and not os.path.isfile(primary) else primary
+    except OSError:
+        return primary
+
+
+def _trusted(d, roots, bypass=False):
+    p = d.get("projects") if isinstance(d, dict) else None
+    return (isinstance(p, dict) and d.get("hasCompletedOnboarding") is True
+            and (not bypass or d.get("bypassPermissionsModeAccepted") is True)
+            and all(isinstance(p.get(r), dict) and p[r].get("hasTrustDialogAccepted") is True for r in roots))
+
+
+def claude_trust(folder, bypass=False):
+    """Sets first-run onboarding, bypass consent and folder trust in Claude's .claude.json before launch."""
+    roots = [r for r in trust_roots(folder) if r not in {"", os.sep, HOME, os.path.realpath(HOME)}]
+    if not roots and not bypass:
+        return
+    path = os.path.realpath(p) if os.path.islink(p := claude_config_path()) else p
+    try:
+        with open(path) as f:
+            if _trusted(json.load(f), roots, bypass):
+                return
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError):
+        return
+    with contextlib.suppress(OSError):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(STORE, exist_ok=True)
+    lk = None
+    with contextlib.suppress(OSError):
+        lk = open(os.path.join(STORE, ".claude-trust.lock"), "a")
+    with lk or contextlib.nullcontext():
+        if lk:
+            fcntl.flock(lk, fcntl.LOCK_EX)
+        mode, d = 0o600, {}
+        try:
+            mode = os.stat(path).st_mode & 0o777
+            with open(path) as f:
+                d = json.load(f)
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError):
+            return
+        if not isinstance(d, dict) or (d.get("projects") is not None and not isinstance(d.get("projects"), dict)) or _trusted(d, roots, bypass):
+            return
+        d.setdefault("hasCompletedOnboarding", True)
+        if bypass:
+            d["bypassPermissionsModeAccepted"] = True
+        if roots:
+            d["projects"] = {**(p := dict(d.get("projects") or {})), **{r: {**(p[r] if isinstance(p.get(r), dict) else {}), "hasTrustDialogAccepted": True} for r in roots}}
+        tmp = f"{path}.{os.getpid()}.tmp"
+        try:
+            with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode or 0o600), "w") as f:
+                json.dump(d, f, indent=2)
+                f.write("\n")
+            os.replace(tmp, path)
+        except OSError:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+
+
 def own_argv(argv, folder=None, verbs=OWN, cwd=None, reads=None):
     """An agent's argv with its own herdr-task commands allowed (Claude Code, Codex, and agy,
-    which also trusts `folder`). verbs: the herdr-task verbs allowed; cwd: the folder agy runs in,
-    which a relative --settings file is read from; reads: a reviewer's commands (review_reads)."""
+    and folder trust + bypass acceptance recorded/passed). verbs: the herdr-task verbs allowed;
+    cwd: the folder the agent runs in; reads: a reviewer's commands (review_reads)."""
     path, out = own_path(), list(argv)
     k = agent_key(out)
     if k == "claude":
         rules = own_rules(path, verbs) + [f"Bash({r}:*)" for r in reads or []]
-        if not rules and verbs is not OWN:
+        bypass = "--allow-dangerously-skip-permissions" in out or claude_mode(out, cwd or folder) in (None, "bypassPermissions")
+        claude_trust(folder, bypass=bypass)
+        if not rules and verbs is not OWN and not bypass:
             return out
-        cur, i = {}, None
-        if "--settings" in out[:-1]:
-            i = out.index("--settings")
+        cur, spans = {}, []
+        for j, a in enumerate(out):
+            if a == "--settings" and j + 1 < len(out):
+                n, val = 2, out[j + 1]
+            elif a.startswith("--settings="):
+                n, val = 1, a[len("--settings="):]
+            else:
+                continue
             try:
-                cur = json.loads(out[i + 1])
+                got = json.loads(val)
             except ValueError:
                 try:
-                    with open(os.path.expanduser(out[i + 1])) as f:
-                        cur = json.load(f)
+                    with open(os.path.join(cwd or "", os.path.expanduser(val))) as f:
+                        got = json.load(f)
                 except (OSError, ValueError):
-                    cur = None
-            if not isinstance(cur, dict):
-                cur, i = {}, None
+                    continue
+            if isinstance(got, dict):
+                spans.append((j, n))
+                allow = list((cur.get("permissions") or {}).get("allow") or []) + list((got.get("permissions") or {}).get("allow") or [])
+                cur = {**cur, **got, **({"permissions": {**(cur.get("permissions") or {}), **(got.get("permissions") or {}), "allow": allow}}
+                                        if cur.get("permissions") or got.get("permissions") else {})}
         merged = dict(cur)
         if rules:
             perms = dict(cur.get("permissions") or {})
@@ -114,8 +192,13 @@ def own_argv(argv, folder=None, verbs=OWN, cwd=None, reads=None):
         if verbs is OWN:
             # FAC-107: no idle compaction (it wakes a Ready task's worker); a value the argv sets wins
             merged.setdefault("idleCompaction", False)
-        if i is not None:
-            out[i + 1] = json.dumps(merged)
+        if bypass:
+            merged.setdefault("skipDangerousModePermissionPrompt", True)
+        if spans:
+            for j, n in reversed(spans[1:]):
+                del out[j:j + n]
+            i, n = spans[0]
+            out[i:i + n] = ["--settings", json.dumps(merged)]
             return out
         return out[:1] + ["--settings", json.dumps(merged)] + out[1:]
     if k == "codex":
@@ -353,11 +436,9 @@ def claude_mode(argv, folder=None):
             return argv[i + 1]
         if a.startswith("--permission-mode="):
             return a.split("=", 1)[1]
-    found = []
-    for i, a in enumerate(argv[:-1]):
-        if a == "--settings":
-            found.append(argv[i + 1])
-    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    found = [argv[i + 1] if a == "--settings" else a.split("=", 1)[1] for i, a in enumerate(argv)
+             if (a == "--settings" and i + 1 < len(argv)) or a.startswith("--settings=")]
+    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude")
     files = ([os.path.join(folder, ".claude", "settings.local.json"), os.path.join(folder, ".claude", "settings.json")] if folder else []) \
         + [os.path.join(home, "settings.json")]
     for src in found + files:
@@ -365,7 +446,7 @@ def claude_mode(argv, folder=None):
             if src.lstrip().startswith("{"):
                 d = json.loads(src)
             else:
-                with open(os.path.expanduser(src)) as f:
+                with open(os.path.join(folder or "", os.path.expanduser(src))) as f:
                     d = json.load(f)
         except (OSError, ValueError):
             continue
@@ -413,8 +494,11 @@ NO_UPDATE = {"claude": ["DISABLE_AUTOUPDATER=1"]}
 
 
 def no_update_env(argv):
-    """The env words that stop argv's agent CLI auto-updating; none for one without a switch."""
-    return NO_UPDATE.get(agent_key(argv), [])
+    """The env words that stop argv's agent CLI auto-updating (and carry CLAUDE_CONFIG_DIR when set)."""
+    out = list(NO_UPDATE.get(agent_key(argv), []))
+    if agent_key(argv) == "claude" and (cfg := os.environ.get("CLAUDE_CONFIG_DIR")):
+        out.append(f"CLAUDE_CONFIG_DIR={cfg}")
+    return out
 
 
 def clean_env(argv):
@@ -811,7 +895,7 @@ def launch(s, task, argv, message=None, parent=None, resume=None, role=None, rea
         cmd = cmd + ["--settings", json.dumps({"trustedWorkspaces": [folder]})]
     elif role == "reviewer" and agent_key(cmd) in ("agy", "claude"):
         # a read-only reviewer: its worktree trusted, its verdict (herdr-task review) and `reads` allowed
-        cmd = own_argv(cmd, folder if task.get("mode") == "worktree" else None, verbs=("review",), cwd=folder, reads=reads)
+        cmd = own_argv(cmd, trust, verbs=("review",), cwd=folder, reads=reads)
     held = message if role == "reviewer" and agent_key(cmd) == "codex" else None
     if message and not held:
         cmd = cmd + (["-i", message] if agent_key(cmd) == "agy" else [message])  # agy reads prompts only from -i
