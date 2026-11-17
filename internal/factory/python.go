@@ -317,8 +317,12 @@ func resolveUVBinary(lookPath func(string) (string, error), customLookPath bool,
 			cands = append(cands, filepath.Join(filepath.Dir(exe), "uv"))
 		}
 		if home != "" {
-			cands = append(cands, filepath.Join(home, ".local", "bin", "uv"))
+			cands = append(cands,
+				filepath.Join(home, ".local", "bin", "uv"),
+				filepath.Join(home, ".cargo", "bin", "uv"),
+			)
 		}
+		cands = append(cands, "/opt/homebrew/bin/uv", "/usr/local/bin/uv")
 		for _, cand := range cands {
 			if st, err := os.Stat(cand); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
 				return cand, true
