@@ -589,7 +589,7 @@ class Autopilot(unittest.TestCase):
 
 
 class RemoteInstall(unittest.TestCase):
-    """herdr-task --on installs itself on the other machine once per bundle digest, then runs directly."""
+    """herdr-task --on installs itself on the other machine first, never over a machine that holds its source."""
 
     def setUp(self):
         from unittest import mock
@@ -597,10 +597,12 @@ class RemoteInstall(unittest.TestCase):
         sys.path.insert(0, BIN)
         import herdr_task.cli as cli
         self.cli, self.store, self.ran, self.wrote = cli, tempfile.mkdtemp(), [], []
+        self.source = False
 
         def run(argv, cwd=None, check=False):
             self.ran.append(argv)
-            return subprocess.CompletedProcess(argv, 0, "{}", "")
+            code = 0 if argv[:2] != ["hc", "exec"] or "test" not in argv else (0 if self.source else 1)
+            return subprocess.CompletedProcess(argv, code, "{}" if "test" not in argv else "", "")
 
         def write(argv, **kw):
             self.wrote.append(argv)
@@ -614,11 +616,16 @@ class RemoteInstall(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
 
-    def test_first_run_installs_bundle_and_second_reuses_digest_mark(self):
+    def test_a_machine_without_the_source_gets_this_copy(self):
         self.cli.remote_run("vm", ["autopilot", "list", "--json"])
-        self.cli.remote_run("vm", ["autopilot", "list", "--json"])
-        self.assertEqual(len(self.wrote), 1)
         self.assertEqual(self.wrote[0][:5], ["hc", "file", "write", "--on", "vm"])
+
+    def test_a_machine_holding_the_source_is_never_written_to(self):
+        self.source = True
+        self.cli.remote_run("mini", ["autopilot", "list", "--json"])
+        self.cli.remote_run("mini", ["autopilot", "list", "--json"])
+        self.assertEqual(self.wrote, [])
+        self.assertEqual(sum(1 for a in self.ran if "test" in a), 1)  # asked once, then remembered
         self.assertEqual(self.ran[-1][-3:], ["autopilot", "list", "--json"])
 
 
@@ -7861,6 +7868,8 @@ class TaskFlow(unittest.TestCase):
         other = os.path.join(self.root, "other")
         os.makedirs(other)
         terms = [
+            {"address": "c-slug-other", "state": "live", "cwd": self.main,
+             "labels": {"sheepdog.role": "coordinator", "sheepdog.project": "unrelated-slug"}},
             {"address": "c-other", "state": "live", "cwd": self.main,
              "labels": {"sheepdog.role": "coordinator", "sheepdog.project": other}},
             {"address": "c-main", "state": "live", "cwd": other,
@@ -7870,6 +7879,19 @@ class TaskFlow(unittest.TestCase):
         self.patch(launch, "hc_json", lambda *a: {"terminals": terms} if a[:1] == ("ls",) else by_addr.get(a[1]) if a[:1] == ("get",) else None)
         self.assertEqual(launch.coordinator_in(self.main), "c-main")
         self.assertEqual(launch.parent_for(None, self.main), "c-main")
+        # When only a coordinator with another project's slug is live, coordinator_in returns None (no NameError on STORE)
+        terms[:] = [terms[0]]
+        self.assertIsNone(launch.coordinator_in(self.main))
+        # And when STORE/<slug>.json maps that slug to self.main, coordinator_in resolves it
+        sdir = os.path.join(self.root, "store")
+        os.makedirs(sdir)
+        with open(os.path.join(sdir, "repo-slug.json"), "w") as fh:
+            json.dump({"version": 1, "folder": os.path.realpath(self.main), "tasks": []}, fh)
+        self.patch(launch, "STORE", sdir)
+        terms[:] = [{"address": "c-slug", "state": "live", "cwd": other,
+                     "labels": {"sheepdog.role": "coordinator", "sheepdog.project": "repo-slug"}}]
+        by_addr["c-slug"] = terms[0]
+        self.assertEqual(launch.coordinator_in(self.main), "c-slug")
         # launch stamps sheepdog.{project,task,role,agent} and SHEEPDOG_TASK without space/tab
         ran = []
         self.patch(launch, "run", lambda argv, *a, **k: (ran.append(argv), subprocess.CompletedProcess(argv, 0, '{"address":"w1"}', ""))[1])

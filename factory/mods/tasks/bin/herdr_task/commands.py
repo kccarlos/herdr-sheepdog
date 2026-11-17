@@ -332,6 +332,8 @@ def begin(s, t, argv, space=None, parent=None):
     folder_for(s, t)
     ensure_build_dir(s, t)
     if t.get("mode") != "worktree" and s.loc["kind"] == "repo":
+        # The folder's commit as it starts: still there, and nothing tracked changed, at ready means
+        # it changed nothing, so there is nothing to review (review_refusal, #744).
         t["folder_start"] = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None
     parent = parent_for(parent, s.loc["folder"])
     return launch(s, t, argv, brief(s, t, parent, argv), parent=parent)
@@ -368,9 +370,12 @@ def cmd_start(args):
         plan = {"argv": argv, "parent": parent, **({"custom": True} if args.argv else {})}
         at = scheduled_at(args)
         if at:
+            # start --at / --in: it starts by itself then, as this start would now.
             schedule(s, t, at, plan)
             v = view(s, t)
             reason = "scheduled"
+        # A queued task started again goes now; otherwise it waits its turn. A scheduled one
+        # started now waits only for the queue (start --now: not even that).
         elif (reason := None if (t["state"] == "queued" or args.now) else queue_reason(s, t)):
             t["state"], t["queued_at"] = "queued", now()
             t.pop("scheduled_for", None)
@@ -380,6 +385,7 @@ def cmd_start(args):
         else:
             a = begin(s, t, argv, parent=parent)
             v = view(s, t)
+    # The scheduler starts queued tasks and tells the Assistant its tasks' news.
     try:
         ensure_scheduler(quiet=True)
     except Exception:

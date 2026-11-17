@@ -63,18 +63,26 @@ def remote_run(machine, argv, timeout=None):
     target = ".local/bin/herdr-task"
     try:
         with open(mark) as f:
-            installed = f.read().strip() == digest
+            # "source": it holds herdr-task's source, and runs its own
+            installed = f.read().strip() in (digest, "source")
     except OSError:
         installed = False
 
     def install():
         guard(["hc"])
+        # A machine with Herdr's own install (its window's) holds herdr-task's source: copies come from there, it's
+        # never written to (machines.py, the same rule). Its link ~/.local/bin/herdr-task leads into that install.
+        there = run(["hc", "exec", "--on", machine, "--", "test", "-d", ".config/herdr-app/mods/tasks/bin/herdr_task"])
+        if link.lost(there):
+            raise Fail(f"Can't reach {machine}: its link is down, and nothing was run there. Try again once it's back.")
+        if there.returncode == 0:
+            os.makedirs(os.path.dirname(mark), exist_ok=True)
+            with open(mark, "w") as f:
+                f.write("source")
+            return
         r = subprocess.run(["hc", "file", "write", "--on", machine, target], input=body, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if r.returncode != 0:
-            err = r.stderr.decode(errors="replace").strip()
-            if r.returncode == 5 and ("lost the line" in err or "unreachable" in err or '"unavailable"' in err):
-                raise Fail(f"Can't reach {machine}: its link is down, and nothing was run there. Try again once it's back.")
-            raise Fail(f"Couldn't install herdr-task on {machine}: {err}")
+            raise Fail(f"Couldn't install herdr-task on {machine}: {r.stderr.decode().strip()}")
         run(["hc", "exec", "--on", machine, "--", "chmod", "+x", target], check=True)
         os.makedirs(os.path.dirname(mark), exist_ok=True)
         with open(mark, "w") as f:
@@ -102,6 +110,7 @@ def remote_run(machine, argv, timeout=None):
 def remote(machine, argv):
     """Runs herdr-task on the machine that holds the folder (installing it there first)."""
     if argv[:1] == ["tick"]:
+        # Its start limits live in Settings here, where the window is (HERD-40).
         from .settings import machine_limits
         argv = [*argv, "--machine", machine, "--hold", json.dumps(machine_limits(machine))]
     r = remote_run(machine, argv)
@@ -361,10 +370,8 @@ def main():
     ap = sub.add_parser("autopilot", help="a project's coordinator woken on a schedule or by events, with the heartbeat "
                         "(Everywhere's schedule, events and heartbeat, unless a project sets its own)").add_subparsers(dest="autopilot")
 
-    def ap_cmd(name, help, folder=True, everywhere=False):
+    def ap_cmd(name, help, everywhere=False):
         c = ap.add_parser(name, help=help)
-        if folder:
-            c.add_argument("--folder", help="the project folder (default: the coordinator's own)")
         if everywhere:
             c.add_argument("--everywhere", action="store_true", help="Everywhere's: what every project works from unless it sets its own")
         c.add_argument("--name", help=argparse.SUPPRESS)
@@ -392,12 +399,10 @@ def main():
     ap_cmd("heartbeat", "the heartbeat this project works from (--everywhere: Everywhere's), and Everywhere's file from before (made with a starter when missing)", everywhere=True)
     c = sub.add_parser("progress", help="a coordinator on Autopilot saves its progress and next step: progress \"Started HAT-4; next: check its review\"")
     c.add_argument("text")
-    c.add_argument("--folder")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_progress)
     c = sub.add_parser("complete", help="a coordinator on Autopilot proved its heartbeat's stopping goal: turns Autopilot off")
     c.add_argument("evidence")
-    c.add_argument("--folder")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_complete)
     auto_cmd("rm", "remove it")

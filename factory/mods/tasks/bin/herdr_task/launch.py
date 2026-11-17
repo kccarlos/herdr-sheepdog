@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-from .base import ENTRY, Fail, HOME, git, hc_json, kill_agent, label_of, now, PROJECT_LABEL, ROLE_LABEL, run, TASK_LABEL, WHERE, WORKTREES
+from .base import ENTRY, Fail, HOME, git, hc_json, kill_agent, label_of, now, PROJECT_LABEL, ROLE_LABEL, run, STORE, TASK_LABEL, WHERE, WORKTREES
 from .settings import agent_key, ASSISTANT_TEMPLATES, by_layer, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, gate_min, keep_review, notes, notes_part, read_settings, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import LINE_MAX, SUMMARY_MAX
@@ -551,6 +551,7 @@ def closing_line(s, task, parent=None, argv=None):
                  "`git add`/`git commit` and your review's `hc run`/`hc wait`/`hc read`/`hc kill` (its prompt in single quotes) "
                  "sandbox_permissions \"require_escalated\" from the first try, each as one plain command (no && chains, no $(…), "
                  "no git options before the verb): then they run without asking.")
+    # No "report to your coordinator": Herdr tells the Assistant itself (news_pass).
     return text
 
 
@@ -733,6 +734,8 @@ def folder_for(s, task):
         raise Fail("Worktrees need a git repo. Use --here.")
     main = s.loc["folder"]
     branch = branch_for(s, task)
+    # New worktrees under WORKTREES (or tasks.worktree_root);
+    # a task that has one keeps it wherever it is (git keeps its absolute path).
     root = os.path.expanduser(str(settings_for(s)["tasks"].get("worktree_root") or "").strip()) or WORKTREES
     path = os.path.join(root, os.path.basename(main), re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip("-"))
     # Its own base (--base) branches from that branch; else from what the folder has checked out.
@@ -865,6 +868,7 @@ def is_coordinator(k):
 
 def coordinators():
     """The live coordinators' addresses on this machine (without labels: hc get each)."""
+    # Only coordinators get an hc get (labels): there can be thousands of terminals.
     found = [k for k in (hc_json("ls") or {}).get("terminals", []) if k.get("template") in ASSISTANT_TEMPLATES]
     found += (hc_json("ls", "--label", f"{ROLE_LABEL}=coordinator") or {}).get("terminals", [])
     found += (hc_json("ls", "--label", "herdr.role=coordinator") or {}).get("terminals", [])
