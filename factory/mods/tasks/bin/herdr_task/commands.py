@@ -881,8 +881,8 @@ def gate_step(s, t):
         + (f"You run in a sandbox: you can read only this worktree, its git history and the system's tools, write only in "
            f"$TMPDIR, and can't reach Herdr. When done, end your last message with your findings, each with its level and "
            f"proof, between two lines of their own: first one holding only this round's code and the word begin, last one "
-           f"holding only the code and your verdict: pass N, or changes N M, where N is the count at or above Must fix "
-           f"and M is the count of major or blocker findings (pass N gives the major count). Herdr "
+           f"holding only the code and your verdict: pass M, or changes N M. N is the count at or above Must fix; "
+           f"M is the count of major or blocker findings. Herdr "
            f"reads it from this terminal while {head[:7]} is the worktree's HEAD with nothing uncommitted, and runs this "
            f"folder's check itself, outside the sandbox: don't run it here. This round's code is {code}." if sand else
         f"When done, record your verdict with one of "
@@ -1022,6 +1022,8 @@ def cmd_reviewed(args):
         t = s.find(args.id)
         if t["state"] not in ("running", "ready"):
             raise Fail(f"{s.ref(t)} isn't being worked on ({STATUSES.get(t['state'], t['state'])}).")
+        if why := recap_refusal(s, t):
+            raise Fail(why)
         on, rounds = review_limits(s, t)
         if not on:
             raise Fail(f"Review is off for {s.ref(t)}: there is no round to record.")
@@ -1053,17 +1055,20 @@ def cmd_reviewed(args):
         if verdict not in ("pass", "changes") or majors is None or majors < 0:
             raise Fail("Say --verdict pass|changes and --majors N (a nonnegative count).")
         text = " ".join(str(args.report or "").split())[:2000]
-        reviewer = next((x["value"] for x in task_settings(s, t) if x["label"] == "Reviewer"), {})
+        settings = {x["label"]: x["value"] for x in task_settings(s, t)}
+        if verdict == "pass" and majors and settings.get("Must fix", "major") != "blocker":
+            raise Fail("A pass cannot have major or blocker findings when Must fix includes major.")
+        reviewer = settings.get("Reviewer") or {}
         t.setdefault("reviews", []).append({"round": used + 1, "result": "report", "text": text, "at": now(), "head": head,
                                             "by": os.environ.get("HC_TERMINAL_ID"), "verdict": verdict, "must_fix": 0 if verdict == "pass" else None, "majors": majors,
                                             "report": text, "cli": reviewer.get("agent"), "model": reviewer.get("model")})
         t.pop("review_out", None)
         s.dirty = True
-        if t.get("mode") == "worktree":
-            budget_pass(s, t)
+        stopped = t.get("mode") == "worktree" and budget_pass(s, t)
         v = view(s, t)
     on_what = f" for commit {head[:7]}" if head else ""
-    say(args, {**v, "round": used + 1, "rounds": rounds}, f"{s.ref(t)}: review round {used + 1} of {rounds} recorded{on_what}.")
+    say(args, {**v, "round": used + 1, "rounds": rounds}, f"{s.ref(t)}: review round {used + 1} of {rounds} recorded{on_what}."
+        + (f" {recap_refusal(s, t)}" if stopped else ""))
 
 
 def cmd_review_more(args):

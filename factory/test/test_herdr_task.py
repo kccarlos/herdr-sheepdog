@@ -5553,6 +5553,11 @@ class LoopBreaker(GateReview):
         self.assertTrue(budget_pass(self.store, self.task))
         self.recap("new")
         self.assertFalse(budget_pass(self.store, self.task))
+        at = self.task["recaps"][-1]["at"]
+        self.task["reviews"].append({"round": 4, "verdict": "changes", "majors": 1, "at": at + 1})
+        self.assertFalse(budget_pass(self.store, self.task))
+        self.task["reviews"].append({"round": 5, "verdict": "changes", "majors": 1, "at": at + 2})
+        self.assertTrue(budget_pass(self.store, self.task))
 
     def second_recap(self):
         """A task that had its one continue and is stopped for a recap again (two non-converging rounds)."""
@@ -6864,12 +6869,28 @@ class ReviewedNamesItsCommit(unittest.TestCase):
     def test_worker_records_trigger_nonconvergence(self):
         from unittest import mock
         from herdr_task.budget import NON_CONVERGENCE, triggers
-        with mock.patch.object(self.commands, "workers", return_value=[]):
+        said = []
+        with mock.patch.object(self.commands, "workers", return_value=[]), \
+                mock.patch.object(self.commands, "say", side_effect=lambda args, view, msg: said.append(msg)):
             for verdict, majors in (("pass", 0), ("changes", 2), ("changes", 1)):
                 self.commit("reviewed change")
                 self.commands.cmd_reviewed(self.argparse.Namespace(id="SHEP-1", json=True, folder=None, report="finding",
                                                                    commit=None, verdict=verdict, majors=majors))
         self.assertIn(NON_CONVERGENCE, triggers(self.store, self.task))
+        self.assertIn("stop and wait", said[-1])
+        with self.assertRaises(self.commands.Fail):
+            self.commands.cmd_reviewed(self.argparse.Namespace(id="SHEP-1", json=True, folder=None, report="finding",
+                                                               commit=None, verdict="pass", majors=0))
+
+    def test_pass_with_majors_requires_blocker_only_setting(self):
+        self.commit("reviewed change")
+        args = self.argparse.Namespace(id="SHEP-1", json=True, folder=None, report="finding", commit=None, verdict="pass", majors=1)
+        self.task["set"] = {"review": "on", "must_fix": "major"}
+        with self.assertRaises(self.commands.Fail):
+            self.commands.cmd_reviewed(args)
+        self.task["set"]["must_fix"] = "blocker"
+        self.commands.cmd_reviewed(args)
+        self.assertEqual(self.task["reviews"][-1]["majors"], 1)
 
     def test_uncommitted_fixes_still_record_the_named_commit(self):
         a = self.commit("reactions on the left")

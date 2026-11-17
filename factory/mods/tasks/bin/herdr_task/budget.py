@@ -384,8 +384,9 @@ NON_CONVERGENCE = "two rounds in a row with new majors: retro first"
 def review_nonconverging(t):
     from .settings import fable_runs
     fable = fable_runs(t)
-    rounds = [r for r in rounds_since(t, all_rounds=True) if r.get("by") not in fable]
-    return len(rounds) >= 3 and all((r.get("majors") or 0) > 0 for r in rounds[-2:])
+    all_rounds = [r for r in rounds_since(t, all_rounds=True) if r.get("by") not in fable]
+    rounds = [r for r in rounds_since(t) if r.get("by") not in fable]
+    return len(all_rounds) >= 3 and len(rounds) >= 2 and all((r.get("majors") or 0) > 0 for r in rounds[-2:])
 
 
 def triggers(s, t):
@@ -535,7 +536,7 @@ def recap_refusal(s, t):
     rc = t.get("recap")
     if rc:
         if NON_CONVERGENCE in rc.get("reasons", []):
-            return f"{s.ref(t)}: {NON_CONVERGENCE}; the coordinator decides whether to split, change approach or drop it."
+            return f"{s.ref(t)}: {NON_CONVERGENCE}; stop and wait while the coordinator decides whether to split, change approach or drop it."
         why = f" ({'; '.join(rc['reasons'])})" if rc.get("reasons") else ""
         return (f"{s.ref(t)} needs a recap first{why}: write RECAP.md (untracked) at your worktree's root, end your turn and "
                 f"wait; your Assistant decides what happens next.")
