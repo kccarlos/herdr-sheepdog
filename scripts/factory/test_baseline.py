@@ -395,6 +395,131 @@ class BaselineClassifierTests(unittest.TestCase):
             self.assertEqual(rep["per_project"]["alpha-app"]["owner_touches"], 7)
             self.assertEqual(rep["per_project"]["alpha-app"]["outside_interventions"], 4)
 
+    def test_dev_session_readonly_list_and_unscoped_outside_actions_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha_repo = os.path.join(tmp, "repos", "alpha-app")
+            os.makedirs(alpha_repo, exist_ok=True)
+            tasks_dir = os.path.join(tmp, "tasks")
+            claude_dir = os.path.join(tmp, "claude")
+
+            write_json(
+                os.path.join(tasks_dir, "repos-alpha-app.json"),
+                {
+                    "folder": alpha_repo,
+                    "prefix": "ALP",
+                    "tasks": [
+                        {
+                            "id": 1,
+                            "title": "Add parser",
+                            "state": "running",
+                            "space": "sp_alpha01",
+                            "agents": [{"address": "t2w", "parent": "t1a"}],
+                        }
+                    ],
+                },
+            )
+
+            t1, _ = local_iso_and_ms("2026-11-12", 10, 0, 0)
+            t2, _ = local_iso_and_ms("2026-11-12", 10, 5, 0)
+
+            # A) Ordinary dev session in alpha-app that runs read-only `herdr-task list --json`:
+            # must yield 0 touches and 0 interventions.
+            write_jsonl(
+                os.path.join(claude_dir, "proj-dev", "dev_readonly.jsonl"),
+                [
+                    {
+                        "type": "user",
+                        "cwd": alpha_repo,
+                        "timestamp": t1,
+                        "message": {"content": "Check local tasks and then refactor the HTTP handler."},
+                    },
+                    {
+                        "type": "assistant",
+                        "timestamp": t1,
+                        "message": {
+                            "content": [
+                                {"type": "tool_use", "id": "r1", "name": "Bash", "input": {"command": "herdr-task list --json"}},
+                            ]
+                        },
+                    },
+                    {
+                        "type": "user",
+                        "cwd": alpha_repo,
+                        "timestamp": t2,
+                        "message": {"content": "Now add a unit test for the timeout header."},
+                    },
+                ],
+            )
+
+            rep_dev = baseline.measure(
+                since="2026-11-12",
+                until="2026-11-12",
+                usage_dirs=[],
+                tasks_dir=tasks_dir,
+                claude_dir=claude_dir,
+                codex_dir="",
+            )
+            self.assertEqual(rep_dev["totals"]["owner_touches"], 0)
+            self.assertEqual(rep_dev["totals"]["outside_interventions"], 0)
+
+            # B) Real outside_orchestrator session that has:
+            # - 1 factory turn ("Resume ALP-1") + `herdr-task resume ALP-1` -> 1 touch, 1 intervention
+            # - 1 non-factory turn ("Summarize general Go style notes") + `hc send t99helper` / `hc kill t99helper`
+            #   targeting its own non-factory helper terminal `t99helper` -> 0 touches, 0 interventions
+            write_jsonl(
+                os.path.join(claude_dir, "proj-baby", "baby_mixed.jsonl"),
+                [
+                    {
+                        "type": "user",
+                        "cwd": os.path.join(tmp, "scratch"),
+                        "timestamp": t1,
+                        "message": {"content": "Resume ALP-1 please."},
+                    },
+                    {
+                        "type": "assistant",
+                        "timestamp": t1,
+                        "message": {
+                            "content": [
+                                {"type": "tool_use", "id": "m1", "name": "Bash", "input": {"command": "herdr-task resume ALP-1"}},
+                            ]
+                        },
+                    },
+                    {
+                        "type": "user",
+                        "cwd": os.path.join(tmp, "scratch"),
+                        "timestamp": t2,
+                        "message": {"content": "Summarize general Go style notes with a helper."},
+                    },
+                    {
+                        "type": "assistant",
+                        "timestamp": t2,
+                        "message": {
+                            "content": [
+                                {
+                                    "type": "tool_use",
+                                    "id": "m2",
+                                    "name": "Bash",
+                                    "input": {"command": "hc send t99helper 'check style' && hc kill t99helper"},
+                                },
+                            ]
+                        },
+                    },
+                ],
+            )
+
+            rep_mixed = baseline.measure(
+                since="2026-11-12",
+                until="2026-11-12",
+                usage_dirs=[],
+                tasks_dir=tasks_dir,
+                claude_dir=claude_dir,
+                codex_dir="",
+            )
+            self.assertEqual(rep_mixed["totals"]["owner_touches"], 1)
+            self.assertEqual(rep_mixed["totals"]["outside_interventions"], 1)
+            self.assertEqual(rep_mixed["per_project"]["alpha-app"]["owner_touches"], 1)
+            self.assertEqual(rep_mixed["per_project"]["alpha-app"]["outside_interventions"], 1)
+
     def test_shell_parser_ignores_heredoc_bodies(self) -> None:
         cmd = (
             "python3 - <<'EOF'\n"

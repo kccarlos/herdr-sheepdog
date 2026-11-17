@@ -295,14 +295,15 @@ def match_project_by_cwd(cwd: str, projects: dict[str, dict[str, Any]]) -> str |
     return None
 
 
-def infer_project_from_text(
+def resolve_projects_from_text(
     text: str,
     projects: dict[str, dict[str, Any]],
     prefix_to_proj: dict[str, str],
     term_map: dict[str, tuple[str, str]],
     space_map: dict[str, str],
-) -> str | None:
-    """Infer target factory project from task refs, terminals, spaces, or project names."""
+    exclude_weak_name: str | None = None,
+) -> set[str]:
+    """Return the set of factory project names referenced in `text`."""
     strong: set[str] = set()
     for pref, pname in prefix_to_proj.items():
         if re.search(rf"\b{re.escape(pref)}-\d+\b", text):
@@ -314,17 +315,37 @@ def infer_project_from_text(
         addr = m.group(1)
         if addr in term_map:
             strong.add(term_map[addr][0])
-    if len(strong) == 1:
-        return next(iter(strong))
-    if len(strong) > 1:
-        return None
+    for pname, p in projects.items():
+        if len(p["slug"]) >= 6 and p["slug"] in text:
+            strong.add(pname)
+    if strong:
+        return strong
 
     weak: set[str] = set()
     for pname in projects:
+        if exclude_weak_name and pname.lower() == exclude_weak_name.lower():
+            continue
         if re.search(rf"\b{re.escape(pname)}\b", text, re.I):
             weak.add(pname)
-    if len(weak) == 1:
-        return next(iter(weak))
+    return weak
+
+
+def infer_project_from_text(
+    text: str,
+    projects: dict[str, dict[str, Any]],
+    prefix_to_proj: dict[str, str],
+    term_map: dict[str, tuple[str, str]],
+    space_map: dict[str, str],
+    exclude_weak_name: str | None = None,
+) -> str | None:
+    """Infer target factory project ('<project>', 'cross-project' when >=2 match, or None when 0 match)."""
+    matched = resolve_projects_from_text(
+        text, projects, prefix_to_proj, term_map, space_map, exclude_weak_name=exclude_weak_name
+    )
+    if len(matched) == 1:
+        return next(iter(matched))
+    if len(matched) > 1:
+        return "cross-project"
     return None
 
 
@@ -854,7 +875,10 @@ def scan_session_file(
                         setting_notices.append((ms, len(set_keys)))
 
                     if msg_text is not None and ms:
-                        inferred_proj = infer_project_from_text(msg_text, projects, prefix_to_proj, term_map, space_map)
+                        cwd_base = os.path.basename(cwd.rstrip("/")) if (cwd and role not in ("assistant", "worker")) else None
+                        inferred_proj = infer_project_from_text(
+                            msg_text, projects, prefix_to_proj, term_map, space_map, exclude_weak_name=cwd_base
+                        )
                         cur_turn = {
                             "ms": ms,
                             "msg_text": msg_text,
@@ -909,35 +933,53 @@ def scan_session_file(
                                     if re.search(r"(?:AGENTS|CLAUDE)\.md$|settings\.json$|autopilot|heartbeat", fpath):
                                         cur_turn["edited_rule_file"] = True
                                 if ("shepherdr/tasks" in fpath or ".herdr/tasks" in fpath) and ms:
+                                    cwd_base = os.path.basename(cwd.rstrip("/")) if (cwd and role not in ("assistant", "worker")) else None
+                                    s_proj = infer_project_from_text(
+                                        fpath, projects, prefix_to_proj, term_map, space_map, exclude_weak_name=cwd_base
+                                    )
                                     act = {
                                         "kind": "store_edit",
                                         "verb": tname.lower(),
                                         "start_ms": ms,
                                         "end_ms": ms,
-                                        "proj": infer_project_from_text(fpath, projects, prefix_to_proj, term_map, space_map),
+                                        "proj": s_proj,
                                         "refs": [],
                                         "turn_idx": len(turns) - 1,
                                     }
                                     all_tool_actions.append(act)
-                                    saw_factory_target = True
+                                    if s_proj is not None:
+                                        saw_factory_target = True
                                     if cur_turn is not None:
                                         cur_turn["actions"].append(act)
                             elif tname == "Bash" and ms:
                                 cmd = str(inp.get("command") or "")
                                 tid = str(b.get("id") or "")
+                                cwd_base = os.path.basename(cwd.rstrip("/")) if (cwd and role not in ("assistant", "worker")) else None
                                 parsed = parse_bash_actions(cmd, var_env)
                                 for pa in parsed:
                                     if pa["kind"] == "herdr_task" and pa["verb"] == "review" and ("--pass" in cmd or "--changes" in cmd):
                                         saw_reviewer_verdict = True
                                     proj = None
-                                    if pa.get("target") and pa["target"] in term_map:
-                                        proj = term_map[pa["target"]][0]
-                                        saw_factory_target = True
-                                    if pa.get("folder"):
-                                        proj = proj or match_project_by_cwd(pa["folder"], projects)
-                                    proj = proj or infer_project_from_text(cmd, projects, prefix_to_proj, term_map, space_map)
-                                    if pa["kind"] in ("herdr_task", "store_edit"):
-                                        saw_factory_target = True
+                                    if pa["kind"] in ("hc_send", "hc_keys", "hc_kill", "hc_rm"):
+                                        tgt = pa.get("target")
+                                        if tgt and tgt in term_map:
+                                            proj = term_map[tgt][0]
+                                            saw_factory_target = True
+                                    else:
+                                        if pa.get("folder"):
+                                            proj = match_project_by_cwd(pa["folder"], projects)
+                                        proj = proj or infer_project_from_text(
+                                            cmd, projects, prefix_to_proj, term_map, space_map, exclude_weak_name=cwd_base
+                                        )
+                                        if (
+                                            pa["kind"] == "herdr_task"
+                                            and pa["verb"] not in HT_READONLY_VERBS
+                                            and pa["verb"] != "review"
+                                            and proj is not None
+                                        ):
+                                            saw_factory_target = True
+                                        elif pa["kind"] == "store_edit" and proj is not None:
+                                            saw_factory_target = True
                                     refs = re.findall(r"\b(?:[A-Z]{2,8}-\d+|\d+)\b", cmd)
                                     rec = {
                                         "kind": pa["kind"],
@@ -977,6 +1019,7 @@ def scan_session_file(
                     first_user_seen = True
                     if role is None:
                         role = detect_initial_role(raw_txt, cwd, is_worktree_dir)
+                    cwd_base = os.path.basename(cwd.rstrip("/")) if (cwd and role not in ("assistant", "worker")) else None
                     msg_text, _ = clean_owner_message(o, is_first, role, "codex")
                     cur_turn = {
                         "ms": ms or 0,
@@ -984,7 +1027,10 @@ def scan_session_file(
                         "is_opening": is_first and role == "assistant",
                         "prev_asked": prev_assistant_asked,
                         "prev_release_ask": prev_assistant_release_ask,
-                        "inferred_proj": infer_project_from_text(msg_text, projects, prefix_to_proj, term_map, space_map) if msg_text else None,
+                        "inferred_proj": (
+                            infer_project_from_text(msg_text, projects, prefix_to_proj, term_map, space_map, exclude_weak_name=cwd_base)
+                            if msg_text else None
+                        ),
                         "actions": [],
                         "edited_rule_file": False,
                         "wrote_any_file": False,
@@ -1017,16 +1063,31 @@ def scan_session_file(
                     if tname == "apply_patch" and cur_turn is not None:
                         cur_turn["wrote_any_file"] = True
                     elif cmd:
+                        cwd_base = os.path.basename(cwd.rstrip("/")) if (cwd and role not in ("assistant", "worker")) else None
                         for pa in parse_bash_actions(cmd, var_env):
                             if pa["kind"] == "herdr_task" and pa["verb"] == "review" and ("--pass" in cmd or "--changes" in cmd):
                                 saw_reviewer_verdict = True
                             proj = None
-                            if pa.get("target") and pa["target"] in term_map:
-                                proj = term_map[pa["target"]][0]
-                                saw_factory_target = True
-                            proj = proj or infer_project_from_text(cmd, projects, prefix_to_proj, term_map, space_map)
-                            if pa["kind"] in ("herdr_task", "store_edit"):
-                                saw_factory_target = True
+                            if pa["kind"] in ("hc_send", "hc_keys", "hc_kill", "hc_rm"):
+                                tgt = pa.get("target")
+                                if tgt and tgt in term_map:
+                                    proj = term_map[tgt][0]
+                                    saw_factory_target = True
+                            else:
+                                if pa.get("folder"):
+                                    proj = match_project_by_cwd(pa["folder"], projects)
+                                proj = proj or infer_project_from_text(
+                                    cmd, projects, prefix_to_proj, term_map, space_map, exclude_weak_name=cwd_base
+                                )
+                                if (
+                                    pa["kind"] == "herdr_task"
+                                    and pa["verb"] not in HT_READONLY_VERBS
+                                    and pa["verb"] != "review"
+                                    and proj is not None
+                                ):
+                                    saw_factory_target = True
+                                elif pa["kind"] == "store_edit" and proj is not None:
+                                    saw_factory_target = True
                             rec = {
                                 "kind": pa["kind"],
                                 "verb": pa["verb"],
@@ -1085,14 +1146,20 @@ def scan_session_file(
             turn_wrote_any_file=tr["wrote_any_file"],
             is_opening_assistant_msg=tr["is_opening"],
         )
-        # Determine project for this turn
+        # Determine project for this turn. For an outside_orchestrator session, only count turns
+        # whose message or tool calls resolve to at least one factory project.
         t_proj = session_proj if role in ("assistant", "worker") else None
         if not t_proj:
-            t_proj = tr["inferred_proj"]
-        if not t_proj:
             act_projs = {a["proj"] for a in tr["actions"] if a.get("proj")}
+            if tr["inferred_proj"]:
+                act_projs.add(tr["inferred_proj"])
             if len(act_projs) == 1:
                 t_proj = next(iter(act_projs))
+            elif len(act_projs) > 1:
+                t_proj = "cross-project"
+        if role == "outside_orchestrator" and not t_proj:
+            tr["msg_text"] = None
+            continue
         owner_turns.append({
             "ms": tr["ms"],
             "touchpoint": tp_name,
@@ -1308,7 +1375,9 @@ def measure(
                 itype = "store_edit"
 
             if itype:
-                proj = act.get("proj") or "cross-project"
+                proj = act.get("proj")
+                if not proj:
+                    continue
                 record_intervention(d_str, proj, itype)
                 if act.get("turn_idx", -1) >= 0:
                     acted_turns_per_day[d_str].add(act["turn_idx"])
