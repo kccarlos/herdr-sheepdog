@@ -122,8 +122,10 @@ def claim(project, addr, replacing=None, pid=None, **extra):
         if cur.get("address") not in (None, addr, replacing) and _live(cur):
             return False
         d[KEY] = {"address": addr, "created_ms": k.get("created_ms"), "since": now(), "template": template_info()[0],
-                  **({"previous": cur["address"], "handoff": {"from": cur["address"], "created_ms": cur.get("created_ms"), "pid": pid}}
-                     if cur.get("address") not in (None, addr) else {}),
+                  **({"previous": cur["address"]} if cur.get("address") not in (None, addr) else {}),
+                  # every handoff not finished yet stays, the newest last (one replaced twice before a tick finished it)
+                  **({"handoffs": pending} if (pending := [*handoffs_of(cur), *([{"from": cur["address"], "created_ms": cur.get("created_ms"), "pid": pid}]
+                                                                                   if cur.get("address") not in (None, addr) else [])]) else {}),
                   **({"starts": cur["starts"]} if cur.get("starts") else {}), **extra}
         return True
     return _edit(project, put)
@@ -247,24 +249,33 @@ def handoff(folder, old, k=None, lease=None):
     return " ".join(parts)
 
 
+def handoffs_of(rec):
+    """The lease's handoff records not finished yet, oldest first."""
+    hs = rec.get("handoffs") if isinstance(rec.get("handoffs"), list) else []
+    return [h for h in hs if isinstance(h, dict) and h.get("from")]
+
+
 def finish_handoff(folder, new):
-    """Carries out the lease's handoff record, then removes it: workers and held news move from the earlier holder to
-    `new`; if that very terminal (same created_ms) still runs, it ends with its agent's process group. A later terminal
-    at its address is not it: its news and life are left alone. Returns (workers moved, ended address or None)."""
-    h = lease_of(folder).get("handoff")
-    if not isinstance(h, dict) or not h.get("from"):
-        return 0, None
-    old = h["from"]
-    k = hc_json("get", old) if "/" not in old else None
-    live = bool(k) and k.get("state") == "live"
-    same = live and not (h.get("created_ms") and k.get("created_ms") and h["created_ms"] != k["created_ms"])
-    moved = reparent(folder, old, new, held=same or not live)
-    if same:  # never two coordinators: it ends, as the restart would have ended it
-        run(["hc", "kill", old])
-        run(["hc", "rm", old])
-        end_group(h.get("pid"))  # its agent's children (agy's) don't orphan
-    _edit(folder, lambda d: d.get(KEY, {}).pop("handoff", None) if isinstance(d.get(KEY), dict) else None)
-    return moved, old if same else None
+    """Carries out the lease's handoff records, oldest first, removing each once done: workers and held news move from
+    the earlier holder to `new`; that very terminal (same created_ms) ends if it still runs, and its agent's process
+    group ends whenever its pid is known (also when a tick stopped after the kill). A later terminal at its address is
+    not it: its news and life are left alone. Every step can run twice. Returns (workers moved, [ended addresses])."""
+    moved, ended = 0, []
+    for h in handoffs_of(lease_of(folder)):
+        old = h["from"]
+        k = hc_json("get", old) if "/" not in old else None
+        here = bool(k) and not (h.get("created_ms") and k.get("created_ms") and h["created_ms"] != k["created_ms"])
+        live = bool(k) and k.get("state") == "live"
+        moved += reparent(folder, old, new, held=here or not live)
+        if here and live:  # never two coordinators: it ends, as the restart would have ended it
+            run(["hc", "kill", old])
+            ended.append(old)
+        if here:
+            run(["hc", "rm", old])
+        end_group(h.get("pid"))  # its agent's children (agy's) don't orphan; nothing when that group is gone already
+        _edit(folder, lambda d: d.get(KEY, {}).update(handoffs=[x for x in handoffs_of(d.get(KEY, {})) if x != h])
+              if isinstance(d.get(KEY), dict) else None)
+    return moved, ended
 
 
 def reparent(folder, old, new, held=True):
@@ -346,10 +357,10 @@ def reconcile_pass(report):
             holders.add(k["address"])
             try:
                 remember_session(folder, k)
-                if isinstance(lease.get("handoff"), dict):  # a handoff cut short: finish it
+                if handoffs_of(lease):  # a handoff cut short: finish it
                     moved, ended = finish_handoff(folder, k["address"])
                     report.setdefault("coordinators", []).append({"action": "re-parented", "folder": folder, "to": k["address"],
-                                                                  "workers": moved, **({"ended": ended} if ended else {})})
+                                                                  "workers": moved, **({"ended": ended[-1]} if ended else {})})
                 elif orphans(d, k["address"]):  # workers on a parent that is gone
                     report.setdefault("coordinators", []).append({"action": "re-parented", "folder": folder, "to": k["address"],
                                                                   "workers": reparent(folder, None, k["address"])})
