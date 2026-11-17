@@ -114,6 +114,52 @@ class Templates(unittest.TestCase):
         ):
             self.assertIn(words, workers)
 
+    def test_no_engine_prompt_or_brief_mentions_tasks_panel_or_herdr_app(self):
+        import tempfile
+        from unittest import mock
+        import herdr_task.assistant_settings as aset
+        import herdr_task.commands as commands
+        import herdr_task.launch as launch
+        import herdr_task.revive as revive
+        import herdr_task.settings as settings
+        import herdr_task.templates as T
+        from test_herdr_task import Store
+        tdir = tempfile.mkdtemp()
+        with mock.patch.object(T, "TEMPLATES", tdir), mock.patch.object(revive, "TEMPLATES", tdir), \
+                mock.patch.object(settings, "SETTINGS", os.path.join(tdir, "none.json")), \
+                mock.patch.object(launch, "own_path", lambda: "/usr/local/bin/herdr-task"):
+            s = Store([
+                {"id": 4, "title": "Fix bug", "state": "running", "mode": "worktree", "worktree": "/wt/4", "branch": "task/4", "base": "main", "prompt": "Fix it."},
+                {"id": 5, "title": "Local", "state": "running", "mode": "here", "prompt": "Check it."},
+            ])
+            wt, here = s.data["tasks"]
+            rs = aset.rows("/f", {})
+            samples = [
+                T.instructions("worker"),
+                T.instructions("reviewer"),
+                revive.template_of("assistant")[1],
+                aset.block(rs),
+                aset.notice(rs),
+                launch.brief(s, wt),
+                launch.brief(s, here),
+                launch.handoff(s, wt, {"agent": "claude"}),
+                settings.settings_block(s, wt),
+                settings.settings_block(s, here),
+                commands.finalize(s, {**here, "set": {}}),
+                commands.finalize(s, {**wt, "set": {"merge": "ask"}}),
+                commands.RESUME_NUDGE,
+                commands.SWITCH_NUDGE,
+            ]
+            for label, cfg_merge in (("assistant_settings", aset.block(rs)), ("settings_block", settings.settings_block(s, wt)),
+                                     ("finalize_local", commands.finalize(s, {**here, "set": {}})),
+                                     ("finalize_wt", commands.finalize(s, {**wt, "set": {"merge": "ask"}}))):
+                self.assertIn("by voice or on the phone's ask card", cfg_merge, label)
+            for idx, text in enumerate(samples):
+                low = text.lower()
+                self.assertNotIn("tasks panel", low, f"sample {idx}: {text[:120]}")
+                self.assertNotIn("herdr-app", low, f"sample {idx}: {text[:120]}")
+                self.assertNotIn("shepherdr", low, f"sample {idx}: {text[:120]}")
+
 
 if __name__ == "__main__":
     unittest.main()

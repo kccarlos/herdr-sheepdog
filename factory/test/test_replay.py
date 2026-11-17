@@ -124,7 +124,7 @@ def stale(text):
 def scorecard(files=False, templates=None):
     built = prompts(files, templates)
     rows = [(s, score(s, act(built[s["role"]][0], s))) for s in SITUATIONS]
-    roles = {r: (stale(p), [w for w in GONE if w in own]) for r, (p, own) in built.items()}
+    roles = {r: (stale(p), [w for w in GONE if w in p]) for r, (p, own) in built.items()}
     return rows, roles
 
 

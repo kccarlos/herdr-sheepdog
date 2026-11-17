@@ -9,7 +9,7 @@ Sheepdog's rule is that prompt changes need eval evidence ([eval index](../eval/
 - **Prompts come from the engine's own code**, on a clean install with an empty templates folder. The worker's prompt comes from `launch.brief`, the reviewer's from `instructions("reviewer")`, and the Assistant's from the bundled `assistant.md` plus its settings block, the way `project.py` starts it. The `--files` arm instead installs the bundled `worker.md` and `reviewer.md` as the owner's templates.
 - **The fake CLI runs as a real process** (`factory/test/fake_cli`, `FAKE_MODE=replay`) with the prompt plus the situation's message. It splits the prompt into rules (a bullet, a numbered step or a paragraph) and takes the first rule that holds every word of the situation's first matching cue set. It acts on that rule alone and logs the rule and the commands the rule names.
 - **A situation passes** when that rule names the expected command (`run`), holds the expected words (`says`) and names none of the forbidden commands (`never`).
-- **Two checks run on each whole prompt.** First, every `herdr-task …` command it names, in backticks or a code block, must be accepted by the engine's real CLI (`herdr-task <command> --help`, with each flag looked up there). Second, the template's own words must not mention a Shepherdr-only surface (window, web app, chat UI, browser view, upstream feedback).
+- **Two checks run on each whole prompt.** First, every `herdr-task …` command it names, in backticks or a code block, must be accepted by the engine's real CLI (`herdr-task <command> --help`, with each flag looked up there). Second, the whole built prompt (including the Settings block) must not mention a Shepherdr-only surface (window, web app, chat UI, browser view, upstream feedback).
 - **A mutation test proves the replay can fail.** It removes the Assistant's "Never approve a delete" sentence from a copy of the template and checks that A3, and only A3, fails.
 
 **No model is in the loop.** The replay proves what each prompt holds and that what it names exists in the engine. It does not prove how a model behaves on these prompts.
@@ -130,8 +130,16 @@ Passed 12 of 12.
 
 With the bundled files installed: Passed 12 of 12, with no refused commands and no Shepherdr-only words.
 
+## Follow-up (SDF-42): full-prompt check including Settings block
+
+`test_replay.py` now checks the whole built prompt (`launch.brief` / `assistant.md` plus `settings_block` / `assistant_settings.block`) rather than only the template body. Before SDF-42, `worker` and `assistant` still had `Tasks panel` in their Merge line (`settings.MERGE_WORDS` and `assistant_settings.MERGE_SHORT`); after SDF-42 they say "by voice or on the phone's ask card":
+
+| Arm | Situation score | Worker (`GONE` in full prompt) | Reviewer (`GONE` in full prompt) | Assistant (`GONE` in full prompt) |
+|---|---|---|---|---|
+| Before SDF-42 (clean install & `--files`) | 12 of 12 | `Tasks panel` | none | `Tasks panel` |
+| After SDF-42 (clean install & `--files`) | 12 of 12 | none | none | none |
+
 ## Not covered
 
 - **Model behaviour.** No model ran on these prompts. A live replay with a real CLI is still to do.
 - **Existing template files.** The engine still reads `~/.config/herdr-core/templates`. Where Shepherdr already put `worker.md`, `reviewer.md` or `assistant.md` there, as on the owner's Mac, those files win, so the trim reaches clean installs only. The upgrade matches only the engine's own earlier built-in defaults, never Shepherdr's installed files: live Shepherdr agents read those. `restart.sh` (Phase 2, SDF-16) and `herdr-task machines sync` still read that folder too.
-- **Settings block words.** The Settings block that `settings.py` and `assistant_settings.py` write still says "Tasks panel" in its Merge line. That text is outside the templates.

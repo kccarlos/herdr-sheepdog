@@ -432,7 +432,7 @@ def argv_model(argv):
 SETTINGS_HEAD = "Settings: (from herdr-task show; where the brief above says otherwise, it wins)"
 SET_BY = {"task": "set by the assistant for this task", "folder": "this folder's setting", "machine": "this machine's setting",
           "all": "your setting everywhere", "flag": "the flag file ~/.config/sheepdog/agy-review-unsandboxed"}
-MERGE_WORDS = {"ask": "ask the person first: they accept it in the Tasks panel, which merges it",
+MERGE_WORDS = {"ask": "ask the person first: they accept it by voice or on the phone's ask card, which merges it",
                "checks": "after checks: once you say ready, Herdr merges it when its checks pass",
                "auto": "on its own: once you say ready, Herdr merges it"}
 MUST_WORDS = {"blocker": "blocker", "major": "major and up (blocker, major)", "minor": "everything (blocker, major, minor)"}
@@ -775,6 +775,7 @@ def task_settings(s, t, space=None, argv=None, live=False):
             by_layer(s, None, "tasks", "review_rounds", rounds, 3))
     policy = sets.get("merge") or (k.get("merge") if k.get("merge") in MERGE_WORDS else "ask")
     m_by = "task" if "merge" in sets else by_layer(s, None, "tasks", "merge", policy, "ask")
+    proof = sets["proof"] == "on" if "proof" in sets else k.get("proof") is not False
     if here:
         add("Merge", "nothing to merge: you work in the folder itself, and the person accepts it", policy, m_by)
     else:
@@ -782,13 +783,21 @@ def task_settings(s, t, space=None, argv=None, live=False):
         add("Merge", f"ask me first ({why})" if why else MERGE_WORDS[policy], "ask" if why else policy, None if why else m_by)
         if why or policy == "ask":  # FAC-99: who takes the person's Accept
             from .ask import open_asks
-            on, gate = auto_accept_on(s, t), owner_gate(s, t, open_asks(s, t))
-            add("Auto-accept", AUTO_ACCEPT_WORDS["off" if not on else "owner" if gate else "fable" if why else "engine"].format(why=gate),
-                on, "task" if "auto_accept" in sets else by_layer(s, None, "tasks", "auto_accept", on, True))
+            auto_on, gate_why = auto_accept_on(s, t), owner_gate(s, t, open_asks(s, t))
+            if not auto_on:
+                auto_text = AUTO_ACCEPT_WORDS["off"]
+            elif gate_why:
+                auto_text = AUTO_ACCEPT_WORDS["owner"].format(why=gate_why)
+            elif why:
+                auto_text = AUTO_ACCEPT_WORDS["fable"]
+            else:
+                req = (["its passing review rounds on your final commit"] if on else []) + ["green CI"] + (["its proof"] if proof else [])
+                auto_text = f"on: with {', '.join(req[:-1])} and {req[-1]}, Herdr accepts and merges it" if len(req) > 1 else f"on: with {req[0]}, Herdr accepts and merges it"
+            add("Auto-accept", auto_text, auto_on,
+                "task" if "auto_accept" in sets else by_layer(s, None, "tasks", "auto_accept", auto_on, True))
         if t.get("base_set"):
             add("Base", f"{t['base']}: your branch starts from it and merges into it", t["base"],
                 "folder" if t.get("base_by") in ("project", "folder", "space") else "task")
-    proof = sets["proof"] == "on" if "proof" in sets else k.get("proof") is not False
     add("Proof", PROOF_WORDS["on" if proof else "off"], proof,
         "task" if "proof" in sets else by_layer(s, None, "tasks", "proof", proof, True))
     bdir = build_dir_of(s)
@@ -819,14 +828,16 @@ def settings_block(s, t, space=None, argv=None, live=False):
 
 def gate_min(s, t, space=None):
     """The passing rounds a worktree task needs from herdr-task's own reviewer (review.min); 0
-    outside gate folders, and for a task in the folder itself."""
+    outside gate folders, when review is set off, and for a task in the folder itself."""
     if t.get("mode") != "worktree":
         return 0
     sets = t.get("set") or {}
     if "review_min" in sets:
         return int(sets["review_min"])
+    if sets.get("review") == "off" or sets.get("review_rounds") == 0:
+        return 0
     if review_kind(t):
-        return 0 if sets.get("review") == "off" or sets.get("review_rounds") == 0 else 1
+        return 1
     return int(settings_for(s)["tasks"].get("review_min") or 0)
 
 
@@ -1055,11 +1066,14 @@ def accept_bar(s, t):
         ok = any(r.get("by") in fable_runs(t) and r.get("verdict") == "pass" for r in revs)
         return ("fable", None) if ok else (None, "Fable asked for changes twice" if fable_said(t, "changes") >= FABLE_CHANGES
                                            else "waits for Fable's review round")
-    gate = gate_min(s, t)  # at least one passing round, even with review off
-    got = sum(1 for r in revs if ((r.get("started_by") == "herdr-task" and r.get("verdict") == "pass") if gate else
-                                  r.get("result") in ("report", "pass")))
-    if got < max(1, gate):
-        return None, f"{got} of {max(1, gate)} passing review rounds on its final commit"
+    review_on, _ = review_limits(s, t)
+    gate = gate_min(s, t)
+    need = max(1, gate) if review_on else 0
+    if need:
+        got = sum(1 for r in revs if ((r.get("started_by") == "herdr-task" and r.get("verdict") == "pass") if gate else
+                                      r.get("result") in ("report", "pass")))
+        if got < need:
+            return None, f"{got} of {need} passing review rounds on its final commit"
     sets = t.get("set") or {}
     if (sets["proof"] == "on" if "proof" in sets else settings_for(s)["tasks"].get("proof") is not False) \
             and not t.get("proof"):
