@@ -17,7 +17,7 @@ from .base import Fail, git, guard, hc_json, kill_agent, now, run, STORE, stop_n
 from .settings import (write_max_running, 
     accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, bare, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
     fable_due, gate_min, merge_hold, merge_policy,
-    merge_wait_why, MUST_WORDS, remove_build_dir, review_kind, review_limits, set_opts, settings_block, settings_for, space_base,
+    merge_wait_why, MUST_WORDS, remove_build_dir, review_kind, review_limits, reviewed_for_head, set_opts, settings_block, settings_for, space_base,
     task_settings, worker_argv, worker_pick, worktrees_on, set_task, argv_model, AGENTS,
 )
 from .agents import (
@@ -43,7 +43,7 @@ from .scheduler import ensure_scheduler
 from .proof import evidence, find_proof
 from .when import when_from
 from .templates import instructions
-from .budget import budget_lines, budget_pass, change_sizes, merge_only_step, recap_refusal, record_ci, size_estimate, size_pass
+from .budget import budget_lines, budget_pass, change_sizes, merge_only_commits, merge_only_step, recap_refusal, record_ci, size_estimate, size_pass
 from .simulators import release_task
 
 
@@ -470,7 +470,7 @@ def cmd_ready(args):
                 # "For AGENTS.md": what the next agent would need about setting up or testing this
                 # repo; the Assistant decides whether it goes into the repo's AGENTS.md.
                 t["agents_md"] = note[:300]
-            for k in ("attention", "attention_at", "handed_at", "fix_requested", "progress", "retry", "review_out", "back", "settled_at", "device_wait"):
+            for k in ("attention", "attention_at", "handed_at", "fix_requested", "progress", "retry", "review_out", "back", "settled_at", "device_wait", "head_moved_at"):
                 t.pop(k, None)
             # Its agents' turns now: a later turn of theirs takes it back to work (busy_again()).
             t["ready_turns"] = ready_turns(live_agents(s.key(t)))
@@ -1515,7 +1515,7 @@ def cmd_state(args, state):
             # pull request merged and close it again at once) until its agent says ready.
             if t["state"] == "done" and t.get("merged"):
                 t["kept_open"] = True
-            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait"):
+            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait", "head_moved_at"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
@@ -1962,6 +1962,25 @@ def uses_queue(s, base):
     return bool(q) and now() - q < QUEUE_DAY
 
 
+def advance_merge_only(s, t):
+    """SDF-39: when a ready worktree branch moved forward solely via merge-only commits of base
+    on top of t['head'], move t['head'] forward so it can merge once checks pass; else False."""
+    wt = t.get("worktree") if t.get("mode") == "worktree" else None
+    folder = (s.loc or {}).get("folder") or ""
+    git_dir = wt if wt and os.path.exists(os.path.join(wt, ".git")) else (folder if folder and os.path.exists(os.path.join(folder, ".git")) else None)
+    if not git_dir:
+        return False
+    head, tip = t.get("head"), branch_tip(s, t)
+    if not (head and tip and tip != head):
+        return False
+    if wt and os.path.isdir(wt) and git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
+        return False
+    if not merge_only_commits(git_dir, t.get("base") or "main", head, tip, t.get("branch")):
+        return False
+    t["head"], t["head_moved_at"], s.dirty = tip, now(), True
+    return True
+
+
 def merge_now(s, t, accepting=False):
     """Merges the task's pull request on GitHub (squash) and tidies up here. Returns why it
     couldn't, or None when it's merged (and the task done). A base branch with GitHub's merge
@@ -1975,8 +1994,11 @@ def merge_now(s, t, accepting=False):
         return f"Couldn't reach pull request #{n} on GitHub."
     head = t.get("head")
     # A commit made here after ready was never pushed: merging would delete it with the branch.
+    # SDF-39: base-merge-only commits on top of the ready head move it forward automatically.
     if head and branch_tip(s, t) != head:
-        return f"{t.get('branch')} has moved on since it said ready: its agent says ready again first."
+        if not advance_merge_only(s, t):
+            return f"{t.get('branch')} has moved on since it said ready: its agent says ready again first."
+        head = t["head"]
     # FAC-98: a head GitHub's update-branch made from the ready head stands for it.
     synced = synced_head(t, repo, v.get("headRefOid")) if v.get("state") != "MERGED" else None
     if synced == "":
@@ -2045,15 +2067,15 @@ def merge_now(s, t, accepting=False):
             return NO_CI_RUN if t["pr"].get("no_ci") else CHECKS_RUNNING
         if not accepting and not t.get("accepted_by") and (by := auto_accepter(s, t)):  # FAC-99: its evidence, on the head merged
             if not v.get("statusCheckRollup"):
-                if t["pr"].get("wait") or now() - (t.get("ready_at") or 0) < NO_CHECKS_MS:
+                if t["pr"].get("wait") or now() - max(t.get("ready_at") or 0, t.get("head_moved_at") or 0) < NO_CHECKS_MS:
                     return CHECKS_RUNNING  # its checks may not show yet
                 t.pop("auto_merge", None)
                 t["accept_wait"] = "no CI checks ran on it, so it waits for your Accept"
                 return t["accept_wait"]
             t["auto_accepted"] = {
                 "by": by, "at": now(), "head": head, "merged_head": at, "proof": (t.get("proof") or {}).get("id"),
-                "rounds": [r["round"] for r in t.get("reviews") or [] if r.get("head") == head
-                           and (r.get("verdict") == "pass" or r.get("result") in ("report", "pass"))],
+                "rounds": [r["round"] for r in reviewed_for_head(s, t, head)
+                           if r.get("verdict") == "pass" or r.get("result") in ("report", "pass")],
                 "ci": sorted({str(e.get("run") or e["sha"][:7]) for e in t.get("ci_runs") or []
                               if e.get("sha") == v.get("headRefOid") and not e.get("failed")})}
         # #1045: never --delete-branch. gh deletes the branch right after its merge call whenever it
@@ -2130,7 +2152,7 @@ def run_pr_merge(s, t, wait_as_checks=False):
         if gone := pr_merged_at_tip(s, t, repo):
             finish_merged_pr(s, t, gone.get("mergeCommit"))
             return "github", None
-        if t.get("head") and branch_tip(s, t) != t["head"]:
+        if t.get("head") and branch_tip(s, t) != t["head"] and not advance_merge_only(s, t):
             return "github", f"{t.get('branch')} has moved on since it said ready: its agent says ready again first."
         pr_open(s, t, repo, t.get("summary"))
         # Restart the CI-start grace window from when the PR actually opened so a stale ready_at

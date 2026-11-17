@@ -907,6 +907,30 @@ def fable_due(s, t):
             and fable_said(t, "changes") < FABLE_CHANGES)
 
 
+def reviewed_for_head(s, t, head):
+    """Reviews on `head`, or on the latest earlier head that `head` extends only with base merges."""
+    all_revs = t.get("reviews") or []
+    if not head:
+        return []
+    revs = [r for r in all_revs if r.get("head") == head]
+    if revs:
+        return revs
+    wt = t.get("worktree") if t.get("mode") == "worktree" else None
+    folder = (s.loc or {}).get("folder") or ""
+    git_dir = wt if wt and os.path.exists(os.path.join(wt, ".git")) else (folder if folder and os.path.exists(os.path.join(folder, ".git")) else None)
+    if not git_dir:
+        return []
+    from .budget import merge_only_commits
+    seen, base, branch = set(), t.get("base") or "main", t.get("branch")
+    for r in reversed(all_revs):
+        rh = r.get("head")
+        if rh and rh != head and rh not in seen:
+            seen.add(rh)
+            if merge_only_commits(git_dir, base, rh, head, branch):
+                return [x for x in all_revs if x.get("head") == rh]
+    return []
+
+
 def accept_bar(s, t):
     """(who accepts, why not): ("engine"|"fable", None) when auto-accept takes the person's place,
     else (None, what's missing). Green CI is checked where it merges (merge_now)."""
@@ -916,7 +940,7 @@ def accept_bar(s, t):
         return None, why
     if t.get("mode") != "worktree" or t.get("nothing_to_merge"):
         return None, "nothing to merge"
-    revs = [r for r in t.get("reviews") or [] if head and r.get("head") == head]
+    revs = reviewed_for_head(s, t, head)
     if review_kind(t) or asks:
         ok = any(r.get("by") in fable_runs(t) and r.get("verdict") == "pass" for r in revs)
         return ("fable", None) if ok else (None, "Fable asked for changes twice" if fable_said(t, "changes") >= FABLE_CHANGES
