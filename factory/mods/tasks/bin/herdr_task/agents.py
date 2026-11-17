@@ -146,6 +146,13 @@ STATUSES = {"todo": "To do", "scheduled": "Scheduled", "queued": "Queued", "work
             "ready": "Ready", "merging": "Merging", "done": "Done"}
 
 
+def _startup_auth(task, k):
+    """agy briefly reports blocked (auth) at turn 0 while booting; ignore during STARTING_MS."""
+    st = k.get("status") if isinstance(k.get("status"), dict) else {}
+    return (status_word(k) == "blocked" and st.get("kind") == "auth"
+            and cli_of(k) == "agy" and not k.get("turn") and starting(task))
+
+
 def task_status(task, live):
     """(status, needs, why): a STATUSES key; for Needs you what kind ("attention", "asks",
     "reply", "stopped") and a one-line reason. live = its running agents (hc records)."""
@@ -155,7 +162,7 @@ def task_status(task, live):
         return "scheduled", None, starts_words(task.get("scheduled_for") or now(), now())
     if st not in ("running", "ready"):
         return (st if st in STATUSES else "todo"), None, None
-    states = ["blocked" if asking(k) else status_word(k) for k in live]
+    states = ["working" if _startup_auth(task, k) else "blocked" if asking(k) else status_word(k) for k in live]
     # A problem Herdr just found (SHEP-133): not Needs you before GRACE_MS have passed, while its
     # agent is told and takes it up; until then the task reads as it would without it. Recaps and
     # repeated reviewer failures wait on the Assistant right away (not the worker).
@@ -1337,6 +1344,9 @@ def codex_working(k):
     return False
 
 
+BG_WORK_MAX_MS = 30 * 60_000  # a task waiting on its own background job stays Working at most 30 minutes
+
+
 def own_work(task, live, ready=False, since=0):
     """Its quiet agent is on its own work (above). What really runs (a background job, a command
     open in the foreground, an agy background task, a helper of its own at work: SHEP-54) counts
@@ -1355,12 +1365,14 @@ def own_work(task, live, ready=False, since=0):
         key = label_of(k.get("labels"), "task")
         if key and any(parent_of(h) == address and status_word(h) in ("working", "blocked") for h in live_helpers(key)):
             return True
+        if k.get("status_ms") and now() - k["status_ms"] >= BG_WORK_MAX_MS:
+            continue
         log = agent_log(task, address) or agent_log(task)
         jobs, ended = background_jobs(log) if log else ({}, 0)
         cut = since or (task.get("settled_at") or 0 if ready else 0)
         told = task.get("bg_told") or {}
         gone = set(told.get("ids") or []) if told.get("at") and turn_since(told, live) else set()
-        jobs = {i: at for i, at in jobs.items() if at >= cut and i not in gone}
+        jobs = {i: at for i, at in jobs.items() if at >= cut and i not in gone and now() - at < BG_WORK_MAX_MS}
         # Codex's jobs are only what its process tree shows (SHEP-207): a session the log says is
         # still open, with no process of the agent running, is over.
         if any(i.startswith("codex:") for i in jobs) and not codex_working(k):
