@@ -160,6 +160,15 @@ func TestClientCallsRequestsAndResults(t *testing.T) {
 		t.Fatalf("unexpected kill result: %+v", killed)
 	}
 	assertParams(t, server, "terminal.kill", map[string]any{"terminal": "t2"})
+
+	if _, err := client.Remove(ctx, ranSized.Address); !errors.Is(err, hc.ErrLive) {
+		t.Fatalf("Remove live error = %v, want ErrLive", err)
+	}
+	removed, err := client.Remove(ctx, ran.Address)
+	if err != nil || removed.Removed != ran.Address {
+		t.Fatalf("Remove finished = (%+v, %v), want %s", removed, err, ran.Address)
+	}
+	assertParams(t, server, "terminal.rm", map[string]any{"terminal": "t2"})
 }
 
 func TestCallErrorsAndKindMatching(t *testing.T) {
@@ -191,6 +200,7 @@ func TestCallErrorsAndKindMatching(t *testing.T) {
 		{"finished", hc.ErrFinished},
 		{"unavailable", hc.ErrUnavailable},
 		{"name_taken", hc.ErrNameTaken},
+		{"live", hc.ErrLive},
 	}
 	for _, tt := range tests {
 		t.Run(tt.kind, func(t *testing.T) {

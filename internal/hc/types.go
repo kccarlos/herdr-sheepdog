@@ -113,7 +113,14 @@ type RunParams struct {
 	Labels   map[string]string `json:"labels,omitempty"`
 	Keep     bool              `json:"keep,omitempty"`
 	NoParent bool              `json:"no_parent,omitempty"`
+	NoNotify bool              `json:"no_notify,omitempty"`
+	Rm       bool              `json:"rm,omitempty"`
 	Size     *InitialSize      `json:"size,omitempty"`
+}
+
+// RemoveResult reports the removed terminal address from terminal.rm.
+type RemoveResult struct {
+	Removed string `json:"removed"`
 }
 
 // Error is a JSON-RPC error returned by herdr-core.
@@ -151,6 +158,8 @@ func (e *Error) Is(target error) bool {
 		return e.Kind == "unavailable"
 	case ErrNameTaken:
 		return e.Kind == "name_taken"
+	case ErrLive:
+		return e.Kind == "live"
 	}
 	return false
 }
@@ -167,6 +176,8 @@ var (
 	ErrUnavailable = errors.New("hc: terminal is unavailable")
 	// ErrNameTaken matches a terminal name already in use.
 	ErrNameTaken = errors.New("hc: terminal name is taken")
+	// ErrLive matches terminal.rm on a terminal that has not exited yet.
+	ErrLive = errors.New("hc: terminal is live")
 )
 
 // SubscribeFilter narrows an event subscription.

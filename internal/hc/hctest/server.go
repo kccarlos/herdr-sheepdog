@@ -31,6 +31,8 @@ type Request struct {
 type Server struct {
 	// Path is the Unix socket to give to hc.NewClient.
 	Path string
+	// OnRun, when set, is called after terminal.run creates a terminal.
+	OnRun func(hc.Terminal, hc.RunParams)
 
 	ln   net.Listener
 	dir  string
@@ -217,6 +219,15 @@ func (s *Server) SetScreen(address, text string) {
 
 // Finish marks a terminal finished and emits a finished event.
 func (s *Server) Finish(address, reason string) {
+	s.finish(address, reason, nil)
+}
+
+// FinishExit marks a terminal finished with code and emits a finished event.
+func (s *Server) FinishExit(address, reason string, code int) {
+	s.finish(address, reason, &code)
+}
+
+func (s *Server) finish(address, reason string, code *int) {
 	s.mu.Lock()
 	t, ok := s.terminals[address]
 	if !ok {
@@ -225,6 +236,10 @@ func (s *Server) Finish(address, reason string) {
 	}
 	t.State = "finished"
 	t.Reason = &reason
+	if code != nil {
+		c := *code
+		t.ExitCode = &c
+	}
 	t.Status = nil
 	t.Foreground = nil
 	s.terminals[address] = t
@@ -400,7 +415,7 @@ func (s *Server) handle(method string, params json.RawMessage) (any, error) {
 			Methods: []string{
 				"hello", "terminal.list", "terminal.get", "terminal.read",
 				"terminal.send", "terminal.keys", "terminal.interrupt",
-				"terminal.run", "terminal.kill", "terminal.label", "terminal.attach",
+				"terminal.run", "terminal.kill", "terminal.rm", "terminal.label", "terminal.attach",
 				"events.subscribe",
 			},
 			Core: hc.CoreInfo{ID: "fake-core", Name: "hctest"},
@@ -469,6 +484,12 @@ func (s *Server) handle(method string, params json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return s.kill(p.Terminal)
+	case "terminal.rm":
+		var p terminalParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, err
+		}
+		return s.rm(p.Terminal)
 	case "terminal.label":
 		var p struct {
 			Terminal string            `json:"terminal"`
@@ -615,9 +636,30 @@ func (s *Server) run(p hc.RunParams) hc.Terminal {
 		Keep:      p.Keep,
 	}
 	s.terminals[address] = t
+	onRun := s.OnRun
 	s.mu.Unlock()
 	s.emitEvent(address, &t, "created", t)
+	if onRun != nil {
+		onRun(t, p)
+		if updated, ok := s.get(address); ok {
+			t = updated
+		}
+	}
 	return t
+}
+
+func (s *Server) rm(target string) (hc.RemoveResult, error) {
+	s.mu.Lock()
+	t, ok := s.resolveLocked(target)
+	s.mu.Unlock()
+	if !ok {
+		return hc.RemoveResult{}, notFound(target)
+	}
+	if t.State == "live" {
+		return hc.RemoveResult{}, kindError("live", fmt.Sprintf("terminal %s is live", target))
+	}
+	s.Remove(t.Address)
+	return hc.RemoveResult{Removed: t.Address}, nil
 }
 
 func (s *Server) kill(target string) (hc.Terminal, error) {
