@@ -840,8 +840,9 @@ def launch(s, task, argv, message=None, parent=None, resume=None, role=None, rea
     keep = [] if role == "reviewer" else ["--keep"]
     sh = reviewer_shell(cmd) if role == "reviewer" else in_shell(cmd)
     name = agent_name(s, task, "review" if role else None)
+    # HERDR_BROWSER_TASK stays beside SHEEPDOG_TASK until SDF-8/SDF-11 convert revive.py and worker.md.
     r = run(["hc", "run", "--bg", "--json", *keep, "--cwd", folder, "--name", name,
-             *labels, *rel, "--", *low_priority(clean_env(["env", f"SHEEPDOG_TASK={key}", *no_update_env(cmd), *sh]), name)])
+             *labels, *rel, "--", *low_priority(clean_env(["env", f"SHEEPDOG_TASK={key}", f"HERDR_BROWSER_TASK={key}", *no_update_env(cmd), *sh]), name)])
     try:
         out = json.loads(r.stdout)
     except ValueError:

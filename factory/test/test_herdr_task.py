@@ -7002,6 +7002,7 @@ class CleanEnv(unittest.TestCase):
         for k, v in self.KEPT.items():
             self.assertEqual(env.get(k), v)
         self.assertEqual(env.get("SHEEPDOG_TASK"), "dev#6")  # what the launch sets on purpose stays
+        self.assertEqual(env.get("HERDR_BROWSER_TASK"), "dev#6")  # kept until SDF-8/SDF-11 convert worker.md
 
     def test_the_same_line_everywhere(self):
         """herdr-task, the window and the service (core/clean-env.js) and restart.sh clear the same names."""
@@ -9180,7 +9181,7 @@ class Resume(unittest.TestCase):
 
     def test_an_agent_without_an_update_switch_gets_nothing_extra(self):
         self.started_task({"agent": "agy", "perm": "auto"})
-        self.assertEqual([w.split("=")[0] for w in self.env_words()], ["SHEEPDOG_TASK"])
+        self.assertEqual([w.split("=")[0] for w in self.env_words()], ["SHEEPDOG_TASK", "HERDR_BROWSER_TASK"])
         self.assertEqual(self.launch.no_update_env(["codex", "exec"]), [])
 
     def test_fresh_handoff_when_session_missing_or_cli_changed_without_duplicate_continue(self):
