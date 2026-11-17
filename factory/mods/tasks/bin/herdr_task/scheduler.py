@@ -3,8 +3,9 @@
 import hashlib
 import os
 import sys
+import time
 
-from .base import bundle, ENTRY, hc_json, HOME, run, STORE
+from .base import bundle, ENTRY, hc_json, HOME, kill_agent, run, STORE
 from .store import read_list, store_files
 
 
@@ -28,8 +29,13 @@ def ensure_scheduler(quiet=False):
     if ok or not need:
         return {"running": ok, "started": False, "note": "The scheduler is running." if ok else "Nothing at work here: no scheduler needed."}
     if k:
-        # Its program was lost (a restart left a shell): replace it.
-        run(["hc", "kill", SCHEDULER])
+        # Its program was lost (a restart left a shell): replace it, waiting briefly for hc kill to finish.
+        kill_agent(SCHEDULER)
+        for _ in range(15):
+            cur = hc_json("get", SCHEDULER)
+            if not cur or cur.get("state") != "live":
+                break
+            time.sleep(0.2)
         run(["hc", "rm", SCHEDULER])
     r = run(["hc", "run", "--bg", "--json", "--keep", "--no-parent", "--no-notify", "--name", SCHEDULER, "--cwd", HOME,
              "--", sys.executable, ENTRY, "scheduler"])

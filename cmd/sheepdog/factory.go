@@ -28,7 +28,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "           timed project-volume probe inside herdr-core (macOS consent prompts")
 	fprintln(w, "           and external-disk stalls), at least one logged-in agent CLI (claude,")
 	fprintln(w, "           codex or agy) plus a canary start inside herdr-core, gh login with")
-	fprintln(w, "           the default repo pinned, and codexbar. Exit 1 on FAIL.")
+	fprintln(w, "           the default repo pinned, codexbar, and tart VMs (when tart is installed). Exit 1 on FAIL.")
 	fprintln(w, "")
 	fprintln(w, "flags:")
 	fprintln(w, "  --folder PATH      project folder to check (default . or [folder])")
@@ -130,6 +130,7 @@ func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writ
 		Canary:       !*noCanary,
 		Home:         home,
 		GHHost:       os.Getenv("GH_HOST"),
+		TartHome:     os.Getenv("TART_HOME"),
 	})
 	for _, r := range results {
 		fprintln(stdout, r.Line())

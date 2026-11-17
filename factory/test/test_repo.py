@@ -521,3 +521,117 @@ class TestsOnAThrowawayHome(unittest.TestCase):
         # this repo's own files are fine, wherever its worktree lives
         open(J("NOTICE")).close()
         subprocess.run(["true"], check=True)
+
+
+REPO_ROOT = os.path.dirname(ROOT)
+R = lambda *p: os.path.join(REPO_ROOT, *p)
+
+
+@unittest.skipUnless(
+    os.path.isfile(R("scripts", "factory", "m1-pr-acceptance.sh"))
+    and os.path.isfile(R("scripts", "e2e", "nightly.sh")),
+    "scripts/factory and scripts/e2e are outside factory/",
+)
+class TartHomeScripts(unittest.TestCase):
+    """SDF-44: scripts calling tart honour TART_HOME from env or settings.json and hint when empty."""
+
+    def test_scripts_parse_and_honour_tart_home_setting_and_hint(self):
+        import json
+        import subprocess
+        import tempfile
+
+        for rel in (
+            os.path.join("scripts", "e2e", "lib.sh"),
+            os.path.join("scripts", "e2e", "nightly.sh"),
+            os.path.join("scripts", "e2e", "nightly-install.sh"),
+            os.path.join("scripts", "factory", "m1-pr-acceptance.sh"),
+        ):
+            out = subprocess.run(["bash", "-n", R(rel)], capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0, f"{rel}: {out.stderr}")
+
+        with tempfile.TemporaryDirectory() as d:
+            fake_home = os.path.join(d, "home")
+            fake_bin = os.path.join(d, "bin")
+            tart_dir = os.path.join(d, "tart-vms")
+            os.makedirs(os.path.join(fake_home, ".config", "sheepdog"), exist_ok=True)
+            os.makedirs(fake_bin, exist_ok=True)
+            os.makedirs(tart_dir, exist_ok=True)
+            with open(os.path.join(fake_home, ".config", "sheepdog", "settings.json"), "w") as f:
+                json.dump({"machines": {"local": {"machine": {"tart_home": tart_dir}}}}, f)
+
+            seen_file = os.path.join(d, "seen-tart-home")
+            tart_stub = os.path.join(fake_bin, "tart")
+            with open(tart_stub, "w") as f:
+                f.write(
+                    "#!/bin/sh\n"
+                    f'printf "%s" "${{TART_HOME:-}}" > "{seen_file}"\n'
+                    'if [ "$1" = "list" ]; then exit 0; fi\n'
+                    "exit 1\n"
+                )
+            os.chmod(tart_stub, 0o755)
+            for tool in ("ssh", "scp"):
+                p = os.path.join(fake_bin, tool)
+                with open(p, "w") as f:
+                    f.write("#!/bin/sh\nexit 1\n")
+                os.chmod(p, 0o755)
+
+            env = {
+                "HOME": fake_home,
+                "PATH": f"{fake_bin}:/usr/bin:/bin",
+                "GH_TOKEN": "fake-token",
+            }
+            res = subprocess.run(
+                ["bash", R("scripts", "factory", "m1-pr-acceptance.sh"), "owner/repo", "--vm", "sd-qa"],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(res.returncode, 0)
+            self.assertEqual(open(seen_file).read(), tart_dir)
+            self.assertIn("VMs live under TART_HOME; set it to the folder that holds them", res.stderr)
+
+            env_override = dict(env, TART_HOME=os.path.join(d, "env-tart"))
+            subprocess.run(
+                ["bash", R("scripts", "factory", "m1-pr-acceptance.sh"), "owner/repo", "--vm", "sd-qa"],
+                env=env_override,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(open(seen_file).read(), env_override["TART_HOME"])
+
+            nightly_out = subprocess.run(
+                ["bash", R("scripts", "e2e", "nightly.sh"), "__vm-boot", d],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(nightly_out.returncode, 0)
+            self.assertEqual(open(seen_file).read(), tart_dir)
+            self.assertIn("VMs live under TART_HOME; set it to the folder that holds them", nightly_out.stdout + nightly_out.stderr)
+
+            # nightly-install.sh resolves TART_HOME from settings.json into the plist and passes plutil -lint.
+            clone = os.path.join(d, "nightly-clone")
+            os.makedirs(os.path.join(clone, ".git"), exist_ok=True)
+            os.makedirs(os.path.join(clone, "scripts", "e2e"), exist_ok=True)
+            with open(os.path.join(clone, "scripts", "e2e", "nightly.sh"), "w") as f:
+                f.write("#!/bin/sh\nexit 0\n")
+            os.chmod(os.path.join(clone, "scripts", "e2e", "nightly.sh"), 0o755)
+            for name, body in (
+                ("git", "#!/bin/sh\nexit 0\n"),
+                ("launchctl", "#!/bin/sh\nexit 0\n"),
+                ("plutil", "#!/bin/sh\nexit 0\n"),
+            ):
+                p = os.path.join(fake_bin, name)
+                with open(p, "w") as f:
+                    f.write(body)
+                os.chmod(p, 0o755)
+            inst_env = dict(env, SHEEPDOG_NIGHTLY_CLONE=clone)
+            inst = subprocess.run(
+                ["bash", R("scripts", "e2e", "nightly-install.sh")],
+                env=inst_env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(inst.returncode, 0, inst.stdout + inst.stderr)
+            plist = open(os.path.join(fake_home, "Library", "LaunchAgents", "io.github.kccarlos.sheepdog-nightly.plist")).read()
+            self.assertIn(f"<string>{tart_dir}</string>", plist)

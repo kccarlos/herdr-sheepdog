@@ -14174,3 +14174,40 @@ class ClaudeStartupTrustAndDialogs(unittest.TestCase):
             live[0] = {**live[0], "status": {"state": "working"}, "turn": 1}
             with self.store_mod.Store(self.store_mod.locate(repo), write=False) as s:
                 self.assertEqual(self.agents.task_status(s.find(tid), live), ("working", None, None))
+
+
+class TartHomeSetting(unittest.TestCase):
+    """SDF-44: tart_home reads TART_HOME env first, then machine.tart_home in settings.json."""
+
+    def test_tart_home_env_and_config_setting(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.settings as settings
+        tmp = os.path.realpath(tempfile.mkdtemp(prefix="sdf44-tart-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        repo = os.path.join(tmp, "repo")
+        os.makedirs(repo)
+        subprocess.run(["git", "init", "-q", "-b", "main", repo], check=True)
+        settings_file = os.path.join(tmp, "settings.json")
+        store_dir = os.path.join(tmp, "tasks")
+        env = {
+            **os.environ,
+            "HOME": tmp,
+            "HERDR_TASK_STORE": store_dir,
+            "HERDR_TASK_SETTINGS": settings_file,
+        }
+        env.pop("TART_HOME", None)
+        code = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]); "
+                "from herdr_task.cli import main; sys.argv[1:] = sys.argv[2:]; sys.exit(main())")
+        run_cli = lambda *a: subprocess.run([sys.executable, "-c", code, BIN, *a], env=env, capture_output=True, text=True)
+
+        with mock.patch.object(settings, "SETTINGS", settings_file), mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(settings.tart_home(), "")
+            r = run_cli("config", "--folder", repo, "--set", "machine.tart_home=~/tart-vms")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(settings.tart_home(), os.path.expanduser("~/tart-vms"))
+            with mock.patch.dict(os.environ, {"TART_HOME": "/tmp/override-tart"}):
+                self.assertEqual(settings.tart_home(), "/tmp/override-tart")
+            r = run_cli("config", "--folder", repo, "--set", "machine.tart_home=default")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(settings.tart_home(), "")

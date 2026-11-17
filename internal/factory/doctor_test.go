@@ -885,3 +885,134 @@ func TestCheckSync(t *testing.T) {
 		}
 	})
 }
+
+func TestCheckTart(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("skips when tart is not on PATH", func(t *testing.T) {
+		env := newFakeEnv("hc")
+		r := CheckTart(ctx, DoctorOptions{
+			Home:       t.TempDir(),
+			TempDir:    t.TempDir(),
+			Getenv:     func(string) string { return "" },
+			LookPath:   env.lookPath,
+			RunCommand: env.run,
+		})
+		if r.Status != onboard.Skip {
+			t.Fatalf("missing tart = %+v, want Skip", r)
+		}
+	})
+
+	t.Run("empty tart list warns with TART_HOME hint", func(t *testing.T) {
+		env := newFakeEnv("tart")
+		env.handlers["tart list"] = func(_ string, _ []string, _ []string) CommandOutput {
+			return CommandOutput{Stdout: "\n"}
+		}
+		r := CheckTart(ctx, DoctorOptions{
+			Home:       t.TempDir(),
+			TempDir:    t.TempDir(),
+			Getenv:     func(string) string { return "" },
+			LookPath:   env.lookPath,
+			RunCommand: env.run,
+		})
+		if r.Status != onboard.Warn ||
+			!strings.Contains(r.Detail, "tart list") ||
+			!strings.Contains(r.Fix, "VMs live under TART_HOME; set it to the folder that holds them") {
+			t.Fatalf("empty tart list = %+v", r)
+		}
+	})
+
+	t.Run("honours TART_HOME env and factory setting with env winning", func(t *testing.T) {
+		home := t.TempDir()
+		settingsPath := filepath.Join(home, ".config", "sheepdog", "settings.json")
+		if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(settingsPath, []byte(`{"here":"mini","everywhere":{"machine":{"tart_home":"~/vms-all"}},"machines":{"mini":{"machine":{"tart_home":"~/vms-mini"}}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		var gotEnvs [][]string
+		env := newFakeEnv("tart")
+		env.handlers["tart list"] = func(_ string, extra []string, _ []string) CommandOutput {
+			gotEnvs = append(gotEnvs, append([]string(nil), extra...))
+			return CommandOutput{Stdout: "sd-qa-base\nsd-qa\n"}
+		}
+
+		// Factory setting used when TART_HOME env is empty; machines[here] wins over everywhere and expands ~/.
+		r := CheckTart(ctx, DoctorOptions{
+			Home:         home,
+			TempDir:      home,
+			SettingsPath: settingsPath,
+			Getenv:       func(string) string { return "" },
+			LookPath:     env.lookPath,
+			RunCommand:   env.run,
+		})
+		wantSetting := filepath.Join(home, "vms-mini")
+		if r.Status != onboard.OK || !strings.Contains(r.Detail, "2 VM(s)") || !strings.Contains(r.Detail, "TART_HOME="+wantSetting) {
+			t.Fatalf("factory setting tart = %+v", r)
+		}
+		if len(gotEnvs) != 1 || !slices.Contains(gotEnvs[0], "TART_HOME="+wantSetting) {
+			t.Fatalf("expected TART_HOME=%s passed to tart list, got %v", wantSetting, gotEnvs)
+		}
+
+		// Explicit TART_HOME env wins over the factory setting.
+		envDir := filepath.Join(home, "vms-env")
+		r = CheckTart(ctx, DoctorOptions{
+			Home:         home,
+			TempDir:      home,
+			SettingsPath: settingsPath,
+			Getenv: func(k string) string {
+				if k == "TART_HOME" {
+					return envDir
+				}
+				return ""
+			},
+			LookPath:   env.lookPath,
+			RunCommand: env.run,
+		})
+		if r.Status != onboard.OK || !strings.Contains(r.Detail, "TART_HOME="+envDir) {
+			t.Fatalf("env TART_HOME = %+v", r)
+		}
+		if len(gotEnvs) != 2 || !slices.Contains(gotEnvs[1], "TART_HOME="+envDir) {
+			t.Fatalf("expected TART_HOME=%s passed to tart list, got %v", envDir, gotEnvs)
+		}
+	})
+
+	t.Run("Doctor passes TART_HOME through hc machine.exec", func(t *testing.T) {
+		tmp := t.TempDir()
+		tartDir := filepath.Join(tmp, "tart-vms")
+		srv := hctest.New(t)
+		srv.OnRun = func(term hc.Terminal, _ hc.RunParams) {
+			srv.SetScreen(term.Address, "<SD_DIR>"+tmp+"</SD_DIR>\n")
+			srv.FinishExit(term.Address, "exited", 0)
+		}
+		var tartExecEnv map[string]string
+		srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+			zero := 0
+			if slices.Contains(p.Argv, "tart") && slices.Contains(p.Argv, "list") {
+				tartExecEnv = p.Env
+				return hc.ExecResult{Code: &zero, Stdout: []byte("sd-qa-base\n")}, nil
+			}
+			return hc.ExecResult{Code: &zero}, nil
+		}
+		rs := Doctor(ctx, DoctorOptions{
+			Folder:        tmp,
+			DataDir:       filepath.Join(tmp, "data"),
+			HCSocket:      srv.Path,
+			Canary:        false,
+			Home:          tmp,
+			TempDir:       tmp,
+			TartHome:      tartDir,
+			VolumeTimeout: time.Second,
+			AuthTimeout:   time.Second,
+		})
+		r := findResult(t, rs, "tart")
+		if r.Status != onboard.OK || !strings.Contains(r.Detail, "TART_HOME="+tartDir) {
+			t.Fatalf("Doctor tart result = %+v", r)
+		}
+		if tartExecEnv["TART_HOME"] != tartDir {
+			t.Fatalf("hc machine.exec env TART_HOME = %q, want %q", tartExecEnv["TART_HOME"], tartDir)
+		}
+	})
+}

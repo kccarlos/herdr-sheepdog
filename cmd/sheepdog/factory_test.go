@@ -75,12 +75,14 @@ func TestFactoryCommandCLI(t *testing.T) {
 		}
 		sock := filepath.Join(home, "hc.sock")
 		proj := filepath.Join(home, "repo")
+		tartDir := filepath.Join(home, "tart-vms")
+		t.Setenv("TART_HOME", tartDir)
 		var out, errBuf bytes.Buffer
 		code := run(context.Background(), []string{"factory", "doctor", "--hc-socket", sock, "--no-canary", "--no-repair", proj}, &out, &errBuf)
 		if code != 0 {
 			t.Fatalf("code = %d, stderr = %s", code, errBuf.String())
 		}
-		if gotOpts.Folder != proj || gotOpts.HCSocket != sock || gotOpts.Canary || !gotOpts.NoRepair || gotOpts.DataDir != filepath.Join(home, ".local", "share", "sheepdog") || gotOpts.Engine.FS == nil {
+		if gotOpts.Folder != proj || gotOpts.HCSocket != sock || gotOpts.Canary || !gotOpts.NoRepair || gotOpts.DataDir != filepath.Join(home, ".local", "share", "sheepdog") || gotOpts.Engine.FS == nil || gotOpts.TartHome != tartDir {
 			t.Errorf("gotOpts = %+v", gotOpts)
 		}
 		if !strings.Contains(out.String(), "WARN  codexbar") || !strings.Contains(out.String(), "fix: install codexbar") {

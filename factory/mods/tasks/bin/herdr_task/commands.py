@@ -14,7 +14,7 @@ import time
 from . import sandbox
 from .checks import checks_line, resolve_check, sync_check, sync_mode, sync_plan, SYNC_FAILED
 from .base import Fail, git, guard, hc_json, kill_agent, label_of, now, run, STORE, stop_note, VERSION
-from .settings import (cli_missing_reason, write_max_running, write_task_check, write_worker_agent, write_worker_perm, WORKER_PERMS,
+from .settings import (cli_missing_reason, write_machine_option, write_max_running, write_task_check, write_worker_agent, write_worker_perm, WORKER_PERMS,
     accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
     fable_due, gate_min, merge_hold, merge_policy,
     merge_wait_why, MUST_WORDS, project_base, remove_build_dir, review_kind, review_limits, reviewed_for_head, set_opts, settings_block, settings_for,
@@ -1693,10 +1693,13 @@ def cmd_config(args):
         for pair in getattr(args, "set", None) or []:  # FAC-103: folder settings from the CLI
             k, eq, v = pair.partition("=")
             key = k.strip().lower()
-            if not eq or key not in ("tasks.max_running", "max_running", "tasks.check", "check", "worker.perm", "worker.agent"):
-                raise Fail(f"config --set takes tasks.max_running=N, tasks.check=CMD, worker.agent=CLI or worker.perm=MODE, not {pair!r}.")
+            if not eq or key not in ("tasks.max_running", "max_running", "tasks.check", "check", "worker.perm", "worker.agent", "machine.tart_home"):
+                raise Fail(f"config --set takes tasks.max_running=N, tasks.check=CMD, worker.agent=CLI, worker.perm=MODE or machine.tart_home=DIR, not {pair!r}.")
             v = v.strip().strip("\"'")
             low = v.lower()
+            if key == "machine.tart_home":
+                write_machine_option("tart_home", None if not v or low == "default" else v)
+                continue
             if key == "worker.agent":
                 if not v or low == "default":
                     write_worker_agent(s, None)

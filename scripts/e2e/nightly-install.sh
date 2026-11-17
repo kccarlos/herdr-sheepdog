@@ -12,12 +12,14 @@
 # removes the plist (the clone and the reports stay).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/e2e/lib.sh
+. "$HERE/lib.sh"
 LABEL=io.github.kccarlos.sheepdog-nightly
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 CLONE="${SHEEPDOG_NIGHTLY_CLONE:-$HOME/.sheepdog-nightly/herdr-sheepdog}"
 URL="https://github.com/kccarlos/herdr-sheepdog"
 REF=origin/main
-TART_HOME_V="${TART_HOME:-/Volumes/Ext/dev/vms/tart}"
+TART_HOME_V="$(e2e_resolve_tart_home)"
 DOMAIN="gui/$(id -u)"
 
 while [ $# -gt 0 ]; do
@@ -46,9 +48,19 @@ git -C "$CLONE" checkout -q --detach --force "$REF"
 
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs/sheepdog-nightly"
 esc() { printf '%s' "$1" | sed -e 's/[&|\\]/\\&/g'; }
-sed -e "s|@CLONE@|$(esc "$CLONE")|g" -e "s|@HOME@|$(esc "$HOME")|g" \
-    -e "s|@REF@|$(esc "$REF")|g" -e "s|@TART_HOME@|$(esc "$TART_HOME_V")|g" \
-    "$HERE/$LABEL.plist" >"$PLIST.new"
+if [ -n "$TART_HOME_V" ]; then
+  sed -e "s|@CLONE@|$(esc "$CLONE")|g" -e "s|@HOME@|$(esc "$HOME")|g" \
+      -e "s|@REF@|$(esc "$REF")|g" -e "s|@TART_HOME@|$(esc "$TART_HOME_V")|g" \
+      "$HERE/$LABEL.plist" >"$PLIST.new"
+else
+  sed -e "s|@CLONE@|$(esc "$CLONE")|g" -e "s|@HOME@|$(esc "$HOME")|g" \
+      -e "s|@REF@|$(esc "$REF")|g" \
+      -e '/<key>TART_HOME<\/key>/d' -e '/@TART_HOME@/d' \
+      "$HERE/$LABEL.plist" >"$PLIST.new"
+  if command -v tart >/dev/null 2>&1 && [ -z "$(tart list --quiet 2>/dev/null || true)" ]; then
+    echo "nightly-install: warning: tart list is empty (VMs live under TART_HOME; set it to the folder that holds them)" >&2
+  fi
+fi
 plutil -lint "$PLIST.new" >/dev/null
 mv "$PLIST.new" "$PLIST"
 
