@@ -834,6 +834,9 @@ def gate_step(s, t):
             return f"{s.ref(t)}: {hold}."
         t.pop("push_held", None)
         push_branch(s, t)
+        t["pr"]["wait"] = PR_CHECKS_RUNNING
+        t["pr"]["checked"] = 0
+        s.dirty = True
     rv = FABLE if fable else pick
     ref, ht, folder = s.ref(t), own_path(), shlex.quote(s.loc["folder"])
     sand = sandboxes([rv["agent"]])  # agy on a Mac: sandboxed, nothing prompts, its verdict read from its terminal
@@ -1208,8 +1211,11 @@ def finalize(s, t):
         t["ready_at"] = now()
         if head:
             t["ready_head"] = head
-    elif not t.get("ready_head") and prev_head:
-        t["ready_head"] = prev_head
+    else:
+        if not t.get("ready_head") and prev_head:
+            t["ready_head"] = prev_head
+        if repo and not held and not failed and head and head != prev_head:
+            t["head_moved_at"] = now()  # fresh CI-wait clock for this new docs-only commit while keeping first ready_at
     for k in ("attention", "merge_requested", "review", "accepted_by", "auto_accepted", "accept_wait"):
         t.pop(k, None)
     (t.get("pr") or {}).pop("wait", None)
@@ -1232,6 +1238,8 @@ def finalize(s, t):
         pr["checked"] = 0
         # Working until its checks are done and GitHub knows it can merge (the tick: pr_wait()).
         pr["wait"] = PR_CHECKS_RUNNING
+        if keep_ready and head and head != prev_head:
+            pr["head_at"] = now()
         msg = (f"{s.ref(t)} is ready: pull request #{pr['number']}, {pr['url']}. It shows Working until its checks "
                "pass and GitHub says it can merge; a failing check or a conflict comes back to you to fix.")
     policy = merge_policy(s, t)

@@ -100,12 +100,17 @@ def generated_only(wt, paths):
 
 
 DOC_SUFFIXES = (".md", ".mdx", ".rst", ".adoc")
+DOC_MEDIA = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".pdf", ".txt")
 
 
 def is_doc_file(path):
-    """Whether a repo-relative path is documentation (under docs/ or doc/, or a doc file)."""
-    p = size_path(path)
-    return bool(p) and (p.startswith(("docs/", "doc/")) or "/docs/" in p or "/doc/" in p or p.endswith(DOC_SUFFIXES))
+    """Whether a repo-relative path is documentation (.md/.mdx/.rst/.adoc, or a non-code doc/asset under top-level docs/ or doc/)."""
+    p = size_path(path).lstrip("./").lower()
+    if not p:
+        return False
+    if p.endswith(DOC_SUFFIXES):
+        return True
+    return p.startswith(("docs/", "doc/")) and p.endswith(DOC_MEDIA)
 
 
 def docs_only(wt, paths):

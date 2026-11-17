@@ -9893,6 +9893,10 @@ class ProjectStart(unittest.TestCase):
         for flag in ("docs skip", "at most 3 heavy jobs per PR (found 4)", "queue not cancel on main", "base flakiness measured first (docs/flaky-tests.md)"):
             self.assertIn(flag, det1)
         self.assertTrue(any("notes 23, 28" in s for s in steps1))
+        # _has_docs_skip does not match across sections (e.g. paths-ignore on ios/** plus a job step mentioning docs).
+        self.assertFalse(self.project._has_docs_skip(
+            "on:\n  pull_request:\n    paths-ignore: ['ios/**']\njobs:\n  build:\n    steps:\n      - run: make docs\n"
+        ))
 
         # 3. Fixed workflow + docs/flaky-tests.md + path-filter job -> <=3 heavy PR jobs, 1 summary check, docs skip, safe concurrency on main, flaky baseline noted.
         self.put(wf, (
@@ -14318,6 +14322,11 @@ class DocsOnlyCommitsExempt(unittest.TestCase):
         return subprocess.check_output(["git", "-C", folder, "rev-parse", "HEAD"], text=True).strip()
 
     def test_docs_only_commits_helper_classification(self):
+        # Nested /doc/ /docs/ or code inside docs/ is NOT docs-only; doc suffixes and docs/ media/prose are.
+        for bad in ("internal/doc/parser.go", "src/docs/handler.ts", "docs/conf.py", "notes.txt", "scripts/build.sh"):
+            self.assertFalse(self.budget.is_doc_file(bad), bad)
+        for good in ("README.md", "docs/guide.md", "docs/img/arch.png", "doc/notes.txt", "internal/doc/README.md"):
+            self.assertTrue(self.budget.is_doc_file(good), good)
         h_code = self.commit(self.wt, "app.py", "v = 2\n", "code change")
         h_doc1 = self.commit(self.wt, "docs/guide.md", "# Guide\n", "docs md")
         h_doc2 = self.commit(self.wt, "doc/notes.mdx", "# Notes\n", "docs mdx")
@@ -14395,6 +14404,23 @@ class DocsOnlyCommitsExempt(unittest.TestCase):
             self.assertEqual(len(t["reviews"]), 1)  # no new review round launched!
             self.assertEqual(pushes, [h_code, h_doc])
             self.assertEqual((t["ready_at"], t["ready_head"]), (t1_ready, h_code))
+            self.assertEqual(t.get("head_moved_at"), clock[0])  # fresh CI grace clock on docs-only push
+
+            # Gate push sets pr["wait"] = PR_CHECKS_RUNNING so prs_in_ci counts it for other tasks right away.
+            h_gate_push = self.commit(self.wt, "app.py", "v = 2b\n", "feat: gate push")
+            t["head"] = h_gate_push
+            t["pr"] = {"number": 9, "repo": "o/r", "url": "u/9", "head_sha": h_code}
+            with (self.mock.patch.object(self.commands, "live_agents", lambda key: []),
+                  self.mock.patch.object(self.commands, "detail", lambda k: k),
+                  self.mock.patch.object(self.commands, "fallback_reviewer", lambda *a, **k: ({"agent": "claude"}, None)),
+                  self.mock.patch.object(self.commands, "branch_needs_push", lambda s_, t_: True),
+                  self.mock.patch.object(self.commands, "ci_cap_hold", lambda *a: None),
+                  self.mock.patch.object(self.commands, "push_branch", lambda s_, t_: None),
+                  self.mock.patch.object(self.commands, "launch", lambda s_, t_, argv_, prompt_, **k: {"address": "rev-0"})):
+                self.commands.gate_step(s, t)
+            self.assertEqual(t["pr"].get("wait"), self.github.CHECKS_RUNNING)
+            t.pop("review_runs", None)
+            t.pop("pr", None)
 
             # New code commit fails worker review_refusal & triggers gate_start.
             h_code2 = self.commit(self.wt, "app.py", "v = 3\n", "feat: more code")
@@ -14553,11 +14579,13 @@ class CIRunnerCap(unittest.TestCase):
             self.commands.merge_now(s, t_run1, accepting=True)
             self.assertEqual(updated, [t_run1["id"]])
 
-            # External CI runs finish -> 2 of 3 busy (t_run1 + t_run2) -> tick releases ONLY t_hold1 (1 slot), keeps t_hold2 held!
+            # One external CI run finishes -> 2 of 3 busy (t_run1 + t_run2) -> tick releases ONLY t_hold1 (1 slot), keeps t_hold2 held!
             gh_runs[:] = []
+            clock[0] += 30 * 60_000  # 30m later while held: release starts a fresh head_moved_at CI window
             rep = {"started": [], "done": [], "attention": []}
             self.tick.tick_store(s, rep)
             self.assertEqual(opened, [t_hold1["id"]])
+            self.assertEqual(t_hold1.get("head_moved_at"), clock[0])
             self.assertIsNone(t_hold1.get("push_held"))
             self.assertIsNotNone(t_hold2.get("push_held"))
             self.assertEqual(rep["attention"], [])  # CI_CAP_WAIT never raises attention

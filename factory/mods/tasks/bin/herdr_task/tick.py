@@ -177,6 +177,9 @@ def facts(s, t, report):
                     pr.pop("wait", None)
             if wait:
                 pr["checked"] = now() - PR_EVERY + PR_WAIT_EVERY
+        elif pr.get("wait") in (CHECKS_RUNNING, STARTED_CI, MERGE_CHECKS_RUNNING) and not pr_pending(v) and not missing:
+            pr.pop("wait", None)
+            s.dirty = True
         try:
             pr_news(s, t, v, report)
         except Exception as e:  # never stops the tick
@@ -351,6 +354,8 @@ def tick_store(s, report):
                             if why := pr_head_problem(s, t, repo, t.get("head")):
                                 raise Fail(why[0].upper() + why[1:] + ".")
                             t.pop("push_held", None)
+                            t["head_moved_at"] = now()  # CI grace window starts when the held push actually reaches GitHub
+                            pr["head_at"] = now()
                             pr["checked"] = 0
                             pr["wait"] = CHECKS_RUNNING
                             s.dirty = True

@@ -127,13 +127,24 @@ def _workflow_jobs(text):
 
 def _has_docs_skip(text):
     """Whether a PR workflow skips or filters docs-only changes."""
-    cleaned = "\n".join(re.sub(r"\s#.*$|^\s*#.*$", "", ln) for ln in text.splitlines())
-    if re.search(r"paths-ignore\s*:[\s\S]*?(?:docs|\*\.md)", cleaned):
-        return True
-    if re.search(r"paths\s*:[\s\S]*?(?:!docs|!\*\*?/\*\.md|!\*\.md)", cleaned):
-        return True
-    if re.search(r"paths-filter", cleaned) and re.search(r"(?:!docs|!\*\*?/\*\.md|!\*\.md|docs/)", cleaned):
-        return True
+    lines = [re.sub(r"\s#.*$|^\s*#.*$", "", ln).rstrip() for ln in text.splitlines()]
+    for i, ln in enumerate(lines):
+        if m := re.search(r"^(\s*)(paths-ignore|paths)\s*:(.*)$", ln):
+            ind, key, rest = len(m.group(1)), m.group(2), m.group(3)
+            block = [rest]
+            for nxt in lines[i + 1:]:
+                if nxt.strip() and _indent(nxt) <= ind:
+                    break
+                block.append(nxt)
+            body = "\n".join(block)
+            if key == "paths-ignore" and re.search(r"(?:docs|\*\.md)", body):
+                return True
+            if key == "paths" and re.search(r"(?:!docs|!\*\*?/\*\.md|!\*\.md)", body):
+                return True
+        elif "paths-filter" in ln:
+            for nxt in lines[i:i + 15]:
+                if re.search(r"(?:!docs|!\*\*?/\*\.md|!\*\.md|docs/)", nxt):
+                    return True
     return False
 
 
