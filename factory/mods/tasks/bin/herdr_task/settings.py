@@ -19,9 +19,10 @@ AGENTS = {"claude": ["claude"], "codex": ["codex", "--no-daemon"], "agy": ["agy"
 # ---- the person's settings ------------------------------------------------------------------
 
 SETTINGS = os.environ.get("HERDR_TASK_SETTINGS") or WHERE.path("settings")
-# Role templates: assistant.md (the coordinator's), worker.md and reviewer.md.
-TEMPLATES = os.environ.get("HERDR_TASK_TEMPLATES") or os.path.join(WHERE.roots["config"], "templates")
-OLD_INSTRUCTIONS = os.path.join(WHERE.roots["config"], "instructions")
+# The role instructions are herdr-core templates (`hc templates` lists them): assistant.md (the
+# coordinator's), worker.md and reviewer.md. Workers and reviewers used ~/.herdr/instructions.
+TEMPLATES = os.environ.get("HERDR_TASK_TEMPLATES") or os.path.join(HOME, ".config", "herdr-core", "templates")
+OLD_INSTRUCTIONS = os.path.join(HOME, ".herdr", "instructions")
 ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants started before the rename
 DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "review_min": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": "",

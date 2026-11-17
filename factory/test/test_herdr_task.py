@@ -48,6 +48,8 @@ class HerdrTask(unittest.TestCase):
         for gone in ("LEGACY", "APP_HOME", "ASK_HOME", "SYNC_HOLDS", "addon_off"):
             self.assertFalse(hasattr(base, gone), gone)
         self.assertNotIn("herdr-app", base.GUARDED)
+        from herdr_task import settings
+        self.assertTrue(settings.TEMPLATES.endswith(os.path.join(".config", "herdr-core", "templates")))
 
     def test_tell_takes_a_chat_mention(self):
         """A chat's #-mention (core/mentions.js) names its Assistant for tell-assistant: whole, its target, or #name."""
