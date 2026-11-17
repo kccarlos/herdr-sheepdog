@@ -360,10 +360,10 @@ sequenceDiagram
    - Returns HTTP `200` with the `answer_proof` shape in [`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json), or HTTP `403` / `404` `{"ok": false, "verified": false, "code": "proof_rejected", "error": "..."}`.
 5. **Threat boundary, residuals, and required tests (`SDF-22`):**
    - **What this stops:** Agent shortcuts (`--owner-approved`, `HERDR_TASK_BY`, `hc keys` into `_ask-pane`, ticketless loopback `POST /api/pending/answer`, loopback `POST /api/agents/{pane_id}/input` `WindowKeys`, loopback `POST /api/turn`, or an invented `--proof` token). `SDF-22` must test that all three loopback HTTP paths (`POST /api/pending/answer`, `POST /api/agents/{pane_id}/input` with option keys, and `POST /api/turn`) on `"fask-<id>"` without a paired-device ticket are refused and mint no `AnswerProof`.
-   - **Two residuals outside this boundary (mitigated by VM isolation):**
+   - **Two accepted residuals outside this boundary:**
      1. *Loopback self-pairing:* Because `GET /api/pair` (`internal/web/pair.go`) is `accessLoopback`, a local process running as the same OS user on the host could fetch a pairing code, enroll a fake device, and tap with that ticket (audited via `web.device.enrolled` and `device_id` in `factory.proof_verified`).
      2. *Unauthenticated local `owner say`:* A local process running as the same OS user can invoke `engine owner say <project> "<text>"` directly on the CLI.
-     As stated in `sheepdog-factory-design.md` §3 and §9, stopping a hostile same-user process from calling loopback pairing routes or writing engine files is the job of running workers in a VM machine, not the loopback proof.
+     Workers run with full user permissions on the machine — as the owner is told at first run — so a hostile same-user process can call loopback pairing routes, run local CLI commands, or write files directly; the loopback proof is there to keep honest agents on the rail, and the audit events above remain on record.
 
 ---
 
