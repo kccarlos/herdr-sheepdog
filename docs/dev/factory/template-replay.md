@@ -142,4 +142,4 @@ With the bundled files installed: Passed 12 of 12, with no refused commands and 
 ## Not covered
 
 - **Model behaviour.** No model ran on these prompts. A live replay with a real CLI is still to do.
-- **Existing template files.** The engine still reads `~/.config/herdr-core/templates`. Where Shepherdr already put `worker.md`, `reviewer.md` or `assistant.md` there, as on the owner's Mac, those files win, so the trim reaches clean installs only. The upgrade matches only the engine's own earlier built-in defaults, never Shepherdr's installed files: live Shepherdr agents read those. `restart.sh` (Phase 2, SDF-16) and `herdr-task machines sync` still read that folder too.
+- **Existing template files.** The engine still reads `~/.config/herdr-core/templates`. Where Shepherdr already put `worker.md`, `reviewer.md` or `assistant.md` there, as on the owner's Mac, those files win, so the trim reaches clean installs only. The upgrade matches only the engine's own earlier built-in defaults, never Shepherdr's installed files: live Shepherdr agents read those. The coordinator start ([coordinator.md](coordinator.md)) and `herdr-task machines sync` read that folder too.

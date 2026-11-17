@@ -366,9 +366,10 @@ class ShellScripts(unittest.TestCase):
     text breaks the whole script ("unexpected EOF while looking for matching `''"). Shipped scripts keep
     here-docs out of $( ), and each one parses."""
 
-    def test_found_the_scripts(self):
+    def test_the_coordinator_restart_is_engine_code(self):
+        # SDF-16: restart.sh became lease.restart, so a headless install restarts its coordinator too
         names = {os.path.relpath(f, ROOT) for f in shell_scripts()}
-        self.assertIn(os.path.join("mods", "coordinator", "restart.sh"), names)
+        self.assertNotIn(os.path.join("mods", "coordinator", "restart.sh"), names)
 
     def test_no_here_doc_inside_command_substitution(self):
         # $( up to its first ), across lines, holding a here-doc (<< or <<-, not the <<< here-string)
@@ -385,7 +386,7 @@ class ShellScripts(unittest.TestCase):
         self.assertFalse(pat.search('new=$(jq -r .a <<<"$out")'))
 
     def test_no_bash4_builtins(self):
-        # #736: macOS's /bin/bash 3.2 has no mapfile/readarray; restart.sh died there before restarting anything
+        # #736: macOS's /bin/bash 3.2 has no mapfile/readarray; a script using them died there
         pat = re.compile(r"^[^#\n]*\b(mapfile|readarray)\b", re.M)
         for f in shell_scripts():
             with open(f, encoding="utf-8") as fh:

@@ -7000,7 +7000,7 @@ class CleanEnv(unittest.TestCase):
         self.assertEqual(env.get("HERDR_BROWSER_TASK"), "dev#6")  # kept until SDF-8/SDF-11 convert worker.md
 
     def test_the_same_line_everywhere(self):
-        """herdr-task, the window and the service (core/clean-env.js) and restart.sh clear the same names."""
+        """herdr-task and the window and the service (core/clean-env.js) clear the same names."""
         sys.path.insert(0, BIN)
         import herdr_task.launch as L
         clean_js = os.path.join(ROOT, "core", "clean-env.js")
@@ -7008,9 +7008,7 @@ class CleanEnv(unittest.TestCase):
             js = subprocess.run(["sh", "-c", 'grep -o "export const CLEAN_ENV = .*" "$1"', "x", clean_js],
                                 capture_output=True, text=True).stdout.strip()
             self.assertEqual(js.split("`")[1].replace("\\\\", "\\"), L.CLEAN_ENV)
-        restart = os.path.join(ROOT, "mods", "coordinator", "restart.sh")
-        line = subprocess.run(["bash", "-c", 'eval "$(grep "^clean=" "$1")"; printf %s "$clean"', "x", restart], capture_output=True, text=True).stdout
-        self.assertEqual(line, L.CLEAN_ENV)
+        line = L.CLEAN_ENV
         self.assertEqual(self.agent_env(["sh", "-c", line + ' exec env']).keys() & self.MARKERS.keys(), set())
 
 
@@ -7857,40 +7855,47 @@ class TaskFlow(unittest.TestCase):
         return argparse.Namespace(**{"id": "SHEP-1", "json": True, "folder": None, **kw})
 
     def test_project_folder_coordinators_labels_watch_main_and_cli_flags(self):
-        """SDF-7: coordinator_in resolves explicit sheepdog.project labels before terminal cwd, launch stamps
+        """SDF-7/SDF-16: coordinator_in is the project's lease holder, whatever other terminals' labels or cwd say; launch stamps
         sheepdog.* labels without task['space']/tab, watch_main keys on folder, link drops star, and --space is gone."""
         from types import SimpleNamespace
         import herdr_task.cli as cli
         import herdr_task.github as github
         import herdr_task.launch as launch
+        import herdr_task.lease as lease
         import herdr_task.link as link
         import herdr_task.output as output
+        import herdr_task.store as store_mod
         other = os.path.join(self.root, "other")
         os.makedirs(other)
         terms = [
-            {"address": "c-slug-other", "state": "live", "cwd": self.main,
-             "labels": {"sheepdog.role": "coordinator", "sheepdog.project": "unrelated-slug"}},
             {"address": "c-other", "state": "live", "cwd": self.main,
              "labels": {"sheepdog.role": "coordinator", "sheepdog.project": other}},
-            {"address": "c-main", "state": "live", "cwd": other,
+            {"address": "c-main", "state": "live", "cwd": other, "created_ms": 7,
              "labels": {"sheepdog.role": "coordinator", "sheepdog.project": self.main}},
         ]
         by_addr = {t["address"]: t for t in terms}
-        self.patch(launch, "hc_json", lambda *a: {"terminals": terms} if a[:1] == ("ls",) else by_addr.get(a[1]) if a[:1] == ("get",) else None)
-        self.assertEqual(launch.coordinator_in(self.main), "c-main")
-        self.assertEqual(launch.parent_for(None, self.main), "c-main")
-        # When only a coordinator with another project's slug is live, coordinator_in returns None (no NameError on STORE)
-        terms[:] = [terms[0]]
-        self.assertIsNone(launch.coordinator_in(self.main))
-        # And when STORE/<slug>.json maps that slug to self.main, coordinator_in resolves it
+        self.patch(lease, "hc_json", lambda *a: {"terminals": terms} if a[:1] == ("ls",) else by_addr.get(a[1]) if a[:1] == ("get",) else None)
         sdir = os.path.join(self.root, "store")
         os.makedirs(sdir)
-        with open(os.path.join(sdir, "repo-slug.json"), "w") as fh:
-            json.dump({"version": 1, "folder": os.path.realpath(self.main), "tasks": []}, fh)
-        self.patch(launch, "STORE", sdir)
-        terms[:] = [{"address": "c-slug", "state": "live", "cwd": other,
-                     "labels": {"sheepdog.role": "coordinator", "sheepdog.project": "repo-slug"}}]
-        by_addr["c-slug"] = terms[0]
+        self.patch(store_mod, "STORE", sdir)
+        slug, path = store_mod.store_path(os.path.realpath(self.main))
+        def put(rec):
+            with open(path, "w") as fh:
+                json.dump({"version": 1, "folder": os.path.realpath(self.main), "tasks": [], **({"coordinator": rec} if rec else {})}, fh)
+        # Labelled for this folder, started in it, named after it: no lease, no coordinator (note 55)
+        put(None)
+        self.assertIsNone(launch.coordinator_in(self.main))
+        put({"address": "c-main", "created_ms": 7})
+        self.assertEqual((launch.coordinator_in(self.main), launch.coordinator_in(slug)), ("c-main", "c-main"))
+        self.assertEqual(launch.parent_for(None, self.main), "c-main")
+        # A later terminal at the lease's address is not the holder; nor is one gone
+        by_addr["c-main"] = dict(terms[1], created_ms=8)
+        self.assertIsNone(launch.coordinator_in(self.main))
+        by_addr["c-main"] = dict(terms[1], state="exited")
+        self.assertIsNone(launch.coordinator_in(self.main))
+        # The lease handed on (a restart): the new holder is the coordinator from now on
+        by_addr["c-slug"] = {"address": "c-slug", "state": "live", "cwd": other, "created_ms": 9, "labels": {}}
+        put({"address": "c-slug", "created_ms": 9})
         self.assertEqual(launch.coordinator_in(self.main), "c-slug")
         # And tick.rescue_question & ask.cmd_ask_pane route by project folder without space
         import herdr_task.tick as tick, herdr_task.ask as ask_mod, herdr_task.ghnews as ghnews_mod, herdr_task.agents as agents_mod
@@ -9884,7 +9889,7 @@ class ProbeVolume(unittest.TestCase):
 
 
 class Watchdog(unittest.TestCase):
-    """FAC-62: watchdog restarts a stuck local Assistant once with restart.sh and alerts on repeat."""
+    """FAC-62: watchdog restarts a stuck local Assistant (its project's lease holder) once in engine code and alerts on repeat."""
 
     def setUp(self):
         from pathlib import Path
@@ -9892,8 +9897,8 @@ class Watchdog(unittest.TestCase):
         sys.path.insert(0, BIN)
         import herdr_task.agents as agents, herdr_task.assistant_settings as aset, herdr_task.autopilot as autopilot
         import herdr_task.base as base, herdr_task.commands as commands
-        import herdr_task.news as news, herdr_task.store as store, herdr_task.watchdog as watchdog
-        self.news, self.wd, self.Path, real_sub = news, watchdog, Path, subprocess.run
+        import herdr_task.news as news, herdr_task.store as store, herdr_task.watchdog as watchdog, herdr_task.lease as lease
+        self.news, self.wd, self.Path, real_sub, self.lease_mod = news, watchdog, Path, subprocess.run, lease
         self.tmp = os.path.realpath(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.store = os.path.join(self.tmp, "tasks")
@@ -9903,12 +9908,8 @@ class Watchdog(unittest.TestCase):
         def fake_sub(args, env=None, **kw):
             if args[0] == "git":
                 return real_sub(args, env=env, **kw)
-            if args[0] == "bash" and os.path.basename(args[1]) == "restart.sh":
-                old, nxt, prev = args[2], f"c{len(self.restarts) + 2}", self.terms.pop(args[2])
-                self.restarts.append((old, nxt))
-                lbs = {k: v for k, v in prev["labels"].items() if k not in ("sheepdog.template", "herdr.template")}
-                self.terms[nxt] = {**prev, "address": nxt, "turn": 0, "status": {"state": "idle"}, "created_ms": self.clock, "labels": lbs}
-                return subprocess.CompletedProcess(args, 0, f"{nxt}\n", "")
+            if args[:2] == ["hc", "kill"]:
+                self.terms.pop(args[2], None)
             if args[:2] == ["hc", "ls"]:
                 k, v = args[args.index("--label") + 1].split("=", 1) if "--label" in args else (None, None)
                 return subprocess.CompletedProcess(args, 0, json.dumps({"terminals": [t for t in self.terms.values() if not k or (t.get("labels") or {}).get(k) == v]}), "")
@@ -9932,12 +9933,22 @@ class Watchdog(unittest.TestCase):
                       p_(watchdog, "template_info", lambda: (self.tpl, self.clock - 5 * 60000)),
                       p_(news, "NEWS", os.path.join(self.store, ".news.json")), p_(news, "HELD", os.path.join(self.store, ".held.json")),
                       p_(autopilot, "STATE", os.path.join(self.store, ".autopilot.json")), p_(news, "POLL_DELAYS", (0,)),
-                      p_(news, "screen_raw", lambda *_: self.raw),
+                      p_(news, "screen_raw", lambda *_: self.raw), p_(lease, "start", self.fake_start), p_(lease, "handoff", lambda *a, **kw: "handoff"),
                       *(p_(m, fn, noop) for m, fn in ((aset, "settings_pass"), (base, "guard"), (news, "guard"), (watchdog, "guard")))])
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
+        self.lease = None
         self.coord("c1")
+
+    def fake_start(self, folder, prefix, message=None):
+        """lease.start: a new coordinator beside the lease holder, with its labels (but not its template's)."""
+        old = self.lease_mod.lease_of(folder).get("address")
+        nxt, prev = f"c{len(self.restarts) + 2}", self.terms[old]
+        self.restarts.append((old, nxt))
+        lbs = {k: v for k, v in prev["labels"].items() if k not in ("sheepdog.template", "herdr.template")}
+        self.terms[nxt] = {**prev, "address": nxt, "turn": 0, "status": {"state": "idle"}, "created_ms": self.clock, "labels": lbs}
+        return nxt
 
     def coord(self, addr="c1", folder=None, status="done", turn=2):
         folder = folder or (self.tmp if "/" not in addr else "/remote")
@@ -9945,13 +9956,20 @@ class Watchdog(unittest.TestCase):
                             "status": {"state": status}, "turn": turn, "foreground": {"name": "claude"},
                             "labels": {"sheepdog.role": "coordinator", "sheepdog.project": self.slug if folder == self.tmp else folder,
                                        "herdr.role": "coordinator"}}
+        if folder == self.tmp:  # the project's lease holder: the coordinator the watchdog looks after
+            self.lease = {"address": addr}
+            p = self.Path(self.store, f"{self.slug}.json")
+            d = json.loads(p.read_text()) if p.exists() else {"folder": self.tmp, "prefix": "SHOP", "tasks": []}
+            p.write_text(json.dumps({**d, "coordinator": self.lease}))
 
     def worker(self, addr, tid, status="working", **extra):
         self.terms[addr] = {"address": addr, "state": "live", "status": {"state": status}, "foreground": {"name": "claude"}, "labels": {"sheepdog.task": f"{self.slug}#{tid}"}, **extra}
 
     def save_tasks(self, *rows, delivered=None, inflight=None):
         put = lambda fn, d: self.Path(self.store, fn).write_text(json.dumps(d))
-        put(f"{self.slug}.json", {"folder": self.tmp, "prefix": "SHOP", "tasks": list(rows)})
+        p = self.Path(self.store, f"{self.slug}.json")
+        lease = (json.loads(p.read_text()) if p.exists() else {}).get("coordinator")
+        put(f"{self.slug}.json", {"folder": self.tmp, "prefix": "SHOP", "tasks": list(rows), **({"coordinator": lease} if lease else {})})
         if delivered is not None:
             put(".news.json", {"delivered": {f"{self.slug}#{k}": v for k, v in delivered.items()}, "outbox": []})
         if inflight is not None:
@@ -10054,7 +10072,7 @@ class Watchdog(unittest.TestCase):
         self.terms["c1"]["foreground"]["pid"] = 4242
         self.save_tasks({"id": 1, "title": "Auth", "state": "running", "attention": "x", "attention_at": self.clock - 40 * 60000},
                         delivered={1: {"to": "c1", "turn": 2, "at": self.clock - 40 * 60000, "event": "needs-you"}})
-        with mock.patch.object(self.wd, "end_group") as eg:
+        with mock.patch.object(self.lease_mod, "end_group") as eg:
             self.tick()
         self.assertEqual((len(self.restarts), eg.call_args_list), (1, [mock.call(4242)]))
 

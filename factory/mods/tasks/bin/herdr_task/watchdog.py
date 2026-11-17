@@ -1,15 +1,16 @@
-"""Watchdog: restarts a live Assistant that is stuck, or alerts the person (FAC-62)."""
+"""Watchdog: restarts a project's coordinator (its lease holder, lease.py) that is stuck, or alerts the person (FAC-62)."""
 
-import hashlib, json, os, re, subprocess, time
+import hashlib, json, os, re, time
 
-from . import news
-from .agents import agent_running, detail, live_agents, STARTING_MS, status_word, task_status
-from .base import agent_pid, end_group, Fail, guard, hc_json, HOME, label_of, now, PACKAGE, probe_volume, PROJECT_LABEL, ROLE_LABEL, run, STORE, volume_of
+from . import lease, news
+from .agents import agent_running, detail, fg_job, live_agents, STARTING_MS, status_word, task_status
+from .base import Fail, guard, hc_json, HOME, label_of, now, PACKAGE, probe_volume, ROLE_LABEL, run, STORE, volume_of
 from .commands import send_alert
 from .news import send_or_hold, stall_of, typing
 from .store import read_list, store_files
 
 STUCK_MS = 30 * 60000              # Needs you / Failed / Stalled, or "working" with an unchanged screen
+QUIET_MS = 20 * 60000              # "working" with no child process and no output this long: stuck (note 53)
 RESTART_COOLDOWN_MS = 2 * 3600000  # stuck again within 2 hours of a restart: alert instead of restarting
 NEWS_GRACE_MS = STARTING_MS        # time after news lands for the Assistant to start its turn
 OUTAGE_WINDOW_MS = 15 * 60000       # new agents counted for a factory-wide blank-start outage
@@ -20,17 +21,52 @@ SIGNED_OUT = re.compile(r"not logged in|invalid (?:x-)?api key|authentication_er
 NUDGE = "Carry on with what you were doing; the last turn hit an API error."
 
 
-def restart_assistant(k):
-    """Restarts coordinator `k` with coordinator/restart.sh."""
+def restart_assistant(k, folder):
+    """Restarts project `folder`'s coordinator `k` in engine code (lease.restart). The new address, or None."""
     guard(["hc"])
-    script = os.path.normpath(os.path.join(PACKAGE, "..", "..", "..", "coordinator", "restart.sh"))
-    env = {x: v for x, v in os.environ.items() if x not in ("HC_TERMINAL_ID", "HERDR_RESTART_CHAT", "HERDR_RESTART_RESUME")}
-    pid = agent_pid(k["address"])
-    r = subprocess.run(["bash", script, k["address"]], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=120)
-    nxt = ((r.stdout or "").strip().splitlines() or [""])[-1].strip()
-    if r.returncode == 0:
-        end_group(pid)  # the old agent's children (agy's) don't orphan
-    return nxt if r.returncode == 0 and nxt else None
+    return lease.restart(folder, k)
+
+
+WORKING_LINE = re.compile(r"^\s*[\u00b7\u2722-\u273d*\u2800-\u28ff]|esc to interrupt|\bWorking \(", re.I)  # Claude's, Codex's, agy's
+TICKING = re.compile(r"[\d\u00b7\u2722-\u273d*\u2800-\u28ff]")  # what animates on it: the spinner glyph, the timer, the token count
+
+
+def screen_digest(text):
+    """A screen's hash that a CLI's animated working line leaves the same (its words still count)."""
+    lines = [TICKING.sub("", x) if WORKING_LINE.search(x) else x for x in (text or "").splitlines()]
+    return hashlib.sha1("\n".join(lines).encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def log_ms(k):
+    """When the coordinator's session log last changed (its own output), 0 when unknown."""
+    from .revive import read_record
+    log = (read_record(k) or {}).get("log")
+    pid = (k.get("foreground") or {}).get("pid")
+    if not log and pid:
+        from .sessions import session_of
+        log = session_of(pid)[1]
+    try:
+        return int(os.path.getmtime(log) * 1000) if log else 0
+    except OSError:
+        return 0
+
+
+def own_kids(k):
+    from .sessions import kids
+    pid = (k.get("foreground") or {}).get("pid")
+    return sorted(kids(pid)) if pid else []
+
+
+def has_child(k, rec):
+    """The coordinator runs something now: a helper terminal at work, a command in its terminal, or a process under
+    it that wasn't there while it was idle (an MCP server that always runs is no child, note 53)."""
+    if fg_job(k):
+        return True
+    ls = hc_json("ls") or {}
+    if any(t.get("parent") == k["address"] and t.get("state") == "live" and status_word(t) in ("working", "blocked") for t in ls.get("terminals") or ()):
+        return True
+    now_kids, base = own_kids(k), rec.get("idle_kids")
+    return bool(set(now_kids) - set(base)) if base is not None else bool(now_kids)
 
 
 def blank_starts(lists):
@@ -161,11 +197,6 @@ def _canon(p):
 def watchdog_pass(report):
     """Restarts a stuck local coordinator once with a handoff; stuck again within 2 hours, alerts once."""
     from . import autopilot as ap
-    ls_a, ls_b = hc_json("ls", "--label", f"{ROLE_LABEL}=coordinator"), hc_json("ls", "--label", "herdr.role=coordinator")
-    if not isinstance(ls_a, dict) and not isinstance(ls_b, dict):
-        return
-    seen_coords = {t["address"]: t for ls in (ls_b, ls_a) if isinstance(ls, dict)
-                   for t in (ls.get("terminals") or ()) if t.get("state") == "live" and "/" not in (t.get("address") or "/")}
     raw_prev = read_list(WATCHDOG)
     prev_all = raw_prev if isinstance(raw_prev, dict) else {}
     news_data, held_data, retries = read_list(news.NEWS) or {}, read_list(news.HELD) or {}, read_list(os.path.join(STORE, ".retries.json")) or {}
@@ -173,7 +204,12 @@ def watchdog_pass(report):
     ap_projects = raw_ap.get("projects") or {}
     lists = [(os.path.basename(p)[:-5], _canon(d.get("folder")), d.get("prefix") or "TASK", d.get("tasks") or [])
              for p in store_files() for d in [read_list(p)] if isinstance(d, dict)]
-    slugs = {slug: folder for slug, folder, _, _ in lists if folder}
+    seen_coords = {}  # the lease holders: only they are coordinators (note 55)
+    for p in store_files():
+        d = read_list(p)
+        k = lease._live(d.get(lease.KEY) or {}) if isinstance(d, dict) and isinstance(d.get(lease.KEY), dict) else None
+        if k and d.get("folder"):
+            seen_coords[k["address"]] = {"address": k["address"], "folder": _canon(d["folder"])}
     coords = list(seen_coords.values())
     live_addrs = set(seen_coords)
     active_folders = {folder for _, folder, _, tasks in lists if folder and any(
@@ -193,8 +229,7 @@ def watchdog_pass(report):
         labels = dict(k.get("labels") or {}, **{ROLE_LABEL: "coordinator", "herdr.role": "coordinator"})
         k["labels"] = labels
         by_prev = next((s for s, r in prev_all.items() if isinstance(r, dict) and addr in (r.get("restarted_to"), r.get("address"))), None)
-        proj = labels.get(PROJECT_LABEL)
-        raw_folder = (_canon(proj) if os.path.isabs(proj) else slugs.get(proj)) if proj else _canon(k.get("cwd"))
+        raw_folder = item["folder"]
         slot = raw_folder or by_prev or addr
         rec = dict(state.get(slot) or prev_all.get(slot) or {}, address=addr)
         folder = raw_folder or rec.get("folder") or ""
@@ -229,12 +264,27 @@ def watchdog_pass(report):
         if st == "working":
             r = run(["hc", "read", addr, "--lines", "80"])
             if r.returncode == 0:
-                digest, prev = hashlib.sha1((r.stdout or "").encode("utf-8", "replace")).hexdigest()[:16], prev_all.get(slot) or {}
+                digest, prev = screen_digest(r.stdout), prev_all.get(slot) or {}
                 since = prev["screen_since"] if prev.get("address") == addr and prev.get("screen") == digest and prev.get("screen_since") else now()
                 rec["screen"], rec["screen_since"] = digest, since
-                why = f"working with an unchanged screen for {(now() - since) // 60000} min" if now() - since >= STUCK_MS else None
+                last = max(since, log_ms(k))
+                quiet = rec.get("quiet") if (rec.get("quiet") or {}).get("since") == last else None
+                if now() - last >= QUIET_MS and not has_child(k, rec):  # note 53: Esc once, then a fresh session, then alert
+                    if not quiet:
+                        run(["hc", "interrupt", addr])
+                        rec["quiet"] = {"since": last, "at": now()}
+                        report.setdefault("watchdog", []).append({"action": "interrupted", "address": addr, "folder": folder,
+                                                                  "why": f"working with no child process and no output for {(now() - last) // 60000} min"})
+                    elif now() - quiet["at"] >= NEWS_GRACE_MS:
+                        why = f"working with no child process and no output for {(now() - last) // 60000} min"
+                elif now() - since >= STUCK_MS:
+                    why = f"working with an unchanged screen for {(now() - since) // 60000} min"
+                else:
+                    rec.pop("quiet", None)
         else:
-            rec.pop("screen", None), rec.pop("screen_since", None)
+            rec.pop("screen", None), rec.pop("screen_since", None), rec.pop("quiet", None)
+            if st in ("idle", "done"):
+                rec["idle_kids"] = own_kids(k)
             booting = not k.get("turn") and k.get("created_ms") and now() - k["created_ms"] < STARTING_MS
             if st in ("idle", "done", None) and folder and not booting and not held_data.get(addr) and not (retries.get(addr) or {}).get("due"):
                 spell, err = rec.get("api") or {}, None
@@ -254,7 +304,7 @@ def watchdog_pass(report):
         if why and not outage and not _wake_inflight(ap_projects, folder, addr, k, ap) and not typing(addr, k):
             in_cooldown = bool(rec.get("restarted_at") and now() - rec["restarted_at"] < RESTART_COOLDOWN_MS)
             old_tpl = why == "running an old Assistant template"  # an idle one only; never an alert
-            nxt = None if in_cooldown or alert_only else restart_assistant(k)
+            nxt = None if in_cooldown or alert_only else restart_assistant(k, folder)
             if nxt:
                 if slot == addr:
                     state.pop(slot, None)
