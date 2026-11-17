@@ -182,7 +182,7 @@ func (s *Server) loudWaiting() int {
 	host, _ := s.attentionHost()
 	n := 0
 	for _, a := range s.deps.Store.List() {
-		if a.State == herdr.StateBlocked && (host == nil || !host.PaneMuted(a.PaneID)) {
+		if a.State == herdr.StateBlocked && !herdr.IsFactoryQuiet(a.Labels) && (host == nil || !host.PaneMuted(a.PaneID)) {
 			n++
 		}
 	}
@@ -207,6 +207,9 @@ func (s *Server) activityState() push.ActivityState {
 	st := push.ActivityState{Phase: push.PhaseAway, Rows: []push.ActivityRow{}}
 	var blocked []state.Agent
 	for _, a := range agents {
+		if herdr.IsFactoryQuiet(a.Labels) {
+			continue
+		}
 		switch a.State {
 		case herdr.StateBlocked:
 			st.Waiting++

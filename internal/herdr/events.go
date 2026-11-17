@@ -22,6 +22,8 @@ type StatusEvent struct {
 	// Source names the channel that delivered the event: "socket",
 	// "snapshot", "bootstrap", or whatever Inject callers pass ("http").
 	Source string `json:"source,omitempty"`
+	// Labels carries updated terminal labels when the backend supplies them.
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // FleetKind is the lifecycle event kind, in herdr's snake_case spelling.

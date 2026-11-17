@@ -371,10 +371,10 @@ sequenceDiagram
 
 ### 6.1 The Quiet Rule (`SDF-23`)
 
-In a factory project, every terminal spawned by the engine carries `sheepdog.project=<id>` and `sheepdog.role=<coordinator|worker|reviewer|checks>` (alongside `sheepdog.task=<slug>#<n>` on task panes).
+In a factory project, every terminal spawned by the engine carries `sheepdog.project=<id>` and `sheepdog.role=<coordinator|worker|reviewer|checks>` (alongside `sheepdog.task=<slug>#<n>` on task panes), while worker-spawned reviewers and helpers carry `sheepdog.role=<reviewer|helper>` and/or `sheepdog.task=<slug>#<n>` without requiring `sheepdog.project`.
 
-A hard code rule in `internal/supervisor` checks these labels on every `herdr` transition:
-- **Workers, reviewers, and check panes are completely silent to the owner:** their starts, finishes, blocks on coordinator `decision` asks, review rounds, CI runs, rebases, retries, and model switches trigger **zero** `announce` turns, **zero** voice pushes, and **zero** APNs notifications.
+A hard code rule in `internal/supervisor` (`herdr.IsFactoryQuiet`) checks these labels on every `herdr` transition (`worker`, `reviewer`, `checks`, `helper`, or any non-coordinator pane with `sheepdog.task`):
+- **Workers, reviewers, helpers, and check panes are completely silent to the owner:** their starts, finishes, blocks on coordinator `decision` asks, review rounds, CI runs, rebases, retries, and model switches trigger **zero** `announce` turns, **zero** voice pushes, **zero** pending prompt cards, and **zero** APNs notifications.
 - Only **owner asks**, **factory alerts**, and **digests** break the silence.
 
 ### 6.2 The Five Allowed Alert Kinds (`SDF-24`)

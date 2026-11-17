@@ -98,7 +98,7 @@ func (s *Supervisor) pollReprompt(paneID string) {
 		}
 		polls++
 		row, ok := s.store.Get(paneID)
-		if !ok || row.State != herdr.StateBlocked {
+		if !ok || row.State != herdr.StateBlocked || s.isFactoryQuietRow(row) {
 			outcome = "left_blocked"
 			break
 		}
@@ -147,6 +147,9 @@ func (s *Supervisor) reconcileReprompts(ctx context.Context) {
 		open[q.PaneID] = q
 	}
 	for _, row := range s.store.List() {
+		if s.isFactoryQuietRow(row) {
+			continue
+		}
 		if p, has := s.store.Pending(); has && p.PaneID == row.PaneID {
 			if p.Kind == state.PendingAnswerPrompt {
 				s.checkOpenPrompt(ctx, row, p)
@@ -356,6 +359,7 @@ func (s *Supervisor) raiseReprompt(ctx context.Context, row state.Agent, prompt 
 	t := herdr.Transition{
 		PaneID: row.PaneID, From: herdr.StateBlocked, To: herdr.StateBlocked, At: s.cfg.Now(),
 		Agent: row.Kind, Name: row.Name, WorkspaceID: row.Workspace, WorkspaceLabel: row.WorkspaceLabel, Source: source,
+		Labels: herdr.CloneLabels(row.Labels),
 	}
 	s.log.Log(logSource, "herdr.state", row.PaneID, map[string]any{"state": herdr.StateBlocked, "source": source, "agent": row.Kind})
 	s.log.Log(logSource, "herdr.transition", row.PaneID, t)

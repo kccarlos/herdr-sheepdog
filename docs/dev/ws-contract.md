@@ -1427,7 +1427,9 @@ of them, and a client then groups by `state` alone.
   pinned first within a group, unread first within Done, then by spoken name.
 - `seen` is absent when there is no record. `shared` says the marks are hc
   labels every Herdr client shares. `muted` is true when the agent's space is
-  muted.
+  muted or the terminal is a factory-quiet pane (`sheepdog.role`
+  `worker`/`reviewer`/`checks`/`helper`, or `sheepdog.task` set outside a
+  coordinator).
 - `attention_counts` count the same groups across all agents. **The badges do
   not count unread done agents**: the Agents badge and the panel's amber
   stay "needs you" only; unread shows as a bold name. (Product default, design
