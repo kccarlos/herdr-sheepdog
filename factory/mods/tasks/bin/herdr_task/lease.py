@@ -25,6 +25,37 @@ def run(argv):
 def hc_json(*args):
     return base.hc_json(*args)
 
+
+def hc_get(addr):
+    """("live" | "gone" | "unknown", hc's record or None) of a terminal here. "gone": hc says there is no such terminal,
+    or it has finished; "unknown": hc failed (not answering, a timeout), so nothing may be decided from it."""
+    if not addr or "/" in addr:
+        return "unknown", None
+    try:
+        r = run(["hc", "get", addr, "--json"])
+    except (OSError, Fail):
+        return "unknown", None
+    if r.returncode == 0:
+        try:
+            k = json.loads(r.stdout)
+        except ValueError:
+            return "unknown", None
+        if isinstance(k, dict) and not k.get("error"):
+            return ("live" if k.get("state") == "live" else "gone"), k
+    said = f"{r.stdout or ''} {r.stderr or ''}"
+    return ("gone" if re.search(r'"not_found"|\bno (?:such )?terminal\b', said) else "unknown"), None
+
+
+def pid_started_before(pid, at_ms):
+    """Whether process `pid` started before `at_ms` (ps's start time, to the second): the process a handoff record named,
+    not a later one given its recycled pid. False when it can't be told."""
+    try:
+        r = base.run(["ps", "-o", "lstart=", "-p", str(int(pid))], env={**os.environ, "LC_ALL": "C"})
+        started = time.mktime(time.strptime(" ".join(r.stdout.split()), "%a %b %d %H:%M:%S %Y")) if r.returncode == 0 else None
+    except (OSError, ValueError, TypeError, OverflowError, Fail):
+        return False
+    return started is not None and started * 1000 < at_ms
+
 KEY = "coordinator"
 OPEN = ("running", "ready", "queued", "todo", "scheduled")  # a task in one of these needs its project's coordinator
 START_GRACE_MS = 10 * 60000   # a coordinator started this recently that is gone again: no new start yet
@@ -72,17 +103,21 @@ def live_holders():
     return [(k["address"], folder) for folder, rec in leases() for k in [_live(rec)] if k]
 
 
-def _live(rec):
-    """hc's record of the lease's terminal while it is that same terminal and live here, else None."""
+def _state(rec):
+    """("live", k) while the record's terminal is that same terminal and live here, ("gone", None) once it is not,
+    ("unknown", None) when hc couldn't say (one failed call never replaces a healthy holder)."""
     addr = rec.get("address")
     if not addr or "/" in addr:
-        return None
-    k = hc_json("get", addr)
-    if not k or k.get("state") != "live":
-        return None
-    if rec.get("created_ms") and k.get("created_ms") and rec["created_ms"] != k["created_ms"]:
-        return None  # a later terminal at the same address
-    return k
+        return "gone", None
+    st, k = hc_get(addr)
+    if st == "live" and rec.get("created_ms") and k.get("created_ms") and rec["created_ms"] != k["created_ms"]:
+        return "gone", None  # a later terminal at the same address
+    return st, (k if st == "live" else None)
+
+
+def _live(rec):
+    """hc's record of the lease's terminal while it is that same terminal and live here, else None."""
+    return _state(rec)[1]
 
 
 def holder(project):
@@ -121,11 +156,11 @@ def claim(project, addr, replacing=None, pid=None, **extra):
         cur = d.get(KEY) if isinstance(d.get(KEY), dict) else {}
         if cur.get("address") not in (None, addr, replacing) and _live(cur):
             return False
+        rec = {"from": cur.get("address"), "created_ms": cur.get("created_ms"), "at": now(),
+               "pid": pid if replacing and cur.get("address") == replacing else None}  # a pid only for the terminal it was read from
         d[KEY] = {"address": addr, "created_ms": k.get("created_ms"), "since": now(), "template": template_info()[0],
-                  **({"previous": cur["address"]} if cur.get("address") not in (None, addr) else {}),
                   # every handoff not finished yet stays, the newest last (one replaced twice before a tick finished it)
-                  **({"handoffs": pending} if (pending := [*handoffs_of(cur), *([{"from": cur["address"], "created_ms": cur.get("created_ms"), "pid": pid}]
-                                                                                   if cur.get("address") not in (None, addr) else [])]) else {}),
+                  **({"handoffs": pending} if (pending := [*handoffs_of(cur), *([rec] if cur.get("address") not in (None, addr) else [])]) else {}),
                   **({"starts": cur["starts"]} if cur.get("starts") else {}), **extra}
         return True
     return _edit(project, put)
@@ -263,16 +298,21 @@ def finish_handoff(folder, new):
     moved, ended = 0, []
     for h in handoffs_of(lease_of(folder)):
         old = h["from"]
-        k = hc_json("get", old) if "/" not in old else None
-        here = bool(k) and not (h.get("created_ms") and k.get("created_ms") and h["created_ms"] != k["created_ms"])
-        live = bool(k) and k.get("state") == "live"
-        moved += reparent(folder, old, new, held=here or not live)
-        if here and live:  # never two coordinators: it ends, as the restart would have ended it
-            run(["hc", "kill", old])
-            ended.append(old)
-        if here:
-            run(["hc", "rm", old])
-        end_group(h.get("pid"))  # its agent's children (agy's) don't orphan; nothing when that group is gone already
+        st, k = hc_get(old) if "/" not in old else ("gone", None)
+        if st == "unknown":
+            break  # hc didn't answer: the record stays for the next tick
+        if old != new:
+            st2 = "gone" if k is None else ("live" if k.get("state") == "live" else "finished")
+            here = k is not None and not (h.get("created_ms") and k.get("created_ms") and h["created_ms"] != k["created_ms"])
+            moved += reparent(folder, old, new, held=here or st2 != "live")
+            if here and st2 == "live":  # never two coordinators: it ends, as the restart would have ended it
+                run(["hc", "kill", old])
+                ended.append(old)
+            if here:
+                run(["hc", "rm", old])
+        # its agent's children (agy's) don't orphan; only the process the record named, never a later one with its pid
+        if h.get("pid") and h.get("at") and pid_started_before(h["pid"], h["at"]):
+            end_group(h["pid"])
         _edit(folder, lambda d: d.get(KEY, {}).update(handoffs=[x for x in handoffs_of(d.get(KEY, {})) if x != h])
               if isinstance(d.get(KEY), dict) else None)
     return moved, ended
@@ -285,8 +325,7 @@ def reparent(folder, old, new, held=True):
 
     def dead(addr):
         if addr not in gone:
-            k = hc_json("get", addr) if addr and "/" not in addr else {"state": "live"}
-            gone[addr] = not k or k.get("state") != "live"
+            gone[addr] = bool(addr) and "/" not in addr and hc_get(addr)[0] == "gone"
         return gone[addr]
 
     def put(d):
@@ -311,7 +350,7 @@ def orphans(d, holder_addr):
     """Whether a live task agent of the list reports to a parent that is gone (not `holder_addr`)."""
     parents = {a["parent"] for t in d.get("tasks") or [] for a in (t.get("agents") or []) + (t.get("reviewers") or [])
                if not a.get("ended") and a.get("parent") and a["parent"] != holder_addr and "/" not in a["parent"]}
-    return any((lambda k: not k or k.get("state") != "live")(hc_json("get", p)) for p in parents)
+    return any(hc_get(p)[0] == "gone" for p in parents)
 
 
 def restart(folder, k, why=None):
@@ -324,7 +363,11 @@ def restart(folder, k, why=None):
         new = start(folder, d.get("prefix") or "TASK", handoff(folder, old, k))
     except Fail:
         return None
-    if not claim(folder, new, replacing=old, pid=pid):
+    try:
+        ok = claim(folder, new, replacing=old, pid=pid)
+    except (Fail, OSError, ValueError):
+        ok = False
+    if not ok:  # the new one never holds the lease: it ends, never a second coordinator
         run(["hc", "kill", new])
         run(["hc", "rm", new])
         return None
@@ -343,7 +386,10 @@ def reconcile_pass(report):
         if not _store.is_task_list(d) or d.get("kind", "repo") != "repo" or not d.get("folder"):
             continue
         folder, lease = d["folder"], d.get(KEY) if isinstance(d.get(KEY), dict) else {}
-        k, stale = _live(lease), None
+        st, k = _state(lease)
+        stale = None
+        if st == "unknown":
+            continue  # hc didn't answer about the holder: decide nothing this tick
         if k:
             from .agents import agent_running
             if agent_running(k):
@@ -381,10 +427,14 @@ def reconcile_pass(report):
         if stalled:
             report.setdefault("coordinators", []).append({"action": "disk-stalled", "folder": folder, "why": stalled})
             continue
-        old = lease.get("address")
+        old, new = lease.get("address"), None
         try:
             new = start(folder, d.get("prefix") or "TASK", handoff(folder, old, lease=lease))
-            if not claim(folder, new, replacing=old, pid=agent_pid(old) if stale else None, starts=[*starts, now()]):  # another start won the lease meanwhile
+            try:
+                ok = claim(folder, new, replacing=old, pid=agent_pid(old) if stale else None, starts=[*starts, now()])
+            except (Fail, OSError, ValueError):
+                ok = False
+            if not ok:  # another start won the lease meanwhile, or the claim failed: the new one ends
                 run(["hc", "kill", new])
                 run(["hc", "rm", new])
                 report.setdefault("coordinators", []).append({"action": "refused", "folder": folder, "address": new})

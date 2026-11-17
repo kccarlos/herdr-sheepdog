@@ -274,6 +274,7 @@ def ensure_assistant(repo, prefix, dry):
     addr = lease.start(repo, prefix)
     if not lease.claim(repo, addr):
         try_run("hc", "kill", addr)
+        try_run("hc", "rm", addr)
         raise Fail(f"Another Assistant took {repo} meanwhile.")
     return addr, True, f"Assistant: started {addr}"
 

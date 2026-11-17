@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -30,7 +31,7 @@ class FakeHc:
     """hc on a fake machine: terminals by address; run starts one, kill ends one; every call is logged."""
 
     def __init__(self, clock):
-        self.terms, self.calls, self.clock, self.n = {}, [], clock, 0
+        self.terms, self.calls, self.clock, self.n, self.down = {}, [], clock, 0, False
 
     def __call__(self, args, cwd=None, env=None, **kw):
         if args[0] != "hc":
@@ -43,7 +44,10 @@ class FakeHc:
             return ok(json.dumps({"terminals": [t for t in self.terms.values() if t["state"] == "live" and (not k or t["labels"].get(k) == v)]}))
         if cmd == "get":
             t = self.terms.get(args[2]) or next((t for t in self.terms.values() if t.get("name") == args[2] and t["state"] == "live"), None)
-            return ok(json.dumps(t)) if t else subprocess.CompletedProcess(args, 1, "", "no such terminal")
+            if self.down:  # hc not answering
+                return subprocess.CompletedProcess(args, 1, "", "the core did not answer")
+            return ok(json.dumps(t)) if t else subprocess.CompletedProcess(  # as hc says it
+                args, 3, json.dumps({"error": {"kind": "not_found", "message": f"no terminal {args[2]!r}"}}), "")
         if cmd == "run":
             self.n += 1
             addr = f"n{self.n}"
@@ -135,7 +139,7 @@ class Lease(LeaseCase):
         self.assertFalse(lease.claim(self.repo, "c2"))  # c1 still lives
         self.assertEqual(lease.lease_of(self.repo)["address"], "c1")
         self.assertTrue(lease.claim(self.repo, "c2", replacing="c1"))  # a restart hands it on
-        self.assertEqual((launch.coordinator_in(self.repo), lease.lease_of(self.repo)["previous"]), ("c2", "c1"))
+        self.assertEqual((launch.coordinator_in(self.repo), lease.handoffs_of(lease.lease_of(self.repo))[0]["from"]), ("c2", "c1"))
         self.hc.terms["c2"]["state"] = "exited"
         self.assertIsNone(launch.coordinator_in(self.repo))
         self.assertTrue(lease.claim(self.repo, "c1"))  # the holder is gone: anyone the engine started may take it
@@ -228,7 +232,7 @@ class Reconcile(LeaseCase):
 
     def test_a_recovery_cut_short_still_moves_the_held_news(self):
         self.hc.term("n9", self.repo)
-        self.save([{"id": 1, "title": "Auth", "state": "running"}], coordinator={"address": "n9", "created_ms": 1000, "previous": "c1", "handoffs": [{"from": "c1"}]})
+        self.save([{"id": 1, "title": "Auth", "state": "running"}], coordinator={"address": "n9", "created_ms": 1000, "handoffs": [{"from": "c1"}]})
         with news.held_messages() as held:
             held["c1"] = [{"text": "SHOP-1 is ready", "how": "news", "at": self.now}]  # the tick stopped before it moved
         lease.reconcile_pass(report := {})
@@ -242,11 +246,11 @@ class Reconcile(LeaseCase):
         self.hc.term("n9", self.repo)
         self.hc.term("w1", self.repo, parent="c1")
         self.save([{"id": 1, "title": "Auth", "state": "running", "agents": [{"address": "w1", "parent": "c1"}]}],
-                  coordinator={"address": "n9", "created_ms": 1000, "previous": "c1",
-                               "handoffs": [{"from": "c1", "created_ms": 1000, "pid": 4242}]})  # claimed, then the tick stopped
+                  coordinator={"address": "n9", "created_ms": 1000,
+                               "handoffs": [{"from": "c1", "created_ms": 1000, "pid": 4242, "at": self.now}]})  # claimed, then the tick stopped
         with news.held_messages() as held:
             held["c1"] = [{"text": "SHOP-1 is ready", "how": "news", "at": self.now}]
-        with mock.patch.object(lease, "end_group") as eg:
+        with mock.patch.object(lease, "end_group") as eg, mock.patch.object(lease, "pid_started_before", lambda pid, at: True):
             lease.reconcile_pass(report := {})
         self.assertEqual((self.started(), report["coordinators"][0]["ended"], self.hc.terms["c1"]["state"]), ([], "c1", "exited"))
         self.assertEqual(eg.call_args_list, [mock.call(4242)])  # its process group too, as a whole restart does
@@ -259,7 +263,7 @@ class Reconcile(LeaseCase):
         self.hc.term("c1", self.repo, created_ms=2000)  # not the one replaced (that one started at 1000)
         self.hc.term("n9", self.repo)
         self.save([{"id": 1, "title": "Auth", "state": "running"}],
-                  coordinator={"address": "n9", "created_ms": 1000, "previous": "c1", "handoffs": [{"from": "c1", "created_ms": 1000}]})
+                  coordinator={"address": "n9", "created_ms": 1000, "handoffs": [{"from": "c1", "created_ms": 1000}]})
         with news.held_messages() as held:
             held["c1"] = [{"text": "its own", "how": "send", "at": self.now}]
         lease.reconcile_pass(report := {})
@@ -293,8 +297,8 @@ class Reconcile(LeaseCase):
         self.hc.term("c1", self.repo)["state"] = "finished"  # killed, then the tick stopped before end_group
         self.hc.term("n9", self.repo)
         self.save([{"id": 1, "title": "Auth", "state": "running"}],
-                  coordinator={"address": "n9", "created_ms": 1000, "handoffs": [{"from": "c1", "created_ms": 1000, "pid": 4242}]})
-        with mock.patch.object(lease, "end_group") as eg:
+                  coordinator={"address": "n9", "created_ms": 1000, "handoffs": [{"from": "c1", "created_ms": 1000, "pid": 4242, "at": self.now}]})
+        with mock.patch.object(lease, "end_group") as eg, mock.patch.object(lease, "pid_started_before", lambda pid, at: True):
             lease.reconcile_pass({})
         self.assertEqual(eg.call_args_list, [mock.call(4242)])
         self.assertIn(["hc", "rm", "c1"], self.hc.calls)
@@ -304,11 +308,11 @@ class Reconcile(LeaseCase):
         self.hc.term("c1", self.repo)  # the first one replaced, still running: its handoff never finished
         self.hc.term("w1", self.repo, parent="c1")
         self.save([{"id": 1, "title": "Auth", "state": "running", "agents": [{"address": "w1", "parent": "c1"}]}],
-                  coordinator={"address": "n9", "created_ms": 1000, "handoffs": [{"from": "c1", "created_ms": 1000, "pid": 4242}]})
+                  coordinator={"address": "n9", "created_ms": 1000, "handoffs": [{"from": "c1", "created_ms": 1000, "pid": 4242, "at": self.now}]})
         with news.held_messages() as held:
             held["c1"] = [{"text": "SHOP-1 is ready", "how": "news", "at": self.now}]
         # n9 is gone before any tick: the next one starts a third and must finish both handoffs
-        with mock.patch.object(lease, "end_group") as eg:
+        with mock.patch.object(lease, "end_group") as eg, mock.patch.object(lease, "pid_started_before", lambda pid, at: True):
             lease.reconcile_pass(report := {})
         new = report["coordinators"][0]["to"]
         self.assertEqual((self.hc.terms["c1"]["state"], self.data()["tasks"][0]["agents"][0]["parent"]), ("exited", new))
@@ -316,6 +320,56 @@ class Reconcile(LeaseCase):
         with news.held_messages() as held:
             self.assertEqual((held.get("c1"), [x["text"] for x in held[new]]), (None, ["SHOP-1 is ready"]))
         self.assertEqual(lease.handoffs_of(lease.lease_of(self.repo)), [])
+
+    def test_fable_a_stale_record_never_ends_a_recycled_pid(self):
+        self.hc.term("n9", self.repo)
+        self.save([{"id": 1, "title": "Auth", "state": "running"}],
+                  coordinator={"address": "n9", "created_ms": 1000, "handoffs": [{"from": "c1", "created_ms": 1000, "pid": 4242, "at": self.now}]})
+        seen = []
+        with mock.patch.object(lease, "end_group") as eg, \
+                mock.patch.object(lease, "pid_started_before", lambda pid, at: seen.append((pid, at)) or False):  # 4242 is someone else's now
+            lease.reconcile_pass({})
+        self.assertEqual((eg.call_args_list, seen), ([], [(4242, self.now)]))
+        self.assertEqual(lease.handoffs_of(lease.lease_of(self.repo)), [])
+
+    def test_fable_hc_not_answering_replaces_no_holder_and_keeps_the_handoff(self):
+        self.hc.term("n9", self.repo)
+        self.hc.term("c1", self.repo)
+        self.save([{"id": 1, "title": "Auth", "state": "running"}],
+                  coordinator={"address": "n9", "created_ms": 1000, "handoffs": [{"from": "c1", "created_ms": 1000}]})
+        self.hc.down = True
+        lease.reconcile_pass(report := {})
+        self.assertEqual((self.started(), report.get("coordinators")), ([], None))
+        self.assertEqual(lease.finish_handoff(self.repo, "n9"), (0, []))
+        self.assertEqual((len(lease.handoffs_of(lease.lease_of(self.repo))), self.hc.terms["c1"]["state"]), (1, "live"))
+        self.hc.down = False
+        lease.reconcile_pass({})
+        self.assertEqual((lease.handoffs_of(lease.lease_of(self.repo)), self.hc.terms["c1"]["state"]), ([], "exited"))
+
+    def test_fable_a_start_whose_claim_fails_ends(self):
+        self.save([{"id": 1, "title": "Auth", "state": "running"}])
+        def boom(*a, **kw):
+            raise lease.Fail("the list is gone")
+        with mock.patch.object(lease, "claim", boom):
+            lease.reconcile_pass(report := {})
+        self.assertEqual((report["coordinators"][0]["action"], self.hc.terms["n1"]["state"]), ("refused", "exited"))
+        self.assertIn(["hc", "rm", "n1"], self.hc.calls)
+
+    def test_fable_a_handoff_from_the_holder_itself_never_ends_it(self):
+        self.hc.term("n9", self.repo)
+        self.save([{"id": 1, "title": "Auth", "state": "running"}], coordinator={"address": "n9", "handoffs": [{"from": "n9"}]})
+        lease.finish_handoff(self.repo, "n9")
+        self.assertEqual((self.hc.terms["n9"]["state"], lease.handoffs_of(lease.lease_of(self.repo))), ("live", []))
+
+    def test_fable_the_pid_is_kept_only_for_the_terminal_it_was_read_from(self):
+        self.hc.term("c2", self.repo)
+        self.hc.term("n9", self.repo)
+        self.save([], coordinator={"address": "c2", "created_ms": 1000})  # the lease moved on since c1's pid was read
+        lease.claim(self.repo, "n9", replacing="c1", pid=4242)
+        self.assertEqual(lease.handoffs_of(lease.lease_of(self.repo)), [])  # refused: c2 lives
+        self.hc.terms["c2"]["state"] = "exited"
+        lease.claim(self.repo, "n9", replacing="c1", pid=4242)
+        self.assertEqual([(h["from"], h["pid"]) for h in lease.handoffs_of(lease.lease_of(self.repo))], [("c2", None)])
 
     def test_one_starts_before_any_owner_message_and_only_for_a_repo_with_open_tasks(self):
         self.save([{"id": 1, "title": "Auth", "state": "done"}])
@@ -387,13 +441,23 @@ class Reconcile(LeaseCase):
         self.assertEqual(a["inflight"]["to"], new)
 
 
+class PidCheck(unittest.TestCase):
+    """The real ps, no fake: the handoff's pid is ended only when that process started before the record."""
+
+    def test_the_pid_check_reads_the_real_process_start(self):
+        self.assertTrue(lease.pid_started_before(os.getpid(), (time.time() + 5) * 1000))
+        self.assertFalse(lease.pid_started_before(os.getpid(), (time.time() - 3600) * 1000))  # it started later: a recycled pid
+        self.assertFalse(lease.pid_started_before(None, time.time() * 1000))
+
+
 class EngineRestart(LeaseCase):
     def test_restart_starts_in_the_repo_folder_hands_on_the_lease_and_ends_the_old_one(self):
         old = self.hc.term("c1", os.path.dirname(self.repo), screen="Checking SHOP-1 again\n", foreground={"name": "claude", "pid": 4242})
         self.hc.term("w1", self.repo, parent="c1")
         self.save([{"id": 1, "title": "Auth", "state": "running", "agents": [{"address": "w1", "parent": "c1"}]}],
                   coordinator={"address": "c1", "created_ms": 1000})
-        with mock.patch.object(lease, "end_group") as eg, mock.patch.object(lease, "agent_pid", lambda a: 4242):
+        with mock.patch.object(lease, "end_group") as eg, mock.patch.object(lease, "agent_pid", lambda a: 4242), \
+                mock.patch.object(lease, "pid_started_before", lambda pid, at: True):
             new = lease.restart(self.repo, old)
         self.assertEqual((launch.coordinator_in(self.repo), self.hc.terms["c1"]["state"], eg.call_args_list), (new, "exited", [mock.call(4242)]))
         run = self.started()[0]

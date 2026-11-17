@@ -7880,6 +7880,7 @@ class TaskFlow(unittest.TestCase):
         ]
         by_addr = {t["address"]: t for t in terms}
         self.patch(lease, "hc_json", lambda *a: {"terminals": terms} if a[:1] == ("ls",) else by_addr.get(a[1]) if a[:1] == ("get",) else None)
+        self.patch(lease, "hc_get", lambda a: (("live" if by_addr[a].get("state") == "live" else "gone"), by_addr[a]) if a in by_addr else ("gone", None))
         sdir = os.path.join(self.root, "store")
         os.makedirs(sdir)
         self.patch(store_mod, "STORE", sdir)
@@ -10077,7 +10078,7 @@ class Watchdog(unittest.TestCase):
         self.terms["c1"]["foreground"]["pid"] = 4242
         self.save_tasks({"id": 1, "title": "Auth", "state": "running", "attention": "x", "attention_at": self.clock - 40 * 60000},
                         delivered={1: {"to": "c1", "turn": 2, "at": self.clock - 40 * 60000, "event": "needs-you"}})
-        with mock.patch.object(self.lease_mod, "end_group") as eg:
+        with mock.patch.object(self.lease_mod, "end_group") as eg, mock.patch.object(self.lease_mod, "pid_started_before", lambda pid, at: True):
             self.tick()
         self.assertEqual((len(self.restarts), eg.call_args_list), (1, [mock.call(4242)]))
 
