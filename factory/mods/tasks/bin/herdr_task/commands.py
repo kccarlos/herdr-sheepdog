@@ -2208,9 +2208,14 @@ def merge_now(s, t, accepting=False):
             return WAITS_APPROVAL
         t["pr"].pop("needs_approval", None)
         base = t.get("base") or "main"
-        if not accepting and (held := main_red_hold(s, base)):
-            return held  # FAC-113: not an attention: the tick asks again, and merges once main is green. The person's Accept still merges.
         at = synced or head or v.get("headRefOid") or ""
+        if not accepting and (held := main_red_hold(s, base)):
+            checks = v.get("statusCheckRollup") or []
+            # A green head containing the red base can fix it. Unknown facts stay held.
+            if (not at or v.get("headRefOid") != at or v.get("checks_unknown") or not checks
+                    or any((c.get("conclusion") or c.get("state") or "").upper() not in ("SUCCESS", "NEUTRAL", "SKIPPED") for c in checks)
+                    or pr_behind(t, repo, at, unknown=None) != 0):
+                return held
         merge = lambda *extra: gh("pr", "merge", n, "--repo", repo, "--squash", *extra, "--match-head-commit", at)
         queue = uses_queue(s, base)
         sy = t["pr"].get("synced") or {}
