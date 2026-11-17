@@ -64,6 +64,7 @@ type CommandFunc func(ctx context.Context, dir string, extraEnv []string, argv .
 type DoctorOptions struct {
 	Folder               string
 	DataDir              string
+	SettingsPath         string
 	Engine               EngineSource
 	NoRepair             bool
 	HCSocket             string
@@ -97,6 +98,9 @@ func (o DoctorOptions) withDefaults() DoctorOptions {
 	}
 	if o.DataDir == "" {
 		o.DataDir = filepath.Join(o.Home, ".local", "share", "sheepdog")
+	}
+	if o.SettingsPath == "" && o.Home != "" {
+		o.SettingsPath = filepath.Join(o.Home, ".config", "sheepdog", "settings.json")
 	}
 	if o.TempDir == "" {
 		o.TempDir = os.TempDir()
@@ -175,6 +179,7 @@ func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	out = append(out, checkAgentCLIs(ctx, o, inHC, customLookPath, volumeOK, probedDir)...)
 	out = append(out, checkGH(ctx, o, inHC, customLookPath, volumeOK, probedDir))
 	out = append(out, checkCodexbar(ctx, o, inHC, customLookPath))
+	out = append(out, checkSync(ctx, o, volumeOK, probedDir))
 	return out
 }
 
@@ -1188,6 +1193,189 @@ func checkCodexbar(ctx context.Context, o DoctorOptions, inHC, customLookPath bo
 		return resOK(name, fmt.Sprintf("on PATH (%s)", ver))
 	}
 	return resOK(name, "on PATH")
+}
+
+// CheckSync checks whether tasks.sync can run in default cheap mode (using
+// tasks.check or a check command derived from the repo) or warns when it falls
+// back to full (GitHub update-branch + full CI re-run).
+func CheckSync(ctx context.Context, o DoctorOptions, volumeOK bool) onboard.Result {
+	o = o.withDefaults()
+	return checkSync(ctx, o, volumeOK, "")
+}
+
+func checkSync(ctx context.Context, o DoctorOptions, volumeOK bool, probedDir string) onboard.Result {
+	const name = "tasks.sync"
+	if !volumeOK {
+		return resSkip(name, "skipped until project volume answers")
+	}
+	repoDir := o.Folder
+	if probedDir != "" {
+		repoDir = probedDir
+	}
+	if root := gitLine(ctx, o, repoDir, "rev-parse", "--show-toplevel"); root != "" {
+		repoDir = root
+	}
+	mode, checkCmd := readSyncSettings(o.SettingsPath, repoDir)
+	switch mode {
+	case "off":
+		return resOK(name, "off (merges without re-syncing)")
+	case "full":
+		return resOK(name, "full (explicitly set; updates branch and re-runs CI)")
+	}
+	if checkCmd != "" {
+		return resOK(name, fmt.Sprintf("cheap (check: %s)", checkCmd))
+	}
+	if derived, src := deriveCheck(repoDir); derived != "" {
+		return resOK(name, fmt.Sprintf("cheap (derived check: %s from %s)", derived, src))
+	}
+	return resWarn(name,
+		"tasks.sync is cheap by default, but tasks.check is empty and could not be derived — falling back to full (GitHub update-branch + full CI re-run)",
+		fmt.Sprintf("herdr-task config --set tasks.check=<cmd> --folder %s", repoDir))
+}
+
+func readSyncSettings(settingsPath, folder string) (mode, check string) {
+	mode = "cheap"
+	data, err := os.ReadFile(settingsPath)
+	if settingsPath == "" || err != nil {
+		return mode, ""
+	}
+	type layer struct {
+		Folder string `json:"folder"`
+		Tasks  struct {
+			Sync  string `json:"sync"`
+			Check string `json:"check"`
+		} `json:"tasks"`
+	}
+	var doc struct {
+		Here       string           `json:"here"`
+		Everywhere layer            `json:"everywhere"`
+		Machines   map[string]layer `json:"machines"`
+		Spaces     map[string]layer `json:"spaces"`
+		Projects   map[string]layer `json:"projects"`
+	}
+	if json.Unmarshal(data, &doc) != nil {
+		return mode, ""
+	}
+	apply := func(l layer) {
+		if l.Tasks.Sync == "cheap" || l.Tasks.Sync == "full" || l.Tasks.Sync == "off" {
+			mode = l.Tasks.Sync
+		}
+		if c := strings.TrimSpace(l.Tasks.Check); c != "" {
+			check = c
+		}
+	}
+	apply(doc.Everywhere)
+	if m, ok := doc.Machines[firstNonEmpty(doc.Here, "local")]; ok {
+		apply(m)
+	}
+	for _, sp := range doc.Spaces {
+		if sameFolder(sp.Folder, folder) {
+			apply(sp)
+			break
+		}
+	}
+	for k, pr := range doc.Projects {
+		if sameFolder(k, folder) {
+			apply(pr)
+			break
+		}
+	}
+	return mode, check
+}
+
+func sameFolder(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && ra == rb
+}
+
+var (
+	makeTestTargetRe  = regexp.MustCompile(`(?m)^test[ \t]*:(?:[^=]|$)`)
+	makeCheckTargetRe = regexp.MustCompile(`(?m)^check[ \t]*:(?:[^=]|$)`)
+	agentsHeadingRe   = regexp.MustCompile(`^#{1,4}\s+`)
+	agentsTestWordsRe = regexp.MustCompile(`(?i)\b(run\s+(the\s+)?(tests?|checks?)|test\s+command|check\s+command|tests?|checks?)\b`)
+	agentsTestHeadRe  = regexp.MustCompile(`(?i)\b(tests?|testing|checks?)\b`)
+	agentsNegativeRe  = regexp.MustCompile(`(?i)^(?:[-*]\s*)?(?:\*\*)?(?:never|don't|do\s+not|avoid)\b`)
+	agentsBacktickRe  = regexp.MustCompile("`([^`\n]+)`")
+	agentsSkipExtRe   = regexp.MustCompile(`\.(?:md|txt|json|ya?ml|toml|xml|xc(?:odeproj|workspace))$`)
+)
+
+func deriveCheck(folder string) (string, string) {
+	if folder == "" {
+		return "", ""
+	}
+	for _, mk := range []string{"Makefile", "makefile", "GNUmakefile"} {
+		if b, err := os.ReadFile(filepath.Join(folder, mk)); err == nil {
+			if makeTestTargetRe.Match(b) {
+				return "make test", mk
+			}
+			if makeCheckTargetRe.Match(b) {
+				return "make check", mk
+			}
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(folder, "AGENTS.md")); err == nil {
+		if cmd := agentsMDCommand(string(b)); cmd != "" {
+			return cmd, "AGENTS.md"
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(folder, "package.json")); err == nil {
+		var pkg struct {
+			Scripts map[string]string `json:"scripts"`
+		}
+		if json.Unmarshal(b, &pkg) == nil {
+			if t := strings.TrimSpace(pkg.Scripts["test"]); t != "" && !strings.Contains(strings.ToLower(t), "no test specified") {
+				return "npm test", "package.json"
+			}
+		}
+	}
+	return "", ""
+}
+
+func agentsMDCommand(text string) string {
+	inFence, inTestSection := false, false
+	for _, raw := range strings.Split(text, "\n") {
+		s := strings.TrimSpace(raw)
+		if strings.HasPrefix(s, "```") {
+			inFence = !inFence
+			if !inFence {
+				inTestSection = false
+			}
+			continue
+		}
+		if inFence {
+			if inTestSection && s != "" && !strings.HasPrefix(s, "#") {
+				return s
+			}
+			continue
+		}
+		if agentsHeadingRe.MatchString(s) {
+			inTestSection = agentsTestHeadRe.MatchString(s)
+			continue
+		}
+		if inTestSection && s != "" {
+			inTestSection = false
+		}
+		if !agentsTestWordsRe.MatchString(s) || agentsNegativeRe.MatchString(s) {
+			continue
+		}
+		for _, m := range agentsBacktickRe.FindAllStringSubmatch(s, -1) {
+			cand := strings.TrimSpace(m[1])
+			if cand == "" || strings.HasSuffix(cand, "/") || strings.Contains(cand, "…") ||
+				strings.HasPrefix(cand, "-") || strings.HasPrefix(cand, "<") || strings.HasPrefix(cand, "~") ||
+				agentsSkipExtRe.MatchString(cand) || (!strings.Contains(cand, " ") && !strings.HasPrefix(cand, "./") && strings.Contains(cand, ".")) {
+				continue
+			}
+			return cand
+		}
+	}
+	return ""
 }
 
 func existingDir(path, fallback string) string {
