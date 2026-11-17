@@ -195,6 +195,28 @@ func (c *Client) Kill(ctx context.Context, terminal string) (Terminal, error) {
 	return result, err
 }
 
+// Remove deletes a finished terminal.
+func (c *Client) Remove(ctx context.Context, terminal string) (RemoveResult, error) {
+	var result RemoveResult
+	err := c.Call(ctx, "terminal.rm", struct {
+		Terminal string `json:"terminal"`
+	}{Terminal: terminal}, &result)
+	return result, err
+}
+
+// Exec runs a program inside herdr-core without opening a terminal.
+func (c *Client) Exec(ctx context.Context, p ExecParams) (ExecResult, error) {
+	var result ExecResult
+	timeout := c.timeout()
+	if p.Timeout != nil && *p.Timeout > 0 {
+		if want := time.Duration(*p.Timeout*float64(time.Second)) + 2*time.Second; want > timeout {
+			timeout = want
+		}
+	}
+	err := c.call(ctx, timeout, "machine.exec", p, &result)
+	return result, err
+}
+
 func (c *Client) timeout() time.Duration {
 	if c.Timeout > 0 {
 		return c.Timeout
