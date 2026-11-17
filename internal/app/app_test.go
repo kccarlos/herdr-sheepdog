@@ -16,6 +16,9 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/cli"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr/herdrtest"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -842,5 +845,72 @@ func TestBrainConfigKeyVars(t *testing.T) {
 	got := BrainConfig(cfg).KeyVars
 	if len(got) != 1 || got["openai"] != "OPENAI_ORCH_API_KEY" {
 		t.Errorf("KeyVars = %v", got)
+	}
+}
+
+func TestAppFactoryTickOffUntilProjectStarted(t *testing.T) {
+	srv := hctest.New(t)
+	cfg := testConfig(t)
+	cfg.Herdr.Backend = config.HerdrBackendHC
+	cfg.Herdr.HCSocket = srv.Path
+
+	// Seed an offline managed CPython stub inside cfg.DataDir so App.Run needs no network/uv.
+	pinned := factory.PinnedPythonVersion()
+	pyHome := filepath.Join(factory.PythonInstallDir(cfg.DataDir), "cpython-"+pinned+"-test")
+	pyBinDir := filepath.Join(pyHome, "bin")
+	if err := os.MkdirAll(pyBinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pyScript := "#!/bin/sh\nprintf '%s\\n%s\\n' '" + pinned + "' '" + pyHome + "'\n"
+	if err := os.WriteFile(filepath.Join(pyBinDir, "python3"), []byte(pyScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	a, err := Build(cfg, Options{
+		Voice:           VoiceOff,
+		Herdr:           HerdrSocket,
+		CLI:             CLIOff,
+		Brain:           BrainOff,
+		Drain:           time.Second,
+		FactoryTickPoll: 25 * time.Millisecond,
+		Stderr:          io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Listen(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	// Before any project is started, no sheepdog-factory-tick terminal exists in herdr-core.
+	hcClient := hc.NewClient(srv.Path)
+	time.Sleep(75 * time.Millisecond)
+	if _, err := hcClient.Get(ctx, factory.TickTerminalName); err == nil {
+		t.Fatal("factory tick terminal started before any project existed")
+	}
+
+	// Starting a project causes the running daemon to start sheepdog-factory-tick with Keep=true.
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "settings.json"),
+		[]byte(`{"version":1,"projects":{"/work/demo":{"folder":"/work/demo"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	var tickTerm hc.Terminal
+	for time.Now().Before(deadline) {
+		if got, gerr := hcClient.Get(ctx, factory.TickTerminalName); gerr == nil {
+			tickTerm = got
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	if tickTerm.Address == "" || !tickTerm.Keep || tickTerm.State != "live" {
+		t.Fatalf("expected live Keep=true %s terminal, got %+v", factory.TickTerminalName, tickTerm)
 	}
 }

@@ -100,15 +100,10 @@ class Autopilot(unittest.TestCase):
         self.addCleanup(p.stop)
         for name, value in (("STORE", store), ("STATE", os.path.join(store, ".autopilot.json")),
                             ("HEARTBEATS", os.path.join(self.tmp, "beats")), ("hc_json", never),
-                            ("ensure_scheduler", self.scheduler),
                             ("coordinator_in", lambda s: None), ("store_files", lambda: self.lists)):
             p = mock.patch.object(ap, name, value)
             p.start()
             self.addCleanup(p.stop)
-
-    def scheduler(self, quiet=False):
-        self.schedulers = getattr(self, "schedulers", 0) + 1
-        return {}
 
     def cmd(self, sub, **kw):
         import argparse
@@ -336,11 +331,10 @@ class Autopilot(unittest.TestCase):
         v = json.loads(out.getvalue())
         self.assertEqual((v["on"], v["completed"]["text"]), (False, "All docs merged."))
 
-    def test_on_starts_this_machines_scheduler(self):
+    def test_on_spawns_no_scheduler_of_its_own(self):
+        # SDF-17: the sheepdog daemon keeps sheepdog-factory-tick alive; autopilot on/off touches no hc terminal.
         self.cmd("on", folder=self.folder)
-        self.assertEqual(getattr(self, "schedulers", 0), 1)
         self.cmd("off", folder=self.folder)
-        self.assertEqual(self.schedulers, 1)
 
     def test_the_parking_starter_upgrades_with_a_backup(self):
         """SHEP-40: 3.1.7's starter (whose quiet wakes parked behind an Accept with a bare no-reply)
@@ -589,7 +583,8 @@ class SchedulerRound(unittest.TestCase):
         patches = [mock.patch.object(au, "STORE", store), mock.patch.object(au, "SEEN", os.path.join(store, ".seen.json")),
                    mock.patch.object(au, "store_files", lambda *a: []), mock.patch.object(ap, "autopilot_pass", ran.append)]
         patches += [mock.patch.object(au, n, lambda *a, **k: None) for n in (
-            "retry_pass", "archive_pass", "news_pass", "watchdog_pass", "end_done_pass", "memory_guard", "cli_check_pass", "machines_pass")]
+            "revive_pass", "retry_pass", "archive_pass", "news_pass", "watchdog_pass", "end_done_pass", "memory_guard",
+            "sweep_sandboxes", "simulator_pass", "device_pass", "lost_logs_pass", "cli_check_pass", "machines_pass")]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
@@ -606,6 +601,48 @@ class SchedulerRound(unittest.TestCase):
             with mock.patch.object(au, "LOCK_WAIT_S", 0.3):
                 au.one_pass({})
         self.assertEqual(len(ran), 1)
+
+    def test_one_pass_runs_revive_sandboxes_and_main_watch_and_ensure_is_retired(self):
+        import contextlib, io
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.automations as au, herdr_task.autopilot as ap, herdr_task.cli as cli, herdr_task.scheduler as sched
+        self.assertEqual(sched.SCHEDULER, "sheepdog-factory-tick")
+        self.assertFalse(hasattr(sched, "ensure_scheduler"))
+        with mock.patch.object(sys, "argv", ["herdr-task", "scheduler", "--ensure"]), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as ex:
+                cli.main()
+            self.assertNotEqual(ex.exception.code, 0)
+
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        store = os.path.join(tmp, "tasks")
+        repo = os.path.join(tmp, "repo")
+        os.makedirs(store)
+        os.makedirs(repo)
+        subprocess.run(["git", "-C", repo, "init", "-q", "-b", "main"], check=True)
+        store_file = os.path.join(store, "repo.json")
+        with open(store_file, "w") as f:
+            json.dump({"version": 1, "folder": repo, "kind": "repo", "name": "repo", "slug": "repo",
+                       "prefix": "RPO", "next": 2, "tasks": [], "main_watch": {"head": "abc", "at": 1}}, f)
+        calls = []
+        patches = [mock.patch.object(au, "STORE", store), mock.patch.object(au, "SEEN", os.path.join(store, ".seen.json")),
+                   mock.patch.object(au, "store_files", lambda *a: [store_file]),
+                   mock.patch.object(au, "revive_pass", lambda r: calls.append("revive")),
+                   mock.patch.object(au, "sweep_sandboxes", lambda: calls.append("sweep")),
+                   mock.patch.object(au, "automations_pass", lambda *a, **k: calls.append("auto")),
+                   mock.patch.object(au, "tick_store", lambda s, r: calls.append(f"tick:{s.loc['folder']}")),
+                   mock.patch.object(ap, "autopilot_pass", lambda r: calls.append("autopilot"))]
+        patches += [mock.patch.object(au, n, lambda *a, **k: None) for n in (
+            "retry_pass", "archive_pass", "news_pass", "watchdog_pass", "end_done_pass", "memory_guard",
+            "simulator_pass", "device_pass", "lost_logs_pass", "cli_check_pass", "machines_pass")]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        au.one_pass({"started": [], "done": [], "attention": [], "fired": []})
+        self.assertIn("revive", calls)
+        self.assertIn("sweep", calls)
+        self.assertIn(f"tick:{os.path.realpath(repo)}", calls)
 
 
 class IdleCompaction(unittest.TestCase):
@@ -5880,7 +5917,6 @@ class Scheduled(unittest.TestCase):
                    mock.patch.object(settings, "SETTINGS", os.path.join(self.tmp, "settings.json")),
                    mock.patch.dict(os.environ, {"HC_TERMINAL_ID": ""}),
                    mock.patch.object(commands, "begin", begin), mock.patch.object(tick, "begin", begin),
-                   mock.patch.object(commands, "ensure_scheduler", lambda quiet=False: {}),
                    mock.patch.object(commands, "worker_argv", lambda s, t, space=None, agent=None: ["claude"]),
                    mock.patch.object(tick, "worker_argv", lambda s, t, space=None, agent=None: ["claude"]),
                    mock.patch.object(commands, "live_agents", lambda key: []),
@@ -6167,8 +6203,8 @@ class Scheduled(unittest.TestCase):
         patches += [mock.patch.object(self.tick, n, quiet) for n in (
             "revive_pass", "retry_pass", "archive_pass", "news_pass", "watchdog_pass", "end_done_pass", "memory_guard", "lost_logs_pass", "say")]
         patches += [mock.patch.object(au, n, quiet) for n in (
-            "retry_pass", "archive_pass", "news_pass", "watchdog_pass", "end_done_pass", "memory_guard", "lost_logs_pass",
-            "cli_check_pass", "machines_pass")]
+            "revive_pass", "retry_pass", "archive_pass", "news_pass", "watchdog_pass", "end_done_pass", "memory_guard",
+            "sweep_sandboxes", "simulator_pass", "device_pass", "lost_logs_pass", "cli_check_pass", "machines_pass")]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
@@ -7329,14 +7365,13 @@ class AutomationFromAnotherMachine(unittest.TestCase):
                    mock.patch.object(au.subprocess, "run", run), mock.patch.object(au, "guard", lambda a: None),
                    mock.patch.object(au, "begin", begin), mock.patch.object(au, "queue_reason", lambda s, t: None),
                    mock.patch.object(au, "worker_argv", lambda s, t: ["claude"]),
-                   mock.patch.object(au, "ensure_scheduler", lambda quiet=False: {}),
                    mock.patch.object(au, "live_agents", lambda key: []),
                    mock.patch.object(machines, "connected_machines", lambda: [{"name": "vmb", "state": "connected"}]),
                    mock.patch.object(ap, "autopilot_pass", lambda r: None),
                    mock.patch.dict(os.environ, {"HC_TERMINAL_ID": ""})]
         patches += [mock.patch.object(au, n, lambda *a, **k: None) for n in (
-            "tick_store", "retry_pass", "archive_pass", "news_pass", "watchdog_pass", "end_done_pass", "memory_guard",
-            "cli_check_pass", "machines_pass")]
+            "revive_pass", "tick_store", "retry_pass", "archive_pass", "news_pass", "watchdog_pass", "end_done_pass",
+            "memory_guard", "sweep_sandboxes", "simulator_pass", "device_pass", "lost_logs_pass", "cli_check_pass", "machines_pass")]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
@@ -9074,7 +9109,6 @@ class Resume(unittest.TestCase):
             (commands, "run", fake_hc),
             (commands, "live_agents", lambda key: list(self.live)),
             (commands, "detail", lambda k: k),
-            (commands, "ensure_scheduler", lambda quiet=False: {}),
             (commands, "just_started", lambda t: None),  # SHEP-223's one-agent guard: these resume right after a start
             (templates, "TEMPLATES", os.path.join(ROOT, "templates")),
         ]
@@ -9491,7 +9525,7 @@ class ProjectStart(unittest.TestCase):
                           (st, "SETTINGS", self.settings_file), (st, "TEMPLATES", self.templates), (news_mod, "send_or_hold", lambda *_, **__: "sent"),
                           (ap, "STORE", self.store_dir), (ap, "STATE", os.path.join(self.store_dir, ".autopilot.json")),
                           (ap, "HEARTBEATS", self.beats), (ap, "typing", lambda *_: None),
-                          (ap, "ensure_scheduler", lambda quiet=False: {}), (ap, "news_send", lambda *_, **__: True)):
+                          (ap, "news_send", lambda *_, **__: True)):
             p = mock.patch.object(obj, k, v)
             p.start()
             self.addCleanup(p.stop)
@@ -11843,7 +11877,7 @@ class BuildOutput(unittest.TestCase):
             t.setdefault("agents", []).append(a := {"address": f"t{t['id']}", "agent": "claude", "argv": argv, "at": 1})
             return a
         for mod, name, val in ((store, "STORE", store_dir), (base, "STORE", store_dir), (settings, "SETTINGS", cfg_path),
-                               (commands, "launch", fake_launch), (commands, "ensure_scheduler", lambda **k: {}),
+                               (commands, "launch", fake_launch),
                                (commands, "live_agents", lambda k: []), (commands, "queue_reason", lambda *a: None), (commands, "parent_for", lambda p, sp=None: p),
                                (launch, "caller_labels", lambda: {}), (github, "live_agents", lambda k: []), (github, "live_helpers", lambda k: [])):
             self.enterContext(mock.patch.object(mod, name, val))
@@ -13675,7 +13709,6 @@ class StartRefusesPoolAtZero(unittest.TestCase):
             (commands, "live_agents", lambda key: []),
             (commands, "detail", lambda k: k),
             (commands, "just_started", lambda t: None),
-            (commands, "ensure_scheduler", lambda quiet=False: {}),
             (commands, "reviewer_pools", lambda: list(self.pools)),
             (queues, "live_agents", lambda key: []),
             (queues, "machine_hold", lambda: None),
@@ -13828,7 +13861,6 @@ class InstalledCliAndMissingRefusal(unittest.TestCase):
             (commands, "live_agents", lambda key: list(self.live_map.get(key, []))),
             (commands, "detail", lambda k: k),
             (commands, "just_started", lambda t: None),
-            (commands, "ensure_scheduler", lambda quiet=False: {}),
             (commands, "reviewer_pools", lambda: []),
             (commands, "refresh_sessions", lambda *a: None),
             (commands, "stop_note", lambda *a, **kw: None),

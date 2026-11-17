@@ -20,7 +20,7 @@ before it:
   queues       Queues: tasks that come after others, and how many may run at once.
   archive      The archive: done tasks set aside after a while.
   output       Output: a task as JSON and as one line of text.
-  scheduler    Keeps the scheduler (herdr-automations) running on this machine.
+  scheduler    Identity and bundle hash of the tick terminal kept alive by the sheepdog daemon.
   commands     The task commands: add, start, status, ready, accept, merge and the rest.
   news         News: what changed in a space's tasks, told to its Assistant.
   ghnews       GitHub news: a Ready task's pull request news to its agent, and its base branch

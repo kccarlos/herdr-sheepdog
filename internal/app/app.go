@@ -18,6 +18,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -109,6 +110,9 @@ type Options struct {
 	// WatcherRetry is the wait before re-running a Watcher whose initial
 	// snapshot failed (default 5 s).
 	WatcherRetry time.Duration
+	// FactoryTickPoll overrides the factory tick supervisor's poll interval
+	// (default 10 s; tests use a shorter interval).
+	FactoryTickPoll time.Duration
 	// Querier, when set, answers run_cli and (when it implements
 	// supervisor.Investigator) investigations instead of the codex/claude
 	// CLIs found on PATH; CLI is then ignored. The voice bench's scratch
@@ -231,6 +235,9 @@ type App struct {
 	// awaitHerdr, set when auto found neither herdr running, runs until
 	// one answers (awaitFirstHerdr).
 	awaitHerdr func(context.Context)
+	// factoryTick keeps the factory tick loop alive as an hc terminal once
+	// a project is started (nil in mock mode).
+	factoryTick *factory.TickSupervisor
 }
 
 // ReasonUpdate is the restart reason that moves the daemon into a new
