@@ -81,6 +81,9 @@ done
 
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/m1-pr-acceptance.XXXXXX")"
 REPO_DIR="$WORKDIR/repo"
+BIN_DIR="$WORKDIR/bin"
+mkdir -p "$BIN_DIR"
+export PATH="$BIN_DIR:$PATH"
 HC_RESTARTED=0
 TASK_STARTED=0
 TASK_DONE=0
@@ -140,21 +143,21 @@ if [ -z "$PY_BIN" ] || [ -z "$ENG_DIR" ] || [ ! -f "$ENG_DIR/mods/tasks/bin/herd
   echo "Error: unpacked factory engine or managed python3.14 not found under $DATA_DIR/factory" >&2
   exit 1
 fi
-mkdir -p "$HOME/.local/bin"
-cat > "$HOME/.local/bin/herdr-task" <<EOF
+cat > "$BIN_DIR/herdr-task" <<EOF
 #!/bin/sh
 exec "$PY_BIN" "$ENG_DIR/mods/tasks/bin/herdr-task" "\$@"
 EOF
-chmod +x "$HOME/.local/bin/herdr-task"
+chmod +x "$BIN_DIR/herdr-task"
 
 echo "==> Step 3: configure $PREFIX with worker.perm=full"
 herdr-task config --folder "$REPO_DIR" --prefix "$PREFIX" --set worker.perm=full
 
 echo "==> Step 4: add $TASK_ID"
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ADD_ARGS=(
-  add "Add HELLO.md"
+  add "Update HELLO.md"
   --folder "$REPO_DIR"
-  --prompt "Create HELLO.md with one line of text and docs/proof/${TASK_ID}.md noting it was created, commit both, then run herdr-task ready ${TASK_ID} --folder ${REPO_DIR} --proof docs/proof/${TASK_ID}.md --summary \"Add HELLO.md\""
+  --prompt "Write 'hello (${RUN_ID})' to HELLO.md and note it in docs/proof/${TASK_ID}.md, commit both, then run herdr-task ready ${TASK_ID} --folder ${REPO_DIR} --proof docs/proof/${TASK_ID}.md --summary \"Update HELLO.md (${RUN_ID})\""
 )
 if [ -n "$AGENT" ]; then
   ADD_ARGS+=(--agent "$AGENT")
