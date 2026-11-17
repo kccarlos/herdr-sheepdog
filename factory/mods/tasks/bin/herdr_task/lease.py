@@ -249,10 +249,18 @@ def reparent(folder, old, new):
     if old:
         from .news import held_messages
         with held_messages() as held:
-            items = [x for x in held.pop(old, []) if "pending" not in x]
+            # one typed into a busy agy coordinator that never took it (pending) is sent again too
+            items = [{k: v for k, v in x.items() if k != "pending"} for x in held.pop(old, [])]
             if items:
                 held.setdefault(new, []).extend(items)
     return moved
+
+
+def orphans(d, holder_addr):
+    """Whether a live task agent of the list reports to a parent that is gone (not `holder_addr`)."""
+    parents = {a["parent"] for t in d.get("tasks") or [] for a in (t.get("agents") or []) + (t.get("reviewers") or [])
+               if not a.get("ended") and a.get("parent") and a["parent"] != holder_addr and "/" not in a["parent"]}
+    return any((lambda k: not k or k.get("state") != "live")(hc_json("get", p)) for p in parents)
 
 
 def restart(folder, k, why=None):
@@ -291,6 +299,9 @@ def reconcile_pass(report):
             holders.add(k["address"])
             try:
                 remember_session(folder, k)
+                if orphans(d, k["address"]):  # a recovery cut short before its workers moved
+                    report.setdefault("coordinators", []).append({"action": "re-parented", "folder": folder, "to": k["address"],
+                                                                  "workers": reparent(folder, None, k["address"])})
             except (OSError, ValueError, Fail):
                 pass
             continue
@@ -311,7 +322,10 @@ def reconcile_pass(report):
         old = lease.get("address")
         try:
             new = start(folder, d.get("prefix") or "TASK", handoff(folder, old, lease=lease))
-            claim(folder, new, replacing=old, starts=[*starts, now()])
+            if not claim(folder, new, replacing=old, starts=[*starts, now()]):  # another start won the lease meanwhile
+                run(["hc", "kill", new])
+                report.setdefault("coordinators", []).append({"action": "refused", "folder": folder, "address": new})
+                continue
             moved = reparent(folder, old, new)
         except (Fail, OSError, ValueError) as e:
             report.setdefault("coordinators", []).append({"action": "failed", "folder": folder, "why": str(e)})

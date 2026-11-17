@@ -193,6 +193,35 @@ class Reconcile(LeaseCase):
         lease.reconcile_pass(report := {})
         self.assertEqual((len(self.started()), report.get("coordinators")), (1, None))
 
+    def test_news_typed_into_a_busy_coordinator_that_died_goes_to_the_new_one(self):
+        self.save([{"id": 1, "title": "Auth", "state": "running"}], coordinator={"address": "c1", "created_ms": 1000})
+        with news.held_messages() as held:
+            held["c1"] = [{"text": "SHOP-1 is ready", "how": "news", "at": self.now, "pending": 3}]
+        lease.reconcile_pass(report := {})
+        new = report["coordinators"][0]["to"]
+        with news.held_messages() as held:
+            self.assertEqual(held[new], [{"text": "SHOP-1 is ready", "how": "news", "at": self.now}])
+
+    def test_a_start_that_loses_the_lease_moves_no_worker_and_ends(self):
+        self.hc.term("w1", self.repo, parent="c1")
+        self.save([{"id": 1, "title": "Auth", "state": "running", "agents": [{"address": "w1", "parent": "c1"}]}],
+                  coordinator={"address": "c1", "created_ms": 1000})
+        with mock.patch.object(lease, "claim", lambda *a, **kw: False):
+            lease.reconcile_pass(report := {})
+        self.assertEqual(report["coordinators"][0]["action"], "refused")
+        self.assertEqual((self.hc.terms["n1"]["state"], self.data()["tasks"][0]["agents"][0]["parent"]), ("exited", "c1"))
+
+    def test_a_recovery_cut_short_still_moves_the_workers(self):
+        self.hc.term("n9", self.repo)
+        self.hc.term("w1", self.repo, parent="c1")
+        self.save([{"id": 1, "title": "Auth", "state": "running", "agents": [{"address": "w1", "parent": "c1"}]}],
+                  coordinator={"address": "n9", "created_ms": 1000})  # the lease moved, then the tick stopped
+        lease.reconcile_pass(report := {})
+        self.assertEqual((self.started(), report["coordinators"][0]["action"]), ([], "re-parented"))
+        self.assertEqual(self.data()["tasks"][0]["agents"][0]["parent"], "n9")
+        lease.reconcile_pass(report := {})
+        self.assertIsNone(report.get("coordinators"))  # nothing left to move: no write, no report
+
     def test_one_starts_before_any_owner_message_and_only_for_a_repo_with_open_tasks(self):
         self.save([{"id": 1, "title": "Auth", "state": "done"}])
         lease.reconcile_pass({})
