@@ -1,0 +1,35 @@
+tEqual(self.terms["c2"]["labels"].get("herdr.template"), None)
+  +        self.clock += 60000
+  +        self.tick()  # the new one is labelled with the current template at first sight: left alone
+  +        self.assertEqual((len(self.restarts), self.terms["c2"]["labels"]["herdr.template"]), (1, "tpl-new"))
+  +        self.terms["c2"]["labels"]["herdr.template"] = "tpl-old"  # still old after a restart: not tried again for the same template
+  +        self.clock += self.wd.RESTART_COOLDOWN_MS + 60000
+  +        self.tick()
+  +        self.assertEqual(len(self.restarts), 1)
+  +        self.tpl = "tpl-newer"  # a new change reaches it
+  +        self.tick()
+  +        self.assertEqual(len(self.restarts), 2)
+  +
+  +    def test_assistant_started_before_the_template_changed_is_labelled_unknown_and_restarted(self):
+  +        self.terms["c1"]["created_ms"] = self.clock - 60 * 60000  # no label: older than the template file
+  +        rep = self.tick()
+  +        self.assertEqual((self.restarts, rep["watchdog"][0]["why"]), ([("c1", "c2", "p1")], "running an old Assistant template"))
+  +
+   class DesignAndDocReview(unittest.TestCase):
+       """FAC-69: design and doc tasks (--set review.kind=design|doc) get 1 review round and review_min 1,
+  Must fix: major and up (blocker, major). Herdr started you, not the worker. When done, record your verdict with one of `/Users/you/.local/bin/herdr-task review FAC-78 --folder
+  /Users/you/Documents/reference_repo/factory-run --pass` or `/Users/you/.local/bin/herdr-task review FAC-78 --folder /Users/you/Documents/reference_repo/factory-run --changes "<each finding with its
+  level and proof>" --must-fix <how many are at or above Must fix>`. It is taken only from this terminal while a5f4d46 is the worktree's HEAD with nothing uncommitted. Then end with your findings as
+  your last message. Your shell runs without asking only git log, git diff, git show, git status, git blame, ls, cat, grep, rg, find, sed -n, head, tail, wc and this folder's check, `export
+  PATH="$HOME/.nvm/versions/node/v22.20.0/bin:$PATH"; bin/sync-shared --check && python3 -m unittest discover -s test`: anything else waits on a prompt nobody here can answer.
+  Searched for 3 patterns, ran 4 shell commands
+⏺ Still reviewing: the full check is running in the background, and I'm tracing the watchdog's API-error logic while I wait.
+  Made 1 scratchpad edit +26, searched for 1 pattern, read 1 file, ran 3 shell commands
+⏺ I reproduced one bug: an Assistant that recovers after the nudge still gets restarted. Now I'm checking whether ordinary prose triggers a false positive.
+  Read 1 file, ran 2 shell commands
+⏺ The full check is still running. Two major findings so far, both reproduced. I'll record the verdict once the check finishes.
+✻ Cooked for 2m 0s · done 3:17 AM · 1 shell still running
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on · 1 shell · ↓ to manage

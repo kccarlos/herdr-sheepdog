@@ -8,7 +8,7 @@ DATE       := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 LDFLAGS    := -X 'main.version=$(VERSION)' -X 'main.commit=$(COMMIT)' -X 'main.date=$(DATE)'
 
-.PHONY: build test test-web test-panel sync-layout lint vet cross clean install run-dev changelog eval eval-live release-sign
+.PHONY: build test test-factory test-web test-panel sync-layout lint vet cross clean install run-dev changelog eval eval-live release-sign
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
@@ -40,6 +40,12 @@ changelog:
 
 test:
 	go test -race ./...
+
+# Factory Python engine suite on the CPython version pinned in factory/.python-version.
+test-factory:
+	cd factory && py="$$(tr -d '[:space:]' < .python-version)" && \
+		uv python install "$$py" && \
+		uv run --no-project --python-preference only-managed --python "$$py" python3 -B -W default -W ignore::ResourceWarning -m unittest discover -s test -v
 
 # The herdr-app panel's tests (net/ and model/ of the mod; no herdr imports,
 # so plain node runs them).
