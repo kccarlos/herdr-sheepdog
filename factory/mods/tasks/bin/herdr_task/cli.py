@@ -276,7 +276,7 @@ def main():
     c.add_argument("--prefix", help="task ids' prefix, 2 to 5 letters (HAT -> HAT-4); unique on this machine")
     c.add_argument("--build-dir", help="per-task build output folder (<path>/<task-key>/, cleaned on done; \"\" clears)")
     c.add_argument("--set", action="append", metavar="KEY=VALUE",
-                   help="tasks.max_running=N or tasks.check=CMD for this project folder (\"default\" clears)")
+                   help="tasks.max_running=N, tasks.check=CMD or worker.perm=full|auto|plan for this project folder (\"default\" clears)")
     si = sub.add_parser("simulator", help="this folder's fixed iOS simulator pool: lease one per task, release it, or list holders")
     si.set_defaults(fn=cmd_simulator, simulator="list", folder=None, json=False, id=None, task_opt=None)
     sp = si.add_subparsers(dest="simulator")
