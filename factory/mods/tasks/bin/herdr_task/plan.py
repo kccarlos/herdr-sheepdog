@@ -199,7 +199,8 @@ class Plan:
         edges = {}
         for t, mid in self.tasks:
             deps = []
-            for a in t.get("after", self.old_after(t)):
+            inherited = [str(i) for i in (self.find(t["split_of"]) or {}).get("plan_after") or []] if "split_of" in t else []
+            for a in list(dict.fromkeys(inherited + t.get("after", self.old_after(t)))):
                 o = None if a in keys else self.find(a)
                 if a in keys:
                     deps.append(("k", a))
@@ -320,9 +321,6 @@ class Plan:
         for pid, kids in self.split_parents.items():
             parent = next(t for t in s.data["tasks"] if t["id"] == pid)
             ids = [self.by_key[k]["id"] for k in kids]
-            for k in kids:
-                c = self.by_key[k]
-                c["plan_after"] = list(dict.fromkeys((parent.get("plan_after") or []) + (c.get("plan_after") or [])))
             for o in s.data["tasks"]:
                 for f in ("after", "plan_after"):
                     if pid in (o.get(f) or []):
@@ -332,11 +330,11 @@ class Plan:
             release_task(s, parent)
             s.data["tasks"].remove(parent)
         for t, mid in self.tasks:
-            if "after" in t:
+            if "after" in t or "split_of" in t:
                 ids = [self.by_key[n[1]]["id"] if n[0] == "k" else n[1] for n in self.edges[("k", t["key"])]]
                 c = self.by_key[t["key"]]
-                c["plan_after"] = list(dict.fromkeys((c.get("plan_after") or []) + ids if "split_of" in t else ids))
-        self.link()
+                c["plan_after"] = list(dict.fromkeys(ids))
+        log["added"] += self.link()
         for t in s.data["tasks"]:
             if t.get("plan_key") and t["state"] in NOT_STARTED and not t.get("acceptance_of"):
                 t["prompt"] = brief(s, t)
@@ -353,7 +351,7 @@ class Plan:
         milestone's first tasks; each milestone's acceptance task comes after all its own tasks."""
         s, mode = self.s, "worktree" if worktrees_on(self.s) else "here"
         from .commands import set_base
-        prev = None
+        prev, added = None, []
         for m in milestones(s):
             acc = self.acceptance(m["id"])
             if acc is None:
@@ -363,6 +361,7 @@ class Plan:
                 if m.get("gate") == "owner":
                     set_task(acc, "merge", "ask me first")
                 m["acceptance_task"] = acc["id"]
+                added.append(s.ref(acc))
             work = [t for t in s.data["tasks"] if t.get("milestone") == m["id"] and t is not acc]
             ids = {t["id"] for t in work}
             for t in work:
@@ -375,6 +374,7 @@ class Plan:
                 acc["after"] = sorted(ids)
                 acc["prompt"] = acceptance_brief(m)
             prev = acc
+        return added
 
 
 def brief(s, t):
