@@ -22,7 +22,7 @@ from .sessions import find_lost_logs, refresh_sessions, session_of
 from .github import (already_merged, BEHIND, CHECKS_NEVER, CHECKS_RUNNING, checks_missing, checks_since, ci_awaited, ci_cap_hold, CI_CAP_WAIT,
                      ci_dispatch, ci_runs_on, drop_branch, expected_checks, finish, github, main_red_hold, merged_here, needs_approval, NO_CI_RUN,
                      note_checks, pr_head_problem, pr_merged, pr_open, pr_pending, pr_problem, pr_repo, pr_view,
-                     pr_wait, CI_STOPPED, queue_entry, queue_merge, task_problem, task_github, tidy_done, tidy_due, update_main, watch_main,
+                     pr_wait, CI_STOPPED, STARTED_CI, queue_entry, queue_merge, task_problem, task_github, tidy_done, tidy_due, update_main, watch_main,
                      UNKNOWN_CHECKS_MS)
 from .launch import parent_for, sweep_sandboxes
 from .store import locate, read_list, Store, store_files
