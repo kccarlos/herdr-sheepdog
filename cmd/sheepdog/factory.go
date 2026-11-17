@@ -121,14 +121,15 @@ func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 
 	results := factoryDoctorRunner(ctx, factory.DoctorOptions{
-		Folder:   folder,
-		DataDir:  dataDir,
-		Engine:   factory.EngineSource{FS: herdrsheepdog.Factory, Version: version},
-		NoRepair: *noRepair,
-		HCSocket: socket,
-		Canary:   !*noCanary,
-		Home:     home,
-		GHHost:   os.Getenv("GH_HOST"),
+		Folder:       folder,
+		DataDir:      dataDir,
+		SettingsPath: resolveFactorySettingsPath(home),
+		Engine:       factory.EngineSource{FS: herdrsheepdog.Factory, Version: version},
+		NoRepair:     *noRepair,
+		HCSocket:     socket,
+		Canary:       !*noCanary,
+		Home:         home,
+		GHHost:       os.Getenv("GH_HOST"),
 	})
 	for _, r := range results {
 		fprintln(stdout, r.Line())
@@ -166,6 +167,21 @@ func reorderFactoryDoctorArgs(args []string) []string {
 		pos = append(pos, a)
 	}
 	return append(flags, pos...)
+}
+
+func resolveFactorySettingsPath(home string) string {
+	if p := strings.TrimSpace(os.Getenv("HERDR_TASK_SETTINGS")); p != "" {
+		return p
+	}
+	for _, env := range []string{"SHEEPDOG_FACTORY_HOME", "SHEEPDOG_HOME", "SHEPHERDR_HOME"} {
+		if v := strings.TrimSpace(os.Getenv(env)); filepath.IsAbs(v) {
+			return filepath.Join(v, "config", "settings.json")
+		}
+	}
+	if xdg := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); filepath.IsAbs(xdg) {
+		return filepath.Join(xdg, "sheepdog", "settings.json")
+	}
+	return filepath.Join(home, ".config", "sheepdog", "settings.json")
 }
 
 func resolveTargetFolder(raw, home string) string {

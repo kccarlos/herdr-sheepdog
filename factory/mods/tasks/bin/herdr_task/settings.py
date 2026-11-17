@@ -27,7 +27,7 @@ ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants 
 DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "review_min": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": "",
                       "worktree_root": "", "check": "", "simulators": [], "reviewer_sandbox": True,
-                      "auto_accept": True, "sync": "full"},
+                      "auto_accept": True, "sync": "cheap"},
             "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {}, "project": {}}
 LEVELS = ["blocker", "major", "minor"]
 
@@ -116,12 +116,8 @@ def write_autopilot(project, values):
     os.replace(tmp, SETTINGS)
 
 
-def write_max_running(s, space=None, value=_UNSET):
-    """FAC-103: `config --set tasks.max_running=N`, the project folder's "Tasks at once" in
-    d["projects"][folder]. None unsets it there. Returns the project folder. Refused on a file
-    that exists on disk but isn't a valid JSON object (writing would lose every other setting)."""
-    if value is _UNSET:
-        value = space
+def _write_task_setting(s, key, value):
+    """Writes one project-folder tasks.<key> setting into d["projects"][folder] (None unsets it)."""
     try:
         with open(SETTINGS) as f:
             d = json.load(f)
@@ -137,14 +133,14 @@ def write_max_running(s, space=None, value=_UNSET):
         raise Fail("No project folder to configure.")
     layer = projects.setdefault(folder, {})
     tasks = dict(layer.get("tasks") or {})
-    tasks.pop("max_running", None) if value is None else tasks.update(max_running=value)
+    tasks.pop(key, None) if value is None else tasks.update({key: value})
     layer.update(tasks=tasks) if tasks else layer.pop("tasks", None)
     if not layer:
         projects.pop(folder, None)
     if value is None and isinstance(d.get("spaces"), dict):
         for v in d["spaces"].values():
             if isinstance(v, dict) and v.get("folder") == folder and isinstance(v.get("tasks"), dict):
-                v["tasks"].pop("max_running", None)
+                v["tasks"].pop(key, None)
                 if not v["tasks"]:
                     v.pop("tasks", None)
     d["version"] = 1
@@ -155,6 +151,55 @@ def write_max_running(s, space=None, value=_UNSET):
         f.write("\n")
     os.replace(tmp, SETTINGS)
     return folder
+
+
+def write_max_running(s, space=None, value=_UNSET):
+    """FAC-103: `config --set tasks.max_running=N`, the project folder's "Tasks at once" in
+    d["projects"][folder]. None unsets it there. Returns the project folder. Refused on a file
+    that exists on disk but isn't a valid JSON object (writing would lose every other setting)."""
+    if value is _UNSET:
+        value = space
+    return _write_task_setting(s, "max_running", value)
+
+
+def write_task_check(s, space=None, value=_UNSET):
+    """`config --set tasks.check=CMD`: sets or clears the project folder's tasks.check command."""
+    if value is _UNSET:
+        value = space
+    return _write_task_setting(s, "check", value)
+
+
+_AGENTS_CHECK_RE = re.compile(
+    r"(?im)^(?:[-*]\s*)?(?:\*\*)?(?:check(?:\s+command)?|test(?:\s+command)?|tests?|run\s+(?:the\s+)?(?:tests?|checks?))(?:\*\*)?\s*:\s*`([^`\n]+)`(?:\s|$|[.,;])"
+)
+
+
+def derive_check(folder):
+    """Derives a repo's check command from facts it already states (Makefile test/check target,
+    or explicit AGENTS.md test/check line), returning (cmd, source) or ('', None)."""
+    if not folder or not os.path.isdir(folder):
+        return "", None
+    for mk in ("Makefile", "makefile", "GNUmakefile"):
+        p = os.path.join(folder, mk)
+        if os.path.isfile(p):
+            try:
+                with open(p, errors="replace") as f:
+                    text = f.read(262144)
+            except OSError:
+                continue
+            if re.search(r"(?m)^test\s*:(?!=)", text):
+                return "make test", mk
+            if re.search(r"(?m)^check\s*:(?!=)", text):
+                return "make check", mk
+    agents_md = os.path.join(folder, "AGENTS.md")
+    if os.path.isfile(agents_md):
+        try:
+            with open(agents_md, errors="replace") as f:
+                if m := _AGENTS_CHECK_RE.search(f.read(262144)):
+                    return m.group(1).strip(), "AGENTS.md"
+        except OSError:
+            pass
+    return "", None
 
 
 def settings_layers(s, space=None):

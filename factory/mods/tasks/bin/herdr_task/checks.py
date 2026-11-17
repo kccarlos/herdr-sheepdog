@@ -9,7 +9,7 @@ import tempfile
 
 from .base import git, hc_json, now, PROJECT_LABEL, ROLE_LABEL, run
 from .github import gh, pr_repo
-from .settings import gate_min, settings_for
+from .settings import derive_check, gate_min, settings_for
 
 LIMIT_MS = 20 * 60000
 TAIL = 4000
@@ -130,10 +130,26 @@ SYNC_FETCH_S = 60
 SYNC_FAILED = "Its check failed on it merged with its base branch (the base moved on since)"
 
 
-def sync_mode(s, t):
+def resolve_check(s, t=None):
+    """(cmd, source) for this folder's tasks.check: explicit setting, else derived from repo facts, else ('', None)."""
+    cmd = (settings_for(s)["tasks"].get("check") or "").strip()
+    if cmd:
+        return cmd, "setting"
+    folder = (getattr(s, "loc", None) or {}).get("folder")
+    return derive_check(folder)
+
+
+def sync_plan(s, t):
+    """(effective_mode, fallback_why): effective tasks.sync and, when cheap fell back to full, why."""
     k = settings_for(s)["tasks"]
-    mode = k.get("sync") if k.get("sync") in SYNC_MODES else "full"
-    return "full" if mode == "cheap" and not (k.get("check") or "").strip() else mode
+    mode = k.get("sync") if k.get("sync") in SYNC_MODES else "cheap"
+    if mode == "cheap" and not resolve_check(s, t)[0]:
+        return "full", "tasks.check is empty and could not be derived"
+    return mode, None
+
+
+def sync_mode(s, t):
+    return sync_plan(s, t)[0]
 
 
 def sync_check(s, t, at, repo=None):
@@ -142,7 +158,7 @@ def sync_check(s, t, at, repo=None):
     ("error", why) when it couldn't check (fall back to full). Leaves the task's worktree, branch and folder alone."""
     from .github import remote_of, remote_repo
     main, base = s.loc["folder"], t.get("base") or "main"
-    cmd = (settings_for(s)["tasks"].get("check") or "").strip()
+    cmd, source = resolve_check(s, t)
     remote = remote_of(main)
     if repo and remote_repo(main, remote) != repo:  # a fork's remote: its base isn't the pull request's
         return "error", f"{remote} isn't {repo}"
@@ -174,6 +190,15 @@ def sync_check(s, t, at, repo=None):
         if r.returncode in (126, 127):  # its program isn't on Herdr's PATH: not the code's fault
             return "error", f"`{cmd}` couldn't run here (exit {r.returncode})"
         if r.returncode:
+            if source != "setting":
+                if not (git(tmp, "reset", "--hard", at)[0] and git(tmp, "clean", "-ffdx")[0]):
+                    return "error", f"couldn't verify derived check `{cmd}` on {at[:8]}"
+                try:
+                    r_at = run(["sh", "-c", cmd], cwd=tmp, timeout=SYNC_LIMIT_S)
+                except subprocess.TimeoutExpired:
+                    return "error", f"the check ran longer than {SYNC_LIMIT_S // 60} minutes"
+                if r_at.returncode:
+                    return "error", f"derived check `{cmd}` also exited {r_at.returncode} on {at[:8]} here"
             tail = (r.stdout + r.stderr).strip()[-600:]
             return "fail", f"`{cmd}` exited {r.returncode} on {at[:8]} merged with {base} at {tip[:8]}" + (f":\n{tail}" if tail else "")
         return "pass", None

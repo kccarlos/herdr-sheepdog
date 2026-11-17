@@ -84,6 +84,7 @@ def news_line(s, t, v, event, words=None):
             "stalled": f"{ref} {words} ({title})",
             "working-again": f"{ref} is working again: {(t.get('back') or {}).get('why') or 'its agent is at work again'} ({title})",
             "backup": f"{ref} backup: {words} ({title})",
+            "sync-fallback": f"{ref}: {words} ({title})",
             "done": f"{ref} is done" + (": merged" + ({"engine": ", accepted by the engine", "fable": ", accepted by Fable review"}
                                                        .get(t.get("accepted_by"), "")) if t.get("merged") else ": nothing to merge" if t.get("nothing_to_merge")
                                         else ": accepted" if t.get("accepted_at") else "") + f" ({title})"}[event]
@@ -187,6 +188,11 @@ def news_pass(report, folder=None):
                 if first or t.get("archived"):
                     continue
                 lines = [("backup", news_line(s, t, v, "backup", backup_news(t)))] if backup else []
+                fb = t.get("sync_fallback") or {}
+                if s.write and fb.get("why") and not fb.get("told"):
+                    fb["told"] = True
+                    s.dirty = True
+                    lines.append(("sync-fallback", news_line(s, t, v, "sync-fallback", fb["why"])))
                 # Taken back to work after it said ready (back_to_work(), busy_again()): told as it happens.
                 # Its agent took up what needed the person (failing checks: on_it()) too.
                 if hold:
@@ -201,8 +207,9 @@ def news_pass(report, folder=None):
                     lines.append(("stalled", news_line(s, t, v, "stalled", stall[1])))
                 for ev, text in lines:
                     # A newer word on the same task replaces one not sent yet.
-                    # A backup's line stands apart: it neither replaces nor is replaced.
-                    outbox[:] = [x for x in outbox if not (x["key"] == key and "backup" not in (ev, x["event"])
+                    # A backup's or sync-fallback's line stands apart: it neither replaces nor is replaced.
+                    outbox[:] = [x for x in outbox if not (x["key"] == key and ev not in ("backup", "sync-fallback")
+                                                           and x["event"] not in ("backup", "sync-fallback")
                                                            and (x["event"] == ev or ev != "stalled"))]
                     outbox.append({"key": key, "space": bare(t["space"]) if t.get("space") else None, "project": s.loc["folder"], "folder": os.path.basename(s.loc["folder"]), "event": ev, "status": v["status"],
                                    "stall": stall[0] if ev == "stalled" else None, "text": text, "at": now()})
@@ -213,8 +220,8 @@ def news_pass(report, folder=None):
     # Still true? A line whose task moved on since (or was removed) goes unsaid.
     def holds(x):
         c = current.get(x["key"])
-        if (folder and c is None) or x.get("event") == "backup":
-            return True  # another folder's task: not looked at this time; a backup's line is news either way
+        if (folder and c is None) or x.get("event") in ("backup", "sync-fallback"):
+            return True  # another folder's task: not looked at this time; one-shot notices are news either way
         return bool(c) and (c["stall"] == x.get("stall") if x.get("event") == "stalled" else c["status"] == x.get("status"))
     outbox[:] = [x for x in outbox if holds(x) and now() - x["at"] < NEWS_KEEP_MS]
     for k in [k for k, v in delivered.items() if not isinstance(v, dict) or not holds({**v, "key": k})]:
@@ -232,7 +239,7 @@ def news_pass(report, folder=None):
             base_turn = ((k or {}).get("turn") or 0) + (1 if got in ("pending", "queued") else 0)
             idle = bool(k) and status_word(k) in ("idle", "done")
             for x in batch:
-                if x["event"] != "backup":
+                if x["event"] not in ("backup", "sync-fallback"):
                     delivered[x["key"]] = {"to": to, "turn": base_turn, "at": now(), "since": x["at"],
                                            "event": x["event"], "status": x["status"], "stall": x.get("stall"),
                                            "idle": idle, **({"pending": True} if got == "pending" else {})}

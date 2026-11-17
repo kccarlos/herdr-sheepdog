@@ -12,9 +12,9 @@ import sys
 import time
 
 from . import sandbox
-from .checks import checks_line, sync_check, sync_mode, SYNC_FAILED
+from .checks import checks_line, resolve_check, sync_check, sync_mode, sync_plan, SYNC_FAILED
 from .base import Fail, git, guard, hc_json, kill_agent, label_of, now, run, STORE, stop_note, VERSION
-from .settings import (write_max_running,
+from .settings import (write_max_running, write_task_check,
     accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
     fable_due, gate_min, merge_hold, merge_policy,
     merge_wait_why, MUST_WORDS, project_base, remove_build_dir, review_kind, review_limits, reviewed_for_head, set_opts, settings_block, settings_for,
@@ -286,6 +286,8 @@ def cmd_show(args):
     text += budget_lines(t)
     if checks_line(t):
         text.append(checks_line(t))
+    if fb := v.get("sync_fallback"):
+        text.append(f"sync: {fb['why']}")
     if v.get("pr"):
         text.append(f"pull request: #{v['pr']['number']} {v['pr']['url']}")
     if v.get("why") and v["status"] == "needs":
@@ -1509,7 +1511,7 @@ def cmd_state(args, state):
             # pull request merged and close it again at once) until its agent says ready.
             if t["state"] == "done" and t.get("merged"):
                 t["kept_open"] = True
-            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait", "head_moved_at"):
+            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait", "head_moved_at", "sync_fallback"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
@@ -1638,16 +1640,20 @@ def cmd_config(args):
                 s.dirty = True
         if not cfg:
             s.data.pop("config", None)
-        for pair in getattr(args, "set", None) or []:  # FAC-103: the folder's "Tasks at once" from the CLI
+        for pair in getattr(args, "set", None) or []:  # FAC-103: folder settings from the CLI
             k, eq, v = pair.partition("=")
-            if not eq or k.strip().lower() not in ("tasks.max_running", "max_running"):
-                raise Fail(f"config --set takes tasks.max_running=N, not {pair!r}.")
+            key = k.strip().lower()
+            if not eq or key not in ("tasks.max_running", "max_running", "tasks.check", "check"):
+                raise Fail(f"config --set takes tasks.max_running=N or tasks.check=CMD, not {pair!r}.")
             v = v.strip().strip("\"'")
+            if key in ("tasks.check", "check"):
+                write_task_check(s, None, None if not v or v.lower() == "default" else v)
+                continue
             if v and v.lower() != "default" and not (v.isdigit() and 1 <= int(v) <= 50):
                 raise Fail("tasks.max_running is 1 to 50 (\"default\": Settings' above this project).")
             write_max_running(s, None, int(v) if v.isdigit() else None)
         out = {"folder": s.loc["folder"], "prefix": s.prefix, "max_running": s.max_running(), "settings": settings_for(s),
-               "worktrees": worktrees_on(s), "build_dir": build_dir_of(s)}
+               "check": resolve_check(s, {})[0], "worktrees": worktrees_on(s), "build_dir": build_dir_of(s)}
     n = out["max_running"]
     where = "a worktree each" if out["worktrees"] else "in the folder itself"
     extra = f", build output {out['build_dir']}" if out["build_dir"] else ""
@@ -2025,7 +2031,7 @@ def merge_now(s, t, accepting=False):
         # FAC-98 (note 52): checks ran on its head, not on it with its base's tip: brought up to date first (a merge
         # queue tests the combination itself), merged once the new head's checks pass.
         # FAC-111: tasks.sync cheap checks it merged with the base here instead, off merges it as it is.
-        mode = sync_mode(s, t)
+        mode, fallback_why = sync_plan(s, t)
         behind = mode != "off" and not queue and v.get("statusCheckRollup") and at and pr_behind(t, repo, at)
         if behind and (held := main_red_hold(s, base)):
             return held  # FAC-113: never updated or merged with a red base, an Accept included (an up-to-date one may still merge)
@@ -2036,8 +2042,12 @@ def merge_now(s, t, accepting=False):
                 t["attention"] = f"{UPDATE_CONFLICT}: a conflict in {why}. {fix}" if checked == "conflict" else f"{SYNC_FAILED}: {why}\n{fix}"
                 t["attention_at"] = now()
                 return t["attention"]
-            behind = checked != "pass"  # cheap couldn't check (no fetch, a slow check): full, as before
+            if checked != "pass":  # cheap couldn't check (no fetch, a slow check): full, as before
+                fallback_why = why
+            behind = checked != "pass"
         if behind:
+            if fallback_why and not t.get("sync_fallback"):
+                t["sync_fallback"] = {"from": "cheap", "to": "full", "why": f"tasks.sync fell back from cheap to full ({fallback_why})", "at": now()}
             ok, err = pr_update_branch(t, repo, at)
             if not ok:
                 t["attention"], t["attention_at"] = f"{UPDATE_CONFLICT}: {err}", now()
