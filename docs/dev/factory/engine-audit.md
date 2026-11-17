@@ -310,6 +310,10 @@ The reference engine relies on **8 runtime mechanisms** implemented outside `mod
 | **7. Multi-machine settings push (`pushed_from: "herdr-app"`) & `_job` pending-action polling** | `service/settings.ts:56–64`, `service/sync.ts`, `core/pending.js` | The Bun service watches `~/.config/shepherdr/settings.json` and pushes per-machine slices (`pushed_from: "herdr-app"`, `here: <machine>`) to linked machines whenever settings change (`settings.py:67, 108` checks `pushed_from`); `core/pending.js` polls `herdr-task --on <m> _job <job>` when `link.py` returns exit `75` (`PENDING`). | In **`SDF-6` / `SDF-9` (Phase 1)**, remove `pushed_from` and sync settings directly from Python (`settings.py` / `machines.py`); `link.py` (`SDF-7`) keeps `_job` polling for CLI/daemon callers. |
 | **8. `hc` (`herdr-core`) terminal multiplexer & OSC 7501 status tracking** | `herdr-core` daemon (`hc run`, `hc ls`, `hc get`, `hc send`, `hc keys`, `hc read`, `hc label`, `hc wait`, `hc kill`, `hc exec`, `hc file`) | Every worker, reviewer, check run, automation run, scheduler, remote action (`link.py`), and Assistant runs as an `hc` terminal; `agents.py` and `news.py` rely on `hc get --json` for `state`, `exit_code`, `status` (OSC 7501 `working`/`idle`/`blocked`/`error`), `foreground`, and `labels`. | **Kept unchanged** — `sheepdog` already talks to `herdr-core`. |
 
+### Field notes since the move
+
+- **Field note 59 (`SDF-40`, cheap sync by default & silent fallback):** `FAC-111` shipped `tasks.sync` with default `"full"`, and `"cheap"` silently fell back to `"full"` in `sync_mode()` (`checks.py`) whenever `tasks.check` was empty — so no real project got cheap sync and behind PRs still hit full 20-minute CI re-runs. Default `tasks.sync` is now `"cheap"`; empty `tasks.check` derives from facts the repo already states (`Makefile` `test`/`check`, `AGENTS.md`, `package.json`), and any remaining fallback (`cheap -> full`) is surfaced once in `sheepdog factory doctor` (with `herdr-task config --set tasks.check=...`) and in the task's status and news.
+
 ---
 
 ## 6. Phase 1 Extraction Order Mapped to Planned Tasks (`SDF-4`..`SDF-13`)

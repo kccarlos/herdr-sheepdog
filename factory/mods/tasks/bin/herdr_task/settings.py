@@ -27,7 +27,7 @@ ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants 
 DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "review_min": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": "",
                       "worktree_root": "", "check": "", "simulators": [], "reviewer_sandbox": True,
-                      "auto_accept": True, "sync": "full"},
+                      "auto_accept": True, "sync": "cheap"},
             "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {}, "project": {},
             "agents": {"reactions": True, "suggestions": True, "feedback": True, "feedback_repo": "eliasstravik/shepherdr"}}
 LEVELS = ["blocker", "major", "minor"]
@@ -91,11 +91,12 @@ def write_autopilot(space, values):
     os.replace(tmp, SETTINGS)
 
 
-def write_max_running(s, space, value):
-    """FAC-103: `config --set tasks.max_running=N`, the folder's "Tasks at once" as the window writes it:
-    in the space layer of the space working in this folder (--space's when given). None unsets it
-    there. Returns the space id. Refused on a pushed copy, as write_autopilot, and on a file that
-    is there but unreadable (writing would lose every other setting in it)."""
+def _same_folder(a, b):
+    return bool(a and b) and (a == b or os.path.realpath(a) == os.path.realpath(b))
+
+
+def _write_task_setting(s, space, key, value, require_space=True):
+    """Writes one folder-level tasks.<key> setting into SETTINGS (None unsets it)."""
     try:
         with open(SETTINGS) as f:
             d = json.load(f)
@@ -109,15 +110,17 @@ def write_max_running(s, space, value):
         raise Fail("This machine's Shepherdr settings are a copy from the machine whose window sets them: change Tasks at once in Settings there.")
     spaces = d.setdefault("spaces", {})
     folder = s.loc["folder"]
-    sid = bare(space) if space else next((k for k, v in spaces.items() if isinstance(v, dict) and v.get("folder") == folder), None)
+    sid = bare(space) if space else next((k for k, v in spaces.items() if isinstance(v, dict) and _same_folder(v.get("folder"), folder)), None)
     if not sid:
-        raise Fail(f"No space works in {folder} in Shepherdr settings: pass --space <id>.")
+        if require_space:
+            raise Fail(f"No space works in {folder} in Shepherdr settings: pass --space <id>.")
+        sid = getattr(s, "slug", None) or os.path.basename(folder) or "default"
     layer = spaces.setdefault(sid, {})
-    if layer.get("folder") not in (None, folder):
+    if layer.get("folder") is not None and not _same_folder(layer.get("folder"), folder):
         raise Fail(f"Space {sid} works in {layer['folder']}, not {folder}.")
-    layer["folder"] = folder
+    layer["folder"] = os.path.realpath(folder) if os.path.exists(folder) else folder
     tasks = dict(layer.get("tasks") or {})
-    tasks.pop("max_running", None) if value is None else tasks.update(max_running=value)
+    tasks.pop(key, None) if value is None else tasks.update({key: value})
     layer.update(tasks=tasks) if tasks else layer.pop("tasks", None)
     d["version"] = 1
     os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
@@ -127,6 +130,93 @@ def write_max_running(s, space, value):
         f.write("\n")
     os.replace(tmp, SETTINGS)
     return sid
+
+
+def write_max_running(s, space, value):
+    """FAC-103: `config --set tasks.max_running=N`, the folder's "Tasks at once" as the window writes it:
+    in the space layer of the space working in this folder (--space's when given). None unsets it
+    there. Returns the space id. Refused on a pushed copy, as write_autopilot, and on a file that
+    is there but unreadable (writing would lose every other setting in it)."""
+    return _write_task_setting(s, space, "max_running", value, require_space=True)
+
+
+def write_task_check(s, space, value):
+    """`config --set tasks.check=CMD`: sets or clears the folder's tasks.check command."""
+    return _write_task_setting(s, space, "check", value, require_space=False)
+
+
+_SKIP_EXT = (".md", ".txt", ".json", ".yml", ".yaml", ".toml", ".xml", ".xcodeproj", ".xcworkspace")
+
+
+def _agents_md_command(text):
+    """Extracts a documented test/check command named in AGENTS.md, or ''."""
+    in_fence = in_test_section = False
+    for raw in text.splitlines():
+        s = raw.strip()
+        if s.startswith("```"):
+            in_fence = not in_fence
+            if not in_fence:
+                in_test_section = False
+            continue
+        if in_fence:
+            if in_test_section and s and not s.startswith("#"):
+                return s
+            continue
+        if re.match(r"^#{1,4}\s+", s):
+            in_test_section = bool(re.search(r"(?i)\b(tests?|testing|checks?)\b", s))
+            continue
+        if in_test_section and s:
+            in_test_section = False
+        if not re.search(r"(?i)\b(run\s+(the\s+)?(tests?|checks?)|test\s+command|check\s+command|tests?|checks?)\b", s):
+            continue
+        if re.match(r"^(?:[-*]\s*)?(?:\*\*)?(?:never|don't|do\s+not|avoid)\b", s, re.I):
+            continue
+        for m in re.finditer(r"`([^`\n]+)`", s):
+            cand = m.group(1).strip()
+            if (not cand or cand.endswith("/") or cand.endswith(_SKIP_EXT) or cand.startswith(("-", "<", "~", "…"))
+                    or "…" in cand or (" " not in cand and not cand.startswith("./") and "." in cand)):
+                continue
+            return cand
+    return ""
+
+
+def derive_check(folder):
+    """Derives a repo's check command from facts it already states (Makefile test/check target,
+    AGENTS.md, or package.json scripts.test), returning (cmd, source) or ('', None)."""
+    if not folder or not os.path.isdir(folder):
+        return "", None
+    for mk in ("Makefile", "makefile", "GNUmakefile"):
+        p = os.path.join(folder, mk)
+        if os.path.isfile(p):
+            try:
+                with open(p, errors="replace") as f:
+                    text = f.read(262144)
+            except OSError:
+                continue
+            if re.search(r"(?m)^test\s*:(?!=)", text):
+                return "make test", mk
+            if re.search(r"(?m)^check\s*:(?!=)", text):
+                return "make check", mk
+    agents_md = os.path.join(folder, "AGENTS.md")
+    if os.path.isfile(agents_md):
+        try:
+            with open(agents_md, errors="replace") as f:
+                cmd = _agents_md_command(f.read(262144))
+            if cmd:
+                return cmd, "AGENTS.md"
+        except OSError:
+            pass
+    pkg_path = os.path.join(folder, "package.json")
+    if os.path.isfile(pkg_path):
+        try:
+            with open(pkg_path) as f:
+                pkg = json.load(f)
+            t = str(((pkg.get("scripts") if isinstance(pkg, dict) else None) or {}).get("test") or "").strip()
+            if t and "no test specified" not in t.lower():
+                return "npm test", "package.json"
+        except (OSError, ValueError):
+            pass
+    return "", None
 
 
 def reactions_on(space=None, d=None):
@@ -153,8 +243,9 @@ def settings_layers(s, space=None):
     except (OSError, ValueError):
         d = {}
     spaces = d.get("spaces") or {}
-    mine = [v for k, v in spaces.items() if (v or {}).get("folder") == s.loc["folder"]]
-    pick = (spaces.get(bare(space)) if space and (spaces.get(bare(space)) or {}).get("folder") == s.loc["folder"] else None) or (mine[0] if mine else None)
+    folder = s.loc["folder"]
+    mine = [v for k, v in spaces.items() if _same_folder((v or {}).get("folder"), folder)]
+    pick = (spaces.get(bare(space)) if space and _same_folder((spaces.get(bare(space)) or {}).get("folder"), folder) else None) or (mine[0] if mine else None)
     machine = (d.get("machines") or {}).get(d.get("here") or LOCAL_MACHINE)
     return d.get("everywhere") or {}, machine or {}, pick or {}
 

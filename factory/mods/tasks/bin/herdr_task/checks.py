@@ -9,7 +9,7 @@ import tempfile
 
 from .base import git, hc_json, now, run
 from .github import gh, pr_repo
-from .settings import gate_min, settings_for
+from .settings import derive_check, gate_min, settings_for
 
 LIMIT_MS = 20 * 60000
 TAIL = 4000
@@ -76,7 +76,7 @@ def checks_pass(s, t):
         t.pop("check_run")
         s.dirty = True
         return
-    cmd = (settings_for(s, t.get("space"))["tasks"].get("check") or "").strip()
+    cmd = resolve_check(s, t)[0]
     mine = [r for r in t.get("checks") or [] if r["sha"] == sha]
     last = mine[-1] if mine and t.get("pr") else None
     state = ((last or {}).get("ci") or {}).get("state")
@@ -127,10 +127,26 @@ SYNC_FETCH_S = 60
 SYNC_FAILED = "Its check failed on it merged with its base branch (the base moved on since)"
 
 
-def sync_mode(s, t):
+def resolve_check(s, t=None):
+    """(cmd, source) for this folder's tasks.check: explicit setting, else derived from repo facts, else ('', None)."""
+    cmd = (settings_for(s, (t or {}).get("space"))["tasks"].get("check") or "").strip()
+    if cmd:
+        return cmd, "setting"
+    folder = (getattr(s, "loc", None) or {}).get("folder")
+    return derive_check(folder)
+
+
+def sync_plan(s, t):
+    """(effective_mode, fallback_why): effective tasks.sync and, when cheap fell back to full, why."""
     k = settings_for(s, t.get("space"))["tasks"]
-    mode = k.get("sync") if k.get("sync") in SYNC_MODES else "full"
-    return "full" if mode == "cheap" and not (k.get("check") or "").strip() else mode
+    mode = k.get("sync") if k.get("sync") in SYNC_MODES else "cheap"
+    if mode == "cheap" and not resolve_check(s, t)[0]:
+        return "full", "tasks.check is empty and could not be derived"
+    return mode, None
+
+
+def sync_mode(s, t):
+    return sync_plan(s, t)[0]
 
 
 def sync_check(s, t, at, repo=None):
@@ -139,7 +155,7 @@ def sync_check(s, t, at, repo=None):
     ("error", why) when it couldn't check (fall back to full). Leaves the task's worktree, branch and folder alone."""
     from .github import remote_of, remote_repo
     main, base = s.loc["folder"], t.get("base") or "main"
-    cmd = (settings_for(s, t.get("space"))["tasks"].get("check") or "").strip()
+    cmd = resolve_check(s, t)[0]
     remote = remote_of(main)
     if repo and remote_repo(main, remote) != repo:  # a fork's remote: its base isn't the pull request's
         return "error", f"{remote} isn't {repo}"
