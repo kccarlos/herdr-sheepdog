@@ -34,10 +34,11 @@ Skips, all for a stated reason:
 
 Recipe on each VM:
 
-1. Copy a `sheepdog` built from this commit and run `sheepdog factory doctor` in a fresh git repo.
-2. Run `herdr-task config --prefix DEMO`.
-3. Add a one-line task, `herdr-task add "Add HELLO.md" --prompt "Create HELLO.md … then run herdr-task ready"`.
-4. Run `herdr-task start DEMO-1`, wait for Ready, then `herdr-task accept DEMO-1` (the tester plays the owner).
+1. Copy a `sheepdog` built from this commit and run `sheepdog factory doctor` in a fresh git repo. Fix what it names: on Tart, install uv and run `hc server start`; on Linux, put a newer uv first on `PATH`.
+2. Put `herdr-task` on `PATH` by hand (finding 4): a two-line `sh` wrapper that execs the managed Python, `~/.local/share/sheepdog/factory/python/cpython-3.14.8-*/bin/python3`, on the engine's `~/.local/share/sheepdog/factory/engine/<version>/mods/tasks/bin/herdr-task`. On Tart there is a second wrapper for `bin/herdr-secret`.
+3. Run `herdr-task config --prefix DEMO --set worker.perm=full`. On Tart this setting was added only after the stall in finding 3.
+4. Add a one-line task, `herdr-task add "Add HELLO.md" --prompt "Create HELLO.md … then run herdr-task ready"`. On Linux it also had `--model haiku`.
+5. Run `herdr-task start DEMO-1`. On Tart it took `herdr-task switch DEMO-1 --agent agy` (finding 1). Wait for Ready, then `herdr-task accept DEMO-1`, with the tester playing the owner.
 
 | Step | Linux (claude) | Tart (agy) |
 |---|---|---|
@@ -63,7 +64,7 @@ Severity levels follow the reviewer template: **major** means someone would hit 
 5. **Minor: prerequisites beyond "hc and one CLI".** uv was missing on Tart. uv 0.12.1 on Linux cannot download CPython 3.14.8 (`No download found`); 0.13.9 can. git and, for a pull request, gh are also needed. Doctor names uv and gh with a fix line; it does not check the uv version.
 6. **Minor: with Review off, auto-accept still waits for a review round.** `show` says "waits for the person's Accept: 0 of 1 passing review rounds" and the Settings block says Review: off. The default merge setting asks the person first anyway, so nothing merges by itself.
 7. **Minor: Shepherdr words remain.** The worker brief's Merge line and `commands.py` still say "they accept it in the Tasks panel" (`assistant_settings.MERGE_SHORT`). `templates.py`'s `REVIEWER_SANDBOX` line names `herdr-app check`. `mods/coordinator/restart.sh` reads `HERDR_APP_HOME`/`~/.config/herdr-app`, a known phase 2 item (design section 5). These are prompt and template texts, so changing them needs the replay evidence from [template-replay.md](template-replay.md). They are left for a follow-up.
-8. **Minor: herdr-task refuses a private hc session.** With `HC_SESSION` set it says "refusing to run hc". This is by design (`base.not_real`), but it means a test on a shared machine has to use the default hc session. The Linux run did that and removed only its own terminals.
+8. **Minor: herdr-task refuses a private hc session.** With `HC_SESSION` set to anything other than empty or `default` (here `sdf13`), it says "refusing to run hc". This is by design (`base.not_real`), but it means a test on a shared machine has to use the default hc session. The Linux run did that and removed only its own terminals.
 9. **Info: older hc on the VMs.** The VMs run hc 0.1.17 and 0.1.18, the Mac 0.1.21. Both worked for this path. On Tart, `hc server start` printed "run hc update to finish installing Herdr Core".
 
 ## Not proven
