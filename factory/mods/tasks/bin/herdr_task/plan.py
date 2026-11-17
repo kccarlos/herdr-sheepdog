@@ -198,7 +198,7 @@ class Plan:
                     self.bad(f"{t['key']}: a split keeps the parent's place; {s.ref(p)} is in {p.get('milestone')}, not {mid}.")
                 elif p.get("plan_key") in keys:
                     self.bad(f"{s.ref(p)} is split, so it can't stay in the plan as {p['plan_key']}.")
-                elif p["state"] not in NOT_STARTED + ("running",) or p.get("acceptance_of") or busy(s, p):
+                elif p["state"] not in NOT_STARTED + ("running",) or p.get("acceptance_of") or (p["state"] == "running" and busy(s, p)):
                     self.bad(f"{s.ref(p)} can't be split now ({'its agent is at work' if p['state'] == 'running' else p['state']}).")
                 else:
                     split_parents.setdefault(p["id"], []).append(t["key"])
@@ -237,9 +237,8 @@ class Plan:
                     self.bad(f"{t['key']}: after {a} is neither a task key in this plan nor a task here.")
             edges[("k", t["key"])] = deps
         self.edges = edges
-        if not self.problems:
-            self.check_loops(edges)
-            self.check_ui(edges)
+        self.check_loops(edges)  # an unknown id is left out of the edges, so the rest is still checked
+        self.check_ui(edges)
 
     def old_after(self, t):
         """An existing task listed without "after": the after it was given by the plan before."""
@@ -376,7 +375,7 @@ class Plan:
             splits[s.ref(parent)] = [s.ref(self.by_key[k]) for k in kids]
             from .commands import end_agent
             from .simulators import release_task
-            for k in agents_of(s, parent):
+            for k in agents_of(s, parent) if parent["state"] == "running" else []:
                 end_agent(s, parent, k["address"])
             release_task(s, parent)
             s.data["tasks"].remove(parent)
