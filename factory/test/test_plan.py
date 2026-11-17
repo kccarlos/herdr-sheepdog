@@ -255,6 +255,34 @@ class Plans(unittest.TestCase):
         self.assertEqual(rc, 1, v)
         self.assertEqual(self.ended, [])
 
+    def test_outside_check_minors(self):
+        self.run_cli("plan", "apply", plan=self.first_plan())
+        t = self.tasks()
+        # rm drops the removed task from plan_after too, so the next amend can list a dependent by key alone.
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", ["herdr-task", "rm", str(t["api"]["id"]), "--folder", self.repo]), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(self.cli.main(), 0)
+        self.assertNotIn(t["api"]["id"], self.tasks()["page"].get("plan_after"))
+        plan = self.first_plan()
+        plan["milestones"][0]["tasks"][1:3] = [{"key": "page"}]
+        rc, v = self.run_cli("plan", "amend", "--reason", "api dropped", plan=plan)
+        self.assertEqual(rc, 0, v)
+        # A split refuses a parent whose agent waits on a prompt.
+        with self.open(True) as s:
+            s.find(str(t["page"]["id"]))["state"] = "running"
+            s.dirty = True
+        self.live[t["page"]["id"]] = [{"address": "w2", "state": "live", "status": {"state": "blocked"}, "foreground": {"name": "claude"}}]
+        plan["milestones"][0]["tasks"][1:2] = [task("page-a", split_of="page")]
+        rc, v = self.run_cli("plan", "amend", "--reason", "x", plan=plan)
+        self.assertIn("can't be split now (its agent is at work)", v["error"])
+        self.assertEqual(self.ended, [])
+        # --check never sets a base (no git).
+        with mock.patch("herdr_task.commands.set_base", side_effect=AssertionError("git touched")):
+            rc, v = self.run_cli("plan", "amend", "--check", "--reason", "x",
+                                 plan={"milestones": [milestone("M3", [task("more")])]})
+        self.assertEqual((rc, v), (0, {"ok": True}))
+
     def test_check_only_changes_nothing(self):
         rc, v = self.run_cli("plan", "apply", "--check", plan=self.first_plan())
         self.assertEqual((rc, v), (0, {"ok": True}))

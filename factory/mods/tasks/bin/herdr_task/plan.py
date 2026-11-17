@@ -67,8 +67,9 @@ def agents_of(s, t):
 
 
 def busy(s, t):
-    """An agent of the task is mid-turn (an idle one, as after a recap, ends when the task is split)."""
-    return any(status_word(k) == "working" for k in agents_of(s, t))
+    """An agent of the task is mid-turn or waiting on a prompt (an idle one, as after a recap, ends when the
+    task is split)."""
+    return any(status_word(k) in ("working", "blocked") for k in agents_of(s, t))
 
 
 def _resolve_ref(s, text):
@@ -83,7 +84,7 @@ class Plan:
     """One apply or amend, worked out in memory: every problem first, then the store is changed."""
 
     def __init__(self, s, plan, amend):
-        self.s, self.amend, self.problems = s, amend, []
+        self.s, self.amend, self.problems, self.dry = s, amend, [], False
         self.by_key = {t["plan_key"]: t for t in s.data["tasks"] if t.get("plan_key")}
         self.old_ms = {m["id"]: m for m in s.data.get("milestones") or []}
         self.ms, self.tasks = [], []  # (milestone entry), (task entry, milestone id)
@@ -352,7 +353,8 @@ class Plan:
             if old is None:
                 old = s.new(t["title"].strip(), "", mode)
                 old["plan_key"] = t["key"]
-                set_base(s, old, None, new=True)
+                if not self.dry:  # --check never touches git (a base only on the remote is fetched)
+                    set_base(s, old, None, new=True)
                 self.by_key[t["key"]] = old
                 log["added"].append(s.ref(old))
             elif old["state"] in NOT_STARTED and any(f in t for f in ("title", "prompt", "lines", "kind", "set", "after")) \
@@ -421,7 +423,8 @@ class Plan:
             if acc is None:
                 acc = s.new(f"{m['id']} acceptance: {m['title']}", "", mode)
                 acc.update(acceptance_of=m["id"], milestone=m["id"])
-                set_base(s, acc, None, new=True)
+                if not self.dry:
+                    set_base(s, acc, None, new=True)
                 m["acceptance_task"] = acc["id"]
                 added.append(s.ref(acc))
             work = [t for t in s.data["tasks"] if t.get("milestone") == m["id"] and t is not acc]
@@ -530,6 +533,7 @@ def cmd_plan(args):
         if p.problems:
             raise Fail("The plan isn't applied:\n- " + "\n- ".join(p.problems))
         saved = copy.deepcopy(s.data) if args.check else None
+        p.dry = bool(args.check)
         log = p.write((args.reason or "").strip() or None)
         if loop := loop_in(s):
             raise Fail("The plan isn't applied: it would make a loop: " + " waits for ".join(loop) + ".")  # nothing saved

@@ -1772,8 +1772,9 @@ def cmd_rm(args):
         release_task(s, t)
         s.data["tasks"].remove(t)
         for o in s.data["tasks"]:
-            if t["id"] in (o.get("after") or []):
-                o["after"] = [i for i in o["after"] if i != t["id"]]
+            for f in ("after", "plan_after"):  # plan_after: what a plan gave it (SDF-31), re-read on the next amend
+                if t["id"] in (o.get(f) or []):
+                    o[f] = [i for i in o[f] if i != t["id"]]
         s.dirty = True
     note = f" Its worktree {t['worktree']} is still there." if t.get("worktree") and os.path.isdir(t["worktree"]) else ""
     say(args, {"id": t["id"], "removed": True}, f"{s.ref(t)} removed.{note}")
