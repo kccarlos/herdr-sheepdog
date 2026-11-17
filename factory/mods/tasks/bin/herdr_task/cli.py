@@ -329,8 +329,7 @@ def main():
     c.add_argument("--changes-file")
     c.add_argument("--notes", help="suggestions with a pass")
     c.add_argument("--must-fix", type=int, help="findings at or above Must fix (herdr-task's own reviewer, FAC-13)")
-    c = cmd("scheduler", cmd_scheduler, "run automations and the queue (herdr-core keeps one as herdr-automations)", id=False)
-    c.add_argument("--ensure", action="store_true", help="start it if automations need it and it isn't running")
+    c = cmd("scheduler", cmd_scheduler, "run automations and the task tick loop (the sheepdog daemon keeps one as sheepdog-factory-tick)", id=False)
     c.add_argument("--once", action="store_true", help="one round, then exit")
     au = sub.add_parser("auto", help="automations: a saved task that a time or an event adds again").add_subparsers(dest="auto")
 

@@ -599,7 +599,8 @@ def memory_guard(report):
         stop_note("memory-guard", memory=h["memory"], terminals=ended)
     if h["memory"] <= GUARD_MEMORY or now() - (g.get("alerted") or 0) < GUARD_ALERT_EVERY_MS:
         return
-    k = hc_json("get", SCHEDULER)
+    sched_target = os.environ.get("HC_TERMINAL_ID") or SCHEDULER
+    k = hc_json("get", sched_target)
     if not k or k.get("state") != "live":
         return
     agents = sum(1 for x in (hc_json("ls") or {}).get("terminals", []) if "/" not in x.get("address", "/")
@@ -608,7 +609,7 @@ def memory_guard(report):
              "body": (f"Ended {len(ended)} finished agent{'s' if len(ended) != 1 else ''}. " if ended else "")
              + f"{agents} agents still run here. New tasks wait. Close apps or finish tasks before the system ends them all.",
              "about": True, "task": machine_name() or "This computer"}
-    if run(["hc", "label", SCHEDULER, "herdr.alert=" + json.dumps(alert, ensure_ascii=False, separators=(",", ":"))]).returncode == 0:
+    if run(["hc", "label", sched_target, "herdr.alert=" + json.dumps(alert, ensure_ascii=False, separators=(",", ":"))]).returncode == 0:
         g["alerted"] = now()
         report["memory_guard"]["alert"] = alert["title"]
     tmp = f"{GUARD_FILE}.{os.getpid()}.tmp"

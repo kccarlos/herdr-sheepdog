@@ -40,7 +40,6 @@ from .queues import after_refs, parse_after, queue_reason, running_count, set_af
 from .archive import unarchive
 from .output import inbox_line, line, minutes, say, view
 from .stage import STAGE_ORDER, STAGE_TABLE
-from .scheduler import ensure_scheduler
 from .proof import evidence, find_proof
 from .when import when_from
 from .templates import instructions
@@ -157,8 +156,6 @@ def cmd_add(args):
         if at:
             schedule(s, t, at, {})
         v = view(s, t)
-    if at:
-        ensure_scheduler_quietly()
     say(args, v, s.ref(t) + (f": {v['why']}" if at else ""))
 
 
@@ -194,13 +191,6 @@ def unschedule(t):
     t["state"] = "todo"
     for k in ("scheduled_for", "queue", "queued_at", "held"):
         t.pop(k, None)
-
-
-def ensure_scheduler_quietly():
-    try:
-        ensure_scheduler(quiet=True)
-    except Exception:
-        pass
 
 
 def set_base(s, t, base, new=False):
@@ -460,11 +450,6 @@ def cmd_start(args):
             fail_if_missing_cli(s, t, argv)
             a = begin(s, t, argv, parent=parent)
             v = view(s, t)
-    # The scheduler starts queued tasks and tells the Assistant its tasks' news.
-    try:
-        ensure_scheduler(quiet=True)
-    except Exception:
-        pass
     if reason == "scheduled":
         say(args, v, f"{s.ref(t)} is scheduled: {v['why']}. It starts by itself then.")
         return
@@ -1662,8 +1647,6 @@ def cmd_edit(args):
         sent = amend(s, t, args)  # last: its agent is told only of an edit that saves
         s.dirty = True
         v = view(s, t)
-    if at:
-        ensure_scheduler_quietly()
     say(args, {**v, **({"sent": sent} if sent is not None else {})},
         f"{s.ref(t)} saved" + (f": {v['why']}." if v["status"] == "scheduled" else ".")
         + (f" Its agent was told the brief changed ({sent})." if sent else "")
