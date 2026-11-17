@@ -25,8 +25,9 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "  doctor   check unattended factory prerequisites and print one-line fixes:")
 	fprintln(w, "           herdr-core (hc), timed project-volume probe inside herdr-core")
 	fprintln(w, "           (macOS consent prompts and external-disk stalls), at least one")
-	fprintln(w, "           logged-in agent CLI (claude, codex or agy) plus a canary start,")
-	fprintln(w, "           gh login with the default repo pinned, and codexbar. Exit 1 on FAIL.")
+	fprintln(w, "           logged-in agent CLI (claude, codex or agy) plus a canary start")
+	fprintln(w, "           inside herdr-core, gh login with the default repo pinned, and")
+	fprintln(w, "           codexbar. Exit 1 on FAIL.")
 	fprintln(w, "")
 	fprintln(w, "flags:")
 	fprintln(w, "  --folder PATH      project folder to check (default . or [folder])")
@@ -55,6 +56,7 @@ func runFactory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 }
 
 func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	reordered := reorderFactoryDoctorArgs(args)
 	fs := flag.NewFlagSet("factory doctor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { printFactoryUsage(stderr) }
@@ -62,7 +64,7 @@ func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writ
 	configPath := fs.String("config", "", "config file")
 	hcSocket := fs.String("hc-socket", "", "herdr-core socket")
 	noCanary := fs.Bool("no-canary", false, "skip agent CLI canary start")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reordered); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
@@ -81,18 +83,19 @@ func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	folder = resolveTargetFolder(folder, home)
 
-	socket, badCfg := resolveFactoryHCSocket(*hcSocket, *configPath, home)
+	socket, claudeModel, badCfg := resolveFactoryConfig(*hcSocket, *configPath, home)
 	if badCfg != nil {
 		fprintln(stdout, badCfg.Line())
 		return 1
 	}
 
 	results := factoryDoctorRunner(ctx, factory.DoctorOptions{
-		Folder:   folder,
-		HCSocket: socket,
-		Canary:   !*noCanary,
-		Home:     home,
-		GHHost:   os.Getenv("GH_HOST"),
+		Folder:      folder,
+		HCSocket:    socket,
+		Canary:      !*noCanary,
+		ClaudeModel: claudeModel,
+		Home:        home,
+		GHHost:      os.Getenv("GH_HOST"),
 	})
 	for _, r := range results {
 		fprintln(stdout, r.Line())
@@ -101,6 +104,35 @@ func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writ
 		return 1
 	}
 	return 0
+}
+
+// reorderFactoryDoctorArgs allows flags to follow [folder] (e.g.
+// `sheepdog factory doctor ~/repo --no-canary`) despite Go's flag.FlagSet
+// stopping at the first positional argument.
+func reorderFactoryDoctorArgs(args []string) []string {
+	var flags, pos []string
+	valueFlags := map[string]bool{
+		"-folder": true, "--folder": true,
+		"-config": true, "--config": true,
+		"-hc-socket": true, "--hc-socket": true,
+	}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			pos = append(pos, args[i+1:]...)
+			break
+		}
+		if strings.HasPrefix(a, "-") && a != "-" {
+			flags = append(flags, a)
+			if valueFlags[a] && i+1 < len(args) {
+				i++
+				flags = append(flags, args[i])
+			}
+			continue
+		}
+		pos = append(pos, a)
+	}
+	return append(flags, pos...)
 }
 
 func resolveTargetFolder(raw, home string) string {
@@ -117,33 +149,42 @@ func resolveTargetFolder(raw, home string) string {
 	return filepath.Clean(f)
 }
 
-func resolveFactoryHCSocket(explicitSocket, configPath, home string) (string, *onboard.Result) {
-	if s := strings.TrimSpace(explicitSocket); s != "" {
-		return expandHomePath(s, home), nil
+func resolveFactoryConfig(explicitSocket, configPath, home string) (socket, claudeModel string, badCfg *onboard.Result) {
+	cfgPath := strings.TrimSpace(configPath)
+	explicitSock := strings.TrimSpace(explicitSocket)
+	if cfgPath == "" && explicitSock == "" {
+		def := config.DefaultPath()
+		if _, err := os.Stat(def); err == nil {
+			cfgPath = def
+		}
 	}
-	if strings.TrimSpace(configPath) != "" {
-		cfg, err := config.Load(configPath)
+	var cfg config.Config
+	var hasCfg bool
+	if cfgPath != "" {
+		loaded, err := config.Load(cfgPath)
 		if err != nil {
 			r := onboard.Result{
 				Name:   "config",
 				Status: onboard.Fail,
 				Detail: err.Error(),
-				Fix:    "fix the config file or pass --hc-socket PATH",
+				Fix:    "fix " + cfgPath + " or pass --config PATH",
 			}
-			return "", &r
+			return "", "", &r
 		}
-		return cfg.Herdr.HCSocketPath(), nil
+		cfg = loaded
+		hasCfg = true
+		claudeModel = strings.TrimSpace(cfg.CLI.ClaudeModel)
+	}
+	if explicitSock != "" {
+		return expandHomePath(explicitSock, home), claudeModel, nil
 	}
 	if envSock := strings.TrimSpace(os.Getenv("SHEEPDOG_HC_SOCKET")); envSock != "" {
-		return expandHomePath(envSock, home), nil
+		return expandHomePath(envSock, home), claudeModel, nil
 	}
-	defCfg := config.DefaultPath()
-	if _, err := os.Stat(defCfg); err == nil {
-		if cfg, err := config.Load(defCfg); err == nil {
-			return cfg.Herdr.HCSocketPath(), nil
-		}
+	if hasCfg {
+		return cfg.Herdr.HCSocketPath(), claudeModel, nil
 	}
-	return hc.DefaultSocket(os.Getenv, home, os.Getuid(), nil), nil
+	return hc.DefaultSocket(os.Getenv, home, os.Getuid(), nil), "", nil
 }
 
 func expandHomePath(p, home string) string {

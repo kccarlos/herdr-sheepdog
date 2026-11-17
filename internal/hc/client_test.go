@@ -169,6 +169,15 @@ func TestClientCallsRequestsAndResults(t *testing.T) {
 		t.Fatalf("Remove finished = (%+v, %v), want %s", removed, err, ran.Address)
 	}
 	assertParams(t, server, "terminal.rm", map[string]any{"terminal": "t2"})
+
+	server.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		zero := 0
+		return hc.ExecResult{Code: &zero, Stdout: []byte("OK\n"), MS: 12}, nil
+	}
+	execRes, err := client.Exec(ctx, hc.ExecParams{Argv: []string{"echo", "OK"}, Cwd: "/tmp"})
+	if err != nil || execRes.Code == nil || *execRes.Code != 0 || string(execRes.Stdout) != "OK\n" {
+		t.Fatalf("Exec = (%+v, %v)", execRes, err)
+	}
 }
 
 func TestCallErrorsAndKindMatching(t *testing.T) {

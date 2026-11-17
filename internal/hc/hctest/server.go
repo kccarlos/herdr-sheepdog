@@ -33,6 +33,8 @@ type Server struct {
 	Path string
 	// OnRun, when set, is called after terminal.run creates a terminal.
 	OnRun func(hc.Terminal, hc.RunParams)
+	// OnExec, when set, handles machine.exec calls in tests.
+	OnExec func(hc.ExecParams) (hc.ExecResult, error)
 
 	ln   net.Listener
 	dir  string
@@ -416,7 +418,7 @@ func (s *Server) handle(method string, params json.RawMessage) (any, error) {
 				"hello", "terminal.list", "terminal.get", "terminal.read",
 				"terminal.send", "terminal.keys", "terminal.interrupt",
 				"terminal.run", "terminal.kill", "terminal.rm", "terminal.label", "terminal.attach",
-				"events.subscribe",
+				"machine.exec", "events.subscribe",
 			},
 			Core: hc.CoreInfo{ID: "fake-core", Name: "hctest"},
 		}, nil
@@ -490,6 +492,12 @@ func (s *Server) handle(method string, params json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return s.rm(p.Terminal)
+	case "machine.exec":
+		var p hc.ExecParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, err
+		}
+		return s.exec(p)
 	case "terminal.label":
 		var p struct {
 			Terminal string            `json:"terminal"`
@@ -660,6 +668,17 @@ func (s *Server) rm(target string) (hc.RemoveResult, error) {
 	}
 	s.Remove(t.Address)
 	return hc.RemoveResult{Removed: t.Address}, nil
+}
+
+func (s *Server) exec(p hc.ExecParams) (hc.ExecResult, error) {
+	s.mu.Lock()
+	fn := s.OnExec
+	s.mu.Unlock()
+	if fn != nil {
+		return fn(p)
+	}
+	zero := 0
+	return hc.ExecResult{Code: &zero}, nil
 }
 
 func (s *Server) kill(target string) (hc.Terminal, error) {

@@ -111,8 +111,8 @@ func TestDoctorAllGreenAndCleansUpProbeTerminal(t *testing.T) {
 		if dir != proj {
 			t.Errorf("agy canary dir = %q, want %q", dir, proj)
 		}
-		if !slices.Contains(argv, "gemini-3.8-flash-low") {
-			t.Errorf("agy canary did not pick gemini-3.8-flash-low: %v", argv)
+		if !slices.Contains(argv, "gemini-3.8-flash-low") || !slices.Contains(argv, "-p="+canaryPrompt) {
+			t.Errorf("agy canary argv = %v", argv)
 		}
 		return CommandOutput{Stdout: "OK\n", Duration: 55 * time.Millisecond}
 	}
@@ -447,6 +447,9 @@ func TestCheckAgentCLIsMatrix(t *testing.T) {
 		if cl.Status != onboard.Fail || !strings.Contains(cl.Detail, "Removable Volumes") {
 			t.Errorf("claude timeout = %+v", cl)
 		}
+		if gate := findResult(t, rs, "agent clis"); gate.Status != onboard.Fail || !strings.Contains(gate.Detail, "claude") {
+			t.Errorf("agent clis gate on timeout = %+v, want Fail", gate)
+		}
 	})
 
 	t.Run("no-canary skips canary invocations", func(t *testing.T) {
@@ -548,6 +551,25 @@ func TestCheckGHPinningAndNote33(t *testing.T) {
 			t.Errorf("pinned to origin = %+v", r)
 		}
 	})
+
+	t.Run("unpinned with github remote also fails", func(t *testing.T) {
+		env := makeGitHandlers("origin\ngithub\n", "https://github.com/alice/fork.git", "")
+		r := CheckGH(ctx, DoctorOptions{Folder: "/Users/alice/repo", TempDir: tmp, LookPath: env.lookPath, RunCommand: env.run}, true)
+		if r.Status != onboard.Fail || !strings.Contains(r.Detail, "github") {
+			t.Errorf("unpinned with github remote = %+v", r)
+		}
+	})
+
+	t.Run("view timeout warns instead of false fail", func(t *testing.T) {
+		env := makeGitHandlers("origin\nupstream\n", "https://github.com/alice/fork.git", "")
+		env.handlers["gh repo"] = func(string, []string, []string) CommandOutput {
+			return CommandOutput{TimedOut: true}
+		}
+		r := CheckGH(ctx, DoctorOptions{Folder: "/Users/alice/repo", TempDir: tmp, LookPath: env.lookPath, RunCommand: env.run}, true)
+		if r.Status != onboard.Warn || !strings.Contains(r.Detail, "could not check") {
+			t.Errorf("view timeout = %+v, want Warn", r)
+		}
+	})
 }
 
 func TestCheckCodexbar(t *testing.T) {
@@ -586,15 +608,25 @@ func TestRepoFromURL(t *testing.T) {
 
 func TestSystemRunCommandScrubsEnvAndKillsGroupOnTimeout(t *testing.T) {
 	t.Setenv("CLAUDECODE", "1")
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-kept")
+	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "1")
 	t.Setenv("HERDR_TASK_STORE", "/tmp/x")
 	t.Setenv("SHEEPDOG_WEB_PORT", "9999")
 	t.Setenv("GH_REPO", "wrong/repo")
 
 	tmp := t.TempDir()
 	out := SystemRunCommand(context.Background(), tmp, []string{"FACTORY_CANARY_TEST=yes"}, "sh", "-c",
-		`printf "cc=%s herdr=%s sd=%s gh=%s extra=%s" "$CLAUDECODE" "$HERDR_TASK_STORE" "$SHEEPDOG_WEB_PORT" "$GH_REPO" "$FACTORY_CANARY_TEST"`)
-	if out.Exit != 0 || out.Stdout != "cc= herdr= sd= gh= extra=yes" {
+		`printf "cc=%s ep=%s oauth=%s br=%s herdr=%s sd=%s gh=%s extra=%s" "$CLAUDECODE" "$CLAUDE_CODE_ENTRYPOINT" "$CLAUDE_CODE_OAUTH_TOKEN" "$CLAUDE_CODE_USE_BEDROCK" "$HERDR_TASK_STORE" "$SHEEPDOG_WEB_PORT" "$GH_REPO" "$FACTORY_CANARY_TEST"`)
+	if out.Exit != 0 || out.Stdout != "cc= ep= oauth=oauth-kept br=1 herdr= sd= gh= extra=yes" {
 		t.Fatalf("SystemRunCommand env scrub = %+v", out)
+	}
+
+	// WaitDelay bounds Wait when a background child keeps stdout open after exit.
+	start := time.Now()
+	held := SystemRunCommand(context.Background(), tmp, nil, "sh", "-c", "sleep 10 & printf ready")
+	if held.Exit != 0 || !strings.Contains(held.Stdout, "ready") || time.Since(start) > 3*time.Second {
+		t.Fatalf("WaitDelay did not bound held stdout pipe (%s): %+v", time.Since(start), held)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
@@ -602,5 +634,83 @@ func TestSystemRunCommandScrubsEnvAndKillsGroupOnTimeout(t *testing.T) {
 	hang := SystemRunCommand(ctx, tmp, nil, "sh", "-c", "sleep 10")
 	if !hang.TimedOut {
 		t.Fatalf("expected timeout on sleeping child: %+v", hang)
+	}
+}
+
+func TestVolumeSignalExitAndParentFolderAndHCExecCanary(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+
+	// A signal-killed probe terminal (nil ExitCode) must fail, not pass as exit 0.
+	srvSig := hctest.New(t)
+	srvSig.OnRun = func(term hc.Terminal, _ hc.RunParams) {
+		srvSig.Finish(term.Address, "signal")
+	}
+	sigRes := CheckProjectVolume(ctx, DoctorOptions{
+		Folder: tmp, HCSocket: srvSig.Path, GOOS: "linux", TempDir: tmp, VolumeTimeout: time.Second,
+	})
+	if sigRes.Status != onboard.Fail {
+		t.Errorf("signal-killed probe = %+v, want Fail", sigRes)
+	}
+
+	// Probing a not-yet-created child folder names the existing parent that answered,
+	// and default RunCommand executes CLI canaries through herdr-core's machine.exec.
+	newChild := filepath.Join(tmp, "not-created-yet")
+	binDir := t.TempDir()
+	fakeClaude := filepath.Join(binDir, "claude")
+	if err := os.WriteFile(fakeClaude, []byte("#!/bin/sh\nprintf '{\"loggedIn\":true}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	srvExec := hctest.New(t)
+	srvExec.OnRun = func(term hc.Terminal, _ hc.RunParams) {
+		srvExec.FinishExit(term.Address, "exited", 0)
+	}
+	var execCwds []string
+	srvExec.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		execCwds = append(execCwds, p.Cwd)
+		zero := 0
+		return hc.ExecResult{
+			Code:   &zero,
+			Stdout: []byte(`{"subtype":"success","is_error":false,"result":"OK"}`),
+			MS:     15,
+		}, nil
+	}
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+	rs := Doctor(ctx, DoctorOptions{
+		Folder:   newChild,
+		HCSocket: srvExec.Path,
+		Canary:   true,
+		GOOS:     "linux",
+		TempDir:  tmp,
+		LookPath: func(name string) (string, error) {
+			switch name {
+			case "hc":
+				return "/usr/bin/hc", nil
+			case "claude":
+				return fakeClaude, nil
+			}
+			return "", os.ErrNotExist
+		},
+		VolumeTimeout: time.Second,
+		CanaryTimeout: time.Second,
+		AuthTimeout:   time.Second,
+	})
+	vol := findResult(t, rs, "project volume")
+	if vol.Status != onboard.OK || !strings.Contains(vol.Detail, "parent of") {
+		t.Errorf("new child volume = %+v, want parent named", vol)
+	}
+	if cl := findResult(t, rs, "claude"); cl.Status != onboard.OK {
+		t.Errorf("claude via hc exec = %+v", cl)
+	}
+	if !slices.Contains(execCwds, tmp) {
+		t.Errorf("expected canary machine.exec in parent %q, got %v", tmp, execCwds)
+	}
+
+	// cleanReason truncates on rune boundaries rather than splitting multi-byte UTF-8.
+	got := cleanReason(strings.Repeat("界", 200))
+	if strings.ContainsRune(got, '\uFFFD') || len([]rune(got)) != 161 {
+		t.Errorf("cleanReason UTF-8 = len %d runes, valid=%v", len([]rune(got)), !strings.ContainsRune(got, '\uFFFD'))
 	}
 }

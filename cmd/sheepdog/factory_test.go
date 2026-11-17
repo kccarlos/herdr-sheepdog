@@ -96,4 +96,31 @@ func TestFactoryCommandCLI(t *testing.T) {
 			t.Fatalf("code = %d, out = %q", code, out.String())
 		}
 	})
+
+	t.Run("accepts flags after positional folder", func(t *testing.T) {
+		stubResults = []onboard.Result{{Name: "herdr-core", Status: onboard.OK, Detail: "ok"}}
+		sock := filepath.Join(home, "after.sock")
+		proj := filepath.Join(home, "after-repo")
+		var out, errBuf bytes.Buffer
+		code := run(context.Background(), []string{"factory", "doctor", proj, "--no-canary", "--hc-socket", sock}, &out, &errBuf)
+		if code != 0 || gotOpts.Folder != proj || gotOpts.HCSocket != sock || gotOpts.Canary {
+			t.Fatalf("trailing flags: code=%d opts=%+v stderr=%s", code, gotOpts, errBuf.String())
+		}
+	})
+
+	t.Run("broken default config.toml fails instead of silently falling back", func(t *testing.T) {
+		defCfg := filepath.Join(home, ".config", "sheepdog", "config.toml")
+		if err := os.MkdirAll(filepath.Dir(defCfg), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(defCfg, []byte("broken = [\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Remove(defCfg) })
+		var out, errBuf bytes.Buffer
+		code := run(context.Background(), []string{"factory", "doctor"}, &out, &errBuf)
+		if code != 1 || !strings.Contains(out.String(), "FAIL  config") {
+			t.Fatalf("broken default config: code=%d out=%q", code, out.String())
+		}
+	})
 }

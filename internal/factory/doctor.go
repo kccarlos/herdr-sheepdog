@@ -27,15 +27,21 @@ const (
 	defaultVolumeTimeout = 5 * time.Second
 	defaultAuthTimeout   = 10 * time.Second
 	defaultCanaryTimeout = 30 * time.Second
+	defaultWaitDelay     = 500 * time.Millisecond
 	canaryPrompt         = "Reply with OK and nothing else."
-	defaultClaudeCanary  = "claude-haiku-4-5-20251001"
+	defaultClaudeCanary  = "haiku"
 	maxCapturedBytes     = 8 << 10
 )
 
 // probeScript walks up to the nearest existing directory for $1 (without
 // blocking the Go caller first), verifies it is a directory, and exercises
-// chdir + git status / ls from inside an hc terminal.
-const probeScript = `d="$1"; while [ ! -e "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ]; do d=$(dirname "$d"); done; [ -d "$d" ] || exit 2; cd "$d" && (git status --porcelain >/dev/null 2>&1 || ls -a >/dev/null)`
+// chdir + lock-free git status / ls from inside an hc terminal.
+const probeScript = `d="$1"; while [ ! -e "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ]; do d=$(dirname "$d"); done; [ -d "$d" ] || exit 2; cd "$d" && (git --no-optional-locks status --porcelain --untracked-files=no >/dev/null 2>&1 || ls -a >/dev/null)`
+
+// cleanExecScript strips daemon keys and parent Claude Code session markers
+// inside herdr-core's machine.exec while keeping CLAUDE_CODE_* auth/provider
+// settings (matching launch.py's CLEAN_ENV).
+const cleanExecScript = `for v in $(env | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p'); do case "$v" in CLAUDE_CODE_USE_*|CLAUDE_CODE_SKIP_*|CLAUDE_CODE_DISABLE_*|CLAUDE_CODE_ENABLE_*|CLAUDE_CODE_MAX_*|CLAUDE_CODE_OAUTH_*|CLAUDE_CODE_CLIENT_*|CLAUDE_CODE_API_*) ;; HERDR_*|SHEEPDOG_*|GEMINI_API_KEY*|VERTEX_*|DEEPSEEK_API_KEY|OPENAI_ORCH_API_KEY|GH_REPO|CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_*) unset "$v" ;; esac; done; exec "$@"`
 
 // CommandOutput is the captured outcome of one child command run by Doctor.
 type CommandOutput struct {
@@ -52,31 +58,19 @@ type CommandFunc func(ctx context.Context, dir string, extraEnv []string, argv .
 
 // DoctorOptions configures Doctor. Zero values use the current machine's defaults.
 type DoctorOptions struct {
-	// Folder is the target project folder (default ".").
-	Folder string
-	// HCSocket is herdr-core's Unix socket path.
-	HCSocket string
-	// Canary runs a tiny read-only turn on each logged-in agent CLI.
-	Canary bool
-	// GOOS is the operating system ("darwin", "linux"; default runtime.GOOS).
-	GOOS string
-	// Home is the user's home directory (default os.UserHomeDir).
-	Home string
-	// TempDir is a scratch folder on the system disk used as initial cwd for
-	// probes and fallback checks when Folder does not answer (default os.TempDir).
-	TempDir string
-	// GHHost is GH_HOST when set, for recognising enterprise GitHub remotes.
-	GHHost string
-	// LookPath resolves executables on PATH (default exec.LookPath).
-	LookPath func(string) (string, error)
-	// RunCommand executes external CLI commands (default SystemRunCommand).
-	RunCommand CommandFunc
-	// VolumeTimeout bounds each volume probe inside herdr-core (default 5s).
+	Folder        string
+	HCSocket      string
+	Canary        bool
+	ClaudeModel   string
+	GOOS          string
+	Home          string
+	TempDir       string
+	GHHost        string
+	LookPath      func(string) (string, error)
+	RunCommand    CommandFunc
 	VolumeTimeout time.Duration
-	// CanaryTimeout bounds each agent CLI canary start (default 30s).
 	CanaryTimeout time.Duration
-	// AuthTimeout bounds fast CLI status checks (default 10s).
-	AuthTimeout time.Duration
+	AuthTimeout   time.Duration
 }
 
 func (o DoctorOptions) withDefaults() DoctorOptions {
@@ -84,6 +78,9 @@ func (o DoctorOptions) withDefaults() DoctorOptions {
 		o.Folder = "."
 	}
 	o.Folder = filepath.Clean(o.Folder)
+	if o.ClaudeModel == "" {
+		o.ClaudeModel = defaultClaudeCanary
+	}
 	if o.GOOS == "" {
 		o.GOOS = runtime.GOOS
 	}
@@ -114,28 +111,47 @@ func (o DoctorOptions) withDefaults() DoctorOptions {
 	return o
 }
 
+func resOK(name, detail string) onboard.Result {
+	return onboard.Result{Name: name, Status: onboard.OK, Detail: detail}
+}
+
+func resWarn(name, detail, fix string) onboard.Result {
+	return onboard.Result{Name: name, Status: onboard.Warn, Detail: detail, Fix: fix}
+}
+
+func resFail(name, detail, fix string) onboard.Result {
+	return onboard.Result{Name: name, Status: onboard.Fail, Detail: detail, Fix: fix}
+}
+
+func resSkip(name, detail string) onboard.Result {
+	return onboard.Result{Name: name, Status: onboard.Skip, Detail: detail}
+}
+
 // Doctor runs the factory prerequisite checks in fixed order: herdr-core, the
 // timed project-volume probe inside herdr-core, agent CLI logins + canary
-// starts, gh login + pinned default repo, and codexbar.
+// starts (executed inside herdr-core when it is up), gh login + pinned default
+// repo, and codexbar.
 func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
+	customRunner := opts.RunCommand != nil
 	o := opts.withDefaults()
 	var out []onboard.Result
 
 	hcRes := CheckHerdrCore(ctx, o)
 	out = append(out, hcRes)
+	hcOK := hcRes.Status == onboard.OK
 
-	volRes := onboard.Result{
-		Name:   "project volume",
-		Status: onboard.Skip,
-		Detail: "skipped until herdr-core is running",
-	}
-	if hcRes.Status == onboard.OK {
+	volRes := resSkip("project volume", "skipped until herdr-core is running")
+	if hcOK {
 		volRes = CheckProjectVolume(ctx, o)
 	}
 	out = append(out, volRes)
 
 	volumeOK := volRes.Status == onboard.OK
-	out = append(out, CheckAgentCLIs(ctx, o, volumeOK)...)
+	canaryOpt := o
+	if hcOK && !customRunner {
+		canaryOpt.RunCommand = hcExecRunner(o.HCSocket)
+	}
+	out = append(out, checkAgentCLIsWith(ctx, o, canaryOpt.RunCommand, volumeOK)...)
 	out = append(out, CheckGH(ctx, o, volumeOK))
 	out = append(out, CheckCodexbar(ctx, o))
 	return out
@@ -146,40 +162,21 @@ func CheckHerdrCore(ctx context.Context, o DoctorOptions) onboard.Result {
 	o = o.withDefaults()
 	const name = "herdr-core"
 	if _, err := o.LookPath("hc"); err != nil {
-		return onboard.Result{
-			Name:   name,
-			Status: onboard.Fail,
-			Detail: "hc is not on PATH",
-			Fix:    "install herdr-core from https://herdr.dev so hc is on PATH",
-		}
+		return resFail(name, "hc is not on PATH", "install herdr-core from https://herdr.dev so hc is on PATH")
 	}
 	client := hc.NewClient(o.HCSocket)
 	client.Timeout = o.AuthTimeout
 	hello, err := client.Hello(ctx)
 	if err != nil {
-		return onboard.Result{
-			Name:   name,
-			Status: onboard.Fail,
-			Detail: fmt.Sprintf("hc is on PATH, but socket %s does not answer", o.HCSocket),
-			Fix:    "run: hc server start (or set herdr.hc_socket / SHEEPDOG_HC_SOCKET)",
-		}
+		return resFail(name, fmt.Sprintf("hc is on PATH, but socket %s does not answer", o.HCSocket),
+			"run: hc server start (or set herdr.hc_socket / SHEEPDOG_HC_SOCKET)")
 	}
-	ver := strings.TrimSpace(hello.Version)
-	if ver != "" {
-		return onboard.Result{
-			Name:   name,
-			Status: onboard.OK,
-			Detail: fmt.Sprintf("hc on PATH; socket %s answers (v%s)", o.HCSocket, ver),
-		}
+	if ver := strings.TrimSpace(hello.Version); ver != "" {
+		return resOK(name, fmt.Sprintf("hc on PATH; socket %s answers (v%s)", o.HCSocket, ver))
 	}
-	return onboard.Result{
-		Name:   name,
-		Status: onboard.OK,
-		Detail: fmt.Sprintf("hc on PATH; socket %s answers", o.HCSocket),
-	}
+	return resOK(name, fmt.Sprintf("hc on PATH; socket %s answers", o.HCSocket))
 }
 
-// probeOutcome is what one timed terminal probe inside herdr-core observed.
 type probeOutcome struct {
 	exitCode int
 	timedOut bool
@@ -198,54 +195,32 @@ func CheckProjectVolume(ctx context.Context, o DoctorOptions) onboard.Result {
 
 	res := probeFolderInHC(ctx, client, o.TempDir, o.Folder, o.VolumeTimeout)
 	if res.err != nil {
-		return onboard.Result{
-			Name:   name,
-			Status: onboard.Fail,
-			Detail: fmt.Sprintf("could not start probe inside herdr-core: %s", cleanReason(res.err.Error())),
-			Fix:    "run: hc server restart, then run sheepdog factory doctor again",
-		}
+		return resFail(name, fmt.Sprintf("could not probe inside herdr-core: %s", cleanReason(res.err.Error())),
+			"run: hc server restart, then run sheepdog factory doctor again")
 	}
 	if !res.timedOut {
 		switch res.exitCode {
 		case 0:
 			ms := res.duration.Milliseconds()
+			targetDesc := o.Folder
+			if probed := existingDir(o.Folder, ""); probed != "" && probed != o.Folder {
+				targetDesc = fmt.Sprintf("%s (parent of %s)", probed, o.Folder)
+			}
 			if o.GOOS == "darwin" {
 				if vol := externalVolume(o.Folder); vol != "" {
-					return onboard.Result{
-						Name:   name,
-						Status: onboard.OK,
-						Detail: fmt.Sprintf("%s answered inside herdr-core (%dms; external volume %s — internal disk is safer overnight)", o.Folder, ms, vol),
-					}
+					return resOK(name, fmt.Sprintf("%s answered inside herdr-core (%dms; external volume %s — internal disk is safer overnight)", targetDesc, ms, vol))
 				}
 			}
-			return onboard.Result{
-				Name:   name,
-				Status: onboard.OK,
-				Detail: fmt.Sprintf("%s answered inside herdr-core (%dms)", o.Folder, ms),
-			}
+			return resOK(name, fmt.Sprintf("%s answered inside herdr-core (%dms)", targetDesc, ms))
 		case 2:
-			return onboard.Result{
-				Name:   name,
-				Status: onboard.Fail,
-				Detail: fmt.Sprintf("%s is not a directory", o.Folder),
-				Fix:    "pass a project folder path",
-			}
+			return resFail(name, fmt.Sprintf("%s is not a directory", o.Folder), "pass a project folder path")
 		default:
 			if o.GOOS == "darwin" {
 				prompt, fix := consentPrompt(o.Home, o.Folder)
-				return onboard.Result{
-					Name:   name,
-					Status: onboard.Fail,
-					Detail: fmt.Sprintf("herdr-core was denied access to %s (%s)", o.Folder, prompt),
-					Fix:    fix,
-				}
+				return resFail(name, fmt.Sprintf("herdr-core was denied access to %s (%s)", o.Folder, prompt), fix)
 			}
-			return onboard.Result{
-				Name:   name,
-				Status: onboard.Fail,
-				Detail: fmt.Sprintf("herdr-core could not read %s (exit %d)", o.Folder, res.exitCode),
-				Fix:    fmt.Sprintf("check directory permissions and mount status for %s", o.Folder),
-			}
+			return resFail(name, fmt.Sprintf("herdr-core could not read %s (exit %d)", o.Folder, res.exitCode),
+				fmt.Sprintf("check directory permissions and mount status for %s", o.Folder))
 		}
 	}
 
@@ -255,26 +230,17 @@ func CheckProjectVolume(ctx context.Context, o DoctorOptions) onboard.Result {
 	if tmpRes.err == nil && !tmpRes.timedOut && tmpRes.exitCode == 0 {
 		if o.GOOS == "darwin" {
 			prompt, fix := consentPrompt(o.Home, o.Folder)
-			return onboard.Result{
-				Name:   name,
-				Status: onboard.Fail,
-				Detail: fmt.Sprintf("%s did not answer inside herdr-core within %s while %s did: disk stall or a %s permission prompt may be waiting", o.Folder, o.VolumeTimeout, o.TempDir, prompt),
-				Fix:    fmt.Sprintf("click Allow on the waiting %s prompt on this Mac, or %s", prompt, fix),
-			}
+			return resFail(name,
+				fmt.Sprintf("%s did not answer inside herdr-core within %s while %s did: disk stall or a %s permission prompt may be waiting", o.Folder, o.VolumeTimeout, o.TempDir, prompt),
+				fmt.Sprintf("click Allow on the waiting %s prompt on this Mac, or %s", prompt, fix))
 		}
-		return onboard.Result{
-			Name:   name,
-			Status: onboard.Fail,
-			Detail: fmt.Sprintf("%s did not answer inside herdr-core within %s while %s did: the disk or mount is stalling", o.Folder, o.VolumeTimeout, o.TempDir),
-			Fix:    fmt.Sprintf("check the disk or network mount backing %s", o.Folder),
-		}
+		return resFail(name,
+			fmt.Sprintf("%s did not answer inside herdr-core within %s while %s did: the disk or mount is stalling", o.Folder, o.VolumeTimeout, o.TempDir),
+			fmt.Sprintf("check the disk or network mount backing %s", o.Folder))
 	}
-	return onboard.Result{
-		Name:   name,
-		Status: onboard.Fail,
-		Detail: fmt.Sprintf("both %s and %s timed out inside herdr-core (%s)", o.Folder, o.TempDir, o.VolumeTimeout),
-		Fix:    "restart herdr-core (hc server restart) and check system load",
-	}
+	return resFail(name,
+		fmt.Sprintf("both %s and %s timed out inside herdr-core (%s)", o.Folder, o.TempDir, o.VolumeTimeout),
+		"restart herdr-core (hc server restart) and check system load")
 }
 
 func probeFolderInHC(ctx context.Context, client *hc.Client, tempDir, target string, timeout time.Duration) probeOutcome {
@@ -313,7 +279,7 @@ func probeFolderInHC(ctx context.Context, client *hc.Client, tempDir, target str
 			cur, gerr := client.Get(probeCtx, t.Address)
 			if gerr != nil {
 				if errors.Is(gerr, hc.ErrNotFound) {
-					return probeOutcome{exitCode: 0, duration: time.Since(start)}
+					return probeOutcome{err: gerr, duration: time.Since(start)}
 				}
 				if probeCtx.Err() != nil && ctx.Err() == nil {
 					return probeOutcome{timedOut: true, duration: time.Since(start)}
@@ -327,8 +293,6 @@ func probeFolderInHC(ctx context.Context, client *hc.Client, tempDir, target str
 	}
 }
 
-// cleanupHCTerminal kills (if still running) and removes a probe terminal so
-// doctor leaves nothing in `hc ls --all`.
 func cleanupHCTerminal(client *hc.Client, address string) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -347,29 +311,24 @@ func cleanupHCTerminal(client *hc.Client, address string) {
 
 func derefExit(code *int) int {
 	if code == nil {
-		return 0
+		return -1
 	}
 	return *code
 }
 
-// externalVolume returns "/Volumes/<Name>" when path is on a mounted volume
-// under /Volumes, else "".
 func externalVolume(path string) string {
 	clean := filepath.Clean(path)
 	const prefix = "/Volumes/"
 	if !strings.HasPrefix(clean, prefix) {
 		return ""
 	}
-	rest := clean[len(prefix):]
-	vol, _, _ := strings.Cut(rest, "/")
+	vol, _, _ := strings.Cut(clean[len(prefix):], "/")
 	if vol == "" {
 		return ""
 	}
 	return prefix + vol
 }
 
-// consentPrompt names the specific macOS Privacy & Security consent prompt
-// that guards target and returns its one-line fix.
 func consentPrompt(home, target string) (prompt, fix string) {
 	clean := filepath.Clean(target)
 	if vol := externalVolume(clean); vol != "" {
@@ -378,17 +337,12 @@ func consentPrompt(home, target string) (prompt, fix string) {
 	}
 	if home != "" {
 		cleanHome := filepath.Clean(home)
-		protected := []struct {
-			rel   string
-			label string
-			pane  string
-		}{
+		for _, p := range []struct{ rel, label, pane string }{
 			{"Documents", "macOS Documents folder", "Documents"},
 			{"Desktop", "macOS Desktop folder", "Desktop"},
 			{"Downloads", "macOS Downloads folder", "Downloads"},
 			{filepath.Join("Library", "Mobile Documents"), "macOS iCloud Drive", "iCloud Drive"},
-		}
-		for _, p := range protected {
+		} {
 			root := filepath.Join(cleanHome, p.rel)
 			if clean == root || strings.HasPrefix(clean, root+string(filepath.Separator)) {
 				return p.label, fmt.Sprintf("allow herdr-core in System Settings ▸ Privacy & Security ▸ Files and Folders ▸ %s (or Full Disk Access)", p.pane)
@@ -405,6 +359,7 @@ const (
 	cliMissing cliProbeState = iota
 	cliSignedOut
 	cliCanaryFailed
+	cliCanaryTimedOut
 	cliReady
 )
 
@@ -416,15 +371,19 @@ type cliOutcome struct {
 
 // CheckAgentCLIs checks claude, codex and agy in parallel and appends the
 // `agent clis` gate: at least one CLI must be logged in and pass its canary
-// start (unless o.Canary is false).
+// start (unless o.Canary is false), and no logged-in CLI may hang on a prompt.
 func CheckAgentCLIs(ctx context.Context, o DoctorOptions, volumeOK bool) []onboard.Result {
 	o = o.withDefaults()
+	return checkAgentCLIsWith(ctx, o, o.RunCommand, volumeOK)
+}
+
+func checkAgentCLIsWith(ctx context.Context, o DoctorOptions, canaryRun CommandFunc, volumeOK bool) []onboard.Result {
 	canaryDir := o.TempDir
 	if volumeOK {
 		canaryDir = existingDir(o.Folder, o.TempDir)
 	}
 
-	checks := []func(context.Context, DoctorOptions, string) cliOutcome{
+	checks := []func(context.Context, DoctorOptions, CommandFunc, string) cliOutcome{
 		checkClaude,
 		checkCodex,
 		checkAgy,
@@ -433,9 +392,9 @@ func CheckAgentCLIs(ctx context.Context, o DoctorOptions, volumeOK bool) []onboa
 	var wg sync.WaitGroup
 	for i, fn := range checks {
 		wg.Add(1)
-		go func(idx int, check func(context.Context, DoctorOptions, string) cliOutcome) {
+		go func(idx int, check func(context.Context, DoctorOptions, CommandFunc, string) cliOutcome) {
 			defer wg.Done()
-			outcomes[idx] = check(ctx, o, canaryDir)
+			outcomes[idx] = check(ctx, o, canaryRun, canaryDir)
 		}(i, fn)
 	}
 	wg.Wait()
@@ -443,6 +402,7 @@ func CheckAgentCLIs(ctx context.Context, o DoctorOptions, volumeOK bool) []onboa
 	var (
 		out       = make([]onboard.Result, 0, len(outcomes)+1)
 		ready     []string
+		timedOut  []string
 		installed int
 		loggedIn  int
 	)
@@ -451,83 +411,58 @@ func CheckAgentCLIs(ctx context.Context, o DoctorOptions, volumeOK bool) []onboa
 		if oc.state != cliMissing {
 			installed++
 		}
-		if oc.state == cliCanaryFailed || oc.state == cliReady {
+		if oc.state >= cliCanaryFailed {
 			loggedIn++
+		}
+		if oc.state == cliCanaryTimedOut {
+			timedOut = append(timedOut, oc.name)
 		}
 		if oc.state == cliReady {
 			ready = append(ready, oc.name)
 		}
 	}
 
-	if len(ready) > 0 {
-		out = append(out, onboard.Result{
-			Name:   "agent clis",
-			Status: onboard.OK,
-			Detail: fmt.Sprintf("%d ready (%s)", len(ready), strings.Join(ready, ", ")),
-		})
-		return out
-	}
-
 	switch {
+	case len(timedOut) > 0:
+		out = append(out, resFail("agent clis",
+			fmt.Sprintf("canary start timed out for %s (a consent or first-run prompt may be waiting)", strings.Join(timedOut, ", ")),
+			"resolve the timed-out CLI prompt above and run sheepdog factory doctor again"))
+	case len(ready) > 0:
+		out = append(out, resOK("agent clis", fmt.Sprintf("%d ready (%s)", len(ready), strings.Join(ready, ", "))))
 	case installed == 0:
-		out = append(out, onboard.Result{
-			Name:   "agent clis",
-			Status: onboard.Fail,
-			Detail: "no agent CLI (claude, codex, agy) found on PATH",
-			Fix:    "install claude, codex or agy and sign in (one CLI is enough)",
-		})
+		out = append(out, resFail("agent clis", "no agent CLI (claude, codex, agy) found on PATH",
+			"install claude, codex or agy and sign in (one CLI is enough)"))
 	case loggedIn == 0:
-		out = append(out, onboard.Result{
-			Name:   "agent clis",
-			Status: onboard.Fail,
-			Detail: "no agent CLI is logged in",
-			Fix:    "sign in to at least one CLI: claude auth login, codex login, or agy",
-		})
+		out = append(out, resFail("agent clis", "no agent CLI is logged in",
+			"sign in to at least one CLI: claude auth login, codex login, or agy"))
 	default:
-		out = append(out, onboard.Result{
-			Name:   "agent clis",
-			Status: onboard.Fail,
-			Detail: "no logged-in agent CLI passed its canary start",
-			Fix:    "fix at least one agent CLI above and run sheepdog factory doctor again",
-		})
+		out = append(out, resFail("agent clis", "no logged-in agent CLI passed its canary start",
+			"fix at least one agent CLI above and run sheepdog factory doctor again"))
 	}
 	return out
 }
 
-func checkClaude(ctx context.Context, o DoctorOptions, canaryDir string) cliOutcome {
+func checkClaude(ctx context.Context, o DoctorOptions, canaryRun CommandFunc, canaryDir string) cliOutcome {
 	const name = "claude"
 	if _, err := o.LookPath(name); err != nil {
-		return cliOutcome{name: name, state: cliMissing, result: onboard.Result{Name: name, Status: onboard.Skip, Detail: "not on PATH"}}
+		return cliOutcome{name: name, state: cliMissing, result: resSkip(name, "not on PATH")}
 	}
 	env := []string{"DISABLE_AUTOUPDATER=1"}
 	authCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	authOut := o.RunCommand(authCtx, o.TempDir, env, "claude", "auth", "status", "--json")
 	cancel()
 	if !claudeLoggedIn(authOut) {
-		return cliOutcome{
-			name:  name,
-			state: cliSignedOut,
-			result: onboard.Result{
-				Name:   name,
-				Status: onboard.Warn,
-				Detail: "installed, not logged in",
-				Fix:    "run: claude auth login",
-			},
-		}
+		return cliOutcome{name: name, state: cliSignedOut, result: resWarn(name, "installed, not logged in", "run: claude auth login")}
 	}
 	if !o.Canary {
-		return cliOutcome{
-			name:   name,
-			state:  cliReady,
-			result: onboard.Result{Name: name, Status: onboard.OK, Detail: "logged in (canary skipped)"},
-		}
+		return cliOutcome{name: name, state: cliReady, result: resOK(name, "logged in (canary skipped)")}
 	}
 	cCtx, cCancel := context.WithTimeout(ctx, o.CanaryTimeout)
 	defer cCancel()
-	cOut := o.RunCommand(cCtx, canaryDir, env,
+	cOut := canaryRun(cCtx, canaryDir, env,
 		"claude", "-p", canaryPrompt,
 		"--no-session-persistence",
-		"--model", defaultClaudeCanary,
+		"--model", o.ClaudeModel,
 		"--tools", "",
 		"--strict-mcp-config",
 		"--setting-sources", "user",
@@ -538,29 +473,12 @@ func checkClaude(ctx context.Context, o DoctorOptions, canaryDir string) cliOutc
 		"--max-budget-usd", "0.05",
 	)
 	if cOut.TimedOut && ctx.Err() == nil {
-		return cliOutcome{name: name, state: cliCanaryFailed, result: canaryTimeoutResult(name, o, canaryDir)}
+		return cliOutcome{name: name, state: cliCanaryTimedOut, result: canaryTimeoutResult(name, o, canaryDir)}
 	}
 	if errMsg := claudeCanaryError(cOut); errMsg != "" {
-		return cliOutcome{
-			name:  name,
-			state: cliCanaryFailed,
-			result: onboard.Result{
-				Name:   name,
-				Status: onboard.Warn,
-				Detail: "logged in, but canary start failed: " + errMsg,
-				Fix:    "run claude once in a terminal to check login and quota",
-			},
-		}
+		return cliOutcome{name: name, state: cliCanaryFailed, result: resWarn(name, "logged in, but canary start failed: "+errMsg, "run claude once in a terminal to check login and quota")}
 	}
-	return cliOutcome{
-		name:  name,
-		state: cliReady,
-		result: onboard.Result{
-			Name:   name,
-			Status: onboard.OK,
-			Detail: fmt.Sprintf("logged in; canary start ok (%dms)", cOut.Duration.Milliseconds()),
-		},
-	}
+	return cliOutcome{name: name, state: cliReady, result: resOK(name, fmt.Sprintf("logged in; canary start ok (%dms)", cOut.Duration.Milliseconds()))}
 }
 
 func claudeLoggedIn(out CommandOutput) bool {
@@ -607,37 +525,24 @@ func claudeCanaryError(out CommandOutput) string {
 	return ""
 }
 
-func checkCodex(ctx context.Context, o DoctorOptions, canaryDir string) cliOutcome {
+func checkCodex(ctx context.Context, o DoctorOptions, canaryRun CommandFunc, canaryDir string) cliOutcome {
 	const name = "codex"
 	if _, err := o.LookPath(name); err != nil {
-		return cliOutcome{name: name, state: cliMissing, result: onboard.Result{Name: name, Status: onboard.Skip, Detail: "not on PATH"}}
+		return cliOutcome{name: name, state: cliMissing, result: resSkip(name, "not on PATH")}
 	}
 	authCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	authOut := o.RunCommand(authCtx, o.TempDir, nil, "codex", "login", "status")
 	cancel()
 	combined := strings.ToLower(authOut.Stdout + "\n" + authOut.Stderr)
 	if authOut.Err != nil || authOut.TimedOut || authOut.Exit != 0 || strings.Contains(combined, "not logged in") {
-		return cliOutcome{
-			name:  name,
-			state: cliSignedOut,
-			result: onboard.Result{
-				Name:   name,
-				Status: onboard.Warn,
-				Detail: "installed, not logged in",
-				Fix:    "run: codex login",
-			},
-		}
+		return cliOutcome{name: name, state: cliSignedOut, result: resWarn(name, "installed, not logged in", "run: codex login")}
 	}
 	if !o.Canary {
-		return cliOutcome{
-			name:   name,
-			state:  cliReady,
-			result: onboard.Result{Name: name, Status: onboard.OK, Detail: "logged in (canary skipped)"},
-		}
+		return cliOutcome{name: name, state: cliReady, result: resOK(name, "logged in (canary skipped)")}
 	}
 	cCtx, cCancel := context.WithTimeout(ctx, o.CanaryTimeout)
 	defer cCancel()
-	cOut := o.RunCommand(cCtx, canaryDir, nil,
+	cOut := canaryRun(cCtx, canaryDir, nil,
 		"codex", "exec",
 		"--ephemeral",
 		"--sandbox", "read-only",
@@ -650,30 +555,13 @@ func checkCodex(ctx context.Context, o DoctorOptions, canaryDir string) cliOutco
 		canaryPrompt,
 	)
 	if cOut.TimedOut && ctx.Err() == nil {
-		return cliOutcome{name: name, state: cliCanaryFailed, result: canaryTimeoutResult(name, o, canaryDir)}
+		return cliOutcome{name: name, state: cliCanaryTimedOut, result: canaryTimeoutResult(name, o, canaryDir)}
 	}
 	if cOut.Err != nil || cOut.Exit != 0 {
 		why := cleanReason(firstNonEmpty(codexErrorText(cOut.Stdout), cOut.Stderr, cOut.Stdout, fmt.Sprintf("exit %d", cOut.Exit)))
-		return cliOutcome{
-			name:  name,
-			state: cliCanaryFailed,
-			result: onboard.Result{
-				Name:   name,
-				Status: onboard.Warn,
-				Detail: "logged in, but canary start failed: " + why,
-				Fix:    "run codex once in a terminal to check login and quota",
-			},
-		}
+		return cliOutcome{name: name, state: cliCanaryFailed, result: resWarn(name, "logged in, but canary start failed: "+why, "run codex once in a terminal to check login and quota")}
 	}
-	return cliOutcome{
-		name:  name,
-		state: cliReady,
-		result: onboard.Result{
-			Name:   name,
-			Status: onboard.OK,
-			Detail: fmt.Sprintf("logged in; canary start ok (%dms)", cOut.Duration.Milliseconds()),
-		},
-	}
+	return cliOutcome{name: name, state: cliReady, result: resOK(name, fmt.Sprintf("logged in; canary start ok (%dms)", cOut.Duration.Milliseconds()))}
 }
 
 func codexErrorText(stdout string) string {
@@ -704,33 +592,20 @@ func codexErrorText(stdout string) string {
 
 var agyModelIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
-func checkAgy(ctx context.Context, o DoctorOptions, canaryDir string) cliOutcome {
+func checkAgy(ctx context.Context, o DoctorOptions, canaryRun CommandFunc, canaryDir string) cliOutcome {
 	const name = "agy"
 	if _, err := o.LookPath(name); err != nil {
-		return cliOutcome{name: name, state: cliMissing, result: onboard.Result{Name: name, Status: onboard.Skip, Detail: "not on PATH"}}
+		return cliOutcome{name: name, state: cliMissing, result: resSkip(name, "not on PATH")}
 	}
 	authCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	authOut := o.RunCommand(authCtx, o.TempDir, nil, "agy", "models")
 	cancel()
 	models := parseAgyModels(authOut.Stdout)
 	if authOut.Err != nil || authOut.TimedOut || authOut.Exit != 0 || len(models) == 0 {
-		return cliOutcome{
-			name:  name,
-			state: cliSignedOut,
-			result: onboard.Result{
-				Name:   name,
-				Status: onboard.Warn,
-				Detail: "installed, not logged in",
-				Fix:    "run agy without arguments and sign in",
-			},
-		}
+		return cliOutcome{name: name, state: cliSignedOut, result: resWarn(name, "installed, not logged in", "run agy without arguments and sign in")}
 	}
 	if !o.Canary {
-		return cliOutcome{
-			name:   name,
-			state:  cliReady,
-			result: onboard.Result{Name: name, Status: onboard.OK, Detail: "logged in (canary skipped)"},
-		}
+		return cliOutcome{name: name, state: cliReady, result: resOK(name, "logged in (canary skipped)")}
 	}
 	model := pickAgyCanaryModel(models)
 	settingsBytes, _ := json.Marshal(map[string]any{
@@ -739,44 +614,25 @@ func checkAgy(ctx context.Context, o DoctorOptions, canaryDir string) cliOutcome
 	})
 	cCtx, cCancel := context.WithTimeout(ctx, o.CanaryTimeout)
 	defer cCancel()
-	cOut := o.RunCommand(cCtx, canaryDir, nil,
+	cOut := canaryRun(cCtx, canaryDir, nil,
 		"agy",
 		"--mode", "plan",
 		"--disable-slash-commands",
 		"--model", model,
 		"--settings", string(settingsBytes),
 		"--print-timeout", "25s",
-		"-p", canaryPrompt,
+		"-p="+canaryPrompt,
 	)
 	if cOut.TimedOut && ctx.Err() == nil {
-		return cliOutcome{name: name, state: cliCanaryFailed, result: canaryTimeoutResult(name, o, canaryDir)}
+		return cliOutcome{name: name, state: cliCanaryTimedOut, result: canaryTimeoutResult(name, o, canaryDir)}
 	}
 	if cOut.Err != nil || cOut.Exit != 0 {
 		why := cleanReason(firstNonEmpty(cOut.Stderr, cOut.Stdout, fmt.Sprintf("exit %d", cOut.Exit)))
-		return cliOutcome{
-			name:  name,
-			state: cliCanaryFailed,
-			result: onboard.Result{
-				Name:   name,
-				Status: onboard.Warn,
-				Detail: "logged in, but canary start failed: " + why,
-				Fix:    "run agy once in a terminal to check sign-in and quota",
-			},
-		}
+		return cliOutcome{name: name, state: cliCanaryFailed, result: resWarn(name, "logged in, but canary start failed: "+why, "run agy once in a terminal to check sign-in and quota")}
 	}
-	return cliOutcome{
-		name:  name,
-		state: cliReady,
-		result: onboard.Result{
-			Name:   name,
-			Status: onboard.OK,
-			Detail: fmt.Sprintf("logged in; canary start ok (%s, %dms)", model, cOut.Duration.Milliseconds()),
-		},
-	}
+	return cliOutcome{name: name, state: cliReady, result: resOK(name, fmt.Sprintf("logged in; canary start ok (%s, %dms)", model, cOut.Duration.Milliseconds()))}
 }
 
-// parseAgyModels extracts model ids from `agy models` stdout, stripping any
-// leading carriage-return progress spinner frames on the first line.
 func parseAgyModels(stdout string) []string {
 	var models []string
 	for _, line := range strings.Split(stdout, "\n") {
@@ -795,19 +651,15 @@ func parseAgyModels(stdout string) []string {
 	return models
 }
 
-// pickAgyCanaryModel chooses the lightest native Gemini model listed by `agy
-// models` so the canary avoids 3P Claude/GPT quota pools on Antigravity and
-// adapts automatically when model versions advance.
 func pickAgyCanaryModel(models []string) string {
-	matchers := []func(string) bool{
+	for _, match := range []func(string) bool{
 		func(m string) bool {
 			return strings.HasPrefix(m, "gemini") && strings.Contains(m, "flash") && strings.HasSuffix(m, "-low")
 		},
 		func(m string) bool { return strings.HasPrefix(m, "gemini") && strings.Contains(m, "flash") },
 		func(m string) bool { return strings.HasPrefix(m, "gemini") && strings.HasSuffix(m, "-low") },
 		func(m string) bool { return strings.HasPrefix(m, "gemini") },
-	}
-	for _, match := range matchers {
+	} {
 		for _, m := range models {
 			if match(m) {
 				return m
@@ -819,120 +671,156 @@ func pickAgyCanaryModel(models []string) string {
 
 func canaryTimeoutResult(cliName string, o DoctorOptions, canaryDir string) onboard.Result {
 	if o.GOOS == "darwin" {
-		prompt, _ := consentPrompt(o.Home, canaryDir)
-		return onboard.Result{
-			Name:   cliName,
-			Status: onboard.Fail,
-			Detail: fmt.Sprintf("logged in, but canary start timed out after %s (a %s prompt or first-run dialog may be waiting)", o.CanaryTimeout, prompt),
-			Fix:    fmt.Sprintf("click Allow on any macOS prompt for %s, or run %s once in %s", cliName, cliName, canaryDir),
+		prompt, fix := consentPrompt(o.Home, canaryDir)
+		return resFail(cliName,
+			fmt.Sprintf("logged in, but canary start inside herdr-core timed out after %s (a %s prompt or first-run dialog may be waiting)", o.CanaryTimeout, prompt),
+			fmt.Sprintf("click Allow on any waiting %s prompt on this Mac, or %s", prompt, fix))
+	}
+	return resFail(cliName,
+		fmt.Sprintf("logged in, but canary start timed out after %s", o.CanaryTimeout),
+		fmt.Sprintf("run %s once in %s and check network access", cliName, canaryDir))
+}
+
+// hcExecRunner runs a canary command inside herdr-core (machine.exec) so macOS
+// attributes file-access consent prompts to herdr-core (as factory workers do)
+// without opening a visible terminal pane.
+func hcExecRunner(socket string) CommandFunc {
+	return func(ctx context.Context, dir string, extraEnv []string, argv ...string) CommandOutput {
+		start := time.Now()
+		sec := defaultCanaryTimeout.Seconds()
+		if dl, ok := ctx.Deadline(); ok {
+			if rem := time.Until(dl).Seconds(); rem > 0 {
+				sec = rem
+			}
+		}
+		envMap := forwardedAuthEnv(os.Environ(), extraEnv)
+		client := hc.NewClient(socket)
+		res, err := client.Exec(ctx, hc.ExecParams{
+			Argv:    append([]string{"sh", "-c", cleanExecScript, "sh"}, argv...),
+			Cwd:     dir,
+			Env:     envMap,
+			Timeout: &sec,
+		})
+		dur := time.Since(start)
+		if res.MS > 0 {
+			dur = time.Duration(res.MS) * time.Millisecond
+		}
+		if err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return CommandOutput{Exit: -1, TimedOut: true, Duration: dur}
+			}
+			return CommandOutput{Exit: -1, Duration: dur, Err: err}
+		}
+		exit := -1
+		if res.Code != nil {
+			exit = *res.Code
+		}
+		return CommandOutput{
+			Stdout:   truncateBytes(res.Stdout, maxCapturedBytes),
+			Stderr:   truncateBytes(res.Stderr, maxCapturedBytes),
+			Exit:     exit,
+			TimedOut: res.TimedOut,
+			Duration: dur,
 		}
 	}
-	return onboard.Result{
-		Name:   cliName,
-		Status: onboard.Fail,
-		Detail: fmt.Sprintf("logged in, but canary start timed out after %s", o.CanaryTimeout),
-		Fix:    fmt.Sprintf("run %s once in %s and check network access", cliName, canaryDir),
+}
+
+func forwardedAuthEnv(environ, extraEnv []string) map[string]string {
+	m := map[string]string{}
+	for _, kv := range environ {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		if k == "PATH" || k == "ANTHROPIC_API_KEY" || k == "OPENAI_API_KEY" || k == "CLAUDE_CONFIG_DIR" || k == "CODEX_HOME" || isClaudeAuthEnv(k) {
+			m[k] = v
+		}
 	}
+	for _, kv := range extraEnv {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			m[k] = v
+		}
+	}
+	return m
 }
 
 // CheckGH checks that `gh` is on PATH, authenticated, and — when the target
 // folder has a GitHub push remote — that `gh repo set-default` is pinned to
-// that push remote so an `upstream` remote cannot redirect PRs (field note 33).
+// that push remote so an `upstream` or `github` remote cannot redirect PRs.
 func CheckGH(ctx context.Context, o DoctorOptions, volumeOK bool) onboard.Result {
 	o = o.withDefaults()
 	const name = "gh"
 	if _, err := o.LookPath("gh"); err != nil {
-		return onboard.Result{
-			Name:   name,
-			Status: onboard.Warn,
-			Detail: "gh is not on PATH (local-merge mode only)",
-			Fix:    "install GitHub CLI (https://cli.github.com) and run gh auth login",
-		}
+		return resWarn(name, "gh is not on PATH (local-merge mode only)", "install GitHub CLI (https://cli.github.com) and run gh auth login")
 	}
 	authCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	authOut := o.RunCommand(authCtx, o.TempDir, nil, "gh", "auth", "status")
 	cancel()
 	if authOut.Err != nil || authOut.TimedOut || authOut.Exit != 0 {
-		return onboard.Result{
-			Name:   name,
-			Status: onboard.Warn,
-			Detail: "gh is not logged in (local-merge mode only)",
-			Fix:    "run: gh auth login",
-		}
+		return resWarn(name, "gh is not logged in (local-merge mode only)", "run: gh auth login")
 	}
 	if !volumeOK {
-		return onboard.Result{
-			Name:   name,
-			Status: onboard.OK,
-			Detail: "logged in (repo pin check skipped until project volume answers)",
-		}
+		return resOK(name, "logged in (repo pin check skipped until project volume answers)")
 	}
 
 	repoRoot := gitLine(ctx, o, o.Folder, "rev-parse", "--show-toplevel")
 	if repoRoot == "" {
-		return onboard.Result{
-			Name:   name,
-			Status: onboard.Warn,
-			Detail: fmt.Sprintf("logged in; %s is not a git repo yet (local-merge mode only)", o.Folder),
-			Fix:    "initialize git, add a GitHub origin remote and run gh repo set-default <owner/repo>",
-		}
+		return resWarn(name, fmt.Sprintf("logged in; %s is not a git repo yet (local-merge mode only)", o.Folder),
+			"initialize git, add a GitHub origin remote and run gh repo set-default <owner/repo>")
 	}
 
-	remotesRaw := gitOut(ctx, o, o.Folder, "remote")
-	remotes := strings.Fields(remotesRaw)
+	remotes := strings.Fields(gitOut(ctx, o, o.Folder, "remote"))
 	pushRemote := resolvePushRemote(ctx, o, o.Folder, remotes)
 	slug := resolveRemoteSlug(ctx, o, o.Folder, pushRemote)
 	if slug == "" {
-		return onboard.Result{
-			Name:   name,
-			Status: onboard.Warn,
-			Detail: fmt.Sprintf("logged in; no GitHub push remote in %s (local-merge mode only)", repoRoot),
-			Fix:    fmt.Sprintf("add a GitHub origin remote and run in %s: gh repo set-default <owner/repo>", repoRoot),
-		}
+		return resWarn(name, fmt.Sprintf("logged in; no GitHub push remote in %s (local-merge mode only)", repoRoot),
+			fmt.Sprintf("add a GitHub origin remote and run in %s: gh repo set-default <owner/repo>", repoRoot))
 	}
 
 	vCtx, vCancel := context.WithTimeout(ctx, o.AuthTimeout)
 	viewOut := o.RunCommand(vCtx, o.Folder, nil, "gh", "repo", "set-default", "--view")
 	vCancel()
+	combinedLower := strings.ToLower(viewOut.Stderr + "\n" + viewOut.Stdout)
+	if viewOut.Err != nil || viewOut.TimedOut || (viewOut.Exit != 0 && !strings.Contains(combinedLower, "no default")) {
+		why := cleanReason(firstNonEmpty(errText(viewOut.Err), viewOut.Stderr, viewOut.Stdout, "timed out"))
+		return resWarn(name, fmt.Sprintf("logged in, but could not check default repo in %s: %s", repoRoot, why),
+			fmt.Sprintf("run in %s: gh repo set-default %s", repoRoot, slug))
+	}
+
 	pinned := strings.TrimSpace(firstLine(viewOut.Stdout))
-	hasUpstream := slices.Contains(remotes, "upstream") && pushRemote != "upstream"
+	hijackRemote := ambiguousGHRemote(remotes, pushRemote)
 
 	switch {
-	case pinned == "" && hasUpstream:
-		return onboard.Result{
-			Name:   name,
-			Status: onboard.Fail,
-			Detail: fmt.Sprintf("logged in, but default repo is not pinned while remote upstream exists (gh would target upstream instead of %s)", slug),
-			Fix:    fmt.Sprintf("run in %s: gh repo set-default %s", repoRoot, slug),
-		}
+	case pinned == "" && hijackRemote != "":
+		return resFail(name,
+			fmt.Sprintf("logged in, but default repo is not pinned while remote %s exists (gh would target %s instead of %s)", hijackRemote, hijackRemote, slug),
+			fmt.Sprintf("run in %s: gh repo set-default %s", repoRoot, slug))
 	case pinned == "":
-		return onboard.Result{
-			Name:   name,
-			Status: onboard.Warn,
-			Detail: fmt.Sprintf("logged in, but default repo is not pinned for %s", slug),
-			Fix:    fmt.Sprintf("run in %s: gh repo set-default %s", repoRoot, slug),
-		}
+		return resWarn(name, fmt.Sprintf("logged in, but default repo is not pinned for %s", slug),
+			fmt.Sprintf("run in %s: gh repo set-default %s", repoRoot, slug))
 	case !strings.EqualFold(pinned, slug):
-		return onboard.Result{
-			Name:   name,
-			Status: onboard.Fail,
-			Detail: fmt.Sprintf("logged in, but default repo is pinned to %s instead of push remote %s", pinned, slug),
-			Fix:    fmt.Sprintf("run in %s: gh repo set-default %s", repoRoot, slug),
-		}
+		return resFail(name, fmt.Sprintf("logged in, but default repo is pinned to %s instead of push remote %s", pinned, slug),
+			fmt.Sprintf("run in %s: gh repo set-default %s", repoRoot, slug))
 	default:
-		return onboard.Result{
-			Name:   name,
-			Status: onboard.OK,
-			Detail: fmt.Sprintf("logged in; default repo pinned to %s", pinned),
+		return resOK(name, fmt.Sprintf("logged in; default repo pinned to %s", pinned))
+	}
+}
+
+// ambiguousGHRemote returns a higher-priority remote ("upstream" or "github")
+// that gh's own remote order prefers over pushRemote when unpinned.
+func ambiguousGHRemote(remotes []string, pushRemote string) string {
+	for _, r := range []string{"upstream", "github"} {
+		if r != pushRemote && slices.Contains(remotes, r) {
+			return r
 		}
 	}
+	return ""
 }
 
 func gitOut(ctx context.Context, o DoctorOptions, dir string, args ...string) string {
 	gCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	defer cancel()
-	argv := append([]string{"git", "-C", dir}, args...)
-	res := o.RunCommand(gCtx, o.TempDir, nil, argv...)
+	res := o.RunCommand(gCtx, o.TempDir, nil, append([]string{"git", "-C", dir}, args...)...)
 	if res.Err != nil || res.TimedOut || res.Exit != 0 {
 		return ""
 	}
@@ -996,7 +884,7 @@ var (
 )
 
 // RepoFromURL extracts "owner/name" from a GitHub HTTPS, git://, ssh:// or
-// SCP-style remote URL (including SSH host aliases such as git@github-work:o/r).
+// SCP-style remote URL (including SSH host aliases).
 func RepoFromURL(rawURL, ghHost string) string {
 	u := strings.TrimSpace(rawURL)
 	if u == "" {
@@ -1045,25 +933,17 @@ func CheckCodexbar(ctx context.Context, o DoctorOptions) onboard.Result {
 		if o.GOOS == "darwin" {
 			fix = "install CodexBar (brew install --cask steipete/tap/codexbar) so codexbar is on PATH"
 		}
-		return onboard.Result{
-			Name:   name,
-			Status: onboard.Warn,
-			Detail: "codexbar is not on PATH (runs without quota facts; switches only on a provider error)",
-			Fix:    fix,
-		}
+		return resWarn(name, "codexbar is not on PATH (runs without quota facts; switches only on a provider error)", fix)
 	}
 	vCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	vOut := o.RunCommand(vCtx, o.TempDir, nil, "codexbar", "--version")
 	cancel()
 	if ver := strings.TrimSpace(firstLine(vOut.Stdout)); ver != "" && vOut.Exit == 0 {
-		return onboard.Result{Name: name, Status: onboard.OK, Detail: fmt.Sprintf("on PATH (%s)", ver)}
+		return resOK(name, fmt.Sprintf("on PATH (%s)", ver))
 	}
-	return onboard.Result{Name: name, Status: onboard.OK, Detail: "on PATH"}
+	return resOK(name, "on PATH")
 }
 
-// existingDir returns path when it is an existing directory, else walks up to
-// its nearest existing ancestor directory, falling back to fallback. Call only
-// after CheckProjectVolume has confirmed the volume answers.
 func existingDir(path, fallback string) string {
 	cur := filepath.Clean(path)
 	for {
@@ -1084,17 +964,30 @@ func cleanReason(s string) string {
 	s = strings.ReplaceAll(s, "\r", "\n")
 	var picked string
 	for _, ln := range strings.Split(s, "\n") {
-		ln = strings.TrimSpace(ln)
-		if ln != "" {
+		if ln = strings.TrimSpace(ln); ln != "" {
 			picked = ln
 			break
 		}
 	}
 	picked = redactor.String(picked)
-	if len(picked) > 160 {
-		picked = picked[:160] + "…"
+	if r := []rune(picked); len(r) > 160 {
+		picked = string(r[:160]) + "…"
 	}
 	return picked
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func truncateBytes(b []byte, max int) string {
+	if len(b) > max {
+		b = b[:max]
+	}
+	return string(b)
 }
 
 func firstLine(s string) string {
@@ -1116,8 +1009,8 @@ func firstNonEmpty(vals ...string) string {
 }
 
 // SystemRunCommand runs argv in its own process group at utility OS priority
-// with daemon/session environment variables scrubbed, killing the whole
-// process group if ctx expires.
+// with daemon/session environment variables scrubbed, bounded pipe WaitDelay,
+// and process-group SIGKILL if ctx expires.
 func SystemRunCommand(ctx context.Context, dir string, extraEnv []string, argv ...string) CommandOutput {
 	start := time.Now()
 	if len(argv) == 0 {
@@ -1129,6 +1022,7 @@ func SystemRunCommand(ctx context.Context, dir string, extraEnv []string, argv .
 	cmd.Env = append(scrubChildEnv(os.Environ()), extraEnv...)
 	cmd.Stdin = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = defaultWaitDelay
 
 	var stdout, stderr cappedBuffer
 	cmd.Stdout = &stdout
@@ -1166,10 +1060,42 @@ func SystemRunCommand(ctx context.Context, dir string, extraEnv []string, argv .
 	if ps := cmd.ProcessState; ps != nil {
 		out.Exit = ps.ExitCode()
 	}
-	if !timedOut && waitErr != nil && out.Exit < 0 {
+	if !timedOut && waitErr != nil && out.Exit < 0 && !errors.Is(waitErr, exec.ErrWaitDelay) {
 		out.Err = waitErr
 	}
 	return out
+}
+
+func isClaudeAuthEnv(key string) bool {
+	for _, pfx := range []string{
+		"CLAUDE_CODE_USE_",
+		"CLAUDE_CODE_SKIP_",
+		"CLAUDE_CODE_DISABLE_",
+		"CLAUDE_CODE_ENABLE_",
+		"CLAUDE_CODE_MAX_",
+		"CLAUDE_CODE_OAUTH_",
+		"CLAUDE_CODE_CLIENT_",
+		"CLAUDE_CODE_API_",
+	} {
+		if strings.HasPrefix(key, pfx) {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldScrubEnvKey(key string) bool {
+	if isClaudeAuthEnv(key) {
+		return false
+	}
+	return strings.HasPrefix(key, "HERDR_") ||
+		key == "CLAUDECODE" || key == "CLAUDE_PID" || strings.HasPrefix(key, "CLAUDE_CODE_") ||
+		strings.HasPrefix(key, "SHEEPDOG_") ||
+		strings.HasPrefix(key, "GEMINI_API_KEY") ||
+		strings.HasPrefix(key, "VERTEX_") ||
+		key == "DEEPSEEK_API_KEY" ||
+		key == "OPENAI_ORCH_API_KEY" ||
+		key == "GH_REPO"
 }
 
 func scrubChildEnv(environ []string) []string {
@@ -1179,14 +1105,7 @@ func scrubChildEnv(environ []string) []string {
 		if i := strings.IndexByte(kv, '='); i >= 0 {
 			key = kv[:i]
 		}
-		if strings.HasPrefix(key, "HERDR_") ||
-			key == "CLAUDECODE" || strings.HasPrefix(key, "CLAUDE_CODE_") ||
-			strings.HasPrefix(key, "SHEEPDOG_") ||
-			strings.HasPrefix(key, "GEMINI_API_KEY") ||
-			strings.HasPrefix(key, "VERTEX_") ||
-			key == "DEEPSEEK_API_KEY" ||
-			key == "OPENAI_ORCH_API_KEY" ||
-			key == "GH_REPO" {
+		if shouldScrubEnvKey(key) {
 			continue
 		}
 		out = append(out, kv)

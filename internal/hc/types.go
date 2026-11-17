@@ -123,6 +123,26 @@ type RemoveResult struct {
 	Removed string `json:"removed"`
 }
 
+// ExecParams selects the program and attributes for machine.exec.
+type ExecParams struct {
+	Argv    []string          `json:"argv,omitempty"`
+	Cwd     string            `json:"cwd,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	Timeout *float64          `json:"timeout,omitempty"`
+}
+
+// ExecResult is the captured outcome of machine.exec. Stdout and Stderr are
+// base64-encoded strings on the wire, which encoding/json decodes into []byte.
+type ExecResult struct {
+	Code      *int   `json:"code"`
+	Signal    *int   `json:"signal"`
+	Stdout    []byte `json:"stdout"`
+	Stderr    []byte `json:"stderr"`
+	MS        uint64 `json:"ms"`
+	TimedOut  bool   `json:"timed_out"`
+	Truncated bool   `json:"truncated"`
+}
+
 // Error is a JSON-RPC error returned by herdr-core.
 type Error struct {
 	Code    int    `json:"code"`
