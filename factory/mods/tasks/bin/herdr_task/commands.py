@@ -14,7 +14,7 @@ import time
 from . import sandbox
 from .checks import checks_line, resolve_check, sync_check, sync_mode, sync_plan, SYNC_FAILED
 from .base import Fail, git, guard, hc_json, kill_agent, label_of, now, run, STORE, stop_note, VERSION
-from .settings import (write_max_running, write_task_check,
+from .settings import (write_max_running, write_task_check, write_worker_perm, WORKER_PERMS,
     accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
     fable_due, gate_min, merge_hold, merge_policy,
     merge_wait_why, MUST_WORDS, project_base, remove_build_dir, review_kind, review_limits, reviewed_for_head, set_opts, settings_block, settings_for,
@@ -322,8 +322,26 @@ def cmd_show(args):
     say(args, v, "\n".join(text))
 
 
+def pool_empty_reason(argv):
+    """Why starting on `argv`'s usage pool is refused (at 0% in 5h or weekly window), or None."""
+    from .handoff import pool_of
+    pool_name = pool_of({"agent": agent_key(argv), "argv": list(argv or ())})
+    if not pool_name:
+        return None
+    p = next((x for x in reviewer_pools() if x.get("name") == pool_name), None)
+    if not p or p.get("state") != "ok":
+        return None
+    empty = [k for k in ("five", "week") if p.get(k) is not None and p[k] <= 0]
+    if not empty:
+        return None
+    reset = p.get(empty[0] + "_reset")
+    return f"the {pool_name} pool is at 0%" + (f" (resets {reset})" if reset else "")
+
+
 def begin(s, t, argv, space=None, parent=None):
     """Starts the task's first agent. Returns its record."""
+    if why := pool_empty_reason(argv):
+        raise Fail(f"Can't start {s.ref(t)}: {why}. Pick another CLI or model (--agent / --model).")
     t["state"], t["started"] = "running", now()
     # Its brief teaches `reviewed`: ready waits for a review of its final commit (review_refusal).
     t["review_gate"] = True
@@ -1642,9 +1660,18 @@ def cmd_config(args):
         for pair in getattr(args, "set", None) or []:  # FAC-103: folder settings from the CLI
             k, eq, v = pair.partition("=")
             key = k.strip().lower()
-            if not eq or key not in ("tasks.max_running", "max_running", "tasks.check", "check"):
-                raise Fail(f"config --set takes tasks.max_running=N or tasks.check=CMD, not {pair!r}.")
+            if not eq or key not in ("tasks.max_running", "max_running", "tasks.check", "check", "worker.perm"):
+                raise Fail(f"config --set takes tasks.max_running=N, tasks.check=CMD or worker.perm=MODE, not {pair!r}.")
             v = v.strip().strip("\"'")
+            if key == "worker.perm":
+                low = v.lower()
+                if not v or low == "default":
+                    write_worker_perm(s, None)
+                elif low in WORKER_PERMS:
+                    write_worker_perm(s, WORKER_PERMS[low])
+                else:
+                    raise Fail("worker.perm is full, auto, plan, read-only, acceptEdits, bypassPermissions, dontAsk or manual (\"default\": Settings' above this project).")
+                continue
             if key in ("tasks.check", "check"):
                 write_task_check(s, None, None if not v or v.lower() == "default" else v)
                 continue
@@ -1689,14 +1716,16 @@ def start_again(s, t, key=None, argv_json=None, message=None, parent=None, resum
     and the session is known; else a fresh one with a handoff. `message` goes after either; `nudge`
     is a resumed session's first message when no `message` is given; `resuming` (`herdr-task resume`)
     rebuilds argv from the current settings and wakes a resumed session."""
-    unarchive(s, t)
-    ensure_build_dir(s, t)
     prev = last_agent(t)
-    parent = parent_for(parent or (prev or {}).get("parent"), s.loc["folder"])
     # The last agent's argv again (switch, tell), unless `resuming` or edit changed its pick.
     keep = not resuming and prev and prev.get("argv") and (t.get("pick_at") or 0) <= (prev.get("at") or 0)
     argv = agent_argv(None, argv_json) if argv_json else worker_argv(s, t, agent=key) if key else \
         (prev["argv"] if keep else worker_argv(s, t))
+    if why := pool_empty_reason(argv):
+        raise Fail(f"Can't start {s.ref(t)}: {why}. Pick another CLI or model (--agent / --model).")
+    unarchive(s, t)
+    ensure_build_dir(s, t)
+    parent = parent_for(parent or (prev or {}).get("parent"), s.loc["folder"])
     same = prev and agent_key(argv) == prev.get("agent")
     res = resume_argv(argv, prev["session"], folder_for(s, t)) if same and prev.get("session") else None
     if res:

@@ -1926,6 +1926,28 @@ class OwnBackgroundWork(unittest.TestCase):
         with store.Store(store.locate(repo), write=False) as s:
             self.assertEqual([ev for ev, _ in au.events_in(s, seen)], ["needs-you"])
 
+    def test_waiting_on_own_background_job_is_capped_at_30_minutes(self):
+        """Design §5: a worker waiting on its own background job stays Working at most 30 minutes."""
+        self.assertEqual(self.agents.BG_WORK_MAX_MS, 30 * 60_000)
+        # 29 minutes in: still Working on the background shell.
+        self.background(-29 * 60_000)
+        self.say(-28 * 60_000, "Running the suite in the background.")
+        idle = [dict(self.idle[0], status_ms=self.clock - 29 * 60_000)]
+        self.assertTrue(self.agents.own_work(self.task, idle))
+        self.assertEqual(self.status(idle), ("working", None, "Waiting on a background job"))
+        # At 30 minutes: capped, surfaces as Needs you.
+        self.clock += 60_000
+        self.assertFalse(self.agents.own_work(self.task, idle))
+        self.assertEqual(self.status(idle)[:2], ("needs", "reply"))
+        # Same 30-minute cap applies to foreground commands and agy background tasks once quiet 30 minutes.
+        self.lines[:] = self.lines[:1]
+        self.say(-31 * 60_000, "Running build.")
+        fg_idle = [dict(self.idle[0], foreground={"name": "xcodebuild", "argv": ["xcodebuild", "test"]}, status_ms=self.clock - 29 * 60_000)]
+        self.assertTrue(self.agents.own_work(self.task, fg_idle))
+        fg_idle[0]["status_ms"] = self.clock - 30 * 60_000
+        self.assertFalse(self.agents.own_work(self.task, fg_idle))
+        self.assertEqual(self.status(fg_idle)[:2], ("needs", "reply"))
+
 
 class CodexCodeMode(unittest.TestCase):
     """SHEP-207: Codex 0.163+ code mode runs its commands from a script (one exec call with
@@ -2269,8 +2291,8 @@ class BackgroundJobEnded(unittest.TestCase):
 
     def test_a_job_still_running_gets_none(self):
         self.ps = "100 1 claude\n102 100 /bin/zsh -c source /Users/x/.claude/shell-snapshots/snapshot-zsh-1.sh && eval 'scripts/remote-test.sh'\n"
-        self.clock += 3600_000
-        self.idle[0]["status_ms"] = self.clock - 3000_000
+        self.clock += 600_000  # 25m since job start, 20m quiet: past BG_NUDGE_MS, within 30m BG_WORK_MAX_MS cap
+        self.idle[0]["status_ms"] = self.clock - 600_000
         self.nudge()
         self.assertEqual(self.sent, [])
         self.assertEqual(self.status(), ("working", None, "Waiting on a background job"))
@@ -6061,6 +6083,23 @@ class Scheduled(unittest.TestCase):
             with open(settings.SETTINGS) as f:
                 self.assertEqual(f.read(), text)
 
+    def test_config_set_worker_perm_writes_and_clears_folder_setting(self):
+        """Field note 56: `herdr-task config --set worker.perm=full` sets and clears projects[folder].worker.perm."""
+        import herdr_task.settings as settings
+        folder = self.store_mod.locate(self.folder)["folder"]
+        v = self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worker.perm=full"])
+        self.assertEqual(v["settings"]["worker"]["perm"], "full")
+        with open(settings.SETTINGS) as f:
+            self.assertEqual(json.load(f)["projects"][folder], {"worker": {"perm": "full"}})
+        with self.store_mod.Store(self.store_mod.locate(self.folder), write=False) as s:
+            self.assertEqual(settings.worker_argv(s, {}), ["claude", "--settings", '{"fastMode": false}', "--dangerously-skip-permissions"])
+            self.assertEqual(settings.worker_argv(s, {}, agent="agy"), ["agy", "--dangerously-skip-permissions"])
+        self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worker.perm=default"])
+        with open(settings.SETTINGS) as f:
+            self.assertNotIn(folder, json.load(f).get("projects", {}))
+        with self.assertRaises(self.Fail):
+            self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worker.perm=bogus"])
+
     def four_tasks(self):
         """FAC-10's folder: two tasks went ready then done, one still works, the fourth is queued."""
         import time
@@ -9205,6 +9244,31 @@ class Resume(unittest.TestCase):
         cmd2 = self.launched_cmd()
         self.assertEqual(cmd2[-2:], ["-i", "Please rebase onto main."])
 
+    def test_resume_with_agent_flag_keeps_folder_perm_and_ignores_old_resume_label(self):
+        """Field note 56: `resume --agent agy` carries folder `worker.perm=full` even when the project's
+        default CLI is different or unset, and ignores an old `herdr.resume` label."""
+        ref = self.started_task({"agent": "claude", "model": "opus", "perm": "auto"}, session="0199-sid", agent="agy")
+        self.assertIn("accept-edits", self.launched_cmd())
+        # Old terminal even carries a stale herdr.resume label with --mode accept-edits.
+        self.live = [{"address": "t1", "state": "live", "agent": "zsh", "foreground": {"name": "zsh"},
+                      "labels": {"herdr.resume": json.dumps({"kind": "agy", "argv": ["agy", "--mode", "accept-edits"], "session": "0199-sid"})}}]
+        self.call(self.commands.cmd_config, prefix=None, build_dir=None, set=["worker.perm=full"])
+        out = self.call(self.commands.cmd_resume, id=ref, space=None, agent="agy", argv=None, parent=None)
+        self.assertTrue(out["resumed"])
+        cmd = self.launched_cmd()
+        self.assertIn("--dangerously-skip-permissions", cmd)
+        self.assertNotIn("accept-edits", cmd)
+        # Without worker.agent set (only worker.perm=full), both `resume --agent agy` and `start --agent agy` get perm=full.
+        self.write_worker({"perm": "full"})
+        out2 = self.call(self.commands.cmd_resume, id=ref, space=None, agent="agy", argv=None, parent=None)
+        self.assertTrue(out2["resumed"])
+        self.assertIn("--dangerously-skip-permissions", self.launched_cmd())
+        # Carrying perm from claude bypassPermissions to agy/codex works too.
+        self.write_worker({"agent": "claude", "perm": "bypassPermissions"})
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+            self.assertIn("--dangerously-skip-permissions", self.settings.worker_argv(s, {}, agent="agy"))
+            self.assertIn("--dangerously-bypass-approvals-and-sandbox", self.settings.worker_argv(s, {}, agent="codex"))
+
 
 class BusyWorkerDelivery(unittest.TestCase):
     """FAC-60: messages herdr-task sends a busy agy worker follow hc send with alt+m when its turn
@@ -9455,6 +9519,7 @@ class ProjectStart(unittest.TestCase):
             self.assertEqual((cfg["tasks"]["merge"], cfg["tasks"]["review_min"], cfg["tasks"]["check"]), ("checks", 2, "npm test"))
             self.assertIs(cfg["tasks"]["reviewer_sandbox"], False)  # sandboxed agy can't sign in today (FAC-76)
             self.assertEqual((cfg["reviewer"]["agent"], cfg["reviewer"]["model"]), ("agy", "gemini-4-argon-high"))
+            self.assertEqual(cfg["worker"]["perm"], "full")
             self.assertEqual(self.st.worker_argv(s, {}), ["agy", "--model", "gemini-4-carbon-high", "--dangerously-skip-permissions"])
         self.assertEqual(self.terms["t1"]["labels"]["sheepdog.role"], "coordinator")
         self.assertTrue(self.terms["t1"]["labels"]["sheepdog.project"])
@@ -12391,6 +12456,45 @@ class AgyStartNudge(unittest.TestCase):
             self.task["agents"][0]["start_nudged"] = self.t0
             self.assertFalse(tick.starts_now(self.task))
 
+    def test_startup_blocked_auth_is_ignored_while_starting_and_raises_no_needs_you_news(self):
+        """Field note 56: agy briefly reports blocked (auth) at turn 0 while booting; no false Signed out notice."""
+        from unittest import mock
+        import herdr_task.agents as agents
+        import herdr_task.assistant_settings as aset
+        import herdr_task.news as news
+        import herdr_task.store as store
+        sdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, sdir, True)
+        repo = os.path.join(sdir, "repo")
+        os.makedirs(repo)
+        sent = []
+        k = {**self.term, "state": "live", "foreground": {"name": "agy"}, "labels": {"herdr.agent": "agy"}, "status_ms": self.t0}
+        with mock.patch.object(store, "STORE", sdir), mock.patch.object(news, "STORE", sdir), \
+                mock.patch.object(news, "NEWS", os.path.join(sdir, ".news.json")), \
+                mock.patch.object(news, "HELD", os.path.join(sdir, ".held.json")), \
+                mock.patch.object(aset, "settings_pass", lambda *_: None), \
+                mock.patch.object(agents, "hc_json", lambda *a: {}), \
+                mock.patch.object(news, "coordinator_in", lambda *_: "c1"), \
+                mock.patch.object(news, "hc_json", lambda *_: {"state": "live", "turn": 1}), \
+                mock.patch.object(news, "news_send", lambda to, m, check=True: sent.append(m) or True), \
+                mock.patch.object(news, "live_agents", lambda *_: [k]), \
+                mock.patch.object(news, "detail", lambda x: x), \
+                mock.patch.object(agents, "now", lambda: self.t0 + 10_000), \
+                mock.patch.object(news, "now", lambda: self.t0 + 10_000):
+            with store.Store(store.locate(repo), write=True) as s:
+                s.data.update(prefix="SDF", tasks=[dict(self.task)])
+                s.dirty = True
+            news.news_pass({}, repo)  # baseline
+            # Within STARTING_MS, blocked (auth) at turn 0 reads Working and emits no needs-you news.
+            self.assertEqual(agents.task_status(self.task, [k]), ("working", None, None))
+            self.assertEqual(self.why(10_000), ("working", None))
+            with mock.patch.object(agents, "now", lambda: self.t0 + 20_000), \
+                    mock.patch.object(news, "now", lambda: self.t0 + 20_000):
+                news.news_pass({}, repo)
+            self.assertEqual(sent, [])
+        # Past STARTING_MS, real blocked (auth) surfaces as Signed out until START_STUCK takes over.
+        self.assertEqual(self.why(agents.STARTING_MS), ("needs", "Signed out"))
+
 class ExpectedChecks(unittest.TestCase):
     """#1044: whether checks will come for a pull request, read from its repo's workflows at its head
     (a real throwaway git repo)."""
@@ -13446,3 +13550,145 @@ class ReadyBranchMoved(unittest.TestCase):
             self.assertEqual((tb.get("attention"), rep_blip["attention"]), ("Couldn't reach pull request #9 on GitHub.", [7]))
         rep_ok, td = self.run_tick(1_000)
         self.assertEqual((rep_ok["done"], td["state"], td.get("attention"), self.gh_state["merged"]), ([7], "done", None, self.ready_head))
+
+
+class StartRefusesPoolAtZero(unittest.TestCase):
+    """Field note 56: never start or resume a task on a usage pool at 0%."""
+
+    def setUp(self):
+        import argparse, contextlib, io
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.base as base, herdr_task.commands as commands, herdr_task.launch as launch
+        import herdr_task.queues as queues, herdr_task.settings as settings, herdr_task.store as store
+        import herdr_task.templates as templates, herdr_task.tick as tick
+        self.argparse, self.io, self.redirect = argparse, io, contextlib.redirect_stdout
+        self.commands, self.settings, self.store_mod, self.tick, self.Fail = commands, settings, store, tick, base.Fail
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="pool0-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.repo = os.path.join(self.tmp, "repo")
+        os.makedirs(self.repo)
+        subprocess.run(["git", "-C", self.repo, "init", "-q", "-b", "main"], check=True)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false")):
+            subprocess.run(["git", "-C", self.repo, "config", k, v], check=True)
+        subprocess.run(["git", "-C", self.repo, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+        self.settings_file = os.path.join(self.tmp, "settings.json")
+        with open(self.settings_file, "w") as f:
+            json.dump({"projects": {self.repo: {"worker": {"agent": "agy", "model": "claude-opus-4-6", "perm": "full"}}}}, f)
+        self.runs, self.pools = [], []
+
+        def fake_hc(argv, *a, **kw):
+            if argv[:2] == ["hc", "run"]:
+                self.runs.append(argv)
+                return subprocess.CompletedProcess(argv, 0, json.dumps({"address": f"t{len(self.runs)}"}), "")
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+        for obj, name, val in (
+            (settings, "SETTINGS", self.settings_file),
+            (base, "STORE", os.path.join(self.tmp, "tasks")),
+            (store, "STORE", os.path.join(self.tmp, "tasks")),
+            (launch, "WORKTREES", os.path.join(self.tmp, "worktrees")),
+            (launch, "HOME", self.tmp),
+            (launch, "own_path", lambda: "/bin/herdr-task"),
+            (commands, "own_path", lambda: "/bin/herdr-task"),
+            (launch, "secret_path", lambda: None),
+            (launch, "in_shell", lambda a: a),
+            (launch, "low_priority", lambda a, n: a),
+            (launch, "clean_env", lambda a: a),
+            (launch, "track", lambda *a: None),
+            (launch, "hc_json", lambda *a: None),
+            (launch, "run", fake_hc),
+            (commands, "run", fake_hc),
+            (commands, "live_agents", lambda key: []),
+            (commands, "detail", lambda k: k),
+            (commands, "just_started", lambda t: None),
+            (commands, "ensure_scheduler", lambda quiet=False: {}),
+            (commands, "reviewer_pools", lambda: list(self.pools)),
+            (queues, "live_agents", lambda key: []),
+            (queues, "machine_hold", lambda: None),
+            (tick, "machine_hold", lambda: None),
+            (templates, "TEMPLATES", os.path.join(ROOT, "templates")),
+        ):
+            p = mock.patch.object(obj, name, val)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def call(self, fn, **kw):
+        out = self.io.StringIO()
+        with self.redirect(out):
+            fn(self.argparse.Namespace(folder=self.repo, json=True, **kw))
+        return json.loads(out.getvalue())
+
+    def add(self, title="Build", **kw):
+        defaults = dict(title=title, prompt="Do it.", prompt_file=None, here=False, worktree=True,
+                        base=None, branch=None, start_notes=None, finish_notes=None, after=None,
+                        at=None, in_=None, agent=None, model=None, effort=None, reviewer=None,
+                        reviewer_model=None, reviewer_effort=None, set=None)
+        defaults.update(kw)
+        return f"REPO-{self.call(self.commands.cmd_add, **defaults)['id']}"
+
+    def start(self, ref, **kw):
+        defaults = dict(id=ref, here=False, worktree=False, branch=None, agent=None, argv=None, parent=None, at=None, in_=None, now=True)
+        defaults.update(kw)
+        return self.call(self.commands.cmd_start, **defaults)
+
+    def test_start_refuses_when_tasks_pool_is_at_zero(self):
+        self.pools = [
+            {"name": "antigravity-claude-gpt", "state": "ok", "five": 0.0, "week": 40.0, "five_reset": "2026-11-18T00:00:00Z"},
+            {"name": "antigravity-gemini", "state": "ok", "five": 80.0, "week": 80.0},
+            {"name": "claude", "state": "ok", "five": 50.0, "week": 50.0},
+        ]
+        ref = self.add()
+        with self.assertRaises(self.Fail) as ctx:
+            self.start(ref)
+        self.assertIn("antigravity-claude-gpt pool is at 0%", str(ctx.exception))
+        self.assertEqual(self.runs, [])
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+            t = s.find(ref)
+            self.assertEqual(t["state"], "todo")
+            self.assertFalse(t.get("worktree"))
+        # Another pool with quota (> 0%) starts normally.
+        ref2 = self.add("Use gemini", agent="agy", model="gemini-4-carbon-high")
+        self.start(ref2)
+        self.assertEqual(len(self.runs), 1)
+        # Unknown pool (codexbar unavailable) also starts normally.
+        self.pools = [{"name": "antigravity-claude-gpt", "state": "unknown", "five": None, "week": None}]
+        self.start(ref)
+        self.assertEqual(len(self.runs), 2)
+
+    def test_queued_task_does_not_start_while_pool_is_at_zero_then_starts_on_reset(self):
+        self.pools = [{"name": "antigravity-claude-gpt", "state": "ok", "five": 50.0, "week": 0.0, "week_reset": "2026-11-20T00:00:00Z"}]
+        ref = self.add()
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref)) as s:
+            t = s.find(ref)
+            t["state"], t["queued_at"] = "queued", 1
+            s.dirty = True
+        rep1 = {"started": [], "done": [], "attention": [], "fired": [], "retries": []}
+        with self.store_mod.Store(self.store_mod.locate(self.repo)) as s:
+            self.tick.tick_store(s, rep1)
+        self.assertEqual((rep1["started"], self.runs), ([], []))
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+            t = s.find(ref)
+            self.assertEqual(t["state"], "queued")
+            self.assertIn("antigravity-claude-gpt pool is at 0%", t["attention"])
+        # Once the pool resets (> 0%), the next tick starts the queued task and clears attention.
+        self.pools = [{"name": "antigravity-claude-gpt", "state": "ok", "five": 100.0, "week": 100.0}]
+        rep2 = {"started": [], "done": [], "attention": [], "fired": [], "retries": []}
+        with self.store_mod.Store(self.store_mod.locate(self.repo)) as s:
+            self.tick.tick_store(s, rep2)
+        self.assertEqual((len(rep2["started"]), len(self.runs)), (1, 1))
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+            t = s.find(ref)
+            self.assertEqual((t["state"], t.get("attention")), ("running", None))
+
+    def test_resume_refuses_when_target_pool_is_at_zero(self):
+        self.pools = [{"name": "antigravity-claude-gpt", "state": "ok", "five": 80.0, "week": 80.0},
+                      {"name": "claude", "state": "ok", "five": 0.0, "week": 20.0}]
+        ref = self.add()
+        self.start(ref)
+        self.assertEqual(len(self.runs), 1)
+        # Target pool (claude) at 0%: resume --agent claude refuses without launching.
+        with self.assertRaises(self.Fail) as ctx:
+            self.call(self.commands.cmd_resume, id=ref, agent="claude", argv=None, parent=None)
+        self.assertIn("claude pool is at 0%", str(ctx.exception))
+        self.assertEqual(len(self.runs), 1)
