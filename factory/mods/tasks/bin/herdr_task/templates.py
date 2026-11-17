@@ -160,7 +160,7 @@ REVIEWER_MD_BEFORE_FEEDBACK = REVIEWER_MD_BEFORE_SUBAGENT + ("- You run as the w
 REVIEWER_FEEDBACK = ("- Shepherdr itself misbehaving while you review (a Herdr command or feature failing like a bug, not the task's code): "
                      "one line in your findings starting \"Shepherdr feedback:\", what happened and what you expected; your worker passes it on.\n")
 REVIEWER_MD_BEFORE_SANDBOX = REVIEWER_MD_BEFORE_FEEDBACK + REVIEWER_FEEDBACK
-# Since a Codex reviewer's read-only sandbox can't run every check (#840): it says which, and its worker runs them.
+# Kept only in REVIEWER_MD_BEFORE_TRIM to upgrade unedited pre-trim reviewer.md files; never emitted.
 REVIEWER_SANDBOX = ("- A check that can't run in a read-only sandbox (Codex's): `herdr-app check` hangs there on the window's "
                     "services and `shepherdr doctor` can't reach the Shepherdr service, as with anything needing the network, a "
                     "window or writes outside the folder. Don't run or wait on those: list them in your findings under \"Not run "

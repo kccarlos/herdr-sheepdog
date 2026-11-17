@@ -4536,7 +4536,8 @@ class GateReview(unittest.TestCase):
         self.assertEqual(len(self.told), 2)
         self.assertNotIn("\n", self.told[-1])
         self.assertTrue(self.told[-1].startswith("Herdr's review round 2 of SHEP-13 passed: SHEP-13 goes on to merging (2 of 2 passing). SHEP-13 is ready."))
-        self.assertIn("Tasks panel", self.told[-1])
+        self.assertIn("by voice or on the phone's ask card", self.told[-1])
+        self.assertNotIn("Tasks panel", self.told[-1])
         self.commands.tell_pass(self.store, self.task, 2, "duplicate")
         self.assertEqual(len(self.told), 2)
         self.assertFalse(agents.busy_again(self.task, [{"address": "w1", "status": "working", "turn": 6, "labels": {}}]))
@@ -12169,6 +12170,60 @@ class AutoAccept(unittest.TestCase):
         self.assertEqual(len(self.runs), 3)
         self.verdict("term-3")
         self.assertEqual((self.tick_green()["done"], self.task["accepted_by"]), ([13], "fable"))
+
+    def show_text(self):
+        said = []
+        with self.mock_say(said):
+            self.commands.cmd_show(self.commands.argparse.Namespace(id="SHEP-13", json=False, folder=None, prompt=None, evidence=False))
+        return said[-1]
+
+    def test_review_off_does_not_wait_for_passing_review_round_and_show_agrees(self):
+        for label, cfg, task_set in (
+            ("defaults_off", {"projects": {self.main: {"tasks": {"review_rounds": 0, "review_min": 0}}}}, {}),
+            ("task_review_off_in_gate_folder", {"projects": {self.main: {"tasks": {"review_min": 2, "review_rounds": 5}}}}, {"review": "off"}),
+        ):
+            with self.subTest(label=label):
+                self.setUp()
+                with open(self.settings.SETTINGS, "w") as f:
+                    json.dump(cfg, f)
+                self.task["set"] = dict(task_set)
+                self.task["proof"] = self.proof
+                self.task["state"] = "ready"
+                self.task.pop("pr", None)
+                self.assertEqual(self.settings.accept_bar(self.store, self.task), (None, "no pull request, so no CI to check"))
+                txt = self.show_text()
+                self.assertIn("waits for the person's Accept: no pull request, so no CI to check", txt)
+                self.assertIn("- Review: off", txt)
+                self.assertIn("- Auto-accept: on: with green CI and its proof, Herdr accepts and merges it", txt)
+
+                self.task["state"] = "running"
+                self.ready()
+                self.assertEqual(self.task.get("auto_merge"), "checks")
+                self.assertEqual((self.tick_green()["done"], self.task["state"], self.task["accepted_by"]), ([13], "done", "engine"))
+                self.assertEqual(self.task["auto_accepted"]["rounds"], [])
+                done_txt = self.show_text()
+                self.assertIn("review rounds none", done_txt)
+                self.assertIn("- Review: off", done_txt)
+                self.assertIn("- Auto-accept: on: with green CI and its proof, Herdr accepts and merges it", done_txt)
+
+    def test_review_on_with_zero_gate_min_still_needs_a_worker_review_round(self):
+        with open(self.settings.SETTINGS, "w") as f:
+            json.dump({"projects": {self.main: {"tasks": {"review_rounds": 3, "review_min": 0}}}}, f)
+        self.task["set"] = {}
+        self.task["proof"] = self.proof
+        self.task["pr"] = {"number": 13, "repo": "o/r"}
+        self.assertEqual(self.settings.accept_bar(self.store, self.task), (None, "0 of 1 passing review rounds on its final commit"))
+        self.assertIn("- Auto-accept: on: with its passing review rounds on your final commit, green CI and its proof, Herdr accepts and merges it", self.auto_line())
+
+    def test_auto_accept_settings_line_matches_review_and_proof(self):
+        for rev, prf, want in (
+            ("on", "on", "- Auto-accept: on: with its passing review rounds on your final commit, green CI and its proof, Herdr accepts and merges it"),
+            ("on", "off", "- Auto-accept: on: with its passing review rounds on your final commit and green CI, Herdr accepts and merges it"),
+            ("off", "on", "- Auto-accept: on: with green CI and its proof, Herdr accepts and merges it"),
+            ("off", "off", "- Auto-accept: on: with green CI, Herdr accepts and merges it"),
+        ):
+            self.task["set"] = {"review": rev, "proof": prf}
+            self.assertEqual(self.auto_line(), want, (rev, prf))
 
 
 class NoCIRunWithCISetUp(unittest.TestCase):
