@@ -13061,3 +13061,466 @@ class LinkActions(unittest.TestCase):
         r = self.link.again("vmb", ["list"], lambda: subprocess.CompletedProcess([], *answers.pop(0)))
         self.assertEqual((r.returncode, r.stdout), (0, "[]"))
         self.assertFalse(self.link.lost(subprocess.CompletedProcess([], 1, "", "herdr-task: no such task")))
+
+
+class AcceptGitHubPrPath(unittest.TestCase):
+    """SDF-38 (field note 57): in a repo whose base branch tracks a GitHub remote, accept and merge
+    always go through the PR path (push, open PR if missing, merge per checks) and never merge locally."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.base as base, herdr_task.commands as commands, herdr_task.github as github
+        self.base, self.commands, self.github, self.mock = base, commands, github, mock
+        self.root = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.bare = os.path.join(self.root, "remote.git")
+        self.main = os.path.join(self.root, "main")
+        self.wt = os.path.join(self.root, "wt")
+        self.git(self.root, "init", "-q", "--bare", self.bare)
+        self.git(self.root, "init", "-q", "-b", "main", self.main)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false"),
+                     (f"url.{self.bare}.insteadOf", "git@github.com:o/r.git")):
+            self.git(self.main, "config", k, v)
+        self.write(self.main, "README.md", "base\n")
+        self.git(self.main, "add", ".")
+        self.git(self.main, "commit", "-q", "-m", "init")
+        self.git(self.main, "remote", "add", "origin", "git@github.com:o/r.git")
+        self.git(self.main, "push", "-q", "-u", "origin", "main")
+        self.base_sha = self.git(self.main, "rev-parse", "main")
+        self.git(self.main, "worktree", "add", "-q", "-b", "task/1-doc", self.wt, "main")
+        self.start_sha = self.git(self.wt, "rev-parse", "HEAD")
+        self.write(self.wt, "doc.md", "notes\n")
+        self.git(self.wt, "add", ".")
+        self.git(self.wt, "commit", "-q", "-m", "docs: add notes")
+        self.tip = self.git(self.wt, "rev-parse", "HEAD")
+        self.task = {"id": 1, "title": "Line audit", "state": "ready", "mode": "worktree",
+                     "worktree": self.wt, "branch": "task/1-doc", "base": "main",
+                     "start": self.start_sha, "head": self.tip, "ready_at": 1, "agents": []}
+        self.store = Store([self.task])
+        self.store.prefix = "SDF"
+        self.store.loc = {"folder": self.main, "kind": "repo", "name": "main",
+                          "common": os.path.join(self.main, ".git")}
+        self.said = []
+        for mod, name, value in ((commands, "open_store", lambda args, write=True: self.store),
+                                 (commands, "view", lambda s, t, live=None: dict(t)),
+                                 (commands, "say", lambda a, d, text: self.said.append((d, text))),
+                                 (commands, "live_agents", lambda key: []),
+                                 (commands, "detail", lambda k: k),
+                                 (commands, "refresh_sessions", lambda *a: None),
+                                 (github, "live_agents", lambda key: []),
+                                 (github, "live_helpers", lambda key: []),
+                                 (github.shutil, "which", lambda x: "/usr/bin/gh")):
+            p = mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def git(self, cwd, *args):
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, check=True).stdout.strip()
+
+    def write(self, folder, rel, text):
+        with open(os.path.join(folder, rel), "w") as f:
+            f.write(text)
+
+    def args(self, **kw):
+        import argparse
+        return argparse.Namespace(**{"id": self.store.ref(self.task), "json": True, "folder": self.main, **kw})
+
+    def mock_gh(self, pending=False):
+        calls, state = [], {"created": False, "merged": False, "pushed_before_create": None}
+
+        def gh(*a, **k):
+            calls.append(a)
+            if a[:2] == ("repo", "view"):
+                return True, "o/r", ""
+            if a[:2] == ("pr", "list"):
+                return True, "[]", ""
+            if a[:2] == ("pr", "create"):
+                state["created"] = True
+                state["pushed_before_create"] = self.git(self.root, "--git-dir", self.bare, "rev-parse", "task/1-doc")
+                return True, "https://github.com/o/r/pull/42", ""
+            if a[:2] == ("pr", "view"):
+                if state["merged"]:
+                    return True, json.dumps({"state": "MERGED", "mergeCommit": {"oid": "m1"}, "headRefOid": self.tip}), ""
+                rollup = [{"name": "ci", "status": "IN_PROGRESS" if pending else "COMPLETED",
+                           **({} if pending else {"conclusion": "SUCCESS"})}]
+                return True, json.dumps({"state": "OPEN", "mergeable": "MERGEABLE", "headRefOid": self.tip,
+                                         "mergeStateStatus": "CLEAN", "statusCheckRollup": rollup}), ""
+            if a[:2] == ("pr", "merge"):
+                state["merged"] = True
+                return True, "", ""
+            if a[:1] == ("api",) and any("compare/" in str(x) for x in a):
+                return True, "0", ""
+            return True, "", ""
+
+        for mod in (self.github, self.commands):
+            p = self.mock.patch.object(mod, "gh", gh)
+            p.start()
+            self.addCleanup(p.stop)
+        return calls, state
+
+    def test_accept_worktree_task_with_no_pr_in_github_repo_goes_pr_path(self):
+        calls, state = self.mock_gh(pending=False)
+        self.commands.cmd_accept(self.args())
+        self.assertEqual(state["pushed_before_create"], self.tip)
+        self.assertTrue(any(c[:2] == ("pr", "create") for c in calls), calls)
+        self.assertTrue(any(c[:2] == ("pr", "merge") for c in calls), calls)
+        self.assertEqual((self.task["state"], self.task.get("merged"), self.task["pr"]["number"]), ("done", True, 42))
+        self.assertEqual(self.git(self.main, "rev-parse", "main"), self.base_sha)
+
+    def test_accept_out_of_rounds_doc_task_with_owner_approved_goes_pr_path(self):
+        calls, state = self.mock_gh(pending=True)
+        self.task.update(title="docs(factory): audit", state="running", review_out=1000, set={"review_kind": "doc"})
+        self.commands.cmd_accept(self.args(owner_approved="owner in chat"))
+        self.assertEqual(state["pushed_before_create"], self.tip)
+        ref = self.store.ref(self.task)
+        create = next(c for c in calls if c[:2] == ("pr", "create"))
+        self.assertEqual(create[create.index("--title") + 1], f"{ref}: docs(factory): audit")
+        self.assertFalse(any(c[:2] == ("pr", "merge") for c in calls))
+        # Checks still running: stays ready (auto_merge=checks), branch & worktree NOT deleted yet, local main untouched.
+        self.assertEqual((self.task["state"], self.task.get("auto_merge"), self.task["pr"]["number"]), ("ready", "checks", 42))
+        self.assertEqual(self.task["owner_approved"]["note"], "owner in chat")
+        self.assertEqual(self.git(self.main, "rev-parse", "main"), self.base_sha)
+        self.assertEqual(self.git(self.main, "branch", "--list", "--format=%(refname:short)", "task/1-doc"), "task/1-doc")
+        self.assertTrue(os.path.isdir(self.wt))
+        # Once checks pass and GitHub merges, local main still did not locally merge the un-squashed commit.
+        calls2, state2 = self.mock_gh(pending=False)
+        self.commands.cmd_accept(self.args())
+        self.assertTrue(any(c[:2] == ("pr", "merge") for c in calls2))
+        self.assertEqual((self.task["state"], self.task.get("merged")), ("done", True))
+        self.assertEqual(self.git(self.main, "rev-parse", "main"), self.base_sha)
+
+    def test_accept_folder_without_remote_still_merges_locally(self):
+        local_main = os.path.join(self.root, "local")
+        local_wt = os.path.join(self.root, "local-wt")
+        self.git(self.root, "init", "-q", "-b", "main", local_main)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false")):
+            self.git(local_main, "config", k, v)
+        self.write(local_main, "a.txt", "base\n")
+        self.git(local_main, "add", ".")
+        self.git(local_main, "commit", "-q", "-m", "init")
+        self.git(local_main, "worktree", "add", "-q", "-b", "task/1", local_wt, "main")
+        start = self.git(local_wt, "rev-parse", "HEAD")
+        self.write(local_wt, "b.txt", "work\n")
+        self.git(local_wt, "add", ".")
+        self.git(local_wt, "commit", "-q", "-m", "local work")
+        tip = self.git(local_wt, "rev-parse", "HEAD")
+        self.store.loc = {"folder": local_main, "kind": "repo", "name": "local", "common": os.path.join(local_main, ".git")}
+        self.task.update(worktree=local_wt, branch="task/1", start=start, head=tip, state="ready")
+        with self.mock.patch.object(self.github, "gh", lambda *a, **k: (_ for _ in ()).throw(AssertionError("called gh"))), \
+                self.mock.patch.object(self.commands, "gh", lambda *a, **k: (_ for _ in ()).throw(AssertionError("called gh"))):
+            self.commands.cmd_accept(self.args(folder=local_main))
+        self.assertEqual((self.task["state"], self.task.get("merged")), ("done", True))
+        self.assertEqual(self.git(local_main, "rev-parse", "main"), tip)
+        self.assertFalse(os.path.isdir(local_wt))
+        self.assertEqual(self.git(local_main, "branch", "--list", "task/1"), "")
+
+    def test_accept_non_github_ssh_remote_still_merges_locally(self):
+        self.git(self.main, "remote", "set-url", "origin", "git@git.example.com:team/proj.git")
+        self.git(self.main, "config", "--unset-all", f"url.{self.bare}.insteadOf")
+        self.git(self.main, "config", f"url.{self.bare}.insteadOf", "git@git.example.com:team/proj.git")
+        not_gh = lambda *a, **k: (False, "", "GraphQL: Could not resolve to a Repository with the name 'team/proj'.")
+        with self.mock.patch.object(self.github, "gh", not_gh), \
+                self.mock.patch.object(self.commands, "gh", not_gh):
+            self.commands.cmd_accept(self.args())
+        self.assertEqual((self.task["state"], self.task.get("merged")), ("done", True))
+        self.assertEqual(self.git(self.main, "rev-parse", "main"), self.tip)
+        self.assertFalse(os.path.isdir(self.wt))
+        self.assertEqual(self.git(self.main, "branch", "--list", "task/1-doc"), "")
+
+    def test_accept_in_github_repo_never_falls_back_to_local_when_gh_unavailable(self):
+        for mod in (self.github, self.commands):
+            p = self.mock.patch.object(mod, "gh", lambda *a, **k: (False, "", "not logged in"))
+            p.start()
+            self.addCleanup(p.stop)
+        with self.assertRaises(self.commands.Fail):
+            self.commands.cmd_accept(self.args())
+        self.assertEqual(self.git(self.main, "rev-parse", "main"), self.base_sha)
+        self.assertEqual(self.git(self.main, "branch", "--list", "--format=%(refname:short)", "task/1-doc"), "task/1-doc")
+        self.assertTrue(os.path.isdir(self.wt))
+
+    def test_merge_worktree_task_with_no_pr_in_github_repo_goes_pr_path(self):
+        calls, state = self.mock_gh(pending=False)
+        self.task["state"] = "running"
+        self.commands.cmd_merge(self.args())
+        self.assertEqual(state["pushed_before_create"], self.tip)
+        self.assertTrue(any(c[:2] == ("pr", "create") for c in calls), calls)
+        self.assertTrue(any(c[:2] == ("pr", "merge") for c in calls), calls)
+        self.assertEqual((self.task["state"], self.task.get("merged")), ("done", True))
+        self.assertEqual(self.git(self.main, "rev-parse", "main"), self.base_sha)
+
+    def test_accept_and_merge_go_pr_path_even_when_local_base_has_task_commit(self):
+        # Local main already fast-forwarded to task/1-doc (e.g. an earlier local merge), while origin/main has not.
+        self.git(self.main, "merge", "-q", "--ff-only", "task/1-doc")
+        self.assertEqual(self.git(self.main, "rev-parse", "main"), self.tip)
+        calls, state = self.mock_gh(pending=True)
+        self.commands.cmd_accept(self.args())
+        self.assertEqual(state["pushed_before_create"], self.tip)
+        self.assertTrue(any(c[:2] == ("pr", "create") for c in calls), calls)
+        self.assertEqual(self.git(self.main, "branch", "--list", "--format=%(refname:short)", "task/1-doc"), "task/1-doc")
+        self.assertTrue(os.path.isdir(self.wt))
+        # cmd_merge likewise goes the PR path instead of marking it done from local main.
+        self.git(self.root, "--git-dir", self.bare, "branch", "-D", "task/1-doc")
+        self.git(self.main, "update-ref", "-d", "refs/remotes/origin/task/1-doc")
+        self.task.pop("pr", None)
+        self.task.pop("auto_merge", None)
+        self.task["state"] = "running"
+        calls2, state2 = self.mock_gh(pending=False)
+        self.commands.cmd_merge(self.args())
+        self.assertEqual(state2["pushed_before_create"], self.tip)
+        self.assertTrue(any(c[:2] == ("pr", "create") for c in calls2), calls2)
+        self.assertTrue(any(c[:2] == ("pr", "merge") for c in calls2), calls2)
+
+    def test_accept_never_checks_local_base_when_remote_ref_missing(self):
+        # Local main has task/1-doc, while refs/remotes/origin/main does not exist: never mark done locally.
+        self.git(self.main, "merge", "-q", "--ff-only", "task/1-doc")
+        self.git(self.main, "update-ref", "-d", "refs/remotes/origin/main")
+        calls, state = self.mock_gh(pending=True)
+        self.commands.cmd_accept(self.args())
+        self.assertEqual(state["pushed_before_create"], self.tip)
+        self.assertTrue(any(c[:2] == ("pr", "create") for c in calls), calls)
+        self.assertEqual(self.git(self.main, "branch", "--list", "--format=%(refname:short)", "task/1-doc"), "task/1-doc")
+        self.assertTrue(os.path.isdir(self.wt))
+        self.assertNotEqual(self.task.get("state"), "done")
+
+
+class ReadyBranchMoved(unittest.TestCase):
+    """SDF-39 (field note 58): a ready task whose branch moved on via base-merge-only commits moves
+    its ready head forward and merges once checks pass; any other merge_now() refusal in the tick
+    sets attention (Needs you) and emits news once instead of being dropped."""
+
+    git = AcceptGitHubPrPath.git
+
+    def write(self, folder, rel, text):
+        full = os.path.join(folder, rel)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w") as f:
+            f.write(text)
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.agents as agents, herdr_task.assistant_settings as aset, herdr_task.budget as budget
+        import herdr_task.commands as commands, herdr_task.github as github, herdr_task.ghnews as ghnews
+        import herdr_task.news as news, herdr_task.settings as settings, herdr_task.store as store, herdr_task.tick as tick
+        self.agents, self.commands, self.github, self.news, self.settings, self.store_mod, self.tick, self.mock = (
+            agents, commands, github, news, settings, store, tick, mock)
+        self.root = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.bare = os.path.join(self.root, "remote.git")
+        self.main = os.path.join(self.root, "main")
+        self.wt = os.path.join(self.root, "wt")
+        self.sdir = os.path.join(self.root, "store")
+        os.makedirs(self.sdir)
+        self.git(self.root, "init", "-q", "--bare", self.bare)
+        self.git(self.root, "init", "-q", "-b", "main", self.main)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false"),
+                     (f"url.{self.bare}.insteadOf", "git@github.com:o/r.git")):
+            self.git(self.main, "config", k, v)
+        self.write(self.main, "README.md", "base\n")
+        self.write(self.main, ".gitattributes", "gen/*.py linguist-generated\n")
+        self.git(self.main, "add", ".")
+        self.git(self.main, "commit", "-q", "-m", "init")
+        self.git(self.main, "remote", "add", "origin", "git@github.com:o/r.git")
+        self.git(self.main, "push", "-q", "-u", "origin", "main")
+        self.git(self.main, "worktree", "add", "-q", "-b", "task/1", self.wt, "main")
+        self.start = self.git(self.wt, "rev-parse", "HEAD")
+        self.write(self.wt, "feat.py", "x = 1\n")
+        self.write(self.wt, "gen/out.py", "g = 1\n")
+        self.git(self.wt, "add", ".")
+        self.git(self.wt, "commit", "-q", "-m", "feat: initial")
+        self.ready_head = self.git(self.wt, "rev-parse", "HEAD")
+        self.git(self.wt, "push", "-q", "-u", "origin", "task/1")
+        self.clock = [10_000_000]
+        self.gh_state = {"checks": {self.ready_head: "SUCCESS"}, "merged": None, "calls": []}
+        self.sent, self.live = [], []
+        sfile = os.path.join(self.root, "settings.json")
+        with open(sfile, "w") as f:
+            json.dump({"spaces": {"sp1": {"folder": self.main, "tasks": {"sync": "off"}}}}, f)
+
+        def fake_gh(*a, **k):
+            self.gh_state["calls"].append(a)
+            if a[:2] == ("repo", "view"):
+                return True, "o/r", ""
+            if a[:2] == ("pr", "view"):
+                remote_tip = self.git(self.root, "--git-dir", self.bare, "rev-parse", "task/1")
+                if "--json" in a and a[a.index("--json") + 1] == "headRefOid":
+                    return True, remote_tip, ""
+                st = self.gh_state["checks"].get(remote_tip, "IN_PROGRESS")
+                rollup = ([{"name": "ci", "status": "IN_PROGRESS"}] if st == "IN_PROGRESS"
+                          else [{"name": "ci", "status": "COMPLETED", "conclusion": st}] if st else [])
+                return True, json.dumps({
+                    "state": "MERGED" if self.gh_state["merged"] else "OPEN",
+                    "mergeable": "MERGEABLE", "headRefOid": remote_tip,
+                    "statusCheckRollup": rollup, "mergeCommit": {"oid": "m00"}, "mergeStateStatus": "CLEAN",
+                }), ""
+            if a[:2] == ("pr", "merge"):
+                self.gh_state["merged"] = a[a.index("--match-head-commit") + 1]
+                return True, "", ""
+            return True, "", ""
+
+        view = lambda t: json.loads(fake_gh("pr", "view", str(t["pr"]["number"]), "--repo", "o/r")[1])
+        patches = [
+            (settings, "SETTINGS", sfile),
+            (store, "STORE", self.sdir), (news, "STORE", self.sdir),
+            (news, "NEWS", os.path.join(self.sdir, ".news.json")), (news, "HELD", os.path.join(self.sdir, ".held.json")),
+            (aset, "settings_pass", lambda *a: None),
+            (news, "live_agents", lambda k: list(self.live)), (news, "detail", lambda k: k),
+            (news, "coordinator_in", lambda sp: "c1"),
+            (news, "news_send", lambda to, m, check=True: self.sent.append((to, m)) or True),
+            (tick, "live_agents", lambda k: list(self.live)), (tick, "detail", lambda k: k),
+            (tick, "hc_json", lambda *a: {}), (news, "hc_json", lambda *a: {"state": "live", "turn": 1}),
+            (agents, "hc_json", lambda *a: {}),
+            (github, "gh", fake_gh), (commands, "gh", fake_gh),
+            (tick, "pr_view", view), (commands, "pr_view", view),
+            (ghnews, "pr_comments", lambda *a: []), (ghnews, "gh", fake_gh),
+            (commands, "watch_main", lambda *a: None), (tick, "watch_main", lambda *a: None),
+            (commands, "update_main", lambda *a: None),
+            (github, "live_agents", lambda k: []), (github, "live_helpers", lambda k: []),
+            (github.shutil, "which", lambda x: "/usr/bin/gh"),
+            (commands, "find_proof", lambda *a: {"id": "art1", "title": "Proof"}),
+        ]
+        for mod in (agents, budget, commands, github, ghnews, news, tick):
+            patches.append((mod, "now", lambda: self.clock[0]))
+        for mod, name, val in patches:
+            p = mock.patch.object(mod, name, val)
+            p.start()
+            self.addCleanup(p.stop)
+        task = {
+            "id": 7, "title": "Fix branch move", "state": "ready", "space": "sp1",
+            "mode": "worktree", "worktree": self.wt, "branch": "task/1", "base": "main",
+            "start": self.start, "head": self.ready_head, "ready_at": self.clock[0],
+            "auto_merge": "checks", "proof": {"id": "art1", "title": "Proof"},
+            "reviews": [{"round": 1, "head": self.ready_head, "result": "report", "verdict": "pass"}],
+            "pr": {"number": 9, "repo": "o/r", "url": "https://github.com/o/r/pull/9", "checked": 0},
+            "agents": [], "ready_turns": {"w1": 5},
+        }
+        with store.Store(store.locate(self.main), write=True) as s:
+            s.data.update(prefix="SDF", tasks=[task])
+            s.dirty = True
+
+    def run_tick(self, advance_ms=0):
+        self.clock[0] += advance_ms
+        report = {"started": [], "done": [], "attention": []}
+        with self.store_mod.Store(self.store_mod.locate(self.main), write=True) as s:
+            if s.data["tasks"] and s.data["tasks"][0].get("pr"):
+                s.data["tasks"][0]["pr"]["checked"] = 0
+            self.tick.tick_store(s, report)
+            task = dict(s.data["tasks"][0])
+        self.news.news_pass(report, self.main)
+        return report, task
+
+    def test_base_merge_only_commit_after_ready_moves_head_and_merges(self):
+        # Advance main with both an independent file and a generated-file conflict, then merge into wt without saying ready again.
+        self.write(self.main, "other.py", "y = 2\n")
+        self.write(self.main, "gen/out.py", "g = 2\n")
+        self.git(self.main, "add", ".")
+        self.git(self.main, "commit", "-q", "-m", "main: advance")
+        self.git(self.main, "push", "-q", "origin", "main")
+        subprocess.run(["git", "-C", self.wt, "merge", "--no-commit", "main"], capture_output=True)
+        self.write(self.wt, "gen/out.py", "g = 3\n")
+        self.git(self.wt, "add", "gen/out.py")
+        self.git(self.wt, "commit", "-q", "-m", "merge main and regen")
+        merged_sha = self.git(self.wt, "rev-parse", "HEAD")
+        self.live = [{"address": "w1", "agent": "claude", "status": {"state": "idle"}, "turn": 6, "labels": {}}]
+
+        # Tick 1 (6m later): head moves to merged_sha, branch pushed to origin, waits for CI on new head (no false no_ci, no attention).
+        rep1, t1 = self.run_tick(6 * 60_000)
+        self.assertEqual((t1["state"], t1["head"], t1.get("attention"), rep1["attention"]), ("ready", merged_sha, None, []))
+        self.assertEqual(self.git(self.root, "--git-dir", self.bare, "rev-parse", "task/1"), merged_sha)
+        self.assertEqual(t1.get("auto_merge"), "checks")
+
+        # Tick 2: checks on merged_sha still running — auto_merge stays, no attention.
+        rep2, t2 = self.run_tick(30_000)
+        self.assertEqual((t2["state"], t2.get("auto_merge"), t2.get("attention"), self.gh_state["merged"]), ("ready", "checks", None, None))
+
+        # Tick 3: checks on merged_sha pass — task auto-accepts and merges at merged_sha!
+        self.gh_state["checks"][merged_sha] = "SUCCESS"
+        rep3, t3 = self.run_tick(30_000)
+        self.assertEqual((rep3["done"], t3["state"], t3.get("merged"), self.gh_state["merged"]), ([7], "done", True, merged_sha))
+        self.assertEqual((t3["auto_accepted"]["rounds"], t3["auto_accepted"]["merged_head"]), ([1], merged_sha))
+
+    def test_merge_now_and_settle_back_move_head_on_base_merge_without_ready(self):
+        # 1. With no live agent (same-turn or exited worker), merge_now() itself moves head and merges.
+        self.write(self.main, "other.py", "y = 2\n")
+        self.git(self.main, "add", "other.py")
+        self.git(self.main, "commit", "-q", "-m", "main: advance")
+        self.git(self.main, "push", "-q", "origin", "main")
+        self.git(self.wt, "merge", "--no-ff", "-q", "-m", "merge main cleanly", "main")
+        m1 = self.git(self.wt, "rev-parse", "HEAD")
+        self.git(self.wt, "push", "-q", "origin", "task/1")
+        self.gh_state["checks"][m1] = "SUCCESS"
+        rep, t = self.run_tick(1_000)
+        self.assertEqual((rep["done"], t["state"], t["head"], self.gh_state["merged"]), ([7], "done", m1, m1))
+
+        # 2. Agent wakes up (working -> back_to_work auto), merges main, goes idle: settle_back moves head and merges.
+        self.setUp()
+        self.gh_state["checks"][self.ready_head] = "IN_PROGRESS"
+        self.live = [{"address": "w1", "agent": "claude", "status": {"state": "working"}, "turn": 5, "labels": {}}]
+        self.write(self.main, "other2.py", "z = 3\n")
+        self.git(self.main, "add", "other2.py")
+        self.git(self.main, "commit", "-q", "-m", "main: advance 2")
+        self.git(self.wt, "merge", "--no-ff", "-q", "-m", "merge main in woken turn", "main")
+        m2 = self.git(self.wt, "rev-parse", "HEAD")
+        self.git(self.wt, "push", "-q", "origin", "task/1")
+        self.gh_state["checks"][m2] = "SUCCESS"
+        _, tw = self.run_tick(1_000)
+        self.assertEqual((tw["state"], tw["back"]["auto"]), ("running", True))
+        self.live = [{"address": "w1", "agent": "claude", "status": {"state": "idle"}, "turn": 6, "labels": {}}]
+        rep2, ts = self.run_tick(1_000)
+        self.assertEqual((rep2["done"], ts["state"], ts["head"], self.gh_state["merged"]), ([7], "done", m2, m2))
+
+    def test_real_commit_after_ready_sets_attention_and_emits_news_once(self):
+        self.gh_state["checks"][self.ready_head] = "IN_PROGRESS"
+        self.run_tick()  # initialize news baseline while Ready/Merges once its checks pass
+        self.assertEqual(self.sent, [])
+        self.gh_state["checks"][self.ready_head] = "SUCCESS"
+        self.write(self.wt, "feat.py", "x = 99\n")
+        self.git(self.wt, "add", "feat.py")
+        self.git(self.wt, "commit", "-q", "-m", "sneaked edit after ready")
+        want = "task/1 has moved on since it said ready: its agent says ready again first."
+
+        # Tick 1: merge_now refuses; tick sets attention (still in GRACE_MS so no news yet).
+        rep1, t1 = self.run_tick(1_000)
+        self.assertEqual((t1["attention"], rep1["attention"], self.sent), (want, [7], []))
+        # Tick 2 (+GRACE_MS): status becomes Needs you with the moved-on reason; news queues.
+        _, t2 = self.run_tick(self.agents.GRACE_MS)
+        self.assertEqual(self.agents.task_status(t2, []), ("needs", "attention", want))
+        # Tick 3 (+NEWS_SETTLE_MS): news emits exactly once.
+        self.run_tick(self.news.NEWS_SETTLE_MS)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn('event="needs-you"', self.sent[0][1])
+        self.assertIn(want, self.sent[0][1])
+        # Subsequent ticks: attention stays, no duplicate news.
+        for _ in range(4):
+            rep, tn = self.run_tick(30_000)
+            self.assertEqual((tn.get("attention"), rep["attention"], len(self.sent)), (want, [], 1))
+
+    def test_other_merge_now_refusal_in_tick_is_surfaced_not_dropped(self):
+        self.gh_state["checks"][self.ready_head] = "IN_PROGRESS"
+        self.run_tick()  # initialize news baseline
+        self.gh_state["checks"][self.ready_head] = "SUCCESS"
+        refusal = "Merge blocked by branch protection rule."
+        with self.mock.patch.object(self.tick, "merge_now", lambda s, t: refusal):
+            rep1, t1 = self.run_tick(1_000)
+            self.assertEqual((t1.get("attention"), rep1["attention"]), (refusal, [7]))
+        _, t2 = self.run_tick(self.agents.GRACE_MS)
+        self.assertEqual(self.agents.task_status(t2, []), ("needs", "attention", refusal))
+        self.run_tick(self.news.NEWS_SETTLE_MS)
+        self.run_tick(30_000)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn(refusal, self.sent[0][1])
+        # Non-attention waits from merge_now do not set attention.
+        with self.store_mod.Store(self.store_mod.locate(self.main), write=True) as s:
+            s.data["tasks"][0].pop("attention", None)
+            s.dirty = True
+        for wait in (self.commands.CHECKS_RUNNING, self.commands.WAITS_APPROVAL, self.commands.IN_QUEUE, self.github.NO_CI_RUN):
+            with self.mock.patch.object(self.tick, "merge_now", lambda s, t, w=wait: w):
+                rep, tw = self.run_tick(1_000)
+                self.assertEqual((tw.get("attention"), rep["attention"]), (None, []), wait)
+        # Transient pr_view failure in merge_now surfaces attention while unreachable, then clears & merges on recovery.
+        with self.mock.patch.object(self.commands, "pr_view", lambda t: None):
+            rep_blip, tb = self.run_tick(1_000)
+            self.assertEqual((tb.get("attention"), rep_blip["attention"]), ("Couldn't reach pull request #9 on GitHub.", [7]))
+        rep_ok, td = self.run_tick(1_000)
+        self.assertEqual((rep_ok["done"], td["state"], td.get("attention"), self.gh_state["merged"]), ([7], "done", None, self.ready_head))

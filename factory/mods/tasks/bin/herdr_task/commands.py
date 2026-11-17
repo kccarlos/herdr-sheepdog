@@ -17,7 +17,7 @@ from .base import Fail, git, guard, hc_json, kill_agent, now, run, STORE, stop_n
 from .settings import (write_max_running, 
     accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, bare, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
     fable_due, gate_min, merge_hold, merge_policy,
-    merge_wait_why, MUST_WORDS, remove_build_dir, review_kind, review_limits, set_opts, settings_block, settings_for, space_base,
+    merge_wait_why, MUST_WORDS, remove_build_dir, review_kind, review_limits, reviewed_for_head, set_opts, settings_block, settings_for, space_base,
     task_settings, worker_argv, worker_pick, worktrees_on, set_task, argv_model, AGENTS,
 )
 from .agents import (
@@ -25,10 +25,11 @@ from .agents import (
     REVIEWER_FAILED, STARTING_MS, STATUSES, status_word, SUMMARY_MAX, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
-from .github import (already_merged, checks_missing, checks_since, expected_checks, github_unreachable, pr_for_branch, pr_head_problem, push_branch,
+from .github import (already_merged, checks_missing, checks_since, expected_checks, github_refusal, github_required, github_unreachable,
+                     pr_for_branch, pr_head_problem, pr_merged_at_tip, push_branch,
                      drop_branch, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
                      pr_pending, pr_problem, pr_repo, pr_behind, main_red_hold, pr_update_branch, synced_head, task_problem, SYNC_CHECKS_MS,
-                     SYNC_GRACE_MS, UPDATE_CONFLICT, pr_view, remote_of, task_github, update_main, watch_main)
+                     SYNC_GRACE_MS, UPDATE_CONFLICT, pr_view, push_remote, remote_of, task_github, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING, ci_awaited, NO_CHECKS_MS, NO_CI_RUN
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, is_coordinator, launch, name_tabs,
@@ -42,7 +43,7 @@ from .scheduler import ensure_scheduler
 from .proof import evidence, find_proof
 from .when import when_from
 from .templates import instructions
-from .budget import budget_lines, budget_pass, change_sizes, merge_only_step, recap_refusal, record_ci, size_estimate, size_pass
+from .budget import budget_lines, budget_pass, change_sizes, merge_only_commits, merge_only_step, recap_refusal, record_ci, size_estimate, size_pass
 from .simulators import release_task
 
 
@@ -469,7 +470,7 @@ def cmd_ready(args):
                 # "For AGENTS.md": what the next agent would need about setting up or testing this
                 # repo; the Assistant decides whether it goes into the repo's AGENTS.md.
                 t["agents_md"] = note[:300]
-            for k in ("attention", "attention_at", "handed_at", "fix_requested", "progress", "retry", "review_out", "back", "settled_at", "device_wait"):
+            for k in ("attention", "attention_at", "handed_at", "fix_requested", "progress", "retry", "review_out", "back", "settled_at", "device_wait", "head_moved_at"):
                 t.pop(k, None)
             # Its agents' turns now: a later turn of theirs takes it back to work (busy_again()).
             t["ready_turns"] = ready_turns(live_agents(s.key(t)))
@@ -1126,10 +1127,10 @@ def finalize(s, t):
                 raise Fail(why[0].upper() + why[1:] + ".")
         except Fail as e:
             failed = str(e)
-    elif not local and os.path.isdir(wt) and github_unreachable(s):
+    elif not local and os.path.isdir(wt) and (github_unreachable(s) or github_required(s, t)):
         # #988: a GitHub repo gh couldn't reach just now: never on as if it had no GitHub (Accept would
         # merge it here while a pull request, its agent's, stays open there).
-        failed = f"Couldn't reach GitHub to open its pull request: {github_unreachable(s)}"
+        failed = f"Couldn't reach GitHub to open its pull request: {github_refusal(s, t)}"
     t["state"], t["ready_at"] = "ready", now()
     for k in ("attention", "merge_requested", "review", "accepted_by", "auto_accepted", "accept_wait"):
         t.pop(k, None)
@@ -1514,7 +1515,7 @@ def cmd_state(args, state):
             # pull request merged and close it again at once) until its agent says ready.
             if t["state"] == "done" and t.get("merged"):
                 t["kept_open"] = True
-            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait"):
+            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait", "head_moved_at"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
@@ -1934,6 +1935,8 @@ def tell(s, t, msg, args, start=True):
 
 
 def local_merge_msg(s, t):
+    if github_required(s, t):
+        raise Fail(f"{s.ref(t)} is in a GitHub repo and must merge through a pull request, never locally.")
     main, wt, br, base = s.loc["folder"], t["worktree"], t["branch"], t.get("base") or "main"
     q = shlex.quote
     return (f"Merge task {s.ref(t)} \"{t['title']}\" now:\n"
@@ -1959,6 +1962,25 @@ def uses_queue(s, base):
     return bool(q) and now() - q < QUEUE_DAY
 
 
+def advance_merge_only(s, t):
+    """SDF-39: when a ready worktree branch moved forward solely via merge-only commits of base
+    on top of t['head'], move t['head'] forward so it can merge once checks pass; else False."""
+    wt = t.get("worktree") if t.get("mode") == "worktree" else None
+    folder = (s.loc or {}).get("folder") or ""
+    git_dir = wt if wt and os.path.exists(os.path.join(wt, ".git")) else (folder if folder and os.path.exists(os.path.join(folder, ".git")) else None)
+    if not git_dir:
+        return False
+    head, tip = t.get("head"), branch_tip(s, t)
+    if not (head and tip and tip != head):
+        return False
+    if wt and os.path.isdir(wt) and git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
+        return False
+    if not merge_only_commits(git_dir, t.get("base") or "main", head, tip, t.get("branch")):
+        return False
+    t["head"], t["head_moved_at"], s.dirty = tip, now(), True
+    return True
+
+
 def merge_now(s, t, accepting=False):
     """Merges the task's pull request on GitHub (squash) and tidies up here. Returns why it
     couldn't, or None when it's merged (and the task done). A base branch with GitHub's merge
@@ -1972,8 +1994,11 @@ def merge_now(s, t, accepting=False):
         return f"Couldn't reach pull request #{n} on GitHub."
     head = t.get("head")
     # A commit made here after ready was never pushed: merging would delete it with the branch.
+    # SDF-39: base-merge-only commits on top of the ready head move it forward automatically.
     if head and branch_tip(s, t) != head:
-        return f"{t.get('branch')} has moved on since it said ready: its agent says ready again first."
+        if not advance_merge_only(s, t):
+            return f"{t.get('branch')} has moved on since it said ready: its agent says ready again first."
+        head = t["head"]
     # FAC-98: a head GitHub's update-branch made from the ready head stands for it.
     synced = synced_head(t, repo, v.get("headRefOid")) if v.get("state") != "MERGED" else None
     if synced == "":
@@ -2042,15 +2067,15 @@ def merge_now(s, t, accepting=False):
             return NO_CI_RUN if t["pr"].get("no_ci") else CHECKS_RUNNING
         if not accepting and not t.get("accepted_by") and (by := auto_accepter(s, t)):  # FAC-99: its evidence, on the head merged
             if not v.get("statusCheckRollup"):
-                if t["pr"].get("wait") or now() - (t.get("ready_at") or 0) < NO_CHECKS_MS:
+                if t["pr"].get("wait") or now() - max(t.get("ready_at") or 0, t.get("head_moved_at") or 0) < NO_CHECKS_MS:
                     return CHECKS_RUNNING  # its checks may not show yet
                 t.pop("auto_merge", None)
                 t["accept_wait"] = "no CI checks ran on it, so it waits for your Accept"
                 return t["accept_wait"]
             t["auto_accepted"] = {
                 "by": by, "at": now(), "head": head, "merged_head": at, "proof": (t.get("proof") or {}).get("id"),
-                "rounds": [r["round"] for r in t.get("reviews") or [] if r.get("head") == head
-                           and (r.get("verdict") == "pass" or r.get("result") in ("report", "pass"))],
+                "rounds": [r["round"] for r in reviewed_for_head(s, t, head)
+                           if r.get("verdict") == "pass" or r.get("result") in ("report", "pass")],
                 "ci": sorted({str(e.get("run") or e["sha"][:7]) for e in t.get("ci_runs") or []
                               if e.get("sha") == v.get("headRefOid") and not e.get("failed")})}
         # #1045: never --delete-branch. gh deletes the branch right after its merge call whenever it
@@ -2109,6 +2134,45 @@ def own_open_pr(s, t):
     return t["pr"]
 
 
+def finish_merged_pr(s, t, merge_commit=None):
+    """Completes a task whose PR is already merged on GitHub."""
+    t["merged"] = True
+    watch_main(s, t, (merge_commit or {}).get("oid"))
+    update_main(s, t)
+    drop_branch(s, t)
+    finish(s, t, even_if_busy=True)
+
+
+def run_pr_merge(s, t, wait_as_checks=False):
+    """Merges t's PR on GitHub (pushing and opening it first when needed). Returns (how, error)."""
+    if not t.get("pr") and not own_open_pr(s, t):
+        repo = task_github(github, s, t)
+        if not repo:
+            raise Fail(f"Couldn't reach GitHub for {s.ref(t)} ({github_refusal(s, t)}); nothing merged. Try again.")
+        if gone := pr_merged_at_tip(s, t, repo):
+            finish_merged_pr(s, t, gone.get("mergeCommit"))
+            return "github", None
+        if t.get("head") and branch_tip(s, t) != t["head"] and not advance_merge_only(s, t):
+            return "github", f"{t.get('branch')} has moved on since it said ready: its agent says ready again first."
+        pr_open(s, t, repo, t.get("summary"))
+        # Restart the CI-start grace window from when the PR actually opened so a stale ready_at
+        # doesn't make checks_missing conclude CI never started.
+        if wait_as_checks or not t.get("ready_at"):
+            t["ready_at"] = now()
+    error = merge_now(s, t, accepting=True)
+    if error == IN_QUEUE:
+        return "queue", None
+    if wait_as_checks and (error in (CHECKS_RUNNING, WAITS_APPROVAL)
+                          or (error and error == main_red_hold(s, t.get("base") or "main"))):
+        # Accepted: it merges by itself once they pass, once it's approved, or once a red base is green (Merging).
+        t["auto_merge"] = "checks"
+        return ("approval" if error == WAITS_APPROVAL else "checks"), None
+    if not wait_as_checks and error in (CHECKS_RUNNING, WAITS_APPROVAL):
+        suffix = " Merge again when they pass." if error == CHECKS_RUNNING else " Merge again once it's approved."
+        return "github", error + suffix
+    return "github", error
+
+
 def cmd_merge(args):
     error = None
     with open_store(args) as s:
@@ -2118,14 +2182,14 @@ def cmd_merge(args):
         sent, started, how = None, False, "agent"
         if t.get("pr") or own_open_pr(s, t):
             # On GitHub: Herdr merges the pull request itself (squash), then tidies up here.
-            how = "github"
-            error = merge_now(s, t, accepting=True)
-            if error == IN_QUEUE:
-                how, error = "queue", None
-            elif error == CHECKS_RUNNING:
-                error += " Merge again when they pass."
-            elif error == WAITS_APPROVAL:
-                error += " Merge again once it's approved."
+            how, error = run_pr_merge(s, t)
+        elif task_github(github, s, t) or github_required(s, t):
+            if in_base(s, t, remote_only=True):
+                t["nothing_to_merge"] = True
+                finish(s, t, even_if_busy=True)
+                how = "done"
+            else:
+                how, error = run_pr_merge(s, t)
         else:
             t["merge_requested"] = now()
             s.dirty = True
@@ -2136,6 +2200,7 @@ def cmd_merge(args):
         sys.exit(1)
     text = f"{s.ref(t)}: pull request #{t['pr']['number']} merged; done." if how == "github" else \
         f"{s.ref(t)}: pull request #{t['pr']['number']} is in GitHub's merge queue; done once GitHub merges it." if how == "queue" else \
+        f"{s.ref(t)}: nothing to merge; done." if how == "done" else \
         f"{s.ref(t)}: merge asked of {sent}" + (" (a new agent)" if started else "")
     say(args, {**v, "terminal": sent, "new_agent": started, "merged": how == "github", "queued": how == "queue"}, text)
 
@@ -2146,19 +2211,24 @@ def branch_tip(s, t):
     return (tip if ok and tip else None) or t.get("head") or None
 
 
-def in_base(s, t):
+def in_base(s, t, remote_only=False):
     """Its branch holds nothing its base branch doesn't, here or on its remote: no commits of its
     own, or it only caught up with its base (`git merge --ff-only main` or `git rebase origin/main`
     while the local main is behind: SHEP-23, #737). Nothing to merge, and never merged."""
     tip, main, base = branch_tip(s, t), s.loc["folder"], t.get("base") or "main"
+    remote = push_remote(main, t.get("branch")) or push_remote(main, base)
+    remote_ref = f"refs/remotes/{remote or 'origin'}/{base}"
+    refs = (remote_ref,) if remote_only and (remote or git(main, "rev-parse", "--verify", "--quiet", remote_ref)[0]) else (base, remote_ref)
     return bool(tip) and (tip == t.get("start") or any(
-        git(main, "merge-base", "--is-ancestor", tip, ref)[0] for ref in (base, f"refs/remotes/{remote_of(main, t.get('branch'))}/{base}")))
+        git(main, "merge-base", "--is-ancestor", tip, ref)[0] for ref in refs))
 
 
 def ff_merge(s, t):
     """Lands a task's branch in its base branch here when that is a fast-forward (the base is
     checked out in the main folder and the branch already holds it: exactly the tested work, no
-    new combination). Returns whether it did; git refuses to touch uncommitted files."""
+    new combination). Never used in a GitHub repo. Returns whether it did; git refuses to touch uncommitted files."""
+    if github_required(s, t):
+        return False
     main, br, base = s.loc["folder"], t.get("branch"), t.get("base") or "main"
     ok, cur, _ = git(main, "symbolic-ref", "--short", "HEAD")
     if not (br and git(main, "merge-base", "--is-ancestor", base, br)[0]):
@@ -2229,19 +2299,18 @@ def cmd_accept(args):
             t["state"], t["ready_at"] = "ready", now()
         t.pop("attention", None)
         wt = t.get("worktree") if t.get("mode") == "worktree" else None
-        t["accepted_at"] = now()
         s.dirty = True
         if not wt:
             # Worked in the folder itself: nothing to merge.
             finish(s, t)
         elif t.get("pr") or own_open_pr(s, t):
-            how = "github"
-            error = merge_now(s, t, accepting=True)
-            if error == IN_QUEUE:
-                how, error = "queue", None
-            elif error in (CHECKS_RUNNING, WAITS_APPROVAL) or (error and error == main_red_hold(s, t.get("base") or "main")):
-                # Accepted: it merges by itself once they pass, once it's approved, or once a red base is green (Merging).
-                t["auto_merge"], how, error = "checks", "approval" if error == WAITS_APPROVAL else "checks", None
+            how, error = run_pr_merge(s, t, wait_as_checks=True)
+        elif task_github(github, s, t) or github_required(s, t):
+            if in_base(s, t, remote_only=True):
+                t["nothing_to_merge"] = True
+                finish(s, t, even_if_busy=True)
+            else:
+                how, error = run_pr_merge(s, t, wait_as_checks=True)
         elif merged_here(s, t) or in_base(s, t):
             # Its own work already in the base branch, or none of its own: nothing to merge.
             t["merged"] = merged_here(s, t)
@@ -2258,6 +2327,7 @@ def cmd_accept(args):
             sent, started = tell(s, t, local_merge_msg(s, t), args)
         if not error:
             t["accepted_by"] = by
+            t["accepted_at"] = now()
         v = view(s, t)
     if error:
         say(args, {**v, "error": error}, None) if args.json else print(f"herdr-task: {error}", file=sys.stderr)
