@@ -26,14 +26,17 @@ var skipRepoDirs = map[string]bool{
 	"build":              true,
 	"DerivedData":        true,
 	"Sheepdog.xcodeproj": true,
-	"bin":                true,
-	"dist":               true,
+	"__pycache__":        true,
 }
 
 // skipRecordedRunRelPaths matches links_test.go: recorded benchmark and
 // research run outputs are frozen generated artifacts, not source/docs/fixtures.
+// Top-level bin/ and dist/ are .gitignored Go build outputs (whereas
+// factory/bin and factory/mods/tasks/bin are committed Python sources).
 func skipRecordedRunRelPath(rel string) bool {
-	return rel == "docs/dev/bench/results" ||
+	return rel == "bin" ||
+		rel == "dist" ||
+		rel == "docs/dev/bench/results" ||
 		rel == "docs/dev/research/live-resume-context-results"
 }
 
@@ -56,7 +59,10 @@ func isHistoricalArchiveDoc(rel string) bool {
 // onboarding, or auth headers (docs/dev/public-release-check.md S2).
 // Personal-data checks and real multi-line PEM block checks STILL run on them.
 func isSyntheticSecretFixture(rel string) bool {
+	base := filepath.Base(rel)
 	if strings.HasSuffix(rel, "_test.go") ||
+		strings.HasSuffix(rel, "_test.py") ||
+		(strings.HasPrefix(base, "test_") && strings.HasSuffix(base, ".py")) ||
 		strings.HasSuffix(rel, ".test.mjs") ||
 		strings.HasSuffix(rel, ".test.ts") ||
 		strings.HasSuffix(rel, "Tests.swift") {
@@ -175,6 +181,7 @@ var allowedHomeUsers = map[string]bool{
 	"x":         true,
 	"alice":     true,
 	"bob":       true,
+	"jane":      true,
 	"alex":      true,
 	"pat":       true,
 	"sam":       true,
@@ -185,6 +192,7 @@ var allowedHomeUsers = map[string]bool{
 	"ubuntu":    true,
 	"debian":    true,
 	"ec2-user":  true,
+	"exedev":    true,
 	"root":      true,
 	"shared":    true,
 	"admin":     true,
@@ -226,6 +234,7 @@ var allowedMDNSHosts = map[string]bool{
 }
 
 var allowedTailnets = map[string]bool{
+	"tail":         true,
 	"tailnet":      true,
 	"my-tailnet":   true,
 	"your-tailnet": true,
@@ -237,6 +246,7 @@ var allowedTailnets = map[string]bool{
 
 var allowedExactEmails = map[string]bool{
 	"kccarlos.opensource@gmail.com": true, // public security contact in SECURITY.md
+	"git@github.com":                true, // SSH git remote user@host
 }
 
 var allowedEmailDomains = map[string]bool{

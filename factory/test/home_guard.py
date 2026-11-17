@@ -20,6 +20,7 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = os.path.dirname(ROOT)
 
 
 def _real_home():
@@ -30,10 +31,11 @@ def _real_home():
 
 
 REAL = os.path.realpath(_real_home())
-# The person's Herdr and Shepherdr state: data, settings, the synced question hook, chat cards, agents' own configs.
+# The person's Herdr, Shepherdr and sheepdog state: data, settings, the synced question hook, chat cards, agents' own configs.
 REAL_DIRS = [os.path.join(REAL, p) for p in (
-    ".herdr", ".config/herdr-app", ".config/herdr-core", ".config/shepherdr", ".local/share/herdr",
-    ".local/share/shepherdr", ".local/state/herdr-core", ".local/state/shepherdr", ".cache/shepherdr", ".claude", ".codex")]
+    ".herdr", ".config/herdr-app", ".config/herdr-core", ".config/shepherdr", ".config/sheepdog",
+    ".local/share/herdr", ".local/share/shepherdr", ".local/share/sheepdog", ".local/state/herdr-core",
+    ".local/state/shepherdr", ".cache/shepherdr", ".claude", ".codex")]
 # What the person's environment points at its own terminal, chat and agent with.
 DROP = ("HC_TERMINAL_SOCKET", "HC_TERMINAL_ID", "HC_SCOPE", "HC_SOCKET", "HC_SESSION", "HERDR_BROWSER_TASK",
         "HERDR_ASK_CHAINED", "HERDR_APP_HOME", "SHEPHERDR_HOME", "SHEPHERDR_DATA", "HERDR_TASK_STORE",
@@ -58,7 +60,7 @@ def touches(path):
     path = os.fsdecode(path)
     if not os.path.isabs(path):
         path = os.path.join(os.getcwd(), path)
-    return _inside(path, REAL_DIRS) and not _inside(path, [os.path.realpath(ROOT)])
+    return _inside(path, REAL_DIRS) and not _inside(path, [os.path.realpath(REPO)])
 
 
 def _audit(event, args):

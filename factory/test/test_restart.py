@@ -193,6 +193,7 @@ class Bash32(unittest.TestCase):
         self.assertIn("herdr.agent=claude", args)
 
 
+@unittest.skipUnless(os.path.isfile(os.path.join(ROOT, "lib", "coordinator.js")), "Shepherdr lib/coordinator.js is outside factory/")
 class Detach(unittest.TestCase):
     """lib/coordinator.js's script() runs the helper scripts detached, also where there is no setsid (macOS, #736)."""
 

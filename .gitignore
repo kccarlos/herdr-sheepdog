@@ -43,6 +43,8 @@ go.work.sum
 # Build outputs
 /bin/
 /dist/
+__pycache__/
+*.py[cod]
 
 # local test audio
 *.wav

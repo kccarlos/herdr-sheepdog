@@ -489,6 +489,7 @@ class CustomRoots(Home):
         self.assertEqual(r["cache"], os.path.join(self.home, ".cache", "shepherdr"))
         self.assertEqual(L.roots(self.home, {}, mac=True)["cache"], os.path.join(self.home, "Library", "Caches", "shepherdr"))
 
+    @unittest.skipUnless(os.path.isfile(SHEPHERDR), "Shepherdr bin/shepherdr is outside factory/")
     def test_installer_root_ignores_the_shells_folders(self):
         # `install --root <scratch>` must never reach the real folders through SHEPHERDR_HOME or XDG_*
         sys.path.insert(0, os.path.join(ROOT, "bin"))
@@ -580,6 +581,7 @@ class MixedVersions(unittest.TestCase):
         self.assertEqual(self.sh(self.old, L.SH + 'printf %s "$SHEP_SETTINGS"'), os.path.join(self.old, ".herdr/shepherdr.json"))
         self.assertEqual(self.sh(self.new, L.SH + 'printf %s "$SHEP_SETTINGS"'), os.path.join(self.new, ".config/shepherdr/settings.json"))
 
+    @unittest.skipUnless(os.path.isfile(os.path.join(ROOT, "service", "settings.ts")), "Shepherdr service/settings.ts is outside factory/")
     def test_the_new_push_lands_where_each_machine_reads(self):
         if not BUN:
             self.skipTest("bun isn't installed here")
@@ -652,13 +654,16 @@ class OneTable(unittest.TestCase):
     """layout.py is the one source; core/paths.js, herdr-secret's and herdr-artifact's copies say the same."""
 
     def test_python_copies(self):
-        for f in ("bin/herdr-secret", "mods/artifacts/bin/herdr-artifact"):
+        checked = [f for f in ("bin/herdr-secret", "mods/artifacts/bin/herdr-artifact") if os.path.isfile(os.path.join(ROOT, f))]
+        self.assertTrue(checked)
+        for f in checked:
             text = open(os.path.join(ROOT, f)).read()
             a = text.index("# ---- SHEP:")
             a = text.index("\n", a) + 1
             b = text.index("# ---- end SHEP ----")
             self.assertEqual(text[a:b], L.PY.lstrip("\n"), f"{f}: run bin/sync-shared (it writes layout.py's PY there)")
 
+    @unittest.skipUnless(os.path.isfile(os.path.join(ROOT, "core", "paths.js")), "Shepherdr core/paths.js is outside factory/")
     def test_js_says_the_same(self):
         if not BUN:
             self.skipTest("bun isn't installed here")
@@ -675,6 +680,7 @@ class OneTable(unittest.TestCase):
             with mock.patch.object(L, "migrate", side_effect=AssertionError("moved")):
                 self.assertIsNone(L.ensure())
 
+    @unittest.skipUnless(os.path.isfile(os.path.join(ROOT, "bin", "herdr-browser")), "Shepherdr bin/herdr-browser is outside factory/")
     def test_browser_keeps_a_running_profiles_path(self):
         home = tempfile.mkdtemp(prefix="shep-browser-")
         self.addCleanup(shutil.rmtree, home, True)
@@ -688,6 +694,7 @@ class OneTable(unittest.TestCase):
         self.assertEqual(name("dev-shop#3")["profile"], os.path.join(home, ".local", "state", "shepherdr", "browser", "dev-shop-3"))
 
 
+@unittest.skipUnless(os.path.isfile(os.path.join(ROOT, "bin", "herdr-browser")), "Shepherdr bin/herdr-browser is outside factory/")
 class BrowserSessionNames(unittest.TestCase):
     """SHEP-178: agent-browser's session name stays short (its socket path is at most 103 bytes), whatever the task's
     folder; the same each call, one per task, and the old names where they fit."""

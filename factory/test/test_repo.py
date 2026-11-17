@@ -22,6 +22,7 @@ def text_files():
                     yield os.path.join(d, f)
 
 
+@unittest.skipUnless(os.path.isfile(J("lib", "addons.json")), "Shepherdr window/web repo is outside factory/")
 class Repo(unittest.TestCase):
     def setUp(self):
         self.addons = json.load(open(J("lib", "addons.json")))
@@ -339,6 +340,11 @@ class Repo(unittest.TestCase):
         self.assertIn(v, open(J("RECIPE.md")).read())
         self.assertIn(v, open(J("README.md")).read())
 
+
+class FactoryRepo(unittest.TestCase):
+    test_nothing_personal = Repo.test_nothing_personal
+    test_no_leftovers = Repo.test_no_leftovers
+
     def test_assistant_decide_yourself_rules(self):
         """FAC-57: templates/assistant.md's Decide yourself section keeps its existing standing rules
         and carries the in-worktree prompt approval rule and PR CI ownership + loop-breaker rule."""
@@ -428,7 +434,8 @@ if __name__ == "__main__":
 
 def shell_scripts():
     """Every shipped shell script: install.sh and any file under the shipped folders whose first line runs sh or bash."""
-    yield J("install.sh")
+    if os.path.isfile(J("install.sh")):
+        yield J("install.sh")
     for f in text_files():
         try:
             with open(f, encoding="utf-8") as fh:
@@ -446,8 +453,7 @@ class ShellScripts(unittest.TestCase):
 
     def test_found_the_scripts(self):
         names = {os.path.relpath(f, ROOT) for f in shell_scripts()}
-        self.assertIn(os.path.join("mods", "chat", "session-note.sh"), names)
-        self.assertIn("install.sh", names)
+        self.assertIn(os.path.join("mods", "coordinator", "restart.sh"), names)
 
     def test_no_here_doc_inside_command_substitution(self):
         # $( up to its first ), across lines, holding a here-doc (<< or <<-, not the <<< here-string)
@@ -488,6 +494,7 @@ class ShellScripts(unittest.TestCase):
                 self.assertEqual(out.returncode, 0, f"{' '.join(cmd)} {os.path.relpath(f, ROOT)}: {out.stderr}")
 
 
+@unittest.skipUnless(os.path.isfile(J("mods", "chat", "mac-audio.swift")), "Shepherdr mac-audio.swift is outside factory/")
 class MacAudio(unittest.TestCase):
     """#789: from Swift 6.4, `import Darwin` no longer shows crt_externs.h (an explicit submodule), so a direct
     _NSGetEnviron() call stops mods/chat/mac-audio.swift building and the Mac's dictation and calls with it. The helper
@@ -501,6 +508,7 @@ class MacAudio(unittest.TestCase):
             self.assertIsNone(m, f"{name}() needs crt_externs.h: dlsym it instead")
         self.assertIn('dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_NSGetEnviron")', code)
 
+@unittest.skipUnless(os.path.isfile(J("mods", "chat", "session-note.sh")), "Shepherdr session-note.sh is outside factory/")
 class SessionNote(unittest.TestCase):
     """SHEP-42, SHEP-48: the chat's SessionStart hook (mods/chat/session-note.sh) adds every agent's Reactions
     words (herdr-task _session-note, on or off by its space) to its JSON: an Assistant's, a task worker's, an
@@ -553,6 +561,7 @@ class SessionNote(unittest.TestCase):
         self.assertFalse(asked)
 
 
+@unittest.skipUnless(os.path.isdir(J("vm")), "Shepherdr vm/ scripts are outside factory/")
 class VmScripts(unittest.TestCase):
     """FAC-51: vm/provision.sh and vm/guest.sh build the factory's Tart images (FAC-56: factory-vm.sh and its guest
     side run the long-lived factory VM); all parse, and the timeout shim
@@ -594,9 +603,10 @@ class TestsOnAThrowawayHome(unittest.TestCase):
                 first = next(n for n in body if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)))
                 self.assertTrue(isinstance(first, ast.Import) and first.names[0].name == "home_guard",
                                 f"test/{f}: `import home_guard` must be its first statement")
-        preload = open(J("test", "preload.ts")).read()
-        self.assertIn("SHEPHERDR_HC", preload)
-        self.assertIn("HC_TERMINAL_SOCKET", preload)
+        if os.path.isfile(J("test", "preload.ts")):
+            preload = open(J("test", "preload.ts")).read()
+            self.assertIn("SHEPHERDR_HC", preload)
+            self.assertIn("HC_TERMINAL_SOCKET", preload)
 
     def test_the_run_is_on_a_throwaway_home(self):
         self.assertNotEqual(os.path.realpath(os.path.expanduser("~")), home_guard.REAL)
@@ -641,9 +651,11 @@ class TestsOnAThrowawayHome(unittest.TestCase):
         with self.assertRaises(home_guard.RealHome):
             open(os.path.join(home_guard.REAL, ".config", "herdr-app", "data", "chat-asks", "req", "x.json"), "w")
         with self.assertRaises(home_guard.RealHome):
+            open(os.path.join(home_guard.REAL, ".config", "sheepdog", "config.toml"))
+        with self.assertRaises(home_guard.RealHome):
             subprocess.run(["true"], env={"HOME": home_guard.REAL, "PATH": os.environ["PATH"]})
         with self.assertRaises(home_guard.RealHome):
             subprocess.run(["true"], env={"PATH": os.environ["PATH"]})
         # this repo's own files are fine, wherever its worktree lives
-        open(J("README.md")).close()
+        open(J("NOTICE")).close()
         subprocess.run(["true"], check=True)

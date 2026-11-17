@@ -101,6 +101,7 @@ class Pick(unittest.TestCase):
         self.assertIsNone(usage.pick([pool("a", 50, 50)], set(), False))
 
 
+@unittest.skipUnless(os.path.isfile(J("core/usage.js")), "Shepherdr JS/TS usage files are outside factory/")
 class UsageIsLocal(unittest.TestCase):
     def test_no_network_calls(self):
         for f in FILES:
