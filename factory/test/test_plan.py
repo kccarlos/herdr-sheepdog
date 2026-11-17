@@ -132,6 +132,7 @@ class Plans(unittest.TestCase):
         rc, v = self.run_cli("plan", "apply", plan=bad)
         err = v["error"]
         self.assertIn("after SDF-99 is neither", err)
+        self.assertIn("would end up waiting for itself", err)  # an unknown id doesn't hide the loop
         bad["milestones"][0]["tasks"][4]["after"] = []
         rc, v = self.run_cli("plan", "apply", plan=bad)
         err = v["error"]

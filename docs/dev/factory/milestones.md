@@ -57,6 +57,7 @@ The file holds the milestones that change, each with all its open tasks, plus ne
 - **A task still to do** can change its title, prompt, lines, kind, set and after.
 - **A started task** is listed by its `key` alone. Changing its brief or what it waits for is refused (for the brief, use `herdr-task edit --amend`). It can't move to another milestone.
 - **A task that is still open** in a listed milestone and missing from the file is refused. Remove it with `herdr-task rm` first, or split it.
+- **`herdr-task edit --after` or `--prompt`** on a plan task still to do is overwritten by the next amend: change plan tasks through the plan.
 - **A milestone whose acceptance task has started** takes no new tasks (put them in a new milestone), and its exit test, gate and release stay as they are.
 
 ## A split keeps the parent's place
