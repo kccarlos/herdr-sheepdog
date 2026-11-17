@@ -46,6 +46,18 @@ def hc_get(addr):
     return ("gone" if re.search(r'"not_found"|\bno (?:such )?terminal\b', said) else "unknown"), None
 
 
+# How long before a handoff record's `at` its pid's process must have started to count as the process the record named.
+# ps's lstart is not the wall clock: on Linux it is /proc/stat's btime (floored to the second) plus the start ticks, and
+# NTP slew since boot can move it several seconds on a long-up VM. A wide margin only errs to the safe side (end_group is
+# skipped), and a real old coordinator started minutes before `at` (the restart cooldown alone is 10 minutes).
+START_MARGIN_S = 30
+
+
+def started_long_before(started, at_ms):
+    """A start time (seconds, from pid_start) at least START_MARGIN_S before `at_ms`."""
+    return started is not None and started + START_MARGIN_S <= at_ms / 1000
+
+
 def pid_start(pid):
     """When process `pid` started (seconds, ps's lstart, floored to the second), None when ps knows no such process
     (or can't be read)."""
@@ -57,10 +69,9 @@ def pid_start(pid):
 
 
 def pid_started_before(pid, at_ms):
-    """Whether process `pid` started before `at_ms` (ps's start time, to the second): the process a handoff record named,
-    not a later one given its recycled pid. False when it can't be told."""
-    started = pid_start(pid)
-    return started is not None and (started + 1) * 1000 <= at_ms  # lstart is floored to the second
+    """Whether process `pid` started at least START_MARGIN_S before `at_ms` (ps's start time): the process a handoff
+    record named, not a later one given its recycled pid. False when it can't be told."""
+    return started_long_before(pid_start(pid), at_ms)
 
 KEY = "coordinator"
 OPEN = ("running", "ready", "queued", "todo", "scheduled")  # a task in one of these needs its project's coordinator
@@ -334,7 +345,7 @@ def finish_handoff(folder, new):
             # a re-run may come long after the verdict: a live process at that pid that started since is someone else's
             # (pid reused) and is left alone; no process there means the leader died, and its group still ends
             started = pid_start(h["pid"])
-            if started is None or (started + 1) * 1000 <= h["at"]:
+            if started is None or started_long_before(started, h["at"]):
                 end_group(h["pid"])
         _edit(folder, lambda d: d.get(KEY, {}).update(handoffs=[x for x in handoffs_of(d.get(KEY, {})) if not _same(x, h)])
               if isinstance(d.get(KEY), dict) else None)
