@@ -3,6 +3,7 @@ tasks); `plan apply` checks it as a whole and adds the tasks, `plan amend --reas
 later and logs why. The engine adds each milestone's acceptance task and derives its state;
 a split keeps the parent's place in the graph. docs/dev/factory/milestones.md."""
 
+import copy
 import json
 import re
 
@@ -329,6 +330,7 @@ class Plan:
     # ---- changing the store ---------------------------------------------------------------
     def write(self, reason=None):
         s = self.s
+        self.later = []
         from .commands import set_base
         log = {"at": now(), "action": "amend" if self.amend else "apply", "added": [], "changed": []}
         mode = "worktree" if worktrees_on(s) else "here"
@@ -380,11 +382,7 @@ class Plan:
                     if pid in (o.get(f) or []):
                         o[f] = list(dict.fromkeys(x for i in o[f] for x in (ids if i == pid else [i])))
             splits[s.ref(parent)] = [s.ref(self.by_key[k]) for k in kids]
-            from .commands import end_agent
-            from .simulators import release_task
-            for k in agents_of(s, parent) if parent["state"] == "running" else []:
-                end_agent(s, parent, k["address"])
-            release_task(s, parent)
+            self.later.append(parent)  # its agent and simulator end only once the whole result passes
             s.data["tasks"].remove(parent)
         for t, mid in self.tasks:
             if "after" in t or "split_of" in t:
@@ -402,6 +400,15 @@ class Plan:
         s.data.setdefault("plan_log", []).append(log)
         s.dirty = True
         return log
+
+    def finish(self):
+        """After the written graph passed its last check: end each split parent's agent and simulator."""
+        from .commands import end_agent
+        from .simulators import release_task
+        for parent in self.later:
+            for k in agents_of(self.s, parent) if parent["state"] == "running" else []:
+                end_agent(self.s, parent, k["address"])
+            release_task(self.s, parent)
 
     def link(self):
         """Each task's after: what the plan gave it, plus the previous milestone's acceptance for a
@@ -432,6 +439,33 @@ class Plan:
                 set_task(acc, "merge", "ask me first" if m.get("gate") == "owner" else "")
             prev = acc
         return added
+
+
+def loop_in(s):
+    """A loop among the open tasks as written, as refs (first one found), or None. The checks above give
+    the plain reasons; this one checks the graph exactly as it will be saved, whatever produced it."""
+    open_ = {t["id"]: t for t in s.data["tasks"] if t["state"] != "done"}
+    state = {}
+    for root in open_:
+        if state.get(root):
+            continue
+        path, stack = [], [(root, iter(open_[root].get("after") or []))]
+        state[root] = 1
+        path.append(root)
+        while stack:
+            node, deps = stack[-1]
+            nxt = next((d for d in deps if d in open_ and state.get(d) != 2), None)
+            if nxt is None:
+                state[node] = 2
+                stack.pop()
+                path.pop()
+            elif state.get(nxt) == 1:
+                return [s.ref(open_[i]) for i in path[path.index(nxt):]] + [s.ref(open_[nxt])]
+            else:
+                state[nxt] = 1
+                path.append(nxt)
+                stack.append((nxt, iter(open_[nxt].get("after") or [])))
+    return None
 
 
 def brief(s, t):
@@ -495,10 +529,16 @@ def cmd_plan(args):
         p = Plan(s, load(args.file), args.plan == "amend")
         if p.problems:
             raise Fail("The plan isn't applied:\n- " + "\n- ".join(p.problems))
+        saved = copy.deepcopy(s.data) if args.check else None
+        log = p.write((args.reason or "").strip() or None)
+        if loop := loop_in(s):
+            raise Fail("The plan isn't applied: it would make a loop: " + " waits for ".join(loop) + ".")  # nothing saved
         if args.check:
+            s.data.clear()
+            s.data.update(saved)
             s.dirty = False
             return say(args, {"ok": True}, "The plan passes its checks; nothing was changed.")
-        log = p.write((args.reason or "").strip() or None)
+        p.finish()
         v = show(s)
     added = f"added {', '.join(log['added'])}" if log["added"] else "added nothing"
     say(args, {**v, "applied": log}, f"Plan {log['action']}: {added}." + "".join(f" Split {p} into {', '.join(k)}." for p, k in (log.get("split") or {}).items()) + "\n" + text_of(v))

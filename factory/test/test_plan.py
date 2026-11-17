@@ -226,6 +226,35 @@ class Plans(unittest.TestCase):
         self.assertEqual(rc, 1, v)
         self.assertIn("a-part would end up waiting for itself", v["error"])
 
+    def test_review_round_5_loop_made_by_moving_a_task(self):
+        # M1 empty, M2: a, b after a. The amend moves a into M1 and adds c after b in M1, listing only M1:
+        # b then waits for M1's acceptance, which waits for c, which waits for b.
+        self.run_cli("plan", "apply", plan={"milestones": [milestone("M1", []), milestone("M2", [task("a"), task("b", after=["a"])])]})
+        before = self.tasks()
+        plan = {"milestones": [milestone("M1", [{"key": "a"}, task("c", after=["b"])])]}
+        rc, v = self.run_cli("plan", "amend", "--check", "--reason", "x", plan=plan)
+        self.assertEqual(rc, 1, v)
+        self.assertIn("would make a loop", v["error"])
+        rc, v = self.run_cli("plan", "amend", "--reason", "x", plan=plan)
+        self.assertEqual(rc, 1, v)
+        self.assertIn("would make a loop", v["error"])
+        self.assertEqual(self.tasks(), before)  # nothing saved
+
+    def test_a_refused_split_ends_no_agent(self):
+        self.run_cli("plan", "apply", plan={"milestones": [milestone("M1", [task("a")])]})
+        with self.open(True) as s:
+            a = next(t for t in s.data["tasks"] if t.get("plan_key") == "a")
+            a["state"] = "running"
+            other = s.new("Outside task", "", "worktree")
+            other["after"] = [a["id"]]
+            s.dirty = True
+            ref, aid = s.ref(other), a["id"]
+        self.live[aid] = [{"address": "w9", "state": "live", "status": {"state": "idle"}, "foreground": {"name": "claude"}}]
+        plan = {"milestones": [milestone("M1", [task("a-part", split_of="a", after=[ref])])]}
+        rc, v = self.run_cli("plan", "amend", "--reason", "x", plan=plan)
+        self.assertEqual(rc, 1, v)
+        self.assertEqual(self.ended, [])
+
     def test_check_only_changes_nothing(self):
         rc, v = self.run_cli("plan", "apply", "--check", plan=self.first_plan())
         self.assertEqual((rc, v), (0, {"ok": True}))

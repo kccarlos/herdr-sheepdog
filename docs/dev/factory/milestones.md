@@ -42,6 +42,7 @@ The plan file is JSON: `{"milestones": [...]}`. Unknown fields are refused, so a
 - **Graph.** Every `after` must name a plan key or a task in this folder. There must be no loop, counting this folder's existing tasks and the edges the engine adds below. A task can't wait for a task of a later milestone.
 - **Size.** Every task needs `lines`, at most 500.
 - **Design before UI.** A `ui` milestone has a `kind: design` task, and every other task in it comes after one, directly or through other tasks.
+- **The graph as it will be saved.** Last, the engine builds the result in memory and checks the open tasks for a loop exactly as they would be saved. This catches what the checks above model only in part, such as a moved task picking up a new wait from milestone order. Nothing is saved, and no agent ends, unless it passes. `--check` runs this step too.
 - **Release.** A plan can't place a release anywhere but its milestone's acceptance task. That task's brief tells it to ask (`herdr-task ask --kind release`) before it says ready. An ask made after the merge is lost when the task closes (field note 31).
 
 ## What the engine adds
