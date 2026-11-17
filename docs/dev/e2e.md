@@ -268,6 +268,24 @@ the same disk (`go env GOMODCACHE GOCACHE`). When that disk does not answer,
 the run uses internal caches in `~/Library/Caches/sheepdog-nightly` and says
 so in the report.
 
+### Tart VM directory (`TART_HOME`)
+
+When Tart VMs live outside `~/.tart` (for example on an external volume), `tart`
+only sees them when `TART_HOME` points at that directory. Scripts that call
+`tart` (`scripts/e2e/nightly.sh`, `scripts/e2e/nightly-install.sh`,
+`scripts/factory/m1-pr-acceptance.sh`) and `sheepdog factory doctor` resolve it
+in order:
+
+1. `TART_HOME` in the environment.
+2. The factory setting `machine.tart_home` in `~/.config/sheepdog/settings.json`
+   (`everywhere.machine.tart_home`, overridden by
+   `machines.<here>.machine.tart_home`; set it with
+   `herdr-task config --set machine.tart_home=<dir>`).
+3. `tart`'s own default (`~/.tart`).
+
+When `tart` is installed and `tart list` is empty, `sheepdog factory doctor`
+prints a hint pointing to `TART_HOME`.
+
 By hand, from any checkout:
 
 ```sh

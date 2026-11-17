@@ -1180,3 +1180,33 @@ def machine_name():
             return json.load(f).get("here") or None
     except (OSError, ValueError, AttributeError):
         return None
+
+
+def write_machine_option(name, value, machine=None):
+    """Sets or clears one machine setting under d["machines"][here]["machine"][name] (None clears)."""
+    try:
+        with open(SETTINGS) as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        d = {}
+    except (OSError, ValueError) as e:
+        raise Fail(f"Can't read {SETTINGS} ({e}): not changing it.")
+    if not isinstance(d, dict):
+        raise Fail(f"{SETTINGS} isn't a settings object: not changing it.")
+    key = machine or d.get("here") or LOCAL_MACHINE
+    machines = d.setdefault("machines", {})
+    entry = machines.setdefault(key, {})
+    sub = dict(entry.get("machine") or {})
+    sub.pop(name, None) if value is None else sub.update({name: value})
+    entry.update({"machine": sub}) if sub else entry.pop("machine", None)
+    if not entry:
+        machines.pop(key, None)
+    if not machines:
+        d.pop("machines", None)
+    d["version"] = 1
+    os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
+    tmp = f"{SETTINGS}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(d, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, SETTINGS)

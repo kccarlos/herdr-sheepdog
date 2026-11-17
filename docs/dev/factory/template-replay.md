@@ -32,6 +32,8 @@ Run it: `cd factory && python3 test/test_replay.py --score` (add `--files` for t
 | A4 | 28 | assistant | A task's CI keeps failing on flaky tests |
 | A5 | 30, 53 | assistant | An Autopilot wake arrives |
 | A6 | 47, 48, 50 | assistant | A task is Ready with its rounds passed and CI green |
+| A7 | 17, 18, 27 | assistant | The owner gives a goal with several parts (SDF-31) |
+| A8 | 27, 42 | assistant | A recap says a task is two jobs: split it (SDF-31) |
 
 ## Before: the templates on main at 4f22cede
 
@@ -138,6 +140,17 @@ With the bundled files installed: Passed 12 of 12, with no refused commands and 
 |---|---|---|---|---|
 | Before SDF-42 (clean install & `--files`) | 12 of 12 | `Tasks panel` | none | `Tasks panel` |
 | After SDF-42 (clean install & `--files`) | 12 of 12 | none | none | none |
+
+## Follow-up (SDF-31): the coordinator plans milestones
+
+SDF-31 rewrote the Assistant's Plan section: a goal becomes milestones in a plan file applied with `herdr-task plan apply`, and a replan or split is `herdr-task plan amend --reason` ([milestones.md](milestones.md)). Two situations were added. A7: a goal with several parts must lead to `plan apply`, with the owner's words kept as said, `ui: true` and a release. A8: a recap that says split must lead to `plan amend` with `--reason` and `split_of`, and must never name `herdr-task rm`. `plan` joined the replay's nested commands, so `plan apply` and `plan amend` and their flags are checked against the real CLI.
+
+| Arm | Before (assistant.md at 8daf81dc) | After |
+|---|---|---|
+| Clean install | 12 of 14: A7 and A8 fail, "no rule covers it" | 14 of 14 |
+| With the bundled files (`--files`) | 12 of 14: A7 and A8 fail, "no rule covers it" | 14 of 14 |
+
+A1 to A6 and the worker and reviewer situations still pass in both arms. No refused commands and no Shepherdr-only words in any role.
 
 ## Not covered
 

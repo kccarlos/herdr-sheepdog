@@ -115,3 +115,34 @@ e2e_hc() {
       XDG_STATE_HOME="$E2E_DIR/xdg/state" XDG_CACHE_HOME="$E2E_DIR/xdg/cache" \
       hc "$@"
 }
+
+# e2e_resolve_tart_home: print TART_HOME from the environment, else the
+# factory setting machine.tart_home in settings.json (~ expanded).
+e2e_resolve_tart_home() {
+  if [ -n "${TART_HOME:-}" ]; then
+    printf '%s\n' "$TART_HOME"
+    return 0
+  fi
+  local cfg="${HERDR_TASK_SETTINGS:-}"
+  if [ -z "$cfg" ]; then
+    if [ -n "${SHEEPDOG_FACTORY_HOME:-}" ]; then
+      cfg="$SHEEPDOG_FACTORY_HOME/config/settings.json"
+    elif [ -n "${SHEEPDOG_HOME:-}" ]; then
+      cfg="$SHEEPDOG_HOME/config/settings.json"
+    elif [ -n "${SHEPHERDR_HOME:-}" ]; then
+      cfg="$SHEPHERDR_HOME/config/settings.json"
+    else
+      cfg="${XDG_CONFIG_HOME:-$HOME/.config}/sheepdog/settings.json"
+    fi
+  fi
+  [ -f "$cfg" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 -c 'import json,os,sys
+try: d=json.load(open(sys.argv[1]))
+except Exception: sys.exit(0)
+if not isinstance(d,dict): sys.exit(0)
+k=d.get("here") or "local"; v=""
+for layer in ((d.get("everywhere") or {}).get("machine") or {}, ((d.get("machines") or {}).get(k) or {}).get("machine") or {}):
+  if isinstance(layer,dict) and layer.get("tart_home"): v=str(layer["tart_home"]).strip()
+if v: print(os.path.expanduser(v))' "$cfg" 2>/dev/null || true
+}
