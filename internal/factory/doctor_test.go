@@ -997,13 +997,22 @@ func TestCheckTart(t *testing.T) {
 			return hc.ExecResult{Code: &zero}, nil
 		}
 		rs := Doctor(ctx, DoctorOptions{
-			Folder:        tmp,
-			DataDir:       filepath.Join(tmp, "data"),
-			HCSocket:      srv.Path,
-			Canary:        false,
-			Home:          tmp,
-			TempDir:       tmp,
-			TartHome:      tartDir,
+			Folder:   tmp,
+			DataDir:  filepath.Join(tmp, "data"),
+			HCSocket: srv.Path,
+			Canary:   false,
+			Home:     tmp,
+			TempDir:  tmp,
+			TartHome: tartDir,
+			LookPath: func(name string) (string, error) {
+				switch name {
+				case "hc":
+					return "/usr/bin/hc", nil
+				case "tart":
+					return "/usr/local/bin/tart", nil
+				}
+				return "", os.ErrNotExist
+			},
 			VolumeTimeout: time.Second,
 			AuthTimeout:   time.Second,
 		})
