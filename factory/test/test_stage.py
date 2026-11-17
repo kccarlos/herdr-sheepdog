@@ -89,8 +89,6 @@ class OrderedStageTable(unittest.TestCase):
             ("owner_answer", "done", "owner_gate", "blocked_or_failed", "ci", "waiting_on_dep", "queued", "idle", "working"),
         )
         self.assertEqual(self.stage.OWNER_STAGES, frozenset({"owner_answer", "owner_gate"}))
-        for name in self.stage.STAGES:
-            self.assertEqual(self.stage.is_inbox_stage(name), name in ("owner_answer", "owner_gate"))
 
     def test_first_match_wins_precedence(self):
         # Task with open owner ask, ready state, attention, and running CI: owner_answer wins first.
@@ -189,14 +187,24 @@ class OrderedStageTable(unittest.TestCase):
             s.dirty = True
 
         with self.open_store() as s:
-            r1 = self.stage.resolve_stage(s.find("1"), [], store=s)
-            self.assertEqual((r1.stage, r1.inbox), ("owner_gate", True))
-            r2 = self.stage.resolve_stage(s.find("2"), [], store=s)
-            self.assertEqual((r2.stage, r2.inbox), ("ci", False))
-            r3 = self.stage.resolve_stage(s.find("3"), [], store=s)
-            self.assertEqual((r3.stage, r3.inbox), ("blocked_or_failed", False))
+            self.assertEqual(self.stage.resolve_stage(s.find("1"), [], store=s).stage, "owner_gate")
+            self.assertEqual(self.stage.resolve_stage(s.find("2"), [], store=s).stage, "ci")
+            self.assertEqual(self.stage.resolve_stage(s.find("3"), [], store=s).stage, "blocked_or_failed")
             r_fable = self.stage.resolve_stage(s.find("4"), [], store=s)
-            self.assertEqual((r_fable.stage, r_fable.inbox), ("working", False))
+            self.assertEqual((r_fable.stage, r_fable.inbox, r_fable.why), ("working", False, "Waits for Fable's review round"))
+
+        # Ready task with merge=auto and no PR is not waiting on Fable.
+        with open(self.settings_file, "w") as f:
+            json.dump({"projects": {self.repo: {"tasks": {"merge": "auto", "auto_accept": False}}}}, f)
+        with self.open_store(write=True) as s:
+            t_auto = s.new("Ready auto merge", "", "worktree")
+            t_auto.update(state="ready")
+            s.dirty = True
+        with self.open_store() as s:
+            r_auto = self.stage.resolve_stage(s.find("5"), [], store=s)
+            self.assertEqual((r_auto.stage, r_auto.inbox, r_auto.why), ("working", False, None))
+            v_auto = self.output.view(s, s.find("5"), [])
+            self.assertIsNone(v_auto["why_waiting"])
 
     def test_dependencies_and_queue_stages(self):
         with self.open_store(write=True) as s:
@@ -288,10 +296,6 @@ class OrderedStageTable(unittest.TestCase):
                 ("TST-1", "owner_gate", True),
             ])
 
-            rc, raw_list = run_cli("list", "--folder", self.repo, "--inbox", "--json")
-            self.assertEqual(rc, 0)
-            self.assertEqual([x["ref"] for x in json.loads(raw_list)["tasks"]], ["TST-2", "TST-6", "TST-1"])
-
             rc, txt = run_cli("inbox", "--folder", self.repo)
             self.assertEqual(rc, 0)
             self.assertIn("TST-2", txt)
@@ -317,10 +321,42 @@ class OrderedStageTable(unittest.TestCase):
         rc, empty_txt = run_cli("inbox", "--folder", self.repo)
         self.assertEqual((rc, empty_txt.strip()), (0, "Inbox is empty."))
 
-        # stage.inbox_tasks and inbox --all --json agree and stay empty when nothing waits on the owner.
-        with self.open_store() as s:
-            self.assertEqual(self.stage.inbox_tasks(s), [])
-            f3 = self.automations.task_facts(s, s.find("3"))
-            self.assertEqual((f3["stage"], f3["inbox"]), ("ci", False))
+        # inbox --all --json returns empty when nothing waits on the owner.
         rc, all_raw = run_cli("inbox", "--all", "--json")
         self.assertEqual((rc, json.loads(all_raw)["tasks"]), (0, []))
+
+    def test_automations_stalled_timing_and_retry_line_preserved(self):
+        # automations.task_facts keeps status_of() timing for stalled detection while exposing stage/inbox.
+        log = os.path.join(self.tmp, "bg2.jsonl")
+        with open(log, "w") as f:
+            f.write(json.dumps({"type": "user", "toolUseResult": {"backgroundTaskId": "bg2"},
+                                "message": {"role": "user", "content": [{"tool_use_id": "t2", "type": "tool_result",
+                                                                         "content": "Command running in background with ID: bg2"}]}}) + "\n")
+        with self.open_store(write=True) as s:
+            s.data["prefix"] = "TST"
+            t = s.new("Bg and retry", "", "worktree")
+            t.update(
+                state="running",
+                started=self.clock - 300_000,
+                attention="Checks failing.",
+                attention_at=self.clock - 60_000,
+                progress={"text": "Waiting on CI", "set": self.clock - 30_000, "at": self.clock - 30_000},
+                retry={"address": "w1", "reason": "Provider overloaded", "due": self.clock + 120_000},
+                agents=[{"address": "w1", "at": self.clock - 300_000, "log": log}],
+            )
+            s.dirty = True
+        self.live_by_key[f"{self.open_store().slug}#1"] = [
+            {"address": "w1", "state": "live", "status": {"state": "idle"}, "status_ms": self.clock - 60_000,
+             "foreground": {"name": "claude"}}]
+        with self.open_store() as s:
+            t = s.find("1")
+            res = self.stage.resolve_stage(t, self.live_by_key[f"{s.slug}#1"], store=s)
+            self.assertEqual((res.stage, res.status, res.legacy_why), ("working", "working", "Provider overloaded · retry in 2m"))
+            facts = self.automations.task_facts(s, t)
+            self.assertEqual((facts["status"], facts["stage"], facts["inbox"]), ("idle", "working", False))
+            seen = {}
+            self.automations.diff_events([facts], seen)
+            self.clock += 31 * 60_000
+            with mock.patch.object(self.automations, "now", lambda: self.clock):
+                evs = self.automations.diff_events([facts], seen)
+            self.assertEqual([e for e, _ in evs], ["stalled"])

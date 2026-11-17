@@ -284,7 +284,7 @@ def _match_idle(ctx):
 
 
 def _match_working(ctx):
-    task, live = ctx["task"], ctx["live"]
+    task, live, store = ctx["task"], ctx["live"], ctx["store"]
     st = task.get("state")
     if st == "ready":
         if ctx["on_it_working"] or agents.back_at_work(task, live):
@@ -299,15 +299,19 @@ def _match_working(ctx):
             return why, "ready", None, None
         if _quota_wait(task):
             return task["review_quota_wait"]["text"], "ready", None, None
-        return "Waits for Fable's review round", "ready", None, None
+        if store is not None and hasattr(store, "loc"):
+            from .settings import accept_bar
+            if accept_bar(store, task)[1] == "waits for Fable's review round":
+                return "Waits for Fable's review round", "ready", None, None
+        return None, "ready", None, None
     if agents.back_at_work(task, live):
         return agents.WORKING_AGAIN, "working", None, agents.WORKING_AGAIN
-    if ctx["on_it_working"]:
-        return None, "working", None, None
     r = task.get("retry")
     if r and any(k.get("address") == r.get("address") for k in live):
         rl = agents.retry_line(r)
         return rl, "working", None, rl
+    if ctx["on_it_working"]:
+        return None, "working", None, None
     if any(x not in ("idle", "done", "blocked") for x in ctx["states"]):
         return None, "working", None, None
     if agents.starting(task):
@@ -345,10 +349,6 @@ STAGES = tuple(row[0] for row in STAGE_TABLE)
 OWNER_STAGES = frozenset(row[0] for row in STAGE_TABLE if row[1])
 STAGE_LABELS = {row[0]: row[2] for row in STAGE_TABLE}
 STAGE_ORDER = {row[0]: i for i, row in enumerate(STAGE_TABLE)}
-
-
-def is_inbox_stage(stage_name):
-    return stage_name in OWNER_STAGES
 
 
 def resolve_stage(task, live=(), *, store=None, asks=None, deps=None, queue_why=None):
@@ -390,28 +390,3 @@ def resolve_stage(task, live=(), *, store=None, asks=None, deps=None, queue_why=
             matched = (stage_name, inbox, label, why)
     # Unreachable because _match_working is a catch-all, but defensive.
     return StageResult("working", False, "Working", None, "working", None, None)
-
-
-def task_stage(task, live=(), *, store=None, asks=None, deps=None, queue_why=None):
-    """Return the winning stage key from the ordered stage table."""
-    return resolve_stage(task, live, store=store, asks=asks, deps=deps, queue_why=queue_why).stage
-
-
-def inbox_tasks(store, tasks=None, *, live_fn=None):
-    """Return only owner-waiting tasks (stage in OWNER_STAGES), ordered by stage table order then id."""
-    from .output import view
-    items = []
-    for t in (tasks if tasks is not None else store.data.get("tasks") or []):
-        if t.get("archived"):
-            continue
-        if live_fn is not None:
-            live = live_fn(t)
-        elif t.get("state") in ("running", "ready"):
-            live = [k for k in map(agents.detail, agents.live_agents(store.key(t))) if agents.agent_running(k)]
-        else:
-            live = []
-        v = view(store, t, live)
-        if v.get("inbox"):
-            items.append(v)
-    items.sort(key=lambda v: (STAGE_ORDER.get(v["stage"], len(STAGE_TABLE)), v.get("id") or 0))
-    return items

@@ -89,8 +89,7 @@ def cmd_list(args):
         folders = [d["folder"] for d in map(read_list, store_files()) if is_task_list(d)]
     else:
         folders = [locate(args.folder)["folder"]]
-    inbox_only = getattr(args, "inbox", False)
-    groups = [_folder_views(folder, archived=args.archived, inbox_only=inbox_only)
+    groups = [_folder_views(folder, archived=args.archived)
               for folder in folders if os.path.isdir(folder)]
     if args.json:
         print(json.dumps(groups if args.all else groups[0]))
@@ -99,16 +98,16 @@ def cmd_list(args):
         if args.all:
             print(f"{g['name']}  {g['folder']}")
         for v in g["tasks"]:
-            if inbox_only or v["state"] != "done" or args.all or args.archived:
-                print(("  " if args.all else "") + (inbox_line(v) if inbox_only else line(v)))
-        hidden = 0 if (args.archived or inbox_only) else sum(1 for v in g["tasks"] if v["state"] == "done")
+            if v["state"] != "done" or args.all or args.archived:
+                print(("  " if args.all else "") + line(v))
+        hidden = 0 if args.archived else sum(1 for v in g["tasks"] if v["state"] == "done")
         more = [f"{hidden} done"] if hidden and not args.all else []
         if g.get("archived") and not args.all:
             more.append(f"{g['archived']} archived: --archived lists them")
         if more:
             print(f"({'; '.join(more)})")
         elif not g["tasks"] and not args.all:
-            print("Inbox is empty." if inbox_only else "No archived tasks." if args.archived else "No tasks.")
+            print("No archived tasks." if args.archived else "No tasks.")
 
 
 def cmd_inbox(args):

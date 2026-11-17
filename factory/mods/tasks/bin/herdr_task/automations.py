@@ -415,12 +415,9 @@ def task_facts(s, t):
     live = [detail(k) if "foreground" not in k else k for k in live_agents(s.key(t))] if t["state"] in ("running", "ready") else []
     working_ones = [k for k in live if agent_running(k)]
     res = resolve_stage(t, working_ones, store=s)
-    if t["state"] == "running":
-        st = "stopped" if res.needs == "stopped" else "working" if res.status == "working" else status_of(t, working_ones)
-    else:
-        st = t["state"]
     return {"id": t["id"], "ref": s.ref(t), "title": t["title"], "branch": t.get("branch"), "state": t["state"],
-            "status": st, "stage": res.stage, "inbox": res.inbox,
+            "status": status_of(t, working_ones) if t["state"] == "running" else t["state"],
+            "stage": res.stage, "inbox": res.inbox,
             "needs": res.needs, "attention": t.get("attention"), "merged": bool(t.get("merged")),
             "automation": t.get("automation"), "starting": bool(t["state"] == "running" and starting(t))}
 
