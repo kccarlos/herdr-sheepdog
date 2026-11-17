@@ -129,12 +129,15 @@ def remote_slug(s, task=None):
     return None
 
 
+def _gh_bin():
+    return GH if GH != "gh" else (os.environ.get("HERDR_TASK_GH") or "gh")
+
+
 def github(s, task=None):
     """The repo on GitHub ("owner/name") from the remote the task (or folder) pushes to, when gh works
     there; asked again after an hour. None: tasks merge locally."""
     pr_r = ((task or {}).get("pr") or {}).get("repo")
-    gh_bin = GH if GH != "gh" else (os.environ.get("HERDR_TASK_GH") or "gh")
-    if s.loc["kind"] != "repo" or not shutil.which(gh_bin):
+    if s.loc["kind"] != "repo" or not shutil.which(_gh_bin()):
         return None
     if pr_r and "/" in pr_r:
         return pr_r
@@ -177,7 +180,7 @@ def on_github(folder):
 
 def github_unreachable(s):
     """Why GitHub couldn't be asked about a repo whose remote is there (github() said None), else None."""
-    return getattr(s, "github_error", None) if s.loc["kind"] == "repo" and shutil.which(GH) else None
+    return getattr(s, "github_error", None) if s.loc["kind"] == "repo" and shutil.which(_gh_bin()) else None
 
 
 def github_required(s, task=None):
@@ -189,8 +192,7 @@ def github_refusal(s, task=None):
     """Why GitHub couldn't be reached/used for a GitHub-backed repo when github() returned None."""
     if why := github_unreachable(s):
         return why
-    gh_bin = GH if GH != "gh" else (os.environ.get("HERDR_TASK_GH") or "gh")
-    if not shutil.which(gh_bin):
+    if not shutil.which(_gh_bin()):
         return "gh isn't installed here (GitHub CLI)"
     return getattr(s, "github_error", None) or "gh isn't signed in or couldn't access this GitHub repo (run `gh auth login`)"
 

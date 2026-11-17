@@ -13741,6 +13741,27 @@ class AcceptGitHubPrPath(unittest.TestCase):
         self.assertEqual((self.task["state"], self.task.get("merged")), ("done", True))
         self.assertEqual(self.git(self.main, "rev-parse", "main"), self.base_sha)
 
+    def test_accept_and_merge_go_pr_path_even_when_local_base_has_task_commit(self):
+        # Local main already fast-forwarded to task/1-doc (e.g. an earlier local merge), while origin/main has not.
+        self.git(self.main, "merge", "-q", "--ff-only", "task/1-doc")
+        self.assertEqual(self.git(self.main, "rev-parse", "main"), self.tip)
+        calls, state = self.mock_gh(pending=True)
+        self.commands.cmd_accept(self.args())
+        self.assertEqual(state["pushed_before_create"], self.tip)
+        self.assertTrue(any(c[:2] == ("pr", "create") for c in calls), calls)
+        self.assertEqual(self.git(self.main, "branch", "--list", "--format=%(refname:short)", "task/1-doc"), "task/1-doc")
+        self.assertTrue(os.path.isdir(self.wt))
+        # cmd_merge likewise goes the PR path instead of marking it done from local main.
+        self.git(self.root, "--git-dir", self.bare, "branch", "-D", "task/1-doc")
+        self.task.pop("pr", None)
+        self.task.pop("auto_merge", None)
+        self.task["state"] = "running"
+        calls2, state2 = self.mock_gh(pending=False)
+        self.commands.cmd_merge(self.args())
+        self.assertEqual(state2["pushed_before_create"], self.tip)
+        self.assertTrue(any(c[:2] == ("pr", "create") for c in calls2), calls2)
+        self.assertTrue(any(c[:2] == ("pr", "merge") for c in calls2), calls2)
+
     def test_pr_title_formats_conventional_and_plain_titles(self):
         ref = self.store.ref(self.task)
         self.assertEqual(self.github.pr_title(self.store, {"id": 1, "title": "docs(factory): audit"}), f"docs(factory): audit ({ref})")

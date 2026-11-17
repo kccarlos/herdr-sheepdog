@@ -2133,6 +2133,8 @@ def run_pr_merge(s, t, wait_as_checks=False):
         if t.get("head") and branch_tip(s, t) != t["head"]:
             return "github", f"{t.get('branch')} has moved on since it said ready: its agent says ready again first."
         pr_open(s, t, repo, t.get("summary"))
+        # Restart the CI-start grace window from when the PR actually opened so a stale ready_at
+        # doesn't make checks_missing conclude CI never started.
         if wait_as_checks or not t.get("ready_at"):
             t["ready_at"] = now()
     error = merge_now(s, t, accepting=True)
@@ -2160,10 +2162,8 @@ def cmd_merge(args):
             # On GitHub: Herdr merges the pull request itself (squash), then tidies up here.
             how, error = run_pr_merge(s, t)
         elif task_github(github, s, t) or github_required(s, t):
-            if merged_here(s, t) or in_base(s, t):
-                t["merged"] = merged_here(s, t)
-                if not t["merged"]:
-                    t["nothing_to_merge"] = True
+            if in_base(s, t, remote_only=True):
+                t["nothing_to_merge"] = True
                 finish(s, t, even_if_busy=True)
                 how = "done"
             else:
@@ -2189,13 +2189,15 @@ def branch_tip(s, t):
     return (tip if ok and tip else None) or t.get("head") or None
 
 
-def in_base(s, t):
+def in_base(s, t, remote_only=False):
     """Its branch holds nothing its base branch doesn't, here or on its remote: no commits of its
     own, or it only caught up with its base (`git merge --ff-only main` or `git rebase origin/main`
     while the local main is behind: SHEP-23, #737). Nothing to merge, and never merged."""
     tip, main, base = branch_tip(s, t), s.loc["folder"], t.get("base") or "main"
+    remote_ref = f"refs/remotes/{remote_of(main, t.get('branch'))}/{base}"
+    refs = (remote_ref,) if remote_only and git(main, "rev-parse", "--verify", "--quiet", remote_ref)[0] else (base, remote_ref)
     return bool(tip) and (tip == t.get("start") or any(
-        git(main, "merge-base", "--is-ancestor", tip, ref)[0] for ref in (base, f"refs/remotes/{remote_of(main, t.get('branch'))}/{base}")))
+        git(main, "merge-base", "--is-ancestor", tip, ref)[0] for ref in refs))
 
 
 def ff_merge(s, t):
@@ -2274,21 +2276,24 @@ def cmd_accept(args):
             t["state"], t["ready_at"] = "ready", now()
         t.pop("attention", None)
         wt = t.get("worktree") if t.get("mode") == "worktree" else None
-        t["accepted_at"] = now()
         s.dirty = True
         if not wt:
             # Worked in the folder itself: nothing to merge.
             finish(s, t)
         elif t.get("pr") or own_open_pr(s, t):
             how, error = run_pr_merge(s, t, wait_as_checks=True)
+        elif task_github(github, s, t) or github_required(s, t):
+            if in_base(s, t, remote_only=True):
+                t["nothing_to_merge"] = True
+                finish(s, t, even_if_busy=True)
+            else:
+                how, error = run_pr_merge(s, t, wait_as_checks=True)
         elif merged_here(s, t) or in_base(s, t):
             # Its own work already in the base branch, or none of its own: nothing to merge.
             t["merged"] = merged_here(s, t)
             if not t["merged"]:
                 t["nothing_to_merge"] = True
             finish(s, t, even_if_busy=True)
-        elif task_github(github, s, t) or github_required(s, t):
-            how, error = run_pr_merge(s, t, wait_as_checks=True)
         elif ff_merge(s, t):
             how = "merged"
             t["merged"] = True
@@ -2299,6 +2304,7 @@ def cmd_accept(args):
             sent, started = tell(s, t, local_merge_msg(s, t), args)
         if not error:
             t["accepted_by"] = by
+            t["accepted_at"] = now()
         v = view(s, t)
     if error:
         say(args, {**v, "error": error}, None) if args.json else print(f"herdr-task: {error}", file=sys.stderr)
