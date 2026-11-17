@@ -217,8 +217,7 @@ def pr_repo(task, s=None, fn=None):
     return repo
 
 
-def push_branch(s, task):
-    """Pushes the task's branch to where its pull request reads it; Fail with git's error when it can't."""
+def _push_target(s, task):
     wt, br = task["worktree"], task["branch"]
     folder = wt if wt and os.path.isdir(wt) else s.loc["folder"]
     remote = remote_of(folder, br)
@@ -228,11 +227,27 @@ def push_branch(s, task):
             remote = base_r
     # The pull request it continues (#828) gets its new commits on its own branch, never forced.
     to = (task.get("pr") or {}).get("branch") or br
-    # Already there at its exact tip (pushed by hand): no second push through its hooks (#795).
     has, tip, _ = git(folder, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")
     seen, there, _ = git(folder, "ls-remote", remote, f"refs/heads/{to}")
-    # FAC-98: GitHub's update-branch merged its base into it there: nothing of its own to push (a push would
-    # drop that merge).
+    return folder, remote, br, to, has, tip, seen, there
+
+
+def branch_needs_push(s, task):
+    """Whether pushing/opening a PR for `task` would push a new commit to the remote."""
+    if not (task.get("pr") or {}).get("number"):
+        return True
+    wt = task.get("worktree")
+    folder = wt if wt and os.path.isdir(wt) else s.loc["folder"]
+    if not folder or not os.path.isdir(folder):
+        return bool(task.get("head") and task["pr"].get("head_sha") and task["pr"]["head_sha"] != task["head"])
+    _, _, _, _, has, tip, seen, there = _push_target(s, task)
+    return not (has and tip and seen and (there.split()[:1] == [tip] or tip == task.get("head") and synced_head(task, pr_repo(task), there.split()[0] if there.split() else "")))
+
+
+def push_branch(s, task):
+    """Pushes the task's branch to where its pull request reads it; Fail with git's error when it can't."""
+    folder, remote, br, to, has, tip, seen, there = _push_target(s, task)
+    # Already there at its exact tip (pushed by hand): no second push through its hooks (#795).
     if not (has and tip and seen and (there.split()[:1] == [tip] or tip == task.get("head") and synced_head(task, pr_repo(task), there.split()[0] if there.split() else ""))):
         # #1007: the task list's lock let go meanwhile (a pre-push hook can run for many minutes).
         with released(s):
@@ -1162,6 +1177,69 @@ def ci_runs_on(task, v):
         return ok and any(r.get("headSha") == v.get("headRefOid") for r in json.loads(out))
     except (ValueError, TypeError, AttributeError):
         return False
+
+
+CI_CAP_WAIT = "Waiting for CI runner slot"
+PR_RUN_ACTIVE = {"QUEUED", "IN_PROGRESS", "WAITING", "PENDING", "REQUESTED"}
+PR_RUN_EVENTS = {"pull_request", "pull_request_target"}
+
+
+def ci_runner_cap(s):
+    """Configured PR-in-CI runner cap for this project (0 or None: unlimited)."""
+    from .settings import settings_for
+    raw = (settings_for(s)["tasks"].get("ci_runner_cap") if s is not None else 0)
+    try:
+        return max(0, int(raw or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def prs_in_ci(s, repo=None, skip_task=None):
+    """Counts other PRs currently running CI (store tasks with open pending PRs + active GitHub PR runs)."""
+    seen = set()
+    skip_id = skip_task.get("id") if isinstance(skip_task, dict) else None
+    skip_brs = {skip_task.get("branch"), (skip_task.get("pr") or {}).get("branch")} - {None, ""} if isinstance(skip_task, dict) else set()
+    base = (skip_task or {}).get("base") or "main"
+    for other in (s.data.get("tasks") or []) if s is not None and isinstance(getattr(s, "data", None), dict) else ():
+        if other is skip_task or (skip_id is not None and other.get("id") == skip_id):
+            continue
+        if other.get("state") not in ("running", "ready") or other.get("merged") or other.get("push_held"):
+            continue
+        opr = other.get("pr") or {}
+        if not opr.get("number") or opr.get("no_ci"):
+            continue
+        if repo and opr.get("repo") and opr["repo"].lower() != repo.lower():
+            continue
+        if other.get("ci_pending") or opr.get("wait") in (CHECKS_RUNNING, STARTED_CI, "Checks are still running.") or other.get("merge_queued"):
+            seen.add(opr.get("branch") or other.get("branch") or f"pr#{opr['number']}")
+    if repo:
+        ok, out, _ = gh("run", "list", "--repo", repo, "--json", "status,headBranch,event", "--limit", "50")
+        try:
+            runs = json.loads(out) if ok and out else []
+        except ValueError:
+            runs = []
+        if isinstance(runs, list):
+            for r in runs:
+                if not isinstance(r, dict) or (r.get("status") or "").upper() not in PR_RUN_ACTIVE:
+                    continue
+                ev = (r.get("event") or "").lower()
+                br = r.get("headBranch") or ""
+                if br and br in skip_brs:
+                    continue
+                if ev in PR_RUN_EVENTS or (ev in ("", "workflow_dispatch") and br and br != base):
+                    seen.add(br or f"run#{len(seen)}")
+    return len(seen)
+
+
+def ci_cap_hold(s, task, repo=None):
+    """Reason to hold pushing another PR/commit into CI when PRs in CI >= runner cap, else None."""
+    cap = ci_runner_cap(s)
+    if cap <= 0:
+        return None
+    in_ci = prs_in_ci(s, repo, skip_task=task)
+    if in_ci >= cap:
+        return f"{CI_CAP_WAIT} ({in_ci} of {cap} PRs in CI)"
+    return None
 
 
 def pr_wait(v, since, expect=None, ci=False):

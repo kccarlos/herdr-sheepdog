@@ -190,14 +190,20 @@ MERGING, MERGES_ITSELF = "Merging", "Merges once its checks pass"
 
 def ready_wait(task, live):
     """What a Ready task waits on that needs nobody, in a few words; None when it's the person's."""
+    if task.get("push_held") and not task["push_held"].get("gate"):
+        return task["push_held"].get("reason") or "Waiting for CI runner slot"
     if task.get("merge_requested") and live:
         return MERGING
     if task.get("merge_queued") and task.get("pr"):
         return IN_QUEUE_LINE
+    wait = (task.get("pr") or {}).get("wait") or ""
+    from .github import CI_CAP_WAIT
+    if wait.startswith(CI_CAP_WAIT):
+        return wait
     if task.get("auto_merge") and task.get("pr") and not task.get("merged"):
         # #743: waits calmly for a review GitHub requires
         return APPROVAL_LINE if task["pr"].get("needs_approval") else MERGES_ITSELF
-    return (task.get("pr") or {}).get("wait") or None
+    return wait or None
 
 
 # ---- a short grace before Needs you (SHEP-133) ------------------------------------------------

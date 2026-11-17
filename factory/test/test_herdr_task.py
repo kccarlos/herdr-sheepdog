@@ -9635,7 +9635,7 @@ class ProjectStart(unittest.TestCase):
         before = len(self.calls)
         text2 = self.start(repo, "--requirements", "https://example.com/other", "--check", "pytest", "--autopilot")
         self.assertTrue(all("found" in line for line in text2.strip().splitlines()[:6]), text2)
-        self.assertIn("Checklist for My App: 3 ready, 5 missing", text2)
+        self.assertIn("Checklist for My App: 3 ready, 6 missing", text2)
         self.assertEqual([c for c in self.calls[before:] if c[:2] == ["hc", "run"]], [])
         self.assertEqual(self.Path(repo, "docs", "requirements.md").read_text(), "# Goal\nShip v1.\n")
 
@@ -9754,7 +9754,8 @@ class ProjectStart(unittest.TestCase):
         subprocess.run(["git", "init", "-q", "--bare", bare], check=True)
         self.put(os.path.join(repo, "package.json"), {"scripts": {"test": "vitest"}})
         self.put(os.path.join(repo, ".github", "workflows", "ci.yml"),
-                 "jobs:\n  test:\n    env:\n      T: ${{ secrets.GITHUB_TOKEN }}\n      A: ${{ secrets.API_KEY }}\n      S: ${{ secrets.SENTRY_DSN }}\n")
+                 "on:\n  push:\n    branches: [main]\n  pull_request:\n    paths-ignore: ['docs/**', '**/*.md']\njobs:\n  test:\n    env:\n      T: ${{ secrets.GITHUB_TOKEN }}\n      A: ${{ secrets.API_KEY }}\n      S: ${{ secrets.SENTRY_DSN }}\n")
+        self.put(os.path.join(repo, "docs", "flaky-tests.md"), "# Flaky tests\n")
         self.start(repo, "--name", "Web App")
         with self.mock.patch.object(sys, "argv", ["herdr-task", "autopilot", "off", "--folder", repo, "--json"]), self.redirect(self.io.StringIO()):
             self.cli.main()
@@ -9765,7 +9766,7 @@ class ProjectStart(unittest.TestCase):
         self.gh_repo, self.gh_secrets = "acme/web-app", "NAME\tUPDATED\nAPI_KEY\t2026-11-12T00:00:00Z\n"
         out1 = json.loads(self.checklist(repo, "--json"))
         self.assertFalse(out1["ios"])
-        self.assertEqual(out1["ready"], ["github", "disk"])
+        self.assertEqual(out1["ready"], ["github", "ci_shape", "disk"])
         self.assertFalse({"apple_signin", "asc_agreements"} & {x["key"] for x in out1["items"]})
         sec_item = next(x for x in out1["items"] if x["key"] == "ci_secrets")
         self.assertEqual((sec_item["referenced"], sec_item["missing"]), (["API_KEY", "SENTRY_DSN"], ["SENTRY_DSN"]))
@@ -9782,7 +9783,7 @@ class ProjectStart(unittest.TestCase):
         self.assertIn("docs/requirements.md", self.ap.heartbeat_of(repo)[0])
         self.gh_secrets = "API_KEY\t2026-11-12\nSENTRY_DSN\t2026-11-12\n"
         text2 = self.checklist(repo)
-        self.assertIn("8 ready, 0 missing — ready for an unattended night.", text2)
+        self.assertIn("9 ready, 0 missing — ready for an unattended night.", text2)
         out2 = json.loads(self.checklist(repo, "--json"))
         self.assertEqual((out2["ok"], out2["missing"], out2["asked"], out2["steps"]), (True, [], [], []))
         with self.store.Store(self.store.locate(repo), write=False) as s:
@@ -9932,6 +9933,101 @@ class ProjectStart(unittest.TestCase):
             beat = self.ap.heartbeat_of(r)[0]
             self.assertTrue(beat.startswith(self.project.HEARTBEAT_HEAD))
             self.assertNotIn("to export", beat)
+
+    def test_ci_shape_checklist_item_checks_all_rules(self):
+        """SDF-33: CI shape item checks the 5 CI rules, persists on checklist/start, and feeds base_health."""
+        repo = os.path.join(self.tmp, "ci-shape-repo")
+        os.makedirs(repo)
+        # 1. No workflows yet -> ci_shape missing with clear spec in detail and steps.
+        out0 = json.loads(self.checklist(repo, "--json", "--dry-run"))
+        item0 = next(x for x in out0["items"] if x["key"] == "ci_shape")
+        self.assertFalse(item0["ready"])
+        self.assertIn("no CI workflow yet", item0["detail"])
+        self.assertIn(self.project.CI_SHAPE_SPEC, item0["detail"])
+        self.assertTrue(any(self.project.CI_SHAPE_SPEC in s for s in out0["steps"]))
+
+        # 2. Bad workflow in an inherited repo (>=2 commits): no docs skip, 4 heavy PR jobs, cancel-in-progress on main, no base flakiness note.
+        self.put(os.path.join(repo, "package.json"), {"scripts": {"test": "vitest"}})
+        subprocess.run(["git", "-C", repo, "init", "-q", "-b", "main"], check=True)
+        for k, v in (("user.name", "H"), ("user.email", "h@x")):
+            subprocess.run(["git", "-C", repo, "config", k, v], check=True)
+        subprocess.run(["git", "-C", repo, "add", "package.json"], check=True)
+        subprocess.run(["git", "-C", repo, "commit", "-q", "-m", "init"], check=True)
+        wf = os.path.join(repo, ".github", "workflows", "ci.yml")
+        self.put(wf, (
+            "on:\n"
+            "  push:\n"
+            "    branches: [main]\n"
+            "  pull_request:\n"
+            "concurrency:\n"
+            "  group: ci-${{ github.ref }}\n"
+            "  cancel-in-progress: true\n"
+            "jobs:\n"
+            "  lint: {}\n"
+            "  unit: {}\n"
+            "  web: {}\n"
+            "  e2e: {}\n"
+        ))
+        subprocess.run(["git", "-C", repo, "add", "."], check=True)
+        subprocess.run(["git", "-C", repo, "commit", "-q", "-m", "existing ci"], check=True)
+        self.assertIn(self.project.CI_SHAPE_SPEC, self.project.base_health(repo))
+        ok1, det1, steps1, shape1 = self.project.check_ci_shape(repo)
+        self.assertFalse(ok1)
+        self.assertEqual(
+            (shape1["docs_skip"], shape1["heavy_jobs"], shape1["max_heavy_jobs"], shape1["queue_not_cancel_on_main"], shape1["base_flakiness_measured"]),
+            (False, 4, False, False, False),
+        )
+        for flag in ("docs skip", "at most 3 heavy jobs per PR (found 4)", "queue not cancel on main", "base flakiness measured first (docs/flaky-tests.md)"):
+            self.assertIn(flag, det1)
+        self.assertTrue(any("notes 23, 28" in s for s in steps1))
+        # _has_docs_skip only counts pull_request triggers and does not scan across steps or jobs.
+        self.assertFalse(self.project._has_docs_skip(
+            "on:\n  pull_request:\n    paths-ignore: ['ios/**']\njobs:\n  build:\n    steps:\n      - run: make docs\n"
+        ))
+        self.assertFalse(self.project._has_docs_skip(
+            "on:\n  push:\n    branches: [main]\n    paths-ignore: ['docs/**']\n  pull_request:\n    branches: [main]\n"
+        ))
+        self.assertFalse(self.project._has_docs_skip(
+            "jobs:\n  filter:\n    steps:\n      - uses: dorny/paths-filter@v3\n        with:\n          filters: 'any: [\"**\"]'\n      - run: mkdocs build -d site/docs/\n"
+        ))
+        self.assertTrue(self.project._has_docs_skip(
+            "on:\n  pull_request:\n    paths-ignore: ['docs/**']\n"
+        ))
+
+        # 3. Fixed workflow + docs/flaky-tests.md + path-filter job -> <=3 heavy PR jobs, 1 summary check, docs skip, safe concurrency on main, flaky baseline noted.
+        self.put(wf, (
+            "on:\n"
+            "  push:\n"
+            "    branches: [main]\n"
+            "  pull_request:\n"
+            "    paths-ignore: ['docs/**', '**/*.md']\n"
+            "concurrency:\n"
+            "  group: ci-${{ github.ref }}\n"
+            "  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}\n"
+            "jobs:\n"
+            "  changes:\n"
+            "    uses: dorny/paths-filter@v3\n"
+            "  lint: {}\n"
+            "  unit: {}\n"
+            "  web: {}\n"
+            "  ci:\n"
+            "    needs: [lint, unit, web]\n"
+        ))
+        self.put(os.path.join(repo, "docs", "flaky-tests.md"), "# Flaky tests baseline\nMeasured 10 main runs.\n")
+        ok2, det2, steps2, shape2 = self.project.check_ci_shape(repo)
+        self.assertTrue(ok2, (det2, shape2))
+        self.assertEqual(steps2, [])
+        self.assertLessEqual(shape2["heavy_jobs"], self.project.MAX_HEAVY_PR_JOBS)
+        self.assertTrue(shape2["queue_not_cancel_on_main"])
+        self.assertTrue(shape2["docs_skip"])
+        self.assertTrue(shape2["base_flakiness_measured"])
+
+        # Checklist persists ci_shape dict (with ok=True) in settings.json.
+        out2 = json.loads(self.checklist(repo, "--json"))
+        self.assertIn("ci_shape", out2["ready"])
+        with self.store.Store(self.store.locate(repo), write=False) as s:
+            saved_ci = self.st.settings_for(s)["project"].get("ci_shape")
+            self.assertTrue(isinstance(saved_ci, dict) and saved_ci.get("ok"), saved_ci)
 
 
 class ProbeVolume(unittest.TestCase):
@@ -11081,6 +11177,8 @@ class ReviewTheCommitGitHubHas(unittest.TestCase):
         def fake_gh(*a, **k):
             if a[:2] == ("pr", "view"):
                 return True, self.git(self.origin, "rev-parse", "refs/heads/task/13"), ""
+            if a[:2] == ("run", "list"):
+                return True, "[]", ""
             self.merges.append(a)
             return True, "", ""
         for mod, name, value in ((github, "gh", fake_gh), (self.commands, "gh", fake_gh),
@@ -11180,6 +11278,8 @@ class UpToDateBeforeMerge(unittest.TestCase):
             if a[:2] == ("pr", "merge"):
                 gh["merged"] = a[a.index("--match-head-commit") + 1]
                 return True, "", ""
+            if a[:2] == ("run", "list"):
+                return True, "[]", ""
             raise AssertionError(f"gh {a}")
         view = lambda t: {"state": "MERGED" if gh["merged"] else "OPEN", "mergeable": "MERGEABLE", "headRefOid": gh["head"],
                           "statusCheckRollup": rows(), "mergeCommit": {"oid": "f00"}, "mergeStateStatus": "CLEAN"}
@@ -14272,3 +14372,348 @@ class ClaudeStartupTrustAndDialogs(unittest.TestCase):
             live[0] = {**live[0], "status": {"state": "working"}, "turn": 1}
             with self.store_mod.Store(self.store_mod.locate(repo), write=False) as s:
                 self.assertEqual(self.agents.task_status(s.find(tid), live), ("working", None, None))
+
+
+def _init_git_with_wt(tmp, name="repo"):
+    bare = os.path.join(tmp, f"{name}.git")
+    repo = os.path.join(tmp, name)
+    wt = os.path.join(tmp, f"{name}-wt")
+    subprocess.run(["git", "init", "--bare", "-q", "-b", "main", bare], check=True)
+    subprocess.run(["git", "-C", tmp, "clone", "-q", bare, repo], check=True)
+    for k, v in (("user.name", "H"), ("user.email", "h@example.invalid"), ("commit.gpgsign", "false")):
+        subprocess.run(["git", "-C", repo, "config", k, v], check=True)
+    with open(os.path.join(repo, "app.py"), "w") as f:
+        f.write("v = 1\n")
+    subprocess.run(["git", "-C", repo, "add", "app.py"], check=True)
+    subprocess.run(["git", "-C", repo, "commit", "-q", "-m", "init"], check=True)
+    subprocess.run(["git", "-C", repo, "push", "-q", "-u", "origin", "main"], check=True)
+    subprocess.run(["git", "-C", repo, "worktree", "add", "-q", "-b", "task/1", wt, "main"], check=True)
+    for k, v in (("user.name", "H"), ("user.email", "h@example.invalid"), ("commit.gpgsign", "false")):
+        subprocess.run(["git", "-C", wt, "config", k, v], check=True)
+    return bare, repo, wt
+
+
+class DocsOnlyCommitsExempt(unittest.TestCase):
+    """SDF-33: Docs-only commits after a reviewed/ready head skip extra review rounds and preserve ready_at."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.agents as agents, herdr_task.base as base, herdr_task.budget as budget
+        import herdr_task.commands as commands, herdr_task.github as github, herdr_task.settings as settings, herdr_task.store as store
+        self.mock = mock
+        self.agents, self.base, self.budget, self.commands, self.github, self.settings, self.store_mod = (
+            agents, base, budget, commands, github, settings, store
+        )
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="sdf33-docs-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.bare, self.repo, self.wt = _init_git_with_wt(self.tmp)
+        for mod in (base, store, settings, commands):
+            if hasattr(mod, "STORE"):
+                p = mock.patch.object(mod, "STORE", os.path.join(self.tmp, "tasks"))
+                p.start()
+                self.addCleanup(p.stop)
+        for mod, name in ((settings, "SETTINGS"), (base, "SETTINGS"), (store, "SETTINGS")):
+            if hasattr(mod, name):
+                p = mock.patch.object(mod, name, os.path.join(self.tmp, "settings.json"))
+                p.start()
+                self.addCleanup(p.stop)
+
+    def commit(self, folder, rel, body, msg):
+        path = os.path.join(folder, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(body)
+        subprocess.run(["git", "-C", folder, "add", rel], check=True)
+        subprocess.run(["git", "-C", folder, "commit", "-q", "-m", msg], check=True)
+        return subprocess.check_output(["git", "-C", folder, "rev-parse", "HEAD"], text=True).strip()
+
+    def test_docs_only_commits_helper_classification(self):
+        # Prompts/templates and nested non-doc code paths are NOT docs-only; root docs, READMEs, and docs/ prose/media are.
+        for bad in ("internal/doc/parser.go", "src/docs/handler.ts", "docs/conf.py", "notes.txt", "scripts/build.sh",
+                    "prompts/assistant.md", "prompts/svp/RULES.md", "factory/templates/reviewer.md"):
+            self.assertFalse(self.budget.is_doc_file(bad), bad)
+        for good in ("README.md", "docs/guide.md", "docs/img/arch.png", "doc/notes.txt", "ios/README.md", "ios/docs/dev/status.md"):
+            self.assertTrue(self.budget.is_doc_file(good), good)
+        h_code = self.commit(self.wt, "app.py", "v = 2\n", "code change")
+        h_doc1 = self.commit(self.wt, "docs/guide.md", "# Guide\n", "docs md")
+        h_doc2 = self.commit(self.wt, "doc/notes.mdx", "# Notes\n", "docs mdx")
+        h_doc3 = self.commit(self.wt, "README.rst", "Title\n=====\n", "readme rst")
+        h_doc4 = self.commit(self.wt, "SPEC.adoc", "= Spec\n", "spec adoc")
+        self.assertTrue(self.budget.docs_only_commits(self.wt, "main", h_code, h_doc1))
+        self.assertTrue(self.budget.docs_only_commits(self.wt, "main", h_code, h_doc4))
+        # Base merge + docs commit is also docs-only; bare merge-only is NOT docs-only.
+        self.commit(self.repo, "other.py", "x = 1\n", "main: other")
+        subprocess.run(["git", "-C", self.repo, "push", "-q", "origin", "main"], check=True)
+        subprocess.run(["git", "-C", self.wt, "fetch", "-q", "origin", "main"], check=True)
+        subprocess.run(["git", "-C", self.wt, "merge", "--no-ff", "-q", "-m", "merge main", "origin/main"], check=True)
+        h_merge = subprocess.check_output(["git", "-C", self.wt, "rev-parse", "HEAD"], text=True).strip()
+        self.assertFalse(self.budget.docs_only_commits(self.wt, "main", h_doc4, h_merge))
+        h_merge_doc = self.commit(self.wt, "docs/after-merge.md", "ok\n", "docs after merge")
+        self.assertTrue(self.budget.docs_only_commits(self.wt, "main", h_doc4, h_merge_doc))
+        # Any non-doc file (.txt at root or .py) fails docs_only_commits.
+        h_txt = self.commit(self.wt, "notes.txt", "plain text at root\n", "non-doc txt")
+        self.assertFalse(self.budget.docs_only_commits(self.wt, "main", h_doc4, h_txt))
+        self.assertFalse(self.budget.docs_only_commits(self.wt, "main", h_merge_doc, h_txt))
+
+    def test_docs_only_exempts_gate_and_worker_review_and_keeps_ready_at(self):
+        clock = [1_700_000_000_000]
+        with open(os.path.join(self.tmp, "settings.json"), "w") as f:
+            json.dump({"everywhere": {"tasks": {
+                "review": True, "reviewer": "claude", "rounds": 2, "must_fix": "major", "auto_accept": True,
+            }}}, f)
+        h_code = self.commit(self.wt, "app.py", "v = 2\n", "feat: code")
+        with self.store_mod.Store(self.store_mod.locate(self.repo)) as s:
+            t = s.new("Feature + docs", "Build and document.", "worktree")
+            t.update(worktree=self.wt, branch="task/1", base="main", state="running", head=h_code, started=clock[0],
+                     review_gate=True, set={"review": "on", "review_rounds": 2, "review_min": 0})
+            t["rounds"] = [{"head": h_code, "passed": True, "at": clock[0], "findings": 0}]
+            t["reviews"] = [{"head": h_code, "round": 1, "result": "report", "report": "ok", "at": clock[0]}]
+            s.dirty = True
+
+        # 1. Worker review_refusal & auto_accept reviewed_for_head pass for docs-only commit on reviewed head.
+        h_doc = self.commit(self.wt, "docs/api.md", "# API\n", "docs: add api doc")
+        t["head"] = h_doc
+        self.assertIsNone(self.commands.review_refusal(s, t, self.wt))
+        self.assertTrue(self.settings.reviewed_for_head(s, t, h_doc))
+
+        # 2. Gate mode: gate_step passes without a new reviewer round on docs-only commit; finalize preserves ready_at!
+        t["review_gate"] = False
+        t["set"] = {"review": "on", "review_rounds": 2, "review_min": 1}
+        t["reviews"] = [{"head": h_code, "round": 1, "started_by": "herdr-task", "verdict": "pass", "findings": [], "at": clock[0]}]
+        t["head"] = h_code
+        t["summary"] = "Ready code"
+        pushes = []
+        fake_gh = lambda *a, **k: (True, json.dumps([]), "") if a[:2] == ("run", "list") else (True, "", "")
+        def fake_open(s_, t_, r, sum_=None):
+            pushes.append(t_["head"])
+            return {"number": 9, "repo": "o/r", "url": "u/9", "head_sha": t_["head"]}
+        with (self.mock.patch.object(self.commands, "now", lambda: clock[0]),
+              self.mock.patch.object(self.github, "now", lambda: clock[0]),
+              self.mock.patch.object(self.github, "gh", fake_gh),
+              self.mock.patch.object(self.commands, "gh", fake_gh),
+              self.mock.patch.object(self.github, "remote_repo", lambda *a: "o/r"),
+              self.mock.patch.object(self.commands, "task_github", lambda g, s_, t_: "o/r"),
+              self.mock.patch.object(self.commands, "pr_head_problem", lambda *a, **k: None),
+              self.mock.patch.object(self.commands, "gate_need", lambda s_, t_: 1),
+              self.mock.patch.object(self.commands, "pr_open", fake_open),
+              self.mock.patch.object(self.commands, "finish", lambda *a, **k: None)):
+            self.assertIsNone(self.commands.gate_step(s, t))
+            self.commands.finalize(s, t)
+            t1_ready = t["ready_at"]
+            self.assertEqual((t["ready_head"], t["state"]), (h_code, "ready"))
+
+            # Docs-only commit after ready: gate_step returns None (exempt) and finalize preserves t1_ready.
+            t["state"] = "running"
+            t["head"] = h_doc
+            clock[0] += 60_000
+            self.assertIsNone(self.commands.gate_step(s, t))
+            self.commands.finalize(s, t)
+            self.assertEqual(len(t["reviews"]), 1)  # no new review round launched!
+            self.assertEqual(pushes, [h_code, h_doc])
+            self.assertEqual((t["ready_at"], t["ready_head"]), (t1_ready, h_code))
+            self.assertEqual(t.get("head_moved_at"), clock[0])  # fresh CI grace clock on docs-only push
+
+            # Gate push sets pr["wait"] = PR_CHECKS_RUNNING so prs_in_ci counts it for other tasks right away.
+            h_gate_push = self.commit(self.wt, "app.py", "v = 2b\n", "feat: gate push")
+            t["head"] = h_gate_push
+            t["pr"] = {"number": 9, "repo": "o/r", "url": "u/9", "head_sha": h_code}
+            with (self.mock.patch.object(self.commands, "live_agents", lambda key: []),
+                  self.mock.patch.object(self.commands, "detail", lambda k: k),
+                  self.mock.patch.object(self.commands, "fallback_reviewer", lambda *a, **k: ({"agent": "claude"}, None)),
+                  self.mock.patch.object(self.commands, "branch_needs_push", lambda s_, t_: True),
+                  self.mock.patch.object(self.commands, "ci_cap_hold", lambda *a: None),
+                  self.mock.patch.object(self.commands, "push_branch", lambda s_, t_: None),
+                  self.mock.patch.object(self.commands, "launch", lambda s_, t_, argv_, prompt_, **k: {"address": "rev-0"})):
+                self.commands.gate_step(s, t)
+            self.assertEqual(t["pr"].get("wait"), self.github.CHECKS_RUNNING)
+            t.pop("review_runs", None)
+            t.pop("pr", None)
+
+            # New code commit fails worker review_refusal & triggers gate_start.
+            h_code2 = self.commit(self.wt, "app.py", "v = 3\n", "feat: more code")
+            t["head"] = h_code2
+            t["state"] = "running"
+            started_gate = []
+            with (self.mock.patch.object(self.commands, "live_agents", lambda key: []),
+                  self.mock.patch.object(self.commands, "detail", lambda k: k),
+                  self.mock.patch.object(self.commands, "fallback_reviewer", lambda *a, **k: ({"agent": "claude"}, None)),
+                  self.mock.patch.object(self.commands, "launch", lambda s_, t_, argv_, prompt_, **k: started_gate.append(t_["head"]) or {"address": "rev-1"})):
+                self.commands.gate_step(s, t)
+            self.assertEqual(started_gate, [h_code2])
+            t["review_gate"] = True
+            t["set"] = {"review": "on", "review_rounds": 2, "review_min": 0}
+            t["reviews"] = [{"head": h_code, "round": 1, "result": "report", "report": "ok", "at": clock[0]}]
+            self.assertIsNotNone(self.commands.review_refusal(s, t, self.wt))
+            self.assertFalse(self.settings.reviewed_for_head(s, t, h_code2))
+
+
+class CIRunnerCap(unittest.TestCase):
+    """SDF-33: CI runner cap counts active PR CI runs, holds pushes calmly, and tick releases slots one by one."""
+
+    def setUp(self):
+        from unittest import mock
+        import argparse
+        sys.path.insert(0, BIN)
+        import herdr_task.agents as agents, herdr_task.base as base, herdr_task.commands as commands
+        import herdr_task.github as github, herdr_task.settings as settings, herdr_task.store as store, herdr_task.tick as tick
+        self.mock, self.argparse = mock, argparse
+        self.agents, self.base, self.commands, self.github, self.settings, self.store_mod, self.tick = (
+            agents, base, commands, github, settings, store, tick
+        )
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="sdf33-cap-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.bare, self.repo, self.wt = _init_git_with_wt(self.tmp)
+        for mod in (base, store, settings, commands, tick):
+            if hasattr(mod, "STORE"):
+                p = mock.patch.object(mod, "STORE", os.path.join(self.tmp, "tasks"))
+                p.start()
+                self.addCleanup(p.stop)
+        for mod, name in ((settings, "SETTINGS"), (base, "SETTINGS"), (store, "SETTINGS")):
+            if hasattr(mod, name):
+                p = mock.patch.object(mod, name, os.path.join(self.tmp, "settings.json"))
+                p.start()
+                self.addCleanup(p.stop)
+
+    def test_config_sets_ci_runner_cap_and_zero_means_unlimited(self):
+        said = []
+        with self.mock.patch.object(self.commands, "say", lambda args, data, text: said.append(data)):
+            self.commands.cmd_config(self.argparse.Namespace(
+                folder=self.repo, id=None, space=None, scope=None, reset=False,
+                prefix=None, build_dir=None, set=["tasks.ci_runner_cap=5"],
+            ))
+        with self.store_mod.Store(self.store_mod.locate(self.repo), write=False) as s:
+            self.assertEqual(self.github.ci_runner_cap(s), 5)
+        with self.mock.patch.object(self.commands, "say", lambda args, data, text: said.append(data)):
+            self.commands.cmd_config(self.argparse.Namespace(
+                folder=self.repo, id=None, space=None, scope=None, reset=False,
+                prefix=None, build_dir=None, set=["tasks.ci_runner_cap=0"],
+            ))
+        with self.store_mod.Store(self.store_mod.locate(self.repo), write=False) as s:
+            self.assertEqual(self.github.ci_runner_cap(s), 0)
+            self.assertIsNone(self.github.ci_cap_hold(s, {"id": 1, "branch": "task/1"}))
+
+    def test_prs_in_ci_hold_and_tick_release_one_slot_at_a_time(self):
+        clock = [1_700_000_000_000]
+        gh_runs = [
+            {"headBranch": "ext-1", "event": "pull_request", "status": "in_progress"},
+            {"headBranch": "ext-1", "event": "pull_request_target", "status": "queued"},  # same branch counts once
+            {"headBranch": "main", "event": "push", "status": "in_progress"},  # non-PR event ignored
+        ]
+        opened = []
+
+        def fake_gh(*a, **k):
+            if a[:2] == ("run", "list"):
+                return True, json.dumps(gh_runs), ""
+            return True, "", ""
+
+        def fake_open(s_, t_, r, sum_=None):
+            opened.append(t_["id"])
+            pr = {"number": 10 + t_["id"], "repo": r, "url": f"u/{10 + t_['id']}", "head_sha": t_.get("head"), "wait": self.github.CHECKS_RUNNING}
+            t_["pr"] = pr
+            return pr
+
+        updated = []
+        patches = (
+            (self.github, "gh", fake_gh),
+            (self.commands, "gh", fake_gh),
+            (self.github, "remote_repo", lambda *a: "o/r"),
+            (self.commands, "task_github", lambda g, s_, t_: "o/r"),
+            (self.commands, "pr_head_problem", lambda *a, **k: None),
+            (self.github, "branch_needs_push", lambda s_, t_: True),
+            (self.commands, "now", lambda: clock[0]),
+            (self.github, "now", lambda: clock[0]),
+            (self.tick, "now", lambda: clock[0]),
+            (self.commands, "pr_open", fake_open),
+            (self.commands, "finish", lambda *a, **k: None),
+            (self.commands, "pr_view", lambda *a, **k: {"state": "OPEN", "isDraft": False, "headRefOid": "aaa", "mergeStateStatus": "CLEAN", "statusCheckRollup": [{"state": "SUCCESS"}]}),
+            (self.commands, "branch_tip", lambda s_, t_: t_.get("head")),
+            (self.commands, "main_red_hold", lambda *a: None),
+            (self.commands, "pr_behind", lambda t_, repo_, at_: True),
+            (self.commands, "sync_plan", lambda s_, t_: ("full", "")),
+            (self.commands, "pr_update_branch", lambda t_, r, h: (updated.append(t_["id"]), (True, ""))[1]),
+            (self.commands, "watch_main", lambda *a: None),
+            (self.commands, "update_main", lambda *a: None),
+            (self.tick, "watch_main", lambda *a: None),
+            (self.tick, "task_github", lambda g, s_, t_: "o/r"),
+            (self.tick, "pr_open", fake_open),
+            (self.tick, "pr_head_problem", lambda *a, **k: None),
+            (self.tick, "pr_merged", lambda *a: None),
+            (self.tick, "pr_deliver", lambda *a: None),
+            (self.tick, "pr_news", lambda *a: None),
+            (self.tick, "main_pass", lambda *a: None),
+            (self.tick, "tidy_done", lambda *a: None),
+            (self.tick, "pr_view", lambda *a, **k: None),
+            (self.tick, "live_agents", lambda key: []),
+            (self.tick, "detail", lambda k: k),
+        )
+        for obj, name, val in patches:
+            p = self.mock.patch.object(obj, name, val)
+            p.start()
+            self.addCleanup(p.stop)
+
+        with self.store_mod.Store(self.store_mod.locate(self.repo)) as s:
+            # 2 active store PRs + 1 external GitHub PR ("ext-1") = 3 of default cap 3!
+            t_run1 = s.new("Active 1", "d", "worktree")
+            t_run1.update(worktree=self.wt, branch="task/a1", state="ready", head="aaa", reviews=[{"head": "aaa"}],
+                          pr={"number": 10, "repo": "o/r", "url": "u/10", "head_sha": "aaa", "wait": self.github.CHECKS_RUNNING})
+            t_run2 = s.new("Active 2", "d", "worktree")
+            t_run2.update(worktree=self.wt, branch="task/a2", state="running", head="bbb",
+                          pr={"number": 11, "repo": "o/r", "url": "u/11", "head_sha": "bbb", "wait": self.github.STARTED_CI})
+            t_hold1 = s.new("Held 1", "d", "worktree")
+            t_hold1.update(worktree=self.wt, branch="task/1", state="running", head="ccc", summary="Done 1")
+            t_hold2 = s.new("Held 2", "d", "worktree")
+            t_hold2.update(worktree=self.wt, branch="task/2", state="running", head="ddd", summary="Done 2")
+            s.dirty = True
+
+            self.assertEqual(self.github.prs_in_ci(s, "o/r"), 3)
+            hold_msg = self.github.ci_cap_hold(s, t_hold1, "o/r")
+            self.assertIn(self.github.CI_CAP_WAIT, hold_msg)
+
+            # finalize holds both t_hold1 and t_hold2 instead of pushing or opening PRs.
+            self.commands.finalize(s, t_hold1)
+            self.commands.finalize(s, t_hold2)
+            self.assertEqual(opened, [])
+            self.assertEqual((t_hold1["state"], t_hold2["state"]), ("ready", "ready"))
+            self.assertTrue(t_hold1.get("push_held") and t_hold2.get("push_held"))
+            self.assertEqual(self.agents.task_status(t_hold1, [])[0], "working")
+
+            # merge_now holds pr_update_branch when 3 other PRs are in CI, while explicit accepting=True proceeds past cap.
+            t_run1["auto_merge"] = "checks"
+            gh_runs.append({"headBranch": "ext-2", "event": "pull_request", "status": "in_progress"})
+            res = self.commands.merge_now(s, t_run1)
+            self.assertIn(self.github.CI_CAP_WAIT, res)
+            self.assertIn(self.github.CI_CAP_WAIT, self.agents.ready_wait(t_run1, []))
+            self.assertEqual(self.agents.task_status(t_run1, [])[2], res)
+            self.assertEqual(updated, [])
+            self.commands.merge_now(s, t_run1, accepting=True)
+            self.assertEqual(updated, [t_run1["id"]])
+
+            # One external CI run finishes -> 2 of 3 busy (t_run1 + t_run2) -> tick releases ONLY t_hold1 (1 slot), keeps t_hold2 held!
+            gh_runs[:] = []
+            clock[0] += 30 * 60_000  # 30m later while held: release starts a fresh head_moved_at CI window
+            rep = {"started": [], "done": [], "attention": []}
+            self.tick.tick_store(s, rep)
+            self.assertEqual(opened, [t_hold1["id"]])
+            self.assertEqual(t_hold1.get("head_moved_at"), clock[0])
+            self.assertIsNone(t_hold1.get("push_held"))
+            self.assertIsNotNone(t_hold2.get("push_held"))
+            self.assertEqual(rep["attention"], [])  # CI_CAP_WAIT never raises attention
+
+            # Another PR drops out of CI -> tick releases t_hold2 on the next tick.
+            t_run1["pr"].pop("wait", None)
+            t_run2["pr"].pop("wait", None)  # finished CI checks no longer count against cap
+            self.tick.tick_store(s, rep)
+            self.assertEqual(opened, [t_hold1["id"], t_hold2["id"]])
+            self.assertIsNone(t_hold2.get("push_held"))
+
+            t_hold1["push_held"] = {"at": clock[0]}
+            t_hold1["state"] = "done"
+            s.dirty = True
+            tid1 = t_hold1["id"]
+
+        # reopen clears push_held cleanly (outside Store lock so cmd_state can open the store).
+        with self.mock.patch.object(self.commands, "say", lambda *a: None):
+            self.commands.cmd_state(self.argparse.Namespace(folder=self.repo, id=str(tid1), note=None), "reopen")
+        with self.store_mod.Store(self.store_mod.locate(self.repo), write=False) as s:
+            self.assertNotIn("push_held", s.find(tid1))
