@@ -100,10 +100,24 @@ func TestFactoryQuietRule(t *testing.T) {
 				const pane = "w5:p1"
 				h.addLabeledAgent(pane, "w5", "codex", herdr.StateIdle, tc.labels)
 
-				// Even an open promise and an owed instruction must not break
-				// the factory quiet rule.
-				if _, err := h.sup.createPromise(pane, brain.PromiseRequest{Text: "tell me when done", Event: brain.PromiseEventDone}); err != nil {
-					t.Fatal(err)
+				// createPromise must refuse factory-quiet panes with a clear message;
+				// also seed a promise directly in the store for quiet panes to verify
+				// announce silences even a pre-existing promise.
+				_, pErr := h.sup.createPromise(pane, brain.PromiseRequest{Text: "tell me when done", Event: brain.PromiseEventDone})
+				if tc.wantQuiet {
+					if pErr == nil {
+						t.Fatal("createPromise succeeded for factory-quiet pane, want refusal")
+					}
+					if err := h.store.UpdateSession(func(ss *state.Session) {
+						ss.Promises = append(ss.Promises, state.Promise{
+							ID: "pr-seeded", PaneID: pane, Alias: "codex", Text: "tell me when done",
+							Event: brain.PromiseEventDone, Status: state.PromiseOpen, CreatedAt: h.clock.Now(),
+						})
+					}); err != nil {
+						t.Fatal(err)
+					}
+				} else if pErr != nil {
+					t.Fatal(pErr)
 				}
 				h.send(pane, "run tests")
 				h.transition(pane, herdr.StateIdle, herdr.StateWorking)
