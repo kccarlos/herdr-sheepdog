@@ -99,6 +99,64 @@ def generated_only(wt, paths):
     return not rest or set(rest) <= marked_generated(wt, rest)
 
 
+DOC_SUFFIXES = (".md", ".mdx", ".rst", ".adoc")
+
+
+def is_doc_file(path):
+    """Whether a repo-relative path is documentation (under docs/ or doc/, or a doc file)."""
+    p = size_path(path)
+    return bool(p) and (p.startswith(("docs/", "doc/")) or "/docs/" in p or "/doc/" in p or p.endswith(DOC_SUFFIXES))
+
+
+def docs_only(wt, paths):
+    """Whether every path in `paths` is documentation (is_doc_file)."""
+    return all(is_doc_file(p) for p in paths if p)
+
+
+def docs_only_commits(wt, base, since, head, branch=None):
+    """Whether `head` since `since` (along first parents) adds at least one docs-only commit and
+    only docs-only commits (plus any clean base merges whose extra edits are only docs or generated files)."""
+    if not since or not head or since == head or not wt or not os.path.isdir(wt):
+        return False
+    if not git(wt, "merge-base", "--is-ancestor", since, head)[0]:
+        return False
+    bases = (base, f"refs/remotes/{remote_of(wt, branch)}/{base}")
+    c, saw_doc = head, False
+    for _ in range(100):
+        if c == since:
+            return saw_doc
+        ok, line, _ = git(wt, "rev-list", "--parents", "-n", "1", c)
+        parts = line.split() if ok else []
+        if len(parts) == 3:
+            _, first, other = parts
+            if not any(git(wt, "merge-base", "--is-ancestor", other, b)[0] for b in bases):
+                return False
+            _, mt, _ = git(wt, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", first, other)
+            mp = [p for p in mt.split("\0") if p]
+            if not mp or not SHA.fullmatch(mp[0]):
+                return False
+            ok_d, dt, _ = git(wt, "-c", "core.quotePath=false", "diff-tree", "-r", "--no-commit-id", "--name-only", "--no-renames", "-z", mp[0], c)
+            extra = [*mp[1:], *(p for p in dt.split("\0") if p)]
+            non_doc = [p for p in extra if not is_doc_file(p)]
+            if not ok_d or (non_doc and not generated_only(wt, non_doc)):
+                return False
+            if any(is_doc_file(p) for p in extra):
+                saw_doc = True
+            c = first
+        elif len(parts) == 2:
+            _, first = parts
+            ok_d, dt, _ = git(wt, "-c", "core.quotePath=false", "diff-tree", "-r", "--no-commit-id", "--name-only", "--no-renames", "-z", first, c)
+            paths = [p for p in dt.split("\0") if p]
+            if not ok_d or not docs_only(wt, paths):
+                return False
+            if paths:
+                saw_doc = True
+            c = first
+        else:
+            return False
+    return False
+
+
 def merge_only_commits(wt, base, since, head, branch=None):
     """FAC-89: whether `head` since `since` (along first parents) is only merges of `base` whose trees
     differ from git's clean merge of their two parents only in generated files (and had no conflicts

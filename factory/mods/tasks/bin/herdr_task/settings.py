@@ -55,7 +55,7 @@ ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants 
 DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "review_min": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": "",
                       "worktree_root": "", "check": "", "simulators": [], "reviewer_sandbox": True,
-                      "auto_accept": True, "sync": "cheap"},
+                      "auto_accept": True, "sync": "cheap", "ci_runner_cap": 3},
             "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {}, "project": {}}
 LEVELS = ["blocker", "major", "minor"]
 
@@ -220,6 +220,11 @@ def write_task_check(s, space=None, value=_UNSET):
     if value is _UNSET:
         value = space
     return _write_task_setting(s, "check", value)
+
+
+def write_ci_runner_cap(s, value=None):
+    """`config --set tasks.ci_runner_cap=N`: sets or clears the project folder's PR-in-CI runner cap."""
+    return _write_task_setting(s, "ci_runner_cap", value)
 
 
 _AGENTS_CHECK_RE = re.compile(
@@ -1029,7 +1034,7 @@ def fable_due(s, t):
 
 
 def reviewed_for_head(s, t, head):
-    """Reviews on `head`, or on the latest earlier head that `head` extends only with base merges."""
+    """Reviews on `head`, or on the latest earlier head that `head` extends only with base merges or docs-only commits."""
     all_revs = t.get("reviews") or []
     if not head:
         return []
@@ -1041,13 +1046,13 @@ def reviewed_for_head(s, t, head):
     git_dir = wt if wt and os.path.exists(os.path.join(wt, ".git")) else (folder if folder and os.path.exists(os.path.join(folder, ".git")) else None)
     if not git_dir:
         return []
-    from .budget import merge_only_commits
+    from .budget import docs_only_commits, merge_only_commits
     seen, base, branch = set(), t.get("base") or "main", t.get("branch")
     for r in reversed(all_revs):
         rh = r.get("head")
         if rh and rh != head and rh not in seen:
             seen.add(rh)
-            if merge_only_commits(git_dir, base, rh, head, branch):
+            if merge_only_commits(git_dir, base, rh, head, branch) or docs_only_commits(git_dir, base, rh, head, branch):
                 return [x for x in all_revs if x.get("head") == rh]
     return []
 

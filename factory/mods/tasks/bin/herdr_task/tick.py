@@ -19,8 +19,9 @@ from .agents import (
 )
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
-from .github import (already_merged, BEHIND, CHECKS_NEVER, CHECKS_RUNNING, checks_missing, checks_since, ci_awaited, ci_dispatch, ci_runs_on, drop_branch,
-                     expected_checks, finish, github, main_red_hold, merged_here, needs_approval, NO_CI_RUN, note_checks, pr_merged, pr_pending, pr_problem, pr_repo, pr_view,
+from .github import (already_merged, BEHIND, CHECKS_NEVER, CHECKS_RUNNING, checks_missing, checks_since, ci_awaited, ci_cap_hold, CI_CAP_WAIT,
+                     ci_dispatch, ci_runs_on, drop_branch, expected_checks, finish, github, main_red_hold, merged_here, needs_approval, NO_CI_RUN,
+                     note_checks, pr_head_problem, pr_merged, pr_open, pr_pending, pr_problem, pr_repo, pr_view,
                      pr_wait, CI_STOPPED, queue_entry, queue_merge, task_problem, task_github, tidy_done, tidy_due, update_main, watch_main,
                      UNKNOWN_CHECKS_MS)
 from .launch import parent_for, sweep_sandboxes
@@ -337,6 +338,30 @@ def tick_store(s, report):
             except Exception as e:  # never stops the tick
                 report.setdefault("start_nudge_error", []).append(f"{s.ref(t)}: {e}")
         if t.get("worktree") and t["state"] in ("running", "ready"):
+            if t["state"] == "ready" and t.get("push_held") and not t["push_held"].get("gate"):
+                repo = task_github(github, s, t)
+                if repo:
+                    if hold := ci_cap_hold(s, t, repo):
+                        if t["push_held"].get("reason") != hold:
+                            t["push_held"]["reason"] = hold
+                            s.dirty = True
+                    else:
+                        try:
+                            pr = pr_open(s, t, repo, t.get("summary"))
+                            if why := pr_head_problem(s, t, repo, t.get("head")):
+                                raise Fail(why[0].upper() + why[1:] + ".")
+                            t.pop("push_held", None)
+                            pr["checked"] = 0
+                            pr["wait"] = CHECKS_RUNNING
+                            s.dirty = True
+                        except Fail as e:
+                            t.pop("push_held", None)
+                            t["attention"], t["attention_at"] = str(e), now()
+                            s.dirty = True
+                            report["attention"].append(t["id"])
+                else:
+                    t.pop("push_held", None)
+                    s.dirty = True
             facts(s, t, report)
             try:
                 budget_pass(s, t)  # FAC-54: not converging, or far over its estimate: recap first
@@ -350,11 +375,12 @@ def tick_store(s, report):
             if t.get("auto_merge") and not t.get("accepted_by") and merge_hold(s, t):
                 t.pop("auto_merge", None)
                 s.dirty = True
-            if t["state"] == "ready" and t.get("auto_merge") and t.get("pr") and not t.get("attention") and t.get("_pr_fresh") \
+            if t["state"] == "ready" and t.get("auto_merge") and t.get("pr") and not t.get("push_held") and not t.get("attention") and t.get("_pr_fresh") \
                     and not busy_again(t, [detail(k) for k in live_agents(s.key(t))]):  # FAC-107: not under a turn just begun
                 if err := merge_now(s, t):
                     if (not t.get("attention") and t["state"] == "ready"
                             and err not in (MERGE_CHECKS_RUNNING, WAITS_APPROVAL, IN_QUEUE, NO_CI_RUN, t.get("accept_wait"))
+                            and not str(err).startswith(CI_CAP_WAIT)
                             and err != main_red_hold(s, t.get("base") or "main")):
                         t["attention"], t["attention_at"] = err, now()
                         s.dirty = True
@@ -369,7 +395,7 @@ def tick_store(s, report):
                 checks_pass(s, t)
             except Exception as e:  # never stops the tick
                 report.setdefault("checks_error", []).append(f"{s.ref(t)}: {e}")
-        if (t.get("review_runs") or t.get("review_quota_wait")) and t["state"] in ("running", "ready"):  # FAC-101: a quota wait too
+        if (t.get("review_runs") or t.get("review_quota_wait") or (t.get("push_held") or {}).get("gate")) and t["state"] in ("running", "ready"):  # FAC-101: a quota wait too
             had = t.get("attention")
             try:
                 gate_reads(s, t)  # a sandboxed reviewer's verdict, or a dead reviewer's fallback

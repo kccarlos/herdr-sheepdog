@@ -14,7 +14,7 @@ import time
 from . import sandbox
 from .checks import checks_line, resolve_check, sync_check, sync_mode, sync_plan, SYNC_FAILED
 from .base import Fail, git, guard, hc_json, kill_agent, label_of, now, run, STORE, stop_note, VERSION
-from .settings import (cli_missing_reason, write_max_running, write_task_check, write_worker_agent, write_worker_perm, WORKER_PERMS,
+from .settings import (cli_missing_reason, write_ci_runner_cap, write_max_running, write_task_check, write_worker_agent, write_worker_perm, WORKER_PERMS,
     accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
     fable_due, gate_min, merge_hold, merge_policy,
     merge_wait_why, MUST_WORDS, project_base, remove_build_dir, review_kind, review_limits, reviewed_for_head, set_opts, settings_block, settings_for,
@@ -25,7 +25,7 @@ from .agents import (
     REVIEWER_FAILED, STARTING_MS, STATUSES, status_word, SUMMARY_MAX, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
-from .github import (already_merged, checks_missing, checks_since, expected_checks, github_refusal, github_required, github_unreachable,
+from .github import (already_merged, branch_needs_push, checks_missing, checks_since, ci_cap_hold, CI_CAP_WAIT, expected_checks, github_refusal, github_required, github_unreachable,
                      pr_for_branch, pr_head_problem, pr_merged_at_tip, push_branch,
                      drop_branch, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
                      pr_pending, pr_problem, pr_repo, pr_behind, main_red_hold, pr_update_branch, synced_head, task_problem, SYNC_CHECKS_MS,
@@ -43,7 +43,7 @@ from .scheduler import ensure_scheduler
 from .proof import evidence, find_proof
 from .when import when_from
 from .templates import instructions
-from .budget import budget_lines, budget_pass, change_sizes, merge_only_commits, merge_only_step, recap_refusal, record_ci, size_estimate, size_pass
+from .budget import budget_lines, budget_pass, change_sizes, docs_only_commits, merge_only_commits, merge_only_step, recap_refusal, record_ci, size_estimate, size_pass
 from .simulators import release_task
 
 
@@ -691,6 +691,28 @@ def gate_passes(t, head):
     return sum(1 for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task" and r["head"] == head and r["verdict"] == "pass")
 
 
+def gate_passes_for(s, t, head, need=None):
+    """Passing gate rounds on `head`, or on the latest earlier commit that already met `need`
+    and was extended only by docs-only commits (exempt from new rounds)."""
+    got = gate_passes(t, head)
+    if need is not None and got >= need:
+        return got
+    wt = t.get("worktree") if t.get("mode") == "worktree" else None
+    if not wt or not head or not os.path.isdir(wt):
+        return got
+    base, br = t.get("base") or "main", t.get("branch")
+    seen = {head}
+    for r in reversed(t.get("reviews") or []):
+        rh = r.get("head")
+        if not rh or rh in seen or r.get("started_by") != "herdr-task":
+            continue
+        seen.add(rh)
+        n = gate_passes(t, rh)
+        if (need is None or n >= need) and docs_only_commits(wt, base, rh, head, br):
+            return n
+    return got
+
+
 def fork_of(wt, base, tip):
     """Where tip left its base: the merge-base with the local base or the remote's (new worktrees branch from the
     remote's, which can be ahead of the local one); the later of the two."""
@@ -743,7 +765,7 @@ def gate_step(s, t):
     """A gate folder's ready (FAC-13): None once its head has review.min passing rounds from
     herdr-task's own reviewer; else starts the next one for that head (or says why it waits)."""
     need, head = gate_need(s, t), t.get("head")
-    if not need or gate_passes(t, head) >= need:
+    if not need or gate_passes_for(s, t, head, need) >= need:
         return None
     if not head or not os.path.isdir(t.get("worktree") or ""):
         raise Fail(f"{s.ref(t)} has no worktree to review: start it first.")
@@ -751,7 +773,7 @@ def gate_step(s, t):
     if t.pop("auto_merge", None) is not None:
         s.dirty = True
     inspect_runs(s, t)
-    if gate_passes(t, head) >= need:
+    if gate_passes_for(s, t, head, need) >= need:
         return f"{s.ref(t)} is ready." if t.get("state") in ("ready", "done") else None
     if t.get("recap"):
         return f"{s.ref(t)}: {t['recap']['title']}."
@@ -804,7 +826,13 @@ def gate_step(s, t):
             t["progress"] = {"text": fit(f"Reviewers out of quota till {at}"), "at": now(), "set": now(), "by": "herdr"}
             s.dirty = True
         return f"{s.ref(t)}: {text}."
-    if (t.get("pr") or {}).get("number"):  # FAC-88: the reviewer reads the commit GitHub has: pushed first, or ready stops
+    if (t.get("pr") or {}).get("number") and branch_needs_push(s, t):  # FAC-88: the reviewer reads the commit GitHub has: pushed first, or ready stops
+        if hold := ci_cap_hold(s, t, pr_repo(t, s, github)):
+            t["push_held"] = {"reason": hold, "at": now(), "gate": True}
+            t["progress"] = {"text": fit(hold), "at": now(), "set": now(), "by": "herdr"}
+            s.dirty = True
+            return f"{s.ref(t)}: {hold}."
+        t.pop("push_held", None)
         push_branch(s, t)
     rv = FABLE if fable else pick
     ref, ht, folder = s.ref(t), own_path(), shlex.quote(s.loc["folder"])
@@ -905,7 +933,9 @@ def review_refusal(s, t, wt):
     head = t.get("head") if wt else None
     if (any(r.get("head") == head for r in revs) if wt else bool(revs)):
         return None
-    if wt and head and base_merges_only(s, t, wt, {r.get("head") for r in revs if r.get("head")}, head):
+    rev_heads = [r.get("head") for r in reversed(revs) if r.get("head")]
+    if wt and head and (base_merges_only(s, t, wt, set(rev_heads), head)
+                        or any(docs_only_commits(wt, t.get("base") or "main", rh, head, t.get("branch")) for rh in dict.fromkeys(rev_heads))):
         return None
     ref, ht, folder = s.ref(t), own_path(), shlex.quote(s.loc["folder"])
     what = f"your final commit {head[:7]}" if head else "this task's work"
@@ -1150,21 +1180,36 @@ def finalize(s, t):
     wt = t.get("worktree")
     local = t.get("mode") != "worktree" or not wt or t.get("nothing_to_merge")
     repo = task_github(github, s, t) if not local and os.path.isdir(wt) else None
-    failed = None
+    failed = held = None
     if repo:
         # Pushed and opened before it shows Ready: the push lets the task list go while its hooks run
         # (#1007), and a Ready task without its pull request yet could be accepted (merged here) meanwhile.
-        try:
-            pr = pr_open(s, t, repo, t.get("summary"))
-            if why := pr_head_problem(s, t, repo, t.get("head")):  # FAC-88: GitHub has the reviewed commit
-                raise Fail(why[0].upper() + why[1:] + ".")
-        except Fail as e:
-            failed = str(e)
+        if branch_needs_push(s, t) and (hold := ci_cap_hold(s, t, repo)):
+            held = hold
+            t["push_held"] = {"reason": hold, "at": now()}
+        else:
+            t.pop("push_held", None)
+            try:
+                pr = pr_open(s, t, repo, t.get("summary"))
+                if why := pr_head_problem(s, t, repo, t.get("head")):  # FAC-88: GitHub has the reviewed commit
+                    raise Fail(why[0].upper() + why[1:] + ".")
+            except Fail as e:
+                failed = str(e)
     elif not local and os.path.isdir(wt) and (github_unreachable(s) or github_required(s, t)):
         # #988: a GitHub repo gh couldn't reach just now: never on as if it had no GitHub (Accept would
         # merge it here while a pull request, its agent's, stays open there).
         failed = f"Couldn't reach GitHub to open its pull request: {github_refusal(s, t)}"
-    t["state"], t["ready_at"] = "ready", now()
+    head = t.get("head")
+    prev_head = t.get("ready_head") or next((r.get("head") for r in reversed(t.get("reviews") or []) if r.get("head")), None)
+    keep_ready = bool(wt and os.path.isdir(wt) and t.get("ready_at") and prev_head and head
+                      and docs_only_commits(wt, t.get("base") or "main", prev_head, head, t.get("branch")))
+    t["state"] = "ready"
+    if not keep_ready:
+        t["ready_at"] = now()
+        if head:
+            t["ready_head"] = head
+    elif not t.get("ready_head") and prev_head:
+        t["ready_head"] = prev_head
     for k in ("attention", "merge_requested", "review", "accepted_by", "auto_accepted", "accept_wait"):
         t.pop(k, None)
     (t.get("pr") or {}).pop("wait", None)
@@ -1172,6 +1217,7 @@ def finalize(s, t):
     s.dirty = True
     msg = f"{s.ref(t)} is ready."
     if local:
+        t.pop("push_held", None)
         # Nothing to merge (in the folder itself, or no commits beyond its base): it waits in Ready
         # for the person's Accept, whatever the merge setting; no pull request.
         t.pop("auto_merge", None)
@@ -1180,7 +1226,9 @@ def finalize(s, t):
     if failed:
         t["attention"] = failed
         return f"{s.ref(t)} {READY_BUT} {failed} Tell the person."
-    if repo:
+    if held:
+        msg = f"{s.ref(t)} is ready ({held}); it will push once a CI slot opens."
+    elif repo:
         pr["checked"] = 0
         # Working until its checks are done and GitHub knows it can merge (the tick: pr_wait()).
         pr["wait"] = PR_CHECKS_RUNNING
@@ -1189,6 +1237,8 @@ def finalize(s, t):
     policy = merge_policy(s, t)
     if policy in ("auto", "checks"):
         t["auto_merge"] = policy
+        if held:
+            return msg + (" It merges by itself once its checks pass." if policy == "checks" else "")
         if t.get("pr"):
             if policy == "auto":
                 err = merge_now(s, t)
@@ -1529,10 +1579,11 @@ def gate_reads(s, t):
     inspect_runs(s, t)
     need, head, wt = gate_need(s, t), t.get("head"), t.get("worktree") or ""
     mine = [r for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"]
-    if (not need or not head or gate_passes(t, head) >= need or open_runs(t)
+    if (not need or not head or gate_passes_for(s, t, head, need) >= need or open_runs(t)
             or t.get("recap") or t.get("review_out") or (t.get("attention") or "").startswith(REVIEWER_FAILED)
             or (mine and mine[-1]["head"] == head and mine[-1]["verdict"] == "changes")
-            or not (any(r["head"] == head for r in t.get("review_runs") or []) or (t.get("review_quota_wait") or {}).get("head") == head)
+            or not (any(r["head"] == head for r in t.get("review_runs") or []) or (t.get("review_quota_wait") or {}).get("head") == head
+                    or (t.get("push_held") or {}).get("gate"))
             or (t.get("review_quota_wait") or {}).get("until", 0) > now()):  # FAC-101: out of quota, retried after the reset
         return
     if os.path.isdir(wt) and git(wt, "rev-parse", "HEAD")[1] == head and not git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
@@ -1548,7 +1599,7 @@ def cmd_state(args, state):
             # pull request merged and close it again at once) until its agent says ready.
             if t["state"] == "done" and t.get("merged"):
                 t["kept_open"] = True
-            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait", "head_moved_at", "sync_fallback"):
+            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait", "head_moved_at", "sync_fallback", "push_held", "ready_head"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
@@ -1693,8 +1744,8 @@ def cmd_config(args):
         for pair in getattr(args, "set", None) or []:  # FAC-103: folder settings from the CLI
             k, eq, v = pair.partition("=")
             key = k.strip().lower()
-            if not eq or key not in ("tasks.max_running", "max_running", "tasks.check", "check", "worker.perm", "worker.agent"):
-                raise Fail(f"config --set takes tasks.max_running=N, tasks.check=CMD, worker.agent=CLI or worker.perm=MODE, not {pair!r}.")
+            if not eq or key not in ("tasks.max_running", "max_running", "tasks.ci_runner_cap", "ci_runner_cap", "tasks.runner_cap", "runner_cap", "tasks.check", "check", "worker.perm", "worker.agent"):
+                raise Fail(f"config --set takes tasks.max_running=N, tasks.ci_runner_cap=N, tasks.check=CMD, worker.agent=CLI or worker.perm=MODE, not {pair!r}.")
             v = v.strip().strip("\"'")
             low = v.lower()
             if key == "worker.agent":
@@ -1717,6 +1768,11 @@ def cmd_config(args):
                 continue
             if key in ("tasks.check", "check"):
                 write_task_check(s, None, None if not v or v.lower() == "default" else v)
+                continue
+            if key in ("tasks.ci_runner_cap", "ci_runner_cap", "tasks.runner_cap", "runner_cap"):
+                if v and low != "default" and not (v.isdigit() and 0 <= int(v) <= 50):
+                    raise Fail("tasks.ci_runner_cap is 0 to 50 (0: unlimited; \"default\": Settings' above this project).")
+                write_ci_runner_cap(s, int(v) if v.isdigit() else None)
                 continue
             if v and v.lower() != "default" and not (v.isdigit() and 1 <= int(v) <= 50):
                 raise Fail("tasks.max_running is 1 to 50 (\"default\": Settings' above this project).")
@@ -2083,7 +2139,15 @@ def merge_now(s, t, accepting=False):
     synced = synced_head(t, repo, v.get("headRefOid")) if v.get("state") != "MERGED" else None
     if synced == "":
         return CHECKS_RUNNING  # GitHub couldn't say whether its head is Herdr's update: asked again next tick
-    if v.get("state") != "MERGED" and not synced and (why := pr_head_problem(s, t, repo, head, v.get("headRefOid"))):
+    theirs = v.get("headRefOid")
+    wt_dir = t.get("worktree") or ""
+    if (not accepting and v.get("state") != "MERGED" and not synced and head and theirs and theirs != head
+            and os.path.isdir(wt_dir)
+            and git(wt_dir, "rev-parse", f"refs/heads/{t.get('branch')}")[1] == head
+            and git(wt_dir, "merge-base", "--is-ancestor", theirs, head)[0]):
+        if hold := ci_cap_hold(s, t, repo):
+            return hold
+    if v.get("state") != "MERGED" and not synced and (why := pr_head_problem(s, t, repo, head, theirs)):
         t["attention"], t["attention_at"] = why[0].upper() + why[1:], now()
         return t["attention"]
     if v.get("state") != "MERGED" and head and v.get("headRefOid") not in (None, "", head, synced):
@@ -2137,6 +2201,8 @@ def merge_now(s, t, accepting=False):
                 fallback_why = why
             behind = checked != "pass"
         if behind:
+            if not accepting and (hold := ci_cap_hold(s, t, repo)):
+                return hold
             if fallback_why and not t.get("sync_fallback"):
                 t["sync_fallback"] = {"from": "cheap", "to": "full", "why": f"tasks.sync fell back from cheap to full ({fallback_why})", "at": now()}
             ok, err = pr_update_branch(t, repo, at)
@@ -2238,6 +2304,7 @@ def run_pr_merge(s, t, wait_as_checks=False):
             return "github", None
         if t.get("head") and branch_tip(s, t) != t["head"] and not advance_merge_only(s, t):
             return "github", f"{t.get('branch')} has moved on since it said ready: its agent says ready again first."
+        t.pop("push_held", None)
         pr_open(s, t, repo, t.get("summary"))
         # Restart the CI-start grace window from when the PR actually opened so a stale ready_at
         # doesn't make checks_missing conclude CI never started.

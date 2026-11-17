@@ -226,6 +226,8 @@ def task_status(task, live):
         return "working", None, None if (task.get("progress") or {}).get("text") else REVIEWER_ON_IT
     if (task.get("review_quota_wait") or {}).get("head") == task.get("head") and task.get("head"):  # FAC-101: waits for a reset
         return "working", None, task["review_quota_wait"]["text"]
+    if (task.get("push_held") or {}).get("gate"):
+        return "working", None, task["push_held"].get("reason") or "Waiting for CI runner slot"
     # Quiet without saying ready, but on its own work (SHEP-53, FAC-60): a helper reviewer at work
     # keeps it Working; a background job of its own (hc get's foreground or status msg, its log's
     # background shells/Monitors, or its fresh status line) shows Waiting on a background job,
@@ -271,6 +273,8 @@ MERGING, MERGES_ITSELF = "Merging", "Merges once its checks pass"
 
 def ready_wait(task, live):
     """What a Ready task waits on that needs nobody, in a few words; None when it's the person's."""
+    if task.get("push_held") and not task["push_held"].get("gate"):
+        return task["push_held"].get("reason") or "Waiting for CI runner slot"
     if task.get("merge_requested") and live:
         return MERGING
     if task.get("merge_queued") and task.get("pr"):
