@@ -45,10 +45,12 @@ class Plans(unittest.TestCase):
         settings_file = os.path.join(self.tmp, "settings.json")
         with open(settings_file, "w") as f:
             json.dump({}, f)
-        self.working = set()
+        self.live = {}  # task id: its live agents
+        self.ended = []
         for p in (mock.patch.object(base, "STORE", self.store_dir), mock.patch.object(store, "STORE", self.store_dir),
                   mock.patch.object(settings, "SETTINGS", settings_file),
-                  mock.patch.object(plan, "working", lambda s, t: t["id"] in self.working)):
+                  mock.patch.object(plan, "agents_of", lambda s, t: self.live.get(t["id"], [])),
+                  mock.patch("herdr_task.commands.end_agent", lambda s, t, a: self.ended.append(a))):
             p.start()
             self.addCleanup(p.stop)
         with self.open(True) as s:
@@ -216,11 +218,20 @@ class Plans(unittest.TestCase):
         with self.open(True) as s:
             s.find(str(api["id"]))["state"] = "running"
             s.dirty = True
-        self.working.add(api["id"])
+        self.live[api["id"]] = [{"address": "w1", "state": "live", "status": {"state": "working"}, "foreground": {"name": "claude"}}]
         plan["milestones"][1]["tasks"].pop()
         plan["milestones"][0]["tasks"].append(task("api-b", split_of="api"))
         rc, v = self.run_cli("plan", "amend", "--reason", "x", plan=plan)
-        self.assertIn("can't be split now", v["error"])
+        self.assertIn("can't be split now (its agent is at work)", v["error"])
+        # After a recap its agent sits idle: the split ends it and goes on.
+        self.live[api["id"]][0]["status"] = {"state": "idle"}
+        rc, v = self.run_cli("plan", "amend", "--reason", "recap said split", plan=plan)
+        self.assertEqual(rc, 0, v)
+        self.assertEqual(self.ended, ["w1"])
+        t = self.tasks()
+        self.assertNotIn("api", t)
+        self.assertEqual(t["api-b"]["after"], [t["design"]["id"]])
+        self.assertIn(t["api-b"]["id"], t["acc-M1"]["after"])
 
     def test_states_are_derived_and_acceptance_closes_the_milestone(self):
         self.run_cli("plan", "apply", plan=self.first_plan())

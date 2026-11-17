@@ -7,7 +7,7 @@ import json
 import re
 
 from .base import Fail, now
-from .queues import working
+from .agents import live_agents, status_word
 from .settings import set_task, worktrees_on
 
 GATES = ("auto", "fable", "owner")
@@ -57,6 +57,15 @@ def states(s):
     done = {t["acceptance_of"] for t in s.data["tasks"] if t.get("acceptance_of") and t["state"] == "done"}
     first = next((m["id"] for m in milestones(s) if m["id"] not in done), None)
     return {m["id"]: state_of(s, m, first) for m in milestones(s)}
+
+
+def agents_of(s, t):
+    return live_agents(s.key(t))
+
+
+def busy(s, t):
+    """An agent of the task is mid-turn (an idle one, as after a recap, ends when the task is split)."""
+    return any(status_word(k) == "working" for k in agents_of(s, t))
 
 
 def _resolve_ref(s, text):
@@ -177,8 +186,8 @@ class Plan:
                     self.bad(f"{t['key']}: a split keeps the parent's place; {s.ref(p)} is in {p.get('milestone')}, not {mid}.")
                 elif p.get("plan_key") in keys:
                     self.bad(f"{s.ref(p)} is split, so it can't stay in the plan as {p['plan_key']}.")
-                elif p["state"] not in NOT_STARTED + ("running",) or p.get("acceptance_of") or working(s, p):
-                    self.bad(f"{s.ref(p)} can't be split now ({p['state']}); stop its agent first if it is at work.")
+                elif p["state"] not in NOT_STARTED + ("running",) or p.get("acceptance_of") or busy(s, p):
+                    self.bad(f"{s.ref(p)} can't be split now ({'its agent is at work' if p['state'] == 'running' else p['state']}).")
                 else:
                     split_parents.setdefault(p["id"], []).append(t["key"])
         self.split_parents = split_parents
@@ -326,7 +335,10 @@ class Plan:
                     if pid in (o.get(f) or []):
                         o[f] = list(dict.fromkeys(x for i in o[f] for x in (ids if i == pid else [i])))
             splits[s.ref(parent)] = [s.ref(self.by_key[k]) for k in kids]
+            from .commands import end_agent
             from .simulators import release_task
+            for k in agents_of(s, parent):
+                end_agent(s, parent, k["address"])
             release_task(s, parent)
             s.data["tasks"].remove(parent)
         for t, mid in self.tasks:

@@ -28,7 +28,7 @@ SITUATIONS = json.load(open(os.path.join(ROOT, "test", "replay", "situations.jso
 GONE = ("herdr-app", "herdr-browser", "Tasks panel", "<hc suggest", "herdr-task feedback", "herdr-task home",
         "the switch in your header", "Show things in the chat", "Show it in the chat", "Usage insights", "--space")
 HT = re.compile(r"herdr-task(?=\s|$)")
-NESTED = ("auto", "autopilot", "machines", "project", "simulator")
+NESTED = ("auto", "autopilot", "machines", "plan", "project", "simulator")
 
 
 def prompts(files=False, templates=None):
