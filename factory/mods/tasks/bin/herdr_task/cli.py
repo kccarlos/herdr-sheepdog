@@ -10,7 +10,7 @@ import sys
 import time
 
 from . import link
-from .base import bundle, Fail, guard, hc_json, run, STORE, sync_held, VERSION
+from .base import bundle, Fail, guard, hc_json, run, STORE, VERSION
 from .agents import LINE_MAX, SUMMARY_MAX
 from .launch import cmd_allow, is_coordinator, name_tabs
 from .commands import (
@@ -22,7 +22,6 @@ from .tick import cmd_tick
 from .automations import auto_list, cmd_auto, cmd_scheduler, cmd_track, EVENTS, HOW
 from .machines import cmd_assistants, cmd_machines, cmd_sync_auto, cmd_tell
 from .autopilot import cmd_autopilot, cmd_complete, cmd_progress
-from .assistant_settings import cmd_session_note
 from .ask import cmd_ask, cmd_ask_pane
 from .budget import cmd_recap, DECISIONS
 from .project import cmd_project
@@ -37,7 +36,7 @@ def install_secret(machine):
     """herdr-secret goes along to another machine (its `install --on`: no values, only the
     command), so agents there can ask for and use secrets. Best effort, again when it changed."""
     path = shutil.which("herdr-secret")
-    if not path or sync_held():
+    if not path:
         return
     with open(os.path.realpath(path), "rb") as f:
         digest = hashlib.sha1(f.read()).hexdigest()
@@ -70,10 +69,6 @@ def remote_run(machine, argv, timeout=None):
         installed = False
 
     def install():
-        held = sync_held()
-        if held:
-            raise Fail(f"herdr-task isn't current on {machine}, and copies to other machines wait: {held}. "
-                       "Run `shepherdr doctor` once the install is whole.")
         guard(["hc"])
         # A machine with Herdr's own install (its window's) holds herdr-task's source: copies come from there, it's
         # never written to (machines.py, the same rule). Its link ~/.local/bin/herdr-task leads into that install.
@@ -93,8 +88,7 @@ def remote_run(machine, argv, timeout=None):
         with open(mark, "w") as f:
             f.write(digest)
 
-    # Held (base.sync_held): no copy goes; the copy already there runs.
-    if not installed and not sync_held():
+    if not installed:
         install()
     install_secret(machine)
     if argv[:1] == ["_job"]:
@@ -494,9 +488,6 @@ def main():
     c.add_argument("--command", required=True)
     c.add_argument("--sandboxed", action="store_true")  # Codex's: its proof and commits run escalated (#866)
     c.set_defaults(fn=cmd_allow, json=False)
-    c = sub.add_parser("_session-note")  # the chat's SessionStart hook (mods/chat/session-note.sh): an Assistant's extra words
-    c.add_argument("terminal")
-    c.set_defaults(fn=cmd_session_note, json=False)
     c = cmd("sandbox", cmd_sandbox, "whether Codex's sandbox (bwrap) can start on this machine, and the fix for it when it can't "
             "(asked once and kept; --check asks again)", id=False)
     c.add_argument("--check", action="store_true", help="ask again now")

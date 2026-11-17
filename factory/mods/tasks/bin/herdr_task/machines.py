@@ -24,7 +24,13 @@ import sys
 import threading
 import time
 
-from .base import addon_off, APP_HOME, ASK_HOME, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, now, PACKAGE, run, STORE, WHERE
+from .base import bundle, ENTRY, Fail, guard, HOME, hc_json, now, PACKAGE, run, STORE, WHERE
+
+# Compatibility shims until SDF-9 adapts machines.py.
+APP_HOME = os.path.join(HOME, ".config", "herdr-app")
+ASK_HOME = os.path.join(".local", "share", "herdr", "ask")
+addon_off = lambda _name: False
+sync_held = lambda: None
 
 
 def _shep_py():
@@ -46,11 +52,11 @@ def _shep_py():
 def SHEP(rel, _t={table!r}):
     H, E = os.path.expanduser("~"), os.environ
     a = lambda v: E.get(v) if (E.get(v) or "").startswith("/") else None
-    one = a("SHEPHERDR_HOME")
+    one = a("SHEEPDOG_FACTORY_HOME") or a("SHEEPDOG_HOME") or a("SHEPHERDR_HOME")
     R = dict((k, os.path.join(one, k)) for k in ("config", "data", "state")) if one else {{
-        "config": os.path.join(a("XDG_CONFIG_HOME") or os.path.join(H, ".config"), "shepherdr"),
-        "data": os.path.join(a("XDG_DATA_HOME") or os.path.join(H, ".local", "share"), "shepherdr"),
-        "state": os.path.join(a("XDG_STATE_HOME") or os.path.join(H, ".local", "state"), "shepherdr")}}
+        "config": os.path.join(a("XDG_CONFIG_HOME") or os.path.join(H, ".config"), "sheepdog"),
+        "data": os.path.join(a("XDG_DATA_HOME") or os.path.join(H, ".local", "share"), "sheepdog"),
+        "state": os.path.join(a("XDG_STATE_HOME") or os.path.join(H, ".local", "state"), "sheepdog")}}
     for old, (base, new) in _t.items():
         if rel == old or rel.startswith(old + "/"):
             return os.path.join(R[base], new + rel[len(old):])

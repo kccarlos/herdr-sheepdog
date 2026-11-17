@@ -39,8 +39,8 @@ class Machine(unittest.TestCase):
 
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="shep-secret-main-")
-        self.secrets = os.path.join(self.dir, "home", ".local", "share", "shepherdr", "secrets")
-        self.drop = os.path.join(self.dir, "home", ".local", "state", "shepherdr", "secret-drop")
+        self.secrets = os.path.join(self.dir, "home", ".local", "share", "sheepdog", "secrets")
+        self.drop = os.path.join(self.dir, "home", ".local", "state", "sheepdog", "secret-drop")
         self.core = os.path.join(self.dir, "state", "herdr-core", "default")
         os.makedirs(self.secrets)
         os.makedirs(self.core)
@@ -179,7 +179,7 @@ class Mark(Machine):
         payload = {"op": "install", "stamp": ".herdr/tasks/.sync-stamp.json", "files": [], "links": [], "version": "v", "from": "m3",
                    "touch": [{"path": ".herdr/secret-remote", "unless": ".herdr/vault.json", "unless_main": True}]}
         env = {"PATH": os.environ.get("PATH", ""), "HOME": home, "XDG_STATE_HOME": os.path.join(self.dir, "state")}
-        mark = os.path.join(home, ".local", "share", "shepherdr", "secrets", "remote")
+        mark = os.path.join(home, ".local", "share", "sheepdog", "secrets", "remote")
         for me, rec, marked in ((MINI, {"id": MINI, "at": 2}, False), (VM, {"id": MINI, "at": 2}, True), (VM, None, True)):
             self.be(me, rec)
             r = subprocess.run([sys.executable, "-c", machines.INSTALL], input=json.dumps(payload), env=env, capture_output=True, text=True)

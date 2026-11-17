@@ -4,7 +4,7 @@ import hashlib
 import os
 import sys
 
-from .base import APP_HOME, bundle, ENTRY, hc_json, HOME, run, STORE
+from .base import bundle, ENTRY, hc_json, HOME, run, STORE
 from .store import read_list, store_files
 
 
@@ -23,8 +23,6 @@ def ensure_scheduler(quiet=False):
                for p in store_files())
     # A space on Autopilot (STORE/.autopilot.json) is woken by it too.
     need = need or any((v or {}).get("on") for v in ((read_list(os.path.join(STORE, ".autopilot.json")) or {}).get("spaces") or {}).values())
-    # Where the window lives it also saves the backups (backup_pass), so it always runs there.
-    need = need or os.path.isdir(os.path.join(APP_HOME, "mods"))
     k = hc_json("get", SCHEDULER)
     ok = bool(k and k.get("state") == "live" and "scheduler" in " ".join((k.get("foreground") or {}).get("argv") or k.get("argv") or []))
     if ok or not need:

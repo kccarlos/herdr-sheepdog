@@ -4,7 +4,7 @@ import hashlib, json, os, re, subprocess, time
 
 from . import news
 from .agents import agent_running, detail, held_ask, live_agents, STARTING_MS, status_word, task_status
-from .base import addon_off, agent_pid, APP_HOME, end_group, Fail, guard, hc_json, HOME, now, PACKAGE, probe_volume, run, STORE, volume_of
+from .base import agent_pid, end_group, Fail, guard, hc_json, HOME, now, PACKAGE, probe_volume, run, STORE, volume_of
 from .commands import send_alert
 from .news import send_or_hold, stall_of, typing
 from .settings import bare
@@ -24,8 +24,7 @@ NUDGE = "Carry on with what you were doing; the last turn hit an API error."
 def restart_assistant(k):
     """Restarts Assistant `k` with coordinator/restart.sh (HERDR_RESTART_CHAT when chat-backed)."""
     guard(["hc"])
-    repo, inst = os.path.normpath(os.path.join(PACKAGE, "..", "..", "..", "coordinator", "restart.sh")), os.path.join(APP_HOME, "mods", "coordinator", "restart.sh")
-    script = inst if os.path.isfile(inst) else repo if os.path.isfile(repo) else inst
+    script = os.path.normpath(os.path.join(PACKAGE, "..", "..", "..", "coordinator", "restart.sh"))
     env = {x: v for x, v in os.environ.items() if x not in ("HC_TERMINAL_ID", "HERDR_RESTART_CHAT", "HERDR_RESTART_RESUME")}
     if (k.get("labels") or {}).get("herdr.chat"):
         env["HERDR_RESTART_CHAT"] = k["labels"]["herdr.chat"]
@@ -140,8 +139,6 @@ def _stuck_task(space, addr, k, rec, lists, news_data, live_addrs):
 
 
 def _wake_inflight(ap_spaces, space, addr, k, ap):
-    if addon_off("autopilot"):
-        return False
     st = status_word(k)
     for sp, a in (ap_spaces or {}).items():
         f = (a or {}).get("inflight") if (a or {}).get("on") is not False else None

@@ -7,7 +7,7 @@ import subprocess
 import shutil
 import tempfile
 
-from .base import git, hc_json, now, run
+from .base import git, hc_json, now, PROJECT_LABEL, ROLE_LABEL, run
 from .github import gh, pr_repo
 from .settings import derive_check, gate_min, settings_for
 
@@ -91,9 +91,12 @@ def checks_pass(s, t):
     tmp = tempfile.mkdtemp(prefix="herdr-check-")
     if not git(wt, "worktree", "add", "--detach", tmp, sha)[0]:
         return clean(s, tmp)
+    key = s.key(t)
+    slug = getattr(s, "slug", None) or key.partition("#")[0]
     try:
         r = run(["hc", "run", "--bg", "--json", "--no-parent", "--no-notify", "--cwd", tmp,
-                 "--label", "herdr.role=checks", "--label", f"herdr.checks={s.key(t)}", "--", "sh", "-c", cmd])
+                 "--label", f"{PROJECT_LABEL}={slug}", "--label", f"{ROLE_LABEL}=checks",
+                 "--label", "herdr.role=checks", "--label", f"herdr.checks={key}", "--", "sh", "-c", cmd])
         address = json.loads(r.stdout)["address"] if r.returncode == 0 else None
     except (ValueError, KeyError):
         address = None
@@ -129,7 +132,7 @@ SYNC_FAILED = "Its check failed on it merged with its base branch (the base move
 
 def resolve_check(s, t=None):
     """(cmd, source) for this folder's tasks.check: explicit setting, else derived from repo facts, else ('', None)."""
-    cmd = (settings_for(s, (t or {}).get("space"))["tasks"].get("check") or "").strip()
+    cmd = (settings_for(s)["tasks"].get("check") or "").strip()
     if cmd:
         return cmd, "setting"
     folder = (getattr(s, "loc", None) or {}).get("folder")
@@ -138,7 +141,7 @@ def resolve_check(s, t=None):
 
 def sync_plan(s, t):
     """(effective_mode, fallback_why): effective tasks.sync and, when cheap fell back to full, why."""
-    k = settings_for(s, t.get("space"))["tasks"]
+    k = settings_for(s)["tasks"]
     mode = k.get("sync") if k.get("sync") in SYNC_MODES else "cheap"
     if mode == "cheap" and not resolve_check(s, t)[0]:
         return "full", "tasks.check is empty and could not be derived"

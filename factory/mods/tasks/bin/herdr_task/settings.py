@@ -1,5 +1,5 @@
-"""The person's settings (~/.config/shepherdr/settings.json and per-folder), the agent each task runs, and
-the Settings block a task's brief ends with."""
+"""The owner's settings (~/.config/sheepdog/settings.json: Everywhere -> machine -> project), the agent
+each task runs, and the Settings block a task's brief ends with."""
 
 import json
 import os
@@ -28,15 +28,20 @@ DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "review_min": 0, "must
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": "",
                       "worktree_root": "", "check": "", "simulators": [], "reviewer_sandbox": True,
                       "auto_accept": True, "sync": "cheap"},
-            "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {}, "project": {},
-            "agents": {"reactions": True, "suggestions": True, "feedback": True, "feedback_repo": "eliasstravik/shepherdr"}}
+            "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {}, "project": {}}
 LEVELS = ["blocker", "major", "minor"]
 
 
-# The machine layer's key for the computer whose Herdr window wrote the file. A copy the window
-# pushes to another machine says which machine that is in "here" (and holds that machine's
-# spaces by their bare ids), so the same lookup works there.
 LOCAL_MACHINE = "local"
+_UNSET = object()
+
+
+def _folder_of(s):
+    if isinstance(s, str):
+        return s
+    if isinstance(s, dict):
+        return s.get("folder")
+    return (getattr(s, "loc", None) or {}).get("folder")
 
 
 def read_settings():
@@ -49,27 +54,52 @@ def read_settings():
     return d if isinstance(d, dict) else {}
 
 
-def autopilot_layers(d, space=None):
-    """(Everywhere's, the space's own) Autopilot in a settings file d: {every, events, heartbeat, direction},
-    each only when set. A space is found by its id on this machine (a pushed copy holds this
-    machine's spaces by their bare ids, as herdr-task names them)."""
+def _same_folder(a, b):
+    return bool(a and b) and (a == b or os.path.realpath(a) == os.path.realpath(b))
+
+
+def project_layer(d, folder=None, space=None):
+    """This project's raw layer: d["projects"][folder] merged per section over any legacy d["spaces"] entry."""
+    if not isinstance(d, dict):
+        return {}
+    projects = d.get("projects") if isinstance(d.get("projects"), dict) else {}
+    spaces = d.get("spaces") if isinstance(d.get("spaces"), dict) else {}
+    sid = bare(str(space)) if space and not os.path.isabs(str(space)) and space not in projects else None
+    sp = spaces.get(sid) if sid and isinstance(spaces.get(sid), dict) else None
+    if folder and sp and sp.get("folder") is not None and not _same_folder(sp.get("folder"), folder):
+        sp = None
+    if sp and not folder and isinstance(sp.get("folder"), str):
+        folder = sp["folder"]
+    if not sp and folder:
+        sp = next((v for v in spaces.values() if isinstance(v, dict) and _same_folder(v.get("folder"), folder)), None)
+    key = (folder if folder and folder in projects else
+           next((k for k in projects if _same_folder(k, folder)), None) if folder else None) or (space if space and space in projects else folder)
+    proj = projects.get(key) if key and isinstance(projects.get(key), dict) else None
+    out = dict(sp) if isinstance(sp, dict) else {}
+    for k, v in (proj or {}).items():
+        out[k] = {**out[k], **{kk: vv for kk, vv in v.items() if vv is not None}} if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+def autopilot_layers(d, project=None):
+    """(Everywhere's, the project's own) Autopilot in a settings file d: {every, events, heartbeat, direction},
+    each only when set. Keyed by project folder in d["projects"] (merged over any legacy d["spaces"] entry)."""
     def part(layer):
         a = (layer or {}).get("autopilot") if isinstance(layer, dict) else None
         return {k: v for k, v in a.items() if k in ("every", "events", "heartbeat", "direction") and v is not None} if isinstance(a, dict) else {}
-    return part(d.get("everywhere")), part((d.get("spaces") or {}).get(space) if space else None)
+    own = project_layer(d, project if project and os.path.isabs(str(project)) else None, project) if project else None
+    return part(d.get("everywhere")), part(own)
 
 
-def write_autopilot(space, values):
-    """Sets Autopilot fields at one level of the settings file (space None: Everywhere's); a value
-    None unsets it there, so it follows the level above again. Refused on a copy the window
-    pushed here: the window's machine holds the truth and would put its own back."""
+def write_autopilot(project, values):
+    """Sets Autopilot fields at one level of the settings file (project None: Everywhere's; folder path:
+    d["projects"][folder]); a value None unsets it there, so it follows the level above again."""
     d = read_settings()
-    if d.get("pushed_from"):
-        raise Fail("This machine's Shepherdr settings are a copy from the machine whose window sets them: change Autopilot in Settings there.")
-    if space:
-        layer = (d.setdefault("spaces", {})).setdefault(space, {})
+    if project:
+        section = "projects" if os.path.isabs(project) or project in (d.get("projects") or {}) else "spaces"
+        layer = (d.setdefault(section, {})).setdefault(project, {})
     else:
-        layer = d.setdefault("everywhere", {})
+        section, layer = None, d.setdefault("everywhere", {})
     a = dict(layer.get("autopilot") or {})
     for k, v in values.items():
         if v is None:
@@ -80,8 +110,8 @@ def write_autopilot(space, values):
         layer["autopilot"] = a
     else:
         layer.pop("autopilot", None)
-    if space and not layer:
-        d["spaces"].pop(space, None)
+    if project and not layer:
+        d[section].pop(project, None)
     d["version"] = 1
     os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
     tmp = f"{SETTINGS}.{os.getpid()}.tmp"
@@ -91,12 +121,8 @@ def write_autopilot(space, values):
     os.replace(tmp, SETTINGS)
 
 
-def _same_folder(a, b):
-    return bool(a and b) and (a == b or os.path.realpath(a) == os.path.realpath(b))
-
-
-def _write_task_setting(s, space, key, value, require_space=True):
-    """Writes one folder-level tasks.<key> setting into SETTINGS (None unsets it)."""
+def _write_task_setting(s, key, value):
+    """Writes one project-folder tasks.<key> setting into d["projects"][folder] (None unsets it)."""
     try:
         with open(SETTINGS) as f:
             d = json.load(f)
@@ -106,22 +132,23 @@ def _write_task_setting(s, space, key, value, require_space=True):
         raise Fail(f"Can't read {SETTINGS} ({e}): not changing it.")
     if not isinstance(d, dict):
         raise Fail(f"{SETTINGS} isn't a settings object: not changing it.")
-    if d.get("pushed_from"):
-        raise Fail("This machine's Shepherdr settings are a copy from the machine whose window sets them: change Tasks at once in Settings there.")
-    spaces = d.setdefault("spaces", {})
-    folder = s.loc["folder"]
-    sid = bare(space) if space else next((k for k, v in spaces.items() if isinstance(v, dict) and _same_folder(v.get("folder"), folder)), None)
-    if not sid:
-        if require_space:
-            raise Fail(f"No space works in {folder} in Shepherdr settings: pass --space <id>.")
-        sid = getattr(s, "slug", None) or os.path.basename(folder) or "default"
-    layer = spaces.setdefault(sid, {})
-    if layer.get("folder") is not None and not _same_folder(layer.get("folder"), folder):
-        raise Fail(f"Space {sid} works in {layer['folder']}, not {folder}.")
-    layer["folder"] = os.path.realpath(folder) if os.path.exists(folder) else folder
+    projects = d.setdefault("projects", {})
+    folder = _folder_of(s)
+    if not folder:
+        raise Fail("No project folder to configure.")
+    proj_key = folder if folder in projects else next((k for k in projects if _same_folder(k, folder)), folder)
+    layer = projects.setdefault(proj_key, {})
     tasks = dict(layer.get("tasks") or {})
     tasks.pop(key, None) if value is None else tasks.update({key: value})
     layer.update(tasks=tasks) if tasks else layer.pop("tasks", None)
+    if not layer:
+        projects.pop(proj_key, None)
+    if value is None and isinstance(d.get("spaces"), dict):
+        for v in d["spaces"].values():
+            if isinstance(v, dict) and _same_folder(v.get("folder"), folder) and isinstance(v.get("tasks"), dict):
+                v["tasks"].pop(key, None)
+                if not v["tasks"]:
+                    v.pop("tasks", None)
     d["version"] = 1
     os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
     tmp = f"{SETTINGS}.{os.getpid()}.tmp"
@@ -129,20 +156,23 @@ def _write_task_setting(s, space, key, value, require_space=True):
         json.dump(d, f, indent=2)
         f.write("\n")
     os.replace(tmp, SETTINGS)
-    return sid
+    return proj_key
 
 
-def write_max_running(s, space, value):
-    """FAC-103: `config --set tasks.max_running=N`, the folder's "Tasks at once" as the window writes it:
-    in the space layer of the space working in this folder (--space's when given). None unsets it
-    there. Returns the space id. Refused on a pushed copy, as write_autopilot, and on a file that
-    is there but unreadable (writing would lose every other setting in it)."""
-    return _write_task_setting(s, space, "max_running", value, require_space=True)
+def write_max_running(s, space=None, value=_UNSET):
+    """FAC-103: `config --set tasks.max_running=N`, the project folder's "Tasks at once" in
+    d["projects"][folder]. None unsets it there. Returns the project folder. Refused on a file
+    that exists on disk but isn't a valid JSON object (writing would lose every other setting)."""
+    if value is _UNSET:
+        value = space
+    return _write_task_setting(s, "max_running", value)
 
 
-def write_task_check(s, space, value):
-    """`config --set tasks.check=CMD`: sets or clears the folder's tasks.check command."""
-    return _write_task_setting(s, space, "check", value, require_space=False)
+def write_task_check(s, space=None, value=_UNSET):
+    """`config --set tasks.check=CMD`: sets or clears the project folder's tasks.check command."""
+    if value is _UNSET:
+        value = space
+    return _write_task_setting(s, "check", value)
 
 
 _SKIP_EXT = (".md", ".txt", ".json", ".yml", ".yaml", ".toml", ".xml", ".xcodeproj", ".xcworkspace")
@@ -219,43 +249,17 @@ def derive_check(folder):
     return "", None
 
 
-def reactions_on(space=None, d=None):
-    """Settings › Agents › Reactions in a space, for every agent there (reactions.py): the space's
-    own, else Everywhere's, else on. A layer's agents.reactions, else what SHEP-42 kept as
-    assistant.reactions (when only the Assistant reacted): the window and the web app move it."""
-    d = read_settings() if d is None else d
-    own = (d.get("spaces") or {}).get(bare(space)) if space else None
-    for layer in (own, d.get("everywhere")):
-        for key in ("agents", "assistant"):
-            a = layer.get(key) if isinstance(layer, dict) else None
-            v = a.get("reactions") if isinstance(a, dict) else None
-            if isinstance(v, bool):
-                return v
-    return DEFAULTS["agents"]["reactions"]
-
-
 def settings_layers(s, space=None):
-    """(Everywhere's, this machine's, this folder's) raw settings, least specific first: the
-    folder's are those of the space working in it (--space's when several do)."""
-    try:
-        with open(SETTINGS) as f:
-            d = json.load(f)
-    except (OSError, ValueError):
-        d = {}
-    spaces = d.get("spaces") or {}
-    folder = s.loc["folder"]
-    mine = [v for k, v in spaces.items() if _same_folder((v or {}).get("folder"), folder)]
-    pick = (spaces.get(bare(space)) if space and _same_folder((spaces.get(bare(space)) or {}).get("folder"), folder) else None) or (mine[0] if mine else None)
+    """(Everywhere's, this machine's, this project's) raw settings, least specific first."""
+    d = read_settings()
+    pick = project_layer(d, _folder_of(s), space)
     machine = (d.get("machines") or {}).get(d.get("here") or LOCAL_MACHINE)
-    return d.get("everywhere") or {}, machine or {}, pick or {}
+    return d.get("everywhere") or {}, machine or {}, pick
 
 
 def settings_for(s, space=None):
-    """The settings for this folder's tasks: Shepherdr settings' Everywhere, then this machine's,
-    then the override of the space working in this folder (--space's when several do): the most
-    specific wins. The window no longer writes agent or task values for a machine (only its
-    machine-only rows, read by machine_limits/machine_option); ones set before still apply here. Written by the settings window (~/.config/shepherdr/settings.json); herdr-task
-    writes only Autopilot (write_autopilot) and a folder's "Tasks at once" (write_max_running)."""
+    """The settings for this project folder's tasks: Everywhere, then this machine's, then
+    this project's override in d["projects"][folder] (most specific wins)."""
     everywhere, machine, pick = settings_layers(s, space)
     out = {k: {kk: list(vv) if isinstance(vv, list) else vv for kk, vv in v.items()} for k, v in DEFAULTS.items()}
 
@@ -276,7 +280,7 @@ def notes(s, task, which, space=None):
     (--start-notes / --finish-notes), else its folder's from Shepherdr settings. Herdr runs
     nothing itself: the notes go into the agents' starting prompts."""
     own = (task.get(f"{which}_notes") or "").strip()
-    return own or (settings_for(s, space or task.get("space"))["tasks"].get(f"{which}_notes") or "").strip()
+    return own or (settings_for(s)["tasks"].get(f"{which}_notes") or "").strip()
 
 
 def notes_part(head, text):
@@ -287,7 +291,7 @@ def notes_part(head, text):
 def worktrees_on(s, space=None):
     """Tasks here get a git worktree each: in a git repo, unless the person's Shepherdr settings
     turn worktrees off for it (then it works in the folder itself, as a folder without git)."""
-    return s.loc["kind"] == "repo" and settings_for(s, space)["tasks"].get("worktrees") is not False
+    return s.loc["kind"] == "repo" and settings_for(s)["tasks"].get("worktrees") is not False
 
 
 # Models only another CLI knows (a reviewer model left from agy or Claude): Codex on a ChatGPT account refuses them.
@@ -371,7 +375,7 @@ def worker_pick(s, task, space=None, agent=None):
     """What a task's agent runs on, {agent, model, effort, fast, perm}: Settings' worker, then the
     task's own --agent / --model / --effort, then `agent` (start --agent). Another CLI than
     Settings' starts from its own defaults (models and permissions differ per CLI)."""
-    w = dict(settings_for(s, space)["worker"] or {})
+    w = dict(settings_for(s)["worker"] or {})
     pick = dict(w)
     if task.get("agent") and task["agent"] != pick.get("agent"):
         pick = {"agent": task["agent"]}
@@ -387,7 +391,7 @@ def worker_pick(s, task, space=None, agent=None):
 
 def worker_argv(s, task, space=None, agent=None):
     """A task's agent when nobody gave an argv: worker_pick's."""
-    pick = worker_pick(s, task, space, agent)
+    pick = worker_pick(s, task, agent=agent)
     if pick.get("argv") and not (task.get("model") or task.get("effort")):
         return argv_for(pick)
     pick.pop("argv", None)
@@ -417,7 +421,7 @@ def argv_model(argv):
 
 SETTINGS_HEAD = "Settings: (from herdr-task show; where the brief above says otherwise, it wins)"
 SET_BY = {"task": "set by the assistant for this task", "folder": "this folder's setting", "machine": "this machine's setting",
-          "all": "your setting everywhere", "flag": "the flag file ~/.herdr/agy-review-unsandboxed"}
+          "all": "your setting everywhere", "flag": "the flag file ~/.config/sheepdog/agy-review-unsandboxed"}
 MERGE_WORDS = {"ask": "ask the person first: they accept it in the Tasks panel, which merges it",
                "checks": "after checks: once you say ready, Herdr merges it when its checks pass",
                "auto": "on its own: once you say ready, Herdr merges it"}
@@ -541,7 +545,7 @@ def by_layer(s, space, section, key, value, default):
     """Who set a setting that differs from Herdr's default: "folder", "machine", "all", or None."""
     if value == default:
         return None
-    everywhere, machine, mine = settings_layers(s, space)
+    everywhere, machine, mine = settings_layers(s)
     for by, layer in (("folder", mine), ("machine", machine), ("all", everywhere)):
         if key in ((layer.get(section) or {}) if key else {}) or (not key and layer.get(section)):
             return by
@@ -657,8 +661,7 @@ def reviewer_command(who, model=None, effort=None, folder=None):
 def task_settings(s, t, space=None, argv=None, live=False):
     """The settings that shape this task's work, each {label, text, value, by}. live: for a brief, so its Reviewer
     line is checked against what Codex says now (sign-in and models), not only the last periodic check."""
-    space = space or t.get("space")
-    cfg = settings_for(s, space)
+    cfg = settings_for(s)
     k, sets = cfg["tasks"], t.get("set") or {}
     lines = []
 
@@ -667,12 +670,12 @@ def task_settings(s, t, space=None, argv=None, live=False):
 
     kind = review_kind(t)
     rounds_cfg = int(k.get("review_rounds") or 0)
-    gate = gate_min(s, t, space)
+    gate = gate_min(s, t)
     # The Review its brief gave (keep_review): a setting changed while it runs is for tasks added
     # later, as the change's notice says (#750); the Assistant's own --set for it still wins.
     kept = t.get("brief_review") if not gate and "review" not in sets and "review_rounds" not in sets and not kind else None
     if gate:  # a gate folder (or review.kind): herdr-task reviews (FAC-13, FAC-69)
-        on, rev_by = True, "task" if "review_min" in sets or kind else by_layer(s, space, "tasks", "review_min", gate, 0)
+        on, rev_by = True, "task" if "review_min" in sets or kind else by_layer(s, None, "tasks", "review_min", gate, 0)
     elif "review" in sets:
         on, rev_by = sets["review"] == "on", "task"
     elif "review_rounds" in sets:
@@ -682,7 +685,7 @@ def task_settings(s, t, space=None, argv=None, live=False):
     elif kept:
         on, rev_by = bool(kept.get("on")), kept.get("by")
     else:
-        on, rev_by = rounds_cfg > 0, by_layer(s, space, "tasks", "review_rounds", rounds_cfg > 0, False)
+        on, rev_by = rounds_cfg > 0, by_layer(s, None, "tasks", "review_rounds", rounds_cfg > 0, False)
     here = t.get("mode") != "worktree"
     add("Review", "off" if not on else "on" if not gate else (
         f"herdr-task's own: once you say ready it starts the reviewer itself, for your final commit, and needs {gate} passing "
@@ -691,14 +694,14 @@ def task_settings(s, t, space=None, argv=None, live=False):
     if kind:
         add("Review kind", f"{kind} (1 review round, then the person reviews it)", kind, "task")
     # What it runs on: the given argv, else its last agent's, else what it would start with.
-    argv = argv or (t["agents"][-1].get("argv") if t.get("agents") else None) or worker_argv(s, t, space)
+    argv = argv or (t["agents"][-1].get("argv") if t.get("agents") else None) or worker_argv(s, t)
     agent = agent_key(argv)
     if on:
         rv = dict(cfg.get("reviewer") or {})
         if t.get("reviewer") and t["reviewer"] != rv.get("agent"):
             rv = {"agent": t["reviewer"]}
         rv_by = "task" if any(t.get(f) for f in ("reviewer", "reviewer_model", "reviewer_effort")) else \
-            by_layer(s, space, "reviewer", None, bool(cfg.get("reviewer")), False)
+            by_layer(s, None, "reviewer", None, bool(cfg.get("reviewer")), False)
         for f in ("model", "effort"):
             if t.get(f"reviewer_{f}"):
                 rv[f] = t[f"reviewer_{f}"]
@@ -740,18 +743,18 @@ def task_settings(s, t, space=None, argv=None, live=False):
         add("Reviewer", text, {"agent": who, "model": rv.get("model"), "effort": rv.get("effort"), "command": cmd}, rv_by)
         from .launch import reviewer_sandbox, sandboxes
         if sandboxes([who]):  # an agy reviewer on a Mac (launch.sandboxes)
-            box, box_by = reviewer_sandbox(s, space)
+            box, box_by = reviewer_sandbox(s)
             add("Reviewer sandbox", REVIEWER_BOX_WORDS["on" if box else "off"], box, box_by)
         must = sets.get("must_fix") or (k.get("must_fix") if k.get("must_fix") in LEVELS else "major")
-        add("Must fix", MUST_WORDS[must], must, "task" if "must_fix" in sets else by_layer(s, space, "tasks", "must_fix", must, "major"))
+        add("Must fix", MUST_WORDS[must], must, "task" if "must_fix" in sets else by_layer(s, None, "tasks", "must_fix", must, "major"))
         rounds = (sets.get("review_rounds") or max(1, gate)) if kind else (
             sets.get("review_rounds") or (kept or {}).get("rounds") or max(rounds_cfg or 3, gate))
         more = int(t.get("review_rounds_added") or 0)
         add("Review rounds", f"at most {rounds + more}" + (f" ({more} added by the assistant)" if more else ""), rounds + more,
             "task" if "review_rounds" in sets or kind else (kept or {}).get("rounds_by") if kept else
-            by_layer(s, space, "tasks", "review_rounds", rounds, 3))
+            by_layer(s, None, "tasks", "review_rounds", rounds, 3))
     policy = sets.get("merge") or (k.get("merge") if k.get("merge") in MERGE_WORDS else "ask")
-    m_by = "task" if "merge" in sets else by_layer(s, space, "tasks", "merge", policy, "ask")
+    m_by = "task" if "merge" in sets else by_layer(s, None, "tasks", "merge", policy, "ask")
     if here:
         add("Merge", "nothing to merge: you work in the folder itself, and the person accepts it", policy, m_by)
     else:
@@ -761,13 +764,13 @@ def task_settings(s, t, space=None, argv=None, live=False):
             from .ask import open_asks
             on, gate = auto_accept_on(s, t), owner_gate(s, t, open_asks(s, t))
             add("Auto-accept", AUTO_ACCEPT_WORDS["off" if not on else "owner" if gate else "fable" if why else "engine"].format(why=gate),
-                on, "task" if "auto_accept" in sets else by_layer(s, space, "tasks", "auto_accept", on, True))
+                on, "task" if "auto_accept" in sets else by_layer(s, None, "tasks", "auto_accept", on, True))
         if t.get("base_set"):
             add("Base", f"{t['base']}: your branch starts from it and merges into it", t["base"],
-                "folder" if t.get("base_by") == "space" else "task")
+                "folder" if t.get("base_by") in ("project", "folder", "space") else "task")
     proof = sets["proof"] == "on" if "proof" in sets else k.get("proof") is not False
     add("Proof", PROOF_WORDS["on" if proof else "off"], proof,
-        "task" if "proof" in sets else by_layer(s, space, "tasks", "proof", proof, True))
+        "task" if "proof" in sets else by_layer(s, None, "tasks", "proof", proof, True))
     bdir = build_dir_of(s)
     if bdir:
         ref = s.ref(t) if hasattr(s, "ref") else f"{(s.get('prefix') if isinstance(s, dict) else getattr(s, 'prefix', None)) or 'T'}-{t['id']}"
@@ -777,22 +780,18 @@ def task_settings(s, t, space=None, argv=None, live=False):
     model, effort = argv_model(argv)
     text = agent + (f", model {model}" if model else "") + (f", effort {effort}" if effort else "")
     a_by = "task" if any(t.get(f) for f in ("agent", "model", "effort")) else \
-        by_layer(s, space, "worker", None, bool(cfg.get("worker")), False)
+        by_layer(s, None, "worker", None, bool(cfg.get("worker")), False)
     add("Agent", text, {"agent": agent, "model": model, "effort": effort}, a_by)
     if sets.get("priority") == "urgent":
         add("Priority", PRIORITY_WORDS, "urgent", "task")
-    # Suggested next message (SHEP-186): the reply ends with the words the person would likely send next (templates/worker.md)
-    sug = (cfg.get("agents") or {}).get("suggestions") is not False
-    add("Suggested next message", "on (your reply ends with the message you'd likely send next, shown greyed out in the box)" if sug
-        else "off (no suggested next message)", sug, by_layer(s, space, "agents", "suggestions", sug, True))
     return lines
 
 
 def settings_block(s, t, space=None, argv=None, live=False):
-    lines = task_settings(s, t, space, argv, live)
+    lines = task_settings(s, t, argv=argv, live=live)
     rows = [f"- {x['label']}: {x['text']}" + (f" ({SET_BY[x['by']]})" if x["by"] else "") for x in lines]
     # Codex's sandbox can't start here (SHEP-227, #998): the worker hears it in its brief and tells the person.
-    word = sandbox_word(lines, argv or (t["agents"][-1].get("argv") if t.get("agents") else None) or worker_argv(s, t, space))
+    word = sandbox_word(lines, argv or (t["agents"][-1].get("argv") if t.get("agents") else None) or worker_argv(s, t))
     if word:
         rows.append(f"- Sandbox: {word}")
     return "\n".join([SETTINGS_HEAD, *rows])
@@ -808,7 +807,7 @@ def gate_min(s, t, space=None):
         return int(sets["review_min"])
     if review_kind(t):
         return 0 if sets.get("review") == "off" or sets.get("review_rounds") == 0 else 1
-    return int(settings_for(s, space or t.get("space"))["tasks"].get("review_min") or 0)
+    return int(settings_for(s)["tasks"].get("review_min") or 0)
 
 
 def sandbox_word(lines, argv):
@@ -826,7 +825,7 @@ def keep_review(s, t, space=None):
     """A fresh brief gives today's Review: kept on the task (brief_review), so its Settings block,
     ready and reviewed keep agreeing with that brief while it runs (#750)."""
     t.pop("brief_review", None)
-    rows = {x["label"]: x for x in task_settings(s, t, space)}
+    rows = {x["label"]: x for x in task_settings(s, t)}
     rev, rounds = rows["Review"], rows.get("Review rounds")
     t["brief_review"] = {"on": bool(rev["value"]), "by": rev["by"]}
     if rounds:
@@ -845,15 +844,18 @@ def review_limits(s, t):
     return on, rounds
 
 
-def space_base(s, space=None):
-    """The branch a space's new tasks branch from and merge into (Shepherdr settings > Tasks >
-    Base branch, per space); "" when unset: the folder's current branch."""
-    return str(settings_for(s, space)["tasks"].get("base") or "").strip()
+def project_base(s, space=None):
+    """The branch a project's new tasks branch from and merge into (tasks.base, per project);
+    "" when unset: the folder's current branch."""
+    return str(settings_for(s)["tasks"].get("base") or "").strip()
+
+
+space_base = project_base  # compatibility shim for commands.py until SDF-7
 
 
 def simulator_pool(s, space=None):
     """This folder's fixed iOS simulator pool (Settings' tasks.simulators: names or UDIDs); [] means off."""
-    raw = settings_for(s, space)["tasks"].get("simulators")
+    raw = settings_for(s)["tasks"].get("simulators")
     items = raw.split(",") if isinstance(raw, str) else (raw if isinstance(raw, (list, tuple)) else [])
     return [str(x).strip() for x in items if str(x).strip()]
 
@@ -964,7 +966,7 @@ FABLE = {"agent": "claude", "model": "claude-fable-5-2", "effort": None}
 def auto_accept_on(s, t):
     """tasks.auto_accept (on by default), or the task's own --set auto_accept=on|off."""
     v = (t.get("set") or {}).get("auto_accept")
-    return v == "on" if v else settings_for(s, t.get("space"))["tasks"].get("auto_accept") is not False
+    return v == "on" if v else settings_for(s)["tasks"].get("auto_accept") is not False
 
 
 def owner_gate(s, t, asks):
@@ -1042,7 +1044,7 @@ def accept_bar(s, t):
     if got < max(1, gate):
         return None, f"{got} of {max(1, gate)} passing review rounds on its final commit"
     sets = t.get("set") or {}
-    if (sets["proof"] == "on" if "proof" in sets else settings_for(s, t.get("space"))["tasks"].get("proof") is not False) \
+    if (sets["proof"] == "on" if "proof" in sets else settings_for(s)["tasks"].get("proof") is not False) \
             and not t.get("proof"):
         return None, "no proof artifact attached"
     if not t.get("pr"):
@@ -1053,7 +1055,7 @@ def accept_bar(s, t):
 def merge_policy(s, t):
     """How a ready task merges: --set merge or Settings'; one that would wait for the person (ask,
     design/doc, open asks) merges after checks when auto-accept's bar holds (FAC-99)."""
-    p = (t.get("set") or {}).get("merge") or settings_for(s, t.get("space"))["tasks"].get("merge")
+    p = (t.get("set") or {}).get("merge") or settings_for(s)["tasks"].get("merge")
     p = p if p in MERGE_WORDS else "ask"
     if p != "ask" and not merge_wait_why(s, t):
         return p
@@ -1067,7 +1069,7 @@ def merge_hold(s, t):
 
 def auto_accepter(s, t):
     """"engine"/"fable" when auto-accept is what lets this task merge (else it waits for the person), else None."""
-    p = (t.get("set") or {}).get("merge") or settings_for(s, t.get("space"))["tasks"].get("merge")
+    p = (t.get("set") or {}).get("merge") or settings_for(s)["tasks"].get("merge")
     if p in ("auto", "checks") and not merge_wait_why(s, t):
         return None
     return accept_bar(s, t)[0]
