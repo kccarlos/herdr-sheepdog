@@ -7805,12 +7805,14 @@ class AssistantSettings(unittest.TestCase):
 
     def test_spaces_fallback_merges_with_projects_until_sdf9(self):
         self.write({"spaces": {"s1": {"folder": "/proj/sp1", "tasks": {"merge": "auto", "review_rounds": 2}}}})
-        self.terminals["t8"] = {"state": "live", "turn": 3, "labels": {"herdr.role": "coordinator", "herdr.space": "vm/s1"}}
+        self.terminals["t8"] = {"state": "live", "turn": 3, "cwd": "/elsewhere",
+                                "labels": {"herdr.role": "coordinator", "herdr.coordinator.space": "vm/s1"}}
         note_old = self.aset.session_note("t8")
         self.assertIn("- Merge: on its own (Herdr merges a ready task); set for this project", note_old)
         self.assertIn("- Review: on, at most 2 rounds", note_old)
         self.settings.write_max_running({"folder": "/proj/sp1"}, None, 3)
-        self.assistant("t5", "/proj/sp1")
+        self.terminals["t5"] = {"state": "live", "turn": 3, "cwd": "/elsewhere",
+                                "labels": {"sheepdog.project": "proj-sp1", "sheepdog.role": "coordinator"}}
         note_merged = self.aset.session_note("t5")
         self.assertIn("- Merge: on its own (Herdr merges a ready task); set for this project", note_merged)
         self.assertIn("- Review: on, at most 2 rounds", note_merged)

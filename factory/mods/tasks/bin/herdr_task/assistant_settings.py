@@ -34,16 +34,23 @@ def project_of(k, d=None):
     labels = (k or {}).get("labels") or {}
     proj = labels.get(PROJECT_LABEL)
     projects = (d or {}).get("projects") if isinstance(d, dict) else None
-    if proj and ((isinstance(projects, dict) and proj in projects) or os.path.isabs(proj)):
-        return proj
-    cwd = (k or {}).get("cwd")
-    if cwd:
-        exp = os.path.expanduser(cwd)
-        return os.path.realpath(exp) if os.path.isdir(exp) else exp
+    if proj:
+        if (isinstance(projects, dict) and proj in projects) or os.path.isabs(proj):
+            return proj
+        from .store import is_task_list, read_list, slug_of
+        lst = read_list(os.path.join(STORE, proj + ".json"))
+        if is_task_list(lst):
+            return lst["folder"]
+        if isinstance(projects, dict) and (hit := next((f for f in projects if os.path.isabs(str(f)) and slug_of(str(f)) == proj), None)):
+            return hit
     sp = bare(labels.get("herdr.space") or labels.get("herdr.coordinator.space") or "")
     spaces = (d or {}).get("spaces") if isinstance(d, dict) else None
     if sp and isinstance(spaces, dict) and isinstance(spaces.get(sp), dict):
         return spaces[sp].get("folder") or sp
+    cwd = (k or {}).get("cwd")
+    if cwd:
+        exp = os.path.expanduser(cwd)
+        return os.path.realpath(exp) if os.path.isdir(exp) else exp
     return proj or sp or None
 
 
