@@ -36,6 +36,12 @@
      "cues": [["save progress"], ["progress"]], "run": ["herdr-task progress"], "never": ["herdr-app"]},
     {"id": "A6", "notes": "47, 48, 50", "role": "assistant", "title": "A task is Ready with its rounds passed and CI green",
      "message": "<herdr-news task=\"WUKO-67\" event=\"ready\">WUKO-67 is ready: Chat panel</herdr-news>",
-     "cues": [["Auto-accept"], ["accept"]], "says": ["Auto-accept"]}
+     "cues": [["Auto-accept"], ["accept"]], "says": ["Auto-accept"]},
+    {"id": "A7", "notes": "17, 18, 27", "role": "assistant", "title": "The owner gives a goal with several parts",
+     "message": "The owner: \"Add sign-in, then a settings screen for it; ship it as v1.2.0.\"",
+     "cues": [["goal as milestones"], ["plan file"]], "run": ["herdr-task plan apply"], "says": ["the owner's words as said", "ui: true", "release"]},
+    {"id": "A8", "notes": "27, 42", "role": "assistant", "title": "A recap says a task is two jobs: split it",
+     "message": "<herdr-news task=\"WUKO-4\" event=\"recap\">WUKO-4's recap: the change is two jobs (the engine and its tools); split it.</herdr-news>",
+     "cues": [["split a task"], ["split_of"]], "run": ["herdr-task plan amend"], "says": ["--reason", "split_of", "everything that waited for it waits for them"], "never": ["herdr-task rm"]}
   ]
 }

@@ -295,6 +295,8 @@ def cmd_show(args):
         text.append(f"merges into: {v['base']} (" + ("its project's base branch" if v.get("base_by") in ("project", "space") else "set for this task") + ")")
     if v.get("after_refs"):
         text.append("comes after: " + ", ".join(v["after_refs"]))
+    if v.get("milestone"):
+        text.append(f"milestone: {v['milestone']}" + (" (its acceptance task)" if v.get("acceptance_of") else ""))
     if kind:
         text.append(f"review kind: {kind} (1 review round)")
     if v.get("urgent_past_cap"):
@@ -1820,8 +1822,9 @@ def cmd_rm(args):
         release_task(s, t)
         s.data["tasks"].remove(t)
         for o in s.data["tasks"]:
-            if t["id"] in (o.get("after") or []):
-                o["after"] = [i for i in o["after"] if i != t["id"]]
+            for f in ("after", "plan_after"):  # plan_after: what a plan gave it (SDF-31), re-read on the next amend
+                if t["id"] in (o.get(f) or []):
+                    o[f] = [i for i in o[f] if i != t["id"]]
         s.dirty = True
     note = f" Its worktree {t['worktree']} is still there." if t.get("worktree") and os.path.isdir(t["worktree"]) else ""
     say(args, {"id": t["id"], "removed": True}, f"{s.ref(t)} removed.{note}")
