@@ -12,15 +12,15 @@ import (
 
 func minimalEngineFS(pyVer, body string) fstest.MapFS {
 	return fstest.MapFS{
-		"factory/.python-version":                     {Data: []byte(pyVer + "\n")},
-		"factory/NOTICE":                              {Data: []byte("MIT Notice\n")},
-		"factory/bin/herdr-secret":                    {Data: []byte("#!/usr/bin/env python3\nprint('secret')\n")},
-		"factory/mods/tasks/bin/herdr-task":           {Data: []byte("#!/usr/bin/env python3\n" + body + "\n")},
+		"factory/.python-version":                       {Data: []byte(pyVer + "\n")},
+		"factory/NOTICE":                                {Data: []byte("MIT Notice\n")},
+		"factory/bin/herdr-secret":                      {Data: []byte("#!/usr/bin/env python3\nprint('secret')\n")},
+		"factory/mods/tasks/bin/herdr-task":             {Data: []byte("#!/usr/bin/env python3\n" + body + "\n")},
 		"factory/mods/tasks/bin/herdr_task/__init__.py": {Data: []byte("# pkg\n")},
 		"factory/mods/tasks/bin/herdr_task/reviewer.sb": {Data: []byte("(version 1)\n")},
-		"factory/templates/assistant.md":              {Data: []byte("# assistant\n")},
-		"factory/templates/reviewer.md":               {Data: []byte("# reviewer\n")},
-		"factory/templates/worker.md":                 {Data: []byte("# worker\n")},
+		"factory/templates/assistant.md":                {Data: []byte("# assistant\n")},
+		"factory/templates/reviewer.md":                 {Data: []byte("# reviewer\n")},
+		"factory/templates/worker.md":                   {Data: []byte("# worker\n")},
 	}
 }
 
