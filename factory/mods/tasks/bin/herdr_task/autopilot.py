@@ -15,7 +15,6 @@ from .launch import caller_labels, coordinator_in
 from .store import locate, open_lock, read_list, Store, store_files
 from .output import say
 from .news import news_send, typing
-from .scheduler import ensure_scheduler
 from .automations import EVENTS, events_in, next_run, parse_every, parse_on, trigger_words
 
 
@@ -724,9 +723,6 @@ def cmd_autopilot(args):
         elif sub == "heartbeat":
             ensure_heartbeat()
         v = everywhere_view(d) if project is None else view(d, project, a)
-    if sub in ("on", "run-now"):
-        # This machine's scheduler wakes it.
-        ensure_scheduler(quiet=True)
     say(args, v, msg or line_of(v))
 
 

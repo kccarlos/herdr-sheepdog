@@ -2,15 +2,17 @@
 
 Phase 1's exit test from the design: *the whole Python suite passes with no herdr-app installed; on a Linux VM and a clean Tart VM with only hc and one CLI, a task goes from `add` to a merged PR.* An agent that wrote none of milestone 1 ran it on 2026-11-17 against `main` at `4cacc91a` (after SDF-10, SDF-11 and SDF-12). This page records what was run, what passed and the gaps found. Background: [engine-audit.md](engine-audit.md) section 6.
 
+**Status: half met (Linux test VM PR leg proven; macOS test VM PR leg still open).** The Python suite passed without `herdr-app` on all three machines, local-merge mode reached `main` on both VMs, and the GitHub pull-request leg (section 3) is now proven on the Linux test VM with [`scripts/factory/m1-pr-acceptance.sh`](../../../scripts/factory/m1-pr-acceptance.sh). The exit test stays half met, not passed, until the macOS test VM's PR leg is proven (see Not proven).
+
 ## Machines
 
 | Machine | What is installed | Agent CLI |
 |---|---|---|
 | Mac (host) | Everything, so `herdr-app` was taken off `PATH` for the run; the suite's own throwaway `HOME` hides `~/.config/herdr-app` | — |
-| Linux VM (`ssh oci`, Ubuntu 24.04, arm64) | hc 0.1.17, claude, codex, uv 0.12.1, git, Python 3.12. No herdr-app, no gh, no make | claude (Haiku) |
-| Tart VM (a clone of `factory-base-2026-11-08`, macOS 26.6) | Stripped to hc 0.1.18 and agy: herdr-app, the Herdr window, `~/.config/herdr-app`, claude and codex removed from the clone. Homebrew git, gh (signed in) and Python 3.15 stay | agy (Gemini 4 Carbon) |
+| The Linux test VM (Ubuntu 24.04, arm64) | hc 0.1.17, claude, codex, uv 0.12.1, git, Python 3.12. No herdr-app, no gh, no make | claude (Haiku) |
+| The macOS test VM (stripped Tart clone, macOS 26.6) | Stripped to hc 0.1.18 and agy: herdr-app, the Herdr window, `~/.config/herdr-app`, claude and codex removed from the clone. Homebrew git, gh (signed in) and Python 3.15 stay | agy (Gemini 4 Carbon) |
 
-The `sheepdog-oci` ssh name in the brief is stale; the Linux VM is `oci`. The original VM images were not changed: the Tart work ran on a clone.
+Unlike the stripped macOS test VM clone (which had only `hc` and `agy`), the Linux test VM had both `claude` and `codex` installed, not "only hc and one CLI". The original VM images were not changed: the macOS test VM work ran on a clone.
 
 ## 1. The suite without herdr-app
 
@@ -51,14 +53,22 @@ Both VMs reached a commit on `main` in local-merge mode: there is no GitHub remo
 
 ## 3. Pull request on GitHub
 
-Not run. Neither VM can make or merge a pull request as it stands. Linux has no gh and no GitHub credentials. The Tart image is signed in to gh with the owner's own account, which was not used. Credentials are the owner's call, and the owner was away, so the Assistant chose to skip this leg rather than create a repo or copy a login. Running it needs:
+In SDF-13, neither VM could make or merge a pull request because the Linux test VM lacked `gh` and credentials, and the owner's login on the macOS test VM was left untouched. Running it needed:
 
 - a private throwaway repo for the test, and
-- a fine-grained token scoped to that repo only (Contents and Pull requests, read and write), given through `herdr-secret` and removed after the run, plus gh on the Linux VM.
+- a fine-grained token scoped to that repo only (Contents and Pull requests, read and write), given through `herdr-secret` and removed after the run, plus `gh` on the Linux test VM.
 
-With those, steps 1 to 5 above run in a clone of that repo, and the result is checked on GitHub (`gh pr view --json state,mergedAt`), not from an exit code.
+**Proven on the Linux test VM (SDF-43, 2026-11-17 against `main` at `5f712f72`):** with `gh` (`2.45.0`), `uv` (`0.13.9`), and `sheepdog` from `5f712f72` on the Linux test VM, [`scripts/factory/m1-pr-acceptance.sh`](../../../scripts/factory/m1-pr-acceptance.sh) cloned a private throwaway repo (`<owner>/<throwaway-repo>`) using a repo-scoped fine-grained `GH_TOKEN` passed via `herdr-secret`, ran steps 1–5 unattended (`claude` Haiku, `worker.perm=full`, 0 key presses after #646), accepted `DEMO-1` once PR #5 was open, waited for `herdr-task`'s `tick` to merge it after the 30s no-CI window, and verified the merged state on GitHub:
+
+```json
+{"mergeCommit":{"oid":"f9c923ae19ce1d4fc695b74982e9842051dfd5eb"},"mergedAt":"2026-11-17T17:26:33Z","number":5,"state":"MERGED","url":"https://github.com/<owner>/<throwaway-repo>/pull/5"}
+```
+
+No macOS test VM image was present in `tart list` on the host Mac during SDF-43, so section 3 was not run on the macOS test VM.
 
 ## Findings
+
+**Fixed since:** findings 1 and 2 fixed by #646 (SDF-41); findings 6 and 7 fixed by #645 (SDF-42).
 
 Severity levels follow the reviewer template: **major** means someone would hit it, **minor** means it is rarely hit or cosmetic.
 
@@ -74,7 +84,7 @@ Severity levels follow the reviewer template: **major** means someone would hit 
 
 ## Not proven
 
-- **The merged pull request on either VM**, which is half of the phase 1 exit test (section 3). It needs a private throwaway repo and a token scoped to it.
-- Unattended runs: every run above had the tester answering dialogs, changing one setting and accepting as the owner. Phase 2 (doctor, coordinator lease) is what removes those step-ins.
+- **The merged pull request on the macOS test VM** (SDF-43 proved the Linux test VM leg; the macOS leg is blocked because no macOS test VM image was present in `tart list` on the host Mac; follow-up task not yet filed).
+- Unattended runs on the macOS test VM (`agy` / `project start`): SDF-43's Linux PR run was unattended after #646, while the earlier SDF-13 runs had the tester answering dialogs, changing one setting, and accepting as the owner. Phase 2 (doctor, coordinator lease) removes the remaining step-ins.
 - `project start` with a coordinator on either VM.
 - Review rounds (Review was off) and CI checks (the demo repos have no CI).

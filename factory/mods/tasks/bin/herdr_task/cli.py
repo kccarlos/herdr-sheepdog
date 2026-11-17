@@ -14,7 +14,7 @@ from .base import bundle, Fail, guard, hc_json, run, STORE, VERSION
 from .agents import LINE_MAX, SUMMARY_MAX
 from .launch import cmd_allow, is_coordinator
 from .commands import (
-    cmd_accept, cmd_add, cmd_alert, cmd_config, cmd_edit, cmd_fix, cmd_list, cmd_merge, cmd_ready,
+    cmd_accept, cmd_add, cmd_alert, cmd_config, cmd_edit, cmd_fix, cmd_inbox, cmd_list, cmd_merge, cmd_ready,
     cmd_resume, cmd_review, cmd_review_more, cmd_reviewed, cmd_rm, cmd_show, cmd_start, cmd_state, cmd_status,
     cmd_switch, cmd_unarchive, cmd_where,
 )
@@ -202,6 +202,8 @@ def main():
     c = cmd("list", cmd_list, "list tasks", id=False)
     c.add_argument("--all", action="store_true", help="every folder's tasks on this machine")
     c.add_argument("--archived", action="store_true", help="the archived tasks instead (Done ones archive themselves after a week), latest first")
+    c = cmd("inbox", cmd_inbox, "owner-waiting tasks (the inbox)", id=False)
+    c.add_argument("--all", action="store_true", help="every folder's inbox tasks on this machine")
     c = cmd("add", cmd_add, "add a task; prints its id", id=False)
     c.add_argument("title")
     c.add_argument("--prompt")
@@ -327,8 +329,7 @@ def main():
     c.add_argument("--changes-file")
     c.add_argument("--notes", help="suggestions with a pass")
     c.add_argument("--must-fix", type=int, help="findings at or above Must fix (herdr-task's own reviewer, FAC-13)")
-    c = cmd("scheduler", cmd_scheduler, "run automations and the queue (herdr-core keeps one as herdr-automations)", id=False)
-    c.add_argument("--ensure", action="store_true", help="start it if automations need it and it isn't running")
+    c = cmd("scheduler", cmd_scheduler, "run automations and the task tick loop (the sheepdog daemon keeps one as sheepdog-factory-tick)", id=False)
     c.add_argument("--once", action="store_true", help="one round, then exit")
     au = sub.add_parser("auto", help="automations: a saved task that a time or an event adds again").add_subparsers(dest="auto")
 

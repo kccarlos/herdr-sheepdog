@@ -9,11 +9,13 @@ import (
 	"strconv"
 	"time"
 
+	herdrsheepdog "github.com/kccarlos/herdr-sheepdog"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/cli"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/identity"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
@@ -42,6 +44,13 @@ func (a *App) wire() error {
 		a.backend, a.term = a.newBackend(cfg)
 		inner = a.backend
 		a.wref = &watcherRef{}
+		a.factoryTick = factory.NewTickSupervisor(factory.TickOptions{
+			DataDir:      cfg.DataDir,
+			HCSocket:     cfg.Herdr.HCSocketPath(),
+			Engine:       factory.EngineSource{FS: herdrsheepdog.Factory, Version: opts.Version},
+			Log:          a.log,
+			PollInterval: opts.FactoryTickPoll,
+		})
 	}
 	a.herdr = inject.NewHerdr(inner, a.log)
 	a.wireMarks(cfg, opts.Stderr)

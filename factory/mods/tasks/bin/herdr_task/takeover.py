@@ -60,6 +60,7 @@ def read_checks():
 
 
 def write_checks(d):
+    os.makedirs(os.path.dirname(CLI_CHECK), exist_ok=True)
     tmp = f"{CLI_CHECK}.{os.getpid()}.tmp"
     with open(tmp, "w") as f:
         json.dump(d, f, indent=1)

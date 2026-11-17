@@ -15,15 +15,18 @@ from .base import ENTRY, Fail, guard, hc_json, now, STORE
 from .when import parse_at
 from .settings import set_task, settings_for, SET_KEYS, worker_argv, worktrees_on
 from .agents import agent_running, detail, live_agents, starting, status_of, task_status
+from .stage import resolve_stage
 from .sessions import session_of
 from .store import locate, open_store, read_list, Store, store_files
 from .queues import queue_reason
 from .archive import archive_pass
 from .output import say
-from .scheduler import ensure_scheduler, script_hash
+from .scheduler import SCHEDULER, script_hash
 from .commands import begin
+from .launch import sweep_sandboxes
 from .news import news_pass
-from .tick import end_done_pass, lost_logs_pass, memory_guard, retry_pass, tick_store, watchdog_pass
+from .revive import revive_pass
+from .tick import end_done_pass, lost_logs_pass, memory_guard, retry_pass, starts_now, tick_store, watchdog_pass
 from .simulators import simulator_pass
 from .devices import device_pass
 from .machines import machines_pass
@@ -334,8 +337,6 @@ def cmd_auto(args):
         v = auto_view(s, a)
         if warning:
             v["warning"] = warning
-    if sub != "rm":
-        ensure_scheduler(quiet=True)
     say(args, {**v, **({"removed": True} if sub == "rm" else {})}, msg)
 
 
@@ -413,9 +414,11 @@ def task_facts(s, t):
     """How a task is now, as events read it. Another machine's come this way too (`auto feed`)."""
     live = [detail(k) if "foreground" not in k else k for k in live_agents(s.key(t))] if t["state"] in ("running", "ready") else []
     working_ones = [k for k in live if agent_running(k)]
+    res = resolve_stage(t, working_ones, store=s)
     return {"id": t["id"], "ref": s.ref(t), "title": t["title"], "branch": t.get("branch"), "state": t["state"],
             "status": status_of(t, working_ones) if t["state"] == "running" else t["state"],
-            "needs": task_status(t, working_ones)[1], "attention": t.get("attention"), "merged": bool(t.get("merged")),
+            "stage": res.stage, "inbox": res.inbox,
+            "needs": res.needs, "attention": t.get("attention"), "merged": bool(t.get("merged")),
             "automation": t.get("automation"), "starting": bool(t["state"] == "running" and starting(t))}
 
 
@@ -666,12 +669,18 @@ def one_pass(report):
         print(f"{time.strftime('%H:%M:%S')} a tick held the lock for {LOCK_WAIT_S} s: skipped this round", flush=True)
         return
     try:
+        try:
+            revive_pass(report)
+        except Exception as e:  # never stops the scheduler
+            print(f"{time.strftime('%H:%M:%S')} revive: {e}", flush=True)
         seen_all = read_list(SEEN) or {}
         lists = [d for d in map(read_list, store_files()) if d and os.path.isdir(d.get("folder") or "")]
         feeds = feeds_for(lists)
         for d in lists:
             tasks = d.get("tasks") or []
-            busy = any(t.get("state") in ("queued", "scheduled") or t.get("check_run") or (t.get("worktree") and t.get("state") in ("running", "ready")) for t in tasks)
+            busy = bool(d.get("main_watch") or any(
+                t.get("state") in ("queued", "scheduled", "ready") or t.get("check_run")
+                or (t.get("worktree") and t.get("state") == "running") or starts_now(t) for t in tasks))
             if not busy and not d.get("automations"):
                 continue
             try:
@@ -696,6 +705,7 @@ def one_pass(report):
         try:
             end_done_pass(report)
             memory_guard(report)
+            sweep_sandboxes()
             simulator_pass(report)
             device_pass(report)
         except Exception as e:  # never stops the scheduler
@@ -731,49 +741,54 @@ def one_pass(report):
 
 
 def cmd_scheduler(args):
-    if args.ensure:
-        out = ensure_scheduler()
-        say(args, out, out["note"])
-        return
     os.makedirs(STORE, exist_ok=True)
-    me = open(os.path.join(STORE, ".scheduler.lock"), "a")
-    try:
-        fcntl.flock(me, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        say(args, {"running": True}, "Another scheduler is running.")
-        return
-    started = script_hash()
-    with open(os.path.join(STORE, ".scheduler.json"), "w") as f:
-        json.dump({"pid": os.getpid(), "hash": started, "at": now(), "terminal": os.environ.get("HC_TERMINAL_ID")}, f)
-    print(f"herdr-automations: watching {STORE} every 15 s.", flush=True)
-    while True:
-        report = {"started": [], "done": [], "attention": [], "fired": []}
+    loaded = script_hash()
+    with open(os.path.join(STORE, ".scheduler.lock"), "a") as me:
         try:
-            one_pass(report)
-        except Exception as e:  # one bad list never stops the rest
-            print(f"{time.strftime('%H:%M:%S')} error: {e}", flush=True)
-        for f in report["fired"]:
-            print(f"{time.strftime('%H:%M:%S')} {f['automation']} -> {f['task']} ({f['why']})", flush=True)
-        for f in report["started"]:
-            print(f"{time.strftime('%H:%M:%S')} started {f['ref']}", flush=True)
-        for f in report.get("news") or []:
-            print(f"{time.strftime('%H:%M:%S')} news to {f['to']}: {len(f['lines'])} line(s)", flush=True)
-        for f in report.get("backups_started") or []:
-            print(f"{time.strftime('%H:%M:%S')} {f['task']}: {f['to']} took over from {f['from']} ({f['why']})", flush=True)
-        for f in report.get("ended") or []:
-            print(f"{time.strftime('%H:%M:%S')} {f['task']} is done: ended {', '.join(f['terminals'])}", flush=True)
-        if (report.get("memory_guard") or {}).get("alert"):
-            print(f"{time.strftime('%H:%M:%S')} memory guard: {report['memory_guard']['alert']}", flush=True)
-        for f in report.get("autopilot") or []:
-            print(f"{time.strftime('%H:%M:%S')} autopilot woke {f['to']} ({f['why']})", flush=True)
-        if args.once:
-            say(args, report, None)
-            return
-        time.sleep(15)
-        # Updated since: carry on as the new version.
-        if script_hash() != started:
+            fcntl.flock(me, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            if args.once:
+                say(args, {"running": True}, "Another scheduler is running.")
+                return
+            print(f"{SCHEDULER}: waiting for another scheduler on {STORE}...", flush=True)
+            fcntl.flock(me, fcntl.LOCK_EX)
+        if not args.once and script_hash() != loaded:
             fcntl.flock(me, fcntl.LOCK_UN)
+            me.close()
             os.execv(sys.executable, [sys.executable, ENTRY, "scheduler"])
+        started = loaded
+        with open(os.path.join(STORE, ".scheduler.json"), "w") as f:
+            json.dump({"pid": os.getpid(), "hash": started, "at": now(), "terminal": os.environ.get("HC_TERMINAL_ID")}, f)
+        print(f"{SCHEDULER}: watching {STORE} every 15 s.", flush=True)
+        while True:
+            report = {"started": [], "done": [], "attention": [], "fired": []}
+            try:
+                one_pass(report)
+            except Exception as e:  # one bad list never stops the rest
+                print(f"{time.strftime('%H:%M:%S')} error: {e}", flush=True)
+            for f in report["fired"]:
+                print(f"{time.strftime('%H:%M:%S')} {f['automation']} -> {f['task']} ({f['why']})", flush=True)
+            for f in report["started"]:
+                print(f"{time.strftime('%H:%M:%S')} started {f['ref']}", flush=True)
+            for f in report.get("news") or []:
+                print(f"{time.strftime('%H:%M:%S')} news to {f['to']}: {len(f['lines'])} line(s)", flush=True)
+            for f in report.get("backups_started") or []:
+                print(f"{time.strftime('%H:%M:%S')} {f['task']}: {f['to']} took over from {f['from']} ({f['why']})", flush=True)
+            for f in report.get("ended") or []:
+                print(f"{time.strftime('%H:%M:%S')} {f['task']} is done: ended {', '.join(f['terminals'])}", flush=True)
+            if (report.get("memory_guard") or {}).get("alert"):
+                print(f"{time.strftime('%H:%M:%S')} memory guard: {report['memory_guard']['alert']}", flush=True)
+            for f in report.get("autopilot") or []:
+                print(f"{time.strftime('%H:%M:%S')} autopilot woke {f['to']} ({f['why']})", flush=True)
+            if args.once:
+                say(args, report, None)
+                return
+            time.sleep(15)
+            # Updated since: carry on as the new version.
+            if script_hash() != started:
+                fcntl.flock(me, fcntl.LOCK_UN)
+                me.close()
+                os.execv(sys.executable, [sys.executable, ENTRY, "scheduler"])
 
 
 def cmd_track(args):
