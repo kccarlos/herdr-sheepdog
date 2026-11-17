@@ -64,4 +64,6 @@ The file holds the milestones that change, each with all its open tasks, plus ne
 
 The parts carry `"split_of": "<parent key or ref>"` and are listed where the parent was, in the same milestone (another milestone is refused). Each part waits for what the parent waited for, plus its own `after`. Every task that waited for the parent, the acceptance task included, now waits for all the parts. Then the parent is removed.
 
+A split also changes the waits of a task that has already started, though an amend can't change a started task's waits otherwise. The two rules don't clash. The amend rule stops new, unmet waits being put on running work. A split only swaps a removed task for its parts. A running task's waits no longer gate it, and keeping the removed id would leave it pointing at nothing. The loop check makes the same swap first, so a split can't make two tasks wait on each other.
+
 The parent may be to do, queued or scheduled. It may also be running when its agent is idle, as after a recap decided `split`: the split ends that agent. A parent whose agent is mid-turn is refused. `herdr-task rm`, by contrast, drops the removed task from others' `after`, so a dependent could start too early. Splitting is therefore done through `plan amend`, not `rm`.

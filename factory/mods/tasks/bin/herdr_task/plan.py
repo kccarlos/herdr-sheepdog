@@ -278,7 +278,10 @@ class Plan:
                 return members.get(n[1], []) + ([("a", prev[n[1]])] if n[1] in prev else [])
             if n[0] == "i" and (known.get(n[1]) or {}).get("acceptance_of"):
                 return nexts(("a", known[n[1]]["acceptance_of"]))
-            deps = edges.get(n, []) if n[0] == "k" else [("i", i) for i in (known.get(n[1]) or {}).get("after") or []]
+            # A split parent an existing task waits for is replaced by its parts, as write() will do.
+            deps = edges.get(n, []) if n[0] == "k" else [
+                d for i in (known.get(n[1]) or {}).get("after") or []
+                for d in ([("k", k) for k in self.split_parents[i]] if i in self.split_parents else [("i", i)])]
             if n[0] == "k" and ms_of[n[1]] in prev and not any(mid_of(d) == ms_of[n[1]] for d in deps):
                 deps = deps + [("a", prev[ms_of[n[1]]])]
             return deps

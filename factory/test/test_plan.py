@@ -212,6 +212,20 @@ class Plans(unittest.TestCase):
         rc, v = self.run_cli("plan", "amend", "--reason", "x", plan=plan)
         self.assertIn("a would end up waiting for itself", v["error"])
 
+    def test_review_round_4_loop_made_by_a_split(self):
+        # An outside task waits for the parent; a part waits for the outside task: after the split they'd wait on each other.
+        self.run_cli("plan", "apply", plan={"milestones": [milestone("M1", [task("a")])]})
+        with self.open(True) as s:
+            a = next(t for t in s.data["tasks"] if t.get("plan_key") == "a")
+            other = s.new("Outside task", "", "worktree")
+            other["after"] = [a["id"]]
+            s.dirty = True
+            ref = s.ref(other)
+        plan = {"milestones": [milestone("M1", [task("a-part", split_of="a", after=[ref])])]}
+        rc, v = self.run_cli("plan", "amend", "--reason", "x", plan=plan)
+        self.assertEqual(rc, 1, v)
+        self.assertIn("a-part would end up waiting for itself", v["error"])
+
     def test_check_only_changes_nothing(self):
         rc, v = self.run_cli("plan", "apply", "--check", plan=self.first_plan())
         self.assertEqual((rc, v), (0, {"ok": True}))
