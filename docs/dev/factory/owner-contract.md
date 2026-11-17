@@ -1,6 +1,6 @@
 # Owner Contract v1 Design
 
-This document specifies **owner contract v1** for `sheepdog-factory`: the versioned JSON boundary between the **sheepdog daemon** (Go, `internal/factory`, `internal/supervisor`, `internal/web`) and the **factory engine** (Python, `factory/`). It covers the resource shapes (`hello`, `projects`, `asks`, `digest`, `rules`, `graph`, `alerts`), the mutating actions (`answer`, `say`, `propose_rule`, `revoke_rule`), the eight ask kinds, the loopback answer proof that replaces `--owner-approved`, how factory alerts travel while routine worker speech stays silent, and the shared contract fixture that both the Python and Go test suites execute.
+This document specifies **owner contract v1** for `sheepdog-factory`: the versioned JSON boundary between the **sheepdog daemon** (Go, `internal/factory`, `internal/supervisor`, `internal/web`) and the **factory engine** (Python, `factory/`). It covers the resource shapes (`projects`, `asks`, `digest`, `rules`, `alerts`, and the provisional `graph`), the mutating actions (`answer`, `say`, `propose_rule`, `revoke_rule`), the eight ask kinds, the loopback answer proof that replaces `--owner-approved`, how factory alerts travel while routine worker speech stays silent, and the shared contract fixture [`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json) that both the Python and Go test suites execute.
 
 See [`architecture.md`](../architecture.md), [`roles.md`](../roles.md), and [`glossary.md`](../glossary.md) for sheepdog's daemon, voice, orchestrator, and rail conventions, and [`engine-audit.md`](engine-audit.md) and [`baseline.md`](baseline.md) for the Phase 0/1 factory baseline and module audit.
 
@@ -24,7 +24,7 @@ Following [`glossary.md`](../glossary.md), **the owner** is **the user** talking
 
 ```mermaid
 flowchart LR
-  Owner["Owner (Voice / iPhone App)"] <-->|"WS audio + cards\nPOST /api/pending/answer\nAPNs push"| Daemon["sheepdog daemon (Go)\nSupervisor + Rail + AnswerProof"]
+  Owner["Owner (Voice / Paired iPhone)"] <-->|"WS audio + cards\nPOST /api/pending/answer (ticketed)\nAPNs push"| Daemon["sheepdog daemon (Go)\nSupervisor + Rail + AnswerProof"]
   Daemon -->|"engine owner <cmd> --json\n(store-only reads & actions)"| Engine["factory engine (Python)\nStore + Gate + Rules + Graph"]
   Engine -->|"GET http://127.0.0.1:<port>/api/factory/answer-proof/<ask_id>\n(loopback verification for gated asks)"| Daemon
   Engine <-->|"hc run / send / get / label"| HC["herdr-core (hc)\n1 Coordinator per project + Workers + Reviewers"]
@@ -34,7 +34,7 @@ flowchart LR
 
 1. **The daemon calls the engine; resources are the truth.** If the daemon is stopped or no phone is connected, unanswered asks and active alerts sit durably in the engine's store (`<store_dir>/asks/<id>.json`, `<store_dir>/alerts.json`) and outlive the worker that raised them (field note 31).
 2. **Loopback callback for gated proof only.** The only call the engine makes to the local sheepdog daemon is a synchronous loopback HTTP `GET` to verify an `AnswerProof` before executing a gated action (Section 5).
-3. **Read commands never touch project repos.** Every `engine owner <resource> --json` read command (`hello`, `projects`, `asks`, `digest`, `rules`, `graph`, `alerts`) reads only the engine's JSON store files in `<data_dir>` (and the cached `usage-pools.json` from `usage.py`). It never spawns `git` inside a project folder or touches an external volume that might be stalled on a macOS TCC consent prompt (field notes 38–40).
+3. **Read commands never touch project repos.** Every `engine owner <resource> --json` read command (`projects`, `asks`, `digest`, `rules`, `graph`, `alerts`) reads only the engine's JSON store files in `<data_dir>` (and the cached `usage-pools.json` from `usage.py`). It never spawns `git` inside a project folder or touches an external volume that might be stalled on a macOS TCC consent prompt (field notes 38–40).
 
 ### 1.3 CLI Binding (`engine owner … --json`)
 
@@ -42,22 +42,21 @@ In v1, the Go daemon invokes the embedded engine with the `uv`-managed pinned Py
 
 | Subcommand | Kind | Purpose |
 |---|---|---|
-| `owner hello --json` | Read | Contract protocol version, machine name, and supported `ask_kinds` and `rule_types`. |
 | `owner projects --json` | Read | All registered factory projects on this machine with status, counts, coordinator lease, and quota pools. |
 | `owner asks [--project <id\|folder>] [--open] --json` | Read | Owner ask records (oldest `at` first), filtered to open asks when `--open` is passed. |
 | `owner digest [--project <id\|folder>] [--since <ms\|iso>] --json` | Read | Code-built cross-project or single-project digest since the given timestamp (no model call). |
 | `owner rules [--project <id\|folder>] --json` | Read | Active standing rules across `everywhere`, `machine`, and `project` scopes (`typed` and `text`). |
-| `owner graph --project <id\|folder> --json` | Read | Milestones, ordered task stages, dependencies, critical path, and code-built voice summary for one project. |
+| `owner graph --project <id\|folder> --json` | Read | Provisional Phase 4 milestone graph, task stages, dependencies, critical path, and voice summary for one project (`SDF-32`). |
 | `owner alerts [--since <ms\|id>] --json` | Read | Active (and recently cleared when `--since` is given) factory-stopping alerts. |
 | `owner answer <ask_id> --option <index\|label> [--proof <proof_id>] --json` | Action | Record an answer to an open ask, verify loopback proof if `gated`, and run what the answer unlocks. |
 | `owner say <project> "<text>" --json` | Action | Deliver the owner's words unchanged to the project's leased coordinator. |
 | `owner propose-rule --scope <scope> [--project <id\|folder>] (--type <t> --value <json> \| --text "<text>") [--section <s>] [--until <ms\|iso>] --json` | Action | Validate a candidate standing rule, build its `read_back`, and open a gated `rule` ask. (Alias: `propose_rule`.) |
-| `owner revoke-rule <rule_id> --json` | Action | Immediately revoke a standing rule by id and notify affected coordinators. (Alias: `revoke_rule`.) |
+| `owner revoke-rule <rule_id> --json` | Action | Immediately revoke a `delegation` rule, or open a gated `rule` ask to revoke any non-delegation rule. (Alias: `revoke_rule`.) |
 
 ### 1.4 Versioning and Error Envelope
 
-- **Protocol version:** Every top-level response object carries `"protocol": 1`. Breaking changes increment `protocol`; additive fields within `v1` are ignored by older runtime consumers in production, while the contract validators in both test suites enforce exact key sets (`unexpected_key`) so Go and Python never drift silently.
-- **Timestamps and IDs:** All contract timestamps (`at`, `answered_at`, `expires_at`, `created_at`, `revoked_at`, `generated_at`, `since`, `updated_at`, `cleared_at`, `until`) are **UTC epoch milliseconds (`int`)**, matching the engine's task store and `test/contract_gate_evidence.py` (audited in [`engine-audit.md`](engine-audit.md) §2). Only `usage.py`'s upstream `five_hour_reset` and `week_reset` strings remain ISO-8601 UTC strings (`"2026-11-17T02:00:00Z"`) or `null`.
+- **Protocol version:** Every top-level response object carries `"protocol": 1`. Breaking changes increment `protocol`; additive fields within `v1` are ignored by older runtime consumers in production, while the contract validators in both test suites enforce exact key sets (`unexpected_key`) on all finalized v1 shapes so Go and Python never drift silently.
+- **Timestamps:** All contract timestamps (`at`, `answered_at`, `created_at`, `expires_at`, `revoked_at`, `generated_at`, `since`, `updated_at`, `cleared_at`, `until`) are **UTC epoch milliseconds (`int`)**, matching the engine's task store and `test/contract_gate_evidence.py` (audited in [`engine-audit.md`](engine-audit.md) §2). Only `usage.py`'s upstream `five_hour_reset` and `week_reset` strings remain ISO-8601 UTC strings (`"2026-11-17T03:00:00Z"`) or `null`.
 - **Error envelope:** When a command fails, it exits non-zero (exit `1`, or exit `2` on conflict) and writes a single JSON object to stdout:
 
 ```json
@@ -65,7 +64,7 @@ In v1, the Go daemon invokes the embedded engine with the `uv`-managed pinned Py
   "protocol": 1,
   "ok": false,
   "code": "proof_rejected",
-  "error": "Ask a1b2c3 is gated (release) and the daemon rejected proof prf-deadbeef: no matching owner input."
+  "error": "Ask ask002 is gated (gate) and the daemon rejected proof prf-deadbeef: no matching owner input."
 }
 ```
 
@@ -74,12 +73,12 @@ Standard error codes (`code`):
 | `code` | HTTP equivalent | Meaning |
 |---|---:|---|
 | `not_found` | 404 | Unknown `ask_id`, `project`, or `rule_id`. |
-| `already_closed` | 409 | Ask was already answered with a different option, expired, or cancelled. |
+| `already_closed` | 409 | Ask was already answered with a different option or cancelled. |
 | `invalid_option` | 400 | Option index or label is not in `ask.options`. |
-| `invalid_ask` | 400 | Malformed ask record (e.g. `gated != (kind != "decision")`, invalid `options` or `recommend`, or gated `on_expiry` not `"hold"`/`null`). |
-| `unknown_kind` | 400 | Ask `kind`, rule `type`, or alert `kind` is not in the v1 enum. |
-| `proof_required` | 403 | Gated ask (`gated: true`) was called without a `--proof` id and no active delegation rule covers it. |
-| `proof_rejected` | 403 | The local sheepdog daemon refused or could not verify the `AnswerProof` over loopback (including ticketless loopback taps or typed turns). |
+| `invalid_ask` | 400 | Malformed ask record (e.g. `gated != (kind != "decision")`, invalid `options` or `recommend`, or answered gated ask missing a valid `answered_by`/`proof_id`). |
+| `unknown_kind` | 400 | Ask `kind` or alert `kind` is not in the closed v1 enum. |
+| `proof_required` | 403 | Gated action (`owner answer` on a gated ask, or revoking a non-delegation rule) was attempted without a verified `AnswerProof` or rule ask. |
+| `proof_rejected` | 403 | The local sheepdog daemon refused or could not verify the `AnswerProof` over loopback (including ticketless loopback taps, window keys, or typed turns). |
 | `not_delegable` | 400 | Attempted to create a `delegation` rule for `paid-key`, `delete`, `install`, `reset`, or `rule`. |
 | `invalid_rule` | 400 | Malformed rule scope, class, type, or value schema (including a `delegation` rule missing a future `until` or valid `release_level`). |
 | `unexpected_key` | 400 | JSON object contains an unknown extra property not in the v1 contract schema. |
@@ -89,55 +88,18 @@ Standard error codes (`code`):
 
 ## 2. Resource Shapes (v1)
 
-### 2.1 `hello` (`owner hello --json`)
+Canonical JSON payloads for all resources below live in [`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json).
 
-Reports the contract version and the closed enum sets this engine binary enforces:
+### 2.1 `projects` (`owner projects --json`)
 
-```json
-{
-  "protocol": 1,
-  "min_protocol": 1,
-  "engine": "sheepdog-factory",
-  "machine": "local",
-  "ask_kinds": [
-    "decision",
-    "gate",
-    "release",
-    "paid-key",
-    "delete",
-    "install",
-    "reset",
-    "rule"
-  ],
-  "rule_types": [
-    "merge_policy",
-    "review_rounds",
-    "auto_accept",
-    "design_gate",
-    "delegation",
-    "notify_level",
-    "project_priority"
-  ],
-  "alert_kinds": [
-    "no_pool",
-    "disk",
-    "consent_prompt",
-    "main_red",
-    "ci_stalled"
-  ]
-}
-```
-
-### 2.2 `projects` (`owner projects --json`)
-
-Replaces Shepherdr's `spaces`: **a project is a repository folder** (`<store_dir>/<slug>.json`).
+Top-level envelope: `{"protocol": 1, "projects": [Project]}`. Replaces Shepherdr's `spaces`: **a project is a repository folder** (`<store_dir>/<slug>.json`).
 
 | Field | Type | Invariants |
 |---|---|---|
-| `id` | `string` | Non-empty store slug / project id (e.g. `"wukongmind"`). |
-| `name` | `string` | Spoken/display name (e.g. `"WukongMind"`). |
-| `folder` | `string` | Canonical absolute path to the project repository on `machine`. |
-| `prefix` | `string` | Uppercase task prefix (`"WUKO"`, `"SDF"`). |
+| `id` | `string` | Non-empty store slug / project id (e.g. `"beacon"`). |
+| `name` | `string` | Spoken/display name (e.g. `"Beacon"`). |
+| `folder` | `string` | Canonical absolute path to the project repository on `machine` (e.g. `"/Users/me/projects/beacon"`). |
+| `prefix` | `string` | Uppercase task prefix (`"BCN"`, `"SDF"`). |
 | `machine` | `string` | Machine name (`"local"` on this computer). |
 | `status` | `string` | Enum: `"working" \| "waiting" \| "idle" \| "stopped"`. `"waiting"` when `open_asks > 0`; `"stopped"` when held by an active alert (`no_pool`, `disk`, `consent_prompt`, `main_red`) or missing a live coordinator while tasks are open; `"working"` when any task or coordinator is active; else `"idle"`. |
 | `open_asks` | `int` | Count of unanswered owner asks (`>= 0`). |
@@ -147,220 +109,49 @@ Replaces Shepherdr's `spaces`: **a project is a repository folder** (`<store_dir
 | `spent` | `object` | `{"tasks_merged": int, "review_rounds": int, "ci_runs": int}` (`>= 0`). |
 | `pools` | `Pool[]` | Account quota pools from `usage.py`: `{"pool": "claude" \| "codex" \| "antigravity-gemini" \| "antigravity-claude-gpt", "state": "ok" \| "floor" \| "unknown", "rolling": bool, "five_hour_left": number \| null, "week_left": number \| null, "five_hour_reset": string \| null, "week_reset": string \| null}`. `rolling` is `true` for `antigravity-*` pools so the daemon and coordinator render their rolling window accurately. |
 
-Example:
+### 2.2 `asks` (`owner asks [--project <id|folder>] [--open] --json`)
 
-```json
-{
-  "protocol": 1,
-  "projects": [
-    {
-      "id": "wukongmind",
-      "name": "WukongMind",
-      "folder": "/Users/me/projects/wukongmind",
-      "prefix": "WUKO",
-      "machine": "local",
-      "status": "waiting",
-      "open_asks": 1,
-      "goal": "Build Learn on ask for 1.5",
-      "active_milestone": "M2",
-      "coordinator": {
-        "terminal": "term-4",
-        "session": "sess-wuko-coord-1",
-        "state": "idle",
-        "lease_valid": true
-      },
-      "spent": {
-        "tasks_merged": 9,
-        "review_rounds": 19,
-        "ci_runs": 14
-      },
-      "pools": [
-        {
-          "pool": "claude",
-          "state": "ok",
-          "rolling": false,
-          "five_hour_left": 62.0,
-          "week_left": 40.0,
-          "five_hour_reset": "2026-11-17T03:00:00Z",
-          "week_reset": "2026-11-22T20:00:00Z"
-        },
-        {
-          "pool": "codex",
-          "state": "ok",
-          "rolling": false,
-          "five_hour_left": null,
-          "week_left": 78.5,
-          "five_hour_reset": null,
-          "week_reset": "2026-11-21T00:00:00Z"
-        },
-        {
-          "pool": "antigravity-gemini",
-          "state": "ok",
-          "rolling": true,
-          "five_hour_left": 85.0,
-          "week_left": 70.0,
-          "five_hour_reset": "2026-11-17T01:30:00Z",
-          "week_reset": "2026-11-20T12:00:00Z"
-        },
-        {
-          "pool": "antigravity-claude-gpt",
-          "state": "floor",
-          "rolling": true,
-          "five_hour_left": 0.0,
-          "week_left": 4.0,
-          "five_hour_reset": "2026-11-17T04:00:00Z",
-          "week_reset": "2026-11-19T18:00:00Z"
-        }
-      ]
-    }
-  ]
-}
-```
-
-### 2.3 `asks` (`owner asks [--project <id|folder>] [--open] --json`)
-
-Each record in `<store_dir>/asks/<id>.json` represents one structured question:
+Top-level envelope: `{"protocol": 1, "asks": [Ask]}`. Each record in `<store_dir>/asks/<id>.json` represents one structured question (owner asks never expire on a timer):
 
 | Field | Type | Invariants |
 |---|---|---|
-| `id` | `string` | Lowercase alphanumeric id (`^[a-z0-9]{6,24}$`, e.g. `"a1b2c3"`). |
-| `project` | `string` | Project `id` (`"wukongmind"`), or `"everywhere"` for a machine/global `rule` ask. |
-| `name` | `string` | Spoken project name (`"WukongMind"`), or `"All projects"` when `project == "everywhere"`. |
+| `id` | `string` | Lowercase alphanumeric id (`^[a-z0-9]{6,24}$`, e.g. `"ask002"`). |
+| `project` | `string` | Project `id` (`"beacon"`), or `"everywhere"` for a machine/global `rule` ask. |
+| `name` | `string` | Spoken project name (`"Beacon"`), or `"All projects"` when `project == "everywhere"`. |
 | `folder` | `string \| null` | Absolute repo path when project-scoped, else `null`. |
-| `kind` | `string` | Required enum: `"decision" \| "gate" \| "release" \| "paid-key" \| "delete" \| "install" \| "reset" \| "rule"`. Unknown values are refused. |
-| `gated` | `bool` | Strictly `kind != "decision"`. A record with `kind == "decision"` and `gated == true` (or a gated kind with `gated == false`) is invalid. |
+| `kind` | `string` | Required enum: `"decision" \| "gate" \| "release" \| "paid-key" \| "delete" \| "install" \| "reset" \| "rule"`. Unknown values fail with `unknown_kind`. |
+| `gated` | `bool` | Strictly `kind != "decision"`. A record with `gated != (kind != "decision")` fails with `invalid_ask`. |
 | `question` | `string` | Non-empty single-line question (`1..300` chars). |
 | `options` | `string[]` | `2..9` distinct non-empty strings. None may end in `([a-z0-9]{1,6})`. |
 | `recommend` | `string` | Must equal one element of `options[]`. |
-| `task` | `string \| null` | Task ref (`"WUKO-11"`) when tied to a task, else `null`. |
+| `task` | `string \| null` | Task ref (`"BCN-33"`) when tied to a task, else `null`. |
 | `milestone` | `string \| null` | Milestone id (`"M2"`) when tied to a milestone, else `null`. |
-| `subject` | `object \| null` | Structured action target executed by the engine when approved (see Section 3.1); `null` for `decision`. |
-| `at` | `int` | Creation time in epoch ms. |
-| `expires_at` | `int \| null` | Expiry time in epoch ms, or `null` (owner asks do not expire on a short timer). |
-| `on_expiry` | `string \| null` | `"hold" \| "recommend" \| "cancel" \| null`. Must be `"hold"` or `null` whenever `gated == true` (gated asks never auto-approve on expiry). |
-| `status` | `string` | `"open" \| "answered" \| "expired" \| "cancelled"`. |
+| `subject` | `object \| null` | Structured action target executed by the engine when approved (Section 3.1); `null` for `decision`. |
+| `at` | `int` | Creation time in UTC epoch ms. |
+| `status` | `string` | `"open" \| "answered" \| "cancelled"`. |
 | `answer` | `string \| null` | Chosen option string from `options[]` when `status == "answered"`, else `null`. |
 | `answered_at` | `int \| null` | Epoch ms when answered, else `null`. |
-| `answered_by` | `string \| null` | `"owner" \| "coordinator" \| "rule" \| null`. When `gated == true` and `status == "answered"`, must be `"owner"` (with `proof_id != null`) or `"rule"` (only for `gate` or `release` with a valid `delegation` rule id in `proof_id`). Never `"coordinator"` on a gated ask. |
+| `answered_by` | `string \| null` | `"owner" \| "coordinator" \| "rule" \| null`. When `gated == true` and `status == "answered"`, must be `"owner"` (with `proof_id: "prf-..."`) or `"rule"` (only for `gate` or `release` with `proof_id: "rul-..."`); otherwise `validate_ask` fails with `invalid_ask`. |
 | `proof_id` | `string \| null` | Daemon `AnswerProof.proof_id` (`"prf-..."`) when `answered_by == "owner"`, or `Rule.id` (`"rul-..."`) when `answered_by == "rule"`, else `null`. |
 
-Example:
-
-```json
-{
-  "protocol": 1,
-  "asks": [
-    {
-      "id": "a1b2c3",
-      "project": "wukongmind",
-      "name": "WukongMind",
-      "folder": "/Users/me/projects/wukongmind",
-      "kind": "release",
-      "gated": true,
-      "question": "Tag WukongMind v1.5.0 and trigger the TestFlight release workflow now?",
-      "options": [
-        "Yes, tag v1.5.0",
-        "Hold release"
-      ],
-      "recommend": "Yes, tag v1.5.0",
-      "task": "WUKO-15",
-      "milestone": "M2",
-      "subject": {
-        "tag": "v1.5.0",
-        "workflow": "release.yml",
-        "head": "0123456789abcdef0123456789abcdef01234567"
-      },
-      "at": 1763310000000,
-      "expires_at": null,
-      "on_expiry": "hold",
-      "status": "open",
-      "answer": null,
-      "answered_at": null,
-      "answered_by": null,
-      "proof_id": null
-    }
-  ]
-}
-```
-
-### 2.4 `digest` (`owner digest [--project <id|folder>] [--since <ms|iso>] --json`)
+### 2.3 `digest` (`owner digest [--project <id|folder>] [--since <ms|iso>] --json`)
 
 Built deterministically in Python from the task stores and `usage.py`, with **no model call** (`SDF-26`). Spoken on owner request, when a milestone completes, or at the morning summary:
 
 | Field | Type | Invariants |
 |---|---|---|
+| `protocol` | `int` | `1`. |
 | `generated_at` | `int` | Epoch ms when the digest was built. |
 | `since` | `int` | Epoch ms start of the digest window (`<= generated_at`). |
 | `spoken_summary` | `string` | Code-built 1–3 sentence plain-words summary for the voice/phone (no file paths, git SHAs, or raw ids). |
 | `open_asks` | `int` | Total open owner asks across the included projects. |
 | `alerts_active` | `int` | Total active factory alerts across the included projects. |
 | `pools` | `Pool[]` | Current account quota pools (`usage.py`). |
-| `projects` | `ProjectDigest[]` | Per-project breakdown (`id`, `name`, `status`, `milestone`, `merged[]`, `waiting[]`, `replans`, `open_asks`, `spent`). |
+| `projects` | `ProjectDigest[]` | Per-project breakdown: `id`, `name`, `status`, `milestone` (`{id, title, state, merged, total} \| null`), `merged` (`[{ref, title, pr, merged_at}]`), `waiting` (`[{ref, title, stage, why}]`), `replans` (`int`), `open_asks` (`int`), and `spent` (`{tasks_merged, review_rounds, ci_runs}`). |
 
-Example:
+### 2.4 `rules` (`owner rules [--project <id|folder>] --json`)
 
-```json
-{
-  "protocol": 1,
-  "generated_at": 1763313600000,
-  "since": 1763270400000,
-  "spoken_summary": "Since last night: 9 merged, milestone 2 done, 1 waiting on CI, Claude 40% left. Nothing needs you.",
-  "open_asks": 0,
-  "alerts_active": 0,
-  "pools": [
-    {
-      "pool": "claude",
-      "state": "ok",
-      "rolling": false,
-      "five_hour_left": 62.0,
-      "week_left": 40.0,
-      "five_hour_reset": "2026-11-17T03:00:00Z",
-      "week_reset": "2026-11-22T20:00:00Z"
-    }
-  ],
-  "projects": [
-    {
-      "id": "wukongmind",
-      "name": "WukongMind",
-      "status": "working",
-      "milestone": {
-        "id": "M2",
-        "title": "Learn on ask",
-        "state": "done",
-        "merged": 9,
-        "total": 9
-      },
-      "merged": [
-        {
-          "ref": "WUKO-15",
-          "title": "M2 acceptance: Learn on ask",
-          "pr": 48,
-          "merged_at": 1763312000000
-        }
-      ],
-      "waiting": [
-        {
-          "ref": "WUKO-16",
-          "title": "Slow UI test batching",
-          "stage": "ci",
-          "why": "Waiting on GitHub Actions (18m)"
-        }
-      ],
-      "replans": 0,
-      "open_asks": 0,
-      "spent": {
-        "tasks_merged": 9,
-        "review_rounds": 19,
-        "ci_runs": 14
-      }
-    }
-  ]
-}
-```
-
-### 2.5 `rules` (`owner rules [--project <id|folder>] --json`)
-
-Standing rules live in one layered store (`everywhere` → `machine` → `project`) and divide into two explicit classes (`SDF-25`):
+Top-level envelope: `{"protocol": 1, "rules": [Rule]}`. Standing rules live in one layered store (`everywhere` → `machine` → `project`) and divide into two explicit classes (`SDF-25`):
 
 1. **`class: "typed"` — Enforced in engine code (never depends on a model remembering):**
    - `merge_policy`: `"checks" | "auto" | "ask"` (default `"checks"`).
@@ -384,7 +175,7 @@ Standing rules live in one layered store (`everywhere` → `machine` → `projec
 | `scope` | `string` | `"everywhere" \| "machine" \| "project"`. |
 | `project` | `string \| null` | Non-empty project `id` when `scope == "project"`, else `null`. |
 | `class` | `string` | `"typed" \| "text"`. |
-| `type` | `string \| null` | One of `rule_types[]` when `class == "typed"`, else `null`. |
+| `type` | `string \| null` | One of the 7 `rule_types` when `class == "typed"`, else `null`. |
 | `value` | `any` | Typed value matching `type` when `class == "typed"`, else `null`. |
 | `text` | `string \| null` | Non-empty rule prose when `class == "text"`, else `null`. |
 | `section` | `string \| null` | Prompt section key when `class == "text"`, else `null`. |
@@ -393,237 +184,22 @@ Standing rules live in one layered store (`everywhere` → `machine` → `projec
 | `created_at` | `int` | Epoch ms when saved. |
 | `expires_at` | `int \| null` | Epoch ms expiry (required and `== value.until` when `type == "delegation"`, optional otherwise). |
 | `saved_by_ask` | `string` | Id of the `rule` ask whose verified owner answer saved this rule. |
-| `revoked_at` | `int \| null` | `null` while active; epoch ms when revoked via `revoke_rule`. |
+| `revoked_at` | `int \| null` | `null` while active; epoch ms when revoked. |
+| `revoked_by_ask` | `string \| null` | `null` while active or when `type == "delegation"` was revoked immediately; **required** `rule` ask id (`^ask[a-z0-9]+$` / `^[a-z0-9]{6,24}$`) whenever a non-delegation rule (`type != "delegation"` or `class == "text"`) has `revoked_at != null` (otherwise fails with `proof_required`). |
 
-Example:
+### 2.5 `graph` (`owner graph --project <id|folder> --json` — Provisional Phase 4 Shape)
 
-```json
-{
-  "protocol": 1,
-  "rules": [
-    {
-      "id": "rul-7f3a19",
-      "scope": "project",
-      "project": "wukongmind",
-      "class": "typed",
-      "type": "design_gate",
-      "value": "fable",
-      "text": null,
-      "section": null,
-      "base_hash": null,
-      "read_back": "Typed rule, this project (WukongMind): designs and plans are judged by Fable without waiting for you.",
-      "created_at": 1763300000000,
-      "expires_at": null,
-      "saved_by_ask": "b4c5d6",
-      "revoked_at": null
-    },
-    {
-      "id": "rul-9d2e01",
-      "scope": "project",
-      "project": "wukongmind",
-      "class": "typed",
-      "type": "delegation",
-      "value": {
-        "kinds": [
-          "release"
-        ],
-        "milestones": [
-          "M2"
-        ],
-        "release_level": "patch",
-        "until": 1763395200000
-      },
-      "text": null,
-      "section": null,
-      "base_hash": null,
-      "read_back": "Typed rule, this project (WukongMind): delegate M2 patch releases until 08:00.",
-      "created_at": 1763305000000,
-      "expires_at": 1763395200000,
-      "saved_by_ask": "c7d8e9",
-      "revoked_at": null
-    },
-    {
-      "id": "rul-3b8c44",
-      "scope": "everywhere",
-      "project": null,
-      "class": "text",
-      "type": null,
-      "value": null,
-      "text": "Keep iOS UI PRs to one screen per task so simulator runs stay under 10 minutes.",
-      "section": "plan",
-      "base_hash": "9a0f1e2d3c4b",
-      "read_back": "Text rule, everywhere: keep iOS UI PRs to one screen per task so simulator runs stay under 10 minutes.",
-      "created_at": 1763306000000,
-      "expires_at": null,
-      "saved_by_ask": "d0e1f2",
-      "revoked_at": null
-    }
-  ]
-}
-```
+> **Provisional until Phase 4 (`SDF-30`–`SDF-32`):** The `graph` resource is sketched here so the contract client (`SDF-22`) knows its top-level envelope, but its exact keys are **outside v1 strict extra-key enforcement until `SDF-32`** extends [`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json). The single-stage ordered table per task is defined in `SDF-30`, and milestone mandate fields (`mandate`, `observe`, `plan apply`, `plan amend`) are defined in `SDF-31`.
 
-### 2.6 `graph` (`owner graph --project <id|folder> --json`)
-
-Exposes the project's milestone graph, single-stage task table (`SDF-30`), `plan apply` / `plan amend` state (`SDF-31`), critical path and merge order (`SDF-32`), `/factory` page data (`SDF-35`), and voice summary (`SDF-36`).
-
-#### Top-Level `graph` and Nested Shapes
-
-| Object / Field | Type | Invariants |
+| Object / Field | Type | Provisional Shape (finalized in `SDF-30`–`SDF-32`) |
 |---|---|---|
-| `project` | `string` | Non-empty project `id` (e.g. `"wukongmind"`). |
-| `name` | `string` | Spoken/display name (`"WukongMind"`). |
-| `folder` | `string` | Canonical absolute path to the project repository. |
-| `updated_at` | `int` | UTC epoch ms of the latest store or plan update. |
-| `replans` | `int` | Count of `plan amend` replans recorded on this project (`>= 0`). |
-| `spoken_summary` | `string` | Code-built 1–3 sentence plain-words summary of the active milestone, critical path, and blockers (no file paths, SHAs, or raw ids). |
-| `critical_path` | `object \| null` | `{"milestone": string, "tasks": string[], "remaining_ms": int, "remaining_text": string}`, or `null` when no active milestone has unfinished tasks. Every ref in `tasks[]` must exist in `graph.tasks[]`. |
-| `milestones` | `Milestone[]` | Ordered by `order` (`1..N`, strictly increasing). |
-| `milestones[].id` | `string` | Milestone identifier (`"M1"`, `"M2"`). |
-| `milestones[].title` | `string` | Short milestone title. |
-| `milestones[].goal` | `string` | Plain-words goal for the milestone. |
-| `milestones[].order` | `int` | 1-based sequence order (`>= 1`). |
-| `milestones[].exit_test` | `string` | Non-empty exit criteria verified by the acceptance task. |
-| `milestones[].gate` | `string` | Enum: `"auto" \| "fable" \| "owner"`. |
-| `milestones[].state` | `string` | Enum: `"planned" \| "active" \| "validating" \| "done"`. |
-| `milestones[].acceptance_task` | `string \| null` | Task ref of the engine-added acceptance task (e.g. `"WUKO-15"`), or `null` while `"planned"`. |
-| `milestones[].mandate` | `object` | `{"words": string, "project": string, "at": int, "kind": "explicit" \| "inferred", "observe": bool}`. Immutable once created; `"inferred"` work with `observe: true` only records what would start until the owner enables proactive execution. |
-| `tasks` | `GraphTask[]` | All non-archived tasks in the project store. |
-| `tasks[].ref` | `string` | Task ref (`"<PREFIX>-<id>"`, e.g. `"WUKO-12"`). |
-| `tasks[].id` | `int` | Numeric task id (`>= 1`). |
-| `tasks[].title` | `string` | Non-empty task title. |
-| `tasks[].milestone` | `string \| null` | Milestone `id` in `milestones[]`, or `null`. |
-| `tasks[].kind` | `string` | Enum: `"code" \| "design" \| "doc" \| "acceptance" \| "release"`. |
-| `tasks[].stage` | `string` | Enum (9 ordered values): `"owner_answer" \| "owner_gate" \| "blocked" \| "ci" \| "waiting_on_dep" \| "queued" \| "idle" \| "working" \| "done"`. |
-| `tasks[].why_waiting` | `string \| null` | Plain one-line reason when `stage` is not `"working"` and not `"done"`; `null` when `"working"` or `"done"`. |
-| `tasks[].after` | `string[]` | Prerequisite task `ref`s (`tasks[]` must contain no cycles or dangling refs). |
-| `tasks[].dependents` | `string[]` | Unfinished task `ref`s in `tasks[]` that depend directly or transitively on this task (drives merge order in `SDF-32`). |
-| `tasks[].on_critical_path` | `bool` | `true` iff `ref` appears in `critical_path.tasks`. |
-| `tasks[].estimate_ms` | `int \| null` | Estimated duration in ms (`> 0`), or `null`. |
-| `tasks[].left_ms` | `int \| null` | Worker-reported remaining time from `--left` in ms (`>= 0`), or `null`. |
-| `tasks[].done_pct` | `int \| null` | Worker-reported `--done` percentage (`0..100`), or `null`. |
-| `tasks[].pr` | `object \| null` | `{"number": int, "url": string, "ci_state": "success" \| "failure" \| "pending" \| "none"}`, or `null` before PR creation. |
-
-#### Ordered Task Stage Table (`stage`)
-
-Every task has **exactly one `stage`**, computed in code by evaluating this ordered table from top to bottom (**first matching row wins**):
-
-| Priority | `stage` | Condition | In Owner Inbox? |
-|---:|---|---|---|
-| 1 | `owner_answer` | Task has an open owner ask with `kind != "gate"`. | **Yes** |
-| 2 | `owner_gate` | Task has an open owner `gate` ask, or is Ready and waiting for the owner's Accept under current rules. | **Yes** |
-| 3 | `blocked` | Out of review rounds (`review_out`), halted by the loop-breaker (`recap`), merge conflict, failed check with no active worker, or `device_wait`. (Never hidden behind `"working"`, fixing field note 49.) | No (coordinator / alert handles) |
-| 4 | `ci` | Task is Ready/Merging with a PR waiting on GitHub Actions checks or the merge queue. | No |
-| 5 | `waiting_on_dep` | Task is `todo` and at least one task in `after[]` is not `done`. | No |
-| 6 | `queued` | All `after[]` blockers are `done`, waiting for a running slot (`max_running`), pool floor, or scheduled `--at` time. | No |
-| 7 | `idle` | Worker terminal is idle with no open ask and no running background job. | No |
-| 8 | `working` | Worker, gate reviewer, local check runner, or task background job (capped at 30 minutes, fixing field note 26) is running. | No |
-| 9 | `done` | Task is merged / completed. | No |
-
-Example:
-
-```json
-{
-  "protocol": 1,
-  "project": "wukongmind",
-  "name": "WukongMind",
-  "folder": "/Users/me/projects/wukongmind",
-  "updated_at": 1763313600000,
-  "replans": 1,
-  "spoken_summary": "Milestone 2 of 4. 7 of 12 merged. The path to done runs through CI speed-up, then the slow UI tests: about 5 hours. Nothing needs you.",
-  "critical_path": {
-    "milestone": "M2",
-    "tasks": [
-      "WUKO-12",
-      "WUKO-14",
-      "WUKO-15"
-    ],
-    "remaining_ms": 18000000,
-    "remaining_text": "5h"
-  },
-  "milestones": [
-    {
-      "id": "M2",
-      "title": "Learn on ask",
-      "goal": "Build Learn on ask for 1.5",
-      "order": 2,
-      "exit_test": "End-to-end Learn on ask flow passes on iPhone simulator with stubbed provider",
-      "gate": "fable",
-      "state": "active",
-      "acceptance_task": "WUKO-15",
-      "mandate": {
-        "words": "In WukongMind, build Learn on ask for 1.5.",
-        "project": "wukongmind",
-        "at": 1763280000000,
-        "kind": "explicit",
-        "observe": false
-      }
-    }
-  ],
-  "tasks": [
-    {
-      "ref": "WUKO-12",
-      "id": 12,
-      "title": "CI speed-up and shared simulator cache",
-      "milestone": "M2",
-      "kind": "code",
-      "stage": "ci",
-      "why_waiting": "Waiting on GitHub Actions (18m)",
-      "after": [],
-      "dependents": [
-        "WUKO-14",
-        "WUKO-15"
-      ],
-      "on_critical_path": true,
-      "estimate_ms": 3600000,
-      "left_ms": 900000,
-      "done_pct": 90,
-      "pr": {
-        "number": 49,
-        "url": "https://github.com/example/wukongmind/pull/49",
-        "ci_state": "pending"
-      }
-    },
-    {
-      "ref": "WUKO-14",
-      "id": 14,
-      "title": "Slow UI tests for Learn card",
-      "milestone": "M2",
-      "kind": "code",
-      "stage": "waiting_on_dep",
-      "why_waiting": "Waiting on WUKO-12",
-      "after": [
-        "WUKO-12"
-      ],
-      "dependents": [
-        "WUKO-15"
-      ],
-      "on_critical_path": true,
-      "estimate_ms": 10800000,
-      "left_ms": null,
-      "done_pct": null,
-      "pr": null
-    },
-    {
-      "ref": "WUKO-15",
-      "id": 15,
-      "title": "M2 acceptance: Learn on ask",
-      "milestone": "M2",
-      "kind": "acceptance",
-      "stage": "waiting_on_dep",
-      "why_waiting": "Waiting on WUKO-14",
-      "after": [
-        "WUKO-14"
-      ],
-      "dependents": [],
-      "on_critical_path": true,
-      "estimate_ms": 6300000,
-      "left_ms": null,
-      "done_pct": null,
-      "pr": null
-    }
-  ]
-}
-```
+| `protocol` | `int` | `1`. |
+| `project`, `name`, `folder` | `string` | Project `id`, spoken `name`, and canonical `folder`. |
+| `updated_at`, `replans` | `int` | Latest update timestamp (epoch ms) and count of `plan amend` replans (`SDF-31`). |
+| `spoken_summary` | `string` | Code-built 1–3 sentence plain-words summary of active milestone, critical path, and blockers (`SDF-36`). |
+| `critical_path` | `object \| null` | `{"milestone": string, "tasks": string[], "remaining_ms": int, "remaining_text": string}` (`SDF-32`). |
+| `milestones[]` | `object[]` | `{"id", "title", "goal", "order", "exit_test", "gate": "auto"\|"fable"\|"owner", "state": "planned"\|"active"\|"validating"\|"done", "acceptance_task"}` plus `SDF-31`'s mandate fields. |
+| `tasks[]` | `object[]` | `{"ref", "id", "title", "milestone", "kind", "stage", "why_waiting", "after": string[], "dependents": string[], "on_critical_path": bool, "estimate_ms", "left_ms", "done_pct"}`, where `stage` comes from `SDF-30`'s ordered stage table. |
 
 ---
 
@@ -635,8 +211,8 @@ Command: `engine owner answer <ask_id> --option <index|label> [--proof <proof_id
 
 1. **Lookup & option resolution:** Loads `<store_dir>/asks/<ask_id>.json` (`not_found` if missing). Checks `ask.kind` against `ask_kinds` (`unknown_kind` if not one of the 8 v1 kinds). Resolves `--option` as a 1-based index (`"1".."9"`) or exact string match in `ask.options` (`invalid_option` if no match).
 2. **Idempotency & conflict:**
-   - If `ask.status == "answered"` with the **same** resolved option label (and same `proof_id` when provided), returns exit `0` with `"idempotent": true` and no duplicate side effects.
-   - If `ask.status != "open"` otherwise (answered with a different option, expired, or cancelled), refuses with `code: "already_closed"` (HTTP 409 equivalent).
+   - If `ask.status == "answered"` with the **same** resolved option label (and same `proof_id` when provided), returns exit `0` with `"idempotent": true` and the `Ask` (§2.2) with no duplicate side effects.
+   - If `ask.status != "open"` otherwise (answered with a different option or cancelled), refuses with `code: "already_closed"` (HTTP 409 equivalent).
 3. **Proof verification for gated asks (`ask.gated == true`):**
    - Requires `--proof <proof_id>` (`proof_required` if omitted).
    - Queries the local sheepdog daemon over loopback (`GET http://127.0.0.1:<port>/api/factory/answer-proof/<ask_id>?proof=<proof_id>&option=<option_label>`; Section 5). If the daemon rejects the proof or cannot be reached, refuses with `code: "proof_rejected"` and leaves the ask `"open"`.
@@ -646,48 +222,12 @@ Command: `engine owner answer <ask_id> --option <index|label> [--proof <proof_id
    - **`release`**: On an approving option, creates/pushes `subject.tag` or dispatches `subject.workflow` on `subject.head`.
    - **`paid-key`**: On an approving option, widens the named `herdr-secret` entry (`subject.secret`) to `subject.project` without exposing or logging the secret's value.
    - **`delete` / `install` / `reset`**: On an approving option, runs the pre-registered engine operation in `subject`.
-   - **`rule`**: On `"Save rule"`, activates `subject` in `settings.json` with `saved_by_ask: ask.id` and delivers the updated rules block to running coordinators (`settings_pass`).
+   - **`rule`**:
+     - When `subject.action == "save_rule"`, activates the rule in `settings.json` with `saved_by_ask: ask.id` and delivers the updated rules block to running coordinators (`settings_pass`).
+     - When `subject.action == "revoke_rule"`, stamps `revoked_at: now()` and `revoked_by_ask: ask.id` on `subject.rule_id` and runs `settings_pass`.
    - **Declining option on any kind:** Records the decline without running the gated operation and notifies the coordinator via `<herdr-news event="answer">`.
 
-Response shape:
-
-```json
-{
-  "protocol": 1,
-  "ok": true,
-  "idempotent": false,
-  "unlocked": "release_dispatched",
-  "ask": {
-    "id": "a1b2c3",
-    "project": "wukongmind",
-    "name": "WukongMind",
-    "folder": "/Users/me/projects/wukongmind",
-    "kind": "release",
-    "gated": true,
-    "question": "Tag WukongMind v1.5.0 and trigger the TestFlight release workflow now?",
-    "options": [
-      "Yes, tag v1.5.0",
-      "Hold release"
-    ],
-    "recommend": "Yes, tag v1.5.0",
-    "task": "WUKO-15",
-    "milestone": "M2",
-    "subject": {
-      "tag": "v1.5.0",
-      "workflow": "release.yml",
-      "head": "0123456789abcdef0123456789abcdef01234567"
-    },
-    "at": 1763310000000,
-    "expires_at": null,
-    "on_expiry": "hold",
-    "status": "answered",
-    "answer": "Yes, tag v1.5.0",
-    "answered_at": 1763310005000,
-    "answered_by": "owner",
-    "proof_id": "prf-8a7b6c5d4e3f"
-  }
-}
-```
+Returns `{"protocol": 1, "ok": true, "idempotent": bool, "unlocked": string | null, "ask": <Ask (§2.2)>}` (see `valid.actions.answer` in [`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json)).
 
 ### 3.2 `say(project, text)`
 
@@ -698,110 +238,33 @@ Command: `engine owner say <project> "<text>" --json`
 3. Delivers `<herdr-owner project="<id>">text</herdr-owner>` with the owner's words **unchanged** via `send_or_hold`.
 4. **Brain read-back rule (`SDF-27`):** Before the orchestrator (`internal/brain`) calls `say` for a new goal, it confirms the project name and goal summary with the owner so a goal is never routed to the wrong project silently.
 
-Response shape:
-
-```json
-{
-  "protocol": 1,
-  "ok": true,
-  "project": "wukongmind",
-  "name": "WukongMind",
-  "coordinator": "term-4",
-  "delivery": "sent"
-}
-```
+Returns `{"protocol": 1, "ok": true, "project": string, "name": string, "coordinator": string, "delivery": "sent" | "held"}`.
 
 ### 3.3 `propose_rule(scope, value | text)`
 
 Command: `engine owner propose-rule --scope <everywhere|machine|project> [--project <id|folder>] (--type <type> --value <json> | --text "<text>" [--section <section>]) [--until <ms|iso>] --json`
 
 1. Validates `scope`, `class` (`typed` when `--type` is given, `text` when `--text` is given), and schema.
-2. Enforces the **non-delegable rail**: if `type == "delegation"`, verifies that `value.kinds` is a non-empty subset of `["gate", "release"]` and that `until` is a future timestamp (`> now()`). Any attempt to delegate `paid-key`, `delete`, `install`, `reset`, or `rule` fails immediately with `code: "not_delegable"`.
+2. Enforces the **non-delegable rail**: if `type == "delegation"`, verifies that `value.kinds` is a non-empty subset of `["gate", "release"]`, `value.release_level` is `"patch" | "minor" | "any"` iff `"release"` is in `kinds` (else `null`), and `value.until` is a future timestamp (`> now()`). Any attempt to delegate `paid-key`, `delete`, `install`, `reset`, or `rule` fails immediately with `code: "not_delegable"`.
 3. Builds the mandatory `read_back` string naming the rule's **class** (`"Typed rule"` or `"Text rule"`) and **scope** (`"this project (<Name>)"`, `"this machine"`, or `"everywhere"`).
-4. Creates an open `Ask` with `kind: "rule"`, `gated: true`, `options: ["Save rule", "Cancel"]`, `recommend: "Save rule"`, and `subject` holding the candidate rule. The rule takes effect only after that ask is answered through `owner answer` with a verified `AnswerProof`.
+4. Creates an open `Ask` (§2.2) with `kind: "rule"`, `gated: true`, `options: ["Save rule", "Cancel"]`, `recommend: "Save rule"`, and `subject` holding the candidate rule (`action: "save_rule"`). The rule takes effect only after that ask is answered through `owner answer` with a verified `AnswerProof`.
 
-Response shape:
-
-```json
-{
-  "protocol": 1,
-  "ok": true,
-  "read_back": "Typed rule, this project (WukongMind): designs and plans are judged by Fable without waiting for you.",
-  "ask": {
-    "id": "b4c5d6",
-    "project": "wukongmind",
-    "name": "WukongMind",
-    "folder": "/Users/me/projects/wukongmind",
-    "kind": "rule",
-    "gated": true,
-    "question": "Typed rule, this project (WukongMind): designs and plans are judged by Fable without waiting for you. Save?",
-    "options": [
-      "Save rule",
-      "Cancel"
-    ],
-    "recommend": "Save rule",
-    "task": null,
-    "milestone": null,
-    "subject": {
-      "scope": "project",
-      "project": "wukongmind",
-      "class": "typed",
-      "type": "design_gate",
-      "value": "fable",
-      "text": null,
-      "section": null,
-      "base_hash": null,
-      "expires_at": null
-    },
-    "at": 1763300000000,
-    "expires_at": null,
-    "on_expiry": "hold",
-    "status": "open",
-    "answer": null,
-    "answered_at": null,
-    "answered_by": null,
-    "proof_id": null
-  }
-}
-```
+Returns `{"protocol": 1, "ok": true, "read_back": string, "ask": <Ask (§2.2)>}` (see `valid.actions.propose_rule` in [`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json)).
 
 ### 3.4 `revoke_rule(id)`
 
 Command: `engine owner revoke-rule <rule_id> --json`
 
-Revoking a rule or delegation tightens authority, so it executes **immediately** without opening a second ask, sets `revoked_at`, logs the revocation, and triggers `settings_pass` to update running coordinators:
+Whether revoking a rule can run without an owner `AnswerProof` depends on whether revocation **tightens** or **loosens** authority:
 
-```json
-{
-  "protocol": 1,
-  "ok": true,
-  "rule": {
-    "id": "rul-9d2e01",
-    "scope": "project",
-    "project": "wukongmind",
-    "class": "typed",
-    "type": "delegation",
-    "value": {
-      "kinds": [
-        "release"
-      ],
-      "milestones": [
-        "M2"
-      ],
-      "release_level": "patch",
-      "until": 1763395200000
-    },
-    "text": null,
-    "section": null,
-    "base_hash": null,
-    "read_back": "Typed rule, this project (WukongMind): delegate M2 patch releases until 08:00.",
-    "created_at": 1763305000000,
-    "expires_at": 1763395200000,
-    "saved_by_ask": "c7d8e9",
-    "revoked_at": 1763311000000
-  }
-}
-```
+1. **Delegation rules (`rule.type == "delegation"`) — Immediate:**
+   - Revoking a delegation strictly tightens authority (returning `gate` or `release` decisions to the owner). It executes immediately without opening a second ask, sets `revoked_at: now()` and `revoked_by_ask: null`, logs the revocation, and runs `settings_pass`.
+   - Returns `{"protocol": 1, "ok": true, "revoked": true, "rule": <Rule (§2.4)>, "ask": null}`.
+2. **All other rules (`rule.type != "delegation"` or `rule.class == "text"`) — Gated by a `rule` ask:**
+   - Revoking a non-delegation rule can **loosen** safety rails (for example, revoking `design_gate: "owner"`, `merge_policy: "ask"`, or `auto_accept: false` falls back to auto-accepting code or Fable-judging designs without the owner).
+   - Therefore, calling `revoke_rule` on any non-delegation rule leaves `revoked_at: null` and opens a gated `Ask` (§2.2) with `kind: "rule"`, `gated: true`, `question: "Revoke <read_back>?"`, `options: ["Revoke rule", "Keep"]`, `recommend: "Revoke rule"`, and `subject: {"action": "revoke_rule", "rule_id": rule.id}`.
+   - The rule is revoked (`revoked_at` and `revoked_by_ask` set) only when that `rule` ask is answered with `"Revoke rule"` and verified by a loopback `AnswerProof`. A stored non-delegation rule with `revoked_at != null` and `revoked_by_ask == null` is rejected by `validate_rule` with `code: "proof_required"`.
+   - Returns `{"protocol": 1, "ok": true, "revoked": false, "rule": <Rule (§2.4)>, "ask": <Ask (§2.2)>}`.
 
 ---
 
@@ -820,7 +283,7 @@ Every ask record carries a mandatory `kind` from this closed table:
 | `delete` | `true` | No | **Never** | Irreversible deletion outside a task's own worktree or build directory. |
 | `install` | `true` | No | **Never** | Installing host packages, toolchains, or self-hosted factory updates. |
 | `reset` | `true` | No | **Never** | Spending a provider limit-reset credit or resetting project state. |
-| `rule` | `true` | No | **Never** | Saving a standing rule created by `propose_rule`. |
+| `rule` | `true` | No | **Never** | Saving a standing rule (`propose_rule`) or revoking a non-delegation rule (`revoke_rule`). |
 
 **Delegation chain of custody (`answered_by: "rule"`):** When a `gate` or `release` ask is opened, the engine checks active, non-expired `delegation` rules (`revoked_at == null`, `expires_at > now()`) in `project` → `machine` → `everywhere` order using deterministic code checks only:
 1. `ask.kind` is in `rule.value.kinds` (`"gate"` or `"release"` only).
@@ -849,7 +312,7 @@ To close the three approval loopholes identified in the audit (`commands.py:2016
 
 ### 5.1 Why the Proof Lives in the Daemon
 
-Sheepdog's core safety rule ([`AGENTS.md`](../../../AGENTS.md), [`roles.md`](../roles.md) "The one rail") is that **an approval is answered only on the user's own fresh tap or recorded words, checked in Go code (`internal/supervisor/inputs.go`)**. Because any local process can invoke the Python CLI or write a string flag, the Python engine cannot trust its own CLI arguments as proof that the owner answered. Instead, the daemon records the owner's input through its existing rail, mints an `AnswerProof`, and the engine verifies that proof with the daemon over loopback before executing any gated action.
+Sheepdog's core safety rule ([`AGENTS.md`](../../../AGENTS.md), [`roles.md`](../roles.md) "The one rail") is that **an approval is answered only on the user's own fresh tap or recorded words, checked in Go code (`internal/supervisor/inputs.go`)**. Because any local process can invoke the Python CLI or write a string flag, the Python engine cannot trust its own CLI arguments as proof that the owner answered. Instead, the daemon records the owner's input through its rail, mints an `AnswerProof`, and the engine verifies that proof with the daemon over loopback before executing any gated action.
 
 ### 5.2 Step-by-Step Verification Flow
 
@@ -860,95 +323,47 @@ sequenceDiagram
   participant Engine as factory engine (Python)
 
   Engine->>Daemon: owner asks --open --json (poll / hc wake)
-  Daemon->>Phone: Card & spoken prompt (pending.created, id="fask-a1b2c3")
+  Daemon->>Phone: Card & spoken prompt (pending.created, id="fask-ask002")
   Phone->>Daemon: Paired-device tap (POST /api/pending/answer + Bearer ticket) or live voice words
-  Note over Daemon: 1. Reject ticketless loopback tap (dev == localDevice) & typed turns<br/>2. inputs.go railInputLocked (after ask shown, within window, not used, not negativeInput)
-  Daemon->>Daemon: Persist AnswerProof (prf-8a7b6c5d4e3f, device_id="dev-iphone-1") in factory_proofs.json
-  Daemon->>Engine: engine owner answer a1b2c3 --option 1 --proof prf-8a7b6c5d4e3f --json
-  Engine->>Daemon: GET http://127.0.0.1:<port>/api/factory/answer-proof/a1b2c3?proof=prf-8a7b6c5d4e3f&option=Yes%2C+tag+v1.5.0
+  Note over Daemon: Guard inside AnswerTap & mintAnswerProof:<br/>1. Refuse deviceID == "" or "local" (blocks loopback tap & WindowKeys)<br/>2. Refuse InputTyped (/api/turn, /api/utterance, SimulateText)<br/>3. inputs.go railInputLocked (after ask shown, within window, not used, not negativeInput)
+  Daemon->>Daemon: Persist AnswerProof (prf-112233445566, device_id="dev-iphone-1") in factory_proofs.json
+  Daemon->>Engine: engine owner answer ask002 --option 1 --proof prf-112233445566 --json
+  Engine->>Daemon: GET http://127.0.0.1:<port>/api/factory/answer-proof/ask002?proof=prf-112233445566&option=Accept+and+merge
   Note over Daemon: proxy.go loopback check:<br/>isLoopbackAddr && isUntrustedLoopback == ""<br/>Match proof_id, ask_id, option, input_kind in (tap,voice), device_id != "local"
-  Daemon-->>Engine: 200 OK {"ok": true, "verified": true, "proof_id": "prf-8a7b6c5d4e3f", ...}
-  Note over Engine: Save answered ask + run gated unlock (tag v1.5.0)
+  Daemon-->>Engine: 200 OK {"ok": true, "verified": true, "proof_id": "prf-112233445566", ...}
+  Note over Engine: Save answered ask + run gated unlock (accept BCN-33)
   Engine-->>Daemon: 0 {"protocol": 1, "ok": true, "ask": {...}}
 ```
 
 1. **Mapping asks into existing cards (`internal/factory` → `internal/supervisor`):**
    - Each open owner ask from `owner asks --open --json` is registered in `Supervisor` as a `state.PendingAction` (`Kind: state.PendingAnswerPrompt`) with:
-     - `ID`: `"fask-" + ask.ID` (e.g. `"fask-a1b2c3"`).
-     - `PaneID`: `"factory:" + ask.Project` (spoken name set to `ask.Name`, e.g. `"WukongMind"`).
+     - `ID`: `"fask-" + ask.ID` (e.g. `"fask-ask002"`).
+     - `PaneID`: `"factory:" + ask.Project` (spoken name set to `ask.Name`, e.g. `"Beacon"`).
      - `Question`: `ask.Question`.
-     - `Command`: `ask.Kind` + task/subject summary (e.g. `"release · WUKO-15 · tag v1.5.0"`), or `""` for plain questions.
+     - `Command`: `ask.Kind` + task/subject summary (e.g. `"gate · BCN-33"`), or `""` for plain questions.
      - `Options`: 1-based `state.Option` entries for `ask.Options`, with `Recommended: o == ask.Recommend` and `Default: o == ask.Recommend`.
-   - Because `/api/state` (`pending_action` and `questions[]`), `/events` (`pending.created`), APNs `push.KindApproval` notifications, and `/ws` `CardKindApproval` frames all read `state.PendingAction`, the iPhone app (`SDF-28`), `/voice`, and the desktop panel render factory asks and submit taps through `POST /api/pending/answer {id: "fask-a1b2c3", option: 1}` without a separate card protocol.
+   - Because `/api/state` (`pending_action` and `questions[]`), `/events` (`pending.created`), APNs `push.KindApproval` notifications, and `/ws` `CardKindApproval` frames all read `state.PendingAction`, the paired iPhone app (`SDF-28`) and `/voice` render factory asks without a separate card protocol.
+   - **Desktop panel (`mods/sheepdog`) is read-only for factory asks:** Because the desktop panel connects over ticketless loopback (`deviceID == localDevice`), it displays open factory asks in the timeline/list as read-only status cards and does not offer answer buttons for `"fask-"` items; answering a factory ask requires a paired phone ticket or live voice speech.
    - For `"fask-"` actions, `AnswerTap` skips terminal screen-scraping (`stillAsking`) and instead verifies that the ask is still open in the contract client before running the rail.
-2. **Closing the loopback tap and typed-turn shortcut (`internal/web/auth.go`, `internal/supervisor/inputs.go`):**
-   - Today in `internal/web/server.go:554–564` and `internal/web/auth.go:120–124`, `POST /api/pending/answer`, `POST /api/turn`, and `POST /api/utterance` use `accessDevice`, which grants a ticketless loopback HTTP request `localDevice` (`"local"`) authority, and `AnswerTap` (`inputs.go:637–644`) appends its own `shepherdInput{kind: InputTap}` right before calling `railInputLocked`. Without an explicit guard, a local worker could run `curl -X POST http://127.0.0.1:<port>/api/pending/answer -d '{"id":"fask-a1b2c3","option":1}'` and mint a real `AnswerProof`.
-   - Therefore, for any factory ask (`strings.HasPrefix(id, "fask-")`), an `AnswerProof` may be minted **only** from two input sources:
-     1. **A paired-device tap (`input_kind: "tap"`):** `handlePendingAnswer` requires `s.hasValidTicket(r) == true` (`dev != "" && dev != localDevice`, resolving to an active, non-revoked paired device `d.ID` in `devices.go`). Any ticketless loopback `POST /api/pending/answer` for `"fask-"` is refused with HTTP `403` (`code: "proof_rejected"`, logged as `brain.rail_blocked` with `reason: "factory ask tap requires a paired device ticket"`), never calling `AnswerTap`.
-     2. **Live voice-session speech (`input_kind: "voice"`):** Words transcribed by the voice model (`voice.transcript.in` → `heard()` → `shepherdInput{kind: InputVoice}`) on an active `/ws` voice session (`device_id` set to the `/ws` client's paired device id, or `"voice-session"` when the local owner mic is active). Typed HTTP turns (`POST /api/turn`, `POST /api/utterance`) and `/ws` `SimulateText` frames (`in.kind == InputTyped`) are refused by `railInputLocked` when the target pending action is `"fask-"` (`reason: "factory asks cannot be answered by typed loopback input"`).
-   - Both conditions are paired with `railInputLocked` (`inputs.go:458`):
-     - `in != nil` and `!in.at.Before(promptSinceLocked(p))` (the owner's input arrived after the ask was presented).
-     - `!in.used` (one `"yes"` answers at most one ask).
-     - `s.displacedLocked(p, in) == ""` (no unannounced displacement).
-     - `now.Sub(in.at) <= s.cfg.AuthoriseWindow`.
-     - `strings.TrimSpace(in.text) != ""` and `!fillerOnly(in.text)`.
-     - `!(negativeInput(in.text) && approves(p, keys))` (a `"no"` input never selects an approving option).
+2. **Paired-ticket and voice-only guard inside `AnswerTap` and `mintAnswerProof` (`internal/supervisor/inputs.go`, `internal/supervisor/window.go`):**
+   - In `internal/web/auth.go:120–124` and `internal/web/server.go:540–564`, `accessDevice` routes grant a ticketless loopback request `localDevice` (`"local"`) authority. Moreover, `AnswerTap` (`inputs.go:583`) has **two** callers: `handlePendingAnswer` (`POST /api/pending/answer`) and `Supervisor.WindowKeys` (`internal/supervisor/window.go:243`, reached via `POST /api/agents/{pane_id}/input` in `internal/web/window.go:99`), and `AnswerTap` appends its own `shepherdInput{kind: InputTap}` right before calling `railInputLocked` (`inputs.go:638–644`).
+   - Putting the check only in `handlePendingAnswer` would leave `WindowKeys` open on loopback. Therefore, the authenticated `deviceID` from `r.Context()` is threaded into `AnswerTap(ctx, id, option, deviceID)` (and `WindowKeys`), and the guard sits **both inside `AnswerTap` (before `addInputLocked`) and inside `mintAnswerProof`**:
+     1. **Paired-device tap (`input_kind: "tap"`):** Allowed only when `deviceID != "" && deviceID != localDevice` (i.e. authenticated via `s.hasValidTicket(r)` to an active, non-revoked paired device `d.ID` in `devices.go`). Any call to `AnswerTap` or `mintAnswerProof` on `"fask-"` with `deviceID == ""` or `deviceID == "local"` (whether via `POST /api/pending/answer` or `POST /api/agents/{pane_id}/input` `WindowKeys`) is refused before `addInputLocked` with `ErrProofRejected` (HTTP `403`, logged as `brain.rail_blocked`).
+     2. **Live voice-session speech (`input_kind: "voice"`):** Allowed only when `in.kind == InputVoice` (transcribed from `voice.transcript.in` on the active `/ws` voice session, with `device_id` set to the `/ws` client's paired device id or `"voice-session"`). Typed HTTP turns (`POST /api/turn`, `POST /api/utterance`) and `/ws` `SimulateText` frames (`in.kind == InputTyped`) are refused by `railInputLocked` and `mintAnswerProof` for `"fask-"` actions.
+   - Both authorized paths must also pass `railInputLocked` (`inputs.go:458`): input arrived after the ask was presented, `!in.used`, not displaced, within `AuthoriseWindow`, non-empty/non-filler, and `!(negativeInput(in.text) && approves(p, keys))`.
 3. **Minting `AnswerProof` (`internal/factory`):**
-   - Once the source check and `railInputLocked` succeed and mark `in.used = true`, the daemon mints a random `proof_id` (`"prf-" + 12 hex chars`) and writes an `AnswerProof` record (including `device_id`) to `<data_dir>/factory_proofs.json` (mode `0600`, atomic rename, 24 h retention):
-
-```json
-{
-  "proof_id": "prf-8a7b6c5d4e3f",
-  "ask_id": "a1b2c3",
-  "project": "wukongmind",
-  "kind": "release",
-  "option_index": 1,
-  "option_label": "Yes, tag v1.5.0",
-  "input_kind": "tap",
-  "input_seq": 42,
-  "utterance_id": "utt-1-19",
-  "device_id": "dev-iphone-1",
-  "answered_at": 1763310005000
-}
-```
-
+   - Once the source check in `mintAnswerProof` and `railInputLocked` succeed and mark `in.used = true`, the daemon mints `proof_id` (`"prf-" + 12 hex chars`) and persists the `AnswerProof` record (including `device_id`) in `<data_dir>/factory_proofs.json` (mode `0600`, atomic rename, 24 h retention).
 4. **Loopback verification endpoint (`GET /api/factory/answer-proof/{ask_id}`):**
    - Query parameters: `proof=<proof_id>&option=<option_label>`.
-   - **Strict local loopback guard (`internal/web/proxy.go`):** The handler requires `isLoopbackAddr(r.RemoteAddr)` **and** `s.isUntrustedLoopback(r) == ""` (rejecting any request with `X-Forwarded-*`, `Forwarded`, `X-Real-IP`, `Tailscale-*`, `CF-Connecting-IP`, or `True-Client-IP` headers, or arriving while Tailscale Funnel is active on the daemon port).
-   - Looks up `proof_id` in the daemon's store and checks that `ask_id` and `option_label` match exactly, `input_kind` is `"tap"` or `"voice"`, `device_id` is non-empty and not `"local"`, and `input_seq > 0`.
-   - Logs `factory.proof_verified` (or `factory.proof_rejected` with `reason`) to `internal/eventlog`.
-   - Returns HTTP `200`:
-
-```json
-{
-  "ok": true,
-  "verified": true,
-  "proof_id": "prf-8a7b6c5d4e3f",
-  "ask_id": "a1b2c3",
-  "project": "wukongmind",
-  "kind": "release",
-  "option_index": 1,
-  "option_label": "Yes, tag v1.5.0",
-  "input_kind": "tap",
-  "input_seq": 42,
-  "utterance_id": "utt-1-19",
-  "device_id": "dev-iphone-1",
-  "answered_at": 1763310005000
-}
-```
-
-   - If missing, mismatched, minted from an unauthorized source, or called from a proxied connection, returns HTTP `403` / `404`:
-
-```json
-{
-  "ok": false,
-  "verified": false,
-  "code": "proof_rejected",
-  "error": "no verified owner input matches ask a1b2c3 and proof prf-forged"
-}
-```
-
-5. **Threat boundary and required tests (`SDF-22`):** As documented in `sheepdog-factory-design.md` §3 and §9, loopback answer verification plus the paired-device / voice-only source check stops agent shortcuts (passing `--owner-approved`, spoofing `HERDR_TASK_BY`, sending `hc keys`, calling ticketless loopback `POST /api/pending/answer` or `/api/turn`, or inventing a `--proof` token). `SDF-22` must include an explicit test asserting that a ticketless loopback `POST /api/pending/answer` and a loopback `POST /api/turn` on `"fask-<id>"` both return `403` (`proof_rejected`) and mint no `AnswerProof`. Every verified answer is audited in `eventlog` with its `device_id`, `input_seq`, and `input_kind`. Isolating untrusted worker processes from the user's filesystem is the job of running workers in a VM machine.
+   - **Strict local loopback guard (`internal/web/proxy.go`):** Requires `isLoopbackAddr(r.RemoteAddr)` **and** `s.isUntrustedLoopback(r) == ""` (rejecting any request with `X-Forwarded-*`, `Forwarded`, `X-Real-IP`, `Tailscale-*`, `CF-Connecting-IP`, or `True-Client-IP` headers, or arriving while Tailscale Funnel is active on the daemon port).
+   - Verifies that `proof_id` exists, `ask_id` and `option_label` match, `input_kind` is `"tap"` or `"voice"`, `device_id` is non-empty and `!= "local"`, and `input_seq > 0`. Logs `factory.proof_verified` (or `factory.proof_rejected` with `reason`) to `internal/eventlog`.
+   - Returns HTTP `200` with the `answer_proof` shape in [`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json), or HTTP `403` / `404` `{"ok": false, "verified": false, "code": "proof_rejected", "error": "..."}`.
+5. **Threat boundary, residuals, and required tests (`SDF-22`):**
+   - **What this stops:** Agent shortcuts (`--owner-approved`, `HERDR_TASK_BY`, `hc keys` into `_ask-pane`, ticketless loopback `POST /api/pending/answer`, loopback `POST /api/agents/{pane_id}/input` `WindowKeys`, loopback `POST /api/turn`, or an invented `--proof` token). `SDF-22` must test that all three loopback HTTP paths (`POST /api/pending/answer`, `POST /api/agents/{pane_id}/input` with option keys, and `POST /api/turn`) on `"fask-<id>"` without a paired-device ticket are refused and mint no `AnswerProof`.
+   - **Two residuals outside this boundary (mitigated by VM isolation):**
+     1. *Loopback self-pairing:* Because `GET /api/pair` (`internal/web/pair.go`) is `accessLoopback`, a local process running as the same OS user on the host could fetch a pairing code, enroll a fake device, and tap with that ticket (audited via `web.device.enrolled` and `device_id` in `factory.proof_verified`).
+     2. *Unauthenticated local `owner say`:* A local process running as the same OS user can invoke `engine owner say <project> "<text>"` directly on the CLI.
+     As stated in `sheepdog-factory-design.md` §3 and §9, stopping a hostile same-user process from calling loopback pairing routes or writing engine files is the job of running workers in a VM machine, not the loopback proof.
 
 ---
 
@@ -974,7 +389,7 @@ An alert breaks the silence without being asked **only** when the factory or a r
 | `main_red` | The project's base branch (`main`) has had failing CI for over 60 minutes (`> 3,600,000 ms`), holding PR merges (`FAC-113`, field note 23). | `main_red:<project>:<base>` | Base branch CI turns green. |
 | `ci_stalled` | A `ready` or `merging` task has waited on CI checks for over 90 minutes (`> 5,400,000 ms`, owned by `SDF-24`). | `ci_stalled:<project>:<task_ref>:<head_sha>` | The PR's checks finish, the task merges, or a new head is pushed. |
 
-Any other event (such as a worker finishing, a single check failure that the coordinator is fixing, or a coordinator restart that succeeded) is **refused** by the alert validator.
+Any other event (such as a worker finishing, a single check failure that the coordinator is fixing, or a coordinator restart that succeeded) is **refused** by the alert validator (`unknown_kind`).
 
 ### 6.3 End-to-End Alert Transport
 
@@ -988,44 +403,21 @@ flowchart LR
 ```
 
 1. **Engine emission & episode deduplication:** When one of the five conditions fires and no active alert (`cleared_at: null`) exists for its `episode_key`, the engine appends an `Alert` record to `<store_dir>/alerts.json` and updates the `sheepdog.alert=<id>` label on the project's coordinator terminal so `internal/herdrcore`'s event stream wakes the daemon immediately.
-2. **Contract shape (`owner alerts [--since <ms|id>] --json`):**
+2. **Contract shape (`owner alerts [--since <ms|id>] --json`):** Top-level envelope `{"protocol": 1, "alerts": [Alert]}` (see `valid.alerts` in [`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json)).
 
 | Field | Type | Invariants |
 |---|---|---|
 | `id` | `string` | Alert id (`^alt-[a-z0-9]{6,16}$`). |
 | `episode_key` | `string` | Deterministic deduplication key for the outage spell. |
 | `kind` | `string` | Enum: `"no_pool" \| "disk" \| "consent_prompt" \| "main_red" \| "ci_stalled"`. |
-| `project` | `string \| null` | Project `id` (`"wukongmind"`), or `null` for machine-wide `no_pool` / `disk`. |
-| `name` | `string \| null` | Spoken project name (`"WukongMind"`), or `null`. |
-| `task` | `string \| null` | Task ref (`"WUKO-12"`) for `ci_stalled`, else `null`. |
+| `project` | `string \| null` | Project `id` (`"beacon"`), or `null` for machine-wide `no_pool` / `disk`. |
+| `name` | `string \| null` | Spoken project name (`"Beacon"`), or `null`. |
+| `task` | `string \| null` | Task ref (`"BCN-12"`) for `ci_stalled`, else `null`. |
 | `title` | `string` | Plain headline (`1..120` chars). |
 | `body` | `string` | Plain explanation with facts (`1..300` chars, e.g. reset time or biggest build folders). |
 | `fix` | `string` | One-line action for the owner at the Mac or by voice (`1..200` chars). |
 | `at` | `int` | Epoch ms when the episode started. |
 | `cleared_at` | `int \| null` | `null` while active; epoch ms when resolved. |
-
-Example:
-
-```json
-{
-  "protocol": 1,
-  "alerts": [
-    {
-      "id": "alt-5e6f7a8b",
-      "episode_key": "consent_prompt:/Users/me/projects/wukongmind",
-      "kind": "consent_prompt",
-      "project": "wukongmind",
-      "name": "WukongMind",
-      "task": null,
-      "title": "WukongMind has stopped: a macOS permission prompt may be waiting",
-      "body": "Two new agent terminals started blank in /Users/me/projects/wukongmind while existing processes still run.",
-      "fix": "Check the Mac screen for a macOS Files and Folders or volume access prompt and click Allow.",
-      "at": 1763312500000,
-      "cleared_at": null
-    }
-  ]
-}
-```
 
 3. **Daemon delivery (`SDF-24`):**
    - The daemon tracks delivered `alert.id` values in its persisted state so each episode alerts **at most once** across restarts.
@@ -1036,1259 +428,53 @@ Example:
 
 ## 7. Shared Contract Fixture (`testdata/factory/owner-contract-v1.json`)
 
-To prevent the Go daemon and Python engine from drifting (`sheepdog-factory-design.md` §9 risk 4), both test suites run against a single checked-in fixture file at **`testdata/factory/owner-contract-v1.json`** (following the pattern of [`ios/Tests/Fixtures/agent-attention.json`](../../../ios/Tests/Fixtures/agent-attention.json), [`internal/web/protocol_golden_test.go`](../../../internal/web/protocol_golden_test.go), and `test/contract_gate_evidence.py` as audited in [`engine-audit.md`](engine-audit.md) §2).
+To prevent the Go daemon and Python engine from drifting (`sheepdog-factory-design.md` §9 risk 4), both test suites run against the checked-in fixture at **[`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json)** (following the pattern of [`ios/Tests/Fixtures/agent-attention.json`](../../../ios/Tests/Fixtures/agent-attention.json), [`internal/web/protocol_golden_test.go`](../../../internal/web/protocol_golden_test.go), and `test/contract_gate_evidence.py` as audited in [`engine-audit.md`](engine-audit.md) §2).
 
 ### 7.1 How Both Suites Run the Fixture
 
 1. **Python suite (`SDF-21`, `factory/test/test_owner_contract.py`):**
-   - Loads `testdata/factory/owner-contract-v1.json`.
-   - Validates every object in `valid` through `factory.owner.validate_<shape>()`, asserting zero errors.
-   - Ensures that the live output of `owner hello --json`, `owner projects --json`, `owner asks --json`, `owner digest --json`, `owner rules --json`, `owner graph --json`, `owner alerts --json`, and the four actions (`answer`, `say`, `propose-rule`, `revoke-rule`) against a seeded store passes the exact same validators.
-   - Runs every entry in `invalid`, asserting that `validate_<target>()` (and `cmd_ask` / `cmd_owner`) raises `Fail` or `ValueError` with the expected `error_code` — specifically refusing every unknown `ask.kind` (`unknown_kind`), `gated` mismatch (`invalid_ask`), unknown `rule.type` (`invalid_rule`), `delegation` rule without `until` or with an invalid `release_level` (`invalid_rule`), non-delegable rule kind (`not_delegable`), unknown `alert.kind` (`unknown_kind`), unverified gated answer (`proof_required`), ticketless loopback or typed `AnswerProof` (`proof_rejected`), and unexpected extra JSON key (`unexpected_key`).
+   - Loads [`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json).
+   - Validates every finalized v1 payload in `valid` (`projects`, `asks_by_kind` covering all 8 ask kinds, `digest`, `rules` covering all 7 typed rule types + 1 text rule, `alerts` covering all 5 alert kinds, `answer_proof`, and `actions`) through `factory.owner.validate_<shape>()`, asserting zero errors.
+   - Ensures that the live output of `owner {projects,asks,digest,rules,alerts,answer,say,propose-rule,revoke-rule} --json` against a seeded store passes the exact same validators.
+   - Runs every entry in `invalid`, asserting that `validate_<target>()` (and `cmd_ask` / `cmd_owner`) raises `Fail` or `ValueError` with the expected `error_code`.
 2. **Go suite (`SDF-22`, `internal/factory/contract_test.go`):**
-   - Loads the same `testdata/factory/owner-contract-v1.json`.
-   - Decodes every object in `valid` using strict Go decoders (`json.NewDecoder` with `DisallowUnknownFields()` plus `Validate()`), round-trips back to JSON, and asserts structural equality.
-   - Runs every entry in `invalid`, asserting that strict decoding or `Validate()` fails with the mapped error code (`ErrUnknownAskKind`, `ErrInvalidAsk`, `ErrProofRequired`, `ErrProofRejected`, `ErrNotDelegable`, `ErrInvalidRule`, `ErrUnexpectedKey`).
-3. **Extending in Milestone 4 (`SDF-32`):**
-   - `SDF-32` adds multi-milestone critical-path and merge-order cases to the `valid.graph` and `invalid` sections of `testdata/factory/owner-contract-v1.json` without changing the v1 schema keys defined here.
+   - Loads the same [`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json).
+   - Decodes every finalized v1 object in `valid` using strict Go decoders (`json.NewDecoder` with `DisallowUnknownFields()` plus `Validate()`), round-trips back to JSON, and asserts structural equality.
+   - Runs every entry in `invalid`, asserting that strict decoding or `Validate()` fails with the mapped error code.
+3. **Provisional `graph_provisional` until `SDF-32`:**
+   - `valid.graph_provisional` is excluded from strict v1 extra-key enforcement in `SDF-21`/`SDF-22` so Phase 4 (`SDF-30`–`SDF-32`) can finalize the stage and mandate fields without breaking Phase 3 tests; `SDF-32` promotes `graph` into the strict validator set.
 
-### 7.2 Complete Fixture Specification (`testdata/factory/owner-contract-v1.json`)
+### 7.2 Negative Rejection Cases in `testdata/factory/owner-contract-v1.json`
 
-The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rule types + text rules, all 5 alert kinds, all 9 task stages, and all 4 action responses) and 13 `invalid` rejection cases:
-
-```json
-{
-  "about": "Shared Go and Python fixture for owner contract v1 (docs/dev/factory/owner-contract.md). Both factory/test/test_owner_contract.py (SDF-21) and internal/factory/contract_test.go (SDF-22) validate every `valid` payload and assert that every `invalid` case is refused with `error_code`.",
-  "protocol": 1,
-  "valid": {
-    "hello": {
-      "protocol": 1,
-      "min_protocol": 1,
-      "engine": "sheepdog-factory",
-      "machine": "local",
-      "ask_kinds": [
-        "decision",
-        "gate",
-        "release",
-        "paid-key",
-        "delete",
-        "install",
-        "reset",
-        "rule"
-      ],
-      "rule_types": [
-        "merge_policy",
-        "review_rounds",
-        "auto_accept",
-        "design_gate",
-        "delegation",
-        "notify_level",
-        "project_priority"
-      ],
-      "alert_kinds": [
-        "no_pool",
-        "disk",
-        "consent_prompt",
-        "main_red",
-        "ci_stalled"
-      ]
-    },
-    "asks_by_kind": [
-      {
-        "id": "ask001",
-        "project": "wukongmind",
-        "name": "WukongMind",
-        "folder": "/Users/me/projects/wukongmind",
-        "kind": "decision",
-        "gated": false,
-        "question": "Keep the offline cache in SQLite or plain JSON files?",
-        "options": ["SQLite", "Plain JSON"],
-        "recommend": "SQLite",
-        "task": "WUKO-10",
-        "milestone": "M2",
-        "subject": null,
-        "at": 1763300000000,
-        "expires_at": null,
-        "on_expiry": null,
-        "status": "answered",
-        "answer": "SQLite",
-        "answered_at": 1763300060000,
-        "answered_by": "coordinator",
-        "proof_id": null
-      },
-      {
-        "id": "ask002",
-        "project": "wukongmind",
-        "name": "WukongMind",
-        "folder": "/Users/me/projects/wukongmind",
-        "kind": "gate",
-        "gated": true,
-        "question": "WUKO-33 is out of review rounds after rebase. Accept and merge it?",
-        "options": ["Accept and merge", "Send back to worker"],
-        "recommend": "Accept and merge",
-        "task": "WUKO-33",
-        "milestone": "M2",
-        "subject": {
-          "target": "task",
-          "ref": "WUKO-33",
-          "head": "0123456789abcdef0123456789abcdef01234567"
-        },
-        "at": 1763301000000,
-        "expires_at": null,
-        "on_expiry": "hold",
-        "status": "answered",
-        "answer": "Accept and merge",
-        "answered_at": 1763301030000,
-        "answered_by": "owner",
-        "proof_id": "prf-112233445566"
-      },
-      {
-        "id": "ask003",
-        "project": "wukongmind",
-        "name": "WukongMind",
-        "folder": "/Users/me/projects/wukongmind",
-        "kind": "release",
-        "gated": true,
-        "question": "Tag WukongMind v1.5.1 and trigger release.yml now?",
-        "options": ["Yes, tag v1.5.1", "Hold release"],
-        "recommend": "Yes, tag v1.5.1",
-        "task": "WUKO-15",
-        "milestone": "M2",
-        "subject": {
-          "tag": "v1.5.1",
-          "workflow": "release.yml",
-          "head": "0123456789abcdef0123456789abcdef01234567"
-        },
-        "at": 1763302000000,
-        "expires_at": null,
-        "on_expiry": "hold",
-        "status": "answered",
-        "answer": "Yes, tag v1.5.1",
-        "answered_at": 1763302001000,
-        "answered_by": "rule",
-        "proof_id": "rul-9d2e01"
-      },
-      {
-        "id": "ask004",
-        "project": "wukongmind",
-        "name": "WukongMind",
-        "folder": "/Users/me/projects/wukongmind",
-        "kind": "paid-key",
-        "gated": true,
-        "question": "Allow WukongMind tasks to use stored secret DEEPSEEK_API_KEY?",
-        "options": ["Allow for WukongMind", "Deny"],
-        "recommend": "Allow for WukongMind",
-        "task": "WUKO-18",
-        "milestone": "M2",
-        "subject": {
-          "secret": "DEEPSEEK_API_KEY",
-          "project": "wukongmind"
-        },
-        "at": 1763303000000,
-        "expires_at": null,
-        "on_expiry": "hold",
-        "status": "open",
-        "answer": null,
-        "answered_at": null,
-        "answered_by": null,
-        "proof_id": null
-      },
-      {
-        "id": "ask005",
-        "project": "wukongmind",
-        "name": "WukongMind",
-        "folder": "/Users/me/projects/wukongmind",
-        "kind": "delete",
-        "gated": true,
-        "question": "Delete stale remote branch experiment/old-prototype on origin?",
-        "options": ["Delete branch", "Keep branch"],
-        "recommend": "Keep branch",
-        "task": null,
-        "milestone": null,
-        "subject": {
-          "action": "delete_remote_branch",
-          "target": "experiment/old-prototype"
-        },
-        "at": 1763304000000,
-        "expires_at": null,
-        "on_expiry": "hold",
-        "status": "open",
-        "answer": null,
-        "answered_at": null,
-        "answered_by": null,
-        "proof_id": null
-      },
-      {
-        "id": "ask006",
-        "project": "wukongmind",
-        "name": "WukongMind",
-        "folder": "/Users/me/projects/wukongmind",
-        "kind": "install",
-        "gated": true,
-        "question": "Install swiftformat 0.55.0 via Homebrew on local?",
-        "options": ["Install", "Skip"],
-        "recommend": "Install",
-        "task": "WUKO-19",
-        "milestone": "M2",
-        "subject": {
-          "action": "brew_install",
-          "target": "swiftformat"
-        },
-        "at": 1763305000000,
-        "expires_at": null,
-        "on_expiry": "hold",
-        "status": "open",
-        "answer": null,
-        "answered_at": null,
-        "answered_by": null,
-        "proof_id": null
-      },
-      {
-        "id": "ask007",
-        "project": "wukongmind",
-        "name": "WukongMind",
-        "folder": "/Users/me/projects/wukongmind",
-        "kind": "reset",
-        "gated": true,
-        "question": "Reset WukongMind milestone M2 failed check counters and restart queued tasks?",
-        "options": ["Reset M2 counters", "Cancel"],
-        "recommend": "Reset M2 counters",
-        "task": null,
-        "milestone": "M2",
-        "subject": {
-          "action": "reset_milestone",
-          "target": "M2"
-        },
-        "at": 1763306000000,
-        "expires_at": null,
-        "on_expiry": "hold",
-        "status": "open",
-        "answer": null,
-        "answered_at": null,
-        "answered_by": null,
-        "proof_id": null
-      },
-      {
-        "id": "ask008",
-        "project": "wukongmind",
-        "name": "WukongMind",
-        "folder": "/Users/me/projects/wukongmind",
-        "kind": "rule",
-        "gated": true,
-        "question": "Typed rule, this project (WukongMind): designs and plans are judged by Fable without waiting for you. Save?",
-        "options": ["Save rule", "Cancel"],
-        "recommend": "Save rule",
-        "task": null,
-        "milestone": null,
-        "subject": {
-          "scope": "project",
-          "project": "wukongmind",
-          "class": "typed",
-          "type": "design_gate",
-          "value": "fable",
-          "text": null,
-          "section": null,
-          "base_hash": null,
-          "expires_at": null
-        },
-        "at": 1763307000000,
-        "expires_at": null,
-        "on_expiry": "hold",
-        "status": "open",
-        "answer": null,
-        "answered_at": null,
-        "answered_by": null,
-        "proof_id": null
-      }
-    ],
-    "answer_proof": {
-      "ok": true,
-      "verified": true,
-      "proof_id": "prf-112233445566",
-      "ask_id": "ask002",
-      "project": "wukongmind",
-      "kind": "gate",
-      "option_index": 1,
-      "option_label": "Accept and merge",
-      "input_kind": "tap",
-      "input_seq": 17,
-      "utterance_id": "utt-1-8",
-      "device_id": "dev-iphone-1",
-      "answered_at": 1763301030000
-    },
-    "projects": {
-      "protocol": 1,
-      "projects": [
-        {
-          "id": "wukongmind",
-          "name": "WukongMind",
-          "folder": "/Users/me/projects/wukongmind",
-          "prefix": "WUKO",
-          "machine": "local",
-          "status": "waiting",
-          "open_asks": 5,
-          "goal": "Build Learn on ask for 1.5",
-          "active_milestone": "M2",
-          "coordinator": {
-            "terminal": "term-4",
-            "session": "sess-wuko-coord-1",
-            "state": "idle",
-            "lease_valid": true
-          },
-          "spent": {
-            "tasks_merged": 9,
-            "review_rounds": 19,
-            "ci_runs": 14
-          },
-          "pools": [
-            {
-              "pool": "claude",
-              "state": "ok",
-              "rolling": false,
-              "five_hour_left": 62.0,
-              "week_left": 40.0,
-              "five_hour_reset": "2026-11-17T03:00:00Z",
-              "week_reset": "2026-11-22T20:00:00Z"
-            },
-            {
-              "pool": "antigravity-gemini",
-              "state": "ok",
-              "rolling": true,
-              "five_hour_left": 85.0,
-              "week_left": 70.0,
-              "five_hour_reset": "2026-11-17T01:30:00Z",
-              "week_reset": "2026-11-20T12:00:00Z"
-            }
-          ]
-        }
-      ]
-    },
-    "digest": {
-      "protocol": 1,
-      "generated_at": 1763313600000,
-      "since": 1763270400000,
-      "spoken_summary": "Since last night: 9 merged, milestone 2 done, 1 waiting on CI, Claude 40% left. Nothing needs you.",
-      "open_asks": 0,
-      "alerts_active": 0,
-      "pools": [
-        {
-          "pool": "claude",
-          "state": "ok",
-          "rolling": false,
-          "five_hour_left": 62.0,
-          "week_left": 40.0,
-          "five_hour_reset": "2026-11-17T03:00:00Z",
-          "week_reset": "2026-11-22T20:00:00Z"
-        }
-      ],
-      "projects": [
-        {
-          "id": "wukongmind",
-          "name": "WukongMind",
-          "status": "working",
-          "milestone": {
-            "id": "M2",
-            "title": "Learn on ask",
-            "state": "done",
-            "merged": 9,
-            "total": 9
-          },
-          "merged": [
-            {
-              "ref": "WUKO-15",
-              "title": "M2 acceptance: Learn on ask",
-              "pr": 48,
-              "merged_at": 1763312000000
-            }
-          ],
-          "waiting": [
-            {
-              "ref": "WUKO-12",
-              "title": "CI speed-up and shared simulator cache",
-              "stage": "ci",
-              "why": "Waiting on GitHub Actions (18m)"
-            }
-          ],
-          "replans": 0,
-          "open_asks": 0,
-          "spent": {
-            "tasks_merged": 9,
-            "review_rounds": 19,
-            "ci_runs": 14
-          }
-        }
-      ]
-    },
-    "rules": {
-      "protocol": 1,
-      "rules": [
-        {
-          "id": "rul-1a2b3c",
-          "scope": "project",
-          "project": "wukongmind",
-          "class": "typed",
-          "type": "merge_policy",
-          "value": "checks",
-          "text": null,
-          "section": null,
-          "base_hash": null,
-          "read_back": "Typed rule, this project (WukongMind): merge policy is checks.",
-          "created_at": 1763300000000,
-          "expires_at": null,
-          "saved_by_ask": "ask008",
-          "revoked_at": null
-        },
-        {
-          "id": "rul-2b3c4d",
-          "scope": "project",
-          "project": "wukongmind",
-          "class": "typed",
-          "type": "review_rounds",
-          "value": {
-            "code": 2,
-            "design": 1,
-            "doc": 1
-          },
-          "text": null,
-          "section": null,
-          "base_hash": null,
-          "read_back": "Typed rule, this project (WukongMind): review rounds are 2 for code and 1 for designs and docs.",
-          "created_at": 1763300100000,
-          "expires_at": null,
-          "saved_by_ask": "ask008",
-          "revoked_at": null
-        },
-        {
-          "id": "rul-3c4d5e",
-          "scope": "project",
-          "project": "wukongmind",
-          "class": "typed",
-          "type": "auto_accept",
-          "value": true,
-          "text": null,
-          "section": null,
-          "base_hash": null,
-          "read_back": "Typed rule, this project (WukongMind): auto-accept is on at the evidence bar.",
-          "created_at": 1763300200000,
-          "expires_at": null,
-          "saved_by_ask": "ask008",
-          "revoked_at": null
-        },
-        {
-          "id": "rul-7f3a19",
-          "scope": "project",
-          "project": "wukongmind",
-          "class": "typed",
-          "type": "design_gate",
-          "value": "fable",
-          "text": null,
-          "section": null,
-          "base_hash": null,
-          "read_back": "Typed rule, this project (WukongMind): designs and plans are judged by Fable without waiting for you.",
-          "created_at": 1763300300000,
-          "expires_at": null,
-          "saved_by_ask": "ask008",
-          "revoked_at": null
-        },
-        {
-          "id": "rul-9d2e01",
-          "scope": "project",
-          "project": "wukongmind",
-          "class": "typed",
-          "type": "delegation",
-          "value": {
-            "kinds": [
-              "release"
-            ],
-            "milestones": [
-              "M2"
-            ],
-            "release_level": "patch",
-            "until": 1763395200000
-          },
-          "text": null,
-          "section": null,
-          "base_hash": null,
-          "read_back": "Typed rule, this project (WukongMind): delegate M2 patch releases until 08:00.",
-          "created_at": 1763305000000,
-          "expires_at": 1763395200000,
-          "saved_by_ask": "ask008",
-          "revoked_at": null
-        },
-        {
-          "id": "rul-4d5e6f",
-          "scope": "machine",
-          "project": null,
-          "class": "typed",
-          "type": "notify_level",
-          "value": "asks_and_alerts",
-          "text": null,
-          "section": null,
-          "base_hash": null,
-          "read_back": "Typed rule, this machine: notify level is asks and alerts.",
-          "created_at": 1763305200000,
-          "expires_at": null,
-          "saved_by_ask": "ask008",
-          "revoked_at": null
-        },
-        {
-          "id": "rul-5e6f7a",
-          "scope": "everywhere",
-          "project": null,
-          "class": "typed",
-          "type": "project_priority",
-          "value": [
-            "wukongmind",
-            "herdr-sheepdog"
-          ],
-          "text": null,
-          "section": null,
-          "base_hash": null,
-          "read_back": "Typed rule, everywhere: project priority is WukongMind first, then herdr-sheepdog.",
-          "created_at": 1763305500000,
-          "expires_at": null,
-          "saved_by_ask": "ask008",
-          "revoked_at": null
-        },
-        {
-          "id": "rul-3b8c44",
-          "scope": "everywhere",
-          "project": null,
-          "class": "text",
-          "type": null,
-          "value": null,
-          "text": "Keep iOS UI PRs to one screen per task so simulator runs stay under 10 minutes.",
-          "section": "plan",
-          "base_hash": "9a0f1e2d3c4b",
-          "read_back": "Text rule, everywhere: keep iOS UI PRs to one screen per task so simulator runs stay under 10 minutes.",
-          "created_at": 1763306000000,
-          "expires_at": null,
-          "saved_by_ask": "d0e1f2",
-          "revoked_at": null
-        }
-      ]
-    },
-    "graph": {
-      "protocol": 1,
-      "project": "wukongmind",
-      "name": "WukongMind",
-      "folder": "/Users/me/projects/wukongmind",
-      "updated_at": 1763313600000,
-      "replans": 1,
-      "spoken_summary": "Milestone 2 of 4. 7 of 12 merged. The path to done runs through CI speed-up, then the slow UI tests: about 5 hours. Two things need you.",
-      "critical_path": {
-        "milestone": "M2",
-        "tasks": ["WUKO-12", "WUKO-14", "WUKO-15"],
-        "remaining_ms": 18000000,
-        "remaining_text": "5h"
-      },
-      "milestones": [
-        {
-          "id": "M2",
-          "title": "Learn on ask",
-          "goal": "Build Learn on ask for 1.5",
-          "order": 2,
-          "exit_test": "End-to-end Learn on ask flow passes on iPhone simulator with stubbed provider",
-          "gate": "fable",
-          "state": "active",
-          "acceptance_task": "WUKO-15",
-          "mandate": {
-            "words": "In WukongMind, build Learn on ask for 1.5.",
-            "project": "wukongmind",
-            "at": 1763280000000,
-            "kind": "explicit",
-            "observe": false
-          }
-        }
-      ],
-      "tasks": [
-        {
-          "ref": "WUKO-11",
-          "id": 11,
-          "title": "Base model adapter",
-          "milestone": "M2",
-          "kind": "code",
-          "stage": "done",
-          "why_waiting": null,
-          "after": [],
-          "dependents": [],
-          "on_critical_path": false,
-          "estimate_ms": 1800000,
-          "left_ms": 0,
-          "done_pct": 100,
-          "pr": {
-            "number": 45,
-            "url": "https://github.com/example/wukongmind/pull/45",
-            "ci_state": "success"
-          }
-        },
-        {
-          "ref": "WUKO-12",
-          "id": 12,
-          "title": "CI speed-up and shared simulator cache",
-          "milestone": "M2",
-          "kind": "code",
-          "stage": "ci",
-          "why_waiting": "Waiting on GitHub Actions (18m)",
-          "after": [],
-          "dependents": ["WUKO-14", "WUKO-15"],
-          "on_critical_path": true,
-          "estimate_ms": 3600000,
-          "left_ms": 900000,
-          "done_pct": 90,
-          "pr": {
-            "number": 49,
-            "url": "https://github.com/example/wukongmind/pull/49",
-            "ci_state": "pending"
-          }
-        },
-        {
-          "ref": "WUKO-13",
-          "id": 13,
-          "title": "Prompt history store",
-          "milestone": "M2",
-          "kind": "code",
-          "stage": "working",
-          "why_waiting": null,
-          "after": [],
-          "dependents": [],
-          "on_critical_path": false,
-          "estimate_ms": 2400000,
-          "left_ms": 1200000,
-          "done_pct": 50,
-          "pr": null
-        },
-        {
-          "ref": "WUKO-14",
-          "id": 14,
-          "title": "Slow UI tests for Learn card",
-          "milestone": "M2",
-          "kind": "code",
-          "stage": "waiting_on_dep",
-          "why_waiting": "Waiting on WUKO-12",
-          "after": ["WUKO-12"],
-          "dependents": ["WUKO-15"],
-          "on_critical_path": true,
-          "estimate_ms": 10800000,
-          "left_ms": null,
-          "done_pct": null,
-          "pr": null
-        },
-        {
-          "ref": "WUKO-15",
-          "id": 15,
-          "title": "M2 acceptance: Learn on ask",
-          "milestone": "M2",
-          "kind": "acceptance",
-          "stage": "waiting_on_dep",
-          "why_waiting": "Waiting on WUKO-14",
-          "after": ["WUKO-14"],
-          "dependents": [],
-          "on_critical_path": true,
-          "estimate_ms": 6300000,
-          "left_ms": null,
-          "done_pct": null,
-          "pr": null
-        },
-        {
-          "ref": "WUKO-16",
-          "id": 16,
-          "title": "Offline transcript export",
-          "milestone": "M2",
-          "kind": "code",
-          "stage": "queued",
-          "why_waiting": "Queued behind tasks.max_running (4 running)",
-          "after": [],
-          "dependents": [],
-          "on_critical_path": false,
-          "estimate_ms": 1800000,
-          "left_ms": null,
-          "done_pct": null,
-          "pr": null
-        },
-        {
-          "ref": "WUKO-17",
-          "id": 17,
-          "title": "User guide update",
-          "milestone": "M2",
-          "kind": "doc",
-          "stage": "idle",
-          "why_waiting": "Worker terminal idle between turns",
-          "after": [],
-          "dependents": [],
-          "on_critical_path": false,
-          "estimate_ms": 900000,
-          "left_ms": 300000,
-          "done_pct": 70,
-          "pr": null
-        },
-        {
-          "ref": "WUKO-18",
-          "id": 18,
-          "title": "DeepSeek fallback wiring",
-          "milestone": "M2",
-          "kind": "code",
-          "stage": "owner_answer",
-          "why_waiting": "Waiting on owner ask ask004 (paid-key)",
-          "after": [],
-          "dependents": [],
-          "on_critical_path": false,
-          "estimate_ms": 2700000,
-          "left_ms": 1800000,
-          "done_pct": 35,
-          "pr": null
-        },
-        {
-          "ref": "WUKO-20",
-          "id": 20,
-          "title": "Learn card layout polish",
-          "milestone": "M2",
-          "kind": "design",
-          "stage": "owner_gate",
-          "why_waiting": "Waiting for owner gate approval",
-          "after": [],
-          "dependents": [],
-          "on_critical_path": false,
-          "estimate_ms": 1800000,
-          "left_ms": 0,
-          "done_pct": 100,
-          "pr": {
-            "number": 50,
-            "url": "https://github.com/example/wukongmind/pull/50",
-            "ci_state": "success"
-          }
-        },
-        {
-          "ref": "WUKO-21",
-          "id": 21,
-          "title": "Keychain migration test",
-          "milestone": "M2",
-          "kind": "code",
-          "stage": "blocked",
-          "why_waiting": "Out of review rounds: wants one more",
-          "after": [],
-          "dependents": [],
-          "on_critical_path": false,
-          "estimate_ms": 2400000,
-          "left_ms": 600000,
-          "done_pct": 85,
-          "pr": {
-            "number": 51,
-            "url": "https://github.com/example/wukongmind/pull/51",
-            "ci_state": "failure"
-          }
-        }
-      ]
-    },
-    "alerts": {
-      "protocol": 1,
-      "alerts": [
-        {
-          "id": "alt-1a2b3c4d",
-          "episode_key": "no_pool:local",
-          "kind": "no_pool",
-          "project": null,
-          "name": null,
-          "task": null,
-          "title": "Factory has stopped: no quota pool has room left",
-          "body": "Claude and Antigravity pools are at the 5-hour floor; earliest reset is 2026-11-17T01:30:00Z.",
-          "fix": "Wait for the 01:30 UTC reset or press a quota reset at the Mac.",
-          "at": 1763312000000,
-          "cleared_at": null
-        },
-        {
-          "id": "alt-2b3c4d5e",
-          "episode_key": "disk:/Users/me/projects/wukongmind",
-          "kind": "disk",
-          "project": "wukongmind",
-          "name": "WukongMind",
-          "task": null,
-          "title": "WukongMind has stopped: disk is 92% full",
-          "body": "Largest task build folders: WUKO-12 (3.4 GB), WUKO-14 (2.1 GB).",
-          "fix": "Free disk space or prune finished task build directories on the Mac.",
-          "at": 1763312100000,
-          "cleared_at": null
-        },
-        {
-          "id": "alt-5e6f7a8b",
-          "episode_key": "consent_prompt:/Users/me/projects/wukongmind",
-          "kind": "consent_prompt",
-          "project": "wukongmind",
-          "name": "WukongMind",
-          "task": null,
-          "title": "WukongMind has stopped: a macOS permission prompt may be waiting",
-          "body": "Two new agent terminals started blank in /Users/me/projects/wukongmind while existing processes still run.",
-          "fix": "Check the Mac screen for a macOS Files and Folders or volume access prompt and click Allow.",
-          "at": 1763312500000,
-          "cleared_at": null
-        },
-        {
-          "id": "alt-3c4d5e6f",
-          "episode_key": "main_red:wukongmind:main",
-          "kind": "main_red",
-          "project": "wukongmind",
-          "name": "WukongMind",
-          "task": null,
-          "title": "WukongMind merges held: main CI has been red for 65 minutes",
-          "body": "Base branch main is failing UI smoke checks since 2026-11-16T17:30:00Z.",
-          "fix": "Inspect main CI or let the fix-main task merge first.",
-          "at": 1763312600000,
-          "cleared_at": null
-        },
-        {
-          "id": "alt-4d5e6f7a",
-          "episode_key": "ci_stalled:wukongmind:WUKO-12:0123456789abcdef0123456789abcdef01234567",
-          "kind": "ci_stalled",
-          "project": "wukongmind",
-          "name": "WukongMind",
-          "task": "WUKO-12",
-          "title": "WUKO-12 has waited on CI for over 90 minutes",
-          "body": "Pull request #49 on WUKO-12 has been pending GitHub Actions checks for 94 minutes.",
-          "fix": "Check GitHub Actions runner queue or cancel and re-trigger the stalled workflow.",
-          "at": 1763312700000,
-          "cleared_at": null
-        }
-      ]
-    },
-    "actions": {
-      "answer": {
-        "protocol": 1,
-        "ok": true,
-        "idempotent": false,
-        "unlocked": "task_accepted",
-        "ask": {
-          "id": "ask002",
-          "project": "wukongmind",
-          "name": "WukongMind",
-          "folder": "/Users/me/projects/wukongmind",
-          "kind": "gate",
-          "gated": true,
-          "question": "WUKO-33 is out of review rounds after rebase. Accept and merge it?",
-          "options": ["Accept and merge", "Send back to worker"],
-          "recommend": "Accept and merge",
-          "task": "WUKO-33",
-          "milestone": "M2",
-          "subject": {
-            "target": "task",
-            "ref": "WUKO-33",
-            "head": "0123456789abcdef0123456789abcdef01234567"
-          },
-          "at": 1763301000000,
-          "expires_at": null,
-          "on_expiry": "hold",
-          "status": "answered",
-          "answer": "Accept and merge",
-          "answered_at": 1763301030000,
-          "answered_by": "owner",
-          "proof_id": "prf-112233445566"
-        }
-      },
-      "say": {
-        "protocol": 1,
-        "ok": true,
-        "project": "wukongmind",
-        "name": "WukongMind",
-        "coordinator": "term-4",
-        "delivery": "sent"
-      },
-      "propose_rule": {
-        "protocol": 1,
-        "ok": true,
-        "read_back": "Typed rule, this project (WukongMind): designs and plans are judged by Fable without waiting for you.",
-        "ask": {
-          "id": "ask008",
-          "project": "wukongmind",
-          "name": "WukongMind",
-          "folder": "/Users/me/projects/wukongmind",
-          "kind": "rule",
-          "gated": true,
-          "question": "Typed rule, this project (WukongMind): designs and plans are judged by Fable without waiting for you. Save?",
-          "options": ["Save rule", "Cancel"],
-          "recommend": "Save rule",
-          "task": null,
-          "milestone": null,
-          "subject": {
-            "scope": "project",
-            "project": "wukongmind",
-            "class": "typed",
-            "type": "design_gate",
-            "value": "fable",
-            "text": null,
-            "section": null,
-            "base_hash": null,
-            "expires_at": null
-          },
-          "at": 1763307000000,
-          "expires_at": null,
-          "on_expiry": "hold",
-          "status": "open",
-          "answer": null,
-          "answered_at": null,
-          "answered_by": null,
-          "proof_id": null
-        }
-      },
-      "revoke_rule": {
-        "protocol": 1,
-        "ok": true,
-        "rule": {
-          "id": "rul-7f3a19",
-          "scope": "project",
-          "project": "wukongmind",
-          "class": "typed",
-          "type": "design_gate",
-          "value": "fable",
-          "text": null,
-          "section": null,
-          "base_hash": null,
-          "read_back": "Typed rule, this project (WukongMind): designs and plans are judged by Fable without waiting for you.",
-          "created_at": 1763300300000,
-          "expires_at": null,
-          "saved_by_ask": "ask008",
-          "revoked_at": 1763311000000
-        }
-      }
-    }
-  },
-  "invalid": [
-    {
-      "name": "unknown ask kind is refused",
-      "target": "ask",
-      "error_code": "unknown_kind",
-      "payload": {
-        "id": "bad001",
-        "project": "wukongmind",
-        "name": "WukongMind",
-        "folder": "/Users/me/projects/wukongmind",
-        "kind": "deploy",
-        "gated": true,
-        "question": "Deploy to production?",
-        "options": ["Yes", "No"],
-        "recommend": "Yes",
-        "task": "WUKO-15",
-        "milestone": "M2",
-        "subject": null,
-        "at": 1763300000000,
-        "expires_at": null,
-        "on_expiry": "hold",
-        "status": "open",
-        "answer": null,
-        "answered_at": null,
-        "answered_by": null,
-        "proof_id": null
-      }
-    },
-    {
-      "name": "empty ask kind is refused",
-      "target": "ask",
-      "error_code": "unknown_kind",
-      "payload": {
-        "id": "bad002",
-        "project": "wukongmind",
-        "name": "WukongMind",
-        "folder": "/Users/me/projects/wukongmind",
-        "kind": "",
-        "gated": false,
-        "question": "Use SQLite?",
-        "options": ["Yes", "No"],
-        "recommend": "Yes",
-        "task": "WUKO-10",
-        "milestone": "M2",
-        "subject": null,
-        "at": 1763300000000,
-        "expires_at": null,
-        "on_expiry": null,
-        "status": "open",
-        "answer": null,
-        "answered_at": null,
-        "answered_by": null,
-        "proof_id": null
-      }
-    },
-    {
-      "name": "gated ask marked gated=false is refused",
-      "target": "ask",
-      "error_code": "invalid_ask",
-      "payload": {
-        "id": "bad003",
-        "project": "wukongmind",
-        "name": "WukongMind",
-        "folder": "/Users/me/projects/wukongmind",
-        "kind": "release",
-        "gated": false,
-        "question": "Tag v1.5.0?",
-        "options": ["Yes", "No"],
-        "recommend": "Yes",
-        "task": "WUKO-15",
-        "milestone": "M2",
-        "subject": {"tag": "v1.5.0", "workflow": "release.yml", "head": "0123456789abcdef0123456789abcdef01234567"},
-        "at": 1763300000000,
-        "expires_at": null,
-        "on_expiry": "hold",
-        "status": "open",
-        "answer": null,
-        "answered_at": null,
-        "answered_by": null,
-        "proof_id": null
-      }
-    },
-    {
-      "name": "answered gated ask without proof_id is refused",
-      "target": "ask",
-      "error_code": "proof_required",
-      "payload": {
-        "id": "bad004",
-        "project": "wukongmind",
-        "name": "WukongMind",
-        "folder": "/Users/me/projects/wukongmind",
-        "kind": "release",
-        "gated": true,
-        "question": "Tag v1.5.0?",
-        "options": ["Yes", "No"],
-        "recommend": "Yes",
-        "task": "WUKO-15",
-        "milestone": "M2",
-        "subject": {"tag": "v1.5.0", "workflow": "release.yml", "head": "0123456789abcdef0123456789abcdef01234567"},
-        "at": 1763300000000,
-        "expires_at": null,
-        "on_expiry": "hold",
-        "status": "answered",
-        "answer": "Yes",
-        "answered_at": 1763300050000,
-        "answered_by": "owner",
-        "proof_id": null
-      }
-    },
-    {
-      "name": "gated ask answered by coordinator is refused",
-      "target": "ask",
-      "error_code": "proof_required",
-      "payload": {
-        "id": "bad005",
-        "project": "wukongmind",
-        "name": "WukongMind",
-        "folder": "/Users/me/projects/wukongmind",
-        "kind": "gate",
-        "gated": true,
-        "question": "Accept WUKO-33?",
-        "options": ["Accept", "Hold"],
-        "recommend": "Accept",
-        "task": "WUKO-33",
-        "milestone": "M2",
-        "subject": {"target": "task", "ref": "WUKO-33", "head": "0123456789abcdef0123456789abcdef01234567"},
-        "at": 1763300000000,
-        "expires_at": null,
-        "on_expiry": "hold",
-        "status": "answered",
-        "answer": "Accept",
-        "answered_at": 1763300050000,
-        "answered_by": "coordinator",
-        "proof_id": null
-      }
-    },
-    {
-      "name": "delegating paid-key or reset is refused",
-      "target": "rule",
-      "error_code": "not_delegable",
-      "payload": {
-        "id": "rul-bad001",
-        "scope": "project",
-        "project": "wukongmind",
-        "class": "typed",
-        "type": "delegation",
-        "value": {
-          "kinds": ["paid-key", "reset"],
-          "milestones": ["M2"],
-          "release_level": null,
-          "until": 1763395200000
-        },
-        "text": null,
-        "section": null,
-        "base_hash": null,
-        "read_back": "Typed rule, this project (WukongMind): delegate paid keys and resets.",
-        "created_at": 1763300000000,
-        "expires_at": 1763395200000,
-        "saved_by_ask": "ask008",
-        "revoked_at": null
-      }
-    },
-    {
-      "name": "delegation rule without until is refused",
-      "target": "rule",
-      "error_code": "invalid_rule",
-      "payload": {
-        "id": "rul-bad002",
-        "scope": "project",
-        "project": "wukongmind",
-        "class": "typed",
-        "type": "delegation",
-        "value": {
-          "kinds": ["release"],
-          "milestones": ["M2"],
-          "release_level": "patch",
-          "until": null
-        },
-        "text": null,
-        "section": null,
-        "base_hash": null,
-        "read_back": "Typed rule, this project (WukongMind): delegate M2 patch releases.",
-        "created_at": 1763300000000,
-        "expires_at": null,
-        "saved_by_ask": "ask008",
-        "revoked_at": null
-      }
-    },
-    {
-      "name": "delegation rule with unknown release_level is refused",
-      "target": "rule",
-      "error_code": "invalid_rule",
-      "payload": {
-        "id": "rul-bad003",
-        "scope": "project",
-        "project": "wukongmind",
-        "class": "typed",
-        "type": "delegation",
-        "value": {
-          "kinds": ["release"],
-          "milestones": ["M2"],
-          "release_level": "major_breaking",
-          "until": 1763395200000
-        },
-        "text": null,
-        "section": null,
-        "base_hash": null,
-        "read_back": "Typed rule, this project (WukongMind): delegate M2 releases.",
-        "created_at": 1763300000000,
-        "expires_at": 1763395200000,
-        "saved_by_ask": "ask008",
-        "revoked_at": null
-      }
-    },
-    {
-      "name": "unknown rule type is refused",
-      "target": "rule",
-      "error_code": "invalid_rule",
-      "payload": {
-        "id": "rul-bad004",
-        "scope": "project",
-        "project": "wukongmind",
-        "class": "typed",
-        "type": "unknown_policy",
-        "value": true,
-        "text": null,
-        "section": null,
-        "base_hash": null,
-        "read_back": "Typed rule, this project (WukongMind): unknown policy.",
-        "created_at": 1763300000000,
-        "expires_at": null,
-        "saved_by_ask": "ask008",
-        "revoked_at": null
-      }
-    },
-    {
-      "name": "worker chatter as an alert kind is refused",
-      "target": "alert",
-      "error_code": "unknown_kind",
-      "payload": {
-        "id": "alt-bad001",
-        "episode_key": "worker_done:WUKO-12",
-        "kind": "worker_finished",
-        "project": "wukongmind",
-        "name": "WukongMind",
-        "task": "WUKO-12",
-        "title": "WUKO-12 finished its turn",
-        "body": "Worker completed.",
-        "fix": "None.",
-        "at": 1763300000000,
-        "cleared_at": null
-      }
-    },
-    {
-      "name": "ticketless local device in AnswerProof is refused",
-      "target": "answer_proof",
-      "error_code": "proof_rejected",
-      "payload": {
-        "ok": true,
-        "verified": true,
-        "proof_id": "prf-badlocal0001",
-        "ask_id": "ask002",
-        "project": "wukongmind",
-        "kind": "gate",
-        "option_index": 1,
-        "option_label": "Accept and merge",
-        "input_kind": "tap",
-        "input_seq": 18,
-        "utterance_id": "utt-1-9",
-        "device_id": "local",
-        "answered_at": 1763301040000
-      }
-    },
-    {
-      "name": "typed input in AnswerProof is refused",
-      "target": "answer_proof",
-      "error_code": "proof_rejected",
-      "payload": {
-        "ok": true,
-        "verified": true,
-        "proof_id": "prf-badtyped0002",
-        "ask_id": "ask002",
-        "project": "wukongmind",
-        "kind": "gate",
-        "option_index": 1,
-        "option_label": "Accept and merge",
-        "input_kind": "typed",
-        "input_seq": 19,
-        "utterance_id": "utt-1-10",
-        "device_id": "dev-iphone-1",
-        "answered_at": 1763301050000
-      }
-    },
-    {
-      "name": "unknown extra JSON key is refused",
-      "target": "ask",
-      "error_code": "unexpected_key",
-      "payload": {
-        "id": "bad006",
-        "project": "wukongmind",
-        "name": "WukongMind",
-        "folder": "/Users/me/projects/wukongmind",
-        "kind": "decision",
-        "gated": false,
-        "question": "Use SQLite?",
-        "options": ["Yes", "No"],
-        "recommend": "Yes",
-        "task": "WUKO-10",
-        "milestone": "M2",
-        "subject": null,
-        "at": 1763300000000,
-        "expires_at": null,
-        "on_expiry": null,
-        "status": "open",
-        "answer": null,
-        "answered_at": null,
-        "answered_by": null,
-        "proof_id": null,
-        "unexpected_extra_field": true
-      }
-    }
-  ]
-}
-```
+| # | `invalid[].name` | `target` | `error_code` | What it proves |
+|---:|---|---|---|---|
+| 1 | `unknown ask kind is refused` | `ask` | `unknown_kind` | Unrecognized ask kind (`"deploy"`) is rejected by both Python and Go. |
+| 2 | `empty ask kind is refused` | `ask` | `unknown_kind` | Empty `kind: ""` is rejected. |
+| 3 | `gated ask marked gated=false is refused` | `ask` | `invalid_ask` | `kind: "release"` with `gated: false` violates `gated == (kind != "decision")`. |
+| 4 | `answered gated ask without proof_id is refused` | `ask` | `invalid_ask` | Static `Ask` record with `answered_by: "owner"` and `proof_id: null` is rejected. |
+| 5 | `gated ask answered by coordinator is refused` | `ask` | `invalid_ask` | Static `Ask` record with `kind: "gate"` and `answered_by: "coordinator"` is rejected. |
+| 6 | `delegating paid-key or reset is refused` | `rule` | `not_delegable` | `delegation` rule naming `"paid-key"` or `"reset"` in `value.kinds` is refused. |
+| 7 | `delegation rule without until is refused` | `rule` | `invalid_rule` | `delegation` rule with `until: null` is refused. |
+| 8 | `delegation rule with unknown release_level is refused` | `rule` | `invalid_rule` | `delegation` rule with `release_level: "major_breaking"` outside `"patch"\|"minor"\|"any"` is refused. |
+| 9 | `unknown rule type is refused` | `rule` | `invalid_rule` | `class: "typed"` with `type: "unknown_policy"` outside `rule_types` is refused. |
+| 10 | `revoking a non-delegation rule without a rule ask proof is refused` | `rule` | `proof_required` | Non-delegation rule (`design_gate: "owner"`) with `revoked_at != null` and `revoked_by_ask: null` is refused. |
+| 11 | `worker chatter as an alert kind is refused` | `alert` | `unknown_kind` | `kind: "worker_finished"` outside the 5 `alert_kinds` is refused. |
+| 12 | `ticketless local device in AnswerProof is refused` | `answer_proof` | `proof_rejected` | `AnswerProof` with `device_id: "local"` (ticketless loopback tap or `WindowKeys`) is refused. |
+| 13 | `typed input in AnswerProof is refused` | `answer_proof` | `proof_rejected` | `AnswerProof` with `input_kind: "typed"` (`/api/turn`, `/api/utterance`, `SimulateText`) is refused. |
+| 14 | `unknown extra JSON key is refused` | `ask` | `unexpected_key` | Extra property `unexpected_extra_field` fails strict schema validation. |
 
 ---
 
 ## 8. Downstream Implementation Map (Milestones 3 and 4)
 
-Each task that depends on `SDF-20` implements one slice of this contract:
-
 | Task | Side | What it builds from this document |
 |---|---|---|
-| **`SDF-21`** | Python (`factory/`) | `factory/owner.py` + `ask.py` + `commands.py`: 8 ask kinds (`unknown_kind` refused), `owner {hello,projects,asks,answer,say} --json`, loopback proof check in `answer` and `accept --ask`, removal of `--owner-approved`, and `factory/test/test_owner_contract.py` against `testdata/factory/owner-contract-v1.json`. |
-| **`SDF-22`** | Go (`internal/factory`, `internal/supervisor`, `internal/web`) | Contract client, open factory asks rendered as question cards (`pending.created` / `/api/state`), `AnswerTap` and spoken answers through `railInputLocked`, `GET /api/factory/answer-proof/{ask_id}` with `proxy.go` loopback guard, and `internal/factory/contract_test.go` against `testdata/factory/owner-contract-v1.json`. |
+| **`SDF-21`** | Python (`factory/`) | `factory/owner.py` + `ask.py` + `commands.py`: 8 ask kinds (`unknown_kind` refused), `owner {projects,asks,answer,say} --json`, loopback proof check in `answer` and `accept --ask`, removal of `--owner-approved`, and `factory/test/test_owner_contract.py` against [`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json). |
+| **`SDF-22`** | Go (`internal/factory`, `internal/supervisor`, `internal/web`) | Contract client, open factory asks rendered as question cards (`pending.created` / `/api/state`, read-only on the desktop panel), `deviceID` threaded into `AnswerTap` and `mintAnswerProof` (refusing ticketless loopback `POST /api/pending/answer`, `POST /api/agents/{pane_id}/input` `WindowKeys`, and `POST /api/turn`), `GET /api/factory/answer-proof/{ask_id}` with `proxy.go` loopback guard, and `internal/factory/contract_test.go` against [`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json). |
 | **`SDF-23`** | Go (`internal/supervisor`) | Quiet rule keyed on `sheepdog.project` / `sheepdog.role` / `sheepdog.task` labels silencing all worker and reviewer speech and APNs pushes. |
 | **`SDF-24`** | Python & Go | The 5 factory-stop alert kinds (`no_pool`, `disk`, `consent_prompt`, `main_red`, `ci_stalled` at 90m), `owner alerts --json`, episode deduplication, APNs push, and voice briefing push. |
-| **`SDF-25`** | Python & Go | `owner rules --json`, `owner propose-rule --json`, `owner revoke-rule --json`, `typed` vs `text` rule store, `read_back` with class and scope, `factory start` answer migration, and prompt assembly (`base_hash`, typed summary, pool table). |
+| **`SDF-25`** | Python & Go | `owner rules --json`, `owner propose-rule --json`, `owner revoke-rule --json` (immediate for `delegation`, gated `rule` ask for all other rules), `typed` vs `text` rule store, `read_back` with class and scope, `factory start` answer migration, and prompt assembly (`base_hash`, typed summary, pool table). |
 | **`SDF-26`** | Python & Go | `owner digest --json` built in pure code from the stores and `usage.py`, spoken on request, at a milestone, and in the morning. |
 | **`SDF-27`** | Go (`internal/brain`, `prompts/svp/`) | Brain routes goals to the right project via `owner say` after reading the project name back (`make eval` with no Safe regression). |
 | **`SDF-28`** | iOS (`ios/`) | Verifies that the app's existing approval cards render factory asks and tap answers via `/api/pending/answer`. |
-| **`SDF-30`–`36`** | Python, Go, Web | Ordered 9-row stage table (`SDF-30`), milestones and `plan apply`/`amend` (`SDF-31`), critical path, merge order, and `owner graph --json` fixture extension (`SDF-32`), `/factory` page (`SDF-34`, `SDF-35`), and voice graph summary (`SDF-36`). |
+| **`SDF-30`–`36`** | Python, Go, Web | Ordered stage table (`SDF-30`), milestones and `plan apply`/`amend` (`SDF-31`), critical path, merge order, and promoting `owner graph --json` in [`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json) (`SDF-32`), `/factory` page (`SDF-34`, `SDF-35`), and voice graph summary (`SDF-36`). |
