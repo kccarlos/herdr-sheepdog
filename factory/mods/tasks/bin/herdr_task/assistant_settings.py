@@ -8,9 +8,8 @@ import hashlib
 import json
 import os
 
-from .base import hc_json, label_of, MAX_RUNNING, now, PROJECT_LABEL, run, STORE
+from .base import hc_json, MAX_RUNNING, now, PROJECT_LABEL, run, STORE
 from .settings import DEFAULTS, LOCAL_MACHINE, MUST_WORDS, SETTINGS, agent_key, bare, default_worker_agent, project_layer, read_settings
-from .launch import coordinators, is_coordinator
 
 # What a coordinator was last told, on its terminal: "review:1a2b3c,merge:…", a short hash of each line.
 LABEL = "sheepdog.settings"
@@ -26,8 +25,10 @@ BY = {"project": "set for this project", "machine": "this machine's setting", "e
 NOTICE_END = "Nothing to answer: reply only <hc no-reply/>."
 
 
-def _is_coord(k):
-    return bool(k) and (label_of(k.get("labels"), "role") == "coordinator" or is_coordinator(k))
+def _holder_folder(terminal):
+    """The project folder whose lease `terminal` holds (lease.py), else None: whatever its labels say."""
+    from .lease import live_holders
+    return next((f for a, f in live_holders() if a == terminal), None) if terminal else None
 
 
 def project_of(k, d=None):
@@ -183,11 +184,11 @@ def notice(changed):
 
 def session_note(terminal):
     """What an Assistant's new session is told: its settings block; "" for other agents or outside Herdr."""
-    k = hc_json("get", terminal) if terminal else None
-    if not _is_coord(k):
+    folder = _holder_folder(terminal)
+    if not folder:
         return ""
     d = read_settings()
-    rs = rows(project_of(k, d), d)
+    rs = rows(folder, d)
     run(["hc", "label", terminal, f"{LABEL}={digest(rs)}"])
     return block(rs)
 
@@ -213,12 +214,11 @@ def settings_pass(report, quiet=None):
     os.replace(tmp, STATE)
     from .news import news_send
     d = read_settings()
-    for addr in coordinators():
+    from .lease import live_holders
+    for addr, folder in live_holders():  # the lease holders: a terminal that only looks like a coordinator is told nothing
         k = hc_json("get", addr) or {}
-        if k.get("state") != "live" or not _is_coord(k):
-            continue
         labels = k.get("labels") or {}
-        rs = rows(project_of(k, d), d)
+        rs = rows(folder, d)
         had = parse(labels.get(LABEL) or labels.get("herdr.settings"))
         now_digest = parse(digest(rs))
         if had == now_digest:
