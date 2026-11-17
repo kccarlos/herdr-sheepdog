@@ -17,12 +17,15 @@ def inspect(s, t, v):
     failures = [c for c in checks if word(c) in BAD - STOPPED]
     run_id = lambda c: (re.search(r"/actions/runs/(\d+)", c.get("detailsUrl") or "") or [None, None])[1]
     limited = {run_id(c) for c in checks if word(c) in STOPPED and hit_limit(t, c)[0]}
-    pr["failed_checks"] = [c.get("name") or c.get("context") or "check" for c in failures]
+    failed_names = [c.get("name") or c.get("context") or "check" for c in failures]
+    if pr.get("failed_checks") != failed_names:
+        pr["failed_checks"] = failed_names
+        s.dirty = True
     drift = {}
     if t.get("state") == "done" and v.get("state") in ("OPEN", "CLOSED"):
         drift["done"] = "Task is done but its pull request is not merged"
     expected = t.get("head")
-    if expected and head and expected != head and synced_head(t, pr_repo(t, s), head) is None:
+    if t.get("state") in ("ready", "done") and expected and head and expected != head and synced_head(t, pr_repo(t, s), head) is None:
         drift["head"] = "Stored head differs from the pull request head"
     if v.get("state") == "OPEN":
         accepted = t.get("accepted_at") or t.get("merge_queued") or t.get("merge_requested")
@@ -30,6 +33,7 @@ def inspect(s, t, v):
             drift["unmerged"] = "Accepted pull request is still open after 30 minutes"
             if any(word(c) in STOPPED for c in checks):
                 ci_stopped(t, v, pr_repo(t, s))
+                s.dirty = True
             # Use the existing update-branch path, with the same sync, queue and runner rails.
             from .checks import sync_plan
             from .commands import uses_queue
@@ -40,41 +44,57 @@ def inspect(s, t, v):
                     and not uses_queue(s, t.get("base") or "main") and sync_plan(s, t)[0] == "full"
                     and not ci_cap_hold(s, t, repo) and pr_behind(t, repo, head)):
                 pr_update_branch(t, repo, head)
-        if failures and resolve_stage(t, store=s).stage != "ci":
+                s.dirty = True
+        reviewed = (t.get("state") == "ready" or t.get("accepted_at") or t.get("merge_queued")
+                    or any(r.get("head") == head for r in t.get("reviews") or []))
+        if failures and reviewed and resolve_stage(t, store=s).stage != "ci":
             runs = sorted({run_id(c) for c in failures if run_id(c) and run_id(c) not in limited})
             if pr.get("drift_rerun_head") != head and head and runs:
                 for run in runs:
                     gh("run", "rerun", run, "--failed", "--repo", pr_repo(t, s))
                 pr["drift_rerun_head"] = head
+                s.dirty = True
             drift["red"] = "CI red on a reviewed head: flaky test or real?"
-        hold = main_red_hold(s, t.get("base") or "main")
-        green_hold = (t.get("state") == "ready" and t.get("auto_merge") and not t.get("attention") and checks and all(word(c) in {"SUCCESS", "NEUTRAL", "SKIPPED"} for c in checks) and hold)
+        hold = (main_red_hold(s, t.get("base") or "main") or (t.get("push_held") or {}).get("reason")
+                or t.get("accept_wait"))
+        green_hold = (t.get("state") == "ready" and not t.get("attention") and checks and all(word(c) in {"SUCCESS", "NEUTRAL", "SKIPPED"} for c in checks) and hold)
         if green_hold:
             previous = pr.get("drift_hold") or {}
             if previous.get("reason") != hold:
                 previous = pr["drift_hold"] = {"reason": hold, "at": now()}
+                s.dirty = True
             if now() - previous["at"] >= WAIT_MS:
                 drift["hold"] = f"Ready and green but held: {hold}"
         else:
-            pr.pop("drift_hold", None)
+            if pr.pop("drift_hold", None):
+                s.dirty = True
     if pr.get("drift") != drift:
         pr["drift"] = drift
-    s.dirty = True
+        s.dirty = True
 
 
-def drift_pass(s, t, v=None):
+def drift_pass(s, t, v=None, at=None):
     """Refresh PR facts at the existing cadence, including tasks already marked done."""
+    at = now() if at is None else at
     pr = t.get("pr")
     if not pr:
         return
     if v is None:
-        if now() - (pr.get("drift_checked") or 0) < PR_EVERY:
+        if at - max(pr.get("drift_checked") or 0, pr.get("checked") or 0, t.get("done_at") or 0) < PR_EVERY:
             return
-        pr["drift_checked"] = now()
+        pr["drift_checked"] = at
         s.dirty = True
         v = pr_view(t)
     if v:
         inspect(s, t, v)
+
+
+def audit_done(s, at):
+    """Bound old PR reads to one per folder per tick, oldest observation first."""
+    tasks = [t for t in s.data["tasks"] if t.get("state") == "done" and t.get("pr")]
+    if tasks:
+        tasks.sort(key=lambda t: (max(t["pr"].get("drift_checked") or 0, t["pr"].get("checked") or 0, t.get("done_at") or 0), t["id"]))
+        drift_pass(s, tasks[0], at=at)
 
 
 def base_drift(s):
