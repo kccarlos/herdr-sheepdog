@@ -4522,6 +4522,9 @@ class GateReview(unittest.TestCase):
         with self.assertRaises(self.commands.Fail):
             self.commands.cmd_review(argparse.Namespace(id="SHEP-13", json=True, folder=None, passed=False,
                 changes="major", changes_file=None, notes=None, must_fix=2, majors=0))
+        with self.assertRaises(self.commands.Fail):
+            self.commands.cmd_review(argparse.Namespace(id="SHEP-13", json=True, folder=None, passed=False,
+                changes="major", changes_file=None, notes=None, must_fix=1, majors=3))
 
     def test_a_read_pass_starts_the_next_round_and_a_moved_head_records_none(self):
         self.sandbox()

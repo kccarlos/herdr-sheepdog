@@ -1019,7 +1019,9 @@ def invalid_major_count(s, t, passed, must, majors):
         return False
     level = next((x["value"] for x in task_settings(s, t) if x["label"] == "Must fix"), "major")
     return ((passed and majors > 0 and level != "blocker") or
-            (not passed and level != "minor" and majors < (must if must is not None else 1)))
+            (not passed and level != "minor" and majors < (must if must is not None else 1)) or
+            (not passed and must is not None and level == "major" and majors != must) or
+            (not passed and must is not None and level == "minor" and majors > must))
 
 
 def cmd_reviewed(args):
