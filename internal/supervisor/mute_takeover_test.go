@@ -96,7 +96,7 @@ func TestOnlyHeldQuestionIsNotAnsweredByAYes(t *testing.T) {
 	}
 
 	// The user's own tap on the card still answers it.
-	if _, err := w.sup.AnswerTap(context.Background(), w.store.Questions()[0].ID, 1); err != nil {
+	if _, err := w.sup.AnswerTap(context.Background(), w.store.Questions()[0].ID, 1, ""); err != nil {
 		t.Fatalf("tap: %v", err)
 	}
 	if got := keysTo(w); len(got) != 1 || got[0] != "w5:p1" {

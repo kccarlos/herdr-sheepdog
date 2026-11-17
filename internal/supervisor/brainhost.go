@@ -28,10 +28,12 @@ var _ brain.Host = brainHost{}
 func (h brainHost) Agents() []brain.AgentInfo {
 	pending, has := h.s.store.Pending()
 	rows := h.s.store.List()
-	out := make([]brain.AgentInfo, 0, len(rows))
+	fagents := h.factoryAgents()
+	out := make([]brain.AgentInfo, 0, len(rows)+len(fagents))
 	for _, a := range rows {
 		out = append(out, h.info(a, pending, has))
 	}
+	out = append(out, fagents...)
 	return out
 }
 
@@ -80,11 +82,11 @@ func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) br
 // Resolve implements brain.Host.
 func (h brainHost) Resolve(name string) (brain.AgentInfo, bool) {
 	row, ok := findAlias(h.s.store.List(), name)
-	if !ok {
-		return brain.AgentInfo{}, false
+	if ok {
+		pending, has := h.s.store.Pending()
+		return h.info(row, pending, has), true
 	}
-	pending, has := h.s.store.Pending()
-	return h.info(row, pending, has), true
+	return h.resolveFactory(name)
 }
 
 // LanguageLine implements brain.LanguageHost: the user's language
@@ -247,6 +249,9 @@ func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, err
 // (docs/dev/history/issues-2026-09-18.md "an expired approval prompt can never be
 // approved") — then the answer send path (answerKeys).
 func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []string) (string, error) {
+	if isFactoryPane(paneID) {
+		return h.answerFactoryPrompt(ctx, paneID, keys)
+	}
 	s := h.s
 	ps := s.paneSend(paneID)
 	ps.Lock()

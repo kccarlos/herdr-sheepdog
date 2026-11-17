@@ -480,6 +480,11 @@ func (s *Supervisor) aliasOf(paneID string) string {
 	if a, ok := s.store.Get(paneID); ok && a.Alias != "" {
 		return a.Alias
 	}
+	if isFactoryPane(paneID) {
+		if n := s.factoryAgentName(paneID); n != "" {
+			return n
+		}
+	}
 	return "another agent"
 }
 

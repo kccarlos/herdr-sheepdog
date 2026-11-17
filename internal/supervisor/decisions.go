@@ -56,6 +56,18 @@ func (s *Supervisor) openDecisions() []string {
 			add(row, row.LastBlock.Question)
 		}
 	}
+	for _, q := range s.store.Questions() {
+		if !isFactoryAskID(q.ID) || q.Held || s.heldQuestion(q.ID) || seen[q.ID] {
+			continue
+		}
+		seen[q.ID] = true
+		name := aliasOr(q.Agent)
+		if txt := strings.TrimSpace(q.Question); txt != "" {
+			out = append(out, fmt.Sprintf("%s is waiting at a prompt for the user's answer (%q)", name, clipRunes(txt, 80)))
+		} else {
+			out = append(out, name+" is waiting at a prompt for the user's answer")
+		}
+	}
 	return out
 }
 

@@ -173,6 +173,30 @@ func (s *Supervisor) buildCard(ctx context.Context, req brain.CardRequest) (Card
 		card.Title, card.Markdown = s.cfg.Redactor.String(req.Title), s.cfg.Redactor.String(req.Markdown)
 		return card, nil
 	}
+	if isFactoryPane(req.PaneID) {
+		name := s.sayOf(req.PaneID)
+		card.Agent, card.Spoken, card.PaneID = s.aliasOf(req.PaneID), name, req.PaneID
+		switch req.Kind {
+		case brain.ShowAgent:
+			card.Title = s.cfg.Redactor.String(name)
+			return card, nil
+		case brain.ShowApproval:
+			p, ok := s.openFactoryQuestionForPane(req.PaneID)
+			if !ok {
+				return Card{}, fmt.Errorf("%s has no open approval prompt to show", name)
+			}
+			card.Title = s.cfg.Redactor.String(name + " is asking")
+			card.PendingID, card.Command, card.Options = p.ID, s.cfg.Redactor.String(p.Command), PendingOptions(p)
+			q := strings.TrimSpace(p.Question)
+			if q == "" {
+				q = strings.TrimSpace(p.SpokenSummary)
+			}
+			card.Question = s.cfg.Redactor.String(q)
+			return card, nil
+		default:
+			return Card{}, fmt.Errorf("%s is a factory project and has no terminal excerpt to show", name)
+		}
+	}
 	row, ok := s.store.Get(req.PaneID)
 	if !ok {
 		return Card{}, ErrNoSuchAgent
