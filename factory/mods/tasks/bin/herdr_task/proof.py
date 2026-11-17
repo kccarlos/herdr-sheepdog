@@ -1,64 +1,222 @@
-"""A task's proof and what its Accept card shows (as Shepherdr's merge card): the proof artifact
-its agent made, and the evidence from Git, GitHub and that artifact, never the agent's own words
+"""A task's proof and what its Accept card shows: file-based proof (Markdown, images, recipe.json)
+linked from the PR, and the evidence from Git, GitHub and those files, never the agent's own words
 (only its summary)."""
 
-import hashlib
 import json
 import os
 import re
 
-from .base import Fail, HOME, git, WHERE
+from .base import Fail, git
 from .github import BAD, CANT_READ_CHECKS, NO_CI_RUN, PENDING, pr_view
 
-ARTIFACTS = WHERE.path("artifacts")
 # Files named on the card, and commits.
 FEW = 3
+MD_EXTS = (".md", ".markdown")
+IMG_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")
+PROOF_DIRS = ("docs/proof", "docs/proofs", "proof", "proofs", ".proof", ".sheepdog/proof")
+REPORT_DIRS = ("docs/reports", "docs/report")
+RECIPE_FILE_KEYS = ("cover", "file", "src", "path", "before", "after")
+URL_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
 
 
-def artifacts_of(folder):
-    """This folder's artifacts, newest first (herdr-artifact's list for it; the same slug rule)."""
-    rel = os.path.relpath(folder, HOME) if folder == HOME or folder.startswith(HOME + "/") else folder
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", "home" if rel == "." else rel.strip("/")).strip("-") or "root"
-    for name in (slug, f"{slug}-{hashlib.sha1(folder.encode()).hexdigest()[:6]}"):
+def _task_root(s, t):
+    wt = t.get("worktree")
+    return wt if t.get("mode") == "worktree" and wt and os.path.isdir(wt) else s.loc["folder"]
+
+
+def _rel_id(path, root):
+    rp, rr = os.path.realpath(path), os.path.realpath(root)
+    return os.path.relpath(rp, rr).replace(os.sep, "/") if rp == rr or rp.startswith(rr + os.sep) else rp
+
+
+def _default_title(s, t):
+    ref, name = s.ref(t), (t.get("title") or "").strip()
+    return f"{ref}: {name} · Proof" if name else f"{ref} · Proof"
+
+
+def _md_title(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        raise Fail(f"Couldn't read proof Markdown {os.path.basename(path)}: {e}")
+    if not text.strip():
+        raise Fail(f"Proof Markdown {os.path.basename(path)} is empty.")
+    m = re.search(r"(?m)^\s*#\s+(.+?)\s*$", text)
+    return m.group(1).strip() if m else None
+
+
+def _validate_recipe(recipe_path, root_dir, rel):
+    try:
+        with open(recipe_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        raise Fail(f"Proof recipe {rel} isn't valid JSON: {e}")
+    if not isinstance(data, dict) or not data:
+        raise Fail(f"Proof recipe {rel} must be a non-empty JSON object.")
+    files = data.get("files") or []
+    if data.get("main") == "main.js" or (isinstance(files, list) and "main.js" in files):
+        raise Fail(f"Your proof {rel} is a custom panel (main.js), which isn't supported. Use Markdown, images, or recipe.json, then run ready again.")
+    if "blocks" in data and not isinstance(data["blocks"], list):
+        raise Fail(f"Proof recipe {rel} field 'blocks' must be a list.")
+    real_root = os.path.realpath(root_dir)
+    refs = ([data["cover"]] if "cover" in data else []) + [
+        item[k] for seq_k in ("blocks", "items", "steps", "media") if isinstance(data.get(seq_k), list)
+        for item in data[seq_k] if isinstance(item, dict) for k in RECIPE_FILE_KEYS if k in item]
+    for val in refs:
+        if isinstance(val, str) and val.strip() and not URL_RE.match(val.strip()):
+            target = os.path.realpath(os.path.join(real_root, val.strip()))
+            if target != real_root and not target.startswith(real_root + os.sep):
+                raise Fail(f"Proof recipe {rel} references {val!r} outside the proof folder.")
+            if not os.path.isfile(target):
+                raise Fail(f"Proof recipe {rel} references missing file {val!r}.")
+    title = data.get("title")
+    return title.strip() if isinstance(title, str) and title.strip() else None
+
+
+def _dir_files(abs_dir, base_dir):
+    found = []
+    for cur, dirs, files in os.walk(abs_dir):
+        dirs[:] = sorted(d for d in dirs if d not in (".git", "__pycache__") and not d.startswith("."))
+        for fn in sorted(files):
+            if fn != ".DS_Store" and not fn.endswith(".pyc"):
+                p = os.path.join(cur, fn)
+                found.append((p, fn, _rel_id(p, base_dir)))
+    return found
+
+
+def _inspect_proof(path, base_dir, s, t):
+    abs_path = os.path.realpath(path)
+    rel = _rel_id(abs_path, base_dir)
+    if os.path.isdir(abs_path):
+        entries = _dir_files(abs_path, base_dir)
+        if any(fn.lower() == "main.js" for _, fn, _ in entries):
+            raise Fail(f"Your proof {rel} is a custom panel (contains main.js), which isn't supported. Use Markdown, images, or recipe.json, then run ready again.")
+        recipes = [p for p, fn, _ in entries if fn.lower() == "recipe.json" or fn.lower().endswith(".recipe.json")]
+        mds = [p for p, fn, _ in entries if fn.lower().endswith(MD_EXTS)]
+        imgs = [p for p, fn, _ in entries if fn.lower().endswith(IMG_EXTS)]
+        if not recipes and not mds and not imgs:
+            raise Fail(f"Proof folder {rel} has no Markdown, image, or recipe.json files.")
+        titles = [_validate_recipe(rp, os.path.dirname(rp), _rel_id(rp, base_dir)) for rp in recipes] + [_md_title(mp) for mp in mds]
+        title = next((x for x in titles if x), None) or _default_title(s, t)
+        return {"id": rel, "title": title, "path": rel, "files": [r for _, _, r in entries], "kind": "recipe" if recipes else "dir"}
+    if not os.path.isfile(abs_path):
+        raise Fail(f"No proof file or folder {rel} found.")
+    low = os.path.basename(abs_path).lower()
+    if low == "main.js" or low.endswith(".js"):
+        raise Fail(f"Your proof {rel} is a JavaScript file (custom panel), which isn't supported. Use Markdown, images, or recipe.json, then run ready again.")
+    if low == "recipe.json" or low.endswith(".recipe.json"):
+        title, kind = _validate_recipe(abs_path, os.path.dirname(abs_path), rel) or _default_title(s, t), "recipe"
+    elif low.endswith(MD_EXTS):
+        title, kind = _md_title(abs_path) or _default_title(s, t), "markdown"
+    elif low.endswith(IMG_EXTS):
+        if os.path.getsize(abs_path) <= 0:
+            raise Fail(f"Proof image {rel} is empty.")
+        title, kind = _default_title(s, t), "image"
+    else:
+        raise Fail(f"Proof {rel} must be a Markdown file, image, recipe.json, or a folder containing them.")
+    return {"id": rel, "title": title, "path": rel, "files": [rel], "kind": kind}
+
+
+def _changed_files(base_dir, s, t):
+    if t.get("mode") != "worktree" or s.loc["kind"] != "repo":
+        return []
+    base = t.get("base") or "main"
+    since = base if git(base_dir, "rev-parse", "--verify", "--quiet", base)[0] else t.get("start")
+    paths = set()
+    if since:
+        ok, out, _ = git(base_dir, "diff", "--name-only", f"{since}...HEAD")
+        if ok and out:
+            paths.update(line.strip() for line in out.splitlines() if line.strip())
+    ok, st_out, _ = git(base_dir, "status", "--porcelain")
+    if ok and st_out:
+        paths.update(line[3:].strip().split(" -> ")[-1].strip('"') for line in st_out.splitlines()
+                     if len(line) > 3 and line[:2].strip() != "D")
+    return sorted(p for p in paths if p)
+
+
+def proof_files_of(s, t):
+    """Proof and report files on disk for this task, primary proof candidates first, newest first."""
+    base_dir = _task_root(s, t)
+    if not base_dir or not os.path.isdir(base_dir):
+        return []
+    ref, seen = s.ref(t).lower(), {}
+
+    def add(abs_path, is_proof=True):
+        real = os.path.realpath(abs_path)
+        if not os.path.exists(real):
+            return
+        rel = _rel_id(real, base_dir)
+        if rel in seen:
+            seen[rel]["is_proof"] = seen[rel]["is_proof"] or is_proof
+            return
         try:
-            with open(os.path.join(ARTIFACTS, name + ".json")) as f:
-                d = json.load(f)
-        except (OSError, ValueError):
+            title = _inspect_proof(real, base_dir, s, t)["title"]
+        except Fail:
+            title = _default_title(s, t)
+        seen[rel] = {"id": rel, "abs": real, "title": title, "is_proof": is_proof,
+                     "mtime": os.path.getmtime(real) if os.path.exists(real) else 0}
+
+    for d in PROOF_DIRS:
+        dp = os.path.join(base_dir, d)
+        for fn in sorted(os.listdir(dp)) if os.path.isdir(dp) else []:
+            low, p = fn.lower(), os.path.join(dp, fn)
+            if (low == ref and os.path.isdir(p)) or low in (f"{ref}.md", f"{ref}.markdown", f"{ref}.recipe.json") or (
+                    low.startswith(ref + ".") and low.endswith(IMG_EXTS)):
+                add(p, is_proof=True)
+            elif low.startswith((ref + "-", ref + "_")) and low.endswith((*MD_EXTS, *IMG_EXTS, ".json")):
+                add(p, is_proof=False)
+    for d in REPORT_DIRS:
+        dp = os.path.join(base_dir, d)
+        for fn in sorted(os.listdir(dp)) if os.path.isdir(dp) else []:
+            if (fn.lower() == ref or fn.lower().startswith((ref + "-", ref + "_", ref + "."))) and not fn.endswith(".pyc"):
+                add(os.path.join(dp, fn), is_proof=False)
+    for fn in sorted(os.listdir(base_dir)):
+        if fn.lower() in (f"{ref}-proof.md", f"{ref}.proof.md", f"proof-{ref}.md"):
+            add(os.path.join(base_dir, fn), is_proof=True)
+    for rel_p in _changed_files(base_dir, s, t):
+        norm, full = rel_p.replace(os.sep, "/"), os.path.join(base_dir, rel_p)
+        low, bn = norm.lower(), os.path.basename(norm).lower()
+        if not os.path.exists(full):
             continue
-        if d.get("folder") in (None, folder):
-            return d.get("artifacts") or []
-    return []
+        if low in ("proof.md", "recipe.json"):
+            add(full, is_proof=True)
+        elif any(low.startswith(d + "/") for d in PROOF_DIRS):
+            parent = os.path.dirname(full)
+            if os.path.dirname(norm) not in PROOF_DIRS and (bn in ("recipe.json", "main.js") or any(
+                    os.path.isfile(os.path.join(parent, m)) for m in ("recipe.json", "main.js"))):
+                add(parent, is_proof=True)
+            elif bn.endswith((*MD_EXTS, *IMG_EXTS, ".recipe.json")):
+                add(full, is_proof=True)
+        elif any(low.startswith(d + "/") for d in REPORT_DIRS) and bn.endswith((*MD_EXTS, *IMG_EXTS, ".json")):
+            add(full, is_proof=False)
+    return sorted(seen.values(), key=lambda r: (not r["is_proof"], -r["mtime"], r["id"]))
 
 
 def find_proof(s, t, given=None):
-    """The task's proof artifact, {id, title}: the one given (ready --proof <id>), else its newest
-    artifact titled as a proof ("HAT-2: ... · Proof") since it started. None: it made none. A proof
-    is always a recipe (the person accepts from their phone too): a custom panel is refused."""
-    arts = artifacts_of(s.loc["folder"])
-    if given:
-        a = next((a for a in arts if a.get("id") == given.strip()), None)
-        if not a:
-            raise Fail(f"No artifact {given} in {s.loc['folder']} (herdr-artifact list shows them).")
-    else:
-        ref, since = s.ref(t).upper(), t.get("started") or 0
-        mine = [a for a in arts if (a.get("task") or "").upper() == ref and re.search(r"\bproof\b", a.get("title") or "", re.I)
-                and (a.get("at") or 0) >= since]
-        a = mine[0] if mine else None
-    if not a:
-        return None
-    files = a.get("files") or []
-    if "main.js" in files or "recipe.json" not in files:
-        raise Fail(f"Your proof {a['id']} is a custom panel, which the person can't open on their phone. Make it a recipe "
-                   f"(recipe.json; `herdr-artifact guide`, A task's proof), `herdr-artifact update {a['id']} <dir>`, then run ready again.")
-    return {"id": a["id"], "title": a.get("title") or a["id"]}
+    """The task's proof, {id, title, path, files, kind}: the file or folder given (ready --proof <path>),
+    else the task's discovered proof file/folder (Markdown, image, or recipe.json). None: none found.
+    A custom panel (main.js) is refused."""
+    base_dir, folder = _task_root(s, t), s.loc["folder"]
+    if given is not None:
+        raw = given.strip()
+        if not raw:
+            raise Fail("Give a proof file or folder path after --proof.")
+        cand = raw if os.path.isabs(raw) else os.path.join(base_dir, raw)
+        if not os.path.isabs(raw) and not os.path.exists(cand) and folder != base_dir and os.path.exists(os.path.join(folder, raw)):
+            cand, base_dir = os.path.join(folder, raw), folder
+        if not os.path.exists(cand):
+            raise Fail(f"No proof file or folder {raw} in {base_dir}.")
+        return _inspect_proof(cand, base_dir, s, t)
+    mine = [r for r in proof_files_of(s, t) if r["is_proof"]]
+    return _inspect_proof(mine[0]["abs"], base_dir, s, t) if mine else None
 
 
 def task_artifacts(s, t, proof=None):
-    """The other artifacts its agent published for it since it started (a research task's report),
-    newest first, [{id, title}]: linked on its Accept card beside its proof (SHEP-96)."""
-    ref, since, skip = s.ref(t).upper(), t.get("started") or 0, (proof or {}).get("id")
-    return [{"id": a["id"], "title": a.get("title") or a["id"]} for a in artifacts_of(s.loc["folder"])
-            if a.get("id") and a["id"] != skip and (a.get("task") or "").upper() == ref and (a.get("at") or 0) >= since]
+    """The other files its agent wrote for this task (a research task's report), [{id, title}]:
+    linked on its Accept card beside its proof (SHEP-96)."""
+    skip = (proof or {}).get("id")
+    return [{"id": r["id"], "title": r["title"]} for r in proof_files_of(s, t) if r["id"] and r["id"] != skip]
 
 
 def numstat(out, files):
