@@ -311,10 +311,18 @@ func resolveUVBinary(lookPath func(string) (string, error), customLookPath bool,
 	if p, err := lookPath("uv"); err == nil && p != "" {
 		return p, true
 	}
-	if !customLookPath && home != "" {
-		cand := filepath.Join(home, ".local", "bin", "uv")
-		if st, err := os.Stat(cand); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
-			return cand, true
+	if !customLookPath {
+		var cands []string
+		if exe, err := os.Executable(); err == nil && exe != "" {
+			cands = append(cands, filepath.Join(filepath.Dir(exe), "uv"))
+		}
+		if home != "" {
+			cands = append(cands, filepath.Join(home, ".local", "bin", "uv"))
+		}
+		for _, cand := range cands {
+			if st, err := os.Stat(cand); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+				return cand, true
+			}
 		}
 	}
 	return "", false
