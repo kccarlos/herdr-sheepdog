@@ -54,7 +54,7 @@ def pid_started_before(pid, at_ms):
         started = time.mktime(time.strptime(" ".join(r.stdout.split()), "%a %b %d %H:%M:%S %Y")) if r.returncode == 0 else None
     except (OSError, ValueError, TypeError, OverflowError, Fail):
         return False
-    return started is not None and started * 1000 < at_ms
+    return started is not None and (started + 1) * 1000 <= at_ms  # lstart is floored to the second
 
 KEY = "coordinator"
 OPEN = ("running", "ready", "queued", "todo", "scheduled")  # a task in one of these needs its project's coordinator
@@ -144,19 +144,21 @@ def _edit(project, fn):
     return out
 
 
-def claim(project, addr, replacing=None, pid=None, **extra):
+def claim(project, addr, replacing=None, pid=None, pid_at=None, **extra):
     """Gives the lease to `addr` (a coordinator the engine just started). Refused (False) while another live
     terminal holds it, unless that is `replacing` (a restart hands it on). Taking it from an earlier holder writes a
     handoff record (that terminal, its created_ms, its agent's pid) that finish_handoff carries out and then removes,
-    so a tick cut short anywhere in between finishes the same steps next time."""
+    so a tick cut short anywhere in between finishes the same steps next time. `pid_at`: when `pid` was read (the record's
+    `at`, which the pid's start time is checked against). An hc failure about the holder refuses too: only a holder hc
+    says is gone gives way."""
     k = hc_json("get", addr) or {}
     from .watchdog import template_info
 
     def put(d):
         cur = d.get(KEY) if isinstance(d.get(KEY), dict) else {}
-        if cur.get("address") not in (None, addr, replacing) and _live(cur):
+        if cur.get("address") not in (None, addr, replacing) and _state(cur)[0] != "gone":
             return False
-        rec = {"from": cur.get("address"), "created_ms": cur.get("created_ms"), "at": now(),
+        rec = {"from": cur.get("address"), "created_ms": cur.get("created_ms"), "at": pid_at or now(),
                "pid": pid if replacing and cur.get("address") == replacing else None}  # a pid only for the terminal it was read from
         d[KEY] = {"address": addr, "created_ms": k.get("created_ms"), "since": now(), "template": template_info()[0],
                   # every handoff not finished yet stays, the newest last (one replaced twice before a tick finished it)
@@ -290,6 +292,11 @@ def handoffs_of(rec):
     return [h for h in hs if isinstance(h, dict) and h.get("from")]
 
 
+def _same(a, b):
+    """The same handoff record (its fields may have gained a verdict since)."""
+    return (a.get("from"), a.get("created_ms"), a.get("at"), a.get("pid")) == (b.get("from"), b.get("created_ms"), b.get("at"), b.get("pid"))
+
+
 def finish_handoff(folder, new):
     """Carries out the lease's handoff records, oldest first, removing each once done: workers and held news move from
     the earlier holder to `new`; that very terminal (same created_ms) ends if it still runs, and its agent's process
@@ -301,6 +308,12 @@ def finish_handoff(folder, new):
         st, k = hc_get(old) if "/" not in old else ("gone", None)
         if st == "unknown":
             break  # hc didn't answer: the record stays for the next tick
+        if h.get("pid") and "group" not in h:
+            # whether the pid is still the process the record named: asked while its leader lives (ps -p fails once the
+            # kill below ends it), and kept, so a tick that stops between the kill and end_group still ends the group
+            verdict = bool(h.get("at")) and pid_started_before(h["pid"], h["at"])
+            _edit(folder, lambda d: [x.update(group=verdict) for x in handoffs_of(d.get(KEY, {})) if _same(x, h)])
+            h = dict(h, group=verdict)
         if old != new:
             st2 = "gone" if k is None else ("live" if k.get("state") == "live" else "finished")
             here = k is not None and not (h.get("created_ms") and k.get("created_ms") and h["created_ms"] != k["created_ms"])
@@ -311,9 +324,9 @@ def finish_handoff(folder, new):
             if here:
                 run(["hc", "rm", old])
         # its agent's children (agy's) don't orphan; only the process the record named, never a later one with its pid
-        if h.get("pid") and h.get("at") and pid_started_before(h["pid"], h["at"]):
+        if h.get("pid") and h.get("group"):
             end_group(h["pid"])
-        _edit(folder, lambda d: d.get(KEY, {}).update(handoffs=[x for x in handoffs_of(d.get(KEY, {})) if x != h])
+        _edit(folder, lambda d: d.get(KEY, {}).update(handoffs=[x for x in handoffs_of(d.get(KEY, {})) if not _same(x, h)])
               if isinstance(d.get(KEY), dict) else None)
     return moved, ended
 
@@ -358,13 +371,13 @@ def restart(folder, k, why=None):
     handoff, the lease and its workers handed on, then the old one ends with its process group. The new address, or None."""
     old = k["address"]
     d = _store.read_list(list_path(folder)) or {}
-    pid = agent_pid(old)
+    pid, pid_at = agent_pid(old), now()  # read before the start (up to a minute): the record's `at` is this moment
     try:
         new = start(folder, d.get("prefix") or "TASK", handoff(folder, old, k))
     except Fail:
         return None
     try:
-        ok = claim(folder, new, replacing=old, pid=pid)
+        ok = claim(folder, new, replacing=old, pid=pid, pid_at=pid_at)
     except (Fail, OSError, ValueError):
         ok = False
     if not ok:  # the new one never holds the lease: it ends, never a second coordinator
@@ -428,10 +441,11 @@ def reconcile_pass(report):
             report.setdefault("coordinators", []).append({"action": "disk-stalled", "folder": folder, "why": stalled})
             continue
         old, new = lease.get("address"), None
+        pid, pid_at = (agent_pid(old), now()) if stale else (None, None)  # the shell's pid, read before the start
         try:
             new = start(folder, d.get("prefix") or "TASK", handoff(folder, old, lease=lease))
             try:
-                ok = claim(folder, new, replacing=old, pid=agent_pid(old) if stale else None, starts=[*starts, now()])
+                ok = claim(folder, new, replacing=old, pid=pid, pid_at=pid_at, starts=[*starts, now()])
             except (Fail, OSError, ValueError):
                 ok = False
             if not ok:  # another start won the lease meanwhile, or the claim failed: the new one ends

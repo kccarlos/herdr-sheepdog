@@ -31,9 +31,13 @@ class FakeHc:
     """hc on a fake machine: terminals by address; run starts one, kill ends one; every call is logged."""
 
     def __init__(self, clock):
-        self.terms, self.calls, self.clock, self.n, self.down = {}, [], clock, 0, False
+        self.terms, self.calls, self.clock, self.n, self.down, self.real_ps, self.procs = {}, [], clock, 0, False, False, {}
+
+    REAL = subprocess.run
 
     def __call__(self, args, cwd=None, env=None, **kw):
+        if args[0] == "ps" and self.real_ps:  # the real process table, for the pid checks
+            return FakeHc.REAL(args, cwd=cwd, env=env, **kw)
         if args[0] != "hc":
             return subprocess.CompletedProcess(args, 1, "", "not here")
         self.calls.append(list(args))
@@ -64,6 +68,10 @@ class FakeHc:
         if cmd == "kill":
             if args[2] in self.terms:
                 self.terms[args[2]]["state"] = "exited"
+                proc = self.procs.get(args[2])
+                if proc:  # hc ends the terminal's own program, the group leader; what it started lives on
+                    proc.kill()
+                    proc.wait()
             return ok()
         if cmd == "label":
             for kv in args[3:]:
@@ -441,12 +449,48 @@ class Reconcile(LeaseCase):
         self.assertEqual(a["inflight"]["to"], new)
 
 
+class RealGroup(LeaseCase):
+    """Fable's check of 4ba329b5: a real process group, a real ps. The restart kills the agent (the group leader) while
+    the processes it started live on; they must still end, as they did before the start-time check came in."""
+
+    def test_a_restart_ends_the_group_after_its_leader_is_killed(self):
+        import signal
+        proc = subprocess.Popen(["sh", "-c", "sleep 60 & sleep 60 & wait"], start_new_session=True,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: (os.killpg(proc.pid, signal.SIGKILL) if self._group_alive(proc.pid) else None))
+        time.sleep(1.2)  # the record is written after the agent started, as in life (lstart is to the second)
+        self.hc.real_ps = True
+        old = self.hc.term("c1", self.repo, foreground={"name": "claude", "pid": proc.pid})
+        self.hc.procs["c1"] = proc
+        self.save([{"id": 1, "title": "Auth", "state": "running"}], coordinator={"address": "c1", "created_ms": 1000})
+        with mock.patch.object(lease, "now", lambda: int(time.time() * 1000)), mock.patch.object(lease, "agent_pid", lambda a: proc.pid):
+            new = lease.restart(self.repo, old)
+        self.assertEqual(launch.coordinator_in(self.repo), new)
+        for _ in range(50):
+            if not self._group_alive(proc.pid):
+                break
+            time.sleep(0.1)
+        self.assertFalse(self._group_alive(proc.pid), "the sleeps the agent started were orphaned")
+        self.assertEqual(lease.handoffs_of(lease.lease_of(self.repo)), [])
+
+    @staticmethod
+    def _group_alive(pgid):
+        try:
+            os.killpg(pgid, 0)
+            return True
+        except (ProcessLookupError, PermissionError):
+            return False
+
+
 class PidCheck(unittest.TestCase):
     """The real ps, no fake: the handoff's pid is ended only when that process started before the record."""
 
     def test_the_pid_check_reads_the_real_process_start(self):
         self.assertTrue(lease.pid_started_before(os.getpid(), (time.time() + 5) * 1000))
         self.assertFalse(lease.pid_started_before(os.getpid(), (time.time() - 3600) * 1000))  # it started later: a recycled pid
+        p = subprocess.Popen(["sleep", "5"])
+        self.addCleanup(p.kill)
+        self.assertFalse(lease.pid_started_before(p.pid, time.time() * 1000))  # started this very second: not "before"
         self.assertFalse(lease.pid_started_before(None, time.time() * 1000))
 
 
