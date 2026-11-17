@@ -2,7 +2,7 @@
 
 Phase 1's exit test from the design: *the whole Python suite passes with no herdr-app installed; on a Linux VM and a clean Tart VM with only hc and one CLI, a task goes from `add` to a merged PR.* An agent that wrote none of milestone 1 ran it on 2026-11-17 against `main` at `4cacc91a` (after SDF-10, SDF-11 and SDF-12). This page records what was run, what passed and the gaps found. Background: [engine-audit.md](engine-audit.md) section 6.
 
-**Status: half met (Linux test VM PR leg proven; macOS test VM PR leg still open).** The Python suite passed without `herdr-app` on all three machines, local-merge mode reached `main` on both VMs, and the GitHub pull-request leg (section 3) is now proven on the Linux test VM with [`scripts/factory/m1-pr-acceptance.sh`](../../../scripts/factory/m1-pr-acceptance.sh). The exit test stays half met, not passed, until the macOS test VM's PR leg is proven (see Not proven).
+**Status: met (both the Linux test VM and macOS test VM PR legs are now proven).** The Python suite passed without `herdr-app` on all three machines, local-merge mode reached `main` on both VMs, and the GitHub pull-request leg (section 3) is now proven on both the Linux test VM and a stripped macOS test VM clone with [`scripts/factory/m1-pr-acceptance.sh`](../../../scripts/factory/m1-pr-acceptance.sh).
 
 ## Machines
 
@@ -64,7 +64,13 @@ In SDF-13, neither VM could make or merge a pull request because the Linux test 
 {"mergeCommit":{"oid":"f9c923ae19ce1d4fc695b74982e9842051dfd5eb"},"mergedAt":"2026-11-17T17:26:33Z","number":5,"state":"MERGED","url":"https://github.com/<owner>/<throwaway-repo>/pull/5"}
 ```
 
-No macOS test VM image was present in `tart list` on the host Mac during SDF-43, so section 3 was not run on the macOS test VM.
+**Proven on the macOS test VM (SDF-44, 2026-11-17):** with `TART_HOME` set ([e2e.md](../e2e.md#tart-vm-directory-tart_home)), `herdr-secret run M1_TEST_GH_TOKEN -- sh -c 'GH_TOKEN="$M1_TEST_GH_TOKEN" bash scripts/factory/m1-pr-acceptance.sh <owner>/<throwaway-repo> --vm <clone> --sheepdog ./bin/sheepdog --agent codex'` ran steps 1–5 unattended on a fresh macOS test VM clone stripped to `hc` (`0.1.18`) and `codex` (with `uv` `0.13.9`, `gh` `2.102.0`, and `herdr-app`, `claude`, and `agy` removed from the clone; `agy` was signed out in the headless clone while `codex` was signed in; `sd-qa-base` is the nightly UI/panel snapshot and has no agent CLIs). `DEMO-1` ran `codex` unattended, opened PR #9, merged via `herdr-task accept`, and verified the merged state on GitHub:
+
+```json
+{"mergeCommit":{"oid":"e22be59c7bed078e4671d0d2696e77d2f1f29b3e"},"mergedAt":"2026-11-17T19:04:35Z","number":9,"state":"MERGED","url":"https://github.com/<owner>/<throwaway-repo>/pull/9"}
+```
+
+**Fixed along the way in SDF-44:** `m1-pr-acceptance.sh` clears global/system `credential.helper` entries (`osxkeychain`, `git-credential-manager`) in the throwaway repo so unattended `git` calls never prompt, restarts `hc` cleanly when `--fresh` is absent, and polls `status == "ready"` (not just `state == "ready"`) so `accept` runs after the worker's turn ends; `base.run` sets `stdin=DEVNULL` and `GIT_TERMINAL_PROMPT=0` / `GCM_INTERACTIVE=never` for `git`; `takeover.write_checks` creates its state parent directory; and `scheduler.ensure_scheduler` waits for a killed `herdr-automations` shell to exit before `hc rm`.
 
 ## Findings
 
@@ -84,7 +90,6 @@ Severity levels follow the reviewer template: **major** means someone would hit 
 
 ## Not proven
 
-- **The merged pull request on the macOS test VM** (SDF-43 proved the Linux test VM leg; the macOS leg is blocked because no macOS test VM image was present in `tart list` on the host Mac; follow-up task not yet filed).
-- Unattended runs on the macOS test VM (`agy` / `project start`): SDF-43's Linux PR run was unattended after #646, while the earlier SDF-13 runs had the tester answering dialogs, changing one setting, and accepting as the owner. Phase 2 (doctor, coordinator lease) removes the remaining step-ins.
+- Unattended PR run with `agy` on the macOS test VM (`agy` was signed out in the headless clone, so SDF-44 ran the unattended macOS test VM PR leg with `codex`; SDF-13 ran local-merge mode with `agy` by hand).
 - `project start` with a coordinator on either VM.
 - Review rounds (Review was off) and CI checks (the demo repos have no CI).

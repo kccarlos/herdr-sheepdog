@@ -14350,6 +14350,68 @@ class ClaudeStartupTrustAndDialogs(unittest.TestCase):
                 self.assertEqual(self.agents.task_status(s.find(tid), live), ("working", None, None))
 
 
+class TartHomeSetting(unittest.TestCase):
+    """SDF-44: machine.tart_home config and engine robustness fixes from the macOS VM run."""
+
+    def test_config_sets_and_clears_machine_tart_home(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.settings as settings
+        tmp = os.path.realpath(tempfile.mkdtemp(prefix="sdf44-tart-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        repo = os.path.join(tmp, "repo")
+        os.makedirs(repo)
+        subprocess.run(["git", "init", "-q", "-b", "main", repo], check=True)
+        settings_file = os.path.join(tmp, "settings.json")
+        store_dir = os.path.join(tmp, "tasks")
+        env = {
+            **os.environ,
+            "HOME": tmp,
+            "HERDR_TASK_STORE": store_dir,
+            "HERDR_TASK_SETTINGS": settings_file,
+        }
+        code = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]); "
+                "from herdr_task.cli import main; sys.argv[1:] = sys.argv[2:]; sys.exit(main())")
+        run_cli = lambda *a: subprocess.run([sys.executable, "-c", code, BIN, *a], env=env, capture_output=True, text=True)
+
+        with mock.patch.object(settings, "SETTINGS", settings_file):
+            self.assertIsNone(settings.machine_option("tart_home"))
+            r = run_cli("config", "--folder", repo, "--set", "machine.tart_home=~/tart-vms")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(settings.machine_option("tart_home"), "~/tart-vms")
+            r = run_cli("config", "--folder", repo, "--set", "machine.tart_home=default")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIsNone(settings.machine_option("tart_home"))
+
+    def test_base_run_git_non_interactive_and_devnull_stdin(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.base as base
+        calls = []
+        def fake_subproc(args, **kw):
+            calls.append((args, kw))
+            return subprocess.CompletedProcess(args, 0, "", "")
+        with mock.patch.object(base.subprocess, "run", fake_subproc):
+            base.git("/tmp/repo", "fetch", "origin", "main")
+        self.assertEqual(len(calls), 1)
+        _, kw = calls[0]
+        self.assertEqual(kw["stdin"], subprocess.DEVNULL)
+        self.assertEqual(kw["env"]["GIT_TERMINAL_PROMPT"], "0")
+        self.assertEqual(kw["env"]["GCM_INTERACTIVE"], "never")
+
+    def test_takeover_write_checks_creates_missing_parent_dir(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.takeover as takeover
+        tmp = os.path.realpath(tempfile.mkdtemp(prefix="sdf44-chk-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        chk = os.path.join(tmp, "nested", "state", "cli-check.json")
+        with mock.patch.object(takeover, "CLI_CHECK", chk):
+            takeover.write_checks({"at": 1, "machines": {}})
+        with open(chk) as f:
+            self.assertEqual(json.load(f), {"at": 1, "machines": {}})
+
+
 def _init_git_with_wt(tmp, name="repo"):
     bare = os.path.join(tmp, f"{name}.git")
     repo = os.path.join(tmp, name)

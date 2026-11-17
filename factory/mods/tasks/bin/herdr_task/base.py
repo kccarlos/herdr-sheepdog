@@ -174,7 +174,9 @@ def guard(args):
 
 def run(args, cwd=None, check=False, env=None, timeout=None):
     guard(args)
-    r = subprocess.run(args, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
+    if env is None and args and os.path.basename(args[0]) == "git":
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
+    r = subprocess.run(args, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
     if check and r.returncode != 0:
         raise Fail((r.stderr or r.stdout).strip() or f"{args[0]} failed")
     return r

@@ -74,6 +74,8 @@ type DoctorOptions struct {
 	Home                 string
 	TempDir              string
 	GHHost               string
+	TartHome             string
+	Getenv               func(string) string
 	LookPath             func(string) (string, error)
 	RunCommand           CommandFunc
 	VolumeTimeout        time.Duration
@@ -110,6 +112,9 @@ func (o DoctorOptions) withDefaults() DoctorOptions {
 	}
 	if o.LookPath == nil {
 		o.LookPath = exec.LookPath
+	}
+	if o.Getenv == nil {
+		o.Getenv = os.Getenv
 	}
 	if o.RunCommand == nil {
 		o.RunCommand = SystemRunCommand
@@ -179,6 +184,7 @@ func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	out = append(out, checkAgentCLIs(ctx, o, inHC, customLookPath, volumeOK, probedDir)...)
 	out = append(out, checkGH(ctx, o, inHC, customLookPath, volumeOK, probedDir))
 	out = append(out, checkCodexbar(ctx, o, inHC, customLookPath))
+	out = append(out, checkTart(ctx, o, inHC, customLookPath))
 	out = append(out, checkSync(ctx, o, volumeOK, probedDir))
 	return out
 }
@@ -1233,30 +1239,148 @@ func checkSync(ctx context.Context, o DoctorOptions, volumeOK bool, probedDir st
 		fmt.Sprintf("herdr-task config --set tasks.check=<cmd> --folder %s", repoDir))
 }
 
-func readSyncSettings(settingsPath, folder string) (mode, check string) {
-	mode = "cheap"
+// CheckTart checks whether `tart` is on PATH and lists at least one VM,
+// honouring TART_HOME from o.TartHome, the environment, or the factory setting
+// `machine.tart_home` in settings.json.
+func CheckTart(ctx context.Context, o DoctorOptions) onboard.Result {
+	customLookPath := o.LookPath != nil
+	o = o.withDefaults()
+	return checkTart(ctx, o, false, customLookPath)
+}
+
+// ResolveTartHome returns the Tart VM directory from o.TartHome, TART_HOME in
+// the environment, or the factory setting machine.tart_home in settings.json.
+func ResolveTartHome(o DoctorOptions) string {
+	o = o.withDefaults()
+	if raw := strings.TrimSpace(o.TartHome); raw != "" {
+		return expandDoctorHome(raw, o.Home)
+	}
+	if raw := strings.TrimSpace(o.Getenv("TART_HOME")); raw != "" {
+		return expandDoctorHome(raw, o.Home)
+	}
+	if raw := readTartHomeSetting(o.SettingsPath); raw != "" {
+		return expandDoctorHome(raw, o.Home)
+	}
+	return ""
+}
+
+func checkTart(ctx context.Context, o DoctorOptions, inHC, customLookPath bool) onboard.Result {
+	const name = "tart"
+	const hint = "VMs live under TART_HOME; set it to the folder that holds them (export TART_HOME=... or herdr-task config --set machine.tart_home=...)"
+	if customLookPath || !inHC {
+		if _, err := o.LookPath(name); err != nil {
+			return resSkip(name, "not on PATH")
+		}
+	}
+	tartHome := ResolveTartHome(o)
+	var extraEnv []string
+	if tartHome != "" {
+		extraEnv = []string{"TART_HOME=" + tartHome}
+	}
+	tCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
+	tOut := o.RunCommand(tCtx, o.TempDir, extraEnv, "tart", "list", "--quiet")
+	cancel()
+	if inHC && tOut.Exit == 127 {
+		if _, err := o.LookPath(name); err == nil {
+			return resWarn(name, "tart is on PATH locally, but not on herdr-core's PATH", "run: hc server restart")
+		}
+		return resSkip(name, "not on PATH")
+	}
+	if tOut.Err != nil || tOut.TimedOut || tOut.Exit != 0 {
+		if inHC && !customLookPath {
+			if _, err := o.LookPath(name); err != nil {
+				return resSkip(name, "not on PATH")
+			}
+		}
+		why := cleanReason(firstNonEmpty(errText(tOut.Err), tOut.Stderr, tOut.Stdout, fmt.Sprintf("exit %d", tOut.Exit)))
+		return resWarn(name, "could not list Tart VMs: "+why, hint)
+	}
+	var count int
+	for _, ln := range strings.Split(tOut.Stdout, "\n") {
+		if strings.TrimSpace(ln) != "" {
+			count++
+		}
+	}
+	if count == 0 {
+		return resWarn(name, "tart is installed, but `tart list` is empty", hint)
+	}
+	where := "default ~/.tart"
+	if tartHome != "" {
+		where = "TART_HOME=" + tartHome
+	}
+	return resOK(name, fmt.Sprintf("%d VM(s) (%s)", count, where))
+}
+
+type factorySettingsLayer struct {
+	Folder  string `json:"folder"`
+	Machine struct {
+		TartHome *string `json:"tart_home"`
+	} `json:"machine"`
+	Tasks struct {
+		Sync  string  `json:"sync"`
+		Check *string `json:"check"`
+	} `json:"tasks"`
+}
+
+type factorySettingsDoc struct {
+	Here       string                          `json:"here"`
+	Everywhere factorySettingsLayer            `json:"everywhere"`
+	Machines   map[string]factorySettingsLayer `json:"machines"`
+	Spaces     map[string]factorySettingsLayer `json:"spaces"`
+	Projects   map[string]factorySettingsLayer `json:"projects"`
+}
+
+func loadFactorySettings(settingsPath string) (factorySettingsDoc, bool) {
+	var doc factorySettingsDoc
+	if settingsPath == "" {
+		return doc, false
+	}
 	data, err := os.ReadFile(settingsPath)
-	if settingsPath == "" || err != nil {
-		return mode, ""
-	}
-	type layer struct {
-		Folder string `json:"folder"`
-		Tasks  struct {
-			Sync  string  `json:"sync"`
-			Check *string `json:"check"`
-		} `json:"tasks"`
-	}
-	var doc struct {
-		Here       string           `json:"here"`
-		Everywhere layer            `json:"everywhere"`
-		Machines   map[string]layer `json:"machines"`
-		Spaces     map[string]layer `json:"spaces"`
-		Projects   map[string]layer `json:"projects"`
+	if err != nil {
+		return doc, false
 	}
 	if json.Unmarshal(data, &doc) != nil {
+		return doc, false
+	}
+	return doc, true
+}
+
+func readTartHomeSetting(settingsPath string) string {
+	doc, ok := loadFactorySettings(settingsPath)
+	if !ok {
+		return ""
+	}
+	var out string
+	if doc.Everywhere.Machine.TartHome != nil {
+		out = strings.TrimSpace(*doc.Everywhere.Machine.TartHome)
+	}
+	if m, ok := doc.Machines[firstNonEmpty(doc.Here, "local")]; ok && m.Machine.TartHome != nil {
+		out = strings.TrimSpace(*m.Machine.TartHome)
+	}
+	return out
+}
+
+func expandDoctorHome(raw, home string) string {
+	p := strings.TrimSpace(raw)
+	if p == "" || home == "" {
+		return p
+	}
+	if p == "~" {
+		return home
+	}
+	if strings.HasPrefix(p, "~/") {
+		return filepath.Join(home, p[2:])
+	}
+	return p
+}
+
+func readSyncSettings(settingsPath, folder string) (mode, check string) {
+	mode = "cheap"
+	doc, ok := loadFactorySettings(settingsPath)
+	if !ok {
 		return mode, ""
 	}
-	apply := func(l layer) {
+	apply := func(l factorySettingsLayer) {
 		if l.Tasks.Sync == "cheap" || l.Tasks.Sync == "full" || l.Tasks.Sync == "off" {
 			mode = l.Tasks.Sync
 		}

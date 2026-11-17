@@ -19,8 +19,13 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
+# shellcheck source=scripts/e2e/lib.sh
+. "$HERE/lib.sh"
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-export TART_HOME="${TART_HOME:-/Volumes/Ext/dev/vms/tart}"
+RESOLVED_TART_HOME="$(e2e_resolve_tart_home)"
+if [ -n "$RESOLVED_TART_HOME" ]; then
+  export TART_HOME="$RESOLVED_TART_HOME"
+fi
 
 LOGROOT="${SHEEPDOG_NIGHTLY_LOGS:-$HOME/Library/Logs/sheepdog-nightly}"
 VM="${SHEEPDOG_NIGHTLY_VM:-sd-qa}"
@@ -50,12 +55,17 @@ case "${1:-}" in
     # Under launchd, the first read of an external disk waits for a macOS
     # consent dialog ("bash" would like to access files on a removable
     # volume); without a click it never returns.
-    if ! perl -e 'alarm 30; exec @ARGV' ls "$TART_HOME" >/dev/null 2>&1; then
+    if [ -n "${TART_HOME:-}" ] && ! perl -e 'alarm 30; exec @ARGV' ls "$TART_HOME" >/dev/null 2>&1; then
       echo "cannot read $TART_HOME within 30 s: under launchd, allow /bin/bash to access removable volumes"
       echo "(System Settings > Privacy & Security > Files and Folders, or click Allow on the dialog), or mount the disk"
       exit 1
     fi
-    tart list --quiet 2>/dev/null | grep -qx "$VM_BASE" || { echo "no VM $VM_BASE (the clean snapshot)"; exit 1; }
+    TART_VMS="$(tart list --quiet 2>/dev/null || true)"
+    if [ -z "$TART_VMS" ]; then
+      echo "no Tart VMs found (VMs live under TART_HOME; set it to the folder that holds them)"
+      exit 1
+    fi
+    printf '%s\n' "$TART_VMS" | grep -qx "$VM_BASE" || { echo "no VM $VM_BASE (the clean snapshot; TART_HOME=${TART_HOME:-default})"; exit 1; }
     tart stop "$VM" >/dev/null 2>&1
     tart delete "$VM" >/dev/null 2>&1
     tart clone "$VM_BASE" "$VM" || exit 1
@@ -210,7 +220,7 @@ disk_ok() { [ "$(df -k / | awk 'NR==2{print $4}')" -gt 8388608 ]; }
 if want vm; then
   if ! command -v tart >/dev/null 2>&1; then
     skip_step vm "tart is not installed"
-  elif [ ! -d "$TART_HOME" ]; then
+  elif [ -n "${TART_HOME:-}" ] && [ ! -d "$TART_HOME" ]; then
     FAILED+=(vm-boot); ROWS+=("| vm-boot | FAIL (no $TART_HOME: is the external disk mounted?) | 0s | |")
   else
     if step vm-boot 400 "$0" __vm-boot "$OUT"; then
