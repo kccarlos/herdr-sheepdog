@@ -56,8 +56,8 @@ In v1, the Go daemon invokes the embedded engine with the `uv`-managed pinned Py
 
 ### 1.4 Versioning and Error Envelope
 
-- **Protocol version:** Every top-level response object carries `"protocol": 1`. Breaking changes increment `protocol`; additive fields within `v1` are ignored by older runtime consumers in production, while the contract validators in both test suites enforce exact key sets so Go and Python never drift silently.
-- **Timestamps and IDs:** All contract timestamps (`at`, `answered_at`, `expires_at`, `created_at`, `revoked_at`, `generated_at`, `since`, `updated_at`, `cleared_at`, `until`) are **UTC epoch milliseconds (`int`)**, matching `contracts/gate-evidence.md` and `contracts/board-data.md`. Only `usage.py`'s upstream `five_hour_reset` and `week_reset` strings remain ISO-8601 UTC strings (`"2026-11-17T02:00:00Z"`) or `null`.
+- **Protocol version:** Every top-level response object carries `"protocol": 1`. Breaking changes increment `protocol`; additive fields within `v1` are ignored by older runtime consumers in production, while the contract validators in both test suites enforce exact key sets (`unexpected_key`) so Go and Python never drift silently.
+- **Timestamps and IDs:** All contract timestamps (`at`, `answered_at`, `expires_at`, `created_at`, `revoked_at`, `generated_at`, `since`, `updated_at`, `cleared_at`, `until`) are **UTC epoch milliseconds (`int`)**, matching the engine's task store and `test/contract_gate_evidence.py` (audited in [`engine-audit.md`](engine-audit.md) §2). Only `usage.py`'s upstream `five_hour_reset` and `week_reset` strings remain ISO-8601 UTC strings (`"2026-11-17T02:00:00Z"`) or `null`.
 - **Error envelope:** When a command fails, it exits non-zero (exit `1`, or exit `2` on conflict) and writes a single JSON object to stdout:
 
 ```json
@@ -76,11 +76,13 @@ Standard error codes (`code`):
 | `not_found` | 404 | Unknown `ask_id`, `project`, or `rule_id`. |
 | `already_closed` | 409 | Ask was already answered with a different option, expired, or cancelled. |
 | `invalid_option` | 400 | Option index or label is not in `ask.options`. |
+| `invalid_ask` | 400 | Malformed ask record (e.g. `gated != (kind != "decision")`, invalid `options` or `recommend`, or gated `on_expiry` not `"hold"`/`null`). |
 | `unknown_kind` | 400 | Ask `kind`, rule `type`, or alert `kind` is not in the v1 enum. |
 | `proof_required` | 403 | Gated ask (`gated: true`) was called without a `--proof` id and no active delegation rule covers it. |
-| `proof_rejected` | 403 | The local sheepdog daemon refused or could not verify the `AnswerProof` over loopback. |
-| `not_delegable` | 400 | Attempted to create a `delegation` rule for `paid-key`, `delete`, `install`, `reset`, or `rule`, or without an `until` expiry. |
-| `invalid_rule` | 400 | Malformed rule scope, class, type, or value schema. |
+| `proof_rejected` | 403 | The local sheepdog daemon refused or could not verify the `AnswerProof` over loopback (including ticketless loopback taps or typed turns). |
+| `not_delegable` | 400 | Attempted to create a `delegation` rule for `paid-key`, `delete`, `install`, `reset`, or `rule`. |
+| `invalid_rule` | 400 | Malformed rule scope, class, type, or value schema (including a `delegation` rule missing a future `until` or valid `release_level`). |
+| `unexpected_key` | 400 | JSON object contains an unknown extra property not in the v1 contract schema. |
 | `not_ready` | 409 | Task or milestone cannot be accepted in its current state. |
 
 ---
@@ -365,9 +367,13 @@ Standing rules live in one layered store (`everywhere` → `machine` → `projec
    - `review_rounds`: `{"code": int, "design": int, "doc": int}` (default `{"code": 2, "design": 1, "doc": 1}`).
    - `auto_accept`: `bool` (default `true` at the evidence bar: required passing review rounds on head SHA, green CI, proof present, no open owner ask).
    - `design_gate`: `"fable" | "owner"` (default `"fable"`; `"owner"` makes designs and milestone plans wait for an owner `gate` ask).
-   - `delegation`: `{"kinds": ("gate" | "release")[], "scope": string, "until": int}`. Only `"gate"` and `"release"` may appear in `kinds[]`, and `until` (epoch ms expiry) is mandatory.
+   - `delegation`: closed typed object `{"kinds": ("gate" | "release")[], "milestones": string[] | null, "release_level": "patch" | "minor" | "any" | null, "until": int}`:
+     - `kinds`: non-empty array containing only `"gate"` and/or `"release"` (any other kind fails with `not_delegable`).
+     - `milestones`: non-empty list of milestone ids (e.g. `["M0", "M1"]`) matched in code against `ask.milestone`, or `null` to cover any milestone in the rule's `scope`.
+     - `release_level`: required enum `"patch" | "minor" | "any"` when `"release"` is in `kinds`; must be `null` when `"release"` is not in `kinds`. Matched deterministically in code against `ask.subject.tag` (`vMAJOR.MINOR.PATCH` compared against the repository's latest tag: `"patch"` requires `MAJOR` and `MINOR` unchanged and `PATCH` incremented by 1; `"minor"` allows `MINOR` or `PATCH` increments with `MAJOR` unchanged; `"any"` allows any semver tag).
+     - `until`: mandatory future UTC epoch ms expiry (`> created_at`; missing or past `until` fails with `invalid_rule`).
    - `notify_level`: `"asks_and_alerts" | "alerts_only" | "quiet"` (default `"asks_and_alerts"`).
-   - `project_priority`: `string[]` (ordered project `id`s, valid at `scope: "everywhere"` or `"machine"`).
+   - `project_priority`: `string[]` (non-empty ordered list of project `id`s, valid at `scope: "everywhere"` or `"machine"`).
 2. **`class: "text"` — Assembled into the coordinator's prompt:**
    - Carries `text` (the rule prose), `section` (the template section name it layers onto, e.g. `"plan"`, `"ci"`, `"custom"`), and `base_hash` (first 12 hex chars of SHA-256 of the built-in prompt section when the rule was saved, so a binary upgrade detects base changes without losing the owner's text).
    - The typed-rules summary and the `usage.py` pool table are appended last and rebuilt fresh on every coordinator wake.
@@ -385,7 +391,7 @@ Standing rules live in one layered store (`everywhere` → `machine` → `projec
 | `base_hash` | `string \| null` | 12-hex SHA-256 prefix of the built-in section when `class == "text"`, else `null`. |
 | `read_back` | `string` | Spoken/shown sentence naming the class (`"Typed rule"` or `"Text rule"`) and scope (`"this project (<Name>)"`, `"this machine"`, or `"everywhere"`). |
 | `created_at` | `int` | Epoch ms when saved. |
-| `expires_at` | `int \| null` | Epoch ms expiry (required when `type == "delegation"`, optional otherwise). |
+| `expires_at` | `int \| null` | Epoch ms expiry (required and `== value.until` when `type == "delegation"`, optional otherwise). |
 | `saved_by_ask` | `string` | Id of the `rule` ask whose verified owner answer saved this rule. |
 | `revoked_at` | `int \| null` | `null` while active; epoch ms when revoked via `revoke_rule`. |
 
@@ -421,13 +427,16 @@ Example:
         "kinds": [
           "release"
         ],
-        "scope": "patch_after_qa",
+        "milestones": [
+          "M2"
+        ],
+        "release_level": "patch",
         "until": 1763395200000
       },
       "text": null,
       "section": null,
       "base_hash": null,
-      "read_back": "Typed rule, this project (WukongMind): delegate patch releases after QA until 08:00.",
+      "read_back": "Typed rule, this project (WukongMind): delegate M2 patch releases until 08:00.",
       "created_at": 1763305000000,
       "expires_at": 1763395200000,
       "saved_by_ask": "c7d8e9",
@@ -456,6 +465,43 @@ Example:
 ### 2.6 `graph` (`owner graph --project <id|folder> --json`)
 
 Exposes the project's milestone graph, single-stage task table (`SDF-30`), `plan apply` / `plan amend` state (`SDF-31`), critical path and merge order (`SDF-32`), `/factory` page data (`SDF-35`), and voice summary (`SDF-36`).
+
+#### Top-Level `graph` and Nested Shapes
+
+| Object / Field | Type | Invariants |
+|---|---|---|
+| `project` | `string` | Non-empty project `id` (e.g. `"wukongmind"`). |
+| `name` | `string` | Spoken/display name (`"WukongMind"`). |
+| `folder` | `string` | Canonical absolute path to the project repository. |
+| `updated_at` | `int` | UTC epoch ms of the latest store or plan update. |
+| `replans` | `int` | Count of `plan amend` replans recorded on this project (`>= 0`). |
+| `spoken_summary` | `string` | Code-built 1–3 sentence plain-words summary of the active milestone, critical path, and blockers (no file paths, SHAs, or raw ids). |
+| `critical_path` | `object \| null` | `{"milestone": string, "tasks": string[], "remaining_ms": int, "remaining_text": string}`, or `null` when no active milestone has unfinished tasks. Every ref in `tasks[]` must exist in `graph.tasks[]`. |
+| `milestones` | `Milestone[]` | Ordered by `order` (`1..N`, strictly increasing). |
+| `milestones[].id` | `string` | Milestone identifier (`"M1"`, `"M2"`). |
+| `milestones[].title` | `string` | Short milestone title. |
+| `milestones[].goal` | `string` | Plain-words goal for the milestone. |
+| `milestones[].order` | `int` | 1-based sequence order (`>= 1`). |
+| `milestones[].exit_test` | `string` | Non-empty exit criteria verified by the acceptance task. |
+| `milestones[].gate` | `string` | Enum: `"auto" \| "fable" \| "owner"`. |
+| `milestones[].state` | `string` | Enum: `"planned" \| "active" \| "validating" \| "done"`. |
+| `milestones[].acceptance_task` | `string \| null` | Task ref of the engine-added acceptance task (e.g. `"WUKO-15"`), or `null` while `"planned"`. |
+| `milestones[].mandate` | `object` | `{"words": string, "project": string, "at": int, "kind": "explicit" \| "inferred", "observe": bool}`. Immutable once created; `"inferred"` work with `observe: true` only records what would start until the owner enables proactive execution. |
+| `tasks` | `GraphTask[]` | All non-archived tasks in the project store. |
+| `tasks[].ref` | `string` | Task ref (`"<PREFIX>-<id>"`, e.g. `"WUKO-12"`). |
+| `tasks[].id` | `int` | Numeric task id (`>= 1`). |
+| `tasks[].title` | `string` | Non-empty task title. |
+| `tasks[].milestone` | `string \| null` | Milestone `id` in `milestones[]`, or `null`. |
+| `tasks[].kind` | `string` | Enum: `"code" \| "design" \| "doc" \| "acceptance" \| "release"`. |
+| `tasks[].stage` | `string` | Enum (9 ordered values): `"owner_answer" \| "owner_gate" \| "blocked" \| "ci" \| "waiting_on_dep" \| "queued" \| "idle" \| "working" \| "done"`. |
+| `tasks[].why_waiting` | `string \| null` | Plain one-line reason when `stage` is not `"working"` and not `"done"`; `null` when `"working"` or `"done"`. |
+| `tasks[].after` | `string[]` | Prerequisite task `ref`s (`tasks[]` must contain no cycles or dangling refs). |
+| `tasks[].dependents` | `string[]` | Unfinished task `ref`s in `tasks[]` that depend directly or transitively on this task (drives merge order in `SDF-32`). |
+| `tasks[].on_critical_path` | `bool` | `true` iff `ref` appears in `critical_path.tasks`. |
+| `tasks[].estimate_ms` | `int \| null` | Estimated duration in ms (`> 0`), or `null`. |
+| `tasks[].left_ms` | `int \| null` | Worker-reported remaining time from `--left` in ms (`>= 0`), or `null`. |
+| `tasks[].done_pct` | `int \| null` | Worker-reported `--done` percentage (`0..100`), or `null`. |
+| `tasks[].pr` | `object \| null` | `{"number": int, "url": string, "ci_state": "success" \| "failure" \| "pending" \| "none"}`, or `null` before PR creation. |
 
 #### Ordered Task Stage Table (`stage`)
 
@@ -739,13 +785,16 @@ Revoking a rule or delegation tightens authority, so it executes **immediately**
       "kinds": [
         "release"
       ],
-      "scope": "patch_after_qa",
+      "milestones": [
+        "M2"
+      ],
+      "release_level": "patch",
       "until": 1763395200000
     },
     "text": null,
     "section": null,
     "base_hash": null,
-    "read_back": "Typed rule, this project (WukongMind): delegate patch releases after QA until 08:00.",
+    "read_back": "Typed rule, this project (WukongMind): delegate M2 patch releases until 08:00.",
     "created_at": 1763305000000,
     "expires_at": 1763395200000,
     "saved_by_ask": "c7d8e9",
@@ -765,15 +814,20 @@ Every ask record carries a mandatory `kind` from this closed table:
 | `kind` | `gated` | Coordinator may answer? | Delegable by typed rule? | What it gates / unlocks |
 |---|---|---|---|---|
 | `decision` | `false` | **Yes** | N/A (not gated) | Worker or coordinator engineering/product choice with no privileged side effect. |
-| `gate` | `true` | No | **Yes** (`scope` + `until`) | Accepting a design/plan task when `design_gate == "owner"`, accepting an out-of-rounds task (field note 47), or passing an owner-gated milestone (field note 18). |
-| `release` | `true` | No | **Yes** (`scope` + `until`, e.g. `"patch_after_qa"`) | Tagging a version, pushing a release tag, or triggering `release.yml` / TestFlight upload (placed before merge/tag, field note 31). |
+| `gate` | `true` | No | **Yes** (`milestones` + `until`) | Accepting a design/plan task when `design_gate == "owner"`, accepting an out-of-rounds task (field note 47), or passing an owner-gated milestone (field note 18). |
+| `release` | `true` | No | **Yes** (`milestones` + `release_level` + `until`) | Tagging a version, pushing a release tag, or triggering `release.yml` / TestFlight upload (placed before merge/tag, field note 31). |
 | `paid-key` | `true` | No | **Never** | Widening a stored `herdr-secret` key's scope to a project (`subject.secret`, field notes 11 & 12). |
 | `delete` | `true` | No | **Never** | Irreversible deletion outside a task's own worktree or build directory. |
 | `install` | `true` | No | **Never** | Installing host packages, toolchains, or self-hosted factory updates. |
 | `reset` | `true` | No | **Never** | Spending a provider limit-reset credit or resetting project state. |
 | `rule` | `true` | No | **Never** | Saving a standing rule created by `propose_rule`. |
 
-**Delegation chain of custody (`answered_by: "rule"`):** When a `gate` or `release` ask is opened and an active, non-expired `delegation` rule (`revoked_at == null`, `expires_at > now()`, `ask.kind in rule.value.kinds`, and matching `scope`) covers it, the engine answers the ask in code with `status: "answered"`, `answer: ask.recommend`, `answered_at: now()`, `answered_by: "rule"`, and `proof_id: rule.id`. Because saving that `delegation` rule itself required a `rule` ask (`rule.saved_by_ask`) backed by a daemon-verified `AnswerProof`, every delegated `gate` or `release` traces back to a verified owner input in the store.
+**Delegation chain of custody (`answered_by: "rule"`):** When a `gate` or `release` ask is opened, the engine checks active, non-expired `delegation` rules (`revoked_at == null`, `expires_at > now()`) in `project` → `machine` → `everywhere` order using deterministic code checks only:
+1. `ask.kind` is in `rule.value.kinds` (`"gate"` or `"release"` only).
+2. `rule.value.milestones` is `null` or contains `ask.milestone`.
+3. When `ask.kind == "release"`, `ask.subject.tag` (`vMAJOR.MINOR.PATCH`) satisfies `rule.value.release_level` against the repository's latest release tag (`"patch"` requires identical `MAJOR.MINOR` and `PATCH == prev_patch + 1`; `"minor"` requires identical `MAJOR`; `"any"` accepts any valid semver tag), and the milestone's acceptance/QA checks have passed.
+
+When all three checks pass, the engine answers the ask in code with `status: "answered"`, `answer: ask.recommend`, `answered_at: now()`, `answered_by: "rule"`, and `proof_id: rule.id`. Because saving that `delegation` rule itself required a `rule` ask (`rule.saved_by_ask`) backed by a daemon-verified `AnswerProof`, every delegated `gate` or `release` traces back to a verified owner input in the store.
 
 ### 4.2 Unknown Ask Kinds Refused
 
@@ -801,18 +855,18 @@ Sheepdog's core safety rule ([`AGENTS.md`](../../../AGENTS.md), [`roles.md`](../
 
 ```mermaid
 sequenceDiagram
-  participant Phone as Owner (Phone / Voice)
+  participant Phone as Owner (Paired Phone / Voice)
   participant Daemon as sheepdog daemon (Go)
   participant Engine as factory engine (Python)
 
   Engine->>Daemon: owner asks --open --json (poll / hc wake)
   Daemon->>Phone: Card & spoken prompt (pending.created, id="fask-a1b2c3")
-  Phone->>Daemon: Tap option 1 (POST /api/pending/answer) or fresh spoken "Yes"
-  Note over Daemon: inputs.go railInputLocked / AnswerTap:<br/>1. Input arrived after ask was shown<br/>2. Within authorise_window_s<br/>3. Not used, not displaced, not negativeInput
-  Daemon->>Daemon: Persist AnswerProof (prf-8a7b6c5d4e3f) in factory_proofs.json
+  Phone->>Daemon: Paired-device tap (POST /api/pending/answer + Bearer ticket) or live voice words
+  Note over Daemon: 1. Reject ticketless loopback tap (dev == localDevice) & typed turns<br/>2. inputs.go railInputLocked (after ask shown, within window, not used, not negativeInput)
+  Daemon->>Daemon: Persist AnswerProof (prf-8a7b6c5d4e3f, device_id="dev-iphone-1") in factory_proofs.json
   Daemon->>Engine: engine owner answer a1b2c3 --option 1 --proof prf-8a7b6c5d4e3f --json
   Engine->>Daemon: GET http://127.0.0.1:<port>/api/factory/answer-proof/a1b2c3?proof=prf-8a7b6c5d4e3f&option=Yes%2C+tag+v1.5.0
-  Note over Daemon: proxy.go loopback check:<br/>isLoopbackAddr && isUntrustedLoopback == ""<br/>Match proof_id, ask_id, option, input_seq > 0
+  Note over Daemon: proxy.go loopback check:<br/>isLoopbackAddr && isUntrustedLoopback == ""<br/>Match proof_id, ask_id, option, input_kind in (tap,voice), device_id != "local"
   Daemon-->>Engine: 200 OK {"ok": true, "verified": true, "proof_id": "prf-8a7b6c5d4e3f", ...}
   Note over Engine: Save answered ask + run gated unlock (tag v1.5.0)
   Engine-->>Daemon: 0 {"protocol": 1, "ok": true, "ask": {...}}
@@ -827,8 +881,12 @@ sequenceDiagram
      - `Options`: 1-based `state.Option` entries for `ask.Options`, with `Recommended: o == ask.Recommend` and `Default: o == ask.Recommend`.
    - Because `/api/state` (`pending_action` and `questions[]`), `/events` (`pending.created`), APNs `push.KindApproval` notifications, and `/ws` `CardKindApproval` frames all read `state.PendingAction`, the iPhone app (`SDF-28`), `/voice`, and the desktop panel render factory asks and submit taps through `POST /api/pending/answer {id: "fask-a1b2c3", option: 1}` without a separate card protocol.
    - For `"fask-"` actions, `AnswerTap` skips terminal screen-scraping (`stillAsking`) and instead verifies that the ask is still open in the contract client before running the rail.
-2. **Rail check in Go (`internal/supervisor/inputs.go`):**
-   - When the owner taps an option on a factory ask card (`POST /api/pending/answer`) or speaks/types an answer (`to_supervisor` / `POST /api/turn`), `Supervisor` runs the same `railInputLocked` check used for worker approval prompts:
+2. **Closing the loopback tap and typed-turn shortcut (`internal/web/auth.go`, `internal/supervisor/inputs.go`):**
+   - Today in `internal/web/server.go:554–564` and `internal/web/auth.go:120–124`, `POST /api/pending/answer`, `POST /api/turn`, and `POST /api/utterance` use `accessDevice`, which grants a ticketless loopback HTTP request `localDevice` (`"local"`) authority, and `AnswerTap` (`inputs.go:637–644`) appends its own `shepherdInput{kind: InputTap}` right before calling `railInputLocked`. Without an explicit guard, a local worker could run `curl -X POST http://127.0.0.1:<port>/api/pending/answer -d '{"id":"fask-a1b2c3","option":1}'` and mint a real `AnswerProof`.
+   - Therefore, for any factory ask (`strings.HasPrefix(id, "fask-")`), an `AnswerProof` may be minted **only** from two input sources:
+     1. **A paired-device tap (`input_kind: "tap"`):** `handlePendingAnswer` requires `s.hasValidTicket(r) == true` (`dev != "" && dev != localDevice`, resolving to an active, non-revoked paired device `d.ID` in `devices.go`). Any ticketless loopback `POST /api/pending/answer` for `"fask-"` is refused with HTTP `403` (`code: "proof_rejected"`, logged as `brain.rail_blocked` with `reason: "factory ask tap requires a paired device ticket"`), never calling `AnswerTap`.
+     2. **Live voice-session speech (`input_kind: "voice"`):** Words transcribed by the voice model (`voice.transcript.in` → `heard()` → `shepherdInput{kind: InputVoice}`) on an active `/ws` voice session (`device_id` set to the `/ws` client's paired device id, or `"voice-session"` when the local owner mic is active). Typed HTTP turns (`POST /api/turn`, `POST /api/utterance`) and `/ws` `SimulateText` frames (`in.kind == InputTyped`) are refused by `railInputLocked` when the target pending action is `"fask-"` (`reason: "factory asks cannot be answered by typed loopback input"`).
+   - Both conditions are paired with `railInputLocked` (`inputs.go:458`):
      - `in != nil` and `!in.at.Before(promptSinceLocked(p))` (the owner's input arrived after the ask was presented).
      - `!in.used` (one `"yes"` answers at most one ask).
      - `s.displacedLocked(p, in) == ""` (no unannounced displacement).
@@ -836,7 +894,7 @@ sequenceDiagram
      - `strings.TrimSpace(in.text) != ""` and `!fillerOnly(in.text)`.
      - `!(negativeInput(in.text) && approves(p, keys))` (a `"no"` input never selects an approving option).
 3. **Minting `AnswerProof` (`internal/factory`):**
-   - Once `railInputLocked` succeeds and marks `in.used = true`, the daemon mints a random `proof_id` (`"prf-" + 12 hex chars`) and writes an `AnswerProof` record to `<data_dir>/factory_proofs.json` (mode `0600`, atomic rename, 24 h retention):
+   - Once the source check and `railInputLocked` succeed and mark `in.used = true`, the daemon mints a random `proof_id` (`"prf-" + 12 hex chars`) and writes an `AnswerProof` record (including `device_id`) to `<data_dir>/factory_proofs.json` (mode `0600`, atomic rename, 24 h retention):
 
 ```json
 {
@@ -849,6 +907,7 @@ sequenceDiagram
   "input_kind": "tap",
   "input_seq": 42,
   "utterance_id": "utt-1-19",
+  "device_id": "dev-iphone-1",
   "answered_at": 1763310005000
 }
 ```
@@ -856,7 +915,7 @@ sequenceDiagram
 4. **Loopback verification endpoint (`GET /api/factory/answer-proof/{ask_id}`):**
    - Query parameters: `proof=<proof_id>&option=<option_label>`.
    - **Strict local loopback guard (`internal/web/proxy.go`):** The handler requires `isLoopbackAddr(r.RemoteAddr)` **and** `s.isUntrustedLoopback(r) == ""` (rejecting any request with `X-Forwarded-*`, `Forwarded`, `X-Real-IP`, `Tailscale-*`, `CF-Connecting-IP`, or `True-Client-IP` headers, or arriving while Tailscale Funnel is active on the daemon port).
-   - Looks up `proof_id` in the daemon's store and checks that `ask_id` and `option_label` match exactly and `input_seq > 0`.
+   - Looks up `proof_id` in the daemon's store and checks that `ask_id` and `option_label` match exactly, `input_kind` is `"tap"` or `"voice"`, `device_id` is non-empty and not `"local"`, and `input_seq > 0`.
    - Logs `factory.proof_verified` (or `factory.proof_rejected` with `reason`) to `internal/eventlog`.
    - Returns HTTP `200`:
 
@@ -873,11 +932,12 @@ sequenceDiagram
   "input_kind": "tap",
   "input_seq": 42,
   "utterance_id": "utt-1-19",
+  "device_id": "dev-iphone-1",
   "answered_at": 1763310005000
 }
 ```
 
-   - If missing, mismatched, or called from a proxied connection, returns HTTP `403` / `404`:
+   - If missing, mismatched, minted from an unauthorized source, or called from a proxied connection, returns HTTP `403` / `404`:
 
 ```json
 {
@@ -888,7 +948,7 @@ sequenceDiagram
 }
 ```
 
-5. **Threat boundary:** As documented in `sheepdog-factory-design.md` §3 and §9, loopback answer verification stops agent shortcuts (passing `--owner-approved`, spoofing `HERDR_TASK_BY`, sending `hc keys`, or inventing a `--proof` token). Every verified answer is audited in `eventlog` with its `input_seq` and `input_kind`. Isolating untrusted worker processes from the user's filesystem is the job of running workers in a VM machine.
+5. **Threat boundary and required tests (`SDF-22`):** As documented in `sheepdog-factory-design.md` §3 and §9, loopback answer verification plus the paired-device / voice-only source check stops agent shortcuts (passing `--owner-approved`, spoofing `HERDR_TASK_BY`, sending `hc keys`, calling ticketless loopback `POST /api/pending/answer` or `/api/turn`, or inventing a `--proof` token). `SDF-22` must include an explicit test asserting that a ticketless loopback `POST /api/pending/answer` and a loopback `POST /api/turn` on `"fask-<id>"` both return `403` (`proof_rejected`) and mint no `AnswerProof`. Every verified answer is audited in `eventlog` with its `device_id`, `input_seq`, and `input_kind`. Isolating untrusted worker processes from the user's filesystem is the job of running workers in a VM machine.
 
 ---
 
@@ -976,7 +1036,7 @@ Example:
 
 ## 7. Shared Contract Fixture (`testdata/factory/owner-contract-v1.json`)
 
-To prevent the Go daemon and Python engine from drifting (`sheepdog-factory-design.md` §9 risk 4), both test suites run against a single checked-in fixture file at **`testdata/factory/owner-contract-v1.json`** (following the pattern of [`ios/Tests/Fixtures/agent-attention.json`](../../../ios/Tests/Fixtures/agent-attention.json) and `contracts/gate-evidence.md`).
+To prevent the Go daemon and Python engine from drifting (`sheepdog-factory-design.md` §9 risk 4), both test suites run against a single checked-in fixture file at **`testdata/factory/owner-contract-v1.json`** (following the pattern of [`ios/Tests/Fixtures/agent-attention.json`](../../../ios/Tests/Fixtures/agent-attention.json), [`internal/web/protocol_golden_test.go`](../../../internal/web/protocol_golden_test.go), and `test/contract_gate_evidence.py` as audited in [`engine-audit.md`](engine-audit.md) §2).
 
 ### 7.1 How Both Suites Run the Fixture
 
@@ -984,17 +1044,17 @@ To prevent the Go daemon and Python engine from drifting (`sheepdog-factory-desi
    - Loads `testdata/factory/owner-contract-v1.json`.
    - Validates every object in `valid` through `factory.owner.validate_<shape>()`, asserting zero errors.
    - Ensures that the live output of `owner hello --json`, `owner projects --json`, `owner asks --json`, `owner digest --json`, `owner rules --json`, `owner graph --json`, `owner alerts --json`, and the four actions (`answer`, `say`, `propose-rule`, `revoke-rule`) against a seeded store passes the exact same validators.
-   - Runs every entry in `invalid`, asserting that `validate_<target>()` (and `cmd_ask` / `cmd_owner`) raises `Fail` or `ValueError` with the expected `error_code` — specifically refusing every unknown `ask.kind`, unknown `rule.type`, unknown `alert.kind`, non-delegable rule kind, unverified gated answer, and unexpected extra JSON key.
+   - Runs every entry in `invalid`, asserting that `validate_<target>()` (and `cmd_ask` / `cmd_owner`) raises `Fail` or `ValueError` with the expected `error_code` — specifically refusing every unknown `ask.kind` (`unknown_kind`), `gated` mismatch (`invalid_ask`), unknown `rule.type` (`invalid_rule`), `delegation` rule without `until` or with an invalid `release_level` (`invalid_rule`), non-delegable rule kind (`not_delegable`), unknown `alert.kind` (`unknown_kind`), unverified gated answer (`proof_required`), ticketless loopback or typed `AnswerProof` (`proof_rejected`), and unexpected extra JSON key (`unexpected_key`).
 2. **Go suite (`SDF-22`, `internal/factory/contract_test.go`):**
    - Loads the same `testdata/factory/owner-contract-v1.json`.
    - Decodes every object in `valid` using strict Go decoders (`json.NewDecoder` with `DisallowUnknownFields()` plus `Validate()`), round-trips back to JSON, and asserts structural equality.
-   - Runs every entry in `invalid`, asserting that strict decoding or `Validate()` fails with the mapped error code (`ErrUnknownAskKind`, `ErrProofRequired`, `ErrNotDelegable`, `ErrInvalidRule`, etc.).
+   - Runs every entry in `invalid`, asserting that strict decoding or `Validate()` fails with the mapped error code (`ErrUnknownAskKind`, `ErrInvalidAsk`, `ErrProofRequired`, `ErrProofRejected`, `ErrNotDelegable`, `ErrInvalidRule`, `ErrUnexpectedKey`).
 3. **Extending in Milestone 4 (`SDF-32`):**
    - `SDF-32` adds multi-milestone critical-path and merge-order cases to the `valid.graph` and `invalid` sections of `testdata/factory/owner-contract-v1.json` without changing the v1 schema keys defined here.
 
 ### 7.2 Complete Fixture Specification (`testdata/factory/owner-contract-v1.json`)
 
-The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rule types + text rules, all 5 alert kinds, and all 9 task stages) and `invalid` rejection cases:
+The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rule types + text rules, all 5 alert kinds, all 9 task stages, and all 4 action responses) and 13 `invalid` rejection cases:
 
 ```json
 {
@@ -1089,24 +1149,24 @@ The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rul
         "folder": "/Users/me/projects/wukongmind",
         "kind": "release",
         "gated": true,
-        "question": "Tag WukongMind v1.5.0 and trigger release.yml now?",
-        "options": ["Yes, tag v1.5.0", "Hold release"],
-        "recommend": "Yes, tag v1.5.0",
+        "question": "Tag WukongMind v1.5.1 and trigger release.yml now?",
+        "options": ["Yes, tag v1.5.1", "Hold release"],
+        "recommend": "Yes, tag v1.5.1",
         "task": "WUKO-15",
         "milestone": "M2",
         "subject": {
-          "tag": "v1.5.0",
+          "tag": "v1.5.1",
           "workflow": "release.yml",
           "head": "0123456789abcdef0123456789abcdef01234567"
         },
         "at": 1763302000000,
         "expires_at": null,
         "on_expiry": "hold",
-        "status": "open",
-        "answer": null,
-        "answered_at": null,
-        "answered_by": null,
-        "proof_id": null
+        "status": "answered",
+        "answer": "Yes, tag v1.5.1",
+        "answered_at": 1763302001000,
+        "answered_by": "rule",
+        "proof_id": "rul-9d2e01"
       },
       {
         "id": "ask004",
@@ -1253,6 +1313,7 @@ The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rul
       "input_kind": "tap",
       "input_seq": 17,
       "utterance_id": "utt-1-8",
+      "device_id": "dev-iphone-1",
       "answered_at": 1763301030000
     },
     "projects": {
@@ -1265,7 +1326,7 @@ The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rul
           "prefix": "WUKO",
           "machine": "local",
           "status": "waiting",
-          "open_asks": 1,
+          "open_asks": 5,
           "goal": "Build Learn on ask for 1.5",
           "active_milestone": "M2",
           "coordinator": {
@@ -1342,8 +1403,8 @@ The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rul
           ],
           "waiting": [
             {
-              "ref": "WUKO-16",
-              "title": "Slow UI test batching",
+              "ref": "WUKO-12",
+              "title": "CI speed-up and shared simulator cache",
               "stage": "ci",
               "why": "Waiting on GitHub Actions (18m)"
             }
@@ -1362,6 +1423,58 @@ The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rul
       "protocol": 1,
       "rules": [
         {
+          "id": "rul-1a2b3c",
+          "scope": "project",
+          "project": "wukongmind",
+          "class": "typed",
+          "type": "merge_policy",
+          "value": "checks",
+          "text": null,
+          "section": null,
+          "base_hash": null,
+          "read_back": "Typed rule, this project (WukongMind): merge policy is checks.",
+          "created_at": 1763300000000,
+          "expires_at": null,
+          "saved_by_ask": "ask008",
+          "revoked_at": null
+        },
+        {
+          "id": "rul-2b3c4d",
+          "scope": "project",
+          "project": "wukongmind",
+          "class": "typed",
+          "type": "review_rounds",
+          "value": {
+            "code": 2,
+            "design": 1,
+            "doc": 1
+          },
+          "text": null,
+          "section": null,
+          "base_hash": null,
+          "read_back": "Typed rule, this project (WukongMind): review rounds are 2 for code and 1 for designs and docs.",
+          "created_at": 1763300100000,
+          "expires_at": null,
+          "saved_by_ask": "ask008",
+          "revoked_at": null
+        },
+        {
+          "id": "rul-3c4d5e",
+          "scope": "project",
+          "project": "wukongmind",
+          "class": "typed",
+          "type": "auto_accept",
+          "value": true,
+          "text": null,
+          "section": null,
+          "base_hash": null,
+          "read_back": "Typed rule, this project (WukongMind): auto-accept is on at the evidence bar.",
+          "created_at": 1763300200000,
+          "expires_at": null,
+          "saved_by_ask": "ask008",
+          "revoked_at": null
+        },
+        {
           "id": "rul-7f3a19",
           "scope": "project",
           "project": "wukongmind",
@@ -1372,7 +1485,67 @@ The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rul
           "section": null,
           "base_hash": null,
           "read_back": "Typed rule, this project (WukongMind): designs and plans are judged by Fable without waiting for you.",
-          "created_at": 1763300000000,
+          "created_at": 1763300300000,
+          "expires_at": null,
+          "saved_by_ask": "ask008",
+          "revoked_at": null
+        },
+        {
+          "id": "rul-9d2e01",
+          "scope": "project",
+          "project": "wukongmind",
+          "class": "typed",
+          "type": "delegation",
+          "value": {
+            "kinds": [
+              "release"
+            ],
+            "milestones": [
+              "M2"
+            ],
+            "release_level": "patch",
+            "until": 1763395200000
+          },
+          "text": null,
+          "section": null,
+          "base_hash": null,
+          "read_back": "Typed rule, this project (WukongMind): delegate M2 patch releases until 08:00.",
+          "created_at": 1763305000000,
+          "expires_at": 1763395200000,
+          "saved_by_ask": "ask008",
+          "revoked_at": null
+        },
+        {
+          "id": "rul-4d5e6f",
+          "scope": "machine",
+          "project": null,
+          "class": "typed",
+          "type": "notify_level",
+          "value": "asks_and_alerts",
+          "text": null,
+          "section": null,
+          "base_hash": null,
+          "read_back": "Typed rule, this machine: notify level is asks and alerts.",
+          "created_at": 1763305200000,
+          "expires_at": null,
+          "saved_by_ask": "ask008",
+          "revoked_at": null
+        },
+        {
+          "id": "rul-5e6f7a",
+          "scope": "everywhere",
+          "project": null,
+          "class": "typed",
+          "type": "project_priority",
+          "value": [
+            "wukongmind",
+            "herdr-sheepdog"
+          ],
+          "text": null,
+          "section": null,
+          "base_hash": null,
+          "read_back": "Typed rule, everywhere: project priority is WukongMind first, then herdr-sheepdog.",
+          "created_at": 1763305500000,
           "expires_at": null,
           "saved_by_ask": "ask008",
           "revoked_at": null
@@ -1402,7 +1575,7 @@ The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rul
       "folder": "/Users/me/projects/wukongmind",
       "updated_at": 1763313600000,
       "replans": 1,
-      "spoken_summary": "Milestone 2 of 4. 7 of 12 merged. The path to done runs through CI speed-up, then the slow UI tests: about 5 hours. Nothing needs you.",
+      "spoken_summary": "Milestone 2 of 4. 7 of 12 merged. The path to done runs through CI speed-up, then the slow UI tests: about 5 hours. Two things need you.",
       "critical_path": {
         "milestone": "M2",
         "tasks": ["WUKO-12", "WUKO-14", "WUKO-15"],
@@ -1430,6 +1603,26 @@ The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rul
       ],
       "tasks": [
         {
+          "ref": "WUKO-11",
+          "id": 11,
+          "title": "Base model adapter",
+          "milestone": "M2",
+          "kind": "code",
+          "stage": "done",
+          "why_waiting": null,
+          "after": [],
+          "dependents": [],
+          "on_critical_path": false,
+          "estimate_ms": 1800000,
+          "left_ms": 0,
+          "done_pct": 100,
+          "pr": {
+            "number": 45,
+            "url": "https://github.com/example/wukongmind/pull/45",
+            "ci_state": "success"
+          }
+        },
+        {
           "ref": "WUKO-12",
           "id": 12,
           "title": "CI speed-up and shared simulator cache",
@@ -1448,12 +1641,174 @@ The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rul
             "url": "https://github.com/example/wukongmind/pull/49",
             "ci_state": "pending"
           }
+        },
+        {
+          "ref": "WUKO-13",
+          "id": 13,
+          "title": "Prompt history store",
+          "milestone": "M2",
+          "kind": "code",
+          "stage": "working",
+          "why_waiting": null,
+          "after": [],
+          "dependents": [],
+          "on_critical_path": false,
+          "estimate_ms": 2400000,
+          "left_ms": 1200000,
+          "done_pct": 50,
+          "pr": null
+        },
+        {
+          "ref": "WUKO-14",
+          "id": 14,
+          "title": "Slow UI tests for Learn card",
+          "milestone": "M2",
+          "kind": "code",
+          "stage": "waiting_on_dep",
+          "why_waiting": "Waiting on WUKO-12",
+          "after": ["WUKO-12"],
+          "dependents": ["WUKO-15"],
+          "on_critical_path": true,
+          "estimate_ms": 10800000,
+          "left_ms": null,
+          "done_pct": null,
+          "pr": null
+        },
+        {
+          "ref": "WUKO-15",
+          "id": 15,
+          "title": "M2 acceptance: Learn on ask",
+          "milestone": "M2",
+          "kind": "acceptance",
+          "stage": "waiting_on_dep",
+          "why_waiting": "Waiting on WUKO-14",
+          "after": ["WUKO-14"],
+          "dependents": [],
+          "on_critical_path": true,
+          "estimate_ms": 6300000,
+          "left_ms": null,
+          "done_pct": null,
+          "pr": null
+        },
+        {
+          "ref": "WUKO-16",
+          "id": 16,
+          "title": "Offline transcript export",
+          "milestone": "M2",
+          "kind": "code",
+          "stage": "queued",
+          "why_waiting": "Queued behind tasks.max_running (4 running)",
+          "after": [],
+          "dependents": [],
+          "on_critical_path": false,
+          "estimate_ms": 1800000,
+          "left_ms": null,
+          "done_pct": null,
+          "pr": null
+        },
+        {
+          "ref": "WUKO-17",
+          "id": 17,
+          "title": "User guide update",
+          "milestone": "M2",
+          "kind": "doc",
+          "stage": "idle",
+          "why_waiting": "Worker terminal idle between turns",
+          "after": [],
+          "dependents": [],
+          "on_critical_path": false,
+          "estimate_ms": 900000,
+          "left_ms": 300000,
+          "done_pct": 70,
+          "pr": null
+        },
+        {
+          "ref": "WUKO-18",
+          "id": 18,
+          "title": "DeepSeek fallback wiring",
+          "milestone": "M2",
+          "kind": "code",
+          "stage": "owner_answer",
+          "why_waiting": "Waiting on owner ask ask004 (paid-key)",
+          "after": [],
+          "dependents": [],
+          "on_critical_path": false,
+          "estimate_ms": 2700000,
+          "left_ms": 1800000,
+          "done_pct": 35,
+          "pr": null
+        },
+        {
+          "ref": "WUKO-20",
+          "id": 20,
+          "title": "Learn card layout polish",
+          "milestone": "M2",
+          "kind": "design",
+          "stage": "owner_gate",
+          "why_waiting": "Waiting for owner gate approval",
+          "after": [],
+          "dependents": [],
+          "on_critical_path": false,
+          "estimate_ms": 1800000,
+          "left_ms": 0,
+          "done_pct": 100,
+          "pr": {
+            "number": 50,
+            "url": "https://github.com/example/wukongmind/pull/50",
+            "ci_state": "success"
+          }
+        },
+        {
+          "ref": "WUKO-21",
+          "id": 21,
+          "title": "Keychain migration test",
+          "milestone": "M2",
+          "kind": "code",
+          "stage": "blocked",
+          "why_waiting": "Out of review rounds: wants one more",
+          "after": [],
+          "dependents": [],
+          "on_critical_path": false,
+          "estimate_ms": 2400000,
+          "left_ms": 600000,
+          "done_pct": 85,
+          "pr": {
+            "number": 51,
+            "url": "https://github.com/example/wukongmind/pull/51",
+            "ci_state": "failure"
+          }
         }
       ]
     },
     "alerts": {
       "protocol": 1,
       "alerts": [
+        {
+          "id": "alt-1a2b3c4d",
+          "episode_key": "no_pool:local",
+          "kind": "no_pool",
+          "project": null,
+          "name": null,
+          "task": null,
+          "title": "Factory has stopped: no quota pool has room left",
+          "body": "Claude and Antigravity pools are at the 5-hour floor; earliest reset is 2026-11-17T01:30:00Z.",
+          "fix": "Wait for the 01:30 UTC reset or press a quota reset at the Mac.",
+          "at": 1763312000000,
+          "cleared_at": null
+        },
+        {
+          "id": "alt-2b3c4d5e",
+          "episode_key": "disk:/Users/me/projects/wukongmind",
+          "kind": "disk",
+          "project": "wukongmind",
+          "name": "WukongMind",
+          "task": null,
+          "title": "WukongMind has stopped: disk is 92% full",
+          "body": "Largest task build folders: WUKO-12 (3.4 GB), WUKO-14 (2.1 GB).",
+          "fix": "Free disk space or prune finished task build directories on the Mac.",
+          "at": 1763312100000,
+          "cleared_at": null
+        },
         {
           "id": "alt-5e6f7a8b",
           "episode_key": "consent_prompt:/Users/me/projects/wukongmind",
@@ -1466,10 +1821,68 @@ The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rul
           "fix": "Check the Mac screen for a macOS Files and Folders or volume access prompt and click Allow.",
           "at": 1763312500000,
           "cleared_at": null
+        },
+        {
+          "id": "alt-3c4d5e6f",
+          "episode_key": "main_red:wukongmind:main",
+          "kind": "main_red",
+          "project": "wukongmind",
+          "name": "WukongMind",
+          "task": null,
+          "title": "WukongMind merges held: main CI has been red for 65 minutes",
+          "body": "Base branch main is failing UI smoke checks since 2026-11-16T17:30:00Z.",
+          "fix": "Inspect main CI or let the fix-main task merge first.",
+          "at": 1763312600000,
+          "cleared_at": null
+        },
+        {
+          "id": "alt-4d5e6f7a",
+          "episode_key": "ci_stalled:wukongmind:WUKO-12:0123456789abcdef0123456789abcdef01234567",
+          "kind": "ci_stalled",
+          "project": "wukongmind",
+          "name": "WukongMind",
+          "task": "WUKO-12",
+          "title": "WUKO-12 has waited on CI for over 90 minutes",
+          "body": "Pull request #49 on WUKO-12 has been pending GitHub Actions checks for 94 minutes.",
+          "fix": "Check GitHub Actions runner queue or cancel and re-trigger the stalled workflow.",
+          "at": 1763312700000,
+          "cleared_at": null
         }
       ]
     },
     "actions": {
+      "answer": {
+        "protocol": 1,
+        "ok": true,
+        "idempotent": false,
+        "unlocked": "task_accepted",
+        "ask": {
+          "id": "ask002",
+          "project": "wukongmind",
+          "name": "WukongMind",
+          "folder": "/Users/me/projects/wukongmind",
+          "kind": "gate",
+          "gated": true,
+          "question": "WUKO-33 is out of review rounds after rebase. Accept and merge it?",
+          "options": ["Accept and merge", "Send back to worker"],
+          "recommend": "Accept and merge",
+          "task": "WUKO-33",
+          "milestone": "M2",
+          "subject": {
+            "target": "task",
+            "ref": "WUKO-33",
+            "head": "0123456789abcdef0123456789abcdef01234567"
+          },
+          "at": 1763301000000,
+          "expires_at": null,
+          "on_expiry": "hold",
+          "status": "answered",
+          "answer": "Accept and merge",
+          "answered_at": 1763301030000,
+          "answered_by": "owner",
+          "proof_id": "prf-112233445566"
+        }
+      },
       "say": {
         "protocol": 1,
         "ok": true,
@@ -1477,6 +1890,43 @@ The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rul
         "name": "WukongMind",
         "coordinator": "term-4",
         "delivery": "sent"
+      },
+      "propose_rule": {
+        "protocol": 1,
+        "ok": true,
+        "read_back": "Typed rule, this project (WukongMind): designs and plans are judged by Fable without waiting for you.",
+        "ask": {
+          "id": "ask008",
+          "project": "wukongmind",
+          "name": "WukongMind",
+          "folder": "/Users/me/projects/wukongmind",
+          "kind": "rule",
+          "gated": true,
+          "question": "Typed rule, this project (WukongMind): designs and plans are judged by Fable without waiting for you. Save?",
+          "options": ["Save rule", "Cancel"],
+          "recommend": "Save rule",
+          "task": null,
+          "milestone": null,
+          "subject": {
+            "scope": "project",
+            "project": "wukongmind",
+            "class": "typed",
+            "type": "design_gate",
+            "value": "fable",
+            "text": null,
+            "section": null,
+            "base_hash": null,
+            "expires_at": null
+          },
+          "at": 1763307000000,
+          "expires_at": null,
+          "on_expiry": "hold",
+          "status": "open",
+          "answer": null,
+          "answered_at": null,
+          "answered_by": null,
+          "proof_id": null
+        }
       },
       "revoke_rule": {
         "protocol": 1,
@@ -1492,7 +1942,7 @@ The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rul
           "section": null,
           "base_hash": null,
           "read_back": "Typed rule, this project (WukongMind): designs and plans are judged by Fable without waiting for you.",
-          "created_at": 1763300000000,
+          "created_at": 1763300300000,
           "expires_at": null,
           "saved_by_ask": "ask008",
           "revoked_at": 1763311000000
@@ -1558,7 +2008,7 @@ The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rul
     {
       "name": "gated ask marked gated=false is refused",
       "target": "ask",
-      "error_code": "unknown_kind",
+      "error_code": "invalid_ask",
       "payload": {
         "id": "bad003",
         "project": "wukongmind",
@@ -1648,7 +2098,8 @@ The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rul
         "type": "delegation",
         "value": {
           "kinds": ["paid-key", "reset"],
-          "scope": "all",
+          "milestones": ["M2"],
+          "release_level": null,
           "until": 1763395200000
         },
         "text": null,
@@ -1657,6 +2108,79 @@ The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rul
         "read_back": "Typed rule, this project (WukongMind): delegate paid keys and resets.",
         "created_at": 1763300000000,
         "expires_at": 1763395200000,
+        "saved_by_ask": "ask008",
+        "revoked_at": null
+      }
+    },
+    {
+      "name": "delegation rule without until is refused",
+      "target": "rule",
+      "error_code": "invalid_rule",
+      "payload": {
+        "id": "rul-bad002",
+        "scope": "project",
+        "project": "wukongmind",
+        "class": "typed",
+        "type": "delegation",
+        "value": {
+          "kinds": ["release"],
+          "milestones": ["M2"],
+          "release_level": "patch",
+          "until": null
+        },
+        "text": null,
+        "section": null,
+        "base_hash": null,
+        "read_back": "Typed rule, this project (WukongMind): delegate M2 patch releases.",
+        "created_at": 1763300000000,
+        "expires_at": null,
+        "saved_by_ask": "ask008",
+        "revoked_at": null
+      }
+    },
+    {
+      "name": "delegation rule with unknown release_level is refused",
+      "target": "rule",
+      "error_code": "invalid_rule",
+      "payload": {
+        "id": "rul-bad003",
+        "scope": "project",
+        "project": "wukongmind",
+        "class": "typed",
+        "type": "delegation",
+        "value": {
+          "kinds": ["release"],
+          "milestones": ["M2"],
+          "release_level": "major_breaking",
+          "until": 1763395200000
+        },
+        "text": null,
+        "section": null,
+        "base_hash": null,
+        "read_back": "Typed rule, this project (WukongMind): delegate M2 releases.",
+        "created_at": 1763300000000,
+        "expires_at": 1763395200000,
+        "saved_by_ask": "ask008",
+        "revoked_at": null
+      }
+    },
+    {
+      "name": "unknown rule type is refused",
+      "target": "rule",
+      "error_code": "invalid_rule",
+      "payload": {
+        "id": "rul-bad004",
+        "scope": "project",
+        "project": "wukongmind",
+        "class": "typed",
+        "type": "unknown_policy",
+        "value": true,
+        "text": null,
+        "section": null,
+        "base_hash": null,
+        "read_back": "Typed rule, this project (WukongMind): unknown policy.",
+        "created_at": 1763300000000,
+        "expires_at": null,
         "saved_by_ask": "ask008",
         "revoked_at": null
       }
@@ -1680,24 +2204,71 @@ The fixture contains `valid` payloads (covering all 8 ask kinds, all 7 typed rul
       }
     },
     {
-      "name": "unknown rule type is refused",
-      "target": "rule",
-      "error_code": "invalid_rule",
+      "name": "ticketless local device in AnswerProof is refused",
+      "target": "answer_proof",
+      "error_code": "proof_rejected",
       "payload": {
-        "id": "rul-bad002",
-        "scope": "project",
+        "ok": true,
+        "verified": true,
+        "proof_id": "prf-badlocal0001",
+        "ask_id": "ask002",
         "project": "wukongmind",
-        "class": "typed",
-        "type": "unknown_policy",
-        "value": true,
-        "text": null,
-        "section": null,
-        "base_hash": null,
-        "read_back": "Typed rule, this project (WukongMind): unknown policy.",
-        "created_at": 1763300000000,
+        "kind": "gate",
+        "option_index": 1,
+        "option_label": "Accept and merge",
+        "input_kind": "tap",
+        "input_seq": 18,
+        "utterance_id": "utt-1-9",
+        "device_id": "local",
+        "answered_at": 1763301040000
+      }
+    },
+    {
+      "name": "typed input in AnswerProof is refused",
+      "target": "answer_proof",
+      "error_code": "proof_rejected",
+      "payload": {
+        "ok": true,
+        "verified": true,
+        "proof_id": "prf-badtyped0002",
+        "ask_id": "ask002",
+        "project": "wukongmind",
+        "kind": "gate",
+        "option_index": 1,
+        "option_label": "Accept and merge",
+        "input_kind": "typed",
+        "input_seq": 19,
+        "utterance_id": "utt-1-10",
+        "device_id": "dev-iphone-1",
+        "answered_at": 1763301050000
+      }
+    },
+    {
+      "name": "unknown extra JSON key is refused",
+      "target": "ask",
+      "error_code": "unexpected_key",
+      "payload": {
+        "id": "bad006",
+        "project": "wukongmind",
+        "name": "WukongMind",
+        "folder": "/Users/me/projects/wukongmind",
+        "kind": "decision",
+        "gated": false,
+        "question": "Use SQLite?",
+        "options": ["Yes", "No"],
+        "recommend": "Yes",
+        "task": "WUKO-10",
+        "milestone": "M2",
+        "subject": null,
+        "at": 1763300000000,
         "expires_at": null,
-        "saved_by_ask": "ask008",
-        "revoked_at": null
+        "on_expiry": null,
+        "status": "open",
+        "answer": null,
+        "answered_at": null,
+        "answered_by": null,
+        "proof_id": null,
+        "unexpected_extra_field": true
       }
     }
   ]
