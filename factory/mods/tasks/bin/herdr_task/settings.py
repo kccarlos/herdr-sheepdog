@@ -116,8 +116,8 @@ def write_autopilot(project, values):
     os.replace(tmp, SETTINGS)
 
 
-def _write_task_setting(s, key, value):
-    """Writes one project-folder tasks.<key> setting into d["projects"][folder] (None unsets it)."""
+def _write_project_setting(s, section, key, value):
+    """Writes one project-folder `<section>.<key>` setting into d["projects"][folder] (None unsets it)."""
     try:
         with open(SETTINGS) as f:
             d = json.load(f)
@@ -132,17 +132,17 @@ def _write_task_setting(s, key, value):
     if not folder:
         raise Fail("No project folder to configure.")
     layer = projects.setdefault(folder, {})
-    tasks = dict(layer.get("tasks") or {})
-    tasks.pop(key, None) if value is None else tasks.update({key: value})
-    layer.update(tasks=tasks) if tasks else layer.pop("tasks", None)
+    sub = dict(layer.get(section) or {})
+    sub.pop(key, None) if value is None else sub.update({key: value})
+    layer.update({section: sub}) if sub else layer.pop(section, None)
     if not layer:
         projects.pop(folder, None)
     if value is None and isinstance(d.get("spaces"), dict):
         for v in d["spaces"].values():
-            if isinstance(v, dict) and v.get("folder") == folder and isinstance(v.get("tasks"), dict):
-                v["tasks"].pop(key, None)
-                if not v["tasks"]:
-                    v.pop("tasks", None)
+            if isinstance(v, dict) and v.get("folder") == folder and isinstance(v.get(section), dict):
+                v[section].pop(key, None)
+                if not v[section]:
+                    v.pop(section, None)
     d["version"] = 1
     os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
     tmp = f"{SETTINGS}.{os.getpid()}.tmp"
@@ -151,6 +151,21 @@ def _write_task_setting(s, key, value):
         f.write("\n")
     os.replace(tmp, SETTINGS)
     return folder
+
+
+def _write_task_setting(s, key, value):
+    """Writes one project-folder tasks.<key> setting into d["projects"][folder] (None unsets it)."""
+    return _write_project_setting(s, "tasks", key, value)
+
+
+WORKER_PERMS = {"full": "full", "auto": "auto", "plan": "plan", "read-only": "read-only",
+                "accept-edits": "accept-edits", "acceptedits": "acceptEdits",
+                "bypasspermissions": "bypassPermissions", "dontask": "dontAsk", "manual": "manual"}
+
+
+def write_worker_perm(s, value):
+    """`config --set worker.perm=full`: sets or clears the project folder's worker.perm."""
+    return _write_project_setting(s, "worker", "perm", value)
 
 
 def write_max_running(s, space=None, value=_UNSET):
@@ -288,10 +303,11 @@ def argv_for(pick):
             a += ["--effort", pick["effort"]]
         a += ["--settings", json.dumps({"fastMode": bool(pick.get("fast"))})]
         perm = pick.get("perm")
-        if perm == "bypassPermissions":
+        if perm in ("full", "bypassPermissions"):
             a.append("--dangerously-skip-permissions")
         elif perm:
-            a += ["--permission-mode", "default" if perm == "manual" else perm]
+            mode = "default" if perm == "manual" else "acceptEdits" if perm == "accept-edits" else "plan" if perm == "read-only" else perm
+            a += ["--permission-mode", mode]
         return a
     if agent == "codex":
         a = ["codex", "--no-daemon"]
@@ -302,7 +318,7 @@ def argv_for(pick):
         # always said, so Fast off wins over a service_tier in config.toml (default: the standard tier)
         a += ["-c", 'service_tier="%s"' % ("fast" if pick.get("fast") else "default")]
         perm = pick.get("perm")
-        if perm == "full":
+        if perm in ("full", "bypassPermissions"):
             a.append("--dangerously-bypass-approvals-and-sandbox")
         elif perm == "read-only":
             a += ["-s", "read-only", "-a", "on-request"]
@@ -316,10 +332,10 @@ def argv_for(pick):
         if pick.get("effort"):
             a += ["--effort", pick["effort"]]
         perm = pick.get("perm")
-        if perm == "full":
+        if perm in ("full", "bypassPermissions"):
             a.append("--dangerously-skip-permissions")
         else:
-            a += ["--mode", "plan" if perm == "plan" else "accept-edits"]
+            a += ["--mode", "plan" if perm in ("plan", "read-only") else "accept-edits"]
         return a
     return [agent] if agent else None
 
@@ -327,18 +343,18 @@ def argv_for(pick):
 def worker_pick(s, task, space=None, agent=None):
     """What a task's agent runs on, {agent, model, effort, fast, perm}: Settings' worker, then the
     task's own --agent / --model / --effort, then `agent` (start --agent). Another CLI than
-    Settings' starts from its own defaults (models and permissions differ per CLI)."""
+    Settings' starts from its own model/effort defaults while carrying over `perm`."""
     w = dict(settings_for(s)["worker"] or {})
     pick = dict(w)
     if task.get("agent") and task["agent"] != pick.get("agent"):
-        pick = {"agent": task["agent"]}
+        pick = {"agent": task["agent"], **({"perm": w["perm"]} if w.get("perm") else {})}
     if not pick.get("agent") and not pick.get("argv"):
         pick["agent"] = "claude"
     for k in ("model", "effort"):
         if task.get(k):
             pick[k] = task[k]
     if agent and agent != pick.get("agent"):
-        pick = dict(w) if w.get("agent") == agent else {"agent": agent}
+        pick = dict(w) if w.get("agent") == agent else {"agent": agent, **({"perm": w["perm"]} if w.get("perm") else {})}
     return pick
 
 
@@ -397,10 +413,10 @@ PRIORITY_WORDS = "urgent: starts before normal queued tasks, in one slot past th
 # The Reviewer sandbox line: whether an agy reviewer here runs sandboxed (tasks.reviewer_sandbox, or the flag file).
 REVIEWER_BOX_WORDS = {"on": "on: the agy reviewer runs in a sandbox; agy's keychain sign-in isn't there, so it can stop at \"Sign in required\" (turn it off in Settings)",
                       "off": "off: the agy reviewer runs as the person's own agy, outside the sandbox"}
-# The Proof line (as Shepherdr's skill asks of its task agents), on and off.
-PROOF_WORDS = {"on": "show verifiable proof in one recipe artifact: each proof with a one-line caption, real and from this work now, "
-                     "plus a \"Not proven\" list; then say ready with --proof <its id>",
-               "off": "not needed for this task: no proof artifact; say in your summary how you checked it"}
+# The Proof line (file-based proof linked from the PR), on and off.
+PROOF_WORDS = {"on": "commit verifiable proof files (Markdown, images, or recipe.json, e.g. docs/proof/<REF>.md or proof/<REF>/recipe.json): "
+                     "each proof with a one-line caption, real and from this work now, plus a \"Not proven\" list; then say ready with --proof <path>",
+               "off": "not needed for this task: no proof files; say in your summary how you checked it"}
 AUTO_ACCEPT_WORDS = {"off": "off: the person accepts it",
                      "owner": "on, but {why}: the person accepts it",
                      "fable": "on: after its review, a Fable round judges it as the owner would; its pass merges it, its findings come back to you",
@@ -996,7 +1012,7 @@ def accept_bar(s, t):
     sets = t.get("set") or {}
     if (sets["proof"] == "on" if "proof" in sets else settings_for(s)["tasks"].get("proof") is not False) \
             and not t.get("proof"):
-        return None, "no proof artifact attached"
+        return None, "no proof attached"
     if not t.get("pr"):
         return None, "no pull request, so no CI to check"
     return "engine", None

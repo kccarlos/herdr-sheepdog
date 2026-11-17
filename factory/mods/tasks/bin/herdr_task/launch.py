@@ -45,9 +45,6 @@ def review_reads(check):
     return REVIEW_READS + [p.strip() for p in parts if p.strip()]
 
 
-# herdr-artifact's verbs a worker uses for its proof (#866): Codex's sandbox can't write its store,
-# so they run escalated and never ask either. Never --custom (a panel installs code in the window).
-ARTIFACT = ["guide", "new", "publish", "update", "show", "list", "link", "preview", "where"]
 # Committing as it goes (#866): Codex keeps every .git read-only in its sandbox, a worktree's
 # (the main checkout's .git) too, so a Codex worker's `git add`/`git commit` run escalated. Only
 # these, as one plain command with no git options before the verb (-c, -C, --git-dir...).
@@ -82,13 +79,8 @@ def own_rules(path, verbs=OWN):
 
 def ask_command(path, sandboxed=False):
     """The PermissionRequest hook a sandboxed Codex worker gets at launch (`herdr-task _allow`):
-    its own commands, proof and commits allowed without asking (#866)."""
+    its own commands and commits allowed without asking (#866)."""
     return f"{shlex.quote(sys.executable)} {shlex.quote(ENTRY)} _allow --command {shlex.quote(path)}" + (" --sandboxed" if sandboxed else "")
-
-
-def artifact_path():
-    """herdr-artifact on PATH, else None."""
-    return shutil.which("herdr-artifact")
 
 
 def own_argv(argv, folder=None, verbs=OWN, cwd=None, reads=None):
@@ -197,8 +189,7 @@ UNQUOTE = re.compile(r"""'([^']*)'|"((?:[^"\\]|\\.)*)\"""")
 
 def own_command(path, text, sandboxed=False):
     """Whether a shell command is exactly one of this herdr-task's own verbs: one simple command,
-    nothing that expands, redirects or chains. sandboxed (a Codex worker's): herdr-artifact's proof
-    verbs and git add/commit too."""
+    nothing that expands, redirects or chains. sandboxed (a Codex worker's): git add/commit too."""
     if not isinstance(text, str):
         return False
     task = os.environ.get("SHEEPDOG_TASK") or os.environ.get("HERDR_BROWSER_TASK") or ""
@@ -216,9 +207,6 @@ def own_command(path, text, sandboxed=False):
         words.append(UNQUOTE.sub(lambda g: g.group(1) if g.group(1) is not None else re.sub(r"\\(.)", r"\1", g.group(2)), m.group(0)))
         at = m.end()
     if len(words) >= 2 and words[0] == path and words[1] in OWN:
-        return True
-    ap = artifact_path()
-    if sandboxed and len(words) >= 2 and words[0] in (ap, "herdr-artifact") and words[1] in ARTIFACT and "--custom" not in words:
         return True
     if sandboxed and len(words) >= 2 and words[0] == "git" and words[1] in GIT:
         return True
@@ -547,7 +535,7 @@ def closing_line(s, task, parent=None, argv=None):
         text += (" Secrets (keys, tokens, passwords) are used by name, never seen: `herdr-secret ask NAME --why \"…\"` "
                  "(then end your turn), `herdr-secret run NAME -- <command>`, `herdr-secret list`; these run without asking too.")
     if argv and agent_key(argv) == "codex":
-        text += (" Codex's sandbox can't reach Herdr nor write git's data, so give those commands, herdr-artifact's (your proof), "
+        text += (" Codex's sandbox can't reach Herdr nor write git's data, so give those commands, "
                  "`git add`/`git commit` and your review's `hc run`/`hc wait`/`hc read`/`hc kill` (its prompt in single quotes) "
                  "sandbox_permissions \"require_escalated\" from the first try, each as one plain command (no && chains, no $(…), "
                  "no git options before the verb): then they run without asking.")

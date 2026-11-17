@@ -231,7 +231,7 @@ def main():
     c.add_argument("--details", help="optional: a few short bullets in plain words (one \"- \" per line): what changed for the "
                                      "person first, then how it was checked; file names only where they help; never one dense "
                                      "paragraph. Folded under Details in the Accept card")
-    c.add_argument("--proof", help="its proof artifact's id (herdr-artifact publish prints it); default: its newest artifact titled \"... · Proof\"")
+    c.add_argument("--proof", help="its proof file or folder (Markdown, image, or recipe.json; committed on the branch); default: docs/proof/<REF>.md or proof/<REF>/")
     c.add_argument("--agents-md", help="\"For AGENTS.md\": one line about setting up or testing this repo that the next agent "
                                        "would need and AGENTS.md lacks; the Assistant decides whether to add it")
     c = cmd("reviewed", cmd_reviewed, "a task's agent records one review round of its current commit (Review: on): ready then "
@@ -276,7 +276,7 @@ def main():
     c.add_argument("--prefix", help="task ids' prefix, 2 to 5 letters (HAT -> HAT-4); unique on this machine")
     c.add_argument("--build-dir", help="per-task build output folder (<path>/<task-key>/, cleaned on done; \"\" clears)")
     c.add_argument("--set", action="append", metavar="KEY=VALUE",
-                   help="tasks.max_running=N or tasks.check=CMD for this project folder (\"default\" clears)")
+                   help="tasks.max_running=N, tasks.check=CMD or worker.perm=full|auto|plan for this project folder (\"default\" clears)")
     si = sub.add_parser("simulator", help="this folder's fixed iOS simulator pool: lease one per task, release it, or list holders")
     si.set_defaults(fn=cmd_simulator, simulator="list", folder=None, json=False, id=None, task_opt=None)
     sp = si.add_subparsers(dest="simulator")

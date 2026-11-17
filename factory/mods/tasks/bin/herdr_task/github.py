@@ -289,7 +289,7 @@ def pr_open(s, task, repo, summary=None):
         pr["repo"] = repo
         ok, out, _ = gh("pr", "view", str(pr["number"]), "--repo", repo, "--json", "state", "-q", ".state")
         if ok and out == "OPEN":
-            pr_describe(s, task, summary)
+            pr_describe(s, task, summary, repo=repo)
             if summary:
                 pr_note(task, repo, summary)
             return pr
@@ -298,7 +298,7 @@ def pr_open(s, task, repo, summary=None):
             task.pop("pr")
             return pr_open(s, task, repo, summary)
     if pr_adopt(task, repo):
-        pr_describe(s, task, summary)
+        pr_describe(s, task, summary, repo=repo)
         if summary:
             pr_note(task, task["pr"].get("repo") or repo, summary)
         return task["pr"]
@@ -309,7 +309,7 @@ def pr_open(s, task, repo, summary=None):
         raise Fail(f"Pull request #{done['number']} for {br} is already merged, and {br} has commits since. "
                    f"Put them on a new branch (a new task) rather than a second pull request.")
     ok, out, err = gh("pr", "create", "--repo", repo, "--head", br, "--base", task.get("base") or "main",
-                      "--title", pr_title(s, task), "--body", pr_body(s, task, summary))
+                      "--title", pr_title(s, task), "--body", pr_body(s, task, summary, repo=repo))
     if not ok or not out:
         raise Fail(f"Couldn't open a pull request: {err}")
     url = out.split()[-1]
@@ -349,7 +349,7 @@ def pr_note(task, repo, summary):
         task["pr_note"] = {"number": number, "id": int(m.group(1)) if m else None, "said": summary}
 
 
-def pr_describe(s, task, summary=None):
+def pr_describe(s, task, summary=None, repo=None):
     """#1004: an open pull request whose description Herdr wrote (pr_body(), "Task: SHEP-n" first)
     gets the one this ready says (its summary, details and proof); one written by a person or an
     agent, or another branch's it continues (#828), is left as it is."""
@@ -357,7 +357,7 @@ def pr_describe(s, task, summary=None):
     if not pr.get("number") or pr.get("branch"):
         return
     ok, body, _ = gh("pr", "view", str(pr["number"]), "--repo", pr["repo"], "--json", "body", "-q", ".body")
-    want = pr_body(s, task, summary)
+    want = pr_body(s, task, summary, repo=repo or pr.get("repo"))
     if ok and body.strip().splitlines()[:1] == [f"Task: {s.ref(task)}"] and body.strip() != want.strip():
         gh("pr", "edit", str(pr["number"]), "--repo", pr["repo"], "--body", want)
 
@@ -371,17 +371,33 @@ def pr_title(s, task):
     return f"{ref}: {rest or ref}"
 
 
-def pr_body(s, task, summary=None):
-    """Short: the task's ref, what ready said (summary), the details and its proof's title. Never the
-    brief: that stays with the task store."""
+def pr_body(s, task, summary=None, repo=None):
+    """Short: the task's ref, what ready said (summary), the details and links to its proof files.
+    Never the brief: that stays with the task store."""
     lines = [f"Task: {s.ref(task)}"]
     if summary and summary.strip():
         lines += ["", "## Summary", "", summary.strip()]
     if (task.get("details") or "").strip():
         lines += ["", "## Details", "", task["details"].strip()]
-    proof = (task.get("proof") or {}).get("title")
-    if proof:
-        lines += ["", "## Proof", "", f"Proof artifact: {proof}"]
+    repo = repo or (task.get("pr") or {}).get("repo") or pr_repo(task, s, github)
+    branch = task.get("branch")
+    link = lambda p: f"https://github.com/{repo}/blob/{branch}/{p.lstrip('/')}" if repo and branch else p
+    proof = task.get("proof") or {}
+    title, path = proof.get("title"), proof.get("path")
+    proof_lines = []
+    if path:
+        proof_lines.append(f"- [{title or path}]({link(path)})")
+        for f in proof.get("files") or []:
+            if f != path:
+                proof_lines.append(f"  - [{f}]({link(f)})")
+    elif title:
+        proof_lines.append(f"Proof: {title}")
+    if getattr(s, "loc", None) and s.loc.get("folder"):
+        from .proof import task_artifacts
+        for a in task_artifacts(s, task, proof or None):
+            proof_lines.append(f"- [{a['title']}]({link(a['id'])})")
+    if proof_lines:
+        lines += ["", "## Proof", "", *proof_lines]
     return "\n".join(lines)
 
 
