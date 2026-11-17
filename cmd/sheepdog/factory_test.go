@@ -34,13 +34,37 @@ func TestFactoryCommandCLI(t *testing.T) {
 		if code := run(context.Background(), []string{"factory", "--help"}, &out, &errBuf); code != 0 {
 			t.Fatalf("factory --help code = %d", code)
 		}
-		if !strings.Contains(out.String(), "doctor") || !strings.Contains(out.String(), "--no-canary") {
+		if !strings.Contains(out.String(), "doctor") || !strings.Contains(out.String(), "--no-canary") || !strings.Contains(out.String(), "--no-repair") {
 			t.Errorf("unexpected help:\n%s", out.String())
 		}
 		out.Reset()
 		errBuf.Reset()
 		if code := run(context.Background(), []string{"factory", "nope"}, &out, &errBuf); code != 2 {
 			t.Fatalf("factory nope code = %d, want 2", code)
+		}
+	})
+
+	t.Run("python-version and python-dir honor config data_dir", func(t *testing.T) {
+		var out, errBuf bytes.Buffer
+		if code := run(context.Background(), []string{"factory", "python-version"}, &out, &errBuf); code != 0 {
+			t.Fatalf("python-version code = %d, stderr = %s", code, errBuf.String())
+		}
+		if got := strings.TrimSpace(out.String()); got != factory.PinnedPythonVersion() {
+			t.Fatalf("python-version = %q, want %q", got, factory.PinnedPythonVersion())
+		}
+
+		customCfg := filepath.Join(home, "custom-data.toml")
+		customData := filepath.Join(home, "my-data")
+		if err := os.WriteFile(customCfg, []byte("data_dir = \""+customData+"\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		out.Reset()
+		errBuf.Reset()
+		if code := run(context.Background(), []string{"factory", "python-dir", "--config", customCfg}, &out, &errBuf); code != 0 {
+			t.Fatalf("python-dir code = %d, stderr = %s", code, errBuf.String())
+		}
+		if got, want := strings.TrimSpace(out.String()), factory.PythonInstallDir(customData); got != want {
+			t.Fatalf("python-dir = %q, want %q", got, want)
 		}
 	})
 
@@ -52,11 +76,11 @@ func TestFactoryCommandCLI(t *testing.T) {
 		sock := filepath.Join(home, "hc.sock")
 		proj := filepath.Join(home, "repo")
 		var out, errBuf bytes.Buffer
-		code := run(context.Background(), []string{"factory", "doctor", "--hc-socket", sock, "--no-canary", proj}, &out, &errBuf)
+		code := run(context.Background(), []string{"factory", "doctor", "--hc-socket", sock, "--no-canary", "--no-repair", proj}, &out, &errBuf)
 		if code != 0 {
 			t.Fatalf("code = %d, stderr = %s", code, errBuf.String())
 		}
-		if gotOpts.Folder != proj || gotOpts.HCSocket != sock || gotOpts.Canary {
+		if gotOpts.Folder != proj || gotOpts.HCSocket != sock || gotOpts.Canary || !gotOpts.NoRepair || gotOpts.DataDir != filepath.Join(home, ".local", "share", "sheepdog") || gotOpts.Engine.FS == nil {
 			t.Errorf("gotOpts = %+v", gotOpts)
 		}
 		if !strings.Contains(out.String(), "WARN  codexbar") || !strings.Contains(out.String(), "fix: install codexbar") {

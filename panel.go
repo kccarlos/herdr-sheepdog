@@ -1,4 +1,5 @@
-// Package herdrsheepdog ships the herdr-app panel with the sheepdog binary.
+// Package herdrsheepdog ships the herdr-app panel and the factory engine with
+// the sheepdog binary.
 package herdrsheepdog
 
 import "embed"

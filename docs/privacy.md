@@ -119,6 +119,7 @@ Everything is in two directories you own; `data_dir` moves the second.
 | `~/.local/share/sheepdog/logs/stdio.log` | What a background daemon printed outside its log; normally empty. | Until `sheepdog data clear --all`. |
 | `~/.local/share/sheepdog/env-file.json` | The path of the env file the last daemon loaded its keys from, and whether it had them. A path only, no value. | Until you delete it. |
 | `~/.local/share/sheepdog/sheepdog.pid` | The running daemon's pid, URL and version. | While it runs. |
+| `~/.local/share/sheepdog/factory/` | The unpacked factory engine (`engine/<version>/`) and the `uv`-managed pinned CPython runtime (`python/`). No personal data. | Until `sheepdog data clear --all` or `sheepdog uninstall`. |
 | `~/.local/share/sheepdog/update-check.json`, `update-notice.json`, `update-restart.json` | The last answer of the daily update check, when a command last printed the update notice, and the last automatic restart after an upgrade. No personal data. | Until you delete them. |
 
 (Source of truth: [CONFIG.md](../CONFIG.md), "What sheepdog stores".)

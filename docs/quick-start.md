@@ -61,7 +61,9 @@ brew install --cask kccarlos/tap/sheepdog-app
 ```
 
 The installer downloads the latest release, verifies its sha256, puts
-`sheepdog` in `~/.local/bin`, and offers to run `sheepdog setup` (which
+`sheepdog` in `~/.local/bin`, fetches `herdr-core` (`hc`) if missing, installs
+the factory's pinned Python runtime into `~/.local/share/sheepdog/factory/python`
+with `uv` (leaving the factory itself off), and offers to run `sheepdog setup` (which
 installs the panel and offers to switch herdr-app to the Sheepdog layout).
 Sheepdog.app provides the microphone, speaker, notifications and global
 shortcut on the Mac. Keep the conversation in herdr-app's sidebar and use
