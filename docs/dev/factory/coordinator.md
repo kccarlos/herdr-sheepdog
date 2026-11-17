@@ -11,7 +11,7 @@ The project's task list (`<data_dir>/tasks/<slug>.json`) holds a `coordinator` r
 - A terminal at the same address with another `created_ms` is not the holder.
 - A terminal that only looks like a coordinator is never used, ended or relabelled. That covers a tab named "Assistant", a hand-started `claude` and a terminal someone gave the role labels. The tick reports each one under `not_coordinator`, with its own cwd.
 
-When hc fails to answer (an error other than "no such terminal"), nothing is decided that tick: no holder is replaced or refused its lease, and no handoff record is dropped.
+When hc fails to answer (an error other than "no such terminal"), nothing is decided that tick: no holder is replaced or refused its lease, and no handoff record is dropped. News held for a dead holder or a pending handoff waits for its replacement, subject to the six-hour news expiry; held news for a dead worker is dropped.
 
 There is no adoption by labels. A coordinator started before the lease existed is not adopted: the engine starts its own.
 
