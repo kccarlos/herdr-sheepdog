@@ -205,10 +205,29 @@ EOF
 	cleanup_run
 	sysbin=$work/sysbin
 	mkdir -p "$sysbin"
-	for tool in sh uname curl tar awk grep mktemp cp mv rm ln mkdir chmod dirname readlink sha256sum shasum printf cat tr sed cut head tail; do
+	for tool in sh env uname curl tar gzip gunzip bzip2 xz awk grep mktemp cp mv rm ln mkdir chmod dirname basename readlink sha256sum shasum printf cat tr sed cut head tail; do
 		tp=$(command -v "$tool" 2>/dev/null || true)
+		case "$tp" in
+		/*) ;;
+		*)
+			tp=
+			for d in /usr/bin /bin /sbin /usr/sbin; do
+				if [ -x "$d/$tool" ]; then tp=$d/$tool; break; fi
+			done
+			;;
+		esac
 		[ -z "$tp" ] || ln -sf "$tp" "$sysbin/$tool"
 	done
+	# GNU tar on Linux spawns gzip via PATH for -z; enforce that on BSD tar too
+	# so macOS runs catch a missing compressor in sysbin.
+	real_tar=$(command -v tar)
+	rm -f "$sysbin/tar"
+	cat >"$sysbin/tar" <<EOF
+#!/bin/sh
+case "\$*" in *z*) command -v gzip >/dev/null 2>&1 || { echo "tar: gzip: not on PATH" >&2; exit 2; } ;; esac
+exec "$real_tar" "\$@"
+EOF
+	chmod 755 "$sysbin/tar"
 	cat >"$sysbin/python3" <<EOF
 #!/bin/sh
 echo "poison-system-python3" >>"$work/poison-python3"
@@ -288,11 +307,12 @@ EOF
 		SHEEPDOG_UV_INSTALL_URL="file://$work/uv-install.sh" \
 		SHEEPDOG_NO_SETUP=1 sh "$here/install.sh" 2>&1) && rc=0 || rc=$?
 	check "factory install succeeds on bare PATH" "$rc"
+	[ "$rc" -eq 0 ] || printf '  install output: %s\n' "$out" >&2
 	if [ -x "$bin/hc" ] && [ -f "$work/hc-fetched" ]; then rc=0; else rc=1; fi
 	check "fetches hc into install_dir when missing" "$rc"
-	if grep -qx "$bin:1" "$work/uv-fetched" && [ -x "$bin/uv" ]; then rc=0; else rc=1; fi
+	if [ -f "$work/uv-fetched" ] && grep -qx "$bin:1" "$work/uv-fetched" && [ -x "$bin/uv" ]; then rc=0; else rc=1; fi
 	check "fetches uv into install_dir with UV_NO_MODIFY_PATH=1" "$rc"
-	if grep -q "python install --install-dir $fhome/.local/share/sheepdog/factory/python --no-bin --managed-python --no-config 3.14.8" "$work/uv-calls"; then rc=0; else rc=1; fi
+	if [ -f "$work/uv-calls" ] && grep -q "python install --install-dir $fhome/.local/share/sheepdog/factory/python --no-bin --managed-python --no-config 3.14.8" "$work/uv-calls"; then rc=0; else rc=1; fi
 	check "runs uv python install into sheepdog data folder" "$rc"
 	if [ -x "$fhome/.local/share/sheepdog/factory/python/cpython-3.14.8-test/bin/python3" ]; then rc=0; else rc=1; fi
 	check "pinned managed python binary exists in data folder" "$rc"
@@ -312,9 +332,10 @@ EOF
 		SHEEPDOG_TEST_NEED_REINSTALL=1 \
 		SHEEPDOG_NO_SETUP=1 sh "$here/install.sh" 2>&1) && rc=0 || rc=$?
 	check "rerun with damaged python succeeds" "$rc"
+	[ "$rc" -eq 0 ] || printf '  rerun output: %s\n' "$out" >&2
 	if [ ! -e "$work/hc-fetched" ] && [ ! -e "$work/uv-fetched" ]; then rc=0; else rc=1; fi
 	check "skips fetching hc and uv when already present" "$rc"
-	if grep -q "python install --reinstall --install-dir $fhome/.local/share/sheepdog/factory/python --no-bin --managed-python --no-config 3.14.8" "$work/uv-calls"; then rc=0; else rc=1; fi
+	if [ -f "$work/uv-calls" ] && grep -q "python install --reinstall --install-dir $fhome/.local/share/sheepdog/factory/python --no-bin --managed-python --no-config 3.14.8" "$work/uv-calls"; then rc=0; else rc=1; fi
 	check "repairs damaged python with --reinstall" "$rc"
 	if [ ! -e "$work/poison-python3" ]; then rc=0; else rc=1; fi
 	check "rerun still never invokes system python3" "$rc"

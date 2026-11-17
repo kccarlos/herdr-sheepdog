@@ -185,14 +185,16 @@ fi
 managed_python_ok() {
 	_py_root=$1
 	_py_want=$2
+	_py_real_root=$(CDPATH='' cd -P "$_py_root" 2>/dev/null && pwd -P) || return 1
 	for _py_cand in "$_py_root/cpython-$_py_want" "$_py_root/cpython-$_py_want"-*; do
 		[ -d "$_py_cand" ] || continue
 		[ ! -L "$_py_cand" ] || continue
 		_py_bin=$_py_cand/bin/python3
 		[ -x "$_py_bin" ] || continue
 		_py_resolved=$(resolve_command "$_py_bin")
-		case "$_py_resolved" in
-		"$_py_root"/*) ;;
+		_py_real_dir=$(CDPATH='' cd -P "$(dirname "$_py_resolved")" 2>/dev/null && pwd -P) || continue
+		case "$_py_real_dir/" in
+		"$_py_real_root"/*) ;;
 		*) continue ;;
 		esac
 		_py_got=$("$_py_bin" -I -B -c 'import encodings, json, sqlite3, ssl, sys; print("%d.%d.%d" % sys.version_info[:3])' </dev/null 2>/dev/null || true)
