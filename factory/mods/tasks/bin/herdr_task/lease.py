@@ -109,9 +109,11 @@ def _edit(project, fn):
     return out
 
 
-def claim(project, addr, replacing=None, **extra):
+def claim(project, addr, replacing=None, pid=None, **extra):
     """Gives the lease to `addr` (a coordinator the engine just started). Refused (False) while another live
-    terminal holds it, unless that is `replacing` (a restart hands it on)."""
+    terminal holds it, unless that is `replacing` (a restart hands it on). Taking it from an earlier holder writes a
+    handoff record (that terminal, its created_ms, its agent's pid) that finish_handoff carries out and then removes,
+    so a tick cut short anywhere in between finishes the same steps next time."""
     k = hc_json("get", addr) or {}
     from .watchdog import template_info
 
@@ -120,7 +122,8 @@ def claim(project, addr, replacing=None, **extra):
         if cur.get("address") not in (None, addr, replacing) and _live(cur):
             return False
         d[KEY] = {"address": addr, "created_ms": k.get("created_ms"), "since": now(), "template": template_info()[0],
-                  **({"previous": cur["address"], "previous_created_ms": cur.get("created_ms")} if cur.get("address") not in (None, addr) else {}),
+                  **({"previous": cur["address"], "handoff": {"from": cur["address"], "created_ms": cur.get("created_ms"), "pid": pid}}
+                     if cur.get("address") not in (None, addr) else {}),
                   **({"starts": cur["starts"]} if cur.get("starts") else {}), **extra}
         return True
     return _edit(project, put)
@@ -244,7 +247,27 @@ def handoff(folder, old, k=None, lease=None):
     return " ".join(parts)
 
 
-def reparent(folder, old, new):
+def finish_handoff(folder, new):
+    """Carries out the lease's handoff record, then removes it: workers and held news move from the earlier holder to
+    `new`; if that very terminal (same created_ms) still runs, it ends with its agent's process group. A later terminal
+    at its address is not it: its news and life are left alone. Returns (workers moved, ended address or None)."""
+    h = lease_of(folder).get("handoff")
+    if not isinstance(h, dict) or not h.get("from"):
+        return 0, None
+    old = h["from"]
+    k = hc_json("get", old) if "/" not in old else None
+    live = bool(k) and k.get("state") == "live"
+    same = live and not (h.get("created_ms") and k.get("created_ms") and h["created_ms"] != k["created_ms"])
+    moved = reparent(folder, old, new, held=same or not live)
+    if same:  # never two coordinators: it ends, as the restart would have ended it
+        run(["hc", "kill", old])
+        run(["hc", "rm", old])
+        end_group(h.get("pid"))  # its agent's children (agy's) don't orphan
+    _edit(folder, lambda d: d.get(KEY, {}).pop("handoff", None) if isinstance(d.get(KEY), dict) else None)
+    return moved, old if same else None
+
+
+def reparent(folder, old, new, held=True):
     """Workers whose parent is `old` or gone report to `new` from now on (their task's agent record names it: hc
     can't change a terminal's parent), and messages held for `old` go to `new`. Returns how many workers moved."""
     gone = {}
@@ -263,7 +286,7 @@ def reparent(folder, old, new):
                     a["parent"], n = new, n + 1
         return n
     moved = _edit(folder, put)
-    if old:
+    if old and held:
         from .news import held_messages
         with held_messages() as held:
             # one typed into a busy agy coordinator that never took it (pending) is sent again too
@@ -271,12 +294,6 @@ def reparent(folder, old, new):
             if items:
                 held.setdefault(new, []).extend(items)
     return moved
-
-
-def has_held(addr):
-    from .news import HELD
-    held = _store.read_list(HELD)
-    return bool(isinstance(held, dict) and held.get(addr))
 
 
 def orphans(d, holder_addr):
@@ -296,14 +313,11 @@ def restart(folder, k, why=None):
         new = start(folder, d.get("prefix") or "TASK", handoff(folder, old, k))
     except Fail:
         return None
-    if not claim(folder, new, replacing=old):
+    if not claim(folder, new, replacing=old, pid=pid):
         run(["hc", "kill", new])
         run(["hc", "rm", new])
         return None
-    reparent(folder, old, new)
-    run(["hc", "kill", old])
-    run(["hc", "rm", old])
-    end_group(pid)  # the old agent's children (agy's) don't orphan
+    finish_handoff(folder, new)  # workers, held news, then the old one and its process group
     return new
 
 
@@ -332,16 +346,10 @@ def reconcile_pass(report):
             holders.add(k["address"])
             try:
                 remember_session(folder, k)
-                prev = lease.get("previous") if lease.get("previous") not in (None, k["address"]) else None
-                # the replaced one still live (a restart cut short before it ended): the same terminal, not a later one there
-                replaced = _live({"address": prev, "created_ms": lease.get("previous_created_ms")}) if prev and lease.get("previous_created_ms") else None
-                if prev and (replaced or has_held(prev) or orphans(d, k["address"])):  # a handoff cut short: finish it
+                if isinstance(lease.get("handoff"), dict):  # a handoff cut short: finish it
+                    moved, ended = finish_handoff(folder, k["address"])
                     report.setdefault("coordinators", []).append({"action": "re-parented", "folder": folder, "to": k["address"],
-                                                                  "workers": reparent(folder, prev, k["address"])})
-                    if replaced:  # never two coordinators: the replaced one ends, as the restart would have
-                        run(["hc", "kill", prev])
-                        run(["hc", "rm", prev])
-                        report["coordinators"][-1]["ended"] = prev
+                                                                  "workers": moved, **({"ended": ended} if ended else {})})
                 elif orphans(d, k["address"]):  # workers on a parent that is gone
                     report.setdefault("coordinators", []).append({"action": "re-parented", "folder": folder, "to": k["address"],
                                                                   "workers": reparent(folder, None, k["address"])})
@@ -365,15 +373,13 @@ def reconcile_pass(report):
         old = lease.get("address")
         try:
             new = start(folder, d.get("prefix") or "TASK", handoff(folder, old, lease=lease))
-            if not claim(folder, new, replacing=old, starts=[*starts, now()]):  # another start won the lease meanwhile
+            if not claim(folder, new, replacing=old, pid=agent_pid(old) if stale else None, starts=[*starts, now()]):  # another start won the lease meanwhile
                 run(["hc", "kill", new])
                 run(["hc", "rm", new])
                 report.setdefault("coordinators", []).append({"action": "refused", "folder": folder, "address": new})
                 continue
-            moved = reparent(folder, old, new)
-            if stale:  # the shell it left: ended, never two coordinators
-                run(["hc", "kill", old])
-                run(["hc", "rm", old])
+            moved, _ = finish_handoff(folder, new)  # a shell it left (stale) is that same terminal, so it ends too
+            moved = moved or reparent(folder, None, new)  # no earlier holder: workers on a gone parent still move
         except (Fail, OSError, ValueError) as e:
             report.setdefault("coordinators", []).append({"action": "failed", "folder": folder, "why": str(e)})
             continue

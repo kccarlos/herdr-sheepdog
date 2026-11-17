@@ -228,7 +228,7 @@ class Reconcile(LeaseCase):
 
     def test_a_recovery_cut_short_still_moves_the_held_news(self):
         self.hc.term("n9", self.repo)
-        self.save([{"id": 1, "title": "Auth", "state": "running"}], coordinator={"address": "n9", "created_ms": 1000, "previous": "c1"})
+        self.save([{"id": 1, "title": "Auth", "state": "running"}], coordinator={"address": "n9", "created_ms": 1000, "previous": "c1", "handoff": {"from": "c1"}})
         with news.held_messages() as held:
             held["c1"] = [{"text": "SHOP-1 is ready", "how": "news", "at": self.now}]  # the tick stopped before it moved
         lease.reconcile_pass(report := {})
@@ -242,11 +242,15 @@ class Reconcile(LeaseCase):
         self.hc.term("n9", self.repo)
         self.hc.term("w1", self.repo, parent="c1")
         self.save([{"id": 1, "title": "Auth", "state": "running", "agents": [{"address": "w1", "parent": "c1"}]}],
-                  coordinator={"address": "n9", "created_ms": 1000, "previous": "c1", "previous_created_ms": 1000})  # claimed, then the tick stopped
+                  coordinator={"address": "n9", "created_ms": 1000, "previous": "c1",
+                               "handoff": {"from": "c1", "created_ms": 1000, "pid": 4242}})  # claimed, then the tick stopped
         with news.held_messages() as held:
             held["c1"] = [{"text": "SHOP-1 is ready", "how": "news", "at": self.now}]
-        lease.reconcile_pass(report := {})
+        with mock.patch.object(lease, "end_group") as eg:
+            lease.reconcile_pass(report := {})
         self.assertEqual((self.started(), report["coordinators"][0]["ended"], self.hc.terms["c1"]["state"]), ([], "c1", "exited"))
+        self.assertEqual(eg.call_args_list, [mock.call(4242)])  # its process group too, as a whole restart does
+        self.assertNotIn("handoff", lease.lease_of(self.repo))
         self.assertEqual(self.data()["tasks"][0]["agents"][0]["parent"], "n9")
         with news.held_messages() as held:
             self.assertEqual((held.get("c1"), [x["text"] for x in held["n9"]]), (None, ["SHOP-1 is ready"]))
@@ -255,9 +259,27 @@ class Reconcile(LeaseCase):
         self.hc.term("c1", self.repo, created_ms=2000)  # not the one replaced (that one started at 1000)
         self.hc.term("n9", self.repo)
         self.save([{"id": 1, "title": "Auth", "state": "running"}],
-                  coordinator={"address": "n9", "created_ms": 1000, "previous": "c1", "previous_created_ms": 1000})
+                  coordinator={"address": "n9", "created_ms": 1000, "previous": "c1", "handoff": {"from": "c1", "created_ms": 1000}})
+        with news.held_messages() as held:
+            held["c1"] = [{"text": "its own", "how": "send", "at": self.now}]
         lease.reconcile_pass(report := {})
-        self.assertEqual((self.hc.terms["c1"]["state"], report.get("coordinators")), ("live", None))
+        self.assertEqual((self.hc.terms["c1"]["state"], report["coordinators"][0].get("ended")), ("live", None))
+        with news.held_messages() as held:
+            self.assertEqual((held.get("c1"), held.get("n9")), ([{"text": "its own", "how": "send", "at": self.now}], None))
+
+    def test_round_4_a_finished_handoff_leaves_nothing_to_redo(self):
+        # a whole restart, then the old address taken by a later terminal with news of its own: nothing moves
+        old = self.hc.term("c1", self.repo, foreground={"name": "claude", "pid": 4242})
+        self.save([{"id": 1, "title": "Auth", "state": "running"}], coordinator={"address": "c1", "created_ms": 1000})
+        with mock.patch.object(lease, "end_group"), mock.patch.object(lease, "agent_pid", lambda a: 4242):
+            new = lease.restart(self.repo, old)
+        self.assertNotIn("handoff", lease.lease_of(self.repo))
+        self.hc.term("c1", self.repo, created_ms=5000)
+        with news.held_messages() as held:
+            held["c1"] = [{"text": "its own", "how": "send", "at": self.now}]
+        lease.reconcile_pass(report := {})
+        with news.held_messages() as held:
+            self.assertEqual((held.get("c1")[0]["text"], held.get(new), report.get("coordinators")), ("its own", None, None))
 
     def test_revive_never_takes_a_later_terminal_at_the_lease_address_for_the_coordinator(self):
         import herdr_task.revive as revive
