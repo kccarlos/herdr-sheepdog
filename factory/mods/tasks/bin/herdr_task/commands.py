@@ -14,7 +14,7 @@ import time
 from . import sandbox
 from .checks import checks_line, resolve_check, sync_check, sync_mode, sync_plan, SYNC_FAILED
 from .base import Fail, git, guard, hc_json, kill_agent, label_of, now, run, STORE, stop_note, VERSION
-from .settings import (cli_missing_reason, write_machine_option, write_max_running, write_task_check, write_worker_agent, write_worker_perm, WORKER_PERMS,
+from .settings import (cli_missing_reason, write_ci_runner_cap, write_machine_option, write_max_running, write_task_check, write_worker_agent, write_worker_perm, WORKER_PERMS,
     accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
     fable_due, gate_min, merge_hold, merge_policy,
     merge_wait_why, MUST_WORDS, project_base, remove_build_dir, review_kind, review_limits, reviewed_for_head, set_opts, settings_block, settings_for,
@@ -25,7 +25,7 @@ from .agents import (
     REVIEWER_FAILED, STARTING_MS, STATUSES, status_word, SUMMARY_MAX, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
-from .github import (already_merged, checks_missing, checks_since, expected_checks, github_refusal, github_required, github_unreachable,
+from .github import (already_merged, branch_needs_push, checks_missing, checks_since, ci_cap_hold, CI_CAP_WAIT, expected_checks, github_refusal, github_required, github_unreachable,
                      pr_for_branch, pr_head_problem, pr_merged_at_tip, push_branch,
                      drop_branch, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
                      pr_pending, pr_problem, pr_repo, pr_behind, main_red_hold, pr_update_branch, synced_head, task_problem, SYNC_CHECKS_MS,
@@ -38,12 +38,12 @@ from .launch import (
 from .store import bare_by_mistake, is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
 from .queues import after_refs, parse_after, queue_reason, running_count, set_after, urgent
 from .archive import unarchive
-from .output import line, minutes, say, view
-from .scheduler import ensure_scheduler
+from .output import inbox_line, line, minutes, say, view
+from .stage import STAGE_ORDER, STAGE_TABLE
 from .proof import evidence, find_proof
 from .when import when_from
 from .templates import instructions
-from .budget import budget_lines, budget_pass, change_sizes, merge_only_commits, merge_only_step, recap_refusal, record_ci, size_estimate, size_pass
+from .budget import budget_lines, budget_pass, change_sizes, docs_only_commits, merge_only_commits, merge_only_step, recap_refusal, record_ci, size_estimate, size_pass
 from .simulators import release_task
 
 
@@ -57,32 +57,39 @@ def cmd_where(args):
     say(args, {**loc, "slug": slug, "store": path, "prefix": st.prefix, "version": VERSION}, f"{loc['folder']}\n{path}")
 
 
+def _folder_views(folder, *, archived=False, inbox_only=False):
+    with Store(locate(folder), write="try") as s:
+        out = []
+        archived_count = sum(1 for t in s.data["tasks"] if t.get("archived"))
+        for t in s.data["tasks"]:
+            if bool(t.get("archived")) != archived:
+                continue
+            mine = live_agents(s.key(t)) if t["state"] in ("running", "ready") else []
+            if mine:
+                refresh_sessions(s, t, mine)
+            v = view(s, t, [detail(k) for k in mine] if mine else [])
+            if t["state"] == "queued":
+                v["reason"] = queue_reason(s, t)
+                if v.get("stage") == "queued" and v["reason"]:
+                    v["why_waiting"] = v["reason"]
+            if inbox_only and not v.get("inbox"):
+                continue
+            out.append(v)
+        if inbox_only:
+            out.sort(key=lambda v: (STAGE_ORDER.get(v.get("stage"), len(STAGE_TABLE)), v.get("id") or 0))
+        elif archived:
+            out.sort(key=lambda v: -(v.get("archived") or 0))
+        return {"folder": s.loc["folder"], "name": s.loc["name"], "kind": s.loc["kind"], "tasks": out,
+                **({} if archived or inbox_only else {"archived": archived_count})}
+
+
 def cmd_list(args):
     if args.all:
         folders = [d["folder"] for d in map(read_list, store_files()) if is_task_list(d)]
     else:
         folders = [locate(args.folder)["folder"]]
-    groups = []
-    for folder in folders:
-        if not os.path.isdir(folder):
-            continue
-        with Store(locate(folder), write="try") as s:
-            out = []
-            archived = sum(1 for t in s.data["tasks"] if t.get("archived"))
-            for t in s.data["tasks"]:
-                if bool(t.get("archived")) != args.archived:
-                    continue
-                mine = live_agents(s.key(t)) if t["state"] in ("running", "ready") else []
-                if mine:
-                    refresh_sessions(s, t, mine)
-                v = view(s, t, [detail(k) for k in mine] if mine else [])
-                if t["state"] == "queued":
-                    v["reason"] = queue_reason(s, t)
-                out.append(v)
-            if args.archived:
-                out.sort(key=lambda v: -(v.get("archived") or 0))
-            groups.append({"folder": s.loc["folder"], "name": s.loc["name"], "kind": s.loc["kind"], "tasks": out,
-                           **({} if args.archived else {"archived": archived})})
+    groups = [_folder_views(folder, archived=args.archived)
+              for folder in folders if os.path.isdir(folder)]
     if args.json:
         print(json.dumps(groups if args.all else groups[0]))
         return
@@ -92,7 +99,7 @@ def cmd_list(args):
         for v in g["tasks"]:
             if v["state"] != "done" or args.all or args.archived:
                 print(("  " if args.all else "") + line(v))
-        hidden = sum(1 for v in g["tasks"] if v["state"] == "done") if not args.archived else 0
+        hidden = 0 if args.archived else sum(1 for v in g["tasks"] if v["state"] == "done")
         more = [f"{hidden} done"] if hidden and not args.all else []
         if g.get("archived") and not args.all:
             more.append(f"{g['archived']} archived: --archived lists them")
@@ -100,6 +107,28 @@ def cmd_list(args):
             print(f"({'; '.join(more)})")
         elif not g["tasks"] and not args.all:
             print("No archived tasks." if args.archived else "No tasks.")
+
+
+def cmd_inbox(args):
+    """Show only owner-waiting tasks (the ordered stage table's inbox rows)."""
+    folders = [d["folder"] for d in map(read_list, store_files()) if is_task_list(d)] if args.all else [locate(args.folder)["folder"]]
+    groups = [_folder_views(folder, inbox_only=True) for folder in folders if os.path.isdir(folder)]
+    tasks = sorted([v for g in groups for v in g["tasks"]],
+                   key=lambda v: (STAGE_ORDER.get(v.get("stage"), len(STAGE_TABLE)), v.get("id") or 0))
+    if args.json:
+        payload = {"tasks": tasks, "projects": groups} if args.all else (groups[0] if groups else {"tasks": []})
+        print(json.dumps(payload))
+        return
+    if not tasks:
+        print("Inbox is empty.")
+        return
+    for g in groups:
+        if not g["tasks"]:
+            continue
+        if args.all:
+            print(f"{g['name']}  {g['folder']}")
+        for v in g["tasks"]:
+            print(("  " if args.all else "") + inbox_line(v))
 
 
 def cmd_add(args):
@@ -127,8 +156,6 @@ def cmd_add(args):
         if at:
             schedule(s, t, at, {})
         v = view(s, t)
-    if at:
-        ensure_scheduler_quietly()
     say(args, v, s.ref(t) + (f": {v['why']}" if at else ""))
 
 
@@ -164,13 +191,6 @@ def unschedule(t):
     t["state"] = "todo"
     for k in ("scheduled_for", "queue", "queued_at", "held"):
         t.pop(k, None)
-
-
-def ensure_scheduler_quietly():
-    try:
-        ensure_scheduler(quiet=True)
-    except Exception:
-        pass
 
 
 def set_base(s, t, base, new=False):
@@ -242,6 +262,8 @@ def cmd_show(args):
             v["auto_accepted"] = t["auto_accepted"]
         if t["state"] == "queued":
             v["reason"] = queue_reason(s, t)
+            if v.get("stage") == "queued" and v["reason"]:
+                v["why_waiting"] = v["reason"]
         elif urgent(t) and t["state"] == "running" and running_count(s) > s.max_running():
             v["urgent_past_cap"] = True  # FAC-103: it took the folder's one extra slot
         v["settings"] = task_settings(s, t)
@@ -262,6 +284,9 @@ def cmd_show(args):
             # What the Accept card shows: commits, files, checks and the proof (proof.py).
             v["evidence"] = evidence(s, t)
     text = [line(v), f"folder: {v['folder']}"]
+    if v.get("stage"):
+        why_w = f" ({v['why_waiting']})" if v.get("why_waiting") else ""
+        text.append(f"stage: {v['stage']}{why_w}" + (" [inbox]" if v.get("inbox") else ""))
     if v.get("worktree"):
         text.append(f"worktree: {v['worktree']} (branch {v['branch']}, base {v.get('base')})")
     elif v.get("branch") and v.get("mode") == "worktree":
@@ -425,11 +450,6 @@ def cmd_start(args):
             fail_if_missing_cli(s, t, argv)
             a = begin(s, t, argv, parent=parent)
             v = view(s, t)
-    # The scheduler starts queued tasks and tells the Assistant its tasks' news.
-    try:
-        ensure_scheduler(quiet=True)
-    except Exception:
-        pass
     if reason == "scheduled":
         say(args, v, f"{s.ref(t)} is scheduled: {v['why']}. It starts by itself then.")
         return
@@ -691,6 +711,28 @@ def gate_passes(t, head):
     return sum(1 for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task" and r["head"] == head and r["verdict"] == "pass")
 
 
+def gate_passes_for(s, t, head, need=None):
+    """Passing gate rounds on `head`, or on the latest earlier commit that already met `need`
+    and was extended only by docs-only commits (exempt from new rounds)."""
+    got = gate_passes(t, head)
+    if need is not None and got >= need:
+        return got
+    wt = t.get("worktree") if t.get("mode") == "worktree" else None
+    if not wt or not head or not os.path.isdir(wt):
+        return got
+    base, br = t.get("base") or "main", t.get("branch")
+    seen = {head}
+    for r in reversed(t.get("reviews") or []):
+        rh = r.get("head")
+        if not rh or rh in seen or r.get("started_by") != "herdr-task":
+            continue
+        seen.add(rh)
+        n = gate_passes(t, rh)
+        if (need is None or n >= need) and docs_only_commits(wt, base, rh, head, br):
+            return n
+    return got
+
+
 def fork_of(wt, base, tip):
     """Where tip left its base: the merge-base with the local base or the remote's (new worktrees branch from the
     remote's, which can be ahead of the local one); the later of the two."""
@@ -743,7 +785,7 @@ def gate_step(s, t):
     """A gate folder's ready (FAC-13): None once its head has review.min passing rounds from
     herdr-task's own reviewer; else starts the next one for that head (or says why it waits)."""
     need, head = gate_need(s, t), t.get("head")
-    if not need or gate_passes(t, head) >= need:
+    if not need or gate_passes_for(s, t, head, need) >= need:
         return None
     if not head or not os.path.isdir(t.get("worktree") or ""):
         raise Fail(f"{s.ref(t)} has no worktree to review: start it first.")
@@ -751,7 +793,7 @@ def gate_step(s, t):
     if t.pop("auto_merge", None) is not None:
         s.dirty = True
     inspect_runs(s, t)
-    if gate_passes(t, head) >= need:
+    if gate_passes_for(s, t, head, need) >= need:
         return f"{s.ref(t)} is ready." if t.get("state") in ("ready", "done") else None
     if t.get("recap"):
         return f"{s.ref(t)}: {t['recap']['title']}."
@@ -804,8 +846,17 @@ def gate_step(s, t):
             t["progress"] = {"text": fit(f"Reviewers out of quota till {at}"), "at": now(), "set": now(), "by": "herdr"}
             s.dirty = True
         return f"{s.ref(t)}: {text}."
-    if (t.get("pr") or {}).get("number"):  # FAC-88: the reviewer reads the commit GitHub has: pushed first, or ready stops
+    if (t.get("pr") or {}).get("number") and branch_needs_push(s, t):  # FAC-88: the reviewer reads the commit GitHub has: pushed first, or ready stops
+        if hold := ci_cap_hold(s, t, pr_repo(t, s, github)):
+            t["push_held"] = {"reason": hold, "at": now(), "gate": True}
+            t["progress"] = {"text": fit(hold), "at": now(), "set": now(), "by": "herdr"}
+            s.dirty = True
+            return f"{s.ref(t)}: {hold}."
+        t.pop("push_held", None)
         push_branch(s, t)
+        t["pr"]["wait"] = PR_CHECKS_RUNNING
+        t["pr"]["checked"] = 0
+        s.dirty = True
     rv = FABLE if fable else pick
     ref, ht, folder = s.ref(t), own_path(), shlex.quote(s.loc["folder"])
     sand = sandboxes([rv["agent"]])  # agy on a Mac: sandboxed, nothing prompts, its verdict read from its terminal
@@ -905,7 +956,9 @@ def review_refusal(s, t, wt):
     head = t.get("head") if wt else None
     if (any(r.get("head") == head for r in revs) if wt else bool(revs)):
         return None
-    if wt and head and base_merges_only(s, t, wt, {r.get("head") for r in revs if r.get("head")}, head):
+    rev_heads = [r.get("head") for r in reversed(revs) if r.get("head")]
+    if wt and head and (base_merges_only(s, t, wt, set(rev_heads), head)
+                        or any(docs_only_commits(wt, t.get("base") or "main", rh, head, t.get("branch")) for rh in dict.fromkeys(rev_heads))):
         return None
     ref, ht, folder = s.ref(t), own_path(), shlex.quote(s.loc["folder"])
     what = f"your final commit {head[:7]}" if head else "this task's work"
@@ -1150,21 +1203,39 @@ def finalize(s, t):
     wt = t.get("worktree")
     local = t.get("mode") != "worktree" or not wt or t.get("nothing_to_merge")
     repo = task_github(github, s, t) if not local and os.path.isdir(wt) else None
-    failed = None
+    failed = held = None
     if repo:
         # Pushed and opened before it shows Ready: the push lets the task list go while its hooks run
         # (#1007), and a Ready task without its pull request yet could be accepted (merged here) meanwhile.
-        try:
-            pr = pr_open(s, t, repo, t.get("summary"))
-            if why := pr_head_problem(s, t, repo, t.get("head")):  # FAC-88: GitHub has the reviewed commit
-                raise Fail(why[0].upper() + why[1:] + ".")
-        except Fail as e:
-            failed = str(e)
+        if branch_needs_push(s, t) and (hold := ci_cap_hold(s, t, repo)):
+            held = hold
+            t["push_held"] = {"reason": hold, "at": now()}
+        else:
+            t.pop("push_held", None)
+            try:
+                pr = pr_open(s, t, repo, t.get("summary"))
+                if why := pr_head_problem(s, t, repo, t.get("head")):  # FAC-88: GitHub has the reviewed commit
+                    raise Fail(why[0].upper() + why[1:] + ".")
+            except Fail as e:
+                failed = str(e)
     elif not local and os.path.isdir(wt) and (github_unreachable(s) or github_required(s, t)):
         # #988: a GitHub repo gh couldn't reach just now: never on as if it had no GitHub (Accept would
         # merge it here while a pull request, its agent's, stays open there).
         failed = f"Couldn't reach GitHub to open its pull request: {github_refusal(s, t)}"
-    t["state"], t["ready_at"] = "ready", now()
+    head = t.get("head")
+    prev_head = t.get("ready_head") or next((r.get("head") for r in reversed(t.get("reviews") or []) if r.get("head")), None)
+    keep_ready = bool(wt and os.path.isdir(wt) and t.get("ready_at") and prev_head and head
+                      and docs_only_commits(wt, t.get("base") or "main", prev_head, head, t.get("branch")))
+    t["state"] = "ready"
+    if not keep_ready:
+        t["ready_at"] = now()
+        if head:
+            t["ready_head"] = head
+    else:
+        if not t.get("ready_head") and prev_head:
+            t["ready_head"] = prev_head
+        if repo and not held and not failed and head and head != prev_head:
+            t["head_moved_at"] = now()  # fresh CI-wait clock for this new docs-only commit while keeping first ready_at
     for k in ("attention", "merge_requested", "review", "accepted_by", "auto_accepted", "accept_wait"):
         t.pop(k, None)
     (t.get("pr") or {}).pop("wait", None)
@@ -1172,6 +1243,7 @@ def finalize(s, t):
     s.dirty = True
     msg = f"{s.ref(t)} is ready."
     if local:
+        t.pop("push_held", None)
         # Nothing to merge (in the folder itself, or no commits beyond its base): it waits in Ready
         # for the person's Accept, whatever the merge setting; no pull request.
         t.pop("auto_merge", None)
@@ -1180,15 +1252,21 @@ def finalize(s, t):
     if failed:
         t["attention"] = failed
         return f"{s.ref(t)} {READY_BUT} {failed} Tell the person."
-    if repo:
+    if held:
+        msg = f"{s.ref(t)} is ready ({held}); it will push once a CI slot opens."
+    elif repo:
         pr["checked"] = 0
         # Working until its checks are done and GitHub knows it can merge (the tick: pr_wait()).
         pr["wait"] = PR_CHECKS_RUNNING
+        if keep_ready and head and head != prev_head:
+            pr["head_at"] = now()
         msg = (f"{s.ref(t)} is ready: pull request #{pr['number']}, {pr['url']}. It shows Working until its checks "
                "pass and GitHub says it can merge; a failing check or a conflict comes back to you to fix.")
     policy = merge_policy(s, t)
     if policy in ("auto", "checks"):
         t["auto_merge"] = policy
+        if held:
+            return msg + (" It merges by itself once its checks pass." if policy == "checks" else "")
         if t.get("pr"):
             if policy == "auto":
                 err = merge_now(s, t)
@@ -1529,10 +1607,11 @@ def gate_reads(s, t):
     inspect_runs(s, t)
     need, head, wt = gate_need(s, t), t.get("head"), t.get("worktree") or ""
     mine = [r for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"]
-    if (not need or not head or gate_passes(t, head) >= need or open_runs(t)
+    if (not need or not head or gate_passes_for(s, t, head, need) >= need or open_runs(t)
             or t.get("recap") or t.get("review_out") or (t.get("attention") or "").startswith(REVIEWER_FAILED)
             or (mine and mine[-1]["head"] == head and mine[-1]["verdict"] == "changes")
-            or not (any(r["head"] == head for r in t.get("review_runs") or []) or (t.get("review_quota_wait") or {}).get("head") == head)
+            or not (any(r["head"] == head for r in t.get("review_runs") or []) or (t.get("review_quota_wait") or {}).get("head") == head
+                    or (t.get("push_held") or {}).get("gate"))
             or (t.get("review_quota_wait") or {}).get("until", 0) > now()):  # FAC-101: out of quota, retried after the reset
         return
     if os.path.isdir(wt) and git(wt, "rev-parse", "HEAD")[1] == head and not git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
@@ -1548,7 +1627,7 @@ def cmd_state(args, state):
             # pull request merged and close it again at once) until its agent says ready.
             if t["state"] == "done" and t.get("merged"):
                 t["kept_open"] = True
-            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait", "head_moved_at", "sync_fallback"):
+            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait", "head_moved_at", "sync_fallback", "push_held", "ready_head"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
@@ -1627,8 +1706,6 @@ def cmd_edit(args):
         sent = amend(s, t, args)  # last: its agent is told only of an edit that saves
         s.dirty = True
         v = view(s, t)
-    if at:
-        ensure_scheduler_quietly()
     say(args, {**v, **({"sent": sent} if sent is not None else {})},
         f"{s.ref(t)} saved" + (f": {v['why']}." if v["status"] == "scheduled" else ".")
         + (f" Its agent was told the brief changed ({sent})." if sent else "")
@@ -1693,8 +1770,8 @@ def cmd_config(args):
         for pair in getattr(args, "set", None) or []:  # FAC-103: folder settings from the CLI
             k, eq, v = pair.partition("=")
             key = k.strip().lower()
-            if not eq or key not in ("tasks.max_running", "max_running", "tasks.check", "check", "worker.perm", "worker.agent", "machine.tart_home"):
-                raise Fail(f"config --set takes tasks.max_running=N, tasks.check=CMD, worker.agent=CLI, worker.perm=MODE or machine.tart_home=DIR, not {pair!r}.")
+            if not eq or key not in ("tasks.max_running", "max_running", "tasks.ci_runner_cap", "ci_runner_cap", "tasks.runner_cap", "runner_cap", "tasks.check", "check", "worker.perm", "worker.agent", "machine.tart_home"):
+                raise Fail(f"config --set takes tasks.max_running=N, tasks.ci_runner_cap=N, tasks.check=CMD, worker.agent=CLI, worker.perm=MODE or machine.tart_home=DIR, not {pair!r}.")
             v = v.strip().strip("\"'")
             low = v.lower()
             if key == "machine.tart_home":
@@ -1720,6 +1797,11 @@ def cmd_config(args):
                 continue
             if key in ("tasks.check", "check"):
                 write_task_check(s, None, None if not v or v.lower() == "default" else v)
+                continue
+            if key in ("tasks.ci_runner_cap", "ci_runner_cap", "tasks.runner_cap", "runner_cap"):
+                if v and low != "default" and not (v.isdigit() and 0 <= int(v) <= 50):
+                    raise Fail("tasks.ci_runner_cap is 0 to 50 (0: unlimited; \"default\": Settings' above this project).")
+                write_ci_runner_cap(s, int(v) if v.isdigit() else None)
                 continue
             if v and v.lower() != "default" and not (v.isdigit() and 1 <= int(v) <= 50):
                 raise Fail("tasks.max_running is 1 to 50 (\"default\": Settings' above this project).")
@@ -2086,7 +2168,17 @@ def merge_now(s, t, accepting=False):
     synced = synced_head(t, repo, v.get("headRefOid")) if v.get("state") != "MERGED" else None
     if synced == "":
         return CHECKS_RUNNING  # GitHub couldn't say whether its head is Herdr's update: asked again next tick
-    if v.get("state") != "MERGED" and not synced and (why := pr_head_problem(s, t, repo, head, v.get("headRefOid"))):
+    theirs = v.get("headRefOid")
+    wt_dir = t.get("worktree") or ""
+    if (not accepting and v.get("state") != "MERGED" and not synced and head and theirs and theirs != head
+            and os.path.isdir(wt_dir)
+            and git(wt_dir, "rev-parse", f"refs/heads/{t.get('branch')}")[1] == head
+            and git(wt_dir, "merge-base", "--is-ancestor", theirs, head)[0]):
+        if hold := ci_cap_hold(s, t, repo):
+            t["pr"]["wait"] = hold
+            s.dirty = True
+            return hold
+    if v.get("state") != "MERGED" and not synced and (why := pr_head_problem(s, t, repo, head, theirs)):
         t["attention"], t["attention_at"] = why[0].upper() + why[1:], now()
         return t["attention"]
     if v.get("state") != "MERGED" and head and v.get("headRefOid") not in (None, "", head, synced):
@@ -2140,6 +2232,10 @@ def merge_now(s, t, accepting=False):
                 fallback_why = why
             behind = checked != "pass"
         if behind:
+            if not accepting and (hold := ci_cap_hold(s, t, repo)):
+                t["pr"]["wait"] = hold
+                s.dirty = True
+                return hold
             if fallback_why and not t.get("sync_fallback"):
                 t["sync_fallback"] = {"from": "cheap", "to": "full", "why": f"tasks.sync fell back from cheap to full ({fallback_why})", "at": now()}
             ok, err = pr_update_branch(t, repo, at)
@@ -2148,6 +2244,9 @@ def merge_now(s, t, accepting=False):
                 return t["attention"]
             t["pr"]["wait"] = CHECKS_RUNNING
             return CHECKS_RUNNING
+        if (t["pr"].get("wait") or "").startswith(CI_CAP_WAIT):
+            t["pr"].pop("wait", None)
+            s.dirty = True
         if not accepting and not t.get("accepted_by") and t.get("auto_merge") != "auto" and ci_awaited(s, t, v):
             # FAC-105: CI is set up for its base but no check ran on it: never merged as if they passed (the tick
             # decides when it's missing); the person's Accept still merges it.
@@ -2241,6 +2340,7 @@ def run_pr_merge(s, t, wait_as_checks=False):
             return "github", None
         if t.get("head") and branch_tip(s, t) != t["head"] and not advance_merge_only(s, t):
             return "github", f"{t.get('branch')} has moved on since it said ready: its agent says ready again first."
+        t.pop("push_held", None)
         pr_open(s, t, repo, t.get("summary"))
         # Restart the CI-start grace window from when the PR actually opened so a stale ready_at
         # doesn't make checks_missing conclude CI never started.

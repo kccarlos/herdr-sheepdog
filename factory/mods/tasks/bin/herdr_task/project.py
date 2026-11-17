@@ -3,7 +3,7 @@
 import argparse, contextlib, fnmatch, io, json, os, re, shlex, shutil, subprocess, urllib.parse
 from . import assistant_settings as aset, autopilot as ap, base, settings as st
 from .base import Fail
-from .github import push_remote, remote_repo
+from .github import push_remote, remote_repo, runs_on_pr
 from .launch import CLEAN_ENV, coordinator_in
 from .output import say
 from .store import auto_prefix, locate, prefixes_in_use, read_list, Store, store_path
@@ -92,6 +92,165 @@ def release_gates(repo, branch):
     files = sorted(f for f in os.listdir(wf_dir) if f.endswith((".yml", ".yaml"))) if os.path.isdir(wf_dir) else []
     return [f for f in files if os.path.isfile(p := os.path.join(wf_dir, f)) and (t := read_text(p)) and releases(t) and pushes_to(t, branch)]
 
+MAX_HEAVY_PR_JOBS = 3
+CI_SHAPE_SPEC = "one summary check, docs skip, at most 3 heavy jobs per PR, queue not cancel on main, base flakiness measured first"
+
+
+def _workflow_jobs(text):
+    """[(key, body_text)] for each job under `jobs:` in a workflow YAML (plain indentation scan)."""
+    lines = [re.sub(r"\s#.*$|^\s*#.*$", "", ln).rstrip() for ln in text.splitlines()]
+    j_idx = next((i for i, ln in enumerate(lines) if re.match(r"jobs\s*:\s*$", ln)), None)
+    if j_idx is None:
+        return []
+    body = []
+    for ln in lines[j_idx + 1:]:
+        if ln.strip() and _indent(ln) == 0:
+            break
+        if ln.strip():
+            body.append(ln)
+    if not body:
+        return []
+    job_ind = _indent(body[0])
+    jobs, cur_k, cur_lines = [], None, []
+    for ln in body:
+        ind = _indent(ln)
+        if ind == job_ind and (m := re.fullmatch(r"\s*([\w-]+)\s*:\s*(?:\{\})?", ln)):
+            if cur_k is not None:
+                jobs.append((cur_k, "\n".join(cur_lines)))
+            cur_k, cur_lines = m.group(1), []
+        elif cur_k is not None and ind > job_ind:
+            cur_lines.append(ln)
+    if cur_k is not None:
+        jobs.append((cur_k, "\n".join(cur_lines)))
+    return jobs
+
+
+def _has_docs_skip(text):
+    """Whether a PR workflow skips or filters docs-only changes."""
+    lines = [re.sub(r"\s#.*$|^\s*#.*$", "", ln).rstrip() for ln in text.splitlines()]
+    # Flow-style inline mapping inside on: pull_request / pull_request_target
+    joined = "\n".join(lines)
+    if re.search(r"pull_request(?:_target)?\s*:\s*\{[^{}]*(?:paths-ignore\s*:[^{}]*(?:docs|\*\.md)|paths\s*:[^{}]*(?:!docs|!\*\*?/\*\.md|!\*\.md))", joined):
+        return True
+    on_ind = pr_ind = None
+    for i, ln in enumerate(lines):
+        if not ln.strip():
+            continue
+        ind = _indent(ln)
+        if on_ind is not None and ind <= on_ind:
+            on_ind = pr_ind = None
+        if pr_ind is not None and ind <= pr_ind:
+            pr_ind = None
+        if ind == 0 and re.match(r"on\s*:\s*(?:\{.*)?$", ln):
+            on_ind = 0
+            continue
+        if on_ind is not None and ind > on_ind and re.match(r"\s*pull_request(?:_target)?\s*:", ln):
+            pr_ind = ind
+            continue
+        if pr_ind is not None and ind > pr_ind and (m := re.search(r"^(\s*)(paths-ignore|paths)\s*:(.*)$", ln)):
+            key_ind, key, rest = len(m.group(1)), m.group(2), m.group(3)
+            block = [rest]
+            for nxt in lines[i + 1:]:
+                if nxt.strip() and _indent(nxt) <= key_ind:
+                    break
+                block.append(nxt)
+            body = "\n".join(block)
+            if key == "paths-ignore" and re.search(r"(?:docs|\*\.md)", body):
+                return True
+            if key == "paths" and re.search(r"(?:!docs|!\*\*?/\*\.md|!\*\.md)", body):
+                return True
+        if "paths-filter" in ln:
+            # Scan only within the current step / filters block, bounded by indentation or next list item.
+            step_ind = len(re.match(r"^(\s*(?:-\s*)?)", ln).group(1))
+            for nxt in lines[i + 1:]:
+                if not nxt.strip():
+                    continue
+                nind = _indent(nxt)
+                if nind < step_ind or (nind == step_ind and nxt.lstrip().startswith("- ")):
+                    break
+                if re.search(r"(?:!docs|!\*\*?/\*\.md|!\*\.md|docs/)", nxt):
+                    return True
+    return False
+
+
+def _cancels_on_main(text, branch):
+    """True when a workflow that pushes to `branch` sets literal `cancel-in-progress: true`."""
+    if not pushes_to(text, branch):
+        return False
+    lines = [re.sub(r"\s#.*$|^\s*#.*$", "", ln).rstrip() for ln in text.splitlines()]
+    for i, ln in enumerate(lines):
+        if _indent(ln) == 0 and re.match(r"concurrency\s*:", ln):
+            block = [ln]
+            for nxt in lines[i + 1:]:
+                if nxt.strip() and _indent(nxt) == 0:
+                    break
+                block.append(nxt)
+            if re.search(r"(?im)^\s*cancel-in-progress\s*:\s*true\s*$", "\n".join(block)):
+                return True
+    return False
+
+
+def check_ci_shape(repo, branch="main"):
+    """Checks `.github/workflows/` and base health against the CI shape (Design §5, notes 23 & 28):
+    one summary check, docs skip, <=3 heavy jobs per PR, queue not cancel on main, base flakiness measured first.
+    Returns (ok, detail, steps, shape_dict)."""
+    wf_dir = os.path.join(repo, ".github", "workflows")
+    wfs = sorted(f for f in os.listdir(wf_dir) if f.endswith((".yml", ".yaml")) and os.path.isfile(os.path.join(wf_dir, f))) if os.path.isdir(wf_dir) else []
+    n_ok, n_out, _ = base.git(repo, "rev-list", "--count", "HEAD") if os.path.isdir(repo) else (False, "", "")
+    inherited = bool(n_ok and n_out.strip().isdigit() and int(n_out.strip()) >= 2)
+    base_ok = (not inherited) or os.path.isfile(os.path.join(repo, "docs", "flaky-tests.md"))
+    if not wfs:
+        shape = {"workflows": 0, "one_summary_check": False, "docs_skip": False, "max_heavy_jobs": True,
+                 "heavy_jobs": 0, "queue_not_cancel_on_main": True, "base_flakiness_measured": base_ok}
+        return False, f"no CI workflow yet (target: {CI_SHAPE_SPEC})", [f"Set up CI shape: {CI_SHAPE_SPEC}"], shape
+    texts = [(f, read_text(os.path.join(wf_dir, f))) for f in wfs]
+    pr_texts = [(f, t) for f, t in texts if runs_on_pr(t, branch)]
+    docs_skip = any(_has_docs_skip(t) for _, t in pr_texts)
+    cancel_main = any(_cancels_on_main(t, branch) for _, t in texts)
+    one_summary = bool(pr_texts)
+    max_heavy = 0
+    for _, t in pr_texts:
+        jobs = _workflow_jobs(t)
+        if not jobs:
+            one_summary = False
+            continue
+        filter_keys = {"changes", "filter", "paths"}
+        summary_keys = {"summary", "ci", "check", "checks", "status", "all", "all-checks", "gate"}
+        heavy = 0
+        has_summary = len(jobs) == 1
+        for k, jbody in jobs:
+            has_needs = bool(re.search(r"(?m)^\s*needs\s*:", jbody))
+            is_filter = k.lower() in filter_keys or ("paths-filter" in jbody and not re.search(r"\b(?:test|build|lint|xcodebuild|pytest|unittest)\b", jbody))
+            is_summary = len(jobs) > 1 and has_needs and (k.lower() in summary_keys or not re.search(r"(?m)^\s*run\s*:", jbody))
+            if is_summary:
+                has_summary = True
+            elif not is_filter:
+                heavy += 1
+        if not has_summary:
+            one_summary = False
+        max_heavy = max(max_heavy, heavy)
+    heavy_ok = max_heavy <= MAX_HEAVY_PR_JOBS
+    missing = []
+    if not one_summary:
+        missing.append("one summary check")
+    if not docs_skip:
+        missing.append("docs skip")
+    if not heavy_ok:
+        missing.append(f"at most {MAX_HEAVY_PR_JOBS} heavy jobs per PR (found {max_heavy})")
+    if cancel_main:
+        missing.append(f"queue not cancel on {branch}")
+    if not base_ok:
+        missing.append("base flakiness measured first (docs/flaky-tests.md)")
+    ok = not missing
+    shape = {"workflows": len(wfs), "one_summary_check": one_summary, "docs_skip": docs_skip,
+             "max_heavy_jobs": heavy_ok, "heavy_jobs": max_heavy,
+             "queue_not_cancel_on_main": not cancel_main, "base_flakiness_measured": base_ok}
+    detail = (f"one summary check, docs skip, <= {MAX_HEAVY_PR_JOBS} heavy jobs/PR, queue on {branch}, base checked"
+              if ok else "missing: " + ", ".join(missing))
+    steps = [] if ok else [f"Set up CI shape ({', '.join(missing)}): {CI_SHAPE_SPEC} (notes 23, 28)"]
+    return ok, detail, steps, shape
+
+
 def base_health(repo):
     """Heartbeat instruction for an inherited codebase (a fork with history); empty for a new folder."""
     if not os.path.isdir(repo) or not (n := base.git(repo, "rev-list", "--count", "HEAD"))[0] or int(n[1] or 0) < 2:
@@ -104,6 +263,7 @@ def base_health(repo):
             f"(recent CI runs: `gh run list --branch {br} --repo {slug}`, plus the check run 3 times, locally or in CI), "
             f"list the flaky tests in docs/flaky-tests.md and turn on test retries in CI."
             + (f" In the same task, gate {', '.join(gates)} (it runs on every push to {br}) to manual dispatch or tags until signing/deploy is proven." if gates else "")
+            + f" Keep the CI shape: {CI_SHAPE_SPEC}."
             + "\n\n")
 
 def json_dict(raw):
@@ -496,15 +656,18 @@ def run_checklist(repo, name=None, assistant=None, ap_hint=None, dry=False):
     elif not ap_ans and ans_yes(proj.get("autopilot")):
         proj.pop("autopilot", None)
     ios = detect_ios(repo)
+    br = base_branch(repo)
     (gh_ok, gh_det, gh_steps), (sec_ok, sec_det, sec_steps, ref_sec, miss_sec) = check_github_secrets(repo)
+    ci_ok, ci_det, ci_steps, ci_shape = check_ci_shape(repo, br)
     items = [{"key": "github", "label": "GitHub repo", "ready": gh_ok, "detail": gh_det},
-             {"key": "ci_secrets", "label": "CI secrets", "ready": sec_ok, "detail": sec_det, "referenced": ref_sec, "missing": miss_sec}]
-    person_steps, asked, ask_err = [*gh_steps, *sec_steps], [], None
+             {"key": "ci_secrets", "label": "CI secrets", "ready": sec_ok, "detail": sec_det, "referenced": ref_sec, "missing": miss_sec},
+             {"key": "ci_shape", "label": "CI shape", "ready": ci_ok, "detail": ci_det, "shape": ci_shape}]
+    person_steps, asked, ask_err = [*gh_steps, *sec_steps, *ci_steps], [], None
     to_term = os.environ.get("HC_TERMINAL_ID") or assistant or (None if dry else coord_for_repo(repo)[0])
     stall = base.probe_volume(repo)
     items.append({"key": "disk", "label": "Repo disk", "ready": not stall, "detail": stall or "answers in time"})
     person_steps += [f"Wake or fix the disk holding {repo}: {stall}"] if stall else []
-    cards = checklist_cards(ios, layer, release_gates(repo, br := base_branch(repo)), br)
+    cards = checklist_cards(ios, layer, release_gates(repo, br), br)
     agreements = probe_asc_agreements() if ios else None
     for key, label, question, options, recommend, needs_ready, pstep in cards:
         if key == "asc_agreements" and agreements is not None:
@@ -538,7 +701,7 @@ def run_checklist(repo, name=None, assistant=None, ap_hint=None, dry=False):
         items.append({"key": key, "label": label, "ready": False, "detail": det})
     card_keys = [c[0] for c in cards]
     kept_asks = {k: asks[k] for k in card_keys if k in asks}
-    new_proj = {"ios": ios, "github": gh_ok, "ci_secrets": sec_ok,
+    new_proj = {"ios": ios, "github": gh_ok, "ci_secrets": sec_ok, "ci_shape": {"ok": ci_ok, "detail": ci_det, **ci_shape},
                 **{k: proj[k] for k in card_keys if str(proj.get(k) or "").strip()}, **({"asks": kept_asks} if kept_asks else {})}
     if new_proj != old_proj:
         changed = True
