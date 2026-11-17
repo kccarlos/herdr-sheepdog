@@ -222,9 +222,10 @@ def cmd_ask_pane(args):
             __import__("herdr_task.project", fromlist=["apply_checklist_answer"]).apply_checklist_answer(rec)
         except Fail:
             pass
-    if not rec.get("to") and (rec.get("origin") or {}).get("space"):
+    orig = rec.get("origin") or {}
+    if not rec.get("to") and (target := orig.get("space") or orig.get("folder")):
         try:
-            rec["to"] = __import__("herdr_task.launch", fromlist=["coordinator_in"]).coordinator_in(rec["origin"]["space"])
+            rec["to"] = __import__("herdr_task.launch", fromlist=["coordinator_in"]).coordinator_in(target)
         except Fail:
             pass
     if rec.get("to"):

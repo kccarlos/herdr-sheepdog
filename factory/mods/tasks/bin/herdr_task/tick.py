@@ -469,7 +469,7 @@ def rescue_question(s, t, k, q, report):
     parent = k.get("parent") or next((a.get("parent") for a in reversed(t.get("agents") or []) if a.get("parent")), None)
     space = t.get("space")
     try:
-        to = parent_for(parent, space) or parent
+        to = parent_for(parent, space or s.loc["folder"]) or parent
     except Fail:
         to = parent
     question = q["question"] if ref in q["question"] else fit(f"{ref}: {q['question']}", ask_mod.MSG_MAX)

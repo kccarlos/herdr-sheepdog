@@ -7893,6 +7893,14 @@ class TaskFlow(unittest.TestCase):
                      "labels": {"sheepdog.role": "coordinator", "sheepdog.project": "repo-slug"}}]
         by_addr["c-slug"] = terms[0]
         self.assertEqual(launch.coordinator_in(self.main), "c-slug")
+        # And tick.rescue_question falls back to coordinator_in(s.loc['folder']) when task has no space and parent is dead
+        import herdr_task.tick as tick, herdr_task.ask as ask_mod
+        asked = []
+        self.patch(tick, "parent_for", lambda p, proj=None: "c-slug" if proj == self.main else None)
+        self.patch(ask_mod, "cmd_ask", lambda ns: asked.append((ns.to, ns.origin["folder"])) or {"id": "a1", "terminal": "ta1"})
+        self.assertTrue(tick.rescue_question(self.store, self.task, {"address": "w1", "parent": "dead"},
+                                             {"question": "Ship?", "options": ["Yes", "No"], "recommend": "Yes"}, {}))
+        self.assertEqual(asked, [("c-slug", self.main)])
         # launch stamps sheepdog.{project,task,role,agent} and SHEEPDOG_TASK without space/tab
         ran = []
         self.patch(launch, "run", lambda argv, *a, **k: (ran.append(argv), subprocess.CompletedProcess(argv, 0, '{"address":"w1"}', ""))[1])
