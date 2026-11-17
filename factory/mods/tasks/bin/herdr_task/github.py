@@ -64,10 +64,10 @@ def gh(*args, repo=None, cwd=None):
     return r.returncode == 0, r.stdout.strip(), (r.stderr or r.stdout).strip()
 
 
-def repo_from_url(url):
-    """GitHub "owner/name" from a remote URL (HTTPS, SSH, or an SSH host alias for GitHub), else None."""
+def repo_from_url(url, explicit_host=False):
+    """GitHub "owner/name" from a remote URL (HTTPS, SSH, or an SSH host alias for GitHub unless `explicit_host`), else None."""
     u = str(url or "").strip()
-    ssh = not u.startswith(("http://", "https://", "git://"))
+    ssh = not explicit_host and not u.startswith(("http://", "https://", "git://"))
     m = (re.match(r"^(?:https?|ssh|git)://(?:[^/@]+@)?([^/:]+)(?::\d+)?/(.+)$", u) if "://" in u
          else re.match(r"^(?:[^/@:]+@)?([A-Za-z0-9._-]{2,}):/?(.+)$", u))
     if not m:
@@ -101,27 +101,49 @@ def remote_of(main, branch=None):
     return push_remote(main, branch) or "origin"
 
 
-def remote_repo(main, remote):
+def remote_repo(main, remote, explicit_host=False):
     """GitHub "owner/name" for `remote` in `main` (its pushurl first when set, else url), or None."""
     if not remote:
         return None
     if push_u := git(main, "config", "--get", f"remote.{remote}.pushurl")[1]:
-        return repo_from_url(push_u) or (repo_from_url(git(main, "config", "--get", f"remote.{remote}.url")[1]) if os.path.exists(push_u) else None)
-    return repo_from_url(git(main, "config", "--get", f"remote.{remote}.url")[1])
+        return repo_from_url(push_u, explicit_host=explicit_host) or (
+            repo_from_url(git(main, "config", "--get", f"remote.{remote}.url")[1], explicit_host=explicit_host)
+            if os.path.exists(push_u) else None)
+    return repo_from_url(git(main, "config", "--get", f"remote.{remote}.url")[1], explicit_host=explicit_host)
+
+
+def remote_slug(s, task=None, explicit_host=False):
+    """GitHub "owner/name" from the task's or its base branch's push remote (without calling gh), else None."""
+    if s.loc["kind"] != "repo":
+        return None
+    pr_r = ((task or {}).get("pr") or {}).get("repo")
+    if pr_r and "/" in pr_r:
+        return pr_r
+    wt = (task or {}).get("worktree")
+    folder = wt if wt and os.path.isdir(wt) else s.loc["folder"]
+    if not os.path.isdir(folder):
+        return None
+    br = ((task or {}).get("pr") or {}).get("branch") or (task or {}).get("branch")
+    base = (task or {}).get("base") or "main"
+    for candidate in (br, base):
+        if slug := remote_repo(folder, push_remote(folder, candidate), explicit_host=explicit_host):
+            return slug
+    return None
+
+
+def _gh_bin():
+    return GH if GH != "gh" else (os.environ.get("HERDR_TASK_GH") or "gh")
 
 
 def github(s, task=None):
     """The repo on GitHub ("owner/name") from the remote the task (or folder) pushes to, when gh works
     there; asked again after an hour. None: tasks merge locally."""
     pr_r = ((task or {}).get("pr") or {}).get("repo")
-    gh_bin = GH if GH != "gh" else (os.environ.get("HERDR_TASK_GH") or "gh")
-    if s.loc["kind"] != "repo" or not shutil.which(gh_bin):
+    if s.loc["kind"] != "repo" or not shutil.which(_gh_bin()):
         return None
     if pr_r and "/" in pr_r:
         return pr_r
-    wt = (task or {}).get("worktree")
-    folder = wt if wt and os.path.isdir(wt) else s.loc["folder"]
-    if not (slug := remote_repo(folder, push_remote(folder, ((task or {}).get("pr") or {}).get("branch") or (task or {}).get("branch")))):
+    if not (slug := remote_slug(s, task)):
         return None
     g = s.data.get("github") or {}
     if g and (g.get("from") or g.get("repo") or "").lower() == slug.lower() and now() - g.get("at", 0) < 3600000:
@@ -160,7 +182,21 @@ def on_github(folder):
 
 def github_unreachable(s):
     """Why GitHub couldn't be asked about a repo whose remote is there (github() said None), else None."""
-    return getattr(s, "github_error", None) if s.loc["kind"] == "repo" and shutil.which(GH) else None
+    return getattr(s, "github_error", None) if s.loc["kind"] == "repo" and shutil.which(_gh_bin()) else None
+
+
+def github_required(s, task=None):
+    """True when the folder or its base branch tracks a GitHub remote (merges must go through a PR)."""
+    return bool(remote_slug(s, task, explicit_host=True) or github_unreachable(s))
+
+
+def github_refusal(s, task=None):
+    """Why GitHub couldn't be reached/used for a GitHub-backed repo when github() returned None."""
+    if why := github_unreachable(s):
+        return why
+    if not shutil.which(_gh_bin()):
+        return "gh isn't installed here (GitHub CLI)"
+    return getattr(s, "github_error", None) or "gh isn't signed in or couldn't access this GitHub repo (run `gh auth login`)"
 
 
 def released(s):
@@ -186,18 +222,22 @@ def push_branch(s, task):
     wt, br = task["worktree"], task["branch"]
     folder = wt if wt and os.path.isdir(wt) else s.loc["folder"]
     remote = remote_of(folder, br)
+    if not remote_repo(folder, remote):
+        base_r = push_remote(folder, task.get("base") or "main")
+        if base_r and remote_repo(folder, base_r):
+            remote = base_r
     # The pull request it continues (#828) gets its new commits on its own branch, never forced.
     to = (task.get("pr") or {}).get("branch") or br
     # Already there at its exact tip (pushed by hand): no second push through its hooks (#795).
-    has, tip, _ = git(wt, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")
-    seen, there, _ = git(wt, "ls-remote", remote, f"refs/heads/{to}")
+    has, tip, _ = git(folder, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")
+    seen, there, _ = git(folder, "ls-remote", remote, f"refs/heads/{to}")
     # FAC-98: GitHub's update-branch merged its base into it there: nothing of its own to push (a push would
     # drop that merge).
     if not (has and tip and seen and (there.split()[:1] == [tip] or tip == task.get("head") and synced_head(task, pr_repo(task), there.split()[0] if there.split() else ""))):
         # #1007: the task list's lock let go meanwhile (a pre-push hook can run for many minutes).
         with released(s):
-            ok, out, err = git(wt, "push", "--force-with-lease", "-u", remote, br) if to == br else \
-                git(wt, "push", remote, f"{br}:refs/heads/{to}")
+            ok, out, err = git(folder, "push", "--force-with-lease", "-u", remote, br) if to == br else \
+                git(folder, "push", remote, f"{br}:refs/heads/{to}")
         if not ok:
             raise Fail(f"Couldn't push {br}" + (f" to {to}" if to != br else "") + f": {push_error(out, err)}")
 
@@ -411,6 +451,19 @@ def pr_merged(task, repo):
                      and p.get("baseRefName") == (task.get("base") or "main")), None) if ok and out else None
     except (ValueError, TypeError, AttributeError):
         return None
+
+
+def pr_merged_at_tip(s, task, repo):
+    """The merged pull request on GitHub whose head matches this branch's current tip, recorded on the task, else None."""
+    main = s.loc["folder"]
+    tip = (git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{task.get('branch')}")[1]
+           if task.get("branch") else "") or task.get("head")
+    found = pr_merged(task, repo) if tip else None
+    if not found or found.get("headRefOid") != tip:
+        return None
+    task["pr"] = {"number": found["number"], "url": found["url"], "repo": repo}
+    s.dirty = True
+    return {**task["pr"], "mergeCommit": found.get("mergeCommit")}
 
 
 def landed(s, task):
