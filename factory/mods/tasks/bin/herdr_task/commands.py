@@ -896,7 +896,7 @@ def gate_step(s, t):
     a = launch(s, t, argv, prompt, parent=live[-1]["address"] if live else None, role="reviewer",
                reads=review_reads(check))
     t.setdefault("review_runs", []).append({"round": round_n, "head": head, "address": a["address"], "cli": agent_key(argv),
-                                            "model": rv.get("model") or None, "at": at})
+                                            "model": rv.get("model") or None, "at": at, "majors_required": True})
     if merge_only:
         t.setdefault("merge_only_runs", []).append(a["address"])
     t["progress"] = {"text": fit("Herdr's reviewer is on it"), "at": now(), "set": now(), "by": "herdr"}
@@ -1049,7 +1049,7 @@ def cmd_reviewed(args):
             head = git(wt, "rev-parse", "HEAD")[1]
         elif s.loc["kind"] == "repo":
             head = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None
-        verdict, majors = getattr(args, "verdict", "pass"), getattr(args, "majors", 0)
+        verdict, majors = getattr(args, "verdict", None), getattr(args, "majors", None)
         if verdict not in ("pass", "changes") or majors is None or majors < 0:
             raise Fail("Say --verdict pass|changes and --majors N (a nonnegative count).")
         text = " ".join(str(args.report or "").split())[:2000]
@@ -1390,8 +1390,8 @@ def gate_verdict(s, t, args, text):
     must = args.must_fix if args.must_fix is not None else (0 if args.passed else None)
     if must is None or must < 0 or bool(args.passed) != (must == 0):  # findings below Must fix never block
         raise Fail("Say --pass (nothing at Must fix; --notes for the rest), or --changes \"…\" --must-fix N: N (1 or more) findings at or above Must fix.")
-    majors = getattr(args, "majors", must)
-    if majors is None or majors < 0:
+    majors = getattr(args, "majors", None)
+    if (majors is None and rn.get("majors_required")) or (majors is not None and majors < 0):
         raise Fail("Say --majors N: the number of major or blocker findings (zero or more).")
     msg = record_verdict(s, t, rn, bool(args.passed), must, text or args.notes or "", majors)
     end_reviewer(me)
@@ -1596,7 +1596,7 @@ def inspect_runs(s, t):
         if sandboxes([rn["cli"]]) and st != "blocked":
             screen = screen_of(rn["address"], 400)
             got = read_verdict(screen, round_code(rn))
-            if got:
+            if got and (got[3] is not None or not rn.get("majors_required")):
                 before, dirty = json.loads(json.dumps(t)), s.dirty
                 try:
                     record_verdict(s, t, rn, *got)
@@ -2283,7 +2283,7 @@ def merge_now(s, t, accepting=False):
             t["auto_accepted"] = {
                 "by": by, "at": now(), "head": head, "merged_head": at, "proof": (t.get("proof") or {}).get("id"),
                 "rounds": [r["round"] for r in reviewed_for_head(s, t, head)
-                           if r.get("verdict") == "pass" or r.get("result") in ("report", "pass")],
+                           if r.get("verdict") == "pass" or ("verdict" not in r and r.get("result") in ("report", "pass"))],
                 "ci": sorted({str(e.get("run") or e["sha"][:7]) for e in t.get("ci_runs") or []
                               if e.get("sha") == v.get("headRefOid") and not e.get("failed")})}
         # #1045: never --delete-branch. gh deletes the branch right after its merge call whenever it

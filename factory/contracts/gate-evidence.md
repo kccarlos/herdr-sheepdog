@@ -8,7 +8,7 @@ Unknown extra keys are rejected. `review_runs[].model` is a non-empty string, or
 ## `t["review_runs"][]`: a reviewer herdr-task started
 ```json
 {"round": 1, "head": "0123456789abcdef0123456789abcdef01234567", "address": "term-7", "cli": "agy",
- "model": "gemini-4-argon-high", "at": 1762600000000}
+ "model": "gemini-4-argon-high", "at": 1762600000000, "majors_required": true}
 ```
 
 ## `t["reviews"][]`: a review round

@@ -3925,7 +3925,7 @@ class GateReview(unittest.TestCase):
         import argparse
         self.env("HC_TERMINAL_ID", by)
         self.commands.cmd_review(argparse.Namespace(id="SHEP-13", json=True, folder=None, passed=passed, changes=changes,
-                                                    changes_file=None, notes=None, must_fix=must_fix))
+                                                    changes_file=None, notes=None, must_fix=must_fix, majors=must_fix))
 
     def valid(self):
         for r in self.task.get("review_runs") or []:
@@ -4325,7 +4325,7 @@ class GateReview(unittest.TestCase):
     def test_the_workers_own_reviewed_is_refused(self):
         import argparse
         with self.assertRaises(self.commands.Fail):
-            self.commands.cmd_reviewed(argparse.Namespace(id="SHEP-13", json=True, folder=None, report="fine"))
+            self.commands.cmd_reviewed(argparse.Namespace(id="SHEP-13", json=True, folder=None, report="fine", verdict="pass", majors=0))
         self.assertNotIn("reviews", self.task)
 
     def test_outside_a_gate_folder_nothing_changes(self):
@@ -4335,7 +4335,7 @@ class GateReview(unittest.TestCase):
             self.ready()
         self.assertEqual(self.runs, [])
         import argparse
-        self.commands.cmd_reviewed(argparse.Namespace(id="SHEP-13", json=True, folder=None, report="fine"))
+        self.commands.cmd_reviewed(argparse.Namespace(id="SHEP-13", json=True, folder=None, report="fine", verdict="pass", majors=0))
         self.ready()
         self.assertEqual((self.task["state"], self.runs), ("ready", []))
 
@@ -4482,7 +4482,7 @@ class GateReview(unittest.TestCase):
         rn = self.task["review_runs"][0]
         code = self.commands.round_code(rn)
         read = self.screen(f"> Review commit ... This round's code is {code}.\n  Working\n  {code} begin\n  - major: gate.txt says hi"
-                           f"\n    twice\n  {code} changes 1\n\n>\n")
+                           f"\n    twice\n  {code} changes 1 1\n\n>\n")
         self.reviewer_term = {"state": "live", "agent": "agy", "status": {"app": "antigravity", "state": "working"}}
         self.commands.gate_reads(self.store, self.task)
         self.assertEqual(read, [])  # never read mid-turn
@@ -4501,7 +4501,10 @@ class GateReview(unittest.TestCase):
         self.sandbox()
         self.ready()
         code = self.commands.round_code(self.task["review_runs"][0])
-        self.screen(f"**{code} pass**\n")
+        self.screen(f"{code} pass\n")
+        self.commands.gate_reads(self.store, self.task)
+        self.assertNotIn("reviews", self.task)  # new rounds require an explicit major count
+        self.screen(f"**{code} pass 0**\n")
         self.commands.gate_reads(self.store, self.task)
         self.assertEqual([r["verdict"] for r in self.task["reviews"]], ["pass"])
         self.assertEqual(len(self.task["review_runs"]), 2)  # min 2: round 2 started
@@ -4517,7 +4520,7 @@ class GateReview(unittest.TestCase):
         with open(os.path.join(self.wt, "gate.txt"), "a") as f:  # a dirty tree: nothing recorded, its reviewer kept for a later try
             f.write("more")
         self.commands.subprocess.Popen.reset_mock()
-        self.screen(f"{code2} pass\n")
+        self.screen(f"{code2} pass 0\n")
         with self.assertRaises(self.commands.Fail):
             self.commands.gate_reads(self.store, self.task)
         self.assertEqual(len(self.task["reviews"]), 1)
@@ -4638,7 +4641,7 @@ class GateReview(unittest.TestCase):
                                   lambda *a, **k: (started.append(k.get("message")), ({"address": "w2"}, True))[1]):
             for i in (0, 1):  # neither an intermediate pass nor the final pass starts a worker when none is live
                 code = self.commands.round_code(self.task["review_runs"][i])
-                self.screen(f"{code} pass\n")
+                self.screen(f"{code} pass 0\n")
                 self.commands.gate_reads(self.store, self.task)
             self.assertEqual(self.task["state"], "ready")
             self.assertEqual(started, [])
@@ -4648,7 +4651,7 @@ class GateReview(unittest.TestCase):
                 self.task.pop(k, None)
             self.ready()
             code3 = self.commands.round_code(self.task["review_runs"][0])
-            self.screen(f"fix x\n{code3} changes 1\n")
+            self.screen(f"fix x\n{code3} changes 1 1\n")
             self.commands.gate_reads(self.store, self.task)
             self.assertEqual(len(started), 1)
             self.assertIn("Fix these", started[0])
@@ -4796,7 +4799,7 @@ if sys.argv[1] == "kill" and alive:
         self.assertEqual([(r["round"], r["cli"]) for r in self.task["review_runs"]],
                          [(1, "agy"), (1, "codex"), (2, "agy")])
         code3 = self.commands.round_code(self.task["review_runs"][2])
-        self.screen(f"{code3} pass\n")
+        self.screen(f"{code3} pass 0\n")
         self.commands.gate_reads(self.store, self.task)
         self.assertEqual(self.task["state"], "ready")
         self.assertEqual([(r["round"], r["by"], r["verdict"]) for r in self.task["reviews"]],
@@ -5537,6 +5540,13 @@ class LoopBreaker(GateReview):
         with self.assertRaises(self.commands.Fail):
             self.recap("continue")
         self.assertIn("decided: split", self.recap("split"))
+
+    def test_new_approach_does_not_reopen_the_same_recap(self):
+        from herdr_task.budget import budget_pass
+        self.rounds(("pass", 0, ""), ("changes", 2, "a.py"), ("changes", 1, "b.py"))
+        self.assertTrue(budget_pass(self.store, self.task))
+        self.recap("new")
+        self.assertFalse(budget_pass(self.store, self.task))
 
     def second_recap(self):
         """A task that had its one continue and is stopped for a recap again (two non-converging rounds)."""
@@ -6828,7 +6838,7 @@ class ReviewedNamesItsCommit(unittest.TestCase):
 
     def reviewed(self, commit=None):
         self.commands.cmd_reviewed(self.argparse.Namespace(id="SHEP-1", json=True, folder=None, report="one major, fixed",
-                                                           commit=commit))
+                                                           commit=commit, verdict="pass", majors=0))
         return self.task["reviews"][-1]["head"]
 
     def test_a_round_on_the_commit_it_reviewed(self):
@@ -12414,6 +12424,11 @@ class AutoAccept(unittest.TestCase):
         self.task["proof"] = self.proof
         self.task["pr"] = {"number": 13, "repo": "o/r"}
         self.assertEqual(self.settings.accept_bar(self.store, self.task), (None, "0 of 1 passing review rounds on its final commit"))
+        self.task["head"] = self.head
+        self.task["reviews"] = [{"head": self.head, "round": 1, "result": "report", "verdict": "changes"}]
+        self.assertEqual(self.settings.accept_bar(self.store, self.task), (None, "0 of 1 passing review rounds on its final commit"))
+        self.task["reviews"][0]["verdict"] = "pass"
+        self.assertEqual(self.settings.accept_bar(self.store, self.task), ("engine", None))
         self.assertIn("- Auto-accept: on: with its passing review rounds on your final commit, green CI and its proof, Herdr accepts and merges it", self.auto_line())
 
     def test_auto_accept_settings_line_matches_review_and_proof(self):

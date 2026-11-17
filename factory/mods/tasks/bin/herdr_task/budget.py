@@ -393,7 +393,7 @@ def triggers(s, t):
     from .settings import fable_runs  # FAC-99: Fable's round judges as the owner would; its changes are no loop
     fable = fable_runs(t)
     why, rounds = [], [r for r in rounds_since(t) if r.get("by") not in fable]
-    if review_nonconverging(t):
+    if rounds and review_nonconverging(t):
         why.append(NON_CONVERGENCE)
     ci = ci_since(t)
     failed_ci = [r for r in ci if r.get("failed")]
@@ -567,7 +567,7 @@ def cmd_recap(args):
             raise Fail("A task's own agent can't decide its recap: your Assistant does.")
         if not rc:
             raise Fail(f"{s.ref(t)} has no recap open.")
-        if args.decide == "continue" and (NON_CONVERGENCE in rc.get("reasons", []) or review_nonconverging(t)):
+        if args.decide == "continue" and (NON_CONVERGENCE in rc.get("reasons", []) or (rounds_since(t) and review_nonconverging(t))):
             raise Fail(f"{NON_CONVERGENCE}; choose split, new or drop.")
         if not (args.why or "").strip():
             raise Fail("Say why in one line: --why \"…\".")

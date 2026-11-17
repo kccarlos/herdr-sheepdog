@@ -44,6 +44,7 @@ class GateEvidence(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_review(r)
         validate_review({**example("reviews"), "verdict": "changes", "must_fix": 2})
+        validate_review({k: v for k, v in example("reviews").items() if k not in ("cli", "model", "majors")})
         validate_check({**example("checks"), "ci": {"state": "none", "url": None}})
         validate_check({**example("checks"), "ci": None})
         with self.assertRaises(ValueError):
