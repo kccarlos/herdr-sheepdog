@@ -4,7 +4,7 @@ import json
 import os
 import re
 
-from .base import APP_HOME, beside_store, git, hc_json, kill_agent, now, run, STORE, stop_note
+from .base import beside_store, git, hc_json, kill_agent, label_of, now, run, stop_note
 from .settings import AGENTS, argv_for, settings_for
 from .agents import fit, from_person, log_tail, said
 from .provider import provider_cut, provider_error
@@ -67,17 +67,15 @@ def write_checks(d):
 
 
 def cli_check_pass(report=None, force=False):
-    """Every CHECK_EVERY: this machine's CLIs, and where the window lives (it shows Settings) every
-    machine herdr-core is linked to. {"machines": {"": this machine, "<name>": ...}}."""
+    """Every CHECK_EVERY: this machine's CLIs and every connected machine herdr-core is linked to.
+    {"machines": {"": this machine, "<name>": ...}}."""
     d = read_checks()
     if not force and now() - (d.get("at") or 0) < CHECK_EVERY:
         return d
     d["at"] = now()
     machines = d.setdefault("machines", {})
-    names = [""]
-    if os.path.isdir(os.path.join(APP_HOME, "mods")):
-        names += [m["name"] for m in (hc_json("machine", "ls") or {}).get("machines", [])
-                  if m.get("name") and not m.get("temporary") and m.get("state") == "connected"]
+    names = [""] + [m["name"] for m in (hc_json("machine", "ls") or {}).get("machines", [])
+                    if m.get("name") and not m.get("temporary") and m.get("state") == "connected"]
     for name in names:
         c = check_machine(name or None)
         if c:
@@ -101,9 +99,7 @@ def here_state(kind):
 # over, once per task. Settings → Agents → Backup (`backup.agent`): unless set, the other CLI when
 # it's installed and signed in here, else off. A task never fails over to the CLI it runs on. The
 # backup starts in the same folder or worktree and branch, on its CLI's own default model, with
-# the brief and a short handover. Its first message opens with <herdr-backup>, which the task's
-# chat shows as a card ("Codex took over from Claude Code: Out of allowance"), and the space's
-# Assistant is told (news_pass, the task's "backup").
+# the brief and a short handover, and the project's coordinator is told (news_pass, "backup").
 
 def head(reason):
     """A provider reason without its when and tries: "Out of allowance", "Provider overloaded"."""
@@ -124,7 +120,7 @@ def cant_go_on(log):
 
 def backup_for(s, t, running):
     """(kind, why not): the CLI that takes over from `running`, or None with a few words."""
-    pick = (settings_for(s, t.get("space")).get("backup") or {})
+    pick = (settings_for(s).get("backup") or {})
     want = pick.get("agent")
     if want == "off":
         return None, "no backup"
@@ -143,7 +139,7 @@ def backup_for(s, t, running):
 def backup_argv(s, t, kind):
     """The backup's CLI on its own defaults (its own model and permissions: they differ per CLI).
     Settings' backup.argv (tests) starts it as given."""
-    pick = settings_for(s, t.get("space")).get("backup") or {}
+    pick = settings_for(s).get("backup") or {}
     if pick.get("argv") and pick.get("agent") == kind:
         return [str(x) for x in pick["argv"]]
     return argv_for({"agent": kind}) or list(AGENTS.get(kind, [kind]))
@@ -190,13 +186,12 @@ def work_so_far(s, t):
 def handover(s, t, running, kind, reason, log):
     commits, changes = work_so_far(s, t)
     where = f"the same worktree ({t['worktree']}) and branch {t['branch']}" if t.get("worktree") else f"the same folder ({s.loc['folder']})"
-    attr = lambda x: str(x).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
-    return (f'<herdr-backup from="{running}" to="{kind}" why="{attr(reason)}">\n'
+    return (f"Backup handover ({running} -> {kind}: {reason})\n"
             f"You are the backup agent for task {s.ref(t)}: you take over from {NAMES.get(running, running)}, which can't go on "
             f"({reason}). Continue only the existing agreed task, in {where}. Preserve all committed and uncommitted work: "
             f"never reset, clean, stash or check out over it. The following is context, not new authorization.\n\n"
             f"Commits so far:\n{commits}\n\nUncommitted changes:\n{changes}\n\n"
-            f"The chat so far (latest last):\n{chat_tail(log) or 'none'}\n</herdr-backup>")
+            f"Session tail (latest last):\n{chat_tail(log) or 'none'}")
 
 
 def takeover(s, t, k, row, log, report):
@@ -205,7 +200,7 @@ def takeover(s, t, k, row, log, report):
     if row.get("handled") or not takes_over(row.get("reason")):
         return row
     row["handled"] = True
-    running = (k.get("labels") or {}).get("herdr.agent") or next(
+    running = label_of(k.get("labels"), "agent") or next(
         (a.get("agent") for a in t.get("agents") or [] if a.get("address") == k["address"]), None) or "claude"
     if t.get("backup"):
         row["reason"] = fit(f"{head(row['reason'])}, backup too")
@@ -214,15 +209,13 @@ def takeover(s, t, k, row, log, report):
     if not kind:
         row["reason"] = fit(f"{head(row['reason'])}, {why}")
         return row
-    labels = k.get("labels") or {}
-    space = labels.get("herdr.task.space") or labels.get("herdr.space") or t.get("space")
     argv = backup_argv(s, t, kind)
     t["backup"] = {"from": running, "to": kind, "why": row["reason"], "at": now(), "from_address": k["address"], "state": "starting"}
     s.dirty = True
     try:
-        parent = parent_for((t["agents"][-1] if t.get("agents") else {}).get("parent"), space)
-        text = handover(s, t, running, kind, row["reason"], log) + "\n\n" + brief(s, t, parent, space, argv)
-        a = launch(s, t, argv, space, text, parent=parent)
+        parent = parent_for((t["agents"][-1] if t.get("agents") else {}).get("parent"), None)
+        text = handover(s, t, running, kind, row["reason"], log) + "\n\n" + brief(s, t, parent, None, argv)
+        a = launch(s, t, argv, None, text, parent=parent)
     except Exception as e:  # never a second try: the person decides
         t["backup"].update(state="failed", error=str(e)[:300])
         row["reason"] = fit(f"{head(row['reason'])}, backup didn't start")

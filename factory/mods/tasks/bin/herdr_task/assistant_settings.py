@@ -1,53 +1,55 @@
-"""What a space's Assistant knows of the person's settings (SHEP-49): the ones that shape how it
-makes and runs tasks, resolved for its space (Everywhere's, then this machine's from before, then
-the space's own), as a short "Your settings" block, like the Settings block a worker's brief ends
-with. Its session gets the block at every start, resume, compaction and handoff (the chat's
-SessionStart hook, mods/chat/session-note.sh, asks `herdr-task _session-note`); a running one gets
-one hidden notice line per setting that changed for its space, several at once in one message,
-never for a save that changed nothing there. Other agents (task workers, automation runs, agent
-tabs) aren't told the block: their brief is fixed; they get only Reactions (reactions.py)."""
+"""What a project's coordinator knows of the owner's settings (SHEP-49): the ones that shape how it
+makes and runs tasks, resolved for its project folder (Everywhere -> machine -> project), as a short
+"Your settings" block. A new coordinator session gets the block at start, and a running one gets one
+notice line per setting that changed for its project, several at once in one message, never for a
+save that changed nothing there."""
 
 import hashlib
 import json
 import os
-import sys
 
-from .base import addon_off, hc_json, MAX_RUNNING, now, run, STORE
-from .settings import DEFAULTS, LOCAL_MACHINE, MUST_WORDS, SETTINGS, agent_key, bare, read_settings
+from .base import hc_json, label_of, MAX_RUNNING, now, PROJECT_LABEL, run, STORE
+from .settings import DEFAULTS, LOCAL_MACHINE, MUST_WORDS, SETTINGS, agent_key, read_settings
 from .launch import coordinators, is_coordinator
 
-# What an Assistant was last told, on its terminal: "review:1a2b3c,merge:…", a short hash of each line.
-LABEL = "herdr.settings"
+# What a coordinator was last told, on its terminal: "review:1a2b3c,merge:…", a short hash of each line.
+LABEL = "sheepdog.settings"
 STATE = os.path.join(STORE, ".assistant-settings.json")
 EVERY_MS = 60000  # looked at again this often (Autopilot's switch is in its own file), and at once when the settings file changes
 
-HEAD = ("Your settings: (Shepherdr settings for this space, the truth for every task you add; a task's own --set wins, "
+HEAD = ("Your settings: (sheepdog factory settings for this project, the truth for every task you add; a task's own --set wins, "
         "and `herdr-task show <id>` says what one task has)")
 MERGE_SHORT = {"ask": "ask the person first (they accept it in the Tasks panel, which merges it)",
                "checks": "after checks (Herdr merges a ready task once its checks pass)",
                "auto": "on its own (Herdr merges a ready task)"}
-BY = {"space": "set for this space", "machine": "this machine's setting", "everywhere": "your setting everywhere"}
+BY = {"project": "set for this project", "machine": "this machine's setting", "everywhere": "your setting everywhere"}
 NOTICE_END = "Nothing to answer: reply only <hc no-reply/>."
 
 
-def space_of(k):
+def _is_coord(k):
+    return bool(k) and (label_of(k.get("labels"), "role") == "coordinator" or is_coordinator(k))
+
+
+def project_of(k, d=None):
     labels = (k or {}).get("labels") or {}
-    return labels.get("herdr.space") or labels.get("herdr.coordinator.space")
+    proj = labels.get(PROJECT_LABEL)
+    projects = (d or {}).get("projects") if isinstance(d, dict) else None
+    if proj and ((isinstance(projects, dict) and proj in projects) or os.path.isabs(proj)):
+        return proj
+    cwd = (k or {}).get("cwd")
+    if cwd:
+        exp = os.path.expanduser(cwd)
+        return os.path.realpath(exp) if os.path.isdir(exp) else exp
+    return proj or None
 
 
-def layers(d, space):
-    """(name, layer) of the settings file d, least specific first: Everywhere's, this machine's
-    (agent and task values set before machine scope went), the space's own."""
-    def obj(x):
-        x = x if isinstance(x, dict) else {}
-        # Reactions as SHEP-42 kept them (the Assistant's) where the layer has no agents' (SHEP-48)
-        old = x.get("assistant") if isinstance(x.get("assistant"), dict) else {}
-        if isinstance(old.get("reactions"), bool):
-            x = {**x, "agents": {"reactions": old["reactions"], **(x.get("agents") if isinstance(x.get("agents"), dict) else {})}}
-        return x
+def layers(d, project):
+    """(name, layer) of the settings file d, least specific first: Everywhere's, this machine's,
+    this project's own."""
+    obj = lambda x: x if isinstance(x, dict) else {}
     machine = obj(obj(d.get("machines")).get(d.get("here") or LOCAL_MACHINE))
-    own = obj(obj(d.get("spaces")).get(bare(space))) if space else {}
-    return [("everywhere", obj(d.get("everywhere"))), ("machine", machine), ("space", own)]
+    own = obj(obj(d.get("projects")).get(project)) if project else {}
+    return [("everywhere", obj(d.get("everywhere"))), ("machine", machine), ("project", own)]
 
 
 def resolve(ls):
@@ -70,25 +72,25 @@ def pick_words(p, unset):
     return agent + (f", model {p['model']}" if p.get("model") else "") + (f", effort {p['effort']}" if p.get("effort") else "")
 
 
-def autopilot_of(space, cfg):
-    """(on, schedule words, direction) of the space's Autopilot."""
+def autopilot_of(project, cfg):
+    """(on, schedule words, direction) of the project's Autopilot."""
     from . import autopilot as ap
     try:
         with ap.state(write=False) as d:
-            eff = ap.resolve(d, (d.get("spaces") or {}).get(bare(space)) if space else None, bare(space) if space else None, cfg)
-        return eff["on"], ap.trigger_of(eff), ap.direction_of(bare(space) if space else None, cfg)
+            rec = ((d.get("projects") or {}).get(project) or (d.get("spaces") or {}).get(project)) if project else None
+            eff = ap.resolve(d, rec, project, cfg)
+        return eff["on"], ap.trigger_of(eff), ap.direction_of(project, cfg)
     except Exception:  # never stops a session's start
         return False, "", ""
 
 
-def rows(space, d=None, auto=None):
-    """The block's lines for a space: [{key, label, text, value, by, scope}]. by: who set a line
-    that differs from Herdr's default (None: the default); scope: "space" when the space sets one of
-    its parts itself, else "everywhere" (or "machine"). d: the settings file (read when None);
-    auto: (on, schedule, direction) of its Autopilot (read when None)."""
+def rows(project, d=None, auto=None):
+    """The block's lines for a project: [{key, label, text, value, by, scope}]. by: who set a line
+    that differs from the default (None: the default); scope: "project" when the project sets one of
+    its parts itself, else "everywhere" (or "machine")."""
     d = read_settings() if d is None else d
-    ls = layers(d, space)
-    on, every, direction = autopilot_of(space, d) if auto is None else auto
+    ls = layers(d, project)
+    on, every, direction = autopilot_of(project, d) if auto is None else auto
 
     def lines(cfg, autopilot):
         t = cfg["tasks"]
@@ -99,7 +101,6 @@ def rows(space, d=None, auto=None):
         merge = t.get("merge") if t.get("merge") in MERGE_SHORT else "ask"
         notes = [w for w, k in (("start", "start_notes"), ("finish", "finish_notes")) if str(t.get(k) or "").strip()]
         a_on, a_every, a_dir = autopilot
-        suggesting = (cfg.get("agents") or {}).get("suggestions") is not False
         return [
             ("review", "Review", review, "on" if rounds > 0 else "off",
              [("tasks", "review_rounds"), ("tasks", "must_fix"), ("reviewer", None)]),
@@ -119,8 +120,6 @@ def rows(space, d=None, auto=None):
             ("autopilot", "Autopilot", ("on, " + a_every + (f", direction: {a_dir}" if a_dir else "")) if a_on
              else "off" + (f" (direction when on: {a_dir})" if a_dir else ""), "on" if a_on else "off",
              [("autopilot", "every"), ("autopilot", "events"), ("autopilot", "direction"), ("autopilot", None)]),
-            ("suggestions", "Suggested next message", "on (end each reply with the message you'd likely send next, greyed out in the box)"
-             if suggesting else "off (no suggested next message)", "on" if suggesting else "off", [("agents", "suggestions")]),
         ]
     have = lines(resolve(ls), (on, every, direction))
     default = {x[0]: x[2] for x in lines(resolve([]), (False, every, ""))}
@@ -128,7 +127,7 @@ def rows(space, d=None, auto=None):
     for key, label, text, value, parts in have:
         def sets(layer):
             if key == "autopilot" and layer is ls[2][1] and on:
-                return True  # its switch is the space's own
+                return True  # its switch is the project's own
             return any((f is None and layer.get(sec)) or (f is not None and isinstance(layer.get(sec), dict) and layer[sec].get(f) is not None)
                        for sec, f in parts)
         setters = [name for name, layer in ls if sets(layer)]
@@ -170,31 +169,18 @@ def notice(changed):
 def session_note(terminal):
     """What an Assistant's new session is told: its settings block; "" for other agents or outside Herdr."""
     k = hc_json("get", terminal) if terminal else None
-    if not k or not is_coordinator(k):
+    if not _is_coord(k):
         return ""
-    rs = rows(space_of(k))
+    d = read_settings()
+    rs = rows(project_of(k, d), d)
     run(["hc", "label", terminal, f"{LABEL}={digest(rs)}"])
     return block(rs)
 
 
-def cmd_session_note(args):
-    """`herdr-task _session-note <terminal>`: the hook's extra words, as JSON string content
-    (escaped, without the quotes) so the hook can put them in its own JSON as they are."""
-    try:
-        text = session_note(args.terminal)
-    except Exception:  # a hook never fails a session's start
-        text = ""
-    if text:
-        sys.stdout.write(json.dumps(" " + text, ensure_ascii=False)[1:-1])
-
-
-def settings_pass(report, quiet):
-    """Tells each live Assistant here what changed in its settings since it was last told (its
+def settings_pass(report, quiet=None):
+    """Tells each live coordinator here what changed in its settings since it was last told (its
     LABEL), in one message. One without the label (started before this) gets the whole block once
-    it has had a turn. quiet: news_pass's {address: {turn, at}}, so a no-reply to this leaves a read
-    chat read."""
-    if addon_off("chat"):
-        return
+    it has had a turn."""
     try:
         mtime = os.path.getmtime(SETTINGS)
     except OSError:
@@ -210,22 +196,21 @@ def settings_pass(report, quiet):
     with open(tmp, "w") as f:
         json.dump({"mtime": mtime, "at": now()}, f)
     os.replace(tmp, STATE)
-    from .news import news_send, READ
+    from .news import news_send
     d = read_settings()
     for addr in coordinators():
         k = hc_json("get", addr) or {}
-        if k.get("state") != "live" or not is_coordinator(k):
+        if k.get("state") != "live" or not _is_coord(k):
             continue
         labels = k.get("labels") or {}
-        rs = rows(space_of(k), d)
-        had = parse(labels.get(LABEL))
+        rs = rows(project_of(k, d), d)
+        had = parse(labels.get(LABEL) or labels.get("herdr.settings"))
         now_digest = parse(digest(rs))
         if had == now_digest:
             continue
         if had is None:
             if not k.get("turn"):
-                continue  # just started: its hook is about to tell it
-            # started before Assistants were told their settings: the whole block, once
+                continue  # just started
             text = f'<herdr-setting name="all">{block(rs)} {NOTICE_END}</herdr-setting>'
             changed = [{"key": "all"}]
         else:
@@ -235,8 +220,6 @@ def settings_pass(report, quiet):
                 continue
             text = notice(changed)
         if not news_send(addr, text):
-            continue  # busy with the person: next time
+            continue  # busy: next time
         run(["hc", "label", addr, f"{LABEL}={digest(rs)}"])
         report.setdefault("settings", []).append({"to": addr, "changed": [r["key"] for r in changed]})
-        if str(labels.get(READ)) == str(k.get("turn")) and addr not in quiet:
-            quiet[addr] = {"turn": k.get("turn"), "at": now()}

@@ -7,7 +7,7 @@ import subprocess
 import shutil
 import tempfile
 
-from .base import git, hc_json, now, run
+from .base import git, hc_json, now, PROJECT_LABEL, ROLE_LABEL, run
 from .github import gh, pr_repo
 from .settings import gate_min, settings_for
 
@@ -76,7 +76,7 @@ def checks_pass(s, t):
         t.pop("check_run")
         s.dirty = True
         return
-    cmd = (settings_for(s, t.get("space"))["tasks"].get("check") or "").strip()
+    cmd = (settings_for(s)["tasks"].get("check") or "").strip()
     mine = [r for r in t.get("checks") or [] if r["sha"] == sha]
     last = mine[-1] if mine and t.get("pr") else None
     state = ((last or {}).get("ci") or {}).get("state")
@@ -91,9 +91,12 @@ def checks_pass(s, t):
     tmp = tempfile.mkdtemp(prefix="herdr-check-")
     if not git(wt, "worktree", "add", "--detach", tmp, sha)[0]:
         return clean(s, tmp)
+    key = s.key(t)
+    slug = getattr(s, "slug", None) or key.partition("#")[0]
     try:
         r = run(["hc", "run", "--bg", "--json", "--no-parent", "--no-notify", "--cwd", tmp,
-                 "--label", "herdr.role=checks", "--label", f"herdr.checks={s.key(t)}", "--", "sh", "-c", cmd])
+                 "--label", f"{PROJECT_LABEL}={slug}", "--label", f"{ROLE_LABEL}=checks",
+                 "--label", "herdr.role=checks", "--label", f"herdr.checks={key}", "--", "sh", "-c", cmd])
         address = json.loads(r.stdout)["address"] if r.returncode == 0 else None
     except (ValueError, KeyError):
         address = None
@@ -128,7 +131,7 @@ SYNC_FAILED = "Its check failed on it merged with its base branch (the base move
 
 
 def sync_mode(s, t):
-    k = settings_for(s, t.get("space"))["tasks"]
+    k = settings_for(s)["tasks"]
     mode = k.get("sync") if k.get("sync") in SYNC_MODES else "full"
     return "full" if mode == "cheap" and not (k.get("check") or "").strip() else mode
 
@@ -139,7 +142,7 @@ def sync_check(s, t, at, repo=None):
     ("error", why) when it couldn't check (fall back to full). Leaves the task's worktree, branch and folder alone."""
     from .github import remote_of, remote_repo
     main, base = s.loc["folder"], t.get("base") or "main"
-    cmd = (settings_for(s, t.get("space"))["tasks"].get("check") or "").strip()
+    cmd = (settings_for(s)["tasks"].get("check") or "").strip()
     remote = remote_of(main)
     if repo and remote_repo(main, remote) != repo:  # a fork's remote: its base isn't the pull request's
         return "error", f"{remote} isn't {repo}"

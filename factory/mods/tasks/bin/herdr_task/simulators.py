@@ -4,7 +4,7 @@
 import json, os, re, shlex, shutil, subprocess
 
 from . import store as _store
-from .base import Fail, hc_json, now
+from .base import Fail, hc_json, label_of, now, TASK_LABEL
 from .output import say
 from .settings import simulator_pool
 from .store import is_task_list, locate, prefixes_in_use, read_list, Store, store_files
@@ -64,7 +64,12 @@ def _task_ended(s, t, check_live=False):
     if starting(t) or review_running(t):
         return False
     try:
-        d = hc_json("ls", "--label", f"herdr.task={s.key(t)}")
+        key = s.key(t)
+        d = hc_json("ls", "--label", f"{TASK_LABEL}={key}")
+        if d is not None and not (d.get("terminals") or []):
+            d2 = hc_json("ls", "--label", f"herdr.task={key}")
+            if d2 is not None:
+                d = d2
     except Fail:
         return t.get("alive") is False
     if d is None:
@@ -133,7 +138,7 @@ def active_leases(s, devs):
 
 
 def simulator_line(s, task, space=None):
-    if not simulator_pool(s, space or task.get("space")):
+    if not simulator_pool(s):
         return ""
     from .launch import own_path
     ht, folder = own_path(), shlex.quote(s.loc["folder"])
@@ -144,10 +149,10 @@ def simulator_line(s, task, space=None):
 
 def _open_for_task(args):
     explicit = getattr(args, "id", None) or getattr(args, "task_opt", None)
-    env_ref = None if explicit else ((os.environ.get("HERDR_BROWSER_TASK") or "").strip() or None)
+    env_ref = None if explicit else ((os.environ.get("SHEEPDOG_TASK") or "").strip() or None)
     if not explicit and not env_ref and os.environ.get("HC_TERMINAL_ID"):
         from .launch import caller_labels
-        env_ref = (caller_labels().get("herdr.task") or "").strip() or None
+        env_ref = (label_of(caller_labels(), "task") or "").strip() or None
     ref = explicit or env_ref
     folder = getattr(args, "folder", None)
     if not folder and ref:
@@ -183,7 +188,7 @@ def cmd_simulator(args):
                     return say(args, {"enabled": False, "folder": s.loc["folder"], "released": None, "message": (m := off_message(s.loc["folder"]))}, m)
                 raise Fail(off_message(s.loc["folder"]))
             raise
-        pool = simulator_pool(s, t.get("space") if t else None)
+        pool = simulator_pool(s)
         if sub == "release":
             if t is not None and t.get("simulator"):
                 return say(args, {"enabled": bool(pool), "task": s.ref(t), "released": (prev := release_task(s, t))}, f"{s.ref(t)} released {prev['name']} ({prev['udid']}).")
