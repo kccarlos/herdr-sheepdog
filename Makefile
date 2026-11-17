@@ -45,7 +45,7 @@ test:
 test-factory:
 	cd factory && py="$$(tr -d '[:space:]' < .python-version)" && \
 		uv python install "$$py" && \
-		uv run --no-project --python-preference only-managed --python "$$py" python3 -W default -W ignore::ResourceWarning -m unittest discover -s test -v
+		uv run --no-project --python-preference only-managed --python "$$py" python3 -B -W default -W ignore::ResourceWarning -m unittest discover -s test -v
 
 # The herdr-app panel's tests (net/ and model/ of the mod; no herdr imports,
 # so plain node runs them).

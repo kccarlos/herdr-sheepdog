@@ -134,7 +134,7 @@ jobs:
       - if: needs.changes.outputs.code == 'true'
         uses: actions/checkout@v7
       - if: needs.changes.outputs.code == 'true'
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v10.3.3
       - if: needs.changes.outputs.code == 'true'
         name: Install pinned Python and run factory suite
         working-directory: factory
@@ -142,7 +142,7 @@ jobs:
           py="$(tr -d '[:space:]' < .python-version)"
           uv python install "$py"
           uv run --no-project --python-preference only-managed --python "$py" python3 --version
-          uv run --no-project --python-preference only-managed --python "$py" python3 -W default -W ignore::ResourceWarning -m unittest discover -s test -v
+          uv run --no-project --python-preference only-managed --python "$py" python3 -B -W default -W ignore::ResourceWarning -m unittest discover -s test -v
 
   cross:
     needs: changes
