@@ -1,10 +1,12 @@
 package supervisor
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +16,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/push"
+	"github.com/kccarlos/herdr-sheepdog/internal/redact"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
@@ -49,6 +52,12 @@ func (e *stubFactoryEngine) client(t *testing.T, proofs *factory.ProofStore) *fa
 						list = append(list, a)
 					}
 				}
+				slices.SortFunc(list, func(a, b factory.Ask) int {
+					if c := cmp.Compare(a.At, b.At); c != 0 {
+						return c
+					}
+					return cmp.Compare(a.ID, b.ID)
+				})
 				raw, _ := json.Marshal(factory.AsksResponse{Protocol: 1, Asks: list})
 				return raw, "", 0, nil
 
@@ -233,6 +242,89 @@ func TestFactoryUnknownAskKindRefusedWithoutCreatingCardOrProof(t *testing.T) {
 	}
 	if _, has := h.pending(); has || len(h.store.Questions()) != 0 {
 		t.Fatalf("unknown ask kind created pending/question state: %+v", h.store.Questions())
+	}
+}
+
+func TestFactoryBadSiblingAskDoesNotHideValidAsks(t *testing.T) {
+	good := sampleGateAsk("ask002")
+	bad := sampleGateAsk("bad009")
+	bad.Kind = factory.AskKind("deploy")
+	bad.At = 1763302000000
+
+	var proofs *factory.ProofStore
+	eng := newStubFactoryEngine(good, bad)
+
+	h := newHarness(t, func(cfg *Config) {
+		var err error
+		proofs, err = factory.NewProofStore(t.TempDir(), cfg.Now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.FactoryProofs = proofs
+		cfg.Factory = eng.client(t, proofs)
+	})
+
+	err := h.sup.SyncFactoryAsks(context.Background())
+	if !errors.Is(err, factory.ErrUnknownAskKind) {
+		t.Fatalf("SyncFactoryAsks err = %v, want ErrUnknownAskKind", err)
+	}
+	qs := h.store.Questions()
+	if len(qs) != 1 || qs[0].ID != "fask-ask002" {
+		t.Fatalf("Questions = %+v, want [fask-ask002] despite bad sibling ask", qs)
+	}
+	if n := h.log.count("factory.ask_rejected"); n != 1 {
+		t.Fatalf("factory.ask_rejected = %d, want 1", n)
+	}
+
+	// Answering the valid ask works even while the bad sibling ask sits in the store.
+	h.clock.Advance(time.Second)
+	if _, err := h.sup.AnswerTap(context.Background(), "fask-ask002", 1, "dev-iphone-1"); err != nil {
+		t.Fatalf("AnswerTap(valid ask alongside bad sibling): %v", err)
+	}
+	if len(h.store.Questions()) != 0 {
+		t.Fatalf("Questions after answering valid ask = %+v, want empty", h.store.Questions())
+	}
+}
+
+func TestFactoryRedactedOptionLabelStillVerifiesAnswerProof(t *testing.T) {
+	ask := sampleGateAsk("ask007")
+	ask.Options = []string{"Rotate password: demoValue9", "Cancel"}
+	ask.Recommend = ask.Options[0]
+
+	var proofs *factory.ProofStore
+	eng := newStubFactoryEngine(ask)
+
+	h := newHarness(t, func(cfg *Config) {
+		var err error
+		proofs, err = factory.NewProofStore(t.TempDir(), cfg.Now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.Redactor = redact.New("demoValue9")
+		cfg.FactoryProofs = proofs
+		cfg.Factory = eng.client(t, proofs)
+	})
+
+	if err := h.sup.SyncFactoryAsks(context.Background()); err != nil {
+		t.Fatalf("SyncFactoryAsks: %v", err)
+	}
+	p, ok := h.pending()
+	if !ok || strings.Contains(p.Options[0].Label, "demoValue9") {
+		t.Fatalf("card option label was not redacted: %+v", p)
+	}
+
+	h.clock.Advance(time.Second)
+	if _, err := h.sup.AnswerTap(context.Background(), "fask-ask007", 1, "dev-iphone-1"); err != nil {
+		t.Fatalf("AnswerTap on redacted option label: %v", err)
+	}
+	if len(eng.answers) != 1 || proofs.Count() != 1 {
+		t.Fatalf("answers=%d proofs=%d, want 1 each", len(eng.answers), proofs.Count())
+	}
+	for _, ev := range h.log.ofType("pending.confirmed") {
+		raw, _ := json.Marshal(ev.Payload)
+		if strings.Contains(string(raw), "demoValue9") {
+			t.Fatalf("pending.confirmed leaked unredacted value: %s", raw)
+		}
 	}
 }
 

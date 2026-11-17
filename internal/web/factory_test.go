@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -48,6 +50,12 @@ func (e *loopbackEngineHarness) client(t *testing.T) *factory.Client {
 						list = append(list, a)
 					}
 				}
+				slices.SortFunc(list, func(a, b factory.Ask) int {
+					if c := cmp.Compare(a.At, b.At); c != 0 {
+						return c
+					}
+					return cmp.Compare(a.ID, b.ID)
+				})
 				e.mu.Unlock()
 				raw, _ := json.Marshal(factory.AsksResponse{Protocol: 1, Asks: list})
 				return raw, "", 0, nil

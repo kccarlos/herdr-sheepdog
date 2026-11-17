@@ -285,6 +285,15 @@ type AsksResponse struct {
 	Asks     []Ask `json:"asks"`
 }
 
+// RejectedAsk describes an individual ask entry in `owner asks --json` that
+// failed v1 validation and was skipped without blocking sibling asks.
+type RejectedAsk struct {
+	ID      string
+	Project string
+	Kind    string
+	Err     error
+}
+
 // Ask is one structured owner/coordinator question in `<store_dir>/asks/<id>.json` (§2.2).
 type Ask struct {
 	ID         string         `json:"id"`
@@ -637,6 +646,47 @@ func DecodeAsksResponse(data []byte) (AsksResponse, error) {
 		return AsksResponse{}, err
 	}
 	return out, nil
+}
+
+// DecodeAsksResponsePartial strictly validates the top-level `owner asks --json`
+// envelope and decodes each ask independently so one malformed or unknown-kind
+// ask is refused and reported in RejectedAsk without hiding valid asks.
+func DecodeAsksResponsePartial(data []byte) (AsksResponse, []RejectedAsk, error) {
+	var env struct {
+		Protocol int               `json:"protocol"`
+		Asks     []json.RawMessage `json:"asks"`
+	}
+	if err := decodeStrictJSON(data, &env, CodeInvalidAsk, ErrInvalidAsk); err != nil {
+		return AsksResponse{}, nil, err
+	}
+	if env.Protocol != ProtocolVersion {
+		return AsksResponse{}, nil, contractErr(CodeInvalidAsk, ErrInvalidAsk, "unsupported protocol %d", env.Protocol)
+	}
+	if env.Asks == nil {
+		return AsksResponse{}, nil, contractErr(CodeInvalidAsk, ErrInvalidAsk, "asks must be an array")
+	}
+	valid := make([]Ask, 0, len(env.Asks))
+	var rejected []RejectedAsk
+	for _, raw := range env.Asks {
+		ask, err := DecodeAsk(raw)
+		if err != nil {
+			var probe struct {
+				ID      string `json:"id"`
+				Project string `json:"project"`
+				Kind    string `json:"kind"`
+			}
+			_ = json.Unmarshal(raw, &probe)
+			rejected = append(rejected, RejectedAsk{
+				ID:      probe.ID,
+				Project: probe.Project,
+				Kind:    probe.Kind,
+				Err:     err,
+			})
+			continue
+		}
+		valid = append(valid, ask)
+	}
+	return AsksResponse{Protocol: env.Protocol, Asks: valid}, rejected, nil
 }
 
 // Validate checks v1 invariants on AsksResponse.

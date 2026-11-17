@@ -181,6 +181,31 @@ func (c *Client) Asks(ctx context.Context, filter AsksFilter) (AsksResponse, err
 	if c.opts.Exec == nil && !hasAskFiles(c.opts.TasksDir) {
 		return AsksResponse{Protocol: ProtocolVersion, Asks: []Ask{}}, nil
 	}
+	raw, err := c.execAsksRaw(ctx, filter)
+	if err != nil {
+		return AsksResponse{}, err
+	}
+	return DecodeAsksResponse(raw)
+}
+
+// AsksPartial calls `owner asks [--project <p>] [--open] --json` and validates
+// each ask entry independently so one malformed or unknown-kind ask is isolated
+// into []RejectedAsk without blocking valid open asks.
+func (c *Client) AsksPartial(ctx context.Context, filter AsksFilter) (AsksResponse, []RejectedAsk, error) {
+	if !c.Active() {
+		return AsksResponse{Protocol: ProtocolVersion, Asks: []Ask{}}, nil, nil
+	}
+	if c.opts.Exec == nil && !hasAskFiles(c.opts.TasksDir) {
+		return AsksResponse{Protocol: ProtocolVersion, Asks: []Ask{}}, nil, nil
+	}
+	raw, err := c.execAsksRaw(ctx, filter)
+	if err != nil {
+		return AsksResponse{}, nil, err
+	}
+	return DecodeAsksResponsePartial(raw)
+}
+
+func (c *Client) execAsksRaw(ctx context.Context, filter AsksFilter) ([]byte, error) {
 	args := []string{"owner", "asks"}
 	if p := strings.TrimSpace(filter.Project); p != "" {
 		args = append(args, "--project", p)
@@ -189,11 +214,7 @@ func (c *Client) Asks(ctx context.Context, filter AsksFilter) (AsksResponse, err
 		args = append(args, "--open")
 	}
 	args = append(args, "--json")
-	raw, err := c.exec(ctx, c.opts.ReadTimeout, args...)
-	if err != nil {
-		return AsksResponse{}, err
-	}
-	return DecodeAsksResponse(raw)
+	return c.exec(ctx, c.opts.ReadTimeout, args...)
 }
 
 // Digest calls `owner digest [--project <p>] [--since <s>] --json` (§2.3).

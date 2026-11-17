@@ -69,7 +69,7 @@ func (s *Supervisor) SyncFactoryAsks(ctx context.Context) error {
 	s.factorySyncMu.Lock()
 	defer s.factorySyncMu.Unlock()
 
-	resp, err := s.cfg.Factory.Asks(ctx, factory.AsksFilter{Open: true})
+	resp, rejected, err := s.cfg.Factory.AsksPartial(ctx, factory.AsksFilter{Open: true})
 	if err != nil {
 		if errors.Is(err, factory.ErrOwnerUnsupported) || ctx.Err() != nil {
 			return nil
@@ -87,27 +87,68 @@ func (s *Supervisor) SyncFactoryAsks(ctx context.Context) error {
 		}
 		return err
 	}
+
+	activeWarnings := make(map[string]bool, len(rejected))
+	var firstReject error
+	for _, rej := range rejected {
+		if firstReject == nil {
+			firstReject = rej.Err
+		}
+		key := "ask:" + rej.ID + ":" + rej.Err.Error()
+		activeWarnings[key] = true
+		s.mu.Lock()
+		already := s.factoryWarned[key]
+		if s.factoryWarned == nil {
+			s.factoryWarned = map[string]bool{}
+		}
+		s.factoryWarned[key] = true
+		s.mu.Unlock()
+		if !already {
+			pane := ""
+			if strings.TrimSpace(rej.Project) != "" {
+				pane = factoryPaneID(rej.Project)
+			}
+			s.log.Log("factory", "factory.ask_rejected", pane, map[string]any{
+				"ask_id": rej.ID,
+				"kind":   rej.Kind,
+				"code":   factory.ErrorCode(rej.Err),
+				"error":  rej.Err.Error(),
+			})
+		}
+	}
 	s.mu.Lock()
-	clear(s.factoryWarned)
+	for k := range s.factoryWarned {
+		if !activeWarnings[k] {
+			delete(s.factoryWarned, k)
+		}
+	}
 	s.mu.Unlock()
-	return s.IngestFactoryAsks(resp.Asks)
+
+	if ierr := s.IngestFactoryAsks(resp.Asks); ierr != nil && firstReject == nil {
+		firstReject = ierr
+	}
+	return firstReject
 }
 
 // IngestFactoryAsks validates asks against owner contract v1 (refusing any
-// unknown ask kind before creating a card) and reconciles the open set into
-// Supervisor's pending / question store.
+// unknown ask kind before creating a card while still reconciling valid asks)
+// and updates Supervisor's pending / question store.
 func (s *Supervisor) IngestFactoryAsks(asks []factory.Ask) error {
 	openList := make([]factory.Ask, 0, len(asks))
 	openMap := make(map[string]factory.Ask, len(asks))
+	var firstErr error
 	for _, ask := range asks {
 		if err := ask.Validate(); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
 			s.log.Log("factory", "factory.ask_rejected", factoryPaneID(ask.Project), map[string]any{
 				"ask_id": ask.ID,
 				"kind":   string(ask.Kind),
 				"code":   factory.ErrorCode(err),
 				"error":  err.Error(),
 			})
-			return err
+			continue
 		}
 		if ask.Status != "open" {
 			continue
@@ -186,7 +227,7 @@ func (s *Supervisor) IngestFactoryAsks(asks []factory.Ask) error {
 			"pending_id": item.pending.ID,
 		})
 	}
-	return nil
+	return firstErr
 }
 
 func (s *Supervisor) newFactoryPendingLocked(ask factory.Ask) state.PendingAction {
@@ -335,7 +376,7 @@ func (s *Supervisor) stillAskingFactory(ctx context.Context, p state.PendingActi
 		s.mu.Unlock()
 		return ok && ask.Status == "open", true
 	}
-	resp, err := s.cfg.Factory.Asks(ctx, factory.AsksFilter{Open: true})
+	resp, _, err := s.cfg.Factory.AsksPartial(ctx, factory.AsksFilter{Open: true})
 	if err != nil {
 		s.log.Log(logSource, "supervisor.reconcile_error", p.PaneID, map[string]any{"error": err.Error(), "for": "factory_tap"})
 		return false, false
@@ -499,7 +540,14 @@ func (s *Supervisor) answerFactoryAskLocked(
 	if u := utteranceOf(ctx); u != nil && u.id != "" {
 		uttID = u.id
 	}
-	proof, err := s.mintAnswerProofLocked(ask, optIdx, optLabel, in, via, tapDeviceID, uttID)
+	// Mint AnswerProof with the canonical contract option label from `ask.Options`
+	// (so loopback verification matches the engine's record even when Redactor
+	// masked the card's display label), while keeping `optLabel` for logs/speech.
+	proofOptionLabel := optLabel
+	if optIdx >= 1 && optIdx <= len(ask.Options) {
+		proofOptionLabel = ask.Options[optIdx-1]
+	}
+	proof, err := s.mintAnswerProofLocked(ask, optIdx, proofOptionLabel, in, via, tapDeviceID, uttID)
 	if err != nil {
 		s.railBlockedLocked(p, keys, via, err.Error())
 		return voice.ToolResult{Spoken: "Factory asks can only be answered from a paired phone or live voice.", Scheduling: voice.UrgencyInterrupt}, err, false
