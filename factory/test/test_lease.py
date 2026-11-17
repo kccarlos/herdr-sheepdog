@@ -222,6 +222,17 @@ class Reconcile(LeaseCase):
         lease.reconcile_pass(report := {})
         self.assertIsNone(report.get("coordinators"))  # nothing left to move: no write, no report
 
+    def test_a_recovery_cut_short_still_moves_the_held_news(self):
+        self.hc.term("n9", self.repo)
+        self.save([{"id": 1, "title": "Auth", "state": "running"}], coordinator={"address": "n9", "created_ms": 1000, "previous": "c1"})
+        with news.held_messages() as held:
+            held["c1"] = [{"text": "SHOP-1 is ready", "how": "news", "at": self.now}]  # the tick stopped before it moved
+        lease.reconcile_pass(report := {})
+        with news.held_messages() as held:
+            self.assertEqual((held.get("c1"), [x["text"] for x in held["n9"]]), (None, ["SHOP-1 is ready"]))
+        lease.reconcile_pass(report := {})
+        self.assertIsNone(report.get("coordinators"))
+
     def test_one_starts_before_any_owner_message_and_only_for_a_repo_with_open_tasks(self):
         self.save([{"id": 1, "title": "Auth", "state": "done"}])
         lease.reconcile_pass({})

@@ -256,6 +256,12 @@ def reparent(folder, old, new):
     return moved
 
 
+def has_held(addr):
+    from .news import HELD
+    held = _store.read_list(HELD)
+    return bool(isinstance(held, dict) and held.get(addr))
+
+
 def orphans(d, holder_addr):
     """Whether a live task agent of the list reports to a parent that is gone (not `holder_addr`)."""
     parents = {a["parent"] for t in d.get("tasks") or [] for a in (t.get("agents") or []) + (t.get("reviewers") or [])
@@ -299,9 +305,11 @@ def reconcile_pass(report):
             holders.add(k["address"])
             try:
                 remember_session(folder, k)
-                if orphans(d, k["address"]):  # a recovery cut short before its workers moved
+                prev = lease.get("previous")
+                prev = prev if prev and prev != k["address"] and has_held(prev) and not _live({"address": prev}) else None
+                if prev or orphans(d, k["address"]):  # a recovery cut short before its workers or held news moved
                     report.setdefault("coordinators", []).append({"action": "re-parented", "folder": folder, "to": k["address"],
-                                                                  "workers": reparent(folder, None, k["address"])})
+                                                                  "workers": reparent(folder, prev, k["address"])})
             except (OSError, ValueError, Fail):
                 pass
             continue

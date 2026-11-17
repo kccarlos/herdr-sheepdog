@@ -25,8 +25,8 @@ The handoff names the previous coordinator's session log and its saved screen (`
 
 1. **The holder's terminal is live:** nothing to do. A kept terminal that hc gave a shell counts too, because revive types its agent back. The holder's session and log are copied onto the lease for a later handoff.
 2. **No live holder:** a new coordinator starts with a handoff and takes the lease. No message from the owner is needed. First a timed probe of the repo's disk runs. If the disk is stalled, nothing starts (note 54 began with a disk stall).
-3. **Re-parenting:** workers whose parent was the old coordinator, or is gone, get the new one as their parent in their task's agent record. hc cannot change a terminal's parent. Messages held for the old coordinator move to the new one.
-4. **Limits:** after a start, no new start for 10 minutes. After 3 starts in an hour, the tick stops starting and reports `gave-up`.
+3. **Re-parenting:** workers whose parent was the old coordinator, or is gone, get the new one as their parent in their task's agent record. hc cannot change a terminal's parent. Messages held for the old coordinator move to the new one. A later tick finishes a recovery that was cut short: workers still on a dead parent, or news still held for the previous holder, move to the live holder.
+4. **Limits:** after a start, no new start for 10 minutes. A start blocks the tick until the new coordinator takes its first message (hc's own wait, up to 60 s). After 3 starts in an hour, the tick stops starting and reports `gave-up`.
 
 The home folder and other plain folders are not projects, so no coordinator starts for them.
 
