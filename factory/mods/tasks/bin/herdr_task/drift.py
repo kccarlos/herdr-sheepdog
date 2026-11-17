@@ -21,11 +21,14 @@ def inspect(s, t, v):
     if pr.get("failed_checks") != failed_names:
         pr["failed_checks"] = failed_names
         s.dirty = True
+    if v.get("state") == "MERGED" and not pr.get("drift_verified_merged"):
+        pr["drift_verified_merged"] = True
+        s.dirty = True
     drift = {}
     if t.get("state") == "done" and v.get("state") in ("OPEN", "CLOSED"):
         drift["done"] = "Task is done but its pull request is not merged"
     expected = t.get("head")
-    if t.get("state") in ("ready", "done") and expected and head and expected != head and synced_head(t, pr_repo(t, s), head) is None:
+    if t.get("state") in ("ready", "done") and not t.get("push_held") and expected and head and expected != head and synced_head(t, pr_repo(t, s), head) is None:
         drift["head"] = "Stored head differs from the pull request head"
     if v.get("state") == "OPEN":
         accepted = t.get("accepted_at") or t.get("merge_queued") or t.get("merge_requested")
@@ -46,7 +49,7 @@ def inspect(s, t, v):
                 pr_update_branch(t, repo, head)
                 s.dirty = True
         reviewed = (t.get("state") == "ready" or t.get("accepted_at") or t.get("merge_queued")
-                    or any(r.get("head") == head for r in t.get("reviews") or []))
+                    or t.get("merge_requested") or (t.get("review_out") and expected == head))
         if failures and reviewed and resolve_stage(t, store=s).stage != "ci":
             runs = sorted({run_id(c) for c in failures if run_id(c) and run_id(c) not in limited})
             if pr.get("drift_rerun_head") != head and head and runs:
@@ -91,7 +94,7 @@ def drift_pass(s, t, v=None, at=None):
 
 def audit_done(s, at):
     """Bound old PR reads to one per folder per tick, oldest observation first."""
-    tasks = [t for t in s.data["tasks"] if t.get("state") == "done" and t.get("pr")]
+    tasks = [t for t in s.data["tasks"] if t.get("state") == "done" and t.get("pr") and not t["pr"].get("drift_verified_merged")]
     if tasks:
         tasks.sort(key=lambda t: (max(t["pr"].get("drift_checked") or 0, t["pr"].get("checked") or 0, t.get("done_at") or 0), t["id"]))
         drift_pass(s, tasks[0], at=at)

@@ -61,7 +61,7 @@ class Comparisons(unittest.TestCase):
     def test_red_outside_ci_reruns_once_and_clears(self):
         from unittest.mock import patch
         self.t["state"] = "done"
-        self.t["reviews"] = [{"head": "abc"}]
+        self.t["accepted_at"] = self.now
         self.v["statusCheckRollup"] = [{"name": "test", "conclusion": "FAILURE", "detailsUrl": "https://example.test/actions/runs/123"}]
         with patch.object(self.drift, "gh", return_value=(True, "", "")) as gh:
             self.assertIn("red", self.inspect())
@@ -116,7 +116,7 @@ class Comparisons(unittest.TestCase):
     def test_timeout_in_failed_run_is_not_rerun(self):
         from unittest.mock import patch
         self.t["state"] = "done"
-        self.t["reviews"] = [{"head": "abc"}]
+        self.t["accepted_at"] = self.now
         url = "https://example.test/actions/runs/123"
         self.v["statusCheckRollup"] = [{"name": "test", "conclusion": "FAILURE", "detailsUrl": url},
                                         {"name": "slow", "conclusion": "TIMED_OUT", "detailsUrl": url}]
@@ -167,3 +167,26 @@ class Comparisons(unittest.TestCase):
             self.assertEqual(probe.call_count, 1)
             self.drift.audit_done(self.store, 11)
             self.assertEqual([call.args[1]["id"] for call in probe.call_args_list], [1, 2])
+
+    def test_findings_review_while_worker_fixes_is_quiet(self):
+        from unittest.mock import patch
+        self.t.update(state="running", reviews=[{"head": "abc", "result": "report"}])
+        self.v["statusCheckRollup"] = [{"name": "test", "conclusion": "FAILURE", "detailsUrl": "https://example.test/actions/runs/9"}]
+        with patch.object(self.drift, "gh") as gh:
+            self.assertNotIn("red", self.inspect())
+            gh.assert_not_called()
+
+    def test_held_push_is_not_a_head_mismatch(self):
+        self.t["push_held"] = {"reason": "CI capacity"}
+        self.v["headRefOid"] = "old"
+        self.assertNotIn("head", self.inspect())
+
+    def test_verified_merged_pr_is_not_polled_again(self):
+        from unittest.mock import patch
+        self.t["state"] = "done"
+        self.store.data["tasks"] = [self.t]
+        self.v["state"] = "MERGED"
+        self.inspect()
+        with patch.object(self.drift, "drift_pass") as probe:
+            self.drift.audit_done(self.store, self.now)
+            probe.assert_not_called()

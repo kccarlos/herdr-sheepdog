@@ -836,7 +836,7 @@ def cmd_tick(args):
         d = read_list(p)
         tasks = (d or {}).get("tasks") or []
         if not d or not os.path.isdir(d.get("folder") or "") or not (d.get("main_watch") or any(
-                t.get("state") in ("queued", "scheduled", "ready") or t.get("pr") or t.get("check_run") or (t.get("worktree") and t.get("state") == "running") or starts_now(t) for t in tasks)):
+                t.get("state") in ("queued", "scheduled", "ready") or (t.get("pr") and not (t["state"] == "done" and t["pr"].get("drift_verified_merged"))) or t.get("check_run") or (t.get("worktree") and t.get("state") == "running") or starts_now(t) for t in tasks)):
             continue
         try:
             with Store(locate(d["folder"])) as s:
