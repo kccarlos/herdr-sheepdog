@@ -14186,6 +14186,7 @@ class InstalledCliAndMissingRefusal(unittest.TestCase):
         self.call(lambda a: self.commands.cmd_state(a, "done"), id=hold.split("-")[1])
         self.assertEqual(tick(), ["SDF-24"])
         self.assertEqual(len(self.runs), 7)
+        self.assertIn("You are taking over task SDF-24", self.runs[-1][-1])
         self.assertEqual(self.call(self.commands.cmd_reopen, id="SDF-24", to_do=True)["state"], "queued")
 
     def test_unset_agent_resolves_consistently_across_layers(self):

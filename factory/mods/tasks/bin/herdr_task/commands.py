@@ -388,6 +388,7 @@ def begin(s, t, argv, space=None, parent=None):
     """Starts the task's first agent. Returns its record."""
     if refused := start_refusal(s, t, argv):
         raise Fail(refused)
+    previous = last_agent(t) if t.get("returned_to_waiting") else None
     t["started_from_queue"] = t["state"] == "queued"
     t["state"], t["started"] = "running", now()
     # Its brief teaches `reviewed`: ready waits for a review of its final commit (review_refusal).
@@ -403,7 +404,8 @@ def begin(s, t, argv, space=None, parent=None):
         # it changed nothing, so there is nothing to review (review_refusal, #744).
         t["folder_start"] = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None
     parent = parent_for(parent, s.loc["folder"])
-    return launch(s, t, argv, brief(s, t, parent, argv), parent=parent)
+    message = handoff(s, t, previous, parent, argv) if previous else brief(s, t, parent, argv)
+    return launch(s, t, argv, message, parent=parent)
 
 
 # #1053: an agent just launched still shows its shell for a moment (agent_running() says no): a task
