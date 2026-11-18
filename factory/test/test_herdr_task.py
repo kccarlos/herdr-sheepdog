@@ -18,6 +18,42 @@ CI = os.environ.get("CI") == "true"
 
 
 class HerdrTask(unittest.TestCase):
+    def test_workers_can_ask_without_approval(self):
+        import tomllib
+        from types import SimpleNamespace
+        from unittest import mock
+
+        sys.path.insert(0, BIN)
+        from herdr_task import launch
+
+        path, folder = "/bin/herdr-task", "/repo/worker"
+        rule = f"Bash({path} ask:*)"
+        store = SimpleNamespace(loc={"folder": folder}, ref=lambda _: "DEMO-1")
+        with tempfile.TemporaryDirectory() as home, \
+                mock.patch.object(launch, "HOME", home), \
+                mock.patch.object(launch, "own_path", return_value=path), \
+                mock.patch.object(launch, "secret_path", return_value=None), \
+                mock.patch.object(launch, "claude_trust"), \
+                mock.patch.object(launch, "review_limits", return_value=(False, 0)), \
+                mock.patch("herdr_task.simulators.simulator_pool", return_value=[]):
+            self.assertIn(rule, launch.own_rules(path))
+            claude = launch.own_argv(["claude"], folder, cwd=folder)
+            self.assertIn(rule, json.loads(claude[2])["permissions"]["allow"])
+            agy = json.loads(launch.own_argv(["agy"], folder, cwd=folder)[2])
+            self.assertIn(f"command({path} ask)", agy["permissions"]["allow"])
+            self.assertEqual(agy["trustedWorkspaces"], [folder])
+            codex = launch.own_argv(["codex"], folder, cwd=folder)
+            self.assertIn(f'projects={{"{folder}"={{trust_level="trusted"}}}}', codex)
+            hook = tomllib.loads(codex[2])["hooks"]["PermissionRequest"][0]["hooks"][0]["command"]
+            command = f'{path} ask "Which option?" --option A --option B --recommend A --folder {folder}'
+            result = subprocess.run(shlex.split(hook), input=json.dumps({"tool_input": {"command": command}}),
+                                    check=True, capture_output=True, text=True)
+            self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["decision"]["behavior"], "allow")
+            brief = launch.closing_line(store, {}, argv=codex)
+            verbs = re.search(r"then its ([\w, -]+) commands run without asking\.", brief)
+            self.assertIsNotNone(verbs)
+            self.assertEqual(verbs.group(1).split(", "), launch.OWN)
+
     def test_compiles(self):
         files = [os.path.join(BIN, "herdr-task")] + [os.path.join(BIN, "herdr_task", f) for f in sorted(os.listdir(os.path.join(BIN, "herdr_task"))) if f.endswith(".py")]
         files += [os.path.join(ROOT, "bin", "herdr-secret")]
