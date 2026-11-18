@@ -186,6 +186,7 @@ func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	out = append(out, checkCodexbar(ctx, o, inHC, customLookPath))
 	out = append(out, checkTart(ctx, o, inHC, customLookPath))
 	out = append(out, checkSync(ctx, o, volumeOK, probedDir))
+	out = append(out, checkWorktreeSparse(ctx, o, volumeOK, probedDir))
 	return out
 }
 
@@ -1239,6 +1240,34 @@ func checkSync(ctx context.Context, o DoctorOptions, volumeOK bool, probedDir st
 		fmt.Sprintf("herdr-task config --set tasks.check=<cmd> --folder %s", repoDir))
 }
 
+// CheckWorktreeSparse reports whether new task worktrees exclude any paths via
+// worktree.sparse_exclude so nobody wonders where excluded files went.
+func CheckWorktreeSparse(ctx context.Context, o DoctorOptions, volumeOK bool) onboard.Result {
+	o = o.withDefaults()
+	return checkWorktreeSparse(ctx, o, volumeOK, "")
+}
+
+func checkWorktreeSparse(ctx context.Context, o DoctorOptions, volumeOK bool, probedDir string) onboard.Result {
+	const name = "worktree.sparse_exclude"
+	if !volumeOK {
+		return resSkip(name, "skipped until project volume answers")
+	}
+	repoDir := o.Folder
+	if probedDir != "" {
+		repoDir = probedDir
+	}
+	if common := gitLine(ctx, o, repoDir, "rev-parse", "--path-format=absolute", "--git-common-dir"); common != "" && filepath.Base(common) == ".git" {
+		repoDir = filepath.Dir(common)
+	} else if root := gitLine(ctx, o, repoDir, "rev-parse", "--show-toplevel"); root != "" {
+		repoDir = root
+	}
+	excludes := readWorktreeSparseExclude(o.SettingsPath, repoDir)
+	if len(excludes) == 0 {
+		return resOK(name, "none (full worktree checkouts)")
+	}
+	return resOK(name, fmt.Sprintf("excludes %s (new worktrees use non-cone sparse checkout; undo with: git sparse-checkout disable)", strings.Join(excludes, ", ")))
+}
+
 // CheckTart checks whether `tart` is on PATH and lists at least one VM,
 // honouring TART_HOME from o.TartHome, the environment, or the factory setting
 // `machine.tart_home` in settings.json.
@@ -1320,6 +1349,9 @@ type factorySettingsLayer struct {
 		Sync  string  `json:"sync"`
 		Check *string `json:"check"`
 	} `json:"tasks"`
+	Worktree struct {
+		SparseExclude []string `json:"sparse_exclude"`
+	} `json:"worktree"`
 }
 
 type factorySettingsDoc struct {
@@ -1405,6 +1437,41 @@ func readSyncSettings(settingsPath, folder string) (mode, check string) {
 		}
 	}
 	return mode, check
+}
+
+func readWorktreeSparseExclude(settingsPath, folder string) []string {
+	doc, ok := loadFactorySettings(settingsPath)
+	if !ok {
+		return nil
+	}
+	var out []string
+	apply := func(l factorySettingsLayer) {
+		if l.Worktree.SparseExclude != nil {
+			out = nil
+			for _, p := range l.Worktree.SparseExclude {
+				if trimmed := strings.Trim(strings.TrimSpace(p), "/"); trimmed != "" {
+					out = append(out, trimmed)
+				}
+			}
+		}
+	}
+	apply(doc.Everywhere)
+	if m, ok := doc.Machines[firstNonEmpty(doc.Here, "local")]; ok {
+		apply(m)
+	}
+	for _, sp := range doc.Spaces {
+		if sameFolder(sp.Folder, folder) {
+			apply(sp)
+			break
+		}
+	}
+	for k, pr := range doc.Projects {
+		if sameFolder(k, folder) {
+			apply(pr)
+			break
+		}
+	}
+	return out
 }
 
 func sameFolder(a, b string) bool {

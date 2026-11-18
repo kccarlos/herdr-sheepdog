@@ -18,7 +18,7 @@ import sys
 import time
 
 from .base import ENTRY, Fail, HOME, git, hc_json, kill_agent, label_of, now, PROJECT_LABEL, ROLE_LABEL, run, STORE, TASK_LABEL, WHERE, WORKTREES
-from .settings import agent_key, ASSISTANT_TEMPLATES, by_layer, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, gate_min, keep_review, notes, notes_part, read_settings, review_limits, settings_block, settings_for
+from .settings import agent_key, ASSISTANT_TEMPLATES, by_layer, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, gate_min, keep_review, notes, notes_part, read_settings, review_limits, settings_block, settings_for, sparse_exclude_of, sparse_exclude_pattern
 from .templates import instructions
 from .agents import LINE_MAX, SUMMARY_MAX
 from .github import remote_of
@@ -815,16 +815,32 @@ def folder_for(s, task):
         task.update(worktree=path, branch=br, base=base, start=start)
         return path
     exists = git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")[0]
+    exclude = sparse_exclude_of(s)
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    no_checkout = ["--no-checkout"] if exclude else []
     if exists:
-        add = ["worktree", "add", path, branch]
+        add = ["worktree", "add", *no_checkout, path, branch]
     else:
         # From the base's latest (fetched first); a detached folder (base is a commit) from HEAD.
         branchy = git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{base}")[0]
-        add = ["worktree", "add", "--no-track", "-b", branch, path, fresh_start(main, base) if branchy else (own or "HEAD")]
+        add = ["worktree", "add", *no_checkout, "--no-track", "-b", branch, path, fresh_start(main, base) if branchy else (own or "HEAD")]
     ok, _, err = git(main, *add)
     if not ok:
         raise Fail(err or "git worktree add failed")
+    if exclude:
+        def _rollback():
+            git(main, "worktree", "remove", "--force", path)
+            if not exists:
+                git(main, "branch", "-D", branch)
+
+        ok, _, err = git(path, "sparse-checkout", "set", "--no-cone", "/*", *[sparse_exclude_pattern(p) for p in exclude])
+        if not ok:
+            _rollback()
+            raise Fail(err or "git sparse-checkout set failed")
+        ok, _, err = git(path, "checkout")
+        if not ok:
+            _rollback()
+            raise Fail(err or "git checkout failed")
     # Where the branch starts: work past it that turns up in the base branch means merged.
     start = git(path, "rev-parse", "HEAD")[1] if not exists else task.get("start")
     task.update(worktree=path, branch=branch, base=task.get("base") or base, start=start)
