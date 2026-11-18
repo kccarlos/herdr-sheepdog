@@ -392,6 +392,10 @@ def begin(s, t, argv, space=None, parent=None):
     previous = last_agent(t) if original_start else None
     t["started_from_queue"] = t["state"] == "queued"
     t["state"], t["started"] = "running", original_start or now()
+    if original_start:
+        t["restarted_at"] = now()
+    else:
+        t.pop("restarted_at", None)
     # Its brief teaches `reviewed`: ready waits for a review of its final commit (review_refusal).
     t["review_gate"] = True
     for k in ("queue", "queued_at", "attention", "attention_at", "held", "scheduled_for", "returned_to_waiting"):

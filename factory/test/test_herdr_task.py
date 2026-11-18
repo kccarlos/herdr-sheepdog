@@ -14202,6 +14202,21 @@ class InstalledCliAndMissingRefusal(unittest.TestCase):
         with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
             self.assertIn("isn't reviewed", self.commands.review_refusal(s, s.find(ref), None))
 
+    def test_reopen_to_do_waiting_time_does_not_trigger_a_recap(self):
+        from herdr_task import budget
+        ref = self.add("Estimated work", set=["estimate.time=1h"])
+        first = self.start(ref)
+        self.call(self.commands.cmd_reopen, id=ref, to_do=True)
+        later = first["started"] + 3 * 60 * 60_000
+        with self.mock.patch.object(self.commands, "now", return_value=later):
+            self.start(ref, now=False)
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+            t = s.find(ref)
+            with self.mock.patch.object(budget, "now", return_value=later):
+                self.assertEqual(budget.triggers(s, t), [])
+            with self.mock.patch.object(budget, "now", return_value=later + 3 * 60 * 60_000):
+                self.assertIn("over twice its time estimate", budget.triggers(s, t)[0])
+
     def test_unset_agent_resolves_consistently_across_layers(self):
         ref = self.add()
         for have, expected in (({"agy"}, "agy"), ({"codex", "agy"}, "codex"), ({"claude", "agy"}, "claude"), (set(), "claude")):
