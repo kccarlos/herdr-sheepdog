@@ -34,16 +34,9 @@ button{cursor:pointer}
 
   <main aria-label="Terminal" style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 10px 14px; display: flex; flex-direction: column; font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; line-height: 18px; color: {{c.ink}}">
     <sc-for list="{{ lines }}" as="l" hint-placeholder-count="12">
-      <div style="white-space: pre-wrap; color: {{ l.color }}; background: {{ l.bg }}; margin: 0 -6px; padding: 0 6px; border-radius: 4px"><sc-if value="{{ l.owner }}" hint-placeholder-val="{{ false }}"><span style="display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 6px; background: {{c.accent}}; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; font-size: 11px; font-weight: 700; line-height: 16px">owner</span></sc-if>{{ l.t }}</div>
+      <div style="white-space: pre-wrap; color: {{ l.color }}; background: {{ l.bg }}; margin: 0 -6px; padding: 0 6px; border-radius: 4px">{{ l.t }}</div>
     </sc-for>
   </main>
-
-  <sc-if value="{{ showReceipt }}" hint-placeholder-val="{{ false }}">
-    <div style="flex-shrink: 0; margin: 0 10px 8px; padding: 8px 12px; border-radius: 12px; border: 1px solid {{c.line}}; background: {{c.surface}}; display: flex; flex-direction: column; gap: 2px">
-      <span style="font-size: 12px; font-weight: 600; color: {{c.accentText}}">Logged as yours</span>
-      <span style="font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 11px; line-height: 15px; color: {{c.ink2}}">14:09 by=owner wake=input:phone decision=typed why="prompt, 34 chars"</span>
-    </div>
-  </sc-if>
 
   <div role="toolbar" aria-label="Keys" style="flex-shrink: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; padding: 0 10px 8px">
     <button aria-label="Escape" style="height: 40px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-family: 'SF Mono', ui-monospace, monospace; font-size: 13px; font-weight: 500">esc</button>
@@ -80,9 +73,9 @@ class Component extends DCLogic {
       ["", "ink"],
       ["Wake: event:drift SDF-38", "ink"],
       ["  CI red on a reviewed head", "ink2"],
-      ["● Opened SDF-57: fix the flaky socket test", "ink"],
+      ["● Added SDF-57: fix main, watchdog crash", "ink"],
       ["● herdr-task progress \"Accepted SDF-41;", "ink"],
-      ["  SDF-57 opened; next: SDF-53 review\"", "ink"],
+      ["  SDF-57 added; next: SDF-53 review\"", "ink"],
       ["", "ink"],
       ["> Hold SDF-54 until SDF-53 merges.", "ink"],
       ["● Holding SDF-54 behind SDF-53", "ink"],
@@ -106,9 +99,8 @@ class Component extends DCLogic {
     ];
     const lines = (isCoord ? coord : worker).map((l) => ({
       t: l[0] === "" ? " " : l[0],
-      owner: l[1] === "owner",
       color: l[1] === "ink2" ? c.ink2 : l[1] === "green" ? c.green : c.ink,
-      bg: l[1] === "owner" ? c.accentTint : "transparent"
+      bg: "transparent"
     }));
     return {
       c, dark: d, isCoord, lines,

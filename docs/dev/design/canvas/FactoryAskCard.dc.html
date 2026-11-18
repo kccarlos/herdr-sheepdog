@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — a factory ask in the approval card</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<section aria-label="The herdr-sheepdog factory needs your answer" style="width: {{ w }}px; box-sizing: border-box; padding: 12px; border-radius: 14px; background: {{c.accentTint}}; border: 1px solid {{c.blocked}}; display: flex; flex-direction: column; gap: 10px; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <span style="font-size: 15px; line-height: 20px; font-weight: 600">The herdr-sheepdog factory asks: tag 0.1.31 now? Milestone 2 is accepted and main is green.</span>
+  <div style="display: flex; flex-wrap: wrap; gap: 6px">
+    <button style="min-height: 44px; padding: 6px 14px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 15px; font-weight: 600; text-align: left; flex: 1 1 100%; display: flex; align-items: center; gap: 8px">Tag 0.1.31<span style="font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 9px; background: {{c.accentTint}}; color: {{c.accentText}}">Recommended</span></button>
+    <button style="min-height: 44px; padding: 6px 14px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 15px; text-align: left; flex: 1 1 100%">Wait for one more QA pass</button>
+    <button style="min-height: 44px; padding: 6px 14px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 15px; text-align: left; flex: 1 1 100%">Not now</button>
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "w": {"editor": "int", "default": 358}, "$preview": {"width": 358, "height": 236}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = {"surface": "#FFFFFF", "ink": "#1F1F22", "line": "#E4E0D7", "accentText": "#8A5700", "accentTint": "#FDF1DC", "blocked": "#D99417"};
+    const dark = {"surface": "#1F2126", "ink": "#F5F2EA", "line": "#2E3138", "accentText": "#F5B83D", "accentTint": "#2A2416", "blocked": "#F0A92A"};
+    return { c: this.props.dark ? dark : light, w: this.props.w ?? 358 };
+  }
+}
+</script>
+</body>
+</html>

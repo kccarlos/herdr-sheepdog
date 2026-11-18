@@ -32,7 +32,7 @@ button{font:inherit;cursor:pointer}
         <div style="flex-shrink: 0; padding: 14px 10px 4px; display: flex; flex-direction: column; gap: 1px"><span style="font-size: 15px; font-weight: 600">{{ r.label }}</span><span style="font-size: 12px; font-weight: 600; color: {{ c.muted }}">{{ r.meta }}</span></div>
       </sc-if>
       <sc-if value="{{ r.isSpace }}" hint-placeholder-val="{{ false }}">
-        <button aria-current="{{ r.current }}" style="min-height: 30px; flex-shrink: 0; border: 0; border-radius: 8px; background: {{ r.bg }}; color: {{ c.muted }}; text-align: left; padding: 6px 10px 2px; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px">{{ r.label }}<span style="font-weight: 400">{{ r.meta }}</span></button>
+        <div style="min-height: 26px; flex-shrink: 0; color: {{ c.muted }}; padding: 6px 10px 0; box-sizing: border-box; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px">{{ r.label }}<span style="font-weight: 400">{{ r.meta }}</span></div>
       </sc-if>
       <sc-if value="{{ r.isAgent }}" hint-placeholder-val="{{ true }}">
         <button aria-current="{{ r.current }}" style="height: 40px; flex-shrink: 0; border: 0; border-radius: 10px; background: {{ r.bg }}; color: {{ c.ink }}; display: flex; align-items: center; gap: 10px; padding: 0 10px; font-size: 15px; font-weight: {{ r.weight }}; text-align: left">
@@ -61,7 +61,7 @@ class Component extends DCLogic {
       nav('conversation', 'Conversation'),
       nav('overview', 'All agents', '2 waiting'),
       pc('Work Mac', 'Voice is here'),
-      sp('space', 'herdr-sheepdog', 'main · factory, 1 ask'),
+      sp('space', 'herdr-sheepdog', 'main'),
       ag('coordinator', '', blue, '2 min'),
       ag('SDF-57', 'worker', amber, 'waiting', true),
       ag('SDF-53', 'worker', blue, '31 min'),

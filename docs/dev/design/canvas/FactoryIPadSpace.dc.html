@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Sheepdog — iPad, a space with a factory section</title>
+<title>Sheepdog — iPad, the space page in its sheet</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -12,111 +12,28 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
 <style>
 body{margin:0}
-a{color:#8A5700}a:hover{color:#5E3B00}
 button{font:inherit;cursor:pointer}
 </style>
 </helmet>
-<div style="width: 1376px; height: 1032px; display: flex; overflow: hidden; background: #FAF8F3; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
-  <dc-import name="FactoryIPadSidebar" sel="space" dark="{{ false }}" style="display: block; width: 390px; height: 1032px; flex-shrink: 0" hint-size="390px,1032px"></dc-import>
-  <section aria-label="herdr-sheepdog space" style="width: 986px; height: 1032px; display: flex; flex-direction: column">
-    <div style="height: 24px; flex-shrink: 0"></div>
-    <header style="flex-shrink: 0; display: flex; align-items: center; gap: 12px; padding: 6px 12px 12px 24px; border-bottom: 1px solid #E4E0D7">
-      <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 2px">
-        <h1 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 28px; font-weight: 700; letter-spacing: -0.3px">herdr-sheepdog</h1>
-        <span style="font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #6B6E75">~/code/herdr-sheepdog · main</span>
-      </div>
-      <button style="height: 44px; border: 0; background: transparent; color: #8A5700; font-size: 16px; padding: 0 10px">Rename</button>
-    </header>
-    <main style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 16px 24px; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 20px; align-items: start">
-      <div style="display: flex; flex-direction: column; gap: 10px">
-        <h2 style="margin: 0 4px; font-size: 13px; font-weight: 600; color: #6B6E75">Factory · milestone 3 of 4</h2>
-        <section aria-label="The factory needs your answer" style="padding: 14px; border-radius: 14px; background: #FDF1DC; border: 1px solid #D99417; display: flex; flex-direction: column; gap: 10px">
-          <span style="font-size: 12px; font-weight: 600; color: #8A5700">Needs you · release</span>
-          <span style="font-family: Outfit, Inter, system-ui, sans-serif; font-size: 20px; line-height: 25px; font-weight: 600">Tag 0.1.31 now?</span>
-          <span style="font-size: 15px; line-height: 21px">Milestone 2 is accepted and main is green. Nothing else is waiting.</span>
-          <div style="display: flex; flex-wrap: wrap; gap: 6px">
-            <button style="min-height: 44px; padding: 0 16px; border-radius: 22px; border: 0; background: #D98718; color: #1F1F22; font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px">Tag 0.1.31<span style="font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 9px; background: #FDF1DC; color: #8A5700">Recommended</span></button>
-            <button style="min-height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-size: 15px">Wait for one more QA pass</button>
-            <button style="min-height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-size: 15px">Not now</button>
-          </div>
-        </section>
-        <div style="padding: 4px 4px 0; display: flex; flex-direction: column; gap: 2px">
-          <span style="font-size: 17px; font-weight: 600">Owner channel · 7 of 12 merged</span>
-          <span style="font-size: 14px; line-height: 19px; color: #6B6E75">The path to done runs through SDF-53, then SDF-15: about 5 hours.</span>
-        </div>
-        <div style="border-radius: 14px; background: #FFFFFF; border: 1px solid #E4E0D7; display: flex; flex-direction: column">
-          <sc-for list="{{ rows }}" as="t" hint-placeholder-count="8">
-            <sc-if value="{{ t.isLayer }}" hint-placeholder-val="{{ false }}">
-              <span style="padding: 8px 14px 3px; font-size: 12px; font-weight: 600; color: #6B6E75; border-top: {{ t.top }}">{{ t.label }}</span>
-            </sc-if>
-            <sc-if value="{{ t.isTask }}" hint-placeholder-val="{{ true }}">
-              <a href="FactoryWorker.dc.html" aria-label="{{ t.aria }}" style="min-height: 50px; box-sizing: border-box; padding: 6px 10px 6px 14px; display: flex; align-items: center; gap: 10px; color: #1F1F22; text-decoration: none">
-                <span style="width: 64px; flex-shrink: 0; font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 12.5px">{{ t.id }}</span>
-                <span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px">
-                  <span style="display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: {{ t.weight }}">{{ t.title }}<sc-if value="{{ t.path }}" hint-placeholder-val="{{ false }}"><svg width="13" height="13" viewBox="0 0 24 24" role="img" aria-label="On the critical path" fill="none" stroke="#1F1F22" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M4 12h13M12 6l6 6-6 6"></path></svg></sc-if></span>
-                  <span style="font-size: 13px; color: #6B6E75">{{ t.why }}</span>
-                </span>
-                <span style="font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 11.5px; color: #6B6E75; white-space: nowrap">{{ t.model }}</span>
-                <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#8E929A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M9 6l6 6-6 6"></path></svg>
-              </a>
-            </sc-if>
-          </sc-for>
-          <button aria-expanded="false" style="min-height: 44px; border: 0; border-top: 1px solid #E4E0D7; background: transparent; color: #6B6E75; padding: 0 14px; display: flex; align-items: center; gap: 6px; font-size: 14px; text-align: left"><svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M9 6l6 6-6 6"></path></svg>Debug: 20 log lines, 1 doctor warning</button>
-        </div>
-      </div>
-
-      <div style="display: flex; flex-direction: column; gap: 8px">
-        <h2 style="margin: 0 4px; font-size: 13px; font-weight: 600; color: #6B6E75">Agents</h2>
-        <div style="border-radius: 14px; background: #FFFFFF; border: 1px solid #E4E0D7; display: flex; flex-direction: column">
-          <sc-for list="{{ agents }}" as="a" hint-placeholder-count="5">
-            <div style="display: flex; align-items: center; gap: 10px; padding: 9px 10px 9px 14px; border-top: {{ a.top }}">
-              <span style="width: 8px; height: 8px; border-radius: 4px; background: {{ a.dot }}; flex-shrink: 0"></span>
-              <span style="flex-grow: 1; font-size: 16px; font-weight: 600">{{ a.name }} <span style="font-weight: 400; font-size: 13px; color: {{ a.color }}">· {{ a.state }}</span></span>
-              <button aria-label="{{ a.aria }}" style="width: 36px; height: 36px; border-radius: 18px; border: 1px solid #E4E0D7; background: #F1EEE7; color: #1F1F22; display: flex; align-items: center; justify-content: center"><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"></rect><path d="M7 9l3 3-3 3M12.500 15H17"></path></svg></button>
-            </div>
-          </sc-for>
-        </div>
-        <h2 style="margin: 10px 4px 0; font-size: 13px; font-weight: 600; color: #6B6E75">Worktrees</h2>
-        <div style="border-radius: 14px; background: #FFFFFF; border: 1px solid #E4E0D7; display: flex; flex-direction: column">
-          <div style="padding: 10px 14px; display: flex; flex-direction: column; gap: 1px; border-bottom: 1px solid #E4E0D7"><span style="font-size: 15px; font-weight: 600">sdf-53-codex-launch-flags</span><span style="font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #6B6E75">sdf-53 · 4 changed</span></div>
-          <div style="padding: 10px 14px; display: flex; flex-direction: column; gap: 1px"><span style="font-size: 15px; font-weight: 600">sdf-57-flaky-socket-test</span><span style="font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #6B6E75">sdf-57 · 1 changed</span></div>
-        </div>
-        <h2 style="margin: 10px 4px 0; font-size: 13px; font-weight: 600; color: #6B6E75">Wrap up</h2>
-        <div style="border-radius: 14px; background: #FFFFFF; border: 1px solid #E4E0D7; display: flex; flex-direction: column">
-          <button style="border: 0; background: transparent; color: #1F1F22; text-align: left; padding: 0 14px; min-height: 52px; display: flex; align-items: center; gap: 12px"><span style="flex-grow: 1; font-size: 16px">Run tests</span><span style="font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #6B6E75">make test</span></button>
-        </div>
-        <button disabled style="margin-top: 10px; height: 50px; border-radius: 14px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #B42318; font-size: 16px; font-weight: 500; opacity: 0.55; cursor: default">Close space</button>
-        <span style="font-size: 13px; line-height: 18px; color: #6B6E75; padding: 0 4px; text-align: center">A factory is running here. Stop the factory first.</span>
-      </div>
-    </main>
-  </section>
+<div style="position: relative; width: 1376px; height: 1032px; overflow: hidden; background: {{ bg }}">
+  <dc-import name="FactoryIPad" dark="{{ dark }}" style="display: block" hint-size="1376px,1032px"></dc-import>
+  <div aria-hidden="true" style="position: absolute; left: 0; top: 0; width: 1376px; height: 1032px; background: {{ scrim }}"></div>
+  <div role="dialog" aria-label="Space" style="position: absolute; left: 418px; top: 76px; width: 540px; height: 880px; border-radius: 14px; overflow: hidden; background: {{ bg }}; box-shadow: 0 12px 40px rgba(0,0,0,0.3); display: flex; justify-content: center">
+    <sc-if value="{{ isFactory }}" hint-placeholder-val="{{ true }}">
+      <dc-import name="FactoryPage" state="running" sheet="{{ true }}" dark="{{ dark }}" style="display: block; width: 390px" hint-size="390px,844px"></dc-import>
+    </sc-if>
+    <sc-if value="{{ isEntry }}" hint-placeholder-val="{{ false }}">
+      <dc-import name="FactoryStartEntry" state="ready" sheet="{{ true }}" dark="{{ dark }}" style="display: block; width: 390px" hint-size="390px,844px"></dc-import>
+    </sc-if>
+  </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview": {"width": 1376, "height": 1032}}'>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "which": {"editor": "enum", "options": ["factory", "entry"], "default": "factory"}, "$preview": {"width": 1376, "height": 1032}}'>
 class Component extends DCLogic {
   renderVals() {
-    const layer = (label, first) => ({ isLayer: true, isTask: false, label, top: first ? "0" : "1px solid #E4E0D7" });
-    const task = (id, title, why, model, path) => ({ isLayer: false, isTask: true, id, title, why, model, path, weight: path ? 700 : 500, aria: id + " " + title + ". " + why + (path ? ". On the critical path" : "") + ". Opens its window." });
-    const rows = [
-      layer("Running", true),
-      task("SDF-53", "Codex launch flags", "Working, round 0 of 2", "gpt-6.2-sol · high", true),
-      task("SDF-54", "Model on every run", "Working", "gemini-4-carbon-high", false),
-      task("SDF-57", "Fix the flaky socket test", "Waiting at a prompt, 14 min", "gpt-6.2-sol · high", false),
-      layer("Waiting", false),
-      task("SDF-48", "drift_pass", "In review, round 2 of 2", "claude-opus-5-5", true),
-      task("SDF-55", "Quota unknown is a value", "Waiting on CI, 18 min", "sonnet · medium", false),
-      layer("Blocked by a task", false),
-      task("SDF-15", "Switch the running factory", "After SDF-48 and SDF-53", "not started", true)
-    ];
-    const ag = (name, state, dot, warn, first) => ({ name, state, dot, color: warn ? "#8A5700" : "#6B6E75", top: first ? "0" : "1px solid #E4E0D7", aria: "Open " + name + "'s window" });
-    const agents = [
-      ag("coordinator", "working 2 min", "#1F5F9E", false, true),
-      ag("SDF-57", "worker · waiting at a prompt", "#D99417", true, false),
-      ag("SDF-53", "worker · working 31 min", "#1F5F9E", false, false),
-      ag("SDF-48", "reviewer · working 6 min", "#1F5F9E", false, false),
-      ag("SDF-55", "worker · done 18 min", "#1D6B46", false, false)
-    ];
-    return { rows, agents };
+    const d = !!this.props.dark;
+    const entry = (this.props.which ?? 'factory') === 'entry';
+    return { dark: d, isFactory: !entry, isEntry: entry, bg: d ? "#16181C" : "#FAF8F3", scrim: d ? "rgba(0,0,0,0.5)" : "rgba(31,31,34,0.32)" };
   }
 }
 </script>
