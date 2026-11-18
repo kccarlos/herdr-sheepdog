@@ -405,7 +405,8 @@ def tick_store(s, report):
                 checks_pass(s, t)
             except Exception as e:  # never stops the tick
                 report.setdefault("checks_error", []).append(f"{s.ref(t)}: {e}")
-        if (t.get("review_runs") or t.get("review_quota_wait") or (t.get("push_held") or {}).get("gate")) and t["state"] in ("running", "ready"):  # FAC-101: a quota wait too
+        from .replan import active_review_runs
+        if (active_review_runs(t) or t.get("retiring_reviewers") or t.get("review_quota_wait") or (t.get("push_held") or {}).get("gate")) and t["state"] in ("running", "ready"):  # FAC-101: a quota wait too
             had = t.get("attention")
             try:
                 gate_reads(s, t)  # a sandboxed reviewer's verdict, or a dead reviewer's fallback

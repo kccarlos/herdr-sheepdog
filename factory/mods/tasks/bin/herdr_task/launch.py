@@ -569,10 +569,15 @@ def low_priority(argv, name):
     return out
 
 
-def caller_labels():
+def caller_labels(strict=False):
     me = os.environ.get("HC_TERMINAL_ID")
     k = hc_json("get", me) if me else None
+    if strict and me and (not isinstance(k, dict) or k.get("error")):
+        raise Fail("Couldn't verify the caller terminal; run this from your Assistant.")
     return (k or {}).get("labels") or {}
+
+
+caller_labels._is_default_caller_labels = True
 
 
 def closing_line(s, task, parent=None, argv=None):

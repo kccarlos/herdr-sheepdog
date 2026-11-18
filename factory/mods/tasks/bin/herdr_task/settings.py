@@ -1114,14 +1114,16 @@ def owner_gate(s, t, asks):
 
 
 def fable_runs(t):
-    """The terminals of Fable's review rounds (its review_runs, by model)."""
-    return {r.get("address") for r in t.get("review_runs") or [] if r.get("model") == FABLE["model"]}
+    """The terminals of Fable's active review rounds (its non-archived review_runs, by model)."""
+    from .replan import active_review_runs
+    return {r.get("address") for r in active_review_runs(t) if r.get("model") == FABLE["model"]}
 
 
 def fable_said(t, verdict):
-    """How many of Fable's rounds on this task gave this verdict."""
+    """How many of Fable's active rounds on this task gave this verdict."""
+    from .replan import active_reviews
     fable = fable_runs(t)
-    return sum(1 for r in t.get("reviews") or [] if r.get("by") in fable and r.get("verdict") == verdict)
+    return sum(1 for r in active_reviews(t) if r.get("by") in fable and r.get("verdict") == verdict)
 
 
 def fable_due(s, t):
@@ -1133,8 +1135,9 @@ def fable_due(s, t):
 
 
 def reviewed_for_head(s, t, head):
-    """Reviews on `head`, or on the latest earlier head that `head` extends only with base merges or docs-only commits."""
-    all_revs = t.get("reviews") or []
+    """Active reviews on `head`, or on the latest earlier head that `head` extends only with base merges or docs-only commits."""
+    from .replan import active_reviews
+    all_revs = active_reviews(t)
     if not head:
         return []
     revs = [r for r in all_revs if r.get("head") == head]

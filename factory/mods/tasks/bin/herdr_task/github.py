@@ -879,12 +879,12 @@ def needs_approval(v):
 
 
 QUEUE_QUERY = """query($owner: String!, $name: String!, $n: Int!) { repository(owner: $owner, name: $name) {
-  pullRequest(number: $n) { state isInMergeQueue autoMergeRequest { enabledAt }
+  pullRequest(number: $n) { id state isInMergeQueue autoMergeRequest { enabledAt }
     timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) { nodes { ... on RemovedFromMergeQueueEvent { reason } } } } } }"""
 
 
 def queue_entry(task):
-    """Its pull request in GitHub's merge queue (#802): {"in": in the queue, "auto": set to merge by
+    """Its pull request in GitHub's merge queue (#802): {"id": node id, "in": in the queue, "auto": set to merge by
     itself (it joins the queue once its checks pass), "reason": why the queue last removed it}, or
     None when GitHub couldn't say."""
     pr = task["pr"]
@@ -901,7 +901,7 @@ def queue_entry(task):
     if not isinstance(p, dict):
         return None
     removed = ((p.get("timelineItems") or {}).get("nodes") or [{}])[-1] or {}
-    return {"in": bool(p.get("isInMergeQueue")), "auto": bool(p.get("autoMergeRequest")),
+    return {"id": p.get("id"), "in": bool(p.get("isInMergeQueue")), "auto": bool(p.get("autoMergeRequest")),
             "reason": removed.get("reason"), "state": p.get("state")}
 
 

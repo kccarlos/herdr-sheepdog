@@ -311,11 +311,14 @@ def token_sum(s, t):
 
 
 def rounds_since(t, all_rounds=False):
-    """Structured non-merge-only rounds recorded after the last recap decision."""
-    since = 0 if all_rounds else ((t.get("recaps") or [{}])[-1]).get("at", 0)
-    mine = [r for r in t.get("reviews") or [] if r.get("verdict") in ("pass", "changes") or r.get("result") == "report"]
+    """Structured non-merge-only rounds of the current approach recorded after the last recap decision."""
+    from .replan import active_review_runs, active_reviews
+    recaps = t.get("recaps") or []
+    since = (max((d.get("at") or 0 for d in recaps if d.get("decision") == "new"), default=0)
+             if all_rounds else (recaps[-1].get("at") or 0 if recaps else 0))
+    mine = [r for r in active_reviews(t) if r.get("verdict") in ("pass", "changes") or r.get("result") == "report"]
     skip = set(t.get("merge_only_runs") or ())
-    known = {r.get("address") for r in t.get("review_runs") or [] if r.get("address")}
+    known = {r.get("address") for r in active_review_runs(t) if r.get("address")}
     wt = t.get("worktree") if t.get("mode") == "worktree" else None
     base, br = t.get("base") or "main", t.get("branch")
     return [r for i, r in enumerate(mine) if (r.get("at") or 0) > since and r.get("by") not in skip
@@ -385,9 +388,8 @@ def review_nonconverging(t):
     from .settings import fable_runs
     fable = fable_runs(t)
     all_rounds = [r for r in rounds_since(t, all_rounds=True) if r.get("by") not in fable]
-    rounds = [r for r in rounds_since(t) if r.get("by") not in fable]
-    return (len(all_rounds) >= 3 and len(rounds) >= 2 and
-            all(r.get("verdict") == "changes" and (r.get("majors") or 0) > 0 for r in rounds[-2:]))
+    return (len(all_rounds) >= 3 and
+            all(r.get("verdict") == "changes" and (r.get("majors") or 0) > 0 for r in all_rounds[-2:]))
 
 
 def triggers(s, t):
@@ -549,8 +551,8 @@ def recap_refusal(s, t):
 def cmd_recap(args):
     """The Assistant's decision on a task's open recap (continue once, split, new, drop); no flags:
     the open recap and RECAP.md."""
-    from .launch import caller_labels
     from .output import say
+    from .replan import replan_task, require_replan_caller
     from .store import open_store
     with open_store(args, write=bool(args.decide)) as s:
         t = s.find(args.id)
@@ -566,9 +568,7 @@ def cmd_recap(args):
             lines += ["", text.strip()] if text else ["(no RECAP.md yet)"] if rc else []
             say(args, {"recap": rc, "recaps": t.get("recaps") or [], "recap_md": text}, "\n".join(lines))
             return
-        labels = caller_labels()
-        if label_of(labels, "task") == s.key(t) or label_of(labels, "role") == "reviewer":  # sheepdog.* or herdr.* (SDF-11)
-            raise Fail("A task's own agent can't decide its recap: your Assistant does.")
+        require_replan_caller(s, t, action="decide its recap")
         if not rc:
             raise Fail(f"{s.ref(t)} has no recap open.")
         if args.decide == "continue" and (NON_CONVERGENCE in rc.get("reasons", []) or (rounds_since(t) and review_nonconverging(t))):
@@ -584,7 +584,7 @@ def cmd_recap(args):
                 past = "went past its bound" if any(w.startswith("past the small continue's bound") for w in why) else "stopped again"
                 raise Fail(f"{s.ref(t)} already had its small continue and {past} ({'; '.join(why)}): "
                            f"no third continue; split it, give it a new approach, or drop it.")
-            if not any(d.get("decision") == "continue" for d in t["recaps"]):
+            if t["recaps"][-1].get("decision") != "continue":
                 raise Fail(f"{s.ref(t)} already had a recap decided without continue: split it, give it a new approach, or drop it.")
             if not small:
                 raise Fail(f"{s.ref(t)} already had its one continue after a recap: split it, give it a new approach, or drop it. "
@@ -593,20 +593,24 @@ def cmd_recap(args):
         elif small:
             raise Fail(f"--small is for a second continue; {s.ref(t)}'s first continue needs none.")
         found = last_findings(t)  # before the decision starts the round count afresh
-        cur = change_lines(t)
-        bound = ({"small": True, "max_rounds": SMALL_ROUNDS, "max_lines": cur + SMALL_LINES if cur is not None else None}
-                 if small else {})
-        t.setdefault("recaps", []).append({"decision": args.decide, "why": " ".join(args.why.split())[:300], "at": now(),
-                                           "reasons": rc.get("reasons", []), "tokens": token_sum(s, t),
-                                           **({"lines": cur} if cur is not None else {}), **bound})
-        t.pop("recap")
-        if (t.get("attention") or "").startswith("Recap required"):
-            t.pop("attention", None)
-            t.pop("attention_at", None)
-        if args.decide == "drop":
-            from .simulators import release_task
-            release_task(s, t)
-        s.dirty = True
+        bound = {}
+        if args.decide == "new":
+            replan_task(s, t, why=args.why, at=now())
+        else:
+            cur = change_lines(t)
+            bound = ({"small": True, "max_rounds": SMALL_ROUNDS, "max_lines": cur + SMALL_LINES if cur is not None else None}
+                     if small else {})
+            t.setdefault("recaps", []).append({"decision": args.decide, "why": " ".join(args.why.split())[:300], "at": now(),
+                                               "reasons": rc.get("reasons", []), "tokens": token_sum(s, t),
+                                               **({"lines": cur} if cur is not None else {}), **bound})
+            t.pop("recap")
+            if (t.get("attention") or "").startswith("Recap required"):
+                t.pop("attention", None)
+                t.pop("attention_at", None)
+            if args.decide == "drop":
+                from .simulators import release_task
+                release_task(s, t)
+            s.dirty = True
         told = None
         if args.decide == "continue":
             from .commands import tell, workers

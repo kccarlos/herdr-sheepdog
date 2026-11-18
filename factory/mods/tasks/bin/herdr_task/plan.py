@@ -19,7 +19,7 @@ REF = re.compile(r"(?:[A-Za-z]+[0-9]*-)?[0-9]+")
 TAG = re.compile(r"v\d+\.\d+\.\d+")
 NOT_STARTED = ("todo", "scheduled", "queued")
 M_KEYS = {"id", "title", "goal", "exit_test", "gate", "mandate", "ui", "release", "tasks"}
-T_KEYS = {"key", "title", "prompt", "lines", "after", "kind", "set", "split_of"}
+T_KEYS = {"key", "title", "prompt", "lines", "after", "kind", "set", "split_of", "retro"}
 
 
 def load(path):
@@ -163,6 +163,10 @@ class Plan:
                     set_task({}, k, str(v))
                 except Fail as e:
                     self.bad(f"{key}: {e}")
+        if not isinstance(t.get("retro", False), bool):
+            self.bad(f"{key}: retro is true or false.")
+        elif t.get("retro") and (old is None or old["state"] == "done"):
+            self.bad(f"{key}: retro is for an open existing task, not a {'done' if old else 'new'} one.")
         if old and old["state"] not in NOT_STARTED:
             for f, have in (("title", old["title"]), ("prompt", old.get("plan_prompt")), ("lines", old.get("estimate_lines"))):
                 if f in t and t[f] != have:
@@ -332,7 +336,12 @@ class Plan:
     def write(self, reason=None):
         s = self.s
         self.later = []
+        self.replan_effects = []
         from .commands import set_base
+        from .replan import has_replan_state, replan_task, require_replan_caller, select_retro_plan_targets
+        if self.amend:
+            require_replan_caller(s, action="amend the plan")
+        had_new_tasks = any(t["key"] not in self.by_key for t, _ in self.tasks)
         log = {"at": now(), "action": "amend" if self.amend else "apply", "added": [], "changed": []}
         mode = "worktree" if worktrees_on(s) else "here"
         # Milestones: new ones go after the old in file order; old ones keep their order and mandate.
@@ -395,6 +404,26 @@ class Plan:
         for t in s.data["tasks"]:
             if t.get("plan_key") and t["state"] in NOT_STARTED and not t.get("acceptance_of"):
                 t["prompt"] = brief(s, t)
+        if self.amend:
+            explicit_keys = {t["key"] for t, _ in self.tasks if t.get("retro")}
+            targets = select_retro_plan_targets(
+                s, self.tasks, self.by_key, reason,
+                has_structural_changes=had_new_tasks or bool(self.split_parents),
+            )
+            replanned = []
+            for target in targets:
+                require_replan_caller(s, target, action="amend the plan or decide its recap")
+                if target.get("plan_key") in explicit_keys or has_replan_state(target):
+                    self.replan_effects.append(replan_task(
+                        s, target, why=reason or "retro plan amend",
+                        at=log["at"], dry=self.dry, defer_side_effects=True,
+                    ))
+                    ref = s.ref(target)
+                    replanned.append(ref)
+                    if ref not in log["changed"]:
+                        log["changed"].append(ref)
+            if replanned:
+                log["replanned"] = replanned
         if splits:
             log["split"] = splits
         if reason:
@@ -404,9 +433,15 @@ class Plan:
         return log
 
     def finish(self):
-        """After the written graph passed its last check: end each split parent's agent and simulator."""
+        """After the written graph passed its last check: run deferred re-plan side effects, then end split parents."""
         from .commands import end_agent
+        from .replan import cancel_queued_merge, clear_task_held_news, retire_reviewers
         from .simulators import release_task
+        for eff in self.replan_effects:
+            cancel_queued_merge(eff.store, eff.task)
+        for eff in self.replan_effects:
+            retire_reviewers(eff.retiring)
+            clear_task_held_news(eff.store, eff.task, eff.retiring)
         for parent in self.later:
             for k in agents_of(self.s, parent) if parent["state"] == "running" else []:
                 end_agent(self.s, parent, k["address"])
@@ -523,7 +558,7 @@ def text_of(v):
 def cmd_plan(args):
     from .output import say
     from .store import open_store
-    with open_store(args, write=args.plan != "show") as s:
+    with open_store(args, write=args.plan != "show" and not getattr(args, "check", False)) as s:
         if args.plan == "show":
             v = show(s)
             return say(args, v, text_of(v))

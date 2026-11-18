@@ -47,9 +47,10 @@ def inspect(s, t, v):
                 s.dirty = True
             if repo and approved_head:
                 update_held_branch(s, t, v, repo, head)
+        from .replan import active_reviews
         reviewed = ready and head and any(
             r.get("head") == head and (r.get("verdict") or r.get("result")) == "pass"
-            for r in t.get("reviews") or ())
+            for r in active_reviews(t))
         if failures and (accepted and approved_head or reviewed) and resolve_stage(t, store=s).stage != "ci":
             stopped_retry = pr.get("ci_rerun") or {}
             unavailable = limited | (set(stopped_retry.get("runs") or ()) if stopped_retry.get("head") == head else set())

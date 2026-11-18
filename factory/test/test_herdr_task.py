@@ -5741,9 +5741,11 @@ class LoopBreaker(GateReview):
         self.recap("new")
         self.assertFalse(budget_pass(self.store, self.task))
         at = self.task["recaps"][-1]["at"]
-        self.task["reviews"].append({"round": 4, "verdict": "changes", "majors": 1, "at": at + 1})
+        self.task["reviews"].append({"round": 1, "verdict": "changes", "majors": 1, "at": at + 1})
         self.assertFalse(budget_pass(self.store, self.task))
-        self.task["reviews"].append({"round": 5, "verdict": "changes", "majors": 1, "at": at + 2})
+        self.task["reviews"].append({"round": 2, "verdict": "changes", "majors": 1, "at": at + 2})
+        self.assertFalse(budget_pass(self.store, self.task))
+        self.task["reviews"].append({"round": 3, "verdict": "changes", "majors": 1, "at": at + 3})
         self.assertTrue(budget_pass(self.store, self.task))
 
     def test_mixed_recap_keeps_worker_recap_without_continue(self):

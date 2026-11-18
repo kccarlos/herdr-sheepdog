@@ -102,14 +102,35 @@ def news_state(s, t, live):
     return v, event, stall
 
 
+@contextmanager
+def news_state_file():
+    """NEWS under its own lock so concurrent commands (e.g. re-plan) and news_pass never clobber it."""
+    os.makedirs(STORE, exist_ok=True)
+    with open(NEWS + ".lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            with open(NEWS) as f:
+                state = json.load(f)
+        except (OSError, ValueError):
+            state = {}
+        yield state
+        tmp = f"{NEWS}.{os.getpid()}.tmp"
+        with open(tmp, "w") as f:
+            json.dump(state, f)
+        os.replace(tmp, NEWS)
+
+
 def news_pass(report, folder=None):
     """Notes each task's status; queues a line for each change worth telling, and sends the lines
     that settled, one message per Assistant. Runs inside the tick lock (scheduler, tick)."""
-    try:
-        with open(NEWS) as f:
-            state = json.load(f)
-    except (OSError, ValueError):
-        state = {}
+    os.makedirs(STORE, exist_ok=True)
+    with open(NEWS + ".lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_SH)
+        try:
+            with open(NEWS) as f:
+                state = json.load(f)
+        except (OSError, ValueError):
+            state = {}
     seen, outbox = state.setdefault("seen", {}), state.setdefault("outbox", [])
     delivered = state.setdefault("delivered", {})
     current = {}  # key -> (status, stall mark), to check queued lines against
@@ -152,7 +173,8 @@ def news_pass(report, folder=None):
                     else:
                         t.pop("own_work", None)
                     s.dirty = True
-                cur = {"status": v["status"], "why": v.get("why"), "stall": stall[0] if stall else None}
+                cur = {"status": v["status"], "why": v.get("why"), "stall": stall[0] if stall else None,
+                       "reset_at": t.get("review_reset_at") or 0}
                 current[key] = cur
                 rf = (t.get("attention") or "").startswith(REVIEWER_FAILED)
                 prev = mine.get(str(t["id"]))
@@ -205,9 +227,11 @@ def news_pass(report, folder=None):
             for k in [k for k in mine if k not in ids and k != "_init"]:
                 mine.pop(k)
     report.setdefault("news", [])
-    # Still true? A line whose task moved on since (or was removed) goes unsaid.
+    # Still true? A line whose task moved on since (or was removed or re-planned) goes unsaid.
     def holds(x):
         c = current.get(x["key"])
+        if c and (c.get("reset_at") or 0) > (x.get("since") or x.get("at") or 0) and x.get("event") != "backup":
+            return False
         if (folder and c is None) or x.get("event") in ("backup", "sync-fallback"):
             return True  # another folder's task: not looked at this time; one-shot notices are news either way
         return bool(c) and (c["stall"] == x.get("stall") if x.get("event") == "stalled" else c["status"] == x.get("status"))
@@ -238,10 +262,12 @@ def news_pass(report, folder=None):
     except Exception as e:  # never stops the news
         report["settings_error"] = str(e)
     held_pass(report, delivered)
-    tmp = f"{NEWS}.{os.getpid()}.tmp"
-    with open(tmp, "w") as f:
-        json.dump(state, f)
-    os.replace(tmp, NEWS)
+    with open(NEWS + ".lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        tmp = f"{NEWS}.{os.getpid()}.tmp"
+        with open(tmp, "w") as f:
+            json.dump(state, f)
+        os.replace(tmp, NEWS)
 
 
 POLL_DELAYS = (0.15, 0.3, 0.3, 0.3)

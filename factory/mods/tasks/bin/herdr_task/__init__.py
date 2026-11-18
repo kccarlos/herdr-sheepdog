@@ -21,6 +21,7 @@ before it:
   archive      The archive: done tasks set aside after a while.
   output       Output: a task as JSON and as one line of text.
   stage        One ordered stage table per task; owner-waiting rows are the inbox.
+  replan       One re-plan state table: what a re-plan resets, keeps and archives.
   plan         Milestones and the plan file: plan apply, plan amend, plan show.
   scheduler    Identity and bundle hash of the tick terminal kept alive by the sheepdog daemon.
   commands     The task commands: add, start, status, ready, accept, merge and the rest.

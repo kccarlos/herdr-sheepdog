@@ -823,22 +823,24 @@ REVIEWER_ON_IT = "Herdr's reviewer is on it"
 
 def review_running(task):
     """A herdr-task review round for this task's head is still open (FAC-66)."""
+    from .replan import active_review_failures, active_review_runs, active_reviews
     head = task.get("head")
     if not head:
         return False
-    done = {r.get("round") for r in task.get("reviews") or [] if r.get("started_by") == "herdr-task"}
-    failed = {f.get("address") for f in task.get("review_failures") or [] if f.get("address")}
+    done = {r.get("round") for r in active_reviews(task) if r.get("started_by") == "herdr-task"}
+    failed = {f.get("address") for f in active_review_failures(task) if f.get("address")}
     return any(r.get("head") == head and r.get("round") not in done and r.get("address") not in failed
-               for r in task.get("review_runs") or [])
+               for r in active_review_runs(task))
 
 
 def starting(task):
     """An agent was started for it under STARTING_MS ago and hasn't ended."""
+    from .replan import active_review_failures, active_review_runs
     last = (task.get("agents") or [None])[-1]
     if last and last.get("ended"):
         return False
-    failed = {f.get("address") for f in task.get("review_failures") or []}
-    runs = [r for r in task.get("review_runs") or [] if r.get("address") not in failed]
+    failed = {f.get("address") for f in active_review_failures(task)}
+    runs = [r for r in active_review_runs(task) if r.get("address") not in failed]
     at = max([x for x in (task.get("started"), (last or {}).get("at"), (task.get("review") or {}).get("at"),
                           (runs[-1] if runs else {}).get("at")) if isinstance(x, (int, float))] or [0])
     return now() - at < STARTING_MS

@@ -10,6 +10,7 @@ Unknown extra keys are rejected. `review_runs[].model` is a non-empty string, or
 {"round": 1, "head": "0123456789abcdef0123456789abcdef01234567", "address": "term-7", "cli": "agy",
  "model": "gemini-4-argon-high", "at": 1762600000000, "majors_required": true}
 ```
+An archived run from before a re-plan carries optional `"before_replan": true` (`bool`).
 
 ## `t["reviews"][]`: a review round
 ```json
@@ -17,7 +18,7 @@ Unknown extra keys are rejected. `review_runs[].model` is a non-empty string, or
  "verdict": "pass", "must_fix": 0, "majors": 0, "cli": "agy", "model": "gemini-4-argon-high", "report": "No findings.", "at": 1762600600000}
 ```
 `verdict` is `pass` or `changes`. `must_fix` is the number of findings at or above the task's must-fix level.
-`majors` counts major and blocker findings, independently of the must-fix setting; null means an older in-flight reviewer did not report the count. `cli` and `model` identify the reviewer.
+`majors` counts major and blocker findings, independently of the must-fix setting; null means an older in-flight reviewer did not report the count. `cli` and `model` identify the reviewer. An archived round from before a re-plan carries optional `"before_replan": true` (`bool`).
 `report` is at most 2000 chars; `must_fix` is 0 on a pass. This shape is only for rounds herdr-task recorded
 (`started_by` is "herdr-task"). A round a worker recorded itself (`herdr-task reviewed`, `started_by` absent, its
 existing shape) is not covered here and never counts for the gate.
@@ -39,7 +40,7 @@ existing shape) is not covered here and never counts for the gate.
 
 ## Counting rule (G4)
 For the SHA being merged and `review.min` > 0:
-- A review round counts only if `started_by` is "herdr-task", a `review_runs` entry has the same `round`, `head`
+- A review round counts only if `started_by` is "herdr-task", neither it nor its `review_runs` entry has `before_replan` true, a `review_runs` entry has the same `round`, `head`
   and `address` (= its `by`), no entry serves two rounds, and its `head` is the SHA being merged.
 - At least `review.min` rounds count, and the last counting round has verdict `pass` and `must_fix` 0.
 - The latest `checks` record for that SHA has `exit` 0, and its `ci.state` is `success` where the repo has CI.

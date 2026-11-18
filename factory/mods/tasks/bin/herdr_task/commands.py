@@ -44,6 +44,7 @@ from .proof import evidence, find_proof
 from .when import when_from
 from .templates import instructions
 from .budget import NON_CONVERGENCE, budget_lines, budget_pass, change_sizes, docs_only_commits, merge_only_commits, merge_only_step, recap_refusal, record_ci, review_nonconverging, size_estimate, size_pass
+from .replan import active_review_failures, active_review_runs, active_reviews, retiring_live
 from .simulators import release_task
 
 
@@ -276,8 +277,15 @@ def cmd_show(args):
         gate = gate_min(s, t)
         if on:
             auto = len(t.get("review_auto_grants") or [])
-            v["review_rounds"] = {"used": rounds_used(t, bool(gate)), "of": rounds, "added": int(t.get("review_rounds_added") or 0),
-                                  **({"min": gate, "kind": kind} if kind else {}), **({"auto": auto} if auto else {})}
+            all_failed = {f["address"] for f in t.get("review_failures") or [] if f.get("address")}
+            archived = (sum(1 for r in t.get("review_runs") or [] if r.get("before_replan") and r.get("address") not in all_failed) if gate else
+                        sum(1 for r in t.get("reviews") or [] if r.get("before_replan") and r.get("result") in REVIEWED))
+            v["review_rounds"] = {
+                "used": rounds_used(t, bool(gate)), "of": rounds, "added": int(t.get("review_rounds_added") or 0),
+                **({"min": gate, "kind": kind} if kind else {}), **({"auto": auto} if auto else {}),
+                **({"before_replan": archived} if archived else {}),
+                **({"reset_at": t["review_reset_at"]} if t.get("review_reset_at") else {}),
+            }
         v["after_refs"] = after_refs(s, t)
         block = settings_block(s, t)
         if getattr(args, "evidence", False):
@@ -317,6 +325,10 @@ def cmd_show(args):
     if v.get("review_rounds"):
         r = v["review_rounds"]
         by = [f"{n} added by {who}" for n, who in ((r["added"] - r.get("auto", 0), "the assistant"), (r.get("auto", 0), "Herdr itself")) if n]
+        if r.get("before_replan"):
+            by.append(f"reset; {r['before_replan']} before re-plan")
+        elif r.get("reset_at"):
+            by.append("reset")
         text.append(f"review rounds: {r['used']} of {r['of']} used" + (f" ({', '.join(by)})" if by else "")
                     + (" (ready refused: out of rounds)" if v.get("review_out") else ""))
     if v.get("agents_md"):
@@ -330,7 +342,7 @@ def cmd_show(args):
         text.append(f"pull request: #{v['pr']['number']} {v['pr']['url']}")
     if v.get("why") and v["status"] == "needs":
         text.append(f"needs the person: {v['why']}")
-        fail = next((f for f in reversed(v.get("review_failures") or []) if f.get("tail")), None)
+        fail = next((f for f in reversed(active_review_failures(v)) if f.get("tail")), None)
         if fail and str(v["why"]).startswith(REVIEWER_FAILED):  # what its reviewer last showed (FAC-75)
             text.append(f"  {fail['cli']} reviewer's last screen ({fail['why']}):")
             text += [f"    {x}" for x in fail["tail"].splitlines()[-8:]]
@@ -628,12 +640,12 @@ def quota_why(screen):
 
 
 def failed_addresses(t):
-    return {f["address"] for f in t.get("review_failures") or [] if f.get("address")}
+    return {f["address"] for f in active_review_failures(t) if f.get("address")}
 
 
 def open_runs(t):
-    done, failed = {r["round"] for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"}, failed_addresses(t)
-    return [r for r in t.get("review_runs") or [] if r["round"] not in done and r["address"] not in failed]
+    done, failed = {r["round"] for r in active_reviews(t) if r.get("started_by") == "herdr-task"}, failed_addresses(t)
+    return [r for r in active_review_runs(t) if r["round"] not in done and r["address"] not in failed]
 
 
 TAIL_LINES, TAIL_BYTES = 40, 4096
@@ -724,19 +736,19 @@ def fallback_reviewer(s, t, first, failed=()):
 def next_round(t):
     """The next gate review run's number: 1 past the runs that didn't fail without a verdict."""
     failed = failed_addresses(t)
-    return sum(1 for r in t.get("review_runs") or [] if r["address"] not in failed) + 1
+    return sum(1 for r in active_review_runs(t) if r["address"] not in failed) + 1
 
 
 def rounds_used(t, gate=False):
     """Review rounds used: in a gate folder, the non-merge-only reviewers herdr-task started that didn't fail without a verdict."""
     if gate:
         skip = failed_addresses(t) | set(t.get("merge_only_runs") or ())
-        return sum(1 for r in t.get("review_runs") or [] if r["address"] not in skip)
-    return sum(1 for r in t.get("reviews") or [] if r.get("result") in REVIEWED)
+        return sum(1 for r in active_review_runs(t) if r["address"] not in skip)
+    return sum(1 for r in active_reviews(t) if r.get("result") in REVIEWED)
 
 
 def gate_passes(t, head):
-    return sum(1 for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task" and r["head"] == head and r["verdict"] == "pass")
+    return sum(1 for r in active_reviews(t) if r.get("started_by") == "herdr-task" and r["head"] == head and r["verdict"] == "pass")
 
 
 def gate_passes_for(s, t, head, need=None):
@@ -750,7 +762,7 @@ def gate_passes_for(s, t, head, need=None):
         return got
     base, br = t.get("base") or "main", t.get("branch")
     seen = {head}
-    for r in reversed(t.get("reviews") or []):
+    for r in reversed(active_reviews(t)):
         rh = r.get("head")
         if not rh or rh in seen or r.get("started_by") != "herdr-task":
             continue
@@ -825,7 +837,7 @@ def gate_step(s, t):
         return f"{s.ref(t)} is ready." if t.get("state") in ("ready", "done") else None
     if t.get("recap"):
         return f"{s.ref(t)}: {t['recap']['title']}."
-    mine = [r for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"]
+    mine = [r for r in active_reviews(t) if r.get("started_by") == "herdr-task"]
     if mine and mine[-1]["head"] == head and mine[-1]["verdict"] == "changes":
         return f"{s.ref(t)}: Herdr's reviewer asked for changes to {head[:7]}: fix them, commit, then run ready again."
     # Never two reviewers at once (FAC-53): a live one on any head, even an older one, holds the next round back.
@@ -833,12 +845,14 @@ def gate_step(s, t):
     if busy:
         return (f"{s.ref(t)}: Herdr's reviewer ({busy['address']}) is still reviewing {busy['head'][:7]}; no second one starts. "
                 + ("Its findings come to you as a message." if busy["head"] == head else "Run ready again once it finishes."))
+    if retiring_live(s, t):
+        return f"{s.ref(t)}: Herdr's previous reviewer ({t['retiring_reviewers'][0]}) is still exiting; run ready again in a moment."
     wt, base = t["worktree"], t.get("base") or "main"
     merge_only = merge_only_step(wt, base, head, mine, t.get("branch"))
     used, (_, rounds) = rounds_used(t, True), review_limits(s, t)
     round_n = next_round(t)
-    since = max(t.get("reviewer_at") or 0, t.get("reopened_at") or 0)
-    fails = [f for f in t.get("review_failures") or []
+    since = max(t.get("reviewer_at") or 0, t.get("reopened_at") or 0, t.get("review_reset_at") or 0)
+    fails = [f for f in active_review_failures(t)
              if f["round"] == round_n and f["head"] == head and (f.get("at") or 0) > since]
     rows = {x["label"]: x["value"] for x in task_settings(s, t)}
     pick, reset = (None, None) if len(fails) >= REVIEW_TRIES else fallback_reviewer(s, t, rows.get("Reviewer"), [f["cli"] for f in fails])
@@ -893,7 +907,7 @@ def gate_step(s, t):
     perm = "read-only" if rv["agent"] == "codex" else "full" if sand else "auto" if rv["agent"] == "claude" else "plan"
     argv = codex_review_argv(rv, wt) if rv["agent"] == "codex" else argv_for({**rv, "perm": perm})
     runs = t.get("review_runs") or []
-    at = max(now(), (runs[-1]["at"] + 1) if runs else 0)
+    at = max(now(), (runs[-1]["at"] + 1) if runs else 0, ((t.get("recaps") or [{}])[-1].get("at") or 0) + 1)
     code = round_code({"round": round_n, "head": head, "at": at}) if sand else None
     shown, diff = review_diff(wt, base, head, mine, merge_only)
     cmd = f"{ht} review {ref} --folder {folder}"
@@ -981,7 +995,7 @@ def review_refusal(s, t, wt):
         return None  # no commits of its own: nothing to review (nothing to merge)
     if not wt and t.get("folder_start") and unchanged_folder(s, t):
         return None  # in the folder itself, and it changed nothing (#744: a run that only reads)
-    revs = [r for r in t.get("reviews") or [] if r.get("result") in REVIEWED and (r.get("at") or 0) >= (t.get("started") or 0)]
+    revs = [r for r in active_reviews(t) if r.get("result") in REVIEWED and (r.get("at") or 0) >= (t.get("started") or 0)]
     head = t.get("head") if wt else None
     if (any(r.get("head") == head for r in revs) if wt else bool(revs)):
         return None
@@ -1095,7 +1109,8 @@ def cmd_reviewed(args):
         if invalid_major_count(s, t, verdict == "pass", None, majors):
             raise Fail("The verdict and major count disagree with the Must fix setting.")
         reviewer = settings.get("Reviewer") or {}
-        t.setdefault("reviews", []).append({"round": used + 1, "result": "report", "text": text, "at": now(), "head": head,
+        at = max(now(), ((t.get("recaps") or [{}])[-1].get("at") or 0) + 1)
+        t.setdefault("reviews", []).append({"round": used + 1, "result": "report", "text": text, "at": at, "head": head,
                                             "by": os.environ.get("HC_TERMINAL_ID"), "verdict": verdict, "must_fix": 0 if verdict == "pass" else None, "majors": majors,
                                             "report": text, "cli": reviewer.get("agent"), "model": reviewer.get("model")})
         t.pop("review_out", None)
@@ -1281,7 +1296,7 @@ def finalize(s, t):
         # merge it here while a pull request, its agent's, stays open there).
         failed = f"Couldn't reach GitHub to open its pull request: {github_refusal(s, t)}"
     head = t.get("head")
-    prev_head = t.get("ready_head") or next((r.get("head") for r in reversed(t.get("reviews") or []) if r.get("head")), None)
+    prev_head = t.get("ready_head") or next((r.get("head") for r in reversed(active_reviews(t)) if r.get("head")), None)
     keep_ready = bool(wt and os.path.isdir(wt) and t.get("ready_at") and prev_head and head
                       and docs_only_commits(wt, t.get("base") or "main", prev_head, head, t.get("branch")))
     t["state"] = "ready"
@@ -1357,9 +1372,10 @@ def cmd_review(args):
         rv = t.pop("review", None) or {}
         cfg = settings_for(s)["tasks"]
         of = rv.get("of") or int(cfg.get("review_rounds") or 1)
-        n = rv.get("round") or len(t.get("reviews") or []) + 1
+        n = rv.get("round") or len(active_reviews(t)) + 1
+        at = max(now(), ((t.get("recaps") or [{}])[-1].get("at") or 0) + 1)
         rec = {"round": n, "result": "pass" if args.passed else "changes", "text": (text or args.notes or "").strip(),
-               "at": now(), "head": t.get("head"), "by": os.environ.get("HC_TERMINAL_ID")}
+               "at": at, "head": t.get("head"), "by": os.environ.get("HC_TERMINAL_ID")}
         t.setdefault("reviews", []).append(rec)
         s.dirty = True
         if args.passed:
@@ -1448,9 +1464,10 @@ def record_verdict(s, t, rn, passed, must, text, majors=None):
     wt = t.get("worktree") or ""
     if git(wt, "rev-parse", "HEAD")[1] != rn["head"] or git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
         raise Fail(f"{wt} has moved on from {rn['head'][:7]} or has uncommitted changes: this round's verdict no longer applies.")
+    at = max(now(), ((t.get("recaps") or [{}])[-1].get("at") or 0) + 1)
     t.setdefault("reviews", []).append({"round": rn["round"], "head": rn["head"], "by": rn["address"], "started_by": "herdr-task",
                                         "verdict": "pass" if passed else "changes", "must_fix": must, "majors": majors,
-                                        "report": text.strip()[:2000], "cli": rn.get("cli"), "model": rn.get("model"), "at": now()})
+                                        "report": text.strip()[:2000], "cli": rn.get("cli"), "model": rn.get("model"), "at": at})
     for k in ("review_out", "progress"):
         t.pop(k, None)
     s.dirty = True
@@ -1677,12 +1694,13 @@ def inspect_runs(s, t):
 def gate_reads(s, t):
     """Verdicts of sandboxed reviewers (FAC-49), and dead-reviewer detection + fallback (FAC-59)."""
     inspect_runs(s, t)
+    retiring = retiring_live(s, t)
     need, head, wt = gate_need(s, t), t.get("head"), t.get("worktree") or ""
-    mine = [r for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"]
-    if (not need or not head or gate_passes_for(s, t, head, need) >= need or open_runs(t)
+    mine = [r for r in active_reviews(t) if r.get("started_by") == "herdr-task"]
+    if (not need or not head or gate_passes_for(s, t, head, need) >= need or open_runs(t) or retiring
             or t.get("recap") or t.get("review_out") or (t.get("attention") or "").startswith(REVIEWER_FAILED)
             or (mine and mine[-1]["head"] == head and mine[-1]["verdict"] == "changes")
-            or not (any(r["head"] == head for r in t.get("review_runs") or []) or (t.get("review_quota_wait") or {}).get("head") == head
+            or not (any(r["head"] == head for r in active_review_runs(t)) or (t.get("review_quota_wait") or {}).get("head") == head
                     or (t.get("push_held") or {}).get("gate"))
             or (t.get("review_quota_wait") or {}).get("until", 0) > now()):  # FAC-101: out of quota, retried after the reset
         return
@@ -1743,7 +1761,7 @@ def cmd_state(args, state):
             # pull request merged and close it again at once) until its agent says ready.
             if t["state"] == "done" and t.get("merged"):
                 t["kept_open"] = True
-            for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait", "head_moved_at", "sync_fallback", "push_held", "ready_head"):
+            for k in ("reviews", "review", "review_runs", "review_failures", "review_reset_at", "retiring_reviewers", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait", "head_moved_at", "sync_fallback", "push_held", "ready_head"):
                 t.pop(k, None)
             t.pop("review_followup", None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
@@ -1791,7 +1809,7 @@ def cmd_edit(args):
         if t.get("auto_merge") and not t.get("accepted_by") and merge_policy(s, t) == "ask":
             t.pop("auto_merge", None)
         if [t.get(k) for k in ("reviewer", "reviewer_model", "reviewer_effort")] != rev_pick:
-            t["reviewer_at"] = max(now(), max((f.get("at") or 0 for f in t.get("review_failures") or []), default=0))
+            t["reviewer_at"] = max(now(), max((f.get("at") or 0 for f in active_review_failures(t)), default=0))
             if (t.get("attention") or "").startswith(REVIEWER_FAILED):
                 t.pop("attention", None)
             t.pop("review_quota_wait", None)
@@ -1950,6 +1968,10 @@ def cmd_rm(args):
     with open_store(args) as s:
         t = s.find(args.id)
         release_task(s, t)
+        if t.get("plan_key"):
+            removed = s.data.setdefault("removed_plan_keys", [])
+            if t["plan_key"] not in removed:
+                removed.append(t["plan_key"])
         s.data["tasks"].remove(t)
         for o in s.data["tasks"]:
             for f in ("after", "plan_after"):  # plan_after: what a plan gave it (SDF-31), re-read on the next amend

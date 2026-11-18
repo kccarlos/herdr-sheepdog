@@ -35,6 +35,7 @@ The plan file is JSON: `{"milestones": [...]}`. Unknown fields are refused, so a
 | `kind` | `design` or `doc` (`review.kind`). |
 | `set` | Any `--set` key, such as `{"agent": "claude", "merge": "ask me first"}`, except `estimate.lines` and `review.kind`: those go in `lines` and `kind`. |
 | `split_of` | In an amend only: the key or ref of the task this one replaces. |
+| `retro` | In an amend only: `true` on an existing open task to re-plan it in place ([`replan.md`](replan.md)). |
 
 ## Checks
 

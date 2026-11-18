@@ -31,10 +31,10 @@ def _check(r, ints=(), strs=(), shas=(), lists=(), enums=None, caps=None, extra=
 
 
 def validate_review_run(r):
-    r = {"majors_required": False, **r}
-    _check(r, ints=("round", "at"), strs=("address", "cli"), shas=("head",), extra=("model", "majors_required"))
-    if type(r["majors_required"]) is not bool:
-        raise ValueError("majors_required is a boolean")
+    r = {"majors_required": False, "before_replan": False, **r}
+    _check(r, ints=("round", "at"), strs=("address", "cli"), shas=("head",), extra=("model", "majors_required", "before_replan"))
+    if type(r["majors_required"]) is not bool or type(r["before_replan"]) is not bool:
+        raise ValueError("majors_required and before_replan are booleans")
     if r["model"] is not None and (not isinstance(r["model"], str) or not r["model"]):
         raise ValueError("model is a non-empty string or null")
     if r["round"] < 1:
@@ -43,9 +43,11 @@ def validate_review_run(r):
 
 def validate_review(r):
     # only rounds herdr-task recorded; a worker's own `reviewed` round has the old shape and is not validated
-    r = {"cli": None, "model": None, "majors": None, **r}
+    r = {"cli": None, "model": None, "majors": None, "before_replan": False, **r}
     _check(r, ints=("round", "must_fix", "at"), strs=("by", "started_by"), shas=("head",),
-           enums={"verdict": ("pass", "changes")}, caps={"report": 2000}, extra=("cli", "model", "majors"))
+           enums={"verdict": ("pass", "changes")}, caps={"report": 2000}, extra=("cli", "model", "majors", "before_replan"))
+    if type(r["before_replan"]) is not bool:
+        raise ValueError("before_replan is a boolean")
     if r["started_by"] != "herdr-task":
         raise ValueError("started_by must be 'herdr-task'")
     if any(r[k] is not None and (not isinstance(r[k], str) or not r[k]) for k in ("cli", "model")):
