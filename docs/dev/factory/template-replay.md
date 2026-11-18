@@ -26,6 +26,7 @@ For the structured review-round wording, both the built-in and bundled-template 
 | W2 | 27, 42 | worker | A worker's change passes its size limit |
 | W3 | 45, 46 | worker | A worker's pull request falls behind main with a conflict |
 | W4 | 26 (FAC-110) | worker | A worker's iPhone check fails because the phone is locked |
+| W5 | SDF-55 | worker | A worker starts without quota information |
 | R1 | #840 | reviewer | A read-only reviewer meets a check it can't run |
 | R2 | 32 | reviewer | A reviewer is tempted to raise a finding the worker already rejected |
 | A1 | 36 | assistant | A release fails with HTTP 403 from App Store Connect |
@@ -153,6 +154,18 @@ SDF-31 rewrote the Assistant's Plan section: a goal becomes milestones in a plan
 | With the bundled files (`--files`) | 12 of 14: A7 and A8 fail, "no rule covers it" | 14 of 14 |
 
 A1 to A6 and the worker and reviewer situations still pass in both arms. No refused commands and no Shepherdr-only words in any role.
+
+## Follow-up (SDF-55): workers leave quota checks to the engine
+
+W5 checks that a worker brief tells the worker to leave quota checks to the
+engine. Every situation rejects a replay action that names CodexBar, and the
+full-prompt check rejects it in role prompts. A negative test adds a quota
+command to W5's rule and verifies that the replay catches it.
+
+| Arm | Pinned Python 3.14.8 score | Refused commands or forbidden words |
+|---|---|---|
+| Clean install | 15 of 15 | None |
+| With the bundled files (`--files`) | 15 of 15 | None |
 
 ## Not covered
 

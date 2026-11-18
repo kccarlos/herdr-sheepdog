@@ -14,5 +14,8 @@ is re-exported after every change.
   `AgentSection`, `Dock`, `ChatRow`) and rely on the canvas runtime
   (`support.js`), so they do not render as plain HTML. Read the source,
   or open the artifact.
+- `png/` holds a PNG of every board, exported from the canvas (1×), and
+  `boards.json` maps each board id to its title, source file and PNG.
+  Codex and agy workers check the UI against these pictures.
 - Images referenced as `/_blob/…` live in the artifact and are not
-  exported. PNGs of the boards are not in this export yet.
+  exported.

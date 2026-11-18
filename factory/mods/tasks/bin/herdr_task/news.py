@@ -494,10 +494,13 @@ def send_or_hold(address, text, how="send"):
 
 def held_pass(report, delivered=None):
     """Sends what was held for agents the person no longer writes to, and re-delivers messages left
-    pending behind a busy agy worker once its turn ends. Dropped once its agent has ended, once agy
-    already started a turn with it, or after NEWS_KEEP_MS."""
+    pending behind a busy agy worker once its turn ends. Dead coordinators' messages wait for a
+    handoff; other ended agents' messages, consumed pending messages and expired messages are dropped."""
     if not os.path.exists(HELD):
         return
+    from . import lease
+    coordinators = {addr for _, rec in lease.leases()
+                    for addr in [rec.get("address"), *(h.get("from") for h in lease.handoffs_of(rec))] if addr}
     pend_docs = lambda addr: [d for d in (delivered or {}).values() if isinstance(d, dict) and d.get("to") == addr and d.get("pending")]
     unpend = lambda addr, k: [d.update(at=now(), turn=k.get("turn") or 0, idle=True) or d.pop("pending", None) for d in pend_docs(addr)]
     with held_messages() as held:
@@ -505,7 +508,8 @@ def held_pass(report, delivered=None):
             items[:] = [x for x in items if now() - (x.get("at") or 0) < NEWS_KEEP_MS]
             k = hc_json("get", addr) if items else None
             if not k or k.get("state") != "live":
-                held.pop(addr)
+                if not items or addr not in coordinators:
+                    held.pop(addr)
                 continue
             had_news = any("pending" in x and x.get("how") == "news" for x in items)
             items[:] = [x for x in items if "pending" not in x or not turn_moved(k, x["pending"])]
