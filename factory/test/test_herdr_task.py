@@ -237,6 +237,12 @@ class Autopilot(unittest.TestCase):
         self.assertEqual(self.cmd("heartbeat", folder=self.folder)["heartbeat_from"], "project")
         self.assertEqual(self.cmd("show", folder=self.folder)["own"], ["heartbeat"])
 
+    def test_wake_names_the_missing_quota_probe(self):
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"PATH": self.tmp}):
+            wake = self.ap.message(self.folder, {}, ["run now"])
+        self.assertIn("codex: unknown (codexbar not installed)", wake)
+
     def test_old_starter_gets_the_new_one(self):
         """An earlier version's starter, never edited, stands for today's: the file is rewritten,
         Settings' words are read as it; an edited one is kept, an empty one stays blank."""
@@ -14107,6 +14113,34 @@ class StartRefusesPoolAtZero(unittest.TestCase):
             self.call(self.commands.cmd_resume, id=ref, agent="claude", argv=None, parent=None)
         self.assertIn("claude pool is at 0%", str(ctx.exception))
         self.assertEqual(len(self.runs), 1)
+
+    def test_task_merges_with_codexbar_missing(self):
+        from unittest import mock
+        from herdr_task import agents, autopilot, usage
+        bin_dir = os.path.join(self.tmp, "bin")
+        os.mkdir(bin_dir)
+        for name, path in (("git", shutil.which("git")), ("agy", os.path.join(ROOT, "test", "fake_cli", "agy"))):
+            os.symlink(path, os.path.join(bin_dir, name))
+        task_store = os.path.join(self.tmp, "tasks")
+        with mock.patch.dict(os.environ, {"PATH": bin_dir}), \
+                mock.patch.object(agents, "hc_json", return_value=None), \
+                mock.patch.object(self.commands, "reviewer_pools", lambda: usage.read(os.path.join(task_store, ".usage"))), \
+                mock.patch.object(autopilot, "STORE", task_store):
+            ref = self.add(set=["review=off"])
+            self.assertEqual(self.start(ref)["state"], "running")
+            wake = autopilot.message(self.repo, {}, ["run now"])
+            self.assertIn("codex: unknown (codexbar not installed)", wake)
+            with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+                wt = s.find(ref)["worktree"]
+            with open(os.path.join(wt, "worked.txt"), "w") as f:
+                f.write("work\n")
+            subprocess.run(["git", "-C", wt, "add", "worked.txt"], check=True)
+            subprocess.run(["git", "-C", wt, "commit", "-qm", "work"], check=True)
+            ready = self.call(self.commands.cmd_ready, id=ref, summary="Work done", details=None, agents_md=None)
+            self.assertEqual(ready["state"], "ready")
+            done = self.call(self.commands.cmd_accept, id=ref)
+            self.assertEqual((done["state"], done["merged"]), ("done", True))
+            self.assertTrue(os.path.isfile(os.path.join(self.repo, "worked.txt")))
 
 
 class InstalledCliAndMissingRefusal(unittest.TestCase):

@@ -475,6 +475,9 @@ def task_text(task):
     return "\n\n".join([text, CHANGES_HEAD + "\n" + "\n".join(changes)]) if changes else text
 
 
+QUOTA_RULE = "Quota is watched for you. Do not run quota tools."
+
+
 def brief(s, task, parent=None, argv=None):
     instructions("reviewer")  # the file its review's reviewer gets (WORKER_MD)
     keep_review(s, task)
@@ -484,7 +487,7 @@ def brief(s, task, parent=None, argv=None):
     body = "Your task, " + s.ref(task) + ":\n" + task_text(task)
     finish = notes_part("Before you say ready", notes(s, task, "finish"))
     return "\n\n".join(x for x in [instructions("worker"), start, body, where_line(task), finish, closing_line(s, task, parent),
-                                    settings_block(s, task, argv=argv, live=True)] if x)
+                                    QUOTA_RULE, settings_block(s, task, argv=argv, live=True)] if x)
 
 
 def handoff(s, task, prev, parent=None, argv=None):
@@ -500,6 +503,7 @@ def handoff(s, task, prev, parent=None, argv=None):
     lines.append(notes_part("Before you continue, if it isn't done yet", notes(s, task, "start")))
     lines.append(notes_part("Before you say ready", notes(s, task, "finish")))
     lines.append(closing_line(s, task, parent))
+    lines.append(QUOTA_RULE)
     lines.append(settings_block(s, task, argv=argv, live=True))
     return "\n\n".join(x for x in lines if x)
 
