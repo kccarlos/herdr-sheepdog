@@ -9503,6 +9503,13 @@ class Resume(unittest.TestCase):
         with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
             self.assertIn("--dangerously-skip-permissions", self.settings.worker_argv(s, {}, agent="agy"))
             self.assertIn("--dangerously-bypass-approvals-and-sandbox", self.settings.worker_argv(s, {}, agent="codex"))
+        # A restart keeps the task's named model over the project's own argv, and an explicit --approve-for-me.
+        self.write_worker({"agent": "codex", "argv": ["codex", "-m", "project-model"]})
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+            got = self.settings.worker_argv(s, {"model": "task-model"}, previous=["codex", "--no-daemon", "-m", "task-model"])
+            self.assertIn("task-model", got)
+            self.assertNotIn("project-model", got)
+        self.assertEqual(self.settings.worker_permissions(["codex", "--approve-for-me"]), ["codex", "--approve-for-me"])
 
 
 class BusyWorkerDelivery(unittest.TestCase):

@@ -395,7 +395,7 @@ def worker_permissions(argv, perm=None, *, replace=False):
                "claude": {"--permission-mode": "mode"}, "agy": {"--mode": "mode"}}[agent]
     config_keys = {"approval_policy": "approval", "sandbox_mode": "sandbox",
                    "hooks.PermissionRequest": "hook", "hooks.state": "hook"}
-    bypass = set(permission_flags(agent, "full")) | ({"--yolo"} if agent == "codex" else set())
+    bypass = set(permission_flags(agent, "full")) | ({"--yolo", "--approve-for-me"} if agent == "codex" else set())
     out, modes, rest = [argv[0]], set(), iter(argv[1:])
     for arg in rest:
         flag, eq, value = arg.partition("=")
@@ -445,7 +445,7 @@ def worker_argv(s, task, space=None, agent=None, previous=None):
     if previous:
         worker = settings_for(s)["worker"]
         custom = worker.get("argv")
-        if custom and agent_key(custom) == agent_key(previous):
+        if custom and agent_key(custom) == agent_key(previous) and not (task.get("model") or task.get("effort")):
             return worker_permissions([str(x) for x in custom], worker.get("perm"))
         return worker_permissions(previous, worker.get("perm"), replace=True)
     pick = worker_pick(s, task, agent=agent)
