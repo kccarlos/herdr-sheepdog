@@ -126,6 +126,8 @@ class ReplanTableTests(unittest.TestCase):
 
         def fake_gh(*argv):
             self.gh_calls.append(argv)
+            if argv[:2] == ("pr", "list"):
+                return True, "[]", ""
             return True, "{}", ""
 
         patches = [
@@ -1295,6 +1297,151 @@ class ReplanTableTests(unittest.TestCase):
             held_after = json.load(f)
         self.assertEqual(held_after["coord-1"], [{"how": "news", "text": backup_line, "at": 8000}])
         self.assertEqual(held_after["w1"], [{"text": backup_line, "at": 8001}])
+
+    def test_round_4_review_findings(self):
+        import herdr_task.devices as devices
+
+        # 1. inspect_runs() does not overwrite a re-plan committed during finalize()'s push_branch released() window.
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            t["state"] = "running"
+            t["head"] = self.head1
+            t.pop("pr", None)
+            t.pop("recap", None)
+            t["reviews"] = []
+            t["review_runs"] = [{"round": 1, "head": self.head1, "address": "rv-sbx", "cli": "agy", "model": None, "at": 9000, "majors_required": True}]
+            s.dirty = True
+        rn_code = self.commands.round_code({"round": 1, "head": self.head1, "at": 9000})
+        self.hc_terminals["rv-sbx"] = {"address": "rv-sbx", "state": "live", "turn": 1, "status": {"state": "done"}, "foreground": {"name": "agy"}}
+
+        def replan_during_finalize_push(s_push, task_push):
+            with s_push.released():
+                with self.open(True) as s_other:
+                    t_other = self.find_key(s_other, "api")
+                    self.replan.replan_task(s_other, t_other, why="replan during inspect_runs finalize", at=9500)
+
+        self.ended_reviewers.clear()
+        with self.open(True) as s, \
+                mock.patch.object(self.commands, "sandboxes", lambda clis: True), \
+                mock.patch.object(self.commands, "screen_of", lambda addr, lines=400: f"{rn_code} begin\nclean\n{rn_code} pass 0\n"), \
+                mock.patch.object(self.commands, "gate_need", lambda s_arg, t_arg: 1), \
+                mock.patch.object(self.commands, "github", lambda folder: "acme/demo"), \
+                mock.patch.object(self.github, "pr_at_tip", lambda t_arg, repo: None), \
+                mock.patch.object(self.github, "push_branch", replan_during_finalize_push):
+            s.dirty = True  # simulate an already-dirty tick
+            t = self.find_key(s, "api")
+            self.commands.inspect_runs(s, t)
+        self.assertIn("rv-sbx", self.ended_reviewers)
+        with self.open() as s:
+            t = self.find_key(s, "api")
+            self.assertEqual(t.get("review_reset_at"), 9500)
+            self.assertEqual(t["state"], "running")
+            self.assertTrue(all(r.get("before_replan") for r in t.get("reviews") or []))
+            self.assertEqual(self.commands.open_runs(t), [])
+
+        # 2. cancel_queued_merge discovers and dequeues an unrecorded open PR on GitHub, and fails closed on pr list error.
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            t.pop("pr", None)
+            t.pop("merge_queued", None)
+            t["recap"] = {"at": 9600, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
+            s.dirty = True
+        self.queue_state.update({"id": "PR_node_remote", "state": "OPEN", "in": True, "auto": True})
+        self.gh_calls.clear()
+
+        def gh_with_remote_pr(*argv):
+            self.gh_calls.append(argv)
+            if argv[:2] == ("pr", "list"):
+                return True, json.dumps([{
+                    "number": 77, "url": "https://github.com/acme/demo/pull/77", "state": "OPEN",
+                    "isCrossRepository": False, "baseRefName": "main", "headRefOid": self.head1,
+                }]), ""
+            return True, "{}", ""
+
+        with mock.patch.object(self.github, "gh", gh_with_remote_pr):
+            rc, _ = self.run_cli("recap", "TST-1", "--decide", "new", "--why", "dequeue unrecorded PR")
+        self.assertEqual(rc, 0)
+        self.assertTrue(any("dequeuePullRequest" in " ".join(c) for c in self.gh_calls), self.gh_calls)
+        self.assertTrue(any(c[:4] == ("pr", "merge", "77", "--repo") and "--disable-auto" in c for c in self.gh_calls), self.gh_calls)
+        self.queue_state.update({"in": False, "auto": False})
+
+        # Failed lookup on GitHub refuses re-plan instead of treating failure as confirmed absence.
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            t.pop("pr", None)
+            t["recap"] = {"at": 9700, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
+            s.dirty = True
+        with mock.patch.object(self.github, "gh", lambda *argv: (False, "", "HTTP 502") if argv[:2] == ("pr", "list") else (True, "{}", "")):
+            rc, bad = self.run_cli("recap", "TST-1", "--decide", "new", "--why", "gh list 502")
+        self.assertEqual(rc, 1)
+        self.assertIn("Couldn't check GitHub", bad["error"])
+
+        # 3. record_verdict stops before tell_pass / verdict_told when gate_step's push_branch hits a concurrent re-plan.
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            prev_reset = int(t.get("review_reset_at") or 0)
+            t.pop("recap", None)
+            t.pop("verdict_told", None)
+            t["pr"] = {"number": 77, "url": "https://github.com/acme/demo/pull/77", "repo": "acme/demo"}
+            t["review_runs"] = [{"round": 1, "head": self.head1, "address": "rv-g1", "cli": "codex", "model": None, "at": 9800, "majors_required": True}]
+            s.dirty = True
+        self.sent.clear()
+
+        def replan_during_gate_push(s_push, task_push):
+            with s_push.released():
+                with self.open(True) as s_other:
+                    t_other = self.find_key(s_other, "api")
+                    self.replan.replan_task(s_other, t_other, why="replan during gate_step push")
+
+        with self.open(True) as s, \
+                mock.patch.object(self.commands, "gate_need", lambda s_arg, t_arg: 2), \
+                mock.patch.object(self.commands, "branch_needs_push", lambda s_arg, t_arg: True), \
+                mock.patch.object(self.commands, "push_branch", replan_during_gate_push):
+            t = self.find_key(s, "api")
+            rn = dict(t["review_runs"][0])
+            self.commands.record_verdict(s, t, rn, True, 0, "clean", 0)
+        self.assertEqual(self.sent, [])
+        with self.open() as s:
+            t = self.find_key(s, "api")
+            self.assertGreater(int(t.get("review_reset_at") or 0), prev_reset)
+            self.assertNotIn("verdict_told", t)
+
+        # 4. held_pass() pending batch preserves message boundaries so clear_task_held_news keeps device notice and drops stale review in both orders.
+        review_msg = "Herdr's review round 1 of TST-1 (abc1234) found what must be fixed:\nFix bug."
+        for order in ([review_msg, devices.CARRY_ON], [devices.CARRY_ON, review_msg]):
+            with open(self.held_file, "w") as f:
+                json.dump({"w1": [{"text": m, "at": self.base.now()} for m in order]}, f)
+            self.hc_terminals["w1"] = {"address": "w1", "state": "live", "turn": 2, "status": {"state": "working"}}
+            with mock.patch.object(self.news, "screen_raw", lambda addr: ""), \
+                    mock.patch.object(self.news, "deliver", lambda addr, txt, *a, **kw: "pending"):
+                self.news.held_pass({})
+            with self.open() as s:
+                t = self.find_key(s, "api")
+                self.replan.clear_task_held_news(s, t, at=10000)
+            with open(self.held_file) as f:
+                kept_items = json.load(f).get("w1") or []
+            self.assertEqual(len(kept_items), 1, order)
+            self.assertEqual(kept_items[0]["text"], devices.CARRY_ON)
+            self.assertNotIn("Herdr's review round", kept_items[0]["text"])
+
+        # 5. select_retro_plan_targets selects valid plan keys like `api-2` while still resolving project refs like `TST-1` first.
+        with self.open() as s:
+            t1 = self.find_key(s, "api")
+            old_key = t1["plan_key"]
+            try:
+                t1["plan_key"] = "api-2"
+                by_key = {o["plan_key"]: o for o in s.data["tasks"] if o.get("plan_key")}
+                plan_tasks = [({"key": "api-2"}, "M1"), ({"key": "api-v2"}, "M1")]
+                self.assertEqual(
+                    [s.ref(o) for o in self.replan.select_retro_plan_targets(s, plan_tasks, by_key, "retro on api-2")],
+                    ["TST-1"],
+                )
+                self.assertEqual(
+                    [s.ref(o) for o in self.replan.select_retro_plan_targets(s, plan_tasks, by_key, "retro on TST-1")],
+                    ["TST-1"],
+                )
+            finally:
+                t1["plan_key"] = old_key
 
 
 if __name__ == "__main__":

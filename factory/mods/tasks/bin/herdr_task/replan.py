@@ -169,12 +169,57 @@ def require_replan_caller(s, task=None, *, action="re-plan a task"):
 
 def cancel_queued_merge(s, task, *, was_merge_queued=None):
     """Dequeues an open PR from GitHub's merge queue and disables auto-merge before resetting local merge state."""
-    from .github import gh, github, pr_repo, queue_entry
+    from .base import git
+    from .github import gh, github, github_refusal, github_required, github_unreachable, pr_repo, queue_entry, task_github
 
-    pr = task.get("pr") if isinstance(task.get("pr"), dict) else None
-    repo = pr_repo(task, s, github) if pr and pr.get("number") else None
     ref = s.ref(task) if s is not None and hasattr(s, "ref") else f"#{task.get('id')}"
     had_queued = bool(task.get("merge_queued")) if was_merge_queued is None else bool(was_merge_queued)
+    pr = task.get("pr") if isinstance(task.get("pr"), dict) else None
+    repo = pr_repo(task, s, github) if pr and pr.get("number") else None
+    if not (pr and pr.get("number")):
+        if s is not None and task.get("branch"):
+            repo = task_github(github, s, task)
+            if not repo:
+                if had_queued:
+                    raise Fail(f"{ref} is marked as in GitHub's merge queue, and its pull request couldn't be reached to dequeue it.")
+                if github_unreachable(s) or github_required(s, task):
+                    why = github_unreachable(s) or github_refusal(s, task)
+                    raise Fail(f"Couldn't check GitHub for {ref}'s pull request before re-planning ({why}); try again.")
+                return
+            ok, out, err = gh("pr", "list", "--repo", repo, "--head", task["branch"], "--state", "all",
+                              "--json", "number,url,state,isCrossRepository,baseRefName,headRefOid")
+            if not ok:
+                raise Fail(f"Couldn't check GitHub for {ref}'s pull request before re-planning ({err or 'gh pr list failed'}); try again.")
+            try:
+                listed = json.loads(out) if out else []
+            except ValueError:
+                listed = None
+            if not isinstance(listed, list):
+                raise Fail(f"Couldn't parse GitHub's pull request list for {ref} before re-planning; try again.")
+            base = task.get("base") or "main"
+            same = [
+                p for p in listed
+                if isinstance(p, dict) and not p.get("isCrossRepository") and p.get("baseRefName") == base
+            ]
+            open_pr = next((p for p in same if p.get("state") == "OPEN"), None)
+            if open_pr and open_pr.get("number"):
+                pr = {"number": open_pr["number"], "url": open_pr.get("url") or "", "repo": repo}
+                task["pr"] = pr
+                s.dirty = True
+            else:
+                merged_pr = next((p for p in same if p.get("state") == "MERGED"), None)
+                if merged_pr and merged_pr.get("number"):
+                    tip = (git(s.loc["folder"], "rev-parse", "--verify", "--quiet", f"refs/heads/{task['branch']}")[1]
+                           if getattr(s, "loc", None) else "") or task.get("head") or ""
+                    if had_queued or (tip and merged_pr.get("headRefOid") == tip):
+                        raise Fail(f"{ref}'s pull request #{merged_pr['number']} is already merged on GitHub.")
+                if had_queued:
+                    raise Fail(f"{ref} is marked as in GitHub's merge queue, and no open pull request was found for {task['branch']} on {repo}.")
+                return
+        else:
+            if had_queued:
+                raise Fail(f"{ref} is marked as in GitHub's merge queue, and its pull request couldn't be reached to dequeue it.")
+            return
     if not repo:
         if had_queued:
             raise Fail(f"{ref} is marked as in GitHub's merge queue, and its pull request couldn't be reached to dequeue it.")
@@ -356,6 +401,18 @@ def _strip_stale_task_news_lines(text, ref):
     return "\n".join(kept).strip()
 
 
+def _clean_worker_part(part, ref):
+    if not isinstance(part, str):
+        return part
+    if ref and f'<herdr-news task="{ref}"' in part:
+        part = _strip_stale_task_news_lines(part, ref)
+        if not part:
+            return None
+    if _is_stale_worker_held_item({"text": part}, ref):
+        return None
+    return part
+
+
 def clear_task_held_news(s, task, retiring=(), *, at=None):
     """Clears disk `.held.json` and `.news.json` entries superseded by a re-plan of `task`."""
     from . import news as _news
@@ -396,25 +453,43 @@ def clear_task_held_news(s, task, retiring=(), *, at=None):
                     if addr in worker_addrs:
                         cleaned_w = []
                         for x in items:
-                            txt = x.get("text")
-                            if isinstance(txt, str) and ref and f'<herdr-news task="{ref}"' in txt:
-                                rem = _strip_stale_task_news_lines(txt, ref)
-                                if not rem:
+                            if isinstance(x.get("parts"), list):
+                                kept_p = [cp for p in x["parts"] if (cp := _clean_worker_part(p, ref)) is not None]
+                                if not kept_p:
                                     continue
-                                if rem != txt:
-                                    x = {**x, "text": rem}
-                            if not _is_stale_worker_held_item(x, ref):
+                                if kept_p != x["parts"]:
+                                    x = {k: v for k, v in x.items() if k != "parts"}
+                                    x["text"] = "\n\n".join(kept_p)
+                                    if len(kept_p) > 1:
+                                        x["parts"] = kept_p
+                                cleaned_w.append(x)
+                            else:
+                                cp = _clean_worker_part(x.get("text"), ref)
+                                if cp is None:
+                                    continue
+                                if cp != x.get("text"):
+                                    x = {**x, "text": cp}
                                 cleaned_w.append(x)
                         items = cleaned_w
                     elif ref:
                         cleaned = []
                         for x in items:
-                            if x.get("how") == "news" and isinstance(x.get("text"), str):
-                                rem = _strip_stale_task_news_lines(x["text"], ref)
-                                if not rem:
-                                    continue
-                                if rem != x["text"]:
-                                    x = {**x, "text": rem}
+                            if x.get("how") == "news":
+                                if isinstance(x.get("parts"), list):
+                                    kept_p = [rem for p in x["parts"] if isinstance(p, str) and (rem := _strip_stale_task_news_lines(p, ref))]
+                                    if not kept_p:
+                                        continue
+                                    if kept_p != x["parts"]:
+                                        x = {k: v for k, v in x.items() if k != "parts"}
+                                        x["text"] = "\n\n".join(kept_p)
+                                        if len(kept_p) > 1:
+                                            x["parts"] = kept_p
+                                elif isinstance(x.get("text"), str):
+                                    rem = _strip_stale_task_news_lines(x["text"], ref)
+                                    if not rem:
+                                        continue
+                                    if rem != x["text"]:
+                                        x = {**x, "text": rem}
                             cleaned.append(x)
                         items = cleaned
                     if items:
@@ -739,16 +814,25 @@ def select_retro_plan_targets(s, plan_tasks, by_key, reason, *, has_structural_c
 
     open_tasks = [o for t, _ in plan_tasks if (o := by_key.get(t["key"])) is not None and o["state"] != "done"]
     own_prefix = (getattr(s, "prefix", None) or "").upper()
-    ref_tokens = [
-        m.group(0)
-        for m in re.finditer(r"(?<![\w-])([A-Za-z]{2,5}[0-9]*)-[0-9]+(?![\w-])", reason)
-        if m.group(1).upper() == own_prefix or m.group(1).upper() not in NON_TASK_PREFIXES
-    ]
-    if ref_tokens:
-        return [
-            o for o in open_tasks
-            if re.search(rf"(?<![\w-]){re.escape(s.ref(o))}(?![\w-])", reason, re.I)
+    all_plan_keys = (
+        {t["key"] for t, _ in plan_tasks if t.get("key")}
+        | {o.get("plan_key") for o in s.data.get("tasks") or [] if o.get("plan_key")}
+        | set(s.data.get("removed_plan_keys") or ())
+    )
+    all_plan_keys_low = {k.lower() for k in all_plan_keys}
+
+    if own_prefix:
+        own_refs = [
+            m.group(0)
+            for m in re.finditer(r"(?<![\w-])([A-Za-z]{2,5}[0-9]*)-[0-9]+(?![\w-])", reason)
+            if m.group(1).upper() == own_prefix
+            and (m.group(1).isupper() or m.group(0).lower() not in all_plan_keys_low)
         ]
+        if own_refs:
+            return [
+                o for o in open_tasks
+                if re.search(rf"(?<![\w-]){re.escape(s.ref(o))}(?![\w-])", reason, re.I)
+            ]
 
     named = [
         o for o in open_tasks
@@ -757,14 +841,16 @@ def select_retro_plan_targets(s, plan_tasks, by_key, reason, *, has_structural_c
     if named:
         return named
 
-    known_other_keys = (
-        {o.get("plan_key") for o in s.data.get("tasks") or [] if o.get("plan_key")}
-        | set(s.data.get("removed_plan_keys") or ())
-    ) - {o["plan_key"] for o in open_tasks if o.get("plan_key")}
-    unresolved = any(
-        re.search(rf"(?<![\w-]){re.escape(k)}(?![\w-])", reason, re.I) for k in known_other_keys
-    )
-    if unresolved or has_structural_changes:
+    known_other_keys = all_plan_keys - {o["plan_key"] for o in open_tasks if o.get("plan_key")}
+    if any(re.search(rf"(?<![\w-]){re.escape(k)}(?![\w-])", reason, re.I) for k in known_other_keys):
+        return []
+
+    foreign_refs = [
+        m.group(0)
+        for m in re.finditer(r"(?<![\w-])([A-Z]{2,5}[0-9]*)-[0-9]+(?![\w-])", reason)
+        if m.group(1) not in NON_TASK_PREFIXES
+    ]
+    if foreign_refs or has_structural_changes:
         return []
 
     candidates = [o for o in open_tasks if o.get("recap") or o.get("review_out")]

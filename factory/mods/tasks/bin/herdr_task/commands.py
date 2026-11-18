@@ -1487,6 +1487,7 @@ def record_verdict(s, t, rn, passed, must, text, majors=None):
     wt = t.get("worktree") or ""
     if git(wt, "rev-parse", "HEAD")[1] != rn["head"] or git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
         raise Fail(f"{wt} has moved on from {rn['head'][:7]} or has uncommitted changes: this round's verdict no longer applies.")
+    reset_before = int(t.get("review_reset_at") or _last_new_recap_at(t) or 0)
     archive_legacy_before_replan(t)
     at = max(now(), ((t.get("recaps") or [{}])[-1].get("at") or 0) + 1)
     t.setdefault("reviews", []).append({"round": rn["round"], "head": rn["head"], "by": rn["address"], "started_by": "herdr-task",
@@ -1501,6 +1502,8 @@ def record_verdict(s, t, rn, passed, must, text, majors=None):
         ref, need, k = s.ref(t), gate_need(s, t), gate_passes(t, rn["head"])
         before = len(t.get("review_runs") or [])
         step = gate_step(s, t)
+        if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before or t.get("recap"):
+            return step or recap_refusal(s, t) or f"{ref} was re-planned while pushing; run ready again."
         if step:
             runs = t.get("review_runs") or []
             rest = (f"Round {runs[-1]['round']} has started; its findings come to you as a message, nothing to do meanwhile."
@@ -1509,6 +1512,8 @@ def record_verdict(s, t, rn, passed, must, text, majors=None):
             msg = f"{ref}: review round {rn['round']} passed. {step}"
         else:
             fin = finalize(s, t)
+            if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before or t.get("recap"):
+                return fin
             what = f"{ref} waits in Ready for Accept" if merge_wait_why(s, t) and merge_policy(s, t) == "ask" else f"{ref} goes on to merging"
             line = f"Herdr's review round {rn['round']} of {ref} passed: {what} ({k} of {need} passing). {fin}"
             msg = f"{ref}: review round {rn['round']} passed. {fin}"
@@ -1689,10 +1694,14 @@ def inspect_runs(s, t):
                 end_reviewer(rn["address"])
                 continue
             if got and (got[3] is not None or not rn.get("majors_required")):
+                reset_before = int(t.get("review_reset_at") or _last_new_recap_at(t) or 0)
                 before, dirty = json.loads(json.dumps(t)), s.dirty
                 try:
                     record_verdict(s, t, rn, *got)
                 except Exception:  # nothing half recorded: a later tick tries again, its reviewer still there
+                    if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before:
+                        end_reviewer(rn["address"])
+                        return
                     t.clear()
                     t.update(before)
                     s.dirty = dirty
@@ -1700,6 +1709,8 @@ def inspect_runs(s, t):
                         raise
                     fail_run(s, t, rn, "head moved on")
                 end_reviewer(rn["address"])  # recorded, or its head moved on: its verdict never applies
+                if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before:
+                    return
                 continue
         if screen is None:
             screen = screen_of(rn["address"], 400)

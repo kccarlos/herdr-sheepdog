@@ -748,7 +748,10 @@ def held_pass(report, delivered=None):
                             unpend(addr, k)
                         report.setdefault("held", []).append({"to": addr, "messages": len(batch)})
                     elif res == "pending":
-                        items[:] = [x for x in items if x not in batch] + [{"text": text, "how": how, "at": now(),
-                                                                            "pending": (k.get("turn") or 0) + 1}]
+                        parts = [p for x in batch for p in (x.get("parts") if isinstance(x.get("parts"), list) else [x["text"]])]
+                        entry = {"text": text, "how": how, "at": now(), "pending": (k.get("turn") or 0) + 1}
+                        if len(parts) > 1:
+                            entry["parts"] = parts
+                        items[:] = [x for x in items if x not in batch] + [entry]
             if not items:
                 held.pop(addr)
