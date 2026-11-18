@@ -40,6 +40,7 @@ func (a *App) wire() error {
 	a.store = store
 
 	var inner supervisor.Herdr
+	factoryClient := opts.Factory
 	if opts.Herdr == HerdrSocket {
 		a.backend, a.term = a.newBackend(cfg)
 		inner = a.backend
@@ -51,6 +52,17 @@ func (a *App) wire() error {
 			Log:          a.log,
 			PollInterval: opts.FactoryTickPoll,
 		})
+		if factoryClient == nil {
+			factoryClient = factory.NewClient(factory.ClientOptions{
+				DataDir:   cfg.DataDir,
+				Engine:    factory.EngineSource{FS: herdrsheepdog.Factory, Version: opts.Version},
+				DaemonURL: a.LoopbackURL,
+			})
+		}
+	}
+	factoryProofs, err := factory.NewProofStore(cfg.DataDir, nil)
+	if err != nil {
+		return fmt.Errorf("app: factory proofs: %w", err)
 	}
 	a.herdr = inject.NewHerdr(inner, a.log)
 	a.wireMarks(cfg, opts.Stderr)
@@ -156,6 +168,9 @@ func (a *App) wire() error {
 		Notifier:              notifier,
 		Marker:                a.marker,
 		Mutes:                 a.mutes,
+		Factory:               factoryClient,
+		FactoryProofs:         factoryProofs,
+		FactoryPoll:           opts.FactoryAskPoll,
 	})
 	if err != nil {
 		if a.brain != nil {
@@ -269,6 +284,7 @@ func (a *App) wire() error {
 		SetupNeeded:    a.SetupNeeded,
 		Restart:        a.RequestRestart,
 		DataDir:        cfg.DataDir,
+		FactoryProofs:  factoryProofs,
 	}
 	if opts.HeardEcho && opts.Voice == VoiceOff {
 		deps.HeardEcho = sup.OnVoiceEvent

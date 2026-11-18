@@ -378,6 +378,8 @@ func (s *Server) pendingView(p *state.PendingAction) *PendingView {
 	v := &PendingView{PendingAction: *p, Summary: p.SpokenSummary, Options: supervisor.PendingOptions(*p)}
 	if row, ok := s.deps.Store.Get(p.PaneID); ok {
 		v.Agent = row.Alias
+	} else if p.Agent != "" {
+		v.Agent = p.Agent
 	}
 	return v
 }
@@ -418,7 +420,7 @@ func (s *Server) handlePendingAnswer(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := s.toolCtx()
 	defer cancel()
-	res, err := s.deps.Supervisor.AnswerTap(ctx, req.ID, req.Option)
+	res, err := s.deps.Supervisor.AnswerTap(ctx, req.ID, req.Option, deviceOf(r))
 	switch {
 	case errors.Is(err, supervisor.ErrPendingGone):
 		writeError(w, http.StatusConflict, supervisor.ErrPendingGone.Error())
