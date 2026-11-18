@@ -28,19 +28,50 @@ class ReplanRow:
     apply: object
 
 
+def _last_new_recap_at(task):
+    return max(
+        (int(d.get("at") or 0) for d in (task.get("recaps") or []) if isinstance(d, dict) and d.get("decision") == "new"),
+        default=0,
+    )
+
+
+def _is_before_replan(rec, cutoff):
+    if rec.get("before_replan"):
+        return True
+    at = rec.get("at")
+    return bool(cutoff and isinstance(at, (int, float)) and at <= cutoff)
+
+
+def archive_legacy_before_replan(task):
+    """Marks any pre-existing records at/before a legacy `decision='new'` recap with `before_replan=True`."""
+    cutoff = _last_new_recap_at(task)
+    if not cutoff:
+        return False
+    changed = False
+    for key in ("reviews", "review_runs", "review_failures"):
+        for rec in task.get(key) or []:
+            if isinstance(rec, dict) and not rec.get("before_replan") and _is_before_replan(rec, cutoff):
+                rec["before_replan"] = True
+                changed = True
+    return changed
+
+
 def active_reviews(task):
-    """Review rounds of the current approach (`before_replan` excluded)."""
-    return [r for r in task.get("reviews") or [] if not r.get("before_replan")]
+    """Review rounds of the current approach (`before_replan` and rounds at/before any `new` recap excluded)."""
+    cutoff = _last_new_recap_at(task)
+    return [r for r in task.get("reviews") or [] if not _is_before_replan(r, cutoff)]
 
 
 def active_review_runs(task):
-    """Gate review runs of the current approach (`before_replan` excluded)."""
-    return [r for r in task.get("review_runs") or [] if not r.get("before_replan")]
+    """Gate review runs of the current approach (`before_replan` and runs at/before any `new` recap excluded)."""
+    cutoff = _last_new_recap_at(task)
+    return [r for r in task.get("review_runs") or [] if not _is_before_replan(r, cutoff)]
 
 
 def active_review_failures(task):
-    """Failed reviewer attempts of the current approach (`before_replan` excluded)."""
-    return [f for f in task.get("review_failures") or [] if not f.get("before_replan")]
+    """Failed reviewer attempts of the current approach (`before_replan` and failures at/before any `new` recap excluded)."""
+    cutoff = _last_new_recap_at(task)
+    return [f for f in task.get("review_failures") or [] if not _is_before_replan(f, cutoff)]
 
 
 # ---- who may trigger a re-plan ------------------------------------------------------------------
@@ -136,15 +167,16 @@ def require_replan_caller(s, task=None, *, action="re-plan a task"):
 
 # ---- external side effects (never run on plan amend --check) ------------------------------------
 
-def cancel_queued_merge(s, task):
+def cancel_queued_merge(s, task, *, was_merge_queued=None):
     """Dequeues an open PR from GitHub's merge queue and disables auto-merge before resetting local merge state."""
     from .github import gh, github, pr_repo, queue_entry
 
     pr = task.get("pr") if isinstance(task.get("pr"), dict) else None
     repo = pr_repo(task, s, github) if pr and pr.get("number") else None
     ref = s.ref(task) if s is not None and hasattr(s, "ref") else f"#{task.get('id')}"
+    had_queued = bool(task.get("merge_queued")) if was_merge_queued is None else bool(was_merge_queued)
     if not repo:
-        if task.get("merge_queued"):
+        if had_queued:
             raise Fail(f"{ref} is marked as in GitHub's merge queue, and its pull request couldn't be reached to dequeue it.")
         return
     num = str(pr["number"])
@@ -258,12 +290,23 @@ def collect_live_reviewers(s, task, *, dry=False):
         *(rn["address"] for rn in _commands.open_runs(task) if rn.get("address")),
     ]))
     if not dry and s is not None and hasattr(s, "key"):
-        for k, _ in _agents._live(s.key(task)):
+        known_reviewers = {a.get("address") for a in (task.get("reviewers") or []) if isinstance(a, dict) and a.get("address")}
+        for k, _ in _agents._live(s.key(task), strict=True):
             addr = k.get("address")
             if not addr or addr in addrs:
                 continue
-            full = k if label_of(k.get("labels"), "role") else _agents.detail(k)
-            if label_of(full.get("labels"), "role") == "reviewer":
+            if addr in known_reviewers:
+                addrs.append(addr)
+                continue
+            role = label_of(k.get("labels"), "role")
+            if not role:
+                det = _agents.hc_json("get", addr)
+                if not isinstance(det, dict) or det.get("error") or ("state" not in det and "labels" not in det):
+                    raise Fail(f"Couldn't verify terminal {addr}; try again when herdr-core is reachable.")
+                if det.get("state") in CONFIRMED_GONE_STATES:
+                    continue
+                role = label_of(det.get("labels"), "role")
+            if role == "reviewer":
                 addrs.append(addr)
     return addrs
 
@@ -323,58 +366,61 @@ def clear_task_held_news(s, task, retiring=(), *, at=None):
     retire_set = set(retiring or ())
     reset_ts = int(at if at is not None else (task.get("review_reset_at") or now()))
 
-    if os.path.exists(_news.HELD):
-        with _news.held_messages() as held:
-            for addr in list(held):
-                if addr in retire_set:
-                    held.pop(addr, None)
-                    continue
-                items = held.get(addr) or []
-                if addr in worker_addrs:
-                    cleaned_w = []
-                    for x in items:
-                        txt = x.get("text")
-                        if isinstance(txt, str) and ref and f'<herdr-news task="{ref}"' in txt:
-                            rem = _strip_stale_task_news_lines(txt, ref)
-                            if not rem:
-                                continue
-                            if rem != txt:
-                                x = {**x, "text": rem}
-                        if not _is_stale_worker_held_item(x, ref):
-                            cleaned_w.append(x)
-                    items = cleaned_w
-                elif ref:
-                    cleaned = []
-                    for x in items:
-                        if x.get("how") == "news" and isinstance(x.get("text"), str):
-                            rem = _strip_stale_task_news_lines(x["text"], ref)
-                            if not rem:
-                                continue
-                            if rem != x["text"]:
-                                x = {**x, "text": rem}
-                        cleaned.append(x)
-                    items = cleaned
-                if items:
-                    held[addr] = items
-                else:
-                    held.pop(addr, None)
-
+    _news.record_mem_reset(key, reset_ts)
     news_dir = os.path.dirname(_news.NEWS)
-    if key and news_dir and os.path.isdir(news_dir):
-        with _news.news_state_file() as state:
-            resets = state.setdefault("reset_at", {})
-            resets[key] = max(int(resets.get(key) or 0), reset_ts)
-            outbox = state.get("outbox")
-            if isinstance(outbox, list):
-                outbox[:] = [x for x in outbox if not (x.get("key") == key and x.get("event") not in ("backup",))]
-            delivered = state.get("delivered")
-            if isinstance(delivered, dict):
-                delivered.pop(key, None)
-            mine = (state.get("seen") or {}).get(s.slug)
-            if isinstance(mine, dict) and isinstance(mine.get(str(task["id"])), dict):
-                prev = mine[str(task["id"])]
-                for k in ("held_ready_at", "recap", "reviewer_failed"):
-                    prev.pop(k, None)
+    lock_cm = _news.news_lock(exclusive=True) if (news_dir and os.path.isdir(news_dir)) else _news.null_lock()
+    with lock_cm:
+        if key and news_dir and os.path.isdir(news_dir):
+            with _news.news_state_file() as state:
+                resets = state.setdefault("reset_at", {})
+                resets[key] = max(int(resets.get(key) or 0), reset_ts)
+                outbox = state.get("outbox")
+                if isinstance(outbox, list):
+                    outbox[:] = [x for x in outbox if not (x.get("key") == key and x.get("event") not in ("backup",))]
+                delivered = state.get("delivered")
+                if isinstance(delivered, dict):
+                    delivered.pop(key, None)
+                mine = (state.get("seen") or {}).get(s.slug)
+                if isinstance(mine, dict) and isinstance(mine.get(str(task["id"])), dict):
+                    prev = mine[str(task["id"])]
+                    for k in ("held_ready_at", "recap", "reviewer_failed"):
+                        prev.pop(k, None)
+
+        if os.path.exists(_news.HELD):
+            with _news.held_messages() as held:
+                for addr in list(held):
+                    if addr in retire_set:
+                        held.pop(addr, None)
+                        continue
+                    items = held.get(addr) or []
+                    if addr in worker_addrs:
+                        cleaned_w = []
+                        for x in items:
+                            txt = x.get("text")
+                            if isinstance(txt, str) and ref and f'<herdr-news task="{ref}"' in txt:
+                                rem = _strip_stale_task_news_lines(txt, ref)
+                                if not rem:
+                                    continue
+                                if rem != txt:
+                                    x = {**x, "text": rem}
+                            if not _is_stale_worker_held_item(x, ref):
+                                cleaned_w.append(x)
+                        items = cleaned_w
+                    elif ref:
+                        cleaned = []
+                        for x in items:
+                            if x.get("how") == "news" and isinstance(x.get("text"), str):
+                                rem = _strip_stale_task_news_lines(x["text"], ref)
+                                if not rem:
+                                    continue
+                                if rem != x["text"]:
+                                    x = {**x, "text": rem}
+                            cleaned.append(x)
+                        items = cleaned
+                    if items:
+                        held[addr] = items
+                    else:
+                        held.pop(addr, None)
 
 
 # ---- table row handlers -------------------------------------------------------------------------
@@ -642,9 +688,10 @@ class ReplanEffect:
     task: dict
     retiring: list
     at: int
+    was_merge_queued: bool = False
 
     def commit(self):
-        cancel_queued_merge(self.store, self.task)
+        cancel_queued_merge(self.store, self.task, was_merge_queued=self.was_merge_queued)
         retire_reviewers(self.retiring)
         clear_task_held_news(self.store, self.task, self.retiring, at=self.at)
 
@@ -667,14 +714,15 @@ def replan_task(s, task, *, why, at=None, dry=False, defer_side_effects=False):
     """Applies `REPLAN_TABLE` to `task`. Unless `dry` or `defer_side_effects`, runs GitHub/hc/news side effects too."""
     prev_reset = int(task.get("review_reset_at") or 0)
     at = max(now(), prev_reset + 1) if at is None else max(int(at), prev_reset + 1)
+    was_merge_queued = bool(task.get("merge_queued"))
     if not dry and not defer_side_effects:
-        cancel_queued_merge(s, task)
+        cancel_queued_merge(s, task, was_merge_queued=was_merge_queued)
     ctx = {"store": s, "task": task, "why": why, "at": at, "dry": dry, "retiring": []}
     for row in REPLAN_TABLE:
         row.apply(ctx)
     if s is not None:
         s.dirty = True
-    eff = ReplanEffect(store=s, task=task, retiring=list(ctx["retiring"]), at=at)
+    eff = ReplanEffect(store=s, task=task, retiring=list(ctx["retiring"]), at=at, was_merge_queued=was_merge_queued)
     if not dry and not defer_side_effects:
         retire_reviewers(eff.retiring)
         clear_task_held_news(s, task, eff.retiring, at=at)
@@ -689,9 +737,20 @@ def select_retro_plan_targets(s, plan_tasks, by_key, reason, *, has_structural_c
         return targets
 
     open_tasks = [o for t, _ in plan_tasks if (o := by_key.get(t["key"])) is not None and o["state"] != "done"]
+    ref_tokens = [
+        m.group(0)
+        for m in re.finditer(r"(?<![\w-])([A-Za-z]{2,5}[0-9]*)-[0-9]+(?![\w-])", reason)
+        if m.group(1).upper() not in NON_TASK_PREFIXES
+    ]
+    if ref_tokens:
+        return [
+            o for o in open_tasks
+            if re.search(rf"(?<![\w-]){re.escape(s.ref(o))}(?![\w-])", reason, re.I)
+        ]
+
     named = [
         o for o in open_tasks
-        if re.search(rf"(?<![\w-])(?:{re.escape(s.ref(o))}|{re.escape(o['plan_key'])})(?![\w-])", reason, re.I)
+        if re.search(rf"(?<![\w-]){re.escape(o['plan_key'])}(?![\w-])", reason, re.I)
     ]
     if named:
         return named
@@ -700,12 +759,7 @@ def select_retro_plan_targets(s, plan_tasks, by_key, reason, *, has_structural_c
         {o.get("plan_key") for o in s.data.get("tasks") or [] if o.get("plan_key")}
         | set(s.data.get("removed_plan_keys") or ())
     ) - {o["plan_key"] for o in open_tasks if o.get("plan_key")}
-    ref_tokens = [
-        m.group(1)
-        for m in re.finditer(r"(?<![\w-])([A-Za-z]{2,5}[0-9]*)-[0-9]+(?![\w-])", reason)
-        if m.group(1).upper() not in NON_TASK_PREFIXES
-    ]
-    unresolved = bool(ref_tokens) or any(
+    unresolved = any(
         re.search(rf"(?<![\w-]){re.escape(k)}(?![\w-])", reason, re.I) for k in known_other_keys
     )
     if unresolved or has_structural_changes:

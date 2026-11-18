@@ -40,7 +40,7 @@ Only the **coordinator** and the **owner** may trigger a re-plan (`recap --decid
 `plan amend` re-plans only the targeted open task(s), never unrelated tasks (`select_retro_plan_targets`):
 
 1. If any task entry in the plan file sets `"retro": true` (valid only on an existing non-`done` task), those tasks are the targets.
-2. Otherwise, when `--reason` matches `\bretro`, open plan tasks named by ref (`SDF-12`) or `plan_key` (`api`, matched with `(?<![\w-])…(?![\w-])` so `api-v2` never matches `api`) are selected.
+2. Otherwise, when `--reason` matches `\bretro`, explicit task refs (`SDF-12`) take precedence over `plan_key` words in surrounding prose; if no task ref appears in `--reason`, open plan tasks named by `plan_key` (`api`, matched with `(?<![\w-])…(?![\w-])` so `api-v2` never matches `api`) are selected.
 3. If `--reason` names a non-open task ref or a `done` / removed `plan_key`, or if the amend itself splits or adds tasks without naming an open target, no fallback runs.
 4. Otherwise (plain prose such as `"retro: use copy-on-write"` with no structural task additions or splits), the single open plan task with `recap` or `review_out` is selected; if multiple open tasks qualify, `plan amend` refuses until one is named or marked `"retro": true`.
 

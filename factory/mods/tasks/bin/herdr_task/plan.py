@@ -438,7 +438,7 @@ class Plan:
         from .replan import cancel_queued_merge, clear_task_held_news, retire_reviewers
         from .simulators import release_task
         for eff in self.replan_effects:
-            cancel_queued_merge(eff.store, eff.task)
+            cancel_queued_merge(eff.store, eff.task, was_merge_queued=eff.was_merge_queued)
         for eff in self.replan_effects:
             retire_reviewers(eff.retiring)
             clear_task_held_news(eff.store, eff.task, eff.retiring, at=eff.at)

@@ -4013,7 +4013,7 @@ class GateReview(unittest.TestCase):
                                  (launch, "low_priority", lambda argv, name: argv), (templates, "TEMPLATES", tdir),
                                  (settings, "SETTINGS", os.path.join(tdir, "none.json")),
                                  (launch, "UNSANDBOXED_FLAG", os.path.join(tdir, "none")),
-                                 (commands, "hc_json", lambda *a: self.reviewer_term), (agents, "hc_json", lambda *a: None),
+                                 (commands, "hc_json", lambda *a: self.reviewer_term), (agents, "hc_json", lambda *a: {"terminals": []} if a and a[0] == "ls" else None),
                                  (commands, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, "", "")),
                                  (agents, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, "", "")),
                                  (commands, "sandboxes", lambda argv: False), (launch, "sandboxes", lambda argv: False),

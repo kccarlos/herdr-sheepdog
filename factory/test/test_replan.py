@@ -83,6 +83,7 @@ class ReplanTableTests(unittest.TestCase):
         self.settings = settings
         self.store_mod = store
         self.tick = tick
+        self.real_agents_live = agents._live
 
         self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="replan-test-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -139,7 +140,7 @@ class ReplanTableTests(unittest.TestCase):
             mock.patch.object(launch, "hc_json", fake_hc_json),
             mock.patch.object(agents, "hc_json", fake_hc_json),
             mock.patch.object(news, "hc_json", fake_hc_json),
-            mock.patch.object(agents, "_live", lambda key=None: list(self.live_by_key.get(key, []))),
+            mock.patch.object(agents, "_live", lambda key=None, strict=False: list(self.live_by_key.get(key, []))),
             mock.patch.object(commands, "end_reviewer", lambda addr: self.ended_reviewers.append(addr)),
             mock.patch.object(commands, "end_agent", lambda s, t, addr: self.ended_agents.append(addr)),
             mock.patch.object(news, "send_or_hold", lambda addr, msg, **kw: (self.sent.append((addr, msg)), True)[1]),
@@ -1000,6 +1001,7 @@ class ReplanTableTests(unittest.TestCase):
                 self.assertEqual(got, want_hold, proc)
 
         # 4. news_pass race: clear_task_held_news after snapshot and before delivery neither sends nor restores stale recap.
+        self.news._MEM_RESETS.clear()
         if os.path.exists(self.news_file):
             os.remove(self.news_file)
         with self.open(True) as s:
@@ -1008,6 +1010,7 @@ class ReplanTableTests(unittest.TestCase):
             key = f"{slug}#1"
             t.pop("retiring_reviewers", None)
             t.pop("review_reset_at", None)
+            t.pop("recaps", None)
             t["recap"] = {"at": 2000, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required: 3 failed CI runs"}
             t["attention"] = "Recap required: 3 failed CI runs"
             s.dirty = True
@@ -1066,6 +1069,114 @@ class ReplanTableTests(unittest.TestCase):
             with self.store_mod.Store(loc, write=False):
                 pass
         self.assertFalse(os.path.exists(fresh_store_dir))
+
+    def test_round_2_review_findings(self):
+        # 1. Interleaved re-plan between cmd_ready's two open_store locks refuses the stale ready.
+        rc, _ = self.run_cli("reviewed", "TST-1", "--verdict", "pass", "--majors", "0", "--report", "clean")
+        self.assertEqual(rc, 0)
+        real_open_store = self.commands.open_store
+        calls = [0]
+
+        def interleaved_open_store(args, write=True):
+            calls[0] += 1
+            if calls[0] == 2:
+                with real_open_store(args, write=True) as s_mid:
+                    t_mid = s_mid.find(args.id)
+                    self.replan.replan_task(s_mid, t_mid, why="interleaved replan")
+            return real_open_store(args, write=write)
+
+        with mock.patch.object(self.commands, "open_store", interleaved_open_store):
+            rc, bad = self.run_cli("ready", "TST-1", "--summary", "Ship it")
+        self.assertEqual(rc, 1)
+        with self.open() as s:
+            t = self.find_key(s, "api")
+            self.assertEqual(t["state"], "running")
+            self.assertEqual(self.replan.active_reviews(t), [])
+
+        # 2. Deferred replan_task + Plan.finish refuses when merge_queued is set and PR repo cannot be reached.
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            t.pop("pr", None)
+            t["merge_queued"] = 55
+            s.dirty = True
+        with mock.patch.object(self.github, "github", lambda folder: None):
+            rc, bad = self.run_cli("plan", "amend", "--reason", "retro: redo api", plan=self.current_plan(retro=True))
+        self.assertEqual(rc, 1)
+        self.assertIn("merge queue", bad["error"])
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            self.assertEqual(t.get("merge_queued"), 55)
+            t.pop("merge_queued", None)
+            s.dirty = True
+
+        # 3. Transient hc ls failure (returning None) refuses re-plan through real agents._live instead of dropping live reviewers.
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            t["reviewers"] = [{"address": "worker-reviewer"}]
+            t["recap"] = {"at": 4000, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
+            s.dirty = True
+        with mock.patch.object(self.agents, "_live", self.real_agents_live), \
+                mock.patch.object(self.agents, "hc_json", lambda *a: None):
+            rc, bad = self.run_cli("recap", "TST-1", "--decide", "new", "--why", "hc down")
+        self.assertEqual(rc, 1)
+        self.assertIn("Couldn't list the task's terminals", bad["error"])
+        with self.open(True) as s:
+            self.find_key(s, "api").pop("recap", None)
+            s.dirty = True
+
+        # 4. Real news_send: re-plan completing inside typing() prevents stale recap delivery and delivered restore.
+        self.news._MEM_RESETS.clear()
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            slug = s.slug
+            key = f"{slug}#1"
+            t.pop("review_reset_at", None)
+            t.pop("recaps", None)
+            t["recap"] = {"at": 4500, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
+            t["attention"] = "Recap required"
+            s.dirty = True
+        t0 = self.base.now() - self.news.NEWS_SETTLE_MS - 1000
+        with open(self.news_file, "w") as f:
+            json.dump({
+                "seen": {slug: {"_init": True, "1": {"status": "needs", "recap": True}}},
+                "outbox": [{"key": key, "project": self.repo, "folder": "repo", "event": "recap", "status": "needs",
+                            "stall": None, "text": '<herdr-news task="TST-1" event="recap">stale recap</herdr-news>', "at": t0}],
+                "delivered": {},
+            }, f)
+        self.hc_terminals["coord-2"] = {"address": "coord-2", "state": "live", "turn": 1, "status": {"state": "idle"}}
+        delivered_calls = []
+
+        def replan_inside_typing(addr, *a, **kw):
+            with self.open(True) as s2:
+                t2 = self.find_key(s2, "api")
+                self.replan.replan_task(s2, t2, why="replan inside typing", at=t0 + 500)
+            return None
+
+        rep = {}
+        with mock.patch.object(self.news, "coordinator_in", lambda proj: "coord-2"), \
+                mock.patch.object(self.news, "typing", replan_inside_typing), \
+                mock.patch.object(self.news, "deliver", lambda addr, txt, *a, **kw: (delivered_calls.append(txt), "sent")[1]):
+            self.news.news_pass(rep)
+        self.assertEqual(delivered_calls, [])
+        self.assertEqual(rep.get("news"), [])
+
+        # 5. Explicit task ref in --reason takes precedence over incidental plan_key words in surrounding prose.
+        with self.open() as s:
+            by_key = {o["plan_key"]: o for o in s.data["tasks"] if o.get("plan_key")}
+            plan_tasks = [({"key": "api"}, "M1"), ({"key": "api-v2"}, "M1")]
+            picked = [s.ref(o) for o in self.replan.select_retro_plan_targets(s, plan_tasks, by_key, "retro TST-2: keep the api unchanged")]
+            self.assertEqual(picked, ["TST-2"])
+
+        # 6. Pre-existing task with a legacy `decision="new"` recap and no `before_replan` markers excludes old gate pass & resets round to 1.
+        legacy = {
+            "id": 99, "state": "running", "mode": "worktree", "worktree": self.wt, "branch": "task/1-api", "base": "main",
+            "review_runs": [{"round": 1, "head": self.head1, "address": "rv-leg", "cli": "codex", "model": None, "at": 110, "majors_required": True}],
+            "reviews": [{"round": 1, "head": self.head1, "by": "rv-leg", "started_by": "herdr-task", "verdict": "pass", "must_fix": 0, "majors": 0, "report": "ok", "cli": "codex", "model": None, "at": 110}],
+            "recaps": [{"decision": "new", "why": "old replan", "at": 200}],
+        }
+        self.assertEqual(self.budget.rounds_since(legacy), [])
+        self.assertEqual(self.commands.next_round(legacy), 1)
+        self.assertEqual(self.commands.gate_passes(legacy, self.head1), 0)
 
 
 if __name__ == "__main__":

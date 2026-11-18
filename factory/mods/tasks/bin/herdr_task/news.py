@@ -102,12 +102,78 @@ def news_state(s, t, live):
     return v, event, stall
 
 
+import threading
+
+_NEWS_LOCK_TLS = threading.local()
+_MEM_RESETS = {}
+
+
+@contextmanager
+def null_lock():
+    yield
+
+
+@contextmanager
+def news_lock(exclusive=True):
+    """Re-entrant lock on `NEWS + '.lock'` (`Store -> NEWS -> HELD` lock order)."""
+    news_dir = os.path.dirname(NEWS)
+    if news_dir:
+        try:
+            os.makedirs(news_dir, exist_ok=True)
+        except OSError:
+            yield
+            return
+    held = getattr(_NEWS_LOCK_TLS, "held", None)
+    if held is None:
+        held = _NEWS_LOCK_TLS.held = {}
+    lock_key = (os.getpid(), NEWS + ".lock")
+    cur = held.get(lock_key)
+    if cur is not None:
+        if exclusive and not cur[1]:
+            fcntl.flock(cur[0], fcntl.LOCK_EX)
+            cur[1] = True
+        cur[2] += 1
+        try:
+            yield
+        finally:
+            cur[2] -= 1
+        return
+    try:
+        f = open(NEWS + ".lock", "a" if exclusive else "r")
+    except OSError:
+        try:
+            f = open(NEWS + ".lock", "a")
+        except OSError:
+            yield
+            return
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        entry = [f, bool(exclusive), 1]
+        held[lock_key] = entry
+        try:
+            yield
+        finally:
+            held.pop(lock_key, None)
+            fcntl.flock(f, fcntl.LOCK_UN)
+    finally:
+        f.close()
+
+
+def record_mem_reset(key, reset_ts):
+    if key and reset_ts:
+        mk = (NEWS, key)
+        _MEM_RESETS[mk] = max(int(_MEM_RESETS.get(mk) or 0), int(reset_ts))
+
+
+def clear_mem_reset(key):
+    if key:
+        _MEM_RESETS.pop((NEWS, key), None)
+
+
 @contextmanager
 def news_state_file():
     """NEWS under its own lock so concurrent commands (e.g. re-plan) and news_pass never clobber it."""
-    os.makedirs(STORE, exist_ok=True)
-    with open(NEWS + ".lock", "a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with news_lock(exclusive=True):
         try:
             with open(NEWS) as f:
                 state = json.load(f)
@@ -121,24 +187,20 @@ def news_state_file():
 
 
 def _read_news_file():
-    try:
-        with open(NEWS + ".lock") as lock:
-            fcntl.flock(lock, fcntl.LOCK_SH)
+    with news_lock(exclusive=False):
+        try:
             with open(NEWS) as f:
                 d = json.load(f)
                 return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        pass
-    try:
-        with open(NEWS) as f:
-            d = json.load(f)
-            return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        return {}
+        except (OSError, ValueError):
+            return {}
 
 
 def _fresh_resets(project=None, base_resets=None):
     resets = {k: int(v or 0) for k, v in (base_resets or {}).items()}
+    for (npath, k), v in list(_MEM_RESETS.items()):
+        if npath == NEWS:
+            resets[k] = max(resets.get(k, 0), int(v or 0))
     for k, v in (_read_news_file().get("reset_at") or {}).items():
         resets[k] = max(resets.get(k, 0), int(v or 0))
     if project:
@@ -309,13 +371,23 @@ def news_pass(report, folder=None):
             continue
         to = coordinator_in(project)
         k = hc_json("get", to) if to else None
-        # Re-check right before sending in case a re-plan ran while resolving the coordinator.
+        # Re-check right before sending, and inside news_send after typing() under NEWS lock.
         resets.update(_fresh_resets(project, resets))
         _prune_reset_news(state, resets)
         batch = [x for x in outbox if x.get("project") == project]
-        if not batch:
+        if not batch or not to:
             continue
-        got = news_send(to, "\n".join(x["text"] for x in batch)) if to else False
+
+        def _validate_batch(proj=project):
+            resets.update(_fresh_resets(proj, resets))
+            _prune_reset_news(state, resets)
+            fresh_batch = [x for x in outbox if x.get("project") == proj]
+            batch[:] = fresh_batch
+            return "\n".join(x["text"] for x in fresh_batch) if fresh_batch else ""
+
+        got = (news_send(to, "\n".join(x["text"] for x in batch), _validate=_validate_batch)
+               if getattr(news_send, "_accepts_validate", False)
+               else news_send(to, "\n".join(x["text"] for x in batch)))
         if got:
             outbox[:] = [x for x in outbox if x not in batch]
             resets.update(_fresh_resets(project, resets))
@@ -327,7 +399,8 @@ def news_pass(report, folder=None):
                                            "event": x["event"], "status": x["status"], "stall": x.get("stall"),
                                            "idle": idle, "reset_at": int(x.get("reset_at") or 0),
                                            **({"pending": True} if got == "pending" else {})}
-            report["news"].append({"to": to, "lines": [x["text"] for x in batch]})
+            if batch:
+                report["news"].append({"to": to, "lines": [x["text"] for x in batch]})
     # Settings changed for a project: its running coordinator told once, in one message (assistant_settings.py).
     try:
         from .assistant_settings import settings_pass
@@ -337,8 +410,7 @@ def news_pass(report, folder=None):
     resets.update(_fresh_resets(None, resets))
     _prune_reset_news(state, resets, snap_resets)
     held_pass(report, delivered)
-    with open(NEWS + ".lock", "a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with news_lock(exclusive=True):
         try:
             with open(NEWS) as f:
                 disk = json.load(f)
@@ -346,6 +418,9 @@ def news_pass(report, folder=None):
             disk = {}
         if isinstance(disk, dict):
             for k, v in (disk.get("reset_at") or {}).items():
+                resets[k] = max(int(resets.get(k) or 0), int(v or 0))
+        for (npath, k), v in list(_MEM_RESETS.items()):
+            if npath == NEWS:
                 resets[k] = max(int(resets.get(k) or 0), int(v or 0))
         _prune_reset_news(state, resets, snap_resets)
         live_keys = {f"{sl}#{tid}" for sl, m in seen.items() if isinstance(m, dict) for tid in m if tid != "_init"}
@@ -406,10 +481,21 @@ def deliver(address, text, how="send", from_held=False):
     return "sent"
 
 
-def news_send(address, text, check=True):
+def news_send(address, text, check=True, _validate=None):
     """Delivers news as the chat delivers the person's words: typed in, sent mid-turn (Claude Ctrl+Enter,
     agy alt+m or at turn end), without <hc from>. False when typing() or refused."""
-    return False if (check and typing(address)) else deliver(address, text, "news")
+    if check and typing(address):
+        return False
+    if _validate is None:
+        return deliver(address, text, "news")
+    with news_lock(exclusive=True):
+        text = _validate()
+        if not text:
+            return False
+        return deliver(address, text, "news")
+
+
+news_send._accepts_validate = True
 
 
 # ---- the person is writing ------------------------------------------------------------------

@@ -44,7 +44,7 @@ from .proof import evidence, find_proof
 from .when import when_from
 from .templates import instructions
 from .budget import NON_CONVERGENCE, budget_lines, budget_pass, change_sizes, docs_only_commits, merge_only_commits, merge_only_step, recap_refusal, record_ci, review_nonconverging, size_estimate, size_pass
-from .replan import active_review_failures, active_review_runs, active_reviews, retiring_live
+from .replan import _last_new_recap_at, active_review_failures, active_review_runs, active_reviews, archive_legacy_before_replan, retiring_live
 from .simulators import release_task
 
 
@@ -278,13 +278,16 @@ def cmd_show(args):
         if on:
             auto = len(t.get("review_auto_grants") or [])
             all_failed = {f["address"] for f in t.get("review_failures") or [] if f.get("address")}
-            archived = (sum(1 for r in t.get("review_runs") or [] if r.get("before_replan") and r.get("address") not in all_failed) if gate else
-                        sum(1 for r in t.get("reviews") or [] if r.get("before_replan") and r.get("result") in REVIEWED))
+            active_run_ids = {id(r) for r in active_review_runs(t)}
+            active_rev_ids = {id(r) for r in active_reviews(t)}
+            archived = (sum(1 for r in t.get("review_runs") or [] if id(r) not in active_run_ids and r.get("address") not in all_failed) if gate else
+                        sum(1 for r in t.get("reviews") or [] if id(r) not in active_rev_ids and r.get("result") in REVIEWED))
+            reset_ts = t.get("review_reset_at") or _last_new_recap_at(t) or None
             v["review_rounds"] = {
                 "used": rounds_used(t, bool(gate)), "of": rounds, "added": int(t.get("review_rounds_added") or 0),
                 **({"min": gate, "kind": kind} if kind else {}), **({"auto": auto} if auto else {}),
                 **({"before_replan": archived} if archived else {}),
-                **({"reset_at": t["review_reset_at"]} if t.get("review_reset_at") else {}),
+                **({"reset_at": reset_ts} if reset_ts else {}),
             }
         v["after_refs"] = after_refs(s, t)
         block = settings_block(s, t)
@@ -570,11 +573,16 @@ def cmd_ready(args):
                 t.pop(k, None)
             # Its agents' turns now: a later turn of theirs takes it back to work (busy_again()).
             t["ready_turns"] = ready_turns(live_agents(s.key(t)))
+            reset_before = int(t.get("review_reset_at") or _last_new_recap_at(t) or 0)
             s.dirty = True
     if refused:
         raise Fail(refused)
     with open_store(args) as s:
         t = s.find(args.id)
+        if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before or recap_refusal(s, t) or review_refusal(s, t, wt):
+            why = recap_refusal(s, t) or review_refusal(s, t, wt) or f"{s.ref(t)} was re-planned while ready was running; review your commit and run ready again."
+            s.dirty = True
+            raise Fail(why)
         # Its review is the agent's own, as its brief's Settings block says (herdr-task starts no
         # reviewers). A worktree branch with nothing beyond its base (none of its own, or only its
         # base caught up with: a research or artifact-only task) still waits in Ready for the
@@ -895,10 +903,14 @@ def gate_step(s, t):
             s.dirty = True
             return f"{s.ref(t)}: {hold}."
         t.pop("push_held", None)
+        reset_before_push = int(t.get("review_reset_at") or _last_new_recap_at(t) or 0)
         push_branch(s, t)
+        if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before_push or t.get("recap"):
+            return recap_refusal(s, t) or f"{s.ref(t)} was re-planned while pushing; run ready again."
         t["pr"]["wait"] = PR_CHECKS_RUNNING
         t["pr"]["checked"] = 0
         s.dirty = True
+    archive_legacy_before_replan(t)
     rv = FABLE if fable else pick
     ref, ht, folder = s.ref(t), own_path(), shlex.quote(s.loc["folder"])
     sand = sandboxes([rv["agent"]])  # agy on a Mac: sandboxed, nothing prompts, its verdict read from its terminal
@@ -1109,6 +1121,7 @@ def cmd_reviewed(args):
         if invalid_major_count(s, t, verdict == "pass", None, majors):
             raise Fail("The verdict and major count disagree with the Must fix setting.")
         reviewer = settings.get("Reviewer") or {}
+        archive_legacy_before_replan(t)
         at = max(now(), ((t.get("recaps") or [{}])[-1].get("at") or 0) + 1)
         t.setdefault("reviews", []).append({"round": used + 1, "result": "report", "text": text, "at": at, "head": head,
                                             "by": os.environ.get("HC_TERMINAL_ID"), "verdict": verdict, "must_fix": 0 if verdict == "pass" else None, "majors": majors,
@@ -1277,6 +1290,7 @@ def finalize(s, t):
     local = t.get("mode") != "worktree" or not wt or t.get("nothing_to_merge")
     repo = task_github(github, s, t) if not local and os.path.isdir(wt) else None
     failed = held = None
+    reset_before = int(t.get("review_reset_at") or _last_new_recap_at(t) or 0)
     if repo:
         # Pushed and opened before it shows Ready: the push lets the task list go while its hooks run
         # (#1007), and a Ready task without its pull request yet could be accepted (merged here) meanwhile.
@@ -1291,6 +1305,8 @@ def finalize(s, t):
                     raise Fail(why[0].upper() + why[1:] + ".")
             except Fail as e:
                 failed = str(e)
+        if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before or t.get("recap"):
+            raise Fail(recap_refusal(s, t) or f"{s.ref(t)} was re-planned while opening its pull request; review your commit and run ready again.")
     elif not local and os.path.isdir(wt) and (github_unreachable(s) or github_required(s, t)):
         # #988: a GitHub repo gh couldn't reach just now: never on as if it had no GitHub (Accept would
         # merge it here while a pull request, its agent's, stays open there).
@@ -1376,6 +1392,7 @@ def cmd_review(args):
                 or (me and me in (t.get("retiring_reviewers") or ()))):
             raise Fail(f"{s.ref(t)} has no active review round to record.")
         t.pop("review", None)
+        archive_legacy_before_replan(t)
         cfg = settings_for(s)["tasks"]
         of = rv.get("of") or int(cfg.get("review_rounds") or 1)
         n = rv.get("round") or len(active_reviews(t)) + 1
@@ -1470,6 +1487,7 @@ def record_verdict(s, t, rn, passed, must, text, majors=None):
     wt = t.get("worktree") or ""
     if git(wt, "rev-parse", "HEAD")[1] != rn["head"] or git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
         raise Fail(f"{wt} has moved on from {rn['head'][:7]} or has uncommitted changes: this round's verdict no longer applies.")
+    archive_legacy_before_replan(t)
     at = max(now(), ((t.get("recaps") or [{}])[-1].get("at") or 0) + 1)
     t.setdefault("reviews", []).append({"round": rn["round"], "head": rn["head"], "by": rn["address"], "started_by": "herdr-task",
                                         "verdict": "pass" if passed else "changes", "must_fix": must, "majors": majors,
@@ -1770,6 +1788,8 @@ def cmd_state(args, state):
             for k in ("reviews", "review", "review_runs", "review_failures", "review_reset_at", "retiring_reviewers", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait", "head_moved_at", "sync_fallback", "push_held", "ready_head"):
                 t.pop(k, None)
             t.pop("review_followup", None)
+            from .news import clear_mem_reset
+            clear_mem_reset(f"{s.slug}#{t['id']}")
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
         if state == "done" and t.get("auto_merge") and not t.get("accepted_by"):
