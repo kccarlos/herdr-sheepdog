@@ -2854,6 +2854,12 @@ class NewWorktrees(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(path, "docs/[draft]/note.md")))
         self.assertTrue(os.path.exists(os.path.join(path, "docs/d/note.md")))
 
+        # Newlines are rejected/ignored and literal backslashes are preserved.
+        self.assertEqual(self.settings.normalize_sparse_exclude(["docs/foo\n!/README.md", r"docs/a\b"]), [r"docs/a\b"])
+        self.assertEqual(self.settings.sparse_exclude_pattern(r"docs/a\b"), r"!/docs/a\\b")
+        with self.assertRaises(self.Fail):
+            self.settings.normalize_sparse_exclude("docs/foo\n!/README.md", strict=True)
+
 
 class MergedOnlyWithOwnWork(unittest.TestCase):
     """SHEP-23: a task counts as merged only when work of its own landed (its pull request merged, or
@@ -6468,6 +6474,26 @@ class Scheduled(unittest.TestCase):
             self.assertNotIn(folder, json.load(f).get("projects", {}))
         with self.assertRaises(self.Fail):
             self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worktree.sparse_exclude=../oops"])
+
+        # Existing sparse worktree reports its actual sparse-checkout list even after setting is cleared.
+        wt = os.path.join(self.folder, ".wt-sparse")
+        subprocess.run(["git", "-C", self.folder, "worktree", "add", "--no-checkout", "-b", "wt-sparse", wt, "HEAD"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", wt, "sparse-checkout", "set", "--no-cone", "/*", "!/docs/dev/bench"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", wt, "checkout"], check=True, capture_output=True)
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            s.find(1).update(worktree=wt, branch="wt-sparse", base="main")
+            s.dirty = True
+        self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worktree.sparse_exclude=docs/other"])
+        out2 = io.StringIO()
+        with contextlib.redirect_stdout(out2):
+            self.commands.cmd_show(argparse.Namespace(id="1", folder=self.folder, json=False, evidence=False))
+        self.assertIn("sparse exclude: docs/dev/bench (undo with `git sparse-checkout disable`)", out2.getvalue())
+        self.assertNotIn("sparse exclude: docs/other", out2.getvalue())
+        self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worktree.sparse_exclude=default"])
+        out3 = io.StringIO()
+        with contextlib.redirect_stdout(out3):
+            self.commands.cmd_show(argparse.Namespace(id="1", folder=self.folder, json=False, evidence=False))
+        self.assertIn("sparse exclude: docs/dev/bench (undo with `git sparse-checkout disable`)", out3.getvalue())
 
     def four_tasks(self):
         """FAC-10's folder: two tasks went ready then done, one still works, the fourth is queued."""

@@ -291,12 +291,20 @@ def cmd_show(args):
         text.append(f"worktree: {v['worktree']} (branch {v['branch']}, base {v.get('base')})")
     elif v.get("branch") and v.get("mode") == "worktree":
         text.append(f"branch: {v['branch']} (set for this task)")
-    if v.get("mode") == "worktree" and (exclude := sparse_exclude_of(s)):
-        v["sparse_exclude"] = exclude
+    if v.get("mode") == "worktree":
         wt = v.get("worktree")
         is_sparse = bool(wt and os.path.isdir(wt) and git(wt, "config", "--bool", "--get", "core.sparseCheckout")[1].strip() == "true")
-        label = "sparse exclude" if is_sparse else "sparse exclude (new worktrees)"
-        text.append(f"{label}: {', '.join(exclude)} (undo with `git sparse-checkout disable`)")
+        if is_sparse:
+            rules = git(wt, "sparse-checkout", "list")[1].splitlines()
+            wt_excludes = [re.sub(r"\\([\\*?\[\]])", r"\1", ln[2:]) for ln in rules if ln.startswith("!/")]
+            if wt_excludes:
+                v["sparse_exclude"] = wt_excludes
+                text.append(f"sparse exclude: {', '.join(wt_excludes)} (undo with `git sparse-checkout disable`)")
+            else:
+                text.append("sparse checkout: active (undo with `git sparse-checkout disable`)")
+        elif exclude := sparse_exclude_of(s):
+            v["sparse_exclude"] = exclude
+            text.append(f"sparse exclude (new worktrees): {', '.join(exclude)} (undo with `git sparse-checkout disable`)")
     if v.get("base_set"):
         text.append(f"merges into: {v['base']} (" + ("its project's base branch" if v.get("base_by") in ("project", "space") else "set for this task") + ")")
     if v.get("after_refs"):

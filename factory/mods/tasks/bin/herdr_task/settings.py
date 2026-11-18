@@ -233,7 +233,12 @@ def normalize_sparse_exclude(raw, *, strict=False):
     items = raw.split(",") if isinstance(raw, str) else list(raw) if isinstance(raw, (list, tuple)) else []
     out, seen = [], set()
     for item in items:
-        p = str(item or "").replace("\\", "/").strip().strip("/")
+        s = str(item or "")
+        if any(c in s for c in ("\n", "\r", "\x00")):
+            if strict:
+                raise Fail(f"worktree.sparse_exclude path cannot contain newlines: {item!r}")
+            continue
+        p = s.strip().strip("/")
         if not p:
             continue
         parts = [seg for seg in p.split("/") if seg and seg != "."]
