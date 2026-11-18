@@ -18,7 +18,7 @@ from .settings import (cli_missing_reason, write_ci_runner_cap, write_machine_op
     accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
     fable_due, gate_min, merge_hold, merge_policy,
     merge_wait_why, MUST_WORDS, project_base, remove_build_dir, review_kind, review_limits, reviewed_for_head, set_opts, settings_block, settings_for,
-    task_settings, worker_argv, worker_pick, worktrees_on, set_task, argv_model, AGENTS,
+    task_settings, worker_argv, worker_permissions, worker_pick, worktrees_on, set_task, argv_model, AGENTS,
 )
 from .agents import (
     agent_log, agent_running, agy_bg_tasks, back_at_work, background_jobs, busy_again, claude_bg_shells, detail, fit, LINE_MAX, live_agents, ready_turns,
@@ -386,6 +386,7 @@ def fail_if_missing_cli(s, t, argv, record=True):
 
 def begin(s, t, argv, space=None, parent=None):
     """Starts the task's first agent. Returns its record."""
+    argv = worker_permissions(argv, settings_for(s)["worker"].get("perm"))
     if refused := start_refusal(s, t, argv):
         raise Fail(refused)
     t["state"], t["started"] = "running", now()
@@ -1845,7 +1846,7 @@ def continue_line(s, t):
 def resolve_again_argv(s, t, key=None, argv_json=None, resuming=False):
     prev = last_agent(t)
     if argv_json:
-        return agent_argv(None, argv_json)
+        return worker_permissions(agent_argv(None, argv_json), settings_for(s)["worker"].get("perm"))
     if not key and not resuming and prev and (t.get("pick_at") or 0) <= (prev.get("at") or 0):
         key = prev.get("agent")
     return worker_argv(s, t, agent=key)

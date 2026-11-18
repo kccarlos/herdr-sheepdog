@@ -46,9 +46,7 @@ class HerdrTask(unittest.TestCase):
             self.assertFalse(any(flag.startswith("hooks.") for flag in codex))
             brief = launch.closing_line(store, {})
             self.assertNotIn("require_escalated", brief)
-            verbs = re.search(r"then its ([\w, -]+) commands run without asking\.", brief)
-            self.assertIsNotNone(verbs)
-            self.assertEqual(verbs.group(1).split(", "), launch.OWN)
+            self.assertIn(f"Use the full path {path} for {', '.join(launch.OWN)}.", brief)
 
     def test_compiles(self):
         files = [os.path.join(BIN, "herdr-task")] + [os.path.join(BIN, "herdr_task", f) for f in sorted(os.listdir(os.path.join(BIN, "herdr_task"))) if f.endswith(".py")]
@@ -6505,7 +6503,7 @@ class AgyWorker(unittest.TestCase):
             L.launch(s, {"id": 6, "title": "fake", "agents": []}, ["agy", "--mode", "plan"], "Your task")
             L.launch(s, {"id": 7, "title": "fake", "agents": []}, ["claude"], "Your task")
         self.assertEqual(ran[0][-4:], ["--mode", "plan", "-i", "Your task"])  # agy reads prompts only from -i
-        self.assertEqual(ran[1][-2:], ["claude", "Your task"])
+        self.assertEqual(ran[1][-3:], ["claude", "--dangerously-skip-permissions", "Your task"])
 
     def test_its_reviewer_is_another_installed_cli(self):
         from unittest import mock
@@ -7201,6 +7199,10 @@ class Revive(unittest.TestCase):
         self.tick()
         self.assertEqual(len(self.sent), 1)
 
+    def test_a_codex_assistant_keeps_its_own_permission_flags(self):
+        self.assertEqual(self.r.resume_argv("codex", ["codex", "--no-daemon"], "S1"),
+                         ["codex", "resume", "--no-daemon", "S1"])
+
     def test_the_line_goes_into_the_shell_with_no_caller(self):
         """SHEP-202 (GitHub #925): the scheduler runs under an agent's HC_TERMINAL_ID, and hc then wraps the typed
         line in <hc from=…> when the shell reports its status, so bash or zsh can't run it. Sent with no caller."""
@@ -7337,7 +7339,7 @@ class Revive(unittest.TestCase):
         self.tick()
         line = self.sent[0][1]
         self.assertNotIn("--conversation", line)
-        self.assertIn("--mode accept-edits -i '<restart>Your earlier session is gone", line)
+        self.assertIn("--dangerously-skip-permissions -i '<restart>Your earlier session is gone", line)
 
     def test_an_assistant_lost_before_any_record_starts_anew(self):
         """Lost before this change (or before its first record): a new Assistant, never a bare shell."""
@@ -7379,9 +7381,12 @@ class Revive(unittest.TestCase):
         self.terms["t5"] = {"address": "t5", "state": "live", "pid": 500, "cwd": "/wt", "name": "shep-6-web", "argv": ["claude"],
                             "labels": {"herdr.task": "dev#6"}}
         self.crash("t5")
-        with self.mock.patch("herdr_task.launch.own_argv", lambda argv, *_, **__: argv):
+        with self.mock.patch.object(self.r, "own_argv", lambda argv, *_, **__: argv):
             self.tick()
-        self.assertTrue(self.sent[0][1].startswith("cd /wt && DISABLE_AUTOUPDATER=1 HERDR_BROWSER_TASK='dev#6' SHEEPDOG_TASK='dev#6' claude --resume S1 'Herdr restarted"), self.sent)
+        words = shlex.split(self.sent[0][1])
+        self.assertIn("--dangerously-skip-permissions", words)
+        self.assertEqual(words[-3:-1], ["--resume", "S1"])
+        self.assertTrue(words[-1].startswith("Herdr restarted"))
         with self.mock.patch.object(self.r, "TEMPLATES", os.path.join(self.dir, "missing")):
             cmd, tpl = self.r.template_of("assistant")
             self.assertEqual(cmd, "claude")
@@ -9276,6 +9281,20 @@ class Resume(unittest.TestCase):
         self.assertNotIn("read-only", cmd)
         self.assertNotIn("older-model", cmd)
         self.assertFalse(any(flag.startswith("hooks.") for flag in cmd))
+
+    def test_custom_argv_without_a_mode_uses_the_project_rule(self):
+        ref = self.started_task({"agent": "codex", "perm": "read-only"})
+        self.call(self.commands.cmd_resume, id=ref, space=None, agent=None, parent=None,
+                  argv=json.dumps(["codex", "-m", "gpt-test"]))
+        cmd = self.launched_cmd()
+        self.assertEqual(cmd[cmd.index("-s") + 1], "read-only")
+        self.assertEqual(cmd[cmd.index("-a") + 1], "on-request")
+        self.call(self.commands.cmd_resume, id=ref, space=None, agent=None, parent=None,
+                  argv=json.dumps(["codex", "-sread-only", "-c", 'approval_policy="never"']))
+        cmd = self.launched_cmd()
+        self.assertIn("-sread-only", cmd)
+        self.assertIn('approval_policy="never"', cmd)
+        self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", cmd)
 
     def test_a_resumed_agy_worker_idle_at_turn_0_gets_one_nudge(self):
         """FAC-100 (note 14): a resumed agy session sits at turn 0 until it hears something: the tick nudges it once."""

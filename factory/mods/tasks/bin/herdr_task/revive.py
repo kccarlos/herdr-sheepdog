@@ -112,9 +112,7 @@ def first(kind, message):
 
 def resume_argv(kind, argv, session, message=None):
     """Resume a recovered session with the resolved argv and an optional first message."""
-    if kind == "claude":
-        return [*argv, "--resume", session, *first(kind, message)]
-    return [*launch_resume(argv, session), *first(kind, message)]
+    return [*launch_resume(argv, session, worker=False), *first(kind, message)]
 
 
 def alive(rec):

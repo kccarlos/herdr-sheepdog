@@ -290,9 +290,10 @@ def sweep_sandboxes():
             pass
 
 
-def resume_argv(argv, session):
+def resume_argv(argv, session, *, worker=True):
     """Resume a session with the current worker argv and the recorded session id."""
-    argv = worker_permissions(argv)
+    if worker:
+        argv = worker_permissions(argv)
     k = agent_key(argv)
     if k == "claude":
         return argv + ["--resume", session]
@@ -442,13 +443,12 @@ def closing_line(s, task, parent=None):
              f"a rough guess beats none.")
     text += (f" Only for what truly can't wait, `{ht} alert \"<what, a few words>\" --body \"<why>\"` reaches the person at once; "
              f"a question goes through `{ht} ask` instead.")
-    text += (f" Your herdr-task command is {ht}: write that full path each time (never the bare name), as one plain command; "
-             f"then its {', '.join(OWN)} commands run without asking.")
+    text += f" Use the full path {ht} for {', '.join(OWN)}. Run each as one plain command."
     from .simulators import simulator_line
     text += simulator_line(s, task)
     if secret_path():
         text += (" Secrets (keys, tokens, passwords) are used by name, never seen: `herdr-secret ask NAME --why \"…\"` "
-                 "(then end your turn), `herdr-secret run NAME -- <command>`, `herdr-secret list`; these run without asking too.")
+                 "(then end your turn), `herdr-secret run NAME -- <command>`, or `herdr-secret list`.")
     # No "report to your coordinator": Herdr tells the Assistant itself (news_pass).
     return text
 
@@ -713,7 +713,7 @@ def launch(s, task, argv, message=None, parent=None, resume=None, role=None, rea
     key = s.key(task)
     slug = getattr(s, "slug", None) or key.partition("#")[0]
     if not role:
-        argv = worker_permissions(argv)
+        argv = worker_permissions(argv, settings_for(s)["worker"].get("perm"))
     cmd, folder = list(resume or argv), folder_for(s, task)
     sand = role == "reviewer" and sandboxes(cmd)
     trust = folder if task.get("mode") == "worktree" or agent_key(cmd) != "agy" else None
