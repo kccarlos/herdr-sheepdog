@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — no agents</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; display: flex; flex-direction: column; overflow: hidden; background: #FAF8F3; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <dc-import name="TopBar" pane="agents" waiting="0" hint-size="390px,102px"></dc-import>
+
+  <main style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 0 32px 100px; text-align: center; border-top: 1px solid #E4E0D7">
+    <img src="/_blob/638094d9433720aab6196c2b1426cfb8" alt="The sheepdog mascot asleep" style="width: 220px; height: 120px; object-fit: contain">
+    <h1 style="margin: 8px 0 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 24px; font-weight: 700">No agents running</h1>
+    <p style="margin: 0; font-size: 16px; line-height: 23px; color: #6B6E75">Start one with +, or ask Sheepdog to start one for you.</p>
+    <button style="margin-top: 6px; height: 44px; padding: 0 20px; border-radius: 22px; border: 1.5px solid #1F1F22; background: transparent; color: #1F1F22; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px">
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>New agent
+    </button>
+    <button style="height: 40px; border: 0; background: transparent; color: #6B6E75; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px">
+      <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>Not running (3)
+    </button>
+  </main>
+
+  <div style="position: absolute; left: 12px; bottom: 26px; width: 366px; height: 60px; display: flex">
+    <dc-import name="Dock" label="Sheepdog" status="Listening" mode="live" style="display: block; width: 366px; height: 60px" hint-size="366px,60px"></dc-import>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

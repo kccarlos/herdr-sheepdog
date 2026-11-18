@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — before the notification prompt</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; background: #FAF8F3; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; padding: 98px 24px 34px">
+  <div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 16px; text-align: center">
+    <img src="/_blob/b6c5654fc2b3c401b794d6ff6e2a7512" alt="The sheepdog mascot, ears up, alert" style="width: 162px; height: 205px; object-fit: contain">
+    <h1 style="margin: 10px 0 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 28px; line-height: 34px; font-weight: 700; letter-spacing: -0.3px">Know when an agent needs you</h1>
+    <p style="margin: 0; max-width: 310px; font-size: 16px; line-height: 23px; color: #6B6E75">When an agent asks a question or finishes its work, Sheepdog taps you, even with the app closed.</p>
+    <div style="margin-top: 6px; align-self: stretch; border-radius: 14px; background: #FFFFFF; border: 1px solid #E4E0D7; padding: 12px 14px; display: flex; gap: 10px; text-align: left; box-shadow: 0 4px 14px rgba(31,31,34,0.06)">
+      <img src="/_blob/830f9e25deae899bb4c5350cf119179c" alt="" style="width: 34px; height: 34px; border-radius: 8px; background: #1B1D22; padding: 3px; box-sizing: border-box">
+      <span style="display: flex; flex-direction: column; gap: 1px; min-width: 0">
+        <span style="font-size: 14px; font-weight: 600">auth-fix needs you</span>
+        <span style="font-size: 14px; line-height: 19px; color: #6B6E75">Run npm test in webapp? Yes · Yes, don't ask again · No</span>
+      </span>
+    </div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 6px; align-items: stretch">
+    <button style="height: 54px; border-radius: 27px; border: 0; background: #D98718; color: #1F1F22; font-size: 17px; font-weight: 600">Turn on notifications</button>
+    <button style="height: 44px; border: 0; background: transparent; color: #8A5700; font-size: 15px; font-weight: 500">Not now</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
