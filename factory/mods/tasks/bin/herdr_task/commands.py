@@ -1847,8 +1847,8 @@ def resolve_again_argv(s, t, key=None, argv_json=None, resuming=False):
     prev = last_agent(t)
     if argv_json:
         return worker_permissions(agent_argv(None, argv_json), settings_for(s)["worker"].get("perm"))
-    if not key and not resuming and prev and (t.get("pick_at") or 0) <= (prev.get("at") or 0):
-        key = prev.get("agent")
+    if not key and not resuming and prev and prev.get("argv") and (t.get("pick_at") or 0) <= (prev.get("at") or 0):
+        return worker_argv(s, t, previous=prev["argv"])
     return worker_argv(s, t, agent=key)
 
 

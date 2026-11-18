@@ -15,9 +15,9 @@ FACTORY_TASKS = {"merge": "checks", "review_min": 2, "reviewer_sandbox": False}
 # Shown once by factory start after its checks pass.
 FIRST_RUN_NOTICE = (
     "Factory agents work without asking. Each worker runs as you, with full access to this Mac, "
-    "limited only by its brief and its own worktree. That is not a sandbox. Reviewers run read-only. "
+    "limited only by its brief and its own worktree. That is not a sandbox. Reviewers are told not to change files. "
     "Sheepdog names the model for every agent and does not read or change your Claude, Codex or agy settings. "
-    'Say "stop the factory" at any time.'
+    "To stop it: sheepdog factory stop."
 )
 IOS_START_NOTE = "iOS: lease a simulator with `herdr-task simulator lease <task>` and use only that one; never create or erase simulators."
 IOS_FINISH_NOTE = "iOS: release it with `herdr-task simulator release <task>`."

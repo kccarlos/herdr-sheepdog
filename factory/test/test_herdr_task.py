@@ -9410,6 +9410,16 @@ class Resume(unittest.TestCase):
         cmd2 = self.launched_cmd()
         self.assertEqual(cmd2[-2:], ["-i", "Please rebase onto main."])
 
+    def test_switch_keeps_the_model_when_the_default_cli_is_different(self):
+        ref = self.started_task({"agent": "codex", "model": "gpt-test", "effort": "high", "perm": "read-only"})
+        self.write_worker({"agent": "claude", "model": "opus"})
+        out = self.call(self.commands.cmd_switch, id=ref, agent=None, argv=None, parent=None, keep=False)
+        self.assertTrue(out["resumed"])
+        cmd = self.launched_cmd()
+        self.assertEqual(cmd[cmd.index("-m") + 1], "gpt-test")
+        self.assertIn('model_reasoning_effort="high"', cmd)
+        self.assertIn("--dangerously-bypass-approvals-and-sandbox", cmd)
+
     def test_resume_with_agent_flag_keeps_folder_perm_and_ignores_old_resume_label(self):
         """Field note 56: `resume --agent agy` carries folder `worker.perm=full` even when the project's
         default CLI is different or unset, and ignores an old `herdr.resume` label."""

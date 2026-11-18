@@ -312,7 +312,7 @@ def plan(k, rec, running, coords=None):
     if rec and task and label_of(labels, "role") != "reviewer":
         cwd = rec.get("cwd")
         trust = task.get("worktree") if task.get("mode") == "worktree" else (None if rec["kind"] == "agy" else cwd)
-        rec = dict(rec, argv=own_argv(worker_argv(project, task, agent=rec["kind"]), trust, cwd=cwd))
+        rec = dict(rec, argv=own_argv(worker_argv(project, task, previous=rec["argv"]), trust, cwd=cwd))
     if rec and rec.get("session") and alive(rec):
         return ("resume", resume_argv(rec["kind"], rec["argv"], rec["session"], CUT if rec.get("working") else None), not rec.get("shell"))
     # Its session is gone: a new one, with the handover (and an Assistant's role, its template's words).

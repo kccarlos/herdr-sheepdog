@@ -425,8 +425,11 @@ def worker_pick(s, task, space=None, agent=None):
     return pick
 
 
-def worker_argv(s, task, space=None, agent=None):
-    """A task's agent when nobody gave an argv: worker_pick's."""
+def worker_argv(s, task, space=None, agent=None, previous=None):
+    """Build a worker command from current settings and any recorded model and effort."""
+    if previous:
+        model, effort = argv_model(previous)
+        task = {**task, "agent": agent_key(previous), "model": model, "effort": effort}
     pick = worker_pick(s, task, agent=agent)
     if pick.get("argv") and not (task.get("model") or task.get("effort")):
         return worker_permissions(argv_for(pick), pick.get("perm"))
