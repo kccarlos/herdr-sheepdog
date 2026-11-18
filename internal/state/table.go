@@ -1,6 +1,7 @@
 package state
 
 import (
+	"maps"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
@@ -77,11 +78,12 @@ type Agent struct {
 	// rotated PID-discovered session while a genuinely new herdr session
 	// still updates. Cwd is the pane's working directory
 	// (docs/dev/iteration-2.md WP4, internal/workerlog).
-	SessionSource   string `json:"session_source,omitempty"`
-	SessionKind     string `json:"session_kind,omitempty"`
-	SessionValue    string `json:"session_value,omitempty"`
-	ReportedSession string `json:"reported_session,omitempty"`
-	Cwd             string `json:"cwd,omitempty"`
+	SessionSource   string            `json:"session_source,omitempty"`
+	SessionKind     string            `json:"session_kind,omitempty"`
+	SessionValue    string            `json:"session_value,omitempty"`
+	ReportedSession string            `json:"reported_session,omitempty"`
+	Cwd             string            `json:"cwd,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty"`
 	// Journal is the agent's work journal, oldest first, capped at
 	// MaxJournal: one entry per done, idle or blocked transition, read
 	// from the worker's own transcript (docs/dev/roles.md "Worker history").
@@ -260,6 +262,7 @@ const (
 type PendingAction struct {
 	ID            string      `json:"id"`
 	PaneID        string      `json:"pane_id"`
+	Agent         string      `json:"agent,omitempty"`
 	Kind          PendingKind `json:"kind"`
 	SpokenSummary string      `json:"spoken_summary"`
 	PayloadText   string      `json:"payload_text"`
@@ -393,6 +396,9 @@ func (a Agent) clone() Agent {
 			j[i] = e.clone()
 		}
 		a.Journal = j
+	}
+	if a.Labels != nil {
+		a.Labels = maps.Clone(a.Labels)
 	}
 	return a
 }

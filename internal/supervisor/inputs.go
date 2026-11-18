@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
@@ -462,6 +464,8 @@ func (s *Supervisor) railInputLocked(p state.PendingAction, keys []string) (*she
 	switch {
 	case in == nil:
 		return nil, fmt.Sprintf("the user has said nothing that could answer %s's prompt", alias)
+	case isFactoryAskID(p.ID) && in.kind == InputTyped:
+		return nil, fmt.Sprintf("typed input cannot authorize %s's factory ask; use a paired phone tap or live voice", alias)
 	case in.at.Before(s.promptSinceLocked(p)):
 		return nil, fmt.Sprintf("the user has said nothing since %s's prompt appeared", alias)
 	case in.used:
@@ -547,6 +551,9 @@ func negativeInput(text string) bool {
 // approves (its label opens with yes / allow / approve / always /
 // proceed / accept / run / continue).
 func approves(p state.PendingAction, keys []string) bool {
+	if isFactoryAskID(p.ID) && len(p.YesKeys) > 0 && slices.Equal(p.YesKeys, keys) {
+		return true
+	}
 	label := strings.ToLower(strings.TrimSpace(keysLabel(p, keys)))
 	if label == "yes" {
 		return true
@@ -580,7 +587,7 @@ func (s *Supervisor) railBlockedLocked(p state.PendingAction, keys []string, via
 // that prompt ends the question (ErrPendingGone); a failed read sends
 // nothing and keeps it (ErrNotSent). A pane herdr reports done or idle at
 // its prompt (agy, a finish that asks, a menu) answers as any other.
-func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error) {
+func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int, deviceID string) (voice.ToolResult, error) {
 	s.mu.Lock()
 	p, _, has := s.questionByID(id)
 	s.mu.Unlock()
@@ -595,15 +602,31 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 	s.mu.Lock()
 	p, slot, has := s.questionByID(id)
 	_, exists := s.store.Get(p.PaneID)
-	s.mu.Unlock()
 	if !has {
+		s.mu.Unlock()
 		return voice.ToolResult{}, ErrPendingGone
 	}
-	// The voice's own question on a pane the table no longer lists is
-	// answered as it is (the keys report any failure); every other is
-	// checked against the screen.
+	if isFactoryAskID(p.ID) {
+		if option < 1 || option > len(p.Options) || p.Options[option-1].Meta {
+			s.mu.Unlock()
+			return voice.ToolResult{}, fmt.Errorf("%w: %d (the question has %d)", ErrNoSuchOption, option, len(p.Options))
+		}
+		dev := strings.TrimSpace(deviceID)
+		if dev == "" || dev == "local" {
+			reason := "ticketless local tap cannot authorize a factory ask; answer on your paired phone or by live voice"
+			s.railBlockedLocked(p, p.Options[option-1].Keys, "tap", reason)
+			s.mu.Unlock()
+			return voice.ToolResult{}, fmt.Errorf("%w: %s", factory.ErrProofRejected, reason)
+		}
+	}
+	s.mu.Unlock()
+
+	// Factory asks verify against the contract store rather than terminal
+	// screen-scraping; regular agent prompts check the terminal screen.
 	asking, known := true, true
-	if !slot || exists {
+	if isFactoryAskID(p.ID) {
+		asking, known = s.stillAskingFactory(ctx, p)
+	} else if !slot || exists {
 		asking, known = s.stillAsking(ctx, p)
 	}
 	s.mu.Lock()
@@ -649,12 +672,27 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 	}
 	in.used = true
 	alias := s.sayOf(p.PaneID)
-	res, sent := s.answerKeys(ctx, p, o.Keys, o.Label, func(l string) string { return toldLine(alias, l, zh) }, "tap", map[string]any{"option": option})
+	var (
+		res  voice.ToolResult
+		sent bool
+		ferr error
+	)
+	if isFactoryAskID(p.ID) {
+		dev := strings.TrimSpace(deviceID)
+		res, ferr, sent = s.answerFactoryAskLocked(ctx, p, o.Keys, func(l string) string {
+			return toldLine(alias, l, zh)
+		}, "tap", map[string]any{"option": option, "device_id": dev}, in, dev)
+	} else {
+		res, sent = s.answerKeys(ctx, p, o.Keys, o.Label, func(l string) string { return toldLine(alias, l, zh) }, "tap", map[string]any{"option": option})
+	}
 	if !sent {
 		in.used = false
 	}
 	s.mu.Unlock()
 	if !sent {
+		if errors.Is(ferr, ErrPendingGone) || errors.Is(ferr, factory.ErrProofRejected) || errors.Is(ferr, factory.ErrUnknownAskKind) {
+			return res, ferr
+		}
 		return res, ErrNotSent
 	}
 	s.push(p.PaneID, fmt.Sprintf("The user tapped %s on %s's question.", strings.TrimRight(o.Label, "."), alias), voice.UrgencySilent)

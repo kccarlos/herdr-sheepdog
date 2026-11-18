@@ -453,3 +453,49 @@ func TestReleasedAgentLeavesItsPaneRow(t *testing.T) {
 		t.Fatalf("agents after release = %+v, want none", rows)
 	}
 }
+
+func TestApplyPersistsAndClonesLabels(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	s, err := Open(path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lbls := map[string]string{herdr.LabelFactoryProject: "proj", herdr.LabelFactoryRole: "worker", herdr.LabelFactoryTask: "proj#1"}
+	first := tr("t1", "", herdr.StateWorking, t0)
+	first.Labels = lbls
+	row, changed := mustApply(t, s, first)
+	if !changed || row.Labels[herdr.LabelFactoryRole] != "worker" {
+		t.Fatalf("row = %+v, changed=%v", row, changed)
+	}
+	// Mutating the caller's or returned map does not alias stored labels.
+	lbls[herdr.LabelFactoryRole] = "mutated"
+	row.Labels[herdr.LabelFactoryRole] = "mutated"
+	got, _ := s.Get("t1")
+	if got.Labels[herdr.LabelFactoryRole] != "worker" {
+		t.Fatalf("stored labels aliased: %v", got.Labels)
+	}
+	// A transition with nil labels (e.g. inject/reprompt) preserves stored labels.
+	if _, changed := mustApply(t, s, tr("t1", herdr.StateWorking, herdr.StateDone, t0.Add(time.Minute))); !changed {
+		t.Fatal("state change expected")
+	}
+	got, _ = s.Get("t1")
+	if !herdr.IsFactoryQuiet(got.Labels) {
+		t.Fatalf("labels lost across nil-label transition: %v", got.Labels)
+	}
+	// Reopening from disk preserves labels.
+	reopened, err := Open(path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := reopened.Get("t1")
+	if !ok || !herdr.IsFactoryQuiet(got.Labels) {
+		t.Fatalf("reopened row = %+v, ok=%v", got, ok)
+	}
+	// Explicit empty non-nil labels clear stored labels.
+	clearTr := tr("t1", herdr.StateDone, herdr.StateIdle, t0.Add(2*time.Minute))
+	clearTr.Labels = map[string]string{}
+	got, changed = mustApply(t, reopened, clearTr)
+	if !changed || len(got.Labels) != 0 {
+		t.Fatalf("cleared row = %+v, changed=%v", got, changed)
+	}
+}

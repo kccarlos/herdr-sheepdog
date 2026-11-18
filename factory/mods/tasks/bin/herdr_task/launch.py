@@ -30,7 +30,7 @@ from .github import remote_of
 # hook (`herdr-task _allow`), and agy in --settings.
 
 HOOK_TIMEOUT = 30
-OWN = ["ready", "reviewed", "status", "alert", "simulator", "device-wait", "show", "list", "where"]
+OWN = ["ready", "reviewed", "status", "alert", "ask", "simulator", "device-wait", "show", "list", "where"]
 # herdr-secret's agent commands (~/.local/bin/herdr-secret): asking for a secret and
 # using one by name never ask either, as Shepherdr's secret commands. Written by its full path or
 # its bare name. Reviewers get none (launch() skips own_argv for them; herdr-secret refuses them).
@@ -466,7 +466,7 @@ def resume_argv(argv, session, folder=None):
 # web Chat can't find the conversation) and skips the folder-trust prompt. hc can only add
 # variables, so the launch unsets them first: CLAUDECODE, CLAUDE_PID and CLAUDE_CODE_*, keeping the
 # person's own Claude Code config (_USE_*, _SKIP_*, _DISABLE_*, _OAUTH_*..., CLAUDE_CONFIG_DIR).
-# The same line is core/clean-env.js CLEAN_ENV and mods/coordinator/restart.sh's (test_repo keeps
+# The same line is core/clean-env.js CLEAN_ENV's (test_repo keeps
 # them equal).
 CLEAN_ENV = ("for v in $(env | sed -nE 's/^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_[A-Za-z0-9_]+)=.*/\\1/p' | "
              "grep -vE '^CLAUDE_CODE_(USE|SKIP|DISABLE|ENABLE|MAX|OAUTH|CLIENT|API)_'); do unset \"$v\"; done;")
@@ -935,51 +935,11 @@ def coordinators():
     return list(dict.fromkeys(k["address"] for k in found if k.get("state") == "live" and "/" not in k["address"]))
 
 
-def _canon(p):
-    if not p:
-        return None
-    exp = os.path.expanduser(str(p))
-    return os.path.realpath(exp) if os.path.isdir(exp) else os.path.normpath(exp)
-
-
 def coordinator_in(project):
-    """The project folder's live coordinator on this machine, or None."""
-    if not project:
-        return None
-    raw = getattr(project, "loc", {}).get("folder") if hasattr(project, "loc") else str(project)
-    real = _canon(raw) if os.path.isabs(raw) else None
-    from .store import is_task_list, read_list, slug_of, store_path
-    slugs = {x for x in (getattr(project, "slug", None), slug_of(real) if real else None,
-                         store_path(real)[0] if real else None) if x}
-    want_sp = bare(raw) if not real else None
-    spaces = read_settings().get("spaces")
-    spaces = spaces if isinstance(spaces, dict) else {}
-    for addr in coordinators():
-        k = hc_json("get", addr) or {}
-        labels = k.get("labels") or {}
-        if k.get("state") != "live" or label_of(labels, "role") == "ask":
-            continue
-        proj = labels.get(PROJECT_LABEL)
-        sp = bare(labels.get("herdr.space") or labels.get("herdr.coordinator.space") or "")
-        if want_sp:
-            if proj == want_sp or sp == want_sp:
-                return addr
-            continue
-        if proj:
-            if proj in (raw, real, *slugs) or (os.path.isabs(proj) and _canon(proj) == real):
-                return addr
-            lst = read_list(os.path.join(STORE, proj + ".json")) if "/" not in proj else None
-            if is_task_list(lst) and _canon(lst.get("folder")) == real:
-                return addr
-            continue
-        sp_folder = (spaces.get(sp) or {}).get("folder") if sp and isinstance(spaces.get(sp), dict) else None
-        if sp_folder:
-            if _canon(sp_folder) == real:
-                return addr
-            continue
-        if _canon(k.get("cwd")) == real:
-            return addr
-    return None
+    """The project's live coordinator on this machine: its lease holder (lease.py), or None. A terminal without the
+    lease is never the coordinator, whatever its name or labels (note 55)."""
+    from .lease import holder
+    return holder(project)
 
 
 def parent_for(parent, project=None):

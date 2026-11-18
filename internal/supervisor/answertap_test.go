@@ -32,7 +32,7 @@ func TestTapAnswersAPromptOnAPaneReportedDone(t *testing.T) {
 	agyAtPrompt(t, h)
 	p, _ := h.pending()
 	h.clock.Advance(time.Second)
-	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); err != nil {
+	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1, ""); err != nil {
 		t.Fatalf("tap on agy's prompt: %v", err)
 	}
 	if n := h.keysTo(authPane); n != 1 {
@@ -51,7 +51,7 @@ func TestTapAnswersAMovedPastPromptOnAPaneReportedDone(t *testing.T) {
 		t.Fatalf("pending = %+v, want docs'", cur)
 	}
 	h.clock.Advance(time.Second)
-	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); err != nil {
+	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1, ""); err != nil {
 		t.Fatalf("tap on agy's moved-past prompt: %v", err)
 	}
 	if n := h.keysTo(authPane); n != 1 {
@@ -82,7 +82,7 @@ func TestTapReadErrorKeepsTheQuestion(t *testing.T) {
 	p, _ := h.pending()
 	h.srv.Handle("pane.read", func(json.RawMessage) (any, error) { return nil, errors.New("boom") })
 	h.clock.Advance(time.Second)
-	_, err := h.sup.AnswerTap(context.Background(), p.ID, 1)
+	_, err := h.sup.AnswerTap(context.Background(), p.ID, 1, "")
 	if err == nil || errors.Is(err, ErrPendingGone) {
 		t.Fatalf("tap err = %v, want a send failure that keeps the question", err)
 	}
@@ -111,7 +111,7 @@ func TestTapReadsTheScreenWithoutTheLock(t *testing.T) {
 		return map[string]any{"type": "pane_read", "read": map[string]any{"pane_id": authPane, "source": "recent_unwrapped", "format": "text", "text": screen}}, nil
 	})
 	h.clock.Advance(time.Second)
-	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); err != nil {
+	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1, ""); err != nil {
 		t.Fatalf("tap: %v", err)
 	}
 	if locked.Load() {

@@ -23,7 +23,7 @@ type Notifier interface {
 // event (dropLate's later line about an event already notified is
 // dropped there).
 func (s *Supervisor) notify(a announcement, kept []state.Promise, text string) {
-	if s.cfg.Notifier == nil || text == "" {
+	if s.cfg.Notifier == nil || text == "" || s.isFactoryQuietRow(a.row) || s.isFactoryQuiet(a.row.PaneID) {
 		return
 	}
 	blocked := a.event == brain.PromiseEventBlocked || a.pending != ""

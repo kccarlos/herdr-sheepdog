@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — where the voice goes on iPad</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 1240px; height: 860px; box-sizing: border-box; padding: 36px 40px; background: #F1EEE7; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; gap: 22px">
+  <div style="display: flex; flex-direction: column; gap: 6px">
+    <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 22px; font-weight: 700">Where the voice goes on iPad: the same floating capsule as iPhone</h2>
+    <span style="font-size: 14px; line-height: 20px; color: #6B6E75; max-width: 1100px">One capsule per window, 366 × 60, floating at the bottom centre of the content area (never over the sidebar). The sidebar is navigation only. Showing or hiding the sidebar, rotating or resizing the window slides the capsule to the new centre (200 ms, brand ease; Reduce Motion: no slide). Narrower than 390 pt: width − 24.</span>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, 360px); gap: 26px 40px; align-items: end">
+    <sc-for list="{{ tiles }}" as="t" hint-placeholder-count="6">
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <div style="height: 250px; display: flex; align-items: flex-end">
+          <div style="position: relative; width: {{ t.fw }}px; height: {{ t.fh }}px; box-sizing: border-box; border-radius: 14px; border: 2px solid #1F1F22; background: #FAF8F3; overflow: hidden">
+            <sc-if value="{{ t.hasSidebar }}" hint-placeholder-val="{{ true }}">
+              <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 96px; background: #E9E5DB; border-right: 1px solid #D6D1C6; box-sizing: border-box; padding: 14px 10px; display: flex; flex-direction: column; gap: 6px">
+                <span style="height: 7px; width: 60px; border-radius: 4px; background: #CFC9BC"></span>
+                <span style="height: 7px; width: 48px; border-radius: 4px; background: #CFC9BC"></span>
+                <span style="height: 7px; width: 54px; border-radius: 4px; background: #CFC9BC"></span>
+              </div>
+            </sc-if>
+            <sc-if value="{{ t.hasDivider }}" hint-placeholder-val="{{ false }}">
+              <div style="position: absolute; top: 0; bottom: 0; left: {{ t.divX }}px; width: 2px; background: #CFC9BC"></div>
+            </sc-if>
+            <sc-if value="{{ t.focusRing }}" hint-placeholder-val="{{ false }}">
+              <div style="position: absolute; top: 0; left: {{ t.focusX }}px; width: {{ t.focusW }}px; height: 3px; background: #1F1F22"></div>
+            </sc-if>
+            <sc-if value="{{ t.keys }}" hint-placeholder-val="{{ false }}">
+              <div style="position: absolute; left: {{ t.keysX }}px; width: {{ t.keysW }}px; bottom: 26px; height: 9px; border-radius: 3px; background: repeating-linear-gradient(90deg, #FFFFFF 0 14px, transparent 14px 17px); border: 1px solid #E4E0D7; box-sizing: border-box"></div>
+            </sc-if>
+            <sc-if value="{{ t.showCap }}" hint-placeholder-val="{{ true }}">
+            <span style="position: absolute; left: {{ t.cx }}px; bottom: 7px; width: 90px; height: 15px; border-radius: 8px; background: #FFFFFF; border: 1px solid #CFC9BC; box-shadow: 0 2px 6px rgba(31,31,34,0.18); display: flex; align-items: center; gap: 3px; padding: 0 3px; box-sizing: border-box">
+              <span style="width: 9px; height: 9px; border-radius: 5px; background: #D98718"></span>
+              <span style="height: 4px; width: 40px; border-radius: 2px; background: #CFC9BC"></span>
+            </span>
+            </sc-if>
+            <sc-if value="{{ t.second }}" hint-placeholder-val="{{ false }}">
+              <span style="position: absolute; left: {{ t.cx2 }}px; bottom: 7px; width: 90px; height: 15px; border-radius: 8px; background: #FFFFFF; border: 1px dashed #8E8A80; display: flex; align-items: center; gap: 3px; padding: 0 3px; box-sizing: border-box">
+                <span style="width: 9px; height: 9px; border-radius: 5px; background: #E4E0D7"></span>
+                <span style="height: 4px; width: 26px; border-radius: 2px; background: #E4E0D7"></span>
+                <span style="height: 9px; width: 30px; border-radius: 5px; border: 1px solid #CFC9BC; box-sizing: border-box"></span>
+              </span>
+            </sc-if>
+          </div>
+        </div>
+        <span style="font-size: 15px; font-weight: 600">{{ t.title }}</span>
+        <span style="font-size: 13px; line-height: 18px; color: #6B6E75">{{ t.note }}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 24px; padding-top: 6px">
+    <div style="padding: 14px; border-radius: 34px; background: #FAF8F3; display: flex">
+      <dc-import name="Dock" label="Work Mac" status="In another window" mode="elsewhere" style="display: block; width: 366px; height: 60px" hint-size="366px,60px"></dc-import>
+    </div>
+    <span style="font-size: 13px; line-height: 18px; color: #6B6E75; max-width: 640px">A window that does not hold the audio: grey dot, mic slot empty, orb shows a mic, status “In another window”, and “Use here” in place of the keyboard. Tapping it moves the session to this window (the other window’s capsule switches to this state). The name still opens the voice menu.</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":860}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = (title, note, o) => Object.assign({ title, note, showCap: true, fw: 340, fh: 255, hasSidebar: false, hasDivider: false, focusRing: false, keys: false, second: false, cx: 0, cx2: 0, divX: 0, focusX: 0, focusW: 0, keysX: 0, keysW: 0 }, o);
+    const tiles = [
+      T('Sidebar shown', 'Centred in the content area, not the window.', { hasSidebar: true, fh: 245, cx: 171 }),
+      T('Sidebar hidden', 'Same capsule, slides to the window centre. Nothing moves into the toolbar.', { fh: 245, cx: 123 }),
+      T('Portrait', 'Sidebar is an overlay; the capsule stays at the bottom centre underneath it.', { fw: 200, fh: 250, cx: 53 }),
+      T('Agent window', 'No capsule, as on iPhone. Footer: key bar, then paperclip (attach) + “Message auth-fix…” box. The voice keeps running: the sidebar’s marker shows where, ⌘⇧M mutes, ⌘K switches. Back to any other page and the capsule returns.', { hasSidebar: true, fh: 245, cx: 171, keys: true, keysX: 104, keysW: 226, showCap: false }),
+      T('Two agents side by side', 'Agent windows only, so no capsule either. Both footers are the same: keys and the message box.', { hasSidebar: true, fh: 245, hasDivider: true, divX: 216, focusRing: true, focusX: 96, focusW: 120, cx: 111, keys: true, keysX: 100, keysW: 230, showCap: false }),
+      T('Two windows (Stage Manager / Split View)', 'Each window has its own capsule. Only one holds the audio; the other shows “In another window · Use here” (below).', { fh: 245, hasDivider: true, divX: 168, cx: 39, second: true, cx2: 211 })
+    ];
+    return { tiles };
+  }
+}
+</script>
+</body>
+</html>

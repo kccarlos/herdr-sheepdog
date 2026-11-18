@@ -38,6 +38,7 @@ from .news import news_pass, send_or_hold, typing
 from .takeover import cant_go_on, takeover
 from .ghnews import main_pass, pr_deliver, pr_news
 from .scheduler import SCHEDULER
+from .lease import reconcile_pass
 from .revive import revive_pass
 from .watchdog import watchdog_pass
 from .checks import checks_pass
@@ -833,6 +834,11 @@ def cmd_tick(args):
         revive_pass(report)
     except Exception as e:  # never stops the queue
         report["revive_error"] = str(e)
+    try:
+        # Then: every project with open tasks has exactly one coordinator, before news and wakes look for it (notes 54, 55).
+        reconcile_pass(report)
+    except Exception as e:  # never stops the queue
+        report["reconcile_error"] = str(e)
     try:
         retry_pass(report)
     except Exception as e:  # never stops the queue

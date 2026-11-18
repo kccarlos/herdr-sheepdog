@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — every conversation row</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 1640px; min-height: 3800px; box-sizing: border-box; padding: 40px; background: {{ c.board }}; color: {{ c.ink }}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; gap: 40px">
+  <sc-for list="{{ sections }}" as="s" hint-placeholder-count="6">
+    <section style="display: flex; flex-direction: column; gap: 16px">
+      <div style="display: flex; align-items: baseline; gap: 14px; padding-bottom: 10px; border-bottom: 1px solid {{ c.line }}">
+        <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 24px; font-weight: 700">{{ s.title }}</h2>
+        <span style="font-size: 15px; color: {{ c.muted }}">{{ s.cue }}</span>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(4, 358px); gap: 28px 40px; align-items: start">
+        <sc-for list="{{ s.tiles }}" as="t" hint-placeholder-count="4">
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <div style="display: flex; flex-direction: column; gap: 1px">
+              <span style="font-size: 14px; font-weight: 600"><span style="color: {{ c.muted }}; font-weight: 500">{{ t.no }}</span> {{ t.title }}</span>
+              <span style="font-size: 12.5px; line-height: 17px; color: {{ c.muted }}">{{ t.note }}</span>
+            </div>
+            <div style="box-sizing: border-box; padding: 14px 0; border-radius: 16px; background: {{ c.surface }}; display: flex; flex-direction: column; align-items: center">
+              <sc-for list="{{ t.rows }}" as="r" hint-placeholder-count="1">
+                <div style="width: 330px; margin-top: {{ r.gap }}px">
+                  <dc-import name="ChatRow" kind="{{ r.kind }}" pos="{{ r.pos }}" text="{{ r.text }}" time="{{ r.time }}" gutter="{{ r.gutter }}" dark="{{ dark }}" w="{{ 330 }}" style="display: block; width: 330px" hint-size="330px,48px"></dc-import>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":1640,"height":3800}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const dark = !!this.props.dark;
+    const c = dark ? { board: '#101215', surface: '#16181C', ink: '#F5F2EA', muted: '#A3A7AF', line: '#2E3138' } : { board: '#F1EEE7', surface: '#FAF8F3', ink: '#1F1F22', muted: '#6B6E75', line: '#E4E0D7' };
+    const R = (kind, o) => Object.assign({ kind, pos: 'single', text: '', time: '', gutter: '', gap: 0 }, o || {});
+    const tile = (no, title, note, rows) => ({ no, title, note, rows: rows.map((r, i) => (i === 0 ? r : Object.assign({}, r, { gap: r.pos === 'mid' || r.pos === 'last' ? 0 : 8 }))) });
+    const sections = [
+      { title: 'Dialogue', cue: 'Cue: a bubble. Only these rows have a tail corner and do not span the width. You on the right, the voice on the left.', tiles: [
+        tile('1', 'You, by voice', 'Bubble fill, body, right. No time on bubbles; the long press shows it with Copy.', [R('you')]),
+        tile('1', 'You, still being transcribed', '72 % opacity and a ••• tail instead of “ …”. Becomes final in place, no jump.', [R('youOpen')]),
+        tile('2', 'You, typed', 'Same bubble plus a “Typed” caption (keyboard glyph) under it — the only difference.', [R('youTyped')]),
+        tile('3', 'The voice', 'Card fill, 1 pt Line border, left, body.', [R('voice')]),
+        tile('3', 'The voice, still speaking', 'Same open treatment as yours.', [R('voiceOpen')]),
+        tile('3b', 'The voice, text-router answer', 'Exactly like 3. VoiceOver says “Sheepdog wrote” instead of “said”.', [R('voice', { text: 'Two agents finished. Want the details?' })]),
+        tile('4', 'Details, collapsed', 'Purple is the orchestrator’s colour: footnote semibold, info.circle, 30 pt row (44 pt hit area).', [R('voiceDetails')]),
+        tile('4', 'Details, open', 'No card: a 2 pt purple rule, the headline, the explanation, options as chips (display only), Raw behind one more tap.', [R('voiceDetailsOpen')]),
+        tile('5', 'Orchestrator reply, not voiced', 'ThinkingSoft panel, no border, left like the voice. Brain glyph. Options shown, not tappable.', [R('brain')]),
+        tile('5', 'Orchestrator reply, pending', 'Muted text; Raw only.', [R('brainPending')]),
+        tile('5', 'Orchestrator asks you to say more', 'Outlined tag in the header — not a colour change.', [R('brainClarify')])
+      ] },
+      { title: 'Needs you', cue: 'Cue: amber, and the down-arrow disc. Nothing else on the page uses amber. The answer itself is the floating card above the capsule.', tiles: [
+        tile('6', 'Open question, pointer', 'One line, no container. Filled amber disc with an ink arrow, “answer below” in BlockedText. Tap scrolls to / pulses the floating card.', [R('pointer')]),
+        tile('6b', 'Open question, full card, pinned', 'Only when not floating (technical view, or a second question not yet floated). 1.5 pt Blocked border.', [R('questionPinned')]),
+        tile('6b', 'Open question, full card, not pinned', 'Line border, dashed circle, muted: it is open on the computer but not answerable here.', [R('questionUnpinned')]),
+        tile('—', 'Settled → moves to the ledger', 'The moment it is answered or closed, the floating card shrinks into the ledger line (matched geometry) and the pointer goes away.', [R('pointer'), R('approved', { gap: 8 })])
+      ] },
+      { title: 'Agent outcomes — the ledger', cue: 'Cue: full width, a 28 pt round well on the leading edge. Consecutive outcome rows share one card with hairlines. Wells: blue = agent news, green = approved, neutral = declined / closed. Never struck through.', tiles: [
+        tile('9', 'Agent update, said', 'terminal.fill in a WorkingSoft well. No chevron when the line fits; tap expands only if it was truncated.', [R('update')]),
+        tile('10', 'Missed update', 'moon.zzz.fill well (same blue family: news, not error) + the words “While you were away · ”. One line, time, chevron.', [R('missed')]),
+        tile('10', 'Missed update, open', 'Full text, no clamp. Same row grows; nothing else moves.', [R('missedOpen')]),
+        tile('7', 'Answered — approved, by tap', 'DoneSoft well, checkmark. Line semibold ink, the question in caption under it.', [R('approved')]),
+        tile('7', 'Answered — approved, by voice', '“by voice” is in the words, not in a colour.', [R('approvedVoice')]),
+        tile('7', 'Answered — declined', 'Neutral Fill well, ink xmark. Declining is your call, not an error: no red.', [R('declined')]),
+        tile('7', 'Answered, open', 'Under it, inset to the text column: the full question, the push that announced it and the voice’s restatement, each a Fill block with a caption.', [R('approvedOpen')]),
+        tile('8', 'Closed by itself', 'Hollow well (Line ring), clock glyph, regular weight. Words say “closed”. Wraps to 2 lines.', [R('closed')]),
+        tile('8', 'Closed, open', 'The question, and why it closed (phase 3 reason; until then the plain fallback).', [R('closedOpen')]),
+        tile('11', 'Updates group, missed', 'Stacked wells say “many”. Title footnote semibold INK (the count matters), newest two lines. Catch me up is its own button in the card’s footer.', [R('group')]),
+        tile('11', 'Updates group, mixed', 'Heard + missed: terminal glyph on the stack, title says both counts.', [R('groupMixed')]),
+        tile('11', 'Updates group, open', 'Title only; the members continue the same card. A restart divider inside the run splits the card around it.', [R('groupOpen', { pos: 'first' }), R('missed', { pos: 'mid', text: 'Both releases are underway. The daemon fix is waiting on CI.', time: '12:09' }), R('missed', { pos: 'last', text: 'Claude finished the forumind work and has published it.', time: '12:31' }), R('restarted', { gap: 8 }), R('missed', { text: 'The local daemon is now the signed v0.1.9.', time: '12:53', gap: 8 })]),
+        tile('—', 'A run of outcomes', 'Settled questions and updates in a row share one card (they never fold into a group, so a question is never hidden).', [R('approved', { pos: 'first' }), R('closed', { pos: 'mid' }), R('update', { pos: 'last' })]),
+        tile('13', 'Card shown', 'Square well (= an object you open) with the card’s own symbol, chevron.right. Always its own card, never in a run.', [R('card')]),
+        tile('13', 'Card, gone', 'Dashed square well, muted words, no chevron, not tappable.', [R('cardGone')])
+      ] },
+      { title: 'Context', cue: 'Cue: centred caption on a hairline, a small glyph naming the kind. No container, no tap.', tiles: [
+        tile('14', 'Day', 'No hairline, caption semibold. Sticky at the top while its day scrolls.', [R('day'), R('day', { text: 'Yesterday', gap: 8 }), R('day', { text: 'Monday 26 October', gap: 8 })]),
+        tile('15', 'New conversation', 'plus.bubble.', [R('newConv')]),
+        tile('16', 'Talking to', 'desktopcomputer. Only with two or more computers paired.', [R('talkingTo')]),
+        tile('17', 'Sheepdog restarted', 'arrow.clockwise. Bridges a run (the card splits around it).', [R('restarted')]),
+        tile('17', 'Sheepdog updated (phase 3)', 'shippingbox; the version is in the words once the daemon sends it.', [R('updated')]),
+        tile('18', 'Voice restarted', 'waveform. Up to two lines, centred.', [R('voiceRestarted')])
+      ] },
+      { title: 'System and screen rows', cue: 'Cue: dashed outline = from the machine. Screen controls are plain text buttons or a floating capsule.', tiles: [
+        tile('19', 'Unrecognised phone notice', 'Dashed border, no fill, gearshape. Ink text (it may ask for a tap).', [R('notice')]),
+        tile('20', 'Earlier conversation', 'Centred text button, 44 pt.', [R('earlier')]),
+        tile('20', 'Earlier, loading', 'ProgressView replaces the glyph.', [R('earlierLoading')]),
+        tile('22', 'Jump to latest', 'Floating .regularMaterial capsule, 12 pt above the floating question (or capsule). Appears after one screen of scroll.', [R('jump')]),
+        tile('12', 'Catch me up', 'Inside the group card’s footer, Surface fill so it reads as a button on the Card. sparkles. Sends “Catch me up on what I missed.”', [R('group')]),
+        tile('21', 'Empty state', 'Unchanged — see the “Empty conversation” boards (mascot, “Just talk”, two chips).', [R('earlier')])
+      ] },
+      { title: 'Technical events (Settings ▸ Health ▸ Show technical events)', cue: 'Cue: a 62 pt time gutter with a category code on every row; plumbing is monospaced and muted with no container. Nothing grouped, nothing folded.', tiles: [
+        tile('T1', 'Voice context lost', '', [R('tContextLost', { gutter: '12:00:04|SYS' })]),
+        tile('T2', 'Fresh reconnect', '', [R('tFresh', { gutter: '12:00:11|SYS' })]),
+        tile('T3', 'Resumed reconnect', '', [R('tResumed', { gutter: '12:20:40|SYS' })]),
+        tile('T4', 'Voice session closed', '', [R('tClosed', { gutter: '12:51:00|SYS' })]),
+        tile('T5', 'Unknown daemon notice', '', [R('tUnknown', { gutter: '12:51:01|SYS' })]),
+        tile('T6', 'Audio route changed', '', [R('tRoute', { gutter: '13:02:30|SYS' })]),
+        tile('T7', 'Paused / listening again', '', [R('tPaused', { gutter: '13:05:12|SYS' })]),
+        tile('T8', 'Audio needs your tap', '', [R('tAudioTap', { gutter: '13:06:00|SYS' })]),
+        tile('T9', 'Audio stopped', '', [R('tAudioStopped', { gutter: '13:06:02|SYS' })]),
+        tile('T10', 'Voice off / closed', '', [R('tVoiceOff', { gutter: '13:07:44|SYS' })]),
+        tile('T11', 'Released push', '', [R('tReleased', { gutter: '13:02:12|UPD' })]),
+        tile('T12', 'Held push', 'Dashed neutral outline, hourglass. No amber (it was amber before).', [R('tHeld', { gutter: '12:20:02|UPD' })]),
+        tile('T13', 'Dropped push', 'bell.slash, no strikethrough.', [R('tDropped', { gutter: '12:05:40|UPD' })]),
+        tile('T14', 'Settled question, unfolded', 'Full card with its outcome; the push and the restatement follow as their own rows.', [R('questionSettled', { gutter: '13:03:21|ASK' }), R('update', { gutter: '13:03:05|UPD', text: 'Claude has a question about running the tests.', gap: 8 })]),
+        tile('T15', 'Orchestrator reply, unfolded', 'The card, not the Details line.', [R('brain', { gutter: '13:02:48|DLG' })]),
+        tile('T16', 'Every other kind', 'Rows 1–18 as in the default view, ungrouped, with the gutter.', [R('you', { gutter: '13:02:40|DLG' }), R('restarted', { gutter: '12:51:03|CTX', gap: 8 })])
+      ] }
+    ];
+    return { c, dark, sections };
+  }
+}
+</script>
+</body>
+</html>

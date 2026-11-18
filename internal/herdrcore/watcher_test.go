@@ -126,4 +126,33 @@ func TestWatcherSurvivesDroppedSubscriptions(t *testing.T) {
 	receiveUntil(t, ch, func(tr herdr.Transition) bool { return tr.To == herdr.StateWorking })
 }
 
+func TestWatcherCarriesFactoryLabels(t *testing.T) {
+	b, srv := newBackend(t)
+	term := reported("t1", "codex", "working")
+	term.Labels = map[string]string{
+		herdr.LabelFactoryProject: "proj",
+		herdr.LabelFactoryRole:    "worker",
+		herdr.LabelFactoryTask:    "proj#1",
+	}
+	srv.Add(term)
+	ch := runWatcher(t, b)
+	first := receive(t, ch)
+	if !herdr.IsFactoryQuiet(first.Labels) || first.Labels[herdr.LabelFactoryRole] != "worker" {
+		t.Fatalf("first transition labels = %v", first.Labels)
+	}
+	awaitSubscribers(t, srv, 2)
+
+	srv.SetStatus("t1", &hc.Status{State: "done", App: "codex"})
+	done := receiveUntil(t, ch, func(tr herdr.Transition) bool { return tr.To == herdr.StateDone })
+	if !herdr.IsFactoryQuiet(done.Labels) || done.Labels[herdr.LabelFactoryTask] != "proj#1" {
+		t.Fatalf("done transition labels = %v", done.Labels)
+	}
+
+	srv.Finish("t1", "exited")
+	closed := receiveUntil(t, ch, func(tr herdr.Transition) bool { return tr.Closed })
+	if !herdr.IsFactoryQuiet(closed.Labels) {
+		t.Fatalf("closed transition labels = %v", closed.Labels)
+	}
+}
+
 func ptr[T any](v T) *T { return &v }

@@ -360,10 +360,10 @@ sequenceDiagram
    - Returns HTTP `200` with the `answer_proof` shape in [`testdata/factory/owner-contract-v1.json`](../../../testdata/factory/owner-contract-v1.json), or HTTP `403` / `404` `{"ok": false, "verified": false, "code": "proof_rejected", "error": "..."}`.
 5. **Threat boundary, residuals, and required tests (`SDF-22`):**
    - **What this stops:** Agent shortcuts (`--owner-approved`, `HERDR_TASK_BY`, `hc keys` into `_ask-pane`, ticketless loopback `POST /api/pending/answer`, loopback `POST /api/agents/{pane_id}/input` `WindowKeys`, loopback `POST /api/turn`, or an invented `--proof` token). `SDF-22` must test that all three loopback HTTP paths (`POST /api/pending/answer`, `POST /api/agents/{pane_id}/input` with option keys, and `POST /api/turn`) on `"fask-<id>"` without a paired-device ticket are refused and mint no `AnswerProof`.
-   - **Two residuals outside this boundary (mitigated by VM isolation):**
+   - **Two accepted residuals outside this boundary:**
      1. *Loopback self-pairing:* Because `GET /api/pair` (`internal/web/pair.go`) is `accessLoopback`, a local process running as the same OS user on the host could fetch a pairing code, enroll a fake device, and tap with that ticket (audited via `web.device.enrolled` and `device_id` in `factory.proof_verified`).
      2. *Unauthenticated local `owner say`:* A local process running as the same OS user can invoke `engine owner say <project> "<text>"` directly on the CLI.
-     As stated in `sheepdog-factory-design.md` §3 and §9, stopping a hostile same-user process from calling loopback pairing routes or writing engine files is the job of running workers in a VM machine, not the loopback proof.
+     Workers run with full user permissions on the machine — as the owner is told at first run — so a hostile same-user process can call loopback pairing routes, run local CLI commands, or write files directly; the loopback proof is there to keep honest agents on the rail, and the audit events above remain on record.
 
 ---
 
@@ -371,10 +371,10 @@ sequenceDiagram
 
 ### 6.1 The Quiet Rule (`SDF-23`)
 
-In a factory project, every terminal spawned by the engine carries `sheepdog.project=<id>` and `sheepdog.role=<coordinator|worker|reviewer|checks>` (alongside `sheepdog.task=<slug>#<n>` on task panes).
+In a factory project, every terminal spawned by the engine carries `sheepdog.project=<id>` and `sheepdog.role=<coordinator|worker|reviewer|checks>` (alongside `sheepdog.task=<slug>#<n>` on task panes), while worker-spawned reviewers and helpers carry `sheepdog.role=<reviewer|helper>` and/or `sheepdog.task=<slug>#<n>` without requiring `sheepdog.project`.
 
-A hard code rule in `internal/supervisor` checks these labels on every `herdr` transition:
-- **Workers, reviewers, and check panes are completely silent to the owner:** their starts, finishes, blocks on coordinator `decision` asks, review rounds, CI runs, rebases, retries, and model switches trigger **zero** `announce` turns, **zero** voice pushes, and **zero** APNs notifications.
+A hard code rule in `internal/supervisor` (`herdr.IsFactoryQuiet`) checks these labels on every `herdr` transition (`worker`, `reviewer`, `checks`, `helper`, or any non-coordinator pane with `sheepdog.task`):
+- **Workers, reviewers, helpers, and check panes are completely silent to the owner:** their starts, finishes, blocks on coordinator `decision` asks, review rounds, CI runs, rebases, retries, and model switches trigger **zero** `announce` turns, **zero** voice pushes, **zero** pending prompt cards, and **zero** APNs notifications.
 - Only **owner asks**, **factory alerts**, and **digests** break the silence.
 
 ### 6.2 The Five Allowed Alert Kinds (`SDF-24`)

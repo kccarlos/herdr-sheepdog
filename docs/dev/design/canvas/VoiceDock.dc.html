@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — voice capsule states</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 1260px; height: 780px; box-sizing: border-box; padding: 40px; background: #F1EEE7; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; display: grid; grid-template-columns: repeat(3, 366px); gap: 32px 41px; align-content: start">
+  <sc-for list="{{ states }}" as="s" hint-placeholder-count="17">
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <div style="display: flex; align-items: baseline; gap: 8px; height: 20px">
+        <span style="font-size: 15px; font-weight: 600">{{ s.title }}</span>
+        <span style="font-size: 13px; color: #6B6E75">{{ s.note }}</span>
+      </div>
+      <div style="padding: 0; border-radius: 30px; background: {{ s.bg }}; width: 366px; height: 60px">
+        <dc-import name="Dock" label="{{ s.label }}" status="{{ s.status }}" mode="{{ s.mode }}" dark="{{ s.dark }}" style="display: block; width: 366px; height: 60px" hint-size="366px,60px"></dc-import>
+      </div>
+    </div>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1260,"height":780}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const L = '#FAF8F3', D = '#16181C';
+    const s = (title, note, mode, status, label, dark) => ({ title, note, mode, status, label: label || 'Work Mac', dark: !!dark, bg: dark ? D : L });
+    return { states: [
+      s('Listening', 'orange orb, cream sticker ring', 'live', 'Listening — just talk', 'Sheepdog'),
+      s('Listening, question open', 'the answer gets the accent', 'quiet', 'Listening'),
+      s('Not talking', 'ended; agents still live; orb starts', 'stopped', 'Not talking · tap the orb'),
+      s('Not talking, question open', 'same, quiet orb', 'stoppedquiet', 'Not talking · tap the orb'),
+      s('Speaking', 'tap the orb to stop it', 'speaking', 'Sheepdog is talking'),
+      s('Thinking', 'tap the orb to stop it', 'thinking', 'Thinking…'),
+      s('Stalled', 'no reply for a while; tap to stop', 'stalled', 'Still waiting on Sheepdog…'),
+      s('Muted', 'the one loud red control', 'muted', 'Muted — can’t hear you'),
+      s('Audio paused', 'a call or Siri; the orb resumes', 'paused', 'Paused by a call — tap to resume'),
+      s('No microphone', 'denied or busy; it can still talk', 'nomic', 'Can’t use the microphone'),
+      s('Reconnecting', 'amber, never red', 'reconnecting', 'Reconnecting…'),
+      s('Offline', 'tap the orb to try again', 'offline', 'Offline since 9:12'),
+      s('Voice off', 'agents still update', 'voiceoff', 'Voice is off on this computer'),
+      s('Hold to talk', 'the orb is the talk button', 'hold', 'Hold the orb to talk'),
+      s('Holding', 'release to send', 'holding', 'Release to send'),
+      s('Listening, dark', '', 'live', 'Listening — just talk', 'Sheepdog', true),
+      s('Speaking, dark', '', 'speaking', 'Sheepdog is talking', 'Work Mac', true)
+    ] };
+  }
+}
+</script>
+</body>
+</html>

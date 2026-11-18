@@ -34,6 +34,9 @@ type Transition struct {
 	Renamed bool `json:"renamed,omitempty"`
 	// Source is the channel that delivered the triggering event.
 	Source string `json:"source,omitempty"`
+	// Labels carries the terminal's metadata labels when known (e.g.
+	// sheepdog.project, sheepdog.role, sheepdog.task).
+	Labels map[string]string `json:"labels,omitempty"`
 	// Session is the agent's reported session as last seen in a snapshot
 	// (the status events do not carry it), and Cwd the pane's working
 	// directory; the supervisor reads the worker's own transcript from
@@ -106,10 +109,11 @@ type Watcher struct {
 type paneState struct {
 	id, workspace, agent, name string
 
-	// session and cwd are the latest snapshot's agent_session and cwd,
-	// carried on every Transition.
+	// session, cwd and labels are the latest snapshot/event values, carried on
+	// every Transition.
 	session *AgentSession
 	cwd     string
+	labels  map[string]string
 
 	state State // confirmed state ("" until first emit)
 
@@ -292,6 +296,9 @@ func (w *Watcher) refreshSnapshot(ctx context.Context) error {
 		if a.Cwd != "" {
 			p.cwd = a.Cwd
 		}
+		if a.Labels != nil {
+			p.labels = CloneLabels(a.Labels)
+		}
 		w.applyEvent(ctx, p, StatusEvent{PaneID: a.PaneID, WorkspaceID: a.WorkspaceID, Agent: a.Agent, State: a.Status, At: at, Source: "snapshot"})
 		if renamed && p.state == before {
 			// The state did not change (a change would have carried the
@@ -335,6 +342,9 @@ func (w *Watcher) handleFleet(ctx context.Context, ev FleetEvent) {
 		}
 		p := w.ensurePane(ctx, ev.PaneID, ev.WorkspaceID, ev.Agent)
 		p.agent = ev.Agent
+		if ev.Pane != nil && ev.Pane.Labels != nil {
+			p.labels = CloneLabels(ev.Pane.Labels)
+		}
 		p.activate()
 		// Bootstrap the new pane's state and workspace label right away
 		// rather than waiting for the next tick.
@@ -389,6 +399,9 @@ func (w *Watcher) applyEvent(ctx context.Context, p *paneState, ev StatusEvent) 
 	}
 	if ev.WorkspaceID != "" {
 		p.workspace = ev.WorkspaceID
+	}
+	if ev.Labels != nil {
+		p.labels = CloneLabels(ev.Labels)
 	}
 	if ev.State != StateUnknown {
 		p.activate()
@@ -446,7 +459,7 @@ func (p *paneState) activate() {
 		return
 	}
 	p.state, p.lastEv, p.lastEvAt = "", "", time.Time{}
-	p.name, p.session = "", nil
+	p.name, p.session, p.labels = "", nil, nil
 	p.released = false
 }
 
@@ -477,6 +490,7 @@ func (w *Watcher) emit(ctx context.Context, p *paneState, to State, at time.Time
 		Closed:         closed,
 		Released:       released,
 		Source:         source,
+		Labels:         CloneLabels(p.labels),
 		Cwd:            p.cwd,
 	}
 	if p.session != nil {
@@ -508,6 +522,7 @@ func (w *Watcher) emitRename(ctx context.Context, p *paneState, at time.Time) {
 		WorkspaceLabel: w.wsLabels[p.workspace],
 		Source:         "snapshot",
 		Renamed:        true,
+		Labels:         CloneLabels(p.labels),
 		Cwd:            p.cwd,
 	}
 	if p.session != nil {

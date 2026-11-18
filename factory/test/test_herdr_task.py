@@ -18,6 +18,42 @@ CI = os.environ.get("CI") == "true"
 
 
 class HerdrTask(unittest.TestCase):
+    def test_workers_can_ask_without_approval(self):
+        import tomllib
+        from types import SimpleNamespace
+        from unittest import mock
+
+        sys.path.insert(0, BIN)
+        from herdr_task import launch
+
+        path, folder = "/bin/herdr-task", "/repo/worker"
+        rule = f"Bash({path} ask:*)"
+        store = SimpleNamespace(loc={"folder": folder}, ref=lambda _: "DEMO-1")
+        with tempfile.TemporaryDirectory() as home, \
+                mock.patch.object(launch, "HOME", home), \
+                mock.patch.object(launch, "own_path", return_value=path), \
+                mock.patch.object(launch, "secret_path", return_value=None), \
+                mock.patch.object(launch, "claude_trust"), \
+                mock.patch.object(launch, "review_limits", return_value=(False, 0)), \
+                mock.patch("herdr_task.simulators.simulator_pool", return_value=[]):
+            self.assertIn(rule, launch.own_rules(path))
+            claude = launch.own_argv(["claude"], folder, cwd=folder)
+            self.assertIn(rule, json.loads(claude[2])["permissions"]["allow"])
+            agy = json.loads(launch.own_argv(["agy"], folder, cwd=folder)[2])
+            self.assertIn(f"command({path} ask)", agy["permissions"]["allow"])
+            self.assertEqual(agy["trustedWorkspaces"], [folder])
+            codex = launch.own_argv(["codex"], folder, cwd=folder)
+            self.assertIn(f'projects={{"{folder}"={{trust_level="trusted"}}}}', codex)
+            hook = tomllib.loads(codex[2])["hooks"]["PermissionRequest"][0]["hooks"][0]["command"]
+            command = f'{path} ask "Which option?" --option A --option B --recommend A --folder {folder}'
+            result = subprocess.run(shlex.split(hook), input=json.dumps({"tool_input": {"command": command}}),
+                                    check=True, capture_output=True, text=True)
+            self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["decision"]["behavior"], "allow")
+            brief = launch.closing_line(store, {}, argv=codex)
+            verbs = re.search(r"then its ([\w, -]+) commands run without asking\.", brief)
+            self.assertIsNotNone(verbs)
+            self.assertEqual(verbs.group(1).split(", "), launch.OWN)
+
     def test_compiles(self):
         files = [os.path.join(BIN, "herdr-task")] + [os.path.join(BIN, "herdr_task", f) for f in sorted(os.listdir(os.path.join(BIN, "herdr_task"))) if f.endswith(".py")]
         files += [os.path.join(ROOT, "bin", "herdr-secret")]
@@ -7092,7 +7128,7 @@ class CleanEnv(unittest.TestCase):
         self.assertEqual(env.get("HERDR_BROWSER_TASK"), "dev#6")  # kept until SDF-8/SDF-11 convert worker.md
 
     def test_the_same_line_everywhere(self):
-        """herdr-task, the window and the service (core/clean-env.js) and restart.sh clear the same names."""
+        """herdr-task and the window and the service (core/clean-env.js) clear the same names."""
         sys.path.insert(0, BIN)
         import herdr_task.launch as L
         clean_js = os.path.join(ROOT, "core", "clean-env.js")
@@ -7100,9 +7136,7 @@ class CleanEnv(unittest.TestCase):
             js = subprocess.run(["sh", "-c", 'grep -o "export const CLEAN_ENV = .*" "$1"', "x", clean_js],
                                 capture_output=True, text=True).stdout.strip()
             self.assertEqual(js.split("`")[1].replace("\\\\", "\\"), L.CLEAN_ENV)
-        restart = os.path.join(ROOT, "mods", "coordinator", "restart.sh")
-        line = subprocess.run(["bash", "-c", 'eval "$(grep "^clean=" "$1")"; printf %s "$clean"', "x", restart], capture_output=True, text=True).stdout
-        self.assertEqual(line, L.CLEAN_ENV)
+        line = L.CLEAN_ENV
         self.assertEqual(self.agent_env(["sh", "-c", line + ' exec env']).keys() & self.MARKERS.keys(), set())
 
 
@@ -7145,8 +7179,10 @@ class Revive(unittest.TestCase):
                 return json.loads(json.dumps(self.terms[args[1]]))
             raise AssertionError(f"hc {args}")
         self.tasks = {"dev#6": {"id": 6, "state": "running", "agents": []}}
+        self.leased = set()  # the projects' lease holders (SDF-16): the coordinators revive brings back
         for name, value in (("run", hc), ("hc_json", hc_json), ("session_of", lambda pid: self.sessions.get(pid, (None, None))),
-                            ("task_of", lambda k: self.tasks.get(revive.label_of(k.get("labels"), "task")))):
+                            ("task_of", lambda k: self.tasks.get(revive.label_of(k.get("labels"), "task"))),
+                            ("coordinator_addresses", lambda: dict.fromkeys(self.leased))):
             p = mock.patch.object(revive, name, value)
             p.start()
             self.addCleanup(p.stop)
@@ -7157,6 +7193,7 @@ class Revive(unittest.TestCase):
                             "foreground": {"pid": agent_pid, "name": "claude", "argv": ["/opt/claude", "--model", "opus", "You are..."], "cwd": "/home/me/app"},
                             "labels": {"herdr.role": "coordinator", "herdr.chat": "p1"}}
         self.sessions[agent_pid] = ("S1", self.log)
+        self.leased.add(addr)
 
     def crash(self, addr, pid=200):
         """What the core does with a kept terminal whose program was lost: a shell, labels kept."""
@@ -7748,7 +7785,8 @@ class AssistantSettings(unittest.TestCase):
             (settings, "SETTINGS", self.file), (aset, "SETTINGS", self.file),
             (aset, "STATE", os.path.join(self.dir, ".assistant-settings.json")), (aset, "hc_json", hc_json),
             (aset, "run", run),
-            (aset, "coordinators", lambda: list(self.terminals)),
+            (__import__("herdr_task.lease", fromlist=["x"]), "live_holders",  # the lease holders (SDF-16)
+             lambda: [(a, t["cwd"]) for a, t in self.terminals.items() if (t.get("labels") or {}).get("sheepdog.role") == "coordinator"]),
             (aset, "autopilot_of", lambda proj, cfg: self.auto.get(proj, (False, "every 60 minutes", ""))),
             (news, "news_send", lambda addr, text: self.sent.append((addr, text)) or True),
         ]:
@@ -7883,13 +7921,14 @@ class AssistantSettings(unittest.TestCase):
 
     def test_spaces_fallback_merges_with_projects_until_sdf9(self):
         self.write({"spaces": {"s1": {"folder": "/proj/sp1", "tasks": {"merge": "auto", "review_rounds": 2}}}})
-        self.terminals["t8"] = {"state": "live", "turn": 3, "cwd": "/elsewhere",
-                                "labels": {"herdr.role": "coordinator", "herdr.coordinator.space": "vm/s1"}}
+        # t8 holds /proj/sp1's lease (SDF-16: the folder comes from the lease, not from its labels or cwd)
+        self.terminals["t8"] = {"state": "live", "turn": 3, "cwd": "/proj/sp1",
+                                "labels": {"sheepdog.role": "coordinator", "herdr.coordinator.space": "vm/s1"}}
         note_old = self.aset.session_note("t8")
         self.assertIn("- Merge: on its own (Herdr merges a ready task); set for this project", note_old)
         self.assertIn("- Review: on, at most 2 rounds", note_old)
         self.settings.write_max_running({"folder": "/proj/sp1"}, None, 3)
-        self.terminals["t5"] = {"state": "live", "turn": 3, "cwd": "/elsewhere",
+        self.terminals["t5"] = {"state": "live", "turn": 3, "cwd": "/proj/sp1",
                                 "labels": {"sheepdog.project": "proj-sp1", "sheepdog.role": "coordinator"}}
         note_merged = self.aset.session_note("t5")
         self.assertIn("- Merge: on its own (Herdr merges a ready task); set for this project", note_merged)
@@ -7948,40 +7987,48 @@ class TaskFlow(unittest.TestCase):
         return argparse.Namespace(**{"id": "SHEP-1", "json": True, "folder": None, **kw})
 
     def test_project_folder_coordinators_labels_watch_main_and_cli_flags(self):
-        """SDF-7: coordinator_in resolves explicit sheepdog.project labels before terminal cwd, launch stamps
+        """SDF-7/SDF-16: coordinator_in is the project's lease holder, whatever other terminals' labels or cwd say; launch stamps
         sheepdog.* labels without task['space']/tab, watch_main keys on folder, link drops star, and --space is gone."""
         from types import SimpleNamespace
         import herdr_task.cli as cli
         import herdr_task.github as github
         import herdr_task.launch as launch
+        import herdr_task.lease as lease
         import herdr_task.link as link
         import herdr_task.output as output
+        import herdr_task.store as store_mod
         other = os.path.join(self.root, "other")
         os.makedirs(other)
         terms = [
-            {"address": "c-slug-other", "state": "live", "cwd": self.main,
-             "labels": {"sheepdog.role": "coordinator", "sheepdog.project": "unrelated-slug"}},
             {"address": "c-other", "state": "live", "cwd": self.main,
              "labels": {"sheepdog.role": "coordinator", "sheepdog.project": other}},
-            {"address": "c-main", "state": "live", "cwd": other,
+            {"address": "c-main", "state": "live", "cwd": other, "created_ms": 7,
              "labels": {"sheepdog.role": "coordinator", "sheepdog.project": self.main}},
         ]
         by_addr = {t["address"]: t for t in terms}
-        self.patch(launch, "hc_json", lambda *a: {"terminals": terms} if a[:1] == ("ls",) else by_addr.get(a[1]) if a[:1] == ("get",) else None)
-        self.assertEqual(launch.coordinator_in(self.main), "c-main")
-        self.assertEqual(launch.parent_for(None, self.main), "c-main")
-        # When only a coordinator with another project's slug is live, coordinator_in returns None (no NameError on STORE)
-        terms[:] = [terms[0]]
-        self.assertIsNone(launch.coordinator_in(self.main))
-        # And when STORE/<slug>.json maps that slug to self.main, coordinator_in resolves it
+        self.patch(lease, "hc_json", lambda *a: {"terminals": terms} if a[:1] == ("ls",) else by_addr.get(a[1]) if a[:1] == ("get",) else None)
+        self.patch(lease, "hc_get", lambda a: (("live" if by_addr[a].get("state") == "live" else "gone"), by_addr[a]) if a in by_addr else ("gone", None))
         sdir = os.path.join(self.root, "store")
         os.makedirs(sdir)
-        with open(os.path.join(sdir, "repo-slug.json"), "w") as fh:
-            json.dump({"version": 1, "folder": os.path.realpath(self.main), "tasks": []}, fh)
-        self.patch(launch, "STORE", sdir)
-        terms[:] = [{"address": "c-slug", "state": "live", "cwd": other,
-                     "labels": {"sheepdog.role": "coordinator", "sheepdog.project": "repo-slug"}}]
-        by_addr["c-slug"] = terms[0]
+        self.patch(store_mod, "STORE", sdir)
+        slug, path = store_mod.store_path(os.path.realpath(self.main))
+        def put(rec):
+            with open(path, "w") as fh:
+                json.dump({"version": 1, "folder": os.path.realpath(self.main), "tasks": [], **({"coordinator": rec} if rec else {})}, fh)
+        # Labelled for this folder, started in it, named after it: no lease, no coordinator (note 55)
+        put(None)
+        self.assertIsNone(launch.coordinator_in(self.main))
+        put({"address": "c-main", "created_ms": 7})
+        self.assertEqual((launch.coordinator_in(self.main), launch.coordinator_in(slug)), ("c-main", "c-main"))
+        self.assertEqual(launch.parent_for(None, self.main), "c-main")
+        # A later terminal at the lease's address is not the holder; nor is one gone
+        by_addr["c-main"] = dict(terms[1], created_ms=8)
+        self.assertIsNone(launch.coordinator_in(self.main))
+        by_addr["c-main"] = dict(terms[1], state="exited")
+        self.assertIsNone(launch.coordinator_in(self.main))
+        # The lease handed on (a restart): the new holder is the coordinator from now on
+        by_addr["c-slug"] = {"address": "c-slug", "state": "live", "cwd": other, "created_ms": 9, "labels": {}}
+        put({"address": "c-slug", "created_ms": 9})
         self.assertEqual(launch.coordinator_in(self.main), "c-slug")
         # And tick.rescue_question & ask.cmd_ask_pane route by project folder without space
         import herdr_task.tick as tick, herdr_task.ask as ask_mod, herdr_task.ghnews as ghnews_mod, herdr_task.agents as agents_mod
@@ -8165,11 +8212,12 @@ class TaskFlow(unittest.TestCase):
         self.assertEqual(tasks[2]["state"], "queued")
         self.assertEqual(self.said[-1].split("\n")[1:], ["SHEP-2: edit claude -> agy", "SHEP-5: edit claude -> agy",
                                                          "SHEP-6: edit claude -> agy"])
-        with self.assertRaises(self.commands.Fail):  # --dry-run only goes with --all: never a real switch
-            self.commands.cmd_switch(self.args(id="SHEP-1", all=False, dry_run=True, agent="agy"))
+        last = self.said[-1]
+        self.commands.cmd_switch(self.args(id="SHEP-1", all=False, dry_run=True, agent="agy"))
+        self.assertEqual(self.said[-1], "SHEP-1: switch to agy (dry run)")
         with self.assertRaises(self.commands.Fail):
             self.commands.cmd_switch(self.args(id=None, all=True, from_="agy", agent="nosuchcli", argv=None, dry_run=False))
-        self.assertTrue(self.said[-1].startswith("SHEP-1: agy t9 took over, t1 ended"))
+        self.assertTrue(last.startswith("SHEP-1: agy t9 took over, t1 ended"))
 
     def test_switch_all_from_a_model_and_dry_run(self):
         """FAC-104: --from claude:opus picks only the opus tasks; --dry-run lists them and changes nothing."""
@@ -9335,10 +9383,14 @@ class Resume(unittest.TestCase):
         self.assertEqual(cmd4[cmd4.index("--model") + 1], "gemini-4-argon-high")
 
     def test_switch_and_tell_keep_their_existing_behaviour(self):
+        from unittest import mock
         ref = self.started_task({"agent": "agy", "perm": "auto"}, session="0199-sid")
         self.write_worker({"agent": "agy", "perm": "full"})
         # switch without --agent keeps prev["argv"] and sends SWITCH_NUDGE (not continue_line).
-        out = self.call(self.commands.cmd_switch, id=ref, space=None, agent=None, argv=None, parent=None, keep=False)
+        self.live = [{"address": "t1", "foreground": {"name": "agy"}}]
+        with mock.patch.object(self.commands, "refresh_sessions"), mock.patch.object(self.commands, "end_agent"):
+            out = self.call(self.commands.cmd_switch, id=ref, space=None, agent=None, argv=None, parent=None, keep=False)
+        self.live = []
         self.assertTrue(out["resumed"])
         cmd = self.launched_cmd()
         self.assertIn("accept-edits", cmd)
@@ -10070,7 +10122,7 @@ class ProbeVolume(unittest.TestCase):
 
 
 class Watchdog(unittest.TestCase):
-    """FAC-62: watchdog restarts a stuck local Assistant once with restart.sh and alerts on repeat."""
+    """FAC-62: watchdog restarts a stuck local Assistant (its project's lease holder) once in engine code and alerts on repeat."""
 
     def setUp(self):
         from pathlib import Path
@@ -10078,8 +10130,8 @@ class Watchdog(unittest.TestCase):
         sys.path.insert(0, BIN)
         import herdr_task.agents as agents, herdr_task.assistant_settings as aset, herdr_task.autopilot as autopilot
         import herdr_task.base as base, herdr_task.commands as commands
-        import herdr_task.news as news, herdr_task.store as store, herdr_task.watchdog as watchdog
-        self.news, self.wd, self.Path, real_sub = news, watchdog, Path, subprocess.run
+        import herdr_task.news as news, herdr_task.store as store, herdr_task.watchdog as watchdog, herdr_task.lease as lease
+        self.news, self.wd, self.Path, real_sub, self.lease_mod = news, watchdog, Path, subprocess.run, lease
         self.tmp = os.path.realpath(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.store = os.path.join(self.tmp, "tasks")
@@ -10089,12 +10141,8 @@ class Watchdog(unittest.TestCase):
         def fake_sub(args, env=None, **kw):
             if args[0] == "git":
                 return real_sub(args, env=env, **kw)
-            if args[0] == "bash" and os.path.basename(args[1]) == "restart.sh":
-                old, nxt, prev = args[2], f"c{len(self.restarts) + 2}", self.terms.pop(args[2])
-                self.restarts.append((old, nxt))
-                lbs = {k: v for k, v in prev["labels"].items() if k not in ("sheepdog.template", "herdr.template")}
-                self.terms[nxt] = {**prev, "address": nxt, "turn": 0, "status": {"state": "idle"}, "created_ms": self.clock, "labels": lbs}
-                return subprocess.CompletedProcess(args, 0, f"{nxt}\n", "")
+            if args[:2] == ["hc", "kill"]:
+                self.terms.pop(args[2], None)
             if args[:2] == ["hc", "ls"]:
                 k, v = args[args.index("--label") + 1].split("=", 1) if "--label" in args else (None, None)
                 return subprocess.CompletedProcess(args, 0, json.dumps({"terminals": [t for t in self.terms.values() if not k or (t.get("labels") or {}).get(k) == v]}), "")
@@ -10118,12 +10166,22 @@ class Watchdog(unittest.TestCase):
                       p_(watchdog, "template_info", lambda: (self.tpl, self.clock - 5 * 60000)),
                       p_(news, "NEWS", os.path.join(self.store, ".news.json")), p_(news, "HELD", os.path.join(self.store, ".held.json")),
                       p_(autopilot, "STATE", os.path.join(self.store, ".autopilot.json")), p_(news, "POLL_DELAYS", (0,)),
-                      p_(news, "screen_raw", lambda *_: self.raw),
+                      p_(news, "screen_raw", lambda *_: self.raw), p_(lease, "start", self.fake_start), p_(lease, "handoff", lambda *a, **kw: "handoff"),
                       *(p_(m, fn, noop) for m, fn in ((aset, "settings_pass"), (base, "guard"), (news, "guard"), (watchdog, "guard")))])
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
+        self.lease = None
         self.coord("c1")
+
+    def fake_start(self, folder, prefix, message=None):
+        """lease.start: a new coordinator beside the lease holder, with its labels (but not its template's)."""
+        old = self.lease_mod.lease_of(folder).get("address")
+        nxt, prev = f"c{len(self.restarts) + 2}", self.terms[old]
+        self.restarts.append((old, nxt))
+        lbs = {k: v for k, v in prev["labels"].items() if k not in ("sheepdog.template", "herdr.template")}
+        self.terms[nxt] = {**prev, "address": nxt, "turn": 0, "status": {"state": "idle"}, "created_ms": self.clock, "labels": lbs}
+        return nxt
 
     def coord(self, addr="c1", folder=None, status="done", turn=2):
         folder = folder or (self.tmp if "/" not in addr else "/remote")
@@ -10131,13 +10189,20 @@ class Watchdog(unittest.TestCase):
                             "status": {"state": status}, "turn": turn, "foreground": {"name": "claude"},
                             "labels": {"sheepdog.role": "coordinator", "sheepdog.project": self.slug if folder == self.tmp else folder,
                                        "herdr.role": "coordinator"}}
+        if folder == self.tmp:  # the project's lease holder: the coordinator the watchdog looks after
+            self.lease = {"address": addr}
+            p = self.Path(self.store, f"{self.slug}.json")
+            d = json.loads(p.read_text()) if p.exists() else {"folder": self.tmp, "prefix": "SHOP", "tasks": []}
+            p.write_text(json.dumps({**d, "coordinator": self.lease}))
 
     def worker(self, addr, tid, status="working", **extra):
         self.terms[addr] = {"address": addr, "state": "live", "status": {"state": status}, "foreground": {"name": "claude"}, "labels": {"sheepdog.task": f"{self.slug}#{tid}"}, **extra}
 
     def save_tasks(self, *rows, delivered=None, inflight=None):
         put = lambda fn, d: self.Path(self.store, fn).write_text(json.dumps(d))
-        put(f"{self.slug}.json", {"folder": self.tmp, "prefix": "SHOP", "tasks": list(rows)})
+        p = self.Path(self.store, f"{self.slug}.json")
+        lease = (json.loads(p.read_text()) if p.exists() else {}).get("coordinator")
+        put(f"{self.slug}.json", {"folder": self.tmp, "prefix": "SHOP", "tasks": list(rows), **({"coordinator": lease} if lease else {})})
         if delivered is not None:
             put(".news.json", {"delivered": {f"{self.slug}#{k}": v for k, v in delivered.items()}, "outbox": []})
         if inflight is not None:
@@ -10240,7 +10305,7 @@ class Watchdog(unittest.TestCase):
         self.terms["c1"]["foreground"]["pid"] = 4242
         self.save_tasks({"id": 1, "title": "Auth", "state": "running", "attention": "x", "attention_at": self.clock - 40 * 60000},
                         delivered={1: {"to": "c1", "turn": 2, "at": self.clock - 40 * 60000, "event": "needs-you"}})
-        with mock.patch.object(self.wd, "end_group") as eg:
+        with mock.patch.object(self.lease_mod, "end_group") as eg, mock.patch.object(self.lease_mod, "pid_started_before", lambda pid, at: True):
             self.tick()
         self.assertEqual((len(self.restarts), eg.call_args_list), (1, [mock.call(4242)]))
 
@@ -11409,6 +11474,32 @@ class HoldWhileMainIsRed(unittest.TestCase):
         gh["checks"] = "SUCCESS"
         self.go(gh)
         self.assertEqual((t["state"], gh["merged"]), ("done", "m1"))
+
+    def test_red_base_up_to_date_green_pr_merges(self):
+        t, gh = self.github(behind=0)
+        self.red()
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], self.updates(gh)), ("done", "abc", []))
+
+    def test_red_base_behind_pr_stays_held(self):
+        t, gh = self.github(behind=3)
+        self.red()
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], self.updates(gh)), ("ready", None, []))
+
+    def test_red_base_up_to_date_failing_pr_stays_held(self):
+        t, gh = self.github(behind=0)
+        gh["checks"] = "FAILURE"
+        self.red()
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], self.updates(gh)), ("ready", None, []))
+        self.assertTrue(t["attention"].startswith("Checks failing:"))
+
+    def test_red_base_unknown_comparison_stays_held(self):
+        t, gh = self.github(behind="unknown")
+        self.red()
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], self.updates(gh)), ("ready", None, []))
 
     def test_the_persons_accept_still_merges_a_red_base(self):
         t, gh = self.github(behind=0)
@@ -13115,6 +13206,16 @@ class ProcessTable(unittest.TestCase):
         sessions._table["at"] = None
         self.addCleanup(lambda: sessions._table.update(at=None, children={}))
 
+    def test_session_of_skips_an_unreadable_or_vanished_fd_dir(self):
+        for error in (PermissionError, FileNotFoundError):
+            with self.subTest(error=error.__name__), \
+                    self.mock.patch.object(self.sessions, "kids", return_value=[]), \
+                    self.mock.patch.object(self.sessions.os.path, "isfile", return_value=False), \
+                    self.mock.patch.object(self.sessions.os.path, "isdir", return_value=True), \
+                    self.mock.patch.object(self.sessions.os, "listdir", side_effect=error) as listdir:
+                self.assertEqual(self.sessions.session_of(42), (None, None))
+                listdir.assert_called_once_with("/proc/42/fd")
+
     def test_a_real_tree_from_one_read(self):
         import signal
         tree = subprocess.Popen(["sh", "-c", "sh -c 'sleep 30 & wait' & sleep 30 & wait"], start_new_session=True)
@@ -13993,6 +14094,8 @@ class InstalledCliAndMissingRefusal(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 0, json.dumps({"address": f"t{len(self.runs)}"}), "")
             if argv[:2] == ["hc", "kill"]:
                 self.killed.append(argv[2])
+                for key, terminals in self.live_map.items():
+                    self.live_map[key] = [k for k in terminals if k["address"] != argv[2]]
             return subprocess.CompletedProcess(argv, 0, "{}", "")
 
         for obj, name, val in (
@@ -14015,6 +14118,8 @@ class InstalledCliAndMissingRefusal(unittest.TestCase):
             (launch, "run", fake_hc),
             (commands, "run", fake_hc),
             (commands, "live_agents", lambda key: list(self.live_map.get(key, []))),
+            (agents, "hc_json", lambda *args: {"terminals": [
+                dict(k, state="live") for k in self.live_map.get(args[-1].split("=", 1)[-1], [])]}),
             (commands, "detail", lambda k: k),
             (commands, "just_started", lambda t: None),
             (commands, "reviewer_pools", lambda: []),
@@ -14047,6 +14152,130 @@ class InstalledCliAndMissingRefusal(unittest.TestCase):
         defaults = dict(id=ref, here=False, worktree=False, branch=None, agent=None, argv=None, parent=None, at=None, in_=None, now=True)
         defaults.update(kw)
         return self.call(self.commands.cmd_start, **defaults)
+
+    def test_switch_todo_with_unmet_dependencies_edits_only(self):
+        dep = self.add("Dependency")
+        ref = self.add("Waiting", agent="agy", after=dep)
+        opts = dict(agent="codex", model="gpt-5", argv=None, parent=None, keep=False, reviewer=False)
+        before = self.call(self.commands.cmd_switch, id=None, all=True, from_="agy", dry_run=True, **opts)
+        self.assertEqual([(row["task"], row["action"]) for row in before["tasks"]], [(ref, "edit")])
+        out = self.call(self.commands.cmd_switch, id=ref, **opts)
+        self.assertEqual((out["state"], out["agent"], out["model"]), ("todo", "codex", "gpt-5"))
+        self.assertEqual(out["waiting_for"], [int(dep.split("-")[1])])
+        self.assertEqual((self.runs, self.killed), ([], []))
+
+    def test_switch_running_replaces_only_the_worker(self):
+        ref = self.add("Working", agent="agy")
+        started = self.start(ref)
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+            self.live_map[s.key(s.find(ref))] = [
+                {"address": "t1", "foreground": {"name": "agy"}},
+                {"address": "review", "foreground": {"name": "claude"}, "labels": {"sheepdog.role": "reviewer"}},
+            ]
+        opts = dict(id=ref, agent="codex", model=None, argv=None, parent=None, keep=False)
+        dry = self.call(self.commands.cmd_switch, dry_run=True, **opts)
+        self.assertEqual((dry["action"], len(self.runs), self.killed), ("switch", 1, []))
+        actual = self.call(self.commands.cmd_switch, **opts)
+        self.assertEqual((actual["action"], actual["worktree"]), (dry["action"], started["worktree"]))
+        self.assertEqual((len(self.runs), self.killed), (2, ["t1"]))
+        self.assertIn("codex", self.runs[-1])
+
+    def test_switch_all_dry_run_matches_the_real_run(self):
+        live = self.add("Working", agent="agy")
+        self.start(live)
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=live), write=False) as s:
+            self.live_map[s.key(s.find(live))] = [{"address": "t1", "foreground": {"name": "agy"}}]
+        todo = self.add("To do", agent="agy", after=live)
+        queued = self.add("Queued", agent="agy", after=live)
+        self.start(queued, now=False)
+        scheduled = self.add("Scheduled", agent="agy")
+        self.start(scheduled, in_="1h")
+        opts = dict(id=None, all=True, from_="agy", agent="codex", model=None, argv=None, parent=None, reviewer=False)
+        dry = self.call(self.commands.cmd_switch, dry_run=True, **opts)
+        self.assertEqual((len(self.runs), self.killed), (1, []))
+        actual = self.call(self.commands.cmd_switch, dry_run=False, **opts)
+        self.assertEqual(dry["tasks"], actual["tasks"])
+        self.assertEqual({r["task"]: r["action"] for r in actual["tasks"]},
+                         {live: "switch", todo: "edit", queued: "edit", scheduled: "edit"})
+        self.assertEqual((len(self.runs), self.killed), (2, ["t1"]))
+        self.assertIn("codex", self.runs[-1])
+
+    def test_reopen_to_do_returns_five_runs_and_respects_dependencies_and_cap(self):
+        self.add("Dependency")
+        self.call(self.commands.cmd_config, prefix="SDF", build_dir=None, set=["tasks.max_running=1"])
+        dep = "SDF-1"
+        hold = self.add("Occupies the only slot")
+        self.start(hold.split("-")[1])
+        fixtures = {}
+        args = self.argparse.Namespace(folder=self.repo)
+        for number in (24, 26, 28, 32, 36):
+            with self.store_mod.open_store(args) as s:
+                s.data["next"], s.dirty = number, True
+            self.add("Waiting", agent="codex", after=dep)
+            ref = f"SDF-{number}"
+            started = self.start(ref, now=True)
+            fixtures[ref] = started
+            with self.store_mod.open_store(args, write=False) as s:
+                key = s.key(s.find(ref))
+            self.live_map[key] = [{"address": started["terminal"], "foreground": {"name": "codex"}},
+                                  {"address": f"review-{number}", "parent": started["terminal"],
+                                   "labels": {"sheepdog.role": "reviewer"}}]
+
+        for ref, started in fixtures.items():
+            out = self.call(self.commands.cmd_reopen, id=ref, to_do=True)
+            self.assertEqual((out["state"], out["waiting_for"]), ("todo", [1]))
+            self.assertNotIn("started", out)
+            for field in ("worktree", "branch", "after", "agents"):
+                self.assertEqual(out[field], started[field])
+            self.assertTrue(os.path.isdir(out["worktree"]))
+            with self.assertRaisesRegex(self.Fail, "waiting"):
+                self.call(self.commands.cmd_fix, id=ref, reason="Check the work", agent=None, argv=None)
+            self.assertEqual(self.start(ref, now=False)["state"], "queued")
+            self.assertEqual(self.start(ref, now=True)["state"], "queued")
+        self.assertCountEqual(self.killed, [a for ref, run in fixtures.items() for a in
+                                          (run["terminal"], f"review-{ref.split('-')[1]}")])
+        self.live_map.clear()
+
+        def tick():
+            report = {"started": [], "done": [], "attention": [], "fired": [], "retries": []}
+            with self.store_mod.open_store(args) as s:
+                self.tick.tick_store(s, report)
+            return [row["ref"] for row in report["started"]]
+
+        self.assertEqual(tick(), [])  # unmet dependency
+        self.call(lambda a: self.commands.cmd_state(a, "done"), id=dep)
+        self.assertEqual(tick(), [])  # dependency done, cap full
+        self.call(lambda a: self.commands.cmd_state(a, "done"), id=hold.split("-")[1])
+        self.assertEqual(tick(), ["SDF-24"])
+        self.assertEqual(len(self.runs), 7)
+        self.assertIn("You are taking over task SDF-24", self.runs[-1][-1])
+        self.assertEqual(self.call(self.commands.cmd_reopen, id="SDF-24", to_do=True)["state"], "queued")
+
+    def test_reopen_to_do_preserves_the_review_baseline(self):
+        ref = self.add("In place", here=True, worktree=False, set=["review=on", "review.min=0"])
+        first = self.start(ref)
+        subprocess.run(["git", "-C", self.repo, "commit", "-q", "--allow-empty", "-m", "First run"], check=True)
+        self.call(self.commands.cmd_reopen, id=ref, to_do=True)
+        restarted = self.start(ref, now=False)
+        self.assertEqual(restarted["folder_start"], first["folder_start"])
+        self.assertEqual(restarted["started"], first["started"])
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+            self.assertIn("isn't reviewed", self.commands.review_refusal(s, s.find(ref), None))
+
+    def test_reopen_to_do_waiting_time_does_not_trigger_a_recap(self):
+        from herdr_task import budget
+        ref = self.add("Estimated work", set=["estimate.time=1h"])
+        first = self.start(ref)
+        self.call(self.commands.cmd_reopen, id=ref, to_do=True)
+        later = first["started"] + 3 * 60 * 60_000
+        with self.mock.patch.object(self.commands, "now", return_value=later):
+            self.start(ref, now=False)
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+            t = s.find(ref)
+            with self.mock.patch.object(budget, "now", return_value=later):
+                self.assertEqual(budget.triggers(s, t), [])
+            with self.mock.patch.object(budget, "now", return_value=later + 3 * 60 * 60_000):
+                self.assertIn("over twice its time estimate", budget.triggers(s, t)[0])
 
     def test_unset_agent_resolves_consistently_across_layers(self):
         ref = self.add()
