@@ -828,13 +828,18 @@ def folder_for(s, task):
     if not ok:
         raise Fail(err or "git worktree add failed")
     if exclude:
+        def _rollback():
+            git(main, "worktree", "remove", "--force", path)
+            if not exists:
+                git(main, "branch", "-D", branch)
+
         ok, _, err = git(path, "sparse-checkout", "set", "--no-cone", "/*", *[sparse_exclude_pattern(p) for p in exclude])
         if not ok:
-            git(main, "worktree", "remove", "--force", path)
+            _rollback()
             raise Fail(err or "git sparse-checkout set failed")
         ok, _, err = git(path, "checkout")
         if not ok:
-            git(main, "worktree", "remove", "--force", path)
+            _rollback()
             raise Fail(err or "git checkout failed")
     # Where the branch starts: work past it that turns up in the base branch means merged.
     start = git(path, "rev-parse", "HEAD")[1] if not exists else task.get("start")

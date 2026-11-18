@@ -1891,6 +1891,8 @@ def cmd_config(args):
             if not eq or key not in ("tasks.max_running", "max_running", "tasks.ci_runner_cap", "ci_runner_cap", "tasks.runner_cap", "runner_cap", "tasks.check", "check", "worker.perm", "worker.agent", "machine.tart_home", "worktree.sparse_exclude"):
                 raise Fail(f"config --set takes tasks.max_running=N, tasks.ci_runner_cap=N, tasks.check=CMD, worker.agent=CLI, worker.perm=MODE, worktree.sparse_exclude=PATH[,...] or machine.tart_home=DIR, not {pair!r}.")
             if key == "worktree.sparse_exclude":
+                if any(ord(c) < 32 or ord(c) == 127 for c in v):
+                    raise Fail(f"worktree.sparse_exclude path cannot contain control characters: {v!r}")
                 if not v.strip() or v.strip().lower() == "default":
                     write_worktree_sparse_exclude(s, None)
                 else:

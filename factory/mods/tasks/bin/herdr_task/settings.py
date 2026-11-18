@@ -267,7 +267,7 @@ def worktree_sparse_excludes(wt):
         gitdir = dotgit
     elif os.path.isfile(dotgit):
         try:
-            with open(dotgit) as f:
+            with open(dotgit, errors="replace") as f:
                 first = f.readline().strip()
             if first.startswith("gitdir:"):
                 raw = first[7:].strip()
@@ -280,17 +280,18 @@ def worktree_sparse_excludes(wt):
     for cfg in (os.path.join(gitdir, "config.worktree"), os.path.join(gitdir, "config")):
         if os.path.isfile(cfg):
             try:
-                with open(cfg) as f:
-                    if re.search(r"(?im)^\s*sparsecheckout\s*=\s*true\s*$", f.read()):
-                        is_sparse = True
-                        break
+                with open(cfg, errors="replace") as f:
+                    matches = re.findall(r"(?im)^\s*sparsecheckout\s*=\s*(true|yes|on|1|false|no|off|0)\s*$", f.read())
+                if matches:
+                    is_sparse = matches[-1].lower() in ("true", "yes", "on", "1")
+                    break
             except OSError:
                 pass
     if not is_sparse:
         return False, []
     sp_file = os.path.join(gitdir, "info", "sparse-checkout")
     try:
-        with open(sp_file) as f:
+        with open(sp_file, errors="replace") as f:
             rules = f.read().split("\n")
     except OSError:
         return True, []
@@ -894,8 +895,13 @@ def task_settings(s, t, space=None, argv=None, live=False):
     add("Proof", PROOF_WORDS["on" if proof else "off"], proof,
         "task" if "proof" in sets else by_layer(s, None, "tasks", "proof", proof, True))
     if not here:
-        exclude = sparse_exclude_of(s)
-        if exclude:
+        is_sparse, wt_excludes = worktree_sparse_excludes(t.get("worktree"))
+        if is_sparse:
+            if wt_excludes:
+                add("Sparse exclude", f"{', '.join(wt_excludes)} (excluded from this worktree; undo with `git sparse-checkout disable`)", wt_excludes, None)
+            else:
+                add("Sparse exclude", "active on this worktree (undo with `git sparse-checkout disable`)", [], None)
+        elif not (t.get("worktree") and os.path.isdir(t["worktree"])) and (exclude := sparse_exclude_of(s)):
             sp_by = by_layer(s, None, "worktree", "sparse_exclude", exclude, [])
             add("Sparse exclude", f"{', '.join(exclude)} (excluded from new worktrees; undo with `git sparse-checkout disable`)", exclude, sp_by)
     bdir = build_dir_of(s)

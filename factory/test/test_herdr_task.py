@@ -6493,12 +6493,17 @@ class Scheduled(unittest.TestCase):
         with contextlib.redirect_stdout(out2):
             self.commands.cmd_show(argparse.Namespace(id="1", folder=self.folder, json=False, evidence=False))
         self.assertIn("sparse exclude: docs/dev/bench (undo with `git sparse-checkout disable`)", out2.getvalue())
-        self.assertNotIn("sparse exclude: docs/other", out2.getvalue())
+        self.assertNotIn("docs/other", out2.getvalue())
         self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worktree.sparse_exclude=default"])
         out3 = io.StringIO()
         with contextlib.redirect_stdout(out3):
             self.commands.cmd_show(argparse.Namespace(id="1", folder=self.folder, json=False, evidence=False))
         self.assertIn("sparse exclude: docs/dev/bench (undo with `git sparse-checkout disable`)", out3.getvalue())
+        self.assertIn("- Sparse exclude: docs/dev/bench (excluded from this worktree", out3.getvalue())
+        with self.assertRaises(self.Fail):
+            self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worktree.sparse_exclude=\ndefault\n"])
+        with self.assertRaises(self.Fail):
+            self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worktree.sparse_exclude=\t"])
 
     def four_tasks(self):
         """FAC-10's folder: two tasks went ready then done, one still works, the fourth is queued."""
