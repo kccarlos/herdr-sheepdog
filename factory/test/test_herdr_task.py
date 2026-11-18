@@ -13151,6 +13151,16 @@ class ProcessTable(unittest.TestCase):
         sessions._table["at"] = None
         self.addCleanup(lambda: sessions._table.update(at=None, children={}))
 
+    def test_session_of_skips_an_unreadable_or_vanished_fd_dir(self):
+        for error in (PermissionError, FileNotFoundError):
+            with self.subTest(error=error.__name__), \
+                    self.mock.patch.object(self.sessions, "kids", return_value=[]), \
+                    self.mock.patch.object(self.sessions.os.path, "isfile", return_value=False), \
+                    self.mock.patch.object(self.sessions.os.path, "isdir", return_value=True), \
+                    self.mock.patch.object(self.sessions.os, "listdir", side_effect=error) as listdir:
+                self.assertEqual(self.sessions.session_of(42), (None, None))
+                listdir.assert_called_once_with("/proc/42/fd")
+
     def test_a_real_tree_from_one_read(self):
         import signal
         tree = subprocess.Popen(["sh", "-c", "sh -c 'sleep 30 & wait' & sleep 30 & wait"], start_new_session=True)
