@@ -7295,6 +7295,7 @@ class Revive(unittest.TestCase):
                             "status": {"state": "working"}, "foreground": {"pid": 501, "name": "claude", "argv": ["claude"], "cwd": "/wt"},
                             "labels": {"sheepdog.task": "dev#6", "sheepdog.agent": "claude"}}
         self.sessions[501] = ("S1", self.log)
+        self.tasks["dev#6"]["agents"] = [{"address": "t5"}]
         self.tick()
         self.crash("t5")
         self.tick()
@@ -7303,6 +7304,23 @@ class Revive(unittest.TestCase):
         self.assertIn("SHEEPDOG_TASK=dev#6", words)
         self.assertIn("--dangerously-skip-permissions", words)
         self.assertEqual(words[-3:-1], ["--resume", "S1"])
+
+    def test_only_the_tasks_own_worker_gets_the_worker_flags_back(self):
+        """A helper or a reviewer without its role label resumes with the argv it ran with, never bypass."""
+        for addr, labels, argv in (
+                ("t6", {"sheepdog.task": "dev#6", "herdr.role": "helper"}, ["codex", "--sandbox", "read-only", "--ask-for-approval", "never"]),
+                ("t7", {"sheepdog.task": "dev#6"}, ["codex", "--sandbox", "read-only", "--ask-for-approval", "never"])):
+            self.terms[addr] = {"address": addr, "state": "live", "pid": 600, "cwd": "/wt", "argv": ["sh"],
+                                "status": {"state": "working"}, "labels": labels,
+                                "foreground": {"pid": 601, "name": "codex", "argv": argv, "cwd": "/wt"}}
+            self.sessions[601] = ("S1", self.log)
+            self.tick()
+            self.crash(addr)
+            self.tick()
+            words = shlex.split(self.sent[-1][1])
+            self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", words, addr)
+            self.assertNotIn("--dangerously-skip-permissions", words, addr)
+            self.assertIn("read-only", words, addr)
 
     def agy_worker(self, cid="0199aaaa-bbbb-cccc-dddd-eeeeeeeeeeee"):
         """A kept agy worker (FAC-7) in a temp home: its conversation is a db no chat reads, so no log."""

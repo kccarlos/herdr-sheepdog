@@ -309,7 +309,10 @@ def plan(k, rec, running, coords=None):
         rec = task_record(k, task) if task else None
     if rec and rec.get("session") and rec["session"] in running:
         return ("running", None, False)
-    if rec and task and label_of(labels, "role") != "reviewer":
+    # Only the task's own worker gets the worker rule: a helper or a reviewer keeps the argv it ran with.
+    is_worker = label_of(labels, "role") in (None, "", "worker") and any(
+        a.get("address") == k.get("address") for a in (task or {}).get("agents") or [])
+    if rec and task and is_worker:
         cwd = rec.get("cwd")
         trust = task.get("worktree") if task.get("mode") == "worktree" else (None if rec["kind"] == "agy" else cwd)
         rec = dict(rec, argv=own_argv(worker_argv(project, task, previous=rec["argv"]), trust, cwd=cwd))
