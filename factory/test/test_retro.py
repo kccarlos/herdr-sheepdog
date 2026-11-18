@@ -1,5 +1,6 @@
 """SDF-49: the retro round. Review that does not converge starts one read-only Fable session; its
 <retro> tail becomes task.retro and the engine acts on the verdict (SHIP, FIX, REDESIGN)."""
+import home_guard  # noqa: F401
 import argparse
 import json
 import os
