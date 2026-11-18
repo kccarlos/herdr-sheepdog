@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — Conversation with a factory digest and an alert</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; display: flex; flex-direction: column; overflow: hidden; background: #FAF8F3; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <dc-import name="TopBar" pane="conversation" waiting="0" dark="{{ false }}" hint-size="390px,102px"></dc-import>
+  <main style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; padding: 8px 16px 104px; border-top: 1px solid #E4E0D7">
+    <sc-for list="{{ rows }}" as="r" hint-placeholder-count="6">
+      <div style="margin-top: {{ r.gap }}px; width: 358px">
+        <dc-import name="ChatRow" kind="{{ r.kind }}" pos="single" text="{{ r.text }}" time="{{ r.time }}" gutter="" dark="{{ false }}" ax="{{ false }}" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,48px"></dc-import>
+      </div>
+    </sc-for>
+  </main>
+  <div style="position: absolute; left: 12px; bottom: 26px; width: 366px; height: 60px; display: flex">
+    <dc-import name="Dock" label="Sheepdog" status="Listening" mode="live" dark="{{ false }}" style="display: block; width: 366px; height: 60px" hint-size="366px,60px"></dc-import>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview": {"width": 390, "height": 844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const R = (kind, gap, text, time) => ({ kind, gap, text: text || '', time: time || '' });
+    const rows = [
+      R('day', 0, 'Today'),
+      R('you', 14, 'How is the factory?'),
+      R('voiceDetails', 6, 'Since last night, herdr-sheepdog merged 9 tasks. Milestone 2 of 4 is done and one task is waiting on CI. Quota is unknown, because codexbar isn’t installed. Nothing needs you.'),
+      R('update', 18, 'herdr-sheepdog factory: main has been red for over an hour. Merges are on hold. The fix, SDF-57, is in review.', '11:40'),
+      R('you', 14, 'Open the coordinator.'),
+      R('voice', 6, 'Opening the herdr-sheepdog coordinator’s window.')
+    ];
+    return { rows };
+  }
+}
+</script>
+</body>
+</html>

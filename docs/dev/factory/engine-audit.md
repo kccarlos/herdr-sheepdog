@@ -393,3 +393,7 @@ Using `uv 0.12.23` and `cpython-3.14.8-macos-aarch64-none` (`/opt/homebrew/bin/p
 | **Installer & doctor** | `test_install.py` | 37 | 37 | **34** | 0 | 0 | 3 | 63.45s | 37 tests at `1a4e064e` (33 pre-sync); 34 passed, 3 skipped; emits `DeprecationWarning: load_module()` (dropped in `SDF-5`). |
 | **Artifacts, chat, browser** | `test_herdr_artifact*.py` (6), `test_recipe_view_form.py`, `test_herdr_browser_*.py` (2), `test_chat_*.py` (4) | 90 | 90 | **79** | 0 | 0 | 11 | 15.10s | 11 Linux `ldd`/`sysctl` browser library tests skipped on macOS; all 79 active tests pass. |
 | **Total Run** | **All 25 `test_*.py` files** | **917** | **926** | **906** | **0** | **0** | **20** | **256.22s** | **0 failures, 0 errors across all 25 test files on CPython 3.14.8 (0 `DeprecationWarning`s in engine/kept tests).** |
+
+## M2 acceptance follow-up (SDF-19)
+
+The acceptance agent also runs the [drift case](m2-acceptance.md).

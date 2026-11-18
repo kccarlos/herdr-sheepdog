@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — iPad, All agents</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 1376px; height: 1032px; display: flex; overflow: hidden; background: #FAF8F3; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <dc-import name="IPadSidebar" sel="overview" style="display: block; width: 390px; height: 1032px; flex-shrink: 0" hint-size="390px,1032px"></dc-import>
+
+  <section aria-label="All agents" style="position: relative; width: 986px; height: 1032px; display: flex; flex-direction: column">
+    <div style="height: 24px; flex-shrink: 0"></div>
+    <header style="height: 52px; flex-shrink: 0; display: flex; align-items: center; gap: 12px; padding: 0 12px 0 24px; border-bottom: 1px solid #E4E0D7">
+      <div style="display: flex; flex-direction: column; flex-grow: 1">
+        <span style="font-size: 17px; font-weight: 600">All agents</span>
+        <span style="font-size: 12px; color: #6B6E75">8 agents on 2 computers · <span style="color: #8A5700; font-weight: 600">2 waiting</span></span>
+      </div>
+      <nav aria-label="Filter" style="height: 34px; padding: 3px; box-sizing: border-box; border-radius: 11px; background: #ECE8DF; display: flex; gap: 2px">
+        <button aria-current="page" style="border: 0; border-radius: 8px; background: #FFFFFF; box-shadow: 0 1px 2px rgba(31,31,34,0.12); color: #1F1F22; font-size: 13px; font-weight: 600; padding: 0 12px">All</button>
+        <button style="border: 0; border-radius: 8px; background: transparent; color: #1F1F22; font-size: 13px; padding: 0 12px">Waiting</button>
+        <button style="border: 0; border-radius: 8px; background: transparent; color: #1F1F22; font-size: 13px; padding: 0 12px">Working</button>
+      </nav>
+      <button aria-label="Expand all" style="height: 34px; padding: 0 12px; border: 1px solid #E4E0D7; border-radius: 17px; background: #FFFFFF; color: #1F1F22; font-size: 13px; font-weight: 500">Expand all</button>
+    </header>
+
+    <main style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 14px 24px 0; display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; align-items: center; gap: 8px">
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#1F1F22" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg>
+        <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 16px; font-weight: 600">Work Mac</h2>
+        <span style="font-size: 12px; font-weight: 600; color: #6B6E75">Voice is here</span>
+        <span style="flex-grow: 1"></span>
+        <button role="radio" aria-checked="true" aria-label="The voice is on Work Mac" style="width: 44px; height: 44px; flex-shrink: 0; border: 0; background: transparent; padding: 0; display: flex; align-items: center; justify-content: center"><span style="width: 28px; height: 28px; border-radius: 14px; background: #1F1F22; color: #FAF8F3; display: flex; align-items: center; justify-content: center"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 10v4M9 7v10M13 4v16M17 8v8M21 11v2"></path></svg></span></button>
+      </div>
+      <dc-import name="AgentSection" label="Needs you" count="1" w="{{ 938 }}" style="display: block" hint-size="938px,24px"></dc-import>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start">
+        <dc-import name="AgentCard" agent="auth-fix" w="{{ 462 }}" style="display: block; width: 462px" hint-size="462px,150px"></dc-import>
+      </div>
+      <dc-import name="AgentSection" label="Working" count="3" w="{{ 938 }}" style="display: block" hint-size="938px,24px"></dc-import>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start">
+        <div style="display: flex; flex-direction: column; gap: 12px">
+          <dc-import name="AgentCard" agent="payments" open="{{ false }}" w="{{ 462 }}" style="display: block; width: 462px" hint-size="462px,70px"></dc-import>
+          <dc-import name="AgentCard" agent="api-docs" open="{{ false }}" w="{{ 462 }}" style="display: block; width: 462px" hint-size="462px,70px"></dc-import>
+        </div>
+        <dc-import name="AgentCard" agent="search" open="{{ true }}" history="{{ true }}" w="{{ 462 }}" style="display: block; width: 462px" hint-size="462px,240px"></dc-import>
+      </div>
+      <dc-import name="AgentSection" label="Done" count="2" w="{{ 938 }}" style="display: block" hint-size="938px,24px"></dc-import>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start">
+        <dc-import name="AgentCard" agent="migrate" open="{{ false }}" unread="{{ true }}" w="{{ 462 }}" style="display: block; width: 462px" hint-size="462px,70px"></dc-import>
+        <dc-import name="AgentCard" agent="e2e" open="{{ false }}" w="{{ 462 }}" style="display: block; width: 462px" hint-size="462px,70px"></dc-import>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 8px; padding-top: 6px">
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#1F1F22" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg>
+        <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 16px; font-weight: 600">Home Mac</h2>
+        <span style="font-size: 12px; color: #6B6E75">2 agents · 1 waiting</span>
+        <span style="flex-grow: 1"></span>
+        <button role="radio" aria-checked="false" aria-label="Move the voice to Home Mac" style="width: 44px; height: 44px; flex-shrink: 0; border: 0; background: transparent; padding: 0; display: flex; align-items: center; justify-content: center"><span style="width: 28px; height: 28px; box-sizing: border-box; border-radius: 14px; border: 1.5px solid #8E8A80; color: #6B6E75; display: flex; align-items: center; justify-content: center"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 10v4M9 7v10M13 4v16M17 8v8M21 11v2"></path></svg></span></button>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start">
+        <dc-import name="AgentCard" agent="blog" primary="{{ false }}" w="{{ 462 }}" style="display: block; width: 462px" hint-size="462px,150px"></dc-import>
+        <dc-import name="AgentCard" agent="photos" open="{{ false }}" w="{{ 462 }}" style="display: block; width: 462px" hint-size="462px,70px"></dc-import>
+      </div>
+    </main>
+    <div style="position: absolute; left: 310px; bottom: 26px; width: 366px; height: 60px; display: flex">
+      <dc-import name="Dock" label="Work Mac" status="Listening" mode="quiet" style="display: block; width: 366px; height: 60px" hint-size="366px,60px"></dc-import>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1376,"height":1032}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

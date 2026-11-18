@@ -28,6 +28,7 @@ def view(s, task, live=None):
     st = resolve_stage(task, running, store=s, deps=deps)
     v["stage"] = st.stage
     v["inbox"] = st.inbox
+    v["waits_on"], v["failed_checks"] = st.waits_on, list(st.failed_checks)
     v["status"], v["needs"], v["why"] = st.status, st.needs, st.legacy_why
     if v["needs"] == "asks" and v["why"] not in (REASONS["trust"], REASONS["bypass"], REASONS["onboard"]):
         # Why it waits, at most LINE_MAX characters: a standard reason or its own question.
@@ -64,7 +65,16 @@ def inbox_line(v):
     """One line for `herdr-task inbox`: ref, owner-waiting stage label, title, and why."""
     label = STAGE_LABELS.get(v.get("stage"), v.get("stage") or "Inbox")
     why = v.get("why_waiting") or v.get("why") or ""
-    return f"{v['ref']:<7} {label:<12} {v['title']}" + (f"  ({why})" if why else "")
+    return f"{v['ref']:<7} {label:<12} {v['title']}" + (f"  ({why})" if why else "") + stage_facts(v)
+
+
+def stage_facts(v):
+    facts = []
+    if waits := v.get("waits_on"):
+        facts.append("waiting on " + (", ".join(waits) if isinstance(waits, list) else waits))
+    if failed := v.get("failed_checks"):
+        facts.append("failing checks: " + ", ".join(failed))
+    return "".join(f" · {fact}" for fact in facts)
 
 
 def subagent(k):
@@ -139,4 +149,4 @@ def line(v):
         extra = w["text"] + (f" · {w['done']}%" if w.get("done") is not None else "") + (f" · ~{minutes(w['left'])} left" if w.get("left") is not None else "")
     if (fb := v.get("sync_fallback")) and v["status"] in ("working", "ready", "merging") and fb.get("why"):
         extra = f"{extra}; {fb['why']}" if extra else fb["why"]
-    return f"{v['ref']:<7} {word:<9} {v['title']}" + (f"  ({extra})" if extra else "")
+    return f"{v['ref']:<7} {word:<9} {v['title']}" + (f"  ({extra})" if extra else "") + stage_facts(v)

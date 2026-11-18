@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — iPad agent pane</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button,input{font:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<section aria-label="{{ name }} window" style="width: {{ w }}px; height: {{ h }}px; box-sizing: border-box; display: flex; flex-direction: column; background: #FAF8F3; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; box-shadow: {{ focusRing }}">
+  <div style="height: 24px; flex-shrink: 0"></div>
+  <header style="height: 52px; flex-shrink: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; padding: 0 10px; border-bottom: 1px solid #E4E0D7">
+    <div style="display: flex; align-items: center; gap: 6px">
+      <sc-if value="{{ portrait }}" hint-placeholder-val="{{ false }}">
+        <button aria-label="Show sidebar" style="width: 40px; height: 40px; border: 0; border-radius: 20px; background: transparent; color: #1F1F22; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"></rect><path d="M9 4v16"></path></svg></button>
+      </sc-if>
+    </div>
+    <div style="display: flex; flex-direction: column; align-items: center; min-width: 0">
+      <span style="display: flex; align-items: center; gap: 6px; font-size: 17px; font-weight: 600"><span style="width: 8px; height: 8px; border-radius: 4px; background: {{ dot }}"></span>{{ name }}</span>
+      <span style="font-size: 12px; color: #6B6E75">{{ place }}</span>
+    </div>
+    <div style="display: flex; justify-content: flex-end; align-items: center; gap: 2px">
+      <sc-if value="{{ remote }}" hint-placeholder-val="{{ false }}">
+        <span style="display: flex; align-items: center; gap: 8px; margin-right: 6px; padding: 0 4px 0 12px; height: 36px; border-radius: 18px; background: #F1EEE7; font-size: 13px; color: #5C5F66; white-space: nowrap">
+          <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 10v4M9 7v10M13 4v16M17 8v8M21 11v2"></path></svg>Voice on Work Mac
+          <button style="height: 28px; padding: 0 11px; border-radius: 14px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-size: 13px; font-weight: 600">Talk to {{ computer }}</button>
+        </span>
+      </sc-if>
+      <sc-if value="{{ closable }}" hint-placeholder-val="{{ false }}">
+        <button aria-label="Close this pane" style="width: 40px; height: 40px; border: 0; border-radius: 20px; background: transparent; color: #6B6E75; display: flex; align-items: center; justify-content: center"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+      </sc-if>
+      <sc-if value="{{ splitBtn }}" hint-placeholder-val="{{ true }}">
+        <button aria-label="Show another agent beside this one" style="width: 40px; height: 40px; border: 0; border-radius: 20px; background: transparent; color: #1F1F22; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"></rect><path d="M12 4v16"></path></svg></button>
+      </sc-if>
+      <button aria-label="Agent actions" style="width: 40px; height: 40px; border: 0; border-radius: 20px; background: transparent; color: #1F1F22; display: flex; align-items: center; justify-content: center"><svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="5.5" cy="12" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="18.5" cy="12" r="1.7"></circle></svg></button>
+    </div>
+  </header>
+
+  <main aria-label="Terminal" style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 16px 20px; font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: {{ fs }}px; line-height: 1.5; display: flex; flex-direction: column">
+    <sc-for list="{{ lines }}" as="l" hint-placeholder-count="12">
+      <span style="white-space: pre-wrap; min-height: 1.5em; color: {{ l.color }}">{{ l.text }}</span>
+    </sc-for>
+  </main>
+
+  <div style="flex-shrink: 0; padding: 0 14px 12px; display: flex; flex-direction: column; gap: 10px">
+    <sc-if value="{{ question }}" hint-placeholder-val="{{ false }}">
+      <section aria-label="{{ name }} needs your answer" style="padding: 12px 14px; border-radius: 14px; background: #FDF1DC; border: 1px solid #D99417; display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
+        <div style="flex: 1 1 100%; display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+          <span style="font-size: 16px; font-weight: 600">{{ q.summary }}</span>
+          <span style="border-radius: 7px; background: rgba(31,31,34,0.06); padding: 3px 8px; font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 13px">{{ q.command }}</span>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap">
+          <button style="min-height: 40px; padding: 6px 20px; border-radius: 20px; border: 0; background: #D98718; color: #1F1F22; font-size: 15px; font-weight: 600">{{ q.a }}</button>
+          <button style="min-height: 40px; padding: 6px 14px; border-radius: 20px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-size: 15px; text-align: left">{{ q.b }}</button>
+          <button style="min-height: 40px; padding: 6px 14px; border-radius: 20px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #B42318; font-size: 15px; text-align: left">{{ q.c }}</button>
+        </div>
+        <sc-if value="{{ remote }}" hint-placeholder-val="{{ false }}">
+          <span style="flex: 1 1 100%; font-size: 13px; color: #6B6E75">Answers by tap go to {{ computer }}.</span>
+        </sc-if>
+      </section>
+    </sc-if>
+    <div role="toolbar" aria-label="Keys" style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px">
+      <button style="height: 40px; border-radius: 10px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-family: 'SF Mono', ui-monospace, monospace; font-size: 14px">esc</button>
+      <button aria-label="Tab" style="height: 40px; border-radius: 10px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-size: 16px">⇥</button>
+      <button aria-label="Up" style="height: 40px; border-radius: 10px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-size: 16px">↑</button>
+      <button aria-label="Down" style="height: 40px; border-radius: 10px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-size: 16px">↓</button>
+      <button aria-label="Return" style="height: 40px; border-radius: 10px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-size: 16px">⏎</button>
+      <button aria-label="Type in the terminal" style="height: 40px; border-radius: 10px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; display: flex; align-items: center; justify-content: center"><svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"></rect><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"></path></svg></button>
+      <button aria-label="More keys" style="height: 40px; border-radius: 10px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="5.5" cy="12" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="18.5" cy="12" r="1.6"></circle></svg></button>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 14px">
+      <button aria-label="Attach a file or photo" style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.5 3.5 0 0 1 5 5L10.3 18a2 2 0 0 1-2.8-2.8l7.9-7.9"></path></svg></button>
+      <label style="flex-grow: 1; min-width: 0; height: 44px; border-radius: 22px; border: 1px solid #E4E0D7; background: #FFFFFF; display: flex; align-items: center; padding: 0 6px 0 16px; box-sizing: border-box">
+        <input type="text" placeholder="Message {{ name }}…" aria-label="Message to {{ name }}" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; font-size: 16px; outline: none; color: #1F1F22">
+        <button aria-label="Send" style="width: 32px; height: 32px; border-radius: 16px; border: 0; background: #E4E0D7; color: #FFFFFF; display: flex; align-items: center; justify-content: center"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"></path></svg></button>
+      </label>
+    </div>
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"agent":{"editor":"enum","options":["auth-fix","payments","blog"],"default":"auth-fix"},"w":{"editor":"int","default":986},"h":{"editor":"int","default":1032},"focused":{"editor":"boolean","default":false},"portrait":{"editor":"boolean","default":false},"closable":{"editor":"boolean","default":false},"$preview":{"width":986,"height":1032}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const g = '#1D6B46', m = '#6B6E75', k = '#1F1F22';
+    const auth = [
+      { text: '> Fix the login redirect loop', color: k }, { text: '', color: k },
+      { text: '● Reading src/auth/session.ts', color: g },
+      { text: '● Found it: the cookie path is /app, so /login never sees the session.', color: g },
+      { text: '● Editing src/auth/session.ts', color: g },
+      { text: '  ⎿ Updated 1 line: path: "/"', color: m }, { text: '', color: k },
+      { text: '╭──────────────────────────────╮', color: m },
+      { text: '│ Bash command                 │', color: k },
+      { text: '│   npm test                   │', color: k },
+      { text: '│ Do you want to proceed?      │', color: k },
+      { text: '│ ❯ 1. Yes                     │', color: k },
+      { text: '│   2. Yes, and don’t ask again │', color: k },
+      { text: '│   3. No                      │', color: k },
+      { text: '╰──────────────────────────────╯', color: m }
+    ];
+    const pay = [
+      { text: '> Add retries to the payment webhook', color: k }, { text: '', color: k },
+      { text: '● Reading src/webhooks/stripe.ts', color: g },
+      { text: '● Adding exponential backoff: 3 tries, 2s, 4s, 8s', color: g },
+      { text: '● Editing src/webhooks/stripe.ts', color: g },
+      { text: '  ⎿ +24 −6', color: m },
+      { text: '● Running npm test -- webhooks', color: g },
+      { text: '  ⎿ 18 passed', color: m }, { text: '', color: k },
+      { text: '✻ Writing a test for the retry limit… (2m 10s)', color: m }
+    ];
+    const blog = [
+      { text: '> Draft the release post', color: k }, { text: '', color: k },
+      { text: '✦ Wrote content/posts/sheepdog-0-2.md (612 words)', color: g },
+      { text: '✦ Built the site: 41 pages, no broken links', color: g }, { text: '', color: k },
+      { text: '╭──────────────────────────────────────╮', color: m },
+      { text: '│ Allow execution of: npm run deploy?   │', color: k },
+      { text: '│   npm run deploy -- --env staging     │', color: k },
+      { text: '│ ● 1. Yes, allow once                  │', color: k },
+      { text: '│   2. Yes, allow always                │', color: k },
+      { text: '│   3. No, suggest changes              │', color: k },
+      { text: '╰──────────────────────────────────────╯', color: m }
+    ];
+    const ag = this.props.agent ?? 'auth-fix';
+    const isBlog = ag === 'blog';
+    const isAuth = ag === 'auth-fix';
+    const w = this.props.w ?? 986;
+    const split = w < 700;
+    return {
+      w, h: this.props.h ?? 1032,
+      name: isBlog ? 'blog' : (isAuth ? 'auth-fix' : 'payments'),
+      place: isBlog ? 'Home Mac · site' : 'Work Mac · webapp',
+      dot: (isAuth || isBlog) ? '#D99417' : '#1F5F9E',
+      lines: isBlog ? blog : (isAuth ? auth : pay),
+      question: isAuth || isBlog,
+      remote: isBlog, computer: 'Home Mac',
+      q: isBlog ? { summary: 'blog asks to run a shell command', command: 'npm run deploy -- --env staging', a: 'Yes, allow once', b: 'Yes, allow always', c: 'No, suggest changes' }
+               : { summary: 'auth-fix asks to run npm test in webapp', command: 'npm test', a: 'Yes', b: 'Yes, and don’t ask again for npm test commands in webapp', c: 'No, and tell Claude what to do differently' },
+      fs: split ? 12 : 14,
+      focusRing: this.props.focused ? 'inset 0 3px 0 #1F1F22' : 'none',
+      portrait: !!this.props.portrait,
+      closable: !!this.props.closable,
+      splitBtn: !split
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -96,7 +96,11 @@ def session_of(pid):
         files = []
         fd = f"/proc/{p}/fd"
         if os.path.isdir(fd):
-            for n in os.listdir(fd):
+            try:
+                descriptors = os.listdir(fd)
+            except OSError:
+                continue
+            for n in descriptors:
                 try:
                     files.append(os.readlink(os.path.join(fd, n)))
                 except OSError:
