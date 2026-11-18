@@ -885,15 +885,31 @@ func (c *client) flush(epoch uint64, ctrl frame) (int, bool) {
 		ctrl.at = c.h.s.deps.Now()
 	}
 	c.mu.Lock()
+	n, bp, ok := c.flushLocked(epoch, ctrl)
+	c.mu.Unlock()
+	if bp > 0 {
+		c.h.s.log.Log(logSource, "web.client.backpressure", "", map[string]any{"client_id": c.id, "dropped": bp, "queue": c.max})
+	}
+	if ok {
+		select {
+		case c.notify <- struct{}{}:
+		default:
+		}
+	}
+	return n, ok
+}
+
+func (c *client) flushLocked(epoch uint64, ctrl frame) (n, bp int, ok bool) {
+	if ctrl.at.IsZero() {
+		ctrl.at = c.h.s.deps.Now()
+	}
 	if epoch != 0 && epoch <= c.flushedEpoch {
-		c.mu.Unlock()
-		return 0, false
+		return 0, 0, false
 	}
 	if epoch > c.flushedEpoch {
 		c.flushedEpoch = epoch
 	}
 	kept := make([]frame, 0, len(c.queue)+1)
-	n := 0
 	inserted := false
 	canSendCtrl := !c.closing || ctrl.close
 	for _, f := range c.queue {
@@ -909,8 +925,6 @@ func (c *client) flush(epoch uint64, ctrl frame) (int, bool) {
 		}
 		kept = append(kept, f)
 	}
-	var bp int
-	ok := false
 	if inserted {
 		c.queue = kept
 		if len(c.queue) > c.max {
@@ -935,17 +949,7 @@ func (c *client) flush(epoch uint64, ctrl frame) (int, bool) {
 		c.queue = kept
 		bp, ok = c.enqueueLocked(ctrl)
 	}
-	c.mu.Unlock()
-	if bp > 0 {
-		c.h.s.log.Log(logSource, "web.client.backpressure", "", map[string]any{"client_id": c.id, "dropped": bp, "queue": c.max})
-	}
-	if ok {
-		select {
-		case c.notify <- struct{}{}:
-		default:
-		}
-	}
-	return n, ok
+	return n, bp, ok
 }
 
 // closeAfterFlush lets queued frames go out, then closes.
