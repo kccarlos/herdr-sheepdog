@@ -159,6 +159,13 @@ def news_lock(exclusive=True):
         f.close()
 
 
+_MEM_STALE_PROMPTS = {}
+
+
+def _norm_prompt(s):
+    return " ".join(str(s or "").split())
+
+
 def record_mem_reset(key, reset_ts):
     if key and reset_ts:
         mk = (NEWS, key)
@@ -168,6 +175,51 @@ def record_mem_reset(key, reset_ts):
 def clear_mem_reset(key):
     if key:
         _MEM_RESETS.pop((NEWS, key), None)
+
+
+def record_stale_prompt(addr, text):
+    np = _norm_prompt(text)
+    if not (addr and np):
+        return
+    _MEM_STALE_PROMPTS.setdefault((HELD, addr), set()).add(np)
+    news_dir = os.path.dirname(NEWS)
+    if news_dir and os.path.isdir(news_dir):
+        with news_state_file() as state:
+            sp = state.setdefault("stale_prompts", {}).setdefault(addr, [])
+            if np not in sp:
+                sp.append(np)
+
+
+def is_stale_prompt(addr, text, items=()):
+    np = _norm_prompt(text)
+    if not (addr and np):
+        return False
+    if np in _MEM_STALE_PROMPTS.get((HELD, addr), set()):
+        return True
+    if any(_norm_prompt(p) == np for x in (items or ()) for p in (x.get("stale_prompts") or ())):
+        return True
+    disk = (_read_news_file().get("stale_prompts") or {}).get(addr) or ()
+    return any(_norm_prompt(p) == np for p in disk)
+
+
+def clear_stale_prompts(addr, items=()):
+    _MEM_STALE_PROMPTS.pop((HELD, addr), None)
+    for x in items or ():
+        if isinstance(x, dict):
+            x.pop("stale_prompts", None)
+    if os.path.exists(NEWS):
+        with news_state_file() as state:
+            sp = state.get("stale_prompts")
+            if isinstance(sp, dict) and addr in sp:
+                sp.pop(addr, None)
+
+
+def stale_prompt_addrs():
+    addrs = {addr for (hpath, addr), vals in _MEM_STALE_PROMPTS.items() if hpath == HELD and vals}
+    disk = _read_news_file().get("stale_prompts")
+    if isinstance(disk, dict):
+        addrs.update(a for a, vals in disk.items() if vals)
+    return addrs
 
 
 @contextmanager
@@ -724,15 +776,24 @@ def held_pass(report, delivered=None):
             inp = typed_input(screen_raw(addr))
             if inp:
                 own = [x for x in items if "pending" in x and ready_pending
-                       and x["text"].strip() and inp.splitlines()[0] == x["text"].strip().splitlines()[0]]
+                       and x["text"].strip() and _norm_prompt(inp) == _norm_prompt(x["text"])]
                 if own and run(["hc", "keys", addr, "enter"]).returncode == 0:
                     items[:] = [x for x in items if x not in own]
+                    clear_stale_prompts(addr, items)
                     if any(x.get("how") == "news" for x in own):
                         unpend(addr, k)
                     report.setdefault("held", []).append({"to": addr, "messages": len(own)})
-                if not items:
-                    held.pop(addr)
-                continue
+                    if not items:
+                        held.pop(addr)
+                    continue
+                if is_stale_prompt(addr, inp, items):
+                    if not ready_pending or run(["hc", "keys", addr, "ctrl+u"]).returncode != 0:
+                        continue
+                    clear_stale_prompts(addr, items)
+                else:
+                    if not items:
+                        held.pop(addr)
+                    continue
             for pending in (True, False):
                 if pending and not ready_pending:
                     continue
@@ -755,3 +816,14 @@ def held_pass(report, delivered=None):
                         items[:] = [x for x in items if x not in batch] + [entry]
             if not items:
                 held.pop(addr)
+    for addr in list(stale_prompt_addrs()):
+        k = hc_json("get", addr)
+        if not k or k.get("state") != "live":
+            clear_stale_prompts(addr)
+            continue
+        inp = typed_input(screen_raw(addr))
+        if not inp:
+            clear_stale_prompts(addr)
+        elif status_word(k) in ("idle", "done") and is_stale_prompt(addr, inp):
+            if run(["hc", "keys", addr, "ctrl+u"]).returncode == 0:
+                clear_stale_prompts(addr)

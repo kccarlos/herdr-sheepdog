@@ -128,6 +128,8 @@ def classify_replan_caller(s, task=None):
         raise Fail("A task worker, reviewer or helper can't re-plan a task or decide its recap: your Assistant does.")
 
     if not patched:
+        from .agents import parent_of
+
         tasks = (getattr(s, "data", None) or {}).get("tasks") or []
         task_addrs = {
             a.get("address")
@@ -135,9 +137,9 @@ def classify_replan_caller(s, task=None):
             for a in (o.get("agents") or []) + (o.get("reviewers") or [])
             if isinstance(a, dict) and a.get("address")
         }
-        bare_me = me.split("/")[-1] if me else None
-        parent = (k or {}).get("parent")
-        if (bare_me and (me in task_addrs or bare_me in task_addrs)) or (parent and parent in task_addrs):
+        bare_me = me.split("/")[-1] if (me and "/" not in me) else None
+        parent = parent_of(dict(k, address=k.get("address") or me)) if isinstance(k, dict) else None
+        if (me and (me in task_addrs or (bare_me and bare_me in task_addrs))) or (parent and parent in task_addrs):
             raise Fail("A task's own agent can't re-plan a task or decide its recap: your Assistant does.")
 
     lease = (getattr(s, "data", None) or {}).get("coordinator")
@@ -167,9 +169,46 @@ def require_replan_caller(s, task=None, *, action="re-plan a task"):
 
 # ---- external side effects (never run on plan amend --check) ------------------------------------
 
+def _lookup_open_branch_pr(s, task, repo, ref, *, had_queued=False):
+    """Finds an open same-repo PR for `task['branch']` into `task['base']`, failing closed on lookup errors or merged tip."""
+    from .base import git
+    from .github import gh
+
+    ok, out, err = gh("pr", "list", "--repo", repo, "--head", task["branch"], "--state", "all",
+                      "--json", "number,url,state,isCrossRepository,baseRefName,headRefOid")
+    if not ok:
+        raise Fail(f"Couldn't check GitHub for {ref}'s pull request before re-planning ({err or 'gh pr list failed'}); try again.")
+    try:
+        listed = json.loads(out) if out else []
+    except ValueError:
+        listed = None
+    if not isinstance(listed, list):
+        raise Fail(f"Couldn't parse GitHub's pull request list for {ref} before re-planning; try again.")
+    base = task.get("base") or "main"
+    same = [
+        p for p in listed
+        if isinstance(p, dict) and not p.get("isCrossRepository") and p.get("baseRefName") == base
+    ]
+    open_pr = next((p for p in same if p.get("state") == "OPEN"), None)
+    if open_pr and open_pr.get("number"):
+        pr = {"number": open_pr["number"], "url": open_pr.get("url") or "", "repo": repo}
+        task["pr"] = pr
+        if s is not None:
+            s.dirty = True
+        return pr
+    merged_pr = next((p for p in same if p.get("state") == "MERGED"), None)
+    if merged_pr and merged_pr.get("number"):
+        tip = (git(s.loc["folder"], "rev-parse", "--verify", "--quiet", f"refs/heads/{task['branch']}")[1]
+               if s is not None and getattr(s, "loc", None) else "") or task.get("head") or ""
+        if had_queued or (tip and merged_pr.get("headRefOid") == tip):
+            raise Fail(f"{ref}'s pull request #{merged_pr['number']} is already merged on GitHub.")
+    if had_queued:
+        raise Fail(f"{ref} is marked as in GitHub's merge queue, and no open pull request was found for {task['branch']} on {repo}.")
+    return None
+
+
 def cancel_queued_merge(s, task, *, was_merge_queued=None):
     """Dequeues an open PR from GitHub's merge queue and disables auto-merge before resetting local merge state."""
-    from .base import git
     from .github import gh, github, github_refusal, github_required, github_unreachable, pr_repo, queue_entry, task_github
 
     ref = s.ref(task) if s is not None and hasattr(s, "ref") else f"#{task.get('id')}"
@@ -186,35 +225,8 @@ def cancel_queued_merge(s, task, *, was_merge_queued=None):
                     why = github_unreachable(s) or github_refusal(s, task)
                     raise Fail(f"Couldn't check GitHub for {ref}'s pull request before re-planning ({why}); try again.")
                 return
-            ok, out, err = gh("pr", "list", "--repo", repo, "--head", task["branch"], "--state", "all",
-                              "--json", "number,url,state,isCrossRepository,baseRefName,headRefOid")
-            if not ok:
-                raise Fail(f"Couldn't check GitHub for {ref}'s pull request before re-planning ({err or 'gh pr list failed'}); try again.")
-            try:
-                listed = json.loads(out) if out else []
-            except ValueError:
-                listed = None
-            if not isinstance(listed, list):
-                raise Fail(f"Couldn't parse GitHub's pull request list for {ref} before re-planning; try again.")
-            base = task.get("base") or "main"
-            same = [
-                p for p in listed
-                if isinstance(p, dict) and not p.get("isCrossRepository") and p.get("baseRefName") == base
-            ]
-            open_pr = next((p for p in same if p.get("state") == "OPEN"), None)
-            if open_pr and open_pr.get("number"):
-                pr = {"number": open_pr["number"], "url": open_pr.get("url") or "", "repo": repo}
-                task["pr"] = pr
-                s.dirty = True
-            else:
-                merged_pr = next((p for p in same if p.get("state") == "MERGED"), None)
-                if merged_pr and merged_pr.get("number"):
-                    tip = (git(s.loc["folder"], "rev-parse", "--verify", "--quiet", f"refs/heads/{task['branch']}")[1]
-                           if getattr(s, "loc", None) else "") or task.get("head") or ""
-                    if had_queued or (tip and merged_pr.get("headRefOid") == tip):
-                        raise Fail(f"{ref}'s pull request #{merged_pr['number']} is already merged on GitHub.")
-                if had_queued:
-                    raise Fail(f"{ref} is marked as in GitHub's merge queue, and no open pull request was found for {task['branch']} on {repo}.")
+            pr = _lookup_open_branch_pr(s, task, repo, ref, had_queued=had_queued)
+            if not pr:
                 return
         else:
             if had_queued:
@@ -230,6 +242,17 @@ def cancel_queued_merge(s, task, *, was_merge_queued=None):
         raise Fail(f"Couldn't check pull request #{num} on GitHub before re-planning {ref}; try again once GitHub answers.")
     if q.get("state") == "MERGED":
         raise Fail(f"{ref}'s pull request #{num} is already merged on GitHub.")
+    if q.get("state") == "CLOSED" and s is not None and task.get("branch"):
+        replacement = _lookup_open_branch_pr(s, task, repo, ref, had_queued=had_queued)
+        if not replacement or str(replacement["number"]) == num:
+            return
+        pr = replacement
+        num = str(pr["number"])
+        q = queue_entry(task)
+        if q is None:
+            raise Fail(f"Couldn't check pull request #{num} on GitHub before re-planning {ref}; try again once GitHub answers.")
+        if q.get("state") == "MERGED":
+            raise Fail(f"{ref}'s pull request #{num} is already merged on GitHub.")
     if q.get("in"):
         if q.get("id"):
             ok, _, err = gh(
@@ -447,49 +470,80 @@ def clear_task_held_news(s, task, retiring=(), *, at=None):
             with _news.held_messages() as held:
                 for addr in list(held):
                     if addr in retire_set:
+                        for x in held.get(addr) or []:
+                            if "pending" in x and x.get("text"):
+                                _news.record_stale_prompt(addr, x["text"])
                         held.pop(addr, None)
                         continue
                     items = held.get(addr) or []
                     if addr in worker_addrs:
                         cleaned_w = []
                         for x in items:
+                            old_txt = x.get("text")
+                            was_pending = "pending" in x and bool(old_txt)
                             if isinstance(x.get("parts"), list):
                                 kept_p = [cp for p in x["parts"] if (cp := _clean_worker_part(p, ref)) is not None]
                                 if not kept_p:
+                                    if was_pending:
+                                        _news.record_stale_prompt(addr, old_txt)
                                     continue
                                 if kept_p != x["parts"]:
+                                    prev_stale = list(x.get("stale_prompts") or [])
                                     x = {k: v for k, v in x.items() if k != "parts"}
                                     x["text"] = "\n\n".join(kept_p)
                                     if len(kept_p) > 1:
                                         x["parts"] = kept_p
+                                    if was_pending:
+                                        _news.record_stale_prompt(addr, old_txt)
+                                        x["stale_prompts"] = list(dict.fromkeys([*prev_stale, old_txt]))
                                 cleaned_w.append(x)
                             else:
-                                cp = _clean_worker_part(x.get("text"), ref)
+                                cp = _clean_worker_part(old_txt, ref)
                                 if cp is None:
+                                    if was_pending:
+                                        _news.record_stale_prompt(addr, old_txt)
                                     continue
-                                if cp != x.get("text"):
+                                if cp != old_txt:
+                                    prev_stale = list(x.get("stale_prompts") or [])
                                     x = {**x, "text": cp}
+                                    if was_pending:
+                                        _news.record_stale_prompt(addr, old_txt)
+                                        x["stale_prompts"] = list(dict.fromkeys([*prev_stale, old_txt]))
                                 cleaned_w.append(x)
                         items = cleaned_w
                     elif ref:
                         cleaned = []
                         for x in items:
                             if x.get("how") == "news":
+                                old_txt = x.get("text")
+                                was_pending = "pending" in x and bool(old_txt)
                                 if isinstance(x.get("parts"), list):
                                     kept_p = [rem for p in x["parts"] if isinstance(p, str) and (rem := _strip_stale_task_news_lines(p, ref))]
                                     if not kept_p:
+                                        if was_pending:
+                                            _news.record_stale_prompt(addr, old_txt)
                                         continue
                                     if kept_p != x["parts"]:
+                                        prev_stale = list(x.get("stale_prompts") or [])
                                         x = {k: v for k, v in x.items() if k != "parts"}
                                         x["text"] = "\n\n".join(kept_p)
                                         if len(kept_p) > 1:
                                             x["parts"] = kept_p
-                                elif isinstance(x.get("text"), str):
-                                    rem = _strip_stale_task_news_lines(x["text"], ref)
+                                        if was_pending:
+                                            _news.record_stale_prompt(addr, old_txt)
+                                            x["stale_prompts"] = list(dict.fromkeys([*prev_stale, old_txt]))
+                                elif isinstance(old_txt, str):
+                                    rem = _strip_stale_task_news_lines(old_txt, ref)
                                     if not rem:
+                                        if was_pending:
+                                            _news.record_stale_prompt(addr, old_txt)
                                         continue
-                                    if rem != x["text"]:
+                                    if rem != old_txt:
+                                        prev_stale = list(x.get("stale_prompts") or [])
                                         x = {**x, "text": rem}
+                                        if was_pending:
+                                            _news.record_stale_prompt(addr, old_txt)
+                                            x["stale_prompts"] = list(dict.fromkeys([*prev_stale, old_txt]))
                             cleaned.append(x)
                         items = cleaned
                     if items:
@@ -821,6 +875,12 @@ def select_retro_plan_targets(s, plan_tasks, by_key, reason, *, has_structural_c
     )
     all_plan_keys_low = {k.lower() for k in all_plan_keys}
 
+    explicit_target = (
+        re.search(r"(?i)\bretro\s+(?:on|for|of)\s+([A-Za-z0-9][A-Za-z0-9_-]*)(?![\w-])", reason)
+        or re.search(r"(?i)\bretro\s+([A-Za-z0-9][A-Za-z0-9_-]*)\s*:", reason)
+        or re.match(r"(?i)^\s*retro\s+([A-Za-z0-9][A-Za-z0-9_-]*)\s*$", reason)
+    )
+
     if own_prefix:
         own_refs = [
             m.group(0)
@@ -829,10 +889,16 @@ def select_retro_plan_targets(s, plan_tasks, by_key, reason, *, has_structural_c
             and (m.group(1).isupper() or m.group(0).lower() not in all_plan_keys_low)
         ]
         if own_refs:
-            return [
+            matched_own = [
                 o for o in open_tasks
                 if re.search(rf"(?<![\w-]){re.escape(s.ref(o))}(?![\w-])", reason, re.I)
             ]
+            if matched_own:
+                return matched_own
+            if explicit_target:
+                tok = explicit_target.group(1)
+                raise Fail(f"Unknown or closed retro target {tok!r} in --reason; name an open plan key or task ref, or set \"retro\": true on it.")
+            return []
 
     named = [
         o for o in open_tasks
@@ -840,6 +906,10 @@ def select_retro_plan_targets(s, plan_tasks, by_key, reason, *, has_structural_c
     ]
     if named:
         return named
+
+    if explicit_target:
+        tok = explicit_target.group(1)
+        raise Fail(f"Unknown or closed retro target {tok!r} in --reason; name an open plan key or task ref, or set \"retro\": true on it.")
 
     known_other_keys = all_plan_keys - {o["plan_key"] for o in open_tasks if o.get("plan_key")}
     if any(re.search(rf"(?<![\w-]){re.escape(k)}(?![\w-])", reason, re.I) for k in known_other_keys):
@@ -851,6 +921,9 @@ def select_retro_plan_targets(s, plan_tasks, by_key, reason, *, has_structural_c
         if m.group(1) not in NON_TASK_PREFIXES
     ]
     if foreign_refs or has_structural_changes:
+        return []
+
+    if re.search(r"(?i)\bretro(?:\s+[\w-]+)?\s+(?:after|from)\s+([A-Za-z0-9][A-Za-z0-9_-]*)(?![\w-])", reason):
         return []
 
     candidates = [o for o in open_tasks if o.get("recap") or o.get("review_out")]

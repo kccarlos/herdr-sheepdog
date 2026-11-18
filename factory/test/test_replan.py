@@ -1443,6 +1443,104 @@ class ReplanTableTests(unittest.TestCase):
             finally:
                 t1["plan_key"] = old_key
 
+    def test_round_5_review_findings(self):
+        # 1. Closed recorded PR #42 on task looks up and dequeues replacement open PR #77 on the same branch & base.
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            t["pr"] = {"number": 42, "url": "https://github.com/acme/demo/pull/42", "repo": "acme/demo"}
+            t["recap"] = {"at": 11000, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
+            s.dirty = True
+        pr_states = {
+            42: {"id": "PR_42", "state": "CLOSED", "in": False, "auto": False},
+            77: {"id": "PR_77", "state": "OPEN", "in": True, "auto": True},
+        }
+        self.gh_calls.clear()
+
+        def gh_replacement(*argv):
+            self.gh_calls.append(argv)
+            if argv[:2] == ("pr", "list"):
+                return True, json.dumps([
+                    {"number": 42, "url": "https://github.com/acme/demo/pull/42", "state": "CLOSED", "isCrossRepository": False, "baseRefName": "main", "headRefOid": self.head1},
+                    {"number": 77, "url": "https://github.com/acme/demo/pull/77", "state": "OPEN", "isCrossRepository": False, "baseRefName": "main", "headRefOid": self.head1},
+                ]), ""
+            return True, "{}", ""
+
+        with mock.patch.object(self.github, "gh", gh_replacement), \
+                mock.patch.object(self.github, "queue_entry", lambda t_arg: dict(pr_states[t_arg["pr"]["number"]])):
+            rc, _ = self.run_cli("recap", "TST-1", "--decide", "new", "--why", "closed PR replaced by #77")
+        self.assertEqual(rc, 0)
+        self.assertTrue(any("dequeuePullRequest" in " ".join(c) and "id=PR_77" in c for c in self.gh_calls), self.gh_calls)
+        self.assertTrue(any(c[:4] == ("pr", "merge", "77", "--repo") and "--disable-auto" in c for c in self.gh_calls), self.gh_calls)
+        with self.open() as s:
+            self.assertEqual(self.find_key(s, "api")["pr"]["number"], 77)
+
+        # 2. classify_replan_caller normalizes remote child parent (`vm/t4` with `parent="t3"` -> `vm/t3`) and refuses it.
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            old_agents = list(t["agents"])
+            t["agents"] = [{"address": "vm/t3", "agent": "claude", "argv": ["claude"], "at": 1000}]
+            self.hc_terminals["vm/t4"] = {"address": "vm/t4", "parent": "t3", "state": "live", "labels": {}}
+            try:
+                with mock.patch.dict(os.environ, {"HC_TERMINAL_ID": "vm/t4"}, clear=False):
+                    with self.assertRaises(self.base.Fail) as ctx:
+                        self.replan.classify_replan_caller(s, t)
+                self.assertIn("can't re-plan", str(ctx.exception))
+            finally:
+                t["agents"] = old_agents
+
+        # 3. Partially stripped pending prompt never receives `enter` on the old prompt; held_pass clears stale engine input (`ctrl+u`) and delivers only kept message, while leaving user input untouched.
+        sim_msg = "Your simulator is ready."
+        old_review = "Herdr's review round 1 of TST-1 (abc1234) found what must be fixed:\nFix bug."
+        combined = f"{sim_msg}\n\n{old_review}"
+        with open(self.held_file, "w") as f:
+            json.dump({"w1": [{"text": combined, "parts": [sim_msg, old_review], "how": "send", "at": self.base.now(), "pending": 3}]}, f)
+        with self.open() as s:
+            t = self.find_key(s, "api")
+            self.replan.clear_task_held_news(s, t, at=12000)
+
+        self.hc_terminals["w1"] = {"address": "w1", "state": "live", "turn": 2, "status": {"state": "idle"}}
+        run_calls = []
+        delivered_texts = []
+        with mock.patch.object(self.news, "screen_raw", lambda addr: ""), \
+                mock.patch.object(self.news, "typed_input", lambda raw: combined), \
+                mock.patch.object(self.news, "run", lambda argv, **kw: (run_calls.append(argv), subprocess.CompletedProcess(argv, 0, "", ""))[1]), \
+                mock.patch.object(self.news, "deliver", lambda addr, txt, *a, **kw: (delivered_texts.append(txt), "sent")[1]):
+            rep = {}
+            self.news.held_pass(rep)
+        self.assertNotIn(["hc", "keys", "w1", "enter"], run_calls)
+        self.assertIn(["hc", "keys", "w1", "ctrl+u"], run_calls)
+        self.assertEqual(delivered_texts, [sim_msg])
+
+        # Unrelated user input is left completely untouched.
+        with open(self.held_file, "w") as f:
+            json.dump({"w1": [{"text": sim_msg, "how": "send", "at": self.base.now(), "pending": 3}]}, f)
+        run_calls.clear()
+        delivered_texts.clear()
+        with mock.patch.object(self.news, "screen_raw", lambda addr: ""), \
+                mock.patch.object(self.news, "typed_input", lambda raw: "hold on, reading logs"), \
+                mock.patch.object(self.news, "run", lambda argv, **kw: (run_calls.append(argv), subprocess.CompletedProcess(argv, 0, "", ""))[1]), \
+                mock.patch.object(self.news, "deliver", lambda addr, txt, *a, **kw: (delivered_texts.append(txt), "sent")[1]):
+            self.news.held_pass({})
+        self.assertEqual(run_calls, [])
+        self.assertEqual(delivered_texts, [])
+
+        # 4. Explicit unknown target phrase (`retro on MISSING-KEY`) refuses without resetting unrelated recap task `api`, while untargeted prose keeps fallback.
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            t["recap"] = {"at": 13000, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
+            by_key = {o["plan_key"]: o for o in s.data["tasks"] if o.get("plan_key") and o["state"] != "done"}
+            plan_tasks = [({"key": "api"}, "M1")]
+            with self.assertRaises(self.base.Fail) as ctx:
+                self.replan.select_retro_plan_targets(s, plan_tasks, by_key, "retro on MISSING-KEY")
+            self.assertIn("MISSING-KEY", str(ctx.exception))
+            self.assertEqual(self.replan.select_retro_plan_targets(s, plan_tasks, by_key, "retro after OTHER-99"), [])
+            self.assertEqual(
+                [s.ref(o) for o in self.replan.select_retro_plan_targets(s, plan_tasks, by_key, "retro: switch to copy-on-write for UTF-8")],
+                ["TST-1"],
+            )
+            t.pop("recap", None)
+            s.dirty = True
+
 
 if __name__ == "__main__":
     unittest.main()
