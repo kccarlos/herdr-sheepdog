@@ -9448,8 +9448,8 @@ class Resume(unittest.TestCase):
                 mock.patch.object(queues, "live_agents", lambda key: []):
             with self.assertRaisesRegex(Fail, "Can't resume .*1 task is running here"):
                 self.call(self.commands.cmd_fix, id=ref, reason="Fix the checks")
-            with self.assertRaisesRegex(Fail, "Can't resume .*1 task is running here"):
-                self.call(self.commands.cmd_switch, id=ref, agent=None, argv=None, parent=None, keep=False)
+            # A switch with no worker at work only edits the settings: it starts nothing past the cap.
+            self.call(self.commands.cmd_switch, id=ref, agent="agy", argv=None, parent=None, keep=False)
         self.assertEqual(len(self.runs), 2)
 
     def test_a_resumed_agy_worker_idle_at_turn_0_gets_one_nudge(self):

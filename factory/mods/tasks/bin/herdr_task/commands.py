@@ -2192,6 +2192,8 @@ def tell(s, t, msg, args, start=True):
         return live[-1]["address"], False
     if not start:
         return None, False
+    if t.get("state") in ("todo", "queued", "scheduled"):
+        raise Fail(f"{s.ref(t)} is waiting. Use start when it can run.")
     require_resume_slot(s, t)
     a, _ = start_again(s, t, getattr(args, "agent", None), getattr(args, "argv", None), message=msg)
     return a["address"], True
