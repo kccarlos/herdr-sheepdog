@@ -171,3 +171,14 @@ command to W5's rule and verifies that the replay catches it.
 
 - **Model behaviour.** No model ran on these prompts. A live replay with a real CLI is still to do.
 - **Existing template files.** The engine still reads `~/.config/herdr-core/templates`. Where Shepherdr already put `worker.md`, `reviewer.md` or `assistant.md` there, as on the owner's Mac, those files win, so the trim reaches clean installs only. The upgrade matches only the engine's own earlier built-in defaults, never Shepherdr's installed files: live Shepherdr agents read those. The coordinator start ([coordinator.md](coordinator.md)) and `herdr-task machines sync` read that folder too.
+
+## The retro template (SDF-49)
+
+`factory/templates/retro.md` is the prompt of the [retro round](review-rounds.md#the-retro-round). The keyword replay above cannot judge it, because its output is a verdict and a cause, not a command. Its replay uses two real non-converging histories from this project's task store, each built at round 3, where the retro trigger fires (rounds 2 and 3 both had majors):
+
+| Situation | Task | At | What the store shows |
+|---|---|---|---|
+| R-16 | SDF-16, coordinator lease and restart | `6e965f3a72`, 1,673 changed lines against a 600-line estimate | Every round finds new cut-short states of one handoff mechanism; earlier fixes hold |
+| R-31 | SDF-31, milestones and plan amend | `830bd86886`, 942 changed lines, no estimate | Every round finds one more dependency-loop case; earlier fixes hold |
+
+The fixtures are `factory/test/replay/retro/<task>.json`: each round's verdict, major count and note, the brief with private paths removed, and the diff range. `python3 test/replay_retro.py --show` prints each filled prompt. `--live --dir <scratch>` runs one read-only Fable session per situation in a detached worktree at that round's head, and records its answer as `<task>.out.txt`. The test suite checks that every slot is filled and that each recorded answer parses. The expected causes are not in the prompt. They come from the retro proposal, which judged both tasks after the fact: R-16 should name task-too-big or design-needed-first, and R-31 patch-shaped-fix or reviewer-narrow.
