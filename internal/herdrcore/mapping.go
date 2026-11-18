@@ -132,6 +132,7 @@ func agentInfo(t hc.Terminal, state herdr.State) herdr.AgentInfo {
 		Cwd:            cwdOf(t),
 		TerminalTitle:  t.Title,
 		StateChangeSeq: t.Turn,
+		Labels:         herdr.CloneLabels(t.Labels),
 	}
 }
 
@@ -146,5 +147,6 @@ func paneInfo(t hc.Terminal, state herdr.State) herdr.PaneInfo {
 		Cwd:           cwdOf(t),
 		TerminalTitle: t.Title,
 		PhoneShell:    t.Labels[spawnLabel] == shellValue,
+		Labels:        herdr.CloneLabels(t.Labels),
 	}
 }

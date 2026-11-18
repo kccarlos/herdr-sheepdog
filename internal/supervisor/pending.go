@@ -175,7 +175,13 @@ func (s *Supervisor) dropQuestionLocked(p state.PendingAction) {
 	if q, ok := s.store.Question(p.ID); !ok || q.PaneID != p.PaneID {
 		return
 	}
-	if err := s.store.DropQuestion(p.PaneID); err != nil {
+	var err error
+	if isFactoryAskID(p.ID) {
+		err = s.store.DropQuestionID(p.ID)
+	} else {
+		err = s.store.DropQuestion(p.PaneID)
+	}
+	if err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
 	s.closedLocked() // displaced.go

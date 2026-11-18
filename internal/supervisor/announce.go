@@ -130,6 +130,9 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 	}
 	kept := s.keepMatching(a.row.PaneID, events...)
 	level := s.chattiness()
+	if s.silenceFactoryAnnounce(a, kept, level, true) {
+		return
+	}
 	if s.mutedQuiet(ctx, a, kept) {
 		// The user muted this space's notifications and nothing here is owed
 		// (no kept promise, not the finish of their own instruction): no
@@ -217,6 +220,9 @@ func noFindingSentence(a announcement) string {
 // applyResult turns the orchestrator's answer (or failure) into the event's one
 // push and its logs.
 func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Chattiness, r turnResult) {
+	if s.silenceFactoryAnnounce(a, kept, level, true) {
+		return
+	}
 	if len(kept) == 0 && !a.owed && s.paneMutedCached(a.row.PaneID) {
 		s.logMutedQuiet(a, level)
 		return
@@ -344,6 +350,9 @@ func promiseIDs(ps []state.Promise) []string {
 //     the line relates the finish to a request of theirs (relates_to),
 //     which the code could not know.
 func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chattiness, r turnResult, start time.Time) {
+	if s.silenceFactoryAnnounce(a, kept, level, false) {
+		return
+	}
 	if len(kept) == 0 && !a.owed && s.paneMutedCached(a.row.PaneID) {
 		s.logMutedQuiet(a, level)
 		return
@@ -444,6 +453,9 @@ func (s *Supervisor) pendingStillOpen(a announcement) bool {
 // newer turn about the same agent is about to speak; nor after a model
 // error, which is no matter of time).
 func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chattiness, reason string) {
+	if s.silenceFactoryAnnounce(a, kept, level, false) {
+		return
+	}
 	if len(kept) == 0 && !a.owed && s.paneMutedCached(a.row.PaneID) {
 		s.logMutedQuiet(a, level)
 		return

@@ -16,7 +16,14 @@ export const LINGER_MS = 4000;
 
 export const GONE = "That question was already answered or has gone.";
 
-// A worker's approval prompt the user can answer by tap.
+export const FACTORY_READ_ONLY = "Answer on your paired phone or by voice.";
+
+// Factory owner asks (`fask-*`) require a paired phone ticket or live voice:
+// the desktop panel connects over ticketless loopback, so it shows them as
+// read-only status cards and never sends answer taps for them.
+export const isFactoryAsk = (q) => typeof q?.id === "string" && q.id.startsWith("fask-");
+
+// A worker's or factory project's open question.
 const answerable = (q) => q?.kind === "answer_prompt" && Array.isArray(q.options) && q.options.length > 0;
 
 // The open questions of /api/state, oldest first: `questions`, else the
@@ -51,7 +58,7 @@ export function createAnswers({ http, newKey, now = Date.now, refresh = async ()
   // Taps `option` (an entry of the question's `options`) of question `q`.
   // One tap at a time; a tap on a question that is not open sends nothing.
   async function answer(q, option) {
-    if (busy() || phaseOf(q.id).phase !== "open") return;
+    if (isFactoryAsk(q) || busy() || phaseOf(q.id).phase !== "open") return;
     set(q.id, { phase: "sending", option, pending: q, at: now() });
     try {
       const res = await http.answer(q.id, option.index, newKey());
@@ -72,7 +79,7 @@ export function createAnswers({ http, newKey, now = Date.now, refresh = async ()
     const lingering = Object.entries(snapshot.phases)
       .filter(([id, p]) => !ids.has(id) && (p.phase === "answered" || p.phase === "gone" || p.phase === "sending"))
       .map(([, p]) => p.pending);
-    return [...lingering, ...open].map((pending) => ({ pending, ...phaseOf(pending.id) }));
+    return [...lingering, ...open].map((pending) => ({ pending, readOnly: isFactoryAsk(pending), ...phaseOf(pending.id) }));
   }
 
   // Forgets a settled question that has lingered, and a phase of a question

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — empty conversation</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; display: flex; flex-direction: column; overflow: hidden; background: {{c.bg}}; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <dc-import name="TopBar" pane="conversation" waiting="0" dark="{{ dark }}" hint-size="390px,102px"></dc-import>
+  <div style="flex-shrink: 0; display: flex; gap: 6px; padding: 4px 16px 8px; overflow: hidden; border-bottom: 1px solid {{c.line}}">
+    <sc-for list="{{ strip }}" as="s" hint-placeholder-count="4">
+      <button style="flex-shrink: 0; height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 11px; border-radius: 16px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 14px; font-weight: 600"><span style="width: 7px; height: 7px; border-radius: 4px; background: {{ s.color }}"></span>{{ s.name }}</button>
+    </sc-for>
+  </div>
+
+  <main style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 0 32px 100px; text-align: center">
+    <img src="/_blob/401c7376e1431b57333bf0ffcb6f2b09" alt="The sheepdog mascot listening through its headset" style="width: 150px; height: 167px; object-fit: contain">
+    <h1 style="margin: 6px 0 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 26px; font-weight: 700">Just talk</h1>
+    <p style="margin: 0; font-size: 16px; line-height: 23px; color: {{c.ink2}}">Ask what your agents are doing, or tell one what to do next.</p>
+    <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 6px">
+      <button style="height: 36px; padding: 0 14px; border-radius: 18px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 14px">What's going on?</button>
+      <button style="height: 36px; padding: 0 14px; border-radius: 18px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 14px">Is anyone stuck?</button>
+    </div>
+  </main>
+
+  <div style="position: absolute; left: 12px; bottom: 26px; width: 366px; height: 60px; display: flex">
+    <dc-import name="Dock" label="Sheepdog" status="Listening — just talk" mode="live" dark="{{ dark }}" style="display: block; width: 366px; height: 60px" hint-size="366px,60px"></dc-import>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = { bg: '#FAF8F3', surface: '#FFFFFF', ink: '#1F1F22', ink2: '#6B6E75', line: '#E4E0D7', blue: '#1F5F9E', green: '#1D6B46' };
+    const dark = { bg: '#16181C', surface: '#1F2126', ink: '#F5F2EA', ink2: '#A3A7AF', line: '#2E3138', blue: '#6AA8EB', green: '#5CC792' };
+    const d = !!this.props.dark;
+    const c = d ? dark : light;
+    return { dark: d, c, strip: [
+      { name: 'api-docs', color: c.blue }, { name: 'payments', color: c.blue }, { name: 'search', color: c.blue }, { name: 'migrate', color: c.green }
+    ] };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — conversation spec</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 1640px; min-height: 4300px; box-sizing: border-box; padding: 48px; background: #FFFFFF; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; gap: 44px; font-size: 14px; line-height: 20px">
+
+  <section style="display: flex; flex-direction: column; gap: 12px">
+    <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 28px; font-weight: 700">1 · Tell a row at a glance</h2>
+    <p style="margin: 0; max-width: 1200px; color: #6B6E75">Each category owns one dominant cue that is not a colour, so a row is classified from arm’s length, in greyscale, and by VoiceOver. Colour only confirms it.</p>
+    <div style="display: grid; grid-template-columns: 170px 330px 330px 300px 1fr; border: 1px solid #E4E0D7; border-radius: 14px; overflow: hidden">
+      <sc-for list="{{ glanceHead }}" as="h" hint-placeholder-count="5"><span style="padding: 10px 12px; background: #F1EEE7; font-weight: 600; font-size: 13px">{{ h.t }}</span></sc-for>
+      <sc-for list="{{ glance }}" as="g" hint-placeholder-count="30"><span style="padding: 10px 12px; border-top: 1px solid #E4E0D7; font-weight: {{ g.w }}">{{ g.t }}</span></sc-for>
+    </div>
+  </section>
+
+  <section style="display: flex; flex-direction: column; gap: 12px">
+    <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 28px; font-weight: 700">2 · Every row kind: look, symbol, tap, VoiceOver</h2>
+    <p style="margin: 0; max-width: 1200px; color: #6B6E75">The numbers are the brief’s. Nothing outside this table appears in the conversation. A kind the app does not recognise is drawn as 19 (default view) or as a plumbing line (technical view) — never dropped silently.</p>
+    <div style="display: grid; grid-template-columns: 54px 200px 470px 230px 270px 1fr; border: 1px solid #E4E0D7; border-radius: 14px; overflow: hidden; font-size: 13px; line-height: 18px">
+      <sc-for list="{{ kindsHead }}" as="h" hint-placeholder-count="6"><span style="padding: 9px 10px; background: #F1EEE7; font-weight: 600">{{ h.t }}</span></sc-for>
+      <sc-for list="{{ kinds }}" as="k" hint-placeholder-count="60"><span style="padding: 8px 10px; border-top: 1px solid #E4E0D7; background: {{ k.bg }}; font-weight: {{ k.w }}; font-family: {{ k.font }}">{{ k.t }}</span></sc-for>
+    </div>
+  </section>
+
+  <section style="display: flex; flex-direction: column; gap: 12px">
+    <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 28px; font-weight: 700">3 · Tokens (asset catalog)</h2>
+    <p style="margin: 0; max-width: 1200px; color: #6B6E75">Everything in section 7 of the brief is kept. Four colour sets are added; one rule changes (Danger is no longer used for a declined question). Ratios are measured on the surface the token sits on.</p>
+    <div style="display: grid; grid-template-columns: 170px 110px 110px 110px 520px 1fr; border: 1px solid #E4E0D7; border-radius: 14px; overflow: hidden; font-size: 13px">
+      <sc-for list="{{ tokHead }}" as="h" hint-placeholder-count="6"><span style="padding: 9px 10px; background: #F1EEE7; font-weight: 600">{{ h.t }}</span></sc-for>
+      <sc-for list="{{ toks }}" as="k" hint-placeholder-count="60"><span style="padding: 8px 10px; border-top: 1px solid #E4E0D7; display: flex; align-items: center; gap: 8px; font-weight: {{ k.w }}; font-family: {{ k.font }}"><span style="width: 14px; height: 14px; border-radius: 4px; flex-shrink: 0; background: {{ k.sw }}; border: {{ k.swb }}"></span>{{ k.t }}</span></sc-for>
+    </div>
+  </section>
+
+  <section style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px">
+    <div style="display: flex; flex-direction: column; gap: 12px">
+      <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 28px; font-weight: 700">4 · Type</h2>
+      <div style="display: grid; grid-template-columns: 260px 1fr; border: 1px solid #E4E0D7; border-radius: 14px; overflow: hidden; font-size: 13px">
+        <sc-for list="{{ type }}" as="k" hint-placeholder-count="30"><span style="padding: 8px 10px; border-top: 1px solid #E4E0D7; font-weight: {{ k.w }}; font-family: {{ k.font }}">{{ k.t }}</span></sc-for>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 12px">
+      <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 28px; font-weight: 700">5 · Shapes and spacing</h2>
+      <div style="display: grid; grid-template-columns: 260px 1fr; border: 1px solid #E4E0D7; border-radius: 14px; overflow: hidden; font-size: 13px">
+        <sc-for list="{{ shapes }}" as="k" hint-placeholder-count="30"><span style="padding: 8px 10px; border-top: 1px solid #E4E0D7; font-weight: {{ k.w }}">{{ k.t }}</span></sc-for>
+      </div>
+    </div>
+  </section>
+
+  <section style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px">
+    <div style="display: flex; flex-direction: column; gap: 12px">
+      <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 28px; font-weight: 700">6 · Largest text, motion, VoiceOver</h2>
+      <ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px">
+        <sc-for list="{{ a11y }}" as="k" hint-placeholder-count="10"><li>{{ k.t }}</li></sc-for>
+      </ul>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 12px">
+      <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 28px; font-weight: 700">7 · Around the timeline</h2>
+      <ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px">
+        <sc-for list="{{ around }}" as="k" hint-placeholder-count="10"><li>{{ k.t }}</li></sc-for>
+      </ul>
+    </div>
+  </section>
+
+  <section style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px">
+    <div style="display: flex; flex-direction: column; gap: 12px">
+      <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 28px; font-weight: 700">8 · Why it works</h2>
+      <ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px">
+        <sc-for list="{{ why }}" as="k" hint-placeholder-count="8"><li>{{ k.t }}</li></sc-for>
+      </ul>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 12px">
+      <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 28px; font-weight: 700">9 · For later (not blocking this)</h2>
+      <ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px">
+        <sc-for list="{{ later }}" as="k" hint-placeholder-count="6"><li>{{ k.t }}</li></sc-for>
+      </ul>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1640,"height":4300}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const mono = "'SF Mono', 'JetBrains Mono', ui-monospace, monospace";
+    const sans = 'inherit';
+    const cells = (rows, firstBold, monoCols) => rows.flatMap((r) => r.map((t, i) => ({ t, w: firstBold && i === 0 ? 600 : 400, font: (monoCols || []).includes(i) ? mono : sans, bg: 'transparent' })));
+    const glanceHead = ['Category', 'Dominant cue (not colour)', 'Container', 'Colour (confirms)', 'Kept quiet on purpose'].map((t) => ({ t }));
+    const glance = cells([
+      ['Dialogue', 'Bubble with one tight corner, not full width; side = who', 'Bubble 20 / 6 pt corners. You: Bubble fill. Voice: Card + 1 pt Line', 'None — ink on neutral', 'No times on bubbles; no avatars'],
+      ['Orchestrator', 'Brain glyph or the “Details” disclosure; panel, no border', 'ThinkingSoft panel (reply card) or a 2 pt rule (Details open)', 'Thinking purple', 'Folds under the voice’s bubble whenever it can'],
+      ['Needs you', 'Down-arrow disc + the words “answer below”', 'None (pointer); the floating card is the answer', 'Amber — the only amber on the page', 'Listed once; the card does the work'],
+      ['Agent outcome', 'Full-width ledger row with a 28 pt ROUND well on the leading edge', 'Card; consecutive outcomes share one card with hairlines', 'Well tint: blue news, green approved, neutral declined / closed', 'Never struck through; no red; closed is a hollow well, not a cross'],
+      ['Card shown', 'SQUARE well (an object) + chevron.right', 'Its own Card, never in a run', 'Neutral well', '—'],
+      ['Context', 'Centred caption on a hairline, small glyph', 'None', 'Muted only', 'No tap, no container'],
+      ['System', 'Dashed outline', 'Dashed 1 pt, no fill', 'Muted glyph', 'Plumbing hidden unless the switch is on'],
+      ['Technical view', 'Time gutter with a category code; monospaced plumbing', 'Gutter + rows as above', 'Muted', 'Nothing grouped or folded']
+    ], true);
+    const kindsHead = ['#', 'Kind / state', 'Look', 'SF Symbol (mode, size)', 'Tap / long press', 'VoiceOver label (one element)'].map((t) => ({ t }));
+    const K = [
+      ['1', 'You, by voice — final', 'Right bubble, Bubble fill, body, max 80 % width (iPad 70 %)', '—', 'Long press: Copy, and the time', '“You said, What did I miss?”'],
+      ['1', 'You, by voice — open', 'Same at 72 % opacity, ••• tail (muted). Turns final in place', '—', 'None while open', '“You are saying, …” (updates politely)'],
+      ['2', 'You, typed', 'As 1 + caption2 “Typed” with a keyboard glyph under the bubble, trailing', 'keyboard (monochrome, caption2)', 'Long press: Copy', '“You typed, Is anyone stuck?”'],
+      ['3', 'The voice — final / open', 'Left bubble, Card fill + 1 pt Line, body, max 86 %. Open as 1', '—', 'Long press: Copy', '“Work Mac said, …” / “is saying”'],
+      ['3b', 'The voice, text router', 'Identical to 3', '—', 'Long press: Copy', '“Work Mac wrote, …”'],
+      ['4', 'Details — collapsed', 'Under the voice bubble, 6 pt in: info.circle + “Details” + chevron, footnote semibold, Thinking', 'info.circle (monochrome, footnote)', 'Tap: open. 44 pt hit area', 'Button “Details”, hint “Shows what the orchestrator told Work Mac”'],
+      ['4', 'Details — expanded', '2 pt ThinkingRule on the left; headline footnote semibold; explanation footnote; options as ThinkingSoft chips; “Raw ⌄” → monospaced JSON in a Fill block', 'chevron.up', 'Tap Details: close. Tap Raw: show JSON. Chips are not buttons', 'Container; options read “Options: Yes, Not now”'],
+      ['5', 'Orchestrator reply card', 'Left, ThinkingSoft panel radius 14, no border, max 86 %. Caption semibold ThinkingText “Orchestrator → Work Mac”; callout body', 'brain (monochrome, caption)', 'Tap “Detail”: explanation + Raw', '“Orchestrator to Work Mac, …”'],
+      ['5', '… pending', 'Body muted: “Still working on it — the answer follows as a push.” Only Raw', 'brain', 'Tap Raw', '“Orchestrator, still working”'],
+      ['5', '… asks you to say more', 'Outlined tag “asks you to say more” in the header (ThinkingRule border)', 'brain', 'As 5', 'Adds “asks you to say more”'],
+      ['6', 'Open question — pointer', 'No container, 30 pt. Amber disc with ink arrow; “Codex asked” semibold ink + “ — answer below” BlockedText', 'arrow.down.circle.fill (palette: Accent + Ink, footnote)', 'Tap: scroll to the floating card and pulse its border once', '“Codex asked. The question is on the card below.” Action moves focus to the card'],
+      ['6', '… the push / interrupt about it', 'Folds into the same pointer line (one pointer per open question)', '—', '—', '—'],
+      ['6b', 'Full question card — pinned', 'Card, 1.5 pt Blocked border, caption “Codex asked · 13:03”, callout question, BlockedText status “Waiting for your answer — below”', 'arrow.down (BlockedText)', 'Tap: as pointer', '“Codex asked, 13:03, …. Waiting for your answer below.”'],
+      ['6b', '… not pinned', 'Line border, muted status “Not answered here”', 'circle.dashed (muted)', 'None', '“… Not answered here.”'],
+      ['—', 'Floating question card', 'Unchanged from the main redesign: Card, Accent border, first option filled orange with ink text, the rest outlined; several stack and scroll. Largest text: one bar “Codex asked” + “Answer” opens a sheet', '—', 'Approve / Deny logic unchanged', 'Unchanged'],
+      ['7', 'Answered — approved, by tap / voice', 'Ledger: DoneSoft well + Done checkmark; line subheadline semibold “You approved — Yes, proceed · by tap”; caption muted “Claude’s question (run npm test)”; time; chevron', 'checkmark (bold, Done) in 28 pt well', 'Tap: expand / collapse', '“You approved Claude’s question, run npm test, Yes proceed, by tap, 1:03 PM.” Hint “Shows the question”'],
+      ['7', 'Answered — declined', 'Same, Fill well + Ink xmark. No red', 'xmark (bold, Ink)', 'Tap: expand', '“You declined …”'],
+      ['7', 'Answered — expanded', 'Below the line, inset to the text column: Fill blocks with a caption each — “Claude asked · 12:56” (full question + options), “Pushed · 12:56”, “Sheepdog said · 12:57”', 'chevron.up', 'Tap the line: collapse', 'Each block its own element'],
+      ['8', 'Closed by itself', 'Ledger: hollow 1.5 pt Line ring, muted clock, subheadline regular ink “Codex’s question (…) — closed”, wraps to 2 lines; time; chevron', 'clock (Muted) — replaces clock.badge.xmark', 'Tap: expand', '“Codex’s question, allow Computer Use to use Finder, closed, 12:47 PM”'],
+      ['8', 'Closed — expanded', 'The full question + “Why it closed”: expired / left the screen / replaced (phase 3). Until then: “It was closed on the computer.”', 'chevron.up', 'Tap: collapse', '—'],
+      ['9', 'Agent update (said)', 'Ledger: WorkingSoft well + Working terminal; subheadline ink; time; chevron only if truncated', 'terminal.fill (Working) — replaces terminal', 'Tap: expand only if truncated', '“Update, 1:04 PM. slingshot stage Codex finished.”'],
+      ['10', 'Missed update (held or dropped) — collapsed / expanded', 'Ledger: WorkingSoft well + moon.zzz.fill; “While you were away · ” muted + text ink, one line; time; chevron. Expanded: full text', 'moon.zzz.fill (Working)', 'Tap: expand', '“While you were away, 12:14 PM. forumind finished …”'],
+      ['11', 'Updates group — collapsed', 'Ledger: three stacked wells (moon if any missed, else terminal); title footnote semibold INK “8 updates while you were away”; newest two lines subheadline; chevron. Catch me up in the footer', 'stacked moon.zzz.fill / terminal.fill', 'Tap the head: open', '“8 updates while you were away. Latest: …” Hint “Shows them all”'],
+      ['11', '… mixed', 'Title “5 agent updates · 2 while you were away”, terminal stack', 'terminal.fill stack', 'As above', 'As above'],
+      ['11', '… expanded', 'Title only; members continue the same card as rows 9 / 10. A restart divider inside the run closes the card and a new one starts after it', 'chevron.up', 'Tap the head: close', 'Head + each member'],
+      ['12', 'Catch me up', 'Capsule, Surface fill, 1 pt Line, footnote semibold ink, 36 pt tall (44 pt hit); in the group footer, aligned to the text column. After tap: “Asking…” with a small ProgressView until the voice answers', 'sparkles', 'Tap: sends “Catch me up on what I missed.”', 'Button “Catch me up”, hint “Asks the orchestrator to summarise what you missed”'],
+      ['13', 'Card shown', 'Own Card: 28 pt square well (8 pt radius, Fill) with the card’s own symbol; subheadline semibold title; caption “Card · Claude · 13:04”; chevron.right', 'card’s own symbol (CardViews) / chevron.right', 'Tap: opens the card sheet', '“Card, Test results, from Claude, 1:04 PM.” Trait button'],
+      ['13', 'Card — gone', 'Dashed square well, muted text “A card was shown on the screen; it is no longer stored.”, no chevron', 'rectangle.on.rectangle (Muted)', 'None', '“A card was shown; it is no longer stored.”'],
+      ['14', 'Day', 'Caption semibold muted, centred, no hairline; sticky section header (material behind it while pinned)', '—', 'None', 'Header trait: “Today”'],
+      ['15', 'New conversation', 'Divider: hairline · glyph + caption medium muted · hairline', 'plus.bubble (caption)', 'None', '“New conversation, 9:12 AM”'],
+      ['16', 'Talking to', 'Divider', 'desktopcomputer', 'None', '“Talking to Work Mac, 1:02 PM”'],
+      ['17', 'Sheepdog restarted / updated', 'Divider. Splits a ledger run. “updated to 0.2.2” when the daemon sends it (phase 3)', 'arrow.clockwise / shippingbox', 'None', '“Sheepdog restarted, 12:51 PM”'],
+      ['18', 'Voice restarted', 'Divider, up to 2 lines centred', 'waveform', 'None', 'As shown'],
+      ['19', 'Unrecognised phone notice', '1 pt dashed Dash outline, no fill, subheadline ink', 'gearshape (Muted)', 'None (any action it names is in its words)', '“Notice, …”'],
+      ['20', 'Earlier conversation / Loading', 'Centred text button, footnote medium muted, 44 pt; Loading swaps the glyph for a ProgressView', 'arrow.up.circle', 'Tap: load older', 'Button “Earlier conversation”'],
+      ['21', 'Empty', 'Unchanged (mascot, “Just talk”, two chips)', '—', 'Chips send', 'Unchanged'],
+      ['22', 'Jump to latest', 'Floating .regularMaterial capsule, footnote semibold, 12 pt above the floating question (or capsule); shows after one screen of scroll', 'arrow.down', 'Tap: scroll to bottom', 'Button “Jump to latest”'],
+      ['T*', 'Every technical row', '62 pt gutter: time HH:MM:SS (caption2 monospacedDigit) over a code badge DLG ASK UPD CTX SYS SCR; 1 pt Line rule; then the row', '—', 'Long press: “Copy raw JSON” (doc.on.doc)', 'Prefix “12:46:03, System.” then the row'],
+      ['T1–T10', 'Plumbing (context lost, reconnects, closed, unknown notice, audio route, paused, needs tap, stopped, voice off)', 'No container. Footnote monospaced, Muted, its own text verbatim, small glyph', 'waveform / link / gearshape / route glyph / pause / mic.slash', 'Long press', 'Its text'],
+      ['T11', 'Released push', 'As plumbing: “Released held push → said at 13:02”', 'paperplane', 'Long press', 'Its text'],
+      ['T12', 'Held push in transit', 'Ledger shape with a dashed Dash outline, Fill well, kicker muted “Waiting for a listener — said when you connect” + text. No amber', 'hourglass', 'Long press', '“Waiting for a listener, …”'],
+      ['T13', 'Dropped push', 'As T12, kicker “Dropped — nobody was listening for 5 minutes”. Never struck through', 'bell.slash', 'Long press', '“Dropped, …”'],
+      ['T14', 'Settled question, unfolded', 'Full card with outcome; the push and the restatement as their own rows', 'as 7 / 8', 'Long press', 'As 6b with outcome'],
+      ['T15', 'Orchestrator replies', 'Always the card (5), never folded into Details', 'brain', 'Long press', 'As 5'],
+      ['T16', 'Rows 1–18', 'As in the default view, ungrouped, each with the gutter', '—', 'Long press', 'Gutter prefix + label']
+    ];
+    const kinds = K.flatMap((r, ri) => r.map((t, i) => ({ t, w: i < 2 ? 600 : 400, font: (i === 3) ? mono : sans, bg: ri % 2 ? '#FBFAF7' : 'transparent' })));
+    const tokHead = ['Token', 'Light', 'Dark', 'Status', 'Use', 'Contrast (text pairs)'].map((t) => ({ t }));
+    const T = (name, l, d, st, use, cr) => [name, l, d, st, use, cr];
+    const TR = [
+      T('Ink', '#1F1F22', '#F5F2EA', 'keep', 'Bubble text, ledger text', '15.5 / 15.9 on Surface; 14.2 on Fill'),
+      T('Muted', '#6B6E75', '#A3A7AF', 'keep', 'Times, captions, dividers, prefixes. Never on Bubble or Fill in light (4.2 / 4.4)', '4.8 on Surface, 5.1 on Card · dark 7.4 / 6.7'),
+      T('MutedOnFill', '#5C5F66', '= Muted', 'ADD', 'Captions inside Fill blocks (expanded rows) and any caption on Bubble', '5.5 on Fill, 5.2 on Bubble'),
+      T('Bubble', '#ECE8DF', '#2C2F36', 'keep', 'Your bubbles', 'Ink 13+'),
+      T('Card', '#FFFFFF', '#1F2126', 'keep', 'Voice bubble, ledger, cards', '—'),
+      T('Fill', '#F1EEE7', '#26292F', 'keep', 'Neutral wells, expanded blocks, raw JSON', '—'),
+      T('Line', '#E4E0D7', '#2E3138', 'keep', 'Borders, hairlines, hollow well ring', 'decorative'),
+      T('Dash', '#8E8A80', '#6B707A', 'ADD', 'Dashed outlines (system notice, gone card, held / dropped)', '3.3 on Surface · 3.6 dark (non-text 3:1)'),
+      T('Accent', '#D98718', '#F39C1F', 'keep', 'Floating card’s first button, pointer disc. Needs you only', 'Ink on it 5.8 / 7.5'),
+      T('Blocked', '#D99417', '#F0A92A', 'keep', 'Floating / pinned card border, amber dots', 'non-text'),
+      T('BlockedText', '#8A5700', '#F5B83D', 'keep', '“answer below”, pinned status', '5.7 on Surface · 10.0 dark'),
+      T('Working', '#1F5F9E', '#6AA8EB', 'keep', 'Update / missed well glyph', '5.4 on WorkingSoft (both)'),
+      T('WorkingSoft', '#E1EAF4', '#22303F', 'keep', 'Update / missed / group well', '—'),
+      T('Done', '#1D6B46', '#5CC792', 'keep', 'Approved well glyph', '5.4 / 6.4 on DoneSoft'),
+      T('DoneSoft', '#DDEEE4', '#1E3428', 'keep', 'Approved well', '—'),
+      T('Thinking', '#6A46B0', '#B195F0', 'keep', 'Details label, Raw, brain glyph', '6.4 / 7.1 on Surface'),
+      T('ThinkingText', '#553591', '#C9B5F5', 'ADD', 'Text on ThinkingSoft (reply header, option chips)', '7.5 / 7.8 on ThinkingSoft'),
+      T('ThinkingSoft', '#ECE6F6', '#2C2640', 'keep', 'Reply card, option chips', '—'),
+      T('ThinkingRule', '#C9B8EA', '#54477A', 'ADD', '2 pt rule beside open Details; clarify tag border', 'decorative (the label carries it)'),
+      T('Danger', '#B42318', '#F26B5B', 'CHANGE', 'Errors and destructive actions only — no longer a declined question', '—'),
+      T('Chevron', '#8E929A', '#8E929A', 'keep (as used)', 'Disclosure chevrons on Card', '3.1 on Card, 5.2 dark (non-text)')
+    ];
+    const toks = TR.flatMap((r) => r.map((t, i) => ({ t, w: i === 0 ? 600 : 400, font: (i === 1 || i === 2) ? mono : sans, sw: i === 1 ? (r[1].startsWith('#') ? r[1] : 'transparent') : (i === 2 ? (r[2].startsWith('#') ? r[2] : 'transparent') : 'transparent'), swb: (i === 1 || i === 2) && (i === 1 ? r[1] : r[2]).startsWith('#') ? '1px solid #E4E0D7' : '0' })));
+    const TY = [
+      ['Bubble text', 'body, regular (17)'],
+      ['“Typed” caption', 'caption2, Muted'],
+      ['Details label', 'footnote semibold, Thinking'],
+      ['Details / reply body', 'footnote (Details) · callout (reply card)'],
+      ['Reply header', 'caption semibold, ThinkingText'],
+      ['Pointer', 'footnote; agent semibold ink, “— answer below” semibold BlockedText'],
+      ['Ledger line', 'subheadline; settled answered = semibold; closed / updates = regular'],
+      ['Ledger second line', 'caption, Muted, one line (wraps when expanded / AX)'],
+      ['Group title', 'footnote semibold, INK, .contentTransition(.numericText())'],
+      ['Times', 'caption .monospacedDigit(), Muted, trailing (h:mm, locale)'],
+      ['Dividers', 'caption medium, Muted; Day caption semibold'],
+      ['Catch me up / Jump', 'footnote semibold'],
+      ['Technical gutter', 'caption2 monospaced (time HH:mm:ss + code)'],
+      ['Plumbing text', 'footnote .monospaced(), Muted']
+    ];
+    const type = TY.flatMap((r) => r.map((t, i) => ({ t, w: i === 0 ? 600 : 400, font: sans })));
+    const SH = [
+      ['Bubbles', 'UnevenRoundedRectangle 20 / 6 (continuous); padding 9 × 14'],
+      ['Ledger card', 'RoundedRectangle 14; a run = one card, Divider inset to the text column (leading 51)'],
+      ['Round well', '28 pt circle; glyph 15 pt; group = 3 offset by 5 pt with a 2 pt Card ring'],
+      ['Square well', '28 pt, radius 8 (cards)'],
+      ['Reply panel', 'radius 14, no border'],
+      ['Row heights', 'Ledger ≥ 44; pointer / Details 30 visual, 44 hit; dividers 24'],
+      ['Spacing', '6 pt between bubbles of one exchange · 14 pt from a divider to dialogue · 18 pt between different categories · 0 inside a ledger run · 8 between a run and a card'],
+      ['Screen margins', '16 pt iPhone; iPad readable column 680 pt centred, bubbles max 70 %'],
+      ['Bottom inset', 'List bottom = floating question height + capsule + 12 pt; the newest row is never under them'],
+      ['Floating question', 'Unchanged: radius 22, Accent 1.5 pt border']
+    ];
+    const shapes = SH.flatMap((r) => r.map((t, i) => ({ t, w: i === 0 ? 600 : 400 })));
+    const a11y = [
+      'Accessibility sizes: wells disappear and the glyph sits inline before the first word, scaled with the text (@ScaledMetric); the time drops to its own line under the text; nothing truncates (lineLimit nil); bubbles may use the full width.',
+      'Largest sizes: the floating question collapses to one bar — “Codex asked” + “Answer” — which opens the full question as a sheet. The capsule keeps its layout (see Voice capsule board).',
+      'Each row is one combined element; labels are in section 2. Colour is never the only signal: every state has its own glyph and words.',
+      'A new row posts a polite announcement only for Needs you and dialogue; outcomes are read when focused.',
+      'Expand / collapse: 200 ms, the brand ease. Reduce Motion: crossfade only, no height spring, no pulse on the floating card.',
+      'Settling a question: the floating card shrinks into its ledger line (matchedGeometryEffect); Reduce Motion fades it out and the line in.',
+      'Open bubbles: the ••• tail is static text, not an animation; updates replace text in place.',
+      'Dark mode: same tokens, dark values; ledger cards keep the Card surface so the wells stay readable.'
+    ].map((t) => ({ t }));
+    const around = [
+      'Banners: error = Danger disc; warning = Ink exclamationmark.triangle on a Fill disc (amber stays for Needs you); info / update = Working. Cards keep the 14 pt radius, Line border (drop the 45 % tint border).',
+      'Audio route glyph lives in the capsule (Voice capsule board); no route rows in the default view.',
+      '“Technical events shown” tag: sticky material capsule under the strip, gearshape + “Technical events shown · long press copies JSON”.',
+      'Card corner label (“Card: …” while a card sheet is open): same material capsule as Jump to latest.',
+      'Push notifications and Live Activity reuse the glyph table: moon.zzz for missed, checkmark for approved, arrow.down.circle.fill for needs you.'
+    ].map((t) => ({ t }));
+    const why = [
+      'Four shapes do the sorting before any reading: a bubble is talk, a round well is an outcome, a square well is a thing to open, a hairline is context.',
+      'Outcomes stack into one ledger card, so ten rows of news read as one block, and the dialogue around it stands out by contrast.',
+      'Amber appears in exactly one place per question; everything blue is news, everything green is a yes.',
+      'Missed updates are blue news with a moon, not a struck or warning row: they were true and you were simply away.',
+      'Declined and closed are neutral: they are decisions or expiries, not failures.',
+      'The orchestrator keeps its purple, but only as a disclosure line or a soft panel — it never competes with the voice.',
+      'Plumbing stays out; in the technical view a time gutter and monospaced text make it look like a log without looking broken.'
+    ].map((t) => ({ t }));
+    const later = [
+      'Symbol set: moon.zzz for “while you were away” could be used on the Agents page for agents that finished while the app was closed.',
+      'Push notifications: one category per row kind with the same glyphs.',
+      'Mascot: the sleeping pose could head the “8 updates while you were away” group on the first open of the day (only once).',
+      'Daemon fields needed for full fidelity: question close reason, start version (“updated to …”), client-attached flag for reconnects.'
+    ].map((t) => ({ t }));
+    return { glanceHead, glance, kindsHead, kinds, tokHead, toks, type, shapes, a11y, around, why, later };
+  }
+}
+</script>
+</body>
+</html>

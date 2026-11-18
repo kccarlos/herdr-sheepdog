@@ -569,6 +569,7 @@ Nothing is sent anywhere except to the model providers you configured.
 | `~/.local/share/sheepdog/devices.json` | The paired phones and browsers: a name, a kind, each one's public key, when it paired and was last seen, and whether it was revoked (mode 0600). No secret: the private keys stay on the devices. | Until you delete it. |
 | `~/.local/share/sheepdog/sheepdog.pid` | The running daemon's pid, URL and version (empty when it is stopped). | While it runs. |
 | `~/.local/share/sheepdog/factory/` | The unpacked factory engine (`engine/<version>/`) and the `uv`-managed pinned CPython runtime (`python/`). No personal data. | Until `sheepdog data clear --all` or `sheepdog uninstall`. |
+| `~/.local/share/sheepdog/factory_proofs.json` | Verified owner answer proofs for gated factory asks (`proof_id`, `ask_id`, option label, `tap` or `voice`, paired `device_id` and timestamp; mode 0600). | 24 hours, or until `sheepdog data clear --all`. |
 | `~/.local/share/sheepdog/update-check.json`, `update-notice.json`, `update-restart.json` | The last answer of the daily update check, when a command last printed the update notice, and the last automatic restart after an upgrade. No personal data. | Until you delete them. |
 
 `sheepdog data clear --events` deletes the event log, `--all` everything

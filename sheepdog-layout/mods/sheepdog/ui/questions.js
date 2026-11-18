@@ -8,7 +8,7 @@
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { labelOf, summaryOf } from "../model/questions.js";
+import { FACTORY_READ_ONLY, isFactoryAsk, labelOf, summaryOf } from "../model/questions.js";
 import { button, dot, stopDrag, tint } from "./widgets.js";
 
 // "Codex", or "An agent".
@@ -56,6 +56,7 @@ function optionRow(t, q, option, { sending, enabled, onAnswer }) {
 export function questionCard(t, card, { primary, enabled, onAnswer }) {
   const q = card.pending;
   const settled = card.phase === "answered" || card.phase === "gone";
+  const readOnly = Boolean(card.readOnly ?? isFactoryAsk(q));
   return v_flex()
     .w_full()
     .gap(8)
@@ -83,7 +84,21 @@ export function questionCard(t, card, { primary, enabled, onAnswer }) {
       ),
     )
     .when(card.phase === "gone", (el) => el.child(div().text_size(12).text_color(t.muted).child(card.message)))
-    .when(!settled, (el) =>
+    .when(!settled && readOnly, (el) =>
+      el.child(
+        v_flex()
+          .w_full()
+          .gap(4)
+          .child(
+            div()
+              .text_size(11.5)
+              .text_color(t.muted)
+              .child(`Options: ${(q.options ?? []).map((option) => labelOf(option)).join(" · ")}`),
+          )
+          .child(div().text_size(11.5).font_semibold().text_color(t.blocked).child(FACTORY_READ_ONLY)),
+      ),
+    )
+    .when(!settled && !readOnly, (el) =>
       el.child(
         v_flex()
           .w_full()
@@ -128,6 +143,7 @@ export function questionSheet(t, cards, { busy, onAnswer, onClose }) {
 // The compact bar:"Codex asked · Answer", or how many are waiting.
 export function questionBar(t, cards, { onOpen }) {
   const waiting = cards.filter((c) => c.phase === "open" || c.phase === "sending");
+  const allReadOnly = waiting.length > 0 && waiting.every((c) => Boolean(c.readOnly ?? isFactoryAsk(c.pending)));
   const first = cards[0].pending;
   const words = cards.length === 1 ? `${askerOf(first)} asked` : `${cards.length} questions need you`;
   return div()
@@ -151,6 +167,6 @@ export function questionBar(t, cards, { onOpen }) {
         .on_click(onOpen)
         .child(dot(waiting.length ? t.blocked : t.done, 8))
         .child(div().flex_1().truncate().text_size(12.5).font_semibold().text_color(t.foreground).child(words))
-        .child(div().text_size(12).font_semibold().text_color(t.blocked).child("Answer")),
+        .child(div().text_size(12).font_semibold().text_color(t.blocked).child(allReadOnly ? "View" : "Answer")),
     );
 }

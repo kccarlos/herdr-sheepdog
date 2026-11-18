@@ -76,7 +76,23 @@ func (s *Supervisor) refreshTitle(row state.Agent, roots workerlog.ProcessRoots)
 // SpokenNames returns the spoken names of the running agents, sorted:
 // the voice model's agent list and speech-to-text vocabulary.
 func (s *Supervisor) SpokenNames() []string {
-	return spokenNames(s.store.List())
+	names := spokenNames(s.store.List())
+	seen := make(map[string]bool, len(names))
+	for _, n := range names {
+		seen[n] = true
+	}
+	added := false
+	for _, q := range s.store.Questions() {
+		if isFactoryAskID(q.ID) && q.Agent != "" && !seen[q.Agent] {
+			seen[q.Agent] = true
+			names = append(names, q.Agent)
+			added = true
+		}
+	}
+	if added {
+		sort.Strings(names)
+	}
+	return names
 }
 
 func spokenNames(rows []state.Agent) []string {
@@ -214,6 +230,11 @@ func (s *Supervisor) rename(ctx context.Context, paneID, name string) (string, e
 func (s *Supervisor) sayOf(paneID string) string {
 	if a, ok := s.store.Get(paneID); ok {
 		if n := state.Say(a); n != "" {
+			return n
+		}
+	}
+	if isFactoryPane(paneID) {
+		if n := s.factoryAgentName(paneID); n != "" {
 			return n
 		}
 	}

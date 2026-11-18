@@ -19,6 +19,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/identity"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
@@ -475,6 +476,9 @@ type harnessOpts struct {
 	// end-to-end /ws tests exercise real flush acknowledgement slots,
 	// underruns, cuts, and stop pushes.
 	trackPlayback bool
+	factory       *factory.Client
+	proofs        *factory.ProofStore
+	funnel        TailscaleFunnelFunc
 }
 
 // testFleet is the fleet a test's marks follow: the injector's panes.
@@ -530,7 +534,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		}
 		providers = []ProviderInfo{{ID: "gemini", Label: "Gemini", Available: true}, {ID: "deepseek", Label: "DeepSeek", Available: true}, {ID: "openai", Label: "OpenAI", Available: false, Reason: "no OPENAI_API_KEY"}}
 	}
-	scfg := supervisor.Config{Brain: b, Mutes: o.mutes}
+	scfg := supervisor.Config{Brain: b, Mutes: o.mutes, Factory: o.factory, FactoryProofs: o.proofs, Now: o.now}
 	if o.marks {
 		local, err := attention.NewLocal("", testFleet{h}, attention.Options{})
 		if err != nil {
@@ -552,7 +556,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	deps := Deps{Log: log, Store: store, Supervisor: serverSup, Injector: injector, Router: &inject.Router{}, Version: "test", Computer: identity.Computer{ID: "AAAAAAAAAAAAAAAAAAAAAA", Name: "Test Mac"}, Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, DevBrainDir: o.devBrain, StatsInterval: o.statsInterval,
 		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off", BrainProviders: providers, Shell: !o.shellOff, Files: !o.filesOff, VoiceContext: vctx, RouterContext: routerCtx, Push: o.push,
 		HandshakeTimeout: o.handshakeTimeout, MinProtocol: o.minProtocol, ScreenInterval: o.screenInterval, ScreenMinGap: o.screenMinGap,
-		Setup: o.setup, Restart: o.restart, Term: o.term, DataDir: o.dataDir, Now: o.now}
+		Setup: o.setup, Restart: o.restart, Term: o.term, DataDir: o.dataDir, FactoryProofs: o.proofs, TailscaleFunnel: o.funnel, Now: o.now}
 	var sw *voice.Switcher
 	var session2 *fakeSession
 	if session != nil {

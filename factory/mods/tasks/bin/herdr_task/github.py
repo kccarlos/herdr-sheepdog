@@ -695,14 +695,14 @@ def main_red_hold(s, base):
     return f"{base} is red since {red[:7]}: merges held until it's green." if red else None
 
 
-def pr_behind(task, repo, head):
+def pr_behind(task, repo, head, unknown=0):
     """FAC-98: how many of its base branch's commits the pull request's head lacks (GitHub's compare), or 0 when
-    GitHub can't say."""
+    GitHub can't say, unless `unknown` is supplied."""
     ok, out, _ = gh("api", f"repos/{repo}/compare/{task.get('base') or 'main'}...{head}", "--jq", ".behind_by")
     try:
-        return int(out) if ok else 0
+        return int(out) if ok else unknown
     except ValueError:
-        return 0
+        return unknown
 
 
 def pr_update_branch(task, repo, head):

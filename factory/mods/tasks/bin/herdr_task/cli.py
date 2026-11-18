@@ -15,7 +15,7 @@ from .agents import LINE_MAX, SUMMARY_MAX
 from .launch import cmd_allow, is_coordinator
 from .commands import (
     cmd_accept, cmd_add, cmd_alert, cmd_config, cmd_edit, cmd_fix, cmd_inbox, cmd_list, cmd_merge, cmd_ready,
-    cmd_resume, cmd_review, cmd_review_more, cmd_reviewed, cmd_rm, cmd_show, cmd_start, cmd_state, cmd_status,
+    cmd_reopen, cmd_resume, cmd_review, cmd_review_more, cmd_reviewed, cmd_rm, cmd_show, cmd_start, cmd_state, cmd_status,
     cmd_switch, cmd_unarchive, cmd_where,
 )
 from .tick import cmd_tick
@@ -222,7 +222,7 @@ def main():
     c = cmd("start", cmd_start, "start a task's agent (an hc child of the project's coordinator)")
     agent_opts(c)
     c.add_argument("--parent", help="a coordinator's terminal: the agent's hc parent (default: the project's coordinator)")
-    c.add_argument("--now", action="store_true", help="skip the queue (a scheduled task: start it now)")
+    c.add_argument("--now", action="store_true", help="skip the queue, except for tasks returned with reopen --to-do")
     c.add_argument("--branch", help="its branch's exact name (as add --branch), before its worktree is made")
     g = c.add_mutually_exclusive_group()
     g.add_argument("--here", action="store_true")
@@ -261,7 +261,8 @@ def main():
     c = cmd("accept", cmd_accept, "the person's Accept on a Ready task: merges first when there is something to merge, then done")
     agent_opts(c)
     c.add_argument("--owner-approved", metavar="NOTE", help="Assistant: a task out of review rounds, after the owner's explicit approval (who/where, one line)")
-    cmd("reopen", lambda a: cmd_state(a, "reopen"), "undo done or ready; a queued or scheduled task goes back to to do")
+    c = cmd("reopen", cmd_reopen, "undo done or ready; a queued or scheduled task goes back to To do")
+    c.add_argument("--to-do", action="store_true", help="end a running task's agents and return it to To do or Queued, keeping its work")
     cmd("unarchive", cmd_unarchive, "bring an archived task back into its list (only when the person asks; writing to it does too)")
     c = cmd("edit", cmd_edit, "change a task")
     c.add_argument("--title")
@@ -462,14 +463,14 @@ def main():
     c = cmd("resume", cmd_resume, "continue a stopped task")
     agent_opts(c)
     c.add_argument("--parent")
-    c = cmd("switch", cmd_switch, "replace the task's agent (no --agent: restart it); --all --from claude --agent agy: "
+    c = cmd("switch", cmd_switch, "replace a running worker or edit the task's agent settings; --all --from claude --agent agy: "
             "every task of the folder on that agent", id=False)
     c.add_argument("id", nargs="?", help="task id (4, #4 or its key)")
     agent_opts(c)
     c.add_argument("--model", help="the model it runs (saved on the task, as edit --model)")
     c.add_argument("--all", action="store_true", help="every task of the folder not done whose agent matches --from")
     c.add_argument("--from", dest="from_", metavar="CLI[:MODEL]", help="with --all: the agent (and model) to move off")
-    c.add_argument("--dry-run", action="store_true", help="with --all: list what would change, change nothing")
+    c.add_argument("--dry-run", action="store_true", help="list what would change, change nothing")
     c.add_argument("--reviewer", action="store_true", help="with --all: tasks whose reviewer matches --from move it too")
     c.add_argument("--parent")
     c.add_argument("--keep", action="store_true", help="add the agent beside the old one")

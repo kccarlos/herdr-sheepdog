@@ -30,7 +30,7 @@ from .github import remote_of
 # hook (`herdr-task _allow`), and agy in --settings.
 
 HOOK_TIMEOUT = 30
-OWN = ["ready", "reviewed", "status", "alert", "simulator", "device-wait", "show", "list", "where"]
+OWN = ["ready", "reviewed", "status", "alert", "ask", "simulator", "device-wait", "show", "list", "where"]
 # herdr-secret's agent commands (~/.local/bin/herdr-secret): asking for a secret and
 # using one by name never ask either, as Shepherdr's secret commands. Written by its full path or
 # its bare name. Reviewers get none (launch() skips own_argv for them; herdr-secret refuses them).

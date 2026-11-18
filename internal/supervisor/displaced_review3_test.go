@@ -228,7 +228,7 @@ func TestMutingASpaceHoldsItsOpenQuestion(t *testing.T) {
 	if n := w.keysTo(authPane); n != 0 {
 		t.Fatalf("a muted space's question got %d key presses by voice", n)
 	}
-	if _, err := w.sup.AnswerTap(context.Background(), p.ID, 1); err != nil {
+	if _, err := w.sup.AnswerTap(context.Background(), p.ID, 1, ""); err != nil {
 		t.Fatalf("tap: %v", err)
 	}
 }

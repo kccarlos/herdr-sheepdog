@@ -591,7 +591,26 @@ def events_for(project, a, events):
         if not d or d.get("folder") != folder or not os.path.isdir(folder or ""):
             continue
         with Store(locate(folder), write=False) as s:
-            for ev, t in events_in(s, seen_all.setdefault(s.slug, {})):
+            seen = seen_all.setdefault(s.slug, {})
+            for t in s.data["tasks"]:
+                pr = t.get("pr") or {}
+                current = pr.get("drift") or {}
+                previous = seen.setdefault("_drift", {}).get(str(t["id"]), {})
+                red_head = previous.get("red_head")
+                for key, message in current.items():
+                    if key == "red" and pr.get("drift_red_head"):
+                        if red_head != pr["drift_red_head"]:
+                            out.append(f"event:drift {s.ref(t)} {message}")
+                            red_head = pr["drift_red_head"]
+                    elif previous.get(key) != message:
+                        out.append(f"event:drift {s.ref(t)} {message}")
+                seen["_drift"][str(t["id"])] = {**current, "red_head": red_head}
+            bases = s.data.get("drift_bases") or []
+            for base in bases:
+                if base not in seen.get("_drift_bases", []):
+                    out.append(f"event:drift local base {base} is ahead of origin")
+            seen["_drift_bases"] = list(bases)
+            for ev, t in events_in(s, seen):
                 # Added while a wake is at work: its own doing, not news.
                 if ev in events and not (ev == "added" and a.get("inflight")):
                     out.append(f"event:{ev} {s.ref(t)}")
@@ -616,9 +635,8 @@ def autopilot_pass(report):
             if eff["every"] and a.get("next_run") and now() >= a["next_run"]:
                 a["next_run"] = next_run(eff["every"], now())
                 queue(a, "schedule")
-            if eff["events"]:
-                for why in events_for(project, a, eff["events"]):
-                    queue(a, why)
+            for why in events_for(project, a, eff["events"] or []):
+                queue(a, why)
             if deliver(project, a) == "delivered":
                 report.setdefault("autopilot", []).append({"project": project, "to": a["inflight"]["to"], "why": a["inflight"]["reason"]})
 
