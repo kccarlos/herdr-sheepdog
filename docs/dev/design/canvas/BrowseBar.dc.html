@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — Files and Changes bar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button,input{font:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<div style="width: 390px; height: {{ h }}px; display: flex; flex-direction: column; flex-shrink: 0; background: {{c.bg}}; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; border-bottom: 1px solid {{c.line}}; box-sizing: border-box">
+  <div style="height: 54px; flex-shrink: 0"></div>
+  <header style="height: 52px; flex-shrink: 0; display: grid; grid-template-columns: 62px minmax(0, 1fr) 62px; align-items: center; padding: 0 4px">
+    <div style="display: flex; justify-content: flex-start">
+      <sc-if value="{{ leftDone }}" hint-placeholder-val="{{ true }}"><button style="height: 44px; border: 0; background: transparent; color: {{c.accentText}}; font-size: 16px; padding: 0 10px">Done</button></sc-if>
+      <sc-if value="{{ leftBack }}" hint-placeholder-val="{{ false }}"><button aria-label="Back" style="width: 44px; height: 44px; border: 0; background: transparent; color: {{c.ink}}; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M15 6l-6 6 6 6"></path></svg></button></sc-if>
+    </div>
+    <div style="display: flex; flex-direction: column; align-items: center; min-width: 0; text-align: center">
+      <span style="max-width: 100%; font-size: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ head }}</span>
+      <span style="max-width: 100%; font-size: 12px; color: {{c.ink2}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ sub }}</span>
+    </div>
+    <div style="display: flex; justify-content: flex-end">
+      <sc-if value="{{ rRefresh }}" hint-placeholder-val="{{ true }}"><button aria-label="Refresh" style="width: 44px; height: 44px; border: 0; background: transparent; color: {{c.ink}}; display: flex; align-items: center; justify-content: center"><svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M21 12a9 9 0 1 1-3-6.700M21 4v5h-5"></path></svg></button></sc-if>
+      <sc-if value="{{ rMore }}" hint-placeholder-val="{{ false }}"><button aria-label="File actions" style="width: 44px; height: 44px; border: 0; background: transparent; color: {{c.ink}}; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="5.5" cy="12" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="18.5" cy="12" r="1.7"></circle></svg></button></sc-if>
+      <sc-if value="{{ rWrap }}" hint-placeholder-val="{{ false }}"><button aria-label="Do not wrap lines" style="width: 44px; height: 44px; border: 0; background: transparent; color: {{c.ink}}; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M4 6h16M4 12h13a3 3 0 0 1 0 6h-4M15 16l-2 2 2 2M4 18h5"></path></svg></button></sc-if>
+    </div>
+  </header>
+  <sc-if value="{{ hasSeg }}" hint-placeholder-val="{{ true }}">
+    <nav aria-label="Files or Changes" style="height: 36px; margin: 2px 16px 8px; padding: 3px; box-sizing: border-box; border-radius: 12px; background: {{c.track}}; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px">
+      <button aria-current="{{ fCurrent }}" style="border: 0; border-radius: 9px; background: {{ fBg }}; box-shadow: {{ fShadow }}; color: {{c.ink}}; font-size: 14px; font-weight: {{ fWeight }}">Files</button>
+      <button aria-current="{{ cCurrent }}" style="border: 0; border-radius: 9px; background: {{ cBg }}; box-shadow: {{ cShadow }}; color: {{c.ink}}; font-size: 14px; font-weight: {{ cWeight }}">Changes<sc-if value="{{ hasCount }}" hint-placeholder-val="{{ true }}"><span style="margin-left: 6px; font-weight: 500; color: {{c.ink2}}; font-variant-numeric: tabular-nums">{{ count }}</span></sc-if></button>
+    </nav>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "head": {"editor": "text", "default": "shop"}, "sub": {"editor": "text", "default": "Work Mac · main"}, "left": {"editor": "enum", "options": ["done", "back"], "default": "done"}, "right": {"editor": "enum", "options": ["refresh", "more", "wrap", "none"], "default": "refresh"}, "seg": {"editor": "enum", "options": ["files", "changes", ""], "default": "files"}, "count": {"editor": "text", "default": "6"}, "$preview": {"width": 390, "height": 152}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "surface2": "#F1EEE7", "track": "#ECE8DF", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "accent": "#D98718", "accentText": "#8A5700", "accentTint": "#FDF1DC", "blocked": "#D99417", "blue": "#1F5F9E", "green": "#1D6B46", "idle": "#5C6370", "red": "#B42318", "side": "#F3F0E8", "selBg": "#E5DFD2", "sel": "#FFFFFF", "shadow": "0 1px 2px rgba(31,31,34,0.12)", "dash": "#CFC9BC", "chevron": "#8E929A", "kw": "#6A46B0", "str": "#1D6B46", "fn": "#1F5F9E", "num": "#8A5700", "add": "#1A8038", "rem": "#BF2924", "addFill": "rgba(52,199,89,0.12)", "remFill": "rgba(255,59,48,0.12)", "addWord": "rgba(52,199,89,0.32)", "remWord": "rgba(255,59,48,0.32)", "scrim": "rgba(31,31,34,0.32)", "wash": "rgba(250,248,243,0.55)", "pop": "0 12px 40px rgba(31,31,34,0.18), 0 0 0 1px #E4E0D7"};
+    const dark = {"bg": "#16181C", "surface": "#1F2126", "surface2": "#26292F", "track": "#26292F", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138", "accent": "#F39C1F", "accentText": "#F5B83D", "accentTint": "#2A2416", "blocked": "#F0A92A", "blue": "#6AA8EB", "green": "#5CC792", "idle": "#9AA1AD", "red": "#F26B5B", "side": "#1B1D22", "selBg": "#2C2F36", "sel": "#3A3D44", "shadow": "0 1px 2px rgba(0,0,0,0.5)", "dash": "#3E4148", "chevron": "#8E929A", "kw": "#B195F0", "str": "#5CC792", "fn": "#6AA8EB", "num": "#F5B83D", "add": "#6BD185", "rem": "#FF7A73", "addFill": "rgba(48,209,88,0.12)", "remFill": "rgba(255,69,58,0.12)", "addWord": "rgba(48,209,88,0.32)", "remWord": "rgba(255,69,58,0.32)", "scrim": "rgba(0,0,0,0.5)", "wash": "rgba(22,24,28,0.55)", "pop": "0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px #2E3138"};
+    const d = !!this.props.dark;
+    const c = d ? dark : light;
+    const left = this.props.left ?? 'done';
+    const right = this.props.right ?? 'refresh';
+    const seg = this.props.seg ?? 'files';
+    const f = seg === 'files';
+    const count = String(this.props.count ?? '');
+    return { c, dark: d, head: this.props.head ?? 'shop', sub: this.props.sub ?? 'Work Mac · main',
+      leftDone: left === 'done', leftBack: left === 'back',
+      rRefresh: right === 'refresh', rMore: right === 'more', rWrap: right === 'wrap',
+      hasSeg: !!seg, h: seg ? 152 : 106, count, hasCount: count !== '',
+      fCurrent: f ? 'page' : 'false', cCurrent: f ? 'false' : 'page',
+      fBg: f ? c.sel : 'transparent', cBg: f ? 'transparent' : c.sel,
+      fShadow: f ? c.shadow : 'none', cShadow: f ? 'none' : c.shadow,
+      fWeight: f ? 600 : 500, cWeight: f ? 500 : 600 };
+  }
+}
+</script>
+</body>
+</html>
