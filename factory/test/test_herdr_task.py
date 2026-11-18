@@ -4077,6 +4077,10 @@ class GateReview(unittest.TestCase):
                 args = argparse.Namespace(id="SHEP-13", json=True, folder=None)
                 self.commands.cmd_state(args, state)
                 self.assertNotIn("review_followup", self.task)
+        merged = {"id": 14, "state": "ready", "review_followup": "Old findings"}
+        self.commands.finish(self.store, merged)
+        self.assertEqual(merged["state"], "done")
+        self.assertNotIn("review_followup", merged)
 
     def test_ready_again_without_fixing_the_changes_starts_none(self):
         self.ready()
@@ -5974,6 +5978,7 @@ class Scheduled(unittest.TestCase):
         import herdr_task.tick as tick
         from herdr_task.base import Fail
         self.commands, self.tick, self.store_mod, self.Fail = commands, tick, store, Fail
+        self.real_begin = commands.begin
         self.argparse, self.io, self.redirect = argparse, io, contextlib.redirect_stdout
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -6177,6 +6182,35 @@ class Scheduled(unittest.TestCase):
                 mock.patch.object(queues, "detail", lambda k: k), \
                 mock.patch.object(ask, "open_asks", return_value=[{"question": "Ship?", "kind": "owner"}]):
             self.assertEqual(self.tick_at(None), [])
+
+    def test_queued_restart_delivers_saved_review_findings(self):
+        from unittest import mock
+        self.busy_folder(1, [])
+        self.add("Waiting for review fixes", here=True)
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            s.find(2).update(state="running", review_followup="Fix the wording")
+            s.dirty = True
+        messages = []
+
+        def launch(s, task, argv, message, parent=None):
+            messages.append(message)
+            s.dirty = True
+            return {"address": "t2"}
+
+        with mock.patch.object(self.store_mod.Store, "max_running", return_value=1), \
+                mock.patch.object(self.tick, "begin", self.real_begin), \
+                mock.patch.object(self.commands, "start_refusal", return_value=None), \
+                mock.patch.object(self.commands, "parent_for", return_value=None), \
+                mock.patch.object(self.commands, "brief", return_value="Continue the task."), \
+                mock.patch.object(self.commands, "launch", launch):
+            self.assertTrue(self.run_cmd(self.commands.cmd_start, id="2")["queued"])
+            self.assertEqual(self.task(2)["review_followup"], "Fix the wording")
+            with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+                s.find(1)["state"] = "done"
+                s.dirty = True
+            self.assertEqual(self.tick_at(None), ["APP-2"])
+        self.assertEqual(messages, ["Continue the task.\n\nFix the wording"])
+        self.assertNotIn("review_followup", self.task(2))
 
     def test_without_priority_the_queue_is_oldest_first_within_the_cap(self):
         from unittest import mock
