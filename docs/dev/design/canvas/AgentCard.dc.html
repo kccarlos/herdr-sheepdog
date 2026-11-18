@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — agent card</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<article aria-label="{{ a.name }}, {{ stateText }}" style="position: relative; width: {{ w }}px; box-sizing: border-box; border-radius: 14px; background: {{c.surface}}; border: {{ border }}; padding: 12px 12px 12px 14px; display: flex; flex-direction: column; gap: 10px; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <sc-if value="{{ unread }}" hint-placeholder-val="{{ false }}">
+    <span role="img" aria-label="Unread" style="position: absolute; left: 3px; top: 18px; width: 8px; height: 8px; border-radius: 4px; background: {{c.accent}}"></span>
+  </sc-if>
+  <div style="display: flex; gap: 10px; align-items: flex-start">
+    <button aria-expanded="{{ expandedText }}" aria-label="{{ a.name }}. {{ toggleLabel }}" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; color: {{c.ink}}; text-align: left; padding: 0; display: flex; flex-direction: column; gap: 3px">
+      <span style="display: flex; align-items: center; gap: 7px; width: 100%">
+        <span style="width: 8px; height: 8px; border-radius: 4px; background: {{ dot }}; flex-shrink: 0"></span>
+        <span style="font-size: 16px; font-weight: 600">{{ a.name }}</span>
+        <sc-if value="{{ pinned }}" hint-placeholder-val="{{ false }}">
+          <svg width="12" height="12" viewBox="0 0 24 24" role="img" aria-label="Pinned" fill="{{c.ink2}}" style="flex-shrink: 0; margin-left: -2px"><path d="M9 3h6l-1 6 3 3v2h-4v6l-1 1-1-1v-6H7v-2l3-3z"></path></svg>
+        </sc-if>
+        <sc-if value="{{ muted }}" hint-placeholder-val="{{ false }}">
+          <svg width="12" height="12" viewBox="0 0 24 24" role="img" aria-label="Muted space" fill="none" stroke="{{c.ink2}}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-left: -2px"><path d="M6.5 8a5.5 5.5 0 0 1 8.9-4.3M18 9c0 5 2 7 2 7H8M6.3 11c-.5 2.700-1.300 4-2.300 5h4M13.700 20a2 2 0 0 1-3.400 0M3 3l18 18"></path></svg>
+        </sc-if>
+        <span style="font-size: 12px; color: {{c.ink2}}">{{ a.kind }}</span>
+        <span style="flex-grow: 1"></span>
+        <span style="font-size: 13px; font-weight: {{ stateWeight }}; color: {{ stateColor }}; white-space: nowrap">{{ stateText }}</span>
+      </span>
+      <span style="display: flex; align-items: center; gap: 4px; padding-left: 15px; font-size: 14px; color: {{c.ink2}}; width: 100%; box-sizing: border-box">
+        <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ a.line }}</span>
+        <sc-if value="{{ foldable }}" hint-placeholder-val="{{ true }}">
+          <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="{{ chevron }}"></path></svg>
+        </sc-if>
+      </span>
+    </button>
+    <button aria-label="Open {{ a.name }}'s window" style="width: 36px; height: 36px; flex-shrink: 0; border-radius: 18px; border: 1px solid {{c.line}}; background: {{c.surface2}}; color: {{c.ink}}; display: flex; align-items: center; justify-content: center; margin-top: -4px">
+      <svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"></rect><path d="M7 9l3 3-3 3M12.5 15H17"></path></svg>
+    </button>
+  </div>
+
+  <sc-if value="{{ held }}" hint-placeholder-val="{{ false }}">
+    <span style="display: flex; gap: 6px; padding-left: 15px; font-size: 13px; line-height: 18px; color: {{c.ink2}}"><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px"><path d="M6.5 8a5.5 5.5 0 0 1 8.9-4.3M18 9c0 5 2 7 2 7H8M6.3 11c-.5 2.700-1.300 4-2.300 5h4M13.700 20a2 2 0 0 1-3.400 0M3 3l18 18"></path></svg>Muted space. Sheepdog did not announce this, so answer it here.</span>
+  </sc-if>
+  <sc-if value="{{ blocked }}" hint-placeholder-val="{{ false }}">
+    <div style="border-radius: 12px; background: {{c.accentTint}}; padding: 12px; display: flex; flex-direction: column; gap: 10px">
+      <span style="font-size: 15px; line-height: 20px; font-weight: 600">{{ p.summary }}</span>
+      <div style="border-radius: 8px; background: {{c.code}}; padding: 7px 10px; font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 18px; color: {{c.ink}}">{{ p.command }}</div>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px">
+        <sc-for list="{{ options }}" as="o" hint-placeholder-count="3">
+          <button style="min-height: 40px; padding: 8px 14px; box-sizing: border-box; border-radius: 20px; border: {{ o.border }}; background: {{ o.bg }}; color: {{ o.fg }}; font-size: 15px; line-height: 20px; font-weight: {{ o.weight }}; text-align: left; flex: {{ o.flex }}">{{ o.label }}</button>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ showDetails }}" hint-placeholder-val="{{ false }}">
+    <div style="display: flex; flex-direction: column; gap: 10px; padding: 10px 0 0 15px; border-top: 1px solid {{c.line}}">
+      <sc-if value="{{ hasWorkingOn }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; flex-direction: column; gap: 2px">
+          <span style="font-size: 12px; font-weight: 600; color: {{c.ink2}}">Working on</span>
+          <span style="font-size: 15px; line-height: 20px">{{ a.currentTask }}</span>
+        </div>
+      </sc-if>
+      <sc-if value="{{ hasResult }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; flex-direction: column; gap: 2px">
+          <span style="font-size: 12px; font-weight: 600; color: {{c.ink2}}">Last result · {{ r.at }}</span>
+          <span style="font-size: 15px; line-height: 20px">{{ r.spoken }}</span>
+          <sc-if value="{{ hasDetail }}" hint-placeholder-val="{{ false }}">
+            <button style="align-self: flex-start; border: 0; background: transparent; color: {{c.accentText}}; padding: 4px 0 0; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 4px">Detail<svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></button>
+          </sc-if>
+        </div>
+      </sc-if>
+      <sc-if value="{{ hasJournal }}" hint-placeholder-val="{{ true }}">
+        <div style="border-radius: 12px; background: {{c.surface2}}; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px">
+          <span style="font-size: 12px; font-weight: 600; color: {{c.ink2}}">{{ a.name }} wrote when {{ j.event }} · {{ j.at }}</span>
+          <span style="font-size: 14px; line-height: 19px">{{ j.text }}</span>
+          <div style="display: flex; flex-wrap: wrap; gap: 5px; font-size: 12px; color: {{c.ink2}}">
+            <sc-for list="{{ j.files }}" as="f" hint-placeholder-count="2">
+              <sc-if value="{{ chipPlain }}" hint-placeholder-val="{{ true }}"><span style="padding: 2px 7px; border-radius: 6px; background: {{c.surface}}; border: 1px solid {{c.line}}; font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px">{{ f.n }}</span></sc-if>
+              <sc-if value="{{ chipLink }}" hint-placeholder-val="{{ false }}"><button aria-label="Open {{ f.n }}" style="min-height: 30px; padding: 2px 8px; box-sizing: border-box; border-radius: 6px; background: {{c.surface}}; border: 1px solid {{c.line}}; color: {{c.accentText}}; font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; font-weight: 500">{{ f.n }}</button></sc-if>
+            </sc-for>
+            <span style="padding: 2px 4px">{{ j.tools }}</span>
+          </div>
+        </div>
+      </sc-if>
+      <sc-if value="{{ noJournal }}" hint-placeholder-val="{{ false }}">
+        <span style="font-size: 13px; color: {{c.ink2}}">Nothing from {{ a.name }} yet. Its first message shows here when it stops.</span>
+      </sc-if>
+      <sc-if value="{{ browse }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; flex-wrap: wrap; gap: 8px">
+          <button style="min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface2}}; color: {{c.ink}}; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>Files</button>
+          <button style="min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface2}}; color: {{c.ink}}; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v8M8 8h8M8 19h8"></path></svg>Changes · 6</button>
+        </div>
+      </sc-if>
+      <sc-if value="{{ showAttn }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; flex-wrap: wrap; gap: 0 14px">
+          <button style="min-height: 44px; border: 0; background: transparent; padding: 0; color: {{c.accentText}}; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="{{ pinIcon }}"></path></svg>{{ pinLabel }}</button>
+          <sc-if value="{{ canMarkUnread }}" hint-placeholder-val="{{ false }}">
+            <button style="min-height: 44px; border: 0; background: transparent; padding: 0; color: {{c.accentText}}; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8"></circle></svg>Mark as unread</button>
+          </sc-if>
+        </div>
+        <sc-if value="{{ localOnly }}" hint-placeholder-val="{{ false }}">
+          <span style="font-size: 12px; color: {{c.ink2}}">Seen and pinned on this computer only</span>
+        </sc-if>
+      </sc-if>
+      <sc-if value="{{ hasAnswered }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; flex-direction: column; gap: 2px">
+          <span style="font-size: 12px; font-weight: 600; color: {{c.ink2}}">Last question (answered)</span>
+          <span style="font-size: 14px; line-height: 19px; color: {{c.ink2}}">{{ a.answered }}</span>
+        </div>
+      </sc-if>
+      <sc-if value="{{ showHistory }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; flex-direction: column; gap: 4px">
+          <span style="font-size: 12px; font-weight: 600; color: {{c.ink2}}">Earlier</span>
+          <sc-for list="{{ history }}" as="h" hint-placeholder-count="2">
+            <span style="display: flex; gap: 8px; font-size: 13px; line-height: 18px; color: {{c.ink2}}"><span style="width: 74px; flex-shrink: 0; font-variant-numeric: tabular-nums">{{ h.at }} · {{ h.event }}</span><span style="color: {{c.ink}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ h.text }}</span></span>
+          </sc-for>
+        </div>
+      </sc-if>
+      <span style="display: flex; align-items: center; gap: 5px; font-size: 12px; color: {{c.ink2}}">
+        <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>{{ a.place }}
+      </span>
+    </div>
+  </sc-if>
+</article>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"agent":{"editor":"enum","options":["auth-fix","payments","api-docs","search","migrate","e2e","blog","photos","claude-auth","codex-payments","claude-migration","codex-docs"],"default":"migrate"},"unread":{"editor":"boolean","default":false},"pinned":{"editor":"boolean","default":false},"muted":{"editor":"boolean","default":false},"attn":{"editor":"boolean","default":true},"local":{"editor":"boolean","default":false},"browse":{"editor":"boolean","default":false},"open":{"editor":"boolean","default":true},"primary":{"editor":"boolean","default":true},"history":{"editor":"boolean","default":false},"dark":{"editor":"boolean","default":false},"w":{"editor":"int","default":358},"$preview":{"width":358,"height":330}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = { surface: '#FFFFFF', surface2: '#F1EEE7', code: 'rgba(31,31,34,0.06)', ink: '#1F1F22', ink2: '#6B6E75', line: '#E4E0D7', accent: '#D98718', accentText: '#8A5700', accentTint: '#FDF1DC', blocked: '#D99417', blue: '#1F5F9E', green: '#1D6B46', idle: '#5C6370', red: '#B42318' };
+    const dark = { surface: '#1F2126', surface2: '#26292F', code: 'rgba(245,242,234,0.08)', ink: '#F5F2EA', ink2: '#A3A7AF', line: '#2E3138', accent: '#F39C1F', accentText: '#F5B83D', accentTint: '#2A2416', blocked: '#F0A92A', blue: '#6AA8EB', green: '#5CC792', idle: '#9AA1AD', red: '#F26B5B' };
+    const c = this.props.dark ? dark : light;
+    const J = (at, event, text, files, tools) => ({ at, event, text, files: (files || []).map((n) => ({ n })), tools: Object.entries(tools || {}).map(([k, v]) => k + ' ×' + v).join(' · ') });
+    const A = {
+      'claude-auth': { name: 'claude-auth', kind: 'claude', state: 'done', since: '6 min', line: 'Fix the login redirect loop', place: 'shop',
+        result: { spoken: 'claude-auth finished: the login redirect loop is fixed.', at: '9:32', detail: true },
+        journal: [J('9:32', 'done', 'Fixed the login redirect loop: the session cookie was set on the wrong path. The report is in docs/reports.', ['session.go', 'session_test.go', 'login-loop.md'], { Edit: 5, Bash: 3 })] },
+      'codex-payments': { name: 'codex-payments', kind: 'codex', state: 'working', since: '2 min', line: 'Add retries to the payment webhook', currentTask: 'Add retries to the payment webhook, with a cap', place: 'shop',
+        journal: [J('9:35', 'idle', 'Backoff is in. The webhook tests pass. Next is a test for the retry limit.', ['webhook.go'], { Edit: 3, Bash: 1 })] },
+      'claude-migration': { name: 'claude-migration', kind: 'claude', state: 'idle', since: '20 min', line: 'Run the database migration on the staging copy', place: 'shop',
+        result: { spoken: 'claude-migration finished: the migration ran on the staging copy.', at: '9:18', detail: false },
+        journal: [J('9:18', 'done', 'The migration ran on the staging copy without errors.', ['migrate.sql'], { Bash: 2 })] },
+      'codex-docs': { name: 'codex-docs', kind: 'codex', state: 'blocked', since: '1 min', line: 'Update the install section of the README', place: 'shop',
+        pending: { summary: 'codex-docs asks to run npm run docs:build in shop', command: 'npm run docs:build', options: ['Yes', 'Yes, and don’t ask again for npm run commands in shop', 'No, and tell Codex what to do differently'] } },
+      'auth-fix': { name: 'auth-fix', kind: 'claude', state: 'blocked', since: '4 min', line: 'Fix the login redirect loop', place: 'webapp',
+        pending: { summary: 'auth-fix asks to run npm test in webapp', command: 'npm test', options: ['Yes', 'Yes, and don’t ask again for npm test commands in webapp', 'No, and tell Claude what to do differently'] } },
+      'blog': { name: 'blog', kind: 'gemini', state: 'blocked', since: '1 min', line: 'Draft the release post', place: 'site',
+        pending: { summary: 'blog asks to run a shell command', command: 'npm run deploy -- --env staging', options: ['Yes, allow once', 'Yes, allow always', 'No, suggest changes'] } },
+      'payments': { name: 'payments', kind: 'claude', state: 'working', since: '2 min', line: 'Add retries to the payment webhook', currentTask: 'Add retries to the payment webhook, with a cap, and a test for the cap', place: 'webapp',
+        journal: [J('10:31', 'idle', 'Backoff is in: 3 tries at 2 s, 4 s and 8 s. The 18 webhook tests pass. Next I’ll add a test for the retry limit.', ['stripe.ts', 'stripe.test.ts'], { Edit: 4, Read: 3, Bash: 2 })] },
+      'api-docs': { name: 'api-docs', kind: 'codex', state: 'working', since: '12 min', line: 'Update the install section of the README', currentTask: 'Update the install section of the README for Homebrew and Linux', place: 'docs-site', journal: [] },
+      'search': { name: 'search', kind: 'gemini', state: 'working', since: '31 min', line: 'Rebuild the search index on the new schema', currentTask: 'Rebuild the search index on the new schema and open a PR', place: 'api', answered: 'Run the benchmark against staging? — Yes',
+        journal: [J('9:52', 'blocked', 'May I run the benchmark against staging?', [], {}), J('10:08', 'idle', 'Indexer moved to the new schema; old index kept until the PR lands.', ['indexer.go', 'schema.sql'], { Edit: 6 }), J('10:24', 'idle', 'p95 went from 41 ms to 29 ms on the benchmark.', ['indexer.go', 'schema.sql', 'bench_test.go'], { Edit: 9, Bash: 5 })] },
+      'migrate': { name: 'migrate', kind: 'agy', state: 'done', since: '18 min', line: 'Move the orders table to the new schema', place: 'api',
+        result: { spoken: 'migrate finished: the orders migration ran clean and the tests pass.', at: '10:22', detail: true },
+        journal: [J('9:40', 'idle', 'Wrote the migration; waiting for the test database.', ['0042_orders_v2.sql'], { Edit: 2 }), J('10:05', 'idle', 'Model updated for the new columns.', ['order.ts', 'order_items.ts'], { Edit: 4 }), J('10:22', 'done', 'Done. I added 0042_orders_v2.sql, updated the model and ran the suite: 214 passed.', ['0042_orders_v2.sql', 'order.ts', 'order_items.ts'], { Edit: 6, Bash: 4 })] },
+      'e2e': { name: 'e2e', kind: 'claude', state: 'idle', since: '40 min', line: 'Checkout e2e flake', place: 'webapp',
+        journal: [J('10:02', 'idle', 'The flake was a race on the payment iframe. I wait for its ready event now; 20 runs passed.', ['checkout.spec.ts'], { Bash: 21, Edit: 2 })] },
+      'photos': { name: 'photos', kind: 'claude', state: 'idle', since: '40 min', line: 'Dedupe the photo library script', place: 'scripts',
+        result: { spoken: 'photos finished: 312 duplicates moved to a folder.', at: '9:58', detail: false },
+        journal: [J('9:58', 'done', 'Nothing was deleted. Check ~/Pictures/dupes before you empty it.', ['dedupe.py'], { Bash: 3, Edit: 1 })] }
+    };
+    const a = Object.assign({ journal: [], answered: '' }, A[this.props.agent ?? 'migrate']);
+    const blocked = a.state === 'blocked';
+    const open = this.props.open ?? true;
+    const primary = this.props.primary ?? true;
+    const color = { blocked: c.blocked, working: c.blue, done: c.green, idle: c.idle }[a.state];
+    const word = { blocked: 'Blocked', working: 'Working', done: 'Done', idle: 'Idle' }[a.state];
+    const options = blocked ? a.pending.options.map((label, i) => {
+      const first = i === 0;
+      const neg = /^No\b/.test(label);
+      return { label, flex: label.length > 18 ? '1 1 100%' : '0 0 auto', weight: first ? 600 : 400,
+        bg: first && primary ? c.accent : c.surface, fg: first && primary ? '#1F1F22' : (neg ? c.red : c.ink),
+        border: first && primary ? '0' : (first ? '1px solid ' + c.blocked : '1px solid ' + c.line) };
+    }) : [];
+    const showDetails = !blocked && !!open;
+    const j = a.journal.length ? a.journal[a.journal.length - 1] : null;
+    return {
+      c, a, w: this.props.w ?? 358, options, p: a.pending || {}, r: a.result || {}, blocked, showDetails,
+      unread: !!this.props.unread, pinned: !!this.props.pinned, muted: !!this.props.muted,
+      held: !!this.props.muted && blocked,
+      browse: !!this.props.browse && showDetails,
+      chipLink: !!this.props.browse, chipPlain: !this.props.browse,
+      showAttn: showDetails && (this.props.attn ?? true),
+      pinLabel: this.props.pinned ? 'Unpin' : 'Pin to top',
+      pinIcon: this.props.pinned ? 'M9 3h6l-1 6 3 3v2h-4v6l-1 1-1-1v-6H7v-2l3-3zM4 4l16 16' : 'M9 3h6l-1 6 3 3v2h-4v6l-1 1-1-1v-6H7v-2l3-3z',
+      canMarkUnread: (a.state === 'done' || a.state === 'idle') && !this.props.unread,
+      localOnly: !!this.props.local,
+      j: j || { files: [] },
+      hasJournal: !!j, noJournal: !j,
+      hasWorkingOn: a.state === 'working' && !!a.currentTask,
+      hasResult: !!a.result, hasDetail: !!(a.result && a.result.detail),
+      hasAnswered: !!a.answered,
+      showHistory: !!this.props.history && a.journal.length > 1,
+      history: a.journal.slice(0, -1).reverse().slice(0, 3),
+      dot: color, stateColor: blocked ? c.accentText : color, stateText: word + ' · ' + a.since,
+      foldable: !blocked,
+      chevron: showDetails ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6',
+      expandedText: showDetails ? 'true' : 'false',
+      toggleLabel: blocked ? 'Waiting on you' : (showDetails ? 'Hide details' : 'Show details'),
+      stateWeight: blocked ? 600 : 500,
+      border: blocked ? (primary ? '1.5px solid ' + c.accent : '1px solid ' + c.blocked) : '1px solid ' + c.line
+    };
+  }
+}
+</script>
+</body>
+</html>

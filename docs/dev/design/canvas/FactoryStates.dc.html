@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — factory empty and error states</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button,input{font:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<div style="width: 1250px; height: 844px; box-sizing: border-box; padding: 40px; display: flex; flex-direction: column; gap: 24px; background: #F3F0E8; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <div style="display: flex; flex-direction: column; gap: 4px">
+    <h1 style="margin: 0; font-family: Outfit, Inter, system-ui, sans-serif; font-size: 28px; font-weight: 600">Factory states, each with a plain fix</h1>
+    <p style="margin: 0; font-size: 15px; color: #6B6E75">The first is a space page with no factory. The other two show in the factory section of the space page. Two of the three need nothing from the owner, and say so.</p>
+  </div>
+  <div style="flex-grow: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px">
+
+    <section aria-label="Factory not started" style="border-radius: 24px; background: #FAF8F3; border: 1px solid #E4E0D7; padding: 28px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center">
+      <span style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; color: #6B6E75">Empty</span>
+      <svg width="44" height="44" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#6B6E75" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20V10l5 3V10l5 3V5h4l1 15zM3 20h18"></path></svg>
+      <h2 style="margin: 0; font-family: Outfit, Inter, system-ui, sans-serif; font-size: 22px; font-weight: 600">No factory project yet</h2>
+      <p style="margin: 0; font-size: 16px; line-height: 23px; color: #1F1F22">A factory builds a goal for you in this folder and only speaks when it needs you. Start a factory here opens a shell that checks this computer first.</p>
+      <button style="min-height: 44px; padding: 0 20px; border-radius: 22px; border: 0; background: #D98718; color: #1F1F22; font-size: 15px; font-weight: 600">Start a factory here</button>
+      <span style="font-size: 14px; line-height: 20px; color: #6B6E75">Runs sheepdog factory start in a shell. Proposed: today only factory doctor exists.</span>
+    </section>
+
+    <section aria-label="Quota unknown" style="border-radius: 24px; background: #FAF8F3; border: 1px solid #E4E0D7; padding: 28px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center">
+      <span style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; color: #6B6E75">Unknown, not an error</span>
+      <svg width="44" height="44" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#6B6E75" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16a8 8 0 0 1 16 0M12 16l3-5M9.500 9.500a2.500 2.500 0 0 1 4.300 1.700"></path><path d="M12 20h.01"></path></svg>
+      <h2 style="margin: 0; font-family: Outfit, Inter, system-ui, sans-serif; font-size: 22px; font-weight: 600">Quota unknown</h2>
+      <p style="margin: 0; font-size: 16px; line-height: 23px">Sheepdog can't see how much Claude, Codex or agy use is left, because codexbar isn't installed. Work carries on. An agent moves to another model only when its provider says it is out.</p>
+      <div style="width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 10px; background: #F1EEE7; display: flex; flex-direction: column; gap: 4px; font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 13px; text-align: left"><span>claude   unknown (codexbar not installed)</span><span>codex    unknown (codexbar not installed)</span></div>
+      <span style="font-size: 14px; line-height: 20px; color: #6B6E75">Nothing to do. To see quota, install CodexBar on your computer.</span>
+    </section>
+
+    <section aria-label="Coordinator restarting" style="border-radius: 24px; background: #FAF8F3; border: 1px solid #E4E0D7; padding: 28px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center">
+      <span style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; color: #6B6E75">Recovering by itself</span>
+      <svg width="44" height="44" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#6B6E75" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.300-5.600M20 4v4h-4"></path></svg>
+      <h2 style="margin: 0; font-family: Outfit, Inter, system-ui, sans-serif; font-size: 22px; font-weight: 600">Coordinator restarting</h2>
+      <p style="margin: 0; font-size: 16px; line-height: 23px">The coordinator for herdr-sheepdog stopped answering for 20 minutes. Sheepdog started a fresh one from the saved tasks. Workers keep going and nothing was lost.</p>
+      <span style="font-size: 14px; line-height: 20px; color: #6B6E75">Nothing to do. If it can't recover, you get one alert that the factory has stopped.</span>
+      <button style="min-height: 44px; padding: 0 20px; border-radius: 22px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-size: 15px; font-weight: 600">Open its terminal</button>
+    </section>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview": {"width": 1250, "height": 844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

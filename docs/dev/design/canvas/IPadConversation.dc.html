@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — iPad, Conversation</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button,input{font:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<div style="width: 1376px; height: 1032px; display: flex; overflow: hidden; background: #FAF8F3; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <dc-import name="IPadSidebar" sel="conversation" style="display: block; width: 390px; height: 1032px; flex-shrink: 0" hint-size="390px,1032px"></dc-import>
+
+  <section aria-label="Conversation" style="width: 986px; height: 1032px; display: flex; flex-direction: column">
+    <div style="height: 24px; flex-shrink: 0"></div>
+    <header style="height: 52px; flex-shrink: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; padding: 0 10px; border-bottom: 1px solid #E4E0D7">
+      <span></span>
+      <div style="display: flex; flex-direction: column; align-items: center">
+        <span style="font-size: 17px; font-weight: 600">Conversation</span>
+        <span style="font-size: 12px; color: #6B6E75">Talking to Work Mac</span>
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 2px">
+        <button aria-label="New conversation" style="width: 40px; height: 40px; border: 0; border-radius: 20px; background: transparent; color: #1F1F22; display: flex; align-items: center; justify-content: center"><svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"></path></svg></button>
+        <button aria-label="More" style="width: 40px; height: 40px; border: 0; border-radius: 20px; background: transparent; color: #1F1F22; display: flex; align-items: center; justify-content: center"><svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="5.5" cy="12" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="18.5" cy="12" r="1.7"></circle></svg></button>
+      </div>
+    </header>
+
+    <main style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; align-items: center; padding: 16px 24px 0">
+      <div style="width: 100%; max-width: 720px; display: flex; flex-direction: column; gap: 10px">
+        <sc-for list="{{ msgs }}" as="m" hint-placeholder-count="12">
+          <sc-if value="{{ m.divider }}" hint-placeholder-val="{{ false }}">
+            <div style="display: flex; align-items: center; gap: 10px; font-size: 12px; color: #6B6E75; padding: 2px 0"><span style="flex-grow: 1; height: 1px; background: #E4E0D7"></span><span>{{ m.text }}</span><span style="flex-grow: 1; height: 1px; background: #E4E0D7"></span></div>
+          </sc-if>
+          <sc-if value="{{ m.bubble }}" hint-placeholder-val="{{ true }}">
+            <div style="align-self: {{ m.align }}; max-width: 70%; padding: 10px 16px; border-radius: {{ m.radius }}; background: {{ m.bg }}; border: {{ m.border }}; font-size: 17px; line-height: 23px">{{ m.text }}</div>
+          </sc-if>
+        </sc-for>
+      </div>
+    </main>
+
+    <div style="flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 10px 24px 26px">
+      <section aria-label="auth-fix needs your answer" style="width: 100%; max-width: 720px; box-sizing: border-box; padding: 14px 16px; border-radius: 18px; background: #FFFFFF; border: 1.5px solid #D99417; box-shadow: 0 8px 24px rgba(31,31,34,0.10); display: flex; align-items: center; gap: 14px; flex-wrap: wrap">
+        <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 2px">
+          <span style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: #6B6E75"><span style="width: 7px; height: 7px; border-radius: 4px; background: #D99417"></span><span style="font-weight: 600; color: #1F1F22">auth-fix</span> · 4 min</span>
+          <span style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap"><span style="font-size: 17px; font-weight: 600">auth-fix asks to run npm test in webapp</span><span style="border-radius: 7px; background: #F1EEE7; padding: 3px 8px; font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 13px">npm test</span></span>
+        </div>
+        <div style="flex: 1 1 100%; display: flex; gap: 8px; flex-wrap: wrap">
+          <button style="min-height: 42px; padding: 6px 22px; border-radius: 21px; border: 0; background: #D98718; color: #1F1F22; font-size: 15px; font-weight: 600">Yes</button>
+          <button style="min-height: 42px; padding: 6px 14px; border-radius: 21px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-size: 15px">Yes, and don’t ask again for npm test commands in webapp</button>
+          <button style="min-height: 42px; padding: 6px 14px; border-radius: 21px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #B42318; font-size: 15px">No, and tell Claude what to do differently</button>
+        </div>
+      </section>
+      <div style="height: 60px; display: flex; justify-content: center">
+        <dc-import name="Dock" label="Work Mac" status="Listening" mode="quiet" style="display: block; width: 366px; height: 60px" hint-size="366px,60px"></dc-import>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1376,"height":1032}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const you = { bubble: true, divider: false, align: 'flex-end', radius: '22px 22px 6px 22px', bg: '#ECE8DF', border: '0' };
+    const dog = { bubble: true, divider: false, align: 'flex-start', radius: '22px 22px 22px 6px', bg: '#FFFFFF', border: '1px solid #E4E0D7' };
+    const div = (text) => ({ bubble: false, divider: true, text });
+    const msgs = [
+      div('Talking to Work Mac · 10:14'),
+      Object.assign({ text: 'What’s going on?' }, you),
+      Object.assign({ text: 'auth-fix found the login bug and wants to run the tests. api-docs, payments and search are still working.' }, dog),
+      Object.assign({ text: 'What did search change?' }, you),
+      Object.assign({ text: 'It rebuilt the index on the new schema. Queries are about 30% faster in its benchmark.' }, dog),
+      div('migrate finished · 10:22'),
+      Object.assign({ text: 'migrate is done. Three tables changed and the tests pass.' }, dog),
+      Object.assign({ text: 'Tell search to open a PR.' }, you),
+      Object.assign({ text: 'Done. search is opening the PR now.' }, dog),
+      Object.assign({ text: 'On your home Mac, blog is waiting for you. It wants to publish the draft to staging.' }, dog),
+      Object.assign({ text: 'Let me look at auth-fix first.' }, you),
+      Object.assign({ text: 'Its question is pinned below. You can also open its window from the sidebar.' }, dog)
+    ];
+    return { msgs };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — agent card states</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 1260px; height: 1120px; box-sizing: border-box; padding: 40px; background: #FAF8F3; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; display: grid; grid-template-columns: repeat(3, 358px); column-gap: 53px; align-items: start">
+  <div style="display: flex; flex-direction: column; gap: 14px">
+    <div style="display: flex; flex-direction: column; gap: 2px"><h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 20px; font-weight: 700">Collapsed</h2><span style="font-size: 13px; line-height: 18px; color: #6B6E75">Line two: current_task, else last_task, else the agent’s own title (e2e was started by hand).</span></div>
+    <sc-for list="{{ collapsed }}" as="r" hint-placeholder-count="5">
+      <dc-import name="AgentCard" agent="{{ r }}" open="{{ false }}" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,70px"></dc-import>
+    </sc-for>
+    <button style="align-self: flex-start; border: 0; background: transparent; color: #6B6E75; padding: 4px 2px; display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500"><svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>Not running (2)</button>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 14px">
+    <div style="display: flex; flex-direction: column; gap: 2px"><h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 20px; font-weight: 700">Expanded</h2><span style="font-size: 13px; line-height: 18px; color: #6B6E75">Working on · last result (with Detail) · the newest journal entry · Pin to top, Mark as unread · the space. Only what the daemon sent.</span></div>
+    <sc-for list="{{ expanded }}" as="r" hint-placeholder-count="3">
+      <dc-import name="AgentCard" agent="{{ r }}" open="{{ true }}" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,230px"></dc-import>
+    </sc-for>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 14px">
+    <div style="display: flex; flex-direction: column; gap: 2px"><h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 20px; font-weight: 700">Waiting on you</h2><span style="font-size: 13px; line-height: 18px; color: #6B6E75">Never folds. Summary, command, and the agent’s own option labels, never shortened.</span></div>
+    <dc-import name="AgentCard" agent="auth-fix" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,260px"></dc-import>
+    <dc-import name="AgentCard" agent="blog" primary="{{ false }}" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,200px"></dc-import>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1260,"height":1120}}'>
+class Component extends DCLogic {
+  renderVals() { return { collapsed: ['payments', 'api-docs', 'migrate', 'e2e', 'photos'], expanded: ['payments', 'api-docs', 'migrate'] }; }
+}
+</script>
+</body>
+</html>

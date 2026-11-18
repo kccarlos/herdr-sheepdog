@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — the shell window running factory start</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button,input{font:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; display: flex; flex-direction: column; overflow: hidden; background: #FAF8F3; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <div style="height: 54px; flex-shrink: 0"></div>
+  <header style="height: 52px; flex-shrink: 0; display: grid; grid-template-columns: 52px minmax(0, 1fr) 52px; align-items: center; padding: 0 4px; border-bottom: 1px solid #E4E0D7">
+    <button aria-label="Back" style="width: 44px; height: 44px; border: 0; background: transparent; color: #1F1F22; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg></button>
+    <div style="display: flex; flex-direction: column; align-items: center; min-width: 0">
+      <span style="font-size: 17px; font-weight: 600">Shell · blog-engine</span>
+      <span style="font-size: 12px; color: #6B6E75">~/code/blog-engine</span>
+    </div>
+    <button aria-label="Shell actions" style="width: 44px; height: 44px; border: 0; background: transparent; color: #1F1F22; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="5.5" cy="12" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="18.5" cy="12" r="1.7"></circle></svg></button>
+  </header>
+
+  <main aria-label="Terminal" style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 10px 14px; font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; line-height: 18px; white-space: pre; color: #1F1F22">$ sheepdog factory start
+Checking this computer
+<span style="color: #1D6B46">ok   </span> engine and Python
+<span style="color: #1D6B46">ok   </span> git repository, branch main
+<span style="color: #1D6B46">ok   </span> claude and codex signed in
+<span style="color: #8A5700">WARN </span> gh is not signed in
+      fix: run  gh auth login
+      until then: merges stay local
+<span style="color: #8A5700">WARN </span> quota unknown, no codexbar
+      fix: nothing needed
+<span style="color: #1D6B46">ok   </span> no factory runs here yet
+Nothing stops the start. 2 warnings.
+
+Factory agents work without asking.
+Each worker runs as you, with full
+access to this Mac. That is not a
+sandbox. Reviewers run read-only.
+
+<b>1 of 5  What should it build?</b>
+One sentence, or a file with the
+requirements. You can say it.
+&gt; <span style="background: #1F1F22; color: #FAF8F3"> </span></main>
+
+  <div style="flex-shrink: 0; margin: 0 10px 8px; padding: 8px 12px; border-radius: 12px; border: 1px solid #E4E0D7; background: #FFFFFF; font-size: 12px; line-height: 17px; color: #6B6E75">Next, each with a recommended answer that Return accepts: gates you delegate, releases, notify level, design system. A failing check prints its fix and waits for Return to check again.</div>
+
+  <div role="toolbar" aria-label="Keys" style="flex-shrink: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; padding: 0 10px 34px">
+    <button aria-label="Escape" style="height: 40px; border-radius: 10px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-family: 'SF Mono', ui-monospace, monospace; font-size: 13px; font-weight: 500">esc</button>
+    <button aria-label="Tab" style="height: 40px; border-radius: 10px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-size: 16px">⇥</button>
+    <button aria-label="Up" style="height: 40px; border-radius: 10px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-size: 16px">↑</button>
+    <button aria-label="Down" style="height: 40px; border-radius: 10px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-size: 16px">↓</button>
+    <button aria-label="Return" style="height: 40px; border-radius: 10px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-size: 16px">⏎</button>
+    <button aria-label="Control C" style="height: 40px; border-radius: 10px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; font-family: 'SF Mono', ui-monospace, monospace; font-size: 13px; font-weight: 500">⌃C</button>
+    <button aria-label="More keys" style="height: 40px; border-radius: 10px; border: 1px solid #E4E0D7; background: #FFFFFF; color: #1F1F22; display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="5.5" cy="12" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="18.5" cy="12" r="1.6"></circle></svg></button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
