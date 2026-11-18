@@ -9752,6 +9752,11 @@ class Resume(unittest.TestCase):
             self.assertIn("task-model", got)
             self.assertNotIn("project-model", got)
         self.assertEqual(self.settings.worker_permissions(["codex", "--approve-for-me"]), ["codex", "--approve-for-me"])
+        # The hook-trust flag is not a mode: the configured mode still applies, and --yolo gets it too.
+        wp, trust = self.settings.worker_permissions, "--dangerously-bypass-hook-trust"
+        self.assertEqual(wp(["codex", trust], "read-only"), ["codex", trust, "-s", "read-only", "-a", "on-request"])
+        self.assertEqual(wp(["codex", trust]), ["codex", trust, "--dangerously-bypass-approvals-and-sandbox"])
+        self.assertEqual(wp(["codex", "--yolo"]), ["codex", "--yolo", trust])
 
 
 class BusyWorkerDelivery(unittest.TestCase):

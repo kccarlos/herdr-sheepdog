@@ -395,7 +395,8 @@ def worker_permissions(argv, perm=None, *, replace=False):
                "claude": {"--permission-mode": "mode"}, "agy": {"--mode": "mode"}}[agent]
     config_keys = {"approval_policy": "approval", "sandbox_mode": "sandbox",
                    "hooks.PermissionRequest": "hook", "hooks.state": "hook"}
-    bypass = set(permission_flags(agent, "full")) | ({"--yolo", "--approve-for-me"} if agent == "codex" else set())
+    trust = "--dangerously-bypass-hook-trust"  # not a mode: it only keeps a full worker from the hook-review dialog
+    bypass = set(permission_flags(agent, "full")) - {trust} | ({"--yolo", "--approve-for-me"} if agent == "codex" else set())
     out, modes, rest = [argv[0]], set(), iter(argv[1:])
     for arg in rest:
         flag, eq, value = arg.partition("=")
@@ -406,6 +407,10 @@ def worker_permissions(argv, perm=None, *, replace=False):
         if not eq and (config or flag in options):
             value = next(rest, "")
             words.append(value)
+        if flag == trust:
+            if not replace:
+                out.extend(words)
+            continue
         mode = config_keys.get(value.partition("=")[0].strip()) if config else options.get(flag)
         if flag in bypass:
             mode = "full"
@@ -414,13 +419,13 @@ def worker_permissions(argv, perm=None, *, replace=False):
         if not replace or not mode:
             out.extend(words)
     if replace or not modes:
-        return out + permission_flags(agent, perm)
+        return out + [f for f in permission_flags(agent, perm) if f not in out]
     if agent == "codex" and "full" not in modes:
         mode = "read-only" if perm == "read-only" else "workspace-write"
         return [*out, *([] if "sandbox" in modes else ["-s", mode]),
                 *([] if "approval" in modes else ["-a", "on-request"])]
-    if agent == "codex" and "--dangerously-bypass-approvals-and-sandbox" in out and "--dangerously-bypass-hook-trust" not in out:
-        out = out + ["--dangerously-bypass-hook-trust"]  # a full worker never stops at the hook-review dialog
+    if agent == "codex" and trust not in out and ("--dangerously-bypass-approvals-and-sandbox" in out or "--yolo" in out):
+        out = out + [trust]  # a full worker never stops at the hook-review dialog
     return out
 
 
