@@ -35,7 +35,7 @@ button{cursor:pointer}
       <h2 style="margin: 0 4px; font-size: {{ f.cap }}px; font-weight: 600; color: {{c.ink2}}">Factory</h2>
     </sc-if>
     <sc-if value="{{ showAsk }}" hint-placeholder-val="{{ true }}">
-      <dc-import name="FactoryAskCard" dark="{{ dark }}" w="{{ 358 }}" style="display: block; width: 358px; flex-shrink: 0" hint-size="358px,236px"></dc-import>
+      <dc-import name="FactoryAskCard" dark="{{ dark }}" ax="{{ ax }}" w="{{ 358 }}" style="display: block; width: 358px; flex-shrink: 0" hint-size="358px,236px"></dc-import>
     </sc-if>
     <sc-if value="{{ showAlert }}" hint-placeholder-val="{{ false }}">
       <section aria-label="The factory has stopped" style="flex-shrink: 0; padding: 12px 14px; border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.red}}; display: flex; flex-direction: column; gap: 4px">
@@ -48,7 +48,7 @@ button{cursor:pointer}
         <span style="font-size: {{ f.row }}px; font-weight: 600">{{ msgTitle }}</span>
         <span style="font-size: {{ f.sub }}px; line-height: 1.4; color: {{c.ink2}}">{{ msgBody }}</span>
         <sc-if value="{{ showRetry }}" hint-placeholder-val="{{ false }}">
-          <button style="min-height: 44px; padding: 0 18px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 15px; font-weight: 600">Try again</button>
+          <button style="min-height: 44px; padding: 0 18px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 15px; font-weight: 600">{{ msgButton }}</button>
         </sc-if>
       </div>
     </sc-if>
@@ -125,12 +125,12 @@ ok    one coordinator, main green</div>
         <button style="border: 0; background: transparent; color: {{c.accentText}}; text-align: left; padding: 0 14px; min-height: 52px; font-size: 16px">Run a command…</button>
       </div>
       <button disabled style="flex-shrink: 0; margin-top: 10px; height: 50px; border-radius: 14px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.red}}; font-size: 16px; font-weight: 500; opacity: 0.55; cursor: default">Close space</button>
-      <span style="font-size: 13px; line-height: 18px; color: {{c.ink2}}; padding: 0 4px; text-align: center">A factory is running here. Stop the factory first.</span>
+      <span style="font-size: 13px; line-height: 18px; color: {{c.ink2}}; padding: 0 4px; text-align: center">A factory is running here. To close it, say “stop the factory” or run sheepdog factory stop.</span>
     </sc-if>
   </main>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "ax": {"editor": "boolean", "default": false}, "sheet": {"editor": "boolean", "default": false}, "state": {"editor": "enum", "options": ["running", "noask", "planning", "finished", "stopped", "loadfail", "end", "debug"], "default": "running"}, "$preview": {"width": 390, "height": 844}}'>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "ax": {"editor": "boolean", "default": false}, "sheet": {"editor": "boolean", "default": false}, "state": {"editor": "enum", "options": ["running", "noask", "planning", "finished", "stopped", "ownerstop", "loadfail", "end", "debug"], "default": "running"}, "$preview": {"width": 390, "height": 844}}'>
 class Component extends DCLogic {
   renderVals() {
     const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "surface2": "#F1EEE7", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "accentText": "#8A5700", "blue": "#1F5F9E", "red": "#B42318", "chevron": "#8E929A"};
@@ -152,18 +152,19 @@ class Component extends DCLogic {
     const msg = {
       planning: ["Planning", "The coordinator is turning your goal into milestones and tasks.", false],
       finished: ["Finished", "All 4 milestones are done. 41 tasks merged.", false],
-      loadfail: ["Couldn’t load the factory", "The engine didn’t answer. The agents below are still live.", true]
+      loadfail: ["Couldn’t load the factory", "The engine didn’t answer. The agents below are still live.", true, "Try again"],
+      ownerstop: ["Stopped by you", "Nothing is running. The plan and the tasks are kept.", true, "Start the factory again…"]
     }[st];
     const withRows = st === 'running' || st === 'noask' || st === 'stopped';
     return {
-      c, dark: d, rows,
-      h: ax ? 1100 : 844, top: sheet ? 12 : 54,
+      c, dark: d, ax, rows,
+      h: ax ? 1500 : 844, top: sheet ? 12 : 54,
       f: ax ? { h1: 34, cap: 17, row: 22, sub: 17 } : { h1: 30, cap: 13, row: 15, sub: 12.5 },
       showTitle: st !== 'end', showFactory: st !== 'end',
-      showAsk: st === 'running' && !ax, showAlert: st === 'stopped',
-      showMsg: !!msg, msgTitle: msg ? msg[0] : '', msgBody: msg ? msg[1] : '', showRetry: msg ? msg[2] : false,
+      showAsk: st === 'running', showAlert: st === 'stopped',
+      showMsg: !!msg, msgTitle: msg ? msg[0] : '', msgBody: msg ? msg[1] : '', showRetry: msg ? msg[2] : false, msgButton: msg && msg[3] ? msg[3] : '',
       showRows: withRows, showDebug: st === 'debug',
-      showAgents: st !== 'running' && st !== 'end' && !ax,
+      showAgents: st !== 'running' && st !== 'end' && st !== 'ownerstop' && !ax,
       showEnd: st === 'end',
       coordState: st === 'finished' ? 'idle 2 h' : st === 'stopped' ? 'waiting for quota' : 'working 2 min'
     };
