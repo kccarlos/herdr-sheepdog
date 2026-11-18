@@ -22,7 +22,8 @@ MAJOR = {"file": "plan.py", "line": 7, "what": "a loop through a split child pas
 def screen(rec, width=60):
     """A reviewer's screen: the prompt's own example tail first, then the answer's tail wrapped as a terminal does."""
     body = "<retro>" + json.dumps(rec) + "</retro>"
-    lines = [body[i:i + width] for i in range(0, len(body), width)]
+    import textwrap
+    lines = textwrap.wrap(body, width, break_on_hyphens=False)  # as Claude Code wraps: at spaces
     return '  <retro>{"verdict":"SHIP|FIX|REDESIGN"}</retro>\n⏺ Findings: none.\n' + "\n".join("  " + x for x in lines)
 
 
@@ -186,10 +187,16 @@ class Retro(unittest.TestCase):
                 mock.patch.object(autopilot, "locate", return_value={}), \
                 mock.patch.object(autopilot, "Store", return_value=nullcontext(self.store)), \
                 mock.patch.object(autopilot, "events_in", return_value=[]), mock.patch.object(os.path, "isdir", return_value=True):
-            self.assertEqual(autopilot.events_for("/tmp", state, []), ["event:retro SHEP-13"])
+            first = autopilot.events_for("/tmp", state, [])
+            self.assertEqual(first, ["event:retro SHEP-13 FIX, cause patch-shaped-fix, replan none, confidence high: "
+                                     "Name the class in the brief."])
             self.assertEqual(autopilot.events_for("/tmp", state, []), [])
             self.task["retro_capped"] = 1  # the FIX cap: the coordinator hears again
-            self.assertEqual(autopilot.events_for("/tmp", state, []), ["event:retro SHEP-13"])
+            self.assertIn("FIX (FIX cap)", autopilot.events_for("/tmp", state, [])[0])
+        a = {"pending": {"reasons": [f"event:x{i}" for i in range(6)], "at": 1}}
+        for i in range(7):
+            autopilot.queue(a, f"event:retro T-{i}")
+        self.assertEqual(len([x for x in a["pending"]["reasons"] if x.startswith("event:retro")]), 7)
 
     def test_replay_prompts_fill_every_slot_and_recorded_answers_parse(self):
         import re
@@ -213,7 +220,7 @@ class Retro(unittest.TestCase):
         self.change("moved on")
         self.tick(TAIL)
         self.assertNotIn("retro", self.task)
-        self.assertIn("head moved on", self.task["retro_failures"][-1]["why"])
+        self.assertIn("checkout moved on", self.task["retro_failures"][-1]["why"])
         self.assertIn("majors is not", self.retro.parse_tail(screen({**TAIL, "verdict": "FIX", "majors": [0]}))[1])
         self.task["set"]["review"] = "off"
         self.assertFalse(self.retro.retro_due(self.task))
@@ -234,6 +241,37 @@ class Retro(unittest.TestCase):
                 mock.patch("herdr_task.store.open_store", lambda args, write=True: self.store):
             with self.assertRaisesRegex(self.commands.Fail, "retro:SHEP-13"):
                 plan.cmd_plan(argparse.Namespace(plan="amend", reason="smaller", file="p.json", check=True, json=True, folder=None))
+
+    def test_review_findings_round_2(self):
+        """Codex round 2: contradictory tails fail; SHIP keeps an unrelated CI recap; a folder FIX needs its own
+        passing round after the retro; new or drop after REDESIGN needs the replan on record."""
+        self.assertIn("SHIP verdict names majors", self.retro.parse_tail(screen({**TAIL, "majors": [MAJOR]}))[1])
+        self.assertIn("file and what", self.retro.parse_tail(screen({**TAIL, "verdict": "FIX", "majors": [{}]}))[1])
+        self.started()
+        self.task["recap"]["reasons"].append("3 failed CI runs")
+        self.tick(TAIL)
+        self.assertEqual(self.task["recap"]["reasons"], ["3 failed CI runs"])
+        self.assertFalse(self.budget.review_nonconverging(self.task))
+
+    def test_folder_fix_needs_its_own_passing_round(self):
+        self.task.update(mode="here", worktree=None)
+        self.task["review_gate"] = True
+        self.started()
+        self.tick({**TAIL, "verdict": "FIX", "majors": [MAJOR]})
+        self.assertEqual(self.task["review_rounds_added"], 1)
+        self.assertIn("one more round is added", self.told[-1])
+        self.assertIn("isn't reviewed", self.commands.review_refusal(self.store, self.task, None))
+        self.task["reviews"].append({"round": 5, "result": "report", "verdict": "pass", "majors": 0, "at": self.task["retro"]["at"] + 1})
+        self.assertIsNone(self.commands.review_refusal(self.store, self.task, None))
+
+    def test_new_after_redesign_needs_the_replan_on_record(self):
+        self.started()
+        self.tick({**TAIL, "verdict": "REDESIGN", "majors": [MAJOR], "cause": "design-needed-first"})
+        self.store.data["plan_log"] = [{"at": 1, "action": "apply"}]
+        with self.assertRaisesRegex(self.commands.Fail, "record the replan first"):
+            self.recap("new")
+        self.store.data["plan_log"].append({"at": self.task["retro"]["at"], "action": "amend", "reason": "retro:SHEP-13"})
+        self.recap("new")
 
 
 if __name__ == "__main__":

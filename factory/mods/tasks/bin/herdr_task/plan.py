@@ -534,7 +534,7 @@ def cmd_plan(args):
             raise Fail("plan amend needs --reason: why the plan changes, in a line.")
         p = Plan(s, load(args.file), args.plan == "amend")
         for t in p.tasks:  # SDF-49: a split after a retro says so
-            parent = p.find(t[0]["split_of"]) if "split_of" in t[0] else None
+            parent = p.find(t[0]["split_of"]) if isinstance(t[0].get("split_of"), str) else None
             if (parent or {}).get("retro") and (args.reason or "").strip() != f"retro:{s.ref(parent)}":
                 p.problems.append(f"{s.ref(parent)} had a retro: split it with plan amend --reason retro:{s.ref(parent)}.")
         if p.problems:

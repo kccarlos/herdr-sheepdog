@@ -987,6 +987,8 @@ def review_refusal(s, t, wt):
     if not wt and t.get("folder_start") and unchanged_folder(s, t):
         return None  # in the folder itself, and it changed nothing (#744: a run that only reads)
     revs = [r for r in t.get("reviews") or [] if r.get("result") in REVIEWED and (r.get("at") or 0) >= (t.get("started") or 0)]
+    if not wt and (rr := t.get("retro") or {}).get("verdict") == "FIX":  # SDF-49: the fix needs a passing round of its own
+        revs = [r for r in revs if (r.get("at") or 0) > rr["at"] and not r.get("retro") and r.get("verdict") != "changes"]
     head = t.get("head") if wt else None
     if (any(r.get("head") == head for r in revs) if wt else bool(revs)):
         return None

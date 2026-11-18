@@ -61,7 +61,8 @@ RETRO_CAP = f"retro: FIX asked {FABLE_CHANGES} times and it still does not conve
 
 def retro_due(t):
     """Review is on, not converging, and this task has not had its one retro (failed rounds don't use it up)."""
-    return not t.get("retro") and (t.get("set") or {}).get("review") != "off" and review_nonconverging(t)
+    sets = t.get("set") or {}
+    return not t.get("retro") and sets.get("review") != "off" and sets.get("review_rounds") != 0 and review_nonconverging(t)
 
 
 def fixing(t):
@@ -133,8 +134,10 @@ def check_tail(rec):
         return f"confidence {rec.get('confidence')!r} is not low, medium or high"
     if not isinstance(rec.get("majors", []), list) or not all(isinstance(m, dict) for m in rec.get("majors") or []):
         return "majors is not a list of findings"
-    if rec["verdict"] == "FIX" and not rec.get("majors"):
-        return "a FIX verdict names no majors"
+    if rec["verdict"] == "SHIP" and rec.get("majors"):
+        return "a SHIP verdict names majors"
+    if rec["verdict"] == "FIX" and (not rec.get("majors") or not all(m.get("file") and m.get("what") for m in rec["majors"])):
+        return "a FIX verdict needs majors, each with its file and what is wrong"
     return None
 
 
@@ -187,11 +190,16 @@ def start(s, t):
     from .launch import launch, review_reads
     from .settings import argv_for, settings_for
     wt = t.get("worktree") or s.loc["folder"]
-    head = git(wt, "rev-parse", "HEAD")[1] or t.get("head")  # the commit on disk: the one it reads
+    head = git(wt, "rev-parse", "HEAD")[1]  # the commit on disk: the one it reads
+    if not head:
+        t["retro_failures"] = (t.get("retro_failures") or []) + [{"at": now(), "head": None, "why": "no commit to read"}]
+        s.dirty = True
+        return
     base_sha = git(wt, "merge-base", t.get("base") or "main", head)[1] if head else ""
     check = (settings_for(s)["tasks"].get("check") or "").strip()
     live = workers(s, t)
-    a = launch(s, t, argv_for({**FABLE, "perm": "auto"}), retro_prompt(s, t, base_sha or (t.get("start") or ""), head),
+    # dontAsk: only the reviewer's allow list runs; edits and every other command are refused, nothing prompts.
+    a = launch(s, t, argv_for({**FABLE, "perm": "dontAsk"}), retro_prompt(s, t, base_sha or (t.get("start") or ""), head),
                parent=live[-1]["address"] if live else None, role="reviewer", reads=review_reads(check))
     t["retro_run"] = {"address": a["address"], "head": head, "at": now()}
     t["progress"] = {"text": "Herdr's retro round is on it", "at": now(), "set": now(), "by": "herdr"}
@@ -211,6 +219,10 @@ def finished_screen(t, rn):
 
 def close_recap(s, t, decision, rec, small):
     """The retro decided in the coordinator's place (SHIP, FIX): the open recap closes as a continue."""
+    rest = [w for w in (t.get("recap") or {}).get("reasons") or [] if w != NON_CONVERGENCE]
+    if rest:  # a size, time or CI stop as well: that recap stays for the coordinator, without the review reason
+        t["recap"]["reasons"] = rest
+        return
     cur = change_lines(t) if t.get("worktree") else None
     t.setdefault("recaps", []).append({"decision": "continue", "why": f"retro: {decision}", "by": "retro", "at": now(),
                                        "reasons": [NON_CONVERGENCE], "tokens": token_sum(s, t),
@@ -250,9 +262,14 @@ def act(s, t, rn, rec):
             s.dirty = True
             return None
         close_recap(s, t, "FIX", rec, True)
+        folder = t.get("mode") != "worktree"
+        if folder:  # no worktree for a Fable round: the worker's own next round checks the fix
+            t["review_rounds_added"] = int(t.get("review_rounds_added") or 0) + 1
         found = "\n".join(f"- {m.get('file')}:{m.get('line')}: {m.get('what')} (repro: {m.get('repro')})" for m in rec["majors"])
         msg = (f"Herdr's retro round on {ref} found majors to fix:\n{found}\nYour one change: {rec.get('worker_change')}\n"
-               f"Make one bounded fix (at most {SMALL_LINES} more lines), commit, then run {ready} again: a Fable round checks it.")
+               f"Make one bounded fix (at most {SMALL_LINES} more lines), commit, then " + (
+                   "have it reviewed and record the round (one more round is added), then run " if folder else "run ")
+               + f"{ready} again" + ("." if folder else ": a Fable round checks it."))
     else:
         rc = t.get("recap")
         if rc and RETRO_REDESIGN not in rc["reasons"]:
@@ -291,8 +308,9 @@ def retro_pass(s, t):
         from .commands import end_reviewer
         from .base import git
         rec, why = parse_tail(screen)
-        if git(t.get("worktree") or s.loc["folder"], "rev-parse", "HEAD")[1] not in ("", rn["head"]):
-            rec, why = None, f"the head moved on from {rn['head'][:7]} while it read"
+        where = t.get("worktree") or s.loc["folder"]
+        if git(where, "rev-parse", "HEAD")[1] != rn["head"] or git(where, "status", "--porcelain", "--untracked-files=no")[1]:
+            rec, why = None, f"the checkout moved on from {rn['head'][:7]} or has uncommitted changes"
         t.pop("retro_run")
         s.dirty = True
         end_reviewer(rn["address"])
@@ -302,7 +320,8 @@ def retro_pass(s, t):
         t["retro_failures"] = (t.get("retro_failures") or []) + [{"at": now(), "head": rn["head"], "why": why}]
     if cap(s, t) or t.get("retro"):
         return
-    if not retro_due(t):
+    from .settings import review_limits
+    if not retro_due(t) or not review_limits(s, t)[0]:
         return
     if not t.get("recap"):
         open_recap(s, t, [NON_CONVERGENCE])  # folder tasks too: no next round, no merge, no fixing

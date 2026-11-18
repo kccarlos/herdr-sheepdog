@@ -440,7 +440,9 @@ def queue(a, reason):
     p = a.get("pending")
     if p:
         if reason not in p["reasons"]:  # a retro's wake is never the one dropped (SDF-49)
-            p["reasons"] = ([reason] + p["reasons"] if reason.startswith("event:retro") else p["reasons"] + [reason])[:6]
+            both = p["reasons"] + [reason]
+            keep = [x for x in both if x.startswith("event:retro")]
+            p["reasons"] = keep + [x for x in both if not x.startswith("event:retro")][:max(0, 6 - len(keep))]
     else:
         a["pending"] = {"reasons": [reason], "at": now()}
 
@@ -614,7 +616,9 @@ def events_for(project, a, events):
             seen["_drift_bases"] = list(bases)
             for t in s.data["tasks"]:  # SDF-49: each retro outcome (its verdict, then a FIX cap) wakes the coordinator
                 if (r := t.get("retro")) and seen.setdefault("_retro", {}).get(str(t["id"])) != (mark := f"{r.get('verdict')}:{bool(t.get('retro_capped'))}"):
-                    out.append(f"event:retro {s.ref(t)}")
+                    out.append(f"event:retro {s.ref(t)} {r.get('verdict')}{' (FIX cap)' if t.get('retro_capped') else ''}, "
+                               f"cause {r.get('cause')}, replan {r.get('replan')}, confidence {r.get('confidence')}: "
+                               f"{r.get('coordinator_change')}")
                     seen["_retro"][str(t["id"])] = mark
             for ev, t in events_in(s, seen):
                 # Added while a wake is at work: its own doing, not news.
