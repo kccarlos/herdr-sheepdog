@@ -9438,6 +9438,29 @@ class Resume(unittest.TestCase):
                 self.call(self.commands.cmd_resume, id=ref, agent=None, argv=None, parent=None)
         self.assertEqual(len(self.runs), 2)
 
+    def test_the_tick_starts_nothing_while_the_count_is_at_or_over_the_cap(self):
+        """A message to a live paused worker takes its slot back unchecked, so the count can pass the cap
+        for a while: the tick then starts no queued task until it is below the cap again."""
+        from unittest import mock
+        import herdr_task.queues as queues
+        import herdr_task.tick as tick
+        self.started_task({"agent": "agy"})
+        self.started_task({"agent": "agy"})
+        waiting = self.started_task({"agent": "agy"})
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo)) as s:
+            t = s.find(waiting)
+            t["agents"][-1]["ended"] = queues.now()
+            t["state"], t["queue"], t["queued_at"] = "queued", {"agent": "agy"}, queues.now()
+            s.dirty = True
+        before = len(self.runs)
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1):
+            with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo), write=False) as s:
+                self.assertGreater(queues.running_count(s), 1)
+            report = {"started": [], "done": [], "attention": [], "fired": [], "retries": []}
+            with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo)) as s:
+                tick.tick_store(s, report)
+        self.assertEqual((report["started"], len(self.runs)), ([], before))
+
     def test_message_and_switch_cannot_restart_a_stopped_agent_at_the_cap(self):
         from unittest import mock
         import herdr_task.queues as queues
