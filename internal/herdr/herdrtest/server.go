@@ -579,10 +579,22 @@ func (s *Server) subscribe(conn net.Conn, req Request) {
 		}
 	}
 	c := &subConn{conn: conn, subs: params.Subscriptions}
-	s.subs[c] = struct{}{}
 	s.mu.Unlock()
 
+	// Send the ack before registering c in s.subs so waitSubs / EmitRaw
+	// can never write an event ahead of subscription_started.
 	s.reply(conn, response{ID: req.ID, Result: map[string]any{"type": "subscription_started"}})
+
+	s.mu.Lock()
+	select {
+	case <-s.quit:
+		s.mu.Unlock()
+		_ = conn.Close()
+		return
+	default:
+	}
+	s.subs[c] = struct{}{}
+	s.mu.Unlock()
 
 	// Hold the connection until the client goes away or the server drops it.
 	_, _ = io.Copy(io.Discard, conn)

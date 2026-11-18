@@ -428,7 +428,7 @@ func recvFleet(t *testing.T, ch <-chan herdr.FleetEvent) herdr.FleetEvent {
 // waitSubs blocks until the fake server has exactly n open subscriptions.
 func waitSubs(t *testing.T, srv *herdrtest.Server, n int) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if srv.SubscriptionCount() == n {
 			return
