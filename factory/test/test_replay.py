@@ -82,6 +82,7 @@ def score(sit, done):
     cmds = [plain(c) for c in done["commands"]]
     why = [f"doesn't run {r}" for r in sit.get("run", []) if not any(c.startswith(r) for c in cmds)]
     why += [f"rule lacks \"{w}\"" for w in sit.get("says", []) if w not in done["rule"]]
+    why += [f"names a quota tool: {c}" for c in cmds if re.search(r"\bcodexbar\b", c)]
     return why + [f"names {n}" for n in sit.get("never", []) if any(n in c for c in cmds)]
 
 

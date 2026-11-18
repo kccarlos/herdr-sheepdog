@@ -271,7 +271,7 @@ Also covered by 6 tests in `test/test_repo.py` (`L388–440`: `test_assistant_de
 | **Structured questions (`herdr-task ask`, `L33`)** | `L33` | **Keep** | Keep `herdr-task ask "<question>" --option A --option B --recommend A` (`--kind owner\|release\|paid-key\|delete\|install\|reset`, never `AskUserQuestion`). |
 | **Suggested next message (`<hc suggest="…"/>`, `L34`)** | `L34` | **Drop** | Drop window/web chat UI prompt chip (`templates.py:99` `SUGGEST_RULE`). |
 
-*(Note: `launch.py:271` dynamically appends the `codexbar usage` quota line, `simulators.py:135` appends the `herdr-task simulator` lease line when a pool is configured, and `templates.py:69–88` (`GATE_SECTION`) swaps in the `Review: herdr-task's own` gate instructions when `gate_on` is active; all three dynamic additions stay.)*
+*The engine probes quota and `launch.py` tells workers to leave quota checks to the engine. `simulators.py` appends the `herdr-task simulator` lease line when a pool is configured. `templates.py` swaps in the `Review: herdr-task's own` instructions when `gate_on` is active.*
 
 ### 4.3 `templates/reviewer.md` (16 lines, synced with `mods/tasks/bin/herdr_task/templates.py`)
 

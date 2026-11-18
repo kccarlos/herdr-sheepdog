@@ -3,9 +3,11 @@ import home_guard  # noqa: F401  (first: every test on a throwaway home, never t
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.dont_write_bytecode = True
@@ -28,9 +30,6 @@ def fixture(provider):
         return f.read()
 
 
-def pool(name, five, week, reset="2026-11-10T00:00:00Z", state="ok"):
-    return {"name": name, "state": state, "five": five, "week": week, "five_reset": None, "week_reset": reset}
-
 
 class Parse(unittest.TestCase):
     def test_normal(self):
@@ -50,12 +49,13 @@ class Parse(unittest.TestCase):
         d[0]["usage"]["tertiary"] = {"windowMinutes": 10080, "usedPercent": 15, "resetsAt": "2026-11-11T00:00:00Z"}
         (c,) = usage.parse("claude", json.dumps(d))
         self.assertEqual(c["week"], 0.5)
-        self.assertIsNone(usage.pick([c], {"claude"}, False))
+        self.assertIsNone(c["reason"])
 
     def test_a_failing_provider_is_unknown(self):
         for text in ("", "not json", "[]", '[{"error":"x"}]'):
             (p,) = usage.parse("claude", text)
-            self.assertEqual((p["name"], p["state"], p["five"], p["week"]), ("claude", "unknown", None, None))
+            self.assertEqual((p["name"], p["state"], p["reason"], p["five"], p["week"]),
+                             ("claude", "unknown", "no data", None, None))
         self.assertEqual([p["state"] for p in usage.parse("antigravity", "")], ["unknown", "unknown"])
 
 
@@ -77,28 +77,32 @@ class Read(unittest.TestCase):
             self.assertEqual(len(calls), 6)
 
 
-class Pick(unittest.TestCase):
-    def test_soonest_weekly_reset_wins(self):
-        pools = [pool("a", 80, 50, "2026-11-12T00:00:00Z"), pool("b", 80, 50, "2026-11-09T00:00:00Z"),
-                 pool("c", 80, 50, "2026-11-08T00:00:00Z")]
-        self.assertEqual(usage.pick(pools, {"a", "b"}, False)["name"], "b")
+    def test_path_changes_invalidate_a_fresh_cache(self):
+        with tempfile.TemporaryDirectory() as cache, mock.patch("shutil.which", return_value=None) as which, \
+                mock.patch("subprocess.run") as run:
+            self.assertEqual({p["reason"] for p in usage.read(cache)}, {"not installed"})
+            run.assert_not_called()
+            which.return_value = "/fixture/codexbar"
+            run.return_value = subprocess.CompletedProcess([], 0, fixture("claude"), "")
+            self.assertEqual(usage.read(cache)[0]["state"], "ok")
+            which.return_value = None
+            self.assertEqual({p["reason"] for p in usage.read(cache)}, {"not installed"})
 
-    def test_pool_at_its_floor_is_skipped(self):
-        pools = [pool("a", 5, 50, "2026-11-08T00:00:00Z"), pool("b", 80, 1, "2026-11-08T00:00:00Z"), pool("c", 40, 40)]
-        self.assertEqual(usage.pick(pools, {"a", "b", "c"}, False)["name"], "c")
-        self.assertIsNone(usage.pick(pools, {"a", "b"}, False))
-
-    def test_long_job_refused_on_a_low_5h_window(self):
-        pools = [pool("a", 15, 50)]
-        self.assertEqual(usage.pick(pools, {"a"}, False)["name"], "a")
-        self.assertIsNone(usage.pick(pools, {"a"}, True))
-
-    def test_unknown_only_for_short_jobs_and_last(self):
-        unk = pool("u", None, None, None, "unknown")
-        self.assertEqual(usage.pick([unk, pool("a", 50, 50)], {"u", "a"}, False)["name"], "a")
-        self.assertEqual(usage.pick([unk], {"u"}, False)["name"], "u")
-        self.assertIsNone(usage.pick([unk], {"u"}, True))
-        self.assertIsNone(usage.pick([pool("a", 50, 50)], set(), False))
+    def test_probe_reports_unavailable_reasons(self):
+        cases = (
+            (subprocess.TimeoutExpired("codexbar", 20), None, "timed out"),
+            (None, subprocess.CompletedProcess([], 4, "", ""), "timed out"),
+            (None, subprocess.CompletedProcess([], 1, '[{"error":"Not logged in"}]', ""), "not signed in"),
+            (None, subprocess.CompletedProcess([], 1, "", "Authentication required"), "not signed in"),
+            (None, subprocess.CompletedProcess([], 1, "", "Network failure"), "no data"),
+        )
+        for error, result, reason in cases:
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as cache, \
+                    mock.patch("shutil.which", return_value="/fixture/codexbar"), \
+                    mock.patch("subprocess.run", side_effect=error, return_value=result) as run:
+                self.assertEqual({p["reason"] for p in usage.read(cache)}, {reason})
+                self.assertEqual(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
+                self.assertEqual(run.call_args.args[0][-2:], ["--source", "oauth"])
 
 
 @unittest.skipUnless(os.path.isfile(J("core/usage.js")), "Shepherdr JS/TS usage files are outside factory/")

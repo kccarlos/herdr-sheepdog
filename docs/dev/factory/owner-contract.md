@@ -138,6 +138,10 @@ Top-level envelope: `{"protocol": 1, "asks": [Ask]}`. Each record in `<store_dir
 
 Built deterministically in Python from the task stores and `usage.py`, with **no model call** (`SDF-26`). Spoken on owner request, when a milestone completes, or at the morning summary:
 
+In the spoken summary, report known quota by pool, for example “Claude 40% left”.
+If any pool in use has an unknown reading, say “quota unknown” once for the
+whole digest. Quota is reported per pool, independent of how many workers use it.
+
 | Field | Type | Invariants |
 |---|---|---|
 | `protocol` | `int` | `1`. |

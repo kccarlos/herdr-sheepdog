@@ -8,6 +8,7 @@ import fcntl
 import json
 import os
 
+from . import usage
 from .base import Fail, hc_json, HOME, now, PROJECT_LABEL, STORE, WHERE
 from .settings import autopilot_layers, read_settings, write_autopilot
 from .agents import agent_running, status_word
@@ -515,7 +516,8 @@ def message(project, a, reasons):
             f"Heartbeat ({src}):\n{beat or '(not written yet: tell the person Autopilot has no heartbeat yet, and do nothing else)'}\n\n"
             f"{aim}\n\n"
             + (f"Waiting on the person:\n{waits}\n\n" if waits else "")
-            + f"{prog}")
+            + f"{prog}\n\nQuota pools (keep quota commands out of worker briefs):\n"
+            + usage.table(usage.read(os.path.join(STORE, ".usage"))))
     body = body.replace("</herdr-autopilot", "</ herdr-autopilot")
     reason = reasons[0].replace('"', "'")
     return f'<herdr-autopilot reason="{reason}" project="{project}">\n{body}\n</herdr-autopilot>'
