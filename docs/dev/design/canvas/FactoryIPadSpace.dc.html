@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — iPad, the space page in its sheet</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="position: relative; width: 1376px; height: 1032px; overflow: hidden; background: {{ bg }}">
+  <dc-import name="FactoryIPad" dark="{{ dark }}" style="display: block" hint-size="1376px,1032px"></dc-import>
+  <div aria-hidden="true" style="position: absolute; left: 0; top: 0; width: 1376px; height: 1032px; background: {{ scrim }}"></div>
+  <div role="dialog" aria-label="Space" style="position: absolute; left: 418px; top: 76px; width: 540px; height: 880px; border-radius: 14px; overflow: hidden; background: {{ bg }}; box-shadow: 0 12px 40px rgba(0,0,0,0.3); display: flex; justify-content: center">
+    <sc-if value="{{ isFactory }}" hint-placeholder-val="{{ true }}">
+      <dc-import name="FactoryPage" state="running" sheet="{{ true }}" dark="{{ dark }}" style="display: block; width: 390px" hint-size="390px,844px"></dc-import>
+    </sc-if>
+    <sc-if value="{{ isEntry }}" hint-placeholder-val="{{ false }}">
+      <dc-import name="FactoryStartEntry" state="ready" sheet="{{ true }}" dark="{{ dark }}" style="display: block; width: 390px" hint-size="390px,844px"></dc-import>
+    </sc-if>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "which": {"editor": "enum", "options": ["factory", "entry"], "default": "factory"}, "$preview": {"width": 1376, "height": 1032}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const d = !!this.props.dark;
+    const entry = (this.props.which ?? 'factory') === 'entry';
+    return { dark: d, isFactory: !entry, isEntry: entry, bg: d ? "#16181C" : "#FAF8F3", scrim: d ? "rgba(0,0,0,0.5)" : "rgba(31,31,34,0.32)" };
+  }
+}
+</script>
+</body>
+</html>

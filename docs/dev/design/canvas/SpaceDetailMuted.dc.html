@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — a muted space</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button,input{font:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; display: flex; flex-direction: column; overflow: hidden; background: {{c.bg}}; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+<div style="height: 54px; flex-shrink: 0"></div>
+<header style="height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 8px">
+<button aria-label="Back to Spaces" style="width: 44px; height: 44px; border: 0; background: transparent; color: {{c.ink}}; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M15 6l-6 6 6 6"></path></svg></button>
+<button style="height: 44px; border: 0; background: transparent; color: {{c.accentText}}; font-size: 16px; padding: 0 10px">Rename</button>
+</header>
+<div style="padding: 0 20px 10px; display: flex; flex-direction: column; gap: 2px"><h1 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 30px; font-weight: 700; letter-spacing: -0.3px">shop</h1><span style="font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: {{c.ink2}}">~/code/shop · main</span></div><main style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 8px; padding: 4px 16px">
+<h2 style="margin: 6px 4px 0; font-size: 13px; font-weight: 600; color: {{c.ink2}}">Agents</h2><div style="border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; overflow: hidden; display: flex; flex-direction: column; flex-shrink: 0"><div style="display: flex; align-items: center; gap: 10px; padding: 9px 10px 9px 14px; border-bottom: 1px solid {{c.line}}"><span style="width: 8px; height: 8px; border-radius: 4px; background: {{c.blocked}}"></span><span style="flex-grow: 1; font-size: 16px; font-weight: 600">codex-docs <span style="font-weight: 400; font-size: 13px; color: {{c.accentText}}">· waiting on you</span></span><button aria-label="Open codex-docs&#39;s window" style="width: 36px; height: 36px; border-radius: 18px; border: 1px solid {{c.line}}; background: {{c.surface2}}; color: {{c.ink}}; display: flex; align-items: center; justify-content: center"><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM7 9l3 3-3 3M12.500 15H17"></path></svg></button></div><div style="display: flex; align-items: center; gap: 10px; padding: 9px 10px 9px 14px"><span style="width: 8px; height: 8px; border-radius: 4px; background: {{c.green}}"></span><span style="flex-grow: 1; font-size: 16px; font-weight: 600">claude-auth <span style="font-weight: 400; font-size: 13px; color: {{c.ink2}}">· done</span></span><button aria-label="Open claude-auth&#39;s window" style="width: 36px; height: 36px; border-radius: 18px; border: 1px solid {{c.line}}; background: {{c.surface2}}; color: {{c.ink}}; display: flex; align-items: center; justify-content: center"><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM7 9l3 3-3 3M12.500 15H17"></path></svg></button></div></div><h2 style="margin: 6px 4px 0; font-size: 13px; font-weight: 600; color: {{c.ink2}}">Notifications</h2><div style="border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; overflow: hidden; display: flex; flex-direction: column; flex-shrink: 0"><div style="display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 14px; font-size: 16px; border-bottom: 1px solid {{c.line}}"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M6.500 8a5.500 5.500 0 0 1 8.900-4.300M18 9c0 5 2 7 2 7H8M6.300 11c-.5 2.700-1.300 4-2.300 5h4M13.700 20a2 2 0 0 1-3.400 0M3 3l18 18"></path></svg>Muted until 9:38 AM</div><button style="border-left: 0; border-right: 0; border-top: 0; background: transparent; color: {{c.accentText}}; text-align: left; padding: 0 14px; min-height: 52px; display: flex; align-items: center; gap: 12px; font-size: 16px"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 7 2 7H4s2-2 2-7M13.700 20a2 2 0 0 1-3.400 0"></path></svg><span style="flex-grow: 1">Unmute</span></button></div><p style="margin: 0; padding: 0 4px; font-size: 13px; line-height: 18px; color: {{c.ink2}}">Sheepdog won’t notify your phone or speak up about this space. Its agents still show here, and the voice still answers when you ask.</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "$preview": {"width": 390, "height": 844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "surface2": "#F1EEE7", "track": "#ECE8DF", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "accent": "#D98718", "accentText": "#8A5700", "accentTint": "#FDF1DC", "blocked": "#D99417", "blue": "#1F5F9E", "green": "#1D6B46", "idle": "#5C6370", "red": "#B42318", "side": "#F3F0E8", "selBg": "#E5DFD2", "sel": "#FFFFFF", "shadow": "0 1px 2px rgba(31,31,34,0.12)", "dash": "#CFC9BC", "chevron": "#8E929A", "kw": "#6A46B0", "str": "#1D6B46", "fn": "#1F5F9E", "num": "#8A5700", "add": "#1A8038", "rem": "#BF2924", "addFill": "rgba(52,199,89,0.12)", "remFill": "rgba(255,59,48,0.12)", "addWord": "rgba(52,199,89,0.32)", "remWord": "rgba(255,59,48,0.32)", "scrim": "rgba(31,31,34,0.32)", "wash": "rgba(250,248,243,0.55)", "pop": "0 12px 40px rgba(31,31,34,0.18), 0 0 0 1px #E4E0D7"};
+    const dark = {"bg": "#16181C", "surface": "#1F2126", "surface2": "#26292F", "track": "#26292F", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138", "accent": "#F39C1F", "accentText": "#F5B83D", "accentTint": "#2A2416", "blocked": "#F0A92A", "blue": "#6AA8EB", "green": "#5CC792", "idle": "#9AA1AD", "red": "#F26B5B", "side": "#1B1D22", "selBg": "#2C2F36", "sel": "#3A3D44", "shadow": "0 1px 2px rgba(0,0,0,0.5)", "dash": "#3E4148", "chevron": "#8E929A", "kw": "#B195F0", "str": "#5CC792", "fn": "#6AA8EB", "num": "#F5B83D", "add": "#6BD185", "rem": "#FF7A73", "addFill": "rgba(48,209,88,0.12)", "remFill": "rgba(255,69,58,0.12)", "addWord": "rgba(48,209,88,0.32)", "remWord": "rgba(255,69,58,0.32)", "scrim": "rgba(0,0,0,0.5)", "wash": "rgba(22,24,28,0.55)", "pop": "0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px #2E3138"};
+    const d = !!this.props.dark;
+    const c = d ? dark : light;
+    
+    return { c, dark: d,  };
+  }
+}
+</script>
+</body>
+</html>

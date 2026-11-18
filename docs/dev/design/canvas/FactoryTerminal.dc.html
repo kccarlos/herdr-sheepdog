@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — factory log and factory doctor</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 1100px; height: 980px; box-sizing: border-box; padding: 40px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; background: #F3F0E8; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <section aria-label="factory log output" style="border-radius: 14px; background: #16181C; color: #F5F2EA; padding: 18px 20px; font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 13px; line-height: 20px; white-space: pre; overflow: hidden"><span style="color: #A3A7AF">$</span> sheepdog factory log
+<span style="color: #A3A7AF">14:02</span> <span style="color: #6AA8EB">engine</span>       SDF-41 accept
+      wake: event:ready
+      why: 2 rounds passed, CI green
+<span style="color: #A3A7AF">14:02</span> <span style="color: #6AA8EB">engine</span>       SDF-41 merge
+      wake: tick
+      why: up to date, checks green
+<span style="color: #A3A7AF">14:05</span> <span style="color: #6AA8EB">engine</span>       SDF-38 wake
+      wake: tick:drift
+      why: CI red on a reviewed head
+<span style="color: #A3A7AF">14:05</span> <span style="color: #5CC792">coordinator</span>  SDF-57 add
+      wake: event:drift
+      why: fix main, watchdog crash
+      model: claude-opus-5-5
+<span style="color: #A3A7AF">14:06</span> <span style="color: #6AA8EB">engine</span>       SDF-57 start
+      wake: start
+      why: pool known, slot free
+      model: gpt-6.2-sol, high
+<span style="color: #A3A7AF">14:09</span> <span style="color: #F5B83D">owner</span>        typed
+      wake: input:phone
+      why: to coordinator, 34 chars
+<span style="color: #A3A7AF">14:09</span> <span style="color: #5CC792">coordinator</span>  SDF-54 plan-amend
+      wake: input:owner
+      why: owner: after SDF-53
+      model: claude-opus-5-5
+<span style="color: #A3A7AF">14:31</span> <span style="color: #6AA8EB">engine</span>       SDF-53 review-round-1
+      wake: round
+      why: reviewer on another model
+      model: claude-fable-5-2</section>
+  <section aria-label="factory doctor output" style="border-radius: 14px; background: #16181C; color: #F5F2EA; padding: 18px 20px; font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 13px; line-height: 20px; white-space: pre; overflow: hidden"><span style="color: #A3A7AF">$</span> sheepdog factory doctor
+Checking this computer
+<span style="color: #5CC792">ok   </span> engine and Python
+<span style="color: #5CC792">ok   </span> git repository, branch main
+<span style="color: #5CC792">ok   </span> claude, codex and agy signed in
+<span style="color: #5CC792">ok   </span> models: opus, gpt-6.2-sol
+<span style="color: #5CC792">ok   </span> gh signed in, repo pinned
+<span style="color: #F5B83D">WARN </span> quota unknown, no codexbar
+      fix: nothing needed
+
+Running now
+<span style="color: #5CC792">ok   </span> one coordinator, 2 min ago
+<span style="color: #5CC792">ok   </span> main is green
+<span style="color: #F26B5B">FAIL </span> SDF-57 waits at a prompt, 14 min
+      fix: on the phone, Agents,
+      Needs you, SDF-57, Open window
+<span style="color: #F5B83D">WARN </span> ask-7 is open on a done task
+      fix: nothing needed, it closes
+      at the next tick
+<span style="color: #5CC792">ok   </span> nothing approved and unmerged
+      for over 30 min
+
+1 failed, 2 warnings.</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview": {"width": 1100, "height": 980}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

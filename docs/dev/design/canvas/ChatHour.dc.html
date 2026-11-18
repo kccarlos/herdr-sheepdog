@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — a busy hour</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: {{ h }}px; display: flex; flex-direction: column; overflow: hidden; background: {{ c.surface }}; color: {{ c.ink }}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <dc-import name="TopBar" pane="conversation" waiting="1" dark="{{ dark }}" hint-size="390px,102px"></dc-import>
+
+  <div style="flex-shrink: 0; display: flex; gap: 6px; padding: 4px 16px 8px; overflow: hidden; border-bottom: 1px solid {{ c.line }}">
+    <sc-for list="{{ strip }}" as="s" hint-placeholder-count="4">
+      <button style="flex-shrink: 0; height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 11px; border-radius: 16px; border: 1px solid {{ s.border }}; background: {{ s.bg }}; color: {{ c.ink }}; font-size: 14px; font-weight: 600"><span style="width: 7px; height: 7px; border-radius: 4px; background: {{ s.color }}"></span>{{ s.name }}</button>
+    </sc-for>
+  </div>
+
+  <sc-if value="{{ tech }}" hint-placeholder-val="{{ false }}">
+    <div style="flex-shrink: 0; display: flex; justify-content: center; padding: 8px 0 0">
+      <span style="display: flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 14px; background: {{ c.material }}; border: 1px solid {{ c.line }}; font-size: 12px; font-weight: 600; color: {{ c.muted }}">
+        <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6zM12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"></path></svg>Technical events shown · long press copies JSON
+      </span>
+    </div>
+  </sc-if>
+
+  <main style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: {{ justify }}; padding: 8px 16px {{ padBottom }}px">
+    <sc-for list="{{ rows }}" as="r" hint-placeholder-count="14">
+      <div style="margin-top: {{ r.gap }}px; width: 358px">
+        <dc-import name="ChatRow" kind="{{ r.kind }}" pos="{{ r.pos }}" text="{{ r.text }}" time="{{ r.time }}" gutter="{{ r.gutter }}" dark="{{ dark }}" ax="{{ ax }}" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,48px"></dc-import>
+      </div>
+    </sc-for>
+  </main>
+
+  <sc-if value="{{ showQuestion }}" hint-placeholder-val="{{ true }}">
+    <section aria-label="Codex needs your answer" style="position: absolute; left: 12px; right: 12px; bottom: 96px; padding: 12px 14px 14px; border-radius: 22px; background: {{ c.card }}; border: 1.5px solid {{ c.blocked }}; box-shadow: 0 8px 24px rgba(0,0,0,0.16); display: flex; flex-direction: column; gap: 9px">
+      <div style="display: flex; align-items: center; gap: 7px; font-size: {{ fs.cap }}px; color: {{ c.muted }}">
+        <span style="width: 7px; height: 7px; border-radius: 4px; background: {{ c.blocked }}"></span>
+        <span style="font-weight: 600; color: {{ c.ink }}">Codex</span>
+        <span style="flex-grow: 1"></span>
+        <span>1 min</span>
+      </div>
+      <span style="font-size: {{ fs.q }}px; line-height: {{ lh.q }}px; font-weight: 600">Codex is asking allow Computer Use to use Finder.</span>
+      <div style="display: flex; flex-direction: {{ btnDir }}; gap: 8px">
+        <button style="flex: 1; min-height: 44px; border-radius: 22px; border: 0; background: {{ c.accent }}; color: #1F1F22; font-size: {{ fs.btn }}px; font-weight: 600; padding: 6px 14px">Yes, proceed</button>
+        <button style="flex: 1; min-height: 44px; border-radius: 22px; border: 1px solid {{ c.line }}; background: {{ c.card }}; color: {{ c.ink }}; font-size: {{ fs.btn }}px; padding: 6px 14px">No</button>
+      </div>
+    </section>
+  </sc-if>
+
+  <sc-if value="{{ ax }}" hint-placeholder-val="{{ false }}">
+    <section aria-label="Codex needs your answer" style="position: absolute; left: 12px; right: 12px; bottom: 96px; padding: 12px 14px; border-radius: 22px; background: {{ c.card }}; border: 1.5px solid {{ c.blocked }}; box-shadow: 0 8px 24px rgba(0,0,0,0.16); display: flex; flex-direction: column; gap: 10px">
+      <span style="font-size: 34px; line-height: 41px; font-weight: 600">Codex asked</span>
+      <button style="min-height: 56px; border-radius: 28px; border: 0; background: {{ c.accent }}; color: #1F1F22; font-size: 34px; font-weight: 600">Answer</button>
+    </section>
+  </sc-if>
+
+  <div style="position: absolute; left: 12px; bottom: 26px; width: 366px; height: 60px; display: flex">
+    <dc-import name="Dock" label="Work Mac" status="Listening" mode="quiet" dark="{{ dark }}" style="display: block; width: 366px; height: 60px" hint-size="366px,60px"></dc-import>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"ax":{"editor":"boolean","default":false},"tech":{"editor":"boolean","default":false},"$preview":{"width":390,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const dark = !!this.props.dark, ax = !!this.props.ax, tech = !!this.props.tech;
+    const c = dark
+      ? { surface: '#16181C', card: '#1F2126', ink: '#F5F2EA', muted: '#A3A7AF', line: '#2E3138', accent: '#F39C1F', blocked: '#F0A92A', accentSoft: '#2A2416', material: 'rgba(38,41,47,0.9)' }
+      : { surface: '#FAF8F3', card: '#FFFFFF', ink: '#1F1F22', muted: '#6B6E75', line: '#E4E0D7', accent: '#D98718', blocked: '#D99417', accentSoft: '#FDF1DC', material: 'rgba(255,255,255,0.9)' };
+    const S = (name, color, blocked) => ({ name, color, bg: blocked ? c.accentSoft : c.card, border: blocked ? c.blocked : c.line });
+    const strip = [S('Codex', c.blocked, true), S('Claude', dark ? '#6AA8EB' : '#1F5F9E'), S('forumind', dark ? '#9AA1AD' : '#5C6370'), S('slingshot', dark ? '#5CC792' : '#1D6B46')];
+    const R = (kind, gap, o) => Object.assign({ kind, gap, pos: 'single', text: '', time: '', gutter: '' }, o || {});
+    let rows;
+    if (tech) {
+      const g = (t, code) => ({ gutter: t + '|' + code });
+      rows = [
+        R('day', 0),
+        R('tContextLost', 6, g('12:00:04', 'SYS')),
+        R('tFresh', 2, g('12:00:11', 'SYS')),
+        R('tDropped', 6, g('12:05:40', 'UPD')),
+        R('tDropped', 6, Object.assign(g('12:09:13', 'UPD'), { text: '' })),
+        R('tHeld', 6, g('12:20:02', 'UPD')),
+        R('tClosed', 6, g('12:51:00', 'SYS')),
+        R('restarted', 2, g('12:51:03', 'CTX')),
+        R('tReleased', 6, g('13:02:12', 'UPD')),
+        R('talkingTo', 6, g('13:02:10', 'CTX')),
+        R('tRoute', 4, g('13:02:30', 'SYS')),
+        R('you', 6, g('13:02:40', 'DLG')),
+        R('voice', 6, Object.assign(g('13:02:47', 'DLG'), { text: 'Eight things finished while you were away. The forumind design doc is waiting for your OK.' })),
+        R('brain', 6, g('13:02:48', 'DLG')),
+        R('questionPinned', 6, g('13:03:02', 'ASK')),
+        R('questionSettled', 6, g('13:03:21', 'ASK'))
+      ];
+    } else if (ax) {
+      rows = [
+        R('talkingTo', 0),
+        R('you', 14),
+        R('voiceDetails', 6, { text: 'Eight things finished while you were away.' }),
+        R('pointer', 10),
+        R('approved', 14, { time: '13:03' })
+      ];
+    } else {
+      rows = [
+        R('earlier', 0),
+        R('day', 2),
+        R('group', 8),
+        R('talkingTo', 18, { text: 'Talking to Work Mac · 13:02' }),
+        R('you', 14),
+        R('voiceDetails', 6),
+        R('youTyped', 18),
+        R('voice', 6, { text: 'Codex wants to use Finder. Its question is below.' }),
+        R('pointer', 4),
+        R('approved', 18, { pos: 'first', time: '13:03' }),
+        R('closed', 0, { pos: 'mid', time: '13:03' }),
+        R('update', 0, { pos: 'last', time: '13:04' }),
+        R('card', 8),
+        R('youOpen', 18)
+      ];
+    }
+    return {
+      c, dark, ax, tech, strip, rows,
+      h: ax ? 844 : 1560,
+      showQuestion: !tech && !ax,
+      fs: ax ? { cap: 30, q: 36, btn: 34 } : { cap: 13, q: 16, btn: 15 },
+      lh: ax ? { q: 43 } : { q: 21 },
+      btnDir: ax ? 'column' : 'row',
+      justify: (tech || ax) ? 'flex-start' : 'flex-end',
+      padBottom: tech ? 100 : (ax ? 0 : 236)
+    };
+  }
+}
+</script>
+</body>
+</html>
