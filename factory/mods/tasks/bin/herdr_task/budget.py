@@ -382,10 +382,13 @@ NON_CONVERGENCE = "two rounds in a row with new majors: retro first"
 
 
 def review_nonconverging(t):
+    """Two rounds in a row with new majors (of three or more), counted from the last recap decision that
+    answered a review stop: a continue on a size, time or CI recap never hides it (SDF-49)."""
     from .settings import fable_runs
-    fable = fable_runs(t)
+    fable = fable_runs(t) | {r.get("by") for r in t.get("reviews") or [] if r.get("retro")}
     all_rounds = [r for r in rounds_since(t, all_rounds=True) if r.get("by") not in fable]
-    rounds = [r for r in rounds_since(t) if r.get("by") not in fable]
+    since = max([d.get("at") or 0 for d in t.get("recaps") or [] if NON_CONVERGENCE in (d.get("reasons") or [])], default=0)
+    rounds = [r for r in all_rounds if (r.get("at") or 0) > since]
     return (len(all_rounds) >= 3 and len(rounds) >= 2 and
             all(r.get("verdict") == "changes" and (r.get("majors") or 0) > 0 for r in rounds[-2:]))
 
@@ -571,7 +574,10 @@ def cmd_recap(args):
             raise Fail("A task's own agent can't decide its recap: your Assistant does.")
         if not rc:
             raise Fail(f"{s.ref(t)} has no recap open.")
-        if args.decide == "continue" and (NON_CONVERGENCE in rc.get("reasons", []) or (rounds_since(t) and review_nonconverging(t))):
+        from .retro import blocks_continue
+        if args.decide == "continue" and (why := blocks_continue(t)):
+            raise Fail(f"{why}; choose split, new or drop, and record it with plan amend --reason retro:{s.ref(t)}.")
+        if args.decide == "continue" and (NON_CONVERGENCE in rc.get("reasons", []) or review_nonconverging(t)):
             raise Fail(f"{NON_CONVERGENCE}; choose split, new or drop.")
         if not (args.why or "").strip():
             raise Fail("Say why in one line: --why \"…\".")

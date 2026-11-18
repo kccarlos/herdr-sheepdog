@@ -373,7 +373,10 @@ class Plan:
                     set_task(old, k, str(v))
             old["milestone"] = mid
             if "split_of" in t:
-                old["split_of"] = s.ref(self.find(t["split_of"]))
+                p = self.find(t["split_of"])
+                old["split_of"] = s.ref(p)
+                if (p or {}).get("retro"):  # SDF-49: the worker's one change goes into each child's brief
+                    old["retro_parent"] = {"task": s.ref(p), "worker_change": p["retro"].get("worker_change") or ""}
         # A split: children take the parent's after, and whoever waited on the parent waits on them all.
         splits = {}
         for pid, kids in self.split_parents.items():

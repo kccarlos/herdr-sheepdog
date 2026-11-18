@@ -43,6 +43,7 @@ from .revive import revive_pass
 from .watchdog import watchdog_pass
 from .checks import checks_pass
 from .budget import budget_pass, record_ci
+from .retro import retro_pass
 
 
 PR_WAIT_EVERY = 20000  # how often a pull request whose checks still run is read again (ms)
@@ -398,6 +399,11 @@ def tick_store(s, report):
                     report["done"].append(t["id"])
             t.pop("_pr_fresh", None)
     for t in s.data["tasks"]:
+        if t["state"] in ("running", "ready") and (t.get("retro_run") or t.get("reviews")):
+            try:
+                retro_pass(s, t)  # SDF-49: review not converging: one retro round, worktree or folder task
+            except Exception as e:  # never stops the tick
+                report.setdefault("retro_error", []).append(f"{s.ref(t)}: {e}")
         if t.get("pr") and t.get("state") != "done" and not t.get("worktree"):
             drift_pass(s, t, at=now())
         if t.get("worktree") or t.get("check_run"):

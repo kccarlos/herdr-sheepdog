@@ -509,6 +509,8 @@ def stamp(ms):
 def task_text(task):
     """The task's brief as given, then its dated amendments (FAC-109, `edit --amend`): what workers and reviewers judge by."""
     text = (task.get("prompt") or "").strip() or task["title"]
+    if (rp := task.get("retro_parent")) and rp.get("worker_change"):  # SDF-49
+        text += f"\n\nFrom the retro of {rp['task']}, which this task splits: {rp['worker_change']}"
     changes = [f"- {stamp(a['at'])}: {a['text']}" for a in task.get("amendments") or []]
     return "\n\n".join([text, CHANGES_HEAD + "\n" + "\n".join(changes)]) if changes else text
 

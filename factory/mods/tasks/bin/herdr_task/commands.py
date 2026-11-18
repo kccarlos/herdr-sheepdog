@@ -45,6 +45,8 @@ from .when import when_from
 from .templates import instructions
 from .budget import NON_CONVERGENCE, budget_lines, budget_pass, change_sizes, docs_only_commits, merge_only_commits, merge_only_step, recap_refusal, record_ci, review_nonconverging, size_estimate, size_pass
 from .simulators import release_task
+from .budget import open_recap
+from .retro import fix_words as retro_fix_words, fixing as retro_fixing, gate_rounds as retro_gate_rounds, retro_due
 
 
 # ---- commands -------------------------------------------------------------------------------
@@ -903,7 +905,7 @@ def gate_step(s, t):
         instructions("reviewer"), f"The task, {ref}:\n" + task_text(t),
         f"Review commit {head} in {wt}. {shown}" + (", cut: run it for the rest" if len(diff) > 20000 else "")
         + f":\n{diff[:20000]}",
-        *([FABLE_WORDS] if fable else []),
+        *([FABLE_WORDS] if fable and not retro_fixing(t) else []), *([retro_fix_words(t)] if fable and retro_fixing(t) else []),
         f"Must fix: {MUST_WORDS[rows.get('Must fix') or 'major']}. Herdr started you, not the worker. "
         + (f"You run in a sandbox: you can read only this worktree, its git history and the system's tools, write only in "
            f"$TMPDIR, and can't reach Herdr. When done, end your last message with your findings, each with its level and "
@@ -941,6 +943,8 @@ FABLE_WORDS = ("This round is Fable's (FAC-99): you stand in for the owner at th
 
 def gate_need(s, t):
     """Passing rounds herdr-task's reviewer gives a head: review.min, plus Fable's round for a judgement task."""
+    if n := retro_gate_rounds(t):  # SDF-49: the retro's SHIP on this head, or Fable checking its FIX
+        return n
     if not fable_due(s, t):
         return gate_min(s, t)
     return 1 if fable_said(t, "changes") else gate_min(s, t) + 1  # after its changes, Fable alone reviews the fix
@@ -976,8 +980,8 @@ def review_refusal(s, t, wt):
     task in the folder itself needs a round recorded since it started. Out of rounds, only the
     Assistant adds one (review-more): the task then waits, saying so (review_out)."""
     on, rounds = review_limits(s, t)
-    if not on or not t.get("review_gate") or gate_min(s, t):
-        return None  # a gate folder: herdr-task reviews after ready (gate_step)
+    if not on or not t.get("review_gate") or gate_min(s, t) or retro_gate_rounds(t):
+        return None  # a gate folder, or the retro's own round: herdr-task reviews after ready (gate_step)
     if wt and t.get("start") and in_base(s, t):
         return None  # no commits of its own: nothing to review (nothing to merge)
     if not wt and t.get("folder_start") and unchanged_folder(s, t):
@@ -1101,7 +1105,7 @@ def cmd_reviewed(args):
                                             "report": text, "cli": reviewer.get("agent"), "model": reviewer.get("model")})
         t.pop("review_out", None)
         s.dirty = True
-        stopped = t.get("mode") == "worktree" and budget_pass(s, t)
+        stopped = budget_pass(s, t) if t.get("mode") == "worktree" else bool(retro_due(t) and open_recap(s, t, [NON_CONVERGENCE]))
         v = view(s, t)
     on_what = f" for commit {head[:7]}" if head else ""
     say(args, {**v, "round": used + 1, "rounds": rounds}, f"{s.ref(t)}: review round {used + 1} of {rounds} recorded{on_what}."
