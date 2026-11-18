@@ -44,8 +44,13 @@ def live(ref, scratch):
     wt = os.path.join(scratch, f"retro-{ref.lower()}")
     if not os.path.isdir(wt):
         subprocess.run(["git", "worktree", "add", "-q", "--detach", wt, head], check=True)
+    at = subprocess.run(["git", "-C", wt, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout
+    if not at.startswith(head):
+        raise SystemExit(f"{wt} is at {at.strip()}, not {head}")
     r = subprocess.run(["claude", "-p", "--model", retro.FABLE["model"], "--allowedTools", READ_ONLY, prompt(ref, wt)],
                        cwd=wt, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=1800)
+    if r.returncode:
+        raise SystemExit(f"{ref}: claude exited {r.returncode}: {r.stderr[-500:]}")
     with open(os.path.join(DIR, f"{ref}.out.txt"), "w", encoding="utf-8") as f:
         f.write(r.stdout)
 
@@ -56,6 +61,8 @@ def main():
     ap.add_argument("--dir")
     ap.add_argument("--show", action="store_true", help="print each prompt")
     a = ap.parse_args()
+    if a.live and not a.dir:
+        ap.error("--live needs --dir, a scratch folder for the worktrees")
     for ref in SITUATIONS:
         if a.live:
             live(ref, a.dir)

@@ -439,8 +439,8 @@ def queue(a, reason):
     """One wake at a time: a second reason joins the one waiting."""
     p = a.get("pending")
     if p:
-        if reason not in p["reasons"]:
-            p["reasons"] = (p["reasons"] + [reason])[:6]
+        if reason not in p["reasons"]:  # a retro's wake is never the one dropped (SDF-49)
+            p["reasons"] = ([reason] + p["reasons"] if reason.startswith("event:retro") else p["reasons"] + [reason])[:6]
     else:
         a["pending"] = {"reasons": [reason], "at": now()}
 

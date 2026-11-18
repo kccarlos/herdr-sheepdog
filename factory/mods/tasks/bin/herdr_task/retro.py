@@ -60,8 +60,8 @@ RETRO_CAP = f"retro: FIX asked {FABLE_CHANGES} times and it still does not conve
 
 
 def retro_due(t):
-    """Review is not converging and this task has not had its one retro (failed rounds don't use it up)."""
-    return not t.get("retro") and review_nonconverging(t)
+    """Review is on, not converging, and this task has not had its one retro (failed rounds don't use it up)."""
+    return not t.get("retro") and (t.get("set") or {}).get("review") != "off" and review_nonconverging(t)
 
 
 def fixing(t):
@@ -82,6 +82,19 @@ def blocks_continue(t):
     if t.get("retro_capped"):
         return RETRO_CAP
     return RETRO_REDESIGN if r.get("verdict") == "REDESIGN" and r.get("confidence") != "low" else None
+
+
+def cap(s, t):
+    """The retro's FIX plus a Fable round asking for changes again is the FIX cap (FABLE_CHANGES): a recap
+    without continue, opened before anyone tells the worker to fix again. True when it opened one."""
+    if not fixing(t):
+        return False
+    fable, since = fable_runs(t), t["retro"]["at"]
+    asked = sum(1 for r in t.get("reviews") or [] if r.get("by") in fable and r.get("verdict") == "changes" and (r.get("at") or 0) > since)
+    if 1 + asked < FABLE_CHANGES:
+        return False
+    t["retro_capped"] = now()
+    return open_recap(s, t, [RETRO_CAP])
 
 
 def fix_words(t):
@@ -118,7 +131,9 @@ def check_tail(rec):
         return f"cause {rec.get('cause')!r} / {rec.get('second_cause')!r} is outside the set"
     if rec.get("confidence") not in CONFIDENCE:
         return f"confidence {rec.get('confidence')!r} is not low, medium or high"
-    if not isinstance(rec.get("majors", []), list) or (rec["verdict"] == "FIX" and not rec.get("majors")):
+    if not isinstance(rec.get("majors", []), list) or not all(isinstance(m, dict) for m in rec.get("majors") or []):
+        return "majors is not a list of findings"
+    if rec["verdict"] == "FIX" and not rec.get("majors"):
         return "a FIX verdict names no majors"
     return None
 
@@ -172,7 +187,7 @@ def start(s, t):
     from .launch import launch, review_reads
     from .settings import argv_for, settings_for
     wt = t.get("worktree") or s.loc["folder"]
-    head = t.get("head") or git(wt, "rev-parse", "HEAD")[1]
+    head = git(wt, "rev-parse", "HEAD")[1] or t.get("head")  # the commit on disk: the one it reads
     base_sha = git(wt, "merge-base", t.get("base") or "main", head)[1] if head else ""
     check = (settings_for(s)["tasks"].get("check") or "").strip()
     live = workers(s, t)
@@ -224,6 +239,16 @@ def act(s, t, rn, rec):
         close_recap(s, t, "SHIP", rec, False)
         msg = f"Herdr's retro round passed {ref} on {rn['head'][:7]}: no majors. Run {ready} again."
     elif rec["verdict"] == "FIX":
+        t.setdefault("reviews", []).append({"round": len(t.get("reviews") or []) + 1, "head": rn["head"], "by": rn["address"],
+                                            "started_by": "herdr-task", "result": "changes", "verdict": "changes",
+                                            "must_fix": len(rec["majors"]), "majors": len(rec["majors"]), "report": "retro: FIX",
+                                            "cli": "claude", "model": FABLE["model"], "retro": True, "at": now()})
+        if any(d.get("small") for d in t.get("recaps") or []):  # its bounded continue is spent: FIX is the cap
+            t["retro_capped"] = now()
+            if t.get("recap"):
+                t["recap"]["reasons"].append(RETRO_CAP)
+            s.dirty = True
+            return None
         close_recap(s, t, "FIX", rec, True)
         found = "\n".join(f"- {m.get('file')}:{m.get('line')}: {m.get('what')} (repro: {m.get('repro')})" for m in rec["majors"])
         msg = (f"Herdr's retro round on {ref} found majors to fix:\n{found}\nYour one change: {rec.get('worker_change')}\n"
@@ -244,11 +269,14 @@ def child_ask(s, t):
     """B1 step 7: a split child of a retro'd task draws a retro too: one owner ask, kind decision, instead of a retro."""
     from .ask import cmd_ask
     parent = t["retro_parent"]["task"]
-    rec = cmd_ask(SimpleNamespace(
-        show=None, question=f"{s.ref(t)} failed review twice in a row, also after {parent} was split after its retro. "
-                            "Drop it, or tell me how to go on?",
-        option=["Drop it", "Tell me how to go on"], recommend="Drop it", task=s.ref(t), kind="decision",
-        origin={"folder": s.loc["folder"]}, checklist=None, to=None, json=True))
+    import contextlib
+    import io
+    with contextlib.redirect_stdout(io.StringIO()):  # the tick's own --json stays one document
+        rec = cmd_ask(SimpleNamespace(
+            show=None, question=f"{s.ref(t)} failed review twice in a row, also after {parent} was split after its retro. "
+                                "Drop it, or tell me how to go on?",
+            option=["Drop it", "Tell me how to go on"], recommend="Drop it", task=s.ref(t), kind="decision",
+            origin={"folder": s.loc["folder"]}, checklist=None, to=None, json=True))
     t["retro_ask"] = rec["id"]
     s.dirty = True
 
@@ -261,7 +289,10 @@ def retro_pass(s, t):
         if screen is None:
             return
         from .commands import end_reviewer
+        from .base import git
         rec, why = parse_tail(screen)
+        if git(t.get("worktree") or s.loc["folder"], "rev-parse", "HEAD")[1] not in ("", rn["head"]):
+            rec, why = None, f"the head moved on from {rn['head'][:7]} while it read"
         t.pop("retro_run")
         s.dirty = True
         end_reviewer(rn["address"])
@@ -269,13 +300,7 @@ def retro_pass(s, t):
             act(s, t, rn, rec)
             return
         t["retro_failures"] = (t.get("retro_failures") or []) + [{"at": now(), "head": rn["head"], "why": why}]
-    if t.get("retro") and fixing(t) and not t.get("retro_capped"):
-        since = t["retro"]["at"]
-        fable = fable_runs(t)
-        asked = sum(1 for r in t.get("reviews") or [] if r.get("by") in fable and r.get("verdict") == "changes" and (r.get("at") or 0) > since)
-        if 1 + asked >= FABLE_CHANGES:  # the retro's FIX plus Fable's: the cap, then only split, new or drop
-            t["retro_capped"] = now()
-            open_recap(s, t, [RETRO_CAP])
+    if cap(s, t) or t.get("retro"):
         return
     if not retro_due(t):
         return

@@ -376,7 +376,7 @@ class Plan:
                 p = self.find(t["split_of"])
                 old["split_of"] = s.ref(p)
                 if (p or {}).get("retro"):  # SDF-49: the worker's one change goes into each child's brief
-                    old["retro_parent"] = {"task": s.ref(p), "worker_change": p["retro"].get("worker_change") or ""}
+                    old["retro_parent"] = {"task": s.ref(p), "worker_change": p["retro"].get("worker_change") or "", "retro": p["retro"]}
         # A split: children take the parent's after, and whoever waited on the parent waits on them all.
         splits = {}
         for pid, kids in self.split_parents.items():
@@ -533,6 +533,10 @@ def cmd_plan(args):
         if args.plan == "amend" and not (args.reason or "").strip():
             raise Fail("plan amend needs --reason: why the plan changes, in a line.")
         p = Plan(s, load(args.file), args.plan == "amend")
+        for t in p.tasks:  # SDF-49: a split after a retro says so
+            parent = p.find(t[0]["split_of"]) if "split_of" in t[0] else None
+            if (parent or {}).get("retro") and (args.reason or "").strip() != f"retro:{s.ref(parent)}":
+                p.problems.append(f"{s.ref(parent)} had a retro: split it with plan amend --reason retro:{s.ref(parent)}.")
         if p.problems:
             raise Fail("The plan isn't applied:\n- " + "\n- ".join(p.problems))
         saved = copy.deepcopy(s.data) if args.check else None

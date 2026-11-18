@@ -200,6 +200,40 @@ class Retro(unittest.TestCase):
                 rec, why = self.retro.parse_tail(out)
                 self.assertIsNone(why, ref)
 
+    def test_review_findings_round_1(self):
+        """Codex round 1: a folder task is ticked; a moved head, bad majors or review off never use the retro;
+        a FIX after a spent small continue is the cap; a split after a retro needs its reason."""
+        from herdr_task.tick import needs_tick
+        self.task.update(mode="here", worktree=None)
+        self.rounds(("pass", 0), ("changes", 2), ("changes", 1))
+        self.assertTrue(needs_tick({"tasks": [self.task]}))
+        self.task.update(mode="worktree", worktree=self.wt)
+        self.tick()
+        self.change("moved on")
+        self.tick(TAIL)
+        self.assertNotIn("retro", self.task)
+        self.assertIn("head moved on", self.task["retro_failures"][-1]["why"])
+        self.assertIn("majors is not", self.retro.parse_tail(screen({**TAIL, "verdict": "FIX", "majors": [0]}))[1])
+        self.task["set"]["review"] = "off"
+        self.assertFalse(self.retro.retro_due(self.task))
+        self.task["set"]["review"] = "on"
+        self.task.pop("retro_run", None)
+        self.task["recaps"] = [{"decision": "continue", "small": True, "at": 1, "reasons": ["3 failed CI runs"]}]
+        self.tick()
+        self.tick({**TAIL, "verdict": "FIX", "majors": [MAJOR]})
+        self.assertTrue(self.task["retro_capped"])
+        self.assertIn(self.retro.RETRO_CAP, self.task["recap"]["reasons"])
+        self.assertEqual(self.told, [])
+
+    def test_a_split_after_a_retro_needs_its_reason(self):
+        import herdr_task.plan as plan
+        self.task["retro"] = dict(TAIL)
+        fake = mock.Mock(problems=[], tasks=[({"key": "a", "split_of": "SHEP-13"}, "m1")], find=lambda ref: self.task)
+        with mock.patch.object(plan, "Plan", return_value=fake), mock.patch.object(plan, "load", return_value={}), \
+                mock.patch("herdr_task.store.open_store", lambda args, write=True: self.store):
+            with self.assertRaisesRegex(self.commands.Fail, "retro:SHEP-13"):
+                plan.cmd_plan(argparse.Namespace(plan="amend", reason="smaller", file="p.json", check=True, json=True, folder=None))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -43,7 +43,7 @@ from .revive import revive_pass
 from .watchdog import watchdog_pass
 from .checks import checks_pass
 from .budget import budget_pass, record_ci
-from .retro import retro_pass
+from .retro import retro_due, retro_pass
 
 
 PR_WAIT_EVERY = 20000  # how often a pull request whose checks still run is read again (ms)
@@ -814,7 +814,8 @@ def needs_tick(data):
     """Both the scheduler and a manual tick visit folders with outstanding facts."""
     return bool(data.get("main_watch") or any(
         t.get("state") in ("queued", "scheduled", "ready") or t.get("check_run")
-        or (t.get("worktree") and t.get("state") == "running") or starts_now(t)
+        or (t.get("worktree") and t.get("state") == "running") or starts_now(t) or t.get("retro_run")
+        or (t.get("state") == "running" and t.get("reviews") and retro_due(t))
         or (t.get("pr") and not (t.get("state") == "done" and t["pr"].get("drift_verified_merged")))
         for t in data.get("tasks") or ()))
 

@@ -46,7 +46,7 @@ from .templates import instructions
 from .budget import NON_CONVERGENCE, budget_lines, budget_pass, change_sizes, docs_only_commits, merge_only_commits, merge_only_step, recap_refusal, record_ci, review_nonconverging, size_estimate, size_pass
 from .simulators import release_task
 from .budget import open_recap
-from .retro import fix_words as retro_fix_words, fixing as retro_fixing, gate_rounds as retro_gate_rounds, retro_due
+from .retro import cap as retro_cap, fix_words as retro_fix_words, fixing as retro_fixing, gate_rounds as retro_gate_rounds, retro_due
 
 
 # ---- commands -------------------------------------------------------------------------------
@@ -1459,7 +1459,7 @@ def record_verdict(s, t, rn, passed, must, text, majors=None):
     for k in ("review_out", "progress"):
         t.pop(k, None)
     s.dirty = True
-    if t.get("mode") == "worktree" and budget_pass(s, t):  # a recap first: no next round, no merge, no fixing
+    if t.get("mode") == "worktree" and (retro_cap(s, t) or budget_pass(s, t)):  # a recap first: no next round, no merge, no fixing
         msg = f"{s.ref(t)}: review round {rn['round']} {'passed' if passed else 'asked for changes'}; {t['recap']['title']}."
     elif passed:
         ref, need, k = s.ref(t), gate_need(s, t), gate_passes(t, rn["head"])
