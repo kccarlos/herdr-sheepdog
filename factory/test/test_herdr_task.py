@@ -11420,6 +11420,32 @@ class HoldWhileMainIsRed(unittest.TestCase):
         self.go(gh)
         self.assertEqual((t["state"], gh["merged"]), ("done", "m1"))
 
+    def test_red_base_up_to_date_green_pr_merges(self):
+        t, gh = self.github(behind=0)
+        self.red()
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], self.updates(gh)), ("done", "abc", []))
+
+    def test_red_base_behind_pr_stays_held(self):
+        t, gh = self.github(behind=3)
+        self.red()
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], self.updates(gh)), ("ready", None, []))
+
+    def test_red_base_up_to_date_failing_pr_stays_held(self):
+        t, gh = self.github(behind=0)
+        gh["checks"] = "FAILURE"
+        self.red()
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], self.updates(gh)), ("ready", None, []))
+        self.assertTrue(t["attention"].startswith("Checks failing:"))
+
+    def test_red_base_unknown_comparison_stays_held(self):
+        t, gh = self.github(behind="unknown")
+        self.red()
+        self.go(gh)
+        self.assertEqual((t["state"], gh["merged"], self.updates(gh)), ("ready", None, []))
+
     def test_the_persons_accept_still_merges_a_red_base(self):
         t, gh = self.github(behind=0)
         self.red()
