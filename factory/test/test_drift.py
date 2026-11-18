@@ -60,15 +60,14 @@ class Comparisons(unittest.TestCase):
         self.assertNotIn("head", self.inspect())
 
     def test_accepted_open_after_half_hour(self):
-        self.t["accepted_at"] = self.now - self.drift.WAIT_MS
+        self.t.update(accepted_by="owner", accepted_at=self.now - self.drift.WAIT_MS)
         self.assertIn("unmerged", self.inspect())
         self.v["state"] = "MERGED"
         self.assertNotIn("unmerged", self.inspect())
 
     def test_red_outside_ci_reruns_once_and_clears(self):
         from unittest.mock import patch
-        self.t["state"] = "done"
-        self.t["accepted_at"] = self.now
+        self.t["reviews"] = [{"head": "abc", "verdict": "pass"}]
         self.v["statusCheckRollup"] = [{"name": "test", "conclusion": "FAILURE", "detailsUrl": "https://example.test/actions/runs/123"}]
         with patch.object(self.drift, "gh", return_value=(True, "", "")) as gh:
             self.assertIn("red", self.inspect())
@@ -77,22 +76,22 @@ class Comparisons(unittest.TestCase):
         self.v["statusCheckRollup"][0]["conclusion"] = "SUCCESS"
         self.assertNotIn("red", self.inspect())
 
-    def test_red_retry_waits_for_pending_run_and_only_records_success(self):
+    def test_red_retry_waits_for_pending_run_and_attempts_once(self):
         from unittest.mock import patch
-        self.t.update(state="done", accepted_at=self.now)
+        self.t.update(accepted_by="owner", accepted_at=self.now)
         url = "https://example.test/actions/runs/4"
         self.v["statusCheckRollup"] = [
             {"name": "test", "conclusion": "FAILURE", "detailsUrl": url},
             {"name": "lint", "status": "IN_PROGRESS", "detailsUrl": url},
         ]
-        with patch.object(self.drift, "gh", side_effect=[(False, "", "retry later"), (True, "", "")]) as gh:
+        with patch.object(self.drift, "gh", return_value=(False, "", "refused")) as gh:
             self.assertIn("red", self.inspect())
             gh.assert_not_called()
             self.v["statusCheckRollup"][1].update(status="COMPLETED", conclusion="SUCCESS")
             self.inspect()
             self.inspect()
             self.inspect()
-            self.assertEqual(gh.call_count, 2)
+            self.assertEqual(gh.call_count, 1)
 
     def test_ready_green_hold_waits_half_hour(self):
         self.v["statusCheckRollup"] = [{"name": "test", "conclusion": "SUCCESS"}]
@@ -122,6 +121,7 @@ class Comparisons(unittest.TestCase):
         self.store.ref = lambda t: "TST-1"
         self.store.data["tasks"] = [self.t]
         self.t["pr"]["drift"] = {"red": "CI red on a reviewed head: flaky test or real?"}
+        self.t["pr"]["drift_red_head"] = "abc"
         state = {"folder": "/tmp"}
         with patch.object(autopilot, "store_files", return_value=["store"]), \
              patch.object(autopilot, "read_list", return_value={"folder": "/tmp"}), \
@@ -131,16 +131,46 @@ class Comparisons(unittest.TestCase):
             reasons = autopilot.events_for("/tmp", state, [])
             self.assertEqual(reasons, ["event:drift TST-1 CI red on a reviewed head: flaky test or real?"])
             self.assertEqual(autopilot.events_for("/tmp", state, []), [])
+            red = self.t["pr"].pop("drift")
+            self.assertEqual(autopilot.events_for("/tmp", state, []), [])
+            self.t["pr"]["drift"] = red  # the rerun finishes red on the same head
+            self.assertEqual(autopilot.events_for("/tmp", state, []), [])
+            self.t["pr"]["drift_red_head"] = "def"
+            self.assertEqual(autopilot.events_for("/tmp", state, []), reasons)
 
     def test_red_in_ci_stage_stays_quiet(self):
+        self.t["reviews"] = [{"head": "abc", "result": "pass"}]
         self.t["auto_merge"] = "checks"
         self.v["statusCheckRollup"] = [{"name": "test", "conclusion": "FAILURE"}]
         self.assertNotIn("red", self.inspect())
 
+    def test_unreviewed_ready_failure_stays_quiet_after_attention(self):
+        from unittest.mock import patch
+        self.t.update(auto_merge="checks", attention="Checks failing: test.", attention_at=0)
+        self.v["statusCheckRollup"] = [
+            {"name": "test", "conclusion": "FAILURE", "detailsUrl": "https://example.test/actions/runs/4"},
+        ]
+        with patch.object(self.drift, "gh") as gh:
+            self.assertNotIn("red", self.inspect())
+            gh.assert_not_called()
+
+    def test_stale_acceptance_never_mutates_active_or_done_work(self):
+        from unittest.mock import patch
+        self.v["statusCheckRollup"] = [
+            {"name": "test", "conclusion": "FAILURE", "detailsUrl": "https://example.test/actions/runs/4"},
+        ]
+        self.t.update(accepted_at=self.now - self.drift.WAIT_MS)
+        with patch.object(self.drift, "gh") as gh, patch.object(self.drift, "pr_update_branch") as update:
+            for state in ("running", "ready", "done"):
+                with self.subTest(state=state):
+                    self.t["state"] = state
+                    self.assertEqual(set(self.inspect()), {"done"} if state == "done" else set())
+            gh.assert_not_called()
+            update.assert_not_called()
+
     def test_timeout_in_failed_run_is_not_rerun(self):
         from unittest.mock import patch
-        self.t["state"] = "done"
-        self.t["accepted_at"] = self.now
+        self.t["reviews"] = [{"head": "abc", "verdict": "pass"}]
         url = "https://example.test/actions/runs/123"
         self.v["statusCheckRollup"] = [{"name": "test", "conclusion": "FAILURE", "detailsUrl": url},
                                         {"name": "slow", "conclusion": "TIMED_OUT", "detailsUrl": url}]
@@ -150,13 +180,15 @@ class Comparisons(unittest.TestCase):
 
     def test_old_accepted_branch_uses_existing_update_path(self):
         from unittest.mock import patch
-        self.t["accepted_at"] = self.now - self.drift.WAIT_MS
+        self.t.update(accepted_by="owner", accepted_at=self.now - self.drift.WAIT_MS)
         with patch("herdr_task.commands.uses_queue", return_value=False), \
-             patch("herdr_task.checks.sync_plan", return_value=("full", None)), \
+             patch("herdr_task.checks.sync_plan", return_value=("cheap", None)), \
              patch.object(self.drift, "ci_cap_hold", return_value=None), \
              patch.object(self.drift, "pr_behind", return_value=1), \
-             patch.object(self.drift, "pr_update_branch") as update:
+             patch.object(self.drift, "pr_update_branch", return_value=(False, "conflict")) as update:
             self.assertIn("unmerged", self.inspect())
+            self.now += 60_000
+            self.inspect()
             update.assert_called_once_with(self.t, "a/b", "abc")
 
     def test_working_new_head_is_not_a_claim_or_reviewed_red(self):
@@ -170,12 +202,12 @@ class Comparisons(unittest.TestCase):
             gh.assert_not_called()
 
     def test_accepted_open_less_than_half_hour_is_quiet(self):
-        self.t["accepted_at"] = self.now - self.drift.WAIT_MS + 1
+        self.t.update(accepted_by="owner", accepted_at=self.now - self.drift.WAIT_MS + 1)
         self.assertNotIn("unmerged", self.inspect())
 
     def test_stopped_check_reuses_retry_and_respects_timeout(self):
         from unittest.mock import patch
-        self.t["accepted_at"] = self.now - self.drift.WAIT_MS
+        self.t.update(accepted_by="owner", accepted_at=self.now - self.drift.WAIT_MS)
         self.v["statusCheckRollup"] = [{"name": "test", "conclusion": "CANCELLED"}]
         with patch.object(self.drift, "ci_stopped") as retry, patch("herdr_task.commands.uses_queue", return_value=True):
             self.inspect()
