@@ -18,7 +18,7 @@ import sys
 import time
 
 from .base import ENTRY, Fail, HOME, git, hc_json, kill_agent, label_of, now, PROJECT_LABEL, ROLE_LABEL, run, STORE, TASK_LABEL, WHERE, WORKTREES
-from .settings import agent_key, ASSISTANT_TEMPLATES, by_layer, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, gate_min, keep_review, notes, notes_part, read_settings, review_limits, settings_block, settings_for, sparse_exclude_of
+from .settings import agent_key, ASSISTANT_TEMPLATES, by_layer, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, gate_min, keep_review, notes, notes_part, read_settings, review_limits, settings_block, settings_for, sparse_exclude_of, sparse_exclude_pattern
 from .templates import instructions
 from .agents import LINE_MAX, SUMMARY_MAX
 from .github import remote_of
@@ -828,7 +828,7 @@ def folder_for(s, task):
     if not ok:
         raise Fail(err or "git worktree add failed")
     if exclude:
-        ok, _, err = git(path, "sparse-checkout", "set", "--no-cone", "/*", *[f"!/{p}" for p in exclude])
+        ok, _, err = git(path, "sparse-checkout", "set", "--no-cone", "/*", *[sparse_exclude_pattern(p) for p in exclude])
         if not ok:
             git(main, "worktree", "remove", "--force", path)
             raise Fail(err or "git sparse-checkout set failed")

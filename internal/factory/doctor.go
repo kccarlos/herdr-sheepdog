@@ -1256,7 +1256,9 @@ func checkWorktreeSparse(ctx context.Context, o DoctorOptions, volumeOK bool, pr
 	if probedDir != "" {
 		repoDir = probedDir
 	}
-	if root := gitLine(ctx, o, repoDir, "rev-parse", "--show-toplevel"); root != "" {
+	if common := gitLine(ctx, o, repoDir, "rev-parse", "--path-format=absolute", "--git-common-dir"); common != "" && filepath.Base(common) == ".git" {
+		repoDir = filepath.Dir(common)
+	} else if root := gitLine(ctx, o, repoDir, "rev-parse", "--show-toplevel"); root != "" {
 		repoDir = root
 	}
 	excludes := readWorktreeSparseExclude(o.SettingsPath, repoDir)

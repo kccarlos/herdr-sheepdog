@@ -293,7 +293,10 @@ def cmd_show(args):
         text.append(f"branch: {v['branch']} (set for this task)")
     if v.get("mode") == "worktree" and (exclude := sparse_exclude_of(s)):
         v["sparse_exclude"] = exclude
-        text.append(f"sparse exclude: {', '.join(exclude)} (undo with `git sparse-checkout disable`)")
+        wt = v.get("worktree")
+        is_sparse = bool(wt and os.path.isdir(wt) and git(wt, "config", "--bool", "--get", "core.sparseCheckout")[1].strip() == "true")
+        label = "sparse exclude" if is_sparse else "sparse exclude (new worktrees)"
+        text.append(f"{label}: {', '.join(exclude)} (undo with `git sparse-checkout disable`)")
     if v.get("base_set"):
         text.append(f"merges into: {v['base']} (" + ("its project's base branch" if v.get("base_by") in ("project", "space") else "set for this task") + ")")
     if v.get("after_refs"):

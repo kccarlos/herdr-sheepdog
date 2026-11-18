@@ -248,6 +248,12 @@ def normalize_sparse_exclude(raw, *, strict=False):
     return out
 
 
+def sparse_exclude_pattern(path):
+    """Escapes Git wildcard metacharacters so a configured path is matched literally in --no-cone sparse-checkout."""
+    escaped = re.sub(r"([\\*?\[\]])", r"\\\1", path)
+    return f"!/{escaped}"
+
+
 def sparse_exclude_of(s):
     """Normalized worktree.sparse_exclude list for this project folder."""
     raw = (settings_for(s).get("worktree") or {}).get("sparse_exclude")

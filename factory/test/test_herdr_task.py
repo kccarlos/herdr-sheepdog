@@ -2836,6 +2836,24 @@ class NewWorktrees(unittest.TestCase):
         self.git(new_path, "sparse-checkout", "disable")
         self.assertTrue(os.path.exists(os.path.join(new_path, "docs/dev/bench/results/big.json")))
 
+    def test_sparse_exclude_escapes_git_pattern_metacharacters(self):
+        os.makedirs(os.path.join(self.main, "docs/[draft]"), exist_ok=True)
+        os.makedirs(os.path.join(self.main, "docs/d"), exist_ok=True)
+        with open(os.path.join(self.main, "docs/[draft]/note.md"), "w") as f:
+            f.write("draft\n")
+        with open(os.path.join(self.main, "docs/d/note.md"), "w") as f:
+            f.write("keep\n")
+        self.git(self.main, "add", "docs/[draft]/note.md", "docs/d/note.md")
+        self.git(self.main, "-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
+                 "commit", "-q", "-m", "add bracket paths")
+        self.git(self.main, "push", "-q", "origin", "main")
+        with open(self.settings_file, "w") as f:
+            json.dump({"projects": {self.main: {"worktree": {"sparse_exclude": ["docs/[draft]"]}}}}, f)
+
+        _, path = self.new_worktree(self.task("Literal brackets"))
+        self.assertFalse(os.path.exists(os.path.join(path, "docs/[draft]/note.md")))
+        self.assertTrue(os.path.exists(os.path.join(path, "docs/d/note.md")))
+
 
 class MergedOnlyWithOwnWork(unittest.TestCase):
     """SHEP-23: a task counts as merged only when work of its own landed (its pull request merged, or
@@ -6442,7 +6460,7 @@ class Scheduled(unittest.TestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             self.commands.cmd_show(argparse.Namespace(id="1", folder=self.folder, json=False, evidence=False))
-        self.assertIn("sparse exclude: docs/dev/bench (undo with `git sparse-checkout disable`)", out.getvalue())
+        self.assertIn("sparse exclude (new worktrees): docs/dev/bench (undo with `git sparse-checkout disable`)", out.getvalue())
 
         v2 = self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worktree.sparse_exclude=default"])
         self.assertEqual(v2["sparse_exclude"], [])

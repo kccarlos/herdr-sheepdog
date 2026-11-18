@@ -923,6 +923,27 @@ func TestCheckWorktreeSparse(t *testing.T) {
 		}
 	})
 
+	t.Run("resolves main repo from linked worktree git-common-dir", func(t *testing.T) {
+		home := t.TempDir()
+		mainRepo := filepath.Join(t.TempDir(), "main-repo")
+		wt := filepath.Join(t.TempDir(), "wt-1")
+		env := newFakeEnv("git")
+		env.handlers["git -C"] = func(_ string, _ []string, args []string) CommandOutput {
+			for _, a := range args {
+				if a == "--git-common-dir" {
+					return CommandOutput{Stdout: filepath.Join(mainRepo, ".git") + "\n"}
+				}
+			}
+			return CommandOutput{Exit: 1}
+		}
+		cfg := filepath.Join(home, ".config", "sheepdog", "settings.json")
+		writeFile(filepath.Dir(cfg), "settings.json", `{"projects":{"`+mainRepo+`":{"worktree":{"sparse_exclude":["docs/dev/bench"]}}}}`)
+		r := CheckWorktreeSparse(ctx, DoctorOptions{Folder: wt, Home: home, TempDir: home, RunCommand: env.run}, true)
+		if r.Status != onboard.OK || !strings.Contains(r.Detail, "docs/dev/bench") {
+			t.Fatalf("linked worktree sparse_exclude = %+v", r)
+		}
+	})
+
 	t.Run("skips when project volume failed", func(t *testing.T) {
 		r := CheckWorktreeSparse(ctx, DoctorOptions{Folder: t.TempDir(), Home: t.TempDir()}, false)
 		if r.Status != onboard.Skip {
