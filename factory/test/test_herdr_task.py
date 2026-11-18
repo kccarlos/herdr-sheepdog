@@ -3870,6 +3870,9 @@ class Store:
     def __exit__(self, *a):
         return False
 
+    def save(self):
+        pass
+
     def find(self, ref):
         return next(t for t in self.data["tasks"] if t["id"] == int(str(ref).split("-")[-1]))
 
@@ -3878,6 +3881,10 @@ class Store:
 
     def key(self, t):
         return f"f#{t['id']}"
+
+    def max_running(self):
+        from herdr_task.settings import MAX_RUNNING
+        return MAX_RUNNING
 
 
 class GateReview(unittest.TestCase):
@@ -3921,6 +3928,7 @@ class GateReview(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, json.dumps({"address": f"term-{len(self.runs)}"}), "")
         tdir = tempfile.mkdtemp(dir=self.root)
         self.real_pools, self.real_send = commands.reviewer_pools, launch.send_when_clear
+        self.real_tell = commands.tell
         for mod, name, value in ((commands, "open_store", lambda args, write=True: self.store),
                                  (commands, "view", lambda s, t, live=None: dict(t)), (commands, "say", lambda *a: None),
                                  (commands, "find_proof", lambda *a: None), (commands, "ready_turns", lambda *a: {}),
@@ -3972,7 +3980,7 @@ class GateReview(unittest.TestCase):
         import argparse
         self.env("HC_TERMINAL_ID", by)
         self.commands.cmd_review(argparse.Namespace(id="SHEP-13", json=True, folder=None, passed=passed, changes=changes,
-                                                    changes_file=None, notes=None, must_fix=must_fix))
+                                                    changes_file=None, notes=None, must_fix=must_fix, majors=must_fix))
 
     def valid(self):
         for r in self.task.get("review_runs") or []:
@@ -4089,6 +4097,43 @@ class GateReview(unittest.TestCase):
         self.ready()
         self.assertEqual([(r["round"], r["head"]) for r in self.task["review_runs"]], [(1, self.head), (2, new)])
         self.valid()
+
+    def test_review_findings_are_saved_at_the_running_cap(self):
+        from unittest import mock
+        self.ready()
+        with mock.patch.object(self.commands, "tell", self.real_tell), \
+                mock.patch.object(self.commands, "running_count", return_value=self.store.max_running()):
+            self.verdict("term-1", passed=False, changes="Fix the wording", must_fix=1)
+        self.assertEqual(self.task["reviews"][-1]["report"], "Fix the wording")
+        self.assertIn("Review changes saved", self.task["attention"])
+        self.assertEqual(len(self.runs), 1)
+        self.valid()
+
+        with mock.patch.object(self.commands, "start_refusal", return_value=None), \
+                mock.patch.object(self.commands, "parent_for", return_value=None), \
+                mock.patch.object(self.commands, "handoff", return_value="Continue the task."), \
+                mock.patch.object(self.commands, "launch", return_value={"address": "t9"}) as launch:
+            self.commands.start_again(self.store, self.task, resuming=True)
+        self.assertIn("Fix the wording", launch.call_args.args[3])
+        self.assertNotIn("review_followup", self.task)
+        self.assertNotIn("attention", self.task)
+
+    def test_finishing_or_reopening_drops_deferred_review_delivery(self):
+        import argparse
+        from unittest import mock
+        for state in ("done", "reopen"):
+            with self.subTest(state=state), \
+                    mock.patch.object(self.commands, "merged_here", return_value=False), \
+                    mock.patch.object(self.commands, "release_task"), \
+                    mock.patch.object(self.commands, "remove_build_dir"):
+                self.task.update(state="running", review_followup="Old findings")
+                args = argparse.Namespace(id="SHEP-13", json=True, folder=None)
+                self.commands.cmd_state(args, state)
+                self.assertNotIn("review_followup", self.task)
+        merged = {"id": 14, "state": "ready", "review_followup": "Old findings"}
+        self.commands.finish(self.store, merged)
+        self.assertEqual(merged["state"], "done")
+        self.assertNotIn("review_followup", merged)
 
     def test_ready_again_without_fixing_the_changes_starts_none(self):
         self.ready()
@@ -4372,7 +4417,7 @@ class GateReview(unittest.TestCase):
     def test_the_workers_own_reviewed_is_refused(self):
         import argparse
         with self.assertRaises(self.commands.Fail):
-            self.commands.cmd_reviewed(argparse.Namespace(id="SHEP-13", json=True, folder=None, report="fine"))
+            self.commands.cmd_reviewed(argparse.Namespace(id="SHEP-13", json=True, folder=None, report="fine", verdict="pass", majors=0))
         self.assertNotIn("reviews", self.task)
 
     def test_outside_a_gate_folder_nothing_changes(self):
@@ -4382,7 +4427,7 @@ class GateReview(unittest.TestCase):
             self.ready()
         self.assertEqual(self.runs, [])
         import argparse
-        self.commands.cmd_reviewed(argparse.Namespace(id="SHEP-13", json=True, folder=None, report="fine"))
+        self.commands.cmd_reviewed(argparse.Namespace(id="SHEP-13", json=True, folder=None, report="fine", verdict="pass", majors=0))
         self.ready()
         self.assertEqual((self.task["state"], self.runs), ("ready", []))
 
@@ -4529,7 +4574,7 @@ class GateReview(unittest.TestCase):
         rn = self.task["review_runs"][0]
         code = self.commands.round_code(rn)
         read = self.screen(f"> Review commit ... This round's code is {code}.\n  Working\n  {code} begin\n  - major: gate.txt says hi"
-                           f"\n    twice\n  {code} changes 1\n\n>\n")
+                           f"\n    twice\n  {code} changes 1 1\n\n>\n")
         self.reviewer_term = {"state": "live", "agent": "agy", "status": {"app": "antigravity", "state": "working"}}
         self.commands.gate_reads(self.store, self.task)
         self.assertEqual(read, [])  # never read mid-turn
@@ -4544,25 +4589,56 @@ class GateReview(unittest.TestCase):
         self.assertEqual(len(self.task["reviews"]), 1)
         self.valid()
 
+    def test_missing_major_count_explains_failed_sandbox_round(self):
+        self.sandbox()
+        self.ready()
+        code = self.commands.round_code(self.task["review_runs"][0])
+        self.screen(f"{code} pass\n")
+        self.reviewer_term = {"state": "live", "agent": "agy", "status": {"state": "done"}, "turn": 1}
+        self.commands.gate_reads(self.store, self.task)
+        self.assertEqual(self.task["review_failures"][0]["why"], "verdict missing major count")
+
+    def test_inconsistent_major_count_fails_sandbox_round(self):
+        self.sandbox()
+        self.ready()
+        code = self.commands.round_code(self.task["review_runs"][0])
+        self.screen(f"{code} changes 2 0\n")
+        self.reviewer_term = {"state": "live", "agent": "agy", "status": {"state": "done"}, "turn": 1}
+        self.commands.gate_reads(self.store, self.task)
+        self.assertEqual(self.task["review_failures"][0]["why"], "verdict and major count disagree")
+
+    def test_inconsistent_major_count_refuses_engine_verdict(self):
+        import argparse
+        self.ready()
+        self.env("HC_TERMINAL_ID", "term-1")
+        with self.assertRaises(self.commands.Fail):
+            self.commands.cmd_review(argparse.Namespace(id="SHEP-13", json=True, folder=None, passed=False,
+                changes="major", changes_file=None, notes=None, must_fix=2, majors=0))
+        with self.assertRaises(self.commands.Fail):
+            self.commands.cmd_review(argparse.Namespace(id="SHEP-13", json=True, folder=None, passed=False,
+                changes="major", changes_file=None, notes=None, must_fix=1, majors=3))
+
     def test_a_read_pass_starts_the_next_round_and_a_moved_head_records_none(self):
         self.sandbox()
         self.ready()
         code = self.commands.round_code(self.task["review_runs"][0])
-        self.screen(f"**{code} pass**\n")
+        self.screen(f"**{code} pass 0**\n")
         self.commands.gate_reads(self.store, self.task)
         self.assertEqual([r["verdict"] for r in self.task["reviews"]], ["pass"])
         self.assertEqual(len(self.task["review_runs"]), 2)  # min 2: round 2 started
         code2 = self.commands.round_code(self.task["review_runs"][1])
         self.assertNotEqual(code, code2)
-        self.assertEqual(self.commands.read_verdict(f"`{code2} changes 0`\n", code2), (True, 0, ""))  # only minor findings: a pass
-        self.assertEqual(self.commands.read_verdict(f"- minor: x\n{code2} pass", code2), (True, 0, "- minor: x"))  # no begin line
+        self.assertEqual(self.commands.read_verdict(f"`{code2} changes 0`\n", code2), (True, 0, "", None))  # old marker
+        self.assertEqual(self.commands.read_verdict(f"- minor: x\n{code2} pass", code2), (True, 0, "- minor: x", None))  # no begin line
+        self.assertEqual(self.commands.read_verdict(f"major: x\n{code2} pass 1", code2), (True, 0, "major: x", 1))
+        self.assertEqual(self.commands.read_verdict(f"major: x\n{code2} changes 2 1", code2), (False, 2, "major: x", 1))
         self.screen(f"{code} pass\n")  # round 1's code on round 2's screen: no verdict
         self.commands.gate_reads(self.store, self.task)
         self.assertEqual(len(self.task["reviews"]), 1)
         with open(os.path.join(self.wt, "gate.txt"), "a") as f:  # a dirty tree: nothing recorded, its reviewer kept for a later try
             f.write("more")
         self.commands.subprocess.Popen.reset_mock()
-        self.screen(f"{code2} pass\n")
+        self.screen(f"{code2} pass 0\n")
         with self.assertRaises(self.commands.Fail):
             self.commands.gate_reads(self.store, self.task)
         self.assertEqual(len(self.task["reviews"]), 1)
@@ -4683,7 +4759,7 @@ class GateReview(unittest.TestCase):
                                   lambda *a, **k: (started.append(k.get("message")), ({"address": "w2"}, True))[1]):
             for i in (0, 1):  # neither an intermediate pass nor the final pass starts a worker when none is live
                 code = self.commands.round_code(self.task["review_runs"][i])
-                self.screen(f"{code} pass\n")
+                self.screen(f"{code} pass 0\n")
                 self.commands.gate_reads(self.store, self.task)
             self.assertEqual(self.task["state"], "ready")
             self.assertEqual(started, [])
@@ -4693,7 +4769,7 @@ class GateReview(unittest.TestCase):
                 self.task.pop(k, None)
             self.ready()
             code3 = self.commands.round_code(self.task["review_runs"][0])
-            self.screen(f"fix x\n{code3} changes 1\n")
+            self.screen(f"fix x\n{code3} changes 1 1\n")
             self.commands.gate_reads(self.store, self.task)
             self.assertEqual(len(started), 1)
             self.assertIn("Fix these", started[0])
@@ -4841,7 +4917,7 @@ if sys.argv[1] == "kill" and alive:
         self.assertEqual([(r["round"], r["cli"]) for r in self.task["review_runs"]],
                          [(1, "agy"), (1, "codex"), (2, "agy")])
         code3 = self.commands.round_code(self.task["review_runs"][2])
-        self.screen(f"{code3} pass\n")
+        self.screen(f"{code3} pass 0\n")
         self.commands.gate_reads(self.store, self.task)
         self.assertEqual(self.task["state"], "ready")
         self.assertEqual([(r["round"], r["by"], r["verdict"]) for r in self.task["reviews"]],
@@ -5442,35 +5518,31 @@ class LoopBreaker(GateReview):
     as Needs you "Recap required"; ready refuses until the Assistant decides (continue once)."""
 
     def rounds(self, *rows, since=0):
-        self.task["reviews"] = [{"round": i + 1, "head": "h", "started_by": "herdr-task", "verdict": v, "must_fix": n,
+        self.task["reviews"] = [{"round": i + 1, "head": "h", "started_by": "herdr-task", "verdict": v, "must_fix": n, "majors": n,
                                  "report": rep, "at": since + i + 1} for i, (v, n, rep) in enumerate(rows)]
 
     def why(self):
         from herdr_task.budget import triggers
         return triggers(self.store, self.task)
 
+    def test_worker_rounds_count_after_three_rounds(self):
+        self.rounds(("pass", 0, ""), ("changes", 2, "a.py"), ("changes", 1, "b.py"))
+        for r in self.task["reviews"]:
+            r.pop("started_by")
+        self.assertTrue(self.why())
+
     def test_review_triggers_and_their_edges(self):
-        self.rounds(("changes", 3, "a.py"))
-        self.assertEqual(self.why(), [])  # one round of findings is normal
-        self.rounds(("changes", 3, "a.py"), ("pass", 0, ""))
+        from herdr_task.budget import NON_CONVERGENCE
+        self.rounds(("changes", 3, "a.py"), ("changes", 2, "a.py"))
         self.assertEqual(self.why(), [])
-        self.rounds(("changes", 3, "x/a.py:4"), ("changes", 2, "b.ts"))
-        self.assertEqual(len(self.why()), 1)
-        self.assertIn("round 2 still has 2", self.why()[0])
-        self.rounds(("changes", 2, "x/a.py:4"), ("changes", 2, "x/a.py:9"))
-        self.assertEqual(len(self.why()), 3)
-        self.assertTrue(any("didn't drop" in w for w in self.why()) and any("x/a.py" in w for w in self.why()))
-        self.rounds(("changes", 2, "x/a.py"), ("pass", 0, ""), ("changes", 1, "c.md"))  # same file only once each, dropping
-        self.assertEqual([w[:12] for w in self.why()], ["review round"])
-        self.rounds(("changes", 2, "a.py"), ("pass", 0, ""), ("changes", 1, "a.py"))
-        self.assertTrue(any("same file" in w for w in self.why()))
-        # an agent's own `reviewed` rounds and rounds before the last decision don't count
-        self.rounds(("changes", 2, "a.py"), ("changes", 2, "a.py"))
-        self.task["reviews"][0]["started_by"] = "agent"
+        self.rounds(("pass", 0, ""), ("changes", 2, "a.py"), ("changes", 1, "b.py"))
+        self.assertEqual(self.why(), [NON_CONVERGENCE])
+        self.task["reviews"][0] = {"round": 1, "result": "report", "at": 1}
+        self.assertEqual(self.why(), [NON_CONVERGENCE])  # an old round counts toward the threshold
+        self.rounds(("changes", 1, "a.py"), ("pass", 0, ""), ("changes", 1, "a.py"))
         self.assertEqual(self.why(), [])
-        self.rounds(("changes", 2, "a.py"), ("changes", 2, "a.py"))
-        self.task["recaps"] = [{"decision": "continue", "why": "w", "at": 1}]
-        self.assertEqual(self.why(), [])
+        self.rounds(("pass", 1, "a.py"), ("pass", 1, "a.py"), ("pass", 1, "a.py"))
+        self.assertEqual(self.why(), [])  # majors below a blocker-only Must fix do not request changes
 
     def test_time_trigger_edge(self):
         from unittest import mock
@@ -5521,7 +5593,7 @@ class LoopBreaker(GateReview):
     def test_a_ready_task_goes_back_to_work_and_the_recap_stays_first(self):
         from herdr_task.budget import budget_pass
         from herdr_task.agents import task_status
-        self.rounds(("changes", 2, "a.py"), ("changes", 2, "a.py"))
+        self.rounds(("pass", 0, ""), ("changes", 2, "a.py"), ("changes", 2, "a.py"))
         self.task.update(state="ready", auto_merge="checks", pr={"number": 7})
         self.assertNotIn("recap", self.task)
         with __import__("unittest").mock.patch.object(self.commands, "workers", lambda s, t: []):
@@ -5580,54 +5652,42 @@ class LoopBreaker(GateReview):
             self.assertIn("can't decide its recap", str(e.exception))
         self.assertNotIn("recaps", self.task)
 
-    def test_second_must_fix_round_stops_ready_until_continue_then_again(self):
-        from unittest import mock
-        self.ready()
-        self.verdict("term-1", passed=False, changes="major: gate.txt says hi", must_fix=1)
-        self.assertNotIn("recap", self.task)
-        self.assertIn("Fix these", self.told[-1])
-        self.head = self.change("better")
-        with mock.patch.object(self.commands, "workers", lambda s, t: [{"address": "w1"}]):
-            self.ready()
-            self.verdict("term-2", passed=False, changes="major: gate.txt still says hi", must_fix=1)
-        self.assertTrue(self.task["attention"].startswith("Recap required: review round 2 still has 1"))
-        self.assertIn("RECAP.md", self.told[-1])
-        self.assertIn("Don't fix anything more", self.told[-1])
-        self.assertIn("gate.txt still says hi", self.told[-1])  # the findings, for the recap
-        self.assertEqual(self.task["recap"]["round"], 2)
-        with self.assertRaises(self.commands.Fail) as e:
-            self.ready()
-        self.assertIn("Assistant decides", str(e.exception))
-        self.assertIn("no RECAP.md yet", self.recap())
-        with open(os.path.join(self.wt, "RECAP.md"), "w") as f:
-            f.write("Goal: a gate.")
-        self.assertIn("Goal: a gate.", self.recap())
-        with self.assertRaises(self.commands.Fail):
-            self.recap("continue", why=" ")
-        self.assertIn("decided: continue", self.recap("continue", why="one more, the premise was right"))
-        self.assertNotIn("recap", self.task)
-        self.assertNotIn("attention", self.task)
-        self.assertEqual(self.why(), [])  # the count starts afresh
-        # two more non-converging rounds: Recap required again, and continue is refused
-        at = self.task["recaps"][-1]["at"]
-        self.rounds(("changes", 1, "a.py"), ("changes", 1, "b.py"), since=at)
-        from herdr_task.budget import budget_pass
+    def test_nonconvergence_stops_ready_and_refuses_continue(self):
+        from herdr_task.budget import NON_CONVERGENCE, budget_pass
+        self.rounds(("pass", 0, ""), ("changes", 2, "a.py"), ("changes", 1, "b.py"))
         self.assertTrue(budget_pass(self.store, self.task))
-        self.assertEqual(self.task["attention"], "Recap required again: change direction")
-        with self.assertRaises(self.commands.Fail) as e:
+        self.assertIn(NON_CONVERGENCE, self.task["recap"]["reasons"])
+        with self.assertRaises(self.commands.Fail):
             self.recap("continue")
-        self.assertIn("one continue", str(e.exception))
-        self.assertIn("decided: split", self.recap("split", why="two tasks"))
-        self.assertEqual([d["decision"] for d in self.task["recaps"]], ["continue", "split"])
+        self.assertIn("decided: split", self.recap("split"))
+
+    def test_new_approach_does_not_reopen_the_same_recap(self):
+        from herdr_task.budget import budget_pass
+        self.rounds(("pass", 0, ""), ("changes", 2, "a.py"), ("changes", 1, "b.py"))
+        self.assertTrue(budget_pass(self.store, self.task))
+        self.recap("new")
+        self.assertFalse(budget_pass(self.store, self.task))
+        at = self.task["recaps"][-1]["at"]
+        self.task["reviews"].append({"round": 4, "verdict": "changes", "majors": 1, "at": at + 1})
+        self.assertFalse(budget_pass(self.store, self.task))
+        self.task["reviews"].append({"round": 5, "verdict": "changes", "majors": 1, "at": at + 2})
+        self.assertTrue(budget_pass(self.store, self.task))
+
+    def test_mixed_recap_keeps_worker_recap_without_continue(self):
+        from herdr_task.budget import NON_CONVERGENCE, recap_refusal, stop_words
+        why = [NON_CONVERGENCE, "over twice its time estimate (3h of 1h)"]
+        self.task["recap"] = {"reasons": why, "title": "Recap required"}
+        words = stop_words(self.store, self.task, why, False)
+        self.assertIn("RECAP.md", words)
+        self.assertNotIn("one more round", words)
+        self.assertIn("RECAP.md", recap_refusal(self.store, self.task))
 
     def second_recap(self):
         """A task that had its one continue and is stopped for a recap again (two non-converging rounds)."""
         from unittest import mock
         from herdr_task.budget import budget_pass
         self.task["recaps"] = [{"decision": "continue", "why": "w", "at": 1}]
-        self.rounds(("changes", 1, "a.py"), ("changes", 1, "b.py"), since=1)
-        with mock.patch.object(self.commands, "workers", lambda s, t: []):
-            self.assertTrue(budget_pass(self.store, self.task))
+        self.task["recap"] = {"title": "Recap required again: change direction", "reasons": ["3 failed CI runs"]}
 
     def test_a_second_continue_small_is_bounded_and_a_third_is_refused(self):
         """FAC-108: a second recap can continue once more with --small: 1 more round, 60 more lines."""
@@ -5986,6 +6046,7 @@ class Scheduled(unittest.TestCase):
         import herdr_task.tick as tick
         from herdr_task.base import Fail
         self.commands, self.tick, self.store_mod, self.Fail = commands, tick, store, Fail
+        self.real_begin = commands.begin
         self.argparse, self.io, self.redirect = argparse, io, contextlib.redirect_stdout
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -6143,6 +6204,81 @@ class Scheduled(unittest.TestCase):
         with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 2):
             self.assertEqual(self.tick_at(None), ["APP-3"])
         self.assertEqual(self.task(2)["state"], "queued")
+
+    def test_stopped_agent_does_not_block_queued_start(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        self.busy_folder(1, [("Next", False)])
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            s.find(1)["agents"][-1]["at"] = 1
+            s.dirty = True
+        # The agent exited, leaving a shell whose last reported status is still Working.
+        record = {"address": "t1", "agent": "claude", "status": "working"}
+        shell = {**record, "foreground": {"name": "zsh", "argv": ["zsh", "-i"]}}
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "live_agents", lambda key: [record]), \
+                mock.patch.object(queues, "detail", lambda k: shell):
+            self.assertEqual(self.tick_at(None), ["APP-2"])
+
+    def test_tasks_waiting_on_person_or_coordinator_do_not_block_queued_start(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        self.busy_folder(3, [("Next", False)])
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            for i in (1, 2, 3):
+                s.find(i)["agents"][-1]["at"] = 1
+            s.find(2)["device_wait"] = {"why": "Connect the device"}
+            s.dirty = True
+        live = {
+            "1": [{"address": "t1", "agent": "claude", "status": "idle"}],
+            "2": [{"address": "t2", "agent": "claude", "status": "working"}],
+            "3": [{"address": "t3", "agent": "claude", "status": "blocked"}],
+        }
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "live_agents", lambda key: live[key.split("#")[-1]]), \
+                mock.patch.object(queues, "detail", lambda k: k):
+            self.assertEqual(self.tick_at(None), ["APP-4"])
+
+    def test_active_worker_keeps_slot_with_open_owner_question(self):
+        from unittest import mock
+        import herdr_task.ask as ask
+        import herdr_task.queues as queues
+        self.busy_folder(1, [("Next", False)])
+        live = [{"address": "t1", "agent": "claude", "status": "working"}]
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "live_agents", lambda key: live), \
+                mock.patch.object(queues, "detail", lambda k: k), \
+                mock.patch.object(ask, "open_asks", return_value=[{"question": "Ship?", "kind": "owner"}]):
+            self.assertEqual(self.tick_at(None), [])
+
+    def test_queued_restart_delivers_saved_review_findings(self):
+        from unittest import mock
+        self.busy_folder(1, [])
+        self.add("Waiting for review fixes", here=True)
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            s.find(2).update(state="running", review_followup="Fix the wording")
+            s.dirty = True
+        messages = []
+
+        def launch(s, task, argv, message, parent=None):
+            messages.append(message)
+            s.dirty = True
+            return {"address": "t2"}
+
+        with mock.patch.object(self.store_mod.Store, "max_running", return_value=1), \
+                mock.patch.object(self.tick, "begin", self.real_begin), \
+                mock.patch.object(self.commands, "start_refusal", return_value=None), \
+                mock.patch.object(self.commands, "parent_for", return_value=None), \
+                mock.patch.object(self.commands, "brief", return_value="Continue the task."), \
+                mock.patch.object(self.commands, "launch", launch):
+            self.assertTrue(self.run_cmd(self.commands.cmd_start, id="2")["queued"])
+            self.assertEqual(self.task(2)["review_followup"], "Fix the wording")
+            with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+                s.find(1)["state"] = "done"
+                s.dirty = True
+            self.assertEqual(self.tick_at(None), ["APP-2"])
+        self.assertEqual(messages, ["Continue the task.\n\nFix the wording"])
+        self.assertNotIn("review_followup", self.task(2))
 
     def test_without_priority_the_queue_is_oldest_first_within_the_cap(self):
         from unittest import mock
@@ -6912,18 +7048,58 @@ class ReviewedNamesItsCommit(unittest.TestCase):
 
     def reviewed(self, commit=None):
         self.commands.cmd_reviewed(self.argparse.Namespace(id="SHEP-1", json=True, folder=None, report="one major, fixed",
-                                                           commit=commit))
+                                                           commit=commit, verdict="pass", majors=0))
         return self.task["reviews"][-1]["head"]
 
     def test_a_round_on_the_commit_it_reviewed(self):
+        self.task.update(reviewer="codex", reviewer_model="test-model", set={"review": "on"})
         a = self.commit("reactions on the left")
         b = self.commit("the round's fixes")
         self.assertEqual(self.reviewed(a[:9]), a)
+        row = self.task["reviews"][-1]
+        self.assertEqual((row["cli"], row["model"]), ("codex", "test-model"))
+        self.assertEqual((row["verdict"], row["majors"]), ("pass", 0))
         self.task["head"] = b
         refusal = self.commands.review_refusal(self.store, self.task, self.wt)
         self.assertIn(f"your final commit {b[:7]} (rounds are recorded on {a[:7]})", refusal)
         self.assertEqual(self.reviewed(), b)  # by default HEAD, as before
         self.assertIsNone(self.commands.review_refusal(self.store, self.task, self.wt))
+
+    def test_worker_records_trigger_nonconvergence(self):
+        from unittest import mock
+        from herdr_task.budget import NON_CONVERGENCE, triggers
+        said = []
+        with mock.patch.object(self.commands, "workers", return_value=[]), \
+                mock.patch.object(self.commands, "say", side_effect=lambda args, view, msg: said.append(msg)):
+            for verdict, majors in (("pass", 0), ("changes", 2), ("changes", 1)):
+                self.commit("reviewed change")
+                self.commands.cmd_reviewed(self.argparse.Namespace(id="SHEP-1", json=True, folder=None, report="finding",
+                                                                   commit=None, verdict=verdict, majors=majors))
+        self.assertIn(NON_CONVERGENCE, triggers(self.store, self.task))
+        self.assertIn("stop and wait", said[-1])
+        with self.assertRaises(self.commands.Fail):
+            self.commands.cmd_reviewed(self.argparse.Namespace(id="SHEP-1", json=True, folder=None, report="finding",
+                                                               commit=None, verdict="pass", majors=0))
+
+    def test_pass_with_majors_requires_blocker_only_setting(self):
+        self.commit("reviewed change")
+        args = self.argparse.Namespace(id="SHEP-1", json=True, folder=None, report="finding", commit=None, verdict="pass", majors=1)
+        self.task["set"] = {"review": "on", "must_fix": "major"}
+        with self.assertRaises(self.commands.Fail):
+            self.commands.cmd_reviewed(args)
+        self.task["set"]["must_fix"] = "blocker"
+        self.commands.cmd_reviewed(args)
+        self.assertEqual(self.task["reviews"][-1]["majors"], 1)
+
+    def test_changes_without_majors_requires_minor_setting(self):
+        self.commit("reviewed change")
+        args = self.argparse.Namespace(id="SHEP-1", json=True, folder=None, report="finding", commit=None, verdict="changes", majors=0)
+        self.task["set"] = {"review": "on", "must_fix": "major"}
+        with self.assertRaises(self.commands.Fail):
+            self.commands.cmd_reviewed(args)
+        self.task["set"]["must_fix"] = "minor"
+        self.commands.cmd_reviewed(args)
+        self.assertEqual(self.task["reviews"][-1]["majors"], 0)
 
     def test_uncommitted_fixes_still_record_the_named_commit(self):
         a = self.commit("reactions on the left")
@@ -7069,7 +7245,7 @@ class GateEndToEnd(GateReview):
             self.ready()
         argv = self.argv_of(1)
         self.assertIn("trustedWorkspaces", argv[argv.index("--settings") + 1])
-        self.until(lambda: self.screen_has(1, " pass\n"))
+        self.until(lambda: self.screen_has(1, " pass 0\n"))
         self.reviewer_term = {"state": "live", "agent": "agy", "status": {"state": "idle"}, "turn": 1}
         self.commands.gate_reads(self.store, self.task)  # reads the begin and pass lines off its terminal
         self.assertEqual([(r["verdict"], r["by"], r["must_fix"]) for r in self.task["reviews"]], [("pass", "term-1", 0)])
@@ -8202,7 +8378,8 @@ class TaskFlow(unittest.TestCase):
             {"id": 5, "title": "Opus", "state": "todo", "mode": "here", "agents": [], "agent": "claude", "model": "opus", "effort": "max"},
             {"id": 6, "title": "Ready", "state": "ready", "mode": "here", "agents": [], "agent": "claude"}]
         got = []
-        self.patch(self.commands, "workers", lambda s, t: [{"address": "t1", "labels": {}}] if t["id"] in (1, 6) else [])
+        self.patch(self.commands, "workers", lambda s, t: [{"address": "t1", "labels": {}, "status": "working"}]
+                   if t["id"] in (1, 6) else [])
         self.patch(self.commands, "refresh_sessions", lambda *a: None)
         self.patch(self.commands, "end_agent", lambda s, t, address: got.append(("end", address)))
         self.patch(self.commands, "start_again", lambda s, t, key=None, *a, **k: (
@@ -8442,8 +8619,8 @@ class TaskFlow(unittest.TestCase):
         with open(os.path.join(ROOT, "templates", "assistant.md")) as f:
             guide = f.read()
         [line] = [x for x in guide.splitlines() if x.startswith("- A task out of review rounds (")]  # FAC-93's owner-approved line too
-        self.assertIn("that fix needs a round of its own", line)
-        self.assertIn("Never tell it to say ready without one", line)
+        self.assertIn("a fix needs its own review", line)
+        self.assertIn("Never tell it to say ready without a review", line)
 
     def test_out_of_rounds_needs_you_whatever_its_line_says(self):
         """#784: ready refused for rounds, the worker's status line "waiting for a review round" is no work of its own."""
@@ -9189,6 +9366,7 @@ class Resume(unittest.TestCase):
         import herdr_task.base as base
         import herdr_task.commands as commands
         import herdr_task.launch as launch
+        import herdr_task.queues as queues
         import herdr_task.settings as settings
         import herdr_task.store as store
         import herdr_task.templates as templates
@@ -9230,6 +9408,7 @@ class Resume(unittest.TestCase):
             (commands, "live_agents", lambda key: list(self.live)),
             (commands, "detail", lambda k: k),
             (commands, "just_started", lambda t: None),  # SHEP-223's one-agent guard: these resume right after a start
+            (queues, "live_agents", lambda key: []),
             (templates, "TEMPLATES", os.path.join(ROOT, "templates")),
         ]
         for mod, name, val in patches:
@@ -9335,6 +9514,69 @@ class Resume(unittest.TestCase):
         self.assertIn('approval_policy="never"', cmd)
         self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", cmd)
 
+    def test_resumed_agent_counts_again(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        ref = self.started_task({"agent": "agy"})
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo)) as s:
+            s.find(ref)["agents"][-1]["ended"] = queues.now()
+            s.dirty = True
+        with mock.patch.object(queues, "live_agents", lambda key: []):
+            with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo), write=False) as s:
+                self.assertEqual(queues.running_count(s), 0)
+            self.call(self.commands.cmd_resume, id=ref, agent=None, argv=None, parent=None)
+            with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo), write=False) as s:
+                self.assertEqual(queues.running_count(s), 1)
+
+    def test_resume_refuses_when_the_running_cap_is_full(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        from herdr_task.base import Fail
+        ref = self.started_task({"agent": "agy"}, set=["priority=urgent"])
+        self.started_task({"agent": "agy"})
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "live_agents", lambda key: []):
+            with self.assertRaisesRegex(Fail, "Can't resume .*1 task is running here"):
+                self.call(self.commands.cmd_resume, id=ref, agent=None, argv=None, parent=None)
+        self.assertEqual(len(self.runs), 2)
+
+    def test_the_tick_starts_nothing_while_the_count_is_at_or_over_the_cap(self):
+        """A message to a live paused worker takes its slot back unchecked, so the count can pass the cap
+        for a while: the tick then starts no queued task until it is below the cap again."""
+        from unittest import mock
+        import herdr_task.queues as queues
+        import herdr_task.tick as tick
+        self.started_task({"agent": "agy"})
+        self.started_task({"agent": "agy"})
+        waiting = self.started_task({"agent": "agy"})
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo)) as s:
+            t = s.find(waiting)
+            t["agents"][-1]["ended"] = queues.now()
+            t["state"], t["queue"], t["queued_at"] = "queued", {"agent": "agy"}, queues.now()
+            s.dirty = True
+        before = len(self.runs)
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1):
+            with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo), write=False) as s:
+                self.assertGreater(queues.running_count(s), 1)
+            report = {"started": [], "done": [], "attention": [], "fired": [], "retries": []}
+            with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo)) as s:
+                tick.tick_store(s, report)
+        self.assertEqual((report["started"], len(self.runs)), ([], before))
+
+    def test_message_and_switch_cannot_restart_a_stopped_agent_at_the_cap(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        from herdr_task.base import Fail
+        ref = self.started_task({"agent": "agy"})
+        self.started_task({"agent": "agy"})
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "live_agents", lambda key: []):
+            with self.assertRaisesRegex(Fail, "Can't resume .*1 task is running here"):
+                self.call(self.commands.cmd_fix, id=ref, reason="Fix the checks")
+            # A switch with no worker at work only edits the settings: it starts nothing past the cap.
+            self.call(self.commands.cmd_switch, id=ref, agent="agy", argv=None, parent=None, keep=False)
+        self.assertEqual(len(self.runs), 2)
+
     def test_a_resumed_agy_worker_idle_at_turn_0_gets_one_nudge(self):
         """FAC-100 (note 14): a resumed agy session sits at turn 0 until it hears something: the tick nudges it once."""
         from unittest import mock
@@ -9435,7 +9677,7 @@ class Resume(unittest.TestCase):
     def switch_live_worker(self, ref, cli):
         from unittest import mock
 
-        live = [{"address": f"t{len(self.runs)}", "foreground": {"name": cli}}]
+        live = [{"address": f"t{len(self.runs)}", "foreground": {"name": cli}, "turn": 1}]
         with mock.patch.object(self, "live", live), mock.patch.object(self.commands, "refresh_sessions"), \
                 mock.patch.object(self.commands, "end_agent"):
             return self.call(self.commands.cmd_switch, id=ref, space=None, agent=None, argv=None, parent=None, keep=False)
@@ -10580,6 +10822,21 @@ class DesignAndDocReview(unittest.TestCase):
                 mock.patch.object(self.commands, "caller_labels", lambda: {}):
             self.commands.cmd_review_more(argparse.Namespace(id="SHEP-13", json=True, folder=None))
         return sent
+
+    def test_review_more_once_and_refuses_nonconvergence(self):
+        from unittest import mock
+        from herdr_task.budget import NON_CONVERGENCE
+        self.task["set"] = {"review": "on", "review_rounds": 1}
+        self.task["reviews"] = [{"round": 1, "result": "report", "verdict": "changes", "majors": 1, "at": 1}]
+        with mock.patch.object(self.commands, "gate_min", return_value=0):
+            self.review_more()
+            self.task["reviews"].append({"round": 2, "result": "report", "verdict": "pass", "majors": 0, "at": 2})
+            with self.assertRaisesRegex(self.commands.Fail, "one review-more"):
+                self.review_more()
+            self.task["reviews"].extend([{"round": 3, "result": "report", "verdict": "changes", "majors": 1, "at": 3},
+                                         {"round": 4, "result": "report", "verdict": "changes", "majors": 1, "at": 4}])
+            with self.assertRaisesRegex(self.commands.Fail, NON_CONVERGENCE):
+                self.review_more()
 
     def test_design_and_doc_kinds_override_space_and_normal_tasks_are_unchanged(self):
         # Normal task: keeps the space's 5 rounds and min 2.
@@ -12090,14 +12347,18 @@ class MergeOnlyReviewRounds(unittest.TestCase):
         self.assertNotIn("recap", self.task)
         self.assertEqual(triggers(self.store, self.task), [])
 
-        # A real hand-fix commit after that flagging app.py DOES trip the loop-breaker.
+        # The merge-only finding is excluded; the next ordinary round alone does not trip it.
         self.write_wt("app.py", "a = 2\n")
         self.git(self.wt, "commit", "-q", "-m", "fix app")
         self.ready()
         self.assertEqual(self.commands.rounds_used(self.task, True), 4)
         self.verdict("term-5", passed=False, changes="[major] app.py still broken", must_fix=1)
-        self.assertIn("recap", self.task)
-        self.assertTrue(any("same file flagged in two rounds: app.py" in r for r in self.task["recap"]["reasons"]))
+        self.assertNotIn("recap", self.task)
+        self.write_wt("app.py", "a = 3\n")
+        self.git(self.wt, "commit", "-q", "-m", "fix app again")
+        self.ready()
+        self.verdict("term-6", passed=False, changes="[major] app.py still broken", must_fix=1)
+        self.assertIn("two rounds in a row with new majors: retro first", self.task["recap"]["reasons"])
         self.valid()
 
 
@@ -12579,6 +12840,11 @@ class AutoAccept(unittest.TestCase):
         self.task["proof"] = self.proof
         self.task["pr"] = {"number": 13, "repo": "o/r"}
         self.assertEqual(self.settings.accept_bar(self.store, self.task), (None, "0 of 1 passing review rounds on its final commit"))
+        self.task["head"] = self.head
+        self.task["reviews"] = [{"head": self.head, "round": 1, "result": "report", "verdict": "changes"}]
+        self.assertEqual(self.settings.accept_bar(self.store, self.task), (None, "0 of 1 passing review rounds on its final commit"))
+        self.task["reviews"][0]["verdict"] = "pass"
+        self.assertEqual(self.settings.accept_bar(self.store, self.task), ("engine", None))
         self.assertIn("- Auto-accept: on: with its passing review rounds on your final commit, green CI and its proof, Herdr accepts and merges it", self.auto_line())
 
     def test_auto_accept_settings_line_matches_review_and_proof(self):
@@ -14533,7 +14799,8 @@ class InstalledCliAndMissingRefusal(unittest.TestCase):
             t1 = s.find(r1)
             t1.update(state="running", started=1, mode="here",
                       agents=[{"address": "t-live", "agent": "claude", "argv": ["claude", "--model", "opus"], "at": 10}])
-            self.live_map[s.key(t1)] = [{"address": "t-live", "foreground": {"name": "2.1.325"}, "labels": {"sheepdog.agent": "claude"}}]
+            self.live_map[s.key(t1)] = [{"address": "t-live", "foreground": {"name": "2.1.325"}, "status": "working",
+                                         "labels": {"sheepdog.agent": "claude"}}]
             s.find(r2).update(state="queued", queued_at=2, mode="here", queue={"argv": ["claude"]})
             s.find(r5).update(state="running", started=3, mode="here",
                               agents=[{"address": "t-dead", "agent": "claude", "argv": ["claude"], "at": 5, "ended": 9}])

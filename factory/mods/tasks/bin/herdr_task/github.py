@@ -1346,7 +1346,7 @@ def finish(s, task, even_if_busy=False):
     if task.get("auto_merge") and not task.get("accepted_by"):
         task["accepted_by"] = accepted_word(task)
     task["state"], task["done_at"] = "done", now()
-    for k in ("attention", "merge_requested", "queue", "queued_at", "merge_queued", "kept_open"):
+    for k in ("attention", "merge_requested", "queue", "queued_at", "merge_queued", "kept_open", "review_followup"):
         task.pop(k, None)
     release_task(s, task)
     remove_build_dir(s, task)

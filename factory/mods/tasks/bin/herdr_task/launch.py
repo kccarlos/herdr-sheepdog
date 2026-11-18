@@ -291,13 +291,51 @@ def sweep_sandboxes():
             pass
 
 
-def resume_argv(argv, session, *, worker=True):
-    """Resume a session with the current worker argv and the recorded session id."""
+def claude_mode(argv, folder=None):
+    """The permission mode a new Claude Code session would start in (#1056): argv's own flag, else the defaultMode of
+    its --settings, the folder's .claude/settings.local.json and .claude/settings.json, then the person's
+    (CLAUDE_CONFIG_DIR or ~/.claude), as Claude Code ranks them; "default" when none says."""
+    for i, a in enumerate(argv):
+        if a == "--dangerously-skip-permissions":
+            return None
+        if a == "--permission-mode" and i + 1 < len(argv):
+            return argv[i + 1]
+        if a.startswith("--permission-mode="):
+            return a.split("=", 1)[1]
+    found = []
+    for i, a in enumerate(argv[:-1]):
+        if a == "--settings":
+            found.append(argv[i + 1])
+    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude")
+    files = ([os.path.join(folder, ".claude", "settings.local.json"), os.path.join(folder, ".claude", "settings.json")] if folder else []) \
+        + [os.path.join(home, "settings.json")]
+    for src in found + files:
+        try:
+            if src.lstrip().startswith("{"):
+                d = json.loads(src)
+            else:
+                with open(os.path.expanduser(src)) as f:
+                    d = json.load(f)
+        except (OSError, ValueError):
+            continue
+        mode = ((d.get("permissions") or {}) if isinstance(d, dict) else {}).get("defaultMode")
+        if isinstance(mode, str) and mode:
+            return mode
+    return "default"
+
+
+def resume_argv(argv, session, folder=None, *, worker=True):
+    """Resume a session with the current worker argv and the recorded session id. Claude Code brings a resumed
+    session back in the permission mode it ended in (#1056): the mode a new one would get is said, unless argv
+    already says one (worker argv always does)."""
     if worker:
         argv = worker_permissions(argv)
     k = agent_key(argv)
     if k == "claude":
-        return argv + ["--resume", session]
+        mode = claude_mode(argv, folder)
+        has = mode is None or any(a in ("--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--permission-mode")
+                                  or a.startswith("--permission-mode=") for a in argv)
+        return argv + ([] if has else ["--permission-mode", mode]) + ["--resume", session]
     if k == "codex":
         return [argv[0], "resume", *argv[1:], session]
     if k == "agy":
@@ -436,7 +474,7 @@ def closing_line(s, task, parent=None):
                  f"finds; `reviewed` doesn't count here.")
     elif on:
         text += (f" Review is on: after each review round, record it on the commit it reviewed with `{ht} reviewed {s.ref(task)} "
-                 f"--folder {shlex.quote(s.loc['folder'])} --report \"<its findings in a line>\"` (add `--commit <sha>` if you committed fixes since; at most {rounds} rounds); "
+                 f"--folder {shlex.quote(s.loc['folder'])} --verdict pass|changes --majors N --report \"<its findings in a line>\"` (add `--commit <sha>` if you committed fixes since; at most {rounds} rounds); "
                  f"ready refuses a final commit no round was recorded on.")
     text += (f" At the start, at each natural step and at least every 5 minutes while you work, say how it's going: `{ht} status {s.ref(task)} --folder {shlex.quote(s.loc['folder'])} "
              f"\"<what you're doing now, at most {LINE_MAX} characters>\" --done <% of the whole task> --left <your best guess of how long is left, like 20m>`: "

@@ -112,6 +112,8 @@ def first(kind, message):
 
 def resume_argv(kind, argv, session, message=None):
     """Resume a recovered session with the resolved argv and an optional first message."""
+    if kind == "claude":  # Claude's argv as it was: a revive brings back the session it had, never launch's #1056 mode
+        return [*argv, "--resume", session, *first(kind, message)]
     return [*launch_resume(argv, session, worker=False), *first(kind, message)]
 
 

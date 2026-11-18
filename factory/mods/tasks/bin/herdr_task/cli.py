@@ -240,6 +240,8 @@ def main():
     c = cmd("reviewed", cmd_reviewed, "a task's agent records one review round of its current commit (Review: on): ready then "
                                       "accepts that commit; uses one of its Review rounds")
     c.add_argument("--report", help="the round's findings in a line (levels, what was fixed)")
+    c.add_argument("--verdict", choices=("pass", "changes"), required=True)
+    c.add_argument("--majors", type=int, required=True, help="number of major or blocker findings")
     c.add_argument("--commit", help="the commit the round reviewed, when fixes were committed since (default: HEAD)")
     c = cmd("recap", cmd_recap, "the Assistant decides a task's open recap (Recap required): no flags prints it and its RECAP.md")
     c.add_argument("--decide", choices=DECISIONS, help="continue (once per task), split, new (approach) or drop: the last three only record")
@@ -344,6 +346,7 @@ def main():
     c.add_argument("--changes-file")
     c.add_argument("--notes", help="suggestions with a pass")
     c.add_argument("--must-fix", type=int, help="findings at or above Must fix (herdr-task's own reviewer, FAC-13)")
+    c.add_argument("--majors", type=int, help="major or blocker findings (herdr-task's own reviewer)")
     c = cmd("scheduler", cmd_scheduler, "run automations and the task tick loop (the sheepdog daemon keeps one as sheepdog-factory-tick)", id=False)
     c.add_argument("--once", action="store_true", help="one round, then exit")
     au = sub.add_parser("auto", help="automations: a saved task that a time or an event adds again").add_subparsers(dest="auto")

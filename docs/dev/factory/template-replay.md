@@ -16,6 +16,8 @@ Sheepdog's rule is that prompt changes need eval evidence ([eval index](../eval/
 
 Run it: `cd factory && python3 test/test_replay.py --score` (add `--files` for the second arm). The test class runs in `make test-factory`.
 
+For the structured review-round wording, both the built-in and bundled-template arms passed all 14 situations on 2026-11-17. This checks the existing situations and command names; it does not measure whether a model reports the new count correctly.
+
 ## Situations
 
 | ID | Field notes | Role | Situation |
