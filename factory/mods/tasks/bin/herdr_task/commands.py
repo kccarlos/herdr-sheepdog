@@ -402,7 +402,12 @@ def begin(s, t, argv, space=None, parent=None):
         # it changed nothing, so there is nothing to review (review_refusal, #744).
         t["folder_start"] = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None
     parent = parent_for(parent, s.loc["folder"])
-    return launch(s, t, argv, brief(s, t, parent, argv), parent=parent)
+    message = brief(s, t, parent, argv)
+    if followup := t.get("review_followup"):
+        message += "\n\n" + followup
+    a = launch(s, t, argv, message, parent=parent)
+    t.pop("review_followup", None)
+    return a
 
 
 # #1053: an agent just launched still shows its shell for a moment (agent_running() says no): a task
@@ -1635,6 +1640,7 @@ def cmd_state(args, state):
                 t["kept_open"] = True
             for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait", "head_moved_at", "sync_fallback", "push_held", "ready_head"):
                 t.pop(k, None)
+            t.pop("review_followup", None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
         if state == "done" and t.get("auto_merge") and not t.get("accepted_by"):
@@ -1648,6 +1654,7 @@ def cmd_state(args, state):
         if state != "running":
             release_task(s, t)
         if state == "done":
+            t.pop("review_followup", None)
             remove_build_dir(s, t)
         s.dirty = True
         v = view(s, t)

@@ -4065,6 +4065,19 @@ class GateReview(unittest.TestCase):
         self.assertNotIn("review_followup", self.task)
         self.assertNotIn("attention", self.task)
 
+    def test_finishing_or_reopening_drops_deferred_review_delivery(self):
+        import argparse
+        from unittest import mock
+        for state in ("done", "reopen"):
+            with self.subTest(state=state), \
+                    mock.patch.object(self.commands, "merged_here", return_value=False), \
+                    mock.patch.object(self.commands, "release_task"), \
+                    mock.patch.object(self.commands, "remove_build_dir"):
+                self.task.update(state="running", review_followup="Old findings")
+                args = argparse.Namespace(id="SHEP-13", json=True, folder=None)
+                self.commands.cmd_state(args, state)
+                self.assertNotIn("review_followup", self.task)
+
     def test_ready_again_without_fixing_the_changes_starts_none(self):
         self.ready()
         self.verdict("term-1", passed=False, changes="gate.txt says hi twice", must_fix=1)
@@ -14343,7 +14356,8 @@ class InstalledCliAndMissingRefusal(unittest.TestCase):
             t1 = s.find(r1)
             t1.update(state="running", started=1, mode="here",
                       agents=[{"address": "t-live", "agent": "claude", "argv": ["claude", "--model", "opus"], "at": 10}])
-            self.live_map[s.key(t1)] = [{"address": "t-live", "foreground": {"name": "2.1.325"}, "labels": {"sheepdog.agent": "claude"}}]
+            self.live_map[s.key(t1)] = [{"address": "t-live", "foreground": {"name": "2.1.325"}, "status": "working",
+                                         "labels": {"sheepdog.agent": "claude"}}]
             s.find(r2).update(state="queued", queued_at=2, mode="here", queue={"argv": ["claude"]})
             s.find(r5).update(state="running", started=3, mode="here",
                               agents=[{"address": "t-dead", "agent": "claude", "argv": ["claude"], "at": 5, "ended": 9}])
