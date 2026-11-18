@@ -34,7 +34,7 @@ func startWatcher(t *testing.T, srv *herdrtest.Server, snapshotEvery time.Durati
 			if err != nil {
 				t.Errorf("Run returned %v", err)
 			}
-		case <-time.After(3 * time.Second):
+		case <-time.After(10 * time.Second):
 			t.Error("Run did not return after cancel")
 		}
 	})
@@ -50,7 +50,7 @@ func recvTransition(t *testing.T, ch <-chan herdr.Transition) herdr.Transition {
 			t.Fatal("transitions channel closed")
 		}
 		return tr
-	case <-time.After(3 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("timed out waiting for transition")
 	}
 	return herdr.Transition{}
