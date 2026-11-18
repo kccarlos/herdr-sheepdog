@@ -1313,10 +1313,11 @@ def cmd_review(args):
             last = n >= of
             if t["state"] == "ready":
                 t["state"] = "running"
-            sent, _ = tell(s, t, (f"Review round {n} of {of} for {s.ref(t)} found what must be fixed before it can merge:\n{text.strip()}\n\n"
-                                     f"Fix these, commit, then run `herdr-task ready {s.ref(t)} --folder {shlex.quote(s.loc['folder'])}` again"
-                                     + (" (that was the last review round)." if last else " for the next round.")), None)
-            msg = f"{s.ref(t)}: findings sent to {sent}."
+            followup = (f"Review round {n} of {of} for {s.ref(t)} found what must be fixed before it can merge:\n{text.strip()}\n\n"
+                        f"Fix these, commit, then run `herdr-task ready {s.ref(t)} --folder {shlex.quote(s.loc['folder'])}` again"
+                        + (" (that was the last review round)." if last else " for the next round."))
+            sent = tell_review_changes(s, t, followup)
+            msg = f"{s.ref(t)}: findings sent to {sent}." if sent else f"{s.ref(t)}: {t.get('attention') or 'Review asked for changes.'}"
         v = view(s, t)
     # This reviewer is finished: it ends a moment after this command returns.
     me = os.environ.get("HC_TERMINAL_ID")
@@ -1415,12 +1416,14 @@ def record_verdict(s, t, rn, passed, must, text):
         told = t.setdefault("verdict_told", [])
         sent = None
         if rn["round"] not in told:
-            sent, _ = tell(s, t, (f"Herdr's review round {rn['round']} of {s.ref(t)} ({rn['head'][:7]}) found what must be fixed:\n"
-                                  f"{text.strip()}\n\nFix these, commit, then run `{own_path()} ready {s.ref(t)} --folder "
-                                  f"{shlex.quote(s.loc['folder'])}` again."), None)
+            followup = (f"Herdr's review round {rn['round']} of {s.ref(t)} ({rn['head'][:7]}) found what must be fixed:\n"
+                        f"{text.strip()}\n\nFix these, commit, then run `{own_path()} ready {s.ref(t)} --folder "
+                        f"{shlex.quote(s.loc['folder'])}` again.")
+            sent = tell_review_changes(s, t, followup)
             if sent:
                 told.append(rn["round"])
-        msg = f"{s.ref(t)}: findings sent to {sent}." if sent else f"{s.ref(t)}: review round {rn['round']} asked for changes."
+        outcome = f"findings sent to {sent}." if sent else t.get("attention") or f"review round {rn['round']} asked for changes."
+        msg = f"{s.ref(t)}: {outcome}"
     return msg
 
 
@@ -1864,22 +1867,24 @@ def start_again(s, t, key=None, argv_json=None, message=None, parent=None, resum
     parent = parent_for(parent or (prev or {}).get("parent"), s.loc["folder"])
     same = prev and agent_key(argv) == prev.get("agent")
     res = resume_argv(argv, prev["session"], folder_for(s, t)) if same and prev.get("session") else None
+    followup = t.get("review_followup")
+    if followup:
+        message = f"{followup}\n\n{message}" if message else followup
     if res:
         msg = message or nudge or (continue_line(s, t) if resuming else None)
         a = launch(s, t, argv, msg, parent=parent, resume=res)
         a["session"] = prev["session"]  # the same conversation from the start (agent_log, before a pass sees its pid)
-        if (t.get("attention") or "").startswith("Couldn't start:"):
-            t.pop("attention", None)
-        return a, True
-    text = handoff(s, t, prev, parent, argv)
-    extra = message or (continue_line(s, t) if resuming and f"ready {s.ref(t)}" not in text else None)
-    if extra:
-        text += "\n\n" + extra
-    t["review_gate"] = True
-    a = launch(s, t, argv, text, parent=parent)
-    if (t.get("attention") or "").startswith("Couldn't start:"):
+    else:
+        text = handoff(s, t, prev, parent, argv)
+        extra = message or (continue_line(s, t) if resuming and f"ready {s.ref(t)}" not in text else None)
+        if extra:
+            text += "\n\n" + extra
+        t["review_gate"] = True
+        a = launch(s, t, argv, text, parent=parent)
+    t.pop("review_followup", None)
+    if (t.get("attention") or "").startswith(("Couldn't start:", REVIEW_RESUME_WAIT)):
         t.pop("attention", None)
-    return a, False
+    return a, bool(res)
 
 
 # SHEP-189: what a resumed agent hears first. Its session comes back with no message, so without this
@@ -1888,11 +1893,15 @@ RESUME_NUDGE = ("Herdr resumed your session because your agent had stopped. Carr
                 "what is already done with `herdr-task show`, then keep going with the task.")
 
 
+class ResumeAtCapacity(Fail):
+    pass
+
+
 def require_resume_slot(s, t):
     # The caller holds the folder's write lock through launch and saving the new agent.
     n = running_count(s, t)
     if n >= s.max_running():
-        raise Fail(f"Can't resume {s.ref(t)}: {running_reason(n)}. Wait for a slot to open.")
+        raise ResumeAtCapacity(f"Can't resume {s.ref(t)}: {running_reason(n)}. Wait for a slot to open.")
 
 
 def cmd_resume(args):
@@ -2112,6 +2121,20 @@ def tell(s, t, msg, args, start=True):
     require_resume_slot(s, t)
     a, _ = start_again(s, t, getattr(args, "agent", None), getattr(args, "argv", None), message=msg)
     return a["address"], True
+
+
+REVIEW_RESUME_WAIT = "Review changes saved."
+
+
+def tell_review_changes(s, t, message):
+    try:
+        sent, _ = tell(s, t, message, None)
+    except ResumeAtCapacity as e:
+        t["review_followup"] = message
+        t["attention"], t["attention_at"] = f"{REVIEW_RESUME_WAIT} {e}", now()
+        return None
+    t.pop("review_followup", None)
+    return sent
 
 
 def local_merge_msg(s, t):

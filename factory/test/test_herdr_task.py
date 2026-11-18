@@ -3829,6 +3829,10 @@ class Store:
     def key(self, t):
         return f"f#{t['id']}"
 
+    def max_running(self):
+        from herdr_task.settings import MAX_RUNNING
+        return MAX_RUNNING
+
 
 class GateReview(unittest.TestCase):
     """FAC-13: in a gate folder (review.min > 0) ready starts herdr-task's own reviewer for the exact
@@ -3871,6 +3875,7 @@ class GateReview(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, json.dumps({"address": f"term-{len(self.runs)}"}), "")
         tdir = tempfile.mkdtemp(dir=self.root)
         self.real_pools, self.real_send = commands.reviewer_pools, launch.send_when_clear
+        self.real_tell = commands.tell
         for mod, name, value in ((commands, "open_store", lambda args, write=True: self.store),
                                  (commands, "view", lambda s, t, live=None: dict(t)), (commands, "say", lambda *a: None),
                                  (commands, "find_proof", lambda *a: None), (commands, "ready_turns", lambda *a: {}),
@@ -4039,6 +4044,26 @@ class GateReview(unittest.TestCase):
         self.ready()
         self.assertEqual([(r["round"], r["head"]) for r in self.task["review_runs"]], [(1, self.head), (2, new)])
         self.valid()
+
+    def test_review_findings_are_saved_at_the_running_cap(self):
+        from unittest import mock
+        self.ready()
+        with mock.patch.object(self.commands, "tell", self.real_tell), \
+                mock.patch.object(self.commands, "running_count", return_value=self.store.max_running()):
+            self.verdict("term-1", passed=False, changes="Fix the wording", must_fix=1)
+        self.assertEqual(self.task["reviews"][-1]["report"], "Fix the wording")
+        self.assertIn("Review changes saved", self.task["attention"])
+        self.assertEqual(len(self.runs), 1)
+        self.valid()
+
+        with mock.patch.object(self.commands, "start_refusal", return_value=None), \
+                mock.patch.object(self.commands, "parent_for", return_value=None), \
+                mock.patch.object(self.commands, "handoff", return_value="Continue the task."), \
+                mock.patch.object(self.commands, "launch", return_value={"address": "t9"}) as launch:
+            self.commands.start_again(self.store, self.task, resuming=True)
+        self.assertIn("Fix the wording", launch.call_args.args[3])
+        self.assertNotIn("review_followup", self.task)
+        self.assertNotIn("attention", self.task)
 
     def test_ready_again_without_fixing_the_changes_starts_none(self):
         self.ready()
@@ -8182,7 +8207,8 @@ class TaskFlow(unittest.TestCase):
             {"id": 5, "title": "Opus", "state": "todo", "mode": "here", "agents": [], "agent": "claude", "model": "opus", "effort": "max"},
             {"id": 6, "title": "Ready", "state": "ready", "mode": "here", "agents": [], "agent": "claude"}]
         got = []
-        self.patch(self.commands, "workers", lambda s, t: [{"address": "t1", "labels": {}}] if t["id"] in (1, 6) else [])
+        self.patch(self.commands, "workers", lambda s, t: [{"address": "t1", "labels": {}, "status": "working"}]
+                   if t["id"] in (1, 6) else [])
         self.patch(self.commands, "refresh_sessions", lambda *a: None)
         self.patch(self.commands, "end_agent", lambda s, t, address: got.append(("end", address)))
         self.patch(self.commands, "start_again", lambda s, t, key=None, *a, **k: (
@@ -9168,6 +9194,7 @@ class Resume(unittest.TestCase):
         import herdr_task.base as base
         import herdr_task.commands as commands
         import herdr_task.launch as launch
+        import herdr_task.queues as queues
         import herdr_task.settings as settings
         import herdr_task.store as store
         import herdr_task.templates as templates
@@ -9209,6 +9236,7 @@ class Resume(unittest.TestCase):
             (commands, "live_agents", lambda key: list(self.live)),
             (commands, "detail", lambda k: k),
             (commands, "just_started", lambda t: None),  # SHEP-223's one-agent guard: these resume right after a start
+            (queues, "live_agents", lambda key: []),
             (templates, "TEMPLATES", os.path.join(ROOT, "templates")),
         ]
         for mod, name, val in patches:
