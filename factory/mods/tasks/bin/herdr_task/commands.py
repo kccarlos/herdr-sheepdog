@@ -573,16 +573,11 @@ def cmd_ready(args):
                 t.pop(k, None)
             # Its agents' turns now: a later turn of theirs takes it back to work (busy_again()).
             t["ready_turns"] = ready_turns(live_agents(s.key(t)))
-            reset_before = int(t.get("review_reset_at") or _last_new_recap_at(t) or 0)
             s.dirty = True
     if refused:
         raise Fail(refused)
     with open_store(args) as s:
         t = s.find(args.id)
-        if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before or recap_refusal(s, t) or review_refusal(s, t, wt):
-            why = recap_refusal(s, t) or review_refusal(s, t, wt) or f"{s.ref(t)} was re-planned while ready was running; review your commit and run ready again."
-            s.dirty = True
-            raise Fail(why)
         # Its review is the agent's own, as its brief's Settings block says (herdr-task starts no
         # reviewers). A worktree branch with nothing beyond its base (none of its own, or only its
         # base caught up with: a research or artifact-only task) still waits in Ready for the
@@ -903,10 +898,7 @@ def gate_step(s, t):
             s.dirty = True
             return f"{s.ref(t)}: {hold}."
         t.pop("push_held", None)
-        reset_before_push = int(t.get("review_reset_at") or _last_new_recap_at(t) or 0)
         push_branch(s, t)
-        if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before_push or t.get("recap"):
-            return recap_refusal(s, t) or f"{s.ref(t)} was re-planned while pushing; run ready again."
         t["pr"]["wait"] = PR_CHECKS_RUNNING
         t["pr"]["checked"] = 0
         s.dirty = True
@@ -1290,7 +1282,6 @@ def finalize(s, t):
     local = t.get("mode") != "worktree" or not wt or t.get("nothing_to_merge")
     repo = task_github(github, s, t) if not local and os.path.isdir(wt) else None
     failed = held = None
-    reset_before = int(t.get("review_reset_at") or _last_new_recap_at(t) or 0)
     if repo:
         # Pushed and opened before it shows Ready: the push lets the task list go while its hooks run
         # (#1007), and a Ready task without its pull request yet could be accepted (merged here) meanwhile.
@@ -1305,8 +1296,6 @@ def finalize(s, t):
                     raise Fail(why[0].upper() + why[1:] + ".")
             except Fail as e:
                 failed = str(e)
-        if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before or t.get("recap"):
-            raise Fail(recap_refusal(s, t) or f"{s.ref(t)} was re-planned while opening its pull request; review your commit and run ready again.")
     elif not local and os.path.isdir(wt) and (github_unreachable(s) or github_required(s, t)):
         # #988: a GitHub repo gh couldn't reach just now: never on as if it had no GitHub (Accept would
         # merge it here while a pull request, its agent's, stays open there).
@@ -1487,7 +1476,6 @@ def record_verdict(s, t, rn, passed, must, text, majors=None):
     wt = t.get("worktree") or ""
     if git(wt, "rev-parse", "HEAD")[1] != rn["head"] or git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
         raise Fail(f"{wt} has moved on from {rn['head'][:7]} or has uncommitted changes: this round's verdict no longer applies.")
-    reset_before = int(t.get("review_reset_at") or _last_new_recap_at(t) or 0)
     archive_legacy_before_replan(t)
     at = max(now(), ((t.get("recaps") or [{}])[-1].get("at") or 0) + 1)
     t.setdefault("reviews", []).append({"round": rn["round"], "head": rn["head"], "by": rn["address"], "started_by": "herdr-task",
@@ -1502,8 +1490,6 @@ def record_verdict(s, t, rn, passed, must, text, majors=None):
         ref, need, k = s.ref(t), gate_need(s, t), gate_passes(t, rn["head"])
         before = len(t.get("review_runs") or [])
         step = gate_step(s, t)
-        if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before or t.get("recap"):
-            return step or recap_refusal(s, t) or f"{ref} was re-planned while pushing; run ready again."
         if step:
             runs = t.get("review_runs") or []
             rest = (f"Round {runs[-1]['round']} has started; its findings come to you as a message, nothing to do meanwhile."
@@ -1512,8 +1498,6 @@ def record_verdict(s, t, rn, passed, must, text, majors=None):
             msg = f"{ref}: review round {rn['round']} passed. {step}"
         else:
             fin = finalize(s, t)
-            if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before or t.get("recap"):
-                return fin
             what = f"{ref} waits in Ready for Accept" if merge_wait_why(s, t) and merge_policy(s, t) == "ask" else f"{ref} goes on to merging"
             line = f"Herdr's review round {rn['round']} of {ref} passed: {what} ({k} of {need} passing). {fin}"
             msg = f"{ref}: review round {rn['round']} passed. {fin}"
@@ -1694,14 +1678,10 @@ def inspect_runs(s, t):
                 end_reviewer(rn["address"])
                 continue
             if got and (got[3] is not None or not rn.get("majors_required")):
-                reset_before = int(t.get("review_reset_at") or _last_new_recap_at(t) or 0)
                 before, dirty = json.loads(json.dumps(t)), s.dirty
                 try:
                     record_verdict(s, t, rn, *got)
                 except Exception:  # nothing half recorded: a later tick tries again, its reviewer still there
-                    if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before:
-                        end_reviewer(rn["address"])
-                        return
                     t.clear()
                     t.update(before)
                     s.dirty = dirty
@@ -1709,8 +1689,6 @@ def inspect_runs(s, t):
                         raise
                     fail_run(s, t, rn, "head moved on")
                 end_reviewer(rn["address"])  # recorded, or its head moved on: its verdict never applies
-                if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before:
-                    return
                 continue
         if screen is None:
             screen = screen_of(rn["address"], 400)
@@ -1799,8 +1777,6 @@ def cmd_state(args, state):
             for k in ("reviews", "review", "review_runs", "review_failures", "review_reset_at", "retiring_reviewers", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait", "head_moved_at", "sync_fallback", "push_held", "ready_head"):
                 t.pop(k, None)
             t.pop("review_followup", None)
-            from .news import clear_mem_reset
-            clear_mem_reset(f"{s.slug}#{t['id']}")
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
         if state == "done" and t.get("auto_merge") and not t.get("accepted_by"):
@@ -2396,7 +2372,6 @@ def merge_now(s, t, accepting=False):
     s.dirty = True
     if not v:
         return f"Couldn't reach pull request #{n} on GitHub."
-    reset_before = int(t.get("review_reset_at") or _last_new_recap_at(t) or 0)
     head = t.get("head")
     # A commit made here after ready was never pushed: merging would delete it with the branch.
     # SDF-39: base-merge-only commits on top of the ready head move it forward automatically.
@@ -2419,12 +2394,8 @@ def merge_now(s, t, accepting=False):
             s.dirty = True
             return hold
     if v.get("state") != "MERGED" and not synced and (why := pr_head_problem(s, t, repo, head, theirs)):
-        if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before or t.get("recap"):
-            return recap_refusal(s, t) or f"{s.ref(t)} was re-planned while pushing; its agent says ready again first."
         t["attention"], t["attention_at"] = why[0].upper() + why[1:], now()
         return t["attention"]
-    if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before or t.get("recap"):
-        return recap_refusal(s, t) or f"{s.ref(t)} was re-planned while pushing; its agent says ready again first."
     if v.get("state") != "MERGED" and head and v.get("headRefOid") not in (None, "", head, synced):
         return CHECKS_RUNNING  # just pushed: this view is of the old head; the next tick reads the new one and merges
     note_checks(s, t, v)
@@ -2580,7 +2551,6 @@ def finish_merged_pr(s, t, merge_commit=None):
 
 def run_pr_merge(s, t, wait_as_checks=False):
     """Merges t's PR on GitHub (pushing and opening it first when needed). Returns (how, error)."""
-    reset_before = int(t.get("review_reset_at") or _last_new_recap_at(t) or 0)
     if not t.get("pr") and not own_open_pr(s, t):
         repo = task_github(github, s, t)
         if not repo:
@@ -2591,21 +2561,12 @@ def run_pr_merge(s, t, wait_as_checks=False):
         if t.get("head") and branch_tip(s, t) != t["head"] and not advance_merge_only(s, t):
             return "github", f"{t.get('branch')} has moved on since it said ready: its agent says ready again first."
         t.pop("push_held", None)
-        try:
-            pr_open(s, t, repo, t.get("summary"))
-        except Fail as e:
-            if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before or t.get("recap"):
-                return "github", recap_refusal(s, t) or str(e)
-            raise
-        if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before or t.get("recap"):
-            return "github", recap_refusal(s, t) or f"{s.ref(t)} was re-planned while opening its pull request; nothing merged."
+        pr_open(s, t, repo, t.get("summary"))
         # Restart the CI-start grace window from when the PR actually opened so a stale ready_at
         # doesn't make checks_missing conclude CI never started.
         if wait_as_checks or not t.get("ready_at"):
             t["ready_at"] = now()
     error = merge_now(s, t, accepting=True)
-    if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before or t.get("recap"):
-        return "github", error or recap_refusal(s, t) or f"{s.ref(t)} was re-planned while merging; nothing merged."
     if error == IN_QUEUE:
         return "queue", None
     if wait_as_checks and (error in (CHECKS_RUNNING, WAITS_APPROVAL)
@@ -2705,7 +2666,6 @@ def cmd_accept(args):
     owner = (getattr(args, "owner_approved", None) or "").strip()
     with open_store(args) as s:
         t = s.find(args.id)
-        reset_before = int(t.get("review_reset_at") or _last_new_recap_at(t) or 0)
         if t["state"] != "ready" and not (owner and out_of_rounds(t)):
             raise not_ready(s, t)
         # Its agent at work again since it said ready: never accepted half done. Working again
@@ -2735,8 +2695,6 @@ def cmd_accept(args):
     by = "assistant" if os.environ.get("HERDR_TASK_BY") == "assistant" or (me and is_coordinator(hc_json("get", me) or {})) else "person"
     with open_store(args) as s:
         t = s.find(args.id)
-        if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) != reset_before or t.get("recap"):
-            raise Fail(recap_refusal(s, t) or f"{s.ref(t)} was re-planned while accepting; accept it once its new approach is ready.")
         if t["state"] != "ready" and not (owner and out_of_rounds(t)):
             raise not_ready(s, t)
         if t["state"] != "ready":

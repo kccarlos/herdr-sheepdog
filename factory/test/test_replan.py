@@ -587,39 +587,28 @@ class ReplanTableTests(unittest.TestCase):
             t = self.find_key(s, "api")
             t["pr"] = {"number": 42, "url": "https://example.invalid/pr/42", "repo": "acme/demo"}
             t["merge_queued"] = 1500
-            t["requeued"] = 1
-            t["attention"] = f"{self.tick.QUEUE_REMOVED} check failed"
             t["recap"] = {"at": 1600, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
             s.dirty = True
 
-        # 1. If PR already merged on GitHub, re-plan is refused and task state stays intact.
-        self.queue_state = {"id": "PR_node_42", "state": "MERGED", "in": False, "auto": False}
-        rc, bad = self.run_cli("recap", "TST-1", "--decide", "new", "--why", "too late")
+        # Active merge_queued is refused under the store lock with why, without calling gh or mutating task state.
+        self.gh_calls.clear()
+        rc, bad = self.run_cli("recap", "TST-1", "--decide", "new", "--why", "queued on GitHub")
         self.assertEqual(rc, 1)
-        self.assertIn("already merged", bad["error"])
-        with self.open() as s:
-            self.assertEqual(self.find_key(s, "api").get("merge_queued"), 1500)
-
-        # 2. If dequeue fails and PR stays in merge queue, plan amend aborts without saving or retiring reviewers.
-        self.queue_state = {"id": "PR_node_42", "state": "OPEN", "in": True, "auto": True}
-        with mock.patch.object(self.github, "gh", lambda *a: (False, "", "graphql boom")):
-            rc, bad = self.run_cli("plan", "amend", "--reason", "retro: redo api", plan=self.current_plan(retro=True))
-        self.assertEqual(rc, 1)
-        self.assertIn("merge queue", bad["error"])
-        with self.open() as s:
+        self.assertIn("queued to merge on GitHub", bad["error"])
+        self.assertEqual(self.gh_calls, [])
+        with self.open(True) as s:
             t = self.find_key(s, "api")
             self.assertEqual(t.get("merge_queued"), 1500)
-            self.assertIn("recap", t)
+            # Once dequeued (QUEUE_REMOVED on a running task), leftover requeued and queue-removed attention clear.
+            t.pop("merge_queued", None)
+            t["requeued"] = 1
+            t["attention"] = f"{self.tick.QUEUE_REMOVED} check failed"
+            s.dirty = True
 
-        # 3. When GitHub dequeues and disables auto-merge, merge_queued and requeued clear.
-        self.gh_calls.clear()
-        rc, ok = self.run_cli("recap", "TST-1", "--decide", "new", "--why", "dequeue and redo")
+        rc, ok = self.run_cli("recap", "TST-1", "--decide", "new", "--why", "redo after dequeue")
         self.assertEqual(rc, 0, ok)
-        self.assertTrue(any("dequeuePullRequest" in " ".join(c) for c in self.gh_calls))
-        self.assertTrue(any("--disable-auto" in c for c in self.gh_calls))
         with self.open() as s:
             t = self.find_key(s, "api")
-            self.assertNotIn("merge_queued", t)
             self.assertNotIn("requeued", t)
             self.assertNotIn("attention", t)
 
@@ -630,7 +619,6 @@ class ReplanTableTests(unittest.TestCase):
             t["state"] = "running"
             t["back"] = {"at": 1000, "why": "its agent is at work again", "auto": True}
             t["settled_at"] = 1000
-            t["auto_merge"] = "checks"
             t["pr"] = {"number": 7, "url": "https://example.invalid/pr/7", "repo": "acme/demo"}
             s.dirty = True
         worker = {"address": "w1", "state": "live", "labels": {"herdr.role": "worker"}, "foreground": {"name": "claude"}, "status": {"state": "idle"}}
@@ -643,7 +631,6 @@ class ReplanTableTests(unittest.TestCase):
             t = self.find_key(s, "api")
             self.assertFalse((t.get("back") or {}).get("auto", False))
             self.assertNotIn("settled_at", t)
-            self.assertNotIn("auto_merge", t)
             # tick.settle_back must NOT return the task to Ready after a re-plan.
             with mock.patch.object(self.tick, "now", lambda: 999999999):
                 self.tick.settle_back(s, t, [worker])
@@ -655,8 +642,7 @@ class ReplanTableTests(unittest.TestCase):
             t = self.find_key(s, "api")
             t.update(
                 state="ready", ready_at=1500, ready_head=self.head1, ready_turns={"w1": 2}, stray_since=1510,
-                auto_merge="checks", merge_requested=1520, accepted_by="engine", accepted_at=1530,
-                auto_accepted={"by": "engine", "at": 1530, "head": self.head1, "rounds": [1]},
+                accepted_at=1530, auto_accepted={"by": "engine", "at": 1530, "head": self.head1, "rounds": [1]},
                 accept_wait="no CI", owner_approved={"by": "Assistant", "at": 1540, "note": "ok"},
                 head_moved_at=1550, push_held={"reason": "ci cap", "at": 1560},
                 pr={"number": 9, "url": "https://example.invalid/pr/9", "repo": "acme/demo", "wait": "Checks are still running.", "no_ci": True, "drift_hold": "drift"},
@@ -669,6 +655,14 @@ class ReplanTableTests(unittest.TestCase):
             t["nothing_to_merge"] = True
             s.dirty = True
 
+        # Active Ready state is refused under the store lock; once back in running, leftover Ready/auto-accept markers clear.
+        rc, bad = self.run_cli("plan", "amend", "--reason", "retro: redo api", plan=self.current_plan(retro=True))
+        self.assertEqual(rc, 1)
+        self.assertIn("while it is ready", bad["error"])
+
+        with self.open(True) as s:
+            self.find_key(s, "api")["state"] = "running"
+            s.dirty = True
         rc, _ = self.run_cli("plan", "amend", "--reason", "retro: redo api", plan=self.current_plan(retro=True))
         self.assertEqual(rc, 0)
         doc_head = self.commit_file("README.md", "# Doc note\n", "docs commit")
@@ -921,13 +915,11 @@ class ReplanTableTests(unittest.TestCase):
             s.data.pop("project_id", None)
             t = self.find_key(s, "api")
             t["pr"] = {"number": 55, "url": "https://example.invalid/pr/55", "repo": "acme/demo"}
-            t["merge_queued"] = 1500
             t["review_runs"] = [{"round": 1, "head": self.head1, "address": "rv-check", "cli": "codex", "model": None, "at": 1100, "majors_required": True}]
             t["recap"] = {"at": 1600, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
             store_path = s.path
             s.dirty = True
         self.hc_terminals["rv-check"] = {"address": "rv-check", "state": "live", "foreground": {"name": "codex"}}
-        self.queue_state = {"id": "PR_node_55", "state": "OPEN", "in": True, "auto": True}
         with open(self.held_file, "w") as f:
             json.dump({"rv-check": [{"text": "nudge", "at": 1}]}, f)
         with open(self.news_file, "w") as f:
@@ -956,7 +948,72 @@ class ReplanTableTests(unittest.TestCase):
         with open(self.news_file, "rb") as f:
             self.assertEqual(f.read(), before_news)
 
-    def test_round_1_review_findings(self):
+    # ---- one test per refused state (ready, merging, queued merge, in-flight merge) -------------
+
+    def _assert_replan_and_split_refused(self, expected_substring):
+        with self.open() as s:
+            snap = copy.deepcopy(s.data)
+        split_plan = {"milestones": [milestone("M1", [
+            plan_task("api-part-1", split_of="api"),
+            plan_task("api-part-2", split_of="api"),
+            plan_task("api-v2", after=["api-part-1", "api-part-2"]),
+        ])]}
+        for cmd in (
+            ("recap", "TST-1", "--decide", "new", "--why", "try new approach"),
+            ("recap", "TST-1", "--decide", "split", "--why", "try splitting"),
+        ):
+            rc, bad = self.run_cli(*cmd)
+            self.assertEqual(rc, 1, cmd)
+            self.assertIn(expected_substring, bad["error"])
+        for label, plan_payload in (
+            ("retro_amend", self.current_plan(retro=True)),
+            ("split_amend", split_plan),
+        ):
+            rc, bad = self.run_cli("plan", "amend", "--reason", "retro: rework api", plan=plan_payload)
+            self.assertEqual(rc, 1, label)
+            self.assertIn(expected_substring, bad["error"])
+        with self.open() as s:
+            self.assertEqual(s.data, snap)
+
+    def test_refused_while_ready(self):
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            t["state"] = "ready"
+            t["ready_at"] = 2000
+            t["recap"] = {"at": 2100, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
+            s.dirty = True
+        self._assert_replan_and_split_refused("while it is ready")
+
+    def test_refused_while_merging(self):
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            t["state"] = "ready"
+            t["auto_merge"] = "checks"
+            t["pr"] = {"number": 12, "url": "https://example.invalid/pr/12", "repo": "acme/demo"}
+            t["recap"] = {"at": 2200, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
+            s.dirty = True
+        self._assert_replan_and_split_refused("while it is merging")
+
+    def test_refused_while_merge_queued(self):
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            t["state"] = "running"
+            t["merge_queued"] = 2300
+            t["pr"] = {"number": 13, "url": "https://example.invalid/pr/13", "repo": "acme/demo"}
+            t["recap"] = {"at": 2350, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
+            s.dirty = True
+        self._assert_replan_and_split_refused("queued to merge on GitHub")
+
+    def test_refused_while_merge_in_flight(self):
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            t["state"] = "running"
+            t["merge_requested"] = 2400
+            t["recap"] = {"at": 2450, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
+            s.dirty = True
+        self._assert_replan_and_split_refused("in-flight merge")
+
+    def test_retained_review_regressions(self):
         import herdr_task.devices as devices
 
         # 1. Legacy reviewer in t["review"] is retired on re-plan and cannot pass the task via cmd_review.
@@ -974,11 +1031,9 @@ class ReplanTableTests(unittest.TestCase):
             rc, bad = self.run_cli("review", "TST-1", "--pass")
         self.assertEqual(rc, 1)
         self.assertIn("no active review round", bad["error"])
-        with self.open() as s:
-            self.assertEqual(self.find_key(s, "api")["state"], "running")
 
-        # 2. collect_live_reviewers fetches detail when hc ls omits role labels, retiring reviewer and keeping helper.
-        with self.open() as s:
+        # 2. collect_live_reviewers fetches detail when hc ls omits role labels, and fails closed when hc ls returns None.
+        with self.open(True) as s:
             t = self.find_key(s, "api")
             key = s.key(t)
             t.pop("retiring_reviewers", None)
@@ -988,8 +1043,17 @@ class ReplanTableTests(unittest.TestCase):
             ]
             self.hc_terminals["sub-rev"] = {"address": "sub-rev", "state": "live", "labels": {"herdr.task": key, "herdr.role": "reviewer"}}
             self.hc_terminals["sub-hlp"] = {"address": "sub-hlp", "state": "live", "labels": {"herdr.task": key, "herdr.role": "helper"}}
-            found = self.replan.collect_live_reviewers(s, t)
-            self.assertEqual(found, ["sub-rev"])
+            self.assertEqual(self.replan.collect_live_reviewers(s, t), ["sub-rev"])
+            t["recap"] = {"at": 4000, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
+            s.dirty = True
+        with mock.patch.object(self.agents, "_live", self.real_agents_live), \
+                mock.patch.object(self.agents, "hc_json", lambda *a: None):
+            rc, bad = self.run_cli("recap", "TST-1", "--decide", "new", "--why", "hc down")
+        self.assertEqual(rc, 1)
+        self.assertIn("Couldn't list the task's terminals", bad["error"])
+        with self.open(True) as s:
+            self.find_key(s, "api").pop("recap", None)
+            s.dirty = True
 
         # 3. retiring_live production subprocess parser keeps hold on inconclusive hc get and clears only on confirmed exit/absence.
         with mock.patch.object(self.commands, "hc_json", self.replan._DEFAULT_HC_JSON):
@@ -1002,479 +1066,75 @@ class ReplanTableTests(unittest.TestCase):
             ):
                 dummy = {"retiring_reviewers": ["rv-p"]}
                 with mock.patch.object(self.commands, "run", lambda argv, p=proc: p):
-                    got = self.replan.retiring_live(None, dummy)
-                self.assertEqual(got, want_hold, proc)
+                    self.assertEqual(self.replan.retiring_live(None, dummy), want_hold, proc)
 
-        # 4. news_pass race: clear_task_held_news after snapshot and before delivery neither sends nor restores stale recap.
-        self.news._MEM_RESETS.clear()
-        if os.path.exists(self.news_file):
-            os.remove(self.news_file)
-        with self.open(True) as s:
-            t = self.find_key(s, "api")
-            slug = s.slug
-            key = f"{slug}#1"
-            t.pop("retiring_reviewers", None)
-            t.pop("review_reset_at", None)
-            t.pop("recaps", None)
-            t["recap"] = {"at": 2000, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required: 3 failed CI runs"}
-            t["attention"] = "Recap required: 3 failed CI runs"
-            s.dirty = True
-        t0 = self.base.now() - self.news.NEWS_SETTLE_MS - 1000
-        with open(self.news_file, "w") as f:
-            json.dump({
-                "seen": {slug: {"_init": True, "1": {"status": "needs", "recap": True}}},
-                "outbox": [{"key": key, "project": self.repo, "folder": "repo", "event": "recap", "status": "needs",
-                            "stall": None, "text": '<herdr-news task="TST-1" event="recap">stale recap</herdr-news>', "at": t0}],
-                "delivered": {key: {"to": "coord-1", "turn": 1, "at": t0, "since": t0, "event": "ready", "status": "needs", "stall": None}},
-            }, f)
-        delivered_msgs = []
-        hook_ran = []
-
-        def replan_during_lookup(project):
-            hook_ran.append(project)
-            with self.open(True) as s2:
-                t2 = self.find_key(s2, "api")
-                self.replan.replan_task(s2, t2, why="race replan", at=t0 + 500)
-            return "coord-1"
-
-        self.hc_terminals["coord-1"] = {"address": "coord-1", "state": "live", "turn": 2, "status": {"state": "idle"}}
-        with mock.patch.object(self.news, "coordinator_in", replan_during_lookup), \
-                mock.patch.object(self.news, "news_send", lambda to, txt, **kw: (delivered_msgs.append(txt), "sent")[1]):
-            self.news.news_pass({})
-        self.assertEqual(hook_ran, [self.repo])
-        self.assertEqual(delivered_msgs, [])
-        with open(self.news_file) as f:
-            after_news = json.load(f)
-        self.assertEqual(after_news["outbox"], [])
-        self.assertEqual(after_news["delivered"], {})
-        self.assertNotIn("recap", after_news["seen"][slug]["1"])
-
-        # 5. Held device CARRY_ON wake-up survives clear_task_held_news while old review/recap items are removed.
-        with open(self.held_file, "w") as f:
-            json.dump({
-                "w1": [
-                    {"text": devices.CARRY_ON, "at": 3000},
-                    {"text": "Stop TST-1: Herdr's loop-breaker says recap first.", "at": 3001},
-                ],
-            }, f)
-        with self.open() as s:
-            t = self.find_key(s, "api")
-            self.replan.clear_task_held_news(s, t, at=6000)
-        with open(self.held_file) as f:
-            self.assertEqual(json.load(f), {"w1": [{"text": devices.CARRY_ON, "at": 3000}]})
-
-        # 6. plan amend --check runs no git on task worktrees, and Store(write=False) creates no lock file or STORE dir.
-        with mock.patch.object(self.budget, "git", side_effect=AssertionError("worktree git called in --check")):
-            rc, res = self.run_cli("plan", "amend", "--check", "--reason", "retro: check boundary", plan=self.current_plan(retro=True))
-        self.assertEqual((rc, res), (0, {"ok": True}))
-
-        fresh_store_dir = os.path.join(self.tmp, "missing-store")
-        with mock.patch.object(self.store_mod, "STORE", fresh_store_dir):
-            loc = self.store_mod.locate(self.repo)
-            with self.store_mod.Store(loc, write=False):
-                pass
-        self.assertFalse(os.path.exists(fresh_store_dir))
-
-    def test_round_2_review_findings(self):
-        # 1. Interleaved re-plan between cmd_ready's two open_store locks refuses the stale ready.
-        rc, _ = self.run_cli("reviewed", "TST-1", "--verdict", "pass", "--majors", "0", "--report", "clean")
-        self.assertEqual(rc, 0)
-        real_open_store = self.commands.open_store
-        calls = [0]
-
-        def interleaved_open_store(args, write=True):
-            calls[0] += 1
-            if calls[0] == 2:
-                with real_open_store(args, write=True) as s_mid:
-                    t_mid = s_mid.find(args.id)
-                    self.replan.replan_task(s_mid, t_mid, why="interleaved replan")
-            return real_open_store(args, write=write)
-
-        with mock.patch.object(self.commands, "open_store", interleaved_open_store):
-            rc, bad = self.run_cli("ready", "TST-1", "--summary", "Ship it")
-        self.assertEqual(rc, 1)
-        with self.open() as s:
-            t = self.find_key(s, "api")
-            self.assertEqual(t["state"], "running")
-            self.assertEqual(self.replan.active_reviews(t), [])
-
-        # 2. Deferred replan_task + Plan.finish refuses when merge_queued is set and PR repo cannot be reached.
-        with self.open(True) as s:
-            t = self.find_key(s, "api")
-            t.pop("pr", None)
-            t["merge_queued"] = 55
-            s.dirty = True
-        with mock.patch.object(self.github, "github", lambda folder: None):
-            rc, bad = self.run_cli("plan", "amend", "--reason", "retro: redo api", plan=self.current_plan(retro=True))
-        self.assertEqual(rc, 1)
-        self.assertIn("merge queue", bad["error"])
-        with self.open(True) as s:
-            t = self.find_key(s, "api")
-            self.assertEqual(t.get("merge_queued"), 55)
-            t.pop("merge_queued", None)
-            s.dirty = True
-
-        # 3. Transient hc ls failure (returning None) refuses re-plan through real agents._live instead of dropping live reviewers.
-        with self.open(True) as s:
-            t = self.find_key(s, "api")
-            t["reviewers"] = [{"address": "worker-reviewer"}]
-            t["recap"] = {"at": 4000, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
-            s.dirty = True
-        with mock.patch.object(self.agents, "_live", self.real_agents_live), \
-                mock.patch.object(self.agents, "hc_json", lambda *a: None):
-            rc, bad = self.run_cli("recap", "TST-1", "--decide", "new", "--why", "hc down")
-        self.assertEqual(rc, 1)
-        self.assertIn("Couldn't list the task's terminals", bad["error"])
-        with self.open(True) as s:
-            self.find_key(s, "api").pop("recap", None)
-            s.dirty = True
-
-        # 4. Real news_send: re-plan completing inside typing() prevents stale recap delivery and delivered restore.
-        self.news._MEM_RESETS.clear()
-        with self.open(True) as s:
-            t = self.find_key(s, "api")
-            slug = s.slug
-            key = f"{slug}#1"
-            t.pop("review_reset_at", None)
-            t.pop("recaps", None)
-            t["recap"] = {"at": 4500, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
-            t["attention"] = "Recap required"
-            s.dirty = True
-        t0 = self.base.now() - self.news.NEWS_SETTLE_MS - 1000
-        with open(self.news_file, "w") as f:
-            json.dump({
-                "seen": {slug: {"_init": True, "1": {"status": "needs", "recap": True}}},
-                "outbox": [{"key": key, "project": self.repo, "folder": "repo", "event": "recap", "status": "needs",
-                            "stall": None, "text": '<herdr-news task="TST-1" event="recap">stale recap</herdr-news>', "at": t0}],
-                "delivered": {},
-            }, f)
-        self.hc_terminals["coord-2"] = {"address": "coord-2", "state": "live", "turn": 1, "status": {"state": "idle"}}
-        delivered_calls = []
-
-        def replan_inside_typing(addr, *a, **kw):
-            with self.open(True) as s2:
-                t2 = self.find_key(s2, "api")
-                self.replan.replan_task(s2, t2, why="replan inside typing", at=t0 + 500)
-            return None
-
-        rep = {}
-        with mock.patch.object(self.news, "coordinator_in", lambda proj: "coord-2"), \
-                mock.patch.object(self.news, "typing", replan_inside_typing), \
-                mock.patch.object(self.news, "deliver", lambda addr, txt, *a, **kw: (delivered_calls.append(txt), "sent")[1]):
-            self.news.news_pass(rep)
-        self.assertEqual(delivered_calls, [])
-        self.assertEqual(rep.get("news"), [])
-
-        # 5. Explicit task ref in --reason takes precedence over incidental plan_key words in surrounding prose.
-        with self.open() as s:
-            by_key = {o["plan_key"]: o for o in s.data["tasks"] if o.get("plan_key")}
-            plan_tasks = [({"key": "api"}, "M1"), ({"key": "api-v2"}, "M1")]
-            picked = [s.ref(o) for o in self.replan.select_retro_plan_targets(s, plan_tasks, by_key, "retro TST-2: keep the api unchanged")]
-            self.assertEqual(picked, ["TST-2"])
-
-        # 6. Pre-existing task with a legacy `decision="new"` recap and no `before_replan` markers excludes old gate pass & resets round to 1.
-        legacy = {
-            "id": 99, "state": "running", "mode": "worktree", "worktree": self.wt, "branch": "task/1-api", "base": "main",
-            "review_runs": [{"round": 1, "head": self.head1, "address": "rv-leg", "cli": "codex", "model": None, "at": 110, "majors_required": True}],
-            "reviews": [{"round": 1, "head": self.head1, "by": "rv-leg", "started_by": "herdr-task", "verdict": "pass", "must_fix": 0, "majors": 0, "report": "ok", "cli": "codex", "model": None, "at": 110}],
-            "recaps": [{"decision": "new", "why": "old replan", "at": 200}],
-        }
-        self.assertEqual(self.budget.rounds_since(legacy), [])
-        self.assertEqual(self.commands.next_round(legacy), 1)
-        self.assertEqual(self.commands.gate_passes(legacy, self.head1), 0)
-
-    def test_round_3_review_findings(self):
-        # 1a. cmd_accept / run_pr_merge on a Ready task with push_held refuses merge when re-planned during push_branch's released() window.
-        with self.open(True) as s:
-            t = self.find_key(s, "api")
-            t.pop("pr", None)
-            t["state"] = "ready"
-            t["ready_at"] = 5000
-            t["head"] = self.head1
-            t["summary"] = "Ship attempt 1"
-            t["push_held"] = {"reason": "CI cap", "at": 4900}
-            s.dirty = True
-
-        def replan_during_push(s_push, task_push):
-            with s_push.released():
-                with self.open(True) as s_other:
-                    t_other = self.find_key(s_other, "api")
-                    self.replan.replan_task(s_other, t_other, why="replan during accept push")
-
-        self.gh_calls.clear()
-        with mock.patch.object(self.commands, "github", lambda folder: "org/repo"), \
-                mock.patch.object(self.github, "github", lambda folder: "org/repo"), \
-                mock.patch.object(self.commands, "own_open_pr", lambda s, t: None), \
-                mock.patch.object(self.commands, "pr_merged_at_tip", lambda s, t, repo: None), \
-                mock.patch.object(self.github, "pr_at_tip", lambda t, repo: None), \
-                mock.patch.object(self.github, "push_branch", replan_during_push):
-            rc, bad = self.run_cli("accept", "TST-1")
-        self.assertEqual(rc, 1)
-        self.assertIn("re-planned", bad["error"])
-        self.assertFalse(any(c[:2] == ("pr", "create") or c[:2] == ("pr", "merge") for c in self.gh_calls), self.gh_calls)
-        with self.open() as s:
-            t = self.find_key(s, "api")
-            self.assertEqual(t["state"], "running")
-            self.assertNotIn("merge_queued", t)
-            self.assertNotIn("accepted_by", t)
-            self.assertNotIn("auto_merge", t)
-
-        # 1b. merge_now refuses merge when re-planned during pr_head_problem's push_branch released() window.
-        with self.open(True) as s:
-            t = self.find_key(s, "api")
-            t["state"] = "ready"
-            t["ready_at"] = 6000
-            t["head"] = self.head1
-            t["pr"] = {"number": 42, "url": "https://github.com/org/repo/pull/42", "repo": "org/repo"}
-            s.dirty = True
-        self.gh_calls.clear()
-        with self.open(True) as s, \
-                mock.patch.object(self.commands, "github", lambda folder: "org/repo"), \
-                mock.patch.object(self.commands, "pr_view", lambda t: {
-                    "state": "OPEN", "headRefOid": self.base_sha, "mergeStateStatus": "CLEAN",
-                    "statusCheckRollup": [{"name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}],
-                }), \
-                mock.patch.object(self.github, "push_branch", replan_during_push):
-            t = self.find_key(s, "api")
-            err = self.commands.merge_now(s, t, accepting=True)
-        self.assertIn("re-planned", err)
-        self.assertFalse(any(c[:2] == ("pr", "merge") for c in self.gh_calls), self.gh_calls)
-        with self.open() as s:
-            t = self.find_key(s, "api")
-            self.assertEqual(t["state"], "running")
-            self.assertNotIn("merge_queued", t)
-
-        # 2. select_retro_plan_targets honors task refs whose prefix matches the store's own prefix even if in NON_TASK_PREFIXES (e.g. RFC).
-        with self.open() as s:
-            old_prefix = s.data.get("prefix")
-            try:
-                s.data["prefix"] = "RFC"
-                by_key = {o["plan_key"]: o for o in s.data["tasks"] if o.get("plan_key")}
-                plan_tasks = [({"key": "api"}, "M1"), ({"key": "api-v2"}, "M1")]
-                picked = [s.ref(o) for o in self.replan.select_retro_plan_targets(
-                    s, plan_tasks, by_key, "retro RFC-2: retain the api contract"
-                )]
-                self.assertEqual(picked, ["RFC-2"])
-            finally:
-                s.data["prefix"] = old_prefix
-
-        # 3. Immediate replan_task checks live reviewers BEFORE dequeuing GitHub PR, leaving queue and merge_queued intact if hc ls fails.
-        with self.open(True) as s:
-            t = self.find_key(s, "api")
-            t["pr"] = {"number": 42, "url": "https://github.com/org/repo/pull/42", "repo": "org/repo"}
-            t["merge_queued"] = 7000
-            t["reviewers"] = [{"address": "worker-reviewer"}]
-            t["recap"] = {"at": 7100, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
-            s.dirty = True
-        self.queue_state.update({"state": "OPEN", "in": True, "auto": True})
-        self.gh_calls.clear()
-        with mock.patch.object(self.agents, "_live", self.real_agents_live), \
-                mock.patch.object(self.agents, "hc_json", lambda *a: None):
-            rc, bad = self.run_cli("recap", "TST-1", "--decide", "new", "--why", "hc down while queued")
-        self.assertEqual(rc, 1)
-        self.assertIn("Couldn't list the task's terminals", bad["error"])
-        self.assertEqual(self.gh_calls, [])
-        with self.open(True) as s:
-            t = self.find_key(s, "api")
-            self.assertEqual(t.get("merge_queued"), 7000)
-            t.pop("merge_queued", None)
-            t.pop("recap", None)
-            s.dirty = True
-        self.queue_state.update({"in": False, "auto": False})
-
-        # 4. clear_task_held_news preserves event="backup" notices in pending .held.json batches while stripping stale task news.
+        # 4. clear_task_held_news preserves device CARRY_ON and event="backup" while stripping stale review/task lines.
         backup_line = '<herdr-news task="TST-1" title="Api" folder="repo" status="needs" event="backup">backup saved</herdr-news>'
         stale_line = '<herdr-news task="TST-1" title="Api" folder="repo" status="ready" event="ready">ready</herdr-news>'
         with open(self.held_file, "w") as f:
             json.dump({
                 "coord-1": [{"how": "news", "text": backup_line + "\n" + stale_line, "at": 8000}],
-                "w1": [{"text": backup_line, "at": 8001}, {"text": stale_line, "at": 8002}],
+                "w1": [
+                    {"text": devices.CARRY_ON, "at": 8001},
+                    {"text": backup_line, "at": 8002},
+                    {"text": stale_line, "at": 8003},
+                    {"text": "Stop TST-1: Herdr's loop-breaker says recap first.", "at": 8004},
+                ],
             }, f)
         with self.open() as s:
-            t = self.find_key(s, "api")
-            self.replan.clear_task_held_news(s, t, at=8500)
+            self.replan.clear_task_held_news(s, self.find_key(s, "api"), at=8500)
         with open(self.held_file) as f:
             held_after = json.load(f)
         self.assertEqual(held_after["coord-1"], [{"how": "news", "text": backup_line, "at": 8000}])
-        self.assertEqual(held_after["w1"], [{"text": backup_line, "at": 8001}])
+        self.assertEqual(held_after["w1"], [{"text": devices.CARRY_ON, "at": 8001}, {"text": backup_line, "at": 8002}])
 
-    def test_round_4_review_findings(self):
-        import herdr_task.devices as devices
+        # 5. plan amend --check runs no git on task worktrees, and Store(write=False) creates no lock file or STORE dir.
+        with mock.patch.object(self.budget, "git", side_effect=AssertionError("worktree git called in --check")):
+            rc, res = self.run_cli("plan", "amend", "--check", "--reason", "retro: check boundary", plan=self.current_plan(retro=True))
+        self.assertEqual((rc, res), (0, {"ok": True}))
+        fresh_store_dir = os.path.join(self.tmp, "missing-store")
+        with mock.patch.object(self.store_mod, "STORE", fresh_store_dir):
+            with self.store_mod.Store(self.store_mod.locate(self.repo), write=False):
+                pass
+        self.assertFalse(os.path.exists(fresh_store_dir))
 
-        # 1. inspect_runs() does not overwrite a re-plan committed during finalize()'s push_branch released() window.
+        # 6. select_retro_plan_targets: project refs (including RFC), hyphenated plan keys (`api-2`), and explicit unknown target refusal.
         with self.open(True) as s:
-            t = self.find_key(s, "api")
-            t["state"] = "running"
-            t["head"] = self.head1
-            t.pop("pr", None)
-            t.pop("recap", None)
-            t["reviews"] = []
-            t["review_runs"] = [{"round": 1, "head": self.head1, "address": "rv-sbx", "cli": "agy", "model": None, "at": 9000, "majors_required": True}]
-            s.dirty = True
-        rn_code = self.commands.round_code({"round": 1, "head": self.head1, "at": 9000})
-        self.hc_terminals["rv-sbx"] = {"address": "rv-sbx", "state": "live", "turn": 1, "status": {"state": "done"}, "foreground": {"name": "agy"}}
-
-        def replan_during_finalize_push(s_push, task_push):
-            with s_push.released():
-                with self.open(True) as s_other:
-                    t_other = self.find_key(s_other, "api")
-                    self.replan.replan_task(s_other, t_other, why="replan during inspect_runs finalize", at=9500)
-
-        self.ended_reviewers.clear()
-        with self.open(True) as s, \
-                mock.patch.object(self.commands, "sandboxes", lambda clis: True), \
-                mock.patch.object(self.commands, "screen_of", lambda addr, lines=400: f"{rn_code} begin\nclean\n{rn_code} pass 0\n"), \
-                mock.patch.object(self.commands, "gate_need", lambda s_arg, t_arg: 1), \
-                mock.patch.object(self.commands, "github", lambda folder: "acme/demo"), \
-                mock.patch.object(self.github, "pr_at_tip", lambda t_arg, repo: None), \
-                mock.patch.object(self.github, "push_branch", replan_during_finalize_push):
-            s.dirty = True  # simulate an already-dirty tick
-            t = self.find_key(s, "api")
-            self.commands.inspect_runs(s, t)
-        self.assertIn("rv-sbx", self.ended_reviewers)
-        with self.open() as s:
-            t = self.find_key(s, "api")
-            self.assertEqual(t.get("review_reset_at"), 9500)
-            self.assertEqual(t["state"], "running")
-            self.assertTrue(all(r.get("before_replan") for r in t.get("reviews") or []))
-            self.assertEqual(self.commands.open_runs(t), [])
-
-        # 2. cancel_queued_merge discovers and dequeues an unrecorded open PR on GitHub, and fails closed on pr list error.
-        with self.open(True) as s:
-            t = self.find_key(s, "api")
-            t.pop("pr", None)
-            t.pop("merge_queued", None)
-            t["recap"] = {"at": 9600, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
-            s.dirty = True
-        self.queue_state.update({"id": "PR_node_remote", "state": "OPEN", "in": True, "auto": True})
-        self.gh_calls.clear()
-
-        def gh_with_remote_pr(*argv):
-            self.gh_calls.append(argv)
-            if argv[:2] == ("pr", "list"):
-                return True, json.dumps([{
-                    "number": 77, "url": "https://github.com/acme/demo/pull/77", "state": "OPEN",
-                    "isCrossRepository": False, "baseRefName": "main", "headRefOid": self.head1,
-                }]), ""
-            return True, "{}", ""
-
-        with mock.patch.object(self.github, "gh", gh_with_remote_pr):
-            rc, _ = self.run_cli("recap", "TST-1", "--decide", "new", "--why", "dequeue unrecorded PR")
-        self.assertEqual(rc, 0)
-        self.assertTrue(any("dequeuePullRequest" in " ".join(c) for c in self.gh_calls), self.gh_calls)
-        self.assertTrue(any(c[:4] == ("pr", "merge", "77", "--repo") and "--disable-auto" in c for c in self.gh_calls), self.gh_calls)
-        self.queue_state.update({"in": False, "auto": False})
-
-        # Failed lookup on GitHub refuses re-plan instead of treating failure as confirmed absence.
-        with self.open(True) as s:
-            t = self.find_key(s, "api")
-            t.pop("pr", None)
-            t["recap"] = {"at": 9700, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
-            s.dirty = True
-        with mock.patch.object(self.github, "gh", lambda *argv: (False, "", "HTTP 502") if argv[:2] == ("pr", "list") else (True, "{}", "")):
-            rc, bad = self.run_cli("recap", "TST-1", "--decide", "new", "--why", "gh list 502")
-        self.assertEqual(rc, 1)
-        self.assertIn("Couldn't check GitHub", bad["error"])
-
-        # 3. record_verdict stops before tell_pass / verdict_told when gate_step's push_branch hits a concurrent re-plan.
-        with self.open(True) as s:
-            t = self.find_key(s, "api")
-            prev_reset = int(t.get("review_reset_at") or 0)
-            t.pop("recap", None)
-            t.pop("verdict_told", None)
-            t["pr"] = {"number": 77, "url": "https://github.com/acme/demo/pull/77", "repo": "acme/demo"}
-            t["review_runs"] = [{"round": 1, "head": self.head1, "address": "rv-g1", "cli": "codex", "model": None, "at": 9800, "majors_required": True}]
-            s.dirty = True
-        self.sent.clear()
-
-        def replan_during_gate_push(s_push, task_push):
-            with s_push.released():
-                with self.open(True) as s_other:
-                    t_other = self.find_key(s_other, "api")
-                    self.replan.replan_task(s_other, t_other, why="replan during gate_step push")
-
-        with self.open(True) as s, \
-                mock.patch.object(self.commands, "gate_need", lambda s_arg, t_arg: 2), \
-                mock.patch.object(self.commands, "branch_needs_push", lambda s_arg, t_arg: True), \
-                mock.patch.object(self.commands, "push_branch", replan_during_gate_push):
-            t = self.find_key(s, "api")
-            rn = dict(t["review_runs"][0])
-            self.commands.record_verdict(s, t, rn, True, 0, "clean", 0)
-        self.assertEqual(self.sent, [])
-        with self.open() as s:
-            t = self.find_key(s, "api")
-            self.assertGreater(int(t.get("review_reset_at") or 0), prev_reset)
-            self.assertNotIn("verdict_told", t)
-
-        # 4. held_pass() pending batch preserves message boundaries so clear_task_held_news keeps device notice and drops stale review in both orders.
-        review_msg = "Herdr's review round 1 of TST-1 (abc1234) found what must be fixed:\nFix bug."
-        for order in ([review_msg, devices.CARRY_ON], [devices.CARRY_ON, review_msg]):
-            with open(self.held_file, "w") as f:
-                json.dump({"w1": [{"text": m, "at": self.base.now()} for m in order]}, f)
-            self.hc_terminals["w1"] = {"address": "w1", "state": "live", "turn": 2, "status": {"state": "working"}}
-            with mock.patch.object(self.news, "screen_raw", lambda addr: ""), \
-                    mock.patch.object(self.news, "deliver", lambda addr, txt, *a, **kw: "pending"):
-                self.news.held_pass({})
-            with self.open() as s:
-                t = self.find_key(s, "api")
-                self.replan.clear_task_held_news(s, t, at=10000)
-            with open(self.held_file) as f:
-                kept_items = json.load(f).get("w1") or []
-            self.assertEqual(len(kept_items), 1, order)
-            self.assertEqual(kept_items[0]["text"], devices.CARRY_ON)
-            self.assertNotIn("Herdr's review round", kept_items[0]["text"])
-
-        # 5. select_retro_plan_targets selects valid plan keys like `api-2` while still resolving project refs like `TST-1` first.
-        with self.open() as s:
             t1 = self.find_key(s, "api")
+            by_key = {o["plan_key"]: o for o in s.data["tasks"] if o.get("plan_key")}
+            plan_tasks = [({"key": "api"}, "M1"), ({"key": "api-v2"}, "M1")]
+            self.assertEqual(
+                [s.ref(o) for o in self.replan.select_retro_plan_targets(s, plan_tasks, by_key, "retro TST-2: keep the api unchanged")],
+                ["TST-2"],
+            )
+            old_prefix = s.data.get("prefix")
+            try:
+                s.data["prefix"] = "RFC"
+                self.assertEqual(
+                    [s.ref(o) for o in self.replan.select_retro_plan_targets(s, plan_tasks, by_key, "retro RFC-2: retain the api contract")],
+                    ["RFC-2"],
+                )
+            finally:
+                s.data["prefix"] = old_prefix
             old_key = t1["plan_key"]
             try:
                 t1["plan_key"] = "api-2"
-                by_key = {o["plan_key"]: o for o in s.data["tasks"] if o.get("plan_key")}
-                plan_tasks = [({"key": "api-2"}, "M1"), ({"key": "api-v2"}, "M1")]
+                by_key2 = {o["plan_key"]: o for o in s.data["tasks"] if o.get("plan_key")}
+                plan_tasks2 = [({"key": "api-2"}, "M1"), ({"key": "api-v2"}, "M1")]
                 self.assertEqual(
-                    [s.ref(o) for o in self.replan.select_retro_plan_targets(s, plan_tasks, by_key, "retro on api-2")],
-                    ["TST-1"],
-                )
-                self.assertEqual(
-                    [s.ref(o) for o in self.replan.select_retro_plan_targets(s, plan_tasks, by_key, "retro on TST-1")],
+                    [s.ref(o) for o in self.replan.select_retro_plan_targets(s, plan_tasks2, by_key2, "retro on api-2")],
                     ["TST-1"],
                 )
             finally:
                 t1["plan_key"] = old_key
+            t1["recap"] = {"at": 13000, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
+            with self.assertRaises(self.base.Fail) as ctx:
+                self.replan.select_retro_plan_targets(s, [({"key": "api"}, "M1")], {"api": t1}, "retro on MISSING-KEY")
+            self.assertIn("MISSING-KEY", str(ctx.exception))
+            self.assertEqual(self.replan.select_retro_plan_targets(s, [({"key": "api"}, "M1")], {"api": t1}, "retro after OTHER-99"), [])
+            t1.pop("recap", None)
 
-    def test_round_5_review_findings(self):
-        # 1. Closed recorded PR #42 on task looks up and dequeues replacement open PR #77 on the same branch & base.
-        with self.open(True) as s:
-            t = self.find_key(s, "api")
-            t["pr"] = {"number": 42, "url": "https://github.com/acme/demo/pull/42", "repo": "acme/demo"}
-            t["recap"] = {"at": 11000, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
-            s.dirty = True
-        pr_states = {
-            42: {"id": "PR_42", "state": "CLOSED", "in": False, "auto": False},
-            77: {"id": "PR_77", "state": "OPEN", "in": True, "auto": True},
-        }
-        self.gh_calls.clear()
-
-        def gh_replacement(*argv):
-            self.gh_calls.append(argv)
-            if argv[:2] == ("pr", "list"):
-                return True, json.dumps([
-                    {"number": 42, "url": "https://github.com/acme/demo/pull/42", "state": "CLOSED", "isCrossRepository": False, "baseRefName": "main", "headRefOid": self.head1},
-                    {"number": 77, "url": "https://github.com/acme/demo/pull/77", "state": "OPEN", "isCrossRepository": False, "baseRefName": "main", "headRefOid": self.head1},
-                ]), ""
-            return True, "{}", ""
-
-        with mock.patch.object(self.github, "gh", gh_replacement), \
-                mock.patch.object(self.github, "queue_entry", lambda t_arg: dict(pr_states[t_arg["pr"]["number"]])):
-            rc, _ = self.run_cli("recap", "TST-1", "--decide", "new", "--why", "closed PR replaced by #77")
-        self.assertEqual(rc, 0)
-        self.assertTrue(any("dequeuePullRequest" in " ".join(c) and "id=PR_77" in c for c in self.gh_calls), self.gh_calls)
-        self.assertTrue(any(c[:4] == ("pr", "merge", "77", "--repo") and "--disable-auto" in c for c in self.gh_calls), self.gh_calls)
-        with self.open() as s:
-            self.assertEqual(self.find_key(s, "api")["pr"]["number"], 77)
-
-        # 2. classify_replan_caller normalizes remote child parent (`vm/t4` with `parent="t3"` -> `vm/t3`) and refuses it.
+        # 7. classify_replan_caller normalizes remote child parent (`vm/t4` with `parent="t3"` -> `vm/t3`) and refuses it.
         with self.open(True) as s:
             t = self.find_key(s, "api")
             old_agents = list(t["agents"])
@@ -1488,58 +1148,16 @@ class ReplanTableTests(unittest.TestCase):
             finally:
                 t["agents"] = old_agents
 
-        # 3. Partially stripped pending prompt never receives `enter` on the old prompt; held_pass clears stale engine input (`ctrl+u`) and delivers only kept message, while leaving user input untouched.
-        sim_msg = "Your simulator is ready."
-        old_review = "Herdr's review round 1 of TST-1 (abc1234) found what must be fixed:\nFix bug."
-        combined = f"{sim_msg}\n\n{old_review}"
-        with open(self.held_file, "w") as f:
-            json.dump({"w1": [{"text": combined, "parts": [sim_msg, old_review], "how": "send", "at": self.base.now(), "pending": 3}]}, f)
-        with self.open() as s:
-            t = self.find_key(s, "api")
-            self.replan.clear_task_held_news(s, t, at=12000)
-
-        self.hc_terminals["w1"] = {"address": "w1", "state": "live", "turn": 2, "status": {"state": "idle"}}
-        run_calls = []
-        delivered_texts = []
-        with mock.patch.object(self.news, "screen_raw", lambda addr: ""), \
-                mock.patch.object(self.news, "typed_input", lambda raw: combined), \
-                mock.patch.object(self.news, "run", lambda argv, **kw: (run_calls.append(argv), subprocess.CompletedProcess(argv, 0, "", ""))[1]), \
-                mock.patch.object(self.news, "deliver", lambda addr, txt, *a, **kw: (delivered_texts.append(txt), "sent")[1]):
-            rep = {}
-            self.news.held_pass(rep)
-        self.assertNotIn(["hc", "keys", "w1", "enter"], run_calls)
-        self.assertIn(["hc", "keys", "w1", "ctrl+u"], run_calls)
-        self.assertEqual(delivered_texts, [sim_msg])
-
-        # Unrelated user input is left completely untouched.
-        with open(self.held_file, "w") as f:
-            json.dump({"w1": [{"text": sim_msg, "how": "send", "at": self.base.now(), "pending": 3}]}, f)
-        run_calls.clear()
-        delivered_texts.clear()
-        with mock.patch.object(self.news, "screen_raw", lambda addr: ""), \
-                mock.patch.object(self.news, "typed_input", lambda raw: "hold on, reading logs"), \
-                mock.patch.object(self.news, "run", lambda argv, **kw: (run_calls.append(argv), subprocess.CompletedProcess(argv, 0, "", ""))[1]), \
-                mock.patch.object(self.news, "deliver", lambda addr, txt, *a, **kw: (delivered_texts.append(txt), "sent")[1]):
-            self.news.held_pass({})
-        self.assertEqual(run_calls, [])
-        self.assertEqual(delivered_texts, [])
-
-        # 4. Explicit unknown target phrase (`retro on MISSING-KEY`) refuses without resetting unrelated recap task `api`, while untargeted prose keeps fallback.
-        with self.open(True) as s:
-            t = self.find_key(s, "api")
-            t["recap"] = {"at": 13000, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
-            by_key = {o["plan_key"]: o for o in s.data["tasks"] if o.get("plan_key") and o["state"] != "done"}
-            plan_tasks = [({"key": "api"}, "M1")]
-            with self.assertRaises(self.base.Fail) as ctx:
-                self.replan.select_retro_plan_targets(s, plan_tasks, by_key, "retro on MISSING-KEY")
-            self.assertIn("MISSING-KEY", str(ctx.exception))
-            self.assertEqual(self.replan.select_retro_plan_targets(s, plan_tasks, by_key, "retro after OTHER-99"), [])
-            self.assertEqual(
-                [s.ref(o) for o in self.replan.select_retro_plan_targets(s, plan_tasks, by_key, "retro: switch to copy-on-write for UTF-8")],
-                ["TST-1"],
-            )
-            t.pop("recap", None)
-            s.dirty = True
+        # 8. Legacy `decision="new"` recap boundary without `before_replan` markers excludes old gate pass & resets round to 1.
+        legacy = {
+            "id": 99, "state": "running", "mode": "worktree", "worktree": self.wt, "branch": "task/1-api", "base": "main",
+            "review_runs": [{"round": 1, "head": self.head1, "address": "rv-leg", "cli": "codex", "model": None, "at": 110, "majors_required": True}],
+            "reviews": [{"round": 1, "head": self.head1, "by": "rv-leg", "started_by": "herdr-task", "verdict": "pass", "must_fix": 0, "majors": 0, "report": "ok", "cli": "codex", "model": None, "at": 110}],
+            "recaps": [{"decision": "new", "why": "old replan", "at": 200}],
+        }
+        self.assertEqual(self.budget.rounds_since(legacy), [])
+        self.assertEqual(self.commands.next_round(legacy), 1)
+        self.assertEqual(self.commands.gate_passes(legacy, self.head1), 0)
 
 
 if __name__ == "__main__":

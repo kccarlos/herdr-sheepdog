@@ -102,211 +102,17 @@ def news_state(s, t, live):
     return v, event, stall
 
 
-import threading
-
-_NEWS_LOCK_TLS = threading.local()
-_MEM_RESETS = {}
-
-
-@contextmanager
-def null_lock():
-    yield
-
-
-@contextmanager
-def news_lock(exclusive=True):
-    """Re-entrant lock on `NEWS + '.lock'` (`Store -> NEWS -> HELD` lock order)."""
-    news_dir = os.path.dirname(NEWS)
-    if news_dir:
-        try:
-            os.makedirs(news_dir, exist_ok=True)
-        except OSError:
-            yield
-            return
-    held = getattr(_NEWS_LOCK_TLS, "held", None)
-    if held is None:
-        held = _NEWS_LOCK_TLS.held = {}
-    lock_key = (os.getpid(), NEWS + ".lock")
-    cur = held.get(lock_key)
-    if cur is not None:
-        if exclusive and not cur[1]:
-            fcntl.flock(cur[0], fcntl.LOCK_EX)
-            cur[1] = True
-        cur[2] += 1
-        try:
-            yield
-        finally:
-            cur[2] -= 1
-        return
-    try:
-        f = open(NEWS + ".lock", "a" if exclusive else "r")
-    except OSError:
-        try:
-            f = open(NEWS + ".lock", "a")
-        except OSError:
-            yield
-            return
-    try:
-        fcntl.flock(f, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
-        entry = [f, bool(exclusive), 1]
-        held[lock_key] = entry
-        try:
-            yield
-        finally:
-            held.pop(lock_key, None)
-            fcntl.flock(f, fcntl.LOCK_UN)
-    finally:
-        f.close()
-
-
-_MEM_STALE_PROMPTS = {}
-
-
-def _norm_prompt(s):
-    return " ".join(str(s or "").split())
-
-
-def record_mem_reset(key, reset_ts):
-    if key and reset_ts:
-        mk = (NEWS, key)
-        _MEM_RESETS[mk] = max(int(_MEM_RESETS.get(mk) or 0), int(reset_ts))
-
-
-def clear_mem_reset(key):
-    if key:
-        _MEM_RESETS.pop((NEWS, key), None)
-
-
-def record_stale_prompt(addr, text):
-    np = _norm_prompt(text)
-    if not (addr and np):
-        return
-    _MEM_STALE_PROMPTS.setdefault((HELD, addr), set()).add(np)
-    news_dir = os.path.dirname(NEWS)
-    if news_dir and os.path.isdir(news_dir):
-        with news_state_file() as state:
-            sp = state.setdefault("stale_prompts", {}).setdefault(addr, [])
-            if np not in sp:
-                sp.append(np)
-
-
-def is_stale_prompt(addr, text, items=()):
-    np = _norm_prompt(text)
-    if not (addr and np):
-        return False
-    if np in _MEM_STALE_PROMPTS.get((HELD, addr), set()):
-        return True
-    if any(_norm_prompt(p) == np for x in (items or ()) for p in (x.get("stale_prompts") or ())):
-        return True
-    disk = (_read_news_file().get("stale_prompts") or {}).get(addr) or ()
-    return any(_norm_prompt(p) == np for p in disk)
-
-
-def clear_stale_prompts(addr, items=()):
-    _MEM_STALE_PROMPTS.pop((HELD, addr), None)
-    for x in items or ():
-        if isinstance(x, dict):
-            x.pop("stale_prompts", None)
-    if os.path.exists(NEWS):
-        with news_state_file() as state:
-            sp = state.get("stale_prompts")
-            if isinstance(sp, dict) and addr in sp:
-                sp.pop(addr, None)
-
-
-def stale_prompt_addrs():
-    addrs = {addr for (hpath, addr), vals in _MEM_STALE_PROMPTS.items() if hpath == HELD and vals}
-    disk = _read_news_file().get("stale_prompts")
-    if isinstance(disk, dict):
-        addrs.update(a for a, vals in disk.items() if vals)
-    return addrs
-
-
-@contextmanager
-def news_state_file():
-    """NEWS under its own lock so concurrent commands (e.g. re-plan) and news_pass never clobber it."""
-    with news_lock(exclusive=True):
-        try:
-            with open(NEWS) as f:
-                state = json.load(f)
-        except (OSError, ValueError):
-            state = {}
-        yield state
-        tmp = f"{NEWS}.{os.getpid()}.tmp"
-        with open(tmp, "w") as f:
-            json.dump(state, f)
-        os.replace(tmp, NEWS)
-
-
-def _read_news_file():
-    with news_lock(exclusive=False):
-        try:
-            with open(NEWS) as f:
-                d = json.load(f)
-                return d if isinstance(d, dict) else {}
-        except (OSError, ValueError):
-            return {}
-
-
-def _fresh_resets(project=None, base_resets=None):
-    resets = {k: int(v or 0) for k, v in (base_resets or {}).items()}
-    for (npath, k), v in list(_MEM_RESETS.items()):
-        if npath == NEWS:
-            resets[k] = max(resets.get(k, 0), int(v or 0))
-    for k, v in (_read_news_file().get("reset_at") or {}).items():
-        resets[k] = max(resets.get(k, 0), int(v or 0))
-    if project:
-        for path in store_files(project):
-            d = read_list(path) or {}
-            slug = d.get("slug")
-            if slug:
-                for t in d.get("tasks") or []:
-                    if isinstance(t, dict) and t.get("review_reset_at"):
-                        rk = f"{slug}#{t['id']}"
-                        resets[rk] = max(resets.get(rk, 0), int(t["review_reset_at"]))
-    return resets
-
-
-def _stale_for_reset(x, r_at):
-    if not r_at or x.get("event") == "backup":
-        return False
-    if "reset_at" in x:
-        return int(x.get("reset_at") or 0) < r_at
-    return (x.get("since") or x.get("at") or 0) <= r_at
-
-
-def _prune_reset_news(state, resets, snap_resets=None):
-    outbox = state.get("outbox")
-    if isinstance(outbox, list):
-        outbox[:] = [x for x in outbox if not _stale_for_reset(x, resets.get(x.get("key"), 0))]
-    delivered = state.get("delivered")
-    if isinstance(delivered, dict):
-        for k in list(delivered):
-            v = delivered.get(k)
-            if isinstance(v, dict) and _stale_for_reset(v, resets.get(k, 0)):
-                delivered.pop(k, None)
-    seen = state.get("seen")
-    if isinstance(seen, dict) and snap_resets is not None:
-        for k, r_at in resets.items():
-            if r_at <= int(snap_resets.get(k) or 0):
-                continue
-            slug, _, tid = k.rpartition("#")
-            prev = (seen.get(slug) or {}).get(tid)
-            if isinstance(prev, dict):
-                for fk in ("held_ready_at", "recap", "reviewer_failed"):
-                    prev.pop(fk, None)
-
-
 def news_pass(report, folder=None):
     """Notes each task's status; queues a line for each change worth telling, and sends the lines
     that settled, one message per Assistant. Runs inside the tick lock (scheduler, tick)."""
-    os.makedirs(STORE, exist_ok=True)
-    state = _read_news_file()
-    snap_resets = {k: int(v or 0) for k, v in (state.get("reset_at") or {}).items()}
-    resets = state.setdefault("reset_at", {})
+    try:
+        with open(NEWS) as f:
+            state = json.load(f)
+    except (OSError, ValueError):
+        state = {}
     seen, outbox = state.setdefault("seen", {}), state.setdefault("outbox", [])
     delivered = state.setdefault("delivered", {})
-    current = {}  # key -> (status, stall mark, reset_at), to check queued lines against
+    current = {}  # key -> (status, stall mark), to check queued lines against
     for path in store_files(folder):
         d = read_list(path)
         if not d or not os.path.isdir(d.get("folder") or ""):
@@ -346,11 +152,7 @@ def news_pass(report, folder=None):
                     else:
                         t.pop("own_work", None)
                     s.dirty = True
-                r_at = max(int(t.get("review_reset_at") or 0), int(resets.get(key) or 0))
-                if r_at:
-                    resets[key] = r_at
-                cur = {"status": v["status"], "why": v.get("why"), "stall": stall[0] if stall else None,
-                       "reset_at": r_at}
+                cur = {"status": v["status"], "why": v.get("why"), "stall": stall[0] if stall else None}
                 current[key] = cur
                 rf = (t.get("attention") or "").startswith(REVIEWER_FAILED)
                 prev = mine.get(str(t["id"]))
@@ -398,16 +200,14 @@ def news_pass(report, folder=None):
                                                            and x["event"] not in ("backup", "sync-fallback")
                                                            and (x["event"] == ev or ev != "stalled"))]
                     outbox.append({"key": key, "project": s.loc["folder"], "folder": os.path.basename(s.loc["folder"]), "event": ev, "status": v["status"],
-                                   "stall": stall[0] if ev == "stalled" else None, "text": text, "at": now(), "reset_at": r_at})
+                                   "stall": stall[0] if ev == "stalled" else None, "text": text, "at": now()})
             ids = {str(t["id"]) for t in s.data["tasks"]}
             for k in [k for k in mine if k not in ids and k != "_init"]:
                 mine.pop(k)
     report.setdefault("news", [])
-    # Still true? A line whose task moved on since (or was removed or re-planned) goes unsaid.
+    # Still true? A line whose task moved on since (or was removed) goes unsaid.
     def holds(x):
         c = current.get(x["key"])
-        if c and _stale_for_reset(x, c.get("reset_at") or 0):
-            return False
         if (folder and c is None) or x.get("event") in ("backup", "sync-fallback"):
             return True  # another folder's task: not looked at this time; one-shot notices are news either way
         return bool(c) and (c["stall"] == x.get("stall") if x.get("event") == "stalled" else c["status"] == x.get("status"))
@@ -415,73 +215,33 @@ def news_pass(report, folder=None):
     for k in [k for k, v in delivered.items() if not isinstance(v, dict) or not holds({**v, "key": k})]:
         delivered.pop(k)
     for project in dict.fromkeys(x.get("project") for x in outbox if x.get("project")):
-        live_resets = _fresh_resets(project, resets)
-        resets.update(live_resets)
-        _prune_reset_news(state, resets)
         batch = [x for x in outbox if x.get("project") == project]
-        if not batch or now() - min(x["at"] for x in batch) < NEWS_SETTLE_MS:
+        if now() - min(x["at"] for x in batch) < NEWS_SETTLE_MS:
             continue
         to = coordinator_in(project)
         k = hc_json("get", to) if to else None
-        # Re-check right before sending, and inside news_send after typing() under NEWS lock.
-        resets.update(_fresh_resets(project, resets))
-        _prune_reset_news(state, resets)
-        batch = [x for x in outbox if x.get("project") == project]
-        if not batch or not to:
-            continue
-
-        def _validate_batch(proj=project):
-            resets.update(_fresh_resets(proj, resets))
-            _prune_reset_news(state, resets)
-            fresh_batch = [x for x in outbox if x.get("project") == proj]
-            batch[:] = fresh_batch
-            return "\n".join(x["text"] for x in fresh_batch) if fresh_batch else ""
-
-        got = (news_send(to, "\n".join(x["text"] for x in batch), _validate=_validate_batch)
-               if getattr(news_send, "_accepts_validate", False)
-               else news_send(to, "\n".join(x["text"] for x in batch)))
+        got = news_send(to, "\n".join(x["text"] for x in batch)) if to else False
         if got:
             outbox[:] = [x for x in outbox if x not in batch]
-            resets.update(_fresh_resets(project, resets))
             base_turn = ((k or {}).get("turn") or 0) + (1 if got in ("pending", "queued") else 0)
             idle = bool(k) and status_word(k) in ("idle", "done")
             for x in batch:
-                if x["event"] not in ("backup", "sync-fallback") and not _stale_for_reset(x, resets.get(x["key"], 0)):
+                if x["event"] not in ("backup", "sync-fallback"):
                     delivered[x["key"]] = {"to": to, "turn": base_turn, "at": now(), "since": x["at"],
                                            "event": x["event"], "status": x["status"], "stall": x.get("stall"),
-                                           "idle": idle, "reset_at": int(x.get("reset_at") or 0),
-                                           **({"pending": True} if got == "pending" else {})}
-            if batch:
-                report["news"].append({"to": to, "lines": [x["text"] for x in batch]})
+                                           "idle": idle, **({"pending": True} if got == "pending" else {})}
+            report["news"].append({"to": to, "lines": [x["text"] for x in batch]})
     # Settings changed for a project: its running coordinator told once, in one message (assistant_settings.py).
     try:
         from .assistant_settings import settings_pass
         settings_pass(report)
     except Exception as e:  # never stops the news
         report["settings_error"] = str(e)
-    resets.update(_fresh_resets(None, resets))
-    _prune_reset_news(state, resets, snap_resets)
     held_pass(report, delivered)
-    with news_lock(exclusive=True):
-        try:
-            with open(NEWS) as f:
-                disk = json.load(f)
-        except (OSError, ValueError):
-            disk = {}
-        if isinstance(disk, dict):
-            for k, v in (disk.get("reset_at") or {}).items():
-                resets[k] = max(int(resets.get(k) or 0), int(v or 0))
-        for (npath, k), v in list(_MEM_RESETS.items()):
-            if npath == NEWS:
-                resets[k] = max(int(resets.get(k) or 0), int(v or 0))
-        _prune_reset_news(state, resets, snap_resets)
-        live_keys = {f"{sl}#{tid}" for sl, m in seen.items() if isinstance(m, dict) for tid in m if tid != "_init"}
-        for k in [k for k in list(resets) if k not in live_keys and k not in current]:
-            resets.pop(k, None)
-        tmp = f"{NEWS}.{os.getpid()}.tmp"
-        with open(tmp, "w") as f:
-            json.dump(state, f)
-        os.replace(tmp, NEWS)
+    tmp = f"{NEWS}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(state, f)
+    os.replace(tmp, NEWS)
 
 
 POLL_DELAYS = (0.15, 0.3, 0.3, 0.3)
@@ -533,21 +293,10 @@ def deliver(address, text, how="send", from_held=False):
     return "sent"
 
 
-def news_send(address, text, check=True, _validate=None):
+def news_send(address, text, check=True):
     """Delivers news as the chat delivers the person's words: typed in, sent mid-turn (Claude Ctrl+Enter,
     agy alt+m or at turn end), without <hc from>. False when typing() or refused."""
-    if check and typing(address):
-        return False
-    if _validate is None:
-        return deliver(address, text, "news")
-    with news_lock(exclusive=True):
-        text = _validate()
-        if not text:
-            return False
-        return deliver(address, text, "news")
-
-
-news_send._accepts_validate = True
+    return False if (check and typing(address)) else deliver(address, text, "news")
 
 
 # ---- the person is writing ------------------------------------------------------------------
@@ -776,24 +525,15 @@ def held_pass(report, delivered=None):
             inp = typed_input(screen_raw(addr))
             if inp:
                 own = [x for x in items if "pending" in x and ready_pending
-                       and x["text"].strip() and _norm_prompt(inp) == _norm_prompt(x["text"])]
+                       and x["text"].strip() and inp.splitlines()[0] == x["text"].strip().splitlines()[0]]
                 if own and run(["hc", "keys", addr, "enter"]).returncode == 0:
                     items[:] = [x for x in items if x not in own]
-                    clear_stale_prompts(addr, items)
                     if any(x.get("how") == "news" for x in own):
                         unpend(addr, k)
                     report.setdefault("held", []).append({"to": addr, "messages": len(own)})
-                    if not items:
-                        held.pop(addr)
-                    continue
-                if is_stale_prompt(addr, inp, items):
-                    if not ready_pending or run(["hc", "keys", addr, "ctrl+u"]).returncode != 0:
-                        continue
-                    clear_stale_prompts(addr, items)
-                else:
-                    if not items:
-                        held.pop(addr)
-                    continue
+                if not items:
+                    held.pop(addr)
+                continue
             for pending in (True, False):
                 if pending and not ready_pending:
                     continue
@@ -809,21 +549,7 @@ def held_pass(report, delivered=None):
                             unpend(addr, k)
                         report.setdefault("held", []).append({"to": addr, "messages": len(batch)})
                     elif res == "pending":
-                        parts = [p for x in batch for p in (x.get("parts") if isinstance(x.get("parts"), list) else [x["text"]])]
-                        entry = {"text": text, "how": how, "at": now(), "pending": (k.get("turn") or 0) + 1}
-                        if len(parts) > 1:
-                            entry["parts"] = parts
-                        items[:] = [x for x in items if x not in batch] + [entry]
+                        items[:] = [x for x in items if x not in batch] + [{"text": text, "how": how, "at": now(),
+                                                                            "pending": (k.get("turn") or 0) + 1}]
             if not items:
                 held.pop(addr)
-    for addr in list(stale_prompt_addrs()):
-        k = hc_json("get", addr)
-        if not k or k.get("state") != "live":
-            clear_stale_prompts(addr)
-            continue
-        inp = typed_input(screen_raw(addr))
-        if not inp:
-            clear_stale_prompts(addr)
-        elif status_word(k) in ("idle", "done") and is_stale_prompt(addr, inp):
-            if run(["hc", "keys", addr, "ctrl+u"]).returncode == 0:
-                clear_stale_prompts(addr)

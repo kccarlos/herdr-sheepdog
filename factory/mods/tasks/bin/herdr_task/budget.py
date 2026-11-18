@@ -594,8 +594,8 @@ def cmd_recap(args):
             raise Fail(f"--small is for a second continue; {s.ref(t)}'s first continue needs none.")
         found = last_findings(t)  # before the decision starts the round count afresh
         bound = {}
-        if args.decide == "new":
-            replan_task(s, t, why=args.why, at=now())
+        if args.decide in ("new", "split"):
+            replan_task(s, t, why=args.why, decision=args.decide, at=now())
         else:
             cur = change_lines(t)
             bound = ({"small": True, "max_rounds": SMALL_ROUNDS, "max_lines": cur + SMALL_LINES if cur is not None else None}

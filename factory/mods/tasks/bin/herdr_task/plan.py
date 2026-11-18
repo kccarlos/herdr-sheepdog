@@ -195,6 +195,7 @@ class Plan:
         listed = {m["id"] for m in self.ms}
         # Every not-done task of a milestone in this file is listed (drop one with herdr-task rm first).
         split_parents = {}
+        from .replan import replan_state_refusal
         for t, mid in self.tasks:
             if "split_of" in t:
                 p = self.find(t["split_of"])
@@ -204,6 +205,8 @@ class Plan:
                     self.bad(f"{t['key']}: a split keeps the parent's place; {s.ref(p)} is in {p.get('milestone')}, not {mid}.")
                 elif p.get("plan_key") in keys:
                     self.bad(f"{s.ref(p)} is split, so it can't stay in the plan as {p['plan_key']}.")
+                elif not p.get("acceptance_of") and (why_refused := replan_state_refusal(s, p)):
+                    self.bad(why_refused)
                 elif p["state"] not in NOT_STARTED + ("running",) or p.get("acceptance_of") or (p["state"] == "running" and busy(s, p)):
                     self.bad(f"{s.ref(p)} can't be split now ({'its agent is at work' if p['state'] == 'running' else p['state']}).")
                 else:
@@ -435,13 +438,9 @@ class Plan:
     def finish(self):
         """After the written graph passed its last check: run deferred re-plan side effects, then end split parents."""
         from .commands import end_agent
-        from .replan import cancel_queued_merge, clear_task_held_news, retire_reviewers
         from .simulators import release_task
         for eff in self.replan_effects:
-            cancel_queued_merge(eff.store, eff.task, was_merge_queued=eff.was_merge_queued)
-        for eff in self.replan_effects:
-            retire_reviewers(eff.retiring)
-            clear_task_held_news(eff.store, eff.task, eff.retiring, at=eff.at)
+            eff.commit()
         for parent in self.later:
             for k in agents_of(self.s, parent) if parent["state"] == "running" else []:
                 end_agent(self.s, parent, k["address"])

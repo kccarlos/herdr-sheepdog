@@ -352,25 +352,21 @@ def tick_store(s, report):
                             t["push_held"]["reason"] = hold
                             s.dirty = True
                     else:
-                        from .replan import _last_new_recap_at
-                        reset_before_push = int(t.get("review_reset_at") or _last_new_recap_at(t) or 0)
                         try:
                             pr = pr_open(s, t, repo, t.get("summary"))
                             if why := pr_head_problem(s, t, repo, t.get("head")):
                                 raise Fail(why[0].upper() + why[1:] + ".")
-                            if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) == reset_before_push and t["state"] == "ready" and not t.get("recap"):
-                                t.pop("push_held", None)
-                                t["head_moved_at"] = now()  # CI grace window starts when the held push actually reaches GitHub
-                                pr["head_at"] = now()
-                                pr["checked"] = 0
-                                pr["wait"] = CHECKS_RUNNING
-                                s.dirty = True
+                            t.pop("push_held", None)
+                            t["head_moved_at"] = now()  # CI grace window starts when the held push actually reaches GitHub
+                            pr["head_at"] = now()
+                            pr["checked"] = 0
+                            pr["wait"] = CHECKS_RUNNING
+                            s.dirty = True
                         except Fail as e:
-                            if int(t.get("review_reset_at") or _last_new_recap_at(t) or 0) == reset_before_push and not t.get("recap"):
-                                t.pop("push_held", None)
-                                t["attention"], t["attention_at"] = str(e), now()
-                                s.dirty = True
-                                report["attention"].append(t["id"])
+                            t.pop("push_held", None)
+                            t["attention"], t["attention_at"] = str(e), now()
+                            s.dirty = True
+                            report["attention"].append(t["id"])
                 else:
                     t.pop("push_held", None)
                     s.dirty = True
