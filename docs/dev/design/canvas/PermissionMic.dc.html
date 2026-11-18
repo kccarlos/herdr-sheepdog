@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — before the microphone prompt</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; background: #FAF8F3; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; padding: 98px 24px 34px">
+  <div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 16px; text-align: center">
+    <img src="/_blob/401c7376e1431b57333bf0ffcb6f2b09" alt="The sheepdog mascot listening through its headset" style="width: 180px; height: 200px; object-fit: contain">
+    <h1 style="margin: 10px 0 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 28px; line-height: 34px; font-weight: 700; letter-spacing: -0.3px">Let Sheepdog hear you</h1>
+    <p style="margin: 0; max-width: 310px; font-size: 16px; line-height: 23px; color: #6B6E75">It listens only while a voice session is on. Tap the mic in the voice bar to mute it any time.</p>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 6px; align-items: stretch">
+    <button style="height: 54px; border-radius: 27px; border: 0; background: #D98718; color: #1F1F22; font-size: 17px; font-weight: 600">Allow the microphone</button>
+    <button style="height: 44px; border: 0; background: transparent; color: #8A5700; font-size: 15px; font-weight: 500">Not now — I'll type</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

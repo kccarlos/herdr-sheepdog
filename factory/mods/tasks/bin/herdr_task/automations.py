@@ -26,7 +26,7 @@ from .commands import begin
 from .launch import sweep_sandboxes
 from .news import news_pass
 from .revive import revive_pass
-from .tick import end_done_pass, lost_logs_pass, memory_guard, retry_pass, starts_now, tick_store, watchdog_pass
+from .tick import end_done_pass, lost_logs_pass, memory_guard, needs_tick, retry_pass, tick_store, watchdog_pass
 from .simulators import simulator_pass
 from .devices import device_pass
 from .machines import machines_pass
@@ -677,11 +677,7 @@ def one_pass(report):
         lists = [d for d in map(read_list, store_files()) if d and os.path.isdir(d.get("folder") or "")]
         feeds = feeds_for(lists)
         for d in lists:
-            tasks = d.get("tasks") or []
-            busy = bool(d.get("main_watch") or any(
-                t.get("state") in ("queued", "scheduled", "ready") or t.get("check_run")
-                or (t.get("worktree") and t.get("state") == "running") or starts_now(t) for t in tasks))
-            if not busy and not d.get("automations"):
+            if not needs_tick(d) and not d.get("automations"):
                 continue
             try:
                 with Store(locate(d["folder"])) as s:

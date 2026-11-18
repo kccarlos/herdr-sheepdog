@@ -674,6 +674,20 @@ class SchedulerRound(unittest.TestCase):
         self.assertIn("sweep", calls)
         self.assertIn(f"tick:{os.path.realpath(repo)}", calls)
 
+        # The daemon uses this scheduler, so a folder with only a Done PR still gets audited.
+        with open(store_file) as f:
+            data = json.load(f)
+        data.pop("main_watch")
+        data["tasks"] = [{"id": 1, "state": "done", "pr": {"number": 7}}]
+        for verified in (False, True):
+            with self.subTest(verified=verified):
+                data["tasks"][0]["pr"]["drift_verified_merged"] = verified
+                with open(store_file, "w") as f:
+                    json.dump(data, f)
+                calls.clear()
+                au.one_pass({"started": [], "done": [], "attention": [], "fired": []})
+                self.assertEqual(f"tick:{os.path.realpath(repo)}" in calls, not verified)
+
     def test_cmd_scheduler_waits_for_held_lock_unless_once_and_cli_check_creates_state_dir(self):
         import argparse, contextlib, fcntl, io, threading
         from unittest import mock
@@ -8190,11 +8204,12 @@ class TaskFlow(unittest.TestCase):
         self.assertEqual(tasks[2]["state"], "queued")
         self.assertEqual(self.said[-1].split("\n")[1:], ["SHEP-2: edit claude -> agy", "SHEP-5: edit claude -> agy",
                                                          "SHEP-6: edit claude -> agy"])
-        with self.assertRaises(self.commands.Fail):  # --dry-run only goes with --all: never a real switch
-            self.commands.cmd_switch(self.args(id="SHEP-1", all=False, dry_run=True, agent="agy"))
+        last = self.said[-1]
+        self.commands.cmd_switch(self.args(id="SHEP-1", all=False, dry_run=True, agent="agy"))
+        self.assertEqual(self.said[-1], "SHEP-1: switch to agy (dry run)")
         with self.assertRaises(self.commands.Fail):
             self.commands.cmd_switch(self.args(id=None, all=True, from_="agy", agent="nosuchcli", argv=None, dry_run=False))
-        self.assertTrue(self.said[-1].startswith("SHEP-1: agy t9 took over, t1 ended"))
+        self.assertTrue(last.startswith("SHEP-1: agy t9 took over, t1 ended"))
 
     def test_switch_all_from_a_model_and_dry_run(self):
         """FAC-104: --from claude:opus picks only the opus tasks; --dry-run lists them and changes nothing."""
@@ -9393,11 +9408,19 @@ class Resume(unittest.TestCase):
         self.assertIn("--dangerously-skip-permissions", cmd4)
         self.assertEqual(cmd4[cmd4.index("--model") + 1], "gemini-4-argon-high")
 
+    def switch_live_worker(self, ref, cli):
+        from unittest import mock
+
+        live = [{"address": f"t{len(self.runs)}", "foreground": {"name": cli}}]
+        with mock.patch.object(self, "live", live), mock.patch.object(self.commands, "refresh_sessions"), \
+                mock.patch.object(self.commands, "end_agent"):
+            return self.call(self.commands.cmd_switch, id=ref, space=None, agent=None, argv=None, parent=None, keep=False)
+
     def test_switch_and_tell_keep_their_existing_behaviour(self):
         ref = self.started_task({"agent": "agy", "perm": "auto"}, session="0199-sid")
         self.write_worker({"agent": "agy", "perm": "full"})
         # switch without --agent keeps the CLI, picks up the current mode and sends SWITCH_NUDGE.
-        out = self.call(self.commands.cmd_switch, id=ref, space=None, agent=None, argv=None, parent=None, keep=False)
+        out = self.switch_live_worker(ref, "agy")
         self.assertTrue(out["resumed"])
         cmd = self.launched_cmd()
         self.assertIn("--dangerously-skip-permissions", cmd)
@@ -9413,7 +9436,7 @@ class Resume(unittest.TestCase):
     def test_switch_keeps_the_model_when_the_default_cli_is_different(self):
         ref = self.started_task({"agent": "codex", "model": "gpt-test", "effort": "high", "perm": "read-only"})
         self.write_worker({"agent": "claude", "model": "opus"})
-        out = self.call(self.commands.cmd_switch, id=ref, agent=None, argv=None, parent=None, keep=False)
+        out = self.switch_live_worker(ref, "codex")
         self.assertTrue(out["resumed"])
         cmd = self.launched_cmd()
         self.assertEqual(cmd[cmd.index("-m") + 1], "gpt-test")
@@ -9422,11 +9445,11 @@ class Resume(unittest.TestCase):
 
     def test_switch_keeps_custom_worker_arguments(self):
         ref = self.started_task({"argv": ["claude", "--add-dir", "/extra"]})
-        self.call(self.commands.cmd_switch, id=ref, agent=None, argv=None, parent=None, keep=False)
+        self.switch_live_worker(ref, "claude")
         cmd = self.launched_cmd()
         self.assertEqual(cmd[cmd.index("--add-dir") + 1], "/extra")
         self.write_worker({"agent": "claude", "perm": "plan"})
-        self.call(self.commands.cmd_switch, id=ref, agent=None, argv=None, parent=None, keep=False)
+        self.switch_live_worker(ref, "claude")
         cmd = self.launched_cmd()
         self.assertEqual(cmd[cmd.index("--add-dir") + 1], "/extra")
         self.assertEqual(cmd[cmd.index("--permission-mode") + 1], "plan")
@@ -13235,6 +13258,16 @@ class ProcessTable(unittest.TestCase):
         sessions._table["at"] = None
         self.addCleanup(lambda: sessions._table.update(at=None, children={}))
 
+    def test_session_of_skips_an_unreadable_or_vanished_fd_dir(self):
+        for error in (PermissionError, FileNotFoundError):
+            with self.subTest(error=error.__name__), \
+                    self.mock.patch.object(self.sessions, "kids", return_value=[]), \
+                    self.mock.patch.object(self.sessions.os.path, "isfile", return_value=False), \
+                    self.mock.patch.object(self.sessions.os.path, "isdir", return_value=True), \
+                    self.mock.patch.object(self.sessions.os, "listdir", side_effect=error) as listdir:
+                self.assertEqual(self.sessions.session_of(42), (None, None))
+                listdir.assert_called_once_with("/proc/42/fd")
+
     def test_a_real_tree_from_one_read(self):
         import signal
         tree = subprocess.Popen(["sh", "-c", "sh -c 'sleep 30 & wait' & sleep 30 & wait"], start_new_session=True)
@@ -14113,6 +14146,8 @@ class InstalledCliAndMissingRefusal(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 0, json.dumps({"address": f"t{len(self.runs)}"}), "")
             if argv[:2] == ["hc", "kill"]:
                 self.killed.append(argv[2])
+                for key, terminals in self.live_map.items():
+                    self.live_map[key] = [k for k in terminals if k["address"] != argv[2]]
             return subprocess.CompletedProcess(argv, 0, "{}", "")
 
         for obj, name, val in (
@@ -14135,6 +14170,8 @@ class InstalledCliAndMissingRefusal(unittest.TestCase):
             (launch, "run", fake_hc),
             (commands, "run", fake_hc),
             (commands, "live_agents", lambda key: list(self.live_map.get(key, []))),
+            (agents, "hc_json", lambda *args: {"terminals": [
+                dict(k, state="live") for k in self.live_map.get(args[-1].split("=", 1)[-1], [])]}),
             (commands, "detail", lambda k: k),
             (commands, "just_started", lambda t: None),
             (commands, "reviewer_pools", lambda: []),
@@ -14167,6 +14204,130 @@ class InstalledCliAndMissingRefusal(unittest.TestCase):
         defaults = dict(id=ref, here=False, worktree=False, branch=None, agent=None, argv=None, parent=None, at=None, in_=None, now=True)
         defaults.update(kw)
         return self.call(self.commands.cmd_start, **defaults)
+
+    def test_switch_todo_with_unmet_dependencies_edits_only(self):
+        dep = self.add("Dependency")
+        ref = self.add("Waiting", agent="agy", after=dep)
+        opts = dict(agent="codex", model="gpt-5", argv=None, parent=None, keep=False, reviewer=False)
+        before = self.call(self.commands.cmd_switch, id=None, all=True, from_="agy", dry_run=True, **opts)
+        self.assertEqual([(row["task"], row["action"]) for row in before["tasks"]], [(ref, "edit")])
+        out = self.call(self.commands.cmd_switch, id=ref, **opts)
+        self.assertEqual((out["state"], out["agent"], out["model"]), ("todo", "codex", "gpt-5"))
+        self.assertEqual(out["waiting_for"], [int(dep.split("-")[1])])
+        self.assertEqual((self.runs, self.killed), ([], []))
+
+    def test_switch_running_replaces_only_the_worker(self):
+        ref = self.add("Working", agent="agy")
+        started = self.start(ref)
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+            self.live_map[s.key(s.find(ref))] = [
+                {"address": "t1", "foreground": {"name": "agy"}},
+                {"address": "review", "foreground": {"name": "claude"}, "labels": {"sheepdog.role": "reviewer"}},
+            ]
+        opts = dict(id=ref, agent="codex", model=None, argv=None, parent=None, keep=False)
+        dry = self.call(self.commands.cmd_switch, dry_run=True, **opts)
+        self.assertEqual((dry["action"], len(self.runs), self.killed), ("switch", 1, []))
+        actual = self.call(self.commands.cmd_switch, **opts)
+        self.assertEqual((actual["action"], actual["worktree"]), (dry["action"], started["worktree"]))
+        self.assertEqual((len(self.runs), self.killed), (2, ["t1"]))
+        self.assertIn("codex", self.runs[-1])
+
+    def test_switch_all_dry_run_matches_the_real_run(self):
+        live = self.add("Working", agent="agy")
+        self.start(live)
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=live), write=False) as s:
+            self.live_map[s.key(s.find(live))] = [{"address": "t1", "foreground": {"name": "agy"}}]
+        todo = self.add("To do", agent="agy", after=live)
+        queued = self.add("Queued", agent="agy", after=live)
+        self.start(queued, now=False)
+        scheduled = self.add("Scheduled", agent="agy")
+        self.start(scheduled, in_="1h")
+        opts = dict(id=None, all=True, from_="agy", agent="codex", model=None, argv=None, parent=None, reviewer=False)
+        dry = self.call(self.commands.cmd_switch, dry_run=True, **opts)
+        self.assertEqual((len(self.runs), self.killed), (1, []))
+        actual = self.call(self.commands.cmd_switch, dry_run=False, **opts)
+        self.assertEqual(dry["tasks"], actual["tasks"])
+        self.assertEqual({r["task"]: r["action"] for r in actual["tasks"]},
+                         {live: "switch", todo: "edit", queued: "edit", scheduled: "edit"})
+        self.assertEqual((len(self.runs), self.killed), (2, ["t1"]))
+        self.assertIn("codex", self.runs[-1])
+
+    def test_reopen_to_do_returns_five_runs_and_respects_dependencies_and_cap(self):
+        self.add("Dependency")
+        self.call(self.commands.cmd_config, prefix="SDF", build_dir=None, set=["tasks.max_running=1"])
+        dep = "SDF-1"
+        hold = self.add("Occupies the only slot")
+        self.start(hold.split("-")[1])
+        fixtures = {}
+        args = self.argparse.Namespace(folder=self.repo)
+        for number in (24, 26, 28, 32, 36):
+            with self.store_mod.open_store(args) as s:
+                s.data["next"], s.dirty = number, True
+            self.add("Waiting", agent="codex", after=dep)
+            ref = f"SDF-{number}"
+            started = self.start(ref, now=True)
+            fixtures[ref] = started
+            with self.store_mod.open_store(args, write=False) as s:
+                key = s.key(s.find(ref))
+            self.live_map[key] = [{"address": started["terminal"], "foreground": {"name": "codex"}},
+                                  {"address": f"review-{number}", "parent": started["terminal"],
+                                   "labels": {"sheepdog.role": "reviewer"}}]
+
+        for ref, started in fixtures.items():
+            out = self.call(self.commands.cmd_reopen, id=ref, to_do=True)
+            self.assertEqual((out["state"], out["waiting_for"]), ("todo", [1]))
+            self.assertNotIn("started", out)
+            for field in ("worktree", "branch", "after", "agents"):
+                self.assertEqual(out[field], started[field])
+            self.assertTrue(os.path.isdir(out["worktree"]))
+            with self.assertRaisesRegex(self.Fail, "waiting"):
+                self.call(self.commands.cmd_fix, id=ref, reason="Check the work", agent=None, argv=None)
+            self.assertEqual(self.start(ref, now=False)["state"], "queued")
+            self.assertEqual(self.start(ref, now=True)["state"], "queued")
+        self.assertCountEqual(self.killed, [a for ref, run in fixtures.items() for a in
+                                          (run["terminal"], f"review-{ref.split('-')[1]}")])
+        self.live_map.clear()
+
+        def tick():
+            report = {"started": [], "done": [], "attention": [], "fired": [], "retries": []}
+            with self.store_mod.open_store(args) as s:
+                self.tick.tick_store(s, report)
+            return [row["ref"] for row in report["started"]]
+
+        self.assertEqual(tick(), [])  # unmet dependency
+        self.call(lambda a: self.commands.cmd_state(a, "done"), id=dep)
+        self.assertEqual(tick(), [])  # dependency done, cap full
+        self.call(lambda a: self.commands.cmd_state(a, "done"), id=hold.split("-")[1])
+        self.assertEqual(tick(), ["SDF-24"])
+        self.assertEqual(len(self.runs), 7)
+        self.assertIn("You are taking over task SDF-24", self.runs[-1][-1])
+        self.assertEqual(self.call(self.commands.cmd_reopen, id="SDF-24", to_do=True)["state"], "queued")
+
+    def test_reopen_to_do_preserves_the_review_baseline(self):
+        ref = self.add("In place", here=True, worktree=False, set=["review=on", "review.min=0"])
+        first = self.start(ref)
+        subprocess.run(["git", "-C", self.repo, "commit", "-q", "--allow-empty", "-m", "First run"], check=True)
+        self.call(self.commands.cmd_reopen, id=ref, to_do=True)
+        restarted = self.start(ref, now=False)
+        self.assertEqual(restarted["folder_start"], first["folder_start"])
+        self.assertEqual(restarted["started"], first["started"])
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+            self.assertIn("isn't reviewed", self.commands.review_refusal(s, s.find(ref), None))
+
+    def test_reopen_to_do_waiting_time_does_not_trigger_a_recap(self):
+        from herdr_task import budget
+        ref = self.add("Estimated work", set=["estimate.time=1h"])
+        first = self.start(ref)
+        self.call(self.commands.cmd_reopen, id=ref, to_do=True)
+        later = first["started"] + 3 * 60 * 60_000
+        with self.mock.patch.object(self.commands, "now", return_value=later):
+            self.start(ref, now=False)
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+            t = s.find(ref)
+            with self.mock.patch.object(budget, "now", return_value=later):
+                self.assertEqual(budget.triggers(s, t), [])
+            with self.mock.patch.object(budget, "now", return_value=later + 3 * 60 * 60_000):
+                self.assertIn("over twice its time estimate", budget.triggers(s, t)[0])
 
     def test_unset_agent_resolves_consistently_across_layers(self):
         ref = self.add()

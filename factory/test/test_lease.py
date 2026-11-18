@@ -589,6 +589,7 @@ class StuckWorking(LeaseCase):
         p = mock.patch("herdr_task.sessions.kids", lambda pid: self.kids.get(str(pid), []))
         p.start()
         self.addCleanup(p.stop)
+        self.enterContext(mock.patch("herdr_task.sessions.session_of", return_value=(None, None)))
         self.restarts = []
         p = mock.patch.object(watchdog, "restart_assistant", lambda k, folder: self.restarts.append(k["address"]) or None)
         p.start()
