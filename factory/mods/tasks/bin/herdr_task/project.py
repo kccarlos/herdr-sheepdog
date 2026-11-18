@@ -12,6 +12,13 @@ FACTORY_WORKER = {"agent": "agy", "model": "gemini-4-carbon-high", "effort": "",
 FACTORY_REVIEWER = {"agent": "agy", "model": "gemini-4-argon-high", "effort": "", "fast": False}
 # reviewer_sandbox off: a sandboxed agy reviewer can't sign in (agy keeps its sign-in in the keychain), and FACTORY_REVIEWER is agy
 FACTORY_TASKS = {"merge": "checks", "review_min": 2, "reviewer_sandbox": False}
+# Copy for the future factory start command to print after its checks pass.
+FIRST_RUN_NOTICE = (
+    "Factory agents work without asking. Each worker runs as you, with full access to this Mac, "
+    "limited only by its brief and its own worktree. That is not a sandbox. Reviewers are told not to change files. "
+    "Sheepdog names the model for every agent and does not read or change your Claude, Codex or agy settings. "
+    "To stop it: sheepdog factory stop."
+)
 IOS_START_NOTE = "iOS: lease a simulator with `herdr-task simulator lease <task>` and use only that one; never create or erase simulators."
 IOS_FINISH_NOTE = "iOS: release it with `herdr-task simulator release <task>`."
 HEARTBEAT_HEAD = "Requirements: read docs/requirements.md and build toward it milestone by milestone.\n\n"

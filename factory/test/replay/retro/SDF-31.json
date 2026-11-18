@@ -1,0 +1,41 @@
+{
+ "task_ref": "SDF-31",
+ "task_title": "M4: Milestones, plan apply and amend",
+ "project": "sheepdog",
+ "base_sha": "8daf81dcf582",
+ "head_sha": "830bd86886",
+ "changed_lines": 942,
+ "estimate_lines": "none",
+ "tokens_used": "unknown",
+ "worker": "claude opus",
+ "reviewer": "codex",
+ "recaps": "none",
+ "small_lines": 60,
+ "rounds": [
+  {
+   "round": 1,
+   "head": "64c3de2b28",
+   "at": 1794943578070,
+   "verdict": "changes",
+   "majors": 4,
+   "report": "Round 1 (codex): 2 blocker, 2 major, 1 minor: implicit milestone-edge loop, gate change on amend, empty milestone order, set estimate.lines bypass, malformed after crash; all fixed in b02890df"
+  },
+  {
+   "round": 2,
+   "head": "b02890df62",
+   "at": 1794943728290,
+   "verdict": "changes",
+   "majors": 3,
+   "report": "Round 2 (codex): round-1 fixes hold; 1 blocker, 2 major: gate change after acceptance started, kind overridden via set, after changed on a started task; all fixed in 6edd7e35"
+  },
+  {
+   "round": 3,
+   "head": "830bd86886",
+   "at": 1794944656086,
+   "verdict": "changes",
+   "majors": 2,
+   "report": "Round 3 (codex): round-2 fixes hold; 2 major: loop hidden when an existing plan task is reached by id (fixed in 2349a4d5 with a test), split rewriting a started dependent's after (rejected: that is how a split keeps the parent's place)"
+  }
+ ],
+ "brief": "# M4: Milestones, plan apply and amend\n\nPart of sheepdog-factory, phases 1–4. Read the design (the design repo's docs/sheepdog-factory-design.md) and field notes (the design repo's docs/factory-field-notes.md) first; docs/dev/factory/engine-audit.md (SDF-1's line audit) once it exists.\n\n## Goal and scope\nMilestones (goal, order, exit test, gate, state, the owner's words as one field), plan file with `plan apply` checks and `plan amend` with a reason, a split keeps the parent's place, the engine adds each milestone's acceptance task. Replay runs for the coordinator prompt change.\n\n## Note\nThis brief may be finished by the Assistant (herdr-task edit) before the task starts. Waits on: SDF-30.\n\n## Rules for this repo (sheepdog)\n- Read AGENTS.md and docs/dev/architecture.md first. Use the words in docs/dev/glossary.md.\n- Conventional Commits (`docs(factory): …`, `feat(factory): …`). No session links, no Co-authored-by trailers.\n- Never print or commit secrets, `.env` files or unredacted logs. No real names, phone numbers or private addresses in anything you commit (say \"the owner\", never a name). The repo will be public.\n- Docs: developer docs live under docs/dev/; keep relative links working; `go test ./internal/docscheck` must pass. Show the output.\n- Don't merge, don't start other agents (your own reviewer excepted), don't touch the running daemon or ~/.config/sheepdog, ~/.local/share/sheepdog.\n- Ask through `herdr-task ask` only, never a CLI question dialog."
+}

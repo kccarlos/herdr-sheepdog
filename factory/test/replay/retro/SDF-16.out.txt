@@ -1,0 +1,57 @@
+**Verdict: FIX.** The head under review (6e965f3a) is the head round 3 reviewed; the "fixed after" commits are not in the range, and both round-3 majors are still there.
+
+**What was run:** `make test-factory` at 6e965f3a gives `Ran 758 tests in 202.897s, OK (skipped=31)`. Every attempt to run my own reproduction (inline Python, a scratch script outside the repo) was denied by the session's permission mode. The two majors below are therefore traced through the code, not executed. I could not find the design repo, so section 5 and notes 53–55 were read only through `docs/dev/factory/coordinator.md`.
+
+## Part 1: the code
+
+### Major 1: a restart that stops after the lease moves is never finished
+`factory/mods/tasks/bin/herdr_task/lease.py:299-305` and `:336`.
+
+- **How it happens:** `restart()` claims the lease for the new coordinator (299), then re-parents (303), then ends the old one (304). The return code of `hc kill old` is ignored and `reparent` is not guarded, so a failed kill, an `OSError` or a killed tick leaves the old coordinator live with the lease already moved.
+- **Why no later tick repairs it:** line 336 moves held news only when the previous holder is not live, and `orphans()` (286) counts a live parent as fine. Nothing ever ends a replaced holder; it is only listed under `not_coordinator`.
+- **Result:** two live coordinators, both told they are the Assistant. Workers stay parented to the stuck one. `news.held_pass` (news.py:505-548) delivers the held news to the stuck one, or drops it at 508-510 once that one ends.
+- **The stale-shell path has the same hole:** `lease.py:360-368`, added in 6e965f3a.
+- **Fixture to run:** in `LeaseCase`, live `c1` holds the lease, worker `w1` has parent `c1`, `held["c1"]` has one item. Patch `lease.reparent` to raise, call `lease.restart(self.repo, c1)`, then `reconcile_pass` three times. Expected: `c1` and `n1` both live, `held["c1"]` unmoved, `w1` still on `c1`.
+
+### Major 2: identity is by bare address outside `_live()`
+`factory/mods/tasks/bin/herdr_task/revive.py:176-179` and `:286`.
+
+- **How it happens:** `coordinator_addresses()` returns lease addresses with no `created_ms` check, and `watched()` and `plan()` use it. A later terminal at a dead holder's address is treated as the Assistant.
+- **Result:** for a bare shell there, `plan()` returns `("fresh", <assistant template command>)` and revive types a coordinator into someone else's terminal, while reconcile starts the real one.
+- **Other sites of the same kind:** `lease.py:336` (`_live({"address": prev})`), `:123` (`previous` stored as a bare address), `:254` and `:286` (worker parents).
+- **Fixture to run:** lease `{address: "c1", created_ms: 1000}`, then `hc.term("c1", repo, {}, created_ms=999999)`. Expected: `lease.holder()` is `None` but `revive.watched(terms["c1"])` is `True`.
+
+### The class
+Every major in rounds 1–3 except the reused address is one thing: the handover is five side effects (start, claim, move workers, move held news, end the old one) across the task list, the held file and hc, in three code paths, with no record of what is still owed. Each fix added a detector that infers one missed step from side evidence. The head does not close the class. Further open rows, also traced only:
+
+- **Start without claim:** `starts` is stamped only inside `claim` (360). If `claim` raises, line 369 reports `failed` and leaves the new terminal live and unleased, and the next tick starts another with no grace or hourly limit. I am not counting this as a major because it depends on a write failure I could not run.
+- **Two handovers in a row:** only one `previous` is kept, so news held under an older address is stranded.
+
+### The structural change
+About 40–45 engine lines, which is why this is FIX and not REDESIGN. No round raised a major against the lease as identity.
+
+1. `claim` replaces `previous` with a `retired` list of `{address, created_ms}` (about 4 lines).
+2. One idempotent `finish()` runs every tick for the live holder: for each retired entry, move workers and held news, end it if `_live(entry)`, and drop the entry once it is gone and nothing is held for it. It replaces lines 335-339 and the kill tails in `restart` and `reconcile_pass` (about 14 lines, net fewer).
+3. Stamp `starts` and a `starting: {name, at}` record before `hc run`; the next tick claims or ends a live terminal of that name that is not the holder (about 16 lines).
+4. `revive.coordinator_addresses()` uses `live_holders()` (2 lines).
+
+Not closed by this: worker parents other than a retired holder are still checked by bare address.
+
+## Part 2: the retro
+
+**Cause: patch-shaped-fix.** b10d8ee9 added `orphans()` for "cut short before workers moved". 405af0c0 added `previous` plus `has_held()` for "cut short before held news moved", and its `not _live(prev)` condition is the exact hole round 3 then found. The same mechanism was patched once per reported case.
+
+**Second cause: reviewer-narrow.** "Cut short" appears in the notes of rounds 1, 2 and 3, each time as a single case; the class was never named and no cut-point table was asked for.
+
+**Not the cause:**
+- **Worker model:** no major came back, and round 2 confirmed the round-1 fixes.
+- **Size:** the diff is 1673 changed lines against an estimate of 600, but 431 added lines are tests and 394 deletions are `restart.sh` and its test. The brief's split line (lease/restart vs reconcile/re-parent) runs through the handover, so it would not have isolated it.
+
+**One more observation:** 6e965f3a (157 lines, 33 minutes) is not traceable to a round-2 major in the notes. It added the stale-shell replace path and the address-only revive check that round 3 flagged.
+
+- **Coordinator change:** for a brief that moves state across more than one store, require a cut-point table (each step, what a stop after it leaves, which code finishes it) in the task doc before code, and make it an acceptance item.
+- **Worker change:** when a second finding lands on the same mechanism, stop adding a detector; write the cut table and replace the detectors with one recorded-intent step, and keep fix commits to the reported findings.
+
+**Re-plan:** none. One more round on this task, scoped to the four edits above with the cut table as tests; no model change suggested. The reviewer should do one class pass (enumerate cuts for all three paths) instead of finding the next case.
+
+<retro>{"verdict":"FIX","majors":[{"file":"factory/mods/tasks/bin/herdr_task/lease.py","line":336,"what":"A restart or stale-shell replace that stops after claim (lease.py:299-305, 360-368: unguarded reparent, ignored hc kill result, or a killed tick) is never finished: the replaced coordinator stays live, held news stays under it and workers stay parented to it, because line 336 only moves news when the previous holder is not live and nothing ends a replaced holder.","repro":"Traced, not run (custom runs denied; make test-factory: 758 tests OK, 31 skipped). LeaseCase fixture: live c1 holds the lease, w1 parent c1, held['c1'] has one item; patch lease.reparent to raise, call lease.restart(repo, c1), then reconcile_pass x3. Expected: c1 and n1 both live, held['c1'] unmoved, w1 parent still c1; news.held_pass then delivers to c1 or drops it at news.py:508-510 once c1 ends."},{"file":"factory/mods/tasks/bin/herdr_task/revive.py","line":176,"what":"coordinator_addresses() identifies the holder by bare address without created_ms, so watched() and plan() (revive.py:286) treat a later terminal at a dead holder's address as the Assistant and type the assistant command into it; the same address-only identity is at lease.py:336, 123, 254 and 286.","repro":"Traced, not run. LeaseCase fixture: lease {address:'c1', created_ms:1000}, then hc.term('c1', repo, {}, created_ms=999999). Expected: lease.holder(repo) is None while revive.watched(terms['c1']) is True and plan() returns ('fresh', assistant template argv) for a bare shell there."}],"cause":"patch-shaped-fix","second_cause":"reviewer-narrow","evidence":["round 1: three majors on one handover (pending held news dropped, refused claim still re-parented, cut-short recovery left orphans); b10d8ee9 fixed each case and added orphans() as a detector for one missed step","round 2: cut-short recovery leaves held news; 405af0c0 added previous + has_held() with a 'not _live(prev)' condition","round 3: restart cut short leaves news and a live replaced coordinator, which is exactly the 'not _live(prev)' hole at lease.py:336 from 405af0c0; both round-3 majors are still present at head 6e965f3a","rounds 1-3: the reviewer's notes say 'cut short' each round as a single case and never name the class or ask for a cut-point table","6e965f3a: 157 lines in 33 minutes, not traceable to a round-2 major in the notes, added the stale-shell replace path and the address-only revive check flagged in round 3","no major returned after its fix and round 2 confirmed the round-1 fixes, so not worker-model","size 1673 changed lines vs 600 estimate, but 431 are new tests and 394 are the deleted restart.sh and its test, and the brief's split line runs through the handover, so not task-too-big"],"coordinator_change":"For a brief that moves state across more than one store, require a cut-point table (each step, what a stop after it leaves, which code finishes it) in the task doc before code and list it as an acceptance item.","worker_change":"When a second finding lands on the same mechanism, write the cut table and replace the per-case detectors with one recorded-intent finish step instead of adding another detector, and keep fix commits to the reported findings.","replan":"none","replan_note":"One more round on this task, scoped to four edits of about 40-45 engine lines: a retired list of (address, created_ms) written in claim, one idempotent finish step per tick that moves workers and held news and ends retired holders, starts plus a starting record stamped before hc run, and revive using live_holders; the cut table becomes the tests. Worker parents other than a retired holder stay address-only and should be named as a limit.","worker_model":"keep","reviewer":"class-pass","confidence":"medium"}</retro>

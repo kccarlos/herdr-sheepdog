@@ -30,8 +30,13 @@ class ReplanRow:
 
 
 def _last_new_recap_at(task):
+    stamped = int(task.get("review_reset_at") or 0)
     return max(
-        (int(d.get("at") or 0) for d in (task.get("recaps") or []) if isinstance(d, dict) and d.get("decision") == "new"),
+        (
+            int(d.get("at") or 0)
+            for d in (task.get("recaps") or [])
+            if isinstance(d, dict) and d.get("decision") == "new" and int(d.get("at") or 0) > stamped
+        ),
         default=0,
     )
 
@@ -459,6 +464,7 @@ def _apply_consecutive_majors(ctx):
 def _apply_open_recap(ctx):
     t = ctx["task"]
     rc = t.pop("recap", None)
+    t.pop("retro_fix_pending", None)
     ctx["had_reasons"] = list((rc or {}).get("reasons") or [])
     if str(t.get("attention") or "").startswith("Recap required"):
         t.pop("attention", None)
@@ -750,6 +756,11 @@ def select_retro_plan_targets(s, plan_tasks, by_key, reason, *, has_structural_c
                 if re.search(rf"(?<![\w-]){re.escape(s.ref(o))}(?![\w-])", reason, re.I)
             ]
             if matched_own:
+                from .retro import blocks_continue
+                if len(matched_own) == 1 and reason.strip().lower() == f"retro:{s.ref(matched_own[0]).lower()}" and matched_own[0].get("recap") and blocks_continue(matched_own[0]):
+                    if why_refused := replan_state_refusal(s, matched_own[0]):
+                        raise Fail(why_refused)
+                    return []  # SDF-49: records plan_log before recap --decide new|drop acts on the open recap
                 return matched_own
             if explicit_target:
                 tok = explicit_target.group(1)

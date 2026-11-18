@@ -18,7 +18,7 @@ from .settings import (cli_missing_reason, normalize_sparse_exclude, sparse_excl
     accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
     fable_due, gate_min, merge_hold, merge_policy,
     merge_wait_why, MUST_WORDS, project_base, remove_build_dir, review_kind, review_limits, reviewed_for_head, set_opts, settings_block, settings_for,
-    task_settings, worker_argv, worker_pick, worktrees_on, set_task, argv_model, AGENTS,
+    task_settings, worker_argv, worker_permissions, worker_pick, worktrees_on, set_task, argv_model, AGENTS,
 )
 from .agents import (
     agent_log, agent_running, agy_bg_tasks, back_at_work, background_jobs, busy_again, claude_bg_shells, detail, fit, LINE_MAX, live_agents, ready_turns,
@@ -46,6 +46,10 @@ from .templates import instructions
 from .budget import NON_CONVERGENCE, budget_lines, budget_pass, change_sizes, docs_only_commits, merge_only_commits, merge_only_step, recap_refusal, record_ci, review_nonconverging, size_estimate, size_pass
 from .replan import _last_new_recap_at, active_review_failures, active_review_runs, active_reviews, archive_legacy_before_replan, retiring_live
 from .simulators import release_task
+from .budget import open_recap
+from .settings import fable_runs
+from .ask import open_asks
+from .retro import cap as retro_cap, fix_words as retro_fix_words, fixing as retro_fixing, gate_rounds as retro_gate_rounds, retro_due
 
 
 # ---- commands -------------------------------------------------------------------------------
@@ -412,6 +416,7 @@ def fail_if_missing_cli(s, t, argv, record=True):
 
 def begin(s, t, argv, space=None, parent=None):
     """Starts a waiting task's agent. Returns its record."""
+    argv = worker_permissions(argv, settings_for(s)["worker"].get("perm"))
     if refused := start_refusal(s, t, argv):
         raise Fail(refused)
     original_start = t.get("returned_to_waiting")
@@ -647,7 +652,8 @@ def failed_addresses(t):
 
 
 def open_runs(t):
-    done, failed = {r["round"] for r in active_reviews(t) if r.get("started_by") == "herdr-task"}, failed_addresses(t)
+    done = {r["round"] for r in active_reviews(t) if r.get("started_by") == "herdr-task" and not r.get("retro")}
+    failed = failed_addresses(t)
     return [r for r in active_review_runs(t) if r["round"] not in done and r["address"] not in failed]
 
 
@@ -747,11 +753,14 @@ def rounds_used(t, gate=False):
     if gate:
         skip = failed_addresses(t) | set(t.get("merge_only_runs") or ())
         return sum(1 for r in active_review_runs(t) if r["address"] not in skip)
-    return sum(1 for r in active_reviews(t) if r.get("result") in REVIEWED)
+    return sum(1 for r in active_reviews(t) if r.get("result") in REVIEWED and not r.get("retro"))
 
 
 def gate_passes(t, head):
-    return sum(1 for r in active_reviews(t) if r.get("started_by") == "herdr-task" and r["head"] == head and r["verdict"] == "pass")
+    after = t["retro"]["at"] if retro_fixing(t) else None  # SDF-49: a retro FIX is passed only by Fable's delta round
+    fable = fable_runs(t) if after else ()
+    return sum(1 for r in active_reviews(t) if r.get("started_by") == "herdr-task" and r["head"] == head and r["verdict"] == "pass"
+               and (after is None or (r.get("by") in fable and (r.get("at") or 0) > after)))
 
 
 def gate_passes_for(s, t, head, need=None):
@@ -920,7 +929,8 @@ def gate_step(s, t):
         instructions("reviewer"), f"The task, {ref}:\n" + task_text(t),
         f"Review commit {head} in {wt}. {shown}" + (", cut: run it for the rest" if len(diff) > 20000 else "")
         + f":\n{diff[:20000]}",
-        *([FABLE_WORDS] if fable else []),
+        *([FABLE_WORDS] if fable and (not retro_fixing(t) or review_kind(t) or open_asks(s, t)) else []),
+        *([retro_fix_words(t)] if fable and retro_fixing(t) else []),
         f"Must fix: {MUST_WORDS[rows.get('Must fix') or 'major']}. Herdr started you, not the worker. "
         + (f"You run in a sandbox: you can read only this worktree, its git history and the system's tools, write only in "
            f"$TMPDIR, and can't reach Herdr. When done, end your last message with your findings, each with its level and "
@@ -958,6 +968,9 @@ FABLE_WORDS = ("This round is Fable's (FAC-99): you stand in for the owner at th
 
 def gate_need(s, t):
     """Passing rounds herdr-task's reviewer gives a head: review.min, plus Fable's round for a judgement task."""
+    if n := retro_gate_rounds(t):  # SDF-49: the retro's SHIP on this head, or Fable checking its FIX
+        # a judgement task: SHIP is only the code pass, and Fable's owner round still follows it
+        return 2 if not retro_fixing(t) and (review_kind(t) or open_asks(s, t)) else n
     if not fable_due(s, t):
         return gate_min(s, t)
     return 1 if fable_said(t, "changes") else gate_min(s, t) + 1  # after its changes, Fable alone reviews the fix
@@ -993,13 +1006,19 @@ def review_refusal(s, t, wt):
     task in the folder itself needs a round recorded since it started. Out of rounds, only the
     Assistant adds one (review-more): the task then waits, saying so (review_out)."""
     on, rounds = review_limits(s, t)
-    if not on or not t.get("review_gate") or gate_min(s, t):
-        return None  # a gate folder: herdr-task reviews after ready (gate_step)
+    if not on or not t.get("review_gate") or gate_min(s, t) or retro_gate_rounds(t):
+        return None  # a gate folder, or the retro's own round: herdr-task reviews after ready (gate_step)
     if wt and t.get("start") and in_base(s, t):
         return None  # no commits of its own: nothing to review (nothing to merge)
     if not wt and t.get("folder_start") and unchanged_folder(s, t):
         return None  # in the folder itself, and it changed nothing (#744: a run that only reads)
     revs = [r for r in active_reviews(t) if r.get("result") in REVIEWED and (r.get("at") or 0) >= (t.get("started") or 0)]
+    rr = t.get("retro") or {}
+    if not wt and rr.get("verdict") in ("SHIP", "FIX") and rr.get("confidence") != "low" and rr.get("acted") is not False and (rr.get("at") or 0) > int(t.get("review_reset_at") or 0):
+        # SDF-49: a passing round on the folder's current commit (a FIX: one of its own, after the retro)
+        now_head = git(s.loc["folder"], "rev-parse", "HEAD")[1] if s.loc.get("kind") == "repo" else None
+        revs = [r for r in revs if r.get("verdict") != "changes" and (not now_head or r.get("head") == now_head)
+                and (rr["verdict"] == "SHIP" or ((r.get("at") or 0) > rr["at"] and not r.get("retro")))]
     head = t.get("head") if wt else None
     if (any(r.get("head") == head for r in revs) if wt else bool(revs)):
         return None
@@ -1120,7 +1139,7 @@ def cmd_reviewed(args):
                                             "report": text, "cli": reviewer.get("agent"), "model": reviewer.get("model")})
         t.pop("review_out", None)
         s.dirty = True
-        stopped = t.get("mode") == "worktree" and budget_pass(s, t)
+        stopped = budget_pass(s, t) if t.get("mode") == "worktree" else bool(retro_cap(s, t) or (retro_due(t) and open_recap(s, t, [NON_CONVERGENCE])))
         v = view(s, t)
     on_what = f" for commit {head[:7]}" if head else ""
     say(args, {**v, "round": used + 1, "rounds": rounds}, f"{s.ref(t)}: review round {used + 1} of {rounds} recorded{on_what}."
@@ -1372,9 +1391,13 @@ def cmd_review(args):
             text = f.read()
     with open_store(args) as s:
         t = s.find(args.id)
-        if gate_need(s, t):  # herdr-task's own reviewer in a gate folder (FAC-13), or Fable's round (FAC-99)
-            return gate_verdict(s, t, args, text)
         me = os.environ.get("HC_TERMINAL_ID")
+        if me and me == (t.get("retro_run") or {}).get("address", "").split("/")[-1]:  # SDF-49: its verdict is its <retro> tail
+            raise Fail("The retro round records no verdict with herdr-task review: end with your <retro> tail.")
+        if gate_need(s, t):  # herdr-task's own reviewer in a gate folder (FAC-13), or Fable's round (FAC-99)
+            return gate_verdict(s, t, args, text)  # a recap open: recorded, never passed on (record_verdict)
+        if t.get("recap"):  # the legacy branch below finalizes: never while a recap is open (SDF-49)
+            raise Fail(f"{s.ref(t)} has a recap open ({t['recap'].get('title')}): no review verdict is recorded until it is decided.")
         rv = t.get("review")
         if (not isinstance(rv, dict) or not rv
                 or (rv.get("reviewer") and me and rv["reviewer"] != me)
@@ -1484,7 +1507,7 @@ def record_verdict(s, t, rn, passed, must, text, majors=None):
     for k in ("review_out", "progress"):
         t.pop(k, None)
     s.dirty = True
-    if t.get("mode") == "worktree" and budget_pass(s, t):  # a recap first: no next round, no merge, no fixing
+    if t.get("mode") == "worktree" and (retro_cap(s, t) or budget_pass(s, t)):  # a recap first: no next round, no merge, no fixing
         msg = f"{s.ref(t)}: review round {rn['round']} {'passed' if passed else 'asked for changes'}; {t['recap']['title']}."
     elif passed:
         ref, need, k = s.ref(t), gate_need(s, t), gate_passes(t, rn["head"])
@@ -2009,9 +2032,11 @@ def continue_line(s, t):
 
 def resolve_again_argv(s, t, key=None, argv_json=None, resuming=False):
     prev = last_agent(t)
-    keep = not resuming and prev and prev.get("argv") and (t.get("pick_at") or 0) <= (prev.get("at") or 0)
-    return agent_argv(None, argv_json) if argv_json else worker_argv(s, t, agent=key) if key else \
-        (prev["argv"] if keep else worker_argv(s, t))
+    if argv_json:
+        return worker_permissions(agent_argv(None, argv_json), settings_for(s)["worker"].get("perm"))
+    if not key and not resuming and prev and prev.get("argv") and (t.get("pick_at") or 0) <= (prev.get("at") or 0):
+        return worker_argv(s, t, previous=prev["argv"])
+    return worker_argv(s, t, agent=key)
 
 
 def start_again(s, t, key=None, argv_json=None, message=None, parent=None, resuming=False, nudge=None):

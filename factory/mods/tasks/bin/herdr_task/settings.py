@@ -427,23 +427,18 @@ def argv_for(pick):
     if pick.get("argv"):
         return [str(x) for x in pick["argv"]]
     agent = pick.get("agent")
+    perm = pick.get("perm") or "full"
     if agent == "claude":
         a = ["claude"]
         if pick.get("model"):
             a += ["--model", pick["model"]]
         if pick.get("effort"):
             a += ["--effort", pick["effort"]]
-        perm = pick.get("perm")
         st = {"fastMode": bool(pick.get("fast"))}
         if perm in ("full", "bypassPermissions"):
             st["skipDangerousModePermissionPrompt"] = True
         a += ["--settings", json.dumps(st)]
-        if perm in ("full", "bypassPermissions"):
-            a.append("--dangerously-skip-permissions")
-        elif perm:
-            mode = "default" if perm == "manual" else "acceptEdits" if perm == "accept-edits" else "plan" if perm == "read-only" else perm
-            a += ["--permission-mode", mode]
-        return a
+        return a + permission_flags(agent, perm)
     if agent == "codex":
         a = ["codex", "--no-daemon"]
         if pick.get("model"):
@@ -452,27 +447,75 @@ def argv_for(pick):
             a += ["-c", f'model_reasoning_effort="{pick["effort"]}"']
         # always said, so Fast off wins over a service_tier in config.toml (default: the standard tier)
         a += ["-c", 'service_tier="%s"' % ("fast" if pick.get("fast") else "default")]
-        perm = pick.get("perm")
-        if perm in ("full", "bypassPermissions"):
-            a.append("--dangerously-bypass-approvals-and-sandbox")
-        elif perm == "read-only":
-            a += ["-s", "read-only", "-a", "on-request"]
-        elif perm:
-            a += ["-s", "workspace-write", "-a", "on-request"]
-        return a
+        return a + permission_flags(agent, perm)
     if agent == "agy":
         a = ["agy"]
         if pick.get("model"):
             a += ["--model", pick["model"]]
         if pick.get("effort"):
             a += ["--effort", pick["effort"]]
-        perm = pick.get("perm")
-        if perm in ("full", "bypassPermissions"):
-            a.append("--dangerously-skip-permissions")
-        else:
-            a += ["--mode", "plan" if perm in ("plan", "read-only") else "accept-edits"]
-        return a
+        return a + permission_flags(agent, perm)
     return [agent] if agent else None
+
+
+def permission_flags(agent, perm):
+    full = not perm or perm in ("full", "bypassPermissions")
+    if agent == "codex":
+        return ["--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust"] if full else [
+            "-s", "read-only" if perm == "read-only" else "workspace-write", "-a", "on-request"]
+    if agent == "claude":
+        mode = {"manual": "default", "accept-edits": "acceptEdits", "read-only": "plan"}.get(perm, perm)
+        return ["--dangerously-skip-permissions"] if full else ["--permission-mode", mode]
+    if agent == "agy":
+        mode = "plan" if perm in ("plan", "read-only") else "accept-edits"
+        return ["--dangerously-skip-permissions"] if full else ["--mode", mode]
+    return []
+
+
+def worker_permissions(argv, perm=None, *, replace=False):
+    """State the worker mode, replacing permission flags on an implicit restart."""
+    agent = agent_key(argv)
+    if agent not in AGENTS:
+        return argv
+    if "--" in argv:
+        end = argv.index("--")
+        return worker_permissions(argv[:end], perm, replace=replace) + argv[end:]
+    options = {"codex": {"-a": "approval", "--ask-for-approval": "approval", "-s": "sandbox", "--sandbox": "sandbox"},
+               "claude": {"--permission-mode": "mode"}, "agy": {"--mode": "mode"}}[agent]
+    config_keys = {"approval_policy": "approval", "sandbox_mode": "sandbox",
+                   "hooks.PermissionRequest": "hook", "hooks.state": "hook"}
+    trust = "--dangerously-bypass-hook-trust"  # not a mode: it only keeps a full worker from the hook-review dialog
+    bypass = set(permission_flags(agent, "full")) - {trust} | ({"--yolo", "--approve-for-me"} if agent == "codex" else set())
+    out, modes, rest = [argv[0]], set(), iter(argv[1:])
+    for arg in rest:
+        flag, eq, value = arg.partition("=")
+        if agent == "codex" and arg[:2] in ("-a", "-s", "-c") and len(arg) > 2:
+            flag, eq, value = arg[:2], "=", arg[2:].lstrip("=")
+        config = agent == "codex" and flag in ("-c", "--config")
+        words = [arg]
+        if not eq and (config or flag in options):
+            value = next(rest, "")
+            words.append(value)
+        if flag == trust:
+            if not replace:
+                out.extend(words)
+            continue
+        mode = config_keys.get(value.partition("=")[0].strip()) if config else options.get(flag)
+        if flag in bypass:
+            mode = "full"
+        if mode and mode != "hook":
+            modes.add(mode)
+        if not replace or not mode:
+            out.extend(words)
+    if replace or not modes:
+        return out + [f for f in permission_flags(agent, perm) if f not in out]
+    if agent == "codex" and "full" not in modes:
+        mode = "read-only" if perm == "read-only" else "workspace-write"
+        return [*out, *([] if "sandbox" in modes else ["-s", mode]),
+                *([] if "approval" in modes else ["-a", "on-request"])]
+    if agent == "codex" and trust not in out and ("--dangerously-bypass-approvals-and-sandbox" in out or "--yolo" in out):
+        out = out + [trust]  # a full worker never stops at the hook-review dialog
+    return out
 
 
 def worker_pick(s, task, space=None, agent=None):
@@ -493,11 +536,17 @@ def worker_pick(s, task, space=None, agent=None):
     return pick
 
 
-def worker_argv(s, task, space=None, agent=None):
-    """A task's agent when nobody gave an argv: worker_pick's."""
+def worker_argv(s, task, space=None, agent=None, previous=None):
+    """Build a worker command from current settings and any previous launch being restarted."""
+    if previous:
+        worker = settings_for(s)["worker"]
+        custom = worker.get("argv")
+        if custom and agent_key(custom) == agent_key(previous) and not (task.get("model") or task.get("effort")):
+            return worker_permissions([str(x) for x in custom], worker.get("perm"))
+        return worker_permissions(previous, worker.get("perm"), replace=True)
     pick = worker_pick(s, task, agent=agent)
     if pick.get("argv") and not (task.get("model") or task.get("effort")):
-        return argv_for(pick)
+        return worker_permissions(argv_for(pick), pick.get("perm"))
     pick.pop("argv", None)
     pick.setdefault("agent", default_worker_agent())
     return argv_for(pick) or agent_argv(pick["agent"])
@@ -1129,6 +1178,9 @@ def fable_said(t, verdict):
 def fable_due(s, t):
     """A judgement task (design/doc, or open plan questions) that auto-accept hands to a Fable round."""
     from .ask import open_asks
+    from .retro import fixing
+    if fixing(t):  # SDF-49: after a retro FIX, Fable alone checks the fix
+        return True
     asks = open_asks(s, t)
     return (t.get("mode") == "worktree" and bool(review_kind(t) or asks) and not owner_gate(s, t, asks)
             and fable_said(t, "changes") < FABLE_CHANGES)
@@ -1169,13 +1221,17 @@ def accept_bar(s, t):
     if t.get("mode") != "worktree" or t.get("nothing_to_merge"):
         return None, "nothing to merge"
     revs = reviewed_for_head(s, t, head)
+    from .retro import fixing
+    if fixing(t):  # SDF-49: only Fable's delta round after the retro passes its FIX
+        revs = [r for r in revs if r.get("by") in fable_runs(t) and (r.get("at") or 0) > t["retro"]["at"]]
     if review_kind(t) or asks:
         ok = any(r.get("by") in fable_runs(t) and r.get("verdict") == "pass" for r in revs)
         return ("fable", None) if ok else (None, "Fable asked for changes twice" if fable_said(t, "changes") >= FABLE_CHANGES
                                            else "waits for Fable's review round")
     review_on, _ = review_limits(s, t)
     gate = gate_min(s, t)
-    need = max(1, gate) if review_on else 0
+    from .retro import gate_rounds
+    need = (gate_rounds(t) or max(1, gate)) if review_on else 0
     if need:
         got = sum(1 for r in revs if ((r.get("started_by") == "herdr-task" and r.get("verdict") == "pass") if gate else
                                       (r.get("verdict") == "pass" if "verdict" in r else r.get("result") in ("report", "pass"))))

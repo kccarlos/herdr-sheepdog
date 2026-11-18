@@ -20,8 +20,8 @@ import shlex
 from .base import HOME, hc_json, label_of, now, PACKAGE, run, SHELLS
 from .agents import agent_running, status_word
 from .sessions import session_of
-from .settings import TEMPLATES
-from .launch import CLEAN_ENV, no_update_env, resume_argv as launch_resume
+from .settings import TEMPLATES, worker_argv
+from .launch import CLEAN_ENV, no_update_env, own_argv, resume_argv as launch_resume
 
 LABEL = "herdr.resume"
 # Claude Code: "No conversation found with session ID: …". Codex: "ERROR: No saved session found with ID …"
@@ -111,11 +111,10 @@ def first(kind, message):
 
 
 def resume_argv(kind, argv, session, message=None):
-    """argv (base_argv's) resuming `session`, with a first message when given. Claude's argv as it was: a revive brings
-    back the session it had, never launch's #1056 permission mode for a switch."""
-    if kind == "claude":
+    """Resume a recovered session with the resolved argv and an optional first message."""
+    if kind == "claude":  # Claude's argv as it was: a revive brings back the session it had, never launch's #1056 mode
         return [*argv, "--resume", session, *first(kind, message)]
-    return [*launch_resume(argv, session), *first(kind, message)]
+    return [*launch_resume(argv, session, worker=False), *first(kind, message)]
 
 
 def alive(rec):
@@ -235,24 +234,22 @@ def record_of(k):
 
 
 def task_of(k):
-    """A task agent's task (read only), or None (gone, archived)."""
+    """A task agent's project folder and task (read only)."""
     from .store import read_list
     from .base import STORE
     key = label_of(k.get("labels"), "task") or ""
     slug, _, n = key.rpartition("#")
     d = read_list(os.path.join(STORE, slug + ".json")) if slug and n.isdigit() else None
-    return next((t for t in (d or {}).get("tasks") or [] if t.get("id") == int(n)), None)
+    d = d or {}
+    return d.get("folder"), next((t for t in d.get("tasks") or [] if t.get("id") == int(n)), None)
 
 
 def task_record(k, t):
     """A task agent with no record of its own: the session its task recorded (sessions.refresh_sessions)."""
-    from .launch import own_argv
     a = next((a for a in (t.get("agents") or []) + (t.get("reviewers") or []) if a.get("address") == k["address"]), None)
     kind, argv = base_argv((a or {}).get("argv"))
     if not kind:
         return None
-    if label_of(k.get("labels"), "role") != "reviewer":
-        argv = own_argv(argv, t.get("worktree") if t.get("mode") == "worktree" else (None if kind == "agy" else k.get("cwd")), cwd=k.get("cwd"))
     return {"kind": kind, "session": a.get("session"), "log": a.get("log"), "argv": argv, "cwd": k.get("cwd"),
             "pid": None, "working": t.get("state") == "running", "shell": True}
 
@@ -296,7 +293,7 @@ def plan(k, rec, running, coords=None):
     # A task's agent only while its task is at work (Working, or Ready for follow-ups): a finished
     # task's stays a shell, as its end would leave it.
     has_task = bool(label_of(labels, "task"))
-    task = task_of(k) if has_task else None
+    project, task = task_of(k) if has_task else (None, None)
     if has_task and (task or {}).get("state") not in ("running", "ready"):
         return None
     if rec and rec.get("pid") == k.get("pid"):
@@ -314,6 +311,13 @@ def plan(k, rec, running, coords=None):
         rec = task_record(k, task) if task else None
     if rec and rec.get("session") and rec["session"] in running:
         return ("running", None, False)
+    # Only the task's own worker gets the worker rule: a helper or a reviewer keeps the argv it ran with.
+    is_worker = label_of(labels, "role") in (None, "", "worker") and any(
+        a.get("address") == k.get("address") for a in (task or {}).get("agents") or [])
+    if rec and task and is_worker:
+        cwd = rec.get("cwd")
+        trust = task.get("worktree") if task.get("mode") == "worktree" else (None if rec["kind"] == "agy" else cwd)
+        rec = dict(rec, argv=own_argv(worker_argv(project, task, previous=rec["argv"]), trust, cwd=cwd))
     if rec and rec.get("session") and alive(rec):
         return ("resume", resume_argv(rec["kind"], rec["argv"], rec["session"], CUT if rec.get("working") else None), not rec.get("shell"))
     # Its session is gone: a new one, with the handover (and an Assistant's role, its template's words).

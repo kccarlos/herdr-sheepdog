@@ -439,8 +439,10 @@ def queue(a, reason):
     """One wake at a time: a second reason joins the one waiting."""
     p = a.get("pending")
     if p:
-        if reason not in p["reasons"]:
-            p["reasons"] = (p["reasons"] + [reason])[:6]
+        if reason not in p["reasons"]:  # a retro's wake is never the one dropped (SDF-49)
+            both = p["reasons"] + [reason]
+            keep = [x for x in both if x.startswith("event:retro")]
+            p["reasons"] = keep + [x for x in both if not x.startswith("event:retro")][:max(0, 6 - len(keep))]
     else:
         a["pending"] = {"reasons": [reason], "at": now()}
 
@@ -612,6 +614,12 @@ def events_for(project, a, events):
                 if base not in seen.get("_drift_bases", []):
                     out.append(f"event:drift local base {base} is ahead of origin")
             seen["_drift_bases"] = list(bases)
+            for t in s.data["tasks"]:  # SDF-49: each retro outcome (its verdict, then a FIX cap) wakes the coordinator
+                if (r := t.get("retro")) and seen.setdefault("_retro", {}).get(str(t["id"])) != (mark := f"{r.get('verdict')}:{bool(t.get('retro_capped'))}"):
+                    out.append(f"event:retro {s.ref(t)} {r.get('verdict')}{' (FIX cap)' if t.get('retro_capped') else ''}, "
+                               f"cause {r.get('cause')}, replan {r.get('replan')}, confidence {r.get('confidence')}: "
+                               f"{r.get('coordinator_change')}")
+                    seen["_retro"][str(t["id"])] = mark
             for ev, t in events_in(s, seen):
                 # Added while a wake is at work: its own doing, not news.
                 if ev in events and not (ev == "added" and a.get("inflight")):
