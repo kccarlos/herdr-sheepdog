@@ -503,7 +503,7 @@ func TestS3EdgeCases(t *testing.T) {
 		}
 
 		// Phone tap by ID always works without waiting for voice delivery.
-		if _, err := sup2.AnswerTap(context.Background(), dp.ID, 1); err != nil {
+		if _, err := sup2.AnswerTap(context.Background(), dp.ID, 1, ""); err != nil {
 			t.Fatalf("AnswerTap after restart: %v", err)
 		}
 		if n := h.keysTo(docsPane); n != 1 {

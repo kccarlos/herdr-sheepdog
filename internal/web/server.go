@@ -18,6 +18,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/feedback"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/identity"
@@ -47,7 +48,7 @@ type Supervisor interface {
 	SetSettings(supervisor.Settings) error
 	ShepherdInput(kind supervisor.InputKind, text string)
 	TypedTurn(ctx context.Context) (supervisor.TypedReply, error)
-	AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error)
+	AnswerTap(ctx context.Context, id string, option int, deviceID string) (voice.ToolResult, error)
 	// ConversationStartedAt and ResetConversation back GET /api/state's
 	// conversation_started_at and POST /api/conversation/reset ("New
 	// conversation", docs/dev/roles.md).
@@ -61,7 +62,7 @@ type Supervisor interface {
 	// the visible screen with SGR colours, feature screen-ansi.
 	ScreenANSI(ctx context.Context, paneID string) (supervisor.Screen, error)
 	WindowPrompt(ctx context.Context, paneID, text string) (supervisor.WindowResult, error)
-	WindowKeys(ctx context.Context, paneID string, keys []string) (supervisor.WindowResult, error)
+	WindowKeys(ctx context.Context, paneID string, keys []string, deviceID string) (supervisor.WindowResult, error)
 }
 
 // AgentActions is the optional half of Supervisor behind the user's own
@@ -258,6 +259,9 @@ type Deps struct {
 	// DataDir is the daemon's data directory; attachments are kept in its
 	// attachments/ folder. Empty answers the attachments route with 503.
 	DataDir string
+	// FactoryProofs backs loopback AnswerProof verification at
+	// GET /api/factory/answer-proof/{ask_id}.
+	FactoryProofs *factory.ProofStore
 	// GitBin is the program the changes view runs (default "git").
 	GitBin string
 
@@ -593,6 +597,7 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"GET /api/context/brain", accessLoopback, s.handleContextBrain},
 		route{"GET /api/context/voice", accessLoopback, s.handleContextVoice},
 		route{"GET /api/context/timeline", accessLoopback, s.handleContextTimeline},
+		route{"GET /api/factory/answer-proof/{ask_id}", accessLoopback, s.handleFactoryAnswerProof},
 	)
 	setup, err := s.setupRoutes()
 	if err != nil {

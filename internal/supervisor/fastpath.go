@@ -166,7 +166,15 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 	alias := s.sayOf(p.PaneID)
 	s.log.Log(logSource, "supervisor.fast_path", p.PaneID, map[string]any{"path": "answer", "text": text, "answer": label, "id": p.ID, "input": string(in.kind)})
 	zh := s.ceoChineseLocked()
-	res, sent := s.answerKeys(ctx, p, keys, label, func(l string) string { return toldLine(alias, l, zh) }, "fast_path", nil)
+	var (
+		res  voice.ToolResult
+		sent bool
+	)
+	if isFactoryAskID(p.ID) {
+		res, _, sent = s.answerFactoryAskLocked(ctx, p, keys, func(l string) string { return toldLine(alias, l, zh) }, "fast_path", nil, in, "")
+	} else {
+		res, sent = s.answerKeys(ctx, p, keys, label, func(l string) string { return toldLine(alias, l, zh) }, "fast_path", nil)
+	}
 	if !sent {
 		in.used = false
 	}

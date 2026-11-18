@@ -26,6 +26,9 @@ func (s *Supervisor) createPromise(paneID string, req brain.PromiseRequest) (sta
 	if !ok {
 		return state.Promise{}, errors.New("that agent is gone")
 	}
+	if s.isFactoryQuietRow(row) {
+		return state.Promise{}, errors.New("that terminal is a quiet factory pane; ask for the digest instead")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if old, dup := s.openPromiseFor(paneID, req.Event); dup {

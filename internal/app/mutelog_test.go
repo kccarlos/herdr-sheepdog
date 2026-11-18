@@ -81,3 +81,42 @@ func TestMutedLoggerWithoutAResolver(t *testing.T) {
 		t.Errorf("marked before the resolver was set: %v", m)
 	}
 }
+
+func TestMutedLoggerMarksFactoryQuietTransitions(t *testing.T) {
+	inner := &lineLog{}
+	l := &mutedLogger{Logger: inner}
+	// Even with no space-mute resolver loaded yet, a factory-quiet transition
+	// carries muted: true while a coordinator transition does not.
+	worker := herdr.Transition{
+		PaneID: "t1", From: herdr.StateWorking, To: herdr.StateDone, At: time.Unix(1, 0).UTC(), Agent: "codex",
+		Labels: map[string]string{herdr.LabelFactoryProject: "proj", herdr.LabelFactoryRole: "worker", herdr.LabelFactoryTask: "proj#1"},
+	}
+	coord := herdr.Transition{
+		PaneID: "t2", From: herdr.StateWorking, To: herdr.StateDone, At: time.Unix(1, 0).UTC(), Agent: "claude",
+		Labels: map[string]string{herdr.LabelFactoryProject: "proj", herdr.LabelFactoryRole: "coordinator"},
+	}
+	l.Log("herdr", "herdr.transition", "t1", worker)
+	l.Log("herdr", "herdr.transition", "t2", coord)
+	if len(inner.lines) != 2 {
+		t.Fatalf("lines = %d", len(inner.lines))
+	}
+	wb, err := json.Marshal(inner.lines[0].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wm map[string]any
+	if err := json.Unmarshal(wb, &wm); err != nil || wm["muted"] != true {
+		t.Fatalf("worker transition = %s (err=%v), want muted: true", wb, err)
+	}
+	cb, err := json.Marshal(inner.lines[1].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cm map[string]any
+	if err := json.Unmarshal(cb, &cm); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := cm["muted"]; has {
+		t.Fatalf("coordinator transition unexpectedly muted: %s", cb)
+	}
+}

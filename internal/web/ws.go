@@ -29,6 +29,10 @@ const (
 // is listening (GPT-Live opens a billed session only for one).
 type clientAttacher interface{ ClientAttached(bool) }
 
+// voiceDeviceSetter records the paired-device ID of the attached /ws client on
+// the supervisor so live voice answers stamp it on minted AnswerProofs.
+type voiceDeviceSetter interface{ SetVoiceDevice(deviceID string) }
+
 // voiceStatser is implemented by sessions with counters for
 // web.client.stats (GPT-Live's billed seconds).
 type voiceStatser interface{ VoiceStats() map[string]any }
@@ -160,6 +164,7 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(wsReadLimit)
 	c := newClient(h, conn, r.RemoteAddr, h.s.deps.OutQueue)
+	c.device = deviceOf(r)
 	initialReason := make(chan string, 1)
 	untrack, tracked := h.s.track(r, func(reason string) {
 		select {
@@ -240,6 +245,9 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	if ca, ok := h.s.deps.Voice.(clientAttacher); ok && last {
 		ca.ClientAttached(false)
 	}
+	if vds, ok := h.s.deps.Supervisor.(voiceDeviceSetter); ok && last {
+		vds.SetVoiceDevice("")
+	}
 	if last {
 		h.handoff(rest, "detach")
 	}
@@ -267,6 +275,9 @@ func (h *hub) attach(c *client) bool {
 	h.muted = false
 	h.unheard = false
 	h.mu.Unlock()
+	if vds, ok := h.s.deps.Supervisor.(voiceDeviceSetter); ok {
+		vds.SetVoiceDevice(c.device)
+	}
 	if h.s.deps.Voice != nil {
 		h.s.deps.Voice.SetMuted(false)
 	}
@@ -679,6 +690,7 @@ type client struct {
 	id     int
 	conn   *websocket.Conn
 	remote string
+	device string
 	max    int
 	start  time.Time
 
