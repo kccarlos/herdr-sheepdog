@@ -51,8 +51,7 @@ def parse(provider, text, reason="no data"):
 
 def _codexbar(tool, provider):
     try:
-        # OAuth avoids provider CLI/PTY fallbacks and their login prompts.
-        result = subprocess.run([tool, "usage", "--provider", provider, "--json", "--source", "oauth"],
+        result = subprocess.run([tool, "usage", "--provider", provider, "--json"],
                                 stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20)
     except FileNotFoundError:
         return parse(provider, "", "not installed")

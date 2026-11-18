@@ -103,7 +103,10 @@ class Read(unittest.TestCase):
                     mock.patch("subprocess.run", side_effect=error, return_value=result) as run:
                 self.assertEqual({p["reason"] for p in usage.read(cache)}, {reason})
                 self.assertEqual(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
-                self.assertEqual(run.call_args.args[0][-2:], ["--source", "oauth"])
+                self.assertEqual([call.args[0] for call in run.call_args_list], [
+                    ["/fixture/codexbar", "usage", "--provider", provider, "--json"]
+                    for provider in usage.PROVIDERS
+                ])
 
 
 @unittest.skipUnless(os.path.isfile(J("core/usage.js")), "Shepherdr JS/TS usage files are outside factory/")
