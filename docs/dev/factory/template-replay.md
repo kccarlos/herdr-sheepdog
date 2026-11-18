@@ -182,3 +182,14 @@ command to W5's rule and verifies that the replay catches it.
 | R-31 | SDF-31, milestones and plan amend | `830bd86886`, 942 changed lines, no estimate | Every round finds one more dependency-loop case; earlier fixes hold |
 
 The fixtures are `factory/test/replay/retro/<task>.json`: each round's verdict, major count and note, the brief with private paths removed, and the diff range. `python3 test/replay_retro.py --show` prints each filled prompt. `--live --dir <scratch>` runs one read-only Fable session per situation in a detached worktree at that round's head, and records its answer as `<task>.out.txt`. The test suite checks that every slot is filled and that each recorded answer parses. The expected causes are not in the prompt. They come from the retro proposal, which judged both tasks after the fact: R-16 should name task-too-big or design-needed-first, and R-31 patch-shaped-fix or reviewer-narrow.
+
+### Results (2026-11-18, one live Fable session each)
+
+| Situation | Verdict | Cause, second | Expected cause (from the proposal) | Confidence |
+|---|---|---|---|---|
+| R-16 | FIX: 2 majors (`lease.py` restart cut short after the claim; `revive.py` holder found by a reused address) | patch-shaped-fix, reviewer-narrow | task-too-big or design-needed-first | medium |
+| R-31 | FIX: 3 majors in `plan.py` (loop through an existing task by id; loop through a split parent; a removed dependency left in `after`) | design-needed-first, patch-shaped-fix | patch-shaped-fix or reviewer-narrow | medium |
+
+Both verdicts are sensible. R-16's first major is the round-3 major that the head still has, and both answers quote round numbers and commits. Neither blames a model: both say `worker_model: keep`, `reviewer: class-pass`. Each gives one structural change for the coordinator and one for the worker. For R-16 that is a cut-point table in the brief, and one recorded-intent finish step instead of per-case detectors. For R-31 it is a state-by-operation table in the brief, and a check of the store as `write()` leaves it. The R-31 worker change matches the fix the worker found by itself in round 5.
+
+The causes match the proposal's on R-31 (the second cause) and miss on R-16. There it names how the work went wrong (patch-shaped-fix) rather than the shape of the task (too big), and it does not use the size overrun (1,673 lines against 600). The template's own definitions of patch-shaped-fix and design-needed-first overlap ("one mechanism patched case by case"). That is the first line to sharpen if later retros keep confusing the two. One limit of the replay: the sessions ran in `dontAsk` mode with git reads and `make test-factory` allowed. Both ran the suite, and neither could run its own reproduction scripts, so their majors are traced through the code, not executed.
