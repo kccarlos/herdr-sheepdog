@@ -29,9 +29,13 @@ def is_helper(k, mine=()):
     return bool(k.get("parent")) and (label_of(k.get("labels"), "role") in HELPER_ROLES or parent_of(k) in mine)
 
 
-def _live(key):
-    found = (hc_json("ls", "--label", f"{TASK_LABEL}={key}") or {}).get("terminals") or []
-    found += (hc_json("ls", "--label", f"herdr.task={key}") or {}).get("terminals") or []
+def _live(key, strict=False):
+    current = hc_json("ls", "--label", f"{TASK_LABEL}={key}")
+    legacy = hc_json("ls", "--label", f"herdr.task={key}")
+    if strict and not all(isinstance(result, dict) and isinstance(result.get("terminals"), list)
+                          for result in (current, legacy)):
+        raise Fail("Couldn't list the task's terminals. Try again when herdr-core is reachable.")
+    found = ((current or {}).get("terminals") or []) + ((legacy or {}).get("terminals") or [])
     by_addr = {}
     for k in found:
         if k.get("state") == "live" and k.get("address") not in by_addr:
@@ -50,6 +54,11 @@ def live_agents(key):
 def live_helpers(key):
     """The helper agents its worker started (a reviewer, a second opinion), still live."""
     return [k for k, helper in _live(key) if helper]
+
+
+def task_terminals(key):
+    """All live terminals for a task, helpers first, or an error if the list is unavailable."""
+    return [k for k, helper in sorted(_live(key, strict=True), key=lambda row: not row[1])]
 
 
 def detail(k):
