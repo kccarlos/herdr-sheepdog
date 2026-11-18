@@ -2794,6 +2794,48 @@ class NewWorktrees(unittest.TestCase):
         with self.assertRaisesRegex(self.Fail, "in a worktree"):
             set_branch(self.store, self.task(mode="here"), "ABC-4")
 
+    def _add_bench_files(self):
+        os.makedirs(os.path.join(self.main, "docs/dev/bench/results"), exist_ok=True)
+        with open(os.path.join(self.main, "README.md"), "w") as f:
+            f.write("hello\n")
+        with open(os.path.join(self.main, "docs/dev/bench/results/big.json"), "w") as f:
+            f.write("{}\n")
+        self.git(self.main, "add", "README.md", "docs/dev/bench/results/big.json")
+        self.git(self.main, "-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
+                 "commit", "-q", "-m", "add bench")
+        self.git(self.main, "push", "-q", "origin", "main")
+
+    def test_without_sparse_exclude_worktree_is_full(self):
+        self._add_bench_files()
+        t, path = self.new_worktree(self.task("Full checkout"))
+        self.assertTrue(os.path.exists(os.path.join(path, "README.md")))
+        self.assertTrue(os.path.exists(os.path.join(path, "docs/dev/bench/results/big.json")))
+        self.assertNotIn("Sparse exclude:", self.settings.settings_block(self.store, t))
+
+    def test_sparse_exclude_skips_excluded_paths_and_leaves_existing_worktrees_untouched(self):
+        self._add_bench_files()
+        # Existing worktree created before the setting stays full and untouched.
+        old_task, old_path = self.new_worktree(self.task("Before setting"))
+        self.assertTrue(os.path.exists(os.path.join(old_path, "docs/dev/bench/results/big.json")))
+
+        with open(self.settings_file, "w") as f:
+            json.dump({"projects": {self.main: {"worktree": {"sparse_exclude": ["docs/dev/bench"]}}}}, f)
+
+        # Existing worktree is still full even after folder_for is called again.
+        self.assertEqual(self.launch.folder_for(self.store, old_task), old_path)
+        self.assertTrue(os.path.exists(os.path.join(old_path, "docs/dev/bench/results/big.json")))
+
+        # New worktree lacks the excluded path and has everything else.
+        new_task, new_path = self.new_worktree(self.task("With sparse exclude"))
+        self.assertTrue(os.path.exists(os.path.join(new_path, "README.md")))
+        self.assertFalse(os.path.exists(os.path.join(new_path, "docs/dev/bench")))
+        self.assertIn("Sparse exclude: docs/dev/bench", self.settings.settings_block(self.store, new_task))
+        self.assertIn("git sparse-checkout disable", self.settings.settings_block(self.store, new_task))
+
+        # A task that needs the excluded files can undo it with `git sparse-checkout disable`.
+        self.git(new_path, "sparse-checkout", "disable")
+        self.assertTrue(os.path.exists(os.path.join(new_path, "docs/dev/bench/results/big.json")))
+
 
 class MergedOnlyWithOwnWork(unittest.TestCase):
     """SHEP-23: a task counts as merged only when work of its own landed (its pull request merged, or
@@ -6386,6 +6428,28 @@ class Scheduled(unittest.TestCase):
             self.assertNotIn(folder, json.load(f).get("projects", {}))
         with self.assertRaises(self.Fail):
             self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worker.perm=bogus"])
+
+    def test_config_set_worktree_sparse_exclude_and_show_mentions_it(self):
+        import argparse, contextlib, io
+        import herdr_task.settings as settings
+        folder = self.store_mod.locate(self.folder)["folder"]
+        v = self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worktree.sparse_exclude=/docs/dev/bench/"])
+        self.assertEqual(v["sparse_exclude"], ["docs/dev/bench"])
+        with open(settings.SETTINGS) as f:
+            self.assertEqual(json.load(f)["projects"][folder], {"worktree": {"sparse_exclude": ["docs/dev/bench"]}})
+
+        self.add("Sparse show")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.commands.cmd_show(argparse.Namespace(id="1", folder=self.folder, json=False, evidence=False))
+        self.assertIn("sparse exclude: docs/dev/bench (undo with `git sparse-checkout disable`)", out.getvalue())
+
+        v2 = self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worktree.sparse_exclude=default"])
+        self.assertEqual(v2["sparse_exclude"], [])
+        with open(settings.SETTINGS) as f:
+            self.assertNotIn(folder, json.load(f).get("projects", {}))
+        with self.assertRaises(self.Fail):
+            self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worktree.sparse_exclude=../oops"])
 
     def four_tasks(self):
         """FAC-10's folder: two tasks went ready then done, one still works, the fourth is queued."""

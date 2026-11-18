@@ -56,6 +56,7 @@ DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "review_min": 0, "must
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": "",
                       "worktree_root": "", "check": "", "simulators": [], "reviewer_sandbox": True,
                       "auto_accept": True, "sync": "cheap", "ci_runner_cap": 3},
+            "worktree": {"sparse_exclude": []},
             "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {}, "project": {}}
 LEVELS = ["blocker", "major", "minor"]
 
@@ -225,6 +226,37 @@ def write_task_check(s, space=None, value=_UNSET):
 def write_ci_runner_cap(s, value=None):
     """`config --set tasks.ci_runner_cap=N`: sets or clears the project folder's PR-in-CI runner cap."""
     return _write_task_setting(s, "ci_runner_cap", value)
+
+
+def normalize_sparse_exclude(raw, *, strict=False):
+    """Normalizes worktree.sparse_exclude (list or comma-separated string) into deduplicated repo-relative paths."""
+    items = raw.split(",") if isinstance(raw, str) else list(raw) if isinstance(raw, (list, tuple)) else []
+    out, seen = [], set()
+    for item in items:
+        p = str(item or "").replace("\\", "/").strip().strip("/")
+        if not p:
+            continue
+        parts = [seg for seg in p.split("/") if seg and seg != "."]
+        if not parts or ".." in parts:
+            if strict:
+                raise Fail(f"worktree.sparse_exclude path must be repo-relative without '..': {item!r}")
+            continue
+        norm = "/".join(parts)
+        if norm not in seen:
+            seen.add(norm)
+            out.append(norm)
+    return out
+
+
+def sparse_exclude_of(s):
+    """Normalized worktree.sparse_exclude list for this project folder."""
+    raw = (settings_for(s).get("worktree") or {}).get("sparse_exclude")
+    return normalize_sparse_exclude(raw)
+
+
+def write_worktree_sparse_exclude(s, value=None):
+    """`config --set worktree.sparse_exclude=PATH[,...]`: sets or clears the project folder's sparse_exclude list."""
+    return _write_project_setting(s, "worktree", "sparse_exclude", value)
 
 
 _AGENTS_CHECK_RE = re.compile(
@@ -805,6 +837,11 @@ def task_settings(s, t, space=None, argv=None, live=False):
                 "folder" if t.get("base_by") in ("project", "folder", "space") else "task")
     add("Proof", PROOF_WORDS["on" if proof else "off"], proof,
         "task" if "proof" in sets else by_layer(s, None, "tasks", "proof", proof, True))
+    if not here:
+        exclude = sparse_exclude_of(s)
+        if exclude:
+            sp_by = by_layer(s, None, "worktree", "sparse_exclude", exclude, [])
+            add("Sparse exclude", f"{', '.join(exclude)} (excluded from new worktrees; undo with `git sparse-checkout disable`)", exclude, sp_by)
     bdir = build_dir_of(s)
     if bdir:
         ref = s.ref(t) if hasattr(s, "ref") else f"{(s.get('prefix') if isinstance(s, dict) else getattr(s, 'prefix', None)) or 'T'}-{t['id']}"

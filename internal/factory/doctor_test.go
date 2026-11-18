@@ -886,6 +886,51 @@ func TestCheckSync(t *testing.T) {
 	})
 }
 
+func TestCheckWorktreeSparse(t *testing.T) {
+	ctx := context.Background()
+	writeFile := func(dir, name, content string) {
+		t.Helper()
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("reports configured sparse_exclude and undo command", func(t *testing.T) {
+		home := t.TempDir()
+		repo := t.TempDir()
+		env := newFakeEnv("git")
+		env.handlers["git -C"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 1} }
+		cfg := filepath.Join(home, ".config", "sheepdog", "settings.json")
+		writeFile(filepath.Dir(cfg), "settings.json", `{"projects":{"`+repo+`":{"worktree":{"sparse_exclude":["docs/dev/bench"]}}}}`)
+		r := CheckWorktreeSparse(ctx, DoctorOptions{Folder: repo, Home: home, TempDir: home, RunCommand: env.run}, true)
+		if r.Status != onboard.OK || !strings.Contains(r.Detail, "docs/dev/bench") || !strings.Contains(r.Detail, "git sparse-checkout disable") {
+			t.Fatalf("configured sparse_exclude = %+v", r)
+		}
+	})
+
+	t.Run("reports full checkouts when unset", func(t *testing.T) {
+		home := t.TempDir()
+		repo := t.TempDir()
+		env := newFakeEnv("git")
+		env.handlers["git -C"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 1} }
+		r := CheckWorktreeSparse(ctx, DoctorOptions{Folder: repo, Home: home, TempDir: home, RunCommand: env.run}, true)
+		if r.Status != onboard.OK || !strings.Contains(r.Detail, "full worktree checkouts") {
+			t.Fatalf("unset sparse_exclude = %+v", r)
+		}
+	})
+
+	t.Run("skips when project volume failed", func(t *testing.T) {
+		r := CheckWorktreeSparse(ctx, DoctorOptions{Folder: t.TempDir(), Home: t.TempDir()}, false)
+		if r.Status != onboard.Skip {
+			t.Fatalf("want Skip, got %+v", r)
+		}
+	})
+}
+
 func TestCheckTart(t *testing.T) {
 	ctx := context.Background()
 

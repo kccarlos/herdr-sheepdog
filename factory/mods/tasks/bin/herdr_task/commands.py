@@ -14,7 +14,7 @@ import time
 from . import sandbox
 from .checks import checks_line, resolve_check, sync_check, sync_mode, sync_plan, SYNC_FAILED
 from .base import Fail, git, guard, hc_json, kill_agent, label_of, now, run, STORE, stop_note, VERSION
-from .settings import (cli_missing_reason, write_ci_runner_cap, write_machine_option, write_max_running, write_task_check, write_worker_agent, write_worker_perm, WORKER_PERMS,
+from .settings import (cli_missing_reason, normalize_sparse_exclude, sparse_exclude_of, write_ci_runner_cap, write_machine_option, write_max_running, write_task_check, write_worker_agent, write_worker_perm, write_worktree_sparse_exclude, WORKER_PERMS,
     accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
     fable_due, gate_min, merge_hold, merge_policy,
     merge_wait_why, MUST_WORDS, project_base, remove_build_dir, review_kind, review_limits, reviewed_for_head, set_opts, settings_block, settings_for,
@@ -291,6 +291,9 @@ def cmd_show(args):
         text.append(f"worktree: {v['worktree']} (branch {v['branch']}, base {v.get('base')})")
     elif v.get("branch") and v.get("mode") == "worktree":
         text.append(f"branch: {v['branch']} (set for this task)")
+    if v.get("mode") == "worktree" and (exclude := sparse_exclude_of(s)):
+        v["sparse_exclude"] = exclude
+        text.append(f"sparse exclude: {', '.join(exclude)} (undo with `git sparse-checkout disable`)")
     if v.get("base_set"):
         text.append(f"merges into: {v['base']} (" + ("its project's base branch" if v.get("base_by") in ("project", "space") else "set for this task") + ")")
     if v.get("after_refs"):
@@ -1877,10 +1880,19 @@ def cmd_config(args):
         for pair in getattr(args, "set", None) or []:  # FAC-103: folder settings from the CLI
             k, eq, v = pair.partition("=")
             key = k.strip().lower()
-            if not eq or key not in ("tasks.max_running", "max_running", "tasks.ci_runner_cap", "ci_runner_cap", "tasks.runner_cap", "runner_cap", "tasks.check", "check", "worker.perm", "worker.agent", "machine.tart_home"):
-                raise Fail(f"config --set takes tasks.max_running=N, tasks.ci_runner_cap=N, tasks.check=CMD, worker.agent=CLI, worker.perm=MODE or machine.tart_home=DIR, not {pair!r}.")
+            if not eq or key not in ("tasks.max_running", "max_running", "tasks.ci_runner_cap", "ci_runner_cap", "tasks.runner_cap", "runner_cap", "tasks.check", "check", "worker.perm", "worker.agent", "machine.tart_home", "worktree.sparse_exclude"):
+                raise Fail(f"config --set takes tasks.max_running=N, tasks.ci_runner_cap=N, tasks.check=CMD, worker.agent=CLI, worker.perm=MODE, worktree.sparse_exclude=PATH[,...] or machine.tart_home=DIR, not {pair!r}.")
             v = v.strip().strip("\"'")
             low = v.lower()
+            if key == "worktree.sparse_exclude":
+                if not v or low == "default":
+                    write_worktree_sparse_exclude(s, None)
+                else:
+                    paths = normalize_sparse_exclude(v, strict=True)
+                    if not paths:
+                        raise Fail("worktree.sparse_exclude needs at least one path (or \"default\" to clear).")
+                    write_worktree_sparse_exclude(s, paths)
+                continue
             if key == "machine.tart_home":
                 write_machine_option("tart_home", None if not v or low == "default" else v)
                 continue
@@ -1914,10 +1926,13 @@ def cmd_config(args):
                 raise Fail("tasks.max_running is 1 to 50 (\"default\": Settings' above this project).")
             write_max_running(s, None, int(v) if v.isdigit() else None)
         out = {"folder": s.loc["folder"], "prefix": s.prefix, "max_running": s.max_running(), "settings": settings_for(s),
-               "check": resolve_check(s, {})[0], "worktrees": worktrees_on(s), "build_dir": build_dir_of(s)}
+               "check": resolve_check(s, {})[0], "worktrees": worktrees_on(s), "build_dir": build_dir_of(s),
+               "sparse_exclude": sparse_exclude_of(s)}
     n = out["max_running"]
     where = "a worktree each" if out["worktrees"] else "in the folder itself"
     extra = f", build output {out['build_dir']}" if out["build_dir"] else ""
+    if out["sparse_exclude"]:
+        extra += f", sparse exclude {', '.join(out['sparse_exclude'])}"
     say(args, out, f"{out['folder']}: tasks {out['prefix']}-n, at most {n} at once, {where}{extra}.")
 
 
