@@ -636,7 +636,8 @@ def failed_addresses(t):
 
 
 def open_runs(t):
-    done, failed = {r["round"] for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task"}, failed_addresses(t)
+    done = {r["round"] for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task" and not r.get("retro")}
+    failed = failed_addresses(t)
     return [r for r in t.get("review_runs") or [] if r["round"] not in done and r["address"] not in failed]
 
 
@@ -991,10 +992,12 @@ def review_refusal(s, t, wt):
     if not wt and t.get("folder_start") and unchanged_folder(s, t):
         return None  # in the folder itself, and it changed nothing (#744: a run that only reads)
     revs = [r for r in t.get("reviews") or [] if r.get("result") in REVIEWED and (r.get("at") or 0) >= (t.get("started") or 0)]
-    if not wt and (rr := t.get("retro") or {}).get("verdict") == "FIX" and rr.get("confidence") != "low":  # SDF-49: the fix needs a passing round of its own
+    rr = t.get("retro") or {}
+    if not wt and rr.get("verdict") in ("SHIP", "FIX") and rr.get("confidence") != "low" and rr.get("acted") is not False:
+        # SDF-49: a passing round on the folder's current commit (a FIX: one of its own, after the retro)
         now_head = git(s.loc["folder"], "rev-parse", "HEAD")[1] if s.loc.get("kind") == "repo" else None
-        revs = [r for r in revs if (r.get("at") or 0) > rr["at"] and not r.get("retro") and r.get("verdict") != "changes"
-                and (not now_head or r.get("head") == now_head)]
+        revs = [r for r in revs if r.get("verdict") != "changes" and (not now_head or r.get("head") == now_head)
+                and (rr["verdict"] == "SHIP" or ((r.get("at") or 0) > rr["at"] and not r.get("retro")))]
     head = t.get("head") if wt else None
     if (any(r.get("head") == head for r in revs) if wt else bool(revs)):
         return None

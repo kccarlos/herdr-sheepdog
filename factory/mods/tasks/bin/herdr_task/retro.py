@@ -76,12 +76,14 @@ def gate_rounds(t):
     """1 when the retro decides this head's review (its SHIP on it, or a FIX being checked by Fable), else None."""
     r = t.get("retro") or {}
     return 1 if fixing(t) or (r.get("verdict") == "SHIP" and r.get("confidence") != "low" and r.get("acted") is not False
-                              and r.get("head") == t.get("head")) else None
+                              and t.get("mode") == "worktree" and r.get("head") == t.get("head")) else None
 
 
 def blocks_continue(t):
     """Why recap --decide continue is refused after a retro, or None."""
     r = t.get("retro") or {}
+    if r.get("acted") is False:  # it came after the coordinator decided: evidence only
+        return None
     if t.get("retro_capped"):
         return RETRO_CAP
     return RETRO_REDESIGN if r.get("verdict") == "REDESIGN" and r.get("confidence") != "low" else None
@@ -94,8 +96,11 @@ def cap(s, t):
     if r.get("verdict") != "FIX" or r.get("confidence") == "low" or t.get("retro_capped") or r.get("acted") is False:
         return False
     fable, worktree = fable_runs(t), t.get("mode") == "worktree"  # a folder task: its own next round checks the fix
-    asked = sum(1 for x in t.get("reviews") or [] if x.get("verdict") == "changes" and (x.get("at") or 0) > r["at"]
-                and (x.get("by") in fable if worktree else not x.get("retro")))
+    if not worktree and folder_lines(s, t, r.get("head")) > SMALL_LINES:
+        asked = FABLE_CHANGES  # past the FIX's bound: the cap
+    else:
+        asked = sum(1 for x in t.get("reviews") or [] if x.get("verdict") == "changes" and (x.get("at") or 0) > r["at"]
+                    and (x.get("by") in fable if worktree else not x.get("retro")))
     if 1 + asked < FABLE_CHANGES:
         return False
     t["retro_capped"] = now()
@@ -104,6 +109,13 @@ def cap(s, t):
         s.dirty = True
         return True
     return open_recap(s, t, [RETRO_CAP])
+
+
+def folder_lines(s, t, since):
+    """Lines a folder task changed since the retro's commit (added plus deleted), 0 when it can't tell."""
+    from .base import git
+    ok, out, _ = git(s.loc["folder"], "diff", "--numstat", f"{since}..HEAD") if since else (False, "", "")
+    return sum(int(a) + int(d) for a, d, *_ in (x.split("\t") for x in out.splitlines()) if a.isdigit() and d.isdigit()) if ok else 0
 
 
 def fix_words(t):
@@ -227,9 +239,10 @@ def finished_screen(t, rn):
 
 def close_recap(s, t, decision, rec, small):
     """The retro decided in the coordinator's place (SHIP, FIX): the open recap closes as a continue."""
-    rest = [w for w in (t.get("recap") or {}).get("reasons") or [] if w != NON_CONVERGENCE]
+    from .budget import triggers
+    rest = list(dict.fromkeys(w for w in [*(t.get("recap") or {}).get("reasons", []), *triggers(s, t)] if w != NON_CONVERGENCE))
     if rest:  # a size, time or CI stop as well: that recap stays for the coordinator, without the review reason
-        t["recap"]["reasons"] = rest
+        t.setdefault("recap", {"at": now(), "round": 0, "title": f"Recap required: {rest[0]}"[:120]})["reasons"] = rest
         if small:
             t["retro_fix_pending"] = True  # its continue carries the FIX's bound, and last_findings the majors
         return False

@@ -327,6 +327,31 @@ class Retro(unittest.TestCase):
         self.tick()
         self.assertIn(self.retro.RETRO_CAP, self.task["recap"]["reasons"])
 
+    def test_review_findings_round_5(self):
+        """Codex round 5: a retro row never closes a Fable run; CI failures that came during the recap survive SHIP;
+        a superseded REDESIGN restricts nothing."""
+        self.started()
+        self.task["ci_runs"] = [{"sha": self.head, "run": str(i), "failed": True, "at": 40 + i} for i in range(3)]
+        self.tick(TAIL)
+        self.assertIn("3 failed CI runs", self.task["recap"]["reasons"])
+        self.task["review_runs"] = [{"round": len(self.task["reviews"]), "head": self.head, "address": "fable-1",
+                                     "model": "claude-fable-5-2", "at": 1}]
+        self.assertEqual([r["address"] for r in self.commands.open_runs(self.task)], ["fable-1"])
+        self.task["retro"] = {**TAIL, "verdict": "REDESIGN", "acted": False}
+        self.assertIsNone(self.retro.blocks_continue(self.task))
+
+    def test_folder_ship_needs_a_round_on_the_current_commit_and_a_folder_fix_is_bounded(self):
+        self.task.update(mode="here", worktree=None, review_gate=True)
+        self.store.loc.update(folder=self.wt, kind="repo")
+        self.started()
+        self.tick(TAIL)
+        self.assertIsNone(self.commands.review_refusal(self.store, self.task, None))
+        old = self.task["retro"]["head"]
+        self.change("x\n" * 80)
+        self.assertIsNotNone(self.commands.review_refusal(self.store, self.task, None))
+        self.task["retro"] = {**TAIL, "verdict": "FIX", "majors": [MAJOR], "head": old, "at": 10 ** 13}
+        self.assertTrue(self.retro.cap(self.store, self.task))
+
 
 if __name__ == "__main__":
     unittest.main()
