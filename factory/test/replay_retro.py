@@ -47,8 +47,8 @@ def live(ref, scratch):
     at = subprocess.run(["git", "-C", wt, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout
     if not at.startswith(head):
         raise SystemExit(f"{wt} is at {at.strip()}, not {head}")
-    r = subprocess.run(["claude", "-p", "--model", retro.FABLE["model"], "--allowedTools", READ_ONLY, prompt(ref, wt)],
-                       cwd=wt, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=1800)
+    r = subprocess.run(["claude", "-p", "--model", retro.FABLE["model"], "--permission-mode", "dontAsk", "--allowedTools", READ_ONLY],
+                       cwd=wt, input=prompt(ref, wt), capture_output=True, text=True, timeout=1800)  # the prompt on stdin
     if r.returncode:
         raise SystemExit(f"{ref}: claude exited {r.returncode}: {r.stderr[-500:]}")
     with open(os.path.join(DIR, f"{ref}.out.txt"), "w", encoding="utf-8") as f:

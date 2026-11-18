@@ -1374,10 +1374,10 @@ def cmd_review(args):
         me = os.environ.get("HC_TERMINAL_ID")
         if me and me == (t.get("retro_run") or {}).get("address", "").split("/")[-1]:  # SDF-49: its verdict is its <retro> tail
             raise Fail("The retro round records no verdict with herdr-task review: end with your <retro> tail.")
-        if t.get("recap"):
-            raise Fail(f"{s.ref(t)} has a recap open ({t['recap'].get('title')}): no review verdict is recorded until it is decided.")
         if gate_need(s, t):  # herdr-task's own reviewer in a gate folder (FAC-13), or Fable's round (FAC-99)
-            return gate_verdict(s, t, args, text)
+            return gate_verdict(s, t, args, text)  # a recap open: recorded, never passed on (record_verdict)
+        if t.get("recap"):  # the legacy branch below finalizes: never while a recap is open (SDF-49)
+            raise Fail(f"{s.ref(t)} has a recap open ({t['recap'].get('title')}): no review verdict is recorded until it is decided.")
         rv = t.pop("review", None) or {}
         cfg = settings_for(s)["tasks"]
         of = rv.get("of") or int(cfg.get("review_rounds") or 1)
