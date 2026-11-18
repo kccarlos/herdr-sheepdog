@@ -14189,6 +14189,17 @@ class InstalledCliAndMissingRefusal(unittest.TestCase):
         self.assertIn("You are taking over task SDF-24", self.runs[-1][-1])
         self.assertEqual(self.call(self.commands.cmd_reopen, id="SDF-24", to_do=True)["state"], "queued")
 
+    def test_reopen_to_do_preserves_the_review_baseline(self):
+        ref = self.add("In place", here=True, worktree=False, set=["review=on", "review.min=0"])
+        first = self.start(ref)
+        subprocess.run(["git", "-C", self.repo, "commit", "-q", "--allow-empty", "-m", "First run"], check=True)
+        self.call(self.commands.cmd_reopen, id=ref, to_do=True)
+        restarted = self.start(ref, now=False)
+        self.assertEqual(restarted["folder_start"], first["folder_start"])
+        self.assertEqual(restarted["started"], first["started"])
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref), write=False) as s:
+            self.assertIn("isn't reviewed", self.commands.review_refusal(s, s.find(ref), None))
+
     def test_unset_agent_resolves_consistently_across_layers(self):
         ref = self.add()
         for have, expected in (({"agy"}, "agy"), ({"codex", "agy"}, "codex"), ({"claude", "agy"}, "claude"), (set(), "claude")):

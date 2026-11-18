@@ -385,12 +385,13 @@ def fail_if_missing_cli(s, t, argv, record=True):
 
 
 def begin(s, t, argv, space=None, parent=None):
-    """Starts the task's first agent. Returns its record."""
+    """Starts a waiting task's agent. Returns its record."""
     if refused := start_refusal(s, t, argv):
         raise Fail(refused)
-    previous = last_agent(t) if t.get("returned_to_waiting") else None
+    original_start = t.get("returned_to_waiting")
+    previous = last_agent(t) if original_start else None
     t["started_from_queue"] = t["state"] == "queued"
-    t["state"], t["started"] = "running", now()
+    t["state"], t["started"] = "running", original_start or now()
     # Its brief teaches `reviewed`: ready waits for a review of its final commit (review_refusal).
     t["review_gate"] = True
     for k in ("queue", "queued_at", "attention", "attention_at", "held", "scheduled_for", "returned_to_waiting"):
@@ -399,7 +400,7 @@ def begin(s, t, argv, space=None, parent=None):
         t["mode"] = "here"
     folder_for(s, t)
     ensure_build_dir(s, t)
-    if t.get("mode") != "worktree" and s.loc["kind"] == "repo":
+    if not original_start and t.get("mode") != "worktree" and s.loc["kind"] == "repo":
         # The folder's commit as it starts: still there, and nothing tracked changed, at ready means
         # it changed nothing, so there is nothing to review (review_refusal, #744).
         t["folder_start"] = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None
@@ -1646,10 +1647,12 @@ def return_to_waiting(s, t):
     for rn in open_runs(t):
         fail_run(s, t, rn, "task returned to its list")
     from_queue = bool(t.get("started_from_queue") or t.get("queued_at"))
-    for k in ("started", "progress", "attention", "attention_at", "retry", "back", "device_wait",
+    # Keep the first start for review history. The task has no active start while it waits.
+    t["returned_to_waiting"] = t.pop("started", None) or now()
+    for k in ("progress", "attention", "attention_at", "retry", "back", "device_wait",
               "merge_requested", "queue", "queued_at", "scheduled_for", "held"):
         t.pop(k, None)
-    t["state"], t["reopened_at"], t["returned_to_waiting"] = ("queued" if from_queue else "todo"), now(), True
+    t["state"], t["reopened_at"] = ("queued" if from_queue else "todo"), now()
     if from_queue:
         t["started_from_queue"], t["queued_at"] = True, t["reopened_at"]
     release_task(s, t)
