@@ -36,7 +36,7 @@ from .launch import (
     own_path, parent_for, resume_argv, stamp, task_text, REVIEW_READS, review_reads, reviewer_sandbox, sandboxes, set_branch,
 )
 from .store import bare_by_mistake, is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
-from .queues import after_refs, parse_after, queue_reason, running_count, set_after, urgent
+from .queues import after_refs, parse_after, queue_reason, running_count, running_reason, set_after, urgent, working
 from .archive import unarchive
 from .output import inbox_line, line, minutes, say, view
 from .stage import STAGE_ORDER, STAGE_TABLE
@@ -410,7 +410,11 @@ def begin(s, t, argv, space=None, parent=None):
         t["folder_start"] = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None
     parent = parent_for(parent, s.loc["folder"])
     message = handoff(s, t, previous, parent, argv) if previous else brief(s, t, parent, argv)
-    return launch(s, t, argv, message, parent=parent)
+    if followup := t.get("review_followup"):
+        message += "\n\n" + followup
+    a = launch(s, t, argv, message, parent=parent)
+    t.pop("review_followup", None)
+    return a
 
 
 # #1053: an agent just launched still shows its shell for a moment (agent_running() says no): a task
@@ -420,8 +424,9 @@ JUST_STARTED_MS = 120000  # its own name: STARTING_MS (agents) times a reviewer 
 
 def just_started(t):
     """The agent its queue or a start launched moments ago, while it is Working: its record, or None."""
-    fresh = [a for a in t.get("agents") or [] if now() - (a.get("at") or 0) < JUST_STARTED_MS]
-    return fresh[-1] if t.get("state") == "running" and fresh else None
+    last = (t.get("agents") or [{}])[-1]
+    if t.get("state") == "running" and not last.get("ended") and now() - (last.get("at") or 0) < JUST_STARTED_MS:
+        return last
 
 
 def cmd_start(args):
@@ -1352,10 +1357,11 @@ def cmd_review(args):
             last = n >= of
             if t["state"] == "ready":
                 t["state"] = "running"
-            sent, _ = tell(s, t, (f"Review round {n} of {of} for {s.ref(t)} found what must be fixed before it can merge:\n{text.strip()}\n\n"
-                                     f"Fix these, commit, then run `herdr-task ready {s.ref(t)} --folder {shlex.quote(s.loc['folder'])}` again"
-                                     + (" (that was the last review round)." if last else " for the next round.")), None)
-            msg = f"{s.ref(t)}: findings sent to {sent}."
+            followup = (f"Review round {n} of {of} for {s.ref(t)} found what must be fixed before it can merge:\n{text.strip()}\n\n"
+                        f"Fix these, commit, then run `herdr-task ready {s.ref(t)} --folder {shlex.quote(s.loc['folder'])}` again"
+                        + (" (that was the last review round)." if last else " for the next round."))
+            sent = tell_review_changes(s, t, followup)
+            msg = f"{s.ref(t)}: findings sent to {sent}." if sent else f"{s.ref(t)}: {t.get('attention') or 'Review asked for changes.'}"
         v = view(s, t)
     # This reviewer is finished: it ends a moment after this command returns.
     me = os.environ.get("HC_TERMINAL_ID")
@@ -1459,12 +1465,14 @@ def record_verdict(s, t, rn, passed, must, text, majors=None):
         told = t.setdefault("verdict_told", [])
         sent = None
         if rn["round"] not in told:
-            sent, _ = tell(s, t, (f"Herdr's review round {rn['round']} of {s.ref(t)} ({rn['head'][:7]}) found what must be fixed:\n"
-                                  f"{text.strip()}\n\nFix these, commit, then run `{own_path()} ready {s.ref(t)} --folder "
-                                  f"{shlex.quote(s.loc['folder'])}` again."), None)
+            followup = (f"Herdr's review round {rn['round']} of {s.ref(t)} ({rn['head'][:7]}) found what must be fixed:\n"
+                        f"{text.strip()}\n\nFix these, commit, then run `{own_path()} ready {s.ref(t)} --folder "
+                        f"{shlex.quote(s.loc['folder'])}` again.")
+            sent = tell_review_changes(s, t, followup)
             if sent:
                 told.append(rn["round"])
-        msg = f"{s.ref(t)}: findings sent to {sent}." if sent else f"{s.ref(t)}: review round {rn['round']} asked for changes."
+        outcome = f"findings sent to {sent}." if sent else t.get("attention") or f"review round {rn['round']} asked for changes."
+        msg = f"{s.ref(t)}: {outcome}"
     return msg
 
 
@@ -1726,6 +1734,7 @@ def cmd_state(args, state):
                 t["kept_open"] = True
             for k in ("reviews", "review", "review_runs", "review_failures", "merge_only_runs", "review_out", "verdict_told", "ci_runs", "ci_seen", "ci_pending", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "accepted_by", "size", "merge_queued", "review_wait", "auto_accepted", "accept_wait", "review_quota_wait", "head_moved_at", "sync_fallback", "push_held", "ready_head"):
                 t.pop(k, None)
+            t.pop("review_followup", None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
         if state == "done" and t.get("auto_merge") and not t.get("accepted_by"):
@@ -1739,6 +1748,7 @@ def cmd_state(args, state):
         if state != "running":
             release_task(s, t)
         if state == "done":
+            t.pop("review_followup", None)
             remove_build_dir(s, t)
         s.dirty = True
         v = view(s, t)
@@ -1960,28 +1970,41 @@ def start_again(s, t, key=None, argv_json=None, message=None, parent=None, resum
     parent = parent_for(parent or (prev or {}).get("parent"), s.loc["folder"])
     same = prev and agent_key(argv) == prev.get("agent")
     res = resume_argv(argv, prev["session"], folder_for(s, t)) if same and prev.get("session") else None
+    followup = t.get("review_followup")
+    if followup:
+        message = f"{followup}\n\n{message}" if message else followup
     if res:
         msg = message or nudge or (continue_line(s, t) if resuming else None)
         a = launch(s, t, argv, msg, parent=parent, resume=res)
         a["session"] = prev["session"]  # the same conversation from the start (agent_log, before a pass sees its pid)
-        if (t.get("attention") or "").startswith("Couldn't start:"):
-            t.pop("attention", None)
-        return a, True
-    text = handoff(s, t, prev, parent, argv)
-    extra = message or (continue_line(s, t) if resuming and f"ready {s.ref(t)}" not in text else None)
-    if extra:
-        text += "\n\n" + extra
-    t["review_gate"] = True
-    a = launch(s, t, argv, text, parent=parent)
-    if (t.get("attention") or "").startswith("Couldn't start:"):
+    else:
+        text = handoff(s, t, prev, parent, argv)
+        extra = message or (continue_line(s, t) if resuming and f"ready {s.ref(t)}" not in text else None)
+        if extra:
+            text += "\n\n" + extra
+        t["review_gate"] = True
+        a = launch(s, t, argv, text, parent=parent)
+    t.pop("review_followup", None)
+    if (t.get("attention") or "").startswith(("Couldn't start:", REVIEW_RESUME_WAIT)):
         t.pop("attention", None)
-    return a, False
+    return a, bool(res)
 
 
 # SHEP-189: what a resumed agent hears first. Its session comes back with no message, so without this
 # it sat idle until someone wrote to it.
 RESUME_NUDGE = ("Herdr resumed your session because your agent had stopped. Carry on where you left off: check "
                 "what is already done with `herdr-task show`, then keep going with the task.")
+
+
+class ResumeAtCapacity(Fail):
+    pass
+
+
+def require_resume_slot(s, t):
+    # The caller holds the folder's write lock through launch and saving the new agent.
+    n = running_count(s, t)
+    if n >= s.max_running():
+        raise ResumeAtCapacity(f"Can't resume {s.ref(t)}: {running_reason(n)}. Wait for a slot to open.")
 
 
 def cmd_resume(args):
@@ -1992,6 +2015,7 @@ def cmd_resume(args):
             raise Fail(f"{s.ref(t)} still has an agent ({live[0]['address']}). Use switch to replace it.")
         if t["state"] in ("todo", "scheduled", "queued"):
             raise Fail(f"{s.ref(t)} hasn't started. Use start.")
+        require_resume_slot(s, t)
         fail_if_missing_cli(s, t, resolve_again_argv(s, t, args.agent, args.argv, resuming=True))
         if t["state"] == "done":
             t["state"] = "running"
@@ -2044,6 +2068,8 @@ def retarget(s, t, agent, model):
 def switch_one(s, t, args, live):
     """Replaces the task's agent (`live`: its running agents, oldest first). Returns (data, line, own): own is
     the caller's own agent, ended after the store is saved."""
+    if not live or (t["state"] == "running" and not working(s, t, live)):
+        require_resume_slot(s, t)
     refresh_sessions(s, t, live)
     old = live[-1] if live else None
     if refused := start_refusal(s, t, resolve_again_argv(s, t, argv_json=args.argv)):
@@ -2207,8 +2233,25 @@ def tell(s, t, msg, args, start=True):
         return live[-1]["address"], False
     if not start:
         return None, False
+    if t.get("state") in ("todo", "queued", "scheduled"):
+        raise Fail(f"{s.ref(t)} is waiting. Use start when it can run.")
+    require_resume_slot(s, t)
     a, _ = start_again(s, t, getattr(args, "agent", None), getattr(args, "argv", None), message=msg)
     return a["address"], True
+
+
+REVIEW_RESUME_WAIT = "Review changes saved."
+
+
+def tell_review_changes(s, t, message):
+    try:
+        sent, _ = tell(s, t, message, None)
+    except ResumeAtCapacity as e:
+        t["review_followup"] = message
+        t["attention"], t["attention_at"] = f"{REVIEW_RESUME_WAIT} {e}", now()
+        return None
+    t.pop("review_followup", None)
+    return sent
 
 
 def local_merge_msg(s, t):

@@ -3888,6 +3888,10 @@ class Store:
     def key(self, t):
         return f"f#{t['id']}"
 
+    def max_running(self):
+        from herdr_task.settings import MAX_RUNNING
+        return MAX_RUNNING
+
 
 class GateReview(unittest.TestCase):
     """FAC-13: in a gate folder (review.min > 0) ready starts herdr-task's own reviewer for the exact
@@ -3930,6 +3934,7 @@ class GateReview(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, json.dumps({"address": f"term-{len(self.runs)}"}), "")
         tdir = tempfile.mkdtemp(dir=self.root)
         self.real_pools, self.real_send = commands.reviewer_pools, launch.send_when_clear
+        self.real_tell = commands.tell
         for mod, name, value in ((commands, "open_store", lambda args, write=True: self.store),
                                  (commands, "view", lambda s, t, live=None: dict(t)), (commands, "say", lambda *a: None),
                                  (commands, "find_proof", lambda *a: None), (commands, "ready_turns", lambda *a: {}),
@@ -4098,6 +4103,43 @@ class GateReview(unittest.TestCase):
         self.ready()
         self.assertEqual([(r["round"], r["head"]) for r in self.task["review_runs"]], [(1, self.head), (2, new)])
         self.valid()
+
+    def test_review_findings_are_saved_at_the_running_cap(self):
+        from unittest import mock
+        self.ready()
+        with mock.patch.object(self.commands, "tell", self.real_tell), \
+                mock.patch.object(self.commands, "running_count", return_value=self.store.max_running()):
+            self.verdict("term-1", passed=False, changes="Fix the wording", must_fix=1)
+        self.assertEqual(self.task["reviews"][-1]["report"], "Fix the wording")
+        self.assertIn("Review changes saved", self.task["attention"])
+        self.assertEqual(len(self.runs), 1)
+        self.valid()
+
+        with mock.patch.object(self.commands, "start_refusal", return_value=None), \
+                mock.patch.object(self.commands, "parent_for", return_value=None), \
+                mock.patch.object(self.commands, "handoff", return_value="Continue the task."), \
+                mock.patch.object(self.commands, "launch", return_value={"address": "t9"}) as launch:
+            self.commands.start_again(self.store, self.task, resuming=True)
+        self.assertIn("Fix the wording", launch.call_args.args[3])
+        self.assertNotIn("review_followup", self.task)
+        self.assertNotIn("attention", self.task)
+
+    def test_finishing_or_reopening_drops_deferred_review_delivery(self):
+        import argparse
+        from unittest import mock
+        for state in ("done", "reopen"):
+            with self.subTest(state=state), \
+                    mock.patch.object(self.commands, "merged_here", return_value=False), \
+                    mock.patch.object(self.commands, "release_task"), \
+                    mock.patch.object(self.commands, "remove_build_dir"):
+                self.task.update(state="running", review_followup="Old findings")
+                args = argparse.Namespace(id="SHEP-13", json=True, folder=None)
+                self.commands.cmd_state(args, state)
+                self.assertNotIn("review_followup", self.task)
+        merged = {"id": 14, "state": "ready", "review_followup": "Old findings"}
+        self.commands.finish(self.store, merged)
+        self.assertEqual(merged["state"], "done")
+        self.assertNotIn("review_followup", merged)
 
     def test_ready_again_without_fixing_the_changes_starts_none(self):
         self.ready()
@@ -6010,6 +6052,7 @@ class Scheduled(unittest.TestCase):
         import herdr_task.tick as tick
         from herdr_task.base import Fail
         self.commands, self.tick, self.store_mod, self.Fail = commands, tick, store, Fail
+        self.real_begin = commands.begin
         self.argparse, self.io, self.redirect = argparse, io, contextlib.redirect_stdout
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -6167,6 +6210,81 @@ class Scheduled(unittest.TestCase):
         with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 2):
             self.assertEqual(self.tick_at(None), ["APP-3"])
         self.assertEqual(self.task(2)["state"], "queued")
+
+    def test_stopped_agent_does_not_block_queued_start(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        self.busy_folder(1, [("Next", False)])
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            s.find(1)["agents"][-1]["at"] = 1
+            s.dirty = True
+        # The agent exited, leaving a shell whose last reported status is still Working.
+        record = {"address": "t1", "agent": "claude", "status": "working"}
+        shell = {**record, "foreground": {"name": "zsh", "argv": ["zsh", "-i"]}}
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "live_agents", lambda key: [record]), \
+                mock.patch.object(queues, "detail", lambda k: shell):
+            self.assertEqual(self.tick_at(None), ["APP-2"])
+
+    def test_tasks_waiting_on_person_or_coordinator_do_not_block_queued_start(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        self.busy_folder(3, [("Next", False)])
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            for i in (1, 2, 3):
+                s.find(i)["agents"][-1]["at"] = 1
+            s.find(2)["device_wait"] = {"why": "Connect the device"}
+            s.dirty = True
+        live = {
+            "1": [{"address": "t1", "agent": "claude", "status": "idle"}],
+            "2": [{"address": "t2", "agent": "claude", "status": "working"}],
+            "3": [{"address": "t3", "agent": "claude", "status": "blocked"}],
+        }
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "live_agents", lambda key: live[key.split("#")[-1]]), \
+                mock.patch.object(queues, "detail", lambda k: k):
+            self.assertEqual(self.tick_at(None), ["APP-4"])
+
+    def test_active_worker_keeps_slot_with_open_owner_question(self):
+        from unittest import mock
+        import herdr_task.ask as ask
+        import herdr_task.queues as queues
+        self.busy_folder(1, [("Next", False)])
+        live = [{"address": "t1", "agent": "claude", "status": "working"}]
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "live_agents", lambda key: live), \
+                mock.patch.object(queues, "detail", lambda k: k), \
+                mock.patch.object(ask, "open_asks", return_value=[{"question": "Ship?", "kind": "owner"}]):
+            self.assertEqual(self.tick_at(None), [])
+
+    def test_queued_restart_delivers_saved_review_findings(self):
+        from unittest import mock
+        self.busy_folder(1, [])
+        self.add("Waiting for review fixes", here=True)
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            s.find(2).update(state="running", review_followup="Fix the wording")
+            s.dirty = True
+        messages = []
+
+        def launch(s, task, argv, message, parent=None):
+            messages.append(message)
+            s.dirty = True
+            return {"address": "t2"}
+
+        with mock.patch.object(self.store_mod.Store, "max_running", return_value=1), \
+                mock.patch.object(self.tick, "begin", self.real_begin), \
+                mock.patch.object(self.commands, "start_refusal", return_value=None), \
+                mock.patch.object(self.commands, "parent_for", return_value=None), \
+                mock.patch.object(self.commands, "brief", return_value="Continue the task."), \
+                mock.patch.object(self.commands, "launch", launch):
+            self.assertTrue(self.run_cmd(self.commands.cmd_start, id="2")["queued"])
+            self.assertEqual(self.task(2)["review_followup"], "Fix the wording")
+            with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+                s.find(1)["state"] = "done"
+                s.dirty = True
+            self.assertEqual(self.tick_at(None), ["APP-2"])
+        self.assertEqual(messages, ["Continue the task.\n\nFix the wording"])
+        self.assertNotIn("review_followup", self.task(2))
 
     def test_without_priority_the_queue_is_oldest_first_within_the_cap(self):
         from unittest import mock
@@ -8250,7 +8368,8 @@ class TaskFlow(unittest.TestCase):
             {"id": 5, "title": "Opus", "state": "todo", "mode": "here", "agents": [], "agent": "claude", "model": "opus", "effort": "max"},
             {"id": 6, "title": "Ready", "state": "ready", "mode": "here", "agents": [], "agent": "claude"}]
         got = []
-        self.patch(self.commands, "workers", lambda s, t: [{"address": "t1", "labels": {}}] if t["id"] in (1, 6) else [])
+        self.patch(self.commands, "workers", lambda s, t: [{"address": "t1", "labels": {}, "status": "working"}]
+                   if t["id"] in (1, 6) else [])
         self.patch(self.commands, "refresh_sessions", lambda *a: None)
         self.patch(self.commands, "end_agent", lambda s, t, address: got.append(("end", address)))
         self.patch(self.commands, "start_again", lambda s, t, key=None, *a, **k: (
@@ -9237,6 +9356,7 @@ class Resume(unittest.TestCase):
         import herdr_task.base as base
         import herdr_task.commands as commands
         import herdr_task.launch as launch
+        import herdr_task.queues as queues
         import herdr_task.settings as settings
         import herdr_task.store as store
         import herdr_task.templates as templates
@@ -9278,6 +9398,7 @@ class Resume(unittest.TestCase):
             (commands, "live_agents", lambda key: list(self.live)),
             (commands, "detail", lambda k: k),
             (commands, "just_started", lambda t: None),  # SHEP-223's one-agent guard: these resume right after a start
+            (queues, "live_agents", lambda key: []),
             (templates, "TEMPLATES", os.path.join(ROOT, "templates")),
         ]
         for mod, name, val in patches:
@@ -9348,6 +9469,69 @@ class Resume(unittest.TestCase):
             last = s.find(ref)["agents"][-1]
             self.assertEqual(last["argv"], ["agy", "--model", "gemini-4-argon-high", "--dangerously-skip-permissions"])
             self.assertEqual(last["session"], "0199-sid")
+
+    def test_resumed_agent_counts_again(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        ref = self.started_task({"agent": "agy"})
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo)) as s:
+            s.find(ref)["agents"][-1]["ended"] = queues.now()
+            s.dirty = True
+        with mock.patch.object(queues, "live_agents", lambda key: []):
+            with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo), write=False) as s:
+                self.assertEqual(queues.running_count(s), 0)
+            self.call(self.commands.cmd_resume, id=ref, agent=None, argv=None, parent=None)
+            with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo), write=False) as s:
+                self.assertEqual(queues.running_count(s), 1)
+
+    def test_resume_refuses_when_the_running_cap_is_full(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        from herdr_task.base import Fail
+        ref = self.started_task({"agent": "agy"}, set=["priority=urgent"])
+        self.started_task({"agent": "agy"})
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "live_agents", lambda key: []):
+            with self.assertRaisesRegex(Fail, "Can't resume .*1 task is running here"):
+                self.call(self.commands.cmd_resume, id=ref, agent=None, argv=None, parent=None)
+        self.assertEqual(len(self.runs), 2)
+
+    def test_the_tick_starts_nothing_while_the_count_is_at_or_over_the_cap(self):
+        """A message to a live paused worker takes its slot back unchecked, so the count can pass the cap
+        for a while: the tick then starts no queued task until it is below the cap again."""
+        from unittest import mock
+        import herdr_task.queues as queues
+        import herdr_task.tick as tick
+        self.started_task({"agent": "agy"})
+        self.started_task({"agent": "agy"})
+        waiting = self.started_task({"agent": "agy"})
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo)) as s:
+            t = s.find(waiting)
+            t["agents"][-1]["ended"] = queues.now()
+            t["state"], t["queue"], t["queued_at"] = "queued", {"agent": "agy"}, queues.now()
+            s.dirty = True
+        before = len(self.runs)
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1):
+            with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo), write=False) as s:
+                self.assertGreater(queues.running_count(s), 1)
+            report = {"started": [], "done": [], "attention": [], "fired": [], "retries": []}
+            with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo)) as s:
+                tick.tick_store(s, report)
+        self.assertEqual((report["started"], len(self.runs)), ([], before))
+
+    def test_message_and_switch_cannot_restart_a_stopped_agent_at_the_cap(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        from herdr_task.base import Fail
+        ref = self.started_task({"agent": "agy"})
+        self.started_task({"agent": "agy"})
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "live_agents", lambda key: []):
+            with self.assertRaisesRegex(Fail, "Can't resume .*1 task is running here"):
+                self.call(self.commands.cmd_fix, id=ref, reason="Fix the checks")
+            # A switch with no worker at work only edits the settings: it starts nothing past the cap.
+            self.call(self.commands.cmd_switch, id=ref, agent="agy", argv=None, parent=None, keep=False)
+        self.assertEqual(len(self.runs), 2)
 
     def test_a_resumed_agy_worker_idle_at_turn_0_gets_one_nudge(self):
         """FAC-100 (note 14): a resumed agy session sits at turn 0 until it hears something: the tick nudges it once."""
@@ -14538,7 +14722,8 @@ class InstalledCliAndMissingRefusal(unittest.TestCase):
             t1 = s.find(r1)
             t1.update(state="running", started=1, mode="here",
                       agents=[{"address": "t-live", "agent": "claude", "argv": ["claude", "--model", "opus"], "at": 10}])
-            self.live_map[s.key(t1)] = [{"address": "t-live", "foreground": {"name": "2.1.325"}, "labels": {"sheepdog.agent": "claude"}}]
+            self.live_map[s.key(t1)] = [{"address": "t-live", "foreground": {"name": "2.1.325"}, "status": "working",
+                                         "labels": {"sheepdog.agent": "claude"}}]
             s.find(r2).update(state="queued", queued_at=2, mode="here", queue={"argv": ["claude"]})
             s.find(r5).update(state="running", started=3, mode="here",
                               agents=[{"address": "t-dead", "agent": "claude", "argv": ["claude"], "at": 5, "ended": 9}])
