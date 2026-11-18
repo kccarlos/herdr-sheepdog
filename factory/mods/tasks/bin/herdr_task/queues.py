@@ -147,13 +147,15 @@ def waiting_for(s, task):
     return [i for i in task.get("after") or [] if i in known and known[i]["state"] != "done"]
 
 
-def working(s, task):
+def working(s, task, live=None):
     """A running task uses a slot while its worker starts or its stage shows it working."""
     if task["state"] != "running":
         return False
-    live = [k for k in map(detail, live_agents(s.key(task))) if agent_running(k)]
+    if live is None:
+        live = [k for k in map(detail, live_agents(s.key(task))) if agent_running(k)]
     if live:
-        return resolve_stage(task, live, store=s).stage == "working"
+        # An open owner question can label the row while its worker keeps working.
+        return resolve_stage(task, live, store=s).status == "working"
     # Reserve the slot while the new process comes up. A review or CI wait can
     # put the row in Working without a worker, but cannot reserve this slot.
     last = (task.get("agents") or [{}])[-1]

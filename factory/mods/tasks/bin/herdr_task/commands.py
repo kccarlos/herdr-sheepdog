@@ -36,7 +36,7 @@ from .launch import (
     own_path, parent_for, resume_argv, stamp, task_text, REVIEW_READS, review_reads, reviewer_sandbox, sandboxes, set_branch,
 )
 from .store import bare_by_mistake, is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
-from .queues import after_refs, parse_after, queue_reason, running_count, running_reason, set_after, urgent
+from .queues import after_refs, parse_after, queue_reason, running_count, running_reason, set_after, urgent, working
 from .archive import unarchive
 from .output import inbox_line, line, minutes, say, view
 from .stage import STAGE_ORDER, STAGE_TABLE
@@ -1888,6 +1888,13 @@ RESUME_NUDGE = ("Herdr resumed your session because your agent had stopped. Carr
                 "what is already done with `herdr-task show`, then keep going with the task.")
 
 
+def require_resume_slot(s, t):
+    # The caller holds the folder's write lock through launch and saving the new agent.
+    n = running_count(s, t)
+    if n >= s.max_running():
+        raise Fail(f"Can't resume {s.ref(t)}: {running_reason(n)}. Wait for a slot to open.")
+
+
 def cmd_resume(args):
     with open_store(args) as s:
         t = s.find(args.id)
@@ -1896,9 +1903,7 @@ def cmd_resume(args):
             raise Fail(f"{s.ref(t)} still has an agent ({live[0]['address']}). Use switch to replace it.")
         if t["state"] in ("todo", "scheduled", "queued"):
             raise Fail(f"{s.ref(t)} hasn't started. Use start.")
-        n = running_count(s, t)
-        if n >= s.max_running():
-            raise Fail(f"Can't resume {s.ref(t)}: {running_reason(n)}. Wait for a slot to open.")
+        require_resume_slot(s, t)
         fail_if_missing_cli(s, t, resolve_again_argv(s, t, args.agent, args.argv, resuming=True))
         if t["state"] == "done":
             t["state"] = "running"
@@ -1949,6 +1954,8 @@ def retarget(s, t, agent, model):
 def switch_one(s, t, args, live):
     """Replaces the task's agent (`live`: its running agents, oldest first). Returns (data, line, own): own is
     the caller's own agent, ended after the store is saved."""
+    if not live or (t["state"] == "running" and not working(s, t, live)):
+        require_resume_slot(s, t)
     refresh_sessions(s, t, live)
     old = live[-1] if live else None
     # A --model rides on the task's own pick (retarget), which start_again then reads.
@@ -2102,6 +2109,7 @@ def tell(s, t, msg, args, start=True):
         return live[-1]["address"], False
     if not start:
         return None, False
+    require_resume_slot(s, t)
     a, _ = start_again(s, t, getattr(args, "agent", None), getattr(args, "argv", None), message=msg)
     return a["address"], True
 

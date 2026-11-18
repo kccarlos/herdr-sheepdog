@@ -6128,6 +6128,18 @@ class Scheduled(unittest.TestCase):
                 mock.patch.object(queues, "detail", lambda k: k):
             self.assertEqual(self.tick_at(None), ["APP-4"])
 
+    def test_active_worker_keeps_slot_with_open_owner_question(self):
+        from unittest import mock
+        import herdr_task.ask as ask
+        import herdr_task.queues as queues
+        self.busy_folder(1, [("Next", False)])
+        live = [{"address": "t1", "agent": "claude", "status": "working"}]
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "live_agents", lambda key: live), \
+                mock.patch.object(queues, "detail", lambda k: k), \
+                mock.patch.object(ask, "open_asks", return_value=[{"question": "Ship?", "kind": "owner"}]):
+            self.assertEqual(self.tick_at(None), [])
+
     def test_without_priority_the_queue_is_oldest_first_within_the_cap(self):
         from unittest import mock
         self.busy_folder(1, [("Older", False), ("Newer", False)])
@@ -9292,6 +9304,20 @@ class Resume(unittest.TestCase):
                 mock.patch.object(queues, "live_agents", lambda key: []):
             with self.assertRaisesRegex(Fail, "Can't resume .*1 task is running here"):
                 self.call(self.commands.cmd_resume, id=ref, agent=None, argv=None, parent=None)
+        self.assertEqual(len(self.runs), 2)
+
+    def test_message_and_switch_cannot_restart_a_stopped_agent_at_the_cap(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        from herdr_task.base import Fail
+        ref = self.started_task({"agent": "agy"})
+        self.started_task({"agent": "agy"})
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "live_agents", lambda key: []):
+            with self.assertRaisesRegex(Fail, "Can't resume .*1 task is running here"):
+                self.call(self.commands.cmd_fix, id=ref, reason="Fix the checks")
+            with self.assertRaisesRegex(Fail, "Can't resume .*1 task is running here"):
+                self.call(self.commands.cmd_switch, id=ref, agent=None, argv=None, parent=None, keep=False)
         self.assertEqual(len(self.runs), 2)
 
     def test_a_resumed_agy_worker_idle_at_turn_0_gets_one_nudge(self):
