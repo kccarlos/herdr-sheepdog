@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — Diff — dark</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button,input{font:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; background: #16181C">
+  <dc-import name="DiffFile" dark="{{ true }}" style="display: block" hint-size="390px,844px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "$preview": {"width": 390, "height": 844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "surface2": "#F1EEE7", "track": "#ECE8DF", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "accent": "#D98718", "accentText": "#8A5700", "accentTint": "#FDF1DC", "blocked": "#D99417", "blue": "#1F5F9E", "green": "#1D6B46", "idle": "#5C6370", "red": "#B42318", "side": "#F3F0E8", "selBg": "#E5DFD2", "sel": "#FFFFFF", "shadow": "0 1px 2px rgba(31,31,34,0.12)", "dash": "#CFC9BC", "chevron": "#8E929A", "kw": "#6A46B0", "str": "#1D6B46", "fn": "#1F5F9E", "num": "#8A5700", "add": "#1A8038", "rem": "#BF2924", "addFill": "rgba(52,199,89,0.12)", "remFill": "rgba(255,59,48,0.12)", "addWord": "rgba(52,199,89,0.32)", "remWord": "rgba(255,59,48,0.32)", "scrim": "rgba(31,31,34,0.32)", "wash": "rgba(250,248,243,0.55)", "pop": "0 12px 40px rgba(31,31,34,0.18), 0 0 0 1px #E4E0D7"};
+    const dark = {"bg": "#16181C", "surface": "#1F2126", "surface2": "#26292F", "track": "#26292F", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138", "accent": "#F39C1F", "accentText": "#F5B83D", "accentTint": "#2A2416", "blocked": "#F0A92A", "blue": "#6AA8EB", "green": "#5CC792", "idle": "#9AA1AD", "red": "#F26B5B", "side": "#1B1D22", "selBg": "#2C2F36", "sel": "#3A3D44", "shadow": "0 1px 2px rgba(0,0,0,0.5)", "dash": "#3E4148", "chevron": "#8E929A", "kw": "#B195F0", "str": "#5CC792", "fn": "#6AA8EB", "num": "#F5B83D", "add": "#6BD185", "rem": "#FF7A73", "addFill": "rgba(48,209,88,0.12)", "remFill": "rgba(255,69,58,0.12)", "addWord": "rgba(48,209,88,0.32)", "remWord": "rgba(255,69,58,0.32)", "scrim": "rgba(0,0,0,0.5)", "wash": "rgba(22,24,28,0.55)", "pop": "0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px #2E3138"};
+    const d = !!this.props.dark;
+    const c = d ? dark : light;
+    
+    return { c, dark: d,  };
+  }
+}
+</script>
+</body>
+</html>

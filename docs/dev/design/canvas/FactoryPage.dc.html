@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — /factory on the phone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button,input{font:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; display: flex; flex-direction: column; overflow: hidden; background: {{c.bg}}; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <div style="height: 54px; flex-shrink: 0"></div>
+  <header style="height: 52px; flex-shrink: 0; display: grid; grid-template-columns: 52px minmax(0, 1fr) 52px; align-items: center; padding: 0 4px; border-bottom: 1px solid {{c.line}}">
+    <button aria-label="Back" style="width: 44px; height: 44px; border: 0; background: transparent; color: {{c.ink}}; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg></button>
+    <div style="display: flex; flex-direction: column; align-items: center; min-width: 0">
+      <span style="font-size: 17px; font-weight: 600">Factory</span>
+      <span style="font-size: 12px; color: {{c.ink2}}">herdr-sheepdog · a web page, read only</span>
+    </div>
+    <span></span>
+  </header>
+  <main style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 0">
+    <section aria-label="Needs you" style="flex-shrink: 0; padding: 12px 14px; border-radius: 14px; background: {{c.accentTint}}; border: 1px solid {{c.blocked}}; display: flex; align-items: center; gap: 10px">
+      <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+        <span style="font-size: 12px; font-weight: 600; color: {{c.accentText}}">Needs you · 1</span>
+        <span style="font-size: 16px; font-weight: 600">Tag 0.1.31 now?</span>
+      </div>
+      <button style="min-height: 44px; padding: 0 18px; border-radius: 22px; border: 0; background: {{c.accent}}; color: #1F1F22; font-size: 15px; font-weight: 600">Answer in the app</button>
+    </section>
+    <section aria-label="Milestones" style="flex-shrink: 0; display: flex; flex-direction: column; gap: 8px">
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px">
+        <span style="height: 30px; border-radius: 8px; background: {{c.surface2}}; color: {{c.ink2}}; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px"><svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg>M1</span>
+        <span style="height: 30px; border-radius: 8px; background: {{c.surface2}}; color: {{c.ink2}}; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px"><svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg>M2</span>
+        <span style="height: 30px; box-sizing: border-box; border-radius: 8px; background: {{c.surface}}; border: 1.5px solid {{c.ink}}; color: {{c.ink}}; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center">M3 now</span>
+        <span style="height: 30px; box-sizing: border-box; border-radius: 8px; border: 1px dashed {{c.dash}}; color: {{c.ink2}}; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center">M4</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <span style="font-family: Outfit, Inter, system-ui, sans-serif; font-size: 19px; font-weight: 600">M3 · Owner channel</span>
+        <span style="font-size: 14px; line-height: 19px; color: {{c.ink2}}">7 of 12 merged. The path to done runs through SDF-53, then SDF-15: about 5 hours.</span>
+      </div>
+    </section>
+    <sc-for list="{{ layers }}" as="g" hint-placeholder-count="3">
+      <section style="flex-shrink: 0; display: flex; flex-direction: column; gap: 6px">
+        <h3 style="margin: 0; padding-left: 4px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; color: {{c.ink2}}">{{ g.label }}</h3>
+        <sc-for list="{{ g.tasks }}" as="t" hint-placeholder-count="2">
+          <a href="FactoryWorker.dc.html" aria-label="{{ t.aria }}" style="min-height: 60px; box-sizing: border-box; border-radius: 12px; background: {{c.surface}}; border: {{ t.border }}; padding: 8px 10px 8px 12px; display: flex; align-items: center; gap: 8px; color: {{c.ink}}; text-decoration: none">
+            <span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+              <span style="display: flex; align-items: center; gap: 6px"><span style="font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 12px; font-weight: 600">{{ t.id }}</span><span style="font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ t.title }}</span><sc-if value="{{ t.path }}" hint-placeholder-val="{{ false }}"><span style="flex-shrink: 0; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: {{c.surface2}}; color: {{c.ink}}">path</span></sc-if></span>
+              <span style="font-size: 13px; line-height: 17px; color: {{c.ink2}}">{{ t.why }}</span>
+            </span>
+            <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="{{c.chevron}}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M9 6l6 6-6 6"></path></svg>
+          </a>
+        </sc-for>
+      </section>
+    </sc-for>
+    <button aria-expanded="false" style="flex-shrink: 0; min-height: 44px; border: 0; border-top: 1px solid {{c.line}}; background: transparent; color: {{c.ink2}}; padding: 0 4px; display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; text-align: left"><svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M9 6l6 6-6 6"></path></svg>Debug: 20 log lines, doctor has 1 warning</button>
+  </main>
+  <div style="height: 34px; flex-shrink: 0"></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "$preview": {"width": 390, "height": 844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "surface2": "#F1EEE7", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "accent": "#D98718", "accentText": "#8A5700", "accentTint": "#FDF1DC", "blocked": "#D99417", "dash": "#CFC9BC", "chevron": "#8E929A"};
+    const dark = {"bg": "#16181C", "surface": "#1F2126", "surface2": "#26292F", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138", "accent": "#F39C1F", "accentText": "#F5B83D", "accentTint": "#2A2416", "blocked": "#F0A92A", "dash": "#3E4148", "chevron": "#8E929A"};
+    const d = !!this.props.dark;
+    const c = d ? dark : light;
+    const mk = (id, title, why, path) => ({ id, title, why, path, border: path ? "1.5px solid " + c.ink : "1px solid " + c.line, aria: id + " " + title + ". " + why + ". Opens its worker's window." });
+    const layers = [
+      { label: "Layer 1 · running", tasks: [
+        mk("SDF-53", "Codex launch flags", "Working · codex gpt-6.2-sol · round 0 of 2", true),
+        mk("SDF-54", "Model on every run", "Working · agy gemini-4-carbon-high", false)
+      ] },
+      { label: "Layer 2 · waiting", tasks: [
+        mk("SDF-48", "drift_pass", "Waiting on review, round 2 of 2", true),
+        mk("SDF-55", "Quota unknown is a value", "Waiting on CI, 18 min", false)
+      ] },
+      { label: "Layer 3 · blocked by a task", tasks: [
+        mk("SDF-15", "Switch the running factory", "Waiting on SDF-48 and SDF-53", true)
+      ] }
+    ];
+    return { c, dark: d, layers };
+  }
+}
+</script>
+</body>
+</html>

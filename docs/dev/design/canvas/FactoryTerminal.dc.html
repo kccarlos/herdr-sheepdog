@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — factory log and factory doctor</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+</style>
+</helmet>
+<div style="width: 1100px; height: 980px; box-sizing: border-box; padding: 40px; display: flex; flex-direction: column; gap: 20px; background: #F3F0E8; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <div style="display: flex; flex-direction: column; gap: 4px">
+    <h1 style="margin: 0; font-family: Outfit, Inter, system-ui, sans-serif; font-size: 28px; font-weight: 600">How the owner knows something broke</h1>
+    <p style="margin: 0; font-size: 15px; color: #6B6E75">Proposed: factory log is new, and doctor gains the Running now part. The log has one line per decision, written by the engine. Doctor prints what the tick already found, each with a fix.</p>
+  </div>
+  <section aria-label="factory log output" style="border-radius: 14px; background: #16181C; color: #F5F2EA; padding: 18px 20px; font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 12px; line-height: 20px; white-space: pre; overflow: hidden"><span style="color: #A3A7AF">$</span> sheepdog factory log --project herdr-sheepdog
+<span style="color: #A3A7AF">14:02:11</span> <span style="color: #6AA8EB">by=engine     </span> wake=event:ready  task=SDF-41 decision=accept         why="2 rounds passed, CI green"  model=-
+<span style="color: #A3A7AF">14:02:40</span> <span style="color: #6AA8EB">by=engine     </span> wake=tick         task=SDF-41 decision=merge          why="up to date, checks green"   model=-
+<span style="color: #A3A7AF">14:05:38</span> <span style="color: #6AA8EB">by=engine     </span> wake=tick:drift   task=SDF-38 decision=wake           why="CI red on a reviewed head"  model=-
+<span style="color: #A3A7AF">14:05:40</span> <span style="color: #5CC792">by=coordinator</span> wake=event:drift  task=SDF-57 decision=add            why="fix the flaky socket test"  model=claude-opus-5-5
+<span style="color: #A3A7AF">14:06:02</span> <span style="color: #6AA8EB">by=engine     </span> wake=start        task=SDF-57 decision=start          why="pool known, slot free"      model=gpt-6.2-sol/high
+<span style="color: #A3A7AF">14:09:02</span> <span style="color: #F5B83D">by=owner      </span> wake=input:phone  task=-      decision=typed          why="to coordinator, 34 chars"   model=-
+<span style="color: #A3A7AF">14:09:05</span> <span style="color: #5CC792">by=coordinator</span> wake=input:owner  task=SDF-54 decision=plan-amend     why="owner: after SDF-53"        model=claude-opus-5-5
+<span style="color: #A3A7AF">14:31:17</span> <span style="color: #6AA8EB">by=engine     </span> wake=round        task=SDF-53 decision=review-round-1 why="reviewer on another model"  model=claude-fable-5-2</section>
+  <section aria-label="factory doctor output" style="flex-grow: 1; border-radius: 14px; background: #16181C; color: #F5F2EA; padding: 18px 20px; font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 12.5px; line-height: 20px; white-space: pre; overflow: hidden"><span style="color: #A3A7AF">$</span> sheepdog factory doctor ~/projects/herdr-sheepdog
+<span style="color: #A3A7AF">Before you leave</span>
+<span style="color: #5CC792">ok   </span> engine       unpacked 0.1.31, managed Python ready
+<span style="color: #5CC792">ok   </span> agent CLIs   claude, codex, agy signed in
+<span style="color: #5CC792">ok   </span> gh           signed in, default repo pinned
+<span style="color: #F5B83D">WARN </span> quota        codexbar is not installed: pools read unknown
+                    fix: nothing needed. Install CodexBar to see quota.
+<span style="color: #F26B5B">FAIL </span> model        no model is set for codex reviewers in this project
+                    fix: herdr-task project set reviewer.codex.model=&lt;id&gt;  (codex offers: gpt-6.2-sol, gpt-6.1-terra)
+
+<span style="color: #A3A7AF">Running now</span>
+<span style="color: #5CC792">ok   </span> coordinator  one lease holder: t41, claude-opus-5-5, last turn 2 min ago
+<span style="color: #5CC792">ok   </span> main         green
+<span style="color: #F26B5B">FAIL </span> dialog       SDF-53 worker has waited on a CLI dialog for 14 min
+                    fix: on the phone, Agents, Needs you, SDF-53, Open window, and answer it there
+<span style="color: #F5B83D">WARN </span> stale ask    ask-7 is open on a done task, SDF-31
+                    fix: nothing needed. It closes at the next tick.
+<span style="color: #5CC792">ok   </span> drift        approved and not merged: none over 30 min
+
+2 failed, 2 warnings. Exit 1.</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview": {"width": 1100, "height": 980}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

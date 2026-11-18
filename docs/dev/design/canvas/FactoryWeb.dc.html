@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — /factory web page</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button,input{font:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<div style="min-height: 100vh; box-sizing: border-box; background: #FAF8F3; color: #1F1F22; font-family: Inter, -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+<div style="max-width: 1360px; margin: 0 auto; padding: 32px 5%; display: flex; flex-direction: column; gap: 28px">
+
+  <header style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 20px">
+    <h1 style="margin: 0; font-family: Outfit, Inter, system-ui, sans-serif; font-size: 2rem; font-weight: 600">Factory</h1>
+    <span style="font-size: 1rem; color: #6B6E75">herdr-sheepdog · read only · updated 14:32</span>
+    <span style="flex-grow: 1"></span>
+    <span style="font-size: 0.875rem; color: #6B6E75">Pools: claude unknown · codex unknown · agy 62% of 5 h</span>
+  </header>
+
+  <section aria-label="Needs you" style="padding: 16px 20px; border-radius: 14px; background: #FDF1DC; border: 1px solid #D99417; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px">
+    <div style="flex: 999 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+      <span style="font-size: 0.8125rem; font-weight: 600; color: #8A5700">Needs you · 1 · release</span>
+      <span style="font-size: 1.125rem; font-weight: 600">Tag 0.1.31 now? Milestone 2 is accepted and main is green.</span>
+    </div>
+    <span style="font-size: 0.875rem; color: #6B6E75">Answer on your phone or by voice. This page never answers.</span>
+  </section>
+
+  <section aria-label="Milestones" style="display: flex; flex-direction: column; gap: 12px">
+    <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px">
+      <h2 style="margin: 0; font-family: Outfit, Inter, system-ui, sans-serif; font-size: 1.375rem; font-weight: 600">Milestone 3 of 4 · 7 of 12 merged</h2>
+      <span style="font-size: 0.9375rem; color: #6B6E75">The path to done runs through SDF-53, then SDF-15: about 5 hours.</span>
+      <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: #1F1F22"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 4px; border: 2px solid #1F1F22"></span>critical path</span>
+    </div>
+    <div style="overflow-x: auto">
+    <div style="min-width: 960px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; align-items: start">
+      <sc-for list="{{ milestones }}" as="m" hint-placeholder-count="4">
+        <div style="border-radius: 14px; background: {{ m.bg }}; border: {{ m.border }}; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; flex-direction: column; gap: 2px">
+            <span style="font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; color: #6B6E75">{{ m.state }}</span>
+            <span style="font-size: 1.0625rem; font-weight: 600">{{ m.title }}</span>
+            <span style="font-size: 0.8125rem; line-height: 1.4; color: #6B6E75">{{ m.exit }}</span>
+          </div>
+          <sc-for list="{{ m.layers }}" as="g" hint-placeholder-count="2">
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <span style="font-size: 0.75rem; font-weight: 600; color: #6B6E75">{{ g.label }}</span>
+              <sc-for list="{{ g.tasks }}" as="t" hint-placeholder-count="2">
+                <a href="FactoryWorker.dc.html" style="border-radius: 10px; background: #FFFFFF; border: {{ t.border }}; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; color: #1F1F22; text-decoration: none">
+                  <span style="font-size: 0.875rem; font-weight: 600"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.75rem">{{ t.id }}</span> {{ t.title }}</span>
+                  <span style="font-size: 0.8125rem; line-height: 1.35; color: #6B6E75">{{ t.why }}</span>
+                </a>
+              </sc-for>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+    </div>
+  </section>
+
+  <section aria-label="Debug" style="border-top: 1px solid #E4E0D7; padding-top: 16px; display: flex; flex-direction: column; gap: 16px">
+    <button aria-expanded="true" style="align-self: flex-start; min-height: 44px; border: 0; background: transparent; color: #1F1F22; padding: 0; display: flex; align-items: center; gap: 8px; font-size: 1.0625rem; font-weight: 600"><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>Debug<span style="font-size: 0.875rem; font-weight: 400; color: #6B6E75">collapsed by default · for trial use</span></button>
+    <div style="display: flex; flex-wrap: wrap; gap: 16px">
+      <div style="flex: 999 1 560px; min-width: 0; border-radius: 14px; background: #FFFFFF; border: 1px solid #E4E0D7; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px">
+        <h3 style="margin: 0; font-size: 0.9375rem; font-weight: 600">Recent wakes and decisions <span style="font-weight: 400; color: #6B6E75">· the last lines of factory log</span></h3>
+        <div style="overflow-x: auto"><div style="min-width: 640px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.75rem; line-height: 1.7; white-space: pre">14:02  engine       event:ready    SDF-41  accept           2 rounds passed, CI green
+14:05  engine       tick:drift     SDF-38  wake-coordinator CI red on a reviewed head
+14:05  coordinator  event:drift    SDF-57  add              fix the flaky socket test
+14:06  engine       start          SDF-57  start            gpt-6.2-sol/high
+<span style="background: #FDF1DC; color: #8A5700">14:09  owner        input:phone    -       typed            prompt to coordinator, 34 chars</span>
+14:09  coordinator  input:owner    SDF-54  plan-amend       owner: after SDF-53
+14:31  engine       round          SDF-53  review-round-1   reviewer claude-fable-5-2</div></div>
+      </div>
+      <div style="flex: 1 1 360px; min-width: 0; border-radius: 14px; background: #FFFFFF; border: 1px solid #E4E0D7; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px">
+        <h3 style="margin: 0; font-size: 0.9375rem; font-weight: 600">Drift checks <span style="font-weight: 400; color: #6B6E75">· last tick 14:32</span></h3>
+        <sc-for list="{{ drift }}" as="d" hint-placeholder-count="6">
+          <div style="display: flex; align-items: baseline; gap: 8px; font-size: 0.875rem; line-height: 1.4"><span style="flex-shrink: 0; width: 64px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.75rem; font-weight: 600; color: {{ d.color }}">{{ d.result }}</span><span style="min-width: 0">{{ d.text }}</span></div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="border-radius: 14px; background: #FFFFFF; border: 1px solid #E4E0D7; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px">
+      <h3 style="margin: 0; font-size: 0.9375rem; font-weight: 600">Model and review rounds per task <span style="font-weight: 400; color: #6B6E75">· asked for and actually used</span></h3>
+      <div style="overflow-x: auto">
+      <table style="min-width: 880px; width: 100%; border-collapse: collapse; font-size: 0.875rem; text-align: left">
+        <thead><tr style="color: #6B6E75; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.2px"><th style="padding: 6px 8px 6px 0; font-weight: 600">Task</th><th style="padding: 6px 8px; font-weight: 600">Worker asked</th><th style="padding: 6px 8px; font-weight: 600">Worker used</th><th style="padding: 6px 8px; font-weight: 600">Source</th><th style="padding: 6px 8px; font-weight: 600">Reviewer</th><th style="padding: 6px 8px; font-weight: 600">Rounds</th><th style="padding: 6px 8px; font-weight: 600">Majors by round</th><th style="padding: 6px 0 6px 8px; font-weight: 600">Terminal</th></tr></thead>
+        <tbody>
+          <sc-for list="{{ runs }}" as="r" hint-placeholder-count="5">
+            <tr style="border-top: 1px solid #E4E0D7"><td style="padding: 8px 8px 8px 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.8125rem; font-weight: 600">{{ r.id }}</td><td style="padding: 8px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.8125rem">{{ r.asked }}</td><td style="padding: 8px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.8125rem">{{ r.used }}</td><td style="padding: 8px; color: {{ r.srcColor }}">{{ r.src }}</td><td style="padding: 8px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.8125rem">{{ r.reviewer }}</td><td style="padding: 8px">{{ r.rounds }}</td><td style="padding: 8px">{{ r.majors }}</td><td style="padding: 8px 0 8px 8px"><a href="FactoryWorker.dc.html">{{ r.term }}</a></td></tr>
+          </sc-for>
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </section>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview": {"width": 1440, "height": 1620}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const line = "1px solid #E4E0D7", path = "2px solid #1F1F22";
+    const t = (id, title, why, p) => ({ id, title, why, border: p ? path : line });
+    const milestones = [
+      { state: "M1 · done", title: "Extraction", exit: "The suite passes with no herdr-app installed.", bg: "#F1EEE7", border: line, layers: [
+        { label: "14 tasks merged", tasks: [t("SDF-4", "Move the engine into factory/", "Merged", false), t("SDF-44", "PR leg on the macOS test VM", "Merged", false)] } ] },
+      { state: "M2 · done", title: "One install, staying alive", exit: "Reboot mid-task: work resumes in 5 minutes, one coordinator.", bg: "#F1EEE7", border: line, layers: [
+        { label: "11 tasks merged", tasks: [t("SDF-16", "Coordinator lease and reconcile", "Merged after a retro: split", false), t("SDF-31", "Milestones, plan apply and amend", "Merged", false)] } ] },
+      { state: "M3 · active", title: "Owner channel", exit: "One full day by voice and phone only.", bg: "#FFFFFF", border: "1px solid #8E929A", layers: [
+        { label: "Layer 1 · running", tasks: [t("SDF-53", "Codex launch flags", "Working · round 0 of 2", true), t("SDF-54", "Model on every run", "Held by the owner until SDF-53 merges", false)] },
+        { label: "Layer 2 · waiting", tasks: [t("SDF-48", "drift_pass", "Waiting on review, round 2 of 2", true), t("SDF-55", "Quota unknown is a value", "Waiting on CI, 18 min", false)] },
+        { label: "Layer 3 · blocked by a task", tasks: [t("SDF-15", "Switch the running factory", "Waiting on SDF-48 and SDF-53", true)] } ] },
+      { state: "M4 · planned", title: "Graph and page", exit: "“What is blocking milestone 2?” is answered by voice.", bg: "#FAF8F3", border: "1px dashed #CFC9BC", layers: [
+        { label: "Waits for the design to pass", tasks: [t("design", "Draw /factory and the debug section", "Design task first: drawn, exported, reviewed", false), t("split", "Implementation tasks", "Not split yet. Each will link its boards", false)] } ] }
+    ];
+    const ok = "#1D6B46", warn = "#8A5700", unk = "#6B6E75";
+    const drift = [
+      { result: "ok", color: ok, text: "Approved, not merged: none over 30 min" },
+      { result: "found", color: warn, text: "Red after approval: SDF-38. Coordinator woken, SDF-57 opened" },
+      { result: "ok", color: ok, text: "Claim matches state: 12 tasks checked" },
+      { result: "found", color: warn, text: "Stale ask: ask-7 on a done task. Closes next tick" },
+      { result: "ok", color: ok, text: "Coordinator has had a turn in the last 30 min" },
+      { result: "unknown", color: unk, text: "Quota: could not look. codexbar is not installed" }
+    ];
+    const run = (id, asked, used, src, reviewer, rounds, majors, term) => ({ id, asked, used, src, reviewer, rounds, majors, term, srcColor: src === "CLI default" ? warn : "#1F1F22" });
+    const runs = [
+      run("SDF-53", "gpt-6.2-sol / high", "gpt-6.2-sol", "task", "claude-fable-5-2", "1 of 2", "r1: running", "Open window"),
+      run("SDF-54", "gemini-4-carbon-high", "gemini-4-carbon", "project", "gpt-6.2-sol / high", "0 of 2", "none yet", "Open window"),
+      run("SDF-48", "claude-opus-5-5 / high", "claude-opus-5-5", "task", "gpt-6.2-sol / high", "2 of 2", "r1: 2 · r2: running", "Open window"),
+      run("SDF-55", "sonnet / medium", "unknown", "project", "gpt-6.2-sol", "2 of 2", "r1: 1 · r2: 0", "Ended"),
+      run("SDF-57", "gpt-6.2-sol / high", "gpt-6.2-sol", "project", "claude-fable-5-2", "0 of 2", "none yet", "Open window")
+    ];
+    return { milestones, drift, runs };
+  }
+}
+</script>
+</body>
+</html>

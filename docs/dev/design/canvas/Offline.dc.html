@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — offline</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; display: flex; flex-direction: column; overflow: hidden; background: #FAF8F3; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <dc-import name="TopBar" pane="agents" waiting="0" hint-size="390px,102px"></dc-import>
+
+  <main style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 0 28px 96px; text-align: center; border-top: 1px solid #E4E0D7">
+    <img src="/_blob/638094d9433720aab6196c2b1426cfb8" alt="The sheepdog mascot asleep" style="width: 200px; height: 109px; object-fit: contain">
+    <h1 style="margin: 6px 0 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 24px; font-weight: 700">Can't reach your computer</h1>
+    <p style="margin: 0; font-size: 15px; color: #6B6E75">Last seen at 9:12.</p>
+    <ul style="margin: 4px 0 0; padding: 14px 16px; list-style: none; border-radius: 14px; background: #FFFFFF; border: 1px solid #E4E0D7; display: flex; flex-direction: column; gap: 10px; text-align: left; align-self: stretch">
+      <li style="display: flex; gap: 10px; font-size: 15px; line-height: 20px"><span style="width: 20px; height: 20px; flex-shrink: 0; border-radius: 10px; background: #F1EEE7; color: #6B6E75; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center">1</span>Is the Mac awake?</li>
+      <li style="display: flex; gap: 10px; font-size: 15px; line-height: 20px"><span style="width: 20px; height: 20px; flex-shrink: 0; border-radius: 10px; background: #F1EEE7; color: #6B6E75; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center">2</span>Is sheepdog running there?</li>
+      <li style="display: flex; gap: 10px; font-size: 15px; line-height: 20px"><span style="width: 20px; height: 20px; flex-shrink: 0; border-radius: 10px; background: #F1EEE7; color: #6B6E75; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center">3</span>Are this phone and the Mac on the same Tailscale network?</li>
+    </ul>
+    <button style="margin-top: 6px; align-self: stretch; height: 50px; border-radius: 25px; border: 0; background: #D98718; color: #1F1F22; font-size: 17px; font-weight: 600">Try again</button>
+    <a href="#fix" style="display: inline-flex; align-items: center; min-height: 44px; font-size: 15px; font-weight: 500; text-decoration: none">How to fix this</a>
+  </main>
+
+  <div style="position: absolute; left: 12px; bottom: 26px; width: 366px; height: 60px; display: flex">
+    <dc-import name="Dock" label="Sheepdog" status="Offline since 9:12" mode="offline" style="display: block; width: 366px; height: 60px" hint-size="366px,60px"></dc-import>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

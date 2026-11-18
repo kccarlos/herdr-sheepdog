@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — Agents, one computer</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; display: flex; flex-direction: column; overflow: hidden; background: {{ bg }}; color: {{ ink }}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <dc-import name="TopBar" pane="agents" waiting="1" dark="{{ dark }}" hint-size="390px,102px"></dc-import>
+
+  <main style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 8px; padding: 10px 16px 0; border-top: 1px solid {{ line }}">
+    <dc-import name="AgentSection" label="Needs you" count="1" dark="{{ dark }}" style="display: block; flex-shrink: 0" hint-size="358px,24px"></dc-import>
+    <dc-import name="AgentCard" agent="auth-fix" dark="{{ dark }}" w="{{ 358 }}" style="display: block; width: 358px; flex-shrink: 0" hint-size="358px,260px"></dc-import>
+    <dc-import name="AgentSection" label="Working" count="3" dark="{{ dark }}" style="display: block; flex-shrink: 0" hint-size="358px,24px"></dc-import>
+    <sc-for list="{{ working }}" as="r" hint-placeholder-count="3">
+      <dc-import name="AgentCard" agent="{{ r.id }}" open="{{ false }}" dark="{{ dark }}" w="{{ 358 }}" style="display: block; width: 358px; flex-shrink: 0" hint-size="358px,70px"></dc-import>
+    </sc-for>
+    <dc-import name="AgentSection" label="Done" count="2" dark="{{ dark }}" style="display: block; flex-shrink: 0" hint-size="358px,24px"></dc-import>
+    <sc-for list="{{ doneList }}" as="r" hint-placeholder-count="2">
+      <dc-import name="AgentCard" agent="{{ r.id }}" open="{{ false }}" unread="{{ r.unread }}" dark="{{ dark }}" w="{{ 358 }}" style="display: block; width: 358px; flex-shrink: 0" hint-size="358px,70px"></dc-import>
+    </sc-for>
+    <button style="flex-shrink: 0; align-self: flex-start; border: 0; background: transparent; color: {{ ink2 }}; padding: 6px 4px; display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500">
+      <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+      Not running (2)
+    </button>
+  </main>
+
+  <div style="position: absolute; left: 12px; bottom: 26px; width: 366px; height: 60px; display: flex">
+    <dc-import name="Dock" label="Sheepdog" status="{{ dockStatus }}" mode="{{ dockMode }}" dark="{{ dark }}" style="display: block; width: 366px; height: 60px" hint-size="366px,60px"></dc-import>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"dockMode":{"editor":"enum","options":["quiet","live","stopped","stoppedquiet","offline"],"default":"quiet"},"dockStatus":{"editor":"text","default":"Listening"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const d = !!this.props.dark;
+    return {
+      dark: d,
+      dockMode: this.props.dockMode ?? 'quiet', dockStatus: this.props.dockStatus ?? 'Listening',
+      bg: d ? '#16181C' : '#FAF8F3', ink: d ? '#F5F2EA' : '#1F1F22', ink2: d ? '#A3A7AF' : '#6B6E75', line: d ? '#2E3138' : '#E4E0D7',
+      working: [{ id: 'payments' }, { id: 'api-docs' }, { id: 'search' }],
+      doneList: [{ id: 'migrate', unread: true }, { id: 'e2e', unread: false }]
+    };
+  }
+}
+</script>
+</body>
+</html>

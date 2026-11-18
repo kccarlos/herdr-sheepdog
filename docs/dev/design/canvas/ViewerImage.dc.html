@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — Viewer — image, fit to screen</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button,input{font:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; display: flex; flex-direction: column; overflow: hidden; background: {{c.bg}}; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+<dc-import name="BrowseBar" head="login-flow.png" sub="docs/images" left="back" right="more" seg="" count="6" dark="{{ dark }}" style="display: block; flex-shrink: 0" hint-size="390px,106px"></dc-import><div style="flex-grow: 1; min-height: 0; overflow: hidden; background: {{c.surface2}}; display: flex; align-items: center; justify-content: center; padding: 0 16px"><svg width="358" viewBox="0 0 358 200" role="img" aria-label="A diagram: the login page sets a cookie, the app reads it, and the session starts." style="display: block; background: #FFFFFF; border-radius: 6px; flex-shrink: 0; font-family: Inter, system-ui, sans-serif">
+<rect x="14" y="70" width="86" height="60" rx="8" fill="#FDF1DC" stroke="#D99417" stroke-width="1.500"></rect><text x="57" y="105" text-anchor="middle" font-size="13" font-weight="600" fill="#1F1F22">/login</text>
+<rect x="136" y="70" width="86" height="60" rx="8" fill="#F1EEE7" stroke="#8E929A" stroke-width="1.500"></rect><text x="179" y="105" text-anchor="middle" font-size="13" font-weight="600" fill="#1F1F22">cookie</text>
+<rect x="258" y="70" width="86" height="60" rx="8" fill="#DDEEE4" stroke="#1D6B46" stroke-width="1.500"></rect><text x="301" y="105" text-anchor="middle" font-size="13" font-weight="600" fill="#1F1F22">/app</text>
+<path d="M100 100h30M222 100h30" stroke="#1F1F22" stroke-width="1.500" fill="none"></path><path d="M126 95l6 5-6 5M248 95l6 5-6 5" stroke="#1F1F22" stroke-width="1.500" fill="none"></path>
+<text x="179" y="170" text-anchor="middle" font-size="11" fill="#6B6E75">Path=/ so both pages see it</text></svg></div><div style="flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 8px 16px 34px; border-top: 1px solid {{c.line}}; background: {{c.surface}}"><span style="flex-grow: 1; display: flex; flex-direction: column; gap: 1px; font-size: 12px; color: {{c.ink2}}"><span style="font-size: 14px; font-weight: 500; color: {{c.ink}}">Pinch or double-tap to zoom</span>1280 × 720 · 184 KB</span><nav aria-label="View" style="height: 34px; flex-shrink: 0; padding: 3px; box-sizing: border-box; border-radius: 11px; background: {{c.track}}; display: flex; gap: 2px"><button aria-current="true" style="border: 0; border-radius: 8px; background: {{c.sel}}; box-shadow: {{c.shadow}}; font-weight: 600; color: {{c.ink}}; font-size: 13px; padding: 0 12px">Fit</button><button style="border: 0; border-radius: 8px; background: transparent; font-weight: 500; color: {{c.ink}}; font-size: 13px; padding: 0 12px">100%</button></nav></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "$preview": {"width": 390, "height": 844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "surface2": "#F1EEE7", "track": "#ECE8DF", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "accent": "#D98718", "accentText": "#8A5700", "accentTint": "#FDF1DC", "blocked": "#D99417", "blue": "#1F5F9E", "green": "#1D6B46", "idle": "#5C6370", "red": "#B42318", "side": "#F3F0E8", "selBg": "#E5DFD2", "sel": "#FFFFFF", "shadow": "0 1px 2px rgba(31,31,34,0.12)", "dash": "#CFC9BC", "chevron": "#8E929A", "kw": "#6A46B0", "str": "#1D6B46", "fn": "#1F5F9E", "num": "#8A5700", "add": "#1A8038", "rem": "#BF2924", "addFill": "rgba(52,199,89,0.12)", "remFill": "rgba(255,59,48,0.12)", "addWord": "rgba(52,199,89,0.32)", "remWord": "rgba(255,59,48,0.32)", "scrim": "rgba(31,31,34,0.32)", "wash": "rgba(250,248,243,0.55)", "pop": "0 12px 40px rgba(31,31,34,0.18), 0 0 0 1px #E4E0D7"};
+    const dark = {"bg": "#16181C", "surface": "#1F2126", "surface2": "#26292F", "track": "#26292F", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138", "accent": "#F39C1F", "accentText": "#F5B83D", "accentTint": "#2A2416", "blocked": "#F0A92A", "blue": "#6AA8EB", "green": "#5CC792", "idle": "#9AA1AD", "red": "#F26B5B", "side": "#1B1D22", "selBg": "#2C2F36", "sel": "#3A3D44", "shadow": "0 1px 2px rgba(0,0,0,0.5)", "dash": "#3E4148", "chevron": "#8E929A", "kw": "#B195F0", "str": "#5CC792", "fn": "#6AA8EB", "num": "#F5B83D", "add": "#6BD185", "rem": "#FF7A73", "addFill": "rgba(48,209,88,0.12)", "remFill": "rgba(255,69,58,0.12)", "addWord": "rgba(48,209,88,0.32)", "remWord": "rgba(255,69,58,0.32)", "scrim": "rgba(0,0,0,0.5)", "wash": "rgba(22,24,28,0.55)", "pop": "0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px #2E3138"};
+    const d = !!this.props.dark;
+    const c = d ? dark : light;
+    
+    return { c, dark: d,  };
+  }
+}
+</script>
+</body>
+</html>
