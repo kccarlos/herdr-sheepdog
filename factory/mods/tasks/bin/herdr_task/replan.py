@@ -338,7 +338,7 @@ def _is_stale_worker_held_item(item, ref=None):
         if text.startswith((f"Stop {ref}: ", f'Merge task {ref} "', f'Task {ref} "')):
             return True
         tag = f'<herdr-news task="{ref}"'
-        if text.startswith(tag) and 'event="answer"' not in text:
+        if text.startswith(tag) and 'event="answer"' not in text and 'event="backup"' not in text:
             return True
     elif text.startswith("Stop ") and ("recap first" in text or "two rounds in a row with new majors" in text):
         return True
@@ -351,7 +351,7 @@ def _strip_stale_task_news_lines(text, ref):
         return text
     kept = [
         ln for ln in text.splitlines()
-        if not (ln.startswith(tag) and 'event="answer"' not in ln)
+        if not (ln.startswith(tag) and 'event="answer"' not in ln and 'event="backup"' not in ln)
     ]
     return "\n".join(kept).strip()
 
@@ -427,7 +427,7 @@ def clear_task_held_news(s, task, retiring=(), *, at=None):
 
 def _apply_live_reviewers(ctx):
     t = ctx["task"]
-    retiring = collect_live_reviewers(ctx["store"], t, dry=ctx["dry"])
+    retiring = ctx["pre_retiring"] if "pre_retiring" in ctx else collect_live_reviewers(ctx["store"], t, dry=ctx["dry"])
     if retiring:
         t["retiring_reviewers"] = retiring
     else:
@@ -715,9 +715,10 @@ def replan_task(s, task, *, why, at=None, dry=False, defer_side_effects=False):
     prev_reset = int(task.get("review_reset_at") or 0)
     at = max(now(), prev_reset + 1) if at is None else max(int(at), prev_reset + 1)
     was_merge_queued = bool(task.get("merge_queued"))
+    pre_retiring = collect_live_reviewers(s, task, dry=dry)
     if not dry and not defer_side_effects:
         cancel_queued_merge(s, task, was_merge_queued=was_merge_queued)
-    ctx = {"store": s, "task": task, "why": why, "at": at, "dry": dry, "retiring": []}
+    ctx = {"store": s, "task": task, "why": why, "at": at, "dry": dry, "pre_retiring": pre_retiring, "retiring": []}
     for row in REPLAN_TABLE:
         row.apply(ctx)
     if s is not None:
@@ -737,10 +738,11 @@ def select_retro_plan_targets(s, plan_tasks, by_key, reason, *, has_structural_c
         return targets
 
     open_tasks = [o for t, _ in plan_tasks if (o := by_key.get(t["key"])) is not None and o["state"] != "done"]
+    own_prefix = (getattr(s, "prefix", None) or "").upper()
     ref_tokens = [
         m.group(0)
         for m in re.finditer(r"(?<![\w-])([A-Za-z]{2,5}[0-9]*)-[0-9]+(?![\w-])", reason)
-        if m.group(1).upper() not in NON_TASK_PREFIXES
+        if m.group(1).upper() == own_prefix or m.group(1).upper() not in NON_TASK_PREFIXES
     ]
     if ref_tokens:
         return [

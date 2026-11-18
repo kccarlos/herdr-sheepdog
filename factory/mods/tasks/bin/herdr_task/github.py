@@ -274,11 +274,17 @@ def pr_head_problem(s, task, repo, head, theirs=None):
     ahead = os.path.isdir(wt) and git(wt, "rev-parse", f"refs/heads/{task.get('branch')}")[1] == head \
         and git(wt, "merge-base", "--is-ancestor", theirs, head)[0]
     if ahead:
+        from .replan import _last_new_recap_at
+        reset_before = int(task.get("review_reset_at") or _last_new_recap_at(task) or 0)
         try:
             push_branch(s, task)
+            if int(task.get("review_reset_at") or _last_new_recap_at(task) or 0) != reset_before or task.get("recap"):
+                ref = s.ref(task) if s is not None and hasattr(s, "ref") else (task.get("branch") or "task")
+                return f"{ref} was re-planned while pushing {task.get('branch') or ''}; its pull request was not updated.".replace("  ", " ")
         except Fail as e:
             return str(e)
-        pr["checked"] = 0  # the next tick reads its state again (a conflict the push cleared goes away)
+        if isinstance(task.get("pr"), dict):
+            task["pr"]["checked"] = 0  # the next tick reads its state again (a conflict the push cleared goes away)
         s.dirty = True
         ok, theirs, _ = ask()
         if not ok or theirs == head:
@@ -298,7 +304,12 @@ def pr_open(s, task, repo, summary=None):
         if summary:
             pr_note(task, task["pr"].get("repo") or repo, summary)
         return task["pr"]
+    from .replan import _last_new_recap_at
+    reset_before = int(task.get("review_reset_at") or _last_new_recap_at(task) or 0)
     push_branch(s, task)
+    if int(task.get("review_reset_at") or _last_new_recap_at(task) or 0) != reset_before or task.get("recap"):
+        ref = s.ref(task) if s is not None and hasattr(s, "ref") else br
+        raise Fail(f"{ref} was re-planned while pushing {br}; its pull request was not opened or updated.")
     pr = task.get("pr") or {}
     if pr.get("number"):
         pr["repo"] = repo

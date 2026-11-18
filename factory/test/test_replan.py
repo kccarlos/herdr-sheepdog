@@ -200,7 +200,10 @@ class ReplanTableTests(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.object(sys, "argv", ["herdr-task", *argv, "--folder", self.repo, "--json"]), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = self.cli.main()
+            try:
+                rc = self.cli.main()
+            except SystemExit as e:
+                rc = int(e.code or 0)
         raw = out.getvalue().strip()
         return rc, (json.loads(raw) if raw else None)
 
@@ -1177,6 +1180,121 @@ class ReplanTableTests(unittest.TestCase):
         self.assertEqual(self.budget.rounds_since(legacy), [])
         self.assertEqual(self.commands.next_round(legacy), 1)
         self.assertEqual(self.commands.gate_passes(legacy, self.head1), 0)
+
+    def test_round_3_review_findings(self):
+        # 1a. cmd_accept / run_pr_merge on a Ready task with push_held refuses merge when re-planned during push_branch's released() window.
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            t.pop("pr", None)
+            t["state"] = "ready"
+            t["ready_at"] = 5000
+            t["head"] = self.head1
+            t["summary"] = "Ship attempt 1"
+            t["push_held"] = {"reason": "CI cap", "at": 4900}
+            s.dirty = True
+
+        def replan_during_push(s_push, task_push):
+            with s_push.released():
+                with self.open(True) as s_other:
+                    t_other = self.find_key(s_other, "api")
+                    self.replan.replan_task(s_other, t_other, why="replan during accept push")
+
+        self.gh_calls.clear()
+        with mock.patch.object(self.commands, "github", lambda folder: "org/repo"), \
+                mock.patch.object(self.github, "github", lambda folder: "org/repo"), \
+                mock.patch.object(self.commands, "own_open_pr", lambda s, t: None), \
+                mock.patch.object(self.commands, "pr_merged_at_tip", lambda s, t, repo: None), \
+                mock.patch.object(self.github, "pr_at_tip", lambda t, repo: None), \
+                mock.patch.object(self.github, "push_branch", replan_during_push):
+            rc, bad = self.run_cli("accept", "TST-1")
+        self.assertEqual(rc, 1)
+        self.assertIn("re-planned", bad["error"])
+        self.assertFalse(any(c[:2] == ("pr", "create") or c[:2] == ("pr", "merge") for c in self.gh_calls), self.gh_calls)
+        with self.open() as s:
+            t = self.find_key(s, "api")
+            self.assertEqual(t["state"], "running")
+            self.assertNotIn("merge_queued", t)
+            self.assertNotIn("accepted_by", t)
+            self.assertNotIn("auto_merge", t)
+
+        # 1b. merge_now refuses merge when re-planned during pr_head_problem's push_branch released() window.
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            t["state"] = "ready"
+            t["ready_at"] = 6000
+            t["head"] = self.head1
+            t["pr"] = {"number": 42, "url": "https://github.com/org/repo/pull/42", "repo": "org/repo"}
+            s.dirty = True
+        self.gh_calls.clear()
+        with self.open(True) as s, \
+                mock.patch.object(self.commands, "github", lambda folder: "org/repo"), \
+                mock.patch.object(self.commands, "pr_view", lambda t: {
+                    "state": "OPEN", "headRefOid": self.base_sha, "mergeStateStatus": "CLEAN",
+                    "statusCheckRollup": [{"name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}],
+                }), \
+                mock.patch.object(self.github, "push_branch", replan_during_push):
+            t = self.find_key(s, "api")
+            err = self.commands.merge_now(s, t, accepting=True)
+        self.assertIn("re-planned", err)
+        self.assertFalse(any(c[:2] == ("pr", "merge") for c in self.gh_calls), self.gh_calls)
+        with self.open() as s:
+            t = self.find_key(s, "api")
+            self.assertEqual(t["state"], "running")
+            self.assertNotIn("merge_queued", t)
+
+        # 2. select_retro_plan_targets honors task refs whose prefix matches the store's own prefix even if in NON_TASK_PREFIXES (e.g. RFC).
+        with self.open() as s:
+            old_prefix = s.data.get("prefix")
+            try:
+                s.data["prefix"] = "RFC"
+                by_key = {o["plan_key"]: o for o in s.data["tasks"] if o.get("plan_key")}
+                plan_tasks = [({"key": "api"}, "M1"), ({"key": "api-v2"}, "M1")]
+                picked = [s.ref(o) for o in self.replan.select_retro_plan_targets(
+                    s, plan_tasks, by_key, "retro RFC-2: retain the api contract"
+                )]
+                self.assertEqual(picked, ["RFC-2"])
+            finally:
+                s.data["prefix"] = old_prefix
+
+        # 3. Immediate replan_task checks live reviewers BEFORE dequeuing GitHub PR, leaving queue and merge_queued intact if hc ls fails.
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            t["pr"] = {"number": 42, "url": "https://github.com/org/repo/pull/42", "repo": "org/repo"}
+            t["merge_queued"] = 7000
+            t["reviewers"] = [{"address": "worker-reviewer"}]
+            t["recap"] = {"at": 7100, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
+            s.dirty = True
+        self.queue_state.update({"state": "OPEN", "in": True, "auto": True})
+        self.gh_calls.clear()
+        with mock.patch.object(self.agents, "_live", self.real_agents_live), \
+                mock.patch.object(self.agents, "hc_json", lambda *a: None):
+            rc, bad = self.run_cli("recap", "TST-1", "--decide", "new", "--why", "hc down while queued")
+        self.assertEqual(rc, 1)
+        self.assertIn("Couldn't list the task's terminals", bad["error"])
+        self.assertEqual(self.gh_calls, [])
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            self.assertEqual(t.get("merge_queued"), 7000)
+            t.pop("merge_queued", None)
+            t.pop("recap", None)
+            s.dirty = True
+        self.queue_state.update({"in": False, "auto": False})
+
+        # 4. clear_task_held_news preserves event="backup" notices in pending .held.json batches while stripping stale task news.
+        backup_line = '<herdr-news task="TST-1" title="Api" folder="repo" status="needs" event="backup">backup saved</herdr-news>'
+        stale_line = '<herdr-news task="TST-1" title="Api" folder="repo" status="ready" event="ready">ready</herdr-news>'
+        with open(self.held_file, "w") as f:
+            json.dump({
+                "coord-1": [{"how": "news", "text": backup_line + "\n" + stale_line, "at": 8000}],
+                "w1": [{"text": backup_line, "at": 8001}, {"text": stale_line, "at": 8002}],
+            }, f)
+        with self.open() as s:
+            t = self.find_key(s, "api")
+            self.replan.clear_task_held_news(s, t, at=8500)
+        with open(self.held_file) as f:
+            held_after = json.load(f)
+        self.assertEqual(held_after["coord-1"], [{"how": "news", "text": backup_line, "at": 8000}])
+        self.assertEqual(held_after["w1"], [{"text": backup_line, "at": 8001}])
 
 
 if __name__ == "__main__":
