@@ -6094,6 +6094,40 @@ class Scheduled(unittest.TestCase):
             self.assertEqual(self.tick_at(None), ["APP-3"])
         self.assertEqual(self.task(2)["state"], "queued")
 
+    def test_stopped_agent_does_not_block_queued_start(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        self.busy_folder(1, [("Next", False)])
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            s.find(1)["agents"][-1]["at"] = 1
+            s.dirty = True
+        # The agent exited, leaving a shell whose last reported status is still Working.
+        record = {"address": "t1", "agent": "claude", "status": "working"}
+        shell = {**record, "foreground": {"name": "zsh", "argv": ["zsh", "-i"]}}
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "live_agents", lambda key: [record]), \
+                mock.patch.object(queues, "detail", lambda k: shell):
+            self.assertEqual(self.tick_at(None), ["APP-2"])
+
+    def test_tasks_waiting_on_person_or_coordinator_do_not_block_queued_start(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        self.busy_folder(3, [("Next", False)])
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            for i in (1, 2, 3):
+                s.find(i)["agents"][-1]["at"] = 1
+            s.find(2)["device_wait"] = {"why": "Connect the device"}
+            s.dirty = True
+        live = {
+            "1": [{"address": "t1", "agent": "claude", "status": "idle"}],
+            "2": [{"address": "t2", "agent": "claude", "status": "working"}],
+            "3": [{"address": "t3", "agent": "claude", "status": "blocked"}],
+        }
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "live_agents", lambda key: live[key.split("#")[-1]]), \
+                mock.patch.object(queues, "detail", lambda k: k):
+            self.assertEqual(self.tick_at(None), ["APP-4"])
+
     def test_without_priority_the_queue_is_oldest_first_within_the_cap(self):
         from unittest import mock
         self.busy_folder(1, [("Older", False), ("Newer", False)])
@@ -9233,6 +9267,32 @@ class Resume(unittest.TestCase):
             last = s.find(ref)["agents"][-1]
             self.assertEqual(last["argv"], ["agy", "--model", "gemini-4-argon-high", "--dangerously-skip-permissions"])
             self.assertEqual(last["session"], "0199-sid")
+
+    def test_resumed_agent_counts_again(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        ref = self.started_task({"agent": "agy"})
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo)) as s:
+            s.find(ref)["agents"][-1]["ended"] = queues.now()
+            s.dirty = True
+        with mock.patch.object(queues, "live_agents", lambda key: []):
+            with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo), write=False) as s:
+                self.assertEqual(queues.running_count(s), 0)
+            self.call(self.commands.cmd_resume, id=ref, agent=None, argv=None, parent=None)
+            with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo), write=False) as s:
+                self.assertEqual(queues.running_count(s), 1)
+
+    def test_resume_refuses_when_the_running_cap_is_full(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        from herdr_task.base import Fail
+        ref = self.started_task({"agent": "agy"}, set=["priority=urgent"])
+        self.started_task({"agent": "agy"})
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "live_agents", lambda key: []):
+            with self.assertRaisesRegex(Fail, "Can't resume .*1 task is running here"):
+                self.call(self.commands.cmd_resume, id=ref, agent=None, argv=None, parent=None)
+        self.assertEqual(len(self.runs), 2)
 
     def test_a_resumed_agy_worker_idle_at_turn_0_gets_one_nudge(self):
         """FAC-100 (note 14): a resumed agy session sits at turn 0 until it hears something: the tick nudges it once."""

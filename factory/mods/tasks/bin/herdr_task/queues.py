@@ -7,7 +7,8 @@ import subprocess
 import sys
 
 from .base import beside_store, ENTRY, Fail, guard, now, STORE
-from .agents import agent_running, live_agents
+from .agents import STARTING_MS, agent_running, detail, live_agents
+from .stage import resolve_stage
 from .store import parse_ref, prefixes_in_use, read_list, store_path
 
 
@@ -147,17 +148,24 @@ def waiting_for(s, task):
 
 
 def working(s, task):
-    """An agent is at work on it (or one started moments ago and hasn't shown up yet)."""
+    """A running task uses a slot while its worker starts or its stage shows it working."""
     if task["state"] != "running":
         return False
-    last = task["agents"][-1] if task["agents"] else {}
-    if now() - (last.get("at") or 0) < 30000:
-        return True
-    return any(agent_running(k) for k in live_agents(s.key(task)))
+    live = [k for k in map(detail, live_agents(s.key(task))) if agent_running(k)]
+    if live:
+        return resolve_stage(task, live, store=s).stage == "working"
+    # Reserve the slot while the new process comes up. A review or CI wait can
+    # put the row in Working without a worker, but cannot reserve this slot.
+    last = (task.get("agents") or [{}])[-1]
+    return not last.get("ended") and now() - (last.get("at") or 0) < STARTING_MS
 
 
 def running_count(s, skip=None):
     return sum(1 for t in s.data["tasks"] if t is not skip and working(s, t))
+
+
+def running_reason(n):
+    return "1 task is running here" if n == 1 else f"{n} tasks are running here"
 
 
 def queue_reason(s, task):
@@ -169,7 +177,7 @@ def queue_reason(s, task):
         return "after " + ", ".join(wait)
     n = running_count(s, task)
     if n >= cap_for(s, task):
-        busy = f"{n} tasks are running here" if n != 1 else "1 task is running here"
+        busy = running_reason(n)
         return f"{busy}; urgent: starts next" if urgent(task) else busy
     return machine_hold()
 

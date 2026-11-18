@@ -36,7 +36,7 @@ from .launch import (
     own_path, parent_for, resume_argv, stamp, task_text, REVIEW_READS, review_reads, reviewer_sandbox, sandboxes, set_branch,
 )
 from .store import bare_by_mistake, is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
-from .queues import after_refs, parse_after, queue_reason, running_count, set_after, urgent
+from .queues import after_refs, parse_after, queue_reason, running_count, running_reason, set_after, urgent
 from .archive import unarchive
 from .output import inbox_line, line, minutes, say, view
 from .stage import STAGE_ORDER, STAGE_TABLE
@@ -412,8 +412,9 @@ JUST_STARTED_MS = 120000  # its own name: STARTING_MS (agents) times a reviewer 
 
 def just_started(t):
     """The agent its queue or a start launched moments ago, while it is Working: its record, or None."""
-    fresh = [a for a in t.get("agents") or [] if now() - (a.get("at") or 0) < JUST_STARTED_MS]
-    return fresh[-1] if t.get("state") == "running" and fresh else None
+    last = (t.get("agents") or [{}])[-1]
+    if t.get("state") == "running" and not last.get("ended") and now() - (last.get("at") or 0) < JUST_STARTED_MS:
+        return last
 
 
 def cmd_start(args):
@@ -1895,6 +1896,9 @@ def cmd_resume(args):
             raise Fail(f"{s.ref(t)} still has an agent ({live[0]['address']}). Use switch to replace it.")
         if t["state"] in ("todo", "scheduled", "queued"):
             raise Fail(f"{s.ref(t)} hasn't started. Use start.")
+        n = running_count(s, t)
+        if n >= s.max_running():
+            raise Fail(f"Can't resume {s.ref(t)}: {running_reason(n)}. Wait for a slot to open.")
         fail_if_missing_cli(s, t, resolve_again_argv(s, t, args.agent, args.argv, resuming=True))
         if t["state"] == "done":
             t["state"] = "running"
