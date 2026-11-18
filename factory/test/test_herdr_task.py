@@ -680,6 +680,20 @@ class SchedulerRound(unittest.TestCase):
         self.assertIn("sweep", calls)
         self.assertIn(f"tick:{os.path.realpath(repo)}", calls)
 
+        # The daemon uses this scheduler, so a folder with only a Done PR still gets audited.
+        with open(store_file) as f:
+            data = json.load(f)
+        data.pop("main_watch")
+        data["tasks"] = [{"id": 1, "state": "done", "pr": {"number": 7}}]
+        for verified in (False, True):
+            with self.subTest(verified=verified):
+                data["tasks"][0]["pr"]["drift_verified_merged"] = verified
+                with open(store_file, "w") as f:
+                    json.dump(data, f)
+                calls.clear()
+                au.one_pass({"started": [], "done": [], "attention": [], "fired": []})
+                self.assertEqual(f"tick:{os.path.realpath(repo)}" in calls, not verified)
+
     def test_cmd_scheduler_waits_for_held_lock_unless_once_and_cli_check_creates_state_dir(self):
         import argparse, contextlib, fcntl, io, threading
         from unittest import mock
