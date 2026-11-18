@@ -54,8 +54,7 @@ End with your findings as plain text, then exactly one JSON object in this tag, 
 CAUSES = ("task-too-big", "wrong-seam", "vague-brief", "design-needed-first", "patch-shaped-fix", "worker-model",
           "reviewer-narrow", "none")
 VERDICTS, CONFIDENCE = ("SHIP", "FIX", "REDESIGN"), ("low", "medium", "high")
-# What Claude Code draws under its last message (prompt box, mode and status lines), never the model's own words.
-UI_LINE = re.compile(r"^(\?|esc|shift|ctrl|⏵|⏸|✻|✶|✳|bypass|auto|plan|accept|don't ask|context|tokens|\d+(\.\d+)?[km]? tokens)|for shortcuts|to interrupt|mode on", re.I)
+RULE = re.compile(r"^\s*─{20,}\s*$")  # the rule that opens Claude Code's prompt box, under the last message
 RETRO_TRIES = 3  # failed retro rounds (no tail, a bad tail) before the coordinator is told instead
 RETRO_REDESIGN = "retro: REDESIGN"
 RETRO_CAP = f"retro: FIX asked {FABLE_CHANGES} times and it still does not converge"
@@ -129,11 +128,16 @@ def fix_words(t):
 def parse_tail(screen):
     """(record, None) from the last <retro>{...}</retro> on a screen, or (None, why). A terminal wraps long lines,
     at a space or inside a word: the lines are joined with a space, else with nothing, whichever gives a valid record."""
-    i, j = (screen or "").rfind("<retro>"), (screen or "").rfind("</retro>")
+    lines = [x for x in (screen or "").splitlines() if not x.startswith("[hc]")]  # hc read's own notes
+    rules = [n for n, x in enumerate(lines) if RULE.match(x)]
+    screen = "\n".join(lines[:rules[-2] if len(rules) > 1 else rules[-1]] if rules else lines)  # the footer cut off
+    i, j = screen.rfind("<retro>"), screen.rfind("</retro>")
     if i < 0 or j < i:
         return None, "no <retro> tail"
-    after = [x.strip(" │╰╯─⏺>›❯\t") for x in screen[j + 8:].splitlines()]
-    if any(x and not UI_LINE.search(x) for x in after):  # the tail ends the last message: nothing of its own after it
+    # The tail ends the last message: after it, no message line (⏺) and no indented one (its text or a tool's output);
+    # a line flush left that isn't ⏺ is the turn's own status line.
+    rest = screen[j + 8:].split("\n")
+    if rest[0].strip() or any(x.strip() and (x.startswith("⏺") or x[0].isspace()) for x in rest[1:]):
         return None, "the <retro> tail is not at the end of the last message"
     lines, why = [x.strip().lstrip("⏺│ ").rstrip("│ ") for x in screen[i + 7:j].splitlines()], None
     for sep in (" ", ""):

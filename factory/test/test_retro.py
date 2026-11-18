@@ -377,6 +377,23 @@ class Retro(unittest.TestCase):
         late = "\n".join(real[:cut] + tail + ["⏺ One more thought after the tail."] + real[cut:])
         self.assertIn("not at the end", self.retro.parse_tail(late)[1])
 
+    def test_the_tail_is_read_above_claude_codes_footer(self):
+        """Outside re-check of dca0da11: the screen is cut at the footer's rule (no word list), and hc read's
+        "[hc] incomplete" note doesn't fail a valid tail. Two real screens, private details scrubbed."""
+        tail = screen(TAIL).splitlines()[1:]
+        for name in ("claude_screen_t30p.txt", "claude_screen_t31s.txt"):
+            with open(os.path.join(ROOT, "test", "fixtures", name), encoding="utf-8") as f:
+                real = f.read().splitlines()
+            rule = max(n for n, x in enumerate(real) if self.retro.RULE.match(x))
+            top = max(n for n, x in enumerate(real[:rule]) if self.retro.RULE.match(x))
+            ok = real[:top] + tail + ["", "✻ Crunched for 11s · done 1:57 AM", ""] + real[top:]
+            self.assertEqual(self.retro.parse_tail("\n".join(ok))[0]["verdict"], "SHIP", name)
+            self.assertEqual(self.retro.parse_tail("\n".join(ok + ["[hc] incomplete: older output may be missing"]))[0]["verdict"], "SHIP")
+            late = real[:top] + tail + ["⏺ One more thought after the tail."] + real[top:]
+            self.assertIn("not at the end", self.retro.parse_tail("\n".join(late))[1])
+            tool = real[:top] + tail + ["  ⎿  ran one more command"] + real[top:]
+            self.assertIn("not at the end", self.retro.parse_tail("\n".join(tool))[1])
+
 
 if __name__ == "__main__":
     unittest.main()
