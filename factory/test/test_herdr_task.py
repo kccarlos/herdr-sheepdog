@@ -14168,8 +14168,10 @@ class InstalledCliAndMissingRefusal(unittest.TestCase):
             for field in ("worktree", "branch", "after", "agents"):
                 self.assertEqual(out[field], started[field])
             self.assertTrue(os.path.isdir(out["worktree"]))
+            with self.assertRaisesRegex(self.Fail, "waiting"):
+                self.call(self.commands.cmd_fix, id=ref, reason="Check the work", agent=None, argv=None)
             self.assertEqual(self.start(ref, now=False)["state"], "queued")
-            self.assertEqual(self.start(ref, now=False)["state"], "queued")
+            self.assertEqual(self.start(ref, now=True)["state"], "queued")
         self.assertCountEqual(self.killed, [a for ref, run in fixtures.items() for a in
                                           (run["terminal"], f"review-{ref.split('-')[1]}")])
         self.live_map.clear()

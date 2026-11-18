@@ -222,7 +222,7 @@ def main():
     c = cmd("start", cmd_start, "start a task's agent (an hc child of the project's coordinator)")
     agent_opts(c)
     c.add_argument("--parent", help="a coordinator's terminal: the agent's hc parent (default: the project's coordinator)")
-    c.add_argument("--now", action="store_true", help="skip the queue (a scheduled task: start it now)")
+    c.add_argument("--now", action="store_true", help="skip the queue, except for tasks returned with reopen --to-do")
     c.add_argument("--branch", help="its branch's exact name (as add --branch), before its worktree is made")
     g = c.add_mutually_exclusive_group()
     g.add_argument("--here", action="store_true")

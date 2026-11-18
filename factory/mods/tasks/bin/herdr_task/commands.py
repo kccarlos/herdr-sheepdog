@@ -438,14 +438,15 @@ def cmd_start(args):
             (q.get("argv") or worker_argv(s, t))
         parent = args.parent or q.get("parent")
         plan = {"argv": argv, "parent": parent, **({"custom": True} if args.argv else {}), **({"agent": args.agent} if args.agent else {})}
+        skip_queue = (args.now or t["state"] == "queued") and not t.get("returned_to_waiting")
         at = scheduled_at(args)
         if at:
             # start --at / --in: it starts by itself then, as this start would now.
             schedule(s, t, at, plan)
             v = view(s, t)
             reason = "scheduled"
-        # A second start normally skips the queue. After an explicit return, only --now can skip it.
-        elif (reason := None if (args.now or (t["state"] == "queued" and not t.get("returned_to_waiting"))) else queue_reason(s, t)):
+        # A returned task must pass the queue checks even when asked to start again.
+        elif (reason := None if skip_queue else queue_reason(s, t)):
             if t["state"] != "queued":
                 t["queued_at"] = now()
             t["state"] = "queued"
@@ -1903,6 +1904,8 @@ def start_again(s, t, key=None, argv_json=None, message=None, parent=None, resum
     and the session is known; else a fresh one with a handoff. `message` goes after either; `nudge`
     is a resumed session's first message when no `message` is given; `resuming` (`herdr-task resume`)
     rebuilds argv from the current settings and wakes a resumed session."""
+    if t.get("state") in ("todo", "queued", "scheduled"):
+        raise Fail(f"{s.ref(t)} is waiting. Use start when it can run.")
     prev = last_agent(t)
     argv = resolve_again_argv(s, t, key, argv_json, resuming)
     if refused := start_refusal(s, t, argv):
