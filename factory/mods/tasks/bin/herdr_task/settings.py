@@ -1224,8 +1224,10 @@ def accept_bar(s, t):
                                            else "waits for Fable's review round")
     review_on, _ = review_limits(s, t)
     gate = gate_min(s, t)
-    from .retro import gate_rounds
+    from .retro import fixing, gate_rounds
     need = (gate_rounds(t) or max(1, gate)) if review_on else 0
+    if fixing(t):  # SDF-49: only Fable's delta round after the retro passes its FIX
+        revs = [r for r in revs if r.get("by") in fable_runs(t) and (r.get("at") or 0) > t["retro"]["at"]]
     if need:
         got = sum(1 for r in revs if ((r.get("started_by") == "herdr-task" and r.get("verdict") == "pass") if gate else
                                       (r.get("verdict") == "pass" if "verdict" in r else r.get("result") in ("report", "pass"))))

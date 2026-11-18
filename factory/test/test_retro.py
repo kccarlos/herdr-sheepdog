@@ -273,6 +273,27 @@ class Retro(unittest.TestCase):
         self.store.data["plan_log"].append({"at": self.task["retro"]["at"], "action": "amend", "reason": "retro:SHEP-13"})
         self.recap("new")
 
+    def test_review_findings_round_3(self):
+        """Codex round 3: a FIX is passed only by Fable's round after it; retro rows use no worker round; a FIX
+        beside a CI stop leaves the bound to the coordinator's continue."""
+        self.rounds(("pass", 0), ("changes", 2), ("changes", 1))
+        self.task["reviews"][0]["started_by"] = "herdr-task"  # an earlier pass on this same head
+        self.tick()
+        self.task["recap"]["reasons"].append("3 failed CI runs")
+        self.tick({**TAIL, "verdict": "FIX", "majors": [MAJOR]})
+        self.assertEqual(self.commands.gate_passes(self.task, self.head), 0)
+        self.assertEqual(self.commands.rounds_used(self.task), 3)
+        self.assertEqual((self.task["recap"]["reasons"], self.told), (["3 failed CI runs"], []))
+        self.recap("continue")
+        self.assertTrue(self.task["recaps"][-1]["small"])
+        self.assertNotIn("retro_fix_pending", self.task)
+
+    def test_folder_retro_reads_from_where_the_task_started(self):
+        self.task.update(mode="here", worktree=None, folder_start=self.git(self.wt, "rev-parse", "HEAD~1"))
+        self.store.loc["folder"] = self.wt
+        self.started()
+        self.assertIn(f"Diff: {self.task['folder_start'][:12]}..", self.runs[-1][-1])
+
 
 if __name__ == "__main__":
     unittest.main()

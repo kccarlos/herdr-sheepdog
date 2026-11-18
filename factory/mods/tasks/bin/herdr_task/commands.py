@@ -46,6 +46,7 @@ from .templates import instructions
 from .budget import NON_CONVERGENCE, budget_lines, budget_pass, change_sizes, docs_only_commits, merge_only_commits, merge_only_step, recap_refusal, record_ci, review_nonconverging, size_estimate, size_pass
 from .simulators import release_task
 from .budget import open_recap
+from .settings import fable_runs
 from .retro import cap as retro_cap, fix_words as retro_fix_words, fixing as retro_fixing, gate_rounds as retro_gate_rounds, retro_due
 
 
@@ -735,11 +736,14 @@ def rounds_used(t, gate=False):
     if gate:
         skip = failed_addresses(t) | set(t.get("merge_only_runs") or ())
         return sum(1 for r in t.get("review_runs") or [] if r["address"] not in skip)
-    return sum(1 for r in t.get("reviews") or [] if r.get("result") in REVIEWED)
+    return sum(1 for r in t.get("reviews") or [] if r.get("result") in REVIEWED and not r.get("retro"))
 
 
 def gate_passes(t, head):
-    return sum(1 for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task" and r["head"] == head and r["verdict"] == "pass")
+    after = t["retro"]["at"] if retro_fixing(t) else None  # SDF-49: a retro FIX is passed only by Fable's delta round
+    fable = fable_runs(t) if after else ()
+    return sum(1 for r in t.get("reviews") or [] if r.get("started_by") == "herdr-task" and r["head"] == head and r["verdict"] == "pass"
+               and (after is None or (r.get("by") in fable and (r.get("at") or 0) > after)))
 
 
 def gate_passes_for(s, t, head, need=None):
@@ -987,7 +991,7 @@ def review_refusal(s, t, wt):
     if not wt and t.get("folder_start") and unchanged_folder(s, t):
         return None  # in the folder itself, and it changed nothing (#744: a run that only reads)
     revs = [r for r in t.get("reviews") or [] if r.get("result") in REVIEWED and (r.get("at") or 0) >= (t.get("started") or 0)]
-    if not wt and (rr := t.get("retro") or {}).get("verdict") == "FIX":  # SDF-49: the fix needs a passing round of its own
+    if not wt and (rr := t.get("retro") or {}).get("verdict") == "FIX" and rr.get("confidence") != "low":  # SDF-49: the fix needs a passing round of its own
         revs = [r for r in revs if (r.get("at") or 0) > rr["at"] and not r.get("retro") and r.get("verdict") != "changes"]
     head = t.get("head") if wt else None
     if (any(r.get("head") == head for r in revs) if wt else bool(revs)):

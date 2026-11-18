@@ -195,7 +195,7 @@ def start(s, t):
         t["retro_failures"] = (t.get("retro_failures") or []) + [{"at": now(), "head": None, "why": "no commit to read"}]
         s.dirty = True
         return
-    base_sha = git(wt, "merge-base", t.get("base") or "main", head)[1] if head else ""
+    base_sha = git(wt, "merge-base", t.get("base") or "main", head)[1] if t.get("worktree") else t.get("folder_start") or ""
     check = (settings_for(s)["tasks"].get("check") or "").strip()
     live = workers(s, t)
     # dontAsk: only the reviewer's allow list runs; edits and every other command are refused, nothing prompts.
@@ -222,7 +222,9 @@ def close_recap(s, t, decision, rec, small):
     rest = [w for w in (t.get("recap") or {}).get("reasons") or [] if w != NON_CONVERGENCE]
     if rest:  # a size, time or CI stop as well: that recap stays for the coordinator, without the review reason
         t["recap"]["reasons"] = rest
-        return
+        if small:
+            t["retro_fix_pending"] = True  # its continue carries the FIX's bound, and last_findings the majors
+        return False
     cur = change_lines(t) if t.get("worktree") else None
     t.setdefault("recaps", []).append({"decision": "continue", "why": f"retro: {decision}", "by": "retro", "at": now(),
                                        "reasons": [NON_CONVERGENCE], "tokens": token_sum(s, t),
@@ -232,6 +234,7 @@ def close_recap(s, t, decision, rec, small):
     if (t.get("attention") or "").startswith("Recap required"):
         t.pop("attention", None)
         t.pop("attention_at", None)
+    return True
 
 
 def act(s, t, rn, rec):
@@ -251,9 +254,11 @@ def act(s, t, rn, rec):
         close_recap(s, t, "SHIP", rec, False)
         msg = f"Herdr's retro round passed {ref} on {rn['head'][:7]}: no majors. Run {ready} again."
     elif rec["verdict"] == "FIX":
+        found = "\n".join(f"- {m.get('file')}:{m.get('line')}: {m.get('what')} (repro: {m.get('repro')})" for m in rec["majors"])
         t.setdefault("reviews", []).append({"round": len(t.get("reviews") or []) + 1, "head": rn["head"], "by": rn["address"],
                                             "started_by": "herdr-task", "result": "changes", "verdict": "changes",
-                                            "must_fix": len(rec["majors"]), "majors": len(rec["majors"]), "report": "retro: FIX",
+                                            "must_fix": len(rec["majors"]), "majors": len(rec["majors"]),
+                                            "report": f"retro: FIX\n{found}\nYour one change: {rec.get('worker_change')}",
                                             "cli": "claude", "model": FABLE["model"], "retro": True, "at": now()})
         if any(d.get("small") for d in t.get("recaps") or []):  # its bounded continue is spent: FIX is the cap
             t["retro_capped"] = now()
@@ -261,11 +266,13 @@ def act(s, t, rn, rec):
                 t["recap"]["reasons"].append(RETRO_CAP)
             s.dirty = True
             return None
-        close_recap(s, t, "FIX", rec, True)
+        closed = close_recap(s, t, "FIX", rec, True)
         folder = t.get("mode") != "worktree"
         if folder:  # no worktree for a Fable round: the worker's own next round checks the fix
             t["review_rounds_added"] = int(t.get("review_rounds_added") or 0) + 1
-        found = "\n".join(f"- {m.get('file')}:{m.get('line')}: {m.get('what')} (repro: {m.get('repro')})" for m in rec["majors"])
+        if not closed:  # another stop stays open: the coordinator's continue tells the worker, with these majors
+            s.dirty = True
+            return None
         msg = (f"Herdr's retro round on {ref} found majors to fix:\n{found}\nYour one change: {rec.get('worker_change')}\n"
                f"Make one bounded fix (at most {SMALL_LINES} more lines), commit, then " + (
                    "have it reviewed and record the round (one more round is added), then run " if folder else "run ")

@@ -605,8 +605,9 @@ def cmd_recap(args):
             raise Fail(f"--small is for a second continue; {s.ref(t)}'s first continue needs none.")
         found = last_findings(t)  # before the decision starts the round count afresh
         cur = change_lines(t)
+        fix = bool(t.pop("retro_fix_pending", None)) and args.decide == "continue"  # SDF-49: the retro's FIX is bounded
         bound = ({"small": True, "max_rounds": SMALL_ROUNDS, "max_lines": cur + SMALL_LINES if cur is not None else None}
-                 if small else {})
+                 if small or fix else {})
         t.setdefault("recaps", []).append({"decision": args.decide, "why": " ".join(args.why.split())[:300], "at": now(),
                                            "reasons": rc.get("reasons", []), "tokens": token_sum(s, t),
                                            **({"lines": cur} if cur is not None else {}), **bound})
@@ -625,7 +626,7 @@ def cmd_recap(args):
             if workers(s, t):
                 limit = (f"This is a small follow-up, bounded: at most {SMALL_ROUNDS} more review round"
                          + (f" and {SMALL_LINES} more changed lines (up to {bound['max_lines']:,})" if bound["max_lines"] is not None else "")
-                         + "; past either, the task stops for a recap with only split, new approach or drop left. ") if small else ""
+                         + "; past either, the task stops for a recap with only split, new approach or drop left. ") if small or fix else ""
                 told = tell(s, t, f"Your Assistant read the recap of {s.ref(t)} and says go on: {args.why.strip()}"
                                   f"{found}{limit}Carry on, then run `{own_path()} ready {s.ref(t)} --folder {shlex.quote(s.loc['folder'])}` again.", None)[0]
     say(args, {"decision": args.decide, "told": told},
