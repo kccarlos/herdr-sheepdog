@@ -1076,7 +1076,7 @@ def accept_bar(s, t):
     need = max(1, gate) if review_on else 0
     if need:
         got = sum(1 for r in revs if ((r.get("started_by") == "herdr-task" and r.get("verdict") == "pass") if gate else
-                                      r.get("result") in ("report", "pass")))
+                                      (r.get("verdict") == "pass" if "verdict" in r else r.get("result") in ("report", "pass"))))
         if got < need:
             return None, f"{got} of {need} passing review rounds on its final commit"
     sets = t.get("set") or {}

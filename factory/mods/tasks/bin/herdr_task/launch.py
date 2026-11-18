@@ -590,7 +590,7 @@ def closing_line(s, task, parent=None, argv=None):
                  f"finds; `reviewed` doesn't count here.")
     elif on:
         text += (f" Review is on: after each review round, record it on the commit it reviewed with `{ht} reviewed {s.ref(task)} "
-                 f"--folder {shlex.quote(s.loc['folder'])} --report \"<its findings in a line>\"` (add `--commit <sha>` if you committed fixes since; at most {rounds} rounds); "
+                 f"--folder {shlex.quote(s.loc['folder'])} --verdict pass|changes --majors N --report \"<its findings in a line>\"` (add `--commit <sha>` if you committed fixes since; at most {rounds} rounds); "
                  f"ready refuses a final commit no round was recorded on.")
     text += (f" At the start, at each natural step and at least every 5 minutes while you work, say how it's going: `{ht} status {s.ref(task)} --folder {shlex.quote(s.loc['folder'])} "
              f"\"<what you're doing now, at most {LINE_MAX} characters>\" --done <% of the whole task> --left <your best guess of how long is left, like 20m>`: "
