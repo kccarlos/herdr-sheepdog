@@ -22,7 +22,7 @@ from .settings import (cli_missing_reason, write_ci_runner_cap, write_machine_op
 )
 from .agents import (
     agent_log, agent_running, agy_bg_tasks, back_at_work, background_jobs, busy_again, claude_bg_shells, detail, fit, LINE_MAX, live_agents, ready_turns,
-    REVIEWER_FAILED, STARTING_MS, STATUSES, status_word, SUMMARY_MAX, WORKING_AGAIN,
+    REVIEWER_FAILED, STARTING_MS, STATUSES, status_word, SUMMARY_MAX, task_terminals, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
 from .github import (already_merged, branch_needs_push, checks_missing, checks_since, ci_cap_hold, CI_CAP_WAIT, expected_checks, github_refusal, github_required, github_unreachable,
@@ -385,24 +385,32 @@ def fail_if_missing_cli(s, t, argv, record=True):
 
 
 def begin(s, t, argv, space=None, parent=None):
-    """Starts the task's first agent. Returns its record."""
+    """Starts a waiting task's agent. Returns its record."""
     if refused := start_refusal(s, t, argv):
         raise Fail(refused)
-    t["state"], t["started"] = "running", now()
+    original_start = t.get("returned_to_waiting")
+    previous = last_agent(t) if original_start else None
+    t["started_from_queue"] = t["state"] == "queued"
+    t["state"], t["started"] = "running", original_start or now()
+    if original_start:
+        t["restarted_at"] = now()
+    else:
+        t.pop("restarted_at", None)
     # Its brief teaches `reviewed`: ready waits for a review of its final commit (review_refusal).
     t["review_gate"] = True
-    for k in ("queue", "queued_at", "attention", "attention_at", "held", "scheduled_for"):
+    for k in ("queue", "queued_at", "attention", "attention_at", "held", "scheduled_for", "returned_to_waiting"):
         t.pop(k, None)
     if t.get("mode") == "worktree" and not t.get("worktree") and not worktrees_on(s):
         t["mode"] = "here"
     folder_for(s, t)
     ensure_build_dir(s, t)
-    if t.get("mode") != "worktree" and s.loc["kind"] == "repo":
+    if not original_start and t.get("mode") != "worktree" and s.loc["kind"] == "repo":
         # The folder's commit as it starts: still there, and nothing tracked changed, at ready means
         # it changed nothing, so there is nothing to review (review_refusal, #744).
         t["folder_start"] = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None
     parent = parent_for(parent, s.loc["folder"])
-    return launch(s, t, argv, brief(s, t, parent, argv), parent=parent)
+    message = handoff(s, t, previous, parent, argv) if previous else brief(s, t, parent, argv)
+    return launch(s, t, argv, message, parent=parent)
 
 
 # #1053: an agent just launched still shows its shell for a moment (agent_running() says no): a task
@@ -434,16 +442,18 @@ def cmd_start(args):
             (q.get("argv") or worker_argv(s, t))
         parent = args.parent or q.get("parent")
         plan = {"argv": argv, "parent": parent, **({"custom": True} if args.argv else {}), **({"agent": args.agent} if args.agent else {})}
+        skip_queue = (args.now or t["state"] == "queued") and not t.get("returned_to_waiting")
         at = scheduled_at(args)
         if at:
             # start --at / --in: it starts by itself then, as this start would now.
             schedule(s, t, at, plan)
             v = view(s, t)
             reason = "scheduled"
-        # A queued task started again goes now; otherwise it waits its turn. A scheduled one
-        # started now waits only for the queue (start --now: not even that).
-        elif (reason := None if (t["state"] == "queued" or args.now) else queue_reason(s, t)):
-            t["state"], t["queued_at"] = "queued", now()
+        # A returned task must pass the queue checks even when asked to start again.
+        elif (reason := None if skip_queue else queue_reason(s, t)):
+            if t["state"] != "queued":
+                t["queued_at"] = now()
+            t["state"] = "queued"
             t.pop("scheduled_for", None)
             t["queue"] = plan
             s.dirty = True
@@ -1620,6 +1630,50 @@ def gate_reads(s, t):
         gate_step(s, t)
 
 
+def return_to_waiting(s, t):
+    """Stop a run and leave the task in the list with its work and history."""
+    if t["state"] in ("todo", "queued"):
+        return
+    if t["state"] != "running":
+        raise Fail(f"{s.ref(t)} is {t['state']}. --to-do returns a running task to its list.")
+
+    terminals = task_terminals(s.key(t))
+    addresses = [k["address"] for k in terminals]
+    me = os.environ.get("HC_TERMINAL_ID")
+    if me and any(a.split("/")[-1] == me for a in addresses):
+        raise Fail(f"Run reopen --to-do for {s.ref(t)} from outside its task terminals.")
+    refresh_sessions(s, t, terminals)
+    for address in addresses:
+        stop_note("reopen-kill", task=s.ref(t), terminal=address, by="reopen")
+        result = kill_agent(address, run)
+        if result.returncode != 0:
+            raise Fail(f"Couldn't end {address}: {(result.stderr or result.stdout).strip()}")
+
+    for rn in open_runs(t):
+        fail_run(s, t, rn, "task returned to its list")
+    from_queue = bool(t.get("started_from_queue") or t.get("queued_at"))
+    # Keep the first start for review history. The task has no active start while it waits.
+    t["returned_to_waiting"] = t.pop("started", None) or now()
+    for k in ("progress", "attention", "attention_at", "retry", "back", "device_wait",
+              "merge_requested", "queue", "queued_at", "scheduled_for", "held"):
+        t.pop(k, None)
+    t["state"], t["reopened_at"] = ("queued" if from_queue else "todo"), now()
+    if from_queue:
+        t["started_from_queue"], t["queued_at"] = True, t["reopened_at"]
+    release_task(s, t)
+    s.dirty = True
+
+
+def cmd_reopen(args):
+    if not args.to_do:
+        return cmd_state(args, "reopen")
+    with open_store(args) as s:
+        t = s.find(args.id)
+        return_to_waiting(s, t)
+        v = view(s, t)
+    say(args, v, f"{v['ref']} is back in {'the queue' if v['state'] == 'queued' else 'To do'}.")
+
+
 def cmd_state(args, state):
     with open_store(args) as s:
         t = s.find(args.id)
@@ -1854,6 +1908,8 @@ def start_again(s, t, key=None, argv_json=None, message=None, parent=None, resum
     and the session is known; else a fresh one with a handoff. `message` goes after either; `nudge`
     is a resumed session's first message when no `message` is given; `resuming` (`herdr-task resume`)
     rebuilds argv from the current settings and wakes a resumed session."""
+    if t.get("state") in ("todo", "queued", "scheduled"):
+        raise Fail(f"{s.ref(t)} is waiting. Use start when it can run.")
     prev = last_agent(t)
     argv = resolve_again_argv(s, t, key, argv_json, resuming)
     if refused := start_refusal(s, t, argv):
@@ -1935,10 +1991,12 @@ def retarget(s, t, agent, model):
     elif model:
         set_task(t, "model", model)
     set_task(t, "agent", agent)
-    t["pick_at"] = now()
+    t["pick_at"] = max(now(), ((last_agent(t) or {}).get("at") or 0) + 1)
     q = t.get("queue") or {}
     if q.get("argv") and not q.get("custom"):
         q["argv"] = worker_argv(s, t)
+    if (t.get("attention") or "").startswith("Couldn't start:") and not cli_missing_reason(worker_argv(s, t)):
+        t.pop("attention", None)
     s.dirty = True
 
 
@@ -1947,15 +2005,8 @@ def switch_one(s, t, args, live):
     the caller's own agent, ended after the store is saved."""
     refresh_sessions(s, t, live)
     old = live[-1] if live else None
-    # A --model rides on the task's own pick (retarget), which start_again then reads.
-    key = None if getattr(args, "model", None) else args.agent
-    if refused := start_refusal(s, t, resolve_again_argv(s, t, key, args.argv)):
+    if refused := start_refusal(s, t, resolve_again_argv(s, t, argv_json=args.argv)):
         raise Fail(refused)
-    if t["state"] in ("todo", "scheduled", "queued", "done"):
-        t["state"] = "running"
-        t.setdefault("started", now())
-        t.pop("queue", None)
-        t.pop("scheduled_for", None)
     ended = []
     # An agent switching itself can't end first: that would end this command too.
     me = os.environ.get("HC_TERMINAL_ID")
@@ -1967,7 +2018,7 @@ def switch_one(s, t, args, live):
         end_agent(s, t, old["address"])
         ended.append(old["address"])
     try:
-        a, resumed = start_again(s, t, key, args.argv, parent=args.parent, nudge=SWITCH_NUDGE)
+        a, resumed = start_again(s, t, argv_json=args.argv, parent=args.parent, nudge=SWITCH_NUDGE)
     except Fail as e:
         if ended:
             raise Fail(f"{e} The old agent {ended[0]} already ended: its work is kept, `herdr-task resume "
@@ -1989,19 +2040,36 @@ def cmd_switch(args):
         return switch_all(args)
     if not args.id:
         raise Fail("Name a task, or give --all --from <cli[:model]> --agent <cli>.")
-    if getattr(args, "dry_run", False) or getattr(args, "from_", None) or getattr(args, "reviewer", False):
-        raise Fail("--dry-run, --from and --reviewer go with --all.")
-    with open_store(args) as s:
+    if getattr(args, "from_", None) or getattr(args, "reviewer", False):
+        raise Fail("--from and --reviewer go with --all.")
+    dry = getattr(args, "dry_run", False)
+    with open_store(args, write=not dry) as s:
         t = s.find(args.id)
-        live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)]
-        probe = resolve_again_argv(s, t, args.agent or (worker_pick(s, t).get("agent") if getattr(args, "model", None) else None), args.argv)
-        fail_if_missing_cli(s, t, probe, record=not live)
-        if getattr(args, "model", None):
-            retarget(s, t, args.agent or worker_pick(s, t).get("agent"), args.model)
+        if t["state"] == "done":
+            raise Fail(f"{s.ref(t)} is done. Reopen it first.")
+        live = switch_workers(s, t)
+        model = getattr(args, "model", None)
+        agent = args.agent or (worker_pick(s, t).get("agent") if model else None)
+        if not live and (not agent or args.argv or args.keep or args.parent):
+            raise Fail(f"{s.ref(t)} has no running worker to replace. Use --agent or --model to edit its settings, or start/resume to run it.")
+        action = "switch" if live else "edit"
+        line = f"{s.ref(t)}: {action}" + (f" to {agent}" if agent else "")
+        if dry:
+            return say(args, {**view(s, t), "action": action, "dry_run": True}, line + " (dry run)")
+        probe = resolve_again_argv(s, t, agent, args.argv)
+        fail_if_missing_cli(s, t, probe, record=False)
+        if agent:
+            retarget(s, t, agent, model)
+        if not live:
+            return say(args, {**view(s, t), "action": action}, line)
         data, text, own = switch_one(s, t, args, live)
     if own:
         end_agent(s, t, own)
-    say(args, data, text + ended_line(data, own))
+    say(args, {**data, "action": action}, text + ended_line(data, own))
+
+
+def switch_workers(s, t):
+    return workers(s, t) if t["state"] == "running" else []
 
 
 def matches(pick, want):
@@ -2028,7 +2096,7 @@ def switch_all(args):
         for t in s.data.get("tasks") or []:
             if t.get("state") == "done" or t.get("archived"):
                 continue
-            live = workers(s, t) if t.get("state") == "running" else []  # Ready and the rest: edited
+            live = switch_workers(s, t)
             prev, q = last_agent(t), t.get("queue") or {}
             if live and prev and prev.get("argv"):
                 pick = {"agent": prev.get("agent") or agent_key(prev["argv"]), "model": argv_model(prev["argv"])[0]}
@@ -2060,7 +2128,7 @@ def switch_all(args):
             retarget(s, t, args.agent, args.model)
             if what == "switch":
                 try:
-                    data, text, own = switch_one(s, t, argparse.Namespace(**{**vars(args), "agent": None, "keep": False}), live)
+                    data, text, own = switch_one(s, t, argparse.Namespace(**{**vars(args), "keep": False}), live)
                     line = text + (f", {', '.join(data['ended'])} ended" if data["ended"] else "")
                     if own:
                         owns.append((t, own))
