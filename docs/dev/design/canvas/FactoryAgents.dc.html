@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — Agents with factory terminals in the usual sections</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button,input{font:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; display: flex; flex-direction: column; overflow: hidden; background: {{c.bg}}; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+<dc-import name="TopBar" pane="agents" waiting="1" dark="{{ dark }}" hint-size="390px,102px"></dc-import>
+<main style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 7px; padding: 4px 16px 0; border-top: 1px solid {{c.line}}">
+<dc-import name="AgentSection" label="Needs you" count="1" dark="{{ dark }}" style="display: block; flex-shrink: 0" hint-size="358px,24px"></dc-import>
+<article aria-label="SDF-57 worker, factory, waiting at a prompt for 14 minutes" style="flex-shrink: 0; width: 358px; box-sizing: border-box; border-radius: 14px; background: {{c.surface}}; border: 1.5px solid {{c.blocked}}; padding: 10px 12px 10px 14px; display: flex; flex-direction: column; gap: 6px">
+  <div style="display: flex; align-items: center; gap: 7px">
+    <span style="width: 8px; height: 8px; border-radius: 4px; background: {{c.blocked}}; flex-shrink: 0"></span>
+    <span style="font-size: 16px; font-weight: 600">SDF-57</span>
+    <span style="font-size: 12px; color: {{c.ink2}}">codex · worker</span>
+    <svg width="12" height="12" viewBox="0 0 24 24" role="img" aria-label="Factory, not announced" fill="none" stroke="{{c.ink2}}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M6.5 8a5.500 5.500 0 0 1 8.900-4.300M18 9c0 5 2 7 2 7H8M6.300 11c-.500 2.700-1.300 4-2.300 5h4M13.700 20a2 2 0 0 1-3.400 0M3 3l18 18"></path></svg>
+    <span style="flex-grow: 1"></span>
+    <span style="font-size: 13px; font-weight: 600; color: {{c.accentText}}; white-space: nowrap">Waiting · 14 min</span>
+  </div>
+  <span style="font-size: 14px; line-height: 19px">Waiting at a prompt on its screen.</span>
+  <button style="align-self: flex-start; min-height: 44px; padding: 0 18px; border-radius: 22px; border: 0; background: {{c.accent}}; color: #1F1F22; font-size: 15px; font-weight: 600">Open window</button>
+</article>
+<dc-import name="AgentSection" label="Working" count="4" dark="{{ dark }}" style="display: block; flex-shrink: 0" hint-size="358px,24px"></dc-import>
+<sc-for list="{{ working }}" as="r" hint-placeholder-count="3">
+<button aria-label="{{ r.aria }}" style="flex-shrink: 0; width: 358px; min-height: 70px; box-sizing: border-box; border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; padding: 9px 12px 9px 14px; display: flex; flex-direction: column; gap: 3px; color: {{c.ink}}; text-align: left">
+<span style="display: flex; align-items: center; gap: 7px; width: 100%">
+<span style="width: 8px; height: 8px; border-radius: 4px; background: {{ r.dot }}; flex-shrink: 0"></span>
+<span style="font-size: 16px; font-weight: 600; white-space: nowrap">{{ r.name }}</span>
+<span style="font-size: 12px; color: {{c.ink2}}; white-space: nowrap">{{ r.kind }}</span>
+<sc-if value="{{ r.quiet }}" hint-placeholder-val="{{ true }}"><svg width="12" height="12" viewBox="0 0 24 24" role="img" aria-label="Factory, not announced" fill="none" stroke="{{c.ink2}}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M6.5 8a5.500 5.500 0 0 1 8.900-4.300M18 9c0 5 2 7 2 7H8M6.300 11c-.500 2.700-1.300 4-2.300 5h4M13.700 20a2 2 0 0 1-3.400 0M3 3l18 18"></path></svg></sc-if>
+<span style="flex-grow: 1"></span>
+<span style="font-size: 13px; color: {{c.ink2}}; white-space: nowrap">{{ r.state }}</span>
+</span>
+<span style="font-size: 14px; line-height: 18px; color: {{c.ink}}; padding-left: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 315px">{{ r.line }}</span>
+<span style="font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 11.5px; color: {{c.ink2}}; padding-left: 15px">{{ r.model }}</span>
+</button>
+</sc-for>
+<dc-import name="AgentCard" agent="codex-payments" open="{{ false }}" dark="{{ dark }}" w="{{ 358 }}" style="display: block; width: 358px; flex-shrink: 0" hint-size="358px,70px"></dc-import>
+<button style="flex-shrink: 0; align-self: flex-start; min-height: 44px; border: 0; background: transparent; color: {{c.ink2}}; padding: 0 4px; display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500"><svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M9 6l6 6-6 6"></path></svg>Done (2)</button>
+</main>
+<div style="position: absolute; left: 12px; bottom: 26px; width: 366px; height: 60px; display: flex"><dc-import name="Dock" label="Sheepdog" status="Listening" mode="live" dark="{{ dark }}" style="display: block; width: 366px; height: 60px" hint-size="366px,60px"></dc-import></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "$preview": {"width": 390, "height": 844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "accent": "#D98718", "accentText": "#8A5700", "blocked": "#D99417", "blue": "#1F5F9E"};
+    const dark = {"bg": "#16181C", "surface": "#1F2126", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138", "accent": "#F39C1F", "accentText": "#F5B83D", "blocked": "#F0A92A", "blue": "#6AA8EB"};
+    const d = !!this.props.dark;
+    const c = d ? dark : light;
+    const data = [
+      ["coordinator", "claude · factory", false, "Working · 2 min", "herdr-sheepdog: accepting SDF-41", "claude-opus-5-5 · high"],
+      ["SDF-53", "codex · worker", true, "Working · 31 min", "Codex launch flags: make test, 12m left", "gpt-6.2-sol · high"],
+      ["SDF-48", "claude · reviewer", true, "Working · 6 min", "Review round 2 of 2, read-only", "claude-fable-5-2"]
+    ];
+    const working = data.map((r) => ({
+      name: r[0], kind: r[1], quiet: r[2], state: r[3], line: r[4], model: r[5], dot: c.blue,
+      aria: r[0] + ", " + r[1] + ", " + r[3] + (r[2] ? ", factory, not announced" : "")
+    }));
+    return { c, dark: d, working };
+  }
+}
+</script>
+</body>
+</html>

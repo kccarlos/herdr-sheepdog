@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — iPad sidebar with a factory space</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<nav aria-label="Sidebar" style="width: 390px; height: 1032px; box-sizing: border-box; display: flex; flex-direction: column; background: {{ c.side }}; border-right: 1px solid {{ c.line }}; color: {{ c.ink }}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <div style="height: 24px; flex-shrink: 0"></div>
+  <header style="height: 52px; flex-shrink: 0; display: flex; align-items: center; gap: 4px; padding: 0 10px 0 20px">
+    <span style="flex-grow: 1; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 22px; font-weight: 700">Sheepdog</span>
+    <button aria-label="New" style="width: 40px; height: 40px; border: 0; border-radius: 20px; background: transparent; color: {{ c.ink }}; display: flex; align-items: center; justify-content: center"><svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg></button>
+    <button aria-label="More" style="width: 40px; height: 40px; border: 0; border-radius: 20px; background: transparent; color: {{ c.ink }}; display: flex; align-items: center; justify-content: center"><svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="5.5" cy="12" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="18.5" cy="12" r="1.7"></circle></svg></button>
+  </header>
+  <div style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; padding: 4px 10px; gap: 1px">
+    <sc-for list="{{ rows }}" as="r" hint-placeholder-count="14">
+      <sc-if value="{{ r.isNav }}" hint-placeholder-val="{{ false }}">
+        <button aria-current="{{ r.current }}" style="height: 44px; flex-shrink: 0; border: 0; border-radius: 10px; background: {{ r.bg }}; color: {{ c.ink }}; display: flex; align-items: center; gap: 10px; padding: 0 10px; font-size: 16px; font-weight: {{ r.weight }}; text-align: left"><span style="flex-grow: 1">{{ r.label }}</span><span style="font-size: 12px; font-weight: 600; color: {{ c.accentText }}">{{ r.meta }}</span></button>
+      </sc-if>
+      <sc-if value="{{ r.isComputer }}" hint-placeholder-val="{{ false }}">
+        <div style="flex-shrink: 0; padding: 14px 10px 4px; display: flex; flex-direction: column; gap: 1px"><span style="font-size: 15px; font-weight: 600">{{ r.label }}</span><span style="font-size: 12px; font-weight: 600; color: {{ c.muted }}">{{ r.meta }}</span></div>
+      </sc-if>
+      <sc-if value="{{ r.isSpace }}" hint-placeholder-val="{{ false }}">
+        <button aria-current="{{ r.current }}" style="min-height: 30px; flex-shrink: 0; border: 0; border-radius: 8px; background: {{ r.bg }}; color: {{ c.muted }}; text-align: left; padding: 6px 10px 2px; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px">{{ r.label }}<span style="font-weight: 400">{{ r.meta }}</span></button>
+      </sc-if>
+      <sc-if value="{{ r.isAgent }}" hint-placeholder-val="{{ true }}">
+        <button aria-current="{{ r.current }}" style="height: 40px; flex-shrink: 0; border: 0; border-radius: 10px; background: {{ r.bg }}; color: {{ c.ink }}; display: flex; align-items: center; gap: 10px; padding: 0 10px; font-size: 15px; font-weight: {{ r.weight }}; text-align: left">
+          <span style="width: 8px; height: 8px; border-radius: 4px; background: {{ r.dot }}; flex-shrink: 0"></span>
+          <span style="flex-grow: 1">{{ r.label }} <span style="font-size: 12px; color: {{ c.muted }}">{{ r.role }}</span></span>
+          <span style="font-size: 12px; font-weight: {{ r.metaWeight }}; color: {{ r.metaColor }}">{{ r.meta }}</span>
+        </button>
+      </sc-if>
+    </sc-for>
+  </div>
+</nav>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"sel":{"editor":"text","default":"overview"},"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":1032}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const dk = !!this.props.dark;
+    const c = dk ? { side: '#1B1D22', ink: '#F5F2EA', muted: '#A3A7AF', accentText: '#F5B83D', line: '#2E3138', selBg: '#2C2F36' } : { side: '#F3F0E8', ink: '#1F1F22', muted: '#6B6E75', accentText: '#8A5700', line: '#E4E0D7', selBg: '#E5DFD2' };
+    const sel = String(this.props.sel ?? 'overview');
+    const amber = dk ? '#F0A92A' : '#D99417', blue = dk ? '#6AA8EB' : '#1F5F9E', green = dk ? '#5CC792' : '#1D6B46';
+    const base = { isNav: false, isComputer: false, isSpace: false, isAgent: false, meta: '', role: '', metaColor: c.muted, metaWeight: 400, dot: blue };
+    const nav = (key, label, meta) => ({ ...base, isNav: true, key, label, meta: meta || '' });
+    const pc = (label, meta) => ({ ...base, isComputer: true, label, meta });
+    const sp = (key, label, meta) => ({ ...base, isSpace: true, key, label, meta });
+    const ag = (label, role, dot, meta, blocked) => ({ ...base, isAgent: true, key: label, label, role, dot, meta, metaColor: blocked ? c.accentText : c.muted, metaWeight: blocked ? 600 : 400 });
+    const rows = [
+      nav('conversation', 'Conversation'),
+      nav('overview', 'All agents', '2 waiting'),
+      pc('Work Mac', 'Voice is here'),
+      sp('space', 'herdr-sheepdog', 'main · factory, 1 ask'),
+      ag('coordinator', '', blue, '2 min'),
+      ag('SDF-57', 'worker', amber, 'waiting', true),
+      ag('SDF-53', 'worker', blue, '31 min'),
+      ag('SDF-48', 'reviewer', blue, '6 min'),
+      ag('SDF-55', 'worker', green, '18 min'),
+      sp('webapp', 'webapp', 'main'),
+      ag('payments', '', blue, '2 min'),
+      sp('docs', 'docs-site', 'main'),
+      ag('api-docs', '', blue, '12 min')
+    ].map((r) => {
+      const on = r.key === sel;
+      return { ...r, bg: on ? c.selBg : 'transparent', weight: on ? 600 : (r.isNav ? 500 : 400), current: on ? 'page' : 'false' };
+    });
+    return { rows, c };
+  }
+}
+</script>
+</body>
+</html>

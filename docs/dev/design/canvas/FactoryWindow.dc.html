@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — a factory terminal's window</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button,input{font:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; display: flex; flex-direction: column; overflow: hidden; background: {{c.bg}}; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <div style="height: 54px; flex-shrink: 0"></div>
+  <header style="height: 52px; flex-shrink: 0; display: grid; grid-template-columns: 52px minmax(0, 1fr) 52px; align-items: center; padding: 0 4px; border-bottom: 1px solid {{c.line}}">
+    <button aria-label="Back" style="width: 44px; height: 44px; border: 0; background: transparent; color: {{c.ink}}; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg></button>
+    <div style="display: flex; flex-direction: column; align-items: center; min-width: 0">
+      <span style="display: flex; align-items: center; gap: 6px; font-size: 17px; font-weight: 600"><span style="width: 8px; height: 8px; border-radius: 4px; background: {{c.blue}}"></span>{{ name }}</span>
+      <span style="font-size: 12px; color: {{c.ink2}}">{{ sub }}</span>
+    </div>
+    <button aria-label="Agent actions" style="width: 44px; height: 44px; border: 0; background: transparent; color: {{c.ink}}; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="5.5" cy="12" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="18.5" cy="12" r="1.7"></circle></svg></button>
+  </header>
+  <div style="flex-shrink: 0; display: flex; align-items: center; gap: 6px; padding: 7px 14px; border-bottom: 1px solid {{c.line}}; background: {{c.surface2}}; font-size: 12px; line-height: 16px; color: {{c.ink2}}">
+    <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M6.5 8a5.500 5.500 0 0 1 8.900-4.300M18 9c0 5 2 7 2 7H8M6.300 11c-.500 2.700-1.300 4-2.300 5h4M13.700 20a2 2 0 0 1-3.400 0M3 3l18 18"></path></svg>
+    <span>Factory · {{ model }}</span>
+  </div>
+
+  <main aria-label="Terminal" style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 10px 14px; display: flex; flex-direction: column; font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; line-height: 18px; color: {{c.ink}}">
+    <sc-for list="{{ lines }}" as="l" hint-placeholder-count="12">
+      <div style="white-space: pre-wrap; color: {{ l.color }}; background: {{ l.bg }}; margin: 0 -6px; padding: 0 6px; border-radius: 4px"><sc-if value="{{ l.owner }}" hint-placeholder-val="{{ false }}"><span style="display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 6px; background: {{c.accent}}; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; font-size: 11px; font-weight: 700; line-height: 16px">owner</span></sc-if>{{ l.t }}</div>
+    </sc-for>
+  </main>
+
+  <sc-if value="{{ showReceipt }}" hint-placeholder-val="{{ false }}">
+    <div style="flex-shrink: 0; margin: 0 10px 8px; padding: 8px 12px; border-radius: 12px; border: 1px solid {{c.line}}; background: {{c.surface}}; display: flex; flex-direction: column; gap: 2px">
+      <span style="font-size: 12px; font-weight: 600; color: {{c.accentText}}">Logged as yours</span>
+      <span style="font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 11px; line-height: 15px; color: {{c.ink2}}">14:09 by=owner wake=input:phone decision=typed why="prompt, 34 chars"</span>
+    </div>
+  </sc-if>
+
+  <div role="toolbar" aria-label="Keys" style="flex-shrink: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; padding: 0 10px 8px">
+    <button aria-label="Escape" style="height: 40px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-family: 'SF Mono', ui-monospace, monospace; font-size: 13px; font-weight: 500">esc</button>
+    <button aria-label="Tab" style="height: 40px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 16px">⇥</button>
+    <button aria-label="Up" style="height: 40px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 16px">↑</button>
+    <button aria-label="Down" style="height: 40px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 16px">↓</button>
+    <button aria-label="Return" style="height: 40px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 16px">⏎</button>
+    <button aria-label="Type in the terminal" style="height: 40px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; display: flex; align-items: center; justify-content: center"><svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"></rect><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"></path></svg></button>
+    <button aria-label="More keys" style="height: 40px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="5.5" cy="12" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="18.5" cy="12" r="1.6"></circle></svg></button>
+  </div>
+
+  <div style="flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; padding: 0 10px 34px">
+    <div style="display: flex; align-items: center; gap: 8px"><button aria-label="Attach" style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 20px; border: 0; background: transparent; color: {{c.ink2}}; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.5 3.5 0 0 1 5 5L10.3 18a2 2 0 0 1-2.8-2.8l7.9-7.9"></path></svg></button>
+    <label style="flex-grow: 1; min-width: 0; height: 40px; border-radius: 20px; border: 1px solid {{c.line}}; background: {{c.surface}}; display: flex; align-items: center; padding: 0 6px 0 14px; box-sizing: border-box">
+      <input type="text" placeholder="{{ placeholder }}" aria-label="{{ placeholder }}" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; font-size: 16px; outline: none; color: {{c.ink}}">
+      <button aria-label="Send" style="width: 30px; height: 30px; border-radius: 15px; border: 0; background: {{c.line}}; color: {{c.surface}}; display: flex; align-items: center; justify-content: center"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"></path></svg></button>
+    </label></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "who": {"editor": "enum", "options": ["coordinator", "worker"], "default": "coordinator"}, "$preview": {"width": 390, "height": 844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "surface2": "#F1EEE7", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "accent": "#D98718", "accentText": "#8A5700", "accentTint": "#FDF1DC", "blue": "#1F5F9E", "green": "#1D6B46"};
+    const dark = {"bg": "#16181C", "surface": "#1F2126", "surface2": "#26292F", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138", "accent": "#F39C1F", "accentText": "#F5B83D", "accentTint": "#2A2416", "blue": "#6AA8EB", "green": "#5CC792"};
+    const d = !!this.props.dark;
+    const c = d ? dark : light;
+    const isCoord = (this.props.who ?? 'coordinator') !== 'worker';
+    const coord = [
+      ["Wake: event:ready SDF-41", "ink"],
+      ["  2 rounds passed, CI green, proof present", "ink2"],
+      ["● herdr-task accept SDF-41 --json", "ink"],
+      ["  ⎿ merged #661, done", "ink2"],
+      ["", "ink"],
+      ["Wake: event:drift SDF-38", "ink"],
+      ["  CI red on a reviewed head", "ink2"],
+      ["● Opened SDF-57: fix the flaky socket test", "ink"],
+      ["● herdr-task progress \"Accepted SDF-41;", "ink"],
+      ["  SDF-57 opened; next: SDF-53 review\"", "ink"],
+      ["", "ink"],
+      ["> Hold SDF-54 until SDF-53 merges.", "ink"],
+      ["● Holding SDF-54 behind SDF-53", "ink"],
+      ["  ⎿ plan amend, reason: owner", "ink2"]
+    ];
+    const worker = [
+      ["> SDF-53: state the permission mode on every", "ink"],
+      ["  Codex start and resume", "ink"],
+      ["", "ink"],
+      ["● Editing herdr_task/settings.py", "ink"],
+      ["  ⎿ Updated argv_for: 14 lines", "ink2"],
+      ["● Editing herdr_task/launch.py", "ink"],
+      ["  ⎿ resume_argv rebuilds the flags", "ink2"],
+      ["● Running make test", "ink"],
+      ["  ok  internal/factory        4.1s", "green"],
+      ["  ok  factory/test       212 tests", "green"],
+      ["● herdr-task status \"Resume rebuilds", "ink"],
+      ["  flags\" --done 60 --left 12m", "ink"],
+      ["", "ink"],
+      ["● Committing: fix(factory): state perm", "ink"]
+    ];
+    const lines = (isCoord ? coord : worker).map((l) => ({
+      t: l[0] === "" ? " " : l[0],
+      owner: l[1] === "owner",
+      color: l[1] === "ink2" ? c.ink2 : l[1] === "green" ? c.green : c.ink,
+      bg: l[1] === "owner" ? c.accentTint : "transparent"
+    }));
+    return {
+      c, dark: d, isCoord, lines,
+      name: isCoord ? "coordinator" : "SDF-53 worker",
+      sub: "Factory · herdr-sheepdog",
+      model: isCoord ? "claude · claude-opus-5-5 · high" : "codex · gpt-6.2-sol · high · round 0 of 2",
+      placeholder: isCoord ? "Type to the coordinator…" : "Type to the SDF-53 worker…"
+    };
+  }
+}
+</script>
+</body>
+</html>

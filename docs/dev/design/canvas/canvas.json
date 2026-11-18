@@ -1,0 +1,638 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "AgentCard.dc.html": {
+      "h": 300,
+      "title": "Component — agent card",
+      "w": 358,
+      "x": 3620,
+      "y": 3690
+    },
+    "AgentCards.dc.html": {
+      "h": 1120,
+      "title": "Agent card — collapsed, expanded, waiting",
+      "w": 1260,
+      "x": 2280,
+      "y": 3690
+    },
+    "AgentPane.dc.html": {
+      "h": 1032,
+      "title": "Component — iPad agent pane",
+      "w": 986,
+      "x": 3038,
+      "y": 6502
+    },
+    "AgentWindow.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Agent window",
+      "w": 390,
+      "x": 1880,
+      "y": 1230
+    },
+    "AgentsEmpty.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "No agents",
+      "w": 390,
+      "x": 3290,
+      "y": 2460
+    },
+    "AgentsSeveral.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Agents — several computers",
+      "w": 390,
+      "x": 940,
+      "y": 0
+    },
+    "ChatDebug.dc.html": {
+      "h": 1560,
+      "radius": 40,
+      "title": "Conversation — technical events shown",
+      "w": 390,
+      "x": 1410,
+      "y": 8300
+    },
+    "ChatHour.dc.html": {
+      "h": 1560,
+      "radius": 40,
+      "title": "Conversation — a busy hour (iPhone)",
+      "w": 390,
+      "x": 0,
+      "y": 8300
+    },
+    "ChatHourAX.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Conversation — largest text",
+      "w": 390,
+      "x": 940,
+      "y": 8300
+    },
+    "ChatHourDark.dc.html": {
+      "h": 1560,
+      "radius": 40,
+      "title": "Conversation — a busy hour, dark",
+      "w": 390,
+      "x": 470,
+      "y": 8300
+    },
+    "ChatRow.dc.html": {
+      "h": 200,
+      "title": "Component — conversation row",
+      "w": 358,
+      "x": 4792,
+      "y": 8300
+    },
+    "ChatSpec.dc.html": {
+      "h": 4300,
+      "title": "Spec — cues, kinds, tokens, type, spacing",
+      "w": 1640,
+      "x": 3440,
+      "y": 9980
+    },
+    "ChatStates.dc.html": {
+      "h": 4777,
+      "title": "Every row kind and state",
+      "w": 1664,
+      "x": 0,
+      "y": 9980
+    },
+    "ChatStatesDark.dc.html": {
+      "h": 4777,
+      "title": "Every row kind and state, dark",
+      "w": 1664,
+      "x": 1720,
+      "y": 9980
+    },
+    "ConversationEmpty.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Empty conversation",
+      "w": 390,
+      "x": 2350,
+      "y": 2460
+    },
+    "ConversationEmptyDark.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Empty conversation, dark",
+      "w": 390,
+      "x": 2820,
+      "y": 2460
+    },
+    "ConversationOne.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Conversation — one computer",
+      "w": 390,
+      "x": 1410,
+      "y": 0
+    },
+    "ConversationSeveral.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Conversation — several computers",
+      "w": 390,
+      "x": 1880,
+      "y": 0
+    },
+    "ConversationTyping.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Type instead — the capsule becomes the composer",
+      "w": 390,
+      "x": 1340,
+      "y": 3690
+    },
+    "Dark.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Agents — one computer, dark",
+      "w": 390,
+      "x": 470,
+      "y": 0
+    },
+    "Dock.dc.html": {
+      "h": 60,
+      "title": "Component — voice capsule",
+      "w": 366,
+      "x": 1810,
+      "y": 3912
+    },
+    "IPad.dc.html": {
+      "h": 1032,
+      "radius": 24,
+      "title": "iPad — an agent's window",
+      "w": 1376,
+      "x": 0,
+      "y": 5100
+    },
+    "IPadChat.dc.html": {
+      "h": 1032,
+      "radius": 24,
+      "title": "iPad — conversation, a busy hour",
+      "w": 1376,
+      "x": 1880,
+      "y": 8300
+    },
+    "IPadChatDark.dc.html": {
+      "h": 1032,
+      "radius": 24,
+      "title": "iPad — conversation, dark",
+      "w": 1376,
+      "x": 3336,
+      "y": 8300
+    },
+    "IPadConversation.dc.html": {
+      "h": 1032,
+      "radius": 24,
+      "title": "iPad — Conversation",
+      "w": 1376,
+      "x": 1456,
+      "y": 5100
+    },
+    "IPadHidden.dc.html": {
+      "h": 1032,
+      "radius": 24,
+      "title": "iPad landscape — sidebar hidden",
+      "w": 1376,
+      "x": 5824,
+      "y": 5100
+    },
+    "IPadNewAgent.dc.html": {
+      "h": 1032,
+      "radius": 24,
+      "title": "iPad — sheets (New agent)",
+      "w": 1376,
+      "x": 1112,
+      "y": 6502
+    },
+    "IPadOverview.dc.html": {
+      "h": 1032,
+      "radius": 24,
+      "title": "iPad — All agents",
+      "w": 1376,
+      "x": 4368,
+      "y": 5100
+    },
+    "IPadPortrait.dc.html": {
+      "h": 1376,
+      "radius": 24,
+      "title": "iPad portrait — sidebar hidden",
+      "w": 1032,
+      "x": 0,
+      "y": 6502
+    },
+    "IPadSidebar.dc.html": {
+      "h": 1032,
+      "title": "Component — iPad sidebar",
+      "w": 390,
+      "x": 2568,
+      "y": 6502
+    },
+    "IPadSplit.dc.html": {
+      "h": 1032,
+      "radius": 24,
+      "title": "iPad — two agents side by side",
+      "w": 1376,
+      "x": 2912,
+      "y": 5100
+    },
+    "LiveActivity.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Lock-screen Live Activity",
+      "w": 390,
+      "x": 4230,
+      "y": 2460
+    },
+    "Main.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Agents — one computer",
+      "w": 390,
+      "x": 0,
+      "y": 0
+    },
+    "MoreKeys.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "More keys — ⌃C on top",
+      "w": 390,
+      "x": 2350,
+      "y": 1230
+    },
+    "MoreMenu.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "⋯ menu",
+      "w": 390,
+      "x": 3760,
+      "y": 0
+    },
+    "NewAgentKind.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "New agent 2 — Which agent",
+      "w": 390,
+      "x": 470,
+      "y": 1230
+    },
+    "NewAgentWhere.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "New agent 1 — Where",
+      "w": 390,
+      "x": 0,
+      "y": 1230
+    },
+    "Offline.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "One computer, offline",
+      "w": 390,
+      "x": 3760,
+      "y": 2460
+    },
+    "Paired.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Paired",
+      "w": 390,
+      "x": 940,
+      "y": 2460
+    },
+    "PermissionMic.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Before the microphone prompt",
+      "w": 390,
+      "x": 1410,
+      "y": 2460
+    },
+    "PermissionNotify.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Before the notification prompt",
+      "w": 390,
+      "x": 1880,
+      "y": 2460
+    },
+    "PlusMenu.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "+ menu",
+      "w": 390,
+      "x": 3290,
+      "y": 0
+    },
+    "Settings.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Settings",
+      "w": 390,
+      "x": 2820,
+      "y": 1230
+    },
+    "SettingsComputer.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Settings ▸ a computer",
+      "w": 390,
+      "x": 3290,
+      "y": 1230
+    },
+    "SettingsVoice.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Settings ▸ Voice (this phone)",
+      "w": 390,
+      "x": 3760,
+      "y": 1230
+    },
+    "SpaceDetail.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "A space — worktrees and wrap-up",
+      "w": 390,
+      "x": 1410,
+      "y": 1230
+    },
+    "Spaces.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Spaces",
+      "w": 390,
+      "x": 940,
+      "y": 1230
+    },
+    "Splash.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Splash",
+      "w": 390,
+      "x": 0,
+      "y": 2460
+    },
+    "TalkTo.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Manage computers",
+      "w": 390,
+      "x": 2820,
+      "y": 0
+    },
+    "TopBar.dc.html": {
+      "h": 102,
+      "title": "Component — top bar",
+      "w": 390,
+      "x": 1810,
+      "y": 3690
+    },
+    "VoiceDock.dc.html": {
+      "h": 780,
+      "title": "Voice capsule — every state",
+      "w": 1260,
+      "x": 0,
+      "y": 3690
+    },
+    "VoiceMenu.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Voice menu — Talk to and End",
+      "w": 390,
+      "x": 2350,
+      "y": 0
+    },
+    "VoiceStopped.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "Voice ended — computer still connected",
+      "w": 390,
+      "x": 4230,
+      "y": 0
+    },
+    "Welcome.dc.html": {
+      "h": 844,
+      "radius": 40,
+      "title": "First run",
+      "w": 390,
+      "x": 470,
+      "y": 2460
+    },
+    "IPadVoice.dc.html": {
+      "x": 4104,
+      "y": 6502,
+      "w": 1240,
+      "h": 860,
+      "title": "iPad — where the voice goes"
+    },
+    "IPadRemote.dc.html": {
+      "x": 7280,
+      "y": 5100,
+      "w": 1376,
+      "h": 1032,
+      "radius": 24,
+      "title": "iPad — another computer's agent"
+    },
+"AgentsGrouped.dc.html": {"x": 0, "y": 15250, "w": 390, "h": 844, "title": "Agents — Needs you, Working, Done", "radius": 40},
+"AgentsGroupedDark.dc.html": {"x": 470, "y": 15250, "w": 390, "h": 844, "title": "Agents — grouped, dark", "radius": 40},
+"MuteDialog.dc.html": {"x": 940, "y": 15250, "w": 390, "h": 844, "title": "Mute dialog — three choices and its footer", "radius": 40},
+"MuteDialogDark.dc.html": {"x": 1410, "y": 15250, "w": 390, "h": 844, "title": "Mute dialog, dark", "radius": 40},
+"SpacesMuted.dc.html": {"x": 1880, "y": 15250, "w": 390, "h": 844, "title": "Spaces — a muted space, and swipe to Mute", "radius": 40},
+"SpacesMutedDark.dc.html": {"x": 2350, "y": 15250, "w": 390, "h": 844, "title": "Spaces — muted, dark", "radius": 40},
+"SpaceDetailMuted.dc.html": {"x": 2820, "y": 15250, "w": 390, "h": 844, "title": "A space — muted, with Unmute", "radius": 40},
+"SpaceDetailMutedDark.dc.html": {"x": 3290, "y": 15250, "w": 390, "h": 844, "title": "A space — muted, dark", "radius": 40},
+"AgentsLargest.dc.html": {"x": 3760, "y": 15250, "w": 390, "h": 844, "title": "Largest text — status wraps, capsule stays one row", "radius": 40},
+"AgentsLargestDark.dc.html": {"x": 4230, "y": 15250, "w": 390, "h": 844, "title": "Largest text, dark", "radius": 40},
+"AgentsLargestCard.dc.html": {"x": 4700, "y": 15250, "w": 390, "h": 844, "title": "Largest text — card buttons stacked, two-line status", "radius": 40},
+"AgentAttention.dc.html": {"x": 5170, "y": 15250, "w": 1260, "h": 1100, "title": "Agent card — unread, pinned, muted, actions"},
+"AgentAttentionDark.dc.html": {"x": 6510, "y": 15250, "w": 1260, "h": 1100, "title": "Agent card — marks, dark"},
+"AgentSection.dc.html": {"x": 7850, "y": 15250, "w": 358, "h": 24, "title": "Component — agents section header"},
+"FilesList.dc.html": {"x": 0, "y": 16850, "w": 390, "h": 844, "title": "Files — a folder, by name", "radius": 40},
+"FilesListDark.dc.html": {"x": 470, "y": 16850, "w": 390, "h": 844, "title": "Files — a folder, dark", "radius": 40},
+"FilesRecent.dc.html": {"x": 940, "y": 16850, "w": 390, "h": 844, "title": "Files — recently changed first", "radius": 40},
+"FilesSearch.dc.html": {"x": 1410, "y": 16850, "w": 390, "h": 844, "title": "Files — search", "radius": 40},
+"ViewerMarkdown.dc.html": {"x": 1880, "y": 16850, "w": 390, "h": 844, "title": "Viewer — Markdown, rendered", "radius": 40},
+"ViewerMarkdownDark.dc.html": {"x": 2350, "y": 16850, "w": 390, "h": 844, "title": "Viewer — Markdown, dark", "radius": 40},
+"ViewerRaw.dc.html": {"x": 2820, "y": 16850, "w": 390, "h": 844, "title": "Viewer — Markdown, raw", "radius": 40},
+"ViewerImage.dc.html": {"x": 3290, "y": 16850, "w": 390, "h": 844, "title": "Viewer — image, fit to screen", "radius": 40},
+"ViewerImageZoom.dc.html": {"x": 3760, "y": 16850, "w": 390, "h": 844, "title": "Viewer — image, zoomed in", "radius": 40},
+"ViewerCode.dc.html": {"x": 4230, "y": 16850, "w": 390, "h": 844, "title": "Viewer — code", "radius": 40},
+"ViewerCodeDark.dc.html": {"x": 4700, "y": 16850, "w": 390, "h": 844, "title": "Viewer — code, dark", "radius": 40},
+"ChangesList.dc.html": {"x": 0, "y": 17814, "w": 390, "h": 844, "title": "Changes — as shipped, under the Files | Changes switch", "radius": 40},
+"ChangesListDark.dc.html": {"x": 470, "y": 17814, "w": 390, "h": 844, "title": "Changes — dark", "radius": 40},
+"DiffFile.dc.html": {"x": 940, "y": 17814, "w": 390, "h": 844, "title": "Diff — as shipped, with the Proposed file bar", "radius": 40},
+"DiffFileDark.dc.html": {"x": 1410, "y": 17814, "w": 390, "h": 844, "title": "Diff — dark", "radius": 40},
+"DiffJump.dc.html": {"x": 1880, "y": 17814, "w": 390, "h": 844, "title": "Proposed — go to another file", "radius": 40},
+"ViewerMarkdownAX.dc.html": {"x": 2350, "y": 17814, "w": 390, "h": 1300, "title": "Viewer — Markdown, largest text", "radius": 40},
+"ViewerCodeAX.dc.html": {"x": 2820, "y": 17814, "w": 390, "h": 844, "title": "Viewer — code, largest text", "radius": 40},
+"DiffFileAX.dc.html": {"x": 3290, "y": 17814, "w": 390, "h": 844, "title": "Diff — largest text", "radius": 40},
+"EntryCard.dc.html": {"x": 3760, "y": 17814, "w": 390, "h": 844, "title": "Entry — agent card: file chips, Files, Changes", "radius": 40},
+"EntryWindow.dc.html": {"x": 4230, "y": 17814, "w": 390, "h": 844, "title": "Entry — agent window: ⋯ ▸ Files beside Changes", "radius": 40},
+"EntrySpace.dc.html": {"x": 4700, "y": 17814, "w": 390, "h": 844, "title": "Entry — a space: Files and Changes rows", "radius": 40},
+"BrowseBar.dc.html": {"x": 5250, "y": 17814, "w": 390, "h": 152, "title": "Component — Files and Changes bar"},
+"FileState.dc.html": {"x": 5250, "y": 18046, "w": 390, "h": 560, "title": "Component — a Files or Changes state"},
+"FilesIPad.dc.html": {"x": 0, "y": 19234, "w": 1376, "h": 1032, "title": "iPad — Files: list and viewer side by side", "radius": 24},
+"ChangesIPad.dc.html": {"x": 1456, "y": 19234, "w": 1376, "h": 1032, "title": "iPad — Changes: list and diff side by side", "radius": 24},
+"FilesIPadDark.dc.html": {"x": 2912, "y": 19234, "w": 1376, "h": 1032, "title": "iPad — Files, dark", "radius": 24},
+"FileStates.dc.html": {"x": 0, "y": 20386, "w": 2620, "h": 1960, "title": "Every empty and error state, each with a plain fix"},
+"FileStatesDark.dc.html": {"x": 2700, "y": 20386, "w": 2620, "h": 1960, "title": "Every state, dark"},
+"FactoryAgents.dc.html": {"x": 0, "y": 23050, "w": 390, "h": 844, "title": "Factory — Agents list: factory terminals in the usual sections", "radius": 40},
+"FactoryAgentsDark.dc.html": {"x": 470, "y": 23050, "w": 390, "h": 844, "title": "Factory — Agents list, dark", "radius": 40},
+"FactoryWindow.dc.html": {"x": 940, "y": 23050, "w": 390, "h": 844, "title": "Factory — coordinator window", "radius": 40},
+"FactoryWindowDark.dc.html": {"x": 1410, "y": 23050, "w": 390, "h": 844, "title": "Factory — coordinator window, dark", "radius": 40},
+"FactoryAsk.dc.html": {"x": 1880, "y": 23050, "w": 390, "h": 844, "title": "Factory — an ask as a card", "radius": 40},
+"FactoryVoice.dc.html": {"x": 2350, "y": 23050, "w": 390, "h": 844, "title": "Factory — Conversation: digest and one alert", "radius": 40},
+"FactoryPage.dc.html": {"x": 2820, "y": 23050, "w": 390, "h": 844, "title": "Factory — the space page with its factory section", "radius": 40, "is_interactive": true},
+"FactoryPageDark.dc.html": {"x": 3290, "y": 23050, "w": 390, "h": 844, "title": "Factory — the space page, dark", "radius": 40},
+"FactoryWorker.dc.html": {"x": 3760, "y": 23050, "w": 390, "h": 844, "title": "Factory — a task row opens the worker's window", "radius": 40},
+"FactoryStates.dc.html": {"x": 4230, "y": 23050, "w": 1250, "h": 844, "title": "Factory — empty and error states, each with a plain fix"},
+"FactoryIPadSpace.dc.html": {"x": 0, "y": 24120, "w": 1376, "h": 1032, "title": "Factory — iPad, the space page with its factory section", "radius": 24},
+"FactoryIPad.dc.html": {"x": 0, "y": 25400, "w": 1376, "h": 1032, "title": "Factory — iPad, All agents with factory terminals and an ask", "radius": 24},
+"FactoryIPadDark.dc.html": {"x": 1456, "y": 25400, "w": 1376, "h": 1032, "title": "Factory — iPad, All agents, dark", "radius": 24},
+"FactoryIPadSidebar.dc.html": {"x": 2912, "y": 25400, "w": 390, "h": 1032, "title": "Component — iPad sidebar with a factory space"},
+"FactoryStartEntry.dc.html": {"x": 3382, "y": 25400, "w": 390, "h": 844, "title": "Start — one row on the space page", "radius": 40},
+"FactoryStartShell.dc.html": {"x": 3852, "y": 25400, "w": 390, "h": 844, "title": "Start — the shell window: doctor, then the first question", "radius": 40},
+"FactoryTerminal.dc.html": {"x": 1520, "y": 24120, "w": 1100, "h": 980, "title": "Factory — factory log and factory doctor"},
+"FactoryArch.dc.html": {"x": 2700, "y": 24120, "w": 1240, "h": 760, "title": "Factory — architecture"},
+"FactoryLifecycle.dc.html": {"x": 4020, "y": 24120, "w": 1600, "h": 760, "title": "Factory — one task's lifecycle"},
+"FactoryDesignLoop.dc.html": {"x": 5700, "y": 24120, "w": 1520, "h": 640,"title": "Factory — design loop before implementation"}
+  },
+  "createdOnFiles": {
+    "at": "2026-10-21T01:44:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "view": "canvas"
+  },
+  "notes": {
+    "t1": {
+      "kind": "title1",
+      "maxW": 4620,
+      "text": "Main screen — Agents, Conversation, several computers",
+      "w": 240,
+      "x": 0,
+      "y": -250
+    },
+    "t2": {
+      "kind": "title1",
+      "maxW": 4150,
+      "text": "Make and manage — New agent, Spaces, windows, Settings",
+      "w": 240,
+      "x": 0,
+      "y": 980
+    },
+    "t3": {
+      "kind": "title1",
+      "maxW": 4620,
+      "text": "First run, permissions, empty states, lock screen",
+      "w": 240,
+      "x": 0,
+      "y": 2210
+    },
+    "t4": {
+      "kind": "title1",
+      "maxW": 3978,
+      "text": "Voice capsule, typing, agent cards and shared parts",
+      "w": 240,
+      "x": 0,
+      "y": 3440
+    },
+    "t5": {
+      "kind": "title1",
+      "maxW": 8656,
+      "text": "iPad — landscape",
+      "w": 240,
+      "x": 0,
+      "y": 4850
+    },
+    "t6": {
+      "kind": "title1",
+      "maxW": 5004,
+      "text": "iPad — portrait, sheets and shared parts",
+      "w": 240,
+      "x": 0,
+      "y": 6252
+    },
+    "t7": {
+      "kind": "title1",
+      "maxW": 5150,
+      "text": "Conversation — every message, how it looks and behaves",
+      "w": 240,
+      "x": 0,
+      "y": 8050
+    },
+    "p1": {"kind": "title1", "maxW": 8208, "text": "Part 1 — What shipped: groups, unread, pin, mute, largest text", "w": 240, "x": 0, "y": 15000},
+    "p2": {"kind": "title1", "maxW": 5640, "text": "Part 2 — New design: read-only Files, beside Changes", "w": 240, "x": 0, "y": 16600},
+    "p2note": {"x": 5170, "y": 16850, "w": 640, "fill": "orange", "text": "Part 2: decisions\n• Changes and Diff match what shipped (⋯ ▸ Changes). New: the Files | Changes switch and the viewers. The file bar under a diff and Go to file are Proposed and optional (the Diff board has a switch).\n• One read-only sheet. Done closes it; the voice carries on.\n• Changes means this folder's uncommitted changes, by any agent. git can't tell who wrote what, so the copy says so, and agents sharing shop see one list.\n• Search is file names only. Recently changed uses file times.\n• This computer only, like the window button.\n• Code and diff text stop at 28 pt at the largest size; Markdown grows in full.\n• iPad: full screen, list beside viewer, in place of the sidebar.\n\nOpen questions\n1. Files needs new read-only daemon routes, limited to the space's folder. Hidden for safety is drawn in Files, but changes.go has no such filter today, so a tracked .env can still show in Changes. Filter it there too?\n2. Changes is per agent today. A space with no agents needs its own route.\n3. Is 2 MB the right limit for the phone?\n4. May text or images be shared out of the app? This draft stores nothing on the phone.\n5. Should Changes mark the files an agent's journal lists?\n6. Files for agents on another computer?"},
+    "p3": {"kind": "title1", "maxW": 5480, "text": "Part 3 — Factory", "w": 240, "x": 0, "y": 22800},
+    "p3note": {"x": 5560, "y": 23050, "w": 640, "fill": "orange", "text": "Part 3: decisions\nEach line says what a board reuses and what is new. \"New\" is proposed, not built.\n\nPhone\n• Agents list. Reuses: the Needs you / Working / Done sections and their one sort, the agent card, the crossed bell, the dock. New: role, task id and model on a factory row (the app must first read labels); the words \"Factory, not announced\" where VoiceOver now says Muted space; copy for a worker stuck at a prompt (the daemon makes no question for it, so the card offers Open window). No separate Factory group.\n• Coordinator window. Reuses: the whole Agent window. New: one notice line. Nothing is drawn inside the terminal. In the daemon: what you send is logged as yours; it never answers a factory ask.\n• Ask card. Reuses: the approval card and its Recommended tag; asks already arrive as questions. New: a project-level card under Needs you and the badge (today an ask shows only on Conversation). A typed answer doesn't count.\n• Conversation. Reuses: ChatRow kinds only. A digest is the voice bubble with Details; an alert is an agent-update row.\n• Space page, two states. Without a factory it is today's page plus one row, Start a factory here. With one, a Factory section appears at the top. The app does not decide: the daemon matches the space's folder to the engine's project list and sends the result with the space, so there is no list to keep. Reuses: the space page (Agents, Worktrees, Wrap up) and its window buttons. New: the Factory section: what needs you, the milestone, tasks in dependency layers, the critical path in ink, Debug collapsed. A task row opens that worker's window. This replaces the separate /factory web page.\n• Needs the engine: factory terminals carry no space label today, so they would not show in the space they were started from. The engine stamps that space's label on them. Close space is refused while a factory runs there.\n• States. Reuses: one state, one fix. Not started, quota unknown, coordinator restarting.\n\nStarting a factory\n• No new screens. Reuses: the shell window (Open shell here), its keys and typing mode, and the doctor. New: one row on a space page with no factory, Start a factory here. It opens that folder's shell and runs sheepdog factory start.\n• In that shell: doctor's output as it is (short lines, a plain fix under each failing item), the permissions notice, then at most five questions as plain prompts, each with a recommended answer that Return accepts: the goal, gates you delegate, releases, notify level, design system. They can be answered by voice too. Then the plan and the start.\n• What stops it, as doctor lines with a fix: no signed-in CLI, gh not signed in, not a git repository, a factory already running there.\n• After it starts, the space page shows the factory section.\n\niPad\n• All agents: the same sections in two columns, with the project ask card and factory rows. Sidebar: the project's space lists its factory terminals.\n• Space page: the factory section beside Agents, Worktrees and Wrap up.\n• Starting: the same shell window as on the phone, so no separate board.\n\nDiagrams and terminal\n• factory log (new) and factory doctor (exists; gains a Running now part).\n• Architecture, one task's lifecycle, the design loop.\n\nNot drawn, on purpose: a task board, a chat with workers, per-worker narration, a /factory web page, a factory group in the Agents list. The space page is the one place for the factory for now.\n\nOpen questions\n1. Codex workers: full bypass (recommended) or approve-for-me?\n2. Owner typing: log the length only (recommended) or the text?\n3. No model set for a role: refuse when the task is planned (recommended), or start on the CLI default with a warning?"}
+  },
+  "order": [
+    "Main.dc.html",
+    "Dark.dc.html",
+    "AgentsSeveral.dc.html",
+    "ConversationOne.dc.html",
+    "ConversationSeveral.dc.html",
+    "VoiceMenu.dc.html",
+    "TalkTo.dc.html",
+    "PlusMenu.dc.html",
+    "MoreMenu.dc.html",
+    "NewAgentWhere.dc.html",
+    "NewAgentKind.dc.html",
+    "Spaces.dc.html",
+    "SpaceDetail.dc.html",
+    "AgentWindow.dc.html",
+    "MoreKeys.dc.html",
+    "Settings.dc.html",
+    "SettingsComputer.dc.html",
+    "SettingsVoice.dc.html",
+    "Splash.dc.html",
+    "Welcome.dc.html",
+    "Paired.dc.html",
+    "PermissionMic.dc.html",
+    "PermissionNotify.dc.html",
+    "ConversationEmpty.dc.html",
+    "ConversationEmptyDark.dc.html",
+    "AgentsEmpty.dc.html",
+    "Offline.dc.html",
+    "LiveActivity.dc.html",
+    "VoiceDock.dc.html",
+    "ConversationTyping.dc.html",
+    "TopBar.dc.html",
+    "Dock.dc.html",
+    "AgentCards.dc.html",
+    "AgentCard.dc.html",
+    "IPad.dc.html",
+    "IPadConversation.dc.html",
+    "IPadSplit.dc.html",
+    "IPadOverview.dc.html",
+    "IPadPortrait.dc.html",
+    "IPadNewAgent.dc.html",
+    "IPadSidebar.dc.html",
+    "AgentPane.dc.html",
+    "IPadHidden.dc.html",
+    "VoiceStopped.dc.html",
+    "ChatHour.dc.html",
+    "ChatHourDark.dc.html",
+    "ChatHourAX.dc.html",
+    "ChatDebug.dc.html",
+    "IPadChat.dc.html",
+    "IPadChatDark.dc.html",
+    "ChatRow.dc.html",
+    "ChatStates.dc.html",
+    "ChatStatesDark.dc.html",
+    "ChatSpec.dc.html",
+    "IPadVoice.dc.html",
+    "IPadRemote.dc.html",
+    "AgentsGrouped.dc.html", "AgentsGroupedDark.dc.html", "MuteDialog.dc.html", "MuteDialogDark.dc.html", "SpacesMuted.dc.html", "SpacesMutedDark.dc.html", "SpaceDetailMuted.dc.html", "SpaceDetailMutedDark.dc.html", "AgentsLargest.dc.html", "AgentsLargestDark.dc.html", "AgentsLargestCard.dc.html", "AgentAttention.dc.html", "AgentAttentionDark.dc.html", "AgentSection.dc.html", "FilesList.dc.html", "FilesListDark.dc.html", "FilesRecent.dc.html", "FilesSearch.dc.html", "ViewerMarkdown.dc.html", "ViewerMarkdownDark.dc.html", "ViewerRaw.dc.html", "ViewerImage.dc.html", "ViewerImageZoom.dc.html", "ViewerCode.dc.html", "ViewerCodeDark.dc.html", "ChangesList.dc.html", "ChangesListDark.dc.html", "DiffFile.dc.html", "DiffFileDark.dc.html", "DiffJump.dc.html", "ViewerMarkdownAX.dc.html", "ViewerCodeAX.dc.html", "DiffFileAX.dc.html", "EntryCard.dc.html", "EntryWindow.dc.html", "EntrySpace.dc.html", "BrowseBar.dc.html", "FileState.dc.html", "FilesIPad.dc.html", "ChangesIPad.dc.html", "FilesIPadDark.dc.html", "FileStates.dc.html", "FileStatesDark.dc.html",
+    "FactoryAgents.dc.html", "FactoryAgentsDark.dc.html", "FactoryWindow.dc.html", "FactoryWindowDark.dc.html", "FactoryAsk.dc.html", "FactoryVoice.dc.html", "FactoryPage.dc.html", "FactoryPageDark.dc.html", "FactoryWorker.dc.html", "FactoryStates.dc.html", "FactoryTerminal.dc.html", "FactoryArch.dc.html", "FactoryLifecycle.dc.html", "FactoryDesignLoop.dc.html", "FactoryIPadSpace.dc.html", "FactoryIPadSidebar.dc.html", "FactoryIPad.dc.html", "FactoryIPadDark.dc.html", "FactoryStartEntry.dc.html", "FactoryStartShell.dc.html"
+  ],
+  "pages": [],
+  "title": "Sheepdog iOS — UI refresh"
+}
