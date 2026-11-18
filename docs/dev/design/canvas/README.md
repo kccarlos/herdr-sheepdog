@@ -18,3 +18,4 @@ is re-exported after every change.
   `boards.json` maps each board id to its title, source file and PNG.
   Codex and agy workers check the UI against these pictures.
 - Images referenced as `/_blob/…` live in the artifact and are not
+  exported.
