@@ -409,7 +409,7 @@ def triggers(s, t):
     if dec.get("small") and [r for r in rounds if r.get("verdict") == "changes"]:
         why.append(f"past the small continue's bound: its {dec.get('max_rounds', SMALL_ROUNDS)} extra review round still "
                    f"has Must-fix findings")
-    began = dec.get("at") or t.get("started")
+    began = max(dec.get("at") or 0, t.get("restarted_at") or 0) or t.get("started")
     if est and began and t["state"] == "running" and now() - began > 2 * est:
         why.append(f"over twice its time estimate ({time_words(now() - began)} of {time_words(est)})")
     est = t.get("estimate_tokens")
