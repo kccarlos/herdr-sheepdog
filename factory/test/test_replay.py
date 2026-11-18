@@ -125,7 +125,8 @@ def stale(text):
 def scorecard(files=False, templates=None):
     built = prompts(files, templates)
     rows = [(s, score(s, act(built[s["role"]][0], s))) for s in SITUATIONS]
-    roles = {r: (stale(p), [w for w in GONE if w in p]) for r, (p, own) in built.items()}
+    roles = {r: (stale(p), [w for w in GONE if w in p] + (["codexbar"] if "codexbar" in p.casefold() else []))
+             for r, (p, own) in built.items()}
     return rows, roles
 
 
@@ -155,13 +156,20 @@ class TemplateReplay(unittest.TestCase):
         rows, _ = scorecard(templates=tdir)
         self.assertEqual([s["id"] for s, why in rows if why], ["A3"])
 
+    def test_replay_rejects_a_quota_command_in_the_selected_rule(self):
+        from herdr_task import launch
+        situation = next(s for s in SITUATIONS if s["id"] == "W5")
+        with mock.patch.object(launch, "QUOTA_RULE", launch.QUOTA_RULE + " Run `codexbar usage`."):
+            worker, _ = prompts()["worker"]
+        self.assertEqual(score(situation, act(worker, situation)), ["names a quota tool: codexbar usage"])
+
 
 def report(files):
     rows, roles = scorecard(files)
     print(f"| Situation | Notes | Role | Result |\n|---|---|---|---|")
     for s, why in rows:
         print(f"| {s['id']}: {s['title']} | {s['notes']} | {s['role']} | {'pass' if not why else 'FAIL: ' + '; '.join(why)} |")
-    print(f"\nPassed {sum(not w for _, w in rows)} of {len(rows)}.\n\n| Role | Commands the engine refuses | Shepherdr-only words |\n|---|---|---|")
+    print(f"\nPassed {sum(not w for _, w in rows)} of {len(rows)}.\n\n| Role | Commands the engine refuses | Forbidden words |\n|---|---|---|")
     for r, (bad, gone) in roles.items():
         print(f"| {r} | {', '.join(f'`{b}`' for b in bad) or 'none'} | {', '.join(f'`{g}`' for g in gone) or 'none'} |")
 

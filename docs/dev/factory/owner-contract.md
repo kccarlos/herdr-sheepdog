@@ -109,6 +109,9 @@ Top-level envelope: `{"protocol": 1, "projects": [Project]}`. Replaces Shepherdr
 | `spent` | `object` | `{"tasks_merged": int, "review_rounds": int, "ci_runs": int}` (`>= 0`). |
 | `pools` | `Pool[]` | Account quota pools from `usage.py`: `{"pool": "claude" \| "codex" \| "antigravity-gemini" \| "antigravity-claude-gpt", "state": "ok" \| "floor" \| "unknown", "rolling": bool, "five_hour_left": number \| null, "week_left": number \| null, "five_hour_reset": string \| null, "week_reset": string \| null}`. `rolling` is `true` for `antigravity-*` pools so the daemon and coordinator render their rolling window accurately. |
 
+The engine's quota probe also gives the coordinator a reason for an unknown
+reading: `not installed`, `timed out`, `no data`, or `not signed in`.
+
 ### 2.2 `asks` (`owner asks [--project <id|folder>] [--open] --json`)
 
 Top-level envelope: `{"protocol": 1, "asks": [Ask]}`. Each record in `<store_dir>/asks/<id>.json` represents one structured question (owner asks never expire on a timer):
@@ -136,7 +139,7 @@ Top-level envelope: `{"protocol": 1, "asks": [Ask]}`. Each record in `<store_dir
 
 ### 2.3 `digest` (`owner digest [--project <id|folder>] [--since <ms|iso>] --json`)
 
-Built deterministically in Python from the task stores and `usage.py`, with **no model call** (`SDF-26`). Spoken on owner request, when a milestone completes, or at the morning summary:
+Built deterministically in Python from the task stores and `usage.py`, with **no model call** (`SDF-26`). Spoken on owner request, when a milestone completes, or at the morning summary.
 
 In the spoken summary, report known quota by pool, for example “Claude 40% left”.
 If any pool in use has an unknown reading, say “quota unknown” once for the
