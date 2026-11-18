@@ -3,7 +3,7 @@ import re
 
 from .base import git, now, PR_EVERY
 from .github import (BAD, STOPPED, SYNC_GRACE_MS, ci_cap_hold, ci_stopped, gh, hit_limit, main_red_hold,
-                     pr_behind, pr_repo, pr_update_branch, pr_view, synced_head, word)
+                     pr_behind, pr_pending, pr_repo, pr_update_branch, pr_view, synced_head, word)
 from .stage import resolve_stage
 
 WAIT_MS = 30 * 60000
@@ -52,11 +52,15 @@ def inspect(s, t, v):
                     or t.get("merge_requested") or (t.get("review_out") and expected == head))
         if failures and reviewed and resolve_stage(t, store=s).stage != "ci":
             runs = sorted({run_id(c) for c in failures if run_id(c) and run_id(c) not in limited})
-            if pr.get("drift_rerun_head") != head and head and runs:
+            if head and runs and not pr_pending(v) and (repo := pr_repo(t, s)):
+                retry = pr.get("drift_rerun") or {}
+                if retry.get("head") != head:
+                    retry = {"head": head, "runs": []}
                 for run in runs:
-                    gh("run", "rerun", run, "--failed", "--repo", pr_repo(t, s))
-                pr["drift_rerun_head"] = head
-                s.dirty = True
+                    if run not in retry["runs"] and gh("run", "rerun", run, "--failed", "--repo", repo)[0]:
+                        retry["runs"].append(run)
+                        pr["drift_rerun"] = retry
+                        s.dirty = True
             drift["red"] = "CI red on a reviewed head: flaky test or real?"
         hold = (main_red_hold(s, t.get("base") or "main") or (t.get("push_held") or {}).get("reason")
                 or t.get("accept_wait"))

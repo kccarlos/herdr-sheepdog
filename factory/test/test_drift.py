@@ -21,6 +21,13 @@ class DriftTests(unittest.TestCase):
         self.assertEqual(resolve_stage({"state": "queued"}).waits_on, "coordinator")
         self.assertFalse(resolve_stage({"state": "queued"}).inbox)
 
+    def test_plain_stage_row_shows_wait_and_failure(self):
+        from herdr_task.output import inbox_line, line
+        row = {"stage": "owner_gate", "waits_on": "owner", "failed_checks": ["test"],
+               "state": "ready", "status": "ready", "ref": "TST-1", "title": "Ship"}
+        for render in (line, inbox_line):
+            self.assertIn("waiting on owner · failing checks: test", render(row))
+
 
 class Comparisons(unittest.TestCase):
     def setUp(self):
@@ -69,6 +76,23 @@ class Comparisons(unittest.TestCase):
             self.assertEqual(gh.call_count, 1)
         self.v["statusCheckRollup"][0]["conclusion"] = "SUCCESS"
         self.assertNotIn("red", self.inspect())
+
+    def test_red_retry_waits_for_pending_run_and_only_records_success(self):
+        from unittest.mock import patch
+        self.t.update(state="done", accepted_at=self.now)
+        url = "https://example.test/actions/runs/4"
+        self.v["statusCheckRollup"] = [
+            {"name": "test", "conclusion": "FAILURE", "detailsUrl": url},
+            {"name": "lint", "status": "IN_PROGRESS", "detailsUrl": url},
+        ]
+        with patch.object(self.drift, "gh", side_effect=[(False, "", "retry later"), (True, "", "")]) as gh:
+            self.assertIn("red", self.inspect())
+            gh.assert_not_called()
+            self.v["statusCheckRollup"][1].update(status="COMPLETED", conclusion="SUCCESS")
+            self.inspect()
+            self.inspect()
+            self.inspect()
+            self.assertEqual(gh.call_count, 2)
 
     def test_ready_green_hold_waits_half_hour(self):
         self.v["statusCheckRollup"] = [{"name": "test", "conclusion": "SUCCESS"}]

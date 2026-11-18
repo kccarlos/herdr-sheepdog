@@ -803,6 +803,15 @@ def retry_pass(report):
         os.replace(tmp, RETRIES)
 
 
+def needs_tick(data):
+    """Both the scheduler and a manual tick visit folders with outstanding facts."""
+    return bool(data.get("main_watch") or any(
+        t.get("state") in ("queued", "scheduled", "ready") or t.get("check_run")
+        or (t.get("worktree") and t.get("state") == "running") or starts_now(t)
+        or (t.get("pr") and not (t.get("state") == "done" and t["pr"].get("drift_verified_merged")))
+        for t in data.get("tasks") or ()))
+
+
 def cmd_tick(args):
     """Starts queued tasks that can go now and finds merged ones. Cheap when nothing waits; one
     at a time (a second tick while one runs does nothing)."""
@@ -834,9 +843,7 @@ def cmd_tick(args):
         report["archive_error"] = str(e)
     for p in store_files(args.folder):
         d = read_list(p)
-        tasks = (d or {}).get("tasks") or []
-        if not d or not os.path.isdir(d.get("folder") or "") or not (d.get("main_watch") or any(
-                t.get("state") in ("queued", "scheduled", "ready") or (t.get("pr") and not (t["state"] == "done" and t["pr"].get("drift_verified_merged"))) or t.get("check_run") or (t.get("worktree") and t.get("state") == "running") or starts_now(t) for t in tasks)):
+        if not d or not os.path.isdir(d.get("folder") or "") or not needs_tick(d):
             continue
         try:
             with Store(locate(d["folder"])) as s:
