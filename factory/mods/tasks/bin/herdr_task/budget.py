@@ -386,7 +386,8 @@ def review_nonconverging(t):
     fable = fable_runs(t)
     all_rounds = [r for r in rounds_since(t, all_rounds=True) if r.get("by") not in fable]
     rounds = [r for r in rounds_since(t) if r.get("by") not in fable]
-    return len(all_rounds) >= 3 and len(rounds) >= 2 and all((r.get("majors") or 0) > 0 for r in rounds[-2:])
+    return (len(all_rounds) >= 3 and len(rounds) >= 2 and
+            all(r.get("verdict") == "changes" and (r.get("majors") or 0) > 0 for r in rounds[-2:]))
 
 
 def triggers(s, t):

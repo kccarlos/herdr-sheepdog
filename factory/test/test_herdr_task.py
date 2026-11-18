@@ -5449,6 +5449,8 @@ class LoopBreaker(GateReview):
         self.assertEqual(self.why(), [NON_CONVERGENCE])  # an old round counts toward the threshold
         self.rounds(("changes", 1, "a.py"), ("pass", 0, ""), ("changes", 1, "a.py"))
         self.assertEqual(self.why(), [])
+        self.rounds(("pass", 1, "a.py"), ("pass", 1, "a.py"), ("pass", 1, "a.py"))
+        self.assertEqual(self.why(), [])  # majors below a blocker-only Must fix do not request changes
 
     def test_time_trigger_edge(self):
         from unittest import mock
