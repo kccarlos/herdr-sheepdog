@@ -1844,9 +1844,11 @@ def continue_line(s, t):
 
 def resolve_again_argv(s, t, key=None, argv_json=None, resuming=False):
     prev = last_agent(t)
-    keep = not resuming and prev and prev.get("argv") and (t.get("pick_at") or 0) <= (prev.get("at") or 0)
-    return agent_argv(None, argv_json) if argv_json else worker_argv(s, t, agent=key) if key else \
-        (prev["argv"] if keep else worker_argv(s, t))
+    if argv_json:
+        return agent_argv(None, argv_json)
+    if not key and not resuming and prev and (t.get("pick_at") or 0) <= (prev.get("at") or 0):
+        key = prev.get("agent")
+    return worker_argv(s, t, agent=key)
 
 
 def start_again(s, t, key=None, argv_json=None, message=None, parent=None, resuming=False, nudge=None):
@@ -1862,7 +1864,7 @@ def start_again(s, t, key=None, argv_json=None, message=None, parent=None, resum
     ensure_build_dir(s, t)
     parent = parent_for(parent or (prev or {}).get("parent"), s.loc["folder"])
     same = prev and agent_key(argv) == prev.get("agent")
-    res = resume_argv(argv, prev["session"], folder_for(s, t)) if same and prev.get("session") else None
+    res = resume_argv(argv, prev["session"]) if same and prev.get("session") else None
     if res:
         msg = message or nudge or (continue_line(s, t) if resuming else None)
         a = launch(s, t, argv, msg, parent=parent, resume=res)

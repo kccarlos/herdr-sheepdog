@@ -19,7 +19,6 @@ CI = os.environ.get("CI") == "true"
 
 class HerdrTask(unittest.TestCase):
     def test_workers_can_ask_without_approval(self):
-        import tomllib
         from types import SimpleNamespace
         from unittest import mock
 
@@ -44,12 +43,9 @@ class HerdrTask(unittest.TestCase):
             self.assertEqual(agy["trustedWorkspaces"], [folder])
             codex = launch.own_argv(["codex"], folder, cwd=folder)
             self.assertIn(f'projects={{"{folder}"={{trust_level="trusted"}}}}', codex)
-            hook = tomllib.loads(codex[2])["hooks"]["PermissionRequest"][0]["hooks"][0]["command"]
-            command = f'{path} ask "Which option?" --option A --option B --recommend A --folder {folder}'
-            result = subprocess.run(shlex.split(hook), input=json.dumps({"tool_input": {"command": command}}),
-                                    check=True, capture_output=True, text=True)
-            self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["decision"]["behavior"], "allow")
-            brief = launch.closing_line(store, {}, argv=codex)
+            self.assertFalse(any(flag.startswith("hooks.") for flag in codex))
+            brief = launch.closing_line(store, {})
+            self.assertNotIn("require_escalated", brief)
             verbs = re.search(r"then its ([\w, -]+) commands run without asking\.", brief)
             self.assertIsNotNone(verbs)
             self.assertEqual(verbs.group(1).split(", "), launch.OWN)
@@ -6360,7 +6356,7 @@ class FastOffIsSaid(unittest.TestCase):
         self.assertIn('service_tier="default"', off)
         self.assertNotIn('service_tier="fast"', off)
         self.assertIn('service_tier="fast"', argv_for({"agent": "codex", "fast": True}))
-        self.assertIn('{"fastMode": false}', argv_for({"agent": "claude", "fast": False}))
+        self.assertIn('{"fastMode": false, "skipDangerousModePermissionPrompt": true}', argv_for({"agent": "claude", "fast": False}))
 
 
 class FolderTrustQuestion(unittest.TestCase):
@@ -7167,7 +7163,7 @@ class Revive(unittest.TestCase):
         self.tasks = {"dev#6": {"id": 6, "state": "running", "agents": []}}
         self.leased = set()  # the projects' lease holders (SDF-16): the coordinators revive brings back
         for name, value in (("run", hc), ("hc_json", hc_json), ("session_of", lambda pid: self.sessions.get(pid, (None, None))),
-                            ("task_of", lambda k: self.tasks.get(revive.label_of(k.get("labels"), "task"))),
+                            ("task_of", lambda k: (self.dir, self.tasks.get(revive.label_of(k.get("labels"), "task")))),
                             ("coordinator_addresses", lambda: dict.fromkeys(self.leased))):
             p = mock.patch.object(revive, name, value)
             p.start()
@@ -7280,7 +7276,11 @@ class Revive(unittest.TestCase):
         self.tick()
         self.crash("t5")
         self.tick()
-        self.assertTrue(self.sent[0][1].startswith("""cd /wt && DISABLE_AUTOUPDATER=1 HERDR_BROWSER_TASK='dev#6' SHEEPDOG_TASK='dev#6' claude --settings '{"a":1}' --resume S1 'Herdr restarted"""), self.sent[0][1])
+        words = shlex.split(self.sent[0][1])
+        self.assertIn("HERDR_BROWSER_TASK=dev#6", words)
+        self.assertIn("SHEEPDOG_TASK=dev#6", words)
+        self.assertIn("--dangerously-skip-permissions", words)
+        self.assertEqual(words[-3:-1], ["--resume", "S1"])
 
     def agy_worker(self, cid="0199aaaa-bbbb-cccc-dddd-eeeeeeeeeeee"):
         """A kept agy worker (FAC-7) in a temp home: its conversation is a db no chat reads, so no log."""
@@ -7313,9 +7313,12 @@ class Revive(unittest.TestCase):
         self.crash("t5")
         report = self.tick()
         self.assertEqual(report["revived"], [{"terminal": "t5", "how": "resume", "session": cid}])
-        self.assertEqual(self.sent, [("t5", "cd /wt && HERDR_BROWSER_TASK='dev#6' SHEEPDOG_TASK='dev#6' agy --settings '{\"trustedWorkspaces\":[\"/wt\"]}' "
-                                            f"--mode accept-edits --conversation {cid} -i 'Herdr restarted (a crash, power loss or reboot) "
-                                            "while you were working, and your session is resumed. Carry on where you left off.'")])
+        addr, line = self.sent[0]
+        self.assertEqual(addr, "t5")
+        words = shlex.split(line)
+        self.assertIn("--dangerously-skip-permissions", words)
+        self.assertEqual(words[-5:-1], ["--dangerously-skip-permissions", "--conversation", cid, "-i"])
+        self.assertTrue(words[-1].startswith("Herdr restarted"))
 
     def test_an_agy_worker_lost_before_any_record_resumes_trusting_its_worktree(self):
         cid = self.agy_worker()
@@ -8080,17 +8083,13 @@ class TaskFlow(unittest.TestCase):
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()), \
                 self.mock.patch.object(sys, "argv", ["herdr-task", "list", "--space", "sp1"]):
             cli.main()
-        # Worker own_argv keeps Codex folder trust + _allow and Claude idleCompaction=False without ask-hook chaining
+        # Worker own_argv keeps Codex folder trust and Claude idleCompaction=False.
         st = json.loads(launch.own_argv(["claude", "go"])[2])
         self.assertIs(st["idleCompaction"], False)
         self.assertNotIn("hooks", st)
         real_main = os.path.realpath(self.main)
         self.assertIn(f'projects={{{json.dumps(real_main)}={{trust_level="trusted"}}}}',
                       launch.own_argv(["codex", "-s", "workspace-write"], real_main))
-        with self.mock.patch.dict(os.environ, {"SHEEPDOG_TASK": "demo#1"}):
-            self.assertTrue(launch.own_command("/x/herdr-task",
-                'hc run --bg --name demo-1-review --label "sheepdog.task=$SHEEPDOG_TASK" --label sheepdog.role=reviewer '
-                '--label sheepdog.agent=claude -- claude --permission-mode plan "review"', sandboxed=True))
 
     def switch_events(self, me=None):
         """cmd_switch with the old agent t1 mid-turn on session S1: what it ran, in order."""
@@ -8123,35 +8122,23 @@ class TaskFlow(unittest.TestCase):
         self.assertEqual(events[0], ("run", ["hc", "kill", "t1"]))
         self.assertEqual([e[0] for e in events], ["run", "launch"])
         _, resume, message = events[1]
-        # #1056: the mode a new session would get (none set on this home: default), not the old session's
-        self.assertEqual(resume, ["claude", "--model", "opus", "--permission-mode", "default", "--resume", "S1"])
+        self.assertEqual(resume, ["claude", "--model", "opus", "--dangerously-skip-permissions", "--resume", "S1"])
         self.assertEqual(message, self.commands.SWITCH_NUDGE)
         self.assertEqual(self.said[-1], "SHEP-1: claude t2 resumed its session, t1 ended")
 
-    def test_a_resumed_claude_starts_in_the_configured_mode(self):
-        """#1056: Claude Code resumes a session in the permission mode it ended in (a stuck agent left in plan or
-        ask came back so after switch). The resume says the mode a new session gets: argv's own, else its
-        --settings', the folder's settings, then the person's ~/.claude/settings.json."""
-        from herdr_task import launch
-        from unittest import mock
-        d = tempfile.mkdtemp()
-        home, folder = os.path.join(d, "claude"), os.path.join(d, "repo")
-        os.makedirs(home)
-        os.makedirs(os.path.join(folder, ".claude"))
-        with open(os.path.join(home, "settings.json"), "w") as f:
-            json.dump({"permissions": {"defaultMode": "auto"}}, f)
-        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": home}):
-            self.assertEqual(launch.resume_argv(["claude"], "S1", folder), ["claude", "--permission-mode", "auto", "--resume", "S1"])
-            with open(os.path.join(folder, ".claude", "settings.json"), "w") as f:
-                json.dump({"permissions": {"defaultMode": "acceptEdits"}}, f)
-            self.assertEqual(launch.resume_argv(["claude"], "S1", folder)[1:3], ["--permission-mode", "acceptEdits"])
-            argv = ["claude", "--settings", json.dumps({"permissions": {"defaultMode": "plan"}})]
-            self.assertEqual(launch.resume_argv(argv, "S1", folder)[3:5], ["--permission-mode", "plan"])
-            # said already: kept as it is
-            for argv in (["claude", "--permission-mode", "bypassPermissions"], ["claude", "--dangerously-skip-permissions"]):
-                self.assertEqual(launch.resume_argv(argv, "S1", folder), argv + ["--resume", "S1"])
-        # Codex's sandbox is in its argv already
-        self.assertEqual(launch.resume_argv(["codex", "-s", "read-only"], "S1"), ["codex", "resume", "-s", "read-only", "S1"])
+    def test_resume_states_the_worker_mode(self):
+        from herdr_task.launch import resume_argv
+        for agent, flag, suffix in (
+            ("claude", "--dangerously-skip-permissions", ["--resume", "S1"]),
+            ("agy", "--dangerously-skip-permissions", ["--conversation", "S1"]),
+            ("codex", "--dangerously-bypass-approvals-and-sandbox", ["S1"]),
+        ):
+            prefix = [agent, "resume"] if agent == "codex" else [agent]
+            self.assertEqual(resume_argv([agent], "S1"), prefix + [flag] + suffix)
+        self.assertEqual(resume_argv(["claude", "--permission-mode=plan"], "S1"),
+                         ["claude", "--permission-mode=plan", "--resume", "S1"])
+        self.assertEqual(resume_argv(["codex", "-s", "read-only"], "S1"),
+                         ["codex", "resume", "-s", "read-only", "-a", "on-request", "S1"])
 
     def test_an_agent_switching_itself_ends_after_the_new_one_starts(self):
         """SHEP-211: ending the caller first would end the switch command with it."""
@@ -9270,6 +9257,26 @@ class Resume(unittest.TestCase):
             self.assertEqual(last["argv"], ["agy", "--model", "gemini-4-argon-high", "--dangerously-skip-permissions"])
             self.assertEqual(last["session"], "0199-sid")
 
+    def test_codex_starts_and_resumes_with_explicit_permissions(self):
+        bypass = "--dangerously-bypass-approvals-and-sandbox"
+        ref = self.started_task({"agent": "codex", "model": "gpt-test"})
+        self.assertIn(bypass, self.launched_cmd())
+        self.assertIn("-m", self.launched_cmd())
+        self.assertIn("gpt-test", self.launched_cmd())
+        with self.store_mod.open_store(self.argparse.Namespace(folder=self.repo, id=ref)) as s:
+            s.find(ref)["agents"][-1]["argv"] = ["codex", "--no-daemon", "-m", "older-model",
+                                                         "-s", "read-only", "-a", "on-request"]
+            s.dirty = True
+        out = self.call(self.commands.cmd_resume, id=ref, space=None, agent=None, argv=None, parent=None)
+        self.assertTrue(out["resumed"])
+        cmd = self.launched_cmd()
+        self.assertIn(bypass, cmd)
+        self.assertIn("gpt-test", cmd)
+        self.assertIn("0199-sid", cmd)
+        self.assertNotIn("read-only", cmd)
+        self.assertNotIn("older-model", cmd)
+        self.assertFalse(any(flag.startswith("hooks.") for flag in cmd))
+
     def test_a_resumed_agy_worker_idle_at_turn_0_gets_one_nudge(self):
         """FAC-100 (note 14): a resumed agy session sits at turn 0 until it hears something: the tick nudges it once."""
         from unittest import mock
@@ -9370,11 +9377,11 @@ class Resume(unittest.TestCase):
     def test_switch_and_tell_keep_their_existing_behaviour(self):
         ref = self.started_task({"agent": "agy", "perm": "auto"}, session="0199-sid")
         self.write_worker({"agent": "agy", "perm": "full"})
-        # switch without --agent keeps prev["argv"] and sends SWITCH_NUDGE (not continue_line).
+        # switch without --agent keeps the CLI, picks up the current mode and sends SWITCH_NUDGE.
         out = self.call(self.commands.cmd_switch, id=ref, space=None, agent=None, argv=None, parent=None, keep=False)
         self.assertTrue(out["resumed"])
         cmd = self.launched_cmd()
-        self.assertIn("accept-edits", cmd)
+        self.assertIn("--dangerously-skip-permissions", cmd)
         self.assertEqual(cmd[-2:], ["-i", self.commands.SWITCH_NUDGE])
         self.assertNotIn("Herdr resumed you:", cmd[-1])
         # tell with no live worker starts again with tell's own message once, not continue_line.
@@ -10997,7 +11004,7 @@ class SimulatorPool(unittest.TestCase):
             self.set_pool(["WukongMind 1", self.U2])
             for phrase in ("simulator lease", "never create or boot another", "simulator release"):
                 self.assertIn(phrase, self.launch.closing_line(s, t))
-        self.assertTrue("simulator" in self.launch.OWN and self.launch.own_command("/x/herdr-task", "/x/herdr-task simulator lease WM-1"))
+        self.assertIn("Bash(/x/herdr-task simulator:*)", self.launch.own_rules("/x/herdr-task"))
 
     def test_lease_refusal_release_and_automatic_cleanup_on_end_and_tick(self):
         from unittest import mock
@@ -11100,7 +11107,7 @@ class DeviceWait(unittest.TestCase):
                 self.mock.patch.object(output, "subagents", lambda key: []):
             v = output.view(s, t, [self.worker])
         self.assertEqual((v["status"], v["why"]), ("needs", why))
-        self.assertTrue("device-wait" in self.launch.OWN and self.launch.own_command("/x/herdr-task", "/x/herdr-task device-wait --clear"))
+        self.assertIn("Bash(/x/herdr-task device-wait:*)", self.launch.own_rules("/x/herdr-task"))
         self.assertEqual(self.run_cli("device-wait", "--clear", env=self.env)[0], 0)
         self.assertNotIn("device_wait", self.task())
 

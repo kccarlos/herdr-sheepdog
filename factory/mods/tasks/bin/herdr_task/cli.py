@@ -12,7 +12,7 @@ import time
 from . import link
 from .base import bundle, Fail, guard, hc_json, run, STORE, VERSION
 from .agents import LINE_MAX, SUMMARY_MAX
-from .launch import cmd_allow, is_coordinator
+from .launch import is_coordinator
 from .commands import (
     cmd_accept, cmd_add, cmd_alert, cmd_config, cmd_edit, cmd_fix, cmd_inbox, cmd_list, cmd_merge, cmd_ready,
     cmd_resume, cmd_review, cmd_review_more, cmd_reviewed, cmd_rm, cmd_show, cmd_start, cmd_state, cmd_status,
@@ -482,10 +482,6 @@ def main():
     c = sub.add_parser("_ask-pane")  # the ask pane's program (ask.py)
     c.add_argument("id")
     c.set_defaults(fn=cmd_ask_pane, json=False)
-    c = sub.add_parser("_allow")  # Codex's PermissionRequest hook (own_argv)
-    c.add_argument("--command", required=True)
-    c.add_argument("--sandboxed", action="store_true")  # Codex's: its proof and commits run escalated (#866)
-    c.set_defaults(fn=cmd_allow, json=False)
     c = cmd("sandbox", cmd_sandbox, "whether Codex's sandbox (bwrap) can start on this machine, and the fix for it when it can't "
             "(asked once and kept; --check asks again)", id=False)
     c.add_argument("--check", action="store_true", help="ask again now")

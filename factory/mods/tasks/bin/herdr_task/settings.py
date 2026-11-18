@@ -338,20 +338,20 @@ def argv_for(pick):
     if pick.get("argv"):
         return [str(x) for x in pick["argv"]]
     agent = pick.get("agent")
+    perm = pick.get("perm") or "full"
     if agent == "claude":
         a = ["claude"]
         if pick.get("model"):
             a += ["--model", pick["model"]]
         if pick.get("effort"):
             a += ["--effort", pick["effort"]]
-        perm = pick.get("perm")
         st = {"fastMode": bool(pick.get("fast"))}
         if perm in ("full", "bypassPermissions"):
             st["skipDangerousModePermissionPrompt"] = True
         a += ["--settings", json.dumps(st)]
         if perm in ("full", "bypassPermissions"):
             a.append("--dangerously-skip-permissions")
-        elif perm:
+        else:
             mode = "default" if perm == "manual" else "acceptEdits" if perm == "accept-edits" else "plan" if perm == "read-only" else perm
             a += ["--permission-mode", mode]
         return a
@@ -363,12 +363,11 @@ def argv_for(pick):
             a += ["-c", f'model_reasoning_effort="{pick["effort"]}"']
         # always said, so Fast off wins over a service_tier in config.toml (default: the standard tier)
         a += ["-c", 'service_tier="%s"' % ("fast" if pick.get("fast") else "default")]
-        perm = pick.get("perm")
         if perm in ("full", "bypassPermissions"):
             a.append("--dangerously-bypass-approvals-and-sandbox")
         elif perm == "read-only":
             a += ["-s", "read-only", "-a", "on-request"]
-        elif perm:
+        else:
             a += ["-s", "workspace-write", "-a", "on-request"]
         return a
     if agent == "agy":
@@ -377,13 +376,32 @@ def argv_for(pick):
             a += ["--model", pick["model"]]
         if pick.get("effort"):
             a += ["--effort", pick["effort"]]
-        perm = pick.get("perm")
         if perm in ("full", "bypassPermissions"):
             a.append("--dangerously-skip-permissions")
         else:
             a += ["--mode", "plan" if perm in ("plan", "read-only") else "accept-edits"]
         return a
     return [agent] if agent else None
+
+
+def worker_permissions(argv):
+    """Apply the factory default to a worker argv with no explicit permission flags."""
+    agent = agent_key(argv)
+    flags = {arg.split("=", 1)[0] for arg in argv[1:]}
+    if agent == "codex":
+        if "--dangerously-bypass-approvals-and-sandbox" in flags:
+            return argv
+        sandbox = bool(flags & {"-s", "--sandbox"})
+        approval = bool(flags & {"-a", "--ask-for-approval"})
+        if sandbox or approval:
+            return [*argv, *([] if sandbox else ["-s", "workspace-write"]),
+                    *([] if approval else ["-a", "on-request"])]
+        return [*argv, "--dangerously-bypass-approvals-and-sandbox"]
+    if agent == "claude" and not flags & {"--permission-mode", "--dangerously-skip-permissions"}:
+        return [*argv, "--dangerously-skip-permissions"]
+    if agent == "agy" and not flags & {"--mode", "--dangerously-skip-permissions"}:
+        return [*argv, "--dangerously-skip-permissions"]
+    return argv
 
 
 def worker_pick(s, task, space=None, agent=None):
@@ -408,7 +426,7 @@ def worker_argv(s, task, space=None, agent=None):
     """A task's agent when nobody gave an argv: worker_pick's."""
     pick = worker_pick(s, task, agent=agent)
     if pick.get("argv") and not (task.get("model") or task.get("effort")):
-        return argv_for(pick)
+        return worker_permissions(argv_for(pick))
     pick.pop("argv", None)
     pick.setdefault("agent", default_worker_agent())
     return argv_for(pick) or agent_argv(pick["agent"])

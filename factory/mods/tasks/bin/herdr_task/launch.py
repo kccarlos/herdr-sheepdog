@@ -1,12 +1,7 @@
-"""Starting agents: their argv, labels, brief and coordinator.
-
-The launch allow-list ("an agent's own herdr-task commands never ask": OWN, own_rules, own_argv,
-cmd_allow) is the one place an agent's launch is given commands it may run without asking; allow
-another command (herdr-secret's, say) there."""
+"""Starting agents: their argv, labels, brief and coordinator."""
 
 import contextlib
 import fcntl
-import hashlib
 import json
 import os
 import re
@@ -18,7 +13,7 @@ import sys
 import time
 
 from .base import ENTRY, Fail, HOME, git, hc_json, kill_agent, label_of, now, PROJECT_LABEL, ROLE_LABEL, run, STORE, TASK_LABEL, WHERE, WORKTREES
-from .settings import agent_key, ASSISTANT_TEMPLATES, by_layer, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, gate_min, keep_review, notes, notes_part, read_settings, review_limits, settings_block, settings_for
+from .settings import agent_key, ASSISTANT_TEMPLATES, by_layer, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, gate_min, keep_review, notes, notes_part, read_settings, review_limits, settings_block, settings_for, worker_permissions
 from .templates import instructions
 from .agents import LINE_MAX, SUMMARY_MAX
 from .github import remote_of
@@ -26,10 +21,8 @@ from .github import remote_of
 
 # ---- an agent's own herdr-task commands never ask -------------------------------------------
 # At each launch the agent is allowed exactly this herdr-task's path, verb by verb, without
-# touching the owner's CLI settings: Claude Code in --settings, Codex through a PermissionRequest
-# hook (`herdr-task _allow`), and agy in --settings.
+# touching the owner's CLI settings, through --settings on Claude Code and agy.
 
-HOOK_TIMEOUT = 30
 OWN = ["ready", "reviewed", "status", "alert", "ask", "simulator", "device-wait", "show", "list", "where"]
 # herdr-secret's agent commands (~/.local/bin/herdr-secret): asking for a secret and
 # using one by name never ask either, as Shepherdr's secret commands. Written by its full path or
@@ -45,12 +38,6 @@ def review_reads(check):
     compound line part by part (split at ;, &&, ||, | and line breaks outside quotes)."""
     parts = re.split(r"""(?:&&|\|\||[;|\n])(?=(?:[^'"]|'[^']*'|"(?:\\.|[^"\\])*")*$)""", check or "")
     return REVIEW_READS + [p.strip() for p in parts if p.strip()]
-
-
-# Committing as it goes (#866): Codex keeps every .git read-only in its sandbox, a worktree's
-# (the main checkout's .git) too, so a Codex worker's `git add`/`git commit` run escalated. Only
-# these, as one plain command with no git options before the verb (-c, -C, --git-dir...).
-GIT = ["add", "commit"]
 
 
 def secret_path():
@@ -77,12 +64,6 @@ def own_rules(path, verbs=OWN):
     for p in [sp, "herdr-secret"] if sp and re.fullmatch(r"[\w@%+=:,./-]+", sp) else []:
         rules += [f"Bash({p} {verb}:*)" for verb in SECRET]
     return rules
-
-
-def ask_command(path, sandboxed=False):
-    """The PermissionRequest hook a sandboxed Codex worker gets at launch (`herdr-task _allow`):
-    its own commands and commits allowed without asking (#866)."""
-    return f"{shlex.quote(sys.executable)} {shlex.quote(ENTRY)} _allow --command {shlex.quote(path)}" + (" --sandboxed" if sandboxed else "")
 
 
 def claude_config_path():
@@ -148,15 +129,17 @@ def claude_trust(folder):
 
 
 def own_argv(argv, folder=None, verbs=OWN, cwd=None, reads=None):
-    """An agent's argv with its own herdr-task commands allowed (Claude Code, Codex, and agy,
-    and folder trust + bypass acceptance recorded/passed). verbs: the herdr-task verbs allowed;
+    """An agent's argv with its own herdr-task commands allowed (Claude Code and agy), with folder
+    trust and bypass acceptance recorded where needed. verbs: the herdr-task verbs allowed;
     cwd: the folder the agent runs in; reads: a reviewer's commands (review_reads)."""
     path, out = own_path(), list(argv)
     k = agent_key(out)
     if k == "claude":
         claude_trust(folder)
         rules = own_rules(path, verbs) + [f"Bash({r}:*)" for r in reads or []]
-        bypass = "--allow-dangerously-skip-permissions" in out or claude_mode(out, cwd or folder) in (None, "bypassPermissions")
+        bypass = (any(a in out for a in ("--allow-dangerously-skip-permissions", "--dangerously-skip-permissions",
+                                         "--permission-mode=bypassPermissions"))
+                  or any(a == "--permission-mode" and b == "bypassPermissions" for a, b in zip(out, out[1:])))
         if not rules and verbs is not OWN and not bypass:
             return out
         cur, i = {}, None
@@ -187,14 +170,9 @@ def own_argv(argv, folder=None, verbs=OWN, cwd=None, reads=None):
             return out
         return out[:1] + ["--settings", json.dumps(merged)] + out[1:]
     if k == "codex":
-        hook = ask_command(path, sandboxed=True)
-        ident = {"event_name": "permission_request", "hooks": [{"async": False, "command": hook, "timeout": HOOK_TIMEOUT, "type": "command"}]}
-        state = {"/<session-flags>/config.toml:permission_request:0:0": codex_hook_hash(ident)}
         roots = [] if any(str(a).startswith("projects") for a in out) else trust_roots(folder)
         trust = ["-c", "projects={" + ",".join(f'{json.dumps(r)}={{trust_level="trusted"}}' for r in roots) + "}"] if roots else []
-        return out[:1] + ["-c", f"hooks.PermissionRequest=[{{hooks=[{{type=\"command\",command={json.dumps(hook)},timeout={HOOK_TIMEOUT}}}]}}]",
-                          "-c", "hooks.state={" + ",".join(f'{json.dumps(k)}={{trusted_hash="sha256:{v}"}}' for k, v in state.items()) + "}",
-                          *trust] + out[1:]
+        return out[:1] + trust + out[1:]
     if k == "agy":
         # agy's --settings allow list replaces the person's own (~/.gemini/antigravity-cli): it carries
         # the argv's own --settings rules, then the person's, then these.
@@ -243,104 +221,6 @@ def own_argv(argv, folder=None, verbs=OWN, cwd=None, reads=None):
             return out
         return out[:1] + ["--settings", json.dumps({**trusted, "permissions": {"allow": theirs + own}})] + out[1:]
     return out
-
-
-def codex_hook_hash(ident):
-    """Codex's trusted_hash for one hook group (codex-rs/hooks discovery.rs hook_hash)."""
-    return hashlib.sha256(json.dumps(ident, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-
-
-# One plain word: no expansion, redirect, separator or line break outside quotes, nor $ or ` inside.
-WORD = re.compile(r"""(?:[\w@%+=:,./-]+|'[^']*'|"(?:[^"\\$`]|\\["\\])*")+""")
-UNQUOTE = re.compile(r"""'([^']*)'|"((?:[^"\\]|\\.)*)\"""")
-
-
-def own_command(path, text, sandboxed=False):
-    """Whether a shell command is exactly one of this herdr-task's own verbs: one simple command,
-    nothing that expands, redirects or chains. sandboxed (a Codex worker's): git add/commit too."""
-    if not isinstance(text, str):
-        return False
-    task = os.environ.get("SHEEPDOG_TASK") or os.environ.get("HERDR_BROWSER_TASK") or ""
-    if sandboxed and re.fullmatch(r"[\w#.@-]+", task):
-        for var in ("$SHEEPDOG_TASK", "$HERDR_BROWSER_TASK"):
-            text = text.replace(f'"sheepdog.task={var}"', f'"sheepdog.task={task}"').replace(f'"herdr.task={var}"', f'"herdr.task={task}"')
-    words, at, text = [], 0, text.strip()
-    while at < len(text):
-        if text[at] in " \t":
-            at += 1
-            continue
-        m = WORD.match(text, at)
-        if not m:
-            return False
-        words.append(UNQUOTE.sub(lambda g: g.group(1) if g.group(1) is not None else re.sub(r"\\(.)", r"\1", g.group(2)), m.group(0)))
-        at = m.end()
-    if len(words) >= 2 and words[0] == path and words[1] in OWN:
-        return True
-    if sandboxed and len(words) >= 2 and words[0] == "git" and words[1] in GIT:
-        return True
-    if sandboxed and words and words[0] == "hc" and helper_hc(words):
-        return True
-    sp = secret_path()
-    return bool(sp) and len(words) >= 2 and words[0] in (sp, "herdr-secret") and words[1] in SECRET
-
-
-# A Codex worker's review (#866): its sandbox can't reach hc, so starting, waiting on, reading and
-# ending its reviewer run escalated. Only a read-only reviewer as the brief's Reviewer line gives it,
-# and only its own helpers (<task>-review, -helper) to wait on, read or end.
-REVIEWERS = {"codex": (["codex", "--no-daemon", "--sandbox", "read-only", "--ask-for-approval", "never"],
-                       {"--disable": re.compile(r"hooks"), "-m": re.compile(r"[\w.:-]+"),
-                        "-c": re.compile(r'projects=\{.*\}|model_reasoning_effort="?\w+"?', re.S)}),
-             "claude": (["claude", "--permission-mode", "plan"], {"--model": re.compile(r"[\w.:\[\]-]+"), "--effort": re.compile(r"\w+")})}
-HELPER = re.compile(r"[\w.-]+-(?:review|helper)(?:-[\w.-]+)?")
-
-
-def helper_hc(words):
-    """Whether `hc ...` is a worker's own reviewer: run as the brief says, or waited on, read, ended."""
-    if len(words) >= 3 and words[1] in ("wait", "read", "kill"):
-        return bool(HELPER.fullmatch(words[2])) and all(w.startswith("--") or re.fullmatch(r"\d+", w) for w in words[3:])
-    if len(words) < 4 or words[1] != "run" or "--" not in words:
-        return False
-    i = words.index("--")
-    opts, cmd = words[2:i], words[i + 1:]
-    j = 0
-    while j < len(opts):
-        if opts[j] == "--bg":
-            j += 1
-        elif opts[j] == "--name" and j + 1 < len(opts) and HELPER.fullmatch(opts[j + 1]):
-            j += 2
-        elif opts[j] == "--label" and j + 1 < len(opts) and re.fullmatch(r"(?:sheepdog|herdr)\.(?:task=[\w#.@-]+|role=(?:reviewer|helper)|agent=(?:codex|claude))", opts[j + 1]):
-            j += 2
-        else:
-            return False
-    for base, flags in REVIEWERS.values():
-        if cmd[:len(base)] != base:
-            continue
-        rest = cmd[len(base):]
-        k = 0
-        while k < len(rest) - 1 and rest[k] in flags:
-            if not flags[rest[k]].fullmatch(rest[k + 1]):
-                return False
-            k += 2
-        return len(rest) - k <= 1 and not (rest[k:] and rest[k].startswith("-"))
-    return False
-
-
-def cmd_allow(args):
-    """The PermissionRequest hook of a sandboxed Codex worker (own_argv): allows this launch's own
-    herdr-task commands, commits and helper reviewer without prompting."""
-    raw = sys.stdin.buffer.read(1 << 20)
-    try:
-        data = json.loads(raw or b"{}")
-    except ValueError:
-        return
-    if os.environ.get("HERDR_TASK_HOOK_LOG"):
-        with open(os.environ["HERDR_TASK_HOOK_LOG"], "a") as f:
-            f.write(json.dumps(data) + "\n")
-    cmd = (data.get("tool_input") or {}).get("command") if isinstance(data.get("tool_input"), dict) else None
-    if isinstance(cmd, list):
-        cmd = cmd[2] if len(cmd) == 3 and cmd[1] in ("-c", "-lc") else shlex.join(cmd)
-    if own_command(args.command, cmd, getattr(args, "sandboxed", False)):
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}))
 
 
 # ---- starting agents ------------------------------------------------------------------------
@@ -410,50 +290,14 @@ def sweep_sandboxes():
             pass
 
 
-def claude_mode(argv, folder=None):
-    """The permission mode a new Claude Code session would start in (#1056): argv's own flag, else the defaultMode of
-    its --settings, the folder's .claude/settings.local.json and .claude/settings.json, then the person's
-    (CLAUDE_CONFIG_DIR or ~/.claude), as Claude Code ranks them; "default" when none says."""
-    for i, a in enumerate(argv):
-        if a == "--dangerously-skip-permissions":
-            return None
-        if a == "--permission-mode" and i + 1 < len(argv):
-            return argv[i + 1]
-        if a.startswith("--permission-mode="):
-            return a.split("=", 1)[1]
-    found = []
-    for i, a in enumerate(argv[:-1]):
-        if a == "--settings":
-            found.append(argv[i + 1])
-    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude")
-    files = ([os.path.join(folder, ".claude", "settings.local.json"), os.path.join(folder, ".claude", "settings.json")] if folder else []) \
-        + [os.path.join(home, "settings.json")]
-    for src in found + files:
-        try:
-            if src.lstrip().startswith("{"):
-                d = json.loads(src)
-            else:
-                with open(os.path.expanduser(src)) as f:
-                    d = json.load(f)
-        except (OSError, ValueError):
-            continue
-        mode = ((d.get("permissions") or {}) if isinstance(d, dict) else {}).get("defaultMode")
-        if isinstance(mode, str) and mode:
-            return mode
-    return "default"
-
-
-def resume_argv(argv, session, folder=None):
-    """argv resuming `session`. Claude Code brings a resumed session back in the permission mode it ended in (#1056: a
-    switch replacing a stuck agent came up in plan or ask mode, not the person's auto): the mode a new one would get
-    is said, unless argv already says one."""
+def resume_argv(argv, session):
+    """Resume a session with the current worker argv and the recorded session id."""
+    argv = worker_permissions(argv)
     k = agent_key(argv)
     if k == "claude":
-        mode = claude_mode(argv, folder)
-        has = mode is None or any(a == "--permission-mode" or a.startswith("--permission-mode=") for a in argv)
-        return argv + ([] if has else ["--permission-mode", mode]) + ["--resume", session]
+        return argv + ["--resume", session]
     if k == "codex":
-        return [argv[0], "resume"] + argv[1:] + [session]
+        return [argv[0], "resume", *argv[1:], session]
     if k == "agy":
         return argv + ["--conversation", session]
     return None
@@ -575,7 +419,7 @@ def caller_labels():
     return (k or {}).get("labels") or {}
 
 
-def closing_line(s, task, parent=None, argv=None):
+def closing_line(s, task, parent=None):
     """How the worker finishes: every task, worktree or in the folder, says ready with a summary.
     It names this herdr-task by its full path: only that form runs without asking (own_argv)."""
     done = "finished and committed" if task.get("mode") == "worktree" else "finished"
@@ -605,11 +449,6 @@ def closing_line(s, task, parent=None, argv=None):
     if secret_path():
         text += (" Secrets (keys, tokens, passwords) are used by name, never seen: `herdr-secret ask NAME --why \"…\"` "
                  "(then end your turn), `herdr-secret run NAME -- <command>`, `herdr-secret list`; these run without asking too.")
-    if argv and agent_key(argv) == "codex":
-        text += (" Codex's sandbox can't reach Herdr nor write git's data, so give those commands, "
-                 "`git add`/`git commit` and your review's `hc run`/`hc wait`/`hc read`/`hc kill` (its prompt in single quotes) "
-                 "sandbox_permissions \"require_escalated\" from the first try, each as one plain command (no && chains, no $(…), "
-                 "no git options before the verb): then they run without asking.")
     # No "report to your coordinator": Herdr tells the Assistant itself (news_pass).
     return text
 
@@ -643,7 +482,7 @@ def brief(s, task, parent=None, argv=None):
         start += f"\n(The main folder is {s.loc['folder']}.)"
     body = "Your task, " + s.ref(task) + ":\n" + task_text(task)
     finish = notes_part("Before you say ready", notes(s, task, "finish"))
-    return "\n\n".join(x for x in [instructions("worker"), start, body, where_line(task), finish, closing_line(s, task, parent, argv),
+    return "\n\n".join(x for x in [instructions("worker"), start, body, where_line(task), finish, closing_line(s, task, parent),
                                     settings_block(s, task, argv=argv, live=True)] if x)
 
 
@@ -659,7 +498,7 @@ def handoff(s, task, prev, parent=None, argv=None):
         lines.append(f"The previous agent ({prev.get('agent') or 'agent'}) left no session log; check the folder's state (git status, git log) before you continue.")
     lines.append(notes_part("Before you continue, if it isn't done yet", notes(s, task, "start")))
     lines.append(notes_part("Before you say ready", notes(s, task, "finish")))
-    lines.append(closing_line(s, task, parent, argv))
+    lines.append(closing_line(s, task, parent))
     lines.append(settings_block(s, task, argv=argv, live=True))
     return "\n\n".join(x for x in lines if x)
 
@@ -873,6 +712,8 @@ def launch(s, task, argv, message=None, parent=None, resume=None, role=None, rea
     compatibility labels); reads: a reviewer's read-only commands (review_reads). Returns its record."""
     key = s.key(task)
     slug = getattr(s, "slug", None) or key.partition("#")[0]
+    if not role:
+        argv = worker_permissions(argv)
     cmd, folder = list(resume or argv), folder_for(s, task)
     sand = role == "reviewer" and sandboxes(cmd)
     trust = folder if task.get("mode") == "worktree" or agent_key(cmd) != "agy" else None
