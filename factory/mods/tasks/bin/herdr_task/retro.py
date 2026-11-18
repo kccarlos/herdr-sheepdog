@@ -156,8 +156,13 @@ def retro_prompt(s, t, base_sha, head):
               "worker": who(rows.get("Agent")), "reviewer": who(rows.get("Reviewer")), "rounds_table": rounds_table(t),
               "recaps": recaps or "none", "checks_cmd": (settings_for(s)["tasks"].get("check") or "").strip() or "the repo's own tests",
               "small_lines": SMALL_LINES}
+    return fill(values, task_text(t))
+
+
+def fill(values, brief):
+    """RETRO_MD with every {slot} filled (JSON braces in its tail left alone), then the brief."""
     text = re.sub(r"\{([a-z_]+)\}", lambda m: str(values[m.group(1)]) if m.group(1) in values else m.group(0), RETRO_MD)
-    return text.strip() + f"\n\nThe brief of {s.ref(t)}:\n" + task_text(t)
+    return text.strip() + f"\n\nThe brief of {values['task_ref']}:\n" + brief
 
 
 def start(s, t):

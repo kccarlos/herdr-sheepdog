@@ -173,6 +173,33 @@ class Retro(unittest.TestCase):
         self.assertNotIn("retro_run", self.task)
         self.assertIn("recap", self.task)
 
+    def test_each_outcome_wakes_the_coordinator_once(self):
+        from contextlib import nullcontext
+        from herdr_task import autopilot
+        self.store.slug = "test"
+        self.started()
+        self.tick({**TAIL, "verdict": "FIX", "majors": [MAJOR]})
+        state = {"folder": "/tmp"}
+        with mock.patch.object(autopilot, "store_files", return_value=["store"]), \
+                mock.patch.object(autopilot, "read_list", return_value={"folder": "/tmp"}), \
+                mock.patch.object(autopilot, "locate", return_value={}), \
+                mock.patch.object(autopilot, "Store", return_value=nullcontext(self.store)), \
+                mock.patch.object(autopilot, "events_in", return_value=[]), mock.patch.object(os.path, "isdir", return_value=True):
+            self.assertEqual(autopilot.events_for("/tmp", state, []), ["event:retro SHEP-13"])
+            self.assertEqual(autopilot.events_for("/tmp", state, []), [])
+            self.task["retro_capped"] = 1  # the FIX cap: the coordinator hears again
+            self.assertEqual(autopilot.events_for("/tmp", state, []), ["event:retro SHEP-13"])
+
+    def test_replay_prompts_fill_every_slot_and_recorded_answers_parse(self):
+        import re
+        import replay_retro
+        for ref in replay_retro.SITUATIONS:
+            self.assertEqual(re.findall(r"\{[a-z_]+\}", replay_retro.prompt(ref).split("<retro>")[0]), [], ref)
+            out = replay_retro.recorded(ref)
+            if out is not None:
+                rec, why = self.retro.parse_tail(out)
+                self.assertIsNone(why, ref)
+
 
 if __name__ == "__main__":
     unittest.main()

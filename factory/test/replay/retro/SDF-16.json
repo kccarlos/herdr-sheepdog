@@ -1,0 +1,41 @@
+{
+ "task_ref": "SDF-16",
+ "task_title": "M2: Coordinator lease, reconcile, re-parent, engine restart, watchdog",
+ "project": "sheepdog",
+ "base_sha": "5f712f72d68c",
+ "head_sha": "6e965f3a72",
+ "changed_lines": 1673,
+ "estimate_lines": 600,
+ "tokens_used": "unknown",
+ "worker": "claude opus",
+ "reviewer": "codex",
+ "recaps": "none",
+ "small_lines": 60,
+ "rounds": [
+  {
+   "round": 1,
+   "head": "7edc2bbb1f",
+   "at": 1794933824433,
+   "verdict": "changes",
+   "majors": 3,
+   "report": "Round 1: blocker pending held news dropped on transfer; major refused claim still re-parented; major cut-short recovery left orphans. All three fixed."
+  },
+  {
+   "round": 2,
+   "head": "b10d8ee95d",
+   "at": 1794934289585,
+   "verdict": "changes",
+   "majors": 1,
+   "report": "Round 2: round-1 fixes confirmed; major: a cut-short recovery leaves news held for the old holder (moved only with old set). Fixed after."
+  },
+  {
+   "round": 3,
+   "head": "6e965f3a72",
+   "at": 1794936241767,
+   "verdict": "changes",
+   "majors": 2,
+   "report": "Round 3: major: a restart cut short left news and a live replaced coordinator; major: revive took a reused address for the holder. Both fixed after."
+  }
+ ],
+ "brief": "# M2: Coordinator lease, reconcile, re-parent, engine restart, watchdog\n\nPart of sheepdog-factory, phases 1–4. Read the design (the design repo's docs/sheepdog-factory-design.md) and field notes (the design repo's docs/factory-field-notes.md) first; docs/dev/factory/engine-audit.md (SDF-1's line audit) once it exists.\n\n## Goal and scope\nDesign section 5 'Watchdog, recovery, identity' with notes 53–55 as tests: a lease in the project record; reconcile to exactly one coordinator per project in the repo folder with no owner message; re-parent workers whose parent is dead and deliver held news; wakes keyed by folder; restart in engine code (replaces restart.sh); 'working with no child and no output for 20 min' is stuck. Split into lease/restart and reconcile/re-parent if it passes ~600 lines.\n\n## Note\nThis brief may be finished by the Assistant (herdr-task edit) before the task starts. Waits on: SDF-13.\n\n## Rules for this repo (sheepdog)\n- Read AGENTS.md and docs/dev/architecture.md first. Use the words in docs/dev/glossary.md.\n- Conventional Commits (`docs(factory): …`, `feat(factory): …`). No session links, no Co-authored-by trailers.\n- Never print or commit secrets, `.env` files or unredacted logs. No real names, phone numbers or private addresses in anything you commit (say \"the owner\", never a name). The repo will be public.\n- Docs: developer docs live under docs/dev/; keep relative links working; `go test ./internal/docscheck` must pass. Show the output.\n- Don't merge, don't start other agents (your own reviewer excepted), don't touch the running daemon or ~/.config/sheepdog, ~/.local/share/sheepdog.\n- Ask through `herdr-task ask` only, never a CLI question dialog."
+}
