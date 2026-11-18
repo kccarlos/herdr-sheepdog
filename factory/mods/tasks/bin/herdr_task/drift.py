@@ -94,7 +94,7 @@ def update_held_branch(s, t, v, repo, head):
     pr = t["pr"]
     base = t.get("base") or "main"
     attempt = pr.get("drift_update") or {}
-    if (v.get("mergeable") == "CONFLICTING" or main_red_hold(s, base) or uses_queue(s, base)
+    if (pr_pending(v) or v.get("mergeable") == "CONFLICTING" or main_red_hold(s, base) or uses_queue(s, base)
             or now() - ((pr.get("synced") or {}).get("at") or 0) < SYNC_GRACE_MS
             or (attempt.get("head") == head and now() - attempt["at"] < WAIT_MS)
             or sync_plan(s, t)[0] == "off" or ci_cap_hold(s, t, repo)):

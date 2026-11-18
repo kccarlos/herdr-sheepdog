@@ -191,6 +191,38 @@ class Comparisons(unittest.TestCase):
             self.inspect()
             update.assert_called_once_with(self.t, "a/b", "abc")
 
+    def test_old_accepted_branch_does_not_update_while_ci_runs(self):
+        from unittest.mock import patch
+        self.t.update(accepted_by="owner", accepted_at=self.now - self.drift.WAIT_MS)
+        self.v["statusCheckRollup"] = [{"name": "test", "status": "IN_PROGRESS"}]
+        with patch("herdr_task.commands.uses_queue", return_value=False), \
+             patch("herdr_task.checks.sync_plan", return_value=("cheap", None)), \
+             patch.object(self.drift, "ci_cap_hold", return_value=None), \
+             patch.object(self.drift, "pr_behind", return_value=1) as behind, \
+             patch.object(self.drift, "pr_update_branch") as update:
+            self.assertIn("unmerged", self.inspect())
+            behind.assert_not_called()
+            update.assert_not_called()
+
+    def test_synced_head_is_not_updated_again_while_its_ci_runs(self):
+        from unittest.mock import patch
+        self.t.update(accepted_by="owner", accepted_at=self.now - self.drift.WAIT_MS)
+        self.v["statusCheckRollup"] = [{"name": "test", "conclusion": "SUCCESS"}]
+        with patch("herdr_task.commands.uses_queue", return_value=False), \
+             patch("herdr_task.checks.sync_plan", return_value=("cheap", None)), \
+             patch("herdr_task.github.now", lambda: self.now), \
+             patch.object(self.drift, "ci_cap_hold", return_value=None), \
+             patch.object(self.drift, "pr_behind", return_value=1) as behind, \
+             patch("herdr_task.github.gh", return_value=(True, "", "")) as gh:
+            self.assertIn("unmerged", self.inspect())
+            self.t["pr"]["synced"]["to"] = "updated"
+            self.v.update(headRefOid="updated", statusCheckRollup=[{"name": "test", "status": "IN_PROGRESS"}])
+            self.now += 3 * 60_000
+            self.assertIn("unmerged", self.inspect())
+            behind.assert_called_once_with(self.t, "a/b", "abc")
+            gh.assert_called_once_with("api", "-X", "PUT", "repos/a/b/pulls/1/update-branch",
+                                       "-f", "expected_head_sha=abc")
+
     def test_working_new_head_is_not_a_claim_or_reviewed_red(self):
         from unittest.mock import patch
         self.t["state"] = "running"
