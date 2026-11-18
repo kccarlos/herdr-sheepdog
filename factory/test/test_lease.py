@@ -172,6 +172,32 @@ class Lease(LeaseCase):
 
 
 class Reconcile(LeaseCase):
+    def test_dead_coordinator_news_waits_for_handoff(self):
+        self.save([{"id": 1, "title": "Auth", "state": "running"}],
+                  coordinator={"address": "c1", "created_ms": 1000, "starts": [self.now]})
+        news.hold("c1", "waiting news", "news")
+        lease.reconcile_pass({})  # the start limit defers the replacement
+        news.held_pass({})
+        with news.held_messages() as held:
+            self.assertEqual([x["text"] for x in held["c1"]], ["waiting news"])
+        self.now += lease.START_GRACE_MS + 1
+        lease.reconcile_pass(report := {})
+        new = report["coordinators"][0]["to"]
+        news.held_pass({})
+        self.assertIn([new, "waiting news"], [c[2:] for c in self.hc.calls if c[1] == "send"])
+
+    def test_dead_worker_news_is_dropped_and_coordinator_news_expires(self):
+        self.save([], coordinator={"address": "c1", "handoffs": [{"from": "c0"}]})
+        for addr in ("c1", "c0", "worker"):
+            news.hold(addr, addr, "news")
+        news.held_pass({})
+        with news.held_messages() as held:
+            self.assertEqual(set(held), {"c1", "c0"})
+        self.now += news.NEWS_KEEP_MS
+        news.held_pass({})
+        with news.held_messages() as held:
+            self.assertEqual(held, {})
+
     def test_note_54_a_coordinator_that_exited_is_replaced_in_the_repo_folder_with_its_workers(self):
         home = os.path.dirname(self.repo)
         self.hc.term("t1pj", home, {"sheepdog.role": "coordinator"})  # it ran from the wrong folder (note 55b)
