@@ -8350,10 +8350,10 @@ class TaskFlow(unittest.TestCase):
         for agent, flag, suffix in (
             ("claude", "--dangerously-skip-permissions", ["--resume", "S1"]),
             ("agy", "--dangerously-skip-permissions", ["--conversation", "S1"]),
-            ("codex", "--dangerously-bypass-approvals-and-sandbox", ["S1"]),
+            ("codex", "--dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust", ["S1"]),
         ):
             prefix = [agent, "resume"] if agent == "codex" else [agent]
-            self.assertEqual(resume_argv([agent], "S1"), prefix + [flag] + suffix)
+            self.assertEqual(resume_argv([agent], "S1"), prefix + flag.split() + suffix)
         self.assertEqual(resume_argv(["claude", "--permission-mode=plan"], "S1"),
                          ["claude", "--permission-mode=plan", "--resume", "S1"])
         self.assertEqual(resume_argv(["codex", "-s", "read-only"], "S1"),

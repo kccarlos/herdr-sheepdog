@@ -372,7 +372,7 @@ def argv_for(pick):
 def permission_flags(agent, perm):
     full = not perm or perm in ("full", "bypassPermissions")
     if agent == "codex":
-        return ["--dangerously-bypass-approvals-and-sandbox"] if full else [
+        return ["--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust"] if full else [
             "-s", "read-only" if perm == "read-only" else "workspace-write", "-a", "on-request"]
     if agent == "claude":
         mode = {"manual": "default", "accept-edits": "acceptEdits", "read-only": "plan"}.get(perm, perm)
@@ -419,6 +419,8 @@ def worker_permissions(argv, perm=None, *, replace=False):
         mode = "read-only" if perm == "read-only" else "workspace-write"
         return [*out, *([] if "sandbox" in modes else ["-s", mode]),
                 *([] if "approval" in modes else ["-a", "on-request"])]
+    if agent == "codex" and "--dangerously-bypass-approvals-and-sandbox" in out and "--dangerously-bypass-hook-trust" not in out:
+        out = out + ["--dangerously-bypass-hook-trust"]  # a full worker never stops at the hook-review dialog
     return out
 
 
