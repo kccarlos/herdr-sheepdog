@@ -12,6 +12,7 @@ import subprocess
 import time
 
 from .base import Fail, git, guard, hc_json, label_of, now, PR_EVERY, PROJECT_LABEL, ROLE_LABEL, run, SHELLS, STORE, stop_note
+from .drift import drift_pass, base_drift, audit_done
 from .settings import machine_name, merge_hold, remove_build_dir, worker_argv
 from .agents import (
     agent_log, agent_running, back_at_work, BG_ENDED_MSG, BG_NUDGE_MS, busy_again, detail, ended_jobs, fit, last_question, live_agents,
@@ -124,6 +125,7 @@ def facts(s, t, report):
         if not v:
             return
         note_checks(s, t, v)
+        drift_pass(s, t, v, at=now())
         if v.get("state") == "MERGED":
             if at_work(s, t) or holds_open(s, t):
                 return
@@ -396,6 +398,8 @@ def tick_store(s, report):
                     report["done"].append(t["id"])
             t.pop("_pr_fresh", None)
     for t in s.data["tasks"]:
+        if t.get("pr") and t.get("state") != "done" and not t.get("worktree"):
+            drift_pass(s, t, at=now())
         if t.get("worktree") or t.get("check_run"):
             try:
                 checks_pass(s, t)
@@ -409,6 +413,8 @@ def tick_store(s, report):
                 report.setdefault("review_error", []).append(f"{s.ref(t)}: {e}")
             if t.get("attention") and t.get("attention") != had:
                 report.setdefault("attention", []).append(t["id"])
+    audit_done(s, now())
+    base_drift(s)
     due_pass(s, report)
     # Urgent ones first (FAC-103), then oldest first.
     queued = sorted((t for t in s.data["tasks"] if t["state"] == "queued"), key=lambda t: (not urgent(t), t.get("queued_at") or 0))
@@ -798,6 +804,15 @@ def retry_pass(report):
         os.replace(tmp, RETRIES)
 
 
+def needs_tick(data):
+    """Both the scheduler and a manual tick visit folders with outstanding facts."""
+    return bool(data.get("main_watch") or any(
+        t.get("state") in ("queued", "scheduled", "ready") or t.get("check_run")
+        or (t.get("worktree") and t.get("state") == "running") or starts_now(t)
+        or (t.get("pr") and not (t.get("state") == "done" and t["pr"].get("drift_verified_merged")))
+        for t in data.get("tasks") or ()))
+
+
 def cmd_tick(args):
     """Starts queued tasks that can go now and finds merged ones. Cheap when nothing waits; one
     at a time (a second tick while one runs does nothing)."""
@@ -834,9 +849,7 @@ def cmd_tick(args):
         report["archive_error"] = str(e)
     for p in store_files(args.folder):
         d = read_list(p)
-        tasks = (d or {}).get("tasks") or []
-        if not d or not os.path.isdir(d.get("folder") or "") or not (d.get("main_watch") or any(
-                t.get("state") in ("queued", "scheduled", "ready") or t.get("check_run") or (t.get("worktree") and t.get("state") == "running") or starts_now(t) for t in tasks)):
+        if not d or not os.path.isdir(d.get("folder") or "") or not needs_tick(d):
             continue
         try:
             with Store(locate(d["folder"])) as s:

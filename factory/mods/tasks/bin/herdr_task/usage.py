@@ -2,18 +2,20 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 
 PROVIDERS = ("claude", "codex", "antigravity")
-FLOOR_5H, FLOOR_WEEK, LONG_5H = 5, 1, 20  # percent left
+FLOOR_5H, FLOOR_WEEK = 5, 1  # percent left
 TTL = 60
 # antigravity's extra windows: id suffix -> pool
 _AG = {"gemini": "antigravity-gemini", "3p": "antigravity-claude-gpt"}
 
 
-def _unknown(name):
-    return {"name": name, "state": "unknown", "five": None, "week": None, "five_reset": None, "week_reset": None}
+def _unknown(name, reason="no data"):
+    return {"name": name, "state": "unknown", "reason": reason,
+            "five": None, "week": None, "five_reset": None, "week_reset": None}
 
 
 def _fill(pool, win):
@@ -25,65 +27,86 @@ def _fill(pool, win):
         pool[key] = round(100 - win["usedPercent"], 1)
         pool[key + "_reset"] = win.get("resetsAt")
         pool["state"] = "ok"
+        pool["reason"] = None
 
 
-def parse(provider, text):
+def parse(provider, text, reason="no data"):
     """Pools of one `codexbar usage --provider <p> --json` reading. No usable data: one unknown pool."""
     try:
         usage = json.loads(text)[0]["usage"]
         if provider != "antigravity":
-            pool = _unknown(provider)
+            pool = _unknown(provider, reason)
             for k in ("primary", "secondary"):
                 _fill(pool, usage.get(k))
-            return [pool] if pool["state"] == "ok" else [_unknown(provider)]
-        pools = {name: _unknown(name) for name in _AG.values()}
+            return [pool]
+        pools = {name: _unknown(name, reason) for name in _AG.values()}
         for w in usage.get("extraRateWindows") or []:
             m = re.fullmatch(r"antigravity-quota-summary-(\w+?)-(?:5h|weekly)", w.get("id", ""))
             if m and m[1] in _AG:
                 _fill(pools[_AG[m[1]]], w.get("window"))
         return list(pools.values())
     except (ValueError, LookupError, TypeError, AttributeError):
-        return [_unknown(provider)] if provider != "antigravity" else [_unknown(n) for n in _AG.values()]
+        return [_unknown(n, reason) for n in (_AG.values() if provider == "antigravity" else (provider,))]
 
 
-def _codexbar(provider):
+def _codexbar(tool, provider):
     try:
-        return subprocess.run(["codexbar", "usage", "--provider", provider, "--json"], capture_output=True,
-                              text=True, timeout=20).stdout
-    except (OSError, subprocess.SubprocessError):
-        return ""
+        result = subprocess.run([tool, "usage", "--provider", provider, "--json"],
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20)
+    except FileNotFoundError:
+        return parse(provider, "", "not installed")
+    except subprocess.TimeoutExpired:
+        return parse(provider, "", "timed out")
+    except (OSError, UnicodeError):
+        return parse(provider, "")
+    if result.returncode == 4:
+        return parse(provider, "", "timed out")
+    auth = re.search(r"not (?:signed|logged) in|(?:sign[ -]?in|log[ -]?in|authentication) required|"
+                     r"no [^\n]{0,60}(?:oauth credentials|session key)|oauth credentials not found|unauthorized",
+                     result.stderr + "\n" + result.stdout, re.IGNORECASE)
+    return parse(provider, result.stdout, "not signed in" if auth else "no data")
 
 
-def read(cache_dir, fetch=_codexbar, clock=time.time):
+def read(cache_dir, fetch=None, clock=time.time):
     """All pools, cached for a minute in <cache_dir>/usage-pools.json (shared by every caller)."""
+    tool = shutil.which("codexbar") if fetch is None else None
+    source = tool if fetch is None else "fixture"
     path = os.path.join(cache_dir, "usage-pools.json")
     try:
         with open(path) as f:
             cached = json.load(f)
-        if 0 <= clock() - cached["at"] < TTL:
+        if cached["tool"] == source and 0 <= clock() - cached["at"] < TTL:
             return cached["pools"]
     except (OSError, ValueError, LookupError, TypeError):
         pass
-    pools = [p for prov in PROVIDERS for p in parse(prov, fetch(prov))]
-    os.makedirs(cache_dir, exist_ok=True)
+    pools = []
+    for provider in PROVIDERS:
+        if fetch is not None:
+            pools.extend(parse(provider, fetch(provider)))
+        elif tool:
+            pools.extend(_codexbar(tool, provider))
+        else:
+            pools.extend(parse(provider, "", "not installed"))
     tmp = "%s.%d.tmp" % (path, os.getpid())
-    with open(tmp, "w") as f:
-        json.dump({"at": clock(), "pools": pools}, f)
-    os.replace(tmp, path)
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(tmp, "w") as f:
+            json.dump({"at": clock(), "tool": source, "pools": pools}, f)
+        os.replace(tmp, path)
+    except OSError:
+        pass  # still use this reading if writing the cache fails
     return pools
 
 
-def pick(pools, fits, long_job):
-    """The pool to use among those named in `fits`: room above the floors, soonest weekly reset first.
-    A long job needs 20% of a 5-hour window and never goes to an unknown pool; None when nothing fits."""
-    def room(p):
-        five_ok = p["five"] is None or p["five"] > (LONG_5H if long_job else FLOOR_5H)
-        return five_ok and (p["week"] is None or p["week"] > FLOOR_WEEK)
-    fitting = [p for p in pools if p["name"] in fits]
-    for state in ("ok", "unknown"):
-        if state == "unknown" and long_job:
-            return None
-        found = [p for p in fitting if p["state"] == state and (state == "unknown" or room(p))]
-        if found:
-            return min(found, key=lambda p: p["week_reset"] or "9")
-    return None
+def table(pools):
+    """One row per pool for the coordinator's wake."""
+    lines = []
+    for pool in pools:
+        if pool["state"] == "unknown":
+            reason = pool["reason"]
+            line = f"unknown ({'codexbar ' if reason == 'not installed' else ''}{reason})"
+        else:
+            line = ", ".join(f"{label} {pool[key]:g}% left" for key, label in (("five", "5h"), ("week", "week"))
+                             if pool[key] is not None)
+        lines.append(f"{pool['name']}: {line}")
+    return "\n".join(lines)
