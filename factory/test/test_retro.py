@@ -352,6 +352,31 @@ class Retro(unittest.TestCase):
         self.task["retro"] = {**TAIL, "verdict": "FIX", "majors": [MAJOR], "head": old, "at": 10 ** 13}
         self.assertTrue(self.retro.cap(self.store, self.task))
 
+    def test_outside_check_findings(self):
+        """Outside Fable check of e40cd3b2: the retro terminal can't record a review verdict, nothing does while a recap
+        is open; a judgement task's SHIP is only the code pass; the tail must end the last message on a real screen."""
+        self.started()
+        self.assertNotIn(" review:*)", " ".join(self.runs[-1]))  # launched with no verdict verb
+        args = argparse.Namespace(id="SHEP-13", json=True, folder=None, passed=True, changes=None, changes_file=None, notes=None)
+        self.env("HC_TERMINAL_ID", self.task["retro_run"]["address"])
+        with self.assertRaisesRegex(self.commands.Fail, "retro round records no verdict"):
+            self.commands.cmd_review(args)
+        self.env("HC_TERMINAL_ID", "other")
+        with self.assertRaisesRegex(self.commands.Fail, "recap open"):
+            self.commands.cmd_review(args)
+        self.tick(TAIL)
+        self.task["set"]["review_kind"] = "design"
+        self.assertEqual(self.commands.gate_need(self.store, self.task), 2)
+        from herdr_task.settings import accept_bar
+        self.assertEqual(accept_bar(self.store, self.task)[0], None)
+        with open(os.path.join(ROOT, "test", "fixtures", "fac78_claude_reviewer_tail.txt"), encoding="utf-8") as f:
+            real = f.read().splitlines()
+        cut = next(i for i, x in enumerate(real) if x.startswith("✻"))
+        tail = screen(TAIL).splitlines()[1:]
+        self.assertEqual(self.retro.parse_tail("\n".join(real[:cut] + tail + real[cut:]))[0]["verdict"], "SHIP")
+        late = "\n".join(real[:cut] + tail + ["⏺ One more thought after the tail."] + real[cut:])
+        self.assertIn("not at the end", self.retro.parse_tail(late)[1])
+
 
 if __name__ == "__main__":
     unittest.main()

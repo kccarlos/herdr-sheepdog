@@ -47,6 +47,7 @@ from .budget import NON_CONVERGENCE, budget_lines, budget_pass, change_sizes, do
 from .simulators import release_task
 from .budget import open_recap
 from .settings import fable_runs
+from .ask import open_asks
 from .retro import cap as retro_cap, fix_words as retro_fix_words, fixing as retro_fixing, gate_rounds as retro_gate_rounds, retro_due
 
 
@@ -910,7 +911,8 @@ def gate_step(s, t):
         instructions("reviewer"), f"The task, {ref}:\n" + task_text(t),
         f"Review commit {head} in {wt}. {shown}" + (", cut: run it for the rest" if len(diff) > 20000 else "")
         + f":\n{diff[:20000]}",
-        *([FABLE_WORDS] if fable and not retro_fixing(t) else []), *([retro_fix_words(t)] if fable and retro_fixing(t) else []),
+        *([FABLE_WORDS] if fable and (not retro_fixing(t) or review_kind(t) or open_asks(s, t)) else []),
+        *([retro_fix_words(t)] if fable and retro_fixing(t) else []),
         f"Must fix: {MUST_WORDS[rows.get('Must fix') or 'major']}. Herdr started you, not the worker. "
         + (f"You run in a sandbox: you can read only this worktree, its git history and the system's tools, write only in "
            f"$TMPDIR, and can't reach Herdr. When done, end your last message with your findings, each with its level and "
@@ -949,7 +951,8 @@ FABLE_WORDS = ("This round is Fable's (FAC-99): you stand in for the owner at th
 def gate_need(s, t):
     """Passing rounds herdr-task's reviewer gives a head: review.min, plus Fable's round for a judgement task."""
     if n := retro_gate_rounds(t):  # SDF-49: the retro's SHIP on this head, or Fable checking its FIX
-        return n
+        # a judgement task: SHIP is only the code pass, and Fable's owner round still follows it
+        return 2 if not retro_fixing(t) and (review_kind(t) or open_asks(s, t)) else n
     if not fable_due(s, t):
         return gate_min(s, t)
     return 1 if fable_said(t, "changes") else gate_min(s, t) + 1  # after its changes, Fable alone reviews the fix
@@ -1368,6 +1371,11 @@ def cmd_review(args):
             text = f.read()
     with open_store(args) as s:
         t = s.find(args.id)
+        me = os.environ.get("HC_TERMINAL_ID")
+        if me and me == (t.get("retro_run") or {}).get("address", "").split("/")[-1]:  # SDF-49: its verdict is its <retro> tail
+            raise Fail("The retro round records no verdict with herdr-task review: end with your <retro> tail.")
+        if t.get("recap"):
+            raise Fail(f"{s.ref(t)} has a recap open ({t['recap'].get('title')}): no review verdict is recorded until it is decided.")
         if gate_need(s, t):  # herdr-task's own reviewer in a gate folder (FAC-13), or Fable's round (FAC-99)
             return gate_verdict(s, t, args, text)
         rv = t.pop("review", None) or {}

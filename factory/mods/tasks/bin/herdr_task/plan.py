@@ -375,7 +375,7 @@ class Plan:
             if "split_of" in t:
                 p = self.find(t["split_of"])
                 old["split_of"] = s.ref(p)
-                if (p or {}).get("retro"):  # SDF-49: the worker's one change goes into each child's brief
+                if ((p or {}).get("retro") or {}).get("verdict") in ("FIX", "REDESIGN"):  # SDF-49: the worker's change goes into each child's brief
                     old["retro_parent"] = {"task": s.ref(p), "worker_change": p["retro"].get("worker_change") or "", "retro": p["retro"]}
         # A split: children take the parent's after, and whoever waited on the parent waits on them all.
         splits = {}

@@ -767,7 +767,7 @@ def registered_worktree(main, path):
     return None
 
 
-def launch(s, task, argv, message=None, parent=None, resume=None, role=None, reads=None):
+def launch(s, task, argv, message=None, parent=None, resume=None, role=None, reads=None, verbs=("review",)):
     """Starts one agent for the task as an hc child of `parent` (the project's coordinator).
     Stamps sheepdog.project, sheepdog.task, sheepdog.role and sheepdog.agent (plus herdr.*
     compatibility labels); reads: a reviewer's read-only commands (review_reads). Returns its record."""
@@ -784,7 +784,7 @@ def launch(s, task, argv, message=None, parent=None, resume=None, role=None, rea
         cmd = cmd + ["--settings", json.dumps({"trustedWorkspaces": [folder]})]
     elif role == "reviewer" and agent_key(cmd) in ("agy", "claude"):
         # a read-only reviewer: its worktree trusted, its verdict (herdr-task review) and `reads` allowed
-        cmd = own_argv(cmd, trust, verbs=("review",), cwd=folder, reads=reads)
+        cmd = own_argv(cmd, trust, verbs=verbs, cwd=folder, reads=reads)  # the retro round: no verdict verb (SDF-49)
     held = message if role == "reviewer" and agent_key(cmd) == "codex" else None
     if message and not held:
         cmd = cmd + (["-i", message] if agent_key(cmd) == "agy" else [message])  # agy reads prompts only from -i

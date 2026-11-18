@@ -54,6 +54,8 @@ End with your findings as plain text, then exactly one JSON object in this tag, 
 CAUSES = ("task-too-big", "wrong-seam", "vague-brief", "design-needed-first", "patch-shaped-fix", "worker-model",
           "reviewer-narrow", "none")
 VERDICTS, CONFIDENCE = ("SHIP", "FIX", "REDESIGN"), ("low", "medium", "high")
+# What Claude Code draws under its last message (prompt box, mode and status lines), never the model's own words.
+UI_LINE = re.compile(r"^(\?|esc|shift|ctrl|⏵|⏸|✻|✶|✳|bypass|auto|plan|accept|don't ask|context|tokens|\d+(\.\d+)?[km]? tokens)|for shortcuts|to interrupt|mode on", re.I)
 RETRO_TRIES = 3  # failed retro rounds (no tail, a bad tail) before the coordinator is told instead
 RETRO_REDESIGN = "retro: REDESIGN"
 RETRO_CAP = f"retro: FIX asked {FABLE_CHANGES} times and it still does not converge"
@@ -130,6 +132,9 @@ def parse_tail(screen):
     i, j = (screen or "").rfind("<retro>"), (screen or "").rfind("</retro>")
     if i < 0 or j < i:
         return None, "no <retro> tail"
+    after = [x.strip(" │╰╯─⏺>›❯\t") for x in screen[j + 8:].splitlines()]
+    if any(x and not UI_LINE.search(x) for x in after):  # the tail ends the last message: nothing of its own after it
+        return None, "the <retro> tail is not at the end of the last message"
     lines, why = [x.strip().lstrip("⏺│ ").rstrip("│ ") for x in screen[i + 7:j].splitlines()], None
     for sep in (" ", ""):
         try:
@@ -220,7 +225,7 @@ def start(s, t):
     live = workers(s, t)
     # dontAsk: only the reviewer's allow list runs; edits and every other command are refused, nothing prompts.
     a = launch(s, t, argv_for({**FABLE, "perm": "dontAsk"}), retro_prompt(s, t, base_sha or (t.get("start") or ""), head),
-               parent=live[-1]["address"] if live else None, role="reviewer", reads=review_reads(check))
+               parent=live[-1]["address"] if live else None, role="reviewer", reads=review_reads(check), verbs=())
     t["retro_run"] = {"address": a["address"], "head": head, "at": now(), "recap_at": (t.get("recap") or {}).get("at")}
     t["progress"] = {"text": "Herdr's retro round is on it", "at": now(), "set": now(), "by": "herdr"}
     s.dirty = True

@@ -1222,7 +1222,7 @@ def accept_bar(s, t):
     if fixing(t):  # SDF-49: only Fable's delta round after the retro passes its FIX
         revs = [r for r in revs if r.get("by") in fable_runs(t) and (r.get("at") or 0) > t["retro"]["at"]]
     if review_kind(t) or asks:
-        ok = any((r.get("by") in fable_runs(t) or r.get("retro")) and r.get("verdict") == "pass" for r in revs)
+        ok = any(r.get("by") in fable_runs(t) and r.get("verdict") == "pass" for r in revs)
         return ("fable", None) if ok else (None, "Fable asked for changes twice" if fable_said(t, "changes") >= FABLE_CHANGES
                                            else "waits for Fable's review round")
     review_on, _ = review_limits(s, t)
