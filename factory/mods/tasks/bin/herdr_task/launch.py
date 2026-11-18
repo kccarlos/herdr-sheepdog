@@ -211,7 +211,8 @@ def own_argv(argv, folder=None, verbs=OWN, cwd=None, reads=None):
                     del cur["trustedWorkspaces"]
         if isinstance(cur, dict):
             perms = dict(cur.get("permissions") or {})
-            perms["allow"] = list(perms.get("allow") or []) + theirs + own
+            allow = list(perms.get("allow") or [])
+            perms["allow"] = allow + [rule for rule in theirs + own if rule not in allow]
             if folder:
                 trusted = {"trustedWorkspaces": list(dict.fromkeys(list(cur.get("trustedWorkspaces") or []) + [folder]))}
             for j, n in reversed(spans[1:]):

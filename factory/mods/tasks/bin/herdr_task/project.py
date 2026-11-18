@@ -12,7 +12,7 @@ FACTORY_WORKER = {"agent": "agy", "model": "gemini-4-carbon-high", "effort": "",
 FACTORY_REVIEWER = {"agent": "agy", "model": "gemini-4-argon-high", "effort": "", "fast": False}
 # reviewer_sandbox off: a sandboxed agy reviewer can't sign in (agy keeps its sign-in in the keychain), and FACTORY_REVIEWER is agy
 FACTORY_TASKS = {"merge": "checks", "review_min": 2, "reviewer_sandbox": False}
-# Shown once by factory start after its checks pass.
+# Copy for the future factory start command to print after its checks pass.
 FIRST_RUN_NOTICE = (
     "Factory agents work without asking. Each worker runs as you, with full access to this Mac, "
     "limited only by its brief and its own worktree. That is not a sandbox. Reviewers are told not to change files. "

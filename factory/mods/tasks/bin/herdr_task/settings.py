@@ -383,28 +383,43 @@ def permission_flags(agent, perm):
     return []
 
 
-def worker_permissions(argv, perm=None):
-    """Apply worker permissions to custom argv where it leaves the mode unstated."""
+def worker_permissions(argv, perm=None, *, replace=False):
+    """State the worker mode, replacing permission flags on an implicit restart."""
     agent = agent_key(argv)
-    flags = {arg.split("=", 1)[0] for arg in argv[1:]}
-    if agent == "codex":
-        if flags & {"--dangerously-bypass-approvals-and-sandbox", "--yolo"}:
-            return argv
-        overrides = [val for flag, val in zip(argv, argv[1:]) if flag in ("-c", "--config")]
-        overrides += [arg.removeprefix("--config=").removeprefix("-c").lstrip("=")
-                      for arg in argv[1:] if arg.startswith(("-c", "--config=")) and arg != "-c"]
-        keys = {val.partition("=")[0].strip() for val in overrides}
-        sandbox = "--sandbox" in flags or "sandbox_mode" in keys or any(arg.startswith("-s") for arg in argv[1:])
-        approval = "--ask-for-approval" in flags or "approval_policy" in keys or any(arg.startswith("-a") for arg in argv[1:])
-        if sandbox or approval:
-            mode = "read-only" if perm == "read-only" else "workspace-write"
-            return [*argv, *([] if sandbox else ["-s", mode]),
-                    *([] if approval else ["-a", "on-request"])]
-    if agent == "claude" and flags & {"--permission-mode", "--dangerously-skip-permissions"}:
+    if agent not in AGENTS:
         return argv
-    if agent == "agy" and flags & {"--mode", "--dangerously-skip-permissions"}:
-        return argv
-    return [*argv, *permission_flags(agent, perm)]
+    if "--" in argv:
+        end = argv.index("--")
+        return worker_permissions(argv[:end], perm, replace=replace) + argv[end:]
+    options = {"codex": {"-a": "approval", "--ask-for-approval": "approval", "-s": "sandbox", "--sandbox": "sandbox"},
+               "claude": {"--permission-mode": "mode"}, "agy": {"--mode": "mode"}}[agent]
+    config_keys = {"approval_policy": "approval", "sandbox_mode": "sandbox",
+                   "hooks.PermissionRequest": "hook", "hooks.state": "hook"}
+    bypass = set(permission_flags(agent, "full")) | ({"--yolo"} if agent == "codex" else set())
+    out, modes, rest = [argv[0]], set(), iter(argv[1:])
+    for arg in rest:
+        flag, eq, value = arg.partition("=")
+        if agent == "codex" and arg[:2] in ("-a", "-s", "-c") and len(arg) > 2:
+            flag, eq, value = arg[:2], "=", arg[2:].lstrip("=")
+        config = agent == "codex" and flag in ("-c", "--config")
+        words = [arg]
+        if not eq and (config or flag in options):
+            value = next(rest, "")
+            words.append(value)
+        mode = config_keys.get(value.partition("=")[0].strip()) if config else options.get(flag)
+        if flag in bypass:
+            mode = "full"
+        if mode and mode != "hook":
+            modes.add(mode)
+        if not replace or not mode:
+            out.extend(words)
+    if replace or not modes:
+        return out + permission_flags(agent, perm)
+    if agent == "codex" and "full" not in modes:
+        mode = "read-only" if perm == "read-only" else "workspace-write"
+        return [*out, *([] if "sandbox" in modes else ["-s", mode]),
+                *([] if "approval" in modes else ["-a", "on-request"])]
+    return out
 
 
 def worker_pick(s, task, space=None, agent=None):
@@ -426,10 +441,13 @@ def worker_pick(s, task, space=None, agent=None):
 
 
 def worker_argv(s, task, space=None, agent=None, previous=None):
-    """Build a worker command from current settings and any recorded model and effort."""
+    """Build a worker command from current settings and any previous launch being restarted."""
     if previous:
-        model, effort = argv_model(previous)
-        task = {**task, "agent": agent_key(previous), "model": model, "effort": effort}
+        worker = settings_for(s)["worker"]
+        custom = worker.get("argv")
+        if custom and agent_key(custom) == agent_key(previous):
+            return worker_permissions([str(x) for x in custom], worker.get("perm"))
+        return worker_permissions(previous, worker.get("perm"), replace=True)
     pick = worker_pick(s, task, agent=agent)
     if pick.get("argv") and not (task.get("model") or task.get("effort")):
         return worker_permissions(argv_for(pick), pick.get("perm"))

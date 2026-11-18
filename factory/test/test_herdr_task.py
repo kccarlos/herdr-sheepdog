@@ -9420,6 +9420,18 @@ class Resume(unittest.TestCase):
         self.assertIn('model_reasoning_effort="high"', cmd)
         self.assertIn("--dangerously-bypass-approvals-and-sandbox", cmd)
 
+    def test_switch_keeps_custom_worker_arguments(self):
+        ref = self.started_task({"argv": ["claude", "--add-dir", "/extra"]})
+        self.call(self.commands.cmd_switch, id=ref, agent=None, argv=None, parent=None, keep=False)
+        cmd = self.launched_cmd()
+        self.assertEqual(cmd[cmd.index("--add-dir") + 1], "/extra")
+        self.write_worker({"agent": "claude", "perm": "plan"})
+        self.call(self.commands.cmd_switch, id=ref, agent=None, argv=None, parent=None, keep=False)
+        cmd = self.launched_cmd()
+        self.assertEqual(cmd[cmd.index("--add-dir") + 1], "/extra")
+        self.assertEqual(cmd[cmd.index("--permission-mode") + 1], "plan")
+        self.assertNotIn("--dangerously-skip-permissions", cmd)
+
     def test_resume_with_agent_flag_keeps_folder_perm_and_ignores_old_resume_label(self):
         """Field note 56: `resume --agent agy` carries folder `worker.perm=full` even when the project's
         default CLI is different or unset, and ignores an old `herdr.resume` label."""
