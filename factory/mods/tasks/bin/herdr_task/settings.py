@@ -230,13 +230,17 @@ def write_ci_runner_cap(s, value=None):
 
 def normalize_sparse_exclude(raw, *, strict=False):
     """Normalizes worktree.sparse_exclude (list or comma-separated string) into deduplicated repo-relative paths."""
+    if isinstance(raw, str) and any(ord(c) < 32 or ord(c) == 127 for c in raw):
+        if strict:
+            raise Fail(f"worktree.sparse_exclude path cannot contain control characters: {raw!r}")
+        return []
     items = raw.split(",") if isinstance(raw, str) else list(raw) if isinstance(raw, (list, tuple)) else []
     out, seen = [], set()
     for item in items:
         s = str(item or "")
-        if any(c in s for c in ("\n", "\r", "\x00")):
+        if any(ord(c) < 32 or ord(c) == 127 for c in s):
             if strict:
-                raise Fail(f"worktree.sparse_exclude path cannot contain newlines: {item!r}")
+                raise Fail(f"worktree.sparse_exclude path cannot contain control characters: {item!r}")
             continue
         p = s.strip().strip("/")
         if not p:
@@ -251,6 +255,47 @@ def normalize_sparse_exclude(raw, *, strict=False):
             seen.add(norm)
             out.append(norm)
     return out
+
+
+def worktree_sparse_excludes(wt):
+    """Reads (is_sparse, excludes) from a worktree's gitdir without spawning git."""
+    if not wt or not os.path.isdir(wt):
+        return False, []
+    dotgit = os.path.join(wt, ".git")
+    gitdir = None
+    if os.path.isdir(dotgit):
+        gitdir = dotgit
+    elif os.path.isfile(dotgit):
+        try:
+            with open(dotgit) as f:
+                first = f.readline().strip()
+            if first.startswith("gitdir:"):
+                raw = first[7:].strip()
+                gitdir = raw if os.path.isabs(raw) else os.path.normpath(os.path.join(wt, raw))
+        except OSError:
+            return False, []
+    if not gitdir or not os.path.isdir(gitdir):
+        return False, []
+    is_sparse = False
+    for cfg in (os.path.join(gitdir, "config.worktree"), os.path.join(gitdir, "config")):
+        if os.path.isfile(cfg):
+            try:
+                with open(cfg) as f:
+                    if re.search(r"(?im)^\s*sparsecheckout\s*=\s*true\s*$", f.read()):
+                        is_sparse = True
+                        break
+            except OSError:
+                pass
+    if not is_sparse:
+        return False, []
+    sp_file = os.path.join(gitdir, "info", "sparse-checkout")
+    try:
+        with open(sp_file) as f:
+            rules = f.read().split("\n")
+    except OSError:
+        return True, []
+    excludes = [re.sub(r"\\([\\*?\[\]])", r"\1", ln[2:]) for ln in rules if ln.startswith("!/")]
+    return True, excludes
 
 
 def sparse_exclude_pattern(path):

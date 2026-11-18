@@ -238,7 +238,7 @@ func TestMarkdownLinksSparseCheckout(t *testing.T) {
 	runGit(main, "config", "user.email", "test@example.com")
 	runGit(main, "config", "user.name", "Test")
 	runGit(main, "add", ".")
-	runGit(main, "commit", "-m", "init")
+	runGit(main, "commit", "--no-gpg-sign", "-m", "init")
 	runGit(main, "worktree", "add", "--no-checkout", "-b", "wt-branch", wt, "main")
 	runGit(wt, "sparse-checkout", "set", "--no-cone", "/*", "!/docs/dev/bench")
 	runGit(wt, "checkout")

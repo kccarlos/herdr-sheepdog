@@ -14,7 +14,7 @@ import time
 from . import sandbox
 from .checks import checks_line, resolve_check, sync_check, sync_mode, sync_plan, SYNC_FAILED
 from .base import Fail, git, guard, hc_json, kill_agent, label_of, now, run, STORE, stop_note, VERSION
-from .settings import (cli_missing_reason, normalize_sparse_exclude, sparse_exclude_of, write_ci_runner_cap, write_machine_option, write_max_running, write_task_check, write_worker_agent, write_worker_perm, write_worktree_sparse_exclude, WORKER_PERMS,
+from .settings import (cli_missing_reason, normalize_sparse_exclude, sparse_exclude_of, worktree_sparse_excludes, write_ci_runner_cap, write_machine_option, write_max_running, write_task_check, write_worker_agent, write_worker_perm, write_worktree_sparse_exclude, WORKER_PERMS,
     accept_bar, accepted_word, auto_accepter, agent_argv, fable_said, agent_key, argv_for, build_dir_of, codex_review_argv, ensure_build_dir, FABLE,
     fable_due, gate_min, merge_hold, merge_policy,
     merge_wait_why, MUST_WORDS, project_base, remove_build_dir, review_kind, review_limits, reviewed_for_head, set_opts, settings_block, settings_for,
@@ -292,11 +292,8 @@ def cmd_show(args):
     elif v.get("branch") and v.get("mode") == "worktree":
         text.append(f"branch: {v['branch']} (set for this task)")
     if v.get("mode") == "worktree":
-        wt = v.get("worktree")
-        is_sparse = bool(wt and os.path.isdir(wt) and git(wt, "config", "--bool", "--get", "core.sparseCheckout")[1].strip() == "true")
+        is_sparse, wt_excludes = worktree_sparse_excludes(v.get("worktree"))
         if is_sparse:
-            rules = git(wt, "sparse-checkout", "list")[1].splitlines()
-            wt_excludes = [re.sub(r"\\([\\*?\[\]])", r"\1", ln[2:]) for ln in rules if ln.startswith("!/")]
             if wt_excludes:
                 v["sparse_exclude"] = wt_excludes
                 text.append(f"sparse exclude: {', '.join(wt_excludes)} (undo with `git sparse-checkout disable`)")
@@ -1893,10 +1890,8 @@ def cmd_config(args):
             key = k.strip().lower()
             if not eq or key not in ("tasks.max_running", "max_running", "tasks.ci_runner_cap", "ci_runner_cap", "tasks.runner_cap", "runner_cap", "tasks.check", "check", "worker.perm", "worker.agent", "machine.tart_home", "worktree.sparse_exclude"):
                 raise Fail(f"config --set takes tasks.max_running=N, tasks.ci_runner_cap=N, tasks.check=CMD, worker.agent=CLI, worker.perm=MODE, worktree.sparse_exclude=PATH[,...] or machine.tart_home=DIR, not {pair!r}.")
-            v = v.strip().strip("\"'")
-            low = v.lower()
             if key == "worktree.sparse_exclude":
-                if not v or low == "default":
+                if not v.strip() or v.strip().lower() == "default":
                     write_worktree_sparse_exclude(s, None)
                 else:
                     paths = normalize_sparse_exclude(v, strict=True)
@@ -1904,6 +1899,8 @@ def cmd_config(args):
                         raise Fail("worktree.sparse_exclude needs at least one path (or \"default\" to clear).")
                     write_worktree_sparse_exclude(s, paths)
                 continue
+            v = v.strip().strip("\"'")
+            low = v.lower()
             if key == "machine.tart_home":
                 write_machine_option("tart_home", None if not v or low == "default" else v)
                 continue

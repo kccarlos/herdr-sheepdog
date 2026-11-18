@@ -2854,11 +2854,12 @@ class NewWorktrees(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(path, "docs/[draft]/note.md")))
         self.assertTrue(os.path.exists(os.path.join(path, "docs/d/note.md")))
 
-        # Newlines are rejected/ignored and literal backslashes are preserved.
-        self.assertEqual(self.settings.normalize_sparse_exclude(["docs/foo\n!/README.md", r"docs/a\b"]), [r"docs/a\b"])
+        # Newlines and control characters are rejected/ignored and literal backslashes are preserved.
+        self.assertEqual(self.settings.normalize_sparse_exclude(["docs/foo\n!/README.md", "docs/a\x0btab", r"docs/a\b"]), [r"docs/a\b"])
         self.assertEqual(self.settings.sparse_exclude_pattern(r"docs/a\b"), r"!/docs/a\\b")
-        with self.assertRaises(self.Fail):
-            self.settings.normalize_sparse_exclude("docs/foo\n!/README.md", strict=True)
+        for bad in ("docs/foo\n!/README.md", "\ndocs/dev/bench\n", "docs/a\x0btab"):
+            with self.assertRaises(self.Fail):
+                self.settings.normalize_sparse_exclude(bad, strict=True)
 
 
 class MergedOnlyWithOwnWork(unittest.TestCase):
@@ -6474,6 +6475,10 @@ class Scheduled(unittest.TestCase):
             self.assertNotIn(folder, json.load(f).get("projects", {}))
         with self.assertRaises(self.Fail):
             self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worktree.sparse_exclude=../oops"])
+        with self.assertRaises(self.Fail):
+            self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worktree.sparse_exclude=\ndocs/dev/bench\n"])
+        vq = self.run_cmd(self.commands.cmd_config, prefix=None, build_dir=None, set=["worktree.sparse_exclude=docs/quo'"])
+        self.assertEqual(vq["sparse_exclude"], ["docs/quo'"])
 
         # Existing sparse worktree reports its actual sparse-checkout list even after setting is cleared.
         wt = os.path.join(self.folder, ".wt-sparse")
