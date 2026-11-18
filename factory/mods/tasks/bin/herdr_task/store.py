@@ -182,11 +182,18 @@ class Store:
         self.dirty = self.read_only = False
 
     def __enter__(self):
-        try:
-            os.makedirs(STORE, exist_ok=True)
-        except OSError:
-            pass
-        self.lock, can = open_lock(os.path.join(STORE, "." + os.path.basename(self.path) + ".lock"))
+        lock_path = os.path.join(STORE, "." + os.path.basename(self.path) + ".lock")
+        if self.write:
+            try:
+                os.makedirs(STORE, exist_ok=True)
+            except OSError:
+                pass
+            self.lock, can = open_lock(lock_path)
+        else:
+            try:
+                self.lock, can = open(lock_path), False
+            except OSError:
+                self.lock, can = None, False
         if not can:
             if self.write and not self.best_effort:
                 if self.lock:

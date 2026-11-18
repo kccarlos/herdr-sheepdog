@@ -1369,7 +1369,13 @@ def cmd_review(args):
         t = s.find(args.id)
         if gate_need(s, t):  # herdr-task's own reviewer in a gate folder (FAC-13), or Fable's round (FAC-99)
             return gate_verdict(s, t, args, text)
-        rv = t.pop("review", None) or {}
+        me = os.environ.get("HC_TERMINAL_ID")
+        rv = t.get("review")
+        if (not isinstance(rv, dict) or not rv
+                or (rv.get("reviewer") and me and rv["reviewer"] != me)
+                or (me and me in (t.get("retiring_reviewers") or ()))):
+            raise Fail(f"{s.ref(t)} has no active review round to record.")
+        t.pop("review", None)
         cfg = settings_for(s)["tasks"]
         of = rv.get("of") or int(cfg.get("review_rounds") or 1)
         n = rv.get("round") or len(active_reviews(t)) + 1

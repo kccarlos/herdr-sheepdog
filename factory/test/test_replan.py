@@ -138,6 +138,7 @@ class ReplanTableTests(unittest.TestCase):
             mock.patch.object(commands, "hc_json", fake_hc_json),
             mock.patch.object(launch, "hc_json", fake_hc_json),
             mock.patch.object(agents, "hc_json", fake_hc_json),
+            mock.patch.object(news, "hc_json", fake_hc_json),
             mock.patch.object(agents, "_live", lambda key=None: list(self.live_by_key.get(key, []))),
             mock.patch.object(commands, "end_reviewer", lambda addr: self.ended_reviewers.append(addr)),
             mock.patch.object(commands, "end_agent", lambda s, t, addr: self.ended_agents.append(addr)),
@@ -948,6 +949,123 @@ class ReplanTableTests(unittest.TestCase):
             self.assertEqual(f.read(), before_held)
         with open(self.news_file, "rb") as f:
             self.assertEqual(f.read(), before_news)
+
+    def test_round_1_review_findings(self):
+        import herdr_task.devices as devices
+
+        # 1. Legacy reviewer in t["review"] is retired on re-plan and cannot pass the task via cmd_review.
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            t["review"] = {"reviewer": "rv-legacy", "round": 1, "of": 3, "at": 1100}
+            t["recap"] = {"at": 1200, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required"}
+            s.dirty = True
+        self.hc_terminals["rv-legacy"] = {"address": "rv-legacy", "state": "live", "foreground": {"name": "claude"}}
+        self.ended_reviewers.clear()
+        rc, _ = self.run_cli("recap", "TST-1", "--decide", "new", "--why", "retire legacy reviewer")
+        self.assertEqual(rc, 0)
+        self.assertIn("rv-legacy", self.ended_reviewers)
+        with mock.patch.dict(os.environ, {"HC_TERMINAL_ID": "rv-legacy"}, clear=False):
+            rc, bad = self.run_cli("review", "TST-1", "--pass")
+        self.assertEqual(rc, 1)
+        self.assertIn("no active review round", bad["error"])
+        with self.open() as s:
+            self.assertEqual(self.find_key(s, "api")["state"], "running")
+
+        # 2. collect_live_reviewers fetches detail when hc ls omits role labels, retiring reviewer and keeping helper.
+        with self.open() as s:
+            t = self.find_key(s, "api")
+            key = s.key(t)
+            t.pop("retiring_reviewers", None)
+            self.live_by_key[key] = [
+                ({"address": "sub-rev", "state": "live", "labels": {"herdr.task": key}}, True),
+                ({"address": "sub-hlp", "state": "live", "labels": {"herdr.task": key}}, True),
+            ]
+            self.hc_terminals["sub-rev"] = {"address": "sub-rev", "state": "live", "labels": {"herdr.task": key, "herdr.role": "reviewer"}}
+            self.hc_terminals["sub-hlp"] = {"address": "sub-hlp", "state": "live", "labels": {"herdr.task": key, "herdr.role": "helper"}}
+            found = self.replan.collect_live_reviewers(s, t)
+            self.assertEqual(found, ["sub-rev"])
+
+        # 3. retiring_live production subprocess parser keeps hold on inconclusive hc get and clears only on confirmed exit/absence.
+        with mock.patch.object(self.commands, "hc_json", self.replan._DEFAULT_HC_JSON):
+            for proc, want_hold in (
+                (subprocess.CompletedProcess(["hc"], 0, '{"error":"service unavailable"}', ""), True),
+                (subprocess.CompletedProcess(["hc"], 0, "{}", ""), True),
+                (subprocess.CompletedProcess(["hc"], 1, "", "dependency socket not found"), True),
+                (subprocess.CompletedProcess(["hc"], 0, '{"address":"rv-p","state":"finished","exit_code":0}', ""), False),
+                (subprocess.CompletedProcess(["hc"], 1, "", "terminal rv-p not found"), False),
+            ):
+                dummy = {"retiring_reviewers": ["rv-p"]}
+                with mock.patch.object(self.commands, "run", lambda argv, p=proc: p):
+                    got = self.replan.retiring_live(None, dummy)
+                self.assertEqual(got, want_hold, proc)
+
+        # 4. news_pass race: clear_task_held_news after snapshot and before delivery neither sends nor restores stale recap.
+        if os.path.exists(self.news_file):
+            os.remove(self.news_file)
+        with self.open(True) as s:
+            t = self.find_key(s, "api")
+            slug = s.slug
+            key = f"{slug}#1"
+            t.pop("retiring_reviewers", None)
+            t.pop("review_reset_at", None)
+            t["recap"] = {"at": 2000, "reasons": ["3 failed CI runs"], "round": 1, "title": "Recap required: 3 failed CI runs"}
+            t["attention"] = "Recap required: 3 failed CI runs"
+            s.dirty = True
+        t0 = self.base.now() - self.news.NEWS_SETTLE_MS - 1000
+        with open(self.news_file, "w") as f:
+            json.dump({
+                "seen": {slug: {"_init": True, "1": {"status": "needs", "recap": True}}},
+                "outbox": [{"key": key, "project": self.repo, "folder": "repo", "event": "recap", "status": "needs",
+                            "stall": None, "text": '<herdr-news task="TST-1" event="recap">stale recap</herdr-news>', "at": t0}],
+                "delivered": {key: {"to": "coord-1", "turn": 1, "at": t0, "since": t0, "event": "ready", "status": "needs", "stall": None}},
+            }, f)
+        delivered_msgs = []
+        hook_ran = []
+
+        def replan_during_lookup(project):
+            hook_ran.append(project)
+            with self.open(True) as s2:
+                t2 = self.find_key(s2, "api")
+                self.replan.replan_task(s2, t2, why="race replan", at=t0 + 500)
+            return "coord-1"
+
+        self.hc_terminals["coord-1"] = {"address": "coord-1", "state": "live", "turn": 2, "status": {"state": "idle"}}
+        with mock.patch.object(self.news, "coordinator_in", replan_during_lookup), \
+                mock.patch.object(self.news, "news_send", lambda to, txt, **kw: (delivered_msgs.append(txt), "sent")[1]):
+            self.news.news_pass({})
+        self.assertEqual(hook_ran, [self.repo])
+        self.assertEqual(delivered_msgs, [])
+        with open(self.news_file) as f:
+            after_news = json.load(f)
+        self.assertEqual(after_news["outbox"], [])
+        self.assertEqual(after_news["delivered"], {})
+        self.assertNotIn("recap", after_news["seen"][slug]["1"])
+
+        # 5. Held device CARRY_ON wake-up survives clear_task_held_news while old review/recap items are removed.
+        with open(self.held_file, "w") as f:
+            json.dump({
+                "w1": [
+                    {"text": devices.CARRY_ON, "at": 3000},
+                    {"text": "Stop TST-1: Herdr's loop-breaker says recap first.", "at": 3001},
+                ],
+            }, f)
+        with self.open() as s:
+            t = self.find_key(s, "api")
+            self.replan.clear_task_held_news(s, t, at=6000)
+        with open(self.held_file) as f:
+            self.assertEqual(json.load(f), {"w1": [{"text": devices.CARRY_ON, "at": 3000}]})
+
+        # 6. plan amend --check runs no git on task worktrees, and Store(write=False) creates no lock file or STORE dir.
+        with mock.patch.object(self.budget, "git", side_effect=AssertionError("worktree git called in --check")):
+            rc, res = self.run_cli("plan", "amend", "--check", "--reason", "retro: check boundary", plan=self.current_plan(retro=True))
+        self.assertEqual((rc, res), (0, {"ok": True}))
+
+        fresh_store_dir = os.path.join(self.tmp, "missing-store")
+        with mock.patch.object(self.store_mod, "STORE", fresh_store_dir):
+            loc = self.store_mod.locate(self.repo)
+            with self.store_mod.Store(loc, write=False):
+                pass
+        self.assertFalse(os.path.exists(fresh_store_dir))
 
 
 if __name__ == "__main__":

@@ -441,7 +441,7 @@ class Plan:
             cancel_queued_merge(eff.store, eff.task)
         for eff in self.replan_effects:
             retire_reviewers(eff.retiring)
-            clear_task_held_news(eff.store, eff.task, eff.retiring)
+            clear_task_held_news(eff.store, eff.task, eff.retiring, at=eff.at)
         for parent in self.later:
             for k in agents_of(self.s, parent) if parent["state"] == "running" else []:
                 end_agent(self.s, parent, k["address"])

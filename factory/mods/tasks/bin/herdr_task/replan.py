@@ -177,14 +177,23 @@ def cancel_queued_merge(s, task):
                 raise Fail(f"Couldn't disable auto-merge on pull request #{num} ({why}).")
 
 
+CONFIRMED_GONE_STATES = frozenset({"finished", "exited", "dead", "gone"})
+TRANSIENT_HC_WORDS = ("socket", "daemon", "connect", "refused", "unavailable", "timeout", "timed out", "busy")
+
+
 def _terminal_still_live(addr, hc_get, runner):
-    """True when `addr` is still live OR hc failed transiently; False only when exited/finished/not-found."""
+    """True unless `hc get` confirms `addr` exited or specifically reports the terminal as absent."""
     if hc_get is not _DEFAULT_HC_JSON:
         try:
             k = hc_get("get", addr)
         except (OSError, Fail):
             return True
-        return bool(isinstance(k, dict) and k.get("state") == "live")
+        if not isinstance(k, dict) or k.get("error"):
+            return True
+        state = k.get("state")
+        if state in CONFIRMED_GONE_STATES:
+            return False
+        return True
     try:
         r = runner(["hc", "get", addr, "--json"])
     except (OSError, Fail):
@@ -194,9 +203,23 @@ def _terminal_still_live(addr, hc_get, runner):
             k = json.loads(r.stdout)
         except ValueError:
             return True
-        return bool(isinstance(k, dict) and not k.get("error") and k.get("state") == "live")
+        if not isinstance(k, dict) or k.get("error"):
+            return True
+        if k.get("state") in CONFIRMED_GONE_STATES:
+            return False
+        return True
     err = f"{r.stdout or ''} {r.stderr or ''}".lower()
-    return not any(w in err for w in GONE_WORDS)
+    if any(w in err for w in TRANSIENT_HC_WORDS):
+        return True
+    addr_low = str(addr).lower()
+    bare_low = addr_low.split("/")[-1]
+    if any(w in err for w in ("unknown terminal", "no terminal", "no such terminal")):
+        return False
+    if ("terminal" in err or (addr_low and addr_low in err) or (bare_low and bare_low in err)) and any(
+        w in err for w in ("not found", "not_found", "does not exist")
+    ):
+        return False
+    return True
 
 
 def retiring_live(s, task):
@@ -225,11 +248,13 @@ def retiring_live(s, task):
 
 
 def collect_live_reviewers(s, task, *, dry=False):
-    """Collects live gate reviewers (`open_runs`) and live worker-started `role=reviewer` subagents, never `role=helper`."""
+    """Collects live gate/legacy reviewers and live worker-started `role=reviewer` subagents, never `role=helper`."""
     from . import agents as _agents, commands as _commands
 
+    legacy_rv = (task.get("review") or {}).get("reviewer") if isinstance(task.get("review"), dict) else None
     addrs = list(dict.fromkeys([
         *(task.get("retiring_reviewers") or []),
+        *([legacy_rv] if legacy_rv else ()),
         *(rn["address"] for rn in _commands.open_runs(task) if rn.get("address")),
     ]))
     if not dry and s is not None and hasattr(s, "key"):
@@ -237,7 +262,7 @@ def collect_live_reviewers(s, task, *, dry=False):
             addr = k.get("address")
             if not addr or addr in addrs:
                 continue
-            full = _agents.detail(k) if not k.get("labels") else k
+            full = k if label_of(k.get("labels"), "role") else _agents.detail(k)
             if label_of(full.get("labels"), "role") == "reviewer":
                 addrs.append(addr)
     return addrs
@@ -253,12 +278,26 @@ def retire_reviewers(addrs):
             pass
 
 
-def _keep_worker_held_item(item):
-    """Keeps answered asks (`event="answer"`) and `edit --amend` brief updates; drops stale pre-replan review/recap/PR items."""
+def _is_stale_worker_held_item(item, ref=None):
+    """True only for held messages belonging to the pre-replan review, recap, Ready, merge, or PR state."""
     text = str((item or {}).get("text") or "").strip()
-    if re.search(r'<herdr-news\b[^>]*\bevent="answer"', text):
+    if not text:
+        return False
+    if text.startswith("Herdr's review round ") or re.match(r"^Review round \d+ of \d+ for ", text):
         return True
-    if text.startswith("The brief of ") and " changed:" in text:
+    if text.startswith(("Herdr added one review round to ", "Your Assistant added one review round to ")):
+        return True
+    if text.startswith("Your Assistant read the recap of "):
+        return True
+    if text.startswith("<herdr-github "):
+        return True
+    if ref:
+        if text.startswith((f"Stop {ref}: ", f'Merge task {ref} "', f'Task {ref} "')):
+            return True
+        tag = f'<herdr-news task="{ref}"'
+        if text.startswith(tag) and 'event="answer"' not in text:
+            return True
+    elif text.startswith("Stop ") and ("recap first" in text or "two rounds in a row with new majors" in text):
         return True
     return False
 
@@ -274,7 +313,7 @@ def _strip_stale_task_news_lines(text, ref):
     return "\n".join(kept).strip()
 
 
-def clear_task_held_news(s, task, retiring=()):
+def clear_task_held_news(s, task, retiring=(), *, at=None):
     """Clears disk `.held.json` and `.news.json` entries superseded by a re-plan of `task`."""
     from . import news as _news
 
@@ -282,6 +321,7 @@ def clear_task_held_news(s, task, retiring=()):
     key = f"{s.slug}#{task['id']}" if s is not None and getattr(s, "slug", None) else None
     worker_addrs = {a["address"] for a in task.get("agents") or [] if isinstance(a, dict) and a.get("address")}
     retire_set = set(retiring or ())
+    reset_ts = int(at if at is not None else (task.get("review_reset_at") or now()))
 
     if os.path.exists(_news.HELD):
         with _news.held_messages() as held:
@@ -291,7 +331,18 @@ def clear_task_held_news(s, task, retiring=()):
                     continue
                 items = held.get(addr) or []
                 if addr in worker_addrs:
-                    items = [x for x in items if _keep_worker_held_item(x)]
+                    cleaned_w = []
+                    for x in items:
+                        txt = x.get("text")
+                        if isinstance(txt, str) and ref and f'<herdr-news task="{ref}"' in txt:
+                            rem = _strip_stale_task_news_lines(txt, ref)
+                            if not rem:
+                                continue
+                            if rem != txt:
+                                x = {**x, "text": rem}
+                        if not _is_stale_worker_held_item(x, ref):
+                            cleaned_w.append(x)
+                    items = cleaned_w
                 elif ref:
                     cleaned = []
                     for x in items:
@@ -308,8 +359,11 @@ def clear_task_held_news(s, task, retiring=()):
                 else:
                     held.pop(addr, None)
 
-    if key and os.path.exists(_news.NEWS):
+    news_dir = os.path.dirname(_news.NEWS)
+    if key and news_dir and os.path.isdir(news_dir):
         with _news.news_state_file() as state:
+            resets = state.setdefault("reset_at", {})
+            resets[key] = max(int(resets.get(key) or 0), reset_ts)
             outbox = state.get("outbox")
             if isinstance(outbox, list):
                 outbox[:] = [x for x in outbox if not (x.get("key") == key and x.get("event") not in ("backup",))]
@@ -389,8 +443,8 @@ def _apply_recaps(ctx):
 
     s, t, at = ctx["store"], ctx["task"], ctx["at"]
     why = " ".join(str(ctx["why"] or "re-plan").split())[:300]
-    cur = change_lines(t)
-    tokens = token_sum(s, t) if s is not None else 0
+    cur = None if ctx["dry"] else change_lines(t)
+    tokens = 0 if (ctx["dry"] or s is None) else token_sum(s, t)
     entry = {
         "decision": "new",
         "why": why,
@@ -566,7 +620,7 @@ REPLAN_TABLE = (
         state="Held news",
         disposition="reset",
         fields=("review_followup", "pr.news", ".held.json", ".news.json"),
-        why="Stale pre-replan review followups, PR news, retiring-reviewer prompts, worker review/recap messages, and queued task status lines are dropped while keeping ask answers and brief amendments.",
+        why="Stale pre-replan review followups, PR news, retiring-reviewer prompts, worker review/recap/Ready/merge messages, and queued task status lines are dropped while preserving unrelated held messages such as device-ready notices, ask answers, and brief amendments.",
         apply=_apply_held_news,
     ),
     ReplanRow(
@@ -587,11 +641,12 @@ class ReplanEffect:
     store: object
     task: dict
     retiring: list
+    at: int
 
     def commit(self):
         cancel_queued_merge(self.store, self.task)
         retire_reviewers(self.retiring)
-        clear_task_held_news(self.store, self.task, self.retiring)
+        clear_task_held_news(self.store, self.task, self.retiring, at=self.at)
 
 
 def has_replan_state(task):
@@ -610,7 +665,8 @@ def has_replan_state(task):
 
 def replan_task(s, task, *, why, at=None, dry=False, defer_side_effects=False):
     """Applies `REPLAN_TABLE` to `task`. Unless `dry` or `defer_side_effects`, runs GitHub/hc/news side effects too."""
-    at = now() if at is None else at
+    prev_reset = int(task.get("review_reset_at") or 0)
+    at = max(now(), prev_reset + 1) if at is None else max(int(at), prev_reset + 1)
     if not dry and not defer_side_effects:
         cancel_queued_merge(s, task)
     ctx = {"store": s, "task": task, "why": why, "at": at, "dry": dry, "retiring": []}
@@ -618,10 +674,10 @@ def replan_task(s, task, *, why, at=None, dry=False, defer_side_effects=False):
         row.apply(ctx)
     if s is not None:
         s.dirty = True
-    eff = ReplanEffect(store=s, task=task, retiring=list(ctx["retiring"]))
+    eff = ReplanEffect(store=s, task=task, retiring=list(ctx["retiring"]), at=at)
     if not dry and not defer_side_effects:
         retire_reviewers(eff.retiring)
-        clear_task_held_news(s, task, eff.retiring)
+        clear_task_held_news(s, task, eff.retiring, at=at)
     return eff
 
 
