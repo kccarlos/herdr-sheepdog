@@ -13,7 +13,7 @@ When review does not converge, the engine starts one retro round per task (`herd
 | Verdict | What the engine does |
 |---|---|
 | `SHIP` | Records it as the passing round on that head and closes the recap as a continue. |
-| `FIX` | Sends the majors and the worker's one change to the worker and closes the recap as a bounded continue (one round, 60 more lines). A Fable round alone checks the fix as a delta. A second FIX verdict (that Fable round asking for changes) is the cap. |
+| `FIX` | Sends the majors and the worker's one change to the worker and closes the recap as a bounded continue (one round, 60 more lines). A Fable round alone checks the fix as a delta. A second FIX verdict (that Fable round asking for changes) is the cap, as is a FIX after the task already spent its bounded continue. A folder task has no worktree for a Fable round: its own next round checks the fix. |
 | `REDESIGN`, or the FIX cap | Leaves the recap open with `continue` refused. The coordinator chooses split, new or drop and records it with `plan amend --reason retro:<task>`. |
 
 `confidence: low` is stored and not acted on: the recap stays open for the coordinator, with `continue` still refused. Every outcome wakes the coordinator with `event:retro <task>`. A split of a task that had a retro carries the worker's one change into each child's brief. If such a child draws a retro too, the engine asks the owner once (kind `decision`) instead of starting a second retro.
