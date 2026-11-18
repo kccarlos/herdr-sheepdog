@@ -296,14 +296,19 @@ func TestWSNewEpochAudioOrdersAfterFlushAndSurvivesLateInterrupted(t *testing.T)
 		ep1 := voice.NextAudioEpoch()
 		ep2 := voice.NextAudioEpoch()
 
-		// Lock writeLoop from draining while we stage both epochs in cl.queue,
-		// then run cl.flush(ep1, flush).
+		// Hold cl.mu across staging and flushLocked so writeLoop cannot drain
+		// stale-ep1 before the flush barrier runs.
 		cl.mu.Lock()
 		_, _ = cl.enqueueLocked(frame{binary: true, data: []byte("stale-ep1"), epoch: ep1})
 		_, _ = cl.enqueueLocked(frame{binary: true, data: []byte("fresh-ep2"), epoch: ep2})
+		dropped, _, sent := cl.flushLocked(ep1, controlFrame(wsproto.Flush()))
 		cl.mu.Unlock()
-
-		dropped, sent := cl.flush(ep1, controlFrame(wsproto.Flush()))
+		if sent {
+			select {
+			case cl.notify <- struct{}{}:
+			default:
+			}
+		}
 		if !sent || dropped != 1 {
 			t.Fatalf("cl.flush(ep1) = (dropped=%d, sent=%v), want (1, true)", dropped, sent)
 		}
