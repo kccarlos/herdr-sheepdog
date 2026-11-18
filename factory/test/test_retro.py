@@ -261,7 +261,11 @@ class Retro(unittest.TestCase):
         self.assertEqual(self.task["review_rounds_added"], 1)
         self.assertIn("one more round is added", self.told[-1])
         self.assertIn("isn't reviewed", self.commands.review_refusal(self.store, self.task, None))
-        self.task["reviews"].append({"round": 5, "result": "report", "verdict": "pass", "majors": 0, "at": self.task["retro"]["at"] + 1})
+        row = {"round": 5, "result": "report", "verdict": "pass", "majors": 0, "at": self.task["retro"]["at"] + 1, "head": "0" * 40}
+        self.task["reviews"].append(row)
+        if self.store.loc.get("kind") == "repo":  # a round on an older commit is no review of the fix
+            self.assertIn("isn't reviewed", self.commands.review_refusal(self.store, self.task, None))
+        row["head"] = self.git(self.store.loc["folder"], "rev-parse", "HEAD")
         self.assertIsNone(self.commands.review_refusal(self.store, self.task, None))
 
     def test_new_after_redesign_needs_the_replan_on_record(self):
@@ -293,6 +297,35 @@ class Retro(unittest.TestCase):
         self.store.loc["folder"] = self.wt
         self.started()
         self.assertIn(f"Diff: {self.task['folder_start'][:12]}..", self.runs[-1][-1])
+
+    def test_review_findings_round_4(self):
+        """Codex round 4: a verdict after the coordinator decided is stored, not acted on; the FIX cap keeps a CI stop;
+        a judgement task's earlier Fable pass doesn't pass a FIX."""
+        self.started()
+        self.recap("new")
+        self.tick(TAIL)
+        self.assertEqual((self.task["retro"]["acted"], self.told), (False, []))
+        self.assertIsNone(self.retro.gate_rounds(self.task))
+        self.task["retro"] = {**TAIL, "verdict": "FIX", "majors": [MAJOR], "at": 100, "head": self.head}
+        self.task["recap"] = {"at": 1, "reasons": ["3 failed CI runs"], "title": "Recap required"}
+        self.task["review_runs"] = [{"address": "fable-1", "model": "claude-fable-5-2", "head": self.head, "round": 1, "at": 1}]
+        self.task["reviews"].append({"round": 9, "head": self.head, "by": "fable-1", "started_by": "herdr-task",
+                                     "verdict": "pass", "majors": 0, "at": 50})
+        from herdr_task.settings import accept_bar
+        self.task["set"]["review_kind"] = "doc"
+        self.assertEqual(accept_bar(self.store, self.task)[0], None)
+        self.task["reviews"].append({"round": 10, "head": self.head, "by": "fable-1", "started_by": "herdr-task",
+                                     "verdict": "changes", "majors": 1, "at": 150})
+        self.assertTrue(self.retro.cap(self.store, self.task))
+        self.assertEqual(self.task["recap"]["reasons"], ["3 failed CI runs", self.retro.RETRO_CAP])
+
+    def test_a_folder_fix_that_fails_its_round_is_the_cap(self):
+        self.task.update(mode="here", worktree=None)
+        self.started()
+        self.tick({**TAIL, "verdict": "FIX", "majors": [MAJOR]})
+        self.task["reviews"].append({"round": 5, "result": "report", "verdict": "changes", "majors": 1, "at": self.task["retro"]["at"] + 1})
+        self.tick()
+        self.assertIn(self.retro.RETRO_CAP, self.task["recap"]["reasons"])
 
 
 if __name__ == "__main__":

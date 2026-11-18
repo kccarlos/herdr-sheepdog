@@ -992,7 +992,9 @@ def review_refusal(s, t, wt):
         return None  # in the folder itself, and it changed nothing (#744: a run that only reads)
     revs = [r for r in t.get("reviews") or [] if r.get("result") in REVIEWED and (r.get("at") or 0) >= (t.get("started") or 0)]
     if not wt and (rr := t.get("retro") or {}).get("verdict") == "FIX" and rr.get("confidence") != "low":  # SDF-49: the fix needs a passing round of its own
-        revs = [r for r in revs if (r.get("at") or 0) > rr["at"] and not r.get("retro") and r.get("verdict") != "changes"]
+        now_head = git(s.loc["folder"], "rev-parse", "HEAD")[1] if s.loc.get("kind") == "repo" else None
+        revs = [r for r in revs if (r.get("at") or 0) > rr["at"] and not r.get("retro") and r.get("verdict") != "changes"
+                and (not now_head or r.get("head") == now_head)]
     head = t.get("head") if wt else None
     if (any(r.get("head") == head for r in revs) if wt else bool(revs)):
         return None
@@ -1111,7 +1113,7 @@ def cmd_reviewed(args):
                                             "report": text, "cli": reviewer.get("agent"), "model": reviewer.get("model")})
         t.pop("review_out", None)
         s.dirty = True
-        stopped = budget_pass(s, t) if t.get("mode") == "worktree" else bool(retro_due(t) and open_recap(s, t, [NON_CONVERGENCE]))
+        stopped = budget_pass(s, t) if t.get("mode") == "worktree" else bool(retro_cap(s, t) or (retro_due(t) and open_recap(s, t, [NON_CONVERGENCE])))
         v = view(s, t)
     on_what = f" for commit {head[:7]}" if head else ""
     say(args, {**v, "round": used + 1, "rounds": rounds}, f"{s.ref(t)}: review round {used + 1} of {rounds} recorded{on_what}."

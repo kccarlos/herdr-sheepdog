@@ -68,13 +68,15 @@ def retro_due(t):
 def fixing(t):
     """A worktree task after a retro FIX, before the FIX cap: its fix is checked by a Fable round alone."""
     r = t.get("retro") or {}
-    return t.get("mode") == "worktree" and r.get("verdict") == "FIX" and r.get("confidence") != "low" and not t.get("retro_capped")
+    return (t.get("mode") == "worktree" and r.get("verdict") == "FIX" and r.get("confidence") != "low" and not t.get("retro_capped")
+            and r.get("acted") is not False)
 
 
 def gate_rounds(t):
     """1 when the retro decides this head's review (its SHIP on it, or a FIX being checked by Fable), else None."""
     r = t.get("retro") or {}
-    return 1 if fixing(t) or (r.get("verdict") == "SHIP" and r.get("confidence") != "low" and r.get("head") == t.get("head")) else None
+    return 1 if fixing(t) or (r.get("verdict") == "SHIP" and r.get("confidence") != "low" and r.get("acted") is not False
+                              and r.get("head") == t.get("head")) else None
 
 
 def blocks_continue(t):
@@ -88,13 +90,19 @@ def blocks_continue(t):
 def cap(s, t):
     """The retro's FIX plus a Fable round asking for changes again is the FIX cap (FABLE_CHANGES): a recap
     without continue, opened before anyone tells the worker to fix again. True when it opened one."""
-    if not fixing(t):
+    r = t.get("retro") or {}
+    if r.get("verdict") != "FIX" or r.get("confidence") == "low" or t.get("retro_capped") or r.get("acted") is False:
         return False
-    fable, since = fable_runs(t), t["retro"]["at"]
-    asked = sum(1 for r in t.get("reviews") or [] if r.get("by") in fable and r.get("verdict") == "changes" and (r.get("at") or 0) > since)
+    fable, worktree = fable_runs(t), t.get("mode") == "worktree"  # a folder task: its own next round checks the fix
+    asked = sum(1 for x in t.get("reviews") or [] if x.get("verdict") == "changes" and (x.get("at") or 0) > r["at"]
+                and (x.get("by") in fable if worktree else not x.get("retro")))
     if 1 + asked < FABLE_CHANGES:
         return False
     t["retro_capped"] = now()
+    if t.get("recap"):  # another stop is open: it keeps its reasons, and gains this one
+        t["recap"]["reasons"].append(RETRO_CAP)
+        s.dirty = True
+        return True
     return open_recap(s, t, [RETRO_CAP])
 
 
@@ -201,7 +209,7 @@ def start(s, t):
     # dontAsk: only the reviewer's allow list runs; edits and every other command are refused, nothing prompts.
     a = launch(s, t, argv_for({**FABLE, "perm": "dontAsk"}), retro_prompt(s, t, base_sha or (t.get("start") or ""), head),
                parent=live[-1]["address"] if live else None, role="reviewer", reads=review_reads(check))
-    t["retro_run"] = {"address": a["address"], "head": head, "at": now()}
+    t["retro_run"] = {"address": a["address"], "head": head, "at": now(), "recap_at": (t.get("recap") or {}).get("at")}
     t["progress"] = {"text": "Herdr's retro round is on it", "at": now(), "set": now(), "by": "herdr"}
     s.dirty = True
 
@@ -321,6 +329,9 @@ def retro_pass(s, t):
         t.pop("retro_run")
         s.dirty = True
         end_reviewer(rn["address"])
+        if rec and (t.get("recap") or {}).get("at") != rn.get("recap_at"):  # the coordinator decided meanwhile
+            t["retro"] = {**rec, "head": rn["head"], "by": rn["address"], "at": now(), "acted": False}
+            return
         if rec:
             act(s, t, rn, rec)
             return
