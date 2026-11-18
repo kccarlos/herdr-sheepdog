@@ -93,6 +93,7 @@ class Read(unittest.TestCase):
             (subprocess.TimeoutExpired("codexbar", 20), None, "timed out"),
             (None, subprocess.CompletedProcess([], 4, "", ""), "timed out"),
             (None, subprocess.CompletedProcess([], 1, '[{"error":"Not logged in"}]', ""), "not signed in"),
+            (None, subprocess.CompletedProcess([], 1, '[{"error":"Claude OAuth credentials not found"}]', ""), "not signed in"),
             (None, subprocess.CompletedProcess([], 1, "", "Authentication required"), "not signed in"),
             (None, subprocess.CompletedProcess([], 1, "", "Network failure"), "no data"),
         )

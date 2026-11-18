@@ -63,7 +63,7 @@ def _codexbar(tool, provider):
     if result.returncode == 4:
         return parse(provider, "", "timed out")
     auth = re.search(r"not (?:signed|logged) in|(?:sign[ -]?in|log[ -]?in|authentication) required|"
-                     r"no [^\n]{0,60}(?:oauth credentials|session key)|unauthorized",
+                     r"no [^\n]{0,60}(?:oauth credentials|session key)|oauth credentials not found|unauthorized",
                      result.stderr + "\n" + result.stdout, re.IGNORECASE)
     return parse(provider, result.stdout, "not signed in" if auth else "no data")
 
