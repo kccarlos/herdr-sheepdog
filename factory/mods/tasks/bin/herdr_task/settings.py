@@ -1176,6 +1176,9 @@ def fable_said(t, verdict):
 def fable_due(s, t):
     """A judgement task (design/doc, or open plan questions) that auto-accept hands to a Fable round."""
     from .ask import open_asks
+    from .retro import fixing
+    if fixing(t):  # SDF-49: after a retro FIX, Fable alone checks the fix
+        return True
     asks = open_asks(s, t)
     return (t.get("mode") == "worktree" and bool(review_kind(t) or asks) and not owner_gate(s, t, asks)
             and fable_said(t, "changes") < FABLE_CHANGES)
@@ -1215,13 +1218,17 @@ def accept_bar(s, t):
     if t.get("mode") != "worktree" or t.get("nothing_to_merge"):
         return None, "nothing to merge"
     revs = reviewed_for_head(s, t, head)
+    from .retro import fixing
+    if fixing(t):  # SDF-49: only Fable's delta round after the retro passes its FIX
+        revs = [r for r in revs if r.get("by") in fable_runs(t) and (r.get("at") or 0) > t["retro"]["at"]]
     if review_kind(t) or asks:
         ok = any(r.get("by") in fable_runs(t) and r.get("verdict") == "pass" for r in revs)
         return ("fable", None) if ok else (None, "Fable asked for changes twice" if fable_said(t, "changes") >= FABLE_CHANGES
                                            else "waits for Fable's review round")
     review_on, _ = review_limits(s, t)
     gate = gate_min(s, t)
-    need = max(1, gate) if review_on else 0
+    from .retro import gate_rounds
+    need = (gate_rounds(t) or max(1, gate)) if review_on else 0
     if need:
         got = sum(1 for r in revs if ((r.get("started_by") == "herdr-task" and r.get("verdict") == "pass") if gate else
                                       (r.get("verdict") == "pass" if "verdict" in r else r.get("result") in ("report", "pass"))))

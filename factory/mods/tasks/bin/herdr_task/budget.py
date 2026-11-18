@@ -382,10 +382,15 @@ NON_CONVERGENCE = "two rounds in a row with new majors: retro first"
 
 
 def review_nonconverging(t):
+    """Two rounds in a row with new majors (of three or more), counted from the last recap decision that
+    answered a review stop: a continue on a size, time or CI recap never hides it (SDF-49)."""
     from .settings import fable_runs
-    fable = fable_runs(t)
+    fable = fable_runs(t) | {r.get("by") for r in t.get("reviews") or [] if r.get("retro")}
     all_rounds = [r for r in rounds_since(t, all_rounds=True) if r.get("by") not in fable]
-    rounds = [r for r in rounds_since(t) if r.get("by") not in fable]
+    r = t.get("retro") or {}
+    since = max([d.get("at") or 0 for d in t.get("recaps") or [] if NON_CONVERGENCE in (d.get("reasons") or [])]
+                + [r.get("at") or 0 if r.get("verdict") in ("SHIP", "FIX") and r.get("confidence") != "low" else 0], default=0)
+    rounds = [r for r in all_rounds if (r.get("at") or 0) > since]
     return (len(all_rounds) >= 3 and len(rounds) >= 2 and
             all(r.get("verdict") == "changes" and (r.get("majors") or 0) > 0 for r in rounds[-2:]))
 
@@ -571,7 +576,13 @@ def cmd_recap(args):
             raise Fail("A task's own agent can't decide its recap: your Assistant does.")
         if not rc:
             raise Fail(f"{s.ref(t)} has no recap open.")
-        if args.decide == "continue" and (NON_CONVERGENCE in rc.get("reasons", []) or (rounds_since(t) and review_nonconverging(t))):
+        from .retro import blocks_continue
+        if args.decide == "continue" and (why := blocks_continue(t)):
+            raise Fail(f"{why}; choose split, new or drop, and record it with plan amend --reason retro:{s.ref(t)}.")
+        if (why := blocks_continue(t)) and args.decide in ("new", "drop") and s.data.get("plan_log") and not any(
+                l.get("reason") == f"retro:{s.ref(t)}" and (l.get("at") or 0) >= (t.get("retro") or {}).get("at", 0) for l in s.data["plan_log"]):
+            raise Fail(f"{why}: record the replan first with plan amend --reason retro:{s.ref(t)}, then decide.")
+        if args.decide == "continue" and (NON_CONVERGENCE in rc.get("reasons", []) or review_nonconverging(t)):
             raise Fail(f"{NON_CONVERGENCE}; choose split, new or drop.")
         if not (args.why or "").strip():
             raise Fail("Say why in one line: --why \"…\".")
@@ -594,8 +605,9 @@ def cmd_recap(args):
             raise Fail(f"--small is for a second continue; {s.ref(t)}'s first continue needs none.")
         found = last_findings(t)  # before the decision starts the round count afresh
         cur = change_lines(t)
+        fix = bool(t.pop("retro_fix_pending", None)) and args.decide == "continue"  # SDF-49: the retro's FIX is bounded
         bound = ({"small": True, "max_rounds": SMALL_ROUNDS, "max_lines": cur + SMALL_LINES if cur is not None else None}
-                 if small else {})
+                 if small or fix else {})
         t.setdefault("recaps", []).append({"decision": args.decide, "why": " ".join(args.why.split())[:300], "at": now(),
                                            "reasons": rc.get("reasons", []), "tokens": token_sum(s, t),
                                            **({"lines": cur} if cur is not None else {}), **bound})
@@ -614,7 +626,7 @@ def cmd_recap(args):
             if workers(s, t):
                 limit = (f"This is a small follow-up, bounded: at most {SMALL_ROUNDS} more review round"
                          + (f" and {SMALL_LINES} more changed lines (up to {bound['max_lines']:,})" if bound["max_lines"] is not None else "")
-                         + "; past either, the task stops for a recap with only split, new approach or drop left. ") if small else ""
+                         + "; past either, the task stops for a recap with only split, new approach or drop left. ") if small or fix else ""
                 told = tell(s, t, f"Your Assistant read the recap of {s.ref(t)} and says go on: {args.why.strip()}"
                                   f"{found}{limit}Carry on, then run `{own_path()} ready {s.ref(t)} --folder {shlex.quote(s.loc['folder'])}` again.", None)[0]
     say(args, {"decision": args.decide, "told": told},

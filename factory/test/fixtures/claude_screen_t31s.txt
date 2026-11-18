@@ -1,0 +1,121 @@
+  - (2) Fixed. On a judgement task (design, doc, or an open plan question) a retro SHIP now counts only as the code pass. Fable's owner round still runs, and the accept bar counts only Fable's own
+    pass. The Fable check of a FIX on such a task gets the owner instructions too.
+  - Minors fixed. The <retro> tail must end the last message, which I tested against a real Claude Code screen fixture. Only a parent whose retro said FIX or REDESIGN passes its worker change to split
+    children.
+  - Checks: the factory suite passes (OK, 31 skipped) and make vet lint reports 0 issues.
+
+  (3) Live replays. The first attempt never reached the model: --allowedTools swallowed the prompt and the CLI exited at once. The runner now sends the prompt on stdin, and this run is the one live
+  session each.
+
+  When they finish:
+  1. Commit the two answers.
+  2. Rebase on main, which is 5 commits ahead now and includes SDF-53's launch permission change.
+  3. Re-run the factory suite, make test and make vet lint, push, publish the proof, and send you the head and both verdicts.
+
+✻ Churned for 10m 30s · done 1:31 AM
+
+⏺ Background command "Commit and rerun live replays" completed (exit code 0)
+
+  Ran 2 shell commands
+
+⏺ Bash(cat >> docs/dev/factory/template-replay.md <<'EOF'…)
+  ⎿  af5153fe test(factory): live retro replay answers for SDF-16 and SDF-31
+  ⎿  Updated docs/dev/factory/template-replay.md (+11 -0)
+      182  | R-31 | SDF-31, milestones and plan amend | `830bd86886`, 942 changed lines, no estimate | Every round finds one more dependency-loop case; earlier fixes hold |
+      183
+      184  The fixtures are `factory/test/replay/retro/<task>.json`: each round's verdict, major count and note, the brief with private paths removed, and the diff range. `python3 test/replay_r
+           etro.py --show` prints each filled prompt. `--live --dir <scratch>` runs one read-only Fable session per situation in a detached worktree at that round's head, and records its answer
+            as `<task>.out.txt`. The test suite checks that every slot is filled and that each recorded answer parses. The expected causes are not in the prompt. They come from the retro propos
+           al, which judged both tasks after the fact: R-16 should name task-too-big or design-needed-first, and R-31 patch-shaped-fix or reviewer-narrow.
+      185 +
+      186 +### Results (2026-11-18, one live Fable session each)
+      187 +
+      188 +| Situation | Verdict | Cause, second | Expected cause (from the proposal) | Confidence |
+      189 +|---|---|---|---|---|
+      190 +| R-16 | FIX: 2 majors (`lease.py` restart cut short after the claim; `revive.py` holder found by a reused address) | patch-shaped-fix, reviewer-narrow | task-too-big or design-neede
+          +d-first | medium |
+      191 +| R-31 | FIX: 3 majors in `plan.py` (loop through an existing task by id; loop through a split parent; a removed dependency left in `after`) | design-needed-first, patch-shaped-fix |
+          + patch-shaped-fix or reviewer-narrow | medium |
+      192 +
+      193 +Both verdicts are sensible. R-16's first major is the round-3 major that the head still has, and both answers quote round numbers and commits. Neither blames a model: both say `worke
+          +r_model: keep`, `reviewer: class-pass`. Each gives one structural change for the coordinator and one for the worker. For R-16 that is a cut-point table in the brief, and one recorded
+          +-intent finish step instead of per-case detectors. For R-31 it is a state-by-operation table in the brief, and a check of the store as `write()` leaves it. The R-31 worker change mat
+          +ches the fix the worker found by itself in round 5.
+      194 +
+      195 +The causes match the proposal's on R-31 (the second cause) and miss on R-16. There it names how the work went wrong (patch-shaped-fix) rather than the shape of the task (too big), an
+          +d it does not use the size overrun (1,673 lines against 600). The template's own definitions of patch-shaped-fix and design-needed-first overlap ("one mechanism patched case by case"
+          +). That is the first line to sharpen if later retros keep confusing the two. One limit of the replay: the sessions ran in `dontAsk` mode with git reads and `make test-factory` allowe
+          +d. Both ran the suite, and neither could run its own reproduction scripts, so their majors are traced through the code, not executed.
+
+⏺ Bash(SP=/tmp/scratch
+  ⎿  0
+     SDF-49: Rebasing on main · 94% · ~30m left.
+     Rebasing (1/13)Rebasing (2/13)Rebasing (3/13)Rebasing (4/13)Rebasing (5/13)Rebasing (6/13)Rebasing (7/13)Rebasing (8/13)Rebasing (9/13)Rebasing (10/13)Rebasing (11/13)Rebasing (12/13)Rebasin
+     g (13/13)Successfully rebased and updated refs/heads/task/49-m4-the-retro-round-when-review-does-not.
+  ⎿  Created docs/dev/factory/running-slots.md (+7 -0)
+  ⎿  Updated factory/mods/tasks/bin/herdr_task/cli.py (+2 -6)
+  ⎿  Updated factory/mods/tasks/bin/herdr_task/commands.py (+102 -31)
+  ⎿  Updated factory/mods/tasks/bin/herdr_task/github.py (+1 -1)
+  ⎿  Updated factory/mods/tasks/bin/herdr_task/launch.py (+45 -149)
+  ⎿  … 15 more files changed
+  ⎿  (a git step in this command can move the working tree, so these may be its changes, not edits)
+
+  Ran 1 shell command
+
+⏺ Rebased cleanly on main; factory suite passes. Running make test and make vet lint.
+
+  Ran 5 shell commands
+
+⏺ Checking the proof at phone and desktop width.
+
+  Read 2 files, ran 2 shell commands
+
+⏺ The head is dca0da112b113ca2de6442c2303cf907240f8dd6, rebased on current main and pushed. There's no PR yet. The factory suite, make test and make vet lint all pass on it.
+
+  Your three majors are fixed, with tests:
+  1. Retro recording a pass: the retro session now starts with no herdr-task review verb, and cmd_review refuses its terminal. It also refuses a verdict while a recap is open, but only on the old path
+     that ends in finalizing. On the engine's own review path a verdict with a recap open is recorded and never passed on, and an existing test relies on that.
+  2. SHIP accepting a judgement task: on a design or doc task, or one with an open plan question, a retro SHIP now counts only as the code pass. Fable's owner round still runs (gate_need gives 2), and
+     the accept bar counts only Fable's own pass. The Fable check of a FIX on such a task gets the owner instructions too.
+  3. Eval evidence: both live replays ran once each and the answers are committed. The results are in docs/dev/factory/template-replay.md and the proof.
+
+  ┌───────────┬────────────────────────────────────────────────────────────────┬───────────────────────────────────────┬──────────────────────────────────────────────────────────────────┐
+  │ Situation │                            Verdict                             │             Cause, second             │                       The proposal's cause                       │
+  ├───────────┼────────────────────────────────────────────────────────────────┼───────────────────────────────────────┼──────────────────────────────────────────────────────────────────┤
+  │ SDF-16    │ FIX, 2 majors, one of them the round-3 major still on the head │ patch-shaped-fix, reviewer-narrow     │ task-too-big or design-needed-first, so a miss                   │
+  ├───────────┼────────────────────────────────────────────────────────────────┼───────────────────────────────────────┼──────────────────────────────────────────────────────────────────┤
+  │ SDF-31    │ FIX, 3 majors in plan.py                                       │ design-needed-first, patch-shaped-fix │ patch-shaped-fix or reviewer-narrow, so the second cause matches │
+  └───────────┴────────────────────────────────────────────────────────────────┴───────────────────────────────────────┴──────────────────────────────────────────────────────────────────┘
+
+  Both answers have medium confidence, quote rounds and commits, and blame no model. For SDF-31, the worker change Fable gives matches the fix the worker found by itself in round 5. For SDF-16 the
+  cause misses the size overrun (1,673 lines against 600). The template's definitions of patch-shaped-fix and design-needed-first overlap, and that is the line to sharpen first.
+
+  Both minors are fixed: the <retro> tail must now end the last message (tested on a real Claude Code screen), and only a parent whose retro said FIX or REDESIGN passes its worker change to split
+  children.
+
+  Still open:
+  - The first replay attempt never reached the model: the CLI ate the prompt and exited at once. The runner now sends the prompt on stdin, and the run that counts is the one above.
+  - The engine change is about 400 Python lines against the ~250 aim, and my size question to the Assistant is still unanswered.
+  - I haven't run ready: it would refuse, because no review round is recorded on this head. I'll run it with the proof once your outside check is in.
+
+  The proof is m4-the-retro-round-when-b644. On a phone its four-column table scrolls sideways; the rest reads fine at both widths.
+
+  <hc suggest="outside check says SHIP; run ready"/>
+
+✻ Baked for 7m 55s · done 1:55 AM
+
+❯ <hc from="t2n0 herdr-handoff-78151">Size: allowed. About 400 lines against the ~250 aim is fine for this scope, so don't trim. Wait for the outside check.</hc>
+
+  Ran 1 shell command
+
+⏺ Thanks, I won't trim anything. I'm waiting for the outside check on dca0da11. When it comes back I'll fix any findings, or else run ready with the proof m4-the-retro-round-when-b644.
+
+  <hc no-reply/>
+
+✻ Crunched for 11s · done 1:57 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)
+[hc] incomplete: older output may be missing

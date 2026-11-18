@@ -1,0 +1,68 @@
+**Verdict: FIX.** Three majors are open, and one change under 60 lines closes the class. I could not run my own reproductions: this session's permission mode refused every probe script, so majors 2 and 3 are traced through the code at 830bd868, not run.
+
+`make test-factory` at 830bd868: 770 tests ran, 33 skipped, all passed.
+
+## Part 1: the code
+
+**Majors**
+
+1. **The round-3 loop is still open at the reviewed head.** Its fix, 2349a4d5, sits after 830bd868 and is not in the diff range. At 830bd868, `nexts` (`plan.py:279`) follows an existing task's stored `after` when it is reached by id, so the new edge from the file is missed. The test in 2349a4d5 (`test_review_round_3_loop_through_an_existing_task`) is the reproduction.
+
+2. **The same loop through a split parent stays open even with 2349a4d5 (traced, not run).** The fix maps an id to its key only for keys listed in the file; a split parent's key is not listed.
+   - Steps: apply M1 with task `a` (TST-1); `herdr-task add "outside" --after 1` (TST-3); amend M1 with `a1` (`split_of: a`, `after: ["TST-3"]`) and `a2` (`split_of: a`).
+   - The check walks a1 → TST-3 → TST-1 → nothing, and passes.
+   - `write()` (`plan.py:371-374`) then rewrites TST-3's `after` to the parts, and a1 gets `after: [3]`.
+   - Result: a1 and TST-3 wait on each other, and M1's acceptance waits on a1, so the milestone never finishes.
+
+3. **After `herdr-task rm` of a dependency, the next amend of that milestone is refused (traced, not run).** `milestones.md` names `rm` as the way to drop a task. `cmd_rm` (`commands.py:1774`) clears `after` but leaves `plan_after`.
+   - Steps: apply M1 with `a` and `b` (`after: ["a"]`); `rm 1`; amend M1 listing `{"key": "b"}`.
+   - `old_after` (`plan.py:246`) feeds the removed id back in, and `plan.py:237` refuses with "b: after 1 is neither a task key in this plan nor a task here."
+   - If `b` has started, restating `"after": []` is refused too (`plan.py:171-174`, "what it waits for can't change now"). No file listing M1 can pass until `b` is done.
+
+**Not majors**
+
+- `"after": [[]]` on a started task raises `TypeError` at `plan.py:249`. This is round 1's "malformed after crash" again; the store is unchanged.
+- An amend of a UI milestone whose design task is done is refused with "needs a design task" unless the done task is listed. The doc says to list open tasks only.
+- The rejected round-3 finding (a split rewrites a started dependent's `after`) stays rejected. A dependent that already started has no pending wait to protect.
+
+**The class**
+
+The checks validate a hand-built model of the graph, not the graph that `write()`, `link()`, `rm` and `edit` leave in the store. The model is key/id/acceptance nodes plus `plan_after` as a second copy of `after`. Every loop finding (round 1, round 3, major 2) is a place where the model and the written graph differ. Every "frozen after start" finding (round 1 gate, round 2 all three, round 3 split) is one more field added to a hand-kept list.
+
+**The structural change**
+
+- Snapshot `s.data`, then run `write()` with its two outside effects (`end_agent`, `release_task`) held back.
+- On the result, walk the real `after` ids for loops, as `queues.py:114-123` already does.
+- Compare every task that had started before against the snapshot, with the split rewrite as the one allowed difference.
+- Restore the snapshot on any problem; run the held-back effects only on success.
+- Delete `check_loops` (41 lines).
+- Drop unknown ids in `old_after`, or clear `plan_after` in `cmd_rm`.
+
+This is about 40–50 added lines by my estimate.
+
+## Part 2: the retro
+
+**Cause: design-needed-first.** One mechanism — what an amend may change given task and acceptance state, and what graph results — was patched case by case.
+
+- All 9 majors are in `plan.py`. None returned, and the fixes held, so the worker model is not the cause.
+- Loop class: round 1 (implicit milestone edge), round 3 (reached by id).
+- Frozen-after-start class: round 1 (gate on amend), round 2 (gate after acceptance started, `after` on a started task), round 3 (split and a started dependent).
+- Two ways to set one field: round 1 (`set estimate.lines`), round 2 (kind through `set`).
+- The brief is one paragraph with no acceptance list, and says it "may be finished by the Assistant". It does not say what an amend may change after a start.
+- The in-repo docs other than the worker's own `milestones.md` are silent on that too. The design repo's two documents are not in this worktree, so I could not check section 4; that caps confidence at medium.
+- The feature was built in 6 minutes (0fa9907e 11:14 to 64c3de2b 11:20) with no state table.
+
+**Second cause: patch-shaped-fix.**
+
+- b02890df and 6edd7e35 are titled "address round N review findings", and the tests are named `test_review_round_1_findings` and `test_review_round_2_findings`.
+- 2349a4d5 is 4 lines on one path. Its own test with `split_of` swapped in is major 2.
+
+**Coordinator change:** Before starting an engine-state task like this, put a table in the brief with one row per task or acceptance state and one column per amend operation (change field, move, split, drop), each cell saying allowed or refused.
+
+**Worker change:** When a review finding is a loop or a started-state case, make the fix a check on the store as `write()` leaves it, not a new branch in the model of it.
+
+**Re-plan:** none. The remaining work is the one fix above, done as a single change. SDF-32 (critical path, merge order) should read the written graph and not build a second model of it.
+
+**Models:** keep the worker. For the reviewer, add a class pass: after round 2 it should have been asked to name the class, not find the next case.
+
+<retro>{"verdict":"FIX","majors":[{"file":"factory/mods/tasks/bin/herdr_task/plan.py","line":279,"what":"Round-3 loop still open at reviewed head 830bd868: an existing plan task reached by id follows its stored after, so a loop made by the amend is missed; the fix 2349a4d5 is outside the diff range.","repro":"Test test_review_round_3_loop_through_an_existing_task from 2349a4d5: apply M1[a]; outside task after a; amend M1[a after outside]. At 830bd868 the amend is accepted and a and the outside task wait on each other. Not run by me (probe scripts denied); the reviewer's round-3 repro and the worker's test are the evidence."},{"file":"factory/mods/tasks/bin/herdr_task/plan.py","line":371,"what":"Loop through a split parent passes the check even with 2349a4d5: the id-to-key mapping covers listed keys only, and write() rewrites the outside task's after to the parts.","repro":"Traced, not run: apply M1[a] (TST-1); herdr-task add outside --after 1 (TST-3); plan amend M1[a1 split_of a after [TST-3], a2 split_of a]. Check walks a1 -> TST-3 -> TST-1 -> nothing and passes; store ends with a1.after=[3], TST-3.after=[a1,a2]; M1 acceptance waits on a1 forever."},{"file":"factory/mods/tasks/bin/herdr_task/plan.py","line":246,"what":"After herdr-task rm of a dependency (the documented way to drop a task), plan_after keeps the removed id; the next amend listing the dependent is refused, and for a started dependent no file can pass.","repro":"Traced, not run: apply M1[a, b after a]; herdr-task rm 1; plan amend M1[{key:b}] -> 'b: after 1 is neither a task key in this plan nor a task here' (plan.py:237). With b running, {key:b, after:[]} -> 'what it waits for can't change now' (plan.py:171-174). cmd_rm clears after only (commands.py:1774)."}],"cause":"design-needed-first","second_cause":"patch-shaped-fix","evidence":["rounds 1-3: all 9 majors in plan.py, none returned, fixes held, so not worker-model","round 1 (implicit milestone-edge loop) and round 3 (loop by id): the loop check is a model of the graph, not the written graph","round 1 (gate on amend), round 2 (gate after acceptance started, after on a started task), round 3 (split and a started dependent): frozen-after-start fields listed one by one","round 1 (set estimate.lines) and round 2 (kind via set): two ways to set one field","brief: one paragraph, no acceptance list, 'may be finished by the Assistant', silent on what amend may change after a start; design repo docs not in the worktree, unchecked","0fa9907e 11:14 to 64c3de2b 11:20: feature built in 6 minutes with no state table","b02890df, 6edd7e35: 'address round N review findings' with tests named test_review_round_N_findings","2349a4d5: 4 lines on one path; its own test with split_of swapped in still makes a loop"],"coordinator_change":"Before starting an engine-state task like this, put a table in the brief with one row per task or acceptance state and one column per amend operation (change field, move, split, drop), each cell saying allowed or refused.","worker_change":"When a review finding is a loop or a started-state case, make the fix a check on the store as write() leaves it, not a new branch in the model of it.","replan":"none","replan_note":"One fix closes the class: run write() on a snapshot with end_agent and release_task held back, loop-check the real after ids as queues.py:114-123 does, compare started tasks against the snapshot, restore on any problem, delete check_loops, and drop stale plan_after ids after rm. SDF-32 should read the written graph, not build a second model.","worker_model":"keep","reviewer":"class-pass","confidence":"medium"}</retro>

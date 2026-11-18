@@ -509,6 +509,8 @@ def stamp(ms):
 def task_text(task):
     """The task's brief as given, then its dated amendments (FAC-109, `edit --amend`): what workers and reviewers judge by."""
     text = (task.get("prompt") or "").strip() or task["title"]
+    if (rp := task.get("retro_parent")) and rp.get("worker_change"):  # SDF-49
+        text += f"\n\nFrom the retro of {rp['task']}, which this task splits: {rp['worker_change']}"
     changes = [f"- {stamp(a['at'])}: {a['text']}" for a in task.get("amendments") or []]
     return "\n\n".join([text, CHANGES_HEAD + "\n" + "\n".join(changes)]) if changes else text
 
@@ -765,7 +767,7 @@ def registered_worktree(main, path):
     return None
 
 
-def launch(s, task, argv, message=None, parent=None, resume=None, role=None, reads=None):
+def launch(s, task, argv, message=None, parent=None, resume=None, role=None, reads=None, verbs=("review",)):
     """Starts one agent for the task as an hc child of `parent` (the project's coordinator).
     Stamps sheepdog.project, sheepdog.task, sheepdog.role and sheepdog.agent (plus herdr.*
     compatibility labels); reads: a reviewer's read-only commands (review_reads). Returns its record."""
@@ -782,7 +784,7 @@ def launch(s, task, argv, message=None, parent=None, resume=None, role=None, rea
         cmd = cmd + ["--settings", json.dumps({"trustedWorkspaces": [folder]})]
     elif role == "reviewer" and agent_key(cmd) in ("agy", "claude"):
         # a read-only reviewer: its worktree trusted, its verdict (herdr-task review) and `reads` allowed
-        cmd = own_argv(cmd, trust, verbs=("review",), cwd=folder, reads=reads)
+        cmd = own_argv(cmd, trust, verbs=verbs, cwd=folder, reads=reads)  # the retro round: no verdict verb (SDF-49)
     held = message if role == "reviewer" and agent_key(cmd) == "codex" else None
     if message and not held:
         cmd = cmd + (["-i", message] if agent_key(cmd) == "agy" else [message])  # agy reads prompts only from -i
