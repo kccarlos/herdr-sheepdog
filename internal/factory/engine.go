@@ -30,6 +30,9 @@ var workerTemplate string
 
 var lockGitTimeout = 15 * time.Second
 
+// ghTimeout bounds one GitHub executor or snapshot (a push plus gh calls).
+var ghTimeout = time.Minute
+
 // Engine runs the factory loop and handles owner start and stop commands.
 type Engine struct {
 	Paths        Paths
@@ -41,6 +44,7 @@ type Engine struct {
 
 	mu   sync.Mutex
 	wake chan struct{}
+	prs  map[string]flow.PR // last PR snapshot per attempt worktree (in memory)
 }
 
 // New constructs an Engine. Nothing runs or touches disk until Run or Start.
@@ -228,10 +232,11 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 type taskExec func(e *Engine, ctx context.Context, id string, s *flow.State, ti int) (decision string, abort bool, err error)
 
 // taskExecutors dispatches each ask verb implemented so far to its executor.
-// Asks for PR 1.6–1.8 are absent and logged as "not built yet".
+// Asks for PR 1.7–1.8 are absent and logged as "not built yet".
 var taskExecutors = map[string]taskExec{
 	flow.AskNewAttempt:  (*Engine).execNewAttempt,
 	flow.AskStartWorker: (*Engine).execStartWorker,
+	flow.AskPushPR:      (*Engine).execPushPR,
 }
 
 func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int) {
@@ -252,6 +257,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 			}
 		}
 		facts.Tip, facts.TipRel = tip, rel
+		facts.PR = e.readPRLocked(ctx, id, s, ti)
 	}
 	now := time.Now()
 	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[ti], Settings: s.Settings, Facts: facts, Now: now})
@@ -311,11 +317,7 @@ func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, t
 
 func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, ti int) (string, bool, error) {
 	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
-	out := "(none)"
-	if len(t.Outcomes) > 0 {
-		out = "- " + strings.Join(t.Outcomes, "\n- ")
-	}
-	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"), "{outcomes}", out, "{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", cmp.Or(e.Bin, "sheepdog")).Replace(workerTemplate))
+	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"), "{outcomes}", bullets(t.Outcomes), "{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", cmp.Or(e.Bin, "sheepdog")).Replace(workerTemplate))
 	termID, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, world.RunSpec{
 		Name: workerName(id, t.ID, len(t.Attempts)), Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
 		Argv: world.ClaudeArgv(flow.RoleWorker, "sonnet", "medium", "bypassPermissions"), Prompt: prompt,
@@ -325,6 +327,61 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 		a.RunID = termID
 	}
 	return "started worker " + termID, abort, err
+}
+
+func bullets(items []string) string {
+	if len(items) == 0 {
+		return "(none)"
+	}
+	return "- " + strings.Join(items, "\n- ")
+}
+
+// execPushPR is N26: push H and make sure one PR is open for the branch.
+// Title and body come from task fields only (design.md 9.4).
+func (e *Engine) execPushPR(ctx context.Context, _ string, s *flow.State, ti int) (string, bool, error) {
+	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
+	body := fmt.Sprintf("%s\n\n## Outcomes\n\n%s\n\n---\nOpened by the sheepdog factory.", cmp.Or(strings.TrimSpace(t.Brief), "(no brief)"), bullets(t.Outcomes))
+	gctx, cancel := context.WithTimeout(ctx, ghTimeout)
+	defer cancel()
+	n, err := world.PushAndOpenPR(gctx, a.Worktree, a.Branch, flow.H(*a), t.Title, body)
+	if err == nil {
+		a.PR = n
+	}
+	return fmt.Sprintf("PR #%d open for %s", n, a.Branch), false, err
+}
+
+// readPRLocked is the attempt's PR snapshot (design.md 7.3). A failed read
+// is not a snapshot: the last one is kept with Answered false. HeadSince is
+// when this head was first seen by this daemon. A change is logged, so the
+// log shows each move of the PR (checks pending -> green).
+func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti int) flow.PR {
+	a := s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
+	gctx, cancel := context.WithTimeout(ctx, ghTimeout)
+	defer cancel()
+	last := e.prs[a.Worktree]
+	p, err := world.PRSnapshot(gctx, s.Project.Folder, a.Branch)
+	if err != nil {
+		e.logError("factory.gh_error", id, err)
+		p, p.Answered = last, false
+	} else if p.Head != "" {
+		p.HeadSince = last.HeadSince
+		if p.Head != last.Head || p.HeadSince.IsZero() {
+			p.HeadSince = time.Now()
+		}
+		if p.HeadRel, err = world.Relation(gctx, a.Worktree, flow.H(a), p.Head); err != nil {
+			e.logError("factory.git_error", id, err) // unknown here (e.g. not fetched): no relation, never a guess
+		}
+	}
+	if p != last && ctx.Err() == nil {
+		if e.prs == nil {
+			e.prs = map[string]flow.PR{}
+		}
+		e.prs[a.Worktree] = p
+		if err := e.commitLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: p, Rule: "pr_snapshot", Why: "the PR snapshot changed"}); err != nil {
+			e.logError("factory.commit_error", id, err)
+		}
+	}
+	return p
 }
 
 func coordName(id string) string { return hcName("coord-" + strings.TrimPrefix(id, "proj-")) }
