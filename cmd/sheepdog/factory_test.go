@@ -217,3 +217,64 @@ func TestFactoryStartAndStopCLI(t *testing.T) {
 		t.Fatalf("start without goal code=%d, want 2", code)
 	}
 }
+
+// TestFactoryPlanApplyCLI checks that `plan apply` and `start` send the run's
+// token from the environment, and that the run reaches the daemon through
+// SHEEPDOG_WEB_PORT alone (design.md 7.2, 9.3).
+func TestFactoryPlanApplyCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+
+	var lastPath string
+	var lastBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lastPath, lastBody = r.URL.Path, nil
+		_ = json.NewDecoder(r.Body).Decode(&lastBody)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(srv.Close)
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	t.Setenv("SHEEPDOG_WEB_PORT", port)
+	t.Setenv("SHEEPDOG_RUN_TOKEN", "tok-1")
+
+	plan := filepath.Join(home, "plan.json")
+	if err := os.WriteFile(plan, []byte(`{"tasks":[{"id":"T1","title":"feat: x"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A run's terminal does not need the user's config file: break it.
+	cfgFile := filepath.Join(home, ".config", "sheepdog", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(cfgFile), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgFile, []byte("[web\nbind = \"::1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errBuf bytes.Buffer
+	if code := run(context.Background(), []string{"factory", "plan", "apply", plan}, &out, &errBuf); code != 0 {
+		t.Fatalf("plan apply code=%d stderr=%s", code, errBuf.String())
+	}
+	if err := os.Remove(cfgFile); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := lastBody["args"].(map[string]any)
+	if lastPath != "/api/factory/report" || lastBody["token"] != "tok-1" || lastBody["verb"] != "plan apply" || args["tasks"] == nil {
+		t.Fatalf("plan apply sent %s %+v", lastPath, lastBody)
+	}
+
+	if err := os.WriteFile(plan, []byte(`{"tasks":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lastPath = ""
+	if code := run(context.Background(), []string{"factory", "plan", "apply", plan}, &out, &errBuf); code != 1 || lastPath != "" {
+		t.Fatalf("invalid JSON plan: code=%d sent=%q", code, lastPath)
+	}
+
+	if code := run(context.Background(), []string{"factory", "start", home, "--goal", "g"}, &out, &errBuf); code != 0 {
+		t.Fatalf("start code=%d stderr=%s", code, errBuf.String())
+	}
+	if lastPath != "/api/factory/start" || lastBody["token"] != "tok-1" {
+		t.Fatalf("start from a run's terminal sent %s %+v, want the token", lastPath, lastBody)
+	}
+}

@@ -3,9 +3,11 @@ package factory
 import (
 	"cmp"
 	"context"
+	"crypto/rand"
 	_ "embed"
 	"errors"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +29,8 @@ type Engine struct {
 	HC           *hc.Client
 	Log          logging.Logger
 	PassInterval time.Duration
+	Bin          string            // sheepdog binary named in the coordinator prompt
+	RunEnv       map[string]string // added to every run's environment (daemon port)
 
 	mu   sync.Mutex
 	wake chan struct{}
@@ -57,8 +61,10 @@ func (e *Engine) Start(folder, goal string) error {
 	} else if err != nil {
 		return err
 	}
-	if st, err := world.RunState(ctx, e.HC, s.Project.RunID); err == nil && st == flow.RunGone {
-		s.Project.RunID = ""
+	if s.Project.RunID != "" {
+		if st, err := world.RunState(ctx, e.HC, s.Project.RunID); err == nil && st == flow.RunGone {
+			s.Project.RunID, s.Project.RunTokenHash = "", ""
+		}
 	}
 	s.Project.Folder, s.Project.Goal, s.Project.Started = root, goal, true
 	if err := e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "start", "folder": root, "goal": goal}, Rule: "start", Decision: "started", Why: goal}); err != nil {
@@ -86,7 +92,7 @@ func (e *Engine) Stop(project string) error {
 			return err
 		}
 	}
-	s.Project.RunID, s.Project.Started = "", false
+	s.Project.RunID, s.Project.RunTokenHash, s.Project.Started = "", "", false
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "stop"}, Rule: "stop", Decision: "stopped", Why: "stopped by owner"})
 }
 
@@ -133,18 +139,39 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	if !s.Project.Started || s.Project.RunID != "" {
 		return
 	}
-	prompt := strings.TrimSpace(strings.NewReplacer("{folder}", s.Project.Folder, "{goal}", s.Project.Goal).Replace(coordinatorTemplate))
+	prompt := strings.TrimSpace(strings.NewReplacer("{folder}", s.Project.Folder, "{goal}", s.Project.Goal, "{sheepdog}", cmp.Or(e.Bin, "sheepdog")).Replace(coordinatorTemplate))
+	env := maps.Clone(e.RunEnv)
+	if env == nil {
+		env = map[string]string{}
+	}
+	// A live coordinator left by a crash is adopted and keeps its token; else
+	// mint one and save only its hash before the launch (design.md 7.2).
+	rs, err := world.RunState(ctx, e.HC, coordName(id))
+	if err != nil {
+		e.logError("factory.hc_error", id, err)
+		return
+	}
+	if rs == flow.RunGone {
+		tok := rand.Text()
+		s.Project.RunTokenHash = tokenHash(tok)
+		if err := SaveState(e.Paths.State(id), s); err != nil {
+			e.logError("factory.commit_error", id, err)
+			return
+		}
+		env["SHEEPDOG_RUN_TOKEN"] = tok
+	}
 	termID, err := world.StartRun(ctx, e.HC, world.RunSpec{
 		Name:         coordName(id),
 		Cwd:          s.Project.Folder,
 		ClaudeConfig: e.Paths.ClaudeConfig,
 		Argv:         world.ClaudeArgv(flow.RoleCoordinator, "opus", "medium", "bypassPermissions"),
 		Prompt:       prompt,
+		Env:          env,
 		Labels:       map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleCoordinator, "sheepdog.model": "opus"},
 	})
 	line := LogLine{By: "engine", Facts: map[string]any{"coordinator": flow.RunGone}, Rule: "J7", Asked: []string{"coordinator"}}
 	if err != nil {
-		line.Why = err.Error()
+		line.Why, s.Project.RunTokenHash = err.Error(), "" // no run holds the token
 	} else {
 		s.Project.RunID = termID
 		line.Asked, line.Decision, line.Why = []string{"coordinator:" + termID}, "started coordinator", "project started with no coordinator run"
@@ -152,17 +179,21 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	if err := e.commitLocked(id, &s, line); err != nil {
 		e.logError("factory.commit_error", id, err)
 	}
-	// Seam for PR 1.4+: read worktree tips and PR snapshots, evaluate each task
+	// Seam for PR 1.5+: read worktree tips and PR snapshots, evaluate each task
 	// in s.Tasks with flow.FirstMatch, execute actions, and commit.
 }
 
 func coordName(id string) string { return "coord-" + strings.TrimPrefix(id, "proj-") }
 
 func (e *Engine) logError(typ, id string, err error) {
+	e.logEvent(typ, map[string]string{"project": id, "error": err.Error()})
+}
+
+func (e *Engine) logEvent(typ string, fields map[string]string) {
 	if e.Log != nil {
-		e.Log.Log("factory", typ, "", map[string]string{"project": id, "error": err.Error()})
+		e.Log.Log("factory", typ, "", fields)
 	} else {
-		log.Printf("factory: %s (%s): %v", typ, id, err)
+		log.Printf("factory: %s %v", typ, fields)
 	}
 }
 

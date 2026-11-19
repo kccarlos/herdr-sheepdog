@@ -311,6 +311,11 @@ func (a *App) wire() error {
 	}
 	a.factory = factory.New(factory.Paths{DataDir: cfg.DataDir}, factoryHC)
 	a.factory.Log = a.log
+	// A run's `sheepdog factory …` must reach this daemon, whatever config it was started with.
+	a.factory.RunEnv = map[string]string{"SHEEPDOG_WEB_PORT": strconv.Itoa(cfg.Web.Port)}
+	if exe, err := os.Executable(); err == nil {
+		a.factory.Bin = exe
+	}
 	deps.Factory = a.factory
 	srv, err := web.New(deps)
 	if err != nil {

@@ -27,7 +27,7 @@ import (
 type RunSpec struct {
 	Name, Cwd, Prompt, ClaudeConfig string
 	Argv                            []string
-	Labels                          map[string]string
+	Labels, Env                     map[string]string // Env holds secrets: never argv
 }
 
 // ClaudeArgv returns the launch argv for Claude Code across the three roles,
@@ -74,7 +74,7 @@ func StartRun(ctx context.Context, client *hc.Client, spec RunSpec) (string, err
 	labels := map[string]string{"herdr.space": randID(), "herdr.tab": randID(), "herdr.seen": "0"}
 	maps.Copy(labels, spec.Labels)
 	t, err := client.Run(ctx, hc.RunParams{
-		Name: spec.Name, Cwd: spec.Cwd, Argv: argv, Labels: labels,
+		Name: spec.Name, Cwd: spec.Cwd, Argv: argv, Labels: labels, Env: spec.Env,
 		NoParent: true, NoNotify: true,
 	})
 	return t.Address, err

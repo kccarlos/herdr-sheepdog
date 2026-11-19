@@ -227,8 +227,13 @@ func TestRunStateOutageAndChildProcessGroupStop(t *testing.T) {
 	if err := StopRun(ctx, client, "t1"); err != nil {
 		t.Fatalf("StopRun: %v", err)
 	}
-	if !errors.Is(syscall.Kill(leaderPID, 0), syscall.ESRCH) || !errors.Is(syscall.Kill(childPID, 0), syscall.ESRCH) {
-		t.Fatalf("process group not fully dead: leader=%v child=%v", syscall.Kill(leaderPID, 0), syscall.Kill(childPID, 0))
+	// StopRun returns once no process in the group is alive, but a killed child
+	// stays a zombie until launchd/init (its new parent) reaps it, and the
+	// leader until cmd.Wait does: poll, bounded, for both pids to vanish.
+	for deadline := time.Now().Add(5 * time.Second); !errors.Is(syscall.Kill(leaderPID, 0), syscall.ESRCH) || !errors.Is(syscall.Kill(childPID, 0), syscall.ESRCH); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("process group not fully dead: leader=%v child=%v", syscall.Kill(leaderPID, 0), syscall.Kill(childPID, 0))
+		}
 	}
 }
 
