@@ -753,7 +753,12 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	}
 	runFor(eng3, 80*time.Millisecond)
 	if got := len(srv3.Requests()) - reqsBefore; got != 2 {
-		t.Fatalf("failing worker StartRun sent %d hc requests across many passes, want 2 (1 try)", got)
+		lg, _ := os.ReadFile(eng3.Paths.Log(id3))
+		var methods []string
+		for _, r := range srv3.Requests()[reqsBefore:] {
+			methods = append(methods, r.Method)
+		}
+		t.Fatalf("failing worker StartRun sent %d hc requests across many passes, want 2 (1 try): %v\nlog:\n%s", got, methods, lg)
 	}
 	log3, _ := os.ReadFile(eng3.Paths.Log(id3))
 	if lines := strings.Split(strings.TrimSpace(string(log3)), "\n"); len(lines) != 5 {
