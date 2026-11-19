@@ -13,11 +13,11 @@ const (
 // roundBase is the number of the first round (design.md 3: round{n}).
 const roundBase = 1
 
-// LadderRows is slice 1's review ladder: L7, L9 and L13 of design.md 4.6
-// (L8 and review_rounds above 1 are slice 2). A row's Decision.Why is its
-// answer; WaitsOn is who that answer waits on.
+// LadderRows is slice 2's review ladder: L7, L8, L9 and L13 of design.md 4.6.
+// A row's Decision.Why is its answer; WaitsOn is who that answer waits on.
 var LadderRows = []Row[In]{
 	{ID: "L7", WaitsOn: "the reviewer", When: noRoundCovers, Then: answer(Review)},
+	{ID: "L8", WaitsOn: "the reviewer", When: all(coveringIs(VerdictPass), morePassesNeeded), Then: answer(Review)},
 	{ID: "L9", WaitsOn: "the engine", When: coveringIs(VerdictPass), Then: answer(Passed)},
 	{ID: "L13", WaitsOn: "the worker", When: coveringIs(VerdictChanges), Then: answer(Fix)},
 	{ID: "L-", WaitsOn: "the coordinator", Then: answer(NoLadderRow)},
@@ -40,6 +40,20 @@ func coveringIs(verdict string) Clause {
 		r := newestCovering(*in.attempt(), headH(in))
 		return r != nil && r.Verdict == verdict
 	}
+}
+
+func morePassesNeeded(in In) bool {
+	return passingCovering(*in.attempt(), headH(in)) < in.Settings.ReviewRounds
+}
+
+func passingCovering(a Attempt, h string) int {
+	n := 0
+	for _, r := range a.Rounds {
+		if Covers(r.Head, h) && r.Verdict == VerdictPass {
+			n++
+		}
+	}
+	return n
 }
 
 // nextRound is the number the next review round gets.

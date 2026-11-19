@@ -389,15 +389,38 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	return "started worker " + termID, abort, err
 }
 
-// workerModel is the model every worker runs in slice 1.
+// workerModel is the model every worker runs until Resolve (slice 5b).
 const workerModel = "sonnet"
 
-// reviewerModel picks a reviewer model other than the worker's.
-func reviewerModel(worker string) string {
-	if strings.Contains(worker, "opus") {
-		return "sonnet"
+// claudeReviewers is slice 2's ordered reviewer candidate list on Claude Code.
+var claudeReviewers = []string{"opus", "sonnet"} // no haiku: a second pass must be as strong as the first; Codex joins in slice 5b
+
+// nextReviewerModel picks the first candidate other than worker not yet in
+// used, or the first candidate other than worker in a fresh session.
+func nextReviewerModel(worker string, used, candidates []string) string {
+	first := ""
+	for _, c := range candidates {
+		if c == worker {
+			continue
+		}
+		if !slices.Contains(used, c) {
+			return c
+		}
+		if first == "" {
+			first = c
+		}
 	}
-	return "opus"
+	return first
+}
+
+func passingModels(a flow.Attempt, h string) []string {
+	var out []string
+	for _, r := range a.Rounds {
+		if flow.Covers(r.Head, h) && r.Verdict == flow.VerdictPass {
+			out = append(out, r.Reviewer.Model)
+		}
+	}
+	return out
 }
 
 // observeReviewLocked checks an active reviewer run: stops it if its round is
@@ -506,14 +529,34 @@ func (e *Engine) markReviewIdleLocked(id string, s *flow.State, ti int) bool {
 
 func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
-	round, h, model := len(a.Rounds)+1, flow.H(*a), reviewerModel(workerModel)
-	if a.Review == nil || a.Review.Round != round || a.Review.Head != h || a.Review.Code == "" {
-		a.Review = &flow.ReviewRun{Round: round, Head: h, Code: strings.ToLower(rand.Text()[:10]), Reviewer: flow.Reviewer{CLI: "claude", Model: model, Effort: "medium"}}
+	round, h := len(a.Rounds)+1, flow.H(*a)
+	name, model := reviewerName(id, t.ID, len(t.Attempts), round), nextReviewerModel(workerModel, passingModels(*a, h), claudeReviewers)
+	if e.HC != nil {
+		if term, err := e.HC.Get(ctx, name); err == nil && term.State == "live" {
+			if a.Review == nil || a.Review.Round != round || a.Review.Head != h || a.Review.Code == "" {
+				a.Review = &flow.ReviewRun{Round: round, Kind: flow.RoundFull, Head: h, Code: strings.ToLower(rand.Text()[:10]), Reviewer: flow.Reviewer{CLI: "claude", Model: model, Effort: "medium"}}
+			}
+			a.Review.RunID = term.Address
+			return fmt.Sprintf("started reviewer %s (round %d, %s, %s)", term.Address, round, cmp.Or(a.Review.Kind, flow.RoundFull), a.Review.Reviewer.Model), false, nil
+		} else if err != nil && !errors.Is(err, hc.ErrNotFound) {
+			e.logError("factory.hc_error", id, err)
+			return "", true, err
+		}
 	}
+	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
+	kind, diff, err := reviewDiffPrompt(gctx, *a, h)
+	cancel()
+	if err != nil {
+		return "", false, err
+	}
+	if a.Review == nil || a.Review.Round != round || a.Review.Head != h || a.Review.Code == "" {
+		a.Review = &flow.ReviewRun{Round: round, Kind: kind, Head: h, Code: strings.ToLower(rand.Text()[:10]), Reviewer: flow.Reviewer{CLI: "claude", Model: model, Effort: "medium"}}
+	}
+	model, kind = a.Review.Reviewer.Model, cmp.Or(a.Review.Kind, kind)
 	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
-		"{outcomes}", bullets(t.Outcomes), "{base}", a.BaseCommit, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code).Replace(reviewerTemplate))
+		"{outcomes}", bullets(t.Outcomes), "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code).Replace(reviewerTemplate))
 	termID, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, world.RunSpec{
-		Name: reviewerName(id, t.ID, len(t.Attempts), round), Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
+		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
 		Argv: world.ClaudeArgv(flow.RoleReviewer, model, "medium", "dontAsk"), Prompt: prompt,
 		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleReviewer, "sheepdog.task": t.ID, "sheepdog.model": model},
 	})
@@ -524,7 +567,31 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		return "", abort, err
 	}
 	a.Review.RunID = termID
-	return fmt.Sprintf("started reviewer %s (round %d)", termID, round), abort, nil
+	return fmt.Sprintf("started reviewer %s (round %d, %s, %s)", termID, round, kind, model), abort, nil
+}
+
+func reviewDiffPrompt(ctx context.Context, a flow.Attempt, head string) (kind, diff string, err error) {
+	var rel flow.Rel
+	if n := len(a.Rounds); n > 0 && !flow.Covers(a.Rounds[n-1].Head, head) {
+		rel, _ = world.Relation(ctx, a.Worktree, a.Rounds[n-1].Head, head)
+	}
+	kind, since := flow.RoundKind(a, head, rel)
+	if kind == flow.RoundDelta {
+		ranges, err := world.DeltaRanges(ctx, a.Worktree, since, head)
+		if err != nil {
+			return "", "", err
+		}
+		cmds := make([]string, len(ranges))
+		for i, r := range ranges {
+			cmds[i] = "`git diff " + r + "`"
+		}
+		return kind, fmt.Sprintf("delta changes since %s (%s)", since, strings.Join(cmds, ", ")), nil
+	}
+	mb, err := world.MergeBase(ctx, a.Worktree, head)
+	if err != nil {
+		return "", "", err
+	}
+	return kind, fmt.Sprintf("full changes against merge base %s (`git diff %s..%s`)", mb, mb, head), nil
 }
 
 func (e *Engine) execTellFindings(ctx context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {

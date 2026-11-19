@@ -132,7 +132,10 @@ func TestNoChecksNeverMerges(t *testing.T) {
 		}
 		p.HeadRel = flow.RelSame
 		task := flow.Task{ID: "t1", Attempts: []flow.Attempt{{BaseCommit: "b0", Ready: []flow.Ready{{Head: p.Head}},
-			Rounds: []flow.Round{{N: 1, Head: p.Head, Verdict: flow.VerdictPass}}}}}
+			Rounds: []flow.Round{
+				{N: 1, Head: p.Head, Verdict: flow.VerdictPass},
+				{N: 2, Head: p.Head, Verdict: flow.VerdictPass},
+			}}}}
 		for _, age := range []time.Duration{time.Minute, time.Hour} {
 			p.HeadSince = now.Add(-age)
 			in := flow.In{Task: task, Settings: flow.DefaultSettings(), Now: now,

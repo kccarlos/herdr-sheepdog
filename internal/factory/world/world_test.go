@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -927,5 +928,226 @@ func TestClaudeArgvNeverSwallowsPrompt(t *testing.T) {
 				t.Errorf("%s: %q is a separate argument; use --flag=value so the prompt is not swallowed: %q", mode, a, argv)
 			}
 		}
+	}
+}
+
+// TestReviewRangesExcludeMergedBaseChanges checks design.md 9.4, KB-REV-12 and
+// KB-REV-13 on a temporary repo where the remote base advances and is merged
+// into the task branch: both full (MergeBase..H) and delta (DeltaRanges) diffs
+// contain only the task's own changes and leave out what the base brought in.
+func TestReviewRangesExcludeMergedBaseChanges(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	bare := filepath.Join(tmp, "remote.git")
+	if out, err := exec.Command("git", "init", "--bare", "--initial-branch=main", bare).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v: %s", err, out)
+	}
+	repo := filepath.Join(tmp, "repo")
+	if out, err := exec.Command("git", "init", "--initial-branch=main", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init repo: %v: %s", err, out)
+	}
+	runGit(t, repo, "remote", "add", "origin", bare)
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("v0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "commit", "-m", "chore: b0")
+	runGit(t, repo, "push", "-u", "origin", "main")
+	b0 := runGit(t, repo, "rev-parse", "HEAD")
+
+	wt, err := NewWorktree(ctx, repo, filepath.Join(tmp, "wt-1"), "t1", "feat: task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "task.go"), []byte("package demo\nvar V = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wt.Path, "add", "task.go")
+	runGit(t, wt.Path, "commit", "-m", "feat: c1")
+	c1 := runGit(t, wt.Path, "rev-parse", "HEAD")
+
+	// Remote base advances to b1 in another clone (unmerged so far).
+	other := filepath.Join(tmp, "other")
+	if out, err := exec.Command("git", "clone", bare, other).CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(other, "base_only.go"), []byte("package demo\nvar Base = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "add", "base_only.go")
+	runGit(t, other, "commit", "-m", "feat: base b1")
+	runGit(t, other, "push", "origin", "main")
+	b1 := runGit(t, other, "rev-parse", "HEAD")
+
+	// Full round at c1 while base is ahead at b1: merge base is still b0.
+	if mb, err := MergeBase(ctx, wt.Path, c1); err != nil || mb != b0 {
+		t.Fatalf("MergeBase(c1) = (%s, %v), want %s", mb, err, b0)
+	}
+
+	// Worker commits c2a, fetches and merges origin/main (b1) as m1, then commits c2b;
+	// meanwhile remote base advances again to b2.
+	if err := os.WriteFile(filepath.Join(wt.Path, "pre.go"), []byte("package demo\nvar Pre = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wt.Path, "add", "pre.go")
+	runGit(t, wt.Path, "commit", "-m", "fix: pre merge")
+	c2a := runGit(t, wt.Path, "rev-parse", "HEAD")
+
+	runGit(t, wt.Path, "fetch", "origin")
+	runGit(t, wt.Path, "merge", "--no-edit", "origin/main")
+	m1 := runGit(t, wt.Path, "rev-parse", "HEAD")
+
+	if err := os.WriteFile(filepath.Join(wt.Path, "task.go"), []byte("package demo\nvar V = 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wt.Path, "commit", "-am", "fix: post merge")
+	c2b := runGit(t, wt.Path, "rev-parse", "HEAD")
+
+	if err := os.WriteFile(filepath.Join(other, "base_later.go"), []byte("package demo\nvar Later = 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "add", "base_later.go")
+	runGit(t, other, "commit", "-m", "feat: base b2")
+	runGit(t, other, "push", "origin", "main")
+
+	// Delta from c1 to m1 (fix then merge): [c1..c2a], no base_only.go.
+	r1, err := DeltaRanges(ctx, wt.Path, c1, m1)
+	if err != nil || !slices.Equal(r1, []string{c1 + ".." + c2a}) {
+		t.Fatalf("DeltaRanges(c1, m1) = (%v, %v), want [%s..%s]", r1, err, c1, c2a)
+	}
+
+	// Delta from c1 to c2b (fix, merge, fix): [c1..c2a, m1..c2b], leaving out b1 and b2.
+	ranges, err := DeltaRanges(ctx, wt.Path, c1, c2b)
+	if err != nil || !slices.Equal(ranges, []string{c1 + ".." + c2a, m1 + ".." + c2b}) {
+		t.Fatalf("DeltaRanges(c1, c2b) = (%v, %v)", ranges, err)
+	}
+	var deltaDiff strings.Builder
+	for _, r := range ranges {
+		deltaDiff.WriteString(runGit(t, wt.Path, "diff", r) + "\n")
+	}
+	for _, bad := range []string{"base_only.go", "base_later.go", "+var V = 1"} {
+		if strings.Contains(deltaDiff.String(), bad) {
+			t.Errorf("delta diff leaked %q:\n%s", bad, deltaDiff.String())
+		}
+	}
+	for _, want := range []string{"pre.go", "-var V = 1", "+var V = 2"} {
+		if !strings.Contains(deltaDiff.String(), want) {
+			t.Errorf("delta diff missing %q:\n%s", want, deltaDiff.String())
+		}
+	}
+
+	// Full at c2b (L8 second pass): MergeBase computed now is b1, leaving out b1 and b2.
+	mb, err := MergeBase(ctx, wt.Path, c2b)
+	if err != nil || mb != b1 {
+		t.Fatalf("MergeBase(c2b) = (%s, %v), want %s", mb, err, b1)
+	}
+	fullDiff := runGit(t, wt.Path, "diff", mb+".."+c2b)
+	for _, bad := range []string{"base_only.go", "base_later.go"} {
+		if strings.Contains(fullDiff, bad) {
+			t.Errorf("full diff leaked %q:\n%s", bad, fullDiff)
+		}
+	}
+	for _, want := range []string{"pre.go", "+var V = 2"} {
+		if !strings.Contains(fullDiff, want) {
+			t.Errorf("full diff missing %q:\n%s", want, fullDiff)
+		}
+	}
+}
+
+// TestDeltaRangesIncludesHandEditedBaseMerge checks design.md 3.1: a merge of
+// the remote base is merge_only only when its tree equals git's own merge of
+// its parents; a conflicting base merge resolved by hand or a merge with extra
+// edits stays in the delta range so its edits are reviewed.
+func TestDeltaRangesIncludesHandEditedBaseMerge(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	bare := filepath.Join(tmp, "remote.git")
+	if out, err := exec.Command("git", "init", "--bare", "--initial-branch=main", bare).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v: %s", err, out)
+	}
+	repo := filepath.Join(tmp, "repo")
+	if out, err := exec.Command("git", "init", "--initial-branch=main", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init repo: %v: %s", err, out)
+	}
+	runGit(t, repo, "remote", "add", "origin", bare)
+	if err := os.WriteFile(filepath.Join(repo, "shared.go"), []byte("package demo\nvar Shared = \"v0\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "shared.go")
+	runGit(t, repo, "commit", "-m", "chore: b0")
+	runGit(t, repo, "push", "-u", "origin", "main")
+
+	wt, err := NewWorktree(ctx, repo, filepath.Join(tmp, "wt-1"), "t1", "feat: task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "shared.go"), []byte("package demo\nvar Shared = \"worker-c1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wt.Path, "commit", "-am", "feat: c1")
+	c1 := runGit(t, wt.Path, "rev-parse", "HEAD")
+
+	// Remote base makes a conflicting edit to shared.go at b1.
+	other := filepath.Join(tmp, "other")
+	if out, err := exec.Command("git", "clone", bare, other).CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(other, "shared.go"), []byte("package demo\nvar Shared = \"base-b1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "commit", "-am", "feat: base conflict b1")
+	runGit(t, other, "push", "origin", "main")
+
+	// Worker merges origin/main, hits conflict, and resolves it by hand as m1.
+	runGit(t, wt.Path, "fetch", "origin")
+	// Same identity env as runGit: on a machine with no global git identity
+	// (CI) a bare merge fails before merging, and the test would then build
+	// a plain commit instead of a merge (seen in CI).
+	merge := exec.Command("git", "-C", wt.Path, "merge", "origin/main")
+	merge.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
+	if out, err := merge.CombinedOutput(); err == nil || !strings.Contains(string(out), "CONFLICT") {
+		t.Fatalf("expected a merge conflict on shared.go, got err=%v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "shared.go"), []byte("package demo\nvar Shared = \"hand-resolved\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wt.Path, "add", "shared.go")
+	runGit(t, wt.Path, "commit", "-m", "merge: resolve shared.go")
+	m1 := runGit(t, wt.Path, "rev-parse", "HEAD")
+
+	ranges, err := DeltaRanges(ctx, wt.Path, c1, m1)
+	if err != nil || !slices.Equal(ranges, []string{c1 + ".." + m1}) {
+		t.Fatalf("DeltaRanges(c1, m1) = (%v, %v), want [%s..%s]", ranges, err, c1, m1)
+	}
+	diff := runGit(t, wt.Path, "diff", ranges[0])
+	if !strings.Contains(diff, `+var Shared = "hand-resolved"`) {
+		t.Fatalf("delta diff missing conflict resolution:\n%s", diff)
+	}
+
+	// Extra hand edit inside an otherwise clean base merge m2 also stays in the delta.
+	if err := os.WriteFile(filepath.Join(other, "base2.go"), []byte("package demo\nvar Base2 = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "add", "base2.go")
+	runGit(t, other, "commit", "-m", "feat: base b2")
+	runGit(t, other, "push", "origin", "main")
+
+	runGit(t, wt.Path, "fetch", "origin")
+	runGit(t, wt.Path, "merge", "--no-commit", "--no-ff", "origin/main")
+	if err := os.WriteFile(filepath.Join(wt.Path, "smuggled.go"), []byte("package demo\nvar Smuggled = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wt.Path, "add", "smuggled.go")
+	runGit(t, wt.Path, "commit", "-m", "merge: with extra edit")
+	m2 := runGit(t, wt.Path, "rev-parse", "HEAD")
+
+	ranges2, err := DeltaRanges(ctx, wt.Path, m1, m2)
+	if err != nil || !slices.Equal(ranges2, []string{m1 + ".." + m2}) {
+		t.Fatalf("DeltaRanges(m1, m2) = (%v, %v), want [%s..%s]", ranges2, err, m1, m2)
+	}
+	if diff2 := runGit(t, wt.Path, "diff", ranges2[0]); !strings.Contains(diff2, "smuggled.go") {
+		t.Fatalf("delta diff missing extra merge edit:\n%s", diff2)
 	}
 }

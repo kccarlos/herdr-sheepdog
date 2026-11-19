@@ -20,17 +20,17 @@ type Settings struct {
 // Range limits for each setting.
 const (
 	ReviewRoundsMin = 1
-	ReviewRoundsMax = 1 // slice 2 raises it to 5 with L8
+	ReviewRoundsMax = 5
 	ChecksGraceMin  = 1
 	ChecksGraceMax  = 60
 	StuckMin        = 5
 	StuckMax        = 240
 )
 
-// DefaultSettings are the skeleton's defaults: one passing round
-// (plan.md slice 1; slice 2 sets the owner's two).
+// DefaultSettings are slice 2's defaults: two passing rounds on the final head
+// (design.md 10.1, D12).
 func DefaultSettings() Settings {
-	return Settings{ReviewRounds: 1, ChecksGraceMinutes: 5, StuckMinutes: 30}
+	return Settings{ReviewRounds: 2, ChecksGraceMinutes: 5, StuckMinutes: 30}
 }
 
 // Changed lists every setting that differs from its default as "name

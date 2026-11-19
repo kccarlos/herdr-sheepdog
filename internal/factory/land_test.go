@@ -66,8 +66,11 @@ func newLanding(t *testing.T) *landing {
 		s.Project.RunID = "coord-elsewhere" // the coordinator is not this test's business
 		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: x", Attempts: []flow.Attempt{{
 			BaseCommit: base, Branch: l.branch, Worktree: l.wt, PR: 7, RunID: l.worker,
-			Ready:   []flow.Ready{{Head: l.c1}},
-			Rounds:  []flow.Round{{N: 1, Kind: "full", Head: l.c1, Verdict: flow.VerdictPass}},
+			Ready: []flow.Ready{{Head: l.c1}},
+			Rounds: []flow.Round{
+				{N: 1, Kind: "full", Head: l.c1, Verdict: flow.VerdictPass},
+				{N: 2, Kind: "full", Head: l.c1, Verdict: flow.VerdictPass},
+			},
 			Accepts: []flow.Accept{}, Acts: []flow.Act{},
 		}}}}
 	})
@@ -130,7 +133,7 @@ func TestLandMergesOncePinnedDoneOnlyOnMergedSnapshot(t *testing.T) {
 	l := newLanding(t)
 	l.pass()
 	a := l.state().Tasks[0].Attempts[0]
-	if len(a.Accepts) != 1 || a.Accepts[0].Head != l.c1 || a.Accepts[0].By != "bar" || !slices.Equal(a.Accepts[0].Rounds, []int{1}) ||
+	if len(a.Accepts) != 1 || a.Accepts[0].Head != l.c1 || a.Accepts[0].By != "bar" || !slices.Equal(a.Accepts[0].Rounds, []int{1, 2}) ||
 		!flow.Done(a.Acts, "record_accept@"+l.c1) || !flow.Done(a.Acts, "merge@"+l.c1) {
 		t.Fatalf("after N42: accepts=%+v acts=%+v", a.Accepts, a.Acts)
 	}

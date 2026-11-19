@@ -908,14 +908,15 @@ func TestStartClearsFailedActs(t *testing.T) {
 	}
 }
 
-// TestEngineReviewLoopChangesThenPass checks KB-REV-5, KB-REV-53, KB-REV-63 and
-// the end-to-end review ladder in the engine loop:
-// round 1 starts opus reviewer in plan mode with code1 -> mid-tag/echo-only reads
-// wait -> invalid code logged once without burning the round -> valid changes
-// verdict writes T1-r1.md and stops reviewer 1 -> N22 tells worker findings once ->
-// worker commits c2 and reports ready -> N26 pushes c2 -> N29 starts round 2
-// reviewer with fresh code2 -> valid pass verdict stops reviewer 2 and moves past
-// the ladder into N36 (checks pending) and N42 (accept and merge at c2).
+// TestEngineReviewLoopChangesThenPass checks KB-REV-5, KB-REV-12, KB-REV-13,
+// KB-REV-53, KB-REV-63 and slice 2's two-round ladder (L8, D12):
+// round 1 starts opus on a full diff -> invalid code does not burn the round ->
+// valid changes verdict writes T1-r1.md and stops rev1 -> N22 tells worker ->
+// remote base advances and is merged into the branch before fix commit c2 ->
+// round 2 reviews c2 as a delta (leaving out the base merge) on opus and passes ->
+// L8 holds (does not merge after 1 pass even with green CI) and starts round 3
+// as a fresh full review from the updated merge base on the same strong model in a fresh session (opus) ->
+// round 3 passes -> N36 while CI pending -> N42 accepts rounds [2, 3] and merges.
 func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	ctx := context.Background()
 	srv := hctest.New(t)
@@ -923,7 +924,8 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { runs = append(runs, p) }
 	client := hc.NewClient(srv.Path)
 	paths := testPaths(t)
-	repo, _ := initGitRepoWithRemote(t)
+	repo, b0 := initGitRepoWithRemote(t)
+	bare := gitIn(t, repo, "config", "--get", "remote.origin.url")
 	githubOrigin(t, repo)
 	gh := installFakeGH(t)
 
@@ -951,7 +953,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	workerTerm := st.Tasks[0].Attempts[0].RunID
 	srv.SetStatus(workerTerm, &hc.Status{App: "claude-code", State: "idle"})
 
-	// Worker commits c1, reports ready -> N26 opens PR -> N29 starts round 1 reviewer.
+	// Worker commits c1, reports ready -> N26 opens PR -> N29 starts round 1 reviewer (full, opus).
 	if err := os.WriteFile(filepath.Join(wt, "greet.go"), []byte("package demo\nfunc Greet(s string) string { return s }\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -967,8 +969,11 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 
 	st, _ = LoadState(paths.State(id))
 	rev1 := st.Tasks[0].Attempts[0].Review
-	if rev1 == nil || rev1.Round != 1 || rev1.Head != c1 || rev1.Code == "" {
+	if rev1 == nil || rev1.Round != 1 || rev1.Kind != flow.RoundFull || rev1.Head != c1 || rev1.Code == "" || rev1.Reviewer.Model != "opus" {
 		t.Fatalf("round 1 review = %+v", rev1)
+	}
+	if p1 := runs[len(runs)-1].Argv[len(runs[len(runs)-1].Argv)-1]; !strings.Contains(p1, "Review round 1 (full)") || !strings.Contains(p1, "`git diff "+b0+".."+c1+"`") {
+		t.Fatalf("round 1 prompt = %s", p1)
 	}
 	rev1Term, code1 := rev1.RunID, rev1.Code
 
@@ -999,7 +1004,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	eng.passProject(ctx, id, false) // accepts verdict & stops rev1
 	st, _ = LoadState(paths.State(id))
 	att := st.Tasks[0].Attempts[0]
-	if att.Review != nil || len(att.Rounds) != 1 || att.Rounds[0].Verdict != "changes" || att.Rounds[0].Majors != 1 {
+	if att.Review != nil || len(att.Rounds) != 1 || att.Rounds[0].Kind != flow.RoundFull || att.Rounds[0].Verdict != "changes" || att.Rounds[0].Majors != 1 {
 		t.Fatalf("after round 1 changes: review=%+v rounds=%+v", att.Review, att.Rounds)
 	}
 	if b, err := os.ReadFile(att.Rounds[0].ReportPath); err != nil || !strings.Contains(string(b), "## Findings\n\nmajor: Greet(\"\") returns \"hello, \"\n") {
@@ -1019,7 +1024,22 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 		t.Fatalf("N22 worker sends = %q", sends)
 	}
 
-	// Worker fixes finding, commits c2, reports ready -> N26 pushes c2 -> N29 starts round 2 with fresh code.
+	// Advance remote main to b1, merge it into wt as m1, then commit fix c2 and report ready.
+	other := filepath.Join(t.TempDir(), "other")
+	if out, err := exec.Command("git", "clone", bare, other).CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(other, "base_only.go"), []byte("package demo\nvar Base = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, other, "add", "base_only.go")
+	gitIn(t, other, "commit", "-m", "feat: base advance")
+	gitIn(t, other, "push", "origin", "main")
+	b1 := gitIn(t, other, "rev-parse", "HEAD")
+
+	gitIn(t, wt, "fetch", "origin")
+	gitIn(t, wt, "merge", "--no-edit", "origin/main")
+	m1 := gitIn(t, wt, "rev-parse", "HEAD")
 	if err := os.WriteFile(filepath.Join(wt, "greet.go"), []byte("package demo\nfunc Greet(s string) string { if s == \"\" { return \"hello\" }; return s }\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1030,34 +1050,68 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	}
 	writePRJSON(t, gh, "view.json", c1, `[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]`)
 	eng.passProject(ctx, id, false) // N26 pushes c2 (PR head was behind H)
-	writePRJSON(t, gh, "view.json", c2, `[{"__typename":"CheckRun","name":"ci","status":"IN_PROGRESS","conclusion":""}]`)
-	eng.passProject(ctx, id, false) // N29 starts round 2 reviewer at c2
+	writePRJSON(t, gh, "view.json", c2, `[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]`)
+	eng.passProject(ctx, id, false) // N29 starts round 2 reviewer (delta, opus) at c2
 
 	st, _ = LoadState(paths.State(id))
 	rev2 := st.Tasks[0].Attempts[0].Review
-	if rev2 == nil || rev2.Round != 2 || rev2.Head != c2 || rev2.Code == "" || rev2.Code == code1 || rev2.RunID == rev1Term {
+	if rev2 == nil || rev2.Round != 2 || rev2.Kind != flow.RoundDelta || rev2.Head != c2 || rev2.Code == "" || rev2.Code == code1 || rev2.RunID == rev1Term || rev2.Reviewer.Model != "opus" {
 		t.Fatalf("round 2 review = %+v (code1=%s rev1=%s)", rev2, code1, rev1Term)
+	}
+	p2 := runs[len(runs)-1].Argv[len(runs[len(runs)-1].Argv)-1]
+	if !strings.Contains(p2, "Review round 2 (delta)") || !strings.Contains(p2, "`git diff "+m1+".."+c2+"`") || strings.Contains(p2, c1+".."+c2) {
+		t.Fatalf("round 2 delta prompt did not exclude base merge:\n%s", p2)
 	}
 	rev2Term, code2 := rev2.RunID, rev2.Code
 
-	// Round 2 reviewer passes at c2 -> recorded, rev2 stopped, ladder says passed -> N36 while CI pending, then N42 when CI green.
+	// Round 2 passes at c2 -> even with green CI, 1 pass does NOT merge (L8 asks round 3).
 	srv.SetScreen(rev2Term, "❯ prompt\n\n⏺ Clean fix.\n<report>{\"code\":\""+code2+"\",\"round\":2,\"head\":\""+c2+"\",\"verdict\":\"pass\",\"majors\":0,\"findings\":[]}</report>\n")
 	srv.SetStatus(rev2Term, &hc.Status{App: "claude-code", State: "done"})
 	eng.passProject(ctx, id, false) // accepts round 2 pass verdict & stops rev2
 	if rs, err := world.RunState(ctx, client, rev2Term); err != nil || rs != flow.RunGone {
 		t.Fatalf("rev2 not stopped after pass verdict: state=%s err=%v", rs, err)
 	}
+	if m := ghCalls(t, gh, "pr merge"); len(m) != 0 {
+		t.Fatalf("merged after only one passing round: %q", m)
+	}
 
-	eng.passProject(ctx, id, false) // CI pending -> N36 (waits quietly)
+	// Next pass lands on N29 via L8: starts round 3 (full, opus in a fresh session) from updated merge base b1.
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	rev3 := st.Tasks[0].Attempts[0].Review
+	if rev3 == nil || rev3.Round != 3 || rev3.Kind != flow.RoundFull || rev3.Head != c2 || rev3.Code == "" || rev3.Code == code2 || rev3.Reviewer.Model != "opus" {
+		t.Fatalf("round 3 review = %+v", rev3)
+	}
+	r3Run := runs[len(runs)-1]
+	p3 := r3Run.Argv[len(r3Run.Argv)-1]
+	if r3Run.Labels["sheepdog.model"] != "opus" || !slices.Contains(r3Run.Argv, "opus") ||
+		!strings.Contains(p3, "Review round 3 (full)") || !strings.Contains(p3, "`git diff "+b1+".."+c2+"`") || strings.Contains(p3, b0+".."+c2) {
+		t.Fatalf("round 3 argv/prompt = %v\n%s", r3Run.Argv, p3)
+	}
+	rev3Term, code3 := rev3.RunID, rev3.Code
+
+	// Round 3 passes -> N36 while CI pending -> N42 when CI green, recording rounds [2, 3].
+	writePRJSON(t, gh, "view.json", c2, `[{"__typename":"CheckRun","name":"ci","status":"IN_PROGRESS","conclusion":""}]`)
+	srv.SetScreen(rev3Term, "❯ prompt\n\n⏺ Confirmed.\n<report>{\"code\":\""+code3+"\",\"round\":3,\"head\":\""+c2+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
+	srv.SetStatus(rev3Term, &hc.Status{App: "claude-code", State: "done"})
+	eng.passProject(ctx, id, false) // accepts round 3 pass & stops rev3
+	eng.passProject(ctx, id, false) // CI pending -> N36
+	if m := ghCalls(t, gh, "pr merge"); len(m) != 0 {
+		t.Fatalf("merged while CI pending: %q", m)
+	}
 	writePRJSON(t, gh, "view.json", c2, `[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]`)
 	logBuf.Reset()
-	eng.passProject(ctx, id, false) // CI green + worker idle + passed -> N42 (record_accept & merge)
+	eng.passProject(ctx, id, false) // CI green + worker idle + 2 passes -> N42
 
 	st, _ = LoadState(paths.State(id))
 	att = st.Tasks[0].Attempts[0]
-	if len(att.Rounds) != 2 || att.Rounds[1].Verdict != "pass" || !flow.Done(att.Acts, "record_accept@"+c2) || !flow.Done(att.Acts, "merge@"+c2) ||
-		len(att.Accepts) != 1 || att.Accepts[0].Head != c2 || !slices.Equal(att.Accepts[0].Rounds, []int{2}) {
-		t.Fatalf("after round 2 pass + green CI: rounds=%+v acts=%+v accepts=%+v", att.Rounds, att.Acts, att.Accepts)
+	if len(att.Rounds) != 3 ||
+		att.Rounds[0].Kind != flow.RoundFull || att.Rounds[0].Reviewer.Model != "opus" ||
+		att.Rounds[1].Kind != flow.RoundDelta || att.Rounds[1].Reviewer.Model != "opus" || att.Rounds[1].Verdict != "pass" ||
+		att.Rounds[2].Kind != flow.RoundFull || att.Rounds[2].Reviewer.Model != "opus" || att.Rounds[2].Verdict != "pass" ||
+		!flow.Done(att.Acts, "record_accept@"+c2) || !flow.Done(att.Acts, "merge@"+c2) ||
+		len(att.Accepts) != 1 || att.Accepts[0].Head != c2 || !slices.Equal(att.Accepts[0].Rounds, []int{2, 3}) {
+		t.Fatalf("after 2 passing rounds + green CI: rounds=%+v acts=%+v accepts=%+v", att.Rounds, att.Acts, att.Accepts)
 	}
 	if m := ghCalls(t, gh, "pr merge"); len(m) != 1 || !strings.HasPrefix(m[0], "pr merge 7 --repo acme/demo --squash --match-head-commit "+c2+" --body ") {
 		t.Fatalf("merge calls = %q", m)
@@ -1204,14 +1258,213 @@ func testVoidReview(t *testing.T, dirty bool) {
 	}
 }
 
-// TestReviewerModelDiffersFromWorker: the reviewer never runs the worker's model.
+// TestEngineRebaseAfterReviewedCommitFallsBackToFull checks design.md 4.6 and
+// 9.4: when the last reviewed commit is not an ancestor of H (rebase onto an
+// advanced base), both DeltaRanges and the engine fall back to a full round
+// from the merge base computed now, with none of the base's new commits shown
+// as the worker's.
+func TestEngineRebaseAfterReviewedCommitFallsBackToFull(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	var runs []hc.RunParams
+	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { runs = append(runs, p) }
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, b0 := initGitRepoWithRemote(t)
+	bare := gitIn(t, repo, "config", "--get", "remote.origin.url")
+	githubOrigin(t, repo)
+	gh := installFakeGH(t)
+
+	eng := New(paths, client)
+	if err := eng.Start(repo, "Goal"); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	eng.passProject(ctx, id, false)
+	st, _ := LoadState(paths.State(id))
+	st.Tasks = []flow.Task{{ID: "T1", Title: "feat: task"}}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N11
+	eng.passProject(ctx, id, false) // N23
+	st, _ = LoadState(paths.State(id))
+	wt := st.Tasks[0].Attempts[0].Worktree
+
+	// Commit c1 and finish round 1 with changes.
+	if err := os.WriteFile(filepath.Join(wt, "task.go"), []byte("package demo\nvar V = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "add", "task.go")
+	gitIn(t, wt, "commit", "-m", "feat: c1")
+	c1 := gitIn(t, wt, "rev-parse", "HEAD")
+	writePRJSON(t, gh, "pr.json", c1, "[]")
+	st.Tasks[0].Attempts[0].Ready = []flow.Ready{{Head: c1}}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N26
+	eng.passProject(ctx, id, false) // N29 round 1
+	st, _ = LoadState(paths.State(id))
+	rev1 := st.Tasks[0].Attempts[0].Review
+	srv.SetScreen(rev1.RunID, "❯ prompt\n\n⏺ major: V should be 2\n<report>{\"code\":\""+rev1.Code+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":1}</report>\n")
+	srv.SetStatus(rev1.RunID, &hc.Status{App: "claude-code", State: "done"})
+	eng.passProject(ctx, id, false) // records round 1 changes at c1
+	eng.passProject(ctx, id, false) // N22 tells worker findings
+
+	// Remote base advances to b1 with base_only.go; worker rebases onto b1 and commits fix c2.
+	other := filepath.Join(t.TempDir(), "other")
+	if out, err := exec.Command("git", "clone", bare, other).CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(other, "base_only.go"), []byte("package demo\nvar Base = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, other, "add", "base_only.go")
+	gitIn(t, other, "commit", "-m", "feat: base b1")
+	gitIn(t, other, "push", "origin", "main")
+	b1 := gitIn(t, other, "rev-parse", "HEAD")
+
+	gitIn(t, wt, "fetch", "origin")
+	gitIn(t, wt, "rebase", "origin/main")
+	if err := os.WriteFile(filepath.Join(wt, "task.go"), []byte("package demo\nvar V = 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "commit", "-am", "fix: set V = 2")
+	c2 := gitIn(t, wt, "rev-parse", "HEAD")
+
+	// DeltaRanges on diverged (c1, c2) agrees: full range b1..c2 with no base_only.go.
+	dr, err := world.DeltaRanges(ctx, wt, c1, c2)
+	if err != nil || !slices.Equal(dr, []string{b1 + ".." + c2}) {
+		t.Errorf("DeltaRanges(c1, c2) after rebase = (%v, %v), want [%s..%s]", dr, err, b1, c2)
+	} else if diff := gitIn(t, wt, "diff", dr[0]); strings.Contains(diff, "base_only.go") || !strings.Contains(diff, "+var V = 2") {
+		t.Errorf("DeltaRanges diff after rebase = %s", diff)
+	}
+
+	// Engine starts round 2 at rebased H = c2: must be full against b1..c2, never delta or b0..c2.
+	st, _ = LoadState(paths.State(id))
+	st.Tasks[0].Attempts[0].Ready = append(st.Tasks[0].Attempts[0].Ready, flow.Ready{Head: c2})
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	writePRJSON(t, gh, "view.json", c2, "[]")
+	eng.passProject(ctx, id, false) // N29 round 2
+	st, _ = LoadState(paths.State(id))
+	rev2 := st.Tasks[0].Attempts[0].Review
+	if rev2 == nil || rev2.Round != 2 || rev2.Kind != flow.RoundFull {
+		t.Fatalf("round 2 after rebase = %+v, want round 2 full", rev2)
+	}
+	p2 := runs[len(runs)-1].Argv[len(runs[len(runs)-1].Argv)-1]
+	if !strings.Contains(p2, "Review round 2 (full)") || !strings.Contains(p2, "`git diff "+b1+".."+c2+"`") ||
+		strings.Contains(p2, b0+".."+c2) || strings.Contains(p2, c1+".."+c2) {
+		t.Fatalf("round 2 prompt after rebase:\n%s", p2)
+	}
+	if diff := gitIn(t, wt, "diff", b1+".."+c2); strings.Contains(diff, "base_only.go") || !strings.Contains(diff, "+var V = 2") {
+		t.Fatalf("round 2 range diff:\n%s", diff)
+	}
+}
+
+// TestEngineReuseReviewerSkipsGitWork checks that adopting an already-running
+// reviewer for the round performs no git fetch or range calculation under the lock.
+func TestEngineReuseReviewerSkipsGitWork(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	var runs []hc.RunParams
+	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { runs = append(runs, p) }
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, _ := initGitRepoWithRemote(t)
+	bare := gitIn(t, repo, "config", "--get", "remote.origin.url")
+	githubOrigin(t, repo)
+	gh := installFakeGH(t)
+
+	var logBuf bytes.Buffer
+	eng := New(paths, client)
+	eng.Log = logging.NewJSONLLogger(&logBuf)
+	if err := eng.Start(repo, "Goal"); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	eng.passProject(ctx, id, false)
+	st, _ := LoadState(paths.State(id))
+	st.Tasks = []flow.Task{{ID: "T1", Title: "feat: x"}}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N11
+	eng.passProject(ctx, id, false) // N23
+	st, _ = LoadState(paths.State(id))
+	wt := st.Tasks[0].Attempts[0].Worktree
+	if err := os.WriteFile(filepath.Join(wt, "x.go"), []byte("package demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "add", "x.go")
+	gitIn(t, wt, "commit", "-m", "feat: c1")
+	c1 := gitIn(t, wt, "rev-parse", "HEAD")
+	writePRJSON(t, gh, "pr.json", c1, "[]")
+	st.Tasks[0].Attempts[0].Ready = []flow.Ready{{Head: c1}}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N26
+	eng.passProject(ctx, id, false) // N29 starts round 1 reviewer
+	st, _ = LoadState(paths.State(id))
+	rev1ID, rev1Code := st.Tasks[0].Attempts[0].Review.RunID, st.Tasks[0].Attempts[0].Review.Code
+	runsBefore := len(runs)
+
+	// Simulate crash before RunID and start_reviewer act were committed while
+	// the remote is unreachable: reusing the live reviewer must do no git fetch.
+	st.Tasks[0].Attempts[0].Review.RunID = ""
+	st.Tasks[0].Attempts[0].Acts = slices.DeleteFunc(st.Tasks[0].Attempts[0].Acts, func(x flow.Act) bool {
+		return strings.HasPrefix(x.Key, "start_reviewer@")
+	})
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(bare, bare+".offline"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Rename(bare+".offline", bare) })
+
+	logBuf.Reset()
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	got := st.Tasks[0].Attempts[0].Review
+	if got == nil || got.RunID != rev1ID || got.Code != rev1Code || got.Kind != flow.RoundFull ||
+		len(runs) != runsBefore || !flow.Done(st.Tasks[0].Attempts[0].Acts, "start_reviewer@1@"+c1) {
+		t.Fatalf("reuse reviewer with offline remote: review=%+v runs=%d/%d acts=%+v log=%s",
+			got, len(runs), runsBefore, st.Tasks[0].Attempts[0].Acts, logBuf.String())
+	}
+}
+
+// TestReviewerModelDiffersFromWorker: nextReviewerModel never picks the
+// worker's model, alternates across passing rounds when another resolves, and
+// reuses a non-worker model in a fresh session when needed.
 func TestReviewerModelDiffersFromWorker(t *testing.T) {
-	for _, w := range []string{"sonnet", "opus", "claude-opus-4-5", "claude-sonnet-4-5", "haiku"} {
-		if r := reviewerModel(w); r == "" || strings.Contains(w, r) {
-			t.Errorf("reviewerModel(%q) = %q, want a different model", w, r)
+	for _, w := range []string{"sonnet", "opus", "haiku"} {
+		if r := nextReviewerModel(w, nil, claudeReviewers); r == "" || r == w {
+			t.Errorf("nextReviewerModel(%q) = %q, want a different model", w, r)
 		}
 	}
-	if reviewerModel(workerModel) == workerModel {
-		t.Errorf("reviewer runs the worker's model %q", workerModel)
+	// Worker haiku -> round 1 opus -> round 2 sonnet -> round 3 opus.
+	if got := nextReviewerModel("haiku", nil, claudeReviewers); got != "opus" {
+		t.Errorf("round 1 for haiku worker = %q, want opus", got)
+	}
+	if got := nextReviewerModel("haiku", []string{"opus"}, claudeReviewers); got != "sonnet" {
+		t.Errorf("round 2 for haiku worker = %q, want sonnet", got)
+	}
+	if got := nextReviewerModel("haiku", []string{"opus", "sonnet"}, claudeReviewers); got != "opus" {
+		t.Errorf("round 3 for haiku worker = %q, want opus", got)
+	}
+	// Worker sonnet -> round 1 opus -> round 2 opus again in a fresh session.
+	if got := nextReviewerModel("sonnet", []string{"opus"}, claudeReviewers); got != "opus" {
+		t.Errorf("round 2 for sonnet worker = %q, want opus (fresh session)", got)
+	}
+	// Exact model comparison (no substring matching) and no worker-model fallback.
+	if got := nextReviewerModel("opus", nil, []string{"opus", "opus-2"}); got != "opus-2" {
+		t.Errorf("prefix model name = %q, want opus-2", got)
+	}
+	if got := nextReviewerModel("sonnet", nil, []string{"sonnet"}); got != "" {
+		t.Errorf("worker-only candidate list = %q, want empty", got)
 	}
 }
