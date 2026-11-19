@@ -45,6 +45,11 @@ func (p Paths) State(id string) string { return filepath.Join(p.project(id), "st
 // Log is the project's log.jsonl.
 func (p Paths) Log(id string) string { return filepath.Join(p.project(id), "log.jsonl") }
 
+// Worktree is a task attempt's git worktree folder.
+func (p Paths) Worktree(id, task string, attempt int) string {
+	return filepath.Join(p.project(id), "worktrees", fmt.Sprintf("%s-%d", task, attempt))
+}
+
 // LogLine is one pass in log.jsonl.
 type LogLine struct {
 	Seq      int64     `json:"seq"`

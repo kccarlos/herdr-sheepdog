@@ -14,6 +14,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -258,8 +260,133 @@ func RepoProject(ctx context.Context, folder string, init bool) (string, string,
 	return root, id, err
 }
 
+// Worktree is a task attempt's git worktree and branch from the remote base.
+type Worktree struct{ Path, Branch, BaseCommit string }
+
+var nonSlugRe = regexp.MustCompile(`[^a-z0-9]+`)
+
+// NewWorktree fetches the remote base and creates branch task/<id>-<slug> and a
+// worktree at worktreeDir from the fresh remote base (design.md 9.4, KB-WKT-1,
+// KB-WKT-7). An existing worktree of repo at worktreeDir is adopted unchanged.
+func NewWorktree(ctx context.Context, repo, worktreeDir, taskID, title string) (Worktree, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" || taskID == "." || taskID == ".." || strings.ContainsAny(taskID, "/\\ \t\n") {
+		return Worktree{}, fmt.Errorf("world: invalid task id %q", taskID)
+	}
+	if testing.Testing() {
+		abs, err := filepath.Abs(worktreeDir)
+		if rel, rerr := filepath.Rel(os.TempDir(), abs); err != nil || rerr != nil || strings.HasPrefix(rel, "..") {
+			return Worktree{}, fmt.Errorf("world: %s is outside the temp dir under go test", worktreeDir)
+		}
+	}
+	slug := strings.Trim(nonSlugRe.ReplaceAllString(strings.ToLower(title), "-"), "-")
+	if len(slug) > 48 {
+		slug = strings.TrimRight(slug[:48], "-")
+	}
+	branch, base := "task/"+taskID, ""
+	if slug != "" {
+		branch += "-" + slug
+	}
+	repo = realPath(repo)
+	if _, err := os.Stat(filepath.Join(worktreeDir, ".git")); err == nil {
+		worktreeDir = realPath(worktreeDir)
+		c1, e1 := gitCmd(ctx, repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		c2, e2 := gitCmd(ctx, worktreeDir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		if e1 == nil && e2 == nil && c1 == c2 {
+			if b, _ := gitCmd(ctx, worktreeDir, "symbolic-ref", "--quiet", "--short", "HEAD"); b != "" {
+				branch = b
+			}
+			ref, _, _ := remoteBaseCommit(ctx, repo, false)
+			base, _ = gitCmd(ctx, worktreeDir, "merge-base", "HEAD", ref)
+			if base == "" {
+				if base, err = gitCmd(ctx, worktreeDir, "rev-parse", "--verify", "HEAD^{commit}"); err != nil {
+					return Worktree{}, err
+				}
+			}
+		}
+	}
+	if base == "" {
+		var err error
+		if _, base, err = remoteBaseCommit(ctx, repo, true); err != nil {
+			return Worktree{}, err
+		}
+		_, _ = gitCmd(ctx, repo, "worktree", "prune")
+		if err := os.MkdirAll(filepath.Dir(worktreeDir), 0o700); err != nil {
+			return Worktree{}, err
+		}
+		if _, err := gitCmd(ctx, repo, "worktree", "add", "--no-track", "-b", branch, worktreeDir, base); err != nil {
+			return Worktree{}, err
+		}
+	}
+	return Worktree{Path: realPath(worktreeDir), Branch: branch, BaseCommit: base}, nil
+}
+
+func realPath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return p
+}
+
+func remoteBaseCommit(ctx context.Context, repo string, fetch bool) (string, string, error) {
+	out, _ := gitCmd(ctx, repo, "remote")
+	names, remote := strings.Fields(out), "origin"
+	if !slices.Contains(names, "origin") && len(names) == 1 {
+		remote = names[0]
+	} else if !slices.Contains(names, "origin") {
+		return "", "", fmt.Errorf("world: no unique git remote in %s", repo)
+	}
+	if fetch {
+		if _, err := gitCmd(ctx, repo, "fetch", "--prune", remote); err != nil {
+			return "", "", err
+		}
+	}
+	if ref, _ := gitCmd(ctx, repo, "symbolic-ref", "--quiet", "refs/remotes/"+remote+"/HEAD"); strings.HasPrefix(ref, "refs/remotes/"+remote+"/") {
+		if sha, err := gitCmd(ctx, repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err == nil {
+			return ref, sha, nil
+		}
+	}
+	ls, err := gitCmd(ctx, repo, "ls-remote", "--symref", remote, "HEAD")
+	if err != nil {
+		return "", "", err
+	}
+	for _, ln := range strings.Split(ls, "\n") {
+		if b, ok := strings.CutPrefix(ln, "ref: refs/heads/"); ok {
+			if b, ok = strings.CutSuffix(b, "\tHEAD"); ok && b != "" {
+				ref := "refs/remotes/" + remote + "/" + b
+				if sha, err := gitCmd(ctx, repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err == nil {
+					return ref, sha, nil
+				}
+			}
+		}
+	}
+	return "", "", fmt.Errorf("world: no remote base branch on %s", remote)
+}
+
+// InspectWorktree reads worktree's HEAD, its commit relation to ref, and
+// whether the working tree is clean (design.md 3.1, 7.2, 7.3).
+func InspectWorktree(ctx context.Context, worktree, ref string) (string, flow.Rel, bool, error) {
+	tip, e1 := gitCmd(ctx, worktree, "rev-parse", "--verify", "HEAD^{commit}")
+	status, e2 := gitCmd(ctx, worktree, "status", "--porcelain", "--untracked-files=normal")
+	counts, e3 := gitCmd(ctx, worktree, "rev-list", "--left-right", "--count", ref+"..."+tip)
+	var behind, ahead int
+	_, e4 := fmt.Sscanf(counts, "%d %d", &behind, &ahead)
+	if err := errors.Join(e1, e2, e3, e4); err != nil {
+		return "", "", false, err
+	}
+	switch {
+	case behind == 0 && ahead == 0:
+		return tip, flow.RelSame, status == "", nil
+	case behind == 0:
+		return tip, flow.RelAhead, status == "", nil
+	case ahead == 0:
+		return tip, flow.RelBehind, status == "", nil
+	}
+	return tip, flow.RelDiverged, status == "", nil
+}
+
 func gitCmd(ctx context.Context, dir string, args ...string) (string, error) {
-	gctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	gctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(gctx, "git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")

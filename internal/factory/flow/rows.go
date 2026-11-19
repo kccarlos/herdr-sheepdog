@@ -152,7 +152,9 @@ var TaskRows = []Row[In]{
 		}
 		return say("the "+who+" run ended: the task is stopped", once(in.acts(), AskStopTask))(in)
 	}},
-	{ID: "N11", WaitsOn: "the engine", When: noAttempt, Then: say("no attempt: start one", []string{AskNewAttempt})},
+	{ID: "N11", WaitsOn: "the engine", When: noAttempt, Then: func(in In) Decision {
+		return say("no attempt: start one", once(in.acts(), AskNewAttempt))(in)
+	}},
 	{ID: "N22", WaitsOn: "the worker", When: all(ladderSays(Fix), prNotClosed), Then: func(in In) Decision {
 		r := newestCovering(*in.attempt(), headH(in))
 		return say("the ladder says fix", ensureRun(in, in.Facts.Worker, AskStartWorker),

@@ -2,6 +2,7 @@ package factory
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 )
 
 // Refusal is a report or command the acceptance table turned down
@@ -23,7 +25,7 @@ func (r *Refusal) Error() string { return r.Code + ": " + r.Why }
 const owner = "owner"
 
 // verbRoles is slice 1's acceptance table: who may send each verb.
-var verbRoles = map[string]string{"start": owner, "stop": owner, "plan apply": flow.RoleCoordinator}
+var verbRoles = map[string]string{"start": owner, "stop": owner, "plan apply": flow.RoleCoordinator, "ready": flow.RoleWorker}
 
 // Report is the acceptance step for everything a run's terminal sends: the
 // token names the run, and through it the role and the project.
@@ -34,7 +36,7 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 	if !ok {
 		return e.refuse("", "kind_not_allowed", fmt.Sprintf("%q is not a report the factory knows.", verb))
 	}
-	id, s, role := e.runByTokenLocked(token)
+	id, s, role, ti := e.runByTokenLocked(token)
 	if want == owner {
 		return e.refuse(id, "kind_not_allowed", fmt.Sprintf("A run's terminal cannot %s the factory; the owner runs it from a terminal with no run's token.", verb))
 	}
@@ -43,6 +45,9 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 	}
 	if role != want {
 		return e.refuse(id, "kind_not_allowed", fmt.Sprintf("A %s may not send %s; only the %s may.", role, verb, want))
+	}
+	if verb == "ready" {
+		return e.acceptReadyLocked(id, &s, role, ti, args)
 	}
 	if len(s.Tasks) > 0 {
 		return e.refuse(id, "plan_exists", "A plan already exists; change it with plan amend.")
@@ -60,6 +65,37 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 		Decision: "plan applied", Why: fmt.Sprintf("%d task(s): %s", len(tasks), strings.Join(titles, ", "))})
 }
 
+func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int, args json.RawMessage) error {
+	var req struct {
+		Head string `json:"head"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(args))
+	dec.DisallowUnknownFields()
+	if len(bytes.TrimSpace(args)) == 0 || dec.Decode(&req) != nil || strings.TrimSpace(req.Head) == "" {
+		return e.refuse(id, "invalid_report", "A ready report must carry the worktree head commit.")
+	}
+	t := &s.Tasks[ti]
+	a := &t.Attempts[len(t.Attempts)-1]
+	ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
+	defer cancel()
+	tip, rel, clean, err := world.InspectWorktree(ctx, a.Worktree, flow.H(*a))
+	if err != nil {
+		return err
+	}
+	switch {
+	case strings.TrimSpace(req.Head) != tip:
+		return e.refuse(id, "invalid_report", "Reported head does not match the task worktree tip; run report ready from the worktree.")
+	case !clean:
+		return e.refuse(id, "dirty_tree", "The worktree has uncommitted changes; commit or discard them before reporting ready.")
+	case rel == flow.RelBehind || rel == flow.RelDiverged:
+		return e.refuse(id, "pull_first", "The attempt head moved past the worktree tip; pull first.")
+	case rel == flow.RelSame:
+		return e.refuse(id, "nothing_new", "The worktree has no commit ahead of the current head.")
+	}
+	a.Ready = append(a.Ready, flow.Ready{Head: tip})
+	return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "ready", "head": tip}, Rule: "ready", Decision: "ready", Why: tip})
+}
+
 func (e *Engine) refuse(project, code, why string) error {
 	e.logEvent("factory.refused", map[string]string{"project": project, "code": code, "why": why})
 	return &Refusal{Code: code, Why: why}
@@ -72,8 +108,8 @@ func tokenHash(token string) string {
 }
 
 // runByTokenLocked finds the run holding token: a project's coordinator or a
-// task attempt's worker.
-func (e *Engine) runByTokenLocked(token string) (string, flow.State, string) {
+// task's open attempt worker.
+func (e *Engine) runByTokenLocked(token string) (string, flow.State, string, int) {
 	h := tokenHash(token)
 	same := func(t string) bool {
 		return token != "" && t != "" && subtle.ConstantTimeCompare([]byte(t), []byte(h)) == 1
@@ -84,17 +120,15 @@ func (e *Engine) runByTokenLocked(token string) (string, flow.State, string) {
 			continue
 		}
 		if same(s.Project.RunTokenHash) {
-			return ent.Name(), s, flow.RoleCoordinator
+			return ent.Name(), s, flow.RoleCoordinator, -1
 		}
-		for _, t := range s.Tasks {
-			for _, a := range t.Attempts {
-				if same(a.RunTokenHash) {
-					return ent.Name(), s, flow.RoleWorker
-				}
+		for ti, t := range s.Tasks {
+			if n := len(t.Attempts); n > 0 && same(t.Attempts[n-1].RunTokenHash) {
+				return ent.Name(), s, flow.RoleWorker, ti
 			}
 		}
 	}
-	return "", flow.State{}, ""
+	return "", flow.State{}, "", -1
 }
 
 // planTask is the part of design.md 3's plan record that slice 1 accepts.

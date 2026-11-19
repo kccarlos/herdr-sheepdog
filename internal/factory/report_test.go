@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -202,5 +204,122 @@ func TestPlanShape(t *testing.T) {
 		if c.want == nil && (tasks[0].ID != "A" || len(tasks[1].After) != 1 || tasks[1].After[0] != "A") {
 			t.Errorf("%s: tasks = %+v", c.name, tasks)
 		}
+	}
+}
+
+// TestReportReadyAcceptance checks design.md 7.2 for `ready` (KB-RUN-58,
+// KB-REV-5, KB-MRG-78): role enforcement, dirty_tree, nothing_new, pull_first,
+// and moving H on a clean commit ahead of H.
+func TestReportReadyAcceptance(t *testing.T) {
+	ctx := context.Background()
+	paths := testPaths(t)
+	repo, baseSHA := initGitRepoWithRemote(t)
+	eng := New(paths, nil)
+
+	const projID = "proj-ready"
+	created, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: x")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	st := flow.State{
+		Seq: 1,
+		Project: flow.Project{
+			ID: projID, Folder: repo, Started: true, RunTokenHash: tokenHash("tok-coord"),
+		},
+		Settings: flow.DefaultSettings(),
+		Tasks: []flow.Task{{
+			ID: "T1", Title: "feat: x",
+			Attempts: []flow.Attempt{{
+				BaseCommit: baseSHA, Branch: created.Branch, Worktree: created.Path,
+				RunTokenHash: tokenHash("tok-worker"),
+				Ready:        []flow.Ready{}, Rounds: []flow.Round{}, Accepts: []flow.Accept{}, Acts: []flow.Act{},
+			}},
+		}},
+	}
+	if err := SaveState(paths.State(projID), st); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Coordinator token refused kind_not_allowed; unknown token refused invalid_token.
+	if err := eng.Report("tok-coord", "ready", json.RawMessage(`{"head":"`+baseSHA+`"}`)); refusalCode(err) != "kind_not_allowed" {
+		t.Fatalf("coordinator ready = %v, want kind_not_allowed", err)
+	}
+	if err := eng.Report("tok-bad", "ready", json.RawMessage(`{"head":"`+baseSHA+`"}`)); refusalCode(err) != "invalid_token" {
+		t.Fatalf("bad token ready = %v, want invalid_token", err)
+	}
+	// 2. Missing or mismatched head refused invalid_report.
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{}`)); refusalCode(err) != "invalid_report" {
+		t.Fatalf("empty head = %v, want invalid_report", err)
+	}
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"deadbeef"}`)); refusalCode(err) != "invalid_report" {
+		t.Fatalf("mismatched head = %v, want invalid_report", err)
+	}
+	// 3. Clean at BaseCommit (same as H) refused nothing_new.
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+baseSHA+`"}`)); refusalCode(err) != "nothing_new" {
+		t.Fatalf("at base ready = %v, want nothing_new", err)
+	}
+
+	// Commit c1 ahead of BaseCommit, then dirty the tree (untracked and modified).
+	fPath := filepath.Join(created.Path, "a.txt")
+	if err := os.WriteFile(fPath, []byte("v1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, created.Path, "add", "a.txt")
+	gitIn(t, created.Path, "commit", "-m", "feat: add a.txt")
+	c1 := gitIn(t, created.Path, "rev-parse", "HEAD")
+
+	// 4. Dirty tree (untracked file, then modified tracked file) refused dirty_tree.
+	untracked := filepath.Join(created.Path, "scratch.tmp")
+	if err := os.WriteFile(untracked, []byte("dirty\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c1+`"}`)); refusalCode(err) != "dirty_tree" {
+		t.Fatalf("untracked dirty ready = %v, want dirty_tree", err)
+	}
+	_ = os.Remove(untracked)
+	if err := os.WriteFile(fPath, []byte("v1-dirty\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c1+`"}`)); refusalCode(err) != "dirty_tree" {
+		t.Fatalf("modified dirty ready = %v, want dirty_tree", err)
+	}
+	gitIn(t, created.Path, "checkout", "--", "a.txt")
+
+	// Verify no refusal changed Seq.
+	if cur, _ := LoadState(paths.State(projID)); cur.Seq != 1 {
+		t.Fatalf("refusals changed state seq to %d", cur.Seq)
+	}
+
+	// 5. Clean and ahead at c1 -> accepted; H moves to c1.
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c1+`"}`)); err != nil {
+		t.Fatalf("clean ahead ready: %v", err)
+	}
+	cur, err := LoadState(paths.State(projID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur.Seq != 2 || flow.H(cur.Tasks[0].Attempts[0]) != c1 {
+		t.Fatalf("after ready: seq=%d H=%s, want 2 and %s", cur.Seq, flow.H(cur.Tasks[0].Attempts[0]), c1)
+	}
+
+	// Reporting ready again at c1 without a new commit -> nothing_new.
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c1+`"}`)); refusalCode(err) != "nothing_new" {
+		t.Fatalf("duplicate ready = %v, want nothing_new", err)
+	}
+
+	// 6. Move H ahead to c2 while worktree is reset back to c1 -> refused pull_first.
+	if err := os.WriteFile(fPath, []byte("v2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, created.Path, "commit", "-am", "feat: v2")
+	c2 := gitIn(t, created.Path, "rev-parse", "HEAD")
+	cur.Tasks[0].Attempts[0].Ready = append(cur.Tasks[0].Attempts[0].Ready, flow.Ready{Head: c2})
+	if err := SaveState(paths.State(projID), cur); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, created.Path, "reset", "--hard", c1)
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c1+`"}`)); refusalCode(err) != "pull_first" {
+		t.Fatalf("behind H ready = %v, want pull_first", err)
 	}
 }
