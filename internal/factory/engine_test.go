@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -556,5 +557,22 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 	}
 	if afterStop, _ := os.ReadFile(paths.State(id)); strings.Contains(string(afterStop), "run_token") {
 		t.Fatalf("Stop left a run token hash in state.json:\n%s", afterStop)
+	}
+}
+
+// TestTerminalNamesFitHC: names built from plan task ids (capitals, spaces,
+// long ids) still pass herdr-core's name rule (seen live: "worker-…-T1-1"
+// was refused).
+func TestTerminalNamesFitHC(t *testing.T) {
+	ok := regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,31}$`)
+	for _, n := range []string{
+		workerName("proj-4cd6ea6a", "T1", 1),
+		workerName("proj-4cd6ea6a", "Feat Add/Greeting", 12),
+		workerName("proj-4cd6ea6a", strings.Repeat("X", 60), 3),
+		coordName("proj-4cd6ea6a"),
+	} {
+		if !ok.MatchString(n) {
+			t.Errorf("terminal name %q breaks herdr-core's rule", n)
+		}
 	}
 }

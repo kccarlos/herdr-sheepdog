@@ -298,9 +298,22 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	return "started worker " + termID, abort, err
 }
 
-func coordName(id string) string { return "coord-" + strings.TrimPrefix(id, "proj-") }
+func coordName(id string) string { return hcName("coord-" + strings.TrimPrefix(id, "proj-")) }
 func workerName(id, task string, n int) string {
-	return fmt.Sprintf("worker-%s-%s-%d", strings.TrimPrefix(id, "proj-"), task, n)
+	return hcName(fmt.Sprintf("worker-%s-%s-%d", strings.TrimPrefix(id, "proj-"), task, n))
+}
+
+// hcName fits a terminal name to herdr-core's rule: 1-32 of a-z 0-9 - _ .
+// starting with a letter. Task ids come from the coordinator's plan, so
+// they may hold capitals or other characters.
+func hcName(s string) string {
+	b := []byte(strings.ToLower(s))
+	for i, c := range b {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '_' && c != '.' {
+			b[i] = '-'
+		}
+	}
+	return string(b[:min(len(b), 32)])
 }
 
 func (e *Engine) logError(typ, id string, err error) {
