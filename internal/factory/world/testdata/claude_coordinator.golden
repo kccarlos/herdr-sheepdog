@@ -1,0 +1,11 @@
+env
+DISABLE_AUTOUPDATER=1
+claude
+--model
+opus
+--effort
+high
+--permission-mode
+bypassPermissions
+--settings
+{"skipDangerousModePermissionPrompt":true}
