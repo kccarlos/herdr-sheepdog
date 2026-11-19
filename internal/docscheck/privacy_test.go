@@ -547,6 +547,7 @@ func scanPrivacyLineBytes(rel string, lineNo int, raw []byte, checkSecretShapes,
 				continue
 			}
 			if allowedExactEmails[full] ||
+				strings.HasPrefix(full, "git@") || // an SSH remote user (git@github.com:owner/repo), not a person
 				allowedEmailDomains[domain] ||
 				strings.HasSuffix(domain, ".example.com") ||
 				strings.HasSuffix(domain, ".invalid") ||
@@ -636,6 +637,7 @@ func TestPrivacyScannerDetectors(t *testing.T) {
 		{"generic home user", "files live in /Users/you/.config/sheepdog and /home/alice/repo"},
 		{"security contact", "Email kccarlos.opensource@gmail.com with steps"},
 		{"example email", "user@example.com and bot@my-proj.iam.gserviceaccount.com"},
+		{"ssh remote user", "git@github.com:acme/demo.git and git@gitlab.example:x/y"},
 		{"asset scale filename", `"filename": "LaunchLogo@2x.png"`},
 		{"go selector api key", "APIKey: cfg.Anthropic.APIKey, BaseURL: cfg.Anthropic.BaseURL"},
 		{"env name reference", `env_http_headers = { "x-goog-api-key" = "VERTEX_API_KEY" }`},
