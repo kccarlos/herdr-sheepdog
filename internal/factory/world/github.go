@@ -18,7 +18,9 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 )
 
-var githubRepoRe = regexp.MustCompile(`github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$`)
+// githubRepoRe takes OWNER/NAME from a github.com remote URL only: https,
+// ssh:// or scp form (git@github.com:o/r). Any other host is refused.
+var githubRepoRe = regexp.MustCompile(`^(?:(?:https|ssh)://(?:[^/@\s]+@)?github\.com/|(?:[^/@:\s]+@)?github\.com:)([\w.-]+/[\w.-]+?)(?:\.git)?/?$`)
 
 // pushRemote is the remote the engine pushes to and names on every gh call.
 const pushRemote = "origin"
@@ -63,8 +65,11 @@ func ghCmd(ctx context.Context, dir string, args ...string) (string, error) {
 
 // PushAndOpenPR pushes head to branch on the push remote (never forced: a
 // branch that moved elsewhere refuses it) and makes sure one PR is open for
-// branch against the remote base: the open one is adopted, else one is
-// created (design.md 9.4). It returns the PR number.
+// branch against the remote base (design.md 9.4). An open PR is adopted
+// only if it is in this repo (not a fork), on the base and at head. Any
+// other PR for branch, open, closed or merged, is an error: the engine
+// never reopens a PR or opens a second one (N4). No PR at all: one is
+// created. It returns the PR number.
 func PushAndOpenPR(ctx context.Context, worktree, branch, head, title, body string) (int, error) {
 	repo, err := ghRepo(ctx, worktree)
 	if err != nil {
@@ -73,22 +78,33 @@ func PushAndOpenPR(ctx context.Context, worktree, branch, head, title, body stri
 	if _, err := gitCmd(ctx, worktree, "push", pushRemote, head+":refs/heads/"+branch); err != nil {
 		return 0, err
 	}
-	out, err := ghCmd(ctx, worktree, "pr", "list", "--repo", repo, "--head", branch, "--state", "open", "--json", "number")
-	if err != nil {
-		return 0, err
-	}
-	var open []struct{ Number int }
-	if err := json.Unmarshal([]byte(out), &open); err != nil {
-		return 0, fmt.Errorf("world: gh pr list: %w", err)
-	}
-	if len(open) > 0 {
-		return open[0].Number, nil
-	}
 	ref, _, err := remoteBaseCommit(ctx, worktree, false)
 	if err != nil {
 		return 0, err
 	}
 	base := strings.TrimPrefix(ref, "refs/remotes/"+pushRemote+"/")
+	out, err := ghCmd(ctx, worktree, "pr", "list", "--repo", repo, "--head", branch, "--state", "all", "--json", "number,state,baseRefName,headRefOid,isCrossRepository")
+	if err != nil {
+		return 0, err
+	}
+	var prs []struct {
+		Number                         int
+		State, BaseRefName, HeadRefOid string
+		IsCrossRepository              bool
+	}
+	if err := json.Unmarshal([]byte(out), &prs); err != nil {
+		return 0, fmt.Errorf("world: gh pr list: %w", err)
+	}
+	for _, p := range prs {
+		if p.State == "OPEN" && !p.IsCrossRepository && p.BaseRefName == base && p.HeadRefOid == head {
+			return p.Number, nil
+		}
+	}
+	if len(prs) > 0 {
+		p := prs[0]
+		return 0, fmt.Errorf("world: %s already has PR #%d (%s, base %s, head %s, fork %t), want open on %s at %s: not adopted, no second PR",
+			branch, p.Number, p.State, p.BaseRefName, p.HeadRefOid, p.IsCrossRepository, base, head)
+	}
 	out, err = ghCmd(ctx, worktree, "pr", "create", "--repo", repo, "--head", branch, "--base", base, "--title", title, "--body", body)
 	if err != nil {
 		return 0, err

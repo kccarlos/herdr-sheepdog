@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -8,17 +9,18 @@ import (
 	"testing"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
 // fakeGHScript is world's fake gh (world/github_test.go): it records argv in
 // $D/argv, fails when $D/fail exists, and serves $D/view.json as the PR
-// (pr create copies $D/pr.json there).
+// (pr list lists it; pr create copies $D/pr.json there).
 const fakeGHScript = `#!/bin/sh
 D=%DIR%
 printf '%s\n' "$*" >> "$D/argv"
 [ -f "$D/fail" ] && { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
 case "$1 $2" in
-"pr list") if [ -f "$D/view.json" ]; then echo '[{"number":7}]'; else echo '[]'; fi ;;
+"pr list") if [ -f "$D/view.json" ]; then printf "[%s]" "$(cat "$D/view.json")"; else echo '[]'; fi ;;
 "pr create") cp "$D/pr.json" "$D/view.json" && echo "https://github.com/acme/demo/pull/7" ;;
 "pr view") cat "$D/view.json" 2>/dev/null || { echo 'no pull requests found for branch "x"' >&2; exit 1; } ;;
 *) echo "unexpected gh $*" >&2; exit 2 ;;
@@ -97,17 +99,33 @@ func TestPRSnapshotFactsAndFailure(t *testing.T) {
 		t.Fatal("an unchanged snapshot changed")
 	}
 	writePRJSON(t, gh, "view.json", c1, `[{"__typename":"CheckRun","name":"check","status":"COMPLETED","conclusion":"SUCCESS"}]`)
-	if p2 := read(); p2.Checks != flow.ChecksGreen || !p2.HeadSince.Equal(p1.HeadSince) {
+	p2 := read()
+	if p2.Checks != flow.ChecksGreen || !p2.HeadSince.Equal(p1.HeadSince) {
 		t.Fatalf("green snapshot = %+v (head_since must stay %s)", p2, p1.HeadSince)
 	}
+	// A new PR head restarts head_since (the checks grace counts from it).
+	gitIn(t, repo, "commit", "--allow-empty", "-m", "feat: y")
+	c2 := gitIn(t, repo, "rev-parse", "HEAD")
+	s.Tasks[0].Attempts[0].Ready = append(s.Tasks[0].Attempts[0].Ready, flow.Ready{Head: c2})
+	writePRJSON(t, gh, "view.json", c2, `[{"__typename":"CheckRun","name":"check","status":"COMPLETED","conclusion":"SUCCESS"}]`)
+	if p := read(); p.Head != c2 || p.HeadRel != flow.RelSame || !p.HeadSince.After(p2.HeadSince) {
+		t.Fatalf("new head snapshot = %+v, want head_since after %s", p, p2.HeadSince)
+	}
+	var daemonLog bytes.Buffer
+	eng.Log = logging.NewJSONLLogger(&daemonLog)
 	if err := os.WriteFile(filepath.Join(gh, "fail"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if p3 := read(); p3.Answered || p3.State != flow.PROpen || p3.Checks != flow.ChecksGreen {
 		t.Fatalf("failed snapshot = %+v, want answered=false and the last snapshot", p3)
 	}
+	read()
+	read()
+	if n := strings.Count(daemonLog.String(), "factory.gh_error"); n != 1 {
+		t.Fatalf("the same gh error was logged %d times, want once:\n%s", n, daemonLog.String())
+	}
 	logRaw, _ := os.ReadFile(paths.Log(id))
-	if n := strings.Count(string(logRaw), `"rule":"pr_snapshot"`); n != 3 ||
+	if n := strings.Count(string(logRaw), `"rule":"pr_snapshot"`); n != 4 ||
 		!strings.Contains(string(logRaw), `"checks":"pending"`) || !strings.Contains(string(logRaw), `"checks":"green"`) || !strings.Contains(string(logRaw), `"answered":false`) {
 		t.Fatalf("log has %d snapshot lines:\n%s", n, logRaw)
 	}

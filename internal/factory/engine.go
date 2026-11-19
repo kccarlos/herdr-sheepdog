@@ -45,6 +45,7 @@ type Engine struct {
 	mu   sync.Mutex
 	wake chan struct{}
 	prs  map[string]flow.PR // last PR snapshot per attempt worktree (in memory)
+	errs map[string]string  // last gh or git error per worktree and kind, logged once per change
 }
 
 // New constructs an Engine. Nothing runs or touches disk until Run or Start.
@@ -246,8 +247,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
 		tip, rel, _, err := world.InspectWorktree(gctx, a.Worktree, flow.H(a))
 		cancel()
-		if err != nil {
-			e.logError("factory.git_error", id, err)
+		if e.logOnce("factory.git_error", id, a.Worktree, err); err != nil {
 			return
 		}
 		if a.RunID != "" {
@@ -257,7 +257,9 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 			}
 		}
 		facts.Tip, facts.TipRel = tip, rel
-		facts.PR = e.readPRLocked(ctx, id, s, ti)
+		if len(a.Ready) > 0 { // no PR can exist before the first ready
+			facts.PR = e.readPRLocked(ctx, id, s, ti)
+		}
 	}
 	now := time.Now()
 	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[ti], Settings: s.Settings, Facts: facts, Now: now})
@@ -360,17 +362,15 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 	defer cancel()
 	last := e.prs[a.Worktree]
 	p, err := world.PRSnapshot(gctx, s.Project.Folder, a.Branch)
-	if err != nil {
-		e.logError("factory.gh_error", id, err)
+	if e.logOnce("factory.gh_error", id, a.Worktree, err); err != nil {
 		p, p.Answered = last, false
 	} else if p.Head != "" {
 		p.HeadSince = last.HeadSince
 		if p.Head != last.Head || p.HeadSince.IsZero() {
 			p.HeadSince = time.Now()
 		}
-		if p.HeadRel, err = world.Relation(gctx, a.Worktree, flow.H(a), p.Head); err != nil {
-			e.logError("factory.git_error", id, err) // unknown here (e.g. not fetched): no relation, never a guess
-		}
+		p.HeadRel, err = world.Relation(gctx, a.Worktree, flow.H(a), p.Head)
+		e.logOnce("factory.git_error", id, a.Worktree+" head_rel", err) // unknown here (e.g. not fetched): no relation, never a guess
 	}
 	if p != last && ctx.Err() == nil {
 		if e.prs == nil {
@@ -410,6 +410,24 @@ func hcName(s string) string {
 
 func (e *Engine) logError(typ, id string, err error) {
 	e.logEvent(typ, map[string]string{"project": id, "error": err.Error()})
+}
+
+// logOnce logs err unless it repeats the last error of typ for key; a nil
+// err clears it, so the next failure is logged again.
+func (e *Engine) logOnce(typ, id, key string, err error) {
+	k := typ + " " + key
+	if err == nil {
+		delete(e.errs, k)
+		return
+	}
+	if e.errs[k] == err.Error() {
+		return
+	}
+	if e.errs == nil {
+		e.errs = map[string]string{}
+	}
+	e.errs[k] = err.Error()
+	e.logError(typ, id, err)
 }
 
 func (e *Engine) logEvent(typ string, fields map[string]string) {

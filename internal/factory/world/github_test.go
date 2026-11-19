@@ -15,13 +15,15 @@ import (
 
 // fakeGHScript records each call's argv (one line, words joined by spaces)
 // in $D/argv and answers from files in $D: "fail" makes every call fail,
-// view.json is the open PR (pr create copies pr.json there).
+// view.json is the branch's PR, listed by pr list (honouring --state open;
+// pr create copies pr.json there).
 const fakeGHScript = `#!/bin/sh
 D=%DIR%
 printf '%s\n' "$*" >> "$D/argv"
 [ -f "$D/fail" ] && { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
+case "$*" in *"--state open"*) grep -q '"state":"OPEN"' "$D/view.json" 2>/dev/null || { echo '[]'; exit 0; } ;; esac
 case "$1 $2" in
-"pr list") if [ -f "$D/view.json" ]; then echo '[{"number":7}]'; else echo '[]'; fi ;;
+"pr list") if [ -f "$D/view.json" ]; then printf "[%s]" "$(cat "$D/view.json")"; else echo '[]'; fi ;;
 "pr create") cp "$D/pr.json" "$D/view.json" && echo "https://github.com/acme/demo/pull/7" ;;
 "pr view") cat "$D/view.json" 2>/dev/null || { echo 'no pull requests found for branch "x"' >&2; exit 1; } ;;
 *) echo "unexpected gh $*" >&2; exit 2 ;;
@@ -215,5 +217,63 @@ func TestGHRepoIsRequired(t *testing.T) {
 	runGit(t, repo, "remote", "add", "origin", "/srv/git/demo.git")
 	if _, err := PRSnapshot(context.Background(), repo, "b"); err == nil || !strings.Contains(err.Error(), "not a github.com repo") {
 		t.Fatalf("PRSnapshot without a GitHub remote: %v", err)
+	}
+}
+
+// TestGHRepoHosts: OWNER/NAME only from a github.com host; lookalikes and
+// github.com elsewhere in the URL are refused.
+func TestGHRepoHosts(t *testing.T) {
+	for url, want := range map[string]string{
+		"https://github.com/acme/demo.git":           "acme/demo",
+		"https://github.com/acme/demo":               "acme/demo",
+		"https://user@github.com/acme/demo.git":      "acme/demo",
+		"ssh://git@github.com/acme/demo.git":         "acme/demo",
+		"git@github.com:acme/demo.git":               "acme/demo",
+		"git@github.com:acme/demo":                   "acme/demo",
+		"https://github.com.evil.example/acme/demo":  "",
+		"git@github.com.evil.example:acme/demo.git":  "",
+		"https://notgithub.com/acme/demo.git":        "",
+		"git@notgithub.com:acme/demo.git":            "",
+		"https://gitlab.com/github.com/acme/demo":    "",
+		"https://x.example/github.com/acme/demo.git": "",
+		"/srv/git/github.com/acme/demo.git":          "",
+		"https://github.com/acme/demo/extra":         "",
+	} {
+		repo := t.TempDir()
+		runGit(t, repo, "init")
+		runGit(t, repo, "remote", "add", "origin", url)
+		got, err := ghRepo(context.Background(), repo)
+		if got != want || (err == nil) != (want != "") {
+			t.Errorf("ghRepo(%s) = %q, %v; want %q", url, got, err, want)
+		}
+	}
+}
+
+// TestPushAndOpenPRRefusesOtherPRs: a branch whose PR is closed, merged,
+// on another base, from a fork or at another head gets no second PR and
+// nothing is adopted (design.md 9.4, N4).
+func TestPushAndOpenPRRefusesOtherPRs(t *testing.T) {
+	ctx := context.Background()
+	gh := installFakeGH(t)
+	repo, _ := repoWithGitHubOrigin(t)
+	runGit(t, repo, "switch", "-c", "task/t1-x")
+	runGit(t, repo, "commit", "--allow-empty", "-m", "feat: x")
+	c1 := runGit(t, repo, "rev-parse", "HEAD")
+	for name, pr := range map[string]string{
+		"closed":     `"state":"CLOSED","baseRefName":"main","headRefOid":"` + c1 + `"`,
+		"merged":     `"state":"MERGED","baseRefName":"main","headRefOid":"` + c1 + `"`,
+		"wrong base": `"state":"OPEN","baseRefName":"release","headRefOid":"` + c1 + `"`,
+		"fork":       `"state":"OPEN","baseRefName":"main","headRefOid":"` + c1 + `","isCrossRepository":true`,
+		"stale head": `"state":"OPEN","baseRefName":"main","headRefOid":"0000000000000000000000000000000000000000"`,
+	} {
+		if err := os.WriteFile(filepath.Join(gh, "view.json"), []byte(`{"number":7,`+pr+`}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if n, err := PushAndOpenPR(ctx, repo, "task/t1-x", c1, "feat: x", "b"); err == nil || !strings.Contains(err.Error(), "no second PR") {
+			t.Errorf("%s: PushAndOpenPR = %d, %v; want refused", name, n, err)
+		}
+	}
+	if creates := ghCalls(t, gh, "pr create"); len(creates) != 0 {
+		t.Fatalf("a branch with a PR got another: %q", creates)
 	}
 }

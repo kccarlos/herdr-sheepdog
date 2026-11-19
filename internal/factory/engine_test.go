@@ -525,8 +525,25 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 	c1 := gitIn(t, att.Worktree, "rev-parse", "HEAD")
 
 	writePRJSON(t, gh, "pr.json", c1, "[]")
+	if views := ghCalls(t, gh, "pr view"); len(views) != 0 {
+		t.Fatalf("PR read before any ready report: %q", views)
+	}
 	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`"}`)); err != nil {
 		t.Fatalf("Report ready: %v", err)
+	}
+	// GitHub down after ready: "no PR" is not known, so N26 waits and the
+	// once-only push is not spent.
+	if err := os.WriteFile(filepath.Join(gh, "fail"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false)
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	if n := flow.Count(st.Tasks[0].Attempts[0].Acts, "push_and_open_pr@"+c1); n != 0 || len(ghCalls(t, gh, "pr list")) != 0 {
+		t.Fatalf("unanswered snapshot pushed: acts=%+v gh=%q", st.Tasks[0].Attempts[0].Acts, ghCalls(t, gh, ""))
+	}
+	if err := os.Remove(filepath.Join(gh, "fail")); err != nil {
+		t.Fatal(err)
 	}
 	eng.passProject(ctx, id, false)
 	st, _ = LoadState(paths.State(id))

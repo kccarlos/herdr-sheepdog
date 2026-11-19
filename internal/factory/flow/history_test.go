@@ -36,9 +36,10 @@ func TestHistoryHappyPath(t *testing.T) {
 		{"N23", []string{"start_worker"}, func(w *world) { w.facts.Worker.Pending = true }},
 		{"N23", nil, func(w *world) { w.facts.Worker = Run{State: RunWorking} }},
 		{"N23", nil, func(w *world) { w.facts.Tip, w.facts.TipRel = "c1", RelAhead }},
-		{"N23", nil, func(w *world) { // worker reports ready at c1
+		{"N23", nil, func(w *world) { // worker reports ready at c1; GitHub answers: no PR
 			w.att().Ready = append(w.att().Ready, Ready{Head: "c1"})
 			w.facts.TipRel, w.facts.Worker.State = RelSame, RunIdle
+			w.facts.PR = PR{Answered: true}
 		}},
 		{"N26", []string{"push_and_open_pr@c1"}, func(w *world) {
 			w.att().PR = 1
