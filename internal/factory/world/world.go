@@ -52,7 +52,9 @@ func ClaudeArgv(role, model, effort, permissionMode string) []string {
 		// minutes on a shell prompt, then reviewed without running tests).
 		// dontAsk denies anything not listed; the list is read-only plus
 		// the usual test runners, and never Edit or Write.
-		argv = append(argv, "--allowedTools", reviewerTools)
+		// One argument with "=": --allowedTools takes many values and would
+		// otherwise swallow the prompt that StartRun appends (seen live).
+		argv = append(argv, "--allowedTools="+reviewerTools)
 	}
 	return argv
 }

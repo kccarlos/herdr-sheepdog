@@ -7,5 +7,4 @@ opus
 high
 --permission-mode
 dontAsk
---allowedTools
-Read Grep Glob LS Bash(git diff:*) Bash(git log:*) Bash(git show:*) Bash(git status:*) Bash(go test:*) Bash(go vet:*) Bash(gofmt -l:*) Bash(make test:*) Bash(npm test:*) Bash(pytest:*) Bash(python3 -m pytest:*) Bash(python3 -m unittest:*)
+--allowedTools=Read Grep Glob LS Bash(git diff:*) Bash(git log:*) Bash(git show:*) Bash(git status:*) Bash(go test:*) Bash(go vet:*) Bash(gofmt -l:*) Bash(make test:*) Bash(npm test:*) Bash(pytest:*) Bash(python3 -m pytest:*) Bash(python3 -m unittest:*)
