@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -276,5 +277,72 @@ func TestFactoryPlanApplyCLI(t *testing.T) {
 	}
 	if lastPath != "/api/factory/start" || lastBody["token"] != "tok-1" {
 		t.Fatalf("start from a run's terminal sent %s %+v, want the token", lastPath, lastBody)
+	}
+}
+
+// TestFactoryReportReadyCLI checks that `sheepdog factory report ready` reads
+// HEAD from the worktree and sends it with SHEEPDOG_RUN_TOKEN (design.md 7.2, 9.3).
+func TestFactoryReportReadyCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+
+	var lastPath string
+	var lastBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lastPath, lastBody = r.URL.Path, nil
+		_ = json.NewDecoder(r.Body).Decode(&lastBody)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(srv.Close)
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	t.Setenv("SHEEPDOG_WEB_PORT", port)
+	t.Setenv("SHEEPDOG_RUN_TOKEN", "tok-worker-1")
+
+	var out, errBuf bytes.Buffer
+	if code := run(context.Background(), []string{"factory", "report"}, &out, &errBuf); code != 2 {
+		t.Fatalf("factory report without verb code=%d, want 2", code)
+	}
+
+	// Outside a git repo: exits 1 without calling the daemon.
+	nonGit := t.TempDir()
+	t.Chdir(nonGit)
+	out.Reset()
+	errBuf.Reset()
+	if code := run(context.Background(), []string{"factory", "report", "ready"}, &out, &errBuf); code != 1 || lastPath != "" {
+		t.Fatalf("outside git repo: code=%d lastPath=%q stderr=%s", code, lastPath, errBuf.String())
+	}
+
+	// Inside a git repo: resolves HEAD and posts verb=ready with args.head.
+	repo := filepath.Join(t.TempDir(), "wt")
+	if b, err := exec.Command("git", "init", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, b)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "f.txt"), []byte("ok\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "f.txt"}, {"commit", "-m", "feat: f"}} {
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=T", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=T", "GIT_COMMITTER_EMAIL=t@example.com")
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, b)
+		}
+	}
+	wantHeadBytes, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHead := strings.TrimSpace(string(wantHeadBytes))
+
+	t.Chdir(repo)
+	out.Reset()
+	errBuf.Reset()
+	if code := run(context.Background(), []string{"factory", "report", "ready"}, &out, &errBuf); code != 0 {
+		t.Fatalf("report ready code=%d stderr=%s", code, errBuf.String())
+	}
+	args, _ := lastBody["args"].(map[string]any)
+	if lastPath != "/api/factory/report" || lastBody["token"] != "tok-worker-1" || lastBody["verb"] != "ready" || args["head"] != wantHead {
+		t.Fatalf("report ready sent %s %+v, want head %s", lastPath, lastBody, wantHead)
 	}
 }

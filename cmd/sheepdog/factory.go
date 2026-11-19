@@ -7,9 +7,11 @@ import (
 	"flag"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
@@ -22,10 +24,11 @@ import (
 var factoryDoctorRunner = factory.Doctor
 
 func printFactoryUsage(w io.Writer) {
-	fprintln(w, "usage: sheepdog factory <start|stop|plan|doctor> [flags] [folder]")
+	fprintln(w, "usage: sheepdog factory <start|stop|plan|report|doctor> [flags] [folder]")
 	fprintln(w, "  start <folder> --goal \"<sentence>\"   start the factory coordinator for a repo")
 	fprintln(w, "  stop [<folder>]                      stop a started factory project and its runs")
 	fprintln(w, "  plan apply <file>                    (coordinator only) apply a JSON plan")
+	fprintln(w, "  report ready                         (worker only) report the worktree HEAD ready")
 	fprintln(w, "  doctor                               check unattended factory prerequisites:")
 	fprintln(w, "           herdr-core (hc), timed project-volume probe inside herdr-core")
 	fprintln(w, "           (macOS consent prompts and external-disk stalls), at least one")
@@ -46,6 +49,8 @@ func runFactory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return runFactoryCmd(ctx, args[0], args[1:], stdout, stderr)
 	case "plan":
 		return runFactoryPlan(ctx, args[1:], stdout, stderr)
+	case "report":
+		return runFactoryReport(ctx, args[1:], stdout, stderr)
 	case "doctor":
 		return runFactoryDoctor(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
@@ -106,18 +111,8 @@ func runFactoryPlan(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err == nil && !json.Valid(raw) {
 		err = errors.New(args[1] + " is not valid JSON")
 	}
-	// In a run's terminal the engine set SHEEPDOG_WEB_PORT: no config file needed.
-	url := ""
-	if port, perr := strconv.Atoi(os.Getenv("SHEEPDOG_WEB_PORT")); perr == nil && port > 0 {
-		url = daemon.LocalURL("", port)
-	} else if err == nil {
-		var cfg config.Config
-		cfg, err = config.Load("")
-		url = daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port)
-	}
 	if err == nil {
-		err = postJSON(ctx, url, "/api/factory/report",
-			map[string]any{"token": os.Getenv(runTokenEnv), "verb": "plan apply", "args": json.RawMessage(raw)})
+		err = postFactoryReport(ctx, "plan apply", json.RawMessage(raw))
 	}
 	if err != nil {
 		fprintf(stderr, "sheepdog factory plan apply: %v\n", err)
@@ -125,6 +120,44 @@ func runFactoryPlan(ctx context.Context, args []string, stdout, stderr io.Writer
 	}
 	fprintln(stdout, "plan applied")
 	return 0
+}
+
+// runFactoryReport sends `report ready` with the worktree's HEAD and the run's token.
+func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 || args[0] != "ready" {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	gctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(gctx, "git", "rev-parse", "--verify", "HEAD^{commit}")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	out, err := cmd.CombinedOutput()
+	head := strings.TrimSpace(string(out))
+	if err == nil {
+		raw, _ := json.Marshal(map[string]string{"head": head})
+		err = postFactoryReport(ctx, "ready", raw)
+	} else {
+		err = errors.New(err.Error() + ": " + head)
+	}
+	if err != nil {
+		fprintf(stderr, "sheepdog factory report ready: %v\n", err)
+		return 1
+	}
+	fprintf(stdout, "ready %s\n", head)
+	return 0
+}
+
+func postFactoryReport(ctx context.Context, verb string, args json.RawMessage) error {
+	// In a run's terminal the engine set SHEEPDOG_WEB_PORT: no config file needed.
+	if port, err := strconv.Atoi(os.Getenv("SHEEPDOG_WEB_PORT")); err == nil && port > 0 {
+		return postJSON(ctx, daemon.LocalURL("", port), "/api/factory/report", map[string]any{"token": os.Getenv(runTokenEnv), "verb": verb, "args": args})
+	}
+	cfg, err := config.Load("")
+	if err != nil {
+		return err
+	}
+	return postJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/factory/report", map[string]any{"token": os.Getenv(runTokenEnv), "verb": verb, "args": args})
 }
 
 func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int {

@@ -18,6 +18,7 @@
 | `sheepdog factory doctor` | Check unattended factory prerequisites for `[folder]` (default `.`) with one-line fixes: herdr-core (`hc`), a timed probe of the project volume inside herdr-core (naming any waiting macOS consent prompt), at least one logged-in agent CLI (`claude`, `codex` or `agy`) plus a canary start, `gh` login with the default repo pinned, and `codexbar`. Exit 1 on any FAIL. `--no-canary` spends no tokens; `--folder PATH`, `--config PATH`, `--hc-socket PATH`. |
 | `sheepdog factory start` | Start the factory coordinator for `<folder>` with `--goal "<sentence>"` (needs the running daemon and `herdr-core`). `--config PATH`. |
 | `sheepdog factory plan apply` | Run by the factory coordinator inside its run: apply the JSON plan in `<file>` (`{"tasks": [{"id", "title", "brief", "outcomes", "after"}]}`). Sends the run's `SHEEPDOG_RUN_TOKEN`; the daemon refuses it from any other terminal, refuses a second plan (`plan_exists`) and lists every failing check (`plan_invalid`). |
+| `sheepdog factory report ready` | Run by a factory worker inside its task worktree: report the worktree's `HEAD` commit ready. Sends `SHEEPDOG_RUN_TOKEN`; the daemon refuses it from any other role (`kind_not_allowed`), with uncommitted changes (`dirty_tree`), with no new commit (`nothing_new`), or when the attempt head moved ahead (`pull_first`). |
 | `sheepdog factory stop` | Stop a started factory project (`[folder]`, optional when only one is running) and its runs. `--config PATH`. |
 
 ## Run

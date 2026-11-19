@@ -387,3 +387,123 @@ func TestClaudeTrustSkipsWriteWhenTrusted(t *testing.T) {
 		t.Fatalf("new folder not trusted through the symlink:\n%s", got)
 	}
 }
+
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+		"GIT_TERMINAL_PROMPT=0",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v: %s", args, dir, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestNewWorktreeFromRemoteBaseAndIdempotent checks KB-WKT-1, KB-WKT-2,
+// KB-WKT-7, KB-MRG-78 and KB-TST-1 on a temporary repo with a bare remote.
+func TestNewWorktreeFromRemoteBaseAndIdempotent(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	bare := filepath.Join(tmp, "remote.git")
+	if out, err := exec.Command("git", "init", "--bare", "--initial-branch=main", bare).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v: %s", err, out)
+	}
+
+	repo := filepath.Join(tmp, "repo")
+	if out, err := exec.Command("git", "init", "--initial-branch=main", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init repo: %v: %s", err, out)
+	}
+	runGit(t, repo, "remote", "add", "origin", bare)
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("v0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "commit", "-m", "chore: initial")
+	runGit(t, repo, "push", "-u", "origin", "main")
+
+	// Advance the bare remote from a second clone (b1), and add an unpushed local commit in repo.
+	other := filepath.Join(tmp, "other")
+	if out, err := exec.Command("git", "clone", bare, other).CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(other, "README.md"), []byte("v1-remote\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "commit", "-am", "feat: remote base advance")
+	runGit(t, other, "push", "origin", "main")
+	b1 := runGit(t, other, "rev-parse", "HEAD")
+
+	if err := os.WriteFile(filepath.Join(repo, "LOCAL.md"), []byte("unpushed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "LOCAL.md")
+	runGit(t, repo, "commit", "-m", "chore: local unpushed")
+	localTip := runGit(t, repo, "rev-parse", "HEAD")
+
+	wtDir := filepath.Join(tmp, "data", "factory", "projects", "proj-1", "worktrees", "T1")
+	wt1, err := NewWorktree(ctx, repo, wtDir, "T1", "feat: Add Greeting Helper!")
+	if err != nil {
+		t.Fatalf("NewWorktree: %v", err)
+	}
+	if wt1.Branch != "task/T1-feat-add-greeting-helper" || wt1.BaseCommit != b1 {
+		t.Fatalf("wt1 = %+v, want branch task/T1-feat-add-greeting-helper at %s", wt1, b1)
+	}
+	if _, err := os.Stat(filepath.Join(wt1.Path, "LOCAL.md")); !os.IsNotExist(err) {
+		t.Fatal("unpushed local commit leaked into task worktree")
+	}
+	if runGit(t, repo, "rev-parse", "HEAD") != localTip {
+		t.Fatal("repo checkout was modified by NewWorktree")
+	}
+	if out, err := exec.Command("git", "-C", wt1.Path, "config", "--get", "branch."+wt1.Branch+".merge").CombinedOutput(); err == nil {
+		t.Fatalf("task branch tracks upstream %q", string(out))
+	}
+
+	// Commit c1 and leave untracked work in wt1, advance remote to b2, and verify idempotent adoption.
+	if err := os.WriteFile(filepath.Join(wt1.Path, "greet.go"), []byte("package greet\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wt1.Path, "add", "greet.go")
+	runGit(t, wt1.Path, "commit", "-m", "feat: add greet package")
+	c1 := runGit(t, wt1.Path, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(wt1.Path, "untracked.txt"), []byte("wip\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(other, "README.md"), []byte("v2-remote\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "commit", "-am", "feat: remote v2")
+	runGit(t, other, "push", "origin", "main")
+
+	wt2, err := NewWorktree(ctx, repo, wtDir, "T1", "feat: Add Greeting Helper!")
+	if err != nil {
+		t.Fatalf("second NewWorktree: %v", err)
+	}
+	if wt2 != wt1 {
+		t.Fatalf("adopted worktree = %+v, want %+v", wt2, wt1)
+	}
+	if _, err := os.Stat(filepath.Join(wt2.Path, "untracked.txt")); err != nil {
+		t.Fatalf("adoption lost uncommitted file: %v", err)
+	}
+
+	// InspectWorktree: dirty vs clean and commit relations.
+	tip, rel, clean, err := InspectWorktree(ctx, wt1.Path, b1)
+	if err != nil || tip != c1 || rel != flow.RelAhead || clean {
+		t.Fatalf("dirty InspectWorktree = (%s, %s, %v, %v)", tip, rel, clean, err)
+	}
+	if err := os.Remove(filepath.Join(wt1.Path, "untracked.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, rel, clean, err = InspectWorktree(ctx, wt1.Path, c1); err != nil || rel != flow.RelSame || !clean {
+		t.Fatalf("clean same InspectWorktree = (%s, %v, %v)", rel, clean, err)
+	}
+
+	// Guard: refusing worktree outside os.TempDir() under go test.
+	if _, err := NewWorktree(ctx, repo, "/nonexistent-sheepdog-test-guard/wt", "T2", "feat: x"); err == nil {
+		t.Fatal("expected test guard error outside os.TempDir()")
+	}
+}
