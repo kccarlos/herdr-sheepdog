@@ -58,7 +58,7 @@ Owner's goal (2026-11-18): a reviewer or a verifier should, most of the time, pa
 |---|---|
 | The number | **First-look pass rate:** the share of tasks whose every review round passed with no "changes". The engine already records each round, so it costs nothing to keep. It is in the coordinator's facts block and the owner's digest, split by worker model and by template version |
 | The worker checks itself by the reviewer's own list | The questions the reviewer will ask are in the worker's prompt, as what to do before reporting (5.3). The worker has the whole context in its session; a reviewer reading from nothing costs far more |
-| A miss is named | A review report says how many of its findings the worker should have caught itself: a proof that does not pass, a caller it did not list, code for a "not doing" item (`self_check_misses`). Rework from a hard problem and rework from a skipped self-check are then told apart |
+| A miss is named | A review report says how many of its findings the worker should have caught itself: a proof that does not pass, a caller it did not list, code for a "not doing" item (a `self-check misses:` reply line). Rework from a hard problem and rework from a skipped self-check are then told apart |
 | It steers who gets the work | The coordinator's routing table (design.md 11.2) gains the first-look pass rate and the self-check misses per worker model. A model that keeps failing its first look on a kind of task stops getting that kind |
 
 A low rate points upstream: at the brief, the scope fields or the worker's self-check. It is not a reason to add review.
@@ -366,7 +366,7 @@ One statement of where each thing lands, by the slices of [plan.md](plan.md):
 | `ready --reject`; two passing rounds; the size estimate and cap | design.md 7.2, 4.6, 11.5 | 2 (the review loop) |
 | Plan fields `for_whom`, `if_skipped`, `smallest`, `not_doing`, and `outcomes` each with `proved_by`, with their presence checks | design.md 11.7 | 3 (quality up front) |
 | The `ready` report with a proof per outcome run by the report client, `touched` and `skipped` | design.md 7.2 | 3 |
-| `self_check_misses`, `class`, `deletable`, `not_run` on a verdict; the first-look pass rate | design.md 7.2, 11.2 | 3 |
+| `self-check misses:`, `class:`, `deletable:`, `not run:` lines in the reviewer's reply; the first-look pass rate | design.md 7.2, 11.2 | 3 |
 | The templates of section 5 with replay evidence | this file | 3 (slice 1 runs on three short stand-ins) |
 | The engine running the proofs again in a clean checkout, and a per-outcome judgement in the verdict | design.md 11.6 | 10 |
 | The plan review run, its report and the coordinator's answers, `plan_review_rounds` | design.md 11.7, 7.2 | 11 |
