@@ -786,3 +786,33 @@ func TestEngineLockGitCallsUseTimeout(t *testing.T) {
 		t.Fatalf("passProject under hung git took %s, want lock timeout", elapsed)
 	}
 }
+
+// TestStartClearsFailedActs: the owner starting again is slice 1's retry,
+// so failed executor acts stop blocking their ask; done acts stay.
+func TestStartClearsFailedActs(t *testing.T) {
+	repo := initGitRepo(t)
+	e := New(Paths{DataDir: t.TempDir()}, nil)
+	if err := e.Start(repo, "a goal"); err != nil {
+		t.Fatal(err)
+	}
+	id, s, err := e.findProjectLocked(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Tasks = []flow.Task{{ID: "T1", Title: "feat: x",
+		Acts:     []flow.Act{{Key: "new_attempt", Result: "failed"}},
+		Attempts: []flow.Attempt{{Acts: []flow.Act{{Key: "start_worker", Result: "failed"}, {Key: "keep", Result: "done"}}}}}}
+	if err := SaveState(e.Paths.State(id), s); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Start(repo, "a goal"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadState(e.Paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Tasks[0].Acts) != 0 || len(got.Tasks[0].Attempts[0].Acts) != 1 || got.Tasks[0].Attempts[0].Acts[0].Key != "keep" {
+		t.Fatalf("acts after Start: task %+v attempt %+v", got.Tasks[0].Acts, got.Tasks[0].Attempts[0].Acts)
+	}
+}

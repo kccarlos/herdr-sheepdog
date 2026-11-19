@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -74,7 +75,19 @@ func (e *Engine) Start(folder, goal string) error {
 		}
 	}
 	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts = root, goal, true, nil
+	// The owner starting again is slice 1's retry (plan.md: "the owner
+	// starts again"): failed executor acts no longer block their ask.
+	for ti := range s.Tasks {
+		s.Tasks[ti].Acts = dropFailed(s.Tasks[ti].Acts)
+		for ai := range s.Tasks[ti].Attempts {
+			s.Tasks[ti].Attempts[ai].Acts = dropFailed(s.Tasks[ti].Attempts[ai].Acts)
+		}
+	}
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "start", "folder": root, "goal": goal}, Rule: "start", Decision: "started", Why: goal})
+}
+
+func dropFailed(acts []flow.Act) []flow.Act {
+	return slices.DeleteFunc(acts, func(a flow.Act) bool { return a.Result == "failed" })
 }
 
 // Stop marks project stopped and stops every run it started, leaving no process.
