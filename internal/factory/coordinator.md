@@ -7,3 +7,5 @@ Plan exactly one task, apply it, then wait. To apply it, write the plan as JSON 
 {"tasks": [{"id": "T1", "title": "feat: add a greeting helper", "brief": "What to build and why, in two or three sentences.", "outcomes": ["go test ./... passes with a test of the helper"], "after": []}]}
 
 If it is refused, fix every listed problem and apply it again.
+
+A message that starts with "Wake:" lists tasks that wait on you, with their facts. You have no task commands yet: read the facts, decide, and reply with what you would do and why.

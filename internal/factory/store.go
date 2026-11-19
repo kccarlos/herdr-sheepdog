@@ -73,7 +73,7 @@ type LogLine struct {
 // LoadState reads state.json. A missing or unreadable file is an error:
 // the engine never guesses (design.md 15).
 func LoadState(path string) (flow.State, error) {
-	var s flow.State
+	s := flow.State{Settings: flow.DefaultSettings()} // a setting newer than the file keeps its default
 	if err := guardTestPath(path); err != nil {
 		return s, err
 	}

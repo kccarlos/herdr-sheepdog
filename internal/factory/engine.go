@@ -230,6 +230,9 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 			e.passTaskLocked(ctx, id, &s, i)
 		}
 	}
+	if ctx.Err() == nil {
+		e.deliverWakesLocked(ctx, id, &s)
+	}
 }
 
 // launchRunLocked adopts a live same-name run left by a crash (keeping its
@@ -264,7 +267,8 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 type taskExec func(e *Engine, ctx context.Context, id string, s *flow.State, ti int, f flow.Facts) (decision string, abort bool, err error)
 
 // taskExecutors dispatches each ask verb implemented so far to its executor.
-// Others (wake_coordinator, stop_task) are logged as "not built yet".
+// wake_coordinator is held for J12 (wake.go); others (stop_task) are
+// logged as "not built yet".
 var taskExecutors = map[string]taskExec{
 	flow.AskNewAttempt:   (*Engine).execNewAttempt,
 	flow.AskStartWorker:  (*Engine).execStartWorker,
@@ -320,6 +324,11 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	}
 	for _, ask := range d.Asked {
 		verb, _, _ := strings.Cut(ask, "@")
+		if verb == flow.AskWake {
+			act(ask, "done")
+			decs = append(decs, holdWake(s, ti, r.ID, d.Why, ask, facts, now))
+			continue
+		}
 		fn, built := taskExecutors[verb]
 		if !built {
 			e.logEvent("factory.not_built_yet", map[string]string{"project": id, "task": s.Tasks[ti].ID, "rule": r.ID, "ask": ask})
@@ -426,7 +435,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		return true
 	}
 	if rd.Status == world.ReportNotYet {
-		return false
+		return e.markReviewIdleLocked(id, s, ti)
 	}
 	// The reviewer's allowed commands can write (tests, git diff --output):
 	// a verdict counts only for an untouched worktree at the round's head.
@@ -455,10 +464,30 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	}
 	err = e.acceptVerdictLocked(ctx, id, s, ti, rd)
 	var ref *Refusal
-	if err != nil && !errors.As(err, &ref) {
+	if errors.As(err, &ref) {
+		return e.markReviewIdleLocked(id, s, ti)
+	} else if err != nil {
 		e.logError("factory.exec_error", id, err)
 	}
-	return err == nil || !errors.As(err, &ref)
+	return true
+}
+
+// markReviewIdleLocked starts the stuck row's clock (review.idle_since) the
+// first time a pass reads the reviewer idle with no valid tag. A valid tag
+// ends the round, and the record with it.
+func (e *Engine) markReviewIdleLocked(id string, s *flow.State, ti int) bool {
+	rev := s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1].Review
+	if rev.IdleSince != nil {
+		return false
+	}
+	now := time.Now()
+	rev.IdleSince = &now
+	line := LogLine{By: "engine", Task: s.Tasks[ti].ID, Rule: "review_idle", Why: fmt.Sprintf("round %d's reviewer is idle with no valid tag", rev.Round)}
+	if err := e.commitLocked(id, s, line); err != nil {
+		e.logError("factory.commit_error", id, err)
+		return true
+	}
+	return false
 }
 
 func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {

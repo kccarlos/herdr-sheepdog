@@ -70,10 +70,12 @@ func TestSettingsRange(t *testing.T) {
 	set := map[string]func(*Settings, int){
 		"review_rounds":        func(s *Settings, n int) { s.ReviewRounds = n },
 		"checks_grace_minutes": func(s *Settings, n int) { s.ChecksGraceMinutes = n },
+		"stuck_minutes":        func(s *Settings, n int) { s.StuckMinutes = n },
 	}
 	limits := map[string][2]int{
 		"review_rounds":        {ReviewRoundsMin, ReviewRoundsMax},
 		"checks_grace_minutes": {ChecksGraceMin, ChecksGraceMax},
+		"stuck_minutes":        {StuckMin, StuckMax},
 	}
 	for name, lim := range limits {
 		for _, c := range []struct {
