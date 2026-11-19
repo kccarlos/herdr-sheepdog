@@ -377,7 +377,7 @@ func TestVerdictAcceptance(t *testing.T) {
 		{"wrong code", world.ReportRead{Status: world.ReportFound, Raw: "c", Report: world.Report{Code: "wrong", Round: 1, Head: "c1", Verdict: "pass"}}},
 		{"wrong round", world.ReportRead{Status: world.ReportFound, Raw: "r", Report: world.Report{Code: "nonce123", Round: 2, Head: "c1", Verdict: "pass"}}},
 		{"wrong head", world.ReportRead{Status: world.ReportFound, Raw: "h", Report: world.Report{Code: "nonce123", Round: 1, Head: "c0", Verdict: "pass"}}},
-		{"pass with majors", world.ReportRead{Status: world.ReportFound, Raw: "pm", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 1, Findings: []string{"bug"}}}},
+		{"pass with majors", world.ReportRead{Status: world.ReportFound, Raw: "pm", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 1}}},
 		{"changes with 0 majors", world.ReportRead{Status: world.ReportFound, Raw: "cm", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "changes", Majors: 0}}},
 		{"unknown verdict word", world.ReportRead{Status: world.ReportFound, Raw: "uv", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass|changes", Majors: 0}}},
 	}
@@ -405,11 +405,10 @@ func TestVerdictAcceptance(t *testing.T) {
 	// Valid changes verdict records round{n:1, kind:"full", ...}, writes T1-r1.md, and stops t-rev.
 	good := world.ReportRead{
 		Status: world.ReportFound,
-		Raw:    `{"code":"nonce123","round":1,"head":"c1","verdict":"changes","majors":2,"findings":["nil deref in Parse","missing error check"]}`,
-		Body:   "Detailed review notes line 42.",
+		Raw:    `{"code":"nonce123","round":1,"head":"c1","verdict":"changes","majors":2}`,
+		Body:   "major: nil deref in Parse\nmajor: missing error check\nDetailed review notes line 42.",
 		Report: world.Report{
 			Code: "nonce123", Round: 1, Head: "c1", Verdict: "changes", Majors: 2,
-			Findings: []string{"nil deref in Parse", "missing error check"},
 		},
 	}
 	if err := eng.acceptVerdictLocked(ctx, projID, &st, 0, good); err != nil {

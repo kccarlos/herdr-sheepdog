@@ -643,7 +643,7 @@ func TestReadReportS03FixturesAndCases(t *testing.T) {
 		got := readWith(withTags, f.code)
 		if got.Status != ReportFound || got.Report.Code != f.code || got.Report.Round != f.round ||
 			got.Report.Head != f.head || got.Report.Verdict != "changes" || got.Report.Majors != 2 ||
-			len(got.Report.Findings) != 2 || !strings.Contains(got.Body, "Off-by-one loop bound") {
+			!strings.Contains(got.Body, "Off-by-one loop bound") {
 			t.Fatalf("%s with <report> = %+v", f.file, got)
 		}
 		if bad := readWith(withTags, "zzzzzz"); bad.Status != ReportInvalid {
@@ -726,8 +726,14 @@ func TestReadReportS03FixturesAndCases(t *testing.T) {
 		{
 			name:   "unknown JSON field",
 			code:   "abc123",
-			screen: "⏺ Done.\n<report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0,\"findings\":[],\"extra\":1}</report>\n",
+			screen: "⏺ Done.\n<report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0,\"extra\":1}</report>\n",
 			want:   ReportInvalid,
+		},
+		{
+			name:   "extra findings field with unescaped quotes is ignored",
+			code:   "abc123",
+			screen: "⏺ Done.\n<report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"changes\",\"majors\":1,\"findings\":[\"major: Hello(\"x\") is wrong\"]}</report>\n",
+			want:   ReportFound, verdict: "changes", head: "h1",
 		},
 		{
 			name:   "cut mid-tag before closing report",
@@ -752,6 +758,36 @@ func TestReadReportS03FixturesAndCases(t *testing.T) {
 				t.Fatalf("parsed report = %+v, want verdict=%s head=%s", got.Report, tc.verdict, tc.head)
 			}
 		})
+	}
+}
+
+// TestReadReportLiveDemoScreen replays the live demo's reviewer screen: the
+// findings sit in the tag with unescaped quotes, and a draft waits in the input
+// box. The tag's findings field is ignored; the findings are the reply text.
+func TestReadReportLiveDemoScreen(t *testing.T) {
+	screen, err := os.ReadFile("testdata/demo3-reviewer-screen.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := parseReportText(string(screen), "6knsmxa2re")
+	if got.Status != ReportFound || got.Report.Verdict != "changes" || got.Report.Majors != 1 || got.Report.Round != 1 ||
+		got.Report.Head != "657ce5090879ae2be234dc0f72bf952084c252e6" {
+		t.Fatalf("live screen = %+v, want found changes/1", got)
+	}
+	if !strings.Contains(got.Body, `Hello("world")`) || !strings.HasPrefix(got.Body, "I found one major issue") ||
+		strings.Contains(got.Body, "<report>") || strings.Contains(got.Body, "Ran 5 shell commands") {
+		t.Fatalf("live screen body = %q, want the reply text above the tag", got.Body)
+	}
+	// The prompt echo's template tag alone is never taken.
+	echoOnly := string(screen)[:strings.Index(string(screen), "⏺ I found")]
+	if rd := parseReportText(echoOnly, "6knsmxa2re"); rd.Status != ReportNotYet {
+		t.Fatalf("echo-only screen = %+v, want not_yet", rd)
+	}
+	// New contract: findings as plain text above a tag without a findings field.
+	rd := parseReportText("❯ prompt\n  <report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass|changes\",\"majors\":0}</report>\n\n"+
+		"⏺ major: Hello(\"\") returns \"hello, \"\n  minor: no doc comment\n\n  <report>{\"code\":\"abc123\",\"round\":2,\"head\":\"h1\",\"verdict\":\"changes\",\"majors\":1}</report>\n", "abc123")
+	if rd.Status != ReportFound || rd.Report.Round != 2 || rd.Report.Majors != 1 || rd.Body != "major: Hello(\"\") returns \"hello, \"\n  minor: no doc comment" {
+		t.Fatalf("plain-text findings = %+v", rd)
 	}
 }
 

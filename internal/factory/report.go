@@ -2,6 +2,7 @@ package factory
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -132,10 +133,7 @@ func (e *Engine) acceptVerdictLocked(ctx context.Context, id string, s *flow.Sta
 	delete(e.errs, errKey)
 	path := e.Paths.Report(id, t.ID, rev.Round)
 	body := fmt.Sprintf("# Review round %d: %s (%d major(s))\n\nTask: %s — %s\nCommit: %s\n\n## Findings\n\n%s\n",
-		rev.Round, rep.Verdict, rep.Majors, t.ID, t.Title, rev.Head, bullets(rep.Findings))
-	if rd.Body != "" {
-		body += "\n## Notes\n\n" + rd.Body + "\n"
-	}
+		rev.Round, rep.Verdict, rep.Majors, t.ID, t.Title, rev.Head, cmp.Or(rd.Body, "(none)"))
 	if err := writeAtomic(path, []byte(body)); err != nil {
 		return err
 	}

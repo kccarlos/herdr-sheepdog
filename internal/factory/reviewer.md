@@ -7,7 +7,8 @@ Outcomes:
 {outcomes}
 
 Read only: never edit files, commit, push, or switch branches.
-Review the commit {head} against the base {base} (`git diff {base}..{head}`); list findings with severity (`major` for bugs, broken callers, safety or data-loss issues, or unmet outcomes; `minor` otherwise).
-End your reply with exactly one tag (valid JSON with only these six keys, `"pass"` when `"majors":0` and `"changes"` when `"majors"` >= 1, `"findings"` as an array of strings):
+Review the commit {head} against the base {base} (`git diff {base}..{head}`). Run each check as one plain command from your current folder (no cd, no &&, no pipes).
+Write your findings as plain text, one per line starting with `major:` (bugs, broken callers, safety or data-loss issues, or unmet outcomes) or `minor:` (anything else).
+Then end with exactly one tag line and nothing after it (`"pass"` when `"majors":0`, `"changes"` when `"majors"` >= 1; `"majors"` is your count of major findings):
 
-<report>{"code":"{code}","round":{round},"head":"{head}","verdict":"pass|changes","majors":0,"findings":["..."]}</report>
+<report>{"code":"{code}","round":{round},"head":"{head}","verdict":"pass|changes","majors":<n>}</report>

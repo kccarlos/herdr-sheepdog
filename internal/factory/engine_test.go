@@ -743,8 +743,15 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	eng3.Paths.ClaudeConfig = "/nonexistent-sheepdog-test-guard/.claude.json"
 	eng3.PassInterval = 10 * time.Millisecond
 	reqsBefore := len(srv3.Requests())
+	// Wait for the one try (1 launchRunLocked RunState + 1 StartRun Get),
+	// then keep passing and check it is never retried. A fixed 80 ms window
+	// was flaky under -race with the whole suite running.
 	runFor(eng3, 80*time.Millisecond)
-	if got := len(srv3.Requests()) - reqsBefore; got != 2 { // 1 launchRunLocked RunState + 1 StartRun Get, never retried
+	for deadline := time.Now().Add(3 * time.Second); len(srv3.Requests())-reqsBefore < 2 && time.Now().Before(deadline); {
+		runFor(eng3, 40*time.Millisecond)
+	}
+	runFor(eng3, 80*time.Millisecond)
+	if got := len(srv3.Requests()) - reqsBefore; got != 2 {
 		t.Fatalf("failing worker StartRun sent %d hc requests across many passes, want 2 (1 try)", got)
 	}
 	log3, _ := os.ReadFile(eng3.Paths.Log(id3))
@@ -946,12 +953,15 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	}
 
 	// Reviewer 1 writes valid changes verdict with code1 -> round 1 recorded, rev1 stopped.
-	srv.SetScreen(rev1Term, "❯ prompt\n\n⏺ Found 1 major bug in greet.go.\n```json\n<report>{\"code\":\""+code1+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":1,\"findings\":[\"major: Greet accepts empty string\"]}</report>\n```\n")
+	srv.SetScreen(rev1Term, "❯ prompt\n\n⏺ major: Greet(\"\") returns \"hello, \"\n```json\n<report>{\"code\":\""+code1+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":1}</report>\n```\n")
 	eng.passProject(ctx, id, false) // accepts verdict & stops rev1
 	st, _ = LoadState(paths.State(id))
 	att := st.Tasks[0].Attempts[0]
 	if att.Review != nil || len(att.Rounds) != 1 || att.Rounds[0].Verdict != "changes" || att.Rounds[0].Majors != 1 {
 		t.Fatalf("after round 1 changes: review=%+v rounds=%+v", att.Review, att.Rounds)
+	}
+	if b, err := os.ReadFile(att.Rounds[0].ReportPath); err != nil || !strings.Contains(string(b), "## Findings\n\nmajor: Greet(\"\") returns \"hello, \"\n") {
+		t.Fatalf("round 1 report file = %q, %v", b, err)
 	}
 	if rs, err := world.RunState(ctx, client, rev1Term); err != nil || rs != flow.RunGone {
 		t.Fatalf("rev1 not stopped after verdict: state=%s err=%v", rs, err)

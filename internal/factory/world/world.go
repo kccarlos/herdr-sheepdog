@@ -63,7 +63,7 @@ func ClaudeArgv(role, model, effort, permissionMode string) []string {
 // its history, and run the project's tests. Nothing that edits files.
 const reviewerTools = "Read Grep Glob LS " +
 	"Bash(git diff:*) Bash(git log:*) Bash(git show:*) Bash(git status:*) " +
-	"Bash(go test:*) Bash(go vet:*) Bash(gofmt -l:*) Bash(make test:*) " +
+	"Bash(go build:*) Bash(go test:*) Bash(go vet:*) Bash(gofmt -l:*) Bash(make test:*) " +
 	"Bash(npm test:*) Bash(pytest:*) Bash(python3 -m pytest:*) Bash(python3 -m unittest:*)"
 
 // StartRun launches spec in herdr-core and returns its terminal address.
@@ -268,14 +268,15 @@ const (
 	ReportInvalid ReportStatus = "invalid"
 )
 
-// Report is slice 1's reviewer <report> JSON payload (prompts.md 5.4).
+// Report is slice 1's reviewer <report> JSON payload (prompts.md 5.4). It
+// carries no free text: the findings are the reply text above the tag.
 type Report struct {
 	Code, Head, Verdict string
 	Round, Majors       int
-	Findings            []string
 }
 
-// ReportRead holds the parsed report tag and surrounding reply text.
+// ReportRead holds the parsed report tag (Raw) and the reply text above it
+// (Body), which holds the findings.
 type ReportRead struct {
 	Status    ReportStatus
 	Report    Report
@@ -288,6 +289,7 @@ var (
 	tuiPromptRe  = regexp.MustCompile(`(?m)^❯[ \t\x{00a0}]+\S`)
 	tuiReplyRe   = regexp.MustCompile(`(?m)^⏺`)
 	tuiFooterRe  = regexp.MustCompile(`(?m)^(?:✻ |\x{2500}{8,})`)
+	tuiInputRe   = regexp.MustCompile(`(?m)^\x{2500}{8,}\n❯`)
 	fenceOpenRe  = regexp.MustCompile("(?s)^```[a-zA-Z0-9_-]*\\s*")
 	wrapIndentRe = regexp.MustCompile("\r?\n[ \t>]*")
 	nonSlugRe    = regexp.MustCompile(`[^a-z0-9]+`)
@@ -295,7 +297,8 @@ var (
 
 // ReadReport waits until term is idle/done, reads its stitched output, skips
 // everything up to and including the last prompt echo, and parses the last
-// <report>...</report> tag (design.md 9.3, spike S0.3).
+// <report>...</report> tag (design.md 9.3, spike S0.3); the reply text above
+// that tag is the findings (Body).
 func ReadReport(ctx context.Context, client *hc.Client, term, code string) (ReportRead, error) {
 	if client == nil || strings.TrimSpace(term) == "" {
 		return ReportRead{}, errors.New("world: ReadReport requires hc client and terminal")
@@ -348,6 +351,10 @@ func parseReportText(text, code string) ReportRead {
 			return ReportRead{Status: ReportNotYet}
 		}
 	}
+	// The input box may hold a draft the owner typed (seen live); it is not a prompt echo.
+	if m := tuiInputRe.FindAllStringIndex(clean, -1); len(m) > 0 {
+		clean = clean[:m[len(m)-1][0]]
+	}
 	if m := tuiPromptRe.FindAllStringIndex(clean, -1); len(m) > 0 {
 		r := tuiReplyRe.FindStringIndex(clean[m[len(m)-1][0]:])
 		if r == nil {
@@ -386,6 +393,11 @@ func parseReportText(text, code string) ReportRead {
 }
 
 func decodeReportJSON(s string) (Report, bool) {
+	// An old-style findings field is dropped unread: a model cannot be trusted
+	// to escape free text in JSON (seen live: unescaped quotes).
+	if i := strings.Index(s, `,"findings":`); i > 0 {
+		s = s[:i] + "}"
+	}
 	var r Report
 	dec := json.NewDecoder(strings.NewReader(s))
 	dec.DisallowUnknownFields()
