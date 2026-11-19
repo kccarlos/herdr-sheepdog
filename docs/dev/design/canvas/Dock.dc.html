@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — voice capsule</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 366px; height: {{ h }}px; box-sizing: border-box; border-radius: {{ radius }}px; background: {{c.glass}}; -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); border: 1px solid {{c.rim}}; box-shadow: {{c.shadow}}; display: flex; align-items: center; gap: 8px; padding: 0 7px; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <div style="width: 44px; height: 44px; flex-shrink: 0; opacity: {{ micOpacity }}">
+    <sc-if value="{{ micMuted }}" hint-placeholder-val="{{ false }}">
+      <button aria-label="Unmute microphone" style="width: 44px; height: 44px; border-radius: 22px; border: 0; padding: 0; background: {{c.red}}; color: #FFFFFF; display: flex; align-items: center; justify-content: center">
+        <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3M4 4l16 16"></path></svg>
+      </button>
+    </sc-if>
+    <sc-if value="{{ micLive }}" hint-placeholder-val="{{ true }}">
+      <button aria-label="Mute microphone" style="width: 44px; height: 44px; border-radius: 22px; border: 0; padding: 0; background: {{c.well}}; color: {{c.ink}}; display: flex; align-items: center; justify-content: center; box-shadow: inset 0 0 0 2.5px {{c.green}}">
+        <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg>
+      </button>
+    </sc-if>
+  </div>
+
+  <button aria-label="{{ orbLabel }}" style="position: relative; width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; border: 0; padding: 0; background: {{ orbBg }}; box-shadow: {{ orbShadow }}; color: {{ orbFg }}; transform: scale({{ orbScale }}); display: flex; align-items: center; justify-content: center">
+    <sc-if value="{{ iconWave }}" hint-placeholder-val="{{ true }}">
+      <svg width="21" height="21" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"></path></svg>
+    </sc-if>
+    <sc-if value="{{ iconDots }}" hint-placeholder-val="{{ false }}">
+      <svg width="21" height="21" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="6" cy="12" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="18" cy="12" r="2"></circle></svg>
+    </sc-if>
+    <sc-if value="{{ iconSpin }}" hint-placeholder-val="{{ false }}">
+      <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"></path></svg>
+    </sc-if>
+    <sc-if value="{{ iconOff }}" hint-placeholder-val="{{ false }}">
+      <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5a10 10 0 0 1 5-2.8M14 9.7a10 10 0 0 1 5 2.8M8.5 16a5 5 0 0 1 7 0M12 20h.01M3 3l18 18"></path></svg>
+    </sc-if>
+    <sc-if value="{{ iconMicOff }}" hint-placeholder-val="{{ false }}">
+      <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3M4 4l16 16"></path></svg>
+    </sc-if>
+    <sc-if value="{{ iconMicOn }}" hint-placeholder-val="{{ false }}">
+      <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg>
+    </sc-if>
+    <sc-if value="{{ iconPlay }}" hint-placeholder-val="{{ false }}">
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12-7.5a1 1 0 0 0 0-1.72l-12-7.5A1 1 0 0 0 7 4.5z"></path></svg>
+    </sc-if>
+    <sc-if value="{{ iconHourglass }}" hint-placeholder-val="{{ false }}">
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12M6 21h12M7 3c0 5 10 5 10 9s-10 4-10 9M17 3c0 5-10 5-10 9s10 4 10 9"></path></svg>
+    </sc-if>
+    <sc-if value="{{ warnBadge }}" hint-placeholder-val="{{ false }}">
+      <span style="position: absolute; right: -5px; top: -5px; width: 20px; height: 20px; box-sizing: border-box; border-radius: 10px; background: {{c.amber}}; border: 2px solid {{c.solid}}; color: #1F1F22; font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center">!</span>
+    </sc-if>
+    <sc-if value="{{ stop }}" hint-placeholder-val="{{ false }}">
+      <span style="position: absolute; right: -5px; bottom: -5px; width: 22px; height: 22px; box-sizing: border-box; border-radius: 11px; background: {{c.ink}}; border: 2px solid {{c.solid}}; display: flex; align-items: center; justify-content: center">
+        <span style="width: 7px; height: 7px; border-radius: 1.5px; background: {{c.solid}}"></span>
+      </span>
+    </sc-if>
+  </button>
+
+  <button aria-label="{{ menuLabel }}" aria-haspopup="menu" aria-expanded="{{ openText }}" style="flex-grow: 1; min-width: 0; height: {{ menuH }}px; border: 0; border-radius: 12px; background: {{ menuBg }}; color: {{c.ink}}; text-align: left; padding: 0 8px; display: flex; flex-direction: column; justify-content: center; gap: 1px">
+    <span style="display: flex; align-items: center; gap: 4px; font-size: {{ nameFs }}px; font-weight: 600; white-space: nowrap; overflow: hidden">{{ name }}
+      <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M7 10l5-5 5 5M7 14l5 5 5-5"></path></svg>
+    </span>
+    <span style="display: flex; align-items: center; gap: 5px; font-size: {{ statusFs }}px; color: {{ statusColor }}; white-space: {{ statusWs }}; overflow: hidden; text-overflow: ellipsis"><span style="width: 6px; height: 6px; flex-shrink: 0; border-radius: 3px; background: {{ dot }}"></span>{{ status }}</span>
+  </button>
+
+  <sc-if value="{{ showKeys }}" hint-placeholder-val="{{ true }}">
+  <button aria-label="Type instead" style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; border: 0; background: transparent; color: {{c.ink2}}; display: flex; align-items: center; justify-content: center">
+    <svg width="21" height="21" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"></rect><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"></path></svg>
+  </button>
+  </sc-if>
+  <sc-if value="{{ handoff }}" hint-placeholder-val="{{ false }}">
+  <button aria-label="Use the voice in this window" style="height: 40px; flex-shrink: 0; padding: 0 14px; margin-right: 3px; border-radius: 20px; border: 1px solid {{c.line}}; background: {{c.solid}}; color: {{c.ink}}; font-size: 14px; font-weight: 600">Use here</button>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"label":{"editor":"text","default":"Sheepdog"},"status":{"editor":"text","default":"Listening"},"mode":{"editor":"enum","options":["live","quiet","stopped","stoppedquiet","speaking","thinking","stalled","muted","paused","nomic","reconnecting","offline","voiceoff","hold","holding","elsewhere"],"default":"live"},"open":{"editor":"boolean","default":false},"dark":{"editor":"boolean","default":false},"ax":{"editor":"boolean","default":false},"$preview":{"width":366,"height":60}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = { glass: 'rgba(255,255,255,0.74)', rim: 'rgba(228,224,215,0.95)', shadow: '0 8px 24px rgba(31,31,34,0.12)', solid: '#FFFFFF', well: '#F1EEE7', ink: '#1F1F22', ink2: '#6B6E75', line: '#E4E0D7', accent: '#D98718', cream: '#F5F2EA', accentText: '#8A5700', blue: '#1F5F9E', blueSoft: '#E1EAF4', purple: '#6A46B0', purpleSoft: '#ECE6F6', green: '#1D6B46', greenSoft: '#DDEEE4', red: '#B42318', amber: '#D99417', amberSoft: '#FDF1DC', grey: '#8E929A', menu: 'rgba(31,31,34,0.07)' };
+    const dark = { glass: 'rgba(36,38,44,0.74)', rim: 'rgba(62,65,72,0.9)', shadow: '0 8px 24px rgba(0,0,0,0.45)', solid: '#1F2126', well: '#2C2F36', ink: '#F5F2EA', ink2: '#A3A7AF', line: '#2E3138', accent: '#F39C1F', cream: '#F5F2EA', accentText: '#F5B83D', blue: '#6AA8EB', blueSoft: '#22303F', purple: '#B195F0', purpleSoft: '#2C2640', green: '#5CC792', greenSoft: '#1E3428', red: '#E5484D', amber: '#F0A92A', amberSoft: '#2A2416', grey: '#8E929A', menu: 'rgba(245,242,234,0.10)' };
+    const c = this.props.dark ? dark : light;
+    const mode = this.props.mode ?? 'live';
+    const open = !!this.props.open;
+    const name = this.props.label ?? 'Sheepdog';
+    const v = {
+      c, name, status: this.props.status ?? 'Listening', statusColor: c.ink2, dot: c.green,
+      h: this.props.ax ? 76 : 60, radius: this.props.ax ? 38 : 30, menuH: this.props.ax ? 66 : 44,
+      nameFs: this.props.ax ? 21 : 14, statusFs: this.props.ax ? 16 : 12, statusWs: this.props.ax ? 'normal' : 'nowrap',
+      micMuted: false, micLive: true, micOpacity: 1, orbScale: 1, showKeys: true, handoff: false,
+      iconWave: true, iconDots: false, iconSpin: false, iconOff: false, iconMicOff: false, iconMicOn: false, iconPlay: false, iconHourglass: false, warnBadge: false, stop: false,
+      orbBg: c.accent, orbFg: '#1F1F22', orbShadow: '0 0 0 3px ' + c.cream + ', 0 0 0 4px ' + c.line, orbLabel: name + ' is listening',
+      menuBg: open ? c.menu : 'transparent', openText: open ? 'true' : 'false'
+    };
+    const quiet = { orbBg: c.well, orbFg: c.ink, orbShadow: 'inset 0 0 0 1px ' + c.line };
+    if (mode === 'quiet') Object.assign(v, quiet);
+    if (mode === 'speaking') Object.assign(v, { orbBg: c.blueSoft, orbFg: c.blue, orbShadow: 'inset 0 0 0 1.5px ' + c.blue, stop: true, dot: c.blue, orbLabel: 'Stop ' + name });
+    if (mode === 'thinking') Object.assign(v, { orbBg: c.purpleSoft, orbFg: c.purple, orbShadow: 'inset 0 0 0 1.5px ' + c.purple, iconWave: false, iconDots: true, stop: true, dot: c.purple, orbLabel: 'Stop ' + name });
+    if (mode === 'muted') Object.assign(v, quiet, { orbFg: c.ink2, micMuted: true, micLive: false, statusColor: c.red, dot: c.red, orbLabel: 'Microphone muted' });
+    if (mode === 'reconnecting') Object.assign(v, { orbBg: c.amberSoft, orbFg: c.accentText, orbShadow: 'inset 0 0 0 1.5px ' + c.amber, iconWave: false, iconSpin: true, micOpacity: 0.35, statusColor: c.accentText, dot: c.amber, orbLabel: 'Reconnecting' });
+    if (mode === 'offline') Object.assign(v, quiet, { orbFg: c.ink, iconWave: false, iconOff: true, micOpacity: 0, dot: c.grey, orbLabel: 'Offline. Try again' });
+    if (mode === 'voiceoff') Object.assign(v, quiet, { orbFg: c.ink2, iconWave: false, iconMicOff: true, micOpacity: 0, dot: c.grey, orbLabel: 'Voice is off' });
+    if (mode === 'hold') Object.assign(v, quiet, { micOpacity: 0, dot: c.grey, orbLabel: 'Hold to talk' });
+    if (mode === 'stopped') Object.assign(v, { iconWave: false, iconMicOn: true, micOpacity: 0, dot: c.grey, orbShadow: 'none', orbLabel: 'Start talking to ' + name });
+    if (mode === 'stoppedquiet') Object.assign(v, quiet, { iconWave: false, iconMicOn: true, micOpacity: 0, dot: c.grey, orbLabel: 'Start talking to ' + name });
+    if (mode === 'paused') Object.assign(v, { orbBg: c.amberSoft, orbFg: c.accentText, orbShadow: 'inset 0 0 0 1.5px ' + c.amber, iconWave: false, iconPlay: true, statusColor: c.accentText, dot: c.amber, orbLabel: 'Resume audio' });
+    if (mode === 'nomic') Object.assign(v, quiet, { orbFg: c.ink2, iconWave: false, iconMicOff: true, warnBadge: true, micOpacity: 0, statusColor: c.accentText, dot: c.amber, orbLabel: 'The microphone is not available' });
+    if (mode === 'stalled') Object.assign(v, { orbBg: c.amberSoft, orbFg: c.accentText, orbShadow: 'inset 0 0 0 1.5px ' + c.amber, iconWave: false, iconHourglass: true, stop: true, statusColor: c.accentText, dot: c.amber, orbLabel: 'Stop ' + name });
+    if (mode === 'holding') Object.assign(v, { orbBg: c.greenSoft, orbFg: c.green, orbShadow: '0 0 0 3px ' + c.green, orbScale: 1.08, micOpacity: 0, statusColor: c.green, orbLabel: 'Talking. Release to send' });
+    if (mode === 'elsewhere') Object.assign(v, quiet, { orbFg: c.ink2, iconWave: false, iconPlay: false, iconMicOn: true, micOpacity: 0, dot: c.grey, showKeys: false, handoff: true, orbLabel: 'The voice is in another window' });
+    v.menuLabel = 'Voice: ' + name + ', ' + v.status + '. Switch computer or end';
+    return v;
+  }
+}
+</script>
+</body>
+</html>

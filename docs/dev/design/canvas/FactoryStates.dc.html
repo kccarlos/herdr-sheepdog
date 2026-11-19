@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — the factory section in every state</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 3530px; height: 964px; box-sizing: border-box; padding: 30px; display: flex; gap: 50px; background: {{ bg }}; color: {{ ink }}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <sc-for list="{{ states }}" as="s" hint-placeholder-count="8">
+    <div style="width: 390px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px">
+      <span style="height: 48px; font-size: 15px; line-height: 20px; font-weight: 600">{{ s.label }}</span>
+      <div style="width: 390px; height: 844px; border-radius: 40px; overflow: hidden">
+        <dc-import name="FactoryPage" state="{{ s.key }}" dark="{{ dark }}" style="display: block" hint-size="390px,844px"></dc-import>
+      </div>
+    </div>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "$preview": {"width": 3530, "height": 964}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const d = !!this.props.dark;
+    const states = [
+      { key: "noask", label: "Nothing needs you" },
+      { key: "planning", label: "Planning" },
+      { key: "finished", label: "Finished" },
+      { key: "stopped", label: "Stopped, with the fix" },
+      { key: "ownerstop", label: "Stopped by you: start it again" },
+      { key: "loadfail", label: "Could not load" },
+      { key: "end", label: "End of the page: Close space is refused" },
+      { key: "debug", label: "Debug open (a later task)" }
+    ];
+    return { dark: d, states, bg: d ? "#0E0F12" : "#F3F0E8", ink: d ? "#F5F2EA" : "#1F1F22" };
+  }
+}
+</script>
+</body>
+</html>

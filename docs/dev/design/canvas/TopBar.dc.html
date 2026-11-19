@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — top bar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8A5700}a:hover{color:#5E3B00}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 390px; height: 102px; flex-shrink: 0; display: flex; flex-direction: column; background: {{c.bg}}; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <div style="height: 54px"></div>
+  <header style="height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px">
+    <nav aria-label="Panes" style="height: 36px; padding: 3px; box-sizing: border-box; border-radius: 12px; background: {{c.track}}; display: flex; gap: 2px">
+      <button aria-current="{{ convCurrent }}" style="border: 0; border-radius: 9px; background: {{ convBg }}; box-shadow: {{ convShadow }}; color: {{c.ink}}; font-size: 14px; font-weight: {{ convWeight }}; padding: 0 14px">Conversation</button>
+      <button aria-current="{{ agentsCurrent }}" style="border: 0; border-radius: 9px; background: {{ agentsBg }}; box-shadow: {{ agentsShadow }}; color: {{c.ink}}; font-size: 14px; font-weight: {{ agentsWeight }}; padding: 0 12px; display: flex; align-items: center; gap: 6px">Agents
+        <sc-if value="{{ hasBadge }}" hint-placeholder-val="{{ true }}">
+          <span style="min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 9px; background: {{c.accent}}; color: #1F1F22; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center">{{ waiting }}</span>
+        </sc-if>
+      </button>
+    </nav>
+    <span style="flex-grow: 1"></span>
+    <div style="display: flex; border-radius: 20px; border: 1px solid {{c.line}}; background: {{c.surface}}">
+      <button aria-label="New" style="width: 42px; height: 36px; border: 0; background: transparent; color: {{c.ink}}; display: flex; align-items: center; justify-content: center">
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+      </button>
+      <button aria-label="More" style="width: 42px; height: 36px; border: 0; background: transparent; color: {{c.ink}}; display: flex; align-items: center; justify-content: center">
+        <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="5.5" cy="12" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="18.5" cy="12" r="1.7"></circle></svg>
+      </button>
+    </div>
+  </header>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"pane":{"editor":"enum","options":["conversation","agents"],"default":"agents"},"waiting":{"editor":"text","default":"1"},"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":102}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = { bg: '#FAF8F3', surface: '#FFFFFF', track: '#ECE8DF', ink: '#1F1F22', line: '#E4E0D7', accent: '#D98718', sel: '#FFFFFF', shadow: '0 1px 2px rgba(31,31,34,0.12)' };
+    const dark = { bg: '#16181C', surface: '#1F2126', track: '#26292F', ink: '#F5F2EA', line: '#2E3138', accent: '#F39C1F', sel: '#3A3D44', shadow: '0 1px 2px rgba(0,0,0,0.5)' };
+    const c = this.props.dark ? dark : light;
+    const conv = (this.props.pane ?? 'agents') === 'conversation';
+    const waiting = String(this.props.waiting ?? '1');
+    return {
+      c, waiting, hasBadge: waiting !== '' && waiting !== '0',
+      convBg: conv ? c.sel : 'transparent', convShadow: conv ? c.shadow : 'none', convWeight: conv ? 600 : 500, convCurrent: conv ? 'page' : 'false',
+      agentsBg: conv ? 'transparent' : c.sel, agentsShadow: conv ? 'none' : c.shadow, agentsWeight: conv ? 500 : 600, agentsCurrent: conv ? 'false' : 'page'
+    };
+  }
+}
+</script>
+</body>
+</html>

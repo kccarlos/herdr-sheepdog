@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Factory web — home</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.sd-light{--bg:#FAF8F3;--card:#FFFFFF;--code:#F1EEE7;--line:#E4E0D7;--fg:#1F1F22;--muted:#6B6E75;--mof:#5C5F66;--primary:#D98718;--ptext:#8A5700;--onp:#1F1F22;--psoft:#FDF1DC;--blocked:#D99417;--working:#1F5F9E;--done:#1D6B46;--idle:#5C6370;--thinking:#6A46B0;--dash:#8E8A80;--wsoft:#E1EAF4;--dsoft:#DDEEE4;--track:#ECE8DF;--shadow:0 1px 2px rgba(31,31,34,0.12)}
+.sd-dark{--bg:#16181C;--card:#1F2126;--code:#26292F;--line:#2E3138;--fg:#F5F2EA;--muted:#A3A7AF;--mof:#A3A7AF;--primary:#F39C1F;--ptext:#F5B83D;--onp:#1F1F22;--psoft:#2A2416;--blocked:#F0A92A;--working:#6AA8EB;--done:#5CC792;--idle:#9AA1AD;--thinking:#B195F0;--dash:#6B707A;--wsoft:#22303F;--dsoft:#1E3428;--track:#26292F;--shadow:0 1px 2px rgba(0,0,0,0.5)}
+.sd-light .logo-d,.sd-dark .logo-l{display:none}
+.sd a{color:var(--ptext)}.sd a:hover{color:var(--fg)}
+.sd textarea::placeholder{color:var(--muted)}
+.sd :focus-visible{outline:3px solid #F39C1F;outline-offset:2px;box-shadow:0 0 0 2px var(--fg)}
+</style>
+</helmet>
+<div class="{{rootClass}}" style="min-height: 100vh; background: var(--bg); color: var(--fg); font-family: Inter, system-ui, -apple-system, sans-serif; font-size: 15px; line-height: 1.5">
+
+<sc-if value="{{offline}}" hint-placeholder-val="{{false}}">
+<div role="status" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; padding: 10px 16px; background: var(--code); border-bottom: 1px dashed var(--dash); font-size: 14px; color: var(--fg)">
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 999px; background: var(--idle)"></span>
+<span>Can't reach sheepdog since 10:42. Showing what it showed last; trying again.</span>
+<span style="color: var(--mof)">Sending waits until it's back.</span>
+</div>
+</sc-if>
+
+<div style="max-width: 1360px; margin: 0 auto; padding: 20px clamp(16px, 3vw, 32px) 48px; box-sizing: border-box; display: flex; flex-direction: column; gap: 20px">
+
+<header style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px">
+<div style="display: flex; align-items: center; gap: 10px">
+<img class="logo-l" src="/_blob/1899743c7d9a9dc4065fe836d387e378" alt="" style="width: 32px; height: 32px">
+<img class="logo-d" src="/_blob/fe17d5bf22f3edd8d8670b3bb6d28a53" alt="" style="width: 32px; height: 32px">
+<span style="font-family: Outfit, Inter, sans-serif; font-weight: 700; font-size: 20px; line-height: 1; letter-spacing: -0.01em">sheepdog</span>
+<span style="font-family: Outfit, Inter, sans-serif; font-weight: 500; font-size: 20px; line-height: 1; color: var(--muted)">factory</span>
+<span style="display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; font-size: 13px; color: var(--muted)"><span aria-hidden="true" style="{{linkDot}}"></span>{{linkText}}</span>
+</div>
+<section aria-label="Usage pools" style="display: flex; flex-wrap: wrap; gap: 8px">
+<sc-for list="{{pools}}" as="p" hint-placeholder-count="4">
+<div style="display: flex; flex-direction: column; gap: 5px; min-width: 148px; flex: 1 1 148px; padding: 8px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 14px">
+<div style="display: flex; justify-content: space-between; gap: 8px; font-size: 12px">
+<span style="font-weight: 500">{{p.label}}</span>
+<span style="font-variant-numeric: tabular-nums">{{p.left}}</span>
+</div>
+<div style="height: 4px; background: var(--track); border-radius: 999px; overflow: hidden"><div style="{{p.bar}}"></div></div>
+<span style="font-size: 12px; color: var(--muted)">{{p.note}}</span>
+</div>
+</sc-for>
+</section>
+</header>
+
+<section aria-label="Send a request" style="display: flex; flex-direction: column; gap: 8px; padding: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow)">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px">
+<div style="flex: 999 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 6px">
+<label for="ask" style="font-size: 14px; font-weight: 500">tell the factory what you want</label>
+<textarea id="ask" rows="2" placeholder="e.g. make the board show which model each worker runs" style="resize: none; width: 100%; box-sizing: border-box; padding: 11px 14px; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 14px; font: inherit"></textarea>
+</div>
+<div style="display: flex; gap: 8px; flex: 1 0 auto; justify-content: flex-end">
+<button type="button" aria-label="Speak your request" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 999px; cursor: pointer">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0"></path><path d="M12 18v3"></path></svg>
+</button>
+<button type="button" disabled="{{sendDisabled}}" style="{{sendStyle}}">Send</button>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--muted)">
+<span>Goes to the coordinator. It plans the work and asks you only for decisions.</span>
+
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+
+<main style="flex: 999 1 600px; min-width: 0; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px">
+<h1 style="margin: 0; font-family: Outfit, Inter, sans-serif; font-weight: 600; font-size: 24px">tasks</h1>
+<span style="font-size: 13px; color: var(--muted)">Milestone 3 of 4 · 7 of 12 merged</span>
+</div>
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="4">
+<section aria-label="{{g.label}}" style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; align-items: baseline; gap: 8px; min-height: 24px">
+<h2 style="{{g.labelStyle}}">{{g.label}}</h2>
+<span style="font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums">{{g.count}}</span>
+</div>
+<div style="display: flex; flex-direction: column; background: var(--card); border: 1px solid {{g.border}}; border-radius: 14px; overflow: hidden">
+<sc-for list="{{g.rows}}" as="r" hint-placeholder-count="2">
+<a href="FactoryWebTask.dc.html" style="{{r.rowStyle}}">
+<span aria-hidden="true" style="{{r.dot}}"></span>
+<div style="flex: 999 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+<div style="display: flex; align-items: baseline; gap: 8px; min-width: 0">
+<span style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted)">{{r.id}}</span>
+<span style="font-size: 15px; font-weight: 500; line-height: 1.35">{{r.title}}</span>
+</div>
+<span style="font-size: 13px; color: {{r.statusColor}}">{{r.status}}</span>
+<sc-if value="{{r.hasBar}}" hint-placeholder-val="{{true}}">
+<div style="margin-top: 4px; height: 3px; max-width: 320px; background: var(--track); border-radius: 999px; overflow: hidden"><div style="{{r.bar}}"></div></div>
+</sc-if>
+</div>
+<div style="flex: 1 0 auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px">
+<span style="padding: 1px 8px; font-size: 12px; background: var(--code); color: var(--mof); border-radius: 4px">{{r.worker}}</span>
+<sc-if value="{{r.reviewer}}" hint-placeholder-val="{{false}}">
+<span style="padding: 1px 8px; font-size: 12px; background: var(--code); color: var(--mof); border-radius: 4px">{{r.reviewer}}</span>
+</sc-if>
+<span style="min-width: 44px; text-align: right; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums">{{r.eta}}</span>
+</div>
+</a>
+</sc-for>
+</div>
+</section>
+</sc-for>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 2px">
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; font-size: 14px; text-decoration: none">7 done · show them</a>
+<span style="font-size: 13px; color: var(--muted)">5 left · about 3 h along the longest path</span>
+</div>
+</main>
+
+<aside style="flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+
+<section aria-label="Open asks" style="display: flex; flex-direction: column; gap: 10px; padding: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 14px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px">
+<h2 style="margin: 0; font-family: Outfit, Inter, sans-serif; font-weight: 600; font-size: 18px">asks for you</h2>
+<span style="font-size: 13px; color: var(--ptext); font-weight: 500">2 waiting</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; background: var(--psoft); border: 1.5px solid var(--blocked); border-radius: 14px">
+<div style="display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--fg)">
+<span><span style="font-family: ui-monospace, Menlo, monospace">SDF-17</span> · the coordinator asks</span>
+<span style="font-variant-numeric: tabular-nums">12 min</span>
+</div>
+<p style="margin: 0; font-size: 15px; font-weight: 500; line-height: 1.4">Should designs wait for your yes before they are built?</p>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<button type="button" style="min-height: 44px; padding: 0 16px; background: var(--card); color: var(--fg); border: 1.5px solid var(--fg); border-radius: 999px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Wait for my yes · recommended</button>
+<button type="button" style="min-height: 44px; padding: 0 16px; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 999px; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer">Let the review model decide</button>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; background: var(--psoft); border: 1.5px solid var(--blocked); border-radius: 14px">
+<div style="display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--fg)"><span>the herdr-sheepdog factory asks</span></div>
+<p style="margin: 0; font-size: 15px; font-weight: 600; line-height: 1.4">Merge these 4 now, without waiting for CI and review?</p>
+<ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px">
+<li style="min-height: 32px; box-sizing: border-box; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); font-size: 14px; line-height: 19px">SDF-12 · CI green</li>
+<li style="min-height: 32px; box-sizing: border-box; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); font-size: 14px; line-height: 19px">SDF-14 · CI running</li>
+<li style="min-height: 32px; box-sizing: border-box; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); font-size: 14px; line-height: 19px">SDF-15 · CI red</li>
+<li style="min-height: 32px; box-sizing: border-box; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); font-size: 14px; line-height: 19px">SDF-17 · not reviewed</li>
+</ul>
+<div style="display: flex; gap: 8px">
+<button type="button" style="min-height: 44px; padding: 0 16px; flex: 1 1 0; background: var(--card); color: var(--fg); border: 1.5px solid var(--fg); border-radius: 999px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Merge</button>
+<button type="button" style="min-height: 44px; padding: 0 16px; flex: 1 1 0; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 999px; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer">Not now</button>
+</div>
+<span style="font-size: 13px; color: var(--muted)">Only you can answer this. A conflict, or a commit newer than this card, is not merged.</span>
+</div>
+</section>
+
+<section aria-label="Agent tree" style="display: flex; flex-direction: column; gap: 12px; padding: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 14px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px">
+<h2 style="margin: 0; font-family: Outfit, Inter, sans-serif; font-weight: 600; font-size: 18px">agents</h2>
+<span style="font-size: 13px; color: var(--muted)">6 running</span>
+</div>
+<div style="display: flex; align-items: center; gap: 10px">
+<span aria-hidden="true" style="width: 10px; height: 10px; border-radius: 999px; background: var(--thinking)"></span>
+<div style="display: flex; flex-direction: column">
+<span style="font-weight: 500">Coordinator</span>
+<span style="font-size: 12px; color: var(--muted)">claude opus · plans and watches · idle</span>
+</div>
+</div>
+<ul style="list-style: none; margin: 0 0 0 4px; padding: 0 0 0 14px; border-left: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px">
+<sc-for list="{{tree}}" as="w" hint-placeholder-count="5">
+<li style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; align-items: center; gap: 10px; min-height: 36px">
+<span aria-hidden="true" style="{{w.dot}}"></span>
+<div style="display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto">
+<span style="font-size: 14px"><span style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted)">{{w.id}}</span> worker</span>
+<span style="font-size: 12px; color: var(--muted)">{{w.model}} · {{w.state}}</span>
+</div>
+<sc-if value="{{w.hasThumb}}" hint-placeholder-val="{{false}}">
+<a href="Preview.dc.html" aria-label="{{w.thumbLabel}}" style="flex: none; width: 64px; height: 44px; box-sizing: border-box; padding: 6px; background: var(--code); border: 1px solid var(--line); border-radius: 8px; display: flex; flex-direction: column; gap: 3px; overflow: hidden; position: relative">
+<span style="{{w.t1}}"></span><span style="{{w.t2}}"></span><span style="{{w.t3}}"></span>
+<span aria-hidden="true" style="position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 999px; background: var(--working); box-shadow: 0 0 0 2px var(--code)"></span>
+</a>
+</sc-if>
+</div>
+<sc-if value="{{w.hasChild}}" hint-placeholder-val="{{false}}">
+<div style="margin-left: 4px; padding-left: 14px; border-left: 1px dashed var(--dash); display: flex; align-items: center; gap: 10px">
+<span aria-hidden="true" style="{{w.childDot}}"></span>
+<span style="font-size: 12px; color: var(--muted)">{{w.child}}</span>
+</div>
+</sc-if>
+</li>
+</sc-for>
+</ul>
+</section>
+</aside>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"offline":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":1840}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const theme = this.props.theme ?? 'light';
+    const offline = this.props.offline ?? false;
+    const dot = (c, s) => 'flex:none;display:inline-block;width:' + (s || 10) + 'px;height:' + (s || 10) + 'px;border-radius:999px;background:var(--' + c + ')';
+    const bar = (pct, c) => 'height:100%;width:' + pct + '%;background:var(--' + c + ');border-radius:999px';
+    const pool = (label, pct, note) => ({ label, left: pct + '% left', note, bar: bar(pct, 'fg') });
+    const row = (o, last) => ({
+      reviewer: '', hasBar: false, bar: '', eta: '', statusColor: 'var(--muted)', ...o,
+      rowStyle: 'display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;min-height:44px;padding:10px 14px;color:var(--fg);text-decoration:none' + (last ? '' : ';border-bottom:1px solid var(--line)')
+    });
+    const group = (label, rows, opts) => ({
+      label, count: String(rows.length), border: (opts && opts.border) || 'var(--line)',
+      labelStyle: 'margin:0;font-size:13px;font-weight:600;letter-spacing:0.2px;text-transform:uppercase;color:var(--' + ((opts && opts.color) || 'muted') + ')',
+      rows: rows.map((r, i) => row(r, i === rows.length - 1))
+    });
+    const work = (id, title, status, pct, eta, worker, reviewer) => ({ id, title, status, eta, worker, reviewer: reviewer || '', dot: dot('working', 8), hasBar: pct !== null, bar: bar(pct || 0, 'working') });
+    const ci = (id, title, status, eta, worker, reviewer) => ({ id, title, status, eta, worker, reviewer, dot: dot('working', 8) });
+    const wait = (id, title, status) => ({ id, title, status, worker: 'not started', dot: dot('idle', 8) });
+    const groups = [
+      group('needs you', [{ id: 'SDF-17', title: 'Web factory page: the ask and override cards', status: 'Waiting for your answer · see asks for you', statusColor: 'var(--ptext)', worker: 'claude opus', reviewer: 'round 1 of 2', eta: '12 min', dot: dot('blocked', 8) }], { color: 'ptext', border: 'var(--blocked)' }),
+      group('blocked', [{ id: 'SDF-22', title: 'Doctor: refuse a repo with no pull-request workflow', status: 'No checks after 5 min · waits on the coordinator', worker: 'claude sonnet', reviewer: 'round 1 of 2', dot: dot('thinking', 8) }]),
+      group('waiting on CI', [
+        ci('SDF-12', 'Engine: the acceptance table', 'Waiting on CI, 18 min', '~20m', 'claude opus', '2 passing rounds'),
+        ci('SDF-15', 'Engine: the run table', 'Waiting on CI, 6 min', '~25m', 'claude sonnet', '2 passing rounds')
+      ]),
+      group('working', [
+        work('SDF-14', 'Engine: the review ladder', 'Working · claude opus · round 1 of 2', 55, '~1h', 'claude opus', 'round 1 of 2'),
+        work('SDF-18', 'Log: the rule behind each step', 'Checking 3 outcomes', 80, '~30m', 'claude sonnet', 'round 1 of 2'),
+        work('SDF-19', 'Doctor: the five start questions', 'Working · claude sonnet · round 1 of 2', 30, '~1h', 'claude sonnet', 'round 1 of 2')
+      ]),
+      group('waiting on others', [
+        wait('SDF-23', 'Digest: merged, waiting, pools, alerts', 'After SDF-14'),
+        wait('SDF-24', 'Milestone check: a verify task', 'After SDF-12, SDF-15')
+      ]),
+      group('queued', [wait('SDF-25', 'Web factory page: the log', 'No slot is free')])
+    ];
+    const tree = [
+      { id: 'SDF-17', model: 'claude opus', state: 'waiting for you', dot: dot('blocked'), hasChild: false, child: '', childDot: '' },
+      { id: 'SDF-12', model: 'claude opus', state: 'idle · CI running', dot: dot('idle'), hasChild: false, child: '', childDot: '' },
+      { id: 'SDF-14', model: 'claude opus', state: 'working', dot: dot('working'), hasChild: true, child: 'reviewer · another model · round 1', childDot: dot('working', 8) },
+      { id: 'SDF-18', model: 'claude sonnet', state: 'working', dot: dot('working'), hasChild: false, child: '', childDot: '' },
+      { id: 'SDF-19', model: 'claude sonnet', state: 'working', dot: dot('working'), hasChild: false, child: '', childDot: '' }
+    ].map((w) => ({ hasThumb: false, thumbLabel: '', t1: '', t2: '', t3: '', ...w }));
+    return {
+      rootClass: 'sd sd-' + theme,
+      offline,
+      linkDot: dot(offline ? 'idle' : 'done', 8),
+      linkText: offline ? 'not connected · Mac mini' : 'live · Mac mini',
+      sendDisabled: offline,
+      sendStyle: 'height:44px;padding:0 22px;border:none;border-radius:999px;font:inherit;font-weight:600;cursor:pointer;' + (offline ? 'background:var(--track);color:var(--muted)' : 'background:var(--primary);color:var(--onp)'),
+      pools: [
+        pool('claude · 5 hours', 95, 'refills 15:35'),
+        pool('claude · week', 18, 'refills 20:05 · spend with care'),
+        pool('codex · week', 0, 'empty until 19:45'),
+        pool('antigravity · week', 70, 'refills Friday')
+      ],
+      groups,
+      tree
+    };
+  }
+}
+</script>
+</body>
+</html>

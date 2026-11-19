@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Factory engine — the settings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.eng{--bg:#FAF8F3;--surface:#FFFFFF;--fg:#1F1F22;--muted:#6B6E75;--line:#E4E0D7;--band:#F1EEE7;--edge:#8E929A;--accent:#1D6B46;--accent-soft:#DDEEE4;--in:#6A46B0;--amber:#8A5700;--amber-edge:#D99417;--amber-soft:#FDF1DC;
+--c-worker:#1F5F9E;--c-engine:#5C6370;--c-reviewer:#553591;--c-ci:#1D6B46;--c-coord:#6A46B0;--c-owner:#8A5700;--c-nobody:#646A75;--c-other:#646A75;
+--font-ui:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;--font-display:Outfit,Inter,system-ui,sans-serif;--font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+box-sizing:border-box;background:var(--bg);color:var(--fg);font:15px/1.5 var(--font-ui);-webkit-font-smoothing:antialiased}
+.eng *{box-sizing:border-box}
+.eng h1{font:600 2rem/1.2 var(--font-display);margin:0 0 8px;letter-spacing:-0.01em}
+.eng h2{font:600 1.25rem/1.3 var(--font-display);margin:0}
+.eng h3{font-size:.8125rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0;font-weight:600}
+.eng p{margin:0}
+.eng .intro{max-width:80ch;color:var(--muted);font-size:1rem}
+.eng .intro b{color:var(--fg);font-weight:600}
+.eng code,.eng .mono{font-family:var(--font-mono);font-size:.88em}
+.eng .sub{color:var(--muted);font-size:.9rem}
+.eng .chip{--c:var(--c-other);font:500 .875rem/1.4 var(--font-ui);border-radius:999px;padding:1px 10px;border:1px solid color-mix(in srgb,var(--c) 55%,transparent);background:color-mix(in srgb,var(--c) 12%,var(--surface));color:var(--c)}
+.eng .c-worker{--c:var(--c-worker)}.eng .c-engine{--c:var(--c-engine)}.eng .c-reviewer{--c:var(--c-reviewer)}.eng .c-ci{--c:var(--c-ci)}
+.eng .c-coordinator{--c:var(--c-coord)}.eng .c-owner{--c:var(--c-owner);background:var(--amber-soft);border-color:var(--amber-edge);font-weight:600}.eng .c-nobody{--c:var(--c-nobody);background:none}.eng .c-other{--c:var(--c-other);background:none}
+.eng .a-passed{--c:var(--c-ci)}.eng .a-fix{--c:var(--c-worker)}.eng .a-review{--c:var(--c-reviewer)}.eng .a-retro{--c:var(--c-engine)}.eng .a-recap{--c:var(--c-coord)}
+.eng .ladder{display:flex;flex-direction:column;gap:6px}
+.eng .ladder .gh{margin-top:16px;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline}
+.eng .ladder .gh:first-child{margin-top:0}
+.eng .ladder .gh span{color:var(--muted);font-size:.9rem}
+.eng .rung{background:var(--surface);border:1px solid var(--line);border-radius:8px}
+.eng .rsum,.eng .rung-s{display:grid;grid-template-columns:3.4rem minmax(0,1fr) auto;gap:4px 12px;align-items:start;padding:9px 12px}
+.eng .rid{font:600 .95rem var(--font-mono);color:var(--accent)}
+.eng .cond{font-size:.9rem;min-width:0;overflow-wrap:anywhere}
+.eng .chips{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;max-width:420px}
+.eng .rbody{padding:2px 12px 12px calc(3.4rem + 24px);display:grid;gap:6px;font-size:.88rem}
+.eng .rbody b{font:600 .8125rem var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:block}
+.eng .rung.merge{border:2px solid var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--surface))}
+.eng .rung.merge .rid::after{content:" MERGE";font:600 .75rem var(--font-ui);letter-spacing:.1em}
+.eng .rung.ovr{border-color:var(--amber-edge);background:var(--amber-soft)}
+.eng .rung.ovr .rid{color:var(--amber)}
+.eng .gh.ovr h3{color:var(--amber)}
+.eng .rung.fallback{border-style:dashed;border-color:var(--edge);background:none;color:var(--muted)}
+.eng .rung.fallback .rid{color:var(--muted)}
+.eng .tunewrap{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden}
+.eng table{border-collapse:collapse;width:100%;font-size:.88rem}
+.eng th,.eng td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.eng th{font-size:.8125rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.eng tr:last-child td{border-bottom:0}
+.eng td.m{font-family:var(--font-mono);font-size:.84rem}
+.eng .sect{display:flex;flex-direction:column;gap:14px}
+.eng figure{margin:0}
+.eng .diagram{background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.eng .diagram svg{display:block;width:100%;height:auto}
+.eng figcaption{font-size:.9rem;color:var(--muted);margin-top:8px;max-width:90ch}
+.eng .node rect.body{fill:var(--surface);stroke:var(--edge);stroke-width:1.5}
+.eng .node text{fill:var(--fg);font:500 12px var(--font-mono);text-anchor:middle;dominant-baseline:central}
+.eng .node.term rect.body{stroke-width:2.5}
+.eng .ln{fill:none;stroke:var(--edge);stroke-width:1.3;stroke-opacity:.8}
+.eng .edge .hit{fill:none;stroke:transparent}
+.eng .lbl rect{fill:var(--surface);stroke:var(--line);stroke-width:.8}
+.eng .lbl text{fill:var(--fg);font:400 10.5px var(--font-mono);text-anchor:middle;dominant-baseline:central}
+.eng .m-n{fill:var(--edge)}
+.eng .panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.eng .grp{display:flex;flex-direction:column;gap:6px}
+.eng .row{display:grid;grid-template-columns:4.2rem minmax(0,1fr);gap:12px;padding:9px 0;border-top:1px solid var(--line)}
+.eng .rline{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
+.eng .rline .st{font-family:var(--font-mono);font-size:.875rem;background:var(--band);border-radius:5px;padding:1px 6px;overflow-wrap:anywhere}
+.eng .rline .st.to{background:var(--accent-soft)}
+.eng .rline .on{color:var(--muted);font-size:.9rem}
+.eng .rline .on b{font-family:var(--font-mono);font-weight:500;color:var(--fg)}
+.eng .rg,.eng .rd{font-size:.9rem;margin-top:3px}
+.eng .rg span,.eng .rd span{color:var(--muted)}
+.eng .tag{font-size:.8125rem;border:1px solid var(--line);border-radius:999px;padding:0 8px;color:var(--muted)}
+.eng .note{font-size:.9rem;color:var(--muted)}
+.eng .happy{list-style:none;margin:0;padding:0;display:flex;gap:10px;align-items:stretch}
+.eng .happy li{flex:1 1 0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:6px;font-size:.95rem}
+.eng .happy li.mg{border:2px solid var(--accent)}
+.eng .happy .n{font:600 1rem var(--font-mono);color:var(--accent)}
+.eng .lines{display:flex;flex-direction:column;gap:12px;max-width:100ch;margin:0;padding:0;list-style:none;font-size:1.0625rem;line-height:1.5}
+.eng .lines li{display:grid;grid-template-columns:2rem minmax(0,1fr)}
+.eng .lines li span.k{font:600 1rem var(--font-mono);color:var(--accent)}
+</style>
+</helmet>
+<div class="eng" style="width:1344px;height:1159px;padding:40px 32px 48px"><header style="margin-bottom:24px"><h1>Settings: every number is tunable by the owner</h1><p class="intro">The rows are code; every number a rule uses is a named setting the owner can change while the factory runs.</p></header><div class="sect"><div class="sub">Section 10.1. The rows are code; every number a rule uses is a named setting the owner can change while the factory runs.</div><div class="tunewrap"><table><thead><tr><th>Setting</th><th>Default</th><th>Range</th><th>Used by</th></tr></thead><tbody><tr><td class="m">review_rounds</td><td class="m">2</td><td class="m">1–5</td><td class="m">L8, L9</td></tr><tr><td class="m">max_rounds (per attempt)</td><td class="m">5</td><td class="m">review_rounds–10</td><td class="m">L11</td></tr><tr><td class="m">retro_after_rounds_with_majors, retro_from_round</td><td class="m">2, 3</td><td class="m">2–4, 2–6</td><td class="m">L10, L11</td></tr><tr><td class="m">retros_per_task, retro_fix_verdicts</td><td class="m">1, 2</td><td class="m">0–2, 1–3</td><td class="m">L3, L10</td></tr><tr><td class="m">continues_per_task, continue_lines</td><td class="m">1, 60</td><td class="m">0–3, 0–500</td><td class="m">recaps (N12–N14, section 4.9)</td></tr><tr><td class="m">task_size_limit (lines), size_cap_factor (× estimate)</td><td class="m">400, 2</td><td class="m">50–2000, 1–5</td><td class="m">plan checks; N12</td></tr><tr><td class="m">plan_review_rounds</td><td class="m">2</td><td class="m">0–5</td><td class="m">plan review (11.7)</td></tr><tr><td class="m">ci_fails_per_hour, build_hours</td><td class="m">3, 4</td><td class="m">1–10, 1–48</td><td class="m">N13, N14</td></tr><tr><td class="m">flake_reruns, merge_tries</td><td class="m">1, 3</td><td class="m">0–3, 1–10</td><td class="m">N33, N34, N41</td></tr><tr><td class="m">checks_grace_minutes, ci_stalled_minutes, main_red_minutes</td><td class="m">5, 90, 60</td><td class="m">1–60, 10–600, 5–600</td><td class="m">N35, N36, alerts</td></tr><tr><td class="m">max_running</td><td class="m">set at start</td><td class="m">1–20</td><td class="m">N10</td></tr><tr><td class="m">worker_restarts, reviewer_retries</td><td class="m">3, 2</td><td class="m">0–10, 0–5</td><td class="m">section 4.8</td></tr><tr><td class="m">ensure_failures, ensure_backoff_minutes</td><td class="m">3, 1</td><td class="m">1–10, 1–60</td><td class="m">N5, section 8</td></tr><tr><td class="m">start_minutes, idle_grace_seconds, quiet_minutes, interrupt_seconds, review_minutes</td><td class="m">2, 20, 20, 90, 45</td><td class="m">1–15, 5–120, 5–120, 10–600, 10–240</td><td class="m">R11, R18–R22, N29</td></tr><tr><td class="m">background_job_minutes, blocked_minutes</td><td class="m">30, 10</td><td class="m">1–240, 1–120</td><td class="m">N23, N39; R29</td></tr><tr><td class="m">coordinator_starts_per_hour, coordinator_gap_minutes, owner_typing_minutes, coordinator_silent_minutes</td><td class="m">3, 10, 5, 30</td><td class="m">1–10, 1–60, 1–60, 5–240</td><td class="m">J6, J9</td></tr><tr><td class="m">rotate_after_hours, rotate_after_turns, handoff_minutes, heartbeat_minutes</td><td class="m">4, 150, 5, 60</td><td class="m">1–24, 20–1000, 1–30, 10–600</td><td class="m">J11, J13</td></tr><tr><td class="m">pool_floor_percent, pool_minutes, sweep_minutes</td><td class="m">5, 5, 5</td><td class="m">0–50, 1–60, 1–60</td><td class="m">section 7.3</td></tr></tbody></table></div><p class="note">Settings that are choices, not numbers, are set the same way: design_gate (review model or owner), delegation (kinds, scope, until), notify_level, merge_policy, project_priority, models per role, verify (section 11.6).</p><p class="note"><b>Not a setting, ever:</b> the rows themselves, the acceptance table, the owner's proof, the invariants, &quot;no checks is never green&quot;, &quot;never merge a commit no reviewer passed, unless the owner overrode that very commit&quot;. Rails stay in code; a row change goes through review and shows up in the generated table document.</p></div></div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview": {"width": 1344, "height": 1159}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

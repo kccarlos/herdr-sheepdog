@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Factory engine — the project rules</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.eng{--bg:#FAF8F3;--surface:#FFFFFF;--fg:#1F1F22;--muted:#6B6E75;--line:#E4E0D7;--band:#F1EEE7;--edge:#8E929A;--accent:#1D6B46;--accent-soft:#DDEEE4;--in:#6A46B0;--amber:#8A5700;--amber-edge:#D99417;--amber-soft:#FDF1DC;
+--c-worker:#1F5F9E;--c-engine:#5C6370;--c-reviewer:#553591;--c-ci:#1D6B46;--c-coord:#6A46B0;--c-owner:#8A5700;--c-nobody:#646A75;--c-other:#646A75;
+--font-ui:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;--font-display:Outfit,Inter,system-ui,sans-serif;--font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+box-sizing:border-box;background:var(--bg);color:var(--fg);font:15px/1.5 var(--font-ui);-webkit-font-smoothing:antialiased}
+.eng *{box-sizing:border-box}
+.eng h1{font:600 2rem/1.2 var(--font-display);margin:0 0 8px;letter-spacing:-0.01em}
+.eng h2{font:600 1.25rem/1.3 var(--font-display);margin:0}
+.eng h3{font-size:.8125rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0;font-weight:600}
+.eng p{margin:0}
+.eng .intro{max-width:80ch;color:var(--muted);font-size:1rem}
+.eng .intro b{color:var(--fg);font-weight:600}
+.eng code,.eng .mono{font-family:var(--font-mono);font-size:.88em}
+.eng .sub{color:var(--muted);font-size:.9rem}
+.eng .chip{--c:var(--c-other);font:500 .875rem/1.4 var(--font-ui);border-radius:999px;padding:1px 10px;border:1px solid color-mix(in srgb,var(--c) 55%,transparent);background:color-mix(in srgb,var(--c) 12%,var(--surface));color:var(--c)}
+.eng .c-worker{--c:var(--c-worker)}.eng .c-engine{--c:var(--c-engine)}.eng .c-reviewer{--c:var(--c-reviewer)}.eng .c-ci{--c:var(--c-ci)}
+.eng .c-coordinator{--c:var(--c-coord)}.eng .c-owner{--c:var(--c-owner);background:var(--amber-soft);border-color:var(--amber-edge);font-weight:600}.eng .c-nobody{--c:var(--c-nobody);background:none}.eng .c-other{--c:var(--c-other);background:none}
+.eng .a-passed{--c:var(--c-ci)}.eng .a-fix{--c:var(--c-worker)}.eng .a-review{--c:var(--c-reviewer)}.eng .a-retro{--c:var(--c-engine)}.eng .a-recap{--c:var(--c-coord)}
+.eng .ladder{display:flex;flex-direction:column;gap:6px}
+.eng .ladder .gh{margin-top:16px;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline}
+.eng .ladder .gh:first-child{margin-top:0}
+.eng .ladder .gh span{color:var(--muted);font-size:.9rem}
+.eng .rung{background:var(--surface);border:1px solid var(--line);border-radius:8px}
+.eng .rsum,.eng .rung-s{display:grid;grid-template-columns:3.4rem minmax(0,1fr) auto;gap:4px 12px;align-items:start;padding:9px 12px}
+.eng .rid{font:600 .95rem var(--font-mono);color:var(--accent)}
+.eng .cond{font-size:.9rem;min-width:0;overflow-wrap:anywhere}
+.eng .chips{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;max-width:420px}
+.eng .rbody{padding:2px 12px 12px calc(3.4rem + 24px);display:grid;gap:6px;font-size:.88rem}
+.eng .rbody b{font:600 .8125rem var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:block}
+.eng .rung.merge{border:2px solid var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--surface))}
+.eng .rung.merge .rid::after{content:" MERGE";font:600 .75rem var(--font-ui);letter-spacing:.1em}
+.eng .rung.ovr{border-color:var(--amber-edge);background:var(--amber-soft)}
+.eng .rung.ovr .rid{color:var(--amber)}
+.eng .gh.ovr h3{color:var(--amber)}
+.eng .rung.fallback{border-style:dashed;border-color:var(--edge);background:none;color:var(--muted)}
+.eng .rung.fallback .rid{color:var(--muted)}
+.eng .tunewrap{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden}
+.eng table{border-collapse:collapse;width:100%;font-size:.88rem}
+.eng th,.eng td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.eng th{font-size:.8125rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.eng tr:last-child td{border-bottom:0}
+.eng td.m{font-family:var(--font-mono);font-size:.84rem}
+.eng .sect{display:flex;flex-direction:column;gap:14px}
+.eng figure{margin:0}
+.eng .diagram{background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.eng .diagram svg{display:block;width:100%;height:auto}
+.eng figcaption{font-size:.9rem;color:var(--muted);margin-top:8px;max-width:90ch}
+.eng .node rect.body{fill:var(--surface);stroke:var(--edge);stroke-width:1.5}
+.eng .node text{fill:var(--fg);font:500 12px var(--font-mono);text-anchor:middle;dominant-baseline:central}
+.eng .node.term rect.body{stroke-width:2.5}
+.eng .ln{fill:none;stroke:var(--edge);stroke-width:1.3;stroke-opacity:.8}
+.eng .edge .hit{fill:none;stroke:transparent}
+.eng .lbl rect{fill:var(--surface);stroke:var(--line);stroke-width:.8}
+.eng .lbl text{fill:var(--fg);font:400 10.5px var(--font-mono);text-anchor:middle;dominant-baseline:central}
+.eng .m-n{fill:var(--edge)}
+.eng .panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.eng .grp{display:flex;flex-direction:column;gap:6px}
+.eng .row{display:grid;grid-template-columns:4.2rem minmax(0,1fr);gap:12px;padding:9px 0;border-top:1px solid var(--line)}
+.eng .rline{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
+.eng .rline .st{font-family:var(--font-mono);font-size:.875rem;background:var(--band);border-radius:5px;padding:1px 6px;overflow-wrap:anywhere}
+.eng .rline .st.to{background:var(--accent-soft)}
+.eng .rline .on{color:var(--muted);font-size:.9rem}
+.eng .rline .on b{font-family:var(--font-mono);font-weight:500;color:var(--fg)}
+.eng .rg,.eng .rd{font-size:.9rem;margin-top:3px}
+.eng .rg span,.eng .rd span{color:var(--muted)}
+.eng .tag{font-size:.8125rem;border:1px solid var(--line);border-radius:999px;padding:0 8px;color:var(--muted)}
+.eng .note{font-size:.9rem;color:var(--muted)}
+.eng .happy{list-style:none;margin:0;padding:0;display:flex;gap:10px;align-items:stretch}
+.eng .happy li{flex:1 1 0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:6px;font-size:.95rem}
+.eng .happy li.mg{border:2px solid var(--accent)}
+.eng .happy .n{font:600 1rem var(--font-mono);color:var(--accent)}
+.eng .lines{display:flex;flex-direction:column;gap:12px;max-width:100ch;margin:0;padding:0;list-style:none;font-size:1.0625rem;line-height:1.5}
+.eng .lines li{display:grid;grid-template-columns:2rem minmax(0,1fr)}
+.eng .lines li span.k{font:600 1rem var(--font-mono);color:var(--accent)}
+</style>
+</helmet>
+<div class="eng" style="width:1344px;height:2212px;padding:40px 32px 48px"><header style="margin-bottom:24px"><h1>The project rules</h1><p class="intro">One ordered table for the project as a whole: the coordinator, the plan and the alerts. First match wins.</p></header><div class="sect"><div class="sub">Section 6. First match wins. While a stopping alert is active nothing new starts, whatever row matches.</div><div class="ladder"><div class="rung"><div class="rsum"><span class="rid">J1</span><span class="cond">a start was asked and doctor has not passed since</span><span class="chips"><span class="chip c-other">start shell</span></span></div><div class="rbody"><div><b>Make sure of</b>doctor runs; on failure its fix lines are shown and the start is dropped; on success the project is marked started</div></div></div><div class="rung"><div class="rsum"><span class="rid">J2</span><span class="cond">never started, or stopped by the owner</span><span class="chips"><span class="chip c-other">&quot;Stopped by you&quot;</span></span></div><div class="rbody"><div><b>Make sure of</b>no run of this project is alive; the plan and tasks are kept</div></div></div><div class="rung"><div class="rsum"><span class="rid">J3</span><span class="cond">a stopping alert is active (no_pool, disk, consent_prompt) and no coordinator run is alive</span><span class="chips"><span class="chip c-other">&quot;Stopped&quot;, with the fix</span></span></div><div class="rbody"><div><b>Make sure of</b>nothing starts (tasks wait at N10)</div></div></div><div class="rung"><div class="rsum"><span class="rid">J4</span><span class="cond">a plan exists, every milestone is done, no task is open, and the owner has given no new goal since</span><span class="chips"><span class="chip c-other">&quot;Finished&quot;</span></span></div><div class="rbody"><div><b>Make sure of</b>the final journal entry; then no coordinator</div></div></div><div class="rung"><div class="rsum"><span class="rid">J5</span><span class="cond">the coordinator is signed out</span><span class="chips"><span class="chip c-other">running</span></span></div><div class="rbody"><div><b>Make sure of</b>the alert agents_down with the at-the-Mac fix; no restart until doctor sees it signed in</div></div></div><div class="rung"><div class="rsum"><span class="rid">J6</span><span class="cond">no coordinator run is alive; the owner typed in its terminal within owner_typing_minutes, or a start is not allowed yet (coordinator_gap_minutes, coordinator_starts_per_hour)</span><span class="chips"><span class="chip c-other">running</span></span></div><div class="rbody"><div><b>Make sure of</b>wait; raise agents_down if the hourly limit is the reason</div></div></div><div class="rung"><div class="rsum"><span class="rid">J7</span><span class="cond">no coordinator run is alive</span><span class="chips"><span class="chip c-other">&quot;Planning&quot; with no plan, else running</span></span></div><div class="rbody"><div><b>Make sure of</b>start one: fresh with the goal if there is no plan, else with a handoff built from the store; held wakes are kept for it</div></div></div><div class="rung"><div class="rsum"><span class="rid">J8</span><span class="cond">the coordinator reported an error at the end of a turn</span><span class="chips"><span class="chip c-other">running</span></span></div><div class="rbody"><div><b>Make sure of</b>first time: tell it to go on. Again within quiet_minutes: stop it (J7 follows)</div></div></div><div class="rung"><div class="rsum"><span class="rid">J9</span><span class="cond">wakes were delivered, no coordinator turn followed for coordinator_silent_minutes, and no stopping alert is active</span><span class="chips"><span class="chip c-other">running</span></span></div><div class="rbody"><div><b>Make sure of</b>stop it (J7 follows); the second time in a row, raise agents_down</div></div></div><div class="rung"><div class="rsum"><span class="rid">J10</span><span class="cond">the coordinator's run ended as stuck at a dialog (R29)</span><span class="chips"><span class="chip c-other">running</span></span></div><div class="rbody"><div><b>Make sure of</b>J7 restarts it. The second time in a row, tell the owner (the one coordinator event that speaks) and raise agents_down</div></div></div><div class="rung"><div class="rsum"><span class="rid">J11</span><span class="cond">a rotation is due (rotate_after_hours, rotate_after_turns, or the template changed), the coordinator is idle, and no stopping alert is active</span><span class="chips"><span class="chip c-other">running</span></span></div><div class="rbody"><div><b>Make sure of</b>ask it for the journal entry; when written, or after handoff_minutes: write the fact part, stop the run (J7 follows)</div></div></div><div class="rung"><div class="rsum"><span class="rid">J12</span><span class="cond">wakes are held and the coordinator is idle</span><span class="chips"><span class="chip c-other">running</span></span></div><div class="rbody"><div><b>Make sure of</b>deliver them as one batch</div></div></div><div class="rung"><div class="rsum"><span class="rid">J13</span><span class="cond">no wake for heartbeat_minutes and the coordinator is idle</span><span class="chips"><span class="chip c-other">running</span></span></div><div class="rbody"><div><b>Make sure of</b>a heartbeat wake</div></div></div><div class="rung"><div class="rsum"><span class="rid">J14</span><span class="cond">otherwise</span><span class="chips"><span class="chip c-other">running (&quot;nothing needs you&quot; when no owner ask is open)</span></span></div><div class="rbody"><div><b>Make sure of</b>—</div></div></div></div><h2>Alerts</h2><div class="tunewrap"><table><thead><tr><th>Alert</th><th>Stops the factory</th><th>Raised when</th><th>Cleared when</th></tr></thead><tbody><tr><td class="m">no_pool</td><td class="">yes</td><td class="">no coordinator candidate has a usable pool, or no worker candidate of any open task has one. (One role's pools being empty stops only the tasks that need that role; they wait at their own rows)</td><td class="">a pool is usable again</td></tr><tr><td class="m">disk</td><td class="">yes</td><td class="">the disk is over the limit, or a write failed for space</td><td class="">the reading is back under the limit</td></tr><tr><td class="m">consent_prompt</td><td class="">yes</td><td class="">the volume probe fails. It is run after two blank starts in a row and after two timed-out calls on the project folder. Blank starts with a healthy folder are ordinary start failures (section 4.8, J6), not this alert</td><td class="">the volume probe answers</td></tr><tr><td class="m">main_red</td><td class="">no: it holds merges and branch updates only (N38), so a task that repairs the base can start and merge</td><td class="">the base's newest finished run has been red for main_red_minutes</td><td class="">the newest finished run is green</td></tr><tr><td class="m">ci_stalled</td><td class="">no</td><td class="">N36 for ci_stalled_minutes</td><td class="">the task leaves N36</td></tr><tr><td class="m">agents_down</td><td class="">no</td><td class="">the coordinator cannot be kept alive (J5, J6, J9, J10); or agents on two different CLIs started blank in a row while the project folder answers (a herdr-core or CLI fault, counted as an outage, not as each task's failure)</td><td class="">a coordinator run is alive and has taken a turn; an agent has started</td></tr></tbody></table></div></div></div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview": {"width": 1344, "height": 2212}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
