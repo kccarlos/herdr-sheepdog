@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
 //go:embed coordinator.md
@@ -23,6 +25,7 @@ var coordinatorTemplate string
 type Engine struct {
 	Paths        Paths
 	HC           *hc.Client
+	Log          logging.Logger
 	PassInterval time.Duration
 
 	mu   sync.Mutex
@@ -78,7 +81,7 @@ func (e *Engine) Stop(project string) error {
 	if err != nil {
 		return err
 	}
-	if err := world.StopRun(ctx, e.HC, s.Project.RunID); err != nil {
+	if err := world.StopRun(ctx, e.HC, cmp.Or(s.Project.RunID, coordName(id))); err != nil {
 		return err
 	}
 	s.Project.RunID, s.Project.Started = "", false
@@ -121,33 +124,44 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		return
 	}
 	if trim {
-		_ = TrimLog(e.Paths.Log(id), s.Seq)
+		if err := TrimLog(e.Paths.Log(id), s.Seq); err != nil {
+			e.logError("factory.trim_error", id, err)
+		}
 	}
-	if !s.Project.Started {
-		return
-	}
-	coordState, err := world.RunState(ctx, e.HC, s.Project.RunID)
-	if err != nil || s.Project.RunID != "" {
+	if !s.Project.Started || s.Project.RunID != "" {
 		return
 	}
 	prompt := strings.TrimSpace(strings.NewReplacer("{folder}", s.Project.Folder, "{goal}", s.Project.Goal).Replace(coordinatorTemplate))
 	termID, err := world.StartRun(ctx, e.HC, world.RunSpec{
-		Name:   "coord-" + strings.TrimPrefix(id, "proj-"),
-		Cwd:    s.Project.Folder,
-		Argv:   world.ClaudeArgv(flow.RoleCoordinator, "opus", "medium", "bypassPermissions"),
-		Prompt: prompt,
-		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleCoordinator, "sheepdog.model": "opus"},
+		Name:         coordName(id),
+		Cwd:          s.Project.Folder,
+		ClaudeConfig: e.Paths.ClaudeConfig,
+		Argv:         world.ClaudeArgv(flow.RoleCoordinator, "opus", "medium", "bypassPermissions"),
+		Prompt:       prompt,
+		Labels:       map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleCoordinator, "sheepdog.model": "opus"},
 	})
-	line := LogLine{By: "engine", Facts: map[string]any{"coordinator": coordState}, Rule: "J7", Asked: []string{"coordinator"}}
+	line := LogLine{By: "engine", Facts: map[string]any{"coordinator": flow.RunGone}, Rule: "J7", Asked: []string{"coordinator"}}
 	if err != nil {
 		line.Why = err.Error()
 	} else {
 		s.Project.RunID = termID
 		line.Asked, line.Decision, line.Why = []string{"coordinator:" + termID}, "started coordinator", "project started with no coordinator run"
 	}
-	_ = e.commitLocked(id, &s, line)
+	if err := e.commitLocked(id, &s, line); err != nil {
+		e.logError("factory.commit_error", id, err)
+	}
 	// Seam for PR 1.4+: read worktree tips and PR snapshots, evaluate each task
 	// in s.Tasks with flow.FirstMatch, execute actions, and commit.
+}
+
+func coordName(id string) string { return "coord-" + strings.TrimPrefix(id, "proj-") }
+
+func (e *Engine) logError(typ, id string, err error) {
+	if e.Log != nil {
+		e.Log.Log("factory", typ, "", map[string]string{"project": id, "error": err.Error()})
+	} else {
+		log.Printf("factory: %s (%s): %v", typ, id, err)
+	}
 }
 
 func (e *Engine) commitLocked(id string, s *flow.State, l LogLine) error {

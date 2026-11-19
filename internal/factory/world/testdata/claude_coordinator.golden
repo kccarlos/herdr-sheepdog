@@ -7,3 +7,5 @@ opus
 high
 --permission-mode
 bypassPermissions
+--settings
+{"skipDangerousModePermissionPrompt":true}

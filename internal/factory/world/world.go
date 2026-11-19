@@ -3,7 +3,10 @@
 package world
 
 import (
+	"bytes"
+	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -13,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"testing"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
@@ -21,21 +25,26 @@ import (
 
 // RunSpec describes one terminal run to launch in herdr-core.
 type RunSpec struct {
-	Name, Cwd, Prompt string
-	Argv              []string
-	Labels            map[string]string
+	Name, Cwd, Prompt, ClaudeConfig string
+	Argv                            []string
+	Labels                          map[string]string
 }
 
 // ClaudeArgv returns the launch argv for Claude Code across the three roles,
-// stating model, effort and permission mode explicitly and disabling the
-// auto-updater (KB-LCH-2, KB-LCH-4, KB-LCH-11).
+// stating model, effort and permission mode explicitly, skipping the bypass
+// confirmation dialog in bypass modes, and disabling the auto-updater
+// (KB-LCH-2, KB-LCH-4, KB-LCH-9, KB-LCH-11).
 func ClaudeArgv(role, model, effort, permissionMode string) []string {
 	model, effort, permissionMode = strings.TrimSpace(model), strings.TrimSpace(effort), strings.TrimSpace(permissionMode)
 	if (role != flow.RoleCoordinator && role != flow.RoleWorker && role != flow.RoleReviewer) ||
 		model == "" || effort == "" || permissionMode == "" {
 		return nil
 	}
-	return []string{"env", "DISABLE_AUTOUPDATER=1", "claude", "--model", model, "--effort", effort, "--permission-mode", permissionMode}
+	argv := []string{"env", "DISABLE_AUTOUPDATER=1", "claude", "--model", model, "--effort", effort, "--permission-mode", permissionMode}
+	if permissionMode == "bypassPermissions" {
+		argv = append(argv, "--settings", `{"skipDangerousModePermissionPrompt":true}`)
+	}
+	return argv
 }
 
 // StartRun launches spec in herdr-core and returns its terminal address.
@@ -44,8 +53,18 @@ func StartRun(ctx context.Context, client *hc.Client, spec RunSpec) (string, err
 		return "", errors.New("world: StartRun requires hc client, Cwd and Argv")
 	}
 	if spec.Name != "" {
-		if t, err := client.Get(ctx, spec.Name); err == nil && t.State == "live" {
-			return t.Address, nil
+		if t, err := client.Get(ctx, spec.Name); err == nil {
+			if t.State == "live" {
+				return t.Address, nil
+			}
+			if _, err := client.Remove(ctx, t.Address); err != nil && !errors.Is(err, hc.ErrNotFound) {
+				return "", err
+			}
+		}
+	}
+	if isClaudeArgv(spec.Argv) {
+		if err := preAcceptClaudeTrust(spec.ClaudeConfig, spec.Cwd); err != nil {
+			return "", err
 		}
 	}
 	argv := append([]string(nil), spec.Argv...)
@@ -56,9 +75,88 @@ func StartRun(ctx context.Context, client *hc.Client, spec RunSpec) (string, err
 	maps.Copy(labels, spec.Labels)
 	t, err := client.Run(ctx, hc.RunParams{
 		Name: spec.Name, Cwd: spec.Cwd, Argv: argv, Labels: labels,
-		Env: map[string]string{"DISABLE_AUTOUPDATER": "1"}, NoParent: true, NoNotify: true,
+		NoParent: true, NoNotify: true,
 	})
 	return t.Address, err
+}
+
+func isClaudeArgv(argv []string) bool {
+	for i, a := range argv {
+		if (i == 0 && filepath.Base(a) == "env") || (strings.Contains(a, "=") && !strings.HasPrefix(a, "-")) {
+			continue
+		}
+		return filepath.Base(a) == "claude"
+	}
+	return false
+}
+
+func defaultClaudeConfig() string {
+	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
+		return filepath.Join(dir, ".claude.json")
+	}
+	if home, _ := os.UserHomeDir(); home != "" {
+		return filepath.Join(home, ".claude.json")
+	}
+	return ""
+}
+
+func preAcceptClaudeTrust(configPath, cwd string) error {
+	path := cmp.Or(strings.TrimSpace(configPath), defaultClaudeConfig())
+	if path == "" {
+		return nil
+	}
+	if testing.Testing() {
+		absCfg, err := filepath.Abs(path)
+		if rel, rerr := filepath.Rel(os.TempDir(), absCfg); err != nil || rerr != nil || strings.HasPrefix(rel, "..") {
+			return fmt.Errorf("world: %s is outside the temp dir under go test", path)
+		}
+	}
+	absCwd, err := filepath.Abs(cwd)
+	if err != nil {
+		return nil
+	}
+	root := map[string]any{}
+	if data, err := os.ReadFile(path); err == nil {
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.UseNumber()
+		if !json.Valid(data) || dec.Decode(&root) != nil || root == nil {
+			return nil
+		}
+	} else if !os.IsNotExist(err) {
+		return nil
+	}
+	projects, ok1 := childMap(root, "projects")
+	entry, ok2 := childMap(projects, absCwd)
+	if !ok1 || !ok2 {
+		return nil
+	}
+	entry["hasTrustDialogAccepted"] = true
+	projects[absCwd] = entry
+	root["projects"], root["hasCompletedOnboarding"] = projects, true
+	data, err := json.MarshalIndent(root, "", "  ")
+	if err != nil || os.MkdirAll(filepath.Dir(path), 0o700) != nil {
+		return nil
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".claude.json.tmp*")
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = os.Remove(f.Name()) }()
+	if _, err := f.Write(append(data, '\n')); err == nil && f.Chmod(0o600) == nil && f.Sync() == nil && f.Close() == nil {
+		_ = os.Rename(f.Name(), path)
+	} else {
+		_ = f.Close()
+	}
+	return nil
+}
+
+func childMap(parent map[string]any, key string) (map[string]any, bool) {
+	raw, ok := parent[key]
+	if !ok || raw == nil {
+		return map[string]any{}, true
+	}
+	m, ok := raw.(map[string]any)
+	return m, ok
 }
 
 // SendRun pastes text into terminal id and submits it.
@@ -144,7 +242,7 @@ func RepoProject(ctx context.Context, folder string, init bool) (string, string,
 		root = real
 	}
 	id, _ := gitCmd(ctx, root, "config", "--local", "--get", "sheepdog.projectId")
-	if id == "." || id == ".." || filepath.Base(id) != id {
+	if id == "." || id == ".." || strings.ContainsAny(id, `/\`) {
 		id = ""
 	}
 	if id == "" && init {
