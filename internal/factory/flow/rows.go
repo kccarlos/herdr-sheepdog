@@ -2,6 +2,7 @@ package flow
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -21,6 +22,9 @@ const (
 	AskWake         = "wake_coordinator"
 	AskStopTask     = "stop_task"
 )
+
+// commitKeyed are the verbs whose key ends in the commit it is for.
+var commitKeyed = []string{AskPushPR, AskStartReview, AskAccept, AskMerge}
 
 // key joins a verb and what it is for: "merge@3f9c".
 func key(verb string, parts ...any) string {
@@ -216,8 +220,10 @@ func hasAccept(in In, head string) bool {
 // stuck_minutes and has not woken the coordinator yet, and its wake key
 // stuck@<what>@<H> (so a new H or another stall wakes again). A run that
 // never answered is exactly: an act whose result is failed (a failed
-// start, merge or cleanup, or a voided round; its clock is the act's At),
-// or the round's reviewer read idle with no valid tag (review.idle_since).
+// start, merge or cleanup, or a voided round; its clock is the act's At)
+// for H or for no commit (a failed act for an older H, such as a round
+// voided before H moved, is spent), or the round's reviewer read idle with
+// no valid tag (review.idle_since).
 func stuckWake(in In) (string, []string) {
 	limit := time.Duration(in.Settings.StuckMinutes) * time.Minute
 	try := func(what string, at time.Time) []string {
@@ -227,7 +233,8 @@ func stuckWake(in In) (string, []string) {
 		return once(in.acts(), key(AskWake, "stuck", what, headH(in)))
 	}
 	for _, a := range in.acts() {
-		if a.Result != "failed" {
+		verb, _, _ := strings.Cut(a.Key, "@")
+		if a.Result != "failed" || slices.Contains(commitKeyed, verb) && !strings.HasSuffix(a.Key, "@"+headH(in)) {
 			continue
 		}
 		if k := try(a.Key, a.At); k != nil {

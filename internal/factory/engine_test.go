@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -766,6 +767,41 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	}
 	if st3, err := LoadState(eng3.Paths.State(id3)); err != nil || flow.Count(st3.Tasks[0].Attempts[0].Acts, flow.AskStartWorker) != 1 || flow.Done(st3.Tasks[0].Attempts[0].Acts, flow.AskStartWorker) {
 		t.Fatalf("failing worker attempt acts = %+v (err=%v)", st3.Tasks[0].Attempts[0].Acts, err)
+	}
+}
+
+// TestExecutorFailureRecordedWhenPassCancelled: the flake above, made
+// certain. The pass is cancelled while an executor runs; the executor
+// still runs to its end (its context is not cancelled) and its failure is
+// recorded, so the next pass does not try again.
+func TestExecutorFailureRecordedWhenPassCancelled(t *testing.T) {
+	paths := testPaths(t)
+	repo, _ := initGitRepoWithRemote(t)
+	eng := New(paths, nil)
+	if err := eng.Start(repo, "Goal"); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	st, _ := LoadState(paths.State(id))
+	st.Project.RunID = "coord"
+	st.Tasks = []flow.Task{{ID: "t1", Title: "feat: x"}}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(context.Background(), id, false) // N11
+	orig := taskExecutors[flow.AskStartWorker]
+	t.Cleanup(func() { taskExecutors[flow.AskStartWorker] = orig })
+	ctx, cancel := context.WithCancel(context.Background())
+	var execCtxErr error
+	taskExecutors[flow.AskStartWorker] = func(_ *Engine, ectx context.Context, _ string, _ *flow.State, _ int, _ flow.Facts) (string, bool, error) {
+		cancel() // the pass is cancelled mid-executor
+		execCtxErr = ectx.Err()
+		return "", false, errors.New("start failed")
+	}
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	if acts := st.Tasks[0].Attempts[0].Acts; execCtxErr != nil || flow.Count(acts, flow.AskStartWorker) != 1 || flow.Done(acts, flow.AskStartWorker) {
+		t.Fatalf("executor ctx err = %v, acts = %+v; want a live ctx and one failed start_worker", execCtxErr, acts)
 	}
 }
 

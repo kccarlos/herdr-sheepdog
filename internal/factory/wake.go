@@ -24,6 +24,9 @@ func holdWake(s *flow.State, ti int, row, why, ask string, f flow.Facts, now tim
 	return "wake held for the coordinator"
 }
 
+// The facts block's bounds: a title's characters, the wakes listed.
+const maxFactsTitle, maxFactsWakes = 120, 20
+
 // taskFacts is a waking task's line of the facts block: title, H, the PR
 // number and checks, the last verdict.
 func taskFacts(t flow.Task, f flow.Facts) string {
@@ -35,7 +38,11 @@ func taskFacts(t flow.Task, f flow.Facts) string {
 			verdict = fmt.Sprintf("%s (round %d, %d major(s))", a.Rounds[r-1].Verdict, a.Rounds[r-1].N, a.Rounds[r-1].Majors)
 		}
 	}
-	return fmt.Sprintf("title %q; H %s; PR #%d, checks %s; last verdict %s", t.Title, h, cmp.Or(f.PR.Number, pr), cmp.Or(string(f.PR.Checks), "unknown"), verdict)
+	title := []rune(t.Title)
+	if len(title) > maxFactsTitle {
+		title = append(title[:maxFactsTitle], '…')
+	}
+	return fmt.Sprintf("title %q; H %s; PR #%d, checks %s; last verdict %s", string(title), h, cmp.Or(f.PR.Number, pr), cmp.Or(string(f.PR.Checks), "unknown"), verdict)
 }
 
 // wakeMessage is the one message a batch of wakes is delivered as. It is
@@ -44,7 +51,11 @@ func taskFacts(t flow.Task, f flow.Facts) string {
 func wakeMessage(s flow.State) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Wake: %d task wake(s) wait on you.\n", len(s.Project.Wakes))
-	for _, w := range s.Project.Wakes {
+	for i, w := range s.Project.Wakes {
+		if i == maxFactsWakes {
+			fmt.Fprintf(&b, "- and %d more.\n", len(s.Project.Wakes)-i)
+			break
+		}
 		fmt.Fprintf(&b, "- %s: %s. %s. (wake %s at %s)\n", w.Task, w.Why, w.Facts, w.Key, w.At.Format(time.RFC3339))
 	}
 	changed := cmp.Or(strings.Join(s.Settings.Changed(), ", "), "none")
@@ -54,7 +65,11 @@ func wakeMessage(s flow.State) string {
 
 // deliverWakesLocked is J12: when the coordinator run is idle, every held
 // wake goes to it as one message, then is logged (one line listing the
-// keys) and cleared. While it works, or with no run (J7's), they stay held.
+// keys) and cleared. While it works, or with no run, they stay held; a
+// coordinator that died is J7's to restart, and the wakes wait for it.
+// Delivery is at-least-once: a send that went through but whose commit
+// failed leaves the wakes held, and the next pass sends them again. A
+// duplicate wake is cheaper than a lost one.
 func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.State) {
 	if len(s.Project.Wakes) == 0 || s.Project.RunID == "" || e.HC == nil {
 		return

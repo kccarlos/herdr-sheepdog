@@ -377,6 +377,29 @@ func TestS2StuckWakesOnce(t *testing.T) {
 	}
 }
 
+// TestS2StaleFailedActNeverWakes: a round voided at c1 (its start act
+// failed) never wakes once H has moved to c2, neither at once nor after
+// stuck_minutes; a failed act for the current H still does.
+func TestS2StaleFailedActNeverWakes(t *testing.T) {
+	moved := func(in *In) {
+		a0(in).Ready = append(a0(in).Ready, Ready{Head: "c2"})
+		in.Facts.Tip, in.Facts.PR.Head = "c2", "c2"
+	}
+	later := func(d time.Duration) func(*In) { return func(in *In) { in.Now = now.Add(d) } }
+	for name, in := range map[string]In{
+		"at once":             with(noRounds, stuckAct("start_reviewer@1@c1"), moved),
+		"after stuck_minutes": with(noRounds, stuckAct("start_reviewer@1@c1"), moved, later(time.Duration(StuckMax)*time.Minute)),
+	} {
+		if r, d := FirstMatch(TaskRows, in); r.ID == "S2" || slices.ContainsFunc(d.Asked, func(k string) bool { return strings.HasPrefix(k, AskWake) }) {
+			t.Errorf("%s: %s asked %v, want no wake for a voided round at an older H", name, r.ID, d.Asked)
+		}
+	}
+	in := with(noRounds, stuckAct("start_reviewer@1@c1"), moved, stuckAct("start_reviewer@1@c2"))
+	if r, d := FirstMatch(TaskRows, in); r.ID != "S2" || !slices.Equal(d.Asked, []string{"wake_coordinator@stuck@start_reviewer@1@c2@c2"}) {
+		t.Errorf("failed act at H: %s %v, want S2's wake", r.ID, d.Asked)
+	}
+}
+
 func TestSettingsChanged(t *testing.T) {
 	s := DefaultSettings()
 	if got := s.Changed(); len(got) != 0 {
@@ -384,6 +407,10 @@ func TestSettingsChanged(t *testing.T) {
 	}
 	s.StuckMinutes = StuckMin
 	if got := s.Changed(); !slices.Equal(got, []string{"stuck_minutes 5"}) {
+		t.Errorf("changed: %v", got)
+	}
+	s.ChecksGraceMinutes, s.ReviewRounds = 7, 1
+	if got := s.Changed(); !slices.Equal(got, []string{"checks_grace_minutes 7", "stuck_minutes 5"}) {
 		t.Errorf("changed: %v", got)
 	}
 }

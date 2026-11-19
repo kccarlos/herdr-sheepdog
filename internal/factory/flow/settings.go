@@ -1,10 +1,7 @@
 package flow
 
 import (
-	"encoding/json"
 	"fmt"
-	"maps"
-	"slices"
 	"time"
 )
 
@@ -37,17 +34,21 @@ func DefaultSettings() Settings {
 }
 
 // Changed lists every setting that differs from its default as "name
-// value", sorted, for the coordinator's facts block (design.md 10).
+// value", sorted, for the coordinator's facts block (design.md 10). A new
+// setting adds its line here.
 func (s Settings) Changed() []string {
-	var got, def map[string]any
-	b, _ := json.Marshal(s)
-	_ = json.Unmarshal(b, &got)
-	b, _ = json.Marshal(DefaultSettings())
-	_ = json.Unmarshal(b, &def)
+	d := DefaultSettings()
 	var out []string
-	for _, k := range slices.Sorted(maps.Keys(got)) {
-		if got[k] != def[k] {
-			out = append(out, fmt.Sprintf("%s %v", k, got[k]))
+	for _, c := range []struct {
+		name     string
+		got, def int
+	}{
+		{"checks_grace_minutes", s.ChecksGraceMinutes, d.ChecksGraceMinutes},
+		{"review_rounds", s.ReviewRounds, d.ReviewRounds},
+		{"stuck_minutes", s.StuckMinutes, d.StuckMinutes},
+	} {
+		if c.got != c.def {
+			out = append(out, fmt.Sprintf("%s %d", c.name, c.got))
 		}
 	}
 	return out
