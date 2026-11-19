@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
@@ -19,20 +20,16 @@ import (
 var factoryDoctorRunner = factory.Doctor
 
 func printFactoryUsage(w io.Writer) {
-	fprintln(w, "usage: sheepdog factory <doctor> [flags] [folder]")
-	fprintln(w, "")
-	fprintln(w, "  doctor   check unattended factory prerequisites and print one-line fixes:")
+	fprintln(w, "usage: sheepdog factory <start|stop|doctor> [flags] [folder]")
+	fprintln(w, "  start <folder> --goal \"<sentence>\"   start the factory coordinator for a repo")
+	fprintln(w, "  stop [<folder>]                      stop a started factory project and its runs")
+	fprintln(w, "  doctor                               check unattended factory prerequisites:")
 	fprintln(w, "           herdr-core (hc), timed project-volume probe inside herdr-core")
 	fprintln(w, "           (macOS consent prompts and external-disk stalls), at least one")
 	fprintln(w, "           logged-in agent CLI (claude, codex or agy) plus a canary start")
 	fprintln(w, "           inside herdr-core, gh login with the default repo pinned, and")
 	fprintln(w, "           codexbar. Exit 1 on FAIL.")
-	fprintln(w, "")
-	fprintln(w, "flags:")
-	fprintln(w, "  --folder PATH      project folder to check (default . or [folder])")
-	fprintln(w, "  --config PATH      config file (default ~/.config/sheepdog/config.toml)")
-	fprintln(w, "  --hc-socket PATH   herdr-core socket (overrides config and HC_SOCKET)")
-	fprintln(w, "  --no-canary        skip the agent CLI canary start (no tokens spent)")
+	fprintln(w, "flags: --goal TEXT, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
 }
 
 // runFactory dispatches the `sheepdog factory` command group.
@@ -42,6 +39,8 @@ func runFactory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 2
 	}
 	switch args[0] {
+	case "start", "stop":
+		return runFactoryCmd(ctx, args[0], args[1:], stdout, stderr)
 	case "doctor":
 		return runFactoryDoctor(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
@@ -52,6 +51,41 @@ func runFactory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		printFactoryUsage(stderr)
 		return 2
 	}
+}
+
+func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("factory "+sub, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() { printFactoryUsage(stderr) }
+	configPath, goal := fs.String("config", "", "config file"), fs.String("goal", "", "project goal")
+	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
+		return flagExit(err)
+	}
+	if (sub == "start" && (fs.NArg() != 1 || strings.TrimSpace(*goal) == "")) || (sub == "stop" && (fs.NArg() > 1 || *goal != "")) {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	folder := ""
+	if fs.NArg() == 1 {
+		home, _ := os.UserHomeDir()
+		folder = resolveTargetFolder(fs.Arg(0), home)
+	}
+	cfg, err := config.Load(*configPath)
+	if err == nil {
+		err = postJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/factory/"+sub, map[string]string{"folder": folder, "project": folder, "goal": strings.TrimSpace(*goal)})
+	}
+	if err != nil {
+		fprintf(stderr, "sheepdog factory %s: %v\n", sub, err)
+		return 1
+	}
+	if sub == "start" {
+		fprintf(stdout, "factory started for %s\n", folder)
+	} else if folder != "" {
+		fprintf(stdout, "factory stopped for %s\n", folder)
+	} else {
+		fprintln(stdout, "factory stopped")
+	}
+	return 0
 }
 
 func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -110,6 +144,7 @@ func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writ
 func reorderFactoryDoctorArgs(args []string) []string {
 	var flags, pos []string
 	valueFlags := map[string]bool{
+		"-goal": true, "--goal": true,
 		"-folder": true, "--folder": true,
 		"-config": true, "--config": true,
 		"-hc-socket": true, "--hc-socket": true,

@@ -104,6 +104,10 @@ func (a *App) Run(ctx context.Context) (err error) {
 	}
 	wg.Add(1)
 	go func() { defer wg.Done(); a.sup.Run(inner) }()
+	if a.factory != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); a.factory.Run(inner) }()
+	}
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- a.web.Serve(inner, a.opts.Drain) }()

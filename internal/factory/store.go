@@ -17,7 +17,8 @@ import (
 // Paths says where the engine keeps its files (design.md 14). Tests build
 // one with a temporary DataDir; only the daemon calls DefaultPaths.
 type Paths struct {
-	DataDir string
+	DataDir      string
+	ClaudeConfig string
 }
 
 // DefaultPaths uses the daemon's data dir (config file, then
