@@ -51,7 +51,8 @@ var (
 	reviewEnded = func(in *In) { in.Facts.Reviewer.State = RunGone }
 	noAttempts  = func(in *In) { in.Task.Attempts = nil; in.Facts = Facts{} }
 	onePass     = func(in *In) { a0(in).Rounds = a0(in).Rounds[:1] }
-	changes     = func(in *In) { a0(in).Rounds = []Round{{N: 1, Head: "c1", Verdict: VerdictChanges}} }
+	changes     = func(in *In) { a0(in).Rounds = []Round{{N: 1, Kind: RoundFull, Head: "c1", Verdict: VerdictChanges}} }
+	rejected    = func(in *In) { a0(in).Rejects = []Reject{{Head: "c1", Round: 1, Why: "not a bug"}} }
 	noRounds    = func(in *In) { a0(in).Rounds = nil }
 	notReady    = func(in *In) { a0(in).Ready = nil; in.Facts.Worker = Run{} }
 	tipAheadF   = func(in *In) { in.Facts.Tip, in.Facts.TipRel = "c2", RelAhead }
@@ -205,6 +206,7 @@ func TestRowCases(t *testing.T) {
 		{"N26", with(noRounds, func(in *In) { in.Facts.PR = PR{} }), nil}, // no snapshot yet
 		{"N29", with(noRounds), []string{"start_reviewer@1@c1"}},
 		{"N29", with(onePass), []string{"start_reviewer@2@c1"}},
+		{"N29", with(changes, rejected), []string{"start_reviewer@2@c1"}}, // L10: reject consumes no round number
 		{"N36", with(pending), nil},
 		{"N36", with(noAnswer), nil}, // checks unreadable: wait, no wake
 		{"N39", with(workingF), nil},
@@ -324,7 +326,18 @@ func TestLadder(t *testing.T) {
 		{"L8", Review, with(onePass)},
 		{"L9", Passed, landing()},
 		{"L9", Passed, with(onePass, func(in *In) { in.Settings.ReviewRounds = 1 })},
+		{"L10", Review, with(changes, rejected)},
+		{"L10", Review, with(func(in *In) {
+			a0(in).Rounds = []Round{{N: 1, Kind: RoundDelta, Head: "c1", Verdict: VerdictChanges}}
+			a0(in).Rejects = []Reject{{Head: "c1", Round: 1, Why: "delta claim wrong"}}
+		})},
 		{"L13", Fix, with(changes)},
+		{"L13", Fix, with(changes, rejected, func(in *In) { // round 2 after a round-1 reject asks for changes -> Fix until round 2 is fixed or rejected
+			a0(in).Rounds = append(a0(in).Rounds, Round{N: 2, Kind: RoundFull, Head: "c1", Verdict: VerdictChanges})
+		})},
+		{"L13", Fix, with(rejected, func(in *In) { // send_back / retro cannot match L10 even if a Reject record exists
+			a0(in).Rounds = []Round{{N: 1, Kind: "send_back", Head: "c1", Verdict: VerdictChanges}}
+		})},
 		{"L13", Fix, with(func(in *In) { a0(in).Rounds[1].Verdict = VerdictChanges })},
 		{"L-", NoLadderRow, with(func(in *In) { a0(in).Rounds[1].Verdict = "maybe" })},
 	} {
@@ -341,13 +354,18 @@ func TestLadder(t *testing.T) {
 	}
 }
 
-// TestLadderOrder checks L7/L8/L9 ordering and neighbour swaps (design.md 16):
-// L7 and L8 are disjoint neighbours (swapping them never lets L8 match an
-// unreviewed head), while L8 and L9 both hold on one pass and swapping them
-// flips Review to Passed.
+// TestLadderOrder checks L7/L8/L9/L10/L13 ordering and neighbour swaps
+// (design.md 16, KB-REV-62): L7/L8 and L9/L10 are disjoint neighbour pairs,
+// while L8/L9 (one pass) and L10/L13 (rejected reviewer changes) both hold and
+// swapping either pair flips the answer.
 func TestLadderOrder(t *testing.T) {
-	if LadderRows[0].ID != "L7" || LadderRows[1].ID != "L8" || LadderRows[2].ID != "L9" {
-		t.Fatalf("ladder prefix = %s/%s/%s, want L7/L8/L9", LadderRows[0].ID, LadderRows[1].ID, LadderRows[2].ID)
+	wantIDs := []string{"L7", "L8", "L9", "L10", "L13", "L-"}
+	var gotIDs []string
+	for _, r := range LadderRows {
+		gotIDs = append(gotIDs, r.ID)
+	}
+	if !slices.Equal(gotIDs, wantIDs) {
+		t.Fatalf("ladder rows = %v, want %v", gotIDs, wantIDs)
 	}
 	// Neighbours L7 and L8: disjoint on both noRounds and onePass, so swapping keeps each winner.
 	swap78 := slices.Clone(LadderRows)
@@ -370,6 +388,29 @@ func TestLadderOrder(t *testing.T) {
 	swap89[1], swap89[2] = swap89[2], swap89[1]
 	if r, d := FirstMatch(swap89, in); r.ID != "L9" || d.Why != Passed {
 		t.Fatalf("swapped L8/L9: got %s (%s), want L9 (%s)", r.ID, d.Why, Passed)
+	}
+	// Neighbours L9 and L10: disjoint on landing() (pass) and rejected changes.
+	swap910 := slices.Clone(LadderRows)
+	swap910[2], swap910[3] = swap910[3], swap910[2]
+	if r, _ := FirstMatch(swap910, landing()); r.ID != "L9" {
+		t.Fatalf("swapped L9/L10 on landing() matched %s, want L9", r.ID)
+	}
+	if r, _ := FirstMatch(swap910, with(changes, rejected)); r.ID != "L10" {
+		t.Fatalf("swapped L9/L10 on rejected changes matched %s, want L10", r.ID)
+	}
+	// Neighbours L10 and L13: both hold on rejected reviewer changes; L10 wins
+	// (Review), and swapping makes L13 win (Fix).
+	rejIn := with(changes, rejected)
+	if !LadderRows[3].When(rejIn) || !LadderRows[4].When(rejIn) {
+		t.Fatal("expected both L10 and L13 conditions to hold on rejected reviewer changes")
+	}
+	if r, d := FirstMatch(LadderRows, rejIn); r.ID != "L10" || d.Why != Review {
+		t.Fatalf("L10 vs L13: got %s (%s), want L10 (%s)", r.ID, d.Why, Review)
+	}
+	swap1013 := slices.Clone(LadderRows)
+	swap1013[3], swap1013[4] = swap1013[4], swap1013[3]
+	if r, d := FirstMatch(swap1013, rejIn); r.ID != "L13" || d.Why != Fix {
+		t.Fatalf("swapped L10/L13: got %s (%s), want L13 (%s)", r.ID, d.Why, Fix)
 	}
 }
 

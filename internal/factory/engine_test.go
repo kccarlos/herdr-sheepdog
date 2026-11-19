@@ -1468,3 +1468,129 @@ func TestReviewerModelDiffersFromWorker(t *testing.T) {
 		t.Errorf("worker-only candidate list = %q, want empty", got)
 	}
 }
+
+// TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses checks KB-REV-62,
+// L10, L8 and D12 end to end:
+// worker prompt names `report ready --reject "<why>"` -> round 1 asks for changes
+// at c1 -> N22 tells worker -> empty reject is refused why_missing -> valid
+// reject records Reject{Head: c1, Round: 1, Why} without creating a round ->
+// L10 starts round 2 (full, same head c1) with round 1's findings file path,
+// the worker's why, and the KB-REV-62 rule -> round 2 passes -> L8 starts
+// round 3 at c1 -> round 3 passes -> N42 accepts rounds [2, 3] and merges.
+func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	var runs []hc.RunParams
+	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { runs = append(runs, p) }
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, b0 := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := installFakeGH(t)
+
+	eng := New(paths, client)
+	eng.Bin = "/tmp/sheepdog-bin"
+	if err := eng.Start(repo, "Add Version constant."); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+
+	eng.passProject(ctx, id, false) // J7 coordinator
+	coordTok := runs[0].Env["SHEEPDOG_RUN_TOKEN"]
+	if err := eng.Report(coordTok, "plan apply", []byte(`{"tasks":[{"id":"T1","title":"feat: add Version constant","brief":"Add const Version = 1. No test needed for this one-line constant.","outcomes":["go vet ./... passes"]}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N11
+	eng.passProject(ctx, id, false) // N23 worker
+	wPrompt := runs[1].Argv[len(runs[1].Argv)-1]
+	if !strings.Contains(wPrompt, `/tmp/sheepdog-bin factory report ready --reject "<why>"`) {
+		t.Fatalf("worker prompt missing --reject instruction:\n%s", wPrompt)
+	}
+	workerTok := runs[1].Env["SHEEPDOG_RUN_TOKEN"]
+	st, _ := LoadState(paths.State(id))
+	wt := st.Tasks[0].Attempts[0].Worktree
+	srv.SetStatus(st.Tasks[0].Attempts[0].RunID, &hc.Status{App: "claude-code", State: "idle"})
+
+	// Worker commits c1 and reports ready -> N26 opens PR -> N29 starts round 1.
+	if err := os.WriteFile(filepath.Join(wt, "version.go"), []byte("package demo\n\nconst Version = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "add", "version.go")
+	gitIn(t, wt, "commit", "-m", "feat: add Version constant")
+	c1 := gitIn(t, wt, "rev-parse", "HEAD")
+	writePRJSON(t, gh, "pr.json", c1, `[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]`)
+	writePRJSON(t, gh, "view.json", c1, `[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]`)
+	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`"}`)); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N26
+	eng.passProject(ctx, id, false) // N29 round 1
+
+	st, _ = LoadState(paths.State(id))
+	rev1 := st.Tasks[0].Attempts[0].Review
+	srv.SetScreen(rev1.RunID, "❯ prompt\n\n⏺ major: missing unit test for Version\n<report>{\"code\":\""+rev1.Code+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":1}</report>\n")
+	srv.SetStatus(rev1.RunID, &hc.Status{App: "claude-code", State: "done"})
+	eng.passProject(ctx, id, false) // accepts round 1 changes
+	eng.passProject(ctx, id, false) // N22 tells worker findings
+
+	// Reject with no why is refused why_missing; valid reject adds Reject (no round).
+	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`","reject":""}`)); refusalCode(err) != "why_missing" {
+		t.Fatalf("empty why reject = %v, want why_missing", err)
+	}
+	const why = "Brief explicitly states no test is needed for this one-line constant."
+	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`","reject":"`+why+`"}`)); err != nil {
+		t.Fatalf("valid reject: %v", err)
+	}
+	st, _ = LoadState(paths.State(id))
+	att := st.Tasks[0].Attempts[0]
+	if len(att.Rounds) != 1 || len(att.Rejects) != 1 || att.Rejects[0] != (flow.Reject{Head: c1, Round: 1, Why: why}) {
+		t.Fatalf("after reject: rounds=%+v rejects=%+v", att.Rounds, att.Rejects)
+	}
+
+	// Next pass lands on N29 via L10: starts round 2 (not 3!) as full at c1, carrying the rejection and KB-REV-62 rule.
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	rev2 := st.Tasks[0].Attempts[0].Review
+	if rev2 == nil || rev2.Round != 2 || rev2.Kind != flow.RoundFull || rev2.Head != c1 {
+		t.Fatalf("round 2 after reject = %+v, want round 2 full at %s", rev2, c1)
+	}
+	p2 := runs[len(runs)-1].Argv[len(runs[len(runs)-1].Argv)-1]
+	for _, want := range []string{
+		"Review round 2 (full) at commit " + c1,
+		"`git diff " + b0 + ".." + c1 + "`",
+		paths.Report(id, "T1", 1),
+		why,
+		"a finding the worker rejected comes back only with a run that proves it (a command and its output); otherwise drop it",
+	} {
+		if !strings.Contains(p2, want) {
+			t.Errorf("round 2 prompt missing %q:\n%s", want, p2)
+		}
+	}
+
+	// Round 2 passes -> L8 holds (no merge after 1 pass) -> starts round 3 at c1 -> round 3 passes -> N42 merges.
+	srv.SetScreen(rev2.RunID, "❯ prompt\n\n⏺ Rejection verified against brief.\n<report>{\"code\":\""+rev2.Code+"\",\"round\":2,\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
+	srv.SetStatus(rev2.RunID, &hc.Status{App: "claude-code", State: "done"})
+	eng.passProject(ctx, id, false) // accepts round 2 pass
+	if m := ghCalls(t, gh, "pr merge"); len(m) != 0 {
+		t.Fatalf("merged after 1 pass following reject: %q", m)
+	}
+	eng.passProject(ctx, id, false) // L8 -> N29 starts round 3 at c1
+	st, _ = LoadState(paths.State(id))
+	rev3 := st.Tasks[0].Attempts[0].Review
+	if rev3 == nil || rev3.Round != 3 || rev3.Kind != flow.RoundFull || rev3.Head != c1 {
+		t.Fatalf("round 3 via L8 = %+v, want round 3 full at %s", rev3, c1)
+	}
+	srv.SetScreen(rev3.RunID, "❯ prompt\n\n⏺ Confirmed.\n<report>{\"code\":\""+rev3.Code+"\",\"round\":3,\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
+	srv.SetStatus(rev3.RunID, &hc.Status{App: "claude-code", State: "done"})
+	eng.passProject(ctx, id, false) // accepts round 3 pass
+	eng.passProject(ctx, id, false) // L9 -> N42 accepts rounds [2, 3] and merges
+
+	st, _ = LoadState(paths.State(id))
+	att = st.Tasks[0].Attempts[0]
+	if len(att.Rounds) != 3 || len(att.Accepts) != 1 || !slices.Equal(att.Accepts[0].Rounds, []int{2, 3}) {
+		t.Fatalf("after L8 second pass: rounds=%+v accepts=%+v", att.Rounds, att.Accepts)
+	}
+	if m := ghCalls(t, gh, "pr merge"); len(m) != 1 || !strings.Contains(m[0], "--match-head-commit "+c1) {
+		t.Fatalf("merge calls = %q", m)
+	}
+}
