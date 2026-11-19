@@ -1100,8 +1100,15 @@ func TestDeltaRangesIncludesHandEditedBaseMerge(t *testing.T) {
 
 	// Worker merges origin/main, hits conflict, and resolves it by hand as m1.
 	runGit(t, wt.Path, "fetch", "origin")
-	if err := exec.Command("git", "-C", wt.Path, "merge", "origin/main").Run(); err == nil {
-		t.Fatal("expected merge conflict on shared.go")
+	// Same identity env as runGit: on a machine with no global git identity
+	// (CI) a bare merge fails before merging, and the test would then build
+	// a plain commit instead of a merge (seen in CI).
+	merge := exec.Command("git", "-C", wt.Path, "merge", "origin/main")
+	merge.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
+	if out, err := merge.CombinedOutput(); err == nil || !strings.Contains(string(out), "CONFLICT") {
+		t.Fatalf("expected a merge conflict on shared.go, got err=%v: %s", err, out)
 	}
 	if err := os.WriteFile(filepath.Join(wt.Path, "shared.go"), []byte("package demo\nvar Shared = \"hand-resolved\"\n"), 0o600); err != nil {
 		t.Fatal(err)
