@@ -5,6 +5,13 @@ package flow
 
 import "time"
 
+// Roles of Slice 1 (design.md 9.1).
+const (
+	RoleCoordinator = "coordinator"
+	RoleWorker      = "worker"
+	RoleReviewer    = "reviewer"
+)
+
 // State is one project's state.json. Seq counts the inputs committed to it.
 type State struct {
 	Seq      int64    `json:"seq"`
@@ -15,7 +22,11 @@ type State struct {
 
 // Project is the project record of the skeleton.
 type Project struct {
-	ID string `json:"id"`
+	ID      string `json:"id"`
+	Folder  string `json:"folder,omitempty"`
+	Goal    string `json:"goal,omitempty"`
+	Started bool   `json:"started,omitempty"`
+	RunID   string `json:"run_id,omitempty"` // coordinator terminal identity
 }
 
 // Task is a planned task. It has no phase field: rows derive where it is.
