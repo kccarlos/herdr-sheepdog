@@ -24,9 +24,10 @@ import (
 var factoryDoctorRunner = factory.Doctor
 
 func printFactoryUsage(w io.Writer) {
-	fprintln(w, "usage: sheepdog factory <start|stop|plan|report|doctor> [flags] [folder]")
+	fprintln(w, "usage: sheepdog factory <start|stop|log|plan|report|doctor> [flags] [folder]")
 	fprintln(w, "  start <folder> --goal \"<sentence>\"   start the factory coordinator for a repo")
 	fprintln(w, "  stop [<folder>]                      stop a started factory project and its runs")
+	fprintln(w, "  log [<folder>] [-n N]                each engine step: time, task, rule, asked, decision, why")
 	fprintln(w, "  plan apply <file>                    (coordinator only) apply a JSON plan")
 	fprintln(w, "  report ready                         (worker only) report the worktree HEAD ready")
 	fprintln(w, "  doctor                               check unattended factory prerequisites:")
@@ -47,6 +48,8 @@ func runFactory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	switch args[0] {
 	case "start", "stop":
 		return runFactoryCmd(ctx, args[0], args[1:], stdout, stderr)
+	case "log":
+		return runFactoryLog(ctx, args[1:], stdout, stderr)
 	case "plan":
 		return runFactoryPlan(ctx, args[1:], stdout, stderr)
 	case "report":
@@ -94,6 +97,41 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 		fprintf(stdout, "factory stopped for %s\n", folder)
 	} else {
 		fprintln(stdout, "factory stopped")
+	}
+	return 0
+}
+
+// runFactoryLog prints a project's log.jsonl, read straight from the data
+// dir, one line per engine step with the rule behind it.
+func runFactoryLog(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("factory log", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() { printFactoryUsage(stderr) }
+	configPath, n := fs.String("config", "", "config file"), fs.Int("n", 0, "last N lines")
+	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
+		return flagExit(err)
+	}
+	if fs.NArg() > 1 {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	folder := ""
+	if fs.NArg() == 1 {
+		home, _ := os.UserHomeDir()
+		folder = resolveTargetFolder(fs.Arg(0), home)
+	}
+	cfg, err := config.Load(*configPath)
+	var lines []factory.LogLine
+	if err == nil {
+		lines, err = factory.ProjectLog(ctx, factory.Paths{DataDir: cfg.DataDir}, folder, *n)
+	}
+	if err != nil {
+		fprintf(stderr, "sheepdog factory log: %v\n", err)
+		return 1
+	}
+	for _, l := range lines {
+		l.At = l.At.Local()
+		fprintln(stdout, factory.FormatLogLine(l))
 	}
 	return 0
 }
@@ -220,6 +258,7 @@ func reorderFactoryDoctorArgs(args []string) []string {
 		"-folder": true, "--folder": true,
 		"-config": true, "--config": true,
 		"-hc-socket": true, "--hc-socket": true,
+		"-n": true, "--n": true,
 	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]

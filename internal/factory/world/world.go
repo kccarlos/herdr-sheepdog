@@ -529,6 +529,23 @@ func InspectWorktree(ctx context.Context, worktree, ref string) (string, flow.Re
 	return tip, rel, status == "", nil
 }
 
+// RemoveWorktree removes a task worktree only if it is clean: uncommitted
+// or untracked work is never destroyed (design.md 9.4, KB-MRG-78), and git
+// itself refuses a dirty one (no --force). A worktree already gone counts
+// as removed. It reports whether the worktree is gone.
+func RemoveWorktree(ctx context.Context, repo, worktree string) (bool, error) {
+	if _, err := os.Stat(worktree); os.IsNotExist(err) {
+		_, err = gitCmd(ctx, repo, "worktree", "prune")
+		return err == nil, err
+	}
+	status, err := gitCmd(ctx, worktree, "status", "--porcelain", "--untracked-files=normal")
+	if err != nil || status != "" {
+		return false, err
+	}
+	_, err = gitCmd(ctx, repo, "worktree", "remove", worktree)
+	return err == nil, err
+}
+
 // Relation is how commit x stands to ref in dir's repository: same, ahead
 // (a descendant), behind (an ancestor) or diverged (design.md 3.1).
 func Relation(ctx context.Context, dir, ref, x string) (flow.Rel, error) {
