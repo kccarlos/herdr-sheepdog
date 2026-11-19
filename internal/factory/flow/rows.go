@@ -2,6 +2,7 @@ package flow
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -21,6 +22,9 @@ const (
 	AskWake         = "wake_coordinator"
 	AskStopTask     = "stop_task"
 )
+
+// commitKeyed are the verbs whose key ends in the commit it is for.
+var commitKeyed = []string{AskPushPR, AskStartReview, AskAccept, AskMerge}
 
 // key joins a verb and what it is for: "merge@3f9c".
 func key(verb string, parts ...any) string {
@@ -135,6 +139,16 @@ func join(asked [][]string) []string {
 // Landing rows (4.7) carry the ladder's "passed" as a clause, since slice 1
 // has no ladder row for retro or recap to catch the rest.
 var TaskRows = []Row[In]{
+	// S2 is the stuck stand-in until slice 5a's section 4.8 (plan.md PR
+	// 2.1). It sits above N1, since a failed cleanup act belongs to an ended
+	// task. It holds only for the pass that queues its wake, so the rows
+	// below go on afterwards. (A retry-closed attempt's worktree is cleaned
+	// by N1 only once the task ends; slices 1 and 2 keep it.)
+	{ID: "S2", WaitsOn: "the coordinator", When: func(in In) bool { _, k := stuckWake(in); return k != nil },
+		Then: func(in In) Decision {
+			what, k := stuckWake(in)
+			return say(what+" never answered for stuck_minutes", k)(in)
+		}},
 	{ID: "N1", WaitsOn: "nobody", When: ended, Then: func(in In) Decision {
 		return say("ended: stop its runs and clean up", once(in.acts(), AskCleanup))(in)
 	}},
@@ -200,4 +214,36 @@ func hasAccept(in In, head string) bool {
 		}
 	}
 	return false
+}
+
+// stuckWake is S2's: the first stall of the open attempt that has waited
+// stuck_minutes and has not woken the coordinator yet, and its wake key
+// stuck@<what>@<H> (so a new H or another stall wakes again). A run that
+// never answered is exactly: an act whose result is failed (a failed
+// start, merge or cleanup, or a voided round; its clock is the act's At)
+// for H or for no commit (a failed act for an older H, such as a round
+// voided before H moved, is spent), or the round's reviewer read idle with
+// no valid tag (review.idle_since).
+func stuckWake(in In) (string, []string) {
+	limit := time.Duration(in.Settings.StuckMinutes) * time.Minute
+	try := func(what string, at time.Time) []string {
+		if in.Now.Sub(at) < limit {
+			return nil
+		}
+		return once(in.acts(), key(AskWake, "stuck", what, headH(in)))
+	}
+	for _, a := range in.acts() {
+		verb, _, _ := strings.Cut(a.Key, "@")
+		if a.Result != "failed" || slices.Contains(commitKeyed, verb) && !strings.HasSuffix(a.Key, "@"+headH(in)) {
+			continue
+		}
+		if k := try(a.Key, a.At); k != nil {
+			return a.Key, k
+		}
+	}
+	if a := in.attempt(); a != nil && a.Review != nil && a.Review.IdleSince != nil {
+		what := key("reviewer_idle", a.Review.Round)
+		return what, try(what, *a.Review.IdleSince)
+	}
+	return "", nil
 }

@@ -29,6 +29,18 @@ type Project struct {
 	RunID        string `json:"run_id,omitempty"`           // coordinator terminal identity
 	RunTokenHash string `json:"run_token_sha256,omitempty"` // SHA-256 hex of the coordinator's SHEEPDOG_RUN_TOKEN
 	Acts         []Act  `json:"acts,omitempty"`
+	Wakes        []Wake `json:"wakes,omitempty"` // held until J12 delivers them
+}
+
+// Wake is a held wake for the coordinator (design.md 10, J12): queued once
+// per task and key, delivered in one batch when the coordinator is idle.
+// Facts are the task's facts when it was queued, built in code.
+type Wake struct {
+	Key   string    `json:"key"`
+	Task  string    `json:"task,omitempty"`
+	Why   string    `json:"why"`
+	Facts string    `json:"facts"`
+	At    time.Time `json:"at"`
 }
 
 // Task is a planned task. It has no phase field: rows derive where it is.
@@ -77,6 +89,9 @@ type ReviewRun struct {
 	Head         string   `json:"head"`
 	Code         string   `json:"code"`
 	Reviewer     Reviewer `json:"reviewer"`
+	// IdleSince is when a pass first read the run idle with no valid tag:
+	// the stuck row's clock (S2). The record goes when the round ends.
+	IdleSince *time.Time `json:"idle_since,omitempty"`
 }
 
 // Ready is the worker's "done at this commit".

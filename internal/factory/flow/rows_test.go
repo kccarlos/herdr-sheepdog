@@ -60,7 +60,21 @@ var (
 	noAnswer    = func(in *In) { in.Facts.PR.Answered = false }
 	closedPR    = func(in *In) { in.Facts.PR.State = PRClosed }
 	conflict    = func(in *In) { in.Facts.PR.Mergeable = MergeableConflict }
+	// stuckAct: an act failed past stuck_minutes; idleRev: the round's
+	// reviewer read idle with no tag past stuck_minutes.
+	stuckAct = func(k string) func(*In) {
+		return func(in *In) {
+			a0(in).Acts = append(a0(in).Acts, Act{Key: k, Result: "failed", At: now.Add(-stuckFor(in))})
+		}
+	}
+	idleRev = func(in *In) {
+		t := now.Add(-stuckFor(in))
+		a0(in).Review = &ReviewRun{Round: 1, Head: "c1", IdleSince: &t}
+		in.Facts.Reviewer.State = RunIdle
+	}
 )
+
+func stuckFor(in *In) time.Duration { return time.Duration(in.Settings.StuckMinutes) * time.Minute }
 
 func rowByID(id string) Row[In] {
 	return TaskRows[slices.IndexFunc(TaskRows, func(r Row[In]) bool { return r.ID == id })]
@@ -168,6 +182,8 @@ func TestRowCases(t *testing.T) {
 		in    In
 		asked []string
 	}{
+		{"S2", with(done, stuckAct("cleanup")), []string{"wake_coordinator@stuck@cleanup@c1"}},
+		{"S2", with(noRounds, idleRev), []string{"wake_coordinator@stuck@reviewer_idle@1@c1"}},
 		{"N1", with(done), []string{"cleanup"}},
 		{"N2", with(merged), []string{"mark_done", "wake_coordinator@merged_outside_bar"}},
 		{"S1", with(workerEnded), []string{"stop_task"}},
@@ -210,6 +226,10 @@ func TestRowOrder(t *testing.T) {
 		neighbours bool
 		in         In
 	}{
+		// S2 is first: nothing must win before it (plan.md PR 2.1).
+		{"S2", "N1", true, with(done, stuckAct("cleanup"))},
+		{"S2", "N29", false, with(noRounds, idleRev)},
+		{"S2", "N41", false, with(stuckAct("merge@c1"))},
 		{"N1", "N2", true, with(done, merged)},
 		{"N2", "S1", true, with(merged, workerEnded)},
 		{"S1", "N22", false, with(workerEnded, changes)},
@@ -321,5 +341,76 @@ func TestNoNumberInRules(t *testing.T) {
 				return true
 			})
 		}
+	}
+}
+
+// TestS2StuckWakesOnce: a stall wakes once its clock reaches stuck_minutes;
+// once woken, the rows below go on; a new H or another stall wakes again.
+func TestS2StuckWakesOnce(t *testing.T) {
+	woken := func(in *In) {
+		_, d := FirstMatch(TaskRows, *in)
+		for _, k := range d.Asked {
+			a0(in).Acts = append(a0(in).Acts, Act{Key: k, Result: "done", At: now})
+		}
+	}
+	young := func(in *In) { in.Now = now.Add(-time.Second) }
+	newH := func(in *In) {
+		a0(in).Ready = append(a0(in).Ready, Ready{Head: "c2"})
+		a0(in).Review.Head = "c2"
+	}
+	for name, c := range map[string]struct {
+		in   In
+		row  string
+		wake []string
+	}{
+		"idle, young":         {with(noRounds, idleRev, young), "N29", nil},
+		"failed act, young":   {with(stuckAct("merge@c1"), young), "N41", nil},
+		"idle, woken":         {with(noRounds, idleRev, woken), "N29", nil},
+		"idle, woken, new H":  {with(noRounds, idleRev, woken, newH), "S2", []string{"wake_coordinator@stuck@reviewer_idle@1@c2"}},
+		"woken, another act":  {with(noRounds, idleRev, woken, stuckAct("push_and_open_pr@c1")), "S2", []string{"wake_coordinator@stuck@push_and_open_pr@c1@c1"}},
+		"done act never wake": {with(func(in *In) { a0(in).Acts = []Act{{Key: "merge@c1", Result: "done", At: now.Add(-time.Hour)}} }, asked), "N41", nil},
+	} {
+		r, d := FirstMatch(TaskRows, c.in)
+		if r.ID != c.row || !slices.Equal(d.Asked, c.wake) {
+			t.Errorf("%s: %s %v, want %s %v", name, r.ID, d.Asked, c.row, c.wake)
+		}
+	}
+}
+
+// TestS2StaleFailedActNeverWakes: a round voided at c1 (its start act
+// failed) never wakes once H has moved to c2, neither at once nor after
+// stuck_minutes; a failed act for the current H still does.
+func TestS2StaleFailedActNeverWakes(t *testing.T) {
+	moved := func(in *In) {
+		a0(in).Ready = append(a0(in).Ready, Ready{Head: "c2"})
+		in.Facts.Tip, in.Facts.PR.Head = "c2", "c2"
+	}
+	later := func(d time.Duration) func(*In) { return func(in *In) { in.Now = now.Add(d) } }
+	for name, in := range map[string]In{
+		"at once":             with(noRounds, stuckAct("start_reviewer@1@c1"), moved),
+		"after stuck_minutes": with(noRounds, stuckAct("start_reviewer@1@c1"), moved, later(time.Duration(StuckMax)*time.Minute)),
+	} {
+		if r, d := FirstMatch(TaskRows, in); r.ID == "S2" || slices.ContainsFunc(d.Asked, func(k string) bool { return strings.HasPrefix(k, AskWake) }) {
+			t.Errorf("%s: %s asked %v, want no wake for a voided round at an older H", name, r.ID, d.Asked)
+		}
+	}
+	in := with(noRounds, stuckAct("start_reviewer@1@c1"), moved, stuckAct("start_reviewer@1@c2"))
+	if r, d := FirstMatch(TaskRows, in); r.ID != "S2" || !slices.Equal(d.Asked, []string{"wake_coordinator@stuck@start_reviewer@1@c2@c2"}) {
+		t.Errorf("failed act at H: %s %v, want S2's wake", r.ID, d.Asked)
+	}
+}
+
+func TestSettingsChanged(t *testing.T) {
+	s := DefaultSettings()
+	if got := s.Changed(); len(got) != 0 {
+		t.Errorf("defaults changed: %v", got)
+	}
+	s.StuckMinutes = StuckMin
+	if got := s.Changed(); !slices.Equal(got, []string{"stuck_minutes 5"}) {
+		t.Errorf("changed: %v", got)
+	}
+	s.ChecksGraceMinutes, s.ReviewRounds = 7, 1
+	if got := s.Changed(); !slices.Equal(got, []string{"checks_grace_minutes 7", "stuck_minutes 5"}) {
+		t.Errorf("changed: %v", got)
 	}
 }
