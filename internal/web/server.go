@@ -260,6 +260,8 @@ type Deps struct {
 	DataDir string
 	// GitBin is the program the changes view runs (default "git").
 	GitBin string
+	// Factory backs POST /api/factory/{start,stop}; nil answers 503.
+	Factory Factory
 
 	// TLS is the daemon's key and self-signed certificate (tlsid.go),
 	// served on the same port as plain HTTP; nil makes a fresh one in
@@ -593,6 +595,8 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"GET /api/context/brain", accessLoopback, s.handleContextBrain},
 		route{"GET /api/context/voice", accessLoopback, s.handleContextVoice},
 		route{"GET /api/context/timeline", accessLoopback, s.handleContextTimeline},
+		route{"POST /api/factory/start", accessLoopback, s.handleFactory(true)},
+		route{"POST /api/factory/stop", accessLoopback, s.handleFactory(false)},
 	)
 	setup, err := s.setupRoutes()
 	if err != nil {

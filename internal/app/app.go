@@ -18,6 +18,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -202,6 +203,7 @@ type App struct {
 	voiceCtx       *ctxcap.VoiceLog     // the voice context log (/debug Context tab)
 	routerCtx      *ctxcap.VoiceSession // the text router's session in it (--voice=off)
 	web            *web.Server
+	factory        *factory.Engine
 	prompts        *prompts.Loader
 	port           int
 

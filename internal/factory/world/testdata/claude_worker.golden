@@ -1,0 +1,9 @@
+env
+DISABLE_AUTOUPDATER=1
+claude
+--model
+sonnet
+--effort
+high
+--permission-mode
+bypassPermissions

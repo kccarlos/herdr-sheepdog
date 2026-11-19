@@ -3,8 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -150,4 +156,64 @@ func TestFactoryCommandCLI(t *testing.T) {
 			t.Fatalf("valid default config: code=%d opts=%+v stderr=%s", code, gotOpts, errBuf.String())
 		}
 	})
+}
+
+// TestFactoryStartAndStopCLI exercises `sheepdog factory start` and `stop`
+// against a local test server without touching the real home or daemon (KB-TST-1).
+func TestFactoryStartAndStopCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+
+	var lastPath string
+	var lastBody map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lastPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&lastBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	_, portStr, err := net.SplitHostPort(srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, _ := strconv.Atoi(portStr)
+	cfgFile := filepath.Join(home, "config.toml")
+	if err := os.WriteFile(cfgFile, []byte(fmt.Sprintf("[web]\nbind = \"127.0.0.1\"\nport = %d\n", port)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := filepath.Join(home, "scratch-repo")
+	var out, errBuf bytes.Buffer
+	if code := run(context.Background(), []string{"factory", "start", repo, "--goal", "ship one task", "--config", cfgFile}, &out, &errBuf); code != 0 {
+		t.Fatalf("start code=%d stderr=%s", code, errBuf.String())
+	}
+	if lastPath != "/api/factory/start" || lastBody["folder"] != repo || lastBody["goal"] != "ship one task" {
+		t.Fatalf("start sent %s %+v", lastPath, lastBody)
+	}
+	if strings.Count(out.String(), "\n") != 1 || !strings.Contains(out.String(), repo) {
+		t.Fatalf("start stdout = %q, want one plain line", out.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	if code := run(context.Background(), []string{"factory", "stop", "--config", cfgFile}, &out, &errBuf); code != 0 {
+		t.Fatalf("stop code=%d stderr=%s", code, errBuf.String())
+	}
+	if lastPath != "/api/factory/stop" || lastBody["project"] != "" {
+		t.Fatalf("stop sent %s %+v", lastPath, lastBody)
+	}
+	if strings.TrimSpace(out.String()) != "factory stopped" || strings.Count(out.String(), "\n") != 1 {
+		t.Fatalf("stop stdout = %q", out.String())
+	}
+
+	// Missing --goal is refused with exit 2.
+	out.Reset()
+	errBuf.Reset()
+	if code := run(context.Background(), []string{"factory", "start", repo, "--config", cfgFile}, &out, &errBuf); code != 2 {
+		t.Fatalf("start without goal code=%d, want 2", code)
+	}
 }
