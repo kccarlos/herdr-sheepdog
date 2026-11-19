@@ -63,11 +63,9 @@ func (e *Engine) Start(folder, goal string) error {
 	}
 	if s.Project.RunID != "" {
 		if st, err := world.RunState(ctx, e.HC, s.Project.RunID); err == nil && st == flow.RunGone {
-			s.Project.RunID, s.Project.RunToken = "", ""
+			s.Project.RunID, s.Project.RunTokenHash = "", ""
 		}
 	}
-	// Minted before the run starts, so a run adopted after a crash keeps it.
-	s.Project.RunToken = cmp.Or(s.Project.RunToken, rand.Text())
 	s.Project.Folder, s.Project.Goal, s.Project.Started = root, goal, true
 	if err := e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "start", "folder": root, "goal": goal}, Rule: "start", Decision: "started", Why: goal}); err != nil {
 		return err
@@ -94,7 +92,7 @@ func (e *Engine) Stop(project string) error {
 			return err
 		}
 	}
-	s.Project.RunID, s.Project.RunToken, s.Project.Started = "", "", false
+	s.Project.RunID, s.Project.RunTokenHash, s.Project.Started = "", "", false
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "stop"}, Rule: "stop", Decision: "stopped", Why: "stopped by owner"})
 }
 
@@ -146,7 +144,22 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	if env == nil {
 		env = map[string]string{}
 	}
-	env["SHEEPDOG_RUN_TOKEN"] = s.Project.RunToken
+	// A live coordinator left by a crash is adopted and keeps its token; else
+	// mint one and save only its hash before the launch (design.md 7.2).
+	rs, err := world.RunState(ctx, e.HC, coordName(id))
+	if err != nil {
+		e.logError("factory.hc_error", id, err)
+		return
+	}
+	if rs == flow.RunGone {
+		tok := rand.Text()
+		s.Project.RunTokenHash = tokenHash(tok)
+		if err := SaveState(e.Paths.State(id), s); err != nil {
+			e.logError("factory.commit_error", id, err)
+			return
+		}
+		env["SHEEPDOG_RUN_TOKEN"] = tok
+	}
 	termID, err := world.StartRun(ctx, e.HC, world.RunSpec{
 		Name:         coordName(id),
 		Cwd:          s.Project.Folder,
@@ -158,7 +171,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	})
 	line := LogLine{By: "engine", Facts: map[string]any{"coordinator": flow.RunGone}, Rule: "J7", Asked: []string{"coordinator"}}
 	if err != nil {
-		line.Why = err.Error()
+		line.Why, s.Project.RunTokenHash = err.Error(), "" // no run holds the token
 	} else {
 		s.Project.RunID = termID
 		line.Asked, line.Decision, line.Why = []string{"coordinator:" + termID}, "started coordinator", "project started with no coordinator run"

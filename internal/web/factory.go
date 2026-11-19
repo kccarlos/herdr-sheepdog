@@ -2,7 +2,10 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 )
 
 // Factory is the factory engine's surface: owner commands and the reports
@@ -27,10 +30,13 @@ func (s *Server) handleFactory(cmd string) http.HandlerFunc {
 			return
 		}
 		err := readJSON(r, &req)
+		status, ref := http.StatusBadRequest, (*factory.Refusal)(nil)
 		switch {
 		case err != nil:
 		case cmd == "report":
-			err = s.deps.Factory.Report(req.Token, req.Verb, req.Args)
+			if err = s.deps.Factory.Report(req.Token, req.Verb, req.Args); err != nil && !errors.As(err, &ref) {
+				status = http.StatusInternalServerError // a daemon fault, not a refusal
+			}
 		case req.Token != "":
 			err = s.deps.Factory.Report(req.Token, cmd, nil)
 		case cmd == "start":
@@ -39,7 +45,7 @@ func (s *Server) handleFactory(cmd string) http.HandlerFunc {
 			err = s.deps.Factory.Stop(req.Project)
 		}
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeError(w, status, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})

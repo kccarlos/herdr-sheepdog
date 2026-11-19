@@ -2,7 +2,9 @@ package factory
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -32,10 +34,10 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 	if !ok {
 		return e.refuse("", "kind_not_allowed", fmt.Sprintf("%q is not a report the factory knows.", verb))
 	}
-	if want == owner {
-		return e.refuse("", "kind_not_allowed", fmt.Sprintf("A run's terminal cannot %s the factory; the owner runs it from a terminal with no run's token.", verb))
-	}
 	id, s, role := e.runByTokenLocked(token)
+	if want == owner {
+		return e.refuse(id, "kind_not_allowed", fmt.Sprintf("A run's terminal cannot %s the factory; the owner runs it from a terminal with no run's token.", verb))
+	}
 	if id == "" {
 		return e.refuse("", "invalid_token", "The token matches no run the factory started.")
 	}
@@ -63,21 +65,30 @@ func (e *Engine) refuse(project, code, why string) error {
 	return &Refusal{Code: code, Why: why}
 }
 
+// tokenHash is all state.json keeps of a run token: its SHA-256, hex.
+func tokenHash(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
 // runByTokenLocked finds the run holding token: a project's coordinator or a
 // task attempt's worker.
 func (e *Engine) runByTokenLocked(token string) (string, flow.State, string) {
-	same := func(t string) bool { return t != "" && subtle.ConstantTimeCompare([]byte(t), []byte(token)) == 1 }
+	h := tokenHash(token)
+	same := func(t string) bool {
+		return token != "" && t != "" && subtle.ConstantTimeCompare([]byte(t), []byte(h)) == 1
+	}
 	for _, ent := range e.projectDirs() {
 		s, err := LoadState(e.Paths.State(ent.Name()))
 		if err != nil {
 			continue
 		}
-		if same(s.Project.RunToken) {
+		if same(s.Project.RunTokenHash) {
 			return ent.Name(), s, flow.RoleCoordinator
 		}
 		for _, t := range s.Tasks {
 			for _, a := range t.Attempts {
-				if same(a.RunToken) {
+				if same(a.RunTokenHash) {
 					return ent.Name(), s, flow.RoleWorker
 				}
 			}
@@ -116,11 +127,17 @@ func checkPlan(raw json.RawMessage) ([]flow.Task, []string) {
 		fails = append(fails, "shape: the plan has no tasks")
 	}
 	ids := map[string]bool{}
-	for i, t := range p.Tasks {
+	for i := range p.Tasks {
+		t := &p.Tasks[i]
+		t.ID = strings.TrimSpace(t.ID)
+		for j := range t.After {
+			t.After[j] = strings.TrimSpace(t.After[j])
+		}
 		if t.ID == "" || ids[t.ID] {
 			fails = append(fails, fmt.Sprintf("shape: task %d needs an id no other task has", i+1))
+		} else {
+			ids[t.ID] = true
 		}
-		ids[t.ID] = true
 		if strings.TrimSpace(t.Title) == "" {
 			fails = append(fails, fmt.Sprintf("shape: task %q has no title", t.ID))
 		}

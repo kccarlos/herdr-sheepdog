@@ -243,9 +243,20 @@ func TestFactoryPlanApplyCLI(t *testing.T) {
 	if err := os.WriteFile(plan, []byte(`{"tasks":[{"id":"T1","title":"feat: x"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// A run's terminal does not need the user's config file: break it.
+	cfgFile := filepath.Join(home, ".config", "sheepdog", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(cfgFile), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgFile, []byte("[web\nbind = \"::1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	var out, errBuf bytes.Buffer
 	if code := run(context.Background(), []string{"factory", "plan", "apply", plan}, &out, &errBuf); code != 0 {
 		t.Fatalf("plan apply code=%d stderr=%s", code, errBuf.String())
+	}
+	if err := os.Remove(cfgFile); err != nil {
+		t.Fatal(err)
 	}
 	args, _ := lastBody["args"].(map[string]any)
 	if lastPath != "/api/factory/report" || lastBody["token"] != "tok-1" || lastBody["verb"] != "plan apply" || args["tasks"] == nil {

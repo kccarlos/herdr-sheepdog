@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
@@ -105,12 +106,17 @@ func runFactoryPlan(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err == nil && !json.Valid(raw) {
 		err = errors.New(args[1] + " is not valid JSON")
 	}
-	var cfg config.Config
-	if err == nil {
+	// In a run's terminal the engine set SHEEPDOG_WEB_PORT: no config file needed.
+	url := ""
+	if port, perr := strconv.Atoi(os.Getenv("SHEEPDOG_WEB_PORT")); perr == nil && port > 0 {
+		url = daemon.LocalURL("", port)
+	} else if err == nil {
+		var cfg config.Config
 		cfg, err = config.Load("")
+		url = daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port)
 	}
 	if err == nil {
-		err = postJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/factory/report",
+		err = postJSON(ctx, url, "/api/factory/report",
 			map[string]any{"token": os.Getenv(runTokenEnv), "verb": "plan apply", "args": json.RawMessage(raw)})
 	}
 	if err != nil {

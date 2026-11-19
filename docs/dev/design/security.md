@@ -573,7 +573,13 @@ These refuse any non-loopback caller with `403 {"error":"loopback_only"}`:
   `POST /api/devices/reset-pairing`;
 - factory: `POST /api/factory/start`, `POST /api/factory/stop`,
   `POST /api/factory/report` (a run's report, named by the run's
-  `SHEEPDOG_RUN_TOKEN`; a start or stop carrying a run's token is refused);
+  `SHEEPDOG_RUN_TOKEN`; a start or stop carrying a run's token is refused).
+  Every run is the owner's own OS user, so the run token stops mistakes (a
+  worker's terminal running `sheepdog factory stop`, a reviewer applying a
+  plan), not a hostile local process, which can unset the token or read
+  another run's environment. "Owner" means a terminal with no run token. The
+  real backstops are branch protection on the base branch and the acceptance
+  table;
 - debug and internal: `/api/inject/*` (blocked, pane, done, state, screen,
   remove), `/api/herdr/event` (the herdr hooks), `/api/prompts/reload`,
   `/api/brain/*`, `/api/context/*`, `/testdata/*`;

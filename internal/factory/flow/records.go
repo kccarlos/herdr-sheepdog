@@ -22,12 +22,12 @@ type State struct {
 
 // Project is the project record of the skeleton.
 type Project struct {
-	ID       string `json:"id"`
-	Folder   string `json:"folder,omitempty"`
-	Goal     string `json:"goal,omitempty"`
-	Started  bool   `json:"started,omitempty"`
-	RunID    string `json:"run_id,omitempty"`    // coordinator terminal identity
-	RunToken string `json:"run_token,omitempty"` // coordinator's SHEEPDOG_RUN_TOKEN
+	ID           string `json:"id"`
+	Folder       string `json:"folder,omitempty"`
+	Goal         string `json:"goal,omitempty"`
+	Started      bool   `json:"started,omitempty"`
+	RunID        string `json:"run_id,omitempty"`           // coordinator terminal identity
+	RunTokenHash string `json:"run_token_sha256,omitempty"` // SHA-256 hex of the coordinator's SHEEPDOG_RUN_TOKEN
 }
 
 // Task is a planned task. It has no phase field: rows derive where it is.
@@ -54,16 +54,16 @@ type Closed struct {
 
 // Attempt is one try at a task, from its base commit.
 type Attempt struct {
-	BaseCommit string   `json:"base_commit"`
-	Branch     string   `json:"branch"`
-	Worktree   string   `json:"worktree"`
-	PR         int      `json:"pr"`
-	RunID      string   `json:"run_id"`              // the run's terminal identity
-	RunToken   string   `json:"run_token,omitempty"` // the run's SHEEPDOG_RUN_TOKEN
-	Ready      []Ready  `json:"ready"`
-	Rounds     []Round  `json:"rounds"`
-	Accepts    []Accept `json:"accepts"`
-	Acts       []Act    `json:"acts"`
+	BaseCommit   string   `json:"base_commit"`
+	Branch       string   `json:"branch"`
+	Worktree     string   `json:"worktree"`
+	PR           int      `json:"pr"`
+	RunID        string   `json:"run_id"`                     // the run's terminal identity
+	RunTokenHash string   `json:"run_token_sha256,omitempty"` // SHA-256 hex of the run's SHEEPDOG_RUN_TOKEN
+	Ready        []Ready  `json:"ready"`
+	Rounds       []Round  `json:"rounds"`
+	Accepts      []Accept `json:"accepts"`
+	Acts         []Act    `json:"acts"`
 }
 
 // Ready is the worker's "done at this commit".
