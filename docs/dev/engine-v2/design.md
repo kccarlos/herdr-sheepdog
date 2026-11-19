@@ -210,7 +210,7 @@ First match wins. "Waits on" is what the owner's surfaces show. Numbers are sett
 | N1 | marked `done`, `dropped`, `split` or `closed` | no run of this task is alive; its `decision` asks are cancelled; a dropped or split task's PR is closed with a note; `Cleanup` has finished | nobody |
 | N2 | the PR is merged | mark `done`; if there is no accept for the head the PR had when it merged (a squash makes a new commit, so the PR's own head is compared), wake the coordinator once and log `merged_outside_bar` (a person or an agent merged it by hand; it cannot be undone, and it is never silent) | nobody |
 | N3 | marked `parked` | no run of this task is alive | the coordinator |
-| N4 | the PR was closed without merging, and no `retry` since | no reviewer runs; wake the coordinator once. The engine never reopens it; after a `retry` the attempt forgets that PR and N26 opens a new one | the coordinator |
+| N4 | the PR was closed without merging, and no `retry` since | no reviewer runs; wake the coordinator once. The engine never reopens it, and never opens a second PR for a branch (section 9.4): a `retry` closes the attempt, and N11 starts a new one on a new branch | the coordinator |
 | N5 | something this task needs has failed `ensure_failures` times in a row, and no `retry` since | wake the coordinator once with what failed and its last words | the coordinator |
 | N6 | a recap is open (not decided, and not closed by the owner's override) | wake the coordinator once with the allowed choices; if the trigger is size, CI or time, tell the worker once to write its recap; no reviewer runs | the coordinator |
 | N7 | the tip or the PR head has `diverged` from `H`, or the PR head is ahead of `H` with changes the engine did not push | tell the worker once what happened and to restore the branch (a pull, when its tip is only behind). If it still holds at the worker's next turn end, wake the coordinator once, naming the way out: `say` to the worker, then `retry`. Never merge | the worker; then the coordinator |
@@ -334,7 +334,7 @@ Reached only when the ladder says "passed" for `H`. `p` is the latest PR snapsho
 | N40 | behind the base, no merge queue | update not asked for `H`: bring the branch up to date with a merge commit (the snapshot's new head moves `H`). Asked less than `checks_grace_minutes` ago: wait. Otherwise it is a failed try (section 8) | GitHub |
 | N41 | a merge was asked for `H`, the PR is still open, and it is not behind the base (or a merge queue is on) | in the merge queue: wait. Tries below `merge_tries`: ask again after the back-off. Otherwise wake the coordinator once with GitHub's reason. (A merge call's own failure is not counted by section 8; only this row counts merge tries) | GitHub; then the coordinator |
 | N42 | **all of:** the ladder says passed; (from the evidence increment on) evidence covers `H` with every outcome passing or marked manual and judged by the reviewer; `p.head` is `H`; GitHub is reachable; checks green; mergeable; not behind (or a merge queue is on); no open owner ask names the task; the worker run is not `working` and has left no young background job | record the accept for `H`; merge `H` (squash, pinned to `H`) | GitHub |
-| N43 | none of the above | wake the coordinator once: "no rule matched", with the facts. Nothing else is done | the coordinator |
+| N43 | none of the above | wake the coordinator once per stall, keyed by `H` and the facts no row matched: "no rule matched", with the facts. Nothing else is done. (While a slice has not built a row yet, that row's cases land here) | the coordinator |
 
 The merge call's result is never trusted. Only a snapshot that says merged ends the task (N2).
 
@@ -342,18 +342,18 @@ The merge call's result is never trusted. Only a snapshot that says merged ends 
 
 ### 4.8 Making sure a run is alive
 
-A row that needs a run (worker, reviewer, retro) names it by role, round and commit. When no such run is alive, the next step depends on how the last one ended. First match wins.
+A row that needs a run (worker, reviewer, retro) names it by role, round and commit. Only a run of that role, round and commit is its run: the stopped reviewer of an earlier round reads as none yet, not as ended. When no such run is alive, the next step depends on how the last one ended. First match wins.
 
 | Last run of that role | Then |
 |---|---|
 | a start is pending | wait; it counts as present |
 | a stopping alert is active (section 6) | wait; it counts as present |
-| the engine itself stopped the last run (a park, a changed request, a void round) | start again (resume for a worker); not counted as a restart |
+| the engine itself stopped the last run (a park, a changed request, a round made void by a moved tip; a touched worktree is the no-valid-report row below) | start again (resume for a worker); not counted as a restart |
 | none yet | start fresh |
 | ended on a usage limit, or no candidate resolves because of quota | the next candidate that resolves starts with a handoff; if none, wait for the soonest pool reset (the task waits on quota). A run that ended on a usage limit makes its pool unusable until that pool's reset time, whatever the reading says. Not a failure, for any role |
 | the owner quit it in its terminal | do not restart; wake the coordinator once. Its `retry` restarts the run |
 | signed out | add an at-the-Mac item; the next candidate that resolves starts with a handoff; if none, wait until doctor sees it signed in |
-| reviewer or retro with no valid report | start again with the next reviewer candidate while tries are below `reviewer_retries`; then it counts as a failure (N5) |
+| reviewer or retro with no valid report (a verdict read from a touched worktree is none, section 7.2) | start again with the next reviewer candidate while tries are below `reviewer_retries`; then it counts as a failure (N5). Slice 1 marks the round's start act failed instead, so only an owner start tries the round again |
 | any other end, restarts below `worker_restarts`, backoff passed | worker: resume the session if it is resumable and on the same CLI, else start with a handoff |
 | otherwise | it counts as a failure (N5) |
 
@@ -361,7 +361,7 @@ Starting or restarting a worker needs a free slot, like a first start (N10); wit
 
 A start first delivers the messages held for that run (findings a dead worker never received).
 
-Runs a task's matching row does not want are stopped: a reviewer whose round is over or void (the round is void as soon as the tip moves ahead of `H` with changes), and every run of a task at N1 to N3. **The worker run is wanted by every other row** while the attempt is open, also while a recap is open or the engine has the turn: it writes the recap and makes the fixes. A split or a new attempt stops it as part of that decision. A task uses a slot only while its worker run is `starting` or `working`.
+Runs a task's matching row does not want are stopped: a reviewer whose round is over (its verdict was accepted) or void (the round is void as soon as the tip moves off the round's commit), and every run of a task at N1 to N3. **The worker run is wanted by every other row** while the attempt is open, also while a recap is open or the engine has the turn: it writes the recap and makes the fixes. A split or a new attempt stops it as part of that decision. A task uses a slot only while its worker run is `starting` or `working`.
 
 ### 4.9 What the coordinator and the owner can do to a task
 
@@ -372,7 +372,7 @@ Each is a record, accepted by the table in section 7.2. The rules above then lan
 | `park`, `unpark` | mark | N3 |
 | `drop` (with a why) | mark | N1. Tasks that depend on it then wait at N9 "depends on dropped SDF-n" until the plan is amended. Nothing is unblocked silently |
 | `close` (only after a "nothing to change" report) | mark | N1, with nothing to merge |
-| `retry` | an act that resets failure, restart, reviewer-try and merge-try counts, forgets a closed PR, and allows a run the owner quit to start again | N5 and N4 no longer hold |
+| `retry` | an act that resets failure, restart, reviewer-try and merge-try counts, closes an attempt whose PR was closed (N4), and allows a run the owner quit to start again. Slice 1 has no `retry`: the owner starting the project again clears every failed act, a failed merge or cleanup act included | N5 and N4 no longer hold |
 | `send-back` (with a why) | a round-like record "changes" from the coordinator | N22 |
 | recap decision: `continue` | closes the recap; raises `size_cap` to lines now + `continue_lines` | N23 |
 | recap decision: `split` (children pass the plan checks) | mark `split`; children carry `split_from` and the retro's worker change; dependants move to the children | N1 |
@@ -539,7 +539,7 @@ Whether an `ask_open` or an `answer` is valid at all (who may send it, the owner
 
 ### 7.2 The acceptance table
 
-Every report and command enters here. Valid: it becomes a record. Not valid, or not listed: refused with the code and one plain sentence, logged, and nothing changes. The conditions are about the report itself (who sent it, which commit and round it names, its shape), not about a phase. Reads (`show`, `status`, `log`, `graph`) change nothing and are open to every role; this table is about what changes records.
+Every report and command enters here. Valid: it becomes a record. Not valid, or not listed: refused with the code and one plain sentence, logged in the daemon's event log (section 14), and nothing changes. The conditions are about the report itself (who sent it, which commit and round it names, its shape), not about a phase. Reads (`show`, `status`, `log`, `graph`) change nothing and are open to every role; this table is about what changes records.
 
 | Report or command | Who may send it | Valid when | Else |
 |---|---|---|---|
@@ -548,7 +548,7 @@ Every report and command enters here. Valid: it becomes a record. Not valid, or 
 | `ready --nothing-to-change` | the task's worker run | a reason is given; no commit over the base | `nothing_new` |
 | `recap-written` | the task's worker run | a recap is open; the file exists | `no_recap` |
 | check results | the engine's own check run | they are for `H` | dropped |
-| `verdict` | the run the engine started for that round | the tag carries that run's one-time code (text the reviewer merely printed, such as a diff or a fixture written by the worker, cannot carry it); the round and commit are that run's; pass means no majors and changes means at least one; it answers which lines could go ("none" is an answer) and how many findings the worker should have caught itself. (A separate judgement per outcome, "the check proves it" or not, becomes a required field with the evidence increment. Until then a proof that does not show its outcome is reported as a major, and the tag of prompts.md 5.4 is the whole report) | `invalid_report`; the run counts as failed, the round is not used |
+| `verdict` | the run the engine started for that round | the tag carries that run's one-time code (text the reviewer merely printed, such as a diff or a fixture written by the worker, cannot carry it); the round and commit are that run's; pass means no majors and changes means at least one, and `majors` equals the reply's `major:` lines (section 9.3); the worktree is untouched when the tag is read (clean, its tip at the round's commit); from slice 3 the reply also answers which lines could go ("none" is an answer) and how many findings the worker should have caught itself, as reply lines (`deletable:`, `self-check misses:`), never as tag fields. (A separate judgement per outcome, "the check proves it" or not, becomes a required field with the evidence increment. Until then a proof that does not show its outcome is reported as a major, and the reply and tag of prompts.md 5.4 are the whole report) | `invalid_report`; the run counts as failed, the round is not used. A touched worktree voids the round instead: logged, and the run counts as one with no valid report (section 4.8) |
 | plan review report (from the plan-review slice) | the plan reviewer run the engine started | the tag carries that run's one-time code; each finding names a task and one of `delete`, `shrink`, `merge`, `split`, `design-first`, with a why | `invalid_report` |
 | the coordinator's answer to a plan finding (from the plan-review slice) | the coordinator | each finding is answered done, or rejected with a why; then the plan is submitted again | `finding_unanswered` |
 | `retro` | the retro run the engine started | the tag carries that run's one-time code; the commit is that run's; the cause is in the fixed set; the tag parses | `invalid_report`; the task's retro is not used |
@@ -561,7 +561,7 @@ Every report and command enters here. Valid: it becomes a record. Not valid, or 
 | start, stop, say, `touch` | the owner: by voice, a paired device or the factory page, or `sheepdog factory start` and `stop` in a terminal that carries no run's token | a start is always recorded (J1 then runs doctor); a run's terminal is refused, so a worker cannot stop the factory | `kind_not_allowed` |
 | a setting change | the owner by voice, phone or the factory page; the coordinator; or `sheepdog factory set` from a terminal that carries no run's token (a worker's or reviewer's terminal is refused: they open only `decision` asks). Each only raises an ask of kind `rule` | the value is in its range; it is saved only when the owner answers that ask with the daemon's proof. A terminal is never taken for the owner: a worker has a shell too | `out_of_range`, `proof_required`, `kind_not_allowed` |
 
-The daemon knows which run is calling from a token in the run's environment. A worker cannot record a verdict. The coordinator cannot accept, merge, add a round or mark a task done.
+The daemon knows which run is calling from a token in the run's environment (`SHEEPDOG_RUN_TOKEN`). The same environment carries the daemon's port (`SHEEPDOG_WEB_PORT`), so the report client needs no config file. A worker cannot record a verdict. The coordinator cannot accept, merge, add a round or mark a task done.
 
 ### 7.3 Observers
 
@@ -690,6 +690,8 @@ Per-CLI differences that are **data**: base command, fixed environment (Claude C
 
 Per-CLI differences that need **code**: pre-setting trust for a worktree, the agy sandbox wrapper for read-only runs, listing models.
 
+Read-only for Claude Code is the `dontAsk` mode with an allow list of read tools and the usual test runners, passed as one `--allowedTools=` argument (as separate values the flag swallows the prompt that follows). This is a rule on the model, backed by the clean-worktree check on the verdict (section 7.2). It is not a sandbox: a test runner runs the worker's code.
+
 `Screen` needs text patterns per CLI. That is a kept list, and the accepted limit: it covers only the few screens that appear before status reporting starts, and each pattern has a captured real screen as its test fixture.
 
 ### 9.3 Reports from agents
@@ -697,7 +699,7 @@ Per-CLI differences that need **code**: pre-setting trust for a worktree, the ag
 | Role | Channel | Reports |
 |---|---|---|
 | worker, designer | `sheepdog factory report …`, a thin client of the daemon | `ready`, `recap-written`, `ask` (kind decision) |
-| reviewer, retro, verifier | a `<report>{json}</report>` tag at the end of its last message, carrying the one-time code the engine put in that run's prompt, read by the engine from the terminal when the run goes idle (R20). The echoed prompt is skipped; the tag may sit in a code fence or be wrapped over lines; a read that ends mid-tag is read again, not judged | `verdict`, `retro` |
+| reviewer, retro, verifier | a `<report>{json}</report>` tag at the end of its last message, carrying the one-time code the engine put in that run's prompt, read by the engine from the terminal when the run goes idle (R20). The echoed prompt is skipped; the tag may sit in a code fence or be wrapped over lines; a read that ends mid-tag is read again, not judged. The tag holds no free text, because a model does not escape quotes in JSON reliably: a verdict's tag is `code, round, head, verdict, majors`. The findings are the reply above it, one per line starting `major:` or `minor:`, then (from slice 3) the lines of section 7.2 and prompts.md 5.4 | `verdict`, `retro` |
 | coordinator | `sheepdog factory …` | the commands of section 4.9, `plan apply/amend`, `answer` (kind decision), `ask` (owner kinds), `say`, reads |
 
 - Every report goes through the acceptance table (section 7.2).
@@ -710,15 +712,16 @@ These are mechanics: how a thing is done once a row has asked for it. They decid
 | Area | Rule |
 |---|---|
 | git | Every call is non-interactive, has a time limit and runs through hc (section 2.4). Never a force push, never a rebase of a task branch. A push names the branch explicitly |
-| Worktree | A new attempt branches from the remote base after a fetch, so unpushed local commits never leak into a task. One branch per attempt. The project's sparse exclude list applies. A worktree with uncommitted work is never removed |
+| Worktree | A new attempt branches from the remote base after a fetch, so unpushed local commits never leak into a task. The remote base is the push remote's default branch (its `HEAD`), and nothing else. One branch per attempt, named `task/<project>-<task>-<attempt>-<slug>`, so a new project on the same repo never reuses a branch an old PR names. The project's sparse exclude list applies. A worktree with uncommitted work is never removed |
 | gh | Every call names the repo of the push remote. A call with no repo is refused |
-| PR | One PR per attempt. An existing PR for the branch is adopted only if it is open, in the same repo, on the same base, and its head is `H`. Title: the task's title, which the plan checks as a Conventional Commit subject. Body and squash message are built from task fields only: no co-author trailer, no session link |
+| PR | One PR per attempt, and never a second PR for a branch. After its own push of `H`, the engine adopts the branch's PR only if it is open, in the same repo and on the same base. The head is not compared there, because GitHub lags a re-push; N42's `p.head` check guards the merge. A closed, merged or fork PR for the branch is never adopted: the act fails. Title: the task's title, which the plan checks as a Conventional Commit subject. Body and squash message are built from task fields only: no co-author trailer, no session link |
 | Merge | Squash, pinned to `H`. Never asks GitHub to delete the branch (with a merge queue that closes the PR). The remote branch is deleted only after the PR reads as merged |
 | Branch update | GitHub's update-branch (a merge commit), pinned to the expected head. When and how often is rows N38 and N40's business, not the executor's |
 | CI | Re-run of failed jobs; dispatch of a workflow. When and how often is rows N33 to N35's business |
 | Review diff | Round 1: the task's own changes, from the merge base with the base branch, computed now, to `H`. A delta round: the task's own changes since the last reviewed commit, leaving out what merges of the base brought in. A round that follows a worker's reject has no new commit: it reviews the rejected round's range again, with the rejections beside it |
 | Scratch copies | The clean checkout for a check run and a reviewer's scratch copy are removed when that run ends |
 | Stop | Ending a run ends its whole process group, then checks nothing is left |
+| Terminal names | Built from project, task, attempt and round, and fitted to herdr-core's rule `^[a-z][a-z0-9_.-]{0,31}$` (task ids come from the plan and may have capitals): lower case, other characters made `-`; a name that changed or is too long becomes its first 23 characters, `-` and 8 hex characters of its hash |
 | Messages | Long content is a file path. Another agent's output is passed as a file to read, marked untrusted |
 
 ## 10. The coordinator
@@ -765,6 +768,7 @@ These are mechanics: how a thing is done once a row has asked for it. They decid
 | `worker_restarts`, `reviewer_retries` | 3, 2 | 0–10, 0–5 | section 4.8 |
 | `ensure_failures`, `ensure_backoff_minutes` | 3, 1 | 1–10, 1–60 | N5, section 8 |
 | `start_minutes`, `idle_grace_seconds`, `quiet_minutes`, `interrupt_seconds`, `review_minutes` | 2, 20, 20, 90, 45 | 1–15, 5–120, 5–120, 10–600, 10–240 | R11, R18–R22, N29 |
+| `stuck_minutes` | 30 | 5–240 | the stuck stand-in row of plan slice 2 (2.1), until section 4.8 replaces it in slice 5a; counted from the failed act, the voided round, or the reviewer going idle with no valid tag |
 | `background_job_minutes`, `blocked_minutes` | 30, 10 | 1–240, 1–120 | the worker watch of 4.4, N29, N39; R29 |
 | `coordinator_starts_per_hour`, `coordinator_gap_minutes`, `owner_typing_minutes`, `coordinator_silent_minutes` | 3, 10, 5, 30 | 1–10, 1–60, 1–60, 5–240 | J6, J9 |
 | `rotate_after_hours`, `rotate_after_turns`, `handoff_minutes`, `heartbeat_minutes` | 4, 150, 5, 60 | 1–24, 20–1000, 1–30, 10–600 | J11, J13 |
@@ -882,7 +886,7 @@ Every surface reads a **view**: a pure function of the stored state. The JSON sh
 | Start row and shell start (FactoryStartEntry, FactoryStartShell) | doctor lines, then five questions | `doctor.go`; J1 |
 | Agents block, worker window (FactoryAgents, FactoryWorker) | coordinator state and age; each run's terminal, model and effort | run table; labels `sheepdog.project/role/task/model` set at launch |
 | Log (FactoryTerminal) | `at, by, wake, task, decision, why, model` | `log.jsonl` (section 14) |
-| Debug | for a task: the rule that matched, and for each earlier rule the part of its condition that was false; refusals with their codes | `log.jsonl` |
+| Debug | for a task: the rule that matched, and for each earlier rule the part of its condition that was false; refusals with their codes | `log.jsonl`; refusals from the daemon's event log (section 14) |
 | Voice digest | merged, waiting, pools, alerts; any PR merged outside the accept bar; any task that has waited on the coordinator for hours | a pure function over state and log; no model |
 | Quiet rule | labels on every factory terminal | set at every start; enforced where it is today (`herdr.IsFactoryQuiet`) |
 
@@ -928,7 +932,7 @@ type Engine interface {
 
 ## 13. Packages and size budgets
 
-**Size: three estimates, each higher than the last.** The first figure in this document was about 5,300 lines. The first review measured today's code (`contract.go` alone is 1,385 lines, the old `github.py` 1,413; a rule row costs about 20 lines once each clause is named so the log can say which part was false) and put the full design at 8,500 to 10,000. The second review, and then an independent check of the PR split, redid version 1 on this section's own bases twice: 4,000 became 6,000, then about 8,000. The table below is the full design by package (about 9,500). Adding the plan's increments to its version 1 gives about 11,500. So: **about 8,000 lines of Go without tests for version 1, and 9,500 to 12,000 for the full design.** The two methods disagree by a fifth, and every earlier figure was low. They are estimates. plan.md is now cut into slices that each run end to end; after every slice the real size is compared with the estimate and the next slices are re-planned. The first slice (a walking skeleton, about 2,300 lines in 8 PRs) will test these numbers within days. A package or a PR that passes 1.5 times its budget stops and asks.
+**Size: three estimates, each higher than the last.** The first figure in this document was about 5,300 lines. The first review measured today's code (`contract.go` alone is 1,385 lines, the old `github.py` 1,413; a rule row costs about 20 lines once each clause is named so the log can say which part was false) and put the full design at 8,500 to 10,000. The second review, and then an independent check of the PR split, redid version 1 on this section's own bases twice: 4,000 became 6,000, then about 8,000. The table below is the full design by package (about 9,500). Adding the plan's increments to its version 1 gives about 11,500. So: **about 8,000 lines of Go without tests for version 1, and 9,500 to 12,000 for the full design.** The two methods disagree by a fifth, and every earlier figure was low. They are estimates. plan.md is now cut into slices that each run end to end; after every slice the real size is compared with the estimate and the next slices are re-planned. The first slice (a walking skeleton) came in at about 2,650 lines against 2,300, 1.15 times (plan.md section 7); the next slices are planned on that factor. A package or a PR that passes 1.5 times its budget stops and asks.
 
 | Package | Job | May import | Budget, full | Basis |
 |---|---|---|---|---|
@@ -961,8 +965,8 @@ Deleted against this: about 3,250 lines of Go glue, 21,460 lines of Python and 1
   projects/<id>/reports/       findings, recaps, retro records, briefs
 ```
 
-- `state.json` is the one source of truth. It is written with a temporary file and a rename, mode 0600, as the daemon writes its other state.
-- `log.jsonl` is the audit trail and the owner's factory log. A line: `{seq, at, project, by, wake, task, input, facts, rule, asked, decision, why, model}`. On start, lines past the state's `seq` are dropped (a crash between the two writes).
+- `state.json` is the one source of truth. It is written with a temporary file and a rename, mode 0600, as the daemon writes its other state. It keeps no run token, only its SHA-256.
+- `log.jsonl` is the audit trail and the owner's factory log. A line: `{seq, at, project, by, wake, task, input, facts, rule, asked, decision, why, model}`. On start, lines past the state's `seq` are dropped (a crash between the two writes). A refused report or command changes no record, so it goes to the daemon's event log, not here.
 - Settings are stored in `state.json` or `engine.json` by scope. There is no layered settings file and nothing is read from `~/.config`.
 - Done tasks stay in `state.json` until their milestone closes, then move to `projects/<id>/archive.json`. *Estimate, not measured:* a few hundred tasks is about 1 MB, written a few times a minute.
 - New data files are added to `CONFIG.md`'s data table.
@@ -1083,6 +1087,7 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | O7 | The ladder (4.6) treats review, retro, recap and owner as one loop at four levels. The levels are not alike (three retro verdicts, four recap choices). If the special cases grow, split the function per level rather than adding conditions |
 | O8 | The picture of the tables (`transitions.html`, published privately for the owner) was redrawn for form B from the tables of this file. Its "Try it" panel is a simplified illustration, and its interactions were not tested in a browser |
 | O9 | 62 of the old engine's 893 test functions are cited by no knowledge-base row (knowledge-base.md, Appendix D). They were not re-read |
+| O10 | Until reviewers run in a scratch copy (9.1, U13), slice 1 runs them in the task's worktree. A round voided because the reviewer left that worktree dirty (7.2) leaves the dirt there: the worker's next `ready` is refused (`dirty_tree`) and the next verdict would be void too. Slice 1 marks the round failed and logs it; slice 2's stuck row wakes the coordinator. Who cleans a reviewer's leftovers, and how without touching the worker's own unfinished work, is not decided |
 
 ### 17.5 The audit by simulation, and what it means
 
