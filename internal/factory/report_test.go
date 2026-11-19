@@ -323,3 +323,119 @@ func TestReportReadyAcceptance(t *testing.T) {
 		t.Fatalf("behind H ready = %v, want pull_first", err)
 	}
 }
+
+// TestVerdictAcceptance checks design.md 7.2 for `verdict` (KB-REV-5, KB-REV-53):
+// wrong code, wrong round, wrong head, pass with majors, changes with 0 majors,
+// bad JSON, reviewer token role refusal on HTTP Report, logged-once invalid_report
+// leaving the round unused, and valid acceptance writing reports/<task>-r<n>.md
+// and stopping the reviewer run.
+func TestVerdictAcceptance(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	var logBuf bytes.Buffer
+	eng := New(paths, client)
+	eng.Log = logging.NewJSONLLogger(&logBuf)
+
+	const projID = "proj-verdict"
+	srv.Add(hc.Terminal{Address: "t-rev", Name: "rev-1", State: "live", Status: &hc.Status{App: "claude-code", State: "done"}})
+
+	st := flow.State{
+		Seq:     1,
+		Project: flow.Project{ID: projID, Started: true, RunTokenHash: tokenHash("tok-coord")},
+		Tasks: []flow.Task{{
+			ID: "T1", Title: "feat: add parser",
+			Attempts: []flow.Attempt{{
+				BaseCommit: "b0", RunTokenHash: tokenHash("tok-worker"),
+				Ready: []flow.Ready{{Head: "c1"}},
+				Review: &flow.ReviewRun{
+					RunID: "t-rev", RunTokenHash: tokenHash("tok-rev"),
+					Round: 1, Head: "c1", Code: "nonce123",
+					Reviewer: flow.Reviewer{CLI: "claude", Model: "opus", Effort: "medium"},
+				},
+			}},
+		}},
+	}
+	if err := SaveState(paths.State(projID), st); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reviewer token cannot send ready, plan apply, stop, or verdict over Report HTTP.
+	for _, verb := range []string{"ready", "plan apply", "stop", "verdict"} {
+		if err := eng.Report("tok-rev", verb, json.RawMessage(`{}`)); refusalCode(err) != "kind_not_allowed" {
+			t.Fatalf("reviewer Report(%q) = %v, want kind_not_allowed", verb, err)
+		}
+	}
+
+	// Invalid verdict cases: each refused invalid_report, round stays unused, reviewer stays untouched.
+	badCases := []struct {
+		name string
+		rd   world.ReportRead
+	}{
+		{"malformed json", world.ReportRead{Status: world.ReportInvalid, Raw: "{bad"}},
+		{"wrong code", world.ReportRead{Status: world.ReportFound, Raw: "c", Report: world.Report{Code: "wrong", Round: 1, Head: "c1", Verdict: "pass"}}},
+		{"wrong round", world.ReportRead{Status: world.ReportFound, Raw: "r", Report: world.Report{Code: "nonce123", Round: 2, Head: "c1", Verdict: "pass"}}},
+		{"wrong head", world.ReportRead{Status: world.ReportFound, Raw: "h", Report: world.Report{Code: "nonce123", Round: 1, Head: "c0", Verdict: "pass"}}},
+		{"pass with majors", world.ReportRead{Status: world.ReportFound, Raw: "pm", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 1}}},
+		{"changes with 0 majors", world.ReportRead{Status: world.ReportFound, Raw: "cm", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "changes", Majors: 0}}},
+		{"unknown verdict word", world.ReportRead{Status: world.ReportFound, Raw: "uv", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass|changes", Majors: 0}}},
+		{"pass with a major line", world.ReportRead{Status: world.ReportFound, Raw: "pl", Body: "major: nil deref\nminor: naming", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 0}}},
+		{"majors above the major lines", world.ReportRead{Status: world.ReportFound, Raw: "ml", Body: "  major: nil deref\n  minor: naming", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "changes", Majors: 2}}},
+	}
+	for _, tc := range badCases {
+		logBuf.Reset()
+		err := eng.acceptVerdictLocked(ctx, projID, &st, 0, tc.rd)
+		if refusalCode(err) != "invalid_report" {
+			t.Fatalf("%s: err = %v, want invalid_report", tc.name, err)
+		}
+		if len(st.Tasks[0].Attempts[0].Rounds) != 0 || st.Seq != 1 {
+			t.Fatalf("%s mutated rounds/seq: %+v seq=%d", tc.name, st.Tasks[0].Attempts[0].Rounds, st.Seq)
+		}
+		if n := strings.Count(logBuf.String(), "factory.refused"); n != 1 {
+			t.Fatalf("%s logged %d refusals, want 1:\n%s", tc.name, n, logBuf.String())
+		}
+		// Repeated read of the exact same invalid output on the same run is not re-logged.
+		if err2 := eng.acceptVerdictLocked(ctx, projID, &st, 0, tc.rd); refusalCode(err2) != "invalid_report" {
+			t.Fatalf("%s repeat: err = %v", tc.name, err2)
+		}
+		if n := strings.Count(logBuf.String(), "factory.refused"); n != 1 {
+			t.Fatalf("%s repeat re-logged refusal (%d):\n%s", tc.name, n, logBuf.String())
+		}
+	}
+
+	// Valid changes verdict records round{n:1, kind:"full", ...}, writes T1-r1.md, and stops t-rev.
+	good := world.ReportRead{
+		Status: world.ReportFound,
+		Raw:    `{"code":"nonce123","round":1,"head":"c1","verdict":"changes","majors":4}`,
+		Body:   "- major: nil deref in Parse\n**major:** missing error check\n1. major: no test\n  * major: race\nDetailed review notes line 42.",
+		Report: world.Report{
+			Code: "nonce123", Round: 1, Head: "c1", Verdict: "changes", Majors: 4,
+		},
+	}
+	if err := eng.acceptVerdictLocked(ctx, projID, &st, 0, good); err != nil {
+		t.Fatalf("valid verdict: %v", err)
+	}
+	att := st.Tasks[0].Attempts[0]
+	if att.Review != nil || len(att.Rounds) != 1 || st.Seq != 2 {
+		t.Fatalf("after valid verdict: review=%+v rounds=%+v seq=%d", att.Review, att.Rounds, st.Seq)
+	}
+	wantPath := paths.Report(projID, "T1", 1)
+	r1 := att.Rounds[0]
+	if r1.N != 1 || r1.Kind != "full" || r1.Head != "c1" || r1.Verdict != "changes" || r1.Majors != 4 ||
+		r1.Reviewer != (flow.Reviewer{CLI: "claude", Model: "opus", Effort: "medium"}) || r1.ReportPath != wantPath {
+		t.Fatalf("round 1 record = %+v", r1)
+	}
+	reportBytes, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("read report file: %v", err)
+	}
+	for _, want := range []string{"nil deref in Parse", "missing error check", "Detailed review notes line 42."} {
+		if !strings.Contains(string(reportBytes), want) {
+			t.Errorf("report file missing %q:\n%s", want, reportBytes)
+		}
+	}
+	if rs, err := world.RunState(ctx, client, "t-rev"); err != nil || rs != flow.RunGone {
+		t.Fatalf("reviewer terminal after verdict = (%s, %v), want gone", rs, err)
+	}
+}

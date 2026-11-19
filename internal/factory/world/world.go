@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"math/rand/v2"
 	"os"
@@ -46,8 +47,26 @@ func ClaudeArgv(role, model, effort, permissionMode string) []string {
 	if permissionMode == "bypassPermissions" {
 		argv = append(argv, "--settings", `{"skipDangerousModePermissionPrompt":true}`)
 	}
+	if permissionMode == "dontAsk" {
+		// A reviewer never waits on a prompt (seen live: plan mode waited 20
+		// minutes on a shell prompt, then reviewed without running tests).
+		// dontAsk denies anything not listed; the list is read-only plus
+		// the usual test runners, and never Edit or Write.
+		// One argument with "=": --allowedTools takes many values and would
+		// otherwise swallow the prompt that StartRun appends (seen live).
+		argv = append(argv, "--allowedTools="+reviewerTools)
+	}
 	return argv
 }
+
+// reviewerTools is what a reviewer may use without asking: read the code and
+// its history, and run the project's tests. No edit tools, but test runners
+// run worker code and some git and go flags write files: read-only is a rule
+// on the model, backed by the engine's clean-worktree check on the verdict.
+const reviewerTools = "Read Grep Glob LS " +
+	"Bash(git diff:*) Bash(git log:*) Bash(git show:*) Bash(git status:*) " +
+	"Bash(go build:*) Bash(go test:*) Bash(go vet:*) Bash(gofmt -l:*) Bash(make test:*) " +
+	"Bash(npm test:*) Bash(pytest:*) Bash(python3 -m pytest:*) Bash(python3 -m unittest:*)"
 
 // StartRun launches spec in herdr-core and returns its terminal address.
 func StartRun(ctx context.Context, client *hc.Client, spec RunSpec) (string, error) {
@@ -179,7 +198,7 @@ func SendRun(ctx context.Context, client *hc.Client, id, text string) error {
 // StopRun kills terminal id, removes it, and verifies both the terminal and its
 // OS process group are gone (design.md 9.4).
 func StopRun(ctx context.Context, client *hc.Client, id string) error {
-	if id == "" {
+	if client == nil || id == "" {
 		return nil
 	}
 	t, err := getTerminal(ctx, client, id)
@@ -226,7 +245,7 @@ func RunState(ctx context.Context, client *hc.Client, id string) (flow.RunState,
 	} else if err != nil {
 		return "", err
 	}
-	if t.Status != nil && (t.Status.State == "idle" || t.Status.State == "done" || t.Status.State == "error") {
+	if t.Status != nil && stateIdle(t.Status.State) {
 		return flow.RunIdle, nil
 	}
 	return flow.RunWorking, nil
@@ -237,6 +256,140 @@ func getTerminal(ctx context.Context, client *hc.Client, id string) (hc.Terminal
 		return hc.Terminal{}, errors.New("world: no hc client")
 	}
 	return client.Get(ctx, id)
+}
+
+const reportReadLines = 4000
+
+// ReportStatus is the parsing outcome of ReadReport (design.md 9.3).
+type ReportStatus string
+
+// The three outcomes of ReadReport.
+const (
+	ReportNotYet  ReportStatus = "not_yet"
+	ReportFound   ReportStatus = "found"
+	ReportInvalid ReportStatus = "invalid"
+)
+
+// Report is slice 1's reviewer <report> JSON payload (prompts.md 5.4). It
+// carries no free text: the findings are the reply text above the tag.
+type Report struct {
+	Code, Head, Verdict string
+	Round, Majors       int
+}
+
+// ReportRead holds the parsed report tag (Raw) and the reply text above it
+// (Body), which holds the findings.
+type ReportRead struct {
+	Status    ReportStatus
+	Report    Report
+	Raw, Body string
+}
+
+var (
+	ansiRe       = regexp.MustCompile(`\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))`)
+	tuiPromptRe  = regexp.MustCompile(`(?m)^❯[ \t\x{00a0}]+\S`)
+	tuiReplyRe   = regexp.MustCompile(`(?m)^⏺`)
+	tuiInputRe   = regexp.MustCompile(`(?m)^\x{2500}{8,}\n❯`)
+	wrapIndentRe = regexp.MustCompile("\r?\n[ \t>]*")
+	nonSlugRe    = regexp.MustCompile(`[^a-z0-9]+`)
+)
+
+// ReadReport waits until term is idle/done, reads its stitched output, skips
+// everything up to and including the last prompt echo, and parses the last
+// <report>...</report> tag (design.md 9.3, spike S0.3); the reply text above
+// that tag is the findings (Body).
+func ReadReport(ctx context.Context, client *hc.Client, term, code string) (ReportRead, error) {
+	if client == nil || strings.TrimSpace(term) == "" {
+		return ReportRead{}, errors.New("world: ReadReport requires hc client and terminal")
+	}
+	if err := waitReportIdle(ctx, client, term); err != nil {
+		return ReportRead{}, err
+	}
+	res, err := client.Read(ctx, term, reportReadLines)
+	if err != nil || !res.Complete {
+		return ReportRead{Status: ReportNotYet}, err
+	}
+	return parseReportText(res.Text, code), nil
+}
+
+func waitReportIdle(ctx context.Context, client *hc.Client, term string) error {
+	if t, err := client.Get(ctx, term); err != nil || termIdle(t) {
+		return err
+	}
+	sub, err := client.Subscribe(ctx, hc.SubscribeFilter{Terminal: term})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sub.Close() }()
+	if _, snap := sub.Snapshot(); len(snap) == 0 || termIdle(snap[0]) {
+		return nil
+	}
+	for n := range sub.Events() {
+		var sd hc.StatusData
+		var td hc.TurnData
+		if (n.Method == "missed" && (len(n.Terminals) == 0 || termIdle(n.Terminals[0]))) ||
+			(n.Method == "event" && (n.Type == "finished" || n.Type == "removed" || n.Type == "lost" ||
+				(n.Type == "status" && n.DecodeData(&sd) == nil && sd.Status != nil && stateIdle(sd.Status.State)) ||
+				(n.Type == "turn" && n.DecodeData(&td) == nil && stateIdle(td.State)))) {
+			return nil
+		}
+	}
+	return cmp.Or(ctx.Err(), sub.Err())
+}
+
+func termIdle(t hc.Terminal) bool {
+	return t.State != "live" || (t.Status != nil && stateIdle(t.Status.State))
+}
+func stateIdle(s string) bool { return s == "idle" || s == "done" || s == "error" }
+
+func parseReportText(text, code string) ReportRead {
+	clean := ansiRe.ReplaceAllString(strings.ReplaceAll(text, "\r\n", "\n"), "")
+	// The input box at the bottom may hold a draft the owner typed (seen
+	// live); it is not a prompt echo. A box with a reply or tag after it is
+	// not at the bottom.
+	if m := tuiInputRe.FindAllStringIndex(clean, -1); len(m) > 0 {
+		if rest := clean[m[len(m)-1][0]:]; !tuiReplyRe.MatchString(rest) && !strings.Contains(rest, "<report>") {
+			clean = clean[:m[len(m)-1][0]]
+		}
+	}
+	if m := tuiPromptRe.FindAllStringIndex(clean, -1); len(m) > 0 {
+		r := tuiReplyRe.FindStringIndex(clean[m[len(m)-1][0]:])
+		if r == nil {
+			return ReportRead{Status: ReportNotYet}
+		}
+		clean = clean[m[len(m)-1][0]+r[0]:]
+	}
+	openIdx := strings.LastIndex(clean, "<report>")
+	if openIdx < 0 {
+		return ReportRead{Status: ReportNotYet}
+	}
+	// The TUI wraps long lines with an indent; joining them restores the tag.
+	raw, _, ok := strings.Cut(wrapIndentRe.ReplaceAllString(clean[openIdx+len("<report>"):], ""), "</report>")
+	if !ok {
+		return ReportRead{Status: ReportNotYet}
+	}
+	raw = strings.TrimSpace(raw)
+	body := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(clean[:openIdx]), "⏺"))
+	rep, valid := decodeReportJSON(raw)
+	if !valid || code == "" || rep.Code != code {
+		return ReportRead{Status: ReportInvalid, Report: rep, Raw: raw, Body: body}
+	}
+	return ReportRead{Status: ReportFound, Report: rep, Raw: raw, Body: body}
+}
+
+func decodeReportJSON(s string) (Report, bool) {
+	// An old-style findings field is dropped unread: a model cannot be trusted
+	// to escape free text in JSON (seen live: unescaped quotes).
+	if i := strings.Index(s, `,"findings":`); i > 0 {
+		s = s[:i] + "}"
+	}
+	var r Report
+	dec := json.NewDecoder(strings.NewReader(s))
+	dec.DisallowUnknownFields()
+	if !strings.HasPrefix(s, "{") || dec.Decode(&r) != nil || !errors.Is(dec.Decode(&struct{}{}), io.EOF) {
+		return Report{}, false
+	}
+	return r, true
 }
 
 // RepoProject resolves folder's git top-level directory and its project id in
@@ -262,8 +415,6 @@ func RepoProject(ctx context.Context, folder string, init bool) (string, string,
 
 // Worktree is a task attempt's git worktree and branch from the remote base.
 type Worktree struct{ Path, Branch, BaseCommit string }
-
-var nonSlugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
 // NewWorktree fetches the remote base and creates branch task/<id>-<slug> and a
 // worktree at worktreeDir from the fresh remote base (design.md 9.4, KB-WKT-1,

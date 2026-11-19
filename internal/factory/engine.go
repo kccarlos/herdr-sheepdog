@@ -28,6 +28,9 @@ var coordinatorTemplate string
 //go:embed worker.md
 var workerTemplate string
 
+//go:embed reviewer.md
+var reviewerTemplate string
+
 var lockGitTimeout = 15 * time.Second
 
 // ghTimeout bounds one GitHub executor or snapshot (a push plus gh calls).
@@ -110,7 +113,13 @@ func (e *Engine) Stop(project string) error {
 		for ai := range s.Tasks[ti].Attempts {
 			a := &s.Tasks[ti].Attempts[ai]
 			runs = append(runs, cmp.Or(a.RunID, workerName(id, s.Tasks[ti].ID, ai+1)))
-			a.RunID, a.RunTokenHash = "", ""
+			if a.Review != nil {
+				runs = append(runs, a.Review.RunID)
+			}
+			for r := 1; r <= len(a.Rounds)+1; r++ {
+				runs = append(runs, reviewerName(id, s.Tasks[ti].ID, ai+1, r))
+			}
+			a.RunID, a.RunTokenHash, a.Review = "", "", nil
 		}
 	}
 	if e.HC != nil { // without herdr-core (mock mode) nothing was started
@@ -233,11 +242,13 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 type taskExec func(e *Engine, ctx context.Context, id string, s *flow.State, ti int) (decision string, abort bool, err error)
 
 // taskExecutors dispatches each ask verb implemented so far to its executor.
-// Asks for PR 1.7–1.8 are absent and logged as "not built yet".
+// Asks for PR 1.8 are absent and logged as "not built yet".
 var taskExecutors = map[string]taskExec{
-	flow.AskNewAttempt:  (*Engine).execNewAttempt,
-	flow.AskStartWorker: (*Engine).execStartWorker,
-	flow.AskPushPR:      (*Engine).execPushPR,
+	flow.AskNewAttempt:   (*Engine).execNewAttempt,
+	flow.AskStartWorker:  (*Engine).execStartWorker,
+	flow.AskPushPR:       (*Engine).execPushPR,
+	flow.AskStartReview:  (*Engine).execStartReviewer,
+	flow.AskTellFindings: (*Engine).execTellFindings,
 }
 
 func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int) {
@@ -259,6 +270,9 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		facts.Tip, facts.TipRel = tip, rel
 		if len(a.Ready) > 0 { // no PR can exist before the first ready
 			facts.PR = e.readPRLocked(ctx, id, s, ti)
+		}
+		if e.observeReviewLocked(ctx, id, s, ti, &facts) {
+			return
 		}
 	}
 	now := time.Now()
@@ -322,13 +336,132 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"), "{outcomes}", bullets(t.Outcomes), "{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", cmp.Or(e.Bin, "sheepdog")).Replace(workerTemplate))
 	termID, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, world.RunSpec{
 		Name: workerName(id, t.ID, len(t.Attempts)), Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
-		Argv: world.ClaudeArgv(flow.RoleWorker, "sonnet", "medium", "bypassPermissions"), Prompt: prompt,
-		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleWorker, "sheepdog.task": t.ID, "sheepdog.model": "sonnet"},
+		Argv: world.ClaudeArgv(flow.RoleWorker, workerModel, "medium", "bypassPermissions"), Prompt: prompt,
+		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleWorker, "sheepdog.task": t.ID, "sheepdog.model": workerModel},
 	})
 	if err == nil {
 		a.RunID = termID
 	}
 	return "started worker " + termID, abort, err
+}
+
+// workerModel is the model every worker runs in slice 1.
+const workerModel = "sonnet"
+
+// reviewerModel picks a reviewer model other than the worker's.
+func reviewerModel(worker string) string {
+	if strings.Contains(worker, "opus") {
+		return "sonnet"
+	}
+	return "opus"
+}
+
+// observeReviewLocked checks an active reviewer run: stops it if its round is
+// void, or reads and accepts its verdict tag once idle (design.md 4.5, 4.8).
+func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.State, ti int, facts *flow.Facts) bool {
+	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
+	if a.Review == nil {
+		return false
+	}
+	voidRound := func() bool {
+		if err := world.StopRun(ctx, e.HC, a.Review.RunID); err != nil {
+			e.logError("factory.hc_error", id, err)
+			return true
+		}
+		a.Review = nil
+		if err := SaveState(e.Paths.State(id), *s); err != nil {
+			e.logError("factory.commit_error", id, err)
+			return true
+		}
+		return false
+	}
+	if t.Done != nil || t.Closed != nil || facts.PR.State == flow.PRMerged || facts.PR.State == flow.PRClosed ||
+		facts.TipRel != flow.RelSame || a.Review.Round != len(a.Rounds)+1 || a.Review.Head != flow.H(*a) {
+		return voidRound()
+	}
+	if a.Review.RunID == "" {
+		return false
+	}
+	var err error
+	if facts.Reviewer.State, err = world.RunState(ctx, e.HC, a.Review.RunID); err != nil {
+		e.logError("factory.hc_error", id, err)
+		return true
+	}
+	if facts.Reviewer.State != flow.RunIdle {
+		return false
+	}
+	rctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
+	rd, err := world.ReadReport(rctx, e.HC, a.Review.RunID, a.Review.Code)
+	cancel()
+	if err != nil {
+		e.logError("factory.hc_error", id, err)
+		return true
+	}
+	if rd.Status == world.ReportNotYet {
+		return false
+	}
+	// The reviewer's allowed commands can write (tests, git diff --output):
+	// a verdict counts only for an untouched worktree at the round's head.
+	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
+	tip, _, clean, err := world.InspectWorktree(gctx, a.Worktree, flow.H(*a))
+	cancel()
+	if err != nil {
+		e.logError("factory.git_error", id, err)
+		return true
+	}
+	if !clean || tip != a.Review.Head {
+		why := "the worktree moved"
+		if !clean {
+			why = "the reviewer left the worktree dirty"
+		}
+		e.logEvent("factory.review_void", map[string]string{"project": id, "task": t.ID, "round": fmt.Sprint(a.Review.Round), "why": why})
+		// H did not move, so the flow would ask the spent start act again:
+		// fail it, and the owner starting again retries the round.
+		k := fmt.Sprintf("%s@%d@%s", flow.AskStartReview, a.Review.Round, a.Review.Head)
+		for i := range a.Acts {
+			if a.Acts[i].Key == k {
+				a.Acts[i].Result = "failed"
+			}
+		}
+		return voidRound()
+	}
+	err = e.acceptVerdictLocked(ctx, id, s, ti, rd)
+	var ref *Refusal
+	if err != nil && !errors.As(err, &ref) {
+		e.logError("factory.exec_error", id, err)
+	}
+	return err == nil || !errors.As(err, &ref)
+}
+
+func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State, ti int) (string, bool, error) {
+	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
+	round, h, model := len(a.Rounds)+1, flow.H(*a), reviewerModel(workerModel)
+	if a.Review == nil || a.Review.Round != round || a.Review.Head != h || a.Review.Code == "" {
+		a.Review = &flow.ReviewRun{Round: round, Head: h, Code: strings.ToLower(rand.Text()[:10]), Reviewer: flow.Reviewer{CLI: "claude", Model: model, Effort: "medium"}}
+	}
+	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
+		"{outcomes}", bullets(t.Outcomes), "{base}", a.BaseCommit, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code).Replace(reviewerTemplate))
+	termID, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, world.RunSpec{
+		Name: reviewerName(id, t.ID, len(t.Attempts), round), Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
+		Argv: world.ClaudeArgv(flow.RoleReviewer, model, "medium", "dontAsk"), Prompt: prompt,
+		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleReviewer, "sheepdog.task": t.ID, "sheepdog.model": model},
+	})
+	if err != nil {
+		if a.Review.RunID == "" {
+			a.Review = nil
+		}
+		return "", abort, err
+	}
+	a.Review.RunID = termID
+	return fmt.Sprintf("started reviewer %s (round %d)", termID, round), abort, nil
+}
+
+func (e *Engine) execTellFindings(ctx context.Context, _ string, s *flow.State, ti int) (string, bool, error) {
+	a := &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
+	r := a.Rounds[len(a.Rounds)-1]
+	msg := fmt.Sprintf("Review round %d found %d major(s) in %s — fix them, commit, and run %s factory report ready again.",
+		r.N, r.Majors, r.ReportPath, cmp.Or(e.Bin, "sheepdog"))
+	return fmt.Sprintf("told worker findings from round %d", r.N), false, world.SendRun(ctx, e.HC, a.RunID, msg)
 }
 
 func bullets(items []string) string {
@@ -387,6 +520,9 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 func coordName(id string) string { return hcName("coord-" + strings.TrimPrefix(id, "proj-")) }
 func workerName(id, task string, n int) string {
 	return hcName(fmt.Sprintf("worker-%s-%s-%d", strings.TrimPrefix(id, "proj-"), task, n))
+}
+func reviewerName(id, task string, attempt, round int) string {
+	return hcName(fmt.Sprintf("rev-%s-%s-%d-%d", strings.TrimPrefix(id, "proj-"), task, attempt, round))
 }
 
 // hcName fits a terminal name to herdr-core's rule: 1-32 of a-z 0-9 - _ .

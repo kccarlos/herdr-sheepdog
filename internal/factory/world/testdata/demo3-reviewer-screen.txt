@@ -1,0 +1,120 @@
+
+ ▐▛███▛█   Claude Code v2.1.325
+▝▜██████▀  Opus 5.5 with medium effort · Claude Max
+ ▝▝   ▝▝   ~/demo/data/factory/projects/proj-3ed57ba2/worktrees/T1-1
+
+⚠ Code Mode (experimental) is on · this session can be resumed only with Code Mode on
+⚠ Remote Control isn't available in Code Mode (experimental) yet, so this session isn't connected. To use Remote Control, quit Claude Code and start it again with CLAUDE_CODE_EXPERIMENTAL_CODE_MODE
+  set to 0.
+
+❯ You are the factory code reviewer for task T1: feat: add a hello helper with a unit test
+
+  Brief:
+  The repo has no Go code yet. Initialise a Go module at the repo root and add a small package with a Hello(name string) string helper that returns a greeting such as "hello, <name>". Add one
+  table-free unit test that checks the helper's output, so the repo has a tested example helper.
+
+  Outcomes:
+  - go.mod exists at the repo root and go build ./... succeeds
+  - A Hello(name string) string helper exists and returns "hello, <name>"
+  - go test ./... passes with exactly one unit test of the helper
+
+  Read only: never edit files, commit, push, or switch branches.
+  Review the commit 657ce5090879ae2be234dc0f72bf952084c252e6 against the base 80d9857def34945bd538faf6a162296bc4c2a5a8 (git diff
+  80d9857def34945bd538faf6a162296bc4c2a5a8..657ce5090879ae2be234dc0f72bf952084c252e6); list findings with severity (major for bugs, broken callers, safety or data-loss issues, or unmet outcomes;
+  minor otherwise).
+  End your reply with exactly one tag (valid JSON with only these six keys, "pass" when "majors":0 and "changes" when "majors" >= 1, "findings" as an array of strings):
+
+  <report>{"code":"6knsmxa2re","round":1,"head":"657ce5090879ae2be234dc0f72bf952084c252e6","verdict":"pass|changes","majors":0,"findings":["..."]}</report>
+
+  Ran 5 shell commands
+  ⎿  1 action not run · permission denied
+     │ Reason: Permission to use Bash has been denied because Claude Code is running in don't ask mode.
+
+⏺ I found one major issue: the commit fails the third outcome because the branch has no unit test at all.
+
+  Findings
+
+  1. major (outcome not met): There are no *_test.go files at head 657ce50. The first commit, 14f64ad ("feat: add hello helper with a unit test"), added a test, but the head commit 657ce50 ("chore:
+     drop hello unit test for now") deleted it. Across the full range, only go.mod and hello/hello.go change. So the outcome "go test ./... passes with exactly one unit test of the helper" is not met:
+     go test would run zero tests, and the brief's goal of "a tested example helper" isn't delivered. Fix: restore one test in hello/hello_test.go that checks Hello("world") == "hello, world".
+  2. minor: go.mod uses the placeholder module path example.com/sheepdog-demo. That's fine for a demo, but it should match the repo's real import path if this code will ever be imported.
+
+  What meets the brief
+  - go.mod is at the repo root (go 1.21).
+  - hello.Hello(name string) string returns "hello, " + name, as required. The package and function both have doc comments.
+
+  Not verified: I couldn't run go build, go vet or go test because shell commands were denied in this session. My conclusions come from reading the diff only. The code is small enough that I don't
+  expect a build problem, but I haven't confirmed it.
+
+  <report>{"code":"6knsmxa2re","round":1,"head":"657ce5090879ae2be234dc0f72bf952084c252e6","verdict":"changes","majors":1,"findings":["major: no unit test exists at head; commit 657ce50 'chore: drop
+  hello unit test for now' removed the test, so the outcome 'go test ./... passes with exactly one unit test of the helper' is unmet (zero tests). Restore hello/hello_test.go with one test asserting
+  Hello("world") == "hello, world".","minor: go.mod uses the placeholder module path example.com/sheepdog-demo; use the real repo import path if this code will ever be imported.","note: go
+  build/vet/test could not be run (shell denied in this session); conclusions come from reading the diff only."]}</report>
+
+✻ Sautéed for 12s · done 9:40 AM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ restore the hello unit test
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ don't ask on (shift+tab to cycle) · PR #18

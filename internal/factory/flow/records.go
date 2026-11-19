@@ -56,16 +56,27 @@ type Closed struct {
 
 // Attempt is one try at a task, from its base commit.
 type Attempt struct {
-	BaseCommit   string   `json:"base_commit"`
-	Branch       string   `json:"branch"`
-	Worktree     string   `json:"worktree"`
-	PR           int      `json:"pr"`
-	RunID        string   `json:"run_id"`                     // the run's terminal identity
-	RunTokenHash string   `json:"run_token_sha256,omitempty"` // SHA-256 hex of the run's SHEEPDOG_RUN_TOKEN
-	Ready        []Ready  `json:"ready"`
-	Rounds       []Round  `json:"rounds"`
-	Accepts      []Accept `json:"accepts"`
-	Acts         []Act    `json:"acts"`
+	BaseCommit   string     `json:"base_commit"`
+	Branch       string     `json:"branch"`
+	Worktree     string     `json:"worktree"`
+	PR           int        `json:"pr"`
+	RunID        string     `json:"run_id"`                     // the run's terminal identity
+	RunTokenHash string     `json:"run_token_sha256,omitempty"` // SHA-256 hex of the run's SHEEPDOG_RUN_TOKEN
+	Review       *ReviewRun `json:"review,omitempty"`
+	Ready        []Ready    `json:"ready"`
+	Rounds       []Round    `json:"rounds"`
+	Accepts      []Accept   `json:"accepts"`
+	Acts         []Act      `json:"acts"`
+}
+
+// ReviewRun is the active reviewer run started for the attempt's next round.
+type ReviewRun struct {
+	RunID        string   `json:"run_id,omitempty"`
+	RunTokenHash string   `json:"run_token_sha256,omitempty"`
+	Round        int      `json:"round"`
+	Head         string   `json:"head"`
+	Code         string   `json:"code"`
+	Reviewer     Reviewer `json:"reviewer"`
 }
 
 // Ready is the worker's "done at this commit".
