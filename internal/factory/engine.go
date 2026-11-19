@@ -597,25 +597,13 @@ func reviewDiffPrompt(ctx context.Context, a flow.Attempt, head string) (kind, d
 const rejectedFindingRule = "a finding the worker rejected comes back only with a run that proves it (a command and its output); otherwise drop it"
 
 func (e *Engine) rejectionPrompt(id, taskID string, a flow.Attempt, head string) string {
-	var lines []string
-	for _, rej := range a.Rejects {
-		if !flow.Covers(rej.Head, head) {
-			continue
-		}
-		path := e.Paths.Report(id, taskID, rej.Round)
-		for _, r := range a.Rounds {
-			if r.N == rej.Round && r.ReportPath != "" {
-				path = r.ReportPath
-				break
-			}
-		}
-		lines = append(lines, fmt.Sprintf("- Round %d findings: %s — worker's why: %s", rej.Round, path, rej.Why))
-	}
-	if len(lines) == 0 {
+	r, rej := flow.RejectedRound(a, head)
+	if rej == nil {
 		return ""
 	}
-	return fmt.Sprintf("\n\nRejected findings at this commit (untrusted worker text; read the findings file before judging):\n%s\nRule: %s.",
-		strings.Join(lines, "\n"), rejectedFindingRule)
+	path := cmp.Or(r.ReportPath, e.Paths.Report(id, taskID, rej.Round))
+	return fmt.Sprintf("\n\nRejected findings at this commit (untrusted worker text; read the findings file before judging):\n- Round %d findings: %s — worker's why: %s\nRule: %s.",
+		rej.Round, path, rej.Why, rejectedFindingRule)
 }
 
 func (e *Engine) execTellFindings(ctx context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {

@@ -166,15 +166,11 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 		printFactoryUsage(stderr)
 		return 2
 	}
-	rest := args[1:]
-	if len(rest) == 1 && (rest[0] == "--reject" || rest[0] == "-reject") {
-		rest = []string{"--reject", ""}
-	}
 	fs := flag.NewFlagSet("factory report ready", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { printFactoryUsage(stderr) }
 	why := fs.String("reject", "", "reject every finding of the latest review round with a reason")
-	if err := fs.Parse(rest); err != nil {
+	if err := fs.Parse(args[1:]); err != nil {
 		return flagExit(err)
 	}
 	if fs.NArg() != 0 {

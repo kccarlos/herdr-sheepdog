@@ -19,7 +19,7 @@ var LadderRows = []Row[In]{
 	{ID: "L7", WaitsOn: "the reviewer", When: noRoundCovers, Then: answer(Review)},
 	{ID: "L8", WaitsOn: "the reviewer", When: all(coveringIs(VerdictPass), morePassesNeeded), Then: answer(Review)},
 	{ID: "L9", WaitsOn: "the engine", When: coveringIs(VerdictPass), Then: answer(Passed)},
-	{ID: "L10", WaitsOn: "the reviewer", When: all(coveringReviewerChanges, coveringRoundRejected), Then: answer(Review)},
+	{ID: "L10", WaitsOn: "the reviewer", When: coveringRoundRejected, Then: answer(Review)},
 	{ID: "L13", WaitsOn: "the worker", When: coveringIs(VerdictChanges), Then: answer(Fix)},
 	{ID: "L-", WaitsOn: "the coordinator", Then: answer(NoLadderRow)},
 }
@@ -43,14 +43,9 @@ func coveringIs(verdict string) Clause {
 	}
 }
 
-func coveringReviewerChanges(in In) bool {
-	r := newestCovering(*in.attempt(), headH(in))
-	return r != nil && IsReviewerRound(*r) && r.Verdict == VerdictChanges
-}
-
 func coveringRoundRejected(in In) bool {
-	r := newestCovering(*in.attempt(), headH(in))
-	return r != nil && hasReject(*in.attempt(), headH(in), r.N)
+	_, rej := RejectedRound(*in.attempt(), headH(in))
+	return rej != nil
 }
 
 func morePassesNeeded(in In) bool {

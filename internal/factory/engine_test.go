@@ -1580,6 +1580,10 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 	if rev3 == nil || rev3.Round != 3 || rev3.Kind != flow.RoundFull || rev3.Head != c1 {
 		t.Fatalf("round 3 via L8 = %+v, want round 3 full at %s", rev3, c1)
 	}
+	p3 := runs[len(runs)-1].Argv[len(runs[len(runs)-1].Argv)-1]
+	if strings.Contains(p3, why) || strings.Contains(p3, "Rejected findings") {
+		t.Errorf("round 3 prompt after passing round 2 still carries round-1 reject:\n%s", p3)
+	}
 	srv.SetScreen(rev3.RunID, "❯ prompt\n\n⏺ Confirmed.\n<report>{\"code\":\""+rev3.Code+"\",\"round\":3,\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
 	srv.SetStatus(rev3.RunID, &hc.Status{App: "claude-code", State: "done"})
 	eng.passProject(ctx, id, false) // accepts round 3 pass
@@ -1592,5 +1596,41 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 	}
 	if m := ghCalls(t, gh, "pr merge"); len(m) != 1 || !strings.Contains(m[0], "--match-head-commit "+c1) {
 		t.Fatalf("merge calls = %q", m)
+	}
+}
+
+func TestRejectionPromptOnlyNewestRejectedRoundAtHead(t *testing.T) {
+	eng := New(testPaths(t), nil)
+	base := flow.Attempt{
+		Rounds: []flow.Round{
+			{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictChanges, Majors: 1, ReportPath: "/r/1.md"},
+		},
+		Rejects: []flow.Reject{
+			{Head: "c1", Round: 1, Why: "round 1 why"},
+		},
+	}
+
+	// Reject at c1 is absent from a review of a newer head c2.
+	if got := eng.rejectionPrompt("p", "T1", base, "c2"); got != "" {
+		t.Fatalf("rejectionPrompt at c2 = %q, want empty", got)
+	}
+
+	// Round 3 after a passing round 2 at c1 carries no round-1 reject text.
+	afterPass := base
+	afterPass.Rounds = append(slices.Clone(base.Rounds), flow.Round{N: 2, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass})
+	if got := eng.rejectionPrompt("p", "T1", afterPass, "c1"); got != "" {
+		t.Fatalf("rejectionPrompt after passing round 2 = %q, want empty", got)
+	}
+
+	// When round 2 changes is also rejected at c1, only round 2's reject appears.
+	twoRejects := base
+	twoRejects.Rounds = append(slices.Clone(base.Rounds), flow.Round{N: 2, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictChanges, Majors: 1, ReportPath: "/r/2.md"})
+	twoRejects.Rejects = append(slices.Clone(base.Rejects), flow.Reject{Head: "c1", Round: 2, Why: "round 2 why"})
+	got := eng.rejectionPrompt("p", "T1", twoRejects, "c1")
+	if !strings.Contains(got, "round 2 why") || !strings.Contains(got, "/r/2.md") {
+		t.Fatalf("rejectionPrompt for rejected round 2 missing round 2 details: %q", got)
+	}
+	if strings.Contains(got, "round 1 why") || strings.Contains(got, "/r/1.md") {
+		t.Fatalf("rejectionPrompt for rejected round 2 leaked round 1 reject: %q", got)
 	}
 }

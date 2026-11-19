@@ -143,33 +143,43 @@ func newestCovering(a Attempt, h string) *Round {
 	return nil
 }
 
-// IsReviewerRound reports whether r is a code reviewer's round (full or delta),
-// as opposed to a coordinator send-back or a retro round (design.md 4.6, 7.2).
-func IsReviewerRound(r Round) bool {
-	return r.Kind == RoundFull || r.Kind == RoundDelta
-}
+func isReviewerRound(r Round) bool { return r.Kind == RoundFull || r.Kind == RoundDelta }
 
 // RejectableRound returns the newest round covering h when it is an unrejected
 // reviewer changes round, or nil otherwise (design.md 7.2).
 func RejectableRound(a Attempt, h string) *Round {
 	r := newestCovering(a, h)
-	if r == nil || !IsReviewerRound(*r) || r.Verdict != VerdictChanges || hasReject(a, h, r.N) {
+	if r == nil || !isReviewerRound(*r) || r.Verdict != VerdictChanges || rejectFor(a, h, r.N) != nil {
 		return nil
 	}
 	return r
 }
 
-func hasReject(a Attempt, h string, round int) bool {
-	for _, rej := range a.Rejects {
-		if Covers(rej.Head, h) && rej.Round == round {
-			return true
+// RejectedRound returns the newest round covering h and its reject when that
+// round is a rejected reviewer changes round (design.md 4.6, L10).
+func RejectedRound(a Attempt, h string) (*Round, *Reject) {
+	r := newestCovering(a, h)
+	if r == nil || !isReviewerRound(*r) || r.Verdict != VerdictChanges {
+		return nil, nil
+	}
+	if rej := rejectFor(a, h, r.N); rej != nil {
+		return r, rej
+	}
+	return nil, nil
+}
+
+func rejectFor(a Attempt, h string, round int) *Reject {
+	for i := len(a.Rejects) - 1; i >= 0; i-- {
+		if Covers(a.Rejects[i].Head, h) && a.Rejects[i].Round == round {
+			return &a.Rejects[i]
 		}
 	}
-	return false
+	return nil
 }
 
 // RoundKind is delta from the last round's commit when h is ahead of it and
 // not covered by it, and full otherwise (design.md 4.6, 9.4).
+// A rejected delta round stays at the same head, so it re-reviews as full (a superset for a fresh reviewer).
 func RoundKind(a Attempt, h string, sinceRel Rel) (kind, since string) {
 	if n := len(a.Rounds); n > 0 && sinceRel == RelAhead && !Covers(a.Rounds[n-1].Head, h) {
 		return RoundDelta, a.Rounds[n-1].Head

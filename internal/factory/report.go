@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
@@ -91,9 +93,12 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 	case !clean:
 		return e.refuse(id, "dirty_tree", "The worktree has uncommitted changes; commit or discard them before reporting ready.")
 	case req.Reject != nil:
-		why := strings.TrimSpace(strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(*req.Reject))
+		why := cleanRejectWhy(*req.Reject)
 		if why == "" {
 			return e.refuse(id, "why_missing", "A reject report must carry a non-empty reason (--reject \"<why>\").")
+		}
+		if utf8.RuneCountInString(why) > maxRejectWhyRunes {
+			return e.refuse(id, "invalid_report", "the reason is longer than 500 characters; put details in a file and name it")
 		}
 		r := flow.RejectableRound(*a, h)
 		if rel != flow.RelSame || r == nil {
@@ -109,6 +114,17 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 	}
 	a.Ready = append(a.Ready, flow.Ready{Head: tip})
 	return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "ready", "head": tip}, Rule: "ready", Decision: "ready", Why: tip})
+}
+
+const maxRejectWhyRunes = 500
+
+func cleanRejectWhy(raw string) string {
+	return strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return ' '
+		}
+		return r
+	}, raw)), " ")
 }
 
 // acceptVerdictLocked checks a reviewer's terminal <report> tag against the

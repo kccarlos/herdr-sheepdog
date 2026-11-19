@@ -577,3 +577,90 @@ func TestReportReadyRejectAcceptance(t *testing.T) {
 		t.Fatalf("reject at unreviewed H=c2 = %v, want nothing_to_reject", err)
 	}
 }
+
+// TestReportReadyRejectWhySanitizeAndLength checks that ready --reject cleans
+// control characters (including NUL, ESC/ANSI, U+2028/U+2029) and collapses
+// spaces, refuses reasons over 500 runes with invalid_report, and accepts
+// exactly 500 runes.
+func TestReportReadyRejectWhySanitizeAndLength(t *testing.T) {
+	ctx := context.Background()
+	paths := testPaths(t)
+	repo, baseSHA := initGitRepoWithRemote(t)
+	eng := New(paths, nil)
+
+	const projID = "proj-reject-why"
+	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: clean why")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "f.go"), []byte("package demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt.Path, "add", "f.go")
+	gitIn(t, wt.Path, "commit", "-m", "feat: f")
+	c1 := gitIn(t, wt.Path, "rev-parse", "HEAD")
+
+	reset := func() {
+		t.Helper()
+		st := flow.State{
+			Seq:      1,
+			Project:  flow.Project{ID: projID, Folder: repo, Started: true},
+			Settings: flow.DefaultSettings(),
+			Tasks: []flow.Task{{
+				ID: "T1", Title: "feat: clean why",
+				Attempts: []flow.Attempt{{
+					BaseCommit: baseSHA, Branch: wt.Branch, Worktree: wt.Path,
+					RunTokenHash: tokenHash("tok-worker"),
+					Ready:        []flow.Ready{{Head: c1}},
+					Rounds:       []flow.Round{{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictChanges, Majors: 1}},
+				}},
+			}},
+		}
+		if err := SaveState(paths.State(projID), st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sendReject := func(why string) error {
+		t.Helper()
+		raw, err := json.Marshal(map[string]string{"head": c1, "reject": why})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return eng.Report("tok-worker", "ready", raw)
+	}
+
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"multiline", "  line 1\r\n\t line 2\nline 3  ", "line 1 line 2 line 3"},
+		{"nul", "before\x00after", "before after"},
+		{"ansi", "bad \x1b[31mred\x1b[0m\x07 text", "bad [31mred [0m text"},
+		{"u2028", "sep\u2028line\u2029para", "sep line para"},
+		{"exact500", strings.Repeat("é", 500), strings.Repeat("é", 500)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reset()
+			if err := sendReject(tc.raw); err != nil {
+				t.Fatalf("reject %s: %v", tc.name, err)
+			}
+			got, err := LoadState(paths.State(projID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Tasks[0].Attempts[0].Rejects) != 1 || got.Tasks[0].Attempts[0].Rejects[0].Why != tc.want {
+				t.Fatalf("stored why = %q, want %q", got.Tasks[0].Attempts[0].Rejects[0].Why, tc.want)
+			}
+		})
+	}
+
+	t.Run("over500", func(t *testing.T) {
+		reset()
+		err := sendReject(strings.Repeat("a", 501))
+		if refusalCode(err) != "invalid_report" || !strings.Contains(err.Error(), "the reason is longer than 500 characters; put details in a file and name it") {
+			t.Fatalf("over-long reject = %v, want invalid_report with 500-char guidance", err)
+		}
+	})
+}
