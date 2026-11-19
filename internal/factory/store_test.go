@@ -67,7 +67,7 @@ func TestTrimLog(t *testing.T) {
 	}
 	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 	_, _ = f.WriteString(`{"seq":5,"ru`) // torn by a crash
-	f.Close()
+	_ = f.Close()
 	if err := TrimLog(path, 2); err != nil {
 		t.Fatal(err)
 	}
