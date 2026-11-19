@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"math/rand/v2"
 	"os"
@@ -179,7 +180,7 @@ func SendRun(ctx context.Context, client *hc.Client, id, text string) error {
 // StopRun kills terminal id, removes it, and verifies both the terminal and its
 // OS process group are gone (design.md 9.4).
 func StopRun(ctx context.Context, client *hc.Client, id string) error {
-	if id == "" {
+	if client == nil || id == "" {
 		return nil
 	}
 	t, err := getTerminal(ctx, client, id)
@@ -226,7 +227,7 @@ func RunState(ctx context.Context, client *hc.Client, id string) (flow.RunState,
 	} else if err != nil {
 		return "", err
 	}
-	if t.Status != nil && (t.Status.State == "idle" || t.Status.State == "done" || t.Status.State == "error") {
+	if t.Status != nil && stateIdle(t.Status.State) {
 		return flow.RunIdle, nil
 	}
 	return flow.RunWorking, nil
@@ -237,6 +238,145 @@ func getTerminal(ctx context.Context, client *hc.Client, id string) (hc.Terminal
 		return hc.Terminal{}, errors.New("world: no hc client")
 	}
 	return client.Get(ctx, id)
+}
+
+const reportReadLines = 4000
+
+// ReportStatus is the parsing outcome of ReadReport (design.md 9.3).
+type ReportStatus string
+
+// The three outcomes of ReadReport.
+const (
+	ReportNotYet  ReportStatus = "not_yet"
+	ReportFound   ReportStatus = "found"
+	ReportInvalid ReportStatus = "invalid"
+)
+
+// Report is slice 1's reviewer <report> JSON payload (prompts.md 5.4).
+type Report struct {
+	Code, Head, Verdict string
+	Round, Majors       int
+	Findings            []string
+}
+
+// ReportRead holds the parsed report tag and surrounding reply text.
+type ReportRead struct {
+	Status    ReportStatus
+	Report    Report
+	Raw, Body string
+}
+
+var (
+	ansiRe       = regexp.MustCompile(`\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))`)
+	hcOpenRe     = regexp.MustCompile(`<hc(?:\s[^>]*)?>`)
+	tuiPromptRe  = regexp.MustCompile(`(?m)^❯[ \t\x{00a0}]+\S`)
+	tuiReplyRe   = regexp.MustCompile(`(?m)^⏺`)
+	tuiFooterRe  = regexp.MustCompile(`(?m)^(?:✻ |\x{2500}{8,})`)
+	fenceOpenRe  = regexp.MustCompile("(?s)^```[a-zA-Z0-9_-]*\\s*")
+	wrapIndentRe = regexp.MustCompile("\r?\n[ \t>]*")
+	nonSlugRe    = regexp.MustCompile(`[^a-z0-9]+`)
+)
+
+// ReadReport waits until term is idle/done, reads its stitched output, skips
+// everything up to and including the last prompt echo, and parses the last
+// <report>...</report> tag (design.md 9.3, spike S0.3).
+func ReadReport(ctx context.Context, client *hc.Client, term, code string) (ReportRead, error) {
+	if client == nil || strings.TrimSpace(term) == "" {
+		return ReportRead{}, errors.New("world: ReadReport requires hc client and terminal")
+	}
+	if err := waitReportIdle(ctx, client, term); err != nil {
+		return ReportRead{}, err
+	}
+	res, err := client.Read(ctx, term, reportReadLines)
+	if err != nil || !res.Complete {
+		return ReportRead{Status: ReportNotYet}, err
+	}
+	return parseReportText(res.Text, code), nil
+}
+
+func waitReportIdle(ctx context.Context, client *hc.Client, term string) error {
+	if t, err := client.Get(ctx, term); err != nil || termIdle(t) {
+		return err
+	}
+	sub, err := client.Subscribe(ctx, hc.SubscribeFilter{Terminal: term})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sub.Close() }()
+	if _, snap := sub.Snapshot(); len(snap) == 0 || termIdle(snap[0]) {
+		return nil
+	}
+	for n := range sub.Events() {
+		var sd hc.StatusData
+		var td hc.TurnData
+		if (n.Method == "missed" && (len(n.Terminals) == 0 || termIdle(n.Terminals[0]))) ||
+			(n.Method == "event" && (n.Type == "finished" || n.Type == "removed" || n.Type == "lost" ||
+				(n.Type == "status" && n.DecodeData(&sd) == nil && sd.Status != nil && stateIdle(sd.Status.State)) ||
+				(n.Type == "turn" && n.DecodeData(&td) == nil && stateIdle(td.State)))) {
+			return nil
+		}
+	}
+	return cmp.Or(ctx.Err(), sub.Err())
+}
+
+func termIdle(t hc.Terminal) bool {
+	return t.State != "live" || (t.Status != nil && stateIdle(t.Status.State))
+}
+func stateIdle(s string) bool { return s == "idle" || s == "done" || s == "error" }
+
+func parseReportText(text, code string) ReportRead {
+	clean := ansiRe.ReplaceAllString(strings.ReplaceAll(text, "\r\n", "\n"), "")
+	if m := hcOpenRe.FindAllStringIndex(clean, -1); len(m) > 0 {
+		var ok bool
+		if _, clean, ok = strings.Cut(clean[m[len(m)-1][1]:], "</hc>"); !ok {
+			return ReportRead{Status: ReportNotYet}
+		}
+	}
+	if m := tuiPromptRe.FindAllStringIndex(clean, -1); len(m) > 0 {
+		r := tuiReplyRe.FindStringIndex(clean[m[len(m)-1][0]:])
+		if r == nil {
+			return ReportRead{Status: ReportNotYet}
+		}
+		clean = clean[m[len(m)-1][0]+r[0]:]
+	}
+	if f := tuiFooterRe.FindStringIndex(clean); f != nil && !strings.Contains(clean[f[0]:], "<report>") {
+		clean = clean[:f[0]]
+	}
+	openIdx := strings.LastIndex(clean, "<report>")
+	if openIdx < 0 {
+		return ReportRead{Status: ReportNotYet}
+	}
+	tail := clean[openIdx+len("<report>"):]
+	raw, _, ok := strings.Cut(tail, "</report>")
+	if !ok {
+		if raw, _, ok = strings.Cut(wrapIndentRe.ReplaceAllString(tail, ""), "</report>"); !ok {
+			return ReportRead{Status: ReportNotYet}
+		}
+	}
+	raw = strings.TrimSpace(raw)
+	cleanJSON := raw
+	if strings.HasPrefix(cleanJSON, "```") {
+		cleanJSON = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(fenceOpenRe.ReplaceAllString(cleanJSON, "")), "```"))
+	}
+	body := strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(clean[:openIdx]), "⏺")), "```json"), "```"))
+	rep, valid := decodeReportJSON(cleanJSON)
+	if !valid {
+		rep, valid = decodeReportJSON(wrapIndentRe.ReplaceAllString(cleanJSON, ""))
+	}
+	if !valid || code == "" || rep.Code != code {
+		return ReportRead{Status: ReportInvalid, Report: rep, Raw: raw, Body: body}
+	}
+	return ReportRead{Status: ReportFound, Report: rep, Raw: raw, Body: body}
+}
+
+func decodeReportJSON(s string) (Report, bool) {
+	var r Report
+	dec := json.NewDecoder(strings.NewReader(s))
+	dec.DisallowUnknownFields()
+	if !strings.HasPrefix(s, "{") || dec.Decode(&r) != nil || !errors.Is(dec.Decode(&struct{}{}), io.EOF) {
+		return Report{}, false
+	}
+	return r, true
 }
 
 // RepoProject resolves folder's git top-level directory and its project id in
@@ -262,8 +402,6 @@ func RepoProject(ctx context.Context, folder string, init bool) (string, string,
 
 // Worktree is a task attempt's git worktree and branch from the remote base.
 type Worktree struct{ Path, Branch, BaseCommit string }
-
-var nonSlugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
 // NewWorktree fetches the remote base and creates branch task/<id>-<slug> and a
 // worktree at worktreeDir from the fresh remote base (design.md 9.4, KB-WKT-1,

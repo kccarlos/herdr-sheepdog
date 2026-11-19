@@ -96,6 +96,61 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 	return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "ready", "head": tip}, Rule: "ready", Decision: "ready", Why: tip})
 }
 
+// acceptVerdictLocked checks a reviewer's terminal <report> tag against the
+// acceptance table (design.md 7.2). Valid: writes findings to reports/, stops
+// the reviewer, and records the round. Invalid: refuses with invalid_report,
+// logged once per distinct output on that run, leaving the round unused.
+func (e *Engine) acceptVerdictLocked(ctx context.Context, id string, s *flow.State, ti int, rd world.ReportRead) error {
+	t := &s.Tasks[ti]
+	a := &t.Attempts[len(t.Attempts)-1]
+	rev := a.Review
+	if rev == nil {
+		return e.refuse(id, "invalid_report", "No review round is active for this task.")
+	}
+	rep, why := rd.Report, ""
+	switch {
+	case rd.Status != world.ReportFound || rep.Code == "" || rep.Code != rev.Code:
+		why = "The report tag is malformed or does not carry this round's one-time code."
+	case rep.Round != rev.Round || rep.Head != rev.Head || rev.Head != flow.H(*a) || rev.Round != len(a.Rounds)+1:
+		why = "The report tag does not match this review run's round and commit."
+	case (rep.Verdict != flow.VerdictPass || rep.Majors != 0) && (rep.Verdict != flow.VerdictChanges || rep.Majors < 1):
+		why = "Verdict must be pass with 0 majors or changes with at least 1 major."
+	}
+	errKey := "verdict " + id + " " + t.ID + " " + rev.RunID
+	if why != "" {
+		if sig := rd.Raw + "\x00" + why; rev.RunID == "" || e.errs[errKey] != sig {
+			if rev.RunID != "" {
+				if e.errs == nil {
+					e.errs = map[string]string{}
+				}
+				e.errs[errKey] = sig
+			}
+			return e.refuse(id, "invalid_report", why)
+		}
+		return &Refusal{Code: "invalid_report", Why: why}
+	}
+	delete(e.errs, errKey)
+	path := e.Paths.Report(id, t.ID, rev.Round)
+	body := fmt.Sprintf("# Review round %d: %s (%d major(s))\n\nTask: %s — %s\nCommit: %s\n\n## Findings\n\n%s\n",
+		rev.Round, rep.Verdict, rep.Majors, t.ID, t.Title, rev.Head, bullets(rep.Findings))
+	if rd.Body != "" {
+		body += "\n## Notes\n\n" + rd.Body + "\n"
+	}
+	if err := writeAtomic(path, []byte(body)); err != nil {
+		return err
+	}
+	if err := world.StopRun(ctx, e.HC, rev.RunID); err != nil {
+		return err
+	}
+	rnd := flow.Round{N: rev.Round, Kind: "full", Head: rev.Head, Reviewer: rev.Reviewer, Verdict: rep.Verdict, Majors: rep.Majors, ReportPath: path}
+	a.Rounds, a.Review = append(a.Rounds, rnd), nil
+	return e.commitLocked(id, s, LogLine{
+		By: flow.RoleReviewer, Task: t.ID,
+		Input: map[string]any{"verb": "verdict", "round": rnd.N, "head": rnd.Head, "verdict": rnd.Verdict, "majors": rnd.Majors},
+		Rule:  "verdict", Decision: rnd.Verdict, Why: fmt.Sprintf("round %d at %s: %s (%d major(s))", rnd.N, rnd.Head, rnd.Verdict, rnd.Majors),
+	})
+}
+
 func (e *Engine) refuse(project, code, why string) error {
 	e.logEvent("factory.refused", map[string]string{"project": project, "code": code, "why": why})
 	return &Refusal{Code: code, Why: why}
@@ -123,8 +178,12 @@ func (e *Engine) runByTokenLocked(token string) (string, flow.State, string, int
 			return ent.Name(), s, flow.RoleCoordinator, -1
 		}
 		for ti, t := range s.Tasks {
-			if n := len(t.Attempts); n > 0 && same(t.Attempts[n-1].RunTokenHash) {
-				return ent.Name(), s, flow.RoleWorker, ti
+			if n := len(t.Attempts); n > 0 {
+				if a := t.Attempts[n-1]; same(a.RunTokenHash) {
+					return ent.Name(), s, flow.RoleWorker, ti
+				} else if a.Review != nil && same(a.Review.RunTokenHash) {
+					return ent.Name(), s, flow.RoleReviewer, ti
+				}
 			}
 		}
 	}

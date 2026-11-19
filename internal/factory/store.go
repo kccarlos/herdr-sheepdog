@@ -50,6 +50,11 @@ func (p Paths) Worktree(id, task string, attempt int) string {
 	return filepath.Join(p.project(id), "worktrees", fmt.Sprintf("%s-%d", task, attempt))
 }
 
+// Report is a review round's findings file (design.md 14).
+func (p Paths) Report(id, task string, round int) string {
+	return filepath.Join(p.project(id), "reports", fmt.Sprintf("%s-r%d.md", task, round))
+}
+
 // LogLine is one pass in log.jsonl.
 type LogLine struct {
 	Seq      int64     `json:"seq"`
