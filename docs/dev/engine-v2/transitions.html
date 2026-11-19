@@ -1,0 +1,432 @@
+<title>Engine v2 State Machines</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: header + intro, tab bar and one filter box, then one view per tab. Task view = ladder (left) + happy path and "Try it" (right, sticky). */
+:root {
+  --bg: #f5f6f9; --surface: #ffffff; --fg: #161a22; --muted: #566074; --line: #cdd3df; --band: #eaeef6;
+  --edge: #7a8499; --accent: #1f5fd1; --accent-soft: #dce8fc; --in: #8a3fb8;
+  --amber: #a85f00; --amber-soft: #fdeccb;
+  --c-worker: #2563c9; --c-engine: #5b6578; --c-reviewer: #b0307a; --c-ci: #0f7b6c; --c-coord: #4f46a5; --c-owner: #a85f00; --c-nobody: #6d7688; --c-other: #6d7688;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11141b; --surface: #1a1f29; --fg: #e7eaf1; --muted: #9ba5b8; --line: #384052; --band: #171b24;
+    --edge: #7c879d; --accent: #78a8ff; --accent-soft: #1b2c52; --in: #c79cff; --amber: #f2b24c; --amber-soft: #3b2a0b;
+    --c-worker: #7aa7ff; --c-engine: #a5aec0; --c-reviewer: #f08ac0; --c-ci: #4fd1b9; --c-coord: #aaa5ff; --c-owner: #f2b24c; --c-nobody: #98a2b6; --c-other: #98a2b6; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11141b; --surface: #1a1f29; --fg: #e7eaf1; --muted: #9ba5b8; --line: #384052; --band: #171b24;
+  --edge: #7c879d; --accent: #78a8ff; --accent-soft: #1b2c52; --in: #c79cff; --amber: #f2b24c; --amber-soft: #3b2a0b;
+  --c-worker: #7aa7ff; --c-engine: #a5aec0; --c-reviewer: #f08ac0; --c-ci: #4fd1b9; --c-coord: #aaa5ff; --c-owner: #f2b24c; --c-nobody: #98a2b6; --c-other: #98a2b6; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--font-ui); padding-block: 24px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+main { max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+h1 { font-size: 1.7rem; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; text-wrap: balance; }
+h2 { font-size: 1.05rem; margin: 0; }
+h3 { font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0; }
+p { margin: 0; }
+.intro { max-width: 68ch; color: var(--muted); }
+.intro b { color: var(--fg); font-weight: 600; }
+code, .mono { font-family: var(--font-mono); font-size: 0.88em; }
+.bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; }
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.tab { font: 500 0.9rem var(--font-ui); color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer; display: flex; gap: 7px; align-items: baseline; }
+.tab small { color: var(--muted); font-weight: 400; }
+.tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tab[aria-selected="true"] small { color: #ffffffcc; }
+:root[data-theme="dark"] .tab[aria-selected="true"] { color: #0b1020; } :root[data-theme="dark"] .tab[aria-selected="true"] small { color: #0b1020b3; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tab[aria-selected="true"] { color: #0b1020; } :root:not([data-theme="light"]) .tab[aria-selected="true"] small { color: #0b1020b3; } }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.filter { display: flex; gap: 8px; align-items: center; }
+.filter label, .sub { color: var(--muted); font-size: 0.88rem; }
+input[type="search"] { font: 0.9rem var(--font-mono); padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--fg); width: min(100%, 280px); }
+.btn { font: 500 0.85rem var(--font-ui); padding: 6px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--fg); cursor: pointer; }
+/* chips: who a task waits on */
+.chip { --c: var(--c-other); font: 500 0.72rem var(--font-ui); border-radius: 999px; padding: 1px 9px; border: 1px solid color-mix(in srgb, var(--c) 55%, transparent); background: color-mix(in srgb, var(--c) 14%, var(--surface)); color: var(--c); white-space: nowrap; }
+.c-worker { --c: var(--c-worker); } .c-engine { --c: var(--c-engine); } .c-reviewer { --c: var(--c-reviewer); } .c-ci { --c: var(--c-ci); }
+.c-coordinator { --c: var(--c-coord); } .c-owner { --c: var(--c-owner); background: var(--amber-soft); font-weight: 600; } .c-nobody { --c: var(--c-nobody); background: none; } .c-other { --c: var(--c-other); background: none; }
+.a-passed { --c: var(--c-ci); } .a-fix { --c: var(--c-worker); } .a-review { --c: var(--c-reviewer); } .a-retro { --c: var(--c-engine); } .a-recap { --c: var(--c-coord); }
+/* ladder */
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
+@media (max-width: 960px) { .split { grid-template-columns: minmax(0, 1fr); } }
+.ladder { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ladder .gh { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.ladder .gh:first-child { margin-top: 0; }
+.ladder .gh span { color: var(--muted); font-size: 0.84rem; }
+.rung { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.rung > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 3.4rem minmax(0, 1fr) auto; gap: 4px 12px; align-items: start; padding: 9px 12px; }
+.rung > summary::-webkit-details-marker { display: none; }
+.rung.plain > summary { cursor: default; }
+.rid { font: 600 0.92rem var(--font-mono); color: var(--accent); }
+.cond { font-size: 0.9rem; min-width: 0; overflow-wrap: anywhere; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+@media (max-width: 560px) { .rung > summary { grid-template-columns: 3rem minmax(0, 1fr); } .chips { grid-column: 2; justify-content: flex-start; } }
+.rbody { padding: 2px 12px 12px calc(3.4rem + 24px); display: grid; gap: 6px; font-size: 0.88rem; }
+@media (max-width: 560px) { .rbody { padding-left: 12px; } }
+.rbody b { font: 600 0.72rem var(--font-ui); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); display: block; }
+.rung[open] { border-color: var(--edge); }
+.rung.merge { border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+.rung.merge .rid::after { content: " MERGE"; font: 600 0.62rem var(--font-ui); letter-spacing: .1em; }
+.rung.ovr { border-color: var(--amber); background: color-mix(in srgb, var(--amber) 9%, var(--surface)); }
+.gh.ovr h3 { color: var(--amber); }
+.rung.fallback { border-style: dashed; background: none; color: var(--muted); }
+.rung.match { outline: 3px solid var(--accent); outline-offset: 1px; box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 18%, transparent); }
+.rung.match .rid::before { content: "\25B6 "; }
+.rung.off { opacity: .45; }
+.tagoff { font-size: .72rem; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; width: max-content; }
+.side { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; min-width: 0; }
+@media (max-width: 960px) { .side { position: static; max-height: none; } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.happy { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0; }
+.happy li { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 4px 0; font-size: 0.88rem; position: relative; }
+.happy li::before { content: ""; position: absolute; left: 0.76rem; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: .35; }
+.happy li:first-child::before { top: 50%; } .happy li:last-child::before { bottom: 50%; }
+.happy .n { width: 1.5rem; height: 1.5rem; border-radius: 50%; background: var(--accent); color: var(--bg); display: grid; place-items: center; font: 600 .72rem var(--font-mono); position: relative; z-index: 1; }
+.happy button { font: 600 .82rem var(--font-mono); color: var(--accent); background: none; border: 1px solid var(--line); border-radius: 6px; padding: 1px 8px; cursor: pointer; }
+fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 5px; }
+.fact { display: flex; gap: 8px; align-items: flex-start; font-size: .86rem; line-height: 1.35; cursor: pointer; }
+.fact input { margin-top: 2px; accent-color: var(--accent); }
+.sel { display: grid; grid-template-columns: 1fr; gap: 3px; font-size: .86rem; }
+select { font: .86rem var(--font-ui); padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+.result { border: 2px solid var(--accent); border-radius: 8px; padding: 9px 11px; font-size: .9rem; background: color-mix(in srgb, var(--accent) 8%, var(--surface)); display: flex; flex-direction: column; gap: 6px; }
+.warn { font-size: .82rem; color: var(--muted); border-left: 3px solid var(--amber); padding-left: 10px; }
+/* tables */
+.tunewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.88rem; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 0.74rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td.m { font-family: var(--font-mono); font-size: 0.84rem; }
+.sect { display: flex; flex-direction: column; gap: 10px; }
+.empty { color: var(--muted); padding: 8px 0; }
+/* diagram */
+figure { margin: 0; }
+.diagram { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.diagram svg { display: block; width: 100%; min-width: 760px; height: auto; }
+figcaption { font-size: 0.85rem; color: var(--muted); margin-top: 8px; max-width: 80ch; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 0.82rem; color: var(--muted); }
+.legend i { display: inline-block; width: 26px; height: 0; border-top: 3px solid var(--accent); vertical-align: 3px; margin-right: 6px; }
+.legend i.in { border-top-color: var(--in); }
+.bandlabel { fill: var(--muted); }
+.node rect.body { fill: var(--surface); stroke: var(--edge); stroke-width: 1.5; }
+.node text { fill: var(--fg); font: 500 12px var(--font-mono); text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.node { cursor: pointer; }
+.node.term rect.body { stroke-width: 2.5; }
+.node.entry rect.body { stroke-dasharray: 4 3; }
+.node.sel rect.body, .node:focus-visible rect.body { stroke: var(--accent); stroke-width: 4; }
+.ln { fill: none; stroke: var(--edge); stroke-width: 1.3; stroke-opacity: .8; }
+.edge .hit { fill: none; stroke: transparent; stroke-width: 16; cursor: pointer; }
+.edge.out .ln { stroke: var(--accent); stroke-width: 2.6; stroke-opacity: 1; }
+.edge.in .ln { stroke: var(--in); stroke-width: 2.6; stroke-opacity: 1; }
+.edge.sel .ln { stroke: var(--accent); stroke-width: 3.2; stroke-opacity: 1; }
+.dim { opacity: 0.13; }
+.lbl rect { fill: var(--surface); stroke: var(--line); stroke-width: 0.8; }
+.lbl text { fill: var(--fg); font: 400 10.5px var(--font-mono); text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.lbl { cursor: pointer; }
+.lbl.out rect { stroke: var(--accent); } .lbl.in rect { stroke: var(--in); }
+.m-n { fill: var(--edge); } .m-out { fill: var(--accent); } .m-in { fill: var(--in); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.panelhead { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.grp { display: flex; flex-direction: column; gap: 6px; }
+.row { display: grid; grid-template-columns: 4.2rem minmax(0, 1fr); gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); }
+.rline { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+.rline .st { font-family: var(--font-mono); font-size: 0.86rem; background: var(--band); border-radius: 5px; padding: 1px 6px; overflow-wrap: anywhere; }
+.rline .st.to { background: var(--accent-soft); }
+.rline .on { color: var(--muted); font-size: 0.86rem; overflow-wrap: anywhere; }
+.rline .on b { font-family: var(--font-mono); font-weight: 500; color: var(--fg); }
+.rg, .rd { font-size: 0.88rem; margin-top: 3px; overflow-wrap: anywhere; }
+.rg span, .rd span { color: var(--muted); }
+.tag { font-size: 0.72rem; border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; color: var(--muted); }
+.note { font-size: 0.85rem; color: var(--muted); }
+@media (max-width: 560px) { .row { grid-template-columns: 1fr; gap: 4px; } }
+</style>
+
+<main>
+  <header>
+    <h1>Engine v2 state machines</h1>
+    <p class="intro">The engine stores records of what happened and reads facts about the world. <b>For each task it walks one ordered table from the top and stops at the first row that fits.</b> That row says what to make sure of and who the task is waiting on. Nothing is remembered as a phase, so nothing can be stuck in one, and anything the acceptance table does not allow is refused.</p>
+  </header>
+
+  <div class="bar">
+    <div class="tabs" role="tablist" aria-label="Table" id="tabs"></div>
+    <div class="filter"><label for="q">Filter</label><input id="q" type="search" placeholder="id or word, e.g. N23, quota" autocomplete="off" spellcheck="false"><button class="btn" id="clear" type="button">Clear</button></div>
+  </div>
+
+  <div id="view"></div>
+
+  <p class="note" id="foot">Design draft of 2026-11-18, form B, revised after the first review. The tables have been read and audited, not run.</p>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  // Every row below was parsed from the tables in design.md (sections 4.1-4.5, 4.6, 4.7, 5, 6, 7.1, 7.2, 10.1).
+  var DATA = {"rows": [{"id": "N1", "entity": "task", "group": "4.1 Ended, held, or needing a decision", "if": "marked done, dropped, split or closed", "make": "no run of this task is alive; its decision asks are cancelled; a dropped or split task's PR is closed with a note; Cleanup has finished", "waits": "nobody"}, {"id": "N2", "entity": "task", "group": "4.1 Ended, held, or needing a decision", "if": "the PR is merged", "make": "mark done; if there is no accept for the head the PR had when it merged (a squash makes a new commit, so the PR's own head is compared), wake the coordinator once and log merged_outside_bar (a person or an agent merged it by hand; it cannot be undone, and it is never silent)", "waits": "nobody"}, {"id": "N3", "entity": "task", "group": "4.1 Ended, held, or needing a decision", "if": "marked parked", "make": "no run of this task is alive", "waits": "the coordinator"}, {"id": "N4", "entity": "task", "group": "4.1 Ended, held, or needing a decision", "if": "the PR was closed without merging, and no retry since", "make": "no reviewer runs; wake the coordinator once. The engine never reopens it; after a retry the attempt forgets that PR and N26 opens a new one", "waits": "the coordinator"}, {"id": "N5", "entity": "task", "group": "4.1 Ended, held, or needing a decision", "if": "something this task needs has failed ensure_failures times in a row, and no retry since", "make": "wake the coordinator once with what failed and its last words", "waits": "the coordinator"}, {"id": "N6", "entity": "task", "group": "4.1 Ended, held, or needing a decision", "if": "a recap is open (not decided, and not closed by the owner's override)", "make": "wake the coordinator once with the allowed choices; if the trigger is size, CI or time, tell the worker once to write its recap; no reviewer runs", "waits": "the coordinator (or the owner, while the N25 ask is open)"}, {"id": "N7", "entity": "task", "group": "4.1 Ended, held, or needing a decision", "if": "the tip or the PR head has diverged from H, or the PR head is ahead of H with changes the engine did not push", "make": "tell the worker once what happened and to restore the branch (a pull, when its tip is only behind). If it still holds at the worker's next turn end, wake the coordinator once, naming the way out: say to the worker, then retry. Never merge", "waits": "the worker; then the coordinator"}, {"id": "N8", "entity": "task", "group": "4.1 Ended, held, or needing a decision", "if": "the worker reported \"nothing to change\" with a reason, and no ready report, send-back or close came after it", "make": "wake the coordinator once (it may close the task or send it back)", "waits": "the coordinator"}, {"id": "N9", "entity": "task", "group": "4.2 Not started", "if": "no open attempt; a dependency is not done, or was dropped", "make": "—", "waits": "those tasks, by name"}, {"id": "N10", "entity": "task", "group": "4.2 Not started", "if": "no open attempt; the project is not running, the milestone is not open, no slot is free, or no worker candidate resolves", "make": "—", "waits": "the project, the milestone, a slot, or quota (the first that fails)"}, {"id": "N11", "entity": "task", "group": "4.2 Not started", "if": "no open attempt", "make": "a new attempt: a worktree and branch from the fresh remote base (section 9.4)", "waits": "the engine"}, {"id": "N12", "entity": "task", "group": "4.3 Limits", "if": "changed lines at the tip are over size_cap, and no owner override covers H", "make": "open a recap, trigger size", "waits": "the coordinator"}, {"id": "N13", "entity": "task", "group": "4.3 Limits", "if": "commits with a failing check run, in the last hour and since the last recap decision, reached ci_fails_per_hour (one bad commit counts once, however many jobs failed), the ladder does not say passed for H, and no owner override covers H", "make": "open a recap, trigger ci", "waits": "the coordinator"}, {"id": "N14", "entity": "task", "group": "4.3 Limits", "if": "the time the worker run has spent in the working state in this attempt, since the last recap decision, is over build_hours; the ladder does not say passed for H; and no owner override covers H", "make": "open a recap, trigger time", "waits": "the coordinator"}, {"id": "N15", "entity": "task", "group": "4.3b The owner's override (rows N15–N19)", "if": "an owner override covers H, and GitHub does not have H", "make": "H is pushed and one PR is open for the branch", "waits": "the engine"}, {"id": "N16", "entity": "task", "group": "4.3b The owner's override (rows N15–N19)", "if": "an owner override covers H, and the PR conflicts with the base", "make": "tell the worker once: merge the base into the branch, never rebase. The owner's result line says this task was not merged. (Resolving the conflict makes a new commit, which the override does not cover)", "waits": "the worker"}, {"id": "N17", "entity": "task", "group": "4.3b The owner's override (rows N15–N19)", "if": "an owner override covers H; a task it depends on is not done, or another merge of this project is in flight", "make": "— (overridden tasks merge one at a time, in dependency order)", "waits": "those tasks"}, {"id": "N18", "entity": "task", "group": "4.3b The owner's override (rows N15–N19)", "if": "an owner override covers H, a merge was asked for H, and the PR is still open", "make": "tries below merge_tries: ask again after the back-off. Otherwise wake the coordinator once with GitHub's reason", "waits": "GitHub; then the coordinator"}, {"id": "N19", "entity": "task", "group": "4.3b The owner's override (rows N15–N19)", "if": "an owner override covers H", "make": "record the accept for H (by override, with what was waived); merge H (squash, pinned to H)", "waits": "GitHub"}, {"id": "N20", "entity": "task", "group": "4.4 The worker's turn", "if": "the tip is ahead of H, merge_only", "make": "push it; H moves to the tip. No round", "waits": "the engine"}, {"id": "N21", "entity": "task", "group": "4.4 The worker's turn", "if": "(from the evidence increment on) the newest evidence covering H has a check that failed or ran out of time, and no owner override covers H", "make": "tell the worker once: which check, and where its output is", "waits": "the worker"}, {"id": "N22", "entity": "task", "group": "4.4 The worker's turn", "if": "the ladder (section 4.6) says \"fix\" for H", "make": "tell the worker once: the findings file; or the coordinator's why; or, for a retro's bounded fix, the retro's majors and its one change, with size_cap set to lines now + continue_lines", "waits": "the worker"}, {"id": "N23", "entity": "task", "group": "4.4 The worker's turn", "if": "no ready report in this attempt, or the tip is ahead of H with changes (the worker is working)", "make": "—", "waits": "the worker"}, {"id": "N24", "entity": "task", "group": "4.5 The engine's turn", "if": "the ladder says \"recap\" for H; the task is a split child of a task that already had a retro; and the owner has not answered for this task", "make": "one owner ask: \"drop it, or tell me how to go on?\". No recap yet: there is one decider at a time. \"Drop\" marks the task dropped", "waits": "the owner"}, {"id": "N25", "entity": "task", "group": "4.5 The engine's turn", "if": "the ladder says \"recap\" for H", "make": "open a recap, trigger review (allowed: split, new, drop), with the owner's words when N24 came first", "waits": "the coordinator"}, {"id": "N26", "entity": "task", "group": "4.5 The engine's turn", "if": "GitHub does not have H (no open PR for this attempt, or the PR head is behind H)", "make": "H is pushed and one PR is open for the branch (section 9.4)", "waits": "the engine"}, {"id": "N27", "entity": "task", "group": "4.5 The engine's turn", "if": "(from the evidence increment on) no evidence covers H, and no owner override covers H", "make": "the task's checks run at H (section 11.6)", "waits": "the engine"}, {"id": "N28", "entity": "task", "group": "4.5 The engine's turn", "if": "the ladder says \"retro\" for H", "make": "a retro run for H (a first retro, or the delta check of a bounded fix)", "waits": "the retro reviewer"}, {"id": "N29", "entity": "task", "group": "4.5 The engine's turn", "if": "the ladder says \"review\" for H", "make": "a reviewer run for that round at H (section 4.8); its report is read when it goes idle; with no report and no background job of its own younger than background_job_minutes: one nudge, then stop it; a run older than review_minutes is stopped", "waits": "the reviewer"}, {"id": "L1", "entity": "review", "if": "an owner override covers H", "answer": "passed (the owner chose to skip review for that commit)"}, {"id": "L2", "entity": "review", "if": "this attempt's newest retro verdict is REDESIGN, or has low confidence, and no recap was decided since", "answer": "recap"}, {"id": "L3", "entity": "review", "if": "this attempt's newest retro verdict is FIX, FIX verdicts in this attempt have reached retro_fix_verdicts (with the default 2: the second FIX is the cap), and no recap was decided since", "answer": "recap"}, {"id": "L4", "entity": "review", "if": "this attempt's newest retro verdict is FIX, and no ready report came after it", "answer": "fix (the bounded fix)"}, {"id": "L5", "entity": "review", "if": "this attempt's newest retro verdict is FIX, a ready report came after it, and no retro record covers H", "answer": "retro (the delta check)"}, {"id": "L6", "entity": "review", "if": "the newest round-like record covering H is a retro verdict SHIP", "answer": "passed"}, {"id": "L7", "entity": "review", "if": "no round-like record covers H", "answer": "review"}, {"id": "L8", "entity": "review", "if": "the newest round-like record covering H is a pass, and fewer than review_rounds passing rounds cover H", "answer": "review (by another reviewer candidate when one resolves)"}, {"id": "L9", "entity": "review", "if": "the newest round-like record covering H is a pass", "answer": "passed"}, {"id": "L10", "entity": "review", "if": "it asks for changes; the last retro_after_rounds_with_majors rounds all had majors and this is round retro_from_round or later; the task has used fewer than retros_per_task; the retro has not failed to run (section 4.8 gave up on it); and it is not a split child of a task that had a retro", "answer": "retro"}, {"id": "L11", "entity": "review", "if": "it asks for changes, and that streak holds, or max_rounds rounds were run", "answer": "recap"}, {"id": "L12", "entity": "review", "if": "it asks for changes", "answer": "fix"}, {"id": "N30", "entity": "task", "group": "4.7 Landing", "if": "an owner gate applies to this task (the setting design_gate for a design task, or the plan field gate: owner), the owner answered no in this attempt, and no recap was decided since", "make": "open a recap, trigger owner_no (allowed: split, new, drop), with the owner's words", "waits": "the coordinator"}, {"id": "N31", "entity": "task", "group": "4.7 Landing", "if": "an open owner ask names this task, or an owner gate applies and no yes covers H", "make": "the gate ask is open, naming H", "waits": "the owner"}, {"id": "N32", "entity": "task", "group": "4.7 Landing", "if": "conflict with the base", "make": "tell the worker once: merge the base into the branch, never rebase", "waits": "the worker"}, {"id": "N33", "entity": "task", "group": "4.7 Landing", "if": "checks red at H", "make": "re-runs used for H below flake_reruns: re-run the failed jobs once (a check that turns green by itself costs no round; set flake_reruns to 0 to never re-run a red check). Otherwise tell the worker once per failing run (\"pull first\" if the engine updated the branch)", "waits": "CI; then the worker"}, {"id": "N34", "entity": "task", "group": "4.7 Landing", "if": "checks stopped: cancelled from outside, or a job hit its own time limit", "make": "cancelled from outside with re-runs left: re-run. Otherwise (and always for a job's own time limit): wake the coordinator once", "waits": "CI; then the coordinator"}, {"id": "N35", "entity": "task", "group": "4.7 Landing", "if": "no checks, past checks_grace_minutes", "make": "dispatch not used for H: dispatch the workflow. Dispatched less than checks_grace_minutes ago: wait. Otherwise wake the coordinator once, naming the ways out: a change that makes a workflow run for this PR, the owner's override (section 4.9), or drop. \"No checks\" is never green. Doctor refuses the start of a repo with no PR workflow, and warns when path filters can leave a PR with none", "waits": "CI; then the coordinator"}, {"id": "N36", "entity": "task", "group": "4.7 Landing", "if": "checks pending, unreadable, or absent within checks_grace_minutes; or mergeable unknown", "make": "— (after ci_stalled_minutes the alert ci_stalled is raised)", "waits": "CI"}, {"id": "N37", "entity": "task", "group": "4.7 Landing", "if": "GitHub requires an approving review", "make": "wake the coordinator once. Nobody in the factory can give the approval; doctor lists the repo setting at start, and review comments on the PR are passed to the worker as a file", "waits": "a GitHub approval"}, {"id": "N38", "entity": "task", "group": "4.7 Landing", "if": "the base is red, and the PR is behind or the comparison is unknown", "make": "— until the base has been red for main_red_minutes. Then, once: tell the worker of the oldest task held here to merge the base into its branch and say ready (N20 or a normal round follows; a PR that is no longer behind may merge and so repair the base), and wake the coordinator with that way out named", "waits": "the base branch; then the worker"}, {"id": "N39", "entity": "task", "group": "4.7 Landing", "if": "the worker run is working, or its last turn left a background job younger than background_job_minutes", "make": "— (it may be about to commit, and a merge would end its job; a stray turn does not undo a pass)", "waits": "the worker"}, {"id": "N40", "entity": "task", "group": "4.7 Landing", "if": "behind the base, no merge queue", "make": "update not asked for H: bring the branch up to date with a merge commit (the snapshot's new head moves H). Asked less than checks_grace_minutes ago: wait. Otherwise it is a failed try (section 8)", "waits": "GitHub"}, {"id": "N41", "entity": "task", "group": "4.7 Landing", "if": "a merge was asked for H, the PR is still open, and it is not behind the base (or a merge queue is on)", "make": "in the merge queue: wait. Tries below merge_tries: ask again after the back-off. Otherwise wake the coordinator once with GitHub's reason. (A merge call's own failure is not counted by section 8; only this row counts merge tries)", "waits": "GitHub; then the coordinator"}, {"id": "N42", "entity": "task", "group": "4.7 Landing", "if": "all of: the ladder says passed; (from the evidence increment on) evidence covers H with every outcome passing or marked manual and judged by the reviewer; p.head is H; GitHub is reachable; checks green; mergeable; not behind (or a merge queue is on); no open owner ask names the task; the worker run is not working and has left no young background job", "make": "record the accept for H; merge H (squash, pinned to H)", "waits": "GitHub"}, {"id": "N43", "entity": "task", "group": "4.7 Landing", "if": "none of the above", "make": "wake the coordinator once: \"no rule matched\", with the facts. Nothing else is done", "waits": "the coordinator"}, {"id": "R1", "entity": "run", "from": ["starting"], "on": "launched", "if": "—", "to": "same", "do": "keep the terminal's address, hc id and creation time"}, {"id": "R2", "entity": "run", "from": ["starting"], "on": "launch_failed", "if": "—", "to": "ended(failed)", "do": "—"}, {"id": "R3", "entity": "run", "from": ["starting"], "on": "screen", "if": "a trust, confirm or first-run screen, not answered yet", "to": "same", "do": "press the adapter's keys for it"}, {"id": "R4", "entity": "run", "from": ["starting"], "on": "screen", "if": "signed out", "to": "ended(signed_out)", "do": "stop it"}, {"id": "R5", "entity": "run", "from": ["starting"], "on": "screen", "if": "usage limit", "to": "ended(quota)", "do": "stop it"}, {"id": "R6", "entity": "run", "from": ["starting"], "on": "screen", "if": "—", "to": "same", "do": "—"}, {"id": "R7", "entity": "run", "from": ["starting"], "on": "status", "if": "idle; the first prompt is typed, and not sent yet; no trust, confirm or first-run screen is up", "to": "working", "do": "send the first prompt"}, {"id": "R8", "entity": "run", "from": ["starting"], "on": "status", "if": "working", "to": "working", "do": "—"}, {"id": "R9", "entity": "run", "from": ["starting"], "on": "status", "if": "idle or done, with the first prompt already given on the command line", "to": "working", "do": "— (R20 then decides whether it is idle)"}, {"id": "R10", "entity": "run", "from": ["starting"], "on": "status", "if": "any status other than blocked or error (those are R14–R16)", "to": "same", "do": "—"}, {"id": "R11", "entity": "run", "from": ["starting"], "on": "tick", "if": "older than start_minutes and no status was ever reported", "to": "ended(blank)", "do": "stop it. Two blank starts in a row run the volume probe (section 6)"}, {"id": "R12", "entity": "run", "from": ["starting"], "on": "tick, activity", "if": "—", "to": "same", "do": "—"}, {"id": "R13", "entity": "run", "from": ["starting", "working"], "on": "exit", "if": "a resume, within start_minutes", "to": "ended(resume_failed)", "do": "the session is marked not resumable"}, {"id": "R14", "entity": "run", "from": ["starting", "working"], "on": "status", "if": "blocked, kind auth, on a run older than start_minutes (a brief sign-in prompt at start is R15)", "to": "ended(signed_out)", "do": "stop it"}, {"id": "R15", "entity": "run", "from": ["starting", "working"], "on": "status", "if": "blocked", "to": "blocked", "do": "keep the question and the time as facts. What happens next is R29; nobody is woken yet"}, {"id": "R16", "entity": "run", "from": ["starting", "working"], "on": "status", "if": "error, on a reviewer or retro run", "to": "ended(error)", "do": "stop it"}, {"id": "R17", "entity": "run", "from": ["working"], "on": "status", "if": "—", "to": "same", "do": "keep the status and its time"}, {"id": "R18", "entity": "run", "from": ["working"], "on": "tick", "if": "status idle or done (or error) for idle_grace_seconds; a held message exists; not a reviewer or retro run whose report is still unread", "to": "same", "do": "send the next held message; the idle time starts again from the send"}, {"id": "R19", "entity": "run", "from": ["working"], "on": "tick", "if": "status idle or done for idle_grace_seconds, and the screen is the adapter's usage-limit class", "to": "ended(quota)", "do": "stop it"}, {"id": "R20", "entity": "run", "from": ["working"], "on": "tick", "if": "status idle or done (or error) for idle_grace_seconds", "to": "idle", "do": "reviewer or retro: read its report (section 9.3). Any role: the turn number, background jobs and their age become facts"}, {"id": "R21", "entity": "run", "from": ["working"], "on": "tick", "if": "no output and no child activity for quiet_minutes; not interrupted yet", "to": "same", "do": "interrupt once; wait interrupt_seconds"}, {"id": "R22", "entity": "run", "from": ["working"], "on": "tick", "if": "still quiet after the interrupt", "to": "ended(stuck)", "do": "stop it"}, {"id": "R23", "entity": "run", "from": ["working"], "on": "tick, activity", "if": "—", "to": "same", "do": "—"}, {"id": "R24", "entity": "run", "from": ["idle"], "on": "deliver", "if": "—", "to": "working", "do": "send the message"}, {"id": "R25", "entity": "run", "from": ["working"], "on": "deliver", "if": "urgent", "to": "same", "do": "interrupt, then send"}, {"id": "R26", "entity": "run", "from": ["starting", "working", "blocked"], "on": "deliver", "if": "—", "to": "same", "do": "hold the message on the run"}, {"id": "R27", "entity": "run", "from": ["idle", "blocked"], "on": "status", "if": "working", "to": "working", "do": "—"}, {"id": "R28", "entity": "run", "from": ["blocked"], "on": "status", "if": "idle or done", "to": "working", "do": "— (R20 then decides)"}, {"id": "R29", "entity": "run", "from": ["blocked"], "on": "tick", "if": "blocked for longer than blocked_minutes", "to": "ended(stuck), or ended(signed_out) when the dialog is a sign-in", "do": "stop it. Section 4.8 then resumes it or moves to the next candidate, and counts it; the coordinator hears through N5 if it keeps happening"}, {"id": "R30", "entity": "run", "from": ["idle", "blocked"], "on": "status, tick, activity, screen, launched, launch_failed", "if": "—", "to": "same", "do": "—"}, {"id": "R31", "entity": "run", "from": ["starting", "working", "idle", "blocked"], "on": "pool_floor", "if": "worker or designer", "to": "same", "do": "urgent deliver: \"write your handoff and stop\"; stop it with result quota when it next goes idle, or after handoff_minutes, whichever is first"}, {"id": "R32", "entity": "run", "from": ["starting", "working", "idle", "blocked"], "on": "pool_floor", "if": "—", "to": "same", "do": "—"}, {"id": "R33", "entity": "run", "from": ["starting", "working", "idle", "blocked"], "on": "exit, lost", "if": "—", "to": "ended(exited / lost)", "do": "remove a leftover terminal; note whether it is resumable and whether the owner quit it; held messages go back to the task or project"}, {"id": "R34", "entity": "run", "from": ["starting", "working", "idle", "blocked"], "on": "stop", "if": "—", "to": "ended(stopped)", "do": "end the terminal's whole process group and check nothing is left"}, {"id": "R35", "entity": "run", "from": ["working"], "on": "launched, launch_failed, screen", "if": "—", "to": "same", "do": "—"}, {"id": "R36", "entity": "run", "from": ["ended"], "on": "deliver", "if": "—", "to": "same", "do": "refuse run_ended (the message goes back to the task or project, whose rules restart the run)"}, {"id": "R37", "entity": "run", "from": ["ended"], "on": "every other event", "if": "—", "to": "same", "do": "—"}, {"id": "J1", "entity": "project", "if": "a start was asked and doctor has not passed since", "make": "doctor runs; on failure its fix lines are shown and the start is dropped; on success the project is marked started", "shown": "start shell"}, {"id": "J2", "entity": "project", "if": "never started, or stopped by the owner", "make": "no run of this project is alive; the plan and tasks are kept", "shown": "\"Stopped by you\""}, {"id": "J3", "entity": "project", "if": "a stopping alert is active (no_pool, disk, consent_prompt) and no coordinator run is alive", "make": "nothing starts (tasks wait at N10)", "shown": "\"Stopped\", with the fix"}, {"id": "J4", "entity": "project", "if": "a plan exists, every milestone is done, no task is open, and the owner has given no new goal since", "make": "the final journal entry; then no coordinator", "shown": "\"Finished\""}, {"id": "J5", "entity": "project", "if": "the coordinator is signed out", "make": "the alert agents_down with the at-the-Mac fix; no restart until doctor sees it signed in", "shown": "running"}, {"id": "J6", "entity": "project", "if": "no coordinator run is alive; the owner typed in its terminal within owner_typing_minutes, or a start is not allowed yet (coordinator_gap_minutes, coordinator_starts_per_hour)", "make": "wait; raise agents_down if the hourly limit is the reason", "shown": "running"}, {"id": "J7", "entity": "project", "if": "no coordinator run is alive", "make": "start one: fresh with the goal if there is no plan, else with a handoff built from the store; held wakes are kept for it", "shown": "\"Planning\" with no plan, else running"}, {"id": "J8", "entity": "project", "if": "the coordinator reported an error at the end of a turn", "make": "first time: tell it to go on. Again within quiet_minutes: stop it (J7 follows)", "shown": "running"}, {"id": "J9", "entity": "project", "if": "wakes were delivered, no coordinator turn followed for coordinator_silent_minutes, and no stopping alert is active", "make": "stop it (J7 follows); the second time in a row, raise agents_down", "shown": "running"}, {"id": "J10", "entity": "project", "if": "the coordinator's run ended as stuck at a dialog (R29)", "make": "J7 restarts it. The second time in a row, tell the owner (the one coordinator event that speaks) and raise agents_down", "shown": "running"}, {"id": "J11", "entity": "project", "if": "a rotation is due (rotate_after_hours, rotate_after_turns, or the template changed), the coordinator is idle, and no stopping alert is active", "make": "ask it for the journal entry; when written, or after handoff_minutes: write the fact part, stop the run (J7 follows)", "shown": "running"}, {"id": "J12", "entity": "project", "if": "wakes are held and the coordinator is idle", "make": "deliver them as one batch", "shown": "running"}, {"id": "J13", "entity": "project", "if": "no wake for heartbeat_minutes and the coordinator is idle", "make": "a heartbeat wake", "shown": "running"}, {"id": "J14", "entity": "project", "if": "otherwise", "make": "—", "shown": "running (\"nothing needs you\" when no owner ask is open)"}, {"id": "A1", "entity": "ask", "from": ["(new)"], "on": "ask_open", "if": "a delegation rule covers this kind and scope, and the kind can be delegated", "to": "answered (by rule)", "do": "—"}, {"id": "A2", "entity": "ask", "from": ["(new)"], "on": "ask_open", "if": "—", "to": "open", "do": "kind decision: wake the coordinator. Other kinds: notify the owner"}, {"id": "A3", "entity": "ask", "from": ["open"], "on": "answer", "if": "—", "to": "answered", "do": "an ask opened by a run: deliver the answer to that run, or hold it for the task's worker if the run has ended. An ask opened by a rule: the answer is a record the rules read (N25, N30, N31) and a coordinator wake"}, {"id": "A4", "entity": "ask", "from": ["open"], "on": "cancel", "if": "—", "to": "cancelled", "do": "—"}, {"id": "A5", "entity": "ask", "from": ["answered", "cancelled"], "on": "answer, cancel", "if": "—", "to": "same", "do": "refuse already_closed"}], "tables": {"levels": {"head": ["Level", "Who checks", "Budget (settings)", "When the budget is spent"], "rows": [["0 Review", "a reviewer on another model", "changes may be asked until the streak of L10 (with the defaults: rounds 2 and 3 both with majors); max_rounds in all", "level 1 (L10), or level 2 (L11)"], ["1 Retro", "a stronger model in a fresh session", "retros_per_task retros; retro_fix_verdicts FIX verdicts, each a bounded fix checked as a delta", "level 2, with continue not allowed (L2, L3)"], ["2 Recap", "the coordinator", "continues_per_task", "split, new attempt, or drop"], ["3 Owner", "the owner", "one question", "drop, or the owner's words go to the coordinator (N25)"]]}, "matrix": {"head": ["", "launched / launch_failed", "screen", "status", "activity", "tick", "exit / lost", "deliver", "stop", "pool_floor"], "rows": [["starting", "R1 / R2", "R3–R6", "R7–R10, R14–R16", "R12", "R11, R12", "R13, R33", "R26", "R34", "R31, R32"], ["working", "R35", "R35", "R14–R17", "R23", "R18–R23 (with R19)", "R13, R33", "R25, R26", "R34", "R31, R32"], ["idle", "R30", "R30", "R27, R30", "R30", "R30", "R33", "R24", "R34", "R31, R32"], ["blocked", "R30", "R30", "R27, R28, R30", "R30", "R29, R30", "R33", "R26", "R34", "R31, R32"], ["ended", "R37", "R37", "R37", "R37", "R37", "R37", "R36", "R37", "R37"]]}, "alerts": {"head": ["Alert", "Stops the factory", "Raised when", "Cleared when"], "rows": [["no_pool", "yes", "no coordinator candidate has a usable pool, or no worker candidate of any open task has one. (One role's pools being empty stops only the tasks that need that role; they wait at their own rows)", "a pool is usable again"], ["disk", "yes", "the disk is over the limit, or a write failed for space", "the reading is back under the limit"], ["consent_prompt", "yes", "the volume probe fails. It is run after two blank starts in a row and after two timed-out calls on the project folder. Blank starts with a healthy folder are ordinary start failures (section 4.8, J6), not this alert", "the volume probe answers"], ["main_red", "no: it holds merges and branch updates only (N38), so a task that repairs the base can start and merge", "the base's newest finished run has been red for main_red_minutes", "the newest finished run is green"], ["ci_stalled", "no", "N36 for ci_stalled_minutes", "the task leaves N36"], ["agents_down", "no", "the coordinator cannot be kept alive (J5, J6, J9, J10); or agents on two different CLIs started blank in a row while the project folder answers (a herdr-core or CLI fault, counted as an outage, not as each task's failure)", "a coordinator run is alive and has taken a turn; an agent has started"]]}, "accept": {"head": ["Report or command", "Who may send it", "Valid when", "Else"], "rows": [["ready", "the task's worker or designer run", "the worktree is clean; the commit is ahead of H (if the engine moved H past the worker's tip, the refusal says \"pull first\"); every outcome names a check or is marked manual", "dirty_tree, nothing_new, pull_first, outcome_missing"], ["ready --nothing-to-change", "the task's worker run", "a reason is given; no commit over the base", "nothing_new"], ["recap-written", "the task's worker run", "a recap is open; the file exists", "no_recap"], ["check results", "the engine's own check run", "they are for H", "dropped"], ["verdict", "the run the engine started for that round", "the tag carries that run's one-time code (text the reviewer merely printed, such as a diff or a fixture written by the worker, cannot carry it); the round and commit are that run's; pass means no majors and changes means at least one; every outcome is judged \"the check proves it\" or not", "invalid_report; the run counts as failed, the round is not used"], ["retro", "the retro run the engine started", "the tag carries that run's one-time code; the commit is that run's; the cause is in the fixed set; the tag parses", "invalid_report; the task's retro is not used"], ["ask", "a worker or reviewer (kind decision); the coordinator (any kind); the owner (kind override, from the phone or sheepdog factory override)", "2 to 9 distinct options; a recommended one; one line; a way to say yes as well as no; option text the card can show as written", "invalid_ask, kind_not_allowed"], ["answer", "the coordinator (kind decision); the owner, with the daemon's proof of a tap or spoken words; a delegation rule", "the ask is open; the option exists; a gated kind has a verified proof", "already_closed, invalid_option, proof_required, not_delegable"], ["plan apply, plan amend", "the coordinator", "the plan checks pass (section 11.7); an amend has a why", "plan_invalid, with every failing check"], ["recap decision", "the coordinator", "a recap is open; the choice is in its allowed set; a why is given; split: the children pass the plan checks; new: the brief was amended since the recap opened", "not_allowed, naming the allowed set"], ["park, unpark, drop, close, retry, send-back", "the coordinator", "the task is not ended; a why is given; close only after a \"nothing to change\" report", "already_closed, why_missing"], ["say <run>", "the coordinator", "the run is alive", "run_ended"], ["start, stop, say, touch", "the owner, through the daemon", "a start is always recorded (J1 then runs doctor)", "—"], ["a setting change", "anyone may propose it: the owner by voice or phone, the coordinator, or sheepdog factory set from a terminal. Each only raises an ask of kind rule", "the value is in its range; it is saved only when the owner answers that ask with the daemon's proof. A terminal is never taken for the owner: a worker has a shell too", "out_of_range, proof_required"]]}, "settings": {"head": ["Setting", "Default", "Range", "Used by"], "rows": [["review_rounds", "2", "1–5", "L8, L9"], ["max_rounds (per attempt)", "5", "review_rounds–10", "L11"], ["retro_after_rounds_with_majors, retro_from_round", "2, 3", "2–4, 2–6", "L10, L11"], ["retros_per_task, retro_fix_verdicts", "1, 2", "0–2, 1–3", "L3, L10"], ["continues_per_task, continue_lines", "1, 60", "0–3, 0–500", "recaps (N12–N14, section 4.9)"], ["task_size_limit (lines), size_cap_factor (× estimate)", "400, 2", "50–2000, 1–5", "plan checks; N12"], ["ci_fails_per_hour, build_hours", "3, 4", "1–10, 1–48", "N13, N14"], ["flake_reruns, merge_tries", "1, 3", "0–3, 1–10", "N33, N34, N41"], ["checks_grace_minutes, ci_stalled_minutes, main_red_minutes", "5, 90, 60", "1–60, 10–600, 5–600", "N35, N36, alerts"], ["max_running", "set at start", "1–20", "N10"], ["worker_restarts, reviewer_retries", "3, 2", "0–10, 0–5", "section 4.8"], ["ensure_failures, ensure_backoff_minutes", "3, 1", "1–10, 1–60", "N5, section 8"], ["start_minutes, idle_grace_seconds, quiet_minutes, interrupt_seconds, review_minutes", "2, 20, 20, 90, 45", "1–15, 5–120, 5–120, 10–600, 10–240", "R11, R18–R22, N29"], ["background_job_minutes, blocked_minutes", "30, 10", "1–240, 1–120", "N23, N39; R29"], ["coordinator_starts_per_hour, coordinator_gap_minutes, owner_typing_minutes, coordinator_silent_minutes", "3, 10, 5, 30", "1–10, 1–60, 1–60, 5–240", "J6, J9"], ["rotate_after_hours, rotate_after_turns, handoff_minutes, heartbeat_minutes", "4, 150, 5, 60", "1–24, 20–1000, 1–30, 10–600", "J11, J13"], ["pool_floor_percent, pool_minutes, sweep_minutes", "5, 5, 5", "0–50, 1–60, 1–60", "section 7.3"]]}}, "notes": {"choices": "Settings that are choices, not numbers, are set the same way: design_gate (review model or owner), delegation (kinds, scope, until), notify_level, merge_policy, project_priority, models per role, verify (section 11.6).", "never": "Not a setting, ever: the rows themselves, the acceptance table, the owner's proof, the invariants, \"no checks is never green\", \"never merge a commit no reviewer passed, unless the owner overrode that very commit\". Rails stay in code; a row change goes through review and shows up in the generated table document."}};
+  var ROWS = DATA.rows, TB = DATA.tables;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); };
+  var rowsOf = function (e) { return ROWS.filter(function (r) { return r.entity === e; }); };
+  function txt(r) { if (r._t) return r._t; var s = []; for (var k in r) if (k !== "_t") s.push(Array.isArray(r[k]) ? r[k].join(" ") : r[k]); return (r._t = s.join(" ").toLowerCase()); }
+  var q = "";
+  function hit(r) { return !q || txt(r).indexOf(q) >= 0; }
+  function hitCells(cells) { return !q || cells.join(" ").toLowerCase().indexOf(q) >= 0; }
+
+  var TABS = [["task", "Task"], ["review-ladder", "Review ladder"], ["run", "Run"], ["project", "Project"], ["ask", "Ask"], ["acceptance", "Acceptance"], ["settings", "Settings"]];
+  var tab = "task", openSet = {};
+
+  function counts(t) {
+    return { "task": rowsOf("task").length + " rungs", "review-ladder": rowsOf("review").length + " rows", "run": rowsOf("run").length + " rows", "project": rowsOf("project").length + " rules",
+      "ask": rowsOf("ask").length + " rows", "acceptance": TB.accept.rows.length + " lines", "settings": TB.settings.rows.length + " lines" }[t];
+  }
+
+  // ---------- chips ----------
+  var WAIT = [[/nobody/i, "nobody", "nobody"], [/coordinator/i, "coordinator", "coordinator"], [/\bworker\b/i, "worker", "worker"], [/reviewer/i, "reviewer", "reviewer"], [/\bCI\b|GitHub/i, "ci", "CI / GitHub"], [/\bowner\b/i, "owner", "owner"], [/\bengine\b/i, "engine", "engine"]];
+  function chips(waits) {
+    var f = [];
+    WAIT.forEach(function (w) { var m = w[0].exec(waits); if (m) f.push([m.index, w[1], w[2]]); });
+    f.sort(function (a, b) { return a[0] - b[0]; });
+    if (!f.length) { var s = waits.replace(/\(.*$/, "").trim(); return '<span class="chip c-other" title="' + esc(waits) + '">' + esc(s.length > 34 ? s.slice(0, 32) + "…" : s) + "</span>"; }
+    return f.map(function (x) { return '<span class="chip c-' + x[1] + '">' + esc(x[2]) + "</span>"; }).join("");
+  }
+  function short(s, n) { if (s.length <= n) return s; var c = s.slice(0, n); return c.slice(0, c.lastIndexOf(" ")) + "…"; }
+
+  // ---------- ladder rows ----------
+  function rungHTML(r, opt) {
+    var cls = "rung" + (/^4\.3b/.test(r.group || "") ? " ovr" : "") + (r.id === "N42" ? " merge" : "") + (r.id === "N43" ? " fallback" : "");
+    var cond = opt.full ? r["if"] : short(r["if"], 120);
+    var right = opt.chip(r);
+    var body = "";
+    if (opt.fields) body = '<div class="rbody">' + opt.fields.map(function (f) { return r[f[0]] !== undefined ? "<div><b>" + esc(f[1]) + "</b>" + esc(r[f[0]]) + "</div>" : ""; }).join("") + (opt.extra ? opt.extra(r) : "") + "</div>";
+    if (!body) return '<div class="' + cls + ' plain" id="rung-' + r.id + '" data-id="' + r.id + '"><div class="rung-s" style="display:grid;grid-template-columns:3.4rem minmax(0,1fr) auto;gap:4px 12px;padding:9px 12px"><span class="rid">' + esc(r.id) + '</span><span class="cond">' + esc(cond) + '</span><span class="chips">' + right + "</span></div></div>";
+    return '<details class="' + cls + '" id="rung-' + r.id + '" data-id="' + r.id + '"' + (openSet[r.id] ? " open" : "") + '><summary><span class="rid">' + esc(r.id) + '</span><span class="cond">' + esc(cond) + '</span><span class="chips">' + right + "</span></summary>" + body + "</details>";
+  }
+  function ladderHTML(entity, opt) {
+    var rows = rowsOf(entity).filter(hit), out = "", last = null;
+    rows.forEach(function (r) {
+      if (opt.grouped && r.group !== last) { last = r.group; out += '<div class="gh' + (/^4\.3b/.test(r.group) ? " ovr" : "") + '"><h3>' + esc(r.group) + "</h3>" + (/^4\.3b/.test(r.group) ? "<span>The owner's doing: only the owner can answer an override card.</span>" : "") + "</div>"; }
+      out += rungHTML(r, opt);
+    });
+    return out || '<div class="empty">No rows match the filter.</div>';
+  }
+
+  // ---------- Task view ----------
+  var FACTS = [
+    ["ended", "The task is marked done, dropped, split or closed", false], ["merged", "The PR is merged", false], ["parked", "The task is parked", false],
+    ["closedpr", "The PR was closed without merging", false], ["recap", "A recap is open", false], ["attempt", "An attempt is open", true],
+    ["deps", "Dependencies are done", true], ["slot", "Project running, milestone open, a slot is free", true], ["ready", "The worker said ready at this commit", true],
+    ["working", "The worker run is working right now", false], ["gh", "GitHub has this commit (PR open at it)", true], ["conflict", "Conflict with the base", false],
+    ["behind", "Behind the base (no merge queue)", false], ["approval", "GitHub requires an approving review", false], ["merging", "A merge was already asked for this commit", false], ["override", "An owner override covers this commit", false], ["ask", "An owner ask is open for this task", false]
+  ];
+  var SELS = [["evidence", "Evidence at this commit", [["none", "none yet"], ["passes", "passes"], ["fails", "a check failed"]], "passes"],
+    ["ladder", "Review ladder says", [["review", "review"], ["fix", "fix"], ["retro", "retro"], ["recap", "recap"], ["passed", "passed"]], "review"],
+    ["checks", "CI checks", [["green", "green"], ["pending", "pending"], ["red", "red"], ["stopped", "stopped"], ["absent", "absent"], ["unreadable", "unreadable"]], "pending"]];
+  var F = {}; FACTS.forEach(function (x) { F[x[0]] = x[2]; }); SELS.forEach(function (x) { F[x[0]] = x[3]; });
+  // Simplified readings of the conditions, in the table's own order. A rung with no entry here is not simulated.
+  function P() { return F.ladder === "passed"; }
+  var PRED = {
+    N1: function () { return F.ended; }, N2: function () { return F.merged; }, N3: function () { return F.parked; }, N4: function () { return F.closedpr; }, N6: function () { return F.recap; },
+    N9: function () { return !F.attempt && !F.deps; }, N10: function () { return !F.attempt && !F.slot; }, N11: function () { return !F.attempt; },
+    N15: function () { return F.override && !F.gh; }, N16: function () { return F.override && F.conflict; }, N18: function () { return F.override && F.merging; }, N19: function () { return F.override; },
+    N21: function () { return F.evidence === "fails"; }, N22: function () { return F.ladder === "fix"; }, N23: function () { return !F.ready; },
+    N25: function () { return F.ladder === "recap"; }, N26: function () { return !F.gh; }, N27: function () { return F.evidence === "none"; }, N28: function () { return F.ladder === "retro"; }, N29: function () { return F.ladder === "review"; },
+    N31: function () { return P() && F.ask; }, N32: function () { return P() && F.conflict; }, N33: function () { return P() && F.checks === "red"; }, N34: function () { return P() && F.checks === "stopped"; },
+    N35: function () { return P() && F.checks === "absent"; }, N36: function () { return P() && (F.checks === "pending" || F.checks === "unreadable"); }, N37: function () { return P() && F.approval; },
+    N39: function () { return P() && F.working; }, N40: function () { return P() && F.behind; }, N41: function () { return P() && F.merging && !F.behind; },
+    N42: function () { return P() && F.evidence === "passes" && F.gh && F.checks === "green" && !F.conflict && !F.behind && !F.ask && !F.working; }
+  };
+  var HAPPY = [["N11", "Not started: a new attempt"], ["N23", "The worker is working"], ["N26", "Push, open the PR"], ["N29", "A reviewer reviews"], ["N36", "Waiting on CI"], ["N42", "The merge"], ["N2", "The PR is merged: done"]];
+
+  function simulate() {
+    var rs = rowsOf("task");
+    for (var i = 0; i < rs.length; i++) { var p = PRED[rs[i].id]; if (p && p()) return rs[i].id; }
+    return "N43";
+  }
+  function updateSim() {
+    var id = simulate(), r = rowsOf("task").filter(function (x) { return x.id === id; })[0];
+    Array.prototype.forEach.call(document.querySelectorAll(".rung.match"), function (e) { e.classList.remove("match"); });
+    var el = $("rung-" + id); if (el) el.classList.add("match");
+    $("simres").innerHTML = '<span><b class="mono">' + esc(id) + "</b> is the first rung that fits.</span>" + "<span>" + esc(short(r["if"], 140)) + "</span><span>Make sure of: " + esc(short(r.make, 160)) + '</span><span class="chips" style="justify-content:flex-start">Waits on ' + chips(r.waits) + '</span><button class="btn" type="button" data-go="' + id + '">Show this rung</button>';
+  }
+  function goRung(id) {
+    var el = $("rung-" + id); if (!el) { q = ""; $("q").value = ""; renderView(); el = $("rung-" + id); }
+    if (!el) return;
+    if (el.tagName === "DETAILS") { el.open = true; openSet[id] = true; }
+    try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (x) { el.scrollIntoView(); }
+  }
+  function taskView() {
+    var notSim = rowsOf("task").filter(function (r) { return !PRED[r.id] && r.id !== "N43"; }).map(function (r) { return r.id; });
+    var side = '<aside class="side"><section class="card"><h2>Happy path</h2><span class="sub">Typical order, for reading. Each step is a rung a normal task lands on as it moves along.</span><ol class="happy">' +
+      HAPPY.map(function (h, i) { return '<li><span class="n">' + (i + 1) + "</span><span>" + esc(h[1]) + '</span><button type="button" data-go="' + h[0] + '">' + h[0] + "</button></li>"; }).join("") + "</ol></section>" +
+      '<section class="card"><h2>Try it</h2><p class="warn"><b>A simplified illustration, not the engine.</b> Each toggle is a rough reading of a condition. Not simulated: ' + notSim.join(", ") + ". N43 is the fallback; these toggles cannot reach it.</p><fieldset>" +
+      FACTS.map(function (f) { return '<label class="fact"><input type="checkbox" data-f="' + f[0] + '"' + (F[f[0]] ? " checked" : "") + "><span>" + esc(f[1]) + "</span></label>"; }).join("") + "</fieldset>" +
+      SELS.map(function (s) { return '<label class="sel"><span>' + esc(s[1]) + '</span><select data-s="' + s[0] + '">' + s[2].map(function (o) { return '<option value="' + o[0] + '"' + (F[s[0]] === o[0] ? " selected" : "") + ">" + esc(o[1]) + "</option>"; }).join("") + "</select></label>"; }).join("") +
+      '<div class="result" id="simres" aria-live="polite"></div></section></aside>';
+    var opt = { grouped: true, full: false, fields: [["if", "If"], ["make", "Make sure of"], ["waits", "Waits on"]], chip: function (r) { return chips(r.waits); },
+      extra: function (r) { return PRED[r.id] || r.id === "N43" ? "" : '<span class="tagoff">not simulated in Try it</span>'; } };
+    return '<div class="split"><div class="ladder" id="ladder"><div class="sub">Read top to bottom. The first row whose condition holds wins. Click a rung for its full text. The chip says who the task waits on.</div>' + ladderHTML("task", opt) + "</div>" + side + "</div>";
+  }
+
+  // ---------- Review ladder ----------
+  function reviewView() {
+    var opt = { full: true, chip: function (r) { var a = r.answer.split(" ")[0]; return '<span class="chip a-' + esc(a) + '">' + esc(r.answer) + "</span>"; } };
+    var lv = TB.levels;
+    return '<div class="sect"><div class="sub">Section 4.6. <code>Ladder(task, H)</code> answers what review needs next at the current commit H. First match wins, like the task table.</div><div class="ladder">' + ladderHTML("review", opt) + "</div>" +
+      "<h2>The same loop at four levels, for reading</h2>" + tableHTML(lv) + "</div>";
+  }
+  function tableHTML(t, mono) {
+    var rows = t.rows.filter(hitCells);
+    return '<div class="tunewrap"><table><thead><tr>' + t.head.map(function (h) { return "<th>" + esc(h) + "</th>"; }).join("") + "</tr></thead><tbody>" +
+      (rows.length ? rows.map(function (r) { return "<tr>" + r.map(function (c, i) { return '<td class="' + (mono && mono.indexOf(i) >= 0 ? "m" : "") + '">' + esc(c) + "</td>"; }).join("") + "</tr>"; }).join("") : '<tr><td colspan="' + t.head.length + '" class="empty">No rows match the filter.</td></tr>') + "</tbody></table></div>";
+  }
+
+  // ---------- Project ----------
+  function projectView() {
+    var opt = { full: false, grouped: false, fields: [["if", "If"], ["make", "Make sure of"], ["shown", "Shown as"]], chip: function (r) { return '<span class="chip c-other">' + esc(short(r.shown, 30)) + "</span>"; } };
+    return '<div class="sect"><div class="sub">Section 6. First match wins. While a stopping alert is active nothing new starts, whatever row matches.</div><div class="ladder">' + ladderHTML("project", opt) + "</div><h2>Alerts</h2>" + tableHTML(TB.alerts, [0]) + "</div>";
+  }
+
+  // ---------- Acceptance, Settings ----------
+  function acceptView() { return '<div class="sect"><div class="sub">Section 7.2. Every report and command enters here. Valid: it becomes a record. Not valid, or not listed: refused with the code and one plain sentence, and nothing changes.</div>' + tableHTML(TB.accept, [0, 3]) + "</div>"; }
+  function settingsView() {
+    return '<div class="sect"><div class="sub">Section 10.1. The rows are code; every number a rule uses is a named setting the owner can change while the factory runs.</div>' + tableHTML(TB.settings, [0, 1, 2, 3]) +
+      '<p class="note">' + esc(DATA.notes.choices) + '</p><p class="note"><b>' + esc(DATA.notes.never.split(":")[0]) + ":</b>" + esc(DATA.notes.never.slice(DATA.notes.never.indexOf(":") + 1)) + "</p></div>";
+  }
+
+  // ---------- Diagram tabs (Run, Ask) ----------
+  var ENT = {
+    run: { label: "Run", vb: [900, 380], states: ["starting", "working", "idle", "blocked", "ended"], terminal: ["ended"],
+      pos: { starting: [100, 150], working: [330, 150], idle: [560, 150], ended: [800, 150], blocked: [445, 310] }, bend: { "starting|ended": 120, "working|ended": 80, "blocked|ended": -30, "idle|ended": 40 } },
+    ask: { label: "Ask", vb: [700, 290], states: ["(new)", "open", "answered", "cancelled"], terminal: ["answered", "cancelled"],
+      pos: { "(new)": [90, 145], open: [340, 145], answered: [590, 65], cancelled: [590, 230] }, bend: { "(new)|answered": -70 } }
+  };
+  var selNode = null, selEdge = null;
+  function base(s) { return s === "(new)" ? s : s.replace(/\s*\(.*$/, "").trim(); }
+  function targets(r) { var t = r.to; if (t === "same" || t === "—") return []; var b = base(t); return ENT[r.entity].states.indexOf(b) >= 0 ? [b] : []; }
+  function fromMatches(r, s) { return r.from.some(function (f) { return base(f) === s; }); }
+  function buildEdges(name) {
+    var map = {}, list = [];
+    rowsOf(name).forEach(function (r) {
+      var ts = targets(r);
+      r.from.forEach(function (f) { var a = base(f); ts.forEach(function (b) { if (a === b) return; var k = a + "|" + b; if (!map[k]) { map[k] = { k: k, from: a, to: b, rows: [] }; list.push(map[k]); } map[k].rows.push(r); }); });
+    });
+    return list;
+  }
+  function dim(n) { return n === "(new)" ? [84, 30] : [142, 34]; }
+  function clip(c, d, t) { var dx = t[0] - c[0], dy = t[1] - c[1], hw = d[0] / 2 + 3, hh = d[1] / 2 + 3; var s = Math.min(dx ? hw / Math.abs(dx) : Infinity, dy ? hh / Math.abs(dy) : Infinity); return [c[0] + dx * s, c[1] + dy * s]; }
+  function geom(e, ed, bend) {
+    var a = e.pos[ed.from], b = e.pos[ed.to], mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1;
+    var c = [mx + dy / len * bend, my - dx / len * bend], s = clip(a, dim(ed.from), bend ? c : b), t = clip(b, dim(ed.to), bend ? c : a);
+    var d = bend ? "M" + s[0] + " " + s[1] + " Q" + c[0] + " " + c[1] + " " + t[0] + " " + t[1] : "M" + s[0] + " " + s[1] + " L" + t[0] + " " + t[1];
+    var cc = bend ? c : [(s[0] + t[0]) / 2, (s[1] + t[1]) / 2];
+    return { d: d, at: function (u) { return [(1 - u) * (1 - u) * s[0] + 2 * (1 - u) * u * cc[0] + u * u * t[0], (1 - u) * (1 - u) * s[1] + 2 * (1 - u) * u * cc[1] + u * u * t[1]]; } };
+  }
+  function overlap(a, b) { return a[0] < b[0] + b[2] && a[0] + a[2] > b[0] && a[1] < b[1] + b[3] && a[1] + a[3] > b[1]; }
+  function labelText(ed) { var evs = []; ed.rows.forEach(function (r) { if (evs.indexOf(r.on) < 0) evs.push(r.on); }); return (evs.length === 1 ? evs[0] + " · " : "") + ed.rows.map(function (r) { return r.id; }).join(","); }
+
+  function diagramSVG(name) {
+    var e = ENT[name], edges = buildEdges(name), W = e.vb[0], H = e.vb[1], rev = {}; edges.forEach(function (x) { rev[x.k] = 1; });
+    var out = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(e.label) + ' transition diagram. Click a state or an arrow to list its rows."><defs>';
+    ["n", "out", "in"].forEach(function (m) { out += '<marker id="mk-' + m + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path class="m-' + m + '" d="M0 0 L10 5 L0 10 z"/></marker>'; });
+    out += "</defs>";
+    var placed = [], boxes = Object.keys(e.pos).map(function (n) { var p = e.pos[n], d = dim(n); return [p[0] - d[0] / 2 - 4, p[1] - d[1] / 2 - 4, d[0] + 8, d[1] + 8]; }), lines = "", labels = "";
+    edges.forEach(function (ed) {
+      var bend = e.bend[ed.k] !== undefined ? e.bend[ed.k] : (rev[ed.to + "|" + ed.from] ? 26 : 0), g = geom(e, ed, bend), cls = "edge", mk = "n", hl = "";
+      if (selEdge) { if (selEdge === ed.k) { hl = "out"; cls += " sel"; mk = "out"; } else hl = "dim"; }
+      else if (selNode) { if (ed.from === selNode) { hl = "out"; mk = "out"; } else if (ed.to === selNode) { hl = "in"; mk = "in"; } else hl = "dim"; }
+      if (!hl && q && !ed.rows.some(hit)) hl = "dim";
+      if (hl) cls += " " + hl;
+      lines += '<g class="' + cls + '" data-k="' + esc(ed.k) + '"><path class="hit" d="' + g.d + '"/><path class="ln" d="' + g.d + '" marker-end="url(#mk-' + mk + ')"/></g>';
+      var t = labelText(ed), w = t.length * 6.3 + 12, h = 16, spot = null, tries = [0.5, 0.4, 0.6, 0.3, 0.7, 0.22, 0.78, 0.15, 0.85];
+      for (var i = 0; i < tries.length && !spot; i++) { var p = g.at(tries[i]), r = [p[0] - w / 2, p[1] - h / 2, w, h], bad = false; for (var j = 0; j < placed.length && !bad; j++) bad = overlap(r, placed[j]); for (var j2 = 0; j2 < boxes.length && !bad; j2++) bad = overlap(r, boxes[j2]); if (!bad) spot = p; }
+      if (!spot) spot = g.at(0.5);
+      placed.push([spot[0] - w / 2 - 2, spot[1] - h / 2 - 2, w + 4, h + 4]);
+      labels += '<g class="lbl ' + (hl === "dim" ? "dim " : hl + " ") + '" data-k="' + esc(ed.k) + '"><rect x="' + (spot[0] - w / 2) + '" y="' + (spot[1] - h / 2) + '" width="' + w + '" height="' + h + '" rx="4"/><text x="' + spot[0] + '" y="' + spot[1] + '">' + esc(t) + "</text></g>";
+    });
+    var nodes = "";
+    e.states.forEach(function (n) {
+      var p = e.pos[n], d = dim(n), c = "node" + (e.terminal.indexOf(n) >= 0 ? " term" : "") + (n === "(new)" ? " entry" : "") + (selNode === n ? " sel" : "");
+      if (selNode && selNode !== n && !edges.some(function (x) { return (x.from === selNode && x.to === n) || (x.to === selNode && x.from === n); })) c += " dim";
+      nodes += '<g class="' + c + '" data-n="' + esc(n) + '" tabindex="0" role="button" aria-label="State ' + esc(n) + '"><rect class="body" x="' + (p[0] - d[0] / 2) + '" y="' + (p[1] - d[1] / 2) + '" width="' + d[0] + '" height="' + d[1] + '" rx="8"/><text x="' + p[0] + '" y="' + p[1] + '">' + esc(n) + "</text></g>";
+    });
+    return out + lines + nodes + labels + "</svg>";
+  }
+  function cardHTML(r) {
+    var loop = r.to === "same";
+    return '<article class="row"><div class="rid">' + esc(r.id) + '</div><div><div class="rline">' + r.from.map(function (f) { return '<span class="st">' + esc(f) + "</span>"; }).join(" ") +
+      '<span class="on">on <b>' + esc(r.on) + '</b></span><span class="on">→</span><span class="st to">' + esc(r.to) + "</span>" + (loop ? ' <span class="tag">stays in state</span>' : "") + "</div>" +
+      '<div class="rg"><span>If</span> ' + esc(r["if"] === "—" ? "always" : r["if"]) + '</div><div class="rd"><span>Does</span> ' + esc(r["do"]) + "</div></div></article>";
+  }
+  function grp(title, rows) { var s = rows.filter(hit); return '<div class="grp"><h3>' + esc(title) + " (" + s.length + (s.length !== rows.length ? " of " + rows.length : "") + ")</h3>" + (s.length ? s.map(cardHTML).join("") : '<div class="empty">No rows match the filter.</div>') + "</div>"; }
+  function panelHTML(name) {
+    var mine = rowsOf(name), e = ENT[name], title, sub, html;
+    if (selEdge) {
+      var ed = buildEdges(name).filter(function (x) { return x.k === selEdge; })[0];
+      if (ed) { title = '<span class="mono">' + esc(ed.from) + "</span> → <span class=\"mono\">" + esc(ed.to) + "</span>"; sub = ed.rows.length + " row(s) draw this arrow."; html = grp("Rows on this arrow", ed.rows); } else selEdge = null;
+    }
+    if (!selEdge && selNode) {
+      var from = mine.filter(function (r) { return fromMatches(r, selNode); }), arr = mine.filter(function (r) { return !fromMatches(r, selNode) && targets(r).indexOf(selNode) >= 0; });
+      title = '<span class="mono">' + esc(selNode) + "</span>"; sub = (selNode === "(new)" ? "Entry point, not a state. " : "") + from.length + " rows leave or stay, " + arr.length + " arrive from elsewhere.";
+      html = grp("Rows for this state", from) + grp("Rows that arrive here from other states", arr);
+    }
+    if (!selEdge && !selNode) { title = e.label + " table"; sub = mine.length + " rows. Click a state or an arrow to narrow the list."; html = grp("All " + e.label.toLowerCase() + " rows", mine); }
+    return '<section class="panel"><div class="panelhead"><div><h2>' + title + '</h2><div class="sub">' + esc(sub) + '</div></div><button class="btn" type="button" data-clear="1">Show whole table</button></div>' + html + "</section>";
+  }
+  function diagramView(name) {
+    var cap = name === "run" ? "Run: one agent process in one terminal. Five states; ended carries a reason (failed, quota, blank, stuck, exited, lost, stopped, signed_out, error, resume_failed). Self-loops are in the row list, not drawn."
+      : "Ask: (new) is where an ask enters, not a state. It ends as answered or cancelled, and both refuse every later event (A5).";
+    return '<div class="sect"><div class="legend"><span><i></i>leaves the selected state</span><span><i class="in"></i>arrives at it</span></div><figure><div class="diagram" id="diagram">' + diagramSVG(name) + "</div><figcaption>" + esc(cap) + '</figcaption></figure><div id="panel">' + panelHTML(name) + "</div>" +
+      (name === "run" ? "<h2>The matrix (row ids; every cell filled)</h2>" + tableHTML(TB.matrix, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) : "") + "</div>";
+  }
+  function redrawDiagram() { var n = tab; $("diagram").innerHTML = diagramSVG(n); $("panel").innerHTML = panelHTML(n); }
+
+  // ---------- shell ----------
+  function renderTabs() {
+    $("tabs").innerHTML = TABS.map(function (t) { return '<button class="tab" role="tab" type="button" data-t="' + t[0] + '" aria-selected="' + (t[0] === tab) + '">' + t[1] + " <small>" + counts(t[0]) + "</small></button>"; }).join("");
+  }
+  function renderView() {
+    var v = tab === "task" ? taskView() : tab === "review-ladder" ? reviewView() : tab === "run" ? diagramView("run") : tab === "project" ? projectView() : tab === "ask" ? diagramView("ask") : tab === "acceptance" ? acceptView() : settingsView();
+    $("view").innerHTML = v;
+    if (tab === "task") updateSim();
+  }
+  function setTab(t) { tab = t; selNode = selEdge = null; try { history.replaceState(null, "", "#" + t); } catch (x) {} renderTabs(); renderView(); }
+
+  $("tabs").addEventListener("click", function (ev) { var b = ev.target.closest("[data-t]"); if (b) setTab(b.getAttribute("data-t")); });
+  $("view").addEventListener("click", function (ev) {
+    var g = ev.target.closest("[data-go]"); if (g) { goRung(g.getAttribute("data-go")); return; }
+    if (ev.target.closest("[data-clear]")) { selNode = selEdge = null; redrawDiagram(); return; }
+    if (tab !== "run" && tab !== "ask") return;
+    var nn = ev.target.closest("[data-n]"), kk = ev.target.closest("[data-k]");
+    if (nn) { var n = nn.getAttribute("data-n"); selNode = selNode === n ? null : n; selEdge = null; redrawDiagram(); }
+    else if (kk) { var k = kk.getAttribute("data-k"); selEdge = selEdge === k ? null : k; selNode = null; redrawDiagram(); }
+  });
+  $("view").addEventListener("keydown", function (ev) {
+    if ((ev.key !== "Enter" && ev.key !== " ") || (tab !== "run" && tab !== "ask")) return;
+    var nn = ev.target.closest("[data-n]"); if (!nn) return; ev.preventDefault();
+    var n = nn.getAttribute("data-n"); selNode = selNode === n ? null : n; selEdge = null; redrawDiagram();
+    var again = document.querySelector('[data-n="' + n.replace(/"/g, "") + '"]'); if (again) again.focus();
+  });
+  $("view").addEventListener("toggle", function (ev) { var d = ev.target; if (d && d.tagName === "DETAILS") openSet[d.getAttribute("data-id")] = d.open; }, true);
+  $("view").addEventListener("change", function (ev) {
+    var t = ev.target;
+    if (t.hasAttribute("data-f")) F[t.getAttribute("data-f")] = t.checked; else if (t.hasAttribute("data-s")) F[t.getAttribute("data-s")] = t.value; else return;
+    updateSim();
+  });
+  $("q").addEventListener("input", function () { q = this.value.trim().toLowerCase(); renderView(); });
+  $("clear").addEventListener("click", function () { q = ""; $("q").value = ""; selNode = selEdge = null; renderView(); });
+
+  var h = (location.hash || "").replace("#", "");
+  if (TABS.some(function (t) { return t[0] === h; })) tab = h;
+  var c = {}; ROWS.forEach(function (r) { c[r.entity] = (c[r.entity] || 0) + 1; });
+  $("foot").textContent += " Rows on this page: N " + c.task + ", L " + c.review + ", J " + c.project + ", R " + c.run + ", A " + c.ask + ", acceptance " + TB.accept.rows.length + ", settings " + TB.settings.rows.length + ".";
+  renderTabs(); renderView();
+})();
+</script>
