@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -56,7 +57,100 @@ var (
 	workingF    = func(in *In) { in.Facts.Worker.State = RunWorking }
 	asked       = func(in *In) { a0(in).Acts = append(a0(in).Acts, Act{Key: "merge@c1", Result: "done"}) }
 	red         = func(in *In) { in.Facts.PR.Checks = ChecksRed }
+	noAnswer    = func(in *In) { in.Facts.PR.Answered = false }
+	closedPR    = func(in *In) { in.Facts.PR.State = PRClosed }
+	conflict    = func(in *In) { in.Facts.PR.Mergeable = MergeableConflict }
 )
+
+func rowByID(id string) Row[In] {
+	return TaskRows[slices.IndexFunc(TaskRows, func(r Row[In]) bool { return r.ID == id })]
+}
+
+// TestN42Guards: each N42 clause false and the rest true. N42's condition
+// fails (called directly, so a clause an earlier row shadows is tested
+// too), and no row asks for a merge.
+func TestN42Guards(t *testing.T) {
+	n42 := rowByID("N42")
+	for name, f := range map[string]func(*In){
+		"prOpen":             closedPR,
+		"prHeadIsH":          func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel = "c9", RelAhead },
+		"answered":           noAnswer,
+		"mergeClean":         conflict,
+		"notBehind":          func(in *In) { in.Facts.PR.Behind = true },
+		"notWorking":         workingF,
+		"ladderSays(Passed)": func(in *In) { a0(in).Rounds[0].Verdict = "maybe" },
+		"checksGreen":        red,
+		"tipSame":            func(in *In) { in.Facts.Tip, in.Facts.TipRel = "c9", RelDiverged },
+	} {
+		in := with(f)
+		if n42.When(in) {
+			t.Errorf("%s false: N42 holds", name)
+		}
+		r, d := FirstMatch(TaskRows, in)
+		if r.ID == "N42" || slices.ContainsFunc(d.Asked, func(k string) bool { return strings.HasPrefix(k, "merge@") }) {
+			t.Errorf("%s false: %s asked %v", name, r.ID, d.Asked)
+		}
+	}
+}
+
+// TestS1FinishedReviewer: the reviewer is stopped after its verdict, so
+// once the ladder no longer says review, its gone run stops nothing.
+func TestS1FinishedReviewer(t *testing.T) {
+	for want, in := range map[string]In{
+		"N22": with(changes, reviewEnded),
+		"N36": with(pending, reviewEnded),
+		"N42": with(reviewEnded),
+	} {
+		if r, d := FirstMatch(TaskRows, in); r.ID != want {
+			t.Errorf("reviewer gone: %s %v, want %s", r.ID, d.Asked, want)
+		}
+	}
+}
+
+// TestN43WakeOncePerStall: the same stall wakes the coordinator once; a
+// different stall, or the same at a new H, wakes it again.
+func TestN43WakeOncePerStall(t *testing.T) {
+	_, first := FirstMatch(TaskRows, with(red))
+	stalled := func(fs ...func(*In)) In {
+		in := with(append([]func(*In){red}, fs...)...)
+		a0(&in).Acts = []Act{{Key: first.Asked[0], Result: "done"}}
+		return in
+	}
+	newH := func(in *In) {
+		a0(in).Ready = append(a0(in).Ready, Ready{Head: "c2"})
+		a0(in).Rounds = append(a0(in).Rounds, Round{N: 2, Head: "c2", Verdict: VerdictPass})
+		in.Facts.PR.Head = "c2"
+	}
+	for name, c := range map[string]struct {
+		in   In
+		wake bool
+	}{
+		"same stall": {stalled(), false},
+		"conflict":   {stalled(conflict), true},
+		"new H":      {stalled(newH), true},
+	} {
+		r, d := FirstMatch(TaskRows, c.in)
+		if r.ID != "N43" || (len(d.Asked) == 1) != c.wake {
+			t.Errorf("%s: %s asked %v, want wake=%v", name, r.ID, d.Asked, c.wake)
+		}
+	}
+}
+
+// TestClosedPR: a closed PR waits on nothing and gets no worker or
+// reviewer work; it falls to N43 (design.md N4 comes in a later slice).
+func TestClosedPR(t *testing.T) {
+	for name, in := range map[string]In{
+		"pending": with(closedPR, pending),
+		"unknown": with(closedPR, func(in *In) { in.Facts.PR.Mergeable = MergeableUnknown }),
+		"working": with(closedPR, workingF),
+		"fix":     with(closedPR, changes),
+		"review":  with(closedPR, noRounds),
+	} {
+		if r, d := FirstMatch(TaskRows, in); r.ID != "N43" {
+			t.Errorf("closed PR, %s: %s asked %v, want N43", name, r.ID, d.Asked)
+		}
+	}
+}
 
 func TestTablesCheck(t *testing.T) {
 	if err := CheckTable(TaskRows); err != nil {
@@ -77,17 +171,18 @@ func TestRowCases(t *testing.T) {
 		{"N1", with(done), []string{"cleanup"}},
 		{"N2", with(merged), []string{"mark_done", "wake_coordinator@merged_outside_bar"}},
 		{"S1", with(workerEnded), []string{"stop_task"}},
-		{"S1", with(reviewEnded), []string{"stop_task"}},
+		{"S1", with(noRounds, reviewEnded), []string{"stop_task"}},
 		{"N11", with(noAttempts), []string{"new_attempt"}},
 		{"N22", with(changes), []string{"tell_worker_findings@1"}},
 		{"N23", with(notReady, noRounds, prGone), []string{"start_worker"}},
 		{"N26", with(noRounds, prGone), []string{"push_and_open_pr@c1"}},
 		{"N29", with(noRounds), []string{"start_reviewer@1@c1"}},
 		{"N36", with(pending), nil},
+		{"N36", with(noAnswer), nil}, // checks unreadable: wait, no wake
 		{"N39", with(workingF), nil},
 		{"N41", with(asked), nil},
 		{"N42", landing(), []string{"record_accept@c1", "merge@c1"}},
-		{"N43", with(red), []string{"wake_coordinator@no_rule_matched"}},
+		{"N43", with(red), []string{"wake_coordinator@no_rule_matched@c1@open@red@clean@same"}},
 	}
 	covered := map[string]bool{}
 	for _, c := range cases {

@@ -19,7 +19,7 @@ type Settings struct {
 // Range limits for each setting.
 const (
 	ReviewRoundsMin = 1
-	ReviewRoundsMax = 5
+	ReviewRoundsMax = 1 // slice 2 raises it to 5 with L8
 	ChecksGraceMin  = 1
 	ChecksGraceMax  = 60
 )

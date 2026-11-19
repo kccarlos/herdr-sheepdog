@@ -59,6 +59,11 @@ func TestActs(t *testing.T) {
 }
 
 func TestSettingsRange(t *testing.T) {
+	two := DefaultSettings()
+	two.ReviewRounds = 2 // slice 1 has no L8: a second round would not be enforced
+	if two.Validate() == nil {
+		t.Error("review_rounds 2 accepted")
+	}
 	if err := DefaultSettings().Validate(); err != nil {
 		t.Fatal(err)
 	}

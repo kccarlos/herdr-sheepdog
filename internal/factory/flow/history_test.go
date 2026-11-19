@@ -47,9 +47,9 @@ func TestHistoryHappyPath(t *testing.T) {
 		}},
 		{"N29", []string{"start_reviewer@1@c1"}, func(w *world) { w.facts.Reviewer.Pending = true }},
 		{"N29", nil, func(w *world) { w.facts.Reviewer = Run{State: RunWorking} }},
-		{"N29", nil, func(w *world) { // verdict in; the reviewer for the next round is not started
+		{"N29", nil, func(w *world) { // verdict in; the loop stops round 1's reviewer
 			w.att().Rounds = append(w.att().Rounds, Round{N: 1, Kind: "full", Head: "c1", Verdict: VerdictChanges, Majors: 2})
-			w.facts.Reviewer = Run{}
+			w.facts.Reviewer = Run{State: RunGone}
 			w.facts.PR.Checks, w.facts.PR.Mergeable = ChecksGreen, MergeableClean
 		}},
 		{"N22", []string{"tell_worker_findings@1"}, func(w *world) {
@@ -60,6 +60,7 @@ func TestHistoryHappyPath(t *testing.T) {
 			w.att().Ready = append(w.att().Ready, Ready{Head: "c2"})
 			w.facts.TipRel, w.facts.Worker.State = RelSame, RunIdle
 			w.facts.PR.HeadRel = RelBehind
+			w.facts.Reviewer = Run{} // the ladder now asks for round 2, which has no run yet (Facts.Reviewer)
 		}},
 		{"N26", []string{"push_and_open_pr@c2"}, func(w *world) {
 			w.facts.PR.Head, w.facts.PR.HeadRel = "c2", RelSame
@@ -68,7 +69,7 @@ func TestHistoryHappyPath(t *testing.T) {
 		{"N29", []string{"start_reviewer@2@c2"}, func(w *world) { w.facts.Reviewer = Run{State: RunWorking} }},
 		{"N29", nil, func(w *world) {
 			w.att().Rounds = append(w.att().Rounds, Round{N: 2, Kind: "delta", Head: "c2", Verdict: VerdictPass})
-			w.facts.Reviewer = Run{}
+			w.facts.Reviewer = Run{State: RunGone}
 		}},
 		{"N36", nil, func(w *world) { // CI green; a stray worker turn
 			w.facts.PR.Checks, w.facts.PR.Mergeable = ChecksGreen, MergeableClean

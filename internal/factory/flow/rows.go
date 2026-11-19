@@ -92,9 +92,12 @@ func noReady(in In) bool     { return len(in.attempt().Ready) == 0 }
 func tipAhead(in In) bool    { return in.Facts.TipRel == RelAhead } // slice 1: ahead is always changes
 func noPR(in In) bool        { return in.Facts.PR.State == PRNone }
 func prOpen(in In) bool      { return in.Facts.PR.State == PROpen }
+func prNotClosed(in In) bool { return in.Facts.PR.State != PRClosed }
+func tipSame(in In) bool     { return in.Facts.TipRel == RelSame } // slice 1: diverged falls to N43 (N7 comes later)
 func prBehindH(in In) bool   { return in.Facts.PR.HeadRel == RelBehind }
 func prHeadIsH(in In) bool   { return in.Facts.PR.Head == headH(in) }
 func answered(in In) bool    { return in.Facts.PR.Answered }
+func unanswered(in In) bool  { return !answered(in) }
 func notBehind(in In) bool   { return !in.Facts.PR.Behind }
 func checksGreen(in In) bool { return in.Facts.PR.Checks == ChecksGreen }
 func checksPend(in In) bool  { return in.Facts.PR.Checks == ChecksPending }
@@ -142,7 +145,7 @@ var TaskRows = []Row[In]{
 		}
 		return Decision{Asked: asked, Why: "the PR is merged"}
 	}},
-	{ID: "S1", WaitsOn: "the owner", When: all(hasAttempt, anyOf(workerGone, reviewGone)), Then: func(in In) Decision {
+	{ID: "S1", WaitsOn: "the owner", When: all(hasAttempt, anyOf(workerGone, all(ladderSays(Review), reviewGone))), Then: func(in In) Decision {
 		who := "worker"
 		if !workerGone(in) {
 			who = "reviewer"
@@ -150,7 +153,7 @@ var TaskRows = []Row[In]{
 		return say("the "+who+" run ended: the task is stopped", once(in.acts(), AskStopTask))(in)
 	}},
 	{ID: "N11", WaitsOn: "the engine", When: noAttempt, Then: say("no attempt: start one", []string{AskNewAttempt})},
-	{ID: "N22", WaitsOn: "the worker", When: ladderSays(Fix), Then: func(in In) Decision {
+	{ID: "N22", WaitsOn: "the worker", When: all(ladderSays(Fix), prNotClosed), Then: func(in In) Decision {
 		r := newestCovering(*in.attempt(), headH(in))
 		return say("the ladder says fix", ensureRun(in, in.Facts.Worker, AskStartWorker),
 			once(in.acts(), key(AskTellFindings, r.N)))(in)
@@ -161,23 +164,25 @@ var TaskRows = []Row[In]{
 	{ID: "N26", WaitsOn: "the engine", When: all(hasAttempt, anyOf(noPR, all(prOpen, prBehindH))), Then: func(in In) Decision {
 		return say("GitHub does not have H", once(in.acts(), key(AskPushPR, headH(in))))(in)
 	}},
-	{ID: "N29", WaitsOn: "the reviewer", When: ladderSays(Review), Then: func(in In) Decision {
+	{ID: "N29", WaitsOn: "the reviewer", When: all(ladderSays(Review), prNotClosed), Then: func(in In) Decision {
 		start := key(AskStartReview, nextRound(*in.attempt()), headH(in))
 		return say("the ladder says review", ensureRun(in, in.Facts.Reviewer, start))(in)
 	}},
-	{ID: "N36", WaitsOn: "CI", When: all(ladderSays(Passed), anyOf(checksPend, checksAbsentInGrace, mergeUnkn)),
-		Then: say("checks pending or mergeable unknown")},
-	{ID: "N39", WaitsOn: "the worker", When: all(ladderSays(Passed), working), Then: say("the worker is working")},
+	{ID: "N36", WaitsOn: "CI", When: all(ladderSays(Passed), prOpen, anyOf(checksPend, unanswered, checksAbsentInGrace, mergeUnkn)),
+		Then: say("checks pending or unreadable, or mergeable unknown")},
+	{ID: "N39", WaitsOn: "the worker", When: all(ladderSays(Passed), prOpen, working), Then: say("the worker is working")},
 	{ID: "N41", WaitsOn: "GitHub", When: all(ladderSays(Passed), mergeAsked, prOpen, notBehind),
 		Then: say("a merge was asked for H")},
 	{ID: "N42", WaitsOn: "GitHub",
-		When: all(ladderSays(Passed), prOpen, prHeadIsH, answered, checksGreen, mergeClean, notBehind, notWorking),
+		When: all(ladderSays(Passed), prOpen, prHeadIsH, tipSame, answered, checksGreen, mergeClean, notBehind, notWorking),
 		Then: func(in In) Decision {
 			h := headH(in)
 			return say("passed, green and mergeable at H", once(in.acts(), key(AskAccept, h)), once(in.acts(), key(AskMerge, h)))(in)
 		}},
 	{ID: "N43", WaitsOn: "the coordinator", Then: func(in In) Decision {
-		return say("no rule matched", once(in.acts(), key(AskWake, "no_rule_matched")))(in)
+		// Once per stall: H and the facts that left it unmatched.
+		p := in.Facts.PR
+		return say("no rule matched", once(in.acts(), key(AskWake, "no_rule_matched", headH(in), p.State, p.Checks, p.Mergeable, in.Facts.TipRel)))(in)
 	}},
 }
 
