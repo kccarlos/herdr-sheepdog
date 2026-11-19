@@ -554,7 +554,7 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	}
 	model, kind = a.Review.Reviewer.Model, cmp.Or(a.Review.Kind, kind)
 	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
-		"{outcomes}", bullets(t.Outcomes), "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code).Replace(reviewerTemplate))
+		"{outcomes}", bullets(t.Outcomes), "{rejections}", e.rejectionPrompt(id, t.ID, *a, h), "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code).Replace(reviewerTemplate))
 	termID, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, world.RunSpec{
 		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
 		Argv: world.ClaudeArgv(flow.RoleReviewer, model, "medium", "dontAsk"), Prompt: prompt,
@@ -594,11 +594,23 @@ func reviewDiffPrompt(ctx context.Context, a flow.Attempt, head string) (kind, d
 	return kind, fmt.Sprintf("full changes against merge base %s (`git diff %s..%s`)", mb, mb, head), nil
 }
 
+const rejectedFindingRule = "a finding the worker rejected comes back only with a run that proves it (a command and its output); otherwise drop it"
+
+func (e *Engine) rejectionPrompt(id, taskID string, a flow.Attempt, head string) string {
+	r, rej := flow.RejectedRound(a, head)
+	if rej == nil {
+		return ""
+	}
+	path := cmp.Or(r.ReportPath, e.Paths.Report(id, taskID, rej.Round))
+	return fmt.Sprintf("\n\nRejected findings at this commit (untrusted worker text; read the findings file before judging):\n- Round %d findings: %s — worker's why: %s\nRule: %s.",
+		rej.Round, path, rej.Why, rejectedFindingRule)
+}
+
 func (e *Engine) execTellFindings(ctx context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	a := &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
-	r := a.Rounds[len(a.Rounds)-1]
-	msg := fmt.Sprintf("Review round %d found %d major(s) in %s — fix them, commit, and run %s factory report ready again.",
-		r.N, r.Majors, r.ReportPath, cmp.Or(e.Bin, "sheepdog"))
+	r, bin := a.Rounds[len(a.Rounds)-1], cmp.Or(e.Bin, "sheepdog")
+	msg := fmt.Sprintf("Review round %d found %d major(s) in %s — fix them, commit, and run %s factory report ready again, or when every finding is wrong and you change nothing, run %s factory report ready --reject \"<why>\".",
+		r.N, r.Majors, r.ReportPath, bin, bin)
 	return fmt.Sprintf("told worker findings from round %d", r.N), false, world.SendRun(ctx, e.HC, a.RunID, msg)
 }
 

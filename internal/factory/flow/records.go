@@ -82,6 +82,7 @@ type Attempt struct {
 	RunTokenHash string     `json:"run_token_sha256,omitempty"` // SHA-256 hex of the run's SHEEPDOG_RUN_TOKEN
 	Review       *ReviewRun `json:"review,omitempty"`
 	Ready        []Ready    `json:"ready"`
+	Rejects      []Reject   `json:"rejects,omitempty"`
 	Rounds       []Round    `json:"rounds"`
 	Accepts      []Accept   `json:"accepts"`
 	Acts         []Act      `json:"acts"`
@@ -104,6 +105,14 @@ type ReviewRun struct {
 // Ready is the worker's "done at this commit".
 type Ready struct {
 	Head string `json:"head"`
+}
+
+// Reject is the worker's rejection of every finding of a reviewer's round at
+// Head with no new commit (design.md 3: "A reject is not a round").
+type Reject struct {
+	Head  string `json:"head"`
+	Round int    `json:"round"`
+	Why   string `json:"why"`
 }
 
 // Reviewer names who reviewed a round.

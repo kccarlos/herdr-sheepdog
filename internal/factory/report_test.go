@@ -439,3 +439,228 @@ func TestVerdictAcceptance(t *testing.T) {
 		t.Fatalf("reviewer terminal after verdict = (%s, %v), want gone", rs, err)
 	}
 }
+
+// TestReportReadyRejectAcceptance checks design.md 7.2 for `ready --reject`
+// (KB-REV-62, KB-REV-5): valid reject records flow.Reject without creating a
+// round; empty/whitespace why -> why_missing; nothing_to_reject before any
+// round, after a pass, after a non-reviewer round (send_back, retro), after an
+// already-rejected round, and when the head moved (commit ahead or H moved).
+func TestReportReadyRejectAcceptance(t *testing.T) {
+	ctx := context.Background()
+	paths := testPaths(t)
+	repo, baseSHA := initGitRepoWithRemote(t)
+	var logBuf bytes.Buffer
+	eng := New(paths, nil)
+	eng.Log = logging.NewJSONLLogger(&logBuf)
+
+	const projID = "proj-reject"
+	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: add constant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fPath := filepath.Join(wt.Path, "const.go")
+	if err := os.WriteFile(fPath, []byte("package demo\nconst Version = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt.Path, "add", "const.go")
+	gitIn(t, wt.Path, "commit", "-m", "feat: add Version")
+	c1 := gitIn(t, wt.Path, "rev-parse", "HEAD")
+
+	st := flow.State{
+		Seq:      1,
+		Project:  flow.Project{ID: projID, Folder: repo, Started: true, RunTokenHash: tokenHash("tok-coord")},
+		Settings: flow.DefaultSettings(),
+		Tasks: []flow.Task{{
+			ID: "T1", Title: "feat: add constant",
+			Attempts: []flow.Attempt{{
+				BaseCommit: baseSHA, Branch: wt.Branch, Worktree: wt.Path,
+				RunTokenHash: tokenHash("tok-worker"),
+				Ready:        []flow.Ready{{Head: c1}},
+			}},
+		}},
+	}
+	save := func() {
+		t.Helper()
+		if err := SaveState(paths.State(projID), st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save()
+
+	// Role enforcement: coordinator refused kind_not_allowed.
+	if err := eng.Report("tok-coord", "ready", json.RawMessage(`{"head":"`+c1+`","reject":"nope"}`)); refusalCode(err) != "kind_not_allowed" {
+		t.Fatalf("coordinator reject = %v, want kind_not_allowed", err)
+	}
+
+	// No round covering H yet -> nothing_to_reject.
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c1+`","reject":"no round"}`)); refusalCode(err) != "nothing_to_reject" {
+		t.Fatalf("before round 1 reject = %v, want nothing_to_reject", err)
+	}
+
+	// After a pass round -> nothing_to_reject.
+	st.Tasks[0].Attempts[0].Rounds = []flow.Round{{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass}}
+	save()
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c1+`","reject":"passed"}`)); refusalCode(err) != "nothing_to_reject" {
+		t.Fatalf("after pass reject = %v, want nothing_to_reject", err)
+	}
+
+	// After non-reviewer changes rounds (send_back, retro) -> nothing_to_reject.
+	for _, kind := range []string{"send_back", "retro", ""} {
+		st.Tasks[0].Attempts[0].Rounds = []flow.Round{{N: 1, Kind: kind, Head: c1, Verdict: flow.VerdictChanges, Majors: 1}}
+		save()
+		if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c1+`","reject":"not a reviewer round"}`)); refusalCode(err) != "nothing_to_reject" {
+			t.Fatalf("after kind=%q reject = %v, want nothing_to_reject", kind, err)
+		}
+	}
+
+	// Reviewer changes round at c1, but empty or whitespace why -> why_missing.
+	st.Tasks[0].Attempts[0].Rounds = []flow.Round{{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictChanges, Majors: 1, ReportPath: paths.Report(projID, "T1", 1)}}
+	save()
+	for _, why := range []string{`""`, `"   \t\n "`} {
+		logBuf.Reset()
+		err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c1+`","reject":`+why+`}`))
+		if refusalCode(err) != "why_missing" || !strings.Contains(logBuf.String(), `"code":"why_missing"`) {
+			t.Fatalf("reject %s = %v, log = %s; want why_missing", why, err, logBuf.String())
+		}
+	}
+
+	// Dirty worktree -> dirty_tree.
+	dirtyFile := filepath.Join(wt.Path, "dirty.tmp")
+	if err := os.WriteFile(dirtyFile, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c1+`","reject":"reason"}`)); refusalCode(err) != "dirty_tree" {
+		t.Fatalf("dirty tree reject = %v, want dirty_tree", err)
+	}
+	_ = os.Remove(dirtyFile)
+
+	// Valid reject at c1: writes flow.Reject{Head: c1, Round: 1, Why: ...}, adds no round.
+	const reason = "Brief states no unit test is needed for this one-line constant."
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c1+`","reject":"  `+reason+`  "}`)); err != nil {
+		t.Fatalf("valid reject: %v", err)
+	}
+	got, err := LoadState(paths.State(projID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	att := got.Tasks[0].Attempts[0]
+	if got.Seq != 2 || len(att.Rounds) != 1 || len(att.Rejects) != 1 ||
+		att.Rejects[0] != (flow.Reject{Head: c1, Round: 1, Why: reason}) {
+		t.Fatalf("after valid reject: seq=%d rounds=%+v rejects=%+v", got.Seq, att.Rounds, att.Rejects)
+	}
+
+	// Rejecting the same round a second time -> nothing_to_reject.
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c1+`","reject":"again"}`)); refusalCode(err) != "nothing_to_reject" {
+		t.Fatalf("duplicate reject = %v, want nothing_to_reject", err)
+	}
+
+	// Suppose round 2 (delta) asks for changes at c1, then worker commits c2 (head moved ahead of H) -> nothing_to_reject.
+	got.Tasks[0].Attempts[0].Rounds = append(got.Tasks[0].Attempts[0].Rounds,
+		flow.Round{N: 2, Kind: flow.RoundDelta, Head: c1, Verdict: flow.VerdictChanges, Majors: 1})
+	if err := SaveState(paths.State(projID), got); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fPath, []byte("package demo\nconst Version = 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt.Path, "commit", "-am", "feat: bump Version")
+	c2 := gitIn(t, wt.Path, "rev-parse", "HEAD")
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c2+`","reject":"moved head"}`)); refusalCode(err) != "nothing_to_reject" {
+		t.Fatalf("reject after new commit = %v, want nothing_to_reject", err)
+	}
+
+	// Normal ready at c2 moves H to c2; with no round covering c2 yet, reject is still nothing_to_reject.
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c2+`"}`)); err != nil {
+		t.Fatalf("normal ready at c2: %v", err)
+	}
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c2+`","reject":"H moved"}`)); refusalCode(err) != "nothing_to_reject" {
+		t.Fatalf("reject at unreviewed H=c2 = %v, want nothing_to_reject", err)
+	}
+}
+
+// TestReportReadyRejectWhySanitizeAndLength checks that ready --reject cleans
+// control characters (including NUL, ESC/ANSI, U+2028/U+2029) and collapses
+// spaces, refuses reasons over 500 runes with invalid_report, and accepts
+// exactly 500 runes.
+func TestReportReadyRejectWhySanitizeAndLength(t *testing.T) {
+	ctx := context.Background()
+	paths := testPaths(t)
+	repo, baseSHA := initGitRepoWithRemote(t)
+	eng := New(paths, nil)
+
+	const projID = "proj-reject-why"
+	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: clean why")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "f.go"), []byte("package demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt.Path, "add", "f.go")
+	gitIn(t, wt.Path, "commit", "-m", "feat: f")
+	c1 := gitIn(t, wt.Path, "rev-parse", "HEAD")
+
+	reset := func() {
+		t.Helper()
+		st := flow.State{
+			Seq:      1,
+			Project:  flow.Project{ID: projID, Folder: repo, Started: true},
+			Settings: flow.DefaultSettings(),
+			Tasks: []flow.Task{{
+				ID: "T1", Title: "feat: clean why",
+				Attempts: []flow.Attempt{{
+					BaseCommit: baseSHA, Branch: wt.Branch, Worktree: wt.Path,
+					RunTokenHash: tokenHash("tok-worker"),
+					Ready:        []flow.Ready{{Head: c1}},
+					Rounds:       []flow.Round{{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictChanges, Majors: 1}},
+				}},
+			}},
+		}
+		if err := SaveState(paths.State(projID), st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sendReject := func(why string) error {
+		t.Helper()
+		raw, err := json.Marshal(map[string]string{"head": c1, "reject": why})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return eng.Report("tok-worker", "ready", raw)
+	}
+
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"multiline", "  line 1\r\n\t line 2\nline 3  ", "line 1 line 2 line 3"},
+		{"nul", "before\x00after", "before after"},
+		{"ansi", "bad \x1b[31mred\x1b[0m\x07 text", "bad [31mred [0m text"},
+		{"u2028", "sep\u2028line\u2029para", "sep line para"},
+		{"exact500", strings.Repeat("é", 500), strings.Repeat("é", 500)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reset()
+			if err := sendReject(tc.raw); err != nil {
+				t.Fatalf("reject %s: %v", tc.name, err)
+			}
+			got, err := LoadState(paths.State(projID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Tasks[0].Attempts[0].Rejects) != 1 || got.Tasks[0].Attempts[0].Rejects[0].Why != tc.want {
+				t.Fatalf("stored why = %q, want %q", got.Tasks[0].Attempts[0].Rejects[0].Why, tc.want)
+			}
+		})
+	}
+
+	t.Run("over500", func(t *testing.T) {
+		reset()
+		err := sendReject(strings.Repeat("a", 501))
+		if refusalCode(err) != "invalid_report" || !strings.Contains(err.Error(), "the reason is longer than 500 characters; put details in a file and name it") {
+			t.Fatalf("over-long reject = %v, want invalid_report with 500-char guidance", err)
+		}
+	})
+}

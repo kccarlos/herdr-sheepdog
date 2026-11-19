@@ -4,7 +4,7 @@ Brief:
 {brief}
 
 Outcomes:
-{outcomes}
+{outcomes}{rejections}
 
 Read only: never edit files, commit, push, or switch branches. Leave the worktree exactly as you found it (no build outputs or other files): a verdict from a changed worktree is thrown away.
 Review round {round} ({kind}) at commit {head}: {diff}. Run each check as one plain command from your current folder (no cd, no &&, no pipes).

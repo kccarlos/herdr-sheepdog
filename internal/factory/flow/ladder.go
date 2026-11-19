@@ -13,12 +13,13 @@ const (
 // roundBase is the number of the first round (design.md 3: round{n}).
 const roundBase = 1
 
-// LadderRows is slice 2's review ladder: L7, L8, L9 and L13 of design.md 4.6.
+// LadderRows is slice 2's review ladder: L7, L8, L9, L10 and L13 of design.md 4.6.
 // A row's Decision.Why is its answer; WaitsOn is who that answer waits on.
 var LadderRows = []Row[In]{
 	{ID: "L7", WaitsOn: "the reviewer", When: noRoundCovers, Then: answer(Review)},
 	{ID: "L8", WaitsOn: "the reviewer", When: all(coveringIs(VerdictPass), morePassesNeeded), Then: answer(Review)},
 	{ID: "L9", WaitsOn: "the engine", When: coveringIs(VerdictPass), Then: answer(Passed)},
+	{ID: "L10", WaitsOn: "the reviewer", When: coveringRoundRejected, Then: answer(Review)},
 	{ID: "L13", WaitsOn: "the worker", When: coveringIs(VerdictChanges), Then: answer(Fix)},
 	{ID: "L-", WaitsOn: "the coordinator", Then: answer(NoLadderRow)},
 }
@@ -40,6 +41,11 @@ func coveringIs(verdict string) Clause {
 		r := newestCovering(*in.attempt(), headH(in))
 		return r != nil && r.Verdict == verdict
 	}
+}
+
+func coveringRoundRejected(in In) bool {
+	_, rej := RejectedRound(*in.attempt(), headH(in))
+	return rej != nil
 }
 
 func morePassesNeeded(in In) bool {

@@ -344,8 +344,44 @@ func TestFactoryReportReadyCLI(t *testing.T) {
 		t.Fatalf("report ready code=%d stderr=%s", code, errBuf.String())
 	}
 	args, _ := lastBody["args"].(map[string]any)
-	if lastPath != "/api/factory/report" || lastBody["token"] != "tok-worker-1" || lastBody["verb"] != "ready" || args["head"] != wantHead {
+	if lastPath != "/api/factory/report" || lastBody["token"] != "tok-worker-1" || lastBody["verb"] != "ready" || args["head"] != wantHead || args["reject"] != nil {
 		t.Fatalf("report ready sent %s %+v, want head %s", lastPath, lastBody, wantHead)
+	}
+
+	// `report ready --reject "<why>"` sends head and reject reason.
+	out.Reset()
+	errBuf.Reset()
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--reject", "every finding is wrong"}, &out, &errBuf); code != 0 {
+		t.Fatalf("report ready --reject code=%d stderr=%s", code, errBuf.String())
+	}
+	args, _ = lastBody["args"].(map[string]any)
+	if lastBody["verb"] != "ready" || args["head"] != wantHead || args["reject"] != "every finding is wrong" {
+		t.Fatalf("report ready --reject sent %+v", lastBody)
+	}
+
+	// `--reject ""` sends an empty reject field so the daemon's acceptance table
+	// refuses with why_missing; bare `--reject` is rejected by flag parsing (exit 2).
+	out.Reset()
+	errBuf.Reset()
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--reject", ""}, &out, &errBuf); code != 0 {
+		t.Fatalf("report ready --reject \"\" code=%d stderr=%s", code, errBuf.String())
+	}
+	args, _ = lastBody["args"].(map[string]any)
+	v, hasReject := args["reject"]
+	if !hasReject || v != "" || args["head"] != wantHead {
+		t.Fatalf("report ready --reject \"\" sent %+v, want empty reject key", lastBody)
+	}
+	out.Reset()
+	errBuf.Reset()
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--reject"}, &out, &errBuf); code != 2 {
+		t.Fatalf("report ready bare --reject code=%d, want 2", code)
+	}
+
+	// Extra positional argument is refused with exit 2.
+	out.Reset()
+	errBuf.Reset()
+	if code := run(context.Background(), []string{"factory", "report", "ready", "extra"}, &out, &errBuf); code != 2 {
+		t.Fatalf("report ready extra code=%d, want 2", code)
 	}
 }
 

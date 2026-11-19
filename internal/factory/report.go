@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
@@ -68,7 +70,8 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 
 func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int, args json.RawMessage) error {
 	var req struct {
-		Head string `json:"head"`
+		Head   string  `json:"head"`
+		Reject *string `json:"reject"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(args))
 	dec.DisallowUnknownFields()
@@ -77,9 +80,10 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 	}
 	t := &s.Tasks[ti]
 	a := &t.Attempts[len(t.Attempts)-1]
+	h := flow.H(*a)
 	ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
 	defer cancel()
-	tip, rel, clean, err := world.InspectWorktree(ctx, a.Worktree, flow.H(*a))
+	tip, rel, clean, err := world.InspectWorktree(ctx, a.Worktree, h)
 	if err != nil {
 		return err
 	}
@@ -88,6 +92,21 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 		return e.refuse(id, "invalid_report", "Reported head does not match the task worktree tip; run report ready from the worktree.")
 	case !clean:
 		return e.refuse(id, "dirty_tree", "The worktree has uncommitted changes; commit or discard them before reporting ready.")
+	case req.Reject != nil:
+		why := cleanRejectWhy(*req.Reject)
+		if why == "" {
+			return e.refuse(id, "why_missing", "A reject report must carry a non-empty reason (--reject \"<why>\").")
+		}
+		if utf8.RuneCountInString(why) > maxRejectWhyRunes {
+			return e.refuse(id, "invalid_report", "the reason is longer than 500 characters; put details in a file and name it")
+		}
+		r := flow.RejectableRound(*a, h)
+		if rel != flow.RelSame || r == nil {
+			return e.refuse(id, "nothing_to_reject", "Nothing to reject: the newest round covering the current head must be an unrejected reviewer changes verdict with no new commit (after a commit, run report ready without --reject).")
+		}
+		a.Rejects = append(a.Rejects, flow.Reject{Head: h, Round: r.N, Why: why})
+		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "ready", "head": h, "round": r.N, "reject": why},
+			Rule: "ready --reject", Decision: "rejected", Why: fmt.Sprintf("round %d at %s: %s", r.N, h, why)})
 	case rel == flow.RelBehind || rel == flow.RelDiverged:
 		return e.refuse(id, "pull_first", "The attempt head moved past the worktree tip; pull first.")
 	case rel == flow.RelSame:
@@ -95,6 +114,17 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 	}
 	a.Ready = append(a.Ready, flow.Ready{Head: tip})
 	return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "ready", "head": tip}, Rule: "ready", Decision: "ready", Why: tip})
+}
+
+const maxRejectWhyRunes = 500
+
+func cleanRejectWhy(raw string) string {
+	return strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return ' '
+		}
+		return r
+	}, raw)), " ")
 }
 
 // acceptVerdictLocked checks a reviewer's terminal <report> tag against the
