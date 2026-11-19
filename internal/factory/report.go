@@ -110,7 +110,8 @@ func (e *Engine) acceptVerdictLocked(ctx context.Context, id string, s *flow.Sta
 	}
 	rep, why, majors := rd.Report, "", 0
 	for l := range strings.Lines(rd.Body) {
-		if strings.HasPrefix(strings.TrimSpace(l), "major:") {
+		// A list or bold mark may lead: "- major:", "**major:**", "1. major:".
+		if strings.HasPrefix(strings.TrimLeft(l, " \t-*0123456789."), "major:") {
 			majors++
 		}
 	}

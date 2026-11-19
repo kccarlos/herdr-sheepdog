@@ -1125,6 +1125,40 @@ func testVoidReview(t *testing.T, dirty bool) {
 	if n := strings.Count(logBuf.String(), "factory.review_void"); dirty && n != 1 {
 		t.Fatalf("review_void logged %d times, want 1:\n%s", n, logBuf.String())
 	}
+	if !dirty {
+		return
+	}
+	// The head did not move: no new verdict, one void event, the round's
+	// start act is failed so the owner starting again retries it.
+	for range 3 {
+		eng.passProject(ctx, id, false)
+	}
+	st, _ = LoadState(paths.State(id))
+	a := st.Tasks[0].Attempts[0]
+	startKey := "start_reviewer@1@" + c1
+	failed := 0
+	for _, x := range a.Acts {
+		if x.Key == startKey && x.Result == "failed" {
+			failed++
+		}
+	}
+	if len(a.Rounds) != 0 || a.Review != nil || flow.Count(a.Acts, startKey) != 1 || failed != 1 {
+		t.Fatalf("after void passes: rounds=%+v review=%+v acts=%+v", a.Rounds, a.Review, a.Acts)
+	}
+	if n := strings.Count(logBuf.String(), "factory.review_void"); n != 1 || !strings.Contains(logBuf.String(), "the reviewer left the worktree dirty") {
+		t.Fatalf("review_void logged %d times, want 1 naming why:\n%s", n, logBuf.String())
+	}
+	if err := os.Remove(filepath.Join(wt, "x.out")); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Start(repo, "Goal"); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	if r := st.Tasks[0].Attempts[0].Review; r == nil || r.Round != 1 || r.Head != c1 || r.RunID == "" {
+		t.Fatalf("no new reviewer after restart: review=%+v acts=%+v", r, st.Tasks[0].Attempts[0].Acts)
+	}
 }
 
 // TestReviewerModelDiffersFromWorker: the reviewer never runs the worker's model.

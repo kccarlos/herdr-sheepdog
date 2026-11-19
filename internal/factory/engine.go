@@ -410,8 +410,19 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		return true
 	}
 	if !clean || tip != a.Review.Head {
-		e.logEvent("factory.review_void", map[string]string{"project": id, "task": t.ID, "round": fmt.Sprint(a.Review.Round),
-			"why": "the worktree is not clean at the round's head after the review"})
+		why := "the worktree moved"
+		if !clean {
+			why = "the reviewer left the worktree dirty"
+		}
+		e.logEvent("factory.review_void", map[string]string{"project": id, "task": t.ID, "round": fmt.Sprint(a.Review.Round), "why": why})
+		// H did not move, so the flow would ask the spent start act again:
+		// fail it, and the owner starting again retries the round.
+		k := fmt.Sprintf("%s@%d@%s", flow.AskStartReview, a.Review.Round, a.Review.Head)
+		for i := range a.Acts {
+			if a.Acts[i].Key == k {
+				a.Acts[i].Result = "failed"
+			}
+		}
 		return voidRound()
 	}
 	err = e.acceptVerdictLocked(ctx, id, s, ti, rd)

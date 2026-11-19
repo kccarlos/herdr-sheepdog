@@ -407,10 +407,10 @@ func TestVerdictAcceptance(t *testing.T) {
 	// Valid changes verdict records round{n:1, kind:"full", ...}, writes T1-r1.md, and stops t-rev.
 	good := world.ReportRead{
 		Status: world.ReportFound,
-		Raw:    `{"code":"nonce123","round":1,"head":"c1","verdict":"changes","majors":2}`,
-		Body:   "major: nil deref in Parse\nmajor: missing error check\nDetailed review notes line 42.",
+		Raw:    `{"code":"nonce123","round":1,"head":"c1","verdict":"changes","majors":4}`,
+		Body:   "- major: nil deref in Parse\n**major:** missing error check\n1. major: no test\n  * major: race\nDetailed review notes line 42.",
 		Report: world.Report{
-			Code: "nonce123", Round: 1, Head: "c1", Verdict: "changes", Majors: 2,
+			Code: "nonce123", Round: 1, Head: "c1", Verdict: "changes", Majors: 4,
 		},
 	}
 	if err := eng.acceptVerdictLocked(ctx, projID, &st, 0, good); err != nil {
@@ -422,7 +422,7 @@ func TestVerdictAcceptance(t *testing.T) {
 	}
 	wantPath := paths.Report(projID, "T1", 1)
 	r1 := att.Rounds[0]
-	if r1.N != 1 || r1.Kind != "full" || r1.Head != "c1" || r1.Verdict != "changes" || r1.Majors != 2 ||
+	if r1.N != 1 || r1.Kind != "full" || r1.Head != "c1" || r1.Verdict != "changes" || r1.Majors != 4 ||
 		r1.Reviewer != (flow.Reviewer{CLI: "claude", Model: "opus", Effort: "medium"}) || r1.ReportPath != wantPath {
 		t.Fatalf("round 1 record = %+v", r1)
 	}
