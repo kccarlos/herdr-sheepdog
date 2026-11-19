@@ -350,3 +350,35 @@ func TestClaudeFolderTrustAndTestGuard(t *testing.T) {
 		t.Fatal("expected test-path guard error for ClaudeConfig outside os.TempDir()")
 	}
 }
+
+// TestClaudeTrustSkipsWriteWhenTrusted: an already trusted folder leaves the
+// config file untouched (live sessions rewrite it), and a symlinked config
+// stays a symlink.
+func TestClaudeTrustSkipsWriteWhenTrusted(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real.json")
+	link := filepath.Join(dir, ".claude.json")
+	cwd := filepath.Join(dir, "repo")
+	body := `{"hasCompletedOnboarding":true,"projects":{"` + cwd + `":{"hasTrustDialogAccepted":true}},"zKeep":1}` + "\n"
+	if err := os.WriteFile(real, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := preAcceptClaudeTrust(link, cwd); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(real); string(got) != body {
+		t.Fatalf("trusted config was rewritten:\n%s", got)
+	}
+	if err := preAcceptClaudeTrust(link, filepath.Join(dir, "other")); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("symlinked config was replaced: %v %v", fi, err)
+	}
+	if got, _ := os.ReadFile(real); !strings.Contains(string(got), "other") {
+		t.Fatalf("new folder not trusted through the symlink:\n%s", got)
+	}
+}

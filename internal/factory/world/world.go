@@ -115,6 +115,9 @@ func preAcceptClaudeTrust(configPath, cwd string) error {
 	if err != nil {
 		return nil
 	}
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real // write through a symlink, never replace it
+	}
 	root := map[string]any{}
 	if data, err := os.ReadFile(path); err == nil {
 		dec := json.NewDecoder(bytes.NewReader(data))
@@ -129,6 +132,9 @@ func preAcceptClaudeTrust(configPath, cwd string) error {
 	entry, ok2 := childMap(projects, absCwd)
 	if !ok1 || !ok2 {
 		return nil
+	}
+	if entry["hasTrustDialogAccepted"] == true && root["hasCompletedOnboarding"] == true {
+		return nil // already trusted: do not race live sessions that rewrite this file
 	}
 	entry["hasTrustDialogAccepted"] = true
 	projects[absCwd] = entry
