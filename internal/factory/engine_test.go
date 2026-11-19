@@ -1258,36 +1258,213 @@ func testVoidReview(t *testing.T, dirty bool) {
 	}
 }
 
-// TestReviewerModelDiffersFromWorker: the reviewer never runs the worker's
-// model when another exists, alternates across passing rounds when another
-// resolves, and falls back to the same model when none other resolves.
+// TestEngineRebaseAfterReviewedCommitFallsBackToFull checks design.md 4.6 and
+// 9.4: when the last reviewed commit is not an ancestor of H (rebase onto an
+// advanced base), both DeltaRanges and the engine fall back to a full round
+// from the merge base computed now, with none of the base's new commits shown
+// as the worker's.
+func TestEngineRebaseAfterReviewedCommitFallsBackToFull(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	var runs []hc.RunParams
+	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { runs = append(runs, p) }
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, b0 := initGitRepoWithRemote(t)
+	bare := gitIn(t, repo, "config", "--get", "remote.origin.url")
+	githubOrigin(t, repo)
+	gh := installFakeGH(t)
+
+	eng := New(paths, client)
+	if err := eng.Start(repo, "Goal"); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	eng.passProject(ctx, id, false)
+	st, _ := LoadState(paths.State(id))
+	st.Tasks = []flow.Task{{ID: "T1", Title: "feat: task"}}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N11
+	eng.passProject(ctx, id, false) // N23
+	st, _ = LoadState(paths.State(id))
+	wt := st.Tasks[0].Attempts[0].Worktree
+
+	// Commit c1 and finish round 1 with changes.
+	if err := os.WriteFile(filepath.Join(wt, "task.go"), []byte("package demo\nvar V = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "add", "task.go")
+	gitIn(t, wt, "commit", "-m", "feat: c1")
+	c1 := gitIn(t, wt, "rev-parse", "HEAD")
+	writePRJSON(t, gh, "pr.json", c1, "[]")
+	st.Tasks[0].Attempts[0].Ready = []flow.Ready{{Head: c1}}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N26
+	eng.passProject(ctx, id, false) // N29 round 1
+	st, _ = LoadState(paths.State(id))
+	rev1 := st.Tasks[0].Attempts[0].Review
+	srv.SetScreen(rev1.RunID, "❯ prompt\n\n⏺ major: V should be 2\n<report>{\"code\":\""+rev1.Code+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":1}</report>\n")
+	srv.SetStatus(rev1.RunID, &hc.Status{App: "claude-code", State: "done"})
+	eng.passProject(ctx, id, false) // records round 1 changes at c1
+	eng.passProject(ctx, id, false) // N22 tells worker findings
+
+	// Remote base advances to b1 with base_only.go; worker rebases onto b1 and commits fix c2.
+	other := filepath.Join(t.TempDir(), "other")
+	if out, err := exec.Command("git", "clone", bare, other).CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(other, "base_only.go"), []byte("package demo\nvar Base = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, other, "add", "base_only.go")
+	gitIn(t, other, "commit", "-m", "feat: base b1")
+	gitIn(t, other, "push", "origin", "main")
+	b1 := gitIn(t, other, "rev-parse", "HEAD")
+
+	gitIn(t, wt, "fetch", "origin")
+	gitIn(t, wt, "rebase", "origin/main")
+	if err := os.WriteFile(filepath.Join(wt, "task.go"), []byte("package demo\nvar V = 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "commit", "-am", "fix: set V = 2")
+	c2 := gitIn(t, wt, "rev-parse", "HEAD")
+
+	// DeltaRanges on diverged (c1, c2) agrees: full range b1..c2 with no base_only.go.
+	dr, err := world.DeltaRanges(ctx, wt, c1, c2)
+	if err != nil || !slices.Equal(dr, []string{b1 + ".." + c2}) {
+		t.Errorf("DeltaRanges(c1, c2) after rebase = (%v, %v), want [%s..%s]", dr, err, b1, c2)
+	} else if diff := gitIn(t, wt, "diff", dr[0]); strings.Contains(diff, "base_only.go") || !strings.Contains(diff, "+var V = 2") {
+		t.Errorf("DeltaRanges diff after rebase = %s", diff)
+	}
+
+	// Engine starts round 2 at rebased H = c2: must be full against b1..c2, never delta or b0..c2.
+	st, _ = LoadState(paths.State(id))
+	st.Tasks[0].Attempts[0].Ready = append(st.Tasks[0].Attempts[0].Ready, flow.Ready{Head: c2})
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	writePRJSON(t, gh, "view.json", c2, "[]")
+	eng.passProject(ctx, id, false) // N29 round 2
+	st, _ = LoadState(paths.State(id))
+	rev2 := st.Tasks[0].Attempts[0].Review
+	if rev2 == nil || rev2.Round != 2 || rev2.Kind != flow.RoundFull {
+		t.Fatalf("round 2 after rebase = %+v, want round 2 full", rev2)
+	}
+	p2 := runs[len(runs)-1].Argv[len(runs[len(runs)-1].Argv)-1]
+	if !strings.Contains(p2, "Review round 2 (full)") || !strings.Contains(p2, "`git diff "+b1+".."+c2+"`") ||
+		strings.Contains(p2, b0+".."+c2) || strings.Contains(p2, c1+".."+c2) {
+		t.Fatalf("round 2 prompt after rebase:\n%s", p2)
+	}
+	if diff := gitIn(t, wt, "diff", b1+".."+c2); strings.Contains(diff, "base_only.go") || !strings.Contains(diff, "+var V = 2") {
+		t.Fatalf("round 2 range diff:\n%s", diff)
+	}
+}
+
+// TestEngineReuseReviewerSkipsGitWork checks that adopting an already-running
+// reviewer for the round performs no git fetch or range calculation under the lock.
+func TestEngineReuseReviewerSkipsGitWork(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	var runs []hc.RunParams
+	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { runs = append(runs, p) }
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, _ := initGitRepoWithRemote(t)
+	bare := gitIn(t, repo, "config", "--get", "remote.origin.url")
+	githubOrigin(t, repo)
+	gh := installFakeGH(t)
+
+	var logBuf bytes.Buffer
+	eng := New(paths, client)
+	eng.Log = logging.NewJSONLLogger(&logBuf)
+	if err := eng.Start(repo, "Goal"); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	eng.passProject(ctx, id, false)
+	st, _ := LoadState(paths.State(id))
+	st.Tasks = []flow.Task{{ID: "T1", Title: "feat: x"}}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N11
+	eng.passProject(ctx, id, false) // N23
+	st, _ = LoadState(paths.State(id))
+	wt := st.Tasks[0].Attempts[0].Worktree
+	if err := os.WriteFile(filepath.Join(wt, "x.go"), []byte("package demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "add", "x.go")
+	gitIn(t, wt, "commit", "-m", "feat: c1")
+	c1 := gitIn(t, wt, "rev-parse", "HEAD")
+	writePRJSON(t, gh, "pr.json", c1, "[]")
+	st.Tasks[0].Attempts[0].Ready = []flow.Ready{{Head: c1}}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N26
+	eng.passProject(ctx, id, false) // N29 starts round 1 reviewer
+	st, _ = LoadState(paths.State(id))
+	rev1ID, rev1Code := st.Tasks[0].Attempts[0].Review.RunID, st.Tasks[0].Attempts[0].Review.Code
+	runsBefore := len(runs)
+
+	// Simulate crash before RunID and start_reviewer act were committed while
+	// the remote is unreachable: reusing the live reviewer must do no git fetch.
+	st.Tasks[0].Attempts[0].Review.RunID = ""
+	st.Tasks[0].Attempts[0].Acts = slices.DeleteFunc(st.Tasks[0].Attempts[0].Acts, func(x flow.Act) bool {
+		return strings.HasPrefix(x.Key, "start_reviewer@")
+	})
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(bare, bare+".offline"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Rename(bare+".offline", bare) })
+
+	logBuf.Reset()
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	got := st.Tasks[0].Attempts[0].Review
+	if got == nil || got.RunID != rev1ID || got.Code != rev1Code || got.Kind != flow.RoundFull ||
+		len(runs) != runsBefore || !flow.Done(st.Tasks[0].Attempts[0].Acts, "start_reviewer@1@"+c1) {
+		t.Fatalf("reuse reviewer with offline remote: review=%+v runs=%d/%d acts=%+v log=%s",
+			got, len(runs), runsBefore, st.Tasks[0].Attempts[0].Acts, logBuf.String())
+	}
+}
+
+// TestReviewerModelDiffersFromWorker: nextReviewerModel never picks the
+// worker's model, alternates across passing rounds when another resolves, and
+// reuses a non-worker model in a fresh session when needed.
 func TestReviewerModelDiffersFromWorker(t *testing.T) {
-	for _, w := range []string{"sonnet", "opus", "claude-opus-4-5", "claude-sonnet-4-5", "haiku"} {
-		if r := reviewerModel(w); r == "" || strings.Contains(w, r) {
-			t.Errorf("reviewerModel(%q) = %q, want a different model", w, r)
+	for _, w := range []string{"sonnet", "opus", "haiku"} {
+		if r := nextReviewerModel(w, nil, claudeReviewers); r == "" || r == w {
+			t.Errorf("nextReviewerModel(%q) = %q, want a different model", w, r)
 		}
 	}
-	if reviewerModel(workerModel) == workerModel {
-		t.Errorf("reviewer runs the worker's model %q", workerModel)
-	}
-	// Worker haiku -> round 1 opus -> round 2 sonnet.
+	// Worker haiku -> round 1 opus -> round 2 sonnet -> round 3 opus.
 	if got := nextReviewerModel("haiku", nil, claudeReviewers); got != "opus" {
 		t.Errorf("round 1 for haiku worker = %q, want opus", got)
 	}
 	if got := nextReviewerModel("haiku", []string{"opus"}, claudeReviewers); got != "sonnet" {
 		t.Errorf("round 2 for haiku worker = %q, want sonnet", got)
 	}
-	// Worker sonnet -> round 1 opus -> round 2 opus again in a fresh session
-	// (no weaker model as a second pass; never the worker's sonnet).
+	if got := nextReviewerModel("haiku", []string{"opus", "sonnet"}, claudeReviewers); got != "opus" {
+		t.Errorf("round 3 for haiku worker = %q, want opus", got)
+	}
+	// Worker sonnet -> round 1 opus -> round 2 opus again in a fresh session.
 	if got := nextReviewerModel("sonnet", []string{"opus"}, claudeReviewers); got != "opus" {
 		t.Errorf("round 2 for sonnet worker = %q, want opus (fresh session)", got)
 	}
-	// Only one non-worker model resolves: reuse it rather than using worker's model.
-	if got := nextReviewerModel("sonnet", []string{"opus"}, []string{"opus", "sonnet"}); got != "opus" {
-		t.Errorf("fallback with worker sonnet in candidates = %q, want opus", got)
+	// Exact model comparison (no substring matching) and no worker-model fallback.
+	if got := nextReviewerModel("opus", nil, []string{"opus", "opus-2"}); got != "opus-2" {
+		t.Errorf("prefix model name = %q, want opus-2", got)
 	}
-	// Only worker's model exists at all: last-resort fallback.
-	if got := nextReviewerModel("sonnet", nil, []string{"sonnet"}); got != "sonnet" {
-		t.Errorf("single-candidate fallback = %q, want sonnet", got)
+	if got := nextReviewerModel("sonnet", nil, []string{"sonnet"}); got != "" {
+		t.Errorf("worker-only candidate list = %q, want empty", got)
 	}
 }

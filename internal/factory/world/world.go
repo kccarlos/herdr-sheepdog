@@ -577,13 +577,17 @@ func MergeBase(ctx context.Context, worktree, head string) (string, error) {
 	return gitCmd(ctx, worktree, "merge-base", head, ref)
 }
 
-// DeltaRanges returns the p..c git diff range(s) of non-base-merge commits on
-// the first-parent line from since to head, leaving out what merges of the
-// remote base branch brought in (design.md 9.4, KB-REV-12, KB-REV-13).
+// DeltaRanges returns the p..c git diff range(s) of non-merge-only commits on
+// the first-parent line from since to head, leaving out clean merges of the
+// remote base branch; if since is not an ancestor of head, it returns the full
+// range mb..head (design.md 3.1, 9.4, KB-REV-12, KB-REV-13).
 func DeltaRanges(ctx context.Context, worktree, since, head string) ([]string, error) {
 	mb, err := MergeBase(ctx, worktree, head)
 	if err != nil {
 		return nil, err
+	}
+	if !isAncestor(ctx, worktree, since, head) {
+		return []string{mb + ".." + head}, nil
 	}
 	out, err := gitCmd(ctx, worktree, "rev-list", "--reverse", "--first-parent", "--parents", since+".."+head)
 	if err != nil {
@@ -592,7 +596,7 @@ func DeltaRanges(ctx context.Context, worktree, since, head string) ([]string, e
 	var ranges []string
 	for ln := range strings.Lines(out) {
 		f := strings.Fields(ln)
-		if len(f) < 2 || (len(f) > 2 && allAncestors(ctx, worktree, f[2:], mb)) {
+		if len(f) < 2 || cleanBaseMerge(ctx, worktree, f, mb) {
 			continue
 		}
 		if n := len(ranges); n > 0 {
@@ -609,13 +613,21 @@ func DeltaRanges(ctx context.Context, worktree, since, head string) ([]string, e
 	return ranges, nil
 }
 
-func allAncestors(ctx context.Context, dir string, revs []string, target string) bool {
-	for _, r := range revs {
-		if _, err := gitCmd(ctx, dir, "merge-base", "--is-ancestor", r, target); err != nil {
-			return false
-		}
+func cleanBaseMerge(ctx context.Context, dir string, f []string, mb string) bool {
+	if len(f) != 3 || !isAncestor(ctx, dir, f[2], mb) {
+		return false
 	}
-	return true
+	want, err := gitCmd(ctx, dir, "merge-tree", "--write-tree", f[1], f[2])
+	if err != nil {
+		return false
+	}
+	got, err := gitCmd(ctx, dir, "rev-parse", f[0]+"^{tree}")
+	return err == nil && got == want
+}
+
+func isAncestor(ctx context.Context, dir, a, b string) bool {
+	_, err := gitCmd(ctx, dir, "merge-base", "--is-ancestor", a, b)
+	return err == nil
 }
 
 func gitCmd(ctx context.Context, dir string, args ...string) (string, error) {

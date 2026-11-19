@@ -416,26 +416,31 @@ func TestLadderCountsPerHeadAndResetsAfterChanges(t *testing.T) {
 
 func TestRoundKind(t *testing.T) {
 	var a Attempt
-	if k, s := RoundKind(a, "c1"); k != RoundFull || s != "" {
+	if k, s := RoundKind(a, "c1", ""); k != RoundFull || s != "" {
 		t.Fatalf("first round = (%s, %s), want (full, \"\")", k, s)
 	}
 	a.Rounds = []Round{{N: 1, Kind: RoundFull, Head: "c1", Verdict: VerdictChanges}}
-	if k, s := RoundKind(a, "c2"); k != RoundDelta || s != "c1" {
+	if k, s := RoundKind(a, "c2", RelAhead); k != RoundDelta || s != "c1" {
 		t.Fatalf("after worker commit c2 = (%s, %s), want (delta, c1)", k, s)
 	}
+	for _, rel := range []Rel{RelDiverged, RelBehind, RelSame, ""} {
+		if k, s := RoundKind(a, "c2", rel); k != RoundFull || s != "" {
+			t.Fatalf("RoundKind with rel=%q = (%s, %s), want (full, \"\")", rel, k, s)
+		}
+	}
 	a.Rounds = []Round{{N: 1, Kind: RoundFull, Head: "c1", Verdict: VerdictPass}}
-	if k, s := RoundKind(a, "c1"); k != RoundFull || s != "" {
+	if k, s := RoundKind(a, "c1", RelSame); k != RoundFull || s != "" {
 		t.Fatalf("L8 second pass at c1 = (%s, %s), want (full, \"\")", k, s)
 	}
 	a.Rounds = []Round{
 		{N: 1, Kind: RoundFull, Head: "c1", Verdict: VerdictChanges},
 		{N: 2, Kind: RoundDelta, Head: "c2", Verdict: VerdictPass},
 	}
-	if k, s := RoundKind(a, "c2"); k != RoundFull || s != "" {
+	if k, s := RoundKind(a, "c2", RelSame); k != RoundFull || s != "" {
 		t.Fatalf("L8 second pass at c2 after delta pass = (%s, %s), want (full, \"\")", k, s)
 	}
 	a.Rounds = append(a.Rounds, Round{N: 3, Kind: RoundFull, Head: "c2", Verdict: VerdictChanges})
-	if k, s := RoundKind(a, "c3"); k != RoundDelta || s != "c2" {
+	if k, s := RoundKind(a, "c3", RelAhead); k != RoundDelta || s != "c2" {
 		t.Fatalf("after fix c3 = (%s, %s), want (delta, c2)", k, s)
 	}
 }

@@ -148,8 +148,7 @@ func (e *Engine) acceptVerdictLocked(ctx context.Context, id string, s *flow.Sta
 	if err := world.StopRun(ctx, e.HC, rev.RunID); err != nil {
 		return err
 	}
-	defKind, _ := flow.RoundKind(*a, rev.Head)
-	rnd := flow.Round{N: rev.Round, Kind: cmp.Or(rev.Kind, defKind), Head: rev.Head, Reviewer: rev.Reviewer, Verdict: rep.Verdict, Majors: rep.Majors, ReportPath: path}
+	rnd := flow.Round{N: rev.Round, Kind: cmp.Or(rev.Kind, flow.RoundFull), Head: rev.Head, Reviewer: rev.Reviewer, Verdict: rep.Verdict, Majors: rep.Majors, ReportPath: path}
 	a.Rounds, a.Review = append(a.Rounds, rnd), nil
 	return e.commitLocked(id, s, LogLine{
 		By: flow.RoleReviewer, Task: t.ID,

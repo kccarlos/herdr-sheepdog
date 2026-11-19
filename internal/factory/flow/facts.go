@@ -143,11 +143,10 @@ func newestCovering(a Attempt, h string) *Round {
 	return nil
 }
 
-// RoundKind is full for an attempt's first round or another look at a head the
-// last round already covers (L8), and delta from that round's commit after a
-// new commit by the worker (design.md 4.6, 9.4).
-func RoundKind(a Attempt, h string) (kind, since string) {
-	if n := len(a.Rounds); n > 0 && !Covers(a.Rounds[n-1].Head, h) {
+// RoundKind is delta from the last round's commit when h is ahead of it and
+// not covered by it, and full otherwise (design.md 4.6, 9.4).
+func RoundKind(a Attempt, h string, sinceRel Rel) (kind, since string) {
+	if n := len(a.Rounds); n > 0 && sinceRel == RelAhead && !Covers(a.Rounds[n-1].Head, h) {
 		return RoundDelta, a.Rounds[n-1].Head
 	}
 	return RoundFull, ""
