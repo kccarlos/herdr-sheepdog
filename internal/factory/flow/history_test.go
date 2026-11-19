@@ -22,9 +22,10 @@ type step struct {
 	then  func(*world)
 }
 
-// TestHistoryHappyPath walks History 1 of notes/table-audit.md as far as
-// slice 1 has it: review_rounds 1, no evidence, no slots, no asks. Round 1
-// asks for changes, round 2 passes, the engine merges, the task is done.
+// TestHistoryHappyPath walks History 1 of notes/table-audit.md with slice 2's
+// review_rounds 2 (L8): round 1 (full) asks for changes at c1, round 2 (delta)
+// passes at c2, L8 asks for round 3 (full) at c2 which passes, then N42
+// accepts and merges, and the task ends done.
 func TestHistoryHappyPath(t *testing.T) {
 	t0 := time.Date(2026, 11, 18, 9, 0, 0, 0, time.UTC)
 	w := &world{task: Task{ID: "t1", Title: "one task"}}
@@ -69,7 +70,12 @@ func TestHistoryHappyPath(t *testing.T) {
 		}},
 		{"N29", []string{"start_reviewer@2@c2"}, func(w *world) { w.facts.Reviewer = Run{State: RunWorking} }},
 		{"N29", nil, func(w *world) {
-			w.att().Rounds = append(w.att().Rounds, Round{N: 2, Kind: "delta", Head: "c2", Verdict: VerdictPass})
+			w.att().Rounds = append(w.att().Rounds, Round{N: 2, Kind: RoundDelta, Head: "c2", Verdict: VerdictPass})
+			w.facts.Reviewer = Run{} // round 2 stopped; L8 now asks for round 3, which has no run yet
+		}},
+		{"N29", []string{"start_reviewer@3@c2"}, func(w *world) { w.facts.Reviewer = Run{State: RunWorking} }},
+		{"N29", nil, func(w *world) {
+			w.att().Rounds = append(w.att().Rounds, Round{N: 3, Kind: RoundFull, Head: "c2", Verdict: VerdictPass})
 			w.facts.Reviewer = Run{State: RunGone}
 		}},
 		{"N36", nil, func(w *world) { // CI green; a stray worker turn
@@ -78,7 +84,7 @@ func TestHistoryHappyPath(t *testing.T) {
 		}},
 		{"N39", nil, func(w *world) { w.facts.Worker.State = RunIdle }},
 		{"N42", []string{"record_accept@c2", "merge@c2"}, func(w *world) {
-			w.att().Accepts = append(w.att().Accepts, Accept{Head: "c2", By: "bar", Rounds: []int{2}})
+			w.att().Accepts = append(w.att().Accepts, Accept{Head: "c2", By: "bar", Rounds: []int{2, 3}})
 		}},
 		{"N41", nil, func(w *world) { w.facts.PR.State, w.facts.PR.MergedCommit = PRMerged, "m1" }},
 		{"N2", []string{"mark_done"}, func(w *world) { w.task.Done = &Merged{MergedCommit: "m1"} }},

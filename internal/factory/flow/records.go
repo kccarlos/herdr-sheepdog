@@ -12,6 +12,12 @@ const (
 	RoleReviewer    = "reviewer"
 )
 
+// Round kinds of slice 2 (design.md 3, 4.6).
+const (
+	RoundFull  = "full"
+	RoundDelta = "delta"
+)
+
 // State is one project's state.json. Seq counts the inputs committed to it.
 type State struct {
 	Seq      int64    `json:"seq"`
@@ -86,6 +92,7 @@ type ReviewRun struct {
 	RunID        string   `json:"run_id,omitempty"`
 	RunTokenHash string   `json:"run_token_sha256,omitempty"`
 	Round        int      `json:"round"`
+	Kind         string   `json:"kind,omitempty"`
 	Head         string   `json:"head"`
 	Code         string   `json:"code"`
 	Reviewer     Reviewer `json:"reviewer"`

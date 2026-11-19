@@ -148,12 +148,13 @@ func (e *Engine) acceptVerdictLocked(ctx context.Context, id string, s *flow.Sta
 	if err := world.StopRun(ctx, e.HC, rev.RunID); err != nil {
 		return err
 	}
-	rnd := flow.Round{N: rev.Round, Kind: "full", Head: rev.Head, Reviewer: rev.Reviewer, Verdict: rep.Verdict, Majors: rep.Majors, ReportPath: path}
+	defKind, _ := flow.RoundKind(*a, rev.Head)
+	rnd := flow.Round{N: rev.Round, Kind: cmp.Or(rev.Kind, defKind), Head: rev.Head, Reviewer: rev.Reviewer, Verdict: rep.Verdict, Majors: rep.Majors, ReportPath: path}
 	a.Rounds, a.Review = append(a.Rounds, rnd), nil
 	return e.commitLocked(id, s, LogLine{
 		By: flow.RoleReviewer, Task: t.ID,
-		Input: map[string]any{"verb": "verdict", "round": rnd.N, "head": rnd.Head, "verdict": rnd.Verdict, "majors": rnd.Majors},
-		Rule:  "verdict", Decision: rnd.Verdict, Why: fmt.Sprintf("round %d at %s: %s (%d major(s))", rnd.N, rnd.Head, rnd.Verdict, rnd.Majors),
+		Input: map[string]any{"verb": "verdict", "round": rnd.N, "kind": rnd.Kind, "model": rnd.Reviewer.Model, "head": rnd.Head, "verdict": rnd.Verdict, "majors": rnd.Majors},
+		Rule:  "verdict", Decision: rnd.Verdict, Why: fmt.Sprintf("round %d (%s, %s) at %s: %s (%d major(s))", rnd.N, rnd.Kind, rnd.Reviewer.Model, rnd.Head, rnd.Verdict, rnd.Majors),
 	})
 }
 

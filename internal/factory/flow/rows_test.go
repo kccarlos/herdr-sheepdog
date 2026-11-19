@@ -12,13 +12,16 @@ import (
 
 var now = time.Date(2026, 11, 18, 9, 0, 0, 0, time.UTC)
 
-// landing is a task that N42 merges: passed at c1, green, clean, open.
+// landing is a task that N42 merges: passed twice at c1, green, clean, open.
 func landing() In {
 	return In{
 		Task: Task{ID: "t", Attempts: []Attempt{{
 			BaseCommit: "b0",
 			Ready:      []Ready{{Head: "c1"}},
-			Rounds:     []Round{{N: 1, Head: "c1", Verdict: VerdictPass}},
+			Rounds: []Round{
+				{N: 1, Kind: RoundFull, Head: "c1", Verdict: VerdictPass},
+				{N: 2, Kind: RoundFull, Head: "c1", Verdict: VerdictPass},
+			},
 		}}},
 		Settings: DefaultSettings(),
 		Facts: Facts{
@@ -47,7 +50,8 @@ var (
 	workerEnded = func(in *In) { in.Facts.Worker.State = RunGone }
 	reviewEnded = func(in *In) { in.Facts.Reviewer.State = RunGone }
 	noAttempts  = func(in *In) { in.Task.Attempts = nil; in.Facts = Facts{} }
-	changes     = func(in *In) { a0(in).Rounds[0].Verdict = VerdictChanges }
+	onePass     = func(in *In) { a0(in).Rounds = a0(in).Rounds[:1] }
+	changes     = func(in *In) { a0(in).Rounds = []Round{{N: 1, Head: "c1", Verdict: VerdictChanges}} }
 	noRounds    = func(in *In) { a0(in).Rounds = nil }
 	notReady    = func(in *In) { a0(in).Ready = nil; in.Facts.Worker = Run{} }
 	tipAheadF   = func(in *In) { in.Facts.Tip, in.Facts.TipRel = "c2", RelAhead }
@@ -92,7 +96,8 @@ func TestN42Guards(t *testing.T) {
 		"mergeClean":         conflict,
 		"notBehind":          func(in *In) { in.Facts.PR.Behind = true },
 		"notWorking":         workingF,
-		"ladderSays(Passed)": func(in *In) { a0(in).Rounds[0].Verdict = "maybe" },
+		"onePassNeedsL8":     onePass,
+		"ladderSays(Passed)": func(in *In) { a0(in).Rounds[1].Verdict = "maybe" },
 		"checksGreen":        red,
 		"tipSame":            func(in *In) { in.Facts.Tip, in.Facts.TipRel = "c9", RelDiverged },
 	} {
@@ -132,7 +137,10 @@ func TestN43WakeOncePerStall(t *testing.T) {
 	}
 	newH := func(in *In) {
 		a0(in).Ready = append(a0(in).Ready, Ready{Head: "c2"})
-		a0(in).Rounds = append(a0(in).Rounds, Round{N: 2, Head: "c2", Verdict: VerdictPass})
+		a0(in).Rounds = append(a0(in).Rounds,
+			Round{N: 3, Head: "c2", Verdict: VerdictPass},
+			Round{N: 4, Head: "c2", Verdict: VerdictPass},
+		)
 		in.Facts.PR.Head = "c2"
 	}
 	for name, c := range map[string]struct {
@@ -196,6 +204,7 @@ func TestRowCases(t *testing.T) {
 		{"N26", with(noRounds, prBehind, noAnswer), nil},                  // a stale behind PR, unanswered: wait
 		{"N26", with(noRounds, func(in *In) { in.Facts.PR = PR{} }), nil}, // no snapshot yet
 		{"N29", with(noRounds), []string{"start_reviewer@1@c1"}},
+		{"N29", with(onePass), []string{"start_reviewer@2@c1"}},
 		{"N36", with(pending), nil},
 		{"N36", with(noAnswer), nil}, // checks unreadable: wait, no wake
 		{"N39", with(workingF), nil},
@@ -301,23 +310,133 @@ func TestEnsureRun(t *testing.T) {
 	}
 }
 
-// TestLadder: one case per ladder row. No two ladder rows can both hold:
-// each reads the one newest covering round.
+// TestLadder: each ladder row has a case that lands on it and on no earlier
+// row, including L8 (fewer than review_rounds passes) and review_rounds 1
+// passing after a single round (design.md 4.6, D12).
 func TestLadder(t *testing.T) {
+	covered := map[string]bool{}
 	for _, c := range []struct {
 		row, answer string
 		in          In
 	}{
 		{"L7", Review, with(noRounds)},
 		{"L7", Review, with(func(in *In) { a0(in).Ready = append(a0(in).Ready, Ready{Head: "c2"}) })},
+		{"L8", Review, with(onePass)},
 		{"L9", Passed, landing()},
+		{"L9", Passed, with(onePass, func(in *In) { in.Settings.ReviewRounds = 1 })},
 		{"L13", Fix, with(changes)},
-		{"L-", NoLadderRow, with(func(in *In) { a0(in).Rounds[0].Verdict = "maybe" })},
+		{"L13", Fix, with(func(in *In) { a0(in).Rounds[1].Verdict = VerdictChanges })},
+		{"L-", NoLadderRow, with(func(in *In) { a0(in).Rounds[1].Verdict = "maybe" })},
 	} {
 		r, d := FirstMatch(LadderRows, c.in)
 		if r.ID != c.row || d.Why != c.answer || Ladder(c.in) != c.answer {
 			t.Errorf("want %s %s, got %s %s", c.row, c.answer, r.ID, d.Why)
 		}
+		covered[r.ID] = true
+	}
+	for _, r := range LadderRows {
+		if !covered[r.ID] {
+			t.Errorf("ladder row %s has no case", r.ID)
+		}
+	}
+}
+
+// TestLadderOrder checks L7/L8/L9 ordering and neighbour swaps (design.md 16):
+// L7 and L8 are disjoint neighbours (swapping them never lets L8 match an
+// unreviewed head), while L8 and L9 both hold on one pass and swapping them
+// flips Review to Passed.
+func TestLadderOrder(t *testing.T) {
+	if LadderRows[0].ID != "L7" || LadderRows[1].ID != "L8" || LadderRows[2].ID != "L9" {
+		t.Fatalf("ladder prefix = %s/%s/%s, want L7/L8/L9", LadderRows[0].ID, LadderRows[1].ID, LadderRows[2].ID)
+	}
+	// Neighbours L7 and L8: disjoint on both noRounds and onePass, so swapping keeps each winner.
+	swap78 := slices.Clone(LadderRows)
+	swap78[0], swap78[1] = swap78[1], swap78[0]
+	if r, _ := FirstMatch(swap78, with(noRounds)); r.ID != "L7" {
+		t.Fatalf("swapped L7/L8 on noRounds matched %s, want L7", r.ID)
+	}
+	if r, _ := FirstMatch(swap78, with(onePass)); r.ID != "L8" {
+		t.Fatalf("swapped L7/L8 on onePass matched %s, want L8", r.ID)
+	}
+	// Neighbours L8 and L9: both hold on onePass; L8 wins, and swapping makes L9 win.
+	in := with(onePass)
+	if !LadderRows[1].When(in) || !LadderRows[2].When(in) {
+		t.Fatal("expected both L8 and L9 conditions to hold on onePass")
+	}
+	if r, d := FirstMatch(LadderRows, in); r.ID != "L8" || d.Why != Review {
+		t.Fatalf("L8 vs L9: got %s (%s), want L8 (%s)", r.ID, d.Why, Review)
+	}
+	swap89 := slices.Clone(LadderRows)
+	swap89[1], swap89[2] = swap89[2], swap89[1]
+	if r, d := FirstMatch(swap89, in); r.ID != "L9" || d.Why != Passed {
+		t.Fatalf("swapped L8/L9: got %s (%s), want L9 (%s)", r.ID, d.Why, Passed)
+	}
+}
+
+// TestLadderCountsPerHeadAndResetsAfterChanges checks design.md 4.6 and D12:
+// L8 asks review until review_rounds passing rounds cover H (tested up to
+// ReviewRoundsMax), and a changes verdict followed by a new commit resets the
+// count at the new head so earlier passes at the old head do not cover it.
+func TestLadderCountsPerHeadAndResetsAfterChanges(t *testing.T) {
+	for target := ReviewRoundsMin; target <= ReviewRoundsMax; target++ {
+		in := with(noRounds, func(in *In) { in.Settings.ReviewRounds = target })
+		for n := 1; n <= target; n++ {
+			if got := Ladder(in); got != Review {
+				t.Fatalf("target=%d before round %d: got %s, want %s", target, n, got, Review)
+			}
+			a0(&in).Rounds = append(a0(&in).Rounds, Round{N: n, Head: "c1", Verdict: VerdictPass})
+		}
+		if got := Ladder(in); got != Passed {
+			t.Fatalf("target=%d after %d passes: got %s, want %s", target, target, got, Passed)
+		}
+	}
+
+	// Pass at c1 -> changes at c1 (Fix) -> new commit c2 resets passing count to 0 at c2.
+	in := with(onePass)
+	if r, _ := FirstMatch(LadderRows, in); r.ID != "L8" {
+		t.Fatalf("after 1 pass at c1: %s, want L8", r.ID)
+	}
+	a0(&in).Rounds = append(a0(&in).Rounds, Round{N: 2, Head: "c1", Verdict: VerdictChanges, Majors: 1})
+	if r, _ := FirstMatch(LadderRows, in); r.ID != "L13" || Ladder(in) != Fix {
+		t.Fatalf("after round 2 changes at c1: %s (%s), want L13 (fix)", r.ID, Ladder(in))
+	}
+	a0(&in).Ready = append(a0(&in).Ready, Ready{Head: "c2"})
+	if r, _ := FirstMatch(LadderRows, in); r.ID != "L7" || Ladder(in) != Review {
+		t.Fatalf("at new head c2: %s (%s), want L7 (review)", r.ID, Ladder(in))
+	}
+	a0(&in).Rounds = append(a0(&in).Rounds, Round{N: 3, Kind: RoundDelta, Head: "c2", Verdict: VerdictPass})
+	if r, _ := FirstMatch(LadderRows, in); r.ID != "L8" || Ladder(in) != Review {
+		t.Fatalf("after 1 pass at c2 (despite earlier pass at c1): %s (%s), want L8 (review)", r.ID, Ladder(in))
+	}
+	a0(&in).Rounds = append(a0(&in).Rounds, Round{N: 4, Kind: RoundFull, Head: "c2", Verdict: VerdictPass})
+	if r, _ := FirstMatch(LadderRows, in); r.ID != "L9" || Ladder(in) != Passed {
+		t.Fatalf("after 2 passes at c2: %s (%s), want L9 (passed)", r.ID, Ladder(in))
+	}
+}
+
+func TestRoundKind(t *testing.T) {
+	var a Attempt
+	if k, s := RoundKind(a, "c1"); k != RoundFull || s != "" {
+		t.Fatalf("first round = (%s, %s), want (full, \"\")", k, s)
+	}
+	a.Rounds = []Round{{N: 1, Kind: RoundFull, Head: "c1", Verdict: VerdictChanges}}
+	if k, s := RoundKind(a, "c2"); k != RoundDelta || s != "c1" {
+		t.Fatalf("after worker commit c2 = (%s, %s), want (delta, c1)", k, s)
+	}
+	a.Rounds = []Round{{N: 1, Kind: RoundFull, Head: "c1", Verdict: VerdictPass}}
+	if k, s := RoundKind(a, "c1"); k != RoundFull || s != "" {
+		t.Fatalf("L8 second pass at c1 = (%s, %s), want (full, \"\")", k, s)
+	}
+	a.Rounds = []Round{
+		{N: 1, Kind: RoundFull, Head: "c1", Verdict: VerdictChanges},
+		{N: 2, Kind: RoundDelta, Head: "c2", Verdict: VerdictPass},
+	}
+	if k, s := RoundKind(a, "c2"); k != RoundFull || s != "" {
+		t.Fatalf("L8 second pass at c2 after delta pass = (%s, %s), want (full, \"\")", k, s)
+	}
+	a.Rounds = append(a.Rounds, Round{N: 3, Kind: RoundFull, Head: "c2", Verdict: VerdictChanges})
+	if k, s := RoundKind(a, "c3"); k != RoundDelta || s != "c2" {
+		t.Fatalf("after fix c3 = (%s, %s), want (delta, c2)", k, s)
 	}
 }
 
@@ -409,8 +528,12 @@ func TestSettingsChanged(t *testing.T) {
 	if got := s.Changed(); !slices.Equal(got, []string{"stuck_minutes 5"}) {
 		t.Errorf("changed: %v", got)
 	}
-	s.ChecksGraceMinutes, s.ReviewRounds = 7, 1
+	s.ChecksGraceMinutes, s.ReviewRounds = 7, 2
 	if got := s.Changed(); !slices.Equal(got, []string{"checks_grace_minutes 7", "stuck_minutes 5"}) {
 		t.Errorf("changed: %v", got)
+	}
+	s.ReviewRounds = 1
+	if got := s.Changed(); !slices.Equal(got, []string{"checks_grace_minutes 7", "review_rounds 1", "stuck_minutes 5"}) {
+		t.Errorf("changed with review_rounds 1: %v", got)
 	}
 }

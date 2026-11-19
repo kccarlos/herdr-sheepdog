@@ -59,12 +59,11 @@ func TestActs(t *testing.T) {
 }
 
 func TestSettingsRange(t *testing.T) {
-	two := DefaultSettings()
-	two.ReviewRounds = 2 // slice 1 has no L8: a second round would not be enforced
-	if two.Validate() == nil {
-		t.Error("review_rounds 2 accepted")
+	def := DefaultSettings()
+	if def.ReviewRounds != 2 {
+		t.Fatalf("DefaultSettings().ReviewRounds = %d, want 2", def.ReviewRounds)
 	}
-	if err := DefaultSettings().Validate(); err != nil {
+	if err := def.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	set := map[string]func(*Settings, int){

@@ -567,6 +567,57 @@ func Relation(ctx context.Context, dir, ref, x string) (flow.Rel, error) {
 	return flow.RelDiverged, nil
 }
 
+// MergeBase fetches the push remote's default branch and returns the merge
+// base of head with it, computed now (design.md 9.4, KB-REV-12, KB-REV-13).
+func MergeBase(ctx context.Context, worktree, head string) (string, error) {
+	ref, _, err := remoteBaseCommit(ctx, worktree, true)
+	if err != nil {
+		return "", err
+	}
+	return gitCmd(ctx, worktree, "merge-base", head, ref)
+}
+
+// DeltaRanges returns the p..c git diff range(s) of non-base-merge commits on
+// the first-parent line from since to head, leaving out what merges of the
+// remote base branch brought in (design.md 9.4, KB-REV-12, KB-REV-13).
+func DeltaRanges(ctx context.Context, worktree, since, head string) ([]string, error) {
+	mb, err := MergeBase(ctx, worktree, head)
+	if err != nil {
+		return nil, err
+	}
+	out, err := gitCmd(ctx, worktree, "rev-list", "--reverse", "--first-parent", "--parents", since+".."+head)
+	if err != nil {
+		return nil, err
+	}
+	var ranges []string
+	for ln := range strings.Lines(out) {
+		f := strings.Fields(ln)
+		if len(f) < 2 || (len(f) > 2 && allAncestors(ctx, worktree, f[2:], mb)) {
+			continue
+		}
+		if n := len(ranges); n > 0 {
+			if a, b, _ := strings.Cut(ranges[n-1], ".."); b == f[1] {
+				ranges[n-1] = a + ".." + f[0]
+				continue
+			}
+		}
+		ranges = append(ranges, f[1]+".."+f[0])
+	}
+	if len(ranges) == 0 {
+		return []string{head + ".." + head}, nil
+	}
+	return ranges, nil
+}
+
+func allAncestors(ctx context.Context, dir string, revs []string, target string) bool {
+	for _, r := range revs {
+		if _, err := gitCmd(ctx, dir, "merge-base", "--is-ancestor", r, target); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 func gitCmd(ctx context.Context, dir string, args ...string) (string, error) {
 	gctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
