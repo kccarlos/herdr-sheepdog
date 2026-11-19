@@ -447,7 +447,7 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 	}
 	att := st.Tasks[0].Attempts[0]
 	wantWT, _ := filepath.EvalSymlinks(paths.Worktree(id, "T1", 1))
-	if att.BaseCommit != baseSHA || att.Branch != "task/T1-feat-add-greet-helper" || att.Worktree != wantWT {
+	if att.BaseCommit != baseSHA || att.Branch != "task/"+strings.TrimPrefix(id, "proj-")+"-T1-1-feat-add-greet-helper" || att.Worktree != wantWT {
 		t.Fatalf("attempt after N11 = %+v, want base=%s wt=%s", att, baseSHA, wantWT)
 	}
 	if flow.Count(att.Acts, flow.AskNewAttempt) != 1 || !flow.Done(att.Acts, flow.AskNewAttempt) {
@@ -559,7 +559,7 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 		t.Fatalf("after N29: acts=%+v gh=%q", att.Acts, ghCalls(t, gh, ""))
 	}
 	logRaw, _ := os.ReadFile(paths.Log(id))
-	for _, want := range []string{`"rule":"N11"`, `"rule":"N23"`, `"rule":"ready"`, `"rule":"N26"`, `"PR #7 open for task/T1-feat-add-greet-helper"`,
+	for _, want := range []string{`"rule":"N11"`, `"rule":"N23"`, `"rule":"ready"`, `"rule":"N26"`, `"PR #7 open for task/` + strings.TrimPrefix(id, "proj-") + `-T1-1-feat-add-greet-helper"`,
 		`"rule":"pr_snapshot"`, `"checks":"none"`, `"rule":"N29"`, `"not built yet"`} {
 		if !strings.Contains(string(logRaw), want) {
 			t.Errorf("log.jsonl missing %s:\n%s", want, logRaw)

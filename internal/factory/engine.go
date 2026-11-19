@@ -304,10 +304,10 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 
 func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, ti int) (string, bool, error) {
 	t, n := &s.Tasks[ti], len(s.Tasks[ti].Attempts)+1
-	tag := t.ID
-	if n > 1 {
-		tag = fmt.Sprintf("%s-%d", t.ID, n)
-	}
+	// The branch carries the project and the attempt, so a new project on
+	// the same repo never reuses a branch an older PR (even a closed one)
+	// already names (seen live: a closed PR from an earlier run blocked N26).
+	tag := fmt.Sprintf("%s-%s-%d", strings.TrimPrefix(id, "proj-"), t.ID, n)
 	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
 	defer cancel()
 	wt, err := world.NewWorktree(gctx, s.Project.Folder, e.Paths.Worktree(id, t.ID, n), tag, t.Title)
