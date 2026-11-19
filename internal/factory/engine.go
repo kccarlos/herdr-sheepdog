@@ -30,6 +30,9 @@ var workerTemplate string
 
 var lockGitTimeout = 15 * time.Second
 
+// ghTimeout bounds one GitHub executor or snapshot (a push plus gh calls).
+var ghTimeout = time.Minute
+
 // Engine runs the factory loop and handles owner start and stop commands.
 type Engine struct {
 	Paths        Paths
@@ -41,6 +44,8 @@ type Engine struct {
 
 	mu   sync.Mutex
 	wake chan struct{}
+	prs  map[string]flow.PR // last PR snapshot per attempt worktree (in memory)
+	errs map[string]string  // last gh or git error per worktree and kind, logged once per change
 }
 
 // New constructs an Engine. Nothing runs or touches disk until Run or Start.
@@ -228,10 +233,11 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 type taskExec func(e *Engine, ctx context.Context, id string, s *flow.State, ti int) (decision string, abort bool, err error)
 
 // taskExecutors dispatches each ask verb implemented so far to its executor.
-// Asks for PR 1.6–1.8 are absent and logged as "not built yet".
+// Asks for PR 1.7–1.8 are absent and logged as "not built yet".
 var taskExecutors = map[string]taskExec{
 	flow.AskNewAttempt:  (*Engine).execNewAttempt,
 	flow.AskStartWorker: (*Engine).execStartWorker,
+	flow.AskPushPR:      (*Engine).execPushPR,
 }
 
 func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int) {
@@ -241,8 +247,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
 		tip, rel, _, err := world.InspectWorktree(gctx, a.Worktree, flow.H(a))
 		cancel()
-		if err != nil {
-			e.logError("factory.git_error", id, err)
+		if e.logOnce("factory.git_error", id, a.Worktree, err); err != nil {
 			return
 		}
 		if a.RunID != "" {
@@ -252,6 +257,9 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 			}
 		}
 		facts.Tip, facts.TipRel = tip, rel
+		if len(a.Ready) > 0 { // no PR can exist before the first ready
+			facts.PR = e.readPRLocked(ctx, id, s, ti)
+		}
 	}
 	now := time.Now()
 	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[ti], Settings: s.Settings, Facts: facts, Now: now})
@@ -296,10 +304,10 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 
 func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, ti int) (string, bool, error) {
 	t, n := &s.Tasks[ti], len(s.Tasks[ti].Attempts)+1
-	tag := t.ID
-	if n > 1 {
-		tag = fmt.Sprintf("%s-%d", t.ID, n)
-	}
+	// The branch carries the project and the attempt, so a new project on
+	// the same repo never reuses a branch an older PR (even a closed one)
+	// already names (seen live: a closed PR from an earlier run blocked N26).
+	tag := fmt.Sprintf("%s-%s-%d", strings.TrimPrefix(id, "proj-"), t.ID, n)
 	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
 	defer cancel()
 	wt, err := world.NewWorktree(gctx, s.Project.Folder, e.Paths.Worktree(id, t.ID, n), tag, t.Title)
@@ -311,11 +319,7 @@ func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, t
 
 func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, ti int) (string, bool, error) {
 	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
-	out := "(none)"
-	if len(t.Outcomes) > 0 {
-		out = "- " + strings.Join(t.Outcomes, "\n- ")
-	}
-	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"), "{outcomes}", out, "{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", cmp.Or(e.Bin, "sheepdog")).Replace(workerTemplate))
+	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"), "{outcomes}", bullets(t.Outcomes), "{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", cmp.Or(e.Bin, "sheepdog")).Replace(workerTemplate))
 	termID, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, world.RunSpec{
 		Name: workerName(id, t.ID, len(t.Attempts)), Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
 		Argv: world.ClaudeArgv(flow.RoleWorker, "sonnet", "medium", "bypassPermissions"), Prompt: prompt,
@@ -325,6 +329,59 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 		a.RunID = termID
 	}
 	return "started worker " + termID, abort, err
+}
+
+func bullets(items []string) string {
+	if len(items) == 0 {
+		return "(none)"
+	}
+	return "- " + strings.Join(items, "\n- ")
+}
+
+// execPushPR is N26: push H and make sure one PR is open for the branch.
+// Title and body come from task fields only (design.md 9.4).
+func (e *Engine) execPushPR(ctx context.Context, _ string, s *flow.State, ti int) (string, bool, error) {
+	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
+	body := fmt.Sprintf("%s\n\n## Outcomes\n\n%s\n\n---\nOpened by the sheepdog factory.", cmp.Or(strings.TrimSpace(t.Brief), "(no brief)"), bullets(t.Outcomes))
+	gctx, cancel := context.WithTimeout(ctx, ghTimeout)
+	defer cancel()
+	n, err := world.PushAndOpenPR(gctx, a.Worktree, a.Branch, flow.H(*a), t.Title, body)
+	if err == nil {
+		a.PR = n
+	}
+	return fmt.Sprintf("PR #%d open for %s", n, a.Branch), false, err
+}
+
+// readPRLocked is the attempt's PR snapshot (design.md 7.3). A failed read
+// is not a snapshot: the last one is kept with Answered false. HeadSince is
+// when this head was first seen by this daemon. A change is logged, so the
+// log shows each move of the PR (checks pending -> green).
+func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti int) flow.PR {
+	a := s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
+	gctx, cancel := context.WithTimeout(ctx, ghTimeout)
+	defer cancel()
+	last := e.prs[a.Worktree]
+	p, err := world.PRSnapshot(gctx, s.Project.Folder, a.Branch)
+	if e.logOnce("factory.gh_error", id, a.Worktree, err); err != nil {
+		p, p.Answered = last, false
+	} else if p.Head != "" {
+		p.HeadSince = last.HeadSince
+		if p.Head != last.Head || p.HeadSince.IsZero() {
+			p.HeadSince = time.Now()
+		}
+		p.HeadRel, err = world.Relation(gctx, a.Worktree, flow.H(a), p.Head)
+		e.logOnce("factory.git_error", id, a.Worktree+" head_rel", err) // unknown here (e.g. not fetched): no relation, never a guess
+	}
+	if p != last && ctx.Err() == nil {
+		if e.prs == nil {
+			e.prs = map[string]flow.PR{}
+		}
+		e.prs[a.Worktree] = p
+		if err := e.commitLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: p, Rule: "pr_snapshot", Why: "the PR snapshot changed"}); err != nil {
+			e.logError("factory.commit_error", id, err)
+		}
+	}
+	return p
 }
 
 func coordName(id string) string { return hcName("coord-" + strings.TrimPrefix(id, "proj-")) }
@@ -353,6 +410,24 @@ func hcName(s string) string {
 
 func (e *Engine) logError(typ, id string, err error) {
 	e.logEvent(typ, map[string]string{"project": id, "error": err.Error()})
+}
+
+// logOnce logs err unless it repeats the last error of typ for key; a nil
+// err clears it, so the next failure is logged again.
+func (e *Engine) logOnce(typ, id, key string, err error) {
+	k := typ + " " + key
+	if err == nil {
+		delete(e.errs, k)
+		return
+	}
+	if e.errs[k] == err.Error() {
+		return
+	}
+	if e.errs == nil {
+		e.errs = map[string]string{}
+	}
+	e.errs[k] = err.Error()
+	e.logError(typ, id, err)
 }
 
 func (e *Engine) logEvent(typ string, fields map[string]string) {

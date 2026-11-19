@@ -176,6 +176,9 @@ func TestRowCases(t *testing.T) {
 		{"N22", with(changes), []string{"tell_worker_findings@1"}},
 		{"N23", with(notReady, noRounds, prGone), []string{"start_worker"}},
 		{"N26", with(noRounds, prGone), []string{"push_and_open_pr@c1"}},
+		{"N26", with(noRounds, prGone, noAnswer), nil},                    // "no PR" from a failed read: wait, no push
+		{"N26", with(noRounds, prBehind, noAnswer), nil},                  // a stale behind PR, unanswered: wait
+		{"N26", with(noRounds, func(in *In) { in.Facts.PR = PR{} }), nil}, // no snapshot yet
 		{"N29", with(noRounds), []string{"start_reviewer@1@c1"}},
 		{"N36", with(pending), nil},
 		{"N36", with(noAnswer), nil}, // checks unreadable: wait, no wake

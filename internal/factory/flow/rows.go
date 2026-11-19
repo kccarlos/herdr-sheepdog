@@ -164,6 +164,9 @@ var TaskRows = []Row[In]{
 		return say("the worker is working", ensureRun(in, in.Facts.Worker, AskStartWorker))(in)
 	}},
 	{ID: "N26", WaitsOn: "the engine", When: all(hasAttempt, anyOf(noPR, all(prOpen, prBehindH))), Then: func(in In) Decision {
+		if unanswered(in) { // "no PR" from a failed read is a guess: wait, so the once-only push is not spent
+			return say("GitHub did not answer: wait for a snapshot")(in)
+		}
 		return say("GitHub does not have H", once(in.acts(), key(AskPushPR, headH(in))))(in)
 	}},
 	{ID: "N29", WaitsOn: "the reviewer", When: all(ladderSays(Review), prNotClosed), Then: func(in In) Decision {

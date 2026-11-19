@@ -401,8 +401,8 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 // TestEngineTaskLoopN11ThenN23OnceAndReady checks KB-LCH-1, KB-LCH-2, KB-LCH-4,
 // KB-LCH-8, KB-LCH-9, KB-LCH-11, KB-LCH-24, KB-COO-12 and KB-RUN-58:
 // a planned task lands on N11 then N23, executes each once (acts[]), starts the
-// worker in its worktree with its own token, accepts `ready`, logs later asks
-// (N26) as "not built yet" without executing them, and Stop cleans up all runs.
+// worker in its worktree with its own token, accepts `ready`, pushes and opens
+// one PR (N26, fake gh), logs N29 as "not built yet", and Stop cleans up all runs.
 func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 	srv := hctest.New(t)
 	var runs []hc.RunParams
@@ -410,6 +410,8 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 	client := hc.NewClient(srv.Path)
 	paths := testPaths(t)
 	repo, baseSHA := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := installFakeGH(t)
 	ctx := context.Background()
 
 	var logBuf bytes.Buffer
@@ -445,7 +447,7 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 	}
 	att := st.Tasks[0].Attempts[0]
 	wantWT, _ := filepath.EvalSymlinks(paths.Worktree(id, "T1", 1))
-	if att.BaseCommit != baseSHA || att.Branch != "task/T1-feat-add-greet-helper" || att.Worktree != wantWT {
+	if att.BaseCommit != baseSHA || att.Branch != "task/"+strings.TrimPrefix(id, "proj-")+"-T1-1-feat-add-greet-helper" || att.Worktree != wantWT {
 		t.Fatalf("attempt after N11 = %+v, want base=%s wt=%s", att, baseSHA, wantWT)
 	}
 	if flow.Count(att.Acts, flow.AskNewAttempt) != 1 || !flow.Done(att.Acts, flow.AskNewAttempt) {
@@ -513,7 +515,8 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 		t.Fatalf("worker crash adoption: runs=%d runID=%q want %q", len(runs), st.Tasks[0].Attempts[0].RunID, savedRunID)
 	}
 
-	// Worker commits in worktree and reports ready; next pass lands on N26 ("not built yet").
+	// Worker commits in worktree and reports ready; the next pass lands on N26
+	// (push, open the PR), the one after on N29 (start_reviewer, not built yet).
 	if err := os.WriteFile(filepath.Join(att.Worktree, "greet.go"), []byte("package demo\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -521,19 +524,43 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 	gitIn(t, att.Worktree, "commit", "-m", "feat: add greet.go")
 	c1 := gitIn(t, att.Worktree, "rev-parse", "HEAD")
 
+	writePRJSON(t, gh, "pr.json", c1, "[]")
+	if views := ghCalls(t, gh, "pr view"); len(views) != 0 {
+		t.Fatalf("PR read before any ready report: %q", views)
+	}
 	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`"}`)); err != nil {
 		t.Fatalf("Report ready: %v", err)
 	}
+	// GitHub down after ready: "no PR" is not known, so N26 waits and the
+	// once-only push is not spent.
+	if err := os.WriteFile(filepath.Join(gh, "fail"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	eng.passProject(ctx, id, false)
-	eng.passProject(ctx, id, false) // second pass on N26 does not re-log or re-ask
-
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	if n := flow.Count(st.Tasks[0].Attempts[0].Acts, "push_and_open_pr@"+c1); n != 0 || len(ghCalls(t, gh, "pr list")) != 0 {
+		t.Fatalf("unanswered snapshot pushed: acts=%+v gh=%q", st.Tasks[0].Attempts[0].Acts, ghCalls(t, gh, ""))
+	}
+	if err := os.Remove(filepath.Join(gh, "fail")); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false)
 	st, _ = LoadState(paths.State(id))
 	att = st.Tasks[0].Attempts[0]
-	if flow.H(att) != c1 || flow.Count(att.Acts, "push_and_open_pr@"+c1) != 1 {
-		t.Fatalf("after ready+N26: H=%s acts=%+v", flow.H(att), att.Acts)
+	if flow.H(att) != c1 || att.PR != 7 || !flow.Done(att.Acts, "push_and_open_pr@"+c1) {
+		t.Fatalf("after ready+N26: H=%s pr=%d acts=%+v", flow.H(att), att.PR, att.Acts)
+	}
+	eng.passProject(ctx, id, false) // N29: start_reviewer is not built yet
+	eng.passProject(ctx, id, false) // nothing new
+	st, _ = LoadState(paths.State(id))
+	att = st.Tasks[0].Attempts[0]
+	if flow.Count(att.Acts, "push_and_open_pr@"+c1) != 1 || flow.Count(att.Acts, "start_reviewer@1@"+c1) != 1 || len(ghCalls(t, gh, "pr create")) != 1 {
+		t.Fatalf("after N29: acts=%+v gh=%q", att.Acts, ghCalls(t, gh, ""))
 	}
 	logRaw, _ := os.ReadFile(paths.Log(id))
-	for _, want := range []string{`"rule":"N11"`, `"rule":"N23"`, `"rule":"ready"`, `"rule":"N26"`, `"not built yet"`} {
+	for _, want := range []string{`"rule":"N11"`, `"rule":"N23"`, `"rule":"ready"`, `"rule":"N26"`, `"PR #7 open for task/` + strings.TrimPrefix(id, "proj-") + `-T1-1-feat-add-greet-helper"`,
+		`"rule":"pr_snapshot"`, `"checks":"none"`, `"rule":"N29"`, `"not built yet"`} {
 		if !strings.Contains(string(logRaw), want) {
 			t.Errorf("log.jsonl missing %s:\n%s", want, logRaw)
 		}

@@ -368,21 +368,35 @@ func remoteBaseCommit(ctx context.Context, repo string, fetch bool) (string, str
 func InspectWorktree(ctx context.Context, worktree, ref string) (string, flow.Rel, bool, error) {
 	tip, e1 := gitCmd(ctx, worktree, "rev-parse", "--verify", "HEAD^{commit}")
 	status, e2 := gitCmd(ctx, worktree, "status", "--porcelain", "--untracked-files=normal")
-	counts, e3 := gitCmd(ctx, worktree, "rev-list", "--left-right", "--count", ref+"..."+tip)
-	var behind, ahead int
-	_, e4 := fmt.Sscanf(counts, "%d %d", &behind, &ahead)
-	if err := errors.Join(e1, e2, e3, e4); err != nil {
+	if err := errors.Join(e1, e2); err != nil {
 		return "", "", false, err
 	}
-	switch {
-	case behind == 0 && ahead == 0:
-		return tip, flow.RelSame, status == "", nil
-	case behind == 0:
-		return tip, flow.RelAhead, status == "", nil
-	case ahead == 0:
-		return tip, flow.RelBehind, status == "", nil
+	rel, err := Relation(ctx, worktree, ref, tip)
+	if err != nil {
+		return "", "", false, err
 	}
-	return tip, flow.RelDiverged, status == "", nil
+	return tip, rel, status == "", nil
+}
+
+// Relation is how commit x stands to ref in dir's repository: same, ahead
+// (a descendant), behind (an ancestor) or diverged (design.md 3.1).
+func Relation(ctx context.Context, dir, ref, x string) (flow.Rel, error) {
+	counts, err := gitCmd(ctx, dir, "rev-list", "--left-right", "--count", ref+"..."+x)
+	var behind, ahead int
+	if err == nil {
+		_, err = fmt.Sscanf(counts, "%d %d", &behind, &ahead)
+	}
+	switch {
+	case err != nil:
+		return "", err
+	case behind == 0 && ahead == 0:
+		return flow.RelSame, nil
+	case behind == 0:
+		return flow.RelAhead, nil
+	case ahead == 0:
+		return flow.RelBehind, nil
+	}
+	return flow.RelDiverged, nil
 }
 
 func gitCmd(ctx context.Context, dir string, args ...string) (string, error) {
