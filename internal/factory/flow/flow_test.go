@@ -62,14 +62,24 @@ func TestSettingsRange(t *testing.T) {
 	if err := DefaultSettings().Validate(); err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range []int{ReviewRoundsMin, ReviewRoundsMax} {
-		if err := (Settings{ReviewRounds: n}).Validate(); err != nil {
-			t.Errorf("%d: %v", n, err)
-		}
+	set := map[string]func(*Settings, int){
+		"review_rounds":        func(s *Settings, n int) { s.ReviewRounds = n },
+		"checks_grace_minutes": func(s *Settings, n int) { s.ChecksGraceMinutes = n },
 	}
-	for _, n := range []int{ReviewRoundsMin - 1, ReviewRoundsMax + 1} {
-		if (Settings{ReviewRounds: n}).Validate() == nil {
-			t.Errorf("review_rounds %d accepted", n)
+	limits := map[string][2]int{
+		"review_rounds":        {ReviewRoundsMin, ReviewRoundsMax},
+		"checks_grace_minutes": {ChecksGraceMin, ChecksGraceMax},
+	}
+	for name, lim := range limits {
+		for _, c := range []struct {
+			n  int
+			ok bool
+		}{{lim[0], true}, {lim[1], true}, {lim[0] - 1, false}, {lim[1] + 1, false}} {
+			s := DefaultSettings()
+			set[name](&s, c.n)
+			if err := s.Validate(); (err == nil) != c.ok {
+				t.Errorf("%s %d: err %v, want ok=%v", name, c.n, err, c.ok)
+			}
 		}
 	}
 }
