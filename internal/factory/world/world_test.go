@@ -856,15 +856,14 @@ func TestReadReportWaitsPastMessageAndRequiresComplete(t *testing.T) {
 	}
 }
 
-
 // TestClaudeArgvNeverSwallowsPrompt: no argv may end with a flag that takes
 // several values, or the prompt StartRun appends becomes one of them (seen
 // live: a reviewer started with an empty prompt).
 func TestClaudeArgvNeverSwallowsPrompt(t *testing.T) {
 	for _, mode := range []string{"plan", "dontAsk", "bypassPermissions", "acceptEdits"} {
 		argv := ClaudeArgv(flow.RoleReviewer, "opus", "medium", mode)
-		for i, a := range argv {
-			if (a == "--allowedTools" || a == "--disallowedTools" || a == "--allowed-tools") && i < len(argv) {
+		for _, a := range argv {
+			if (a == "--allowedTools" || a == "--disallowedTools" || a == "--allowed-tools") {
 				t.Errorf("%s: %q is a separate argument; use --flag=value so the prompt is not swallowed: %q", mode, a, argv)
 			}
 		}
