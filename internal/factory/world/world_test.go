@@ -656,7 +656,7 @@ func TestReadReportS03FixturesAndCases(t *testing.T) {
 		}
 	}
 
-	// 2. Synthetic cases: echo skipping (<hc> and TUI argv ❯), code fences, line wraps,
+	// 2. Synthetic cases: echo skipping (TUI argv ❯), input box, code fences, line wraps,
 	//    tag only in echo, wrong code, quoted earlier tag vs final tag, bad JSON, cut mid-tag.
 	cases := []struct {
 		name, screen, code string
@@ -682,10 +682,10 @@ func TestReadReportS03FixturesAndCases(t *testing.T) {
 			want:   ReportFound, verdict: "pass", head: "h1",
 		},
 		{
-			name:   "code fence inside report tag",
+			name:   "code fence inside report tag is not unwrapped",
 			code:   "abc123",
 			screen: "⏺ Review:\n<report>\n```json\n{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"changes\",\"majors\":1,\"findings\":[\"bug\"]}\n```\n</report>\n",
-			want:   ReportFound, verdict: "changes", head: "h1",
+			want:   ReportInvalid,
 		},
 		{
 			name:   "tag and closing tag wrapped over 200-col indented lines",
@@ -745,6 +745,30 @@ func TestReadReportS03FixturesAndCases(t *testing.T) {
 			name:   "cut mid-closing-tag before footer",
 			code:   "abc123",
 			screen: "⏺ Done.\n<report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0,\"findings\":[]}</rep\n────────────────────────────────────────\n❯\n",
+			want:   ReportNotYet,
+		},
+		{
+			name:   "reply mentions an unclosed hc envelope in prose",
+			code:   "abc123",
+			screen: "❯ prompt\n\n⏺ minor: the `<hc from=\"t10\">` envelope is never closed in the doc.\n  <report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0}</report>\n",
+			want:   ReportFound, verdict: "pass", head: "h1",
+		},
+		{
+			name:   "tool output quotes a closed hc envelope above the reply",
+			code:   "abc123",
+			screen: "❯ prompt\n\n⏺ Read(doc.md)\n  <hc from=\"t1\">hi</hc>\n  more\n\n  <report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0}</report>\n",
+			want:   ReportFound, verdict: "pass", head: "h1",
+		},
+		{
+			name:   "earlier input-box rule above the reply, no box at the bottom",
+			code:   "abc123",
+			screen: "────────────────────────────────────────\n❯\n\n⏺ Checked.\n  <report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0}</report>\n",
+			want:   ReportFound, verdict: "pass", head: "h1",
+		},
+		{
+			name:   "draft tag in the bottom input box is not taken",
+			code:   "abc123",
+			screen: "❯ prompt\n\n⏺ Reading.\n\n────────────────────────────────────────\n❯ <report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0}</report>\n────────────────────────────────────────\n",
 			want:   ReportNotYet,
 		},
 	}

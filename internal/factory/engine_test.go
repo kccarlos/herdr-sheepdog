@@ -953,7 +953,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	}
 
 	// Reviewer 1 writes valid changes verdict with code1 -> round 1 recorded, rev1 stopped.
-	srv.SetScreen(rev1Term, "❯ prompt\n\n⏺ major: Greet(\"\") returns \"hello, \"\n```json\n<report>{\"code\":\""+code1+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":1}</report>\n```\n")
+	srv.SetScreen(rev1Term, "❯ prompt\n\n⏺ major: Greet(\"\") returns \"hello, \"\n<report>{\"code\":\""+code1+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":1}</report>\n")
 	eng.passProject(ctx, id, false) // accepts verdict & stops rev1
 	st, _ = LoadState(paths.State(id))
 	att := st.Tasks[0].Attempts[0]
@@ -1049,9 +1049,16 @@ func sendTexts(t *testing.T, reqs []hctest.Request) []string {
 }
 
 // TestEngineVoidReviewStoppedWhenTipAdvances checks design.md 4.8: when the
-// worktree tip moves ahead of H while a reviewer is running, the round is void
-// and the engine stops the reviewer run and clears its token hash.
+// worktree tip moves ahead of H while a reviewer is running, or the reviewer
+// leaves the worktree dirty, the round is void: the engine stops the reviewer
+// run and clears its token hash, and no round is recorded.
 func TestEngineVoidReviewStoppedWhenTipAdvances(t *testing.T) {
+	for _, tc := range []string{"tip advances", "dirty at verdict"} {
+		t.Run(tc, func(t *testing.T) { testVoidReview(t, tc == "dirty at verdict") })
+	}
+}
+
+func testVoidReview(t *testing.T, dirty bool) {
 	ctx := context.Background()
 	srv := hctest.New(t)
 	client := hc.NewClient(srv.Path)
@@ -1060,18 +1067,18 @@ func TestEngineVoidReviewStoppedWhenTipAdvances(t *testing.T) {
 	githubOrigin(t, repo)
 	gh := installFakeGH(t)
 	eng := New(paths, client)
+	var logBuf bytes.Buffer
+	eng.Log = logging.NewJSONLLogger(&logBuf)
 	if err := eng.Start(repo, "Goal"); err != nil {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
 	eng.passProject(ctx, id, false)
-	coord, _ := client.List(ctx, true)
 	st, _ := LoadState(paths.State(id))
 	st.Tasks = []flow.Task{{ID: "T1", Title: "feat: x"}}
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
 	}
-	_ = coord
 	eng.passProject(ctx, id, false) // N11
 	eng.passProject(ctx, id, false) // N23
 	st, _ = LoadState(paths.State(id))
@@ -1090,20 +1097,44 @@ func TestEngineVoidReviewStoppedWhenTipAdvances(t *testing.T) {
 	eng.passProject(ctx, id, false) // N26
 	eng.passProject(ctx, id, false) // N29 starts reviewer
 	st, _ = LoadState(paths.State(id))
-	revTerm := st.Tasks[0].Attempts[0].Review.RunID
+	rev := st.Tasks[0].Attempts[0].Review
 
-	// Worker commits c2 before reporting ready -> tip is ahead of H -> reviewer is void and stopped.
-	if err := os.WriteFile(filepath.Join(wt, "x.go"), []byte("package demo\nvar X = 1\n"), 0o600); err != nil {
-		t.Fatal(err)
+	if dirty {
+		// The reviewer's allowed commands wrote a file, then it passed: void.
+		if err := os.WriteFile(filepath.Join(wt, "x.out"), []byte("built\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		srv.SetScreen(rev.RunID, "❯ prompt\n\n⏺ Fine.\n<report>{\"code\":\""+rev.Code+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
+		srv.SetStatus(rev.RunID, &hc.Status{App: "claude-code", State: "done"})
+	} else {
+		// Worker commits c2 before reporting ready -> tip is ahead of H.
+		if err := os.WriteFile(filepath.Join(wt, "x.go"), []byte("package demo\nvar X = 1\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, wt, "commit", "-am", "feat: c2")
 	}
-	gitIn(t, wt, "commit", "-am", "feat: c2")
 	eng.passProject(ctx, id, false)
 
-	if rs, err := world.RunState(ctx, client, revTerm); err != nil || rs != flow.RunGone {
+	if rs, err := world.RunState(ctx, client, rev.RunID); err != nil || rs != flow.RunGone {
 		t.Fatalf("void reviewer state = (%s, %v), want gone", rs, err)
 	}
 	st, _ = LoadState(paths.State(id))
-	if st.Tasks[0].Attempts[0].Review != nil {
-		t.Fatalf("void review record still set: %+v", st.Tasks[0].Attempts[0].Review)
+	if a := st.Tasks[0].Attempts[0]; len(a.Rounds) != 0 || (a.Review != nil && a.Review.RunID == rev.RunID) {
+		t.Fatalf("void round recorded or kept: rounds=%+v review=%+v", a.Rounds, a.Review)
+	}
+	if n := strings.Count(logBuf.String(), "factory.review_void"); dirty && n != 1 {
+		t.Fatalf("review_void logged %d times, want 1:\n%s", n, logBuf.String())
+	}
+}
+
+// TestReviewerModelDiffersFromWorker: the reviewer never runs the worker's model.
+func TestReviewerModelDiffersFromWorker(t *testing.T) {
+	for _, w := range []string{"sonnet", "opus", "claude-opus-4-5", "claude-sonnet-4-5", "haiku"} {
+		if r := reviewerModel(w); r == "" || strings.Contains(w, r) {
+			t.Errorf("reviewerModel(%q) = %q, want a different model", w, r)
+		}
+	}
+	if reviewerModel(workerModel) == workerModel {
+		t.Errorf("reviewer runs the worker's model %q", workerModel)
 	}
 }

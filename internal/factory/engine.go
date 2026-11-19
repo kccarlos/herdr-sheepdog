@@ -336,8 +336,8 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"), "{outcomes}", bullets(t.Outcomes), "{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", cmp.Or(e.Bin, "sheepdog")).Replace(workerTemplate))
 	termID, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, world.RunSpec{
 		Name: workerName(id, t.ID, len(t.Attempts)), Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
-		Argv: world.ClaudeArgv(flow.RoleWorker, "sonnet", "medium", "bypassPermissions"), Prompt: prompt,
-		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleWorker, "sheepdog.task": t.ID, "sheepdog.model": "sonnet"},
+		Argv: world.ClaudeArgv(flow.RoleWorker, workerModel, "medium", "bypassPermissions"), Prompt: prompt,
+		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleWorker, "sheepdog.task": t.ID, "sheepdog.model": workerModel},
 	})
 	if err == nil {
 		a.RunID = termID
@@ -345,8 +345,12 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	return "started worker " + termID, abort, err
 }
 
+// workerModel is the model every worker runs in slice 1.
+const workerModel = "sonnet"
+
+// reviewerModel picks a reviewer model other than the worker's.
 func reviewerModel(worker string) string {
-	if worker == "opus" {
+	if strings.Contains(worker, "opus") {
 		return "sonnet"
 	}
 	return "opus"
@@ -359,8 +363,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	if a.Review == nil {
 		return false
 	}
-	if t.Done != nil || t.Closed != nil || facts.PR.State == flow.PRMerged || facts.PR.State == flow.PRClosed ||
-		facts.TipRel != flow.RelSame || a.Review.Round != len(a.Rounds)+1 || a.Review.Head != flow.H(*a) {
+	voidRound := func() bool {
 		if err := world.StopRun(ctx, e.HC, a.Review.RunID); err != nil {
 			e.logError("factory.hc_error", id, err)
 			return true
@@ -371,6 +374,10 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 			return true
 		}
 		return false
+	}
+	if t.Done != nil || t.Closed != nil || facts.PR.State == flow.PRMerged || facts.PR.State == flow.PRClosed ||
+		facts.TipRel != flow.RelSame || a.Review.Round != len(a.Rounds)+1 || a.Review.Head != flow.H(*a) {
+		return voidRound()
 	}
 	if a.Review.RunID == "" {
 		return false
@@ -393,6 +400,20 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	if rd.Status == world.ReportNotYet {
 		return false
 	}
+	// The reviewer's allowed commands can write (tests, git diff --output):
+	// a verdict counts only for an untouched worktree at the round's head.
+	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
+	tip, _, clean, err := world.InspectWorktree(gctx, a.Worktree, flow.H(*a))
+	cancel()
+	if err != nil {
+		e.logError("factory.git_error", id, err)
+		return true
+	}
+	if !clean || tip != a.Review.Head {
+		e.logEvent("factory.review_void", map[string]string{"project": id, "task": t.ID, "round": fmt.Sprint(a.Review.Round),
+			"why": "the worktree is not clean at the round's head after the review"})
+		return voidRound()
+	}
 	err = e.acceptVerdictLocked(ctx, id, s, ti, rd)
 	var ref *Refusal
 	if err != nil && !errors.As(err, &ref) {
@@ -403,7 +424,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 
 func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State, ti int) (string, bool, error) {
 	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
-	round, h, model := len(a.Rounds)+1, flow.H(*a), reviewerModel("sonnet")
+	round, h, model := len(a.Rounds)+1, flow.H(*a), reviewerModel(workerModel)
 	if a.Review == nil || a.Review.Round != round || a.Review.Head != h || a.Review.Code == "" {
 		a.Review = &flow.ReviewRun{Round: round, Head: h, Code: strings.ToLower(rand.Text()[:10]), Reviewer: flow.Reviewer{CLI: "claude", Model: model, Effort: "medium"}}
 	}

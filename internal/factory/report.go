@@ -108,7 +108,12 @@ func (e *Engine) acceptVerdictLocked(ctx context.Context, id string, s *flow.Sta
 	if rev == nil {
 		return e.refuse(id, "invalid_report", "No review round is active for this task.")
 	}
-	rep, why := rd.Report, ""
+	rep, why, majors := rd.Report, "", 0
+	for l := range strings.Lines(rd.Body) {
+		if strings.HasPrefix(strings.TrimSpace(l), "major:") {
+			majors++
+		}
+	}
 	switch {
 	case rd.Status != world.ReportFound || rep.Code == "" || rep.Code != rev.Code:
 		why = "The report tag is malformed or does not carry this round's one-time code."
@@ -116,6 +121,8 @@ func (e *Engine) acceptVerdictLocked(ctx context.Context, id string, s *flow.Sta
 		why = "The report tag does not match this review run's round and commit."
 	case (rep.Verdict != flow.VerdictPass || rep.Majors != 0) && (rep.Verdict != flow.VerdictChanges || rep.Majors < 1):
 		why = "Verdict must be pass with 0 majors or changes with at least 1 major."
+	case rep.Majors != majors:
+		why = fmt.Sprintf("The tag says %d major(s) but %d findings line(s) start with major:.", rep.Majors, majors)
 	}
 	errKey := "verdict " + id + " " + t.ID + " " + rev.RunID
 	if why != "" {

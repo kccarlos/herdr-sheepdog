@@ -60,7 +60,9 @@ func ClaudeArgv(role, model, effort, permissionMode string) []string {
 }
 
 // reviewerTools is what a reviewer may use without asking: read the code and
-// its history, and run the project's tests. Nothing that edits files.
+// its history, and run the project's tests. No edit tools, but test runners
+// run worker code and some git and go flags write files: read-only is a rule
+// on the model, backed by the engine's clean-worktree check on the verdict.
 const reviewerTools = "Read Grep Glob LS " +
 	"Bash(git diff:*) Bash(git log:*) Bash(git show:*) Bash(git status:*) " +
 	"Bash(go build:*) Bash(go test:*) Bash(go vet:*) Bash(gofmt -l:*) Bash(make test:*) " +
@@ -285,12 +287,9 @@ type ReportRead struct {
 
 var (
 	ansiRe       = regexp.MustCompile(`\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))`)
-	hcOpenRe     = regexp.MustCompile(`<hc(?:\s[^>]*)?>`)
 	tuiPromptRe  = regexp.MustCompile(`(?m)^❯[ \t\x{00a0}]+\S`)
 	tuiReplyRe   = regexp.MustCompile(`(?m)^⏺`)
-	tuiFooterRe  = regexp.MustCompile(`(?m)^(?:✻ |\x{2500}{8,})`)
 	tuiInputRe   = regexp.MustCompile(`(?m)^\x{2500}{8,}\n❯`)
-	fenceOpenRe  = regexp.MustCompile("(?s)^```[a-zA-Z0-9_-]*\\s*")
 	wrapIndentRe = regexp.MustCompile("\r?\n[ \t>]*")
 	nonSlugRe    = regexp.MustCompile(`[^a-z0-9]+`)
 )
@@ -345,15 +344,13 @@ func stateIdle(s string) bool { return s == "idle" || s == "done" || s == "error
 
 func parseReportText(text, code string) ReportRead {
 	clean := ansiRe.ReplaceAllString(strings.ReplaceAll(text, "\r\n", "\n"), "")
-	if m := hcOpenRe.FindAllStringIndex(clean, -1); len(m) > 0 {
-		var ok bool
-		if _, clean, ok = strings.Cut(clean[m[len(m)-1][1]:], "</hc>"); !ok {
-			return ReportRead{Status: ReportNotYet}
-		}
-	}
-	// The input box may hold a draft the owner typed (seen live); it is not a prompt echo.
+	// The input box at the bottom may hold a draft the owner typed (seen
+	// live); it is not a prompt echo. A box with a reply or tag after it is
+	// not at the bottom.
 	if m := tuiInputRe.FindAllStringIndex(clean, -1); len(m) > 0 {
-		clean = clean[:m[len(m)-1][0]]
+		if rest := clean[m[len(m)-1][0]:]; !tuiReplyRe.MatchString(rest) && !strings.Contains(rest, "<report>") {
+			clean = clean[:m[len(m)-1][0]]
+		}
 	}
 	if m := tuiPromptRe.FindAllStringIndex(clean, -1); len(m) > 0 {
 		r := tuiReplyRe.FindStringIndex(clean[m[len(m)-1][0]:])
@@ -362,30 +359,18 @@ func parseReportText(text, code string) ReportRead {
 		}
 		clean = clean[m[len(m)-1][0]+r[0]:]
 	}
-	if f := tuiFooterRe.FindStringIndex(clean); f != nil && !strings.Contains(clean[f[0]:], "<report>") {
-		clean = clean[:f[0]]
-	}
 	openIdx := strings.LastIndex(clean, "<report>")
 	if openIdx < 0 {
 		return ReportRead{Status: ReportNotYet}
 	}
-	tail := clean[openIdx+len("<report>"):]
-	raw, _, ok := strings.Cut(tail, "</report>")
+	// The TUI wraps long lines with an indent; joining them restores the tag.
+	raw, _, ok := strings.Cut(wrapIndentRe.ReplaceAllString(clean[openIdx+len("<report>"):], ""), "</report>")
 	if !ok {
-		if raw, _, ok = strings.Cut(wrapIndentRe.ReplaceAllString(tail, ""), "</report>"); !ok {
-			return ReportRead{Status: ReportNotYet}
-		}
+		return ReportRead{Status: ReportNotYet}
 	}
 	raw = strings.TrimSpace(raw)
-	cleanJSON := raw
-	if strings.HasPrefix(cleanJSON, "```") {
-		cleanJSON = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(fenceOpenRe.ReplaceAllString(cleanJSON, "")), "```"))
-	}
-	body := strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(clean[:openIdx]), "⏺")), "```json"), "```"))
-	rep, valid := decodeReportJSON(cleanJSON)
-	if !valid {
-		rep, valid = decodeReportJSON(wrapIndentRe.ReplaceAllString(cleanJSON, ""))
-	}
+	body := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(clean[:openIdx]), "⏺"))
+	rep, valid := decodeReportJSON(raw)
 	if !valid || code == "" || rep.Code != code {
 		return ReportRead{Status: ReportInvalid, Report: rep, Raw: raw, Body: body}
 	}

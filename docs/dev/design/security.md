@@ -579,7 +579,11 @@ These refuse any non-loopback caller with `403 {"error":"loopback_only"}`:
   plan), not a hostile local process, which can unset the token or read
   another run's environment. "Owner" means a terminal with no run token. The
   real backstops are branch protection on the base branch and the acceptance
-  table;
+  table. The reviewer's read-only stance is a rule on the model plus a check,
+  not a sandbox: its allowed test and git commands can run worker code and
+  write files, so the engine voids a round whose worktree is not clean at the
+  round's head when the verdict is read, and branch protection stays the last
+  backstop;
 - debug and internal: `/api/inject/*` (blocked, pane, done, state, screen,
   remove), `/api/herdr/event` (the herdr hooks), `/api/prompts/reload`,
   `/api/brain/*`, `/api/context/*`, `/testdata/*`;
