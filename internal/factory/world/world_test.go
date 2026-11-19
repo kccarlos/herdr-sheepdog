@@ -32,7 +32,7 @@ func TestClaudeArgvGolden(t *testing.T) {
 	}{
 		{"coordinator", flow.RoleCoordinator, "opus", "high", "bypassPermissions", "testdata/claude_coordinator.golden"},
 		{"worker", flow.RoleWorker, "sonnet", "high", "bypassPermissions", "testdata/claude_worker.golden"},
-		{"reviewer", flow.RoleReviewer, "opus", "high", "plan", "testdata/claude_reviewer.golden"},
+		{"reviewer", flow.RoleReviewer, "opus", "high", "dontAsk", "testdata/claude_reviewer.golden"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

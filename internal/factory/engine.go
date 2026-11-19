@@ -411,7 +411,7 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		"{outcomes}", bullets(t.Outcomes), "{base}", a.BaseCommit, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code).Replace(reviewerTemplate))
 	termID, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, world.RunSpec{
 		Name: reviewerName(id, t.ID, len(t.Attempts), round), Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
-		Argv: world.ClaudeArgv(flow.RoleReviewer, model, "medium", "plan"), Prompt: prompt,
+		Argv: world.ClaudeArgv(flow.RoleReviewer, model, "medium", "dontAsk"), Prompt: prompt,
 		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleReviewer, "sheepdog.task": t.ID, "sheepdog.model": model},
 	})
 	if err != nil {

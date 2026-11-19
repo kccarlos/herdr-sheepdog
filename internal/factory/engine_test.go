@@ -566,7 +566,7 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 		t.Fatalf("reviewer RunParams = %+v", revRun)
 	}
 	rArgv := strings.Join(revRun.Argv, " ")
-	for _, want := range []string{"claude", "--model opus", "--effort medium", "--permission-mode plan", c1, att.Review.Code, "<report>"} {
+	for _, want := range []string{"claude", "--model opus", "--effort medium", "--permission-mode dontAsk", c1, att.Review.Code, "<report>"} {
 		if !strings.Contains(rArgv, want) {
 			t.Errorf("reviewer argv/prompt missing %q:\n%s", want, rArgv)
 		}

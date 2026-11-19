@@ -47,8 +47,22 @@ func ClaudeArgv(role, model, effort, permissionMode string) []string {
 	if permissionMode == "bypassPermissions" {
 		argv = append(argv, "--settings", `{"skipDangerousModePermissionPrompt":true}`)
 	}
+	if permissionMode == "dontAsk" {
+		// A reviewer never waits on a prompt (seen live: plan mode waited 20
+		// minutes on a shell prompt, then reviewed without running tests).
+		// dontAsk denies anything not listed; the list is read-only plus
+		// the usual test runners, and never Edit or Write.
+		argv = append(argv, "--allowedTools", reviewerTools)
+	}
 	return argv
 }
+
+// reviewerTools is what a reviewer may use without asking: read the code and
+// its history, and run the project's tests. Nothing that edits files.
+const reviewerTools = "Read Grep Glob LS " +
+	"Bash(git diff:*) Bash(git log:*) Bash(git show:*) Bash(git status:*) " +
+	"Bash(go test:*) Bash(go vet:*) Bash(gofmt -l:*) Bash(make test:*) " +
+	"Bash(npm test:*) Bash(pytest:*) Bash(python3 -m pytest:*) Bash(python3 -m unittest:*)"
 
 // StartRun launches spec in herdr-core and returns its terminal address.
 func StartRun(ctx context.Context, client *hc.Client, spec RunSpec) (string, error) {
