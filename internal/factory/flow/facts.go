@@ -111,12 +111,12 @@ func (in In) attempt() *Attempt {
 	return &in.Task.Attempts[len(in.Task.Attempts)-1]
 }
 
-// acts is the current attempt's ledger.
+// acts is the current attempt's ledger (or the task's before the first attempt).
 func (in In) acts() []Act {
 	if a := in.attempt(); a != nil {
 		return a.Acts
 	}
-	return nil
+	return in.Task.Acts
 }
 
 // H is the attempt's head (design.md 3.1): the base commit, then the

@@ -217,7 +217,7 @@ func TestReportReadyAcceptance(t *testing.T) {
 	eng := New(paths, nil)
 
 	const projID = "proj-ready"
-	created, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1"), "T1", "feat: x")
+	created, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: x")
 	if err != nil {
 		t.Fatal(err)
 	}

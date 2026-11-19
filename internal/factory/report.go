@@ -76,7 +76,9 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 	}
 	t := &s.Tasks[ti]
 	a := &t.Attempts[len(t.Attempts)-1]
-	tip, rel, clean, err := world.InspectWorktree(context.Background(), a.Worktree, flow.H(*a))
+	ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
+	defer cancel()
+	tip, rel, clean, err := world.InspectWorktree(ctx, a.Worktree, flow.H(*a))
 	if err != nil {
 		return err
 	}

@@ -507,3 +507,82 @@ func TestNewWorktreeFromRemoteBaseAndIdempotent(t *testing.T) {
 		t.Fatal("expected test guard error outside os.TempDir()")
 	}
 }
+
+// TestNewWorktreeUsesRemoteDefaultBranchNotUpstream checks KB-WKT-1: when the
+// owner checkout is on a feature branch tracking origin/feature and origin/HEAD
+// is unset, NewWorktree branches from origin's default branch, never @{u}.
+func TestNewWorktreeUsesRemoteDefaultBranchNotUpstream(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	bare := filepath.Join(tmp, "remote.git")
+	if out, err := exec.Command("git", "init", "--bare", "--initial-branch=main", bare).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v: %s", err, out)
+	}
+	repo := filepath.Join(tmp, "repo")
+	if out, err := exec.Command("git", "init", "--initial-branch=main", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init repo: %v: %s", err, out)
+	}
+	runGit(t, repo, "remote", "add", "origin", bare)
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "commit", "-m", "chore: initial main")
+	runGit(t, repo, "push", "-u", "origin", "main")
+	mainSHA := runGit(t, repo, "rev-parse", "HEAD")
+
+	runGit(t, repo, "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(repo, "FEATURE.md"), []byte("wip\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "FEATURE.md")
+	runGit(t, repo, "commit", "-m", "feat: feature work")
+	runGit(t, repo, "push", "-u", "origin", "feature")
+	runGit(t, repo, "config", "remote.origin.followRemoteHead", "never")
+	_ = exec.Command("git", "-C", repo, "remote", "set-head", "origin", "-d").Run()
+
+	wt, err := NewWorktree(ctx, repo, filepath.Join(tmp, "wt-1"), "t1", "feat: task on default")
+	if err != nil {
+		t.Fatalf("NewWorktree: %v", err)
+	}
+	if wt.BaseCommit != mainSHA {
+		t.Fatalf("BaseCommit = %s, want remote default branch %s", wt.BaseCommit, mainSHA)
+	}
+	if _, err := os.Stat(filepath.Join(wt.Path, "FEATURE.md")); !os.IsNotExist(err) {
+		t.Fatal("feature branch file leaked into task worktree")
+	}
+}
+
+// TestInspectWorktreeShowsUntrackedDespiteGitConfig checks KB-MRG-78: a repo or
+// user config setting status.showUntrackedFiles=no must not hide untracked files.
+func TestInspectWorktreeShowsUntrackedDespiteGitConfig(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	bare := filepath.Join(tmp, "remote.git")
+	if out, err := exec.Command("git", "init", "--bare", "--initial-branch=main", bare).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v: %s", err, out)
+	}
+	repo := filepath.Join(tmp, "repo")
+	if out, err := exec.Command("git", "init", "--initial-branch=main", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init repo: %v: %s", err, out)
+	}
+	runGit(t, repo, "remote", "add", "origin", bare)
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("v0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "commit", "-m", "chore: initial")
+	runGit(t, repo, "push", "-u", "origin", "main")
+	runGit(t, repo, "config", "status.showUntrackedFiles", "no")
+
+	wt, err := NewWorktree(ctx, repo, filepath.Join(tmp, "wt-1"), "t1", "feat: dirty check")
+	if err != nil {
+		t.Fatalf("NewWorktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "untracked.tmp"), []byte("dirty\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, clean, err := InspectWorktree(ctx, wt.Path, wt.BaseCommit); err != nil || clean {
+		t.Fatalf("InspectWorktree with status.showUntrackedFiles=no: clean=%v err=%v, want clean=false", clean, err)
+	}
+}

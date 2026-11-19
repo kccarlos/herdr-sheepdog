@@ -28,6 +28,7 @@ type Project struct {
 	Started      bool   `json:"started,omitempty"`
 	RunID        string `json:"run_id,omitempty"`           // coordinator terminal identity
 	RunTokenHash string `json:"run_token_sha256,omitempty"` // SHA-256 hex of the coordinator's SHEEPDOG_RUN_TOKEN
+	Acts         []Act  `json:"acts,omitempty"`
 }
 
 // Task is a planned task. It has no phase field: rows derive where it is.
@@ -39,6 +40,7 @@ type Task struct {
 	After    []string  `json:"after,omitempty"`
 	Done     *Merged   `json:"done,omitempty"`
 	Closed   *Closed   `json:"closed,omitempty"`
+	Acts     []Act     `json:"acts,omitempty"`
 	Attempts []Attempt `json:"attempts"`
 }
 

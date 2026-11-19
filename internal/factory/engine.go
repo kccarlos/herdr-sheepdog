@@ -27,6 +27,8 @@ var coordinatorTemplate string
 //go:embed worker.md
 var workerTemplate string
 
+var lockGitTimeout = 15 * time.Second
+
 // Engine runs the factory loop and handles owner start and stop commands.
 type Engine struct {
 	Paths        Paths
@@ -52,7 +54,8 @@ func (e *Engine) Start(folder, goal string) error {
 	if folder == "" || goal == "" {
 		return errors.New("folder and goal are required")
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
+	defer cancel()
 	root, id, err := world.RepoProject(ctx, folder, true)
 	if err != nil {
 		return err
@@ -70,7 +73,7 @@ func (e *Engine) Start(folder, goal string) error {
 			s.Project.RunID, s.Project.RunTokenHash = "", ""
 		}
 	}
-	s.Project.Folder, s.Project.Goal, s.Project.Started = root, goal, true
+	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts = root, goal, true, nil
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "start", "folder": root, "goal": goal}, Rule: "start", Decision: "started", Why: goal})
 }
 
@@ -99,7 +102,7 @@ func (e *Engine) Stop(project string) error {
 			}
 		}
 	}
-	s.Project.RunID, s.Project.RunTokenHash, s.Project.Started = "", "", false
+	s.Project.RunID, s.Project.RunTokenHash, s.Project.Started, s.Project.Acts = "", "", false, nil
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "stop"}, Rule: "stop", Decision: "stopped", Why: "stopped by owner"})
 }
 
@@ -146,7 +149,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	if !s.Project.Started {
 		return
 	}
-	if s.Project.RunID == "" {
+	if s.Project.RunID == "" && flow.Count(s.Project.Acts, "coordinator") == 0 {
 		prompt := strings.TrimSpace(strings.NewReplacer("{folder}", s.Project.Folder, "{goal}", s.Project.Goal, "{sheepdog}", cmp.Or(e.Bin, "sheepdog")).Replace(coordinatorTemplate))
 		termID, abort, err := e.launchRunLocked(ctx, id, &s, &s.Project.RunTokenHash, world.RunSpec{
 			Name: coordName(id), Cwd: s.Project.Folder, ClaudeConfig: e.Paths.ClaudeConfig,
@@ -154,11 +157,13 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 			Prompt: prompt,
 			Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleCoordinator, "sheepdog.model": "opus"},
 		})
-		if abort {
+		if abort || ctx.Err() != nil {
 			return
 		}
 		line := LogLine{By: "engine", Facts: map[string]any{"coordinator": flow.RunGone}, Rule: "J7", Asked: []string{"coordinator"}}
 		if err != nil {
+			e.logError("factory.exec_error", id, err)
+			s.Project.Acts = append(s.Project.Acts, flow.Act{Key: "coordinator", Result: "failed", At: time.Now()})
 			line.Why = err.Error()
 		} else {
 			s.Project.RunID = termID
@@ -220,7 +225,9 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	var facts flow.Facts
 	if n := len(s.Tasks[ti].Attempts); n > 0 {
 		a := s.Tasks[ti].Attempts[n-1]
-		tip, rel, _, err := world.InspectWorktree(ctx, a.Worktree, flow.H(a))
+		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
+		tip, rel, _, err := world.InspectWorktree(gctx, a.Worktree, flow.H(a))
+		cancel()
 		if err != nil {
 			e.logError("factory.git_error", id, err)
 			return
@@ -241,8 +248,11 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	var decs []string
 	whys := []string{d.Why}
 	act := func(k, res string) {
+		a := flow.Act{Key: k, Result: res, At: now}
 		if n := len(s.Tasks[ti].Attempts); n > 0 {
-			s.Tasks[ti].Attempts[n-1].Acts = append(s.Tasks[ti].Attempts[n-1].Acts, flow.Act{Key: k, Result: res, At: now})
+			s.Tasks[ti].Attempts[n-1].Acts = append(s.Tasks[ti].Attempts[n-1].Acts, a)
+		} else {
+			s.Tasks[ti].Acts = append(s.Tasks[ti].Acts, a)
 		}
 	}
 	for _, ask := range d.Asked {
@@ -255,7 +265,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 			continue
 		}
 		dec, abort, err := fn(e, ctx, id, s, ti)
-		if abort {
+		if abort || ctx.Err() != nil {
 			return
 		} else if err != nil {
 			e.logError("factory.exec_error", id, err)
@@ -272,8 +282,14 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 }
 
 func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, ti int) (string, bool, error) {
-	t := &s.Tasks[ti]
-	wt, err := world.NewWorktree(ctx, s.Project.Folder, e.Paths.Worktree(id, t.ID), t.ID, t.Title)
+	t, n := &s.Tasks[ti], len(s.Tasks[ti].Attempts)+1
+	tag := t.ID
+	if n > 1 {
+		tag = fmt.Sprintf("%s-%d", t.ID, n)
+	}
+	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
+	defer cancel()
+	wt, err := world.NewWorktree(gctx, s.Project.Folder, e.Paths.Worktree(id, t.ID, n), tag, t.Title)
 	if err == nil {
 		t.Attempts = append(t.Attempts, flow.Attempt{BaseCommit: wt.BaseCommit, Branch: wt.Branch, Worktree: wt.Path, Ready: []flow.Ready{}, Rounds: []flow.Round{}, Accepts: []flow.Accept{}, Acts: []flow.Act{}})
 	}
@@ -313,7 +329,13 @@ func hcName(s string) string {
 			b[i] = '-'
 		}
 	}
-	return string(b[:min(len(b), 32)])
+	if len(b) == 0 || b[0] < 'a' || b[0] > 'z' {
+		b = append([]byte{'x'}, b...)
+	}
+	if len(b) > 32 || string(b) != s {
+		return string(b[:min(len(b), 23)]) + "-" + tokenHash(s)[:8]
+	}
+	return string(b)
 }
 
 func (e *Engine) logError(typ, id string, err error) {
@@ -337,9 +359,11 @@ func (e *Engine) commitLocked(id string, s *flow.State, l LogLine) error {
 	if err := SaveState(e.Paths.State(id), *s); err != nil {
 		return err
 	}
-	select {
-	case e.wake <- struct{}{}:
-	default:
+	if l.By != "engine" {
+		select {
+		case e.wake <- struct{}{}:
+		default:
+		}
 	}
 	return nil
 }

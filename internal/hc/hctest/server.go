@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -479,7 +480,7 @@ func (s *Server) handle(method string, params json.RawMessage) (any, error) {
 		if err := decodeParams(params, &p); err != nil {
 			return nil, err
 		}
-		return s.run(p), nil
+		return s.run(p)
 	case "terminal.kill":
 		var p terminalParams
 		if err := decodeParams(params, &p); err != nil {
@@ -617,7 +618,12 @@ func (s *Server) interrupt(target string) (hc.InterruptResult, error) {
 	return hc.InterruptResult{Key: "ctrl+c", Outcome: "unknown"}, nil
 }
 
-func (s *Server) run(p hc.RunParams) hc.Terminal {
+var validTerminalName = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,31}$`)
+
+func (s *Server) run(p hc.RunParams) (hc.Terminal, error) {
+	if p.Name != "" && !validTerminalName.MatchString(p.Name) {
+		return hc.Terminal{}, protocolError(-32602, "bad name "+p.Name, "invalid_params", "")
+	}
 	s.mu.Lock()
 	address := s.nextAddressLocked()
 	argv := append([]string(nil), p.Argv...)
@@ -653,7 +659,7 @@ func (s *Server) run(p hc.RunParams) hc.Terminal {
 			t = updated
 		}
 	}
-	return t
+	return t, nil
 }
 
 func (s *Server) rm(target string) (hc.RemoveResult, error) {

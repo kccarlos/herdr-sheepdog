@@ -444,7 +444,7 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 		t.Fatalf("after N11 attempts = %+v", st.Tasks[0].Attempts)
 	}
 	att := st.Tasks[0].Attempts[0]
-	wantWT, _ := filepath.EvalSymlinks(paths.Worktree(id, "T1"))
+	wantWT, _ := filepath.EvalSymlinks(paths.Worktree(id, "T1", 1))
 	if att.BaseCommit != baseSHA || att.Branch != "task/T1-feat-add-greet-helper" || att.Worktree != wantWT {
 		t.Fatalf("attempt after N11 = %+v, want base=%s wt=%s", att, baseSHA, wantWT)
 	}
@@ -562,17 +562,227 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 
 // TestTerminalNamesFitHC: names built from plan task ids (capitals, spaces,
 // long ids) still pass herdr-core's name rule (seen live: "worker-…-T1-1"
-// was refused).
+// was refused), and shortened or sanitized names do not collide across tasks
+// sharing a 32-char prefix, attempts, or case variants.
 func TestTerminalNamesFitHC(t *testing.T) {
 	ok := regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,31}$`)
+	shared := strings.Repeat("a", 32)
+	a1 := workerName("proj-4cd6ea6a", shared+"-alpha", 1)
+	b1 := workerName("proj-4cd6ea6a", shared+"-bravo", 1)
+	a2 := workerName("proj-4cd6ea6a", shared+"-alpha", 2)
+	cap1 := workerName("proj-4cd6ea6a", "SDF-Alpha", 1)
+	low1 := workerName("proj-4cd6ea6a", "sdf-alpha", 1)
 	for _, n := range []string{
 		workerName("proj-4cd6ea6a", "T1", 1),
 		workerName("proj-4cd6ea6a", "Feat Add/Greeting", 12),
 		workerName("proj-4cd6ea6a", strings.Repeat("X", 60), 3),
 		coordName("proj-4cd6ea6a"),
+		a1, b1, a2, cap1, low1,
 	} {
 		if !ok.MatchString(n) {
 			t.Errorf("terminal name %q breaks herdr-core's rule", n)
 		}
+	}
+	for _, n := range []string{a1, b1, a2} {
+		if !strings.HasPrefix(n, "worker-4cd6ea6a-aaaaaaa-") {
+			t.Fatalf("shortened name %q lost readable prefix", n)
+		}
+	}
+	if a1 == b1 || a1 == a2 || b1 == a2 || cap1 == low1 {
+		t.Fatalf("terminal name collision: a1=%q b1=%q a2=%q cap1=%q low1=%q", a1, b1, a2, cap1, low1)
+	}
+}
+
+// TestEngineFailedExecutorsAskOnceAndDoNotSpin checks item 1 (KB-RUN-1):
+// engine pass commits never wake the loop early, and a failed NewWorktree or
+// StartRun (coordinator or worker) records a failed act so many passes ask once
+// and write a bounded number of log lines.
+func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
+	ctx := context.Background()
+	runFor := func(e *Engine, d time.Duration) {
+		rctx, cancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			e.Run(rctx)
+		}()
+		time.Sleep(d)
+		cancel()
+		<-done
+	}
+
+	// 1. Failing NewWorktree (repo has no remote) over many passes asks N11 once.
+	srv1 := hctest.New(t)
+	var runs1 []hc.RunParams
+	srv1.OnRun = func(_ hc.Terminal, p hc.RunParams) { runs1 = append(runs1, p) }
+	eng1 := New(testPaths(t), hc.NewClient(srv1.Path))
+	eng1.PassInterval = 10 * time.Millisecond
+	repoNoRemote := initGitRepo(t)
+	if err := eng1.Start(repoNoRemote, "Goal with no remote"); err != nil {
+		t.Fatal(err)
+	}
+	id1 := eng1.projectDirs()[0].Name()
+	eng1.passProject(ctx, id1, false)
+	if err := eng1.Report(runs1[0].Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"t1","title":"feat: x"}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	runFor(eng1, 80*time.Millisecond)
+	log1, err := os.ReadFile(eng1.Paths.Log(id1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Split(strings.TrimSpace(string(log1)), "\n"); len(lines) != 4 {
+		t.Fatalf("failing NewWorktree wrote %d log lines (want 4: start, J7, plan apply, 1 N11):\n%s", len(lines), log1)
+	}
+	if st1, err := LoadState(eng1.Paths.State(id1)); err != nil || flow.Count(st1.Tasks[0].Acts, flow.AskNewAttempt) != 1 || flow.Done(st1.Tasks[0].Acts, flow.AskNewAttempt) {
+		t.Fatalf("failing NewWorktree task acts = %+v (err=%v)", st1.Tasks[0].Acts, err)
+	}
+
+	// 2. Failing coordinator StartRun over many passes asks J7 once.
+	srv2 := hctest.New(t)
+	p2 := testPaths(t)
+	p2.ClaudeConfig = "/nonexistent-sheepdog-test-guard/.claude.json"
+	eng2 := New(p2, hc.NewClient(srv2.Path))
+	eng2.PassInterval = 10 * time.Millisecond
+	if err := eng2.Start(initGitRepo(t), "Goal with failing coord"); err != nil {
+		t.Fatal(err)
+	}
+	id2 := eng2.projectDirs()[0].Name()
+	runFor(eng2, 80*time.Millisecond)
+	log2, _ := os.ReadFile(eng2.Paths.Log(id2))
+	if lines := strings.Split(strings.TrimSpace(string(log2)), "\n"); len(lines) != 2 {
+		t.Fatalf("failing coordinator StartRun wrote %d log lines (want 2: start, 1 J7):\n%s", len(lines), log2)
+	}
+	if st2, err := LoadState(eng2.Paths.State(id2)); err != nil || flow.Count(st2.Project.Acts, "coordinator") != 1 || flow.Done(st2.Project.Acts, "coordinator") {
+		t.Fatalf("failing coordinator project acts = %+v (err=%v)", st2.Project.Acts, err)
+	}
+
+	// 3. Pass commit does not self-wake Run, and failing worker StartRun over many passes asks N23 once.
+	srv3 := hctest.New(t)
+	runs3Ch := make(chan hc.RunParams, 8)
+	srv3.OnRun = func(_ hc.Terminal, p hc.RunParams) { runs3Ch <- p }
+	eng3 := New(testPaths(t), hc.NewClient(srv3.Path))
+	eng3.PassInterval = time.Hour
+	repo3, _ := initGitRepoWithRemote(t)
+	rctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		eng3.Run(rctx)
+	}()
+	if err := eng3.Start(repo3, "Goal"); err != nil {
+		t.Fatal(err)
+	}
+	var coordRun hc.RunParams
+	select {
+	case coordRun = <-runs3Ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("coordinator did not start")
+	}
+	id3 := eng3.projectDirs()[0].Name()
+	if err := eng3.Report(coordRun.Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"t1","title":"feat: x"}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		if st, err := LoadState(eng3.Paths.State(id3)); err == nil && len(st.Tasks) == 1 && len(st.Tasks[0].Attempts) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("N11 did not create attempt after plan apply")
+		}
+	}
+	time.Sleep(40 * time.Millisecond)
+	cancel()
+	<-done
+	if len(runs3Ch) != 0 {
+		t.Fatalf("engine pass commit woke loop early and started worker without tick: extra runs=%d", len(runs3Ch))
+	}
+
+	eng3.Paths.ClaudeConfig = "/nonexistent-sheepdog-test-guard/.claude.json"
+	eng3.PassInterval = 10 * time.Millisecond
+	reqsBefore := len(srv3.Requests())
+	runFor(eng3, 80*time.Millisecond)
+	if got := len(srv3.Requests()) - reqsBefore; got != 2 { // 1 launchRunLocked RunState + 1 StartRun Get, never retried
+		t.Fatalf("failing worker StartRun sent %d hc requests across many passes, want 2 (1 try)", got)
+	}
+	log3, _ := os.ReadFile(eng3.Paths.Log(id3))
+	if lines := strings.Split(strings.TrimSpace(string(log3)), "\n"); len(lines) != 5 {
+		t.Fatalf("failing worker StartRun wrote %d log lines (want 5):\n%s", len(lines), log3)
+	}
+	if st3, err := LoadState(eng3.Paths.State(id3)); err != nil || flow.Count(st3.Tasks[0].Attempts[0].Acts, flow.AskStartWorker) != 1 || flow.Done(st3.Tasks[0].Attempts[0].Acts, flow.AskStartWorker) {
+		t.Fatalf("failing worker attempt acts = %+v (err=%v)", st3.Tasks[0].Attempts[0].Acts, err)
+	}
+}
+
+// TestAttemptWorktreePathPerAttemptAndLockGitTimeout checks item 6: worktree
+// directories are keyed per attempt (worktrees/<task>-<n>), and git calls made
+// while holding Engine.mu carry a context deadline rather than context.Background().
+func TestAttemptWorktreePathPerAttemptAndLockGitTimeout(t *testing.T) {
+	ctx := context.Background()
+	paths := testPaths(t)
+	repo, _ := initGitRepoWithRemote(t)
+	eng := New(paths, nil)
+	if err := eng.Start(repo, "Goal"); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "t1"
+	st.Tasks = []flow.Task{{ID: "t1", Title: "feat: add x", Attempts: []flow.Attempt{}}}
+	if _, _, err := eng.execNewAttempt(ctx, id, &st, 0); err != nil {
+		t.Fatalf("attempt 1: %v", err)
+	}
+	if _, _, err := eng.execNewAttempt(ctx, id, &st, 0); err != nil {
+		t.Fatalf("attempt 2: %v", err)
+	}
+	w1, w2 := st.Tasks[0].Attempts[0].Worktree, st.Tasks[0].Attempts[1].Worktree
+	if !strings.HasSuffix(w1, filepath.Join("worktrees", "t1-1")) || !strings.HasSuffix(w2, filepath.Join("worktrees", "t1-2")) || w1 == w2 {
+		t.Fatalf("attempt worktrees = (%q, %q), want .../worktrees/t1-1 and .../worktrees/t1-2", w1, w2)
+	}
+}
+
+func TestEngineLockGitCallsUseTimeout(t *testing.T) {
+	old := lockGitTimeout
+	lockGitTimeout = 60 * time.Millisecond
+	t.Cleanup(func() { lockGitTimeout = old })
+
+	paths := testPaths(t)
+	repo, baseSHA := initGitRepoWithRemote(t)
+	eng := New(paths, nil)
+	const projID = "proj-timeout"
+	st := flow.State{
+		Seq:      1,
+		Project:  flow.Project{ID: projID, Folder: repo, Started: true, RunID: "t1"},
+		Settings: flow.DefaultSettings(),
+		Tasks: []flow.Task{{
+			ID: "t1", Title: "feat: x",
+			Attempts: []flow.Attempt{{
+				BaseCommit: baseSHA, Branch: "task/t1-feat-x", Worktree: repo,
+				RunTokenHash: tokenHash("tok-w"),
+			}},
+		}},
+	}
+	if err := SaveState(paths.State(projID), st); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeBin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fakeBin, "git"), []byte("#!/bin/sh\nexec sleep 2\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBin+":"+os.Getenv("PATH"))
+
+	start := time.Now()
+	err := eng.Report("tok-w", "ready", []byte(`{"head":"`+baseSHA+`"}`))
+	if elapsed := time.Since(start); err == nil || elapsed > time.Second {
+		t.Fatalf("Report ready under hung git took %s (err=%v), want lock timeout", elapsed, err)
+	}
+	start = time.Now()
+	eng.passProject(context.Background(), projID, false)
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("passProject under hung git took %s, want lock timeout", elapsed)
 	}
 }

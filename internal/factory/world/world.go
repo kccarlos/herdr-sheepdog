@@ -341,13 +341,22 @@ func remoteBaseCommit(ctx context.Context, repo string, fetch bool) (string, str
 			return "", "", err
 		}
 	}
-	sym, _ := gitCmd(ctx, repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/"+remote+"/HEAD")
-	up, _ := gitCmd(ctx, repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-	cur, _ := gitCmd(ctx, repo, "symbolic-ref", "--quiet", "--short", "HEAD")
-	for _, ref := range []string{sym, up, remote + "/" + cur, remote + "/main", remote + "/master"} {
-		if strings.HasPrefix(ref, remote+"/") && ref != remote+"/" {
-			if sha, err := gitCmd(ctx, repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err == nil {
-				return ref, sha, nil
+	if ref, _ := gitCmd(ctx, repo, "symbolic-ref", "--quiet", "refs/remotes/"+remote+"/HEAD"); strings.HasPrefix(ref, "refs/remotes/"+remote+"/") {
+		if sha, err := gitCmd(ctx, repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err == nil {
+			return ref, sha, nil
+		}
+	}
+	ls, err := gitCmd(ctx, repo, "ls-remote", "--symref", remote, "HEAD")
+	if err != nil {
+		return "", "", err
+	}
+	for _, ln := range strings.Split(ls, "\n") {
+		if b, ok := strings.CutPrefix(ln, "ref: refs/heads/"); ok {
+			if b, ok = strings.CutSuffix(b, "\tHEAD"); ok && b != "" {
+				ref := "refs/remotes/" + remote + "/" + b
+				if sha, err := gitCmd(ctx, repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err == nil {
+					return ref, sha, nil
+				}
 			}
 		}
 	}
@@ -358,7 +367,7 @@ func remoteBaseCommit(ctx context.Context, repo string, fetch bool) (string, str
 // whether the working tree is clean (design.md 3.1, 7.2, 7.3).
 func InspectWorktree(ctx context.Context, worktree, ref string) (string, flow.Rel, bool, error) {
 	tip, e1 := gitCmd(ctx, worktree, "rev-parse", "--verify", "HEAD^{commit}")
-	status, e2 := gitCmd(ctx, worktree, "status", "--porcelain")
+	status, e2 := gitCmd(ctx, worktree, "status", "--porcelain", "--untracked-files=normal")
 	counts, e3 := gitCmd(ctx, worktree, "rev-list", "--left-right", "--count", ref+"..."+tip)
 	var behind, ahead int
 	_, e4 := fmt.Sscanf(counts, "%d %d", &behind, &ahead)
