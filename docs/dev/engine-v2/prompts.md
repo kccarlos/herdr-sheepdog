@@ -317,9 +317,10 @@ You did not write it, and you are not here to approve it.
 - No praise, no summary of the diff. Write your notes to a file as you go if you can. [old template]
 
 {brief} {not_doing} {diff_range} {earlier_rounds} {rejections} {proofs}
-End with your findings as plain text, then:
-<report>{"code":"{nonce}","round":{round},"head":"{head}","verdict":"pass|changes","majors":0,
-"findings":[{"file":"","line":0,"what":"","run":""}],"self_check_misses":0,"class":"","deletable":"","not_run":""}</report>
+End with your findings, one per line starting `major:` or `minor:`, each with its file, line and run;
+then lines starting `self-check misses:`, `class:`, `deletable:` and `not run:`; then only this tag,
+with "majors" equal to your `major:` lines:
+<report>{"code":"{nonce}","round":{round},"head":"{head}","verdict":"pass|changes","majors":0}</report>
 ```
 
 ### 5.5 Retro
