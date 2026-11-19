@@ -12,15 +12,6 @@ const (
 	RoleReviewer    = "reviewer"
 )
 
-// RunState is a run's status from herdr-core in Slice 1 (plan.md 3).
-type RunState string
-
-const (
-	RunIdle    RunState = "idle"
-	RunWorking RunState = "working"
-	RunGone    RunState = "gone"
-)
-
 // State is one project's state.json. Seq counts the inputs committed to it.
 type State struct {
 	Seq      int64    `json:"seq"`

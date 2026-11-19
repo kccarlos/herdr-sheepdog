@@ -87,7 +87,7 @@ func TestEngineLoopStartsOneCoordinatorAndStopsCleanly(t *testing.T) {
 		t.Fatalf("coordinator cwd = %q, want %q", coord.Cwd, realRepo)
 	}
 	joinedArgv := strings.Join(coord.Argv, " ")
-	for _, want := range []string{"DISABLE_AUTOUPDATER=1", "claude", "--model opus", "--effort high", "--permission-mode bypassPermissions", goal, realRepo} {
+	for _, want := range []string{"DISABLE_AUTOUPDATER=1", "claude", "--model opus", "--effort medium", "--permission-mode bypassPermissions", goal, realRepo} {
 		if !strings.Contains(joinedArgv, want) {
 			t.Errorf("argv %q missing %q", joinedArgv, want)
 		}

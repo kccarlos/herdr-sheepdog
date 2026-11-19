@@ -134,7 +134,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	termID, err := world.StartRun(ctx, e.HC, world.RunSpec{
 		Name:   "coord-" + strings.TrimPrefix(id, "proj-"),
 		Cwd:    s.Project.Folder,
-		Argv:   world.ClaudeArgv(flow.RoleCoordinator, "opus", "high", "bypassPermissions"),
+		Argv:   world.ClaudeArgv(flow.RoleCoordinator, "opus", "medium", "bypassPermissions"),
 		Prompt: prompt,
 		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleCoordinator, "sheepdog.model": "opus"},
 	})
