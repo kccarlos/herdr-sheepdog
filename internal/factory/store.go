@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,6 +63,9 @@ type LogLine struct {
 // the engine never guesses (design.md 15).
 func LoadState(path string) (flow.State, error) {
 	var s flow.State
+	if err := guardTestPath(path); err != nil {
+		return s, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return s, err
@@ -83,6 +87,9 @@ func SaveState(path string, s flow.State) error {
 
 // AppendLog appends one line to log.jsonl.
 func AppendLog(path string, l LogLine) error {
+	if err := guardTestPath(path); err != nil {
+		return err
+	}
 	data, err := json.Marshal(l)
 	if err != nil {
 		return err
@@ -104,6 +111,9 @@ func AppendLog(path string, l LogLine) error {
 // TrimLog drops log lines past seq, left by a crash between the log write
 // and the state write (design.md 14). A torn last line is dropped too.
 func TrimLog(path string, seq int64) error {
+	if err := guardTestPath(path); err != nil {
+		return err
+	}
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil
@@ -116,11 +126,11 @@ func TrimLog(path string, seq int64) error {
 		if len(ln) == 0 {
 			continue
 		}
+		if !bytes.HasSuffix(ln, []byte("\n")) {
+			break // torn last line: an append that did not finish
+		}
 		var l LogLine
 		if err := json.Unmarshal(ln, &l); err != nil {
-			if i == len(lines)-1 && !bytes.HasSuffix(ln, []byte("\n")) {
-				break // torn last line
-			}
 			return fmt.Errorf("factory: %s line %d: %w", path, i+1, err)
 		}
 		if l.Seq <= seq {
@@ -133,7 +143,26 @@ func TrimLog(path string, seq int64) error {
 	return writeAtomic(path, keep.Bytes())
 }
 
+// guardTestPath refuses, under go test, any store path outside the temp
+// dir, so no test can read or write the real home (KB-TST-1, KB-TST-3).
+func guardTestPath(path string) error {
+	if !testing.Testing() {
+		return nil
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	if rel, err := filepath.Rel(os.TempDir(), abs); err != nil || strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("factory: %s is outside the temp dir under go test", path)
+	}
+	return nil
+}
+
 func writeAtomic(path string, data []byte) error {
+	if err := guardTestPath(path); err != nil {
+		return err
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err

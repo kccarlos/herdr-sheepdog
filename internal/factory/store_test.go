@@ -2,6 +2,7 @@ package factory
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -82,5 +83,38 @@ func TestTrimLog(t *testing.T) {
 	}
 	if TrimLog(path, 2) == nil {
 		t.Fatal("a corrupt line that is not the last was accepted")
+	}
+	// A whole last line whose newline never made it is torn too; otherwise
+	// the next append would glue two records onto one line.
+	if err := os.WriteFile(path, []byte(`{"seq":1}`+"\n"+`{"seq":2}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := TrimLog(path, 9); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != `{"seq":1}`+"\n" {
+		t.Fatalf("unterminated last line kept: %q", data)
+	}
+}
+
+// TestStoreRefusesRealHome: a store call pointed outside the temp dir fails
+// under go test, whoever built the path (KB-TST-1).
+func TestStoreRefusesRealHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip(err)
+	}
+	p := Paths{DataDir: filepath.Join(home, ".local", "share", "sheepdog")}
+	if SaveState(p.State("guard-test"), flow.State{}) == nil {
+		t.Fatal("SaveState wrote under the real home")
+	}
+	if _, err := LoadState(p.State("guard-test")); err == nil || os.IsNotExist(err) {
+		t.Fatalf("LoadState read under the real home: %v", err)
+	}
+	if AppendLog(p.Log("guard-test"), LogLine{}) == nil || TrimLog(p.Log("guard-test"), 0) == nil {
+		t.Fatal("the log was touched under the real home")
+	}
+	if SaveState(Paths{}.State("guard-test"), flow.State{}) == nil {
+		t.Fatal("a zero Paths wrote into the checkout")
 	}
 }
