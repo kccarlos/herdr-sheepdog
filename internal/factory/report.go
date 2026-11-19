@@ -1,0 +1,171 @@
+package factory
+
+import (
+	"bytes"
+	"crypto/subtle"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+)
+
+// Refusal is a report or command the acceptance table turned down
+// (design.md 7.2): a code and one plain sentence. Nothing changed.
+type Refusal struct{ Code, Why string }
+
+func (r *Refusal) Error() string { return r.Code + ": " + r.Why }
+
+// owner marks the verbs only the owner may send, from a terminal with no
+// run's token.
+const owner = "owner"
+
+// verbRoles is slice 1's acceptance table: who may send each verb.
+var verbRoles = map[string]string{"start": owner, "stop": owner, "plan apply": flow.RoleCoordinator}
+
+// Report is the acceptance step for everything a run's terminal sends: the
+// token names the run, and through it the role and the project.
+func (e *Engine) Report(token, verb string, args json.RawMessage) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	want, ok := verbRoles[verb]
+	if !ok {
+		return e.refuse("", "kind_not_allowed", fmt.Sprintf("%q is not a report the factory knows.", verb))
+	}
+	if want == owner {
+		return e.refuse("", "kind_not_allowed", fmt.Sprintf("A run's terminal cannot %s the factory; the owner runs it from a terminal with no run's token.", verb))
+	}
+	id, s, role := e.runByTokenLocked(token)
+	if id == "" {
+		return e.refuse("", "invalid_token", "The token matches no run the factory started.")
+	}
+	if role != want {
+		return e.refuse(id, "kind_not_allowed", fmt.Sprintf("A %s may not send %s; only the %s may.", role, verb, want))
+	}
+	if len(s.Tasks) > 0 {
+		return e.refuse(id, "plan_exists", "A plan already exists; change it with plan amend.")
+	}
+	tasks, fails := checkPlan(args)
+	if len(fails) > 0 {
+		return e.refuse(id, "plan_invalid", strings.Join(fails, "; ")+".")
+	}
+	s.Tasks = tasks
+	titles := make([]string, len(tasks))
+	for i, t := range tasks {
+		titles[i] = t.ID + " " + t.Title
+	}
+	return e.commitLocked(id, &s, LogLine{By: role, Input: map[string]any{"verb": verb, "tasks": tasks}, Rule: "plan apply",
+		Decision: "plan applied", Why: fmt.Sprintf("%d task(s): %s", len(tasks), strings.Join(titles, ", "))})
+}
+
+func (e *Engine) refuse(project, code, why string) error {
+	e.logEvent("factory.refused", map[string]string{"project": project, "code": code, "why": why})
+	return &Refusal{Code: code, Why: why}
+}
+
+// runByTokenLocked finds the run holding token: a project's coordinator or a
+// task attempt's worker.
+func (e *Engine) runByTokenLocked(token string) (string, flow.State, string) {
+	same := func(t string) bool { return t != "" && subtle.ConstantTimeCompare([]byte(t), []byte(token)) == 1 }
+	for _, ent := range e.projectDirs() {
+		s, err := LoadState(e.Paths.State(ent.Name()))
+		if err != nil {
+			continue
+		}
+		if same(s.Project.RunToken) {
+			return ent.Name(), s, flow.RoleCoordinator
+		}
+		for _, t := range s.Tasks {
+			for _, a := range t.Attempts {
+				if same(a.RunToken) {
+					return ent.Name(), s, flow.RoleWorker
+				}
+			}
+		}
+	}
+	return "", flow.State{}, ""
+}
+
+// planTask is the part of design.md 3's plan record that slice 1 accepts.
+type planTask struct {
+	ID       string   `json:"id"`
+	Title    string   `json:"title"`
+	Brief    string   `json:"brief"`
+	Outcomes []string `json:"outcomes"`
+	After    []string `json:"after"`
+}
+
+type planFile struct {
+	Tasks []planTask `json:"tasks"`
+}
+
+// checkPlan runs the Shape check of design.md 11.7 and returns every failure.
+func checkPlan(raw json.RawMessage) ([]flow.Task, []string) {
+	var p planFile
+	var fails []string
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&p); err != nil {
+		fails = append(fails, "shape: "+strings.TrimPrefix(err.Error(), "json: "))
+		p = planFile{} // the strict decode may have stopped half way
+		if json.Unmarshal(raw, &p) != nil {
+			return nil, fails
+		}
+	}
+	if len(p.Tasks) == 0 {
+		fails = append(fails, "shape: the plan has no tasks")
+	}
+	ids := map[string]bool{}
+	for i, t := range p.Tasks {
+		if t.ID == "" || ids[t.ID] {
+			fails = append(fails, fmt.Sprintf("shape: task %d needs an id no other task has", i+1))
+		}
+		ids[t.ID] = true
+		if strings.TrimSpace(t.Title) == "" {
+			fails = append(fails, fmt.Sprintf("shape: task %q has no title", t.ID))
+		}
+	}
+	after := map[string][]string{}
+	tasks := make([]flow.Task, len(p.Tasks))
+	for i, t := range p.Tasks {
+		for _, a := range t.After {
+			if !ids[a] {
+				fails = append(fails, fmt.Sprintf("shape: task %q is after %q, which is not in the plan", t.ID, a))
+			}
+		}
+		after[t.ID] = t.After
+		tasks[i] = flow.Task{ID: t.ID, Title: strings.TrimSpace(t.Title), Brief: t.Brief, Outcomes: t.Outcomes, After: t.After, Attempts: []flow.Attempt{}}
+	}
+	if id := cycleAt(p.Tasks, after); id != "" {
+		fails = append(fails, fmt.Sprintf("shape: the after links make a cycle through %q", id))
+	}
+	return tasks, fails
+}
+
+// cycleAt returns a task on a cycle of after links, or "" when there is none.
+func cycleAt(tasks []planTask, after map[string][]string) string {
+	seen := map[string]int{} // 1: on the current path, 2: finished
+	var visit func(id string) string
+	visit = func(id string) string {
+		switch seen[id] {
+		case 1:
+			return id
+		case 2:
+			return ""
+		}
+		seen[id] = 1
+		for _, a := range after[id] {
+			if c := visit(a); c != "" {
+				return c
+			}
+		}
+		seen[id] = 2
+		return ""
+	}
+	for _, t := range tasks {
+		if c := visit(t.ID); c != "" {
+			return c
+		}
+	}
+	return ""
+}

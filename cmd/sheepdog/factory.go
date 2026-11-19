@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
@@ -20,9 +21,10 @@ import (
 var factoryDoctorRunner = factory.Doctor
 
 func printFactoryUsage(w io.Writer) {
-	fprintln(w, "usage: sheepdog factory <start|stop|doctor> [flags] [folder]")
+	fprintln(w, "usage: sheepdog factory <start|stop|plan|doctor> [flags] [folder]")
 	fprintln(w, "  start <folder> --goal \"<sentence>\"   start the factory coordinator for a repo")
 	fprintln(w, "  stop [<folder>]                      stop a started factory project and its runs")
+	fprintln(w, "  plan apply <file>                    (coordinator only) apply a JSON plan")
 	fprintln(w, "  doctor                               check unattended factory prerequisites:")
 	fprintln(w, "           herdr-core (hc), timed project-volume probe inside herdr-core")
 	fprintln(w, "           (macOS consent prompts and external-disk stalls), at least one")
@@ -41,6 +43,8 @@ func runFactory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	switch args[0] {
 	case "start", "stop":
 		return runFactoryCmd(ctx, args[0], args[1:], stdout, stderr)
+	case "plan":
+		return runFactoryPlan(ctx, args[1:], stdout, stderr)
 	case "doctor":
 		return runFactoryDoctor(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
@@ -72,7 +76,7 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 	}
 	cfg, err := config.Load(*configPath)
 	if err == nil {
-		err = postJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/factory/"+sub, map[string]string{"folder": folder, "project": folder, "goal": strings.TrimSpace(*goal)})
+		err = postJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/factory/"+sub, map[string]string{"folder": folder, "project": folder, "goal": strings.TrimSpace(*goal), "token": os.Getenv(runTokenEnv)})
 	}
 	if err != nil {
 		fprintf(stderr, "sheepdog factory %s: %v\n", sub, err)
@@ -85,6 +89,35 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 	} else {
 		fprintln(stdout, "factory stopped")
 	}
+	return 0
+}
+
+// runTokenEnv names the run's token the engine puts in each run's environment.
+const runTokenEnv = "SHEEPDOG_RUN_TOKEN"
+
+// runFactoryPlan sends `plan apply <file>` with the run's token; the engine checks it.
+func runFactoryPlan(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) != 2 || args[0] != "apply" {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	raw, err := os.ReadFile(args[1])
+	if err == nil && !json.Valid(raw) {
+		err = errors.New(args[1] + " is not valid JSON")
+	}
+	var cfg config.Config
+	if err == nil {
+		cfg, err = config.Load("")
+	}
+	if err == nil {
+		err = postJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/factory/report",
+			map[string]any{"token": os.Getenv(runTokenEnv), "verb": "plan apply", "args": json.RawMessage(raw)})
+	}
+	if err != nil {
+		fprintf(stderr, "sheepdog factory plan apply: %v\n", err)
+		return 1
+	}
+	fprintln(stdout, "plan applied")
 	return 0
 }
 

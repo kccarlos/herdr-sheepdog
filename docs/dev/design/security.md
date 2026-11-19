@@ -43,7 +43,7 @@ the QR once more.
 | Browsers and Android | They scan the **same QR** with the camera. It opens `/voice` in the browser, which enrolls a WebCrypto key. There is no "phone approves browser" flow. |
 | Devices list | On the setup page: name, kind, last seen and revoke, plus two separate buttons, **Disconnect all devices** and **Reset pairing** (which also replaces the certificate and keys). |
 | Shell | **On by default.** One switch per computer, on the setup page. It applies to every device paired with that computer. There are no per-device tiers and no per-network rule. |
-| Loopback-only routes | Pairing, device management, setup, debug, factory (`POST /api/factory/start`, `POST /api/factory/stop`) and internal routes (hooks, injection, prompt reload, brain and context inspection). The composer's `/api/inject/utterance` is renamed to `/api/utterance` and stays open to paired devices. |
+| Loopback-only routes | Pairing, device management, setup, debug, factory (`POST /api/factory/start`, `POST /api/factory/stop`, `POST /api/factory/report`) and internal routes (hooks, injection, prompt reload, brain and context inspection). The composer's `/api/inject/utterance` is renamed to `/api/utterance` and stays open to paired devices. |
 | Removing a computer in the app | Also revokes this phone's key on that computer, best effort (`DELETE /api/devices/self`). |
 | Limits | Voice: one client, with take-back. Terminals: 4 per device, 8 per daemon. About 32 connections in total; loopback is not counted. |
 | Router forwarding | Required scenario. Pins and device keys never depend on the source address. Subnet routing needs nothing; a port forward needs `web.advertise` or "Add address" in the app (section 13). |
@@ -571,7 +571,9 @@ These refuse any non-loopback caller with `403 {"error":"loopback_only"}`:
 - device management: `GET /api/devices`, `PATCH /api/devices/{id}`,
   `DELETE /api/devices/{id}`, `POST /api/devices/disconnect-all`,
   `POST /api/devices/reset-pairing`;
-- factory: `POST /api/factory/start`, `POST /api/factory/stop`;
+- factory: `POST /api/factory/start`, `POST /api/factory/stop`,
+  `POST /api/factory/report` (a run's report, named by the run's
+  `SHEEPDOG_RUN_TOKEN`; a start or stop carrying a run's token is refused);
 - debug and internal: `/api/inject/*` (blocked, pane, done, state, screen,
   remove), `/api/herdr/event` (the herdr hooks), `/api/prompts/reload`,
   `/api/brain/*`, `/api/context/*`, `/testdata/*`;

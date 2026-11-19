@@ -2,6 +2,7 @@ package web
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -15,7 +16,15 @@ import (
 type stubFactory struct {
 	startedFolder, startedGoal string
 	stoppedProject             string
+	reportToken, reportVerb    string
+	reportArgs                 string
 	called                     int
+}
+
+func (f *stubFactory) Report(token, verb string, args json.RawMessage) error {
+	f.called++
+	f.reportToken, f.reportVerb, f.reportArgs = token, verb, string(args)
+	return nil
 }
 
 func (f *stubFactory) Start(folder, goal string) error {
@@ -52,7 +61,7 @@ func TestFactoryRoutesLoopbackOnly(t *testing.T) {
 	}
 
 	// Non-loopback callers are refused before reaching Factory.
-	for _, path := range []string{"/api/factory/start", "/api/factory/stop"} {
+	for _, path := range []string{"/api/factory/start", "/api/factory/stop", "/api/factory/report"} {
 		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"folder":"/tmp/x","goal":"g"}`))
 		r.RemoteAddr, r.Host = "192.168.1.50:5000", "192.168.1.20:7777"
 		r.TLS = &tls.ConnectionState{}
@@ -90,5 +99,23 @@ func TestFactoryRoutesLoopbackOnly(t *testing.T) {
 	srv.Handler().ServeHTTP(wt, rt)
 	if wt.Code != http.StatusOK || stub.stoppedProject != "/tmp/repo" {
 		t.Fatalf("loopback stop = %d %s, stub=%+v", wt.Code, wt.Body.String(), stub)
+	}
+
+	// A report goes to the engine's acceptance step with its token, verb and args.
+	rr := httptest.NewRequest(http.MethodPost, "/api/factory/report", strings.NewReader(`{"token":"tok","verb":"plan apply","args":{"tasks":[]}}`))
+	rr.RemoteAddr, rr.Host = "127.0.0.1:5000", "127.0.0.1:7777"
+	wr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(wr, rr)
+	if wr.Code != http.StatusOK || stub.reportToken != "tok" || stub.reportVerb != "plan apply" || stub.reportArgs != `{"tasks":[]}` {
+		t.Fatalf("loopback report = %d %s, stub=%+v", wr.Code, wr.Body.String(), stub)
+	}
+
+	// A stop carrying a run's token never reaches Stop: the engine judges it.
+	stub.stoppedProject = ""
+	rk := httptest.NewRequest(http.MethodPost, "/api/factory/stop", strings.NewReader(`{"project":"/tmp/other","token":"tok-w"}`))
+	rk.RemoteAddr, rk.Host = "127.0.0.1:5000", "127.0.0.1:7777"
+	srv.Handler().ServeHTTP(httptest.NewRecorder(), rk)
+	if stub.stoppedProject != "" || stub.reportToken != "tok-w" || stub.reportVerb != "stop" {
+		t.Fatalf("stop with a run token reached Stop or skipped Report: stub=%+v", stub)
 	}
 }

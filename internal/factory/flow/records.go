@@ -22,11 +22,12 @@ type State struct {
 
 // Project is the project record of the skeleton.
 type Project struct {
-	ID      string `json:"id"`
-	Folder  string `json:"folder,omitempty"`
-	Goal    string `json:"goal,omitempty"`
-	Started bool   `json:"started,omitempty"`
-	RunID   string `json:"run_id,omitempty"` // coordinator terminal identity
+	ID       string `json:"id"`
+	Folder   string `json:"folder,omitempty"`
+	Goal     string `json:"goal,omitempty"`
+	Started  bool   `json:"started,omitempty"`
+	RunID    string `json:"run_id,omitempty"`    // coordinator terminal identity
+	RunToken string `json:"run_token,omitempty"` // coordinator's SHEEPDOG_RUN_TOKEN
 }
 
 // Task is a planned task. It has no phase field: rows derive where it is.
@@ -35,6 +36,7 @@ type Task struct {
 	Title    string    `json:"title"`
 	Brief    string    `json:"brief"`
 	Outcomes []string  `json:"outcomes"`
+	After    []string  `json:"after,omitempty"`
 	Done     *Merged   `json:"done,omitempty"`
 	Closed   *Closed   `json:"closed,omitempty"`
 	Attempts []Attempt `json:"attempts"`
@@ -56,7 +58,8 @@ type Attempt struct {
 	Branch     string   `json:"branch"`
 	Worktree   string   `json:"worktree"`
 	PR         int      `json:"pr"`
-	RunID      string   `json:"run_id"` // the run's terminal identity
+	RunID      string   `json:"run_id"`              // the run's terminal identity
+	RunToken   string   `json:"run_token,omitempty"` // the run's SHEEPDOG_RUN_TOKEN
 	Ready      []Ready  `json:"ready"`
 	Rounds     []Round  `json:"rounds"`
 	Accepts    []Accept `json:"accepts"`
