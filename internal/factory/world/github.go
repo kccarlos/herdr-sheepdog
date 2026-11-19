@@ -96,7 +96,9 @@ func PushAndOpenPR(ctx context.Context, worktree, branch, head, title, body stri
 		return 0, fmt.Errorf("world: gh pr list: %w", err)
 	}
 	for _, p := range prs {
-		if p.State == "OPEN" && !p.IsCrossRepository && p.BaseRefName == base && p.HeadRefOid == head {
+		// We just pushed H to this branch, so its open same-repo PR is ours
+		// even if GitHub still lists the previous head (it lags a re-push).
+		if p.State == "OPEN" && !p.IsCrossRepository && p.BaseRefName == base {
 			return p.Number, nil
 		}
 	}

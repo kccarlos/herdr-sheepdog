@@ -264,7 +264,6 @@ func TestPushAndOpenPRRefusesOtherPRs(t *testing.T) {
 		"merged":     `"state":"MERGED","baseRefName":"main","headRefOid":"` + c1 + `"`,
 		"wrong base": `"state":"OPEN","baseRefName":"release","headRefOid":"` + c1 + `"`,
 		"fork":       `"state":"OPEN","baseRefName":"main","headRefOid":"` + c1 + `","isCrossRepository":true`,
-		"stale head": `"state":"OPEN","baseRefName":"main","headRefOid":"0000000000000000000000000000000000000000"`,
 	} {
 		if err := os.WriteFile(filepath.Join(gh, "view.json"), []byte(`{"number":7,`+pr+`}`), 0o600); err != nil {
 			t.Fatal(err)
@@ -275,5 +274,18 @@ func TestPushAndOpenPRRefusesOtherPRs(t *testing.T) {
 	}
 	if creates := ghCalls(t, gh, "pr create"); len(creates) != 0 {
 		t.Fatalf("a branch with a PR got another: %q", creates)
+	}
+	// After our push, GitHub may still list the previous head (it lags a
+	// re-push in a later round): our own open same-repo same-base PR is
+	// adopted, not refused.
+	lag := `"state":"OPEN","baseRefName":"main","headRefOid":"0000000000000000000000000000000000000000"`
+	if err := os.WriteFile(filepath.Join(gh, "view.json"), []byte(`{"number":7,`+lag+`}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := PushAndOpenPR(ctx, repo, "task/t1-x", c1, "feat: x", "b"); err != nil || n != 7 {
+		t.Fatalf("lagging head: PushAndOpenPR = %d, %v; want PR #7 adopted", n, err)
+	}
+	if creates := ghCalls(t, gh, "pr create"); len(creates) != 0 {
+		t.Fatalf("lagging head opened a second PR: %q", creates)
 	}
 }
