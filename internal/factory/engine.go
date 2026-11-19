@@ -81,8 +81,10 @@ func (e *Engine) Stop(project string) error {
 	if err != nil {
 		return err
 	}
-	if err := world.StopRun(ctx, e.HC, cmp.Or(s.Project.RunID, coordName(id))); err != nil {
-		return err
+	if e.HC != nil { // without herdr-core (mock mode) nothing was started
+		if err := world.StopRun(ctx, e.HC, cmp.Or(s.Project.RunID, coordName(id))); err != nil {
+			return err
+		}
 	}
 	s.Project.RunID, s.Project.Started = "", false
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "stop"}, Rule: "stop", Decision: "stopped", Why: "stopped by owner"})

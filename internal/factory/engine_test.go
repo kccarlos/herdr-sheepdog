@@ -347,3 +347,16 @@ func TestPassProjectLogsErrorsAndSkipsDeadRunState(t *testing.T) {
 		t.Fatalf("expected factory.commit_error in engine log, got %q", logBuf.String())
 	}
 }
+
+// TestStopWithoutHC: in mock mode (no herdr-core) Stop still records the
+// stop instead of failing.
+func TestStopWithoutHC(t *testing.T) {
+	repo := initGitRepo(t)
+	e := New(Paths{DataDir: t.TempDir()}, nil)
+	if err := e.Start(repo, "a goal"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Stop(repo); err != nil {
+		t.Fatalf("Stop without hc: %v", err)
+	}
+}

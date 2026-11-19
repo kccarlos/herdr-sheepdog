@@ -310,6 +310,7 @@ func (a *App) wire() error {
 		factoryHC = hc.NewClient(cfg.Herdr.HCSocketPath())
 	}
 	a.factory = factory.New(factory.Paths{DataDir: cfg.DataDir}, factoryHC)
+	a.factory.Log = a.log
 	deps.Factory = a.factory
 	srv, err := web.New(deps)
 	if err != nil {
