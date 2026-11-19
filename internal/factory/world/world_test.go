@@ -863,7 +863,7 @@ func TestClaudeArgvNeverSwallowsPrompt(t *testing.T) {
 	for _, mode := range []string{"plan", "dontAsk", "bypassPermissions", "acceptEdits"} {
 		argv := ClaudeArgv(flow.RoleReviewer, "opus", "medium", mode)
 		for _, a := range argv {
-			if (a == "--allowedTools" || a == "--disallowedTools" || a == "--allowed-tools") {
+			if a == "--allowedTools" || a == "--disallowedTools" || a == "--allowed-tools" {
 				t.Errorf("%s: %q is a separate argument; use --flag=value so the prompt is not swallowed: %q", mode, a, argv)
 			}
 		}
