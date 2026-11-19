@@ -26,6 +26,7 @@ case "$1 $2" in
 "pr list") if [ -f "$D/view.json" ]; then printf "[%s]" "$(cat "$D/view.json")"; else echo '[]'; fi ;;
 "pr create") cp "$D/pr.json" "$D/view.json" && echo "https://github.com/acme/demo/pull/7" ;;
 "pr view") cat "$D/view.json" 2>/dev/null || { echo 'no pull requests found for branch "x"' >&2; exit 1; } ;;
+"pr merge") [ -f "$D/merge_fail" ] && { echo "GraphQL: Head branch was modified" >&2; exit 1; }; : ;;
 *) echo "unexpected gh $*" >&2; exit 2 ;;
 esac
 `
@@ -177,7 +178,7 @@ func TestPushAndOpenPROnceThenAdopts(t *testing.T) {
 	if err != nil || p != (flow.PR{Answered: true, Number: 7, State: flow.PROpen, Head: c1, Mergeable: flow.MergeableUnknown, Checks: flow.ChecksNone}) {
 		t.Fatalf("snapshot = %+v, %v", p, err)
 	}
-	if views := ghCalls(t, gh, "pr view"); !strings.Contains(views[len(views)-1], "pr view task/t1-x --repo acme/demo --json number,state,headRefOid,mergeable,statusCheckRollup,baseRefName") {
+	if views := ghCalls(t, gh, "pr view"); !strings.Contains(views[len(views)-1], "pr view task/t1-x --repo acme/demo --json number,state,headRefOid,mergeable,statusCheckRollup,baseRefName,mergeCommit") {
 		t.Fatalf("pr view argv = %q", views)
 	}
 	if rel, err := Relation(ctx, repo, c1, runGit(t, repo, "rev-parse", "main")); err != nil || rel != flow.RelBehind {

@@ -94,6 +94,41 @@ func (e *Engine) Start(folder, goal string) error {
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "start", "folder": root, "goal": goal}, Rule: "start", Decision: "started", Why: goal})
 }
 
+// taskRuns names every run the task may have started: the recorded ones,
+// and by name the ones a crash left unrecorded.
+func taskRuns(id string, t flow.Task) []string {
+	var runs []string
+	for ai, a := range t.Attempts {
+		runs = append(runs, cmp.Or(a.RunID, workerName(id, t.ID, ai+1)))
+		if a.Review != nil {
+			runs = append(runs, a.Review.RunID)
+		}
+		for r := 1; r <= len(a.Rounds)+1; r++ {
+			runs = append(runs, reviewerName(id, t.ID, ai+1, r))
+		}
+	}
+	return runs
+}
+
+func clearRuns(t *flow.Task) {
+	for ai := range t.Attempts {
+		a := &t.Attempts[ai]
+		a.RunID, a.RunTokenHash, a.Review = "", "", nil
+	}
+}
+
+func (e *Engine) stopRuns(ctx context.Context, runs []string) error {
+	if e.HC == nil { // without herdr-core (mock mode) nothing was started
+		return nil
+	}
+	for _, r := range runs {
+		if err := world.StopRun(ctx, e.HC, r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func dropFailed(acts []flow.Act) []flow.Act {
 	return slices.DeleteFunc(acts, func(a flow.Act) bool { return a.Result == "failed" })
 }
@@ -110,24 +145,11 @@ func (e *Engine) Stop(project string) error {
 	}
 	runs := []string{cmp.Or(s.Project.RunID, coordName(id))}
 	for ti := range s.Tasks {
-		for ai := range s.Tasks[ti].Attempts {
-			a := &s.Tasks[ti].Attempts[ai]
-			runs = append(runs, cmp.Or(a.RunID, workerName(id, s.Tasks[ti].ID, ai+1)))
-			if a.Review != nil {
-				runs = append(runs, a.Review.RunID)
-			}
-			for r := 1; r <= len(a.Rounds)+1; r++ {
-				runs = append(runs, reviewerName(id, s.Tasks[ti].ID, ai+1, r))
-			}
-			a.RunID, a.RunTokenHash, a.Review = "", "", nil
-		}
+		runs = append(runs, taskRuns(id, s.Tasks[ti])...)
+		clearRuns(&s.Tasks[ti])
 	}
-	if e.HC != nil { // without herdr-core (mock mode) nothing was started
-		for _, r := range runs {
-			if err := world.StopRun(ctx, e.HC, r); err != nil {
-				return err
-			}
-		}
+	if err := e.stopRuns(ctx, runs); err != nil {
+		return err
 	}
 	s.Project.RunID, s.Project.RunTokenHash, s.Project.Started, s.Project.Acts = "", "", false, nil
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "stop"}, Rule: "stop", Decision: "stopped", Why: "stopped by owner"})
@@ -239,21 +261,27 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 	return termID, false, err
 }
 
-type taskExec func(e *Engine, ctx context.Context, id string, s *flow.State, ti int) (decision string, abort bool, err error)
+type taskExec func(e *Engine, ctx context.Context, id string, s *flow.State, ti int, f flow.Facts) (decision string, abort bool, err error)
 
 // taskExecutors dispatches each ask verb implemented so far to its executor.
-// Asks for PR 1.8 are absent and logged as "not built yet".
+// Others (wake_coordinator, stop_task) are logged as "not built yet".
 var taskExecutors = map[string]taskExec{
 	flow.AskNewAttempt:   (*Engine).execNewAttempt,
 	flow.AskStartWorker:  (*Engine).execStartWorker,
 	flow.AskPushPR:       (*Engine).execPushPR,
 	flow.AskStartReview:  (*Engine).execStartReviewer,
 	flow.AskTellFindings: (*Engine).execTellFindings,
+	flow.AskAccept:       (*Engine).execRecordAccept,
+	flow.AskMerge:        (*Engine).execMerge,
+	flow.AskMarkDone:     (*Engine).execMarkDone,
+	flow.AskCleanup:      (*Engine).execCleanup,
 }
 
 func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int) {
 	var facts flow.Facts
-	if n := len(s.Tasks[ti].Attempts); n > 0 {
+	// An ended task needs no facts (N1 matches first), and cleanup may
+	// have removed its worktree.
+	if n := len(s.Tasks[ti].Attempts); n > 0 && s.Tasks[ti].Done == nil && s.Tasks[ti].Closed == nil {
 		a := s.Tasks[ti].Attempts[n-1]
 		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
 		tip, rel, _, err := world.InspectWorktree(gctx, a.Worktree, flow.H(a))
@@ -299,7 +327,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 			decs, whys = append(decs, "not built yet"), append(whys, ask+": not built yet")
 			continue
 		}
-		dec, abort, err := fn(e, ctx, id, s, ti)
+		dec, abort, err := fn(e, ctx, id, s, ti, facts)
 		if abort || ctx.Err() != nil {
 			return
 		} else if err != nil {
@@ -316,7 +344,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	}
 }
 
-func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, ti int) (string, bool, error) {
+func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, n := &s.Tasks[ti], len(s.Tasks[ti].Attempts)+1
 	// The branch carries the project and the attempt, so a new project on
 	// the same repo never reuses a branch an older PR (even a closed one)
@@ -331,7 +359,7 @@ func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, t
 	return "new attempt " + wt.Branch, false, err
 }
 
-func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, ti int) (string, bool, error) {
+func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
 	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"), "{outcomes}", bullets(t.Outcomes), "{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", cmp.Or(e.Bin, "sheepdog")).Replace(workerTemplate))
 	termID, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, world.RunSpec{
@@ -433,7 +461,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	return err == nil || !errors.As(err, &ref)
 }
 
-func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State, ti int) (string, bool, error) {
+func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
 	round, h, model := len(a.Rounds)+1, flow.H(*a), reviewerModel(workerModel)
 	if a.Review == nil || a.Review.Round != round || a.Review.Head != h || a.Review.Code == "" {
@@ -456,7 +484,7 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	return fmt.Sprintf("started reviewer %s (round %d)", termID, round), abort, nil
 }
 
-func (e *Engine) execTellFindings(ctx context.Context, _ string, s *flow.State, ti int) (string, bool, error) {
+func (e *Engine) execTellFindings(ctx context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	a := &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
 	r := a.Rounds[len(a.Rounds)-1]
 	msg := fmt.Sprintf("Review round %d found %d major(s) in %s — fix them, commit, and run %s factory report ready again.",
@@ -473,16 +501,20 @@ func bullets(items []string) string {
 
 // execPushPR is N26: push H and make sure one PR is open for the branch.
 // Title and body come from task fields only (design.md 9.4).
-func (e *Engine) execPushPR(ctx context.Context, _ string, s *flow.State, ti int) (string, bool, error) {
+func (e *Engine) execPushPR(ctx context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
-	body := fmt.Sprintf("%s\n\n## Outcomes\n\n%s\n\n---\nOpened by the sheepdog factory.", cmp.Or(strings.TrimSpace(t.Brief), "(no brief)"), bullets(t.Outcomes))
 	gctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
-	n, err := world.PushAndOpenPR(gctx, a.Worktree, a.Branch, flow.H(*a), t.Title, body)
+	n, err := world.PushAndOpenPR(gctx, a.Worktree, a.Branch, flow.H(*a), t.Title, prBody(*t))
 	if err == nil {
 		a.PR = n
 	}
 	return fmt.Sprintf("PR #%d open for %s", n, a.Branch), false, err
+}
+
+// prBody is the PR body and squash message, from task fields only (design.md 9.4).
+func prBody(t flow.Task) string {
+	return fmt.Sprintf("%s\n\n## Outcomes\n\n%s\n\n---\nOpened by the sheepdog factory.", cmp.Or(strings.TrimSpace(t.Brief), "(no brief)"), bullets(t.Outcomes))
 }
 
 // readPRLocked is the attempt's PR snapshot (design.md 7.3). A failed read

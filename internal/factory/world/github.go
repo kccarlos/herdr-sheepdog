@@ -127,7 +127,7 @@ func PRSnapshot(ctx context.Context, repoDir, branch string) (flow.PR, error) {
 	if err != nil {
 		return flow.PR{}, err
 	}
-	out, err := ghCmd(ctx, repoDir, "pr", "view", branch, "--repo", repo, "--json", "number,state,headRefOid,mergeable,statusCheckRollup,baseRefName")
+	out, err := ghCmd(ctx, repoDir, "pr", "view", branch, "--repo", repo, "--json", "number,state,headRefOid,mergeable,statusCheckRollup,baseRefName,mergeCommit")
 	if err != nil && strings.Contains(err.Error(), "no pull requests found") {
 		return flow.PR{Answered: true, State: flow.PRNone}, nil
 	} else if err != nil {
@@ -143,6 +143,7 @@ func parseSnapshot(data []byte) (flow.PR, error) {
 		HeadRefOid        string
 		Mergeable         string
 		StatusCheckRollup []flow.Check
+		MergeCommit       struct{ Oid string }
 	}
 	if err := json.Unmarshal(data, &v); err != nil {
 		return flow.PR{}, fmt.Errorf("world: gh pr view: %w", err)
@@ -153,7 +154,39 @@ func parseSnapshot(data []byte) (flow.PR, error) {
 	}
 	mergeable := map[string]flow.Mergeable{"MERGEABLE": flow.MergeableClean, "CONFLICTING": flow.MergeableConflict}[v.Mergeable]
 	return flow.PR{
-		Answered: true, Number: v.Number, State: state, Head: v.HeadRefOid,
+		Answered: true, Number: v.Number, State: state, Head: v.HeadRefOid, MergedCommit: v.MergeCommit.Oid,
 		Mergeable: cmp.Or(mergeable, flow.MergeableUnknown), Checks: flow.Rollup(v.StatusCheckRollup),
 	}, nil
+}
+
+// MergePR asks GitHub to squash-merge PR number, pinned to head: GitHub
+// refuses it if the PR head moved. Never --admin, --auto or --delete-branch
+// (design.md 9.4, KB-MRG-10). The squash body is the caller's, built from
+// task fields only. Its result is not trusted: only a later snapshot that
+// reads merged ends the task (N2, KB-MRG-9).
+func MergePR(ctx context.Context, repoDir string, number int, head, body string) error {
+	if number <= 0 || head == "" {
+		return fmt.Errorf("world: merge needs a PR number and a head (got #%d at %q)", number, head)
+	}
+	repo, err := ghRepo(ctx, repoDir)
+	if err != nil {
+		return err
+	}
+	_, err = ghCmd(ctx, repoDir, "pr", "merge", strconv.Itoa(number), "--repo", repo, "--squash", "--match-head-commit", head, "--body", body)
+	return err
+}
+
+// DeleteRemoteBranch deletes branch on the push remote. The caller calls it
+// only once the PR reads merged, never as part of the merge (design.md
+// 9.4). A branch already gone (GitHub may delete it on merge) is not an error.
+func DeleteRemoteBranch(ctx context.Context, dir, branch string) error {
+	if branch == "" {
+		return errors.New("world: no branch to delete")
+	}
+	out, err := gitCmd(ctx, dir, "ls-remote", "--heads", pushRemote, "refs/heads/"+branch)
+	if err != nil || out == "" {
+		return err
+	}
+	_, err = gitCmd(ctx, dir, "push", pushRemote, "--delete", "refs/heads/"+branch)
+	return err
 }

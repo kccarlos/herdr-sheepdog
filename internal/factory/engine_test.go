@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -781,10 +782,10 @@ func TestAttemptWorktreePathPerAttemptAndLockGitTimeout(t *testing.T) {
 	}
 	st.Project.RunID = "t1"
 	st.Tasks = []flow.Task{{ID: "t1", Title: "feat: add x", Attempts: []flow.Attempt{}}}
-	if _, _, err := eng.execNewAttempt(ctx, id, &st, 0); err != nil {
+	if _, _, err := eng.execNewAttempt(ctx, id, &st, 0, flow.Facts{}); err != nil {
 		t.Fatalf("attempt 1: %v", err)
 	}
-	if _, _, err := eng.execNewAttempt(ctx, id, &st, 0); err != nil {
+	if _, _, err := eng.execNewAttempt(ctx, id, &st, 0, flow.Facts{}); err != nil {
 		t.Fatalf("attempt 2: %v", err)
 	}
 	w1, w2 := st.Tasks[0].Attempts[0].Worktree, st.Tasks[0].Attempts[1].Worktree
@@ -873,7 +874,7 @@ func TestStartClearsFailedActs(t *testing.T) {
 // verdict writes T1-r1.md and stops reviewer 1 -> N22 tells worker findings once ->
 // worker commits c2 and reports ready -> N26 pushes c2 -> N29 starts round 2
 // reviewer with fresh code2 -> valid pass verdict stops reviewer 2 and moves past
-// the ladder into N36 (checks pending) and N42 (merge not built yet).
+// the ladder into N36 (checks pending) and N42 (accept and merge at c2).
 func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	ctx := context.Background()
 	srv := hctest.New(t)
@@ -1009,15 +1010,16 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	eng.passProject(ctx, id, false) // CI pending -> N36 (waits quietly)
 	writePRJSON(t, gh, "view.json", c2, `[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]`)
 	logBuf.Reset()
-	eng.passProject(ctx, id, false) // CI green + worker idle + passed -> N42 (record_accept & merge: not built yet in PR 1.7)
+	eng.passProject(ctx, id, false) // CI green + worker idle + passed -> N42 (record_accept & merge)
 
 	st, _ = LoadState(paths.State(id))
 	att = st.Tasks[0].Attempts[0]
-	if len(att.Rounds) != 2 || att.Rounds[1].Verdict != "pass" || flow.Count(att.Acts, "record_accept@"+c2) != 1 || flow.Count(att.Acts, "merge@"+c2) != 1 {
-		t.Fatalf("after round 2 pass + green CI: rounds=%+v acts=%+v", att.Rounds, att.Acts)
+	if len(att.Rounds) != 2 || att.Rounds[1].Verdict != "pass" || !flow.Done(att.Acts, "record_accept@"+c2) || !flow.Done(att.Acts, "merge@"+c2) ||
+		len(att.Accepts) != 1 || att.Accepts[0].Head != c2 || !slices.Equal(att.Accepts[0].Rounds, []int{2}) {
+		t.Fatalf("after round 2 pass + green CI: rounds=%+v acts=%+v accepts=%+v", att.Rounds, att.Acts, att.Accepts)
 	}
-	if !strings.Contains(logBuf.String(), "factory.not_built_yet") {
-		t.Fatalf("expected N42 merge to hit not_built_yet in PR 1.7:\n%s", logBuf.String())
+	if m := ghCalls(t, gh, "pr merge"); len(m) != 1 || !strings.HasPrefix(m[0], "pr merge 7 --repo acme/demo --squash --match-head-commit "+c2+" --body ") {
+		t.Fatalf("merge calls = %q", m)
 	}
 }
 

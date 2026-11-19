@@ -1,0 +1,6 @@
+2026-11-19 10:00:00  -    start       asked: - | decision: started | why: Add Greet.
+2026-11-19 10:01:00  -    J7          asked: coordinator:t-1 | decision: started coordinator | why: project started with no coordinator run
+2026-11-19 10:30:00  T1   pr_snapshot asked: - | decision: - | why: the PR snapshot changed
+2026-11-19 10:31:00  T1   N42         asked: record_accept@3f9c3f9, merge@3f9c3f9 | decision: accepted 3f9c3f9 by the bar (rounds [1]); asked GitHub to merge PR #7 at 3f9c3f9 | why: passed, green and mergeable at H
+2026-11-19 10:32:00  T1   N2          asked: mark_done | decision: done: PR #7 merged as abababa | why: the PR is merged
+2026-11-19 10:33:00  T1   N1          asked: cleanup | decision: stopped the task's runs; deleted remote branch task/T1-x | why: ended: stop its runs and clean up

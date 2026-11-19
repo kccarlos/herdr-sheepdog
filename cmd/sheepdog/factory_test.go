@@ -14,8 +14,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
 
@@ -344,5 +346,41 @@ func TestFactoryReportReadyCLI(t *testing.T) {
 	args, _ := lastBody["args"].(map[string]any)
 	if lastPath != "/api/factory/report" || lastBody["token"] != "tok-worker-1" || lastBody["verb"] != "ready" || args["head"] != wantHead {
 		t.Fatalf("report ready sent %s %+v, want head %s", lastPath, lastBody, wantHead)
+	}
+}
+
+// TestFactoryLogCLI reads log.jsonl straight from the data dir named by
+// --config, one line per step in local time; -n keeps the last lines.
+func TestFactoryLogCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+	data := filepath.Join(home, "data")
+	cfgFile := filepath.Join(home, "config.toml")
+	if err := os.WriteFile(cfgFile, []byte("data_dir = \""+data+"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths := factory.Paths{DataDir: data}
+	if err := factory.SaveState(paths.State("proj-1"), flow.State{Project: flow.Project{ID: "proj-1", Started: true}}); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 19, 18, 0, 0, 0, time.UTC)
+	for i, rule := range []string{"N26", "N42"} {
+		if err := factory.AppendLog(paths.Log("proj-1"), factory.LogLine{Seq: int64(i + 1), At: at, Task: "T1", Rule: rule, Why: "w"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out, errBuf bytes.Buffer
+	if code := run(context.Background(), []string{"factory", "log", "-n", "1", "--config", cfgFile}, &out, &errBuf); code != 0 {
+		t.Fatalf("log code=%d stderr=%s", code, errBuf.String())
+	}
+	want := at.Local().Format("2006-01-02 15:04:05") + "  T1   N42         asked: - | decision: - | why: w\n"
+	if out.String() != want {
+		t.Fatalf("factory log -n 1 = %q, want %q", out.String(), want)
+	}
+	out.Reset()
+	if code := run(context.Background(), []string{"factory", "log", filepath.Join(home, "nowhere"), "--config", cfgFile}, &out, &errBuf); code != 1 || out.Len() != 0 {
+		t.Fatalf("log of an unknown folder: code=%d out=%q", code, out.String())
 	}
 }
