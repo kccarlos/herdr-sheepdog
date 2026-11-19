@@ -238,7 +238,9 @@ Your one question for every task: should this exist, and at this size? [Ponytail
 - "The plan is fine" is a valid answer. Do not invent findings.
 
 {plan} {design_note} {repo_facts}
-End with: <report>{"code":"{nonce}","verdict":"pass|changes","findings":[{"task":"","do":"delete|shrink|merge|split|design-first","why":""}]}</report>
+End with your findings, one per line: `finding: <task> delete|shrink|merge|split|design-first <why>`;
+then only this tag, with "findings" equal to your `finding:` lines:
+<report>{"code":"{nonce}","verdict":"pass|changes","findings":0}</report>
 ```
 
 ### 5.3 Worker
