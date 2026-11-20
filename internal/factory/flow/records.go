@@ -239,8 +239,10 @@ type Proof struct {
 
 // Ready is the worker's "done at this commit".
 type Ready struct {
-	Head   string  `json:"head"`
-	Proofs []Proof `json:"proofs,omitempty"`
+	Head    string  `json:"head"`
+	Proofs  []Proof `json:"proofs,omitempty"`
+	Touched string  `json:"touched,omitempty"`
+	Skipped *string `json:"skipped,omitempty"`
 }
 
 // Reject is the worker's rejection of every finding of a reviewer's round at

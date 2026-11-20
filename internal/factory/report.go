@@ -96,6 +96,8 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 		Reject  *string      `json:"reject"`
 		Nothing *string      `json:"nothing_to_change"`
 		Proofs  []flow.Proof `json:"proofs"`
+		Touched *string      `json:"touched"`
+		Skipped *string      `json:"skipped"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(args))
 	dec.DisallowUnknownFields()
@@ -147,18 +149,38 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 	case rel == flow.RelSame:
 		return e.refuse(id, "nothing_new", "The worktree has no commit ahead of the current head.")
 	}
+	var touched string
+	var skipped *string
+	if req.Touched != nil {
+		if touched = cleanRejectWhy(*req.Touched); utf8.RuneCountInString(touched) > maxRejectWhyRunes {
+			return e.refuse(id, "invalid_report", fmt.Sprintf("--touched is longer than %d characters.", maxRejectWhyRunes))
+		}
+	}
+	if req.Skipped != nil {
+		s := cleanRejectWhy(*req.Skipped)
+		if utf8.RuneCountInString(s) > maxRejectWhyRunes {
+			return e.refuse(id, "invalid_report", fmt.Sprintf("--skipped is longer than %d characters.", maxRejectWhyRunes))
+		}
+		skipped = &s
+	}
 	var proofs []flow.Proof
 	if needsProofs(t.Outcomes) || len(req.Proofs) > 0 {
 		var code, why string
 		if proofs, code, why = checkProofs(t.Outcomes, req.Proofs, a.Worktree); code != "" {
 			return e.refuse(id, code, why)
 		}
+		if touched == "" {
+			return e.refuse(id, "invalid_report", `A ready report with proofs must list what the change touched (--touched "<places>").`)
+		}
+		if req.Skipped == nil {
+			return e.refuse(id, "invalid_report", `A ready report with proofs must state what was skipped or not checked (--skipped "<what was left out>", or --skipped "" when nothing was skipped).`)
+		}
 	}
 	if mo, _ := world.MergeOnly(ctx, a.Worktree, h, tip); mo { // a ready at a merge-only tip is N20's move too: no round
 		a.MergeOnly = append(a.MergeOnly, flow.Advance{From: h, To: tip})
 	}
-	a.Ready, a.NothingToChange = append(a.Ready, flow.Ready{Head: tip, Proofs: proofs}), ""
-	return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "ready", "head": tip, "proofs": proofs}, Rule: "ready", Decision: "ready", Why: tip})
+	a.Ready, a.NothingToChange = append(a.Ready, flow.Ready{Head: tip, Proofs: proofs, Touched: touched, Skipped: skipped}), ""
+	return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "ready", "head": tip, "proofs": proofs, "touched": touched, "skipped": skipped}, Rule: "ready", Decision: "ready", Why: tip})
 }
 
 func needsProofs(outcomes []flow.Outcome) bool {
@@ -174,7 +196,7 @@ func checkProofs(outcomes []flow.Outcome, raw []flow.Proof, worktree string) ([]
 	for _, p := range raw {
 		name := cleanRejectWhy(p.Outcome)
 		o, ok := want[name]
-		p.Outcome, p.Command, p.Artifact, p.OutputPath = name, cleanRejectWhy(p.Command), strings.TrimSpace(p.Artifact), strings.TrimSpace(p.OutputPath)
+		p.Outcome, p.Command, p.Artifact, p.OutputPath = name, strings.TrimSpace(p.Command), strings.TrimSpace(p.Artifact), strings.TrimSpace(p.OutputPath)
 		manual := strings.HasPrefix(o.ProvedBy, "manual:")
 		switch {
 		case !ok:
@@ -200,7 +222,7 @@ func checkProofs(outcomes []flow.Outcome, raw []flow.Proof, worktree string) ([]
 				failed = append(failed, fmt.Sprintf("%q: artifact %q does not exist", name, p.Artifact))
 			}
 		} else if p.Exit != 0 {
-			failed = append(failed, fmt.Sprintf("%q (%s, exit %d): %s", name, p.Command, p.Exit, proofHead(p.OutputPath, worktree)))
+			failed = append(failed, fmt.Sprintf("%q (%s, exit %d): %s", name, cleanRejectWhy(p.Command), p.Exit, proofHead(p.OutputPath, worktree)))
 		}
 		out = append(out, p)
 	}
@@ -895,9 +917,9 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		}
 		done = append(done, t.ID+" ("+strings.Join(what, ", ")+")"+capNote)
 		if a != nil && a.RunID != "" {
-			bin := cmp.Or(e.Bin, "sheepdog")
-			msg := fmt.Sprintf("The plan changed for task %s (%s): %s\nTitle: %s\nBrief:\n%s\nOutcomes:\n%s\nEarlier review rounds no longer count. If your work must change, commit and run %s factory report ready again; otherwise wait.",
-				t.ID, strings.Join(what, ", "), why, t.Title, cmp.Or(strings.TrimSpace(t.Brief), "(none)"), bullets(t.Outcomes), bin)
+			rc := readyCmd(cmp.Or(e.Bin, "sheepdog"), t.Outcomes)
+			msg := fmt.Sprintf("The plan changed for task %s (%s): %s\nTitle: %s\nBrief:\n%s\nOutcomes:\n%s\nEarlier review rounds no longer count. If your work must change, commit and run %s again; otherwise wait.",
+				t.ID, strings.Join(what, ", "), why, t.Title, cmp.Or(strings.TrimSpace(t.Brief), "(none)"), bullets(t.Outcomes), rc)
 			if err := world.SendRun(ctx, e.HC, a.RunID, msg); err != nil { // a restarted worker reads the new plan anyway
 				e.logError("factory.exec_error", id, err)
 			}

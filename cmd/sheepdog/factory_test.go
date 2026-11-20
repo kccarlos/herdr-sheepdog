@@ -511,6 +511,7 @@ func TestFactoryReportReadyProofsCLI(t *testing.T) {
 		"--proof", "tests pass=echo ok-out; echo ok-err >&2",
 		"--proof", "lint fails=echo bad-line >&2; exit 3",
 		"--artifact", "looks right=" + art,
+		"--touched", "a.txt", "--skipped", "",
 	}, &out, &errBuf)
 	if code != 0 || !posted {
 		t.Fatalf("code=%d posted=%v stderr=%s", code, posted, errBuf.String())
@@ -543,7 +544,7 @@ func TestFactoryReportReadyProofsCLI(t *testing.T) {
 	posted = false
 	out.Reset()
 	errBuf.Reset()
-	if code := run(context.Background(), []string{"factory", "report", "ready", "--artifact", "looks right=no-such-file.png"}, &out, &errBuf); code != 1 || posted {
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--artifact", "looks right=no-such-file.png", "--touched", "a.txt", "--skipped", ""}, &out, &errBuf); code != 1 || posted {
 		t.Fatalf("missing artifact: code=%d posted=%v stderr=%s", code, posted, errBuf.String())
 	}
 
@@ -554,7 +555,7 @@ func TestFactoryReportReadyProofsCLI(t *testing.T) {
 	posted = false
 	out.Reset()
 	errBuf.Reset()
-	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "slow=sleep 5"}, &out, &errBuf); code != 0 || !posted {
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "slow=sleep 5", "--touched", "a.txt", "--skipped", ""}, &out, &errBuf); code != 0 || !posted {
 		t.Fatalf("timeout proof: code=%d posted=%v stderr=%s", code, posted, errBuf.String())
 	}
 	if len(lastReq.Args.Proofs) != 1 || lastReq.Args.Proofs[0].Exit != 124 {
@@ -754,7 +755,7 @@ func TestFactoryReportReadyProofRunsAtWorktreeRoot(t *testing.T) {
 	t.Chdir(sub)
 
 	var out, errBuf bytes.Buffer
-	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "at root=test -f a.txt && pwd"}, &out, &errBuf); code != 0 {
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "at root=test -f a.txt && pwd", "--touched", "a.txt", "--skipped", ""}, &out, &errBuf); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errBuf.String())
 	}
 	if len(*proofs) != 1 || (*proofs)[0].Exit != 0 {
@@ -778,7 +779,7 @@ func TestFactoryReportReadyProofOutputBounded(t *testing.T) {
 	t.Chdir(wt)
 
 	var out, errBuf bytes.Buffer
-	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "noisy=head -c 100000 /dev/zero | tr '\\0' 'x'"}, &out, &errBuf); code != 0 {
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "noisy=head -c 100000 /dev/zero | tr '\\0' 'x'", "--touched", "a.txt", "--skipped", ""}, &out, &errBuf); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errBuf.String())
 	}
 	if len(*proofs) != 1 || (*proofs)[0].Exit != 0 {
@@ -806,7 +807,7 @@ func TestFactoryReportReadyProofTimeoutKillsProcessGroup(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
 	cmdStr := fmt.Sprintf("sleep 30 & echo $! > %s; wait", pidFile)
 	var out, errBuf bytes.Buffer
-	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "hang=" + cmdStr}, &out, &errBuf); code != 0 {
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "hang=" + cmdStr, "--touched", "a.txt", "--skipped", ""}, &out, &errBuf); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errBuf.String())
 	}
 	if len(*proofs) != 1 || (*proofs)[0].Exit != 124 {
@@ -830,4 +831,103 @@ func TestFactoryReportReadyProofTimeoutKillsProcessGroup(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("grandchild pid %d still alive after proof timeout", childPID)
+}
+
+// TestFactoryReportReadyTouchedSkippedCLI checks PR 3.3b CLI flags:
+// --touched and --skipped are sent in the ready payload (including empty
+// --skipped ""), omitted when not passed, and refused with --reject or
+// --nothing-to-change.
+func TestFactoryReportReadyTouchedSkippedCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+
+	var lastArgs map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Args map[string]any `json:"args"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		lastArgs = body.Args
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(srv.Close)
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	t.Setenv("SHEEPDOG_WEB_PORT", port)
+	t.Setenv("SHEEPDOG_RUN_TOKEN", "tok-worker-1")
+
+	repo := t.TempDir()
+	gitRun := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=T", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=T", "GIT_COMMITTER_EMAIL=t@example.com")
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, b)
+		}
+	}
+	gitRun("init")
+	_ = os.WriteFile(filepath.Join(repo, "a.txt"), []byte("a\n"), 0o600)
+	gitRun("add", "a.txt")
+	gitRun("commit", "-m", "feat: init")
+	t.Chdir(repo)
+
+	var out, errBuf bytes.Buffer
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--touched", "a.txt", "--skipped", ""}, &out, &errBuf); code != 0 {
+		t.Fatalf("empty skipped code=%d stderr=%s", code, errBuf.String())
+	}
+	if v, ok := lastArgs["skipped"]; !ok || v != "" || lastArgs["touched"] != "a.txt" {
+		t.Fatalf("empty skipped sent %+v, want touched=a.txt and explicit skipped=\"\"", lastArgs)
+	}
+
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--touched", "a.txt, b.txt", "--skipped", "e2e"}, &out, &errBuf); code != 0 {
+		t.Fatalf("non-empty skipped code=%d stderr=%s", code, errBuf.String())
+	}
+	if lastArgs["touched"] != "a.txt, b.txt" || lastArgs["skipped"] != "e2e" {
+		t.Fatalf("non-empty skipped sent %+v", lastArgs)
+	}
+
+	for _, bad := range [][]string{
+		{"factory", "report", "ready", "--reject", "no", "--touched", "a.txt"},
+		{"factory", "report", "ready", "--nothing-to-change", "--why", "done", "--skipped", ""},
+	} {
+		if code := run(context.Background(), bad, &out, &errBuf); code != 2 {
+			t.Fatalf("%v code=%d, want 2", bad, code)
+		}
+	}
+}
+
+// TestFactoryReportReadyRefusesProofsWithoutTouchedOrSkippedBeforeRunning checks
+// PR 3.3b review fix 2: the client refuses a ready with proofs when --touched
+// or --skipped is missing (or --touched is blank) before running any proof.
+func TestFactoryReportReadyRefusesProofsWithoutTouchedOrSkippedBeforeRunning(t *testing.T) {
+	wt, proofs := setupProofTestEnv(t)
+	t.Chdir(wt)
+
+	marker := filepath.Join(t.TempDir(), "proof-ran")
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"missing both", []string{"factory", "report", "ready", "--proof", "p=touch " + marker}},
+		{"missing touched", []string{"factory", "report", "ready", "--proof", "p=touch " + marker, "--skipped", ""}},
+		{"blank touched", []string{"factory", "report", "ready", "--proof", "p=touch " + marker, "--touched", " \t\n ", "--skipped", ""}},
+		{"missing skipped", []string{"factory", "report", "ready", "--proof", "p=touch " + marker, "--touched", "a.txt"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_ = os.Remove(marker)
+			*proofs = nil
+			var out, errBuf bytes.Buffer
+			if code := run(context.Background(), tc.args, &out, &errBuf); code == 0 {
+				t.Fatalf("code=0, want refusal; stdout=%s stderr=%s", out.String(), errBuf.String())
+			}
+			if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("proof command ran before --touched/--skipped check (marker stat err=%v)", err)
+			}
+			if len(*proofs) != 0 {
+				t.Fatalf("posted proofs to daemon despite client refusal: %+v", *proofs)
+			}
+		})
+	}
 }

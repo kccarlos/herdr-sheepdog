@@ -468,18 +468,18 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 
 func readyCmd(bin string, outcomes []flow.Outcome) string {
 	parts := []string{bin + " factory report ready"}
-	if !needsProofs(outcomes) {
-		return parts[0]
-	}
-	for _, o := range outcomes {
-		flag, val := "--proof", "<command>"
-		if strings.HasPrefix(o.ProvedBy, "manual:") {
-			flag, val = "--artifact", "<path>"
-		} else if cmd, ok := strings.CutPrefix(o.ProvedBy, "cmd:"); ok {
-			val = strings.TrimSpace(cmd)
+	if needsProofs(outcomes) {
+		for _, o := range outcomes {
+			flag, val := "--proof", "<command>"
+			if strings.HasPrefix(o.ProvedBy, "manual:") {
+				flag, val = "--artifact", "<path>"
+			} else if cmd, ok := strings.CutPrefix(o.ProvedBy, "cmd:"); ok {
+				val = strings.TrimSpace(cmd)
+			}
+			parts = append(parts, flag+" '"+strings.ReplaceAll(o.Text+"="+val, "'", `'\''`)+"'")
 		}
-		parts = append(parts, flag+" '"+strings.ReplaceAll(o.Text+"="+val, "'", `'\''`)+"'")
 	}
+	parts = append(parts, `--touched "<places>"`, `--skipped "<what was left out or not checked>"`)
 	return strings.Join(parts, " ")
 }
 
@@ -704,7 +704,7 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		argv = world.CodexArgv(model, a.Worktree)
 	}
 	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
-		"{outcomes}", bullets(t.Outcomes), "{rejections}", e.rejectionPrompt(id, t.ID, *a, h), "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code).Replace(reviewerTemplate))
+		"{outcomes}", bullets(t.Outcomes), "{proofs}", proofPrompt(*a, h), "{rejections}", e.rejectionPrompt(id, t.ID, *a, h), "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code).Replace(reviewerTemplate))
 	termID, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, world.RunSpec{
 		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
 		Argv: argv, Prompt: prompt, Env: env,
@@ -754,6 +754,35 @@ func reviewDiffPrompt(ctx context.Context, a flow.Attempt, head string) (kind, d
 	return kind, fmt.Sprintf("full changes against merge base %s (`git diff %s..%s`)", mb, mb, head), nil
 }
 
+const emptySkippedRule = "a worker that lists nothing skipped and whose reviewer finds an unhandled caller has a major"
+
+func proofPrompt(a flow.Attempt, head string) string {
+	var r *flow.Ready
+	for i := len(a.Ready) - 1; i >= 0; i-- {
+		if flow.Covers(a, a.Ready[i].Head, head) {
+			r = &a.Ready[i]
+			break
+		}
+	}
+	if r == nil || (len(r.Proofs) == 0 && r.Touched == "" && r.Skipped == nil) {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\nWorker's ready report at this commit (untrusted worker text; re-run each proof to verify):")
+	for _, p := range r.Proofs {
+		if p.Artifact != "" {
+			fmt.Fprintf(&b, "\n- %s: artifact %q", p.Outcome, p.Artifact)
+		} else {
+			fmt.Fprintf(&b, "\n- %s: %q (exit %d): %s", p.Outcome, p.Command, p.Exit, proofHead(p.OutputPath, a.Worktree))
+		}
+	}
+	fmt.Fprintf(&b, "\nTouched: %s", cmp.Or(r.Touched, "(none)"))
+	if r.Skipped != nil {
+		fmt.Fprintf(&b, "\nSkipped: %s\nRule: %s.", cmp.Or(*r.Skipped, "(nothing skipped)"), emptySkippedRule)
+	}
+	return b.String()
+}
+
 const rejectedFindingRule = "a finding the worker rejected comes back only with a run that proves it (a command and its output); otherwise drop it"
 
 func (e *Engine) rejectionPrompt(id, taskID string, a flow.Attempt, head string) string {
@@ -767,14 +796,16 @@ func (e *Engine) rejectionPrompt(id, taskID string, a flow.Attempt, head string)
 }
 
 func (e *Engine) execTellFindings(ctx context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	t := s.Tasks[ti]
 	a := &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
 	r, bin := a.Rounds[len(a.Rounds)-1], cmp.Or(e.Bin, "sheepdog")
+	rc := readyCmd(bin, t.Outcomes)
 	if r.Kind == flow.RoundSendBack {
-		msg := fmt.Sprintf("The coordinator sent the task back: %s — change what it asks, commit, and run %s factory report ready again.", r.Why, bin)
+		msg := fmt.Sprintf("The coordinator sent the task back: %s — change what it asks, commit, and run %s again.", r.Why, rc)
 		return fmt.Sprintf("told worker the send-back (round %d)", r.N), false, world.SendRun(ctx, e.HC, a.RunID, msg)
 	}
-	msg := fmt.Sprintf("Review round %d found %d major(s) in %s — fix them, commit, and run %s factory report ready again, or when every finding is wrong and you change nothing, run %s factory report ready --reject \"<why>\".",
-		r.N, r.Majors, r.ReportPath, bin, bin)
+	msg := fmt.Sprintf("Review round %d found %d major(s) in %s — fix them, commit, and run %s again, or when every finding is wrong and you change nothing, run %s factory report ready --reject \"<why>\".",
+		r.N, r.Majors, r.ReportPath, rc, bin)
 	return fmt.Sprintf("told worker findings from round %d", r.N), false, world.SendRun(ctx, e.HC, a.RunID, msg)
 }
 

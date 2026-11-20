@@ -1246,7 +1246,8 @@ func TestReportReadyProofs(t *testing.T) {
 		{Outcome: "tests pass", Command: "go test ./...", Exit: 0, OutputPath: okLog},
 		{Outcome: "looks right", Artifact: artFile},
 	}
-	if err := send(good); err != nil {
+	goodRaw, _ := json.Marshal(map[string]any{"head": c1, "proofs": good, "touched": "p.go", "skipped": ""})
+	if err := eng.Report("tok-worker", "ready", goodRaw); err != nil {
 		t.Fatalf("valid proofs: %v", err)
 	}
 	cur, _ := LoadState(paths.State(projID))
@@ -1259,6 +1260,101 @@ func TestReportReadyProofs(t *testing.T) {
 	saveTask([]flow.Outcome{{Text: "legacy outcome"}})
 	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c1+`"}`)); err != nil {
 		t.Fatalf("legacy task ready without proofs: %v", err)
+	}
+}
+
+// TestReportReadyTouchedSkippedAndRawCommand checks PR 3.3b:
+// touched and skipped are required with proofs (empty skipped "" is allowed),
+// cleaned and capped at 500 runes, and the stored proof command is the exact
+// raw text that ran.
+func TestReportReadyTouchedSkippedAndRawCommand(t *testing.T) {
+	ctx := context.Background()
+	paths := testPaths(t)
+	repo, baseSHA := initGitRepoWithRemote(t)
+	eng := New(paths, nil)
+
+	const projID = "proj-touched"
+	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: touched")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(wt.Path, "t.go"), []byte("package demo\n"), 0o600)
+	gitIn(t, wt.Path, "add", "t.go")
+	gitIn(t, wt.Path, "commit", "-m", "feat: t")
+	c1 := gitIn(t, wt.Path, "rev-parse", "HEAD")
+
+	gitDir := gitIn(t, wt.Path, "rev-parse", "--git-dir")
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(wt.Path, gitDir)
+	}
+	proofDir := filepath.Join(gitDir, "sheepdog-proofs")
+	_ = os.MkdirAll(proofDir, 0o700)
+	okLog := filepath.Join(proofDir, "ok.log")
+	_ = os.WriteFile(okLog, []byte("a  b\nok\n"), 0o600)
+
+	reset := func() {
+		t.Helper()
+		st := flow.State{
+			Seq:      1,
+			Project:  flow.Project{ID: projID, Folder: repo, Started: true},
+			Settings: flow.DefaultSettings(),
+			Tasks: []flow.Task{{
+				ID: "T1", Title: "feat: touched",
+				Outcomes: []flow.Outcome{{Text: "prints", ProvedBy: "cmd: printf 'a  b'"}},
+				Attempts: []flow.Attempt{{
+					SizeCap: 100, BaseCommit: baseSHA, Branch: wt.Branch, Worktree: wt.Path,
+					RunTokenHash: tokenHash("tok-worker"),
+					Ready:        []flow.Ready{}, Rounds: []flow.Round{}, Accepts: []flow.Accept{}, Acts: []flow.Act{},
+				}},
+			}},
+		}
+		if err := SaveState(paths.State(projID), st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rawCmd := "printf 'a  b'\necho ok"
+	proof := []flow.Proof{{Outcome: "prints", Command: "  " + rawCmd + "  ", Exit: 0, OutputPath: okLog}}
+	send := func(body map[string]any) error {
+		b, _ := json.Marshal(body)
+		return eng.Report("tok-worker", "ready", b)
+	}
+
+	// Required with proofs; over-500 refused; state unchanged.
+	reset()
+	longStr := strings.Repeat("x", 501)
+	for name, body := range map[string]map[string]any{
+		"missing touched": {"head": c1, "proofs": proof, "skipped": ""},
+		"blank touched":   {"head": c1, "proofs": proof, "touched": " \n\t ", "skipped": ""},
+		"missing skipped": {"head": c1, "proofs": proof, "touched": "t.go"},
+		"long touched":    {"head": c1, "proofs": proof, "touched": longStr, "skipped": ""},
+		"long skipped":    {"head": c1, "proofs": proof, "touched": "t.go", "skipped": longStr},
+	} {
+		if err := send(body); refusalCode(err) != "invalid_report" {
+			t.Errorf("%s: err = %v, want invalid_report", name, err)
+		}
+	}
+	if cur, _ := LoadState(paths.State(projID)); cur.Seq != 1 {
+		t.Fatalf("refusals mutated state: seq=%d", cur.Seq)
+	}
+
+	// Empty skipped "" is allowed; touched is cleaned; raw proof command preserved verbatim.
+	if err := send(map[string]any{"head": c1, "proofs": proof, "touched": "t.go\n\tcallers\x1b[31m", "skipped": ""}); err != nil {
+		t.Fatalf("valid ready with empty skipped: %v", err)
+	}
+	cur, _ := LoadState(paths.State(projID))
+	got := cur.Tasks[0].Attempts[0].Ready[0]
+	if got.Touched != "t.go callers [31m" || got.Skipped == nil || *got.Skipped != "" || got.Proofs[0].Command != rawCmd {
+		t.Fatalf("stored ready = %+v, want cleaned touched, empty skipped, raw command %q", got, rawCmd)
+	}
+
+	// Non-empty skipped is cleaned and stored.
+	reset()
+	if err := send(map[string]any{"head": c1, "proofs": proof, "touched": "t.go", "skipped": "slow\te2e\ncheck"}); err != nil {
+		t.Fatalf("valid ready with skipped: %v", err)
+	}
+	cur, _ = LoadState(paths.State(projID))
+	if got := cur.Tasks[0].Attempts[0].Ready[0]; got.Skipped == nil || *got.Skipped != "slow e2e check" {
+		t.Fatalf("stored skipped = %v, want cleaned", got.Skipped)
 	}
 }
 
