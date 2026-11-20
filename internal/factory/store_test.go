@@ -29,7 +29,7 @@ func TestStateRoundTrip(t *testing.T) {
 		Project:  flow.Project{ID: "p1"},
 		Settings: flow.DefaultSettings(),
 		Tasks: []flow.Task{{
-			ID: "t1", Title: "Add x", Brief: "b", Outcomes: []string{"x works"},
+			ID: "t1", Title: "Add x", Brief: "b", Outcomes: []flow.Outcome{{Text: "x works", ProvedBy: "cmd: go test ./..."}},
 			Done: &flow.Merged{MergedCommit: "abc"},
 			Attempts: []flow.Attempt{{SizeCap: 100,
 				BaseCommit: "000", Branch: "t1", Worktree: "/w", PR: 3, RunID: "r1",
@@ -71,6 +71,27 @@ func TestLoadStateFillsNewSettings(t *testing.T) {
 	want.ReviewRounds, want.ChecksGraceMinutes = 1, 9
 	if got.Settings != want {
 		t.Fatalf("settings = %+v, want %+v", got.Settings, want)
+	}
+}
+
+// TestLoadStateLegacyStringOutcomes: a state.json written before PR 3.2 with
+// plain-string outcomes still loads cleanly.
+func TestLoadStateLegacyStringOutcomes(t *testing.T) {
+	path := Paths{DataDir: t.TempDir()}.State("p1")
+	raw := `{"seq":2,"project":{"id":"p1"},"tasks":[{"id":"T1","title":"feat: x","brief":"b","outcomes":["old one","old two"],"estimate_lines":20,"attempts":[]}]}`
+	if err := writeAtomic(path, []byte(raw)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadState(path)
+	if err != nil {
+		t.Fatalf("LoadState legacy outcomes: %v", err)
+	}
+	want := []flow.Outcome{{Text: "old one"}, {Text: "old two"}}
+	if !reflect.DeepEqual(got.Tasks[0].Outcomes, want) {
+		t.Fatalf("outcomes = %+v, want %+v", got.Tasks[0].Outcomes, want)
+	}
+	if b := bullets(got.Tasks[0].Outcomes); b != "- old one\n- old two" {
+		t.Fatalf("legacy bullets = %q", b)
 	}
 }
 
