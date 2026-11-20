@@ -440,17 +440,21 @@ func TestReviewerGoneKeepsSlotWhileWorkerRuns(t *testing.T) {
 	eng.passProject(ctx, id, false) // N11 for T1, T2
 	eng.passProject(ctx, id, false) // N23 starts workers for T1, T2
 	st, _ = LoadState(paths.State(id))
-	// Give T1 a ready report and a dead reviewer run while its worker keeps running.
+	// Give T1 a ready report, an open PR, and a dead reviewer run while its worker keeps running.
+	githubOrigin(t, repo)
+	gh := installFakeGH(t)
 	a1 := &st.Tasks[0].Attempts[0]
+	writePRJSON(t, gh, "view.json", a1.BaseCommit, "[]")
+	a1.PR = 7
 	a1.Ready = []flow.Ready{{Head: a1.BaseCommit}}
 	a1.Review = &flow.ReviewRun{Round: 1, Kind: flow.RoundFull, Head: a1.BaseCommit, RunID: "rev-gone", Code: "c1", Reviewer: flow.Reviewer{CLI: "claude", Model: "opus"}}
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
 	}
-	eng.passProject(ctx, id, false) // S1 fires on T1 because reviewer is gone, recording stop_task
+	eng.passProject(ctx, id, false) // 4.8 retries T1's dead reviewer; T1's worker keeps its slot
 	st, _ = LoadState(paths.State(id))
-	if flow.Count(st.Tasks[0].Attempts[0].Acts, flow.AskStopTask) == 0 {
-		t.Fatalf("T1 acts = %+v, want stop_task from S1", st.Tasks[0].Attempts[0].Acts)
+	if rev := st.Tasks[0].Attempts[0].Review; rev == nil || rev.Retries != 1 || rev.RunID == "" {
+		t.Fatalf("T1 review = %+v, want retried reviewer", rev)
 	}
 	eng.passProject(ctx, id, false) // T1's worker is still live: T3 must not take T1's slot
 	st, _ = LoadState(paths.State(id))

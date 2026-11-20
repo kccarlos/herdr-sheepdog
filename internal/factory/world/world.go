@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	crand "crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -59,6 +60,26 @@ func ClaudeArgv(role, model, effort, permissionMode string) []string {
 		argv = append(argv, "--allowedTools="+reviewerTools)
 	}
 	return argv
+}
+
+// NewUUID returns a random version-4 UUID for Claude session ids (spike S0.8).
+func NewUUID() string {
+	var b [16]byte
+	_, _ = crand.Read(b[:])
+	b[6], b[8] = (b[6]&0x0f)|0x40, (b[8]&0x3f)|0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// ClaudeSessionArgv returns ClaudeArgv with --session-id (fresh) or --resume,
+// passing --model and --effort again on resume (KB-LCH-4, spike S0.8).
+func ClaudeSessionArgv(role, model, effort, permissionMode, sessionID string, resume bool) []string {
+	argv, sid := ClaudeArgv(role, model, effort, permissionMode), strings.TrimSpace(sessionID)
+	if len(argv) == 0 || sid == "" {
+		return argv
+	} else if resume {
+		return append(argv, "--resume", sid)
+	}
+	return append(argv, "--session-id", sid)
 }
 
 // reviewerTools is what a reviewer may use without asking: read the code and
@@ -336,7 +357,7 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]f
 }
 
 // ActRun executes one run-table act against herdr-core.
-func ActRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, act string, held []string) (err error) {
+func ActRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, act, msg string) (err error) {
 	if client == nil || rec.Address == "" {
 		return nil
 	}
@@ -345,9 +366,9 @@ func ActRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, act stri
 		if keys := flow.ScreenKeys(rec.CLI, rec.Screen); len(keys) > 0 {
 			_, err = client.Keys(ctx, rec.Address, keys...)
 		}
-	case flow.RunActSendHeld:
-		if len(held) > 0 {
-			err = SendRun(ctx, client, rec.Address, held[0])
+	case flow.RunActSend, flow.RunActSendHeld:
+		if msg != "" {
+			err = SendRun(ctx, client, rec.Address, msg)
 		}
 	case flow.RunActInterrupt:
 		_, err = client.Interrupt(ctx, rec.Address, 0)

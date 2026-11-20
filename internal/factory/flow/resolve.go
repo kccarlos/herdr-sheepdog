@@ -10,12 +10,12 @@ import (
 
 // Additional roles, permission modes and continue modes (design.md 9.1).
 const (
-	RoleRetro     = "retro"
-	RoleDesigner  = "designer"
-	RoleVerifier  = "verifier"
-	ContinueFresh = "fresh"
-	PermFull      = "full"
-	PermReadOnly  = "read-only"
+	RoleRetro                                      = "retro"
+	RoleDesigner                                   = "designer"
+	RoleVerifier                                   = "verifier"
+	ContinueFresh, ContinueResume, ContinueHandoff = "fresh", "resume", "handoff"
+	PermFull                                       = "full"
+	PermReadOnly                                   = "read-only"
 )
 
 var rolePerm = map[string]string{
@@ -47,6 +47,10 @@ type ResolveFacts struct {
 	CLIs   map[string]CLIFacts
 	Worker Candidate // worker's (CLI, Model) for the reviewer/retro check
 }
+
+// UnprobedFacts marks known CLIs inconclusive so Resolve picks the first
+// configured candidate when CLI probes have not run this pass.
+var UnprobedFacts = ResolveFacts{CLIs: map[string]CLIFacts{"claude": {Unknown: true}, "codex": {Unknown: true}, "agy": {Unknown: true}}}
 
 // Intent is the resolved launch intent for a role (design.md 9.1).
 type Intent struct{ Role, CLI, Model, Effort, Perm, Continue string }

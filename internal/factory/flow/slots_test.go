@@ -152,7 +152,7 @@ func TestUnmetDepsAndRunningTasks(t *testing.T) {
 		{ID: "T6", Attempts: []Attempt{{BaseCommit: "b0", RunID: "w6"}}},
 		{ID: "T7", Attempts: []Attempt{{BaseCommit: "b0", RunID: "w7"}}},
 		{ID: "T8", Attempts: []Attempt{{BaseCommit: "b0", RunID: "w8"}}},
-		{ID: "T9", Attempts: []Attempt{{BaseCommit: "b0", Acts: []Act{{Key: AskStopTask, Result: "not_built_yet"}}}}},
+		{ID: "T9", Attempts: []Attempt{{BaseCommit: "b0", Run: &RunRecord{State: PhaseEnded, Result: EndExited}}}},
 	}
 	notDone, dropped := UnmetDeps(tasks[4], tasks)
 	if !slices.Equal(notDone, []string{"T3", "MISSING"}) || !slices.Equal(dropped, []string{"T2"}) {
@@ -160,19 +160,19 @@ func TestUnmetDepsAndRunningTasks(t *testing.T) {
 	}
 	ws := map[string]RunState{"T6": RunWorking, "T7": RunIdle, "T8": RunGone}
 	if n := RunningTasks(tasks, ws); n != 3 {
-		t.Errorf("RunningTasks = %d, want 3 (T3 starting + T6 working + T7 idle; not T8 gone, T9 stop_task)", n)
+		t.Errorf("RunningTasks = %d, want 3 (T3 starting + T6 working + T7 idle; not T8/T9 ended)", n)
 	}
 }
 
-func TestReviewerGoneS1KeepsSlotWhileWorkerRuns(t *testing.T) {
+func TestReviewerGoneKeepsSlotWhileWorkerRuns(t *testing.T) {
 	tasks := []Task{
-		{ID: "T1", Attempts: []Attempt{{BaseCommit: "b0", RunID: "w1", Acts: []Act{{Key: AskStopTask, Result: "not_built_yet"}}}}},
-		{ID: "T2", Attempts: []Attempt{{BaseCommit: "b0", RunID: "w2", Acts: []Act{{Key: AskStopTask, Result: "not_built_yet"}}}}},
-		{ID: "T3", Attempts: []Attempt{{BaseCommit: "b0", RunID: "w3", Acts: []Act{{Key: AskStopTask, Result: "not_built_yet"}}}}},
+		{ID: "T1", Attempts: []Attempt{{BaseCommit: "b0", RunID: "w1", Review: &ReviewRun{Run: &RunRecord{State: PhaseEnded, Result: EndExited}}}}},
+		{ID: "T2", Attempts: []Attempt{{BaseCommit: "b0", RunID: "w2", Review: &ReviewRun{Run: &RunRecord{State: PhaseEnded, Result: EndExited}}}}},
+		{ID: "T3", Attempts: []Attempt{{BaseCommit: "b0", Run: &RunRecord{State: PhaseEnded, Result: EndExited}}}},
 	}
 	ws := map[string]RunState{"T1": RunWorking, "T2": RunIdle, "T3": RunGone}
 	if n := RunningTasks(tasks, ws); n != 2 {
-		t.Errorf("RunningTasks = %d, want 2 (T1 working + T2 idle keep slots despite stop_task; T3 gone frees slot)", n)
+		t.Errorf("RunningTasks = %d, want 2 (T1 working + T2 idle keep slots despite ended reviewer; T3 gone frees slot)", n)
 	}
 }
 

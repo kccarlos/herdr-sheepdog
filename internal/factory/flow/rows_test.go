@@ -112,21 +112,7 @@ var (
 			{Head: "f3", At: now.Add(-10 * time.Minute)},
 		}
 	}
-	// stuckAct: an act failed past stuck_minutes; idleRev: the round's
-	// reviewer read idle with no tag past stuck_minutes.
-	stuckAct = func(k string) func(*In) {
-		return func(in *In) {
-			a0(in).Acts = append(a0(in).Acts, Act{Key: k, Result: "failed", At: now.Add(-stuckFor(in))})
-		}
-	}
-	idleRev = func(in *In) {
-		t := now.Add(-stuckFor(in))
-		a0(in).Review = &ReviewRun{Round: 1, Head: "c1", IdleSince: &t}
-		in.Facts.Reviewer.State = RunIdle
-	}
 )
-
-func stuckFor(in *In) time.Duration { return time.Duration(in.Settings.StuckMinutes) * time.Minute }
 
 func rowByID(id string) Row[In] {
 	return TaskRows[slices.IndexFunc(TaskRows, func(r Row[In]) bool { return r.ID == id })]
@@ -264,8 +250,6 @@ func TestRowCases(t *testing.T) {
 		in    In
 		asked []string
 	}{
-		{"S2", with(done, stuckAct("cleanup")), []string{"wake_coordinator@stuck@cleanup@c1"}},
-		{"S2", with(noRounds, idleRev), []string{"wake_coordinator@stuck@reviewer_idle@1@c1"}},
 		{"N1", with(done), []string{"cleanup"}},
 		{"N1", with(splitMark), []string{"cleanup"}},
 		{"N1", with(droppedMark), []string{"cleanup"}},
@@ -273,12 +257,11 @@ func TestRowCases(t *testing.T) {
 		{"N3", with(parked, runsLive), []string{"stop_runs"}},
 		{"N3", with(parked), nil},
 		{"N4", with(closedPR), []string{"wake_coordinator@pr_closed"}},
-		{"S1", with(workerEnded), []string{"stop_task"}},
-		{"S1", with(noRounds, reviewEnded), []string{"stop_task"}},
 		{"N6", with(openRecap), []string{"wake_coordinator@recap@1"}},
 		{"N6", with(sizeRecap), []string{"wake_coordinator@recap@1", "tell_worker_stop@1"}},
 		{"N6", with(ciRecap), []string{"wake_coordinator@recap@1", "tell_worker_stop@1"}},
 		{"N6", with(sizeRecap, func(in *In) { in.Facts.Worker = Run{} }), []string{"wake_coordinator@recap@1"}},
+		{"N6", with(sizeRecap, workerEnded), []string{"wake_coordinator@recap@1"}},
 		{"N7", with(diverged), []string{"tell_worker_diverged@c1"}},
 		{"N8", with(nothingF, prGone), []string{"wake_coordinator@nothing_to_change@0"}},
 		{"N9", with(noAttempts, waitDep), nil},
@@ -362,14 +345,10 @@ func TestRowOrder(t *testing.T) {
 		neighbours bool
 		in         In
 	}{
-		// S2 is first: nothing must win before it (plan.md PR 2.1).
-		{"S2", "N1", true, with(done, stuckAct("cleanup"))},
-		{"S2", "N29", false, with(noRounds, idleRev)},
-		{"S2", "N41", false, with(stuckAct("merge@c1"))},
 		{"N1", "N2", true, with(done, merged)},
 		{"N2", "N3", true, with(merged, parked)},
 		{"N3", "N4", true, with(parked, closedPR)},
-		{"N4", "S1", true, with(closedPR, workerEnded)},
+		{"N4", "N6", true, with(closedPR, openRecap)},
 		{"N6", "N7", true, with(openRecap, diverged)},
 		{"N7", "N8", true, with(diverged, nothingF)},
 		{"N8", "N23", false, with(nothingF, prGone)},
@@ -379,10 +358,8 @@ func TestRowOrder(t *testing.T) {
 		{"N3", "N9", false, with(parked, noAttempts, waitDep)},
 		{"N6", "N9", false, with(openRecap, noAttempts, waitDep)},
 		{"N9", "N11", false, with(noAttempts, waitDep)},
-		{"S1", "N6", true, with(workerEnded, openRecap)},
 		{"N6", "N22", false, with(openRecap, changes)},
 		{"N6", "N29", false, with(openRecap, noRounds)},
-		{"S1", "N22", false, with(workerEnded, changes)},
 		{"N6", "N12", false, with(openRecap, overCap)},
 		{"N6", "N13", false, with(openRecap, noRounds, ciFailed3)},
 		{"N12", "N13", true, with(overCap, noRounds, ciFailed3)},
@@ -453,20 +430,79 @@ func TestChecksGrace(t *testing.T) {
 }
 
 func TestEnsureRun(t *testing.T) {
-	in := with(noRounds)
-	for _, c := range []struct {
-		run  Run
-		acts []Act
+	// Worker table (design.md 4.8): pending, engine-stopped, fresh, backoff, resume/handoff, no-slot, quota/signed_out, exhausted -> failure wake.
+	wBase := func(fs ...func(*In)) In {
+		in := with(notReady, noRounds, prGone)
+		for _, f := range fs {
+			f(&in)
+		}
+		return in
+	}
+	for name, tc := range map[string]struct {
+		in   In
 		want []string
 	}{
-		{Run{Pending: true}, nil, nil},
-		{Run{}, nil, []string{"go"}},
-		{Run{}, []Act{{Key: "go", Result: "done"}}, nil},
-		{Run{State: RunIdle}, nil, nil},
+		"pending waits":               {wBase(func(in *In) { in.Facts.Worker.Pending = true }), nil},
+		"none yet starts fresh":       {wBase(), []string{"start_worker"}},
+		"none yet waits without slot": {wBase(noSlotF), nil},
+		"live idle needs nothing":     {wBase(func(in *In) { in.Facts.Worker.State = RunIdle }), nil},
+		"engine stopped resumes uncounted": {wBase(workerEnded, func(in *In) {
+			a0(in).Run = &RunRecord{State: PhaseEnded, Result: EndStopped, CLI: "claude", SessionID: "s1", Resumable: true}
+		}), []string{"start_worker@resume"}},
+		"engine stopped waits without slot": {wBase(workerEnded, noSlotF, func(in *In) {
+			a0(in).Run = &RunRecord{State: PhaseEnded, Result: EndStopped, CLI: "claude", SessionID: "s1", Resumable: true}
+		}), nil},
+		"exited waits before backoff": {wBase(workerEnded, func(in *In) {
+			a0(in).Run = &RunRecord{State: PhaseEnded, Result: EndExited, CLI: "claude", SessionID: "s1", Resumable: true, EndedAt: now.Add(-30 * time.Second)}
+		}), nil},
+		"exited resumes past backoff": {wBase(workerEnded, func(in *In) {
+			a0(in).Run = &RunRecord{State: PhaseEnded, Result: EndExited, CLI: "claude", SessionID: "s1", Resumable: true, EndedAt: now.Add(-time.Minute)}
+		}), []string{"start_worker@resume@1"}},
+		"resume_failed starts handoff": {wBase(workerEnded, func(in *In) {
+			a0(in).Restarts = 1
+			a0(in).Run = &RunRecord{State: PhaseEnded, Result: EndResumeFailed, CLI: "claude", SessionID: "s1", Resumable: false, EndedAt: now.Add(-2 * time.Minute)}
+		}), []string{"start_worker@handoff@2"}},
+		"quota wakes coordinator once": {wBase(workerEnded, func(in *In) {
+			a0(in).Run = &RunRecord{State: PhaseEnded, Result: EndQuota, EndedAt: now}
+		}), []string{"wake_coordinator@worker_failed"}},
+		"restarts exhausted wakes coordinator once": {wBase(workerEnded, func(in *In) {
+			a0(in).Restarts = DefaultSettings().WorkerRestarts
+			a0(in).Run = &RunRecord{State: PhaseEnded, Result: EndExited, EndedAt: now.Add(-time.Hour)}
+		}), []string{"wake_coordinator@worker_failed"}},
 	} {
-		a0(&in).Acts = c.acts
-		if got := ensureRun(in, c.run, "go"); !slices.Equal(got, c.want) {
-			t.Errorf("%+v %v: %v, want %v", c.run, c.acts, got, c.want)
+		if got := EnsureRun(tc.in, RoleWorker); !slices.Equal(got, tc.want) {
+			t.Errorf("worker %s: got %v, want %v", name, got, tc.want)
+		}
+	}
+
+	// Reviewer table (design.md 4.8): fresh, engine-stopped, retry below reviewer_retries, failure at reviewer_retries.
+	rBase := func(fs ...func(*In)) In {
+		in := with(noRounds)
+		for _, f := range fs {
+			f(&in)
+		}
+		return in
+	}
+	for name, tc := range map[string]struct {
+		in   In
+		want []string
+	}{
+		"fresh reviewer": {rBase(), []string{"start_reviewer@1@c1"}},
+		"engine stopped reviewer": {rBase(reviewEnded, func(in *In) {
+			a0(in).Review = &ReviewRun{Round: 1, Head: "c1", Run: &RunRecord{State: PhaseEnded, Result: EndStopped}}
+		}), []string{"start_reviewer@1@resume@c1"}},
+		"no report retry 1": {rBase(reviewEnded, func(in *In) {
+			a0(in).Review = &ReviewRun{Round: 1, Head: "c1", Retries: 0, Run: &RunRecord{State: PhaseEnded, Result: EndExited}}
+		}), []string{"start_reviewer@1@1@c1"}},
+		"no report retry 2": {rBase(reviewEnded, func(in *In) {
+			a0(in).Review = &ReviewRun{Round: 1, Head: "c1", Retries: 1, Run: &RunRecord{State: PhaseEnded, Result: EndStuck}}
+		}), []string{"start_reviewer@1@2@c1"}},
+		"retries exhausted wakes once": {rBase(reviewEnded, func(in *In) {
+			a0(in).Review = &ReviewRun{Round: 1, Head: "c1", Retries: DefaultSettings().ReviewerRetries, Run: &RunRecord{State: PhaseEnded, Result: EndExited}}
+		}), []string{"wake_coordinator@reviewer_failed@1@c1"}},
+	} {
+		if got := EnsureRun(tc.in, RoleReviewer); !slices.Equal(got, tc.want) {
+			t.Errorf("reviewer %s: got %v, want %v", name, got, tc.want)
 		}
 	}
 }
@@ -749,77 +785,21 @@ func TestNoNumberInRules(t *testing.T) {
 	}
 }
 
-// TestS2StuckWakesOnce: a stall wakes once its clock reaches stuck_minutes;
-// once woken, the rows below go on; a new H or another stall wakes again.
-func TestS2StuckWakesOnce(t *testing.T) {
-	woken := func(in *In) {
-		_, d := FirstMatch(TaskRows, *in)
-		for _, k := range d.Asked {
-			a0(in).Acts = append(a0(in).Acts, Act{Key: k, Result: "done", At: now})
-		}
-	}
-	young := func(in *In) { in.Now = now.Add(-time.Second) }
-	newH := func(in *In) {
-		a0(in).Ready = append(a0(in).Ready, Ready{Head: "c2"})
-		a0(in).Review.Head = "c2"
-	}
-	for name, c := range map[string]struct {
-		in   In
-		row  string
-		wake []string
-	}{
-		"idle, young":         {with(noRounds, idleRev, young), "N29", nil},
-		"failed act, young":   {with(stuckAct("merge@c1"), young), "N41", nil},
-		"idle, woken":         {with(noRounds, idleRev, woken), "N29", nil},
-		"idle, woken, new H":  {with(noRounds, idleRev, woken, newH), "S2", []string{"wake_coordinator@stuck@reviewer_idle@1@c2"}},
-		"woken, another act":  {with(noRounds, idleRev, woken, stuckAct("push_and_open_pr@c1")), "S2", []string{"wake_coordinator@stuck@push_and_open_pr@c1@c1"}},
-		"done act never wake": {with(func(in *In) { a0(in).Acts = []Act{{Key: "merge@c1", Result: "done", At: now.Add(-time.Hour)}} }, asked), "N41", nil},
-	} {
-		r, d := FirstMatch(TaskRows, c.in)
-		if r.ID != c.row || !slices.Equal(d.Asked, c.wake) {
-			t.Errorf("%s: %s %v, want %s %v", name, r.ID, d.Asked, c.row, c.wake)
-		}
-	}
-}
-
-// TestS2StaleFailedActNeverWakes: a round voided at c1 (its start act
-// failed) never wakes once H has moved to c2, neither at once nor after
-// stuck_minutes; a failed act for the current H still does.
-func TestS2StaleFailedActNeverWakes(t *testing.T) {
-	moved := func(in *In) {
-		a0(in).Ready = append(a0(in).Ready, Ready{Head: "c2"})
-		in.Facts.Tip, in.Facts.PR.Head = "c2", "c2"
-	}
-	later := func(d time.Duration) func(*In) { return func(in *In) { in.Now = now.Add(d) } }
-	for name, in := range map[string]In{
-		"at once":             with(noRounds, stuckAct("start_reviewer@1@c1"), moved),
-		"after stuck_minutes": with(noRounds, stuckAct("start_reviewer@1@c1"), moved, later(time.Duration(StuckMax)*time.Minute)),
-	} {
-		if r, d := FirstMatch(TaskRows, in); r.ID == "S2" || slices.ContainsFunc(d.Asked, func(k string) bool { return strings.HasPrefix(k, AskWake) }) {
-			t.Errorf("%s: %s asked %v, want no wake for a voided round at an older H", name, r.ID, d.Asked)
-		}
-	}
-	in := with(noRounds, stuckAct("start_reviewer@1@c1"), moved, stuckAct("start_reviewer@1@c2"))
-	if r, d := FirstMatch(TaskRows, in); r.ID != "S2" || !slices.Equal(d.Asked, []string{"wake_coordinator@stuck@start_reviewer@1@c2@c2"}) {
-		t.Errorf("failed act at H: %s %v, want S2's wake", r.ID, d.Asked)
-	}
-}
-
 func TestSettingsChanged(t *testing.T) {
 	s := DefaultSettings()
 	if got := s.Changed(); len(got) != 0 {
 		t.Errorf("defaults changed: %v", got)
 	}
-	s.StuckMinutes = StuckMin
-	if got := s.Changed(); !slices.Equal(got, []string{"stuck_minutes 5"}) {
+	s.WorkerRestarts = 5
+	if got := s.Changed(); !slices.Equal(got, []string{"worker_restarts 5"}) {
 		t.Errorf("changed: %v", got)
 	}
 	s.ChecksGraceMinutes, s.ReviewRounds = 7, 2
-	if got := s.Changed(); !slices.Equal(got, []string{"checks_grace_minutes 7", "stuck_minutes 5"}) {
+	if got := s.Changed(); !slices.Equal(got, []string{"checks_grace_minutes 7", "worker_restarts 5"}) {
 		t.Errorf("changed: %v", got)
 	}
 	s.ReviewRounds = 1
-	if got := s.Changed(); !slices.Equal(got, []string{"checks_grace_minutes 7", "review_rounds 1", "stuck_minutes 5"}) {
+	if got := s.Changed(); !slices.Equal(got, []string{"checks_grace_minutes 7", "review_rounds 1", "worker_restarts 5"}) {
 		t.Errorf("changed with review_rounds 1: %v", got)
 	}
 }
@@ -1144,14 +1124,10 @@ func TestN40BehindAndKBMRG6(t *testing.T) {
 	if r, d := FirstMatch(TaskRows, in); r.ID != "N40" || !slices.Equal(d.Asked, []string{"fail_update_branch@c1"}) {
 		t.Fatalf("N40 past grace = %s %v, want fail_update_branch@c1", r.ID, d.Asked)
 	}
-	// Once marked failed, N40 waits (never re-asks); past stuck_minutes S2 wakes.
+	// Once marked failed, N40 waits (never re-asks).
 	a0(&in).Acts[0].Result = "failed"
 	if r, d := FirstMatch(TaskRows, in); r.ID != "N40" || len(d.Asked) != 0 {
 		t.Fatalf("N40 failed = %s %v, want wait", r.ID, d.Asked)
-	}
-	in.Now = now.Add(stuckFor(&in))
-	if r, d := FirstMatch(TaskRows, in); r.ID != "S2" || !slices.Equal(d.Asked, []string{"wake_coordinator@stuck@update_branch@c1@c1"}) {
-		t.Fatalf("N40 failed past stuck_minutes = %s %v, want S2 wake", r.ID, d.Asked)
 	}
 	// BehindUnknown always holds at N36 (never merges, never asks update_branch);
 	// past checks_grace_minutes it wakes the coordinator once and keeps holding.

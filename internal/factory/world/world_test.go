@@ -61,6 +61,21 @@ func TestClaudeArgvGolden(t *testing.T) {
 	}
 }
 
+func TestClaudeSessionArgvAndNewUUID(t *testing.T) {
+	u1, u2 := NewUUID(), NewUUID()
+	if len(u1) != 36 || u1 == u2 || u1[14] != '4' {
+		t.Fatalf("NewUUID() = (%q, %q), want distinct v4 UUIDs", u1, u2)
+	}
+	fresh := ClaudeSessionArgv(flow.RoleWorker, "sonnet", "high", "bypassPermissions", u1, false)
+	if !slices.Equal(fresh[len(fresh)-2:], []string{"--session-id", u1}) || !slices.Contains(fresh, "sonnet") || !slices.Contains(fresh, "high") {
+		t.Fatalf("fresh ClaudeSessionArgv = %q", fresh)
+	}
+	resumed := ClaudeSessionArgv(flow.RoleWorker, "opus", "high", "bypassPermissions", u1, true)
+	if !slices.Equal(resumed[len(resumed)-2:], []string{"--resume", u1}) || !slices.Contains(resumed, "opus") || !slices.Contains(resumed, "high") {
+		t.Fatalf("resumed ClaudeSessionArgv = %q (must keep explicit --model and --effort)", resumed)
+	}
+}
+
 func startRun(ctx context.Context, client *hc.Client, spec RunSpec) (string, error) {
 	t, _, err := StartTerminal(ctx, client, spec, nil)
 	return t.Address, err

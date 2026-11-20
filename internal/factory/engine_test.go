@@ -1242,22 +1242,23 @@ func testVoidReview(t *testing.T, dirty bool) {
 	if !dirty {
 		return
 	}
-	// The head did not move: no new verdict, one void event, the round's
-	// start act is failed so the owner starting again retries it.
-	for range 3 {
-		eng.passProject(ctx, id, false)
+	// Dirty worktree is 4.8's no-valid-report row: retries while tries < reviewer_retries,
+	// then stops retrying and wakes the coordinator once; owner Start resets retries.
+	eng.passProject(ctx, id, false) // retry 1 starts
+	st, _ = LoadState(paths.State(id))
+	if r := st.Tasks[0].Attempts[0].Review; r == nil || r.Retries != 1 || r.RunID == "" {
+		t.Fatalf("after first dirty void: review=%+v, want retry 1 running", r)
+	}
+	srv.Finish(st.Tasks[0].Attempts[0].Review.RunID, "exited")
+	eng.passProject(ctx, id, false) // retry 2 starts
+	srv.Finish(func() string { s, _ := LoadState(paths.State(id)); return s.Tasks[0].Attempts[0].Review.RunID }(), "exited")
+	for range 2 {
+		eng.passProject(ctx, id, false) // retries exhausted (2 == ReviewerRetries) -> reviewer_failed wake once
 	}
 	st, _ = LoadState(paths.State(id))
 	a := st.Tasks[0].Attempts[0]
-	startKey := "start_reviewer@1@" + c1
-	failed := 0
-	for _, x := range a.Acts {
-		if x.Key == startKey && x.Result == "failed" {
-			failed++
-		}
-	}
-	if len(a.Rounds) != 0 || a.Review != nil || flow.Count(a.Acts, startKey) != 1 || failed != 1 {
-		t.Fatalf("after void passes: rounds=%+v review=%+v acts=%+v", a.Rounds, a.Review, a.Acts)
+	if len(a.Rounds) != 0 || a.Review == nil || a.Review.RunID != "" || len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != "reviewer_failed@1@"+c1 {
+		t.Fatalf("after retries exhausted: rounds=%+v review=%+v wakes=%+v", a.Rounds, a.Review, st.Project.Wakes)
 	}
 	if n := strings.Count(logBuf.String(), "factory.review_void"); n != 1 || !strings.Contains(logBuf.String(), "the reviewer left the worktree dirty") {
 		t.Fatalf("review_void logged %d times, want 1 naming why:\n%s", n, logBuf.String())
@@ -1778,6 +1779,8 @@ func TestReviewerPromptIncludesProofsTouchedSkippedAndRule(t *testing.T) {
 func TestWorkerMessagesShowProofForm(t *testing.T) {
 	l := newLanding(t).withTokens()
 	l.eng.Bin = "/tmp/sheepdog-bin"
+	now := time.Now()
+	l.eng.Now = func() time.Time { return now }
 	outcomes := []flow.Outcome{{Text: "tests pass", ProvedBy: "cmd: go test ./..."}}
 	wantRC := readyCmd("/tmp/sheepdog-bin", outcomes)
 	l.edit(func(s *flow.State) {
@@ -1787,9 +1790,11 @@ func TestWorkerMessagesShowProofForm(t *testing.T) {
 	// 1. Plan-amended message.
 	l.report("tok-coord", "plan amend", `{"why":"clarify","tasks":[{"id":"T1","brief":"updated brief"}]}`, "")
 	// 2. Send-back message (N22).
+	now = now.Add(25 * time.Second)
 	l.report("tok-coord", "task", `{"action":"send-back","task":"T1","why":"missing edge case"}`, "")
 	l.pass()
 	// 3. Review-findings message (N22).
+	now = now.Add(25 * time.Second)
 	l.edit(func(s *flow.State) {
 		a := &s.Tasks[0].Attempts[0]
 		a.Rounds = append(a.Rounds, flow.Round{N: len(a.Rounds) + 1, Kind: flow.RoundFull, Head: l.c1, Verdict: flow.VerdictChanges, Majors: 1, ReportPath: "/r/f.md"})

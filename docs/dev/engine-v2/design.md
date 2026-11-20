@@ -356,7 +356,7 @@ A row that needs a run (worker, reviewer, retro) names it by role, round and com
 | the owner quit it in its terminal | do not restart; wake the coordinator once. Its `retry` restarts the run |
 | signed out | add an at-the-Mac item; the next candidate that resolves starts with a handoff; if none, wait until doctor sees it signed in |
 | reviewer or retro with no valid report (a verdict read from a touched worktree is none, section 7.2) | start again with the next reviewer candidate while tries are below `reviewer_retries`; then it counts as a failure (N5). Slice 1 marks the round's start act failed instead, so only an owner start tries the round again |
-| any other end, restarts below `worker_restarts`, backoff passed | worker: resume the session if it is resumable and on the same CLI, else start with a handoff |
+| worker, any other end, restarts below `worker_restarts` | wait until backoff has passed and a slot is free, then resume the session if it is resumable and on the same CLI, else start with a handoff |
 | otherwise | it counts as a failure (N5) |
 
 Starting or restarting a worker needs a free slot, like a first start (N10); without one it waits. A run that ends `signed_out` while the CLI's own sign-in check passes counts as a restart, so it cannot loop.

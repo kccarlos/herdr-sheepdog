@@ -34,7 +34,9 @@ type Settings struct {
 	QuietMinutes               int `json:"quiet_minutes"`                  // R21 (design.md 10.1)
 	InterruptSeconds           int `json:"interrupt_seconds"`              // R21, R22 (design.md 10.1)
 	BlockedMinutes             int `json:"blocked_minutes"`                // R29 (design.md 10.1)
-	StuckMinutes               int `json:"stuck_minutes"`                  // S2, until slice 5a (design.md 10.1)
+	WorkerRestarts             int `json:"worker_restarts"`                // 4.8 (design.md 10.1)
+	ReviewerRetries            int `json:"reviewer_retries"`               // 4.8 (design.md 10.1)
+	EnsureBackoffMinutes       int `json:"ensure_backoff_minutes"`         // 4.8, section 8 (design.md 10.1)
 	ContinuesPerTask           int `json:"continues_per_task"`             // a recap's continue (design.md 4.3, 10.1)
 	ContinueLines              int `json:"continue_lines"`                 // the cap after a continue (design.md 4.9)
 	TaskSizeLimit              int `json:"task_size_limit"`                // plan checks (design.md 11.5)
@@ -52,52 +54,55 @@ type Settings struct {
 
 // Range limits for each setting.
 const (
-	ReviewRoundsMin   = 1
-	ReviewRoundsMax   = 5
-	MaxRoundsMax      = 10
-	RetroMajorsMin    = 2
-	RetroMajorsMax    = 4
-	RetroFromMin      = 2
-	RetroFromMax      = 6
-	ChecksGraceMin    = 1
-	ChecksGraceMax    = 60
-	CIStalledMin      = 10
-	CIStalledMax      = 600
-	MainRedMin        = 5
-	MainRedMax        = 600
-	CIFailsPerHourMin = 1
-	CIFailsPerHourMax = 10
-	FlakeRerunsMax    = 3
-	StartMin          = 1
-	StartMax          = 15
-	IdleGraceMin      = 5
-	IdleGraceMax      = 120
-	QuietMin          = 5
-	QuietMax          = 120
-	InterruptMin      = 10
-	InterruptMax      = 600
-	BlockedMin        = 1
-	BlockedMax        = 120
-	StuckMin          = 5
-	StuckMax          = 240
-	ContinuesMax      = 3
-	ContinueLinesMax  = 500
-	SizeLimitMin      = 50
-	SizeLimitMax      = 2000
-	SizeFactorMin     = 1
-	SizeFactorMax     = 5
-	MaxRunningMin     = 1
-	MaxRunningMax     = 20
+	ReviewRoundsMin    = 1
+	ReviewRoundsMax    = 5
+	MaxRoundsMax       = 10
+	RetroMajorsMin     = 2
+	RetroMajorsMax     = 4
+	RetroFromMin       = 2
+	RetroFromMax       = 6
+	ChecksGraceMin     = 1
+	ChecksGraceMax     = 60
+	CIStalledMin       = 10
+	CIStalledMax       = 600
+	MainRedMin         = 5
+	MainRedMax         = 600
+	CIFailsPerHourMin  = 1
+	CIFailsPerHourMax  = 10
+	FlakeRerunsMax     = 3
+	StartMin           = 1
+	StartMax           = 15
+	IdleGraceMin       = 5
+	IdleGraceMax       = 120
+	QuietMin           = 5
+	QuietMax           = 120
+	InterruptMin       = 10
+	InterruptMax       = 600
+	BlockedMin         = 1
+	BlockedMax         = 120
+	WorkerRestartsMax  = 10
+	ReviewerRetriesMax = 5
+	EnsureBackoffMin   = 1
+	EnsureBackoffMax   = 60
+	ContinuesMax       = 3
+	ContinueLinesMax   = 500
+	SizeLimitMin       = 50
+	SizeLimitMax       = 2000
+	SizeFactorMin      = 1
+	SizeFactorMax      = 5
+	MaxRunningMin      = 1
+	MaxRunningMax      = 20
 )
 
-// DefaultSettings are slice 2's defaults: two passing rounds on the final head
+// DefaultSettings are the engine's defaults: two passing rounds on the final head
 // (design.md 10.1, D12).
 func DefaultSettings() Settings {
 	return Settings{
 		ReviewRounds: 2, MaxRounds: 5,
 		RetroAfterRoundsWithMajors: 2, RetroFromRound: 3,
 		ChecksGraceMinutes: 5, CIStalledMinutes: 90, MainRedMinutes: 60, CIFailsPerHour: 3, FlakeReruns: 1,
-		StartMinutes: 2, IdleGraceSeconds: 20, QuietMinutes: 20, InterruptSeconds: 90, BlockedMinutes: 10, StuckMinutes: 30,
+		StartMinutes: 2, IdleGraceSeconds: 20, QuietMinutes: 20, InterruptSeconds: 90, BlockedMinutes: 10,
+		WorkerRestarts: 3, ReviewerRetries: 2, EnsureBackoffMinutes: 1,
 		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2, MaxRunning: 3,
 		SecondReviewer: "opus",
 	}
@@ -119,6 +124,7 @@ func (s Settings) Changed() []string {
 		{"ci_stalled_minutes", s.CIStalledMinutes, d.CIStalledMinutes},
 		{"continue_lines", s.ContinueLines, d.ContinueLines},
 		{"continues_per_task", s.ContinuesPerTask, d.ContinuesPerTask},
+		{"ensure_backoff_minutes", s.EnsureBackoffMinutes, d.EnsureBackoffMinutes},
 		{"flake_reruns", s.FlakeReruns, d.FlakeReruns},
 		{"idle_grace_seconds", s.IdleGraceSeconds, d.IdleGraceSeconds},
 		{"interrupt_seconds", s.InterruptSeconds, d.InterruptSeconds},
@@ -129,10 +135,11 @@ func (s Settings) Changed() []string {
 		{"retro_after_rounds_with_majors", s.RetroAfterRoundsWithMajors, d.RetroAfterRoundsWithMajors},
 		{"retro_from_round", s.RetroFromRound, d.RetroFromRound},
 		{"review_rounds", s.ReviewRounds, d.ReviewRounds},
+		{"reviewer_retries", s.ReviewerRetries, d.ReviewerRetries},
 		{"size_cap_factor", s.SizeCapFactor, d.SizeCapFactor},
 		{"start_minutes", s.StartMinutes, d.StartMinutes},
-		{"stuck_minutes", s.StuckMinutes, d.StuckMinutes},
 		{"task_size_limit", s.TaskSizeLimit, d.TaskSizeLimit},
+		{"worker_restarts", s.WorkerRestarts, d.WorkerRestarts},
 	} {
 		if c.got != c.def {
 			out = append(out, fmt.Sprintf("%s %d", c.name, c.got))
@@ -170,7 +177,9 @@ func (s Settings) Validate() error {
 		{"quiet_minutes", s.QuietMinutes, QuietMin, QuietMax},
 		{"interrupt_seconds", s.InterruptSeconds, InterruptMin, InterruptMax},
 		{"blocked_minutes", s.BlockedMinutes, BlockedMin, BlockedMax},
-		{"stuck_minutes", s.StuckMinutes, StuckMin, StuckMax},
+		{"worker_restarts", s.WorkerRestarts, 0, WorkerRestartsMax},
+		{"reviewer_retries", s.ReviewerRetries, 0, ReviewerRetriesMax},
+		{"ensure_backoff_minutes", s.EnsureBackoffMinutes, EnsureBackoffMin, EnsureBackoffMax},
 		{"continues_per_task", s.ContinuesPerTask, 0, ContinuesMax},
 		{"continue_lines", s.ContinueLines, 0, ContinueLinesMax},
 		{"task_size_limit", s.TaskSizeLimit, SizeLimitMin, SizeLimitMax},

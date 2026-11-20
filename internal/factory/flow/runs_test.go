@@ -32,6 +32,8 @@ func TestRunRowsCheckAndCompleteness(t *testing.T) {
 		{Kind: EvExit, Reason: "exited"},
 		{Kind: EvLost},
 		{Kind: EvStop},
+		{Kind: EvDeliver, Msg: "m1"},
+		{Kind: EvDeliver, Msg: "stop", Urgent: true},
 	}
 	for _, st := range []string{PhaseStarting, PhaseWorking, PhaseIdle, PhaseBlocked} {
 		for _, ev := range events {
@@ -44,8 +46,12 @@ func TestRunRowsCheckAndCompleteness(t *testing.T) {
 		}
 	}
 	for _, ev := range events {
-		rec, row, _ := StepRun(RunRecord{State: PhaseEnded, Result: EndExited}, ev, s, now)
-		if row.ID != "R37" || rec.State != PhaseEnded || rec.Result != EndExited {
+		rec, row, dec := StepRun(RunRecord{State: PhaseEnded, Result: EndExited}, ev, s, now)
+		if ev.Kind == EvDeliver {
+			if row.ID != "R36" || dec.Why != RefuseRunEnded || rec.State != PhaseEnded || rec.Result != EndExited {
+				t.Errorf("ended on deliver = (%s, %s, %s/%s), want (R36, run_ended, ended/exited)", row.ID, dec.Why, rec.State, rec.Result)
+			}
+		} else if row.ID != "R37" || rec.State != PhaseEnded || rec.Result != EndExited {
 			t.Errorf("ended on %q = (%s, %s/%s), want (R37, ended/exited)", ev.Kind, row.ID, rec.State, rec.Result)
 		}
 	}
@@ -111,6 +117,18 @@ func TestRunRowsTable(t *testing.T) {
 					t.Errorf("R12 activity = %+v", r)
 				}
 			}},
+		{"R13 resumed exit within start_minutes marks not resumable", RunRecord{State: PhaseWorking, Role: RoleWorker, StartedAt: now, Resumable: true, Resumed: true}, RunEvent{Kind: EvExit, Reason: "exited"}, 30 * time.Second,
+			"R13", PhaseEnded, EndResumeFailed, []string{RunActRemove}, func(t *testing.T, r RunRecord) {
+				if r.Resumable || !r.EndedAt.Equal(now.Add(30*time.Second)) {
+					t.Errorf("R13 record = %+v", r)
+				}
+			}},
+		{"R33 resumed killed within start_minutes stays resumable", RunRecord{State: PhaseWorking, Role: RoleWorker, StartedAt: now, Resumable: true, Resumed: true}, RunEvent{Kind: EvExit, Reason: "killed"}, 30 * time.Second,
+			"R33", PhaseEnded, EndExited, []string{RunActRemove}, func(t *testing.T, r RunRecord) {
+				if !r.Resumable {
+					t.Errorf("killed resume lost Resumable: %+v", r)
+				}
+			}},
 		{"R14 late auth block", work, RunEvent{Kind: EvStatus, Status: "blocked", StatusKind: "auth"}, 2 * time.Minute, "R14", PhaseEnded, EndSignedOut, []string{RunActStop}, nil},
 		{"R15 permission block", start, RunEvent{Kind: EvStatus, Status: "blocked", StatusKind: "permission", Msg: "Trust this folder?"}, 0,
 			"R15", PhaseBlocked, "", nil, func(t *testing.T, r RunRecord) {
@@ -154,6 +172,28 @@ func TestRunRowsTable(t *testing.T) {
 					t.Errorf("R23 did not clear InterruptedAt: %v", r.InterruptedAt)
 				}
 			}},
+		{"R24 deliver to idle sends and moves to working", RunRecord{State: PhaseIdle, Role: RoleWorker, Status: "idle"}, RunEvent{Kind: EvDeliver, Msg: "fix"}, 0,
+			"R24", PhaseWorking, "", []string{RunActSend}, nil},
+		{"R25 urgent deliver to working interrupts then sends", work, RunEvent{Kind: EvDeliver, Msg: "stop", Urgent: true}, 0,
+			"R25", PhaseWorking, "", []string{RunActInterrupt, RunActSend}, nil},
+		{"R26 deliver to working holds message", work, RunEvent{Kind: EvDeliver, Msg: "later"}, 0,
+			"R26", PhaseWorking, "", nil, func(t *testing.T, r RunRecord) {
+				if !slices.Equal(r.Held, []string{"later"}) {
+					t.Errorf("R26 held = %v, want [later]", r.Held)
+				}
+			}},
+		{"R26 deliver to starting holds message", start, RunEvent{Kind: EvDeliver, Msg: "first"}, 0,
+			"R26", PhaseStarting, "", nil, func(t *testing.T, r RunRecord) {
+				if !slices.Equal(r.Held, []string{"first"}) {
+					t.Errorf("R26 starting held = %v, want [first]", r.Held)
+				}
+			}},
+		{"R26 deliver to blocked holds message", RunRecord{State: PhaseBlocked, Role: RoleWorker}, RunEvent{Kind: EvDeliver, Msg: "blk"}, 0,
+			"R26", PhaseBlocked, "", nil, func(t *testing.T, r RunRecord) {
+				if !slices.Equal(r.Held, []string{"blk"}) {
+					t.Errorf("R26 blocked held = %v, want [blk]", r.Held)
+				}
+			}},
 		{"R27 idle wakes on working", RunRecord{State: PhaseIdle, Role: RoleReviewer}, RunEvent{Kind: EvStatus, Status: "working"}, 0,
 			"R27", PhaseWorking, "", nil, nil},
 		{"R28 blocked to idle goes through working grace", RunRecord{State: PhaseBlocked, BlockedSince: now, BlockedKind: "question"}, RunEvent{Kind: EvStatus, Status: "idle"}, 5 * time.Second,
@@ -176,6 +216,7 @@ func TestRunRowsTable(t *testing.T) {
 		{"R33 lost ends as lost", work, RunEvent{Kind: EvLost}, 0, "R33", PhaseEnded, EndLost, nil, nil},
 		{"R34 stop ends as stopped", work, RunEvent{Kind: EvStop}, 0, "R34", PhaseEnded, EndStopped, []string{RunActStop}, nil},
 		{"R35 late screen while working ignored", work, RunEvent{Kind: EvScreen, Screen: ScreenTrust}, 0, "R35", PhaseWorking, "", nil, nil},
+		{"R36 deliver to ended refuses run_ended", RunRecord{State: PhaseEnded, Result: EndExited}, RunEvent{Kind: EvDeliver, Msg: "late"}, 0, "R36", PhaseEnded, EndExited, nil, nil},
 		{"R37 ended ignores events", RunRecord{State: PhaseEnded, Result: EndStopped}, RunEvent{Kind: EvTick}, 0, "R37", PhaseEnded, EndStopped, nil, nil},
 	}
 

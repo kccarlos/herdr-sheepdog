@@ -34,14 +34,11 @@ const (
 	AskMarkDone     = "mark_done"
 	AskCleanup      = "cleanup"
 	AskWake         = "wake_coordinator"
-	AskStopTask     = "stop_task"
 	AskStopRuns     = "stop_runs"
 
 	baseRedTellTries = 2 // one retry on the next pass if the worker tell fails
+	countBase        = 1 // 1-based restart and retry key index
 )
-
-// commitKeyed are the verbs whose key ends in the commit it is for.
-var commitKeyed = []string{AskPushPR, AskStartReview, AskTellDiverged, AskTellConflict, AskRerunCI, AskTellCI, AskDispatchCI, AskUpdateBranch, AskAccept, AskMerge}
 
 // key joins a verb and what it is for: "merge@3f9c".
 func key(verb string, parts ...any) string {
@@ -61,13 +58,87 @@ func once(acts []Act, k string) []string {
 	return []string{k}
 }
 
-// ensureRun is the first two lines of design.md 4.8: a start in flight
-// counts as present; none yet starts fresh. A live run needs nothing.
-func ensureRun(in In, r Run, start string) []string {
-	if r.Pending || r.State != RunNone {
+// EnsureRun is design.md 4.8's first-match table for a role's run (worker or
+// reviewer). A live run needs nothing; otherwise how the last run of that
+// role, round and commit ended decides the next ask.
+func EnsureRun(in In, role string) []string {
+	a := in.attempt()
+	if a == nil {
 		return nil
 	}
-	return once(in.acts(), start)
+	r, round, h, last, tries := in.Facts.Worker, nextRound(*a), headH(in), a.Run, 0
+	if role == RoleReviewer {
+		r, last = in.Facts.Reviewer, nil
+		if a.Review != nil && a.Review.Round == round && Covers(*a, a.Review.Head, h) {
+			last, tries = a.Review.Run, a.Review.Retries
+		}
+	}
+	if r.State == RunWorking || r.State == RunIdle || r.Pending ||
+		(role == RoleWorker && r.State == RunNone && Done(a.Acts, AskStartWorker) && (last == nil || last.State != PhaseEnded)) {
+		return nil
+	}
+	if last != nil && last.State != PhaseEnded {
+		last = nil
+	}
+	if last == nil && r.State == RunGone {
+		last = &RunRecord{State: PhaseEnded, Result: EndExited}
+	}
+	switch {
+	case last != nil && last.State == PhaseEnded && last.Result == EndStopped:
+		if role == RoleReviewer {
+			return []string{key(AskStartReview, round, ContinueResume, h)}
+		} else if in.Facts.NoSlot {
+			return nil
+		}
+		return []string{workerStartAsk(in, last, 0)}
+	case last == nil:
+		if role == RoleReviewer {
+			return once(a.Acts, key(AskStartReview, round, h))
+		} else if in.Facts.NoSlot {
+			return nil
+		}
+		return once(a.Acts, AskStartWorker)
+	case last.Result == EndQuota || last.Result == EndSignedOut:
+		// Quota and signed-out rows are slice 5b; treat them as otherwise.
+	case role == RoleReviewer && tries < in.Settings.ReviewerRetries:
+		return []string{key(AskStartReview, round, tries+countBase, h)}
+	case role == RoleWorker && a.Restarts < in.Settings.WorkerRestarts:
+		if !last.EndedAt.IsZero() && in.Now.Sub(last.EndedAt) < time.Duration(in.Settings.EnsureBackoffMinutes)*time.Minute<<a.Restarts || in.Facts.NoSlot {
+			return nil
+		}
+		return []string{workerStartAsk(in, last, a.Restarts+countBase)}
+	}
+	// Otherwise it counts as a failure; N5 with retry is PR 5a.3.
+	if role == RoleReviewer {
+		return once(a.Acts, key(AskWake, "reviewer_failed", round, h))
+	}
+	return once(a.Acts, key(AskWake, "worker_failed"))
+}
+
+func workerStartAsk(in In, last *RunRecord, n int) string {
+	res, _ := Resolve(RoleWorker, in.Task, in.Settings, UnprobedFacts)
+	mode := ContinueHandoff
+	if last.Resumable && last.SessionID != "" && last.CLI == cmp.Or(res.CLI, "claude") {
+		mode = ContinueResume
+	} else if n == 0 && last.SessionID == "" && !last.Resumed && last.CLI == "" {
+		return AskStartWorker
+	}
+	if n == 0 {
+		return key(AskStartWorker, mode)
+	}
+	return key(AskStartWorker, mode, n)
+}
+
+// WantsWorkerSlot reports whether an open attempt's ended worker run is ready
+// to ask for a start if granted a free slot (design.md 4.8, N10).
+func WantsWorkerSlot(t Task, s Settings, now time.Time) bool {
+	a := OpenAttempt(t)
+	if Ended(t) || t.Parked || OpenRecap(t) != nil || a == nil || a.NothingToChange != "" ||
+		a.Run == nil || a.Run.State != PhaseEnded || a.Review != nil && a.Review.RunID != "" {
+		return false
+	}
+	asks := EnsureRun(In{Task: t, Settings: s, Facts: Facts{Worker: Run{State: RunGone}}, Now: now}, RoleWorker)
+	return len(asks) > 0 && strings.HasPrefix(asks[0], AskStartWorker)
 }
 
 // Clause is one named part of a row's condition (design.md 4: "each clause
@@ -111,8 +182,6 @@ func hasAttempt(in In) bool  { return in.attempt() != nil }
 func depsNotDone(in In) bool { return len(in.Facts.DepsNotDone) > 0 }
 func depsDropped(in In) bool { return len(in.Facts.DepsDropped) > 0 }
 func noSlot(in In) bool      { return in.Facts.NoSlot }
-func workerGone(in In) bool  { return in.Facts.Worker.State == RunGone }
-func reviewGone(in In) bool  { return in.Facts.Reviewer.State == RunGone }
 func noReady(in In) bool     { return len(in.attempt().Ready) == 0 }
 func tipAhead(in In) bool    { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
 func noPR(in In) bool        { return in.Facts.PR.State == PRNone }
@@ -197,21 +266,9 @@ func join(asked [][]string) []string {
 	return out
 }
 
-// TaskRows is the slice-1 task table, in design.md section 4's order. S1
-// stands in for N5 and the rest of 4.8 until slice 5a (plan.md section 3).
-// Landing rows (4.7) carry the ladder's "passed" as a clause, since slice 1
-// has no ladder row for retro or recap to catch the rest.
+// TaskRows is the task table in design.md section 4's order, using EnsureRun
+// (4.8) wherever a row needs a worker or reviewer run.
 var TaskRows = []Row[In]{
-	// S2 is the stuck stand-in until slice 5a's section 4.8 (plan.md PR
-	// 2.1). It sits above N1, since a failed cleanup act belongs to an ended
-	// task. It holds only for the pass that queues its wake, so the rows
-	// below go on afterwards. (A retry-closed attempt's worktree is cleaned
-	// by N1 only once the task ends; slices 1 and 2 keep it.)
-	{ID: "S2", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { _, k := stuckWake(in); return k != nil },
-		Then: func(in In) Decision {
-			what, k := stuckWake(in)
-			return say(what+" never answered for stuck_minutes", k)(in)
-		}},
 	{ID: "N1", WaitsOn: "nobody", Stage: "done", When: ended, Then: func(in In) Decision {
 		return say("ended: stop its runs and clean up", once(in.acts(), AskCleanup))(in)
 	}},
@@ -222,10 +279,11 @@ var TaskRows = []Row[In]{
 		}
 		return Decision{Asked: asked, Why: "the PR is merged"}
 	}},
-	// N3 asks while a run is recorded, not once: the stop clears the
-	// records, and a failed stop is tried again next pass.
+	// N3 asks while a live run is recorded, not once: the stop ends the run
+	// records as stopped, and a failed stop is tried again next pass.
 	{ID: "N3", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return in.Task.Parked }, Then: func(in In) Decision {
-		if a := in.attempt(); a != nil && (a.RunID != "" || a.Review != nil) {
+		if a := in.attempt(); a != nil && (a.RunID != "" || a.Run != nil && a.Run.State != PhaseEnded ||
+			a.Review != nil && (a.Review.RunID != "" || a.Review.Run != nil && a.Review.Run.State != PhaseEnded)) {
 			return say("parked: stop its runs", []string{AskStopRuns})(in)
 		}
 		return say("parked")(in)
@@ -233,18 +291,11 @@ var TaskRows = []Row[In]{
 	{ID: "N4", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: prClosed, Then: func(in In) Decision {
 		return say("the PR was closed without merging (never reopened; retry starts a new attempt)", once(in.acts(), key(AskWake, "pr_closed")))(in)
 	}},
-	{ID: "S1", WaitsOn: "the owner", Stage: "blocked_or_failed", When: all(hasAttempt, anyOf(workerGone, all(ladderSays(Review), reviewGone))), Then: func(in In) Decision {
-		who := "worker"
-		if !workerGone(in) {
-			who = "reviewer"
-		}
-		return say("the "+who+" run ended: the task is stopped", once(in.acts(), AskStopTask))(in)
-	}},
-	// N6 tells the worker of a size or ci recap once to stop (it has no
+	// N6 tells a live worker of a size or ci recap once to stop (it has no
 	// recap-written report yet, so nothing waits for one).
 	{ID: "N6", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: recapOpen, Then: func(in In) Decision {
 		n, tell, trig := len(in.Task.Recaps), []string(nil), OpenRecap(in.Task).Trigger
-		if (trig == TriggerSize || trig == TriggerCI) && in.Facts.Worker.State != RunNone {
+		if (trig == TriggerSize || trig == TriggerCI) && (in.Facts.Worker.State == RunWorking || in.Facts.Worker.State == RunIdle) {
 			tell = once(in.acts(), key(AskTellStop, n))
 		}
 		return say("a recap is open", once(in.acts(), key(AskWake, "recap", n)), tell)(in)
@@ -260,10 +311,10 @@ var TaskRows = []Row[In]{
 		tk := key(AskTellDiverged, h)
 		tell := LastAct(in.acts(), tk)
 		if tell == nil || tell.Result != "done" {
-			return say(N7Why(in, false), ensureRun(in, in.Facts.Worker, AskStartWorker), once(in.acts(), tk))(in)
+			return say(N7Why(in, false), EnsureRun(in, RoleWorker), once(in.acts(), tk))(in)
 		}
 		if working(in) || (!in.Facts.Worker.LastTurnEnd.After(tell.At) && in.Now.Sub(tell.At) < checksGrace(in)) {
-			return say(N7Why(in, false))(in)
+			return say(N7Why(in, false), EnsureRun(in, RoleWorker))(in)
 		}
 		return say(N7Why(in, true), once(in.acts(), key(AskWake, "diverged", h)))(in)
 	}},
@@ -313,11 +364,11 @@ var TaskRows = []Row[In]{
 		}},
 	{ID: "N22", WaitsOn: "the worker", Stage: "working", When: ladderSays(Fix), Then: func(in In) Decision {
 		r := newestCovering(*in.attempt(), headH(in))
-		return say("the ladder says fix", ensureRun(in, in.Facts.Worker, AskStartWorker),
+		return say("the ladder says fix", EnsureRun(in, RoleWorker),
 			once(in.acts(), key(AskTellFindings, r.N)))(in)
 	}},
 	{ID: "N23", WaitsOn: "the worker", Stage: "working", When: all(hasAttempt, anyOf(noReady, tipAhead)), Then: func(in In) Decision {
-		return say("the worker is working", ensureRun(in, in.Facts.Worker, AskStartWorker))(in)
+		return say("the worker is working", EnsureRun(in, RoleWorker))(in)
 	}},
 	{ID: "N25", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: ladderSays(RecapAnswer), Then: func(in In) Decision {
 		return say("the ladder says recap", once(in.acts(), key(AskOpenRecap, "review")))(in)
@@ -329,12 +380,11 @@ var TaskRows = []Row[In]{
 		return say("GitHub does not have H", once(in.acts(), key(AskPushPR, headH(in))))(in)
 	}},
 	{ID: "N29", WaitsOn: "the reviewer", Stage: "working", When: ladderSays(Review), Then: func(in In) Decision {
-		start := key(AskStartReview, nextRound(*in.attempt()), headH(in))
-		return say("the ladder says review", ensureRun(in, in.Facts.Reviewer, start))(in)
+		return say("the ladder says review", EnsureRun(in, RoleReviewer))(in)
 	}},
 	{ID: "N32", WaitsOn: "the worker", Stage: "working", When: ciReady(mergeConflict), Then: func(in In) Decision {
 		return say("PR conflicts with the base: tell the worker once to merge the base (never rebase)",
-			ensureRun(in, in.Facts.Worker, AskStartWorker), once(in.acts(), key(AskTellConflict, headH(in))))(in)
+			EnsureRun(in, RoleWorker), once(in.acts(), key(AskTellConflict, headH(in))))(in)
 	}},
 	{ID: "N33", WaitsOn: "CI; then the worker", Stage: "ci", When: ciReady(checksRed), Then: func(in In) Decision {
 		h := headH(in)
@@ -345,7 +395,7 @@ var TaskRows = []Row[In]{
 		for _, run := range ciRuns(in) {
 			tells = append(tells, once(in.acts(), key(AskTellCI, run, h))...)
 		}
-		return say("checks red at H: tell the worker once per failing run", ensureRun(in, in.Facts.Worker, AskStartWorker), tells)(in)
+		return say("checks red at H: tell the worker once per failing run", EnsureRun(in, RoleWorker), tells)(in)
 	}},
 	{ID: "N34", WaitsOn: "CI; then the coordinator", Stage: "ci", When: ciReady(anyOf(checksStoppedExt, checksStoppedTimeout, checksStoppedUnknown)), Then: func(in In) Decision {
 		h := headH(in)
@@ -382,7 +432,7 @@ var TaskRows = []Row[In]{
 			tell = []string{tk}
 		}
 		return say("the base branch has been red past main_red_minutes: tell the oldest held task's worker to merge the base and say ready (or land a fix PR directly)",
-			ensureRun(in, in.Facts.Worker, AskStartWorker), tell, once(in.acts(), key(AskWake, "base_red_held", spell)))(in)
+			EnsureRun(in, RoleWorker), tell, once(in.acts(), key(AskWake, "base_red_held", spell)))(in)
 	}},
 	{ID: "N36", WaitsOn: "CI", Stage: "ci", Why: WhyCI, When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown)),
 		Then: func(in In) Decision {
@@ -544,36 +594,4 @@ func hasAccept(in In, head string) bool {
 		}
 	}
 	return false
-}
-
-// stuckWake is S2's: the first stall of the open attempt that has waited
-// stuck_minutes and has not woken the coordinator yet, and its wake key
-// stuck@<what>@<H> (so a new H or another stall wakes again). A run that
-// never answered is exactly: an act whose result is failed (a failed
-// start, merge or cleanup, or a voided round; its clock is the act's At)
-// for H or for no commit (a failed act for an older H, such as a round
-// voided before H moved, is spent), or the round's reviewer read idle with
-// no valid tag (review.idle_since).
-func stuckWake(in In) (string, []string) {
-	limit := time.Duration(in.Settings.StuckMinutes) * time.Minute
-	try := func(what string, at time.Time) []string {
-		if in.Now.Sub(at) < limit {
-			return nil
-		}
-		return once(in.acts(), key(AskWake, "stuck", what, headH(in)))
-	}
-	for _, a := range in.acts() {
-		verb, _, _ := strings.Cut(a.Key, "@")
-		if a.Result != "failed" || slices.Contains(commitKeyed, verb) && !strings.HasSuffix(a.Key, "@"+headH(in)) {
-			continue
-		}
-		if k := try(a.Key, a.At); k != nil {
-			return a.Key, k
-		}
-	}
-	if a := in.attempt(); a != nil && a.Review != nil && a.Review.IdleSince != nil {
-		what := key("reviewer_idle", a.Review.Round)
-		return what, try(what, *a.Review.IdleSince)
-	}
-	return "", nil
 }

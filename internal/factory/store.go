@@ -55,6 +55,11 @@ func (p Paths) Report(id, task string, round int) string {
 	return filepath.Join(p.project(id), "reports", fmt.Sprintf("%s-r%d.md", task, round))
 }
 
+// Brief is a task's brief file referenced by a worker handoff note (design.md 4.8).
+func (p Paths) Brief(id, task string) string {
+	return filepath.Join(p.project(id), "briefs", task+".md")
+}
+
 // LogLine is one pass in log.jsonl.
 type LogLine struct {
 	Seq      int64     `json:"seq"`

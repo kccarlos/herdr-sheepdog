@@ -64,10 +64,10 @@ func TestJ12HeldWakesOneBatchWhenIdle(t *testing.T) {
 	srv.Add(hc.Terminal{Address: "coord1", Name: "coord", State: "live", Status: &hc.Status{App: "claude-code", State: "working"}})
 	const id = "proj-wake"
 	st := flow.State{Seq: 1, Project: flow.Project{ID: id, Folder: t.TempDir(), Started: true, RunID: "gone1"}, Settings: flow.DefaultSettings()}
-	st.Settings.StuckMinutes = 5
+	st.Settings.WorkerRestarts = 1
 	at := time.Now()
 	st.Project.Wakes = []flow.Wake{
-		{Key: "stuck@reviewer_idle@1@c1", Task: "T1", Why: "S2: reviewer_idle@1 never answered for stuck_minutes", Facts: `title "feat: x"; H c1; PR #7, checks green; last verdict none`, At: at},
+		{Key: "worker_failed", Task: "T1", Why: "N23: the worker is working", Facts: `title "feat: x"; H c1; PR #7, checks green; last verdict none`, At: at},
 		{Key: "no_rule_matched@c2@open@red@clean@same", Task: "T2", Why: "N43: no rule matched", Facts: `title "feat: y"`, At: at},
 	}
 	save := func() {
@@ -97,7 +97,7 @@ func TestJ12HeldWakesOneBatchWhenIdle(t *testing.T) {
 	if len(sends) != 1 {
 		t.Fatalf("sends = %q, want one batch", sends)
 	}
-	for _, want := range []string{"Wake: 2", "T1: S2:", "stuck@reviewer_idle@1@c1", `title "feat: x"; H c1; PR #7, checks green`, "T2: N43", "differ from their default: stuck_minutes 5."} {
+	for _, want := range []string{"Wake: 2", "T1: N23:", "worker_failed", `title "feat: x"; H c1; PR #7, checks green`, "T2: N43", "differ from their default: worker_restarts 1."} {
 		if !strings.Contains(sends[0], want) {
 			t.Errorf("wake message missing %q:\n%s", want, sends[0])
 		}
@@ -113,11 +113,10 @@ func TestJ12HeldWakesOneBatchWhenIdle(t *testing.T) {
 	}
 }
 
-// TestS2IdleReviewerWakesOnce: a reviewer idle with no tag starts the clock
-// at the first idle read; after stuck_minutes it wakes the coordinator once
-// (held while the coordinator works, delivered when it is idle); later
-// passes do not wake it again; a valid tag ends the round and the clock.
-func TestS2IdleReviewerWakesOnce(t *testing.T) {
+// TestReviewerRetriesFailureWakesOnce: a reviewer that keeps ending with no
+// valid report is retried while tries < reviewer_retries, then counts as a
+// failure and wakes the coordinator once via J12.
+func TestReviewerRetriesFailureWakesOnce(t *testing.T) {
 	ctx := context.Background()
 	srv := hctest.New(t)
 	client := hc.NewClient(srv.Path)
@@ -126,8 +125,7 @@ func TestS2IdleReviewerWakesOnce(t *testing.T) {
 	githubOrigin(t, repo)
 	gh := installFakeGH(t)
 	eng := New(paths, client)
-	var logBuf bytes.Buffer
-	eng.Log = logging.NewJSONLLogger(&logBuf)
+	eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +133,7 @@ func TestS2IdleReviewerWakesOnce(t *testing.T) {
 	eng.passProject(ctx, id, false) // J7: the coordinator starts, working
 	st, _ := LoadState(paths.State(id))
 	coord := st.Project.RunID
-	st.Settings.StuckMinutes = flow.StuckMin
+	st.Settings.ReviewerRetries = 1
 	st.Tasks = []flow.Task{{ID: "T1", Title: "feat: x", EstimateLines: 50}}
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
@@ -156,53 +154,26 @@ func TestS2IdleReviewerWakesOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	eng.passProject(ctx, id, false) // N26
-	eng.passProject(ctx, id, false) // N29 starts the reviewer
-	st, _ = LoadState(paths.State(id))
-	rev := st.Tasks[0].Attempts[0].Review
+	eng.passProject(ctx, id, false) // N29 starts reviewer (try 0)
 
-	// The reviewer replies without the tag and goes idle.
-	srv.SetScreen(rev.RunID, "❯ prompt\n\n⏺ Looks fine to me.\n")
-	setIdle(t, srv, client, rev.RunID, "idle")
+	// Reviewer 0 exits with no report -> 4.8 starts retry 1 (no wake yet).
+	st, _ = LoadState(paths.State(id))
+	srv.Finish(st.Tasks[0].Attempts[0].Review.RunID, "exited")
 	eng.passProject(ctx, id, false)
 	st, _ = LoadState(paths.State(id))
-	first := st.Tasks[0].Attempts[0].Review.IdleSince
-	if first == nil || len(logRules(t, paths.Log(id), "review_idle")) != 1 {
-		t.Fatalf("no idle clock after the first idle read: %+v", st.Tasks[0].Attempts[0].Review)
-	}
-	eng.passProject(ctx, id, false)
-	st, _ = LoadState(paths.State(id))
-	if again := st.Tasks[0].Attempts[0].Review.IdleSince; again == nil || !again.Equal(*first) || len(st.Project.Wakes) != 0 {
-		t.Fatalf("clock moved (%v -> %v) or woke early: %+v", first, again, st.Project.Wakes)
+	if st.Tasks[0].Attempts[0].Review.Retries != 1 || st.Tasks[0].Attempts[0].Review.RunID == "" || len(st.Project.Wakes) != 0 {
+		t.Fatalf("after first reviewer exit: review=%+v wakes=%+v", st.Tasks[0].Attempts[0].Review, st.Project.Wakes)
 	}
 
-	// Seen working again, the clock stops; the next idle read restarts it.
-	srv.SetStatus(rev.RunID, &hc.Status{App: "claude-code", State: "working"})
-	eng.passProject(ctx, id, false)
-	if st, _ = LoadState(paths.State(id)); st.Tasks[0].Attempts[0].Review.IdleSince != nil {
-		t.Fatalf("idle clock kept while the reviewer works: %v", st.Tasks[0].Attempts[0].Review.IdleSince)
-	}
-	setIdle(t, srv, client, rev.RunID, "idle")
-	eng.passProject(ctx, id, false)
-	if st, _ = LoadState(paths.State(id)); st.Tasks[0].Attempts[0].Review.IdleSince == nil || !st.Tasks[0].Attempts[0].Review.IdleSince.After(*first) {
-		t.Fatalf("idle clock did not restart: first %v, now %v", first, st.Tasks[0].Attempts[0].Review.IdleSince)
-	}
-
-	// stuck_minutes later: one wake, held while the coordinator works.
-	past := time.Now().Add(-time.Duration(flow.StuckMin)*time.Minute - time.Second)
-	st.Tasks[0].Attempts[0].Review.IdleSince = &past
-	if err := SaveState(paths.State(id), st); err != nil {
-		t.Fatal(err)
-	}
+	// Retry 1 also exits with no report -> tries == reviewer_retries (1), wakes once (held while coord works).
+	srv.Finish(st.Tasks[0].Attempts[0].Review.RunID, "exited")
 	for range 3 {
 		eng.passProject(ctx, id, false)
 	}
 	st, _ = LoadState(paths.State(id))
-	wantKey := "stuck@reviewer_idle@1@" + c1
+	wantKey := "reviewer_failed@1@" + c1
 	if len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != wantKey || len(sendsTo(t, srv.Requests(), coord)) != 0 {
 		t.Fatalf("held wakes = %+v, want one %s and no send", st.Project.Wakes, wantKey)
-	}
-	if n := flow.Count(st.Tasks[0].Attempts[0].Acts, "wake_coordinator@"+wantKey); n != 1 {
-		t.Fatalf("wake asked %d times, want 1", n)
 	}
 
 	setIdle(t, srv, client, coord, "idle")
@@ -210,19 +181,8 @@ func TestS2IdleReviewerWakesOnce(t *testing.T) {
 		eng.passProject(ctx, id, false)
 	}
 	sends := sendsTo(t, srv.Requests(), coord)
-	if len(sends) != 1 || !strings.Contains(sends[0], "T1: S2:") || !strings.Contains(sends[0], "stuck_minutes 5") || !strings.Contains(sends[0], "H "+c1) {
+	if len(sends) != 1 || !strings.Contains(sends[0], "T1: N29:") || !strings.Contains(sends[0], "reviewer_retries 1") || !strings.Contains(sends[0], "H "+c1) {
 		t.Fatalf("coordinator sends = %q, want one wake with the facts", sends)
-	}
-	if l := logRules(t, paths.Log(id), "J12"); len(l) != 1 {
-		t.Fatalf("J12 lines = %+v, want 1", l)
-	}
-
-	// A valid tag ends the round, and its idle clock with it.
-	srv.SetScreen(rev.RunID, "❯ prompt\n\n⏺ Fine.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rev.Code+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
-	eng.passProject(ctx, id, false)
-	st, _ = LoadState(paths.State(id))
-	if a := st.Tasks[0].Attempts[0]; len(a.Rounds) != 1 || a.Review != nil {
-		t.Fatalf("tag not taken: rounds=%+v review=%+v", a.Rounds, a.Review)
 	}
 }
 
@@ -289,7 +249,7 @@ func TestJ12DeliveryAtLeastOnce(t *testing.T) {
 	srv.Add(hc.Terminal{Address: "coord1", Name: "coord", State: "live", Status: &hc.Status{App: "claude-code", State: "idle"}, StatusMS: &pastMS})
 	const id = "proj-once"
 	st := flow.State{Seq: 1, Project: flow.Project{ID: id, Folder: t.TempDir(), Started: true, RunID: "coord1"}, Settings: flow.DefaultSettings()}
-	st.Project.Wakes = []flow.Wake{{Key: "stuck@cleanup@c1", Task: "T1", Why: "S2: cleanup never answered", Facts: `title "feat: x"`, At: time.Now()}}
+	st.Project.Wakes = []flow.Wake{{Key: "worker_failed", Task: "T1", Why: "N23: worker failed", Facts: `title "feat: x"`, At: time.Now()}}
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
 	}

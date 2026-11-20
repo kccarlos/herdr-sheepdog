@@ -78,7 +78,7 @@ func codexSetup(t *testing.T) (*hctest.Server, *Engine, Paths, string, string, s
 	id := eng.projectDirs()[0].Name()
 	eng.passProject(ctx, id, false) // J7
 	st, _ := LoadState(paths.State(id))
-	st.Settings.StuckMinutes, st.Settings.SecondReviewer = flow.StuckMin, "codex"
+	st.Settings.SecondReviewer = "codex"
 	st.Tasks = []flow.Task{{ID: "T1", Title: "feat: x", EstimateLines: 50}}
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
@@ -119,9 +119,6 @@ func codexRound2(t *testing.T) (*hctest.Server, *Engine, Paths, string, string) 
 	}
 	if home := filepath.Join(paths.DataDir, "factory", "codex-home"); last.Env["CODEX_HOME"] != home {
 		t.Fatalf("CODEX_HOME = %q, want %q", last.Env["CODEX_HOME"], home)
-	}
-	if rev.IdleSince == nil { // S2's clock runs from the start: Codex reports no idle
-		t.Fatal("no S2 clock at the Codex run's start")
 	}
 	return srv, eng, paths, id, c1
 }
@@ -197,7 +194,7 @@ func TestEngineCodexAuthDivergedFallsBackToOpus(t *testing.T) {
 	st, _ := LoadState(paths.State(id))
 	rev, last := st.Tasks[0].Attempts[0].Review, (*runs)[len(*runs)-1]
 	if rev == nil || rev.Round != 2 || rev.Reviewer.CLI != "claude" || rev.Reviewer.Model != "opus" ||
-		!slices.Contains(last.Argv, "opus") || last.Env["CODEX_HOME"] != "" || rev.IdleSince != nil {
+		!slices.Contains(last.Argv, "opus") || last.Env["CODEX_HOME"] != "" {
 		t.Fatalf("round 2 review = %+v argv %q env %v", rev, last.Argv, last.Env["CODEX_HOME"])
 	}
 	if b, _ := os.ReadFile(filepath.Join(home, "auth.json")); string(b) != "rotated" {
@@ -209,49 +206,50 @@ func TestEngineCodexAuthDivergedFallsBackToOpus(t *testing.T) {
 }
 
 // TestEngineCodexReviewerNoTagIsStuck: a Codex run that never prints its
-// tag starts S2's clock on the first read and wakes after stuck_minutes.
+// tag goes quiet (R21 -> R22 ended(stuck)) and wakes the coordinator once
+// reviewer_retries are spent.
 func TestEngineCodexReviewerNoTagIsStuck(t *testing.T) {
 	ctx := context.Background()
 	srv, eng, paths, id, c1 := codexRound2(t)
+	now := time.Now()
+	eng.Now = func() time.Time { return now }
 	st, _ := LoadState(paths.State(id))
-	rev := st.Tasks[0].Attempts[0].Review
-	srv.SetScreen(rev.RunID, codexScreen(rev.Code, c1, "• Still thinking.\n"))
-	eng.passProject(ctx, id, false)
-	st, _ = LoadState(paths.State(id))
-	if st.Tasks[0].Attempts[0].Review.IdleSince == nil || len(st.Project.Wakes) != 0 {
-		t.Fatalf("no S2 clock on the first no-tag read: %+v", st.Tasks[0].Attempts[0].Review)
-	}
-	past := time.Now().Add(-time.Duration(flow.StuckMin)*time.Minute - time.Second)
-	st.Tasks[0].Attempts[0].Review.IdleSince = &past
+	st.Settings.ReviewerRetries = 0
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
 	}
-	eng.passProject(ctx, id, false)
+	rev := st.Tasks[0].Attempts[0].Review
+	srv.SetScreen(rev.RunID, codexScreen(rev.Code, c1, "• Still thinking.\n"))
+	eng.passProject(ctx, id, false) // R8 -> working
+	now = now.Add(time.Duration(st.Settings.QuietMinutes)*time.Minute + time.Second)
+	eng.passProject(ctx, id, false) // R21 -> interrupt
+	now = now.Add(time.Duration(st.Settings.InterruptSeconds)*time.Second + time.Second)
+	eng.passProject(ctx, id, false) // R22 -> ended(stuck), N29 -> reviewer_failed wake
 	st, _ = LoadState(paths.State(id))
-	want := "stuck@reviewer_idle@2@" + c1
+	want := "reviewer_failed@2@" + c1
 	if len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != want {
 		t.Fatalf("wakes = %+v, want %s", st.Project.Wakes, want)
 	}
 }
 
-// TestEngineCodexReviewerAdoptedHasClock: a live Codex reviewer adopted after
-// a restart (no review record) gets S2's clock like a fresh start.
-func TestEngineCodexReviewerAdoptedHasClock(t *testing.T) {
+// TestEngineCodexReviewerAdoptedAfterCrash: a live Codex reviewer adopted after
+// a crash before commit gets its ReviewRun record restored.
+func TestEngineCodexReviewerAdoptedAfterCrash(t *testing.T) {
 	ctx := context.Background()
 	_, eng, paths, id, _ := codexRound2(t)
 	st, _ := LoadState(paths.State(id))
 	run := st.Tasks[0].Attempts[0].Review.RunID
 	a := &st.Tasks[0].Attempts[0]
 	a.Review = nil // a crash before the record and its start act were committed; the terminal lives on
-	forgetStarts(a, false)
+	a.Acts = slices.DeleteFunc(a.Acts, func(x flow.Act) bool { return strings.HasPrefix(x.Key, flow.AskStartReview+"@") })
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
 	}
 	eng.passProject(ctx, id, false)
 	st, _ = LoadState(paths.State(id))
 	rev := st.Tasks[0].Attempts[0].Review
-	if rev == nil || rev.RunID != run || rev.Reviewer.CLI != world.CodexCLI || rev.IdleSince == nil {
-		t.Fatalf("adopted review = %+v, want run %s with an S2 clock", rev, run)
+	if rev == nil || rev.RunID != run || rev.Reviewer.CLI != world.CodexCLI {
+		t.Fatalf("adopted review = %+v, want run %s on codex", rev, run)
 	}
 }
 
