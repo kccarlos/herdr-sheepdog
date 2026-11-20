@@ -471,13 +471,13 @@ func readyCmd(bin string, outcomes []flow.Outcome) string {
 		return parts[0]
 	}
 	for _, o := range outcomes {
+		flag, val := "--proof", "<command>"
 		if strings.HasPrefix(o.ProvedBy, "manual:") {
-			parts = append(parts, fmt.Sprintf("--artifact %q", o.Text+"=<path>"))
+			flag, val = "--artifact", "<path>"
 		} else if cmd, ok := strings.CutPrefix(o.ProvedBy, "cmd:"); ok {
-			parts = append(parts, fmt.Sprintf("--proof %q", o.Text+"="+strings.TrimSpace(cmd)))
-		} else {
-			parts = append(parts, fmt.Sprintf("--proof %q", o.Text+"=<command>"))
+			val = strings.TrimSpace(cmd)
 		}
+		parts = append(parts, flag+" '"+strings.ReplaceAll(o.Text+"="+val, "'", `'\''`)+"'")
 	}
 	return strings.Join(parts, " ")
 }

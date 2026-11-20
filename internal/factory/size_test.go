@@ -551,7 +551,7 @@ func TestWorkerAndReviewerPromptsShowOutcomesWithProofs(t *testing.T) {
 	if !strings.Contains(workerPrompt, wantBlock) {
 		t.Fatalf("worker prompt missing outcomes with proofs:\n%s", workerPrompt)
 	}
-	wantReady := `factory report ready --proof "returns greeting=<command>" --proof "builds cleanly=go build ./..." --artifact "button aligns=<path>"`
+	wantReady := `factory report ready --proof 'returns greeting=<command>' --proof 'builds cleanly=go build ./...' --artifact 'button aligns=<path>'`
 	if !strings.Contains(workerPrompt, wantReady) {
 		t.Fatalf("worker prompt missing ready --proof form:\n%s", workerPrompt)
 	}

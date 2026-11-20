@@ -165,20 +165,16 @@ func needsProofs(outcomes []flow.Outcome) bool {
 	return slices.ContainsFunc(outcomes, func(o flow.Outcome) bool { return o.ProvedBy != "" })
 }
 
-// checkProofs checks design.md 7.2 for ready proofs: every task outcome has
-// exactly one proof command (exiting 0) or manual artifact (existing on disk).
 func checkProofs(outcomes []flow.Outcome, raw []flow.Proof, worktree string) ([]flow.Proof, string, string) {
-	want := make(map[string]flow.Outcome, len(outcomes))
+	want, seen, out := make(map[string]flow.Outcome, len(outcomes)), make(map[string]bool, len(outcomes)), make([]flow.Proof, 0, len(raw))
 	for _, o := range outcomes {
 		want[o.Text] = o
 	}
-	seen := make(map[string]bool, len(outcomes))
-	out := make([]flow.Proof, 0, len(raw))
 	var failed, missing []string
 	for _, p := range raw {
 		name := cleanRejectWhy(p.Outcome)
 		o, ok := want[name]
-		p.Outcome, p.Command, p.Artifact, p.OutputPath = name, strings.TrimSpace(p.Command), strings.TrimSpace(p.Artifact), strings.TrimSpace(p.OutputPath)
+		p.Outcome, p.Command, p.Artifact, p.OutputPath = name, cleanRejectWhy(p.Command), strings.TrimSpace(p.Artifact), strings.TrimSpace(p.OutputPath)
 		manual := strings.HasPrefix(o.ProvedBy, "manual:")
 		switch {
 		case !ok:
@@ -187,10 +183,10 @@ func checkProofs(outcomes []flow.Outcome, raw []flow.Proof, worktree string) ([]
 			return nil, "invalid_report", fmt.Sprintf("Duplicate proof for outcome %q.", name)
 		case (p.Command == "") == (p.Artifact == ""):
 			return nil, "invalid_report", fmt.Sprintf("Proof for %q must carry either a command or an artifact.", name)
-		case p.Artifact != "" && !manual:
-			return nil, "invalid_report", fmt.Sprintf("Outcome %q is not manual; provide a --proof command.", name)
-		case p.Command != "" && manual:
-			return nil, "invalid_report", fmt.Sprintf("Outcome %q is manual; provide --artifact.", name)
+		case utf8.RuneCountInString(p.Command) > maxRejectWhyRunes || utf8.RuneCountInString(p.OutputPath) > maxRejectWhyRunes || utf8.RuneCountInString(p.Artifact) > maxRejectWhyRunes:
+			return nil, "invalid_report", fmt.Sprintf("Proof for %q has a field longer than %d characters.", name, maxRejectWhyRunes)
+		case (p.Artifact != "") != manual:
+			return nil, "invalid_report", fmt.Sprintf("Outcome %q proof kind does not match proved_by (%s).", name, o.ProvedBy)
 		case p.Command != "" && p.OutputPath == "":
 			return nil, "invalid_report", fmt.Sprintf("Proof for %q has no output path.", name)
 		}
@@ -204,7 +200,7 @@ func checkProofs(outcomes []flow.Outcome, raw []flow.Proof, worktree string) ([]
 				failed = append(failed, fmt.Sprintf("%q: artifact %q does not exist", name, p.Artifact))
 			}
 		} else if p.Exit != 0 {
-			failed = append(failed, fmt.Sprintf("%q (%s, exit %d): %s", name, p.Command, p.Exit, proofHead(p.OutputPath)))
+			failed = append(failed, fmt.Sprintf("%q (%s, exit %d): %s", name, p.Command, p.Exit, proofHead(p.OutputPath, worktree)))
 		}
 		out = append(out, p)
 	}
@@ -222,8 +218,22 @@ func checkProofs(outcomes []flow.Outcome, raw []flow.Proof, worktree string) ([]
 	return out, "", ""
 }
 
-func proofHead(path string) string {
-	f, err := os.Open(path)
+func proofHead(path, worktree string) string {
+	gitDir := filepath.Join(worktree, ".git")
+	if b, err := os.ReadFile(gitDir); err == nil {
+		if t, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "gitdir:"); !ok {
+			return "(output unreadable)"
+		} else if gitDir = strings.TrimSpace(t); !filepath.IsAbs(gitDir) {
+			gitDir = filepath.Join(worktree, gitDir)
+		}
+	}
+	fi, err := os.Lstat(path)
+	realDir, err1 := filepath.EvalSymlinks(gitDir)
+	realPath, err2 := filepath.EvalSymlinks(path)
+	if rel, err3 := filepath.Rel(realDir, realPath); err != nil || !fi.Mode().IsRegular() || err1 != nil || err2 != nil || err3 != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return "(output unreadable)"
+	}
+	f, err := os.Open(realPath)
 	if err != nil {
 		return "(output unreadable)"
 	}
@@ -231,11 +241,12 @@ func proofHead(path string) string {
 	buf, _ := io.ReadAll(io.LimitReader(f, 4096))
 	var lines []string
 	for l := range strings.Lines(string(buf)) {
-		if s := strings.TrimSpace(l); s != "" {
-			if lines = append(lines, s); len(lines) == 5 {
-				break
-			}
+		if s := cleanRejectWhy(l); s != "" && len(lines) < 5 {
+			lines = append(lines, s)
 		}
+	}
+	if r := []rune(strings.Join(lines, " | ")); len(r) > maxRejectWhyRunes {
+		return string(r[:maxRejectWhyRunes])
 	}
 	return cmp.Or(strings.Join(lines, " | "), "(no output)")
 }
@@ -362,18 +373,31 @@ func (e *Engine) runByTokenLocked(token string) (string, flow.State, string, int
 	return "", flow.State{}, "", -1
 }
 
+type planOutcome flow.Outcome
+
+func (o *planOutcome) UnmarshalJSON(data []byte) error {
+	*o = planOutcome{}
+	if len(data) > 0 && data[0] == '"' {
+		return json.Unmarshal(data, &o.Text)
+	}
+	type alias planOutcome
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	return dec.Decode((*alias)(o))
+}
+
 // planTask is the part of design.md 3's plan record that slice 3 accepts.
 type planTask struct {
-	ID        string         `json:"id"`
-	Title     string         `json:"title"`
-	Brief     string         `json:"brief"`
-	ForWhom   string         `json:"for_whom"`
-	IfSkipped string         `json:"if_skipped"`
-	Smallest  string         `json:"smallest"`
-	NotDoing  string         `json:"not_doing"`
-	Outcomes  []flow.Outcome `json:"outcomes"`
-	After     []string       `json:"after"`
-	Estimate  int            `json:"estimate_lines"`
+	ID        string        `json:"id"`
+	Title     string        `json:"title"`
+	Brief     string        `json:"brief"`
+	ForWhom   string        `json:"for_whom"`
+	IfSkipped string        `json:"if_skipped"`
+	Smallest  string        `json:"smallest"`
+	NotDoing  string        `json:"not_doing"`
+	Outcomes  []planOutcome `json:"outcomes"`
+	After     []string      `json:"after"`
+	Estimate  int           `json:"estimate_lines"`
 }
 
 var conventionalTitleRE = regexp.MustCompile(`^(feat|fix|docs|refactor|test|chore|perf|ci|build|style|revert)(\([A-Za-z0-9._/-]+\))?!?: \S.*$`)
@@ -410,7 +434,7 @@ func checkScope(t planTask) []string {
 // checkOutcomes is design.md 11.7's Outcomes check (prompts.md 3.1): at least
 // one outcome per task, each with non-empty unique text and a proved_by of kind
 // cmd:, test:, or manual:, both capped at maxRejectWhyRunes.
-func checkOutcomes(id string, raw []flow.Outcome) ([]flow.Outcome, []string) {
+func checkOutcomes(id string, raw []planOutcome) ([]flow.Outcome, []string) {
 	if len(raw) == 0 {
 		return nil, []string{fmt.Sprintf("outcomes: task %q needs at least one outcome", id)}
 	}
@@ -423,6 +447,8 @@ func checkOutcomes(id string, raw []flow.Outcome) ([]flow.Outcome, []string) {
 		if text == "" {
 			label = fmt.Sprintf("outcome %d", i+1)
 			fails = append(fails, fmt.Sprintf("outcomes: task %q %s needs text", id, label))
+		} else if strings.ContainsAny(o.Text, "=\n\r") {
+			fails = append(fails, fmt.Sprintf("outcomes: task %q %s text cannot contain '=' or a newline", id, label))
 		} else if utf8.RuneCountInString(text) > maxRejectWhyRunes {
 			label = fmt.Sprintf("outcome %d", i+1)
 			fails = append(fails, fmt.Sprintf("outcomes: task %q %s text is longer than %d characters", id, label, maxRejectWhyRunes))
@@ -736,11 +762,11 @@ func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args js
 // amendTask is one entry of plan amend for an existing task: only the
 // fields named change.
 type amendTask struct {
-	ID       string          `json:"id"`
-	Title    *string         `json:"title"`
-	Brief    *string         `json:"brief"`
-	Outcomes *[]flow.Outcome `json:"outcomes"`
-	Estimate *int            `json:"estimate_lines"`
+	ID       string         `json:"id"`
+	Title    *string        `json:"title"`
+	Brief    *string        `json:"brief"`
+	Outcomes *[]planOutcome `json:"outcomes"`
+	Estimate *int           `json:"estimate_lines"`
 }
 
 // acceptAmendLocked is plan amend (design.md 3.1, 4.9, 7.2): changes to

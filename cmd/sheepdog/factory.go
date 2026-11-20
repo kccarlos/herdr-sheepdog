@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
@@ -242,7 +244,24 @@ func runFactoryRecap(ctx context.Context, args []string, stdout, stderr io.Write
 	return 0
 }
 
-var proofTimeout = 5 * time.Minute
+var proofTimeout, proofOutputLimit = 5 * time.Minute, 64 * 1024
+
+type limitedWriter struct {
+	w   io.Writer
+	rem int
+	cut bool
+	err error
+}
+
+func (l *limitedWriter) Write(p []byte) (int, error) {
+	n := min(len(p), max(0, l.rem))
+	l.cut = l.cut || n < len(p)
+	if n > 0 {
+		_, err := l.w.Write(p[:n])
+		l.rem, l.err = l.rem-n, cmp.Or(l.err, err)
+	}
+	return len(p), nil
+}
 
 func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 || args[0] != "ready" {
@@ -256,22 +275,20 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 	nothing := fs.Bool("nothing-to-change", false, "report that the task needs no change")
 	nothingWhy := fs.String("why", "", "reason for --nothing-to-change")
 	var proofs []flow.Proof
-	addKV := func(name string, artifact bool) func(string) error {
-		return func(s string) error {
+	for _, name := range []string{"proof", "artifact"} {
+		fs.Func(name, name+` ("<outcome>=<value>", repeatable)`, func(s string) error {
 			k, v, ok := strings.Cut(s, "=")
 			if k, v = strings.TrimSpace(k), strings.TrimSpace(v); !ok || k == "" || v == "" {
 				return errors.New("--" + name + ` must be "<outcome>=<value>"`)
 			}
-			if artifact {
-				proofs = append(proofs, flow.Proof{Outcome: k, Artifact: v})
-			} else {
-				proofs = append(proofs, flow.Proof{Outcome: k, Command: v})
+			p := flow.Proof{Outcome: k, Command: v}
+			if name == "artifact" {
+				p.Command, p.Artifact = "", v
 			}
+			proofs = append(proofs, p)
 			return nil
-		}
+		})
 	}
-	fs.Func("proof", `proof command ("<outcome>=<command>", repeatable)`, addKV("proof", false))
-	fs.Func("artifact", `manual artifact ("<outcome>=<path>", repeatable)`, addKV("artifact", true))
 	if err := fs.Parse(args[1:]); err != nil {
 		return flagExit(err)
 	}
@@ -325,15 +342,16 @@ func gitRevParse(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(gctx, "git", append([]string{"rev-parse"}, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
-	if s := strings.TrimSpace(string(out)); err != nil {
+	s := strings.TrimSpace(string(out))
+	if err != nil {
 		return "", errors.New(err.Error() + ": " + s)
-	} else {
-		return s, nil
 	}
+	return s, nil
 }
 
 func runProofs(ctx context.Context, head string, proofs []flow.Proof) error {
-	gitDir, err := gitRevParse(ctx, "--git-dir")
+	out, err := gitRevParse(ctx, "--git-dir", "--show-toplevel")
+	gitDir, topLevel, _ := strings.Cut(out, "\n")
 	if err == nil {
 		gitDir, err = filepath.Abs(gitDir)
 	}
@@ -344,37 +362,48 @@ func runProofs(ctx context.Context, head string, proofs []flow.Proof) error {
 	for i := range proofs {
 		p := &proofs[i]
 		if p.Artifact != "" {
-			abs, err := filepath.Abs(p.Artifact)
-			if err == nil {
-				_, err = os.Stat(abs)
-			}
-			if err != nil {
+			if abs, err := filepath.Abs(p.Artifact); err != nil {
 				return errors.New("artifact for " + strconv.Quote(p.Outcome) + ": " + err.Error())
+			} else if _, err = os.Stat(abs); err != nil {
+				return errors.New("artifact for " + strconv.Quote(p.Outcome) + ": " + err.Error())
+			} else {
+				p.Artifact = abs
 			}
-			p.Artifact = abs
 			continue
 		}
 		if err := os.MkdirAll(proofDir, 0o700); err != nil {
 			return err
 		}
+		p.OutputPath = filepath.Join(proofDir, head[:min(12, len(head))]+"-"+strconv.Itoa(i+1)+".log")
+		f, err := os.OpenFile(p.OutputPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+		if err != nil {
+			return err
+		}
+		lw := &limitedWriter{w: f, rem: proofOutputLimit}
 		pctx, cancel := context.WithTimeout(ctx, proofTimeout)
 		cmd := exec.CommandContext(pctx, "sh", "-c", p.Command)
-		cmd.WaitDelay = time.Second
-		combined, runErr := cmd.CombinedOutput()
-		timedOut := errors.Is(pctx.Err(), context.DeadlineExceeded)
-		cancel()
+		cmd.Dir, cmd.Stdout, cmd.Stderr, cmd.WaitDelay = topLevel, lw, lw, time.Second
+		cmd.SysProcAttr, cmd.Cancel = &syscall.SysProcAttr{Setpgid: true}, func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+		runErr := cmd.Run()
+		var note string
 		var ee *exec.ExitError
+		if lw.cut {
+			note = "\n[output truncated at " + strconv.Itoa(proofOutputLimit) + " bytes]\n"
+		}
 		switch {
 		case runErr == nil:
-		case timedOut:
-			p.Exit, combined = 124, append(combined, ("\n[proof timed out after "+proofTimeout.String()+"]\n")...)
+		case errors.Is(pctx.Err(), context.DeadlineExceeded):
+			p.Exit, note = 124, note+"\n[proof timed out after "+proofTimeout.String()+"]\n"
 		case errors.As(runErr, &ee):
 			p.Exit = ee.ExitCode()
 		default:
-			p.Exit, combined = 1, append(combined, ("\n"+runErr.Error()+"\n")...)
+			p.Exit, note = 1, note+"\n"+runErr.Error()+"\n"
 		}
-		p.OutputPath = filepath.Join(proofDir, head[:min(12, len(head))]+"-"+strconv.Itoa(i+1)+".log")
-		if err := os.WriteFile(p.OutputPath, combined, 0o600); err != nil {
+		cancel()
+		if note != "" && lw.err == nil {
+			_, lw.err = io.WriteString(f, note)
+		}
+		if err := errors.Join(lw.err, f.Close()); err != nil {
 			return err
 		}
 	}

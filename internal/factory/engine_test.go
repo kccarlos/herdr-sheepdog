@@ -1647,3 +1647,40 @@ func TestRejectionPromptOnlyNewestRejectedRoundAtHead(t *testing.T) {
 		t.Fatalf("rejectionPrompt for rejected round 2 leaked round 1 reject: %q", got)
 	}
 }
+
+// TestWorkerPromptAllReadyLinesUseProofForm checks item 2: every ready line in
+// the worker prompt (initial, after refusal, after review findings) uses {ready_cmd}.
+func TestWorkerPromptAllReadyLinesUseProofForm(t *testing.T) {
+	rc := readyCmd("sheepdog", []flow.Outcome{
+		{Text: "tests pass", ProvedBy: "cmd: go test ./..."},
+	})
+	prompt := strings.NewReplacer("{ready_cmd}", rc, "{sheepdog}", "sheepdog").Replace(workerTemplate)
+	if n := strings.Count(prompt, rc); n != 3 {
+		t.Fatalf("worker prompt contains readyCmd %d time(s), want 3 (initial, retry, after review):\n%s", n, prompt)
+	}
+}
+
+// TestReadyCmdShellSingleQuotes checks item 3b: readyCmd single-quotes proof
+// and artifact arguments so shell metacharacters ($, backticks, single quotes)
+// are never expanded when copied into a shell.
+func TestReadyCmdShellSingleQuotes(t *testing.T) {
+	got := readyCmd("sheepdog", []flow.Outcome{
+		{Text: "`sheepdog status` shows $HOME and it's ok", ProvedBy: "cmd: echo $USER `id`"},
+		{Text: "it's $1 `art`", ProvedBy: "manual: screenshot"},
+	})
+	wantProof := `--proof '` + "`sheepdog status` shows $HOME and it'\\''s ok=echo $USER `id`" + `'`
+	wantArt := `--artifact '` + "it'\\''s $1 `art`=<path>" + `'`
+	if !strings.Contains(got, wantProof) || !strings.Contains(got, wantArt) {
+		t.Fatalf("readyCmd =\n  %s\nwant both:\n  %s\n  %s", got, wantProof, wantArt)
+	}
+	// Verify sh -c evaluates the --proof argument verbatim without expanding $ or backticks.
+	arg := strings.TrimPrefix(wantProof, "--proof ")
+	out, err := exec.Command("sh", "-c", "printf '%s' "+arg).CombinedOutput()
+	if err != nil {
+		t.Fatalf("sh -c: %v: %s", err, out)
+	}
+	wantLit := "`sheepdog status` shows $HOME and it's ok=echo $USER `id`"
+	if string(out) != wantLit {
+		t.Fatalf("sh expanded argument to %q, want %q", string(out), wantLit)
+	}
+}

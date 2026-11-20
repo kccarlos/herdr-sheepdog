@@ -4,7 +4,6 @@
 package flow
 
 import (
-	"bytes"
 	"encoding/json"
 	"time"
 )
@@ -64,23 +63,12 @@ type Outcome struct {
 // UnmarshalJSON accepts both {text, proved_by} and legacy plain-string
 // outcomes from stored state written before PR 3.2.
 func (o *Outcome) UnmarshalJSON(data []byte) error {
+	*o = Outcome{}
 	if len(data) > 0 && data[0] == '"' {
-		var s string
-		if err := json.Unmarshal(data, &s); err != nil {
-			return err
-		}
-		*o = Outcome{Text: s}
-		return nil
+		return json.Unmarshal(data, &o.Text)
 	}
 	type alias Outcome
-	var a alias
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&a); err != nil {
-		return err
-	}
-	*o = Outcome(a)
-	return nil
+	return json.Unmarshal(data, (*alias)(o))
 }
 
 // Task is a planned task. It has no phase field: rows derive where it is.
