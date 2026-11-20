@@ -67,8 +67,8 @@ func New(paths Paths, client *hc.Client) *Engine {
 }
 
 // Start records the project (storing its id in local git config), marks it
-// started, and wakes the loop.
-func (e *Engine) Start(folder, goal string) error {
+// started, and wakes the loop. An optional maxRunning sets Settings.MaxRunning.
+func (e *Engine) Start(folder, goal string, maxRunning ...int) error {
 	folder, goal = strings.TrimSpace(folder), strings.TrimSpace(goal)
 	if folder == "" || goal == "" {
 		return errors.New("folder and goal are required")
@@ -85,6 +85,12 @@ func (e *Engine) Start(folder, goal string) error {
 	if os.IsNotExist(err) {
 		s = flow.State{Project: flow.Project{ID: id}, Settings: flow.DefaultSettings()}
 	} else if err != nil {
+		return err
+	}
+	if len(maxRunning) > 0 {
+		s.Settings.MaxRunning = maxRunning[0]
+	}
+	if err := s.Settings.Validate(); err != nil {
 		return err
 	}
 	if s.Project.RunID != "" {
@@ -260,9 +266,18 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 			return
 		}
 	}
+	var candidates []string
+	for _, t := range s.Tasks {
+		if !flow.Ended(t) && !t.Parked && flow.OpenRecap(t) == nil && flow.OpenAttempt(t) == nil {
+			if notDone, dropped := flow.UnmetDeps(t, s.Tasks); len(notDone) == 0 && len(dropped) == 0 {
+				candidates = append(candidates, t.ID)
+			}
+		}
+	}
+	granted := flow.GrantSlots(candidates, s.Tasks, flow.RunningTasks(s.Tasks), s.Settings.MaxRunning)
 	for i := range s.Tasks {
 		if ctx.Err() == nil {
-			e.passTaskLocked(ctx, id, &s, i)
+			e.passTaskLocked(ctx, id, &s, i, granted[s.Tasks[i].ID])
 		}
 	}
 	if ctx.Err() == nil {
@@ -322,7 +337,7 @@ var taskExecutors = map[string]taskExec{
 	flow.AskStopRuns:     (*Engine).execStopRuns,
 }
 
-func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int) {
+func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int, hasSlot bool) {
 	var facts flow.Facts
 	// An ended task needs no facts (N1 matches first), and cleanup may
 	// have removed its worktree.
@@ -350,6 +365,9 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		if e.observeReviewLocked(ctx, id, s, ti, &facts) {
 			return
 		}
+	} else if oa == nil && !flow.Ended(s.Tasks[ti]) {
+		facts.DepsNotDone, facts.DepsDropped = flow.UnmetDeps(s.Tasks[ti], s.Tasks)
+		facts.ProjectStopped, facts.NoSlot = !s.Project.Started, !hasSlot
 	}
 	now := time.Now()
 	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[ti], Settings: s.Settings, Facts: facts, Now: now})

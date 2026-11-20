@@ -91,31 +91,35 @@ func headH(in In) string {
 	return ""
 }
 
-func ended(in In) bool       { return Ended(in.Task) }
-func recapOpen(in In) bool   { return OpenRecap(in.Task) != nil }
-func prMerged(in In) bool    { return in.Facts.PR.State == PRMerged }
-func noAttempt(in In) bool   { return in.attempt() == nil }
-func hasAttempt(in In) bool  { return in.attempt() != nil }
-func workerGone(in In) bool  { return in.Facts.Worker.State == RunGone }
-func reviewGone(in In) bool  { return in.Facts.Reviewer.State == RunGone }
-func noReady(in In) bool     { return len(in.attempt().Ready) == 0 }
-func tipAhead(in In) bool    { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
-func noPR(in In) bool        { return in.Facts.PR.State == PRNone }
-func prOpen(in In) bool      { return in.Facts.PR.State == PROpen }
-func prNotClosed(in In) bool { return in.Facts.PR.State != PRClosed }
-func tipSame(in In) bool     { return in.Facts.TipRel == RelSame } // slice 1: diverged falls to N43 (N7 comes later)
-func prBehindH(in In) bool   { return in.Facts.PR.HeadRel == RelBehind }
-func prHeadIsH(in In) bool   { return in.Facts.PR.Head == headH(in) }
-func answered(in In) bool    { return in.Facts.PR.Answered }
-func unanswered(in In) bool  { return !answered(in) }
-func notBehind(in In) bool   { return !in.Facts.PR.Behind }
-func checksGreen(in In) bool { return in.Facts.PR.Checks == ChecksGreen }
-func checksPend(in In) bool  { return in.Facts.PR.Checks == ChecksPending }
-func mergeClean(in In) bool  { return in.Facts.PR.Mergeable == MergeableClean }
-func mergeUnkn(in In) bool   { return in.Facts.PR.Mergeable == MergeableUnknown }
-func working(in In) bool     { return in.Facts.Worker.State == RunWorking }
-func notWorking(in In) bool  { return !working(in) }
-func mergeAsked(in In) bool  { return Count(in.acts(), key(AskMerge, headH(in))) > 0 }
+func ended(in In) bool          { return Ended(in.Task) }
+func recapOpen(in In) bool      { return OpenRecap(in.Task) != nil }
+func prMerged(in In) bool       { return in.Facts.PR.State == PRMerged }
+func noAttempt(in In) bool      { return in.attempt() == nil }
+func hasAttempt(in In) bool     { return in.attempt() != nil }
+func depsNotDone(in In) bool    { return len(in.Facts.DepsNotDone) > 0 }
+func depsDropped(in In) bool    { return len(in.Facts.DepsDropped) > 0 }
+func projectStopped(in In) bool { return in.Facts.ProjectStopped }
+func noSlot(in In) bool         { return in.Facts.NoSlot }
+func workerGone(in In) bool     { return in.Facts.Worker.State == RunGone }
+func reviewGone(in In) bool     { return in.Facts.Reviewer.State == RunGone }
+func noReady(in In) bool        { return len(in.attempt().Ready) == 0 }
+func tipAhead(in In) bool       { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
+func noPR(in In) bool           { return in.Facts.PR.State == PRNone }
+func prOpen(in In) bool         { return in.Facts.PR.State == PROpen }
+func prNotClosed(in In) bool    { return in.Facts.PR.State != PRClosed }
+func tipSame(in In) bool        { return in.Facts.TipRel == RelSame } // slice 1: diverged falls to N43 (N7 comes later)
+func prBehindH(in In) bool      { return in.Facts.PR.HeadRel == RelBehind }
+func prHeadIsH(in In) bool      { return in.Facts.PR.Head == headH(in) }
+func answered(in In) bool       { return in.Facts.PR.Answered }
+func unanswered(in In) bool     { return !answered(in) }
+func notBehind(in In) bool      { return !in.Facts.PR.Behind }
+func checksGreen(in In) bool    { return in.Facts.PR.Checks == ChecksGreen }
+func checksPend(in In) bool     { return in.Facts.PR.Checks == ChecksPending }
+func mergeClean(in In) bool     { return in.Facts.PR.Mergeable == MergeableClean }
+func mergeUnkn(in In) bool      { return in.Facts.PR.Mergeable == MergeableUnknown }
+func working(in In) bool        { return in.Facts.Worker.State == RunWorking }
+func notWorking(in In) bool     { return !working(in) }
+func mergeAsked(in In) bool     { return Count(in.acts(), key(AskMerge, headH(in))) > 0 }
 
 // checksAbsentInGrace: no checks yet, and the head is younger than
 // checks_grace_minutes (N36).
@@ -193,6 +197,13 @@ var TaskRows = []Row[In]{
 		a := in.attempt()
 		return say("the worker says nothing to change: "+a.NothingToChange, once(in.acts(), key(AskWake, "nothing_to_change", len(a.Rounds))))(in)
 	}},
+	{ID: "N9", WaitsOn: "dependencies", When: all(noAttempt, anyOf(depsNotDone, depsDropped)), Then: func(in In) Decision {
+		return say(n9Why(in))(in)
+	}},
+	// N10: milestone and quota (no worker candidate resolves) come in later slices (design.md 4.2).
+	{ID: "N10", WaitsOn: "the project or a slot", When: all(noAttempt, anyOf(projectStopped, noSlot)), Then: func(in In) Decision {
+		return say(n10Why(in))(in)
+	}},
 	{ID: "N11", WaitsOn: "the engine", When: noAttempt, Then: func(in In) Decision {
 		return say("no attempt: start one", once(in.acts(), AskNewAttempt))(in)
 	}},
@@ -248,6 +259,25 @@ var TaskRows = []Row[In]{
 		p := in.Facts.PR
 		return say("no rule matched", once(in.acts(), key(AskWake, "no_rule_matched", headH(in), p.State, p.Checks, p.Mergeable, in.Facts.TipRel)))(in)
 	}},
+}
+
+func n9Why(in In) string {
+	var parts []string
+	if len(in.Facts.DepsNotDone) > 0 {
+		parts = append(parts, "waiting on "+strings.Join(in.Facts.DepsNotDone, ", "))
+	}
+	if len(in.Facts.DepsDropped) > 0 {
+		parts = append(parts, "depends on dropped "+strings.Join(in.Facts.DepsDropped, ", "))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func n10Why(in In) string {
+	if in.Facts.ProjectStopped {
+		return "project is not running"
+	}
+	// milestone and quota checks come in later slices (design.md 4.2).
+	return "no slot is free"
 }
 
 func hasAccept(in In, head string) bool {

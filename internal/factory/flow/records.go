@@ -71,6 +71,9 @@ func (o *Outcome) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, (*alias)(o))
 }
 
+// PriorityUrgent marks a task for priority scheduling and the extra urgent slot (design.md 4.10).
+const PriorityUrgent = "urgent"
+
 // Task is a planned task. It has no phase field: rows derive where it is.
 type Task struct {
 	ID       string    `json:"id"`
@@ -78,6 +81,7 @@ type Task struct {
 	Brief    string    `json:"brief"`
 	Outcomes []Outcome `json:"outcomes"`
 	After    []string  `json:"after,omitempty"`
+	Priority string    `json:"priority,omitempty"`
 	// Scope fields of design.md 3, 11.7 (prompts.md 3.1).
 	ForWhom   string `json:"for_whom,omitempty"`
 	IfSkipped string `json:"if_skipped,omitempty"`

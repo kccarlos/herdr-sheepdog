@@ -15,7 +15,7 @@ type Factory interface {
 	Projects() []factory.ProjectView
 	Graph(project string) (factory.GraphView, error)
 	LogLines(project string, n int) ([]factory.LogEntry, error)
-	Start(folder, goal string) error
+	Start(folder, goal string, maxRunning ...int) error
 	Stop(project string) error
 	Report(token, verb string, args json.RawMessage) error
 }
@@ -27,6 +27,7 @@ func (s *Server) handleFactory(cmd string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Folder, Goal, Project, Token, Verb string
+			MaxRunning                         *int `json:"max_running"`
 			Args                               json.RawMessage
 		}
 		if s.deps.Factory == nil {
@@ -44,7 +45,11 @@ func (s *Server) handleFactory(cmd string) http.HandlerFunc {
 		case req.Token != "":
 			err = s.deps.Factory.Report(req.Token, cmd, nil)
 		case cmd == "start":
-			err = s.deps.Factory.Start(req.Folder, req.Goal)
+			if req.MaxRunning != nil {
+				err = s.deps.Factory.Start(req.Folder, req.Goal, *req.MaxRunning)
+			} else {
+				err = s.deps.Factory.Start(req.Folder, req.Goal)
+			}
 		default:
 			err = s.deps.Factory.Stop(req.Project)
 		}

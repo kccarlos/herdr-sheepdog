@@ -73,6 +73,7 @@ func TestSettingsRange(t *testing.T) {
 		"retro_from_round":               func(s *Settings, n int) { s.RetroFromRound = n },
 		"checks_grace_minutes":           func(s *Settings, n int) { s.ChecksGraceMinutes = n },
 		"stuck_minutes":                  func(s *Settings, n int) { s.StuckMinutes = n },
+		"max_running":                    func(s *Settings, n int) { s.MaxRunning = n },
 	}
 	limits := map[string][2]int{
 		"review_rounds":                  {ReviewRoundsMin, ReviewRoundsMax},
@@ -81,6 +82,7 @@ func TestSettingsRange(t *testing.T) {
 		"retro_from_round":               {RetroFromMin, RetroFromMax},
 		"checks_grace_minutes":           {ChecksGraceMin, ChecksGraceMax},
 		"stuck_minutes":                  {StuckMin, StuckMax},
+		"max_running":                    {MaxRunningMin, MaxRunningMax},
 	}
 	for name, lim := range limits {
 		for _, c := range []struct {

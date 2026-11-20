@@ -18,6 +18,7 @@ import (
 
 type stubFactory struct {
 	startedFolder, startedGoal string
+	startedMaxRunning          int
 	stoppedProject             string
 	reportToken, reportVerb    string
 	reportArgs                 string
@@ -39,9 +40,12 @@ func (f *stubFactory) Report(token, verb string, args json.RawMessage) error {
 	return f.reportErr
 }
 
-func (f *stubFactory) Start(folder, goal string) error {
+func (f *stubFactory) Start(folder, goal string, maxRunning ...int) error {
 	f.called++
-	f.startedFolder, f.startedGoal = folder, goal
+	f.startedFolder, f.startedGoal, f.startedMaxRunning = folder, goal, 0
+	if len(maxRunning) > 0 {
+		f.startedMaxRunning = maxRunning[0]
+	}
 	return nil
 }
 
@@ -97,11 +101,11 @@ func TestFactoryRoutesLoopbackOnly(t *testing.T) {
 	}
 
 	// Direct loopback succeeds.
-	rs := httptest.NewRequest(http.MethodPost, "/api/factory/start", strings.NewReader(`{"folder":"/tmp/repo","goal":"build x"}`))
+	rs := httptest.NewRequest(http.MethodPost, "/api/factory/start", strings.NewReader(`{"folder":"/tmp/repo","goal":"build x","max_running":2}`))
 	rs.RemoteAddr, rs.Host = "127.0.0.1:5000", "127.0.0.1:7777"
 	ws := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(ws, rs)
-	if ws.Code != http.StatusOK || stub.startedFolder != "/tmp/repo" || stub.startedGoal != "build x" {
+	if ws.Code != http.StatusOK || stub.startedFolder != "/tmp/repo" || stub.startedGoal != "build x" || stub.startedMaxRunning != 2 {
 		t.Fatalf("loopback start = %d %s, stub=%+v", ws.Code, ws.Body.String(), stub)
 	}
 

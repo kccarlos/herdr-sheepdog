@@ -564,6 +564,7 @@ type planTask struct {
 	NotDoing  string        `json:"not_doing"`
 	Outcomes  []planOutcome `json:"outcomes"`
 	After     []string      `json:"after"`
+	Priority  string        `json:"priority"`
 	Estimate  int           `json:"estimate_lines"`
 }
 
@@ -649,6 +650,15 @@ func checkPlan(raw json.RawMessage, limit int) ([]flow.Task, []string) {
 	return checkPlanWith(raw, nil, "", limit)
 }
 
+// checkPriority validates the optional plan priority field (design.md 3, 4.10).
+func checkPriority(id, raw string) (string, []string) {
+	p := strings.TrimSpace(raw)
+	if p != "" && p != flow.PriorityUrgent {
+		return "", []string{fmt.Sprintf("shape: task %q has unknown priority %q (use %q or omit)", id, p, flow.PriorityUrgent)}
+	}
+	return p, nil
+}
+
 // checkEstimate is design.md 11.5's plan check: estimate_lines is required,
 // and a task over task_size_limit is split before it exists.
 func checkEstimate(id string, est, limit int) []string {
@@ -696,9 +706,11 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, l
 		}
 		fails = append(fails, checkTitle(t.ID, t.Title)...)
 		fails = append(fails, checkScope(*t)...)
-		var oFails []string
+		var oFails, pFails []string
 		outcomes[i], oFails = checkOutcomes(t.ID, t.Outcomes)
 		fails = append(fails, oFails...)
+		t.Priority, pFails = checkPriority(t.ID, t.Priority)
+		fails = append(fails, pFails...)
 		fails = append(fails, checkEstimate(t.ID, t.Estimate, limit)...)
 	}
 	after := map[string][]string{}
@@ -721,7 +733,7 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, l
 			ID: t.ID, Title: cleanRejectWhy(t.Title), Brief: t.Brief,
 			ForWhom: cleanRejectWhy(t.ForWhom), IfSkipped: cleanRejectWhy(t.IfSkipped),
 			Smallest: cleanRejectWhy(t.Smallest), NotDoing: cleanRejectWhy(t.NotDoing),
-			Outcomes: outcomes[i], After: t.After, EstimateLines: t.Estimate, SplitFrom: parentID, Attempts: []flow.Attempt{},
+			Outcomes: outcomes[i], After: t.After, Priority: t.Priority, EstimateLines: t.Estimate, SplitFrom: parentID, Attempts: []flow.Attempt{},
 		}
 	}
 	if id := cycleAt(p.Tasks, after); id != "" {

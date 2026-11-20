@@ -22,6 +22,7 @@ type Settings struct {
 	ContinueLines              int `json:"continue_lines"`                 // the cap after a continue (design.md 4.9)
 	TaskSizeLimit              int `json:"task_size_limit"`                // plan checks (design.md 11.5)
 	SizeCapFactor              int `json:"size_cap_factor"`                // N12: size_cap = factor × estimate_lines
+	MaxRunning                 int `json:"max_running"`                    // N10: concurrent tasks (design.md 4.10, 10.1)
 	// SecondReviewer reviews the second passing round (L8): opus in a
 	// fresh session, or codex (world.CodexArgv's model).
 	SecondReviewer string `json:"second_reviewer"`
@@ -46,6 +47,8 @@ const (
 	SizeLimitMax     = 2000
 	SizeFactorMin    = 1
 	SizeFactorMax    = 5
+	MaxRunningMin    = 1
+	MaxRunningMax    = 20
 )
 
 // DefaultSettings are slice 2's defaults: two passing rounds on the final head
@@ -55,7 +58,7 @@ func DefaultSettings() Settings {
 		ReviewRounds: 2, MaxRounds: 5,
 		RetroAfterRoundsWithMajors: 2, RetroFromRound: 3,
 		ChecksGraceMinutes: 5, StuckMinutes: 30,
-		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2,
+		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2, MaxRunning: 3,
 		SecondReviewer: "opus",
 	}
 }
@@ -74,6 +77,7 @@ func (s Settings) Changed() []string {
 		{"continue_lines", s.ContinueLines, d.ContinueLines},
 		{"continues_per_task", s.ContinuesPerTask, d.ContinuesPerTask},
 		{"max_rounds", s.MaxRounds, d.MaxRounds},
+		{"max_running", s.MaxRunning, d.MaxRunning},
 		{"retro_after_rounds_with_majors", s.RetroAfterRoundsWithMajors, d.RetroAfterRoundsWithMajors},
 		{"retro_from_round", s.RetroFromRound, d.RetroFromRound},
 		{"review_rounds", s.ReviewRounds, d.ReviewRounds},
@@ -107,6 +111,7 @@ func (s Settings) Validate() error {
 		{"continue_lines", s.ContinueLines, 0, ContinueLinesMax},
 		{"task_size_limit", s.TaskSizeLimit, SizeLimitMin, SizeLimitMax},
 		{"size_cap_factor", s.SizeCapFactor, SizeFactorMin, SizeFactorMax},
+		{"max_running", s.MaxRunning, MaxRunningMin, MaxRunningMax},
 	} {
 		if r.v < r.low || r.v > r.high {
 			return fmt.Errorf("%s %d: allowed %d–%d", r.name, r.v, r.low, r.high)

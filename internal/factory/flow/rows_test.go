@@ -53,6 +53,10 @@ var (
 	workerEnded = func(in *In) { in.Facts.Worker.State = RunGone }
 	reviewEnded = func(in *In) { in.Facts.Reviewer.State = RunGone }
 	noAttempts  = func(in *In) { in.Task.Attempts = nil; in.Facts = Facts{} }
+	waitDep     = func(in *In) { in.Facts.DepsNotDone = []string{"T1"} }
+	dropDep     = func(in *In) { in.Facts.DepsDropped = []string{"T2"} }
+	projStop    = func(in *In) { in.Facts.ProjectStopped = true }
+	noSlotF     = func(in *In) { in.Facts.NoSlot = true }
 	onePass     = func(in *In) { a0(in).Rounds = a0(in).Rounds[:1] }
 	changes     = func(in *In) {
 		a0(in).Rounds = []Round{{N: 1, Kind: RoundFull, Head: "c1", Verdict: VerdictChanges, Majors: 1}}
@@ -234,6 +238,10 @@ func TestRowCases(t *testing.T) {
 		{"N6", with(sizeRecap), []string{"wake_coordinator@recap@1", "tell_worker_stop@1"}},
 		{"N6", with(sizeRecap, func(in *In) { in.Facts.Worker = Run{} }), []string{"wake_coordinator@recap@1"}},
 		{"N8", with(nothingF, prGone), []string{"wake_coordinator@nothing_to_change@0"}},
+		{"N9", with(noAttempts, waitDep), nil},
+		{"N9", with(noAttempts, dropDep), nil},
+		{"N10", with(noAttempts, projStop), nil},
+		{"N10", with(noAttempts, noSlotF), nil},
 		{"N11", with(noAttempts), []string{"new_attempt"}},
 		{"N11", with(func(in *In) { a0(in).Closed = "new attempt" }), []string{"new_attempt"}},
 		{"N12", with(overCap), []string{"open_size_recap@0"}},
@@ -291,6 +299,14 @@ func TestRowOrder(t *testing.T) {
 		{"N3", "S1", true, with(parked, workerEnded)},
 		{"N6", "N8", true, with(openRecap, nothingF)},
 		{"N8", "N23", false, with(nothingF, prGone)},
+		{"N9", "N10", true, with(noAttempts, waitDep, noSlotF)},
+		{"N9", "N10", true, with(noAttempts, dropDep, projStop)},
+		{"N10", "N11", true, with(noAttempts, noSlotF)},
+		{"N10", "N11", true, with(noAttempts, projStop)},
+		{"N1", "N9", false, with(done, noAttempts, waitDep)},
+		{"N3", "N9", false, with(parked, noAttempts, waitDep)},
+		{"N6", "N9", false, with(openRecap, noAttempts, waitDep)},
+		{"N9", "N11", false, with(noAttempts, waitDep)},
 		{"S1", "N6", true, with(workerEnded, openRecap)},
 		{"N6", "N22", false, with(openRecap, changes)},
 		{"N6", "N29", false, with(openRecap, noRounds)},
@@ -797,5 +813,19 @@ func TestN12LinesTimeout(t *testing.T) {
 	r, d := FirstMatch(TaskRows, in)
 	if r.ID != "N12" || len(d.Asked) != 1 || d.Asked[0] != "open_size_recap@0" || !strings.Contains(d.Why, "timed out") {
 		t.Fatalf("FirstMatch = (%s, %+v), want N12 opening size recap with timeout why", r.ID, d)
+	}
+}
+
+// TestN9N10Why checks that N9 names its waiting and dropped dependencies and
+// N10 names the first failing condition (project before slot).
+func TestN9N10Why(t *testing.T) {
+	if _, d := FirstMatch(TaskRows, with(noAttempts, waitDep, dropDep)); !strings.Contains(d.Why, "T1") || !strings.Contains(d.Why, "dropped T2") {
+		t.Errorf("N9 why = %q, want T1 and dropped T2", d.Why)
+	}
+	if _, d := FirstMatch(TaskRows, with(noAttempts, projStop, noSlotF)); d.Why != "project is not running" {
+		t.Errorf("N10 why (both) = %q, want project is not running", d.Why)
+	}
+	if _, d := FirstMatch(TaskRows, with(noAttempts, noSlotF)); d.Why != "no slot is free" {
+		t.Errorf("N10 why (slot) = %q, want no slot is free", d.Why)
 	}
 }
