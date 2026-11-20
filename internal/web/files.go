@@ -35,6 +35,10 @@ func (s *Server) filesRoot(r *http.Request) (root *files.Root, pane, space strin
 			return nil, "", "", errNoAgent
 		}
 		dir = row.Cwd
+		if strings.Contains(pane, "~") {
+			// An agent on an added machine: its folder is not on this computer.
+			return nil, pane, "", errNoCwd
+		}
 	} else {
 		a, ok := s.deps.Supervisor.(AgentActions)
 		if !ok || s.deps.Supervisor == nil {

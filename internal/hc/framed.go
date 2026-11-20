@@ -186,6 +186,7 @@ func (f *Framed) Call(ctx context.Context, method string, params, out any) error
 // Attach opens an attach stream (terminal.attach). The handlers are live
 // from the first byte of the first paint.
 func (f *Framed) Attach(ctx context.Context, p AttachParams, h StreamHandlers) (*Stream, Terminal, error) {
+	p.Terminal = Address(p.Terminal)
 	var s *Stream
 	var term Terminal
 	err := f.call(ctx, "terminal.attach", p, func(raw json.RawMessage) error {

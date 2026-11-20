@@ -113,7 +113,7 @@ func (c *Client) Get(ctx context.Context, terminal string) (Terminal, error) {
 	var result Terminal
 	err := c.Call(ctx, "terminal.get", struct {
 		Terminal string `json:"terminal"`
-	}{Terminal: terminal}, &result)
+	}{Terminal: Address(terminal)}, &result)
 	return result, err
 }
 
@@ -123,7 +123,7 @@ func (c *Client) Read(ctx context.Context, terminal string, lines int) (ReadResu
 	err := c.Call(ctx, "terminal.read", struct {
 		Terminal string `json:"terminal"`
 		Lines    int    `json:"lines"`
-	}{Terminal: terminal, Lines: lines}, &result)
+	}{Terminal: Address(terminal), Lines: lines}, &result)
 	return result, err
 }
 
@@ -136,7 +136,7 @@ func (c *Client) Send(ctx context.Context, terminal, text string, force bool) (S
 		Terminal string `json:"terminal"`
 		Text     string `json:"text"`
 		Force    bool   `json:"force"`
-	}{Terminal: terminal, Text: text, Force: force}, &result)
+	}{Terminal: Address(terminal), Text: text, Force: force}, &result)
 	return result, err
 }
 
@@ -146,7 +146,7 @@ func (c *Client) Keys(ctx context.Context, terminal string, keys ...string) (Key
 	err := c.Call(ctx, "terminal.keys", struct {
 		Terminal string   `json:"terminal"`
 		Keys     []string `json:"keys"`
-	}{Terminal: terminal, Keys: keys}, &result)
+	}{Terminal: Address(terminal), Keys: keys}, &result)
 	return result, err
 }
 
@@ -158,7 +158,7 @@ func (c *Client) Interrupt(ctx context.Context, terminal string, watch time.Dura
 	params := struct {
 		Terminal string   `json:"terminal"`
 		Timeout  *float64 `json:"timeout,omitempty"`
-	}{Terminal: terminal}
+	}{Terminal: Address(terminal)}
 	if watch > 0 {
 		s := watch.Seconds()
 		params.Timeout = &s
@@ -182,7 +182,7 @@ func (c *Client) Label(ctx context.Context, terminal string, labels map[string]s
 	err := c.Call(ctx, "terminal.label", struct {
 		Terminal string            `json:"terminal"`
 		Labels   map[string]string `json:"labels"`
-	}{Terminal: terminal, Labels: labels}, &result)
+	}{Terminal: Address(terminal), Labels: labels}, &result)
 	return result, err
 }
 
@@ -191,7 +191,7 @@ func (c *Client) Kill(ctx context.Context, terminal string) (Terminal, error) {
 	var result Terminal
 	err := c.Call(ctx, "terminal.kill", struct {
 		Terminal string `json:"terminal"`
-	}{Terminal: terminal}, &result)
+	}{Terminal: Address(terminal)}, &result)
 	return result, err
 }
 
