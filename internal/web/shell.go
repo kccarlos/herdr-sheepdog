@@ -206,7 +206,7 @@ func (t *termServer) forgetShell(pane string) {
 func (c *termConn) openShell(m termproto.Message) {
 	dir, err := c.t.shellDir(m.Target.Shell.Cwd)
 	if err != nil {
-		c.refuse(m.Ch, "", termproto.RefusedOutsideProjects)
+		c.abortShellOpen(m.Ch, termproto.RefusedOutsideProjects)
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
@@ -214,11 +214,27 @@ func (c *termConn) openShell(m termproto.Message) {
 	pane, reused, err := c.t.shellPane(ctx, dir)
 	if err != nil {
 		c.t.s.log.Log(logSource, "web.shell.error", "", map[string]any{"client_id": c.id, "cwd": dir, "error": err.Error()})
-		c.refuse(m.Ch, "", termproto.ReasonHerdr)
+		c.abortShellOpen(m.Ch, termproto.ReasonHerdr)
 		return
 	}
 	c.t.s.log.Log(logSource, "web.shell.open", pane, map[string]any{"client_id": c.id, "pane_id": pane, "cwd": dir, "remote_kind": c.kind, "reused": reused})
 	c.openChan(m, pane, "shell")
+}
+
+func (c *termConn) abortShellOpen(ch int, reason string) {
+	c.mu.Lock()
+	tc := c.chans[ch]
+	closing := false
+	if tc != nil && tc.gen == 0 {
+		closing = tc.closing
+		delete(c.chans, ch)
+	}
+	c.mu.Unlock()
+	if closing {
+		c.finish(tc, termproto.ReasonReleased)
+		return
+	}
+	c.refuse(ch, "", reason)
 }
 
 // handleShellClose is POST /api/shells/{pane_id}/close: end a phone
