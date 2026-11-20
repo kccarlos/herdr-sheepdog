@@ -509,7 +509,11 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		return false
 	}
 	if flow.Ended(*t) || facts.PR.State == flow.PRMerged || facts.PR.State == flow.PRClosed ||
-		facts.TipRel != flow.RelSame || a.Review.Round != len(a.Rounds)+1 || a.Review.Head != flow.H(*a) {
+		!tipKeepsRound(*a, a.Review.Head, *facts) || a.Review.Round != len(a.Rounds)+1 {
+		return voidRound()
+	}
+	if flow.OpenRecap(*t) != nil { // N6: no reviewer runs; after the decision the round starts again
+		forgetStarts(a, false)
 		return voidRound()
 	}
 	if a.Review.RunID == "" {
@@ -549,7 +553,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		e.logError("factory.git_error", id, err)
 		return true
 	}
-	if !clean || tip != a.Review.Head {
+	if !clean || tip != facts.Tip {
 		why := "the worktree moved"
 		if !clean {
 			why = "the reviewer left the worktree dirty"
@@ -573,6 +577,13 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		e.logError("factory.exec_error", id, err)
 	}
 	return true
+}
+
+// tipKeepsRound: a round in flight at x keeps running while H is x or was
+// reached from x by merge_only moves, and the tip is H or ahead of it by
+// merges of the base only (N20 moves H next).
+func tipKeepsRound(a flow.Attempt, x string, f flow.Facts) bool {
+	return flow.Covers(a, x, flow.H(a)) && (f.TipRel == flow.RelSame || f.TipRel == flow.RelAhead && f.TipMergeOnly)
 }
 
 // markReviewIdleLocked starts the stuck row's clock (review.idle_since) the

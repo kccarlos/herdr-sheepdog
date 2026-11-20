@@ -615,18 +615,25 @@ func DeltaRanges(ctx context.Context, worktree, since, head string) ([]string, e
 
 // ChangedLines is the lines added plus removed at tip against its merge base
 // with the base branch, as git last fetched it (N12, design.md 11.5). It
-// does not fetch: it runs every pass. Binary files count no lines.
+// does not fetch: it runs every pass. Every file counts as text, so no
+// attribute or NUL byte the worker commits can hide lines.
 func ChangedLines(ctx context.Context, dir, tip string) (int, error) {
 	ref, _, err := remoteBaseCommit(ctx, dir, false)
 	if err != nil {
 		return 0, err
 	}
-	out, err := gitCmd(ctx, dir, "diff", "--numstat", ref+"..."+tip)
-	n := 0
+	// The patch, not --numstat: numstat still calls a -diff or NUL file
+	// binary under --text.
+	out, err := gitCmd(ctx, dir, "diff", "--text", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=0", ref+"..."+tip)
+	n, hunk := 0, false
 	for ln := range strings.Lines(out) {
-		var add, del int
-		if _, e := fmt.Sscanf(ln, "%d\t%d", &add, &del); e == nil {
-			n += add + del
+		switch {
+		case strings.HasPrefix(ln, "diff --git "):
+			hunk = false
+		case strings.HasPrefix(ln, "@@"):
+			hunk = true
+		case hunk && (ln[0] == '+' || ln[0] == '-'):
+			n++
 		}
 	}
 	return n, err
@@ -639,12 +646,15 @@ func MergeOnly(ctx context.Context, dir, x, h string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if x == h {
+		return false, nil
+	}
 	mb, err := gitCmd(ctx, dir, "merge-base", h, ref)
-	if err != nil || x == h || !isAncestor(ctx, dir, x, h) {
-		return false, err
+	if err != nil || !isAncestor(ctx, dir, x, h) { // no common ancestor is "not merge_only"; only a cancelled read is an error
+		return false, ctx.Err()
 	}
 	out, err := gitCmd(ctx, dir, "rev-list", "--first-parent", "--parents", x+".."+h)
-	if err != nil {
+	if err != nil || out == "" {
 		return false, err
 	}
 	for ln := range strings.Lines(out) {

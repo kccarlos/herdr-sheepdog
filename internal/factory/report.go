@@ -193,7 +193,7 @@ func (e *Engine) acceptVerdictLocked(ctx context.Context, id string, s *flow.Sta
 	switch {
 	case rd.Status != world.ReportFound || rep.Code == "" || rep.Code != rev.Code:
 		why = "The report tag is malformed or does not carry this round's one-time code."
-	case rep.Round != rev.Round || rep.Head != rev.Head || rev.Head != flow.H(*a) || rev.Round != len(a.Rounds)+1:
+	case rep.Round != rev.Round || rep.Head != rev.Head || !flow.Covers(*a, rev.Head, flow.H(*a)) || rev.Round != len(a.Rounds)+1:
 		why = "The report tag does not match this review run's round and commit."
 	case (rep.Verdict != flow.VerdictPass || rep.Majors != 0) && (rep.Verdict != flow.VerdictChanges || rep.Majors < 1):
 		why = "Verdict must be pass with 0 majors or changes with at least 1 major."

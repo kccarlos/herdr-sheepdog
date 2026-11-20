@@ -1,14 +1,18 @@
 package factory
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
 // TestPlanEstimateRequiredAndLimited: estimate_lines is required and a task
@@ -157,4 +161,102 @@ func TestReadyAtMergeOnlyTip(t *testing.T) {
 			t.Fatalf("edited=%v: ladder %s (want %s), H %s", edited, got, want, flow.H(st.Tasks[0].Attempts[0]))
 		}
 	}
+}
+
+// passReport makes rev's reviewer idle with a valid pass tag for round at head.
+func (l *landing) passReport(rev *flow.ReviewRun) {
+	l.srv.SetScreen(rev.RunID, "❯ prompt\n\n⏺ Fine.\n<report>{\"code\":\""+rev.Code+"\",\"round\":"+strconv.Itoa(rev.Round)+",\"head\":\""+rev.Head+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
+	l.srv.SetStatus(rev.RunID, &hc.Status{App: "claude-code", State: "done"})
+}
+
+// TestRoundInFlightSurvivesMergeOnlyMove: a clean base merge while round 1
+// runs at c1 moves H but does not stop the reviewer; its pass at c1 counts
+// at the new H, and with a second pass the task merges there.
+func TestRoundInFlightSurvivesMergeOnlyMove(t *testing.T) {
+	ctx := context.Background()
+	l := newLanding(t)
+	writePRJSON(t, l.gh, "view.json", l.c1, "[]")
+	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Rounds = []flow.Round{} })
+	l.pass() // N29: round 1 at c1
+	rev := l.state().Tasks[0].Attempts[0].Review
+	if rev == nil || rev.RunID == "" || rev.Head != l.c1 {
+		t.Fatalf("review = %+v, want round 1 running at c1", rev)
+	}
+	if err := os.WriteFile(filepath.Join(l.repo, "base.go"), []byte("package demo\nvar Base = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, l.repo, "add", "base.go")
+	gitIn(t, l.repo, "commit", "-m", "feat: base moves")
+	gitIn(t, l.repo, "push", "origin", "main")
+	gitIn(t, l.wt, "fetch", "origin")
+	gitIn(t, l.wt, "merge", "--no-edit", "origin/main")
+	m1 := gitIn(t, l.wt, "rev-parse", "HEAD")
+
+	l.pass() // N20
+	l.pass() // N26 pushes m1
+	writePRJSON(t, l.gh, "view.json", m1, "[]")
+	a := l.state().Tasks[0].Attempts[0]
+	if rs, _ := world.RunState(ctx, l.client, rev.RunID); flow.H(a) != m1 || a.Review == nil || a.Review.RunID != rev.RunID || rs == flow.RunGone {
+		t.Fatalf("after the merge-only move: H %s, review %+v, reviewer %s", flow.H(a), a.Review, rs)
+	}
+	l.passReport(rev)
+	l.pass() // the verdict at c1
+	a = l.state().Tasks[0].Attempts[0]
+	if len(a.Rounds) != 1 || a.Rounds[0].Head != l.c1 || a.Rounds[0].Verdict != flow.VerdictPass {
+		t.Fatalf("rounds = %+v, want round 1 pass at c1", a.Rounds)
+	}
+	l.pass() // N29: round 2 at m1
+	rev2 := l.state().Tasks[0].Attempts[0].Review
+	if rev2 == nil || rev2.Round != 2 || rev2.Head != m1 {
+		t.Fatalf("second review = %+v, want round 2 at %s", rev2, m1)
+	}
+	l.passReport(rev2)
+	l.pass() // verdict 2
+	writePRJSON(t, l.gh, "view.json", m1, greenRollup)
+	l.pass() // N42
+	a = l.state().Tasks[0].Attempts[0]
+	if len(a.Accepts) != 1 || a.Accepts[0].Head != m1 || !slices.Equal(a.Accepts[0].Rounds, []int{1, 2}) {
+		t.Fatalf("accepts = %+v, want one at %s on rounds 1 and 2", a.Accepts, m1)
+	}
+}
+
+// TestRecapStopsReviewerInFlight: an amend that lowers the estimate under
+// the lines while a reviewer runs opens a size recap; the reviewer is then
+// stopped and its tag is not accepted (N6: no reviewer runs).
+func TestRecapStopsReviewerInFlight(t *testing.T) {
+	ctx := context.Background()
+	l := newLanding(t).withTokens()
+	c2 := commitFile(t, l.wt, "more.go", strings.Repeat("// line\n", 10))
+	gitIn(t, l.wt, "push", "origin", c2+":refs/heads/"+l.branch)
+	writePRJSON(t, l.gh, "view.json", c2, "[]")
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Ready, a.Rounds = append(a.Ready, flow.Ready{Head: c2}), []flow.Round{}
+	})
+	l.pass() // N29 at c2
+	rev := l.state().Tasks[0].Attempts[0].Review
+	if rev == nil || rev.RunID == "" {
+		t.Fatalf("review = %+v, want one running", rev)
+	}
+	l.report("tok-coord", "plan amend", `{"why":"smaller","tasks":[{"id":"T1","estimate_lines":3}]}`, "")
+	l.pass() // N12 opens the size recap
+	if flow.OpenRecap(l.state().Tasks[0]) == nil {
+		t.Fatal("no size recap opened")
+	}
+	l.passReport(rev)
+	l.pass()
+	a := l.state().Tasks[0].Attempts[0]
+	if rs, _ := world.RunState(ctx, l.client, rev.RunID); rs != flow.RunGone || a.Review != nil || len(a.Rounds) != 0 {
+		t.Fatalf("with a recap open: reviewer %s, review %+v, rounds %+v", rs, a.Review, a.Rounds)
+	}
+}
+
+func commitFile(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "add", name)
+	gitIn(t, dir, "commit", "-m", "feat: "+name)
+	return gitIn(t, dir, "rev-parse", "HEAD")
 }
