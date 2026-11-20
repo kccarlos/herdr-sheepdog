@@ -35,6 +35,9 @@ func TestRailLeavesTheReadingToTheBrain(t *testing.T) {
 			h := newBrainHarness(t, m, func(c *Config) { c.bareAnswers = false })
 			h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 			h.block("w5:p1", "codex-approval-prompt.screen.txt")
+			if p, ok := h.pending(); ok {
+				h.playText(p.SpokenSummary)
+			}
 			h.say(tc.heard)
 			sent := len(h.sendKeysRequests()) == 1
 			if sent != tc.sent {

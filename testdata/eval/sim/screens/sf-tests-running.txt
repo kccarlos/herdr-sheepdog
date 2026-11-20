@@ -1,0 +1,16 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/shop
+
+
+❯ Verify the checkout handler changes with the full test suite.
+
+⏺ Bash(go test ./...)
+  ⎿  Running…
+
+✻ Running the full test suite… (14s · esc to interrupt)
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

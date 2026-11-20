@@ -243,6 +243,9 @@ func (s *Supervisor) TypedTurn(ctx context.Context) (TypedReply, error) {
 	tctx, tr := withTypedReasks(ctx)
 	res, acted := s.handleUtterance(tctx, c, "", false, true)
 	reply := s.finishTypedReasks(tctx, res.Spoken, tr)
+	if tctx.Err() == nil && reply != "" {
+		s.NoteReturnedText(reply)
+	}
 	if reply != "" {
 		s.pushTagged("", fmt.Sprintf("The user typed %q and the orchestrator answered in text: %q. Nothing was spoken.", c.text, reply), voice.UrgencySilent, map[string]any{"utterance_id": c.id, "answers_text": c.text})
 	}
@@ -301,7 +304,7 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 		// ablation G4); the bare-answer fast path is left for a
 		// brain-less daemon (--brain=off), where nothing else could,
 		// and for the test harness (Config.bareAnswers).
-		if res, ok := s.fastAnswer(turnCtx, c.in, text, u, daemon); ok {
+		if res, ok := s.fastAnswer(turnCtx, c.in, text); ok {
 			s.endUtterance(u)
 			return res, false
 		}
@@ -368,7 +371,6 @@ func (s *Supervisor) beginUtterance(parent context.Context, text, callID, id str
 	if u.id == "" {
 		u.id = s.nextID("utt")
 	}
-	s.noteCallUtteranceLocked(callID, u.id)
 	u.accepted = s.acceptedSeq
 	u.prev = s.utterance
 	// A second utterance while one is in flight takes the slot over: the

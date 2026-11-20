@@ -630,23 +630,29 @@ func (w *simWorld) alias(paneID string) string {
 type simPusher struct {
 	w  *simWorld
 	ch chan SimLine
+	wg sync.WaitGroup
 }
 
 func (p *simPusher) Push(text string, u voice.Urgency) error { return p.PushTagged(text, u, nil) }
 
-func (p *simPusher) PushTagged(text string, u voice.Urgency, _ map[string]any) error {
+func (p *simPusher) PushTagged(text string, u voice.Urgency, tags map[string]any) error {
 	if u == voice.UrgencySilent || strings.TrimSpace(text) == "" {
 		return nil // context for the voice model, never heard
 	}
 	line := SimLine{AtMS: p.w.since(), Who: "push", Text: strings.TrimSpace(text)}
-	select {
-	case p.ch <- line:
-	default: // a runaway: the user would not have heard 64 queued lines either
-	}
+	p.wg.Add(1)
 	go func() {
-		p.w.sup.OnVoiceEvent(voice.EventPush{Text: text, Urgency: u})
+		defer p.wg.Done()
+		p.w.sup.OnVoiceEvent(voice.EventPush{Text: text, Urgency: u, PendingID: voice.PushPendingID(tags)})
 		p.w.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: text, Final: true})
 		p.w.sup.OnVoiceEvent(voice.EventTurnComplete{})
+		if !p.w.unconfirmedPush(text) {
+			p.w.sup.OnVoiceEvent(voice.EventPlayed{Text: text, End: time.Now()})
+		}
+		select {
+		case p.ch <- line:
+		default: // a runaway: the user would not have heard 64 queued lines either
+		}
 	}()
 	return nil
 }
@@ -656,6 +662,7 @@ func (p *simPusher) HasListener() bool { return true }
 
 // drain returns the pushes that arrived so far.
 func (p *simPusher) drain() []SimLine {
+	p.wg.Wait()
 	var out []SimLine
 	for {
 		select {

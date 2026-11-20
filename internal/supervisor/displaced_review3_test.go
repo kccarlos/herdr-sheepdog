@@ -8,10 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/genai"
-
-	"github.com/kccarlos/herdr-sheepdog/internal/brain"
-	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 )
 
@@ -63,44 +59,6 @@ func TestWordsNamingTheAgentDoNotCoverItsChangedPrompt(t *testing.T) {
 	p, _ := h.pending()
 	if _, err := (brainHost{h.sup}).AnswerPrompt(context.Background(), authPane, p.YesKeys); err == nil {
 		t.Fatal("words naming auth answered its new prompt, which the user had not heard")
-	}
-}
-
-// Bench case 1, told in a reply: docs' question left the open questions
-// (its screen did not parse on one read) while auth's was the one the user
-// heard. The user asked about docs, and the orchestrator's reply stated
-// docs' prompt. send_keys then revives docs' question as a new one: it
-// was told, so words that do not name docs answer it.
-func TestReplyAboutADroppedQuestionTellsItsRevival(t *testing.T) {
-	m := braintest.NewModel()
-	h := newBrainHarness(t, m)
-	h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
-	h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
-	h.block(docsPane, "codex-approval-prompt.screen.txt")
-	dp, _ := h.pending()
-	h.block(authPane, "codex-approval-prompt.screen.txt")
-	ap, _ := h.pending()
-	if ap.PaneID != authPane {
-		t.Fatalf("pending = %+v, want auth's", ap)
-	}
-	m.Add(braintest.Step{Text: braintest.Reply(ap.SpokenSummary+" Should it go ahead?", "")})
-	h.say("What is waiting?")
-	h.clock.Advance(time.Second)
-	// One read of docs' screen does not parse: its question is dropped.
-	h.srv.SetScreen(docsPane, "loading")
-	h.sup.reconcileReprompts(context.Background())
-	if firstQuestionOf(h, docsPane) != "" {
-		t.Fatal("docs' question was not dropped")
-	}
-	h.srv.SetScreen(docsPane, fixture(t, "codex-approval-prompt.screen.txt"))
-	m.Add(braintest.Step{Text: braintest.Reply(dp.SpokenSummary+" Should it go ahead?", "")})
-	h.say("What does docs want?")
-	h.clock.Advance(time.Second)
-	m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "docs", "keys": []any{"y"}})}})
-	m.Add(braintest.Step{Text: braintest.Reply("Told docs yes.", "")})
-	h.say("Okay, that one can go ahead.")
-	if n := h.keysTo(docsPane); n != 1 {
-		t.Fatalf("keys to docs after a reply stated its question = %d, want 1 (rail_blocked %v)", n, h.log.ofType("brain.rail_blocked"))
 	}
 }
 
@@ -158,7 +116,7 @@ func TestReplyMentioningAHeldQuestionDoesNotPromoteIt(t *testing.T) {
 	}
 	w.clock.Advance(time.Second)
 	w.sup.ShepherdInput(InputTyped, "How are things going?")
-	w.sup.toldInReply("Auth is paused on printf in your muted space.")
+	w.sup.NoteReturnedText("Auth is paused on printf in your muted space.")
 	if p, _ := w.pending(); p.PaneID != docsPane {
 		t.Fatalf("pending = %+v, want docs' question the user heard", p)
 	}

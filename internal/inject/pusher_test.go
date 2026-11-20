@@ -10,7 +10,7 @@ import (
 // context (serve --heard-echo).
 func TestSkippedPusherHeard(t *testing.T) {
 	var heard []string
-	p := SkippedPusher{Heard: func(text string, _ voice.Urgency) { heard = append(heard, text) }}
+	p := SkippedPusher{Heard: func(text string, _ voice.Urgency, _ map[string]any) { heard = append(heard, text) }}
 	_ = p.Push("names line", voice.UrgencySilent)
 	_ = p.Push("Claude is done.", voice.UrgencyIdle)
 	_ = p.PushTagged("Claude asks to run go test.", voice.UrgencyInterrupt, map[string]any{"agent": "bench-claude"})

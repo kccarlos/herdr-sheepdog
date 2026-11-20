@@ -20,9 +20,11 @@ func blockedAuth(t *testing.T, h *harness) {
 	t.Helper()
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	if p, has := h.pending(); !has || p.Kind != state.PendingAnswerPrompt {
+	p, has := h.pending()
+	if !has || p.Kind != state.PendingAnswerPrompt {
 		t.Fatalf("no answer_prompt pending: %+v", p)
 	}
+	h.playText(p.SpokenSummary)
 }
 
 // (1) to_supervisor runs one utterance turn: the request carries the

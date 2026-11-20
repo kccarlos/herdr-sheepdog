@@ -71,7 +71,7 @@ func bareStop(text string) bool { return BareStopWords[BareWord(text)] }
 // pane without a model, when the one rail's reading of in, the newest
 // input, allows it (inputs.go). ok is false for anything else, which
 // goes to the orchestrator.
-func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text string, u *inflightUtterance, daemon bool) (voice.ToolResult, bool) {
+func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text string) (voice.ToolResult, bool) {
 	// The space mute of the pending question's pane is read fresh, outside
 	// s.mu (it may read herdr), as send_keys reads it: the folder index a
 	// lock-held check reads can be cold or stale.
@@ -137,22 +137,9 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 		}
 		s.railBlockedLocked(p, keys, "fast_path", reason)
 		if reason == s.displacedLocked(p, in) {
-			// displaced.go: the user hears why and is asked again, and
-			// that reply tells them the question.
 			if line := s.reaskLocked(p, in); line != "" {
-				if ctx.Err() == nil {
-					switch {
-					case daemon:
-						uttID := ""
-						if u != nil {
-							uttID = u.id
-						}
-						s.promptLineForLocked(line, p.ID, uttID)
-					case u != nil && !u.typed:
-						s.toldKeyForLocked(keyOf(p), "", u.id)
-					default:
-						s.toldKeyForLocked(keyOf(p), "", "")
-					}
+				if in.kind == InputVoice {
+					s.noteHandedLocked(p.ID)
 				}
 				s.mu.Unlock()
 				s.log.Log(logSource, "supervisor.fast_path", p.PaneID, map[string]any{"path": "asked_again", "text": text, "id": p.ID, "input": string(in.kind)})

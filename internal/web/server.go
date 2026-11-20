@@ -46,6 +46,7 @@ type Supervisor interface {
 	Settings() supervisor.Settings
 	SetSettings(supervisor.Settings) error
 	ShepherdInput(kind supervisor.InputKind, text string)
+	NoteReturnedText(text string)
 	TypedTurn(ctx context.Context) (supervisor.TypedReply, error)
 	AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error)
 	// ConversationStartedAt and ResetConversation back GET /api/state's

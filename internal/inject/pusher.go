@@ -18,11 +18,7 @@ type SkippedPusher struct {
 	Context *ctxcap.VoiceSession
 	// Heard, when set, is told of every spoken (non-silent) push, as if
 	// a voice session had spoken it (app.Options.HeardEcho).
-	Heard func(text string, u voice.Urgency)
-	// Shown, when set, is told of every spoken (non-silent) push with its
-	// tags: the panel shows it, so with no voice this is how the user is
-	// told (the supervisor's displacement rail, PushShown).
-	Shown func(text string, tags map[string]any)
+	Heard func(text string, u voice.Urgency, tags map[string]any)
 }
 
 var _ supervisor.Pusher = SkippedPusher{}
@@ -51,11 +47,8 @@ func (p SkippedPusher) PushTagged(text string, u voice.Urgency, tags map[string]
 		it.Kind, it.Label = ctxcap.VKindContext, "silent context (not sent: --voice=off)"
 	}
 	p.Context.Item(it)
-	if p.Shown != nil && u != voice.UrgencySilent && text != "" {
-		p.Shown(text, tags)
-	}
 	if p.Heard != nil && u != voice.UrgencySilent && text != "" {
-		p.Heard(text, u)
+		p.Heard(text, u, tags)
 	}
 	return nil
 }

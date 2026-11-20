@@ -72,7 +72,9 @@ type shepherdInput struct {
 	at   time.Time
 	// began is the seq of its first fragment (seq moves with each one):
 	// what the user had been told when they started (displaced.go).
-	began uint64
+	began     uint64
+	beganAt   time.Time
+	noReports bool
 	// open is a voice input still collecting transcript fragments.
 	open bool
 	// claimed is set once a to_supervisor call was accepted on it: a
@@ -161,10 +163,11 @@ func (s *Supervisor) ShepherdInput(kind InputKind, text string) {
 	if text == "" {
 		return
 	}
+	noReports := kind == InputVoice && !s.clientReportsPlayback()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closeVoiceLocked()
-	s.addInputLocked(&shepherdInput{kind: kind, text: text})
+	s.addInputLocked(&shepherdInput{kind: kind, text: text, noReports: noReports})
 }
 
 // heard records a fragment of the user's speech (voice.transcript.in):
@@ -173,6 +176,7 @@ func (s *Supervisor) ShepherdInput(kind InputKind, text string) {
 func (s *Supervisor) heard(text string, final bool) {
 	playback := s.lastPlayback() // outside s.mu: the voice session has its own lock
 	onset, onsetOK := s.lastSpeechOnset()
+	noReports := !s.clientReportsPlayback()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if text == "" {
@@ -203,7 +207,13 @@ func (s *Supervisor) heard(text string, final bool) {
 	if !onsetOK {
 		onset = time.Time{}
 	}
-	in := &shepherdInput{kind: InputVoice, text: text, open: !final, saidBefore: s.echoCandidateLocked(playback, onset)}
+	now := s.cfg.Now()
+	beganAt := now
+	prev := s.lastInputLocked()
+	if !onset.IsZero() && onset.Before(now) && now.Sub(onset) <= voice.ClientSpeechTrust && (prev == nil || (onset.After(prev.at) && onset.After(prev.beganAt))) {
+		beganAt = onset
+	}
+	in := &shepherdInput{kind: InputVoice, text: text, beganAt: beganAt, noReports: noReports, open: !final, saidBefore: s.echoCandidateLocked(playback, onset)}
 	s.addInputLocked(in)
 	s.armRelayLocked(in)
 }
@@ -302,6 +312,9 @@ func (s *Supervisor) addInputLocked(in *shepherdInput) {
 	s.inputSeq++
 	in.seq, in.at = s.inputSeq, s.cfg.Now()
 	in.began = in.seq
+	if in.beganAt.IsZero() || in.beganAt.After(in.at) {
+		in.beganAt = in.at
+	}
 	s.inputs = append(s.inputs, in)
 	s.promptCEOSpokeLocked() // buried.go
 	if len(s.inputs) > maxInputs {
@@ -331,15 +344,12 @@ func (s *Supervisor) lastInputLocked() *shepherdInput {
 // the gate, the voice relayed the words at 19.414 — refused at 20.9 as
 // its own initiative — and the push only went to the model at 21.9.
 // The instruction was lost (docs/dev/history/bench-2026-10-03.md #10).
-// pendingID is the question the push states, when the voice layer
-// carries its tag (voice.EventPush.PendingID).
-func (s *Supervisor) markPushed(text, pendingID string) {
+func (s *Supervisor) markPushed(text string) {
 	s.mu.Lock()
 	s.pushSeq = s.inputSeq
 	s.lastPush = text
 	s.recordSentLocked(text)
-	s.promptPushedLocked(text)          // buried.go
-	s.linePushedLocked(text, pendingID) // displaced.go
+	s.promptPushedLocked(text) // buried.go
 	s.mu.Unlock()
 }
 
@@ -469,14 +479,14 @@ func (s *Supervisor) railInputLocked(p state.PendingAction, keys []string) (*she
 		// answer was delivered is refused without asking the user again
 		// (displaced.go).
 		return nil, "the user's last words already answered a prompt"
-	case s.displacedLocked(p, in) != "": // displaced.go
-		return nil, s.displacedLocked(p, in)
 	case now.Sub(in.at) > s.cfg.AuthoriseWindow:
 		return nil, fmt.Sprintf("the user's last words were %d s ago, past supervisor.authorise_window_s (%d s)", int(now.Sub(in.at).Seconds()), int(s.cfg.AuthoriseWindow.Seconds()))
 	case strings.TrimSpace(in.text) == "":
 		return nil, "the user's last words were empty"
 	case negativeInput(in.text) && approves(p, keys):
 		return nil, fmt.Sprintf("the user said %q, which cannot approve %s's prompt", strings.TrimSpace(in.text), alias)
+	case s.displacedLocked(p, in) != "": // displaced.go
+		return nil, s.displacedLocked(p, in)
 	}
 	return in, ""
 }

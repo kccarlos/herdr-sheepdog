@@ -88,7 +88,7 @@ func TestMutedPromptToolSurfacesQuestionForNextAnswer(t *testing.T) {
 		t.Fatal("a yes approved a muted space's prompt the user never heard")
 	}
 	// The orchestrator's reply states it: now the user has heard it.
-	w.sup.toldInReply(qs[0].SpokenSummary + " Answer that first.")
+	w.sup.NoteReturnedText(qs[0].SpokenSummary + " Answer that first.")
 	if p, ok := w.store.Pending(); !ok || p.ID != qs[0].ID || w.sup.heldQuestion(p.ID) {
 		t.Fatalf("stated prompt not promoted: %+v %v", p, ok)
 	}

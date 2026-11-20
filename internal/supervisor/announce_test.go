@@ -486,6 +486,7 @@ func TestAnnounceLateBlockLines(t *testing.T) {
 			m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
 				<-release
 				if c.answer {
+					h.playText(h.lastPushText())
 					h.say("yes")
 				}
 				return braintest.Response(*announceReply(needs, "interrupt", "", "", c.needsUser)), nil
@@ -690,7 +691,9 @@ func TestAnnounceBlockOneLineAndStale(t *testing.T) {
 	// The question answered before the orchestrator spoke: nothing is said
 	// about a prompt that is gone.
 	m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
-		h.say("yes")
+		h.hear("yes, auth")
+		p, _ := h.pending()
+		_, _ = (brainHost{h.sup}).AnswerPrompt(context.Background(), "w5:p1", p.YesKeys)
 		return braintest.Response(*announceReply("Auth wants to write hello.txt; say yes and it will.", "interrupt", "", "", true)), nil
 	}}
 	h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking)
@@ -944,7 +947,9 @@ func TestKeptPromiseOnAStaleBlockIsLoggedDropped(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
-		h.say("yes")
+		h.hear("yes, auth")
+		pend, _ := h.pending()
+		_, _ = (brainHost{h.sup}).AnswerPrompt(context.Background(), "w5:p1", pend.YesKeys)
 		return braintest.Response(*announceReply("Auth wants to write hello.txt.", "interrupt", "", "", true)), nil
 	}}
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")

@@ -104,6 +104,9 @@ func TestTypedUtteranceIsAShepherdInput(t *testing.T) {
 	if err != nil || !strings.HasPrefix(res.Spoken, "Nothing was handed on") {
 		t.Fatalf("model-initiated relay = %+v %v", res, err)
 	}
+	if code, body := h.postJSON("/api/utterance", map[string]any{"text": "yes"}, &tr); code != http.StatusOK || !strings.Contains(tr.Spoken, "auth asks to run printf") {
+		t.Fatalf("first typed yes (re-ask) = %d %s", code, body)
+	}
 	if code, body := h.postJSON("/api/utterance", map[string]any{"text": "yes"}, &tr); code != http.StatusOK || !strings.Contains(tr.Spoken, "Told auth yes") {
 		t.Fatalf("typed yes = %d %s", code, body)
 	}
