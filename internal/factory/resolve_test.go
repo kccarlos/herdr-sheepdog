@@ -293,3 +293,19 @@ func TestPlanAmendKeepsStoredWorkerAndRequestOnlyNoWorkerNotice(t *testing.T) {
 		t.Fatalf("request-only amend messaged worker: %q", sends[sentBefore:])
 	}
 }
+
+func TestCheckTasksLaunchUnprobedCLIIsUnknown(t *testing.T) {
+	s := flow.DefaultSettings()
+	s.Models = map[string][]flow.Candidate{
+		flow.RoleWorker: {{CLI: "codex", Model: "gpt-6.2-sol", Effort: "medium"}},
+	}
+	facts := flow.ResolveFacts{CLIs: map[string]flow.CLIFacts{
+		"claude": {Installed: true, SignedIn: true},
+	}}
+	if fails := checkTasksLaunch([]flow.Task{{ID: "T1"}}, s, facts); len(fails) > 0 {
+		t.Fatalf("unprobed codex refused plan: %v", fails)
+	}
+	if _, probed := facts.CLIs["codex"]; probed {
+		t.Fatal("checkTasksLaunch mutated caller facts.CLIs")
+	}
+}

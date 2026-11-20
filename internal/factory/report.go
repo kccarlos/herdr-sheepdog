@@ -1277,6 +1277,12 @@ func checkTasksLaunch(tasks []flow.Task, s flow.Settings, facts flow.ResolveFact
 	if len(facts.CLIs) == 0 {
 		return nil
 	}
+	facts.CLIs = maps.Clone(facts.CLIs)
+	for cli := range cliProbeArgv {
+		if _, ok := facts.CLIs[cli]; !ok {
+			facts.CLIs[cli] = flow.CLIFacts{Unknown: true}
+		}
+	}
 	var fails []string
 	for _, t := range tasks {
 		f, roles := facts, []string{flow.RoleReviewer}
