@@ -386,15 +386,20 @@ func parseMisses(val string) (int, bool) {
 
 func parseReplyLines(body string) replyLines {
 	var rl replyLines
-	inTool := false
+	inTool, afterCall := false, false
 	for l := range strings.Lines(body) {
 		trimmed := strings.TrimLeft(l, " \t")
-		if strings.HasPrefix(trimmed, "⎿") || strings.HasPrefix(trimmed, "└") || strings.HasPrefix(trimmed, "│") {
-			inTool = true
+		top, blank := l == trimmed, strings.TrimSpace(l) == ""
+		// ⎿ (Claude) opens a tool block; "└ " (Codex) only under a tool call
+		// line and its wrapped or │ continuation lines. A table's "└─" never does.
+		if strings.HasPrefix(trimmed, "⎿") || (afterCall && strings.HasPrefix(trimmed, "└ ")) {
+			inTool, afterCall = true, false
 			continue
 		}
+		// Only an unindented ⏺ or • is a tool call line; one inside output is output.
+		afterCall = (top && (strings.HasPrefix(l, "⏺") || strings.HasPrefix(l, "•"))) || (afterCall && !top && !blank)
 		if inTool {
-			if strings.TrimSpace(trimmed) == "" || l == trimmed {
+			if blank || top {
 				inTool = false
 			} else {
 				continue

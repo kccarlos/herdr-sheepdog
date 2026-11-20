@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -954,5 +956,46 @@ func TestFactoryReportReadyRefusesProofsWithoutTouchedOrSkippedBeforeRunning(t *
 				t.Fatalf("posted proofs to daemon despite client refusal: %+v", *proofs)
 			}
 		})
+	}
+}
+
+// TestFactoryTemplatesNameRealCommands: every `{sheepdog} factory …` a role
+// template names in backticks is a command in the factory usage, and each of
+// its flags is in the usage's flags line (prompts.md 7).
+func TestFactoryTemplatesNameRealCommands(t *testing.T) {
+	var usage bytes.Buffer
+	printFactoryUsage(&usage)
+	lines := strings.Split(usage.String(), "\n")
+	flags := lines[slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, "flags: ") })]
+	for _, role := range []string{"coordinator", "worker", "reviewer"} {
+		raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "factory", role+".md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := 0
+		for _, span := range regexp.MustCompile("`\\{sheepdog\\} factory ([^`]+)`").FindAllStringSubmatch(string(raw), -1) {
+			found++
+			words := strings.Fields(span[1])
+			subs := []string{""}
+			if len(words) > 1 && regexp.MustCompile(`^[a-z|-]+$`).MatchString(words[1]) {
+				subs = strings.Split(words[1], "|")
+			}
+			for _, sub := range subs {
+				if !slices.ContainsFunc(lines, func(l string) bool {
+					f := strings.Fields(l)
+					return len(f) > 0 && f[0] == words[0] && (sub == "" || len(f) > 1 && (f[1] == sub || strings.Contains(f[1], "|"+sub+"|") || strings.Contains(f[1], "<"+sub+"|") || strings.Contains(f[1], "|"+sub+">")))
+				}) {
+					t.Errorf("%s names `factory %s %s`, not in the usage", role, words[0], sub)
+				}
+			}
+			for _, f := range regexp.MustCompile(`(?:^|\s)(--[a-z-]+)`).FindAllStringSubmatch(span[1], -1) {
+				if !strings.Contains(flags, f[1]+" ") && !strings.Contains(flags, f[1]+",") && !strings.HasSuffix(flags, f[1]) {
+					t.Errorf("%s names flag %s, not in the usage", role, f[1])
+				}
+			}
+		}
+		if found == 0 && role != "reviewer" {
+			t.Errorf("%s: no `{sheepdog} factory` command found; the check reads nothing", role)
+		}
 	}
 }

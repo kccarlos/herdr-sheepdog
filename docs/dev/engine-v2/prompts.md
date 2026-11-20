@@ -166,6 +166,13 @@ The full texts stay where they live (`reference_repo/ponytail`, the pstack skill
 
 Each is embedded Markdown. `{…}` is filled by the engine from records, never by another agent. The bracket at the end of a line is its source and is stripped before the agent sees it.
 
+The templates in use are `internal/factory/coordinator.md`, `worker.md` and `reviewer.md` (slice 3.5): these drafts, one rule per line, without the lines that name commands of later slices (`ask`, `answer`, `report ask`, `override`, `show`). Where the drafts and the code differ, the code wins:
+
+- A worker that needs a choice, or whose check already passes before it writes anything, reports `report ready --nothing-to-change --why` with the question or the passing output; the coordinator answers with `send-back` or `close` (until `report ask` exists).
+- The reviewer runs in the task's worktree, not a scratch copy (design.md O10), one plain command per check, and a verdict from a changed worktree is thrown away. `minor:` lines are allowed beside `major:`.
+- Only the placeholders the engine fills are used: `{folder} {goal} {sheepdog}`; `{id} {title} {brief} {not_doing} {outcomes} {ready_cmd} {worktree} {branch}`; `{proofs} {rejections} {diff} {kind} {head} {round} {code}`. There is no `{facts}` yet: the coordinator's facts arrive with each wake.
+- The rule "a rejected finding comes back only with a run" and the empty-`skipped` major are written by the engine beside their facts, so the reviewer template does not repeat them. The design note and milestone fields of 3.3 do not exist yet; the coordinator quotes the owner in each brief.
+
 ### 5.1 Coordinator
 
 ```text
@@ -240,7 +247,7 @@ Your one question for every task: should this exist, and at this size? [Ponytail
 {plan} {design_note} {repo_facts}
 End with your findings, one per line: `finding: <task> delete|shrink|merge|split|design-first <why>`;
 then only this tag, with "findings" equal to your `finding:` lines:
-<report>{"code":"{nonce}","verdict":"pass|changes","findings":0}</report>
+<report>{"code":"{code}","verdict":"pass|changes","findings":0}</report>
 ```
 
 ### 5.3 Worker
@@ -318,11 +325,11 @@ You did not write it, and you are not here to approve it.
   go with no loss? "None" is an answer. [agent-delivery]
 - No praise, no summary of the diff. Write your notes to a file as you go if you can. [old template]
 
-{brief} {not_doing} {diff_range} {earlier_rounds} {rejections} {proofs}
+{brief} {outcomes} {diff} {rejections} {proofs}
 End with your findings, one per line starting `major:` or `minor:`, each with its file, line and run;
 then lines starting `self-check misses:`, `class:`, `deletable:` and `not run:`; then only this tag,
 with "majors" equal to your `major:` lines:
-<report>{"code":"{nonce}","round":{round},"head":"{head}","verdict":"pass|changes","majors":0}</report>
+<report>{"code":"{code}","round":{round},"head":"{head}","verdict":"pass|changes","majors":0}</report>
 ```
 
 ### 5.5 Retro
