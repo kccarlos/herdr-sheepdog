@@ -147,7 +147,7 @@ Rules compare ages ("the reviewer started more than `review_minutes` ago") again
 | Plan: `id, title, kind, milestone, after[], priority, for_whom, if_skipped, smallest, not_doing, estimate_lines, outcomes[], brief, boards[], request{role → candidates}` | task | `plan apply`, `plan amend` |
 | Marks: `parked`, `dropped{why}`, `split{children}`, `closed{why}`, `done{merged commit}` | task | coordinator commands; the loop (done) |
 | `retros[]`, `recaps[]`, `split_from` | task: survive a new attempt | reports; the loop |
-| `attempts[]`; each: `branch, worktree, pr`, `ready[]`, `rejects[]`, `evidence[]`, `rounds[]`, `overrides[]`, `accepts[]`, `size_cap`, `acts[]`, `last_pr` | attempt | reports; executor results; observers |
+| `attempts[]`; each: `branch, worktree, pr`, `ready[]`, `rejects[]`, `evidence[]`, `rounds[]`, `overrides[]`, `accepts[]`, `size_cap`, `acts[]` | attempt | reports; executor results; observers |
 
 - `ready{head, proofs[outcome → command, exit, output_path, or artifact], touched, skipped}`: the worker said "done" at this commit. The report client runs each proof command in the worktree itself and stores the exit code and the output; a proof that exits non-zero refuses the report.
 - `reject{head, round, why}`: the worker rejected every finding of a reviewer's round with a reason and made no new commit. The ladder then asks for another review (L10). A reject is not a round.
@@ -158,9 +158,8 @@ Rules compare ages ("the reviewer started more than `review_minutes` ago") again
 - `accept{head, by: bar|override, rounds, check runs, evidence, waived, owner proof}`. An accept by the bar is written at `H` in the same step as the merge. An accept by the owner's override is written at the commit the override card named.
 - `recap{trigger, allowed[], decided{choice, why}}`.
 - `acts[]` is the engine's own ledger: each thing it did or tried, with a key and a result. "Told the worker about failing run 812", "re-run asked for commit 3f9c", "nudged at turn 14", "start of run r7 failed: timeout". Rules read it to do a thing once, to count tries, and to back off.
-- `last_pr` is the latest PR snapshot, kept so a restart starts from the last known facts. It is an observation with a time, never edited.
-- `last_pr`, the latest PR snapshot, is not stored either: the loop keeps it in memory per attempt and reads GitHub again after a restart.
-- `last_tip`, the latest worktree reading (the changed lines, and whether the tip is ahead of `H` by merges of the base only), is not stored: the loop keeps it in memory per worktree, keyed by the tip and `H`, so git is read again only when one of them moves. A restart reads it again.
+- `last_pr`, the latest PR snapshot, is not stored: the loop keeps it in memory per attempt and reads GitHub again after a restart.
+- `last_tip`, the latest worktree reading (the changed lines, and whether the tip is ahead of `H` by merges of the base only), is not stored: the loop keeps it in memory per worktree, keyed by the tip and `H`, so git is read again only when one of them moves. A restart reads it again. A read that times out counts as over `size_cap`, so a huge commit cannot slip past N12 (owner decision at review point 2).
 
 A project's id is written into the repo's own git config at start, so renaming or moving the folder does not orphan its tasks.
 
