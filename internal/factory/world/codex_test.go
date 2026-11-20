@@ -16,7 +16,7 @@ import (
 // TestCodexArgvGolden pins the Codex reviewer's launch flags found live in
 // PR D3's step 0: no folder-trust or hooks prompt, read-only, never asks.
 func TestCodexArgvGolden(t *testing.T) {
-	got := CodexArgv("gpt-6.2-sol", `/tmp/wt "x"`)
+	got := CodexArgv("gpt-6.2-sol", "medium", `/tmp/wt "x"`)
 	want := []string{"codex", "--no-daemon", "--no-alt-screen", "-m", "gpt-6.2-sol", "-s", "read-only", "-a", "never",
 		"-c", `projects={"/tmp/wt \"x\""={trust_level="trusted"}}`,
 		"-c", "features.hooks=false", "-c", "check_for_update_on_startup=false",
@@ -24,16 +24,19 @@ func TestCodexArgvGolden(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("CodexArgv =\n%q\nwant\n%q", got, want)
 	}
-	if CodexArgv("", "/tmp") != nil || CodexArgv("m", " ") != nil {
-		t.Fatal("CodexArgv without model or cwd should be nil")
+	if CodexArgv("", "medium", "/tmp") != nil || CodexArgv("m", "", "/tmp") != nil || CodexArgv("m", "medium", " ") != nil {
+		t.Fatal("CodexArgv without model, effort or cwd should be nil")
 	}
 	real := t.TempDir()
 	link := filepath.Join(t.TempDir(), "link")
 	if err := os.Symlink(real, link); err != nil {
 		t.Fatal(err)
 	}
-	if r, _ := filepath.EvalSymlinks(real); CodexArgv("m", link)[10] != `projects={"`+r+`"={trust_level="trusted"}}` {
-		t.Fatalf("trust key not resolved: %q", CodexArgv("m", link)[10])
+	if r, _ := filepath.EvalSymlinks(real); CodexArgv("m", "high", link)[10] != `projects={"`+r+`"={trust_level="trusted"}}` {
+		t.Fatalf("trust key not resolved: %q", CodexArgv("m", "high", link)[10])
+	}
+	if got := CodexArgv("m", "high", "/tmp"); got[len(got)-1] != `model_reasoning_effort="high"` {
+		t.Fatalf("effort arg = %q", got[len(got)-1])
 	}
 	if slices.Contains(got, "--dangerously-bypass-hook-trust") || isClaudeArgv(got) {
 		t.Fatal("CodexArgv must not bypass hook trust or look like Claude")

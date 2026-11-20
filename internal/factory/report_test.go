@@ -388,8 +388,13 @@ func TestVerdictAcceptance(t *testing.T) {
 		{"pass with majors", world.ReportRead{Status: world.ReportFound, Raw: "pm", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 1}}},
 		{"changes with 0 majors", world.ReportRead{Status: world.ReportFound, Raw: "cm", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "changes", Majors: 0}}},
 		{"unknown verdict word", world.ReportRead{Status: world.ReportFound, Raw: "uv", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass|changes", Majors: 0}}},
-		{"pass with a major line", world.ReportRead{Status: world.ReportFound, Raw: "pl", Body: "major: nil deref\nminor: naming", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 0}}},
-		{"majors above the major lines", world.ReportRead{Status: world.ReportFound, Raw: "ml", Body: "  major: nil deref\n  minor: naming", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "changes", Majors: 2}}},
+		{"pass with a major line", world.ReportRead{Status: world.ReportFound, Raw: "pl", Body: "major: nil deref\nminor: naming\nself-check misses: 0\ndeletable: none", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 0}}},
+		{"majors above the major lines", world.ReportRead{Status: world.ReportFound, Raw: "ml", Body: "  major: nil deref\n  minor: naming\nself-check misses: 0\ndeletable: none", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "changes", Majors: 2}}},
+		{"missing self-check misses", world.ReportRead{Status: world.ReportFound, Raw: "nm", Body: "deletable: none", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 0}}},
+		{"non-integer self-check misses", world.ReportRead{Status: world.ReportFound, Raw: "bm", Body: "self-check misses: none\ndeletable: none", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 0}}},
+		{"negative self-check misses", world.ReportRead{Status: world.ReportFound, Raw: "negm", Body: "self-check misses: -1\ndeletable: none", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 0}}},
+		{"missing deletable", world.ReportRead{Status: world.ReportFound, Raw: "nd", Body: "self-check misses: 0", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 0}}},
+		{"empty deletable", world.ReportRead{Status: world.ReportFound, Raw: "ed", Body: "self-check misses: 0\ndeletable:   ", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 0}}},
 	}
 	for _, tc := range badCases {
 		logBuf.Reset()
@@ -412,11 +417,15 @@ func TestVerdictAcceptance(t *testing.T) {
 		}
 	}
 
-	// Valid changes verdict records round{n:1, kind:"full", ...}, writes T1-r1.md, and stops t-rev.
+	// Valid changes verdict records round{n:1, kind:"full", ...}, reply lines
+	// (cleaned and capped at 500), writes T1-r1.md, logs self-check misses, and stops t-rev.
+	longDel := strings.Repeat("x", 600)
 	good := world.ReportRead{
 		Status: world.ReportFound,
 		Raw:    `{"code":"nonce123","round":1,"head":"c1","verdict":"changes","majors":4}`,
-		Body:   "- major: nil deref in Parse\n**major:** missing error check\n1. major: no test\n  * major: race\nDetailed review notes line 42.",
+		Body: "- major: nil deref in Parse\n**major:** missing error check\n1. major: no test\n  * major: race\n" +
+			"• **self-check misses:** 2\n- class: missing\t\x00guards\n1. deletable: " + longDel + "\n  * not run: live e2e\n" +
+			"Detailed review notes line 42.",
 		Report: world.Report{
 			Code: "nonce123", Round: 1, Head: "c1", Verdict: "changes", Majors: 4,
 		},
@@ -431,8 +440,13 @@ func TestVerdictAcceptance(t *testing.T) {
 	wantPath := paths.Report(projID, "T1", 1)
 	r1 := att.Rounds[0]
 	if r1.N != 1 || r1.Kind != "full" || r1.Head != "c1" || r1.Verdict != "changes" || r1.Majors != 4 ||
-		r1.Reviewer != (flow.Reviewer{CLI: "claude", Model: "opus", Effort: "medium"}) || r1.ReportPath != wantPath {
+		r1.Reviewer != (flow.Reviewer{CLI: "claude", Model: "opus", Effort: "medium"}) || r1.ReportPath != wantPath ||
+		r1.SelfCheckMisses == nil || *r1.SelfCheckMisses != 2 || r1.Class != "missing guards" ||
+		len(r1.Deletable) != maxRejectWhyRunes || r1.NotRun != "live e2e" {
 		t.Fatalf("round 1 record = %+v", r1)
+	}
+	if logRaw, _ := os.ReadFile(paths.Log(projID)); !strings.Contains(string(logRaw), "2 self-check miss(es)") {
+		t.Fatalf("verdict log line missing self-check misses:\n%s", logRaw)
 	}
 	reportBytes, err := os.ReadFile(wantPath)
 	if err != nil {

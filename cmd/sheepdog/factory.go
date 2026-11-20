@@ -150,8 +150,9 @@ func runFactoryLog(ctx context.Context, args []string, stdout, stderr io.Writer)
 	}
 	cfg, err := config.Load(*configPath)
 	var lines []factory.LogLine
+	var summary string
 	if err == nil {
-		lines, err = factory.ProjectLog(ctx, factory.Paths{DataDir: cfg.DataDir}, folder, *n)
+		lines, summary, err = factory.ProjectLog(ctx, factory.Paths{DataDir: cfg.DataDir}, folder, *n)
 	}
 	if err != nil {
 		fprintf(stderr, "sheepdog factory log: %v\n", err)
@@ -160,6 +161,9 @@ func runFactoryLog(ctx context.Context, args []string, stdout, stderr io.Writer)
 	for _, l := range lines {
 		l.At = l.At.Local()
 		fprintln(stdout, factory.FormatLogLine(l))
+	}
+	if summary != "" {
+		fprintln(stdout, summary)
 	}
 	return 0
 }

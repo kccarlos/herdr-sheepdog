@@ -262,14 +262,40 @@ type Reviewer struct {
 
 // Round is one review round (kind: full, delta, retro or send_back).
 type Round struct {
-	N          int      `json:"n"`
-	Kind       string   `json:"kind"`
-	Head       string   `json:"head"`
-	Reviewer   Reviewer `json:"reviewer"`
-	Verdict    string   `json:"verdict"`
-	Majors     int      `json:"majors"`
-	ReportPath string   `json:"report_path"`
-	Why        string   `json:"why,omitempty"` // a send-back's reason
+	N               int      `json:"n"`
+	Kind            string   `json:"kind"`
+	Head            string   `json:"head"`
+	Reviewer        Reviewer `json:"reviewer"`
+	Verdict         string   `json:"verdict"`
+	Majors          int      `json:"majors"`
+	SelfCheckMisses *int     `json:"self_check_misses,omitempty"`
+	Class           string   `json:"class,omitempty"`
+	Deletable       string   `json:"deletable,omitempty"`
+	NotRun          string   `json:"not_run,omitempty"`
+	ReportPath      string   `json:"report_path"`
+	Why             string   `json:"why,omitempty"` // a send-back's reason
+}
+
+// FirstLookPassRate returns how many tasks passed their first reviewed round
+// and how many tasks have at least one reviewed round (design.md 11.2,
+// prompts.md 1.2). Coordinator send-backs are not reviewed rounds.
+func FirstLookPassRate(tasks []Task) (passed, reviewed int) {
+	for _, t := range tasks {
+	attempts:
+		for _, a := range t.Attempts {
+			for _, r := range a.Rounds {
+				if !isReviewerRound(r) {
+					continue
+				}
+				reviewed++
+				if r.Verdict == VerdictPass {
+					passed++
+				}
+				break attempts
+			}
+		}
+	}
+	return passed, reviewed
 }
 
 // Accept records that the bar (or an override) accepted a commit.

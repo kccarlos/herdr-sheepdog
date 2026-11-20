@@ -1014,7 +1014,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	}
 
 	// Reviewer 1 writes valid changes verdict with code1 -> round 1 recorded, rev1 stopped.
-	srv.SetScreen(rev1Term, "❯ prompt\n\n⏺ major: Greet(\"\") returns \"hello, \"\n<report>{\"code\":\""+code1+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":1}</report>\n")
+	srv.SetScreen(rev1Term, "❯ prompt\n\n⏺ major: Greet(\"\") returns \"hello, \"\nself-check misses: 1\ndeletable: none\n<report>{\"code\":\""+code1+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":1}</report>\n")
 	eng.passProject(ctx, id, false) // accepts verdict & stops rev1
 	st, _ = LoadState(paths.State(id))
 	att := st.Tasks[0].Attempts[0]
@@ -1080,7 +1080,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	rev2Term, code2 := rev2.RunID, rev2.Code
 
 	// Round 2 passes at c2 -> even with green CI, 1 pass does NOT merge (L8 asks round 3).
-	srv.SetScreen(rev2Term, "❯ prompt\n\n⏺ Clean fix.\n<report>{\"code\":\""+code2+"\",\"round\":2,\"head\":\""+c2+"\",\"verdict\":\"pass\",\"majors\":0,\"findings\":[]}</report>\n")
+	srv.SetScreen(rev2Term, "❯ prompt\n\n⏺ Clean fix.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+code2+"\",\"round\":2,\"head\":\""+c2+"\",\"verdict\":\"pass\",\"majors\":0,\"findings\":[]}</report>\n")
 	srv.SetStatus(rev2Term, &hc.Status{App: "claude-code", State: "done"})
 	eng.passProject(ctx, id, false) // accepts round 2 pass verdict & stops rev2
 	if rs, err := world.RunState(ctx, client, rev2Term); err != nil || rs != flow.RunGone {
@@ -1107,7 +1107,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 
 	// Round 3 passes -> N36 while CI pending -> N42 when CI green, recording rounds [2, 3].
 	writePRJSON(t, gh, "view.json", c2, `[{"__typename":"CheckRun","name":"ci","status":"IN_PROGRESS","conclusion":""}]`)
-	srv.SetScreen(rev3Term, "❯ prompt\n\n⏺ Confirmed.\n<report>{\"code\":\""+code3+"\",\"round\":3,\"head\":\""+c2+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
+	srv.SetScreen(rev3Term, "❯ prompt\n\n⏺ Confirmed.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+code3+"\",\"round\":3,\"head\":\""+c2+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
 	srv.SetStatus(rev3Term, &hc.Status{App: "claude-code", State: "done"})
 	eng.passProject(ctx, id, false) // accepts round 3 pass & stops rev3
 	eng.passProject(ctx, id, false) // CI pending -> N36
@@ -1216,7 +1216,7 @@ func testVoidReview(t *testing.T, dirty bool) {
 		if err := os.WriteFile(filepath.Join(wt, "x.out"), []byte("built\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		srv.SetScreen(rev.RunID, "❯ prompt\n\n⏺ Fine.\n<report>{\"code\":\""+rev.Code+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
+		srv.SetScreen(rev.RunID, "❯ prompt\n\n⏺ Fine.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rev.Code+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
 		srv.SetStatus(rev.RunID, &hc.Status{App: "claude-code", State: "done"})
 	} else {
 		// Worker commits c2 before reporting ready -> tip is ahead of H.
@@ -1322,7 +1322,7 @@ func TestEngineRebaseAfterReviewedCommitFallsBackToFull(t *testing.T) {
 	eng.passProject(ctx, id, false) // N29 round 1
 	st, _ = LoadState(paths.State(id))
 	rev1 := st.Tasks[0].Attempts[0].Review
-	srv.SetScreen(rev1.RunID, "❯ prompt\n\n⏺ major: V should be 2\n<report>{\"code\":\""+rev1.Code+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":1}</report>\n")
+	srv.SetScreen(rev1.RunID, "❯ prompt\n\n⏺ major: V should be 2\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rev1.Code+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":1}</report>\n")
 	srv.SetStatus(rev1.RunID, &hc.Status{App: "claude-code", State: "done"})
 	eng.passProject(ctx, id, false) // records round 1 changes at c1
 	eng.passProject(ctx, id, false) // N22 tells worker findings
@@ -1543,7 +1543,7 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 
 	st, _ = LoadState(paths.State(id))
 	rev1 := st.Tasks[0].Attempts[0].Review
-	srv.SetScreen(rev1.RunID, "❯ prompt\n\n⏺ major: missing unit test for Version\n<report>{\"code\":\""+rev1.Code+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":1}</report>\n")
+	srv.SetScreen(rev1.RunID, "❯ prompt\n\n⏺ major: missing unit test for Version\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rev1.Code+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":1}</report>\n")
 	srv.SetStatus(rev1.RunID, &hc.Status{App: "claude-code", State: "done"})
 	eng.passProject(ctx, id, false) // accepts round 1 changes
 	eng.passProject(ctx, id, false) // N22 tells worker findings
@@ -1583,7 +1583,7 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 	}
 
 	// Round 2 passes -> L8 holds (no merge after 1 pass) -> starts round 3 at c1 -> round 3 passes -> N42 merges.
-	srv.SetScreen(rev2.RunID, "❯ prompt\n\n⏺ Rejection verified against brief.\n<report>{\"code\":\""+rev2.Code+"\",\"round\":2,\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
+	srv.SetScreen(rev2.RunID, "❯ prompt\n\n⏺ Rejection verified against brief.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rev2.Code+"\",\"round\":2,\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
 	srv.SetStatus(rev2.RunID, &hc.Status{App: "claude-code", State: "done"})
 	eng.passProject(ctx, id, false) // accepts round 2 pass
 	if m := ghCalls(t, gh, "pr merge"); len(m) != 0 {
@@ -1599,7 +1599,7 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 	if strings.Contains(p3, why) || strings.Contains(p3, "Rejected findings") {
 		t.Errorf("round 3 prompt after passing round 2 still carries round-1 reject:\n%s", p3)
 	}
-	srv.SetScreen(rev3.RunID, "❯ prompt\n\n⏺ Confirmed.\n<report>{\"code\":\""+rev3.Code+"\",\"round\":3,\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
+	srv.SetScreen(rev3.RunID, "❯ prompt\n\n⏺ Confirmed.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rev3.Code+"\",\"round\":3,\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
 	srv.SetStatus(rev3.RunID, &hc.Status{App: "claude-code", State: "done"})
 	eng.passProject(ctx, id, false) // accepts round 3 pass
 	eng.passProject(ctx, id, false) // L9 -> N42 accepts rounds [2, 3] and merges

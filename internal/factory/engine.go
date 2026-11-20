@@ -699,9 +699,10 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 			env = map[string]string{"CODEX_HOME": home}
 		}
 	}
-	argv := world.ClaudeArgv(flow.RoleReviewer, model, "medium", "dontAsk")
+	effort := cmp.Or(a.Review.Reviewer.Effort, "medium")
+	argv := world.ClaudeArgv(flow.RoleReviewer, model, effort, "dontAsk")
 	if env != nil {
-		argv = world.CodexArgv(model, a.Worktree)
+		argv = world.CodexArgv(model, effort, a.Worktree)
 	}
 	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
 		"{outcomes}", bullets(t.Outcomes), "{proofs}", proofPrompt(*a, h), "{rejections}", e.rejectionPrompt(id, t.ID, *a, h), "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code).Replace(reviewerTemplate))
