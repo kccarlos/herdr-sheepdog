@@ -57,6 +57,11 @@ type Task struct {
 	Brief    string   `json:"brief"`
 	Outcomes []string `json:"outcomes"`
 	After    []string `json:"after,omitempty"`
+	// Scope fields of design.md 3, 11.7 (prompts.md 3.1).
+	ForWhom   string `json:"for_whom,omitempty"`
+	IfSkipped string `json:"if_skipped,omitempty"`
+	Smallest  string `json:"smallest,omitempty"`
+	NotDoing  string `json:"not_doing,omitempty"`
 	// EstimateLines is the plan's estimate of changed lines (design.md 11.5).
 	EstimateLines int       `json:"estimate_lines"`
 	SplitFrom     string    `json:"split_from,omitempty"`

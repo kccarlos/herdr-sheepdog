@@ -92,8 +92,11 @@ type Facts struct {
 	TipMergeOnly bool `json:"tip_merge_only,omitempty"`
 	// Lines is the changed lines (added + removed) at the tip against the
 	// merge base, read from git every pass (N12).
-	Lines  int `json:"lines"`
-	Worker Run `json:"worker"`
+	Lines int `json:"lines"`
+	// LinesTimeout: reading changed lines timed out; N12 counts it as over
+	// size_cap (design.md 3, last_tip).
+	LinesTimeout bool `json:"lines_timeout,omitempty"`
+	Worker       Run  `json:"worker"`
 	// Reviewer is the run for the round the ladder asks for at H, not an
 	// earlier round's (that one was stopped when its verdict came in).
 	Reviewer Run `json:"reviewer"`

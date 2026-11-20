@@ -192,7 +192,7 @@ func TestAmendBriefReviewsSameHeadAgain(t *testing.T) {
 		t.Fatal("refusals changed state")
 	}
 
-	l.report("tok-coord", "plan amend", `{"why":"retitle","tasks":[{"id":"T1","estimate_lines":50,"title":"feat: y"},{"id":"T2","estimate_lines":50,"title":"feat: new","after":["T1"]}]}`, "")
+	l.report("tok-coord", "plan amend", `{"why":"retitle","tasks":[{"id":"T1","estimate_lines":50,"title":"feat: y"},{"id":"T2","estimate_lines":50,"title":"feat: new",`+testScopeJSON+`,"after":["T1"]}]}`, "")
 	st := l.state()
 	if st.Tasks[0].Title != "feat: y" || st.Tasks[0].Attempts[0].Boundary != 0 || len(st.Tasks) != 3 || st.Tasks[2].ID != "T2" {
 		t.Fatalf("after title amend: %+v", st.Tasks)
@@ -323,7 +323,7 @@ func TestWhysCleanedAndCapped(t *testing.T) {
 	if r := l.state().Tasks[0].Attempts[0].Rounds[2]; r.Why != "add a test" {
 		t.Fatalf("send-back why = %q, want cleaned", r.Why)
 	}
-	l.report("tok-coord", "plan amend", `{"why":"w\u001b[2J","tasks":[{"id":"T1","estimate_lines":50,"title":"feat:\ny"},{"id":"T2","estimate_lines":50,"title":"feat:\u0007 z"}]}`, "")
+	l.report("tok-coord", "plan amend", `{"why":"w\u001b[2J","tasks":[{"id":"T1","estimate_lines":50,"title":"feat:\ny"},{"id":"T2","estimate_lines":50,"title":"feat:\u0007 z",`+testScopeJSON+`}]}`, "")
 	if st := l.state(); st.Tasks[0].Title != "feat: y" || st.Tasks[1].Title != "feat: z" {
 		t.Fatalf("titles = %q, %q, want cleaned", st.Tasks[0].Title, st.Tasks[1].Title)
 	}

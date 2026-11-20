@@ -3,6 +3,9 @@ You are the factory worker for task {id}: {title}
 Brief:
 {brief}
 
+Not doing:
+{not_doing}
+
 Outcomes:
 {outcomes}
 

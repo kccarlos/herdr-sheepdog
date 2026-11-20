@@ -17,6 +17,8 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
+const testScopeJSON = `"for_whom":"users","if_skipped":"broken","smallest":"minimal","not_doing":"extras"`
+
 // TestRunTokenInEnvNotArgvOrLog: the coordinator's token reaches it only
 // through the run's environment; argv, log.jsonl and the daemon log never
 // carry it (design.md 7.2).
@@ -62,7 +64,7 @@ func TestRunTokenInEnvNotArgvOrLog(t *testing.T) {
 	if got.Argv != nil {
 		t.Fatalf("the live coordinator was launched again: %v", got.Argv)
 	}
-	if err := eng.Report(tok, "plan apply", json.RawMessage(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: x"}]}`)); err != nil {
+	if err := eng.Report(tok, "plan apply", json.RawMessage(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: x",`+testScopeJSON+`}]}`)); err != nil {
 		t.Fatalf("adopted run's token: %v", err)
 	}
 
@@ -117,7 +119,7 @@ func TestReportAcceptance(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	plan := json.RawMessage(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: add a greeting helper","brief":"b","outcomes":["go test passes"],"after":[]}]}`)
+	plan := json.RawMessage(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: add a greeting helper","brief":"b",` + testScopeJSON + `,"outcomes":["go test passes"],"after":[]}]}`)
 	bad := json.RawMessage(`{"tasks":[{"id":"A","estimate_lines":50,"title":"a","after":["B"],"estimate":5},{"id":"B","estimate_lines":50,"title":"b","after":["A"]},{"id":"C","estimate_lines":50,"title":" ","after":["Z"]}]}`)
 
 	for _, c := range []struct {
@@ -180,16 +182,16 @@ func TestPlanShape(t *testing.T) {
 		name, plan string
 		want       []string // nil: the plan passes
 	}{
-		{"duplicate id", `{"tasks":[{"id":"A","estimate_lines":50,"title":"a"},{"id":"A","estimate_lines":50,"title":"b"}]}`, []string{"task 2 needs an id"}},
-		{"empty id is not an id", `{"tasks":[{"id":"","estimate_lines":50,"title":"a"},{"id":"B","estimate_lines":50,"title":"b","after":[""]}]}`,
+		{"duplicate id", `{"tasks":[{"id":"A","estimate_lines":50,"title":"feat: a",` + testScopeJSON + `},{"id":"A","estimate_lines":50,"title":"feat: b",` + testScopeJSON + `}]}`, []string{"task 2 needs an id"}},
+		{"empty id is not an id", `{"tasks":[{"id":"","estimate_lines":50,"title":"feat: a",` + testScopeJSON + `},{"id":"B","estimate_lines":50,"title":"feat: b",` + testScopeJSON + `,"after":[""]}]}`,
 			[]string{"task 1 needs an id", `"B" is after "", which is not in the plan`}},
-		{"whitespace id", `{"tasks":[{"id":"  ","estimate_lines":50,"title":"a"}]}`, []string{"task 1 needs an id"}},
+		{"whitespace id", `{"tasks":[{"id":"  ","estimate_lines":50,"title":"feat: a",` + testScopeJSON + `}]}`, []string{"task 1 needs an id"}},
 		{"empty plan", `{"tasks":[]}`, []string{"the plan has no tasks"}},
 		{"no tasks key", `{}`, []string{"the plan has no tasks"}},
-		{"self after", `{"tasks":[{"id":"A","estimate_lines":50,"title":"a","after":["A"]}]}`, []string{`cycle through "A"`}},
+		{"self after", `{"tasks":[{"id":"A","estimate_lines":50,"title":"feat: a",` + testScopeJSON + `,"after":["A"]}]}`, []string{`cycle through "A"`}},
 		{"tasks of the wrong type", `{"tasks":"A"}`, []string{"cannot unmarshal"}},
-		{"ids are trimmed", `{"tasks":[{"id":" A ","estimate_lines":50,"title":"a"},{"id":"B","estimate_lines":50,"title":"b","after":[" A"]}]}`, nil},
-		{"valid DAG", `{"tasks":[{"id":"A","estimate_lines":50,"title":"a"},{"id":"B","estimate_lines":50,"title":"b","after":["A"]},{"id":"C","estimate_lines":50,"title":"c","after":["A"]},{"id":"D","estimate_lines":50,"title":"d","after":["B","C"]}]}`, nil},
+		{"ids are trimmed", `{"tasks":[{"id":" A ","estimate_lines":50,"title":"feat: a",` + testScopeJSON + `},{"id":"B","estimate_lines":50,"title":"feat: b",` + testScopeJSON + `,"after":[" A"]}]}`, nil},
+		{"valid DAG", `{"tasks":[{"id":"A","estimate_lines":50,"title":"feat: a",` + testScopeJSON + `},{"id":"B","estimate_lines":50,"title":"feat: b",` + testScopeJSON + `,"after":["A"]},{"id":"C","estimate_lines":50,"title":"feat: c",` + testScopeJSON + `,"after":["A"]},{"id":"D","estimate_lines":50,"title":"feat: d",` + testScopeJSON + `,"after":["B","C"]}]}`, nil},
 	} {
 		tasks, fails := checkPlan(json.RawMessage(c.plan), flow.DefaultSettings().TaskSizeLimit)
 		got := strings.Join(fails, "; ")
@@ -807,7 +809,7 @@ func TestRecapDecideAcceptance(t *testing.T) {
 	}
 
 	// Valid split: parent marked split, children added with split_from, dependants moved.
-	splitBody := `{"task":"T1","choice":"split","why":"two independent parts","children":[{"id":"T1a","estimate_lines":50,"title":"feat: part a","brief":"a","outcomes":["test a"],"after":["T0"]},{"id":"T1b","estimate_lines":50,"title":"feat: part b","brief":"b","outcomes":["test b"],"after":["T1a"]}]}`
+	splitBody := `{"task":"T1","choice":"split","why":"two independent parts","children":[{"id":"T1a","estimate_lines":50,"title":"feat: part a","brief":"a",` + testScopeJSON + `,"outcomes":["test a"],"after":["T0"]},{"id":"T1b","estimate_lines":50,"title":"feat: part b","brief":"b",` + testScopeJSON + `,"outcomes":["test b"],"after":["T1a"]}]}`
 	if err := eng.Report("tok-coord", "recap decide", json.RawMessage(splitBody)); err != nil {
 		t.Fatalf("valid split: %v", err)
 	}
@@ -883,4 +885,115 @@ func TestRecapDecideRefusesEndedTaskAndCleansWhy(t *testing.T) {
 	if got := st.Tasks[0].Dropped.Why; got != "a b [31m c" {
 		t.Fatalf("why = %q, want control characters cleaned", got)
 	}
+}
+
+// TestPlanScopeAndTitle checks KB-PLN-4 and design.md 11.7: for_whom,
+// if_skipped, smallest and not_doing are required on plan apply, tasks added
+// by plan amend, and split children, naming every missing field of every task
+// in one plan_invalid refusal with nothing changed; titles must be
+// Conventional Commit subjects everywhere.
+func TestPlanScopeAndTitle(t *testing.T) {
+	paths := testPaths(t)
+	eng := New(paths, nil)
+	const id = "proj-scope"
+	st := flow.State{
+		Seq:      1,
+		Project:  flow.Project{ID: id, Started: true, RunTokenHash: tokenHash("tok-coord")},
+		Settings: flow.DefaultSettings(),
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	// plan apply: missing scope fields across two tasks named in one refusal; nothing changes.
+	missingScope := `{"tasks":[` +
+		`{"id":"A","title":"feat: a","estimate_lines":40,"if_skipped":"x","not_doing":"y"},` +
+		`{"id":"B","title":"fix(cli): b","estimate_lines":40,"for_whom":"u","if_skipped":" \n\t ","smallest":"s","not_doing":"\u0007"}` +
+		`]}`
+	err := eng.Report("tok-coord", "plan apply", json.RawMessage(missingScope))
+	if refusalCode(err) != "plan_invalid" {
+		t.Fatalf("missing scope apply = %v, want plan_invalid", err)
+	}
+	for _, want := range []string{`task "A" needs for_whom`, `task "A" needs smallest`, `task "B" needs if_skipped`, `task "B" needs not_doing`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q missing %q", err, want)
+		}
+	}
+	if got, _ := LoadState(paths.State(id)); got.Seq != 1 || len(got.Tasks) != 0 {
+		t.Fatalf("refused apply mutated state: seq=%d tasks=%d", got.Seq, len(got.Tasks))
+	}
+
+	// Title check: all 11 Conventional Commit types pass; non-conforming subjects fail.
+	for _, okTitle := range []string{
+		"feat: add x", "fix(web): handle nil", "docs(engine-v2/design): clarify",
+		"refactor!: drop legacy", "test(flow): cover N12", "chore: tidy",
+		"perf(db): cache", "ci: pin go", "build(ios): bump", "style: gofmt", "revert: undo",
+	} {
+		raw := `{"tasks":[{"id":"T1","title":` + strconvQuote(okTitle) + `,"estimate_lines":20,` + testScopeJSON + `}]}`
+		if _, fails := checkPlan(json.RawMessage(raw), 400); len(fails) != 0 {
+			t.Errorf("valid title %q failed: %v", okTitle, fails)
+		}
+	}
+	for _, badTitle := range []string{
+		"", "   ", "Add a helper", "wip: not a type", "Feat: uppercase",
+		"feat:no space", "feat: ", "feat(): empty scope", "feat(a b): space in scope",
+	} {
+		raw := `{"tasks":[{"id":"T1","title":` + strconvQuote(badTitle) + `,"estimate_lines":20,` + testScopeJSON + `}]}`
+		if err := eng.Report("tok-coord", "plan apply", json.RawMessage(raw)); refusalCode(err) != "plan_invalid" {
+			t.Errorf("bad title %q = %v, want plan_invalid", badTitle, err)
+		}
+	}
+	if got, _ := LoadState(paths.State(id)); got.Seq != 1 || len(got.Tasks) != 0 {
+		t.Fatalf("bad titles mutated state: seq=%d tasks=%d", got.Seq, len(got.Tasks))
+	}
+
+	// Valid apply cleans and stores scope fields.
+	validPlan := `{"tasks":[{"id":"T1","title":"feat(factory): add scope","estimate_lines":40,` +
+		`"for_whom":"owners\nusing factory","if_skipped":"no scope fence","smallest":"4 fields","not_doing":"plan\treviewer"}]}`
+	if err := eng.Report("tok-coord", "plan apply", json.RawMessage(validPlan)); err != nil {
+		t.Fatalf("valid apply: %v", err)
+	}
+	got, _ := LoadState(paths.State(id))
+	if got.Seq != 2 || got.Tasks[0].ForWhom != "owners using factory" || got.Tasks[0].NotDoing != "plan reviewer" {
+		t.Fatalf("stored scope fields = %+v", got.Tasks[0])
+	}
+
+	// plan amend: bad title on existing task, and added task missing scope or bad title -> refused, nothing changes.
+	for _, amend := range []string{
+		`{"why":"w","tasks":[{"id":"T1","title":"not conventional"}]}`,
+		`{"why":"w","tasks":[{"id":"T2","title":"feat: two","estimate_lines":30}]}`,
+		`{"why":"w","tasks":[{"id":"T2","title":"bad title","estimate_lines":30,` + testScopeJSON + `}]}`,
+	} {
+		if err := eng.Report("tok-coord", "plan amend", json.RawMessage(amend)); refusalCode(err) != "plan_invalid" {
+			t.Errorf("amend %s = %v, want plan_invalid", amend, err)
+		}
+	}
+	if st2, _ := LoadState(paths.State(id)); st2.Seq != 2 || len(st2.Tasks) != 1 {
+		t.Fatalf("refused amend mutated state: seq=%d tasks=%d", st2.Seq, len(st2.Tasks))
+	}
+
+	// recap decide split: child missing scope or bad title -> refused naming all missing fields, nothing changes.
+	got.Tasks[0].Recaps = []flow.Recap{{Trigger: "review", Allowed: []string{"split", "drop"}}}
+	if err := SaveState(paths.State(id), got); err != nil {
+		t.Fatal(err)
+	}
+	splitErr := eng.Report("tok-coord", "recap decide", json.RawMessage(
+		`{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":"not conventional","estimate_lines":20,"for_whom":"u"}]}`,
+	))
+	if refusalCode(splitErr) != "plan_invalid" {
+		t.Fatalf("bad split = %v, want plan_invalid", splitErr)
+	}
+	for _, want := range []string{`title "not conventional"`, `task "T1a" needs if_skipped`, `task "T1a" needs smallest`, `task "T1a" needs not_doing`} {
+		if !strings.Contains(splitErr.Error(), want) {
+			t.Errorf("split refusal %q missing %q", splitErr, want)
+		}
+	}
+	if st3, _ := LoadState(paths.State(id)); st3.Seq != 2 || len(st3.Tasks) != 1 || st3.Tasks[0].Split != nil {
+		t.Fatalf("refused split mutated state: %+v", st3.Tasks)
+	}
+}
+
+func strconvQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"unicode"
@@ -271,14 +272,49 @@ func (e *Engine) runByTokenLocked(token string) (string, flow.State, string, int
 	return "", flow.State{}, "", -1
 }
 
-// planTask is the part of design.md 3's plan record that slice 1 accepts.
+// planTask is the part of design.md 3's plan record that slice 3.1 accepts.
 type planTask struct {
-	ID       string   `json:"id"`
-	Title    string   `json:"title"`
-	Brief    string   `json:"brief"`
-	Outcomes []string `json:"outcomes"`
-	After    []string `json:"after"`
-	Estimate int      `json:"estimate_lines"`
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Brief     string   `json:"brief"`
+	ForWhom   string   `json:"for_whom"`
+	IfSkipped string   `json:"if_skipped"`
+	Smallest  string   `json:"smallest"`
+	NotDoing  string   `json:"not_doing"`
+	Outcomes  []string `json:"outcomes"`
+	After     []string `json:"after"`
+	Estimate  int      `json:"estimate_lines"`
+}
+
+var conventionalTitleRE = regexp.MustCompile(`^(feat|fix|docs|refactor|test|chore|perf|ci|build|style|revert)(\([A-Za-z0-9._/-]+\))?!?: \S.*$`)
+
+// checkTitle is design.md 11.7's Title check: a Conventional Commit subject.
+func checkTitle(id, raw string) []string {
+	title := cleanRejectWhy(raw)
+	if title == "" {
+		return []string{fmt.Sprintf("shape: task %q has no title", id)}
+	}
+	if !conventionalTitleRE.MatchString(title) {
+		return []string{fmt.Sprintf("title: task %q title %q must be a Conventional Commit subject (type(scope)?: subject)", id, title)}
+	}
+	return nil
+}
+
+// checkScope is design.md 11.7's Scope check (prompts.md 3.1): all four
+// scope fields must be non-empty after cleaning.
+func checkScope(t planTask) []string {
+	var fails []string
+	for _, f := range []struct{ name, val string }{
+		{"for_whom", t.ForWhom},
+		{"if_skipped", t.IfSkipped},
+		{"smallest", t.Smallest},
+		{"not_doing", t.NotDoing},
+	} {
+		if cleanRejectWhy(f.val) == "" {
+			fails = append(fails, fmt.Sprintf("scope: task %q needs %s", t.ID, f.name))
+		}
+	}
+	return fails
 }
 
 type planFile struct {
@@ -334,9 +370,8 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, l
 		} else {
 			ids[t.ID], newIDs = true, append(newIDs, t.ID)
 		}
-		if cleanRejectWhy(t.Title) == "" {
-			fails = append(fails, fmt.Sprintf("shape: task %q has no title", t.ID))
-		}
+		fails = append(fails, checkTitle(t.ID, t.Title)...)
+		fails = append(fails, checkScope(*t)...)
 		fails = append(fails, checkEstimate(t.ID, t.Estimate, limit)...)
 	}
 	after := map[string][]string{}
@@ -355,7 +390,12 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, l
 			}
 		}
 		after[t.ID] = t.After
-		tasks[i] = flow.Task{ID: t.ID, Title: cleanRejectWhy(t.Title), Brief: t.Brief, Outcomes: t.Outcomes, After: t.After, EstimateLines: t.Estimate, SplitFrom: parentID, Attempts: []flow.Attempt{}}
+		tasks[i] = flow.Task{
+			ID: t.ID, Title: cleanRejectWhy(t.Title), Brief: t.Brief,
+			ForWhom: cleanRejectWhy(t.ForWhom), IfSkipped: cleanRejectWhy(t.IfSkipped),
+			Smallest: cleanRejectWhy(t.Smallest), NotDoing: cleanRejectWhy(t.NotDoing),
+			Outcomes: t.Outcomes, After: t.After, EstimateLines: t.Estimate, SplitFrom: parentID, Attempts: []flow.Attempt{},
+		}
 	}
 	if id := cycleAt(p.Tasks, after); id != "" {
 		fails = append(fails, fmt.Sprintf("shape: the after links make a cycle through %q", id))
@@ -430,18 +470,31 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
 		defer cancel()
 		lines, err := world.ChangedLines(ctx, a.Worktree, "HEAD") // the same measure as N12's
+		base, note := lines, ""
 		if err != nil {
-			return err
-		}
-		a.SizeCap, rc.Decided = lines+s.Settings.ContinueLines, &flow.RecapDecision{Choice: choice, Why: why}
-		if a.RunID != "" {
-			msg := fmt.Sprintf("The coordinator lets task %s go on: %s. Your size cap is now %d changed lines (%d now). Continue the task.", t.ID, why, a.SizeCap, lines)
-			if err := world.SendRun(ctx, e.HC, a.RunID, msg); err != nil {
-				e.logError("factory.exec_error", id, err)
+			e.logError("factory.git_error", id, err)
+			base, note = a.SizeCap, " (changed-lines read failed; raised from current cap)"
+			if c, ok := e.tips[a.Worktree]; ok && c.lines > base {
+				base, note = c.lines, " (changed-lines read failed; raised from last good reading)"
 			}
 		}
+		newCap := base + s.Settings.ContinueLines
+		if a.RunID != "" {
+			now := fmt.Sprintf(" (%d now)", lines)
+			if err != nil {
+				now = ""
+			}
+			msg := fmt.Sprintf("The coordinator lets task %s go on: %s. Your size cap is now %d changed lines%s. Continue the task.", t.ID, why, newCap, now)
+			sctx, scancel := context.WithTimeout(context.Background(), lockGitTimeout)
+			defer scancel()
+			if err := world.SendRun(sctx, e.HC, a.RunID, msg); err != nil {
+				e.logError("factory.exec_error", id, err)
+				return err
+			}
+		}
+		a.SizeCap, rc.Decided = newCap, &flow.RecapDecision{Choice: choice, Why: why}
 		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why},
-			Rule: "recap decide", Decision: fmt.Sprintf("continue; size cap %d", a.SizeCap), Why: why})
+			Rule: "recap decide", Decision: fmt.Sprintf("continue; size cap %d%s", a.SizeCap, note), Why: why})
 	}
 	if choice == "new" {
 		if !rc.Amended {
@@ -600,8 +653,8 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 			fails = append(fails, fmt.Sprintf("shape: task %q: %s (only title, brief, outcomes and estimate_lines change)", s.Tasks[ti].ID, strings.TrimPrefix(err.Error(), "json: ")))
 		case flow.Ended(s.Tasks[ti]):
 			fails = append(fails, fmt.Sprintf("task %q has ended and is not changed", s.Tasks[ti].ID))
-		case c.Title != nil && cleanRejectWhy(*c.Title) == "":
-			fails = append(fails, fmt.Sprintf("shape: task %q has no title", s.Tasks[ti].ID))
+		case c.Title != nil && checkTitle(s.Tasks[ti].ID, *c.Title) != nil:
+			fails = append(fails, checkTitle(s.Tasks[ti].ID, *c.Title)...)
 		case c.Estimate != nil && checkEstimate(s.Tasks[ti].ID, *c.Estimate, s.Settings.TaskSizeLimit) != nil:
 			fails = append(fails, checkEstimate(s.Tasks[ti].ID, *c.Estimate, s.Settings.TaskSizeLimit)...)
 		default:
@@ -633,10 +686,19 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 			t.Outcomes, what = *c.Outcomes, append(what, "outcomes")
 		}
 		a := flow.OpenAttempt(*t)
+		var capNote string
 		if c.Estimate != nil && *c.Estimate != t.EstimateLines {
 			t.EstimateLines, what = *c.Estimate, append(what, "estimate_lines")
-			if a != nil { // design.md 4.9: a changed estimate changes size_cap
-				a.SizeCap = s.Settings.SizeCapFactor * t.EstimateLines
+			if a != nil {
+				// design.md 4.9: may lower an open attempt's size_cap (never raise it, and never change it while a size recap is open).
+				want := s.Settings.SizeCapFactor * t.EstimateLines
+				if flow.OpenRecap(*t) != nil && flow.OpenRecap(*t).Trigger == flow.TriggerSize {
+					capNote = fmt.Sprintf("; size cap unchanged at %d while size recap is open (applies to next attempt)", a.SizeCap)
+				} else if want > a.SizeCap {
+					capNote = fmt.Sprintf("; size cap unchanged at %d (amend cannot raise a started task's cap; applies to next attempt)", a.SizeCap)
+				} else {
+					a.SizeCap = want
+				}
 			}
 		}
 		if slices.Contains(what, "brief") || slices.Contains(what, "outcomes") {
@@ -657,7 +719,7 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		if len(what) == 0 {
 			continue
 		}
-		done = append(done, t.ID+" ("+strings.Join(what, ", ")+")")
+		done = append(done, t.ID+" ("+strings.Join(what, ", ")+")"+capNote)
 		if a != nil && a.RunID != "" {
 			bin := cmp.Or(e.Bin, "sheepdog")
 			msg := fmt.Sprintf("The plan changed for task %s (%s): %s\nTitle: %s\nBrief:\n%s\nOutcomes:\n%s\nEarlier review rounds no longer count. If your work must change, commit and run %s factory report ready again; otherwise wait.",
