@@ -264,27 +264,23 @@ var TaskRows = []Row[In]{
 	}},
 	{ID: "N33", WaitsOn: "CI", When: ciReady(checksRed), Then: func(in In) Decision {
 		h := headH(in)
-		if ask, wait := maybeRerun(in, h); wait {
-			return say("re-run requested; waiting for CI")(in)
-		} else if ask != nil {
-			return say("checks red: re-run failed jobs", ask)(in)
+		if asks, wait := rerunOrWait(in, h); len(asks) > 0 || wait {
+			return say("checks red: re-run failed jobs, or wait for the re-run or for checks still running", asks)(in)
 		}
-		return say("checks red at H: tell the worker",
-			ensureRun(in, in.Facts.Worker, AskStartWorker),
-			once(in.acts(), key(AskTellCI, cmp.Or(in.Facts.PR.FailedRun, "none"), h)))(in)
+		var tells []string
+		for _, run := range ciRuns(in) {
+			tells = append(tells, once(in.acts(), key(AskTellCI, run, h))...)
+		}
+		return say("checks red at H: tell the worker once per failing run", ensureRun(in, in.Facts.Worker, AskStartWorker), tells)(in)
 	}},
 	{ID: "N34", WaitsOn: "CI", When: ciReady(anyOf(checksStoppedExt, checksStoppedTimeout, checksStoppedUnknown)), Then: func(in In) Decision {
 		h := headH(in)
-		if checksStoppedTimeout(in) {
-			return say("a CI job hit its own time limit", once(in.acts(), key(AskWake, "checks_stopped", "timeout", h)))(in)
+		if !checksStoppedExt(in) { // a time limit, or a cancel with no evidence of who: one wake for both, never a re-run
+			return say("a CI job was stopped by its own time limit or for an unread reason ("+string(in.Facts.PR.Checks)+")",
+				once(in.acts(), key(AskWake, "checks_stopped", "limit", h)))(in)
 		}
-		if checksStoppedUnknown(in) { // why it was cancelled is unread: a time limit, never re-run
-			return say("a CI job was cancelled and why is unread: treated as a time limit", once(in.acts(), key(AskWake, "checks_stopped", "unknown", h)))(in)
-		}
-		if ask, wait := maybeRerun(in, h); wait {
-			return say("re-run requested; waiting for CI")(in)
-		} else if ask != nil {
-			return say("checks cancelled from outside: re-run failed jobs", ask)(in)
+		if asks, wait := rerunOrWait(in, h); len(asks) > 0 || wait {
+			return say("checks cancelled from outside: re-run, or wait for the re-run or for checks still running", asks)(in)
 		}
 		return say("checks cancelled from outside with no re-runs left", once(in.acts(), key(AskWake, "checks_stopped", "external", h)))(in)
 	}},
@@ -330,28 +326,47 @@ func n9Why(in In) string {
 	return strings.Join(parts, "; ")
 }
 
-func rerunsFor(acts []Act, h string) int {
-	n := 0
-	for _, a := range acts {
-		if strings.HasPrefix(a.Key, AskRerunCI+"@") && strings.HasSuffix(a.Key, "@"+h) {
-			n++
-		}
+// ciRuns are the failing checks' run ids, sorted; "none" for a check
+// with no run (a status, or no run in its URL).
+func ciRuns(in In) []string {
+	var rs []string
+	for _, f := range in.Facts.PR.Failed {
+		rs = append(rs, cmp.Or(f.Run, "none"))
 	}
-	return n
+	slices.Sort(rs)
+	return slices.Compact(rs)
 }
 
-func maybeRerun(in In, h string) (ask []string, wait bool) {
-	rk := key(AskRerunCI, cmp.Or(in.Facts.PR.FailedRun, "none"), h)
-	if in.Facts.PR.FailedJob != "" {
-		rk = key(AskRerunCI, cmp.Or(in.Facts.PR.FailedRun, "none"), in.Facts.PR.FailedJob, h)
-		if a := LastAct(in.acts(), rk); a != nil && a.Result == "done" {
-			return nil, true
+// rerunOrWait waits while a check runs (a re-run of an unfinished run is
+// refused). Else it asks one re-run per failing run with flake_reruns left
+// for that run at H (a failed request counts), keyed by the run's red jobs,
+// and waits while a done re-run still reads those jobs red, at most
+// checks_grace_minutes from the request.
+func rerunOrWait(in In, h string) (asks []string, wait bool) {
+	if in.Facts.PR.Running {
+		return nil, true
+	}
+	for _, run := range ciRuns(in) {
+		var jobs []string
+		for _, f := range in.Facts.PR.Failed {
+			if cmp.Or(f.Run, "none") == run && f.Job != "" {
+				jobs = append(jobs, f.Job)
+			}
+		}
+		slices.Sort(jobs)
+		k, spent := key(AskRerunCI, run, strings.Join(jobs, ","), h), 0
+		for _, a := range in.acts() {
+			if strings.HasPrefix(a.Key, key(AskRerunCI, run)+"@") && strings.HasSuffix(a.Key, "@"+h) {
+				spent++
+			}
+		}
+		if a := LastAct(in.acts(), k); a != nil {
+			wait = wait || a.Result == "done" && in.Now.Sub(a.At) < checksGrace(in)
+		} else if run != "none" && spent < in.Settings.FlakeReruns {
+			asks = append(asks, k)
 		}
 	}
-	if rerunsFor(in.acts(), h) < in.Settings.FlakeReruns && LastAct(in.acts(), rk) == nil {
-		return []string{rk}, false
-	}
-	return nil, false
+	return asks, wait
 }
 
 func hasAccept(in In, head string) bool {

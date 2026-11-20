@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -35,7 +36,7 @@ case "$1 $2" in
   cat "$D/view.json" 2>/dev/null || { echo 'no pull requests found for branch "x"' >&2; exit 1; } ;;
 "pr merge") [ -f "$D/merge_fail" ] && { echo "GraphQL: Head branch was modified" >&2; exit 1; }; : ;;
 "pr close") [ -f "$D/close_fail" ] && { echo "GraphQL: close failed" >&2; exit 1; }; : ;;
-"run rerun") [ -f "$D/rerun_fail" ] && { echo "HTTP 403: rerun failed" >&2; exit 1; }; : ;;
+"run rerun") { [ -f "$D/rerun_fail" ] || [ -f "$D/rerun_fail_$3" ]; } && { echo "HTTP 403: rerun failed" >&2; exit 1; }; : ;;
 "workflow run") [ -f "$D/dispatch_fail" ] && { echo "HTTP 422: dispatch failed" >&2; exit 1; }; : ;;
 api\ *)
   pg=1; case "$2" in *page=*) pg=${2##*page=} ;; esac
@@ -122,7 +123,7 @@ func TestPRSnapshotFactsAndFailure(t *testing.T) {
 	if !p1.Answered || p1.Number != 7 || p1.Head != c1 || p1.HeadRel != flow.RelSame || p1.Checks != flow.ChecksPending || p1.HeadSince.IsZero() {
 		t.Fatalf("pending snapshot = %+v", p1)
 	}
-	if read() != p1 {
+	if !reflect.DeepEqual(read(), p1) {
 		t.Fatal("an unchanged snapshot changed")
 	}
 	writePRJSON(t, gh, "view.json", c1, `[{"__typename":"CheckRun","name":"check","status":"COMPLETED","conclusion":"SUCCESS"}]`)

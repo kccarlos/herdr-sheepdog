@@ -2,6 +2,7 @@ package flow
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -27,6 +28,9 @@ type Settings struct {
 	// SecondReviewer reviews the second passing round (L8): opus in a
 	// fresh session, or codex (world.CodexArgv's model).
 	SecondReviewer string `json:"second_reviewer"`
+	// DispatchWorkflow is the one workflow file under .github/workflows
+	// that N35 may dispatch; empty never dispatches (design.md 9.4).
+	DispatchWorkflow string `json:"dispatch_workflow,omitempty"`
 }
 
 // Range limits for each setting.
@@ -95,6 +99,9 @@ func (s Settings) Changed() []string {
 	if s.SecondReviewer != d.SecondReviewer {
 		out = append(out, "second_reviewer "+s.SecondReviewer)
 	}
+	if s.DispatchWorkflow != "" {
+		out = append(out, "dispatch_workflow "+s.DispatchWorkflow)
+	}
 	return out
 }
 
@@ -123,6 +130,9 @@ func (s Settings) Validate() error {
 	}
 	if s.SecondReviewer != "opus" && s.SecondReviewer != "codex" {
 		return fmt.Errorf("second_reviewer %q: allowed opus or codex", s.SecondReviewer)
+	}
+	if w := s.DispatchWorkflow; strings.ContainsAny(w, `/\`) || w == "." || w == ".." {
+		return fmt.Errorf("dispatch_workflow %q: a file name under .github/workflows, no path", w)
 	}
 	return nil
 }

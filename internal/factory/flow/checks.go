@@ -2,7 +2,6 @@ package flow
 
 import (
 	"cmp"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -20,7 +19,7 @@ type Check struct {
 	StartedAt    string `json:"startedAt,omitempty"`
 	WorkflowName string `json:"workflowName,omitempty"` // or the REST check suite: part of the check's key
 	DetailsURL   string `json:"detailsUrl,omitempty"`
-	Stop         string `json:"-"` // why CANCELLED, from annotations: "timeout", "unknown" (unread) or "" (from outside)
+	Stop         string `json:"-"` // why CANCELLED, from annotations: "timeout", "external" (canceled by someone), else unknown
 }
 
 // LatestChecks keeps the newest run per check, keyed by workflow and name:
@@ -83,7 +82,7 @@ func (c Check) verdict() string {
 	case "TIMED_OUT":
 		return "stopped_timeout"
 	case "CANCELLED":
-		return cmp.Or(map[string]string{"timeout": "stopped_timeout", "unknown": "stopped_unknown"}[c.Stop], "stopped_external")
+		return cmp.Or(map[string]string{"timeout": "stopped_timeout", "external": "stopped_external"}[c.Stop], "stopped_unknown")
 	}
 	return "red"
 }
@@ -127,30 +126,26 @@ func urlID(u, marker string) string {
 	return after[:len(after)-len(strings.TrimLeft(after, "0123456789"))]
 }
 
-// FailingRuns extracts the unique sorted workflow run IDs, job IDs and names
-// of the latest checks matching a failing or externally-stopped class.
-func FailingRuns(checks []Check, class Checks) (runs, jobs, names string) {
+// Failure is one failing check: its workflow run, job and name.
+type Failure struct {
+	Run  string `json:"run,omitempty"`
+	Job  string `json:"job,omitempty"`
+	Name string `json:"name,omitempty"`
+}
+
+// FailingRuns lists the latest checks of a red or outside-cancelled class,
+// and whether any check has not finished.
+func FailingRuns(checks []Check, class Checks) (fails []Failure, running bool) {
 	want := map[Checks]string{ChecksRed: "red", ChecksStoppedExternal: "stopped_external"}[class]
-	if want == "" {
-		return "", "", ""
-	}
-	var rs, js, ns []string
-	add := func(dst *[]string, v string) {
-		if v != "" && !slices.Contains(*dst, v) {
-			*dst = append(*dst, v)
-		}
-	}
 	for _, c := range LatestChecks(checks) {
-		if c.verdict() == want {
-			add(&rs, urlID(c.DetailsURL, "/actions/runs/"))
+		running = running || c.unfinished()
+		if want != "" && c.verdict() == want {
+			f := Failure{Run: urlID(c.DetailsURL, "/actions/runs/"), Name: cmp.Or(c.Name, c.Context)}
 			if id := CheckRunID(c); id > 0 {
-				add(&js, strconv.FormatInt(id, 10))
+				f.Job = strconv.FormatInt(id, 10)
 			}
-			add(&ns, cmp.Or(c.Name, c.Context))
+			fails = append(fails, f)
 		}
 	}
-	slices.Sort(rs)
-	slices.Sort(js)
-	slices.Sort(ns)
-	return strings.Join(rs, ","), strings.Join(js, ","), strings.Join(ns, ", ")
+	return fails, running
 }

@@ -553,9 +553,10 @@ These factory settings live in each project's `state.json`, not in the config fi
 | `continue_lines` | `60` | 0–500 | A recap's `continue` sets the cap to the changed lines now plus this. |
 | `continues_per_task` | `1` | 0–3 | How many times a task may `continue`. |
 | `max_running` | `3` | 1–20 | Maximum concurrent tasks; set at start with `sheepdog factory start --max-running N`. One extra slot beyond `max_running` is available for a task with `priority: "urgent"`. |
-| `flake_reruns` | `1` | 0–3 | How many times the engine re-runs failed or externally-cancelled CI jobs per head commit before telling the worker or waking the coordinator (0 disables re-runs). |
+| `flake_reruns` | `1` | 0–3 | How many times the engine re-runs the failed or externally-cancelled jobs of each workflow run per head commit before telling the worker or waking the coordinator (0 disables re-runs). A failed re-run request counts, and nothing is re-run while a check of the PR is still running. |
 | `checks_grace_minutes` | `5` | 1–60 | Minutes to wait for CI checks to appear on a new head commit (and after a workflow dispatch) before dispatching or waking the coordinator. |
 | `second_reviewer` | `"opus"` | `opus`, `codex` | Who reviews a task's second passing round: Claude opus in a fresh session, or Codex (`gpt-6.2-sol`, read-only, run with `--no-daemon` in herdr-core; the first round stays opus). Codex runs with its own home under `<data_dir>/factory/codex-home`, which holds only a link to your `~/.codex/auth.json`, so it reads none of your global `AGENTS.md`, config or skills; it still loads a `.codex/config.toml` in the repo (no hooks). A Codex review ends when its report tag is read; no tag for `stuck_minutes` wakes the coordinator. |
+| `dispatch_workflow` | `""` | a file name under `.github/workflows` (no path) | The one workflow the engine may dispatch on a PR branch when no checks appear past `checks_grace_minutes` (N35), and only if that file exists at the PR head. Empty never dispatches: the engine wakes the coordinator instead. Dispatch is opt-in by name because a dispatchable workflow can deploy or release. |
 
 ## What sheepdog stores
 

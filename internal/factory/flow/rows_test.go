@@ -266,10 +266,10 @@ func TestRowCases(t *testing.T) {
 		{"N29", with(noRounds), []string{"start_reviewer@1@c1"}},
 		{"N29", with(onePass), []string{"start_reviewer@2@c1"}},
 		{"N29", with(changes, rejected), []string{"start_reviewer@2@c1"}}, // L10: reject consumes no round number
-		{"N33", with(red, func(in *In) { in.Facts.PR.FailedRun = "42" }), []string{"rerun_ci@42@c1"}},
-		{"N34", with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedExternal; in.Facts.PR.FailedRun = "43" }), []string{"rerun_ci@43@c1"}},
-		{"N34", with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedTimeout }), []string{"wake_coordinator@checks_stopped@timeout@c1"}},
-		{"N34", with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedUnknown; in.Facts.PR.FailedRun = "44" }), []string{"wake_coordinator@checks_stopped@unknown@c1"}},
+		{"N33", with(red, func(in *In) { in.Facts.PR.Failed = []Failure{{Run: "42"}} }), []string{"rerun_ci@42@@c1"}},
+		{"N34", with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedExternal; in.Facts.PR.Failed = []Failure{{Run: "43"}} }), []string{"rerun_ci@43@@c1"}},
+		{"N34", with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedTimeout }), []string{"wake_coordinator@checks_stopped@limit@c1"}},
+		{"N34", with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedUnknown; in.Facts.PR.Failed = []Failure{{Run: "44"}} }), []string{"wake_coordinator@checks_stopped@limit@c1"}},
 		{"N35", with(func(in *In) {
 			in.Facts.PR.Checks = ChecksAbsent
 			in.Now = now.Add(time.Duration(DefaultSettings().ChecksGraceMinutes) * time.Minute)
@@ -848,7 +848,7 @@ func TestN9N10Why(t *testing.T) {
 func TestCIRowsN33N34N35(t *testing.T) {
 	grace := time.Duration(DefaultSettings().ChecksGraceMinutes) * time.Minute
 	redRun := func(run, job string) func(*In) {
-		return func(in *In) { in.Facts.PR.Checks, in.Facts.PR.FailedRun, in.Facts.PR.FailedJob = ChecksRed, run, job }
+		return func(in *In) { in.Facts.PR.Checks, in.Facts.PR.Failed = ChecksRed, []Failure{{Run: run, Job: job}} }
 	}
 	// N33: flake_reruns=1 -> rerun once; stale same job waits; new failing job tells worker once; repeat ready at same H does not re-tell (KB-GIT-14).
 	in := with(redRun("42", "100"))
@@ -860,7 +860,7 @@ func TestCIRowsN33N34N35(t *testing.T) {
 	if r, d := FirstMatch(TaskRows, in); r.ID != "N33" || len(d.Asked) != 0 {
 		t.Fatalf("N33 stale same job after rerun = %s %v, want wait", r.ID, d.Asked)
 	}
-	in.Facts.PR.FailedJob = "200" // rerun finished red again
+	in.Facts.PR.Failed = []Failure{{Run: "42", Job: "200"}} // rerun finished red again
 	if r, d := FirstMatch(TaskRows, in); r.ID != "N33" || !slices.Equal(d.Asked, []string{"tell_worker_ci@42@c1"}) {
 		t.Fatalf("N33 red again = %s %v", r.ID, d.Asked)
 	}
@@ -877,30 +877,34 @@ func TestCIRowsN33N34N35(t *testing.T) {
 
 	// N34: external cancel reruns once, then wakes coordinator once; timeout wakes once immediately.
 	ext := with(func(in *In) {
-		in.Facts.PR.Checks, in.Facts.PR.FailedRun, in.Facts.PR.FailedJob = ChecksStoppedExternal, "55", "300"
+		in.Facts.PR.Checks, in.Facts.PR.Failed = ChecksStoppedExternal, []Failure{{Run: "55", Job: "300"}}
 	})
 	if r, d := FirstMatch(TaskRows, ext); r.ID != "N34" || !slices.Equal(d.Asked, []string{"rerun_ci@55@300@c1"}) {
 		t.Fatalf("N34 external first = %s %v", r.ID, d.Asked)
 	}
 	a0(&ext).Acts = append(a0(&ext).Acts, Act{Key: "rerun_ci@55@300@c1", Result: "done", At: now})
-	ext.Facts.PR.FailedJob = "301"
+	ext.Facts.PR.Failed = []Failure{{Run: "55", Job: "301"}}
 	if r, d := FirstMatch(TaskRows, ext); r.ID != "N34" || !slices.Equal(d.Asked, []string{"wake_coordinator@checks_stopped@external@c1"}) {
 		t.Fatalf("N34 external after rerun = %s %v", r.ID, d.Asked)
 	}
+	ext.Facts.PR.Failed, ext.Facts.PR.Running = []Failure{{Run: "57", Job: "500"}}, true
+	if r, d := FirstMatch(TaskRows, ext); r.ID != "N34" || len(d.Asked) != 0 {
+		t.Fatalf("N34 external while a check runs = %s %v, want wait", r.ID, d.Asked)
+	}
 	to := with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedTimeout })
-	if r, d := FirstMatch(TaskRows, to); r.ID != "N34" || !slices.Equal(d.Asked, []string{"wake_coordinator@checks_stopped@timeout@c1"}) {
+	if r, d := FirstMatch(TaskRows, to); r.ID != "N34" || !slices.Equal(d.Asked, []string{"wake_coordinator@checks_stopped@limit@c1"}) {
 		t.Fatalf("N34 timeout = %s %v", r.ID, d.Asked)
 	}
 	// N34: a cancel whose cause is unread (stopped_unknown) is a time limit:
 	// wake once, never re-run, even with re-runs left and a run ID to re-run.
 	unk := with(func(in *In) {
-		in.Facts.PR.Checks, in.Facts.PR.FailedRun, in.Facts.PR.FailedJob = ChecksStoppedUnknown, "56", "400"
+		in.Facts.PR.Checks, in.Facts.PR.Failed = ChecksStoppedUnknown, []Failure{{Run: "56", Job: "400"}}
 		in.Settings.FlakeReruns = 3
 	})
-	if r, d := FirstMatch(TaskRows, unk); r.ID != "N34" || !slices.Equal(d.Asked, []string{"wake_coordinator@checks_stopped@unknown@c1"}) {
+	if r, d := FirstMatch(TaskRows, unk); r.ID != "N34" || !slices.Equal(d.Asked, []string{"wake_coordinator@checks_stopped@limit@c1"}) {
 		t.Fatalf("N34 unknown = %s %v", r.ID, d.Asked)
 	}
-	a0(&unk).Acts = append(a0(&unk).Acts, Act{Key: "wake_coordinator@checks_stopped@unknown@c1", Result: "done", At: now})
+	a0(&unk).Acts = append(a0(&unk).Acts, Act{Key: "wake_coordinator@checks_stopped@limit@c1", Result: "done", At: now})
 	if r, d := FirstMatch(TaskRows, unk); r.ID != "N34" || len(d.Asked) != 0 {
 		t.Fatalf("N34 unknown after wake = %s %v, want nothing", r.ID, d.Asked)
 	}
@@ -950,11 +954,12 @@ func TestFailingRuns(t *testing.T) {
 		{Kind: "CheckRun", Name: "lint", Status: "COMPLETED", Conclusion: "FAILURE", DetailsURL: "https://github.com/o/r/actions/runs/222/job/20"},
 		{Kind: "CheckRun", Name: "test", Status: "COMPLETED", Conclusion: "FAILURE", DetailsURL: "https://github.com/o/r/actions/runs/222/job/30"},
 	}
-	runs, jobs, names := FailingRuns(checks, ChecksRed)
-	if runs != "222" || jobs != "20,30" || names != "lint, test" {
-		t.Fatalf("FailingRuns(red) = (%q, %q, %q)", runs, jobs, names)
+	fails, running := FailingRuns(checks, ChecksRed)
+	if want := []Failure{{Run: "222", Job: "20", Name: "lint"}, {Run: "222", Job: "30", Name: "test"}}; !slices.Equal(fails, want) || running {
+		t.Fatalf("FailingRuns(red) = %+v, %t; want %+v, false", fails, running, want)
 	}
-	if r, j, n := FailingRuns(checks, ChecksGreen); r != "" || j != "" || n != "" {
-		t.Fatalf("FailingRuns(green) = (%q, %q, %q), want empty", r, j, n)
+	checks = append(checks, Check{Kind: "CheckRun", Name: "e2e", Status: "IN_PROGRESS"})
+	if f, r := FailingRuns(checks, ChecksGreen); f != nil || !r {
+		t.Fatalf("FailingRuns(green) = %+v, %t; want none, running", f, r)
 	}
 }

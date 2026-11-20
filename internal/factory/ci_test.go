@@ -69,7 +69,8 @@ func TestCIRedAgainTellsWorkerOnceKBGIT14(t *testing.T) {
 	s := l.state()
 	dec, _, err := l.eng.execTellCI(context.Background(), l.id, &s, 0, flow.Facts{
 		TipRel: flow.RelBehind,
-		PR:     flow.PR{Number: 7, FailedRun: "99999", FailedChecks: "check"},
+		Ask:    "tell_worker_ci@99999@" + l.c1,
+		PR:     flow.PR{Number: 7, Failed: []flow.Failure{{Run: "99999", Name: "check"}}},
 	})
 	if err != nil || !strings.Contains(dec, "99999") {
 		t.Fatalf("execTellCI(behind) = %q, %v", dec, err)
@@ -86,6 +87,7 @@ func TestCIRedAgainTellsWorkerOnceKBGIT14(t *testing.T) {
 func TestCIStoppedExternalAndTimeout(t *testing.T) {
 	t.Run("external cancel", func(t *testing.T) {
 		l := newLanding(t)
+		writeGHFile(t, l.gh, "annotations.json", `[{"message":"The run was canceled by @example-user."}]`)
 		writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("CANCELLED", "55001", "10"))
 		l.pass() // re-run
 		if len(ghCalls(t, l.gh, "run rerun")) != 1 {
@@ -109,7 +111,7 @@ func TestCIStoppedExternalAndTimeout(t *testing.T) {
 		if len(ghCalls(t, l.gh, "run rerun")) != 0 {
 			t.Fatalf("timeout must not re-run: %q", ghCalls(t, l.gh, "run rerun"))
 		}
-		if w := l.state().Project.Wakes; len(w) != 1 || w[0].Key != "checks_stopped@timeout@"+l.c1 {
+		if w := l.state().Project.Wakes; len(w) != 1 || w[0].Key != "checks_stopped@limit@"+l.c1 {
 			t.Fatalf("wakes = %+v, want 1 timeout wake", w)
 		}
 	})
@@ -124,7 +126,7 @@ func TestCIStoppedExternalAndTimeout(t *testing.T) {
 		if len(ghCalls(t, l.gh, "run rerun")) != 0 {
 			t.Fatalf("unread cause must not re-run: %q", ghCalls(t, l.gh, "run rerun"))
 		}
-		if w := l.state().Project.Wakes; len(w) != 1 || w[0].Key != "checks_stopped@unknown@"+l.c1 {
+		if w := l.state().Project.Wakes; len(w) != 1 || w[0].Key != "checks_stopped@limit@"+l.c1 {
 			t.Fatalf("wakes = %+v, want 1 unknown wake", w)
 		}
 	})
@@ -142,7 +144,7 @@ func TestCINoChecksDispatchAndWake(t *testing.T) {
 		l.eng.prs[l.wt] = p
 		l.eng.mu.Unlock()
 	}
-	t.Run("with workflow_dispatch", func(t *testing.T) {
+	t.Run("named workflow", func(t *testing.T) {
 		l := newLanding(t)
 		wfDir := filepath.Join(l.wt, ".github", "workflows")
 		if err := os.MkdirAll(wfDir, 0o700); err != nil {
@@ -155,6 +157,7 @@ func TestCINoChecksDispatchAndWake(t *testing.T) {
 		gitIn(t, l.wt, "commit", "-m", "ci: add dispatch")
 		c2 := gitIn(t, l.wt, "rev-parse", "HEAD")
 		l.edit(func(s *flow.State) {
+			s.Settings.DispatchWorkflow = "ci.yml"
 			a := &s.Tasks[0].Attempts[0]
 			a.Ready = []flow.Ready{{Head: c2}}
 			a.Rounds = []flow.Round{{N: 1, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass}, {N: 2, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass}}
@@ -189,7 +192,7 @@ func TestCINoChecksDispatchAndWake(t *testing.T) {
 			t.Fatal("PR with absent checks was merged")
 		}
 	})
-	t.Run("no workflow_dispatch skips to wake", func(t *testing.T) {
+	t.Run("empty dispatch_workflow skips to wake", func(t *testing.T) {
 		l := newLanding(t)
 		writePRJSON(t, l.gh, "view.json", l.c1, `[]`)
 		l.pass()
@@ -227,5 +230,176 @@ func TestCIExecutorFailuresRecordedOnce(t *testing.T) {
 	a := l.state().Tasks[0].Attempts[0]
 	if act := flow.LastAct(a.Acts, "rerun_ci@44714@100@"+l.c1); act == nil || act.Result != "failed" {
 		t.Fatalf("rerun act = %+v, want failed", act)
+	}
+}
+
+// ciCheck is one rollup check of a workflow run and job.
+func ciCheck(name, status, conclusion, runID, jobID string) string {
+	return `{"__typename":"CheckRun","name":"` + name + `","workflowName":"ci","status":"` + status + `","conclusion":"` + conclusion +
+		`","detailsUrl":"https://github.com/acme/demo/actions/runs/` + runID + `/job/` + jobID + `"}`
+}
+
+func writeGHFile(t *testing.T, dir, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCIWaitsForUnfinishedChecks: a red job beside an unfinished one is not
+// re-run and not told until every check has finished.
+func TestCIWaitsForUnfinishedChecks(t *testing.T) {
+	l := newLanding(t)
+	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("a", "COMPLETED", "FAILURE", "61", "610")+","+ciCheck("b", "IN_PROGRESS", "", "61", "611")+"]")
+	l.pass()
+	l.pass()
+	if got := ghCalls(t, l.gh, "run rerun"); len(got) != 0 || len(sendsTo(t, l.srv.Requests(), l.worker)) != 0 {
+		t.Fatalf("acted while a check runs: reruns %q", got)
+	}
+	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("a", "COMPLETED", "FAILURE", "61", "610")+","+ciCheck("b", "COMPLETED", "SUCCESS", "61", "611")+"]")
+	l.pass()
+	if got := ghCalls(t, l.gh, "run rerun"); len(got) != 1 || got[0] != "run rerun 61 --failed --repo acme/demo" {
+		t.Fatalf("reruns after the run finished = %q", got)
+	}
+}
+
+// TestCITellsOncePerRun: with re-runs off, run 42 is told once; when run 55
+// also fails while 42 stays red, only 55 is told.
+func TestCITellsOncePerRun(t *testing.T) {
+	l := newLanding(t)
+	l.edit(func(s *flow.State) { s.Settings.FlakeReruns = 0 })
+	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("a", "COMPLETED", "FAILURE", "42", "420")+"]")
+	l.pass()
+	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("a", "COMPLETED", "FAILURE", "42", "420")+","+ciCheck("b", "COMPLETED", "FAILURE", "55", "550")+"]")
+	l.pass()
+	l.pass()
+	sends := sendsTo(t, l.srv.Requests(), l.worker)
+	if len(sends) != 2 || !strings.Contains(sends[0], "42") || !strings.Contains(sends[1], "55") || strings.Contains(sends[1], "run 42") {
+		t.Fatalf("worker sends = %q, want one about 42, then one about 55 only", sends)
+	}
+}
+
+// TestCIRerunBudgetPerRun: each run id gets its own re-run request and
+// budget; a failed request for run 55 is spent, never sent again for the
+// same job once run 42 clears.
+func TestCIRerunBudgetPerRun(t *testing.T) {
+	l := newLanding(t)
+	l.edit(func(s *flow.State) { s.Settings.FlakeReruns = 2 })
+	writeGHFile(t, l.gh, "rerun_fail_55", "")
+	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("a", "COMPLETED", "FAILURE", "42", "420")+","+ciCheck("b", "COMPLETED", "FAILURE", "55", "550")+"]")
+	l.pass()
+	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("a", "COMPLETED", "SUCCESS", "42", "421")+","+ciCheck("b", "COMPLETED", "FAILURE", "55", "550")+"]")
+	l.pass()
+	l.pass()
+	var for55 []string
+	for _, c := range ghCalls(t, l.gh, "run rerun") {
+		if strings.HasPrefix(c, "run rerun 55 ") {
+			for55 = append(for55, c)
+		}
+	}
+	if len(for55) != 1 {
+		t.Fatalf("re-runs of 55 = %q, want 1 (the failed request is spent)", for55)
+	}
+	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 1 || !strings.Contains(sends[0], "55") {
+		t.Fatalf("worker sends = %q, want one about 55", sends)
+	}
+}
+
+// TestCICancelNeedsEvidence: a cancel with no time-limit and no
+// canceled-by annotation is an unknown stop: one wake, never a re-run; a
+// later read that finds the time limit does not wake again.
+func TestCICancelNeedsEvidence(t *testing.T) {
+	l := newLanding(t)
+	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("CANCELLED", "57001", "10"))
+	l.pass()
+	writeGHFile(t, l.gh, "annotations.json", `[{"message":"The job has exceeded the maximum execution time of 1m0s"}]`)
+	l.pass()
+	l.pass()
+	if got := ghCalls(t, l.gh, "run rerun"); len(got) != 0 {
+		t.Fatalf("cancel without evidence re-ran: %q", got)
+	}
+	if w := l.state().Project.Wakes; len(w) != 1 {
+		t.Fatalf("wakes = %+v, want exactly 1", w)
+	}
+}
+
+// TestCIStaleRerunWaitIsBounded: an accepted re-run whose job never
+// changes waits at most checks_grace_minutes, then the worker is told once
+// and nothing is re-run again.
+func TestCIStaleRerunWaitIsBounded(t *testing.T) {
+	l := newLanding(t)
+	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "44714", "100"))
+	l.pass() // re-run
+	l.pass() // stale: wait
+	l.edit(func(s *flow.State) {
+		for i := range s.Tasks[0].Attempts[0].Acts {
+			s.Tasks[0].Attempts[0].Acts[i].At = time.Now().Add(-10 * time.Minute)
+		}
+	})
+	l.pass()
+	l.pass()
+	if got := ghCalls(t, l.gh, "run rerun"); len(got) != 1 {
+		t.Fatalf("reruns = %q, want 1", got)
+	}
+	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 1 || !strings.Contains(sends[0], "44714") {
+		t.Fatalf("worker sends = %q, want one about 44714", sends)
+	}
+}
+
+// TestCIRerunNotRepeatedAfterFailedCommit: when the commit after a re-run
+// fails, the intent saved before the call keeps the next pass from sending
+// it again.
+func TestCIRerunNotRepeatedAfterFailedCommit(t *testing.T) {
+	l := newLanding(t)
+	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "44714", "100"))
+	if err := os.Chmod(l.paths.Log(l.id), 0o400); err != nil { // the commit's log append fails
+		t.Fatal(err)
+	}
+	l.pass()
+	l.pass()
+	if got := ghCalls(t, l.gh, "run rerun"); len(got) != 1 {
+		t.Fatalf("reruns = %q, want 1", got)
+	}
+}
+
+// TestCIDispatchOptInAndFailureOnce: N35 never dispatches a workflow the
+// owner did not name, however dispatchable; with dispatch_workflow = ci.yml
+// a failed dispatch is recorded once, sent once, and wakes once.
+func TestCIDispatchOptInAndFailureOnce(t *testing.T) {
+	l := newLanding(t)
+	wfDir := filepath.Join(l.wt, ".github", "workflows")
+	if err := os.MkdirAll(wfDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeGHFile(t, wfDir, "a-deploy.yml", "on:\n  pull_request:\n  workflow_dispatch:\njobs: {}\n")
+	writeGHFile(t, wfDir, "ci.yml", "on:\n  pull_request:\n  workflow_dispatch:\njobs: {}\n")
+	writeGHFile(t, l.gh, "dispatch_fail", "")
+	gitIn(t, l.wt, "add", ".github")
+	gitIn(t, l.wt, "commit", "-m", "ci: workflows")
+	c2 := gitIn(t, l.wt, "rev-parse", "HEAD")
+	l.edit(func(s *flow.State) {
+		s.Settings.DispatchWorkflow = "ci.yml"
+		a := &s.Tasks[0].Attempts[0]
+		a.Ready = []flow.Ready{{Head: c2}}
+		a.Rounds = []flow.Round{{N: 1, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass}, {N: 2, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass}}
+	})
+	writePRJSON(t, l.gh, "view.json", c2, `[]`)
+	l.pass()
+	l.eng.mu.Lock()
+	p := l.eng.prs[l.wt]
+	p.HeadSince = time.Now().Add(-10 * time.Minute)
+	l.eng.prs[l.wt] = p
+	l.eng.mu.Unlock()
+	l.pass()
+	l.pass()
+	l.pass()
+	if got := ghCalls(t, l.gh, "workflow run"); len(got) != 1 || got[0] != "workflow run ci.yml --repo acme/demo --ref "+l.branch {
+		t.Fatalf("dispatches = %q, want one of ci.yml", got)
+	}
+	if act := flow.LastAct(l.state().Tasks[0].Attempts[0].Acts, "dispatch_ci@"+c2); act == nil || act.Result != "failed" {
+		t.Fatalf("dispatch act = %+v, want failed", act)
+	}
+	if w := l.state().Project.Wakes; len(w) != 1 || w[0].Key != "no_checks@"+c2 {
+		t.Fatalf("wakes = %+v, want 1 no_checks", w)
 	}
 }

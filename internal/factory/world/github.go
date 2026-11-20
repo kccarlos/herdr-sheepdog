@@ -180,7 +180,7 @@ func PRSnapshot(ctx context.Context, repoDir, branch string) (p flow.PR, warn, e
 		warns = append(warns, err)
 	}
 	p.Checks = flow.Rollup(checks, wfPending)
-	p.FailedRun, p.FailedJob, p.FailedChecks = flow.FailingRuns(checks, p.Checks)
+	p.Failed, p.Running = flow.FailingRuns(checks, p.Checks)
 	if v.BaseRefName != "" && p.Head != "" {
 		var cmpResp struct {
 			BehindBy int `json:"behind_by"`
@@ -292,22 +292,27 @@ func fetchCheckRuns(ctx context.Context, dir, repo, head string) ([]flow.Check, 
 	return checks, err
 }
 
-// checkRunStop is why a run was cancelled: "timeout", "" (from outside),
-// or "unknown" when the annotations cannot be read (never re-run).
+// checkRunStop is why a run was cancelled, from its annotations (S0.6):
+// "timeout" (the job's own time limit), "external" (a canceled-by line),
+// else "unknown": no evidence either way, or unread (never re-run).
 func checkRunStop(ctx context.Context, dir, repo string, id int64) (string, error) {
-	timedOut := false
+	stop := "unknown"
 	err := ghPages(ctx, dir, fmt.Sprintf("repos/%s/check-runs/%d/annotations", repo, id), 50, func(raw []byte) (int, error) {
 		var anns []struct{ Message string }
 		err := json.Unmarshal(raw, &anns)
-		timedOut = timedOut || slices.ContainsFunc(anns, func(a struct{ Message string }) bool {
-			return strings.Contains(a.Message, "exceeded the maximum execution time")
-		})
+		for _, a := range anns {
+			if strings.Contains(a.Message, "exceeded the maximum execution time") {
+				stop = "timeout"
+			} else if stop == "unknown" && strings.Contains(a.Message, "was canceled by") {
+				stop = "external"
+			}
+		}
 		return len(anns), err
 	})
-	if !timedOut && err != nil {
-		return "unknown", err
+	if err != nil && stop != "timeout" {
+		stop = "unknown"
 	}
-	return map[bool]string{true: "timeout"}[timedOut], err
+	return stop, err
 }
 
 // hasPendingWorkflow: an unfinished run seen counts even if a later page fails.
@@ -372,58 +377,36 @@ func DeleteRemoteBranch(ctx context.Context, dir, branch string) error {
 	return err
 }
 
-// ErrNoDispatchWorkflow is returned by DispatchWorkflow when no workflow in
-// .github/workflows declares workflow_dispatch (N35 skips to waking the coordinator).
-var ErrNoDispatchWorkflow = errors.New("world: no workflow with workflow_dispatch")
+// ErrNoDispatchWorkflow is returned by DispatchWorkflow when no
+// dispatch_workflow is set or its file is missing at head (N35 skips to
+// waking the coordinator).
+var ErrNoDispatchWorkflow = errors.New("world: no dispatch_workflow set, or its file is missing")
 
-var workflowDispatchRe = regexp.MustCompile(`(?m)^[^#\n]*\bworkflow_dispatch\b`)
-
-// RerunFailedJobs asks GitHub Actions to re-run failed (or cancelled) jobs for
-// each comma-separated workflow run ID (design.md 9.4, N33, N34).
-func RerunFailedJobs(ctx context.Context, repoDir, runIDs string) error {
+// RerunFailedJobs asks GitHub Actions to re-run the failed (or cancelled)
+// jobs of one workflow run (design.md 9.4, N33, N34).
+func RerunFailedJobs(ctx context.Context, repoDir, runID string) error {
 	repo, err := ghRepo(ctx, repoDir)
 	if err != nil {
 		return err
 	}
-	ran := false
-	for _, id := range strings.Split(runIDs, ",") {
-		if id = strings.TrimSpace(id); id != "" {
-			ran = true
-			if _, err := ghCmd(ctx, repoDir, "run", "rerun", id, "--failed", "--repo", repo); err != nil {
-				return err
-			}
-		}
-	}
-	if !ran {
-		return errors.New("world: no workflow run id to re-run")
-	}
-	return nil
+	_, err = ghCmd(ctx, repoDir, "run", "rerun", runID, "--failed", "--repo", repo)
+	return err
 }
 
-// DispatchWorkflow dispatches the first workflow in .github/workflows at head
-// that declares workflow_dispatch, targeting branch (design.md 9.4, N35).
-func DispatchWorkflow(ctx context.Context, worktree, branch, head string) (string, error) {
+// DispatchWorkflow dispatches the owner-named workflow on branch, only if
+// .github/workflows/<name> exists at head. Dispatch is opt-in by name: a
+// dispatchable workflow can deploy or release (design.md 9.4, N35).
+func DispatchWorkflow(ctx context.Context, worktree, branch, head, name string) error {
+	if name == "" {
+		return ErrNoDispatchWorkflow
+	}
 	repo, err := ghRepo(ctx, worktree)
 	if err != nil {
-		return "", err
+		return err
 	}
-	out, err := gitCmd(ctx, worktree, "ls-tree", "--name-only", head, ".github/workflows/")
-	if err != nil {
-		return "", err
+	if _, err := gitCmd(ctx, worktree, "cat-file", "-e", head+":.github/workflows/"+name); err != nil {
+		return ErrNoDispatchWorkflow
 	}
-	files := strings.Split(out, "\n")
-	slices.Sort(files)
-	for _, f := range files {
-		if ext := filepath.Ext(f); ext != ".yml" && ext != ".yaml" {
-			continue
-		}
-		if body, err := gitCmd(ctx, worktree, "show", head+":"+f); err != nil {
-			return "", err
-		} else if workflowDispatchRe.MatchString(body) {
-			wf := filepath.Base(f)
-			_, err = ghCmd(ctx, worktree, "workflow", "run", wf, "--repo", repo, "--ref", branch)
-			return wf, err
-		}
-	}
-	return "", ErrNoDispatchWorkflow
+	_, err = ghCmd(ctx, worktree, "workflow", "run", name, "--repo", repo, "--ref", branch)
+	return err
 }

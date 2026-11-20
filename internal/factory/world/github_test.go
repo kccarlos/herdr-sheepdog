@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -123,8 +124,9 @@ func TestChecksRollupTable(t *testing.T) {
 		"timed_out":                {[]flow.Check{ok, run("COMPLETED", "TIMED_OUT")}, false, flow.ChecksStoppedTimeout},
 		"cancelled by timeout":     {[]flow.Check{ok, {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "timeout"}}, false, flow.ChecksStoppedTimeout},
 		"cancelled, cause unread":  {[]flow.Check{ok, {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "unknown"}}, false, flow.ChecksStoppedUnknown},
-		"unread beats outside":     {[]flow.Check{run("COMPLETED", "CANCELLED"), {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "unknown"}}, false, flow.ChecksStoppedUnknown},
-		"cancelled from outside":   {[]flow.Check{ok, run("COMPLETED", "CANCELLED")}, false, flow.ChecksStoppedExternal},
+		"unread beats outside":     {[]flow.Check{{Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "external"}, {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "unknown"}}, false, flow.ChecksStoppedUnknown},
+		"cancelled from outside":   {[]flow.Check{ok, {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "external"}}, false, flow.ChecksStoppedExternal},
+		"cancelled, no evidence":   {[]flow.Check{ok, run("COMPLETED", "CANCELLED")}, false, flow.ChecksStoppedUnknown},
 		"cancelled replaced": {[]flow.Check{
 			{Kind: "CheckRun", Name: "check", Status: "COMPLETED", Conclusion: "CANCELLED", StartedAt: "2026-11-20T09:00:00Z"},
 			{Kind: "CheckRun", Name: "check", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: "2026-11-20T09:05:00Z"},
@@ -201,7 +203,7 @@ func TestPushAndOpenPROnceThenAdopts(t *testing.T) {
 		t.Fatalf("gh calls:\n%s", strings.Join(ghCalls(t, gh, ""), "\n"))
 	}
 	p, _, err := PRSnapshot(ctx, repo, "task/t1-x")
-	if err != nil || p != (flow.PR{Answered: true, Number: 7, State: flow.PROpen, Head: c1, Mergeable: flow.MergeableUnknown, Checks: flow.ChecksAbsent}) {
+	if err != nil || !reflect.DeepEqual(p, flow.PR{Answered: true, Number: 7, State: flow.PROpen, Head: c1, Mergeable: flow.MergeableUnknown, Checks: flow.ChecksAbsent}) {
 		t.Fatalf("snapshot = %+v, %v", p, err)
 	}
 	if views := ghCalls(t, gh, "pr view"); !strings.Contains(views[len(views)-1], "pr view task/t1-x --repo acme/demo --json "+prViewFields) {
@@ -613,38 +615,25 @@ func TestRerunFailedJobsAndDispatchWorkflow(t *testing.T) {
 	gh := installFakeGH(t)
 
 	// RerunFailedJobs calls gh run rerun <id> --failed --repo acme/demo.
-	if err := RerunFailedJobs(ctx, repo, ""); err == nil {
-		t.Fatal("empty runIDs succeeded")
-	}
-	if err := RerunFailedJobs(ctx, repo, "101, 202"); err != nil {
+	if err := RerunFailedJobs(ctx, repo, "101"); err != nil {
 		t.Fatal(err)
 	}
-	wantReruns := []string{
-		"run rerun 101 --failed --repo acme/demo",
-		"run rerun 202 --failed --repo acme/demo",
-	}
+	wantReruns := []string{"run rerun 101 --failed --repo acme/demo"}
 	if got := ghCalls(t, gh, "run rerun"); !slices.Equal(got, wantReruns) {
 		t.Fatalf("rerun calls = %q, want %q", got, wantReruns)
 	}
 
-	// DispatchWorkflow: no workflows -> ErrNoDispatchWorkflow.
+	// DispatchWorkflow is opt-in by name: empty never dispatches, a named
+	// file missing at head never does, a named file present is dispatched.
 	head := runGit(t, repo, "rev-parse", "HEAD")
-	if _, err := DispatchWorkflow(ctx, repo, "task/t1", head); !errors.Is(err, ErrNoDispatchWorkflow) {
-		t.Fatalf("no workflows err = %v, want ErrNoDispatchWorkflow", err)
+	for _, name := range []string{"", "ci.yml"} {
+		if err := DispatchWorkflow(ctx, repo, "task/t1", head, name); !errors.Is(err, ErrNoDispatchWorkflow) {
+			t.Fatalf("name %q before the file err = %v, want ErrNoDispatchWorkflow", name, err)
+		}
 	}
-	// Commented workflow_dispatch is ignored; real workflow_dispatch is dispatched.
 	wfDir := filepath.Join(repo, ".github", "workflows")
 	if err := os.MkdirAll(wfDir, 0o700); err != nil {
 		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(wfDir, "a-pr.yml"), []byte("on:\n  pull_request:\n  # workflow_dispatch:\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, repo, "add", ".github/workflows/a-pr.yml")
-	runGit(t, repo, "commit", "-m", "ci: pr only")
-	head = runGit(t, repo, "rev-parse", "HEAD")
-	if _, err := DispatchWorkflow(ctx, repo, "task/t1", head); !errors.Is(err, ErrNoDispatchWorkflow) {
-		t.Fatalf("commented workflow_dispatch err = %v, want ErrNoDispatchWorkflow", err)
 	}
 	if err := os.WriteFile(filepath.Join(wfDir, "ci.yml"), []byte("on:\n  pull_request:\n  workflow_dispatch:\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -652,9 +641,11 @@ func TestRerunFailedJobsAndDispatchWorkflow(t *testing.T) {
 	runGit(t, repo, "add", ".github/workflows/ci.yml")
 	runGit(t, repo, "commit", "-m", "ci: add dispatch")
 	head = runGit(t, repo, "rev-parse", "HEAD")
-	wf, err := DispatchWorkflow(ctx, repo, "task/t1", head)
-	if err != nil || wf != "ci.yml" {
-		t.Fatalf("DispatchWorkflow = %q, %v; want ci.yml, nil", wf, err)
+	if err := DispatchWorkflow(ctx, repo, "task/t1", head, ""); !errors.Is(err, ErrNoDispatchWorkflow) {
+		t.Fatalf("empty name with a dispatchable file err = %v, want ErrNoDispatchWorkflow", err)
+	}
+	if err := DispatchWorkflow(ctx, repo, "task/t1", head, "ci.yml"); err != nil {
+		t.Fatal(err)
 	}
 	if got := ghCalls(t, gh, "workflow run"); !slices.Equal(got, []string{"workflow run ci.yml --repo acme/demo --ref task/t1"}) {
 		t.Fatalf("workflow run calls = %q", got)

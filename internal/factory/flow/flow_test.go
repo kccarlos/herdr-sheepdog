@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"slices"
 	"testing"
 	"time"
 )
@@ -103,5 +104,16 @@ func TestSettingsRange(t *testing.T) {
 	s.ReviewRounds, s.MaxRounds = 4, 3
 	if err := s.Validate(); err == nil {
 		t.Error("max_rounds < review_rounds validated")
+	}
+	// dispatch_workflow is a plain file name under .github/workflows.
+	for w, ok := range map[string]bool{"": true, "ci.yml": true, "../ci.yml": false, ".github/workflows/ci.yml": false, `a\b.yml`: false, "..": false} {
+		s := DefaultSettings()
+		s.DispatchWorkflow = w
+		if err := s.Validate(); (err == nil) != ok {
+			t.Errorf("dispatch_workflow %q: err %v, want ok=%v", w, err, ok)
+		}
+	}
+	if s := (Settings{DispatchWorkflow: "ci.yml"}); !slices.Contains(s.Changed(), "dispatch_workflow ci.yml") {
+		t.Errorf("Changed() = %q, want dispatch_workflow ci.yml", s.Changed())
 	}
 }

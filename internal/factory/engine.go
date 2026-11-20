@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -399,13 +400,16 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	}
 	var decs []string
 	whys := []string{d.Why}
-	act := func(k, res string) {
-		a := flow.Act{Key: k, Result: res, At: now}
+	act := func(k, res string) { // an outcome replaces the intent saved for it
+		acts := &s.Tasks[ti].Acts
 		if oa := flow.OpenAttempt(s.Tasks[ti]); oa != nil {
-			oa.Acts = append(oa.Acts, a)
-		} else {
-			s.Tasks[ti].Acts = append(s.Tasks[ti].Acts, a)
+			acts = &oa.Acts
 		}
+		if n := len(*acts); n > 0 && (*acts)[n-1].Key == k && (*acts)[n-1].Result == "asked" {
+			(*acts)[n-1].Result = res
+			return
+		}
+		*acts = append(*acts, flow.Act{Key: k, Result: res, At: now})
 	}
 	for i, ask := range d.Asked {
 		verb, _, _ := strings.Cut(ask, "@")
@@ -424,12 +428,21 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		// An executor runs to its end even when the pass is cancelled (its
 		// calls carry their own timeouts), so its outcome is recorded and
 		// the next pass does not ask again; the rest waits for that pass.
-		dec, abort, err := fn(e, context.WithoutCancel(ctx), id, s, ti, facts)
+		if verb == flow.AskRerunCI || verb == flow.AskDispatchCI { // a GitHub call whose outcome can be lost: saved as asked first, never sent twice
+			act(ask, "asked")
+			if err := SaveState(e.Paths.State(id), *s); err != nil {
+				e.logError("factory.commit_error", id, err)
+				return
+			}
+		}
+		f := facts
+		f.Ask = ask
+		dec, abort, err := fn(e, context.WithoutCancel(ctx), id, s, ti, f)
 		if abort {
 			return
 		} else if errors.Is(err, world.ErrNoDispatchWorkflow) {
 			act(ask, "skipped")
-			decs = append(decs, "no workflow with workflow_dispatch")
+			decs = append(decs, "no dispatch_workflow set, or its file is missing")
 		} else if err != nil {
 			e.logError("factory.exec_error", id, err)
 			act(ask, "failed")
@@ -956,39 +969,40 @@ func (e *Engine) execPushPR(ctx context.Context, _ string, s *flow.State, ti int
 	return fmt.Sprintf("PR #%d open for %s", n, a.Branch), false, err
 }
 
-// execRerunCI is N33/N34: re-run failed jobs on GitHub Actions.
+// execRerunCI is N33/N34: re-run the failed jobs of the run in its key.
 func (e *Engine) execRerunCI(ctx context.Context, _ string, s *flow.State, _ int, f flow.Facts) (string, bool, error) {
+	run := strings.Split(f.Ask, "@")[1]
 	gctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
-	err := world.RerunFailedJobs(gctx, s.Project.Folder, f.PR.FailedRun)
-	return "re-ran failed jobs for run " + f.PR.FailedRun, false, err
+	return "re-ran failed jobs of run " + run, false, world.RerunFailedJobs(gctx, s.Project.Folder, run)
 }
 
-// execTellCI is N33: tell the worker once per failing run; prefix "pull first"
-// only when the engine updated the branch (H is ahead of the worker's tip).
+// execTellCI is N33: tell the worker about the failing run in its key;
+// prefix "pull first" only when H is ahead of the worker's tip.
 func (e *Engine) execTellCI(ctx context.Context, _ string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
 	t, a := s.Tasks[ti], flow.OpenAttempt(s.Tasks[ti])
 	if a == nil || a.RunID == "" {
 		return "", false, errors.New("factory: no worker run to tell about CI failure")
 	}
-	run, prefix, checks := cmp.Or(f.PR.FailedRun, "unknown"), "", ""
+	run, prefix, names := strings.Split(f.Ask, "@")[1], "", []string{}
+	for _, c := range f.PR.Failed {
+		if cmp.Or(c.Run, "none") == run && c.Name != "" && !slices.Contains(names, c.Name) {
+			names = append(names, c.Name)
+		}
+	}
 	if f.TipRel == flow.RelBehind {
 		prefix = fmt.Sprintf("Pull first (`git pull --ff-only origin %s` — the engine updated the branch). ", a.Branch)
 	}
-	if f.PR.FailedChecks != "" {
-		checks = " (" + f.PR.FailedChecks + ")"
-	}
-	msg := fmt.Sprintf("%sCI failed on PR #%d at %s (run %s)%s — fix it, commit, and run %s again.", prefix, f.PR.Number, flow.H(*a), run, checks, readyCmd(cmp.Or(e.Bin, "sheepdog"), t.Outcomes))
+	msg := fmt.Sprintf("%sCI failed on PR #%d at %s (run %s: %s) — fix it, commit, and run %s again.", prefix, f.PR.Number, flow.H(*a), run, strings.Join(names, ", "), readyCmd(cmp.Or(e.Bin, "sheepdog"), t.Outcomes))
 	return "told worker CI failed (run " + run + ")", false, world.SendRun(ctx, e.HC, a.RunID, msg)
 }
 
-// execDispatchCI is N35: dispatch a workflow_dispatch workflow on the PR branch.
+// execDispatchCI is N35: dispatch the dispatch_workflow setting's workflow on the PR branch.
 func (e *Engine) execDispatchCI(ctx context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
-	a := flow.OpenAttempt(s.Tasks[ti])
+	a, wf := flow.OpenAttempt(s.Tasks[ti]), s.Settings.DispatchWorkflow
 	gctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
-	wf, err := world.DispatchWorkflow(gctx, a.Worktree, a.Branch, flow.H(*a))
-	return cmp.Or("dispatched workflow "+wf+" on "+a.Branch, ""), false, err
+	return "dispatched workflow " + wf + " on " + a.Branch, false, world.DispatchWorkflow(gctx, a.Worktree, a.Branch, flow.H(*a), wf)
 }
 
 // prBody is the PR body and squash message, from task fields only (design.md 9.4).
@@ -1027,7 +1041,7 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 			e.logOnce("factory.git_error", id, a.Worktree+" head_rel", err) // unknown here (e.g. not fetched): no relation, never a guess
 		}
 	}
-	if p != last && ctx.Err() == nil {
+	if !reflect.DeepEqual(p, last) && ctx.Err() == nil {
 		if e.prs == nil {
 			e.prs = map[string]flow.PR{}
 		}
