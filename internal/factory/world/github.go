@@ -167,7 +167,7 @@ func PRSnapshot(ctx context.Context, repoDir, branch string) (p flow.PR, warn, e
 	var warns []error
 	checks := flow.LatestChecks(v.StatusCheckRollup)
 	for i, c := range checks {
-		if id := checkRunID(c); id > 0 && strings.EqualFold(c.Status, "COMPLETED") && strings.EqualFold(c.Conclusion, "CANCELLED") {
+		if id := flow.CheckRunID(c); id > 0 && strings.EqualFold(c.Status, "COMPLETED") && strings.EqualFold(c.Conclusion, "CANCELLED") {
 			checks[i].Stop, err = checkRunStop(ctx, repoDir, repo, id)
 			warns = append(warns, err)
 		}
@@ -180,6 +180,7 @@ func PRSnapshot(ctx context.Context, repoDir, branch string) (p flow.PR, warn, e
 		warns = append(warns, err)
 	}
 	p.Checks = flow.Rollup(checks, wfPending)
+	p.FailedRun, p.FailedJob, p.FailedChecks = flow.FailingRuns(checks, p.Checks)
 	if v.BaseRefName != "" && p.Head != "" {
 		var cmpResp struct {
 			BehindBy int `json:"behind_by"`
@@ -291,20 +292,6 @@ func fetchCheckRuns(ctx context.Context, dir, repo, head string) ([]flow.Check, 
 	return checks, err
 }
 
-func checkRunID(c flow.Check) int64 {
-	if c.ID > 0 {
-		return c.ID
-	}
-	if _, after, ok := strings.Cut(c.DetailsURL, "/job/"); ok {
-		if fs := strings.FieldsFunc(after, func(r rune) bool { return r < '0' || r > '9' }); len(fs) > 0 {
-			if id, err := strconv.ParseInt(fs[0], 10, 64); err == nil {
-				return id
-			}
-		}
-	}
-	return 0
-}
-
 // checkRunStop is why a run was cancelled: "timeout", "" (from outside),
 // or "unknown" when the annotations cannot be read (never re-run).
 func checkRunStop(ctx context.Context, dir, repo string, id int64) (string, error) {
@@ -383,4 +370,60 @@ func DeleteRemoteBranch(ctx context.Context, dir, branch string) error {
 	}
 	_, err = gitCmd(ctx, dir, "push", pushRemote, "--delete", "refs/heads/"+branch)
 	return err
+}
+
+// ErrNoDispatchWorkflow is returned by DispatchWorkflow when no workflow in
+// .github/workflows declares workflow_dispatch (N35 skips to waking the coordinator).
+var ErrNoDispatchWorkflow = errors.New("world: no workflow with workflow_dispatch")
+
+var workflowDispatchRe = regexp.MustCompile(`(?m)^[^#\n]*\bworkflow_dispatch\b`)
+
+// RerunFailedJobs asks GitHub Actions to re-run failed (or cancelled) jobs for
+// each comma-separated workflow run ID (design.md 9.4, N33, N34).
+func RerunFailedJobs(ctx context.Context, repoDir, runIDs string) error {
+	repo, err := ghRepo(ctx, repoDir)
+	if err != nil {
+		return err
+	}
+	ran := false
+	for _, id := range strings.Split(runIDs, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			ran = true
+			if _, err := ghCmd(ctx, repoDir, "run", "rerun", id, "--failed", "--repo", repo); err != nil {
+				return err
+			}
+		}
+	}
+	if !ran {
+		return errors.New("world: no workflow run id to re-run")
+	}
+	return nil
+}
+
+// DispatchWorkflow dispatches the first workflow in .github/workflows at head
+// that declares workflow_dispatch, targeting branch (design.md 9.4, N35).
+func DispatchWorkflow(ctx context.Context, worktree, branch, head string) (string, error) {
+	repo, err := ghRepo(ctx, worktree)
+	if err != nil {
+		return "", err
+	}
+	out, err := gitCmd(ctx, worktree, "ls-tree", "--name-only", head, ".github/workflows/")
+	if err != nil {
+		return "", err
+	}
+	files := strings.Split(out, "\n")
+	slices.Sort(files)
+	for _, f := range files {
+		if ext := filepath.Ext(f); ext != ".yml" && ext != ".yaml" {
+			continue
+		}
+		if body, err := gitCmd(ctx, worktree, "show", head+":"+f); err != nil {
+			return "", err
+		} else if workflowDispatchRe.MatchString(body) {
+			wf := filepath.Base(f)
+			_, err = ghCmd(ctx, worktree, "workflow", "run", wf, "--repo", repo, "--ref", branch)
+			return wf, err
+		}
+	}
+	return "", ErrNoDispatchWorkflow
 }

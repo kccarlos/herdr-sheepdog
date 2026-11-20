@@ -2,6 +2,8 @@ package flow
 
 import (
 	"cmp"
+	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -109,4 +111,46 @@ func Rollup(checks []Check, workflowPending bool) Checks {
 		return ChecksGreen
 	}
 	return ChecksAbsent
+}
+
+// CheckRunID returns c's numeric check-run/job ID from c.ID or DetailsURL.
+func CheckRunID(c Check) int64 {
+	if c.ID > 0 {
+		return c.ID
+	}
+	id, _ := strconv.ParseInt(urlID(c.DetailsURL, "/job/"), 10, 64)
+	return id
+}
+
+func urlID(u, marker string) string {
+	_, after, _ := strings.Cut(u, marker)
+	return after[:len(after)-len(strings.TrimLeft(after, "0123456789"))]
+}
+
+// FailingRuns extracts the unique sorted workflow run IDs, job IDs and names
+// of the latest checks matching a failing or externally-stopped class.
+func FailingRuns(checks []Check, class Checks) (runs, jobs, names string) {
+	want := map[Checks]string{ChecksRed: "red", ChecksStoppedExternal: "stopped_external"}[class]
+	if want == "" {
+		return "", "", ""
+	}
+	var rs, js, ns []string
+	add := func(dst *[]string, v string) {
+		if v != "" && !slices.Contains(*dst, v) {
+			*dst = append(*dst, v)
+		}
+	}
+	for _, c := range LatestChecks(checks) {
+		if c.verdict() == want {
+			add(&rs, urlID(c.DetailsURL, "/actions/runs/"))
+			if id := CheckRunID(c); id > 0 {
+				add(&js, strconv.FormatInt(id, 10))
+			}
+			add(&ns, cmp.Or(c.Name, c.Context))
+		}
+	}
+	slices.Sort(rs)
+	slices.Sort(js)
+	slices.Sort(ns)
+	return strings.Join(rs, ","), strings.Join(js, ","), strings.Join(ns, ", ")
 }

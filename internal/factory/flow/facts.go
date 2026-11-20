@@ -79,6 +79,9 @@ type PR struct {
 	HeadSince      time.Time `json:"head_since"` // when Head was first seen; the checks grace counts from it
 	Mergeable      Mergeable `json:"mergeable"`
 	Checks         Checks    `json:"checks"`
+	FailedRun      string    `json:"failed_run,omitempty"`
+	FailedJob      string    `json:"failed_job,omitempty"`
+	FailedChecks   string    `json:"failed_checks,omitempty"`
 	Behind         bool      `json:"behind"`
 	BehindUnknown  bool      `json:"behind_unknown,omitempty"` // compare failed: Behind false is not "not behind" (N40)
 	ReviewRequired bool      `json:"review_required,omitempty"`

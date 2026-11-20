@@ -337,3 +337,13 @@ func Count(acts []Act, key string) int {
 	}
 	return n
 }
+
+// LastAct returns the newest act with key, or nil if none exists.
+func LastAct(acts []Act, key string) *Act {
+	for i := len(acts) - 1; i >= 0; i-- {
+		if acts[i].Key == key {
+			return &acts[i]
+		}
+	}
+	return nil
+}

@@ -2,6 +2,7 @@ package world
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -39,6 +40,8 @@ case "$1 $2" in
   cat "$D/view.json" 2>/dev/null || { echo 'no pull requests found for branch "x"' >&2; exit 1; } ;;
 "pr merge") [ -f "$D/merge_fail" ] && { echo "GraphQL: Head branch was modified" >&2; exit 1; }; : ;;
 "pr close") [ -f "$D/close_fail" ] && { echo "GraphQL: close failed" >&2; exit 1; }; : ;;
+"run rerun") [ -f "$D/rerun_fail" ] && { echo "HTTP 403: rerun failed" >&2; exit 1; }; : ;;
+"workflow run") [ -f "$D/dispatch_fail" ] && { echo "HTTP 422: dispatch failed" >&2; exit 1; }; : ;;
 api\ *)
   pg=1; case "$2" in *page=*) pg=${2##*page=} ;; esac
   sfx=""; [ "$pg" = 1 ] || sfx=".$pg"
@@ -601,5 +604,59 @@ func TestCheckRunsRoundTwo(t *testing.T) {
 	copySnap(t, "stopped_timeout.annotations.json", filepath.Join(gh, "annotations.2.json"))
 	if p, _, err := PRSnapshot(ctx, repo, "b"); err != nil || p.Checks != flow.ChecksStoppedTimeout {
 		t.Errorf("timeout annotation on page 2: %s, %v; want stopped_timeout", p.Checks, err)
+	}
+}
+
+func TestRerunFailedJobsAndDispatchWorkflow(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+
+	// RerunFailedJobs calls gh run rerun <id> --failed --repo acme/demo.
+	if err := RerunFailedJobs(ctx, repo, ""); err == nil {
+		t.Fatal("empty runIDs succeeded")
+	}
+	if err := RerunFailedJobs(ctx, repo, "101, 202"); err != nil {
+		t.Fatal(err)
+	}
+	wantReruns := []string{
+		"run rerun 101 --failed --repo acme/demo",
+		"run rerun 202 --failed --repo acme/demo",
+	}
+	if got := ghCalls(t, gh, "run rerun"); !slices.Equal(got, wantReruns) {
+		t.Fatalf("rerun calls = %q, want %q", got, wantReruns)
+	}
+
+	// DispatchWorkflow: no workflows -> ErrNoDispatchWorkflow.
+	head := runGit(t, repo, "rev-parse", "HEAD")
+	if _, err := DispatchWorkflow(ctx, repo, "task/t1", head); !errors.Is(err, ErrNoDispatchWorkflow) {
+		t.Fatalf("no workflows err = %v, want ErrNoDispatchWorkflow", err)
+	}
+	// Commented workflow_dispatch is ignored; real workflow_dispatch is dispatched.
+	wfDir := filepath.Join(repo, ".github", "workflows")
+	if err := os.MkdirAll(wfDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wfDir, "a-pr.yml"), []byte("on:\n  pull_request:\n  # workflow_dispatch:\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".github/workflows/a-pr.yml")
+	runGit(t, repo, "commit", "-m", "ci: pr only")
+	head = runGit(t, repo, "rev-parse", "HEAD")
+	if _, err := DispatchWorkflow(ctx, repo, "task/t1", head); !errors.Is(err, ErrNoDispatchWorkflow) {
+		t.Fatalf("commented workflow_dispatch err = %v, want ErrNoDispatchWorkflow", err)
+	}
+	if err := os.WriteFile(filepath.Join(wfDir, "ci.yml"), []byte("on:\n  pull_request:\n  workflow_dispatch:\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".github/workflows/ci.yml")
+	runGit(t, repo, "commit", "-m", "ci: add dispatch")
+	head = runGit(t, repo, "rev-parse", "HEAD")
+	wf, err := DispatchWorkflow(ctx, repo, "task/t1", head)
+	if err != nil || wf != "ci.yml" {
+		t.Fatalf("DispatchWorkflow = %q, %v; want ci.yml, nil", wf, err)
+	}
+	if got := ghCalls(t, gh, "workflow run"); !slices.Equal(got, []string{"workflow run ci.yml --repo acme/demo --ref task/t1"}) {
+		t.Fatalf("workflow run calls = %q", got)
 	}
 }
