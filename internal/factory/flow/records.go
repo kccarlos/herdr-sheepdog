@@ -51,15 +51,19 @@ type Wake struct {
 
 // Task is a planned task. It has no phase field: rows derive where it is.
 type Task struct {
-	ID       string    `json:"id"`
-	Title    string    `json:"title"`
-	Brief    string    `json:"brief"`
-	Outcomes []string  `json:"outcomes"`
-	After    []string  `json:"after,omitempty"`
-	Done     *Merged   `json:"done,omitempty"`
-	Closed   *Closed   `json:"closed,omitempty"`
-	Acts     []Act     `json:"acts,omitempty"`
-	Attempts []Attempt `json:"attempts"`
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Brief     string    `json:"brief"`
+	Outcomes  []string  `json:"outcomes"`
+	After     []string  `json:"after,omitempty"`
+	SplitFrom string    `json:"split_from,omitempty"`
+	Done      *Merged   `json:"done,omitempty"`
+	Closed    *Closed   `json:"closed,omitempty"`
+	Dropped   *Dropped  `json:"dropped,omitempty"`
+	Split     *Split    `json:"split,omitempty"`
+	Recaps    []Recap   `json:"recaps,omitempty"`
+	Acts      []Act     `json:"acts,omitempty"`
+	Attempts  []Attempt `json:"attempts"`
 }
 
 // Merged is the done mark: the task's PR merged at this commit.
@@ -70,6 +74,44 @@ type Merged struct {
 // Closed marks a task closed without a merge.
 type Closed struct {
 	Why string `json:"why"`
+}
+
+// Dropped marks a task dropped by the coordinator (design.md 3, 4.9).
+type Dropped struct {
+	Why string `json:"why"`
+}
+
+// Split marks a task split into child tasks (design.md 3, 4.9).
+type Split struct {
+	Children []string `json:"children"`
+}
+
+// Recap is a non-convergence or limit stop waiting on the coordinator (design.md 3).
+type Recap struct {
+	Trigger string         `json:"trigger"`
+	Allowed []string       `json:"allowed"`
+	Decided *RecapDecision `json:"decided,omitempty"`
+}
+
+// RecapDecision is the coordinator's decision closing a recap.
+type RecapDecision struct {
+	Choice string `json:"choice"`
+	Why    string `json:"why"`
+}
+
+// Ended reports whether t carries a terminal mark (design.md 4.1, N1).
+func Ended(t Task) bool {
+	return t.Done != nil || t.Closed != nil || t.Dropped != nil || t.Split != nil
+}
+
+// OpenRecap returns t's undecided recap, or nil when none is open.
+func OpenRecap(t Task) *Recap {
+	for i := len(t.Recaps) - 1; i >= 0; i-- {
+		if t.Recaps[i].Decided == nil {
+			return &t.Recaps[i]
+		}
+	}
+	return nil
 }
 
 // Attempt is one try at a task, from its base commit.

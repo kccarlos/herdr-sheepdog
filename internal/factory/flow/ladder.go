@@ -7,19 +7,21 @@ const (
 	Passed      = "passed"
 	Fix         = "fix"
 	Review      = "review"
+	RecapAnswer = "recap"
 	NoLadderRow = "no ladder rule matched"
 )
 
 // roundBase is the number of the first round (design.md 3: round{n}).
 const roundBase = 1
 
-// LadderRows is slice 2's review ladder: L7, L8, L9, L10 and L13 of design.md 4.6.
+// LadderRows is slice 2's review ladder: L7, L8, L9, L10, L12 and L13 of design.md 4.6.
 // A row's Decision.Why is its answer; WaitsOn is who that answer waits on.
 var LadderRows = []Row[In]{
 	{ID: "L7", WaitsOn: "the reviewer", When: noRoundCovers, Then: answer(Review)},
 	{ID: "L8", WaitsOn: "the reviewer", When: all(coveringIs(VerdictPass), morePassesNeeded), Then: answer(Review)},
 	{ID: "L9", WaitsOn: "the engine", When: coveringIs(VerdictPass), Then: answer(Passed)},
 	{ID: "L10", WaitsOn: "the reviewer", When: coveringRoundRejected, Then: answer(Review)},
+	{ID: "L12", WaitsOn: "the coordinator", When: all(coveringIs(VerdictChanges), nonConverging), Then: answer(RecapAnswer)},
 	{ID: "L13", WaitsOn: "the worker", When: coveringIs(VerdictChanges), Then: answer(Fix)},
 	{ID: "L-", WaitsOn: "the coordinator", Then: answer(NoLadderRow)},
 }
@@ -60,6 +62,35 @@ func passingCovering(a Attempt, h string) int {
 		}
 	}
 	return n
+}
+
+// nonConverging is L12's guard: the last retro_after_rounds_with_majors
+// reviewer rounds all had majors at round retro_from_round or later, or
+// max_rounds reviewer rounds were run (design.md 4.6).
+func nonConverging(in In) bool {
+	a := *in.attempt()
+	if r := newestCovering(a, headH(in)); r == nil || !isReviewerRound(*r) {
+		return false
+	}
+	var rr []Round
+	for _, r := range a.Rounds {
+		if isReviewerRound(r) {
+			rr = append(rr, r)
+		}
+	}
+	if len(rr) >= in.Settings.MaxRounds {
+		return true
+	}
+	k := in.Settings.RetroAfterRoundsWithMajors
+	if len(rr) < in.Settings.RetroFromRound || len(rr) < k {
+		return false
+	}
+	for _, r := range rr[len(rr)-k:] {
+		if r.Majors == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // nextRound is the number the next review round gets.

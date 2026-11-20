@@ -24,11 +24,12 @@ import (
 var factoryDoctorRunner = factory.Doctor
 
 func printFactoryUsage(w io.Writer) {
-	fprintln(w, "usage: sheepdog factory <start|stop|log|plan|report|doctor> [flags] [folder]")
+	fprintln(w, "usage: sheepdog factory <start|stop|log|plan|recap|report|doctor> [flags] [folder]")
 	fprintln(w, "  start <folder> --goal \"<sentence>\"   start the factory coordinator for a repo")
 	fprintln(w, "  stop [<folder>]                      stop a started factory project and its runs")
 	fprintln(w, "  log [<folder>] [-n N]                each engine step: time, task, rule, asked, decision, why")
 	fprintln(w, "  plan apply <file>                    (coordinator only) apply a JSON plan")
+	fprintln(w, "  recap decide <task> <choice> --why \"<why>\" [--child '<json>' ...]  (coordinator only) decide an open recap")
 	fprintln(w, "  report ready [--reject \"<why>\"]      (worker only) report HEAD ready, or reject the latest review's findings")
 	fprintln(w, "  doctor                               check unattended factory prerequisites:")
 	fprintln(w, "           herdr-core (hc), timed project-volume probe inside herdr-core")
@@ -36,7 +37,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "           logged-in agent CLI (claude, codex or agy) plus a canary start")
 	fprintln(w, "           inside herdr-core, gh login with the default repo pinned, and")
 	fprintln(w, "           codexbar. Exit 1 on FAIL.")
-	fprintln(w, "flags: --goal TEXT, --reject WHY, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
+	fprintln(w, "flags: --goal TEXT, --reject WHY, --why TEXT, --child JSON, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
 }
 
 // runFactory dispatches the `sheepdog factory` command group.
@@ -52,6 +53,8 @@ func runFactory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return runFactoryLog(ctx, args[1:], stdout, stderr)
 	case "plan":
 		return runFactoryPlan(ctx, args[1:], stdout, stderr)
+	case "recap":
+		return runFactoryRecap(ctx, args[1:], stdout, stderr)
 	case "report":
 		return runFactoryReport(ctx, args[1:], stdout, stderr)
 	case "doctor":
@@ -157,6 +160,40 @@ func runFactoryPlan(ctx context.Context, args []string, stdout, stderr io.Writer
 		return 1
 	}
 	fprintln(stdout, "plan applied")
+	return 0
+}
+
+// runFactoryRecap sends `recap decide <task> <choice> --why "<why>" [--child '<json>' ...]` with the run's token.
+func runFactoryRecap(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 || args[0] != "decide" {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	fs := flag.NewFlagSet("factory recap decide", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() { printFactoryUsage(stderr) }
+	why := fs.String("why", "", "reason for the recap decision")
+	var children []json.RawMessage
+	fs.Func("child", "child task JSON (repeatable, for split)", func(v string) error {
+		if !json.Valid([]byte(v)) {
+			return errors.New("--child is not valid JSON")
+		}
+		children = append(children, json.RawMessage(v))
+		return nil
+	})
+	if err := fs.Parse(reorderFactoryDoctorArgs(args[1:])); err != nil {
+		return flagExit(err)
+	}
+	if fs.NArg() != 2 {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	raw, _ := json.Marshal(map[string]any{"task": fs.Arg(0), "choice": fs.Arg(1), "why": *why, "children": children})
+	if err := postFactoryReport(ctx, "recap decide", raw); err != nil {
+		fprintf(stderr, "sheepdog factory recap decide: %v\n", err)
+		return 1
+	}
+	fprintf(stdout, "recap %s: %s\n", fs.Arg(0), fs.Arg(1))
 	return 0
 }
 
@@ -280,6 +317,8 @@ func reorderFactoryDoctorArgs(args []string) []string {
 	var flags, pos []string
 	valueFlags := map[string]bool{
 		"-goal": true, "--goal": true,
+		"-why": true, "--why": true,
+		"-child": true, "--child": true,
 		"-folder": true, "--folder": true,
 		"-config": true, "--config": true,
 		"-hc-socket": true, "--hc-socket": true,

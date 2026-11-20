@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -27,8 +28,12 @@ func (r *Refusal) Error() string { return r.Code + ": " + r.Why }
 // run's token.
 const owner = "owner"
 
-// verbRoles is slice 1's acceptance table: who may send each verb.
-var verbRoles = map[string]string{"start": owner, "stop": owner, "plan apply": flow.RoleCoordinator, "ready": flow.RoleWorker}
+// verbRoles is the acceptance table: who may send each verb.
+var verbRoles = map[string]string{
+	"start": owner, "stop": owner,
+	"plan apply": flow.RoleCoordinator, "recap decide": flow.RoleCoordinator,
+	"ready": flow.RoleWorker,
+}
 
 // Report is the acceptance step for everything a run's terminal sends: the
 // token names the run, and through it the role and the project.
@@ -51,6 +56,9 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 	}
 	if verb == "ready" {
 		return e.acceptReadyLocked(id, &s, role, ti, args)
+	}
+	if verb == "recap decide" {
+		return e.acceptRecapDecideLocked(id, &s, role, args)
 	}
 	if len(s.Tasks) > 0 {
 		return e.refuse(id, "plan_exists", "A plan already exists; change it with plan amend.")
@@ -93,15 +101,15 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 	case !clean:
 		return e.refuse(id, "dirty_tree", "The worktree has uncommitted changes; commit or discard them before reporting ready.")
 	case req.Reject != nil:
-		why := cleanRejectWhy(*req.Reject)
-		if why == "" {
-			return e.refuse(id, "why_missing", "A reject report must carry a non-empty reason (--reject \"<why>\").")
-		}
-		if utf8.RuneCountInString(why) > maxRejectWhyRunes {
-			return e.refuse(id, "invalid_report", "the reason is longer than 500 characters; put details in a file and name it")
+		why, err := e.cleanWhy(id, *req.Reject, "reject report", "--reject")
+		if err != nil {
+			return err
 		}
 		r := flow.RejectableRound(*a, h)
-		if rel != flow.RelSame || r == nil {
+		if rel != flow.RelSame || r == nil || flow.Ladder(flow.In{Task: *t, Settings: s.Settings}) != flow.Fix {
+			if flow.Ladder(flow.In{Task: *t, Settings: s.Settings}) == flow.RecapAnswer {
+				return e.refuse(id, "nothing_to_reject", "Nothing to reject: a recap is open and the coordinator decides; there is nothing for you to do.")
+			}
 			return e.refuse(id, "nothing_to_reject", "Nothing to reject: the newest round covering the current head must be an unrejected reviewer changes verdict with no new commit (after a commit, run report ready without --reject).")
 		}
 		a.Rejects = append(a.Rejects, flow.Reject{Head: h, Round: r.N, Why: why})
@@ -117,6 +125,18 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 }
 
 const maxRejectWhyRunes = 500
+
+// cleanWhy cleans a free-text reason and refuses it when empty or over the cap.
+func (e *Engine) cleanWhy(id, raw, what, flag string) (string, error) {
+	why := cleanRejectWhy(raw)
+	if why == "" {
+		return "", e.refuse(id, "why_missing", fmt.Sprintf("A %s must carry a non-empty reason (%s \"<why>\").", what, flag))
+	}
+	if utf8.RuneCountInString(why) > maxRejectWhyRunes {
+		return "", e.refuse(id, "invalid_report", "the reason is longer than 500 characters; put details in a file and name it")
+	}
+	return why, nil
+}
 
 func cleanRejectWhy(raw string) string {
 	return strings.Join(strings.Fields(strings.Map(func(r rune) rune {
@@ -241,6 +261,10 @@ type planFile struct {
 
 // checkPlan runs the Shape check of design.md 11.7 and returns every failure.
 func checkPlan(raw json.RawMessage) ([]flow.Task, []string) {
+	return checkPlanWith(raw, nil, "")
+}
+
+func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string) ([]flow.Task, []string) {
 	var p planFile
 	var fails []string
 	dec := json.NewDecoder(bytes.NewReader(raw))
@@ -255,37 +279,130 @@ func checkPlan(raw json.RawMessage) ([]flow.Task, []string) {
 	if len(p.Tasks) == 0 {
 		fails = append(fails, "shape: the plan has no tasks")
 	}
+	existingIDs := map[string]bool{}
+	for _, t := range existing {
+		existingIDs[t.ID] = true
+	}
 	ids := map[string]bool{}
+	var newIDs []string
 	for i := range p.Tasks {
 		t := &p.Tasks[i]
 		t.ID = strings.TrimSpace(t.ID)
 		for j := range t.After {
 			t.After[j] = strings.TrimSpace(t.After[j])
 		}
-		if t.ID == "" || ids[t.ID] {
+		if t.ID == "" || ids[t.ID] || existingIDs[t.ID] {
 			fails = append(fails, fmt.Sprintf("shape: task %d needs an id no other task has", i+1))
 		} else {
-			ids[t.ID] = true
+			ids[t.ID], newIDs = true, append(newIDs, t.ID)
 		}
 		if strings.TrimSpace(t.Title) == "" {
 			fails = append(fails, fmt.Sprintf("shape: task %q has no title", t.ID))
 		}
 	}
 	after := map[string][]string{}
+	for _, et := range existing {
+		if et.ID != parentID {
+			after[et.ID] = replaceDep(et.After, parentID, newIDs)
+		}
+	}
 	tasks := make([]flow.Task, len(p.Tasks))
 	for i, t := range p.Tasks {
 		for _, a := range t.After {
-			if !ids[a] {
+			if parentID != "" && a == parentID {
+				fails = append(fails, fmt.Sprintf("shape: task %q is after %q, which is being split", t.ID, a))
+			} else if !ids[a] && !existingIDs[a] {
 				fails = append(fails, fmt.Sprintf("shape: task %q is after %q, which is not in the plan", t.ID, a))
 			}
 		}
 		after[t.ID] = t.After
-		tasks[i] = flow.Task{ID: t.ID, Title: strings.TrimSpace(t.Title), Brief: t.Brief, Outcomes: t.Outcomes, After: t.After, Attempts: []flow.Attempt{}}
+		tasks[i] = flow.Task{ID: t.ID, Title: strings.TrimSpace(t.Title), Brief: t.Brief, Outcomes: t.Outcomes, After: t.After, SplitFrom: parentID, Attempts: []flow.Attempt{}}
 	}
 	if id := cycleAt(p.Tasks, after); id != "" {
 		fails = append(fails, fmt.Sprintf("shape: the after links make a cycle through %q", id))
 	}
 	return tasks, fails
+}
+
+func replaceDep(after []string, old string, repl []string) []string {
+	if old == "" || !slices.Contains(after, old) {
+		return after
+	}
+	var out []string
+	add := func(id string) {
+		if !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	for _, a := range after {
+		if a == old {
+			for _, r := range repl {
+				add(r)
+			}
+		} else {
+			add(a)
+		}
+	}
+	return out
+}
+
+func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, args json.RawMessage) error {
+	var req struct {
+		Task     string            `json:"task"`
+		Choice   string            `json:"choice"`
+		Why      string            `json:"why"`
+		Children []json.RawMessage `json:"children,omitempty"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(args))
+	dec.DisallowUnknownFields()
+	if len(bytes.TrimSpace(args)) == 0 || dec.Decode(&req) != nil || strings.TrimSpace(req.Task) == "" || strings.TrimSpace(req.Choice) == "" {
+		return e.refuse(id, "invalid_report", "A recap decision must carry task and choice.")
+	}
+	taskID, choice := strings.TrimSpace(req.Task), strings.TrimSpace(req.Choice)
+	ti := slices.IndexFunc(s.Tasks, func(t flow.Task) bool { return t.ID == taskID })
+	if ti < 0 || flow.OpenRecap(s.Tasks[ti]) == nil {
+		return e.refuse(id, "no_recap", fmt.Sprintf("Task %q has no open recap.", taskID))
+	}
+	t := &s.Tasks[ti]
+	if flow.Ended(*t) {
+		return e.refuse(id, "already_closed", fmt.Sprintf("Task %q is already ended; its recap no longer needs a decision.", taskID))
+	}
+	rc := flow.OpenRecap(*t)
+	if !slices.Contains(rc.Allowed, choice) {
+		return e.refuse(id, "not_allowed", fmt.Sprintf("Choice %q is not allowed for this recap; allowed: %s.", choice, strings.Join(rc.Allowed, ", ")))
+	}
+	why, err := e.cleanWhy(id, req.Why, "recap decision", "--why")
+	if err != nil {
+		return err
+	}
+	if choice == "drop" {
+		if len(req.Children) > 0 {
+			return e.refuse(id, "invalid_report", "drop does not take --child tasks.")
+		}
+		rc.Decided, t.Dropped = &flow.RecapDecision{Choice: choice, Why: why}, &flow.Dropped{Why: why}
+		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why},
+			Rule: "recap decide", Decision: "dropped", Why: why})
+	}
+	raw, _ := json.Marshal(struct {
+		Tasks []json.RawMessage `json:"tasks"`
+	}{Tasks: req.Children})
+	children, fails := checkPlanWith(raw, s.Tasks, t.ID)
+	if len(fails) > 0 {
+		return e.refuse(id, "plan_invalid", strings.Join(fails, "; ")+".")
+	}
+	childIDs := make([]string, len(children))
+	for i, c := range children {
+		childIDs[i] = c.ID
+	}
+	rc.Decided, t.Split = &flow.RecapDecision{Choice: choice, Why: why}, &flow.Split{Children: childIDs}
+	for i := range s.Tasks {
+		if i != ti {
+			s.Tasks[i].After = replaceDep(s.Tasks[i].After, t.ID, childIDs)
+		}
+	}
+	s.Tasks = append(s.Tasks, children...)
+	return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why, "children": childIDs},
+		Rule: "recap decide", Decision: "split into " + strings.Join(childIDs, ", "), Why: why})
 }
 
 // cycleAt returns a task on a cycle of after links, or "" when there is none.

@@ -42,7 +42,11 @@ func taskFacts(t flow.Task, f flow.Facts) string {
 	if len(title) > maxFactsTitle {
 		title = append(title[:maxFactsTitle], '…')
 	}
-	return fmt.Sprintf("title %q; H %s; PR #%d, checks %s; last verdict %s", string(title), h, cmp.Or(f.PR.Number, pr), cmp.Or(string(f.PR.Checks), "unknown"), verdict)
+	out := fmt.Sprintf("title %q; H %s; PR #%d, checks %s; last verdict %s", string(title), h, cmp.Or(f.PR.Number, pr), cmp.Or(string(f.PR.Checks), "unknown"), verdict)
+	if rc := flow.OpenRecap(t); rc != nil {
+		out += fmt.Sprintf("; recap trigger %s, allowed [%s]", rc.Trigger, strings.Join(rc.Allowed, ", "))
+	}
+	return out
 }
 
 // wakeMessage is the one message a batch of wakes is delivered as. It is

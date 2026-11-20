@@ -176,6 +176,20 @@ func MergePR(ctx context.Context, repoDir string, number int, head, body string)
 	return err
 }
 
+// ClosePR closes PR number with a short comment and keeps its branch (never
+// --delete-branch, never merges; design.md 4.1 N1, 4.9).
+func ClosePR(ctx context.Context, repoDir string, number int, note string) error {
+	if number <= 0 || strings.TrimSpace(note) == "" {
+		return fmt.Errorf("world: close PR needs a PR number and a note (got #%d)", number)
+	}
+	repo, err := ghRepo(ctx, repoDir)
+	if err != nil {
+		return err
+	}
+	_, err = ghCmd(ctx, repoDir, "pr", "close", strconv.Itoa(number), "--repo", repo, "--comment", note)
+	return err
+}
+
 // DeleteRemoteBranch deletes branch on the push remote. The caller calls it
 // only once the PR reads merged, never as part of the merge (design.md
 // 9.4). A branch already gone (GitHub may delete it on merge) is not an error.

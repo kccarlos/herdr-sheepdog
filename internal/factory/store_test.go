@@ -67,7 +67,9 @@ func TestLoadStateFillsNewSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (flow.Settings{ReviewRounds: 1, ChecksGraceMinutes: 9, StuckMinutes: flow.DefaultSettings().StuckMinutes}); got.Settings != want {
+	want := flow.DefaultSettings()
+	want.ReviewRounds, want.ChecksGraceMinutes = 1, 9
+	if got.Settings != want {
 		t.Fatalf("settings = %+v, want %+v", got.Settings, want)
 	}
 }
