@@ -2,7 +2,10 @@ package flow
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -38,6 +41,8 @@ type Settings struct {
 	// DispatchWorkflow is the one workflow file under .github/workflows
 	// that N35 may dispatch; empty never dispatches (design.md 9.4).
 	DispatchWorkflow string `json:"dispatch_workflow,omitempty"`
+	// Models maps each role to its ordered candidate list (design.md 9.1, 10.1).
+	Models map[string][]Candidate `json:"models,omitempty"`
 }
 
 // Range limits for each setting.
@@ -118,6 +123,9 @@ func (s Settings) Changed() []string {
 	if s.DispatchWorkflow != "" {
 		out = append(out, "dispatch_workflow "+s.DispatchWorkflow)
 	}
+	if len(s.Models) > 0 {
+		out = append(out, "models "+strings.Join(slices.Sorted(maps.Keys(s.Models)), ","))
+	}
 	return out
 }
 
@@ -153,5 +161,5 @@ func (s Settings) Validate() error {
 	if w := s.DispatchWorkflow; w != "" && !WorkflowFile.MatchString(w) {
 		return fmt.Errorf("dispatch_workflow %q: a .yml or .yaml file name under .github/workflows (letters, digits, . _ -; no path)", w)
 	}
-	return nil
+	return ValidateCandidates("models", s.Models)
 }

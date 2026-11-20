@@ -199,7 +199,7 @@ func TestPlanShape(t *testing.T) {
 		{"ids are trimmed", `{"tasks":[{"id":" A ","estimate_lines":50,"title":"feat: a",` + testPlanJSON + `},{"id":"B","estimate_lines":50,"title":"feat: b",` + testPlanJSON + `,"after":[" A"]}]}`, nil},
 		{"valid DAG", `{"tasks":[{"id":"A","estimate_lines":50,"title":"feat: a",` + testPlanJSON + `},{"id":"B","estimate_lines":50,"title":"feat: b",` + testPlanJSON + `,"after":["A"]},{"id":"C","estimate_lines":50,"title":"feat: c",` + testPlanJSON + `,"after":["A"]},{"id":"D","estimate_lines":50,"title":"feat: d",` + testPlanJSON + `,"after":["B","C"]}]}`, nil},
 	} {
-		tasks, fails := checkPlan(json.RawMessage(c.plan), flow.DefaultSettings().TaskSizeLimit)
+		tasks, fails := checkPlanWith(json.RawMessage(c.plan), nil, "", flow.DefaultSettings(), flow.ResolveFacts{})
 		got := strings.Join(fails, "; ")
 		if (c.want == nil) != (len(fails) == 0) {
 			t.Errorf("%s: fails = %q, want %q", c.name, got, c.want)
@@ -956,7 +956,7 @@ func TestPlanScopeAndTitle(t *testing.T) {
 		"perf(db): cache", "ci: pin go", "build(ios): bump", "style: gofmt", "revert: undo",
 	} {
 		raw := `{"tasks":[{"id":"T1","title":` + strconvQuote(okTitle) + `,"estimate_lines":20,` + testPlanJSON + `}]}`
-		if _, fails := checkPlan(json.RawMessage(raw), 400); len(fails) != 0 {
+		if _, fails := checkPlanWith(json.RawMessage(raw), nil, "", flow.Settings{TaskSizeLimit: 400}, flow.ResolveFacts{}); len(fails) != 0 {
 			t.Errorf("valid title %q failed: %v", okTitle, fails)
 		}
 	}
@@ -1389,7 +1389,7 @@ func TestCheckOutcomesRejectsEqualsAndNewline(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := `{"tasks":[{"id":"T1","title":"feat: x","estimate_lines":20,` + testScopeJSON + `,"outcomes":[{"text":` + strconvQuote(tc.text) + `,"proved_by":"cmd: true"}]}]}`
-			_, fails := checkPlan(json.RawMessage(raw), 400)
+			_, fails := checkPlanWith(json.RawMessage(raw), nil, "", flow.Settings{TaskSizeLimit: 400}, flow.ResolveFacts{})
 			got := strings.Join(fails, "; ")
 			if len(fails) == 0 || !strings.Contains(got, `task "T1"`) || !strings.Contains(got, tc.wantOutcome) {
 				t.Fatalf("checkPlan(%s) fails = %q, want failure naming task T1 and outcome %q", tc.name, got, tc.wantOutcome)

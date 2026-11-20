@@ -69,7 +69,7 @@ func TestLoadStateFillsNewSettings(t *testing.T) {
 	}
 	want := flow.DefaultSettings()
 	want.ReviewRounds, want.ChecksGraceMinutes = 1, 9
-	if got.Settings != want {
+	if !reflect.DeepEqual(got.Settings, want) {
 		t.Fatalf("settings = %+v, want %+v", got.Settings, want)
 	}
 }
