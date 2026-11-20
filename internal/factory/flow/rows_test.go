@@ -274,7 +274,7 @@ func TestRowCases(t *testing.T) {
 		{"N6", with(sizeRecap), []string{"wake_coordinator@recap@1", "tell_worker_stop@1"}},
 		{"N6", with(ciRecap), []string{"wake_coordinator@recap@1", "tell_worker_stop@1"}},
 		{"N6", with(sizeRecap, func(in *In) { in.Facts.Worker = Run{} }), []string{"wake_coordinator@recap@1"}},
-		{"N7", with(diverged), []string{"tell_worker_diverged@c9@c1"}},
+		{"N7", with(diverged), []string{"tell_worker_diverged@c1"}},
 		{"N8", with(nothingF, prGone), []string{"wake_coordinator@nothing_to_change@0"}},
 		{"N9", with(noAttempts, waitDep), nil},
 		{"N9", with(noAttempts, dropDep), []string{"wake_coordinator@dep_dropped@T2"}},
@@ -1193,36 +1193,39 @@ func TestN13CIFailsScopedToAttempt(t *testing.T) {
 
 // TestN7DivergedAndForeignPush covers N7: diverged tip, force-pushed (diverged)
 // PR head, foreign commit on PR head, and uncovered tip behind H -> tell worker
-// once, wait while working, wake coordinator once naming say+retry; never merge.
+// once per H, wait until the worker's turn ends after the tell, wake coordinator
+// once per H naming say+retry; merge_only unknown waits without telling or waking.
 func TestN7DivergedAndForeignPush(t *testing.T) {
 	prDiv := func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel = "f9", RelDiverged }
 	prForeign := func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel, in.Facts.PR.HeadMergeOnly = "f8", RelAhead, false }
 	tipBehindUncovered := func(in *In) { in.Facts.Tip, in.Facts.TipRel = "b0", RelBehind }
 
-	for name, tc := range map[string]struct {
-		mod    func(*In)
-		target string
-	}{
-		"tip diverged":         {diverged, "c9"},
-		"PR head diverged":     {prDiv, "f9"},
-		"PR head foreign push": {prForeign, "f8"},
-		"tip behind uncovered": {tipBehindUncovered, "b0"},
+	for name, mod := range map[string]func(*In){
+		"tip diverged":         diverged,
+		"PR head diverged":     prDiv,
+		"PR head foreign push": prForeign,
+		"tip behind uncovered": tipBehindUncovered,
 	} {
-		in := with(tc.mod)
-		tellKey := "tell_worker_diverged@" + tc.target + "@c1"
-		wakeKey := "wake_coordinator@diverged@" + tc.target + "@c1"
+		in := with(mod)
+		tellKey := "tell_worker_diverged@c1"
+		wakeKey := "wake_coordinator@diverged@c1"
 		r, d := FirstMatch(TaskRows, in)
 		if r.ID != "N7" || !slices.Equal(d.Asked, []string{tellKey}) {
 			t.Fatalf("%s first = %s %v, want N7 [%s]", name, r.ID, d.Asked, tellKey)
 		}
-		// Told once; while worker is working, wait.
+		// Told once; still idle before worker has had a turn -> wait (no wake).
 		a0(&in).Acts = append(a0(&in).Acts, Act{Key: tellKey, Result: "done", At: now})
+		if r, d := FirstMatch(TaskRows, in); r.ID != "N7" || len(d.Asked) != 0 {
+			t.Fatalf("%s idle before turn = %s %v, want N7 wait", name, r.ID, d.Asked)
+		}
+		// While worker is working -> wait.
 		in.Facts.Worker.State = RunWorking
 		if r, d := FirstMatch(TaskRows, in); r.ID != "N7" || len(d.Asked) != 0 {
 			t.Fatalf("%s while working = %s %v, want N7 wait", name, r.ID, d.Asked)
 		}
-		// Worker turn ends and N7 still holds -> wake coordinator once naming say and retry.
+		// Worker turn ends after tell and N7 still holds -> wake coordinator once naming say and retry.
 		in.Facts.Worker.State = RunIdle
+		in.Facts.Worker.LastTurnEnd = now.Add(time.Second)
 		r, d = FirstMatch(TaskRows, in)
 		if r.ID != "N7" || !slices.Equal(d.Asked, []string{wakeKey}) || !strings.Contains(d.Why, "say") || !strings.Contains(d.Why, "retry") {
 			t.Fatalf("%s after turn end = %s %v (%q), want N7 [%s] naming say+retry", name, r.ID, d.Asked, d.Why, wakeKey)
@@ -1233,24 +1236,30 @@ func TestN7DivergedAndForeignPush(t *testing.T) {
 			t.Fatalf("%s repeat after wake = %s %v, want N7 nil", name, r.ID, d.Asked)
 		}
 	}
+
+	// HeadMergeOnlyUnknown waits at N7: no tell, no wake, no merge.
+	unk := with(func(in *In) {
+		in.Facts.PR.Head, in.Facts.PR.HeadRel, in.Facts.PR.HeadMergeOnlyUnknown = "m2", RelAhead, true
+	})
+	if r, d := FirstMatch(TaskRows, unk); r.ID != "N7" || len(d.Asked) != 0 {
+		t.Fatalf("HeadMergeOnlyUnknown = %s %v, want N7 wait (no asks)", r.ID, d.Asked)
+	}
 }
 
-// TestPRAdoptTable covers every row P1..P4 of PRAdoptRows (design.md 9.4, KB-GIT-2).
+// TestPRAdoptTable covers every row P2..P4 of PRAdoptRows (design.md 9.4, KB-GIT-2).
 func TestPRAdoptTable(t *testing.T) {
-	own := PRCandidate{Number: 7, State: PROpen, Base: "main", Branch: "task/t1"}
+	own := PRCandidate{Number: 7, State: PROpen, Base: "main"}
 	cases := []struct {
 		name, row, action string
 		num               int
 		in                PRAdoptIn
 	}{
-		{"not pushed", "P1", PRRefuse, 0, PRAdoptIn{Pushed: false, Branch: "task/t1", Base: "main", PRs: []PRCandidate{own}}},
-		{"no PR", "P2", PRCreate, 0, PRAdoptIn{Pushed: true, Branch: "task/t1", Base: "main"}},
-		{"own open PR", "P3", PRAdopt, 7, PRAdoptIn{Pushed: true, Branch: "task/t1", Base: "main", PRs: []PRCandidate{own}}},
-		{"fork PR", "P4", PRRefuse, 0, PRAdoptIn{Pushed: true, Branch: "task/t1", Base: "main", PRs: []PRCandidate{{Number: 8, State: PROpen, Base: "main", Branch: "task/t1", IsCrossRepository: true}}}},
-		{"other base", "P4", PRRefuse, 0, PRAdoptIn{Pushed: true, Branch: "task/t1", Base: "main", PRs: []PRCandidate{{Number: 9, State: PROpen, Base: "release", Branch: "task/t1"}}}},
-		{"other branch", "P4", PRRefuse, 0, PRAdoptIn{Pushed: true, Branch: "task/t1", Base: "main", PRs: []PRCandidate{{Number: 10, State: PROpen, Base: "main", Branch: "other"}}}},
-		{"closed PR", "P4", PRRefuse, 0, PRAdoptIn{Pushed: true, Branch: "task/t1", Base: "main", PRs: []PRCandidate{{Number: 11, State: PRClosed, Base: "main", Branch: "task/t1"}}}},
-		{"merged PR", "P4", PRRefuse, 0, PRAdoptIn{Pushed: true, Branch: "task/t1", Base: "main", PRs: []PRCandidate{{Number: 12, State: PRMerged, Base: "main", Branch: "task/t1"}}}},
+		{"no PR", "P2", PRCreate, 0, PRAdoptIn{Base: "main"}},
+		{"own open PR", "P3", PRAdopt, 7, PRAdoptIn{Base: "main", PRs: []PRCandidate{own}}},
+		{"fork PR", "P4", PRRefuse, 0, PRAdoptIn{Base: "main", PRs: []PRCandidate{{Number: 8, State: PROpen, Base: "main", IsCrossRepository: true}}}},
+		{"other base", "P4", PRRefuse, 0, PRAdoptIn{Base: "main", PRs: []PRCandidate{{Number: 9, State: PROpen, Base: "release"}}}},
+		{"closed PR", "P4", PRRefuse, 0, PRAdoptIn{Base: "main", PRs: []PRCandidate{{Number: 11, State: PRClosed, Base: "main"}}}},
+		{"merged PR", "P4", PRRefuse, 0, PRAdoptIn{Base: "main", PRs: []PRCandidate{{Number: 12, State: PRMerged, Base: "main"}}}},
 	}
 	covered := map[string]bool{}
 	for _, c := range cases {

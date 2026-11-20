@@ -616,7 +616,14 @@ func DeltaRanges(ctx context.Context, worktree, since, head string) ([]string, e
 	var ranges []string
 	for ln := range strings.Lines(out) {
 		f := strings.Fields(ln)
-		if len(f) < 2 || flow.IsMergeOnly(flow.MergeOnlyIn{Rel: flow.RelAhead, Commits: []flow.MergeCommit{inspectMergeCommit(ctx, worktree, f, mb)}}) {
+		if len(f) < 2 {
+			continue
+		}
+		mc, err := inspectMergeCommit(ctx, worktree, f, mb)
+		if err != nil {
+			return nil, err
+		}
+		if flow.IsMergeOnly(flow.MergeOnlyIn{Rel: flow.RelAhead, Commits: []flow.MergeCommit{mc}}) {
 			continue
 		}
 		if n := len(ranges); n > 0 {
@@ -680,27 +687,38 @@ func MergeOnly(ctx context.Context, dir, x, h string) (bool, error) {
 	}
 	var commits []flow.MergeCommit
 	for ln := range strings.Lines(out) {
-		commits = append(commits, inspectMergeCommit(ctx, dir, strings.Fields(ln), mb))
+		mc, err := inspectMergeCommit(ctx, dir, strings.Fields(ln), mb)
+		if err != nil {
+			return false, err
+		}
+		commits = append(commits, mc)
 	}
 	return flow.IsMergeOnly(flow.MergeOnlyIn{Rel: flow.RelAhead, Commits: commits}), nil
 }
 
-func inspectMergeCommit(ctx context.Context, dir string, f []string, mb string) flow.MergeCommit {
+func inspectMergeCommit(ctx context.Context, dir string, f []string, mb string) (flow.MergeCommit, error) {
 	c := flow.MergeCommit{Parents: max(0, len(f)-1)}
 	if c.Parents != 2 {
-		return c
+		return c, nil
 	}
 	c.SecondInBase = isAncestor(ctx, dir, f[2], mb)
 	if !c.SecondInBase {
-		return c
+		return c, ctx.Err()
 	}
 	want, err := gitCmd(ctx, dir, "merge-tree", "--write-tree", f[1], f[2])
 	if err != nil {
-		return c
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() == 1 && ctx.Err() == nil {
+			return c, nil // merge conflict: not a clean merge
+		}
+		return c, err
 	}
 	got, err := gitCmd(ctx, dir, "rev-parse", f[0]+"^{tree}")
-	c.TreeMatches = err == nil && got == want
-	return c
+	if err != nil {
+		return c, err
+	}
+	c.TreeMatches = got == want
+	return c, nil
 }
 
 func isAncestor(ctx context.Context, dir, a, b string) bool {

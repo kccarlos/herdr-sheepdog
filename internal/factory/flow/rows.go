@@ -123,10 +123,14 @@ func tipAtOrBehindH(in In) bool {
 	return in.Facts.TipRel == RelSame || a != nil && in.Facts.TipRel == RelBehind && Covers(*a, in.Facts.Tip, H(*a))
 }
 func tipDivergedOrUncovered(in In) bool {
-	return in.Facts.TipRel == RelDiverged || in.Facts.TipRel == RelBehind && !Covers(*in.attempt(), in.Facts.Tip, headH(in))
+	a := in.attempt()
+	return a != nil && (in.Facts.TipRel == RelDiverged || in.Facts.TipRel == RelBehind && !Covers(*a, in.Facts.Tip, headH(in)))
 }
 func prHeadDivergedOrForeign(in In) bool {
-	return prOpen(in) && answered(in) && (in.Facts.PR.HeadRel == RelDiverged || in.Facts.PR.HeadRel == RelAhead && !in.Facts.PR.HeadMergeOnly)
+	return prOpen(in) && answered(in) && (in.Facts.PR.HeadRel == RelDiverged || in.Facts.PR.HeadRel == RelAhead && !in.Facts.PR.HeadMergeOnly && !in.Facts.PR.HeadMergeOnlyUnknown)
+}
+func prHeadMergeOnlyUnknown(in In) bool {
+	return prOpen(in) && answered(in) && in.Facts.PR.HeadRel == RelAhead && in.Facts.PR.HeadMergeOnlyUnknown
 }
 func prBehindH(in In) bool { return in.Facts.PR.HeadRel == RelBehind }
 func prHeadIsH(in In) bool { return in.Facts.PR.Head == headH(in) }
@@ -239,16 +243,20 @@ var TaskRows = []Row[In]{
 		}
 		return say("a recap is open", once(in.acts(), key(AskWake, "recap", n)), tell)(in)
 	}},
-	{ID: "N7", WaitsOn: "the worker; then the coordinator", When: all(hasAttempt, anyOf(tipDivergedOrUncovered, prHeadDivergedOrForeign)), Then: func(in In) Decision {
-		h, target := headH(in), n7Target(in)
-		tk := key(AskTellDiverged, target, h)
-		if !Done(in.acts(), tk) {
-			return say(n7Why(in, false), ensureRun(in, in.Facts.Worker, AskStartWorker), once(in.acts(), tk))(in)
+	{ID: "N7", WaitsOn: "the worker; then the coordinator", When: all(hasAttempt, anyOf(tipDivergedOrUncovered, prHeadDivergedOrForeign, prHeadMergeOnlyUnknown)), Then: func(in In) Decision {
+		if !tipDivergedOrUncovered(in) && !prHeadDivergedOrForeign(in) {
+			return say("cannot tell if PR head is merge_only: wait")(in)
 		}
-		if working(in) {
-			return say(n7Why(in, false))(in)
+		h := headH(in)
+		tk := key(AskTellDiverged, h)
+		tell := LastAct(in.acts(), tk)
+		if tell == nil || tell.Result != "done" {
+			return say(N7Why(in, false), ensureRun(in, in.Facts.Worker, AskStartWorker), once(in.acts(), tk))(in)
 		}
-		return say(n7Why(in, true), once(in.acts(), key(AskWake, "diverged", target, h)))(in)
+		if working(in) || !in.Facts.Worker.LastTurnEnd.After(tell.At) {
+			return say(N7Why(in, false))(in)
+		}
+		return say(N7Why(in, true), once(in.acts(), key(AskWake, "diverged", h)))(in)
 	}},
 	{ID: "N8", WaitsOn: "the coordinator", When: func(in In) bool { return hasAttempt(in) && in.attempt().NothingToChange != "" }, Then: func(in In) Decision {
 		a := in.attempt()
@@ -409,19 +417,23 @@ var TaskRows = []Row[In]{
 	}},
 }
 
-func n7Target(in In) string {
-	if prHeadDivergedOrForeign(in) {
-		return in.Facts.PR.Head
+// N7Why describes the N7 stall for in, shared by the row and executor so they
+// cannot drift.
+func N7Why(in In, wake bool) string {
+	h, branch := headH(in), ""
+	if a := in.attempt(); a != nil {
+		branch = a.Branch
 	}
-	return in.Facts.Tip
-}
-
-func n7Why(in In, wake bool) string {
-	msg := "the worktree tip diverged from H"
-	if prHeadDivergedOrForeign(in) {
-		msg = "the PR head diverged from H or has changes the engine did not push"
-	} else if in.Facts.TipRel == RelBehind {
-		msg = "the worktree tip is behind H: tell the worker to pull"
+	var msg string
+	switch {
+	case prHeadDivergedOrForeign(in):
+		msg = fmt.Sprintf("PR #%d head %s diverged from H %s or has changes the engine did not push — restore branch %s (never force-push)", in.Facts.PR.Number, in.Facts.PR.Head, h, branch)
+	case in.Facts.TipRel == RelBehind:
+		msg = fmt.Sprintf("worktree tip %s is behind H %s — pull (`git pull --ff-only origin %s`)", in.Facts.Tip, h, branch)
+	case in.Facts.TipDivergedByMergeOnly:
+		msg = fmt.Sprintf("worktree tip %s diverged from H %s after an engine branch update — pull (`git fetch origin && git merge --no-edit origin/%s`, never rebase)", in.Facts.Tip, h, branch)
+	default:
+		msg = fmt.Sprintf("worktree tip %s diverged from H %s — restore branch %s (never rebase or force-push)", in.Facts.Tip, h, branch)
 	}
 	if wake {
 		return msg + " and still holds after the worker's turn: use say to the worker, then retry"

@@ -69,11 +69,11 @@ func ghCmd(ctx context.Context, dir string, args ...string) (string, error) {
 // maxPRTitleRunes is GitHub's PR title length limit (cut on a rune boundary).
 const maxPRTitleRunes = 256
 
-func capTitle(s string, limit int) string {
-	if utf8.RuneCountInString(s) <= limit {
+func capTitle(s string) string {
+	if utf8.RuneCountInString(s) <= maxPRTitleRunes {
 		return s
 	}
-	return string([]rune(s)[:limit])
+	return string([]rune(s)[:maxPRTitleRunes])
 }
 
 // PushAndOpenPR pushes head to branch on the push remote (never forced: a
@@ -93,14 +93,15 @@ func PushAndOpenPR(ctx context.Context, worktree, branch, head, title, body stri
 		return 0, err
 	}
 	base := strings.TrimPrefix(ref, "refs/remotes/"+pushRemote+"/")
-	out, err := ghCmd(ctx, worktree, "pr", "list", "--repo", repo, "--head", branch, "--state", "all", "--json", "number,state,baseRefName,headRefName,headRefOid,isCrossRepository")
+	// No headRefOid check: GitHub can lag on updating a PR's head SHA after a re-push.
+	out, err := ghCmd(ctx, worktree, "pr", "list", "--repo", repo, "--head", branch, "--state", "all", "--json", "number,state,baseRefName,isCrossRepository")
 	if err != nil {
 		return 0, err
 	}
 	var prs []struct {
-		Number                                      int
-		State, BaseRefName, HeadRefName, HeadRefOid string
-		IsCrossRepository                           bool
+		Number             int
+		State, BaseRefName string
+		IsCrossRepository  bool
 	}
 	if err := json.Unmarshal([]byte(out), &prs); err != nil {
 		return 0, fmt.Errorf("world: gh pr list: %w", err)
@@ -109,16 +110,16 @@ func PushAndOpenPR(ctx context.Context, worktree, branch, head, title, body stri
 	for i, p := range prs {
 		cands[i] = flow.PRCandidate{
 			Number: p.Number, State: flow.PRState(strings.ToLower(p.State)),
-			Base: p.BaseRefName, Branch: cmp.Or(p.HeadRefName, branch), IsCrossRepository: p.IsCrossRepository,
+			Base: p.BaseRefName, IsCrossRepository: p.IsCrossRepository,
 		}
 	}
-	switch action, n, why := flow.AdoptPR(flow.PRAdoptIn{Pushed: true, Branch: branch, Base: base, PRs: cands}); action {
+	switch action, n, why := flow.AdoptPR(flow.PRAdoptIn{Base: base, PRs: cands}); action {
 	case flow.PRAdopt:
 		return n, nil
 	case flow.PRRefuse:
 		return 0, fmt.Errorf("world: %s: %s", branch, why)
 	}
-	out, err = ghCmd(ctx, worktree, "pr", "create", "--repo", repo, "--head", branch, "--base", base, "--title", capTitle(title, maxPRTitleRunes), "--body", body)
+	out, err = ghCmd(ctx, worktree, "pr", "create", "--repo", repo, "--head", branch, "--base", base, "--title", capTitle(title), "--body", body)
 	if err != nil {
 		return 0, err
 	}
@@ -138,34 +139,50 @@ type rawPRView struct {
 	MergeCommit                                               struct{ Oid string }
 }
 
-// PRSnapshot reads the PR for branch (design.md 7.3). No PR for the branch
-// is an answer (State none). When gh pr view is denied on statusCheckRollup,
-// it falls back to REST check-runs and commit statuses; if that also fails,
-// or the network fails, Checks is unreadable and err is returned so the
-// caller raises github_unavailable. A failure is never remembered as "not a
-// GitHub repo" (KB-GIT-20). A failed extra call is returned in warn, never
-// green or re-runnable: stopped_unknown, absent, BehindUnknown. HeadRel and
-// HeadSince are left to the caller.
-func PRSnapshot(ctx context.Context, repoDir, branch string) (p flow.PR, warn, err error) {
+// PRSnapshot reads the PR by number when number > 0, else by branch (design.md
+// 7.3). No PR (or a PR whose base differs from the project base) is an answer
+// (State none). When gh pr view is denied on statusCheckRollup, it falls back
+// to REST check-runs and commit statuses; if that also fails, or the network
+// fails, Checks is unreadable and err is returned so the caller raises
+// github_unavailable. A failure is never remembered as "not a GitHub repo"
+// (KB-GIT-20). A failed extra call is returned in warn, never green or
+// re-runnable: stopped_unknown, absent, BehindUnknown. HeadRel and HeadSince
+// are left to the caller.
+func PRSnapshot(ctx context.Context, repoDir, branch string, number int) (p flow.PR, warn, err error) {
 	repo, err := ghRepo(ctx, repoDir)
 	if err != nil {
 		return flow.PR{}, nil, err
 	}
+	baseRef, _, err := remoteBaseCommit(ctx, repoDir, false)
+	if err != nil {
+		return flow.PR{Checks: flow.ChecksUnreadable}, nil, err
+	}
+	base := strings.TrimPrefix(baseRef, "refs/remotes/"+pushRemote+"/")
+	target := branch
+	if number > 0 {
+		target = strconv.Itoa(number)
+	}
 	checksDenied := false
-	raw, err := ghCmd(ctx, repoDir, "pr", "view", branch, "--repo", repo, "--json", prViewFields)
-	if err != nil && strings.Contains(err.Error(), "no pull requests found") {
+	raw, err := ghCmd(ctx, repoDir, "pr", "view", target, "--repo", repo, "--json", prViewFields)
+	if err != nil && (strings.Contains(err.Error(), "no pull requests found") || strings.Contains(err.Error(), "Could not resolve to a PullRequest")) {
 		return flow.PR{Answered: true, State: flow.PRNone}, nil, nil
 	} else if err != nil && isChecksDenied(err) {
 		checksDenied = true
-		raw, err = ghCmd(ctx, repoDir, "pr", "view", branch, "--repo", repo, "--json", strings.Replace(prViewFields, "statusCheckRollup,", "", 1))
+		raw, err = ghCmd(ctx, repoDir, "pr", "view", target, "--repo", repo, "--json", strings.Replace(prViewFields, "statusCheckRollup,", "", 1))
 	}
 	if err != nil {
 		return flow.PR{Checks: flow.ChecksUnreadable}, nil, err
 	}
 	v, p, err := decodeSnapshot([]byte(raw))
-	if err != nil || p.State != flow.PROpen {
-		p.Checks = flow.Rollup(v.StatusCheckRollup, false)
+	if err != nil {
 		return p, nil, err
+	}
+	if v.BaseRefName != base {
+		return flow.PR{Answered: true, State: flow.PRNone}, nil, nil
+	}
+	if p.State != flow.PROpen {
+		p.Checks = flow.Rollup(v.StatusCheckRollup, false)
+		return p, nil, nil
 	}
 	if checksDenied && p.Head != "" {
 		if v.StatusCheckRollup, err = fetchCheckRuns(ctx, repoDir, repo, p.Head); err != nil {

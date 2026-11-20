@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -31,8 +32,9 @@ func (e *Engine) execMerge(ctx context.Context, _ string, s *flow.State, ti int,
 	t, a := s.Tasks[ti], s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
 	gctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
-	err := world.MergePR(gctx, s.Project.Folder, f.PR.Number, flow.H(a), prBody(t))
-	return fmt.Sprintf("asked GitHub to merge PR #%d at %s", f.PR.Number, flow.H(a)), false, err
+	num := cmp.Or(a.PR, f.PR.Number)
+	err := world.MergePR(gctx, s.Project.Folder, num, flow.H(a), prBody(t))
+	return fmt.Sprintf("asked GitHub to merge PR #%d at %s", num, flow.H(a)), false, err
 }
 
 // execMarkDone is N2: done{merged commit} from the snapshot that reads merged.
@@ -105,7 +107,7 @@ func closeOpenPR(ctx context.Context, folder string, a flow.Attempt, note string
 	if a.PR <= 0 {
 		return false, nil
 	}
-	p, _, err := world.PRSnapshot(ctx, folder, a.Branch)
+	p, _, err := world.PRSnapshot(ctx, folder, a.Branch, a.PR)
 	if err != nil || p.State != flow.PROpen {
 		return false, err
 	}

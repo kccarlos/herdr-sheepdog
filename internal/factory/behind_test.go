@@ -227,7 +227,10 @@ func TestN40HandEditedUpdateHeadNeverMovesH(t *testing.T) {
 
 	writePRJSON(t, l.gh, "view.json", mBad, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":0}`)
+	l.pass() // N7 tells worker
+	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "working"})
 	l.pass()
+	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "idle"})
 	l.pass()
 
 	a := l.state().Tasks[0].Attempts[0]
@@ -238,8 +241,8 @@ func TestN40HandEditedUpdateHeadNeverMovesH(t *testing.T) {
 		t.Fatalf("hand-edited merge was merged: %q", got)
 	}
 	wakes := l.state().Project.Wakes
-	if len(wakes) != 1 || wakes[0].Key != "diverged@"+mBad+"@"+l.c1 {
-		t.Fatalf("wakes = %+v, want 1 N7 wake for %s@%s", wakes, mBad, l.c1)
+	if len(wakes) != 1 || wakes[0].Key != "diverged@"+l.c1 {
+		t.Fatalf("wakes = %+v, want 1 N7 wake for %s", wakes, l.c1)
 	}
 }
 

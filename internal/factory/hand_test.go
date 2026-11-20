@@ -111,7 +111,7 @@ func TestN7ForcePushedAndForeignPRHead(t *testing.T) {
 			l.pass()
 			l.pass()
 			wakes := l.state().Project.Wakes
-			if len(wakes) != 1 || wakes[0].Key != "diverged@"+ext+"@"+l.c1 || !strings.Contains(wakes[0].Why, "say") || !strings.Contains(wakes[0].Why, "retry") {
+			if len(wakes) != 1 || wakes[0].Key != "diverged@"+l.c1 || !strings.Contains(wakes[0].Why, "say") || !strings.Contains(wakes[0].Why, "retry") {
 				t.Fatalf("wakes = %+v, want 1 N7 wake naming say+retry", wakes)
 			}
 			if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 1 {
@@ -169,5 +169,194 @@ func TestN7TipBehindAfterUpdateBranchToldToPull(t *testing.T) {
 	sends2 := sendsTo(t, l2.srv.Requests(), l2.worker)
 	if len(sends2) != 1 || !strings.Contains(sends2[0], "git pull --ff-only") {
 		t.Fatalf("tip-only-behind sent = %q, want git pull --ff-only", sends2)
+	}
+}
+
+// simulateUpdateBranch advances origin/main from a separate clone (leaving
+// l.wt's refs/remotes/origin/main stale) and pushes a clean merge commit onto
+// l's remote branch, returning that merge commit SHA.
+func simulateUpdateBranch(t *testing.T, l *landing) string {
+	t.Helper()
+	sim := t.TempDir()
+	rawURL := gitIn(t, l.repo, "remote", "get-url", "--push", "origin")
+	gitIn(t, sim, "clone", rawURL, "repo")
+	simRepo := filepath.Join(sim, "repo")
+	gitIn(t, simRepo, "config", "user.name", "GitHub")
+	gitIn(t, simRepo, "config", "user.email", "noreply@example.com")
+	if err := os.WriteFile(filepath.Join(simRepo, "base.go"), []byte("package demo\nvar B = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, simRepo, "add", "base.go")
+	gitIn(t, simRepo, "commit", "-m", "feat: base")
+	gitIn(t, simRepo, "push", "origin", "main")
+	gitIn(t, simRepo, "checkout", l.branch)
+	gitIn(t, simRepo, "merge", "--no-edit", "origin/main")
+	m1 := gitIn(t, simRepo, "rev-parse", "HEAD")
+	gitIn(t, simRepo, "push", "origin", m1+":refs/heads/"+l.branch)
+	return m1
+}
+
+// TestN7UpdateBranchMergeOnlyFetchFailsWaits verifies item 1: when the
+// merge-only fetch fails on an update-branch head, its merge_only state is
+// unknown (not foreign), so N7 waits instead of telling/waking; once fetch
+// recovers on the next pass, N20 moves H to the merge commit.
+func TestN7UpdateBranchMergeOnlyFetchFailsWaits(t *testing.T) {
+	l := newLanding(t)
+	m1 := simulateUpdateBranch(t, l)
+	// Fetch m1 into l.wt's object store without updating refs/remotes/origin/main
+	// so Relation(c1, m1) is RelAhead while MergeOnly sees a stale origin/main.
+	gitIn(t, l.wt, "fetch", "origin", m1)
+	// Break origin fetch so readPRLocked's FetchRemote retry fails.
+	goodURL := gitIn(t, l.wt, "config", "--get", "url."+gitIn(t, l.repo, "remote", "get-url", "--push", "origin")+".insteadOf")
+	barePath := gitIn(t, l.repo, "remote", "get-url", "--push", "origin")
+	_ = goodURL
+	gitIn(t, l.wt, "config", "--unset", "url."+barePath+".insteadOf")
+	gitIn(t, l.wt, "config", "url./nonexistent/remote.git.insteadOf", "https://github.com/acme/demo.git")
+
+	writePRJSON(t, l.gh, "view.json", m1, greenRollup)
+	l.pass()
+	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 0 {
+		t.Fatalf("merge_only unknown told worker: %q", sends)
+	}
+	if wakes := l.state().Project.Wakes; len(wakes) != 0 {
+		t.Fatalf("merge_only unknown woke coordinator: %+v", wakes)
+	}
+
+	// Restore remote and pass again: fetch succeeds, N20 moves H to m1.
+	gitIn(t, l.wt, "config", "--unset", "url./nonexistent/remote.git.insteadOf")
+	gitIn(t, l.wt, "config", "url."+barePath+".insteadOf", "https://github.com/acme/demo.git")
+	l.pass()
+	if got := flow.H(l.state().Tasks[0].Attempts[0]); got != m1 {
+		t.Fatalf("after fetch recovery, H = %s, want %s", got, m1)
+	}
+}
+
+// TestN7TellsOnceAndWakesOncePerH verifies item 2: N7 keys tell and wake on H
+// only, so a worker committing again on a diverged tip is not told a second
+// time and the coordinator is woken once at turn end.
+func TestN7TellsOnceAndWakesOncePerH(t *testing.T) {
+	l := newLanding(t)
+	// Diverge tip at t1.
+	gitIn(t, l.wt, "commit", "--allow-empty", "--amend", "-m", "feat: diverged t1")
+	l.pass()
+	if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 1 {
+		t.Fatalf("pass 1 sends = %d, want 1", got)
+	}
+
+	// Worker works and makes another commit t2 on the diverged tip.
+	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "working"})
+	gitIn(t, l.wt, "commit", "--allow-empty", "-m", "feat: diverged t2")
+	l.pass()
+	if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 1 {
+		t.Fatalf("while working at t2 sends = %d, want 1", got)
+	}
+
+	// Worker turn ends at t2: must wake once (keyed on H), NOT send a second tell.
+	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "idle"})
+	l.pass()
+	if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 1 {
+		t.Fatalf("after turn end at t2 sends = %d, want 1 (no second tell)", got)
+	}
+	wakes := l.state().Project.Wakes
+	if len(wakes) != 1 || wakes[0].Key != "diverged@"+l.c1 {
+		t.Fatalf("wakes = %+v, want 1 wake keyed diverged@%s", wakes, l.c1)
+	}
+
+	// Another commit t3 does not tell or wake again for the same H.
+	gitIn(t, l.wt, "commit", "--allow-empty", "-m", "feat: diverged t3")
+	l.pass()
+	if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 1 {
+		t.Fatalf("at t3 sends = %d, want 1", got)
+	}
+	if len(l.state().Project.Wakes) != 1 {
+		t.Fatalf("at t3 wakes = %+v, want still 1", l.state().Project.Wakes)
+	}
+}
+
+// TestN7WaitsForWorkerTurnBeforeWaking verifies item 3: staying idle on the
+// pass right after the tell does not wake the coordinator; only after the
+// worker is seen working and then idle again does N7 wake.
+func TestN7WaitsForWorkerTurnBeforeWaking(t *testing.T) {
+	l := newLanding(t)
+	ext := pushExternalToBranch(t, l, true, "ext.txt", "external\n")
+	writePRJSON(t, l.gh, "view.json", ext, greenRollup)
+
+	// Pass 1: idle worker is told.
+	l.pass()
+	if len(sendsTo(t, l.srv.Requests(), l.worker)) != 1 || len(l.state().Project.Wakes) != 0 {
+		t.Fatalf("pass 1: sends=%d wakes=%+v", len(sendsTo(t, l.srv.Requests(), l.worker)), l.state().Project.Wakes)
+	}
+
+	// Pass 2: worker is STILL idle (turn hasn't started yet) -> must NOT wake.
+	l.pass()
+	if wakes := l.state().Project.Wakes; len(wakes) != 0 {
+		t.Fatalf("pass 2 (still idle before turn): wakes = %+v, want none", wakes)
+	}
+
+	// Pass 3: worker is working -> still no wake.
+	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "working"})
+	l.pass()
+	if wakes := l.state().Project.Wakes; len(wakes) != 0 {
+		t.Fatalf("pass 3 (working): wakes = %+v, want none", wakes)
+	}
+
+	// Pass 4: worker is idle again (turn ended) -> wakes once.
+	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "idle"})
+	l.pass()
+	if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != "diverged@"+l.c1 {
+		t.Fatalf("pass 4 (after turn end): wakes = %+v, want 1 wake keyed diverged@%s", wakes, l.c1)
+	}
+}
+
+// TestPRSnapshotByNumberAndBaseCheck verifies item 4: once the attempt has a
+// PR number, PRSnapshot reads by number (`gh pr view <n>`), and a PR whose
+// base differs from the project base is not ours (never merged, never wakes N4).
+func TestPRSnapshotByNumberAndBaseCheck(t *testing.T) {
+	l := newLanding(t)
+	l.pass()
+	views := ghCalls(t, l.gh, "pr view")
+	if len(views) == 0 || !strings.HasPrefix(views[0], "pr view 7 --repo ") {
+		t.Fatalf("pr view calls = %q, want `pr view 7 --repo ...`", views)
+	}
+
+	// Open PR on another base ("release") must never be merged.
+	l2 := newLanding(t)
+	writeGHFile(t, l2.gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"`+l2.c1+`","mergeable":"MERGEABLE","statusCheckRollup":`+greenRollup+`,"baseRefName":"release"}`)
+	l2.pass()
+	if merges := ghCalls(t, l2.gh, "pr merge"); len(merges) != 0 {
+		t.Fatalf("other-base PR was merged: %q", merges)
+	}
+
+	// Closed PR on another base must not wake N4.
+	l3 := newLanding(t)
+	l3.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].PR = 0 })
+	writeGHFile(t, l3.gh, "view.json", `{"number":9,"state":"CLOSED","headRefOid":"`+l3.c1+`","mergeable":"MERGEABLE","statusCheckRollup":[],"baseRefName":"release"}`)
+	l3.pass()
+	if wakes := l3.state().Project.Wakes; len(wakes) != 0 {
+		t.Fatalf("closed other-base PR woke coordinator: %+v", wakes)
+	}
+}
+
+// TestN7DivergedTipAfterUpdateBranchToldToPull verifies item 5: when the
+// worker's tip diverged from H only because the engine updated the branch and
+// the worker committed without pulling, N7 tells the worker to pull (merge
+// origin/<branch>), not restore.
+func TestN7DivergedTipAfterUpdateBranchToldToPull(t *testing.T) {
+	l := newLanding(t)
+	m1 := simulateUpdateBranch(t, l)
+	writePRJSON(t, l.gh, "view.json", m1, greenRollup)
+	l.pass() // N20 moves H to m1; worker tip is still c1
+
+	// Worker commits on top of c1 without pulling m1: tip is diverged from m1, ahead of c1.
+	if err := os.WriteFile(filepath.Join(l.wt, "more.go"), []byte("package demo\nvar M = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, l.wt, "add", "more.go")
+	gitIn(t, l.wt, "commit", "-m", "feat: more")
+	l.pass()
+
+	sends := sendsTo(t, l.srv.Requests(), l.worker)
+	if len(sends) != 1 || !strings.Contains(sends[0], "pull") || strings.Contains(sends[0], "restore") {
+		t.Fatalf("sent = %q, want pull (not restore)", sends)
 	}
 }

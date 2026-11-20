@@ -47,13 +47,19 @@ type Engine struct {
 	Bin          string            // sheepdog binary named in run prompts
 	RunEnv       map[string]string // added to every run's environment (daemon port)
 
-	mu        sync.Mutex
-	wake      chan struct{}
-	prs       map[string]flow.PR  // last PR snapshot per attempt worktree (in memory)
-	errs      map[string]string   // last gh or git error per worktree and kind, logged once per change
-	tips      map[string]tipFacts // last git reading per worktree (in memory)
-	waits     map[string]string   // last N9/N10/N38 wait reason per project/task, logged once per change
-	ghUnavail map[string]bool     // project fact github_unavailable (design.md 7.3)
+	mu         sync.Mutex
+	wake       chan struct{}
+	prs        map[string]flow.PR         // last PR snapshot per attempt worktree (in memory)
+	errs       map[string]string          // last gh or git error per worktree and kind, logged once per change
+	tips       map[string]tipFacts        // last git reading per worktree (in memory)
+	waits      map[string]string          // last N9/N10/N38 wait reason per project/task, logged once per change
+	ghUnavail  map[string]bool            // project fact github_unavailable (design.md 7.3)
+	workerTurn map[string]workerTurnState // last observed worker state and working->idle turn end per RunID
+}
+
+type workerTurnState struct {
+	state flow.RunState
+	ended time.Time
 }
 
 // tipFacts are N12's and N20's git facts for one tip and H: the merge base,
@@ -370,6 +376,16 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		tip, rel, _, err := world.InspectWorktree(gctx, a.Worktree, flow.H(a))
 		if err == nil {
 			facts.Lines, facts.LinesTimeout, facts.TipMergeOnly, err = e.readTipLocked(gctx, a, tip, rel)
+			if err == nil && rel == flow.RelDiverged {
+				readyHead := a.BaseCommit
+				if n := len(a.Ready); n > 0 {
+					readyHead = a.Ready[n-1].Head
+				}
+				if readyHead != flow.H(a) {
+					rrel, _ := world.Relation(gctx, a.Worktree, readyHead, tip)
+					facts.TipDivergedByMergeOnly = rrel == flow.RelAhead
+				}
+			}
 		}
 		cancel()
 		if e.logOnce("factory.git_error", id, a.Worktree, err); err != nil {
@@ -380,6 +396,18 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 			return
 		}
 		facts.Worker.State = workerSt
+		if a.RunID != "" {
+			if e.workerTurn == nil {
+				e.workerTurn = map[string]workerTurnState{}
+			}
+			wt := e.workerTurn[a.RunID]
+			if wt.state == flow.RunWorking && workerSt == flow.RunIdle {
+				wt.ended = time.Now()
+			}
+			wt.state = workerSt
+			e.workerTurn[a.RunID] = wt
+			facts.Worker.LastTurnEnd = wt.ended
+		}
 		facts.Tip, facts.TipRel = tip, rel
 		if len(a.Ready) > 0 { // no PR can exist before the first ready
 			facts.PR = e.readPRLocked(ctx, id, s, ti)
@@ -969,29 +997,19 @@ func pullPrefix(a *flow.Attempt, f flow.Facts) string {
 	return ""
 }
 
-// execTellDiverged is N7: tell the worker once what happened and to restore the
-// branch (or pull, when its tip is only behind H).
+// execTellDiverged is N7: tell the worker once what happened, using flow.N7Why
+// so the row and executor cannot drift.
 func (e *Engine) execTellDiverged(ctx context.Context, _ string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
 	t, a := s.Tasks[ti], flow.OpenAttempt(s.Tasks[ti])
 	if a == nil || a.RunID == "" {
 		return "", false, errors.New("factory: no worker run to tell about diverged branch")
 	}
-	h, rc := flow.H(*a), readyCmd(cmp.Or(e.Bin, "sheepdog"), t.Outcomes)
-	prBad := f.PR.State == flow.PROpen && f.PR.Answered && (f.PR.HeadRel == flow.RelDiverged || f.PR.HeadRel == flow.RelAhead && !f.PR.HeadMergeOnly)
-	var msg, dec string
-	switch {
-	case !prBad && f.TipRel == flow.RelBehind:
-		msg = fmt.Sprintf("Your worktree tip %s is behind attempt head %s — run `git pull --ff-only origin %s` to catch up.", f.Tip, h, a.Branch)
-		dec = "told worker tip is behind H: pull"
-	case prBad:
-		msg = fmt.Sprintf("%sPR #%d head %s diverged from (or has unpushed changes ahead of) H %s — restore branch %s (never force-push) and run %s.",
-			pullPrefix(a, f), f.PR.Number, f.PR.Head, h, a.Branch, rc)
-		dec = "told worker PR head diverged or has unpushed changes"
-	default:
-		msg = fmt.Sprintf("Your worktree tip %s diverged from H %s — restore branch %s (never rebase or force-push) and run %s.", f.Tip, h, a.Branch, rc)
-		dec = "told worker worktree tip diverged from H"
+	why := flow.N7Why(flow.In{Task: t, Facts: f}, false)
+	msg := fmt.Sprintf("%s. Then run %s.", why, readyCmd(cmp.Or(e.Bin, "sheepdog"), t.Outcomes))
+	if strings.HasPrefix(why, "PR #") {
+		msg = pullPrefix(a, f) + msg
 	}
-	return dec, false, world.SendRun(ctx, e.HC, a.RunID, msg)
+	return "told worker: " + why, false, world.SendRun(ctx, e.HC, a.RunID, msg)
 }
 
 // execTellConflict is N32: tell the worker once per H to merge the base (never rebase).
@@ -1161,7 +1179,7 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 	gctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
 	last := e.prs[a.Worktree]
-	p, warn, err := world.PRSnapshot(gctx, s.Project.Folder, a.Branch)
+	p, warn, err := world.PRSnapshot(gctx, s.Project.Folder, a.Branch, a.PR)
 	e.logOnce("factory.gh_partial", id, a.Worktree, warn)
 	if e.logOnce("factory.gh_error", id, a.Worktree, err); err != nil {
 		if e.ghUnavail == nil {
@@ -1191,13 +1209,16 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 			e.logOnce("factory.git_error", id, a.Worktree+" head_rel", err) // unknown here (e.g. not fetched): no relation, never a guess
 			if err == nil && p.HeadRel == flow.RelAhead {
 				mo, merr := world.MergeOnly(gctx, a.Worktree, h, p.Head)
-				if merr == nil && !mo && !fetched && p.Head != last.Head {
+				if merr == nil && !mo && !fetched && (p.Head != last.Head || last.HeadMergeOnlyUnknown) {
 					if ferr := world.FetchRemote(gctx, a.Worktree); ferr == nil {
 						mo, merr = world.MergeOnly(gctx, a.Worktree, h, p.Head)
+					} else {
+						merr = ferr
 					}
 				}
 				e.logOnce("factory.git_error", id, a.Worktree+" head_merge_only", merr)
 				p.HeadMergeOnly = merr == nil && mo
+				p.HeadMergeOnlyUnknown = merr != nil
 			}
 		}
 	}
