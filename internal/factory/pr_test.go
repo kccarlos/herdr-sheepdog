@@ -19,6 +19,7 @@ const fakeGHScript = `#!/bin/sh
 D=%DIR%
 printf '%s\n' "$*" >> "$D/argv"
 [ -f "$D/fail" ] && { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
+failif() { [ -f "$D/$1_fail" ] && { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }; return 0; }
 case "$1 $2" in
 "pr list") if [ -f "$D/view.json" ]; then printf "[%s]" "$(cat "$D/view.json")"; else echo '[]'; fi ;;
 "pr create") cp "$D/pr.json" "$D/view.json" && echo "https://github.com/acme/demo/pull/7" ;;
@@ -33,13 +34,16 @@ case "$1 $2" in
 "pr merge") [ -f "$D/merge_fail" ] && { echo "GraphQL: Head branch was modified" >&2; exit 1; }; : ;;
 "pr close") [ -f "$D/close_fail" ] && { echo "GraphQL: close failed" >&2; exit 1; }; : ;;
 api\ *)
+  pg=1; case "$2" in *page=*) pg=${2##*page=} ;; esac
+  sfx=""; [ "$pg" = 1 ] || sfx=".$pg"
   case "$2" in
-  */check-runs/*/annotations) cat "$D/annotations.json" 2>/dev/null || echo '[]' ;;
-  */commits/*/check-runs)
+  */check-runs/*/annotations*) failif annotations; cat "$D/annotations$sfx.json" 2>/dev/null || echo '[]' ;;
+  */commits/*/check-runs*)
     [ -f "$D/check_runs_denied" ] && { echo "gh: Resource not accessible by personal access token (HTTP 403)" >&2; exit 1; }
-    cat "$D/check-runs.json" 2>/dev/null || echo '{"total_count":0,"check_runs":[]}' ;;
-  */actions/runs*) cat "$D/workflow-runs.json" 2>/dev/null || echo '{"total_count":0,"workflow_runs":[]}' ;;
-  */compare/*) cat "$D/compare.json" 2>/dev/null || echo '{"behind_by":0}' ;;
+    cat "$D/check-runs$sfx.json" 2>/dev/null || echo '{"total_count":0,"check_runs":[]}' ;;
+  */commits/*/status*) failif status; cat "$D/status$sfx.json" 2>/dev/null || echo '{"state":"pending","total_count":0,"statuses":[]}' ;;
+  */actions/runs*) failif workflow_runs; cat "$D/workflow-runs$sfx.json" 2>/dev/null || echo '{"total_count":0,"workflow_runs":[]}' ;;
+  */compare/*) failif compare; cat "$D/compare.json" 2>/dev/null || echo '{"behind_by":0}' ;;
   *) echo "unexpected gh api $2" >&2; exit 2 ;;
   esac ;;
 *) echo "unexpected gh $*" >&2; exit 2 ;;
@@ -135,8 +139,8 @@ func TestPRSnapshotFactsAndFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(gh, "fail"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if p3 := read(); p3.Answered || p3.State != flow.PROpen || p3.Checks != flow.ChecksGreen {
-		t.Fatalf("failed snapshot = %+v, want answered=false and the last snapshot", p3)
+	if p3 := read(); p3.Answered || p3.State != flow.PROpen || p3.Head != c2 || p3.Checks != flow.ChecksUnreadable {
+		t.Fatalf("failed snapshot = %+v, want answered=false, the last PR, checks unreadable (never the last green)", p3)
 	}
 	read()
 	read()
@@ -213,5 +217,19 @@ func TestGitHubUnavailableHoldsMerge(t *testing.T) {
 	_ = os.Remove(filepath.Join(gh, "fail"))
 	if p, unavail, row, asked := eval(); !p.Answered || p.Checks != flow.ChecksGreen || unavail || row != "N42" || len(asked) == 0 {
 		t.Fatalf("after recovery: checks=%s answered=%t unavail=%t row=%s asked=%v", p.Checks, p.Answered, unavail, row, asked)
+	}
+	// A failing optional call (compare) is logged once and holds nothing.
+	var daemonLog bytes.Buffer
+	eng.Log = logging.NewJSONLLogger(&daemonLog)
+	if err := os.WriteFile(filepath.Join(gh, "compare_fail"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if p, unavail, row, _ := eval(); !p.Answered || p.Checks != flow.ChecksGreen || unavail || row != "N42" {
+			t.Fatalf("compare failing: checks=%s answered=%t unavail=%t row=%s", p.Checks, p.Answered, unavail, row)
+		}
+	}
+	if n := strings.Count(daemonLog.String(), "factory.gh_partial"); n != 1 {
+		t.Fatalf("a failing compare was logged %d times, want once:\n%s", n, daemonLog.String())
 	}
 }

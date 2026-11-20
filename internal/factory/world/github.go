@@ -131,64 +131,74 @@ type rawPRView struct {
 
 // PRSnapshot reads the PR for branch (design.md 7.3). No PR for the branch
 // is an answer (State none). When gh pr view is denied on statusCheckRollup,
-// it falls back to REST check-runs; if that also fails, or the network fails,
-// Checks is unreadable and an error is returned so the caller raises
-// github_unavailable. A failure is never remembered as "not a GitHub repo"
-// (KB-GIT-20). HeadRel and HeadSince are left to the caller.
-func PRSnapshot(ctx context.Context, repoDir, branch string) (flow.PR, error) {
+// it falls back to REST check-runs and commit statuses; if that also fails,
+// or the network fails, Checks is unreadable and err is returned so the
+// caller raises github_unavailable. A failure is never remembered as "not a
+// GitHub repo" (KB-GIT-20). The extra calls (annotations, workflow runs,
+// compare) never hold a merge: a failure is returned in warn and leaves
+// "stopped from outside", no unfinished workflow and not behind. HeadRel and
+// HeadSince are left to the caller.
+func PRSnapshot(ctx context.Context, repoDir, branch string) (p flow.PR, warn, err error) {
 	repo, err := ghRepo(ctx, repoDir)
 	if err != nil {
-		return flow.PR{}, err
+		return flow.PR{}, nil, err
 	}
 	checksDenied := false
 	raw, err := ghCmd(ctx, repoDir, "pr", "view", branch, "--repo", repo, "--json", prViewFields)
 	if err != nil && strings.Contains(err.Error(), "no pull requests found") {
-		return flow.PR{Answered: true, State: flow.PRNone}, nil
+		return flow.PR{Answered: true, State: flow.PRNone}, nil, nil
 	} else if err != nil && isChecksDenied(err) {
 		checksDenied = true
 		raw, err = ghCmd(ctx, repoDir, "pr", "view", branch, "--repo", repo, "--json", strings.Replace(prViewFields, "statusCheckRollup,", "", 1))
 	}
 	if err != nil {
-		return flow.PR{Checks: flow.ChecksUnreadable}, err
+		return flow.PR{Checks: flow.ChecksUnreadable}, nil, err
 	}
 	v, p, err := decodeSnapshot([]byte(raw))
 	if err != nil || p.State != flow.PROpen {
-		p.Checks = flow.Rollup(flow.RollupInput{Checks: v.StatusCheckRollup})
-		return p, err
+		p.Checks = flow.Rollup(v.StatusCheckRollup, false)
+		return p, nil, err
 	}
 	if checksDenied && p.Head != "" {
 		if v.StatusCheckRollup, err = fetchCheckRuns(ctx, repoDir, repo, p.Head); err != nil {
 			p.Answered, p.Checks = false, flow.ChecksUnreadable
-			return p, err
+			return p, nil, err
 		}
 	}
+	var warns []error
 	checks := flow.LatestChecks(v.StatusCheckRollup)
 	for i, c := range checks {
 		if id := checkRunID(c); id > 0 && strings.EqualFold(c.Status, "COMPLETED") && strings.EqualFold(c.Conclusion, "CANCELLED") {
-			if checks[i].TimedOut, err = checkRunTimedOut(ctx, repoDir, repo, id); err != nil {
-				return flow.PR{Checks: flow.ChecksUnreadable}, err
-			}
+			checks[i].TimedOut, err = checkRunTimedOut(ctx, repoDir, repo, id)
+			warns = append(warns, err)
 		}
 	}
 	wfPending := false
-	if p.Head != "" {
-		if base := flow.Rollup(flow.RollupInput{Checks: checks}); base == flow.ChecksGreen || base == flow.ChecksAbsent {
-			if wfPending, err = hasPendingWorkflow(ctx, repoDir, repo, p.Head); err != nil {
-				return flow.PR{Checks: flow.ChecksUnreadable}, err
-			}
-		}
+	if base := flow.Rollup(checks, false); p.Head != "" && (base == flow.ChecksGreen || base == flow.ChecksAbsent) {
+		wfPending, err = hasPendingWorkflow(ctx, repoDir, repo, p.Head)
+		warns = append(warns, err)
 	}
-	p.Checks = flow.Rollup(flow.RollupInput{Checks: checks, WorkflowPending: wfPending})
+	p.Checks = flow.Rollup(checks, wfPending)
 	if v.BaseRefName != "" && p.Head != "" {
 		var cmpResp struct {
 			BehindBy int `json:"behind_by"`
 		}
-		if err = ghAPI(ctx, repoDir, "repos/"+repo+"/compare/"+url.PathEscape(v.BaseRefName)+"..."+p.Head, &cmpResp); err != nil {
-			return flow.PR{Checks: flow.ChecksUnreadable}, err
-		}
-		p.Behind = cmpResp.BehindBy > 0
+		err = ghAPI(ctx, repoDir, "repos/"+repo+"/compare/"+escapeRef(v.BaseRefName)+"..."+p.Head, &cmpResp)
+		p.Behind = err == nil && cmpResp.BehindBy > 0
+		warns = append(warns, err)
 	}
-	return p, nil
+	return p, errors.Join(warns...), nil
+}
+
+// escapeRef escapes each segment of a branch name and keeps its slashes
+// raw: GitHub reads compare/release/1.0...H (the S0.6 spike compared
+// main...s06/behind).
+func escapeRef(ref string) string {
+	segs := strings.Split(ref, "/")
+	for i, s := range segs {
+		segs[i] = url.PathEscape(s)
+	}
+	return strings.Join(segs, "/")
 }
 
 func isChecksDenied(err error) bool {
@@ -207,6 +217,28 @@ func ghAPI(ctx context.Context, dir, endpoint string, dst any) error {
 	return nil
 }
 
+// maxPages bounds a paged REST read (100 items a page).
+const maxPages = 10
+
+// ghPages reads endpoint page by page; page decodes one and returns how
+// many items it held. More than maxPages full pages is an error, never a
+// partial read.
+func ghPages(ctx context.Context, dir, endpoint string, page func([]byte) (int, error)) error {
+	sep := map[bool]string{false: "?", true: "&"}[strings.Contains(endpoint, "?")]
+	for n := 1; n <= maxPages; n++ {
+		out, err := ghCmd(ctx, dir, "api", fmt.Sprintf("%s%sper_page=100&page=%d", endpoint, sep, n))
+		if err != nil {
+			return err
+		}
+		if got, err := page([]byte(out)); err != nil {
+			return fmt.Errorf("world: gh api %s: %w", endpoint, err)
+		} else if got < 100 {
+			return nil
+		}
+	}
+	return fmt.Errorf("world: gh api %s: more than %d pages", endpoint, maxPages)
+}
+
 func decodeSnapshot(data []byte) (rawPRView, flow.PR, error) {
 	var v rawPRView
 	if err := json.Unmarshal(data, &v); err != nil {
@@ -223,32 +255,41 @@ func decodeSnapshot(data []byte) (rawPRView, flow.PR, error) {
 	}, nil
 }
 
-func parseSnapshot(data []byte) (flow.PR, error) {
-	v, p, err := decodeSnapshot(data)
-	if err != nil {
-		return flow.PR{}, err
-	}
-	p.Checks = flow.Rollup(flow.RollupInput{Checks: v.StatusCheckRollup})
-	return p, nil
-}
-
+// fetchCheckRuns is the REST fallback: every check run of head (keyed by
+// its check suite) and every commit status.
 func fetchCheckRuns(ctx context.Context, dir, repo, head string) ([]flow.Check, error) {
-	var resp struct {
-		CheckRuns []struct {
-			ID                       int64
-			Name, Status, Conclusion string
-			StartedAt                string `json:"started_at"`
-			DetailsURL               string `json:"details_url"`
-		} `json:"check_runs"`
-	}
-	if err := ghAPI(ctx, dir, "repos/"+repo+"/commits/"+head+"/check-runs", &resp); err != nil {
+	var checks []flow.Check
+	err := ghPages(ctx, dir, "repos/"+repo+"/commits/"+head+"/check-runs", func(raw []byte) (int, error) {
+		var resp struct {
+			CheckRuns []struct {
+				ID                       int64
+				Name, Status, Conclusion string
+				StartedAt                string             `json:"started_at"`
+				DetailsURL               string             `json:"details_url"`
+				CheckSuite               struct{ ID int64 } `json:"check_suite"`
+			} `json:"check_runs"`
+		}
+		err := json.Unmarshal(raw, &resp)
+		for _, cr := range resp.CheckRuns {
+			checks = append(checks, flow.Check{Kind: "CheckRun", ID: cr.ID, Name: cr.Name, Status: cr.Status, Conclusion: cr.Conclusion,
+				StartedAt: cr.StartedAt, DetailsURL: cr.DetailsURL, WorkflowName: fmt.Sprint("suite ", cr.CheckSuite.ID)})
+		}
+		return len(resp.CheckRuns), err
+	})
+	if err != nil {
 		return nil, err
 	}
-	checks := make([]flow.Check, len(resp.CheckRuns))
-	for i, cr := range resp.CheckRuns {
-		checks[i] = flow.Check{Kind: "CheckRun", ID: cr.ID, Name: cr.Name, Status: cr.Status, Conclusion: cr.Conclusion, StartedAt: cr.StartedAt, DetailsURL: cr.DetailsURL}
-	}
-	return checks, nil
+	err = ghPages(ctx, dir, "repos/"+repo+"/commits/"+head+"/status", func(raw []byte) (int, error) {
+		var resp struct {
+			Statuses []struct{ Context, State string }
+		}
+		err := json.Unmarshal(raw, &resp)
+		for _, st := range resp.Statuses {
+			checks = append(checks, flow.Check{Kind: "StatusContext", Context: st.Context, State: st.State})
+		}
+		return len(resp.Statuses), err
+	})
+	return checks, err
 }
 
 func checkRunID(c flow.Check) int64 {
@@ -265,22 +306,35 @@ func checkRunID(c flow.Check) int64 {
 	return 0
 }
 
+// checkRunTimedOut: a failed read is not a time limit (stopped from outside).
 func checkRunTimedOut(ctx context.Context, dir, repo string, id int64) (bool, error) {
-	var anns []struct{ Message string }
-	err := ghAPI(ctx, dir, fmt.Sprintf("repos/%s/check-runs/%d/annotations", repo, id), &anns)
-	return slices.ContainsFunc(anns, func(a struct{ Message string }) bool {
-		return strings.Contains(a.Message, "exceeded the maximum execution time")
-	}), err
+	timedOut := false
+	err := ghPages(ctx, dir, fmt.Sprintf("repos/%s/check-runs/%d/annotations", repo, id), func(raw []byte) (int, error) {
+		var anns []struct{ Message string }
+		err := json.Unmarshal(raw, &anns)
+		timedOut = timedOut || slices.ContainsFunc(anns, func(a struct{ Message string }) bool {
+			return strings.Contains(a.Message, "exceeded the maximum execution time")
+		})
+		return len(anns), err
+	})
+	return timedOut && err == nil, err
 }
 
+// hasPendingWorkflow: a failed read is no unfinished workflow (the head-age
+// grace still holds an absent PR).
 func hasPendingWorkflow(ctx context.Context, dir, repo, head string) (bool, error) {
-	var resp struct {
-		WorkflowRuns []struct{ Status string } `json:"workflow_runs"`
-	}
-	err := ghAPI(ctx, dir, "repos/"+repo+"/actions/runs?head_sha="+head, &resp)
-	return slices.ContainsFunc(resp.WorkflowRuns, func(r struct{ Status string }) bool {
-		return !strings.EqualFold(r.Status, "completed")
-	}), err
+	pending := false
+	err := ghPages(ctx, dir, "repos/"+repo+"/actions/runs?head_sha="+head, func(raw []byte) (int, error) {
+		var resp struct {
+			WorkflowRuns []struct{ Status string } `json:"workflow_runs"`
+		}
+		err := json.Unmarshal(raw, &resp)
+		pending = pending || slices.ContainsFunc(resp.WorkflowRuns, func(r struct{ Status string }) bool {
+			return !strings.EqualFold(r.Status, "completed")
+		})
+		return len(resp.WorkflowRuns), err
+	})
+	return pending && err == nil, err
 }
 
 // MergePR asks GitHub to squash-merge PR number, pinned to head: GitHub

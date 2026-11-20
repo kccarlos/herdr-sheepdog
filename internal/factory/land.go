@@ -105,7 +105,7 @@ func closeOpenPR(ctx context.Context, folder string, a flow.Attempt, note string
 	if a.PR <= 0 {
 		return false, nil
 	}
-	p, err := world.PRSnapshot(ctx, folder, a.Branch)
+	p, _, err := world.PRSnapshot(ctx, folder, a.Branch)
 	if err != nil || p.State != flow.PROpen {
 		return false, err
 	}

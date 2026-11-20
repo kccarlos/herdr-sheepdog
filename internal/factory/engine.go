@@ -964,7 +964,8 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 	gctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
 	last := e.prs[a.Worktree]
-	p, err := world.PRSnapshot(gctx, s.Project.Folder, a.Branch)
+	p, warn, err := world.PRSnapshot(gctx, s.Project.Folder, a.Branch)
+	e.logOnce("factory.gh_partial", id, a.Worktree, warn)
 	if e.logOnce("factory.gh_error", id, a.Worktree, err); err != nil {
 		if e.ghUnavail == nil {
 			e.ghUnavail = map[string]bool{}
@@ -973,7 +974,7 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 		if p.State == flow.PRNone {
 			p = last
 		}
-		p.Answered, p.Checks = false, cmp.Or(p.Checks, flow.ChecksUnreadable)
+		p.Answered, p.Checks = false, flow.ChecksUnreadable // never the last read's checks
 	} else {
 		delete(e.ghUnavail, id)
 		if p.Head != "" {
