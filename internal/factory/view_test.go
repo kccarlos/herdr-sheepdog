@@ -128,7 +128,7 @@ func TestPureViewsOverFixtureState(t *testing.T) {
 		!slices.Equal(tv.Dependents, []string{"T2", "T3"}) {
 		t.Errorf("T1 = %+v", tv)
 	}
-	if tv := byRef["T2"]; tv.Layer != 1 || tv.Stage != "working" || tv.WhyWaiting != "Waiting on the reviewer" ||
+	if tv := byRef["T2"]; tv.Layer != 1 || tv.Stage != "working" || tv.WhyWaiting != "In review round 2" ||
 		tv.Rounds != 1 || tv.LastRule != "N29" || tv.LastDecision != "started reviewer rev-demo-t2-1-2" ||
 		tv.Model != "sonnet" || tv.Terminal != "rev-demo-t2-1-2" || !slices.Equal(tv.Dependents, []string{"T4", "T5"}) {
 		t.Errorf("T2 = %+v", tv)
@@ -136,7 +136,7 @@ func TestPureViewsOverFixtureState(t *testing.T) {
 	if tv := byRef["T3"]; tv.Layer != 1 || tv.Stage != "queued" || tv.WhyWaiting != "Queued to start" || tv.Rounds != 0 || tv.Terminal != "" {
 		t.Errorf("T3 = %+v", tv)
 	}
-	if tv := byRef["T4"]; tv.Layer != 2 || tv.Stage != "blocked_or_failed" || tv.WhyWaiting != "Waiting on the coordinator" ||
+	if tv := byRef["T4"]; tv.Layer != 2 || tv.Stage != "blocked_or_failed" || tv.WhyWaiting != "At review recap, waiting on the coordinator" ||
 		tv.Rounds != 2 || tv.LastRule != "N6" || tv.LastDecision != "queued wake" || tv.Terminal != "worker-demo-t4-1" {
 		t.Errorf("T4 = %+v", tv)
 	}
@@ -210,11 +210,11 @@ func TestStageMappingAndWhyWaitingCases(t *testing.T) {
 		"closed":  {"done", ""},
 		"dropped": {"done", ""},
 		"split":   {"done", ""},
-		"parked":  {"blocked_or_failed", "Waiting on the coordinator"},
+		"parked":  {"blocked_or_failed", "Parked, waiting on the coordinator"},
 		"ntc":     {"blocked_or_failed", "Worker reported nothing to change, waiting on the coordinator"},
 		"working": {"working", "Worker is working"},
 		"fix":     {"working", "Waiting on the worker"},
-		"ci":      {"ci", "Waiting on the engine"},
+		"ci":      {"ci", "Waiting on CI and merge"},
 		"cycA":    {"waiting_on_dep", "Waiting on cycB"},
 		"cycB":    {"waiting_on_dep", "Waiting on cycA"},
 	}
@@ -349,5 +349,175 @@ func TestEngineViewsLockFreeCorruptStateAndBadLogLine(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("view reads blocked while Engine.mu was held")
+	}
+}
+
+func TestTaskWhyLinesPriorityAndFactoryPageRoundText(t *testing.T) {
+	passed := []flow.Attempt{{
+		BaseCommit: "000", PR: 1, Ready: []flow.Ready{{Head: "h1"}},
+		Rounds: []flow.Round{
+			{N: 1, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+			{N: 2, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+		},
+	}}
+	st := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "p", Started: true},
+		Tasks: []flow.Task{
+			{ID: "rev1", LastRow: "N29", Attempts: []flow.Attempt{{
+				BaseCommit: "000", Ready: []flow.Ready{{Head: "h1"}},
+				Review: &flow.ReviewRun{Round: 1, Head: "h1"},
+			}}},
+			{ID: "rev2", LastRow: "N29", Attempts: []flow.Attempt{{
+				BaseCommit: "000", Ready: []flow.Ready{{Head: "h1"}},
+				Rounds: []flow.Round{{N: 1, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass}},
+				Review: &flow.ReviewRun{Round: 2, Head: "h1"},
+			}}},
+			{ID: "parked_stale", Parked: true, LastRow: "N23", Attempts: []flow.Attempt{{BaseCommit: "000", RunID: "w-1"}}},
+			{ID: "dropped_stale", Dropped: &flow.Dropped{Why: "dup"}, LastRow: "N23", Attempts: []flow.Attempt{{BaseCommit: "000", RunID: "w-1"}}},
+			{ID: "recap_size", LastRow: "N6", Recaps: []flow.Recap{{Trigger: flow.TriggerSize}}},
+			{ID: "ci_n36", LastRow: "N36", Attempts: passed},
+			{ID: "ci_n38", LastRow: "N38", Attempts: passed},
+			{ID: "ci_n37", LastRow: "N37", Attempts: passed},
+			{ID: "ntc_n8", LastRow: "N8", Attempts: []flow.Attempt{{BaseCommit: "000", NothingToChange: "done"}}},
+			{ID: "fallback_s1", LastRow: "S1", Attempts: []flow.Attempt{{BaseCommit: "000"}}},
+		},
+	}
+	g := GraphViewOf(st, nil)
+	byRef := map[string]TaskView{}
+	for _, tv := range g.Tasks {
+		byRef[tv.Ref] = tv
+	}
+	want := map[string]struct {
+		stage, why string
+		rounds     int
+	}{
+		"rev1":          {"working", "In review round 1", 0},
+		"rev2":          {"working", "In review round 2", 1},
+		"parked_stale":  {"blocked_or_failed", "Parked, waiting on the coordinator", 0},
+		"dropped_stale": {"done", "", 0},
+		"recap_size":    {"blocked_or_failed", "At size recap, waiting on the coordinator", 0},
+		"ci_n36":        {"ci", "Waiting on CI and merge", 2},
+		"ci_n38":        {"ci", "Waiting on the base branch", 2},
+		"ci_n37":        {"ci", "Waiting on a GitHub approval", 2},
+		"ntc_n8":        {"blocked_or_failed", "Worker reported nothing to change, waiting on the coordinator", 0},
+		"fallback_s1":   {"blocked_or_failed", "Waiting on the owner", 0},
+	}
+	for ref, w := range want {
+		tv := byRef[ref]
+		if tv.Stage != w.stage || tv.WhyWaiting != w.why || tv.Rounds != w.rounds {
+			t.Errorf("%s: got (%q, %q, rounds=%d), want (%q, %q, rounds=%d)", ref, tv.Stage, tv.WhyWaiting, tv.Rounds, w.stage, w.why, w.rounds)
+		}
+	}
+
+	// Stopped project reports "Project is stopped" even when LastRow is set.
+	stopped := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "p-stop", Started: false},
+		Tasks: []flow.Task{
+			{ID: "q", LastRow: "N10"},
+			{ID: "w", LastRow: "N23", Attempts: []flow.Attempt{{BaseCommit: "000", RunID: "w-1"}}},
+			{ID: "d", Done: &flow.Merged{MergedCommit: "aaa"}, LastRow: "N1"},
+		},
+	}
+	gs := GraphViewOf(stopped, nil)
+	if gs.Tasks[0].Stage != "queued" || gs.Tasks[0].WhyWaiting != "Project is stopped" {
+		t.Errorf("stopped queued = %+v", gs.Tasks[0])
+	}
+	if gs.Tasks[1].Stage != "working" || gs.Tasks[1].WhyWaiting != "Project is stopped" {
+		t.Errorf("stopped working = %+v", gs.Tasks[1])
+	}
+	if gs.Tasks[2].Stage != "done" || gs.Tasks[2].WhyWaiting != "" {
+		t.Errorf("stopped done = %+v", gs.Tasks[2])
+	}
+}
+
+func TestCIWhyOnlyWhenWaitingOnCIOrGitHub(t *testing.T) {
+	passed := []flow.Attempt{{
+		BaseCommit: "000", PR: 1, Ready: []flow.Ready{{Head: "h1"}},
+		Rounds: []flow.Round{
+			{N: 1, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+			{N: 2, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+		},
+	}}
+	cases := []struct {
+		row, want string
+	}{
+		{"N33", "Waiting on CI; then the worker"},
+		{"N34", "Waiting on CI; then the coordinator"},
+		{"N35", "Waiting on CI; then the coordinator"},
+		{"N36", "Waiting on CI and merge"},
+		{"N37", "Waiting on a GitHub approval"},
+		{"N38", "Waiting on the base branch"},
+		{"N40", "Waiting on CI and merge"},
+		{"N41", "Waiting on CI and merge"},
+		{"N42", "Waiting on CI and merge"},
+	}
+	tasks := make([]flow.Task, len(cases))
+	for i, tc := range cases {
+		tasks[i] = flow.Task{ID: tc.row, LastRow: tc.row, Attempts: passed}
+	}
+	g := GraphViewOf(flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "p-ci", Started: true},
+		Tasks:    tasks,
+	}, nil)
+	for i, tc := range cases {
+		if got := g.Tasks[i].WhyWaiting; got != tc.want {
+			t.Errorf("%s: WhyWaiting = %q, want %q", tc.row, got, tc.want)
+		}
+	}
+}
+
+func TestStoppedProjectDoesNotHideCoordinatorWait(t *testing.T) {
+	st := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "p-stop-coord", Started: false},
+		Tasks: []flow.Task{
+			{ID: "recap", LastRow: "N6", Recaps: []flow.Recap{{Trigger: flow.TriggerReview}}},
+			{ID: "ntc", LastRow: "N8", Attempts: []flow.Attempt{{BaseCommit: "000", NothingToChange: "already fixed"}}},
+			{ID: "parked", Parked: true, LastRow: "N3"},
+			{ID: "queued", LastRow: "N10"},
+		},
+	}
+	g := GraphViewOf(st, nil)
+	want := []string{
+		"At review recap, waiting on the coordinator",
+		"Worker reported nothing to change, waiting on the coordinator",
+		"Parked, waiting on the coordinator",
+		"Project is stopped",
+	}
+	for i, w := range want {
+		if got := g.Tasks[i].WhyWaiting; got != w {
+			t.Errorf("%s: WhyWaiting = %q, want %q", g.Tasks[i].Ref, got, w)
+		}
+	}
+}
+
+func TestNoInReviewRoundAfterLastVerdict(t *testing.T) {
+	st := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "p-post-review", Started: true},
+		Tasks: []flow.Task{{
+			ID:      "T1",
+			LastRow: "N29",
+			Attempts: []flow.Attempt{{
+				BaseCommit: "000", PR: 1, Ready: []flow.Ready{{Head: "h1"}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+				},
+			}},
+		}},
+	}
+	logs := []LogLine{{Seq: 1, By: "engine", Task: "T1", Rule: "N29", Why: "the ladder says review"}}
+	g := GraphViewOf(st, logs)
+	s := StatusViewOf(st, logs)
+	want := "Waiting on the reviewer"
+	if got := g.Tasks[0].WhyWaiting; got != want {
+		t.Errorf("GraphViewOf WhyWaiting = %q, want %q", got, want)
+	}
+	if got := s[0].Why; got != want {
+		t.Errorf("StatusViewOf Why = %q, want %q", got, want)
 	}
 }
