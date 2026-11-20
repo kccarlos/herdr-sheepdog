@@ -5,7 +5,6 @@ import (
 	"cmp"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -120,10 +119,9 @@ func graphViewOf(s flow.State, lastLog, lastRow map[string]LogLine) GraphView {
 			}
 		}
 	}
-	baseRed := s.Project.Base != nil && s.Project.Base.Red
 	tasks := make([]TaskView, 0, len(s.Tasks))
 	for i, t := range s.Tasks {
-		stage, why := taskStageWhy(t, s.Tasks, s.Settings, s.Project.Started, baseRed, lastRow[t.ID].Rule)
+		stage, why := taskStageWhy(t, s.Tasks, s.Settings, s.Project.Started, cmp.Or(t.LastRow, lastRow[t.ID].Rule))
 		l, model, term, rounds := lastLog[t.ID], "", "", 0
 		if n := len(t.Attempts); n > 0 {
 			rounds = len(slices.DeleteFunc(slices.Clone(flow.Counted(t.Attempts[n-1])), func(r flow.Round) bool { return r.Kind == flow.RoundSendBack }))
@@ -211,45 +209,37 @@ func (e *Engine) loadProjectCopy(project string) (flow.State, []LogLine, error) 
 	return s, logs, nil
 }
 
-func taskStageWhy(t flow.Task, tasks []flow.Task, settings flow.Settings, started, baseRed bool, lastRule string) (string, string) {
-	a := flow.OpenAttempt(t)
+func taskStageWhy(t flow.Task, tasks []flow.Task, settings flow.Settings, started bool, matchedRule string) (string, string) {
 	notDone, dropped := flow.UnmetDeps(t, tasks)
 	unmet := append(notDone, dropped...)
+	if r, ok := taskRows[matchedRule]; ok {
+		switch {
+		case r.WaitsOn == "nobody":
+			return r.Stage, ""
+		case r.WaitsOn == "dependencies" && len(unmet) > 0:
+			return r.Stage, "Waiting on " + strings.Join(unmet, ", ")
+		default:
+			return r.Stage, "Waiting on " + r.WaitsOn
+		}
+	}
+	a := flow.OpenAttempt(t)
 	switch {
 	case flow.Ended(t):
-		return taskRows["N1"].Stage, ""
+		return "done", ""
 	case t.Parked:
-		return taskRows["N3"].Stage, "Parked, waiting on the coordinator"
+		return "blocked_or_failed", "Parked, waiting on the coordinator"
 	case flow.OpenRecap(t) != nil:
-		return taskRows["N6"].Stage, "At " + cmp.Or(flow.OpenRecap(t).Trigger, "a") + " recap, waiting on the coordinator"
+		return "blocked_or_failed", "At " + cmp.Or(flow.OpenRecap(t).Trigger, "a") + " recap, waiting on the coordinator"
 	case a == nil && len(unmet) > 0:
-		return taskRows["N9"].Stage, "Waiting on " + strings.Join(unmet, ", ")
+		return "waiting_on_dep", "Waiting on " + strings.Join(unmet, ", ")
 	case a == nil:
-		return taskRows["N10"].Stage, map[bool]string{true: "Queued to start", false: "Project is stopped"}[started]
+		return "queued", map[bool]string{true: "Queued to start", false: "Project is stopped"}[started]
 	case a.NothingToChange != "":
-		return taskRows["N8"].Stage, "Worker reported nothing to change, waiting on the coordinator"
+		return "blocked_or_failed", "Worker reported nothing to change, waiting on the coordinator"
 	case len(a.Ready) == 0:
-		return taskRows["N23"].Stage, "Worker is working"
+		return "working", "Worker is working"
 	default:
-		r, d := flow.FirstMatch(flow.LadderRows, flow.In{Task: t, Settings: settings})
-		switch d.Why {
-		case flow.Review:
-			round := len(a.Rounds) + 1
-			if a.Review != nil && a.Review.Round > 0 {
-				round = a.Review.Round
-			}
-			return r.Stage, fmt.Sprintf("In review round %d", round)
-		case flow.Fix:
-			return r.Stage, "Waiting on worker to fix review findings"
-		case flow.RecapAnswer:
-			return r.Stage, "Review did not converge, waiting on recap"
-		case flow.Passed:
-			if lastRule == "N38" && baseRed {
-				return r.Stage, "Waiting on " + taskRows[lastRule].WaitsOn
-			}
-			return r.Stage, "Waiting on CI and merge"
-		default:
-			return r.Stage, "Waiting on the coordinator"
-		}
+		r, _ := flow.FirstMatch(flow.LadderRows, flow.In{Task: t, Settings: settings})
+		return r.Stage, "Waiting on " + r.WaitsOn
 	}
 }

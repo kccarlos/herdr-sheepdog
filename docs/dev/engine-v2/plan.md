@@ -203,7 +203,7 @@ Each is planned in PRs only at the review point before it. "Done when" lines are
 - **Size guess.** 1,450. **Spikes first.** S0.2 (session ids and resume), S0.8 (what herdr-core can report).
 - **From review point 2.** Three stalls of slices 1 and 2 end here. S1 asks `stop_task`, which is not built, so a task whose worker vanished waits silently, and S2 does not see it: the run table and 4.8 replace both. A coordinator that answers a wake with a question and applies no plan waits forever: the project rules (J9, J13) must catch it. A failed merge, cleanup or PR close act is tried again only by the owner's start: `retry` and N5 replace that.
 
-- **From review point 4.** Cut into PRs below; spikes S0.2 and S0.8 run before 5a.1. The size guess rises to 1,450: slice 4 ran 1.09 times its estimate in net lines.
+- **From review point 4.** Cut into PRs below; spikes S0.2 and S0.8 run before 5a.1.
 
 | # | PR | Lines | Done when (and what can be watched) |
 |---|---|---|---|

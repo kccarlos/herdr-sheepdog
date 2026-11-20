@@ -27,26 +27,26 @@ type MergeOnlyIn struct {
 // MergeOnlyRows is the first-match table deciding merge_only vs changes
 // (design.md 3.1, 9.4).
 var MergeOnlyRows = []Row[MergeOnlyIn]{
-	{ID: "M1", WaitsOn: "none", Stage: "none", When: func(in MergeOnlyIn) bool { return in.Rel != RelAhead },
+	{ID: "M1", WaitsOn: "none", When: func(in MergeOnlyIn) bool { return in.Rel != RelAhead },
 		Then: func(MergeOnlyIn) Decision { return Decision{Asked: []string{DeltaChanges}, Why: "not ahead of X"} }},
-	{ID: "M2", WaitsOn: "none", Stage: "none", When: func(in MergeOnlyIn) bool { return len(in.Commits) == 0 },
+	{ID: "M2", WaitsOn: "none", When: func(in MergeOnlyIn) bool { return len(in.Commits) == 0 },
 		Then: func(MergeOnlyIn) Decision { return Decision{Asked: []string{DeltaChanges}, Why: "no commits in range"} }},
-	{ID: "M3", WaitsOn: "none", Stage: "none", When: func(in MergeOnlyIn) bool {
+	{ID: "M3", WaitsOn: "none", When: func(in MergeOnlyIn) bool {
 		return slices.ContainsFunc(in.Commits, func(c MergeCommit) bool { return c.Parents != mergeParents })
 	}, Then: func(MergeOnlyIn) Decision {
 		return Decision{Asked: []string{DeltaChanges}, Why: "non-merge commit in range"}
 	}},
-	{ID: "M4", WaitsOn: "none", Stage: "none", When: func(in MergeOnlyIn) bool {
+	{ID: "M4", WaitsOn: "none", When: func(in MergeOnlyIn) bool {
 		return slices.ContainsFunc(in.Commits, func(c MergeCommit) bool { return !c.SecondInBase })
 	}, Then: func(MergeOnlyIn) Decision {
 		return Decision{Asked: []string{DeltaChanges}, Why: "merge of non-base branch"}
 	}},
-	{ID: "M5", WaitsOn: "none", Stage: "none", When: func(in MergeOnlyIn) bool {
+	{ID: "M5", WaitsOn: "none", When: func(in MergeOnlyIn) bool {
 		return slices.ContainsFunc(in.Commits, func(c MergeCommit) bool { return !c.TreeMatches })
 	}, Then: func(MergeOnlyIn) Decision {
 		return Decision{Asked: []string{DeltaChanges}, Why: "merge tree edited by hand"}
 	}},
-	{ID: "M6", WaitsOn: "none", Stage: "none",
+	{ID: "M6", WaitsOn: "none",
 		Then: func(MergeOnlyIn) Decision {
 			return Decision{Asked: []string{DeltaMergeOnly}, Why: "clean merges of base only"}
 		}},

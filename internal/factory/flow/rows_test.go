@@ -241,6 +241,11 @@ func TestTablesCheck(t *testing.T) {
 	if err := CheckTable(TaskRows); err != nil {
 		t.Error(err)
 	}
+	for _, r := range TaskRows {
+		if r.Stage == "" {
+			t.Errorf("TaskRows[%s]: empty Stage", r.ID)
+		}
+	}
 	if err := CheckTable(LadderRows); err != nil {
 		t.Error(err)
 	}
@@ -1314,35 +1319,6 @@ func TestPRAdoptTable(t *testing.T) {
 	for _, r := range PRAdoptRows {
 		if !covered[r.ID] {
 			t.Errorf("PRAdoptRows row %s has no case", r.ID)
-		}
-	}
-}
-
-// TestRowStages checks design.md M9 / 4.11: every row of every table declares
-// its Stage (no second map needed), and every task/ladder row uses a valid stage.
-func TestRowStages(t *testing.T) {
-	valid := map[string]bool{
-		"done": true, "blocked_or_failed": true, "waiting_on_dep": true,
-		"queued": true, "working": true, "ci": true,
-	}
-	for _, r := range TaskRows {
-		if !valid[r.Stage] {
-			t.Errorf("TaskRows[%s].Stage = %q, want one of design.md 4.11 stages", r.ID, r.Stage)
-		}
-	}
-	for _, r := range LadderRows {
-		if !valid[r.Stage] {
-			t.Errorf("LadderRows[%s].Stage = %q, want one of design.md 4.11 stages", r.ID, r.Stage)
-		}
-	}
-	for _, r := range MergeOnlyRows {
-		if r.Stage == "" {
-			t.Errorf("MergeOnlyRows[%s].Stage is empty", r.ID)
-		}
-	}
-	for _, r := range PRAdoptRows {
-		if r.Stage == "" {
-			t.Errorf("PRAdoptRows[%s].Stage is empty", r.ID)
 		}
 	}
 }

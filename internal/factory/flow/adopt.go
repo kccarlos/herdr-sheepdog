@@ -29,16 +29,16 @@ type PRAdoptIn struct {
 // PRAdoptRows is the first-match table deciding whether to adopt an existing
 // PR, create one, or refuse (design.md 9.4, KB-GIT-2).
 var PRAdoptRows = []Row[PRAdoptIn]{
-	{ID: "P2", WaitsOn: "none", Stage: "none", When: func(in PRAdoptIn) bool { return len(in.PRs) == 0 },
+	{ID: "P2", WaitsOn: "none", When: func(in PRAdoptIn) bool { return len(in.PRs) == 0 },
 		Then: func(PRAdoptIn) Decision {
 			return Decision{Asked: []string{PRCreate}, Why: "no PR for this branch: create one"}
 		}},
-	{ID: "P3", WaitsOn: "none", Stage: "none", When: func(in PRAdoptIn) bool { return adoptablePR(in) != nil },
+	{ID: "P3", WaitsOn: "none", When: func(in PRAdoptIn) bool { return adoptablePR(in) != nil },
 		Then: func(in PRAdoptIn) Decision {
 			p := adoptablePR(in)
 			return Decision{Asked: []string{PRAdopt, strconv.Itoa(p.Number)}, Why: fmt.Sprintf("adopt open same-repo PR #%d on %s", p.Number, in.Base)}
 		}},
-	{ID: "P4", WaitsOn: "none", Stage: "none",
+	{ID: "P4", WaitsOn: "none",
 		Then: func(in PRAdoptIn) Decision {
 			p := in.PRs[0]
 			return Decision{Asked: []string{PRRefuse},

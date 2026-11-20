@@ -40,11 +40,25 @@ func TestCheckTable(t *testing.T) {
 		"catch-all early": {catchAll, pos, catchAll},
 		"no id":           {row("", func(int) bool { return true }), catchAll},
 		"no waits on":     {{ID: "x", Stage: "working", When: pos.When, Then: pos.Then}, catchAll},
-		"no stage":        {{ID: "x", WaitsOn: "engine", When: pos.When, Then: pos.Then}, catchAll},
 	}
 	for name, rows := range bad {
 		if CheckTable(rows) == nil {
 			t.Errorf("%s: CheckTable passed", name)
+		}
+	}
+	// Stage is optional in generic CheckTable (only task rows need one).
+	noStage := []Row[int]{{ID: "x", WaitsOn: "none", When: pos.When, Then: pos.Then}, {ID: "end", WaitsOn: "none", Then: pos.Then}}
+	if err := CheckTable(noStage); err != nil {
+		t.Errorf("CheckTable rejected non-task table without Stage: %v", err)
+	}
+	for _, r := range MergeOnlyRows {
+		if r.Stage != "" {
+			t.Errorf("MergeOnlyRows[%s].Stage = %q, want empty", r.ID, r.Stage)
+		}
+	}
+	for _, r := range PRAdoptRows {
+		if r.Stage != "" {
+			t.Errorf("PRAdoptRows[%s].Stage = %q, want empty", r.ID, r.Stage)
 		}
 	}
 }

@@ -128,7 +128,7 @@ func TestPureViewsOverFixtureState(t *testing.T) {
 		!slices.Equal(tv.Dependents, []string{"T2", "T3"}) {
 		t.Errorf("T1 = %+v", tv)
 	}
-	if tv := byRef["T2"]; tv.Layer != 1 || tv.Stage != "working" || tv.WhyWaiting != "In review round 2" ||
+	if tv := byRef["T2"]; tv.Layer != 1 || tv.Stage != "working" || tv.WhyWaiting != "Waiting on the reviewer" ||
 		tv.Rounds != 1 || tv.LastRule != "N29" || tv.LastDecision != "started reviewer rev-demo-t2-1-2" ||
 		tv.Model != "sonnet" || tv.Terminal != "rev-demo-t2-1-2" || !slices.Equal(tv.Dependents, []string{"T4", "T5"}) {
 		t.Errorf("T2 = %+v", tv)
@@ -136,7 +136,7 @@ func TestPureViewsOverFixtureState(t *testing.T) {
 	if tv := byRef["T3"]; tv.Layer != 1 || tv.Stage != "queued" || tv.WhyWaiting != "Queued to start" || tv.Rounds != 0 || tv.Terminal != "" {
 		t.Errorf("T3 = %+v", tv)
 	}
-	if tv := byRef["T4"]; tv.Layer != 2 || tv.Stage != "blocked_or_failed" || tv.WhyWaiting != "At review recap, waiting on the coordinator" ||
+	if tv := byRef["T4"]; tv.Layer != 2 || tv.Stage != "blocked_or_failed" || tv.WhyWaiting != "Waiting on the coordinator" ||
 		tv.Rounds != 2 || tv.LastRule != "N6" || tv.LastDecision != "queued wake" || tv.Terminal != "worker-demo-t4-1" {
 		t.Errorf("T4 = %+v", tv)
 	}
@@ -210,11 +210,11 @@ func TestStageMappingAndWhyWaitingCases(t *testing.T) {
 		"closed":  {"done", ""},
 		"dropped": {"done", ""},
 		"split":   {"done", ""},
-		"parked":  {"blocked_or_failed", "Parked, waiting on the coordinator"},
+		"parked":  {"blocked_or_failed", "Waiting on the coordinator"},
 		"ntc":     {"blocked_or_failed", "Worker reported nothing to change, waiting on the coordinator"},
 		"working": {"working", "Worker is working"},
-		"fix":     {"working", "Waiting on worker to fix review findings"},
-		"ci":      {"ci", "Waiting on CI and merge"},
+		"fix":     {"working", "Waiting on the worker"},
+		"ci":      {"ci", "Waiting on the engine"},
 		"cycA":    {"waiting_on_dep", "Waiting on cycB"},
 		"cycB":    {"waiting_on_dep", "Waiting on cycA"},
 	}
