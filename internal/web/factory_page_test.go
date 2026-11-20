@@ -60,6 +60,48 @@ func TestFactoryPageLoopbackOnly(t *testing.T) {
 	}
 }
 
+// The page's words and shape that a reader can check without a browser: one h1
+// per page, the round chip counts finished rounds (why_waiting names the running
+// one), an empty task log says it only looked at the last 100 lines, and a hash
+// that does not decode cannot throw out of poll.
+func TestFactoryPageWording(t *testing.T) {
+	read := func(name string) string {
+		b, err := fs.ReadFile(static.FS, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	html, js := read("factory/index.html"), read("factory/app.js")
+	if strings.Contains(html, "<h1") {
+		t.Error("index.html has an h1; the page's one h1 is the board title or the task title")
+	}
+	body := func(fn string) string {
+		_, rest, ok := strings.Cut(js, "function "+fn+"(")
+		if !ok {
+			t.Fatalf("app.js has no function %s", fn)
+		}
+		end, _, _ := strings.Cut(rest, "\n}\n")
+		return end
+	}
+	for _, fn := range []string{"boardHTML", "taskHTML"} {
+		if n := strings.Count(body(fn), "<h1"); n != 1 {
+			t.Errorf("%s renders %d h1, want 1", fn, n)
+		}
+	}
+	if !strings.Contains(js, "round${t.rounds > 1 ? 's' : ''} done") || strings.Contains(js, "`round ${t.rounds}`") {
+		t.Error("the rounds chip must say how many rounds are done, not 'round n' next to 'In review round n+1'")
+	}
+	if !strings.Contains(js, "No log lines for this task in the last 100.") {
+		t.Error("an empty task log must say it only looked at the last 100 lines")
+	}
+	for _, line := range strings.Split(js, "\n") {
+		if strings.Contains(line, "decodeURIComponent") && !strings.Contains(line, "try {") {
+			t.Errorf("decodeURIComponent outside a try: %s", strings.TrimSpace(line))
+		}
+	}
+}
+
 // Every API URL the page fetches resolves to a GET factory view route, and the
 // page uses all three W0 views (and no POST route: the page writes nothing).
 func TestFactoryPageFetchesW0Routes(t *testing.T) {

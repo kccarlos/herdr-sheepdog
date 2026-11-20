@@ -3,6 +3,8 @@ body { margin: 0; font-size: 15px; line-height: 1.5; }
 [hidden] { display: none !important; }
 .page { max-width: 1360px; margin: 0 auto; padding: 20px clamp(16px, 3vw, 32px) 48px; box-sizing: border-box; display: flex; flex-direction: column; gap: 20px; }
 header.top { position: static; padding: 0; background: none; border: 0; }
+/* The header brand is not a heading: the page's one h1 is "tasks" or the task title. */
+header .brand { display: flex; align-items: center; gap: .5rem; font-family: var(--font-display); font-size: 1.25rem; font-weight: 600; line-height: 1; }
 .link, .status { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .link { font-size: 13px; color: var(--muted); }
 .dot { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: var(--radius-pill); background: var(--idle); }
