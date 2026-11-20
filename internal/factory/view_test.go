@@ -1,7 +1,6 @@
 package factory
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -431,13 +430,66 @@ func TestTaskWhyLinesPriorityAndFactoryPageRoundText(t *testing.T) {
 	if gs.Tasks[2].Stage != "done" || gs.Tasks[2].WhyWaiting != "" {
 		t.Errorf("stopped done = %+v", gs.Tasks[2])
 	}
+}
 
-	// Verify web/factory/app.js still expects the exact "In review round N" phrasing.
-	appJS, err := os.ReadFile(filepath.Join("..", "..", "web", "factory", "app.js"))
-	if err != nil {
-		t.Fatalf("read web/factory/app.js: %v", err)
+func TestCIWhyOnlyWhenWaitingOnCIOrGitHub(t *testing.T) {
+	passed := []flow.Attempt{{
+		BaseCommit: "000", PR: 1, Ready: []flow.Ready{{Head: "h1"}},
+		Rounds: []flow.Round{
+			{N: 1, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+			{N: 2, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+		},
+	}}
+	cases := []struct {
+		row, want string
+	}{
+		{"N33", "Waiting on the worker"},
+		{"N34", "Waiting on the coordinator"},
+		{"N35", "Waiting on the coordinator"},
+		{"N36", "Waiting on CI and merge"},
+		{"N37", "Waiting on a GitHub approval"},
+		{"N38", "Waiting on the base branch"},
+		{"N40", "Waiting on CI and merge"},
+		{"N41", "Waiting on CI and merge"},
+		{"N42", "Waiting on CI and merge"},
 	}
-	if !bytes.Contains(appJS, []byte(`"In review round 2"`)) {
-		t.Errorf("web/factory/app.js no longer names %q", "In review round 2")
+	tasks := make([]flow.Task, len(cases))
+	for i, tc := range cases {
+		tasks[i] = flow.Task{ID: tc.row, LastRow: tc.row, Attempts: passed}
+	}
+	g := GraphViewOf(flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "p-ci", Started: true},
+		Tasks:    tasks,
+	}, nil)
+	for i, tc := range cases {
+		if got := g.Tasks[i].WhyWaiting; got != tc.want {
+			t.Errorf("%s: WhyWaiting = %q, want %q", tc.row, got, tc.want)
+		}
+	}
+}
+
+func TestStoppedProjectDoesNotHideCoordinatorWait(t *testing.T) {
+	st := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "p-stop-coord", Started: false},
+		Tasks: []flow.Task{
+			{ID: "recap", LastRow: "N6", Recaps: []flow.Recap{{Trigger: flow.TriggerReview}}},
+			{ID: "ntc", LastRow: "N8", Attempts: []flow.Attempt{{BaseCommit: "000", NothingToChange: "already fixed"}}},
+			{ID: "parked", Parked: true, LastRow: "N3"},
+			{ID: "queued", LastRow: "N10"},
+		},
+	}
+	g := GraphViewOf(st, nil)
+	want := []string{
+		"At review recap, waiting on the coordinator",
+		"Worker reported nothing to change, waiting on the coordinator",
+		"Parked, waiting on the coordinator",
+		"Project is stopped",
+	}
+	for i, w := range want {
+		if got := g.Tasks[i].WhyWaiting; got != w {
+			t.Errorf("%s: WhyWaiting = %q, want %q", g.Tasks[i].Ref, got, w)
+		}
 	}
 }

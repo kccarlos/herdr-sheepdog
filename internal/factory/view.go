@@ -244,23 +244,19 @@ func taskStageWhy(t flow.Task, tasks []flow.Task, settings flow.Settings, starte
 
 func taskWhy(t flow.Task, a *flow.Attempt, unmet []string, started bool, stage string, r flow.Row[flow.In]) string {
 	switch {
-	case r.WaitsOn == "nobody":
+	case stage == "done":
 		return ""
-	case !started:
-		return "Project is stopped"
 	case flow.OpenRecap(t) != nil:
 		return "At " + cmp.Or(flow.OpenRecap(t).Trigger, "a") + " recap, waiting on the coordinator"
 	case a != nil && a.NothingToChange != "":
 		return "Worker reported nothing to change, waiting on the coordinator"
-	case len(unmet) > 0 && (r.WaitsOn == "dependencies" || a == nil && r.WaitsOn == ""):
+	case !started:
+		return "Project is stopped"
+	case stage == "waiting_on_dep" && len(unmet) > 0:
 		return "Waiting on " + strings.Join(unmet, ", ")
-	case a != nil && stage == "working" && (r.WaitsOn == "the reviewer" || a.Review != nil):
-		n := len(a.Rounds) + 1
-		if a.Review != nil && a.Review.Round > 0 {
-			n = a.Review.Round
-		}
-		return fmt.Sprintf("In review round %d", n)
-	case stage == "ci" && (r.WaitsOn == "CI" || r.WaitsOn == "GitHub" || r.WaitsOn == "the engine"):
+	case a != nil && stage == "working" && (r.Why == flow.WhyReview || a.Review != nil):
+		return fmt.Sprintf("In review round %d", len(a.Rounds)+1)
+	case r.Why == flow.WhyCI:
 		return "Waiting on CI and merge"
 	case r.WaitsOn != "":
 		return "Waiting on " + r.WaitsOn

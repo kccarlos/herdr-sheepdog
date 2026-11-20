@@ -728,7 +728,7 @@ func TestFactoryStatusCLI(t *testing.T) {
 		t.Fatalf("status lines = %d, want 4:\n%s", len(lines), out.String())
 	}
 	graph := factory.GraphViewOf(st, logs)
-	for i, wantSub := range []string{"N1", "N23", "waiting on T2", "no logged row"} {
+	for i, wantSub := range []string{"N1", "N23", "Project is stopped", "no logged row"} {
 		if !strings.Contains(lines[i], graph.Tasks[i].Stage) || !strings.Contains(lines[i], wantSub) {
 			t.Errorf("line %d = %q, want stage %q and %q", i, lines[i], graph.Tasks[i].Stage, wantSub)
 		}
@@ -736,7 +736,7 @@ func TestFactoryStatusCLI(t *testing.T) {
 
 	out.Reset()
 	errBuf.Reset()
-	if code := run(context.Background(), []string{"factory", "status", repo, "--config", cfgFile}, &out, &errBuf); code != 0 || !strings.Contains(out.String(), "waiting on T2") {
+	if code := run(context.Background(), []string{"factory", "status", repo, "--config", cfgFile}, &out, &errBuf); code != 0 || !strings.Contains(out.String(), "Project is stopped") {
 		t.Fatalf("status <folder>: code=%d out=%q stderr=%q", code, out.String(), errBuf.String())
 	}
 	out.Reset()

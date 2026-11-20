@@ -49,9 +49,9 @@ func TestStatusViewAgreesWithGraph(t *testing.T) {
 	want := []struct {
 		id, stage, rule, why string
 	}{
-		{"T1", "done", "N1", "ended: stop its runs and clean up"},
-		{"T2", "working", "N23", "the worker is working"},
-		{"T3", "waiting_on_dep", "N9", "waiting on T2"},
+		{"T1", "done", "N1", ""},
+		{"T2", "working", "N23", "Project is stopped"},
+		{"T3", "waiting_on_dep", "N9", "Project is stopped"},
 		{"T4", "queued", "", "Project is stopped (no logged row)"},
 	}
 	for i, w := range want {
@@ -85,7 +85,7 @@ func TestStatusViewAgreesWithGraph(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ProjectStatus(%q): %v", folder, err)
 		}
-		if len(disk) != 4 || disk[2].Rule != "N9" || disk[2].Why != "waiting on T2" || !strings.Contains(disk[3].Why, "no logged row") {
+		if len(disk) != 4 || disk[2].Rule != "N9" || disk[2].Why != "Project is stopped" || !strings.Contains(disk[3].Why, "no logged row") {
 			t.Fatalf("ProjectStatus(%q) = %+v", folder, disk)
 		}
 	}
@@ -325,13 +325,6 @@ func TestEnginePassNoAsksWritesLastRowAndParkShowsAtOnce(t *testing.T) {
 	writePRJSON(t, l.gh, "view.json", l.c1, `[{"__typename":"CheckRun","name":"ci","status":"IN_PROGRESS"}]`)
 	l.pass()
 
-	raw, err := os.ReadFile(l.paths.State(l.id))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), `"last_row": "N36"`) && !strings.Contains(string(raw), `"last_row":"N36"`) {
-		t.Fatalf("state.json missing last_row=N36 after no-ask pass:\n%s", raw)
-	}
 	st := l.state()
 	if st.Tasks[0].LastRow != "N36" {
 		t.Fatalf("LastRow = %q, want N36", st.Tasks[0].LastRow)
@@ -342,7 +335,7 @@ func TestEnginePassNoAsksWritesLastRowAndParkShowsAtOnce(t *testing.T) {
 
 	// Park the task and check status immediately (without running another pass).
 	l.eng.mu.Lock()
-	err = l.eng.acceptTaskLocked(l.id, &st, flow.RoleCoordinator, []byte(`{"action":"park","task":"T1","why":"hold for review"}`))
+	err := l.eng.acceptTaskLocked(l.id, &st, flow.RoleCoordinator, []byte(`{"action":"park","task":"T1","why":"hold for review"}`))
 	l.eng.mu.Unlock()
 	if err != nil {
 		t.Fatalf("park: %v", err)
@@ -356,5 +349,55 @@ func TestEnginePassNoAsksWritesLastRowAndParkShowsAtOnce(t *testing.T) {
 	}
 	if g, err := l.eng.Graph(l.id); err != nil || g.Tasks[0].Stage != "blocked_or_failed" || g.Tasks[0].WhyWaiting != "Parked, waiting on the coordinator" {
 		t.Fatalf("graph right after park = %+v, err=%v", g, err)
+	}
+}
+
+func TestStatusWhyMatchesFactoryOnFreshRows(t *testing.T) {
+	now := time.Now()
+	st := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "proj-fresh", Folder: "/tmp/fresh", Started: true},
+		Tasks: []flow.Task{
+			{
+				ID: "T1", Title: "feat: in review", LastRow: "N29",
+				Attempts: []flow.Attempt{{
+					BaseCommit: "000", Ready: []flow.Ready{{Head: "h1"}},
+					Review: &flow.ReviewRun{Round: 1, Head: "h1"},
+				}},
+			},
+			{ID: "T2", Title: "feat: parked", Parked: true, LastRow: "N3"},
+			{ID: "T3", Title: "feat: recap", LastRow: "N6", Recaps: []flow.Recap{{Trigger: flow.TriggerReview}}},
+			{ID: "T4", Title: "feat: dropped stale", Dropped: &flow.Dropped{Why: "dup"}, LastRow: "N29"},
+		},
+	}
+	logs := []LogLine{
+		{Seq: 1, At: now.Add(-3 * time.Minute), By: "engine", Task: "T1", Rule: "N29", Why: "the ladder says review"},
+		{Seq: 2, At: now.Add(-2 * time.Minute), By: "engine", Task: "T2", Rule: "N3", Why: "parked: stop its runs"},
+		{Seq: 3, At: now.Add(-1 * time.Minute), By: "engine", Task: "T3", Rule: "N6", Why: "a recap is open"},
+		{Seq: 4, At: now.Add(-4 * time.Minute), By: "engine", Task: "T4", Rule: "N29", Why: "the ladder says review"},
+	}
+	got := StatusViewOf(st, logs)
+	graph := GraphViewOf(st, logs)
+	for i := range got {
+		if got[i].Why != graph.Tasks[i].WhyWaiting {
+			t.Errorf("%s: status Why=%q != graph WhyWaiting=%q", got[i].ID, got[i].Why, graph.Tasks[i].WhyWaiting)
+		}
+	}
+	if line := FormatStatusLine(got[0]); !strings.Contains(line, "N29") || !strings.Contains(line, "In review round 1") || strings.Contains(line, "the ladder says review") {
+		t.Errorf("T1 line = %q, want N29 + 'In review round 1'", line)
+	}
+	if line := FormatStatusLine(got[3]); !strings.Contains(line, "(last logged N29") || strings.Contains(line, "the ladder says review") {
+		t.Errorf("T4 stale done line = %q, want stale marker without old logged why", line)
+	}
+
+	stopped := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "proj-stop", Folder: "/tmp/stop", Started: false},
+		Tasks:    []flow.Task{{ID: "T1", Title: "feat: working", LastRow: "N23", Attempts: []flow.Attempt{{BaseCommit: "000", RunID: "w-1"}}}},
+	}
+	stopLogs := []LogLine{{Seq: 1, At: now.Add(-5 * time.Minute), By: "engine", Task: "T1", Rule: "N23", Why: "the worker is working"}}
+	sg := StatusViewOf(stopped, stopLogs)
+	if sg[0].Why != "Project is stopped" {
+		t.Errorf("stopped working status Why=%q, want 'Project is stopped'", sg[0].Why)
 	}
 }

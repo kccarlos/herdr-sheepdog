@@ -403,7 +403,7 @@ There is no queue. N10's "a slot is free" is decided by one pure function over a
 | N23 with the worker idle | `idle` | — |
 | N16, N20–N23, N26–N29, N32, N39 | `working` | "Working · model · round 1 of 2", "Checking 3 outcomes" |
 
-Stage is a field of each task row; `GraphViewOf` and `StatusViewOf` read it from the task's last matched row (with a stored-state fallback only before any row has matched), and do not yet emit `idle` (N23 with an idle worker) or `owner_answer`/`owner_gate`.
+Stage is a field of each task row; `GraphViewOf` and `StatusViewOf` read it from the task's last matched row (with ended and parked taking precedence, and a stored-state fallback only before any row has matched), share the same why line, and do not yet emit `idle` (N23 with an idle worker) or `owner_answer`/`owner_gate`.
 
 ## 5. The run table
 

@@ -328,7 +328,7 @@ var TaskRows = []Row[In]{
 		}
 		return say("GitHub does not have H", once(in.acts(), key(AskPushPR, headH(in))))(in)
 	}},
-	{ID: "N29", WaitsOn: "the reviewer", Stage: "working", When: ladderSays(Review), Then: func(in In) Decision {
+	{ID: "N29", WaitsOn: "the reviewer", Stage: "working", Why: WhyReview, When: ladderSays(Review), Then: func(in In) Decision {
 		start := key(AskStartReview, nextRound(*in.attempt()), headH(in))
 		return say("the ladder says review", ensureRun(in, in.Facts.Reviewer, start))(in)
 	}},
@@ -336,7 +336,7 @@ var TaskRows = []Row[In]{
 		return say("PR conflicts with the base: tell the worker once to merge the base (never rebase)",
 			ensureRun(in, in.Facts.Worker, AskStartWorker), once(in.acts(), key(AskTellConflict, headH(in))))(in)
 	}},
-	{ID: "N33", WaitsOn: "CI", Stage: "ci", When: ciReady(checksRed), Then: func(in In) Decision {
+	{ID: "N33", WaitsOn: "the worker", Stage: "ci", When: ciReady(checksRed), Then: func(in In) Decision {
 		h := headH(in)
 		if asks, wait := rerunOrWait(in, h); len(asks) > 0 || wait {
 			return say("checks red: re-run failed jobs, or wait for the re-run or for checks still running", asks)(in)
@@ -347,7 +347,7 @@ var TaskRows = []Row[In]{
 		}
 		return say("checks red at H: tell the worker once per failing run", ensureRun(in, in.Facts.Worker, AskStartWorker), tells)(in)
 	}},
-	{ID: "N34", WaitsOn: "CI", Stage: "ci", When: ciReady(anyOf(checksStoppedExt, checksStoppedTimeout, checksStoppedUnknown)), Then: func(in In) Decision {
+	{ID: "N34", WaitsOn: "the coordinator", Stage: "ci", When: ciReady(anyOf(checksStoppedExt, checksStoppedTimeout, checksStoppedUnknown)), Then: func(in In) Decision {
 		h := headH(in)
 		if !checksStoppedExt(in) { // a time limit, or a cancel with no evidence of who: one wake for both, never a re-run
 			return say("a CI job was stopped by its own time limit or for an unread reason ("+string(in.Facts.PR.Checks)+")",
@@ -358,7 +358,7 @@ var TaskRows = []Row[In]{
 		}
 		return say("checks cancelled from outside with no re-runs left", once(in.acts(), key(AskWake, "checks_stopped", "external", h)))(in)
 	}},
-	{ID: "N35", WaitsOn: "CI", Stage: "ci", When: ciReady(all(checksAbsentPastGrace, checksSeenNone)), Then: func(in In) Decision {
+	{ID: "N35", WaitsOn: "the coordinator", Stage: "ci", When: ciReady(all(checksAbsentPastGrace, checksSeenNone)), Then: func(in In) Decision {
 		h := headH(in)
 		dk := key(AskDispatchCI, h)
 		act := LastAct(in.acts(), dk)
@@ -384,7 +384,7 @@ var TaskRows = []Row[In]{
 		return say("the base branch has been red past main_red_minutes: tell the oldest held task's worker to merge the base and say ready (or land a fix PR directly)",
 			ensureRun(in, in.Facts.Worker, AskStartWorker), tell, once(in.acts(), key(AskWake, "base_red_held", spell)))(in)
 	}},
-	{ID: "N36", WaitsOn: "CI", Stage: "ci", When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown)),
+	{ID: "N36", WaitsOn: "CI", Stage: "ci", Why: WhyCI, When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown)),
 		Then: func(in In) Decision {
 			// Stands in for the ci_stalled alert until slice 5b builds the alerts table.
 			if checksPend(in) && prHeadIsH(in) && answered(in) && githubAvail(in) && !in.Facts.PR.HeadSince.IsZero() && in.Now.Sub(in.Facts.PR.HeadSince) >= ciStalled(in) {
@@ -400,7 +400,7 @@ var TaskRows = []Row[In]{
 			once(in.acts(), key(AskWake, "review_required", headH(in))))(in)
 	}},
 	{ID: "N39", WaitsOn: "the worker", Stage: "working", When: all(ladderSays(Passed), prOpen, working), Then: say("the worker is working")},
-	{ID: "N40", WaitsOn: "GitHub", Stage: "ci", When: ciReady(prBehindBase), Then: func(in In) Decision {
+	{ID: "N40", WaitsOn: "GitHub", Stage: "ci", Why: WhyCI, When: ciReady(prBehindBase), Then: func(in In) Decision {
 		h := headH(in)
 		uk := key(AskUpdateBranch, h)
 		act := LastAct(in.acts(), uk)
@@ -415,9 +415,9 @@ var TaskRows = []Row[In]{
 		}
 		return say("branch update did not move the PR head within checks_grace_minutes: failed try", []string{key(AskFailUpdate, h)})(in)
 	}},
-	{ID: "N41", WaitsOn: "GitHub", Stage: "ci", When: all(ladderSays(Passed), mergeAsked, prOpen, notBehind),
+	{ID: "N41", WaitsOn: "GitHub", Stage: "ci", Why: WhyCI, When: all(ladderSays(Passed), mergeAsked, prOpen, notBehind),
 		Then: say("a merge was asked for H")},
-	{ID: "N42", WaitsOn: "GitHub", Stage: "ci",
+	{ID: "N42", WaitsOn: "GitHub", Stage: "ci", Why: WhyCI,
 		When: all(ladderSays(Passed), prOpen, prHeadIsH, tipAtOrBehindH, answered, githubAvail, checksGreen, mergeClean, noReviewRequired, notBehind, notWorking),
 		Then: func(in In) Decision {
 			h := headH(in)

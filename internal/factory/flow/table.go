@@ -8,6 +8,13 @@ type Decision struct {
 	Why   string   `json:"why"`
 }
 
+// Why kinds set on rows whose owner-facing why line is derived from facts
+// rather than "Waiting on " + WaitsOn.
+const (
+	WhyReview = "review"
+	WhyCI     = "ci"
+)
+
 // Row is one rule: a condition over F, who the task waits on, the stage it
 // puts a task in, and what to ask for. A nil When always holds; only the last
 // row ("no rule matched") may have one.
@@ -15,6 +22,7 @@ type Row[F any] struct {
 	ID      string
 	WaitsOn string
 	Stage   string
+	Why     string
 	When    func(F) bool
 	Then    func(F) Decision
 }

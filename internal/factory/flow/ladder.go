@@ -17,10 +17,10 @@ const roundBase = 1
 // LadderRows is slice 2's review ladder: L7, L8, L9, L10, L12 and L13 of design.md 4.6.
 // A row's Decision.Why is its answer; WaitsOn is who that answer waits on.
 var LadderRows = []Row[In]{
-	{ID: "L7", WaitsOn: "the reviewer", Stage: "working", When: noRoundCovers, Then: answer(Review)},
-	{ID: "L8", WaitsOn: "the reviewer", Stage: "working", When: all(coveringIs(VerdictPass), morePassesNeeded), Then: answer(Review)},
-	{ID: "L9", WaitsOn: "the engine", Stage: "ci", When: coveringIs(VerdictPass), Then: answer(Passed)},
-	{ID: "L10", WaitsOn: "the reviewer", Stage: "working", When: coveringRoundRejected, Then: answer(Review)},
+	{ID: "L7", WaitsOn: "the reviewer", Stage: "working", Why: WhyReview, When: noRoundCovers, Then: answer(Review)},
+	{ID: "L8", WaitsOn: "the reviewer", Stage: "working", Why: WhyReview, When: all(coveringIs(VerdictPass), morePassesNeeded), Then: answer(Review)},
+	{ID: "L9", WaitsOn: "the engine", Stage: "ci", Why: WhyCI, When: coveringIs(VerdictPass), Then: answer(Passed)},
+	{ID: "L10", WaitsOn: "the reviewer", Stage: "working", Why: WhyReview, When: coveringRoundRejected, Then: answer(Review)},
 	{ID: "L12", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: all(coveringIs(VerdictChanges), nonConverging), Then: answer(RecapAnswer)},
 	{ID: "L13", WaitsOn: "the worker", Stage: "working", When: coveringIs(VerdictChanges), Then: answer(Fix)},
 	{ID: "L-", WaitsOn: "the coordinator", Stage: "blocked_or_failed", Then: answer(NoLadderRow)},
