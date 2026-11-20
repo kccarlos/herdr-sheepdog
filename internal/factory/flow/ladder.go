@@ -19,7 +19,7 @@ const roundBase = 1
 var LadderRows = []Row[In]{
 	{ID: "L7", WaitsOn: "the reviewer", Stage: "working", When: noRoundCovers, Then: answer(Review)},
 	{ID: "L8", WaitsOn: "the reviewer", Stage: "working", When: all(coveringIs(VerdictPass), morePassesNeeded), Then: answer(Review)},
-	{ID: "L9", WaitsOn: "the engine", Stage: "ci", When: coveringIs(VerdictPass), Then: answer(Passed)},
+	{ID: "L9", WaitsOn: "the engine", Stage: "ci", Why: WhyCI, When: coveringIs(VerdictPass), Then: answer(Passed)},
 	{ID: "L10", WaitsOn: "the reviewer", Stage: "working", When: coveringRoundRejected, Then: answer(Review)},
 	{ID: "L12", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: all(coveringIs(VerdictChanges), nonConverging), Then: answer(RecapAnswer)},
 	{ID: "L13", WaitsOn: "the worker", Stage: "working", When: coveringIs(VerdictChanges), Then: answer(Fix)},

@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -97,11 +98,11 @@ func lastTaskRows(logs []LogLine) (lastLog, lastRow map[string]LogLine) {
 }
 
 func GraphViewOf(s flow.State, logs []LogLine) GraphView {
-	lastLog, lastRow := lastTaskRows(logs)
-	return graphViewOf(s, lastLog, lastRow)
+	lastLog, _ := lastTaskRows(logs)
+	return graphViewOf(s, lastLog)
 }
 
-func graphViewOf(s flow.State, lastLog, lastRow map[string]LogLine) GraphView {
+func graphViewOf(s flow.State, lastLog map[string]LogLine) GraphView {
 	idx, deps := make(map[string]int, len(s.Tasks)), map[string][]string{}
 	for i, t := range s.Tasks {
 		idx[t.ID] = i
@@ -121,7 +122,7 @@ func graphViewOf(s flow.State, lastLog, lastRow map[string]LogLine) GraphView {
 	}
 	tasks := make([]TaskView, 0, len(s.Tasks))
 	for i, t := range s.Tasks {
-		stage, why := taskStageWhy(t, s.Tasks, s.Settings, s.Project.Started, cmp.Or(t.LastRow, lastRow[t.ID].Rule))
+		stage, why := taskStageWhy(t, s.Tasks, s.Settings, s.Project.Started)
 		l, model, term, rounds := lastLog[t.ID], "", "", 0
 		if n := len(t.Attempts); n > 0 {
 			rounds = len(slices.DeleteFunc(slices.Clone(flow.Counted(t.Attempts[n-1])), func(r flow.Round) bool { return r.Kind == flow.RoundSendBack }))
@@ -209,37 +210,59 @@ func (e *Engine) loadProjectCopy(project string) (flow.State, []LogLine, error) 
 	return s, logs, nil
 }
 
-func taskStageWhy(t flow.Task, tasks []flow.Task, settings flow.Settings, started bool, matchedRule string) (string, string) {
+func taskStageWhy(t flow.Task, tasks []flow.Task, settings flow.Settings, started bool) (string, string) {
+	if flow.Ended(t) {
+		return "done", ""
+	}
+	if t.Parked {
+		return "blocked_or_failed", "Parked, waiting on the coordinator"
+	}
 	notDone, dropped := flow.UnmetDeps(t, tasks)
 	unmet := append(notDone, dropped...)
-	if r, ok := taskRows[matchedRule]; ok {
+	a := flow.OpenAttempt(t)
+	r, ok := taskRows[t.LastRow]
+	stage := r.Stage
+	if !ok {
 		switch {
-		case r.WaitsOn == "nobody":
-			return r.Stage, ""
-		case r.WaitsOn == "dependencies" && len(unmet) > 0:
-			return r.Stage, "Waiting on " + strings.Join(unmet, ", ")
+		case flow.OpenRecap(t) != nil:
+			stage = "blocked_or_failed"
+		case a == nil && len(unmet) > 0:
+			stage = "waiting_on_dep"
+		case a == nil:
+			stage = "queued"
+		case a.NothingToChange != "":
+			stage = "blocked_or_failed"
+		case len(a.Ready) == 0:
+			stage = "working"
 		default:
-			return r.Stage, "Waiting on " + r.WaitsOn
+			r, _ = flow.FirstMatch(flow.LadderRows, flow.In{Task: t, Settings: settings})
+			stage = r.Stage
 		}
 	}
-	a := flow.OpenAttempt(t)
+	return stage, taskWhy(t, a, unmet, started, stage, r)
+}
+
+func taskWhy(t flow.Task, a *flow.Attempt, unmet []string, started bool, stage string, r flow.Row[flow.In]) string {
 	switch {
-	case flow.Ended(t):
-		return "done", ""
-	case t.Parked:
-		return "blocked_or_failed", "Parked, waiting on the coordinator"
+	case stage == "done":
+		return ""
 	case flow.OpenRecap(t) != nil:
-		return "blocked_or_failed", "At " + cmp.Or(flow.OpenRecap(t).Trigger, "a") + " recap, waiting on the coordinator"
-	case a == nil && len(unmet) > 0:
-		return "waiting_on_dep", "Waiting on " + strings.Join(unmet, ", ")
+		return "At " + cmp.Or(flow.OpenRecap(t).Trigger, "a") + " recap, waiting on the coordinator"
+	case a != nil && a.NothingToChange != "":
+		return "Worker reported nothing to change, waiting on the coordinator"
+	case !started:
+		return "Project is stopped"
+	case stage == "waiting_on_dep" && len(unmet) > 0:
+		return "Waiting on " + strings.Join(unmet, ", ")
+	case a != nil && stage == "working" && a.Review != nil:
+		return fmt.Sprintf("In review round %d", len(a.Rounds)+1)
+	case r.Why == flow.WhyCI:
+		return "Waiting on CI and merge"
+	case r.WaitsOn != "":
+		return "Waiting on " + r.WaitsOn
 	case a == nil:
-		return "queued", map[bool]string{true: "Queued to start", false: "Project is stopped"}[started]
-	case a.NothingToChange != "":
-		return "blocked_or_failed", "Worker reported nothing to change, waiting on the coordinator"
-	case len(a.Ready) == 0:
-		return "working", "Worker is working"
+		return "Queued to start"
 	default:
-		r, _ := flow.FirstMatch(flow.LadderRows, flow.In{Task: t, Settings: settings})
-		return r.Stage, "Waiting on " + r.WaitsOn
+		return "Worker is working"
 	}
 }
