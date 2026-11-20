@@ -2,10 +2,12 @@ package docscheck
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -16,7 +18,7 @@ import (
 // the code and are not held to this check.
 func userDocs(t testing.TB, root string) []string {
 	t.Helper()
-	files := []string{"README.md", "CONTRIBUTING.md", "SECURITY.md", "ios/README.md"}
+	files := []string{"README.md", "CONFIG.md", "CONTRIBUTING.md", "SECURITY.md", "ios/README.md"}
 	entries, err := os.ReadDir(filepath.Join(root, "docs"))
 	if err != nil {
 		t.Fatal(err)
@@ -185,44 +187,12 @@ func TestDocCommandsExist(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, c := range commandsIn(file, string(raw)) {
-			f := strings.Fields(c.text)
-			if len(f) < 2 {
+			if len(strings.Fields(c.text)) < 2 {
 				continue
 			}
 			checked++
-			sub := f[1]
-			// Prose quotes program output in code spans ("sheepdog is not
-			// running"), so a span is judged only when it reads as a command:
-			// its second word is a command or a flag. docs/commands.md, the
-			// reference, is judged in full, as is every fenced block.
-			if c.inline && c.file != "docs/commands.md" && !commands[sub] && !strings.HasPrefix(sub, "-") {
-				continue
-			}
-			text := top
-			if !strings.HasPrefix(sub, "-") {
-				if !commands[sub] {
-					t.Errorf("%s: `%s`: %q is not a sheepdog command (see `sheepdog --help`)", c.file, c.text, sub)
-					continue
-				}
-				if _, ok := helps[sub]; !ok {
-					helps[sub] = help(t, bin, sub)
-				}
-				text = helps[sub] + "\n" + top
-			}
-			for i, tok := range f[2:] {
-				if strings.HasPrefix(tok, "-") {
-					flag, _, _ := strings.Cut(tok, "=")
-					if flag == "--help" || flag == "-h" || flag == "--" {
-						continue
-					}
-					if !regexp.MustCompile(`(^|[\s\[|(,])` + regexp.QuoteMeta(flag) + `($|[\s\]|),=<])`).MatchString(text) {
-						t.Errorf("%s: `%s`: flag %s is not in `sheepdog %s --help`", c.file, c.text, flag, sub)
-					}
-				} else if i == 0 && wordRe.MatchString(tok) && helps[sub] != "" {
-					if !regexp.MustCompile(`\b` + tok + `\b`).MatchString(helps[sub]) {
-						t.Errorf("%s: `%s`: %q is not mentioned in `sheepdog %s --help`", c.file, c.text, tok, sub)
-					}
-				}
+			for _, err := range checkDocCommand(c, top, commands, helps, func(sub string) string { return help(t, bin, sub) }) {
+				t.Error(err)
 			}
 		}
 	}
@@ -230,6 +200,79 @@ func TestDocCommandsExist(t *testing.T) {
 		t.Errorf("only %d sheepdog commands found in the user docs; is the extraction broken?", checked)
 	}
 	t.Logf("checked %d commands in the user docs against %d subcommands' --help", checked, len(helps))
+}
+
+func checkDocCommand(c docCommand, top string, commands map[string]bool, helps map[string]string, helpFn func(string) string) []string {
+	f := strings.Fields(c.text)
+	if len(f) < 2 {
+		return nil
+	}
+	sub := ""
+	if !strings.HasPrefix(f[1], "-") {
+		sub = f[1]
+	}
+	// Prose quotes program output in code spans ("sheepdog is not
+	// running"), so a span is judged only when it reads as a command:
+	// its second word is a command or a flag. docs/commands.md, the
+	// reference, is judged in full, as is every fenced block.
+	if c.inline && c.file != "docs/commands.md" && sub != "" && !commands[sub] {
+		return nil
+	}
+	text := top
+	if sub != "" {
+		if !commands[sub] {
+			return []string{fmt.Sprintf("%s: `%s`: %q is not a sheepdog command (see `sheepdog --help`)", c.file, c.text, sub)}
+		}
+		if _, ok := helps[sub]; !ok && helpFn != nil {
+			helps[sub] = helpFn(sub)
+		}
+		text = helps[sub]
+	}
+	var errs []string
+	for i, tok := range f[2:] {
+		if strings.HasPrefix(tok, "-") {
+			flag, _, _ := strings.Cut(tok, "=")
+			if flag == "--help" || flag == "-h" || flag == "--" {
+				continue
+			}
+			if !regexp.MustCompile(`(^|[\s\[|(,])` + regexp.QuoteMeta(flag) + `($|[\s\]|),=<])`).MatchString(text) {
+				errs = append(errs, fmt.Sprintf("%s: `%s`: flag %s is not in `sheepdog %s --help`", c.file, c.text, flag, sub))
+			}
+		} else if i == 0 && wordRe.MatchString(tok) && helps[sub] != "" {
+			if !regexp.MustCompile(`\b` + tok + `\b`).MatchString(helps[sub]) {
+				errs = append(errs, fmt.Sprintf("%s: `%s`: %q is not mentioned in `sheepdog %s --help`", c.file, c.text, tok, sub))
+			}
+		}
+	}
+	return errs
+}
+
+func TestSubcommandFlagMustBeInSubHelpAndConfigMDInUserDocs(t *testing.T) {
+	docs := userDocs(t, repoRoot(t))
+	if !slices.Contains(docs, "CONFIG.md") {
+		t.Errorf("userDocs() = %v, missing CONFIG.md", docs)
+	}
+
+	top := "usage: sheepdog <command> [flags]\n" +
+		"  init        the same setup as terminal questions (also: sheepdog setup --terminal)\n" +
+		"  logs        print the runtime log (-f to follow, -n N lines)\n" +
+		"  start       start the daemon in the background\n" +
+		"  stop        stop it\n"
+	commands := map[string]bool{"init": true, "logs": true, "start": true, "stop": true}
+	helps := map[string]string{
+		"start": "usage: sheepdog start [--config PATH] [--env-file PATH]\n",
+		"stop":  "usage: sheepdog stop [--config PATH]\n",
+	}
+
+	for _, bad := range []string{"sheepdog start --terminal", "sheepdog stop -f"} {
+		errs := checkDocCommand(docCommand{file: "README.md", text: bad}, top, commands, helps, nil)
+		if len(errs) == 0 {
+			t.Errorf("checkDocCommand(%q) succeeded; want failure for flag present in top help but absent from subcommand help", bad)
+		}
+	}
+	if errs := checkDocCommand(docCommand{file: "README.md", text: "sheepdog start --config /tmp/c.toml"}, top, commands, helps, nil); len(errs) != 0 {
+		t.Errorf("unexpected error for valid subcommand flag: %v", errs)
+	}
 }
 
 // TestCommandExtraction pins how commands are pulled out of Markdown.

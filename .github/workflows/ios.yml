@@ -561,6 +561,23 @@ jobs:
           if [ "$status" -ne 0 ]; then tail -n 80 "$RUNNER_TEMP/macos.log"; fi
           exit "$status"
 
+      - name: Build and test SheepdogMac
+        working-directory: ios
+        run: |
+          status=0
+          xcodebuild test \
+            -project Sheepdog.xcodeproj \
+            -scheme SheepdogMac \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -skipPackagePluginValidation \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            > "$RUNNER_TEMP/macos-app.log" 2>&1 || status=$?
+          grep -E 'error:|^\*\* |Executed [0-9]+ tests' "$RUNNER_TEMP/macos-app.log" | tail -n 100 || true
+          if [ "$status" -ne 0 ]; then tail -n 80 "$RUNNER_TEMP/macos-app.log"; fi
+          exit "$status"
+
   # The one check to require on main: green when the tier's test jobs (the
   # build among them) and the macos job passed, or when the tier is none and
   # no Mac job ran.

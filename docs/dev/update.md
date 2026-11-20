@@ -182,7 +182,7 @@ or `~/.config/herdr-app`), with `panel.auto_update` on:
 **`/api/state`** has `panel` `{installed, version, modified, update_available, auto_update}`
 (re-read from disk at most every 10 s, so it follows a user's edits and `sheepdog setup`). The panel
 shows "A newer panel is available" when `update_available && (modified || !auto_update)`. A
-panel with no marker that is identical to the binary's reports `modified: false, update_available:
+panel with no marker that is identical to the binary's reports `modified: true, update_available:
 false`. `sheepdog status` prints the same as a `panel` line. The panel does not read its own version:
 the daemon compares the files, which is the same fact and also covers a panel herdr-app has not
 reloaded yet.

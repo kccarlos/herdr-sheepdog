@@ -181,6 +181,18 @@ func evaluate(home string, src Source) (evaluation, error) {
 		ev.marker, ev.hasMk = m, true
 		ev.state.Version = m.Version
 	}
+	if ev.hasMk {
+		if len(ev.marker.Files) != len(emb) {
+			current = false
+		} else {
+			for rel := range ev.marker.Files {
+				if _, ok := emb[rel]; !ok {
+					current = false
+					break
+				}
+			}
+		}
+	}
 	unmodified := ev.hasMk && !isSymlink(dir)
 	if unmodified {
 		for rel, want := range ev.marker.Files {
@@ -190,9 +202,9 @@ func evaluate(home string, src Source) (evaluation, error) {
 			}
 		}
 	}
+	ev.state.Modified = !unmodified
 	if !current {
 		ev.state.UpdateAvailable = true
-		ev.state.Modified = !unmodified
 	}
 	if ev.hasMk && ev.marker.Layout != "" && !isSymlink(dir) {
 		if disk, err := os.ReadFile(filepath.Join(home, "layouts", layoutFile)); err == nil {
