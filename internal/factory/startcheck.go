@@ -156,12 +156,18 @@ func checkStartRemote(ctx context.Context, o DoctorOptions, r startRepo) onboard
 // limited to other branches still passes.
 func checkPRWorkflow(ctx context.Context, o DoctorOptions, r startRepo) onboard.Result {
 	const name = "pr workflow"
-	if r.empty {
+	switch {
+	case r.empty:
 		return resSkip(name, "repo is empty (no default branch yet)")
+	case r.slug == "":
+		return resSkip(name, "needs the github remote check above to pass")
 	}
 	ref := r.remote + "/HEAD"
 	if r.view != nil {
 		ref = r.remote + "/" + r.view.DefaultBranchRef.Name
+	}
+	if gitLine(ctx, o, r.root, "rev-parse", "--verify", "--quiet", ref) == "" {
+		return resSkip(name, ref+" does not exist yet (push the base branch)")
 	}
 	var filteredFile string
 	for _, f := range strings.Split(gitOut(ctx, o, r.root, "ls-tree", "--name-only", ref, ".github/workflows/"), "\n") {
@@ -296,7 +302,7 @@ func parsePRWorkflow(src string) (bool, bool) {
 		return len(v) >= 2 && v[0] == '{' && v[len(v)-1] == '}' && slices.ContainsFunc(items, isPaths)
 	}
 	for i, ln := range lines {
-		if k, rest, ok := yamlKey(ln); len(ln) > 0 && ln[0] != ' ' && ln[0] != '\t' && ok && (k == "on" || k == "true") {
+		if k, rest, ok := yamlKey(ln); len(ln) > 0 && ln[0] != ' ' && ln[0] != '\t' && ok && k == "on" {
 			if strings.HasPrefix(rest, "&") {
 				_, rest, _ = strings.Cut(strings.ReplaceAll(rest, "\t", " "), " ")
 			}

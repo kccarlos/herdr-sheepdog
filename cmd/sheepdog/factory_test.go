@@ -87,6 +87,27 @@ func TestFactoryStartPassesConfigDataDir(t *testing.T) {
 	}
 }
 
+func TestFactoryStartWarnsOnConfigLoadError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	badCfg := filepath.Join(home, "bad.toml")
+	if err := os.WriteFile(badCfg, []byte("not = [valid\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stubStartChecks(t, []onboard.Result{
+		{Name: "start claude", Status: onboard.Fail, Detail: "signed out", Fix: "login"},
+	})
+	var out, errBuf bytes.Buffer
+	code := run(context.Background(), []string{"factory", "start", home, "--goal", "g", "--config", badCfg}, &out, &errBuf)
+	if code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	got := errBuf.String()
+	if !strings.Contains(got, "project settings") || !strings.Contains(got, "codex") {
+		t.Fatalf("stderr = %q, want warning that project settings could not be read and codex check is skipped", got)
+	}
+}
+
 func TestFactoryCommandCLI(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

@@ -51,6 +51,7 @@ func runStart(t *testing.T, workflow string, over startFake) map[string]onboard.
 		"remote":                                                    out("origin"),
 		"config --get remote.origin.url":                            out("https://github.com/o/r.git"),
 		"refs/remotes/origin/HEAD":                                  out("origin/main"),
+		"rev-parse --verify --quiet origin/main":                    out("abc1234\n"),
 		"claude auth status --json":                                 out(`{"loggedIn":true}`),
 		"ls-tree --name-only origin/main .github/workflows/":        out(".github/workflows/ci.yml"),
 		"show origin/main:.github/workflows/ci.yml":                 out(workflow),
@@ -109,7 +110,7 @@ func TestStartChecksStatuses(t *testing.T) {
 		{"workflow utf8 bom", "\uFEFFon: pull_request\njobs: {}\n", nil, "pr workflow", onboard.OK},
 		{"workflow flow map null values", "on: {pull_request, push}\njobs: {}\n", nil, "pr workflow", onboard.OK},
 		{"workflow anchor block map", "on: &triggers\n  pull_request:\njobs: {}\n", nil, "pr workflow", onboard.OK},
-		{"workflow yaml 1.1 true key", "true:\n  pull_request:\njobs: {}\n", nil, "pr workflow", onboard.OK},
+		{"workflow literal true key is not a trigger", "true:\n  pull_request:\njobs: {}\n", nil, "pr workflow", onboard.Fail},
 		{"workflow push only", "on: push\njobs: {}\n", nil, "pr workflow", onboard.Fail},
 		{"workflow pull_request only in if", "on: push\njobs:\n  ci:\n    if: github.event_name == 'pull_request'\n    runs-on: ubuntu-latest\n", nil, "pr workflow", onboard.Fail},
 		{"workflow pull_request only in string", "name: pull_request check\non: push\njobs:\n  ci:\n    steps:\n      - run: echo pull_request\n", nil, "pr workflow", onboard.Fail},
@@ -195,6 +196,7 @@ func TestStartChecksEscapeBranchName(t *testing.T) {
 	res := runStart(t, goodWorkflow, startFake{
 		"gh repo view o/r --json defaultBranchRef,viewerPermission": out(`{"defaultBranchRef":{"name":"release/1.0"},"viewerPermission":"WRITE"}`),
 		"refs/remotes/origin/HEAD":                                  out("origin/release/1.0"),
+		"rev-parse --verify --quiet origin/release/1.0":             out("abc1234\n"),
 		"ls-tree --name-only origin/release/1.0 .github/workflows/": out(".github/workflows/ci.yml"),
 		"show origin/release/1.0:.github/workflows/ci.yml":          out(goodWorkflow),
 		"gh api repos/o/r/branches/release%2F1.0":                   out(`{"protected":false}`),
@@ -219,11 +221,12 @@ func TestStartChecksWorkflowIgnoresDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := startFake{
-		"git --version":                  out("git version 2.45.0\n"),
-		"rev-parse --show-toplevel":      out(root),
-		"rev-parse --verify HEAD":        out("abc1234\n"),
-		"remote":                         out("origin"),
-		"config --get remote.origin.url": out("https://github.com/o/r.git"),
+		"git --version":                          out("git version 2.45.0\n"),
+		"rev-parse --show-toplevel":              out(root),
+		"rev-parse --verify HEAD":                out("abc1234\n"),
+		"remote":                                 out("origin"),
+		"config --get remote.origin.url":         out("https://github.com/o/r.git"),
+		"rev-parse --verify --quiet origin/HEAD": out("abc1234\n"),
 	}
 	for _, r := range StartChecks(context.Background(), DoctorOptions{Folder: root, RunCommand: f.run}) {
 		if r.Name == "pr workflow" && r.Status != onboard.Fail {
@@ -272,6 +275,7 @@ func TestStartChecksSecondReviewerCodex(t *testing.T) {
 			"remote":                                                    out("origin"),
 			"config --get remote.origin.url":                            out("https://github.com/o/r.git"),
 			"refs/remotes/origin/HEAD":                                  out("origin/main"),
+			"rev-parse --verify --quiet origin/main":                    out("abc1234\n"),
 			"claude auth status --json":                                 out(`{"loggedIn":true}`),
 			"codex login status":                                        codex,
 			"ls-tree --name-only origin/main .github/workflows/":        out(".github/workflows/ci.yml"),
@@ -368,6 +372,26 @@ func TestStartChecksTempRepos(t *testing.T) {
 		if r.Status != onboard.Fail || !strings.Contains(r.Detail, "no GitHub remote") || !strings.Contains(r.Fix, "git remote add origin") {
 			t.Fatalf("no-remote empty repo github remote = %+v", r)
 		}
+		if pr := findResult(t, rs, "pr workflow"); pr.Status != onboard.Skip {
+			t.Fatalf("no-remote empty repo pr workflow = %+v, want Skip", pr)
+		}
+	})
+
+	t.Run("repo with empty bare remote skips pr workflow", func(t *testing.T) {
+		bare := t.TempDir()
+		runGit(bare, "init", "--bare", "-b", "main")
+		work := t.TempDir()
+		runGit(work, "init", "-b", "main")
+		runGit(work, "remote", "add", "origin", bare)
+		rs := StartChecks(context.Background(), DoctorOptions{Folder: work, RunCommand: hybrid})
+		if pr := findResult(t, rs, "pr workflow"); pr.Status != onboard.Skip {
+			t.Fatalf("empty bare remote (non-GitHub) pr workflow = %+v, want Skip", pr)
+		}
+		runGit(work, "remote", "set-url", "--push", "origin", "https://github.com/o/r.git")
+		rs = StartChecks(context.Background(), DoctorOptions{Folder: work, RunCommand: hybrid})
+		if pr := findResult(t, rs, "pr workflow"); pr.Status != onboard.Skip {
+			t.Fatalf("empty bare remote (GitHub pushurl) pr workflow = %+v, want Skip", pr)
+		}
 	})
 
 	t.Run("empty remote repo fails with push a first commit and skips downstream", func(t *testing.T) {
@@ -404,6 +428,7 @@ func TestStartChecksTempRepos(t *testing.T) {
 		runGit(work, "remote", "add", "origin", bare)
 		runGit(work, "push", "-u", "origin", "main")
 		runGit(work, "remote", "set-head", "origin", "main")
+		runGit(work, "remote", "set-url", "--push", "origin", "https://github.com/o/r.git")
 
 		rs := StartChecks(context.Background(), DoctorOptions{Folder: work, RunCommand: hybrid})
 		if r := findResult(t, rs, "pr workflow"); r.Status != onboard.Fail || r.Fix == "" {

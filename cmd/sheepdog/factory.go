@@ -110,6 +110,9 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 	}
 	cfg, err := config.Load(*configPath)
 	if sub == "start" {
+		if err != nil {
+			fprintf(stderr, "sheepdog factory start: warning: could not read project settings (%v); codex check skipped\n", err)
+		}
 		var failed []string
 		for _, r := range factoryStartChecks(ctx, factory.DoctorOptions{Folder: folder, DataDir: cfg.DataDir, GHHost: os.Getenv("GH_HOST")}) {
 			if r.Status == onboard.Fail {
