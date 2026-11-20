@@ -328,7 +328,7 @@ var TaskRows = []Row[In]{
 		}
 		return say("GitHub does not have H", once(in.acts(), key(AskPushPR, headH(in))))(in)
 	}},
-	{ID: "N29", WaitsOn: "the reviewer", Stage: "working", Why: WhyReview, When: ladderSays(Review), Then: func(in In) Decision {
+	{ID: "N29", WaitsOn: "the reviewer", Stage: "working", When: ladderSays(Review), Then: func(in In) Decision {
 		start := key(AskStartReview, nextRound(*in.attempt()), headH(in))
 		return say("the ladder says review", ensureRun(in, in.Facts.Reviewer, start))(in)
 	}},
@@ -336,7 +336,7 @@ var TaskRows = []Row[In]{
 		return say("PR conflicts with the base: tell the worker once to merge the base (never rebase)",
 			ensureRun(in, in.Facts.Worker, AskStartWorker), once(in.acts(), key(AskTellConflict, headH(in))))(in)
 	}},
-	{ID: "N33", WaitsOn: "the worker", Stage: "ci", When: ciReady(checksRed), Then: func(in In) Decision {
+	{ID: "N33", WaitsOn: "CI; then the worker", Stage: "ci", When: ciReady(checksRed), Then: func(in In) Decision {
 		h := headH(in)
 		if asks, wait := rerunOrWait(in, h); len(asks) > 0 || wait {
 			return say("checks red: re-run failed jobs, or wait for the re-run or for checks still running", asks)(in)
@@ -347,7 +347,7 @@ var TaskRows = []Row[In]{
 		}
 		return say("checks red at H: tell the worker once per failing run", ensureRun(in, in.Facts.Worker, AskStartWorker), tells)(in)
 	}},
-	{ID: "N34", WaitsOn: "the coordinator", Stage: "ci", When: ciReady(anyOf(checksStoppedExt, checksStoppedTimeout, checksStoppedUnknown)), Then: func(in In) Decision {
+	{ID: "N34", WaitsOn: "CI; then the coordinator", Stage: "ci", When: ciReady(anyOf(checksStoppedExt, checksStoppedTimeout, checksStoppedUnknown)), Then: func(in In) Decision {
 		h := headH(in)
 		if !checksStoppedExt(in) { // a time limit, or a cancel with no evidence of who: one wake for both, never a re-run
 			return say("a CI job was stopped by its own time limit or for an unread reason ("+string(in.Facts.PR.Checks)+")",
@@ -358,7 +358,7 @@ var TaskRows = []Row[In]{
 		}
 		return say("checks cancelled from outside with no re-runs left", once(in.acts(), key(AskWake, "checks_stopped", "external", h)))(in)
 	}},
-	{ID: "N35", WaitsOn: "the coordinator", Stage: "ci", When: ciReady(all(checksAbsentPastGrace, checksSeenNone)), Then: func(in In) Decision {
+	{ID: "N35", WaitsOn: "CI; then the coordinator", Stage: "ci", When: ciReady(all(checksAbsentPastGrace, checksSeenNone)), Then: func(in In) Decision {
 		h := headH(in)
 		dk := key(AskDispatchCI, h)
 		act := LastAct(in.acts(), dk)

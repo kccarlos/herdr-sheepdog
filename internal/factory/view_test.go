@@ -443,9 +443,9 @@ func TestCIWhyOnlyWhenWaitingOnCIOrGitHub(t *testing.T) {
 	cases := []struct {
 		row, want string
 	}{
-		{"N33", "Waiting on the worker"},
-		{"N34", "Waiting on the coordinator"},
-		{"N35", "Waiting on the coordinator"},
+		{"N33", "Waiting on CI; then the worker"},
+		{"N34", "Waiting on CI; then the coordinator"},
+		{"N35", "Waiting on CI; then the coordinator"},
 		{"N36", "Waiting on CI and merge"},
 		{"N37", "Waiting on a GitHub approval"},
 		{"N38", "Waiting on the base branch"},
@@ -491,5 +491,33 @@ func TestStoppedProjectDoesNotHideCoordinatorWait(t *testing.T) {
 		if got := g.Tasks[i].WhyWaiting; got != w {
 			t.Errorf("%s: WhyWaiting = %q, want %q", g.Tasks[i].Ref, got, w)
 		}
+	}
+}
+
+func TestNoInReviewRoundAfterLastVerdict(t *testing.T) {
+	st := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "p-post-review", Started: true},
+		Tasks: []flow.Task{{
+			ID:      "T1",
+			LastRow: "N29",
+			Attempts: []flow.Attempt{{
+				BaseCommit: "000", PR: 1, Ready: []flow.Ready{{Head: "h1"}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+				},
+			}},
+		}},
+	}
+	logs := []LogLine{{Seq: 1, By: "engine", Task: "T1", Rule: "N29", Why: "the ladder says review"}}
+	g := GraphViewOf(st, logs)
+	s := StatusViewOf(st, logs)
+	want := "Waiting on the reviewer"
+	if got := g.Tasks[0].WhyWaiting; got != want {
+		t.Errorf("GraphViewOf WhyWaiting = %q, want %q", got, want)
+	}
+	if got := s[0].Why; got != want {
+		t.Errorf("StatusViewOf Why = %q, want %q", got, want)
 	}
 }
