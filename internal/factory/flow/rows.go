@@ -343,8 +343,8 @@ func ciRuns(in In) []string {
 // and waits while a done re-run still reads those jobs red, at most
 // checks_grace_minutes from the request.
 func rerunOrWait(in In, h string) (asks []string, wait bool) {
-	if in.Facts.PR.Running {
-		return nil, true
+	if in.Facts.PR.Running || in.Facts.PR.ChecksUnread && in.Now.Sub(in.Facts.PR.HeadSince) < checksGrace(in) {
+		return nil, true // H's runs unread: never a re-run; tell or wake after the grace
 	}
 	for _, run := range ciRuns(in) {
 		var jobs []string

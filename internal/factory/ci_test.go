@@ -434,3 +434,50 @@ func TestCIRerunOnlyActionsRunsOfThisRepo(t *testing.T) {
 		}
 	}
 }
+
+// TestCIRunListGatesReruns: the head's workflow runs decide. A failed job
+// whose run is still in progress (its other jobs not in the rollup yet)
+// waits; a same-repo run id that is not a run of H is never re-run; an
+// unreadable run list never re-runs and tells after checks_grace_minutes.
+func TestCIRunListGatesReruns(t *testing.T) {
+	t.Run("run in progress", func(t *testing.T) {
+		l := newLanding(t)
+		writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("a", "COMPLETED", "FAILURE", "70", "700")+"]")
+		writeGHFile(t, l.gh, "workflow-runs.json", `{"total_count":1,"workflow_runs":[{"id":70,"status":"in_progress","conclusion":null}]}`)
+		l.pass()
+		l.pass()
+		if got := ghCalls(t, l.gh, "run rerun"); len(got) != 0 || len(sendsTo(t, l.srv.Requests(), l.worker)) != 0 {
+			t.Fatalf("acted while run 70 runs: reruns %q", got)
+		}
+	})
+	t.Run("stale run id", func(t *testing.T) {
+		l := newLanding(t)
+		writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("a", "COMPLETED", "FAILURE", "71", "710")+"]")
+		writeGHFile(t, l.gh, "workflow-runs.json", `{"total_count":1,"workflow_runs":[{"id":72,"status":"completed","conclusion":"failure"}]}`)
+		l.pass()
+		l.pass()
+		if got := ghCalls(t, l.gh, "run rerun"); len(got) != 0 || len(sendsTo(t, l.srv.Requests(), l.worker)) != 1 {
+			t.Fatalf("stale run 71: reruns %q, sends %d; want none and one tell", got, len(sendsTo(t, l.srv.Requests(), l.worker)))
+		}
+	})
+	t.Run("run list unreadable", func(t *testing.T) {
+		l := newLanding(t)
+		writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("a", "COMPLETED", "FAILURE", "73", "730")+"]")
+		writeGHFile(t, l.gh, "workflow_runs_fail", "")
+		l.pass()
+		l.pass()
+		if got := ghCalls(t, l.gh, "run rerun"); len(got) != 0 || len(sendsTo(t, l.srv.Requests(), l.worker)) != 0 {
+			t.Fatalf("unreadable run list inside the grace: reruns %q", got)
+		}
+		l.eng.mu.Lock()
+		p := l.eng.prs[l.wt]
+		p.HeadSince = time.Now().Add(-10 * time.Minute)
+		l.eng.prs[l.wt] = p
+		l.eng.mu.Unlock()
+		l.pass()
+		l.pass()
+		if got := ghCalls(t, l.gh, "run rerun"); len(got) != 0 || len(sendsTo(t, l.srv.Requests(), l.worker)) != 1 {
+			t.Fatalf("unreadable run list past the grace: reruns %q, sends %d; want none and one tell", got, len(sendsTo(t, l.srv.Requests(), l.worker)))
+		}
+	})
+}

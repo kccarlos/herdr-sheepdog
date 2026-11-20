@@ -83,7 +83,7 @@ type PR struct {
 	Running        bool      `json:"running,omitempty"` // a check has not finished: no re-run or tell yet
 	Behind         bool      `json:"behind"`
 	BehindUnknown  bool      `json:"behind_unknown,omitempty"` // compare failed: Behind false is not "not behind" (N40)
-	ChecksUnread   bool      `json:"checks_unread,omitempty"`  // workflow runs unread: absent is not "no checks", N35 never dispatches (N43)
+	ChecksUnread   bool      `json:"checks_unread,omitempty"`  // H's workflow runs unread: absent is not "no checks" (N35 never dispatches); N33/N34 never re-run
 	ReviewRequired bool      `json:"review_required,omitempty"`
 }
 

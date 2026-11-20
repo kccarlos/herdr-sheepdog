@@ -3,6 +3,8 @@ package factory
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -93,6 +95,36 @@ func writePRJSON(t *testing.T, dir, file, head, rollup string) {
 	t.Helper()
 	body := `{"number":7,"state":"OPEN","headRefOid":"` + head + `","mergeable":"MERGEABLE","statusCheckRollup":` + rollup + `,"baseRefName":"main"}`
 	if err := os.WriteFile(filepath.Join(dir, file), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The head's workflow runs, as GitHub lists them for these checks: a run
+	// is unfinished while one of its checks is, else failed, cancelled or green.
+	var checks []flow.Check
+	if err := json.Unmarshal([]byte(rollup), &checks); err != nil {
+		t.Fatal(err)
+	}
+	runs, order := map[string]map[string]string{}, []string{}
+	for _, c := range checks {
+		_, after, ok := strings.Cut(c.DetailsURL, "/actions/runs/")
+		id, _, _ := strings.Cut(after, "/")
+		if !ok || id == "" {
+			continue
+		}
+		if runs[id] == nil {
+			runs[id], order = map[string]string{"status": "completed", "conclusion": "success"}, append(order, id)
+		}
+		if !strings.EqualFold(c.Status, "COMPLETED") {
+			runs[id]["status"] = "in_progress"
+		}
+		if concl := strings.ToLower(c.Conclusion); concl == "failure" || concl == "cancelled" && runs[id]["conclusion"] != "failure" {
+			runs[id]["conclusion"] = concl
+		}
+	}
+	var items []string
+	for _, id := range order {
+		items = append(items, fmt.Sprintf(`{"id":%s,"status":%q,"conclusion":%q}`, id, runs[id]["status"], runs[id]["conclusion"]))
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workflow-runs.json"), []byte(`{"total_count":`+fmt.Sprint(len(items))+`,"workflow_runs":[`+strings.Join(items, ",")+`]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

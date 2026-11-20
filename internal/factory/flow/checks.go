@@ -136,8 +136,9 @@ type Failure struct {
 
 // FailingRuns lists the latest checks of a red or outside-cancelled class,
 // and whether any check or status has not finished. A run id comes only
-// from an Actions check run whose URL is repo's own actions run.
-func FailingRuns(checks []Check, class Checks, repo string) (fails []Failure, running bool) {
+// from an Actions check run whose URL is repo's own actions run, and only
+// if that run is in failedRuns (H's runs completed with a failure or cancel).
+func FailingRuns(checks []Check, class Checks, repo string, failedRuns map[string]bool) (fails []Failure, running bool) {
 	want := map[Checks]string{ChecksRed: "red", ChecksStoppedExternal: "stopped_external"}[class]
 	pre := "https://github.com/" + repo + "/actions/runs/"
 	for _, c := range LatestChecks(checks) {
@@ -145,7 +146,9 @@ func FailingRuns(checks []Check, class Checks, repo string) (fails []Failure, ru
 		if want != "" && c.verdict() == want {
 			f := Failure{Name: cmp.Or(c.Name, c.Context)}
 			if c.Actions && len(c.DetailsURL) > len(pre) && strings.EqualFold(c.DetailsURL[:len(pre)], pre) {
-				f.Run = urlID(c.DetailsURL, "/actions/runs/")
+				if id := urlID(c.DetailsURL, "/actions/runs/"); failedRuns[id] {
+					f.Run = id
+				}
 			}
 			if id := CheckRunID(c); id > 0 {
 				f.Job = strconv.FormatInt(id, 10)

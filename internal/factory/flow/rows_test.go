@@ -955,14 +955,15 @@ func TestFailingRuns(t *testing.T) {
 		{Kind: "CheckRun", Name: "test", Status: "COMPLETED", Conclusion: "FAILURE", Actions: true, DetailsURL: "https://github.com/o/r/actions/runs/222/job/30"},
 		{Kind: "CheckRun", Name: "ext", Status: "COMPLETED", Conclusion: "FAILURE", DetailsURL: "https://github.com/o/r/actions/runs/333/job/40"},
 		{Kind: "CheckRun", Name: "fork", Status: "COMPLETED", Conclusion: "FAILURE", Actions: true, DetailsURL: "https://github.com/x/r/actions/runs/444/job/50"},
+		{Kind: "CheckRun", Name: "stale", Status: "COMPLETED", Conclusion: "FAILURE", Actions: true, DetailsURL: "https://github.com/o/r/actions/runs/555/job/60"},
 	}
-	fails, running := FailingRuns(checks, ChecksRed, "o/r")
-	want := []Failure{{Run: "222", Job: "20", Name: "lint"}, {Run: "222", Job: "30", Name: "test"}, {Job: "40", Name: "ext"}, {Job: "50", Name: "fork"}}
+	fails, running := FailingRuns(checks, ChecksRed, "o/r", map[string]bool{"222": true, "333": true, "444": true})
+	want := []Failure{{Run: "222", Job: "20", Name: "lint"}, {Run: "222", Job: "30", Name: "test"}, {Job: "40", Name: "ext"}, {Job: "50", Name: "fork"}, {Job: "60", Name: "stale"}}
 	if !slices.Equal(fails, want) || running {
 		t.Fatalf("FailingRuns(red) = %+v, %t; want %+v, false", fails, running, want)
 	}
 	for _, c := range []Check{{Kind: "CheckRun", Name: "e2e", Status: "IN_PROGRESS"}, {Kind: "StatusContext", Context: "ci/x", State: "EXPECTED"}} {
-		if f, r := FailingRuns(append(checks[:1:1], c), ChecksGreen, "o/r"); f != nil || !r {
+		if f, r := FailingRuns(append(checks[:1:1], c), ChecksGreen, "o/r", nil); f != nil || !r {
 			t.Fatalf("FailingRuns(green, %s) = %+v, %t; want none, running", c.Name+c.Context, f, r)
 		}
 	}

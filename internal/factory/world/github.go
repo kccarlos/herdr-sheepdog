@@ -173,15 +173,19 @@ func PRSnapshot(ctx context.Context, repoDir, branch string) (p flow.PR, warn, e
 			warns = append(warns, err)
 		}
 	}
-	wfPending := false
-	if base := flow.Rollup(checks, false); p.Head != "" && (base == flow.ChecksGreen || base == flow.ChecksAbsent) {
-		if wfPending, err = hasPendingWorkflow(ctx, repoDir, repo, p.Head); err != nil {
-			checks, p.ChecksUnread = nil, true // never green unread: absent, N36 holds it in the grace, then N43
+	wfPending, failedRuns := false, map[string]bool{}
+	if p.Head != "" { // H's own workflow runs: an unfinished one waits, and only a failed one is re-run
+		if wfPending, failedRuns, err = headRuns(ctx, repoDir, repo, p.Head); err != nil {
+			p.ChecksUnread = true // N33/N34 never re-run on it
+			if base := flow.Rollup(checks, false); base == flow.ChecksGreen || base == flow.ChecksAbsent {
+				checks = nil // never green unread: absent, N36 holds it in the grace, then N43
+			}
 		}
 		warns = append(warns, err)
 	}
 	p.Checks = flow.Rollup(checks, wfPending)
-	p.Failed, p.Running = flow.FailingRuns(checks, p.Checks, repo)
+	p.Failed, p.Running = flow.FailingRuns(checks, p.Checks, repo, failedRuns)
+	p.Running = p.Running || wfPending
 	if v.BaseRefName != "" && p.Head != "" {
 		var cmpResp struct {
 			BehindBy int `json:"behind_by"`
@@ -317,20 +321,27 @@ func checkRunStop(ctx context.Context, dir, repo string, id int64) (string, erro
 	return stop, err
 }
 
-// hasPendingWorkflow: an unfinished run seen counts even if a later page fails.
-func hasPendingWorkflow(ctx context.Context, dir, repo, head string) (bool, error) {
-	pending := false
+// headRuns reads head's workflow runs: whether one is unfinished (seen
+// even if a later page fails) and the ids of those completed with a
+// failure or a cancel, the only runs N33/N34 may re-run.
+func headRuns(ctx context.Context, dir, repo, head string) (bool, map[string]bool, error) {
+	pending, failed := false, map[string]bool{}
 	err := ghPages(ctx, dir, "repos/"+repo+"/actions/runs?head_sha="+head, 100, func(raw []byte) (int, error) {
 		var resp struct {
-			WorkflowRuns []struct{ Status string } `json:"workflow_runs"`
+			WorkflowRuns []struct {
+				ID                 int64
+				Status, Conclusion string
+			} `json:"workflow_runs"`
 		}
 		err := json.Unmarshal(raw, &resp)
-		pending = pending || slices.ContainsFunc(resp.WorkflowRuns, func(r struct{ Status string }) bool {
-			return !strings.EqualFold(r.Status, "completed")
-		})
+		for _, r := range resp.WorkflowRuns {
+			done := strings.EqualFold(r.Status, "completed")
+			pending = pending || !done
+			failed[fmt.Sprint(r.ID)] = done && slices.Contains([]string{"failure", "cancelled", "timed_out"}, strings.ToLower(r.Conclusion))
+		}
 		return len(resp.WorkflowRuns), err
 	})
-	return pending, err
+	return pending, failed, err
 }
 
 // MergePR asks GitHub to squash-merge PR number, pinned to head: GitHub
