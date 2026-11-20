@@ -20,7 +20,7 @@ func holdWake(s *flow.State, ti int, row, why, ask string, f flow.Facts, now tim
 	if slices.ContainsFunc(s.Project.Wakes, func(w flow.Wake) bool { return w.Task == t.ID && w.Key == k }) {
 		return "wake already held"
 	}
-	s.Project.Wakes = append(s.Project.Wakes, flow.Wake{Key: k, Task: t.ID, Why: row + ": " + why, Facts: taskFacts(t, f), At: now})
+	s.Project.Wakes = append(s.Project.Wakes, flow.Wake{Key: k, Task: t.ID, Why: row + ": " + why, Facts: taskFacts(t, f, now), At: now})
 	return "wake held for the coordinator"
 }
 
@@ -29,7 +29,7 @@ const maxFactsTitle, maxFactsWakes = 120, 20
 
 // taskFacts is a waking task's line of the facts block: title, H, the PR
 // number and checks, the last verdict.
-func taskFacts(t flow.Task, f flow.Facts) string {
+func taskFacts(t flow.Task, f flow.Facts, now time.Time) string {
 	h, pr, verdict := "none", 0, "none"
 	if n := len(t.Attempts); n > 0 {
 		a := t.Attempts[n-1]
@@ -56,6 +56,18 @@ func taskFacts(t flow.Task, f flow.Facts) string {
 				out += fmt.Sprintf("; changed lines timed out, size cap %d, estimate %d", a.SizeCap, t.EstimateLines)
 			} else {
 				out += fmt.Sprintf("; changed lines %d, size cap %d, estimate %d", f.Lines, a.SizeCap, t.EstimateLines)
+			}
+		}
+		if rc.Trigger == flow.TriggerCI {
+			fails := flow.RecentCIFails(t, now)
+			heads := make([]string, len(fails))
+			for i, cf := range fails {
+				heads[i] = cf.Head[:min(len(cf.Head), 7)]
+			}
+			if len(heads) > 0 {
+				out += fmt.Sprintf("; %d failing CI commit(s): %s", len(fails), strings.Join(heads, ", "))
+			} else {
+				out += fmt.Sprintf("; %d failing CI commit(s)", len(fails))
 			}
 		}
 	}

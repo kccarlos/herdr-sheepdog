@@ -44,6 +44,7 @@ case "$1 $2" in
 "run rerun") [ -f "$D/rerun_fail" ] && { echo "HTTP 403: rerun failed" >&2; exit 1; }; : ;;
 "workflow run") [ -f "$D/dispatch_fail" ] && { echo "HTTP 422: dispatch failed" >&2; exit 1; }; : ;;
 api\ *)
+  case "$*" in *"/pulls/"*"/update-branch"*) failif update_branch; :; exit 0 ;; esac
   pg=1; case "$2" in *page=*) pg=${2##*page=} ;; esac
   sfx=""; [ "$pg" = 1 ] || sfx=".$pg"
   case "$2" in
@@ -724,5 +725,29 @@ func TestPRSnapshotFallbackSeesEarlierAttempts(t *testing.T) {
 	p, _, err := PRSnapshot(ctx, repo, "b")
 	if err != nil || p.Checks != flow.ChecksRed || len(p.Failed) != 1 || p.Failed[0].Run != "" {
 		t.Fatalf("fallback with an earlier timed-out attempt: %+v, %v; want red with no re-run target", p, err)
+	}
+}
+
+func TestUpdateBranch(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	if err := UpdateBranch(ctx, repo, 0, "abc"); err == nil {
+		t.Fatal("UpdateBranch(0, abc) succeeded")
+	}
+	if err := UpdateBranch(ctx, repo, 7, ""); err == nil {
+		t.Fatal("UpdateBranch(7, empty) succeeded")
+	}
+	if err := UpdateBranch(ctx, repo, 7, "abc1234"); err != nil {
+		t.Fatalf("UpdateBranch: %v", err)
+	}
+	got := ghCalls(t, gh, "api -X PUT")
+	want := "api -X PUT repos/acme/demo/pulls/7/update-branch -f expected_head_sha=abc1234"
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("UpdateBranch calls = %q, want [%q]", got, want)
+	}
+	writeGH(t, gh, "update_branch_fail", "")
+	if err := UpdateBranch(ctx, repo, 7, "abc1234"); err == nil {
+		t.Fatal("UpdateBranch succeeded when fake gh failed")
 	}
 }

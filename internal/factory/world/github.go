@@ -408,6 +408,20 @@ func RerunFailedJobs(ctx context.Context, repoDir, runID string) error {
 	return err
 }
 
+// UpdateBranch asks GitHub to bring PR number up to date with its base using a
+// merge commit, pinned to expectedHead (design.md 9.4, N40, KB-MRG-43).
+func UpdateBranch(ctx context.Context, repoDir string, number int, expectedHead string) error {
+	if number <= 0 || expectedHead == "" {
+		return fmt.Errorf("world: update-branch needs a PR number and an expected head (got #%d at %q)", number, expectedHead)
+	}
+	repo, err := ghRepo(ctx, repoDir)
+	if err != nil {
+		return err
+	}
+	_, err = ghCmd(ctx, repoDir, "api", "-X", "PUT", "repos/"+repo+"/pulls/"+strconv.Itoa(number)+"/update-branch", "-f", "expected_head_sha="+expectedHead)
+	return err
+}
+
 // DispatchWorkflow dispatches the owner-named workflow on branch, only if
 // .github/workflows/<name> exists at head. Dispatch is opt-in by name: a
 // dispatchable workflow can deploy or release (design.md 9.4, N35).

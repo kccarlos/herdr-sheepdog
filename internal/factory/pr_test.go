@@ -41,6 +41,7 @@ case "$1 $2" in
 "run rerun") { [ -f "$D/rerun_fail" ] || [ -f "$D/rerun_fail_$3" ]; } && { echo "HTTP 403: rerun failed" >&2; exit 1; }; : ;;
 "workflow run") [ -f "$D/dispatch_fail" ] && { echo "HTTP 422: dispatch failed" >&2; exit 1; }; : ;;
 api\ *)
+  case "$*" in *"/pulls/"*"/update-branch"*) failif update_branch; :; exit 0 ;; esac
   pg=1; case "$2" in *page=*) pg=${2##*page=} ;; esac
   sfx=""; [ "$pg" = 1 ] || sfx=".$pg"
   case "$2" in

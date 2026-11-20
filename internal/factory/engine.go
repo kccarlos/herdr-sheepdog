@@ -341,6 +341,8 @@ var taskExecutors = map[string]taskExec{
 	flow.AskRerunCI:      (*Engine).execRerunCI,
 	flow.AskTellCI:       (*Engine).execTellCI,
 	flow.AskDispatchCI:   (*Engine).execDispatchCI,
+	flow.AskUpdateBranch: (*Engine).execUpdateBranch,
+	flow.AskFailUpdate:   (*Engine).execFailUpdate,
 	flow.AskAccept:       (*Engine).execRecordAccept,
 	flow.AskMerge:        (*Engine).execMerge,
 	flow.AskMarkDone:     (*Engine).execMarkDone,
@@ -430,7 +432,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		// An executor runs to its end even when the pass is cancelled (its
 		// calls carry their own timeouts), so its outcome is recorded and
 		// the next pass does not ask again; the rest waits for that pass.
-		if verb == flow.AskRerunCI || verb == flow.AskDispatchCI { // a GitHub call whose outcome can be lost: saved as asked first, never sent twice
+		if verb == flow.AskRerunCI || verb == flow.AskDispatchCI || verb == flow.AskUpdateBranch { // a GitHub call whose outcome can be lost: saved as asked first, never sent twice
 			act(ask, "asked")
 			if err := SaveState(e.Paths.State(id), *s); err != nil {
 				e.logError("factory.commit_error", id, err)
@@ -732,7 +734,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 // reached from x by merge_only moves, and the tip is H or ahead of it by
 // merges of the base only (N20 moves H next).
 func tipKeepsRound(a flow.Attempt, x string, f flow.Facts) bool {
-	return flow.Covers(a, x, flow.H(a)) && (f.TipRel == flow.RelSame || f.TipRel == flow.RelAhead && f.TipMergeOnly)
+	return flow.Covers(a, x, flow.H(a)) && (f.TipRel == flow.RelSame || f.TipRel == flow.RelBehind || f.TipRel == flow.RelAhead && f.TipMergeOnly)
 }
 
 // markReviewIdleLocked starts the stuck row's clock (review.idle_since) the
@@ -958,13 +960,17 @@ func (e *Engine) execTellConflict(ctx context.Context, _ string, s *flow.State, 
 	return "told worker PR conflicts with the base", false, world.SendRun(ctx, e.HC, a.RunID, msg)
 }
 
-// execMergeOnly is N20: H moves to a tip that is ahead of it by merges of
-// the base only. N26 then pushes it; no round is asked.
+// execMergeOnly is N20: H moves to a tip or PR head that is ahead of it by
+// merges of the base only. No round is asked.
 func (e *Engine) execMergeOnly(_ context.Context, _ string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
 	a := flow.OpenAttempt(s.Tasks[ti])
 	from := flow.H(*a)
-	a.MergeOnly = append(a.MergeOnly, flow.Advance{From: from, To: f.Tip})
-	return fmt.Sprintf("H moved from %s to merge-only tip %s", from, f.Tip), false, nil
+	_, to, _ := strings.Cut(f.Ask, "@")
+	if to == "" {
+		to = f.Tip
+	}
+	a.MergeOnly = append(a.MergeOnly, flow.Advance{From: from, To: to})
+	return fmt.Sprintf("H moved from %s to merge-only head %s", from, to), false, nil
 }
 
 func bullets(items []flow.Outcome) string {
@@ -1023,6 +1029,29 @@ func (e *Engine) execTellCI(ctx context.Context, _ string, s *flow.State, ti int
 	return "told worker CI failed (run " + run + ")", false, world.SendRun(ctx, e.HC, a.RunID, msg)
 }
 
+// execUpdateBranch is N40: bring a behind PR up to date with a merge commit,
+// pinned to H (design.md 9.4, KB-MRG-43).
+func (e *Engine) execUpdateBranch(ctx context.Context, _ string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
+	a := flow.OpenAttempt(s.Tasks[ti])
+	h := flow.H(*a)
+	gctx, cancel := context.WithTimeout(ctx, ghTimeout)
+	defer cancel()
+	return fmt.Sprintf("asked GitHub to update branch for PR #%d at %s", f.PR.Number, h), false, world.UpdateBranch(gctx, s.Project.Folder, f.PR.Number, h)
+}
+
+// execFailUpdate is N40 past checks_grace_minutes: the branch update did not
+// move the PR head in time, so it becomes a failed try (design.md 4.7, 8).
+func (e *Engine) execFailUpdate(_ context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	a := flow.OpenAttempt(s.Tasks[ti])
+	uk := flow.AskUpdateBranch + "@" + flow.H(*a)
+	for i := range a.Acts {
+		if a.Acts[i].Key == uk {
+			a.Acts[i].Result = "failed"
+		}
+	}
+	return "branch update timed out for " + flow.H(*a) + " (failed try)", false, nil
+}
+
 // execDispatchCI is N35: dispatch the dispatch_workflow setting's workflow on the PR branch.
 func (e *Engine) execDispatchCI(ctx context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	a, wf := flow.OpenAttempt(s.Tasks[ti]), s.Settings.DispatchWorkflow
@@ -1063,14 +1092,33 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 			if p.Head != last.Head || p.HeadSince.IsZero() {
 				p.HeadSince = time.Now()
 			}
-			p.HeadRel, err = world.Relation(gctx, a.Worktree, flow.H(a), p.Head)
+			h := flow.H(a)
+			p.HeadRel, err = world.Relation(gctx, a.Worktree, h, p.Head)
+			fetched := false
+			if err != nil && p.Head != h {
+				if ferr := world.FetchRemote(gctx, a.Worktree); ferr == nil {
+					fetched = true
+					p.HeadRel, err = world.Relation(gctx, a.Worktree, h, p.Head)
+				}
+			}
 			e.logOnce("factory.git_error", id, a.Worktree+" head_rel", err) // unknown here (e.g. not fetched): no relation, never a guess
+			if err == nil && p.HeadRel == flow.RelAhead {
+				mo, merr := world.MergeOnly(gctx, a.Worktree, h, p.Head)
+				if merr == nil && !mo && !fetched && p.Head != last.Head {
+					if ferr := world.FetchRemote(gctx, a.Worktree); ferr == nil {
+						mo, merr = world.MergeOnly(gctx, a.Worktree, h, p.Head)
+					}
+				}
+				e.logOnce("factory.git_error", id, a.Worktree+" head_merge_only", merr)
+				p.HeadMergeOnly = merr == nil && mo
+			}
 		}
 	}
 	ciFailAdded := false
+	oa := &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
 	if p.Answered && p.State == flow.PROpen && p.Head != "" && p.Checks == flow.ChecksRed &&
-		!slices.ContainsFunc(s.Tasks[ti].CIFails, func(f flow.CIFail) bool { return f.Head == p.Head }) {
-		s.Tasks[ti].CIFails = append(s.Tasks[ti].CIFails, flow.CIFail{Head: p.Head, At: time.Now()})
+		!slices.ContainsFunc(oa.CIFails, func(f flow.CIFail) bool { return f.Head == p.Head }) {
+		oa.CIFails = append(oa.CIFails, flow.CIFail{Head: p.Head, At: time.Now()})
 		ciFailAdded = true
 	}
 	if (ciFailAdded || !reflect.DeepEqual(p, last)) && ctx.Err() == nil {

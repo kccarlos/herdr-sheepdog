@@ -491,6 +491,13 @@ func PushRemote(names []string) string {
 	return ""
 }
 
+// FetchRemote fetches the push remote so the remote base and remote PR heads
+// are in the local object store.
+func FetchRemote(ctx context.Context, dir string) error {
+	_, _, err := remoteBaseCommit(ctx, dir, true)
+	return err
+}
+
 func remoteBaseCommit(ctx context.Context, repo string, fetch bool) (string, string, error) {
 	out, err := gitCmd(ctx, repo, "remote")
 	if err != nil {
@@ -609,7 +616,7 @@ func DeltaRanges(ctx context.Context, worktree, since, head string) ([]string, e
 	var ranges []string
 	for ln := range strings.Lines(out) {
 		f := strings.Fields(ln)
-		if len(f) < 2 || cleanBaseMerge(ctx, worktree, f, mb) {
+		if len(f) < 2 || flow.IsMergeOnly(flow.MergeOnlyIn{Rel: flow.RelAhead, Commits: []flow.MergeCommit{inspectMergeCommit(ctx, worktree, f, mb)}}) {
 			continue
 		}
 		if n := len(ranges); n > 0 {
@@ -653,41 +660,51 @@ func ChangedLines(ctx context.Context, dir, tip string) (int, error) {
 }
 
 // MergeOnly reports whether h is ahead of x by clean merges of the base
-// branch only, on the first-parent line (design.md 3.1). It does not fetch.
+// branch only, on the first-parent line (design.md 3.1, 9.4). It does not
+// fetch; the decision is made by flow.MergeOnlyRows.
 func MergeOnly(ctx context.Context, dir, x, h string) (bool, error) {
 	ref, _, err := remoteBaseCommit(ctx, dir, false)
 	if err != nil {
 		return false, err
 	}
 	if x == h {
-		return false, nil
+		return flow.IsMergeOnly(flow.MergeOnlyIn{Rel: flow.RelSame}), nil
 	}
 	mb, err := gitCmd(ctx, dir, "merge-base", h, ref)
 	if err != nil || !isAncestor(ctx, dir, x, h) { // no common ancestor is "not merge_only"; only a cancelled read is an error
-		return false, ctx.Err()
+		return flow.IsMergeOnly(flow.MergeOnlyIn{Rel: flow.RelDiverged}), ctx.Err()
 	}
 	out, err := gitCmd(ctx, dir, "rev-list", "--first-parent", "--parents", x+".."+h)
 	if err != nil || out == "" {
 		return false, err
 	}
+	var commits []flow.MergeCommit
 	for ln := range strings.Lines(out) {
-		if !cleanBaseMerge(ctx, dir, strings.Fields(ln), mb) {
+		c := inspectMergeCommit(ctx, dir, strings.Fields(ln), mb)
+		commits = append(commits, c)
+		if !flow.IsMergeOnly(flow.MergeOnlyIn{Rel: flow.RelAhead, Commits: commits}) {
 			return false, nil
 		}
 	}
-	return true, nil
+	return flow.IsMergeOnly(flow.MergeOnlyIn{Rel: flow.RelAhead, Commits: commits}), nil
 }
 
-func cleanBaseMerge(ctx context.Context, dir string, f []string, mb string) bool {
-	if len(f) != 3 || !isAncestor(ctx, dir, f[2], mb) {
-		return false
+func inspectMergeCommit(ctx context.Context, dir string, f []string, mb string) flow.MergeCommit {
+	c := flow.MergeCommit{Parents: max(0, len(f)-1)}
+	if c.Parents != 2 {
+		return c
+	}
+	c.SecondInBase = isAncestor(ctx, dir, f[2], mb)
+	if !c.SecondInBase {
+		return c
 	}
 	want, err := gitCmd(ctx, dir, "merge-tree", "--write-tree", f[1], f[2])
 	if err != nil {
-		return false
+		return c
 	}
 	got, err := gitCmd(ctx, dir, "rev-parse", f[0]+"^{tree}")
-	return err == nil && got == want
+	c.TreeMatches = err == nil && got == want
+	return c
 }
 
 func isAncestor(ctx context.Context, dir, a, b string) bool {
