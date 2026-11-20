@@ -21,7 +21,7 @@ import (
 // children (design.md 11.5); an amended estimate changes a started task's
 // size_cap, and a new attempt starts at size_cap_factor × estimate_lines.
 func TestPlanEstimateRequiredAndLimited(t *testing.T) {
-	_, fails := checkPlan(json.RawMessage(`{"tasks":[{"id":"A","title":"a"},{"id":"B","title":"b","estimate_lines":401}]}`), 400)
+	_, fails := checkPlanWith(json.RawMessage(`{"tasks":[{"id":"A","title":"a"},{"id":"B","title":"b","estimate_lines":401}]}`), nil, "", flow.Settings{TaskSizeLimit: 400}, flow.ResolveFacts{})
 	if got := strings.Join(fails, "; "); !strings.Contains(got, `task "A" needs estimate_lines`) || !strings.Contains(got, `"B" estimates 401 lines, over task_size_limit 400: split it before it exists`) {
 		t.Fatalf("plan apply fails = %q", got)
 	}

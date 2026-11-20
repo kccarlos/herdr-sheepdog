@@ -97,17 +97,18 @@ type Task struct {
 	Smallest  string `json:"smallest,omitempty"`
 	NotDoing  string `json:"not_doing,omitempty"`
 	// EstimateLines is the plan's estimate of changed lines (design.md 11.5).
-	EstimateLines int       `json:"estimate_lines"`
-	SplitFrom     string    `json:"split_from,omitempty"`
-	Done          *Merged   `json:"done,omitempty"`
-	Closed        *Closed   `json:"closed,omitempty"`
-	Dropped       *Dropped  `json:"dropped,omitempty"`
-	Split         *Split    `json:"split,omitempty"`
-	Parked        bool      `json:"parked,omitempty"`
-	LastRow       string    `json:"last_row,omitempty"`
-	Recaps        []Recap   `json:"recaps,omitempty"`
-	Acts          []Act     `json:"acts,omitempty"`
-	Attempts      []Attempt `json:"attempts"`
+	EstimateLines int                    `json:"estimate_lines"`
+	Request       map[string][]Candidate `json:"request,omitempty"`
+	SplitFrom     string                 `json:"split_from,omitempty"`
+	Done          *Merged                `json:"done,omitempty"`
+	Closed        *Closed                `json:"closed,omitempty"`
+	Dropped       *Dropped               `json:"dropped,omitempty"`
+	Split         *Split                 `json:"split,omitempty"`
+	Parked        bool                   `json:"parked,omitempty"`
+	LastRow       string                 `json:"last_row,omitempty"`
+	Recaps        []Recap                `json:"recaps,omitempty"`
+	Acts          []Act                  `json:"acts,omitempty"`
+	Attempts      []Attempt              `json:"attempts"`
 }
 
 // CIFail records the first time a task commit was observed with a failing check run (N13).

@@ -70,6 +70,7 @@ type DoctorOptions struct {
 	Home          string
 	TempDir       string
 	GHHost        string
+	DataDir       string
 	LookPath      func(string) (string, error)
 	RunCommand    CommandFunc
 	VolumeTimeout time.Duration
@@ -640,8 +641,7 @@ func checkCodex(ctx context.Context, o DoctorOptions, pctx probeContext) cliOutc
 	if oc, done := handleHCPathStatus(name, authOut, o, pctx); done {
 		return oc
 	}
-	combined := strings.ToLower(authOut.Stdout + "\n" + authOut.Stderr)
-	if authOut.Err != nil || authOut.TimedOut || authOut.Exit != 0 || strings.Contains(combined, "not logged in") {
+	if !codexLoggedIn(authOut) {
 		return cliOutcome{name: name, state: cliSignedOut, result: resWarn(name, "installed, not logged in", "run: codex login")}
 	}
 	if !o.Canary {
@@ -669,6 +669,10 @@ func checkCodex(ctx context.Context, o DoctorOptions, pctx probeContext) cliOutc
 		return cliOutcome{name: name, state: cliCanaryFailed, result: resWarn(name, "logged in, but canary start failed: "+why, "run codex once in a terminal to check login and quota")}
 	}
 	return cliOutcome{name: name, state: cliReady, result: resOK(name, fmt.Sprintf("logged in; canary start ok (%dms)", cOut.Duration.Milliseconds()))}
+}
+
+func codexLoggedIn(c CommandOutput) bool {
+	return cmdOK(c) && !strings.Contains(strings.ToLower(c.Stdout+"\n"+c.Stderr), "not logged in")
 }
 
 func codexErrorText(stdout string) string {
