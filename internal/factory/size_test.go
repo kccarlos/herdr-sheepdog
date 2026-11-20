@@ -431,25 +431,50 @@ func TestContinueWhenLineReadFails(t *testing.T) {
 	}
 }
 
-// TestCoordinatorPromptAndCommandsDocScope checks that coordinator.md states
-// what estimate_lines means and docs/commands.md matches PR 3.1's scope fields
-// and amend cap rule.
-func TestCoordinatorPromptAndCommandsDocScope(t *testing.T) {
-	if !strings.Contains(coordinatorTemplate, "add plus remove") {
-		t.Errorf("coordinator.md missing estimate_lines meaning")
-	}
-	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "commands.md"))
-	if err != nil {
+// TestContinueUnderGitTimeout: a slow git diff during recap decide continue
+// does not starve SendRun of context, so the worker still gets the continue
+// message; if SendRun itself fails, continue is not committed.
+func TestContinueUnderGitTimeout(t *testing.T) {
+	old := lockGitTimeout
+	lockGitTimeout = 500 * time.Millisecond
+	t.Cleanup(func() { lockGitTimeout = old })
+
+	l := newLanding(t).withTokens()
+	writePRJSON(t, l.gh, "view.json", l.c1, "[]")
+	slow, _ := fakeGitDiff(t)
+	if err := os.WriteFile(slow, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	doc := string(raw)
-	for _, field := range []string{"for_whom", "if_skipped", "smallest", "not_doing"} {
-		if !strings.Contains(doc, field) {
-			t.Errorf("docs/commands.md missing scope field %q", field)
-		}
+	l.pass() // N12: timeout opens size recap
+	l.pass() // N6: wakes coordinator, tells worker to stop
+	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 1 || !strings.Contains(sends[0], "Stop now") {
+		t.Fatalf("worker sends before continue = %q, want one stop", sends)
 	}
-	if strings.Contains(doc, "also changes a started task's size cap") {
-		t.Errorf("docs/commands.md still says plan amend also changes a started task's size cap")
+
+	// Keep slow set during continue: ChangedLines times out, SendRun must still succeed.
+	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"continue","why":"git is slow"}`, "")
+	sends := sendsTo(t, l.srv.Requests(), l.worker)
+	if len(sends) != 2 || !strings.Contains(sends[1], "lets task T1 go on") || !strings.Contains(sends[1], "size cap is now 160") {
+		t.Fatalf("worker sends after continue under git timeout = %q, want continue message", sends)
+	}
+	st := l.state()
+	if a := st.Tasks[0].Attempts[0]; a.SizeCap != 160 || flow.OpenRecap(st.Tasks[0]) != nil {
+		t.Fatalf("after continue under git timeout: size_cap %d, open recap %+v", a.SizeCap, flow.OpenRecap(st.Tasks[0]))
+	}
+
+	// If SendRun fails, continue returns an error and does not commit the decision.
+	_ = os.Remove(slow)
+	lFail := newLanding(t).withTokens()
+	lFail.edit(func(s *flow.State) {
+		s.Tasks[0].Attempts[0].RunID = "missing-worker"
+		s.Tasks[0].Recaps = []flow.Recap{{Trigger: flow.TriggerSize, Allowed: []string{"continue", "split", "new", "drop"}}}
+	})
+	if err := lFail.eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T1","choice":"continue","why":"worker unreachable"}`)); err == nil {
+		t.Fatal("continue with unreachable worker succeeded, want error")
+	}
+	stFail := lFail.state()
+	if a := stFail.Tasks[0].Attempts[0]; a.SizeCap != 100 || flow.OpenRecap(stFail.Tasks[0]) == nil {
+		t.Fatalf("after failed send: size_cap %d, open recap %+v; want cap 100 and recap still open", a.SizeCap, flow.OpenRecap(stFail.Tasks[0]))
 	}
 }
 

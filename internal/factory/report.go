@@ -478,17 +478,21 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 				base, note = c.lines, " (changed-lines read failed; raised from last good reading)"
 			}
 		}
-		a.SizeCap, rc.Decided = base+s.Settings.ContinueLines, &flow.RecapDecision{Choice: choice, Why: why}
+		newCap := base + s.Settings.ContinueLines
 		if a.RunID != "" {
 			now := fmt.Sprintf(" (%d now)", lines)
 			if err != nil {
 				now = ""
 			}
-			msg := fmt.Sprintf("The coordinator lets task %s go on: %s. Your size cap is now %d changed lines%s. Continue the task.", t.ID, why, a.SizeCap, now)
-			if err := world.SendRun(ctx, e.HC, a.RunID, msg); err != nil {
+			msg := fmt.Sprintf("The coordinator lets task %s go on: %s. Your size cap is now %d changed lines%s. Continue the task.", t.ID, why, newCap, now)
+			sctx, scancel := context.WithTimeout(context.Background(), lockGitTimeout)
+			defer scancel()
+			if err := world.SendRun(sctx, e.HC, a.RunID, msg); err != nil {
 				e.logError("factory.exec_error", id, err)
+				return err
 			}
 		}
+		a.SizeCap, rc.Decided = newCap, &flow.RecapDecision{Choice: choice, Why: why}
 		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why},
 			Rule: "recap decide", Decision: fmt.Sprintf("continue; size cap %d%s", a.SizeCap, note), Why: why})
 	}
