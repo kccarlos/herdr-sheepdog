@@ -175,7 +175,7 @@ func PRSnapshot(ctx context.Context, repoDir, branch string) (p flow.PR, warn, e
 	wfPending := false
 	if base := flow.Rollup(checks, false); p.Head != "" && (base == flow.ChecksGreen || base == flow.ChecksAbsent) {
 		if wfPending, err = hasPendingWorkflow(ctx, repoDir, repo, p.Head); err != nil {
-			checks = nil // never green unread: absent, N36 holds it in the grace, then N43
+			checks, p.ChecksUnread = nil, true // never green unread: absent, N36 holds it in the grace, then N43
 		}
 		warns = append(warns, err)
 	}

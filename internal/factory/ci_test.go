@@ -81,8 +81,8 @@ func TestCIRedAgainTellsWorkerOnceKBGIT14(t *testing.T) {
 }
 
 // TestCIStoppedExternalAndTimeout verifies N34: an externally cancelled check
-// is re-run once then wakes the coordinator once; a job time limit wakes once
-// without re-running.
+// is re-run once then wakes the coordinator once; a job time limit, or a
+// cancel whose cause cannot be read, wakes once without re-running.
 func TestCIStoppedExternalAndTimeout(t *testing.T) {
 	t.Run("external cancel", func(t *testing.T) {
 		l := newLanding(t)
@@ -111,6 +111,21 @@ func TestCIStoppedExternalAndTimeout(t *testing.T) {
 		}
 		if w := l.state().Project.Wakes; len(w) != 1 || w[0].Key != "checks_stopped@timeout@"+l.c1 {
 			t.Fatalf("wakes = %+v, want 1 timeout wake", w)
+		}
+	})
+	t.Run("cause unread", func(t *testing.T) {
+		l := newLanding(t)
+		if err := os.WriteFile(filepath.Join(l.gh, "annotations_fail"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("CANCELLED", "55003", "40"))
+		l.pass()
+		l.pass()
+		if len(ghCalls(t, l.gh, "run rerun")) != 0 {
+			t.Fatalf("unread cause must not re-run: %q", ghCalls(t, l.gh, "run rerun"))
+		}
+		if w := l.state().Project.Wakes; len(w) != 1 || w[0].Key != "checks_stopped@unknown@"+l.c1 {
+			t.Fatalf("wakes = %+v, want 1 unknown wake", w)
 		}
 	})
 }

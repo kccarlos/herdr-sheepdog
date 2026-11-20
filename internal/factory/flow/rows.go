@@ -122,6 +122,7 @@ func checksGreen(in In) bool          { return in.Facts.PR.Checks == ChecksGreen
 func checksRed(in In) bool            { return in.Facts.PR.Checks == ChecksRed }
 func checksStoppedExt(in In) bool     { return in.Facts.PR.Checks == ChecksStoppedExternal }
 func checksStoppedTimeout(in In) bool { return in.Facts.PR.Checks == ChecksStoppedTimeout }
+func checksStoppedUnknown(in In) bool { return in.Facts.PR.Checks == ChecksStoppedUnknown }
 func checksPend(in In) bool           { return in.Facts.PR.Checks == ChecksPending }
 func checksUnreadable(in In) bool     { return in.Facts.PR.Checks == ChecksUnreadable }
 func mergeClean(in In) bool           { return in.Facts.PR.Mergeable == MergeableClean }
@@ -139,6 +140,7 @@ func checksAbsentInGrace(in In) bool {
 func checksAbsentPastGrace(in In) bool {
 	return in.Facts.PR.Checks == ChecksAbsent && in.Now.Sub(in.Facts.PR.HeadSince) >= checksGrace(in)
 }
+func checksSeenNone(in In) bool { return !in.Facts.PR.ChecksUnread } // absent from a failed read is not "no checks"
 func ciReady(c Clause) Clause {
 	return all(ladderSays(Passed), prOpen, prHeadIsH, answered, githubAvail, c)
 }
@@ -271,10 +273,13 @@ var TaskRows = []Row[In]{
 			ensureRun(in, in.Facts.Worker, AskStartWorker),
 			once(in.acts(), key(AskTellCI, cmp.Or(in.Facts.PR.FailedRun, "none"), h)))(in)
 	}},
-	{ID: "N34", WaitsOn: "CI", When: ciReady(anyOf(checksStoppedExt, checksStoppedTimeout)), Then: func(in In) Decision {
+	{ID: "N34", WaitsOn: "CI", When: ciReady(anyOf(checksStoppedExt, checksStoppedTimeout, checksStoppedUnknown)), Then: func(in In) Decision {
 		h := headH(in)
 		if checksStoppedTimeout(in) {
 			return say("a CI job hit its own time limit", once(in.acts(), key(AskWake, "checks_stopped", "timeout", h)))(in)
+		}
+		if checksStoppedUnknown(in) { // why it was cancelled is unread: a time limit, never re-run
+			return say("a CI job was cancelled and why is unread: treated as a time limit", once(in.acts(), key(AskWake, "checks_stopped", "unknown", h)))(in)
 		}
 		if ask, wait := maybeRerun(in, h); wait {
 			return say("re-run requested; waiting for CI")(in)
@@ -283,7 +288,7 @@ var TaskRows = []Row[In]{
 		}
 		return say("checks cancelled from outside with no re-runs left", once(in.acts(), key(AskWake, "checks_stopped", "external", h)))(in)
 	}},
-	{ID: "N35", WaitsOn: "CI", When: ciReady(checksAbsentPastGrace), Then: func(in In) Decision {
+	{ID: "N35", WaitsOn: "CI", When: ciReady(all(checksAbsentPastGrace, checksSeenNone)), Then: func(in In) Decision {
 		h := headH(in)
 		dk := key(AskDispatchCI, h)
 		act := LastAct(in.acts(), dk)

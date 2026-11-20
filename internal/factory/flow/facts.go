@@ -84,6 +84,7 @@ type PR struct {
 	FailedChecks   string    `json:"failed_checks,omitempty"`
 	Behind         bool      `json:"behind"`
 	BehindUnknown  bool      `json:"behind_unknown,omitempty"` // compare failed: Behind false is not "not behind" (N40)
+	ChecksUnread   bool      `json:"checks_unread,omitempty"`  // workflow runs unread: absent is not "no checks", N35 never dispatches (N43)
 	ReviewRequired bool      `json:"review_required,omitempty"`
 }
 

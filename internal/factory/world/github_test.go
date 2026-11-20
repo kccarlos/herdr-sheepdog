@@ -578,7 +578,7 @@ func TestPRSnapshotOptionalCallFails(t *testing.T) {
 		}
 		writeGH(t, gh, c.fail+"_fail", "")
 		p, warn, err := PRSnapshot(ctx, repo, "b")
-		if err != nil || warn == nil || !p.Answered || p.Checks != c.want || p.Behind || p.BehindUnknown != (c.fail == "compare") {
+		if err != nil || warn == nil || !p.Answered || p.Checks != c.want || p.Behind || p.BehindUnknown != (c.fail == "compare") || p.ChecksUnread != (c.fail == "workflow_runs") {
 			t.Errorf("%s fails on %s: %+v, warn %v, err %v; want answered %s, not behind, a warning", c.fail, c.view, p, warn, err, c.want)
 		}
 	}

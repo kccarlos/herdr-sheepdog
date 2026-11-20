@@ -136,6 +136,7 @@ func TestN42Guards(t *testing.T) {
 		"checksAbsent":          func(in *In) { in.Facts.PR.Checks = ChecksAbsent },
 		"checksStoppedTimeout":  func(in *In) { in.Facts.PR.Checks = ChecksStoppedTimeout },
 		"checksStoppedExternal": func(in *In) { in.Facts.PR.Checks = ChecksStoppedExternal },
+		"checksStoppedUnknown":  func(in *In) { in.Facts.PR.Checks = ChecksStoppedUnknown },
 		"checksUnreadable":      func(in *In) { in.Facts.PR.Checks = ChecksUnreadable },
 		"tipSame":               func(in *In) { in.Facts.Tip, in.Facts.TipRel = "c9", RelDiverged },
 	} {
@@ -268,6 +269,7 @@ func TestRowCases(t *testing.T) {
 		{"N33", with(red, func(in *In) { in.Facts.PR.FailedRun = "42" }), []string{"rerun_ci@42@c1"}},
 		{"N34", with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedExternal; in.Facts.PR.FailedRun = "43" }), []string{"rerun_ci@43@c1"}},
 		{"N34", with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedTimeout }), []string{"wake_coordinator@checks_stopped@timeout@c1"}},
+		{"N34", with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedUnknown; in.Facts.PR.FailedRun = "44" }), []string{"wake_coordinator@checks_stopped@unknown@c1"}},
 		{"N35", with(func(in *In) {
 			in.Facts.PR.Checks = ChecksAbsent
 			in.Now = now.Add(time.Duration(DefaultSettings().ChecksGraceMinutes) * time.Minute)
@@ -889,8 +891,29 @@ func TestCIRowsN33N34N35(t *testing.T) {
 	if r, d := FirstMatch(TaskRows, to); r.ID != "N34" || !slices.Equal(d.Asked, []string{"wake_coordinator@checks_stopped@timeout@c1"}) {
 		t.Fatalf("N34 timeout = %s %v", r.ID, d.Asked)
 	}
+	// N34: a cancel whose cause is unread (stopped_unknown) is a time limit:
+	// wake once, never re-run, even with re-runs left and a run ID to re-run.
+	unk := with(func(in *In) {
+		in.Facts.PR.Checks, in.Facts.PR.FailedRun, in.Facts.PR.FailedJob = ChecksStoppedUnknown, "56", "400"
+		in.Settings.FlakeReruns = 3
+	})
+	if r, d := FirstMatch(TaskRows, unk); r.ID != "N34" || !slices.Equal(d.Asked, []string{"wake_coordinator@checks_stopped@unknown@c1"}) {
+		t.Fatalf("N34 unknown = %s %v", r.ID, d.Asked)
+	}
+	a0(&unk).Acts = append(a0(&unk).Acts, Act{Key: "wake_coordinator@checks_stopped@unknown@c1", Result: "done", At: now})
+	if r, d := FirstMatch(TaskRows, unk); r.ID != "N34" || len(d.Asked) != 0 {
+		t.Fatalf("N34 unknown after wake = %s %v, want nothing", r.ID, d.Asked)
+	}
 
 	// N35: absent past grace -> dispatch once -> wait within grace -> wake once naming ways out; skipped dispatch wakes immediately.
+	// Absent only because the workflow runs were unread: never dispatch, N43 wakes.
+	unread := with(func(in *In) {
+		in.Facts.PR.Checks, in.Facts.PR.ChecksUnread = ChecksAbsent, true
+		in.Now = now.Add(grace)
+	})
+	if r, d := FirstMatch(TaskRows, unread); r.ID != "N43" || slices.ContainsFunc(d.Asked, func(k string) bool { return strings.HasPrefix(k, AskDispatchCI) }) {
+		t.Fatalf("N35 on unread workflow runs = %s %v, want N43 and no dispatch", r.ID, d.Asked)
+	}
 	abs := with(func(in *In) { in.Facts.PR.Checks = ChecksAbsent; in.Now = now.Add(grace) })
 	if r, d := FirstMatch(TaskRows, abs); r.ID != "N35" || !slices.Equal(d.Asked, []string{"dispatch_ci@c1"}) {
 		t.Fatalf("N35 dispatch = %s %v", r.ID, d.Asked)
