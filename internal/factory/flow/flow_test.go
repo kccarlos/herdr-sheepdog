@@ -106,7 +106,8 @@ func TestSettingsRange(t *testing.T) {
 		t.Error("max_rounds < review_rounds validated")
 	}
 	// dispatch_workflow is a plain file name under .github/workflows.
-	for w, ok := range map[string]bool{"": true, "ci.yml": true, "../ci.yml": false, ".github/workflows/ci.yml": false, `a\b.yml`: false, "..": false} {
+	for w, ok := range map[string]bool{"": true, "ci.yml": true, "Build_2.yaml": true, "../ci.yml": false, ".github/workflows/ci.yml": false, `a\b.yml`: false, "..": false,
+		"12345": false, "12345.txt": false, "ci": false, "-x.yml": false, "--repo.yml": false, ".yml": false} {
 		s := DefaultSettings()
 		s.DispatchWorkflow = w
 		if err := s.Validate(); (err == nil) != ok {

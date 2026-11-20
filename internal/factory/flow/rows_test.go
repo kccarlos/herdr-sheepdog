@@ -950,16 +950,20 @@ func TestCIRowsN33N34N35(t *testing.T) {
 
 func TestFailingRuns(t *testing.T) {
 	checks := []Check{
-		{Kind: "CheckRun", Name: "ok", Status: "COMPLETED", Conclusion: "SUCCESS", DetailsURL: "https://github.com/o/r/actions/runs/111/job/1"},
-		{Kind: "CheckRun", Name: "lint", Status: "COMPLETED", Conclusion: "FAILURE", DetailsURL: "https://github.com/o/r/actions/runs/222/job/20"},
-		{Kind: "CheckRun", Name: "test", Status: "COMPLETED", Conclusion: "FAILURE", DetailsURL: "https://github.com/o/r/actions/runs/222/job/30"},
+		{Kind: "CheckRun", Name: "ok", Status: "COMPLETED", Conclusion: "SUCCESS", Actions: true, DetailsURL: "https://github.com/o/r/actions/runs/111/job/1"},
+		{Kind: "CheckRun", Name: "lint", Status: "COMPLETED", Conclusion: "FAILURE", Actions: true, DetailsURL: "https://github.com/O/R/actions/runs/222/job/20"},
+		{Kind: "CheckRun", Name: "test", Status: "COMPLETED", Conclusion: "FAILURE", Actions: true, DetailsURL: "https://github.com/o/r/actions/runs/222/job/30"},
+		{Kind: "CheckRun", Name: "ext", Status: "COMPLETED", Conclusion: "FAILURE", DetailsURL: "https://github.com/o/r/actions/runs/333/job/40"},
+		{Kind: "CheckRun", Name: "fork", Status: "COMPLETED", Conclusion: "FAILURE", Actions: true, DetailsURL: "https://github.com/x/r/actions/runs/444/job/50"},
 	}
-	fails, running := FailingRuns(checks, ChecksRed)
-	if want := []Failure{{Run: "222", Job: "20", Name: "lint"}, {Run: "222", Job: "30", Name: "test"}}; !slices.Equal(fails, want) || running {
+	fails, running := FailingRuns(checks, ChecksRed, "o/r")
+	want := []Failure{{Run: "222", Job: "20", Name: "lint"}, {Run: "222", Job: "30", Name: "test"}, {Job: "40", Name: "ext"}, {Job: "50", Name: "fork"}}
+	if !slices.Equal(fails, want) || running {
 		t.Fatalf("FailingRuns(red) = %+v, %t; want %+v, false", fails, running, want)
 	}
-	checks = append(checks, Check{Kind: "CheckRun", Name: "e2e", Status: "IN_PROGRESS"})
-	if f, r := FailingRuns(checks, ChecksGreen); f != nil || !r {
-		t.Fatalf("FailingRuns(green) = %+v, %t; want none, running", f, r)
+	for _, c := range []Check{{Kind: "CheckRun", Name: "e2e", Status: "IN_PROGRESS"}, {Kind: "StatusContext", Context: "ci/x", State: "EXPECTED"}} {
+		if f, r := FailingRuns(append(checks[:1:1], c), ChecksGreen, "o/r"); f != nil || !r {
+			t.Fatalf("FailingRuns(green, %s) = %+v, %t; want none, running", c.Name+c.Context, f, r)
+		}
 	}
 }

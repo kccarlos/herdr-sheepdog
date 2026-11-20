@@ -47,6 +47,7 @@ api\ *)
   pg=1; case "$2" in *page=*) pg=${2##*page=} ;; esac
   sfx=""; [ "$pg" = 1 ] || sfx=".$pg"
   case "$2" in
+  */actions/workflows/*/dispatches) failif dispatch; : ;;
   */check-runs/*/annotations*) failif annotations; cat "$D/annotations$sfx.json" 2>/dev/null || echo '[]' ;;
   */commits/*/check-runs*)
     [ -f "$D/check_runs_denied" ] && { echo "gh: Resource not accessible by personal access token (HTTP 403)" >&2; exit 1; }
@@ -647,7 +648,37 @@ func TestRerunFailedJobsAndDispatchWorkflow(t *testing.T) {
 	if err := DispatchWorkflow(ctx, repo, "task/t1", head, "ci.yml"); err != nil {
 		t.Fatal(err)
 	}
-	if got := ghCalls(t, gh, "workflow run"); !slices.Equal(got, []string{"workflow run ci.yml --repo acme/demo --ref task/t1"}) {
-		t.Fatalf("workflow run calls = %q", got)
+	if got := ghCalls(t, gh, "api repos/acme/demo/actions/workflows/"); !slices.Equal(got, []string{"api repos/acme/demo/actions/workflows/ci.yml/dispatches -X POST -f ref=task/t1"}) {
+		t.Fatalf("dispatch calls = %q, want the file's own dispatches endpoint", got)
+	}
+}
+
+// TestDispatchWorkflowExactFileOnly: a value gh could read as a workflow id,
+// a display name or a flag is never dispatched, even if a file by that name
+// exists at head (the guard runs where the command runs).
+func TestDispatchWorkflowExactFileOnly(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	wfDir := filepath.Join(repo, ".github", "workflows")
+	if err := os.MkdirAll(wfDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	names := []string{"12345", "ci", "-x.yml"}
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(wfDir, n), []byte("on: workflow_dispatch\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit(t, repo, "add", ".github")
+	runGit(t, repo, "commit", "-m", "ci")
+	head := runGit(t, repo, "rev-parse", "HEAD")
+	for _, n := range append(names, "a/b.yml") {
+		if err := DispatchWorkflow(ctx, repo, "task/t1", head, n); !errors.Is(err, ErrNoDispatchWorkflow) {
+			t.Errorf("DispatchWorkflow(%q) err = %v, want ErrNoDispatchWorkflow", n, err)
+		}
+	}
+	if got := append(ghCalls(t, gh, "workflow run"), ghCalls(t, gh, "api repos/acme/demo/actions/workflows/")...); len(got) != 0 {
+		t.Fatalf("dispatched %q", got)
 	}
 }

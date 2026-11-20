@@ -2,9 +2,13 @@ package flow
 
 import (
 	"fmt"
-	"strings"
+	"regexp"
 	"time"
 )
+
+// WorkflowFile is a dispatch_workflow value: exactly one file name, never
+// a path, a flag, or a number or name gh would resolve to another workflow.
+var WorkflowFile = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$`)
 
 // PassInterval is the loop's tick. It is a constant, not a setting
 // (design.md 10.1: the engine's own machinery is not tunable).
@@ -131,8 +135,8 @@ func (s Settings) Validate() error {
 	if s.SecondReviewer != "opus" && s.SecondReviewer != "codex" {
 		return fmt.Errorf("second_reviewer %q: allowed opus or codex", s.SecondReviewer)
 	}
-	if w := s.DispatchWorkflow; strings.ContainsAny(w, `/\`) || w == "." || w == ".." {
-		return fmt.Errorf("dispatch_workflow %q: a file name under .github/workflows, no path", w)
+	if w := s.DispatchWorkflow; w != "" && !WorkflowFile.MatchString(w) {
+		return fmt.Errorf("dispatch_workflow %q: a .yml or .yaml file name under .github/workflows (letters, digits, . _ -; no path)", w)
 	}
 	return nil
 }

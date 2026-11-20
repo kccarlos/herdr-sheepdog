@@ -19,6 +19,7 @@ type Check struct {
 	StartedAt    string `json:"startedAt,omitempty"`
 	WorkflowName string `json:"workflowName,omitempty"` // or the REST check suite: part of the check's key
 	DetailsURL   string `json:"detailsUrl,omitempty"`
+	Actions      bool   `json:"-"` // a GitHub Actions check run (set by the snapshot)
 	Stop         string `json:"-"` // why CANCELLED, from annotations: "timeout", "external" (canceled by someone), else unknown
 }
 
@@ -134,13 +135,18 @@ type Failure struct {
 }
 
 // FailingRuns lists the latest checks of a red or outside-cancelled class,
-// and whether any check has not finished.
-func FailingRuns(checks []Check, class Checks) (fails []Failure, running bool) {
+// and whether any check or status has not finished. A run id comes only
+// from an Actions check run whose URL is repo's own actions run.
+func FailingRuns(checks []Check, class Checks, repo string) (fails []Failure, running bool) {
 	want := map[Checks]string{ChecksRed: "red", ChecksStoppedExternal: "stopped_external"}[class]
+	pre := "https://github.com/" + repo + "/actions/runs/"
 	for _, c := range LatestChecks(checks) {
-		running = running || c.unfinished()
+		running = running || c.verdict() == "pending"
 		if want != "" && c.verdict() == want {
-			f := Failure{Run: urlID(c.DetailsURL, "/actions/runs/"), Name: cmp.Or(c.Name, c.Context)}
+			f := Failure{Name: cmp.Or(c.Name, c.Context)}
+			if c.Actions && len(c.DetailsURL) > len(pre) && strings.EqualFold(c.DetailsURL[:len(pre)], pre) {
+				f.Run = urlID(c.DetailsURL, "/actions/runs/")
+			}
 			if id := CheckRunID(c); id > 0 {
 				f.Job = strconv.FormatInt(id, 10)
 			}

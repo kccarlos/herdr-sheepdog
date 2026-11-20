@@ -167,6 +167,7 @@ func PRSnapshot(ctx context.Context, repoDir, branch string) (p flow.PR, warn, e
 	var warns []error
 	checks := flow.LatestChecks(v.StatusCheckRollup)
 	for i, c := range checks {
+		checks[i].Actions = c.Actions || !checksDenied && c.WorkflowName != "" // the rollup names only an Actions run's workflow; REST reads the app
 		if id := flow.CheckRunID(c); id > 0 && strings.EqualFold(c.Status, "COMPLETED") && strings.EqualFold(c.Conclusion, "CANCELLED") {
 			checks[i].Stop, err = checkRunStop(ctx, repoDir, repo, id)
 			warns = append(warns, err)
@@ -180,7 +181,7 @@ func PRSnapshot(ctx context.Context, repoDir, branch string) (p flow.PR, warn, e
 		warns = append(warns, err)
 	}
 	p.Checks = flow.Rollup(checks, wfPending)
-	p.Failed, p.Running = flow.FailingRuns(checks, p.Checks)
+	p.Failed, p.Running = flow.FailingRuns(checks, p.Checks, repo)
 	if v.BaseRefName != "" && p.Head != "" {
 		var cmpResp struct {
 			BehindBy int `json:"behind_by"`
@@ -267,12 +268,13 @@ func fetchCheckRuns(ctx context.Context, dir, repo, head string) ([]flow.Check, 
 				StartedAt                string             `json:"started_at"`
 				DetailsURL               string             `json:"details_url"`
 				CheckSuite               struct{ ID int64 } `json:"check_suite"`
+				App                      struct{ Slug string }
 			} `json:"check_runs"`
 		}
 		err := json.Unmarshal(raw, &resp)
 		for _, cr := range resp.CheckRuns {
 			checks = append(checks, flow.Check{Kind: "CheckRun", ID: cr.ID, Name: cr.Name, Status: cr.Status, Conclusion: cr.Conclusion,
-				StartedAt: cr.StartedAt, DetailsURL: cr.DetailsURL, WorkflowName: fmt.Sprint("suite ", cr.CheckSuite.ID)})
+				StartedAt: cr.StartedAt, DetailsURL: cr.DetailsURL, WorkflowName: fmt.Sprint("suite ", cr.CheckSuite.ID), Actions: cr.App.Slug == "github-actions"})
 		}
 		return len(resp.CheckRuns), err
 	})
@@ -397,7 +399,7 @@ func RerunFailedJobs(ctx context.Context, repoDir, runID string) error {
 // .github/workflows/<name> exists at head. Dispatch is opt-in by name: a
 // dispatchable workflow can deploy or release (design.md 9.4, N35).
 func DispatchWorkflow(ctx context.Context, worktree, branch, head, name string) error {
-	if name == "" {
+	if !flow.WorkflowFile.MatchString(name) { // also here: settings are reloaded from disk each pass
 		return ErrNoDispatchWorkflow
 	}
 	repo, err := ghRepo(ctx, worktree)
@@ -407,6 +409,8 @@ func DispatchWorkflow(ctx context.Context, worktree, branch, head, name string) 
 	if _, err := gitCmd(ctx, worktree, "cat-file", "-e", head+":.github/workflows/"+name); err != nil {
 		return ErrNoDispatchWorkflow
 	}
-	_, err = ghCmd(ctx, worktree, "workflow", "run", name, "--repo", repo, "--ref", branch)
+	// The file's own dispatches endpoint: gh workflow run would resolve the
+	// value as an id or a display name too.
+	_, err = ghCmd(ctx, worktree, "api", "repos/"+repo+"/actions/workflows/"+name+"/dispatches", "-X", "POST", "-f", "ref="+branch)
 	return err
 }

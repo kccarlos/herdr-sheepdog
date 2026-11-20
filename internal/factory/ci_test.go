@@ -13,7 +13,7 @@ import (
 )
 
 func checkRollup(conclusion, runID, jobID string) string {
-	return `[{"__typename":"CheckRun","name":"check","status":"COMPLETED","conclusion":"` + conclusion + `","detailsUrl":"https://github.com/acme/demo/actions/runs/` + runID + `/job/` + jobID + `"}]`
+	return `[{"__typename":"CheckRun","name":"check","workflowName":"ci","status":"COMPLETED","conclusion":"` + conclusion + `","detailsUrl":"https://github.com/acme/demo/actions/runs/` + runID + `/job/` + jobID + `"}]`
 }
 
 // TestCIRedRerunThenGreenNoRound verifies N33: a red check below flake_reruns
@@ -166,8 +166,8 @@ func TestCINoChecksDispatchAndWake(t *testing.T) {
 		l.pass() // within grace -> N36 waits
 		agePR(l)
 		l.pass() // past grace -> N35 dispatches once
-		dispatches := ghCalls(t, l.gh, "workflow run")
-		if len(dispatches) != 1 || dispatches[0] != "workflow run ci.yml --repo acme/demo --ref "+l.branch {
+		dispatches := ghCalls(t, l.gh, "api repos/acme/demo/actions/workflows/")
+		if len(dispatches) != 1 || dispatches[0] != "api repos/acme/demo/actions/workflows/ci.yml/dispatches -X POST -f ref="+l.branch {
 			t.Fatalf("dispatches = %q", dispatches)
 		}
 		l.pass() // dispatched < grace ago -> wait, no wake yet
@@ -393,7 +393,7 @@ func TestCIDispatchOptInAndFailureOnce(t *testing.T) {
 	l.pass()
 	l.pass()
 	l.pass()
-	if got := ghCalls(t, l.gh, "workflow run"); len(got) != 1 || got[0] != "workflow run ci.yml --repo acme/demo --ref "+l.branch {
+	if got := ghCalls(t, l.gh, "api repos/acme/demo/actions/workflows/"); len(got) != 1 || got[0] != "api repos/acme/demo/actions/workflows/ci.yml/dispatches -X POST -f ref="+l.branch {
 		t.Fatalf("dispatches = %q, want one of ci.yml", got)
 	}
 	if act := flow.LastAct(l.state().Tasks[0].Attempts[0].Acts, "dispatch_ci@"+c2); act == nil || act.Result != "failed" {
@@ -401,5 +401,36 @@ func TestCIDispatchOptInAndFailureOnce(t *testing.T) {
 	}
 	if w := l.state().Project.Wakes; len(w) != 1 || w[0].Key != "no_checks@"+c2 {
 		t.Fatalf("wakes = %+v, want 1 no_checks", w)
+	}
+}
+
+// TestCIWaitsForPendingStatus: a pending commit status beside a red job
+// holds the re-run and the tell, like an unfinished check run.
+func TestCIWaitsForPendingStatus(t *testing.T) {
+	l := newLanding(t)
+	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("a", "COMPLETED", "FAILURE", "62", "620")+`,{"__typename":"StatusContext","context":"ci/jenkins","state":"PENDING"}]`)
+	l.pass()
+	l.pass()
+	if got := ghCalls(t, l.gh, "run rerun"); len(got) != 0 || len(sendsTo(t, l.srv.Requests(), l.worker)) != 0 {
+		t.Fatalf("acted while a status is pending: reruns %q", got)
+	}
+}
+
+// TestCIRerunOnlyActionsRunsOfThisRepo: a run id comes only from a GitHub
+// Actions check run whose URL is this repository's actions run; an external
+// check linking to a run, or an Actions URL of another repository, is told,
+// never re-run.
+func TestCIRerunOnlyActionsRunsOfThisRepo(t *testing.T) {
+	for name, rollup := range map[string]string{
+		"external check": `[{"__typename":"CheckRun","name":"ext","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/acme/demo/actions/runs/999/job/1"}]`,
+		"other repo":     `[{"__typename":"CheckRun","name":"a","workflowName":"ci","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/other/repo/actions/runs/998/job/1"}]`,
+	} {
+		l := newLanding(t)
+		writePRJSON(t, l.gh, "view.json", l.c1, rollup)
+		l.pass()
+		l.pass()
+		if got := ghCalls(t, l.gh, "run rerun"); len(got) != 0 || len(sendsTo(t, l.srv.Requests(), l.worker)) != 1 {
+			t.Errorf("%s: reruns %q, sends %d; want none and one tell", name, got, len(sendsTo(t, l.srv.Requests(), l.worker)))
+		}
 	}
 }
