@@ -73,8 +73,8 @@ func EnsureRun(in In, role string) []string {
 			last, tries = a.Review.Run, a.Review.Retries
 		}
 	}
-	if r.State == RunWorking || r.State == RunIdle || r.Pending ||
-		(role == RoleWorker && r.State == RunNone && Done(a.Acts, AskStartWorker) && (last == nil || last.State != PhaseEnded)) {
+	// A stopping alert (section 6) is slice 5b.
+	if r.State == RunWorking || r.State == RunIdle || r.Pending {
 		return nil
 	}
 	if last != nil && last.State != PhaseEnded {
@@ -99,7 +99,7 @@ func EnsureRun(in In, role string) []string {
 		}
 		return once(a.Acts, AskStartWorker)
 	case last.Result == EndQuota || last.Result == EndSignedOut:
-		// Quota and signed-out rows are slice 5b; treat them as otherwise.
+		// Quota and signed-out rows are slice 5b; owner-quit detection awaits herdr-core (U12) and retry (5a.3/5a.4).
 	case role == RoleReviewer && tries < in.Settings.ReviewerRetries:
 		return []string{key(AskStartReview, round, tries+countBase, h)}
 	case role == RoleWorker && a.Restarts < in.Settings.WorkerRestarts:
@@ -116,12 +116,9 @@ func EnsureRun(in In, role string) []string {
 }
 
 func workerStartAsk(in In, last *RunRecord, n int) string {
-	res, _ := Resolve(RoleWorker, in.Task, in.Settings, UnprobedFacts)
 	mode := ContinueHandoff
-	if last.Resumable && last.SessionID != "" && last.CLI == cmp.Or(res.CLI, "claude") {
+	if res, _ := Resolve(RoleWorker, in.Task, in.Settings, UnprobedFacts); last.Resumable && last.SessionID != "" && last.CLI == cmp.Or(res.CLI, "claude") {
 		mode = ContinueResume
-	} else if n == 0 && last.SessionID == "" && !last.Resumed && last.CLI == "" {
-		return AskStartWorker
 	}
 	if n == 0 {
 		return key(AskStartWorker, mode)
@@ -266,9 +263,43 @@ func join(asked [][]string) []string {
 	return out
 }
 
+// stuckKey backs the reduced S2 fallback: failed non-run acts until PR 5a.3
+// (N5 retry), and an idle no-tag reviewer until PR 5a.5 (time limits).
+func stuckKey(in In) string {
+	if in.Task.Parked || prClosed(in) {
+		return ""
+	}
+	d, h := time.Duration(in.Settings.StuckMinutes)*time.Minute, headH(in)
+	if a := in.attempt(); !ended(in) && !prMerged(in) && !recapOpen(in) && ladderSays(Review)(in) &&
+		!noPR(in) && (!prOpen(in) || !prBehindH(in)) && in.Facts.Reviewer.State == RunIdle &&
+		!in.Facts.Reviewer.LastTurnEnd.IsZero() && in.Now.Sub(in.Facts.Reviewer.LastTurnEnd) >= d {
+		return key(AskWake, "stuck", "reviewer_idle", nextRound(*a), h)
+	}
+	for _, ac := range in.acts() {
+		verb, _, _ := strings.Cut(ac.Key, "@")
+		if last := LastAct(in.acts(), ac.Key); last == nil || last.Result != "failed" || last.At.IsZero() || in.Now.Sub(last.At) < d {
+			continue
+		}
+		if ended(in) && verb == AskCleanup || prMerged(in) && verb == AskMarkDone ||
+			!ended(in) && !prMerged(in) && (verb == AskNewAttempt ||
+				inSet("merge|push_and_open_pr|update_branch|tell_worker_diverged|tell_worker_conflict|tell_worker_ci", verb) && strings.HasSuffix(ac.Key, "@"+h) && (verb != AskUpdateBranch || prBehindBase(in)) ||
+				verb == AskTellFindings && ladderSays(Fix)(in) && ac.Key == key(AskTellFindings, newestCovering(*in.attempt(), h).N) ||
+				verb == AskTellStop && recapOpen(in) && ac.Key == key(AskTellStop, len(in.Task.Recaps)) ||
+				verb == AskTellBaseRed && in.Facts.BaseRed && ac.Key == key(AskTellBaseRed, in.Facts.BaseRedSpell) && Count(in.acts(), ac.Key) >= baseRedTellTries) {
+			return key(AskWake, "stuck", ac.Key)
+		}
+	}
+	return ""
+}
+
 // TaskRows is the task table in design.md section 4's order, using EnsureRun
 // (4.8) wherever a row needs a worker or reviewer run.
 var TaskRows = []Row[In]{
+	// Reduced S2 fallback until PR 5a.3 (N5 retry) and PR 5a.5 (time limits).
+	{ID: "S2", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return stuckKey(in) != "" }, Then: func(in In) Decision {
+		k := stuckKey(in)
+		return say("stuck past stuck_minutes: "+k, once(in.acts(), k))(in)
+	}},
 	{ID: "N1", WaitsOn: "nobody", Stage: "done", When: ended, Then: func(in In) Decision {
 		return say("ended: stop its runs and clean up", once(in.acts(), AskCleanup))(in)
 	}},

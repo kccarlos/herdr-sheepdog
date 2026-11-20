@@ -1,17 +1,23 @@
 package factory
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -542,5 +548,458 @@ func TestReviewerNoReportRetriesCandidateRotationThenFails(t *testing.T) {
 	st, _ = LoadState(paths.State(id))
 	if st.Tasks[0].Attempts[0].Review.RunID != "" || len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != "reviewer_failed@1@"+c1 {
 		t.Fatalf("past reviewer_retries: review=%+v wakes=%+v", st.Tasks[0].Attempts[0].Review, st.Project.Wakes)
+	}
+}
+
+func methodFailProxy(t *testing.T, target, method string, fail *atomic.Bool) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "sdp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	ln, err := net.Listen("unix", filepath.Join(dir, "s"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer func() { _ = c.Close() }()
+				line, err := bufio.NewReader(c).ReadBytes('\n')
+				if err != nil {
+					return
+				}
+				var req struct {
+					ID     uint64 `json:"id"`
+					Method string `json:"method"`
+				}
+				_ = json.Unmarshal(line, &req)
+				if req.Method == method && fail.Load() {
+					_, _ = fmt.Fprintf(c, `{"jsonrpc":"2.0","id":%d,"error":{"code":-32000,"message":"%s failed"}}`+"\n", req.ID, method)
+					return
+				}
+				up, err := net.Dial("unix", target)
+				if err != nil {
+					return
+				}
+				defer func() { _ = up.Close() }()
+				if _, err := up.Write(line); err == nil {
+					_, _ = io.Copy(c, up)
+				}
+			}()
+		}
+	}()
+	return ln.Addr().String()
+}
+
+// TestParkDuringReviewUnparkRestartsReviewer (from Opus probe): parking mid-review
+// records EndStopped on the reviewer run (never deleting Review), and unparking
+// starts the reviewer again for the same round and commit without counting.
+func TestParkDuringReviewUnparkRestartsReviewer(t *testing.T) {
+	l := newLanding(t).withTokens()
+	ctx := context.Background()
+	rev, err := startRun(ctx, l.client, world.RunSpec{Name: "rev-t1", Cwd: l.wt, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.srv.SetStatus(rev, &hc.Status{App: "claude-code", State: "working"})
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Rounds = nil
+		a.Review = &flow.ReviewRun{RunID: rev, Round: 1, Head: l.c1, Code: "c", Reviewer: flow.Reviewer{CLI: "claude", Model: "opus"}}
+		a.Acts = []flow.Act{{Key: flow.AskStartWorker, Result: "done"}, {Key: "push_and_open_pr@" + l.c1, Result: "done"}, {Key: "start_reviewer@1@" + l.c1, Result: "done"}}
+	})
+	l.pass()
+	l.report("tok-coord", "task", `{"action":"park","task":"T1","why":"x"}`, "")
+	l.pass()
+	l.report("tok-coord", "task", `{"action":"unpark","task":"T1","why":"y"}`, "")
+	for range 4 {
+		l.pass()
+	}
+	s := l.state()
+	a := s.Tasks[0].Attempts[0]
+	if a.Review == nil || a.Review.RunID == "" || a.Review.Round != 1 || a.Review.Head != l.c1 || a.Review.Retries != 0 {
+		t.Fatalf("no uncounted reviewer after unpark (row=%s review=%+v acts=%+v)", s.Tasks[0].LastRow, a.Review, a.Acts)
+	}
+}
+
+// TestAmendBriefDuringReviewRestartsReviewer (from Opus probe): plan amend of
+// brief or outcomes during a review round records EndStopped on the reviewer and
+// starts a fresh reviewer for the round when the worker changes nothing.
+func TestAmendBriefDuringReviewRestartsReviewer(t *testing.T) {
+	l := newLanding(t).withTokens()
+	ctx := context.Background()
+	rev, err := startRun(ctx, l.client, world.RunSpec{Name: "rev-t1", Cwd: l.wt, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.srv.SetStatus(rev, &hc.Status{App: "claude-code", State: "working"})
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Rounds = nil
+		a.Review = &flow.ReviewRun{RunID: rev, Round: 1, Head: l.c1, Code: "c", Reviewer: flow.Reviewer{CLI: "claude", Model: "opus"}}
+		a.Acts = []flow.Act{{Key: flow.AskStartWorker, Result: "done"}, {Key: "push_and_open_pr@" + l.c1, Result: "done"}, {Key: "start_reviewer@1@" + l.c1, Result: "done"}}
+	})
+	l.pass()
+	l.report("tok-coord", "plan amend", `{"why":"clarify","tasks":[{"id":"T1","brief":"updated brief"}]}`, "")
+	for range 3 {
+		l.pass()
+	}
+	s := l.state()
+	a := s.Tasks[0].Attempts[0]
+	if a.Review == nil || a.Review.RunID == "" || a.Review.Retries != 0 {
+		t.Fatalf("no reviewer after brief amend (row=%s review=%+v)", s.Tasks[0].LastRow, a.Review)
+	}
+}
+
+// TestRecapAndMovedTipVoidRecordEngineStop verifies that both a recap voiding an
+// in-flight round and a clean moved-tip void record EndStopped (never nil) so
+// once the round is wanted again at H, the reviewer restarts uncounted.
+func TestRecapAndMovedTipVoidRecordEngineStop(t *testing.T) {
+	l := newLanding(t).withTokens()
+	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Rounds = nil })
+	l.pass() // N29 starts round 1 reviewer at c1
+	rev1 := l.state().Tasks[0].Attempts[0].Review
+	if rev1 == nil || rev1.RunID == "" {
+		t.Fatalf("expected round 1 reviewer running, got %+v", rev1)
+	}
+
+	// 1. Open size recap -> voids reviewer as EndStopped; continue -> restarts round 1 at c1 uncounted.
+	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].SizeCap = 0 })
+	l.pass() // N12 opens size recap
+	l.pass() // observeReviewLocked voids round 1 as EndStopped
+	if rv := l.state().Tasks[0].Attempts[0].Review; rv == nil || rv.Run == nil || rv.Run.Result != flow.EndStopped {
+		t.Fatalf("after recap void: review = %+v, want EndStopped", rv)
+	}
+	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"continue","why":"allow lines"}`, "")
+	l.pass() // N29 restarts reviewer for round 1 at c1
+	rev2 := l.state().Tasks[0].Attempts[0].Review
+	if rev2 == nil || rev2.RunID == "" || rev2.RunID == rev1.RunID || rev2.Retries != 0 {
+		t.Fatalf("after recap continue: review = %+v, want restarted round 1 with Retries=0", rev2)
+	}
+
+	// 2. Worker commits c2 mid-review (tip moves off c1) -> voids reviewer as EndStopped;
+	// worker resets back to c1 -> N29 restarts round 1 at c1 uncounted.
+	commitFile(t, l.wt, "tmp.go", "package demo\n")
+	l.pass() // tip ahead -> voids round 1 as EndStopped
+	if rv := l.state().Tasks[0].Attempts[0].Review; rv == nil || rv.Run == nil || rv.Run.Result != flow.EndStopped {
+		t.Fatalf("after tip-moved void: review = %+v, want EndStopped", rv)
+	}
+	gitIn(t, l.wt, "reset", "--hard", l.c1)
+	l.pass()
+	rev3 := l.state().Tasks[0].Attempts[0].Review
+	if rev3 == nil || rev3.RunID == "" || rev3.Retries != 0 {
+		t.Fatalf("after reset back to c1: review = %+v, want restarted round 1 with Retries=0", rev3)
+	}
+}
+
+// TestOwnerStopStartRestartsWorker (from Opus probe): owner Stop records
+// EndStopped on open runs (never clearRuns), and owner Start restarts the worker.
+func TestOwnerStopStartRestartsWorker(t *testing.T) {
+	l := newLanding(t).withTokens()
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Ready, a.Rounds = nil, nil
+		a.Acts = []flow.Act{{Key: flow.AskStartWorker, Result: "done"}}
+	})
+	l.pass()
+	if err := l.eng.Stop(l.repo); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.eng.Start(l.repo, "Goal", 0); err != nil {
+		t.Fatal(err)
+	}
+	l.edit(func(s *flow.State) { s.Project.RunID = "coord-elsewhere" })
+	for range 3 {
+		l.pass()
+	}
+	s := l.state()
+	a := s.Tasks[0].Attempts[0]
+	if a.RunID == "" {
+		t.Fatalf("worker not restarted after owner stop+start (silent wait at %s, rec=%+v)", s.Tasks[0].LastRow, a.Run)
+	}
+}
+
+// TestS2FailedMergeWakesAfterStuckMinutes verifies reduced S2 (until 5a.3 N5):
+// a failed non-run act (merge@H) wakes the coordinator once after stuck_minutes.
+func TestS2FailedMergeWakesAfterStuckMinutes(t *testing.T) {
+	l := newLanding(t)
+	now := time.Now()
+	l.eng.Now = func() time.Time { return now }
+	if err := os.WriteFile(filepath.Join(l.gh, "merge_fail"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l.pass() // N42 asks merge@c1 -> fails
+	if ac := flow.LastAct(l.state().Tasks[0].Attempts[0].Acts, "merge@"+l.c1); ac == nil || ac.Result != "failed" {
+		t.Fatalf("merge act = %+v, want failed", ac)
+	}
+	now = now.Add(29 * time.Minute)
+	l.pass()
+	if w := l.state().Project.Wakes; len(w) != 0 {
+		t.Fatalf("woke before stuck_minutes: %+v", w)
+	}
+	now = now.Add(2 * time.Minute)
+	l.pass() // S2 wakes once
+	l.pass() // no duplicate wake
+	w := l.state().Project.Wakes
+	if len(w) != 1 || w[0].Key != "stuck@merge@"+l.c1 {
+		t.Fatalf("wakes past stuck_minutes = %+v, want [stuck@merge@%s]", w, l.c1)
+	}
+}
+
+// TestS2IdleReviewerNoTagWakesAfterStuckMinutes verifies reduced S2 (until 5a.5):
+// a reviewer idle with no <report> tag wakes the coordinator once after stuck_minutes.
+func TestS2IdleReviewerNoTagWakesAfterStuckMinutes(t *testing.T) {
+	l := newLanding(t)
+	now := time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)
+	l.eng.Now = func() time.Time { return now }
+	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Rounds = nil })
+	l.pass() // N29 starts round 1 reviewer
+	revID := l.state().Tasks[0].Attempts[0].Review.RunID
+	l.srv.SetScreen(revID, "❯ prompt\n\n⏺ Reviewed everything, forgot the tag.\n")
+	l.srv.SetStatus(revID, &hc.Status{App: "claude-code", State: "done"})
+	now = now.Add(5 * time.Second)
+	l.pass() // R9 -> working
+	now = now.Add(25 * time.Second)
+	l.pass() // R20 -> idle (ReportNotYet)
+	now = now.Add(29 * time.Minute)
+	l.pass()
+	if w := l.state().Project.Wakes; len(w) != 0 {
+		t.Fatalf("woke before stuck_minutes: %+v", w)
+	}
+	now = now.Add(2 * time.Minute)
+	l.pass() // S2 wakes once
+	l.pass() // no duplicate wake
+	w := l.state().Project.Wakes
+	if len(w) != 1 || w[0].Key != "stuck@reviewer_idle@1@"+l.c1 {
+		t.Fatalf("wakes past stuck_minutes = %+v, want [stuck@reviewer_idle@1@%s]", w, l.c1)
+	}
+}
+
+// TestRestartStopsOldLiveTerminalInsteadOfAdopting verifies Item 3a: when an
+// ended worker restarts while an old terminal with the same name is still live,
+// the engine stops the old terminal first and launches a fresh terminal that
+// receives held messages and the right session id (never adopting the old one).
+func TestRestartStopsOldLiveTerminalInsteadOfAdopting(t *testing.T) {
+	l := newLanding(t)
+	now := time.Date(2026, 11, 20, 15, 0, 0, 0, time.UTC)
+	l.eng.Now = func() time.Time { return now }
+	var launched []hc.RunParams
+	l.srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { launched = append(launched, p) }
+
+	// Leave a live terminal with the exact workerName in hc (as if R22's stop failed).
+	wName := workerName(l.id, "T1", 1)
+	oldTerm, err := startRun(context.Background(), l.client, world.RunSpec{Name: wName, Cwd: l.wt, Argv: []string{"sh", "-c", "sleep 60"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const origSID = "22222222-3333-4444-8555-666666666666"
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Ready, a.Rounds, a.RunID = nil, nil, ""
+		a.Held = []string{"held findings across failed stop"}
+		a.Run = &flow.RunRecord{Address: oldTerm, Role: flow.RoleWorker, CLI: "claude", SessionID: origSID, Resumable: true, State: flow.PhaseEnded, Result: flow.EndStuck, EndedAt: now.Add(-2 * time.Minute)}
+		a.Acts = []flow.Act{{Key: flow.AskStartWorker, Result: "done"}}
+	})
+	launched = nil
+	l.pass()
+	a := l.state().Tasks[0].Attempts[0]
+	if len(launched) != 1 || !strings.Contains(launched[0].Argv[len(launched[0].Argv)-1], "held findings across failed stop") {
+		t.Fatalf("restart adopted old terminal instead of launching with held messages: launched=%+v", launched)
+	}
+	if a.Run == nil || a.Run.SessionID != origSID || len(a.Held) != 0 {
+		t.Fatalf("after restart: run=%+v held=%q, want SessionID=%s and held cleared", a.Run, a.Held, origSID)
+	}
+}
+
+// TestHeldMessagesClearedOnlyAfterSuccessfulLaunch verifies Item 3b: held
+// messages stay on Attempt.Held when a restart cannot stop the old live terminal
+// or fails to launch, and are cleared only once a launch actually delivers them.
+func TestHeldMessagesClearedOnlyAfterSuccessfulLaunch(t *testing.T) {
+	l := newLanding(t)
+	now := time.Date(2026, 11, 20, 15, 30, 0, 0, time.UTC)
+	l.eng.Now = func() time.Time { return now }
+	var failKill, failRun atomic.Bool
+	p1 := methodFailProxy(t, l.srv.Path, "terminal.kill", &failKill)
+	p2 := methodFailProxy(t, p1, "terminal.run", &failRun)
+	l.eng.HC = hc.NewClient(p2)
+	var launched []hc.RunParams
+	l.srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { launched = append(launched, p) }
+
+	wName := workerName(l.id, "T1", 1)
+	oldTerm, err := startRun(context.Background(), l.client, world.RunSpec{Name: wName, Cwd: l.wt, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Ready, a.Rounds, a.RunID = nil, nil, ""
+		a.Held = []string{"important CI failure"}
+		a.Run = &flow.RunRecord{Address: oldTerm, Role: flow.RoleWorker, CLI: "claude", SessionID: "33333333-4444-4555-8666-777777777777", Resumable: true, State: flow.PhaseEnded, Result: flow.EndStuck, EndedAt: now.Add(-2 * time.Minute)}
+		a.Acts = []flow.Act{{Key: flow.AskStartWorker, Result: "done"}}
+	})
+	launched = nil
+
+	// 1. Old terminal cannot be killed -> no adoption, Held kept.
+	failKill.Store(true)
+	l.pass()
+	if got := l.state().Tasks[0].Attempts[0].Held; len(got) != 1 {
+		t.Fatalf("Held cleared when old terminal kill failed: %q", got)
+	}
+
+	// 2. Old terminal killed, but terminal.run fails -> Held still kept.
+	failKill.Store(false)
+	failRun.Store(true)
+	l.pass()
+	if got := l.state().Tasks[0].Attempts[0].Held; len(got) != 1 {
+		t.Fatalf("Held cleared when terminal.run failed: %q", got)
+	}
+
+	// 3. terminal.run succeeds after backoff -> Held delivered and cleared.
+	failRun.Store(false)
+	now = now.Add(5 * time.Minute)
+	l.pass()
+	if len(launched) != 1 || !strings.Contains(launched[0].Argv[len(launched[0].Argv)-1], "important CI failure") {
+		t.Fatalf("launched prompts = %+v, want held message delivered", launched)
+	}
+	if got := l.state().Tasks[0].Attempts[0].Held; len(got) != 0 {
+		t.Fatalf("Held not cleared after successful launch: %q", got)
+	}
+}
+
+// TestSessionIDSavedBeforeLaunchAndKeptAcrossCrash verifies Item 3c: the engine
+// persists SessionID to state.json before launching the terminal, so a crash
+// between launch and post-pass save never records an id the terminal never had.
+func TestSessionIDSavedBeforeLaunchAndKeptAcrossCrash(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, _ := initGitRepoWithRemote(t)
+	eng := New(paths, client)
+	eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
+	if err := eng.Start(repo, "Crash goal", 2); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	var runs []hc.RunParams
+	var preCommitState []byte
+	var launchedSID string
+	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) {
+		runs = append(runs, p)
+		if p.Labels["sheepdog.role"] == flow.RoleWorker {
+			launchedSID = argValue(p.Argv, "--session-id")
+			preCommitState, _ = os.ReadFile(paths.State(id))
+		}
+	}
+	eng.passProject(ctx, id, false) // coordinator
+	if err := eng.Report(runs[0].Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: crash",`+testPlanJSON+`}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N11
+	eng.passProject(ctx, id, false) // N23 launches worker
+
+	var savedBefore flow.State
+	if err := json.Unmarshal(preCommitState, &savedBefore); err != nil {
+		t.Fatalf("unmarshal pre-launch state: %v", err)
+	}
+	if savedBefore.Tasks[0].Attempts[0].Run == nil || savedBefore.Tasks[0].Attempts[0].Run.SessionID != launchedSID {
+		t.Fatalf("SessionID not saved before launch: disk=%+v want=%q", savedBefore.Tasks[0].Attempts[0].Run, launchedSID)
+	}
+
+	// Simulate daemon crash right after hc launched the worker (restore preCommitState).
+	if err := os.WriteFile(paths.State(id), preCommitState, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // adopts the live worker
+	st, _ := LoadState(paths.State(id))
+	if got := st.Tasks[0].Attempts[0].Run; got == nil || got.SessionID != launchedSID {
+		t.Fatalf("after crash adoption: Run=%+v, want SessionID=%q", got, launchedSID)
+	}
+}
+
+// TestResumableFalseWhenLaunchFails verifies Item 4a: a failed fresh launch
+// leaves Resumable=false so the next restart uses a handoff instead of wasting
+// a restart trying --resume on a session that was never created.
+func TestResumableFalseWhenLaunchFails(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	var failRun atomic.Bool
+	var runs []hc.RunParams
+	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { runs = append(runs, p) }
+	paths := testPaths(t)
+	repo, _ := initGitRepoWithRemote(t)
+	now := time.Date(2026, 11, 20, 16, 0, 0, 0, time.UTC)
+	eng := New(paths, hc.NewClient(methodFailProxy(t, srv.Path, "terminal.run", &failRun)))
+	eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
+	eng.Now = func() time.Time { return now }
+	if err := eng.Start(repo, "Launch fail goal", 2); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	eng.passProject(ctx, id, false) // coordinator
+	if err := eng.Report(runs[0].Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: launch",`+testPlanJSON+`}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N11
+	failRun.Store(true)
+	eng.passProject(ctx, id, false) // N23 launch fails (R2)
+	st, _ := LoadState(paths.State(id))
+	if r := st.Tasks[0].Attempts[0].Run; r == nil || r.Resumable {
+		t.Fatalf("after failed launch: Run=%+v, want Resumable=false", r)
+	}
+	failRun.Store(false)
+	now = now.Add(time.Minute)
+	eng.passProject(ctx, id, false) // restart 1 uses handoff (--session-id, not --resume)
+	last := runs[len(runs)-1]
+	if argValue(last.Argv, "--resume") != "" || argValue(last.Argv, "--session-id") == "" {
+		t.Fatalf("restart after failed fresh launch tried --resume: %q", last.Argv)
+	}
+}
+
+// TestAppendHeldKeepsRepeatedMessagesWithSameText verifies Item 4c: two separate
+// held messages with identical text are both kept, never dropped by text dedupe.
+func TestAppendHeldKeepsRepeatedMessagesWithSameText(t *testing.T) {
+	got := appendHeld(nil, "same message", "same message")
+	if len(got) != 2 || got[0] != "same message" || got[1] != "same message" {
+		t.Fatalf("appendHeld dropped duplicate text: %q, want 2 copies", got)
+	}
+}
+
+// TestWorkerFailedStatusShowsFailedNotWorking verifies Item 4d: once worker
+// restarts are exhausted and worker_failed wakes the coordinator, both
+// ProjectStatus and Graph report blocked_or_failed with a worker-failed why
+// (neither working nor stale).
+func TestWorkerFailedStatusShowsFailedNotWorking(t *testing.T) {
+	l := newLanding(t)
+	now := time.Date(2026, 11, 20, 17, 0, 0, 0, time.UTC)
+	l.eng.Now = func() time.Time { return now }
+	l.srv.Finish(l.worker, "killed")
+	l.edit(func(s *flow.State) {
+		s.Settings.WorkerRestarts = 0
+		a := &s.Tasks[0].Attempts[0]
+		a.Ready, a.Rounds = nil, nil
+		a.Acts = []flow.Act{{Key: flow.AskStartWorker, Result: "done"}}
+	})
+	l.pass()
+	st, err := ProjectStatus(l.paths, l.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := l.eng.Graph(l.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st[0].Stage != "blocked_or_failed" || st[0].Stale || !strings.Contains(strings.ToLower(st[0].Why), "worker failed") {
+		t.Fatalf("status after worker_failed = %+v, want fresh blocked_or_failed mentioning worker failed", st[0])
+	}
+	if g.Tasks[0].Stage != "blocked_or_failed" || !strings.Contains(strings.ToLower(g.Tasks[0].WhyWaiting), "worker failed") {
+		t.Fatalf("graph after worker_failed = %+v, want blocked_or_failed mentioning worker failed", g.Tasks[0])
 	}
 }

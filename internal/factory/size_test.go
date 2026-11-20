@@ -247,7 +247,7 @@ func TestRecapStopsReviewerInFlight(t *testing.T) {
 	l.passReport(rev)
 	l.pass()
 	a := l.state().Tasks[0].Attempts[0]
-	if rs, _ := termState(ctx, l.client, rev.RunID); rs != flow.RunGone || a.Review != nil || len(a.Rounds) != 0 {
+	if rs, _ := termState(ctx, l.client, rev.RunID); rs != flow.RunGone || a.Review == nil || a.Review.RunID != "" || a.Review.Run == nil || a.Review.Run.Result != flow.EndStopped || len(a.Rounds) != 0 {
 		t.Fatalf("with a recap open: reviewer %s, review %+v, rounds %+v", rs, a.Review, a.Rounds)
 	}
 }

@@ -250,6 +250,14 @@ func TestRowCases(t *testing.T) {
 		in    In
 		asked []string
 	}{
+		{"S2", with(func(in *In) {
+			a0(in).Acts = []Act{{Key: "merge@c1", Result: "failed", At: now}}
+			in.Now = now.Add(time.Duration(DefaultSettings().StuckMinutes) * time.Minute)
+		}), []string{"wake_coordinator@stuck@merge@c1"}},
+		{"S2", with(noRounds, func(in *In) {
+			in.Facts.Reviewer = Run{State: RunIdle, LastTurnEnd: now}
+			in.Now = now.Add(time.Duration(DefaultSettings().StuckMinutes) * time.Minute)
+		}), []string{"wake_coordinator@stuck@reviewer_idle@1@c1"}},
 		{"N1", with(done), []string{"cleanup"}},
 		{"N1", with(splitMark), []string{"cleanup"}},
 		{"N1", with(droppedMark), []string{"cleanup"}},
@@ -345,6 +353,10 @@ func TestRowOrder(t *testing.T) {
 		neighbours bool
 		in         In
 	}{
+		{"S2", "N1", true, with(done, func(in *In) {
+			a0(in).Acts = []Act{{Key: "cleanup", Result: "failed", At: now}}
+			in.Now = now.Add(time.Duration(DefaultSettings().StuckMinutes) * time.Minute)
+		})},
 		{"N1", "N2", true, with(done, merged)},
 		{"N2", "N3", true, with(merged, parked)},
 		{"N3", "N4", true, with(parked, closedPR)},
@@ -503,6 +515,53 @@ func TestEnsureRun(t *testing.T) {
 	} {
 		if got := EnsureRun(tc.in, RoleReviewer); !slices.Equal(got, tc.want) {
 			t.Errorf("reviewer %s: got %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+func TestS2ReducedFallbackAllNonRunActsAndIdleReviewer(t *testing.T) {
+	wait := time.Duration(DefaultSettings().StuckMinutes) * time.Minute
+	for name, tc := range map[string]struct {
+		in   In
+		want string
+	}{
+		"merge": {with(func(in *In) {
+			a0(in).Acts = []Act{{Key: "merge@c1", Result: "failed", At: now}}
+			in.Now = now.Add(wait)
+		}), "wake_coordinator@stuck@merge@c1"},
+		"push_pr": {with(noRounds, prGone, func(in *In) {
+			a0(in).Acts = []Act{{Key: "push_and_open_pr@c1", Result: "failed", At: now}}
+			in.Now = now.Add(wait)
+		}), "wake_coordinator@stuck@push_and_open_pr@c1"},
+		"update_branch": {with(behind, func(in *In) {
+			a0(in).Acts = []Act{{Key: "update_branch@c1", Result: "failed", At: now}}
+			in.Now = now.Add(wait)
+		}), "wake_coordinator@stuck@update_branch@c1"},
+		"cleanup": {with(done, func(in *In) {
+			a0(in).Acts = []Act{{Key: "cleanup", Result: "failed", At: now}}
+			in.Now = now.Add(wait)
+		}), "wake_coordinator@stuck@cleanup"},
+		"new_attempt": {with(noAttempts, func(in *In) {
+			in.Task.Acts = []Act{{Key: "new_attempt", Result: "failed", At: now}}
+			in.Now = now.Add(wait)
+		}), "wake_coordinator@stuck@new_attempt"},
+		"tell_findings": {with(changes, func(in *In) {
+			a0(in).Acts = []Act{{Key: "tell_worker_findings@1", Result: "failed", At: now}}
+			in.Now = now.Add(wait)
+		}), "wake_coordinator@stuck@tell_worker_findings@1"},
+		"tell_ci": {with(red, func(in *In) {
+			in.Facts.PR.Failed = []Failure{{Run: "42"}}
+			a0(in).Acts = []Act{{Key: "tell_worker_ci@42@c1", Result: "failed", At: now}}
+			in.Now = now.Add(wait)
+		}), "wake_coordinator@stuck@tell_worker_ci@42@c1"},
+		"idle_reviewer_no_tag": {with(noRounds, func(in *In) {
+			in.Facts.Reviewer = Run{State: RunIdle, LastTurnEnd: now}
+			in.Now = now.Add(wait)
+		}), "wake_coordinator@stuck@reviewer_idle@1@c1"},
+	} {
+		r, d := FirstMatch(TaskRows, tc.in)
+		if r.ID != "S2" || !slices.Equal(d.Asked, []string{tc.want}) {
+			t.Errorf("%s: got %s %v, want S2 [%s]", name, r.ID, d.Asked, tc.want)
 		}
 	}
 }

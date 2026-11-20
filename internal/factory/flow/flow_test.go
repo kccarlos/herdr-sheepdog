@@ -101,6 +101,7 @@ func TestSettingsRange(t *testing.T) {
 		"worker_restarts":                func(s *Settings, n int) { s.WorkerRestarts = n },
 		"reviewer_retries":               func(s *Settings, n int) { s.ReviewerRetries = n },
 		"ensure_backoff_minutes":         func(s *Settings, n int) { s.EnsureBackoffMinutes = n },
+		"stuck_minutes":                  func(s *Settings, n int) { s.StuckMinutes = n },
 		"max_running":                    func(s *Settings, n int) { s.MaxRunning = n },
 	}
 	limits := map[string][2]int{
@@ -121,6 +122,7 @@ func TestSettingsRange(t *testing.T) {
 		"worker_restarts":                {0, WorkerRestartsMax},
 		"reviewer_retries":               {0, ReviewerRetriesMax},
 		"ensure_backoff_minutes":         {EnsureBackoffMin, EnsureBackoffMax},
+		"stuck_minutes":                  {StuckMin, StuckMax},
 		"max_running":                    {MaxRunningMin, MaxRunningMax},
 	}
 	for name, lim := range limits {

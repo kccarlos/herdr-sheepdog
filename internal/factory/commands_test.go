@@ -109,7 +109,7 @@ func TestN3ParkStopsRunsUnparkStartsAgain(t *testing.T) {
 		}
 	}
 	a := l.state().Tasks[0].Attempts[0]
-	if a.RunID != "" || a.Review != nil || a.Run == nil || a.Run.Result != flow.EndStopped {
+	if a.RunID != "" || a.Review == nil || a.Review.RunID != "" || a.Review.Run == nil || a.Review.Run.Result != flow.EndStopped || a.Run == nil || a.Run.Result != flow.EndStopped {
 		t.Fatalf("attempt after N3: run %q rec %+v review %+v", a.RunID, a.Run, a.Review)
 	}
 	l.pass()
@@ -164,7 +164,7 @@ func TestSendBackStaysWithWorkerUntilReady(t *testing.T) {
 	gitIn(t, l.wt, "commit", "-m", "test: empty case")
 	c2 := gitIn(t, l.wt, "rev-parse", "HEAD")
 	l.pass()
-	if a := l.state().Tasks[0].Attempts[0]; a.Review != nil || ladder() != flow.Fix || len(sendsTo(t, l.srv.Requests(), l.worker)) != 1 {
+	if a := l.state().Tasks[0].Attempts[0]; (a.Review != nil && a.Review.RunID != "") || ladder() != flow.Fix || len(sendsTo(t, l.srv.Requests(), l.worker)) != 1 {
 		t.Fatalf("a commit without ready left the worker: review %+v ladder %s", a.Review, ladder())
 	}
 	l.report("tok-worker", "ready", `{"head":"`+c2+`"}`, "")

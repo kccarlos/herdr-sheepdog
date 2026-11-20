@@ -102,6 +102,10 @@ func GraphViewOf(s flow.State, logs []LogLine) GraphView {
 	return graphViewOf(s, lastLog)
 }
 
+func revActive(a *flow.Attempt) bool {
+	return a != nil && a.Review != nil && (a.Review.Run == nil || a.Review.Run.State != flow.PhaseEnded)
+}
+
 func graphViewOf(s flow.State, lastLog map[string]LogLine) GraphView {
 	idx, deps := make(map[string]int, len(s.Tasks)), map[string][]string{}
 	for i, t := range s.Tasks {
@@ -127,7 +131,7 @@ func graphViewOf(s flow.State, lastLog map[string]LogLine) GraphView {
 		if n := len(t.Attempts); n > 0 {
 			rounds = len(slices.DeleteFunc(slices.Clone(flow.Counted(t.Attempts[n-1])), func(r flow.Round) bool { return r.Kind == flow.RoundSendBack }))
 		}
-		if a := flow.OpenAttempt(t); a != nil && a.Review != nil {
+		if a := flow.OpenAttempt(t); revActive(a) {
 			model, term = a.Review.Reviewer.Model, cmp.Or(a.Review.RunID, a.RunID)
 		} else if a != nil && a.RunID != "" {
 			model, term = workerModel, a.RunID
@@ -222,7 +226,9 @@ func taskStageWhy(t flow.Task, tasks []flow.Task, settings flow.Settings, starte
 	a := flow.OpenAttempt(t)
 	r, ok := taskRows[t.LastRow]
 	stage := r.Stage
-	if !ok {
+	if a != nil && a.RunID == "" && flow.Done(a.Acts, flow.AskWake+"@worker_failed") {
+		stage = "blocked_or_failed"
+	} else if !ok {
 		switch {
 		case flow.OpenRecap(t) != nil:
 			stage = "blocked_or_failed"
@@ -252,9 +258,11 @@ func taskWhy(t flow.Task, a *flow.Attempt, unmet []string, started bool, stage s
 		return "Worker reported nothing to change, waiting on the coordinator"
 	case !started:
 		return "Project is stopped"
+	case a != nil && a.RunID == "" && flow.Done(a.Acts, flow.AskWake+"@worker_failed"):
+		return "Worker failed, waiting on the coordinator"
 	case stage == "waiting_on_dep" && len(unmet) > 0:
 		return "Waiting on " + strings.Join(unmet, ", ")
-	case a != nil && stage == "working" && a.Review != nil:
+	case stage == "working" && revActive(a):
 		return fmt.Sprintf("In review round %d", len(a.Rounds)+1)
 	case r.Why == flow.WhyCI:
 		return "Waiting on CI and merge"

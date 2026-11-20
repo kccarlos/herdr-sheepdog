@@ -148,11 +148,7 @@ func (e *Engine) execStopRuns(ctx context.Context, id string, s *flow.State, ti 
 	if err := e.stopRuns(ctx, taskRuns(id, *t)); err != nil {
 		return "", false, err
 	}
-	now := e.now()
-	for ai := range t.Attempts {
-		stopWorkerRec(&t.Attempts[ai], s.Settings, now, true)
-		stopReviewRec(&t.Attempts[ai].Review, s.Settings, now)
-	}
+	stopTaskRuns(t, s.Settings, e.now())
 	return "stopped the task's runs", false, nil
 }
 
@@ -165,28 +161,24 @@ func stopRec(recp **flow.RunRecord, role string, st flow.Settings, now time.Time
 	}
 }
 
-func stopReviewRec(rev **flow.ReviewRun, st flow.Settings, now time.Time) {
-	if *rev != nil && (*rev).Retries == 0 && len((*rev).FailedModels) == 0 {
-		*rev = nil
-	} else if *rev != nil {
-		stopRec(&(*rev).Run, flow.RoleReviewer, st, now)
-		(*rev).RunID, (*rev).RunTokenHash = "", ""
+func stopReviewRec(rev *flow.ReviewRun, st flow.Settings, now time.Time) {
+	if rev != nil {
+		stopRec(&rev.Run, flow.RoleReviewer, st, now)
+		rev.RunID, rev.RunTokenHash = "", ""
 	}
 }
 
 func stopWorkerRec(a *flow.Attempt, st flow.Settings, now time.Time, keepResume bool) {
-	if a.RunID == "" && a.Run == nil {
-		return
+	if a.RunID != "" || a.Run != nil || flow.Done(a.Acts, flow.AskStartWorker) {
+		stopRec(&a.Run, flow.RoleWorker, st, now)
+		a.Run.Resumable, a.Held, a.Run.Held, a.RunID, a.RunTokenHash = a.Run.Resumable && keepResume, appendHeld(a.Held, a.Run.Held...), nil, "", ""
 	}
-	stopRec(&a.Run, flow.RoleWorker, st, now)
-	a.Run.Resumable = a.Run.Resumable && keepResume
-	a.Held, a.Run.Held, a.RunID, a.RunTokenHash = appendHeld(a.Held, a.Run.Held...), nil, "", ""
 }
 
-func clearRuns(t *flow.Task) {
-	for ai := range t.Attempts {
-		a := &t.Attempts[ai]
-		a.RunID, a.RunTokenHash, a.Run, a.Review = "", "", nil, nil
+func stopTaskRuns(t *flow.Task, st flow.Settings, now time.Time) {
+	if a := flow.OpenAttempt(*t); a != nil {
+		stopWorkerRec(a, st, now, true)
+		stopReviewRec(a.Review, st, now)
 	}
 }
 
@@ -204,7 +196,7 @@ func (e *Engine) stopRuns(ctx context.Context, runs []string) error {
 
 func dropFailed(acts []flow.Act) []flow.Act {
 	return slices.DeleteFunc(acts, func(a flow.Act) bool {
-		return a.Result == "failed" || a.Key == flow.AskWake+"@worker_failed" || strings.HasPrefix(a.Key, flow.AskWake+"@reviewer_failed@")
+		return a.Result == "failed" || a.Key == flow.AskWake+"@worker_failed" || strings.HasPrefix(a.Key, flow.AskWake+"@reviewer_failed@") || strings.HasPrefix(a.Key, flow.AskWake+"@stuck@")
 	})
 }
 
@@ -221,10 +213,13 @@ func (e *Engine) Stop(project string) error {
 	runs := []string{cmp.Or(s.Project.RunID, coordName(id))}
 	for ti := range s.Tasks {
 		runs = append(runs, taskRuns(id, s.Tasks[ti])...)
-		clearRuns(&s.Tasks[ti])
 	}
 	if err := e.stopRuns(ctx, runs); err != nil {
 		return err
+	}
+	now := e.now()
+	for ti := range s.Tasks {
+		stopTaskRuns(&s.Tasks[ti], s.Settings, now)
 	}
 	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base = "", "", nil, false, nil, nil
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "stop"}, Rule: "stop", Decision: "stopped", Why: "stopped by owner"})
@@ -274,7 +269,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		return
 	}
 	if s.Project.RunID == "" && flow.Count(s.Project.Acts, "coordinator") == 0 {
-		termID, rec, abort, err := e.launchRunLocked(ctx, id, &s, &s.Project.RunTokenHash, "claude", world.RunSpec{
+		termID, _, abort, err := e.launchRunLocked(ctx, id, &s, &s.Project.RunTokenHash, &s.Project.Run, s.Project.Run == nil || s.Project.Run.State != flow.PhaseEnded, flow.RunRecord{Role: flow.RoleCoordinator, CLI: "claude"}, world.RunSpec{
 			Name: coordName(id), Cwd: s.Project.Folder, ClaudeConfig: e.Paths.ClaudeConfig,
 			Argv:   world.ClaudeArgv(flow.RoleCoordinator, "opus", "medium", "bypassPermissions"),
 			Prompt: coordinatorPrompt(coordinatorTemplate, s.Project, cmp.Or(e.Bin, "sheepdog")),
@@ -284,7 +279,6 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 			return
 		}
 		line := LogLine{By: "engine", Facts: map[string]any{"coordinator": flow.RunGone}, Rule: "J7", Asked: []string{"coordinator"}}
-		s.Project.Run = rec
 		if err != nil {
 			e.logError("factory.exec_error", id, err)
 			s.Project.Acts = append(s.Project.Acts, flow.Act{Key: "coordinator", Result: "failed", At: e.now()})
@@ -381,22 +375,28 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 	return (*recp).TaskRun(), nil
 }
 
-// launchRunLocked adopts a live same-name run left by a crash (keeping its
-// token) or mints a new token, persists only its hash before StartTerminal, and
-// steps R1/R2 on the returned RunRecord (design.md 5, 7.2).
-func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, hash *string, cli string, spec world.RunSpec) (string, *flow.RunRecord, bool, error) {
+// launchRunLocked stops any leftover same-name terminal on a restart (!adopt),
+// adopts a live same-name run left by a crash or persists RunRecord (with its
+// SessionID) and token hash before StartTerminal, and steps R1/R2 (design.md 5, 7.2).
+func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, hash *string, recp **flow.RunRecord, adopt bool, rec flow.RunRecord, spec world.RunSpec) (string, bool, bool, error) {
+	if !adopt && e.HC != nil {
+		if err := world.StopRun(ctx, e.HC, spec.Name); err != nil {
+			e.logError("factory.hc_error", id, err)
+			return "", false, true, err
+		}
+	}
 	env := map[string]string{}
 	maps.Copy(env, e.RunEnv)
 	maps.Copy(env, spec.Env)
-	runID, minted := "run-"+strings.ToLower(rand.Text()[:12]), false
+	runID, minted, prevRec, prevHash := "run-"+strings.ToLower(rand.Text()[:12]), false, *recp, *hash
 	spec.Labels["sheepdog.run"], spec.Env = runID, env
 	now := e.now()
-	rec := flow.RunRecord{Role: spec.Labels["sheepdog.role"], CLI: cli, State: flow.PhaseStarting, StartedAt: now, LastActivity: now}
+	rec.State, rec.StartedAt, rec.LastActivity = flow.PhaseStarting, now, now
 	term, abort, err := world.StartTerminal(ctx, e.HC, spec, func() error {
 		tok := rand.Text()
-		*hash, env["SHEEPDOG_RUN_TOKEN"], minted = tokenHash(tok), tok, true
+		*hash, *recp, env["SHEEPDOG_RUN_TOKEN"], minted = tokenHash(tok), &rec, tok, true
 		if sErr := SaveState(e.Paths.State(id), *s); sErr != nil {
-			*hash = ""
+			*hash, *recp = prevHash, prevRec
 			e.logError("factory.commit_error", id, sErr)
 			return sErr
 		}
@@ -405,14 +405,19 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 	if err != nil {
 		if abort && !minted {
 			e.logError("factory.hc_error", id, err)
-		} else if minted {
-			*hash = ""
+			return "", false, true, err
 		}
+		*hash = ""
 		rec, _, _ = flow.StepRun(rec, flow.RunEvent{Kind: flow.EvLaunchFailed}, s.Settings, now)
-		return "", &rec, abort, err
+		*recp = &rec
+		return "", false, abort, err
+	}
+	if i := max(slices.Index(term.Argv, "--session-id"), slices.Index(term.Argv, "--resume")); !minted && i >= 0 && i+1 < len(term.Argv) {
+		rec.SessionID = term.Argv[i+1]
 	}
 	rec, _, _ = flow.StepRun(rec, flow.RunEvent{Kind: flow.EvLaunched, Address: term.Address, RunID: term.Labels["sheepdog.run"], CreatedMS: term.CreatedMS}, s.Settings, now)
-	return term.Address, &rec, false, nil
+	rec.Resumable, *recp = rec.SessionID != "", &rec
+	return term.Address, minted || len(term.Argv) > 0 && term.Argv[len(term.Argv)-1] == spec.Prompt, false, nil
 }
 
 type taskExec func(e *Engine, ctx context.Context, id string, s *flow.State, ti int, f flow.Facts) (decision string, abort bool, err error)
@@ -626,19 +631,22 @@ func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, t
 
 func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
 	t, a, parts := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1], strings.Split(f.Ask, "@")
-	mode, counted := "", len(parts) > 2
+	mode, counted, prev := "", len(parts) > 2, a.Run
 	if len(parts) > 1 {
 		mode = parts[1]
 	}
-	res, _ := flow.Resolve(flow.RoleWorker, *t, s.Settings, flow.UnprobedFacts)
 	model, effort := workerModel, "medium"
-	if res.CLI == "claude" && res.Model != "" {
+	if res, _ := flow.Resolve(flow.RoleWorker, *t, s.Settings, flow.UnprobedFacts); res.CLI == "claude" && res.Model != "" {
 		model, effort = res.Model, res.Effort
 	}
-	sid, resume, bin := world.NewUUID(), mode == flow.ContinueResume && a.Run != nil && a.Run.SessionID != "", cmp.Or(e.Bin, "sheepdog")
+	adopt := prev == nil || prev.State != flow.PhaseEnded
+	sid, resume, bin := world.NewUUID(), mode == flow.ContinueResume && prev != nil && prev.SessionID != "", cmp.Or(e.Bin, "sheepdog")
+	if resume || (adopt && prev != nil && prev.SessionID != "") {
+		sid = prev.SessionID
+	}
 	prompt := workerPrompt(workerTemplate, *t, *a, bin)
 	if resume {
-		sid, prompt = a.Run.SessionID, cmp.Or(strings.Join(a.Held, "\n\n"), "Continue where you left off in this worktree (check git status and git log -1); when done, commit and run "+readyCmd(bin, t.Outcomes)+".")
+		prompt = cmp.Or(strings.Join(a.Held, "\n\n"), "Continue where you left off in this worktree (check git status and git log -1); when done, commit and run "+readyCmd(bin, t.Outcomes)+".")
 	} else {
 		if mode == flow.ContinueHandoff {
 			prompt = e.handoffNote(id, *t, *a) + prompt
@@ -647,7 +655,7 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 			prompt = "Messages held for you:\n" + strings.Join(a.Held, "\n\n") + "\n\n" + prompt
 		}
 	}
-	termID, rec, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, "claude", world.RunSpec{
+	termID, delivered, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, &a.Run, adopt, flow.RunRecord{Role: flow.RoleWorker, CLI: "claude", SessionID: sid, Resumed: resume}, world.RunSpec{
 		Name: workerName(id, t.ID, len(t.Attempts)), Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
 		Argv: world.ClaudeSessionArgv(flow.RoleWorker, model, effort, "bypassPermissions", sid, resume), Prompt: prompt,
 		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleWorker, "sheepdog.task": t.ID, "sheepdog.model": model},
@@ -655,8 +663,10 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	if counted && !abort {
 		a.Restarts++
 	}
-	rec.SessionID, rec.Resumable, rec.Resumed, a.Run = sid, true, resume, rec
 	if err == nil {
+		if !delivered {
+			a.Run.Held = appendHeld(a.Run.Held, a.Held...)
+		}
 		a.RunID, a.Held = termID, nil
 	}
 	return "started worker " + termID, abort, err
@@ -787,18 +797,13 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		}
 		if !stopped {
 			a.Review.RunID, a.Review.RunTokenHash, a.Review.Run = "", "", &flow.RunRecord{Role: flow.RoleReviewer, State: flow.PhaseEnded, Result: flow.EndError, EndedAt: e.now()}
-		} else if flow.OpenRecap(*t) != nil {
-			stopReviewRec(&a.Review, s.Settings, e.now())
 		} else {
-			a.Review = nil
+			stopReviewRec(a.Review, s.Settings, e.now())
 		}
 		return !e.saveLocked(id, *s)
 	}
 	if flow.Ended(*t) || facts.PR.State == flow.PRMerged || facts.PR.State == flow.PRClosed ||
-		!tipKeepsRound(*a, a.Review.Head, *facts) || a.Review.Round != len(a.Rounds)+1 {
-		return voidRound(true)
-	}
-	if flow.OpenRecap(*t) != nil { // N6: no reviewer runs; after the decision the round starts again
+		flow.OpenRecap(*t) != nil || !tipKeepsRound(*a, a.Review.Head, *facts) || a.Review.Round != len(a.Rounds)+1 {
 		if a.Review.RunID == "" && a.Review.Run != nil && a.Review.Run.State == flow.PhaseEnded {
 			return false
 		}
@@ -946,12 +951,11 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	if env != nil {
 		argv = world.CodexArgv(model, effort, a.Worktree)
 	}
-	termID, rec, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, cmp.Or(a.Review.Reviewer.CLI, "claude"), world.RunSpec{
+	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, &a.Review.Run, adopt, flow.RunRecord{Role: flow.RoleReviewer, CLI: cmp.Or(a.Review.Reviewer.CLI, "claude")}, world.RunSpec{
 		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
 		Argv: argv, Prompt: reviewerPrompt(reviewerTemplate, *t, *a, h, kind, diff, e.rejectionPrompt(id, t.ID, *a, h), round), Env: env,
 		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleReviewer, "sheepdog.task": t.ID, "sheepdog.model": model},
 	})
-	a.Review.Run = rec
 	if err == nil {
 		a.Review.RunID = termID
 	} else if abort && counted {
@@ -1027,7 +1031,7 @@ func (e *Engine) rejectionPrompt(id, taskID string, a flow.Attempt, head string)
 
 func appendHeld(held []string, msgs ...string) []string {
 	for _, m := range msgs {
-		if !slices.Contains(held, m) {
+		if m != "" {
 			held = append(held, m)
 		}
 	}

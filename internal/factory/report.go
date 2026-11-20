@@ -873,7 +873,7 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 			if err := e.stopRuns(ctx, taskRuns(id, *t)); err != nil {
 				return err
 			}
-			clearRuns(t)
+			stopTaskRuns(t, s.Settings, now)
 			a.Closed = note
 		}
 		rc.Decided = &flow.RecapDecision{Choice: choice, Why: why, At: now}
@@ -1156,7 +1156,8 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 					if err := world.StopRun(ctx, e.HC, a.Review.RunID); err != nil {
 						return err
 					}
-					a.Review = nil
+					a.Review.Retries, a.Review.FailedModels, a.Review.Run = 0, nil, nil
+					stopReviewRec(a.Review, s.Settings, e.now())
 				}
 			}
 		}
@@ -1171,8 +1172,7 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 				if err := world.StopRun(ctx, e.HC, a.Review.RunID); err != nil {
 					return err
 				}
-				stopRec(&a.Review.Run, flow.RoleReviewer, s.Settings, e.now())
-				a.Review.RunID, a.Review.RunTokenHash = "", ""
+				stopReviewRec(a.Review, s.Settings, e.now())
 			}
 		}
 		if len(what) == 0 {
