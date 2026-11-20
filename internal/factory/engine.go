@@ -46,11 +46,12 @@ type Engine struct {
 	Bin          string            // sheepdog binary named in run prompts
 	RunEnv       map[string]string // added to every run's environment (daemon port)
 
-	mu   sync.Mutex
-	wake chan struct{}
-	prs  map[string]flow.PR  // last PR snapshot per attempt worktree (in memory)
-	errs map[string]string   // last gh or git error per worktree and kind, logged once per change
-	tips map[string]tipFacts // last git reading per worktree (in memory)
+	mu    sync.Mutex
+	wake  chan struct{}
+	prs   map[string]flow.PR  // last PR snapshot per attempt worktree (in memory)
+	errs  map[string]string   // last gh or git error per worktree and kind, logged once per change
+	tips  map[string]tipFacts // last git reading per worktree (in memory)
+	waits map[string]string   // last N9/N10 wait reason per project/task, logged once per change
 }
 
 // tipFacts are N12's and N20's git facts for one tip and H: the merge base,
@@ -67,8 +68,8 @@ func New(paths Paths, client *hc.Client) *Engine {
 }
 
 // Start records the project (storing its id in local git config), marks it
-// started, and wakes the loop.
-func (e *Engine) Start(folder, goal string) error {
+// started, and wakes the loop. A non-zero maxRunning sets Settings.MaxRunning.
+func (e *Engine) Start(folder, goal string, maxRunning int) error {
 	folder, goal = strings.TrimSpace(folder), strings.TrimSpace(goal)
 	if folder == "" || goal == "" {
 		return errors.New("folder and goal are required")
@@ -85,6 +86,12 @@ func (e *Engine) Start(folder, goal string) error {
 	if os.IsNotExist(err) {
 		s = flow.State{Project: flow.Project{ID: id}, Settings: flow.DefaultSettings()}
 	} else if err != nil {
+		return err
+	}
+	if maxRunning != 0 {
+		s.Settings.MaxRunning = maxRunning
+	}
+	if err := s.Settings.Validate(); err != nil {
 		return err
 	}
 	if s.Project.RunID != "" {
@@ -260,9 +267,21 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 			return
 		}
 	}
+	var candidates []string
+	workerState, workerErr := map[string]flow.RunState{}, map[string]error{}
+	for _, t := range s.Tasks {
+		if a := flow.OpenAttempt(t); a != nil && !flow.Ended(t) && a.RunID != "" {
+			workerState[t.ID], workerErr[t.ID] = world.RunState(ctx, e.HC, a.RunID)
+		} else if a == nil && !flow.Ended(t) && !t.Parked && flow.OpenRecap(t) == nil && flow.Count(t.Acts, flow.AskNewAttempt) == 0 {
+			if notDone, dropped := flow.UnmetDeps(t, s.Tasks); len(notDone) == 0 && len(dropped) == 0 {
+				candidates = append(candidates, t.ID)
+			}
+		}
+	}
+	granted := flow.GrantSlots(candidates, s.Tasks, flow.RunningTasks(s.Tasks, workerState), s.Settings.MaxRunning)
 	for i := range s.Tasks {
 		if ctx.Err() == nil {
-			e.passTaskLocked(ctx, id, &s, i)
+			e.passTaskLocked(ctx, id, &s, i, granted[s.Tasks[i].ID], workerState[s.Tasks[i].ID], workerErr[s.Tasks[i].ID])
 		}
 	}
 	if ctx.Err() == nil {
@@ -322,7 +341,7 @@ var taskExecutors = map[string]taskExec{
 	flow.AskStopRuns:     (*Engine).execStopRuns,
 }
 
-func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int) {
+func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int, hasSlot bool, workerSt flow.RunState, workerErr error) {
 	var facts flow.Facts
 	// An ended task needs no facts (N1 matches first), and cleanup may
 	// have removed its worktree.
@@ -337,12 +356,11 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		if e.logOnce("factory.git_error", id, a.Worktree, err); err != nil {
 			return
 		}
-		if a.RunID != "" {
-			if facts.Worker.State, err = world.RunState(ctx, e.HC, a.RunID); err != nil {
-				e.logError("factory.hc_error", id, err)
-				return
-			}
+		if workerErr != nil {
+			e.logError("factory.hc_error", id, workerErr)
+			return
 		}
+		facts.Worker.State = workerSt
 		facts.Tip, facts.TipRel = tip, rel
 		if len(a.Ready) > 0 { // no PR can exist before the first ready
 			facts.PR = e.readPRLocked(ctx, id, s, ti)
@@ -350,9 +368,27 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		if e.observeReviewLocked(ctx, id, s, ti, &facts) {
 			return
 		}
+	} else if oa == nil && !flow.Ended(s.Tasks[ti]) {
+		facts.DepsNotDone, facts.DepsDropped = flow.UnmetDeps(s.Tasks[ti], s.Tasks)
+		facts.NoSlot = !hasSlot && flow.Count(s.Tasks[ti].Acts, flow.AskNewAttempt) == 0
 	}
 	now := time.Now()
 	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[ti], Settings: s.Settings, Facts: facts, Now: now})
+	waitKey := id + "/" + s.Tasks[ti].ID
+	if r.ID != "N9" && r.ID != "N10" {
+		delete(e.waits, waitKey)
+	} else if waitVal := r.ID + ":" + d.Why; e.waits[waitKey] != waitVal {
+		if e.waits == nil {
+			e.waits = map[string]string{}
+		}
+		e.waits[waitKey] = waitVal
+		if len(d.Asked) == 0 {
+			if err := e.commitLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: facts, Rule: r.ID, Decision: "waiting", Why: d.Why}); err != nil {
+				e.logError("factory.commit_error", id, err)
+			}
+			return
+		}
+	}
 	if len(d.Asked) == 0 {
 		return
 	}

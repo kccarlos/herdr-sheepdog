@@ -100,6 +100,10 @@ type Facts struct {
 	// Reviewer is the run for the round the ladder asks for at H, not an
 	// earlier round's (that one was stopped when its verdict came in).
 	Reviewer Run `json:"reviewer"`
+	// N9/N10 scheduling facts (design.md 4.2, 4.10).
+	DepsNotDone []string `json:"deps_not_done,omitempty"`
+	DepsDropped []string `json:"deps_dropped,omitempty"`
+	NoSlot      bool     `json:"no_slot,omitempty"`
 }
 
 // In is what a row sees: the task's records, the settings, the facts and

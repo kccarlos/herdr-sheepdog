@@ -33,7 +33,7 @@ var factoryStartChecks = factory.StartChecks
 
 func printFactoryUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog factory <start|stop|log|plan|task|recap|report|doctor> [flags] [folder]")
-	fprintln(w, "  start <folder> --goal \"<sentence>\"   start the factory coordinator for a repo")
+	fprintln(w, "  start <folder> --goal \"<sentence>\" [--max-running N]   start the factory coordinator for a repo")
 	fprintln(w, "  stop [<folder>]                      stop a started factory project and its runs")
 	fprintln(w, "  log [<folder>] [-n N]                each engine step: time, task, rule, asked, decision, why")
 	fprintln(w, "  plan apply <file>                    (coordinator only) apply a JSON plan")
@@ -48,7 +48,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "           logged-in agent CLI (claude, codex or agy) plus a canary start")
 	fprintln(w, "           inside herdr-core, gh login with the default repo pinned, and")
 	fprintln(w, "           codexbar. Exit 1 on FAIL.")
-	fprintln(w, "flags: --goal TEXT, --proof OUTCOME=CMD, --artifact OUTCOME=PATH, --touched TEXT, --skipped TEXT, --reject WHY, --nothing-to-change, --why TEXT, --child JSON, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
+	fprintln(w, "flags: --goal TEXT, --max-running N, --proof OUTCOME=CMD, --artifact OUTCOME=PATH, --touched TEXT, --skipped TEXT, --reject WHY, --nothing-to-change, --why TEXT, --child JSON, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
 }
 
 // runFactory dispatches the `sheepdog factory` command group.
@@ -86,13 +86,19 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 	fs := flag.NewFlagSet("factory "+sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { printFactoryUsage(stderr) }
-	configPath, goal := fs.String("config", "", "config file"), fs.String("goal", "", "project goal")
+	configPath, goal, maxRunning := fs.String("config", "", "config file"), fs.String("goal", "", "project goal"), fs.Int("max-running", 0, "maximum concurrent tasks")
 	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
 		return flagExit(err)
 	}
-	if (sub == "start" && (fs.NArg() != 1 || strings.TrimSpace(*goal) == "")) || (sub == "stop" && (fs.NArg() > 1 || *goal != "")) {
+	maxSet := false
+	fs.Visit(func(f *flag.Flag) { maxSet = maxSet || f.Name == "max-running" })
+	if (sub == "start" && (fs.NArg() != 1 || strings.TrimSpace(*goal) == "")) || (sub == "stop" && (fs.NArg() > 1 || *goal != "" || maxSet)) {
 		printFactoryUsage(stderr)
 		return 2
+	}
+	if maxSet && (*maxRunning < flow.MaxRunningMin || *maxRunning > flow.MaxRunningMax) {
+		fprintf(stderr, "sheepdog factory start: max_running %d: allowed %d–%d\n", *maxRunning, flow.MaxRunningMin, flow.MaxRunningMax)
+		return 1
 	}
 	folder := ""
 	if fs.NArg() == 1 {
@@ -113,7 +119,8 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 	}
 	cfg, err := config.Load(*configPath)
 	if err == nil {
-		err = postJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/factory/"+sub, map[string]string{"folder": folder, "project": folder, "goal": strings.TrimSpace(*goal), "token": os.Getenv(runTokenEnv)})
+		body := map[string]any{"folder": folder, "project": folder, "goal": strings.TrimSpace(*goal), "token": os.Getenv(runTokenEnv), "max_running": *maxRunning}
+		err = postJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/factory/"+sub, body)
 	}
 	if err != nil {
 		fprintf(stderr, "sheepdog factory %s: %v\n", sub, err)
@@ -506,6 +513,7 @@ func reorderFactoryDoctorArgs(args []string) []string {
 	var flags, pos []string
 	valueFlags := map[string]bool{
 		"-goal": true, "--goal": true,
+		"-max-running": true, "--max-running": true,
 		"-why": true, "--why": true,
 		"-child": true, "--child": true,
 		"-folder": true, "--folder": true,

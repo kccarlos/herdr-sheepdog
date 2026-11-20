@@ -42,7 +42,7 @@ func newLanding(t *testing.T) *landing {
 	l.repo, l.gh = repo, installFakeGH(t)
 	l.eng = New(l.paths, l.client)
 	l.eng.Log = logging.NewJSONLLogger(l.log)
-	if err := l.eng.Start(repo, "Goal"); err != nil {
+	if err := l.eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	l.id = l.eng.projectDirs()[0].Name()

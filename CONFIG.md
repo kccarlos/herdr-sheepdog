@@ -552,6 +552,7 @@ These factory settings live in each project's `state.json`, not in the config fi
 | `size_cap_factor` | `2` | 1–5 | A task's size cap is this times its `estimate_lines`; past it the task stops at a size recap. |
 | `continue_lines` | `60` | 0–500 | A recap's `continue` sets the cap to the changed lines now plus this. |
 | `continues_per_task` | `1` | 0–3 | How many times a task may `continue`. |
+| `max_running` | `3` | 1–20 | Maximum concurrent tasks; set at start with `sheepdog factory start --max-running N`. One extra slot beyond `max_running` is available for a task with `priority: "urgent"`. |
 | `second_reviewer` | `"opus"` | `opus`, `codex` | Who reviews a task's second passing round: Claude opus in a fresh session, or Codex (`gpt-6.2-sol`, read-only, run with `--no-daemon` in herdr-core; the first round stays opus). Codex runs with its own home under `<data_dir>/factory/codex-home`, which holds only a link to your `~/.codex/auth.json`, so it reads none of your global `AGENTS.md`, config or skills; it still loads a `.codex/config.toml` in the repo (no hooks). A Codex review ends when its report tag is read; no tag for `stuck_minutes` wakes the coordinator. |
 
 ## What sheepdog stores

@@ -67,7 +67,7 @@ func TestEngineLoopStartsOneCoordinatorAndStopsCleanly(t *testing.T) {
 	}
 
 	const goal = "Add a greeting helper with a unit test."
-	if err := eng.Start(repo, goal); err != nil {
+	if err := eng.Start(repo, goal, 0); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -160,7 +160,7 @@ func TestEngineStopKillsUnrecordedCoordinator(t *testing.T) {
 	ctx := context.Background()
 
 	eng := New(paths, client)
-	if err := eng.Start(repo, "Ship slice 1."); err != nil {
+	if err := eng.Start(repo, "Ship slice 1.", 0); err != nil {
 		t.Fatal(err)
 	}
 	_, projID, err := world.RepoProject(ctx, repo, false)
@@ -208,7 +208,7 @@ func TestEngineCrashAdoptTrimAndOutage(t *testing.T) {
 	eng1 := New(paths, client)
 	eng1.PassInterval = 15 * time.Millisecond
 	stop1 := runEngine(eng1)
-	if err := eng1.Start(repo, "Goal A"); err != nil {
+	if err := eng1.Start(repo, "Goal A", 0); err != nil {
 		t.Fatal(err)
 	}
 	_, projID, err := world.RepoProject(ctx, repo, false)
@@ -290,7 +290,7 @@ func TestEngineCrashAdoptTrimAndOutage(t *testing.T) {
 	// (d) hc unreachable (closed socket): Start does not clear persisted RunID.
 	srv.Close()
 	eng4 := New(paths, client)
-	if err := eng4.Start(repo, "Goal B during hc outage"); err != nil {
+	if err := eng4.Start(repo, "Goal B during hc outage", 0); err != nil {
 		t.Fatalf("(d) Start during hc outage: %v", err)
 	}
 	stAfter, err := LoadState(paths.State(projID))
@@ -358,7 +358,7 @@ func TestPassProjectLogsErrorsAndSkipsDeadRunState(t *testing.T) {
 func TestStopWithoutHC(t *testing.T) {
 	repo := initGitRepo(t)
 	e := New(Paths{DataDir: t.TempDir()}, nil)
-	if err := e.Start(repo, "a goal"); err != nil {
+	if err := e.Start(repo, "a goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.Stop(repo); err != nil {
@@ -424,7 +424,7 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 	eng.Bin = "/tmp/sheepdog-bin"
 	eng.RunEnv = map[string]string{"SHEEPDOG_WEB_PORT": "17777"}
 
-	if err := eng.Start(repo, "Add Greet helper."); err != nil {
+	if err := eng.Start(repo, "Add Greet helper.", 0); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	id := eng.projectDirs()[0].Name()
@@ -676,7 +676,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	eng1 := New(testPaths(t), hc.NewClient(srv1.Path))
 	eng1.PassInterval = 10 * time.Millisecond
 	repoNoRemote := initGitRepo(t)
-	if err := eng1.Start(repoNoRemote, "Goal with no remote"); err != nil {
+	if err := eng1.Start(repoNoRemote, "Goal with no remote", 0); err != nil {
 		t.Fatal(err)
 	}
 	id1 := eng1.projectDirs()[0].Name()
@@ -702,7 +702,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	p2.ClaudeConfig = "/nonexistent-sheepdog-test-guard/.claude.json"
 	eng2 := New(p2, hc.NewClient(srv2.Path))
 	eng2.PassInterval = 10 * time.Millisecond
-	if err := eng2.Start(initGitRepo(t), "Goal with failing coord"); err != nil {
+	if err := eng2.Start(initGitRepo(t), "Goal with failing coord", 0); err != nil {
 		t.Fatal(err)
 	}
 	id2 := eng2.projectDirs()[0].Name()
@@ -728,7 +728,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 		defer close(done)
 		eng3.Run(rctx)
 	}()
-	if err := eng3.Start(repo3, "Goal"); err != nil {
+	if err := eng3.Start(repo3, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	var coordRun hc.RunParams
@@ -792,7 +792,7 @@ func TestExecutorFailureRecordedWhenPassCancelled(t *testing.T) {
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
 	eng := New(paths, nil)
-	if err := eng.Start(repo, "Goal"); err != nil {
+	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
@@ -827,7 +827,7 @@ func TestAttemptWorktreePathPerAttemptAndLockGitTimeout(t *testing.T) {
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
 	eng := New(paths, nil)
-	if err := eng.Start(repo, "Goal"); err != nil {
+	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
@@ -897,7 +897,7 @@ func TestEngineLockGitCallsUseTimeout(t *testing.T) {
 func TestStartClearsFailedActs(t *testing.T) {
 	repo := initGitRepo(t)
 	e := New(Paths{DataDir: t.TempDir()}, nil)
-	if err := e.Start(repo, "a goal"); err != nil {
+	if err := e.Start(repo, "a goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	id, s, err := e.findProjectLocked(context.Background(), repo)
@@ -910,7 +910,7 @@ func TestStartClearsFailedActs(t *testing.T) {
 	if err := SaveState(e.Paths.State(id), s); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Start(repo, "a goal"); err != nil {
+	if err := e.Start(repo, "a goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	got, err := LoadState(e.Paths.State(id))
@@ -948,7 +948,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	eng.Log = logging.NewJSONLLogger(&logBuf)
 	eng.Bin = "/tmp/sheepdog-bin"
 
-	if err := eng.Start(repo, "Add Greet with non-empty validation."); err != nil {
+	if err := eng.Start(repo, "Add Greet with non-empty validation.", 0); err != nil {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
@@ -1171,7 +1171,7 @@ func testVoidReview(t *testing.T, dirty bool) {
 	eng := New(paths, client)
 	var logBuf bytes.Buffer
 	eng.Log = logging.NewJSONLLogger(&logBuf)
-	if err := eng.Start(repo, "Goal"); err != nil {
+	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
@@ -1253,7 +1253,7 @@ func testVoidReview(t *testing.T, dirty bool) {
 	if err := os.Remove(filepath.Join(wt, "x.out")); err != nil {
 		t.Fatal(err)
 	}
-	if err := eng.Start(repo, "Goal"); err != nil {
+	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	eng.passProject(ctx, id, false)
@@ -1281,7 +1281,7 @@ func TestEngineRebaseAfterReviewedCommitFallsBackToFull(t *testing.T) {
 	gh := installFakeGH(t)
 
 	eng := New(paths, client)
-	if err := eng.Start(repo, "Goal"); err != nil {
+	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
@@ -1386,7 +1386,7 @@ func TestEngineReuseReviewerSkipsGitWork(t *testing.T) {
 	var logBuf bytes.Buffer
 	eng := New(paths, client)
 	eng.Log = logging.NewJSONLLogger(&logBuf)
-	if err := eng.Start(repo, "Goal"); err != nil {
+	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
@@ -1495,7 +1495,7 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 
 	eng := New(paths, client)
 	eng.Bin = "/tmp/sheepdog-bin"
-	if err := eng.Start(repo, "Add Version constant."); err != nil {
+	if err := eng.Start(repo, "Add Version constant.", 0); err != nil {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
@@ -1692,7 +1692,7 @@ func TestReviewerPromptIncludesProofsTouchedSkippedAndRule(t *testing.T) {
 	gh := installFakeGH(t)
 
 	eng := New(paths, hc.NewClient(srv.Path))
-	if err := eng.Start(repo, "Goal"); err != nil {
+	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()

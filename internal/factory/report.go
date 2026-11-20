@@ -564,6 +564,7 @@ type planTask struct {
 	NotDoing  string        `json:"not_doing"`
 	Outcomes  []planOutcome `json:"outcomes"`
 	After     []string      `json:"after"`
+	Priority  string        `json:"priority"`
 	Estimate  int           `json:"estimate_lines"`
 }
 
@@ -649,6 +650,15 @@ func checkPlan(raw json.RawMessage, limit int) ([]flow.Task, []string) {
 	return checkPlanWith(raw, nil, "", limit)
 }
 
+// checkPriority validates the optional plan priority field (design.md 3, 4.10).
+func checkPriority(id, raw string) (string, []string) {
+	p := strings.TrimSpace(raw)
+	if p != "" && p != flow.PriorityUrgent {
+		return "", []string{fmt.Sprintf("shape: task %q has unknown priority %q (use %q or omit)", id, p, flow.PriorityUrgent)}
+	}
+	return p, nil
+}
+
 // checkEstimate is design.md 11.5's plan check: estimate_lines is required,
 // and a task over task_size_limit is split before it exists.
 func checkEstimate(id string, est, limit int) []string {
@@ -696,9 +706,11 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, l
 		}
 		fails = append(fails, checkTitle(t.ID, t.Title)...)
 		fails = append(fails, checkScope(*t)...)
-		var oFails []string
+		var oFails, pFails []string
 		outcomes[i], oFails = checkOutcomes(t.ID, t.Outcomes)
 		fails = append(fails, oFails...)
+		t.Priority, pFails = checkPriority(t.ID, t.Priority)
+		fails = append(fails, pFails...)
 		fails = append(fails, checkEstimate(t.ID, t.Estimate, limit)...)
 	}
 	after := map[string][]string{}
@@ -721,10 +733,10 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, l
 			ID: t.ID, Title: cleanRejectWhy(t.Title), Brief: t.Brief,
 			ForWhom: cleanRejectWhy(t.ForWhom), IfSkipped: cleanRejectWhy(t.IfSkipped),
 			Smallest: cleanRejectWhy(t.Smallest), NotDoing: cleanRejectWhy(t.NotDoing),
-			Outcomes: outcomes[i], After: t.After, EstimateLines: t.Estimate, SplitFrom: parentID, Attempts: []flow.Attempt{},
+			Outcomes: outcomes[i], After: t.After, Priority: t.Priority, EstimateLines: t.Estimate, SplitFrom: parentID, Attempts: []flow.Attempt{},
 		}
 	}
-	if id := cycleAt(p.Tasks, after); id != "" {
+	if id := cycleAt(newIDs, after); id != "" {
 		fails = append(fails, fmt.Sprintf("shape: the after links make a cycle through %q", id))
 	}
 	return tasks, fails
@@ -934,6 +946,8 @@ type amendTask struct {
 	Brief    *string        `json:"brief"`
 	Outcomes *[]planOutcome `json:"outcomes"`
 	Estimate *int           `json:"estimate_lines"`
+	After    *[]string      `json:"after"`
+	Priority *string        `json:"priority"`
 }
 
 // acceptAmendLocked is plan amend (design.md 3.1, 4.9, 7.2): changes to
@@ -963,6 +977,8 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		ti       int
 		c        amendTask
 		outcomes []flow.Outcome
+		after    []string
+		priority string
 	}
 	var changes []change
 	var fresh []json.RawMessage
@@ -977,15 +993,14 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		d := json.NewDecoder(bytes.NewReader(raw))
 		d.DisallowUnknownFields()
 		if err := d.Decode(&c); err != nil {
-			fails = append(fails, fmt.Sprintf("shape: task %q: %s (only title, brief, outcomes and estimate_lines change)", s.Tasks[ti].ID, strings.TrimPrefix(err.Error(), "json: ")))
+			fails = append(fails, fmt.Sprintf("shape: task %q: %s (only title, brief, outcomes, estimate_lines, after and priority change)", s.Tasks[ti].ID, strings.TrimPrefix(err.Error(), "json: ")))
 			continue
 		}
 		if flow.Ended(s.Tasks[ti]) {
 			fails = append(fails, fmt.Sprintf("task %q has ended and is not changed", s.Tasks[ti].ID))
 			continue
 		}
-		before := len(fails)
-		var outs []flow.Outcome
+		before, outs, after, prio := len(fails), []flow.Outcome(nil), []string(nil), ""
 		if c.Title != nil {
 			fails = append(fails, checkTitle(s.Tasks[ti].ID, *c.Title)...)
 		}
@@ -997,8 +1012,21 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		if c.Estimate != nil {
 			fails = append(fails, checkEstimate(s.Tasks[ti].ID, *c.Estimate, s.Settings.TaskSizeLimit)...)
 		}
+		if (c.After != nil || c.Priority != nil) && len(s.Tasks[ti].Attempts) > 0 {
+			fails = append(fails, fmt.Sprintf("task %q already has an attempt; after and priority cannot be changed", s.Tasks[ti].ID))
+		}
+		if c.After != nil {
+			for _, dep := range *c.After {
+				after = append(after, strings.TrimSpace(dep))
+			}
+		}
+		if c.Priority != nil {
+			var pFails []string
+			prio, pFails = checkPriority(s.Tasks[ti].ID, *c.Priority)
+			fails = append(fails, pFails...)
+		}
 		if len(fails) == before {
-			changes = append(changes, change{ti, c, outs})
+			changes = append(changes, change{ti, c, outs, after, prio})
 		}
 	}
 	var added []flow.Task
@@ -1007,6 +1035,29 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		var f []string
 		added, f = checkPlanWith(raw, s.Tasks, "", s.Settings.TaskSizeLimit)
 		fails = append(fails, f...)
+	}
+	if slices.ContainsFunc(changes, func(ch change) bool { return ch.c.After != nil }) {
+		afterMap, checkIDs := make(map[string][]string, len(s.Tasks)+len(added)), make([]string, 0, len(changes)+len(added))
+		for _, t := range s.Tasks {
+			afterMap[t.ID] = t.After
+		}
+		for _, t := range added {
+			afterMap[t.ID], checkIDs = t.After, append(checkIDs, t.ID)
+		}
+		for _, ch := range changes {
+			if ch.c.After != nil {
+				tid := s.Tasks[ch.ti].ID
+				afterMap[tid], checkIDs = ch.after, append(checkIDs, tid)
+				for _, dep := range ch.after {
+					if _, ok := afterMap[dep]; !ok {
+						fails = append(fails, fmt.Sprintf("shape: task %q is after %q, which is not in the plan", tid, dep))
+					}
+				}
+			}
+		}
+		if cid := cycleAt(checkIDs, afterMap); cid != "" {
+			fails = append(fails, fmt.Sprintf("shape: the after links make a cycle through %q", cid))
+		}
 	}
 	if len(fails) > 0 {
 		return e.refuse(id, "plan_invalid", strings.Join(fails, "; ")+".")
@@ -1024,6 +1075,12 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		}
 		if c.Outcomes != nil && !slices.Equal(ch.outcomes, t.Outcomes) {
 			t.Outcomes, what = ch.outcomes, append(what, "outcomes")
+		}
+		if c.After != nil && !slices.Equal(ch.after, t.After) {
+			t.After, what = ch.after, append(what, "after")
+		}
+		if c.Priority != nil && ch.priority != t.Priority {
+			t.Priority, what = ch.priority, append(what, "priority")
 		}
 		a := flow.OpenAttempt(*t)
 		var capNote string
@@ -1078,7 +1135,7 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 }
 
 // cycleAt returns a task on a cycle of after links, or "" when there is none.
-func cycleAt(tasks []planTask, after map[string][]string) string {
+func cycleAt(ids []string, after map[string][]string) string {
 	seen := map[string]int{} // 1: on the current path, 2: finished
 	var visit func(id string) string
 	visit = func(id string) string {
@@ -1097,8 +1154,8 @@ func cycleAt(tasks []planTask, after map[string][]string) string {
 		seen[id] = 2
 		return ""
 	}
-	for _, t := range tasks {
-		if c := visit(t.ID); c != "" {
+	for _, id := range ids {
+		if c := visit(id); c != "" {
 			return c
 		}
 	}

@@ -264,6 +264,45 @@ func TestFactoryStartAndStopCLI(t *testing.T) {
 	if code := run(context.Background(), []string{"factory", "start", repo, "--config", cfgFile}, &out, &errBuf); code != 2 {
 		t.Fatalf("start without goal code=%d, want 2", code)
 	}
+
+	// --max-running is forwarded on start, validated, and refused on stop.
+	var anyBody map[string]any
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		anyBody = nil
+		_ = json.NewDecoder(r.Body).Decode(&anyBody)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(srv2.Close)
+	_, port2Str, _ := net.SplitHostPort(srv2.Listener.Addr().String())
+	cfgFile2 := filepath.Join(home, "config2.toml")
+	if err := os.WriteFile(cfgFile2, []byte(fmt.Sprintf("[web]\nbind = \"127.0.0.1\"\nport = %s\n", port2Str)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errBuf.Reset()
+	if code := run(context.Background(), []string{"factory", "start", repo, "--goal", "ship", "--max-running", "2", "--config", cfgFile2}, &out, &errBuf); code != 0 {
+		t.Fatalf("start --max-running 2 code=%d stderr=%s", code, errBuf.String())
+	}
+	if anyBody["max_running"] != float64(2) {
+		t.Fatalf("max_running sent = %#v, want 2", anyBody["max_running"])
+	}
+	if code := run(context.Background(), []string{"factory", "stop", "--max-running", "2", "--config", cfgFile2}, &out, &errBuf); code != 2 {
+		t.Fatalf("stop --max-running 2 code=%d, want 2", code)
+	}
+	if code := run(context.Background(), []string{"factory", "stop", "--max-running", "0", "--config", cfgFile2}, &out, &errBuf); code != 2 {
+		t.Fatalf("stop --max-running 0 code=%d, want 2", code)
+	}
+	for _, bad := range []string{"0", "-1", "21"} {
+		anyBody = nil
+		out.Reset()
+		errBuf.Reset()
+		if code := run(context.Background(), []string{"factory", "start", repo, "--goal", "ship", "--max-running", bad, "--config", cfgFile2}, &out, &errBuf); code != 1 {
+			t.Fatalf("start --max-running %s code=%d stderr=%q, want 1", bad, code, errBuf.String())
+		}
+		if !strings.Contains(errBuf.String(), "allowed 1–20") || anyBody != nil {
+			t.Fatalf("start --max-running %s stderr=%q body=%v, want allowed 1–20 and no request", bad, errBuf.String(), anyBody)
+		}
+	}
 }
 
 // TestFactoryPlanApplyCLI checks that `plan apply` and `start` send the run's

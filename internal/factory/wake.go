@@ -43,6 +43,9 @@ func taskFacts(t flow.Task, f flow.Facts) string {
 		title = append(title[:maxFactsTitle], '…')
 	}
 	out := fmt.Sprintf("title %q; H %s; PR #%d, checks %s; last verdict %s", string(title), h, cmp.Or(f.PR.Number, pr), cmp.Or(string(f.PR.Checks), "unknown"), verdict)
+	if len(f.DepsDropped) > 0 {
+		out += "; dropped dependencies: " + strings.Join(f.DepsDropped, ", ")
+	}
 	if rc := flow.OpenRecap(t); rc != nil {
 		out += fmt.Sprintf("; recap trigger %s, allowed [%s]", rc.Trigger, strings.Join(rc.Allowed, ", "))
 		if a := flow.OpenAttempt(t); a != nil && rc.Trigger == flow.TriggerSize {

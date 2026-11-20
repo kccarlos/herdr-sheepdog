@@ -96,6 +96,9 @@ func recapOpen(in In) bool   { return OpenRecap(in.Task) != nil }
 func prMerged(in In) bool    { return in.Facts.PR.State == PRMerged }
 func noAttempt(in In) bool   { return in.attempt() == nil }
 func hasAttempt(in In) bool  { return in.attempt() != nil }
+func depsNotDone(in In) bool { return len(in.Facts.DepsNotDone) > 0 }
+func depsDropped(in In) bool { return len(in.Facts.DepsDropped) > 0 }
+func noSlot(in In) bool      { return in.Facts.NoSlot }
 func workerGone(in In) bool  { return in.Facts.Worker.State == RunGone }
 func reviewGone(in In) bool  { return in.Facts.Reviewer.State == RunGone }
 func noReady(in In) bool     { return len(in.attempt().Ready) == 0 }
@@ -193,6 +196,15 @@ var TaskRows = []Row[In]{
 		a := in.attempt()
 		return say("the worker says nothing to change: "+a.NothingToChange, once(in.acts(), key(AskWake, "nothing_to_change", len(a.Rounds))))(in)
 	}},
+	{ID: "N9", WaitsOn: "dependencies", When: all(noAttempt, anyOf(depsNotDone, depsDropped)), Then: func(in In) Decision {
+		var asked []string
+		for _, dep := range in.Facts.DepsDropped {
+			asked = append(asked, once(in.acts(), key(AskWake, "dep_dropped", dep))...)
+		}
+		return say(n9Why(in), asked)(in)
+	}},
+	// N10: milestone and quota (no worker candidate resolves) come in later slices (design.md 4.2).
+	{ID: "N10", WaitsOn: "a slot", When: all(noAttempt, noSlot), Then: say("no slot is free")},
 	{ID: "N11", WaitsOn: "the engine", When: noAttempt, Then: func(in In) Decision {
 		return say("no attempt: start one", once(in.acts(), AskNewAttempt))(in)
 	}},
@@ -248,6 +260,17 @@ var TaskRows = []Row[In]{
 		p := in.Facts.PR
 		return say("no rule matched", once(in.acts(), key(AskWake, "no_rule_matched", headH(in), p.State, p.Checks, p.Mergeable, in.Facts.TipRel)))(in)
 	}},
+}
+
+func n9Why(in In) string {
+	var parts []string
+	if len(in.Facts.DepsNotDone) > 0 {
+		parts = append(parts, "waiting on "+strings.Join(in.Facts.DepsNotDone, ", "))
+	}
+	if len(in.Facts.DepsDropped) > 0 {
+		parts = append(parts, "depends on dropped "+strings.Join(in.Facts.DepsDropped, ", "))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func hasAccept(in In, head string) bool {

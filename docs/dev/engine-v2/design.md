@@ -363,6 +363,7 @@ Starting or restarting a worker needs a free slot, like a first start (N10); wit
 A start first delivers the messages held for that run (findings a dead worker never received).
 
 Runs a task's matching row does not want are stopped: a reviewer whose round is over (its verdict was accepted) or void (the round is void as soon as the tip moves off the round's commit), and every run of a task at N1 to N3. **The worker run is wanted by every other row** while the attempt is open, also while a recap is open or the engine has the turn: it writes the recap and makes the fixes. A split or a new attempt stops it as part of that decision. A task uses a slot only while its worker run is `starting` or `working`.
+In slice 4, an open attempt holds its slot through `idle` too (freeing it only when its worker run is gone or the task stops), because `max_running` caps concurrent tasks rather than only active worker turns.
 
 ### 4.9 What the coordinator and the owner can do to a task
 
