@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
@@ -222,6 +223,25 @@ func TestN7UpdateBranchMergeOnlyFetchFailsWaits(t *testing.T) {
 		t.Fatalf("merge_only unknown woke coordinator: %+v", wakes)
 	}
 
+	// Age HeadSince past checks_grace_minutes -> wakes coordinator once, never tells or merges.
+	l.eng.mu.Lock()
+	p := l.eng.prs[l.wt]
+	p.HeadSince = time.Now().Add(-time.Duration(l.state().Settings.ChecksGraceMinutes+1) * time.Minute)
+	l.eng.prs[l.wt] = p
+	l.eng.mu.Unlock()
+	l.pass()
+	l.pass()
+	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 0 {
+		t.Fatalf("merge_only unknown past grace told worker: %q", sends)
+	}
+	if merges := ghCalls(t, l.gh, "pr merge"); len(merges) != 0 {
+		t.Fatalf("merge_only unknown past grace merged: %q", merges)
+	}
+	wantWake := "merge_only_unknown@" + l.c1
+	if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != wantWake {
+		t.Fatalf("wakes past grace = %+v, want 1 with key %q", wakes, wantWake)
+	}
+
 	// Restore remote and pass again: fetch succeeds, N20 moves H to m1.
 	gitIn(t, l.wt, "config", "--unset", "url./nonexistent/remote.git.insteadOf")
 	gitIn(t, l.wt, "config", "url."+barePath+".insteadOf", "https://github.com/acme/demo.git")
@@ -273,39 +293,102 @@ func TestN7TellsOnceAndWakesOncePerH(t *testing.T) {
 	}
 }
 
-// TestN7WaitsForWorkerTurnBeforeWaking verifies item 3: staying idle on the
-// pass right after the tell does not wake the coordinator; only after the
-// worker is seen working and then idle again does N7 wake.
+// TestN7WaitsForWorkerTurnBeforeWaking verifies that N7 waits within
+// checks_grace_minutes for the worker's turn, wakes early if the worker's turn
+// end is observed, and never holds forever: if the worker is never seen working
+// (a turn shorter than a pass) or the engine restarts after the tell (losing
+// in-memory turn state), N7 wakes the coordinator once past checks_grace_minutes.
 func TestN7WaitsForWorkerTurnBeforeWaking(t *testing.T) {
-	l := newLanding(t)
-	ext := pushExternalToBranch(t, l, true, "ext.txt", "external\n")
-	writePRJSON(t, l.gh, "view.json", ext, greenRollup)
-
-	// Pass 1: idle worker is told.
-	l.pass()
-	if len(sendsTo(t, l.srv.Requests(), l.worker)) != 1 || len(l.state().Project.Wakes) != 0 {
-		t.Fatalf("pass 1: sends=%d wakes=%+v", len(sendsTo(t, l.srv.Requests(), l.worker)), l.state().Project.Wakes)
+	ageTell := func(l *landing) {
+		l.edit(func(s *flow.State) {
+			a := &s.Tasks[0].Attempts[0]
+			for i := range a.Acts {
+				if a.Acts[i].Key == flow.AskTellDiverged+"@"+l.c1 {
+					a.Acts[i].At = time.Now().Add(-time.Duration(s.Settings.ChecksGraceMinutes+1) * time.Minute)
+				}
+			}
+		})
 	}
 
-	// Pass 2: worker is STILL idle (turn hasn't started yet) -> must NOT wake.
-	l.pass()
-	if wakes := l.state().Project.Wakes; len(wakes) != 0 {
-		t.Fatalf("pass 2 (still idle before turn): wakes = %+v, want none", wakes)
-	}
+	t.Run("turn end wakes early", func(t *testing.T) {
+		l := newLanding(t)
+		ext := pushExternalToBranch(t, l, true, "ext.txt", "external\n")
+		writePRJSON(t, l.gh, "view.json", ext, greenRollup)
 
-	// Pass 3: worker is working -> still no wake.
-	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "working"})
-	l.pass()
-	if wakes := l.state().Project.Wakes; len(wakes) != 0 {
-		t.Fatalf("pass 3 (working): wakes = %+v, want none", wakes)
-	}
+		// Pass 1: idle worker is told.
+		l.pass()
+		if len(sendsTo(t, l.srv.Requests(), l.worker)) != 1 || len(l.state().Project.Wakes) != 0 {
+			t.Fatalf("pass 1: sends=%d wakes=%+v", len(sendsTo(t, l.srv.Requests(), l.worker)), l.state().Project.Wakes)
+		}
 
-	// Pass 4: worker is idle again (turn ended) -> wakes once.
-	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "idle"})
-	l.pass()
-	if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != "diverged@"+l.c1 {
-		t.Fatalf("pass 4 (after turn end): wakes = %+v, want 1 wake keyed diverged@%s", wakes, l.c1)
-	}
+		// Pass 2: worker is still idle within checks_grace_minutes -> waits.
+		l.pass()
+		if wakes := l.state().Project.Wakes; len(wakes) != 0 {
+			t.Fatalf("pass 2 (idle within grace): wakes = %+v, want none", wakes)
+		}
+
+		// Pass 3: worker is working -> still no wake.
+		l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "working"})
+		l.pass()
+		if wakes := l.state().Project.Wakes; len(wakes) != 0 {
+			t.Fatalf("pass 3 (working): wakes = %+v, want none", wakes)
+		}
+
+		// Pass 4: worker is idle again (turn ended within grace) -> wakes once early.
+		l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "idle"})
+		l.pass()
+		if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != "diverged@"+l.c1 {
+			t.Fatalf("pass 4 (after turn end): wakes = %+v, want 1 wake keyed diverged@%s", wakes, l.c1)
+		}
+	})
+
+	t.Run("never seen working wakes after grace", func(t *testing.T) {
+		l := newLanding(t)
+		ext := pushExternalToBranch(t, l, true, "ext.txt", "external\n")
+		writePRJSON(t, l.gh, "view.json", ext, greenRollup)
+
+		l.pass() // idle worker is told
+		l.pass() // still idle within grace -> waits
+		if wakes := l.state().Project.Wakes; len(wakes) != 0 {
+			t.Fatalf("within grace: wakes = %+v, want none", wakes)
+		}
+
+		// Worker never showed as working (turn shorter than a pass); tell ages past grace.
+		ageTell(l)
+		l.pass()
+		l.pass()
+		if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != "diverged@"+l.c1 {
+			t.Fatalf("after grace without working: wakes = %+v, want 1 wake keyed diverged@%s", wakes, l.c1)
+		}
+		if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 1 {
+			t.Fatalf("worker told %d times, want 1", got)
+		}
+		if got := ghCalls(t, l.gh, "pr merge"); len(got) != 0 {
+			t.Fatalf("diverged PR was merged: %q", got)
+		}
+	})
+
+	t.Run("engine restart wakes after grace", func(t *testing.T) {
+		l := newLanding(t)
+		ext := pushExternalToBranch(t, l, true, "ext.txt", "external\n")
+		writePRJSON(t, l.gh, "view.json", ext, greenRollup)
+
+		l.pass() // idle worker is told
+		// Engine restarts: in-memory workerTurn map is lost.
+		oldLog := l.eng.Log
+		l.eng = New(l.paths, l.client)
+		l.eng.Log = oldLog
+
+		ageTell(l)
+		l.pass()
+		l.pass()
+		if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != "diverged@"+l.c1 {
+			t.Fatalf("after restart and grace: wakes = %+v, want 1 wake keyed diverged@%s", wakes, l.c1)
+		}
+		if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 1 {
+			t.Fatalf("worker told %d times, want 1", got)
+		}
+	})
 }
 
 // TestPRSnapshotByNumberAndBaseCheck verifies item 4: once the attempt has a

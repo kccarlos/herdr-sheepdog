@@ -1004,9 +1004,10 @@ func (e *Engine) execTellDiverged(ctx context.Context, _ string, s *flow.State, 
 	if a == nil || a.RunID == "" {
 		return "", false, errors.New("factory: no worker run to tell about diverged branch")
 	}
-	why := flow.N7Why(flow.In{Task: t, Facts: f}, false)
+	in := flow.In{Task: t, Facts: f}
+	why := flow.N7Why(in, false)
 	msg := fmt.Sprintf("%s. Then run %s.", why, readyCmd(cmp.Or(e.Bin, "sheepdog"), t.Outcomes))
-	if strings.HasPrefix(why, "PR #") {
+	if flow.PRHeadDivergedOrForeign(in) {
 		msg = pullPrefix(a, f) + msg
 	}
 	return "told worker: " + why, false, world.SendRun(ctx, e.HC, a.RunID, msg)

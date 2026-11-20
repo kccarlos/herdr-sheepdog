@@ -126,7 +126,10 @@ func tipDivergedOrUncovered(in In) bool {
 	a := in.attempt()
 	return a != nil && (in.Facts.TipRel == RelDiverged || in.Facts.TipRel == RelBehind && !Covers(*a, in.Facts.Tip, headH(in)))
 }
-func prHeadDivergedOrForeign(in In) bool {
+
+// PRHeadDivergedOrForeign reports whether an open, answered PR head diverged
+// from H or has non-merge_only commits ahead of H.
+func PRHeadDivergedOrForeign(in In) bool {
 	return prOpen(in) && answered(in) && (in.Facts.PR.HeadRel == RelDiverged || in.Facts.PR.HeadRel == RelAhead && !in.Facts.PR.HeadMergeOnly && !in.Facts.PR.HeadMergeOnlyUnknown)
 }
 func prHeadMergeOnlyUnknown(in In) bool {
@@ -243,17 +246,20 @@ var TaskRows = []Row[In]{
 		}
 		return say("a recap is open", once(in.acts(), key(AskWake, "recap", n)), tell)(in)
 	}},
-	{ID: "N7", WaitsOn: "the worker; then the coordinator", When: all(hasAttempt, anyOf(tipDivergedOrUncovered, prHeadDivergedOrForeign, prHeadMergeOnlyUnknown)), Then: func(in In) Decision {
-		if !tipDivergedOrUncovered(in) && !prHeadDivergedOrForeign(in) {
+	{ID: "N7", WaitsOn: "the worker; then the coordinator", When: all(hasAttempt, anyOf(tipDivergedOrUncovered, PRHeadDivergedOrForeign, prHeadMergeOnlyUnknown)), Then: func(in In) Decision {
+		h := headH(in)
+		if !tipDivergedOrUncovered(in) && !PRHeadDivergedOrForeign(in) {
+			if in.Now.Sub(in.Facts.PR.HeadSince) >= checksGrace(in) {
+				return say("cannot tell if PR head is merge_only past checks_grace_minutes", once(in.acts(), key(AskWake, "merge_only_unknown", h)))(in)
+			}
 			return say("cannot tell if PR head is merge_only: wait")(in)
 		}
-		h := headH(in)
 		tk := key(AskTellDiverged, h)
 		tell := LastAct(in.acts(), tk)
 		if tell == nil || tell.Result != "done" {
 			return say(N7Why(in, false), ensureRun(in, in.Facts.Worker, AskStartWorker), once(in.acts(), tk))(in)
 		}
-		if working(in) || !in.Facts.Worker.LastTurnEnd.After(tell.At) {
+		if working(in) || (!in.Facts.Worker.LastTurnEnd.After(tell.At) && in.Now.Sub(tell.At) < checksGrace(in)) {
 			return say(N7Why(in, false))(in)
 		}
 		return say(N7Why(in, true), once(in.acts(), key(AskWake, "diverged", h)))(in)
@@ -426,7 +432,7 @@ func N7Why(in In, wake bool) string {
 	}
 	var msg string
 	switch {
-	case prHeadDivergedOrForeign(in):
+	case PRHeadDivergedOrForeign(in):
 		msg = fmt.Sprintf("PR #%d head %s diverged from H %s or has changes the engine did not push — restore branch %s (never force-push)", in.Facts.PR.Number, in.Facts.PR.Head, h, branch)
 	case in.Facts.TipRel == RelBehind:
 		msg = fmt.Sprintf("worktree tip %s is behind H %s — pull (`git pull --ff-only origin %s`)", in.Facts.Tip, h, branch)

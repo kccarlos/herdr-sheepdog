@@ -1213,10 +1213,22 @@ func TestN7DivergedAndForeignPush(t *testing.T) {
 		if r.ID != "N7" || !slices.Equal(d.Asked, []string{tellKey}) {
 			t.Fatalf("%s first = %s %v, want N7 [%s]", name, r.ID, d.Asked, tellKey)
 		}
-		// Told once; still idle before worker has had a turn -> wait (no wake).
+		// Told once; still idle within checks_grace_minutes before worker has had a turn -> wait (no wake).
 		a0(&in).Acts = append(a0(&in).Acts, Act{Key: tellKey, Result: "done", At: now})
 		if r, d := FirstMatch(TaskRows, in); r.ID != "N7" || len(d.Asked) != 0 {
 			t.Fatalf("%s idle before turn = %s %v, want N7 wait", name, r.ID, d.Asked)
+		}
+		// Still working even past checks_grace_minutes -> wait.
+		pastGrace := in
+		pastGrace.Now = now.Add(checksGrace(in))
+		pastGrace.Facts.Worker.State = RunWorking
+		if r, d := FirstMatch(TaskRows, pastGrace); r.ID != "N7" || len(d.Asked) != 0 {
+			t.Fatalf("%s working past grace = %s %v, want N7 wait", name, r.ID, d.Asked)
+		}
+		// Never seen working, tell older than checks_grace_minutes -> wake once.
+		pastGrace.Facts.Worker.State = RunIdle
+		if r, d := FirstMatch(TaskRows, pastGrace); r.ID != "N7" || !slices.Equal(d.Asked, []string{wakeKey}) {
+			t.Fatalf("%s idle past grace without turn = %s %v, want N7 [%s]", name, r.ID, d.Asked, wakeKey)
 		}
 		// While worker is working -> wait.
 		in.Facts.Worker.State = RunWorking
@@ -1237,12 +1249,41 @@ func TestN7DivergedAndForeignPush(t *testing.T) {
 		}
 	}
 
-	// HeadMergeOnlyUnknown waits at N7: no tell, no wake, no merge.
+	// HeadMergeOnlyUnknown waits at N7 within checks_grace_minutes, then wakes once past grace (never tells or merges).
 	unk := with(func(in *In) {
 		in.Facts.PR.Head, in.Facts.PR.HeadRel, in.Facts.PR.HeadMergeOnlyUnknown = "m2", RelAhead, true
 	})
 	if r, d := FirstMatch(TaskRows, unk); r.ID != "N7" || len(d.Asked) != 0 {
-		t.Fatalf("HeadMergeOnlyUnknown = %s %v, want N7 wait (no asks)", r.ID, d.Asked)
+		t.Fatalf("HeadMergeOnlyUnknown within grace = %s %v, want N7 wait (no asks)", r.ID, d.Asked)
+	}
+	unk.Now = now.Add(checksGrace(unk))
+	unkWake := "wake_coordinator@merge_only_unknown@c1"
+	if r, d := FirstMatch(TaskRows, unk); r.ID != "N7" || !slices.Equal(d.Asked, []string{unkWake}) {
+		t.Fatalf("HeadMergeOnlyUnknown past grace = %s %v, want N7 [%s]", r.ID, d.Asked, unkWake)
+	}
+	a0(&unk).Acts = append(a0(&unk).Acts, Act{Key: unkWake, Result: "done", At: unk.Now})
+	if r, d := FirstMatch(TaskRows, unk); r.ID != "N7" || len(d.Asked) != 0 {
+		t.Fatalf("HeadMergeOnlyUnknown repeat after wake = %s %v, want N7 nil", r.ID, d.Asked)
+	}
+}
+
+func TestPRHeadDivergedOrForeign(t *testing.T) {
+	if !PRHeadDivergedOrForeign(with(func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel = "f9", RelDiverged })) {
+		t.Fatal("diverged open answered PR = false, want true")
+	}
+	if !PRHeadDivergedOrForeign(with(func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel = "f8", RelAhead })) {
+		t.Fatal("foreign ahead open answered PR = false, want true")
+	}
+	if PRHeadDivergedOrForeign(with(func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel, in.Facts.PR.HeadMergeOnly = "m2", RelAhead, true })) {
+		t.Fatal("merge_only ahead PR = true, want false")
+	}
+	if PRHeadDivergedOrForeign(with(func(in *In) {
+		in.Facts.PR.Head, in.Facts.PR.HeadRel, in.Facts.PR.HeadMergeOnlyUnknown = "m2", RelAhead, true
+	})) {
+		t.Fatal("merge_only unknown PR = true, want false")
+	}
+	if PRHeadDivergedOrForeign(with(diverged)) {
+		t.Fatal("tip-only diverged = true, want false")
 	}
 }
 
