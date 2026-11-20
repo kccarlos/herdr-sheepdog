@@ -70,6 +70,7 @@ type DoctorOptions struct {
 	Home          string
 	TempDir       string
 	GHHost        string
+	DataDir       string
 	LookPath      func(string) (string, error)
 	RunCommand    CommandFunc
 	VolumeTimeout time.Duration
