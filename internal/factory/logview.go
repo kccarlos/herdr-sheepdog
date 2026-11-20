@@ -66,7 +66,7 @@ type TaskStatus struct {
 var ruleStage = map[string]string{
 	"N1": "done", "N2": "done",
 	"S1": "blocked_or_failed", "S2": "blocked_or_failed",
-	"N3": "blocked_or_failed", "N6": "blocked_or_failed", "N8": "blocked_or_failed",
+	"N3": "blocked_or_failed", "N4": "blocked_or_failed", "N6": "blocked_or_failed", "N7": "blocked_or_failed", "N8": "blocked_or_failed",
 	"N12": "blocked_or_failed", "N25": "blocked_or_failed", "N43": "blocked_or_failed",
 	"N9": "waiting_on_dep", "N10": "queued", "N11": "queued",
 	"N20": "working", "N22": "working", "N23": "working", "N26": "working", "N29": "working", "N39": "working",

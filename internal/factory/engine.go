@@ -338,6 +338,7 @@ var taskExecutors = map[string]taskExec{
 	flow.AskSizeRecap:    (*Engine).execSizeRecap,
 	flow.AskCIRecap:      (*Engine).execCIRecap,
 	flow.AskTellStop:     (*Engine).execTellStop,
+	flow.AskTellDiverged: (*Engine).execTellDiverged,
 	flow.AskTellConflict: (*Engine).execTellConflict,
 	flow.AskMergeOnly:    (*Engine).execMergeOnly,
 	flow.AskRerunCI:      (*Engine).execRerunCI,
@@ -966,6 +967,31 @@ func pullPrefix(a *flow.Attempt, f flow.Facts) string {
 		return fmt.Sprintf("Pull first (`git pull --ff-only origin %s` — the engine updated the branch). ", a.Branch)
 	}
 	return ""
+}
+
+// execTellDiverged is N7: tell the worker once what happened and to restore the
+// branch (or pull, when its tip is only behind H).
+func (e *Engine) execTellDiverged(ctx context.Context, _ string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
+	t, a := s.Tasks[ti], flow.OpenAttempt(s.Tasks[ti])
+	if a == nil || a.RunID == "" {
+		return "", false, errors.New("factory: no worker run to tell about diverged branch")
+	}
+	h, rc := flow.H(*a), readyCmd(cmp.Or(e.Bin, "sheepdog"), t.Outcomes)
+	prBad := f.PR.State == flow.PROpen && f.PR.Answered && (f.PR.HeadRel == flow.RelDiverged || f.PR.HeadRel == flow.RelAhead && !f.PR.HeadMergeOnly)
+	var msg, dec string
+	switch {
+	case !prBad && f.TipRel == flow.RelBehind:
+		msg = fmt.Sprintf("Your worktree tip %s is behind attempt head %s — run `git pull --ff-only origin %s` to catch up.", f.Tip, h, a.Branch)
+		dec = "told worker tip is behind H: pull"
+	case prBad:
+		msg = fmt.Sprintf("%sPR #%d head %s diverged from (or has unpushed changes ahead of) H %s — restore branch %s (never force-push) and run %s.",
+			pullPrefix(a, f), f.PR.Number, f.PR.Head, h, a.Branch, rc)
+		dec = "told worker PR head diverged or has unpushed changes"
+	default:
+		msg = fmt.Sprintf("Your worktree tip %s diverged from H %s — restore branch %s (never rebase or force-push) and run %s.", f.Tip, h, a.Branch, rc)
+		dec = "told worker worktree tip diverged from H"
+	}
+	return dec, false, world.SendRun(ctx, e.HC, a.RunID, msg)
 }
 
 // execTellConflict is N32: tell the worker once per H to merge the base (never rebase).

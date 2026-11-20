@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 )
@@ -65,13 +66,20 @@ func ghCmd(ctx context.Context, dir string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// maxPRTitleRunes is GitHub's PR title length limit (cut on a rune boundary).
+const maxPRTitleRunes = 256
+
+func capTitle(s string, limit int) string {
+	if utf8.RuneCountInString(s) <= limit {
+		return s
+	}
+	return string([]rune(s)[:limit])
+}
+
 // PushAndOpenPR pushes head to branch on the push remote (never forced: a
 // branch that moved elsewhere refuses it) and makes sure one PR is open for
-// branch against the remote base (design.md 9.4). An open PR is adopted
-// only if it is in this repo (not a fork), on the base and at head. Any
-// other PR for branch, open, closed or merged, is an error: the engine
-// never reopens a PR or opens a second one (N4). No PR at all: one is
-// created. It returns the PR number.
+// branch against the remote base, decided by flow.PRAdoptRows (design.md 9.4,
+// KB-GIT-2). It returns the PR number.
 func PushAndOpenPR(ctx context.Context, worktree, branch, head, title, body string) (int, error) {
 	repo, err := ghRepo(ctx, worktree)
 	if err != nil {
@@ -85,31 +93,32 @@ func PushAndOpenPR(ctx context.Context, worktree, branch, head, title, body stri
 		return 0, err
 	}
 	base := strings.TrimPrefix(ref, "refs/remotes/"+pushRemote+"/")
-	out, err := ghCmd(ctx, worktree, "pr", "list", "--repo", repo, "--head", branch, "--state", "all", "--json", "number,state,baseRefName,headRefOid,isCrossRepository")
+	out, err := ghCmd(ctx, worktree, "pr", "list", "--repo", repo, "--head", branch, "--state", "all", "--json", "number,state,baseRefName,headRefName,headRefOid,isCrossRepository")
 	if err != nil {
 		return 0, err
 	}
 	var prs []struct {
-		Number                         int
-		State, BaseRefName, HeadRefOid string
-		IsCrossRepository              bool
+		Number                                      int
+		State, BaseRefName, HeadRefName, HeadRefOid string
+		IsCrossRepository                           bool
 	}
 	if err := json.Unmarshal([]byte(out), &prs); err != nil {
 		return 0, fmt.Errorf("world: gh pr list: %w", err)
 	}
-	for _, p := range prs {
-		// We just pushed H to this branch, so its open same-repo PR is ours
-		// even if GitHub still lists the previous head (it lags a re-push).
-		if p.State == "OPEN" && !p.IsCrossRepository && p.BaseRefName == base {
-			return p.Number, nil
+	cands := make([]flow.PRCandidate, len(prs))
+	for i, p := range prs {
+		cands[i] = flow.PRCandidate{
+			Number: p.Number, State: flow.PRState(strings.ToLower(p.State)),
+			Base: p.BaseRefName, Branch: cmp.Or(p.HeadRefName, branch), IsCrossRepository: p.IsCrossRepository,
 		}
 	}
-	if len(prs) > 0 {
-		p := prs[0]
-		return 0, fmt.Errorf("world: %s already has PR #%d (%s, base %s, head %s, fork %t), want open on %s at %s: not adopted, no second PR",
-			branch, p.Number, p.State, p.BaseRefName, p.HeadRefOid, p.IsCrossRepository, base, head)
+	switch action, n, why := flow.AdoptPR(flow.PRAdoptIn{Pushed: true, Branch: branch, Base: base, PRs: cands}); action {
+	case flow.PRAdopt:
+		return n, nil
+	case flow.PRRefuse:
+		return 0, fmt.Errorf("world: %s: %s", branch, why)
 	}
-	out, err = ghCmd(ctx, worktree, "pr", "create", "--repo", repo, "--head", branch, "--base", base, "--title", title, "--body", body)
+	out, err = ghCmd(ctx, worktree, "pr", "create", "--repo", repo, "--head", branch, "--base", base, "--title", capTitle(title, maxPRTitleRunes), "--body", body)
 	if err != nil {
 		return 0, err
 	}

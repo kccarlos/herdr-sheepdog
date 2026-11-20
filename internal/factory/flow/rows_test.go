@@ -187,9 +187,10 @@ func TestS1FinishedReviewer(t *testing.T) {
 // TestN43WakeOncePerStall: the same stall wakes the coordinator once; a
 // different stall, or the same at a new H, wakes it again.
 func TestN43WakeOncePerStall(t *testing.T) {
-	_, first := FirstMatch(TaskRows, with(diverged))
+	unmatched := func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel = "c9", "" }
+	_, first := FirstMatch(TaskRows, with(unmatched))
 	stalled := func(fs ...func(*In)) In {
-		in := with(append([]func(*In){diverged}, fs...)...)
+		in := with(append([]func(*In){unmatched}, fs...)...)
 		a0(&in).Acts = []Act{{Key: first.Asked[0], Result: "done"}}
 		return in
 	}
@@ -199,15 +200,14 @@ func TestN43WakeOncePerStall(t *testing.T) {
 			Round{N: 3, Head: "c2", Verdict: VerdictPass},
 			Round{N: 4, Head: "c2", Verdict: VerdictPass},
 		)
-		in.Facts.PR.Head = "c2"
 	}
 	for name, c := range map[string]struct {
 		in   In
 		wake bool
 	}{
-		"same stall": {stalled(), false},
-		"closed PR":  {stalled(closedPR), true},
-		"new H":      {stalled(newH), true},
+		"same stall":      {stalled(), false},
+		"unknown verdict": {stalled(func(in *In) { a0(in).Rounds[1].Verdict = "maybe"; in.Facts.PR.Checks = ChecksRed }), true},
+		"new H":           {stalled(newH), true},
 	} {
 		r, d := FirstMatch(TaskRows, c.in)
 		if r.ID != "N43" || (len(d.Asked) == 1) != c.wake {
@@ -216,8 +216,8 @@ func TestN43WakeOncePerStall(t *testing.T) {
 	}
 }
 
-// TestClosedPR: a closed PR waits on nothing and gets no worker or
-// reviewer work; it falls to N43 (design.md N4 comes in a later slice).
+// TestClosedPR: a closed PR matches N4, wakes the coordinator once, runs no
+// reviewer, never reopens, and never opens a second PR.
 func TestClosedPR(t *testing.T) {
 	for name, in := range map[string]In{
 		"pending": with(closedPR, pending),
@@ -226,8 +226,13 @@ func TestClosedPR(t *testing.T) {
 		"fix":     with(closedPR, changes),
 		"review":  with(closedPR, noRounds),
 	} {
-		if r, d := FirstMatch(TaskRows, in); r.ID != "N43" {
-			t.Errorf("closed PR, %s: %s asked %v, want N43", name, r.ID, d.Asked)
+		r, d := FirstMatch(TaskRows, in)
+		if r.ID != "N4" || !slices.Equal(d.Asked, []string{"wake_coordinator@pr_closed"}) {
+			t.Errorf("closed PR, %s: %s asked %v, want N4 wake once", name, r.ID, d.Asked)
+		}
+		a0(&in).Acts = append(a0(&in).Acts, Act{Key: "wake_coordinator@pr_closed", Result: "done", At: now})
+		if r, d := FirstMatch(TaskRows, in); r.ID != "N4" || len(d.Asked) != 0 {
+			t.Errorf("closed PR repeat, %s: %s asked %v, want N4 nil", name, r.ID, d.Asked)
 		}
 	}
 }
@@ -240,6 +245,9 @@ func TestTablesCheck(t *testing.T) {
 		t.Error(err)
 	}
 	if err := CheckTable(MergeOnlyRows); err != nil {
+		t.Error(err)
+	}
+	if err := CheckTable(PRAdoptRows); err != nil {
 		t.Error(err)
 	}
 }
@@ -259,12 +267,14 @@ func TestRowCases(t *testing.T) {
 		{"N2", with(merged), []string{"mark_done", "wake_coordinator@merged_outside_bar"}},
 		{"N3", with(parked, runsLive), []string{"stop_runs"}},
 		{"N3", with(parked), nil},
+		{"N4", with(closedPR), []string{"wake_coordinator@pr_closed"}},
 		{"S1", with(workerEnded), []string{"stop_task"}},
 		{"S1", with(noRounds, reviewEnded), []string{"stop_task"}},
 		{"N6", with(openRecap), []string{"wake_coordinator@recap@1"}},
 		{"N6", with(sizeRecap), []string{"wake_coordinator@recap@1", "tell_worker_stop@1"}},
 		{"N6", with(ciRecap), []string{"wake_coordinator@recap@1", "tell_worker_stop@1"}},
 		{"N6", with(sizeRecap, func(in *In) { in.Facts.Worker = Run{} }), []string{"wake_coordinator@recap@1"}},
+		{"N7", with(diverged), []string{"tell_worker_diverged@c9@c1"}},
 		{"N8", with(nothingF, prGone), []string{"wake_coordinator@nothing_to_change@0"}},
 		{"N9", with(noAttempts, waitDep), nil},
 		{"N9", with(noAttempts, dropDep), []string{"wake_coordinator@dep_dropped@T2"}},
@@ -322,7 +332,7 @@ func TestRowCases(t *testing.T) {
 		{"N40", with(behind), []string{"update_branch@c1"}},
 		{"N41", with(asked), nil},
 		{"N42", landing(), []string{"record_accept@c1", "merge@c1"}},
-		{"N43", with(diverged), []string{"wake_coordinator@no_rule_matched@c1@open@green@clean@diverged"}},
+		{"N43", with(func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel = "c9", "" }), []string{"wake_coordinator@no_rule_matched@c1@open@green@clean@same"}},
 	}
 	covered := map[string]bool{}
 	for _, c := range cases {
@@ -353,8 +363,10 @@ func TestRowOrder(t *testing.T) {
 		{"S2", "N41", false, with(stuckAct("merge@c1"))},
 		{"N1", "N2", true, with(done, merged)},
 		{"N2", "N3", true, with(merged, parked)},
-		{"N3", "S1", true, with(parked, workerEnded)},
-		{"N6", "N8", true, with(openRecap, nothingF)},
+		{"N3", "N4", true, with(parked, closedPR)},
+		{"N4", "S1", true, with(closedPR, workerEnded)},
+		{"N6", "N7", true, with(openRecap, diverged)},
+		{"N7", "N8", true, with(diverged, nothingF)},
 		{"N8", "N23", false, with(nothingF, prGone)},
 		{"N9", "N10", true, with(noAttempts, waitDep, noSlotF)},
 		{"N10", "N11", true, with(noAttempts, noSlotF)},
@@ -1176,5 +1188,82 @@ func TestN13CIFailsScopedToAttempt(t *testing.T) {
 	}
 	if r, _ := FirstMatch(TaskRows, in); r.ID != "N29" {
 		t.Fatalf("new attempt after closed failing attempt = %s, want N29", r.ID)
+	}
+}
+
+// TestN7DivergedAndForeignPush covers N7: diverged tip, force-pushed (diverged)
+// PR head, foreign commit on PR head, and uncovered tip behind H -> tell worker
+// once, wait while working, wake coordinator once naming say+retry; never merge.
+func TestN7DivergedAndForeignPush(t *testing.T) {
+	prDiv := func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel = "f9", RelDiverged }
+	prForeign := func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel, in.Facts.PR.HeadMergeOnly = "f8", RelAhead, false }
+	tipBehindUncovered := func(in *In) { in.Facts.Tip, in.Facts.TipRel = "b0", RelBehind }
+
+	for name, tc := range map[string]struct {
+		mod    func(*In)
+		target string
+	}{
+		"tip diverged":         {diverged, "c9"},
+		"PR head diverged":     {prDiv, "f9"},
+		"PR head foreign push": {prForeign, "f8"},
+		"tip behind uncovered": {tipBehindUncovered, "b0"},
+	} {
+		in := with(tc.mod)
+		tellKey := "tell_worker_diverged@" + tc.target + "@c1"
+		wakeKey := "wake_coordinator@diverged@" + tc.target + "@c1"
+		r, d := FirstMatch(TaskRows, in)
+		if r.ID != "N7" || !slices.Equal(d.Asked, []string{tellKey}) {
+			t.Fatalf("%s first = %s %v, want N7 [%s]", name, r.ID, d.Asked, tellKey)
+		}
+		// Told once; while worker is working, wait.
+		a0(&in).Acts = append(a0(&in).Acts, Act{Key: tellKey, Result: "done", At: now})
+		in.Facts.Worker.State = RunWorking
+		if r, d := FirstMatch(TaskRows, in); r.ID != "N7" || len(d.Asked) != 0 {
+			t.Fatalf("%s while working = %s %v, want N7 wait", name, r.ID, d.Asked)
+		}
+		// Worker turn ends and N7 still holds -> wake coordinator once naming say and retry.
+		in.Facts.Worker.State = RunIdle
+		r, d = FirstMatch(TaskRows, in)
+		if r.ID != "N7" || !slices.Equal(d.Asked, []string{wakeKey}) || !strings.Contains(d.Why, "say") || !strings.Contains(d.Why, "retry") {
+			t.Fatalf("%s after turn end = %s %v (%q), want N7 [%s] naming say+retry", name, r.ID, d.Asked, d.Why, wakeKey)
+		}
+		// Repeat pass does not wake again.
+		a0(&in).Acts = append(a0(&in).Acts, Act{Key: wakeKey, Result: "done", At: now})
+		if r, d := FirstMatch(TaskRows, in); r.ID != "N7" || len(d.Asked) != 0 {
+			t.Fatalf("%s repeat after wake = %s %v, want N7 nil", name, r.ID, d.Asked)
+		}
+	}
+}
+
+// TestPRAdoptTable covers every row P1..P4 of PRAdoptRows (design.md 9.4, KB-GIT-2).
+func TestPRAdoptTable(t *testing.T) {
+	own := PRCandidate{Number: 7, State: PROpen, Base: "main", Branch: "task/t1"}
+	cases := []struct {
+		name, row, action string
+		num               int
+		in                PRAdoptIn
+	}{
+		{"not pushed", "P1", PRRefuse, 0, PRAdoptIn{Pushed: false, Branch: "task/t1", Base: "main", PRs: []PRCandidate{own}}},
+		{"no PR", "P2", PRCreate, 0, PRAdoptIn{Pushed: true, Branch: "task/t1", Base: "main"}},
+		{"own open PR", "P3", PRAdopt, 7, PRAdoptIn{Pushed: true, Branch: "task/t1", Base: "main", PRs: []PRCandidate{own}}},
+		{"fork PR", "P4", PRRefuse, 0, PRAdoptIn{Pushed: true, Branch: "task/t1", Base: "main", PRs: []PRCandidate{{Number: 8, State: PROpen, Base: "main", Branch: "task/t1", IsCrossRepository: true}}}},
+		{"other base", "P4", PRRefuse, 0, PRAdoptIn{Pushed: true, Branch: "task/t1", Base: "main", PRs: []PRCandidate{{Number: 9, State: PROpen, Base: "release", Branch: "task/t1"}}}},
+		{"other branch", "P4", PRRefuse, 0, PRAdoptIn{Pushed: true, Branch: "task/t1", Base: "main", PRs: []PRCandidate{{Number: 10, State: PROpen, Base: "main", Branch: "other"}}}},
+		{"closed PR", "P4", PRRefuse, 0, PRAdoptIn{Pushed: true, Branch: "task/t1", Base: "main", PRs: []PRCandidate{{Number: 11, State: PRClosed, Base: "main", Branch: "task/t1"}}}},
+		{"merged PR", "P4", PRRefuse, 0, PRAdoptIn{Pushed: true, Branch: "task/t1", Base: "main", PRs: []PRCandidate{{Number: 12, State: PRMerged, Base: "main", Branch: "task/t1"}}}},
+	}
+	covered := map[string]bool{}
+	for _, c := range cases {
+		r, _ := FirstMatch(PRAdoptRows, c.in)
+		act, num, why := AdoptPR(c.in)
+		if r.ID != c.row || act != c.action || num != c.num {
+			t.Errorf("%s: (%s, %s, %d, %q), want (%s, %s, %d)", c.name, r.ID, act, num, why, c.row, c.action, c.num)
+		}
+		covered[r.ID] = true
+	}
+	for _, r := range PRAdoptRows {
+		if !covered[r.ID] {
+			t.Errorf("PRAdoptRows row %s has no case", r.ID)
+		}
 	}
 }

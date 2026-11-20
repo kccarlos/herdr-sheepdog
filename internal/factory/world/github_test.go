@@ -849,3 +849,33 @@ func TestBaseStatusHeadCommit(t *testing.T) {
 		t.Fatalf("paged runs (fail on page 2) = %+v, %v; want red known", got, err)
 	}
 }
+
+// TestPushAndOpenPRTitleCap verifies that PR titles longer than GitHub's 256
+// rune limit are cut on a rune boundary.
+func TestPushAndOpenPRTitleCap(t *testing.T) {
+	ctx := context.Background()
+	gh := installFakeGH(t)
+	repo, _ := repoWithGitHubOrigin(t)
+	runGit(t, repo, "switch", "-c", "task/t1-cap")
+	runGit(t, repo, "commit", "--allow-empty", "-m", "feat: cap")
+	c1 := runGit(t, repo, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(gh, "pr.json"), []byte(`{"number":7,"state":"OPEN","headRefOid":"`+c1+`","baseRefName":"main","headRefName":"task/t1-cap"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	longTitle := "feat: " + strings.Repeat("é", 294) // 300 runes (>300 bytes)
+	if n, err := PushAndOpenPR(ctx, repo, "task/t1-cap", c1, longTitle, "body"); err != nil || n != 7 {
+		t.Fatalf("PushAndOpenPR = %d, %v", n, err)
+	}
+	creates := ghCalls(t, gh, "pr create")
+	wantTitle := "feat: " + strings.Repeat("é", 250)
+	if len(creates) != 1 || !strings.Contains(creates[0], "--title "+wantTitle+" --body") {
+		t.Fatalf("pr create = %q, want title cut to 256 runes (%d runes)", creates, len([]rune(wantTitle)))
+	}
+	// Wrong branch name in PR list is refused (KB-GIT-2).
+	if err := os.WriteFile(filepath.Join(gh, "view.json"), []byte(`{"number":8,"state":"OPEN","baseRefName":"main","headRefName":"other-branch","headRefOid":"`+c1+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PushAndOpenPR(ctx, repo, "task/t1-cap", c1, "feat: x", "b"); err == nil || !strings.Contains(err.Error(), "no second PR") {
+		t.Fatalf("wrong headRefName: err = %v, want refused", err)
+	}
+}
