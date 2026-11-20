@@ -191,6 +191,14 @@ func TestStartChecksNoPRWorkflowGivesEveryFix(t *testing.T) {
 	}
 }
 
+func TestStartChecksUnfetchedBaseRefFails(t *testing.T) {
+	res := runStart(t, goodWorkflow, startFake{"rev-parse --verify --quiet origin/main": {Exit: 1}})
+	r := res["pr workflow"]
+	if r.Status != onboard.Fail || r.Fix != "run: git fetch origin" {
+		t.Fatalf("pr workflow = %+v, want Fail with fix %q", r, "run: git fetch origin")
+	}
+}
+
 // TestStartChecksEscapeBranchName: a default branch with a slash is escaped in API paths.
 func TestStartChecksEscapeBranchName(t *testing.T) {
 	res := runStart(t, goodWorkflow, startFake{
