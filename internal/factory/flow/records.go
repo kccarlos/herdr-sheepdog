@@ -30,16 +30,24 @@ type State struct {
 	Tasks    []Task   `json:"tasks"`
 }
 
+// BaseState is the persisted base-branch red spell (design.md 7.3, N38).
+type BaseState struct {
+	Red     bool      `json:"red,omitempty"`
+	Since   time.Time `json:"since,omitempty"`
+	SpellID string    `json:"spell_id,omitempty"`
+}
+
 // Project is the project record of the skeleton.
 type Project struct {
-	ID           string `json:"id"`
-	Folder       string `json:"folder,omitempty"`
-	Goal         string `json:"goal,omitempty"`
-	Started      bool   `json:"started,omitempty"`
-	RunID        string `json:"run_id,omitempty"`           // coordinator terminal identity
-	RunTokenHash string `json:"run_token_sha256,omitempty"` // SHA-256 hex of the coordinator's SHEEPDOG_RUN_TOKEN
-	Acts         []Act  `json:"acts,omitempty"`
-	Wakes        []Wake `json:"wakes,omitempty"` // held until J12 delivers them
+	ID           string     `json:"id"`
+	Folder       string     `json:"folder,omitempty"`
+	Goal         string     `json:"goal,omitempty"`
+	Started      bool       `json:"started,omitempty"`
+	RunID        string     `json:"run_id,omitempty"`           // coordinator terminal identity
+	RunTokenHash string     `json:"run_token_sha256,omitempty"` // SHA-256 hex of the coordinator's SHEEPDOG_RUN_TOKEN
+	Acts         []Act      `json:"acts,omitempty"`
+	Wakes        []Wake     `json:"wakes,omitempty"` // held until J12 delivers them
+	Base         *BaseState `json:"base,omitempty"`
 }
 
 // Wake is a held wake for the coordinator (design.md 10, J12): queued once

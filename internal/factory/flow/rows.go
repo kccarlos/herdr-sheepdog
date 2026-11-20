@@ -35,6 +35,8 @@ const (
 	AskWake         = "wake_coordinator"
 	AskStopTask     = "stop_task"
 	AskStopRuns     = "stop_runs"
+
+	baseRedTellTries = 2 // one retry on the next pass if the worker tell fails
 )
 
 // commitKeyed are the verbs whose key ends in the commit it is for.
@@ -332,12 +334,17 @@ var TaskRows = []Row[In]{
 			once(in.acts(), key(AskWake, "no_checks", h)))(in)
 	}},
 	{ID: "N38", WaitsOn: "the base branch", When: ciReady(all(baseRed, anyOf(prBehindBase, prBehindUnknown))), Then: func(in In) Decision {
-		if !in.Facts.BaseRedOldest || in.Facts.BaseRedSince.IsZero() || in.Now.Sub(in.Facts.BaseRedSince) < time.Duration(in.Settings.MainRedMinutes)*time.Minute {
+		if in.Facts.BaseRedSpell == "" || in.Now.Sub(in.Facts.BaseRedSince) < time.Duration(in.Settings.MainRedMinutes)*time.Minute {
 			return say("the base branch is red: holding branch updates and merges")(in)
 		}
-		spell := cmp.Or(in.Facts.BaseRedRun, in.Facts.BaseRedSince.UTC().Format(time.RFC3339))
+		spell := in.Facts.BaseRedSpell
+		tk := key(AskTellBaseRed, spell)
+		var tell []string
+		if !Done(in.acts(), tk) && Count(in.acts(), tk) < baseRedTellTries {
+			tell = []string{tk}
+		}
 		return say("the base branch has been red past main_red_minutes: tell the oldest held task's worker to merge the base and say ready (or land a fix PR directly)",
-			ensureRun(in, in.Facts.Worker, AskStartWorker), once(in.acts(), key(AskTellBaseRed, spell)), once(in.acts(), key(AskWake, "base_red_held", spell)))(in)
+			ensureRun(in, in.Facts.Worker, AskStartWorker), tell, once(in.acts(), key(AskWake, "base_red_held", spell)))(in)
 	}},
 	{ID: "N36", WaitsOn: "CI", When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown)),
 		Then: func(in In) Decision {

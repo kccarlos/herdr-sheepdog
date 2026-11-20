@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
@@ -78,13 +77,8 @@ var ruleStage = map[string]string{
 // Stage comes from GraphViewOf so `sheepdog factory status` and `/factory`
 // always agree from one function.
 func StatusViewOf(s flow.State, logs []LogLine) []TaskStatus {
-	last := make(map[string]LogLine, len(s.Tasks))
-	for _, l := range logs {
-		if l.Task != "" && slices.ContainsFunc(flow.TaskRows, func(r flow.Row[flow.In]) bool { return r.ID == l.Rule }) {
-			last[l.Task] = l
-		}
-	}
-	g := GraphViewOf(s, logs)
+	lastLog, lastRow := lastTaskRows(logs)
+	g := graphViewOf(s, lastLog, lastRow)
 	out := make([]TaskStatus, len(g.Tasks))
 	for i, tv := range g.Tasks {
 		why := "no logged row"
@@ -92,7 +86,7 @@ func StatusViewOf(s flow.State, logs []LogLine) []TaskStatus {
 			why = tv.WhyWaiting + " (no logged row)"
 		}
 		ts := TaskStatus{ID: tv.Ref, Title: tv.Title, Stage: tv.Stage, Why: why}
-		if l, ok := last[tv.Ref]; ok {
+		if l, ok := lastRow[tv.Ref]; ok {
 			ts.Rule, ts.Why, ts.At, ts.Stale = l.Rule, l.Why, l.At, ruleStage[l.Rule] != tv.Stage
 		}
 		out[i] = ts

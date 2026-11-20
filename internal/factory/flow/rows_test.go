@@ -99,7 +99,7 @@ var (
 	conflict   = func(in *In) { in.Facts.PR.Mergeable = MergeableConflict }
 	behind     = func(in *In) { in.Facts.PR.Behind = true }
 	behindUnkn = func(in *In) { in.Facts.PR.BehindUnknown = true }
-	baseRedF   = func(in *In) { in.Facts.BaseRed, in.Facts.BaseRedSince, in.Facts.BaseRedRun = true, now, "101" }
+	baseRedF   = func(in *In) { in.Facts.BaseRed, in.Facts.BaseRedSince = true, now }
 	diverged   = func(in *In) { in.Facts.Tip, in.Facts.TipRel = "c9", RelDiverged }
 	reviewReq  = func(in *In) { in.Facts.PR.ReviewRequired = true }
 	ciRecap    = func(in *In) {
@@ -304,9 +304,9 @@ func TestRowCases(t *testing.T) {
 		{"N38", with(baseRedF, behind), nil},
 		{"N38", with(baseRedF, behindUnkn), nil},
 		{"N38", with(baseRedF, behind, func(in *In) {
-			in.Facts.BaseRedOldest = true
+			in.Facts.BaseRedSpell = "sha101"
 			in.Now = now.Add(time.Duration(DefaultSettings().MainRedMinutes) * time.Minute)
-		}), []string{"tell_worker_base_red@101", "wake_coordinator@base_red_held@101"}},
+		}), []string{"tell_worker_base_red@sha101", "wake_coordinator@base_red_held@sha101"}},
 		{"N38", with(baseRedF, behind, func(in *In) {
 			in.Now = now.Add(time.Duration(DefaultSettings().MainRedMinutes) * time.Minute)
 		}), nil},

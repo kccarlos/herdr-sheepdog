@@ -49,18 +49,11 @@ type Engine struct {
 
 	mu        sync.Mutex
 	wake      chan struct{}
-	prs       map[string]flow.PR   // last PR snapshot per attempt worktree (in memory)
-	errs      map[string]string    // last gh or git error per worktree and kind, logged once per change
-	tips      map[string]tipFacts  // last git reading per worktree (in memory)
-	waits     map[string]string    // last N9/N10/N38 wait reason per project/task, logged once per change
-	ghUnavail map[string]bool      // project fact github_unavailable (design.md 7.3)
-	base      map[string]baseState // project fact base_red (design.md 7.3, N38)
-}
-
-type baseState struct {
-	red     bool
-	since   time.Time
-	spellID string
+	prs       map[string]flow.PR  // last PR snapshot per attempt worktree (in memory)
+	errs      map[string]string   // last gh or git error per worktree and kind, logged once per change
+	tips      map[string]tipFacts // last git reading per worktree (in memory)
+	waits     map[string]string   // last N9/N10/N38 wait reason per project/task, logged once per change
+	ghUnavail map[string]bool     // project fact github_unavailable (design.md 7.3)
 }
 
 // tipFacts are N12's and N20's git facts for one tip and H: the merge base,
@@ -108,7 +101,7 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 			s.Project.RunID, s.Project.RunTokenHash = "", ""
 		}
 	}
-	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts = root, goal, true, nil
+	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts, s.Project.Base = root, goal, true, nil, nil
 	// The owner starting again is slice 1's retry (plan.md: "the owner
 	// starts again"): failed executor acts no longer block their ask.
 	for ti := range s.Tasks {
@@ -202,7 +195,7 @@ func (e *Engine) Stop(project string) error {
 	if err := e.stopRuns(ctx, runs); err != nil {
 		return err
 	}
-	s.Project.RunID, s.Project.RunTokenHash, s.Project.Started, s.Project.Acts = "", "", false, nil
+	s.Project.RunID, s.Project.RunTokenHash, s.Project.Started, s.Project.Acts, s.Project.Base = "", "", false, nil, nil
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "stop"}, Rule: "stop", Decision: "stopped", Why: "stopped by owner"})
 }
 
@@ -277,8 +270,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		}
 	}
 	e.observeBaseLocked(ctx, id, &s)
-	b := e.base[id]
-	baseEscalated := b.red && flow.Count(s.Project.Acts, flow.AskTellBaseRed+"@"+b.spellID) > 0
+	baseTried := s.Project.Base != nil && s.Project.Base.Red && flow.Done(s.Project.Acts, flow.AskTellBaseRed+"@"+s.Project.Base.SpellID)
 	var candidates []string
 	workerState, workerErr := map[string]flow.RunState{}, map[string]error{}
 	for _, t := range s.Tasks {
@@ -292,8 +284,8 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	}
 	granted := flow.GrantSlots(candidates, s.Tasks, flow.RunningTasks(s.Tasks, workerState), s.Settings.MaxRunning)
 	for i := range s.Tasks {
-		if ctx.Err() == nil && e.passTaskLocked(ctx, id, &s, i, granted[s.Tasks[i].ID], workerState[s.Tasks[i].ID], workerErr[s.Tasks[i].ID], b, !baseEscalated) {
-			baseEscalated = true
+		if ctx.Err() == nil {
+			e.passTaskLocked(ctx, id, &s, i, granted[s.Tasks[i].ID], workerState[s.Tasks[i].ID], workerErr[s.Tasks[i].ID], &baseTried)
 		}
 	}
 	if ctx.Err() == nil {
@@ -361,8 +353,14 @@ var taskExecutors = map[string]taskExec{
 	flow.AskStopRuns:     (*Engine).execStopRuns,
 }
 
-func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int, hasSlot bool, workerSt flow.RunState, workerErr error, base baseState, allowBaseEscalate bool) bool {
-	facts := flow.Facts{BaseRed: base.red, BaseRedSince: base.since, BaseRedRun: base.spellID, BaseRedOldest: allowBaseEscalate}
+func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int, hasSlot bool, workerSt flow.RunState, workerErr error, baseTried *bool) {
+	var facts flow.Facts
+	if b := s.Project.Base; b != nil && b.Red {
+		facts.BaseRed, facts.BaseRedSince = true, b.Since
+		if !*baseTried {
+			facts.BaseRedSpell = b.SpellID
+		}
+	}
 	// An ended task needs no facts (N1 matches first), and cleanup may
 	// have removed its worktree.
 	if oa := flow.OpenAttempt(s.Tasks[ti]); oa != nil && !flow.Ended(s.Tasks[ti]) {
@@ -374,11 +372,11 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		}
 		cancel()
 		if e.logOnce("factory.git_error", id, a.Worktree, err); err != nil {
-			return false
+			return
 		}
 		if workerErr != nil {
 			e.logError("factory.hc_error", id, workerErr)
-			return false
+			return
 		}
 		facts.Worker.State = workerSt
 		facts.Tip, facts.TipRel = tip, rel
@@ -387,7 +385,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		}
 		facts.GitHubUnavailable = e.ghUnavail[id]
 		if e.observeReviewLocked(ctx, id, s, ti, &facts) {
-			return false
+			return
 		}
 	} else if oa == nil && !flow.Ended(s.Tasks[ti]) {
 		facts.DepsNotDone, facts.DepsDropped = flow.UnmetDeps(s.Tasks[ti], s.Tasks)
@@ -407,14 +405,14 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 			if err := e.commitLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: facts, Rule: r.ID, Decision: "waiting", Why: d.Why}); err != nil {
 				e.logError("factory.commit_error", id, err)
 			}
-			return false
+			return
 		}
 	}
 	if len(d.Asked) == 0 {
-		return false
+		return
 	}
 	var decs []string
-	whys, escalated := []string{d.Why}, false
+	whys := []string{d.Why}
 	act := func(k, res string) { // an outcome replaces the intent saved for it
 		acts := &s.Tasks[ti].Acts
 		if oa := flow.OpenAttempt(s.Tasks[ti]); oa != nil {
@@ -447,14 +445,14 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 			act(ask, "asked")
 			if err := SaveState(e.Paths.State(id), *s); err != nil {
 				e.logError("factory.commit_error", id, err)
-				return escalated
+				return
 			}
 		}
 		f := facts
 		f.Ask = ask
 		dec, abort, err := fn(e, context.WithoutCancel(ctx), id, s, ti, f)
 		if abort {
-			return escalated
+			return
 		} else if errors.Is(err, world.ErrNoDispatchWorkflow) {
 			act(ask, "skipped")
 			decs = append(decs, "no dispatch_workflow set, or its file is missing")
@@ -467,8 +465,10 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 			decs = append(decs, dec)
 		}
 		if verb == flow.AskTellBaseRed {
-			s.Project.Acts = append(s.Project.Acts, flow.Act{Key: ask, Result: map[bool]string{true: "done", false: "failed"}[err == nil], At: now})
-			escalated = true
+			*baseTried = true
+			if err == nil {
+				s.Project.Acts = append(s.Project.Acts, flow.Act{Key: ask, Result: "done", At: now})
+			}
 		}
 		if ctx.Err() != nil {
 			d.Asked = d.Asked[:i+1] // the rest is asked again next pass
@@ -478,7 +478,6 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	if err := e.commitLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: facts, Rule: r.ID, Asked: d.Asked, Decision: strings.Join(decs, "; "), Why: strings.Join(whys, "; ")}); err != nil {
 		e.logError("factory.commit_error", id, err)
 	}
-	return escalated
 }
 
 // readTipLocked reads the changed lines at tip and whether it is ahead of H
@@ -1055,9 +1054,10 @@ func (e *Engine) execTellBaseRed(ctx context.Context, _ string, s *flow.State, t
 	return "told worker base is red: merge base and say ready", false, world.SendRun(ctx, e.HC, a.RunID, msg)
 }
 
-// observeBaseLocked reads the base branch's newest finished push workflow run
-// once per pass (project level, design.md 7.3, N38, KB-MRG-47). Read errors
-// keep the last known value and never flip the base red.
+// observeBaseLocked reads the push workflow runs on the base branch's head
+// commit once per pass (project level, design.md 7.3, N38, KB-MRG-47) and
+// persists the red spell in s.Project.Base. Read errors keep the last known
+// value and never flip the base red.
 func (e *Engine) observeBaseLocked(ctx context.Context, id string, s *flow.State) {
 	if s.Project.Folder == "" {
 		return
@@ -1065,26 +1065,27 @@ func (e *Engine) observeBaseLocked(ctx context.Context, id string, s *flow.State
 	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
 	res, err := world.BaseStatus(gctx, s.Project.Folder)
 	cancel()
-	if e.logOnce("factory.base_error", id, id, err); err != nil || !res.Known || res.Red == e.base[id].red {
+	wasRed := s.Project.Base != nil && s.Project.Base.Red
+	if e.logOnce("factory.base_error", id, id, err); err != nil || !res.Known || res.Red == wasRed {
 		return
 	}
 	now := time.Now()
-	if e.base == nil {
-		e.base = map[string]baseState{}
-	}
-	e.base[id] = baseState{red: res.Red, since: now, spellID: fmt.Sprint(res.ID)}
-	kind, dec, why := "base_green", "base turned green", fmt.Sprintf("base branch %s is green again (run %d)", res.Branch, res.ID)
+	kind, dec, why := "base_green", "base turned green", fmt.Sprintf("base branch %s is green again (%s, run %d)", res.Branch, res.HeadSHA[:min(len(res.HeadSHA), 7)], res.ID)
 	if res.Red {
+		s.Project.Base = &flow.BaseState{Red: true, Since: now, SpellID: res.HeadSHA}
 		kind, dec, why = "base_red", "base turned red", fmt.Sprintf("base branch %s is red since %s (run %d, %s): holding branch updates and merges", res.Branch, res.HeadSHA[:min(len(res.HeadSHA), 7)], res.ID, res.Conclusion)
+	} else {
+		s.Project.Base = nil
 	}
-	wakeKey := fmt.Sprintf("%s@%d", kind, res.ID)
+	wakeKey := kind + "@" + res.HeadSHA
 	actKey := flow.AskWake + "@" + wakeKey
-	if flow.Count(s.Project.Acts, actKey) > 0 {
-		return
+	var asked []string
+	if flow.Count(s.Project.Acts, actKey) == 0 {
+		s.Project.Acts = append(s.Project.Acts, flow.Act{Key: actKey, Result: "done", At: now})
+		holdProjectWake(s, wakeKey, "base_observer: "+why, fmt.Sprintf("branch %s; run %d; conclusion %s; head %s", res.Branch, res.ID, res.Conclusion, res.HeadSHA), now)
+		asked = []string{actKey}
 	}
-	s.Project.Acts = append(s.Project.Acts, flow.Act{Key: actKey, Result: "done", At: now})
-	holdProjectWake(s, wakeKey, "base_observer: "+why, fmt.Sprintf("branch %s; run %d; conclusion %s; head %s", res.Branch, res.ID, res.Conclusion, res.HeadSHA), now)
-	if err := e.commitLocked(id, s, LogLine{By: "engine", Rule: "base_observer", Asked: []string{actKey}, Decision: dec, Why: why}); err != nil {
+	if err := e.commitLocked(id, s, LogLine{By: "engine", Rule: "base_observer", Asked: asked, Decision: dec, Why: why}); err != nil {
 		e.logError("factory.commit_error", id, err)
 	}
 }
