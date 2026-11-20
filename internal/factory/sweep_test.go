@@ -404,6 +404,13 @@ func TestDoctorNoStateReportsUnknownNeverItemsAndRunsLocalBase(t *testing.T) {
 					VolumeTimeout: time.Second, AuthTimeout: time.Second,
 				})
 				assertUnknownOnlyAndLocalBase(t, rs)
+				if tc.name == "corrupt state.json" {
+					for _, r := range rs {
+						if r.Name == "sweep terminals" && !strings.Contains(r.Detail, "cannot load factory state") {
+							t.Errorf("corrupt state.json detail = %q, want load error", r.Detail)
+						}
+					}
+				}
 			})
 		}
 	})
@@ -418,6 +425,68 @@ func TestDoctorNoStateReportsUnknownNeverItemsAndRunsLocalBase(t *testing.T) {
 			TempDir: t.TempDir(), LookPath: env.lookPath, RunCommand: env.run,
 			VolumeTimeout: time.Second, AuthTimeout: time.Second,
 		})
-		assertUnknownOnlyAndLocalBase(t, rs)
+		var skipCount int
+		var gotLocalBase bool
+		for _, r := range rs {
+			switch r.Name {
+			case "sweep":
+				if r.Status != onboard.Skip || r.Detail != "leftover checks skipped: this folder has no factory project yet" {
+					t.Errorf("sweep = %+v, want Skip with no-project message", r)
+				}
+				skipCount++
+			case "sweep terminals", "sweep worktrees", "sweep branches":
+				t.Errorf("unexpected sweep warning without factory project: %+v", r)
+			case "leftover stray_terminal", "leftover worktree", "leftover branch":
+				t.Errorf("unexpected ownership leftover without factory project: %+v", r)
+			case "leftover local_base":
+				if strings.Contains(r.Detail, "1 commit ahead") {
+					gotLocalBase = true
+				}
+			}
+		}
+		if skipCount != 1 {
+			t.Errorf("sweep skip count = %d, want 1 (%+v)", skipCount, rs)
+		}
+		if !gotLocalBase {
+			t.Errorf("missing leftover local_base in %+v", rs)
+		}
 	})
+}
+
+func TestDoctorUnreachableHCReportsSingleStrayTerminalWarn(t *testing.T) {
+	ctx := context.Background()
+	repo, id, paths, srv, _, _, _ := setupSweepRepo(t)
+	srv.Close()
+
+	for _, tc := range []struct {
+		name    string
+		hcOK    bool
+		wantSub string
+	}{
+		{"hcOK false", false, "unknown: no hc client"},
+		{"hc socket closed", true, "unknown: "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rs := checkSweepLeftovers(ctx, DoctorOptions{
+				Folder:      repo,
+				HCSocket:    srv.Path,
+				DataDir:     paths.DataDir,
+				AuthTimeout: time.Second,
+			}, tc.hcOK, repo)
+			var termWarns []onboard.Result
+			for _, r := range rs {
+				if r.Name == "sweep terminals" {
+					termWarns = append(termWarns, r)
+				}
+			}
+			if len(termWarns) != 1 {
+				t.Fatalf("sweep terminals results = %d (%+v), want 1", len(termWarns), termWarns)
+			}
+			r := termWarns[0]
+			if r.Status != onboard.Warn || !strings.Contains(r.Detail, tc.wantSub) || strings.TrimPrefix(r.Detail, "unknown: ") == "" {
+				t.Fatalf("sweep terminals = %+v, want Warn containing %q with reason", r, tc.wantSub)
+			}
+			_ = id
+		})
+	}
 }

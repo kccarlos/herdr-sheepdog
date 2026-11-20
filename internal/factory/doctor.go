@@ -177,7 +177,7 @@ func checkSweepLeftovers(ctx context.Context, o DoctorOptions, hcOK bool, dir st
 	if err != nil {
 		return nil
 	}
-	s, wtRoot, p, stateWhy, client := flow.State{}, "", Paths{DataDir: o.DataDir}, "no factory project state", (*hc.Client)(nil)
+	s, wtRoot, p, stateWhy, client := flow.State{}, "", Paths{DataDir: o.DataDir}, "", (*hc.Client)(nil)
 	if o.DataDir != "" && id == "" {
 		id, _ = findStoredProject(p, repo)
 	}
@@ -192,8 +192,13 @@ func checkSweepLeftovers(ctx context.Context, o DoctorOptions, hcOK bool, dir st
 		}
 	} else if id != "" {
 		stateWhy = "no data dir to load factory state for " + id
+	} else {
+		out = append(out, resSkip("sweep", "leftover checks skipped: this folder has no factory project yet"))
 	}
 	for _, pr := range world.Sweep(gctx, client, repo, wtRoot, s) {
+		if id == "" && pr.Probe != "local_base" {
+			continue
+		}
 		if pr.Unknown != "" {
 			out = append(out, resWarn("sweep "+pr.Probe, "unknown: "+cleanReason(map[bool]string{true: stateWhy, false: pr.Unknown}[stateWhy != "" && pr.Probe != "local_base"]), "check "+pr.Probe+" manually"))
 		}
