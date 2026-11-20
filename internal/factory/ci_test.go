@@ -481,3 +481,17 @@ func TestCIRunListGatesReruns(t *testing.T) {
 		}
 	})
 }
+
+// TestCINoRerunOfARunWithATimeLimit: gh run rerun --failed also re-runs
+// dependents, so a run holding a job stopped by its own time limit (here an
+// always() job after a failed build) is never re-run; the worker is told.
+func TestCINoRerunOfARunWithATimeLimit(t *testing.T) {
+	l := newLanding(t)
+	writeGHFile(t, l.gh, "annotations.json", `[{"message":"The job has exceeded the maximum execution time of 1m0s"}]`)
+	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("build", "COMPLETED", "FAILURE", "80", "800")+","+ciCheck("report", "COMPLETED", "CANCELLED", "80", "801")+"]")
+	l.pass()
+	l.pass()
+	if got := ghCalls(t, l.gh, "run rerun"); len(got) != 0 || len(sendsTo(t, l.srv.Requests(), l.worker)) != 1 {
+		t.Fatalf("run 80 with a timed-out job: reruns %q, sends %d; want none and one tell", got, len(sendsTo(t, l.srv.Requests(), l.worker)))
+	}
+}

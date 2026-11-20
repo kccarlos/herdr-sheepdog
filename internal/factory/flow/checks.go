@@ -138,16 +138,22 @@ type Failure struct {
 // FailingRuns lists the latest checks of a red or outside-cancelled class,
 // and whether any check or status has not finished. A run id comes only
 // from an Actions check run whose URL is repo's own actions run, and only
-// if that run is in failedRuns (H's runs completed with a failure or cancel).
+// if that run is in failedRuns (H's runs completed with a failure or cancel)
+// and none of its checks was stopped by a time limit or for an unread reason.
 func FailingRuns(checks []Check, class Checks, repo string, failedRuns map[string]bool) (fails []Failure, running bool) {
 	want := map[Checks]string{ChecksRed: "red", ChecksStoppedExternal: "stopped_external"}[class]
-	pre := "https://github.com/" + repo + "/actions/runs/"
-	for _, c := range LatestChecks(checks) {
+	pre, latest, limited := "https://github.com/"+repo+"/actions/runs/", LatestChecks(checks), map[string]bool{}
+	for _, c := range latest { // a run holding a time limit is never re-run: --failed re-runs its dependents too
+		if v := c.verdict(); v == "stopped_timeout" || v == "stopped_unknown" {
+			limited[urlID(c.DetailsURL, "/actions/runs/")] = true
+		}
+	}
+	for _, c := range latest {
 		running = running || c.verdict() == "pending"
 		if want != "" && c.verdict() == want {
 			f := Failure{Name: cmp.Or(c.Name, c.Context)}
 			if c.Actions && len(c.DetailsURL) > len(pre) && strings.EqualFold(c.DetailsURL[:len(pre)], pre) {
-				if id := urlID(c.DetailsURL, "/actions/runs/"); failedRuns[id] {
+				if id := urlID(c.DetailsURL, "/actions/runs/"); failedRuns[id] && !limited[id] {
 					f.Run = id
 				}
 			}
