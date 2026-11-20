@@ -24,6 +24,12 @@ func holdWake(s *flow.State, ti int, row, why, ask string, f flow.Facts, now tim
 	return "wake held for the coordinator"
 }
 
+func holdProjectWake(s *flow.State, k, why, facts string, now time.Time) {
+	if !slices.ContainsFunc(s.Project.Wakes, func(w flow.Wake) bool { return w.Task == "" && w.Key == k }) {
+		s.Project.Wakes = append(s.Project.Wakes, flow.Wake{Key: k, Why: why, Facts: facts, At: now})
+	}
+}
+
 // The facts block's bounds: a title's characters, the wakes listed.
 const maxFactsTitle, maxFactsWakes = 120, 20
 
@@ -85,7 +91,7 @@ func wakeMessage(s flow.State) string {
 			fmt.Fprintf(&b, "- and %d more.\n", len(s.Project.Wakes)-i)
 			break
 		}
-		fmt.Fprintf(&b, "- %s: %s. %s. (wake %s at %s)\n", w.Task, w.Why, w.Facts, w.Key, w.At.Format(time.RFC3339))
+		fmt.Fprintf(&b, "- %s: %s. %s. (wake %s at %s)\n", cmp.Or(w.Task, "project"), w.Why, w.Facts, w.Key, w.At.Format(time.RFC3339))
 	}
 	changed := cmp.Or(strings.Join(s.Settings.Changed(), ", "), "none")
 	fmt.Fprintf(&b, "Settings that differ from their default: %s.", changed)
@@ -117,7 +123,7 @@ func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.Stat
 	}
 	var keys []string
 	for _, w := range s.Project.Wakes {
-		keys = append(keys, w.Task+":"+w.Key)
+		keys = append(keys, cmp.Or(w.Task, "project")+":"+w.Key)
 	}
 	s.Project.Wakes = nil
 	line := LogLine{By: "engine", Rule: "J12", Asked: keys, Decision: fmt.Sprintf("delivered %d wake(s) to the coordinator", len(keys)), Why: "wakes held and the coordinator is idle"}

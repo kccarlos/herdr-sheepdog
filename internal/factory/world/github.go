@@ -346,6 +346,103 @@ func headRuns(ctx context.Context, dir, repo, head string) (bool, map[string]boo
 	return pending, failed, err
 }
 
+// BaseRun is the push workflow runs result on the base branch's head commit.
+type BaseRun struct {
+	ID                          int64
+	Branch, HeadSHA, Conclusion string
+	Red, Known                  bool
+}
+
+// BaseStatus reads the base branch's head commit and its push workflow runs
+// (design.md 7.3, N38, KB-MRG-47). Red if any completed run failed (failure,
+// timed_out, or cancelled by job time limit); green when every run completed
+// and none is red; unknown while any run is still in progress or when no run
+// exists for that commit (path-ignored push). Read errors are returned so
+// callers keep the last known state and never flip red.
+func BaseStatus(ctx context.Context, repoDir string) (BaseRun, error) {
+	repo, err := ghRepo(ctx, repoDir)
+	if err != nil {
+		return BaseRun{}, err
+	}
+	ref, _, err := remoteBaseCommit(ctx, repoDir, false)
+	if err != nil {
+		return BaseRun{}, err
+	}
+	base := strings.TrimPrefix(ref, "refs/remotes/"+pushRemote+"/")
+	var headRef struct{ Object struct{ SHA string } }
+	if err := ghAPI(ctx, repoDir, "repos/"+repo+"/git/ref/heads/"+escapeRef(base), &headRef); err != nil || headRef.Object.SHA == "" {
+		return BaseRun{}, cmp.Or(err, fmt.Errorf("world: empty head sha for base %s", base))
+	}
+	head := headRef.Object.SHA
+	red, firstID, firstConc, total, pending := BaseRun{}, int64(0), "", 0, false
+	endpoint := "repos/" + repo + "/actions/runs?branch=" + url.QueryEscape(base) + "&event=push&head_sha=" + url.QueryEscape(head)
+	err = ghPages(ctx, repoDir, endpoint, 100, func(raw []byte) (int, error) {
+		var resp struct {
+			WorkflowRuns []struct {
+				ID                 int64
+				Status, Conclusion string
+			} `json:"workflow_runs"`
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return 0, err
+		}
+		for _, r := range resp.WorkflowRuns {
+			total++
+			if firstID == 0 {
+				firstID, firstConc = r.ID, strings.ToLower(r.Conclusion)
+			}
+			if !strings.EqualFold(r.Status, "completed") {
+				pending = true
+				continue
+			}
+			if red.Red {
+				continue
+			}
+			switch c := strings.ToLower(r.Conclusion); c {
+			case "failure", "timed_out":
+				red = BaseRun{ID: r.ID, Branch: base, HeadSHA: head, Conclusion: c, Red: true, Known: true}
+			case "cancelled":
+				if lim, err := runCancelledByLimit(ctx, repoDir, repo, r.ID); err != nil {
+					return 0, err
+				} else if lim {
+					red = BaseRun{ID: r.ID, Branch: base, HeadSHA: head, Conclusion: "cancelled_timeout", Red: true, Known: true}
+				}
+			}
+		}
+		return len(resp.WorkflowRuns), nil
+	})
+	if err != nil {
+		return BaseRun{}, err
+	} else if red.Red {
+		return red, nil
+	} else if total == 0 || pending {
+		return BaseRun{Branch: base, HeadSHA: head}, nil
+	}
+	return BaseRun{ID: firstID, Branch: base, HeadSHA: head, Conclusion: firstConc, Known: true}, nil
+}
+
+func runCancelledByLimit(ctx context.Context, dir, repo string, runID int64) (bool, error) {
+	limited := false
+	err := ghPages(ctx, dir, fmt.Sprintf("repos/%s/actions/runs/%d/jobs", repo, runID), 100, func(raw []byte) (int, error) {
+		var resp struct {
+			Jobs []struct {
+				ID         int64
+				Conclusion string
+			}
+		}
+		err := json.Unmarshal(raw, &resp)
+		for _, j := range resp.Jobs {
+			if err == nil && strings.EqualFold(j.Conclusion, "cancelled") {
+				var stop string
+				stop, err = checkRunStop(ctx, dir, repo, j.ID)
+				limited = limited || stop == "timeout"
+			}
+		}
+		return len(resp.Jobs), err
+	})
+	return limited, err
+}
+
 // MergePR asks GitHub to squash-merge PR number, pinned to head: GitHub
 // refuses it if the PR head moved. Never --admin, --auto or --delete-branch
 // (design.md 9.4, KB-MRG-10). The squash body is the caller's, built from

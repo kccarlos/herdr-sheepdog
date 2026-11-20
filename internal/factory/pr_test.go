@@ -42,7 +42,7 @@ case "$1 $2" in
 "workflow run") [ -f "$D/dispatch_fail" ] && { echo "HTTP 422: dispatch failed" >&2; exit 1; }; : ;;
 api\ *)
   case "$*" in *"/pulls/"*"/update-branch"*) failif update_branch; :; exit 0 ;; esac
-  pg=1; case "$2" in *page=*) pg=${2##*page=} ;; esac
+  pg=1; case "$2" in *"&page="*) pg=${2##*&page=} ;; esac
   sfx=""; [ "$pg" = 1 ] || sfx=".$pg"
   case "$2" in
   */actions/workflows/*/dispatches) failif dispatch; : ;;
@@ -51,6 +51,9 @@ api\ *)
     [ -f "$D/check_runs_denied" ] && { echo "gh: Resource not accessible by personal access token (HTTP 403)" >&2; exit 1; }
     cat "$D/check-runs$sfx.json" 2>/dev/null || echo '{"total_count":0,"check_runs":[]}' ;;
   */commits/*/status*) failif status; cat "$D/status$sfx.json" 2>/dev/null || echo '{"state":"pending","total_count":0,"statuses":[]}' ;;
+  */git/ref/heads/*) failif base_ref; cat "$D/base-ref.json" 2>/dev/null || echo '{"object":{"sha":"deadbeef1234567890"}}' ;;
+  */actions/runs/*/jobs*) failif run_jobs; cat "$D/run-jobs$sfx.json" 2>/dev/null || echo '{"jobs":[]}' ;;
+  */actions/runs*branch=*) failif base_runs; cat "$D/base-runs$sfx.json" 2>/dev/null || echo '{"workflow_runs":[]}' ;;
   */actions/runs*) failif workflow_runs; cat "$D/workflow-runs$sfx.json" 2>/dev/null || echo '{"total_count":0,"workflow_runs":[]}' ;;
   */compare/*) failif compare; cat "$D/compare.json" 2>/dev/null || echo '{"behind_by":0}' ;;
   *) echo "unexpected gh api $2" >&2; exit 2 ;;

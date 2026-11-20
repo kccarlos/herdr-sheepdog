@@ -76,13 +76,34 @@ func projectViewOf(s flow.State) ProjectView {
 	return ProjectView{ID: s.Project.ID, Folder: s.Project.Folder, Goal: s.Project.Goal, Running: s.Project.Started, Counts: counts}
 }
 
-func GraphViewOf(s flow.State, logs []LogLine) GraphView {
-	idx, deps, lastLog := make(map[string]int, len(s.Tasks)), map[string][]string{}, map[string]LogLine{}
+var taskRowWaits = func() map[string]string {
+	m := make(map[string]string, len(flow.TaskRows))
+	for _, r := range flow.TaskRows {
+		m[r.ID] = r.WaitsOn
+	}
+	return m
+}()
+
+func lastTaskRows(logs []LogLine) (lastLog, lastRow map[string]LogLine) {
+	lastLog, lastRow = map[string]LogLine{}, map[string]LogLine{}
 	for _, l := range logs {
 		if l.Task != "" {
 			lastLog[l.Task] = l
+			if _, ok := taskRowWaits[l.Rule]; ok {
+				lastRow[l.Task] = l
+			}
 		}
 	}
+	return lastLog, lastRow
+}
+
+func GraphViewOf(s flow.State, logs []LogLine) GraphView {
+	lastLog, lastRow := lastTaskRows(logs)
+	return graphViewOf(s, lastLog, lastRow)
+}
+
+func graphViewOf(s flow.State, lastLog, lastRow map[string]LogLine) GraphView {
+	idx, deps := make(map[string]int, len(s.Tasks)), map[string][]string{}
 	for i, t := range s.Tasks {
 		idx[t.ID] = i
 		for _, after := range t.After {
@@ -99,9 +120,10 @@ func GraphViewOf(s flow.State, logs []LogLine) GraphView {
 			}
 		}
 	}
+	baseRed := s.Project.Base != nil && s.Project.Base.Red
 	tasks := make([]TaskView, 0, len(s.Tasks))
 	for i, t := range s.Tasks {
-		stage, why := taskStageWhy(t, s.Tasks, s.Settings, s.Project.Started)
+		stage, why := taskStageWhy(t, s.Tasks, s.Settings, s.Project.Started, baseRed, lastRow[t.ID].Rule)
 		l, model, term, rounds := lastLog[t.ID], "", "", 0
 		if n := len(t.Attempts); n > 0 {
 			rounds = len(slices.DeleteFunc(slices.Clone(flow.Counted(t.Attempts[n-1])), func(r flow.Round) bool { return r.Kind == flow.RoundSendBack }))
@@ -197,7 +219,7 @@ var stateStage = map[string][2]string{
 	flow.Passed: {"ci", "Waiting on CI and merge"}, flow.NoLadderRow: {"blocked_or_failed", "Waiting on the coordinator"},
 }
 
-func taskStageWhy(t flow.Task, tasks []flow.Task, settings flow.Settings, started bool) (string, string) {
+func taskStageWhy(t flow.Task, tasks []flow.Task, settings flow.Settings, started, baseRed bool, lastRule string) (string, string) {
 	a, st, why := flow.OpenAttempt(t), "", ""
 	notDone, dropped := flow.UnmetDeps(t, tasks)
 	unmet := append(notDone, dropped...)
@@ -222,6 +244,8 @@ func taskStageWhy(t flow.Task, tasks []flow.Task, settings flow.Settings, starte
 			why = fmt.Sprintf("In review round %d", a.Review.Round)
 		} else if st == flow.Review {
 			why = fmt.Sprintf("In review round %d", len(a.Rounds)+1)
+		} else if st == flow.Passed && lastRule == "N38" && baseRed {
+			why = "Waiting on " + taskRowWaits[lastRule]
 		}
 	}
 	if info, ok := stateStage[st]; ok {

@@ -45,7 +45,7 @@ case "$1 $2" in
 "workflow run") [ -f "$D/dispatch_fail" ] && { echo "HTTP 422: dispatch failed" >&2; exit 1; }; : ;;
 api\ *)
   case "$*" in *"/pulls/"*"/update-branch"*) failif update_branch; :; exit 0 ;; esac
-  pg=1; case "$2" in *page=*) pg=${2##*page=} ;; esac
+  pg=1; case "$2" in *"&page="*) pg=${2##*&page=} ;; esac
   sfx=""; [ "$pg" = 1 ] || sfx=".$pg"
   case "$2" in
   */actions/workflows/*/dispatches) failif dispatch; : ;;
@@ -55,6 +55,9 @@ api\ *)
     f="$D/check-runs$sfx.json"; case "$2" in *filter=all*) [ -f "$D/check-runs.all$sfx.json" ] && f="$D/check-runs.all$sfx.json" ;; esac
     cat "$f" 2>/dev/null || echo '{"total_count":0,"check_runs":[]}' ;;
   */commits/*/status*) failif status; cat "$D/status$sfx.json" 2>/dev/null || echo '{"state":"pending","total_count":0,"statuses":[]}' ;;
+  */git/ref/heads/*) failif base_ref; cat "$D/base-ref.json" 2>/dev/null || echo '{"object":{"sha":"deadbeef1234567890"}}' ;;
+  */actions/runs/*/jobs*) failif run_jobs; cat "$D/run-jobs$sfx.json" 2>/dev/null || echo '{"jobs":[]}' ;;
+  */actions/runs*branch=*) failif base_runs; cat "$D/base-runs$sfx.json" 2>/dev/null || echo '{"workflow_runs":[]}' ;;
   */actions/runs*) failif workflow_runs; cat "$D/workflow-runs$sfx.json" 2>/dev/null || echo '{"total_count":0,"workflow_runs":[]}' ;;
   */compare/*) failif compare; cat "$D/compare.json" 2>/dev/null || echo '{"behind_by":0}' ;;
   *) echo "unexpected gh api $2" >&2; exit 2 ;;
@@ -749,5 +752,100 @@ func TestUpdateBranch(t *testing.T) {
 	writeGH(t, gh, "update_branch_fail", "")
 	if err := UpdateBranch(ctx, repo, 7, "abc1234"); err == nil {
 		t.Fatal("UpdateBranch succeeded when fake gh failed")
+	}
+}
+
+func TestBaseStatus(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+
+	// Empty runs list (path-ignored push) -> unknown, not red.
+	got, err := BaseStatus(ctx, repo)
+	if err != nil || got.Known || got.Red || got.Branch != "main" {
+		t.Fatalf("empty = %+v, %v", got, err)
+	}
+	wantCall := "api repos/acme/demo/actions/runs?branch=main&event=push&head_sha=deadbeef1234567890&per_page=100&page=1"
+	if calls := ghCalls(t, gh, "api repos/acme/demo/actions/runs"); len(calls) != 1 || calls[0] != wantCall {
+		t.Fatalf("calls = %q, want [%q]", calls, wantCall)
+	}
+
+	// Failure and timed_out count red; success counts green.
+	for _, tc := range []struct {
+		name, body string
+		red, known bool
+		id         int64
+	}{
+		{"failure", `{"workflow_runs":[{"id":11,"status":"completed","conclusion":"failure"}]}`, true, true, 11},
+		{"timed_out", `{"workflow_runs":[{"id":12,"status":"completed","conclusion":"timed_out"}]}`, true, true, 12},
+		{"success", `{"workflow_runs":[{"id":13,"status":"completed","conclusion":"success"}]}`, false, true, 13},
+		{"skipped and failure", `{"workflow_runs":[{"id":14,"status":"completed","conclusion":"skipped"},{"id":15,"status":"completed","conclusion":"failure"}]}`, true, true, 15},
+	} {
+		writeGH(t, gh, "base-runs.json", tc.body)
+		got, err := BaseStatus(ctx, repo)
+		if err != nil || got.Red != tc.red || got.Known != tc.known || got.ID != tc.id {
+			t.Errorf("%s: got %+v, %v; want red=%v known=%v id=%d", tc.name, got, err, tc.red, tc.known, tc.id)
+		}
+	}
+
+	// Cancelled by job time limit counts red; external cancel + success counts green.
+	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[{"id":20,"status":"completed","conclusion":"cancelled"},{"id":19,"status":"completed","conclusion":"success"}]}`)
+	writeGH(t, gh, "run-jobs.json", `{"jobs":[{"id":501,"conclusion":"cancelled"}]}`)
+	writeGH(t, gh, "annotations.json", `[{"message":"The job has exceeded the maximum execution time of 60m0s"}]`)
+	if got, err := BaseStatus(ctx, repo); err != nil || !got.Red || !got.Known || got.ID != 20 {
+		t.Fatalf("cancelled by limit = %+v, %v; want red id=20", got, err)
+	}
+	writeGH(t, gh, "annotations.json", `[{"message":"The run was canceled by @someone."}]`)
+	if got, err := BaseStatus(ctx, repo); err != nil || got.Red || !got.Known {
+		t.Fatalf("cancelled externally = %+v, %v; want green", got, err)
+	}
+
+	// Read error returns err (never flips red).
+	writeGH(t, gh, "base_runs_fail", "")
+	if _, err := BaseStatus(ctx, repo); err == nil {
+		t.Fatal("BaseStatus succeeded on base_runs_fail")
+	}
+}
+
+func TestBaseStatusHeadCommit(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	const head = "1111222233334444555566667777888899990000"
+	writeGH(t, gh, "base-ref.json", `{"object":{"sha":"`+head+`"}}`)
+
+	// Passing workflow listed first cannot hide a failing workflow on the same head commit.
+	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[{"id":202,"head_sha":"`+head+`","status":"completed","conclusion":"success"},{"id":201,"head_sha":"`+head+`","status":"completed","conclusion":"failure"}]}`)
+	got, err := BaseStatus(ctx, repo)
+	if err != nil || !got.Red || !got.Known || got.HeadSHA != head {
+		t.Fatalf("two workflows (pass then fail) = %+v, %v; want red known head=%s", got, err, head)
+	}
+	wantSub := "actions/runs?branch=main&event=push&head_sha=" + head
+	if calls := ghCalls(t, gh, "api repos/acme/demo/actions/runs"); len(calls) == 0 || !strings.Contains(calls[len(calls)-1], wantSub) || strings.Contains(calls[len(calls)-1], "status=completed") {
+		t.Fatalf("runs query = %q, want %q without status=completed", calls, wantSub)
+	}
+
+	// Re-run in progress (or another workflow still running) with no red run yet -> unknown (keep last value).
+	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[{"id":201,"head_sha":"`+head+`","status":"in_progress","conclusion":""},{"id":202,"head_sha":"`+head+`","status":"completed","conclusion":"success"}]}`)
+	got, err = BaseStatus(ctx, repo)
+	if err != nil || got.Known || got.Red {
+		t.Fatalf("in-progress rerun alongside pass = %+v, %v; want unknown (keep last value)", got, err)
+	}
+
+	// Paged runs: 100 passing runs on page 1, 1 failing run on page 2 -> red.
+	var p1 strings.Builder
+	p1.WriteString(`{"workflow_runs":[`)
+	for i := range 100 {
+		if i > 0 {
+			p1.WriteByte(',')
+		}
+		fmt.Fprintf(&p1, `{"id":%d,"head_sha":"%s","status":"completed","conclusion":"success"}`, 1000+i, head)
+	}
+	p1.WriteString(`]}`)
+	writeGH(t, gh, "base-runs.json", p1.String())
+	writeGH(t, gh, "base-runs.2.json", `{"workflow_runs":[{"id":2000,"head_sha":"`+head+`","status":"completed","conclusion":"failure"}]}`)
+	got, err = BaseStatus(ctx, repo)
+	if err != nil || !got.Red || !got.Known {
+		t.Fatalf("paged runs (fail on page 2) = %+v, %v; want red known", got, err)
 	}
 }

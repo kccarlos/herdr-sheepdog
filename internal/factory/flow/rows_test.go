@@ -99,6 +99,7 @@ var (
 	conflict   = func(in *In) { in.Facts.PR.Mergeable = MergeableConflict }
 	behind     = func(in *In) { in.Facts.PR.Behind = true }
 	behindUnkn = func(in *In) { in.Facts.PR.BehindUnknown = true }
+	baseRedF   = func(in *In) { in.Facts.BaseRed, in.Facts.BaseRedSince = true, now }
 	diverged   = func(in *In) { in.Facts.Tip, in.Facts.TipRel = "c9", RelDiverged }
 	reviewReq  = func(in *In) { in.Facts.PR.ReviewRequired = true }
 	ciRecap    = func(in *In) {
@@ -300,6 +301,16 @@ func TestRowCases(t *testing.T) {
 			in.Facts.PR.Checks = ChecksAbsent
 			in.Now = now.Add(time.Duration(DefaultSettings().ChecksGraceMinutes) * time.Minute)
 		}), []string{"dispatch_ci@c1"}},
+		{"N38", with(baseRedF, behind), nil},
+		{"N38", with(baseRedF, behindUnkn), nil},
+		{"N38", with(baseRedF, behind, func(in *In) {
+			in.Facts.BaseRedSpell = "sha101"
+			in.Now = now.Add(time.Duration(DefaultSettings().MainRedMinutes) * time.Minute)
+		}), []string{"tell_worker_base_red@sha101", "wake_coordinator@base_red_held@sha101"}},
+		{"N38", with(baseRedF, behind, func(in *In) {
+			in.Now = now.Add(time.Duration(DefaultSettings().MainRedMinutes) * time.Minute)
+		}), nil},
+		{"N42", with(baseRedF), []string{"record_accept@c1", "merge@c1"}},
 		{"N36", with(pending), nil},
 		{"N36", with(noAnswer), nil}, // checks unreadable: wait, no wake
 		{"N36", with(func(in *In) { in.Facts.PR.Checks = ChecksUnreadable }), nil},
@@ -371,6 +382,12 @@ func TestRowOrder(t *testing.T) {
 		{"N32", "N33", true, with(conflict, red)},
 		{"N32", "N36", false, with(conflict, pending)},
 		{"N32", "N37", false, with(conflict, reviewReq)},
+		{"N35", "N38", true, with(baseRedF, behind, func(in *In) {
+			in.Facts.PR.Checks = ChecksAbsent
+			in.Now = now.Add(time.Duration(DefaultSettings().ChecksGraceMinutes) * time.Minute)
+		})},
+		{"N38", "N36", true, with(baseRedF, behindUnkn)},
+		{"N38", "N40", false, with(baseRedF, behind)},
 		{"N36", "N37", true, with(pending, reviewReq)},
 		{"N36", "N40", false, with(pending, behind)},
 		{"N37", "N39", true, with(reviewReq, workingF)},
