@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -509,5 +510,119 @@ func TestCINoRerunWhenATimeLimitIsDeduped(t *testing.T) {
 	l.pass()
 	if got := ghCalls(t, l.gh, "run rerun"); len(got) != 0 || len(sendsTo(t, l.srv.Requests(), l.worker)) != 1 {
 		t.Fatalf("run 80 with a hidden timed-out job: reruns %q, sends %d; want none and one tell", got, len(sendsTo(t, l.srv.Requests(), l.worker)))
+	}
+}
+
+// TestN13CIRecapAndWindowReset verifies N13 end to end: two failing jobs on one
+// commit count once; three distinct failing commits within the hour open a ci
+// recap and wake the coordinator once (and tell the worker once to stop); a
+// recap decision (continue) resets the window without changing size_cap; three
+// more failing commits open a second recap without continue.
+func TestN13CIRecapAndWindowReset(t *testing.T) {
+	l := newLanding(t).withTokens()
+	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Rounds = []flow.Round{} })
+	pushFail := func(file, rollup string) string {
+		c := commitFile(t, l.wt, file, file+"\n")
+		gitIn(t, l.wt, "push", "origin", c+":refs/heads/"+l.branch)
+		l.edit(func(s *flow.State) {
+			a := &s.Tasks[0].Attempts[0]
+			a.Ready = append(a.Ready, flow.Ready{Head: c})
+			a.Review = nil // keep reviewer out of the way
+		})
+		writePRJSON(t, l.gh, "view.json", c, rollup)
+		l.pass()
+		return c
+	}
+	// Commit 1 with two failing jobs: counts once.
+	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("lint", "COMPLETED", "FAILURE", "91", "910")+","+ciCheck("test", "COMPLETED", "FAILURE", "91", "911")+"]")
+	l.pass()
+	if got := l.state().Tasks[0]; len(got.CIFails) != 1 || len(got.Recaps) != 0 {
+		t.Fatalf("after 2 failing jobs on c1: fails=%d recaps=%d, want 1 and 0", len(got.CIFails), len(got.Recaps))
+	}
+	// Commit 2 fails: count 2, no recap yet.
+	pushFail("f2.txt", checkRollup("FAILURE", "92", "920"))
+	if got := l.state().Tasks[0]; len(got.CIFails) != 2 || len(got.Recaps) != 0 {
+		t.Fatalf("after c2 fail: fails=%d recaps=%d, want 2 and 0", len(got.CIFails), len(got.Recaps))
+	}
+	// Commit 3 fails: reaches ci_fails_per_hour (3) -> N13 opens ci recap, N6 wakes once and tells worker once.
+	c3 := pushFail("f3.txt", checkRollup("FAILURE", "93", "930"))
+	l.pass() // N6: wake and tell stop
+	l.pass() // repeat pass: no second wake or tell
+	st := l.state()
+	rc := st.Tasks[0].Recaps
+	if len(rc) != 1 || rc[0].Trigger != flow.TriggerCI || !slices.Equal(rc[0].Allowed, []string{"continue", "split", "new", "drop"}) {
+		t.Fatalf("recaps = %+v, want 1 ci recap with continue", rc)
+	}
+	if w := st.Project.Wakes; len(w) != 1 || w[0].Key != "recap@1" || !strings.Contains(w[0].Facts, "recap trigger ci") {
+		t.Fatalf("wakes = %+v, want 1 ci recap wake", w)
+	}
+	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 1 || !strings.Contains(sends[0], "failing CI commits") {
+		t.Fatalf("worker sends = %q, want 1 stop at CI limit", sends)
+	}
+
+	// Coordinator decides continue: resets window, keeps SizeCap (100), tells worker to continue.
+	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"continue","why":"fix the workflow"}`, "")
+	st = l.state()
+	if st.Tasks[0].Attempts[0].SizeCap != 100 || flow.OpenRecap(st.Tasks[0]) != nil || st.Tasks[0].Recaps[0].Decided.At.IsZero() {
+		t.Fatalf("after continue: cap=%d open=%+v decided=%+v", st.Tasks[0].Attempts[0].SizeCap, flow.OpenRecap(st.Tasks[0]), st.Tasks[0].Recaps[0].Decided)
+	}
+	// Next pass still seeing c3 red does not reopen a recap.
+	writePRJSON(t, l.gh, "view.json", c3, checkRollup("FAILURE", "93", "930"))
+	l.pass()
+	if flow.OpenRecap(l.state().Tasks[0]) != nil {
+		t.Fatalf("stale red c3 reopened recap: %+v", l.state().Tasks[0].Recaps)
+	}
+	// Three new failing commits open a second ci recap without continue.
+	pushFail("f4.txt", checkRollup("FAILURE", "94", "940"))
+	pushFail("f5.txt", checkRollup("FAILURE", "95", "950"))
+	pushFail("f6.txt", checkRollup("FAILURE", "96", "960"))
+	rc = l.state().Tasks[0].Recaps
+	if len(rc) != 2 || rc[1].Trigger != flow.TriggerCI || slices.Contains(rc[1].Allowed, flow.ChoiceContinue) {
+		t.Fatalf("second ci recap = %+v, want no continue", rc)
+	}
+}
+
+// TestN32ConflictTellsWorkerOnce verifies N32: a conflicted PR tells the worker
+// once per H to merge the base (never rebase), resolve, commit, and report ready;
+// repeat passes do not tell again; TipRel == RelBehind prefixes "Pull first".
+func TestN32ConflictTellsWorkerOnce(t *testing.T) {
+	l := newLanding(t)
+	writeGHFile(t, l.gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"`+l.c1+`","mergeable":"CONFLICTING","statusCheckRollup":`+greenRollup+`,"baseRefName":"main"}`)
+	l.pass()
+	l.pass()
+	sends := sendsTo(t, l.srv.Requests(), l.worker)
+	if len(sends) != 1 || !strings.Contains(sends[0], "merge the base into your branch (never rebase)") || !strings.Contains(sends[0], "report ready") {
+		t.Fatalf("worker sends = %q, want 1 conflict instruction", sends)
+	}
+	if len(ghCalls(t, l.gh, "pr merge")) != 0 {
+		t.Fatal("conflicted PR was merged")
+	}
+	// Engine updated branch (TipRel == RelBehind): execTellConflict adds "Pull first".
+	s := l.state()
+	if _, _, err := l.eng.execTellConflict(context.Background(), l.id, &s, 0, flow.Facts{TipRel: flow.RelBehind, PR: flow.PR{Number: 7}}); err != nil {
+		t.Fatalf("execTellConflict(behind): %v", err)
+	}
+	sends = sendsTo(t, l.srv.Requests(), l.worker)
+	if len(sends) != 2 || !strings.HasPrefix(sends[1], "Pull first") {
+		t.Fatalf("behind conflict msg = %q, want Pull first prefix", sends[len(sends)-1])
+	}
+}
+
+// TestN37ReviewRequiredWakesOnce verifies N37: a PR whose reviewDecision is
+// REVIEW_REQUIRED wakes the coordinator once per H with facts naming the repo
+// setting and stating nobody in the factory can approve, and never merges.
+func TestN37ReviewRequiredWakesOnce(t *testing.T) {
+	l := newLanding(t)
+	writeGHFile(t, l.gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"`+l.c1+`","mergeable":"MERGEABLE","reviewDecision":"REVIEW_REQUIRED","statusCheckRollup":`+greenRollup+`,"baseRefName":"main"}`)
+	l.pass()
+	l.pass()
+	w := l.state().Project.Wakes
+	if len(w) != 1 || w[0].Key != "review_required@"+l.c1 ||
+		!strings.Contains(w[0].Facts, "nobody in the factory can approve") ||
+		!strings.Contains(w[0].Facts, "branch protection") {
+		t.Fatalf("wakes = %+v, want 1 review_required wake naming repo setting", w)
+	}
+	if len(ghCalls(t, l.gh, "pr merge")) != 0 {
+		t.Fatal("review_required PR was merged")
 	}
 }

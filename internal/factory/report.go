@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -797,11 +798,12 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 	if err != nil {
 		return err
 	}
+	now := time.Now()
 	if choice == "drop" {
 		if len(req.Children) > 0 {
 			return e.refuse(id, "invalid_report", "drop does not take --child tasks.")
 		}
-		rc.Decided, t.Dropped = &flow.RecapDecision{Choice: choice, Why: why}, &flow.Dropped{Why: why}
+		rc.Decided, t.Dropped = &flow.RecapDecision{Choice: choice, Why: why, At: now}, &flow.Dropped{Why: why}
 		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why},
 			Rule: "recap decide", Decision: "dropped", Why: why})
 	}
@@ -810,24 +812,27 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		if a == nil {
 			return e.refuse(id, "not_allowed", "continue needs an open attempt.")
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
-		defer cancel()
-		lines, err := world.ChangedLines(ctx, a.Worktree, "HEAD") // the same measure as N12's
-		base, note := lines, ""
-		if err != nil {
-			e.logError("factory.git_error", id, err)
-			base, note = a.SizeCap, " (changed-lines read failed; raised from current cap)"
-			if c, ok := e.tips[a.Worktree]; ok && c.lines > base {
-				base, note = c.lines, " (changed-lines read failed; raised from last good reading)"
-			}
-		}
-		newCap := base + s.Settings.ContinueLines
-		if a.RunID != "" {
-			now := fmt.Sprintf(" (%d now)", lines)
+		newCap, note, msg := a.SizeCap, "", fmt.Sprintf("The coordinator lets task %s go on: %s. Continue the task.", t.ID, why)
+		if rc.Trigger == flow.TriggerSize {
+			ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
+			defer cancel()
+			lines, err := world.ChangedLines(ctx, a.Worktree, "HEAD") // the same measure as N12's
+			base := lines
 			if err != nil {
-				now = ""
+				e.logError("factory.git_error", id, err)
+				base, note = a.SizeCap, " (changed-lines read failed; raised from current cap)"
+				if c, ok := e.tips[a.Worktree]; ok && c.lines > base {
+					base, note = c.lines, " (changed-lines read failed; raised from last good reading)"
+				}
 			}
-			msg := fmt.Sprintf("The coordinator lets task %s go on: %s. Your size cap is now %d changed lines%s. Continue the task.", t.ID, why, newCap, now)
+			newCap = base + s.Settings.ContinueLines
+			cur := fmt.Sprintf(" (%d now)", lines)
+			if err != nil {
+				cur = ""
+			}
+			msg = fmt.Sprintf("The coordinator lets task %s go on: %s. Your size cap is now %d changed lines%s. Continue the task.", t.ID, why, newCap, cur)
+		}
+		if a.RunID != "" {
 			sctx, scancel := context.WithTimeout(context.Background(), lockGitTimeout)
 			defer scancel()
 			if err := world.SendRun(sctx, e.HC, a.RunID, msg); err != nil {
@@ -835,9 +840,13 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 				return err
 			}
 		}
-		a.SizeCap, rc.Decided = newCap, &flow.RecapDecision{Choice: choice, Why: why}
+		dec := "continue"
+		if rc.Trigger == flow.TriggerSize {
+			a.SizeCap, dec = newCap, fmt.Sprintf("continue; size cap %d%s", newCap, note)
+		}
+		rc.Decided = &flow.RecapDecision{Choice: choice, Why: why, At: now}
 		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why},
-			Rule: "recap decide", Decision: fmt.Sprintf("continue; size cap %d%s", a.SizeCap, note), Why: why})
+			Rule: "recap decide", Decision: dec, Why: why})
 	}
 	if choice == "new" {
 		if !rc.Amended {
@@ -856,7 +865,7 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 			clearRuns(t)
 			a.Closed = note
 		}
-		rc.Decided = &flow.RecapDecision{Choice: choice, Why: why}
+		rc.Decided = &flow.RecapDecision{Choice: choice, Why: why, At: now}
 		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why},
 			Rule: "recap decide", Decision: "attempt closed; a new one starts", Why: why})
 	}
@@ -871,7 +880,7 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 	for i, c := range children {
 		childIDs[i] = c.ID
 	}
-	rc.Decided, t.Split = &flow.RecapDecision{Choice: choice, Why: why}, &flow.Split{Children: childIDs}
+	rc.Decided, t.Split = &flow.RecapDecision{Choice: choice, Why: why, At: now}, &flow.Split{Children: childIDs}
 	for i := range s.Tasks {
 		if i != ti {
 			s.Tasks[i].After = replaceDep(s.Tasks[i].After, t.ID, childIDs)

@@ -22,6 +22,7 @@ type Settings struct {
 	RetroAfterRoundsWithMajors int `json:"retro_after_rounds_with_majors"` // L12 (design.md 10.1)
 	RetroFromRound             int `json:"retro_from_round"`               // L12 (design.md 10.1)
 	ChecksGraceMinutes         int `json:"checks_grace_minutes"`           // N35, N36 (design.md 10.1)
+	CIFailsPerHour             int `json:"ci_fails_per_hour"`              // N13 (design.md 10.1)
 	FlakeReruns                int `json:"flake_reruns"`                   // N33, N34 (design.md 10.1)
 	StuckMinutes               int `json:"stuck_minutes"`                  // S2, until slice 5a (design.md 10.1)
 	ContinuesPerTask           int `json:"continues_per_task"`             // a recap's continue (design.md 4.3, 10.1)
@@ -39,26 +40,28 @@ type Settings struct {
 
 // Range limits for each setting.
 const (
-	ReviewRoundsMin  = 1
-	ReviewRoundsMax  = 5
-	MaxRoundsMax     = 10
-	RetroMajorsMin   = 2
-	RetroMajorsMax   = 4
-	RetroFromMin     = 2
-	RetroFromMax     = 6
-	ChecksGraceMin   = 1
-	ChecksGraceMax   = 60
-	FlakeRerunsMax   = 3
-	StuckMin         = 5
-	StuckMax         = 240
-	ContinuesMax     = 3
-	ContinueLinesMax = 500
-	SizeLimitMin     = 50
-	SizeLimitMax     = 2000
-	SizeFactorMin    = 1
-	SizeFactorMax    = 5
-	MaxRunningMin    = 1
-	MaxRunningMax    = 20
+	ReviewRoundsMin   = 1
+	ReviewRoundsMax   = 5
+	MaxRoundsMax      = 10
+	RetroMajorsMin    = 2
+	RetroMajorsMax    = 4
+	RetroFromMin      = 2
+	RetroFromMax      = 6
+	ChecksGraceMin    = 1
+	ChecksGraceMax    = 60
+	CIFailsPerHourMin = 1
+	CIFailsPerHourMax = 10
+	FlakeRerunsMax    = 3
+	StuckMin          = 5
+	StuckMax          = 240
+	ContinuesMax      = 3
+	ContinueLinesMax  = 500
+	SizeLimitMin      = 50
+	SizeLimitMax      = 2000
+	SizeFactorMin     = 1
+	SizeFactorMax     = 5
+	MaxRunningMin     = 1
+	MaxRunningMax     = 20
 )
 
 // DefaultSettings are slice 2's defaults: two passing rounds on the final head
@@ -67,7 +70,7 @@ func DefaultSettings() Settings {
 	return Settings{
 		ReviewRounds: 2, MaxRounds: 5,
 		RetroAfterRoundsWithMajors: 2, RetroFromRound: 3,
-		ChecksGraceMinutes: 5, FlakeReruns: 1, StuckMinutes: 30,
+		ChecksGraceMinutes: 5, CIFailsPerHour: 3, FlakeReruns: 1, StuckMinutes: 30,
 		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2, MaxRunning: 3,
 		SecondReviewer: "opus",
 	}
@@ -84,6 +87,7 @@ func (s Settings) Changed() []string {
 		got, def int
 	}{
 		{"checks_grace_minutes", s.ChecksGraceMinutes, d.ChecksGraceMinutes},
+		{"ci_fails_per_hour", s.CIFailsPerHour, d.CIFailsPerHour},
 		{"continue_lines", s.ContinueLines, d.ContinueLines},
 		{"continues_per_task", s.ContinuesPerTask, d.ContinuesPerTask},
 		{"flake_reruns", s.FlakeReruns, d.FlakeReruns},
@@ -120,6 +124,7 @@ func (s Settings) Validate() error {
 		{"retro_after_rounds_with_majors", s.RetroAfterRoundsWithMajors, RetroMajorsMin, RetroMajorsMax},
 		{"retro_from_round", s.RetroFromRound, RetroFromMin, RetroFromMax},
 		{"checks_grace_minutes", s.ChecksGraceMinutes, ChecksGraceMin, ChecksGraceMax},
+		{"ci_fails_per_hour", s.CIFailsPerHour, CIFailsPerHourMin, CIFailsPerHourMax},
 		{"flake_reruns", s.FlakeReruns, 0, FlakeRerunsMax},
 		{"stuck_minutes", s.StuckMinutes, StuckMin, StuckMax},
 		{"continues_per_task", s.ContinuesPerTask, 0, ContinuesMax},

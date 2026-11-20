@@ -96,8 +96,15 @@ type Task struct {
 	Split         *Split    `json:"split,omitempty"`
 	Parked        bool      `json:"parked,omitempty"`
 	Recaps        []Recap   `json:"recaps,omitempty"`
+	CIFails       []CIFail  `json:"ci_fails,omitempty"`
 	Acts          []Act     `json:"acts,omitempty"`
 	Attempts      []Attempt `json:"attempts"`
+}
+
+// CIFail records the first time a task commit was observed with a failing check run (N13).
+type CIFail struct {
+	Head string    `json:"head"`
+	At   time.Time `json:"at"`
 }
 
 // Merged is the done mark: the task's PR merged at this commit.
@@ -130,8 +137,9 @@ type Recap struct {
 
 // RecapDecision is the coordinator's decision closing a recap.
 type RecapDecision struct {
-	Choice string `json:"choice"`
-	Why    string `json:"why"`
+	Choice string    `json:"choice"`
+	Why    string    `json:"why"`
+	At     time.Time `json:"at,omitempty"`
 }
 
 // Recap choices and triggers (design.md 4.3, 4.9).
@@ -139,6 +147,7 @@ const (
 	ChoiceContinue = "continue"
 	TriggerReview  = "review"
 	TriggerSize    = "size"
+	TriggerCI      = "ci"
 )
 
 // SizeRecapAllowed is a size recap's choices: continue only while the task
