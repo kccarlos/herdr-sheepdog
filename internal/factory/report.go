@@ -55,6 +55,9 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 	if role != want {
 		return e.refuse(id, "kind_not_allowed", fmt.Sprintf("A %s may not send %s; only the %s may.", role, verb, want))
 	}
+	if ti >= 0 && flow.Ended(s.Tasks[ti]) {
+		return e.refuse(id, "already_closed", fmt.Sprintf("Task %q has ended; it takes no more reports.", s.Tasks[ti].ID))
+	}
 	if verb == "ready" {
 		return e.acceptReadyLocked(id, &s, role, ti, args)
 	}
@@ -115,7 +118,7 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 		}
 		r := flow.RejectableRound(*a, h)
 		if rel != flow.RelSame || r == nil || flow.Ladder(flow.In{Task: *t, Settings: s.Settings}) != flow.Fix {
-			if flow.Ladder(flow.In{Task: *t, Settings: s.Settings}) == flow.RecapAnswer {
+			if rel == flow.RelSame && flow.Ladder(flow.In{Task: *t, Settings: s.Settings}) == flow.RecapAnswer {
 				return e.refuse(id, "nothing_to_reject", "Nothing to reject: a recap is open and the coordinator decides; there is nothing for you to do.")
 			}
 			return e.refuse(id, "nothing_to_reject", "Nothing to reject: the newest round covering the current head must be an unrejected reviewer changes verdict with no new commit (after a commit, run report ready without --reject).")
@@ -124,9 +127,9 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "ready", "head": h, "round": r.N, "reject": why},
 			Rule: "ready --reject", Decision: "rejected", Why: fmt.Sprintf("round %d at %s: %s", r.N, h, why)})
 	case req.Nothing != nil:
-		why := cleanRejectWhy(*req.Nothing)
-		if why == "" {
-			return e.refuse(id, "why_missing", "A nothing-to-change report must carry a non-empty reason (--why \"<why>\").")
+		why, err := e.cleanWhy(id, *req.Nothing, "nothing-to-change report", "--why")
+		if err != nil {
+			return err
 		}
 		if tip != a.BaseCommit || rel != flow.RelSame { // at the base, and no ready moved H past it
 			return e.refuse(id, "nothing_new", "The worktree has commits over the base; run report ready without --nothing-to-change.")
@@ -315,7 +318,7 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string) (
 		} else {
 			ids[t.ID], newIDs = true, append(newIDs, t.ID)
 		}
-		if strings.TrimSpace(t.Title) == "" {
+		if cleanRejectWhy(t.Title) == "" {
 			fails = append(fails, fmt.Sprintf("shape: task %q has no title", t.ID))
 		}
 	}
@@ -335,7 +338,7 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string) (
 			}
 		}
 		after[t.ID] = t.After
-		tasks[i] = flow.Task{ID: t.ID, Title: strings.TrimSpace(t.Title), Brief: t.Brief, Outcomes: t.Outcomes, After: t.After, SplitFrom: parentID, Attempts: []flow.Attempt{}}
+		tasks[i] = flow.Task{ID: t.ID, Title: cleanRejectWhy(t.Title), Brief: t.Brief, Outcomes: t.Outcomes, After: t.After, SplitFrom: parentID, Attempts: []flow.Attempt{}}
 	}
 	if id := cycleAt(p.Tasks, after); id != "" {
 		fails = append(fails, fmt.Sprintf("shape: the after links make a cycle through %q", id))
@@ -410,10 +413,10 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		if a := flow.OpenAttempt(*t); a != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), ghTimeout)
 			defer cancel()
-			if err := e.stopRuns(ctx, taskRuns(id, *t)); err != nil {
-				return err
-			}
 			if _, err := closeOpenPR(ctx, s.Project.Folder, *a, note); err != nil {
+				return err // before any run is stopped: the task is as it was
+			}
+			if err := e.stopRuns(ctx, taskRuns(id, *t)); err != nil {
 				return err
 			}
 			clearRuns(t)
@@ -452,15 +455,16 @@ func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args js
 	if json.Unmarshal(args, &req) != nil {
 		return e.refuse(id, "invalid_report", "A task command must carry action, task and why.")
 	}
-	why := cleanRejectWhy(req.Why)
 	ti := slices.IndexFunc(s.Tasks, func(t flow.Task) bool { return t.ID == strings.TrimSpace(req.Task) })
 	switch {
 	case ti < 0:
 		return e.refuse(id, "invalid_report", fmt.Sprintf("No task %q in the plan.", req.Task))
 	case flow.Ended(s.Tasks[ti]):
 		return e.refuse(id, "already_closed", fmt.Sprintf("Task %q has ended; it cannot be changed.", req.Task))
-	case why == "":
-		return e.refuse(id, "why_missing", "A task command must carry a non-empty reason (--why \"<why>\").")
+	}
+	why, err := e.cleanWhy(id, req.Why, "task command", "--why")
+	if err != nil {
+		return err
 	}
 	t, verb := &s.Tasks[ti], "task "+req.Action
 	a := flow.OpenAttempt(*t)
@@ -482,6 +486,13 @@ func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args js
 	case "close":
 		if a == nil || a.NothingToChange == "" {
 			return e.refuse(id, "not_allowed", "close is allowed only after the worker reported nothing to change.")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
+		defer cancel()
+		if tip, _, _, err := world.InspectWorktree(ctx, a.Worktree, flow.H(*a)); err != nil {
+			return err
+		} else if tip != a.BaseCommit {
+			return e.refuse(id, "nothing_new", "The worker committed since it reported nothing to change; send it back or wait for its ready.")
 		}
 		t.Closed = &flow.Closed{Why: why}
 	case "send-back":
@@ -521,11 +532,11 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 	if err := dec.Decode(&req); err != nil {
 		return e.refuse(id, "plan_invalid", "shape: "+strings.TrimPrefix(err.Error(), "json: ")+".")
 	}
-	why := cleanRejectWhy(req.Why)
-	var fails []string
-	if why == "" {
-		fails = append(fails, "an amend needs a why")
+	why, err := e.cleanWhy(id, req.Why, "plan amend", `"why"`)
+	if err != nil {
+		return err
 	}
+	var fails []string
 	if len(req.Tasks) == 0 {
 		fails = append(fails, "shape: the amend has no tasks")
 	}
@@ -550,7 +561,7 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 			fails = append(fails, fmt.Sprintf("shape: task %q: %s (only title, brief and outcomes change)", s.Tasks[ti].ID, strings.TrimPrefix(err.Error(), "json: ")))
 		case flow.Ended(s.Tasks[ti]):
 			fails = append(fails, fmt.Sprintf("task %q has ended and is not changed", s.Tasks[ti].ID))
-		case c.Title != nil && strings.TrimSpace(*c.Title) == "":
+		case c.Title != nil && cleanRejectWhy(*c.Title) == "":
 			fails = append(fails, fmt.Sprintf("shape: task %q has no title", s.Tasks[ti].ID))
 		default:
 			changes = append(changes, change{ti, c})
@@ -571,8 +582,8 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 	var done []string
 	for _, ch := range changes {
 		t, c, what := &s.Tasks[ch.ti], ch.c, []string{}
-		if c.Title != nil && strings.TrimSpace(*c.Title) != t.Title {
-			t.Title, what = strings.TrimSpace(*c.Title), append(what, "title")
+		if c.Title != nil && cleanRejectWhy(*c.Title) != t.Title {
+			t.Title, what = cleanRejectWhy(*c.Title), append(what, "title")
 		}
 		if c.Brief != nil && *c.Brief != t.Brief {
 			t.Brief, what = *c.Brief, append(what, "brief")

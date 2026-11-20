@@ -81,6 +81,8 @@ func TestTaskCommandsAcceptance(t *testing.T) {
 		t.Fatalf("drop log decision = %q, want the dependants named", last.Decision)
 	}
 	l.report("tok-coord", "task", `{"action":"unpark","task":"T1","why":"w"}`, "already_closed")
+	// No report on an ended task: the worker's token still resolves until N1 runs.
+	l.report("tok-worker", "ready", `{"head":"`+base+`","nothing_to_change":"w"}`, "already_closed")
 }
 
 // TestN3ParkStopsRunsUnparkStartsAgain: a parked task keeps no run alive;
@@ -182,7 +184,7 @@ func TestAmendBriefReviewsSameHeadAgain(t *testing.T) {
 	})
 	seq := l.state().Seq
 	l.report("tok-worker", "plan amend", `{"why":"w","tasks":[{"id":"T1","brief":"b"}]}`, "kind_not_allowed")
-	l.report("tok-coord", "plan amend", `{"tasks":[{"id":"T1","brief":"b"}]}`, "plan_invalid")
+	l.report("tok-coord", "plan amend", `{"tasks":[{"id":"T1","brief":"b"}]}`, "why_missing")
 	l.report("tok-coord", "plan amend", `{"why":"w","tasks":[{"id":"T3","brief":"b"}]}`, "plan_invalid")
 	l.report("tok-coord", "plan amend", `{"why":"w","tasks":[{"id":"T1","after":["T3"]}]}`, "plan_invalid")
 	l.report("tok-coord", "plan amend", `{"why":"w","tasks":[{"id":"T4","after":["NOPE"],"title":"feat: n"}]}`, "plan_invalid")
@@ -290,6 +292,14 @@ func TestNothingToChangeN8ThenClose(t *testing.T) {
 	if len(w) != 1 || w[0].Key != "nothing_to_change@0" || !strings.Contains(w[0].Why, "N8") || !strings.Contains(w[0].Why, "already exists upstream") {
 		t.Fatalf("held wakes = %+v, want one N8 wake with the reason", w)
 	}
+	// A commit after the report, with no ready: close is refused.
+	if err := os.WriteFile(filepath.Join(wt.Path, "z.go"), []byte("package z\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt.Path, "add", "z.go")
+	gitIn(t, wt.Path, "commit", "-m", "feat: z")
+	rep("tok-coord", "task", `{"action":"close","task":"T1","why":"nothing to do"}`, "nothing_new")
+	gitIn(t, wt.Path, "reset", "--hard", base)
 	rep("tok-coord", "task", `{"action":"close","task":"T1","why":"nothing to do"}`, "")
 	if c := st().Tasks[0].Closed; c == nil || c.Why != "nothing to do" {
 		t.Fatalf("closed = %+v", c)
@@ -297,5 +307,55 @@ func TestNothingToChangeN8ThenClose(t *testing.T) {
 	eng.passProject(ctx, id, false)
 	if a := st().Tasks[0].Attempts[0]; !flow.Done(a.Acts, flow.AskCleanup) {
 		t.Fatalf("N1 did not clean up a closed task: %+v", a.Acts)
+	}
+}
+
+// TestWhysCleanedAndCapped: every why goes through cleanWhy: control
+// characters become spaces and over 500 characters is refused, for a worker
+// command (nothing-to-change) and coordinator ones (send-back, plan amend,
+// whose titles are cleaned too).
+func TestWhysCleanedAndCapped(t *testing.T) {
+	l := newLanding(t).withTokens()
+	long := strings.Repeat("x", 501)
+	l.report("tok-coord", "task", `{"action":"send-back","task":"T1","why":"`+long+`"}`, "invalid_report")
+	l.report("tok-coord", "plan amend", `{"why":"`+long+`","tasks":[{"id":"T1","brief":"b"}]}`, "invalid_report")
+	l.report("tok-coord", "task", `{"action":"send-back","task":"T1","why":"add\u0007 a\ntest"}`, "")
+	if r := l.state().Tasks[0].Attempts[0].Rounds[2]; r.Why != "add a test" {
+		t.Fatalf("send-back why = %q, want cleaned", r.Why)
+	}
+	l.report("tok-coord", "plan amend", `{"why":"w\u001b[2J","tasks":[{"id":"T1","title":"feat:\ny"},{"id":"T2","title":"feat:\u0007 z"}]}`, "")
+	if st := l.state(); st.Tasks[0].Title != "feat: y" || st.Tasks[1].Title != "feat: z" {
+		t.Fatalf("titles = %q, %q, want cleaned", st.Tasks[0].Title, st.Tasks[1].Title)
+	}
+	base := l.state().Tasks[0].Attempts[0].BaseCommit
+	l.edit(func(s *flow.State) { a := &s.Tasks[0].Attempts[0]; a.Ready, a.Rounds = nil, nil })
+	gitIn(t, l.wt, "reset", "--hard", base)
+	l.report("tok-worker", "ready", `{"head":"`+base+`","nothing_to_change":"`+long+`"}`, "invalid_report")
+	l.report("tok-worker", "ready", `{"head":"`+base+`","nothing_to_change":"done\u001b upstream"}`, "")
+	if got := l.state().Tasks[0].Attempts[0].NothingToChange; got != "done upstream" {
+		t.Fatalf("nothing-to-change why = %q, want cleaned", got)
+	}
+}
+
+// TestRecapDecideNewCloseFailureKeepsRuns: a failed gh close leaves the
+// worker alive and nothing committed, and returns the error.
+func TestRecapDecideNewCloseFailureKeepsRuns(t *testing.T) {
+	l := newLanding(t).withTokens()
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Recaps = []flow.Recap{{Trigger: "review", Allowed: []string{"split", "new", "drop"}, Amended: true}}
+	})
+	if err := os.WriteFile(filepath.Join(l.gh, "close_fail"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	seq := l.state().Seq
+	err := l.eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T1","choice":"new","why":"start over"}`))
+	if err == nil || refusalCode(err) != "" {
+		t.Fatalf("new with a failing gh close = %v, want the gh error", err)
+	}
+	if rs, _ := world.RunState(context.Background(), l.client, l.worker); rs == flow.RunGone {
+		t.Fatal("worker stopped although the PR close failed")
+	}
+	if st := l.state(); st.Seq != seq || st.Tasks[0].Attempts[0].Closed != "" || st.Tasks[0].Attempts[0].RunID != l.worker {
+		t.Fatalf("state changed after a failed new: seq %d->%d attempt %+v", seq, st.Seq, st.Tasks[0].Attempts[0])
 	}
 }
