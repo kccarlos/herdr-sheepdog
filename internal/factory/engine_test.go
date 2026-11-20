@@ -654,6 +654,19 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 		cancel()
 		<-done
 	}
+	// runUntilLogged runs passes until the log has want lines (or 3 s), then
+	// keeps passing for one more window so a retry would show. A fixed window
+	// alone was flaky under -race on a shared CI runner.
+	runUntilLogged := func(e *Engine, id string, want int) {
+		for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+			runFor(e, 40*time.Millisecond)
+			b, _ := os.ReadFile(e.Paths.Log(id))
+			if len(strings.Split(strings.TrimSpace(string(b)), "\n")) >= want {
+				break
+			}
+		}
+		runFor(e, 80*time.Millisecond)
+	}
 
 	// 1. Failing NewWorktree (repo has no remote) over many passes asks N11 once.
 	srv1 := hctest.New(t)
@@ -670,7 +683,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	if err := eng1.Report(runs1[0].Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"t1","estimate_lines":50,"title":"feat: x"}]}`)); err != nil {
 		t.Fatal(err)
 	}
-	runFor(eng1, 80*time.Millisecond)
+	runUntilLogged(eng1, id1, 4)
 	log1, err := os.ReadFile(eng1.Paths.Log(id1))
 	if err != nil {
 		t.Fatal(err)
@@ -692,7 +705,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 		t.Fatal(err)
 	}
 	id2 := eng2.projectDirs()[0].Name()
-	runFor(eng2, 80*time.Millisecond)
+	runUntilLogged(eng2, id2, 2)
 	log2, _ := os.ReadFile(eng2.Paths.Log(id2))
 	if lines := strings.Split(strings.TrimSpace(string(log2)), "\n"); len(lines) != 2 {
 		t.Fatalf("failing coordinator StartRun wrote %d log lines (want 2: start, 1 J7):\n%s", len(lines), log2)
