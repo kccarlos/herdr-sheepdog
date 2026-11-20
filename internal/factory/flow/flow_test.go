@@ -92,6 +92,11 @@ func TestSettingsRange(t *testing.T) {
 		"main_red_minutes":               func(s *Settings, n int) { s.MainRedMinutes = n },
 		"ci_fails_per_hour":              func(s *Settings, n int) { s.CIFailsPerHour = n },
 		"flake_reruns":                   func(s *Settings, n int) { s.FlakeReruns = n },
+		"start_minutes":                  func(s *Settings, n int) { s.StartMinutes = n },
+		"idle_grace_seconds":             func(s *Settings, n int) { s.IdleGraceSeconds = n },
+		"quiet_minutes":                  func(s *Settings, n int) { s.QuietMinutes = n },
+		"interrupt_seconds":              func(s *Settings, n int) { s.InterruptSeconds = n },
+		"blocked_minutes":                func(s *Settings, n int) { s.BlockedMinutes = n },
 		"stuck_minutes":                  func(s *Settings, n int) { s.StuckMinutes = n },
 		"max_running":                    func(s *Settings, n int) { s.MaxRunning = n },
 	}
@@ -105,6 +110,11 @@ func TestSettingsRange(t *testing.T) {
 		"main_red_minutes":               {MainRedMin, MainRedMax},
 		"ci_fails_per_hour":              {CIFailsPerHourMin, CIFailsPerHourMax},
 		"flake_reruns":                   {0, FlakeRerunsMax},
+		"start_minutes":                  {StartMin, StartMax},
+		"idle_grace_seconds":             {IdleGraceMin, IdleGraceMax},
+		"quiet_minutes":                  {QuietMin, QuietMax},
+		"interrupt_seconds":              {InterruptMin, InterruptMax},
+		"blocked_minutes":                {BlockedMin, BlockedMax},
 		"stuck_minutes":                  {StuckMin, StuckMax},
 		"max_running":                    {MaxRunningMin, MaxRunningMax},
 	}

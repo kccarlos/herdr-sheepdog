@@ -230,7 +230,7 @@ func TestN40HandEditedUpdateHeadNeverMovesH(t *testing.T) {
 	l.pass() // N7 tells worker
 	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "working"})
 	l.pass()
-	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "idle"})
+	setIdle(t, l.srv, l.client, l.worker, "idle")
 	l.pass()
 
 	a := l.state().Tasks[0].Attempts[0]
@@ -299,7 +299,7 @@ func TestKBMRG6WakeNoCommitKeepsPass(t *testing.T) {
 		t.Fatalf("merged while worker working: %q", got)
 	}
 	// Worker finishes turn on the same commit c1: N42 merges, still 2 rounds.
-	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "idle"})
+	setIdle(t, l.srv, l.client, l.worker, "idle")
 	l.pass()
 	a := l.state().Tasks[0].Attempts[0]
 	if merges := ghCalls(t, l.gh, "pr merge"); len(merges) != 1 || len(a.Rounds) != 2 || a.Review != nil {

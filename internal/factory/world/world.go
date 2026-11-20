@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -70,22 +72,35 @@ const reviewerTools = "Read Grep Glob LS " +
 
 // StartRun launches spec in herdr-core and returns its terminal address.
 func StartRun(ctx context.Context, client *hc.Client, spec RunSpec) (string, error) {
-	if client == nil || strings.TrimSpace(spec.Cwd) == "" || len(spec.Argv) == 0 {
-		return "", errors.New("world: StartRun requires hc client, Cwd and Argv")
+	t, _, err := StartTerminal(ctx, client, spec, nil)
+	return t.Address, err
+}
+
+// StartTerminal launches spec in herdr-core (or adopts a live same-name terminal) and returns its terminal record and whether an hc check failed before launch.
+func StartTerminal(ctx context.Context, client *hc.Client, spec RunSpec, beforeLaunch func() error) (hc.Terminal, bool, error) {
+	if client != nil && spec.Name != "" {
+		switch t, err := client.Get(ctx, spec.Name); {
+		case err != nil && !errors.Is(err, hc.ErrNotFound):
+			return hc.Terminal{}, true, err
+		case err == nil && t.State == "live":
+			return t, false, nil
+		case err == nil:
+			if _, rerr := client.Remove(ctx, t.Address); rerr != nil && !errors.Is(rerr, hc.ErrNotFound) {
+				return hc.Terminal{}, false, rerr
+			}
+		}
 	}
-	if spec.Name != "" {
-		if t, err := client.Get(ctx, spec.Name); err == nil {
-			if t.State == "live" {
-				return t.Address, nil
-			}
-			if _, err := client.Remove(ctx, t.Address); err != nil && !errors.Is(err, hc.ErrNotFound) {
-				return "", err
-			}
+	if client == nil || strings.TrimSpace(spec.Cwd) == "" || len(spec.Argv) == 0 {
+		return hc.Terminal{}, false, errors.New("world: StartRun requires hc client, Cwd and Argv")
+	}
+	if beforeLaunch != nil {
+		if err := beforeLaunch(); err != nil {
+			return hc.Terminal{}, true, err
 		}
 	}
 	if isClaudeArgv(spec.Argv) {
 		if err := preAcceptClaudeTrust(spec.ClaudeConfig, spec.Cwd); err != nil {
-			return "", err
+			return hc.Terminal{}, false, err
 		}
 	}
 	argv := append([]string(nil), spec.Argv...)
@@ -94,11 +109,8 @@ func StartRun(ctx context.Context, client *hc.Client, spec RunSpec) (string, err
 	}
 	labels := map[string]string{"herdr.space": randID(), "herdr.tab": randID(), "herdr.seen": "0"}
 	maps.Copy(labels, spec.Labels)
-	t, err := client.Run(ctx, hc.RunParams{
-		Name: spec.Name, Cwd: spec.Cwd, Argv: argv, Labels: labels, Env: spec.Env,
-		NoParent: true, NoNotify: true,
-	})
-	return t.Address, err
+	t, err := client.Run(ctx, hc.RunParams{Name: spec.Name, Cwd: spec.Cwd, Argv: argv, Labels: labels, Env: spec.Env, NoParent: true, NoNotify: true})
+	return t, false, err
 }
 
 func isClaudeArgv(argv []string) bool {
@@ -233,27 +245,106 @@ func StopRun(ctx context.Context, client *hc.Client, id string) error {
 	return fmt.Errorf("world: %s or pid %d still alive after stop", id, pid)
 }
 
-// RunState maps herdr-core's terminal state and OSC 7501 status to flow's
-// idle | working | gone.
-func RunState(ctx context.Context, client *hc.Client, id string) (flow.RunState, error) {
-	if id == "" {
-		return flow.RunGone, nil
+func deref[T any](p *T) (z T) {
+	if p != nil {
+		return *p
 	}
-	t, err := getTerminal(ctx, client, id)
-	if errors.Is(err, hc.ErrNotFound) || (err == nil && t.State != "live") {
-		return flow.RunGone, nil
+	return z
+}
+
+// ScreenClass classifies a pre-status or idle screen text against adapter patterns (design.md 9.2, spike S0.2).
+func ScreenClass(_ string, text string) string {
+	low := strings.ToLower(ansiRe.ReplaceAllString(text, ""))
+	for _, p := range [][2]string{
+		{flow.ScreenSignedOut, "not logged in|please run /login|invalid api key|sign in with chatgpt|codex login|not signed in|please sign in"},
+		{flow.ScreenLimit, "hit your limit|usage limit|exceeded your current quota|quota exceeded"},
+		{flow.ScreenTrust, "is this a project you created or one you trust|do you trust the contents of this|yes, i trust this folder|trust this directory"},
+		{flow.ScreenConfirm, "hooks need review|bypass permissions mode"},
+		{flow.ScreenOnboarding, "choose the text style|welcome to claude code"},
+	} {
+		if slices.ContainsFunc(strings.Split(p[1], "|"), func(s string) bool { return strings.Contains(low, s) }) {
+			return p[0]
+		}
+	}
+	return flow.ScreenNone
+}
+
+// ScreenKeys returns the adapter keystrokes that answer a start dialog (design.md 9.2).
+func ScreenKeys(cli, class string) []string {
+	return map[string][]string{CodexCLI + ":confirm": {"3", "enter"}, ":trust": {"enter"}, ":confirm": {"enter"}, ":onboarding": {"enter"}}[map[bool]string{true: cli}[cli == CodexCLI && class == flow.ScreenConfirm]+":"+class]
+}
+
+// ObserveRun reads rec's terminal and screen from herdr-core and emits the events for one pass (design.md 5, 7.3).
+func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]flow.RunEvent, error) {
+	if rec.State == flow.PhaseEnded {
+		return nil, nil
+	}
+	t, err := getTerminal(ctx, client, rec.Address)
+	if errors.Is(err, hc.ErrNotFound) || (err == nil && ((rec.ID != "" && t.Labels["sheepdog.run"] != rec.ID) || (rec.CreatedMS != 0 && t.CreatedMS != 0 && t.CreatedMS != rec.CreatedMS))) {
+		return []flow.RunEvent{{Kind: flow.EvLost}}, nil
 	} else if err != nil {
-		return "", err
+		return nil, err
 	}
-	if t.Status != nil && stateIdle(t.Status.State) {
-		return flow.RunIdle, nil
+	if t.State != "live" {
+		return []flow.RunEvent{{Kind: flow.EvExit, Reason: deref(t.Reason)}}, nil
 	}
-	return flow.RunWorking, nil
+	cls, hash, nonEmpty := flow.ScreenNone, "", false
+	if rd, rerr := client.Read(ctx, rec.Address, 200); rerr == nil && rd.Complete {
+		clean := ansiRe.ReplaceAllString(strings.ReplaceAll(rd.Text, "\r\n", "\n"), "")
+		sum := sha256.Sum256([]byte(clean))
+		hash, nonEmpty, cls = hex.EncodeToString(sum[:8]), strings.TrimSpace(clean) != "", ScreenClass(rec.CLI, clean)
+	}
+	var evs []flow.RunEvent
+	if rec.State == flow.PhaseStarting && !rec.StatusReported && t.Status == nil {
+		evs = append(evs, flow.RunEvent{Kind: flow.EvScreen, Screen: cls, ScreenHash: hash})
+		if rec.CLI == CodexCLI && nonEmpty && cls == flow.ScreenNone {
+			evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: "working"})
+		}
+	}
+	if hash != "" && rec.ScreenHash != "" && hash != rec.ScreenHash {
+		evs = append(evs, flow.RunEvent{Kind: flow.EvActivity, ScreenHash: hash})
+	}
+	if s := t.Status; s != nil && (!rec.StatusReported || s.State != rec.Status || deref(s.Kind) != rec.BlockedKind || s.Msg != rec.Question || t.Turn != rec.Turn) {
+		var at time.Time
+		if ms := deref(t.StatusMS); ms > 0 {
+			at = time.UnixMilli(int64(ms))
+		}
+		evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: s.State, StatusKind: deref(s.Kind), Msg: s.Msg, Turn: t.Turn, StatusAt: at})
+	}
+	return append(evs, flow.RunEvent{Kind: flow.EvTick, Screen: cls, ScreenHash: hash}), nil
+}
+
+// ActRun executes one run-table act against herdr-core.
+func ActRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, act, msg string) error {
+	switch act {
+	case flow.RunActKeys:
+		if keys := ScreenKeys(rec.CLI, rec.Screen); len(keys) > 0 {
+			_, err := client.Keys(ctx, rec.Address, keys...)
+			return err
+		}
+	case flow.RunActSendFirst, flow.RunActSendHeld:
+		return SendRun(ctx, client, rec.Address, msg)
+	case flow.RunActInterrupt:
+		_, err := client.Interrupt(ctx, rec.Address, 0)
+		return err
+	case flow.RunActStop:
+		return StopRun(ctx, client, rec.Address)
+	case flow.RunActRemove:
+		if client != nil && rec.Address != "" {
+			if _, err := client.Remove(ctx, rec.Address); !errors.Is(err, hc.ErrNotFound) && !errors.Is(err, hc.ErrLive) {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func getTerminal(ctx context.Context, client *hc.Client, id string) (hc.Terminal, error) {
 	if client == nil {
 		return hc.Terminal{}, errors.New("world: no hc client")
+	}
+	if id == "" {
+		return hc.Terminal{}, hc.ErrNotFound
 	}
 	return client.Get(ctx, id)
 }

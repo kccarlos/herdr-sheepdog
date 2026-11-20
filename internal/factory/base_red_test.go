@@ -10,7 +10,6 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
-	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
 func writeBaseRuns(t *testing.T, ghDir, body string) {
@@ -123,7 +122,7 @@ func TestBaseRedPastMainRedMinutesOldestTaskOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l.srv.SetStatus(w2, &hc.Status{App: "claude-code", State: "idle"})
+	setIdle(t, l.srv, l.client, w2, "idle")
 	l.edit(func(s *flow.State) {
 		s.Tasks = append(s.Tasks, flow.Task{
 			ID: "T2", Title: "feat: y", EstimateLines: 50,

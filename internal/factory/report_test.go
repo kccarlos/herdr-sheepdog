@@ -347,7 +347,8 @@ func TestVerdictAcceptance(t *testing.T) {
 	eng.Log = logging.NewJSONLLogger(&logBuf)
 
 	const projID = "proj-verdict"
-	srv.Add(hc.Terminal{Address: "t-rev", Name: "rev-1", State: "live", Status: &hc.Status{App: "claude-code", State: "done"}})
+	pastMS := uint64(time.Now().Add(-time.Minute).UnixMilli())
+	srv.Add(hc.Terminal{Address: "t-rev", Name: "rev-1", State: "live", Status: &hc.Status{App: "claude-code", State: "done"}, StatusMS: &pastMS})
 
 	st := flow.State{
 		Seq:     1,
@@ -463,7 +464,7 @@ func TestVerdictAcceptance(t *testing.T) {
 			t.Errorf("report file missing %q:\n%s", want, reportBytes)
 		}
 	}
-	if rs, err := world.RunState(ctx, client, "t-rev"); err != nil || rs != flow.RunGone {
+	if rs, err := termState(ctx, client, "t-rev"); err != nil || rs != flow.RunGone {
 		t.Fatalf("reviewer terminal after verdict = (%s, %v), want gone", rs, err)
 	}
 }
@@ -1756,7 +1757,8 @@ func TestVerdictRefusalTellsReviewerOnce(t *testing.T) {
 	gitIn(t, wt.Path, "commit", "-m", "feat: x")
 	c1 := gitIn(t, wt.Path, "rev-parse", "HEAD")
 
-	srv.Add(hc.Terminal{Address: "t-rev", Name: "rev-1", State: "live", Status: &hc.Status{App: "claude-code", State: "done"}})
+	pastMS := uint64(time.Now().Add(-time.Minute).UnixMilli())
+	srv.Add(hc.Terminal{Address: "t-rev", Name: "rev-1", State: "live", Status: &hc.Status{App: "claude-code", State: "done"}, StatusMS: &pastMS})
 	st := flow.State{
 		Seq:      1,
 		Project:  flow.Project{ID: projID, Folder: repo, Started: true, RunID: "t-coord"},

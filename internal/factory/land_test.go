@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
@@ -61,7 +62,7 @@ func newLanding(t *testing.T) *landing {
 	if l.worker, err = world.StartRun(ctx, l.client, world.RunSpec{Name: "worker-t1", Cwd: l.wt, Argv: []string{"sh"}}); err != nil {
 		t.Fatal(err)
 	}
-	srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "idle"})
+	setIdle(t, srv, l.client, l.worker, "idle")
 	l.edit(func(s *flow.State) {
 		s.Project.RunID = "coord-elsewhere" // the coordinator is not this test's business
 		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: x", EstimateLines: 50, Attempts: []flow.Attempt{{SizeCap: 100,
@@ -121,6 +122,30 @@ func (l *landing) remoteBranch() string {
 	return gitIn(l.t, l.repo, "ls-remote", "--heads", "origin", l.branch)
 }
 
+func setIdle(t testing.TB, srv *hctest.Server, client *hc.Client, id, state string) {
+	t.Helper()
+	srv.SetStatus(id, &hc.Status{App: "claude-code", State: state})
+	term, err := client.Get(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := uint64(time.Now().Add(-time.Minute).UnixMilli())
+	term.StatusMS = &ms
+	srv.Add(term)
+}
+
+func termState(ctx context.Context, client *hc.Client, id string) (flow.RunState, error) {
+	evs, err := world.ObserveRun(ctx, client, flow.RunRecord{Address: id, State: flow.PhaseWorking})
+	if err != nil {
+		return "", err
+	}
+	rec, s, now := flow.RunRecord{Address: id, State: flow.PhaseWorking}, flow.DefaultSettings(), time.Now()
+	for _, ev := range evs {
+		rec, _, _ = flow.StepRun(rec, ev, s, now)
+	}
+	return rec.TaskRun().State, nil
+}
+
 const mergedSHA = "abababababababababababababababababababab"
 
 // TestLandMergesOncePinnedDoneOnlyOnMergedSnapshot: N42 writes the accept
@@ -168,7 +193,7 @@ func TestLandMergesOncePinnedDoneOnlyOnMergedSnapshot(t *testing.T) {
 		t.Fatal("branch deleted in the same pass as done, before cleanup")
 	}
 	l.pass() // N1 cleanup
-	if rs, err := world.RunState(context.Background(), l.client, l.worker); err != nil || rs != flow.RunGone {
+	if rs, err := termState(context.Background(), l.client, l.worker); err != nil || rs != flow.RunGone {
 		t.Fatalf("worker after cleanup: %s %v", rs, err)
 	}
 	if _, err := os.Stat(l.wt); !os.IsNotExist(err) {
@@ -259,7 +284,7 @@ func TestLandCleanup(t *testing.T) {
 				}
 			}
 			l.pass()
-			if rs, err := world.RunState(context.Background(), l.client, l.worker); err != nil || rs != flow.RunGone {
+			if rs, err := termState(context.Background(), l.client, l.worker); err != nil || rs != flow.RunGone {
 				t.Fatalf("worker after cleanup: %s %v", rs, err)
 			}
 			_, err := os.Stat(filepath.Join(l.wt, "x.go"))
@@ -296,7 +321,7 @@ func TestLandCleanupSplitAndDrop(t *testing.T) {
 			l := newLanding(t)
 			l.edit(func(s *flow.State) { tc.mark(&s.Tasks[0]) })
 			l.pass()
-			if rs, err := world.RunState(context.Background(), l.client, l.worker); err != nil || rs != flow.RunGone {
+			if rs, err := termState(context.Background(), l.client, l.worker); err != nil || rs != flow.RunGone {
 				t.Fatalf("worker after cleanup: %s %v", rs, err)
 			}
 			closes := ghCalls(t, l.gh, "pr close")

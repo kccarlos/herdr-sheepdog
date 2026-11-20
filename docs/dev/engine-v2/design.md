@@ -477,6 +477,9 @@ The matrix (row ids; every cell filled):
 - Sending waits for a person's unfinished typing in that terminal; herdr-core does that itself (`hc send`). The engine decides "idle" from the run's own state, not from a send-only-if-idle check, because an agent can report done between steps.
 - Runs are started so that the terminal ends when the program ends (no kept shell), so a dead agent always produces `exit`.
 - A run's end is a fact the task and project rules read (section 4.8, section 6). The run table restarts nothing.
+- herdr-core gives no output time or output events (spike S0.8), so `activity` is derived by `world` from a change in the screen text between two reads (hash of `hc read`).
+- The Claude trust dialog and the Codex hooks dialog report no status, so `screen` events come from reading the screen against each adapter's known texts; agy reports its trust screen as `status blocked, kind permission` (spikes S0.2, S0.8).
+- A gone terminal is `state finished, status null`; `reason exited` vs `killed` tells an engine kill from anything else, but not who quit it (spike S0.8).
 
 ## 6. The project rules
 

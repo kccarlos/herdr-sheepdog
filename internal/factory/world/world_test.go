@@ -61,7 +61,19 @@ func TestClaudeArgvGolden(t *testing.T) {
 	}
 }
 
-// TestRunLifecycleAndProcessGroupStop checks StartRun, SendRun, RunState and StopRun (KB-COO-12).
+func observeRunState(ctx context.Context, client *hc.Client, id string) (flow.RunState, error) {
+	evs, err := ObserveRun(ctx, client, flow.RunRecord{Address: id, State: flow.PhaseWorking})
+	if err != nil {
+		return "", err
+	}
+	rec, s, now := flow.RunRecord{Address: id, State: flow.PhaseWorking}, flow.DefaultSettings(), time.Now()
+	for _, ev := range evs {
+		rec, _, _ = flow.StepRun(rec, ev, s, now)
+	}
+	return rec.TaskRun().State, nil
+}
+
+// TestRunLifecycleAndProcessGroupStop checks StartRun, SendRun, ObserveRun and StopRun (KB-COO-12).
 func TestRunLifecycleAndProcessGroupStop(t *testing.T) {
 	srv := hctest.New(t)
 	client := hc.NewClient(srv.Path)
@@ -96,12 +108,16 @@ func TestRunLifecycleAndProcessGroupStop(t *testing.T) {
 		t.Fatalf("prompt missing from argv: %v", term.Argv)
 	}
 
-	if st, err := RunState(ctx, client, id); err != nil || st != flow.RunWorking {
-		t.Fatalf("fresh RunState = %q, %v; want working", st, err)
+	if st, err := observeRunState(ctx, client, id); err != nil || st != flow.RunWorking {
+		t.Fatalf("fresh observeRunState = %q, %v; want working", st, err)
 	}
 	srv.SetStatus(id, &hc.Status{App: "claude-code", State: "done"})
-	if st, err := RunState(ctx, client, id); err != nil || st != flow.RunIdle {
-		t.Fatalf("done RunState = %q, %v; want idle", st, err)
+	term, _ = client.Get(ctx, id)
+	pastMS := uint64(time.Now().Add(-time.Minute).UnixMilli())
+	term.StatusMS = &pastMS
+	srv.Add(term)
+	if st, err := observeRunState(ctx, client, id); err != nil || st != flow.RunIdle {
+		t.Fatalf("done observeRunState = %q, %v; want idle", st, err)
 	}
 	if err := SendRun(ctx, client, id, "continue"); err != nil {
 		t.Fatalf("SendRun: %v", err)
@@ -123,8 +139,8 @@ func TestRunLifecycleAndProcessGroupStop(t *testing.T) {
 	if err := StopRun(ctx, client, id); err != nil {
 		t.Fatalf("StopRun: %v", err)
 	}
-	if st, err := RunState(ctx, client, id); err != nil || st != flow.RunGone {
-		t.Fatalf("after StopRun RunState = %q, %v; want gone", st, err)
+	if st, err := observeRunState(ctx, client, id); err != nil || st != flow.RunGone {
+		t.Fatalf("after StopRun observeRunState = %q, %v; want gone", st, err)
 	}
 	if !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
 		t.Fatalf("process %d still alive after StopRun", pid)
@@ -189,12 +205,12 @@ func TestStartRunOmitsDuplicateDisableAutoupdaterEnv(t *testing.T) {
 func TestRunStateOutageAndChildProcessGroupStop(t *testing.T) {
 	ctx := context.Background()
 
-	// (d) Closed hc socket: RunState returns error, never RunGone.
+	// (d) Closed hc socket: ObserveRun returns error, never RunGone.
 	deadSrv := hctest.New(t)
 	deadClient := hc.NewClient(deadSrv.Path)
 	deadSrv.Close()
-	if st, err := RunState(ctx, deadClient, "t1"); err == nil || st == flow.RunGone {
-		t.Fatalf("closed-socket RunState = (%q, %v), want non-nil error and not gone", st, err)
+	if st, err := observeRunState(ctx, deadClient, "t1"); err == nil || st == flow.RunGone {
+		t.Fatalf("closed-socket observeRunState = (%q, %v), want non-nil error and not gone", st, err)
 	}
 
 	// (e) StopRun kills both leader and background child in the same process group.
@@ -237,6 +253,56 @@ func TestRunStateOutageAndChildProcessGroupStop(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("process group not fully dead: leader=%v child=%v", syscall.Kill(leaderPID, 0), syscall.Kill(childPID, 0))
 		}
+	}
+}
+
+func TestObserveRunScreensActivityAndExit(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+
+	for _, tc := range []struct {
+		cli, screen, wantClass string
+		wantKeys               []string
+	}{
+		{"claude", "Is this a project you created or one you trust?\n❯ 1. Yes, I trust this folder", flow.ScreenTrust, []string{"enter"}},
+		{CodexCLI, "Hooks need review\n1. Yes\n3. Continue without trusting", flow.ScreenConfirm, []string{"3", "enter"}},
+		{"claude", "Not logged in · Please run /login", flow.ScreenSignedOut, nil},
+		{"claude", "You've hit your limit · resets 2pm", flow.ScreenLimit, nil},
+		{"claude", "", flow.ScreenNone, nil},
+	} {
+		if got := ScreenClass(tc.cli, tc.screen); got != tc.wantClass {
+			t.Errorf("ScreenClass(%q, %q) = %q, want %q", tc.cli, tc.screen, got, tc.wantClass)
+		}
+		if got := ScreenKeys(tc.cli, tc.wantClass); !slices.Equal(got, tc.wantKeys) {
+			t.Errorf("ScreenKeys(%q, %q) = %v, want %v", tc.cli, tc.wantClass, got, tc.wantKeys)
+		}
+	}
+
+	srv.Add(hc.Terminal{Address: "t1", State: "live", CreatedMS: 100, Labels: map[string]string{"sheepdog.run": "r1"}})
+	srv.SetScreen("t1", "line 1\n")
+	rec := flow.RunRecord{ID: "r1", Address: "t1", CLI: "claude", State: flow.PhaseStarting, StartedAt: time.Now()}
+	evs, err := ObserveRun(ctx, client, rec)
+	if err != nil || len(evs) != 2 || evs[0].Kind != flow.EvScreen || evs[1].Kind != flow.EvTick || evs[0].ScreenHash == "" {
+		t.Fatalf("first ObserveRun = %+v, %v", evs, err)
+	}
+	rec.ScreenHash = evs[0].ScreenHash
+	evs, _ = ObserveRun(ctx, client, rec)
+	if slices.ContainsFunc(evs, func(e flow.RunEvent) bool { return e.Kind == flow.EvActivity }) {
+		t.Fatalf("unchanged screen emitted activity: %+v", evs)
+	}
+	srv.SetScreen("t1", "line 1\nline 2\n")
+	evs, _ = ObserveRun(ctx, client, rec)
+	if !slices.ContainsFunc(evs, func(e flow.RunEvent) bool { return e.Kind == flow.EvActivity }) {
+		t.Fatalf("changed screen did not emit activity: %+v", evs)
+	}
+
+	if evs, _ = ObserveRun(ctx, client, flow.RunRecord{ID: "other", Address: "t1", State: flow.PhaseWorking}); len(evs) != 1 || evs[0].Kind != flow.EvLost {
+		t.Fatalf("mismatched run label = %+v, want [lost]", evs)
+	}
+	srv.Finish("t1", "killed")
+	if evs, _ = ObserveRun(ctx, client, rec); len(evs) != 1 || evs[0].Kind != flow.EvExit || evs[0].Reason != "killed" {
+		t.Fatalf("finished terminal = %+v, want [exit killed]", evs)
 	}
 }
 

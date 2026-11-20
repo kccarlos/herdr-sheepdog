@@ -262,7 +262,7 @@ func TestDroppedDepWakesAndAmendUnblocks(t *testing.T) {
 		t.Fatalf("held wakes = %+v, want 1 wake for T2 with facts naming T1", st.Project.Wakes)
 	}
 	// Coordinator goes idle: J12 delivers the wake once; a follow-up pass does not re-wake.
-	srv.SetStatus(coord, &hc.Status{App: "claude-code", State: "idle"})
+	setIdle(t, srv, client, coord, "idle")
 	eng.passProject(ctx, id, false)
 	sent := sendsTo(t, srv.Requests(), coord)
 	if len(sent) != 1 || !strings.Contains(sent[0], "T2") || !strings.Contains(sent[0], "T1") {
@@ -399,8 +399,8 @@ func TestIdleWorkerHoldsSlot(t *testing.T) {
 	eng.passProject(ctx, id, false) // N23 starts workers for T1, T2
 	st, _ = LoadState(paths.State(id))
 	for _, state := range []string{"idle", "done", "error"} {
-		srv.SetStatus(st.Tasks[0].Attempts[0].RunID, &hc.Status{App: "claude-code", State: state})
-		srv.SetStatus(st.Tasks[1].Attempts[0].RunID, &hc.Status{App: "claude-code", State: state})
+		setIdle(t, srv, client, st.Tasks[0].Attempts[0].RunID, state)
+		setIdle(t, srv, client, st.Tasks[1].Attempts[0].RunID, state)
 		eng.passProject(ctx, id, false)
 		st, _ = LoadState(paths.State(id))
 		if flow.OpenAttempt(st.Tasks[2]) != nil {

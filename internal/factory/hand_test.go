@@ -108,7 +108,7 @@ func TestN7ForcePushedAndForeignPRHead(t *testing.T) {
 			}
 
 			// Pass 3 after worker turn ends and divergence still holds: wakes coordinator once.
-			l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "idle"})
+			setIdle(t, l.srv, l.client, l.worker, "idle")
 			l.pass()
 			l.pass()
 			wakes := l.state().Project.Wakes
@@ -272,7 +272,7 @@ func TestN7TellsOnceAndWakesOncePerH(t *testing.T) {
 	}
 
 	// Worker turn ends at t2: must wake once (keyed on H), NOT send a second tell.
-	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "idle"})
+	setIdle(t, l.srv, l.client, l.worker, "idle")
 	l.pass()
 	if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 1 {
 		t.Fatalf("after turn end at t2 sends = %d, want 1 (no second tell)", got)
@@ -335,7 +335,7 @@ func TestN7WaitsForWorkerTurnBeforeWaking(t *testing.T) {
 		}
 
 		// Pass 4: worker is idle again (turn ended within grace) -> wakes once early.
-		l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "idle"})
+		setIdle(t, l.srv, l.client, l.worker, "idle")
 		l.pass()
 		if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != "diverged@"+l.c1 {
 			t.Fatalf("pass 4 (after turn end): wakes = %+v, want 1 wake keyed diverged@%s", wakes, l.c1)

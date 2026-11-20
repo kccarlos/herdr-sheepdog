@@ -104,7 +104,7 @@ func TestN3ParkStopsRunsUnparkStartsAgain(t *testing.T) {
 	l.report("tok-coord", "task", `{"action":"park","task":"T1","why":"owner asked"}`, "")
 	l.pass()
 	for _, run := range []string{l.worker, rev} {
-		if rs, err := world.RunState(ctx, l.client, run); err != nil || rs != flow.RunGone {
+		if rs, err := termState(ctx, l.client, run); err != nil || rs != flow.RunGone {
 			t.Fatalf("run %s after park: %s %v", run, rs, err)
 		}
 	}
@@ -140,7 +140,7 @@ func TestSendBackStaysWithWorkerUntilReady(t *testing.T) {
 	l.report("tok-coord", "task", `{"action":"send-back","task":"T1","why":"the owner wants a test for the empty case"}`, "")
 	l.pass()
 	l.pass()
-	if rs, _ := world.RunState(ctx, l.client, rev); rs != flow.RunGone {
+	if rs, _ := termState(ctx, l.client, rev); rs != flow.RunGone {
 		t.Fatalf("in-flight reviewer after send-back: %s", rs)
 	}
 	sends := sendsTo(t, l.srv.Requests(), l.worker)
@@ -235,7 +235,7 @@ func TestRecapDecideNewOnlyAfterAmend(t *testing.T) {
 	if c := ghCalls(t, l.gh, "pr close"); len(c) != 1 || !strings.Contains(c[0], "new attempt") || strings.Contains(c[0], "--delete-branch") {
 		t.Fatalf("pr close calls = %q", c)
 	}
-	if rs, _ := world.RunState(context.Background(), l.client, l.worker); rs != flow.RunGone {
+	if rs, _ := termState(context.Background(), l.client, l.worker); rs != flow.RunGone {
 		t.Fatalf("old worker after new: %s", rs)
 	}
 	l.pass()
@@ -352,7 +352,7 @@ func TestRecapDecideNewCloseFailureKeepsRuns(t *testing.T) {
 	if err == nil || refusalCode(err) != "" {
 		t.Fatalf("new with a failing gh close = %v, want the gh error", err)
 	}
-	if rs, _ := world.RunState(context.Background(), l.client, l.worker); rs == flow.RunGone {
+	if rs, _ := termState(context.Background(), l.client, l.worker); rs == flow.RunGone {
 		t.Fatal("worker stopped although the PR close failed")
 	}
 	if st := l.state(); st.Seq != seq || st.Tasks[0].Attempts[0].Closed != "" || st.Tasks[0].Attempts[0].RunID != l.worker {

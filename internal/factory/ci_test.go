@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
-	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
 func checkRollup(conclusion, runID, jobID string) string {
@@ -220,7 +219,7 @@ func TestCIExecutorFailuresRecordedOnce(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(l.gh, "rerun_fail"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "idle"})
+	setIdle(t, l.srv, l.client, l.worker, "idle")
 	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "44714", "100"))
 	l.pass() // rerun fails, recorded once
 	l.pass() // does not re-run again; tells worker once

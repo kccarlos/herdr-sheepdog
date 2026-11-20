@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
-	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
@@ -168,7 +167,7 @@ func TestReadyAtMergeOnlyTip(t *testing.T) {
 // passReport makes rev's reviewer idle with a valid pass tag for round at head.
 func (l *landing) passReport(rev *flow.ReviewRun) {
 	l.srv.SetScreen(rev.RunID, "❯ prompt\n\n⏺ Fine.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rev.Code+"\",\"round\":"+strconv.Itoa(rev.Round)+",\"head\":\""+rev.Head+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
-	l.srv.SetStatus(rev.RunID, &hc.Status{App: "claude-code", State: "done"})
+	setIdle(l.t, l.srv, l.client, rev.RunID, "done")
 }
 
 // TestRoundInFlightSurvivesMergeOnlyMove: a clean base merge while round 1
@@ -198,7 +197,7 @@ func TestRoundInFlightSurvivesMergeOnlyMove(t *testing.T) {
 	l.pass() // N26 pushes m1
 	writePRJSON(t, l.gh, "view.json", m1, "[]")
 	a := l.state().Tasks[0].Attempts[0]
-	if rs, _ := world.RunState(ctx, l.client, rev.RunID); flow.H(a) != m1 || a.Review == nil || a.Review.RunID != rev.RunID || rs == flow.RunGone {
+	if rs, _ := termState(ctx, l.client, rev.RunID); flow.H(a) != m1 || a.Review == nil || a.Review.RunID != rev.RunID || rs == flow.RunGone {
 		t.Fatalf("after the merge-only move: H %s, review %+v, reviewer %s", flow.H(a), a.Review, rs)
 	}
 	l.passReport(rev)
@@ -248,7 +247,7 @@ func TestRecapStopsReviewerInFlight(t *testing.T) {
 	l.passReport(rev)
 	l.pass()
 	a := l.state().Tasks[0].Attempts[0]
-	if rs, _ := world.RunState(ctx, l.client, rev.RunID); rs != flow.RunGone || a.Review != nil || len(a.Rounds) != 0 {
+	if rs, _ := termState(ctx, l.client, rev.RunID); rs != flow.RunGone || a.Review != nil || len(a.Rounds) != 0 {
 		t.Fatalf("with a recap open: reviewer %s, review %+v, rounds %+v", rs, a.Review, a.Rounds)
 	}
 }
