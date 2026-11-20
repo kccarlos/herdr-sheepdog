@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/procprio"
@@ -162,6 +164,41 @@ func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	out = append(out, checkAgentCLIs(ctx, o, inHC, customLookPath, volumeOK, probedDir)...)
 	out = append(out, checkGH(ctx, o, inHC, customLookPath, volumeOK, probedDir))
 	out = append(out, checkCodexbar(ctx, o, inHC, customLookPath))
+	if volumeOK {
+		out = append(out, checkSweepLeftovers(ctx, o, hcOK, firstNonEmpty(probedDir, o.Folder))...)
+	}
+	return out
+}
+
+func checkSweepLeftovers(ctx context.Context, o DoctorOptions, hcOK bool, dir string) (out []onboard.Result) {
+	gctx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
+	defer cancel()
+	repo, id, err := world.RepoProject(gctx, dir, false)
+	if err != nil {
+		return nil
+	}
+	s, wtRoot, p := flow.State{}, "", Paths{DataDir: o.DataDir}
+	if o.DataDir != "" && id == "" {
+		id, _ = findStoredProject(p, repo)
+	}
+	if o.DataDir != "" && id != "" {
+		s, _ = LoadState(p.State(id))
+		wtRoot = filepath.Join(p.project(id), "worktrees")
+	}
+	var client *hc.Client
+	if s.Project.ID = id; hcOK && id != "" {
+		client = hc.NewClient(o.HCSocket)
+	}
+	for _, pr := range world.Sweep(gctx, client, repo, wtRoot, s) {
+		if pr.Probe != "terminals" || client != nil {
+			if pr.Unknown != "" {
+				out = append(out, resWarn("sweep "+pr.Probe, "unknown: "+cleanReason(pr.Unknown), "check "+pr.Probe+" manually"))
+			}
+			for _, it := range pr.Items {
+				out = append(out, resWarn("leftover "+it.Kind, it.Summary, "inspect and clean up manually"))
+			}
+		}
+	}
 	return out
 }
 
