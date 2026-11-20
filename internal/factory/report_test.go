@@ -1343,7 +1343,7 @@ func TestReportReadyTouchedSkippedAndRawCommand(t *testing.T) {
 	}
 	cur, _ := LoadState(paths.State(projID))
 	got := cur.Tasks[0].Attempts[0].Ready[0]
-	if got.Touched != "t.go callers [31m" || got.Skipped != "" || got.Proofs[0].Command != rawCmd {
+	if got.Touched != "t.go callers [31m" || got.Skipped == nil || *got.Skipped != "" || got.Proofs[0].Command != rawCmd {
 		t.Fatalf("stored ready = %+v, want cleaned touched, empty skipped, raw command %q", got, rawCmd)
 	}
 
@@ -1353,8 +1353,8 @@ func TestReportReadyTouchedSkippedAndRawCommand(t *testing.T) {
 		t.Fatalf("valid ready with skipped: %v", err)
 	}
 	cur, _ = LoadState(paths.State(projID))
-	if got := cur.Tasks[0].Attempts[0].Ready[0]; got.Skipped != "slow e2e check" {
-		t.Fatalf("stored skipped = %q, want cleaned", got.Skipped)
+	if got := cur.Tasks[0].Attempts[0].Ready[0]; got.Skipped == nil || *got.Skipped != "slow e2e check" {
+		t.Fatalf("stored skipped = %v, want cleaned", got.Skipped)
 	}
 }
 

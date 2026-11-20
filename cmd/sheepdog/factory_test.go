@@ -511,6 +511,7 @@ func TestFactoryReportReadyProofsCLI(t *testing.T) {
 		"--proof", "tests pass=echo ok-out; echo ok-err >&2",
 		"--proof", "lint fails=echo bad-line >&2; exit 3",
 		"--artifact", "looks right=" + art,
+		"--touched", "a.txt", "--skipped", "",
 	}, &out, &errBuf)
 	if code != 0 || !posted {
 		t.Fatalf("code=%d posted=%v stderr=%s", code, posted, errBuf.String())
@@ -543,7 +544,7 @@ func TestFactoryReportReadyProofsCLI(t *testing.T) {
 	posted = false
 	out.Reset()
 	errBuf.Reset()
-	if code := run(context.Background(), []string{"factory", "report", "ready", "--artifact", "looks right=no-such-file.png"}, &out, &errBuf); code != 1 || posted {
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--artifact", "looks right=no-such-file.png", "--touched", "a.txt", "--skipped", ""}, &out, &errBuf); code != 1 || posted {
 		t.Fatalf("missing artifact: code=%d posted=%v stderr=%s", code, posted, errBuf.String())
 	}
 
@@ -554,7 +555,7 @@ func TestFactoryReportReadyProofsCLI(t *testing.T) {
 	posted = false
 	out.Reset()
 	errBuf.Reset()
-	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "slow=sleep 5"}, &out, &errBuf); code != 0 || !posted {
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "slow=sleep 5", "--touched", "a.txt", "--skipped", ""}, &out, &errBuf); code != 0 || !posted {
 		t.Fatalf("timeout proof: code=%d posted=%v stderr=%s", code, posted, errBuf.String())
 	}
 	if len(lastReq.Args.Proofs) != 1 || lastReq.Args.Proofs[0].Exit != 124 {
@@ -754,7 +755,7 @@ func TestFactoryReportReadyProofRunsAtWorktreeRoot(t *testing.T) {
 	t.Chdir(sub)
 
 	var out, errBuf bytes.Buffer
-	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "at root=test -f a.txt && pwd"}, &out, &errBuf); code != 0 {
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "at root=test -f a.txt && pwd", "--touched", "a.txt", "--skipped", ""}, &out, &errBuf); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errBuf.String())
 	}
 	if len(*proofs) != 1 || (*proofs)[0].Exit != 0 {
@@ -778,7 +779,7 @@ func TestFactoryReportReadyProofOutputBounded(t *testing.T) {
 	t.Chdir(wt)
 
 	var out, errBuf bytes.Buffer
-	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "noisy=head -c 100000 /dev/zero | tr '\\0' 'x'"}, &out, &errBuf); code != 0 {
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "noisy=head -c 100000 /dev/zero | tr '\\0' 'x'", "--touched", "a.txt", "--skipped", ""}, &out, &errBuf); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errBuf.String())
 	}
 	if len(*proofs) != 1 || (*proofs)[0].Exit != 0 {
@@ -806,7 +807,7 @@ func TestFactoryReportReadyProofTimeoutKillsProcessGroup(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
 	cmdStr := fmt.Sprintf("sleep 30 & echo $! > %s; wait", pidFile)
 	var out, errBuf bytes.Buffer
-	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "hang=" + cmdStr}, &out, &errBuf); code != 0 {
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "hang=" + cmdStr, "--touched", "a.txt", "--skipped", ""}, &out, &errBuf); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errBuf.String())
 	}
 	if len(*proofs) != 1 || (*proofs)[0].Exit != 124 {
@@ -893,5 +894,40 @@ func TestFactoryReportReadyTouchedSkippedCLI(t *testing.T) {
 		if code := run(context.Background(), bad, &out, &errBuf); code != 2 {
 			t.Fatalf("%v code=%d, want 2", bad, code)
 		}
+	}
+}
+
+// TestFactoryReportReadyRefusesProofsWithoutTouchedOrSkippedBeforeRunning checks
+// PR 3.3b review fix 2: the client refuses a ready with proofs when --touched
+// or --skipped is missing (or --touched is blank) before running any proof.
+func TestFactoryReportReadyRefusesProofsWithoutTouchedOrSkippedBeforeRunning(t *testing.T) {
+	wt, proofs := setupProofTestEnv(t)
+	t.Chdir(wt)
+
+	marker := filepath.Join(t.TempDir(), "proof-ran")
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"missing both", []string{"factory", "report", "ready", "--proof", "p=touch " + marker}},
+		{"missing touched", []string{"factory", "report", "ready", "--proof", "p=touch " + marker, "--skipped", ""}},
+		{"blank touched", []string{"factory", "report", "ready", "--proof", "p=touch " + marker, "--touched", " \t\n ", "--skipped", ""}},
+		{"missing skipped", []string{"factory", "report", "ready", "--proof", "p=touch " + marker, "--touched", "a.txt"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_ = os.Remove(marker)
+			*proofs = nil
+			var out, errBuf bytes.Buffer
+			if code := run(context.Background(), tc.args, &out, &errBuf); code == 0 {
+				t.Fatalf("code=0, want refusal; stdout=%s stderr=%s", out.String(), errBuf.String())
+			}
+			if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("proof command ran before --touched/--skipped check (marker stat err=%v)", err)
+			}
+			if len(*proofs) != 0 {
+				t.Fatalf("posted proofs to daemon despite client refusal: %+v", *proofs)
+			}
+		})
 	}
 }

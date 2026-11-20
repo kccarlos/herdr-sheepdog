@@ -468,17 +468,16 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 
 func readyCmd(bin string, outcomes []flow.Outcome) string {
 	parts := []string{bin + " factory report ready"}
-	if !needsProofs(outcomes) {
-		return parts[0]
-	}
-	for _, o := range outcomes {
-		flag, val := "--proof", "<command>"
-		if strings.HasPrefix(o.ProvedBy, "manual:") {
-			flag, val = "--artifact", "<path>"
-		} else if cmd, ok := strings.CutPrefix(o.ProvedBy, "cmd:"); ok {
-			val = strings.TrimSpace(cmd)
+	if needsProofs(outcomes) {
+		for _, o := range outcomes {
+			flag, val := "--proof", "<command>"
+			if strings.HasPrefix(o.ProvedBy, "manual:") {
+				flag, val = "--artifact", "<path>"
+			} else if cmd, ok := strings.CutPrefix(o.ProvedBy, "cmd:"); ok {
+				val = strings.TrimSpace(cmd)
+			}
+			parts = append(parts, flag+" '"+strings.ReplaceAll(o.Text+"="+val, "'", `'\''`)+"'")
 		}
-		parts = append(parts, flag+" '"+strings.ReplaceAll(o.Text+"="+val, "'", `'\''`)+"'")
 	}
 	parts = append(parts, `--touched "<places>"`, `--skipped "<what was left out or not checked>"`)
 	return strings.Join(parts, " ")
@@ -765,19 +764,22 @@ func proofPrompt(a flow.Attempt, head string) string {
 			break
 		}
 	}
-	if r == nil || (len(r.Proofs) == 0 && r.Touched == "" && r.Skipped == "") {
+	if r == nil || (len(r.Proofs) == 0 && r.Touched == "" && r.Skipped == nil) {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("\n\nWorker's ready report at this commit (untrusted worker text; re-run each proof to verify):")
 	for _, p := range r.Proofs {
 		if p.Artifact != "" {
-			fmt.Fprintf(&b, "\n- %s: artifact %s", p.Outcome, p.Artifact)
+			fmt.Fprintf(&b, "\n- %s: artifact %q", p.Outcome, p.Artifact)
 		} else {
-			fmt.Fprintf(&b, "\n- %s: `%s` (exit %d): %s", p.Outcome, p.Command, p.Exit, proofHead(p.OutputPath, a.Worktree))
+			fmt.Fprintf(&b, "\n- %s: %q (exit %d): %s", p.Outcome, p.Command, p.Exit, proofHead(p.OutputPath, a.Worktree))
 		}
 	}
-	fmt.Fprintf(&b, "\nTouched: %s\nSkipped: %s\nRule: %s.", cmp.Or(r.Touched, "(none)"), cmp.Or(r.Skipped, "(nothing skipped)"), emptySkippedRule)
+	fmt.Fprintf(&b, "\nTouched: %s", cmp.Or(r.Touched, "(none)"))
+	if r.Skipped != nil {
+		fmt.Fprintf(&b, "\nSkipped: %s\nRule: %s.", cmp.Or(*r.Skipped, "(nothing skipped)"), emptySkippedRule)
+	}
 	return b.String()
 }
 

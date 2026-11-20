@@ -149,16 +149,19 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 	case rel == flow.RelSame:
 		return e.refuse(id, "nothing_new", "The worktree has no commit ahead of the current head.")
 	}
-	var touched, skipped string
+	var touched string
+	var skipped *string
 	if req.Touched != nil {
 		if touched = cleanRejectWhy(*req.Touched); utf8.RuneCountInString(touched) > maxRejectWhyRunes {
 			return e.refuse(id, "invalid_report", fmt.Sprintf("--touched is longer than %d characters.", maxRejectWhyRunes))
 		}
 	}
 	if req.Skipped != nil {
-		if skipped = cleanRejectWhy(*req.Skipped); utf8.RuneCountInString(skipped) > maxRejectWhyRunes {
+		s := cleanRejectWhy(*req.Skipped)
+		if utf8.RuneCountInString(s) > maxRejectWhyRunes {
 			return e.refuse(id, "invalid_report", fmt.Sprintf("--skipped is longer than %d characters.", maxRejectWhyRunes))
 		}
+		skipped = &s
 	}
 	var proofs []flow.Proof
 	if needsProofs(t.Outcomes) || len(req.Proofs) > 0 {

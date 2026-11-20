@@ -309,6 +309,16 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 		printFactoryUsage(stderr)
 		return 2
 	}
+	if len(proofs) > 0 {
+		if touchedArg == nil || strings.TrimSpace(*touchedArg) == "" {
+			fprintln(stderr, `sheepdog factory report ready: A ready report with proofs must list what the change touched (--touched "<places>").`)
+			return 1
+		}
+		if skippedArg == nil {
+			fprintln(stderr, `sheepdog factory report ready: A ready report with proofs must state what was skipped or not checked (--skipped "<what was left out>", or --skipped "" when nothing was skipped).`)
+			return 1
+		}
+	}
 	head, err := gitRevParse(ctx, "--verify", "HEAD^{commit}")
 	if err == nil && len(proofs) > 0 {
 		err = runProofs(ctx, head, proofs)
