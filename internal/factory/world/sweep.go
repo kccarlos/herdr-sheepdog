@@ -25,21 +25,30 @@ func Sweep(ctx context.Context, client *hc.Client, repo, worktreeRoot string, s 
 			}
 		}
 	}
-	wtProbe, brProbe := flow.SweepProbe{Probe: "worktrees"}, flow.SweepProbe{Probe: "branches"}
+	wtProbe, brProbe, wtBr := flow.SweepProbe{Probe: "worktrees"}, flow.SweepProbe{Probe: "branches"}, map[string]bool{}
 	if out, err := gitCmd(ctx, repo, "worktree", "list", "--porcelain"); err != nil {
 		wtProbe.Unknown = err.Error()
 	} else {
-		mainRepo, wtRoot := realPath(repo), realPath(worktreeRoot)
-		for ln := range strings.Lines(out) {
-			raw, ok := strings.CutPrefix(strings.TrimSpace(ln), "worktree ")
-			wt := realPath(raw)
-			if !ok || wt == "" || wt == mainRepo {
+		mainRepo, wtRoot, projMarker := realPath(repo), realPath(worktreeRoot), "/factory/projects/"+s.Project.ID+"/worktrees/"
+		for stanza := range strings.SplitSeq(out, "\n\n") {
+			var wt, br string
+			for ln := range strings.Lines(stanza) {
+				if raw, ok := strings.CutPrefix(strings.TrimSpace(ln), "worktree "); ok {
+					wt = realPath(raw)
+				} else if ref, ok := strings.CutPrefix(strings.TrimSpace(ln), "branch refs/heads/"); ok {
+					br = ref
+				}
+			}
+			if wt == "" || wt == mainRepo {
 				continue
 			}
+			rel, rerr := filepath.Rel(wtRoot, wt)
+			inWT := (wtRoot != "" && rerr == nil && rel != "." && !strings.HasPrefix(rel, "..")) || (s.Project.ID != "" && strings.Contains(filepath.ToSlash(wt), projMarker))
+			note := map[bool]string{true: " (branch " + br + ")"}[br != ""]
 			if tid, ok := doneWT[wt]; ok {
-				wtProbe.Items = append(wtProbe.Items, flow.SweepItem{Kind: "worktree", Key: wt, Summary: fmt.Sprintf("a leftover worktree %s of done task %s", wt, tid)})
-			} else if rel, rerr := filepath.Rel(wtRoot, wt); !openWT[wt] && wtRoot != "" && rerr == nil && rel != "." && !strings.HasPrefix(rel, "..") {
-				wtProbe.Items = append(wtProbe.Items, flow.SweepItem{Kind: "worktree", Key: wt, Summary: fmt.Sprintf("a leftover worktree %s owned by no open attempt", wt)})
+				wtProbe.Items, wtBr[br] = append(wtProbe.Items, flow.SweepItem{Kind: "worktree", Key: wt, Summary: fmt.Sprintf("a leftover worktree %s of done task %s%s", wt, tid, note)}), true
+			} else if !openWT[wt] && inWT {
+				wtProbe.Items, wtBr[br] = append(wtProbe.Items, flow.SweepItem{Kind: "worktree", Key: wt, Summary: fmt.Sprintf("a leftover worktree %s owned by no open attempt%s", wt, note)}), true
 			}
 		}
 	}
@@ -47,7 +56,7 @@ func Sweep(ctx context.Context, client *hc.Client, repo, worktreeRoot string, s 
 		brProbe.Unknown = err.Error()
 	} else {
 		for ln := range strings.Lines(out) {
-			if br := strings.TrimSpace(ln); br != "" && !openBr[br] {
+			if br := strings.TrimSpace(ln); br != "" && !openBr[br] && !wtBr[br] {
 				brProbe.Items = append(brProbe.Items, flow.SweepItem{Kind: "branch", Key: br, Summary: fmt.Sprintf("a leftover branch %s owned by no open attempt", br)})
 			}
 		}
@@ -98,7 +107,7 @@ func SweepTerminals(ctx context.Context, client *hc.Client, s flow.State) flow.S
 	delete(owned, "")
 	p := flow.SweepProbe{Probe: "terminals"}
 	for _, t := range list.Terminals {
-		if proj := t.Labels["sheepdog.project"]; proj != "" && (s.Project.ID == "" || proj == s.Project.ID) && !owned[t.Address] && !owned[t.Labels["sheepdog.run"]] {
+		if proj := t.Labels["sheepdog.project"]; proj != "" && (s.Project.ID == "" || proj == s.Project.ID) && !owned[t.Address] && !owned[t.Name] && !owned[t.Labels["sheepdog.run"]] {
 			p.Items = append(p.Items, flow.SweepItem{Kind: "stray_terminal", Key: t.Address, Summary: fmt.Sprintf("a stray agent terminal %s with factory labels", t.Address)})
 		}
 	}

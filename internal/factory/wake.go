@@ -141,7 +141,7 @@ func (e *Engine) sweepProjectLocked(ctx context.Context, id string, s *flow.Stat
 		asked, whys = append(asked, w.ActKey), append(whys, w.Summary)
 	}
 	if len(asked) > 0 {
-		e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "sweep", Asked: asked, Decision: fmt.Sprintf("sweep found %d leftover(s)", len(asked)), Why: strings.Join(whys, "; ")})
+		e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "sweep", Asked: asked, Decision: fmt.Sprintf("sweep found %d leftover(s): %s", len(asked), strings.Join(whys, "; ")), Why: strings.Join(whys, "; ")})
 	} else {
 		e.saveLocked(id, *s)
 	}

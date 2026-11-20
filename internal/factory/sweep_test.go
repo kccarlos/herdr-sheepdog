@@ -185,3 +185,33 @@ func TestDoctorListsSweepLeftoversAsWarn(t *testing.T) {
 		}
 	}
 }
+
+func TestEngineSweepLogLineNamesItems(t *testing.T) {
+	_, id, paths, srv, strayAddr, wt2Path, _ := setupSweepRepo(t)
+	eng := New(paths, hc.NewClient(srv.Path))
+	eng.passProject(context.Background(), id, false)
+
+	lines, _, err := ProjectLog(context.Background(), paths, id, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sweepLine *LogLine
+	for i := range lines {
+		if lines[i].Rule == "sweep" {
+			sweepLine = &lines[i]
+		}
+	}
+	if sweepLine == nil {
+		t.Fatalf("no sweep log line found in %+v", lines)
+	}
+	for _, want := range []string{
+		"a stray agent terminal " + strayAddr + " with factory labels",
+		"a leftover worktree " + wt2Path + " of done task T2",
+		"a leftover branch task/orphan-branch",
+		"the local main is 2 commits ahead of origin/main",
+	} {
+		if !strings.Contains(sweepLine.Decision, want) {
+			t.Errorf("sweep log Decision = %q, want item summary %q", sweepLine.Decision, want)
+		}
+	}
+}

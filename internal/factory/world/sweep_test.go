@@ -126,17 +126,17 @@ func TestSweepFindersAndUnknown(t *testing.T) {
 	for _, it := range byProbe["worktrees"].Items {
 		gotWT[it.Key] = it.Summary
 	}
-	if len(gotWT) != 2 || gotWT[wt2.Path] != "a leftover worktree "+wt2.Path+" of done task T2" || gotWT[wtOrphan.Path] == "" {
-		t.Fatalf("worktrees = %+v, want wt2 + wtOrphan", gotWT)
+	if len(gotWT) != 2 || gotWT[wt2.Path] != "a leftover worktree "+wt2.Path+" of done task T2 (branch "+wt2.Branch+")" || !strings.Contains(gotWT[wtOrphan.Path], wtOrphan.Branch) {
+		t.Fatalf("worktrees = %+v, want wt2 + wtOrphan with branches", gotWT)
 	}
 
-	// Branches: wt2.Branch, wtOrphan.Branch, task/orphan-only; NOT wt1.Branch.
+	// Branches: only standalone task/orphan-only (wt2 and wtOrphan branches are reported with their worktrees; wt1 is open).
 	gotBr := map[string]bool{}
 	for _, it := range byProbe["branches"].Items {
 		gotBr[it.Key] = true
 	}
-	if gotBr[wt1.Branch] || !gotBr[wt2.Branch] || !gotBr[wtOrphan.Branch] || !gotBr["task/orphan-only"] {
-		t.Fatalf("branches = %+v, want wt2, wtOrphan, task/orphan-only (not wt1)", gotBr)
+	if len(gotBr) != 1 || !gotBr["task/orphan-only"] {
+		t.Fatalf("branches = %+v, want only task/orphan-only", gotBr)
 	}
 
 	// Local base ahead: 2 commits ahead, keyed by localMainSHA.
@@ -155,5 +155,78 @@ func TestSweepFindersAndUnknown(t *testing.T) {
 	closedHC := hc.NewClient(filepath.Join(t.TempDir(), "missing.sock"))
 	if p := SweepTerminals(ctx, closedHC, st); p.Unknown == "" {
 		t.Errorf("closed hc socket reported empty Unknown: %+v", p)
+	}
+}
+
+func TestSweepLiveCoordinatorReportsNoStray(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	coord, err := client.Run(ctx, hc.RunParams{
+		Name:   "coord-proj-live",
+		Cwd:    t.TempDir(),
+		Argv:   []string{"true"},
+		Labels: map[string]string{"sheepdog.project": "proj-live", "sheepdog.role": "coordinator", "sheepdog.run": "run-coord-live"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		st   flow.State
+	}{
+		{"live run record", flow.State{Project: flow.Project{ID: "proj-live", RunID: coord.Address, Run: &flow.RunRecord{ID: "run-coord-live", Address: coord.Address, State: flow.PhaseIdle}}}},
+		{"owned by terminal name", flow.State{Project: flow.Project{ID: "proj-live", RunID: coord.Name}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := SweepTerminals(ctx, client, tc.st)
+			if p.Unknown != "" || len(p.Items) != 0 {
+				t.Fatalf("SweepTerminals(%s) = %+v, want no stray terminals", tc.name, p)
+			}
+		})
+	}
+}
+
+func TestSweepLeftoverWorktreeInProjectDirReportedOnceWithBranch(t *testing.T) {
+	ctx := context.Background()
+	bare := filepath.Join(t.TempDir(), "remote.git")
+	repo := filepath.Join(t.TempDir(), "repo")
+	mustGit(t, t.TempDir(), "init", "--bare", "--initial-branch=main", bare)
+	mustGit(t, t.TempDir(), "clone", bare, repo)
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+	mustGit(t, repo, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("init\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repo, "add", "a.txt")
+	mustGit(t, repo, "commit", "-m", "init")
+	mustGit(t, repo, "push", "-u", "origin", "main")
+	mustGit(t, repo, "remote", "set-head", "origin", "main")
+
+	wtDir := filepath.Join(t.TempDir(), "data", "factory", "projects", "proj-wt1", "worktrees", "T99-1")
+	if err := os.MkdirAll(filepath.Dir(wtDir), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repo, "worktree", "add", "-b", "task/T99-stray", wtDir, "origin/main")
+	wtReal := realPath(wtDir)
+
+	st := flow.State{Project: flow.Project{ID: "proj-wt1", Folder: repo}}
+	for _, tc := range []struct{ name, wtRoot string }{
+		{"matching worktreeRoot", filepath.Dir(wtDir)},
+		{"mismatched worktreeRoot", filepath.Join(t.TempDir(), "other-data", "factory", "projects", "proj-wt1", "worktrees")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			byProbe := map[string]flow.SweepProbe{}
+			for _, p := range Sweep(ctx, nil, repo, tc.wtRoot, st) {
+				byProbe[p.Probe] = p
+			}
+			wtItems := byProbe["worktrees"].Items
+			if len(wtItems) != 1 || wtItems[0].Key != wtReal || !strings.Contains(wtItems[0].Summary, "task/T99-stray") {
+				t.Fatalf("worktrees = %+v, want 1 item for %s mentioning task/T99-stray", wtItems, wtReal)
+			}
+			if brItems := byProbe["branches"].Items; len(brItems) != 0 {
+				t.Fatalf("branches = %+v, want none (branch already reported with its worktree)", brItems)
+			}
+		})
 	}
 }
