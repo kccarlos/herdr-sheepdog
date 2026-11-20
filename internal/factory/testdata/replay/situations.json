@@ -4,7 +4,7 @@
   {"id": "W2", "role": "worker", "notes": "field notes 27, 42", "message": "Task T1 is over its size cap: 640 changed lines, cap 400. Stop now and write nothing more.",
    "says": ["over your size cap", "write nothing more", "end your turn"]},
   {"id": "W3", "role": "worker", "notes": "field notes 45, 46", "message": "Your branch is behind the base and conflicts with it.",
-   "says": ["merge it into your branch", "rebase or force-push"], "never": ["git rebase", "push --force"]},
+   "says": ["Never merge into the base", "merge the base into your branch", "rebase or force-push"], "never": ["git rebase", "push --force"]},
   {"id": "W8", "role": "worker", "notes": "prompts.md 7", "message": "The outcome's check already passes before you have written anything.",
    "run": ["sheepdog factory report ready --nothing-to-change"], "says": ["already passes before you write anything", "passing output"]},
   {"id": "W9", "role": "worker", "notes": "prompts.md 7", "message": "It compiles; you are about to say ready.",

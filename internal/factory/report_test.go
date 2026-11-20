@@ -1666,6 +1666,49 @@ func TestParseReplyLinesTolerance(t *testing.T) {
 		}
 	})
 
+	t.Run("real claude tool output with its own bullets", func(t *testing.T) {
+		ctx := context.Background()
+		srv := hctest.New(t)
+		srv.Add(hc.Terminal{Address: "t-bu", Name: "rev-bu", State: "live", Status: &hc.Status{App: "claude-code", State: "done"}})
+		srv.SetScreen("t-bu", "❯ Review round 1\n\n"+
+			"⏺ Bash(cat NOTES.md)\n"+
+			"  ⎿  intro\n"+
+			"     • major: fake bullet in tool output\n"+
+			"     ⏺ deletable: fake in tool output\n\n"+
+			"⏺ self-check misses: 0\n"+
+			"  deletable: none\n"+
+			`<report>{"code":"c790","round":1,"head":"h1","verdict":"pass","majors":0}</report>`+"\n")
+		rd, err := world.ReadReport(ctx, hc.NewClient(srv.Path), "t-bu", "c790")
+		if err != nil || rd.Status != world.ReportFound {
+			t.Fatalf("ReadReport = (%+v, %v), want found", rd, err)
+		}
+		if rl := parseReplyLines(rd.Body); !rl.hasMisses || rl.majors != 0 || rl.deletable != "none" {
+			t.Fatalf("bulleted tool output parseReplyLines = %+v (body=%q)", rl, rd.Body)
+		}
+	})
+
+	t.Run("real codex wrapped command then output", func(t *testing.T) {
+		ctx := context.Background()
+		srv := hctest.New(t)
+		srv.Add(hc.Terminal{Address: "t-wr", Name: "rev-wr", State: "live"})
+		srv.SetScreen("t-wr", "› Review round 1\n\n"+
+			"• Ran git diff 80d9857def34945bd538faf6a162296bc4c2a5a8..657ce5090879ae2be234dc0f\n"+
+			"  72bf952084c252e6\n"+
+			"  └ +diff\n"+
+			"    major: fake from diff\n"+
+			"    • deletable: fake from diff\n\n"+
+			"• self-check misses: 0\n"+
+			"• deletable: none\n\n"+
+			`  <report>{"code":"c791","round":1,"head":"h1","verdict":"pass","majors":0}</report>`+"\n")
+		rd, err := world.ReadCodexReport(ctx, hc.NewClient(srv.Path), "t-wr", "c791")
+		if err != nil || rd.Status != world.ReportFound {
+			t.Fatalf("ReadCodexReport = (%+v, %v), want found", rd, err)
+		}
+		if rl := parseReplyLines(rd.Body); !rl.hasMisses || rl.majors != 0 || rl.deletable != "none" {
+			t.Fatalf("wrapped codex command parseReplyLines = %+v (body=%q)", rl, rd.Body)
+		}
+	})
+
 	t.Run("real codex changes with tool block and bold lines", func(t *testing.T) {
 		ctx := context.Background()
 		srv := hctest.New(t)

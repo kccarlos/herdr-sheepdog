@@ -389,16 +389,17 @@ func parseReplyLines(body string) replyLines {
 	inTool, afterCall := false, false
 	for l := range strings.Lines(body) {
 		trimmed := strings.TrimLeft(l, " \t")
-		call := strings.HasPrefix(trimmed, "⏺") || strings.HasPrefix(trimmed, "•")
-		// ⎿ (Claude) opens a tool block, └ (Codex) only under a tool call line
-		// and its │ continuation: a table's box characters in a reply never do.
-		if strings.HasPrefix(trimmed, "⎿") || (afterCall && strings.HasPrefix(trimmed, "└")) {
+		top, blank := l == trimmed, strings.TrimSpace(l) == ""
+		// ⎿ (Claude) opens a tool block; "└ " (Codex) only under a tool call
+		// line and its wrapped or │ continuation lines. A table's "└─" never does.
+		if strings.HasPrefix(trimmed, "⎿") || (afterCall && strings.HasPrefix(trimmed, "└ ")) {
 			inTool, afterCall = true, false
 			continue
 		}
-		afterCall = call || (afterCall && strings.HasPrefix(trimmed, "│"))
+		// Only an unindented ⏺ or • is a tool call line; one inside output is output.
+		afterCall = (top && (strings.HasPrefix(l, "⏺") || strings.HasPrefix(l, "•"))) || (afterCall && !top && !blank)
 		if inTool {
-			if strings.TrimSpace(trimmed) == "" || l == trimmed || call {
+			if blank || top {
 				inTool = false
 			} else {
 				continue
