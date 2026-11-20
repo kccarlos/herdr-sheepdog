@@ -22,9 +22,26 @@ printf '%s\n' "$*" >> "$D/argv"
 case "$1 $2" in
 "pr list") if [ -f "$D/view.json" ]; then printf "[%s]" "$(cat "$D/view.json")"; else echo '[]'; fi ;;
 "pr create") cp "$D/pr.json" "$D/view.json" && echo "https://github.com/acme/demo/pull/7" ;;
-"pr view") cat "$D/view.json" 2>/dev/null || { echo 'no pull requests found for branch "x"' >&2; exit 1; } ;;
+"pr view")
+  if [ -f "$D/view_denied" ]; then
+    case "$*" in *statusCheckRollup*)
+      echo "GraphQL: Resource not accessible by personal access token (repository.pullRequest.statusCheckRollup.nodes.0.commit.statusCheckRollup.contexts.nodes.0)" >&2
+      exit 1 ;;
+    esac
+  fi
+  cat "$D/view.json" 2>/dev/null || { echo 'no pull requests found for branch "x"' >&2; exit 1; } ;;
 "pr merge") [ -f "$D/merge_fail" ] && { echo "GraphQL: Head branch was modified" >&2; exit 1; }; : ;;
 "pr close") [ -f "$D/close_fail" ] && { echo "GraphQL: close failed" >&2; exit 1; }; : ;;
+api\ *)
+  case "$2" in
+  */check-runs/*/annotations) cat "$D/annotations.json" 2>/dev/null || echo '[]' ;;
+  */commits/*/check-runs)
+    [ -f "$D/check_runs_denied" ] && { echo "gh: Resource not accessible by personal access token (HTTP 403)" >&2; exit 1; }
+    cat "$D/check-runs.json" 2>/dev/null || echo '{"total_count":0,"check_runs":[]}' ;;
+  */actions/runs*) cat "$D/workflow-runs.json" 2>/dev/null || echo '{"total_count":0,"workflow_runs":[]}' ;;
+  */compare/*) cat "$D/compare.json" 2>/dev/null || echo '{"behind_by":0}' ;;
+  *) echo "unexpected gh api $2" >&2; exit 2 ;;
+  esac ;;
 *) echo "unexpected gh $*" >&2; exit 2 ;;
 esac
 `
@@ -130,5 +147,71 @@ func TestPRSnapshotFactsAndFailure(t *testing.T) {
 	if n := strings.Count(string(logRaw), `"rule":"pr_snapshot"`); n != 4 ||
 		!strings.Contains(string(logRaw), `"checks":"pending"`) || !strings.Contains(string(logRaw), `"checks":"green"`) || !strings.Contains(string(logRaw), `"answered":false`) {
 		t.Fatalf("log has %d snapshot lines:\n%s", n, logRaw)
+	}
+}
+
+// TestGitHubUnavailableHoldsMerge verifies denied -> fallback -> unreadable ->
+// github_unavailable holds N42, and a network failure is never remembered as
+// "not a GitHub repo" (KB-GIT-20): once GitHub answers again, N42 merges.
+func TestGitHubUnavailableHoldsMerge(t *testing.T) {
+	ctx := context.Background()
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := installFakeGH(t)
+	eng := New(testPaths(t), nil)
+	if err := eng.Start(repo, "Goal", 0); err != nil {
+		t.Fatal(err)
+	}
+	id, s, err := eng.findProjectLocked(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, repo, "commit", "--allow-empty", "-m", "feat: x")
+	c1 := gitIn(t, repo, "rev-parse", "HEAD")
+	s.Tasks = []flow.Task{{ID: "t1", Title: "feat: x", EstimateLines: 50, Attempts: []flow.Attempt{{
+		SizeCap: 100, BaseCommit: base, Branch: "task/t1", Worktree: repo,
+		Ready: []flow.Ready{{Head: c1}},
+		Rounds: []flow.Round{
+			{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+			{N: 2, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+		},
+	}}}}
+	writePRJSON(t, gh, "view.json", c1, `[{"__typename":"CheckRun","name":"check","status":"COMPLETED","conclusion":"SUCCESS"}]`)
+
+	eval := func() (flow.PR, bool, string, []string) {
+		eng.mu.Lock()
+		p := eng.readPRLocked(ctx, id, &s, 0)
+		unavail := eng.ghUnavail[id]
+		eng.mu.Unlock()
+		r, d := flow.FirstMatch(flow.TaskRows, flow.In{
+			Task: s.Tasks[0], Settings: s.Settings,
+			Facts: flow.Facts{PR: p, Tip: c1, TipRel: flow.RelSame, Worker: flow.Run{State: flow.RunIdle}, GitHubUnavailable: unavail},
+		})
+		return p, unavail, r.ID, d.Asked
+	}
+
+	// Denied pr view + denied REST check-runs -> unreadable + github_unavailable holds merge.
+	for _, f := range []string{"view_denied", "check_runs_denied"} {
+		if err := os.WriteFile(filepath.Join(gh, f), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p, unavail, row, asked := eval(); p.Checks != flow.ChecksUnreadable || !unavail || row != "N36" || len(asked) != 0 {
+		t.Fatalf("both denied: checks=%s unavail=%t row=%s asked=%v", p.Checks, unavail, row, asked)
+	}
+	// Network failure also sets github_unavailable and holds merge (never marks non-GitHub).
+	for _, f := range []string{"view_denied", "check_runs_denied"} {
+		_ = os.Remove(filepath.Join(gh, f))
+	}
+	if err := os.WriteFile(filepath.Join(gh, "fail"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, unavail, row, asked := eval(); !unavail || row != "N36" || len(asked) != 0 {
+		t.Fatalf("network failure: unavail=%t row=%s asked=%v", unavail, row, asked)
+	}
+	// Recovery clears github_unavailable and N42 merges.
+	_ = os.Remove(filepath.Join(gh, "fail"))
+	if p, unavail, row, asked := eval(); !p.Answered || p.Checks != flow.ChecksGreen || unavail || row != "N42" || len(asked) == 0 {
+		t.Fatalf("after recovery: checks=%s answered=%t unavail=%t row=%s asked=%v", p.Checks, p.Answered, unavail, row, asked)
 	}
 }

@@ -91,40 +91,43 @@ func headH(in In) string {
 	return ""
 }
 
-func ended(in In) bool       { return Ended(in.Task) }
-func recapOpen(in In) bool   { return OpenRecap(in.Task) != nil }
-func prMerged(in In) bool    { return in.Facts.PR.State == PRMerged }
-func noAttempt(in In) bool   { return in.attempt() == nil }
-func hasAttempt(in In) bool  { return in.attempt() != nil }
-func depsNotDone(in In) bool { return len(in.Facts.DepsNotDone) > 0 }
-func depsDropped(in In) bool { return len(in.Facts.DepsDropped) > 0 }
-func noSlot(in In) bool      { return in.Facts.NoSlot }
-func workerGone(in In) bool  { return in.Facts.Worker.State == RunGone }
-func reviewGone(in In) bool  { return in.Facts.Reviewer.State == RunGone }
-func noReady(in In) bool     { return len(in.attempt().Ready) == 0 }
-func tipAhead(in In) bool    { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
-func noPR(in In) bool        { return in.Facts.PR.State == PRNone }
-func prOpen(in In) bool      { return in.Facts.PR.State == PROpen }
-func prNotClosed(in In) bool { return in.Facts.PR.State != PRClosed }
-func tipSame(in In) bool     { return in.Facts.TipRel == RelSame } // slice 1: diverged falls to N43 (N7 comes later)
-func prBehindH(in In) bool   { return in.Facts.PR.HeadRel == RelBehind }
-func prHeadIsH(in In) bool   { return in.Facts.PR.Head == headH(in) }
-func answered(in In) bool    { return in.Facts.PR.Answered }
-func unanswered(in In) bool  { return !answered(in) }
-func notBehind(in In) bool   { return !in.Facts.PR.Behind }
-func checksGreen(in In) bool { return in.Facts.PR.Checks == ChecksGreen }
-func checksPend(in In) bool  { return in.Facts.PR.Checks == ChecksPending }
-func mergeClean(in In) bool  { return in.Facts.PR.Mergeable == MergeableClean }
-func mergeUnkn(in In) bool   { return in.Facts.PR.Mergeable == MergeableUnknown }
-func working(in In) bool     { return in.Facts.Worker.State == RunWorking }
-func notWorking(in In) bool  { return !working(in) }
-func mergeAsked(in In) bool  { return Count(in.acts(), key(AskMerge, headH(in))) > 0 }
+func ended(in In) bool            { return Ended(in.Task) }
+func recapOpen(in In) bool        { return OpenRecap(in.Task) != nil }
+func prMerged(in In) bool         { return in.Facts.PR.State == PRMerged }
+func noAttempt(in In) bool        { return in.attempt() == nil }
+func hasAttempt(in In) bool       { return in.attempt() != nil }
+func depsNotDone(in In) bool      { return len(in.Facts.DepsNotDone) > 0 }
+func depsDropped(in In) bool      { return len(in.Facts.DepsDropped) > 0 }
+func noSlot(in In) bool           { return in.Facts.NoSlot }
+func workerGone(in In) bool       { return in.Facts.Worker.State == RunGone }
+func reviewGone(in In) bool       { return in.Facts.Reviewer.State == RunGone }
+func noReady(in In) bool          { return len(in.attempt().Ready) == 0 }
+func tipAhead(in In) bool         { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
+func noPR(in In) bool             { return in.Facts.PR.State == PRNone }
+func prOpen(in In) bool           { return in.Facts.PR.State == PROpen }
+func prNotClosed(in In) bool      { return in.Facts.PR.State != PRClosed }
+func tipSame(in In) bool          { return in.Facts.TipRel == RelSame } // slice 1: diverged falls to N43 (N7 comes later)
+func prBehindH(in In) bool        { return in.Facts.PR.HeadRel == RelBehind }
+func prHeadIsH(in In) bool        { return in.Facts.PR.Head == headH(in) }
+func answered(in In) bool         { return in.Facts.PR.Answered }
+func unanswered(in In) bool       { return !answered(in) }
+func githubUnavail(in In) bool    { return in.Facts.GitHubUnavailable }
+func githubAvail(in In) bool      { return !githubUnavail(in) }
+func notBehind(in In) bool        { return !in.Facts.PR.Behind }
+func checksGreen(in In) bool      { return in.Facts.PR.Checks == ChecksGreen }
+func checksPend(in In) bool       { return in.Facts.PR.Checks == ChecksPending }
+func checksUnreadable(in In) bool { return in.Facts.PR.Checks == ChecksUnreadable }
+func mergeClean(in In) bool       { return in.Facts.PR.Mergeable == MergeableClean }
+func mergeUnkn(in In) bool        { return in.Facts.PR.Mergeable == MergeableUnknown }
+func working(in In) bool          { return in.Facts.Worker.State == RunWorking }
+func notWorking(in In) bool       { return !working(in) }
+func mergeAsked(in In) bool       { return Count(in.acts(), key(AskMerge, headH(in))) > 0 }
 
 // checksAbsentInGrace: no checks yet, and the head is younger than
 // checks_grace_minutes (N36).
 func checksAbsentInGrace(in In) bool {
 	grace := time.Duration(in.Settings.ChecksGraceMinutes) * time.Minute
-	return in.Facts.PR.Checks == ChecksNone && in.Now.Sub(in.Facts.PR.HeadSince) < grace
+	return in.Facts.PR.Checks == ChecksAbsent && in.Now.Sub(in.Facts.PR.HeadSince) < grace
 }
 
 func ladderSays(answer string) Clause {
@@ -244,13 +247,13 @@ var TaskRows = []Row[In]{
 		start := key(AskStartReview, nextRound(*in.attempt()), headH(in))
 		return say("the ladder says review", ensureRun(in, in.Facts.Reviewer, start))(in)
 	}},
-	{ID: "N36", WaitsOn: "CI", When: all(ladderSays(Passed), prOpen, anyOf(checksPend, unanswered, checksAbsentInGrace, mergeUnkn)),
+	{ID: "N36", WaitsOn: "CI", When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn)),
 		Then: say("checks pending or unreadable, or mergeable unknown")},
 	{ID: "N39", WaitsOn: "the worker", When: all(ladderSays(Passed), prOpen, working), Then: say("the worker is working")},
 	{ID: "N41", WaitsOn: "GitHub", When: all(ladderSays(Passed), mergeAsked, prOpen, notBehind),
 		Then: say("a merge was asked for H")},
 	{ID: "N42", WaitsOn: "GitHub",
-		When: all(ladderSays(Passed), prOpen, prHeadIsH, tipSame, answered, checksGreen, mergeClean, notBehind, notWorking),
+		When: all(ladderSays(Passed), prOpen, prHeadIsH, tipSame, answered, githubAvail, checksGreen, mergeClean, notBehind, notWorking),
 		Then: func(in In) Decision {
 			h := headH(in)
 			return say("passed, green and mergeable at H", once(in.acts(), key(AskAccept, h)), once(in.acts(), key(AskMerge, h)))(in)

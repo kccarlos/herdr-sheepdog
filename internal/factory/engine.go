@@ -46,12 +46,13 @@ type Engine struct {
 	Bin          string            // sheepdog binary named in run prompts
 	RunEnv       map[string]string // added to every run's environment (daemon port)
 
-	mu    sync.Mutex
-	wake  chan struct{}
-	prs   map[string]flow.PR  // last PR snapshot per attempt worktree (in memory)
-	errs  map[string]string   // last gh or git error per worktree and kind, logged once per change
-	tips  map[string]tipFacts // last git reading per worktree (in memory)
-	waits map[string]string   // last N9/N10 wait reason per project/task, logged once per change
+	mu        sync.Mutex
+	wake      chan struct{}
+	prs       map[string]flow.PR  // last PR snapshot per attempt worktree (in memory)
+	errs      map[string]string   // last gh or git error per worktree and kind, logged once per change
+	tips      map[string]tipFacts // last git reading per worktree (in memory)
+	waits     map[string]string   // last N9/N10 wait reason per project/task, logged once per change
+	ghUnavail map[string]bool     // project fact github_unavailable (design.md 7.3)
 }
 
 // tipFacts are N12's and N20's git facts for one tip and H: the merge base,
@@ -365,6 +366,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		if len(a.Ready) > 0 { // no PR can exist before the first ready
 			facts.PR = e.readPRLocked(ctx, id, s, ti)
 		}
+		facts.GitHubUnavailable = e.ghUnavail[id]
 		if e.observeReviewLocked(ctx, id, s, ti, &facts) {
 			return
 		}
@@ -964,14 +966,24 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 	last := e.prs[a.Worktree]
 	p, err := world.PRSnapshot(gctx, s.Project.Folder, a.Branch)
 	if e.logOnce("factory.gh_error", id, a.Worktree, err); err != nil {
-		p, p.Answered = last, false
-	} else if p.Head != "" {
-		p.HeadSince = last.HeadSince
-		if p.Head != last.Head || p.HeadSince.IsZero() {
-			p.HeadSince = time.Now()
+		if e.ghUnavail == nil {
+			e.ghUnavail = map[string]bool{}
 		}
-		p.HeadRel, err = world.Relation(gctx, a.Worktree, flow.H(a), p.Head)
-		e.logOnce("factory.git_error", id, a.Worktree+" head_rel", err) // unknown here (e.g. not fetched): no relation, never a guess
+		e.ghUnavail[id] = true
+		if p.State == flow.PRNone {
+			p = last
+		}
+		p.Answered, p.Checks = false, cmp.Or(p.Checks, flow.ChecksUnreadable)
+	} else {
+		delete(e.ghUnavail, id)
+		if p.Head != "" {
+			p.HeadSince = last.HeadSince
+			if p.Head != last.Head || p.HeadSince.IsZero() {
+				p.HeadSince = time.Now()
+			}
+			p.HeadRel, err = world.Relation(gctx, a.Worktree, flow.H(a), p.Head)
+			e.logOnce("factory.git_error", id, a.Worktree+" head_rel", err) // unknown here (e.g. not fetched): no relation, never a guess
+		}
 	}
 	if p != last && ctx.Err() == nil {
 		if e.prs == nil {

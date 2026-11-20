@@ -576,7 +576,7 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 	}
 	logRaw, _ := os.ReadFile(paths.Log(id))
 	for _, want := range []string{`"rule":"N11"`, `"rule":"N23"`, `"rule":"ready"`, `"rule":"N26"`, `"PR #7 open for task/` + strings.TrimPrefix(id, "proj-") + `-T1-1-feat-add-greet-helper"`,
-		`"rule":"pr_snapshot"`, `"checks":"none"`, `"rule":"N29"`, `"decision":"started reviewer `} {
+		`"rule":"pr_snapshot"`, `"checks":"absent"`, `"rule":"N29"`, `"decision":"started reviewer `} {
 		if !strings.Contains(string(logRaw), want) {
 			t.Errorf("log.jsonl missing %s:\n%s", want, logRaw)
 		}
