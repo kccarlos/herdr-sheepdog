@@ -470,18 +470,27 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
 		defer cancel()
 		lines, err := world.ChangedLines(ctx, a.Worktree, "HEAD") // the same measure as N12's
+		base, note := lines, ""
 		if err != nil {
-			return err
+			e.logError("factory.git_error", id, err)
+			base, note = a.SizeCap, " (changed-lines read failed; raised from current cap)"
+			if c, ok := e.tips[a.Worktree]; ok && c.lines > base {
+				base, note = c.lines, " (changed-lines read failed; raised from last good reading)"
+			}
 		}
-		a.SizeCap, rc.Decided = lines+s.Settings.ContinueLines, &flow.RecapDecision{Choice: choice, Why: why}
+		a.SizeCap, rc.Decided = base+s.Settings.ContinueLines, &flow.RecapDecision{Choice: choice, Why: why}
 		if a.RunID != "" {
-			msg := fmt.Sprintf("The coordinator lets task %s go on: %s. Your size cap is now %d changed lines (%d now). Continue the task.", t.ID, why, a.SizeCap, lines)
+			now := fmt.Sprintf(" (%d now)", lines)
+			if err != nil {
+				now = ""
+			}
+			msg := fmt.Sprintf("The coordinator lets task %s go on: %s. Your size cap is now %d changed lines%s. Continue the task.", t.ID, why, a.SizeCap, now)
 			if err := world.SendRun(ctx, e.HC, a.RunID, msg); err != nil {
 				e.logError("factory.exec_error", id, err)
 			}
 		}
 		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why},
-			Rule: "recap decide", Decision: fmt.Sprintf("continue; size cap %d", a.SizeCap), Why: why})
+			Rule: "recap decide", Decision: fmt.Sprintf("continue; size cap %d%s", a.SizeCap, note), Why: why})
 	}
 	if choice == "new" {
 		if !rc.Amended {
@@ -673,11 +682,19 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 			t.Outcomes, what = *c.Outcomes, append(what, "outcomes")
 		}
 		a := flow.OpenAttempt(*t)
+		var capNote string
 		if c.Estimate != nil && *c.Estimate != t.EstimateLines {
 			t.EstimateLines, what = *c.Estimate, append(what, "estimate_lines")
-			if a != nil && (flow.OpenRecap(*t) == nil || flow.OpenRecap(*t).Trigger != flow.TriggerSize) {
+			if a != nil {
 				// design.md 4.9: may lower an open attempt's size_cap (never raise it, and never change it while a size recap is open).
-				a.SizeCap = min(a.SizeCap, s.Settings.SizeCapFactor*t.EstimateLines)
+				want := s.Settings.SizeCapFactor * t.EstimateLines
+				if flow.OpenRecap(*t) != nil && flow.OpenRecap(*t).Trigger == flow.TriggerSize {
+					capNote = fmt.Sprintf("; size cap unchanged at %d while size recap is open (applies to next attempt)", a.SizeCap)
+				} else if want > a.SizeCap {
+					capNote = fmt.Sprintf("; size cap unchanged at %d (amend cannot raise a started task's cap; applies to next attempt)", a.SizeCap)
+				} else {
+					a.SizeCap = want
+				}
 			}
 		}
 		if slices.Contains(what, "brief") || slices.Contains(what, "outcomes") {
@@ -698,7 +715,7 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		if len(what) == 0 {
 			continue
 		}
-		done = append(done, t.ID+" ("+strings.Join(what, ", ")+")")
+		done = append(done, t.ID+" ("+strings.Join(what, ", ")+")"+capNote)
 		if a != nil && a.RunID != "" {
 			bin := cmp.Or(e.Bin, "sheepdog")
 			msg := fmt.Sprintf("The plan changed for task %s (%s): %s\nTitle: %s\nBrief:\n%s\nOutcomes:\n%s\nEarlier review rounds no longer count. If your work must change, commit and run %s factory report ready again; otherwise wait.",

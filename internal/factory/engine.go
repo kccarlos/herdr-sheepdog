@@ -31,10 +31,7 @@ var workerTemplate string
 //go:embed reviewer.md
 var reviewerTemplate string
 
-var (
-	lockGitTimeout = 15 * time.Second
-	changedLines   = world.ChangedLines
-)
+var lockGitTimeout = 15 * time.Second
 
 // ghTimeout bounds one GitHub executor or snapshot (a push plus gh calls).
 var ghTimeout = time.Minute
@@ -58,10 +55,9 @@ type Engine struct {
 // tipFacts are N12's and N20's git facts for one tip and H: the merge base,
 // and so the line count, moves only with the tip.
 type tipFacts struct {
-	tip, h       string
-	lines        int
-	linesTimeout bool
-	mergeOnly    bool
+	tip, h    string
+	lines     int
+	mergeOnly bool
 }
 
 // New constructs an Engine. Nothing runs or touches disk until Run or Start.
@@ -409,20 +405,21 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 // readTipLocked reads the changed lines at tip and whether it is ahead of H
 // by merges of the base only, once per tip and H. The base commit itself
 // has no changed lines. A changed-lines read that times out counts as over
-// size_cap (design.md 3, last_tip).
+// size_cap (design.md 3, last_tip) and is never cached, so the next pass
+// reads again.
 func (e *Engine) readTipLocked(ctx context.Context, a flow.Attempt, tip string, rel flow.Rel) (int, bool, bool, error) {
 	h := flow.H(a)
 	if c, ok := e.tips[a.Worktree]; ok && c.tip == tip && c.h == h {
-		return c.lines, c.linesTimeout, c.mergeOnly, nil
+		return c.lines, false, c.mergeOnly, nil
 	}
 	c, err := tipFacts{tip: tip, h: h}, error(nil)
 	if tip != a.BaseCommit {
-		c.lines, err = changedLines(ctx, a.Worktree, tip)
+		c.lines, err = world.ChangedLines(ctx, a.Worktree, tip)
 		if errors.Is(err, context.DeadlineExceeded) {
-			c.linesTimeout, err = true, nil
+			return 0, true, false, nil
 		}
 	}
-	if err == nil && !c.linesTimeout && rel == flow.RelAhead {
+	if err == nil && rel == flow.RelAhead {
 		c.mergeOnly, err = world.MergeOnly(ctx, a.Worktree, h, tip)
 	}
 	if err != nil {
@@ -432,7 +429,7 @@ func (e *Engine) readTipLocked(ctx context.Context, a flow.Attempt, tip string, 
 		e.tips = map[string]tipFacts{}
 	}
 	e.tips[a.Worktree] = c
-	return c.lines, c.linesTimeout, c.mergeOnly, nil
+	return c.lines, false, c.mergeOnly, nil
 }
 
 func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {

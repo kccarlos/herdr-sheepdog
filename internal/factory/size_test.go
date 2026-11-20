@@ -3,13 +3,14 @@ package factory
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
@@ -275,6 +276,9 @@ func TestAmendEstimateSizeCapRules(t *testing.T) {
 	if st := l.state(); st.Tasks[0].EstimateLines != 200 || st.Tasks[0].Attempts[0].SizeCap != 100 {
 		t.Fatalf("after raise amend: estimate %d, size_cap %d, want 200 and 100", st.Tasks[0].EstimateLines, st.Tasks[0].Attempts[0].SizeCap)
 	}
+	if last := l.logLines()[len(l.logLines())-1]; !strings.Contains(last.Decision, "size cap unchanged at 100") || !strings.Contains(last.Decision, "amend cannot raise") {
+		t.Fatalf("raise amend decision = %q, want plain note that size cap is unchanged and why", last.Decision)
+	}
 	// 2. Lowering estimate when no size recap is open lowers SizeCap.
 	l.report("tok-coord", "plan amend", `{"why":"tighter","tasks":[{"id":"T1","estimate_lines":25}]}`, "")
 	if st := l.state(); st.Tasks[0].EstimateLines != 25 || st.Tasks[0].Attempts[0].SizeCap != 50 {
@@ -287,6 +291,9 @@ func TestAmendEstimateSizeCapRules(t *testing.T) {
 	l.report("tok-coord", "plan amend", `{"why":"raise during size recap","tasks":[{"id":"T1","estimate_lines":150}]}`, "")
 	if st := l.state(); st.Tasks[0].EstimateLines != 150 || st.Tasks[0].Attempts[0].SizeCap != 50 {
 		t.Fatalf("raise during size recap: estimate %d, size_cap %d, want 150 and 50", st.Tasks[0].EstimateLines, st.Tasks[0].Attempts[0].SizeCap)
+	}
+	if last := l.logLines()[len(l.logLines())-1]; !strings.Contains(last.Decision, "size cap unchanged at 50") || !strings.Contains(last.Decision, "size recap is open") {
+		t.Fatalf("amend during size recap decision = %q, want plain note that size cap is unchanged while size recap is open", last.Decision)
 	}
 	l.report("tok-coord", "plan amend", `{"why":"lower during size recap","tasks":[{"id":"T1","estimate_lines":10,"brief":"new brief"}]}`, "")
 	if st := l.state(); st.Tasks[0].EstimateLines != 10 || st.Tasks[0].Attempts[0].SizeCap != 50 {
@@ -307,35 +314,62 @@ func TestAmendEstimateSizeCapRules(t *testing.T) {
 	}
 }
 
+// fakeGitDiff prepends a git wrapper to PATH that sleeps on `diff` while slow
+// exists, fails on `diff` while fail exists, and delegates everything else to
+// the real git binary.
+func fakeGitDiff(t *testing.T) (slow, fail string) {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	slow, fail = filepath.Join(dir, "slow"), filepath.Join(dir, "fail")
+	script := "#!/bin/sh\n" +
+		"for arg in \"$@\"; do\n" +
+		"  if [ \"$arg\" = \"diff\" ]; then\n" +
+		"    if [ -f " + strconv.Quote(slow) + " ]; then exec sleep 3; fi\n" +
+		"    if [ -f " + strconv.Quote(fail) + " ]; then echo 'git diff failed' >&2; exit 1; fi\n" +
+		"  fi\n" +
+		"done\n" +
+		"exec " + strconv.Quote(realGit) + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	return slow, fail
+}
+
 // TestChangedLinesTimeoutOpensSizeRecap: a changed-lines read that times out
 // counts as over size_cap (N12 opens a size recap) instead of skipping the
-// pass, and is cached per (tip, H); a non-timeout error still skips the pass.
+// pass, and is never cached so after continue a normal read opens no second
+// recap; a non-timeout error still skips the pass.
 func TestChangedLinesTimeoutOpensSizeRecap(t *testing.T) {
-	orig := changedLines
-	t.Cleanup(func() { changedLines = orig })
+	old := lockGitTimeout
+	lockGitTimeout = 500 * time.Millisecond
+	t.Cleanup(func() { lockGitTimeout = old })
+
+	lErr := newLanding(t)
+	l := newLanding(t).withTokens()
+	writePRJSON(t, l.gh, "view.json", l.c1, "[]")
+	slow, fail := fakeGitDiff(t)
 
 	// Non-timeout error skips the pass and opens no recap.
-	lErr := newLanding(t)
-	changedLines = func(context.Context, string, string) (int, error) {
-		return 0, errors.New("git broken")
+	if err := os.WriteFile(fail, nil, 0o600); err != nil {
+		t.Fatal(err)
 	}
 	lErr.pass()
+	_ = os.Remove(fail)
 	if rc := lErr.state().Tasks[0].Recaps; len(rc) != 0 {
 		t.Fatalf("non-timeout error opened recap: %+v", rc)
 	}
 
 	// Timeout opens a size recap via N12, then N6 wakes the coordinator and tells the worker.
-	l := newLanding(t)
-	calls := 0
-	changedLines = func(context.Context, string, string) (int, error) {
-		calls++
-		return 0, context.DeadlineExceeded
+	if err := os.WriteFile(slow, nil, 0o600); err != nil {
+		t.Fatal(err)
 	}
 	l.pass() // N12
-	l.pass() // N6: uses cached timeout reading, wakes coordinator, tells worker
-	if calls != 1 {
-		t.Fatalf("changedLines called %d times for same (tip, H), want 1", calls)
-	}
+	l.pass() // N6: wakes coordinator, tells worker
 	st := l.state()
 	if len(st.Tasks[0].Recaps) != 1 || st.Tasks[0].Recaps[0].Trigger != flow.TriggerSize {
 		t.Fatalf("recaps after timeout = %+v, want one size recap", st.Tasks[0].Recaps)
@@ -345,6 +379,77 @@ func TestChangedLinesTimeoutOpensSizeRecap(t *testing.T) {
 	}
 	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 1 || !strings.Contains(sends[0], "timed out reading changed lines") {
 		t.Fatalf("worker sends = %q, want timeout stop message", sends)
+	}
+
+	// Once git diff recovers, continue + next pass must read again and open no second recap.
+	_ = os.Remove(slow)
+	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"continue","why":"transient stall"}`, "")
+	l.pass()
+	if rc := l.state().Tasks[0].Recaps; len(rc) != 1 || flow.OpenRecap(l.state().Tasks[0]) != nil {
+		t.Fatalf("recaps after continue + normal pass = %+v, want no second recap", rc)
+	}
+}
+
+// TestContinueWhenLineReadFails: recap decide continue raises the cap from the
+// last good reading (or the current cap) plus continue_lines when ChangedLines
+// fails, says so in the decision text, and never returns a raw error.
+func TestContinueWhenLineReadFails(t *testing.T) {
+	l1 := newLanding(t).withTokens()
+	l2 := newLanding(t).withTokens()
+	_, fail := fakeGitDiff(t)
+
+	// 1. With a last good reading (1 line > SizeCap 0): raises from last good reading.
+	l1.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].SizeCap = 0 })
+	l1.pass() // caches good reading (1 line) and opens size recap
+	if err := os.WriteFile(fail, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := l1.eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T1","choice":"continue","why":"give room"}`)); err != nil {
+		t.Fatalf("continue with failed line read returned error: %v", err)
+	}
+	st1 := l1.state()
+	if a := st1.Tasks[0].Attempts[0]; a.SizeCap != 1+st1.Settings.ContinueLines || flow.OpenRecap(st1.Tasks[0]) != nil {
+		t.Fatalf("after continue with last good reading: size_cap %d, open recap %+v", a.SizeCap, flow.OpenRecap(st1.Tasks[0]))
+	}
+	if last := l1.logLines()[len(l1.logLines())-1]; !strings.Contains(last.Decision, "changed-lines read failed") || !strings.Contains(last.Decision, "last good reading") {
+		t.Fatalf("continue decision (last good) = %q", last.Decision)
+	}
+
+	// 2. With no prior good reading: raises from current cap (100).
+	l2.edit(func(s *flow.State) {
+		s.Tasks[0].Recaps = []flow.Recap{{Trigger: flow.TriggerSize, Allowed: []string{"continue", "split", "new", "drop"}}}
+	})
+	if err := l2.eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T1","choice":"continue","why":"give room"}`)); err != nil {
+		t.Fatalf("continue with failed line read (no prior reading) returned error: %v", err)
+	}
+	st2 := l2.state()
+	if a := st2.Tasks[0].Attempts[0]; a.SizeCap != 100+st2.Settings.ContinueLines || flow.OpenRecap(st2.Tasks[0]) != nil {
+		t.Fatalf("after continue with no prior reading: size_cap %d, open recap %+v", a.SizeCap, flow.OpenRecap(st2.Tasks[0]))
+	}
+	if last := l2.logLines()[len(l2.logLines())-1]; !strings.Contains(last.Decision, "changed-lines read failed") || !strings.Contains(last.Decision, "current cap") {
+		t.Fatalf("continue decision (current cap) = %q", last.Decision)
+	}
+}
+
+// TestCoordinatorPromptAndCommandsDocScope checks that coordinator.md states
+// what estimate_lines means and docs/commands.md matches PR 3.1's scope fields
+// and amend cap rule.
+func TestCoordinatorPromptAndCommandsDocScope(t *testing.T) {
+	if !strings.Contains(coordinatorTemplate, "add plus remove") {
+		t.Errorf("coordinator.md missing estimate_lines meaning")
+	}
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "commands.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(raw)
+	for _, field := range []string{"for_whom", "if_skipped", "smallest", "not_doing"} {
+		if !strings.Contains(doc, field) {
+			t.Errorf("docs/commands.md missing scope field %q", field)
+		}
+	}
+	if strings.Contains(doc, "also changes a started task's size cap") {
+		t.Errorf("docs/commands.md still says plan amend also changes a started task's size cap")
 	}
 }
 

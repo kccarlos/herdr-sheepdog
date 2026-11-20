@@ -1255,15 +1255,29 @@ func TestMergeOnlyEdgeCases(t *testing.T) {
 	}
 }
 
-// TestChangedLinesTimeoutReturnsDeadlineExceeded: when git exceeds the context
-// deadline, ChangedLines returns an error matching context.DeadlineExceeded so
-// readTipLocked can treat it as over size_cap.
+// TestChangedLinesTimeoutReturnsDeadlineExceeded: when a running git diff is
+// killed mid-run by the context deadline, ChangedLines returns an error
+// matching context.DeadlineExceeded so readTipLocked treats it as over
+// size_cap.
 func TestChangedLinesTimeoutReturnsDeadlineExceeded(t *testing.T) {
 	wt := sizeRepo(t)
 	tip := commitFile(t, wt, "a.go", "package a\n")
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakeBin := t.TempDir()
+	script := "#!/bin/sh\nfor arg in \"$@\"; do\n  if [ \"$arg\" = \"diff\" ]; then exec sleep 2; fi\ndone\nexec \"" + realGit + "\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "git"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBin+":"+os.Getenv("PATH"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
-	if _, err := ChangedLines(ctx, wt, tip); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("ChangedLines with expired deadline = %v, want context.DeadlineExceeded", err)
+	start := time.Now()
+	_, err = ChangedLines(ctx, wt, tip)
+	if elapsed := time.Since(start); !errors.Is(err, context.DeadlineExceeded) || elapsed < 100*time.Millisecond || elapsed > time.Second {
+		t.Fatalf("ChangedLines under hung git diff = %v in %s, want context.DeadlineExceeded killed mid-run", err, elapsed)
 	}
 }
