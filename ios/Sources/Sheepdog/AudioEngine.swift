@@ -416,7 +416,7 @@ final class AudioEngine {
         return out
     }
 
-    private func captureOnMain(_ buffer: AVAudioPCMBuffer) {
+    func captureOnMain(_ buffer: AVAudioPCMBuffer) {
         guard isRunning, !isMuted, let converter else { return }
         let started = CFAbsoluteTimeGetCurrent()
         let samples: [Int16]
@@ -798,11 +798,7 @@ final class AudioEngine {
         let input = engine.inputNode
         let format = input.inputFormat(forBus: 0)
         try requireCapturable(format)
-        let converter = try PCMConverter(inputFormat: format)
-        self.converter = converter
-        metrics.hardwareSampleRate = format.sampleRate
-        chunker.reset()
-        gate.reset()
+        try resetCaptureState(format: format)
         input.installTap(onBus: 0, bufferSize: 4_096, format: format) { [weak self] buffer, _ in
             self?.handleCaptured(buffer)
         }
@@ -815,5 +811,25 @@ final class AudioEngine {
         }
         player.play()
         recordVoiceProcessing()
+    }
+
+    func resetCaptureState(format: AVAudioFormat) throws {
+        let converter = try PCMConverter(inputFormat: format)
+        self.converter = converter
+        metrics.hardwareSampleRate = format.sampleRate
+        chunker.reset()
+        gate.reset()
+        if isGateClosed != gate.isGated {
+            isGateClosed = gate.isGated
+            onGate?(isGateClosed, nil)
+        }
+    }
+
+    func prepareCaptureForTesting(format: AVAudioFormat) throws {
+        converter = try PCMConverter(inputFormat: format)
+        chunker.reset()
+        gate.reset()
+        isGateClosed = false
+        isRunning = true
     }
 }

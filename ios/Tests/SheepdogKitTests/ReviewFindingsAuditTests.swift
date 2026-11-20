@@ -1,4 +1,5 @@
 #if os(iOS)
+import AVFoundation
 import Foundation
 import Observation
 import SwiftUI
@@ -869,6 +870,112 @@ final class ReviewFindingsAuditTests: XCTestCase {
         XCTAssertFalse(labels.contains("Mute") || labels.contains("Unmute") || labels.contains("Talk"), "Stale Live Activity must not offer an active Mute/Talk toggle")
     }
 
+    // MARK: - DeviceCredentials per-base sign-in deduplication & AudioEngine capture rebuild gate sync
+
+    func testDeviceCredentialsSignsInPerBaseURLSoStaggeredFallbackSucceedsWhenPreferredAddressHangs() async throws {
+        let daemonID = "test-per-base-signin-\(UUID().uuidString)"
+        DeviceKey.delete(daemonID: daemonID)
+        _ = try DeviceKey.loadOrCreate(daemonID: daemonID)
+        defer { DeviceKey.delete(daemonID: daemonID) }
+
+        let creds = DeviceCredentials(daemonID: daemonID, secrets: InMemorySecretStore())
+        creds.protocolClasses = [ReviewAuditStub.self]
+        creds.computer = PairedComputer(
+            daemonID: daemonID,
+            name: "Home Mac",
+            addresses: ["192.0.2.10:7777", "198.51.100.20:7777"],
+            pin: "pin_home",
+            deviceID: "dev-home",
+            pairedAt: Date()
+        )
+        XCTAssertNil(creds.header(), "Cold launch / cold notification wake starts with no cached SessionTicket")
+
+        let lan = try XCTUnwrap(DaemonEndpoint(text: "192.0.2.10:7777", secure: true, credentials: creds))
+        let remote = try XCTUnwrap(DaemonEndpoint(text: "198.51.100.20:7777", secure: true, credentials: creds))
+
+        // LAN address hangs during sign-in; after 120 ms (after the staggered second probe
+        // at 25 ms has already entered ticket(base:)), LAN fails as unreachable.
+        ReviewAuditStub.hangHosts = ["192.0.2.10"]
+        let failLanLater = Task {
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            ReviewAuditStub.unreachableHosts = ["192.0.2.10"]
+            ReviewAuditStub.release(host: "192.0.2.10")
+        }
+        defer { failLanLater.cancel() }
+
+        let winner = try await PushActions.answerPending(
+            id: "ap-cold",
+            option: 1,
+            endpoints: [lan, remote],
+            stagger: 0.025,
+            makeClient: { endpoint in
+                let config = URLSessionConfiguration.ephemeral
+                config.protocolClasses = [ReviewAuditStub.self]
+                return DaemonClient(endpoint: endpoint, session: URLSession(configuration: config))
+            }
+        )
+
+        XCTAssertEqual(winner.display, "198.51.100.20:7777", "Staggered fallback must sign in against its own base URL instead of joining the hanging LAN sign-in task")
+        XCTAssertEqual(ReviewAuditStub.answeredHosts, ["198.51.100.20"])
+        XCTAssertEqual(creds.header(), "Bearer sds_tk-audit", "Winning sign-in must populate the shared SessionTicket")
+    }
+
+    func testAudioEngineRebuildCaptureSynchronizesReopenedGateAndExitsSilentState() throws {
+        let audio = AudioEngine()
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
+        try audio.prepareCaptureForTesting(format: format)
+
+        let t0 = Date(timeIntervalSinceReferenceDate: 1_000)
+        var core = SessionCore()
+        _ = core.apply(.connectTapped, now: t0)
+        _ = core.apply(.probeSucceeded(micGranted: true), now: t0)
+        _ = core.apply(.socketOpened, now: t0)
+        _ = core.apply(.status(.status(.connected)), now: t0)
+        _ = core.apply(.audioStarted(gateClosed: audio.gateIsClosed), now: t0)
+
+        var gateTransitions: [(closed: Bool, speechEndMs: Int?)] = []
+        var sentFrames: [Data] = []
+        audio.onGate = { closed, speechEndMs in
+            gateTransitions.append((closed, speechEndMs))
+            _ = core.apply(.gateChanged(closed: closed, speechEndMs: speechEndMs), now: t0)
+        }
+        audio.onFrame = { frame in
+            sentFrames.append(frame)
+        }
+
+        // 1. Feed 50 buffers (40 ms each = 2 s) of quiet room noise so CaptureGate closes.
+        var rng = VADTestAudio.RNG(seed: 11)
+        let framesPerBuffer: AVAudioFrameCount = 1_920 // 40 ms at 48 kHz
+        for _ in 0 ..< 50 {
+            let quiet = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: framesPerBuffer))
+            quiet.frameLength = framesPerBuffer
+            for i in 0 ..< Int(framesPerBuffer) {
+                quiet.floatChannelData![0][i] = Float(rng.gaussian() * 40) / 32_768
+            }
+            audio.captureOnMain(quiet)
+        }
+
+        XCTAssertTrue(audio.gateIsClosed, "CaptureGate should close after room silence")
+        XCTAssertEqual(gateTransitions.map(\.closed), [true])
+        XCTAssertTrue(core.mic.gateClosed)
+        XCTAssertFalse(core.mic.speaking)
+        XCTAssertEqual(core.sessionState, .silent)
+
+        // 2. Simulate route/configuration rebuild (`rebuildCapture()` -> `resetCaptureState(format:)`),
+        //    then feed continuous speech frames.
+        sentFrames.removeAll()
+        try audio.resetCaptureState(format: format)
+
+        let speech = try XCTUnwrap(PCMConverter.sineBuffer(frequency: 440, sampleRate: 48_000, seconds: 0.2))
+        audio.captureOnMain(speech)
+
+        XCTAssertFalse(audio.gateIsClosed, "gate.reset() reopens the gate in open-mic mode")
+        XCTAssertFalse(sentFrames.isEmpty, "Speech PCM frames are sent after capture rebuild")
+        XCTAssertEqual(gateTransitions.last?.closed, false, "rebuildCapture must notify onGate(false, nil) when gate.reset() reopens a closed gate")
+        XCTAssertFalse(core.mic.gateClosed, "SessionCore must not stay stuck with mic.gateClosed == true while streaming PCM frames")
+        XCTAssertEqual(core.sessionState, .listening, "SessionCore must exit .silent when capture rebuilds and reopens the gate")
+    }
+
     // MARK: - View hierarchy helpers
 
     private func findSubview<T: UIView>(ofType type: T.Type, in view: UIView) -> T? {
@@ -1014,7 +1121,10 @@ private final class ReviewAuditStub: URLProtocol {
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func stopLoading() {}
+    private var stopped = false
+    override func stopLoading() {
+        Self.lock.withLock { stopped = true }
+    }
 
     override func startLoading() {
         let host = request.url?.host ?? ""
@@ -1033,9 +1143,14 @@ private final class ReviewAuditStub: URLProtocol {
     }
 
     private func finish() {
-        guard let url = request.url else { return }
+        guard !Self.lock.withLock({ stopped }), let url = request.url else { return }
         let host = url.host ?? ""
         let path = url.path
+
+        if Self.lock.withLock({ Self.state.unreachableHosts.contains(host) }) {
+            client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
+            return
+        }
 
         if let custom = Self.lock.withLock({ Self.state.statusByHost[host] }), path != "/api/hello" {
             respond(custom.0, custom.1)
@@ -1043,6 +1158,18 @@ private final class ReviewAuditStub: URLProtocol {
         }
 
         switch path {
+        case "/api/auth/challenge":
+            respond(200, [
+                "nonce": "nonce-audit",
+                "daemon_id": Self.enrollDaemonID,
+                "expires_in": 60,
+            ])
+        case "/api/auth/session":
+            respond(200, [
+                "ticket": "tk-audit",
+                "expires_in": 43_200,
+                "device": ["id": Self.enrollDeviceID, "name": "Phone"],
+            ])
         case "/api/hello":
             respond(200, [
                 "name": "sheepdog",
