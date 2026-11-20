@@ -678,6 +678,77 @@ func TestFactoryLogCLI(t *testing.T) {
 	}
 }
 
+// TestFactoryStatusCLI checks `sheepdog factory status [<folder>]` reads stored
+// state and log.jsonl without a running daemon or git repo, prints one line per
+// task (working, waiting_on_dep by name, done, not yet reached), and agrees with
+// GraphViewOf on every task's stage.
+func TestFactoryStatusCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+	data := filepath.Join(home, "data")
+	cfgFile := filepath.Join(home, "config.toml")
+	if err := os.WriteFile(cfgFile, []byte("data_dir = \""+data+"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(home, "demo-repo") // not a git repo: proves no git call
+	paths := factory.Paths{DataDir: data}
+	st := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "proj-1", Folder: repo, Started: false},
+		Tasks: []flow.Task{
+			{ID: "T1", Title: "feat: done task", Done: &flow.Merged{MergedCommit: "aaa"}},
+			{ID: "T2", Title: "feat: working task", Attempts: []flow.Attempt{{BaseCommit: "000", RunID: "w-2"}}},
+			{ID: "T3", Title: "feat: dep task", After: []string{"T2"}},
+			{ID: "T4", Title: "feat: untouched task", After: []string{"T1"}},
+		},
+	}
+	if err := factory.SaveState(paths.State("proj-1"), st); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	logs := []factory.LogLine{
+		{Seq: 1, At: at, By: "engine", Task: "T1", Rule: "N1", Why: "ended: stop its runs and clean up"},
+		{Seq: 2, At: at, By: "engine", Task: "T2", Rule: "N23", Why: "the worker is working"},
+		{Seq: 3, At: at, By: "engine", Task: "T3", Rule: "N9", Why: "waiting on T2"},
+	}
+	for _, l := range logs {
+		if err := factory.AppendLog(paths.Log("proj-1"), l); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var out, errBuf bytes.Buffer
+	if code := run(context.Background(), []string{"factory", "status", "--config", cfgFile}, &out, &errBuf); code != 0 {
+		t.Fatalf("status code=%d stderr=%s", code, errBuf.String())
+	}
+	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("status lines = %d, want 4:\n%s", len(lines), out.String())
+	}
+	graph := factory.GraphViewOf(st, logs)
+	for i, wantSub := range []string{"N1", "N23", "waiting on T2", "no logged row"} {
+		if !strings.Contains(lines[i], graph.Tasks[i].Stage) || !strings.Contains(lines[i], wantSub) {
+			t.Errorf("line %d = %q, want stage %q and %q", i, lines[i], graph.Tasks[i].Stage, wantSub)
+		}
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	if code := run(context.Background(), []string{"factory", "status", repo, "--config", cfgFile}, &out, &errBuf); code != 0 || !strings.Contains(out.String(), "waiting on T2") {
+		t.Fatalf("status <folder>: code=%d out=%q stderr=%q", code, out.String(), errBuf.String())
+	}
+	out.Reset()
+	errBuf.Reset()
+	if code := run(context.Background(), []string{"factory", "status", filepath.Join(home, "missing"), "--config", cfgFile}, &out, &errBuf); code != 1 {
+		t.Fatalf("status unknown folder: code=%d, want 1", code)
+	}
+	if code := run(context.Background(), []string{"factory", "status", repo, "extra", "--config", cfgFile}, &out, &errBuf); code != 2 {
+		t.Fatalf("status extra arg: code=%d, want 2", code)
+	}
+}
+
 func TestFactoryRecapDecideCLI(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

@@ -251,6 +251,7 @@ func TestRowCases(t *testing.T) {
 		{"N42", with(movedToM2), []string{"record_accept@m2", "merge@m2"}}, // the passes at c1 still cover m2
 		{"N22", with(changes), []string{"tell_worker_findings@1"}},
 		{"N23", with(notReady, noRounds, prGone), []string{"start_worker"}},
+		{"N23", with(notReady, noRounds, prGone, waitDep), []string{"start_worker"}}, // open attempt with unmet deps still matches an attempt row, not N9
 		{"N25", with(streakRecap), []string{"open_recap@review"}},
 		{"N26", with(noRounds, prGone), []string{"push_and_open_pr@c1"}},
 		{"N26", with(noRounds, prGone, noAnswer), nil},                    // "no PR" from a failed read: wait, no push

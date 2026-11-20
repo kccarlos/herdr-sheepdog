@@ -290,7 +290,7 @@ func (e *Engine) cleanWhy(id, raw, what, flag string) (string, error) {
 
 func cleanRejectWhy(raw string) string {
 	return strings.Join(strings.Fields(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029' {
 			return ' '
 		}
 		return r
@@ -671,6 +671,8 @@ func checkEstimate(id string, est, limit int) []string {
 	return nil
 }
 
+var validTaskID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
+
 func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, limit int) ([]flow.Task, []string) {
 	var p planFile
 	var fails []string
@@ -701,6 +703,8 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, l
 		}
 		if t.ID == "" || ids[t.ID] || existingIDs[t.ID] {
 			fails = append(fails, fmt.Sprintf("shape: task %d needs an id no other task has", i+1))
+		} else if !validTaskID.MatchString(t.ID) {
+			fails = append(fails, fmt.Sprintf("shape: task %q id must be 1-32 letters, digits, -, _ or .", t.ID))
 		} else {
 			ids[t.ID], newIDs = true, append(newIDs, t.ID)
 		}

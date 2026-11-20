@@ -190,3 +190,18 @@ func TestClosedDepCountsAsSatisfied(t *testing.T) {
 		t.Fatalf("T2 matched %s (%q), want N11", r.ID, d.Why)
 	}
 }
+
+func TestCriticalPathsCycle(t *testing.T) {
+	tasks := []Task{
+		{ID: "A", EstimateLines: 100, After: []string{"B"}},
+		{ID: "B", EstimateLines: 50, After: []string{"A"}},
+		{ID: "C", EstimateLines: 80},
+	}
+	crit := criticalPaths(tasks)
+	if crit["A"] != 150 || crit["B"] != 50 || crit["C"] != 80 {
+		t.Fatalf("criticalPaths(cycle) = %v, want A=150 B=50 C=80", crit)
+	}
+	if got := GrantSlots([]string{"B", "C"}, tasks, 0, 1); !got["C"] || got["B"] {
+		t.Fatalf("GrantSlots(cycle) = %v, want C", got)
+	}
+}

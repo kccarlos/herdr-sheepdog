@@ -32,9 +32,10 @@ var factoryDoctorRunner = func(ctx context.Context, o factory.DoctorOptions) []o
 var factoryStartChecks = factory.StartChecks
 
 func printFactoryUsage(w io.Writer) {
-	fprintln(w, "usage: sheepdog factory <start|stop|log|plan|task|recap|report|doctor> [flags] [folder]")
+	fprintln(w, "usage: sheepdog factory <start|stop|status|log|plan|task|recap|report|doctor> [flags] [folder]")
 	fprintln(w, "  start <folder> --goal \"<sentence>\" [--max-running N]   start the factory coordinator for a repo")
 	fprintln(w, "  stop [<folder>]                      stop a started factory project and its runs")
+	fprintln(w, "  status [<folder>]                    one line per task: id, title, stage, last logged rule, age and why")
 	fprintln(w, "  log [<folder>] [-n N]                each engine step: time, task, rule, asked, decision, why")
 	fprintln(w, "  plan apply <file>                    (coordinator only) apply a JSON plan")
 	fprintln(w, "  plan amend <file>                    (coordinator only) change tasks' title, brief, outcomes, estimate_lines or add tasks, with a why")
@@ -60,6 +61,8 @@ func runFactory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	switch args[0] {
 	case "start", "stop":
 		return runFactoryCmd(ctx, args[0], args[1:], stdout, stderr)
+	case "status":
+		return runFactoryStatus(args[1:], stdout, stderr)
 	case "log":
 		return runFactoryLog(ctx, args[1:], stdout, stderr)
 	case "plan":
@@ -132,6 +135,43 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 		fprintf(stdout, "factory stopped for %s\n", folder)
 	} else {
 		fprintln(stdout, "factory stopped")
+	}
+	return 0
+}
+
+// runFactoryStatus prints one line per task from stored state and log.jsonl
+// without calling hc, git or gh; works when the daemon is stopped.
+func runFactoryStatus(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("factory status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() { printFactoryUsage(stderr) }
+	configPath := fs.String("config", "", "config file")
+	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
+		return flagExit(err)
+	}
+	if fs.NArg() > 1 {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	folder := ""
+	if fs.NArg() == 1 {
+		home, _ := os.UserHomeDir()
+		folder = resolveTargetFolder(fs.Arg(0), home)
+	}
+	cfg, err := config.Load(*configPath)
+	var tasks []factory.TaskStatus
+	if err == nil {
+		tasks, err = factory.ProjectStatus(factory.Paths{DataDir: cfg.DataDir}, folder)
+	}
+	if err != nil {
+		fprintf(stderr, "sheepdog factory status: %v\n", err)
+		return 1
+	}
+	if len(tasks) == 0 {
+		fprintln(stdout, "no tasks yet")
+	}
+	for _, ts := range tasks {
+		fprintln(stdout, factory.FormatStatusLine(ts))
 	}
 	return 0
 }
