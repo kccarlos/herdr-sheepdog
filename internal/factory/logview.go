@@ -20,11 +20,21 @@ func ProjectLog(ctx context.Context, paths Paths, folder string, n int) ([]LogLi
 	if err != nil {
 		return nil, err
 	}
-	if err := guardTestPath(paths.Log(id)); err != nil {
+	lines, err := readLogFile(paths.Log(id), false)
+	if err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(paths.Log(id))
-	if err != nil {
+	return LogView(lines, n), nil
+}
+
+func readLogFile(path string, allowMissing bool) ([]LogLine, error) {
+	if err := guardTestPath(path); err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if allowMissing && os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
 		return nil, err
 	}
 	var lines []LogLine
@@ -35,9 +45,6 @@ func ProjectLog(ctx context.Context, paths Paths, folder string, n int) ([]LogLi
 		if json.Unmarshal(sc.Bytes(), &l) == nil {
 			lines = append(lines, l)
 		}
-	}
-	if n > 0 && len(lines) > n {
-		lines = lines[len(lines)-n:]
 	}
 	return lines, sc.Err()
 }

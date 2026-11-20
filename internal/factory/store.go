@@ -61,6 +61,7 @@ type LogLine struct {
 	At       time.Time `json:"at"`
 	Project  string    `json:"project"`
 	By       string    `json:"by"`
+	Wake     string    `json:"wake,omitempty"`
 	Task     string    `json:"task,omitempty"`
 	Input    any       `json:"input,omitempty"`
 	Facts    any       `json:"facts,omitempty"`
@@ -68,6 +69,7 @@ type LogLine struct {
 	Asked    []string  `json:"asked,omitempty"`
 	Decision string    `json:"decision,omitempty"`
 	Why      string    `json:"why,omitempty"`
+	Model    string    `json:"model,omitempty"`
 }
 
 // LoadState reads state.json. A missing or unreadable file is an error:
