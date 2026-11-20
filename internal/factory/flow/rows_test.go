@@ -91,12 +91,24 @@ var (
 		a0(in).MergeOnly = []Advance{{From: "c1", To: "m2"}}
 		in.Facts.Tip, in.Facts.PR.Head = "m2", "m2"
 	}
-	workingF = func(in *In) { in.Facts.Worker.State = RunWorking }
-	asked    = func(in *In) { a0(in).Acts = append(a0(in).Acts, Act{Key: "merge@c1", Result: "done"}) }
-	red      = func(in *In) { in.Facts.PR.Checks = ChecksRed }
-	noAnswer = func(in *In) { in.Facts.PR.Answered = false }
-	closedPR = func(in *In) { in.Facts.PR.State = PRClosed }
-	conflict = func(in *In) { in.Facts.PR.Mergeable = MergeableConflict }
+	workingF  = func(in *In) { in.Facts.Worker.State = RunWorking }
+	asked     = func(in *In) { a0(in).Acts = append(a0(in).Acts, Act{Key: "merge@c1", Result: "done"}) }
+	red       = func(in *In) { in.Facts.PR.Checks = ChecksRed }
+	noAnswer  = func(in *In) { in.Facts.PR.Answered = false }
+	closedPR  = func(in *In) { in.Facts.PR.State = PRClosed }
+	conflict  = func(in *In) { in.Facts.PR.Mergeable = MergeableConflict }
+	behind    = func(in *In) { in.Facts.PR.Behind = true }
+	reviewReq = func(in *In) { in.Facts.PR.ReviewRequired = true }
+	ciRecap   = func(in *In) {
+		in.Task.Recaps = []Recap{{Trigger: TriggerCI, Allowed: []string{ChoiceContinue, "split", "new", "drop"}}}
+	}
+	ciFailed3 = func(in *In) {
+		in.Task.CIFails = []CIFail{
+			{Head: "f1", At: now.Add(-30 * time.Minute)},
+			{Head: "f2", At: now.Add(-20 * time.Minute)},
+			{Head: "f3", At: now.Add(-10 * time.Minute)},
+		}
+	}
 	// stuckAct: an act failed past stuck_minutes; idleRev: the round's
 	// reviewer read idle with no tag past stuck_minutes.
 	stuckAct = func(k string) func(*In) {
@@ -128,7 +140,8 @@ func TestN42Guards(t *testing.T) {
 		"answered":              noAnswer,
 		"githubAvail":           func(in *In) { in.Facts.GitHubUnavailable = true },
 		"mergeClean":            conflict,
-		"notBehind":             func(in *In) { in.Facts.PR.Behind = true },
+		"noReviewRequired":      reviewReq,
+		"notBehind":             behind,
 		"notWorking":            workingF,
 		"onePassNeedsL8":        onePass,
 		"ladderSays(Passed)":    func(in *In) { a0(in).Rounds[1].Verdict = "maybe" },
@@ -168,9 +181,9 @@ func TestS1FinishedReviewer(t *testing.T) {
 // TestN43WakeOncePerStall: the same stall wakes the coordinator once; a
 // different stall, or the same at a new H, wakes it again.
 func TestN43WakeOncePerStall(t *testing.T) {
-	_, first := FirstMatch(TaskRows, with(conflict))
+	_, first := FirstMatch(TaskRows, with(behind))
 	stalled := func(fs ...func(*In)) In {
-		in := with(append([]func(*In){conflict}, fs...)...)
+		in := with(append([]func(*In){behind}, fs...)...)
 		a0(&in).Acts = []Act{{Key: first.Asked[0], Result: "done"}}
 		return in
 	}
@@ -241,6 +254,7 @@ func TestRowCases(t *testing.T) {
 		{"S1", with(noRounds, reviewEnded), []string{"stop_task"}},
 		{"N6", with(openRecap), []string{"wake_coordinator@recap@1"}},
 		{"N6", with(sizeRecap), []string{"wake_coordinator@recap@1", "tell_worker_stop@1"}},
+		{"N6", with(ciRecap), []string{"wake_coordinator@recap@1", "tell_worker_stop@1"}},
 		{"N6", with(sizeRecap, func(in *In) { in.Facts.Worker = Run{} }), []string{"wake_coordinator@recap@1"}},
 		{"N8", with(nothingF, prGone), []string{"wake_coordinator@nothing_to_change@0"}},
 		{"N9", with(noAttempts, waitDep), nil},
@@ -251,7 +265,8 @@ func TestRowCases(t *testing.T) {
 		{"N11", with(func(in *In) { a0(in).Closed = "new attempt" }), []string{"new_attempt"}},
 		{"N12", with(overCap), []string{"open_size_recap@0"}},
 		{"N12", with(func(in *In) { in.Facts.Lines = 1 }), []string{"open_size_recap@0"}}, // no estimate (cap 0) never turns the check off (KB-CAP-18)
-		{"N42", with(atCap), []string{"record_accept@c1", "merge@c1"}},                    // at the cap is not over it
+		{"N13", with(noRounds, ciFailed3), []string{"open_ci_recap@0"}},
+		{"N42", with(atCap), []string{"record_accept@c1", "merge@c1"}}, // at the cap is not over it
 		{"N20", with(mergeTip), []string{"move_h_merge_only@m2"}},
 		{"N26", with(movedToM2, func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel = "c1", RelBehind }), []string{"push_and_open_pr@m2"}},
 		{"N42", with(movedToM2), []string{"record_accept@m2", "merge@m2"}}, // the passes at c1 still cover m2
@@ -266,6 +281,7 @@ func TestRowCases(t *testing.T) {
 		{"N29", with(noRounds), []string{"start_reviewer@1@c1"}},
 		{"N29", with(onePass), []string{"start_reviewer@2@c1"}},
 		{"N29", with(changes, rejected), []string{"start_reviewer@2@c1"}}, // L10: reject consumes no round number
+		{"N32", with(conflict), []string{"tell_worker_conflict@c1"}},
 		{"N33", with(red, func(in *In) { in.Facts.PR.Failed = []Failure{{Run: "42"}} }), []string{"rerun_ci@42@@c1"}},
 		{"N34", with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedExternal; in.Facts.PR.Failed = []Failure{{Run: "43"}} }), []string{"rerun_ci@43@@c1"}},
 		{"N34", with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedTimeout }), []string{"wake_coordinator@checks_stopped@limit@c1"}},
@@ -278,10 +294,11 @@ func TestRowCases(t *testing.T) {
 		{"N36", with(noAnswer), nil}, // checks unreadable: wait, no wake
 		{"N36", with(func(in *In) { in.Facts.PR.Checks = ChecksUnreadable }), nil},
 		{"N36", with(func(in *In) { in.Facts.GitHubUnavailable = true }), nil},
+		{"N37", with(reviewReq), []string{"wake_coordinator@review_required@c1"}},
 		{"N39", with(workingF), nil},
 		{"N41", with(asked), nil},
 		{"N42", landing(), []string{"record_accept@c1", "merge@c1"}},
-		{"N43", with(conflict), []string{"wake_coordinator@no_rule_matched@c1@open@green@conflict@same"}},
+		{"N43", with(behind), []string{"wake_coordinator@no_rule_matched@c1@open@green@clean@same"}},
 	}
 	covered := map[string]bool{}
 	for _, c := range cases {
@@ -326,7 +343,10 @@ func TestRowOrder(t *testing.T) {
 		{"N6", "N29", false, with(openRecap, noRounds)},
 		{"S1", "N22", false, with(workerEnded, changes)},
 		{"N6", "N12", false, with(openRecap, overCap)},
-		{"N12", "N20", true, with(overCap, mergeTip)},
+		{"N6", "N13", false, with(openRecap, noRounds, ciFailed3)},
+		{"N12", "N13", true, with(overCap, noRounds, ciFailed3)},
+		{"N13", "N20", true, with(noRounds, ciFailed3, mergeTip)},
+		{"N13", "N29", false, with(noRounds, ciFailed3)},
 		{"N20", "N22", true, with(changes, mergeTip)},
 		{"N12", "N23", false, with(overCap, tipAheadF)},
 		{"N22", "N23", true, with(changes, tipAheadF)},
@@ -335,7 +355,11 @@ func TestRowOrder(t *testing.T) {
 		{"N25", "N26", true, with(streakRecap, prGone)},
 		{"N23", "N36", false, with(tipAheadF, pending)},
 		{"N26", "N29", true, with(noRounds, prGone)},
-		{"N36", "N39", true, with(pending, workingF)},
+		{"N32", "N33", true, with(conflict, red)},
+		{"N32", "N36", false, with(conflict, pending)},
+		{"N32", "N37", false, with(conflict, reviewReq)},
+		{"N36", "N37", true, with(pending, reviewReq)},
+		{"N37", "N39", true, with(reviewReq, workingF)},
 		{"N39", "N41", true, with(workingF, asked)},
 		{"N41", "N42", true, with(asked)},
 	}
@@ -966,5 +990,52 @@ func TestFailingRuns(t *testing.T) {
 		if f, r := FailingRuns(append(checks[:1:1], c), ChecksGreen, "o/r", nil); f != nil || !r {
 			t.Fatalf("FailingRuns(green, %s) = %+v, %t; want none, running", c.Name+c.Context, f, r)
 		}
+	}
+}
+
+// TestN13N32N37 covers N13 (distinct failing commits within the last hour and
+// since the last recap decision, skipped when ladder says passed), N32 (conflict
+// tells worker once per H) and N37 (review_required wakes coordinator once per H).
+func TestN13N32N37(t *testing.T) {
+	// N13: 3 distinct commits in the last hour -> open_ci_recap@0; duplicate head counts once; old fail excluded.
+	dup := with(noRounds, func(in *In) {
+		in.Task.CIFails = []CIFail{
+			{Head: "f1", At: now.Add(-30 * time.Minute)},
+			{Head: "f1", At: now.Add(-25 * time.Minute)},
+			{Head: "f2", At: now.Add(-10 * time.Minute)},
+			{Head: "f0", At: now.Add(-time.Hour)}, // outside the last hour
+		}
+	})
+	if r, _ := FirstMatch(TaskRows, dup); r.ID != "N29" {
+		t.Fatalf("2 distinct recent fails + 1 dup + 1 old = %s, want N29", r.ID)
+	}
+	// Recap decision resets the window.
+	reset := with(noRounds, ciFailed3, func(in *In) {
+		in.Task.Recaps = []Recap{{Trigger: TriggerCI, Decided: &RecapDecision{Choice: ChoiceContinue, At: now.Add(-15 * time.Minute)}}}
+	})
+	if r, _ := FirstMatch(TaskRows, reset); r.ID != "N29" {
+		t.Fatalf("after recap decision resetting 2 of 3 fails = %s, want N29", r.ID)
+	}
+	// Ladder == Passed does not fire N13.
+	if r, _ := FirstMatch(TaskRows, with(ciFailed3)); r.ID != "N42" {
+		t.Fatalf("ladder passed with 3 CI fails = %s, want N42", r.ID)
+	}
+	// N32: conflict tells worker once per H, not again on repeat pass.
+	cIn := with(conflict)
+	if r, d := FirstMatch(TaskRows, cIn); r.ID != "N32" || !slices.Equal(d.Asked, []string{"tell_worker_conflict@c1"}) {
+		t.Fatalf("N32 first = %s %v", r.ID, d.Asked)
+	}
+	a0(&cIn).Acts = append(a0(&cIn).Acts, Act{Key: "tell_worker_conflict@c1", Result: "done", At: now})
+	if r, d := FirstMatch(TaskRows, cIn); r.ID != "N32" || len(d.Asked) != 0 {
+		t.Fatalf("N32 repeat = %s %v, want nil", r.ID, d.Asked)
+	}
+	// N37: review_required wakes once per H, not again on repeat pass.
+	rrIn := with(reviewReq)
+	if r, d := FirstMatch(TaskRows, rrIn); r.ID != "N37" || !slices.Equal(d.Asked, []string{"wake_coordinator@review_required@c1"}) {
+		t.Fatalf("N37 first = %s %v", r.ID, d.Asked)
+	}
+	a0(&rrIn).Acts = append(a0(&rrIn).Acts, Act{Key: "wake_coordinator@review_required@c1", Result: "done", At: now})
+	if r, d := FirstMatch(TaskRows, rrIn); r.ID != "N37" || len(d.Asked) != 0 {
+		t.Fatalf("N37 repeat = %s %v, want nil", r.ID, d.Asked)
 	}
 }

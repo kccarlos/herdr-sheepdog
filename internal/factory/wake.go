@@ -46,6 +46,9 @@ func taskFacts(t flow.Task, f flow.Facts) string {
 	if len(f.DepsDropped) > 0 {
 		out += "; dropped dependencies: " + strings.Join(f.DepsDropped, ", ")
 	}
+	if f.PR.ReviewRequired {
+		out += "; GitHub requires an approving review (repo branch protection / ruleset required approving reviews): nobody in the factory can approve"
+	}
 	if rc := flow.OpenRecap(t); rc != nil {
 		out += fmt.Sprintf("; recap trigger %s, allowed [%s]", rc.Trigger, strings.Join(rc.Allowed, ", "))
 		if a := flow.OpenAttempt(t); a != nil && rc.Trigger == flow.TriggerSize {

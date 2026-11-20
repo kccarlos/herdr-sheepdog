@@ -334,7 +334,9 @@ var taskExecutors = map[string]taskExec{
 	flow.AskTellFindings: (*Engine).execTellFindings,
 	flow.AskOpenRecap:    (*Engine).execOpenRecap,
 	flow.AskSizeRecap:    (*Engine).execSizeRecap,
+	flow.AskCIRecap:      (*Engine).execCIRecap,
 	flow.AskTellStop:     (*Engine).execTellStop,
+	flow.AskTellConflict: (*Engine).execTellConflict,
 	flow.AskMergeOnly:    (*Engine).execMergeOnly,
 	flow.AskRerunCI:      (*Engine).execRerunCI,
 	flow.AskTellCI:       (*Engine).execTellCI,
@@ -915,6 +917,11 @@ func (e *Engine) execSizeRecap(_ context.Context, _ string, s *flow.State, ti in
 	return openRecap(&s.Tasks[ti], flow.TriggerSize, flow.SizeRecapAllowed(s.Tasks[ti], s.Settings)), false, nil
 }
 
+// execCIRecap is N13: open a ci recap with the choices it allows now.
+func (e *Engine) execCIRecap(_ context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	return openRecap(&s.Tasks[ti], flow.TriggerCI, flow.SizeRecapAllowed(s.Tasks[ti], s.Settings)), false, nil
+}
+
 func openRecap(t *flow.Task, trigger string, allowed []string) string {
 	if flow.OpenRecap(*t) == nil {
 		t.Recaps = append(t.Recaps, flow.Recap{Trigger: trigger, Allowed: allowed})
@@ -922,14 +929,33 @@ func openRecap(t *flow.Task, trigger string, allowed []string) string {
 	return fmt.Sprintf("opened recap (trigger %s, allowed %s)", trigger, strings.Join(allowed, ", "))
 }
 
-// execTellStop is N6 for a size recap: the worker is told once to stop.
+// execTellStop is N6 for a size or ci recap: the worker is told once to stop.
 func (e *Engine) execTellStop(ctx context.Context, _ string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
 	a := flow.OpenAttempt(s.Tasks[ti])
+	if rc := flow.OpenRecap(s.Tasks[ti]); rc != nil && rc.Trigger == flow.TriggerCI {
+		msg := fmt.Sprintf("Task %s hit %d failing CI commits in the last hour. Stop now and write nothing more; the coordinator decides how the task goes on.", s.Tasks[ti].ID, s.Settings.CIFailsPerHour)
+		return "told worker to stop at the CI failure limit", false, world.SendRun(ctx, e.HC, a.RunID, msg)
+	}
 	msg := fmt.Sprintf("Task %s is over its size cap: %d changed lines, cap %d. Stop now and write nothing more; the coordinator decides how the task goes on.", s.Tasks[ti].ID, f.Lines, a.SizeCap)
 	if f.LinesTimeout {
 		msg = fmt.Sprintf("Task %s timed out reading changed lines (counts as over cap %d). Stop now and write nothing more; the coordinator decides how the task goes on.", s.Tasks[ti].ID, a.SizeCap)
 	}
 	return "told worker to stop at the size cap", false, world.SendRun(ctx, e.HC, a.RunID, msg)
+}
+
+// execTellConflict is N32: tell the worker once per H to merge the base (never rebase).
+func (e *Engine) execTellConflict(ctx context.Context, _ string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
+	t, a := s.Tasks[ti], flow.OpenAttempt(s.Tasks[ti])
+	if a == nil || a.RunID == "" {
+		return "", false, errors.New("factory: no worker run to tell about PR conflict")
+	}
+	prefix := ""
+	if f.TipRel == flow.RelBehind {
+		prefix = fmt.Sprintf("Pull first (`git pull --ff-only origin %s` — the engine updated the branch). ", a.Branch)
+	}
+	msg := fmt.Sprintf("%sPR #%d conflicts with the base at %s — merge the base into your branch (never rebase), resolve, commit, and run %s again.",
+		prefix, f.PR.Number, flow.H(*a), readyCmd(cmp.Or(e.Bin, "sheepdog"), t.Outcomes))
+	return "told worker PR conflicts with the base", false, world.SendRun(ctx, e.HC, a.RunID, msg)
 }
 
 // execMergeOnly is N20: H moves to a tip that is ahead of it by merges of
@@ -1041,7 +1067,13 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 			e.logOnce("factory.git_error", id, a.Worktree+" head_rel", err) // unknown here (e.g. not fetched): no relation, never a guess
 		}
 	}
-	if !reflect.DeepEqual(p, last) && ctx.Err() == nil {
+	ciFailAdded := false
+	if p.Answered && p.State == flow.PROpen && p.Head != "" && p.Checks == flow.ChecksRed &&
+		!slices.ContainsFunc(s.Tasks[ti].CIFails, func(f flow.CIFail) bool { return f.Head == p.Head }) {
+		s.Tasks[ti].CIFails = append(s.Tasks[ti].CIFails, flow.CIFail{Head: p.Head, At: time.Now()})
+		ciFailAdded = true
+	}
+	if (ciFailAdded || !reflect.DeepEqual(p, last)) && ctx.Err() == nil {
 		if e.prs == nil {
 			e.prs = map[string]flow.PR{}
 		}
