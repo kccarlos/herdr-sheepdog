@@ -570,6 +570,9 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"DELETE /api/push/activity", accessDevice, s.handlePushActivityEnd},
 		route{"GET /api/push/status", accessDevice, s.handlePushStatus},
 		route{"POST /api/feedback", accessDevice, s.handleFeedback},
+		route{"GET /api/factory/projects", accessDevice, s.handleFactoryView("projects")},
+		route{"GET /api/factory/projects/{id}/graph", accessDevice, s.handleFactoryView("graph")},
+		route{"GET /api/factory/projects/{id}/log", accessDevice, s.handleFactoryView("log")},
 
 		// This computer only: pairing, debug and internal routes.
 		route{"GET /api/pair", accessLoopback, s.handlePair},
