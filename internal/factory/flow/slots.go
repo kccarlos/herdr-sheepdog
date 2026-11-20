@@ -109,8 +109,10 @@ func criticalPaths(tasks []Task) map[string]int {
 		memo[id] = est[id] + best
 		return memo[id]
 	}
-	for id := range est {
-		longest(id)
+	for _, t := range tasks {
+		if !Ended(t) {
+			longest(t.ID)
+		}
 	}
 	return memo
 }
