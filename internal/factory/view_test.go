@@ -380,7 +380,7 @@ func TestTaskWhyLinesPriorityAndFactoryPageRoundText(t *testing.T) {
 			{ID: "ci_n38", LastRow: "N38", Attempts: passed},
 			{ID: "ci_n37", LastRow: "N37", Attempts: passed},
 			{ID: "ntc_n8", LastRow: "N8", Attempts: []flow.Attempt{{BaseCommit: "000", NothingToChange: "done"}}},
-			{ID: "fallback_s1", LastRow: "S1", Attempts: []flow.Attempt{{BaseCommit: "000"}}},
+			{ID: "closed_pr_n4", LastRow: "N4", Attempts: []flow.Attempt{{BaseCommit: "000"}}},
 		},
 	}
 	g := GraphViewOf(st, nil)
@@ -401,7 +401,7 @@ func TestTaskWhyLinesPriorityAndFactoryPageRoundText(t *testing.T) {
 		"ci_n38":        {"ci", "Waiting on the base branch", 2},
 		"ci_n37":        {"ci", "Waiting on a GitHub approval", 2},
 		"ntc_n8":        {"blocked_or_failed", "Worker reported nothing to change, waiting on the coordinator", 0},
-		"fallback_s1":   {"blocked_or_failed", "Waiting on the owner", 0},
+		"closed_pr_n4":  {"blocked_or_failed", "Waiting on the coordinator", 0},
 	}
 	for ref, w := range want {
 		tv := byRef[ref]

@@ -356,7 +356,7 @@ A row that needs a run (worker, reviewer, retro) names it by role, round and com
 | the owner quit it in its terminal | do not restart; wake the coordinator once. Its `retry` restarts the run |
 | signed out | add an at-the-Mac item; the next candidate that resolves starts with a handoff; if none, wait until doctor sees it signed in |
 | reviewer or retro with no valid report (a verdict read from a touched worktree is none, section 7.2) | start again with the next reviewer candidate while tries are below `reviewer_retries`; then it counts as a failure (N5). Slice 1 marks the round's start act failed instead, so only an owner start tries the round again |
-| any other end, restarts below `worker_restarts`, backoff passed | worker: resume the session if it is resumable and on the same CLI, else start with a handoff |
+| worker, any other end, restarts below `worker_restarts` | wait until backoff has passed and a slot is free, then resume the session if it is resumable and on the same CLI, else start with a handoff |
 | otherwise | it counts as a failure (N5) |
 
 Starting or restarting a worker needs a free slot, like a first start (N10); without one it waits. A run that ends `signed_out` while the CLI's own sign-in check passes counts as a restart, so it cannot loop.
@@ -706,7 +706,7 @@ Per-CLI differences that are **data**: base command, fixed environment (Claude C
 | The rest of the argv | `--no-daemon` (its own app server, never a shared one), `--no-alt-screen` (the scrollback `hc read` needs), a read-only sandbox, never an approval prompt, model and effort stated |
 | The owner's own instructions | The run's `CODEX_HOME` is one folder per data dir (`<data_dir>/factory/codex-home`) holding only a link to the owner's `auth.json`, so the reviewer reads none of the owner's global instructions, config or skills. If Codex has replaced that link with a file (a sign-in refresh), the engine never touches it: that round runs on Claude opus and the daemon log names the fix |
 | A repo's own `.codex/config.toml` | Still loads in a trusted folder; no per-run override turns it off without a prompt (O14) |
-| Status | herdr-core's status for a Codex terminal is not used, except "gone". The report tag ends the run: the screen is read every pass, after the last prompt echo, with no wait for idle. The stand-in row's no-tag clock starts when the run starts, so `stuck_minutes` covers the whole Codex review |
+| Status | The report tag ends the run: the screen is read every pass, after the last prompt echo, with no wait for idle. Non-empty output moves the run to `working`, so a review with no tag that goes quiet ends via R21–R22 and retries under section 4.8 (`reviewer_retries`), while one that goes idle with no tag wakes the coordinator after `stuck_minutes` until `review_minutes` lands in PR 5a.5 |
 
 Per-CLI differences that need **code**: pre-setting trust for a worktree, the agy sandbox wrapper for read-only runs, listing models.
 
@@ -788,7 +788,7 @@ These are mechanics: how a thing is done once a row has asked for it. They decid
 | `worker_restarts`, `reviewer_retries` | 3, 2 | 0–10, 0–5 | section 4.8 |
 | `ensure_failures`, `ensure_backoff_minutes` | 3, 1 | 1–10, 1–60 | N5, section 8 |
 | `start_minutes`, `idle_grace_seconds`, `quiet_minutes`, `interrupt_seconds`, `review_minutes` | 2, 20, 20, 90, 45 | 1–15, 5–120, 5–120, 10–600, 10–240 | R11, R18–R22, N29 |
-| `stuck_minutes` | 30 | 5–240 | the stuck stand-in row of plan slice 2 (2.1), until section 4.8 replaces it in slice 5a; counted from the failed act, the voided round, or the reviewer going idle with no valid tag |
+| `stuck_minutes` | 30 | 5–240 | the reduced S2 fallback row, kept until PR 5a.3 (N5 and section 8 retries) and PR 5a.5 (`review_minutes`) replace it; counted from a failed non-run act or the reviewer going idle with no report tag |
 | `background_job_minutes`, `blocked_minutes` | 30, 10 | 1–240, 1–120 | the worker watch of 4.4, N29, N39; R29 |
 | `coordinator_starts_per_hour`, `coordinator_gap_minutes`, `owner_typing_minutes`, `coordinator_silent_minutes` | 3, 10, 5, 30 | 1–10, 1–60, 1–60, 5–240 | J6, J9 |
 | `rotate_after_hours`, `rotate_after_turns`, `handoff_minutes`, `heartbeat_minutes` | 4, 150, 5, 60 | 1–24, 20–1000, 1–30, 10–600 | J11, J13 |
@@ -1107,7 +1107,7 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | O7 | The ladder (4.6) treats review, retro, recap and owner as one loop at four levels. The levels are not alike (three retro verdicts, four recap choices). If the special cases grow, split the function per level rather than adding conditions |
 | O8 | The picture of the tables (`transitions.html`, published privately for the owner) was redrawn for form B from the tables of this file. Its "Try it" panel is a simplified illustration, and its interactions were not tested in a browser |
 | O9 | 62 of the old engine's 893 test functions are cited by no knowledge-base row (knowledge-base.md, Appendix D). They were not re-read |
-| O10 | Until reviewers run in a scratch copy (9.1, U13), slice 1 runs them in the task's worktree. A round voided because the reviewer left that worktree dirty (7.2) leaves the dirt there: the worker's next `ready` is refused (`dirty_tree`) and the next verdict would be void too. Slice 1 marks the round failed and logs it; slice 2's stuck row wakes the coordinator. Who cleans a reviewer's leftovers, and how without touching the worker's own unfinished work, is not decided (still open after slice 3) |
+| O10 | Until reviewers run in a scratch copy (9.1, U13), slice 1 runs them in the task's worktree. A round voided because the reviewer left that worktree dirty (7.2) leaves the dirt there: the worker's next `ready` is refused (`dirty_tree`) and the next verdict would be void too. The round is voided and logged, and section 4.8 retries up to `reviewer_retries` before waking the coordinator (`reviewer_failed`). Who cleans a reviewer's leftovers, and how without touching the worker's own unfinished work, is not decided (still open after slice 3) |
 | O11 | The in-memory tip reading (section 3, `last_tip`) is keyed by the tip and `H` only, not by the remote base commit. A reading taken while the local base ref was stale (a false `merge_only`, or a line count) stays until the tip or `H` moves. The effect is safe: the tip goes to review instead of N20, at the cost of one round |
 | O12 | After `recap decide new`, until the next attempt exists, a stopped worker's token still resolves to the closed attempt, so a stale terminal could add a ready to it. Harmless while that run is stopped; the fix is to resolve tokens only to an open attempt |
 | O13 | A worker cannot answer a coordinator's send-back at an unchanged head that is not the base: `--reject` is for reviewer rounds only, and `--nothing-to-change` is refused `nothing_new`. It can only commit or sit idle while N22 waits on it, and the coordinator is not woken. How a worker says "this is already right" is not decided |

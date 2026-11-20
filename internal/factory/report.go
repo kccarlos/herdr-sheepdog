@@ -843,10 +843,10 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 			}
 			msg = fmt.Sprintf("The coordinator lets task %s go on: %s. Your size cap is now %d changed lines%s. Continue the task.", t.ID, why, newCap, cur)
 		}
-		if a.RunID != "" {
+		if a.RunID != "" || a.Run != nil && a.Run.State == flow.PhaseEnded {
 			sctx, scancel := context.WithTimeout(context.Background(), lockGitTimeout)
 			defer scancel()
-			if err := world.SendRun(sctx, e.HC, a.RunID, msg); err != nil {
+			if err := e.deliverWorkerLocked(sctx, id, t.ID, s, a, msg, false); err != nil {
 				e.logError("factory.exec_error", id, err)
 				return err
 			}
@@ -873,7 +873,7 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 			if err := e.stopRuns(ctx, taskRuns(id, *t)); err != nil {
 				return err
 			}
-			clearRuns(t)
+			stopTaskRuns(t, s.Settings, now)
 			a.Closed = note
 		}
 		rc.Decided = &flow.RecapDecision{Choice: choice, Why: why, At: now}
@@ -1126,8 +1126,9 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		if c.Priority != nil && ch.priority != t.Priority {
 			t.Priority, what = ch.priority, append(what, "priority")
 		}
+		var oldReq map[string][]flow.Candidate
 		if c.Request != nil && !reflect.DeepEqual(ch.request, t.Request) {
-			t.Request, what = ch.request, append(what, "request")
+			oldReq, t.Request, what = t.Request, ch.request, append(what, "request")
 		}
 		a := flow.OpenAttempt(*t)
 		var capNote string
@@ -1155,9 +1156,23 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 					if err := world.StopRun(ctx, e.HC, a.Review.RunID); err != nil {
 						return err
 					}
-					a.Review = nil
-					forgetStarts(a, false)
+					a.Review.Retries, a.Review.FailedModels, a.Review.Run = 0, nil, nil
+					stopReviewRec(a.Review, s.Settings, e.now())
 				}
+			}
+		}
+		if slices.Contains(what, "request") && a != nil {
+			if !slices.Equal(oldReq[flow.RoleWorker], t.Request[flow.RoleWorker]) && (a.RunID != "" || a.Run != nil && a.Run.State != flow.PhaseEnded) {
+				if err := world.StopRun(ctx, e.HC, a.RunID); err != nil {
+					return err
+				}
+				stopWorkerRec(a, s.Settings, e.now(), false)
+			}
+			if !slices.Equal(oldReq[flow.RoleReviewer], t.Request[flow.RoleReviewer]) && a.Review != nil && a.Review.RunID != "" {
+				if err := world.StopRun(ctx, e.HC, a.Review.RunID); err != nil {
+					return err
+				}
+				stopReviewRec(a.Review, s.Settings, e.now())
 			}
 		}
 		if len(what) == 0 {
@@ -1169,7 +1184,7 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 			rc := readyCmd(cmp.Or(e.Bin, "sheepdog"), t.Outcomes)
 			msg := fmt.Sprintf("The plan changed for task %s (%s): %s\nTitle: %s\nBrief:\n%s\nOutcomes:\n%s\nEarlier review rounds no longer count. If your work must change, commit and run %s again; otherwise wait.",
 				t.ID, strings.Join(workerWhat, ", "), why, t.Title, cmp.Or(strings.TrimSpace(t.Brief), "(none)"), bullets(t.Outcomes), rc)
-			if err := world.SendRun(ctx, e.HC, a.RunID, msg); err != nil { // a restarted worker reads the new plan anyway
+			if err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false); err != nil { // a restarted worker reads the new plan anyway
 				e.logError("factory.exec_error", id, err)
 			}
 		}

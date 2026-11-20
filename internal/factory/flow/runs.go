@@ -9,24 +9,25 @@ import (
 
 // Run phases, end results, events, screen classes and acts (design.md section 5).
 const (
-	PhaseStarting, PhaseWorking, PhaseIdle, PhaseBlocked, PhaseEnded      = "starting", "working", "idle", "blocked", "ended"
-	EndFailed, EndSignedOut, EndQuota, EndBlank, EndError                 = "failed", "signed_out", "quota", "blank", "error"
-	EndStuck, EndExited, EndLost, EndStopped                              = "stuck", "exited", "lost", "stopped"
-	EvLaunched, EvLaunchFailed, EvScreen, EvStatus                        = "launched", "launch_failed", "screen", "status"
-	EvActivity, EvTick, EvExit, EvLost, EvStop                            = "activity", "tick", "exit", "lost", "stop"
-	ScreenNone, ScreenTrust, ScreenConfirm, ScreenOnboarding              = "none", "trust", "confirm", "onboarding"
-	ScreenSignedOut, ScreenLimit                                          = "signed_out", "limit"
-	RunActKeys, RunActSendHeld, RunActInterrupt, RunActStop, RunActRemove = "press_keys", "send_held", "interrupt", "stop_run", "remove_terminal"
-	liveSet, firstHeld                                                    = "starting|working|idle|blocked", 1
+	PhaseStarting, PhaseWorking, PhaseIdle, PhaseBlocked, PhaseEnded                  = "starting", "working", "idle", "blocked", "ended"
+	EndFailed, EndSignedOut, EndQuota, EndBlank, EndError, EndResumeFailed            = "failed", "signed_out", "quota", "blank", "error", "resume_failed"
+	EndStuck, EndExited, EndLost, EndStopped                                          = "stuck", "exited", "lost", "stopped"
+	EvLaunched, EvLaunchFailed, EvScreen, EvStatus, EvDeliver                         = "launched", "launch_failed", "screen", "status", "deliver"
+	EvActivity, EvTick, EvExit, EvLost, EvStop                                        = "activity", "tick", "exit", "lost", "stop"
+	ScreenNone, ScreenTrust, ScreenConfirm, ScreenOnboarding                          = "none", "trust", "confirm", "onboarding"
+	ScreenSignedOut, ScreenLimit                                                      = "signed_out", "limit"
+	RunActKeys, RunActSend, RunActSendHeld, RunActInterrupt, RunActStop, RunActRemove = "press_keys", "send_message", "send_held", "interrupt", "stop_run", "remove_terminal"
+	RefuseRunEnded                                                                    = "run_ended"
+	liveSet, firstHeld                                                                = "starting|working|idle|blocked", 1
 )
 
 // RunRecord is a run's persisted state in state.json (design.md sections 3 and 5).
 type RunRecord struct {
-	ID, Address, Role, CLI, State, Result, Screen, ScreenHash, Status, BlockedKind, Question, Reason string
-	CreatedMS, Turn                                                                                  uint64
-	StartedAt, StatusSince, LastActivity, LastTurnEnd, BlockedSince, InterruptedAt                   time.Time
-	StatusReported                                                                                   bool
-	ScreensAnswered, Held                                                                            []string
+	ID, Address, Role, CLI, SessionID, State, Result, Screen, ScreenHash, Status, BlockedKind, Question, Reason string
+	CreatedMS, Turn                                                                                             uint64
+	StartedAt, EndedAt, StatusSince, LastActivity, LastTurnEnd, BlockedSince, InterruptedAt                     time.Time
+	StatusReported, Resumable, Resumed                                                                          bool
+	ScreensAnswered, Held                                                                                       []string
 }
 
 // TaskRun projects a RunRecord into the Run fact that task rows read.
@@ -42,6 +43,7 @@ type RunEvent struct {
 	Kind, Address, RunID, Screen, ScreenHash, Status, StatusKind, Msg, Reason string
 	CreatedMS, Turn                                                           uint64
 	StatusAt                                                                  time.Time
+	Urgent                                                                    bool
 }
 
 // RunIn is what a run row sees: the run record, event, settings and clock.
@@ -82,9 +84,8 @@ func rrow(id, from, on string, guard func(RunIn) bool, to string, acts ...string
 	return Row[RunIn]{ID: id, WaitsOn: "none", When: when, Then: func(x RunIn) Decision { return Decision{Asked: acts, Why: cmp.Or(to, x.R.State)} }}
 }
 
-// RunRows is the run transition table of design.md section 5: R1-R6, R8-R12, R14-R23, R27-R30, R33-R35, R37.
-// R7 (typed first prompt) and R13 (resume) wait for non-argv and resume launches;
-// R24-R26 and R36 (deliver) are PR 5a.2; R31 and R32 (pool_floor) are slice 5b.
+// RunRows is the run transition table of design.md section 5: R1-R6, R8-R30, R33-R37.
+// R7 (typed first prompt) waits for non-argv launches; R31 and R32 (pool_floor) are slice 5b.
 var RunRows = []Row[RunIn]{
 	rrow("R1", PhaseStarting, EvLaunched, nil, PhaseStarting),
 	rrow("R2", PhaseStarting, EvLaunchFailed, nil, "ended(failed)"),
@@ -102,11 +103,14 @@ var RunRows = []Row[RunIn]{
 	rrow("R11", PhaseStarting, EvTick, func(x RunIn) bool { return x.startOut() && isDialog(x.R.Screen) }, "ended(stuck)", RunActStop),
 	rrow("R11", PhaseStarting, EvTick, RunIn.startOut, "ended(blank)", RunActStop),
 	rrow("R12", PhaseStarting, "tick|activity", nil, PhaseStarting),
+	rrow("R13", "starting|working", EvExit, func(x RunIn) bool {
+		return x.R.Resumed && x.E.Reason != "killed" && !x.pastMin(x.R.StartedAt, x.S.StartMinutes)
+	}, "ended(resume_failed)", RunActRemove),
 	rrow("R14", "starting|working", "status:blocked", func(x RunIn) bool { return x.E.StatusKind == "auth" && x.pastMin(x.R.StartedAt, x.S.StartMinutes) }, "ended(signed_out)", RunActStop),
 	rrow("R15", "starting|working", "status:blocked", nil, PhaseBlocked),
 	rrow("R16", "starting|working", EvStatus, func(x RunIn) bool { return x.E.Status == "error" && isRevRole(x.R.Role) }, "ended(error)", RunActStop),
 	rrow("R17", PhaseWorking, EvStatus, nil, PhaseWorking),
-	rrow("R18", PhaseWorking, EvTick, func(x RunIn) bool { return x.idle() && len(x.R.Held) > 0 }, PhaseWorking, RunActSendHeld),
+	rrow("R18", PhaseWorking, EvTick, func(x RunIn) bool { return x.idle() && len(x.R.Held) > 0 && !isRevRole(x.R.Role) }, PhaseWorking, RunActSendHeld),
 	rrow("R19", PhaseWorking, EvTick, func(x RunIn) bool {
 		return x.idle() && x.R.Status != "error" && cmp.Or(x.E.Screen, x.R.Screen) == ScreenLimit
 	}, "ended(quota)", RunActStop),
@@ -116,6 +120,9 @@ var RunRows = []Row[RunIn]{
 		return !x.R.LastActivity.After(x.R.InterruptedAt) && x.pastSec(x.R.InterruptedAt, x.S.InterruptSeconds)
 	}, "ended(stuck)", RunActStop),
 	rrow("R23", PhaseWorking, "tick|activity", nil, PhaseWorking),
+	rrow("R24", PhaseIdle, EvDeliver, nil, PhaseWorking, RunActSend),
+	rrow("R25", PhaseWorking, EvDeliver, func(x RunIn) bool { return x.E.Urgent }, PhaseWorking, RunActInterrupt, RunActSend),
+	rrow("R26", "starting|working|blocked", EvDeliver, nil, ""),
 	rrow("R27", "idle|blocked", "status:working", nil, PhaseWorking),
 	rrow("R28", PhaseBlocked, "status:idle|status:done", nil, PhaseWorking),
 	rrow("R29", PhaseBlocked, EvTick, func(x RunIn) bool { return x.R.BlockedKind == "auth" && x.blockedOut() }, "ended(signed_out)", RunActStop),
@@ -125,6 +132,7 @@ var RunRows = []Row[RunIn]{
 	rrow("R33", liveSet, EvLost, nil, "ended(lost)"),
 	rrow("R34", liveSet, EvStop, nil, "ended(stopped)", RunActStop),
 	rrow("R35", PhaseWorking, "launched|launch_failed|screen", nil, PhaseWorking),
+	rrow("R36", PhaseEnded, EvDeliver, nil, RefuseRunEnded),
 	{ID: "R37", WaitsOn: "none", Then: func(RunIn) Decision { return Decision{Why: PhaseEnded} }},
 }
 
@@ -136,7 +144,7 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 		rec.ScreenHash = ev.ScreenHash
 	}
 	if res, ok := strings.CutPrefix(d.Why, "ended("); ok {
-		rec.State, rec.Result = PhaseEnded, strings.TrimSuffix(res, ")")
+		rec.State, rec.Result, rec.EndedAt = PhaseEnded, strings.TrimSuffix(res, ")"), now
 	}
 	stAt := cmp.Or(ev.StatusAt, now)
 	switch {
@@ -157,9 +165,14 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 				rec.LastActivity = now
 			}
 		}
+		if ev.Turn > rec.Turn {
+			rec.LastTurnEnd = time.Time{}
+		}
 		rec.StatusReported, rec.Turn = true, max(rec.Turn, ev.Turn)
 	case inSet("R12|R23", r.ID) && ev.Kind == EvActivity:
 		rec.LastActivity, rec.InterruptedAt = now, time.Time{}
+	case r.ID == "R13":
+		rec.Resumable, rec.Reason = false, ev.Reason
 	case r.ID == "R15":
 		if rec.State != PhaseBlocked || rec.BlockedSince.IsZero() {
 			rec.BlockedSince = stAt
@@ -168,9 +181,16 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 	case r.ID == "R18":
 		rec.Held, rec.StatusSince, rec.LastActivity = rec.Held[firstHeld:], now, now
 	case r.ID == "R20":
-		rec.State, rec.LastTurnEnd, rec.InterruptedAt, rec.Turn = PhaseIdle, now, time.Time{}, max(rec.Turn, ev.Turn)
+		if rec.LastTurnEnd.IsZero() || !rec.StatusSince.Before(rec.LastTurnEnd) {
+			rec.LastTurnEnd = now
+		}
+		rec.State, rec.InterruptedAt, rec.Turn = PhaseIdle, time.Time{}, max(rec.Turn, ev.Turn)
 	case r.ID == "R21":
 		rec.InterruptedAt, rec.ScreenHash = now, ""
+	case inSet("R24|R25", r.ID):
+		rec.State, rec.Status, rec.StatusSince, rec.LastActivity, rec.InterruptedAt = PhaseWorking, "", now, now, time.Time{}
+	case r.ID == "R26":
+		rec.Held = append(rec.Held, ev.Msg)
 	case r.ID == "R33":
 		rec.Reason = ev.Reason
 	}

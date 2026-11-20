@@ -98,6 +98,9 @@ func TestSettingsRange(t *testing.T) {
 		"quiet_minutes":                  func(s *Settings, n int) { s.QuietMinutes = n },
 		"interrupt_seconds":              func(s *Settings, n int) { s.InterruptSeconds = n },
 		"blocked_minutes":                func(s *Settings, n int) { s.BlockedMinutes = n },
+		"worker_restarts":                func(s *Settings, n int) { s.WorkerRestarts = n },
+		"reviewer_retries":               func(s *Settings, n int) { s.ReviewerRetries = n },
+		"ensure_backoff_minutes":         func(s *Settings, n int) { s.EnsureBackoffMinutes = n },
 		"stuck_minutes":                  func(s *Settings, n int) { s.StuckMinutes = n },
 		"max_running":                    func(s *Settings, n int) { s.MaxRunning = n },
 	}
@@ -116,6 +119,9 @@ func TestSettingsRange(t *testing.T) {
 		"quiet_minutes":                  {QuietMin, QuietMax},
 		"interrupt_seconds":              {InterruptMin, InterruptMax},
 		"blocked_minutes":                {BlockedMin, BlockedMax},
+		"worker_restarts":                {0, WorkerRestartsMax},
+		"reviewer_retries":               {0, ReviewerRetriesMax},
+		"ensure_backoff_minutes":         {EnsureBackoffMin, EnsureBackoffMax},
 		"stuck_minutes":                  {StuckMin, StuckMax},
 		"max_running":                    {MaxRunningMin, MaxRunningMax},
 	}

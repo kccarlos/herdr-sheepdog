@@ -205,6 +205,8 @@ type Attempt struct {
 	Rounds       []Round    `json:"rounds"`
 	Accepts      []Accept   `json:"accepts"`
 	Acts         []Act      `json:"acts"`
+	Restarts     int        `json:"restarts,omitempty"`
+	Held         []string   `json:"held,omitempty"`
 	// NothingToChange is the worker's reason for "nothing to change"; a later
 	// ready or send-back clears it (design.md 3.2).
 	NothingToChange string `json:"nothing_to_change,omitempty"`
@@ -249,10 +251,9 @@ type ReviewRun struct {
 	Head         string     `json:"head"`
 	Code         string     `json:"code"`
 	Reviewer     Reviewer   `json:"reviewer"`
-	// IdleSince is when a pass first read the run idle with no valid tag:
-	// the stuck row's clock (S2). The record goes when the round ends.
-	IdleSince   *time.Time `json:"idle_since,omitempty"`
-	RefusalSent bool       `json:"refusal_sent,omitempty"`
+	Retries      int        `json:"retries,omitempty"`
+	FailedModels []string   `json:"failed_models,omitempty"`
+	RefusalSent  bool       `json:"refusal_sent,omitempty"`
 }
 
 // Proof is one outcome's evidence attached to a ready report (design.md 3, 7.2):

@@ -56,7 +56,7 @@ func (e *Engine) execCleanup(ctx context.Context, id string, s *flow.State, ti i
 	if err := e.stopRuns(ctx, taskRuns(id, *t)); err != nil {
 		return "", false, err
 	}
-	clearRuns(t)
+	stopTaskRuns(t, s.Settings, e.now())
 	steps := []string{"stopped the task's runs"}
 	if len(t.Attempts) == 0 {
 		return steps[0], false, nil

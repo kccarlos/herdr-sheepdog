@@ -29,15 +29,13 @@ func UnmetDeps(t Task, tasks []Task) (notDone, dropped []string) {
 }
 
 // RunningTasks counts tasks holding a slot (design.md 4.8): an open attempt
-// whose worker run is not gone (idle/done/error hold the slot; stop_task frees
-// it only when no worker run is live).
+// whose worker run is not gone (idle/done/error hold the slot; an ended worker
+// frees it).
 func RunningTasks(tasks []Task, workerState map[string]RunState) int {
 	n := 0
 	for _, t := range tasks {
-		if a := OpenAttempt(t); !Ended(t) && !t.Parked && a != nil {
-			if st := workerState[t.ID]; st != RunGone && (st != RunNone || Count(a.Acts, AskStopTask) == 0) {
-				n++
-			}
+		if a := OpenAttempt(t); !Ended(t) && !t.Parked && a != nil && cmp.Or(workerState[t.ID], a.Run.TaskRun().State) != RunGone {
+			n++
 		}
 	}
 	return n

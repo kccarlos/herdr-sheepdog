@@ -33,8 +33,8 @@ func TestN4PRClosedByHand(t *testing.T) {
 	l.pass()
 
 	st := l.state()
-	if st.Tasks[0].Attempts[0].Review != nil {
-		t.Fatalf("active reviewer was not stopped on closed PR: %+v", st.Tasks[0].Attempts[0].Review)
+	if r := st.Tasks[0].Attempts[0].Review; r == nil || r.RunID != "" || r.Run == nil || r.Run.Result != flow.EndStopped {
+		t.Fatalf("active reviewer was not stopped on closed PR: %+v", r)
 	}
 	if len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != "pr_closed" {
 		t.Fatalf("wakes = %+v, want 1 pr_closed wake", st.Project.Wakes)

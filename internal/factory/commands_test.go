@@ -109,17 +109,17 @@ func TestN3ParkStopsRunsUnparkStartsAgain(t *testing.T) {
 		}
 	}
 	a := l.state().Tasks[0].Attempts[0]
-	if a.RunID != "" || a.Review != nil || flow.Count(a.Acts, flow.AskStartWorker) != 0 || flow.Count(a.Acts, "tell_worker_findings@1") != 0 {
-		t.Fatalf("attempt after N3: run %q review %+v acts %+v", a.RunID, a.Review, a.Acts)
+	if a.RunID != "" || a.Review == nil || a.Review.RunID != "" || a.Review.Run == nil || a.Review.Run.Result != flow.EndStopped || a.Run == nil || a.Run.Result != flow.EndStopped {
+		t.Fatalf("attempt after N3: run %q rec %+v review %+v", a.RunID, a.Run, a.Review)
 	}
 	l.pass()
-	if a := l.state().Tasks[0].Attempts[0]; flow.Count(a.Acts, flow.AskStopRuns) != 1 || flow.Count(a.Acts, flow.AskStartWorker) != 0 {
-		t.Fatalf("parked pass asked again: %+v", a.Acts)
+	if a := l.state().Tasks[0].Attempts[0]; flow.Count(a.Acts, flow.AskStopRuns) != 1 || a.RunID != "" {
+		t.Fatalf("parked pass asked again: run %q acts %+v", a.RunID, a.Acts)
 	}
 	l.report("tok-coord", "task", `{"action":"unpark","task":"T1","why":"go on"}`, "")
 	l.pass()
-	if a := l.state().Tasks[0].Attempts[0]; !flow.Done(a.Acts, flow.AskStartWorker) || a.RunID == "" {
-		t.Fatalf("worker not started again after unpark: run %q acts %+v", a.RunID, a.Acts)
+	if a := l.state().Tasks[0].Attempts[0]; a.RunID == "" || a.Restarts != 0 {
+		t.Fatalf("worker not started again uncounted after unpark: run %q restarts %d acts %+v", a.RunID, a.Restarts, a.Acts)
 	}
 }
 
@@ -164,7 +164,7 @@ func TestSendBackStaysWithWorkerUntilReady(t *testing.T) {
 	gitIn(t, l.wt, "commit", "-m", "test: empty case")
 	c2 := gitIn(t, l.wt, "rev-parse", "HEAD")
 	l.pass()
-	if a := l.state().Tasks[0].Attempts[0]; a.Review != nil || ladder() != flow.Fix || len(sendsTo(t, l.srv.Requests(), l.worker)) != 1 {
+	if a := l.state().Tasks[0].Attempts[0]; (a.Review != nil && a.Review.RunID != "") || ladder() != flow.Fix || len(sendsTo(t, l.srv.Requests(), l.worker)) != 1 {
 		t.Fatalf("a commit without ready left the worker: review %+v ladder %s", a.Review, ladder())
 	}
 	l.report("tok-worker", "ready", `{"head":"`+c2+`"}`, "")

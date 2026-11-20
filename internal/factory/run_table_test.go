@@ -84,9 +84,8 @@ func TestWorkerDiedMidTurnSeenAsGone(t *testing.T) {
 			if len(r33) != 1 || r33[0].Decision != "ended(exited)" || !strings.Contains(r33[0].Why, reason) {
 				t.Fatalf("R33 log = %+v, want 1 ended(exited) naming %s", r33, reason)
 			}
-			s1 := logRules(t, paths.Log(id), "S1")
-			if len(s1) != 1 {
-				t.Fatalf("S1 log = %+v, want worker seen as gone in same pass", s1)
+			if st.Tasks[0].LastRow != "N23" || st.Tasks[0].Attempts[0].RunID != "" || st.Tasks[0].Attempts[0].Restarts != 0 {
+				t.Fatalf("after mid-turn %s: row=%s runID=%q restarts=%d, want N23 waiting on backoff", reason, st.Tasks[0].LastRow, st.Tasks[0].Attempts[0].RunID, st.Tasks[0].Attempts[0].Restarts)
 			}
 		})
 	}
@@ -131,6 +130,7 @@ func TestStartTrustScreenToldApartFromBlank(t *testing.T) {
 	eng.passProject(ctx, id, false) // N11
 	eng.passProject(ctx, id, false) // N23 starts T1..T4
 	st, _ = LoadState(paths.State(id))
+	st.Settings.WorkerRestarts = 0
 	st.Tasks[3].Attempts[0].Run.CLI = "agy"
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
