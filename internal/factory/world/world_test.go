@@ -61,6 +61,11 @@ func TestClaudeArgvGolden(t *testing.T) {
 	}
 }
 
+func startRun(ctx context.Context, client *hc.Client, spec RunSpec) (string, error) {
+	t, _, err := StartTerminal(ctx, client, spec, nil)
+	return t.Address, err
+}
+
 func observeRunState(ctx context.Context, client *hc.Client, id string) (flow.RunState, error) {
 	evs, err := ObserveRun(ctx, client, flow.RunRecord{Address: id, State: flow.PhaseWorking})
 	if err != nil {
@@ -82,7 +87,7 @@ func TestRunLifecycleAndProcessGroupStop(t *testing.T) {
 	claudeCfg := filepath.Join(t.TempDir(), ".claude.json")
 
 	argv := ClaudeArgv(flow.RoleCoordinator, "opus", "high", "bypassPermissions")
-	id, err := StartRun(ctx, client, RunSpec{
+	id, err := startRun(ctx, client, RunSpec{
 		Name:         "coord-test",
 		Cwd:          cwd,
 		ClaudeConfig: claudeCfg,
@@ -93,9 +98,9 @@ func TestRunLifecycleAndProcessGroupStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// KB-LCH-24: repeated StartRun for the same live name adopts the running terminal.
-	if id2, err := StartRun(ctx, client, RunSpec{Name: "coord-test", Cwd: cwd, ClaudeConfig: claudeCfg, Argv: argv}); err != nil || id2 != id {
-		t.Fatalf("duplicate StartRun = %q, %v; want %q", id2, err, id)
+	// KB-LCH-24: repeated StartTerminal for the same live name adopts the running terminal.
+	if id2, err := startRun(ctx, client, RunSpec{Name: "coord-test", Cwd: cwd, ClaudeConfig: claudeCfg, Argv: argv}); err != nil || id2 != id {
+		t.Fatalf("duplicate startRun = %q, %v; want %q", id2, err, id)
 	}
 	term, err := client.Get(ctx, id)
 	if err != nil {
@@ -159,13 +164,13 @@ func TestStartRunRemovesFinishedSameNameTerminal(t *testing.T) {
 		ClaudeConfig: filepath.Join(t.TempDir(), ".claude.json"),
 		Argv:         ClaudeArgv(flow.RoleCoordinator, "opus", "high", "bypassPermissions"),
 	}
-	id1, err := StartRun(ctx, client, spec)
+	id1, err := startRun(ctx, client, spec)
 	if err != nil {
 		t.Fatal(err)
 	}
 	srv.Finish(id1, "exited")
 
-	id2, err := StartRun(ctx, client, spec)
+	id2, err := startRun(ctx, client, spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +190,7 @@ func TestStartRunOmitsDuplicateDisableAutoupdaterEnv(t *testing.T) {
 	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { got = p }
 	client := hc.NewClient(srv.Path)
 
-	_, err := StartRun(context.Background(), client, RunSpec{
+	_, err := startRun(context.Background(), client, RunSpec{
 		Name:         "coord-env",
 		Cwd:          t.TempDir(),
 		ClaudeConfig: filepath.Join(t.TempDir(), ".claude.json"),
@@ -265,8 +270,9 @@ func TestObserveRunScreensActivityAndExit(t *testing.T) {
 		cli, screen, wantClass string
 		wantKeys               []string
 	}{
-		{"claude", "Is this a project you created or one you trust?\n❯ 1. Yes, I trust this folder", flow.ScreenTrust, []string{"enter"}},
-		{CodexCLI, "Hooks need review\n1. Yes\n3. Continue without trusting", flow.ScreenConfirm, []string{"3", "enter"}},
+		{"agy", "Do you trust the contents of this project?\n> Yes, I trust this folder\n  No, exit", flow.ScreenTrust, []string{"enter"}},
+		{"claude", "Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder", flow.ScreenTrust, nil},
+		{CodexCLI, "Hooks need review\n1. Yes\n3. Continue without trusting", flow.ScreenConfirm, nil},
 		{"claude", "Not logged in · Please run /login", flow.ScreenSignedOut, nil},
 		{"claude", "You've hit your limit · resets 2pm", flow.ScreenLimit, nil},
 		{"claude", "", flow.ScreenNone, nil},
@@ -274,7 +280,7 @@ func TestObserveRunScreensActivityAndExit(t *testing.T) {
 		if got := ScreenClass(tc.cli, tc.screen); got != tc.wantClass {
 			t.Errorf("ScreenClass(%q, %q) = %q, want %q", tc.cli, tc.screen, got, tc.wantClass)
 		}
-		if got := ScreenKeys(tc.cli, tc.wantClass); !slices.Equal(got, tc.wantKeys) {
+		if got := flow.ScreenKeys(tc.cli, tc.wantClass); !slices.Equal(got, tc.wantKeys) {
 			t.Errorf("ScreenKeys(%q, %q) = %v, want %v", tc.cli, tc.wantClass, got, tc.wantKeys)
 		}
 	}
@@ -303,6 +309,48 @@ func TestObserveRunScreensActivityAndExit(t *testing.T) {
 	srv.Finish("t1", "killed")
 	if evs, _ = ObserveRun(ctx, client, rec); len(evs) != 1 || evs[0].Kind != flow.EvExit || evs[0].Reason != "killed" {
 		t.Fatalf("finished terminal = %+v, want [exit killed]", evs)
+	}
+}
+
+func TestScreenClassUIOnlyAndVerifiedKeys(t *testing.T) {
+	agyTrust, err := os.ReadFile("../../../testdata/herdr/agy-trust-dialog.screen.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claudeTrust, err := os.ReadFile("../../../testdata/herdr/claude-trust-dialog.screen.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claudeIdle, err := os.ReadFile("../../../testdata/herdr/claude-idle.screen.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proseAboveTail := "⏺ Checked workerlog: usage limit and quota exceeded and You've hit your limit · resets 2pm.\n" +
+		strings.Repeat("  normal test output line\n", 14) + string(claudeIdle)
+	proseInTail := "⏺ Handled usage limit and quota exceeded in workerlog/errors.go.\n\n" + string(claudeIdle)
+
+	for _, tc := range []struct {
+		name, cli, screen, wantClass string
+		wantKeys                     []string
+	}{
+		{"limit prose above tail", "claude", proseAboveTail, flow.ScreenNone, nil},
+		{"limit prose inside tail", "claude", proseInTail, flow.ScreenNone, nil},
+		{"claude limit UI in tail", "claude", "⎿  You've hit your limit · resets 2pm (America/Los_Angeles)\n" + string(claudeIdle), flow.ScreenLimit, nil},
+		{"cross-cli limit ignored", "claude", "Individual quota reached · resets tomorrow\n" + string(claudeIdle), flow.ScreenNone, nil},
+		{"agy trust verified enter", "agy", string(agyTrust), flow.ScreenTrust, []string{"enter"}},
+		{"claude trust default is No exit", "claude", string(claudeTrust), flow.ScreenTrust, nil},
+		{"claude bypass default is No exit", "claude", "WARNING: Claude Code running in Bypass Permissions mode\n❯ 1. No, exit\n  2. Yes, I accept\n", flow.ScreenConfirm, nil},
+		{"codex hooks unverified", CodexCLI, "Hooks need review\n1. Review hooks\n3. Continue without trusting\n", flow.ScreenConfirm, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gotClass := ScreenClass(tc.cli, tc.screen)
+			if gotClass != tc.wantClass {
+				t.Errorf("ScreenClass(%q) = %q, want %q", tc.cli, gotClass, tc.wantClass)
+			}
+			if gotKeys := flow.ScreenKeys(tc.cli, gotClass); !slices.Equal(gotKeys, tc.wantKeys) {
+				t.Errorf("ScreenKeys(%q, %q) = %v, want %v", tc.cli, gotClass, gotKeys, tc.wantKeys)
+			}
+		})
 	}
 }
 
@@ -366,8 +414,8 @@ func TestClaudeFolderTrustAndTestGuard(t *testing.T) {
 	if err := os.WriteFile(cfgFile, []byte(seed), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := StartRun(ctx, client, RunSpec{Name: "coord-t1", Cwd: cwd, ClaudeConfig: cfgFile, Argv: argv}); err != nil {
-		t.Fatalf("StartRun with existing config: %v", err)
+	if _, err := startRun(ctx, client, RunSpec{Name: "coord-t1", Cwd: cwd, ClaudeConfig: cfgFile, Argv: argv}); err != nil {
+		t.Fatalf("startRun with existing config: %v", err)
 	}
 	info, err := os.Stat(cfgFile)
 	if err != nil || info.Mode().Perm() != 0o600 {
@@ -397,8 +445,8 @@ func TestClaudeFolderTrustAndTestGuard(t *testing.T) {
 	cfgDir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", cfgDir)
 	cwd2 := t.TempDir()
-	if _, err := StartRun(ctx, client, RunSpec{Name: "coord-t2", Cwd: cwd2, Argv: argv}); err != nil {
-		t.Fatalf("StartRun with CLAUDE_CONFIG_DIR: %v", err)
+	if _, err := startRun(ctx, client, RunSpec{Name: "coord-t2", Cwd: cwd2, Argv: argv}); err != nil {
+		t.Fatalf("startRun with CLAUDE_CONFIG_DIR: %v", err)
 	}
 	envCfg := filepath.Join(cfgDir, ".claude.json")
 	envRaw, err := os.ReadFile(envCfg)
@@ -406,21 +454,21 @@ func TestClaudeFolderTrustAndTestGuard(t *testing.T) {
 		t.Fatalf("CLAUDE_CONFIG_DIR/.claude.json missing trust (%v):\n%s", err, string(envRaw))
 	}
 
-	// 3. Malformed file is left untouched and StartRun still succeeds.
+	// 3. Malformed file is left untouched and StartTerminal still succeeds.
 	badFile := filepath.Join(t.TempDir(), "malformed.json")
 	const broken = "{broken json\n"
 	if err := os.WriteFile(badFile, []byte(broken), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := StartRun(ctx, client, RunSpec{Name: "coord-t3", Cwd: cwd, ClaudeConfig: badFile, Argv: argv}); err != nil {
-		t.Fatalf("StartRun with malformed config should still proceed: %v", err)
+	if _, err := startRun(ctx, client, RunSpec{Name: "coord-t3", Cwd: cwd, ClaudeConfig: badFile, Argv: argv}); err != nil {
+		t.Fatalf("startRun with malformed config should still proceed: %v", err)
 	}
 	if after, err := os.ReadFile(badFile); err != nil || string(after) != broken {
 		t.Fatalf("malformed file changed: got %q (%v), want %q", string(after), err, broken)
 	}
 
 	// 4. Path outside os.TempDir() is refused under go test.
-	if _, err := StartRun(ctx, client, RunSpec{Name: "coord-t4", Cwd: cwd, ClaudeConfig: "/nonexistent-sheepdog-test-guard/.claude.json", Argv: argv}); err == nil {
+	if _, err := startRun(ctx, client, RunSpec{Name: "coord-t4", Cwd: cwd, ClaudeConfig: "/nonexistent-sheepdog-test-guard/.claude.json", Argv: argv}); err == nil {
 		t.Fatal("expected test-path guard error for ClaudeConfig outside os.TempDir()")
 	}
 }

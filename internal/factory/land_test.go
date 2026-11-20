@@ -59,7 +59,7 @@ func newLanding(t *testing.T) *landing {
 	gitIn(t, l.wt, "commit", "-m", "feat: x")
 	l.c1 = gitIn(t, l.wt, "rev-parse", "HEAD")
 	gitIn(t, l.wt, "push", "origin", l.c1+":refs/heads/"+l.branch)
-	if l.worker, err = world.StartRun(ctx, l.client, world.RunSpec{Name: "worker-t1", Cwd: l.wt, Argv: []string{"sh"}}); err != nil {
+	if l.worker, err = startRun(ctx, l.client, world.RunSpec{Name: "worker-t1", Cwd: l.wt, Argv: []string{"sh"}}); err != nil {
 		t.Fatal(err)
 	}
 	setIdle(t, srv, l.client, l.worker, "idle")
@@ -77,6 +77,11 @@ func newLanding(t *testing.T) *landing {
 	})
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	return l
+}
+
+func startRun(ctx context.Context, client *hc.Client, spec world.RunSpec) (string, error) {
+	t, _, err := world.StartTerminal(ctx, client, spec, nil)
+	return t.Address, err
 }
 
 func (l *landing) pass() { l.eng.passProject(context.Background(), l.id, false) }

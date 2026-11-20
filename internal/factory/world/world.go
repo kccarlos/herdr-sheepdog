@@ -55,7 +55,7 @@ func ClaudeArgv(role, model, effort, permissionMode string) []string {
 		// dontAsk denies anything not listed; the list is read-only plus
 		// the usual test runners, and never Edit or Write.
 		// One argument with "=": --allowedTools takes many values and would
-		// otherwise swallow the prompt that StartRun appends (seen live).
+		// otherwise swallow the prompt that StartTerminal appends (seen live).
 		argv = append(argv, "--allowedTools="+reviewerTools)
 	}
 	return argv
@@ -69,12 +69,6 @@ const reviewerTools = "Read Grep Glob LS " +
 	"Bash(git diff:*) Bash(git log:*) Bash(git show:*) Bash(git status:*) " +
 	"Bash(go build:*) Bash(go test:*) Bash(go vet:*) Bash(gofmt -l:*) Bash(make test:*) " +
 	"Bash(npm test:*) Bash(pytest:*) Bash(python3 -m pytest:*) Bash(python3 -m unittest:*)"
-
-// StartRun launches spec in herdr-core and returns its terminal address.
-func StartRun(ctx context.Context, client *hc.Client, spec RunSpec) (string, error) {
-	t, _, err := StartTerminal(ctx, client, spec, nil)
-	return t.Address, err
-}
 
 // StartTerminal launches spec in herdr-core (or adopts a live same-name terminal) and returns its terminal record and whether an hc check failed before launch.
 func StartTerminal(ctx context.Context, client *hc.Client, spec RunSpec, beforeLaunch func() error) (hc.Terminal, bool, error) {
@@ -91,7 +85,7 @@ func StartTerminal(ctx context.Context, client *hc.Client, spec RunSpec, beforeL
 		}
 	}
 	if client == nil || strings.TrimSpace(spec.Cwd) == "" || len(spec.Argv) == 0 {
-		return hc.Terminal{}, false, errors.New("world: StartRun requires hc client, Cwd and Argv")
+		return hc.Terminal{}, false, errors.New("world: StartTerminal requires hc client, Cwd and Argv")
 	}
 	if beforeLaunch != nil {
 		if err := beforeLaunch(); err != nil {
@@ -213,7 +207,7 @@ func StopRun(ctx context.Context, client *hc.Client, id string) error {
 	if client == nil || id == "" {
 		return nil
 	}
-	t, err := getTerminal(ctx, client, id)
+	t, err := client.Get(ctx, id)
 	if errors.Is(err, hc.ErrNotFound) {
 		return nil
 	} else if err != nil {
@@ -252,26 +246,47 @@ func deref[T any](p *T) (z T) {
 	return z
 }
 
-// ScreenClass classifies a pre-status or idle screen text against adapter patterns (design.md 9.2, spike S0.2).
-func ScreenClass(_ string, text string) string {
-	low := strings.ToLower(ansiRe.ReplaceAllString(text, ""))
-	for _, p := range [][2]string{
-		{flow.ScreenSignedOut, "not logged in|please run /login|invalid api key|sign in with chatgpt|codex login|not signed in|please sign in"},
-		{flow.ScreenLimit, "hit your limit|usage limit|exceeded your current quota|quota exceeded"},
-		{flow.ScreenTrust, "is this a project you created or one you trust|do you trust the contents of this|yes, i trust this folder|trust this directory"},
-		{flow.ScreenConfirm, "hooks need review|bypass permissions mode"},
-		{flow.ScreenOnboarding, "choose the text style|welcome to claude code"},
+const screenTailLines = 12
+
+func matchUI(lines []string, spec, trim string) bool {
+	return slices.ContainsFunc(strings.Split(spec, "|"), func(pat string) bool {
+		p, wild := strings.CutSuffix(pat, "*")
+		return slices.ContainsFunc(lines, func(ln string) bool {
+			s := strings.TrimLeft(ln, trim)
+			return (wild && strings.HasPrefix(s, p)) || (!wild && s == pat)
+		})
+	})
+}
+
+// ScreenClass classifies the bottom UI region of text against cli's known
+// dialog, sign-out and usage-limit screens (design.md 5, 9.2; spikes S0.2, S0.8).
+func ScreenClass(cli, text string) string {
+	lines := strings.Split(strings.TrimRight(ansiRe.ReplaceAllString(strings.ReplaceAll(text, "\r\n", "\n"), ""), "\n \t"), "\n")
+	var ui []string
+	for _, ln := range lines[max(0, len(lines)-screenTailLines):] {
+		if s := strings.TrimLeft(strings.ToLower(strings.TrimSpace(ln)), "⏺●⎿⚠✕✗•·│✨\u200a "); s != "" {
+			ui = append(ui, s)
+		}
+	}
+	for _, r := range [][4]string{
+		{"claude", flow.ScreenSignedOut, "not logged in · please run /login*|invalid api key · please run /login*|not logged in|please run /login", ""},
+		{"claude", flow.ScreenLimit, "you've hit your limit*|claude ai usage limit reached*", ""},
+		{"claude", flow.ScreenTrust, "quick safety check: is this a project*|is this a project you created or one you trust?*", "yes, i trust this folder|1. yes, i trust this folder"},
+		{"claude", flow.ScreenConfirm, "warning: claude code running in bypass permissions mode*|bypass permissions mode*", "1. no, exit|no, exit"},
+		{CodexCLI, flow.ScreenSignedOut, "sign in with chatgpt*|not logged in", ""},
+		{CodexCLI, flow.ScreenLimit, "you've hit your usage limit*|you've hit your limit*|you exceeded your current quota*", ""},
+		{CodexCLI, flow.ScreenTrust, "do you trust the contents of this directory?*|trust this folder?*", "1. yes, continue|1. trust and continue"},
+		{CodexCLI, flow.ScreenConfirm, "hooks need review*", "3. continue without trusting"},
+		{CodexCLI, flow.ScreenConfirm, "update available!*", "2. skip"},
+		{"agy", flow.ScreenSignedOut, "not signed in*|please sign in to*", ""},
+		{"agy", flow.ScreenLimit, "individual quota reached*|you've hit your limit*|you've hit your usage limit*", ""},
+		{"agy", flow.ScreenTrust, "do you trust the contents of this project?", "> yes, i trust this folder"},
 	} {
-		if slices.ContainsFunc(strings.Split(p[1], "|"), func(s string) bool { return strings.Contains(low, s) }) {
-			return p[0]
+		if r[0] == cli && matchUI(ui, r[2], "") && (r[3] == "" || matchUI(ui, r[3], "❯› ")) {
+			return r[1]
 		}
 	}
 	return flow.ScreenNone
-}
-
-// ScreenKeys returns the adapter keystrokes that answer a start dialog (design.md 9.2).
-func ScreenKeys(cli, class string) []string {
-	return map[string][]string{CodexCLI + ":confirm": {"3", "enter"}, ":trust": {"enter"}, ":confirm": {"enter"}, ":onboarding": {"enter"}}[map[bool]string{true: cli}[cli == CodexCLI && class == flow.ScreenConfirm]+":"+class]
 }
 
 // ObserveRun reads rec's terminal and screen from herdr-core and emits the events for one pass (design.md 5, 7.3).
@@ -279,7 +294,13 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]f
 	if rec.State == flow.PhaseEnded {
 		return nil, nil
 	}
-	t, err := getTerminal(ctx, client, rec.Address)
+	if client == nil {
+		return nil, errors.New("world: no hc client")
+	}
+	if rec.Address == "" {
+		return []flow.RunEvent{{Kind: flow.EvLost}}, nil
+	}
+	t, err := client.Get(ctx, rec.Address)
 	if errors.Is(err, hc.ErrNotFound) || (err == nil && ((rec.ID != "" && t.Labels["sheepdog.run"] != rec.ID) || (rec.CreatedMS != 0 && t.CreatedMS != 0 && t.CreatedMS != rec.CreatedMS))) {
 		return []flow.RunEvent{{Kind: flow.EvLost}}, nil
 	} else if err != nil {
@@ -288,14 +309,14 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]f
 	if t.State != "live" {
 		return []flow.RunEvent{{Kind: flow.EvExit, Reason: deref(t.Reason)}}, nil
 	}
-	cls, hash, nonEmpty := flow.ScreenNone, "", false
+	cls, hash, nonEmpty := "", "", false
 	if rd, rerr := client.Read(ctx, rec.Address, 200); rerr == nil && rd.Complete {
 		clean := ansiRe.ReplaceAllString(strings.ReplaceAll(rd.Text, "\r\n", "\n"), "")
-		sum := sha256.Sum256([]byte(clean))
+		sum := sha256.Sum256([]byte(strings.Join(strings.Fields(noiseRe.ReplaceAllString(durationRe.ReplaceAllString(clean, " "), " ")), " ")))
 		hash, nonEmpty, cls = hex.EncodeToString(sum[:8]), strings.TrimSpace(clean) != "", ScreenClass(rec.CLI, clean)
 	}
 	var evs []flow.RunEvent
-	if rec.State == flow.PhaseStarting && !rec.StatusReported && t.Status == nil {
+	if cls != "" && rec.State == flow.PhaseStarting && !rec.StatusReported && t.Status == nil {
 		evs = append(evs, flow.RunEvent{Kind: flow.EvScreen, Screen: cls, ScreenHash: hash})
 		if rec.CLI == CodexCLI && nonEmpty && cls == flow.ScreenNone {
 			evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: "working"})
@@ -315,38 +336,29 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]f
 }
 
 // ActRun executes one run-table act against herdr-core.
-func ActRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, act, msg string) error {
+func ActRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, act string, held []string) (err error) {
+	if client == nil || rec.Address == "" {
+		return nil
+	}
 	switch act {
 	case flow.RunActKeys:
-		if keys := ScreenKeys(rec.CLI, rec.Screen); len(keys) > 0 {
-			_, err := client.Keys(ctx, rec.Address, keys...)
-			return err
+		if keys := flow.ScreenKeys(rec.CLI, rec.Screen); len(keys) > 0 {
+			_, err = client.Keys(ctx, rec.Address, keys...)
 		}
-	case flow.RunActSendFirst, flow.RunActSendHeld:
-		return SendRun(ctx, client, rec.Address, msg)
+	case flow.RunActSendHeld:
+		if len(held) > 0 {
+			err = SendRun(ctx, client, rec.Address, held[0])
+		}
 	case flow.RunActInterrupt:
-		_, err := client.Interrupt(ctx, rec.Address, 0)
-		return err
+		_, err = client.Interrupt(ctx, rec.Address, 0)
 	case flow.RunActStop:
-		return StopRun(ctx, client, rec.Address)
+		err = StopRun(ctx, client, rec.Address)
 	case flow.RunActRemove:
-		if client != nil && rec.Address != "" {
-			if _, err := client.Remove(ctx, rec.Address); !errors.Is(err, hc.ErrNotFound) && !errors.Is(err, hc.ErrLive) {
-				return err
-			}
+		if _, rerr := client.Remove(ctx, rec.Address); !errors.Is(rerr, hc.ErrNotFound) && !errors.Is(rerr, hc.ErrLive) {
+			err = rerr
 		}
 	}
-	return nil
-}
-
-func getTerminal(ctx context.Context, client *hc.Client, id string) (hc.Terminal, error) {
-	if client == nil {
-		return hc.Terminal{}, errors.New("world: no hc client")
-	}
-	if id == "" {
-		return hc.Terminal{}, hc.ErrNotFound
-	}
-	return client.Get(ctx, id)
+	return err
 }
 
 const reportReadLines = 4000
@@ -378,6 +390,8 @@ type ReportRead struct {
 
 var (
 	ansiRe       = regexp.MustCompile(`\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))`)
+	durationRe   = regexp.MustCompile(`\b\d+(?:\.\d+)?(?:ms|[dhms])\b`)
+	noiseRe      = regexp.MustCompile(`[0-9✢✳✶✻✽✦✧·•\x{2800}-\x{28ff}◐◓◑◒◴◷◶◵]+`)
 	tuiPromptRe  = regexp.MustCompile(`(?m)^❯[ \t\x{00a0}]+\S`)
 	tuiReplyRe   = regexp.MustCompile(`(?m)^⏺`)
 	tuiInputRe   = regexp.MustCompile(`(?m)^\x{2500}{8,}\n❯`)

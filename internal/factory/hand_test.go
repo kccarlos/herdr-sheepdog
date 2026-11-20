@@ -18,7 +18,7 @@ import (
 // never opens a second PR, and never merges.
 func TestN4PRClosedByHand(t *testing.T) {
 	l := newLanding(t)
-	revID, err := world.StartRun(context.Background(), l.client, world.RunSpec{Name: "rev-t1-1", Cwd: l.wt, Argv: []string{"sh"}})
+	revID, err := startRun(context.Background(), l.client, world.RunSpec{Name: "rev-t1-1", Cwd: l.wt, Argv: []string{"sh"}})
 	if err != nil {
 		t.Fatal(err)
 	}

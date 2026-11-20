@@ -167,7 +167,7 @@ func TestEngineStopKillsUnrecordedCoordinator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := world.StartRun(ctx, client, world.RunSpec{
+	if _, err := startRun(ctx, client, world.RunSpec{
 		Name:         "coord-" + strings.TrimPrefix(projID, "proj-"),
 		Cwd:          repo,
 		ClaudeConfig: paths.ClaudeConfig,

@@ -2,6 +2,7 @@ package flow
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -130,11 +131,17 @@ func TestSettingsRange(t *testing.T) {
 			}
 		}
 	}
-	// max_rounds lower bound tracks review_rounds (design.md 10.1).
+	// max_rounds lower bound tracks review_rounds (design.md 10.1), and
+	// Validate checks fields in declaration order (review_rounds before max_rounds).
 	s := DefaultSettings()
 	s.ReviewRounds, s.MaxRounds = 4, 3
 	if err := s.Validate(); err == nil {
 		t.Error("max_rounds < review_rounds validated")
+	}
+	sOrder := DefaultSettings()
+	sOrder.ReviewRounds, sOrder.MaxRounds = 6, 5
+	if err := sOrder.Validate(); err == nil || !strings.Contains(err.Error(), "review_rounds 6: allowed 1–5") {
+		t.Errorf("Validate(review_rounds=6, max_rounds=5) = %v, want review_rounds error first", err)
 	}
 	// dispatch_workflow is a plain file name under .github/workflows.
 	for w, ok := range map[string]bool{"": true, "ci.yml": true, "Build_2.yaml": true, "../ci.yml": false, ".github/workflows/ci.yml": false, `a\b.yml`: false, "..": false,

@@ -90,7 +90,7 @@ func TestTaskCommandsAcceptance(t *testing.T) {
 func TestN3ParkStopsRunsUnparkStartsAgain(t *testing.T) {
 	l := newLanding(t).withTokens()
 	ctx := context.Background()
-	rev, err := world.StartRun(ctx, l.client, world.RunSpec{Name: "rev-t1", Cwd: l.wt, Argv: []string{"sh"}})
+	rev, err := startRun(ctx, l.client, world.RunSpec{Name: "rev-t1", Cwd: l.wt, Argv: []string{"sh"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestN3ParkStopsRunsUnparkStartsAgain(t *testing.T) {
 func TestSendBackStaysWithWorkerUntilReady(t *testing.T) {
 	l := newLanding(t).withTokens()
 	ctx := context.Background()
-	rev, err := world.StartRun(ctx, l.client, world.RunSpec{Name: "rev-t1-3", Cwd: l.wt, Argv: []string{"sh"}})
+	rev, err := startRun(ctx, l.client, world.RunSpec{Name: "rev-t1-3", Cwd: l.wt, Argv: []string{"sh"}})
 	if err != nil {
 		t.Fatal(err)
 	}

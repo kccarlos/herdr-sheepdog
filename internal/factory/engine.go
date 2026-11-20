@@ -251,11 +251,10 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		return
 	}
 	if s.Project.RunID == "" && flow.Count(s.Project.Acts, "coordinator") == 0 {
-		prompt := coordinatorPrompt(coordinatorTemplate, s.Project, cmp.Or(e.Bin, "sheepdog"))
 		termID, rec, abort, err := e.launchRunLocked(ctx, id, &s, &s.Project.RunTokenHash, "claude", world.RunSpec{
 			Name: coordName(id), Cwd: s.Project.Folder, ClaudeConfig: e.Paths.ClaudeConfig,
 			Argv:   world.ClaudeArgv(flow.RoleCoordinator, "opus", "medium", "bypassPermissions"),
-			Prompt: prompt,
+			Prompt: coordinatorPrompt(coordinatorTemplate, s.Project, cmp.Or(e.Bin, "sheepdog")),
 			Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleCoordinator, "sheepdog.model": "opus"},
 		})
 		if abort || ctx.Err() != nil {
@@ -315,7 +314,7 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 	}
 	now, fresh := e.now(), *recp == nil || (runID != "" && (*recp).Address != runID)
 	if fresh {
-		*recp = &flow.RunRecord{Address: runID, Role: role, CLI: cli, State: flow.PhaseStarting, PromptViaArgv: true, StartedAt: now, LastActivity: now}
+		*recp = &flow.RunRecord{Address: runID, Role: role, CLI: cli, State: flow.PhaseStarting, StartedAt: now, LastActivity: now}
 	}
 	if (*recp).State == flow.PhaseEnded || e.HC == nil {
 		return (*recp).TaskRun(), nil
@@ -330,11 +329,7 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 		next, row, dec := flow.StepRun(old, ev, s.Settings, now)
 		**recp = next
 		for _, act := range dec.Asked {
-			var msg string
-			if len(old.Held) > 0 {
-				msg = old.Held[0]
-			}
-			if aerr := world.ActRun(ctx, e.HC, next, act, msg); aerr != nil {
+			if aerr := world.ActRun(ctx, e.HC, next, act, old.Held); aerr != nil {
 				e.logError("factory.exec_error", id, aerr)
 			}
 		}
@@ -359,7 +354,7 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 	runID, minted := "run-"+strings.ToLower(rand.Text()[:12]), false
 	spec.Labels["sheepdog.run"], spec.Env = runID, env
 	now := e.now()
-	rec := flow.RunRecord{Role: spec.Labels["sheepdog.role"], CLI: cli, State: flow.PhaseStarting, StartedAt: now, LastActivity: now, PromptViaArgv: spec.Prompt != ""}
+	rec := flow.RunRecord{Role: spec.Labels["sheepdog.role"], CLI: cli, State: flow.PhaseStarting, StartedAt: now, LastActivity: now}
 	term, abort, err := world.StartTerminal(ctx, e.HC, spec, func() error {
 		tok := rand.Text()
 		*hash, env["SHEEPDOG_RUN_TOKEN"], minted = tokenHash(tok), tok, true
@@ -373,8 +368,7 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 	if err != nil {
 		if abort && !minted {
 			e.logError("factory.hc_error", id, err)
-		}
-		if minted {
+		} else if minted {
 			*hash = ""
 		}
 		rec, _, _ = flow.StepRun(rec, flow.RunEvent{Kind: flow.EvLaunchFailed}, s.Settings, now)
@@ -600,11 +594,9 @@ func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, t
 
 func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
-	bin := cmp.Or(e.Bin, "sheepdog")
-	prompt := workerPrompt(workerTemplate, *t, *a, bin)
 	termID, rec, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, "claude", world.RunSpec{
 		Name: workerName(id, t.ID, len(t.Attempts)), Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
-		Argv: world.ClaudeArgv(flow.RoleWorker, workerModel, "medium", "bypassPermissions"), Prompt: prompt,
+		Argv: world.ClaudeArgv(flow.RoleWorker, workerModel, "medium", "bypassPermissions"), Prompt: workerPrompt(workerTemplate, *t, *a, cmp.Or(e.Bin, "sheepdog")),
 		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleWorker, "sheepdog.task": t.ID, "sheepdog.model": workerModel},
 	})
 	a.Run = rec
@@ -881,10 +873,9 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	if env != nil {
 		argv = world.CodexArgv(model, effort, a.Worktree)
 	}
-	prompt := reviewerPrompt(reviewerTemplate, *t, *a, h, kind, diff, e.rejectionPrompt(id, t.ID, *a, h), round)
 	termID, rec, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, cmp.Or(a.Review.Reviewer.CLI, "claude"), world.RunSpec{
 		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
-		Argv: argv, Prompt: prompt, Env: env,
+		Argv: argv, Prompt: reviewerPrompt(reviewerTemplate, *t, *a, h, kind, diff, e.rejectionPrompt(id, t.ID, *a, h), round), Env: env,
 		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleReviewer, "sheepdog.task": t.ID, "sheepdog.model": model},
 	})
 	if err != nil {
