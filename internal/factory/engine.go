@@ -1050,7 +1050,7 @@ func (e *Engine) deliverWorkerLocked(ctx context.Context, id, taskID string, s *
 		}
 	}
 	if a == nil || (a.RunID == "" && (a.Run == nil || a.Run.State != flow.PhaseEnded)) || (e.HC == nil && a.Run == nil) {
-		if a != nil && a.Run == nil && a.RunID == "" && !flow.Done(a.Acts, flow.AskStartWorker) {
+		if a != nil && a.RunID == "" && (a.Run == nil && !flow.Done(a.Acts, flow.AskStartWorker) || a.Run != nil && a.Run.State == flow.PhaseStarting && a.Run.Address == "") {
 			a.Held = appendHeld(a.Held, msg)
 			return nil
 		}

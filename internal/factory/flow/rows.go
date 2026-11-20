@@ -52,7 +52,7 @@ func key(verb string, parts ...any) string {
 // once asks for k unless acts already hold it, whatever its result. Retries
 // and back-off are section 8 (slice 5a).
 func once(acts []Act, k string) []string {
-	if Count(acts, k) > 0 {
+	if k == "" || Count(acts, k) > 0 {
 		return nil
 	}
 	return []string{k}
@@ -77,14 +77,24 @@ func EnsureRun(in In, role string) []string {
 	if r.State == RunWorking || r.State == RunIdle || r.Pending {
 		return nil
 	}
-	if last != nil && last.State != PhaseEnded {
+	inFlight := last != nil && last.State == PhaseStarting && last.Address == ""
+	if last != nil && last.State != PhaseEnded && !inFlight {
 		last = nil
 	}
 	if last == nil && r.State == RunGone {
 		last = &RunRecord{State: PhaseEnded, Result: EndExited}
 	}
+	firstKey := AskStartWorker
+	if role == RoleReviewer {
+		firstKey = key(AskStartReview, round, h)
+	}
 	switch {
-	case last != nil && last.State == PhaseEnded && last.Result == EndStopped:
+	case (last == nil || inFlight) && Count(a.Acts, firstKey) == 0:
+		if role != RoleReviewer && in.Facts.NoSlot {
+			return nil
+		}
+		return []string{firstKey}
+	case inFlight || last != nil && last.Result == EndStopped:
 		if role == RoleReviewer {
 			return []string{key(AskStartReview, round, ContinueResume, h)}
 		} else if in.Facts.NoSlot {
@@ -92,12 +102,7 @@ func EnsureRun(in In, role string) []string {
 		}
 		return []string{workerStartAsk(in, last, 0)}
 	case last == nil:
-		if role == RoleReviewer {
-			return once(a.Acts, key(AskStartReview, round, h))
-		} else if in.Facts.NoSlot {
-			return nil
-		}
-		return once(a.Acts, AskStartWorker)
+		return nil
 	case last.Result == EndQuota || last.Result == EndSignedOut:
 		// Quota and signed-out rows are slice 5b; owner-quit detection awaits herdr-core (U12) and retry (5a.3/5a.4).
 	case role == RoleReviewer && tries < in.Settings.ReviewerRetries:
@@ -117,7 +122,7 @@ func EnsureRun(in In, role string) []string {
 
 func workerStartAsk(in In, last *RunRecord, n int) string {
 	mode := ContinueHandoff
-	if res, _ := Resolve(RoleWorker, in.Task, in.Settings, UnprobedFacts); last.Resumable && last.SessionID != "" && last.CLI == cmp.Or(res.CLI, "claude") {
+	if res, _ := Resolve(RoleWorker, in.Task, in.Settings, UnprobedFacts); (last.Resumable || last.State == PhaseStarting && last.Resumed) && last.SessionID != "" && last.CLI == cmp.Or(res.CLI, "claude") {
 		mode = ContinueResume
 	}
 	if n == 0 {
@@ -264,7 +269,8 @@ func join(asked [][]string) []string {
 }
 
 // stuckKey backs the reduced S2 fallback: failed non-run acts until PR 5a.3
-// (N5 retry), and an idle no-tag reviewer until PR 5a.5 (time limits).
+// (N5 retry), and an idle no-tag reviewer until PR 5a.5 (time limits). It
+// returns "" once its wake act exists so S2 lets go on the next pass.
 func stuckKey(in In) string {
 	if in.Task.Parked || prClosed(in) {
 		return ""
@@ -272,12 +278,13 @@ func stuckKey(in In) string {
 	d, h := time.Duration(in.Settings.StuckMinutes)*time.Minute, headH(in)
 	if a := in.attempt(); !ended(in) && !prMerged(in) && !recapOpen(in) && ladderSays(Review)(in) &&
 		!noPR(in) && (!prOpen(in) || !prBehindH(in)) && in.Facts.Reviewer.State == RunIdle &&
-		!in.Facts.Reviewer.LastTurnEnd.IsZero() && in.Now.Sub(in.Facts.Reviewer.LastTurnEnd) >= d {
+		!in.Facts.Reviewer.LastTurnEnd.IsZero() && in.Now.Sub(in.Facts.Reviewer.LastTurnEnd) >= d &&
+		Count(in.acts(), key(AskWake, "stuck", "reviewer_idle", nextRound(*a), h)) == 0 {
 		return key(AskWake, "stuck", "reviewer_idle", nextRound(*a), h)
 	}
 	for _, ac := range in.acts() {
 		verb, _, _ := strings.Cut(ac.Key, "@")
-		if last := LastAct(in.acts(), ac.Key); last == nil || last.Result != "failed" || last.At.IsZero() || in.Now.Sub(last.At) < d {
+		if last := LastAct(in.acts(), ac.Key); last == nil || last.Result != "failed" || last.At.IsZero() || in.Now.Sub(last.At) < d || Count(in.acts(), key(AskWake, "stuck", ac.Key)) > 0 {
 			continue
 		}
 		if ended(in) && verb == AskCleanup || prMerged(in) && verb == AskMarkDone ||
@@ -296,7 +303,7 @@ func stuckKey(in In) string {
 // (4.8) wherever a row needs a worker or reviewer run.
 var TaskRows = []Row[In]{
 	// Reduced S2 fallback until PR 5a.3 (N5 retry) and PR 5a.5 (time limits).
-	{ID: "S2", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return stuckKey(in) != "" }, Then: func(in In) Decision {
+	{ID: "S2", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return len(once(in.acts(), stuckKey(in))) > 0 }, Then: func(in In) Decision {
 		k := stuckKey(in)
 		return say("stuck past stuck_minutes: "+k, once(in.acts(), k))(in)
 	}},

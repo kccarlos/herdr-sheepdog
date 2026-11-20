@@ -1003,3 +1003,115 @@ func TestWorkerFailedStatusShowsFailedNotWorking(t *testing.T) {
 		t.Fatalf("graph after worker_failed = %+v, want blocked_or_failed mentioning worker failed", g.Tasks[0])
 	}
 }
+
+// TestProbeS2HoldsAfterWake (Opus round-2 probe A): after S2's wake for a
+// failed act, S2 lets go so rows below run — a send-back reaches the worker,
+// and a dead worker is restarted.
+func TestProbeS2HoldsAfterWake(t *testing.T) {
+	l := newLanding(t).withTokens()
+	now := time.Now()
+	l.eng.Now = func() time.Time { return now }
+	if err := os.WriteFile(filepath.Join(l.gh, "merge_fail"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l.pass()
+	now = now.Add(31 * time.Minute)
+	l.pass()
+	l.pass()
+	// the coordinator now sends the task back: N22 should run (tell the worker), S2 should not hold
+	l.report("tok-coord", "task", `{"action":"send-back","task":"T1","why":"redo"}`, "")
+	l.pass()
+	l.pass()
+	s := l.state()
+	t.Logf("row after wake + send-back: %s acts=%+v", s.Tasks[0].LastRow, s.Tasks[0].Attempts[0].Acts)
+	if s.Tasks[0].LastRow == "S2" {
+		t.Errorf("S2 keeps matching after its wake; rows below never run")
+	}
+	if !flow.Done(s.Tasks[0].Attempts[0].Acts, "tell_worker_findings@3") {
+		t.Errorf("send-back did not reach the worker: acts=%+v", s.Tasks[0].Attempts[0].Acts)
+	}
+
+	// Kill the worker while the failed merge act is still in Acts: N22 below S2
+	// must still run EnsureRun and restart the dead worker after backoff.
+	l.srv.Finish(s.Tasks[0].Attempts[0].RunID, "killed")
+	now = now.Add(10 * time.Second)
+	l.pass() // R33 -> ended(exited)
+	now = now.Add(2 * time.Minute)
+	l.pass() // N22 -> EnsureRun restarts worker
+	if a := l.state().Tasks[0].Attempts[0]; a.RunID == "" || a.Restarts != 1 {
+		t.Errorf("dead worker not restarted after S2 wake: row=%s runID=%q restarts=%d", l.state().Tasks[0].LastRow, a.RunID, a.Restarts)
+	}
+}
+
+// TestProbeCrashWindowRestart (Opus round-2 probe B): crash between the
+// pre-launch save and the commit during a counted restart recovers in 3 passes.
+func TestProbeCrashWindowRestart(t *testing.T) {
+	l := newLanding(t).withTokens()
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Ready, a.Rounds = nil, nil
+		a.RunID, a.Restarts = "", 1
+		a.Run = &flow.RunRecord{Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseStarting, SessionID: "11111111-1111-4111-8111-111111111111", StartedAt: time.Now(), LastActivity: time.Now()}
+		a.Acts = []flow.Act{{Key: flow.AskStartWorker, Result: "done"}}
+	})
+	for range 3 {
+		l.pass()
+	}
+	s := l.state()
+	a := s.Tasks[0].Attempts[0]
+	t.Logf("row=%s runID=%q rec=%+v", s.Tasks[0].LastRow, a.RunID, a.Run)
+	if a.RunID == "" {
+		t.Errorf("silent wait after crash in the launch window (row %s)", s.Tasks[0].LastRow)
+	}
+}
+
+// TestCrashWindowRestartTakesOverLiveTerminalAndReviewerRetry verifies that a
+// saved starting record with no address takes over an already-spawned terminal
+// by name without counting again (preserving SessionID and Resumed), and that a
+// reviewer retry crashing in the same window also recovers uncounted.
+func TestCrashWindowRestartTakesOverLiveTerminalAndReviewerRetry(t *testing.T) {
+	l := newLanding(t).withTokens()
+	var launched []hc.RunParams
+	l.srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { launched = append(launched, p) }
+
+	// 1. Worker terminal was spawned in hc right before crash; state.json has starting with Address == "".
+	const sid = "44444444-5555-4666-8777-888888888888"
+	wName := workerName(l.id, "T1", 1)
+	liveTerm, err := startRun(context.Background(), l.client, world.RunSpec{
+		Name: wName, Cwd: l.wt, ClaudeConfig: l.paths.ClaudeConfig, Prompt: "held across crash",
+		Argv: world.ClaudeSessionArgv(flow.RoleWorker, "sonnet", "medium", "bypassPermissions", sid, true),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Ready, a.Rounds, a.RunID, a.Restarts = nil, nil, "", 1
+		a.Held = []string{"held across crash"}
+		a.Run = &flow.RunRecord{Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseStarting, SessionID: sid, Resumed: true, StartedAt: time.Now(), LastActivity: time.Now()}
+		a.Acts = []flow.Act{{Key: flow.AskStartWorker, Result: "done"}}
+	})
+	launched = nil
+	for range 3 {
+		l.pass()
+	}
+	if a := l.state().Tasks[0].Attempts[0]; a.RunID != liveTerm || a.Restarts != 1 || len(launched) != 0 || a.Run == nil || a.Run.SessionID != sid || !a.Run.Resumed || len(a.Held) != 0 || len(a.Run.Held) != 0 {
+		t.Fatalf("worker crash takeover: runID=%q (want %q) restarts=%d launched=%d run=%+v held=%q/%q", a.RunID, liveTerm, a.Restarts, len(launched), a.Run, a.Held, a.Run.Held)
+	}
+
+	// 2. Reviewer retry crashed in the pre-launch window (Retries=1, Run starting with no address).
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Ready = []flow.Ready{{Head: l.c1}}
+		a.Rounds = nil
+		a.Review = &flow.ReviewRun{Round: 1, Head: l.c1, Code: "code123456", Reviewer: flow.Reviewer{CLI: "claude", Model: "sonnet"}, Retries: 1, FailedModels: []string{"opus"},
+			Run: &flow.RunRecord{Role: flow.RoleReviewer, CLI: "claude", State: flow.PhaseStarting, StartedAt: time.Now(), LastActivity: time.Now()}}
+		a.Acts = []flow.Act{{Key: flow.AskStartWorker, Result: "done"}, {Key: "push_and_open_pr@" + l.c1, Result: "done"}, {Key: "start_reviewer@1@" + l.c1, Result: "done"}}
+	})
+	for range 3 {
+		l.pass()
+	}
+	if rv := l.state().Tasks[0].Attempts[0].Review; rv == nil || rv.RunID == "" || rv.Retries != 1 || rv.Code != "code123456" {
+		t.Fatalf("reviewer retry crash recovery: review=%+v, want non-empty RunID with Retries=1 and Code preserved", rv)
+	}
+}

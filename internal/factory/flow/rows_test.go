@@ -481,6 +481,16 @@ func TestEnsureRun(t *testing.T) {
 			a0(in).Restarts = DefaultSettings().WorkerRestarts
 			a0(in).Run = &RunRecord{State: PhaseEnded, Result: EndExited, EndedAt: now.Add(-time.Hour)}
 		}), []string{"wake_coordinator@worker_failed"}},
+		"crash window restart asks uncounted handoff": {wBase(func(in *In) {
+			a0(in).Restarts = 1
+			a0(in).Acts = []Act{{Key: AskStartWorker, Result: "done"}}
+			a0(in).Run = &RunRecord{State: PhaseStarting, CLI: "claude", SessionID: "s1"}
+		}), []string{"start_worker@handoff"}},
+		"crash window resumed restart asks uncounted resume": {wBase(func(in *In) {
+			a0(in).Restarts = 1
+			a0(in).Acts = []Act{{Key: AskStartWorker, Result: "done"}}
+			a0(in).Run = &RunRecord{State: PhaseStarting, CLI: "claude", SessionID: "s1", Resumed: true}
+		}), []string{"start_worker@resume"}},
 	} {
 		if got := EnsureRun(tc.in, RoleWorker); !slices.Equal(got, tc.want) {
 			t.Errorf("worker %s: got %v, want %v", name, got, tc.want)
@@ -502,6 +512,10 @@ func TestEnsureRun(t *testing.T) {
 		"fresh reviewer": {rBase(), []string{"start_reviewer@1@c1"}},
 		"engine stopped reviewer": {rBase(reviewEnded, func(in *In) {
 			a0(in).Review = &ReviewRun{Round: 1, Head: "c1", Run: &RunRecord{State: PhaseEnded, Result: EndStopped}}
+		}), []string{"start_reviewer@1@resume@c1"}},
+		"crash window reviewer retry asks uncounted": {rBase(func(in *In) {
+			a0(in).Acts = []Act{{Key: "start_reviewer@1@c1", Result: "done"}}
+			a0(in).Review = &ReviewRun{Round: 1, Head: "c1", Retries: 1, Run: &RunRecord{State: PhaseStarting}}
 		}), []string{"start_reviewer@1@resume@c1"}},
 		"no report retry 1": {rBase(reviewEnded, func(in *In) {
 			a0(in).Review = &ReviewRun{Round: 1, Head: "c1", Retries: 0, Run: &RunRecord{State: PhaseEnded, Result: EndExited}}
@@ -562,6 +576,15 @@ func TestS2ReducedFallbackAllNonRunActsAndIdleReviewer(t *testing.T) {
 		r, d := FirstMatch(TaskRows, tc.in)
 		if r.ID != "S2" || !slices.Equal(d.Asked, []string{tc.want}) {
 			t.Errorf("%s: got %s %v, want S2 [%s]", name, r.ID, d.Asked, tc.want)
+		}
+		after := tc.in
+		if a := after.attempt(); a != nil {
+			a.Acts = append(slices.Clone(a.Acts), Act{Key: tc.want, Result: "done", At: after.Now})
+		} else {
+			after.Task.Acts = append(slices.Clone(after.Task.Acts), Act{Key: tc.want, Result: "done", At: after.Now})
+		}
+		if r2, _ := FirstMatch(TaskRows, after); r2.ID == "S2" {
+			t.Errorf("%s: S2 still matched after its wake act was recorded", name)
 		}
 	}
 }
