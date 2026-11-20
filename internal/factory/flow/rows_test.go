@@ -480,6 +480,29 @@ func TestLadderL12StreakAndMaxRounds(t *testing.T) {
 	}
 }
 
+// TestLadderL12NonDefaultStreak: with retro_from_round 2, a streak setting of 3
+// opens the recap one round later (round 3) than the default 2 (round 2).
+func TestLadderL12NonDefaultStreak(t *testing.T) {
+	chg := func(n int, head string) Round {
+		return Round{N: n, Kind: RoundFull, Head: head, Verdict: VerdictChanges, Majors: 1}
+	}
+	mk := func(k int, rounds ...Round) In {
+		return with(func(in *In) {
+			a0(in).Rounds = rounds
+			in.Settings.RetroFromRound, in.Settings.RetroAfterRoundsWithMajors = 2, k
+		})
+	}
+	if got := Ladder(mk(2, chg(1, "c0"), chg(2, "c1"))); got != RecapAnswer {
+		t.Fatalf("2 rounds with streak setting 2 = %s, want recap", got)
+	}
+	if got := Ladder(mk(3, chg(1, "c0"), chg(2, "c1"))); got != Fix {
+		t.Fatalf("2 rounds with streak setting 3 = %s, want fix", got)
+	}
+	if got := Ladder(mk(3, chg(1, "c0"), chg(2, "c0b"), chg(3, "c1"))); got != RecapAnswer {
+		t.Fatalf("3 rounds with streak setting 3 = %s, want recap", got)
+	}
+}
+
 // TestLadderCountsPerHeadAndResetsAfterChanges checks design.md 4.6 and D12:
 // L8 asks review until review_rounds passing rounds cover H (tested up to
 // ReviewRoundsMax), and a changes verdict followed by a new commit resets the

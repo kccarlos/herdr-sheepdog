@@ -101,15 +101,15 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 	case !clean:
 		return e.refuse(id, "dirty_tree", "The worktree has uncommitted changes; commit or discard them before reporting ready.")
 	case req.Reject != nil:
-		why := cleanRejectWhy(*req.Reject)
-		if why == "" {
-			return e.refuse(id, "why_missing", "A reject report must carry a non-empty reason (--reject \"<why>\").")
-		}
-		if utf8.RuneCountInString(why) > maxRejectWhyRunes {
-			return e.refuse(id, "invalid_report", "the reason is longer than 500 characters; put details in a file and name it")
+		why, err := e.cleanWhy(id, *req.Reject, "reject report", "--reject")
+		if err != nil {
+			return err
 		}
 		r := flow.RejectableRound(*a, h)
 		if rel != flow.RelSame || r == nil || flow.Ladder(flow.In{Task: *t, Settings: s.Settings}) != flow.Fix {
+			if flow.Ladder(flow.In{Task: *t, Settings: s.Settings}) == flow.RecapAnswer {
+				return e.refuse(id, "nothing_to_reject", "Nothing to reject: a recap is open and the coordinator decides; there is nothing for you to do.")
+			}
 			return e.refuse(id, "nothing_to_reject", "Nothing to reject: the newest round covering the current head must be an unrejected reviewer changes verdict with no new commit (after a commit, run report ready without --reject).")
 		}
 		a.Rejects = append(a.Rejects, flow.Reject{Head: h, Round: r.N, Why: why})
@@ -125,6 +125,18 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 }
 
 const maxRejectWhyRunes = 500
+
+// cleanWhy cleans a free-text reason and refuses it when empty or over the cap.
+func (e *Engine) cleanWhy(id, raw, what, flag string) (string, error) {
+	why := cleanRejectWhy(raw)
+	if why == "" {
+		return "", e.refuse(id, "why_missing", fmt.Sprintf("A %s must carry a non-empty reason (%s \"<why>\").", what, flag))
+	}
+	if utf8.RuneCountInString(why) > maxRejectWhyRunes {
+		return "", e.refuse(id, "invalid_report", "the reason is longer than 500 characters; put details in a file and name it")
+	}
+	return why, nil
+}
 
 func cleanRejectWhy(raw string) string {
 	return strings.Join(strings.Fields(strings.Map(func(r rune) rune {
@@ -346,18 +358,22 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 	if len(bytes.TrimSpace(args)) == 0 || dec.Decode(&req) != nil || strings.TrimSpace(req.Task) == "" || strings.TrimSpace(req.Choice) == "" {
 		return e.refuse(id, "invalid_report", "A recap decision must carry task and choice.")
 	}
-	taskID, choice, why := strings.TrimSpace(req.Task), strings.TrimSpace(req.Choice), strings.TrimSpace(req.Why)
+	taskID, choice := strings.TrimSpace(req.Task), strings.TrimSpace(req.Choice)
 	ti := slices.IndexFunc(s.Tasks, func(t flow.Task) bool { return t.ID == taskID })
 	if ti < 0 || flow.OpenRecap(s.Tasks[ti]) == nil {
 		return e.refuse(id, "no_recap", fmt.Sprintf("Task %q has no open recap.", taskID))
 	}
 	t := &s.Tasks[ti]
+	if flow.Ended(*t) {
+		return e.refuse(id, "already_closed", fmt.Sprintf("Task %q is already ended; its recap no longer needs a decision.", taskID))
+	}
 	rc := flow.OpenRecap(*t)
 	if !slices.Contains(rc.Allowed, choice) {
 		return e.refuse(id, "not_allowed", fmt.Sprintf("Choice %q is not allowed for this recap; allowed: %s.", choice, strings.Join(rc.Allowed, ", ")))
 	}
-	if why == "" {
-		return e.refuse(id, "why_missing", "A recap decision must carry a non-empty reason (--why \"<why>\").")
+	why, err := e.cleanWhy(id, req.Why, "recap decision", "--why")
+	if err != nil {
+		return err
 	}
 	if choice == "drop" {
 		if len(req.Children) > 0 {
@@ -366,9 +382,6 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		rc.Decided, t.Dropped = &flow.RecapDecision{Choice: choice, Why: why}, &flow.Dropped{Why: why}
 		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why},
 			Rule: "recap decide", Decision: "dropped", Why: why})
-	}
-	if choice != "split" {
-		return e.refuse(id, "not_allowed", fmt.Sprintf("Choice %q is not allowed for this recap; allowed: %s.", choice, strings.Join(rc.Allowed, ", ")))
 	}
 	raw, _ := json.Marshal(struct {
 		Tasks []json.RawMessage `json:"tasks"`

@@ -720,8 +720,8 @@ func TestReportReadyRejectRefusedWhenLadderSaysRecap(t *testing.T) {
 				t.Fatal(err)
 			}
 			err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c1+`","reject":"still wrong"}`))
-			if refusalCode(err) != "nothing_to_reject" {
-				t.Fatalf("reject when ladder says recap = %v, want nothing_to_reject", err)
+			if refusalCode(err) != "nothing_to_reject" || !strings.Contains(err.Error(), "the coordinator decides") {
+				t.Fatalf("reject when ladder says recap = %v, want nothing_to_reject naming the coordinator", err)
 			}
 		})
 	}
@@ -825,5 +825,51 @@ func TestRecapDecideAcceptance(t *testing.T) {
 	if st.Tasks[1].Dropped == nil || st.Tasks[1].Dropped.Why != "contradictory goal" ||
 		st.Tasks[1].Recaps[0].Decided == nil || st.Tasks[1].Recaps[0].Decided.Choice != "drop" {
 		t.Fatalf("parent after drop = %+v", st.Tasks[1])
+	}
+}
+
+// TestRecapDecideRefusesEndedTaskAndCleansWhy covers the PR 2.4 review round 1:
+// a recap left open on a task that ended another way (merged by hand) is not
+// decidable, and the why is cleaned and capped like a reject why.
+func TestRecapDecideRefusesEndedTaskAndCleansWhy(t *testing.T) {
+	paths := testPaths(t)
+	eng := New(paths, nil)
+	const id = "proj-recap-ended"
+	save := func(done bool) {
+		t.Helper()
+		task := flow.Task{ID: "T1", Title: "feat: big", Recaps: []flow.Recap{{Trigger: "review", Allowed: []string{"split", "drop"}}}}
+		if done {
+			task.Done = &flow.Merged{MergedCommit: "m1"}
+		}
+		st := flow.State{Seq: 1, Project: flow.Project{ID: id, Started: true, RunTokenHash: tokenHash("tok-coord")}, Settings: flow.DefaultSettings(), Tasks: []flow.Task{task}}
+		if err := SaveState(paths.State(id), st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save(true)
+	for _, body := range []string{
+		`{"task":"T1","choice":"drop","why":"x"}`,
+		`{"task":"T1","choice":"split","why":"x","children":[{"id":"T1a","title":"feat: a"}]}`,
+	} {
+		if err := eng.Report("tok-coord", "recap decide", json.RawMessage(body)); refusalCode(err) != "already_closed" {
+			t.Fatalf("decide on done task %s = %v, want already_closed", body, err)
+		}
+	}
+	st, _ := LoadState(paths.State(id))
+	if st.Seq != 1 || len(st.Tasks) != 1 || st.Tasks[0].Done == nil || st.Tasks[0].Dropped != nil || st.Tasks[0].Split != nil || st.Tasks[0].Recaps[0].Decided != nil {
+		t.Fatalf("state changed after refused decisions: %+v", st)
+	}
+
+	save(false)
+	long, _ := json.Marshal(map[string]string{"task": "T1", "choice": "drop", "why": strings.Repeat("a", 501)})
+	if err := eng.Report("tok-coord", "recap decide", long); refusalCode(err) != "invalid_report" {
+		t.Fatalf("over-long why = %v, want invalid_report", err)
+	}
+	if err := eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T1","choice":"drop","why":"a\nb\u001b[31m\tc"}`)); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = LoadState(paths.State(id))
+	if got := st.Tasks[0].Dropped.Why; got != "a b [31m c" {
+		t.Fatalf("why = %q, want control characters cleaned", got)
 	}
 }

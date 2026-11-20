@@ -443,7 +443,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		}
 		return false
 	}
-	if flow.Ended(*t) || flow.OpenRecap(*t) != nil || facts.PR.State == flow.PRMerged || facts.PR.State == flow.PRClosed ||
+	if flow.Ended(*t) || facts.PR.State == flow.PRMerged || facts.PR.State == flow.PRClosed ||
 		facts.TipRel != flow.RelSame || a.Review.Round != len(a.Rounds)+1 || a.Review.Head != flow.H(*a) {
 		return voidRound()
 	}
