@@ -90,9 +90,15 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
 		return flagExit(err)
 	}
-	if (sub == "start" && (fs.NArg() != 1 || strings.TrimSpace(*goal) == "")) || (sub == "stop" && (fs.NArg() > 1 || *goal != "" || *maxRunning != 0)) {
+	maxSet := false
+	fs.Visit(func(f *flag.Flag) { maxSet = maxSet || f.Name == "max-running" })
+	if (sub == "start" && (fs.NArg() != 1 || strings.TrimSpace(*goal) == "")) || (sub == "stop" && (fs.NArg() > 1 || *goal != "" || maxSet)) {
 		printFactoryUsage(stderr)
 		return 2
+	}
+	if maxSet && (*maxRunning < flow.MaxRunningMin || *maxRunning > flow.MaxRunningMax) {
+		fprintf(stderr, "sheepdog factory start: max_running %d: allowed %d–%d\n", *maxRunning, flow.MaxRunningMin, flow.MaxRunningMax)
+		return 1
 	}
 	folder := ""
 	if fs.NArg() == 1 {

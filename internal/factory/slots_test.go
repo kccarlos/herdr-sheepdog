@@ -366,3 +366,155 @@ func TestWaitReasonLoggedOncePerChange(t *testing.T) {
 		t.Fatalf("T3 N10 log count after unchanged wait = %d, want 1", n)
 	}
 }
+
+func TestIdleWorkerHoldsSlot(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, _ := initGitRepoWithRemote(t)
+	eng := New(paths, client)
+	if err := eng.Start(repo, "Goal", 2); err != nil {
+		t.Fatal(err)
+	}
+	_, id, err := world.RepoProject(ctx, repo, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // J7 starts coordinator
+	st, _ := LoadState(paths.State(id))
+	st.Project.RunTokenHash = tokenHash("tok-coord")
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	plan := `{"tasks":[
+		{"id":"T1","title":"feat: first","estimate_lines":50,` + testPlanJSON + `},
+		{"id":"T2","title":"feat: second","estimate_lines":50,` + testPlanJSON + `},
+		{"id":"T3","title":"feat: third","estimate_lines":50,` + testPlanJSON + `}
+	]}`
+	if err := eng.Report("tok-coord", "plan apply", json.RawMessage(plan)); err != nil {
+		t.Fatalf("plan apply: %v", err)
+	}
+	eng.passProject(ctx, id, false) // N11 for T1, T2
+	eng.passProject(ctx, id, false) // N23 starts workers for T1, T2
+	st, _ = LoadState(paths.State(id))
+	for _, state := range []string{"idle", "done", "error"} {
+		srv.SetStatus(st.Tasks[0].Attempts[0].RunID, &hc.Status{App: "claude-code", State: state})
+		srv.SetStatus(st.Tasks[1].Attempts[0].RunID, &hc.Status{App: "claude-code", State: state})
+		eng.passProject(ctx, id, false)
+		st, _ = LoadState(paths.State(id))
+		if flow.OpenAttempt(st.Tasks[2]) != nil {
+			t.Fatalf("T3 started while T1 and T2 workers had status %q", state)
+		}
+	}
+}
+
+func TestReviewerGoneKeepsSlotWhileWorkerRuns(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, _ := initGitRepoWithRemote(t)
+	eng := New(paths, client)
+	if err := eng.Start(repo, "Goal", 2); err != nil {
+		t.Fatal(err)
+	}
+	_, id, err := world.RepoProject(ctx, repo, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // J7 starts coordinator
+	st, _ := LoadState(paths.State(id))
+	st.Project.RunTokenHash = tokenHash("tok-coord")
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	plan := `{"tasks":[
+		{"id":"T1","title":"feat: first","estimate_lines":50,` + testPlanJSON + `},
+		{"id":"T2","title":"feat: second","estimate_lines":50,` + testPlanJSON + `},
+		{"id":"T3","title":"feat: third","estimate_lines":50,` + testPlanJSON + `}
+	]}`
+	if err := eng.Report("tok-coord", "plan apply", json.RawMessage(plan)); err != nil {
+		t.Fatalf("plan apply: %v", err)
+	}
+	eng.passProject(ctx, id, false) // N11 for T1, T2
+	eng.passProject(ctx, id, false) // N23 starts workers for T1, T2
+	st, _ = LoadState(paths.State(id))
+	// Give T1 a ready report and a dead reviewer run while its worker keeps running.
+	a1 := &st.Tasks[0].Attempts[0]
+	a1.Ready = []flow.Ready{{Head: a1.BaseCommit}}
+	a1.Review = &flow.ReviewRun{Round: 1, Kind: flow.RoundFull, Head: a1.BaseCommit, RunID: "rev-gone", Code: "c1", Reviewer: flow.Reviewer{CLI: "claude", Model: "opus"}}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // S1 fires on T1 because reviewer is gone, recording stop_task
+	st, _ = LoadState(paths.State(id))
+	if flow.Count(st.Tasks[0].Attempts[0].Acts, flow.AskStopTask) == 0 {
+		t.Fatalf("T1 acts = %+v, want stop_task from S1", st.Tasks[0].Attempts[0].Acts)
+	}
+	eng.passProject(ctx, id, false) // T1's worker is still live: T3 must not take T1's slot
+	st, _ = LoadState(paths.State(id))
+	if flow.OpenAttempt(st.Tasks[2]) != nil {
+		t.Fatal("T3 started while T1's worker was still running after reviewer died")
+	}
+	// Once T1's worker is actually gone, T1 frees its slot and T3 starts.
+	if err := world.StopRun(ctx, client, st.Tasks[0].Attempts[0].RunID); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	if flow.OpenAttempt(st.Tasks[2]) == nil {
+		t.Fatal("T3 did not start after T1's worker died")
+	}
+}
+
+func TestWorkerRunStateReadOncePerPass(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, _ := initGitRepoWithRemote(t)
+	eng := New(paths, client)
+	if err := eng.Start(repo, "Goal", 2); err != nil {
+		t.Fatal(err)
+	}
+	_, id, err := world.RepoProject(ctx, repo, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // J7 starts coordinator
+	st, _ := LoadState(paths.State(id))
+	st.Project.RunTokenHash = tokenHash("tok-coord")
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	plan := `{"tasks":[
+		{"id":"T1","title":"feat: first","estimate_lines":50,` + testPlanJSON + `},
+		{"id":"T2","title":"feat: second","estimate_lines":50,` + testPlanJSON + `}
+	]}`
+	if err := eng.Report("tok-coord", "plan apply", json.RawMessage(plan)); err != nil {
+		t.Fatalf("plan apply: %v", err)
+	}
+	eng.passProject(ctx, id, false) // N11 for T1, T2
+	eng.passProject(ctx, id, false) // N23 starts workers for T1, T2
+	st, _ = LoadState(paths.State(id))
+	w1, w2 := st.Tasks[0].Attempts[0].RunID, st.Tasks[1].Attempts[0].RunID
+	before := len(srv.Requests())
+	eng.passProject(ctx, id, false)
+	counts := map[string]int{}
+	for _, req := range srv.Requests()[before:] {
+		if req.Method != "terminal.get" {
+			continue
+		}
+		for _, w := range []string{w1, w2} {
+			if strings.Contains(string(req.Params), w) {
+				counts[w]++
+			}
+		}
+	}
+	for _, w := range []string{w1, w2} {
+		if counts[w] != 1 {
+			t.Errorf("terminal.get count for worker %s = %d, want 1", w, counts[w])
+		}
+	}
+}

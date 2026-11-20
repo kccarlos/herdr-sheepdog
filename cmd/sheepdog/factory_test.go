@@ -289,6 +289,20 @@ func TestFactoryStartAndStopCLI(t *testing.T) {
 	if code := run(context.Background(), []string{"factory", "stop", "--max-running", "2", "--config", cfgFile2}, &out, &errBuf); code != 2 {
 		t.Fatalf("stop --max-running 2 code=%d, want 2", code)
 	}
+	if code := run(context.Background(), []string{"factory", "stop", "--max-running", "0", "--config", cfgFile2}, &out, &errBuf); code != 2 {
+		t.Fatalf("stop --max-running 0 code=%d, want 2", code)
+	}
+	for _, bad := range []string{"0", "-1", "21"} {
+		anyBody = nil
+		out.Reset()
+		errBuf.Reset()
+		if code := run(context.Background(), []string{"factory", "start", repo, "--goal", "ship", "--max-running", bad, "--config", cfgFile2}, &out, &errBuf); code != 1 {
+			t.Fatalf("start --max-running %s code=%d stderr=%q, want 1", bad, code, errBuf.String())
+		}
+		if !strings.Contains(errBuf.String(), "allowed 1–20") || anyBody != nil {
+			t.Fatalf("start --max-running %s stderr=%q body=%v, want allowed 1–20 and no request", bad, errBuf.String(), anyBody)
+		}
+	}
 }
 
 // TestFactoryPlanApplyCLI checks that `plan apply` and `start` send the run's

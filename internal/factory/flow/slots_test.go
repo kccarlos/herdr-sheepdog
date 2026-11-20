@@ -159,8 +159,20 @@ func TestUnmetDepsAndRunningTasks(t *testing.T) {
 		t.Errorf("UnmetDeps = (%v, %v), want ([T3 MISSING], [T2])", notDone, dropped)
 	}
 	ws := map[string]RunState{"T6": RunWorking, "T7": RunIdle, "T8": RunGone}
+	if n := RunningTasks(tasks, ws); n != 3 {
+		t.Errorf("RunningTasks = %d, want 3 (T3 starting + T6 working + T7 idle; not T8 gone, T9 stop_task)", n)
+	}
+}
+
+func TestReviewerGoneS1KeepsSlotWhileWorkerRuns(t *testing.T) {
+	tasks := []Task{
+		{ID: "T1", Attempts: []Attempt{{BaseCommit: "b0", RunID: "w1", Acts: []Act{{Key: AskStopTask, Result: "not_built_yet"}}}}},
+		{ID: "T2", Attempts: []Attempt{{BaseCommit: "b0", RunID: "w2", Acts: []Act{{Key: AskStopTask, Result: "not_built_yet"}}}}},
+		{ID: "T3", Attempts: []Attempt{{BaseCommit: "b0", RunID: "w3", Acts: []Act{{Key: AskStopTask, Result: "not_built_yet"}}}}},
+	}
+	ws := map[string]RunState{"T1": RunWorking, "T2": RunIdle, "T3": RunGone}
 	if n := RunningTasks(tasks, ws); n != 2 {
-		t.Errorf("RunningTasks = %d, want 2 (T3 starting + T6 working; not T7 idle, T8 gone, T9 stop_task)", n)
+		t.Errorf("RunningTasks = %d, want 2 (T1 working + T2 idle keep slots despite stop_task; T3 gone frees slot)", n)
 	}
 }
 
