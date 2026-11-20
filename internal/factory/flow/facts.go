@@ -104,12 +104,7 @@ type In struct {
 }
 
 // attempt is the task's current attempt, or nil before the first.
-func (in In) attempt() *Attempt {
-	if len(in.Task.Attempts) == 0 {
-		return nil
-	}
-	return &in.Task.Attempts[len(in.Task.Attempts)-1]
-}
+func (in In) attempt() *Attempt { return OpenAttempt(in.Task) }
 
 // acts is the current attempt's ledger (or the task's before the first attempt).
 func (in In) acts() []Act {
@@ -135,15 +130,28 @@ func Covers(x, h string) bool { return x == h }
 
 // newestCovering is the newest round that covers h, or nil.
 func newestCovering(a Attempt, h string) *Round {
-	for i := len(a.Rounds) - 1; i >= 0; i-- {
-		if Covers(a.Rounds[i].Head, h) {
-			return &a.Rounds[i]
+	rs := Counted(a)
+	for i := len(rs) - 1; i >= 0; i-- {
+		if Covers(rs[i].Head, h) {
+			return &rs[i]
 		}
 	}
 	return nil
 }
 
 func isReviewerRound(r Round) bool { return r.Kind == RoundFull || r.Kind == RoundDelta }
+
+// LastReviewed is the newest reviewer round after the boundary, or nil: a
+// send-back reviewed nothing, so a delta never starts from it.
+func LastReviewed(a Attempt) *Round {
+	rs := Counted(a)
+	for i := len(rs) - 1; i >= 0; i-- {
+		if isReviewerRound(rs[i]) {
+			return &rs[i]
+		}
+	}
+	return nil
+}
 
 // RejectableRound returns the newest round covering h when it is an unrejected
 // reviewer changes round, or nil otherwise (design.md 7.2).
@@ -181,8 +189,8 @@ func rejectFor(a Attempt, h string, round int) *Reject {
 // not covered by it, and full otherwise (design.md 4.6, 9.4).
 // A rejected delta round stays at the same head, so it re-reviews as full (a superset for a fresh reviewer).
 func RoundKind(a Attempt, h string, sinceRel Rel) (kind, since string) {
-	if n := len(a.Rounds); n > 0 && sinceRel == RelAhead && !Covers(a.Rounds[n-1].Head, h) {
-		return RoundDelta, a.Rounds[n-1].Head
+	if r := LastReviewed(a); r != nil && sinceRel == RelAhead && !Covers(r.Head, h) {
+		return RoundDelta, r.Head
 	}
 	return RoundFull, ""
 }

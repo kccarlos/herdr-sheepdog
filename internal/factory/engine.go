@@ -110,6 +110,31 @@ func taskRuns(id string, t flow.Task) []string {
 	return runs
 }
 
+// execStopRuns is N3: a parked task keeps no run alive. The start acts are
+// forgotten, since those runs were stopped on purpose: after unpark the rows
+// start them again.
+func (e *Engine) execStopRuns(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	t := &s.Tasks[ti]
+	if err := e.stopRuns(ctx, taskRuns(id, *t)); err != nil {
+		return "", false, err
+	}
+	clearRuns(t)
+	if a := flow.OpenAttempt(*t); a != nil {
+		forgetStarts(a, true)
+	}
+	return "stopped the task's runs", false, nil
+}
+
+// forgetStarts drops the start acts of runs stopped on purpose (the
+// reviewer's, and the worker's and what it was told when worker is set), so
+// the rows start and tell them again.
+func forgetStarts(a *flow.Attempt, worker bool) {
+	a.Acts = slices.DeleteFunc(a.Acts, func(x flow.Act) bool {
+		return worker && (x.Key == flow.AskStartWorker || strings.HasPrefix(x.Key, flow.AskTellFindings+"@")) ||
+			strings.HasPrefix(x.Key, flow.AskStartReview+"@")
+	})
+}
+
 func clearRuns(t *flow.Task) {
 	for ai := range t.Attempts {
 		a := &t.Attempts[ai]
@@ -280,14 +305,15 @@ var taskExecutors = map[string]taskExec{
 	flow.AskMerge:        (*Engine).execMerge,
 	flow.AskMarkDone:     (*Engine).execMarkDone,
 	flow.AskCleanup:      (*Engine).execCleanup,
+	flow.AskStopRuns:     (*Engine).execStopRuns,
 }
 
 func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int) {
 	var facts flow.Facts
 	// An ended task needs no facts (N1 matches first), and cleanup may
 	// have removed its worktree.
-	if n := len(s.Tasks[ti].Attempts); n > 0 && !flow.Ended(s.Tasks[ti]) {
-		a := s.Tasks[ti].Attempts[n-1]
+	if oa := flow.OpenAttempt(s.Tasks[ti]); oa != nil && !flow.Ended(s.Tasks[ti]) {
+		a := *oa
 		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
 		tip, rel, _, err := world.InspectWorktree(gctx, a.Worktree, flow.H(a))
 		cancel()
@@ -317,8 +343,8 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	whys := []string{d.Why}
 	act := func(k, res string) {
 		a := flow.Act{Key: k, Result: res, At: now}
-		if n := len(s.Tasks[ti].Attempts); n > 0 {
-			s.Tasks[ti].Attempts[n-1].Acts = append(s.Tasks[ti].Attempts[n-1].Acts, a)
+		if oa := flow.OpenAttempt(s.Tasks[ti]); oa != nil {
+			oa.Acts = append(oa.Acts, a)
 		} else {
 			s.Tasks[ti].Acts = append(s.Tasks[ti].Acts, a)
 		}
@@ -416,10 +442,8 @@ func nextReviewerModel(worker string, used, candidates []string) string {
 
 func passingModels(a flow.Attempt, h string) []string {
 	var out []string
-	for _, r := range a.Rounds {
-		if flow.Covers(r.Head, h) && r.Verdict == flow.VerdictPass {
-			out = append(out, r.Reviewer.Model)
-		}
+	for _, r := range flow.PassingCovering(a, h) {
+		out = append(out, r.Reviewer.Model)
 	}
 	return out
 }
@@ -573,8 +597,8 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 
 func reviewDiffPrompt(ctx context.Context, a flow.Attempt, head string) (kind, diff string, err error) {
 	var rel flow.Rel
-	if n := len(a.Rounds); n > 0 && !flow.Covers(a.Rounds[n-1].Head, head) {
-		rel, _ = world.Relation(ctx, a.Worktree, a.Rounds[n-1].Head, head)
+	if r := flow.LastReviewed(a); r != nil && !flow.Covers(r.Head, head) {
+		rel, _ = world.Relation(ctx, a.Worktree, r.Head, head)
 	}
 	kind, since := flow.RoundKind(a, head, rel)
 	if kind == flow.RoundDelta {
@@ -610,19 +634,23 @@ func (e *Engine) rejectionPrompt(id, taskID string, a flow.Attempt, head string)
 func (e *Engine) execTellFindings(ctx context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	a := &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
 	r, bin := a.Rounds[len(a.Rounds)-1], cmp.Or(e.Bin, "sheepdog")
+	if r.Kind == flow.RoundSendBack {
+		msg := fmt.Sprintf("The coordinator sent the task back: %s — change what it asks, commit, and run %s factory report ready again.", r.Why, bin)
+		return fmt.Sprintf("told worker the send-back (round %d)", r.N), false, world.SendRun(ctx, e.HC, a.RunID, msg)
+	}
 	msg := fmt.Sprintf("Review round %d found %d major(s) in %s — fix them, commit, and run %s factory report ready again, or when every finding is wrong and you change nothing, run %s factory report ready --reject \"<why>\".",
 		r.N, r.Majors, r.ReportPath, bin, bin)
 	return fmt.Sprintf("told worker findings from round %d", r.N), false, world.SendRun(ctx, e.HC, a.RunID, msg)
 }
 
 // execOpenRecap is N25: open a review-triggered recap once per attempt with
-// slice 2's allowed choices (split, drop; new and continue arrive in 2.5/2.6).
+// slice 2's allowed choices (split, new, drop; continue arrives in 2.6).
 func (e *Engine) execOpenRecap(_ context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t := &s.Tasks[ti]
 	if flow.OpenRecap(*t) == nil {
-		t.Recaps = append(t.Recaps, flow.Recap{Trigger: "review", Allowed: []string{"split", "drop"}})
+		t.Recaps = append(t.Recaps, flow.Recap{Trigger: "review", Allowed: []string{"split", "new", "drop"}})
 	}
-	return "opened recap (trigger review, allowed split, drop)", false, nil
+	return "opened recap (trigger review, allowed split, new, drop)", false, nil
 }
 
 func bullets(items []string) string {

@@ -377,6 +377,22 @@ func TestFactoryReportReadyCLI(t *testing.T) {
 		t.Fatalf("report ready bare --reject code=%d, want 2", code)
 	}
 
+	// `--nothing-to-change --why` sends the reason; --why alone or with --reject is a usage error.
+	out.Reset()
+	errBuf.Reset()
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--nothing-to-change", "--why", "already upstream"}, &out, &errBuf); code != 0 {
+		t.Fatalf("report ready --nothing-to-change code=%d stderr=%s", code, errBuf.String())
+	}
+	args, _ = lastBody["args"].(map[string]any)
+	if args["nothing_to_change"] != "already upstream" || args["head"] != wantHead || args["reject"] != nil {
+		t.Fatalf("report ready --nothing-to-change sent %+v", lastBody)
+	}
+	for _, bad := range [][]string{{"--why", "w"}, {"--nothing-to-change", "--reject", "w"}} {
+		if code := run(context.Background(), append([]string{"factory", "report", "ready"}, bad...), &out, &errBuf); code != 2 {
+			t.Fatalf("report ready %v code=%d, want 2", bad, code)
+		}
+	}
+
 	// Extra positional argument is refused with exit 2.
 	out.Reset()
 	errBuf.Reset()
@@ -466,5 +482,46 @@ func TestFactoryRecapDecideCLI(t *testing.T) {
 	// Missing args exits 2.
 	if code := run(context.Background(), []string{"factory", "recap", "decide", "T1"}, &out, &errBuf); code != 2 {
 		t.Fatalf("missing choice: code=%d, want 2", code)
+	}
+}
+
+// TestFactoryTaskAndAmendCLI: `task <action> <task> --why` and `plan amend
+// <file>` post the coordinator's token, verb and args.
+func TestFactoryTaskAndAmendCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+	var lastBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lastBody = nil
+		_ = json.NewDecoder(r.Body).Decode(&lastBody)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(srv.Close)
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	t.Setenv("SHEEPDOG_WEB_PORT", port)
+	t.Setenv("SHEEPDOG_RUN_TOKEN", "tok-coord-1")
+
+	var out, errBuf bytes.Buffer
+	if code := run(context.Background(), []string{"factory", "task", "send-back", "T1", "--why", "tests missing"}, &out, &errBuf); code != 0 {
+		t.Fatalf("task send-back code=%d stderr=%s", code, errBuf.String())
+	}
+	args, _ := lastBody["args"].(map[string]any)
+	if lastBody["verb"] != "task" || lastBody["token"] != "tok-coord-1" || args["action"] != "send-back" || args["task"] != "T1" || args["why"] != "tests missing" {
+		t.Fatalf("task send-back sent %+v", lastBody)
+	}
+	if code := run(context.Background(), []string{"factory", "task", "park"}, &out, &errBuf); code != 2 {
+		t.Fatalf("task without id code=%d, want 2", code)
+	}
+	file := filepath.Join(t.TempDir(), "amend.json")
+	if err := os.WriteFile(file, []byte(`{"why":"w","tasks":[{"id":"T1","brief":"b"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := run(context.Background(), []string{"factory", "plan", "amend", file}, &out, &errBuf); code != 0 || !strings.Contains(out.String(), "plan amended") {
+		t.Fatalf("plan amend code=%d out=%s stderr=%s", code, out.String(), errBuf.String())
+	}
+	if args, _ := lastBody["args"].(map[string]any); lastBody["verb"] != "plan amend" || args["why"] != "w" {
+		t.Fatalf("plan amend sent %+v", lastBody)
 	}
 }

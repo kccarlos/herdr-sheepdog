@@ -16,10 +16,8 @@ import (
 func (e *Engine) execRecordAccept(_ context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	a := &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
 	h, rounds := flow.H(*a), []int{}
-	for _, r := range a.Rounds {
-		if flow.Covers(r.Head, h) && r.Verdict == flow.VerdictPass {
-			rounds = append(rounds, r.N)
-		}
+	for _, r := range flow.PassingCovering(*a, h) {
+		rounds = append(rounds, r.N)
 	}
 	a.Accepts = append(a.Accepts, flow.Accept{Head: h, By: "bar", Rounds: rounds})
 	return fmt.Sprintf("accepted %s by the bar (rounds %v)", h, rounds), false, nil
@@ -70,15 +68,11 @@ func (e *Engine) execCleanup(ctx context.Context, id string, s *flow.State, ti i
 		}
 		steps = append(steps, "deleted remote branch "+a.Branch)
 	}
-	if note := closePRNote(*t); note != "" && a.PR > 0 {
-		p, err := world.PRSnapshot(gctx, s.Project.Folder, a.Branch)
+	if note := closePRNote(*t); note != "" {
+		closed, err := closeOpenPR(gctx, s.Project.Folder, a, note)
 		if err != nil {
 			return "", false, err
-		}
-		if p.State == flow.PROpen {
-			if err := world.ClosePR(gctx, s.Project.Folder, a.PR, note); err != nil {
-				return "", false, err
-			}
+		} else if closed {
 			steps = append(steps, fmt.Sprintf("closed PR #%d", a.PR))
 		}
 	}
@@ -104,4 +98,16 @@ func closePRNote(t flow.Task) string {
 	default:
 		return ""
 	}
+}
+
+// closeOpenPR closes a's PR with note when GitHub still reads it open.
+func closeOpenPR(ctx context.Context, folder string, a flow.Attempt, note string) (bool, error) {
+	if a.PR <= 0 {
+		return false, nil
+	}
+	p, err := world.PRSnapshot(ctx, folder, a.Branch)
+	if err != nil || p.State != flow.PROpen {
+		return false, err
+	}
+	return true, world.ClosePR(ctx, folder, a.PR, note)
 }

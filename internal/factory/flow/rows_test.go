@@ -64,6 +64,13 @@ var (
 			{N: 3, Kind: RoundDelta, Head: "c1", Verdict: VerdictChanges, Majors: 1},
 		}
 	}
+	parked   = func(in *In) { in.Task.Parked = true }
+	runsLive = func(in *In) { a0(in).RunID = "w1" }
+	nothingF = func(in *In) {
+		a0(in).Ready = nil
+		a0(in).Rounds = nil
+		a0(in).NothingToChange = "already done upstream"
+	}
 	rejected  = func(in *In) { a0(in).Rejects = []Reject{{Head: "c1", Round: 1, Why: "not a bug"}} }
 	noRounds  = func(in *In) { a0(in).Rounds = nil }
 	notReady  = func(in *In) { a0(in).Ready = nil; in.Facts.Worker = Run{} }
@@ -209,10 +216,14 @@ func TestRowCases(t *testing.T) {
 		{"N1", with(splitMark), []string{"cleanup"}},
 		{"N1", with(droppedMark), []string{"cleanup"}},
 		{"N2", with(merged), []string{"mark_done", "wake_coordinator@merged_outside_bar"}},
+		{"N3", with(parked, runsLive), []string{"stop_runs"}},
+		{"N3", with(parked), nil},
 		{"S1", with(workerEnded), []string{"stop_task"}},
 		{"S1", with(noRounds, reviewEnded), []string{"stop_task"}},
 		{"N6", with(openRecap), []string{"wake_coordinator@recap@1"}},
+		{"N8", with(nothingF, prGone), []string{"wake_coordinator@nothing_to_change@0"}},
 		{"N11", with(noAttempts), []string{"new_attempt"}},
+		{"N11", with(func(in *In) { a0(in).Closed = "new attempt" }), []string{"new_attempt"}},
 		{"N22", with(changes), []string{"tell_worker_findings@1"}},
 		{"N23", with(notReady, noRounds, prGone), []string{"start_worker"}},
 		{"N25", with(streakRecap), []string{"open_recap@review"}},
@@ -258,7 +269,10 @@ func TestRowOrder(t *testing.T) {
 		{"S2", "N29", false, with(noRounds, idleRev)},
 		{"S2", "N41", false, with(stuckAct("merge@c1"))},
 		{"N1", "N2", true, with(done, merged)},
-		{"N2", "S1", true, with(merged, workerEnded)},
+		{"N2", "N3", true, with(merged, parked)},
+		{"N3", "S1", true, with(parked, workerEnded)},
+		{"N6", "N8", true, with(openRecap, nothingF)},
+		{"N8", "N23", false, with(nothingF, prGone)},
 		{"S1", "N6", true, with(workerEnded, openRecap)},
 		{"N6", "N22", false, with(openRecap, changes)},
 		{"N6", "N29", false, with(openRecap, noRounds)},
@@ -573,6 +587,18 @@ func TestRoundKind(t *testing.T) {
 	if k, s := RoundKind(a, "c3", RelAhead); k != RoundDelta || s != "c2" {
 		t.Fatalf("after fix c3 = (%s, %s), want (delta, c2)", k, s)
 	}
+	// A send-back reviewed nothing: no delta starts from it.
+	sb := Attempt{Rounds: []Round{{N: 1, Kind: RoundSendBack, Head: "c1", Verdict: VerdictChanges}}}
+	if k, s := RoundKind(sb, "c2", RelAhead); k != RoundFull || s != "" {
+		t.Fatalf("after a send-back with no review = (%s, %s), want (full, \"\")", k, s)
+	}
+	sb.Rounds = []Round{
+		{N: 1, Kind: RoundFull, Head: "c1", Verdict: VerdictChanges},
+		{N: 2, Kind: RoundSendBack, Head: "c2", Verdict: VerdictChanges},
+	}
+	if k, s := RoundKind(sb, "c3", RelAhead); k != RoundDelta || s != "c1" {
+		t.Fatalf("review c1, send-back c2, ready c3 = (%s, %s), want (delta, c1)", k, s)
+	}
 }
 
 // TestNoNumberInRules: rules take numbers from Settings or named constants
@@ -670,5 +696,36 @@ func TestSettingsChanged(t *testing.T) {
 	s.ReviewRounds = 1
 	if got := s.Changed(); !slices.Equal(got, []string{"checks_grace_minutes 7", "review_rounds 1", "stuck_minutes 5"}) {
 		t.Errorf("changed with review_rounds 1: %v", got)
+	}
+}
+
+// TestBoundaryAndSendBack: a plan amend boundary voids earlier rounds, so the
+// same head is reviewed again (design.md 3.1); a send-back is a fix for the
+// worker that it cannot reject (4.4 N22, 7.2), until a ready moves H.
+func TestBoundaryAndSendBack(t *testing.T) {
+	amended := with(func(in *In) { a0(in).Boundary = 2 })
+	if r, d := FirstMatch(TaskRows, amended); r.ID != "N29" || !slices.Equal(d.Asked, []string{"start_reviewer@3@c1"}) {
+		t.Errorf("after amend: %s %v, want N29 start_reviewer@3@c1", r.ID, d.Asked)
+	}
+	sentBack := with(func(in *In) {
+		a0(in).Rounds = append(a0(in).Rounds, Round{N: 3, Kind: RoundSendBack, Head: "c1", Verdict: VerdictChanges, Why: "add a test"})
+	})
+	if r, d := FirstMatch(TaskRows, sentBack); r.ID != "N22" || !slices.Equal(d.Asked, []string{"tell_worker_findings@3"}) {
+		t.Errorf("send-back: %s %v, want N22 tell_worker_findings@3", r.ID, d.Asked)
+	}
+	if RejectableRound(sentBack.Task.Attempts[0], "c1") != nil {
+		t.Error("a send-back must not be rejectable")
+	}
+	working := sentBack
+	working.Facts.Tip, working.Facts.TipRel = "c2", RelAhead
+	if r, _ := FirstMatch(TaskRows, working); r.ID != "N22" {
+		t.Errorf("send-back, worker committed without ready: %s, want N22", r.ID)
+	}
+	readyAgain := with(func(in *In) {
+		a0(in).Rounds = append(a0(in).Rounds, Round{N: 3, Kind: RoundSendBack, Head: "c1", Verdict: VerdictChanges})
+		a0(in).Ready = append(a0(in).Ready, Ready{Head: "c2"})
+	})
+	if got := Ladder(readyAgain); got != Review {
+		t.Errorf("after ready again: ladder %s, want review", got)
 	}
 }

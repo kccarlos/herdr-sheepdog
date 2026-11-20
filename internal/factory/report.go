@@ -32,6 +32,7 @@ const owner = "owner"
 var verbRoles = map[string]string{
 	"start": owner, "stop": owner,
 	"plan apply": flow.RoleCoordinator, "recap decide": flow.RoleCoordinator,
+	"plan amend": flow.RoleCoordinator, "task": flow.RoleCoordinator,
 	"ready": flow.RoleWorker,
 }
 
@@ -54,11 +55,20 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 	if role != want {
 		return e.refuse(id, "kind_not_allowed", fmt.Sprintf("A %s may not send %s; only the %s may.", role, verb, want))
 	}
+	if ti >= 0 && flow.Ended(s.Tasks[ti]) {
+		return e.refuse(id, "already_closed", fmt.Sprintf("Task %q has ended; it takes no more reports.", s.Tasks[ti].ID))
+	}
 	if verb == "ready" {
 		return e.acceptReadyLocked(id, &s, role, ti, args)
 	}
 	if verb == "recap decide" {
 		return e.acceptRecapDecideLocked(id, &s, role, args)
+	}
+	if verb == "task" {
+		return e.acceptTaskLocked(id, &s, role, args)
+	}
+	if verb == "plan amend" {
+		return e.acceptAmendLocked(id, &s, role, args)
 	}
 	if len(s.Tasks) > 0 {
 		return e.refuse(id, "plan_exists", "A plan already exists; change it with plan amend.")
@@ -78,8 +88,9 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 
 func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int, args json.RawMessage) error {
 	var req struct {
-		Head   string  `json:"head"`
-		Reject *string `json:"reject"`
+		Head    string  `json:"head"`
+		Reject  *string `json:"reject"`
+		Nothing *string `json:"nothing_to_change"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(args))
 	dec.DisallowUnknownFields()
@@ -107,7 +118,7 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 		}
 		r := flow.RejectableRound(*a, h)
 		if rel != flow.RelSame || r == nil || flow.Ladder(flow.In{Task: *t, Settings: s.Settings}) != flow.Fix {
-			if flow.Ladder(flow.In{Task: *t, Settings: s.Settings}) == flow.RecapAnswer {
+			if rel == flow.RelSame && flow.Ladder(flow.In{Task: *t, Settings: s.Settings}) == flow.RecapAnswer {
 				return e.refuse(id, "nothing_to_reject", "Nothing to reject: a recap is open and the coordinator decides; there is nothing for you to do.")
 			}
 			return e.refuse(id, "nothing_to_reject", "Nothing to reject: the newest round covering the current head must be an unrejected reviewer changes verdict with no new commit (after a commit, run report ready without --reject).")
@@ -115,12 +126,23 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 		a.Rejects = append(a.Rejects, flow.Reject{Head: h, Round: r.N, Why: why})
 		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "ready", "head": h, "round": r.N, "reject": why},
 			Rule: "ready --reject", Decision: "rejected", Why: fmt.Sprintf("round %d at %s: %s", r.N, h, why)})
+	case req.Nothing != nil:
+		why, err := e.cleanWhy(id, *req.Nothing, "nothing-to-change report", "--why")
+		if err != nil {
+			return err
+		}
+		if tip != a.BaseCommit || rel != flow.RelSame { // at the base, and no ready moved H past it
+			return e.refuse(id, "nothing_new", "The worktree has commits over the base; run report ready without --nothing-to-change.")
+		}
+		a.NothingToChange = why
+		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "ready", "nothing_to_change": why},
+			Rule: "ready --nothing-to-change", Decision: "nothing to change", Why: why})
 	case rel == flow.RelBehind || rel == flow.RelDiverged:
 		return e.refuse(id, "pull_first", "The attempt head moved past the worktree tip; pull first.")
 	case rel == flow.RelSame:
 		return e.refuse(id, "nothing_new", "The worktree has no commit ahead of the current head.")
 	}
-	a.Ready = append(a.Ready, flow.Ready{Head: tip})
+	a.Ready, a.NothingToChange = append(a.Ready, flow.Ready{Head: tip}), ""
 	return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "ready", "head": tip}, Rule: "ready", Decision: "ready", Why: tip})
 }
 
@@ -296,7 +318,7 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string) (
 		} else {
 			ids[t.ID], newIDs = true, append(newIDs, t.ID)
 		}
-		if strings.TrimSpace(t.Title) == "" {
+		if cleanRejectWhy(t.Title) == "" {
 			fails = append(fails, fmt.Sprintf("shape: task %q has no title", t.ID))
 		}
 	}
@@ -316,7 +338,7 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string) (
 			}
 		}
 		after[t.ID] = t.After
-		tasks[i] = flow.Task{ID: t.ID, Title: strings.TrimSpace(t.Title), Brief: t.Brief, Outcomes: t.Outcomes, After: t.After, SplitFrom: parentID, Attempts: []flow.Attempt{}}
+		tasks[i] = flow.Task{ID: t.ID, Title: cleanRejectWhy(t.Title), Brief: t.Brief, Outcomes: t.Outcomes, After: t.After, SplitFrom: parentID, Attempts: []flow.Attempt{}}
 	}
 	if id := cycleAt(p.Tasks, after); id != "" {
 		fails = append(fails, fmt.Sprintf("shape: the after links make a cycle through %q", id))
@@ -383,6 +405,27 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why},
 			Rule: "recap decide", Decision: "dropped", Why: why})
 	}
+	if choice == "new" {
+		if !rc.Amended {
+			return e.refuse(id, "not_allowed", "new is allowed only after plan amend changed the task's brief or outcomes since the recap opened.")
+		}
+		note := fmt.Sprintf("Closed by sheepdog factory: task %s starts a new attempt (%s).", t.ID, why)
+		if a := flow.OpenAttempt(*t); a != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), ghTimeout)
+			defer cancel()
+			if _, err := closeOpenPR(ctx, s.Project.Folder, *a, note); err != nil {
+				return err // before any run is stopped: the task is as it was
+			}
+			if err := e.stopRuns(ctx, taskRuns(id, *t)); err != nil {
+				return err
+			}
+			clearRuns(t)
+			a.Closed = note
+		}
+		rc.Decided = &flow.RecapDecision{Choice: choice, Why: why}
+		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why},
+			Rule: "recap decide", Decision: "attempt closed; a new one starts", Why: why})
+	}
 	raw, _ := json.Marshal(struct {
 		Tasks []json.RawMessage `json:"tasks"`
 	}{Tasks: req.Children})
@@ -403,6 +446,186 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 	s.Tasks = append(s.Tasks, children...)
 	return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why, "children": childIDs},
 		Rule: "recap decide", Decision: "split into " + strings.Join(childIDs, ", "), Why: why})
+}
+
+// acceptTaskLocked is the coordinator's park, unpark, drop, close and
+// send-back (design.md 4.9, 7.2). The rows then act on the record.
+func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args json.RawMessage) error {
+	var req struct{ Action, Task, Why string }
+	if json.Unmarshal(args, &req) != nil {
+		return e.refuse(id, "invalid_report", "A task command must carry action, task and why.")
+	}
+	ti := slices.IndexFunc(s.Tasks, func(t flow.Task) bool { return t.ID == strings.TrimSpace(req.Task) })
+	switch {
+	case ti < 0:
+		return e.refuse(id, "invalid_report", fmt.Sprintf("No task %q in the plan.", req.Task))
+	case flow.Ended(s.Tasks[ti]):
+		return e.refuse(id, "already_closed", fmt.Sprintf("Task %q has ended; it cannot be changed.", req.Task))
+	}
+	why, err := e.cleanWhy(id, req.Why, "task command", "--why")
+	if err != nil {
+		return err
+	}
+	t, verb := &s.Tasks[ti], "task "+req.Action
+	a := flow.OpenAttempt(*t)
+	line := LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": verb, "why": why}, Rule: verb, Decision: req.Action, Why: why}
+	switch req.Action {
+	case "park", "unpark":
+		t.Parked = req.Action == "park"
+	case "drop":
+		t.Dropped = &flow.Dropped{Why: why}
+		var waiting []string // nothing is unblocked silently: they keep waiting on the dropped id
+		for _, o := range s.Tasks {
+			if slices.Contains(o.After, t.ID) && !flow.Ended(o) {
+				waiting = append(waiting, o.ID)
+			}
+		}
+		if len(waiting) > 0 {
+			line.Decision += "; still waiting on it: " + strings.Join(waiting, ", ")
+		}
+	case "close":
+		if a == nil || a.NothingToChange == "" {
+			return e.refuse(id, "not_allowed", "close is allowed only after the worker reported nothing to change.")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
+		defer cancel()
+		if tip, _, _, err := world.InspectWorktree(ctx, a.Worktree, flow.H(*a)); err != nil {
+			return err
+		} else if tip != a.BaseCommit {
+			return e.refuse(id, "nothing_new", "The worker committed since it reported nothing to change; send it back or wait for its ready.")
+		}
+		t.Closed = &flow.Closed{Why: why}
+	case "send-back":
+		if a == nil {
+			return e.refuse(id, "invalid_report", fmt.Sprintf("Task %q has no attempt to send back.", t.ID))
+		}
+		n := len(a.Rounds) + 1
+		a.Rounds = append(a.Rounds, flow.Round{N: n, Kind: flow.RoundSendBack, Head: flow.H(*a), Verdict: flow.VerdictChanges, Why: why})
+		a.NothingToChange, line.Decision = "", fmt.Sprintf("sent back (round %d)", n)
+	default:
+		return e.refuse(id, "invalid_report", fmt.Sprintf("%q is not a task command; use park, unpark, drop, close or send-back.", req.Action))
+	}
+	return e.commitLocked(id, s, line)
+}
+
+// amendTask is one entry of plan amend for an existing task: only the
+// fields named change.
+type amendTask struct {
+	ID       string    `json:"id"`
+	Title    *string   `json:"title"`
+	Brief    *string   `json:"brief"`
+	Outcomes *[]string `json:"outcomes"`
+}
+
+// acceptAmendLocked is plan amend (design.md 3.1, 4.9, 7.2): changes to
+// existing tasks' title, brief and outcomes, and new tasks, with a why. An
+// ended task is not changed. A changed brief or outcomes is a boundary:
+// earlier rounds stop covering, an in-flight review is stopped, and an open
+// recap may then decide new. A live worker is told once what changed.
+func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args json.RawMessage) error {
+	var req struct {
+		Why   string            `json:"why"`
+		Tasks []json.RawMessage `json:"tasks"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(args))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		return e.refuse(id, "plan_invalid", "shape: "+strings.TrimPrefix(err.Error(), "json: ")+".")
+	}
+	why, err := e.cleanWhy(id, req.Why, "plan amend", `"why"`)
+	if err != nil {
+		return err
+	}
+	var fails []string
+	if len(req.Tasks) == 0 {
+		fails = append(fails, "shape: the amend has no tasks")
+	}
+	type change struct {
+		ti int
+		c  amendTask
+	}
+	var changes []change
+	var fresh []json.RawMessage
+	for _, raw := range req.Tasks {
+		var c amendTask
+		_ = json.Unmarshal(raw, &c) // the id decides: an existing task or a new one
+		ti := slices.IndexFunc(s.Tasks, func(t flow.Task) bool { return t.ID == strings.TrimSpace(c.ID) })
+		if ti < 0 {
+			fresh = append(fresh, raw)
+			continue
+		}
+		d := json.NewDecoder(bytes.NewReader(raw))
+		d.DisallowUnknownFields()
+		switch err := d.Decode(&c); {
+		case err != nil:
+			fails = append(fails, fmt.Sprintf("shape: task %q: %s (only title, brief and outcomes change)", s.Tasks[ti].ID, strings.TrimPrefix(err.Error(), "json: ")))
+		case flow.Ended(s.Tasks[ti]):
+			fails = append(fails, fmt.Sprintf("task %q has ended and is not changed", s.Tasks[ti].ID))
+		case c.Title != nil && cleanRejectWhy(*c.Title) == "":
+			fails = append(fails, fmt.Sprintf("shape: task %q has no title", s.Tasks[ti].ID))
+		default:
+			changes = append(changes, change{ti, c})
+		}
+	}
+	var added []flow.Task
+	if len(fresh) > 0 {
+		raw, _ := json.Marshal(map[string]any{"tasks": fresh})
+		var f []string
+		added, f = checkPlanWith(raw, s.Tasks, "")
+		fails = append(fails, f...)
+	}
+	if len(fails) > 0 {
+		return e.refuse(id, "plan_invalid", strings.Join(fails, "; ")+".")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
+	defer cancel()
+	var done []string
+	for _, ch := range changes {
+		t, c, what := &s.Tasks[ch.ti], ch.c, []string{}
+		if c.Title != nil && cleanRejectWhy(*c.Title) != t.Title {
+			t.Title, what = cleanRejectWhy(*c.Title), append(what, "title")
+		}
+		if c.Brief != nil && *c.Brief != t.Brief {
+			t.Brief, what = *c.Brief, append(what, "brief")
+		}
+		if c.Outcomes != nil && !slices.Equal(*c.Outcomes, t.Outcomes) {
+			t.Outcomes, what = *c.Outcomes, append(what, "outcomes")
+		}
+		a := flow.OpenAttempt(*t)
+		if slices.Contains(what, "brief") || slices.Contains(what, "outcomes") {
+			if rc := flow.OpenRecap(*t); rc != nil {
+				rc.Amended = true
+			}
+			if a != nil {
+				a.Boundary = len(a.Rounds)
+				if a.Review != nil { // it was given the old brief
+					if err := world.StopRun(ctx, e.HC, a.Review.RunID); err != nil {
+						return err
+					}
+					a.Review = nil
+					forgetStarts(a, false)
+				}
+			}
+		}
+		if len(what) == 0 {
+			continue
+		}
+		done = append(done, t.ID+" ("+strings.Join(what, ", ")+")")
+		if a != nil && a.RunID != "" {
+			bin := cmp.Or(e.Bin, "sheepdog")
+			msg := fmt.Sprintf("The plan changed for task %s (%s): %s\nTitle: %s\nBrief:\n%s\nOutcomes:\n%s\nEarlier review rounds no longer count. If your work must change, commit and run %s factory report ready again; otherwise wait.",
+				t.ID, strings.Join(what, ", "), why, t.Title, cmp.Or(strings.TrimSpace(t.Brief), "(none)"), bullets(t.Outcomes), bin)
+			if err := world.SendRun(ctx, e.HC, a.RunID, msg); err != nil { // a restarted worker reads the new plan anyway
+				e.logError("factory.exec_error", id, err)
+			}
+		}
+	}
+	for _, t := range added {
+		done = append(done, t.ID+" (new)")
+	}
+	s.Tasks = append(s.Tasks, added...)
+	return e.commitLocked(id, s, LogLine{By: role, Input: map[string]any{"verb": "plan amend", "why": why, "tasks": done},
+		Rule: "plan amend", Decision: "amended " + cmp.Or(strings.Join(done, ", "), "nothing"), Why: why})
 }
 
 // cycleAt returns a task on a cycle of after links, or "" when there is none.

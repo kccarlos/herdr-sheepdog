@@ -361,12 +361,12 @@ func TestN25N6RecapOpensOnceWakesCoordinatorAndSplits(t *testing.T) {
 
 	st := l.state()
 	if len(st.Tasks[0].Recaps) != 1 || st.Tasks[0].Recaps[0].Trigger != "review" ||
-		strings.Join(st.Tasks[0].Recaps[0].Allowed, ",") != "split,drop" {
+		strings.Join(st.Tasks[0].Recaps[0].Allowed, ",") != "split,new,drop" {
 		t.Fatalf("recaps = %+v", st.Tasks[0].Recaps)
 	}
 	coordSends := sendsTo(t, l.srv.Requests(), "coord1")
-	if len(coordSends) != 1 || !strings.Contains(coordSends[0], "allowed [split, drop]") || !strings.Contains(coordSends[0], "T1: N6:") {
-		t.Fatalf("coordinator wakes = %q, want one wake with allowed [split, drop]", coordSends)
+	if len(coordSends) != 1 || !strings.Contains(coordSends[0], "allowed [split, new, drop]") || !strings.Contains(coordSends[0], "T1: N6:") {
+		t.Fatalf("coordinator wakes = %q, want one wake with allowed [split, new, drop]", coordSends)
 	}
 	if workerSends := sendsTo(t, l.srv.Requests(), l.worker); len(workerSends) != 0 {
 		t.Fatalf("worker was told findings during recap: %q", workerSends)

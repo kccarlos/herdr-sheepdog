@@ -725,6 +725,17 @@ func TestReportReadyRejectRefusedWhenLadderSaysRecap(t *testing.T) {
 			}
 		})
 	}
+	// After a new commit the recap text does not apply: use plain ready.
+	if err := os.WriteFile(filepath.Join(wt.Path, "g.go"), []byte("package demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt.Path, "add", "g.go")
+	gitIn(t, wt.Path, "commit", "-m", "feat: g")
+	c2 := gitIn(t, wt.Path, "rev-parse", "HEAD")
+	err = eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c2+`","reject":"still wrong"}`))
+	if refusalCode(err) != "nothing_to_reject" || !strings.Contains(err.Error(), "after a commit") {
+		t.Fatalf("reject after a commit with a recap = %v, want the plain-ready text", err)
+	}
 }
 
 // TestRecapDecideAcceptance checks design.md 4.9 and 7.2 for `recap decide`:
