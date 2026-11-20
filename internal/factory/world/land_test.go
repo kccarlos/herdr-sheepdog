@@ -38,11 +38,11 @@ func TestMergePRPinnedSquash(t *testing.T) {
 // TestSnapshotMergeCommit: a merged PR's snapshot carries gh's mergeCommit
 // oid; an open one has none.
 func TestSnapshotMergeCommit(t *testing.T) {
-	p, err := parseSnapshot([]byte(`{"number":7,"state":"MERGED","headRefOid":"h","mergeable":"UNKNOWN","statusCheckRollup":[],"mergeCommit":{"oid":"m1"}}`))
+	_, p, err := decodeSnapshot([]byte(`{"number":7,"state":"MERGED","headRefOid":"h","mergeable":"UNKNOWN","statusCheckRollup":[],"mergeCommit":{"oid":"m1"}}`))
 	if err != nil || p.State != flow.PRMerged || p.MergedCommit != "m1" {
 		t.Fatalf("merged snapshot = %+v, %v", p, err)
 	}
-	p, err = parseSnapshot([]byte(`{"number":7,"state":"OPEN","headRefOid":"h","mergeable":"MERGEABLE","statusCheckRollup":[],"mergeCommit":null}`))
+	_, p, err = decodeSnapshot([]byte(`{"number":7,"state":"OPEN","headRefOid":"h","mergeable":"MERGEABLE","statusCheckRollup":[],"mergeCommit":null}`))
 	if err != nil || p.MergedCommit != "" {
 		t.Fatalf("open snapshot = %+v, %v", p, err)
 	}

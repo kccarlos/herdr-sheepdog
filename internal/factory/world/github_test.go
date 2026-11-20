@@ -2,6 +2,7 @@ package world
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,18 +17,41 @@ import (
 // fakeGHScript records each call's argv (one line, words joined by spaces)
 // in $D/argv and answers from files in $D: "fail" makes every call fail,
 // view.json is the branch's PR, listed by pr list (honouring --state open;
-// pr create copies pr.json there).
+// pr create copies pr.json there). gh api serves NAME.json (page N:
+// NAME.N.json), and $D/<call>_fail fails one call (annotations, status,
+// workflow_runs, compare).
 const fakeGHScript = `#!/bin/sh
 D=%DIR%
 printf '%s\n' "$*" >> "$D/argv"
 [ -f "$D/fail" ] && { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
+failif() { [ -f "$D/$1_fail" ] && { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }; return 0; }
 case "$*" in *"--state open"*) grep -q '"state":"OPEN"' "$D/view.json" 2>/dev/null || { echo '[]'; exit 0; } ;; esac
 case "$1 $2" in
 "pr list") if [ -f "$D/view.json" ]; then printf "[%s]" "$(cat "$D/view.json")"; else echo '[]'; fi ;;
 "pr create") cp "$D/pr.json" "$D/view.json" && echo "https://github.com/acme/demo/pull/7" ;;
-"pr view") cat "$D/view.json" 2>/dev/null || { echo 'no pull requests found for branch "x"' >&2; exit 1; } ;;
+"pr view")
+  if [ -f "$D/view_denied" ]; then
+    case "$*" in *statusCheckRollup*)
+      echo "GraphQL: Resource not accessible by personal access token (repository.pullRequest.statusCheckRollup.nodes.0.commit.statusCheckRollup.contexts.nodes.0)" >&2
+      exit 1 ;;
+    esac
+  fi
+  cat "$D/view.json" 2>/dev/null || { echo 'no pull requests found for branch "x"' >&2; exit 1; } ;;
 "pr merge") [ -f "$D/merge_fail" ] && { echo "GraphQL: Head branch was modified" >&2; exit 1; }; : ;;
 "pr close") [ -f "$D/close_fail" ] && { echo "GraphQL: close failed" >&2; exit 1; }; : ;;
+api\ *)
+  pg=1; case "$2" in *page=*) pg=${2##*page=} ;; esac
+  sfx=""; [ "$pg" = 1 ] || sfx=".$pg"
+  case "$2" in
+  */check-runs/*/annotations*) failif annotations; cat "$D/annotations$sfx.json" 2>/dev/null || echo '[]' ;;
+  */commits/*/check-runs*)
+    [ -f "$D/check_runs_denied" ] && { echo "gh: Resource not accessible by personal access token (HTTP 403)" >&2; exit 1; }
+    cat "$D/check-runs$sfx.json" 2>/dev/null || echo '{"total_count":0,"check_runs":[]}' ;;
+  */commits/*/status*) failif status; cat "$D/status$sfx.json" 2>/dev/null || echo '{"state":"pending","total_count":0,"statuses":[]}' ;;
+  */actions/runs*) failif workflow_runs; cat "$D/workflow-runs$sfx.json" 2>/dev/null || echo '{"total_count":0,"workflow_runs":[]}' ;;
+  */compare/*) failif compare; cat "$D/compare.json" 2>/dev/null || echo '{"behind_by":0}' ;;
+  *) echo "unexpected gh api $2" >&2; exit 2 ;;
+  esac ;;
 *) echo "unexpected gh $*" >&2; exit 2 ;;
 esac
 `
@@ -75,22 +99,6 @@ func repoWithGitHubOrigin(t *testing.T) (repo, bare string) {
 	return repo, bare
 }
 
-func TestChecksRollupS06Fixtures(t *testing.T) {
-	for _, class := range []flow.Checks{flow.ChecksRed, flow.ChecksPending, flow.ChecksGreen, flow.ChecksNone} {
-		data, err := os.ReadFile(filepath.Join("testdata", "prfull-"+string(class)+".json"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		p, err := parseSnapshot(data)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if p.Checks != class || !p.Answered || p.State != flow.PROpen || p.Mergeable != flow.MergeableClean || p.Number < 10 || len(p.Head) != 40 {
-			t.Errorf("%s fixture parsed as %+v", class, p)
-		}
-	}
-}
-
 func TestChecksRollupTable(t *testing.T) {
 	run := func(status, conclusion string) flow.Check {
 		return flow.Check{Kind: "CheckRun", Status: status, Conclusion: conclusion}
@@ -98,23 +106,33 @@ func TestChecksRollupTable(t *testing.T) {
 	ctx := func(state string) flow.Check { return flow.Check{Kind: "StatusContext", State: state} }
 	ok, skip, neutral := run("COMPLETED", "SUCCESS"), run("COMPLETED", "SKIPPED"), run("COMPLETED", "NEUTRAL")
 	for name, c := range map[string]struct {
-		in   []flow.Check
-		want flow.Checks
+		checks    []flow.Check
+		wfPending bool
+		want      flow.Checks
 	}{
-		"empty":                    {nil, flow.ChecksNone},
-		"only skipped and neutral": {[]flow.Check{skip, neutral}, flow.ChecksNone},
-		"success with skipped":     {[]flow.Check{ok, skip, neutral}, flow.ChecksGreen},
-		"queued":                   {[]flow.Check{ok, run("QUEUED", "")}, flow.ChecksPending},
-		"skipped and in progress":  {[]flow.Check{skip, run("IN_PROGRESS", "")}, flow.ChecksPending},
-		"failure beats pending":    {[]flow.Check{run("IN_PROGRESS", ""), run("COMPLETED", "FAILURE")}, flow.ChecksRed},
-		"cancelled":                {[]flow.Check{ok, run("COMPLETED", "CANCELLED")}, flow.ChecksRed},
-		"unknown conclusion":       {[]flow.Check{run("COMPLETED", "STALE")}, flow.ChecksRed},
-		"status success":           {[]flow.Check{ctx("SUCCESS")}, flow.ChecksGreen},
-		"status pending":           {[]flow.Check{ok, ctx("PENDING")}, flow.ChecksPending},
-		"status expected":          {[]flow.Check{ctx("EXPECTED")}, flow.ChecksPending},
-		"status error":             {[]flow.Check{ok, ctx("ERROR")}, flow.ChecksRed},
+		"empty":                    {nil, false, flow.ChecksAbsent},
+		"only skipped and neutral": {[]flow.Check{skip, neutral}, false, flow.ChecksAbsent},
+		"success with skipped":     {[]flow.Check{ok, skip, neutral}, false, flow.ChecksGreen},
+		"workflow unfinished":      {[]flow.Check{ok}, true, flow.ChecksPending},
+		"queued":                   {[]flow.Check{ok, run("QUEUED", "")}, false, flow.ChecksPending},
+		"skipped and in progress":  {[]flow.Check{skip, run("IN_PROGRESS", "")}, false, flow.ChecksPending},
+		"failure beats pending":    {[]flow.Check{run("IN_PROGRESS", ""), run("COMPLETED", "FAILURE")}, false, flow.ChecksRed},
+		"timed_out":                {[]flow.Check{ok, run("COMPLETED", "TIMED_OUT")}, false, flow.ChecksStoppedTimeout},
+		"cancelled by timeout":     {[]flow.Check{ok, {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "timeout"}}, false, flow.ChecksStoppedTimeout},
+		"cancelled, cause unread":  {[]flow.Check{ok, {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "unknown"}}, false, flow.ChecksStoppedUnknown},
+		"unread beats outside":     {[]flow.Check{run("COMPLETED", "CANCELLED"), {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "unknown"}}, false, flow.ChecksStoppedUnknown},
+		"cancelled from outside":   {[]flow.Check{ok, run("COMPLETED", "CANCELLED")}, false, flow.ChecksStoppedExternal},
+		"cancelled replaced": {[]flow.Check{
+			{Kind: "CheckRun", Name: "check", Status: "COMPLETED", Conclusion: "CANCELLED", StartedAt: "2026-11-20T09:00:00Z"},
+			{Kind: "CheckRun", Name: "check", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: "2026-11-20T09:05:00Z"},
+		}, false, flow.ChecksGreen},
+		"unknown conclusion": {[]flow.Check{run("COMPLETED", "STALE")}, false, flow.ChecksRed},
+		"status success":     {[]flow.Check{ctx("SUCCESS")}, false, flow.ChecksGreen},
+		"status pending":     {[]flow.Check{ok, ctx("PENDING")}, false, flow.ChecksPending},
+		"status expected":    {[]flow.Check{ctx("EXPECTED")}, false, flow.ChecksPending},
+		"status error":       {[]flow.Check{ok, ctx("ERROR")}, false, flow.ChecksRed},
 	} {
-		if got := flow.Rollup(c.in); got != c.want {
+		if got := flow.Rollup(c.checks, c.wfPending); got != c.want {
 			t.Errorf("%s: Rollup = %s, want %s", name, got, c.want)
 		}
 	}
@@ -125,12 +143,13 @@ func TestChecksRollupTable(t *testing.T) {
 // the checks grace. The same task with green checks is merged.
 func TestNoChecksNeverMerges(t *testing.T) {
 	now := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
-	for _, class := range []string{"none", "green"} {
-		data, _ := os.ReadFile(filepath.Join("testdata", "prfull-"+class+".json"))
-		p, err := parseSnapshot(data)
+	for _, class := range []string{"absent", "green"} {
+		data, _ := os.ReadFile(filepath.Join("testdata", "snapshots", class+".json"))
+		v, p, err := decodeSnapshot(data)
 		if err != nil {
 			t.Fatal(err)
 		}
+		p.Checks = flow.Rollup(v.StatusCheckRollup, false)
 		p.HeadRel = flow.RelSame
 		task := flow.Task{ID: "t1", Attempts: []flow.Attempt{{BaseCommit: "b0", Ready: []flow.Ready{{Head: p.Head}},
 			Rounds: []flow.Round{
@@ -162,7 +181,7 @@ func TestPushAndOpenPROnceThenAdopts(t *testing.T) {
 	}
 
 	// Before: no PR is an answer, not a failure.
-	if p, err := PRSnapshot(ctx, repo, "task/t1-x"); err != nil || !p.Answered || p.State != flow.PRNone {
+	if p, _, err := PRSnapshot(ctx, repo, "task/t1-x"); err != nil || !p.Answered || p.State != flow.PRNone {
 		t.Fatalf("snapshot before PR = %+v, %v", p, err)
 	}
 	for i := range 2 {
@@ -178,11 +197,11 @@ func TestPushAndOpenPROnceThenAdopts(t *testing.T) {
 	if len(creates) != 1 || len(ghCalls(t, gh, "pr list")) != 2 || !strings.Contains(creates[0], "--repo acme/demo --head task/t1-x --base main --title feat: x --body Brief.") {
 		t.Fatalf("gh calls:\n%s", strings.Join(ghCalls(t, gh, ""), "\n"))
 	}
-	p, err := PRSnapshot(ctx, repo, "task/t1-x")
-	if err != nil || p != (flow.PR{Answered: true, Number: 7, State: flow.PROpen, Head: c1, Mergeable: flow.MergeableUnknown, Checks: flow.ChecksNone}) {
+	p, _, err := PRSnapshot(ctx, repo, "task/t1-x")
+	if err != nil || p != (flow.PR{Answered: true, Number: 7, State: flow.PROpen, Head: c1, Mergeable: flow.MergeableUnknown, Checks: flow.ChecksAbsent}) {
 		t.Fatalf("snapshot = %+v, %v", p, err)
 	}
-	if views := ghCalls(t, gh, "pr view"); !strings.Contains(views[len(views)-1], "pr view task/t1-x --repo acme/demo --json number,state,headRefOid,mergeable,statusCheckRollup,baseRefName,mergeCommit") {
+	if views := ghCalls(t, gh, "pr view"); !strings.Contains(views[len(views)-1], "pr view task/t1-x --repo acme/demo --json "+prViewFields) {
 		t.Fatalf("pr view argv = %q", views)
 	}
 	if rel, err := Relation(ctx, repo, c1, runGit(t, repo, "rev-parse", "main")); err != nil || rel != flow.RelBehind {
@@ -210,7 +229,7 @@ func TestPushAndOpenPROnceThenAdopts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(gh, "fail"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if p, err := PRSnapshot(ctx, repo, "task/t1-x"); err == nil || p.Answered {
+	if p, _, err := PRSnapshot(ctx, repo, "task/t1-x"); err == nil || p.Answered {
 		t.Fatalf("failed gh call gave %+v, %v", p, err)
 	}
 }
@@ -220,7 +239,7 @@ func TestGHRepoIsRequired(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init")
 	runGit(t, repo, "remote", "add", "origin", "/srv/git/demo.git")
-	if _, err := PRSnapshot(context.Background(), repo, "b"); err == nil || !strings.Contains(err.Error(), "not a github.com repo") {
+	if _, _, err := PRSnapshot(context.Background(), repo, "b"); err == nil || !strings.Contains(err.Error(), "not a github.com repo") {
 		t.Fatalf("PRSnapshot without a GitHub remote: %v", err)
 	}
 }
@@ -292,5 +311,295 @@ func TestPushAndOpenPRRefusesOtherPRs(t *testing.T) {
 	}
 	if creates := ghCalls(t, gh, "pr create"); len(creates) != 0 {
 		t.Fatalf("lagging head opened a second PR: %q", creates)
+	}
+}
+
+func copySnap(t *testing.T, src, dst string) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", "snapshots", src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestPRSnapshotS06Classes reads every checks class from its recorded real
+// S0.6 snapshot (testdata/snapshots/).
+func TestPRSnapshotS06Classes(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	cases := []struct {
+		name, view, workflow, annotations string
+		want                              flow.Checks
+		wantAnn                           bool
+	}{
+		{"green", "green.json", "green.workflow-runs.json", "", flow.ChecksGreen, false},
+		{"red", "red.json", "red.workflow-runs.json", "", flow.ChecksRed, false},
+		{"stopped_timeout", "stopped_timeout.json", "stopped_timeout.workflow-runs.json", "stopped_timeout.annotations.json", flow.ChecksStoppedTimeout, true},
+		{"stopped_external", "stopped_external.json", "stopped_external.workflow-runs.json", "stopped_external.annotations.json", flow.ChecksStoppedExternal, true},
+		{"pending", "pending.json", "pending.workflow-runs.json", "", flow.ChecksPending, false},
+		{"workflow_unfinished", "green.json", "pending.workflow-runs.json", "", flow.ChecksPending, false},
+		{"absent", "absent.json", "absent.workflow-runs.json", "", flow.ChecksAbsent, false},
+		{"absent_skipped", "absent-skipped.json", "absent-skipped.workflow-runs.json", "", flow.ChecksAbsent, false},
+		// Before its run exists a PR reads absent; N36's checks grace holds it.
+		{"pending_before_run", "pending-before-run.json", "pending-before-run.workflow-runs.json", "", flow.ChecksAbsent, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			gh := installFakeGH(t)
+			copySnap(t, c.view, filepath.Join(gh, "view.json"))
+			copySnap(t, c.workflow, filepath.Join(gh, "workflow-runs.json"))
+			if c.annotations != "" {
+				copySnap(t, c.annotations, filepath.Join(gh, "annotations.json"))
+			}
+			p, warn, err := PRSnapshot(ctx, repo, "s06/"+c.name)
+			if err != nil || warn != nil {
+				t.Fatalf("PRSnapshot: %v, %v", err, warn)
+			}
+			if p.Checks != c.want || !p.Answered {
+				t.Fatalf("PRSnapshot checks=%s answered=%t, want %s true", p.Checks, p.Answered, c.want)
+			}
+			annCalled := len(ghCalls(t, gh, "api repos/acme/demo/check-runs/")) > 0
+			if annCalled != c.wantAnn {
+				t.Fatalf("annotations called=%t, want %t", annCalled, c.wantAnn)
+			}
+		})
+	}
+}
+
+// TestPRSnapshotDeniedFallbackAndUnreadable verifies denied pr view -> REST
+// check-runs fallback, and both denied -> ChecksUnreadable with error.
+func TestPRSnapshotDeniedFallbackAndUnreadable(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	copySnap(t, "green.json", filepath.Join(gh, "view.json"))
+	copySnap(t, "green.check-runs.json", filepath.Join(gh, "check-runs.json"))
+	copySnap(t, "green.workflow-runs.json", filepath.Join(gh, "workflow-runs.json"))
+	if err := os.WriteFile(filepath.Join(gh, "view_denied"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Fallback to REST check-runs succeeds.
+	p, _, err := PRSnapshot(ctx, repo, "s06/green")
+	if err != nil || !p.Answered || p.Checks != flow.ChecksGreen {
+		t.Fatalf("fallback snapshot = %+v, %v; want answered green", p, err)
+	}
+	if len(ghCalls(t, gh, "api repos/acme/demo/commits/")) != 2 {
+		t.Fatalf("expected a REST check-runs and a status call, got %v", ghCalls(t, gh, ""))
+	}
+	// REST check-runs also denied -> unreadable + error.
+	if err := os.WriteFile(filepath.Join(gh, "check_runs_denied"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, _, err = PRSnapshot(ctx, repo, "s06/green")
+	if err == nil || p.Answered || p.Checks != flow.ChecksUnreadable {
+		t.Fatalf("both denied = %+v, %v; want unreadable + err", p, err)
+	}
+}
+
+// TestPRSnapshotBehindAndReviewRequired reads Behind from the real compare
+// capture (not mergeStateStatus) and ReviewRequired from reviewDecision.
+func TestPRSnapshotBehindAndReviewRequired(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	copySnap(t, "behind-before.json", filepath.Join(gh, "view.json"))
+	copySnap(t, "behind-before.compare.json", filepath.Join(gh, "compare.json"))
+	p, _, err := PRSnapshot(ctx, repo, "s06/behind")
+	if err != nil || p.Behind || p.ReviewRequired {
+		t.Fatalf("before mover: %+v, %v; want Behind=false ReviewRequired=false", p, err)
+	}
+	copySnap(t, "behind.json", filepath.Join(gh, "view.json"))
+	copySnap(t, "behind.compare.json", filepath.Join(gh, "compare.json"))
+	p, _, err = PRSnapshot(ctx, repo, "s06/behind")
+	if err != nil || !p.Behind || p.Checks != flow.ChecksGreen {
+		t.Fatalf("after mover: %+v, %v; want Behind=true green", p, err)
+	}
+	// compare is base...head; a slashed base keeps its slash raw, as the
+	// S0.6 spike called compare main...s06/behind.
+	calls := ghCalls(t, gh, "api repos/acme/demo/compare/")
+	if want := "api repos/acme/demo/compare/main..." + p.Head; calls[len(calls)-1] != want {
+		t.Fatalf("compare argv = %q, want %q", calls[len(calls)-1], want)
+	}
+	raw, err := os.ReadFile(filepath.Join(gh, "view.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeGH(t, gh, "view.json", strings.Replace(string(raw), `"baseRefName": "main"`, `"baseRefName": "release/1.0"`, 1))
+	if _, _, err := PRSnapshot(ctx, repo, "s06/behind"); err != nil {
+		t.Fatal(err)
+	}
+	calls = ghCalls(t, gh, "api repos/acme/demo/compare/")
+	if want := "api repos/acme/demo/compare/release/1.0..." + p.Head; calls[len(calls)-1] != want {
+		t.Fatalf("compare argv = %q, want %q", calls[len(calls)-1], want)
+	}
+	raw, err = os.ReadFile(filepath.Join("testdata", "snapshots", "green.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev := strings.Replace(string(raw), `"reviewDecision": ""`, `"reviewDecision": "REVIEW_REQUIRED"`, 1)
+	if err := os.WriteFile(filepath.Join(gh, "view.json"), []byte(rev), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, _, err = PRSnapshot(ctx, repo, "s06/review")
+	if err != nil || !p.ReviewRequired {
+		t.Fatalf("review_required: %+v, %v; want ReviewRequired=true", p, err)
+	}
+}
+
+// TestPRSnapshotNetworkFailureNotNonGitHub is KB-GIT-20: a network outage
+// returns unreadable and is never remembered as "not a GitHub repo".
+func TestPRSnapshotNetworkFailureNotNonGitHub(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	copySnap(t, "green.json", filepath.Join(gh, "view.json"))
+	copySnap(t, "green.workflow-runs.json", filepath.Join(gh, "workflow-runs.json"))
+	failFile := filepath.Join(gh, "fail")
+	if err := os.WriteFile(failFile, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, _, err := PRSnapshot(ctx, repo, "s06/green")
+	if err == nil || p.Checks != flow.ChecksUnreadable || strings.Contains(err.Error(), "not a github.com repo") {
+		t.Fatalf("network failure = %+v, %v", p, err)
+	}
+	if err := os.Remove(failFile); err != nil {
+		t.Fatal(err)
+	}
+	p, _, err = PRSnapshot(ctx, repo, "s06/green")
+	if err != nil || !p.Answered || p.Checks != flow.ChecksGreen {
+		t.Fatalf("after recovery = %+v, %v; want answered green", p, err)
+	}
+}
+
+func writeGH(t *testing.T, gh, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(gh, name), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestPRSnapshotNoCheckHidesAnother: same-named checks of two workflows are
+// two checks, and a queued re-run (gh prints its startedAt as year 1)
+// replaces the run it reruns, in either order.
+func TestPRSnapshotNoCheckHidesAnother(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	run := func(wf, status, concl, started string) string {
+		return fmt.Sprintf(`{"__typename":"CheckRun","name":"test","workflowName":%q,"status":%q,"conclusion":%q,"startedAt":%q}`, wf, status, concl, started)
+	}
+	failed, queued := run("ci", "COMPLETED", "FAILURE", "2026-11-20T10:00:05Z"), run("ci", "QUEUED", "", "0001-01-01T00:00:00Z")
+	for name, c := range map[string]struct {
+		rollup string
+		want   flow.Checks
+	}{
+		"failure in ci, later success in e2e": {failed + "," + run("e2e", "COMPLETED", "SUCCESS", "2026-11-20T10:00:09Z"), flow.ChecksRed},
+		"queued re-run after the failure":     {failed + "," + queued, flow.ChecksPending},
+		"queued re-run before the failure":    {queued + "," + failed, flow.ChecksPending},
+		"queued re-run of a cancelled run":    {run("ci", "COMPLETED", "CANCELLED", "2026-11-20T10:00:05Z") + "," + queued, flow.ChecksPending},
+	} {
+		gh := installFakeGH(t)
+		writeGH(t, gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"h1","mergeable":"MERGEABLE","baseRefName":"main","statusCheckRollup":[`+c.rollup+`]}`)
+		if p, _, err := PRSnapshot(ctx, repo, "b"); err != nil || p.Checks != c.want {
+			t.Errorf("%s: checks = %s, %v; want %s", name, p.Checks, err, c.want)
+		}
+	}
+}
+
+// TestPRSnapshotFallbackReadsEverything: the REST fallback follows
+// check-run pages and reads commit statuses, so a red check on page 2 or a
+// status-only gate counts; more pages than the bound is unreadable, never a
+// partial green.
+func TestPRSnapshotFallbackReadsEverything(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	page := func(from, n int, concl string) string {
+		runs := make([]string, n)
+		for i := range runs {
+			runs[i] = fmt.Sprintf(`{"id":%d,"name":"c%d","status":"completed","conclusion":%q,"check_suite":{"id":1}}`, from+i, from+i, concl)
+		}
+		return `{"total_count":2000,"check_runs":[` + strings.Join(runs, ",") + `]}`
+	}
+	full := map[string]string{"check-runs.json": page(100, 100, "success")}
+	for i := 2; i <= 20; i++ {
+		full[fmt.Sprintf("check-runs.%d.json", i)] = page(i*100, 100, "success")
+	}
+	for name, c := range map[string]struct {
+		files map[string]string
+		want  flow.Checks
+	}{
+		"red on page 2":    {map[string]string{"check-runs.json": page(1, 100, "success"), "check-runs.2.json": page(500, 1, "failure")}, flow.ChecksRed},
+		"status-only gate": {map[string]string{"status.json": `{"state":"failure","total_count":1,"statuses":[{"context":"ci/jenkins","state":"failure"}]}`}, flow.ChecksRed},
+		"status pending":   {map[string]string{"check-runs.json": page(1, 1, "success"), "status.json": `{"state":"pending","total_count":1,"statuses":[{"context":"ci/jenkins","state":"pending"}]}`}, flow.ChecksPending},
+		"too many pages":   {full, flow.ChecksUnreadable},
+	} {
+		gh := installFakeGH(t)
+		copySnap(t, "green.json", filepath.Join(gh, "view.json"))
+		writeGH(t, gh, "view_denied", "")
+		for f, body := range c.files {
+			writeGH(t, gh, f, body)
+		}
+		if p, _, _ := PRSnapshot(ctx, repo, "s06/green"); p.Checks != c.want {
+			t.Errorf("%s: checks = %s, want %s", name, p.Checks, c.want)
+		}
+	}
+}
+
+// TestPRSnapshotOptionalCallFails: a failed annotations, workflow-runs or
+// compare call never makes the snapshot unreadable. A cancelled run whose
+// annotations cannot be read is stopped_unknown (N34 treats it as a time
+// limit: the coordinator is told, nothing is re-run); a failed workflow-runs
+// read is never green (absent: N36 holds it in the grace, then N43); a
+// failed compare leaves Behind false with BehindUnknown set.
+func TestPRSnapshotOptionalCallFails(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	for _, c := range []struct {
+		fail, view, workflow, extra string
+		want                        flow.Checks
+	}{
+		{"annotations", "stopped_timeout.json", "stopped_timeout.workflow-runs.json", "stopped_timeout.annotations.json", flow.ChecksStoppedUnknown},
+		{"workflow_runs", "absent.json", "", "", flow.ChecksAbsent},
+		{"workflow_runs", "green.json", "", "", flow.ChecksAbsent},
+		{"compare", "behind.json", "green.workflow-runs.json", "behind.compare.json", flow.ChecksGreen},
+	} {
+		gh := installFakeGH(t)
+		copySnap(t, c.view, filepath.Join(gh, "view.json"))
+		if c.workflow != "" {
+			copySnap(t, c.workflow, filepath.Join(gh, "workflow-runs.json"))
+		}
+		if c.extra != "" {
+			copySnap(t, c.extra, filepath.Join(gh, strings.TrimPrefix(filepath.Ext(strings.TrimSuffix(c.extra, ".json")), ".")+".json"))
+		}
+		writeGH(t, gh, c.fail+"_fail", "")
+		p, warn, err := PRSnapshot(ctx, repo, "b")
+		if err != nil || warn == nil || !p.Answered || p.Checks != c.want || p.Behind || p.BehindUnknown != (c.fail == "compare") {
+			t.Errorf("%s fails on %s: %+v, warn %v, err %v; want answered %s, not behind, a warning", c.fail, c.view, p, warn, err, c.want)
+		}
+	}
+}
+
+// TestCheckRunsRoundTwo: a completed check without a start time never hides
+// a failure of the same check, and annotations are paged 50 at a time (the
+// endpoint's cap), so a timeout line on page 2 is read.
+func TestCheckRunsRoundTwo(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	writeGH(t, gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"h1","mergeable":"MERGEABLE","baseRefName":"main","statusCheckRollup":[`+
+		`{"__typename":"CheckRun","name":"test","workflowName":"ci","status":"COMPLETED","conclusion":"SUCCESS"},`+
+		`{"__typename":"CheckRun","name":"test","workflowName":"ci","status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-11-20T10:00:05Z"}]}`)
+	if p, _, err := PRSnapshot(ctx, repo, "b"); err != nil || p.Checks != flow.ChecksRed {
+		t.Errorf("completed success without a start beside a failure: %s, %v; want red", p.Checks, err)
+	}
+	gh = installFakeGH(t)
+	copySnap(t, "stopped_timeout.json", filepath.Join(gh, "view.json"))
+	copySnap(t, "stopped_timeout.workflow-runs.json", filepath.Join(gh, "workflow-runs.json"))
+	writeGH(t, gh, "annotations.json", "["+strings.Repeat(`{"message":"warning"},`, 49)+`{"message":"warning"}]`)
+	copySnap(t, "stopped_timeout.annotations.json", filepath.Join(gh, "annotations.2.json"))
+	if p, _, err := PRSnapshot(ctx, repo, "b"); err != nil || p.Checks != flow.ChecksStoppedTimeout {
+		t.Errorf("timeout annotation on page 2: %s, %v; want stopped_timeout", p.Checks, err)
 	}
 }

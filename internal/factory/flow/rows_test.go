@@ -126,12 +126,14 @@ func TestN42Guards(t *testing.T) {
 		"prOpen":             closedPR,
 		"prHeadIsH":          func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel = "c9", RelAhead },
 		"answered":           noAnswer,
+		"githubAvail":        func(in *In) { in.Facts.GitHubUnavailable = true },
 		"mergeClean":         conflict,
 		"notBehind":          func(in *In) { in.Facts.PR.Behind = true },
 		"notWorking":         workingF,
 		"onePassNeedsL8":     onePass,
 		"ladderSays(Passed)": func(in *In) { a0(in).Rounds[1].Verdict = "maybe" },
 		"checksGreen":        red,
+		"checksUnreadable":   func(in *In) { in.Facts.PR.Checks = ChecksUnreadable },
 		"tipSame":            func(in *In) { in.Facts.Tip, in.Facts.TipRel = "c9", RelDiverged },
 	} {
 		in := with(f)
@@ -262,6 +264,8 @@ func TestRowCases(t *testing.T) {
 		{"N29", with(changes, rejected), []string{"start_reviewer@2@c1"}}, // L10: reject consumes no round number
 		{"N36", with(pending), nil},
 		{"N36", with(noAnswer), nil}, // checks unreadable: wait, no wake
+		{"N36", with(func(in *In) { in.Facts.PR.Checks = ChecksUnreadable }), nil},
+		{"N36", with(func(in *In) { in.Facts.GitHubUnavailable = true }), nil},
 		{"N39", with(workingF), nil},
 		{"N41", with(asked), nil},
 		{"N42", landing(), []string{"record_accept@c1", "merge@c1"}},
@@ -356,7 +360,7 @@ func TestChecksGrace(t *testing.T) {
 		age  time.Duration
 		want string
 	}{{0, "N36"}, {grace - time.Second, "N36"}, {grace, "N43"}} {
-		in := with(func(in *In) { in.Facts.PR.Checks = ChecksNone; in.Now = now.Add(c.age) })
+		in := with(func(in *In) { in.Facts.PR.Checks = ChecksAbsent; in.Now = now.Add(c.age) })
 		if r, _ := FirstMatch(TaskRows, in); r.ID != c.want {
 			t.Errorf("no checks after %v: %s, want %s", c.age, r.ID, c.want)
 		}

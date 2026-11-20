@@ -24,15 +24,19 @@ const (
 	PRClosed PRState = "closed"
 )
 
-// Checks is slice 1's checks rollup (plan.md section 3, git and gh row).
+// Checks is the PR checks rollup class (design.md 7.3).
 type Checks string
 
-// The four simple classes.
+// The checks rollup classes of design.md 7.3.
 const (
-	ChecksNone    Checks = "none"
-	ChecksPending Checks = "pending"
-	ChecksRed     Checks = "red"
-	ChecksGreen   Checks = "green"
+	ChecksUnreadable      Checks = "unreadable"
+	ChecksRed             Checks = "red"
+	ChecksStoppedTimeout  Checks = "stopped_timeout"
+	ChecksStoppedExternal Checks = "stopped_external"
+	ChecksStoppedUnknown  Checks = "stopped_unknown" // cancelled, annotations unread: N34 treats it as a time limit, never re-runs
+	ChecksPending         Checks = "pending"
+	ChecksAbsent          Checks = "absent"
+	ChecksGreen           Checks = "green"
 )
 
 // Mergeable is GitHub's answer on conflicts (design.md 7.3).
@@ -62,19 +66,22 @@ const (
 	VerdictChanges = "changes"
 )
 
-// PR is the latest PR snapshot. Answered is false when GitHub did not
-// answer this pass; the rest is then the last snapshot it gave.
+// PR is the latest PR snapshot (design.md 7.3). Answered is false when GitHub
+// did not answer this pass; the rest is then the last snapshot it gave.
+// No merge_queue field: spike S0.5 found no merge queue on the repo.
 type PR struct {
-	Answered     bool      `json:"answered"`
-	Number       int       `json:"number"`
-	State        PRState   `json:"state"`
-	MergedCommit string    `json:"merged_commit,omitempty"`
-	Head         string    `json:"head"`
-	HeadRel      Rel       `json:"head_rel"`   // Head against H
-	HeadSince    time.Time `json:"head_since"` // when Head was first seen; the checks grace counts from it
-	Mergeable    Mergeable `json:"mergeable"`
-	Checks       Checks    `json:"checks"`
-	Behind       bool      `json:"behind"`
+	Answered       bool      `json:"answered"`
+	Number         int       `json:"number"`
+	State          PRState   `json:"state"`
+	MergedCommit   string    `json:"merged_commit,omitempty"`
+	Head           string    `json:"head"`
+	HeadRel        Rel       `json:"head_rel"`   // Head against H
+	HeadSince      time.Time `json:"head_since"` // when Head was first seen; the checks grace counts from it
+	Mergeable      Mergeable `json:"mergeable"`
+	Checks         Checks    `json:"checks"`
+	Behind         bool      `json:"behind"`
+	BehindUnknown  bool      `json:"behind_unknown,omitempty"` // compare failed: Behind false is not "not behind" (N40)
+	ReviewRequired bool      `json:"review_required,omitempty"`
 }
 
 // Run is one run's state, and whether a start for it is in flight.
@@ -104,6 +111,9 @@ type Facts struct {
 	DepsNotDone []string `json:"deps_not_done,omitempty"`
 	DepsDropped []string `json:"deps_dropped,omitempty"`
 	NoSlot      bool     `json:"no_slot,omitempty"`
+	// GitHubUnavailable is the project fact raised when GitHub cannot be read
+	// (design.md 7.3); it holds merges (N42) and never marks the repo non-GitHub.
+	GitHubUnavailable bool `json:"github_unavailable,omitempty"`
 }
 
 // In is what a row sees: the task's records, the settings, the facts and
