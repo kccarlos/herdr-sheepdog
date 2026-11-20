@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -33,6 +35,35 @@ func CodexArgv(model, cwd string) []string {
 		"-c", "projects={" + string(key) + "={trust_level=\"trusted\"}}",
 		"-c", "features.hooks=false", "-c", "check_for_update_on_startup=false",
 		"-c", `model_reasoning_effort="medium"`}
+}
+
+// CodexHome makes dir a Codex home that holds only a link to the owner's
+// auth.json (from $CODEX_HOME, else ~/.codex), so a reviewer run with
+// CODEX_HOME=dir reads none of the owner's AGENTS.md, config or skills.
+// project_doc_max_bytes=0 does not drop the user file (PR D3 fix, live).
+func CodexHome(dir string) (string, error) {
+	src := os.Getenv("CODEX_HOME")
+	if src == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		src = filepath.Join(home, ".codex")
+	}
+	auth, link := filepath.Join(src, "auth.json"), filepath.Join(dir, "auth.json")
+	if _, err := os.Stat(auth); err != nil {
+		return "", fmt.Errorf("world: Codex is not signed in (%w)", err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	if cur, err := os.Readlink(link); err != nil || cur != auth {
+		_ = os.Remove(link)
+		if err := os.Symlink(auth, link); err != nil {
+			return "", err
+		}
+	}
+	return dir, nil
 }
 
 var (

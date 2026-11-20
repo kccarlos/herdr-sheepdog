@@ -81,3 +81,27 @@ func TestReadCodexReport(t *testing.T) {
 		t.Fatal("ReadCodexReport waited for a status Codex never sends")
 	}
 }
+
+// TestCodexHome: the run's home holds only a link to the sign-in, and a
+// missing sign-in is an error, not a login prompt in a reviewer terminal.
+func TestCodexHome(t *testing.T) {
+	src, dir := t.TempDir(), filepath.Join(t.TempDir(), "codex-home")
+	t.Setenv("CODEX_HOME", src)
+	if _, err := CodexHome(dir); err == nil {
+		t.Fatal("CodexHome without auth.json should fail")
+	}
+	if err := os.WriteFile(filepath.Join(src, "auth.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 { // idempotent
+		if got, err := CodexHome(dir); err != nil || got != dir {
+			t.Fatalf("CodexHome = %q, %v", got, err)
+		}
+	}
+	if l, err := os.Readlink(filepath.Join(dir, "auth.json")); err != nil || l != filepath.Join(src, "auth.json") {
+		t.Fatalf("auth link = %q, %v", l, err)
+	}
+	if es, _ := os.ReadDir(dir); len(es) != 1 {
+		t.Fatalf("home holds %d entries, want only auth.json", len(es))
+	}
+}

@@ -280,6 +280,7 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 	}
 	env := map[string]string{}
 	maps.Copy(env, e.RunEnv)
+	maps.Copy(env, spec.Env)
 	if rs == flow.RunGone {
 		tok := rand.Text()
 		*hash = tokenHash(tok)
@@ -662,15 +663,19 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		a.Review = &flow.ReviewRun{Round: round, Kind: kind, Head: h, Code: strings.ToLower(rand.Text()[:10]), Reviewer: reviewerOf(model)}
 	}
 	model, kind = a.Review.Reviewer.Model, cmp.Or(a.Review.Kind, kind)
-	argv := world.ClaudeArgv(flow.RoleReviewer, model, "medium", "dontAsk")
+	argv, env := world.ClaudeArgv(flow.RoleReviewer, model, "medium", "dontAsk"), map[string]string(nil)
 	if a.Review.Reviewer.CLI == world.CodexCLI {
-		argv = world.CodexArgv(model, a.Worktree)
+		home, err := world.CodexHome(filepath.Join(e.Paths.DataDir, "factory", "codex-home"))
+		if err != nil {
+			return "", false, err
+		}
+		argv, env = world.CodexArgv(model, a.Worktree), map[string]string{"CODEX_HOME": home}
 	}
 	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
 		"{outcomes}", bullets(t.Outcomes), "{rejections}", e.rejectionPrompt(id, t.ID, *a, h), "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code).Replace(reviewerTemplate))
 	termID, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, world.RunSpec{
 		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
-		Argv: argv, Prompt: prompt,
+		Argv: argv, Prompt: prompt, Env: env,
 		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleReviewer, "sheepdog.task": t.ID, "sheepdog.model": model},
 	})
 	if err != nil {
@@ -680,6 +685,10 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		return "", abort, err
 	}
 	a.Review.RunID = termID
+	if a.Review.Reviewer.CLI == world.CodexCLI && a.Review.IdleSince == nil {
+		now := time.Now() // Codex reports no idle: S2's no-tag clock runs from the start
+		a.Review.IdleSince = &now
+	}
 	return fmt.Sprintf("started reviewer %s (round %d, %s, %s)", termID, round, kind, model), abort, nil
 }
 

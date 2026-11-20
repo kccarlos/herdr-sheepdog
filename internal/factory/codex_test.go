@@ -57,6 +57,11 @@ func TestReviewerCandidatesBySetting(t *testing.T) {
 // round 1 passed by opus at c1. The Codex terminal never reports a status.
 func codexRound2(t *testing.T) (*hctest.Server, *Engine, Paths, string, string) {
 	ctx := context.Background()
+	codexHome := t.TempDir() // a fake sign-in: tests never touch the real ~/.codex
+	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", codexHome)
 	srv := hctest.New(t)
 	runs := &[]hc.RunParams{}
 	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { *runs = append(*runs, p) }
@@ -103,6 +108,12 @@ func codexRound2(t *testing.T) (*hctest.Server, *Engine, Paths, string, string) 
 		!slices.Equal(last.Argv[:len(last.Argv)-1], world.CodexArgv(codexModel, wt)) || !strings.Contains(last.Argv[len(last.Argv)-1], "Review round 2") {
 		t.Fatalf("round 2 review = %+v argv %q", rev, last.Argv)
 	}
+	if home := filepath.Join(paths.DataDir, "factory", "codex-home"); last.Env["CODEX_HOME"] != home {
+		t.Fatalf("CODEX_HOME = %q, want %q", last.Env["CODEX_HOME"], home)
+	}
+	if rev.IdleSince == nil { // S2's clock runs from the start: Codex reports no idle
+		t.Fatal("no S2 clock at the Codex run's start")
+	}
 	return srv, eng, paths, id, c1
 }
 
@@ -136,6 +147,25 @@ func TestEngineCodexReviewerTagIsTheVerdict(t *testing.T) {
 	}
 	if flow.Ladder(flow.In{Task: st.Tasks[0], Settings: st.Settings}) != flow.Passed {
 		t.Fatal("opus pass + Codex pass is not passed")
+	}
+}
+
+// TestEngineCodexReviewerChangesCounted: Codex prints findings as "• "
+// bullets; a "changes" tag with two "• major:" lines is round 2's changes.
+func TestEngineCodexReviewerChangesCounted(t *testing.T) {
+	ctx := context.Background()
+	srv, eng, paths, id, c1 := codexRound2(t)
+	st, _ := LoadState(paths.State(id))
+	rev := st.Tasks[0].Attempts[0].Review
+	srv.SetScreen(rev.RunID, codexScreen(rev.Code, c1, "• I’ll read the diff and check the change.\n\n• Explored\n  └ Read x.go\n\n"+
+		"• major: add() subtracts its second argument.\n\n• major: no test covers add().\n\n• minor: name the helper.\n\n"+
+		"  <report>{\"code\":\""+rev.Code+"\",\"round\":2,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":2}</report>\n\n"+
+		"  Worked for 11s • 7:46 PM\n\n› Ask Codex to do anything\n"))
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	a := st.Tasks[0].Attempts[0]
+	if a.Review != nil || len(a.Rounds) != 2 || a.Rounds[1].Verdict != flow.VerdictChanges || a.Rounds[1].Majors != 2 {
+		t.Fatalf("after the Codex changes tag: review=%+v rounds=%+v", a.Review, a.Rounds)
 	}
 }
 
