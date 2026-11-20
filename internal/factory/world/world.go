@@ -668,11 +668,11 @@ func MergeOnly(ctx context.Context, dir, x, h string) (bool, error) {
 		return false, err
 	}
 	if x == h {
-		return flow.IsMergeOnly(flow.MergeOnlyIn{Rel: flow.RelSame}), nil
+		return false, nil
 	}
 	mb, err := gitCmd(ctx, dir, "merge-base", h, ref)
 	if err != nil || !isAncestor(ctx, dir, x, h) { // no common ancestor is "not merge_only"; only a cancelled read is an error
-		return flow.IsMergeOnly(flow.MergeOnlyIn{Rel: flow.RelDiverged}), ctx.Err()
+		return false, ctx.Err()
 	}
 	out, err := gitCmd(ctx, dir, "rev-list", "--first-parent", "--parents", x+".."+h)
 	if err != nil || out == "" {
@@ -680,11 +680,7 @@ func MergeOnly(ctx context.Context, dir, x, h string) (bool, error) {
 	}
 	var commits []flow.MergeCommit
 	for ln := range strings.Lines(out) {
-		c := inspectMergeCommit(ctx, dir, strings.Fields(ln), mb)
-		commits = append(commits, c)
-		if !flow.IsMergeOnly(flow.MergeOnlyIn{Rel: flow.RelAhead, Commits: commits}) {
-			return false, nil
-		}
+		commits = append(commits, inspectMergeCommit(ctx, dir, strings.Fields(ln), mb))
 	}
 	return flow.IsMergeOnly(flow.MergeOnlyIn{Rel: flow.RelAhead, Commits: commits}), nil
 }

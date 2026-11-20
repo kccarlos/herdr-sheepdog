@@ -99,24 +99,27 @@ func headH(in In) string {
 	return ""
 }
 
-func ended(in In) bool          { return Ended(in.Task) }
-func recapOpen(in In) bool      { return OpenRecap(in.Task) != nil }
-func prMerged(in In) bool       { return in.Facts.PR.State == PRMerged }
-func noAttempt(in In) bool      { return in.attempt() == nil }
-func hasAttempt(in In) bool     { return in.attempt() != nil }
-func depsNotDone(in In) bool    { return len(in.Facts.DepsNotDone) > 0 }
-func depsDropped(in In) bool    { return len(in.Facts.DepsDropped) > 0 }
-func noSlot(in In) bool         { return in.Facts.NoSlot }
-func workerGone(in In) bool     { return in.Facts.Worker.State == RunGone }
-func reviewGone(in In) bool     { return in.Facts.Reviewer.State == RunGone }
-func noReady(in In) bool        { return len(in.attempt().Ready) == 0 }
-func tipAhead(in In) bool       { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
-func noPR(in In) bool           { return in.Facts.PR.State == PRNone }
-func prOpen(in In) bool         { return in.Facts.PR.State == PROpen }
-func prNotClosed(in In) bool    { return in.Facts.PR.State != PRClosed }
-func tipAtOrBehindH(in In) bool { return in.Facts.TipRel == RelSame || in.Facts.TipRel == RelBehind } // diverged falls to N43 until N7
-func prBehindH(in In) bool      { return in.Facts.PR.HeadRel == RelBehind }
-func prHeadIsH(in In) bool      { return in.Facts.PR.Head == headH(in) }
+func ended(in In) bool       { return Ended(in.Task) }
+func recapOpen(in In) bool   { return OpenRecap(in.Task) != nil }
+func prMerged(in In) bool    { return in.Facts.PR.State == PRMerged }
+func noAttempt(in In) bool   { return in.attempt() == nil }
+func hasAttempt(in In) bool  { return in.attempt() != nil }
+func depsNotDone(in In) bool { return len(in.Facts.DepsNotDone) > 0 }
+func depsDropped(in In) bool { return len(in.Facts.DepsDropped) > 0 }
+func noSlot(in In) bool      { return in.Facts.NoSlot }
+func workerGone(in In) bool  { return in.Facts.Worker.State == RunGone }
+func reviewGone(in In) bool  { return in.Facts.Reviewer.State == RunGone }
+func noReady(in In) bool     { return len(in.attempt().Ready) == 0 }
+func tipAhead(in In) bool    { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
+func noPR(in In) bool        { return in.Facts.PR.State == PRNone }
+func prOpen(in In) bool      { return in.Facts.PR.State == PROpen }
+func prNotClosed(in In) bool { return in.Facts.PR.State != PRClosed }
+func tipAtOrBehindH(in In) bool {
+	a := in.attempt()
+	return in.Facts.TipRel == RelSame || a != nil && in.Facts.TipRel == RelBehind && Covers(*a, in.Facts.Tip, H(*a))
+}                          // diverged or uncovered tip falls to N43 until N7
+func prBehindH(in In) bool { return in.Facts.PR.HeadRel == RelBehind }
+func prHeadIsH(in In) bool { return in.Facts.PR.Head == headH(in) }
 func prHeadAheadMergeOnly(in In) bool {
 	return prOpen(in) && answered(in) && in.Facts.PR.HeadRel == RelAhead && in.Facts.PR.HeadMergeOnly
 }
@@ -125,8 +128,8 @@ func unanswered(in In) bool           { return !answered(in) }
 func githubUnavail(in In) bool        { return in.Facts.GitHubUnavailable }
 func githubAvail(in In) bool          { return !githubUnavail(in) }
 func prBehindBase(in In) bool         { return in.Facts.PR.Behind && !in.Facts.PR.BehindUnknown }
-func prBehindUnknown(in In) bool      { return in.Facts.PR.Behind && in.Facts.PR.BehindUnknown }
-func notBehind(in In) bool            { return !in.Facts.PR.Behind }
+func prBehindUnknown(in In) bool      { return in.Facts.PR.BehindUnknown }
+func notBehind(in In) bool            { return !in.Facts.PR.Behind && !in.Facts.PR.BehindUnknown }
 func checksGreen(in In) bool          { return in.Facts.PR.Checks == ChecksGreen }
 func checksRed(in In) bool            { return in.Facts.PR.Checks == ChecksRed }
 func checksStoppedExt(in In) bool     { return in.Facts.PR.Checks == ChecksStoppedExternal }
@@ -327,7 +330,12 @@ var TaskRows = []Row[In]{
 			once(in.acts(), key(AskWake, "no_checks", h)))(in)
 	}},
 	{ID: "N36", WaitsOn: "CI", When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown)),
-		Then: say("checks pending or unreadable, or mergeable/behind unknown")},
+		Then: func(in In) Decision {
+			if prBehindUnknown(in) && !anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn)(in) && in.Now.Sub(in.Facts.PR.HeadSince) >= checksGrace(in) {
+				return say("cannot tell if PR is behind the base past checks_grace_minutes", once(in.acts(), key(AskWake, "behind_unknown", headH(in))))(in)
+			}
+			return say("checks pending or unreadable, or mergeable/behind unknown")(in)
+		}},
 	{ID: "N37", WaitsOn: "a GitHub approval", When: ciReady(reviewRequired), Then: func(in In) Decision {
 		return say("GitHub requires an approving review (branch protection / required approving reviews); nobody in the factory can approve",
 			once(in.acts(), key(AskWake, "review_required", headH(in))))(in)

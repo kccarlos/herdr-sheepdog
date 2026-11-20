@@ -144,6 +144,7 @@ func TestN42Guards(t *testing.T) {
 		"mergeClean":            conflict,
 		"noReviewRequired":      reviewReq,
 		"notBehind":             behind,
+		"notBehindUnknown":      behindUnkn,
 		"notWorking":            workingF,
 		"onePassNeedsL8":        onePass,
 		"ladderSays(Passed)":    func(in *In) { a0(in).Rounds[1].Verdict = "maybe" },
@@ -154,6 +155,8 @@ func TestN42Guards(t *testing.T) {
 		"checksStoppedUnknown":  func(in *In) { in.Facts.PR.Checks = ChecksStoppedUnknown },
 		"checksUnreadable":      func(in *In) { in.Facts.PR.Checks = ChecksUnreadable },
 		"tipAtOrBehindH":        diverged,
+		"tipBehindNotCovered":   func(in *In) { in.Facts.Tip, in.Facts.TipRel = "b0", RelBehind },
+		"tipBehindPastMove":     func(in *In) { movedToM2(in); in.Facts.Tip, in.Facts.TipRel = "b0", RelBehind },
 	} {
 		in := with(f)
 		if n42.When(in) {
@@ -301,7 +304,8 @@ func TestRowCases(t *testing.T) {
 		{"N36", with(noAnswer), nil}, // checks unreadable: wait, no wake
 		{"N36", with(func(in *In) { in.Facts.PR.Checks = ChecksUnreadable }), nil},
 		{"N36", with(func(in *In) { in.Facts.GitHubUnavailable = true }), nil},
-		{"N36", with(behind, behindUnkn), nil},
+		{"N36", with(behindUnkn), nil},
+		{"N36", with(behindUnkn, func(in *In) { in.Now = now.Add(time.Duration(DefaultSettings().ChecksGraceMinutes) * time.Minute) }), []string{"wake_coordinator@behind_unknown@c1"}},
 		{"N37", with(reviewReq), []string{"wake_coordinator@review_required@c1"}},
 		{"N39", with(workingF), nil},
 		{"N40", with(behind), []string{"update_branch@c1"}},
@@ -1115,13 +1119,19 @@ func TestN40BehindAndKBMRG6(t *testing.T) {
 	if r, d := FirstMatch(TaskRows, in); r.ID != "S2" || !slices.Equal(d.Asked, []string{"wake_coordinator@stuck@update_branch@c1@c1"}) {
 		t.Fatalf("N40 failed past stuck_minutes = %s %v, want S2 wake", r.ID, d.Asked)
 	}
-	// BehindUnknown with Behind waits at N36 (no update asked, no merge);
-	// BehindUnknown with green checks and not behind does not block N42 (no update asked).
-	if r, d := FirstMatch(TaskRows, with(behind, behindUnkn)); r.ID != "N36" || len(d.Asked) != 0 {
-		t.Fatalf("Behind+BehindUnknown = %s %v, want N36 wait", r.ID, d.Asked)
+	// BehindUnknown always holds at N36 (never merges, never asks update_branch);
+	// past checks_grace_minutes it wakes the coordinator once and keeps holding.
+	bu := with(behindUnkn)
+	if r, d := FirstMatch(TaskRows, bu); r.ID != "N36" || len(d.Asked) != 0 {
+		t.Fatalf("BehindUnknown in grace = %s %v, want N36 wait", r.ID, d.Asked)
 	}
-	if r, d := FirstMatch(TaskRows, with(behindUnkn)); r.ID != "N42" || !slices.Equal(d.Asked, []string{"record_accept@c1", "merge@c1"}) {
-		t.Fatalf("not behind + BehindUnknown + green = %s %v, want N42 merge", r.ID, d.Asked)
+	bu.Now = now.Add(grace)
+	if r, d := FirstMatch(TaskRows, bu); r.ID != "N36" || !slices.Equal(d.Asked, []string{"wake_coordinator@behind_unknown@c1"}) {
+		t.Fatalf("BehindUnknown past grace = %s %v, want N36 wake once", r.ID, d.Asked)
+	}
+	a0(&bu).Acts = append(a0(&bu).Acts, Act{Key: "wake_coordinator@behind_unknown@c1", Result: "done", At: bu.Now})
+	if r, d := FirstMatch(TaskRows, bu); r.ID != "N36" || len(d.Asked) != 0 {
+		t.Fatalf("BehindUnknown after wake = %s %v, want N36 hold", r.ID, d.Asked)
 	}
 	// KB-MRG-6: a wake with no new commit holds at N39 while working, then merges at N42 when idle.
 	w := with(workingF)

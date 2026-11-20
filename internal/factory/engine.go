@@ -734,7 +734,8 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 // reached from x by merge_only moves, and the tip is H or ahead of it by
 // merges of the base only (N20 moves H next).
 func tipKeepsRound(a flow.Attempt, x string, f flow.Facts) bool {
-	return flow.Covers(a, x, flow.H(a)) && (f.TipRel == flow.RelSame || f.TipRel == flow.RelBehind || f.TipRel == flow.RelAhead && f.TipMergeOnly)
+	h := flow.H(a)
+	return flow.Covers(a, x, h) && (f.TipRel == flow.RelSame || f.TipRel == flow.RelBehind && flow.Covers(a, f.Tip, h) || f.TipRel == flow.RelAhead && f.TipMergeOnly)
 }
 
 // markReviewIdleLocked starts the stuck row's clock (review.idle_since) the
@@ -966,9 +967,6 @@ func (e *Engine) execMergeOnly(_ context.Context, _ string, s *flow.State, ti in
 	a := flow.OpenAttempt(s.Tasks[ti])
 	from := flow.H(*a)
 	_, to, _ := strings.Cut(f.Ask, "@")
-	if to == "" {
-		to = f.Tip
-	}
 	a.MergeOnly = append(a.MergeOnly, flow.Advance{From: from, To: to})
 	return fmt.Sprintf("H moved from %s to merge-only head %s", from, to), false, nil
 }
