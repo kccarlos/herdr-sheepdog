@@ -303,3 +303,121 @@ func TestDoctorLiveCoordinatorReportsNoStray(t *testing.T) {
 		})
 	}
 }
+
+func TestDoctorNoStateReportsUnknownNeverItemsAndRunsLocalBase(t *testing.T) {
+	ctx := context.Background()
+	makeRepo := func(initProject bool) (string, string) {
+		bare := filepath.Join(t.TempDir(), "remote.git")
+		repo := filepath.Join(t.TempDir(), "repo")
+		gitIn(t, t.TempDir(), "init", "--bare", "--initial-branch=main", bare)
+		gitIn(t, t.TempDir(), "clone", bare, repo)
+		gitIn(t, repo, "config", "user.email", "test@example.com")
+		gitIn(t, repo, "config", "user.name", "Test")
+		if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("init\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, repo, "add", "a.txt")
+		gitIn(t, repo, "commit", "-m", "init")
+		gitIn(t, repo, "push", "-u", "origin", "main")
+		gitIn(t, repo, "remote", "set-head", "origin", "main")
+		if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("ahead\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, repo, "add", "a.txt")
+		gitIn(t, repo, "commit", "-m", "ahead 1")
+		repo, id, err := world.RepoProject(ctx, repo, initProject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return repo, id
+	}
+
+	env := newFakeEnv("hc", "claude", "gh", "codexbar")
+	env.handlers["claude auth"] = func(string, []string, []string) CommandOutput { return CommandOutput{Stdout: `{"loggedIn":true}`} }
+	env.handlers["gh auth"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 0} }
+	env.handlers["git -C"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 1} }
+	env.handlers["codexbar --version"] = func(string, []string, []string) CommandOutput { return CommandOutput{Stdout: "1.0"} }
+
+	assertUnknownOnlyAndLocalBase := func(t *testing.T, rs []onboard.Result) {
+		t.Helper()
+		seenUnknown := map[string]bool{}
+		var gotLocalBase bool
+		for _, r := range rs {
+			switch r.Name {
+			case "sweep terminals", "sweep worktrees", "sweep branches":
+				if r.Status != onboard.Warn || !strings.HasPrefix(r.Detail, "unknown: ") {
+					t.Errorf("%s = %+v, want Warn unknown", r.Name, r)
+				}
+				seenUnknown[r.Name] = true
+			case "leftover stray_terminal", "leftover worktree", "leftover branch":
+				t.Errorf("unexpected ownership leftover without state: %+v", r)
+			case "leftover local_base":
+				if strings.Contains(r.Detail, "1 commit ahead") {
+					gotLocalBase = true
+				}
+			}
+		}
+		for _, want := range []string{"sweep terminals", "sweep worktrees", "sweep branches"} {
+			if !seenUnknown[want] {
+				t.Errorf("missing %q warning in %+v", want, rs)
+			}
+		}
+		if !gotLocalBase {
+			t.Errorf("missing leftover local_base in %+v", rs)
+		}
+	}
+
+	t.Run("mismatched or corrupt state with live worker and worktree", func(t *testing.T) {
+		repo, id := makeRepo(true)
+		realPaths := Paths{DataDir: t.TempDir()}
+		if _, err := world.NewWorktree(ctx, repo, realPaths.Worktree(id, "T1", 1), "T1", "active"); err != nil {
+			t.Fatal(err)
+		}
+		srv := hctest.New(t)
+		client := hc.NewClient(srv.Path)
+		for _, p := range []hc.RunParams{
+			{Name: coordName(id), Cwd: repo, Argv: []string{"true"}, Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleCoordinator}},
+			{Name: "worker-t1", Cwd: repo, Argv: []string{"true"}, Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleWorker}},
+		} {
+			if _, err := client.Run(ctx, p); err != nil {
+				t.Fatal(err)
+			}
+		}
+		srv.OnRun = func(term hc.Terminal, _ hc.RunParams) { srv.FinishExit(term.Address, "exited", 0) }
+
+		corruptPaths := Paths{DataDir: t.TempDir()}
+		if err := os.MkdirAll(filepath.Dir(corruptPaths.State(id)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(corruptPaths.State(id), []byte("{corrupt"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		for _, tc := range []struct{ name, dataDir string }{
+			{"mismatched DataDir", t.TempDir()},
+			{"corrupt state.json", corruptPaths.DataDir},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				rs := Doctor(ctx, DoctorOptions{
+					Folder: repo, HCSocket: srv.Path, DataDir: tc.dataDir, Canary: false,
+					TempDir: t.TempDir(), LookPath: env.lookPath, RunCommand: env.run,
+					VolumeTimeout: time.Second, AuthTimeout: time.Second,
+				})
+				assertUnknownOnlyAndLocalBase(t, rs)
+			})
+		}
+	})
+
+	t.Run("repo with no factory project and user task branch", func(t *testing.T) {
+		repo, _ := makeRepo(false)
+		gitIn(t, repo, "branch", "task/my-feature")
+		srv := hctest.New(t)
+		srv.OnRun = func(term hc.Terminal, _ hc.RunParams) { srv.FinishExit(term.Address, "exited", 0) }
+		rs := Doctor(ctx, DoctorOptions{
+			Folder: repo, HCSocket: srv.Path, DataDir: t.TempDir(), Canary: false,
+			TempDir: t.TempDir(), LookPath: env.lookPath, RunCommand: env.run,
+			VolumeTimeout: time.Second, AuthTimeout: time.Second,
+		})
+		assertUnknownOnlyAndLocalBase(t, rs)
+	})
+}

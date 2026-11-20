@@ -177,29 +177,28 @@ func checkSweepLeftovers(ctx context.Context, o DoctorOptions, hcOK bool, dir st
 	if err != nil {
 		return nil
 	}
-	s, wtRoot, p, lerr := flow.State{}, "", Paths{DataDir: o.DataDir}, os.ErrNotExist
+	s, wtRoot, p, stateWhy, client := flow.State{}, "", Paths{DataDir: o.DataDir}, "no factory project state", (*hc.Client)(nil)
 	if o.DataDir != "" && id == "" {
 		id, _ = findStoredProject(p, repo)
 	}
-	if o.DataDir != "" && id != "" {
-		s, lerr = LoadState(p.State(id))
-		wtRoot = filepath.Join(p.project(id), "worktrees")
-	}
-	if (lerr != nil || s.Project.Started && s.Project.RunID == "") && id != "" {
-		s.Project.RunID = coordName(id)
-	}
-	var client *hc.Client
-	if s.Project.ID = id; hcOK && id != "" {
-		client = hc.NewClient(o.HCSocket)
+	if id != "" && o.DataDir != "" {
+		if loaded, lerr := LoadState(p.State(id)); lerr != nil {
+			stateWhy = fmt.Sprintf("cannot load factory state for %s: %v", id, lerr)
+		} else {
+			s, s.Project.ID, wtRoot, stateWhy = loaded, id, filepath.Join(p.project(id), "worktrees"), ""
+			if hcOK {
+				client = hc.NewClient(o.HCSocket)
+			}
+		}
+	} else if id != "" {
+		stateWhy = "no data dir to load factory state for " + id
 	}
 	for _, pr := range world.Sweep(gctx, client, repo, wtRoot, s) {
-		if pr.Probe != "terminals" || client != nil {
-			if pr.Unknown != "" {
-				out = append(out, resWarn("sweep "+pr.Probe, "unknown: "+cleanReason(pr.Unknown), "check "+pr.Probe+" manually"))
-			}
-			for _, it := range pr.Items {
-				out = append(out, resWarn("leftover "+it.Kind, it.Summary, "inspect and clean up manually"))
-			}
+		if pr.Unknown != "" {
+			out = append(out, resWarn("sweep "+pr.Probe, "unknown: "+cleanReason(map[bool]string{true: stateWhy, false: pr.Unknown}[stateWhy != "" && pr.Probe != "local_base"]), "check "+pr.Probe+" manually"))
+		}
+		for _, it := range pr.Items {
+			out = append(out, resWarn("leftover "+it.Kind, it.Summary, "inspect and clean up manually"))
 		}
 	}
 	return out
