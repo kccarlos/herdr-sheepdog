@@ -56,7 +56,7 @@ Owner's goal (2026-11-18): a reviewer or a verifier should, most of the time, pa
 
 | Part | What |
 |---|---|
-| The number | **First-look pass rate:** the share of tasks whose every review round passed with no "changes". The engine already records each round, so it costs nothing to keep. It is in the coordinator's facts block and the owner's digest, split by worker model and by template version |
+| The number | **First-look pass rate:** the share of tasks whose first reviewed round passed. The engine already records each round, so it costs nothing to keep. It is in the coordinator's facts block and the owner's digest, split by worker model and by template version |
 | The worker checks itself by the reviewer's own list | The questions the reviewer will ask are in the worker's prompt, as what to do before reporting (5.3). The worker has the whole context in its session; a reviewer reading from nothing costs far more |
 | A miss is named | A review report says how many of its findings the worker should have caught itself: a proof that does not pass, a caller it did not list, code for a "not doing" item (a `self-check misses:` reply line). Rework from a hard problem and rework from a skipped self-check are then told apart |
 | It steers who gets the work | The coordinator's routing table (design.md 11.2) gains the first-look pass rate and the self-check misses per worker model. A model that keeps failing its first look on a kind of task stops getting that kind |

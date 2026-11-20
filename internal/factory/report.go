@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -296,6 +297,134 @@ func cleanRejectWhy(raw string) string {
 	}, raw)), " ")
 }
 
+type replyLines struct {
+	majors    int
+	misses    int
+	hasMisses bool
+	badMisses bool
+	class     string
+	deletable string
+	notRun    string
+}
+
+func capRunes(s string, limit int) string {
+	if utf8.RuneCountInString(s) <= limit {
+		return s
+	}
+	return string([]rune(s)[:limit])
+}
+
+func unwrapReply(s string) string {
+	for {
+		t := strings.TrimSpace(s)
+		switch {
+		case len(t) >= 4 && strings.HasPrefix(t, "**") && strings.HasSuffix(t, "**"):
+			t = t[2 : len(t)-2]
+		case len(t) >= 2 && strings.HasPrefix(t, "`") && strings.HasSuffix(t, "`"):
+			t = t[1 : len(t)-1]
+		case strings.HasSuffix(t, "."):
+			t = t[:len(t)-1]
+		default:
+			return t
+		}
+		s = t
+	}
+}
+
+func parseReplyLine(l string) (key, val string, ok bool) {
+	s := strings.TrimSpace(l)
+	for {
+		prev := s
+		s = strings.TrimLeft(s, " \t⏺•◦▪‣·-")
+		if rest, cut := strings.CutPrefix(s, "*"); cut && strings.HasPrefix(rest, " ") {
+			s = strings.TrimLeft(rest, " \t")
+		}
+		i := 0
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+		if i > 0 && i < len(s) && s[i] == '.' {
+			s = strings.TrimLeft(s[i+1:], " \t")
+		}
+		if s == prev {
+			break
+		}
+	}
+	s = unwrapReply(s)
+	k, v, ok := strings.Cut(s, ":")
+	if !ok {
+		return "", "", false
+	}
+	if strings.HasPrefix(k, "**") {
+		v = strings.TrimPrefix(v, "**")
+	} else if strings.HasPrefix(k, "`") {
+		v = strings.TrimPrefix(v, "`")
+	}
+	key = strings.ToLower(strings.Trim(k, "*` \t"))
+	val = unwrapReply(cleanRejectWhy(v))
+	if strings.Count(val, "`")%2 == 1 && strings.HasSuffix(val, "`") {
+		val = unwrapReply(val[:len(val)-1])
+	}
+	return key, val, key != ""
+}
+
+func parseMisses(val string) (int, bool) {
+	low := strings.ToLower(val)
+	if low == "none" || strings.HasPrefix(low, "none ") || strings.HasPrefix(low, "none(") {
+		return 0, true
+	}
+	i := 0
+	for i < len(val) && val[i] >= '0' && val[i] <= '9' {
+		i++
+	}
+	if i == 0 || (i < len(val) && (unicode.IsLetter(rune(val[i])) || val[i] == '_')) {
+		return 0, false
+	}
+	n, err := strconv.Atoi(val[:i])
+	return n, err == nil
+}
+
+func parseReplyLines(body string) replyLines {
+	var rl replyLines
+	inTool := false
+	for l := range strings.Lines(body) {
+		trimmed := strings.TrimLeft(l, " \t")
+		if strings.HasPrefix(trimmed, "⎿") || strings.HasPrefix(trimmed, "└") || strings.HasPrefix(trimmed, "│") {
+			inTool = true
+			continue
+		}
+		if inTool {
+			if strings.TrimSpace(trimmed) == "" || l == trimmed {
+				inTool = false
+			} else {
+				continue
+			}
+		}
+		key, val, ok := parseReplyLine(l)
+		if !ok {
+			continue
+		}
+		switch key {
+		case "major":
+			rl.majors++
+		case "self-check misses":
+			rl.hasMisses = true
+			n, valid := parseMisses(val)
+			rl.badMisses = !valid
+			if valid {
+				rl.misses = n
+			}
+		case "class":
+			rl.class = capRunes(val, maxRejectWhyRunes)
+		case "deletable":
+			rl.deletable = capRunes(val, maxRejectWhyRunes)
+		case "not run":
+			rl.notRun = capRunes(val, maxRejectWhyRunes)
+		}
+	}
+	return rl
+}
+
 // acceptVerdictLocked checks a reviewer's terminal <report> tag against the
 // acceptance table (design.md 7.2). Valid: writes findings to reports/, stops
 // the reviewer, and records the round. Invalid: refuses with invalid_report,
@@ -307,14 +436,8 @@ func (e *Engine) acceptVerdictLocked(ctx context.Context, id string, s *flow.Sta
 	if rev == nil {
 		return e.refuse(id, "invalid_report", "No review round is active for this task.")
 	}
-	rep, why, majors := rd.Report, "", 0
-	for l := range strings.Lines(rd.Body) {
-		// A list or bold mark may lead: "- major:", "**major:**", "1. major:",
-		// and Codex's "• major:" (or another bullet).
-		if strings.HasPrefix(strings.TrimLeft(l, " \t-*•◦▪‣·0123456789."), "major:") {
-			majors++
-		}
-	}
+	rep, why := rd.Report, ""
+	rl := parseReplyLines(rd.Body)
 	switch {
 	case rd.Status != world.ReportFound || rep.Code == "" || rep.Code != rev.Code:
 		why = "The report tag is malformed or does not carry this round's one-time code."
@@ -322,8 +445,14 @@ func (e *Engine) acceptVerdictLocked(ctx context.Context, id string, s *flow.Sta
 		why = "The report tag does not match this review run's round and commit."
 	case (rep.Verdict != flow.VerdictPass || rep.Majors != 0) && (rep.Verdict != flow.VerdictChanges || rep.Majors < 1):
 		why = "Verdict must be pass with 0 majors or changes with at least 1 major."
-	case rep.Majors != majors:
-		why = fmt.Sprintf("The tag says %d major(s) but %d findings line(s) start with major:.", rep.Majors, majors)
+	case rep.Majors != rl.majors:
+		why = fmt.Sprintf("The tag says %d major(s) but %d findings line(s) start with major:.", rep.Majors, rl.majors)
+	case !rl.hasMisses:
+		why = "The reply must include a self-check misses: <n> line."
+	case rl.badMisses:
+		why = "The self-check misses: line must carry a non-negative integer."
+	case rl.deletable == "":
+		why = "The reply must include a deletable: <text or none> line."
 	}
 	errKey := "verdict " + id + " " + t.ID + " " + rev.RunID
 	if why != "" {
@@ -348,12 +477,22 @@ func (e *Engine) acceptVerdictLocked(ctx context.Context, id string, s *flow.Sta
 	if err := world.StopRun(ctx, e.HC, rev.RunID); err != nil {
 		return err
 	}
-	rnd := flow.Round{N: rev.Round, Kind: cmp.Or(rev.Kind, flow.RoundFull), Head: rev.Head, Reviewer: rev.Reviewer, Verdict: rep.Verdict, Majors: rep.Majors, ReportPath: path}
+	misses := rl.misses
+	rnd := flow.Round{
+		N: rev.Round, Kind: cmp.Or(rev.Kind, flow.RoundFull), Head: rev.Head, Reviewer: rev.Reviewer,
+		Verdict: rep.Verdict, Majors: rep.Majors, SelfCheckMisses: &misses,
+		Class: rl.class, Deletable: rl.deletable, NotRun: rl.notRun, ReportPath: path,
+	}
 	a.Rounds, a.Review = append(a.Rounds, rnd), nil
 	return e.commitLocked(id, s, LogLine{
 		By: flow.RoleReviewer, Task: t.ID,
-		Input: map[string]any{"verb": "verdict", "round": rnd.N, "kind": rnd.Kind, "model": rnd.Reviewer.Model, "head": rnd.Head, "verdict": rnd.Verdict, "majors": rnd.Majors},
-		Rule:  "verdict", Decision: rnd.Verdict, Why: fmt.Sprintf("round %d (%s, %s) at %s: %s (%d major(s))", rnd.N, rnd.Kind, rnd.Reviewer.Model, rnd.Head, rnd.Verdict, rnd.Majors),
+		Input: map[string]any{
+			"verb": "verdict", "round": rnd.N, "kind": rnd.Kind, "model": rnd.Reviewer.Model,
+			"head": rnd.Head, "verdict": rnd.Verdict, "majors": rnd.Majors,
+			"self_check_misses": misses,
+		},
+		Rule: "verdict", Decision: rnd.Verdict,
+		Why: fmt.Sprintf("round %d (%s, %s) at %s: %s (%d major(s), %d self-check miss(es))", rnd.N, rnd.Kind, rnd.Reviewer.Model, rnd.Head, rnd.Verdict, rnd.Majors, misses),
 	})
 }
 

@@ -388,8 +388,13 @@ func TestVerdictAcceptance(t *testing.T) {
 		{"pass with majors", world.ReportRead{Status: world.ReportFound, Raw: "pm", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 1}}},
 		{"changes with 0 majors", world.ReportRead{Status: world.ReportFound, Raw: "cm", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "changes", Majors: 0}}},
 		{"unknown verdict word", world.ReportRead{Status: world.ReportFound, Raw: "uv", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass|changes", Majors: 0}}},
-		{"pass with a major line", world.ReportRead{Status: world.ReportFound, Raw: "pl", Body: "major: nil deref\nminor: naming", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 0}}},
-		{"majors above the major lines", world.ReportRead{Status: world.ReportFound, Raw: "ml", Body: "  major: nil deref\n  minor: naming", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "changes", Majors: 2}}},
+		{"pass with a major line", world.ReportRead{Status: world.ReportFound, Raw: "pl", Body: "major: nil deref\nminor: naming\nself-check misses: 0\ndeletable: none", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 0}}},
+		{"majors above the major lines", world.ReportRead{Status: world.ReportFound, Raw: "ml", Body: "  major: nil deref\n  minor: naming\nself-check misses: 0\ndeletable: none", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "changes", Majors: 2}}},
+		{"missing self-check misses", world.ReportRead{Status: world.ReportFound, Raw: "nm", Body: "deletable: none", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 0}}},
+		{"non-integer self-check misses", world.ReportRead{Status: world.ReportFound, Raw: "bm", Body: "self-check misses: many\ndeletable: none", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 0}}},
+		{"negative self-check misses", world.ReportRead{Status: world.ReportFound, Raw: "negm", Body: "self-check misses: -1\ndeletable: none", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 0}}},
+		{"missing deletable", world.ReportRead{Status: world.ReportFound, Raw: "nd", Body: "self-check misses: 0", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 0}}},
+		{"empty deletable", world.ReportRead{Status: world.ReportFound, Raw: "ed", Body: "self-check misses: 0\ndeletable:   ", Report: world.Report{Code: "nonce123", Round: 1, Head: "c1", Verdict: "pass", Majors: 0}}},
 	}
 	for _, tc := range badCases {
 		logBuf.Reset()
@@ -412,11 +417,15 @@ func TestVerdictAcceptance(t *testing.T) {
 		}
 	}
 
-	// Valid changes verdict records round{n:1, kind:"full", ...}, writes T1-r1.md, and stops t-rev.
+	// Valid changes verdict records round{n:1, kind:"full", ...}, reply lines
+	// (cleaned and capped at 500), writes T1-r1.md, logs self-check misses, and stops t-rev.
+	longDel := strings.Repeat("x", 600)
 	good := world.ReportRead{
 		Status: world.ReportFound,
 		Raw:    `{"code":"nonce123","round":1,"head":"c1","verdict":"changes","majors":4}`,
-		Body:   "- major: nil deref in Parse\n**major:** missing error check\n1. major: no test\n  * major: race\nDetailed review notes line 42.",
+		Body: "- major: nil deref in Parse\n**major:** missing error check\n1. major: no test\n  * major: race\n" +
+			"• **self-check misses:** 2\n- class: missing\t\x00guards\n1. deletable: " + longDel + "\n  * not run: live e2e\n" +
+			"Detailed review notes line 42.",
 		Report: world.Report{
 			Code: "nonce123", Round: 1, Head: "c1", Verdict: "changes", Majors: 4,
 		},
@@ -431,8 +440,19 @@ func TestVerdictAcceptance(t *testing.T) {
 	wantPath := paths.Report(projID, "T1", 1)
 	r1 := att.Rounds[0]
 	if r1.N != 1 || r1.Kind != "full" || r1.Head != "c1" || r1.Verdict != "changes" || r1.Majors != 4 ||
-		r1.Reviewer != (flow.Reviewer{CLI: "claude", Model: "opus", Effort: "medium"}) || r1.ReportPath != wantPath {
+		r1.Reviewer != (flow.Reviewer{CLI: "claude", Model: "opus", Effort: "medium"}) || r1.ReportPath != wantPath ||
+		r1.SelfCheckMisses == nil || *r1.SelfCheckMisses != 2 || r1.Class != "missing guards" ||
+		len(r1.Deletable) != maxRejectWhyRunes || r1.NotRun != "live e2e" {
 		t.Fatalf("round 1 record = %+v", r1)
+	}
+	logRaw, _ := os.ReadFile(paths.Log(projID))
+	if !strings.Contains(string(logRaw), "2 self-check miss(es)") || !strings.Contains(string(logRaw), `"self_check_misses":2`) {
+		t.Fatalf("verdict log line missing self-check misses:\n%s", logRaw)
+	}
+	for _, dup := range []string{`"class":`, `"deletable":`, `"not_run":`} {
+		if strings.Contains(string(logRaw), dup) {
+			t.Fatalf("verdict log input duplicated %s:\n%s", dup, logRaw)
+		}
 	}
 	reportBytes, err := os.ReadFile(wantPath)
 	if err != nil {
@@ -1513,5 +1533,209 @@ func TestLoadStateAllowsUnknownOutcomeFields(t *testing.T) {
 	}
 	if len(st.Tasks) != 1 || len(st.Tasks[0].Outcomes) != 1 || st.Tasks[0].Outcomes[0].Text != "works" {
 		t.Fatalf("loaded tasks = %+v", st.Tasks)
+	}
+}
+
+// TestParseReplyLinesTolerance checks tolerant reply-line parsing across
+// Claude and Codex shapes: leading ⏺ and bullets, **…** and backticks,
+// trailing periods, leading-integer and "none" self-check misses, and
+// ignoring indented tool-output lines (⎿, └, │ and their continuations).
+func TestParseReplyLinesTolerance(t *testing.T) {
+	t.Run("variants", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			body   string
+			majors int
+			misses int
+			hasM   bool
+			badM   bool
+			class  string
+			del    string
+			notRun string
+		}{
+			{
+				name: "annotated misses and trailing periods",
+				body: "⏺ major: nil deref.\n◦ **major: missing check**\n`major: race`\n" +
+					"**self-check misses: 1 (missed nil check).**\n" +
+					"`class: nil guards.`\n" +
+					"**deletable: none**\n" +
+					"• not run: live e2e.",
+				majors: 3, misses: 1, hasM: true, class: "nil guards", del: "none", notRun: "live e2e",
+			},
+			{
+				name:   "zero with trailing period and backtick",
+				body:   "self-check misses: 0.\n`deletable: none`",
+				misses: 0, hasM: true, del: "none",
+			},
+			{
+				name:   "trailing unmatched backtick on misses",
+				body:   "self-check misses: 0`\ndeletable: none.",
+				misses: 0, hasM: true, del: "none",
+			},
+			{
+				name:   "none misses means zero",
+				body:   "self-check misses: none\ndeletable: none",
+				misses: 0, hasM: true, del: "none",
+			},
+			{
+				name:   "claude second block opens with self-check misses",
+				body:   "Bash(git diff)\n  ⎿  +func foo() {}\n\n⏺ self-check misses: 0\nclass: none\ndeletable: none\nnot run: none",
+				misses: 0, hasM: true, class: "none", del: "none", notRun: "none",
+			},
+			{
+				name: "indented tool output never counts as reply lines",
+				body: "Bash(cat fixture.txt)\n" +
+					"  ⎿  major: from claude tool\n" +
+					"     self-check misses: 9\n" +
+					"     deletable: from claude tool\n" +
+					"     class: from claude tool\n" +
+					"     not run: from claude tool\n" +
+					"• Explored\n" +
+					"  └ Read fixture.go\n" +
+					"    major: from codex tool\n" +
+					"    deletable: from codex tool\n" +
+					"  │ self-check misses: 8\n" +
+					"  │ deletable: from box\n",
+				majors: 0, misses: 0, hasM: false,
+			},
+			{
+				name: "negative misses still bad",
+				body: "self-check misses: -2\ndeletable: none",
+				hasM: true, badM: true, del: "none",
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				got := parseReplyLines(tc.body)
+				if got.majors != tc.majors || got.misses != tc.misses || got.hasMisses != tc.hasM || got.badMisses != tc.badM ||
+					got.class != tc.class || got.deletable != tc.del || got.notRun != tc.notRun {
+					t.Fatalf("parseReplyLines = %+v, want majors=%d misses=%d hasM=%v badM=%v class=%q del=%q notRun=%q",
+						got, tc.majors, tc.misses, tc.hasM, tc.badM, tc.class, tc.del, tc.notRun)
+				}
+			})
+		}
+	})
+
+	t.Run("real claude pass opening with self-check misses", func(t *testing.T) {
+		ctx := context.Background()
+		srv := hctest.New(t)
+		srv.Add(hc.Terminal{Address: "t-cl", Name: "rev-cl", State: "live", Status: &hc.Status{App: "claude-code", State: "done"}})
+		srv.SetScreen("t-cl", "❯ Review round 1\n  <report>{\"code\":\"c123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass|changes\",\"majors\":<n>}</report>\n\n"+
+			"⏺ Bash(git diff)\n"+
+			"  ⎿  deletable: fake in diff\n"+
+			"     major: fake in diff\n\n"+
+			"⏺ self-check misses: 0\nclass: none\ndeletable: none\nnot run: none\n"+
+			`<report>{"code":"c123","round":1,"head":"h1","verdict":"pass","majors":0}</report>`+"\n")
+		rd, err := world.ReadReport(ctx, hc.NewClient(srv.Path), "t-cl", "c123")
+		if err != nil || rd.Status != world.ReportFound {
+			t.Fatalf("ReadReport = (%+v, %v), want found", rd, err)
+		}
+		rl := parseReplyLines(rd.Body)
+		if !rl.hasMisses || rl.badMisses || rl.misses != 0 || rl.majors != 0 || rl.deletable != "none" {
+			t.Fatalf("claude pass parseReplyLines = %+v (body=%q)", rl, rd.Body)
+		}
+	})
+
+	t.Run("real codex changes with tool block and bold lines", func(t *testing.T) {
+		ctx := context.Background()
+		srv := hctest.New(t)
+		srv.Add(hc.Terminal{Address: "t-cx", Name: "rev-cx", State: "live"})
+		srv.SetScreen("t-cx", "› Review round 2\n  <report>{\"code\":\"c456\",\"round\":2,\"head\":\"h1\",\"verdict\":\"pass|changes\",\"majors\":<n>}</report>\n\n"+
+			"• Explored\n"+
+			"  └ Read fixture.go\n"+
+			"    major: fake from file\n"+
+			"    deletable: fake from file\n\n"+
+			"• **major: nil deref in Foo.**\n"+
+			"• **self-check misses: 1 (missed nil check)**\n"+
+			"• `deletable: none.`\n\n"+
+			`  <report>{"code":"c456","round":2,"head":"h1","verdict":"changes","majors":1}</report>`+"\n")
+		rd, err := world.ReadCodexReport(ctx, hc.NewClient(srv.Path), "t-cx", "c456")
+		if err != nil || rd.Status != world.ReportFound {
+			t.Fatalf("ReadCodexReport = (%+v, %v), want found", rd, err)
+		}
+		rl := parseReplyLines(rd.Body)
+		if !rl.hasMisses || rl.badMisses || rl.misses != 1 || rl.majors != 1 || rl.deletable != "none" {
+			t.Fatalf("codex changes parseReplyLines = %+v (body=%q)", rl, rd.Body)
+		}
+	})
+}
+
+// TestVerdictRefusalTellsReviewerOnce checks that a refused verdict sends the
+// refusal reason to the reviewer run once so it can fix and re-send, never
+// loops on repeated refusals, and accepts the corrected reply.
+func TestVerdictRefusalTellsReviewerOnce(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, baseSHA := initGitRepoWithRemote(t)
+	eng := New(paths, client)
+
+	const projID = "proj-refuse-tell"
+	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "x.go"), []byte("package demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt.Path, "add", "x.go")
+	gitIn(t, wt.Path, "commit", "-m", "feat: x")
+	c1 := gitIn(t, wt.Path, "rev-parse", "HEAD")
+
+	srv.Add(hc.Terminal{Address: "t-rev", Name: "rev-1", State: "live", Status: &hc.Status{App: "claude-code", State: "done"}})
+	st := flow.State{
+		Seq:      1,
+		Project:  flow.Project{ID: projID, Folder: repo, Started: true, RunID: "t-coord"},
+		Settings: flow.DefaultSettings(),
+		Tasks: []flow.Task{{
+			ID: "T1", Title: "feat: x",
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: baseSHA, Branch: wt.Branch, Worktree: wt.Path,
+				Ready: []flow.Ready{{Head: c1}},
+				Review: &flow.ReviewRun{
+					RunID: "t-rev", Round: 1, Head: c1, Code: "code1",
+					Reviewer: flow.Reviewer{CLI: "claude", Model: "opus", Effort: "medium"},
+				},
+			}},
+		}},
+	}
+	if err := SaveState(paths.State(projID), st); err != nil {
+		t.Fatal(err)
+	}
+
+	// First refusal: missing deletable line -> reviewer is told why once.
+	srv.SetScreen("t-rev", "❯ Review round 1\n\n⏺ Looks good.\nself-check misses: 0\n"+
+		`<report>{"code":"code1","round":1,"head":"`+c1+`","verdict":"pass","majors":0}</report>`+"\n")
+	eng.passProject(ctx, projID, false)
+	sends := sendsTo(t, srv.Requests(), "t-rev")
+	if len(sends) != 1 || !strings.Contains(sends[0], "deletable:") {
+		t.Fatalf("after first refusal sends = %q, want 1 send mentioning deletable:", sends)
+	}
+
+	// Second pass with same invalid screen, and third with a different invalid screen: never sent again.
+	eng.passProject(ctx, projID, false)
+	srv.SetScreen("t-rev", "❯ Your verdict was refused\n\n⏺ Still missing misses.\ndeletable: none\n"+
+		`<report>{"code":"code1","round":1,"head":"`+c1+`","verdict":"pass","majors":0}</report>`+"\n")
+	eng.passProject(ctx, projID, false)
+	if got := sendsTo(t, srv.Requests(), "t-rev"); len(got) != 1 {
+		t.Fatalf("repeated refusals sent %d times, want 1: %q", len(got), got)
+	}
+
+	// Reviewer fixes its reply and re-sends: accepted without waiting for stuck_minutes.
+	srv.SetScreen("t-rev", "❯ Your verdict was refused\n\n⏺ self-check misses: 0\ndeletable: none\n"+
+		`<report>{"code":"code1","round":1,"head":"`+c1+`","verdict":"pass","majors":0}</report>`+"\n")
+	eng.passProject(ctx, projID, false)
+	cur, err := LoadState(paths.State(projID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := cur.Tasks[0].Attempts[0]; a.Review != nil || len(a.Rounds) != 1 || a.Rounds[0].Verdict != flow.VerdictPass {
+		t.Fatalf("after fixed reply: review=%+v rounds=%+v", a.Review, a.Rounds)
+	}
+}
+
+func TestReviewerPromptSelfCheckMissesWording(t *testing.T) {
+	if !strings.Contains(reviewerTemplate, "self-check misses: <a number only>") {
+		t.Fatalf("reviewer.md missing 'self-check misses: <a number only>':\n%s", reviewerTemplate)
 	}
 }

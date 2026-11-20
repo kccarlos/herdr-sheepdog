@@ -10,22 +10,25 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 )
 
 // ProjectLog reads the last n lines (all when n <= 0) of a project's
-// log.jsonl: folder's project, or the one started project when folder is
-// empty. A torn last line (an append that did not finish) is skipped.
-func ProjectLog(ctx context.Context, paths Paths, folder string, n int) ([]LogLine, error) {
-	id, _, err := (&Engine{Paths: paths}).findProjectLocked(ctx, folder)
+// log.jsonl and its formatted first-look pass rate summary (empty when no task
+// has a reviewed round): folder's project, or the one started project when
+// folder is empty. A torn last line (an append that did not finish) is skipped.
+func ProjectLog(ctx context.Context, paths Paths, folder string, n int) ([]LogLine, string, error) {
+	id, s, err := (&Engine{Paths: paths}).findProjectLocked(ctx, folder)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if err := guardTestPath(paths.Log(id)); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	data, err := os.ReadFile(paths.Log(id))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var lines []LogLine
 	sc := bufio.NewScanner(bytes.NewReader(data))
@@ -39,7 +42,18 @@ func ProjectLog(ctx context.Context, paths Paths, folder string, n int) ([]LogLi
 	if n > 0 && len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
-	return lines, sc.Err()
+	return lines, FormatFirstLook(s.Tasks), sc.Err()
+}
+
+// FormatFirstLook formats the project's first-look pass rate (tasks whose
+// first reviewed round passed / tasks with at least one reviewed round), or ""
+// when no task has been reviewed yet.
+func FormatFirstLook(tasks []flow.Task) string {
+	passed, reviewed := flow.FirstLookPassRate(tasks)
+	if reviewed == 0 {
+		return ""
+	}
+	return fmt.Sprintf("first-look pass rate: %d/%d (%d%%)", passed, reviewed, (passed*100+reviewed/2)/reviewed)
 }
 
 var fullSHA = regexp.MustCompile(`\b[0-9a-f]{40}\b`)

@@ -43,9 +43,12 @@ func TestFactoryLogGolden(t *testing.T) {
 	_ = f.Close()
 
 	format := func(n int) string {
-		lines, err := ProjectLog(context.Background(), paths, "", n)
+		lines, summary, err := ProjectLog(context.Background(), paths, "", n)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if summary != "" {
+			t.Fatalf("summary with no reviewed tasks = %q, want empty", summary)
 		}
 		var b strings.Builder
 		for _, l := range lines {
@@ -62,5 +65,52 @@ func TestFactoryLogGolden(t *testing.T) {
 	}
 	if got := format(2); strings.Count(got, "\n") != 2 || !strings.Contains(got, " N1 ") {
 		t.Fatalf("factory log -n 2 =\n%s", got)
+	}
+}
+
+// TestFirstLookPassRateAndLogSummary checks design.md 11.2 / prompts.md 1.2:
+// first-look pass rate counts tasks whose first reviewed round passed over
+// tasks with at least one reviewed round, ignoring send-backs and unreviewed tasks.
+func TestFirstLookPassRateAndLogSummary(t *testing.T) {
+	paths := testPaths(t)
+	id := "proj-rate"
+	tasks := []flow.Task{
+		{ID: "T1", Attempts: []flow.Attempt{{Rounds: []flow.Round{
+			{N: 1, Kind: flow.RoundSendBack, Verdict: flow.VerdictChanges},
+			{N: 2, Kind: flow.RoundFull, Verdict: flow.VerdictPass},
+			{N: 3, Kind: flow.RoundFull, Verdict: flow.VerdictPass},
+		}}}},
+		{ID: "T2", Attempts: []flow.Attempt{{Rounds: []flow.Round{
+			{N: 1, Kind: flow.RoundFull, Verdict: flow.VerdictChanges, Majors: 1},
+			{N: 2, Kind: flow.RoundDelta, Verdict: flow.VerdictPass},
+		}}}},
+		{ID: "T3", Attempts: []flow.Attempt{
+			{Closed: "new", Rounds: []flow.Round{{N: 1, Kind: flow.RoundFull, Verdict: flow.VerdictChanges, Majors: 1}}},
+			{Rounds: []flow.Round{{N: 1, Kind: flow.RoundFull, Verdict: flow.VerdictPass}}},
+		}},
+		{ID: "T4", Attempts: []flow.Attempt{{Rounds: []flow.Round{{N: 1, Kind: flow.RoundSendBack, Verdict: flow.VerdictChanges}}}}},
+		{ID: "T5"},
+	}
+	if p, r := flow.FirstLookPassRate(tasks); p != 1 || r != 3 {
+		t.Fatalf("FirstLookPassRate = %d/%d, want 1/3", p, r)
+	}
+	if err := SaveState(paths.State(id), flow.State{Seq: 1, Project: flow.Project{ID: id, Folder: "/tmp/rate", Started: true}, Tasks: tasks}); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendLog(paths.Log(id), LogLine{
+		Seq: 1, At: time.Date(2026, 11, 19, 10, 0, 0, 0, time.UTC), By: flow.RoleReviewer, Task: "T2",
+		Rule: "verdict", Decision: "changes", Why: "round 1 (full, opus) at abcdef1: changes (1 major(s), 2 self-check miss(es))",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	lines, summary, err := ProjectLog(context.Background(), paths, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary != "first-look pass rate: 1/3 (33%)" {
+		t.Fatalf("summary = %q, want 1/3 (33%%)", summary)
+	}
+	if len(lines) != 1 || !strings.Contains(FormatLogLine(lines[0]), "2 self-check miss(es)") {
+		t.Fatalf("formatted line = %q", FormatLogLine(lines[0]))
 	}
 }

@@ -218,7 +218,7 @@ func TestS2IdleReviewerWakesOnce(t *testing.T) {
 	}
 
 	// A valid tag ends the round, and its idle clock with it.
-	srv.SetScreen(rev.RunID, "❯ prompt\n\n⏺ Fine.\n<report>{\"code\":\""+rev.Code+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
+	srv.SetScreen(rev.RunID, "❯ prompt\n\n⏺ Fine.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rev.Code+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
 	eng.passProject(ctx, id, false)
 	st, _ = LoadState(paths.State(id))
 	if a := st.Tasks[0].Attempts[0]; len(a.Rounds) != 1 || a.Review != nil {

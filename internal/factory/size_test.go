@@ -167,7 +167,7 @@ func TestReadyAtMergeOnlyTip(t *testing.T) {
 
 // passReport makes rev's reviewer idle with a valid pass tag for round at head.
 func (l *landing) passReport(rev *flow.ReviewRun) {
-	l.srv.SetScreen(rev.RunID, "❯ prompt\n\n⏺ Fine.\n<report>{\"code\":\""+rev.Code+"\",\"round\":"+strconv.Itoa(rev.Round)+",\"head\":\""+rev.Head+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
+	l.srv.SetScreen(rev.RunID, "❯ prompt\n\n⏺ Fine.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rev.Code+"\",\"round\":"+strconv.Itoa(rev.Round)+",\"head\":\""+rev.Head+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
 	l.srv.SetStatus(rev.RunID, &hc.Status{App: "claude-code", State: "done"})
 }
 

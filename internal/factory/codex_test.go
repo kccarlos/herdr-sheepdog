@@ -114,7 +114,7 @@ func codexRound2(t *testing.T) (*hctest.Server, *Engine, Paths, string, string) 
 	rev := st.Tasks[0].Attempts[0].Review
 	last := (*runs)[len(*runs)-1]
 	if rev == nil || rev.Round != 2 || rev.Reviewer.CLI != world.CodexCLI || rev.Reviewer.Model != codexModel ||
-		!slices.Equal(last.Argv[:len(last.Argv)-1], world.CodexArgv(codexModel, wt)) || !strings.Contains(last.Argv[len(last.Argv)-1], "Review round 2") {
+		!slices.Equal(last.Argv[:len(last.Argv)-1], world.CodexArgv(codexModel, "medium", wt)) || !strings.Contains(last.Argv[len(last.Argv)-1], "Review round 2") {
 		t.Fatalf("round 2 review = %+v argv %q", rev, last.Argv)
 	}
 	if home := filepath.Join(paths.DataDir, "factory", "codex-home"); last.Env["CODEX_HOME"] != home {
@@ -143,7 +143,7 @@ func TestEngineCodexReviewerTagIsTheVerdict(t *testing.T) {
 	if st, _ = LoadState(paths.State(id)); len(st.Tasks[0].Attempts[0].Rounds) != 1 || st.Tasks[0].Attempts[0].Review == nil {
 		t.Fatalf("echo read as a verdict: %+v", st.Tasks[0].Attempts[0])
 	}
-	srv.SetScreen(rev.RunID, codexScreen(rev.Code, c1, "• Clean change.\n\n  <report>{\"code\":\""+rev.Code+"\",\"round\":2,\"head\":\""+c1+
+	srv.SetScreen(rev.RunID, codexScreen(rev.Code, c1, "• Clean change.\n\n• self-check misses: 0\n• deletable: none\n\n  <report>{\"code\":\""+rev.Code+"\",\"round\":2,\"head\":\""+c1+
 		"\",\"verdict\":\"pass\",\"majors\":0}</report>\n\n  Worked for 9s • 8:44 PM\n\n› Ask Codex to do anything\n"))
 	eng.passProject(ctx, id, false)
 	st, _ = LoadState(paths.State(id))
@@ -168,6 +168,7 @@ func TestEngineCodexReviewerChangesCounted(t *testing.T) {
 	rev := st.Tasks[0].Attempts[0].Review
 	srv.SetScreen(rev.RunID, codexScreen(rev.Code, c1, "• I’ll read the diff and check the change.\n\n• Explored\n  └ Read x.go\n\n"+
 		"• major: add() subtracts its second argument.\n\n• major: no test covers add().\n\n• minor: name the helper.\n\n"+
+		"• self-check misses: 1\n• class: arithmetic bugs\n• deletable: none\n• not run: none\n\n"+
 		"  <report>{\"code\":\""+rev.Code+"\",\"round\":2,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":2}</report>\n\n"+
 		"  Worked for 11s • 7:46 PM\n\n› Ask Codex to do anything\n"))
 	eng.passProject(ctx, id, false)
@@ -251,5 +252,67 @@ func TestEngineCodexReviewerAdoptedHasClock(t *testing.T) {
 	rev := st.Tasks[0].Attempts[0].Review
 	if rev == nil || rev.RunID != run || rev.Reviewer.CLI != world.CodexCLI || rev.IdleSince == nil {
 		t.Fatalf("adopted review = %+v, want run %s with an S2 clock", rev, run)
+	}
+}
+
+// TestEveryRunStartNamesModelAndEffort checks KB-LCH-4: every run start across
+// all roles and CLIs (coordinator, worker, Claude reviewer, Codex reviewer)
+// states both model and effort explicitly in argv, and reviewer prompts ask
+// for the four reply lines.
+func TestEveryRunStartNamesModelAndEffort(t *testing.T) {
+	ctx := context.Background()
+	_, eng, paths, id, _, _, runs, _ := codexSetup(t)
+	// codexSetup already launched coordinator and worker; now launch a Claude
+	// reviewer (round 1) by clearing round 1 first, then a Codex reviewer (round 2).
+	st, _ := LoadState(paths.State(id))
+	c1 := st.Tasks[0].Attempts[0].Ready[0].Head
+	st.Tasks[0].Attempts[0].Rounds = nil
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N26
+	eng.passProject(ctx, id, false) // N29 starts Claude reviewer (round 1)
+
+	st, _ = LoadState(paths.State(id))
+	st.Tasks[0].Attempts[0].Review = nil
+	st.Tasks[0].Attempts[0].Rounds = []flow.Round{{N: 1, Kind: flow.RoundFull, Head: c1, Reviewer: reviewerOf("opus"), Verdict: flow.VerdictPass}}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N29 starts Codex reviewer (round 2)
+
+	if len(*runs) != 4 {
+		t.Fatalf("launched %d runs, want 4 (coordinator, worker, claude reviewer, codex reviewer)", len(*runs))
+	}
+	assertFlag := func(role string, argv []string, flag string) {
+		i := slices.Index(argv, flag)
+		if i < 0 || i+1 >= len(argv) || strings.TrimSpace(argv[i+1]) == "" {
+			t.Errorf("%s argv missing %s <val>: %q", role, flag, argv)
+		}
+	}
+	for idx, wantRole := range []string{flow.RoleCoordinator, flow.RoleWorker, flow.RoleReviewer, flow.RoleReviewer} {
+		p := (*runs)[idx]
+		if p.Labels["sheepdog.role"] != wantRole {
+			t.Fatalf("run %d role = %q, want %q", idx, p.Labels["sheepdog.role"], wantRole)
+		}
+		if idx < 3 {
+			assertFlag(wantRole, p.Argv, "--model")
+			assertFlag(wantRole, p.Argv, "--effort")
+		} else {
+			assertFlag("codex reviewer", p.Argv, "-m")
+			if !slices.ContainsFunc(p.Argv, func(a string) bool {
+				return strings.HasPrefix(a, `model_reasoning_effort="`) && len(a) > len(`model_reasoning_effort=""`)
+			}) {
+				t.Errorf("codex reviewer argv missing explicit model_reasoning_effort: %q", p.Argv)
+			}
+		}
+		if wantRole == flow.RoleReviewer {
+			prompt := p.Argv[len(p.Argv)-1]
+			for _, line := range []string{"self-check misses:", "class:", "deletable:", "not run:"} {
+				if !strings.Contains(prompt, line) {
+					t.Errorf("reviewer prompt (run %d) missing %q:\n%s", idx, line, prompt)
+				}
+			}
+		}
 	}
 }

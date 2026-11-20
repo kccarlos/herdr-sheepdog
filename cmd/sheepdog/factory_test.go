@@ -610,6 +610,31 @@ func TestFactoryLogCLI(t *testing.T) {
 	if code := run(context.Background(), []string{"factory", "log", filepath.Join(home, "nowhere"), "--config", cfgFile}, &out, &errBuf); code != 1 || out.Len() != 0 {
 		t.Fatalf("log of an unknown folder: code=%d out=%q", code, out.String())
 	}
+
+	// With reviewed tasks, factory log appends the project's first-look pass rate
+	// and verdict lines display each round's self-check misses.
+	if err := factory.SaveState(paths.State("proj-1"), flow.State{
+		Project: flow.Project{ID: "proj-1", Started: true},
+		Tasks: []flow.Task{
+			{ID: "T1", Attempts: []flow.Attempt{{Rounds: []flow.Round{{N: 1, Kind: flow.RoundFull, Verdict: flow.VerdictPass}}}}},
+			{ID: "T2", Attempts: []flow.Attempt{{Rounds: []flow.Round{{N: 1, Kind: flow.RoundFull, Verdict: flow.VerdictChanges, Majors: 1}}}}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := factory.AppendLog(paths.Log("proj-1"), factory.LogLine{
+		Seq: 3, At: at, Task: "T2", Rule: "verdict", Decision: "changes",
+		Why: "round 1 (full, opus) at abc1234: changes (1 major(s), 1 self-check miss(es))",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if code := run(context.Background(), []string{"factory", "log", "-n", "1", "--config", cfgFile}, &out, &errBuf); code != 0 {
+		t.Fatalf("log with rate code=%d stderr=%s", code, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "1 self-check miss(es)") || !strings.Contains(out.String(), "first-look pass rate: 1/2 (50%)\n") {
+		t.Fatalf("factory log output =\n%s", out.String())
+	}
 }
 
 func TestFactoryRecapDecideCLI(t *testing.T) {

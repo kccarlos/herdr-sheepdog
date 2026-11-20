@@ -23,19 +23,20 @@ const CodexCLI = "codex"
 // write nothing to Codex's config: cwd is trusted (no folder-trust prompt),
 // hooks are off (no hooks-review prompt, and no project hook runs), and no
 // update check. Spike S0.3 and PR D3's step 0. StartRun appends the prompt.
-func CodexArgv(model, cwd string) []string {
-	model, cwd = strings.TrimSpace(model), strings.TrimSpace(cwd)
-	if model == "" || cwd == "" {
+func CodexArgv(model, effort, cwd string) []string {
+	model, effort, cwd = strings.TrimSpace(model), strings.TrimSpace(effort), strings.TrimSpace(cwd)
+	if model == "" || effort == "" || cwd == "" {
 		return nil
 	}
 	if real, err := filepath.EvalSymlinks(cwd); err == nil {
 		cwd = real // Codex keys trust by the resolved folder (step 0: /tmp → /private/tmp)
 	}
-	key, _ := json.Marshal(cwd) // a JSON string is a TOML basic string
+	key, _ := json.Marshal(cwd)    // a JSON string is a TOML basic string
+	eff, _ := json.Marshal(effort) // likewise
 	return []string{"codex", "--no-daemon", "--no-alt-screen", "-m", model, "-s", "read-only", "-a", "never",
 		"-c", "projects={" + string(key) + "={trust_level=\"trusted\"}}",
 		"-c", "features.hooks=false", "-c", "check_for_update_on_startup=false",
-		"-c", `model_reasoning_effort="medium"`}
+		"-c", "model_reasoning_effort=" + string(eff)}
 }
 
 // CodexHome makes dir a Codex home that holds only a link to the owner's
