@@ -182,3 +182,76 @@ func TestHistoryRejectThenTwoPassesMerge(t *testing.T) {
 		}
 	}
 }
+
+// TestHistoryNonConvergenceRecapSplit checks KB-CAP-1 and KB-CAP-9:
+// rounds 1, 2, 3 all ask for changes with majors -> L12 answers recap ->
+// N25 opens a recap once -> N6 wakes the coordinator once (no reviewer runs,
+// worker is not told findings) -> coordinator splits -> N1 cleans up.
+func TestHistoryNonConvergenceRecapSplit(t *testing.T) {
+	t0 := time.Date(2026, 11, 18, 9, 0, 0, 0, time.UTC)
+	w := &world{
+		task: Task{ID: "t1", Title: "feat: hard task", Attempts: []Attempt{{
+			BaseCommit: "b0", Branch: "t1", PR: 1,
+			Ready: []Ready{{Head: "c1"}},
+			Acts:  []Act{{Key: "new_attempt", Result: "done"}, {Key: "start_worker", Result: "done"}, {Key: "push_and_open_pr@c1", Result: "done"}},
+		}}},
+		facts: Facts{
+			Tip: "c1", TipRel: RelSame, Worker: Run{State: RunIdle},
+			PR: PR{Answered: true, Number: 1, State: PROpen, Head: "c1", HeadRel: RelSame, Checks: ChecksGreen, Mergeable: MergeableClean},
+		},
+	}
+	steps := []step{
+		{"N29", []string{"start_reviewer@1@c1"}, func(w *world) {
+			w.att().Rounds = append(w.att().Rounds, Round{N: 1, Kind: RoundFull, Head: "c1", Verdict: VerdictChanges, Majors: 1})
+			w.facts.Reviewer = Run{State: RunGone}
+		}},
+		{"N22", []string{"tell_worker_findings@1"}, func(w *world) {
+			w.att().Ready = append(w.att().Ready, Ready{Head: "c2"})
+			w.facts.Tip, w.facts.PR.Head = "c2", "c2"
+			w.facts.Reviewer = Run{}
+		}},
+		{"N29", []string{"start_reviewer@2@c2"}, func(w *world) {
+			w.att().Rounds = append(w.att().Rounds, Round{N: 2, Kind: RoundDelta, Head: "c2", Verdict: VerdictChanges, Majors: 1})
+			w.facts.Reviewer = Run{State: RunGone}
+		}},
+		{"N22", []string{"tell_worker_findings@2"}, func(w *world) {
+			w.att().Ready = append(w.att().Ready, Ready{Head: "c3"})
+			w.facts.Tip, w.facts.PR.Head = "c3", "c3"
+			w.facts.Reviewer = Run{}
+		}},
+		{"N29", []string{"start_reviewer@3@c3"}, func(w *world) {
+			w.att().Rounds = append(w.att().Rounds, Round{N: 3, Kind: RoundDelta, Head: "c3", Verdict: VerdictChanges, Majors: 1})
+			w.facts.Reviewer = Run{State: RunGone}
+		}},
+		{"N25", []string{"open_recap@review"}, func(w *world) {
+			w.task.Recaps = append(w.task.Recaps, Recap{Trigger: "review", Allowed: []string{"split", "drop"}})
+		}},
+		{"N6", []string{"wake_coordinator@recap@1"}, nil},
+		{"N6", nil, func(w *world) {
+			w.task.Recaps[0].Decided = &RecapDecision{Choice: "split", Why: "too broad"}
+			w.task.Split = &Split{Children: []string{"t1a", "t1b"}}
+		}},
+		{"N1", []string{"cleanup"}, func(w *world) { w.facts.Worker = Run{State: RunGone} }},
+		{"N1", nil, nil},
+	}
+
+	seen := map[string]int{}
+	for i, s := range steps {
+		pass := i + 1
+		in := In{Task: w.task, Settings: DefaultSettings(), Facts: w.facts, Now: t0.Add(time.Duration(i) * PassInterval)}
+		r, d := FirstMatch(TaskRows, in)
+		if r.ID != s.row || !slices.Equal(d.Asked, s.asked) {
+			t.Fatalf("pass %d: row %s asked %v, want %s asked %v", pass, r.ID, d.Asked, s.row, s.asked)
+		}
+		for _, k := range d.Asked {
+			if p, dup := seen[k]; dup {
+				t.Fatalf("pass %d: %q asked again (first at pass %d)", pass, k, p)
+			}
+			seen[k] = pass
+			w.att().Acts = append(w.att().Acts, Act{Key: k, Result: "done", At: in.Now})
+		}
+		if s.then != nil {
+			s.then(w)
+		}
+	}
+}

@@ -664,3 +664,166 @@ func TestReportReadyRejectWhySanitizeAndLength(t *testing.T) {
 		}
 	})
 }
+
+// TestReportReadyRejectRefusedWhenLadderSaysRecap checks the PR 2.3 carry
+// (Opus minor 1): ready --reject is accepted only when the ladder answers fix
+// for H, never when L12 says recap (streak or max_rounds).
+func TestReportReadyRejectRefusedWhenLadderSaysRecap(t *testing.T) {
+	ctx := context.Background()
+	paths := testPaths(t)
+	repo, baseSHA := initGitRepoWithRemote(t)
+	eng := New(paths, nil)
+
+	const projID = "proj-reject-recap"
+	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "f.go"), []byte("package demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt.Path, "add", "f.go")
+	gitIn(t, wt.Path, "commit", "-m", "feat: f")
+	c1 := gitIn(t, wt.Path, "rev-parse", "HEAD")
+
+	cases := map[string][]flow.Round{
+		"streak at round 3": {
+			{N: 1, Kind: flow.RoundFull, Head: "c0", Verdict: flow.VerdictChanges, Majors: 1},
+			{N: 2, Kind: flow.RoundDelta, Head: "c0b", Verdict: flow.VerdictChanges, Majors: 1},
+			{N: 3, Kind: flow.RoundDelta, Head: c1, Verdict: flow.VerdictChanges, Majors: 1},
+		},
+		"max_rounds reached": {
+			{N: 1, Kind: flow.RoundFull, Head: "c0", Verdict: flow.VerdictChanges, Majors: 1},
+			{N: 2, Kind: flow.RoundDelta, Head: "c0b", Verdict: flow.VerdictPass},
+			{N: 3, Kind: flow.RoundFull, Head: "c0c", Verdict: flow.VerdictChanges, Majors: 1},
+			{N: 4, Kind: flow.RoundDelta, Head: "c0d", Verdict: flow.VerdictPass},
+			{N: 5, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictChanges, Majors: 1},
+		},
+	}
+	for name, rounds := range cases {
+		t.Run(name, func(t *testing.T) {
+			st := flow.State{
+				Seq:      1,
+				Project:  flow.Project{ID: projID, Folder: repo, Started: true},
+				Settings: flow.DefaultSettings(),
+				Tasks: []flow.Task{{
+					ID: "T1", Title: "feat: x",
+					Attempts: []flow.Attempt{{
+						BaseCommit: baseSHA, Branch: wt.Branch, Worktree: wt.Path,
+						RunTokenHash: tokenHash("tok-worker"),
+						Ready:        []flow.Ready{{Head: c1}},
+						Rounds:       rounds,
+					}},
+				}},
+			}
+			if err := SaveState(paths.State(projID), st); err != nil {
+				t.Fatal(err)
+			}
+			err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c1+`","reject":"still wrong"}`))
+			if refusalCode(err) != "nothing_to_reject" {
+				t.Fatalf("reject when ladder says recap = %v, want nothing_to_reject", err)
+			}
+		})
+	}
+}
+
+// TestRecapDecideAcceptance checks design.md 4.9 and 7.2 for `recap decide`:
+// coordinator-only, valid split (children added with split_from, dependants
+// moved, parent marked split), valid drop (marked dropped{why}), and refusals
+// (not_allowed naming allowed set, why_missing, no_recap, plan_invalid).
+func TestRecapDecideAcceptance(t *testing.T) {
+	paths := testPaths(t)
+	var logBuf bytes.Buffer
+	eng := New(paths, nil)
+	eng.Log = logging.NewJSONLLogger(&logBuf)
+	const id = "proj-recap"
+
+	reset := func(open bool) {
+		t.Helper()
+		var recaps []flow.Recap
+		if open {
+			recaps = []flow.Recap{{Trigger: "review", Allowed: []string{"split", "drop"}}}
+		}
+		st := flow.State{
+			Seq:      1,
+			Project:  flow.Project{ID: id, Started: true, RunTokenHash: tokenHash("tok-coord")},
+			Settings: flow.DefaultSettings(),
+			Tasks: []flow.Task{
+				{ID: "T0", Title: "feat: base"},
+				{ID: "T1", Title: "feat: big", Recaps: recaps, Attempts: []flow.Attempt{{RunTokenHash: tokenHash("tok-worker")}}},
+				{ID: "T2", Title: "feat: after big", After: []string{"T0", "T1"}},
+			},
+		}
+		if err := SaveState(paths.State(id), st); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Refusals: role, no_recap, not_allowed (naming allowed set), why_missing, plan_invalid.
+	reset(true)
+	if err := eng.Report("tok-worker", "recap decide", json.RawMessage(`{"task":"T1","choice":"drop","why":"x"}`)); refusalCode(err) != "kind_not_allowed" {
+		t.Fatalf("worker recap decide = %v, want kind_not_allowed", err)
+	}
+	if err := eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T0","choice":"drop","why":"x"}`)); refusalCode(err) != "no_recap" {
+		t.Fatalf("no open recap = %v, want no_recap", err)
+	}
+	if err := eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T9","choice":"drop","why":"x"}`)); refusalCode(err) != "no_recap" {
+		t.Fatalf("unknown task = %v, want no_recap", err)
+	}
+	if err := eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T1","choice":"continue","why":"x"}`)); refusalCode(err) != "not_allowed" ||
+		!strings.Contains(err.Error(), "split, drop") {
+		t.Fatalf("disallowed choice = %v, want not_allowed naming split, drop", err)
+	}
+	if err := eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T1","choice":"drop","why":"   "}`)); refusalCode(err) != "why_missing" {
+		t.Fatalf("empty why = %v, want why_missing", err)
+	}
+	for name, body := range map[string]string{
+		"no children":      `{"task":"T1","choice":"split","why":"too big"}`,
+		"missing title":    `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":" "}]}`,
+		"existing id":      `{"task":"T1","choice":"split","why":"w","children":[{"id":"T0","title":"feat: dup"}]}`,
+		"after missing":    `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":"feat: a","after":["NOPE"]}]}`,
+		"after parent":     `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":"feat: a","after":["T1"]}]}`,
+		"cycle":            `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":"feat: a","after":["T1b"]},{"id":"T1b","title":"feat: b","after":["T1a"]}]}`,
+		"unknown field":    `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":"feat: a","bogus":1}]}`,
+		"cycle via parent": `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":"feat: a","after":["T2"]}]}`,
+	} {
+		if err := eng.Report("tok-coord", "recap decide", json.RawMessage(body)); refusalCode(err) != "plan_invalid" {
+			t.Errorf("%s: err = %v, want plan_invalid", name, err)
+		}
+	}
+	if st, _ := LoadState(paths.State(id)); st.Seq != 1 {
+		t.Fatalf("refusals mutated state: seq=%d", st.Seq)
+	}
+
+	// Valid split: parent marked split, children added with split_from, dependants moved.
+	splitBody := `{"task":"T1","choice":"split","why":"two independent parts","children":[{"id":"T1a","title":"feat: part a","brief":"a","outcomes":["test a"],"after":["T0"]},{"id":"T1b","title":"feat: part b","brief":"b","outcomes":["test b"],"after":["T1a"]}]}`
+	if err := eng.Report("tok-coord", "recap decide", json.RawMessage(splitBody)); err != nil {
+		t.Fatalf("valid split: %v", err)
+	}
+	st, _ := LoadState(paths.State(id))
+	if st.Tasks[1].Split == nil || strings.Join(st.Tasks[1].Split.Children, ",") != "T1a,T1b" ||
+		st.Tasks[1].Recaps[0].Decided == nil || st.Tasks[1].Recaps[0].Decided.Choice != "split" {
+		t.Fatalf("parent after split = %+v", st.Tasks[1])
+	}
+	if strings.Join(st.Tasks[2].After, ",") != "T0,T1a,T1b" {
+		t.Fatalf("dependant T2.After = %v, want [T0 T1a T1b]", st.Tasks[2].After)
+	}
+	if len(st.Tasks) != 5 || st.Tasks[3].ID != "T1a" || st.Tasks[3].SplitFrom != "T1" || st.Tasks[4].ID != "T1b" || st.Tasks[4].SplitFrom != "T1" {
+		t.Fatalf("children after split = %+v", st.Tasks[3:])
+	}
+	// Deciding again after recap closed -> no_recap.
+	if err := eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T1","choice":"drop","why":"again"}`)); refusalCode(err) != "no_recap" {
+		t.Fatalf("second decide = %v, want no_recap", err)
+	}
+
+	// Valid drop: marked dropped{why}, recap closed.
+	reset(true)
+	if err := eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T1","choice":"drop","why":"contradictory goal"}`)); err != nil {
+		t.Fatalf("valid drop: %v", err)
+	}
+	st, _ = LoadState(paths.State(id))
+	if st.Tasks[1].Dropped == nil || st.Tasks[1].Dropped.Why != "contradictory goal" ||
+		st.Tasks[1].Recaps[0].Decided == nil || st.Tasks[1].Recaps[0].Decided.Choice != "drop" {
+		t.Fatalf("parent after drop = %+v", st.Tasks[1])
+	}
+}

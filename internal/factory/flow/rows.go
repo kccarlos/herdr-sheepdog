@@ -14,6 +14,7 @@ const (
 	AskStartWorker  = "start_worker"
 	AskStartReview  = "start_reviewer"
 	AskTellFindings = "tell_worker_findings"
+	AskOpenRecap    = "open_recap"
 	AskPushPR       = "push_and_open_pr"
 	AskAccept       = "record_accept"
 	AskMerge        = "merge"
@@ -86,7 +87,8 @@ func headH(in In) string {
 	return ""
 }
 
-func ended(in In) bool       { return in.Task.Done != nil || in.Task.Closed != nil }
+func ended(in In) bool       { return Ended(in.Task) }
+func recapOpen(in In) bool   { return OpenRecap(in.Task) != nil }
 func prMerged(in In) bool    { return in.Facts.PR.State == PRMerged }
 func noAttempt(in In) bool   { return in.attempt() == nil }
 func hasAttempt(in In) bool  { return in.attempt() != nil }
@@ -166,6 +168,9 @@ var TaskRows = []Row[In]{
 		}
 		return say("the "+who+" run ended: the task is stopped", once(in.acts(), AskStopTask))(in)
 	}},
+	{ID: "N6", WaitsOn: "the coordinator", When: recapOpen, Then: func(in In) Decision {
+		return say("a recap is open", once(in.acts(), key(AskWake, "recap", len(in.Task.Recaps))))(in)
+	}},
 	{ID: "N11", WaitsOn: "the engine", When: noAttempt, Then: func(in In) Decision {
 		return say("no attempt: start one", once(in.acts(), AskNewAttempt))(in)
 	}},
@@ -176,6 +181,9 @@ var TaskRows = []Row[In]{
 	}},
 	{ID: "N23", WaitsOn: "the worker", When: all(hasAttempt, anyOf(noReady, tipAhead)), Then: func(in In) Decision {
 		return say("the worker is working", ensureRun(in, in.Facts.Worker, AskStartWorker))(in)
+	}},
+	{ID: "N25", WaitsOn: "the coordinator", When: all(ladderSays(RecapAnswer), prNotClosed), Then: func(in In) Decision {
+		return say("the ladder says recap", once(in.acts(), key(AskOpenRecap, "review")))(in)
 	}},
 	{ID: "N26", WaitsOn: "the engine", When: all(hasAttempt, anyOf(noPR, all(prOpen, prBehindH))), Then: func(in In) Decision {
 		if unanswered(in) { // "no PR" from a failed read is a guess: wait, so the once-only push is not spent

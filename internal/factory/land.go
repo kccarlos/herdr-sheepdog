@@ -70,6 +70,18 @@ func (e *Engine) execCleanup(ctx context.Context, id string, s *flow.State, ti i
 		}
 		steps = append(steps, "deleted remote branch "+a.Branch)
 	}
+	if note := closePRNote(*t); note != "" && a.PR > 0 {
+		p, err := world.PRSnapshot(gctx, s.Project.Folder, a.Branch)
+		if err != nil {
+			return "", false, err
+		}
+		if p.State == flow.PROpen {
+			if err := world.ClosePR(gctx, s.Project.Folder, a.PR, note); err != nil {
+				return "", false, err
+			}
+			steps = append(steps, fmt.Sprintf("closed PR #%d", a.PR))
+		}
+	}
 	removed, err := world.RemoveWorktree(gctx, s.Project.Folder, a.Worktree)
 	switch {
 	case err != nil:
@@ -81,4 +93,15 @@ func (e *Engine) execCleanup(ctx context.Context, id string, s *flow.State, ti i
 		steps = append(steps, "kept worktree "+a.Worktree+" (uncommitted work)")
 	}
 	return strings.Join(steps, "; "), false, nil
+}
+
+func closePRNote(t flow.Task) string {
+	switch {
+	case t.Split != nil:
+		return fmt.Sprintf("Closed by sheepdog factory: task %s was split into %s.", t.ID, strings.Join(t.Split.Children, ", "))
+	case t.Dropped != nil:
+		return fmt.Sprintf("Closed by sheepdog factory: task %s was dropped (%s).", t.ID, t.Dropped.Why)
+	default:
+		return ""
+	}
 }

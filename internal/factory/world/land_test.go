@@ -95,3 +95,22 @@ func TestDeleteRemoteBranchIdempotent(t *testing.T) {
 		t.Fatal("empty branch accepted")
 	}
 }
+
+func TestClosePR(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	if err := ClosePR(ctx, repo, 7, "split into T1a, T1b"); err != nil {
+		t.Fatal(err)
+	}
+	got := ghCalls(t, gh, "pr close")
+	if len(got) != 1 || got[0] != "pr close 7 --repo acme/demo --comment split into T1a, T1b" {
+		t.Fatalf("close argv = %q", got)
+	}
+	if strings.Contains(got[0], "--delete-branch") {
+		t.Fatalf("close passed --delete-branch: %q", got[0])
+	}
+	if ClosePR(ctx, repo, 0, "note") == nil || ClosePR(ctx, repo, 7, "  ") == nil || len(ghCalls(t, gh, "pr close")) != 1 {
+		t.Fatalf("close without number or note called gh: %q", ghCalls(t, gh, ""))
+	}
+}

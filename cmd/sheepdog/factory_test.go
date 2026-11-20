@@ -420,3 +420,51 @@ func TestFactoryLogCLI(t *testing.T) {
 		t.Fatalf("log of an unknown folder: code=%d out=%q", code, out.String())
 	}
 }
+
+func TestFactoryRecapDecideCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+
+	var lastPath string
+	var lastBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lastPath, lastBody = r.URL.Path, nil
+		_ = json.NewDecoder(r.Body).Decode(&lastBody)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(srv.Close)
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	t.Setenv("SHEEPDOG_WEB_PORT", port)
+	t.Setenv("SHEEPDOG_RUN_TOKEN", "tok-coord-1")
+
+	var out, errBuf bytes.Buffer
+	code := run(context.Background(), []string{
+		"factory", "recap", "decide", "T1", "split",
+		"--why", "too big",
+		"--child", `{"id":"T1a","title":"feat: a"}`,
+		"--child", `{"id":"T1b","title":"feat: b","after":["T1a"]}`,
+	}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("recap decide split code=%d stderr=%s", code, errBuf.String())
+	}
+	args, _ := lastBody["args"].(map[string]any)
+	children, _ := args["children"].([]any)
+	if lastPath != "/api/factory/report" || lastBody["token"] != "tok-coord-1" || lastBody["verb"] != "recap decide" ||
+		args["task"] != "T1" || args["choice"] != "split" || args["why"] != "too big" || len(children) != 2 {
+		t.Fatalf("recap decide sent %s %+v", lastPath, lastBody)
+	}
+
+	// Bad child JSON fails before calling daemon.
+	lastPath = ""
+	out.Reset()
+	errBuf.Reset()
+	if code := run(context.Background(), []string{"factory", "recap", "decide", "T1", "split", "--why", "w", "--child", "{bad"}, &out, &errBuf); code != 2 || lastPath != "" {
+		t.Fatalf("bad child JSON: code=%d lastPath=%q", code, lastPath)
+	}
+	// Missing args exits 2.
+	if code := run(context.Background(), []string{"factory", "recap", "decide", "T1"}, &out, &errBuf); code != 2 {
+		t.Fatalf("missing choice: code=%d, want 2", code)
+	}
+}

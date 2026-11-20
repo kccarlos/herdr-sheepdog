@@ -275,6 +275,7 @@ var taskExecutors = map[string]taskExec{
 	flow.AskPushPR:       (*Engine).execPushPR,
 	flow.AskStartReview:  (*Engine).execStartReviewer,
 	flow.AskTellFindings: (*Engine).execTellFindings,
+	flow.AskOpenRecap:    (*Engine).execOpenRecap,
 	flow.AskAccept:       (*Engine).execRecordAccept,
 	flow.AskMerge:        (*Engine).execMerge,
 	flow.AskMarkDone:     (*Engine).execMarkDone,
@@ -285,7 +286,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	var facts flow.Facts
 	// An ended task needs no facts (N1 matches first), and cleanup may
 	// have removed its worktree.
-	if n := len(s.Tasks[ti].Attempts); n > 0 && s.Tasks[ti].Done == nil && s.Tasks[ti].Closed == nil {
+	if n := len(s.Tasks[ti].Attempts); n > 0 && !flow.Ended(s.Tasks[ti]) {
 		a := s.Tasks[ti].Attempts[n-1]
 		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
 		tip, rel, _, err := world.InspectWorktree(gctx, a.Worktree, flow.H(a))
@@ -442,7 +443,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		}
 		return false
 	}
-	if t.Done != nil || t.Closed != nil || facts.PR.State == flow.PRMerged || facts.PR.State == flow.PRClosed ||
+	if flow.Ended(*t) || flow.OpenRecap(*t) != nil || facts.PR.State == flow.PRMerged || facts.PR.State == flow.PRClosed ||
 		facts.TipRel != flow.RelSame || a.Review.Round != len(a.Rounds)+1 || a.Review.Head != flow.H(*a) {
 		return voidRound()
 	}
@@ -612,6 +613,16 @@ func (e *Engine) execTellFindings(ctx context.Context, _ string, s *flow.State, 
 	msg := fmt.Sprintf("Review round %d found %d major(s) in %s — fix them, commit, and run %s factory report ready again, or when every finding is wrong and you change nothing, run %s factory report ready --reject \"<why>\".",
 		r.N, r.Majors, r.ReportPath, bin, bin)
 	return fmt.Sprintf("told worker findings from round %d", r.N), false, world.SendRun(ctx, e.HC, a.RunID, msg)
+}
+
+// execOpenRecap is N25: open a review-triggered recap once per attempt with
+// slice 2's allowed choices (split, drop; new and continue arrive in 2.5/2.6).
+func (e *Engine) execOpenRecap(_ context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	t := &s.Tasks[ti]
+	if flow.OpenRecap(*t) == nil {
+		t.Recaps = append(t.Recaps, flow.Recap{Trigger: "review", Allowed: []string{"split", "drop"}})
+	}
+	return "opened recap (trigger review, allowed split, drop)", false, nil
 }
 
 func bullets(items []string) string {

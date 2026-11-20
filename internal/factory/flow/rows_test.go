@@ -46,25 +46,37 @@ func a0(in *In) *Attempt { return &in.Task.Attempts[0] }
 
 var (
 	done        = func(in *In) { in.Task.Done = &Merged{MergedCommit: "m1"} }
+	splitMark   = func(in *In) { in.Task.Split = &Split{Children: []string{"t-a", "t-b"}} }
+	droppedMark = func(in *In) { in.Task.Dropped = &Dropped{Why: "no longer needed"} }
+	openRecap   = func(in *In) { in.Task.Recaps = []Recap{{Trigger: "review", Allowed: []string{"split", "drop"}}} }
 	merged      = func(in *In) { in.Facts.PR.State = PRMerged }
 	workerEnded = func(in *In) { in.Facts.Worker.State = RunGone }
 	reviewEnded = func(in *In) { in.Facts.Reviewer.State = RunGone }
 	noAttempts  = func(in *In) { in.Task.Attempts = nil; in.Facts = Facts{} }
 	onePass     = func(in *In) { a0(in).Rounds = a0(in).Rounds[:1] }
-	changes     = func(in *In) { a0(in).Rounds = []Round{{N: 1, Kind: RoundFull, Head: "c1", Verdict: VerdictChanges}} }
-	rejected    = func(in *In) { a0(in).Rejects = []Reject{{Head: "c1", Round: 1, Why: "not a bug"}} }
-	noRounds    = func(in *In) { a0(in).Rounds = nil }
-	notReady    = func(in *In) { a0(in).Ready = nil; in.Facts.Worker = Run{} }
-	tipAheadF   = func(in *In) { in.Facts.Tip, in.Facts.TipRel = "c2", RelAhead }
-	prGone      = func(in *In) { in.Facts.PR = PR{Answered: true} }
-	prBehind    = func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel = "b0", RelBehind }
-	pending     = func(in *In) { in.Facts.PR.Checks = ChecksPending }
-	workingF    = func(in *In) { in.Facts.Worker.State = RunWorking }
-	asked       = func(in *In) { a0(in).Acts = append(a0(in).Acts, Act{Key: "merge@c1", Result: "done"}) }
-	red         = func(in *In) { in.Facts.PR.Checks = ChecksRed }
-	noAnswer    = func(in *In) { in.Facts.PR.Answered = false }
-	closedPR    = func(in *In) { in.Facts.PR.State = PRClosed }
-	conflict    = func(in *In) { in.Facts.PR.Mergeable = MergeableConflict }
+	changes     = func(in *In) {
+		a0(in).Rounds = []Round{{N: 1, Kind: RoundFull, Head: "c1", Verdict: VerdictChanges, Majors: 1}}
+	}
+	streakRecap = func(in *In) {
+		a0(in).Rounds = []Round{
+			{N: 1, Kind: RoundFull, Head: "c0", Verdict: VerdictChanges, Majors: 1},
+			{N: 2, Kind: RoundDelta, Head: "c0b", Verdict: VerdictChanges, Majors: 1},
+			{N: 3, Kind: RoundDelta, Head: "c1", Verdict: VerdictChanges, Majors: 1},
+		}
+	}
+	rejected  = func(in *In) { a0(in).Rejects = []Reject{{Head: "c1", Round: 1, Why: "not a bug"}} }
+	noRounds  = func(in *In) { a0(in).Rounds = nil }
+	notReady  = func(in *In) { a0(in).Ready = nil; in.Facts.Worker = Run{} }
+	tipAheadF = func(in *In) { in.Facts.Tip, in.Facts.TipRel = "c2", RelAhead }
+	prGone    = func(in *In) { in.Facts.PR = PR{Answered: true} }
+	prBehind  = func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel = "b0", RelBehind }
+	pending   = func(in *In) { in.Facts.PR.Checks = ChecksPending }
+	workingF  = func(in *In) { in.Facts.Worker.State = RunWorking }
+	asked     = func(in *In) { a0(in).Acts = append(a0(in).Acts, Act{Key: "merge@c1", Result: "done"}) }
+	red       = func(in *In) { in.Facts.PR.Checks = ChecksRed }
+	noAnswer  = func(in *In) { in.Facts.PR.Answered = false }
+	closedPR  = func(in *In) { in.Facts.PR.State = PRClosed }
+	conflict  = func(in *In) { in.Facts.PR.Mergeable = MergeableConflict }
 	// stuckAct: an act failed past stuck_minutes; idleRev: the round's
 	// reviewer read idle with no tag past stuck_minutes.
 	stuckAct = func(k string) func(*In) {
@@ -194,12 +206,16 @@ func TestRowCases(t *testing.T) {
 		{"S2", with(done, stuckAct("cleanup")), []string{"wake_coordinator@stuck@cleanup@c1"}},
 		{"S2", with(noRounds, idleRev), []string{"wake_coordinator@stuck@reviewer_idle@1@c1"}},
 		{"N1", with(done), []string{"cleanup"}},
+		{"N1", with(splitMark), []string{"cleanup"}},
+		{"N1", with(droppedMark), []string{"cleanup"}},
 		{"N2", with(merged), []string{"mark_done", "wake_coordinator@merged_outside_bar"}},
 		{"S1", with(workerEnded), []string{"stop_task"}},
 		{"S1", with(noRounds, reviewEnded), []string{"stop_task"}},
+		{"N6", with(openRecap), []string{"wake_coordinator@recap@1"}},
 		{"N11", with(noAttempts), []string{"new_attempt"}},
 		{"N22", with(changes), []string{"tell_worker_findings@1"}},
 		{"N23", with(notReady, noRounds, prGone), []string{"start_worker"}},
+		{"N25", with(streakRecap), []string{"open_recap@review"}},
 		{"N26", with(noRounds, prGone), []string{"push_and_open_pr@c1"}},
 		{"N26", with(noRounds, prGone, noAnswer), nil},                    // "no PR" from a failed read: wait, no push
 		{"N26", with(noRounds, prBehind, noAnswer), nil},                  // a stale behind PR, unanswered: wait
@@ -243,10 +259,14 @@ func TestRowOrder(t *testing.T) {
 		{"S2", "N41", false, with(stuckAct("merge@c1"))},
 		{"N1", "N2", true, with(done, merged)},
 		{"N2", "S1", true, with(merged, workerEnded)},
+		{"S1", "N6", true, with(workerEnded, openRecap)},
+		{"N6", "N22", false, with(openRecap, changes)},
+		{"N6", "N29", false, with(openRecap, noRounds)},
 		{"S1", "N22", false, with(workerEnded, changes)},
 		{"N22", "N23", true, with(changes, tipAheadF)},
 		{"N22", "N26", false, with(changes, prBehind)},
-		{"N23", "N26", true, with(noRounds, tipAheadF, prBehind)},
+		{"N23", "N25", true, with(streakRecap, tipAheadF)},
+		{"N25", "N26", true, with(streakRecap, prGone)},
 		{"N23", "N36", false, with(tipAheadF, pending)},
 		{"N26", "N29", true, with(noRounds, prGone)},
 		{"N36", "N39", true, with(pending, workingF)},
@@ -331,6 +351,7 @@ func TestLadder(t *testing.T) {
 			a0(in).Rounds = []Round{{N: 1, Kind: RoundDelta, Head: "c1", Verdict: VerdictChanges}}
 			a0(in).Rejects = []Reject{{Head: "c1", Round: 1, Why: "delta claim wrong"}}
 		})},
+		{"L12", RecapAnswer, with(streakRecap)},
 		{"L13", Fix, with(changes)},
 		{"L13", Fix, with(changes, rejected, func(in *In) { // round 2 after a round-1 reject asks for changes -> Fix until round 2 is fixed or rejected
 			a0(in).Rounds = append(a0(in).Rounds, Round{N: 2, Kind: RoundFull, Head: "c1", Verdict: VerdictChanges})
@@ -354,12 +375,10 @@ func TestLadder(t *testing.T) {
 	}
 }
 
-// TestLadderOrder checks L7/L8/L9/L10/L13 ordering and neighbour swaps
-// (design.md 16, KB-REV-62): L7/L8 and L9/L10 are disjoint neighbour pairs,
-// while L8/L9 (one pass) and L10/L13 (rejected reviewer changes) both hold and
-// swapping either pair flips the answer.
+// TestLadderOrder checks L7/L8/L9/L10/L12/L13 ordering and neighbour swaps
+// (design.md 16, KB-REV-62, KB-CAP-1, KB-CAP-9).
 func TestLadderOrder(t *testing.T) {
-	wantIDs := []string{"L7", "L8", "L9", "L10", "L13", "L-"}
+	wantIDs := []string{"L7", "L8", "L9", "L10", "L12", "L13", "L-"}
 	var gotIDs []string
 	for _, r := range LadderRows {
 		gotIDs = append(gotIDs, r.ID)
@@ -398,19 +417,66 @@ func TestLadderOrder(t *testing.T) {
 	if r, _ := FirstMatch(swap910, with(changes, rejected)); r.ID != "L10" {
 		t.Fatalf("swapped L9/L10 on rejected changes matched %s, want L10", r.ID)
 	}
-	// Neighbours L10 and L13: both hold on rejected reviewer changes; L10 wins
-	// (Review), and swapping makes L13 win (Fix).
-	rejIn := with(changes, rejected)
-	if !LadderRows[3].When(rejIn) || !LadderRows[4].When(rejIn) {
-		t.Fatal("expected both L10 and L13 conditions to hold on rejected reviewer changes")
+	// Neighbours L10 and L12: both hold on a rejected streak round; L10 wins,
+	// and swapping makes L12 win.
+	rejStreak := with(streakRecap, func(in *In) {
+		a0(in).Rejects = []Reject{{Head: "c1", Round: 3, Why: "wrong"}}
+	})
+	if !LadderRows[3].When(rejStreak) || !LadderRows[4].When(rejStreak) {
+		t.Fatal("expected both L10 and L12 conditions to hold on rejected streak")
 	}
-	if r, d := FirstMatch(LadderRows, rejIn); r.ID != "L10" || d.Why != Review {
-		t.Fatalf("L10 vs L13: got %s (%s), want L10 (%s)", r.ID, d.Why, Review)
+	if r, d := FirstMatch(LadderRows, rejStreak); r.ID != "L10" || d.Why != Review {
+		t.Fatalf("L10 vs L12: got %s (%s), want L10 (%s)", r.ID, d.Why, Review)
 	}
-	swap1013 := slices.Clone(LadderRows)
-	swap1013[3], swap1013[4] = swap1013[4], swap1013[3]
-	if r, d := FirstMatch(swap1013, rejIn); r.ID != "L13" || d.Why != Fix {
-		t.Fatalf("swapped L10/L13: got %s (%s), want L13 (%s)", r.ID, d.Why, Fix)
+	swap1012 := slices.Clone(LadderRows)
+	swap1012[3], swap1012[4] = swap1012[4], swap1012[3]
+	if r, d := FirstMatch(swap1012, rejStreak); r.ID != "L12" || d.Why != RecapAnswer {
+		t.Fatalf("swapped L10/L12: got %s (%s), want L12 (%s)", r.ID, d.Why, RecapAnswer)
+	}
+	// Neighbours L12 and L13: both hold on streakRecap; L12 wins (Recap),
+	// and swapping makes L13 win (Fix).
+	sIn := with(streakRecap)
+	if !LadderRows[4].When(sIn) || !LadderRows[5].When(sIn) {
+		t.Fatal("expected both L12 and L13 conditions to hold on streakRecap")
+	}
+	if r, d := FirstMatch(LadderRows, sIn); r.ID != "L12" || d.Why != RecapAnswer {
+		t.Fatalf("L12 vs L13: got %s (%s), want L12 (%s)", r.ID, d.Why, RecapAnswer)
+	}
+	swap1213 := slices.Clone(LadderRows)
+	swap1213[4], swap1213[5] = swap1213[5], swap1213[4]
+	if r, d := FirstMatch(swap1213, sIn); r.ID != "L13" || d.Why != Fix {
+		t.Fatalf("swapped L12/L13: got %s (%s), want L13 (%s)", r.ID, d.Why, Fix)
+	}
+}
+
+// TestLadderL12StreakAndMaxRounds checks KB-CAP-1 and KB-CAP-9:
+// rounds 1, 2, 3 with majors hit L12 at round 3 when retro_from_round is 3;
+// a pass in between resets the streak; max_rounds hits L12 even without a streak.
+func TestLadderL12StreakAndMaxRounds(t *testing.T) {
+	mk := func(rounds ...Round) In {
+		return with(func(in *In) { a0(in).Rounds = rounds })
+	}
+	chg := func(n int, head string) Round {
+		return Round{N: n, Kind: RoundFull, Head: head, Verdict: VerdictChanges, Majors: 1}
+	}
+	pass := func(n int, head string) Round {
+		return Round{N: n, Kind: RoundFull, Head: head, Verdict: VerdictPass, Majors: 0}
+	}
+	for name, c := range map[string]struct {
+		in   In
+		want string
+	}{
+		"round 1 changes -> fix":                {mk(chg(1, "c1")), Fix},
+		"round 2 changes -> fix (below from 3)": {mk(chg(1, "c0"), chg(2, "c1")), Fix},
+		"round 3 changes -> recap (streak 2)":   {mk(chg(1, "c0"), chg(2, "c0b"), chg(3, "c1")), RecapAnswer},
+		"pass in between resets streak":         {mk(chg(1, "c0"), pass(2, "c0b"), chg(3, "c1")), Fix},
+		"streak resumes at round 4":             {mk(chg(1, "c0"), pass(2, "c0b"), chg(3, "c0c"), chg(4, "c1")), RecapAnswer},
+		"max_rounds 5 without streak -> recap":  {mk(chg(1, "c0"), pass(2, "c0b"), chg(3, "c0c"), pass(4, "c0d"), chg(5, "c1")), RecapAnswer},
+		"send_back does not count toward L12":   {mk(chg(1, "c0"), chg(2, "c0b"), Round{N: 3, Kind: "send_back", Head: "c1", Verdict: VerdictChanges, Majors: 1}), Fix},
+	} {
+		if got := Ladder(c.in); got != c.want {
+			t.Errorf("%s: Ladder = %s, want %s", name, got, c.want)
+		}
 	}
 }
 

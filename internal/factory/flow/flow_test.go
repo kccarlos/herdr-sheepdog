@@ -67,14 +67,20 @@ func TestSettingsRange(t *testing.T) {
 		t.Fatal(err)
 	}
 	set := map[string]func(*Settings, int){
-		"review_rounds":        func(s *Settings, n int) { s.ReviewRounds = n },
-		"checks_grace_minutes": func(s *Settings, n int) { s.ChecksGraceMinutes = n },
-		"stuck_minutes":        func(s *Settings, n int) { s.StuckMinutes = n },
+		"review_rounds":                  func(s *Settings, n int) { s.ReviewRounds = n },
+		"max_rounds":                     func(s *Settings, n int) { s.MaxRounds = n },
+		"retro_after_rounds_with_majors": func(s *Settings, n int) { s.RetroAfterRoundsWithMajors = n },
+		"retro_from_round":               func(s *Settings, n int) { s.RetroFromRound = n },
+		"checks_grace_minutes":           func(s *Settings, n int) { s.ChecksGraceMinutes = n },
+		"stuck_minutes":                  func(s *Settings, n int) { s.StuckMinutes = n },
 	}
 	limits := map[string][2]int{
-		"review_rounds":        {ReviewRoundsMin, ReviewRoundsMax},
-		"checks_grace_minutes": {ChecksGraceMin, ChecksGraceMax},
-		"stuck_minutes":        {StuckMin, StuckMax},
+		"review_rounds":                  {ReviewRoundsMin, ReviewRoundsMax},
+		"max_rounds":                     {def.ReviewRounds, MaxRoundsMax},
+		"retro_after_rounds_with_majors": {RetroMajorsMin, RetroMajorsMax},
+		"retro_from_round":               {RetroFromMin, RetroFromMax},
+		"checks_grace_minutes":           {ChecksGraceMin, ChecksGraceMax},
+		"stuck_minutes":                  {StuckMin, StuckMax},
 	}
 	for name, lim := range limits {
 		for _, c := range []struct {
@@ -87,5 +93,11 @@ func TestSettingsRange(t *testing.T) {
 				t.Errorf("%s %d: err %v, want ok=%v", name, c.n, err, c.ok)
 			}
 		}
+	}
+	// max_rounds lower bound tracks review_rounds (design.md 10.1).
+	s := DefaultSettings()
+	s.ReviewRounds, s.MaxRounds = 4, 3
+	if err := s.Validate(); err == nil {
+		t.Error("max_rounds < review_rounds validated")
 	}
 }

@@ -336,3 +336,58 @@ func TestWakeMessageBounded(t *testing.T) {
 		t.Fatalf("listed %d wakes, want 20 then \"and 5 more\":\n%s", n, msg)
 	}
 }
+
+// TestN25N6RecapOpensOnceWakesCoordinatorAndSplits runs the full non-convergence
+// path in Engine: 3 changes rounds -> N25 opens recap once -> N6 wakes
+// coordinator once with allowed choices in facts (no reviewer starts, worker is
+// not told findings) -> coordinator splits -> N1 closes PR with note and keeps
+// branch -> split child starts as a normal task.
+func TestN25N6RecapOpensOnceWakesCoordinatorAndSplits(t *testing.T) {
+	l := newLanding(t)
+	l.srv.Add(hc.Terminal{Address: "coord1", Name: "coord", State: "live", Status: &hc.Status{App: "claude-code", State: "idle"}})
+	l.edit(func(s *flow.State) {
+		s.Project.RunID = "coord1"
+		s.Project.RunTokenHash = tokenHash("tok-coord")
+		s.Tasks[0].Attempts[0].Rounds = []flow.Round{
+			{N: 1, Kind: flow.RoundFull, Head: "c0", Verdict: flow.VerdictChanges, Majors: 1},
+			{N: 2, Kind: flow.RoundDelta, Head: "c0b", Verdict: flow.VerdictChanges, Majors: 1},
+			{N: 3, Kind: flow.RoundDelta, Head: l.c1, Verdict: flow.VerdictChanges, Majors: 1},
+		}
+	})
+
+	l.pass() // N25 opens recap
+	l.pass() // N6 queues wake, J12 delivers it to idle coord1
+	l.pass() // N6 waits: no second wake, no reviewer, no tell_worker_findings
+
+	st := l.state()
+	if len(st.Tasks[0].Recaps) != 1 || st.Tasks[0].Recaps[0].Trigger != "review" ||
+		strings.Join(st.Tasks[0].Recaps[0].Allowed, ",") != "split,drop" {
+		t.Fatalf("recaps = %+v", st.Tasks[0].Recaps)
+	}
+	coordSends := sendsTo(t, l.srv.Requests(), "coord1")
+	if len(coordSends) != 1 || !strings.Contains(coordSends[0], "allowed [split, drop]") || !strings.Contains(coordSends[0], "T1: N6:") {
+		t.Fatalf("coordinator wakes = %q, want one wake with allowed [split, drop]", coordSends)
+	}
+	if workerSends := sendsTo(t, l.srv.Requests(), l.worker); len(workerSends) != 0 {
+		t.Fatalf("worker was told findings during recap: %q", workerSends)
+	}
+	if st.Tasks[0].Attempts[0].Review != nil {
+		t.Fatalf("reviewer started during recap: %+v", st.Tasks[0].Attempts[0].Review)
+	}
+
+	// Coordinator splits T1 into T1a.
+	if err := l.eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T1","choice":"split","why":"smaller scope","children":[{"id":"T1a","title":"feat: part a"}]}`)); err != nil {
+		t.Fatalf("recap decide split: %v", err)
+	}
+	l.pass() // T1 -> N1 cleanup (closes PR #7, keeps branch); T1a -> N11 new attempt
+	st = l.state()
+	if len(st.Tasks) != 2 || len(st.Tasks[1].Attempts) != 1 || st.Tasks[1].SplitFrom != "T1" {
+		t.Fatalf("split child did not start as normal task: %+v", st.Tasks)
+	}
+	if closes := ghCalls(t, l.gh, "pr close"); len(closes) != 1 || !strings.Contains(closes[0], "split into T1a") {
+		t.Fatalf("pr close calls = %q", closes)
+	}
+	if l.remoteBranch() == "" {
+		t.Fatal("parent remote branch deleted on split")
+	}
+}

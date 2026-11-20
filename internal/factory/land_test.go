@@ -279,3 +279,39 @@ func TestLandCleanup(t *testing.T) {
 		})
 	}
 }
+
+// TestLandCleanupSplitAndDrop: N1 cleanup on a split or dropped task stops
+// runs, closes its open PR with a short note (never merging it), keeps the
+// remote branch, and removes a clean worktree.
+func TestLandCleanupSplitAndDrop(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		mark     func(*flow.Task)
+		wantNote string
+	}{
+		{"split", func(tk *flow.Task) { tk.Split = &flow.Split{Children: []string{"T1a", "T1b"}} }, "split into T1a, T1b"},
+		{"dropped", func(tk *flow.Task) { tk.Dropped = &flow.Dropped{Why: "out of scope"} }, "dropped (out of scope)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l := newLanding(t)
+			l.edit(func(s *flow.State) { tc.mark(&s.Tasks[0]) })
+			l.pass()
+			if rs, err := world.RunState(context.Background(), l.client, l.worker); err != nil || rs != flow.RunGone {
+				t.Fatalf("worker after cleanup: %s %v", rs, err)
+			}
+			closes := ghCalls(t, l.gh, "pr close")
+			if len(closes) != 1 || !strings.Contains(closes[0], tc.wantNote) || strings.Contains(closes[0], "--delete-branch") {
+				t.Fatalf("pr close calls = %q, want one containing %q without --delete-branch", closes, tc.wantNote)
+			}
+			if merges := ghCalls(t, l.gh, "pr merge"); len(merges) != 0 {
+				t.Fatalf("split/dropped task merged PR: %q", merges)
+			}
+			if b := l.remoteBranch(); b == "" {
+				t.Fatal("remote branch was deleted; split/dropped task must keep it")
+			}
+			if _, err := os.Stat(l.wt); !os.IsNotExist(err) {
+				t.Fatalf("clean worktree not removed: %v", err)
+			}
+		})
+	}
+}

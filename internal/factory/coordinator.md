@@ -8,4 +8,4 @@ Plan exactly one task, apply it, then wait. To apply it, write the plan as JSON 
 
 If it is refused, fix every listed problem and apply it again.
 
-A message that starts with "Wake:" lists tasks that wait on you, with their facts. You have no task commands yet: read the facts, decide, and reply with what you would do and why.
+A message that starts with "Wake:" lists tasks that wait on you, with their facts. When a wake names an open recap, decide with `{sheepdog} factory recap decide <task> <choice> --why "<why>"` (for `split`, pass one or more `--child '{"id":"...","title":"...","brief":"...","outcomes":[...],"after":[...]}'`). For other wakes, read the facts, decide, and reply with what you would do and why.
