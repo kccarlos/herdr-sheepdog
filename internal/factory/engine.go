@@ -647,6 +647,7 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 				a.Review = &flow.ReviewRun{Round: round, Kind: flow.RoundFull, Head: h, Code: strings.ToLower(rand.Text()[:10]), Reviewer: reviewerOf(model)}
 			}
 			a.Review.RunID = term.Address
+			startCodexClock(a.Review)
 			return fmt.Sprintf("started reviewer %s (round %d, %s, %s)", term.Address, round, cmp.Or(a.Review.Kind, flow.RoundFull), a.Review.Reviewer.Model), false, nil
 		} else if err != nil && !errors.Is(err, hc.ErrNotFound) {
 			e.logError("factory.hc_error", id, err)
@@ -663,13 +664,25 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		a.Review = &flow.ReviewRun{Round: round, Kind: kind, Head: h, Code: strings.ToLower(rand.Text()[:10]), Reviewer: reviewerOf(model)}
 	}
 	model, kind = a.Review.Reviewer.Model, cmp.Or(a.Review.Kind, kind)
-	argv, env := world.ClaudeArgv(flow.RoleReviewer, model, "medium", "dontAsk"), map[string]string(nil)
+	var env map[string]string
 	if a.Review.Reviewer.CLI == world.CodexCLI {
-		home, err := world.CodexHome(filepath.Join(e.Paths.DataDir, "factory", "codex-home"))
-		if err != nil {
+		dir := filepath.Join(e.Paths.DataDir, "factory", "codex-home")
+		home, err := world.CodexHome(dir)
+		switch {
+		case errors.Is(err, world.ErrCodexAuthDiverged): // this round falls back to opus
+			e.logEvent("factory.codex_auth_diverged", map[string]string{"project": id, "task": t.ID, "file": filepath.Join(dir, "auth.json"),
+				"fix": "Codex refreshed its sign-in inside sheepdog's Codex home. Check `codex login`; then move or remove that file to use Codex again."})
+			model = claudeReviewers[0]
+			a.Review.Reviewer = reviewerOf(model)
+		case err != nil:
 			return "", false, err
+		default:
+			env = map[string]string{"CODEX_HOME": home}
 		}
-		argv, env = world.CodexArgv(model, a.Worktree), map[string]string{"CODEX_HOME": home}
+	}
+	argv := world.ClaudeArgv(flow.RoleReviewer, model, "medium", "dontAsk")
+	if env != nil {
+		argv = world.CodexArgv(model, a.Worktree)
 	}
 	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
 		"{outcomes}", bullets(t.Outcomes), "{rejections}", e.rejectionPrompt(id, t.ID, *a, h), "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code).Replace(reviewerTemplate))
@@ -685,11 +698,17 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		return "", abort, err
 	}
 	a.Review.RunID = termID
-	if a.Review.Reviewer.CLI == world.CodexCLI && a.Review.IdleSince == nil {
-		now := time.Now() // Codex reports no idle: S2's no-tag clock runs from the start
-		a.Review.IdleSince = &now
-	}
+	startCodexClock(a.Review)
 	return fmt.Sprintf("started reviewer %s (round %d, %s, %s)", termID, round, kind, model), abort, nil
+}
+
+// startCodexClock: Codex reports no idle, so S2's no-tag clock for a Codex
+// run starts with the run (a fresh start or one adopted after a restart).
+func startCodexClock(r *flow.ReviewRun) {
+	if r.Reviewer.CLI == world.CodexCLI && r.IdleSince == nil {
+		now := time.Now()
+		r.IdleSince = &now
+	}
 }
 
 func reviewDiffPrompt(ctx context.Context, a flow.Attempt, head string) (kind, diff string, err error) {

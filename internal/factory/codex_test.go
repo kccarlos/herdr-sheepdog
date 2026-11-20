@@ -53,9 +53,9 @@ func TestReviewerCandidatesBySetting(t *testing.T) {
 	}
 }
 
-// codexRound2 brings a task to round 2 with second_reviewer = "codex" and
-// round 1 passed by opus at c1. The Codex terminal never reports a status.
-func codexRound2(t *testing.T) (*hctest.Server, *Engine, Paths, string, string) {
+// codexSetup brings a task to just before round 2 with second_reviewer =
+// "codex", round 1 passed by opus at c1, and a fake Codex sign-in.
+func codexSetup(t *testing.T) (*hctest.Server, *Engine, Paths, string, string, string, *[]hc.RunParams, *bytes.Buffer) {
 	ctx := context.Background()
 	codexHome := t.TempDir() // a fake sign-in: tests never touch the real ~/.codex
 	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte("{}"), 0o600); err != nil {
@@ -70,7 +70,8 @@ func codexRound2(t *testing.T) (*hctest.Server, *Engine, Paths, string, string) 
 	githubOrigin(t, repo)
 	gh := installFakeGH(t)
 	eng := New(paths, hc.NewClient(srv.Path))
-	eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
+	logs := &bytes.Buffer{}
+	eng.Log = logging.NewJSONLLogger(logs)
 	if err := eng.Start(repo, "Goal"); err != nil {
 		t.Fatal(err)
 	}
@@ -99,9 +100,17 @@ func codexRound2(t *testing.T) (*hctest.Server, *Engine, Paths, string, string) 
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
 	}
+	return srv, eng, paths, id, c1, wt, runs, logs
+}
+
+// codexRound2 brings a task to round 2 with second_reviewer = "codex" and
+// round 1 passed by opus at c1. The Codex terminal never reports a status.
+func codexRound2(t *testing.T) (*hctest.Server, *Engine, Paths, string, string) {
+	ctx := context.Background()
+	srv, eng, paths, id, c1, wt, runs, _ := codexSetup(t)
 	eng.passProject(ctx, id, false) // N26
 	eng.passProject(ctx, id, false) // N29 starts round 2 on Codex
-	st, _ = LoadState(paths.State(id))
+	st, _ := LoadState(paths.State(id))
 	rev := st.Tasks[0].Attempts[0].Review
 	last := (*runs)[len(*runs)-1]
 	if rev == nil || rev.Round != 2 || rev.Reviewer.CLI != world.CodexCLI || rev.Reviewer.Model != codexModel ||
@@ -169,6 +178,35 @@ func TestEngineCodexReviewerChangesCounted(t *testing.T) {
 	}
 }
 
+// TestEngineCodexAuthDivergedFallsBackToOpus: a regular file at the scoped
+// home's auth.json (Codex replaced our link on a token refresh) is never
+// touched; round 2 starts on opus and one event tells the owner.
+func TestEngineCodexAuthDivergedFallsBackToOpus(t *testing.T) {
+	ctx := context.Background()
+	_, eng, paths, id, _, _, runs, logs := codexSetup(t)
+	home := filepath.Join(paths.DataDir, "factory", "codex-home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte("rotated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N26
+	eng.passProject(ctx, id, false) // N29 starts round 2, on opus
+	st, _ := LoadState(paths.State(id))
+	rev, last := st.Tasks[0].Attempts[0].Review, (*runs)[len(*runs)-1]
+	if rev == nil || rev.Round != 2 || rev.Reviewer.CLI != "claude" || rev.Reviewer.Model != "opus" ||
+		!slices.Contains(last.Argv, "opus") || last.Env["CODEX_HOME"] != "" || rev.IdleSince != nil {
+		t.Fatalf("round 2 review = %+v argv %q env %v", rev, last.Argv, last.Env["CODEX_HOME"])
+	}
+	if b, _ := os.ReadFile(filepath.Join(home, "auth.json")); string(b) != "rotated" {
+		t.Fatalf("scoped auth.json changed: %q", b)
+	}
+	if n := strings.Count(logs.String(), "factory.codex_auth_diverged"); n != 1 || strings.Contains(logs.String(), "rotated") {
+		t.Fatalf("diverged events = %d in %s", n, logs.String())
+	}
+}
+
 // TestEngineCodexReviewerNoTagIsStuck: a Codex run that never prints its
 // tag starts S2's clock on the first read and wakes after stuck_minutes.
 func TestEngineCodexReviewerNoTagIsStuck(t *testing.T) {
@@ -192,5 +230,26 @@ func TestEngineCodexReviewerNoTagIsStuck(t *testing.T) {
 	want := "stuck@reviewer_idle@2@" + c1
 	if len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != want {
 		t.Fatalf("wakes = %+v, want %s", st.Project.Wakes, want)
+	}
+}
+
+// TestEngineCodexReviewerAdoptedHasClock: a live Codex reviewer adopted after
+// a restart (no review record) gets S2's clock like a fresh start.
+func TestEngineCodexReviewerAdoptedHasClock(t *testing.T) {
+	ctx := context.Background()
+	_, eng, paths, id, _ := codexRound2(t)
+	st, _ := LoadState(paths.State(id))
+	run := st.Tasks[0].Attempts[0].Review.RunID
+	a := &st.Tasks[0].Attempts[0]
+	a.Review = nil // a crash before the record and its start act were committed; the terminal lives on
+	forgetStarts(a, false)
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	rev := st.Tasks[0].Attempts[0].Review
+	if rev == nil || rev.RunID != run || rev.Reviewer.CLI != world.CodexCLI || rev.IdleSince == nil {
+		t.Fatalf("adopted review = %+v, want run %s with an S2 clock", rev, run)
 	}
 }

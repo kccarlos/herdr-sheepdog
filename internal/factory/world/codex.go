@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -57,14 +58,27 @@ func CodexHome(dir string) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	if cur, err := os.Readlink(link); err != nil || cur != auth {
-		_ = os.Remove(link)
-		if err := os.Symlink(auth, link); err != nil {
+	fi, err := os.Lstat(link)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return "", err
+	case fi.Mode()&fs.ModeSymlink == 0: // Codex replaced our link (a token refresh): it may hold the only live token
+		return "", ErrCodexAuthDiverged
+	default:
+		if cur, _ := os.Readlink(link); cur == auth {
+			return dir, nil
+		}
+		if err := os.Remove(link); err != nil { // only ever our own stale link
 			return "", err
 		}
 	}
-	return dir, nil
+	return dir, os.Symlink(auth, link)
 }
+
+// ErrCodexAuthDiverged: the scoped home's auth.json is a file, not our link.
+// CodexHome never deletes or overwrites it.
+var ErrCodexAuthDiverged = errors.New("world: the scoped Codex sign-in is a file, not a link to yours")
 
 var (
 	codexPromptRe = regexp.MustCompile(`(?m)^›[ \t\x{00a0}]`)

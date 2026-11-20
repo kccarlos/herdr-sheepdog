@@ -2,6 +2,7 @@ package world
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -103,5 +104,30 @@ func TestCodexHome(t *testing.T) {
 	}
 	if es, _ := os.ReadDir(dir); len(es) != 1 {
 		t.Fatalf("home holds %d entries, want only auth.json", len(es))
+	}
+	link := filepath.Join(dir, "auth.json")
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(src, "old.json"), link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CodexHome(dir); err != nil { // our own stale link is replaced
+		t.Fatal(err)
+	}
+	if l, _ := os.Readlink(link); l != filepath.Join(src, "auth.json") {
+		t.Fatalf("stale link kept: %q", l)
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(link, []byte("rotated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CodexHome(dir); !errors.Is(err, ErrCodexAuthDiverged) {
+		t.Fatalf("regular auth.json: err %v, want ErrCodexAuthDiverged", err)
+	}
+	if b, _ := os.ReadFile(link); string(b) != "rotated" {
+		t.Fatalf("regular auth.json changed: %q", b)
 	}
 }
