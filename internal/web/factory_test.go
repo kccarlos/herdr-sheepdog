@@ -29,7 +29,7 @@ func (f *stubFactory) Projects() []factory.ProjectView { return nil }
 func (f *stubFactory) Graph(string) (factory.GraphView, error) {
 	return factory.GraphView{}, factory.ErrProjectNotFound
 }
-func (f *stubFactory) LogLines(string, int) ([]factory.LogLine, error) {
+func (f *stubFactory) LogLines(string, int) ([]factory.LogEntry, error) {
 	return nil, factory.ErrProjectNotFound
 }
 
@@ -174,8 +174,8 @@ func TestFactoryViewRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, l := range []factory.LogLine{
-		{Seq: 1, Project: "proj-web", By: "engine", Task: "T1", Rule: "N1", Decision: "done", Why: "ended"},
-		{Seq: 2, Project: "proj-web", By: "engine", Wake: "tick", Task: "T2", Rule: "N11", Decision: "queued", Why: "no attempt", Model: "sonnet"},
+		{Seq: 1, Project: "proj-web", By: "engine", Task: "T1", Rule: "N1", Input: map[string]string{"folder": "/tmp/repo"}, Facts: map[string]any{"pr": 1}, Decision: "done", Why: "ended"},
+		{Seq: 2, Project: "proj-web", By: "engine", Task: "T2", Rule: "N11", Input: map[string]string{"secret": "hidden"}, Facts: map[string]any{"checks": "green"}, Decision: "queued", Why: "no attempt"},
 	} {
 		if err := factory.AppendLog(paths.Log("proj-web"), l); err != nil {
 			t.Fatal(err)
@@ -235,22 +235,27 @@ func TestFactoryViewRoutes(t *testing.T) {
 		t.Fatalf("graph = %d %s", wg.Code, wg.Body.String())
 	}
 	var gResp factory.GraphView
-	if err := json.Unmarshal(wg.Body.Bytes(), &gResp); err != nil || gResp.Project != "proj-web" || len(gResp.Layers) != 2 {
+	if err := json.Unmarshal(wg.Body.Bytes(), &gResp); err != nil || gResp.Project != "proj-web" || len(gResp.Tasks) != 2 || gResp.Tasks[0].Ref != "T1" || gResp.Tasks[1].Stage != "queued" {
 		t.Fatalf("unexpected graph JSON: %s (err=%v)", wg.Body.String(), err)
 	}
 
-	// GET /api/factory/projects/{id}/log?n=1
+	// GET /api/factory/projects/{id}/log?n=1 returns only projected LogEntry fields (no input/facts).
 	wl := get(srv, "/api/factory/projects/proj-web/log?n=1")
 	if wl.Code != http.StatusOK {
 		t.Fatalf("log = %d %s", wl.Code, wl.Body.String())
 	}
 	var logResp struct {
-		Protocol int               `json:"protocol"`
-		Project  string            `json:"project"`
-		Lines    []factory.LogLine `json:"lines"`
+		Protocol int              `json:"protocol"`
+		Project  string           `json:"project"`
+		Lines    []map[string]any `json:"lines"`
 	}
-	if err := json.Unmarshal(wl.Body.Bytes(), &logResp); err != nil || len(logResp.Lines) != 1 || logResp.Lines[0].Seq != 2 || logResp.Lines[0].Wake != "tick" || logResp.Lines[0].Model != "sonnet" {
+	if err := json.Unmarshal(wl.Body.Bytes(), &logResp); err != nil || len(logResp.Lines) != 1 || logResp.Lines[0]["decision"] != "queued" || logResp.Lines[0]["task"] != "T2" {
 		t.Fatalf("unexpected log JSON: %s (err=%v)", wl.Body.String(), err)
+	}
+	for _, forbidden := range []string{"input", "facts", "seq", "project", "rule", "asked"} {
+		if _, leaked := logResp.Lines[0][forbidden]; leaked {
+			t.Fatalf("log route leaked %q: %s", forbidden, wl.Body.String())
+		}
 	}
 
 	// 404 for unknown project, 400 for invalid n.

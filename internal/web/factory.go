@@ -14,7 +14,7 @@ import (
 type Factory interface {
 	Projects() []factory.ProjectView
 	Graph(project string) (factory.GraphView, error)
-	LogLines(project string, n int) ([]factory.LogLine, error)
+	LogLines(project string, n int) ([]factory.LogEntry, error)
 	Start(folder, goal string) error
 	Stop(project string) error
 	Report(token, verb string, args json.RawMessage) error
@@ -76,16 +76,14 @@ func (s *Server) handleFactoryView(kind string) http.HandlerFunc {
 					return
 				}
 			}
-			var lines []factory.LogLine
-			lines, err = s.deps.Factory.LogLines(id, n)
-			v = map[string]any{"protocol": 1, "project": id, "lines": append([]factory.LogLine{}, lines...)}
+			lines, lerr := s.deps.Factory.LogLines(id, n)
+			err, v = lerr, map[string]any{"protocol": 1, "project": id, "lines": append([]factory.LogEntry{}, lines...)}
 		}
-		switch {
-		case errors.Is(err, factory.ErrProjectNotFound):
+		if errors.Is(err, factory.ErrProjectNotFound) {
 			writeError(w, http.StatusNotFound, err.Error())
-		case err != nil:
+		} else if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
-		default:
+		} else {
 			writeJSON(w, http.StatusOK, v)
 		}
 	}
