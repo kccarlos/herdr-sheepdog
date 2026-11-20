@@ -68,7 +68,7 @@ type TaskStatus struct {
 // `/factory`, and the stale check always agree from one source.
 func StatusViewOf(s flow.State, logs []LogLine) []TaskStatus {
 	lastLog, lastRow := lastTaskRows(logs)
-	g := graphViewOf(s, lastLog, lastRow)
+	g := graphViewOf(s, lastLog)
 	out := make([]TaskStatus, len(g.Tasks))
 	for i, tv := range g.Tasks {
 		why := "no logged row"
@@ -77,7 +77,11 @@ func StatusViewOf(s flow.State, logs []LogLine) []TaskStatus {
 		}
 		ts := TaskStatus{ID: tv.Ref, Title: tv.Title, Stage: tv.Stage, Why: why}
 		if l, ok := lastRow[tv.Ref]; ok {
-			ts.Rule, ts.Why, ts.At, ts.Stale = l.Rule, l.Why, l.At, taskRows[l.Rule].Stage != tv.Stage
+			stale := taskRows[l.Rule].Stage != tv.Stage
+			ts.Rule, ts.Why, ts.At, ts.Stale = l.Rule, l.Why, l.At, stale
+			if stale && tv.WhyWaiting != "" {
+				ts.Why = tv.WhyWaiting
+			}
 		}
 		out[i] = ts
 	}

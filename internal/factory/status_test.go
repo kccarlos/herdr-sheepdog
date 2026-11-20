@@ -273,6 +273,7 @@ func TestStatusEveryTaskRowFreshAndStage(t *testing.T) {
 			case "N32":
 				task = passedTask("T1", "feat: passed task with conflict")
 			}
+			task.LastRow = r.ID
 			st := flow.State{
 				Settings: flow.DefaultSettings(),
 				Project:  flow.Project{ID: "proj-row", Folder: "/tmp/row", Started: true},
@@ -291,5 +292,69 @@ func TestStatusEveryTaskRowFreshAndStage(t *testing.T) {
 				t.Errorf("%s formatted = %q, want live %s line", r.ID, line, r.ID)
 			}
 		})
+	}
+}
+
+func TestStatusPre5a0StateFallsBackToFacts(t *testing.T) {
+	now := time.Now()
+	// Pre-5a.0 state.json: no LastRow, task passed review, last logged row is old N29 (working).
+	st := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "proj-legacy", Folder: "/tmp/legacy", Started: true},
+		Tasks: []flow.Task{{
+			ID: "T1", Title: "feat: legacy passed",
+			Attempts: []flow.Attempt{{
+				BaseCommit: "000", Ready: []flow.Ready{{Head: "h1"}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+				},
+			}},
+		}},
+	}
+	logs := []LogLine{{Seq: 1, At: now.Add(-10 * time.Minute), By: "engine", Task: "T1", Rule: "N29", Why: "the ladder says review"}}
+	got := StatusViewOf(st, logs)
+	if got[0].Stage != "ci" || !got[0].Stale || got[0].Why != "Waiting on CI and merge" {
+		t.Fatalf("legacy status = %+v, want stage=ci stale=true why='Waiting on CI and merge'", got[0])
+	}
+}
+
+func TestEnginePassNoAsksWritesLastRowAndParkShowsAtOnce(t *testing.T) {
+	l := newLanding(t)
+	// Pending checks -> N36 matches with no asks; pass must persist last_row to state.json.
+	writePRJSON(t, l.gh, "view.json", l.c1, `[{"__typename":"CheckRun","name":"ci","status":"IN_PROGRESS"}]`)
+	l.pass()
+
+	raw, err := os.ReadFile(l.paths.State(l.id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"last_row": "N36"`) && !strings.Contains(string(raw), `"last_row":"N36"`) {
+		t.Fatalf("state.json missing last_row=N36 after no-ask pass:\n%s", raw)
+	}
+	st := l.state()
+	if st.Tasks[0].LastRow != "N36" {
+		t.Fatalf("LastRow = %q, want N36", st.Tasks[0].LastRow)
+	}
+	if g, err := l.eng.Graph(l.id); err != nil || g.Tasks[0].Stage != "ci" || g.Tasks[0].WhyWaiting != "Waiting on CI and merge" {
+		t.Fatalf("graph after N36 = %+v, err=%v", g, err)
+	}
+
+	// Park the task and check status immediately (without running another pass).
+	l.eng.mu.Lock()
+	err = l.eng.acceptTaskLocked(l.id, &st, flow.RoleCoordinator, []byte(`{"action":"park","task":"T1","why":"hold for review"}`))
+	l.eng.mu.Unlock()
+	if err != nil {
+		t.Fatalf("park: %v", err)
+	}
+	got, err := ProjectStatus(l.paths, l.repo)
+	if err != nil {
+		t.Fatalf("ProjectStatus after park: %v", err)
+	}
+	if got[0].Stage != "blocked_or_failed" || !strings.Contains(got[0].Why, "Parked, waiting on the coordinator") {
+		t.Fatalf("status right after park = %+v, want blocked_or_failed + Parked", got[0])
+	}
+	if g, err := l.eng.Graph(l.id); err != nil || g.Tasks[0].Stage != "blocked_or_failed" || g.Tasks[0].WhyWaiting != "Parked, waiting on the coordinator" {
+		t.Fatalf("graph right after park = %+v, err=%v", g, err)
 	}
 }
