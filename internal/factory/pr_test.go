@@ -41,6 +41,7 @@ case "$1 $2" in
 "run rerun") { [ -f "$D/rerun_fail" ] || [ -f "$D/rerun_fail_$3" ]; } && { echo "HTTP 403: rerun failed" >&2; exit 1; }; : ;;
 "workflow run") [ -f "$D/dispatch_fail" ] && { echo "HTTP 422: dispatch failed" >&2; exit 1; }; : ;;
 api\ *)
+  case "$*" in *"/pulls/"*"/update-branch"*) failif update_branch; :; exit 0 ;; esac
   pg=1; case "$2" in *page=*) pg=${2##*page=} ;; esac
   sfx=""; [ "$pg" = 1 ] || sfx=".$pg"
   case "$2" in
@@ -256,15 +257,15 @@ func TestGitHubUnavailableHoldsMerge(t *testing.T) {
 	if p, unavail, row, asked := eval(); !p.Answered || p.Checks != flow.ChecksGreen || unavail || row != "N42" || len(asked) == 0 {
 		t.Fatalf("after recovery: checks=%s answered=%t unavail=%t row=%s asked=%v", p.Checks, p.Answered, unavail, row, asked)
 	}
-	// A failing optional call (compare) is logged once and holds nothing.
+	// A failing compare is logged once, leaves github_unavailable false, and holds at N36 (never merges).
 	var daemonLog bytes.Buffer
 	eng.Log = logging.NewJSONLLogger(&daemonLog)
 	if err := os.WriteFile(filepath.Join(gh, "compare_fail"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for range 3 {
-		if p, unavail, row, _ := eval(); !p.Answered || p.Checks != flow.ChecksGreen || unavail || row != "N42" {
-			t.Fatalf("compare failing: checks=%s answered=%t unavail=%t row=%s", p.Checks, p.Answered, unavail, row)
+		if p, unavail, row, asked := eval(); !p.Answered || p.Checks != flow.ChecksGreen || !p.BehindUnknown || unavail || row != "N36" || len(asked) != 0 {
+			t.Fatalf("compare failing: checks=%s answered=%t behind_unknown=%t unavail=%t row=%s asked=%v", p.Checks, p.Answered, p.BehindUnknown, unavail, row, asked)
 		}
 	}
 	if n := strings.Count(daemonLog.String(), "factory.gh_partial"); n != 1 {

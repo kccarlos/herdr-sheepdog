@@ -96,7 +96,6 @@ type Task struct {
 	Split         *Split    `json:"split,omitempty"`
 	Parked        bool      `json:"parked,omitempty"`
 	Recaps        []Recap   `json:"recaps,omitempty"`
-	CIFails       []CIFail  `json:"ci_fails,omitempty"`
 	Acts          []Act     `json:"acts,omitempty"`
 	Attempts      []Attempt `json:"attempts"`
 }
@@ -203,9 +202,11 @@ type Attempt struct {
 	Closed   string `json:"closed,omitempty"` // the note a recap's "new" closed this attempt with
 	// SizeCap is N12's limit on changed lines at the tip (design.md 3, 11.5).
 	SizeCap int `json:"size_cap"`
-	// MergeOnly are H's moves to a tip that was ahead of it by merges of the
-	// base only (N20, design.md 3.1), in order.
+	// MergeOnly are H's moves to a tip or PR head that was ahead of it by
+	// merges of the base only (N20, N40, design.md 3.1), in order.
 	MergeOnly []Advance `json:"merge_only,omitempty"`
+	// CIFails records distinct commits of this attempt seen with a failing check run (N13).
+	CIFails []CIFail `json:"ci_fails,omitempty"`
 }
 
 // Advance is one merge_only move of H, observed with git when it was made.

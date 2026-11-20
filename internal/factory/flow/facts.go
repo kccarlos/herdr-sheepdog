@@ -75,8 +75,9 @@ type PR struct {
 	State          PRState   `json:"state"`
 	MergedCommit   string    `json:"merged_commit,omitempty"`
 	Head           string    `json:"head"`
-	HeadRel        Rel       `json:"head_rel"`   // Head against H
-	HeadSince      time.Time `json:"head_since"` // when Head was first seen; the checks grace counts from it
+	HeadRel        Rel       `json:"head_rel"`                  // Head against H
+	HeadMergeOnly  bool      `json:"head_merge_only,omitempty"` // Head is ahead of H by clean merges of the base only (N20/N40)
+	HeadSince      time.Time `json:"head_since"`                // when Head was first seen; the checks grace counts from it
 	Mergeable      Mergeable `json:"mergeable"`
 	Checks         Checks    `json:"checks"`
 	Failed         []Failure `json:"failed,omitempty"`  // the red or outside-cancelled checks (N33, N34)

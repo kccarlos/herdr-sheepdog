@@ -536,13 +536,13 @@ func TestN13CIRecapAndWindowReset(t *testing.T) {
 	// Commit 1 with two failing jobs: counts once.
 	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("lint", "COMPLETED", "FAILURE", "91", "910")+","+ciCheck("test", "COMPLETED", "FAILURE", "91", "911")+"]")
 	l.pass()
-	if got := l.state().Tasks[0]; len(got.CIFails) != 1 || len(got.Recaps) != 0 {
-		t.Fatalf("after 2 failing jobs on c1: fails=%d recaps=%d, want 1 and 0", len(got.CIFails), len(got.Recaps))
+	if got := l.state().Tasks[0]; len(got.Attempts[0].CIFails) != 1 || len(got.Recaps) != 0 {
+		t.Fatalf("after 2 failing jobs on c1: fails=%d recaps=%d, want 1 and 0", len(got.Attempts[0].CIFails), len(got.Recaps))
 	}
 	// Commit 2 fails: count 2, no recap yet.
-	pushFail("f2.txt", checkRollup("FAILURE", "92", "920"))
-	if got := l.state().Tasks[0]; len(got.CIFails) != 2 || len(got.Recaps) != 0 {
-		t.Fatalf("after c2 fail: fails=%d recaps=%d, want 2 and 0", len(got.CIFails), len(got.Recaps))
+	c2 := pushFail("f2.txt", checkRollup("FAILURE", "92", "920"))
+	if got := l.state().Tasks[0]; len(got.Attempts[0].CIFails) != 2 || len(got.Recaps) != 0 {
+		t.Fatalf("after c2 fail: fails=%d recaps=%d, want 2 and 0", len(got.Attempts[0].CIFails), len(got.Recaps))
 	}
 	// Commit 3 fails: reaches ci_fails_per_hour (3) -> N13 opens ci recap, N6 wakes once and tells worker once.
 	c3 := pushFail("f3.txt", checkRollup("FAILURE", "93", "930"))
@@ -553,8 +553,10 @@ func TestN13CIRecapAndWindowReset(t *testing.T) {
 	if len(rc) != 1 || rc[0].Trigger != flow.TriggerCI || !slices.Equal(rc[0].Allowed, []string{"continue", "split", "new", "drop"}) {
 		t.Fatalf("recaps = %+v, want 1 ci recap with continue", rc)
 	}
-	if w := st.Project.Wakes; len(w) != 1 || w[0].Key != "recap@1" || !strings.Contains(w[0].Facts, "recap trigger ci") {
-		t.Fatalf("wakes = %+v, want 1 ci recap wake", w)
+	if w := st.Project.Wakes; len(w) != 1 || w[0].Key != "recap@1" || !strings.Contains(w[0].Facts, "recap trigger ci") ||
+		!strings.Contains(w[0].Facts, "3 failing CI commit(s): ") ||
+		!strings.Contains(w[0].Facts, l.c1[:7]) || !strings.Contains(w[0].Facts, c2[:7]) || !strings.Contains(w[0].Facts, c3[:7]) {
+		t.Fatalf("wakes = %+v, want 1 ci recap wake with count and short heads", w)
 	}
 	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 1 || !strings.Contains(sends[0], "failing CI commits") {
 		t.Fatalf("worker sends = %q, want 1 stop at CI limit", sends)

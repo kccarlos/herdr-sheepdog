@@ -323,7 +323,7 @@ func TestJ12DeliveryAtLeastOnce(t *testing.T) {
 // wakes are listed, then how many more.
 func TestWakeMessageBounded(t *testing.T) {
 	long := strings.Repeat("é", 200)
-	if f := taskFacts(flow.Task{Title: long}, flow.Facts{}); !strings.Contains(f, strconv.Quote(strings.Repeat("é", 120)+"…")) {
+	if f := taskFacts(flow.Task{Title: long}, flow.Facts{}, time.Time{}); !strings.Contains(f, strconv.Quote(strings.Repeat("é", 120)+"…")) {
 		t.Fatalf("title not cut to 120 characters: %s", f)
 	}
 	var s flow.State

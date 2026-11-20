@@ -25,6 +25,8 @@ const (
 	AskRerunCI      = "rerun_ci"
 	AskTellCI       = "tell_worker_ci"
 	AskDispatchCI   = "dispatch_ci"
+	AskUpdateBranch = "update_branch"
+	AskFailUpdate   = "fail_update_branch"
 	AskAccept       = "record_accept"
 	AskMerge        = "merge"
 	AskMarkDone     = "mark_done"
@@ -35,7 +37,7 @@ const (
 )
 
 // commitKeyed are the verbs whose key ends in the commit it is for.
-var commitKeyed = []string{AskPushPR, AskStartReview, AskTellConflict, AskRerunCI, AskTellCI, AskDispatchCI, AskAccept, AskMerge}
+var commitKeyed = []string{AskPushPR, AskStartReview, AskTellConflict, AskRerunCI, AskTellCI, AskDispatchCI, AskUpdateBranch, AskAccept, AskMerge}
 
 // key joins a verb and what it is for: "merge@3f9c".
 func key(verb string, parts ...any) string {
@@ -97,29 +99,37 @@ func headH(in In) string {
 	return ""
 }
 
-func ended(in In) bool                { return Ended(in.Task) }
-func recapOpen(in In) bool            { return OpenRecap(in.Task) != nil }
-func prMerged(in In) bool             { return in.Facts.PR.State == PRMerged }
-func noAttempt(in In) bool            { return in.attempt() == nil }
-func hasAttempt(in In) bool           { return in.attempt() != nil }
-func depsNotDone(in In) bool          { return len(in.Facts.DepsNotDone) > 0 }
-func depsDropped(in In) bool          { return len(in.Facts.DepsDropped) > 0 }
-func noSlot(in In) bool               { return in.Facts.NoSlot }
-func workerGone(in In) bool           { return in.Facts.Worker.State == RunGone }
-func reviewGone(in In) bool           { return in.Facts.Reviewer.State == RunGone }
-func noReady(in In) bool              { return len(in.attempt().Ready) == 0 }
-func tipAhead(in In) bool             { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
-func noPR(in In) bool                 { return in.Facts.PR.State == PRNone }
-func prOpen(in In) bool               { return in.Facts.PR.State == PROpen }
-func prNotClosed(in In) bool          { return in.Facts.PR.State != PRClosed }
-func tipSame(in In) bool              { return in.Facts.TipRel == RelSame } // slice 1: diverged falls to N43 (N7 comes later)
-func prBehindH(in In) bool            { return in.Facts.PR.HeadRel == RelBehind }
-func prHeadIsH(in In) bool            { return in.Facts.PR.Head == headH(in) }
+func ended(in In) bool       { return Ended(in.Task) }
+func recapOpen(in In) bool   { return OpenRecap(in.Task) != nil }
+func prMerged(in In) bool    { return in.Facts.PR.State == PRMerged }
+func noAttempt(in In) bool   { return in.attempt() == nil }
+func hasAttempt(in In) bool  { return in.attempt() != nil }
+func depsNotDone(in In) bool { return len(in.Facts.DepsNotDone) > 0 }
+func depsDropped(in In) bool { return len(in.Facts.DepsDropped) > 0 }
+func noSlot(in In) bool      { return in.Facts.NoSlot }
+func workerGone(in In) bool  { return in.Facts.Worker.State == RunGone }
+func reviewGone(in In) bool  { return in.Facts.Reviewer.State == RunGone }
+func noReady(in In) bool     { return len(in.attempt().Ready) == 0 }
+func tipAhead(in In) bool    { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
+func noPR(in In) bool        { return in.Facts.PR.State == PRNone }
+func prOpen(in In) bool      { return in.Facts.PR.State == PROpen }
+func prNotClosed(in In) bool { return in.Facts.PR.State != PRClosed }
+func tipAtOrBehindH(in In) bool {
+	a := in.attempt()
+	return in.Facts.TipRel == RelSame || a != nil && in.Facts.TipRel == RelBehind && Covers(*a, in.Facts.Tip, H(*a))
+}                          // diverged or uncovered tip falls to N43 until N7
+func prBehindH(in In) bool { return in.Facts.PR.HeadRel == RelBehind }
+func prHeadIsH(in In) bool { return in.Facts.PR.Head == headH(in) }
+func prHeadAheadMergeOnly(in In) bool {
+	return prOpen(in) && answered(in) && in.Facts.PR.HeadRel == RelAhead && in.Facts.PR.HeadMergeOnly
+}
 func answered(in In) bool             { return in.Facts.PR.Answered }
 func unanswered(in In) bool           { return !answered(in) }
 func githubUnavail(in In) bool        { return in.Facts.GitHubUnavailable }
 func githubAvail(in In) bool          { return !githubUnavail(in) }
-func notBehind(in In) bool            { return !in.Facts.PR.Behind }
+func prBehindBase(in In) bool         { return in.Facts.PR.Behind && !in.Facts.PR.BehindUnknown }
+func prBehindUnknown(in In) bool      { return in.Facts.PR.BehindUnknown }
+func notBehind(in In) bool            { return !in.Facts.PR.Behind && !in.Facts.PR.BehindUnknown }
 func checksGreen(in In) bool          { return in.Facts.PR.Checks == ChecksGreen }
 func checksRed(in In) bool            { return in.Facts.PR.Checks == ChecksRed }
 func checksStoppedExt(in In) bool     { return in.Facts.PR.Checks == ChecksStoppedExternal }
@@ -250,9 +260,14 @@ var TaskRows = []Row[In]{
 			why := fmt.Sprintf("%d commits failed CI in the last hour (limit %d)", ciFailCount(in), in.Settings.CIFailsPerHour)
 			return say(why, once(in.acts(), key(AskCIRecap, len(in.Task.Recaps))))(in)
 		}},
-	{ID: "N20", WaitsOn: "the engine", When: func(in In) bool { return hasAttempt(in) && tipAhead(in) && in.Facts.TipMergeOnly },
+	{ID: "N20", WaitsOn: "the engine", When: func(in In) bool {
+		return hasAttempt(in) && ((tipAhead(in) && in.Facts.TipMergeOnly) || prHeadAheadMergeOnly(in))
+	},
 		Then: func(in In) Decision {
-			return say("the tip is ahead of H by merges of the base only: H moves to it, no round", once(in.acts(), key(AskMergeOnly, in.Facts.Tip)))(in)
+			if tipAhead(in) && in.Facts.TipMergeOnly {
+				return say("the tip is ahead of H by merges of the base only: H moves to it, no round", once(in.acts(), key(AskMergeOnly, in.Facts.Tip)))(in)
+			}
+			return say("the PR head is ahead of H by merges of the base only: H moves to it, no round", once(in.acts(), key(AskMergeOnly, in.Facts.PR.Head)))(in)
 		}},
 	{ID: "N22", WaitsOn: "the worker", When: all(ladderSays(Fix), prNotClosed), Then: func(in In) Decision {
 		r := newestCovering(*in.attempt(), headH(in))
@@ -314,17 +329,37 @@ var TaskRows = []Row[In]{
 		return say("no checks past checks_grace_minutes: push a change that triggers a workflow, ask for an owner override, or drop the task",
 			once(in.acts(), key(AskWake, "no_checks", h)))(in)
 	}},
-	{ID: "N36", WaitsOn: "CI", When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn)),
-		Then: say("checks pending or unreadable, or mergeable unknown")},
+	{ID: "N36", WaitsOn: "CI", When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown)),
+		Then: func(in In) Decision {
+			if prBehindUnknown(in) && !anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn)(in) && in.Now.Sub(in.Facts.PR.HeadSince) >= checksGrace(in) {
+				return say("cannot tell if PR is behind the base past checks_grace_minutes", once(in.acts(), key(AskWake, "behind_unknown", headH(in))))(in)
+			}
+			return say("checks pending or unreadable, or mergeable/behind unknown")(in)
+		}},
 	{ID: "N37", WaitsOn: "a GitHub approval", When: ciReady(reviewRequired), Then: func(in In) Decision {
 		return say("GitHub requires an approving review (branch protection / required approving reviews); nobody in the factory can approve",
 			once(in.acts(), key(AskWake, "review_required", headH(in))))(in)
 	}},
 	{ID: "N39", WaitsOn: "the worker", When: all(ladderSays(Passed), prOpen, working), Then: say("the worker is working")},
+	{ID: "N40", WaitsOn: "GitHub", When: ciReady(prBehindBase), Then: func(in In) Decision {
+		h := headH(in)
+		uk := key(AskUpdateBranch, h)
+		act := LastAct(in.acts(), uk)
+		if act == nil {
+			return say("PR is behind the base: update branch with a merge commit", []string{uk})(in)
+		}
+		if act.Result == "failed" {
+			return say("branch update failed for H")(in)
+		}
+		if in.Now.Sub(act.At) < checksGrace(in) {
+			return say("branch update asked; waiting for the new head")(in)
+		}
+		return say("branch update did not move the PR head within checks_grace_minutes: failed try", []string{key(AskFailUpdate, h)})(in)
+	}},
 	{ID: "N41", WaitsOn: "GitHub", When: all(ladderSays(Passed), mergeAsked, prOpen, notBehind),
 		Then: say("a merge was asked for H")},
 	{ID: "N42", WaitsOn: "GitHub",
-		When: all(ladderSays(Passed), prOpen, prHeadIsH, tipSame, answered, githubAvail, checksGreen, mergeClean, noReviewRequired, notBehind, notWorking),
+		When: all(ladderSays(Passed), prOpen, prHeadIsH, tipAtOrBehindH, answered, githubAvail, checksGreen, mergeClean, noReviewRequired, notBehind, notWorking),
 		Then: func(in In) Decision {
 			h := headH(in)
 			return say("passed, green and mergeable at H", once(in.acts(), key(AskAccept, h)), once(in.acts(), key(AskMerge, h)))(in)
@@ -347,23 +382,32 @@ func n9Why(in In) string {
 	return strings.Join(parts, "; ")
 }
 
-// ciFailCount counts the task's distinct commits with a failing check run in
-// the last hour and since the last recap decision (design.md 4.3, N13).
-func ciFailCount(in In) int {
-	cutoff := in.Now.Add(-time.Hour)
-	for _, r := range in.Task.Recaps {
+// RecentCIFails returns the open attempt's distinct commits with a failing
+// check run in the last hour and since the last recap decision, in order of
+// first observation (design.md 4.3, N13).
+func RecentCIFails(t Task, now time.Time) []CIFail {
+	a := OpenAttempt(t)
+	if a == nil {
+		return nil
+	}
+	cutoff := now.Add(-time.Hour)
+	for _, r := range t.Recaps {
 		if r.Decided != nil && r.Decided.At.After(cutoff) {
 			cutoff = r.Decided.At
 		}
 	}
 	seen := map[string]bool{}
-	for _, f := range in.Task.CIFails {
-		if f.Head != "" && f.At.After(cutoff) {
+	var out []CIFail
+	for _, f := range a.CIFails {
+		if f.Head != "" && f.At.After(cutoff) && !seen[f.Head] {
 			seen[f.Head] = true
+			out = append(out, f)
 		}
 	}
-	return len(seen)
+	return out
 }
+
+func ciFailCount(in In) int { return len(RecentCIFails(in.Task, in.Now)) }
 
 // ciRuns are the failing checks' run ids, sorted; "none" for a check
 // with no run (a status, or no run in its URL).

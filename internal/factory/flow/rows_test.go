@@ -91,19 +91,21 @@ var (
 		a0(in).MergeOnly = []Advance{{From: "c1", To: "m2"}}
 		in.Facts.Tip, in.Facts.PR.Head = "m2", "m2"
 	}
-	workingF  = func(in *In) { in.Facts.Worker.State = RunWorking }
-	asked     = func(in *In) { a0(in).Acts = append(a0(in).Acts, Act{Key: "merge@c1", Result: "done"}) }
-	red       = func(in *In) { in.Facts.PR.Checks = ChecksRed }
-	noAnswer  = func(in *In) { in.Facts.PR.Answered = false }
-	closedPR  = func(in *In) { in.Facts.PR.State = PRClosed }
-	conflict  = func(in *In) { in.Facts.PR.Mergeable = MergeableConflict }
-	behind    = func(in *In) { in.Facts.PR.Behind = true }
-	reviewReq = func(in *In) { in.Facts.PR.ReviewRequired = true }
-	ciRecap   = func(in *In) {
+	workingF   = func(in *In) { in.Facts.Worker.State = RunWorking }
+	asked      = func(in *In) { a0(in).Acts = append(a0(in).Acts, Act{Key: "merge@c1", Result: "done"}) }
+	red        = func(in *In) { in.Facts.PR.Checks = ChecksRed }
+	noAnswer   = func(in *In) { in.Facts.PR.Answered = false }
+	closedPR   = func(in *In) { in.Facts.PR.State = PRClosed }
+	conflict   = func(in *In) { in.Facts.PR.Mergeable = MergeableConflict }
+	behind     = func(in *In) { in.Facts.PR.Behind = true }
+	behindUnkn = func(in *In) { in.Facts.PR.BehindUnknown = true }
+	diverged   = func(in *In) { in.Facts.Tip, in.Facts.TipRel = "c9", RelDiverged }
+	reviewReq  = func(in *In) { in.Facts.PR.ReviewRequired = true }
+	ciRecap    = func(in *In) {
 		in.Task.Recaps = []Recap{{Trigger: TriggerCI, Allowed: []string{ChoiceContinue, "split", "new", "drop"}}}
 	}
 	ciFailed3 = func(in *In) {
-		in.Task.CIFails = []CIFail{
+		a0(in).CIFails = []CIFail{
 			{Head: "f1", At: now.Add(-30 * time.Minute)},
 			{Head: "f2", At: now.Add(-20 * time.Minute)},
 			{Head: "f3", At: now.Add(-10 * time.Minute)},
@@ -142,6 +144,7 @@ func TestN42Guards(t *testing.T) {
 		"mergeClean":            conflict,
 		"noReviewRequired":      reviewReq,
 		"notBehind":             behind,
+		"notBehindUnknown":      behindUnkn,
 		"notWorking":            workingF,
 		"onePassNeedsL8":        onePass,
 		"ladderSays(Passed)":    func(in *In) { a0(in).Rounds[1].Verdict = "maybe" },
@@ -151,7 +154,9 @@ func TestN42Guards(t *testing.T) {
 		"checksStoppedExternal": func(in *In) { in.Facts.PR.Checks = ChecksStoppedExternal },
 		"checksStoppedUnknown":  func(in *In) { in.Facts.PR.Checks = ChecksStoppedUnknown },
 		"checksUnreadable":      func(in *In) { in.Facts.PR.Checks = ChecksUnreadable },
-		"tipSame":               func(in *In) { in.Facts.Tip, in.Facts.TipRel = "c9", RelDiverged },
+		"tipAtOrBehindH":        diverged,
+		"tipBehindNotCovered":   func(in *In) { in.Facts.Tip, in.Facts.TipRel = "b0", RelBehind },
+		"tipBehindPastMove":     func(in *In) { movedToM2(in); in.Facts.Tip, in.Facts.TipRel = "b0", RelBehind },
 	} {
 		in := with(f)
 		if n42.When(in) {
@@ -181,9 +186,9 @@ func TestS1FinishedReviewer(t *testing.T) {
 // TestN43WakeOncePerStall: the same stall wakes the coordinator once; a
 // different stall, or the same at a new H, wakes it again.
 func TestN43WakeOncePerStall(t *testing.T) {
-	_, first := FirstMatch(TaskRows, with(behind))
+	_, first := FirstMatch(TaskRows, with(diverged))
 	stalled := func(fs ...func(*In)) In {
-		in := with(append([]func(*In){behind}, fs...)...)
+		in := with(append([]func(*In){diverged}, fs...)...)
 		a0(&in).Acts = []Act{{Key: first.Asked[0], Result: "done"}}
 		return in
 	}
@@ -233,6 +238,9 @@ func TestTablesCheck(t *testing.T) {
 	if err := CheckTable(LadderRows); err != nil {
 		t.Error(err)
 	}
+	if err := CheckTable(MergeOnlyRows); err != nil {
+		t.Error(err)
+	}
 }
 
 // TestRowCases: each row has a case that lands on it, so on no earlier row.
@@ -268,8 +276,10 @@ func TestRowCases(t *testing.T) {
 		{"N13", with(noRounds, ciFailed3), []string{"open_ci_recap@0"}},
 		{"N42", with(atCap), []string{"record_accept@c1", "merge@c1"}}, // at the cap is not over it
 		{"N20", with(mergeTip), []string{"move_h_merge_only@m2"}},
+		{"N20", with(func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel, in.Facts.PR.HeadMergeOnly = "m2", RelAhead, true }), []string{"move_h_merge_only@m2"}},
 		{"N26", with(movedToM2, func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel = "c1", RelBehind }), []string{"push_and_open_pr@m2"}},
-		{"N42", with(movedToM2), []string{"record_accept@m2", "merge@m2"}}, // the passes at c1 still cover m2
+		{"N42", with(movedToM2), []string{"record_accept@m2", "merge@m2"}},                                                                   // the passes at c1 still cover m2
+		{"N42", with(movedToM2, func(in *In) { in.Facts.Tip, in.Facts.TipRel = "c1", RelBehind }), []string{"record_accept@m2", "merge@m2"}}, // PR updated on GitHub: tip behind H still merges
 		{"N22", with(changes), []string{"tell_worker_findings@1"}},
 		{"N23", with(notReady, noRounds, prGone), []string{"start_worker"}},
 		{"N23", with(notReady, noRounds, prGone, waitDep), []string{"start_worker"}}, // open attempt with unmet deps still matches an attempt row, not N9
@@ -294,11 +304,14 @@ func TestRowCases(t *testing.T) {
 		{"N36", with(noAnswer), nil}, // checks unreadable: wait, no wake
 		{"N36", with(func(in *In) { in.Facts.PR.Checks = ChecksUnreadable }), nil},
 		{"N36", with(func(in *In) { in.Facts.GitHubUnavailable = true }), nil},
+		{"N36", with(behindUnkn), nil},
+		{"N36", with(behindUnkn, func(in *In) { in.Now = now.Add(time.Duration(DefaultSettings().ChecksGraceMinutes) * time.Minute) }), []string{"wake_coordinator@behind_unknown@c1"}},
 		{"N37", with(reviewReq), []string{"wake_coordinator@review_required@c1"}},
 		{"N39", with(workingF), nil},
+		{"N40", with(behind), []string{"update_branch@c1"}},
 		{"N41", with(asked), nil},
 		{"N42", landing(), []string{"record_accept@c1", "merge@c1"}},
-		{"N43", with(behind), []string{"wake_coordinator@no_rule_matched@c1@open@green@clean@same"}},
+		{"N43", with(diverged), []string{"wake_coordinator@no_rule_matched@c1@open@green@clean@diverged"}},
 	}
 	covered := map[string]bool{}
 	for _, c := range cases {
@@ -359,8 +372,10 @@ func TestRowOrder(t *testing.T) {
 		{"N32", "N36", false, with(conflict, pending)},
 		{"N32", "N37", false, with(conflict, reviewReq)},
 		{"N36", "N37", true, with(pending, reviewReq)},
+		{"N36", "N40", false, with(pending, behind)},
 		{"N37", "N39", true, with(reviewReq, workingF)},
-		{"N39", "N41", true, with(workingF, asked)},
+		{"N39", "N40", true, with(workingF, behind)},
+		{"N39", "N41", false, with(workingF, asked)},
 		{"N41", "N42", true, with(asked)},
 	}
 	for _, c := range cases {
@@ -999,7 +1014,7 @@ func TestFailingRuns(t *testing.T) {
 func TestN13N32N37(t *testing.T) {
 	// N13: 3 distinct commits in the last hour -> open_ci_recap@0; duplicate head counts once; old fail excluded.
 	dup := with(noRounds, func(in *In) {
-		in.Task.CIFails = []CIFail{
+		a0(in).CIFails = []CIFail{
 			{Head: "f1", At: now.Add(-30 * time.Minute)},
 			{Head: "f1", At: now.Add(-25 * time.Minute)},
 			{Head: "f2", At: now.Add(-10 * time.Minute)},
@@ -1037,5 +1052,112 @@ func TestN13N32N37(t *testing.T) {
 	a0(&rrIn).Acts = append(a0(&rrIn).Acts, Act{Key: "wake_coordinator@review_required@c1", Result: "done", At: now})
 	if r, d := FirstMatch(TaskRows, rrIn); r.ID != "N37" || len(d.Asked) != 0 {
 		t.Fatalf("N37 repeat = %s %v, want nil", r.ID, d.Asked)
+	}
+}
+
+// TestMergeOnlyTable covers every row M1..M6 of MergeOnlyRows (design.md 3.1, 9.4).
+func TestMergeOnlyTable(t *testing.T) {
+	clean := MergeCommit{Parents: 2, SecondInBase: true, TreeMatches: true}
+	cases := []struct {
+		row  string
+		want bool
+		in   MergeOnlyIn
+	}{
+		{"M1", false, MergeOnlyIn{Rel: RelSame, Commits: []MergeCommit{clean}}},
+		{"M1", false, MergeOnlyIn{Rel: RelDiverged, Commits: []MergeCommit{clean}}},
+		{"M2", false, MergeOnlyIn{Rel: RelAhead}},
+		{"M3", false, MergeOnlyIn{Rel: RelAhead, Commits: []MergeCommit{clean, {Parents: 1, SecondInBase: true, TreeMatches: true}}}},
+		{"M3", false, MergeOnlyIn{Rel: RelAhead, Commits: []MergeCommit{{Parents: 3, SecondInBase: true, TreeMatches: true}}}},
+		{"M4", false, MergeOnlyIn{Rel: RelAhead, Commits: []MergeCommit{{Parents: 2, SecondInBase: false, TreeMatches: true}}}},
+		{"M5", false, MergeOnlyIn{Rel: RelAhead, Commits: []MergeCommit{{Parents: 2, SecondInBase: true, TreeMatches: false}}}},
+		{"M6", true, MergeOnlyIn{Rel: RelAhead, Commits: []MergeCommit{clean}}},
+		{"M6", true, MergeOnlyIn{Rel: RelAhead, Commits: []MergeCommit{clean, clean}}},
+	}
+	covered := map[string]bool{}
+	for _, c := range cases {
+		r, _ := FirstMatch(MergeOnlyRows, c.in)
+		if r.ID != c.row || IsMergeOnly(c.in) != c.want {
+			t.Errorf("MergeOnlyRows(%+v) = %s (%v), want %s (%v)", c.in, r.ID, IsMergeOnly(c.in), c.row, c.want)
+		}
+		covered[r.ID] = true
+	}
+	for _, r := range MergeOnlyRows {
+		if !covered[r.ID] {
+			t.Errorf("MergeOnlyRows row %s has no case", r.ID)
+		}
+	}
+}
+
+// TestN40BehindAndKBMRG6 covers N40 (KB-MRG-43: update once, wait within grace,
+// failed try past grace, S2 wake after stuck_minutes, BehindUnknown waits at N36,
+// not behind merges at N42), merge_only PR head moving H, and KB-MRG-6 (stray
+// worker wake with no new commit never undoes a pass).
+func TestN40BehindAndKBMRG6(t *testing.T) {
+	grace := time.Duration(DefaultSettings().ChecksGraceMinutes) * time.Minute
+	in := with(behind)
+	r, d := FirstMatch(TaskRows, in)
+	if r.ID != "N40" || !slices.Equal(d.Asked, []string{"update_branch@c1"}) {
+		t.Fatalf("N40 first = %s %v", r.ID, d.Asked)
+	}
+	// Asked within checks_grace_minutes -> wait.
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: "update_branch@c1", Result: "done", At: now})
+	in.Now = now.Add(grace - time.Second)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N40" || len(d.Asked) != 0 {
+		t.Fatalf("N40 within grace = %s %v, want wait", r.ID, d.Asked)
+	}
+	// Past checks_grace_minutes -> failed try.
+	in.Now = now.Add(grace)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N40" || !slices.Equal(d.Asked, []string{"fail_update_branch@c1"}) {
+		t.Fatalf("N40 past grace = %s %v, want fail_update_branch@c1", r.ID, d.Asked)
+	}
+	// Once marked failed, N40 waits (never re-asks); past stuck_minutes S2 wakes.
+	a0(&in).Acts[0].Result = "failed"
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N40" || len(d.Asked) != 0 {
+		t.Fatalf("N40 failed = %s %v, want wait", r.ID, d.Asked)
+	}
+	in.Now = now.Add(stuckFor(&in))
+	if r, d := FirstMatch(TaskRows, in); r.ID != "S2" || !slices.Equal(d.Asked, []string{"wake_coordinator@stuck@update_branch@c1@c1"}) {
+		t.Fatalf("N40 failed past stuck_minutes = %s %v, want S2 wake", r.ID, d.Asked)
+	}
+	// BehindUnknown always holds at N36 (never merges, never asks update_branch);
+	// past checks_grace_minutes it wakes the coordinator once and keeps holding.
+	bu := with(behindUnkn)
+	if r, d := FirstMatch(TaskRows, bu); r.ID != "N36" || len(d.Asked) != 0 {
+		t.Fatalf("BehindUnknown in grace = %s %v, want N36 wait", r.ID, d.Asked)
+	}
+	bu.Now = now.Add(grace)
+	if r, d := FirstMatch(TaskRows, bu); r.ID != "N36" || !slices.Equal(d.Asked, []string{"wake_coordinator@behind_unknown@c1"}) {
+		t.Fatalf("BehindUnknown past grace = %s %v, want N36 wake once", r.ID, d.Asked)
+	}
+	a0(&bu).Acts = append(a0(&bu).Acts, Act{Key: "wake_coordinator@behind_unknown@c1", Result: "done", At: bu.Now})
+	if r, d := FirstMatch(TaskRows, bu); r.ID != "N36" || len(d.Asked) != 0 {
+		t.Fatalf("BehindUnknown after wake = %s %v, want N36 hold", r.ID, d.Asked)
+	}
+	// KB-MRG-6: a wake with no new commit holds at N39 while working, then merges at N42 when idle.
+	w := with(workingF)
+	if r, d := FirstMatch(TaskRows, w); r.ID != "N39" || len(d.Asked) != 0 {
+		t.Fatalf("KB-MRG-6 working = %s %v, want N39 wait", r.ID, d.Asked)
+	}
+	w.Facts.Worker.State = RunIdle
+	if r, d := FirstMatch(TaskRows, w); r.ID != "N42" || !slices.Equal(d.Asked, []string{"record_accept@c1", "merge@c1"}) {
+		t.Fatalf("KB-MRG-6 idle again = %s %v, want N42 merge", r.ID, d.Asked)
+	}
+}
+
+// TestN13CIFailsScopedToAttempt verifies m4: a new attempt does not inherit
+// failing CI commits from an earlier closed attempt.
+func TestN13CIFailsScopedToAttempt(t *testing.T) {
+	in := with(noRounds, ciFailed3)
+	if r, _ := FirstMatch(TaskRows, in); r.ID != "N13" {
+		t.Fatalf("first attempt with 3 fails = %s, want N13", r.ID)
+	}
+	a0(&in).Closed = "new attempt"
+	in.Task.Attempts = append(in.Task.Attempts, Attempt{BaseCommit: "b0", Ready: []Ready{{Head: "c2"}}})
+	in.Facts.Tip, in.Facts.PR.Head = "c2", "c2"
+	if got := RecentCIFails(in.Task, in.Now); len(got) != 0 {
+		t.Fatalf("new attempt RecentCIFails = %+v, want none", got)
+	}
+	if r, _ := FirstMatch(TaskRows, in); r.ID != "N29" {
+		t.Fatalf("new attempt after closed failing attempt = %s, want N29", r.ID)
 	}
 }
