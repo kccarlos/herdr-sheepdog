@@ -2,10 +2,12 @@ package world
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -39,14 +41,18 @@ case "$1 $2" in
   cat "$D/view.json" 2>/dev/null || { echo 'no pull requests found for branch "x"' >&2; exit 1; } ;;
 "pr merge") [ -f "$D/merge_fail" ] && { echo "GraphQL: Head branch was modified" >&2; exit 1; }; : ;;
 "pr close") [ -f "$D/close_fail" ] && { echo "GraphQL: close failed" >&2; exit 1; }; : ;;
+"run rerun") [ -f "$D/rerun_fail" ] && { echo "HTTP 403: rerun failed" >&2; exit 1; }; : ;;
+"workflow run") [ -f "$D/dispatch_fail" ] && { echo "HTTP 422: dispatch failed" >&2; exit 1; }; : ;;
 api\ *)
   pg=1; case "$2" in *page=*) pg=${2##*page=} ;; esac
   sfx=""; [ "$pg" = 1 ] || sfx=".$pg"
   case "$2" in
+  */actions/workflows/*/dispatches) failif dispatch; : ;;
   */check-runs/*/annotations*) failif annotations; cat "$D/annotations$sfx.json" 2>/dev/null || echo '[]' ;;
   */commits/*/check-runs*)
     [ -f "$D/check_runs_denied" ] && { echo "gh: Resource not accessible by personal access token (HTTP 403)" >&2; exit 1; }
-    cat "$D/check-runs$sfx.json" 2>/dev/null || echo '{"total_count":0,"check_runs":[]}' ;;
+    f="$D/check-runs$sfx.json"; case "$2" in *filter=all*) [ -f "$D/check-runs.all$sfx.json" ] && f="$D/check-runs.all$sfx.json" ;; esac
+    cat "$f" 2>/dev/null || echo '{"total_count":0,"check_runs":[]}' ;;
   */commits/*/status*) failif status; cat "$D/status$sfx.json" 2>/dev/null || echo '{"state":"pending","total_count":0,"statuses":[]}' ;;
   */actions/runs*) failif workflow_runs; cat "$D/workflow-runs$sfx.json" 2>/dev/null || echo '{"total_count":0,"workflow_runs":[]}' ;;
   */compare/*) failif compare; cat "$D/compare.json" 2>/dev/null || echo '{"behind_by":0}' ;;
@@ -120,17 +126,19 @@ func TestChecksRollupTable(t *testing.T) {
 		"timed_out":                {[]flow.Check{ok, run("COMPLETED", "TIMED_OUT")}, false, flow.ChecksStoppedTimeout},
 		"cancelled by timeout":     {[]flow.Check{ok, {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "timeout"}}, false, flow.ChecksStoppedTimeout},
 		"cancelled, cause unread":  {[]flow.Check{ok, {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "unknown"}}, false, flow.ChecksStoppedUnknown},
-		"unread beats outside":     {[]flow.Check{run("COMPLETED", "CANCELLED"), {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "unknown"}}, false, flow.ChecksStoppedUnknown},
-		"cancelled from outside":   {[]flow.Check{ok, run("COMPLETED", "CANCELLED")}, false, flow.ChecksStoppedExternal},
+		"unread beats outside":     {[]flow.Check{{Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "external"}, {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "unknown"}}, false, flow.ChecksStoppedUnknown},
+		"cancelled from outside":   {[]flow.Check{ok, {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "external"}}, false, flow.ChecksStoppedExternal},
+		"cancelled, no evidence":   {[]flow.Check{ok, run("COMPLETED", "CANCELLED")}, false, flow.ChecksStoppedUnknown},
 		"cancelled replaced": {[]flow.Check{
 			{Kind: "CheckRun", Name: "check", Status: "COMPLETED", Conclusion: "CANCELLED", StartedAt: "2026-11-20T09:00:00Z"},
 			{Kind: "CheckRun", Name: "check", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: "2026-11-20T09:05:00Z"},
 		}, false, flow.ChecksGreen},
-		"unknown conclusion": {[]flow.Check{run("COMPLETED", "STALE")}, false, flow.ChecksRed},
-		"status success":     {[]flow.Check{ctx("SUCCESS")}, false, flow.ChecksGreen},
-		"status pending":     {[]flow.Check{ok, ctx("PENDING")}, false, flow.ChecksPending},
-		"status expected":    {[]flow.Check{ctx("EXPECTED")}, false, flow.ChecksPending},
-		"status error":       {[]flow.Check{ok, ctx("ERROR")}, false, flow.ChecksRed},
+		"unknown conclusion":                  {[]flow.Check{run("COMPLETED", "STALE")}, false, flow.ChecksRed},
+		"a check run never replaces a status": {[]flow.Check{{Kind: "StatusContext", Context: "ci", State: "PENDING"}, {Kind: "CheckRun", Name: "ci", Status: "COMPLETED", Conclusion: "SUCCESS"}}, false, flow.ChecksPending},
+		"status success":                      {[]flow.Check{ctx("SUCCESS")}, false, flow.ChecksGreen},
+		"status pending":                      {[]flow.Check{ok, ctx("PENDING")}, false, flow.ChecksPending},
+		"status expected":                     {[]flow.Check{ctx("EXPECTED")}, false, flow.ChecksPending},
+		"status error":                        {[]flow.Check{ok, ctx("ERROR")}, false, flow.ChecksRed},
 	} {
 		if got := flow.Rollup(c.checks, c.wfPending); got != c.want {
 			t.Errorf("%s: Rollup = %s, want %s", name, got, c.want)
@@ -198,7 +206,7 @@ func TestPushAndOpenPROnceThenAdopts(t *testing.T) {
 		t.Fatalf("gh calls:\n%s", strings.Join(ghCalls(t, gh, ""), "\n"))
 	}
 	p, _, err := PRSnapshot(ctx, repo, "task/t1-x")
-	if err != nil || p != (flow.PR{Answered: true, Number: 7, State: flow.PROpen, Head: c1, Mergeable: flow.MergeableUnknown, Checks: flow.ChecksAbsent}) {
+	if err != nil || !reflect.DeepEqual(p, flow.PR{Answered: true, Number: 7, State: flow.PROpen, Head: c1, Mergeable: flow.MergeableUnknown, Checks: flow.ChecksAbsent}) {
 		t.Fatalf("snapshot = %+v, %v", p, err)
 	}
 	if views := ghCalls(t, gh, "pr view"); !strings.Contains(views[len(views)-1], "pr view task/t1-x --repo acme/demo --json "+prViewFields) {
@@ -575,7 +583,7 @@ func TestPRSnapshotOptionalCallFails(t *testing.T) {
 		}
 		writeGH(t, gh, c.fail+"_fail", "")
 		p, warn, err := PRSnapshot(ctx, repo, "b")
-		if err != nil || warn == nil || !p.Answered || p.Checks != c.want || p.Behind || p.BehindUnknown != (c.fail == "compare") {
+		if err != nil || warn == nil || !p.Answered || p.Checks != c.want || p.Behind || p.BehindUnknown != (c.fail == "compare") || p.ChecksUnread != (c.fail == "workflow_runs") {
 			t.Errorf("%s fails on %s: %+v, warn %v, err %v; want answered %s, not behind, a warning", c.fail, c.view, p, warn, err, c.want)
 		}
 	}
@@ -601,5 +609,120 @@ func TestCheckRunsRoundTwo(t *testing.T) {
 	copySnap(t, "stopped_timeout.annotations.json", filepath.Join(gh, "annotations.2.json"))
 	if p, _, err := PRSnapshot(ctx, repo, "b"); err != nil || p.Checks != flow.ChecksStoppedTimeout {
 		t.Errorf("timeout annotation on page 2: %s, %v; want stopped_timeout", p.Checks, err)
+	}
+}
+
+func TestRerunFailedJobsAndDispatchWorkflow(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+
+	// RerunFailedJobs calls gh run rerun <id> --failed --repo acme/demo.
+	if err := RerunFailedJobs(ctx, repo, "101"); err != nil {
+		t.Fatal(err)
+	}
+	wantReruns := []string{"run rerun 101 --failed --repo acme/demo"}
+	if got := ghCalls(t, gh, "run rerun"); !slices.Equal(got, wantReruns) {
+		t.Fatalf("rerun calls = %q, want %q", got, wantReruns)
+	}
+
+	// DispatchWorkflow is opt-in by name: empty never dispatches, a named
+	// file missing at head never does, a named file present is dispatched.
+	head := runGit(t, repo, "rev-parse", "HEAD")
+	for _, name := range []string{"", "ci.yml"} {
+		if err := DispatchWorkflow(ctx, repo, "task/t1", head, name); !errors.Is(err, ErrNoDispatchWorkflow) {
+			t.Fatalf("name %q before the file err = %v, want ErrNoDispatchWorkflow", name, err)
+		}
+	}
+	wfDir := filepath.Join(repo, ".github", "workflows")
+	if err := os.MkdirAll(wfDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wfDir, "ci.yml"), []byte("on:\n  pull_request:\n  workflow_dispatch:\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".github/workflows/ci.yml")
+	runGit(t, repo, "commit", "-m", "ci: add dispatch")
+	head = runGit(t, repo, "rev-parse", "HEAD")
+	if err := DispatchWorkflow(ctx, repo, "task/t1", head, ""); !errors.Is(err, ErrNoDispatchWorkflow) {
+		t.Fatalf("empty name with a dispatchable file err = %v, want ErrNoDispatchWorkflow", err)
+	}
+	if err := DispatchWorkflow(ctx, repo, "task/t1", head, "ci.yml"); err != nil {
+		t.Fatal(err)
+	}
+	if got := ghCalls(t, gh, "api repos/acme/demo/actions/workflows/"); !slices.Equal(got, []string{"api repos/acme/demo/actions/workflows/ci.yml/dispatches -X POST -f ref=task/t1"}) {
+		t.Fatalf("dispatch calls = %q, want the file's own dispatches endpoint", got)
+	}
+}
+
+// TestDispatchWorkflowExactFileOnly: a value gh could read as a workflow id,
+// a display name or a flag is never dispatched, even if a file by that name
+// exists at head (the guard runs where the command runs).
+func TestDispatchWorkflowExactFileOnly(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	wfDir := filepath.Join(repo, ".github", "workflows")
+	if err := os.MkdirAll(wfDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	names := []string{"12345", "ci", "-x.yml"}
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(wfDir, n), []byte("on: workflow_dispatch\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit(t, repo, "add", ".github")
+	runGit(t, repo, "commit", "-m", "ci")
+	head := runGit(t, repo, "rev-parse", "HEAD")
+	for _, n := range append(names, "a/b.yml") {
+		if err := DispatchWorkflow(ctx, repo, "task/t1", head, n); !errors.Is(err, ErrNoDispatchWorkflow) {
+			t.Errorf("DispatchWorkflow(%q) err = %v, want ErrNoDispatchWorkflow", n, err)
+		}
+	}
+	if got := append(ghCalls(t, gh, "workflow run"), ghCalls(t, gh, "api repos/acme/demo/actions/workflows/")...); len(got) != 0 {
+		t.Fatalf("dispatched %q", got)
+	}
+}
+
+// TestPRSnapshotPartialRunListNoTarget: when H's run list fails on a later
+// page, the ids read on earlier pages are not used: no re-run target.
+func TestPRSnapshotPartialRunListNoTarget(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	writeGH(t, gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"h1","mergeable":"MERGEABLE","baseRefName":"main","statusCheckRollup":[`+
+		`{"__typename":"CheckRun","name":"test","workflowName":"ci","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/acme/demo/actions/runs/5/job/50"}]}`)
+	runs := []string{`{"id":5,"status":"completed","conclusion":"failure"}`}
+	for i := 1; i < 100; i++ {
+		runs = append(runs, fmt.Sprintf(`{"id":%d,"status":"completed","conclusion":"success"}`, 1000+i))
+	}
+	writeGH(t, gh, "workflow-runs.json", `{"total_count":150,"workflow_runs":[`+strings.Join(runs, ",")+`]}`)
+	writeGH(t, gh, "workflow-runs.2.json", `not json`)
+	p, warn, err := PRSnapshot(ctx, repo, "b")
+	if err != nil || warn == nil || p.Checks != flow.ChecksRed || !p.ChecksUnread || len(p.Failed) != 1 || p.Failed[0].Run != "" {
+		t.Fatalf("partial run list: %+v, warn %v, err %v; want red, checks_unread, a failure with no run", p, warn, err)
+	}
+}
+
+// TestPRSnapshotFallbackSeesEarlierAttempts: the REST fallback asks for
+// every attempt (filter=all), so a timed-out earlier attempt of a job that
+// was re-run still vetoes re-running its run.
+func TestPRSnapshotFallbackSeesEarlierAttempts(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	writeGH(t, gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"h1","mergeable":"MERGEABLE","baseRefName":"main","statusCheckRollup":[]}`)
+	writeGH(t, gh, "view_denied", "")
+	cr := func(id int, name, concl string) string {
+		return fmt.Sprintf(`{"id":%d,"name":%q,"status":"completed","conclusion":%q,"details_url":"https://github.com/acme/demo/actions/runs/90/job/%d","check_suite":{"id":1},"app":{"slug":"github-actions"}}`, id, name, concl, id)
+	}
+	writeGH(t, gh, "check-runs.json", `{"total_count":2,"check_runs":[`+cr(900, "build", "failure")+","+cr(902, "report", "success")+`]}`)
+	writeGH(t, gh, "check-runs.all.json", `{"total_count":3,"check_runs":[`+cr(900, "build", "failure")+","+cr(901, "report", "cancelled")+","+cr(902, "report", "success")+`]}`)
+	writeGH(t, gh, "annotations.json", `[{"message":"The job has exceeded the maximum execution time of 1m0s"}]`)
+	writeGH(t, gh, "workflow-runs.json", `{"total_count":1,"workflow_runs":[{"id":90,"status":"completed","conclusion":"failure"}]}`)
+	p, _, err := PRSnapshot(ctx, repo, "b")
+	if err != nil || p.Checks != flow.ChecksRed || len(p.Failed) != 1 || p.Failed[0].Run != "" {
+		t.Fatalf("fallback with an earlier timed-out attempt: %+v, %v; want red with no re-run target", p, err)
 	}
 }

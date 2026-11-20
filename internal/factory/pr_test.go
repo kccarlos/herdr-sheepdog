@@ -3,8 +3,11 @@ package factory
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -35,10 +38,13 @@ case "$1 $2" in
   cat "$D/view.json" 2>/dev/null || { echo 'no pull requests found for branch "x"' >&2; exit 1; } ;;
 "pr merge") [ -f "$D/merge_fail" ] && { echo "GraphQL: Head branch was modified" >&2; exit 1; }; : ;;
 "pr close") [ -f "$D/close_fail" ] && { echo "GraphQL: close failed" >&2; exit 1; }; : ;;
+"run rerun") { [ -f "$D/rerun_fail" ] || [ -f "$D/rerun_fail_$3" ]; } && { echo "HTTP 403: rerun failed" >&2; exit 1; }; : ;;
+"workflow run") [ -f "$D/dispatch_fail" ] && { echo "HTTP 422: dispatch failed" >&2; exit 1; }; : ;;
 api\ *)
   pg=1; case "$2" in *page=*) pg=${2##*page=} ;; esac
   sfx=""; [ "$pg" = 1 ] || sfx=".$pg"
   case "$2" in
+  */actions/workflows/*/dispatches) failif dispatch; : ;;
   */check-runs/*/annotations*) failif annotations; cat "$D/annotations$sfx.json" 2>/dev/null || echo '[]' ;;
   */commits/*/check-runs*)
     [ -f "$D/check_runs_denied" ] && { echo "gh: Resource not accessible by personal access token (HTTP 403)" >&2; exit 1; }
@@ -91,6 +97,36 @@ func writePRJSON(t *testing.T, dir, file, head, rollup string) {
 	if err := os.WriteFile(filepath.Join(dir, file), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The head's workflow runs, as GitHub lists them for these checks: a run
+	// is unfinished while one of its checks is, else failed, cancelled or green.
+	var checks []flow.Check
+	if err := json.Unmarshal([]byte(rollup), &checks); err != nil {
+		t.Fatal(err)
+	}
+	runs, order := map[string]map[string]string{}, []string{}
+	for _, c := range checks {
+		_, after, ok := strings.Cut(c.DetailsURL, "/actions/runs/")
+		id, _, _ := strings.Cut(after, "/")
+		if !ok || id == "" {
+			continue
+		}
+		if runs[id] == nil {
+			runs[id], order = map[string]string{"status": "completed", "conclusion": "success"}, append(order, id)
+		}
+		if !strings.EqualFold(c.Status, "COMPLETED") {
+			runs[id]["status"] = "in_progress"
+		}
+		if concl := strings.ToLower(c.Conclusion); concl == "failure" || concl == "cancelled" && runs[id]["conclusion"] != "failure" {
+			runs[id]["conclusion"] = concl
+		}
+	}
+	var items []string
+	for _, id := range order {
+		items = append(items, fmt.Sprintf(`{"id":%s,"status":%q,"conclusion":%q}`, id, runs[id]["status"], runs[id]["conclusion"]))
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workflow-runs.json"), []byte(`{"total_count":`+fmt.Sprint(len(items))+`,"workflow_runs":[`+strings.Join(items, ",")+`]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestPRSnapshotFactsAndFailure: the snapshot feeds the facts with head_rel
@@ -120,7 +156,7 @@ func TestPRSnapshotFactsAndFailure(t *testing.T) {
 	if !p1.Answered || p1.Number != 7 || p1.Head != c1 || p1.HeadRel != flow.RelSame || p1.Checks != flow.ChecksPending || p1.HeadSince.IsZero() {
 		t.Fatalf("pending snapshot = %+v", p1)
 	}
-	if read() != p1 {
+	if !reflect.DeepEqual(read(), p1) {
 		t.Fatal("an unchanged snapshot changed")
 	}
 	writePRJSON(t, gh, "view.json", c1, `[{"__typename":"CheckRun","name":"check","status":"COMPLETED","conclusion":"SUCCESS"}]`)

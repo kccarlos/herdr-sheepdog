@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -19,6 +20,9 @@ const (
 	AskTellStop     = "tell_worker_stop"
 	AskMergeOnly    = "move_h_merge_only"
 	AskPushPR       = "push_and_open_pr"
+	AskRerunCI      = "rerun_ci"
+	AskTellCI       = "tell_worker_ci"
+	AskDispatchCI   = "dispatch_ci"
 	AskAccept       = "record_accept"
 	AskMerge        = "merge"
 	AskMarkDone     = "mark_done"
@@ -29,7 +33,7 @@ const (
 )
 
 // commitKeyed are the verbs whose key ends in the commit it is for.
-var commitKeyed = []string{AskPushPR, AskStartReview, AskAccept, AskMerge}
+var commitKeyed = []string{AskPushPR, AskStartReview, AskRerunCI, AskTellCI, AskDispatchCI, AskAccept, AskMerge}
 
 // key joins a verb and what it is for: "merge@3f9c".
 func key(verb string, parts ...any) string {
@@ -91,43 +95,54 @@ func headH(in In) string {
 	return ""
 }
 
-func ended(in In) bool            { return Ended(in.Task) }
-func recapOpen(in In) bool        { return OpenRecap(in.Task) != nil }
-func prMerged(in In) bool         { return in.Facts.PR.State == PRMerged }
-func noAttempt(in In) bool        { return in.attempt() == nil }
-func hasAttempt(in In) bool       { return in.attempt() != nil }
-func depsNotDone(in In) bool      { return len(in.Facts.DepsNotDone) > 0 }
-func depsDropped(in In) bool      { return len(in.Facts.DepsDropped) > 0 }
-func noSlot(in In) bool           { return in.Facts.NoSlot }
-func workerGone(in In) bool       { return in.Facts.Worker.State == RunGone }
-func reviewGone(in In) bool       { return in.Facts.Reviewer.State == RunGone }
-func noReady(in In) bool          { return len(in.attempt().Ready) == 0 }
-func tipAhead(in In) bool         { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
-func noPR(in In) bool             { return in.Facts.PR.State == PRNone }
-func prOpen(in In) bool           { return in.Facts.PR.State == PROpen }
-func prNotClosed(in In) bool      { return in.Facts.PR.State != PRClosed }
-func tipSame(in In) bool          { return in.Facts.TipRel == RelSame } // slice 1: diverged falls to N43 (N7 comes later)
-func prBehindH(in In) bool        { return in.Facts.PR.HeadRel == RelBehind }
-func prHeadIsH(in In) bool        { return in.Facts.PR.Head == headH(in) }
-func answered(in In) bool         { return in.Facts.PR.Answered }
-func unanswered(in In) bool       { return !answered(in) }
-func githubUnavail(in In) bool    { return in.Facts.GitHubUnavailable }
-func githubAvail(in In) bool      { return !githubUnavail(in) }
-func notBehind(in In) bool        { return !in.Facts.PR.Behind }
-func checksGreen(in In) bool      { return in.Facts.PR.Checks == ChecksGreen }
-func checksPend(in In) bool       { return in.Facts.PR.Checks == ChecksPending }
-func checksUnreadable(in In) bool { return in.Facts.PR.Checks == ChecksUnreadable }
-func mergeClean(in In) bool       { return in.Facts.PR.Mergeable == MergeableClean }
-func mergeUnkn(in In) bool        { return in.Facts.PR.Mergeable == MergeableUnknown }
-func working(in In) bool          { return in.Facts.Worker.State == RunWorking }
-func notWorking(in In) bool       { return !working(in) }
-func mergeAsked(in In) bool       { return Count(in.acts(), key(AskMerge, headH(in))) > 0 }
+func ended(in In) bool                { return Ended(in.Task) }
+func recapOpen(in In) bool            { return OpenRecap(in.Task) != nil }
+func prMerged(in In) bool             { return in.Facts.PR.State == PRMerged }
+func noAttempt(in In) bool            { return in.attempt() == nil }
+func hasAttempt(in In) bool           { return in.attempt() != nil }
+func depsNotDone(in In) bool          { return len(in.Facts.DepsNotDone) > 0 }
+func depsDropped(in In) bool          { return len(in.Facts.DepsDropped) > 0 }
+func noSlot(in In) bool               { return in.Facts.NoSlot }
+func workerGone(in In) bool           { return in.Facts.Worker.State == RunGone }
+func reviewGone(in In) bool           { return in.Facts.Reviewer.State == RunGone }
+func noReady(in In) bool              { return len(in.attempt().Ready) == 0 }
+func tipAhead(in In) bool             { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
+func noPR(in In) bool                 { return in.Facts.PR.State == PRNone }
+func prOpen(in In) bool               { return in.Facts.PR.State == PROpen }
+func prNotClosed(in In) bool          { return in.Facts.PR.State != PRClosed }
+func tipSame(in In) bool              { return in.Facts.TipRel == RelSame } // slice 1: diverged falls to N43 (N7 comes later)
+func prBehindH(in In) bool            { return in.Facts.PR.HeadRel == RelBehind }
+func prHeadIsH(in In) bool            { return in.Facts.PR.Head == headH(in) }
+func answered(in In) bool             { return in.Facts.PR.Answered }
+func unanswered(in In) bool           { return !answered(in) }
+func githubUnavail(in In) bool        { return in.Facts.GitHubUnavailable }
+func githubAvail(in In) bool          { return !githubUnavail(in) }
+func notBehind(in In) bool            { return !in.Facts.PR.Behind }
+func checksGreen(in In) bool          { return in.Facts.PR.Checks == ChecksGreen }
+func checksRed(in In) bool            { return in.Facts.PR.Checks == ChecksRed }
+func checksStoppedExt(in In) bool     { return in.Facts.PR.Checks == ChecksStoppedExternal }
+func checksStoppedTimeout(in In) bool { return in.Facts.PR.Checks == ChecksStoppedTimeout }
+func checksStoppedUnknown(in In) bool { return in.Facts.PR.Checks == ChecksStoppedUnknown }
+func checksPend(in In) bool           { return in.Facts.PR.Checks == ChecksPending }
+func checksUnreadable(in In) bool     { return in.Facts.PR.Checks == ChecksUnreadable }
+func mergeClean(in In) bool           { return in.Facts.PR.Mergeable == MergeableClean }
+func mergeUnkn(in In) bool            { return in.Facts.PR.Mergeable == MergeableUnknown }
+func working(in In) bool              { return in.Facts.Worker.State == RunWorking }
+func notWorking(in In) bool           { return !working(in) }
+func mergeAsked(in In) bool           { return Count(in.acts(), key(AskMerge, headH(in))) > 0 }
 
-// checksAbsentInGrace: no checks yet, and the head is younger than
-// checks_grace_minutes (N36).
+func checksGrace(in In) time.Duration {
+	return time.Duration(in.Settings.ChecksGraceMinutes) * time.Minute
+}
 func checksAbsentInGrace(in In) bool {
-	grace := time.Duration(in.Settings.ChecksGraceMinutes) * time.Minute
-	return in.Facts.PR.Checks == ChecksAbsent && in.Now.Sub(in.Facts.PR.HeadSince) < grace
+	return in.Facts.PR.Checks == ChecksAbsent && in.Now.Sub(in.Facts.PR.HeadSince) < checksGrace(in)
+}
+func checksAbsentPastGrace(in In) bool {
+	return in.Facts.PR.Checks == ChecksAbsent && in.Now.Sub(in.Facts.PR.HeadSince) >= checksGrace(in)
+}
+func checksSeenNone(in In) bool { return !in.Facts.PR.ChecksUnread } // absent from a failed read is not "no checks"
+func ciReady(c Clause) Clause {
+	return all(ladderSays(Passed), prOpen, prHeadIsH, answered, githubAvail, c)
 }
 
 func ladderSays(answer string) Clause {
@@ -247,6 +262,41 @@ var TaskRows = []Row[In]{
 		start := key(AskStartReview, nextRound(*in.attempt()), headH(in))
 		return say("the ladder says review", ensureRun(in, in.Facts.Reviewer, start))(in)
 	}},
+	{ID: "N33", WaitsOn: "CI", When: ciReady(checksRed), Then: func(in In) Decision {
+		h := headH(in)
+		if asks, wait := rerunOrWait(in, h); len(asks) > 0 || wait {
+			return say("checks red: re-run failed jobs, or wait for the re-run or for checks still running", asks)(in)
+		}
+		var tells []string
+		for _, run := range ciRuns(in) {
+			tells = append(tells, once(in.acts(), key(AskTellCI, run, h))...)
+		}
+		return say("checks red at H: tell the worker once per failing run", ensureRun(in, in.Facts.Worker, AskStartWorker), tells)(in)
+	}},
+	{ID: "N34", WaitsOn: "CI", When: ciReady(anyOf(checksStoppedExt, checksStoppedTimeout, checksStoppedUnknown)), Then: func(in In) Decision {
+		h := headH(in)
+		if !checksStoppedExt(in) { // a time limit, or a cancel with no evidence of who: one wake for both, never a re-run
+			return say("a CI job was stopped by its own time limit or for an unread reason ("+string(in.Facts.PR.Checks)+")",
+				once(in.acts(), key(AskWake, "checks_stopped", "limit", h)))(in)
+		}
+		if asks, wait := rerunOrWait(in, h); len(asks) > 0 || wait {
+			return say("checks cancelled from outside: re-run, or wait for the re-run or for checks still running", asks)(in)
+		}
+		return say("checks cancelled from outside with no re-runs left", once(in.acts(), key(AskWake, "checks_stopped", "external", h)))(in)
+	}},
+	{ID: "N35", WaitsOn: "CI", When: ciReady(all(checksAbsentPastGrace, checksSeenNone)), Then: func(in In) Decision {
+		h := headH(in)
+		dk := key(AskDispatchCI, h)
+		act := LastAct(in.acts(), dk)
+		if act == nil {
+			return say("no checks past checks_grace_minutes: dispatch the workflow", []string{dk})(in)
+		}
+		if act.Result == "done" && in.Now.Sub(act.At) < checksGrace(in) {
+			return say("workflow dispatched; waiting for checks")(in)
+		}
+		return say("no checks past checks_grace_minutes: push a change that triggers a workflow, ask for an owner override, or drop the task",
+			once(in.acts(), key(AskWake, "no_checks", h)))(in)
+	}},
 	{ID: "N36", WaitsOn: "CI", When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn)),
 		Then: say("checks pending or unreadable, or mergeable unknown")},
 	{ID: "N39", WaitsOn: "the worker", When: all(ladderSays(Passed), prOpen, working), Then: say("the worker is working")},
@@ -274,6 +324,49 @@ func n9Why(in In) string {
 		parts = append(parts, "depends on dropped "+strings.Join(in.Facts.DepsDropped, ", "))
 	}
 	return strings.Join(parts, "; ")
+}
+
+// ciRuns are the failing checks' run ids, sorted; "none" for a check
+// with no run (a status, or no run in its URL).
+func ciRuns(in In) []string {
+	var rs []string
+	for _, f := range in.Facts.PR.Failed {
+		rs = append(rs, cmp.Or(f.Run, "none"))
+	}
+	slices.Sort(rs)
+	return slices.Compact(rs)
+}
+
+// rerunOrWait waits while a check runs (a re-run of an unfinished run is
+// refused). Else it asks one re-run per failing run with flake_reruns left
+// for that run at H (a failed request counts), keyed by the run's red jobs,
+// and waits while a done re-run still reads those jobs red, at most
+// checks_grace_minutes from the request.
+func rerunOrWait(in In, h string) (asks []string, wait bool) {
+	if in.Facts.PR.Running || in.Facts.PR.ChecksUnread && in.Now.Sub(in.Facts.PR.HeadSince) < checksGrace(in) {
+		return nil, true // H's runs unread: never a re-run; tell or wake after the grace
+	}
+	for _, run := range ciRuns(in) {
+		var jobs []string
+		for _, f := range in.Facts.PR.Failed {
+			if cmp.Or(f.Run, "none") == run && f.Job != "" {
+				jobs = append(jobs, f.Job)
+			}
+		}
+		slices.Sort(jobs)
+		k, spent := key(AskRerunCI, run, strings.Join(jobs, ","), h), 0
+		for _, a := range in.acts() {
+			if strings.HasPrefix(a.Key, key(AskRerunCI, run)+"@") && strings.HasSuffix(a.Key, "@"+h) {
+				spent++
+			}
+		}
+		if a := LastAct(in.acts(), k); a != nil {
+			wait = wait || a.Result == "done" && in.Now.Sub(a.At) < checksGrace(in)
+		} else if run != "none" && spent < in.Settings.FlakeReruns {
+			asks = append(asks, k)
+		}
+	}
+	return asks, wait
 }
 
 func hasAccept(in In, head string) bool {

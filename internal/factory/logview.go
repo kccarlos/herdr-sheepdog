@@ -71,7 +71,7 @@ var ruleStage = map[string]string{
 	"N12": "blocked_or_failed", "N25": "blocked_or_failed", "N43": "blocked_or_failed",
 	"N9": "waiting_on_dep", "N10": "queued", "N11": "queued",
 	"N20": "working", "N22": "working", "N23": "working", "N26": "working", "N29": "working", "N39": "working",
-	"N36": "ci", "N41": "ci", "N42": "ci",
+	"N33": "ci", "N34": "ci", "N35": "ci", "N36": "ci", "N41": "ci", "N42": "ci",
 }
 
 // StatusViewOf derives each task's status from stored state and log.jsonl.

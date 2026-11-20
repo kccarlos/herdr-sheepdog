@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"slices"
 	"testing"
 	"time"
 )
@@ -72,6 +73,7 @@ func TestSettingsRange(t *testing.T) {
 		"retro_after_rounds_with_majors": func(s *Settings, n int) { s.RetroAfterRoundsWithMajors = n },
 		"retro_from_round":               func(s *Settings, n int) { s.RetroFromRound = n },
 		"checks_grace_minutes":           func(s *Settings, n int) { s.ChecksGraceMinutes = n },
+		"flake_reruns":                   func(s *Settings, n int) { s.FlakeReruns = n },
 		"stuck_minutes":                  func(s *Settings, n int) { s.StuckMinutes = n },
 		"max_running":                    func(s *Settings, n int) { s.MaxRunning = n },
 	}
@@ -81,6 +83,7 @@ func TestSettingsRange(t *testing.T) {
 		"retro_after_rounds_with_majors": {RetroMajorsMin, RetroMajorsMax},
 		"retro_from_round":               {RetroFromMin, RetroFromMax},
 		"checks_grace_minutes":           {ChecksGraceMin, ChecksGraceMax},
+		"flake_reruns":                   {0, FlakeRerunsMax},
 		"stuck_minutes":                  {StuckMin, StuckMax},
 		"max_running":                    {MaxRunningMin, MaxRunningMax},
 	}
@@ -101,5 +104,17 @@ func TestSettingsRange(t *testing.T) {
 	s.ReviewRounds, s.MaxRounds = 4, 3
 	if err := s.Validate(); err == nil {
 		t.Error("max_rounds < review_rounds validated")
+	}
+	// dispatch_workflow is a plain file name under .github/workflows.
+	for w, ok := range map[string]bool{"": true, "ci.yml": true, "Build_2.yaml": true, "../ci.yml": false, ".github/workflows/ci.yml": false, `a\b.yml`: false, "..": false,
+		"12345": false, "12345.txt": false, "ci": false, "-x.yml": false, "--repo.yml": false, ".yml": false} {
+		s := DefaultSettings()
+		s.DispatchWorkflow = w
+		if err := s.Validate(); (err == nil) != ok {
+			t.Errorf("dispatch_workflow %q: err %v, want ok=%v", w, err, ok)
+		}
+	}
+	if s := (Settings{DispatchWorkflow: "ci.yml"}); !slices.Contains(s.Changed(), "dispatch_workflow ci.yml") {
+		t.Errorf("Changed() = %q, want dispatch_workflow ci.yml", s.Changed())
 	}
 }

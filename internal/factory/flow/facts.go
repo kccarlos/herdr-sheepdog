@@ -79,8 +79,11 @@ type PR struct {
 	HeadSince      time.Time `json:"head_since"` // when Head was first seen; the checks grace counts from it
 	Mergeable      Mergeable `json:"mergeable"`
 	Checks         Checks    `json:"checks"`
+	Failed         []Failure `json:"failed,omitempty"`  // the red or outside-cancelled checks (N33, N34)
+	Running        bool      `json:"running,omitempty"` // a check has not finished: no re-run or tell yet
 	Behind         bool      `json:"behind"`
 	BehindUnknown  bool      `json:"behind_unknown,omitempty"` // compare failed: Behind false is not "not behind" (N40)
+	ChecksUnread   bool      `json:"checks_unread,omitempty"`  // H's workflow runs unread: absent is not "no checks" (N35 never dispatches); N33/N34 never re-run
 	ReviewRequired bool      `json:"review_required,omitempty"`
 }
 
@@ -92,6 +95,7 @@ type Run struct {
 
 // Facts are one pass's observations of a task. Plain data, no I/O.
 type Facts struct {
+	Ask    string `json:"-"` // the ask an executor runs for (its key)
 	PR     PR     `json:"pr"`
 	Tip    string `json:"tip"`
 	TipRel Rel    `json:"tip_rel"` // the worktree tip against H

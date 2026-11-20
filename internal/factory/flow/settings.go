@@ -2,8 +2,13 @@ package flow
 
 import (
 	"fmt"
+	"regexp"
 	"time"
 )
+
+// WorkflowFile is a dispatch_workflow value: exactly one file name, never
+// a path, a flag, or a number or name gh would resolve to another workflow.
+var WorkflowFile = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$`)
 
 // PassInterval is the loop's tick. It is a constant, not a setting
 // (design.md 10.1: the engine's own machinery is not tunable).
@@ -16,7 +21,8 @@ type Settings struct {
 	MaxRounds                  int `json:"max_rounds"`                     // L12 (design.md 10.1)
 	RetroAfterRoundsWithMajors int `json:"retro_after_rounds_with_majors"` // L12 (design.md 10.1)
 	RetroFromRound             int `json:"retro_from_round"`               // L12 (design.md 10.1)
-	ChecksGraceMinutes         int `json:"checks_grace_minutes"`           // N36 (design.md 10.1)
+	ChecksGraceMinutes         int `json:"checks_grace_minutes"`           // N35, N36 (design.md 10.1)
+	FlakeReruns                int `json:"flake_reruns"`                   // N33, N34 (design.md 10.1)
 	StuckMinutes               int `json:"stuck_minutes"`                  // S2, until slice 5a (design.md 10.1)
 	ContinuesPerTask           int `json:"continues_per_task"`             // a recap's continue (design.md 4.3, 10.1)
 	ContinueLines              int `json:"continue_lines"`                 // the cap after a continue (design.md 4.9)
@@ -26,6 +32,9 @@ type Settings struct {
 	// SecondReviewer reviews the second passing round (L8): opus in a
 	// fresh session, or codex (world.CodexArgv's model).
 	SecondReviewer string `json:"second_reviewer"`
+	// DispatchWorkflow is the one workflow file under .github/workflows
+	// that N35 may dispatch; empty never dispatches (design.md 9.4).
+	DispatchWorkflow string `json:"dispatch_workflow,omitempty"`
 }
 
 // Range limits for each setting.
@@ -39,6 +48,7 @@ const (
 	RetroFromMax     = 6
 	ChecksGraceMin   = 1
 	ChecksGraceMax   = 60
+	FlakeRerunsMax   = 3
 	StuckMin         = 5
 	StuckMax         = 240
 	ContinuesMax     = 3
@@ -57,7 +67,7 @@ func DefaultSettings() Settings {
 	return Settings{
 		ReviewRounds: 2, MaxRounds: 5,
 		RetroAfterRoundsWithMajors: 2, RetroFromRound: 3,
-		ChecksGraceMinutes: 5, StuckMinutes: 30,
+		ChecksGraceMinutes: 5, FlakeReruns: 1, StuckMinutes: 30,
 		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2, MaxRunning: 3,
 		SecondReviewer: "opus",
 	}
@@ -76,6 +86,7 @@ func (s Settings) Changed() []string {
 		{"checks_grace_minutes", s.ChecksGraceMinutes, d.ChecksGraceMinutes},
 		{"continue_lines", s.ContinueLines, d.ContinueLines},
 		{"continues_per_task", s.ContinuesPerTask, d.ContinuesPerTask},
+		{"flake_reruns", s.FlakeReruns, d.FlakeReruns},
 		{"max_rounds", s.MaxRounds, d.MaxRounds},
 		{"max_running", s.MaxRunning, d.MaxRunning},
 		{"retro_after_rounds_with_majors", s.RetroAfterRoundsWithMajors, d.RetroAfterRoundsWithMajors},
@@ -92,6 +103,9 @@ func (s Settings) Changed() []string {
 	if s.SecondReviewer != d.SecondReviewer {
 		out = append(out, "second_reviewer "+s.SecondReviewer)
 	}
+	if s.DispatchWorkflow != "" {
+		out = append(out, "dispatch_workflow "+s.DispatchWorkflow)
+	}
 	return out
 }
 
@@ -106,6 +120,7 @@ func (s Settings) Validate() error {
 		{"retro_after_rounds_with_majors", s.RetroAfterRoundsWithMajors, RetroMajorsMin, RetroMajorsMax},
 		{"retro_from_round", s.RetroFromRound, RetroFromMin, RetroFromMax},
 		{"checks_grace_minutes", s.ChecksGraceMinutes, ChecksGraceMin, ChecksGraceMax},
+		{"flake_reruns", s.FlakeReruns, 0, FlakeRerunsMax},
 		{"stuck_minutes", s.StuckMinutes, StuckMin, StuckMax},
 		{"continues_per_task", s.ContinuesPerTask, 0, ContinuesMax},
 		{"continue_lines", s.ContinueLines, 0, ContinueLinesMax},
@@ -119,6 +134,9 @@ func (s Settings) Validate() error {
 	}
 	if s.SecondReviewer != "opus" && s.SecondReviewer != "codex" {
 		return fmt.Errorf("second_reviewer %q: allowed opus or codex", s.SecondReviewer)
+	}
+	if w := s.DispatchWorkflow; w != "" && !WorkflowFile.MatchString(w) {
+		return fmt.Errorf("dispatch_workflow %q: a .yml or .yaml file name under .github/workflows (letters, digits, . _ -; no path)", w)
 	}
 	return nil
 }

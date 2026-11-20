@@ -123,18 +123,22 @@ func rowByID(id string) Row[In] {
 func TestN42Guards(t *testing.T) {
 	n42 := rowByID("N42")
 	for name, f := range map[string]func(*In){
-		"prOpen":             closedPR,
-		"prHeadIsH":          func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel = "c9", RelAhead },
-		"answered":           noAnswer,
-		"githubAvail":        func(in *In) { in.Facts.GitHubUnavailable = true },
-		"mergeClean":         conflict,
-		"notBehind":          func(in *In) { in.Facts.PR.Behind = true },
-		"notWorking":         workingF,
-		"onePassNeedsL8":     onePass,
-		"ladderSays(Passed)": func(in *In) { a0(in).Rounds[1].Verdict = "maybe" },
-		"checksGreen":        red,
-		"checksUnreadable":   func(in *In) { in.Facts.PR.Checks = ChecksUnreadable },
-		"tipSame":            func(in *In) { in.Facts.Tip, in.Facts.TipRel = "c9", RelDiverged },
+		"prOpen":                closedPR,
+		"prHeadIsH":             func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel = "c9", RelAhead },
+		"answered":              noAnswer,
+		"githubAvail":           func(in *In) { in.Facts.GitHubUnavailable = true },
+		"mergeClean":            conflict,
+		"notBehind":             func(in *In) { in.Facts.PR.Behind = true },
+		"notWorking":            workingF,
+		"onePassNeedsL8":        onePass,
+		"ladderSays(Passed)":    func(in *In) { a0(in).Rounds[1].Verdict = "maybe" },
+		"checksGreen":           red,
+		"checksAbsent":          func(in *In) { in.Facts.PR.Checks = ChecksAbsent },
+		"checksStoppedTimeout":  func(in *In) { in.Facts.PR.Checks = ChecksStoppedTimeout },
+		"checksStoppedExternal": func(in *In) { in.Facts.PR.Checks = ChecksStoppedExternal },
+		"checksStoppedUnknown":  func(in *In) { in.Facts.PR.Checks = ChecksStoppedUnknown },
+		"checksUnreadable":      func(in *In) { in.Facts.PR.Checks = ChecksUnreadable },
+		"tipSame":               func(in *In) { in.Facts.Tip, in.Facts.TipRel = "c9", RelDiverged },
 	} {
 		in := with(f)
 		if n42.When(in) {
@@ -164,9 +168,9 @@ func TestS1FinishedReviewer(t *testing.T) {
 // TestN43WakeOncePerStall: the same stall wakes the coordinator once; a
 // different stall, or the same at a new H, wakes it again.
 func TestN43WakeOncePerStall(t *testing.T) {
-	_, first := FirstMatch(TaskRows, with(red))
+	_, first := FirstMatch(TaskRows, with(conflict))
 	stalled := func(fs ...func(*In)) In {
-		in := with(append([]func(*In){red}, fs...)...)
+		in := with(append([]func(*In){conflict}, fs...)...)
 		a0(&in).Acts = []Act{{Key: first.Asked[0], Result: "done"}}
 		return in
 	}
@@ -183,7 +187,7 @@ func TestN43WakeOncePerStall(t *testing.T) {
 		wake bool
 	}{
 		"same stall": {stalled(), false},
-		"conflict":   {stalled(conflict), true},
+		"closed PR":  {stalled(closedPR), true},
 		"new H":      {stalled(newH), true},
 	} {
 		r, d := FirstMatch(TaskRows, c.in)
@@ -262,6 +266,14 @@ func TestRowCases(t *testing.T) {
 		{"N29", with(noRounds), []string{"start_reviewer@1@c1"}},
 		{"N29", with(onePass), []string{"start_reviewer@2@c1"}},
 		{"N29", with(changes, rejected), []string{"start_reviewer@2@c1"}}, // L10: reject consumes no round number
+		{"N33", with(red, func(in *In) { in.Facts.PR.Failed = []Failure{{Run: "42"}} }), []string{"rerun_ci@42@@c1"}},
+		{"N34", with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedExternal; in.Facts.PR.Failed = []Failure{{Run: "43"}} }), []string{"rerun_ci@43@@c1"}},
+		{"N34", with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedTimeout }), []string{"wake_coordinator@checks_stopped@limit@c1"}},
+		{"N34", with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedUnknown; in.Facts.PR.Failed = []Failure{{Run: "44"}} }), []string{"wake_coordinator@checks_stopped@limit@c1"}},
+		{"N35", with(func(in *In) {
+			in.Facts.PR.Checks = ChecksAbsent
+			in.Now = now.Add(time.Duration(DefaultSettings().ChecksGraceMinutes) * time.Minute)
+		}), []string{"dispatch_ci@c1"}},
 		{"N36", with(pending), nil},
 		{"N36", with(noAnswer), nil}, // checks unreadable: wait, no wake
 		{"N36", with(func(in *In) { in.Facts.PR.Checks = ChecksUnreadable }), nil},
@@ -269,7 +281,7 @@ func TestRowCases(t *testing.T) {
 		{"N39", with(workingF), nil},
 		{"N41", with(asked), nil},
 		{"N42", landing(), []string{"record_accept@c1", "merge@c1"}},
-		{"N43", with(red), []string{"wake_coordinator@no_rule_matched@c1@open@red@clean@same"}},
+		{"N43", with(conflict), []string{"wake_coordinator@no_rule_matched@c1@open@green@conflict@same"}},
 	}
 	covered := map[string]bool{}
 	for _, c := range cases {
@@ -359,7 +371,7 @@ func TestChecksGrace(t *testing.T) {
 	for _, c := range []struct {
 		age  time.Duration
 		want string
-	}{{0, "N36"}, {grace - time.Second, "N36"}, {grace, "N43"}} {
+	}{{0, "N36"}, {grace - time.Second, "N36"}, {grace, "N35"}} {
 		in := with(func(in *In) { in.Facts.PR.Checks = ChecksAbsent; in.Now = now.Add(c.age) })
 		if r, _ := FirstMatch(TaskRows, in); r.ID != c.want {
 			t.Errorf("no checks after %v: %s, want %s", c.age, r.ID, c.want)
@@ -826,5 +838,133 @@ func TestN9N10Why(t *testing.T) {
 	}
 	if _, d := FirstMatch(TaskRows, with(noAttempts, noSlotF)); d.Why != "no slot is free" {
 		t.Errorf("N10 why (slot) = %q, want no slot is free", d.Why)
+	}
+}
+
+// TestCIRowsN33N34N35 covers N33 (red: rerun below flake_reruns, else tell
+// worker once per failing run, KB-GIT-14), N34 (external cancel rerun vs
+// timeout wake once) and N35 (absent past grace: dispatch once, wait within
+// grace, wake once naming ways out; never green).
+func TestCIRowsN33N34N35(t *testing.T) {
+	grace := time.Duration(DefaultSettings().ChecksGraceMinutes) * time.Minute
+	redRun := func(run, job string) func(*In) {
+		return func(in *In) { in.Facts.PR.Checks, in.Facts.PR.Failed = ChecksRed, []Failure{{Run: run, Job: job}} }
+	}
+	// N33: flake_reruns=1 -> rerun once; stale same job waits; new failing job tells worker once; repeat ready at same H does not re-tell (KB-GIT-14).
+	in := with(redRun("42", "100"))
+	r, d := FirstMatch(TaskRows, in)
+	if r.ID != "N33" || !slices.Equal(d.Asked, []string{"rerun_ci@42@100@c1"}) {
+		t.Fatalf("N33 first red = %s %v", r.ID, d.Asked)
+	}
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: "rerun_ci@42@100@c1", Result: "done", At: now})
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N33" || len(d.Asked) != 0 {
+		t.Fatalf("N33 stale same job after rerun = %s %v, want wait", r.ID, d.Asked)
+	}
+	in.Facts.PR.Failed = []Failure{{Run: "42", Job: "200"}} // rerun finished red again
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N33" || !slices.Equal(d.Asked, []string{"tell_worker_ci@42@c1"}) {
+		t.Fatalf("N33 red again = %s %v", r.ID, d.Asked)
+	}
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: "tell_worker_ci@42@c1", Result: "done", At: now})
+	a0(&in).Ready = append(a0(&in).Ready, Ready{Head: "c1"}) // ready again at same commit (KB-GIT-14)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N33" || len(d.Asked) != 0 {
+		t.Fatalf("N33 KB-GIT-14 repeat = %s %v, want nil", r.ID, d.Asked)
+	}
+	// flake_reruns=0 skips rerun and tells worker at once.
+	noRerun := with(redRun("42", "100"), func(in *In) { in.Settings.FlakeReruns = 0 })
+	if r, d := FirstMatch(TaskRows, noRerun); r.ID != "N33" || !slices.Equal(d.Asked, []string{"tell_worker_ci@42@c1"}) {
+		t.Fatalf("N33 flake_reruns=0 = %s %v", r.ID, d.Asked)
+	}
+
+	// N34: external cancel reruns once, then wakes coordinator once; timeout wakes once immediately.
+	ext := with(func(in *In) {
+		in.Facts.PR.Checks, in.Facts.PR.Failed = ChecksStoppedExternal, []Failure{{Run: "55", Job: "300"}}
+	})
+	if r, d := FirstMatch(TaskRows, ext); r.ID != "N34" || !slices.Equal(d.Asked, []string{"rerun_ci@55@300@c1"}) {
+		t.Fatalf("N34 external first = %s %v", r.ID, d.Asked)
+	}
+	a0(&ext).Acts = append(a0(&ext).Acts, Act{Key: "rerun_ci@55@300@c1", Result: "done", At: now})
+	ext.Facts.PR.Failed = []Failure{{Run: "55", Job: "301"}}
+	if r, d := FirstMatch(TaskRows, ext); r.ID != "N34" || !slices.Equal(d.Asked, []string{"wake_coordinator@checks_stopped@external@c1"}) {
+		t.Fatalf("N34 external after rerun = %s %v", r.ID, d.Asked)
+	}
+	ext.Facts.PR.Failed, ext.Facts.PR.Running = []Failure{{Run: "57", Job: "500"}}, true
+	if r, d := FirstMatch(TaskRows, ext); r.ID != "N34" || len(d.Asked) != 0 {
+		t.Fatalf("N34 external while a check runs = %s %v, want wait", r.ID, d.Asked)
+	}
+	to := with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedTimeout })
+	if r, d := FirstMatch(TaskRows, to); r.ID != "N34" || !slices.Equal(d.Asked, []string{"wake_coordinator@checks_stopped@limit@c1"}) {
+		t.Fatalf("N34 timeout = %s %v", r.ID, d.Asked)
+	}
+	// N34: a cancel whose cause is unread (stopped_unknown) is a time limit:
+	// wake once, never re-run, even with re-runs left and a run ID to re-run.
+	unk := with(func(in *In) {
+		in.Facts.PR.Checks, in.Facts.PR.Failed = ChecksStoppedUnknown, []Failure{{Run: "56", Job: "400"}}
+		in.Settings.FlakeReruns = 3
+	})
+	if r, d := FirstMatch(TaskRows, unk); r.ID != "N34" || !slices.Equal(d.Asked, []string{"wake_coordinator@checks_stopped@limit@c1"}) {
+		t.Fatalf("N34 unknown = %s %v", r.ID, d.Asked)
+	}
+	a0(&unk).Acts = append(a0(&unk).Acts, Act{Key: "wake_coordinator@checks_stopped@limit@c1", Result: "done", At: now})
+	if r, d := FirstMatch(TaskRows, unk); r.ID != "N34" || len(d.Asked) != 0 {
+		t.Fatalf("N34 unknown after wake = %s %v, want nothing", r.ID, d.Asked)
+	}
+
+	// N35: absent past grace -> dispatch once -> wait within grace -> wake once naming ways out; skipped dispatch wakes immediately.
+	// Absent only because the workflow runs were unread: never dispatch, N43 wakes.
+	unread := with(func(in *In) {
+		in.Facts.PR.Checks, in.Facts.PR.ChecksUnread = ChecksAbsent, true
+		in.Now = now.Add(grace)
+	})
+	if r, d := FirstMatch(TaskRows, unread); r.ID != "N43" || slices.ContainsFunc(d.Asked, func(k string) bool { return strings.HasPrefix(k, AskDispatchCI) }) {
+		t.Fatalf("N35 on unread workflow runs = %s %v, want N43 and no dispatch", r.ID, d.Asked)
+	}
+	abs := with(func(in *In) { in.Facts.PR.Checks = ChecksAbsent; in.Now = now.Add(grace) })
+	if r, d := FirstMatch(TaskRows, abs); r.ID != "N35" || !slices.Equal(d.Asked, []string{"dispatch_ci@c1"}) {
+		t.Fatalf("N35 dispatch = %s %v", r.ID, d.Asked)
+	}
+	a0(&abs).Acts = append(a0(&abs).Acts, Act{Key: "dispatch_ci@c1", Result: "done", At: abs.Now})
+	abs.Now = abs.Now.Add(grace - time.Second)
+	if r, d := FirstMatch(TaskRows, abs); r.ID != "N35" || len(d.Asked) != 0 {
+		t.Fatalf("N35 within dispatch grace = %s %v, want wait", r.ID, d.Asked)
+	}
+	abs.Now = abs.Now.Add(time.Second)
+	r, d = FirstMatch(TaskRows, abs)
+	if r.ID != "N35" || !slices.Equal(d.Asked, []string{"wake_coordinator@no_checks@c1"}) ||
+		!strings.Contains(d.Why, "override") || !strings.Contains(d.Why, "drop") {
+		t.Fatalf("N35 wake = %s %v (%q)", r.ID, d.Asked, d.Why)
+	}
+	a0(&abs).Acts = append(a0(&abs).Acts, Act{Key: "wake_coordinator@no_checks@c1", Result: "done", At: abs.Now})
+	if r, d := FirstMatch(TaskRows, abs); r.ID != "N35" || len(d.Asked) != 0 {
+		t.Fatalf("N35 wake repeat = %s %v, want nil", r.ID, d.Asked)
+	}
+	// Skipped dispatch (no workflow_dispatch) skips the grace wait and wakes immediately.
+	noWF := with(func(in *In) {
+		in.Facts.PR.Checks = ChecksAbsent
+		in.Now = now.Add(grace)
+		a0(in).Acts = []Act{{Key: "dispatch_ci@c1", Result: "skipped", At: in.Now}}
+	})
+	if r, d := FirstMatch(TaskRows, noWF); r.ID != "N35" || !slices.Equal(d.Asked, []string{"wake_coordinator@no_checks@c1"}) {
+		t.Fatalf("N35 skipped dispatch = %s %v", r.ID, d.Asked)
+	}
+}
+
+func TestFailingRuns(t *testing.T) {
+	checks := []Check{
+		{Kind: "CheckRun", Name: "ok", Status: "COMPLETED", Conclusion: "SUCCESS", Actions: true, DetailsURL: "https://github.com/o/r/actions/runs/111/job/1"},
+		{Kind: "CheckRun", Name: "lint", Status: "COMPLETED", Conclusion: "FAILURE", Actions: true, DetailsURL: "https://github.com/O/R/actions/runs/222/job/20"},
+		{Kind: "CheckRun", Name: "test", Status: "COMPLETED", Conclusion: "FAILURE", Actions: true, DetailsURL: "https://github.com/o/r/actions/runs/222/job/30"},
+		{Kind: "CheckRun", Name: "ext", Status: "COMPLETED", Conclusion: "FAILURE", DetailsURL: "https://github.com/o/r/actions/runs/333/job/40"},
+		{Kind: "CheckRun", Name: "fork", Status: "COMPLETED", Conclusion: "FAILURE", Actions: true, DetailsURL: "https://github.com/x/r/actions/runs/444/job/50"},
+		{Kind: "CheckRun", Name: "stale", Status: "COMPLETED", Conclusion: "FAILURE", Actions: true, DetailsURL: "https://github.com/o/r/actions/runs/555/job/60"},
+	}
+	fails, running := FailingRuns(checks, ChecksRed, "o/r", map[string]bool{"222": true, "333": true, "444": true})
+	want := []Failure{{Run: "222", Job: "20", Name: "lint"}, {Run: "222", Job: "30", Name: "test"}, {Job: "40", Name: "ext"}, {Job: "50", Name: "fork"}, {Job: "60", Name: "stale"}}
+	if !slices.Equal(fails, want) || running {
+		t.Fatalf("FailingRuns(red) = %+v, %t; want %+v, false", fails, running, want)
+	}
+	for _, c := range []Check{{Kind: "CheckRun", Name: "e2e", Status: "IN_PROGRESS"}, {Kind: "StatusContext", Context: "ci/x", State: "EXPECTED"}} {
+		if f, r := FailingRuns(append(checks[:1:1], c), ChecksGreen, "o/r", nil); f != nil || !r {
+			t.Fatalf("FailingRuns(green, %s) = %+v, %t; want none, running", c.Name+c.Context, f, r)
+		}
 	}
 }
