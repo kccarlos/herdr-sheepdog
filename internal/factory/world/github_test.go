@@ -51,7 +51,8 @@ api\ *)
   */check-runs/*/annotations*) failif annotations; cat "$D/annotations$sfx.json" 2>/dev/null || echo '[]' ;;
   */commits/*/check-runs*)
     [ -f "$D/check_runs_denied" ] && { echo "gh: Resource not accessible by personal access token (HTTP 403)" >&2; exit 1; }
-    cat "$D/check-runs$sfx.json" 2>/dev/null || echo '{"total_count":0,"check_runs":[]}' ;;
+    f="$D/check-runs$sfx.json"; case "$2" in *filter=all*) [ -f "$D/check-runs.all$sfx.json" ] && f="$D/check-runs.all$sfx.json" ;; esac
+    cat "$f" 2>/dev/null || echo '{"total_count":0,"check_runs":[]}' ;;
   */commits/*/status*) failif status; cat "$D/status$sfx.json" 2>/dev/null || echo '{"state":"pending","total_count":0,"statuses":[]}' ;;
   */actions/runs*) failif workflow_runs; cat "$D/workflow-runs$sfx.json" 2>/dev/null || echo '{"total_count":0,"workflow_runs":[]}' ;;
   */compare/*) failif compare; cat "$D/compare.json" 2>/dev/null || echo '{"behind_by":0}' ;;
@@ -701,5 +702,27 @@ func TestPRSnapshotPartialRunListNoTarget(t *testing.T) {
 	p, warn, err := PRSnapshot(ctx, repo, "b")
 	if err != nil || warn == nil || p.Checks != flow.ChecksRed || !p.ChecksUnread || len(p.Failed) != 1 || p.Failed[0].Run != "" {
 		t.Fatalf("partial run list: %+v, warn %v, err %v; want red, checks_unread, a failure with no run", p, warn, err)
+	}
+}
+
+// TestPRSnapshotFallbackSeesEarlierAttempts: the REST fallback asks for
+// every attempt (filter=all), so a timed-out earlier attempt of a job that
+// was re-run still vetoes re-running its run.
+func TestPRSnapshotFallbackSeesEarlierAttempts(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	writeGH(t, gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"h1","mergeable":"MERGEABLE","baseRefName":"main","statusCheckRollup":[]}`)
+	writeGH(t, gh, "view_denied", "")
+	cr := func(id int, name, concl string) string {
+		return fmt.Sprintf(`{"id":%d,"name":%q,"status":"completed","conclusion":%q,"details_url":"https://github.com/acme/demo/actions/runs/90/job/%d","check_suite":{"id":1},"app":{"slug":"github-actions"}}`, id, name, concl, id)
+	}
+	writeGH(t, gh, "check-runs.json", `{"total_count":2,"check_runs":[`+cr(900, "build", "failure")+","+cr(902, "report", "success")+`]}`)
+	writeGH(t, gh, "check-runs.all.json", `{"total_count":3,"check_runs":[`+cr(900, "build", "failure")+","+cr(901, "report", "cancelled")+","+cr(902, "report", "success")+`]}`)
+	writeGH(t, gh, "annotations.json", `[{"message":"The job has exceeded the maximum execution time of 1m0s"}]`)
+	writeGH(t, gh, "workflow-runs.json", `{"total_count":1,"workflow_runs":[{"id":90,"status":"completed","conclusion":"failure"}]}`)
+	p, _, err := PRSnapshot(ctx, repo, "b")
+	if err != nil || p.Checks != flow.ChecksRed || len(p.Failed) != 1 || p.Failed[0].Run != "" {
+		t.Fatalf("fallback with an earlier timed-out attempt: %+v, %v; want red with no re-run target", p, err)
 	}
 }

@@ -265,7 +265,8 @@ func decodeSnapshot(data []byte) (rawPRView, flow.PR, error) {
 // its check suite) and every commit status.
 func fetchCheckRuns(ctx context.Context, dir, repo, head string) ([]flow.Check, error) {
 	var checks []flow.Check
-	err := ghPages(ctx, dir, "repos/"+repo+"/commits/"+head+"/check-runs", 100, func(raw []byte) (int, error) {
+	// filter=all: every attempt, so an earlier timed-out one still vetoes its run.
+	err := ghPages(ctx, dir, "repos/"+repo+"/commits/"+head+"/check-runs?filter=all", 100, func(raw []byte) (int, error) {
 		var resp struct {
 			CheckRuns []struct {
 				ID                       int64
