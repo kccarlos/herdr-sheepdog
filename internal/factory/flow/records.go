@@ -224,7 +224,8 @@ type ReviewRun struct {
 	Reviewer     Reviewer `json:"reviewer"`
 	// IdleSince is when a pass first read the run idle with no valid tag:
 	// the stuck row's clock (S2). The record goes when the round ends.
-	IdleSince *time.Time `json:"idle_since,omitempty"`
+	IdleSince   *time.Time `json:"idle_since,omitempty"`
+	RefusalSent bool       `json:"refusal_sent,omitempty"`
 }
 
 // Proof is one outcome's evidence attached to a ready report (design.md 3, 7.2):

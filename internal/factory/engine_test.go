@@ -1029,10 +1029,10 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	}
 
 	// Next pass lands on N22: sends findings path to worker ONCE across repeated passes.
-	sendsBefore := countMethod(srv.Requests(), "terminal.send")
+	reqsBefore := len(srv.Requests())
 	eng.passProject(ctx, id, false) // N22 tell_worker_findings@1
 	eng.passProject(ctx, id, false) // idempotent: acts[] prevents re-sending
-	sends := sendTexts(t, srv.Requests()[sendsBefore:])
+	sends := sendTexts(t, srv.Requests()[reqsBefore:])
 	wantRC := readyCmd("/tmp/sheepdog-bin", []flow.Outcome{{Text: "go test passes", ProvedBy: "cmd: go test ./..."}})
 	if len(sends) != 1 || !strings.Contains(sends[0], paths.Report(id, "T1", 1)) ||
 		!strings.Contains(sends[0], "fix them, commit, and run "+wantRC+" again") {
@@ -1131,16 +1131,6 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	if m := ghCalls(t, gh, "pr merge"); len(m) != 1 || !strings.HasPrefix(m[0], "pr merge 7 --repo acme/demo --squash --match-head-commit "+c2+" --body ") {
 		t.Fatalf("merge calls = %q", m)
 	}
-}
-
-func countMethod(reqs []hctest.Request, method string) int {
-	n := 0
-	for _, r := range reqs {
-		if r.Method == method {
-			n++
-		}
-	}
-	return n
 }
 
 func sendTexts(t *testing.T, reqs []hctest.Request) []string {

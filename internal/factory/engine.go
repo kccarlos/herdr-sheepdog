@@ -624,6 +624,21 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	err = e.acceptVerdictLocked(ctx, id, s, ti, rd)
 	var ref *Refusal
 	if errors.As(err, &ref) {
+		if e.HC != nil && a.Review != nil && a.Review.RunID != "" && !a.Review.RefusalSent {
+			msg := fmt.Sprintf("Your verdict was refused (%s). Fix it and end with the report tag again.", ref.Why)
+			sctx, scancel := context.WithTimeout(ctx, lockGitTimeout)
+			sendErr := world.SendRun(sctx, e.HC, a.Review.RunID, msg)
+			scancel()
+			if sendErr != nil {
+				e.logError("factory.exec_error", id, sendErr)
+			} else {
+				a.Review.RefusalSent = true
+				if err := SaveState(e.Paths.State(id), *s); err != nil {
+					e.logError("factory.commit_error", id, err)
+					return true
+				}
+			}
+		}
 		return e.markReviewIdleLocked(id, s, ti)
 	} else if err != nil {
 		e.logError("factory.exec_error", id, err)

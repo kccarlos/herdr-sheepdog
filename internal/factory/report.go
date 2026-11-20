@@ -314,27 +314,104 @@ func capRunes(s string, limit int) string {
 	return string([]rune(s)[:limit])
 }
 
+func unwrapReply(s string) string {
+	for {
+		t := strings.TrimSpace(s)
+		switch {
+		case len(t) >= 4 && strings.HasPrefix(t, "**") && strings.HasSuffix(t, "**"):
+			t = t[2 : len(t)-2]
+		case len(t) >= 2 && strings.HasPrefix(t, "`") && strings.HasSuffix(t, "`"):
+			t = t[1 : len(t)-1]
+		case strings.HasSuffix(t, "."):
+			t = t[:len(t)-1]
+		default:
+			return t
+		}
+		s = t
+	}
+}
+
+func parseReplyLine(l string) (key, val string, ok bool) {
+	s := strings.TrimSpace(l)
+	for {
+		prev := s
+		s = strings.TrimLeft(s, " \t⏺•◦▪‣·-")
+		if rest, cut := strings.CutPrefix(s, "*"); cut && strings.HasPrefix(rest, " ") {
+			s = strings.TrimLeft(rest, " \t")
+		}
+		i := 0
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+		if i > 0 && i < len(s) && s[i] == '.' {
+			s = strings.TrimLeft(s[i+1:], " \t")
+		}
+		if s == prev {
+			break
+		}
+	}
+	s = unwrapReply(s)
+	k, v, ok := strings.Cut(s, ":")
+	if !ok {
+		return "", "", false
+	}
+	if strings.HasPrefix(k, "**") {
+		v = strings.TrimPrefix(v, "**")
+	} else if strings.HasPrefix(k, "`") {
+		v = strings.TrimPrefix(v, "`")
+	}
+	key = strings.ToLower(strings.Trim(k, "*` \t"))
+	val = unwrapReply(cleanRejectWhy(v))
+	if strings.Count(val, "`")%2 == 1 && strings.HasSuffix(val, "`") {
+		val = unwrapReply(val[:len(val)-1])
+	}
+	return key, val, key != ""
+}
+
+func parseMisses(val string) (int, bool) {
+	low := strings.ToLower(val)
+	if low == "none" || strings.HasPrefix(low, "none ") || strings.HasPrefix(low, "none(") {
+		return 0, true
+	}
+	i := 0
+	for i < len(val) && val[i] >= '0' && val[i] <= '9' {
+		i++
+	}
+	if i == 0 || (i < len(val) && (unicode.IsLetter(rune(val[i])) || val[i] == '_')) {
+		return 0, false
+	}
+	n, err := strconv.Atoi(val[:i])
+	return n, err == nil
+}
+
 func parseReplyLines(body string) replyLines {
 	var rl replyLines
+	inTool := false
 	for l := range strings.Lines(body) {
-		// A list or bold mark may lead: "- major:", "**major:**", "1. major:",
-		// and Codex's "• major:" (or another bullet).
-		s := strings.TrimLeft(l, " \t-*•◦▪‣·0123456789.")
-		if strings.HasPrefix(s, "major:") {
-			rl.majors++
+		trimmed := strings.TrimLeft(l, " \t")
+		if strings.HasPrefix(trimmed, "⎿") || strings.HasPrefix(trimmed, "└") || strings.HasPrefix(trimmed, "│") {
+			inTool = true
 			continue
 		}
-		k, v, ok := strings.Cut(s, ":")
+		if inTool {
+			if strings.TrimSpace(trimmed) == "" || l == trimmed {
+				inTool = false
+			} else {
+				continue
+			}
+		}
+		key, val, ok := parseReplyLine(l)
 		if !ok {
 			continue
 		}
-		val := cleanRejectWhy(strings.TrimLeft(v, "*"))
-		switch strings.ToLower(strings.TrimRight(k, "* \t")) {
+		switch key {
+		case "major":
+			rl.majors++
 		case "self-check misses":
 			rl.hasMisses = true
-			n, err := strconv.Atoi(val)
-			rl.badMisses = err != nil || n < 0
-			if !rl.badMisses {
+			n, valid := parseMisses(val)
+			rl.badMisses = !valid
+			if valid {
 				rl.misses = n
 			}
 		case "class":
@@ -412,7 +489,7 @@ func (e *Engine) acceptVerdictLocked(ctx context.Context, id string, s *flow.Sta
 		Input: map[string]any{
 			"verb": "verdict", "round": rnd.N, "kind": rnd.Kind, "model": rnd.Reviewer.Model,
 			"head": rnd.Head, "verdict": rnd.Verdict, "majors": rnd.Majors,
-			"self_check_misses": misses, "class": rnd.Class, "deletable": rnd.Deletable, "not_run": rnd.NotRun,
+			"self_check_misses": misses,
 		},
 		Rule: "verdict", Decision: rnd.Verdict,
 		Why: fmt.Sprintf("round %d (%s, %s) at %s: %s (%d major(s), %d self-check miss(es))", rnd.N, rnd.Kind, rnd.Reviewer.Model, rnd.Head, rnd.Verdict, rnd.Majors, misses),
