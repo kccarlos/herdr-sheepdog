@@ -21,19 +21,24 @@ func UnmetDeps(t Task, tasks []Task) (notDone, dropped []string) {
 		switch {
 		case ok && dep.Dropped != nil:
 			dropped = append(dropped, id)
-		case !ok || dep.Done == nil:
+		case !ok || (dep.Done == nil && dep.Closed == nil):
 			notDone = append(notDone, id)
 		}
 	}
 	return notDone, dropped
 }
 
-// RunningTasks counts tasks currently holding a slot: open attempt, not ended,
-// not parked. (Design 4.8 refines this to worker starting/working in slice 5a.)
-func RunningTasks(tasks []Task) int {
+// RunningTasks counts tasks holding a slot (design.md 4.8): an open attempt
+// (not ended, not parked, not holding a stop_task act) whose worker run is
+// starting (RunNone) or working (RunWorking).
+func RunningTasks(tasks []Task, workerState map[string]RunState) int {
 	n := 0
 	for _, t := range tasks {
-		if !Ended(t) && !t.Parked && OpenAttempt(t) != nil {
+		a := OpenAttempt(t)
+		if Ended(t) || t.Parked || a == nil || Count(a.Acts, AskStopTask) > 0 {
+			continue
+		}
+		if st := workerState[t.ID]; st == RunNone || st == RunWorking {
 			n++
 		}
 	}
@@ -53,12 +58,8 @@ func GrantSlots(candidates []string, tasks []Task, running, maxRunning int) map[
 	crit := criticalPaths(tasks)
 	ordered := slices.Clone(candidates)
 	slices.SortStableFunc(ordered, func(a, b string) int {
-		ua, ub := byID[a].Priority == PriorityUrgent, byID[b].Priority == PriorityUrgent
-		if ua != ub {
-			if ua {
-				return -1
-			}
-			return 1
+		if ua, ub := byID[a].Priority == PriorityUrgent, byID[b].Priority == PriorityUrgent; ua != ub {
+			return map[bool]int{true: -1, false: 1}[ua]
 		}
 		if c := cmp.Compare(crit[b], crit[a]); c != 0 {
 			return c

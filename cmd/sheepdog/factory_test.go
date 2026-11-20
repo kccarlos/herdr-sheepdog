@@ -286,9 +286,6 @@ func TestFactoryStartAndStopCLI(t *testing.T) {
 	if anyBody["max_running"] != float64(2) {
 		t.Fatalf("max_running sent = %#v, want 2", anyBody["max_running"])
 	}
-	if code := run(context.Background(), []string{"factory", "start", repo, "--goal", "ship", "--max-running", "0", "--config", cfgFile2}, &out, &errBuf); code != 1 {
-		t.Fatalf("start --max-running 0 code=%d, want 1", code)
-	}
 	if code := run(context.Background(), []string{"factory", "stop", "--max-running", "2", "--config", cfgFile2}, &out, &errBuf); code != 2 {
 		t.Fatalf("stop --max-running 2 code=%d, want 2", code)
 	}

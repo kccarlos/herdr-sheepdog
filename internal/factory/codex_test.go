@@ -72,7 +72,7 @@ func codexSetup(t *testing.T) (*hctest.Server, *Engine, Paths, string, string, s
 	eng := New(paths, hc.NewClient(srv.Path))
 	logs := &bytes.Buffer{}
 	eng.Log = logging.NewJSONLLogger(logs)
-	if err := eng.Start(repo, "Goal"); err != nil {
+	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()

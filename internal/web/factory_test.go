@@ -40,12 +40,9 @@ func (f *stubFactory) Report(token, verb string, args json.RawMessage) error {
 	return f.reportErr
 }
 
-func (f *stubFactory) Start(folder, goal string, maxRunning ...int) error {
+func (f *stubFactory) Start(folder, goal string, maxRunning int) error {
 	f.called++
-	f.startedFolder, f.startedGoal, f.startedMaxRunning = folder, goal, 0
-	if len(maxRunning) > 0 {
-		f.startedMaxRunning = maxRunning[0]
-	}
+	f.startedFolder, f.startedGoal, f.startedMaxRunning = folder, goal, maxRunning
 	return nil
 }
 

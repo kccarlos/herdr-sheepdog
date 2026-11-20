@@ -149,12 +149,32 @@ func TestUnmetDepsAndRunningTasks(t *testing.T) {
 		{ID: "T3", Attempts: []Attempt{{BaseCommit: "b0"}}},
 		{ID: "T4", Parked: true, Attempts: []Attempt{{BaseCommit: "b0"}}},
 		{ID: "T5", After: []string{"T1", "T2", "T3", "MISSING"}},
+		{ID: "T6", Attempts: []Attempt{{BaseCommit: "b0", RunID: "w6"}}},
+		{ID: "T7", Attempts: []Attempt{{BaseCommit: "b0", RunID: "w7"}}},
+		{ID: "T8", Attempts: []Attempt{{BaseCommit: "b0", RunID: "w8"}}},
+		{ID: "T9", Attempts: []Attempt{{BaseCommit: "b0", Acts: []Act{{Key: AskStopTask, Result: "not_built_yet"}}}}},
 	}
 	notDone, dropped := UnmetDeps(tasks[4], tasks)
 	if !slices.Equal(notDone, []string{"T3", "MISSING"}) || !slices.Equal(dropped, []string{"T2"}) {
 		t.Errorf("UnmetDeps = (%v, %v), want ([T3 MISSING], [T2])", notDone, dropped)
 	}
-	if n := RunningTasks(tasks); n != 1 {
-		t.Errorf("RunningTasks = %d, want 1 (T3 only)", n)
+	ws := map[string]RunState{"T6": RunWorking, "T7": RunIdle, "T8": RunGone}
+	if n := RunningTasks(tasks, ws); n != 2 {
+		t.Errorf("RunningTasks = %d, want 2 (T3 starting + T6 working; not T7 idle, T8 gone, T9 stop_task)", n)
+	}
+}
+
+func TestClosedDepCountsAsSatisfied(t *testing.T) {
+	tasks := []Task{
+		{ID: "T1", Closed: &Closed{Why: "already done upstream"}},
+		{ID: "T2", After: []string{"T1"}},
+	}
+	notDone, dropped := UnmetDeps(tasks[1], tasks)
+	if len(notDone) != 0 || len(dropped) != 0 {
+		t.Fatalf("UnmetDeps for closed dep = (%v, %v), want ([], [])", notDone, dropped)
+	}
+	r, d := FirstMatch(TaskRows, In{Task: tasks[1], Settings: DefaultSettings(), Facts: Facts{DepsNotDone: notDone, DepsDropped: dropped}})
+	if r.ID != "N11" || d.Why == "waiting on T1" {
+		t.Fatalf("T2 matched %s (%q), want N11", r.ID, d.Why)
 	}
 }

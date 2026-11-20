@@ -37,7 +37,7 @@ func TestRunTokenInEnvNotArgvOrLog(t *testing.T) {
 	eng.Log = logging.NewJSONLLogger(&logBuf)
 	eng.RunEnv = map[string]string{"SHEEPDOG_WEB_PORT": "17777"}
 	repo := initGitRepo(t)
-	if err := eng.Start(repo, "a goal"); err != nil {
+	if err := eng.Start(repo, "a goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
@@ -86,7 +86,7 @@ func TestRunTokenInEnvNotArgvOrLog(t *testing.T) {
 // cannot start it, no token is left that a run could report with.
 func TestFailedLaunchClearsToken(t *testing.T) {
 	eng := New(testPaths(t), hc.NewClient(hctest.New(t).Path))
-	if err := eng.Start(initGitRepo(t), "a goal"); err != nil {
+	if err := eng.Start(initGitRepo(t), "a goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()

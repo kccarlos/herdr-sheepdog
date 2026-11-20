@@ -80,7 +80,7 @@ func TestPRSnapshotFactsAndFailure(t *testing.T) {
 	gh := installFakeGH(t)
 	paths := testPaths(t)
 	eng := New(paths, nil)
-	if err := eng.Start(repo, "Goal"); err != nil {
+	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	id, s, err := eng.findProjectLocked(ctx, repo)

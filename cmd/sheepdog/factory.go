@@ -90,19 +90,9 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
 		return flagExit(err)
 	}
-	hasMaxRunning := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "max-running" {
-			hasMaxRunning = true
-		}
-	})
-	if (sub == "start" && (fs.NArg() != 1 || strings.TrimSpace(*goal) == "")) || (sub == "stop" && (fs.NArg() > 1 || *goal != "" || hasMaxRunning)) {
+	if (sub == "start" && (fs.NArg() != 1 || strings.TrimSpace(*goal) == "")) || (sub == "stop" && (fs.NArg() > 1 || *goal != "" || *maxRunning != 0)) {
 		printFactoryUsage(stderr)
 		return 2
-	}
-	if sub == "start" && hasMaxRunning && (*maxRunning < flow.MaxRunningMin || *maxRunning > flow.MaxRunningMax) {
-		fprintf(stderr, "sheepdog factory start: max_running %d: allowed %d–%d\n", *maxRunning, flow.MaxRunningMin, flow.MaxRunningMax)
-		return 1
 	}
 	folder := ""
 	if fs.NArg() == 1 {
@@ -123,10 +113,7 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 	}
 	cfg, err := config.Load(*configPath)
 	if err == nil {
-		body := map[string]any{"folder": folder, "project": folder, "goal": strings.TrimSpace(*goal), "token": os.Getenv(runTokenEnv)}
-		if hasMaxRunning {
-			body["max_running"] = *maxRunning
-		}
+		body := map[string]any{"folder": folder, "project": folder, "goal": strings.TrimSpace(*goal), "token": os.Getenv(runTokenEnv), "max_running": *maxRunning}
 		err = postJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/factory/"+sub, body)
 	}
 	if err != nil {

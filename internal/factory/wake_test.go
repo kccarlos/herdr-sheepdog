@@ -128,7 +128,7 @@ func TestS2IdleReviewerWakesOnce(t *testing.T) {
 	eng := New(paths, client)
 	var logBuf bytes.Buffer
 	eng.Log = logging.NewJSONLLogger(&logBuf)
-	if err := eng.Start(repo, "Goal"); err != nil {
+	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
