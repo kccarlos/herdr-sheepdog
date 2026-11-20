@@ -490,7 +490,7 @@ func (s *Server) routeTable() ([]route, error) {
 	for _, p := range []struct {
 		name string
 		a    access
-	}{{"voice", accessPublic}, {"static", accessPublic}, {"debug", accessLoopback}} {
+	}{{"voice", accessPublic}, {"static", accessPublic}, {"debug", accessLoopback}, {"factory", accessLoopback}} {
 		pages, err := s.staticRoutes(p.name, p.a)
 		if err != nil {
 			return nil, err
