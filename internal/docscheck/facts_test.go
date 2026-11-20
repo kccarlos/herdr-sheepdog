@@ -3,6 +3,8 @@ package docscheck
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -138,4 +140,91 @@ func TestDocFacts(t *testing.T) {
 		"ConstantTimeCompare",
 		"There is no rate limiting",
 	)
+}
+
+var workflowMacOSRunnerRe = regexp.MustCompile(`(?im)^\s*runs-on:.*(?:macos|xcode-[0-9])`)
+
+// TestCIRunnersDocParity checks that infra/ci-runners/README.md stays aligned
+// with the public monorepo layout, the macOS runner allowlist enforced by
+// scripts/workflow-policy.sh, and public-repo fork-PR protections.
+func TestCIRunnersDocParity(t *testing.T) {
+	root := repoRoot(t)
+
+	if _, err := os.Stat(filepath.Join(root, "ios", "project.yml")); err != nil {
+		t.Fatalf("expected ios/project.yml in monorepo: %v", err)
+	}
+
+	wfEntries, err := os.ReadFile(filepath.Join(root, "scripts", "workflow-policy.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	policyScript := string(wfEntries)
+	for _, allow := range []string{"ios.yml", "release.yml", "environment: release"} {
+		if !strings.Contains(policyScript, allow) {
+			t.Fatalf("scripts/workflow-policy.sh no longer mentions expected allowlist item %q", allow)
+		}
+	}
+
+	entries, err := os.ReadDir(filepath.Join(root, ".github", "workflows"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var macosWorkflows []string
+	for _, ent := range entries {
+		if ent.IsDir() {
+			continue
+		}
+		name := ent.Name()
+		if !strings.HasSuffix(name, ".yml") && !strings.HasSuffix(name, ".yaml") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(root, ".github", "workflows", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if workflowMacOSRunnerRe.Match(b) {
+			macosWorkflows = append(macosWorkflows, name)
+		}
+	}
+	sort.Strings(macosWorkflows)
+	if len(macosWorkflows) == 0 {
+		t.Fatal("expected at least one workflow using macOS/Xcode runners")
+	}
+
+	raw, err := os.ReadFile(filepath.Join(root, "infra", "ci-runners", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciDoc := string(raw)
+	flat := strings.Join(strings.Fields(ciDoc), " ")
+
+	for _, wf := range macosWorkflows {
+		if !strings.Contains(ciDoc, wf) {
+			t.Errorf("infra/ci-runners/README.md does not document macOS runner workflow %q", wf)
+		}
+	}
+	for _, want := range []string{
+		"public",
+		"ios/",
+		"workflow-policy.sh",
+		"environment: release",
+		"sign-macos",
+		"outside collaborators",
+		"`pull_request`",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("infra/ci-runners/README.md is missing %q", want)
+		}
+	}
+	for _, stale := range []string{
+		"this private repo",
+		"the repo is private",
+		"The iOS repo is untouched",
+		"no workflow may use macOS runners",
+		"run_workflows_from_fork_pull_requests",
+	} {
+		if strings.Contains(flat, stale) {
+			t.Errorf("infra/ci-runners/README.md still contains stale %q", stale)
+		}
+	}
 }
