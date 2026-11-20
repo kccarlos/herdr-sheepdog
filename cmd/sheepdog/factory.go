@@ -21,7 +21,12 @@ import (
 
 // factoryDoctorRunner is overridden in CLI tests so no test touches the real
 // machine's PATH, CLIs, herdr-core socket or ~/.config/sheepdog.
-var factoryDoctorRunner = factory.Doctor
+var factoryDoctorRunner = func(ctx context.Context, o factory.DoctorOptions) []onboard.Result {
+	return append(factory.Doctor(ctx, o), factory.StartChecks(ctx, o)...)
+}
+
+// factoryStartChecks is overridden in CLI tests for the same reason.
+var factoryStartChecks = factory.StartChecks
 
 func printFactoryUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog factory <start|stop|log|plan|task|recap|report|doctor> [flags] [folder]")
@@ -90,6 +95,18 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 	if fs.NArg() == 1 {
 		home, _ := os.UserHomeDir()
 		folder = resolveTargetFolder(fs.Arg(0), home)
+	}
+	if sub == "start" {
+		var failed []string
+		for _, r := range factoryStartChecks(ctx, factory.DoctorOptions{Folder: folder, GHHost: os.Getenv("GH_HOST")}) {
+			if r.Status == onboard.Fail {
+				failed = append(failed, r.Line())
+			}
+		}
+		if len(failed) > 0 {
+			fprintf(stderr, "sheepdog factory start: not starting; fix these first (sheepdog factory doctor %s shows every check):\n%s\n", folder, strings.Join(failed, "\n"))
+			return 1
+		}
 	}
 	cfg, err := config.Load(*configPath)
 	if err == nil {
