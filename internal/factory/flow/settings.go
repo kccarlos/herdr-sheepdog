@@ -22,6 +22,9 @@ type Settings struct {
 	ContinueLines              int `json:"continue_lines"`                 // the cap after a continue (design.md 4.9)
 	TaskSizeLimit              int `json:"task_size_limit"`                // plan checks (design.md 11.5)
 	SizeCapFactor              int `json:"size_cap_factor"`                // N12: size_cap = factor × estimate_lines
+	// SecondReviewer reviews the second passing round (L8): opus in a
+	// fresh session, or codex (world.CodexArgv's model).
+	SecondReviewer string `json:"second_reviewer"`
 }
 
 // Range limits for each setting.
@@ -53,6 +56,7 @@ func DefaultSettings() Settings {
 		RetroAfterRoundsWithMajors: 2, RetroFromRound: 3,
 		ChecksGraceMinutes: 5, StuckMinutes: 30,
 		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2,
+		SecondReviewer: "opus",
 	}
 }
 
@@ -81,6 +85,9 @@ func (s Settings) Changed() []string {
 			out = append(out, fmt.Sprintf("%s %d", c.name, c.got))
 		}
 	}
+	if s.SecondReviewer != d.SecondReviewer {
+		out = append(out, "second_reviewer "+s.SecondReviewer)
+	}
 	return out
 }
 
@@ -104,6 +111,9 @@ func (s Settings) Validate() error {
 		if r.v < r.low || r.v > r.high {
 			return fmt.Errorf("%s %d: allowed %d–%d", r.name, r.v, r.low, r.high)
 		}
+	}
+	if s.SecondReviewer != "opus" && s.SecondReviewer != "codex" {
+		return fmt.Errorf("second_reviewer %q: allowed opus or codex", s.SecondReviewer)
 	}
 	return nil
 }

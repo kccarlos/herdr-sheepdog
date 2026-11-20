@@ -280,6 +280,7 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 	}
 	env := map[string]string{}
 	maps.Copy(env, e.RunEnv)
+	maps.Copy(env, spec.Env)
 	if rs == flow.RunGone {
 		tok := rand.Text()
 		*hash = tokenHash(tok)
@@ -488,6 +489,25 @@ const workerModel = "sonnet"
 // claudeReviewers is slice 2's ordered reviewer candidate list on Claude Code.
 var claudeReviewers = []string{"opus", "sonnet"} // no haiku: a second pass must be as strong as the first; Codex joins in slice 5b
 
+// codexModel is the Codex reviewer's model (second_reviewer = "codex").
+const codexModel = "gpt-6.2-sol"
+
+// reviewerCandidates puts Codex after opus when the project opts in, so it
+// reviews the second passing round (L8); otherwise slice 2's list.
+func reviewerCandidates(st flow.Settings) []string {
+	if st.SecondReviewer == world.CodexCLI {
+		return []string{"opus", codexModel}
+	}
+	return claudeReviewers
+}
+
+func reviewerOf(model string) flow.Reviewer {
+	if model == codexModel {
+		return flow.Reviewer{CLI: world.CodexCLI, Model: model, Effort: "medium"}
+	}
+	return flow.Reviewer{CLI: "claude", Model: model, Effort: "medium"}
+}
+
 // nextReviewerModel picks the first candidate other than worker not yet in
 // used, or the first candidate other than worker in a fresh session.
 func nextReviewerModel(worker string, used, candidates []string) string {
@@ -549,7 +569,10 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		e.logError("factory.hc_error", id, err)
 		return true
 	}
-	if facts.Reviewer.State != flow.RunIdle {
+	// Codex sends herdr-core no status: its run ends when its tag is read,
+	// and no tag for stuck_minutes is S2's (owner decision 2026-11-19).
+	codex := a.Review.Reviewer.CLI == world.CodexCLI
+	if facts.Reviewer.State == flow.RunGone || !codex && facts.Reviewer.State != flow.RunIdle {
 		if a.Review.IdleSince != nil { // seen working again: the next idle read restarts the clock
 			a.Review.IdleSince = nil
 			if err := SaveState(e.Paths.State(id), *s); err != nil {
@@ -560,7 +583,11 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		return false
 	}
 	rctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
-	rd, err := world.ReadReport(rctx, e.HC, a.Review.RunID, a.Review.Code)
+	read := world.ReadReport
+	if codex {
+		read = world.ReadCodexReport
+	}
+	rd, err := read(rctx, e.HC, a.Review.RunID, a.Review.Code)
 	cancel()
 	if err != nil {
 		e.logError("factory.hc_error", id, err)
@@ -632,13 +659,14 @@ func (e *Engine) markReviewIdleLocked(id string, s *flow.State, ti int) bool {
 func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
 	round, h := len(a.Rounds)+1, flow.H(*a)
-	name, model := reviewerName(id, t.ID, len(t.Attempts), round), nextReviewerModel(workerModel, passingModels(*a, h), claudeReviewers)
+	name, model := reviewerName(id, t.ID, len(t.Attempts), round), nextReviewerModel(workerModel, passingModels(*a, h), reviewerCandidates(s.Settings))
 	if e.HC != nil {
 		if term, err := e.HC.Get(ctx, name); err == nil && term.State == "live" {
 			if a.Review == nil || a.Review.Round != round || a.Review.Head != h || a.Review.Code == "" {
-				a.Review = &flow.ReviewRun{Round: round, Kind: flow.RoundFull, Head: h, Code: strings.ToLower(rand.Text()[:10]), Reviewer: flow.Reviewer{CLI: "claude", Model: model, Effort: "medium"}}
+				a.Review = &flow.ReviewRun{Round: round, Kind: flow.RoundFull, Head: h, Code: strings.ToLower(rand.Text()[:10]), Reviewer: reviewerOf(model)}
 			}
 			a.Review.RunID = term.Address
+			startCodexClock(a.Review)
 			return fmt.Sprintf("started reviewer %s (round %d, %s, %s)", term.Address, round, cmp.Or(a.Review.Kind, flow.RoundFull), a.Review.Reviewer.Model), false, nil
 		} else if err != nil && !errors.Is(err, hc.ErrNotFound) {
 			e.logError("factory.hc_error", id, err)
@@ -652,14 +680,34 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		return "", false, err
 	}
 	if a.Review == nil || a.Review.Round != round || a.Review.Head != h || a.Review.Code == "" {
-		a.Review = &flow.ReviewRun{Round: round, Kind: kind, Head: h, Code: strings.ToLower(rand.Text()[:10]), Reviewer: flow.Reviewer{CLI: "claude", Model: model, Effort: "medium"}}
+		a.Review = &flow.ReviewRun{Round: round, Kind: kind, Head: h, Code: strings.ToLower(rand.Text()[:10]), Reviewer: reviewerOf(model)}
 	}
 	model, kind = a.Review.Reviewer.Model, cmp.Or(a.Review.Kind, kind)
+	var env map[string]string
+	if a.Review.Reviewer.CLI == world.CodexCLI {
+		dir := filepath.Join(e.Paths.DataDir, "factory", "codex-home")
+		home, err := world.CodexHome(dir)
+		switch {
+		case errors.Is(err, world.ErrCodexAuthDiverged): // this round falls back to opus
+			e.logEvent("factory.codex_auth_diverged", map[string]string{"project": id, "task": t.ID, "file": filepath.Join(dir, "auth.json"),
+				"fix": "Codex refreshed its sign-in inside sheepdog's Codex home. Check `codex login`; then move or remove that file to use Codex again."})
+			model = claudeReviewers[0]
+			a.Review.Reviewer = reviewerOf(model)
+		case err != nil:
+			return "", false, err
+		default:
+			env = map[string]string{"CODEX_HOME": home}
+		}
+	}
+	argv := world.ClaudeArgv(flow.RoleReviewer, model, "medium", "dontAsk")
+	if env != nil {
+		argv = world.CodexArgv(model, a.Worktree)
+	}
 	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
 		"{outcomes}", bullets(t.Outcomes), "{rejections}", e.rejectionPrompt(id, t.ID, *a, h), "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code).Replace(reviewerTemplate))
 	termID, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, world.RunSpec{
 		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
-		Argv: world.ClaudeArgv(flow.RoleReviewer, model, "medium", "dontAsk"), Prompt: prompt,
+		Argv: argv, Prompt: prompt, Env: env,
 		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleReviewer, "sheepdog.task": t.ID, "sheepdog.model": model},
 	})
 	if err != nil {
@@ -669,7 +717,17 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		return "", abort, err
 	}
 	a.Review.RunID = termID
+	startCodexClock(a.Review)
 	return fmt.Sprintf("started reviewer %s (round %d, %s, %s)", termID, round, kind, model), abort, nil
+}
+
+// startCodexClock: Codex reports no idle, so S2's no-tag clock for a Codex
+// run starts with the run (a fresh start or one adopted after a restart).
+func startCodexClock(r *flow.ReviewRun) {
+	if r.Reviewer.CLI == world.CodexCLI && r.IdleSince == nil {
+		now := time.Now()
+		r.IdleSince = &now
+	}
 }
 
 func reviewDiffPrompt(ctx context.Context, a flow.Attempt, head string) (kind, diff string, err error) {
