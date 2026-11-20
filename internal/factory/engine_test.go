@@ -531,7 +531,7 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 	if views := ghCalls(t, gh, "pr view"); len(views) != 0 {
 		t.Fatalf("PR read before any ready report: %q", views)
 	}
-	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`","proofs":[{"outcome":"go test ./... passes","command":"go test ./...","exit":0,"output_path":"/tmp/p1.log"}]}`)); err != nil {
+	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`","proofs":[{"outcome":"go test ./... passes","command":"go test ./...","exit":0,"output_path":"/tmp/p1.log"}],"touched":"greet.go","skipped":""}`)); err != nil {
 		t.Fatalf("Report ready: %v", err)
 	}
 	// GitHub down after ready: "no PR" is not known, so N26 waits and the
@@ -974,7 +974,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	gitIn(t, wt, "commit", "-m", "feat: initial Greet")
 	c1 := gitIn(t, wt, "rev-parse", "HEAD")
 	writePRJSON(t, gh, "pr.json", c1, `[{"__typename":"CheckRun","name":"ci","status":"IN_PROGRESS","conclusion":""}]`)
-	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`","proofs":[{"outcome":"go test passes","command":"go test ./...","exit":0,"output_path":"/tmp/p1.log"}]}`)); err != nil {
+	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`","proofs":[{"outcome":"go test passes","command":"go test ./...","exit":0,"output_path":"/tmp/p1.log"}],"touched":"greet.go","skipped":""}`)); err != nil {
 		t.Fatal(err)
 	}
 	eng.passProject(ctx, id, false) // N26
@@ -1032,8 +1032,9 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	eng.passProject(ctx, id, false) // N22 tell_worker_findings@1
 	eng.passProject(ctx, id, false) // idempotent: acts[] prevents re-sending
 	sends := sendTexts(t, srv.Requests()[sendsBefore:])
+	wantRC := readyCmd("/tmp/sheepdog-bin", []flow.Outcome{{Text: "go test passes", ProvedBy: "cmd: go test ./..."}})
 	if len(sends) != 1 || !strings.Contains(sends[0], paths.Report(id, "T1", 1)) ||
-		!strings.Contains(sends[0], "fix them, commit, and run /tmp/sheepdog-bin factory report ready again") {
+		!strings.Contains(sends[0], "fix them, commit, and run "+wantRC+" again") {
 		t.Fatalf("N22 worker sends = %q", sends)
 	}
 
@@ -1058,7 +1059,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	}
 	gitIn(t, wt, "commit", "-am", "fix: handle empty name")
 	c2 := gitIn(t, wt, "rev-parse", "HEAD")
-	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c2+`","proofs":[{"outcome":"go test passes","command":"go test ./...","exit":0,"output_path":"/tmp/p2.log"}]}`)); err != nil {
+	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c2+`","proofs":[{"outcome":"go test passes","command":"go test ./...","exit":0,"output_path":"/tmp/p2.log"}],"touched":"greet.go","skipped":""}`)); err != nil {
 		t.Fatal(err)
 	}
 	writePRJSON(t, gh, "view.json", c1, `[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]`)
@@ -1533,7 +1534,7 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 	c1 := gitIn(t, wt, "rev-parse", "HEAD")
 	writePRJSON(t, gh, "pr.json", c1, `[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]`)
 	writePRJSON(t, gh, "view.json", c1, `[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]`)
-	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`","proofs":[{"outcome":"go vet passes","command":"go vet ./...","exit":0,"output_path":"/tmp/p1.log"}]}`)); err != nil {
+	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`","proofs":[{"outcome":"go vet passes","command":"go vet ./...","exit":0,"output_path":"/tmp/p1.log"}],"touched":"version.go","skipped":""}`)); err != nil {
 		t.Fatal(err)
 	}
 	eng.passProject(ctx, id, false) // N26
@@ -1682,5 +1683,123 @@ func TestReadyCmdShellSingleQuotes(t *testing.T) {
 	wantLit := "`sheepdog status` shows $HOME and it's ok=echo $USER `id`"
 	if string(out) != wantLit {
 		t.Fatalf("sh expanded argument to %q, want %q", string(out), wantLit)
+	}
+}
+
+// TestReviewerPromptIncludesProofsTouchedSkippedAndRule checks PR 3.3b:
+// the reviewer's prompt carries each outcome, its proof command, exit code,
+// bounded/cleaned first lines of the real output file, touched, skipped, and
+// the prompts.md rule about an empty skipped list and an unhandled caller.
+func TestReviewerPromptIncludesProofsTouchedSkippedAndRule(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	var runs []hc.RunParams
+	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { runs = append(runs, p) }
+	paths := testPaths(t)
+	repo, _ := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := installFakeGH(t)
+
+	eng := New(paths, hc.NewClient(srv.Path))
+	if err := eng.Start(repo, "Goal"); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	eng.passProject(ctx, id, false) // coordinator
+	coordTok := runs[0].Env["SHEEPDOG_RUN_TOKEN"]
+	plan := `{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: proofs","brief":"Check proofs.",` + testScopeJSON + `,"outcomes":[` +
+		`{"text":"tests pass","proved_by":"cmd: go test ./..."},` +
+		`{"text":"looks right","proved_by":"manual: screenshot"}` +
+		`]}]}`
+	if err := eng.Report(coordTok, "plan apply", []byte(plan)); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N11
+	eng.passProject(ctx, id, false) // N23 worker
+	workerTok := runs[1].Env["SHEEPDOG_RUN_TOKEN"]
+	st, _ := LoadState(paths.State(id))
+	wt := st.Tasks[0].Attempts[0].Worktree
+
+	_ = os.WriteFile(filepath.Join(wt, "f.go"), []byte("package demo\n"), 0o600)
+	gitIn(t, wt, "add", "f.go")
+	gitIn(t, wt, "commit", "-m", "feat: f")
+	c1 := gitIn(t, wt, "rev-parse", "HEAD")
+
+	gitDir := gitIn(t, wt, "rev-parse", "--git-dir")
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(wt, gitDir)
+	}
+	proofDir := filepath.Join(gitDir, "sheepdog-proofs")
+	_ = os.MkdirAll(proofDir, 0o700)
+	logFile := filepath.Join(proofDir, "p1.log")
+	_ = os.WriteFile(logFile, []byte("ok  \x1b[32mpkg/demo\x1b[0m\nline2\nline3\nline4\nline5\nline6-cut\n"), 0o600)
+	artFile := filepath.Join(t.TempDir(), "shot.png")
+	_ = os.WriteFile(artFile, []byte("png"), 0o600)
+
+	readyBody, _ := json.Marshal(map[string]any{
+		"head": c1,
+		"proofs": []flow.Proof{
+			{Outcome: "tests pass", Command: "printf 'a  b' && go test ./...", Exit: 0, OutputPath: logFile},
+			{Outcome: "looks right", Artifact: artFile},
+		},
+		"touched": "f.go, f_test.go",
+		"skipped": "",
+	})
+	if err := eng.Report(workerTok, "ready", readyBody); err != nil {
+		t.Fatal(err)
+	}
+	writePRJSON(t, gh, "pr.json", c1, "[]")
+	eng.passProject(ctx, id, false) // N26
+	eng.passProject(ctx, id, false) // N29 reviewer
+
+	revPrompt := runs[len(runs)-1].Argv[len(runs[len(runs)-1].Argv)-1]
+	for _, want := range []string{
+		"- tests pass: `printf 'a  b' && go test ./...` (exit 0): ok [32mpkg/demo [0m | line2 | line3 | line4 | line5",
+		"- looks right: artifact " + artFile,
+		"Touched: f.go, f_test.go",
+		"Skipped: (nothing skipped)",
+		emptySkippedRule,
+	} {
+		if !strings.Contains(revPrompt, want) {
+			t.Errorf("reviewer prompt missing %q:\n%s", want, revPrompt)
+		}
+	}
+	if strings.Contains(revPrompt, "line6-cut") || strings.Contains(revPrompt, "\x1b") {
+		t.Errorf("reviewer prompt output not bounded or cleaned:\n%s", revPrompt)
+	}
+}
+
+// TestWorkerMessagesShowProofForm checks PR 3.3b (3.3a review minor):
+// send-back, review-findings and plan-amended messages to the worker all show
+// the full readyCmd with --proof/--touched/--skipped, never bare report ready.
+func TestWorkerMessagesShowProofForm(t *testing.T) {
+	l := newLanding(t).withTokens()
+	l.eng.Bin = "/tmp/sheepdog-bin"
+	outcomes := []flow.Outcome{{Text: "tests pass", ProvedBy: "cmd: go test ./..."}}
+	wantRC := readyCmd("/tmp/sheepdog-bin", outcomes)
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Outcomes = outcomes
+	})
+
+	// 1. Plan-amended message.
+	l.report("tok-coord", "plan amend", `{"why":"clarify","tasks":[{"id":"T1","brief":"updated brief"}]}`, "")
+	// 2. Send-back message (N22).
+	l.report("tok-coord", "task", `{"action":"send-back","task":"T1","why":"missing edge case"}`, "")
+	l.pass()
+	// 3. Review-findings message (N22).
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Rounds = append(a.Rounds, flow.Round{N: len(a.Rounds) + 1, Kind: flow.RoundFull, Head: l.c1, Verdict: flow.VerdictChanges, Majors: 1, ReportPath: "/r/f.md"})
+	})
+	l.pass()
+
+	sends := sendsTo(t, l.srv.Requests(), l.worker)
+	if len(sends) != 3 {
+		t.Fatalf("got %d worker sends, want 3 (plan amend, send-back, review findings): %q", len(sends), sends)
+	}
+	for i, label := range []string{"plan-amended", "send-back", "review-findings"} {
+		if !strings.Contains(sends[i], wantRC) {
+			t.Errorf("%s message missing %q:\n%s", label, wantRC, sends[i])
+		}
 	}
 }

@@ -540,7 +540,7 @@ func TestWorkerAndReviewerPromptsShowOutcomesWithProofs(t *testing.T) {
 		`{"outcome":"returns greeting","command":"go test -run TestGreet","exit":0,"output_path":"/tmp/p1.log"},`+
 		`{"outcome":"builds cleanly","command":"go build ./...","exit":0,"output_path":"/tmp/p2.log"},`+
 		`{"outcome":"button aligns","artifact":`+strconvQuote(art)+`}`+
-		`]}`, "")
+		`],"touched":"two.txt","skipped":""}`, "")
 	l.pass() // N26 push + open PR for T2
 	l.pass() // N29 starts reviewer for T2
 
@@ -551,7 +551,7 @@ func TestWorkerAndReviewerPromptsShowOutcomesWithProofs(t *testing.T) {
 	if !strings.Contains(workerPrompt, wantBlock) {
 		t.Fatalf("worker prompt missing outcomes with proofs:\n%s", workerPrompt)
 	}
-	wantReady := `factory report ready --proof 'returns greeting=<command>' --proof 'builds cleanly=go build ./...' --artifact 'button aligns=<path>'`
+	wantReady := `factory report ready --proof 'returns greeting=<command>' --proof 'builds cleanly=go build ./...' --artifact 'button aligns=<path>' --touched "<places>" --skipped "<what was left out or not checked>"`
 	if !strings.Contains(workerPrompt, wantReady) {
 		t.Fatalf("worker prompt missing ready --proof form:\n%s", workerPrompt)
 	}

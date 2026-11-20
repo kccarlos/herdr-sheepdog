@@ -40,7 +40,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "  plan amend <file>                    (coordinator only) change tasks' title, brief, outcomes, estimate_lines or add tasks, with a why")
 	fprintln(w, "  task <park|unpark|drop|close|send-back> <task> --why \"<why>\"  (coordinator only)")
 	fprintln(w, "  recap decide <task> <choice> --why \"<why>\" [--child '<json>' ...]  (coordinator only) decide an open recap")
-	fprintln(w, "  report ready [--proof \"<outcome>=<cmd>\" ...] [--artifact \"<outcome>=<path>\" ...] [--reject \"<why>\"]  (worker only) run proofs and report HEAD ready, or reject findings")
+	fprintln(w, "  report ready [--proof \"<outcome>=<cmd>\" ...] [--artifact \"<outcome>=<path>\" ...] [--touched \"<places>\"] [--skipped \"<what was left out>\"] [--reject \"<why>\"]  (worker only) run proofs and report HEAD ready, or reject findings")
 	fprintln(w, "  report ready --nothing-to-change --why \"<why>\"  (worker only) report that the task needs no change")
 	fprintln(w, "  doctor                               check unattended factory prerequisites:")
 	fprintln(w, "           herdr-core (hc), timed project-volume probe inside herdr-core")
@@ -48,7 +48,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "           logged-in agent CLI (claude, codex or agy) plus a canary start")
 	fprintln(w, "           inside herdr-core, gh login with the default repo pinned, and")
 	fprintln(w, "           codexbar. Exit 1 on FAIL.")
-	fprintln(w, "flags: --goal TEXT, --proof OUTCOME=CMD, --artifact OUTCOME=PATH, --reject WHY, --nothing-to-change, --why TEXT, --child JSON, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
+	fprintln(w, "flags: --goal TEXT, --proof OUTCOME=CMD, --artifact OUTCOME=PATH, --touched TEXT, --skipped TEXT, --reject WHY, --nothing-to-change, --why TEXT, --child JSON, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
 }
 
 // runFactory dispatches the `sheepdog factory` command group.
@@ -274,6 +274,8 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 	why := fs.String("reject", "", "reject every finding of the latest review round with a reason")
 	nothing := fs.Bool("nothing-to-change", false, "report that the task needs no change")
 	nothingWhy := fs.String("why", "", "reason for --nothing-to-change")
+	touched := fs.String("touched", "", "places the change had to reach (callers, tests, fixtures, config)")
+	skipped := fs.String("skipped", "", "what was left out or not checked (empty means nothing skipped)")
 	var proofs []flow.Proof
 	for _, name := range []string{"proof", "artifact"} {
 		fs.Func(name, name+` ("<outcome>=<value>", repeatable)`, func(s string) error {
@@ -292,13 +294,18 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 	if err := fs.Parse(args[1:]); err != nil {
 		return flagExit(err)
 	}
-	var reject *string
+	var reject, touchedArg, skippedArg *string
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "reject" {
+		switch f.Name {
+		case "reject":
 			reject = why
+		case "touched":
+			touchedArg = touched
+		case "skipped":
+			skippedArg = skipped
 		}
 	})
-	if fs.NArg() != 0 || (*nothing && reject != nil) || (!*nothing && *nothingWhy != "") || (len(proofs) > 0 && (*nothing || reject != nil)) {
+	if fs.NArg() != 0 || (*nothing && reject != nil) || (!*nothing && *nothingWhy != "") || ((len(proofs) > 0 || touchedArg != nil || skippedArg != nil) && (*nothing || reject != nil)) {
 		printFactoryUsage(stderr)
 		return 2
 	}
@@ -316,6 +323,12 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 		}
 		if len(proofs) > 0 {
 			body["proofs"] = proofs
+		}
+		if touchedArg != nil {
+			body["touched"] = *touchedArg
+		}
+		if skippedArg != nil {
+			body["skipped"] = *skippedArg
 		}
 		raw, _ := json.Marshal(body)
 		err = postFactoryReport(ctx, "ready", raw)

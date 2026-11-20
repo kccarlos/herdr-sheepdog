@@ -831,3 +831,67 @@ func TestFactoryReportReadyProofTimeoutKillsProcessGroup(t *testing.T) {
 	}
 	t.Fatalf("grandchild pid %d still alive after proof timeout", childPID)
 }
+
+// TestFactoryReportReadyTouchedSkippedCLI checks PR 3.3b CLI flags:
+// --touched and --skipped are sent in the ready payload (including empty
+// --skipped ""), omitted when not passed, and refused with --reject or
+// --nothing-to-change.
+func TestFactoryReportReadyTouchedSkippedCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+
+	var lastArgs map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Args map[string]any `json:"args"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		lastArgs = body.Args
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(srv.Close)
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	t.Setenv("SHEEPDOG_WEB_PORT", port)
+	t.Setenv("SHEEPDOG_RUN_TOKEN", "tok-worker-1")
+
+	repo := t.TempDir()
+	gitRun := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=T", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=T", "GIT_COMMITTER_EMAIL=t@example.com")
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, b)
+		}
+	}
+	gitRun("init")
+	_ = os.WriteFile(filepath.Join(repo, "a.txt"), []byte("a\n"), 0o600)
+	gitRun("add", "a.txt")
+	gitRun("commit", "-m", "feat: init")
+	t.Chdir(repo)
+
+	var out, errBuf bytes.Buffer
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--touched", "a.txt", "--skipped", ""}, &out, &errBuf); code != 0 {
+		t.Fatalf("empty skipped code=%d stderr=%s", code, errBuf.String())
+	}
+	if v, ok := lastArgs["skipped"]; !ok || v != "" || lastArgs["touched"] != "a.txt" {
+		t.Fatalf("empty skipped sent %+v, want touched=a.txt and explicit skipped=\"\"", lastArgs)
+	}
+
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--touched", "a.txt, b.txt", "--skipped", "e2e"}, &out, &errBuf); code != 0 {
+		t.Fatalf("non-empty skipped code=%d stderr=%s", code, errBuf.String())
+	}
+	if lastArgs["touched"] != "a.txt, b.txt" || lastArgs["skipped"] != "e2e" {
+		t.Fatalf("non-empty skipped sent %+v", lastArgs)
+	}
+
+	for _, bad := range [][]string{
+		{"factory", "report", "ready", "--reject", "no", "--touched", "a.txt"},
+		{"factory", "report", "ready", "--nothing-to-change", "--why", "done", "--skipped", ""},
+	} {
+		if code := run(context.Background(), bad, &out, &errBuf); code != 2 {
+			t.Fatalf("%v code=%d, want 2", bad, code)
+		}
+	}
+}
