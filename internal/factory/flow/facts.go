@@ -70,28 +70,31 @@ const (
 // did not answer this pass; the rest is then the last snapshot it gave.
 // No merge_queue field: spike S0.5 found no merge queue on the repo.
 type PR struct {
-	Answered       bool      `json:"answered"`
-	Number         int       `json:"number"`
-	State          PRState   `json:"state"`
-	MergedCommit   string    `json:"merged_commit,omitempty"`
-	Head           string    `json:"head"`
-	HeadRel        Rel       `json:"head_rel"`                  // Head against H
-	HeadMergeOnly  bool      `json:"head_merge_only,omitempty"` // Head is ahead of H by clean merges of the base only (N20/N40)
-	HeadSince      time.Time `json:"head_since"`                // when Head was first seen; the checks grace counts from it
-	Mergeable      Mergeable `json:"mergeable"`
-	Checks         Checks    `json:"checks"`
-	Failed         []Failure `json:"failed,omitempty"`  // the red or outside-cancelled checks (N33, N34)
-	Running        bool      `json:"running,omitempty"` // a check has not finished: no re-run or tell yet
-	Behind         bool      `json:"behind"`
-	BehindUnknown  bool      `json:"behind_unknown,omitempty"` // compare failed: Behind false is not "not behind" (N40)
-	ChecksUnread   bool      `json:"checks_unread,omitempty"`  // H's workflow runs unread: absent is not "no checks" (N35 never dispatches); N33/N34 never re-run
-	ReviewRequired bool      `json:"review_required,omitempty"`
+	Answered             bool      `json:"answered"`
+	Number               int       `json:"number"`
+	State                PRState   `json:"state"`
+	MergedCommit         string    `json:"merged_commit,omitempty"`
+	Head                 string    `json:"head"`
+	HeadRel              Rel       `json:"head_rel"`                          // Head against H
+	HeadMergeOnly        bool      `json:"head_merge_only,omitempty"`         // Head is ahead of H by clean merges of the base only (N20/N40)
+	HeadMergeOnlyUnknown bool      `json:"head_merge_only_unknown,omitempty"` // merge-tree or fetch failed: HeadMergeOnly false is not "foreign" (N7)
+	HeadSince            time.Time `json:"head_since"`                        // when Head was first seen; the checks grace counts from it
+	Mergeable            Mergeable `json:"mergeable"`
+	Checks               Checks    `json:"checks"`
+	Failed               []Failure `json:"failed,omitempty"`  // the red or outside-cancelled checks (N33, N34)
+	Running              bool      `json:"running,omitempty"` // a check has not finished: no re-run or tell yet
+	Behind               bool      `json:"behind"`
+	BehindUnknown        bool      `json:"behind_unknown,omitempty"` // compare failed: Behind false is not "not behind" (N40)
+	ChecksUnread         bool      `json:"checks_unread,omitempty"`  // H's workflow runs unread: absent is not "no checks" (N35 never dispatches); N33/N34 never re-run
+	ReviewRequired       bool      `json:"review_required,omitempty"`
 }
 
-// Run is one run's state, and whether a start for it is in flight.
+// Run is one run's state, whether a start for it is in flight, and when its
+// last working->idle turn ended (in memory, for N7's post-tell wake).
 type Run struct {
-	State   RunState `json:"state"`
-	Pending bool     `json:"pending"`
+	State       RunState  `json:"state"`
+	Pending     bool      `json:"pending"`
+	LastTurnEnd time.Time `json:"last_turn_end,omitempty"`
 }
 
 // Facts are one pass's observations of a task. Plain data, no I/O.
@@ -102,6 +105,9 @@ type Facts struct {
 	TipRel Rel    `json:"tip_rel"` // the worktree tip against H
 	// TipMergeOnly: the tip is ahead of H by merges of the base only (N20).
 	TipMergeOnly bool `json:"tip_merge_only,omitempty"`
+	// TipDivergedByMergeOnly: TipRel is diverged only because H moved by
+	// merge_only moves (update-branch) and the worker committed without pulling.
+	TipDivergedByMergeOnly bool `json:"tip_diverged_by_merge_only,omitempty"`
 	// Lines is the changed lines (added + removed) at the tip against the
 	// merge base, read from git every pass (N12).
 	Lines int `json:"lines"`

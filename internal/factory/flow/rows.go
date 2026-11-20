@@ -19,6 +19,7 @@ const (
 	AskSizeRecap    = "open_size_recap"
 	AskCIRecap      = "open_ci_recap"
 	AskTellStop     = "tell_worker_stop"
+	AskTellDiverged = "tell_worker_diverged"
 	AskTellConflict = "tell_worker_conflict"
 	AskMergeOnly    = "move_h_merge_only"
 	AskPushPR       = "push_and_open_pr"
@@ -40,7 +41,7 @@ const (
 )
 
 // commitKeyed are the verbs whose key ends in the commit it is for.
-var commitKeyed = []string{AskPushPR, AskStartReview, AskTellConflict, AskRerunCI, AskTellCI, AskDispatchCI, AskUpdateBranch, AskAccept, AskMerge}
+var commitKeyed = []string{AskPushPR, AskStartReview, AskTellDiverged, AskTellConflict, AskRerunCI, AskTellCI, AskDispatchCI, AskUpdateBranch, AskAccept, AskMerge}
 
 // key joins a verb and what it is for: "merge@3f9c".
 func key(verb string, parts ...any) string {
@@ -116,11 +117,24 @@ func noReady(in In) bool     { return len(in.attempt().Ready) == 0 }
 func tipAhead(in In) bool    { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
 func noPR(in In) bool        { return in.Facts.PR.State == PRNone }
 func prOpen(in In) bool      { return in.Facts.PR.State == PROpen }
-func prNotClosed(in In) bool { return in.Facts.PR.State != PRClosed }
+func prClosed(in In) bool    { return in.Facts.PR.State == PRClosed }
 func tipAtOrBehindH(in In) bool {
 	a := in.attempt()
 	return in.Facts.TipRel == RelSame || a != nil && in.Facts.TipRel == RelBehind && Covers(*a, in.Facts.Tip, H(*a))
-}                          // diverged or uncovered tip falls to N43 until N7
+}
+func tipDivergedOrUncovered(in In) bool {
+	a := in.attempt()
+	return a != nil && (in.Facts.TipRel == RelDiverged || in.Facts.TipRel == RelBehind && !Covers(*a, in.Facts.Tip, headH(in)))
+}
+
+// PRHeadDivergedOrForeign reports whether an open, answered PR head diverged
+// from H or has non-merge_only commits ahead of H.
+func PRHeadDivergedOrForeign(in In) bool {
+	return prOpen(in) && answered(in) && (in.Facts.PR.HeadRel == RelDiverged || in.Facts.PR.HeadRel == RelAhead && !in.Facts.PR.HeadMergeOnly && !in.Facts.PR.HeadMergeOnlyUnknown)
+}
+func prHeadMergeOnlyUnknown(in In) bool {
+	return prOpen(in) && answered(in) && in.Facts.PR.HeadRel == RelAhead && in.Facts.PR.HeadMergeOnlyUnknown
+}
 func prBehindH(in In) bool { return in.Facts.PR.HeadRel == RelBehind }
 func prHeadIsH(in In) bool { return in.Facts.PR.Head == headH(in) }
 func prHeadAheadMergeOnly(in In) bool {
@@ -213,6 +227,9 @@ var TaskRows = []Row[In]{
 		}
 		return say("parked")(in)
 	}},
+	{ID: "N4", WaitsOn: "the coordinator", When: prClosed, Then: func(in In) Decision {
+		return say("the PR was closed without merging (never reopened; retry starts a new attempt)", once(in.acts(), key(AskWake, "pr_closed")))(in)
+	}},
 	{ID: "S1", WaitsOn: "the owner", When: all(hasAttempt, anyOf(workerGone, all(ladderSays(Review), reviewGone))), Then: func(in In) Decision {
 		who := "worker"
 		if !workerGone(in) {
@@ -228,6 +245,24 @@ var TaskRows = []Row[In]{
 			tell = once(in.acts(), key(AskTellStop, n))
 		}
 		return say("a recap is open", once(in.acts(), key(AskWake, "recap", n)), tell)(in)
+	}},
+	{ID: "N7", WaitsOn: "the worker; then the coordinator", When: all(hasAttempt, anyOf(tipDivergedOrUncovered, PRHeadDivergedOrForeign, prHeadMergeOnlyUnknown)), Then: func(in In) Decision {
+		h := headH(in)
+		if !tipDivergedOrUncovered(in) && !PRHeadDivergedOrForeign(in) {
+			if in.Now.Sub(in.Facts.PR.HeadSince) >= checksGrace(in) {
+				return say("cannot tell if PR head is merge_only past checks_grace_minutes", once(in.acts(), key(AskWake, "merge_only_unknown", h)))(in)
+			}
+			return say("cannot tell if PR head is merge_only: wait")(in)
+		}
+		tk := key(AskTellDiverged, h)
+		tell := LastAct(in.acts(), tk)
+		if tell == nil || tell.Result != "done" {
+			return say(N7Why(in, false), ensureRun(in, in.Facts.Worker, AskStartWorker), once(in.acts(), tk))(in)
+		}
+		if working(in) || (!in.Facts.Worker.LastTurnEnd.After(tell.At) && in.Now.Sub(tell.At) < checksGrace(in)) {
+			return say(N7Why(in, false))(in)
+		}
+		return say(N7Why(in, true), once(in.acts(), key(AskWake, "diverged", h)))(in)
 	}},
 	{ID: "N8", WaitsOn: "the coordinator", When: func(in In) bool { return hasAttempt(in) && in.attempt().NothingToChange != "" }, Then: func(in In) Decision {
 		a := in.attempt()
@@ -273,7 +308,7 @@ var TaskRows = []Row[In]{
 			}
 			return say("the PR head is ahead of H by merges of the base only: H moves to it, no round", once(in.acts(), key(AskMergeOnly, in.Facts.PR.Head)))(in)
 		}},
-	{ID: "N22", WaitsOn: "the worker", When: all(ladderSays(Fix), prNotClosed), Then: func(in In) Decision {
+	{ID: "N22", WaitsOn: "the worker", When: ladderSays(Fix), Then: func(in In) Decision {
 		r := newestCovering(*in.attempt(), headH(in))
 		return say("the ladder says fix", ensureRun(in, in.Facts.Worker, AskStartWorker),
 			once(in.acts(), key(AskTellFindings, r.N)))(in)
@@ -281,7 +316,7 @@ var TaskRows = []Row[In]{
 	{ID: "N23", WaitsOn: "the worker", When: all(hasAttempt, anyOf(noReady, tipAhead)), Then: func(in In) Decision {
 		return say("the worker is working", ensureRun(in, in.Facts.Worker, AskStartWorker))(in)
 	}},
-	{ID: "N25", WaitsOn: "the coordinator", When: all(ladderSays(RecapAnswer), prNotClosed), Then: func(in In) Decision {
+	{ID: "N25", WaitsOn: "the coordinator", When: ladderSays(RecapAnswer), Then: func(in In) Decision {
 		return say("the ladder says recap", once(in.acts(), key(AskOpenRecap, "review")))(in)
 	}},
 	{ID: "N26", WaitsOn: "the engine", When: all(hasAttempt, anyOf(noPR, all(prOpen, prBehindH))), Then: func(in In) Decision {
@@ -290,7 +325,7 @@ var TaskRows = []Row[In]{
 		}
 		return say("GitHub does not have H", once(in.acts(), key(AskPushPR, headH(in))))(in)
 	}},
-	{ID: "N29", WaitsOn: "the reviewer", When: all(ladderSays(Review), prNotClosed), Then: func(in In) Decision {
+	{ID: "N29", WaitsOn: "the reviewer", When: ladderSays(Review), Then: func(in In) Decision {
 		start := key(AskStartReview, nextRound(*in.attempt()), headH(in))
 		return say("the ladder says review", ensureRun(in, in.Facts.Reviewer, start))(in)
 	}},
@@ -386,6 +421,30 @@ var TaskRows = []Row[In]{
 		p := in.Facts.PR
 		return say("no rule matched", once(in.acts(), key(AskWake, "no_rule_matched", headH(in), p.State, p.Checks, p.Mergeable, in.Facts.TipRel)))(in)
 	}},
+}
+
+// N7Why describes the N7 stall for in, shared by the row and executor so they
+// cannot drift.
+func N7Why(in In, wake bool) string {
+	h, branch := headH(in), ""
+	if a := in.attempt(); a != nil {
+		branch = a.Branch
+	}
+	var msg string
+	switch {
+	case PRHeadDivergedOrForeign(in):
+		msg = fmt.Sprintf("PR #%d head %s diverged from H %s or has changes the engine did not push — restore branch %s (never force-push)", in.Facts.PR.Number, in.Facts.PR.Head, h, branch)
+	case in.Facts.TipRel == RelBehind:
+		msg = fmt.Sprintf("worktree tip %s is behind H %s — pull (`git pull --ff-only origin %s`)", in.Facts.Tip, h, branch)
+	case in.Facts.TipDivergedByMergeOnly:
+		msg = fmt.Sprintf("worktree tip %s diverged from H %s after an engine branch update — pull (`git fetch origin && git merge --no-edit origin/%s`, never rebase)", in.Facts.Tip, h, branch)
+	default:
+		msg = fmt.Sprintf("worktree tip %s diverged from H %s — restore branch %s (never rebase or force-push)", in.Facts.Tip, h, branch)
+	}
+	if wake {
+		return msg + " and still holds after the worker's turn: use say to the worker, then retry"
+	}
+	return msg
 }
 
 func n9Why(in In) string {

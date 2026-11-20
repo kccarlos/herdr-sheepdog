@@ -541,7 +541,7 @@ func TestWorkerAndReviewerPromptsShowOutcomesWithProofs(t *testing.T) {
 		`{"outcome":"builds cleanly","command":"go build ./...","exit":0,"output_path":"/tmp/p2.log"},`+
 		`{"outcome":"button aligns","artifact":`+strconvQuote(art)+`}`+
 		`],"touched":"two.txt","skipped":""}`, "")
-	l.pass() // N26 push + open PR for T2
+	writePRJSON(t, l.gh, "view.json", c, greenRollup)
 	l.pass() // N29 starts reviewer for T2
 
 	wantBlock := "Outcomes:\n" +

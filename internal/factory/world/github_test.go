@@ -193,7 +193,7 @@ func TestPushAndOpenPROnceThenAdopts(t *testing.T) {
 	}
 
 	// Before: no PR is an answer, not a failure.
-	if p, _, err := PRSnapshot(ctx, repo, "task/t1-x"); err != nil || !p.Answered || p.State != flow.PRNone {
+	if p, _, err := PRSnapshot(ctx, repo, "task/t1-x", 0); err != nil || !p.Answered || p.State != flow.PRNone {
 		t.Fatalf("snapshot before PR = %+v, %v", p, err)
 	}
 	for i := range 2 {
@@ -209,11 +209,11 @@ func TestPushAndOpenPROnceThenAdopts(t *testing.T) {
 	if len(creates) != 1 || len(ghCalls(t, gh, "pr list")) != 2 || !strings.Contains(creates[0], "--repo acme/demo --head task/t1-x --base main --title feat: x --body Brief.") {
 		t.Fatalf("gh calls:\n%s", strings.Join(ghCalls(t, gh, ""), "\n"))
 	}
-	p, _, err := PRSnapshot(ctx, repo, "task/t1-x")
+	p, _, err := PRSnapshot(ctx, repo, "task/t1-x", 7)
 	if err != nil || !reflect.DeepEqual(p, flow.PR{Answered: true, Number: 7, State: flow.PROpen, Head: c1, Mergeable: flow.MergeableUnknown, Checks: flow.ChecksAbsent}) {
 		t.Fatalf("snapshot = %+v, %v", p, err)
 	}
-	if views := ghCalls(t, gh, "pr view"); !strings.Contains(views[len(views)-1], "pr view task/t1-x --repo acme/demo --json "+prViewFields) {
+	if views := ghCalls(t, gh, "pr view"); !strings.Contains(views[len(views)-1], "pr view 7 --repo acme/demo --json "+prViewFields) {
 		t.Fatalf("pr view argv = %q", views)
 	}
 	if rel, err := Relation(ctx, repo, c1, runGit(t, repo, "rev-parse", "main")); err != nil || rel != flow.RelBehind {
@@ -241,7 +241,7 @@ func TestPushAndOpenPROnceThenAdopts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(gh, "fail"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if p, _, err := PRSnapshot(ctx, repo, "task/t1-x"); err == nil || p.Answered {
+	if p, _, err := PRSnapshot(ctx, repo, "task/t1-x", 7); err == nil || p.Answered {
 		t.Fatalf("failed gh call gave %+v, %v", p, err)
 	}
 }
@@ -251,7 +251,7 @@ func TestGHRepoIsRequired(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init")
 	runGit(t, repo, "remote", "add", "origin", "/srv/git/demo.git")
-	if _, _, err := PRSnapshot(context.Background(), repo, "b"); err == nil || !strings.Contains(err.Error(), "not a github.com repo") {
+	if _, _, err := PRSnapshot(context.Background(), repo, "b", 0); err == nil || !strings.Contains(err.Error(), "not a github.com repo") {
 		t.Fatalf("PRSnapshot without a GitHub remote: %v", err)
 	}
 }
@@ -366,7 +366,7 @@ func TestPRSnapshotS06Classes(t *testing.T) {
 			if c.annotations != "" {
 				copySnap(t, c.annotations, filepath.Join(gh, "annotations.json"))
 			}
-			p, warn, err := PRSnapshot(ctx, repo, "s06/"+c.name)
+			p, warn, err := PRSnapshot(ctx, repo, "s06/"+c.name, 0)
 			if err != nil || warn != nil {
 				t.Fatalf("PRSnapshot: %v, %v", err, warn)
 			}
@@ -394,7 +394,7 @@ func TestPRSnapshotDeniedFallbackAndUnreadable(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Fallback to REST check-runs succeeds.
-	p, _, err := PRSnapshot(ctx, repo, "s06/green")
+	p, _, err := PRSnapshot(ctx, repo, "s06/green", 0)
 	if err != nil || !p.Answered || p.Checks != flow.ChecksGreen {
 		t.Fatalf("fallback snapshot = %+v, %v; want answered green", p, err)
 	}
@@ -405,7 +405,7 @@ func TestPRSnapshotDeniedFallbackAndUnreadable(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(gh, "check_runs_denied"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	p, _, err = PRSnapshot(ctx, repo, "s06/green")
+	p, _, err = PRSnapshot(ctx, repo, "s06/green", 0)
 	if err == nil || p.Answered || p.Checks != flow.ChecksUnreadable {
 		t.Fatalf("both denied = %+v, %v; want unreadable + err", p, err)
 	}
@@ -419,13 +419,13 @@ func TestPRSnapshotBehindAndReviewRequired(t *testing.T) {
 	gh := installFakeGH(t)
 	copySnap(t, "behind-before.json", filepath.Join(gh, "view.json"))
 	copySnap(t, "behind-before.compare.json", filepath.Join(gh, "compare.json"))
-	p, _, err := PRSnapshot(ctx, repo, "s06/behind")
+	p, _, err := PRSnapshot(ctx, repo, "s06/behind", 0)
 	if err != nil || p.Behind || p.ReviewRequired {
 		t.Fatalf("before mover: %+v, %v; want Behind=false ReviewRequired=false", p, err)
 	}
 	copySnap(t, "behind.json", filepath.Join(gh, "view.json"))
 	copySnap(t, "behind.compare.json", filepath.Join(gh, "compare.json"))
-	p, _, err = PRSnapshot(ctx, repo, "s06/behind")
+	p, _, err = PRSnapshot(ctx, repo, "s06/behind", 0)
 	if err != nil || !p.Behind || p.Checks != flow.ChecksGreen {
 		t.Fatalf("after mover: %+v, %v; want Behind=true green", p, err)
 	}
@@ -440,9 +440,17 @@ func TestPRSnapshotBehindAndReviewRequired(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeGH(t, gh, "view.json", strings.Replace(string(raw), `"baseRefName": "main"`, `"baseRefName": "release/1.0"`, 1))
-	if _, _, err := PRSnapshot(ctx, repo, "s06/behind"); err != nil {
+	// A PR on another base than origin/HEAD is treated as not ours (PRNone).
+	if pOther, _, err := PRSnapshot(ctx, repo, "s06/behind", 0); err != nil || !pOther.Answered || pOther.State != flow.PRNone {
+		t.Fatalf("other-base PR = %+v, %v; want answered PRNone", pOther, err)
+	}
+	// When the project base itself is release/1.0, compare keeps its slash raw.
+	runGit(t, repo, "update-ref", "refs/remotes/origin/release/1.0", "refs/remotes/origin/main")
+	runGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/release/1.0")
+	if _, _, err := PRSnapshot(ctx, repo, "s06/behind", 0); err != nil {
 		t.Fatal(err)
 	}
+	runGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
 	calls = ghCalls(t, gh, "api repos/acme/demo/compare/")
 	if want := "api repos/acme/demo/compare/release/1.0..." + p.Head; calls[len(calls)-1] != want {
 		t.Fatalf("compare argv = %q, want %q", calls[len(calls)-1], want)
@@ -455,7 +463,7 @@ func TestPRSnapshotBehindAndReviewRequired(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(gh, "view.json"), []byte(rev), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	p, _, err = PRSnapshot(ctx, repo, "s06/review")
+	p, _, err = PRSnapshot(ctx, repo, "s06/review", 0)
 	if err != nil || !p.ReviewRequired {
 		t.Fatalf("review_required: %+v, %v; want ReviewRequired=true", p, err)
 	}
@@ -473,14 +481,14 @@ func TestPRSnapshotNetworkFailureNotNonGitHub(t *testing.T) {
 	if err := os.WriteFile(failFile, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	p, _, err := PRSnapshot(ctx, repo, "s06/green")
+	p, _, err := PRSnapshot(ctx, repo, "s06/green", 0)
 	if err == nil || p.Checks != flow.ChecksUnreadable || strings.Contains(err.Error(), "not a github.com repo") {
 		t.Fatalf("network failure = %+v, %v", p, err)
 	}
 	if err := os.Remove(failFile); err != nil {
 		t.Fatal(err)
 	}
-	p, _, err = PRSnapshot(ctx, repo, "s06/green")
+	p, _, err = PRSnapshot(ctx, repo, "s06/green", 0)
 	if err != nil || !p.Answered || p.Checks != flow.ChecksGreen {
 		t.Fatalf("after recovery = %+v, %v; want answered green", p, err)
 	}
@@ -514,7 +522,7 @@ func TestPRSnapshotNoCheckHidesAnother(t *testing.T) {
 	} {
 		gh := installFakeGH(t)
 		writeGH(t, gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"h1","mergeable":"MERGEABLE","baseRefName":"main","statusCheckRollup":[`+c.rollup+`]}`)
-		if p, _, err := PRSnapshot(ctx, repo, "b"); err != nil || p.Checks != c.want {
+		if p, _, err := PRSnapshot(ctx, repo, "b", 0); err != nil || p.Checks != c.want {
 			t.Errorf("%s: checks = %s, %v; want %s", name, p.Checks, err, c.want)
 		}
 	}
@@ -553,7 +561,7 @@ func TestPRSnapshotFallbackReadsEverything(t *testing.T) {
 		for f, body := range c.files {
 			writeGH(t, gh, f, body)
 		}
-		if p, _, _ := PRSnapshot(ctx, repo, "s06/green"); p.Checks != c.want {
+		if p, _, _ := PRSnapshot(ctx, repo, "s06/green", 0); p.Checks != c.want {
 			t.Errorf("%s: checks = %s, want %s", name, p.Checks, c.want)
 		}
 	}
@@ -586,7 +594,7 @@ func TestPRSnapshotOptionalCallFails(t *testing.T) {
 			copySnap(t, c.extra, filepath.Join(gh, strings.TrimPrefix(filepath.Ext(strings.TrimSuffix(c.extra, ".json")), ".")+".json"))
 		}
 		writeGH(t, gh, c.fail+"_fail", "")
-		p, warn, err := PRSnapshot(ctx, repo, "b")
+		p, warn, err := PRSnapshot(ctx, repo, "b", 0)
 		if err != nil || warn == nil || !p.Answered || p.Checks != c.want || p.Behind || p.BehindUnknown != (c.fail == "compare") || p.ChecksUnread != (c.fail == "workflow_runs") {
 			t.Errorf("%s fails on %s: %+v, warn %v, err %v; want answered %s, not behind, a warning", c.fail, c.view, p, warn, err, c.want)
 		}
@@ -603,7 +611,7 @@ func TestCheckRunsRoundTwo(t *testing.T) {
 	writeGH(t, gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"h1","mergeable":"MERGEABLE","baseRefName":"main","statusCheckRollup":[`+
 		`{"__typename":"CheckRun","name":"test","workflowName":"ci","status":"COMPLETED","conclusion":"SUCCESS"},`+
 		`{"__typename":"CheckRun","name":"test","workflowName":"ci","status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-11-20T10:00:05Z"}]}`)
-	if p, _, err := PRSnapshot(ctx, repo, "b"); err != nil || p.Checks != flow.ChecksRed {
+	if p, _, err := PRSnapshot(ctx, repo, "b", 0); err != nil || p.Checks != flow.ChecksRed {
 		t.Errorf("completed success without a start beside a failure: %s, %v; want red", p.Checks, err)
 	}
 	gh = installFakeGH(t)
@@ -611,7 +619,7 @@ func TestCheckRunsRoundTwo(t *testing.T) {
 	copySnap(t, "stopped_timeout.workflow-runs.json", filepath.Join(gh, "workflow-runs.json"))
 	writeGH(t, gh, "annotations.json", "["+strings.Repeat(`{"message":"warning"},`, 49)+`{"message":"warning"}]`)
 	copySnap(t, "stopped_timeout.annotations.json", filepath.Join(gh, "annotations.2.json"))
-	if p, _, err := PRSnapshot(ctx, repo, "b"); err != nil || p.Checks != flow.ChecksStoppedTimeout {
+	if p, _, err := PRSnapshot(ctx, repo, "b", 0); err != nil || p.Checks != flow.ChecksStoppedTimeout {
 		t.Errorf("timeout annotation on page 2: %s, %v; want stopped_timeout", p.Checks, err)
 	}
 }
@@ -703,7 +711,7 @@ func TestPRSnapshotPartialRunListNoTarget(t *testing.T) {
 	}
 	writeGH(t, gh, "workflow-runs.json", `{"total_count":150,"workflow_runs":[`+strings.Join(runs, ",")+`]}`)
 	writeGH(t, gh, "workflow-runs.2.json", `not json`)
-	p, warn, err := PRSnapshot(ctx, repo, "b")
+	p, warn, err := PRSnapshot(ctx, repo, "b", 0)
 	if err != nil || warn == nil || p.Checks != flow.ChecksRed || !p.ChecksUnread || len(p.Failed) != 1 || p.Failed[0].Run != "" {
 		t.Fatalf("partial run list: %+v, warn %v, err %v; want red, checks_unread, a failure with no run", p, warn, err)
 	}
@@ -725,7 +733,7 @@ func TestPRSnapshotFallbackSeesEarlierAttempts(t *testing.T) {
 	writeGH(t, gh, "check-runs.all.json", `{"total_count":3,"check_runs":[`+cr(900, "build", "failure")+","+cr(901, "report", "cancelled")+","+cr(902, "report", "success")+`]}`)
 	writeGH(t, gh, "annotations.json", `[{"message":"The job has exceeded the maximum execution time of 1m0s"}]`)
 	writeGH(t, gh, "workflow-runs.json", `{"total_count":1,"workflow_runs":[{"id":90,"status":"completed","conclusion":"failure"}]}`)
-	p, _, err := PRSnapshot(ctx, repo, "b")
+	p, _, err := PRSnapshot(ctx, repo, "b", 0)
 	if err != nil || p.Checks != flow.ChecksRed || len(p.Failed) != 1 || p.Failed[0].Run != "" {
 		t.Fatalf("fallback with an earlier timed-out attempt: %+v, %v; want red with no re-run target", p, err)
 	}
@@ -847,5 +855,28 @@ func TestBaseStatusHeadCommit(t *testing.T) {
 	got, err = BaseStatus(ctx, repo)
 	if err != nil || !got.Red || !got.Known {
 		t.Fatalf("paged runs (fail on page 2) = %+v, %v; want red known", got, err)
+	}
+}
+
+// TestPushAndOpenPRTitleCap verifies that PR titles longer than GitHub's 256
+// rune limit are cut on a rune boundary.
+func TestPushAndOpenPRTitleCap(t *testing.T) {
+	ctx := context.Background()
+	gh := installFakeGH(t)
+	repo, _ := repoWithGitHubOrigin(t)
+	runGit(t, repo, "switch", "-c", "task/t1-cap")
+	runGit(t, repo, "commit", "--allow-empty", "-m", "feat: cap")
+	c1 := runGit(t, repo, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(gh, "pr.json"), []byte(`{"number":7,"state":"OPEN","headRefOid":"`+c1+`","baseRefName":"main","headRefName":"task/t1-cap"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	longTitle := "feat: " + strings.Repeat("é", 294) // 300 runes (>300 bytes)
+	if n, err := PushAndOpenPR(ctx, repo, "task/t1-cap", c1, longTitle, "body"); err != nil || n != 7 {
+		t.Fatalf("PushAndOpenPR = %d, %v", n, err)
+	}
+	creates := ghCalls(t, gh, "pr create")
+	wantTitle := "feat: " + strings.Repeat("é", 250)
+	if len(creates) != 1 || !strings.Contains(creates[0], "--title "+wantTitle+" --body") {
+		t.Fatalf("pr create = %q, want title cut to 256 runes (%d runes)", creates, len([]rune(wantTitle)))
 	}
 }
