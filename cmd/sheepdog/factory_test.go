@@ -43,7 +43,7 @@ func TestFactoryStartRefusedByChecks(t *testing.T) {
 	}
 	stubStartChecks(t, []onboard.Result{
 		{Name: "pr workflow", Status: onboard.Fail, Detail: "none", Fix: "add ci.yml"},
-		{Name: "coding cli", Status: onboard.Fail, Detail: "signed out", Fix: "run: claude auth login"},
+		{Name: "start claude", Status: onboard.Fail, Detail: "signed out", Fix: "run: claude auth login"},
 		{Name: "base protection", Status: onboard.Warn, Detail: "none", Fix: "optional"},
 	})
 	var out, errBuf bytes.Buffer
