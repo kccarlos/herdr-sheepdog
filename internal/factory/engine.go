@@ -738,11 +738,19 @@ func (e *Engine) execMergeOnly(_ context.Context, _ string, s *flow.State, ti in
 	return fmt.Sprintf("H moved from %s to merge-only tip %s", from, f.Tip), false, nil
 }
 
-func bullets(items []string) string {
+func bullets(items []flow.Outcome) string {
 	if len(items) == 0 {
 		return "(none)"
 	}
-	return "- " + strings.Join(items, "\n- ")
+	lines := make([]string, len(items))
+	for i, o := range items {
+		if o.ProvedBy != "" {
+			lines[i] = "- " + o.Text + " (proved by: " + o.ProvedBy + ")"
+		} else {
+			lines[i] = "- " + o.Text
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // execPushPR is N26: push H and make sure one PR is open for the branch.

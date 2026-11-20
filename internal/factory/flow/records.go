@@ -3,7 +3,10 @@
 // (docs/dev/engine-v2/design.md sections 2.1 and 13).
 package flow
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Roles of Slice 1 (design.md 9.1).
 const (
@@ -50,13 +53,40 @@ type Wake struct {
 	At    time.Time `json:"at"`
 }
 
+// Outcome is one verifiable result of a task (design.md 3, 11.7; prompts.md 3.1):
+// what is true when done and how it will be proved (cmd:, test:, or manual:).
+type Outcome struct {
+	Text     string `json:"text"`
+	ProvedBy string `json:"proved_by"`
+}
+
+// UnmarshalJSON accepts both {text, proved_by} and legacy plain-string
+// outcomes from stored state written before PR 3.2.
+func (o *Outcome) UnmarshalJSON(data []byte) error {
+	if len(data) > 0 && data[0] == '"' {
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return err
+		}
+		*o = Outcome{Text: s}
+		return nil
+	}
+	type alias Outcome
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	*o = Outcome(a)
+	return nil
+}
+
 // Task is a planned task. It has no phase field: rows derive where it is.
 type Task struct {
-	ID       string   `json:"id"`
-	Title    string   `json:"title"`
-	Brief    string   `json:"brief"`
-	Outcomes []string `json:"outcomes"`
-	After    []string `json:"after,omitempty"`
+	ID       string    `json:"id"`
+	Title    string    `json:"title"`
+	Brief    string    `json:"brief"`
+	Outcomes []Outcome `json:"outcomes"`
+	After    []string  `json:"after,omitempty"`
 	// Scope fields of design.md 3, 11.7 (prompts.md 3.1).
 	ForWhom   string `json:"for_whom,omitempty"`
 	IfSkipped string `json:"if_skipped,omitempty"`

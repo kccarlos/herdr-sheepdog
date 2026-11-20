@@ -272,18 +272,26 @@ func (e *Engine) runByTokenLocked(token string) (string, flow.State, string, int
 	return "", flow.State{}, "", -1
 }
 
-// planTask is the part of design.md 3's plan record that slice 3.1 accepts.
+// planOutcome is the JSON shape of an outcome accepted in plans, amends and
+// split children (design.md 3, 11.7). Unlike flow.Outcome it never accepts
+// legacy plain strings.
+type planOutcome struct {
+	Text     string `json:"text"`
+	ProvedBy string `json:"proved_by"`
+}
+
+// planTask is the part of design.md 3's plan record that slice 3.2 accepts.
 type planTask struct {
-	ID        string   `json:"id"`
-	Title     string   `json:"title"`
-	Brief     string   `json:"brief"`
-	ForWhom   string   `json:"for_whom"`
-	IfSkipped string   `json:"if_skipped"`
-	Smallest  string   `json:"smallest"`
-	NotDoing  string   `json:"not_doing"`
-	Outcomes  []string `json:"outcomes"`
-	After     []string `json:"after"`
-	Estimate  int      `json:"estimate_lines"`
+	ID        string        `json:"id"`
+	Title     string        `json:"title"`
+	Brief     string        `json:"brief"`
+	ForWhom   string        `json:"for_whom"`
+	IfSkipped string        `json:"if_skipped"`
+	Smallest  string        `json:"smallest"`
+	NotDoing  string        `json:"not_doing"`
+	Outcomes  []planOutcome `json:"outcomes"`
+	After     []string      `json:"after"`
+	Estimate  int           `json:"estimate_lines"`
 }
 
 var conventionalTitleRE = regexp.MustCompile(`^(feat|fix|docs|refactor|test|chore|perf|ci|build|style|revert)(\([A-Za-z0-9._/-]+\))?!?: \S.*$`)
@@ -315,6 +323,36 @@ func checkScope(t planTask) []string {
 		}
 	}
 	return fails
+}
+
+// checkOutcomes is design.md 11.7's Outcomes check (prompts.md 3.1): at least
+// one outcome per task, each with non-empty text and a proved_by of kind
+// cmd:, test:, or manual:.
+func checkOutcomes(id string, raw []planOutcome) ([]flow.Outcome, []string) {
+	if len(raw) == 0 {
+		return nil, []string{fmt.Sprintf("outcomes: task %q needs at least one outcome", id)}
+	}
+	out := make([]flow.Outcome, len(raw))
+	var fails []string
+	for i, o := range raw {
+		text, pb := cleanRejectWhy(o.Text), cleanRejectWhy(o.ProvedBy)
+		label := fmt.Sprintf("outcome %q", text)
+		if text == "" {
+			label = fmt.Sprintf("outcome %d", i+1)
+			fails = append(fails, fmt.Sprintf("outcomes: task %q %s needs text", id, label))
+		}
+		if pb == "" {
+			fails = append(fails, fmt.Sprintf("outcomes: task %q %s needs proved_by (cmd:, test:, or manual:)", id, label))
+		} else if kind, rest, ok := strings.Cut(pb, ":"); !ok || (kind != "cmd" && kind != "test" && kind != "manual") {
+			fails = append(fails, fmt.Sprintf("outcomes: task %q %s has unknown proved_by %q (use cmd:, test:, or manual:)", id, label, pb))
+		} else if rest = strings.TrimSpace(rest); rest == "" {
+			fails = append(fails, fmt.Sprintf("outcomes: task %q %s proved_by %q needs a value after %s:", id, label, pb, kind))
+		} else {
+			pb = kind + ": " + rest
+		}
+		out[i] = flow.Outcome{Text: text, ProvedBy: pb}
+	}
+	return out, fails
 }
 
 type planFile struct {
@@ -359,6 +397,7 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, l
 	}
 	ids := map[string]bool{}
 	var newIDs []string
+	outcomes := make([][]flow.Outcome, len(p.Tasks))
 	for i := range p.Tasks {
 		t := &p.Tasks[i]
 		t.ID = strings.TrimSpace(t.ID)
@@ -372,6 +411,9 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, l
 		}
 		fails = append(fails, checkTitle(t.ID, t.Title)...)
 		fails = append(fails, checkScope(*t)...)
+		var oFails []string
+		outcomes[i], oFails = checkOutcomes(t.ID, t.Outcomes)
+		fails = append(fails, oFails...)
 		fails = append(fails, checkEstimate(t.ID, t.Estimate, limit)...)
 	}
 	after := map[string][]string{}
@@ -394,7 +436,7 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, l
 			ID: t.ID, Title: cleanRejectWhy(t.Title), Brief: t.Brief,
 			ForWhom: cleanRejectWhy(t.ForWhom), IfSkipped: cleanRejectWhy(t.IfSkipped),
 			Smallest: cleanRejectWhy(t.Smallest), NotDoing: cleanRejectWhy(t.NotDoing),
-			Outcomes: t.Outcomes, After: t.After, EstimateLines: t.Estimate, SplitFrom: parentID, Attempts: []flow.Attempt{},
+			Outcomes: outcomes[i], After: t.After, EstimateLines: t.Estimate, SplitFrom: parentID, Attempts: []flow.Attempt{},
 		}
 	}
 	if id := cycleAt(p.Tasks, after); id != "" {
@@ -602,11 +644,11 @@ func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args js
 // amendTask is one entry of plan amend for an existing task: only the
 // fields named change.
 type amendTask struct {
-	ID       string    `json:"id"`
-	Title    *string   `json:"title"`
-	Brief    *string   `json:"brief"`
-	Outcomes *[]string `json:"outcomes"`
-	Estimate *int      `json:"estimate_lines"`
+	ID       string         `json:"id"`
+	Title    *string        `json:"title"`
+	Brief    *string        `json:"brief"`
+	Outcomes *[]planOutcome `json:"outcomes"`
+	Estimate *int           `json:"estimate_lines"`
 }
 
 // acceptAmendLocked is plan amend (design.md 3.1, 4.9, 7.2): changes to
@@ -633,8 +675,9 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		fails = append(fails, "shape: the amend has no tasks")
 	}
 	type change struct {
-		ti int
-		c  amendTask
+		ti       int
+		c        amendTask
+		outcomes []flow.Outcome
 	}
 	var changes []change
 	var fresh []json.RawMessage
@@ -648,17 +691,29 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		}
 		d := json.NewDecoder(bytes.NewReader(raw))
 		d.DisallowUnknownFields()
-		switch err := d.Decode(&c); {
-		case err != nil:
+		if err := d.Decode(&c); err != nil {
 			fails = append(fails, fmt.Sprintf("shape: task %q: %s (only title, brief, outcomes and estimate_lines change)", s.Tasks[ti].ID, strings.TrimPrefix(err.Error(), "json: ")))
-		case flow.Ended(s.Tasks[ti]):
+			continue
+		}
+		if flow.Ended(s.Tasks[ti]) {
 			fails = append(fails, fmt.Sprintf("task %q has ended and is not changed", s.Tasks[ti].ID))
-		case c.Title != nil && checkTitle(s.Tasks[ti].ID, *c.Title) != nil:
+			continue
+		}
+		before := len(fails)
+		var outs []flow.Outcome
+		if c.Title != nil {
 			fails = append(fails, checkTitle(s.Tasks[ti].ID, *c.Title)...)
-		case c.Estimate != nil && checkEstimate(s.Tasks[ti].ID, *c.Estimate, s.Settings.TaskSizeLimit) != nil:
+		}
+		if c.Outcomes != nil {
+			var oFails []string
+			outs, oFails = checkOutcomes(s.Tasks[ti].ID, *c.Outcomes)
+			fails = append(fails, oFails...)
+		}
+		if c.Estimate != nil {
 			fails = append(fails, checkEstimate(s.Tasks[ti].ID, *c.Estimate, s.Settings.TaskSizeLimit)...)
-		default:
-			changes = append(changes, change{ti, c})
+		}
+		if len(fails) == before {
+			changes = append(changes, change{ti, c, outs})
 		}
 	}
 	var added []flow.Task
@@ -682,8 +737,8 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		if c.Brief != nil && *c.Brief != t.Brief {
 			t.Brief, what = *c.Brief, append(what, "brief")
 		}
-		if c.Outcomes != nil && !slices.Equal(*c.Outcomes, t.Outcomes) {
-			t.Outcomes, what = *c.Outcomes, append(what, "outcomes")
+		if c.Outcomes != nil && !slices.Equal(ch.outcomes, t.Outcomes) {
+			t.Outcomes, what = ch.outcomes, append(what, "outcomes")
 		}
 		a := flow.OpenAttempt(*t)
 		var capNote string
