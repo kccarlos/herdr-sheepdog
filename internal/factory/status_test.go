@@ -237,3 +237,47 @@ func TestProjectStatusSubfolderAndCorruptState(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusFreshN40AndAllRowsHaveStage(t *testing.T) {
+	for _, r := range flow.TaskRows {
+		if r.Stage == "" || taskRows[r.ID].Stage != r.Stage {
+			t.Errorf("row %s: Stage=%q, taskRows=%q", r.ID, r.Stage, taskRows[r.ID].Stage)
+		}
+	}
+	now := time.Now()
+	st := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "proj-n40", Folder: "/tmp/n40", Started: true},
+		Tasks: []flow.Task{
+			{ID: "T1", Title: "feat: behind base", Attempts: []flow.Attempt{{
+				BaseCommit: "000", Ready: []flow.Ready{{Head: "h1"}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+				},
+			}}},
+			{ID: "T2", Title: "feat: review required", Attempts: []flow.Attempt{{
+				BaseCommit: "000", Ready: []flow.Ready{{Head: "h2"}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: "h2", Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: "h2", Verdict: flow.VerdictPass},
+				},
+			}}},
+			{ID: "T3", Title: "feat: ci recap", Recaps: []flow.Recap{{Trigger: flow.TriggerCI, Allowed: []string{"split", "drop"}}}},
+		},
+	}
+	logs := []LogLine{
+		{Seq: 1, At: now.Add(-2 * time.Minute), By: "engine", Task: "T1", Rule: "N40", Why: "PR is behind the base: update branch with a merge commit"},
+		{Seq: 2, At: now.Add(-2 * time.Minute), By: "engine", Task: "T2", Rule: "N37", Why: "GitHub requires an approving review"},
+		{Seq: 3, At: now.Add(-2 * time.Minute), By: "engine", Task: "T3", Rule: "N13", Why: "3 commits failed CI in the last hour"},
+	}
+	got := StatusViewOf(st, logs)
+	for _, ts := range got {
+		if ts.Stale {
+			t.Errorf("%s (%s): Stale=true, want false (stage=%s)", ts.ID, ts.Rule, ts.Stage)
+		}
+		if line := FormatStatusLine(ts); strings.Contains(line, "(last logged") || !strings.Contains(line, ts.Rule) {
+			t.Errorf("%s formatted = %q, want live %s line", ts.ID, line, ts.Rule)
+		}
+	}
+}

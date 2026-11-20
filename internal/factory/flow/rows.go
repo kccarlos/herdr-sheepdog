@@ -167,6 +167,9 @@ func mergeAsked(in In) bool           { return Count(in.acts(), key(AskMerge, he
 func checksGrace(in In) time.Duration {
 	return time.Duration(in.Settings.ChecksGraceMinutes) * time.Minute
 }
+func ciStalled(in In) time.Duration {
+	return time.Duration(in.Settings.CIStalledMinutes) * time.Minute
+}
 func checksAbsentInGrace(in In) bool {
 	return in.Facts.PR.Checks == ChecksAbsent && in.Now.Sub(in.Facts.PR.HeadSince) < checksGrace(in)
 }
@@ -204,15 +207,15 @@ var TaskRows = []Row[In]{
 	// task. It holds only for the pass that queues its wake, so the rows
 	// below go on afterwards. (A retry-closed attempt's worktree is cleaned
 	// by N1 only once the task ends; slices 1 and 2 keep it.)
-	{ID: "S2", WaitsOn: "the coordinator", When: func(in In) bool { _, k := stuckWake(in); return k != nil },
+	{ID: "S2", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { _, k := stuckWake(in); return k != nil },
 		Then: func(in In) Decision {
 			what, k := stuckWake(in)
 			return say(what+" never answered for stuck_minutes", k)(in)
 		}},
-	{ID: "N1", WaitsOn: "nobody", When: ended, Then: func(in In) Decision {
+	{ID: "N1", WaitsOn: "nobody", Stage: "done", When: ended, Then: func(in In) Decision {
 		return say("ended: stop its runs and clean up", once(in.acts(), AskCleanup))(in)
 	}},
-	{ID: "N2", WaitsOn: "nobody", When: prMerged, Then: func(in In) Decision {
+	{ID: "N2", WaitsOn: "nobody", Stage: "done", When: prMerged, Then: func(in In) Decision {
 		asked := once(in.acts(), AskMarkDone)
 		if !hasAccept(in, in.Facts.PR.Head) {
 			asked = append(asked, once(in.acts(), key(AskWake, "merged_outside_bar"))...)
@@ -221,16 +224,16 @@ var TaskRows = []Row[In]{
 	}},
 	// N3 asks while a run is recorded, not once: the stop clears the
 	// records, and a failed stop is tried again next pass.
-	{ID: "N3", WaitsOn: "the coordinator", When: func(in In) bool { return in.Task.Parked }, Then: func(in In) Decision {
+	{ID: "N3", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return in.Task.Parked }, Then: func(in In) Decision {
 		if a := in.attempt(); a != nil && (a.RunID != "" || a.Review != nil) {
 			return say("parked: stop its runs", []string{AskStopRuns})(in)
 		}
 		return say("parked")(in)
 	}},
-	{ID: "N4", WaitsOn: "the coordinator", When: prClosed, Then: func(in In) Decision {
+	{ID: "N4", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: prClosed, Then: func(in In) Decision {
 		return say("the PR was closed without merging (never reopened; retry starts a new attempt)", once(in.acts(), key(AskWake, "pr_closed")))(in)
 	}},
-	{ID: "S1", WaitsOn: "the owner", When: all(hasAttempt, anyOf(workerGone, all(ladderSays(Review), reviewGone))), Then: func(in In) Decision {
+	{ID: "S1", WaitsOn: "the owner", Stage: "blocked_or_failed", When: all(hasAttempt, anyOf(workerGone, all(ladderSays(Review), reviewGone))), Then: func(in In) Decision {
 		who := "worker"
 		if !workerGone(in) {
 			who = "reviewer"
@@ -239,14 +242,14 @@ var TaskRows = []Row[In]{
 	}},
 	// N6 tells the worker of a size or ci recap once to stop (it has no
 	// recap-written report yet, so nothing waits for one).
-	{ID: "N6", WaitsOn: "the coordinator", When: recapOpen, Then: func(in In) Decision {
+	{ID: "N6", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: recapOpen, Then: func(in In) Decision {
 		n, tell, trig := len(in.Task.Recaps), []string(nil), OpenRecap(in.Task).Trigger
 		if (trig == TriggerSize || trig == TriggerCI) && in.Facts.Worker.State != RunNone {
 			tell = once(in.acts(), key(AskTellStop, n))
 		}
 		return say("a recap is open", once(in.acts(), key(AskWake, "recap", n)), tell)(in)
 	}},
-	{ID: "N7", WaitsOn: "the worker; then the coordinator", When: all(hasAttempt, anyOf(tipDivergedOrUncovered, PRHeadDivergedOrForeign, prHeadMergeOnlyUnknown)), Then: func(in In) Decision {
+	{ID: "N7", WaitsOn: "the worker; then the coordinator", Stage: "blocked_or_failed", When: all(hasAttempt, anyOf(tipDivergedOrUncovered, PRHeadDivergedOrForeign, prHeadMergeOnlyUnknown)), Then: func(in In) Decision {
 		h := headH(in)
 		if !tipDivergedOrUncovered(in) && !PRHeadDivergedOrForeign(in) {
 			if in.Now.Sub(in.Facts.PR.HeadSince) >= checksGrace(in) {
@@ -264,11 +267,11 @@ var TaskRows = []Row[In]{
 		}
 		return say(N7Why(in, true), once(in.acts(), key(AskWake, "diverged", h)))(in)
 	}},
-	{ID: "N8", WaitsOn: "the coordinator", When: func(in In) bool { return hasAttempt(in) && in.attempt().NothingToChange != "" }, Then: func(in In) Decision {
+	{ID: "N8", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return hasAttempt(in) && in.attempt().NothingToChange != "" }, Then: func(in In) Decision {
 		a := in.attempt()
 		return say("the worker says nothing to change: "+a.NothingToChange, once(in.acts(), key(AskWake, "nothing_to_change", len(a.Rounds))))(in)
 	}},
-	{ID: "N9", WaitsOn: "dependencies", When: all(noAttempt, anyOf(depsNotDone, depsDropped)), Then: func(in In) Decision {
+	{ID: "N9", WaitsOn: "dependencies", Stage: "waiting_on_dep", When: all(noAttempt, anyOf(depsNotDone, depsDropped)), Then: func(in In) Decision {
 		var asked []string
 		for _, dep := range in.Facts.DepsDropped {
 			asked = append(asked, once(in.acts(), key(AskWake, "dep_dropped", dep))...)
@@ -276,12 +279,12 @@ var TaskRows = []Row[In]{
 		return say(n9Why(in), asked)(in)
 	}},
 	// N10: milestone and quota (no worker candidate resolves) come in later slices (design.md 4.2).
-	{ID: "N10", WaitsOn: "a slot", When: all(noAttempt, noSlot), Then: say("no slot is free")},
-	{ID: "N11", WaitsOn: "the engine", When: noAttempt, Then: func(in In) Decision {
+	{ID: "N10", WaitsOn: "a slot", Stage: "queued", When: all(noAttempt, noSlot), Then: say("no slot is free")},
+	{ID: "N11", WaitsOn: "the engine", Stage: "queued", When: noAttempt, Then: func(in In) Decision {
 		return say("no attempt: start one", once(in.acts(), AskNewAttempt))(in)
 	}},
 	// N12 has no "no owner override covers H" clause until slice 7.
-	{ID: "N12", WaitsOn: "the coordinator", When: func(in In) bool {
+	{ID: "N12", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool {
 		return hasAttempt(in) && (in.Facts.LinesTimeout || in.Facts.Lines > in.attempt().SizeCap)
 	},
 		Then: func(in In) Decision {
@@ -292,14 +295,14 @@ var TaskRows = []Row[In]{
 			return say(why, once(in.acts(), key(AskSizeRecap, len(in.Task.Recaps))))(in)
 		}},
 	// N13 has no "no owner override covers H" clause until slice 7.
-	{ID: "N13", WaitsOn: "the coordinator", When: func(in In) bool {
+	{ID: "N13", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool {
 		return hasAttempt(in) && !ladderSays(Passed)(in) && in.Settings.CIFailsPerHour > 0 && ciFailCount(in) >= in.Settings.CIFailsPerHour
 	},
 		Then: func(in In) Decision {
 			why := fmt.Sprintf("%d commits failed CI in the last hour (limit %d)", ciFailCount(in), in.Settings.CIFailsPerHour)
 			return say(why, once(in.acts(), key(AskCIRecap, len(in.Task.Recaps))))(in)
 		}},
-	{ID: "N20", WaitsOn: "the engine", When: func(in In) bool {
+	{ID: "N20", WaitsOn: "the engine", Stage: "working", When: func(in In) bool {
 		return hasAttempt(in) && ((tipAhead(in) && in.Facts.TipMergeOnly) || prHeadAheadMergeOnly(in))
 	},
 		Then: func(in In) Decision {
@@ -308,32 +311,32 @@ var TaskRows = []Row[In]{
 			}
 			return say("the PR head is ahead of H by merges of the base only: H moves to it, no round", once(in.acts(), key(AskMergeOnly, in.Facts.PR.Head)))(in)
 		}},
-	{ID: "N22", WaitsOn: "the worker", When: ladderSays(Fix), Then: func(in In) Decision {
+	{ID: "N22", WaitsOn: "the worker", Stage: "working", When: ladderSays(Fix), Then: func(in In) Decision {
 		r := newestCovering(*in.attempt(), headH(in))
 		return say("the ladder says fix", ensureRun(in, in.Facts.Worker, AskStartWorker),
 			once(in.acts(), key(AskTellFindings, r.N)))(in)
 	}},
-	{ID: "N23", WaitsOn: "the worker", When: all(hasAttempt, anyOf(noReady, tipAhead)), Then: func(in In) Decision {
+	{ID: "N23", WaitsOn: "the worker", Stage: "working", When: all(hasAttempt, anyOf(noReady, tipAhead)), Then: func(in In) Decision {
 		return say("the worker is working", ensureRun(in, in.Facts.Worker, AskStartWorker))(in)
 	}},
-	{ID: "N25", WaitsOn: "the coordinator", When: ladderSays(RecapAnswer), Then: func(in In) Decision {
+	{ID: "N25", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: ladderSays(RecapAnswer), Then: func(in In) Decision {
 		return say("the ladder says recap", once(in.acts(), key(AskOpenRecap, "review")))(in)
 	}},
-	{ID: "N26", WaitsOn: "the engine", When: all(hasAttempt, anyOf(noPR, all(prOpen, prBehindH))), Then: func(in In) Decision {
+	{ID: "N26", WaitsOn: "the engine", Stage: "working", When: all(hasAttempt, anyOf(noPR, all(prOpen, prBehindH))), Then: func(in In) Decision {
 		if unanswered(in) { // "no PR" from a failed read is a guess: wait, so the once-only push is not spent
 			return say("GitHub did not answer: wait for a snapshot")(in)
 		}
 		return say("GitHub does not have H", once(in.acts(), key(AskPushPR, headH(in))))(in)
 	}},
-	{ID: "N29", WaitsOn: "the reviewer", When: ladderSays(Review), Then: func(in In) Decision {
+	{ID: "N29", WaitsOn: "the reviewer", Stage: "working", When: ladderSays(Review), Then: func(in In) Decision {
 		start := key(AskStartReview, nextRound(*in.attempt()), headH(in))
 		return say("the ladder says review", ensureRun(in, in.Facts.Reviewer, start))(in)
 	}},
-	{ID: "N32", WaitsOn: "the worker", When: ciReady(mergeConflict), Then: func(in In) Decision {
+	{ID: "N32", WaitsOn: "the worker", Stage: "working", When: ciReady(mergeConflict), Then: func(in In) Decision {
 		return say("PR conflicts with the base: tell the worker once to merge the base (never rebase)",
 			ensureRun(in, in.Facts.Worker, AskStartWorker), once(in.acts(), key(AskTellConflict, headH(in))))(in)
 	}},
-	{ID: "N33", WaitsOn: "CI", When: ciReady(checksRed), Then: func(in In) Decision {
+	{ID: "N33", WaitsOn: "CI", Stage: "ci", When: ciReady(checksRed), Then: func(in In) Decision {
 		h := headH(in)
 		if asks, wait := rerunOrWait(in, h); len(asks) > 0 || wait {
 			return say("checks red: re-run failed jobs, or wait for the re-run or for checks still running", asks)(in)
@@ -344,7 +347,7 @@ var TaskRows = []Row[In]{
 		}
 		return say("checks red at H: tell the worker once per failing run", ensureRun(in, in.Facts.Worker, AskStartWorker), tells)(in)
 	}},
-	{ID: "N34", WaitsOn: "CI", When: ciReady(anyOf(checksStoppedExt, checksStoppedTimeout, checksStoppedUnknown)), Then: func(in In) Decision {
+	{ID: "N34", WaitsOn: "CI", Stage: "ci", When: ciReady(anyOf(checksStoppedExt, checksStoppedTimeout, checksStoppedUnknown)), Then: func(in In) Decision {
 		h := headH(in)
 		if !checksStoppedExt(in) { // a time limit, or a cancel with no evidence of who: one wake for both, never a re-run
 			return say("a CI job was stopped by its own time limit or for an unread reason ("+string(in.Facts.PR.Checks)+")",
@@ -355,7 +358,7 @@ var TaskRows = []Row[In]{
 		}
 		return say("checks cancelled from outside with no re-runs left", once(in.acts(), key(AskWake, "checks_stopped", "external", h)))(in)
 	}},
-	{ID: "N35", WaitsOn: "CI", When: ciReady(all(checksAbsentPastGrace, checksSeenNone)), Then: func(in In) Decision {
+	{ID: "N35", WaitsOn: "CI", Stage: "ci", When: ciReady(all(checksAbsentPastGrace, checksSeenNone)), Then: func(in In) Decision {
 		h := headH(in)
 		dk := key(AskDispatchCI, h)
 		act := LastAct(in.acts(), dk)
@@ -368,7 +371,7 @@ var TaskRows = []Row[In]{
 		return say("no checks past checks_grace_minutes: push a change that triggers a workflow, ask for an owner override, or drop the task",
 			once(in.acts(), key(AskWake, "no_checks", h)))(in)
 	}},
-	{ID: "N38", WaitsOn: "the base branch", When: ciReady(all(baseRed, anyOf(prBehindBase, prBehindUnknown))), Then: func(in In) Decision {
+	{ID: "N38", WaitsOn: "the base branch", Stage: "ci", When: ciReady(all(baseRed, anyOf(prBehindBase, prBehindUnknown))), Then: func(in In) Decision {
 		if in.Facts.BaseRedSpell == "" || in.Now.Sub(in.Facts.BaseRedSince) < time.Duration(in.Settings.MainRedMinutes)*time.Minute {
 			return say("the base branch is red: holding branch updates and merges")(in)
 		}
@@ -381,19 +384,23 @@ var TaskRows = []Row[In]{
 		return say("the base branch has been red past main_red_minutes: tell the oldest held task's worker to merge the base and say ready (or land a fix PR directly)",
 			ensureRun(in, in.Facts.Worker, AskStartWorker), tell, once(in.acts(), key(AskWake, "base_red_held", spell)))(in)
 	}},
-	{ID: "N36", WaitsOn: "CI", When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown)),
+	{ID: "N36", WaitsOn: "CI", Stage: "ci", When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown)),
 		Then: func(in In) Decision {
+			// Stands in for the ci_stalled alert until slice 5b builds the alerts table.
+			if checksPend(in) && prHeadIsH(in) && answered(in) && githubAvail(in) && !in.Facts.PR.HeadSince.IsZero() && in.Now.Sub(in.Facts.PR.HeadSince) >= ciStalled(in) {
+				return say("checks pending past ci_stalled_minutes", once(in.acts(), key(AskWake, "ci_stalled", headH(in))))(in)
+			}
 			if prBehindUnknown(in) && !anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn)(in) && in.Now.Sub(in.Facts.PR.HeadSince) >= checksGrace(in) {
 				return say("cannot tell if PR is behind the base past checks_grace_minutes", once(in.acts(), key(AskWake, "behind_unknown", headH(in))))(in)
 			}
 			return say("checks pending or unreadable, or mergeable/behind unknown")(in)
 		}},
-	{ID: "N37", WaitsOn: "a GitHub approval", When: ciReady(reviewRequired), Then: func(in In) Decision {
+	{ID: "N37", WaitsOn: "a GitHub approval", Stage: "ci", When: ciReady(reviewRequired), Then: func(in In) Decision {
 		return say("GitHub requires an approving review (branch protection / required approving reviews); nobody in the factory can approve",
 			once(in.acts(), key(AskWake, "review_required", headH(in))))(in)
 	}},
-	{ID: "N39", WaitsOn: "the worker", When: all(ladderSays(Passed), prOpen, working), Then: say("the worker is working")},
-	{ID: "N40", WaitsOn: "GitHub", When: ciReady(prBehindBase), Then: func(in In) Decision {
+	{ID: "N39", WaitsOn: "the worker", Stage: "working", When: all(ladderSays(Passed), prOpen, working), Then: say("the worker is working")},
+	{ID: "N40", WaitsOn: "GitHub", Stage: "ci", When: ciReady(prBehindBase), Then: func(in In) Decision {
 		h := headH(in)
 		uk := key(AskUpdateBranch, h)
 		act := LastAct(in.acts(), uk)
@@ -408,15 +415,15 @@ var TaskRows = []Row[In]{
 		}
 		return say("branch update did not move the PR head within checks_grace_minutes: failed try", []string{key(AskFailUpdate, h)})(in)
 	}},
-	{ID: "N41", WaitsOn: "GitHub", When: all(ladderSays(Passed), mergeAsked, prOpen, notBehind),
+	{ID: "N41", WaitsOn: "GitHub", Stage: "ci", When: all(ladderSays(Passed), mergeAsked, prOpen, notBehind),
 		Then: say("a merge was asked for H")},
-	{ID: "N42", WaitsOn: "GitHub",
+	{ID: "N42", WaitsOn: "GitHub", Stage: "ci",
 		When: all(ladderSays(Passed), prOpen, prHeadIsH, tipAtOrBehindH, answered, githubAvail, checksGreen, mergeClean, noReviewRequired, notBehind, notWorking),
 		Then: func(in In) Decision {
 			h := headH(in)
 			return say("passed, green and mergeable at H", once(in.acts(), key(AskAccept, h)), once(in.acts(), key(AskMerge, h)))(in)
 		}},
-	{ID: "N43", WaitsOn: "the coordinator", Then: func(in In) Decision {
+	{ID: "N43", WaitsOn: "the coordinator", Stage: "blocked_or_failed", Then: func(in In) Decision {
 		// Once per stall: H and the facts that left it unmatched.
 		p := in.Facts.PR
 		return say("no rule matched", once(in.acts(), key(AskWake, "no_rule_matched", headH(in), p.State, p.Checks, p.Mergeable, in.Facts.TipRel)))(in)

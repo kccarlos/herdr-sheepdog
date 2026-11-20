@@ -28,7 +28,7 @@
 | 2 | The review loop | A task that fails review is fixed and reviewed again; two passing rounds are needed; a worker can reject a finding; a task that will not converge, or grows past its size, stops, the coordinator is woken and decides | 1,500 | — |
 | 3 | Quality up front | A plan with no scope fields or no proof for an outcome is refused; a worker's "ready" runs its proofs and is refused when one fails; the real templates of prompts.md | 1,050 | — |
 | 4 | Several tasks, real GitHub | Three tasks with a dependency run with a slot limit, and `sheepdog factory status` shows what each waits on; a PR behind its base is updated; a flaky check is re-run once; a red base holds merges; a PR merged or closed by hand is handled | 1,400 | S0.5 |
-| 5a | Leave it alone: agents | Kill a worker, the reviewer, the coordinator or the daemon: the factory carries on. An agent stuck at a screen or a dialog is restarted | 1,300 | S0.2, S0.8 |
+| 5a | Leave it alone: agents | Kill a worker, the reviewer, the coordinator or the daemon: the factory carries on. An agent stuck at a screen or a dialog is restarted | 1,450 | S0.2, S0.8 |
 | 5b | Leave it alone: the machine | The daemon runs as a service; an empty quota pool stops the factory and the reset starts it; a second CLI reviews; stray terminals and leftovers are reported | 1,000 | S0.4 |
 | 6 | The owner's asks | A worker's question goes to the coordinator; a decision only the owner can make appears as a card on the phone and its answer unblocks the task; stop and start by the owner | 800 | S0.10 |
 | 7 | The override | "Merge these now": one card listing two open PRs; a yes merges them without waiting for CI or review | 300 | — |
@@ -200,14 +200,14 @@ Each is planned in PRs only at the review point before it. "Done when" lines are
 - **Brings in.** The run table (section 5) with its matrix, replacing slice 1's status reading; "making sure a run is alive" (4.8), replacing the stand-in row and slice 2's stuck row; keys, back-off and N5 with `retry` (section 8); N3; N14 (the time limit); the project rules for the coordinator (J1 to J10, J12 to J14; rotation is slice 13); the invariants I1 to I5; `say`; the clock rule.
 - **Done when.** A project has exactly one coordinator, and a replacement starts in the repo folder (KB-COO-1, KB-COO-4). A restart ends the replaced agent's whole process group (KB-COO-12). A worker that died mid-turn is seen as gone (KB-RUN-8). A start stuck at a trust or sign-in screen is told apart from a blank one (KB-RUN-28, KB-RUN-43). A restart of the daemon after every step of every history gives the same end. A failing action backs off and ends at N5, never in a loop.
 - **Its review question.** How many restarts did a night's run need, and which of them were the engine's own doing?
-- **Size guess.** 1,300. **Spikes first.** S0.2 (session ids and resume), S0.8 (what herdr-core can report).
+- **Size guess.** 1,450. **Spikes first.** S0.2 (session ids and resume), S0.8 (what herdr-core can report).
 - **From review point 2.** Three stalls of slices 1 and 2 end here. S1 asks `stop_task`, which is not built, so a task whose worker vanished waits silently, and S2 does not see it: the run table and 4.8 replace both. A coordinator that answers a wake with a question and applies no plan waits forever: the project rules (J9, J13) must catch it. A failed merge, cleanup or PR close act is tried again only by the owner's start: `retry` and N5 replace that.
 
 - **From review point 4.** Cut into PRs below; spikes S0.2 and S0.8 run before 5a.1. The size guess rises to 1,450: slice 4 ran 1.09 times its estimate in net lines.
 
 | # | PR | Lines | Done when (and what can be watched) |
 |---|---|---|---|
-| 5a.0 | Two slice 4 leftovers: each row's stage comes from the row itself, so `status` needs no hand-kept map (N4, N7, N13, N32, N37, N38, N40 show live); N36 wakes the coordinator once when a check stays pending past `ci_stalled_minutes` | 80 | **A fresh line from any row is never shown as stale; a check that never finishes wakes the coordinator once** |
+| 5a.0 | Two slice 4 leftovers: each row's stage comes from the row itself, so `status` needs no hand-kept map (N13, N32, N37 and N40 were missing one); N36 wakes the coordinator once when a check stays pending past `ci_stalled_minutes` | 80 | **A fresh line from any row is never shown as stale; a check that never finishes wakes the coordinator once** |
 | 5a.1 | The run table (section 5) with its matrix, replacing slice 1's status reading | 250 | **A worker that died mid-turn is seen as gone** (KB-RUN-8); a start stuck at a trust or sign-in screen is told apart from a blank one (KB-RUN-28, KB-RUN-43) |
 | 5a.2 | "Making sure a run is alive" (4.8), replacing the stand-in row, S1's `stop_task` and slice 2's stuck row; N3 | 200 | **The owner kills a worker, then a reviewer: each comes back and the task finishes** |
 | 5a.3 | Keys, back-off and N5 with `retry` (section 8) for every act: merge, cleanup, PR close, update-branch, tells. Also: a red, green, red base at one commit wakes again; two failed N38 tells wake once per spell; a second N7 problem at one `H` is told; a PR on another base stops being pushed; failing commits from an old attempt do not count for N13; two runs of one workflow on a head stay apart in the rollup | 250 | **A failing action backs off and ends at N5, never in a loop** |
@@ -225,7 +225,6 @@ Each is planned in PRs only at the review point before it. "Done when" lines are
 - **Its review question.** Did anything on the machine (a consent prompt, an update, a full disk) stop the run in a way no alert named?
 - **Size guess.** 1,000. **Spike first.** S0.4 (the daemon under launchd).
 - **From review point 3.** Codex as a reviewer is built (PR #700, opt-in `second_reviewer`, design.md 9.2); this slice still brings `Resolve`, candidate lists and Codex in other roles. The sweep also lists the shared Codex home (`<data_dir>/factory/codex-home`), which gathers Codex's session and log files with no cleanup, and which concurrent Codex runs share. One 15 s git budget covers a pass's worktree inspection and its changed-lines read, so a slow inspection leaves the read little time, and a timeout inside the inspection skips the pass instead of counting as over `size_cap`: the per-call time limits of this slice must cover both.
-
 
 ### Slice 6: the owner's asks
 

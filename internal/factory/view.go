@@ -76,10 +76,10 @@ func projectViewOf(s flow.State) ProjectView {
 	return ProjectView{ID: s.Project.ID, Folder: s.Project.Folder, Goal: s.Project.Goal, Running: s.Project.Started, Counts: counts}
 }
 
-var taskRowWaits = func() map[string]string {
-	m := make(map[string]string, len(flow.TaskRows))
+var taskRows = func() map[string]flow.Row[flow.In] {
+	m := make(map[string]flow.Row[flow.In], len(flow.TaskRows))
 	for _, r := range flow.TaskRows {
-		m[r.ID] = r.WaitsOn
+		m[r.ID] = r
 	}
 	return m
 }()
@@ -89,7 +89,7 @@ func lastTaskRows(logs []LogLine) (lastLog, lastRow map[string]LogLine) {
 	for _, l := range logs {
 		if l.Task != "" {
 			lastLog[l.Task] = l
-			if _, ok := taskRowWaits[l.Rule]; ok {
+			if _, ok := taskRows[l.Rule]; ok {
 				lastRow[l.Task] = l
 			}
 		}
@@ -211,45 +211,45 @@ func (e *Engine) loadProjectCopy(project string) (flow.State, []LogLine, error) 
 	return s, logs, nil
 }
 
-// stateStage maps slice-2 engine states onto design.md 4.11 stages and default why text.
-var stateStage = map[string][2]string{
-	"done": {"done", ""}, "parked": {"blocked_or_failed", "Parked, waiting on the coordinator"}, "nothing_to_change": {"blocked_or_failed", "Worker reported nothing to change, waiting on the coordinator"},
-	"waiting_on_dep": {"waiting_on_dep", ""}, "queued": {"queued", "Queued to start"}, "working": {"working", "Worker is working"},
-	flow.Review: {"working", ""}, flow.Fix: {"working", "Waiting on worker to fix review findings"}, flow.RecapAnswer: {"blocked_or_failed", "Review did not converge, waiting on recap"},
-	flow.Passed: {"ci", "Waiting on CI and merge"}, flow.NoLadderRow: {"blocked_or_failed", "Waiting on the coordinator"},
-}
-
 func taskStageWhy(t flow.Task, tasks []flow.Task, settings flow.Settings, started, baseRed bool, lastRule string) (string, string) {
-	a, st, why := flow.OpenAttempt(t), "", ""
+	a := flow.OpenAttempt(t)
 	notDone, dropped := flow.UnmetDeps(t, tasks)
 	unmet := append(notDone, dropped...)
 	switch {
 	case flow.Ended(t):
-		st = "done"
+		return taskRows["N1"].Stage, ""
 	case t.Parked:
-		st = "parked"
+		return taskRows["N3"].Stage, "Parked, waiting on the coordinator"
 	case flow.OpenRecap(t) != nil:
-		st, why = flow.RecapAnswer, "At "+cmp.Or(flow.OpenRecap(t).Trigger, "a")+" recap, waiting on the coordinator"
+		return taskRows["N6"].Stage, "At " + cmp.Or(flow.OpenRecap(t).Trigger, "a") + " recap, waiting on the coordinator"
 	case a == nil && len(unmet) > 0:
-		st, why = "waiting_on_dep", "Waiting on "+strings.Join(unmet, ", ")
+		return taskRows["N9"].Stage, "Waiting on " + strings.Join(unmet, ", ")
 	case a == nil:
-		st, why = "queued", map[bool]string{true: "Queued to start", false: "Project is stopped"}[started]
+		return taskRows["N10"].Stage, map[bool]string{true: "Queued to start", false: "Project is stopped"}[started]
 	case a.NothingToChange != "":
-		st = "nothing_to_change"
+		return taskRows["N8"].Stage, "Worker reported nothing to change, waiting on the coordinator"
 	case len(a.Ready) == 0:
-		st = "working"
+		return taskRows["N23"].Stage, "Worker is working"
 	default:
-		st = flow.Ladder(flow.In{Task: t, Settings: settings})
-		if st == flow.Review && a.Review != nil && a.Review.Round > 0 {
-			why = fmt.Sprintf("In review round %d", a.Review.Round)
-		} else if st == flow.Review {
-			why = fmt.Sprintf("In review round %d", len(a.Rounds)+1)
-		} else if st == flow.Passed && lastRule == "N38" && baseRed {
-			why = "Waiting on " + taskRowWaits[lastRule]
+		r, d := flow.FirstMatch(flow.LadderRows, flow.In{Task: t, Settings: settings})
+		switch d.Why {
+		case flow.Review:
+			round := len(a.Rounds) + 1
+			if a.Review != nil && a.Review.Round > 0 {
+				round = a.Review.Round
+			}
+			return r.Stage, fmt.Sprintf("In review round %d", round)
+		case flow.Fix:
+			return r.Stage, "Waiting on worker to fix review findings"
+		case flow.RecapAnswer:
+			return r.Stage, "Review did not converge, waiting on recap"
+		case flow.Passed:
+			if lastRule == "N38" && baseRed {
+				return r.Stage, "Waiting on " + taskRows[lastRule].WaitsOn
+			}
+			return r.Stage, "Waiting on CI and merge"
+		default:
+			return r.Stage, "Waiting on the coordinator"
 		}
 	}
-	if info, ok := stateStage[st]; ok {
-		return info[0], cmp.Or(why, info[1])
-	}
-	return "blocked_or_failed", "Waiting on the coordinator"
 }

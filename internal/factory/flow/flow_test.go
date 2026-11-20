@@ -7,7 +7,7 @@ import (
 )
 
 func row(id string, when func(int) bool) Row[int] {
-	return Row[int]{ID: id, WaitsOn: "engine", When: when, Then: func(int) Decision { return Decision{Why: id} }}
+	return Row[int]{ID: id, WaitsOn: "engine", Stage: "working", When: when, Then: func(int) Decision { return Decision{Why: id} }}
 }
 
 var catchAll = row("none", nil)
@@ -39,7 +39,8 @@ func TestCheckTable(t *testing.T) {
 		"no catch-all":    {pos},
 		"catch-all early": {catchAll, pos, catchAll},
 		"no id":           {row("", func(int) bool { return true }), catchAll},
-		"no waits on":     {{ID: "x", When: pos.When, Then: pos.Then}, catchAll},
+		"no waits on":     {{ID: "x", Stage: "working", When: pos.When, Then: pos.Then}, catchAll},
+		"no stage":        {{ID: "x", WaitsOn: "engine", When: pos.When, Then: pos.Then}, catchAll},
 	}
 	for name, rows := range bad {
 		if CheckTable(rows) == nil {
@@ -73,6 +74,7 @@ func TestSettingsRange(t *testing.T) {
 		"retro_after_rounds_with_majors": func(s *Settings, n int) { s.RetroAfterRoundsWithMajors = n },
 		"retro_from_round":               func(s *Settings, n int) { s.RetroFromRound = n },
 		"checks_grace_minutes":           func(s *Settings, n int) { s.ChecksGraceMinutes = n },
+		"ci_stalled_minutes":             func(s *Settings, n int) { s.CIStalledMinutes = n },
 		"main_red_minutes":               func(s *Settings, n int) { s.MainRedMinutes = n },
 		"ci_fails_per_hour":              func(s *Settings, n int) { s.CIFailsPerHour = n },
 		"flake_reruns":                   func(s *Settings, n int) { s.FlakeReruns = n },
@@ -85,6 +87,7 @@ func TestSettingsRange(t *testing.T) {
 		"retro_after_rounds_with_majors": {RetroMajorsMin, RetroMajorsMax},
 		"retro_from_round":               {RetroFromMin, RetroFromMax},
 		"checks_grace_minutes":           {ChecksGraceMin, ChecksGraceMax},
+		"ci_stalled_minutes":             {CIStalledMin, CIStalledMax},
 		"main_red_minutes":               {MainRedMin, MainRedMax},
 		"ci_fails_per_hour":              {CIFailsPerHourMin, CIFailsPerHourMax},
 		"flake_reruns":                   {0, FlakeRerunsMax},
@@ -120,5 +123,13 @@ func TestSettingsRange(t *testing.T) {
 	}
 	if s := (Settings{DispatchWorkflow: "ci.yml"}); !slices.Contains(s.Changed(), "dispatch_workflow ci.yml") {
 		t.Errorf("Changed() = %q, want dispatch_workflow ci.yml", s.Changed())
+	}
+	if def.CIStalledMinutes != 90 {
+		t.Fatalf("DefaultSettings().CIStalledMinutes = %d, want 90", def.CIStalledMinutes)
+	}
+	s2 := DefaultSettings()
+	s2.CIStalledMinutes = 10
+	if !slices.Contains(s2.Changed(), "ci_stalled_minutes 10") {
+		t.Errorf("Changed() = %q, want ci_stalled_minutes 10", s2.Changed())
 	}
 }

@@ -8,12 +8,13 @@ type Decision struct {
 	Why   string   `json:"why"`
 }
 
-// Row is one rule: a condition over F, who the task waits on, and what to
-// ask for. A nil When always holds; only the last row ("no rule matched")
-// may have one.
+// Row is one rule: a condition over F, who the task waits on, the stage it
+// puts a task in, and what to ask for. A nil When always holds; only the last
+// row ("no rule matched") may have one.
 type Row[F any] struct {
 	ID      string
 	WaitsOn string
+	Stage   string
 	When    func(F) bool
 	Then    func(F) Decision
 }
@@ -29,8 +30,8 @@ func FirstMatch[F any](rows []Row[F], f F) (Row[F], Decision) {
 	return Row[F]{}, Decision{}
 }
 
-// CheckTable fails unless every row has an ID, a WaitsOn and a Then, and
-// only the last row is the catch-all (nil When).
+// CheckTable fails unless every row has an ID, a WaitsOn, a Stage and a Then,
+// and only the last row is the catch-all (nil When).
 func CheckTable[F any](rows []Row[F]) error {
 	if len(rows) == 0 {
 		return fmt.Errorf("empty table")
@@ -38,8 +39,8 @@ func CheckTable[F any](rows []Row[F]) error {
 	for i, r := range rows {
 		last := i == len(rows)-1
 		switch {
-		case r.ID == "" || r.WaitsOn == "" || r.Then == nil:
-			return fmt.Errorf("row %d (%q): needs an ID, a WaitsOn and a Then", i, r.ID)
+		case r.ID == "" || r.WaitsOn == "" || r.Stage == "" || r.Then == nil:
+			return fmt.Errorf("row %d (%q): needs an ID, a WaitsOn, a Stage and a Then", i, r.ID)
 		case last && r.When != nil:
 			return fmt.Errorf("last row %q is not the catch-all \"no rule matched\"", r.ID)
 		case !last && r.When == nil:
