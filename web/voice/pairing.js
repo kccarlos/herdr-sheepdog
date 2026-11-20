@@ -175,3 +175,20 @@ export function keyStore(idb) {
     forget: (id) => run('readwrite', (s) => s.delete(id)),
   };
 }
+
+// localPairLink returns the loopback pairing link when this browser is on
+// loopback with no session ticket (device kind "local"), else "".
+export async function localPairLink(fetchFn) {
+  try {
+    const r = await fetchFn('/api/devices/self', { cache: 'no-store' });
+    if (!r.ok) return '';
+    const self = await r.json();
+    if (!self || self.kind !== 'local') return '';
+    const pr = await fetchFn('/api/pair', { cache: 'no-store' });
+    if (!pr.ok) return '';
+    const body = await pr.json();
+    return body.local_link || '';
+  } catch {
+    return '';
+  }
+}

@@ -274,3 +274,33 @@ func TestKindTailscaleRanges(t *testing.T) {
 		}
 	}
 }
+
+func TestLocalLink(t *testing.T) {
+	info := LinkInfo{DaemonID: "abc", Name: "Studio Mac", Pin: "pin_-x", Code: "c0de"}
+	for addr, want := range map[string]string{
+		"127.0.0.1:17779": "127.0.0.1:17779",
+		"localhost:17779": "127.0.0.1:17779",
+		"[::1]:17779":     "[::1]:17779",
+		"0.0.0.0:7777":    "127.0.0.1:7777",
+		"[::]:7777":       "127.0.0.1:7777",
+		":7777":           "127.0.0.1:7777",
+		"192.168.1.20:77": "",
+		"mac.example:77":  "",
+		"":                "",
+	} {
+		if got := LoopbackHostPort(addr); got != want {
+			t.Errorf("LoopbackHostPort(%q) = %q, want %q", addr, got, want)
+		}
+	}
+	link := LocalLink(info, "127.0.0.1:17779")
+	if !strings.HasPrefix(link, "http://127.0.0.1:17779/voice#pair=1&") {
+		t.Fatalf("LocalLink = %q", link)
+	}
+	in, err := ParseLink(link)
+	if err != nil || in.DaemonID != "abc" || in.Name != "Studio Mac" || in.Pin != "pin_-x" || in.Code != "c0de" || len(in.Addresses) != 1 || HostPort(in.Addresses[0].URL) != "127.0.0.1:17779" {
+		t.Errorf("ParseLink(LocalLink) = %+v, %v", in, err)
+	}
+	if got := LocalLink(info, "192.168.1.20:7777"); got != "" {
+		t.Errorf("non-loopback LocalLink = %q, want empty", got)
+	}
+}

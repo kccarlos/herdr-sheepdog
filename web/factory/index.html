@@ -10,14 +10,14 @@
 <link rel="stylesheet" href="/static/shared.css">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="stylesheet" href="/factory/style.css">
-<script src="/factory/app.js" defer></script>
+<script type="module" src="/factory/app.js"></script>
 </head>
 <body>
 <div id="offline" class="banner" role="status" hidden></div>
 <div class="page">
   <header class="top">
     <div class="brand"><span class="logo" aria-hidden="true"></span><span class="wordmark">sheepdog</span> <span class="page-name">factory</span></div>
-    <span class="link"><span class="dot" id="link-dot" aria-hidden="true"></span><span id="link-text">connecting</span></span>
+    <span class="link"><a id="pair-link" hidden>Pair this browser</a><span class="dot" id="link-dot" aria-hidden="true"></span><span id="link-text">connecting</span></span>
   </header>
   <div id="loading" class="card status" role="status"><span class="dot working" aria-hidden="true"></span>Loading the factory…</div>
   <div id="unreachable" class="card dashed" role="status" hidden>

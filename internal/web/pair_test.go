@@ -12,15 +12,24 @@ import (
 )
 
 // Without a reachable address /api/pair says why and the QR route
-// refuses; both answer this computer only.
+// refuses, while returning an http loopback link for a browser on this
+// computer; both answer this computer only.
 func TestPairLoopbackServer(t *testing.T) {
 	h := newHarness(t, harnessOpts{})
 	if err := h.srv.Listen("127.0.0.1:0"); err != nil {
 		t.Fatal(err)
 	}
+	_, port, _ := net.SplitHostPort(h.srv.Addr())
 	var resp PairResponse
-	if code := h.getJSON("/api/pair", &resp); code != 200 || resp.Error == "" || resp.Link != "" {
+	if code := h.getJSON("/api/pair", &resp); code != 200 || resp.Error == "" || resp.Link != "" || len(resp.Addresses) != 0 {
 		t.Errorf("/api/pair = %d %+v", code, resp)
+	}
+	wantPrefix := "http://127.0.0.1:" + port + "/voice#pair=1&"
+	if !strings.HasPrefix(resp.LocalLink, wantPrefix) || resp.Expires == nil {
+		t.Errorf("local_link = %q (expires %v), want prefix %q", resp.LocalLink, resp.Expires, wantPrefix)
+	}
+	if in, err := pair.ParseLink(resp.LocalLink); err != nil || in.DaemonID != h.srv.deps.Computer.ID || in.Code == "" {
+		t.Errorf("parse local_link = %+v, %v", in, err)
 	}
 	if code, _ := h.do(h.authedRequest("GET", "/api/pair/qr.svg", "", nil, nil), nil); code != http.StatusConflict {
 		t.Errorf("qr without an address: %d", code)
@@ -32,8 +41,33 @@ func TestPairLoopbackServer(t *testing.T) {
 		t.Errorf("loopback: %v", err)
 	}
 	h.asRemote()
-	if code := h.getJSON("/api/pair", nil); code != http.StatusForbidden {
-		t.Errorf("/api/pair from the network = %d", code)
+	var remoteResp PairResponse
+	if code := h.getJSON("/api/pair", &remoteResp); code != http.StatusForbidden || remoteResp.LocalLink != "" {
+		t.Errorf("/api/pair from the network = %d %+v", code, remoteResp)
+	}
+}
+
+// With web.advertise on a loopback-only daemon, the advertised https link is
+// unchanged and local_link still offers the plain http loopback link.
+func TestPairLoopbackWithAdvertise(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	h.srv.deps.Advertise = []string{"100.101.1.1:7777"}
+	if err := h.srv.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	_, port, _ := net.SplitHostPort(h.srv.Addr())
+	var resp PairResponse
+	if code := h.getJSON("/api/pair", &resp); code != 200 || resp.Error != "" {
+		t.Fatalf("/api/pair = %d %+v", code, resp)
+	}
+	if !strings.HasPrefix(resp.Link, "https://100.101.1.1:7777/voice#pair=1&") {
+		t.Errorf("advertised link = %q", resp.Link)
+	}
+	if len(resp.Addresses) != 1 || resp.Addresses[0].Kind != pair.KindAdvertised {
+		t.Errorf("addresses = %+v", resp.Addresses)
+	}
+	if !strings.HasPrefix(resp.LocalLink, "http://127.0.0.1:"+port+"/voice#pair=1&") {
+		t.Errorf("local_link = %q", resp.LocalLink)
 	}
 }
 

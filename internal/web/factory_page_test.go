@@ -100,6 +100,12 @@ func TestFactoryPageWording(t *testing.T) {
 			t.Errorf("decodeURIComponent outside a try: %s", strings.TrimSpace(line))
 		}
 	}
+	for _, page := range []string{"factory/index.html", "voice/index.html"} {
+		doc := read(page)
+		if !strings.Contains(doc, `id="pair-link"`) || !strings.Contains(doc, "Pair this browser") {
+			t.Errorf("%s lacks hidden Pair this browser link", page)
+		}
+	}
 }
 
 // Every API URL the page fetches resolves to a GET factory view route, and the

@@ -307,6 +307,42 @@ func HostPort(base string) string {
 // KindAdvertised marks an address from web.advertise.
 const KindAdvertised = "advertised"
 
+// KindLoopback marks a loopback address for a browser on this computer.
+const KindLoopback = "loopback"
+
+// LoopbackHostPort returns the loopback host:port for a server listening on
+// addr, or "" when addr does not listen on loopback.
+func LoopbackHostPort(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || port == "" {
+		return ""
+	}
+	ip := net.ParseIP(host)
+	if host != "" && host != "localhost" && (ip == nil || (!ip.IsUnspecified() && !ip.IsLoopback())) {
+		return ""
+	}
+	if ip != nil && ip.IsLoopback() && ip.To4() == nil {
+		return net.JoinHostPort("::1", port)
+	}
+	return net.JoinHostPort("127.0.0.1", port)
+}
+
+// LocalLink is an http pairing link for a browser on this computer, or ""
+// when addr does not listen on loopback.
+func LocalLink(in LinkInfo, addr string) string {
+	hp := LoopbackHostPort(addr)
+	if hp == "" {
+		return ""
+	}
+	q := url.Values{}
+	q.Set("d", in.DaemonID)
+	q.Set("n", in.Name)
+	q.Set("k", in.Pin)
+	q.Set("e", in.Code)
+	q.Add("u", hp)
+	return "http://" + hp + "/voice#pair=1&" + q.Encode()
+}
+
 // Advertised turns web.advertise entries (host:port, a host alone for
 // port 7777, or a URL) into addresses.
 func Advertised(list []string) []Address {

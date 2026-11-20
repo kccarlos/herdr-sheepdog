@@ -1,5 +1,6 @@
 // The factory page (design.md 12.1, the FactoryWeb* boards): read-only, polls the
 // W0 views. Nothing here writes; the ask and override cards come with slice 6.
+import { localPairLink } from '/voice/pairing.js';
 const POLL_MS = 3000, GIVE_UP_MS = 8000;
 const $ = (id) => document.getElementById(id);
 const enc = encodeURIComponent;
@@ -141,4 +142,9 @@ function taskHTML(t) {
 
 $('retry').addEventListener('click', poll);
 addEventListener('hashchange', () => { scrollTo(0, 0); poll(); });
+localPairLink(fetch).then((href) => {
+  if (!href) return;
+  $('pair-link').href = href;
+  $('pair-link').hidden = false;
+});
 poll();

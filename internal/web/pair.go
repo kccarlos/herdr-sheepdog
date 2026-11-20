@@ -81,9 +81,11 @@ func (e *enrollCodes) burn(code string, now time.Time) string {
 
 // PairResponse is GET /api/pair (loopback only): the one-time pairing
 // link, when it stops working, the addresses it lists, or why there is
-// none.
+// none. LocalLink is the plain http loopback link for a browser on this
+// computer (never shown as a phone link).
 type PairResponse struct {
 	Link      string         `json:"link,omitempty"`
+	LocalLink string         `json:"local_link,omitempty"`
 	Expires   *time.Time     `json:"expires,omitempty"`
 	Addresses []pair.Address `json:"addresses"`
 	Error     string         `json:"error,omitempty"`
@@ -115,12 +117,14 @@ func (s *Server) pairAddresses(addr string) ([]pair.Address, error) {
 // pairing is the pairing response; fresh makes a new code.
 func (s *Server) pairing(fresh bool) PairResponse {
 	resp := PairResponse{Addresses: []pair.Address{}}
-	addrs, err := s.pairAddresses(s.Addr())
-	if err != nil {
-		resp.Error = err.Error()
-		return resp
+	addrs, addrErr := s.pairAddresses(s.Addr())
+	localHP := pair.LoopbackHostPort(s.Addr())
+	if addrErr != nil {
+		resp.Error = addrErr.Error()
+		if localHP == "" {
+			return resp
+		}
 	}
-	resp.Addresses = addrs
 	if s.deps.Computer.ID == "" {
 		resp.Error = errNoComputerID.Error()
 		return resp
@@ -133,10 +137,17 @@ func (s *Server) pairing(fresh bool) PairResponse {
 	if made {
 		s.log.Log(logSource, "web.pair.code", "", map[string]any{"expires": exp.UTC()})
 	}
-	resp.Link = pair.Link(pair.LinkInfo{
+	info := pair.LinkInfo{
 		DaemonID: s.deps.Computer.ID, Name: s.deps.Computer.Name, Pin: s.deps.TLS.Pin(),
 		Code: code, Addresses: addrs, Host: s.tailscaleHost(port(s.Addr())),
-	})
+	}
+	if addrErr == nil {
+		resp.Addresses = addrs
+		resp.Link = pair.Link(info)
+	}
+	if localHP != "" {
+		resp.LocalLink = pair.LocalLink(info, s.Addr())
+	}
 	e := exp.UTC()
 	resp.Expires = &e
 	return resp

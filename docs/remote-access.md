@@ -20,6 +20,11 @@ sheepdog pair
 - **Android, a laptop or any browser:** point the camera at it, or open
   the link. The browser opens sheepdog's voice page, warns once about the
   certificate (accept it), and pairs itself.
+- **A browser on this computer:** even when sheepdog listens on
+  `127.0.0.1` only, `/factory` and `/voice` show a **Pair this browser**
+  link while the browser holds no session ticket. Follow it to enrol the
+  browser over local `http://127.0.0.1` in one click; once paired, the
+  link is hidden.
 
 The code holds the computer's Tailscale address first (when Tailscale is
 running), then its Wi-Fi/LAN address (a private 192.168.x, 10.x or

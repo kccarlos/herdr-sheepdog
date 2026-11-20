@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
-import { parsePairing, isAppleMobile, deviceName, appLink, signedText, enroll, signIn, renewSession, classifyWsClose, MSG } from './pairing.js';
+import { parsePairing, isAppleMobile, deviceName, appLink, signedText, enroll, signIn, renewSession, classifyWsClose, localPairLink, MSG } from './pairing.js';
 
 const hash = '#pair=1&d=DAEMONID&e=c0de&k=PIN&n=Studio+Mac+%26+co&u=100.101.102.103%3A7777&u=192.168.1.20%3A7777';
 
@@ -141,4 +141,24 @@ test('classifyWsClose stops on 4003 device_revoked and re-signs on 4004 session_
     classifyWsClose({ code: 1006, reason: '', opened: true, handshakeState: 'ready', userDisconnected: false }),
     { action: 'reconnect' },
   );
+});
+
+test('localPairLink returns the loopback link only when the browser has no ticket', async () => {
+  const link = 'http://127.0.0.1:17779/voice#pair=1&d=DAEMONID&e=c0de&k=PIN&u=127.0.0.1%3A17779';
+  const calls = [];
+  const makeFetch = (self, pairStatus = 200, pairBody = { local_link: link }) => async (path) => {
+    calls.push(path);
+    if (path === '/api/devices/self') return { ok: true, status: 200, json: async () => self };
+    if (path === '/api/pair') return { ok: pairStatus === 200, status: pairStatus, json: async () => pairBody };
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+
+  assert.equal(await localPairLink(makeFetch({ id: 'local', kind: 'local' })), link);
+  assert.deepEqual(calls, ['/api/devices/self', '/api/pair']);
+
+  calls.length = 0;
+  assert.equal(await localPairLink(makeFetch({ id: 'dev1', kind: 'browser' })), '');
+  assert.deepEqual(calls, ['/api/devices/self']);
+
+  assert.equal(await localPairLink(makeFetch({ id: 'local', kind: 'local' }, 403, { error: 'loopback_only' })), '');
 });

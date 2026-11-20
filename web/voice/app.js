@@ -7,7 +7,7 @@
 import { AEC_HINT, aecStatus, aecWarn, isMobile } from './aec.js';
 import { Handshake, clientReady, HANDSHAKE_TIMEOUT_MS } from './handshake.js';
 import { visibilityMessage, cardsEnabled, cardBodyHTML, cardLabel } from './cards.js';
-import { parsePairing, isAppleMobile, appLink, enroll, signIn, renewSession, classifyWsClose, keyStore, MSG } from './pairing.js';
+import { parsePairing, isAppleMobile, appLink, enroll, signIn, renewSession, classifyWsClose, keyStore, localPairLink, MSG } from './pairing.js';
 import { createWakeController, createPingTracker } from './wake.js';
 import { createApprovals, openQuestions, renderApprovalCardsHTML, pageTitle } from './approvals.js';
 import { createBuildReloader, takeReloadDraft } from './reload.js';
@@ -1180,6 +1180,14 @@ function resumeIfSuspended() {
 
 async function init() {
   if (!(await authGate())) return; // pairing or the pair prompt is up
+  addEventListener('hashchange', () => {
+    if (parsePairing(location.hash)) authGate();
+  });
+  localPairLink(fetch).then((href) => {
+    if (!href) return;
+    $('pair-link').href = href;
+    $('pair-link').classList.remove('hidden');
+  });
   const params = new URLSearchParams(location.search);
   state.gate.opts = gateOptions(params);
   if (params.get('src') === 'file') {
