@@ -89,7 +89,7 @@ func TestJ12HeldWakesOneBatchWhenIdle(t *testing.T) {
 	save()
 	held("coordinator working")
 
-	srv.SetStatus("coord1", &hc.Status{App: "claude-code", State: "idle"})
+	setIdle(t, srv, client, "coord1", "idle")
 	for range 3 {
 		eng.passProject(ctx, id, false)
 	}
@@ -162,7 +162,7 @@ func TestS2IdleReviewerWakesOnce(t *testing.T) {
 
 	// The reviewer replies without the tag and goes idle.
 	srv.SetScreen(rev.RunID, "❯ prompt\n\n⏺ Looks fine to me.\n")
-	srv.SetStatus(rev.RunID, &hc.Status{App: "claude-code", State: "idle"})
+	setIdle(t, srv, client, rev.RunID, "idle")
 	eng.passProject(ctx, id, false)
 	st, _ = LoadState(paths.State(id))
 	first := st.Tasks[0].Attempts[0].Review.IdleSince
@@ -181,7 +181,7 @@ func TestS2IdleReviewerWakesOnce(t *testing.T) {
 	if st, _ = LoadState(paths.State(id)); st.Tasks[0].Attempts[0].Review.IdleSince != nil {
 		t.Fatalf("idle clock kept while the reviewer works: %v", st.Tasks[0].Attempts[0].Review.IdleSince)
 	}
-	srv.SetStatus(rev.RunID, &hc.Status{App: "claude-code", State: "idle"})
+	setIdle(t, srv, client, rev.RunID, "idle")
 	eng.passProject(ctx, id, false)
 	if st, _ = LoadState(paths.State(id)); st.Tasks[0].Attempts[0].Review.IdleSince == nil || !st.Tasks[0].Attempts[0].Review.IdleSince.After(*first) {
 		t.Fatalf("idle clock did not restart: first %v, now %v", first, st.Tasks[0].Attempts[0].Review.IdleSince)
@@ -205,7 +205,7 @@ func TestS2IdleReviewerWakesOnce(t *testing.T) {
 		t.Fatalf("wake asked %d times, want 1", n)
 	}
 
-	srv.SetStatus(coord, &hc.Status{App: "claude-code", State: "idle"})
+	setIdle(t, srv, client, coord, "idle")
 	for range 3 {
 		eng.passProject(ctx, id, false)
 	}
@@ -285,7 +285,8 @@ func TestJ12DeliveryAtLeastOnce(t *testing.T) {
 	fail.Store(true)
 	paths := testPaths(t)
 	eng := New(paths, hc.NewClient(sendFailProxy(t, srv.Path, &fail)))
-	srv.Add(hc.Terminal{Address: "coord1", Name: "coord", State: "live", Status: &hc.Status{App: "claude-code", State: "idle"}})
+	pastMS := uint64(time.Now().Add(-time.Minute).UnixMilli())
+	srv.Add(hc.Terminal{Address: "coord1", Name: "coord", State: "live", Status: &hc.Status{App: "claude-code", State: "idle"}, StatusMS: &pastMS})
 	const id = "proj-once"
 	st := flow.State{Seq: 1, Project: flow.Project{ID: id, Folder: t.TempDir(), Started: true, RunID: "coord1"}, Settings: flow.DefaultSettings()}
 	st.Project.Wakes = []flow.Wake{{Key: "stuck@cleanup@c1", Task: "T1", Why: "S2: cleanup never answered", Facts: `title "feat: x"`, At: time.Now()}}
@@ -344,7 +345,8 @@ func TestWakeMessageBounded(t *testing.T) {
 // branch -> split child starts as a normal task.
 func TestN25N6RecapOpensOnceWakesCoordinatorAndSplits(t *testing.T) {
 	l := newLanding(t)
-	l.srv.Add(hc.Terminal{Address: "coord1", Name: "coord", State: "live", Status: &hc.Status{App: "claude-code", State: "idle"}})
+	pastMS := uint64(time.Now().Add(-time.Minute).UnixMilli())
+	l.srv.Add(hc.Terminal{Address: "coord1", Name: "coord", State: "live", Status: &hc.Status{App: "claude-code", State: "idle"}, StatusMS: &pastMS})
 	l.edit(func(s *flow.State) {
 		s.Project.RunID = "coord1"
 		s.Project.RunTokenHash = tokenHash("tok-coord")

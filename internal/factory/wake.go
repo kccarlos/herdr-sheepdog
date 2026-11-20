@@ -105,16 +105,8 @@ func wakeMessage(s flow.State) string {
 // Delivery is at-least-once: a send that went through but whose commit
 // failed leaves the wakes held, and the next pass sends them again. A
 // duplicate wake is cheaper than a lost one.
-func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.State) {
-	if len(s.Project.Wakes) == 0 || s.Project.RunID == "" || e.HC == nil {
-		return
-	}
-	st, err := world.RunState(ctx, e.HC, s.Project.RunID)
-	if err != nil {
-		e.logError("factory.hc_error", id, err)
-		return
-	}
-	if st != flow.RunIdle {
+func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.State, coordSt flow.RunState) {
+	if len(s.Project.Wakes) == 0 || s.Project.RunID == "" || e.HC == nil || coordSt != flow.RunIdle {
 		return
 	}
 	if err := world.SendRun(ctx, e.HC, s.Project.RunID, wakeMessage(*s)); err != nil {
@@ -126,8 +118,5 @@ func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.Stat
 		keys = append(keys, cmp.Or(w.Task, "project")+":"+w.Key)
 	}
 	s.Project.Wakes = nil
-	line := LogLine{By: "engine", Rule: "J12", Asked: keys, Decision: fmt.Sprintf("delivered %d wake(s) to the coordinator", len(keys)), Why: "wakes held and the coordinator is idle"}
-	if err := e.commitLocked(id, s, line); err != nil {
-		e.logError("factory.commit_error", id, err)
-	}
+	e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "J12", Asked: keys, Decision: fmt.Sprintf("delivered %d wake(s) to the coordinator", len(keys)), Why: "wakes held and the coordinator is idle"})
 }

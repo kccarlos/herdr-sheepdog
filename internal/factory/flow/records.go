@@ -45,6 +45,7 @@ type Project struct {
 	Started      bool       `json:"started,omitempty"`
 	RunID        string     `json:"run_id,omitempty"`           // coordinator terminal identity
 	RunTokenHash string     `json:"run_token_sha256,omitempty"` // SHA-256 hex of the coordinator's SHEEPDOG_RUN_TOKEN
+	Run          *RunRecord `json:"run,omitempty"`
 	Acts         []Act      `json:"acts,omitempty"`
 	Wakes        []Wake     `json:"wakes,omitempty"` // held until J12 delivers them
 	Base         *BaseState `json:"base,omitempty"`
@@ -197,6 +198,7 @@ type Attempt struct {
 	PR           int        `json:"pr"`
 	RunID        string     `json:"run_id"`                     // the run's terminal identity
 	RunTokenHash string     `json:"run_token_sha256,omitempty"` // SHA-256 hex of the run's SHEEPDOG_RUN_TOKEN
+	Run          *RunRecord `json:"run,omitempty"`
 	Review       *ReviewRun `json:"review,omitempty"`
 	Ready        []Ready    `json:"ready"`
 	Rejects      []Reject   `json:"rejects,omitempty"`
@@ -239,13 +241,14 @@ func Counted(a Attempt) []Round { return a.Rounds[min(a.Boundary, len(a.Rounds))
 
 // ReviewRun is the active reviewer run started for the attempt's next round.
 type ReviewRun struct {
-	RunID        string   `json:"run_id,omitempty"`
-	RunTokenHash string   `json:"run_token_sha256,omitempty"`
-	Round        int      `json:"round"`
-	Kind         string   `json:"kind,omitempty"`
-	Head         string   `json:"head"`
-	Code         string   `json:"code"`
-	Reviewer     Reviewer `json:"reviewer"`
+	RunID        string     `json:"run_id,omitempty"`
+	RunTokenHash string     `json:"run_token_sha256,omitempty"`
+	Run          *RunRecord `json:"run,omitempty"`
+	Round        int        `json:"round"`
+	Kind         string     `json:"kind,omitempty"`
+	Head         string     `json:"head"`
+	Code         string     `json:"code"`
+	Reviewer     Reviewer   `json:"reviewer"`
 	// IdleSince is when a pass first read the run idle with no valid tag:
 	// the stuck row's clock (S2). The record goes when the round ends.
 	IdleSince   *time.Time `json:"idle_since,omitempty"`

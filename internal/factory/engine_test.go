@@ -167,7 +167,7 @@ func TestEngineStopKillsUnrecordedCoordinator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := world.StartRun(ctx, client, world.RunSpec{
+	if _, err := startRun(ctx, client, world.RunSpec{
 		Name:         "coord-" + strings.TrimPrefix(projID, "proj-"),
 		Cwd:          repo,
 		ClaudeConfig: paths.ClaudeConfig,
@@ -329,8 +329,16 @@ func TestPassProjectLogsErrorsAndSkipsDeadRunState(t *testing.T) {
 
 	reqsBefore := len(srv.Requests())
 	eng.passProject(ctx, projID, true)
-	if len(srv.Requests()) != reqsBefore {
-		t.Fatalf("expected no hc RPC in passProject while RunID is set, got %+v", srv.Requests()[reqsBefore:])
+	if st1, _ := LoadState(paths.State(projID)); st1.Project.Run == nil || st1.Project.Run.Result != flow.EndLost {
+		t.Fatalf("expected coordinator run ended(lost) after missing terminal, got %+v", st1.Project.Run)
+	}
+	reqsAfterFirst := len(srv.Requests())
+	if reqsAfterFirst == reqsBefore {
+		t.Fatal("expected first passProject to observe missing coordinator terminal")
+	}
+	eng.passProject(ctx, projID, false)
+	if len(srv.Requests()) != reqsAfterFirst {
+		t.Fatalf("expected no hc RPC once coordinator run ended, got %+v", srv.Requests()[reqsAfterFirst:])
 	}
 	if !strings.Contains(logBuf.String(), "factory.trim_error") {
 		t.Fatalf("expected factory.trim_error in engine log, got %q", logBuf.String())
@@ -759,21 +767,25 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	eng3.Paths.ClaudeConfig = "/nonexistent-sheepdog-test-guard/.claude.json"
 	eng3.PassInterval = 10 * time.Millisecond
 	reqsBefore := len(srv3.Requests())
-	// Wait for the one try (1 launchRunLocked RunState + 1 StartRun Get),
-	// then keep passing and check it is never retried. A fixed 80 ms window
-	// was flaky under -race with the whole suite running.
+	workerRequests := func() []string {
+		var methods []string
+		for _, r := range srv3.Requests()[reqsBefore:] {
+			if strings.Contains(string(r.Params), "worker-") {
+				methods = append(methods, r.Method)
+			}
+		}
+		return methods
+	}
+	// Wait for the one worker start try (1 StartTerminal Get), then keep
+	// passing and check it is never retried.
 	runFor(eng3, 80*time.Millisecond)
-	for deadline := time.Now().Add(3 * time.Second); len(srv3.Requests())-reqsBefore < 2 && time.Now().Before(deadline); {
+	for deadline := time.Now().Add(3 * time.Second); len(workerRequests()) < 1 && time.Now().Before(deadline); {
 		runFor(eng3, 40*time.Millisecond)
 	}
 	runFor(eng3, 80*time.Millisecond)
-	if got := len(srv3.Requests()) - reqsBefore; got != 2 {
+	if methods := workerRequests(); len(methods) != 1 {
 		lg, _ := os.ReadFile(eng3.Paths.Log(id3))
-		var methods []string
-		for _, r := range srv3.Requests()[reqsBefore:] {
-			methods = append(methods, r.Method)
-		}
-		t.Fatalf("failing worker StartRun sent %d hc requests across many passes, want 2 (1 try): %v\nlog:\n%s", got, methods, lg)
+		t.Fatalf("failing worker StartRun sent %d worker hc requests across many passes, want 1 (1 try): %v\nlog:\n%s", len(methods), methods, lg)
 	}
 	log3, _ := os.ReadFile(eng3.Paths.Log(id3))
 	if lines := strings.Split(strings.TrimSpace(string(log3)), "\n"); len(lines) != 5 {
@@ -965,7 +977,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	st, _ := LoadState(paths.State(id))
 	wt := st.Tasks[0].Attempts[0].Worktree
 	workerTerm := st.Tasks[0].Attempts[0].RunID
-	srv.SetStatus(workerTerm, &hc.Status{App: "claude-code", State: "idle"})
+	setIdle(t, srv, client, workerTerm, "idle")
 
 	// Worker commits c1, reports ready -> N26 opens PR -> N29 starts round 1 reviewer (full, opus).
 	if err := os.WriteFile(filepath.Join(wt, "greet.go"), []byte("package demo\nfunc Greet(s string) string { return s }\n"), 0o600); err != nil {
@@ -993,7 +1005,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 
 	// Idle with prompt echo only (or cut mid-tag): not judged yet, round 1 stays open.
 	srv.SetScreen(rev1Term, "❯ You are the factory code reviewer...\n  <report>{\"code\":\""+code1+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"pass|changes\",\"majors\":0,\"findings\":[\"...\"]}</report>\n\n⏺ Reading diff\n  <report>{\"code\":\""+code1+"\"")
-	srv.SetStatus(rev1Term, &hc.Status{App: "claude-code", State: "done"})
+	setIdle(t, srv, client, rev1Term, "done")
 	eng.passProject(ctx, id, false)
 	st, _ = LoadState(paths.State(id))
 	if st.Tasks[0].Attempts[0].Review == nil || len(st.Tasks[0].Attempts[0].Rounds) != 0 {
@@ -1024,7 +1036,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	if b, err := os.ReadFile(att.Rounds[0].ReportPath); err != nil || !strings.Contains(string(b), "## Findings\n\nmajor: Greet(\"\") returns \"hello, \"\n") {
 		t.Fatalf("round 1 report file = %q, %v", b, err)
 	}
-	if rs, err := world.RunState(ctx, client, rev1Term); err != nil || rs != flow.RunGone {
+	if rs, err := termState(ctx, client, rev1Term); err != nil || rs != flow.RunGone {
 		t.Fatalf("rev1 not stopped after verdict: state=%s err=%v", rs, err)
 	}
 
@@ -1081,9 +1093,9 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 
 	// Round 2 passes at c2 -> even with green CI, 1 pass does NOT merge (L8 asks round 3).
 	srv.SetScreen(rev2Term, "❯ prompt\n\n⏺ Clean fix.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+code2+"\",\"round\":2,\"head\":\""+c2+"\",\"verdict\":\"pass\",\"majors\":0,\"findings\":[]}</report>\n")
-	srv.SetStatus(rev2Term, &hc.Status{App: "claude-code", State: "done"})
+	setIdle(t, srv, client, rev2Term, "done")
 	eng.passProject(ctx, id, false) // accepts round 2 pass verdict & stops rev2
-	if rs, err := world.RunState(ctx, client, rev2Term); err != nil || rs != flow.RunGone {
+	if rs, err := termState(ctx, client, rev2Term); err != nil || rs != flow.RunGone {
 		t.Fatalf("rev2 not stopped after pass verdict: state=%s err=%v", rs, err)
 	}
 	if m := ghCalls(t, gh, "pr merge"); len(m) != 0 {
@@ -1108,7 +1120,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	// Round 3 passes -> N36 while CI pending -> N42 when CI green, recording rounds [2, 3].
 	writePRJSON(t, gh, "view.json", c2, `[{"__typename":"CheckRun","name":"ci","status":"IN_PROGRESS","conclusion":""}]`)
 	srv.SetScreen(rev3Term, "❯ prompt\n\n⏺ Confirmed.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+code3+"\",\"round\":3,\"head\":\""+c2+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
-	srv.SetStatus(rev3Term, &hc.Status{App: "claude-code", State: "done"})
+	setIdle(t, srv, client, rev3Term, "done")
 	eng.passProject(ctx, id, false) // accepts round 3 pass & stops rev3
 	eng.passProject(ctx, id, false) // CI pending -> N36
 	if m := ghCalls(t, gh, "pr merge"); len(m) != 0 {
@@ -1207,7 +1219,7 @@ func testVoidReview(t *testing.T, dirty bool) {
 			t.Fatal(err)
 		}
 		srv.SetScreen(rev.RunID, "❯ prompt\n\n⏺ Fine.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rev.Code+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
-		srv.SetStatus(rev.RunID, &hc.Status{App: "claude-code", State: "done"})
+		setIdle(t, srv, client, rev.RunID, "done")
 	} else {
 		// Worker commits c2 before reporting ready -> tip is ahead of H.
 		if err := os.WriteFile(filepath.Join(wt, "x.go"), []byte("package demo\nvar X = 1\n"), 0o600); err != nil {
@@ -1217,7 +1229,7 @@ func testVoidReview(t *testing.T, dirty bool) {
 	}
 	eng.passProject(ctx, id, false)
 
-	if rs, err := world.RunState(ctx, client, rev.RunID); err != nil || rs != flow.RunGone {
+	if rs, err := termState(ctx, client, rev.RunID); err != nil || rs != flow.RunGone {
 		t.Fatalf("void reviewer state = (%s, %v), want gone", rs, err)
 	}
 	st, _ = LoadState(paths.State(id))
@@ -1313,7 +1325,7 @@ func TestEngineRebaseAfterReviewedCommitFallsBackToFull(t *testing.T) {
 	st, _ = LoadState(paths.State(id))
 	rev1 := st.Tasks[0].Attempts[0].Review
 	srv.SetScreen(rev1.RunID, "❯ prompt\n\n⏺ major: V should be 2\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rev1.Code+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":1}</report>\n")
-	srv.SetStatus(rev1.RunID, &hc.Status{App: "claude-code", State: "done"})
+	setIdle(t, srv, client, rev1.RunID, "done")
 	eng.passProject(ctx, id, false) // records round 1 changes at c1
 	eng.passProject(ctx, id, false) // N22 tells worker findings
 
@@ -1514,7 +1526,7 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 	workerTok := runs[1].Env["SHEEPDOG_RUN_TOKEN"]
 	st, _ := LoadState(paths.State(id))
 	wt := st.Tasks[0].Attempts[0].Worktree
-	srv.SetStatus(st.Tasks[0].Attempts[0].RunID, &hc.Status{App: "claude-code", State: "idle"})
+	setIdle(t, srv, client, st.Tasks[0].Attempts[0].RunID, "idle")
 
 	// Worker commits c1 and reports ready -> N26 opens PR -> N29 starts round 1.
 	if err := os.WriteFile(filepath.Join(wt, "version.go"), []byte("package demo\n\nconst Version = 1\n"), 0o600); err != nil {
@@ -1534,7 +1546,7 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 	st, _ = LoadState(paths.State(id))
 	rev1 := st.Tasks[0].Attempts[0].Review
 	srv.SetScreen(rev1.RunID, "❯ prompt\n\n⏺ major: missing unit test for Version\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rev1.Code+"\",\"round\":1,\"head\":\""+c1+"\",\"verdict\":\"changes\",\"majors\":1}</report>\n")
-	srv.SetStatus(rev1.RunID, &hc.Status{App: "claude-code", State: "done"})
+	setIdle(t, srv, client, rev1.RunID, "done")
 	eng.passProject(ctx, id, false) // accepts round 1 changes
 	eng.passProject(ctx, id, false) // N22 tells worker findings
 
@@ -1574,7 +1586,7 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 
 	// Round 2 passes -> L8 holds (no merge after 1 pass) -> starts round 3 at c1 -> round 3 passes -> N42 merges.
 	srv.SetScreen(rev2.RunID, "❯ prompt\n\n⏺ Rejection verified against brief.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rev2.Code+"\",\"round\":2,\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
-	srv.SetStatus(rev2.RunID, &hc.Status{App: "claude-code", State: "done"})
+	setIdle(t, srv, client, rev2.RunID, "done")
 	eng.passProject(ctx, id, false) // accepts round 2 pass
 	if m := ghCalls(t, gh, "pr merge"); len(m) != 0 {
 		t.Fatalf("merged after 1 pass following reject: %q", m)
@@ -1590,7 +1602,7 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 		t.Errorf("round 3 prompt after passing round 2 still carries round-1 reject:\n%s", p3)
 	}
 	srv.SetScreen(rev3.RunID, "❯ prompt\n\n⏺ Confirmed.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rev3.Code+"\",\"round\":3,\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
-	srv.SetStatus(rev3.RunID, &hc.Status{App: "claude-code", State: "done"})
+	setIdle(t, srv, client, rev3.RunID, "done")
 	eng.passProject(ctx, id, false) // accepts round 3 pass
 	eng.passProject(ctx, id, false) // L9 -> N42 accepts rounds [2, 3] and merges
 

@@ -10,7 +10,6 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
-	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
 func writeBaseRuns(t *testing.T, ghDir, body string) {
@@ -119,11 +118,11 @@ func TestBaseRedPastMainRedMinutesOldestTaskOnce(t *testing.T) {
 	gitIn(t, wt2.Path, "commit", "-m", "feat: y")
 	c2 := gitIn(t, wt2.Path, "rev-parse", "HEAD")
 	gitIn(t, wt2.Path, "push", "origin", c2+":refs/heads/"+wt2.Branch)
-	w2, err := world.StartRun(ctx, l.client, world.RunSpec{Name: "worker-t2", Cwd: wt2.Path, Argv: []string{"sh"}})
+	w2, err := startRun(ctx, l.client, world.RunSpec{Name: "worker-t2", Cwd: wt2.Path, Argv: []string{"sh"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	l.srv.SetStatus(w2, &hc.Status{App: "claude-code", State: "idle"})
+	setIdle(t, l.srv, l.client, w2, "idle")
 	l.edit(func(s *flow.State) {
 		s.Tasks = append(s.Tasks, flow.Task{
 			ID: "T2", Title: "feat: y", EstimateLines: 50,

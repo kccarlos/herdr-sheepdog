@@ -428,15 +428,15 @@ Runs are driven by events, so this is a transition table. Every cell is written;
 |---|---|---|---|---|---|
 | R1 | `starting` | `launched` | — | same | keep the terminal's address, hc id and creation time |
 | R2 | `starting` | `launch_failed` | — | `ended(failed)` | — |
-| R3 | `starting` | `screen` | a trust, confirm or first-run screen, not answered yet | same | press the adapter's keys for it |
+| R3 | `starting` | `screen` | a trust, confirm or first-run screen with verified adapter keys, not answered yet for that screen class | same | press the adapter's keys for it |
 | R4 | `starting` | `screen` | signed out | `ended(signed_out)` | stop it |
 | R5 | `starting` | `screen` | usage limit | `ended(quota)` | stop it |
 | R6 | `starting` | `screen` | — | same | — |
 | R7 | `starting` | `status` | idle; the first prompt is typed, and not sent yet; no trust, confirm or first-run screen is up | `working` | send the first prompt |
 | R8 | `starting` | `status` | working | `working` | — |
-| R9 | `starting` | `status` | idle or done, with the first prompt already given on the command line | `working` | — (R20 then decides whether it is idle) |
-| R10 | `starting` | `status` | any status other than blocked or error (those are R14–R16) | same | — |
-| R11 | `starting` | `tick` | older than `start_minutes` and no status was ever reported | `ended(blank)` | stop it. Two blank starts in a row run the volume probe (section 6) |
+| R9 | `starting` | `status` | idle or done (or error on a non-reviewer/retro run), with the first prompt already given on the command line | `working` | — (R20 then decides whether it is idle) |
+| R10 | `starting` | `status` | any status other than blocked or error (those are R14–R16) | same | — (does not count as a usable status for R11) |
+| R11 | `starting` | `tick` | older than `start_minutes` and no usable status was ever reported | `ended(blank)` (or `ended(stuck)` on a start dialog) | stop it. Two blank starts in a row run the volume probe (section 6) |
 | R12 | `starting` | `tick`, `activity` | — | same | — |
 | R13 | `starting`, `working` | `exit` | a resume, within `start_minutes` | `ended(resume_failed)` | the session is marked not resumable |
 | R14 | `starting`, `working` | `status` | blocked, kind auth, on a run older than `start_minutes` (a brief sign-in prompt at start is R15) | `ended(signed_out)` | stop it |
@@ -478,6 +478,9 @@ The matrix (row ids; every cell filled):
 - Sending waits for a person's unfinished typing in that terminal; herdr-core does that itself (`hc send`). The engine decides "idle" from the run's own state, not from a send-only-if-idle check, because an agent can report done between steps.
 - Runs are started so that the terminal ends when the program ends (no kept shell), so a dead agent always produces `exit`.
 - A run's end is a fact the task and project rules read (section 4.8, section 6). The run table restarts nothing.
+- herdr-core gives no output time or output events (spike S0.8), so `activity` is derived by `world` from a change in the normalised screen text (timers, digits and spinner glyphs stripped) between two reads (`hc read`), and R21's own interrupt redraw is re-baselined so R22 still fires if the run stays quiet.
+- The Claude trust dialog and the Codex hooks dialog report no status, so `screen` events come from matching each adapter's whole known UI phrases in the bottom lines of the screen, never agent output above; only dialogs whose default key was verified in spikes (agy trust) are auto-answered by R3, while unverified dialogs stay on R6 and time out via R11 as `ended(stuck)`; agy also reports its trust screen as `status blocked, kind permission` (spikes S0.2, S0.8).
+- A gone terminal is `state finished, status null`; `reason exited` vs `killed` tells an engine kill from anything else, but not who quit it (spike S0.8).
 
 ## 6. The project rules
 
