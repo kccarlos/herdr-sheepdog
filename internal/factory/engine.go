@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -233,7 +234,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		return
 	}
 	if s.Project.RunID == "" && flow.Count(s.Project.Acts, "coordinator") == 0 {
-		prompt := strings.TrimSpace(strings.NewReplacer("{folder}", s.Project.Folder, "{goal}", s.Project.Goal, "{sheepdog}", cmp.Or(e.Bin, "sheepdog")).Replace(coordinatorTemplate))
+		prompt := coordinatorPrompt(coordinatorTemplate, s.Project, cmp.Or(e.Bin, "sheepdog"))
 		termID, abort, err := e.launchRunLocked(ctx, id, &s, &s.Project.RunTokenHash, world.RunSpec{
 			Name: coordName(id), Cwd: s.Project.Folder, ClaudeConfig: e.Paths.ClaudeConfig,
 			Argv:   world.ClaudeArgv(flow.RoleCoordinator, "opus", "medium", "bypassPermissions"),
@@ -452,9 +453,7 @@ func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, t
 func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
 	bin := cmp.Or(e.Bin, "sheepdog")
-	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
-		"{not_doing}", cmp.Or(strings.TrimSpace(t.NotDoing), "(none)"), "{outcomes}", bullets(t.Outcomes), "{ready_cmd}", readyCmd(bin, t.Outcomes),
-		"{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", bin).Replace(workerTemplate))
+	prompt := workerPrompt(workerTemplate, *t, *a, bin)
 	termID, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, world.RunSpec{
 		Name: workerName(id, t.ID, len(t.Attempts)), Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
 		Argv: world.ClaudeArgv(flow.RoleWorker, workerModel, "medium", "bypassPermissions"), Prompt: prompt,
@@ -464,6 +463,30 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 		a.RunID = termID
 	}
 	return "started worker " + termID, abort, err
+}
+
+// sourceMark is a rule line's trailing source, e.g. " [KB-REV-63]" (prompts.md 1).
+var sourceMark = regexp.MustCompile(`(?m)[ \t]+\[[^\[\]\n]+\]$`)
+
+// fill strips the source marks from a template, then fills its placeholders,
+// so a filled value ending in "]" is never cut.
+func fill(tmpl string, pairs ...string) string {
+	return strings.TrimSpace(strings.NewReplacer(pairs...).Replace(sourceMark.ReplaceAllString(tmpl, "")))
+}
+
+func coordinatorPrompt(tmpl string, p flow.Project, bin string) string {
+	return fill(tmpl, "{folder}", p.Folder, "{goal}", p.Goal, "{sheepdog}", bin)
+}
+
+func workerPrompt(tmpl string, t flow.Task, a flow.Attempt, bin string) string {
+	return fill(tmpl, "{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
+		"{not_doing}", cmp.Or(strings.TrimSpace(t.NotDoing), "(none)"), "{outcomes}", bullets(t.Outcomes), "{ready_cmd}", readyCmd(bin, t.Outcomes),
+		"{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", bin)
+}
+
+func reviewerPrompt(tmpl string, t flow.Task, a flow.Attempt, h, kind, diff, rejections string, round int) string {
+	return fill(tmpl, "{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
+		"{outcomes}", bullets(t.Outcomes), "{proofs}", proofPrompt(a, h), "{rejections}", rejections, "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code)
 }
 
 func readyCmd(bin string, outcomes []flow.Outcome) string {
@@ -719,8 +742,7 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	if env != nil {
 		argv = world.CodexArgv(model, effort, a.Worktree)
 	}
-	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
-		"{outcomes}", bullets(t.Outcomes), "{proofs}", proofPrompt(*a, h), "{rejections}", e.rejectionPrompt(id, t.ID, *a, h), "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code).Replace(reviewerTemplate))
+	prompt := reviewerPrompt(reviewerTemplate, *t, *a, h, kind, diff, e.rejectionPrompt(id, t.ID, *a, h), round)
 	termID, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, world.RunSpec{
 		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
 		Argv: argv, Prompt: prompt, Env: env,

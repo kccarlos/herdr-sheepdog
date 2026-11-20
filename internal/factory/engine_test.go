@@ -479,7 +479,7 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 		"DISABLE_AUTOUPDATER=1", "claude", "--model sonnet", "--effort medium",
 		"--permission-mode bypassPermissions", `{"skipDangerousModePermissionPrompt":true}`,
 		"feat: add Greet helper", "Write Greet(name).", "go test ./... passes",
-		"/tmp/sheepdog-bin factory report ready", "do not push",
+		"/tmp/sheepdog-bin factory report ready", "Never merge, push",
 	} {
 		if !strings.Contains(wArgv, want) {
 			t.Errorf("worker argv/prompt missing %q:\n%s", want, wArgv)

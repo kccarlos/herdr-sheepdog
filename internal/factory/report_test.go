@@ -1599,6 +1599,11 @@ func TestParseReplyLinesTolerance(t *testing.T) {
 				majors: 0, misses: 0, hasM: false,
 			},
 			{
+				name:   "codex multi-line command then output",
+				body:   "• Ran printf a\n  │ b\n  └ deletable: from codex output\n    major: from codex output\n• self-check misses: 0\n• deletable: none",
+				misses: 0, hasM: true, del: "none",
+			},
+			{
 				name: "negative misses still bad",
 				body: "self-check misses: -2\ndeletable: none",
 				hasM: true, badM: true, del: "none",
@@ -1632,6 +1637,32 @@ func TestParseReplyLinesTolerance(t *testing.T) {
 		rl := parseReplyLines(rd.Body)
 		if !rl.hasMisses || rl.badMisses || rl.misses != 0 || rl.majors != 0 || rl.deletable != "none" {
 			t.Fatalf("claude pass parseReplyLines = %+v (body=%q)", rl, rd.Body)
+		}
+	})
+
+	t.Run("real claude table right before the reply lines", func(t *testing.T) {
+		ctx := context.Background()
+		srv := hctest.New(t)
+		srv.Add(hc.Terminal{Address: "t-tb", Name: "rev-tb", State: "live", Status: &hc.Status{App: "claude-code", State: "done"}})
+		srv.SetScreen("t-tb", "❯ Review round 1\n\n"+
+			"⏺ Bash(cat notes.txt)\n"+
+			"  ⎿  deletable: fake in tool output\n\n"+
+			"⏺ Checked:\n"+
+			"  ┌──────┬────────┐\n"+
+			"  │ file │ result │\n"+
+			"  ├──────┼────────┤\n"+
+			"  │ a.go │ ok     │\n"+
+			"  └──────┴────────┘\n"+
+			"  self-check misses: 0\n"+
+			"  deletable: none\n"+
+			`<report>{"code":"c789","round":1,"head":"h1","verdict":"pass","majors":0}</report>`+"\n")
+		rd, err := world.ReadReport(ctx, hc.NewClient(srv.Path), "t-tb", "c789")
+		if err != nil || rd.Status != world.ReportFound {
+			t.Fatalf("ReadReport = (%+v, %v), want found", rd, err)
+		}
+		rl := parseReplyLines(rd.Body)
+		if !rl.hasMisses || rl.badMisses || rl.misses != 0 || rl.majors != 0 || rl.deletable != "none" {
+			t.Fatalf("table reply parseReplyLines = %+v (body=%q)", rl, rd.Body)
 		}
 	})
 
