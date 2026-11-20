@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/procprio"
@@ -162,6 +164,43 @@ func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	out = append(out, checkAgentCLIs(ctx, o, inHC, customLookPath, volumeOK, probedDir)...)
 	out = append(out, checkGH(ctx, o, inHC, customLookPath, volumeOK, probedDir))
 	out = append(out, checkCodexbar(ctx, o, inHC, customLookPath))
+	if volumeOK {
+		out = append(out, checkSweepLeftovers(ctx, o, hcOK, firstNonEmpty(probedDir, o.Folder))...)
+	}
+	return out
+}
+
+func checkSweepLeftovers(ctx context.Context, o DoctorOptions, hcOK bool, dir string) (out []onboard.Result) {
+	gctx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
+	defer cancel()
+	repo, id, err := world.RepoProject(gctx, dir, false)
+	if err != nil {
+		return nil
+	}
+	s, wtRoot, p, stateWhy, client := flow.State{}, "", Paths{DataDir: o.DataDir}, "no factory project state", (*hc.Client)(nil)
+	if o.DataDir != "" && id == "" {
+		id, _ = findStoredProject(p, repo)
+	}
+	if id != "" && o.DataDir != "" {
+		if loaded, lerr := LoadState(p.State(id)); lerr != nil {
+			stateWhy = fmt.Sprintf("cannot load factory state for %s: %v", id, lerr)
+		} else {
+			s, s.Project.ID, wtRoot, stateWhy = loaded, id, filepath.Join(p.project(id), "worktrees"), ""
+			if hcOK {
+				client = hc.NewClient(o.HCSocket)
+			}
+		}
+	} else if id != "" {
+		stateWhy = "no data dir to load factory state for " + id
+	}
+	for _, pr := range world.Sweep(gctx, client, repo, wtRoot, s) {
+		if pr.Unknown != "" {
+			out = append(out, resWarn("sweep "+pr.Probe, "unknown: "+cleanReason(map[bool]string{true: stateWhy, false: pr.Unknown}[stateWhy != "" && pr.Probe != "local_base"]), "check "+pr.Probe+" manually"))
+		}
+		for _, it := range pr.Items {
+			out = append(out, resWarn("leftover "+it.Kind, it.Summary, "inspect and clean up manually"))
+		}
+	}
 	return out
 }
 

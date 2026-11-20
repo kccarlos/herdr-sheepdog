@@ -167,6 +167,9 @@ func checkPRWorkflow(ctx context.Context, o DoctorOptions, r startRepo) onboard.
 		ref = r.remote + "/" + r.view.DefaultBranchRef.Name
 	}
 	if gitLine(ctx, o, r.root, "rev-parse", "--verify", "--quiet", ref) == "" {
+		if r.view != nil {
+			return resFail(name, "cannot read "+ref+" locally", "run: git fetch "+r.remote)
+		}
 		return resSkip(name, ref+" does not exist yet (push the base branch)")
 	}
 	var filteredFile string
