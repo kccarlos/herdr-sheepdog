@@ -1,0 +1,166 @@
+package factory
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
+	"github.com/kccarlos/herdr-sheepdog/internal/logging"
+)
+
+// TestReviewerCandidatesBySetting: round 1 is opus either way; the second
+// passing round is Codex only when second_reviewer = "codex".
+func TestReviewerCandidatesBySetting(t *testing.T) {
+	def, cdx := flow.DefaultSettings(), flow.DefaultSettings()
+	cdx.SecondReviewer = "codex"
+	for _, tc := range []struct {
+		st     flow.Settings
+		passed []string
+		want   string
+	}{
+		{def, nil, "opus"},
+		{def, []string{"opus"}, "opus"},
+		{cdx, nil, "opus"},
+		{cdx, []string{"opus"}, codexModel},
+		{cdx, []string{"opus", codexModel}, "opus"},
+	} {
+		if got := nextReviewerModel(workerModel, tc.passed, reviewerCandidates(tc.st)); got != tc.want {
+			t.Errorf("%s after %v = %q, want %q", tc.st.SecondReviewer, tc.passed, got, tc.want)
+		}
+	}
+	if r := reviewerOf(codexModel); r.CLI != world.CodexCLI || reviewerOf("opus").CLI != "claude" {
+		t.Errorf("reviewerOf CLI wrong: %+v", r)
+	}
+	if cdx.Validate() != nil || def.Validate() != nil {
+		t.Error("opus and codex must validate")
+	}
+	bad := flow.DefaultSettings()
+	bad.SecondReviewer = "haiku"
+	if bad.Validate() == nil {
+		t.Error("second_reviewer haiku validated")
+	}
+	if got := cdx.Changed(); !slices.Equal(got, []string{"second_reviewer codex"}) {
+		t.Errorf("Changed = %q", got)
+	}
+}
+
+// codexRound2 brings a task to round 2 with second_reviewer = "codex" and
+// round 1 passed by opus at c1. The Codex terminal never reports a status.
+func codexRound2(t *testing.T) (*hctest.Server, *Engine, Paths, string, string) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	runs := &[]hc.RunParams{}
+	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { *runs = append(*runs, p) }
+	paths := testPaths(t)
+	repo, _ := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := installFakeGH(t)
+	eng := New(paths, hc.NewClient(srv.Path))
+	eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
+	if err := eng.Start(repo, "Goal"); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	eng.passProject(ctx, id, false) // J7
+	st, _ := LoadState(paths.State(id))
+	st.Settings.StuckMinutes, st.Settings.SecondReviewer = flow.StuckMin, "codex"
+	st.Tasks = []flow.Task{{ID: "T1", Title: "feat: x", EstimateLines: 50}}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N11
+	eng.passProject(ctx, id, false) // N23
+	st, _ = LoadState(paths.State(id))
+	wt := st.Tasks[0].Attempts[0].Worktree
+	if err := os.WriteFile(filepath.Join(wt, "x.go"), []byte("package demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "add", "x.go")
+	gitIn(t, wt, "commit", "-m", "feat: c1")
+	c1 := gitIn(t, wt, "rev-parse", "HEAD")
+	writePRJSON(t, gh, "pr.json", c1, "[]")
+	a := &st.Tasks[0].Attempts[0]
+	a.Ready = []flow.Ready{{Head: c1}}
+	a.Rounds = []flow.Round{{N: 1, Kind: flow.RoundFull, Head: c1, Reviewer: flow.Reviewer{CLI: "claude", Model: "opus", Effort: "medium"}, Verdict: flow.VerdictPass}}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false) // N26
+	eng.passProject(ctx, id, false) // N29 starts round 2 on Codex
+	st, _ = LoadState(paths.State(id))
+	rev := st.Tasks[0].Attempts[0].Review
+	last := (*runs)[len(*runs)-1]
+	if rev == nil || rev.Round != 2 || rev.Reviewer.CLI != world.CodexCLI || rev.Reviewer.Model != codexModel ||
+		!slices.Equal(last.Argv[:len(last.Argv)-1], world.CodexArgv(codexModel, wt)) || !strings.Contains(last.Argv[len(last.Argv)-1], "Review round 2") {
+		t.Fatalf("round 2 review = %+v argv %q", rev, last.Argv)
+	}
+	return srv, eng, paths, id, c1
+}
+
+func codexScreen(code, head, reply string) string {
+	return "› You are the factory code reviewer for task T1: feat: x\n" +
+		`  <report>{"code":"` + code + `","round":2,"head":"` + head + `","verdict":"pass|changes","majors":<n>}</report>` + "\n\n" + reply
+}
+
+// TestEngineCodexReviewerTagIsTheVerdict: a Codex run with no hc status is
+// read every pass; the echo alone is not a verdict, the reply's tag is.
+func TestEngineCodexReviewerTagIsTheVerdict(t *testing.T) {
+	ctx := context.Background()
+	srv, eng, paths, id, c1 := codexRound2(t)
+	st, _ := LoadState(paths.State(id))
+	rev := st.Tasks[0].Attempts[0].Review
+	srv.SetScreen(rev.RunID, codexScreen(rev.Code, c1, "• Working (3s • esc to interrupt)\n"))
+	eng.passProject(ctx, id, false)
+	if st, _ = LoadState(paths.State(id)); len(st.Tasks[0].Attempts[0].Rounds) != 1 || st.Tasks[0].Attempts[0].Review == nil {
+		t.Fatalf("echo read as a verdict: %+v", st.Tasks[0].Attempts[0])
+	}
+	srv.SetScreen(rev.RunID, codexScreen(rev.Code, c1, "• Clean change.\n\n  <report>{\"code\":\""+rev.Code+"\",\"round\":2,\"head\":\""+c1+
+		"\",\"verdict\":\"pass\",\"majors\":0}</report>\n\n  Worked for 9s • 8:44 PM\n\n› Ask Codex to do anything\n"))
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	a := st.Tasks[0].Attempts[0]
+	if a.Review != nil || len(a.Rounds) != 2 || a.Rounds[1].Verdict != flow.VerdictPass || a.Rounds[1].Reviewer.CLI != world.CodexCLI {
+		t.Fatalf("after the Codex tag: review=%+v rounds=%+v", a.Review, a.Rounds)
+	}
+	if b, err := os.ReadFile(a.Rounds[1].ReportPath); err != nil || !strings.Contains(string(b), "• Clean change.") {
+		t.Fatalf("round 2 report = %q, %v", b, err)
+	}
+	if flow.Ladder(flow.In{Task: st.Tasks[0], Settings: st.Settings}) != flow.Passed {
+		t.Fatal("opus pass + Codex pass is not passed")
+	}
+}
+
+// TestEngineCodexReviewerNoTagIsStuck: a Codex run that never prints its
+// tag starts S2's clock on the first read and wakes after stuck_minutes.
+func TestEngineCodexReviewerNoTagIsStuck(t *testing.T) {
+	ctx := context.Background()
+	srv, eng, paths, id, c1 := codexRound2(t)
+	st, _ := LoadState(paths.State(id))
+	rev := st.Tasks[0].Attempts[0].Review
+	srv.SetScreen(rev.RunID, codexScreen(rev.Code, c1, "• Still thinking.\n"))
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	if st.Tasks[0].Attempts[0].Review.IdleSince == nil || len(st.Project.Wakes) != 0 {
+		t.Fatalf("no S2 clock on the first no-tag read: %+v", st.Tasks[0].Attempts[0].Review)
+	}
+	past := time.Now().Add(-time.Duration(flow.StuckMin)*time.Minute - time.Second)
+	st.Tasks[0].Attempts[0].Review.IdleSince = &past
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	want := "stuck@reviewer_idle@2@" + c1
+	if len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != want {
+		t.Fatalf("wakes = %+v, want %s", st.Project.Wakes, want)
+	}
+}

@@ -552,6 +552,7 @@ These factory settings live in each project's `state.json`, not in the config fi
 | `size_cap_factor` | `2` | 1–5 | A task's size cap is this times its `estimate_lines`; past it the task stops at a size recap. |
 | `continue_lines` | `60` | 0–500 | A recap's `continue` sets the cap to the changed lines now plus this. |
 | `continues_per_task` | `1` | 0–3 | How many times a task may `continue`. |
+| `second_reviewer` | `"opus"` | `opus`, `codex` | Who reviews a task's second passing round: Claude opus in a fresh session, or Codex (`gpt-6.2-sol`, read-only, run with `--no-daemon` in herdr-core; the first round stays opus). A Codex review ends when its report tag is read; no tag for `stuck_minutes` wakes the coordinator. |
 
 ## What sheepdog stores
 
