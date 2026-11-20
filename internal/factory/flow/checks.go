@@ -135,7 +135,7 @@ type Failure struct {
 	Name string `json:"name,omitempty"`
 }
 
-// FailingRuns lists the latest checks of a red or outside-cancelled class,
+// FailingRuns lists the latest of checks (all of H's) of a red or outside-cancelled class,
 // and whether any check or status has not finished. A run id comes only
 // from an Actions check run whose URL is repo's own actions run, and only
 // if that run is in failedRuns (H's runs completed with a failure or cancel)
@@ -143,7 +143,7 @@ type Failure struct {
 func FailingRuns(checks []Check, class Checks, repo string, failedRuns map[string]bool) (fails []Failure, running bool) {
 	want := map[Checks]string{ChecksRed: "red", ChecksStoppedExternal: "stopped_external"}[class]
 	pre, latest, limited := "https://github.com/"+repo+"/actions/runs/", LatestChecks(checks), map[string]bool{}
-	for _, c := range latest { // a run holding a time limit is never re-run: --failed re-runs its dependents too
+	for _, c := range checks { // every check, not the latest: a run holding a time limit is never re-run (--failed re-runs dependents)
 		if v := c.verdict(); v == "stopped_timeout" || v == "stopped_unknown" {
 			limited[urlID(c.DetailsURL, "/actions/runs/")] = true
 		}

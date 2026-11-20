@@ -495,3 +495,19 @@ func TestCINoRerunOfARunWithATimeLimit(t *testing.T) {
 		t.Fatalf("run 80 with a timed-out job: reruns %q, sends %d; want none and one tell", got, len(sendsTo(t, l.srv.Requests(), l.worker)))
 	}
 }
+
+// TestCINoRerunWhenATimeLimitIsDeduped: run 80's timed-out report job is
+// hidden from the rollup by a newer same-named report of run 81 (two
+// workflows with display name ci); run 80 is still never re-run, because
+// eligibility reads every check of H, not the deduped ones.
+func TestCINoRerunWhenATimeLimitIsDeduped(t *testing.T) {
+	l := newLanding(t)
+	writeGHFile(t, l.gh, "annotations.json", `[{"message":"The job has exceeded the maximum execution time of 1m0s"}]`)
+	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("build", "COMPLETED", "FAILURE", "80", "800")+","+
+		ciCheck("report", "COMPLETED", "CANCELLED", "80", "801")+","+ciCheck("report", "COMPLETED", "SUCCESS", "81", "811")+"]")
+	l.pass()
+	l.pass()
+	if got := ghCalls(t, l.gh, "run rerun"); len(got) != 0 || len(sendsTo(t, l.srv.Requests(), l.worker)) != 1 {
+		t.Fatalf("run 80 with a hidden timed-out job: reruns %q, sends %d; want none and one tell", got, len(sendsTo(t, l.srv.Requests(), l.worker)))
+	}
+}

@@ -165,14 +165,15 @@ func PRSnapshot(ctx context.Context, repoDir, branch string) (p flow.PR, warn, e
 		}
 	}
 	var warns []error
-	checks := flow.LatestChecks(v.StatusCheckRollup)
-	for i, c := range checks {
-		checks[i].Actions = c.Actions || !checksDenied && c.WorkflowName != "" // the rollup names only an Actions run's workflow; REST reads the app
+	all := v.StatusCheckRollup // every check of H, before the dedupe: re-run eligibility reads them all
+	for i, c := range all {
+		all[i].Actions = c.Actions || !checksDenied && c.WorkflowName != "" // the rollup names only an Actions run's workflow; REST reads the app
 		if id := flow.CheckRunID(c); id > 0 && strings.EqualFold(c.Status, "COMPLETED") && strings.EqualFold(c.Conclusion, "CANCELLED") {
-			checks[i].Stop, err = checkRunStop(ctx, repoDir, repo, id)
+			all[i].Stop, err = checkRunStop(ctx, repoDir, repo, id)
 			warns = append(warns, err)
 		}
 	}
+	checks := flow.LatestChecks(all)
 	wfPending, failedRuns := false, map[string]bool{}
 	if p.Head != "" { // H's own workflow runs: an unfinished one waits, and only a failed one is re-run
 		if wfPending, failedRuns, err = headRuns(ctx, repoDir, repo, p.Head); err != nil {
@@ -184,7 +185,7 @@ func PRSnapshot(ctx context.Context, repoDir, branch string) (p flow.PR, warn, e
 		warns = append(warns, err)
 	}
 	p.Checks = flow.Rollup(checks, wfPending)
-	p.Failed, p.Running = flow.FailingRuns(checks, p.Checks, repo, failedRuns)
+	p.Failed, p.Running = flow.FailingRuns(all, p.Checks, repo, failedRuns)
 	p.Running = p.Running || wfPending
 	if v.BaseRefName != "" && p.Head != "" {
 		var cmpResp struct {
