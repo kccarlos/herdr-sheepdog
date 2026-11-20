@@ -88,7 +88,12 @@ type Facts struct {
 	PR     PR     `json:"pr"`
 	Tip    string `json:"tip"`
 	TipRel Rel    `json:"tip_rel"` // the worktree tip against H
-	Worker Run    `json:"worker"`
+	// TipMergeOnly: the tip is ahead of H by merges of the base only (N20).
+	TipMergeOnly bool `json:"tip_merge_only,omitempty"`
+	// Lines is the changed lines (added + removed) at the tip against the
+	// merge base, read from git every pass (N12).
+	Lines  int `json:"lines"`
+	Worker Run `json:"worker"`
 	// Reviewer is the run for the round the ladder asks for at H, not an
 	// earlier round's (that one was stopped when its verdict came in).
 	Reviewer Run `json:"reviewer"`
@@ -115,24 +120,37 @@ func (in In) acts() []Act {
 }
 
 // H is the attempt's head (design.md 3.1): the base commit, then the
-// commit of the latest ready report. Slice 1 has no engine branch update
-// and no merge-only advance.
+// commit of the latest ready report, then each merge_only move from it.
 func H(a Attempt) string {
+	h := a.BaseCommit
 	if n := len(a.Ready); n > 0 {
-		return a.Ready[n-1].Head
+		h = a.Ready[n-1].Head
 	}
-	return a.BaseCommit
+	for _, m := range a.MergeOnly {
+		if m.From == h {
+			h = m.To
+		}
+	}
+	return h
 }
 
 // Covers reports whether a record made at x still counts for h (design.md
-// 3.1). Slice 1 has no merge_only deltas, so only the same commit covers.
-func Covers(x, h string) bool { return x == h }
+// 3.1): x is h, or h was reached from x by merge_only moves only. Every
+// record is made at some H, so the attempt's moves are the whole relation.
+func Covers(a Attempt, x, h string) bool {
+	for i := len(a.MergeOnly) - 1; i >= 0 && x != h; i-- {
+		if a.MergeOnly[i].To == h {
+			h = a.MergeOnly[i].From
+		}
+	}
+	return x == h
+}
 
 // newestCovering is the newest round that covers h, or nil.
 func newestCovering(a Attempt, h string) *Round {
 	rs := Counted(a)
 	for i := len(rs) - 1; i >= 0; i-- {
-		if Covers(rs[i].Head, h) {
+		if Covers(a, rs[i].Head, h) {
 			return &rs[i]
 		}
 	}
@@ -178,7 +196,7 @@ func RejectedRound(a Attempt, h string) (*Round, *Reject) {
 
 func rejectFor(a Attempt, h string, round int) *Reject {
 	for i := len(a.Rejects) - 1; i >= 0; i-- {
-		if Covers(a.Rejects[i].Head, h) && a.Rejects[i].Round == round {
+		if Covers(a, a.Rejects[i].Head, h) && a.Rejects[i].Round == round {
 			return &a.Rejects[i]
 		}
 	}
@@ -189,7 +207,7 @@ func rejectFor(a Attempt, h string, round int) *Reject {
 // not covered by it, and full otherwise (design.md 4.6, 9.4).
 // A rejected delta round stays at the same head, so it re-reviews as full (a superset for a fresh reviewer).
 func RoundKind(a Attempt, h string, sinceRel Rel) (kind, since string) {
-	if r := LastReviewed(a); r != nil && sinceRel == RelAhead && !Covers(r.Head, h) {
+	if r := LastReviewed(a); r != nil && sinceRel == RelAhead && !Covers(a, r.Head, h) {
 		return RoundDelta, r.Head
 	}
 	return RoundFull, ""

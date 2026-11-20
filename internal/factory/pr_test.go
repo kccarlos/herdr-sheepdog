@@ -89,7 +89,7 @@ func TestPRSnapshotFactsAndFailure(t *testing.T) {
 	}
 	gitIn(t, repo, "commit", "--allow-empty", "-m", "feat: x")
 	c1 := gitIn(t, repo, "rev-parse", "HEAD")
-	s.Tasks = []flow.Task{{ID: "t1", Title: "feat: x", Attempts: []flow.Attempt{{BaseCommit: base, Branch: "task/t1", Worktree: repo, Ready: []flow.Ready{{Head: c1}}}}}}
+	s.Tasks = []flow.Task{{ID: "t1", Title: "feat: x", EstimateLines: 50, Attempts: []flow.Attempt{{SizeCap: 100, BaseCommit: base, Branch: "task/t1", Worktree: repo, Ready: []flow.Ready{{Head: c1}}}}}}
 
 	read := func() flow.PR { eng.mu.Lock(); defer eng.mu.Unlock(); return eng.readPRLocked(ctx, id, &s, 0) }
 	writePRJSON(t, gh, "view.json", c1, `[{"__typename":"CheckRun","name":"check","status":"IN_PROGRESS","conclusion":""}]`)

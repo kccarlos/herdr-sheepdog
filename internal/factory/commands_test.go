@@ -36,8 +36,8 @@ func (l *landing) withTokens() *landing {
 func TestTaskCommandsAcceptance(t *testing.T) {
 	l := newLanding(t).withTokens()
 	l.edit(func(s *flow.State) {
-		s.Tasks = append(s.Tasks, flow.Task{ID: "T2", Title: "feat: after", After: []string{"T1"}},
-			flow.Task{ID: "T3", Title: "feat: ended", Closed: &flow.Closed{Why: "x"}})
+		s.Tasks = append(s.Tasks, flow.Task{ID: "T2", Title: "feat: after", EstimateLines: 50, After: []string{"T1"}},
+			flow.Task{ID: "T3", Title: "feat: ended", EstimateLines: 50, Closed: &flow.Closed{Why: "x"}})
 	})
 	seq := l.state().Seq
 	l.report("tok-worker", "task", `{"action":"park","task":"T1","why":"w"}`, "kind_not_allowed")
@@ -180,19 +180,19 @@ func TestSendBackStaysWithWorkerUntilReady(t *testing.T) {
 func TestAmendBriefReviewsSameHeadAgain(t *testing.T) {
 	l := newLanding(t).withTokens()
 	l.edit(func(s *flow.State) {
-		s.Tasks = append(s.Tasks, flow.Task{ID: "T3", Title: "feat: ended", Dropped: &flow.Dropped{Why: "x"}})
+		s.Tasks = append(s.Tasks, flow.Task{ID: "T3", Title: "feat: ended", EstimateLines: 50, Dropped: &flow.Dropped{Why: "x"}})
 	})
 	seq := l.state().Seq
 	l.report("tok-worker", "plan amend", `{"why":"w","tasks":[{"id":"T1","brief":"b"}]}`, "kind_not_allowed")
 	l.report("tok-coord", "plan amend", `{"tasks":[{"id":"T1","brief":"b"}]}`, "why_missing")
 	l.report("tok-coord", "plan amend", `{"why":"w","tasks":[{"id":"T3","brief":"b"}]}`, "plan_invalid")
 	l.report("tok-coord", "plan amend", `{"why":"w","tasks":[{"id":"T1","after":["T3"]}]}`, "plan_invalid")
-	l.report("tok-coord", "plan amend", `{"why":"w","tasks":[{"id":"T4","after":["NOPE"],"title":"feat: n"}]}`, "plan_invalid")
+	l.report("tok-coord", "plan amend", `{"why":"w","tasks":[{"id":"T4","after":["NOPE"],"estimate_lines":50,"title":"feat: n"}]}`, "plan_invalid")
 	if l.state().Seq != seq {
 		t.Fatal("refusals changed state")
 	}
 
-	l.report("tok-coord", "plan amend", `{"why":"retitle","tasks":[{"id":"T1","title":"feat: y"},{"id":"T2","title":"feat: new","after":["T1"]}]}`, "")
+	l.report("tok-coord", "plan amend", `{"why":"retitle","tasks":[{"id":"T1","estimate_lines":50,"title":"feat: y"},{"id":"T2","estimate_lines":50,"title":"feat: new","after":["T1"]}]}`, "")
 	st := l.state()
 	if st.Tasks[0].Title != "feat: y" || st.Tasks[0].Attempts[0].Boundary != 0 || len(st.Tasks) != 3 || st.Tasks[2].ID != "T2" {
 		t.Fatalf("after title amend: %+v", st.Tasks)
@@ -261,7 +261,7 @@ func TestNothingToChangeN8ThenClose(t *testing.T) {
 	if err := SaveState(paths.State(id), flow.State{
 		Seq: 1, Project: flow.Project{ID: id, Folder: repo, Started: true, RunID: "coord", RunTokenHash: tokenHash("tok-coord")},
 		Settings: flow.DefaultSettings(),
-		Tasks: []flow.Task{{ID: "T1", Title: "feat: x", Attempts: []flow.Attempt{{
+		Tasks: []flow.Task{{ID: "T1", Title: "feat: x", EstimateLines: 50, Attempts: []flow.Attempt{{SizeCap: 100,
 			BaseCommit: base, Branch: wt.Branch, Worktree: wt.Path, RunTokenHash: tokenHash("tok-worker"),
 			Acts: []flow.Act{{Key: flow.AskStartWorker, Result: "done"}},
 		}}}},
@@ -323,7 +323,7 @@ func TestWhysCleanedAndCapped(t *testing.T) {
 	if r := l.state().Tasks[0].Attempts[0].Rounds[2]; r.Why != "add a test" {
 		t.Fatalf("send-back why = %q, want cleaned", r.Why)
 	}
-	l.report("tok-coord", "plan amend", `{"why":"w\u001b[2J","tasks":[{"id":"T1","title":"feat:\ny"},{"id":"T2","title":"feat:\u0007 z"}]}`, "")
+	l.report("tok-coord", "plan amend", `{"why":"w\u001b[2J","tasks":[{"id":"T1","estimate_lines":50,"title":"feat:\ny"},{"id":"T2","estimate_lines":50,"title":"feat:\u0007 z"}]}`, "")
 	if st := l.state(); st.Tasks[0].Title != "feat: y" || st.Tasks[1].Title != "feat: z" {
 		t.Fatalf("titles = %q, %q, want cleaned", st.Tasks[0].Title, st.Tasks[1].Title)
 	}

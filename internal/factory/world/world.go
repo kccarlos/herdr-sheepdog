@@ -613,6 +613,58 @@ func DeltaRanges(ctx context.Context, worktree, since, head string) ([]string, e
 	return ranges, nil
 }
 
+// ChangedLines is the lines added plus removed at tip against its merge base
+// with the base branch, as git last fetched it (N12, design.md 11.5). It
+// does not fetch: it runs every pass. Every file counts as text, so no
+// attribute or NUL byte the worker commits can hide lines.
+func ChangedLines(ctx context.Context, dir, tip string) (int, error) {
+	ref, _, err := remoteBaseCommit(ctx, dir, false)
+	if err != nil {
+		return 0, err
+	}
+	// The patch, not --numstat: numstat still calls a -diff or NUL file
+	// binary under --text.
+	out, err := gitCmd(ctx, dir, "diff", "--text", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=0", ref+"..."+tip)
+	n, hunk := 0, false
+	for ln := range strings.Lines(out) {
+		switch {
+		case strings.HasPrefix(ln, "diff --git "):
+			hunk = false
+		case strings.HasPrefix(ln, "@@"):
+			hunk = true
+		case hunk && (ln[0] == '+' || ln[0] == '-'):
+			n++
+		}
+	}
+	return n, err
+}
+
+// MergeOnly reports whether h is ahead of x by clean merges of the base
+// branch only, on the first-parent line (design.md 3.1). It does not fetch.
+func MergeOnly(ctx context.Context, dir, x, h string) (bool, error) {
+	ref, _, err := remoteBaseCommit(ctx, dir, false)
+	if err != nil {
+		return false, err
+	}
+	if x == h {
+		return false, nil
+	}
+	mb, err := gitCmd(ctx, dir, "merge-base", h, ref)
+	if err != nil || !isAncestor(ctx, dir, x, h) { // no common ancestor is "not merge_only"; only a cancelled read is an error
+		return false, ctx.Err()
+	}
+	out, err := gitCmd(ctx, dir, "rev-list", "--first-parent", "--parents", x+".."+h)
+	if err != nil || out == "" {
+		return false, err
+	}
+	for ln := range strings.Lines(out) {
+		if !cleanBaseMerge(ctx, dir, strings.Fields(ln), mb) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func cleanBaseMerge(ctx context.Context, dir string, f []string, mb string) bool {
 	if len(f) != 3 || !isAncestor(ctx, dir, f[2], mb) {
 		return false

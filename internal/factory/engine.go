@@ -47,8 +47,17 @@ type Engine struct {
 
 	mu   sync.Mutex
 	wake chan struct{}
-	prs  map[string]flow.PR // last PR snapshot per attempt worktree (in memory)
-	errs map[string]string  // last gh or git error per worktree and kind, logged once per change
+	prs  map[string]flow.PR  // last PR snapshot per attempt worktree (in memory)
+	errs map[string]string   // last gh or git error per worktree and kind, logged once per change
+	tips map[string]tipFacts // last git reading per worktree (in memory)
+}
+
+// tipFacts are N12's and N20's git facts for one tip and H: the merge base,
+// and so the line count, moves only with the tip.
+type tipFacts struct {
+	tip, h    string
+	lines     int
+	mergeOnly bool
 }
 
 // New constructs an Engine. Nothing runs or touches disk until Run or Start.
@@ -301,6 +310,9 @@ var taskExecutors = map[string]taskExec{
 	flow.AskStartReview:  (*Engine).execStartReviewer,
 	flow.AskTellFindings: (*Engine).execTellFindings,
 	flow.AskOpenRecap:    (*Engine).execOpenRecap,
+	flow.AskSizeRecap:    (*Engine).execSizeRecap,
+	flow.AskTellStop:     (*Engine).execTellStop,
+	flow.AskMergeOnly:    (*Engine).execMergeOnly,
 	flow.AskAccept:       (*Engine).execRecordAccept,
 	flow.AskMerge:        (*Engine).execMerge,
 	flow.AskMarkDone:     (*Engine).execMarkDone,
@@ -316,6 +328,9 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		a := *oa
 		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
 		tip, rel, _, err := world.InspectWorktree(gctx, a.Worktree, flow.H(a))
+		if err == nil {
+			facts.Lines, facts.TipMergeOnly, err = e.readTipLocked(gctx, a, tip, rel)
+		}
 		cancel()
 		if e.logOnce("factory.git_error", id, a.Worktree, err); err != nil {
 			return
@@ -387,6 +402,31 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	}
 }
 
+// readTipLocked reads the changed lines at tip and whether it is ahead of H
+// by merges of the base only, once per tip and H. The base commit itself
+// has no changed lines.
+func (e *Engine) readTipLocked(ctx context.Context, a flow.Attempt, tip string, rel flow.Rel) (int, bool, error) {
+	h := flow.H(a)
+	if c, ok := e.tips[a.Worktree]; ok && c.tip == tip && c.h == h {
+		return c.lines, c.mergeOnly, nil
+	}
+	c, err := tipFacts{tip: tip, h: h}, error(nil)
+	if tip != a.BaseCommit {
+		c.lines, err = world.ChangedLines(ctx, a.Worktree, tip)
+	}
+	if err == nil && rel == flow.RelAhead {
+		c.mergeOnly, err = world.MergeOnly(ctx, a.Worktree, h, tip)
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	if e.tips == nil {
+		e.tips = map[string]tipFacts{}
+	}
+	e.tips[a.Worktree] = c
+	return c.lines, c.mergeOnly, nil
+}
+
 func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, n := &s.Tasks[ti], len(s.Tasks[ti].Attempts)+1
 	// The branch carries the project and the attempt, so a new project on
@@ -397,7 +437,8 @@ func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, t
 	defer cancel()
 	wt, err := world.NewWorktree(gctx, s.Project.Folder, e.Paths.Worktree(id, t.ID, n), tag, t.Title)
 	if err == nil {
-		t.Attempts = append(t.Attempts, flow.Attempt{BaseCommit: wt.BaseCommit, Branch: wt.Branch, Worktree: wt.Path, Ready: []flow.Ready{}, Rounds: []flow.Round{}, Accepts: []flow.Accept{}, Acts: []flow.Act{}})
+		t.Attempts = append(t.Attempts, flow.Attempt{BaseCommit: wt.BaseCommit, Branch: wt.Branch, Worktree: wt.Path, Ready: []flow.Ready{}, Rounds: []flow.Round{}, Accepts: []flow.Accept{}, Acts: []flow.Act{},
+			SizeCap: s.Settings.SizeCapFactor * t.EstimateLines})
 	}
 	return "new attempt " + wt.Branch, false, err
 }
@@ -468,7 +509,11 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		return false
 	}
 	if flow.Ended(*t) || facts.PR.State == flow.PRMerged || facts.PR.State == flow.PRClosed ||
-		facts.TipRel != flow.RelSame || a.Review.Round != len(a.Rounds)+1 || a.Review.Head != flow.H(*a) {
+		!tipKeepsRound(*a, a.Review.Head, *facts) || a.Review.Round != len(a.Rounds)+1 {
+		return voidRound()
+	}
+	if flow.OpenRecap(*t) != nil { // N6: no reviewer runs; after the decision the round starts again
+		forgetStarts(a, false)
 		return voidRound()
 	}
 	if a.Review.RunID == "" {
@@ -508,7 +553,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		e.logError("factory.git_error", id, err)
 		return true
 	}
-	if !clean || tip != a.Review.Head {
+	if !clean || tip != facts.Tip {
 		why := "the worktree moved"
 		if !clean {
 			why = "the reviewer left the worktree dirty"
@@ -532,6 +577,13 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		e.logError("factory.exec_error", id, err)
 	}
 	return true
+}
+
+// tipKeepsRound: a round in flight at x keeps running while H is x or was
+// reached from x by merge_only moves, and the tip is H or ahead of it by
+// merges of the base only (N20 moves H next).
+func tipKeepsRound(a flow.Attempt, x string, f flow.Facts) bool {
+	return flow.Covers(a, x, flow.H(a)) && (f.TipRel == flow.RelSame || f.TipRel == flow.RelAhead && f.TipMergeOnly)
 }
 
 // markReviewIdleLocked starts the stuck row's clock (review.idle_since) the
@@ -597,7 +649,7 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 
 func reviewDiffPrompt(ctx context.Context, a flow.Attempt, head string) (kind, diff string, err error) {
 	var rel flow.Rel
-	if r := flow.LastReviewed(a); r != nil && !flow.Covers(r.Head, head) {
+	if r := flow.LastReviewed(a); r != nil && !flow.Covers(a, r.Head, head) {
 		rel, _ = world.Relation(ctx, a.Worktree, r.Head, head)
 	}
 	kind, since := flow.RoundKind(a, head, rel)
@@ -643,14 +695,38 @@ func (e *Engine) execTellFindings(ctx context.Context, _ string, s *flow.State, 
 	return fmt.Sprintf("told worker findings from round %d", r.N), false, world.SendRun(ctx, e.HC, a.RunID, msg)
 }
 
-// execOpenRecap is N25: open a review-triggered recap once per attempt with
-// slice 2's allowed choices (split, new, drop; continue arrives in 2.6).
+// execOpenRecap is N25: open a review-triggered recap once per attempt
+// (allowed split, new, drop: never continue after a review trigger).
 func (e *Engine) execOpenRecap(_ context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
-	t := &s.Tasks[ti]
+	return openRecap(&s.Tasks[ti], flow.TriggerReview, []string{"split", "new", "drop"}), false, nil
+}
+
+// execSizeRecap is N12: open a size recap with the choices it allows now.
+func (e *Engine) execSizeRecap(_ context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	return openRecap(&s.Tasks[ti], flow.TriggerSize, flow.SizeRecapAllowed(s.Tasks[ti], s.Settings)), false, nil
+}
+
+func openRecap(t *flow.Task, trigger string, allowed []string) string {
 	if flow.OpenRecap(*t) == nil {
-		t.Recaps = append(t.Recaps, flow.Recap{Trigger: "review", Allowed: []string{"split", "new", "drop"}})
+		t.Recaps = append(t.Recaps, flow.Recap{Trigger: trigger, Allowed: allowed})
 	}
-	return "opened recap (trigger review, allowed split, new, drop)", false, nil
+	return fmt.Sprintf("opened recap (trigger %s, allowed %s)", trigger, strings.Join(allowed, ", "))
+}
+
+// execTellStop is N6 for a size recap: the worker is told once to stop.
+func (e *Engine) execTellStop(ctx context.Context, _ string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
+	a := flow.OpenAttempt(s.Tasks[ti])
+	msg := fmt.Sprintf("Task %s is over its size cap: %d changed lines, cap %d. Stop now and write nothing more; the coordinator decides how the task goes on.", s.Tasks[ti].ID, f.Lines, a.SizeCap)
+	return "told worker to stop at the size cap", false, world.SendRun(ctx, e.HC, a.RunID, msg)
+}
+
+// execMergeOnly is N20: H moves to a tip that is ahead of it by merges of
+// the base only. N26 then pushes it; no round is asked.
+func (e *Engine) execMergeOnly(_ context.Context, _ string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
+	a := flow.OpenAttempt(s.Tasks[ti])
+	from := flow.H(*a)
+	a.MergeOnly = append(a.MergeOnly, flow.Advance{From: from, To: f.Tip})
+	return fmt.Sprintf("H moved from %s to merge-only tip %s", from, f.Tip), false, nil
 }
 
 func bullets(items []string) string {

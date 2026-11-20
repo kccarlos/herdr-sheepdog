@@ -15,6 +15,9 @@ const (
 	AskStartReview  = "start_reviewer"
 	AskTellFindings = "tell_worker_findings"
 	AskOpenRecap    = "open_recap"
+	AskSizeRecap    = "open_size_recap"
+	AskTellStop     = "tell_worker_stop"
+	AskMergeOnly    = "move_h_merge_only"
 	AskPushPR       = "push_and_open_pr"
 	AskAccept       = "record_accept"
 	AskMerge        = "merge"
@@ -96,7 +99,7 @@ func hasAttempt(in In) bool  { return in.attempt() != nil }
 func workerGone(in In) bool  { return in.Facts.Worker.State == RunGone }
 func reviewGone(in In) bool  { return in.Facts.Reviewer.State == RunGone }
 func noReady(in In) bool     { return len(in.attempt().Ready) == 0 }
-func tipAhead(in In) bool    { return in.Facts.TipRel == RelAhead } // slice 1: ahead is always changes
+func tipAhead(in In) bool    { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
 func noPR(in In) bool        { return in.Facts.PR.State == PRNone }
 func prOpen(in In) bool      { return in.Facts.PR.State == PROpen }
 func prNotClosed(in In) bool { return in.Facts.PR.State != PRClosed }
@@ -177,8 +180,14 @@ var TaskRows = []Row[In]{
 		}
 		return say("the "+who+" run ended: the task is stopped", once(in.acts(), AskStopTask))(in)
 	}},
+	// N6 tells the worker of a size recap once to stop (it has no
+	// recap-written report yet, so nothing waits for one).
 	{ID: "N6", WaitsOn: "the coordinator", When: recapOpen, Then: func(in In) Decision {
-		return say("a recap is open", once(in.acts(), key(AskWake, "recap", len(in.Task.Recaps))))(in)
+		n, tell := len(in.Task.Recaps), []string(nil)
+		if OpenRecap(in.Task).Trigger == TriggerSize && in.Facts.Worker.State != RunNone {
+			tell = once(in.acts(), key(AskTellStop, n))
+		}
+		return say("a recap is open", once(in.acts(), key(AskWake, "recap", n)), tell)(in)
 	}},
 	{ID: "N8", WaitsOn: "the coordinator", When: func(in In) bool { return hasAttempt(in) && in.attempt().NothingToChange != "" }, Then: func(in In) Decision {
 		a := in.attempt()
@@ -187,6 +196,16 @@ var TaskRows = []Row[In]{
 	{ID: "N11", WaitsOn: "the engine", When: noAttempt, Then: func(in In) Decision {
 		return say("no attempt: start one", once(in.acts(), AskNewAttempt))(in)
 	}},
+	// N12 has no "no owner override covers H" clause until slice 7.
+	{ID: "N12", WaitsOn: "the coordinator", When: func(in In) bool { return hasAttempt(in) && in.Facts.Lines > in.attempt().SizeCap },
+		Then: func(in In) Decision {
+			return say(fmt.Sprintf("%d changed lines, over the size cap %d", in.Facts.Lines, in.attempt().SizeCap),
+				once(in.acts(), key(AskSizeRecap, len(in.Task.Recaps))))(in)
+		}},
+	{ID: "N20", WaitsOn: "the engine", When: func(in In) bool { return hasAttempt(in) && tipAhead(in) && in.Facts.TipMergeOnly },
+		Then: func(in In) Decision {
+			return say("the tip is ahead of H by merges of the base only: H moves to it, no round", once(in.acts(), key(AskMergeOnly, in.Facts.Tip)))(in)
+		}},
 	{ID: "N22", WaitsOn: "the worker", When: all(ladderSays(Fix), prNotClosed), Then: func(in In) Decision {
 		r := newestCovering(*in.attempt(), headH(in))
 		return say("the ladder says fix", ensureRun(in, in.Facts.Worker, AskStartWorker),

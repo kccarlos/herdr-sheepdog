@@ -58,7 +58,7 @@ func morePassesNeeded(in In) bool {
 func PassingCovering(a Attempt, h string) []Round {
 	var out []Round
 	for _, r := range Counted(a) {
-		if Covers(r.Head, h) && r.Verdict == VerdictPass {
+		if Covers(a, r.Head, h) && r.Verdict == VerdictPass {
 			out = append(out, r)
 		}
 	}

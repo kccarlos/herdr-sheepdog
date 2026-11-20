@@ -62,7 +62,7 @@ func TestRunTokenInEnvNotArgvOrLog(t *testing.T) {
 	if got.Argv != nil {
 		t.Fatalf("the live coordinator was launched again: %v", got.Argv)
 	}
-	if err := eng.Report(tok, "plan apply", json.RawMessage(`{"tasks":[{"id":"T1","title":"feat: x"}]}`)); err != nil {
+	if err := eng.Report(tok, "plan apply", json.RawMessage(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: x"}]}`)); err != nil {
 		t.Fatalf("adopted run's token: %v", err)
 	}
 
@@ -109,16 +109,16 @@ func TestReportAcceptance(t *testing.T) {
 	var logBuf bytes.Buffer
 	eng := New(testPaths(t), nil)
 	eng.Log = logging.NewJSONLLogger(&logBuf)
-	coord := flow.State{Seq: 1, Project: flow.Project{ID: "proj-a", Started: true, RunTokenHash: tokenHash("tok-coord-a")}}
+	coord := flow.State{Seq: 1, Settings: flow.DefaultSettings(), Project: flow.Project{ID: "proj-a", Started: true, RunTokenHash: tokenHash("tok-coord-a")}}
 	worker := flow.State{Seq: 1, Project: flow.Project{ID: "proj-b", Started: true, RunTokenHash: tokenHash("tok-coord-b")},
-		Tasks: []flow.Task{{ID: "T1", Title: "feat: x", Attempts: []flow.Attempt{{RunTokenHash: tokenHash("tok-worker-b")}}}}}
+		Tasks: []flow.Task{{ID: "T1", Title: "feat: x", EstimateLines: 50, Attempts: []flow.Attempt{{SizeCap: 100, RunTokenHash: tokenHash("tok-worker-b")}}}}}
 	for _, s := range []flow.State{coord, worker} {
 		if err := SaveState(eng.Paths.State(s.Project.ID), s); err != nil {
 			t.Fatal(err)
 		}
 	}
-	plan := json.RawMessage(`{"tasks":[{"id":"T1","title":"feat: add a greeting helper","brief":"b","outcomes":["go test passes"],"after":[]}]}`)
-	bad := json.RawMessage(`{"tasks":[{"id":"A","title":"a","after":["B"],"estimate":5},{"id":"B","title":"b","after":["A"]},{"id":"C","title":" ","after":["Z"]}]}`)
+	plan := json.RawMessage(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: add a greeting helper","brief":"b","outcomes":["go test passes"],"after":[]}]}`)
+	bad := json.RawMessage(`{"tasks":[{"id":"A","estimate_lines":50,"title":"a","after":["B"],"estimate":5},{"id":"B","estimate_lines":50,"title":"b","after":["A"]},{"id":"C","estimate_lines":50,"title":" ","after":["Z"]}]}`)
 
 	for _, c := range []struct {
 		name, token, verb string
@@ -180,18 +180,18 @@ func TestPlanShape(t *testing.T) {
 		name, plan string
 		want       []string // nil: the plan passes
 	}{
-		{"duplicate id", `{"tasks":[{"id":"A","title":"a"},{"id":"A","title":"b"}]}`, []string{"task 2 needs an id"}},
-		{"empty id is not an id", `{"tasks":[{"id":"","title":"a"},{"id":"B","title":"b","after":[""]}]}`,
+		{"duplicate id", `{"tasks":[{"id":"A","estimate_lines":50,"title":"a"},{"id":"A","estimate_lines":50,"title":"b"}]}`, []string{"task 2 needs an id"}},
+		{"empty id is not an id", `{"tasks":[{"id":"","estimate_lines":50,"title":"a"},{"id":"B","estimate_lines":50,"title":"b","after":[""]}]}`,
 			[]string{"task 1 needs an id", `"B" is after "", which is not in the plan`}},
-		{"whitespace id", `{"tasks":[{"id":"  ","title":"a"}]}`, []string{"task 1 needs an id"}},
+		{"whitespace id", `{"tasks":[{"id":"  ","estimate_lines":50,"title":"a"}]}`, []string{"task 1 needs an id"}},
 		{"empty plan", `{"tasks":[]}`, []string{"the plan has no tasks"}},
 		{"no tasks key", `{}`, []string{"the plan has no tasks"}},
-		{"self after", `{"tasks":[{"id":"A","title":"a","after":["A"]}]}`, []string{`cycle through "A"`}},
+		{"self after", `{"tasks":[{"id":"A","estimate_lines":50,"title":"a","after":["A"]}]}`, []string{`cycle through "A"`}},
 		{"tasks of the wrong type", `{"tasks":"A"}`, []string{"cannot unmarshal"}},
-		{"ids are trimmed", `{"tasks":[{"id":" A ","title":"a"},{"id":"B","title":"b","after":[" A"]}]}`, nil},
-		{"valid DAG", `{"tasks":[{"id":"A","title":"a"},{"id":"B","title":"b","after":["A"]},{"id":"C","title":"c","after":["A"]},{"id":"D","title":"d","after":["B","C"]}]}`, nil},
+		{"ids are trimmed", `{"tasks":[{"id":" A ","estimate_lines":50,"title":"a"},{"id":"B","estimate_lines":50,"title":"b","after":[" A"]}]}`, nil},
+		{"valid DAG", `{"tasks":[{"id":"A","estimate_lines":50,"title":"a"},{"id":"B","estimate_lines":50,"title":"b","after":["A"]},{"id":"C","estimate_lines":50,"title":"c","after":["A"]},{"id":"D","estimate_lines":50,"title":"d","after":["B","C"]}]}`, nil},
 	} {
-		tasks, fails := checkPlan(json.RawMessage(c.plan))
+		tasks, fails := checkPlan(json.RawMessage(c.plan), flow.DefaultSettings().TaskSizeLimit)
 		got := strings.Join(fails, "; ")
 		if (c.want == nil) != (len(fails) == 0) {
 			t.Errorf("%s: fails = %q, want %q", c.name, got, c.want)
@@ -230,7 +230,7 @@ func TestReportReadyAcceptance(t *testing.T) {
 		Settings: flow.DefaultSettings(),
 		Tasks: []flow.Task{{
 			ID: "T1", Title: "feat: x",
-			Attempts: []flow.Attempt{{
+			Attempts: []flow.Attempt{{SizeCap: 100,
 				BaseCommit: baseSHA, Branch: created.Branch, Worktree: created.Path,
 				RunTokenHash: tokenHash("tok-worker"),
 				Ready:        []flow.Ready{}, Rounds: []flow.Round{}, Accepts: []flow.Accept{}, Acts: []flow.Act{},
@@ -346,7 +346,7 @@ func TestVerdictAcceptance(t *testing.T) {
 		Project: flow.Project{ID: projID, Started: true, RunTokenHash: tokenHash("tok-coord")},
 		Tasks: []flow.Task{{
 			ID: "T1", Title: "feat: add parser",
-			Attempts: []flow.Attempt{{
+			Attempts: []flow.Attempt{{SizeCap: 100,
 				BaseCommit: "b0", RunTokenHash: tokenHash("tok-worker"),
 				Ready: []flow.Ready{{Head: "c1"}},
 				Review: &flow.ReviewRun{
@@ -472,7 +472,7 @@ func TestReportReadyRejectAcceptance(t *testing.T) {
 		Settings: flow.DefaultSettings(),
 		Tasks: []flow.Task{{
 			ID: "T1", Title: "feat: add constant",
-			Attempts: []flow.Attempt{{
+			Attempts: []flow.Attempt{{SizeCap: 100,
 				BaseCommit: baseSHA, Branch: wt.Branch, Worktree: wt.Path,
 				RunTokenHash: tokenHash("tok-worker"),
 				Ready:        []flow.Ready{{Head: c1}},
@@ -608,7 +608,7 @@ func TestReportReadyRejectWhySanitizeAndLength(t *testing.T) {
 			Settings: flow.DefaultSettings(),
 			Tasks: []flow.Task{{
 				ID: "T1", Title: "feat: clean why",
-				Attempts: []flow.Attempt{{
+				Attempts: []flow.Attempt{{SizeCap: 100,
 					BaseCommit: baseSHA, Branch: wt.Branch, Worktree: wt.Path,
 					RunTokenHash: tokenHash("tok-worker"),
 					Ready:        []flow.Ready{{Head: c1}},
@@ -708,7 +708,7 @@ func TestReportReadyRejectRefusedWhenLadderSaysRecap(t *testing.T) {
 				Settings: flow.DefaultSettings(),
 				Tasks: []flow.Task{{
 					ID: "T1", Title: "feat: x",
-					Attempts: []flow.Attempt{{
+					Attempts: []flow.Attempt{{SizeCap: 100,
 						BaseCommit: baseSHA, Branch: wt.Branch, Worktree: wt.Path,
 						RunTokenHash: tokenHash("tok-worker"),
 						Ready:        []flow.Ready{{Head: c1}},
@@ -761,7 +761,7 @@ func TestRecapDecideAcceptance(t *testing.T) {
 			Settings: flow.DefaultSettings(),
 			Tasks: []flow.Task{
 				{ID: "T0", Title: "feat: base"},
-				{ID: "T1", Title: "feat: big", Recaps: recaps, Attempts: []flow.Attempt{{RunTokenHash: tokenHash("tok-worker")}}},
+				{ID: "T1", Title: "feat: big", Recaps: recaps, Attempts: []flow.Attempt{{SizeCap: 100, RunTokenHash: tokenHash("tok-worker")}}},
 				{ID: "T2", Title: "feat: after big", After: []string{"T0", "T1"}},
 			},
 		}
@@ -790,13 +790,13 @@ func TestRecapDecideAcceptance(t *testing.T) {
 	}
 	for name, body := range map[string]string{
 		"no children":      `{"task":"T1","choice":"split","why":"too big"}`,
-		"missing title":    `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":" "}]}`,
-		"existing id":      `{"task":"T1","choice":"split","why":"w","children":[{"id":"T0","title":"feat: dup"}]}`,
-		"after missing":    `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":"feat: a","after":["NOPE"]}]}`,
-		"after parent":     `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":"feat: a","after":["T1"]}]}`,
-		"cycle":            `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":"feat: a","after":["T1b"]},{"id":"T1b","title":"feat: b","after":["T1a"]}]}`,
-		"unknown field":    `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":"feat: a","bogus":1}]}`,
-		"cycle via parent": `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":"feat: a","after":["T2"]}]}`,
+		"missing title":    `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","estimate_lines":50,"title":" "}]}`,
+		"existing id":      `{"task":"T1","choice":"split","why":"w","children":[{"id":"T0","estimate_lines":50,"title":"feat: dup"}]}`,
+		"after missing":    `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","estimate_lines":50,"title":"feat: a","after":["NOPE"]}]}`,
+		"after parent":     `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","estimate_lines":50,"title":"feat: a","after":["T1"]}]}`,
+		"cycle":            `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","estimate_lines":50,"title":"feat: a","after":["T1b"]},{"id":"T1b","estimate_lines":50,"title":"feat: b","after":["T1a"]}]}`,
+		"unknown field":    `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","estimate_lines":50,"title":"feat: a","bogus":1}]}`,
+		"cycle via parent": `{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","estimate_lines":50,"title":"feat: a","after":["T2"]}]}`,
 	} {
 		if err := eng.Report("tok-coord", "recap decide", json.RawMessage(body)); refusalCode(err) != "plan_invalid" {
 			t.Errorf("%s: err = %v, want plan_invalid", name, err)
@@ -807,7 +807,7 @@ func TestRecapDecideAcceptance(t *testing.T) {
 	}
 
 	// Valid split: parent marked split, children added with split_from, dependants moved.
-	splitBody := `{"task":"T1","choice":"split","why":"two independent parts","children":[{"id":"T1a","title":"feat: part a","brief":"a","outcomes":["test a"],"after":["T0"]},{"id":"T1b","title":"feat: part b","brief":"b","outcomes":["test b"],"after":["T1a"]}]}`
+	splitBody := `{"task":"T1","choice":"split","why":"two independent parts","children":[{"id":"T1a","estimate_lines":50,"title":"feat: part a","brief":"a","outcomes":["test a"],"after":["T0"]},{"id":"T1b","estimate_lines":50,"title":"feat: part b","brief":"b","outcomes":["test b"],"after":["T1a"]}]}`
 	if err := eng.Report("tok-coord", "recap decide", json.RawMessage(splitBody)); err != nil {
 		t.Fatalf("valid split: %v", err)
 	}
@@ -848,7 +848,7 @@ func TestRecapDecideRefusesEndedTaskAndCleansWhy(t *testing.T) {
 	const id = "proj-recap-ended"
 	save := func(done bool) {
 		t.Helper()
-		task := flow.Task{ID: "T1", Title: "feat: big", Recaps: []flow.Recap{{Trigger: "review", Allowed: []string{"split", "drop"}}}}
+		task := flow.Task{ID: "T1", Title: "feat: big", EstimateLines: 50, Recaps: []flow.Recap{{Trigger: "review", Allowed: []string{"split", "drop"}}}}
 		if done {
 			task.Done = &flow.Merged{MergedCommit: "m1"}
 		}
@@ -860,7 +860,7 @@ func TestRecapDecideRefusesEndedTaskAndCleansWhy(t *testing.T) {
 	save(true)
 	for _, body := range []string{
 		`{"task":"T1","choice":"drop","why":"x"}`,
-		`{"task":"T1","choice":"split","why":"x","children":[{"id":"T1a","title":"feat: a"}]}`,
+		`{"task":"T1","choice":"split","why":"x","children":[{"id":"T1a","estimate_lines":50,"title":"feat: a"}]}`,
 	} {
 		if err := eng.Report("tok-coord", "recap decide", json.RawMessage(body)); refusalCode(err) != "already_closed" {
 			t.Fatalf("decide on done task %s = %v, want already_closed", body, err)

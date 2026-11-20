@@ -78,12 +78,22 @@ var (
 	prGone    = func(in *In) { in.Facts.PR = PR{Answered: true} }
 	prBehind  = func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel = "b0", RelBehind }
 	pending   = func(in *In) { in.Facts.PR.Checks = ChecksPending }
-	workingF  = func(in *In) { in.Facts.Worker.State = RunWorking }
-	asked     = func(in *In) { a0(in).Acts = append(a0(in).Acts, Act{Key: "merge@c1", Result: "done"}) }
-	red       = func(in *In) { in.Facts.PR.Checks = ChecksRed }
-	noAnswer  = func(in *In) { in.Facts.PR.Answered = false }
-	closedPR  = func(in *In) { in.Facts.PR.State = PRClosed }
-	conflict  = func(in *In) { in.Facts.PR.Mergeable = MergeableConflict }
+	overCap   = func(in *In) { a0(in).SizeCap, in.Facts.Lines = 100, 101 }
+	atCap     = func(in *In) { a0(in).SizeCap, in.Facts.Lines = 100, 100 }
+	sizeRecap = func(in *In) {
+		in.Task.Recaps = []Recap{{Trigger: TriggerSize, Allowed: []string{ChoiceContinue, "split", "new", "drop"}}}
+	}
+	mergeTip  = func(in *In) { in.Facts.Tip, in.Facts.TipRel, in.Facts.TipMergeOnly = "m2", RelAhead, true }
+	movedToM2 = func(in *In) {
+		a0(in).MergeOnly = []Advance{{From: "c1", To: "m2"}}
+		in.Facts.Tip, in.Facts.PR.Head = "m2", "m2"
+	}
+	workingF = func(in *In) { in.Facts.Worker.State = RunWorking }
+	asked    = func(in *In) { a0(in).Acts = append(a0(in).Acts, Act{Key: "merge@c1", Result: "done"}) }
+	red      = func(in *In) { in.Facts.PR.Checks = ChecksRed }
+	noAnswer = func(in *In) { in.Facts.PR.Answered = false }
+	closedPR = func(in *In) { in.Facts.PR.State = PRClosed }
+	conflict = func(in *In) { in.Facts.PR.Mergeable = MergeableConflict }
 	// stuckAct: an act failed past stuck_minutes; idleRev: the round's
 	// reviewer read idle with no tag past stuck_minutes.
 	stuckAct = func(k string) func(*In) {
@@ -221,9 +231,17 @@ func TestRowCases(t *testing.T) {
 		{"S1", with(workerEnded), []string{"stop_task"}},
 		{"S1", with(noRounds, reviewEnded), []string{"stop_task"}},
 		{"N6", with(openRecap), []string{"wake_coordinator@recap@1"}},
+		{"N6", with(sizeRecap), []string{"wake_coordinator@recap@1", "tell_worker_stop@1"}},
+		{"N6", with(sizeRecap, func(in *In) { in.Facts.Worker = Run{} }), []string{"wake_coordinator@recap@1"}},
 		{"N8", with(nothingF, prGone), []string{"wake_coordinator@nothing_to_change@0"}},
 		{"N11", with(noAttempts), []string{"new_attempt"}},
 		{"N11", with(func(in *In) { a0(in).Closed = "new attempt" }), []string{"new_attempt"}},
+		{"N12", with(overCap), []string{"open_size_recap@0"}},
+		{"N12", with(func(in *In) { in.Facts.Lines = 1 }), []string{"open_size_recap@0"}}, // no estimate (cap 0) never turns the check off (KB-CAP-18)
+		{"N42", with(atCap), []string{"record_accept@c1", "merge@c1"}},                    // at the cap is not over it
+		{"N20", with(mergeTip), []string{"move_h_merge_only@m2"}},
+		{"N26", with(movedToM2, func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel = "c1", RelBehind }), []string{"push_and_open_pr@m2"}},
+		{"N42", with(movedToM2), []string{"record_accept@m2", "merge@m2"}}, // the passes at c1 still cover m2
 		{"N22", with(changes), []string{"tell_worker_findings@1"}},
 		{"N23", with(notReady, noRounds, prGone), []string{"start_worker"}},
 		{"N25", with(streakRecap), []string{"open_recap@review"}},
@@ -277,6 +295,10 @@ func TestRowOrder(t *testing.T) {
 		{"N6", "N22", false, with(openRecap, changes)},
 		{"N6", "N29", false, with(openRecap, noRounds)},
 		{"S1", "N22", false, with(workerEnded, changes)},
+		{"N6", "N12", false, with(openRecap, overCap)},
+		{"N12", "N20", true, with(overCap, mergeTip)},
+		{"N20", "N22", true, with(changes, mergeTip)},
+		{"N12", "N23", false, with(overCap, tipAheadF)},
 		{"N22", "N23", true, with(changes, tipAheadF)},
 		{"N22", "N26", false, with(changes, prBehind)},
 		{"N23", "N25", true, with(streakRecap, tipAheadF)},
@@ -727,5 +749,39 @@ func TestBoundaryAndSendBack(t *testing.T) {
 	})
 	if got := Ladder(readyAgain); got != Review {
 		t.Errorf("after ready again: ladder %s, want review", got)
+	}
+}
+
+// TestCoversMergeOnly: a record covers H when H was reached from it by
+// merge_only moves only; a ready with changes in between breaks the chain.
+func TestCoversMergeOnly(t *testing.T) {
+	a := Attempt{BaseCommit: "b0", Ready: []Ready{{Head: "c1"}}, MergeOnly: []Advance{{From: "c1", To: "m1"}, {From: "m1", To: "m2"}}}
+	if h := H(a); h != "m2" {
+		t.Fatalf("H = %s, want m2", h)
+	}
+	for _, c := range []struct {
+		x, h string
+		want bool
+	}{{"c1", "m2", true}, {"m1", "m2", true}, {"m2", "m2", true}, {"c1", "c1", true}, {"b0", "m2", false}, {"m2", "c1", false}, {"c0", "m2", false}} {
+		if got := Covers(a, c.x, c.h); got != c.want {
+			t.Errorf("Covers(%s, %s) = %v, want %v", c.x, c.h, got, c.want)
+		}
+	}
+	a.Ready = append(a.Ready, Ready{Head: "c3"}) // a later ready with changes: H is c3, and m2 does not cover it
+	if H(a) != "c3" || Covers(a, "m2", "c3") || Covers(a, "c1", "c3") {
+		t.Fatalf("after ready c3: H = %s", H(a))
+	}
+}
+
+// TestSizeRecapAllowed: continue is offered while fewer than
+// continues_per_task continues were decided.
+func TestSizeRecapAllowed(t *testing.T) {
+	s, task := DefaultSettings(), Task{}
+	if got := SizeRecapAllowed(task, s); got[0] != ChoiceContinue {
+		t.Fatalf("first size recap allowed %v, want continue first", got)
+	}
+	task.Recaps = []Recap{{Trigger: TriggerSize, Decided: &RecapDecision{Choice: ChoiceContinue}}}
+	if got := SizeRecapAllowed(task, s); slices.Contains(got, ChoiceContinue) {
+		t.Fatalf("after one continue (default 1) allowed %v", got)
 	}
 }

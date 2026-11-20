@@ -243,7 +243,7 @@ func TestFactoryPlanApplyCLI(t *testing.T) {
 	t.Setenv("SHEEPDOG_RUN_TOKEN", "tok-1")
 
 	plan := filepath.Join(home, "plan.json")
-	if err := os.WriteFile(plan, []byte(`{"tasks":[{"id":"T1","title":"feat: x"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(plan, []byte(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: x"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// A run's terminal does not need the user's config file: break it.
@@ -459,8 +459,8 @@ func TestFactoryRecapDecideCLI(t *testing.T) {
 	code := run(context.Background(), []string{
 		"factory", "recap", "decide", "T1", "split",
 		"--why", "too big",
-		"--child", `{"id":"T1a","title":"feat: a"}`,
-		"--child", `{"id":"T1b","title":"feat: b","after":["T1a"]}`,
+		"--child", `{"id":"T1a","estimate_lines":50,"title":"feat: a"}`,
+		"--child", `{"id":"T1b","estimate_lines":50,"title":"feat: b","after":["T1a"]}`,
 	}, &out, &errBuf)
 	if code != 0 {
 		t.Fatalf("recap decide split code=%d stderr=%s", code, errBuf.String())

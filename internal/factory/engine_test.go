@@ -434,7 +434,7 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 		t.Fatalf("expected coordinator start, got %d runs", len(runs))
 	}
 	coordTok := runs[0].Env["SHEEPDOG_RUN_TOKEN"]
-	plan := `{"tasks":[{"id":"T1","title":"feat: add Greet helper","brief":"Write Greet(name).","outcomes":["go test ./... passes"],"after":[]}]}`
+	plan := `{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: add Greet helper","brief":"Write Greet(name).","outcomes":["go test ./... passes"],"after":[]}]}`
 	if err := eng.Report(coordTok, "plan apply", []byte(plan)); err != nil {
 		t.Fatalf("plan apply: %v", err)
 	}
@@ -667,7 +667,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	}
 	id1 := eng1.projectDirs()[0].Name()
 	eng1.passProject(ctx, id1, false)
-	if err := eng1.Report(runs1[0].Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"t1","title":"feat: x"}]}`)); err != nil {
+	if err := eng1.Report(runs1[0].Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"t1","estimate_lines":50,"title":"feat: x"}]}`)); err != nil {
 		t.Fatal(err)
 	}
 	runFor(eng1, 80*time.Millisecond)
@@ -724,7 +724,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 		t.Fatal("coordinator did not start")
 	}
 	id3 := eng3.projectDirs()[0].Name()
-	if err := eng3.Report(coordRun.Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"t1","title":"feat: x"}]}`)); err != nil {
+	if err := eng3.Report(coordRun.Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"t1","estimate_lines":50,"title":"feat: x"}]}`)); err != nil {
 		t.Fatal(err)
 	}
 	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(5 * time.Millisecond) {
@@ -784,7 +784,7 @@ func TestExecutorFailureRecordedWhenPassCancelled(t *testing.T) {
 	id := eng.projectDirs()[0].Name()
 	st, _ := LoadState(paths.State(id))
 	st.Project.RunID = "coord"
-	st.Tasks = []flow.Task{{ID: "t1", Title: "feat: x"}}
+	st.Tasks = []flow.Task{{ID: "t1", Title: "feat: x", EstimateLines: 50}}
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
 	}
@@ -822,7 +822,7 @@ func TestAttemptWorktreePathPerAttemptAndLockGitTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	st.Project.RunID = "t1"
-	st.Tasks = []flow.Task{{ID: "t1", Title: "feat: add x", Attempts: []flow.Attempt{}}}
+	st.Tasks = []flow.Task{{ID: "t1", Title: "feat: add x", EstimateLines: 50, Attempts: []flow.Attempt{}}}
 	if _, _, err := eng.execNewAttempt(ctx, id, &st, 0, flow.Facts{}); err != nil {
 		t.Fatalf("attempt 1: %v", err)
 	}
@@ -850,7 +850,7 @@ func TestEngineLockGitCallsUseTimeout(t *testing.T) {
 		Settings: flow.DefaultSettings(),
 		Tasks: []flow.Task{{
 			ID: "t1", Title: "feat: x",
-			Attempts: []flow.Attempt{{
+			Attempts: []flow.Attempt{{SizeCap: 100,
 				BaseCommit: baseSHA, Branch: "task/t1-feat-x", Worktree: repo,
 				RunTokenHash: tokenHash("tok-w"),
 			}},
@@ -890,9 +890,9 @@ func TestStartClearsFailedActs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Tasks = []flow.Task{{ID: "T1", Title: "feat: x",
+	s.Tasks = []flow.Task{{ID: "T1", Title: "feat: x", EstimateLines: 50,
 		Acts:     []flow.Act{{Key: "new_attempt", Result: "failed"}},
-		Attempts: []flow.Attempt{{Acts: []flow.Act{{Key: "start_worker", Result: "failed"}, {Key: "keep", Result: "done"}}}}}}
+		Attempts: []flow.Attempt{{SizeCap: 100, Acts: []flow.Act{{Key: "start_worker", Result: "failed"}, {Key: "keep", Result: "done"}}}}}}
 	if err := SaveState(e.Paths.State(id), s); err != nil {
 		t.Fatal(err)
 	}
@@ -942,7 +942,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	// Coordinator starts and applies 1-task plan; N11 creates worktree; N23 starts worker.
 	eng.passProject(ctx, id, false)
 	coordTok := runs[0].Env["SHEEPDOG_RUN_TOKEN"]
-	if err := eng.Report(coordTok, "plan apply", []byte(`{"tasks":[{"id":"T1","title":"feat: add Greet","brief":"Greet non-empty names.","outcomes":["go test ./... passes"]}]}`)); err != nil {
+	if err := eng.Report(coordTok, "plan apply", []byte(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: add Greet","brief":"Greet non-empty names.","outcomes":["go test ./... passes"]}]}`)); err != nil {
 		t.Fatal(err)
 	}
 	eng.passProject(ctx, id, false) // N11
@@ -1172,7 +1172,7 @@ func testVoidReview(t *testing.T, dirty bool) {
 	id := eng.projectDirs()[0].Name()
 	eng.passProject(ctx, id, false)
 	st, _ := LoadState(paths.State(id))
-	st.Tasks = []flow.Task{{ID: "T1", Title: "feat: x"}}
+	st.Tasks = []flow.Task{{ID: "T1", Title: "feat: x", EstimateLines: 50}}
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
 	}
@@ -1282,7 +1282,7 @@ func TestEngineRebaseAfterReviewedCommitFallsBackToFull(t *testing.T) {
 	id := eng.projectDirs()[0].Name()
 	eng.passProject(ctx, id, false)
 	st, _ := LoadState(paths.State(id))
-	st.Tasks = []flow.Task{{ID: "T1", Title: "feat: task"}}
+	st.Tasks = []flow.Task{{ID: "T1", Title: "feat: task", EstimateLines: 50}}
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
 	}
@@ -1387,7 +1387,7 @@ func TestEngineReuseReviewerSkipsGitWork(t *testing.T) {
 	id := eng.projectDirs()[0].Name()
 	eng.passProject(ctx, id, false)
 	st, _ := LoadState(paths.State(id))
-	st.Tasks = []flow.Task{{ID: "T1", Title: "feat: x"}}
+	st.Tasks = []flow.Task{{ID: "T1", Title: "feat: x", EstimateLines: 50}}
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
 	}
@@ -1497,7 +1497,7 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 
 	eng.passProject(ctx, id, false) // J7 coordinator
 	coordTok := runs[0].Env["SHEEPDOG_RUN_TOKEN"]
-	if err := eng.Report(coordTok, "plan apply", []byte(`{"tasks":[{"id":"T1","title":"feat: add Version constant","brief":"Add const Version = 1. No test needed for this one-line constant.","outcomes":["go vet ./... passes"]}]}`)); err != nil {
+	if err := eng.Report(coordTok, "plan apply", []byte(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: add Version constant","brief":"Add const Version = 1. No test needed for this one-line constant.","outcomes":["go vet ./... passes"]}]}`)); err != nil {
 		t.Fatal(err)
 	}
 	eng.passProject(ctx, id, false) // N11

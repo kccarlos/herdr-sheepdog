@@ -1010,6 +1010,25 @@ func TestReviewRangesExcludeMergedBaseChanges(t *testing.T) {
 	runGit(t, other, "commit", "-m", "feat: base b2")
 	runGit(t, other, "push", "origin", "main")
 
+	// merge_only (design.md 3.1): a clean base merge is; a normal commit or a
+	// diverged pair is not. Changed lines leave out what the base brought in.
+	for _, c := range []struct {
+		x, h string
+		want bool
+	}{{c2a, m1, true}, {c1, m1, false}, {m1, c2b, false}, {c2a, b1, false}} {
+		if got, err := MergeOnly(ctx, wt.Path, c.x, c.h); err != nil || got != c.want {
+			t.Errorf("MergeOnly(%s, %s) = (%v, %v), want %v", c.x, c.h, got, err, c.want)
+		}
+	}
+	for _, c := range []struct {
+		tip  string
+		want int
+	}{{c1, 2}, {m1, 4}, {c2b, 4}} { // new files task.go and pre.go, 2 lines each; base_only.go never counts
+		if n, err := ChangedLines(ctx, wt.Path, c.tip); err != nil || n != c.want {
+			t.Errorf("ChangedLines(%s) = (%d, %v), want %d", c.tip, n, err, c.want)
+		}
+	}
+
 	// Delta from c1 to m1 (fix then merge): [c1..c2a], no base_only.go.
 	r1, err := DeltaRanges(ctx, wt.Path, c1, m1)
 	if err != nil || !slices.Equal(r1, []string{c1 + ".." + c2a}) {
@@ -1143,11 +1162,95 @@ func TestDeltaRangesIncludesHandEditedBaseMerge(t *testing.T) {
 	runGit(t, wt.Path, "commit", "-m", "merge: with extra edit")
 	m2 := runGit(t, wt.Path, "rev-parse", "HEAD")
 
+	for _, pair := range [][2]string{{c1, m1}, {m1, m2}} { // hand-resolved, and an extra edit in a merge
+		if mo, err := MergeOnly(ctx, wt.Path, pair[0], pair[1]); err != nil || mo {
+			t.Errorf("MergeOnly(%s, %s) = (%v, %v), want false", pair[0], pair[1], mo, err)
+		}
+	}
+
 	ranges2, err := DeltaRanges(ctx, wt.Path, m1, m2)
 	if err != nil || !slices.Equal(ranges2, []string{m1 + ".." + m2}) {
 		t.Fatalf("DeltaRanges(m1, m2) = (%v, %v), want [%s..%s]", ranges2, err, m1, m2)
 	}
 	if diff2 := runGit(t, wt.Path, "diff", ranges2[0]); !strings.Contains(diff2, "smuggled.go") {
 		t.Fatalf("delta diff missing extra merge edit:\n%s", diff2)
+	}
+}
+
+// sizeRepo is a repo with a bare origin and one base commit; it returns a
+// task worktree from it.
+func sizeRepo(t *testing.T) string {
+	t.Helper()
+	tmp := t.TempDir()
+	bare := filepath.Join(tmp, "remote.git")
+	if out, err := exec.Command("git", "init", "--bare", "--initial-branch=main", bare).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v: %s", err, out)
+	}
+	repo := filepath.Join(tmp, "repo")
+	if out, err := exec.Command("git", "init", "--initial-branch=main", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	runGit(t, repo, "remote", "add", "origin", bare)
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("v0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "commit", "-m", "chore: b0")
+	runGit(t, repo, "push", "-u", "origin", "main")
+	w, err := NewWorktree(context.Background(), repo, filepath.Join(tmp, "wt-1"), "t1", "feat: task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return w.Path
+}
+
+func commitFile(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", name)
+	runGit(t, dir, "commit", "-m", "feat: "+name)
+	return runGit(t, dir, "rev-parse", "HEAD")
+}
+
+// TestChangedLinesCountsBinaryMarkedFiles: neither a committed -diff
+// attribute nor a NUL byte hides a file's lines from the size cap.
+func TestChangedLinesCountsBinaryMarkedFiles(t *testing.T) {
+	wt := sizeRepo(t)
+	commitFile(t, wt, ".gitattributes", "*.gen -diff\n")
+	commitFile(t, wt, "big.gen", strings.Repeat("x\n", 100))
+	tip := commitFile(t, wt, "nul.txt", "a\x00b\nc\n") // a NUL byte makes git call it binary
+	if n, err := ChangedLines(context.Background(), wt, tip); err != nil || n != 103 {
+		t.Fatalf("ChangedLines = (%d, %v), want 103", n, err)
+	}
+}
+
+// TestMergeOnlyEdgeCases: unrelated histories, an empty range under two
+// spellings of one commit, and a clean merge of a branch that is not the
+// base are all "not merge_only", and none is an error.
+func TestMergeOnlyEdgeCases(t *testing.T) {
+	ctx := context.Background()
+	wt := sizeRepo(t)
+	base := runGit(t, wt, "rev-parse", "HEAD")
+	c1 := commitFile(t, wt, "a.go", "package a\n")
+
+	runGit(t, wt, "checkout", "-q", "-b", "side", base)
+	side := commitFile(t, wt, "side.go", "package side\n")
+	runGit(t, wt, "checkout", "-q", "-")
+	runGit(t, wt, "merge", "--no-ff", "--no-edit", side)
+	m := runGit(t, wt, "rev-parse", "HEAD")
+
+	runGit(t, wt, "checkout", "-q", "--orphan", "orphan")
+	orphan := commitFile(t, wt, "o.go", "package o\n")
+
+	for _, c := range []struct{ name, x, h string }{
+		{"unrelated histories", c1, orphan},
+		{"empty range", c1[:12], c1}, // two spellings of one commit
+		{"clean merge of a non-base branch", c1, m},
+	} {
+		if mo, err := MergeOnly(ctx, wt, c.x, c.h); err != nil || mo {
+			t.Errorf("%s: MergeOnly = (%v, %v), want (false, nil)", c.name, mo, err)
+		}
 	}
 }

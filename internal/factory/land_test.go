@@ -64,7 +64,7 @@ func newLanding(t *testing.T) *landing {
 	srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "idle"})
 	l.edit(func(s *flow.State) {
 		s.Project.RunID = "coord-elsewhere" // the coordinator is not this test's business
-		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: x", Attempts: []flow.Attempt{{
+		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: x", EstimateLines: 50, Attempts: []flow.Attempt{{SizeCap: 100,
 			BaseCommit: base, Branch: l.branch, Worktree: l.wt, PR: 7, RunID: l.worker,
 			Ready: []flow.Ready{{Head: l.c1}},
 			Rounds: []flow.Round{

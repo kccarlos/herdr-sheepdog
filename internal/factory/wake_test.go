@@ -136,7 +136,7 @@ func TestS2IdleReviewerWakesOnce(t *testing.T) {
 	st, _ := LoadState(paths.State(id))
 	coord := st.Project.RunID
 	st.Settings.StuckMinutes = flow.StuckMin
-	st.Tasks = []flow.Task{{ID: "T1", Title: "feat: x"}}
+	st.Tasks = []flow.Task{{ID: "T1", Title: "feat: x", EstimateLines: 50}}
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +376,7 @@ func TestN25N6RecapOpensOnceWakesCoordinatorAndSplits(t *testing.T) {
 	}
 
 	// Coordinator splits T1 into T1a.
-	if err := l.eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T1","choice":"split","why":"smaller scope","children":[{"id":"T1a","title":"feat: part a"}]}`)); err != nil {
+	if err := l.eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T1","choice":"split","why":"smaller scope","children":[{"id":"T1a","estimate_lines":50,"title":"feat: part a"}]}`)); err != nil {
 		t.Fatalf("recap decide split: %v", err)
 	}
 	l.pass() // T1 -> N1 cleanup (closes PR #7, keeps branch); T1a -> N11 new attempt
