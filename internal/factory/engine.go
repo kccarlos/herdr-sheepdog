@@ -450,8 +450,10 @@ func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, t
 
 func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
+	bin := cmp.Or(e.Bin, "sheepdog")
 	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
-		"{not_doing}", cmp.Or(strings.TrimSpace(t.NotDoing), "(none)"), "{outcomes}", bullets(t.Outcomes), "{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", cmp.Or(e.Bin, "sheepdog")).Replace(workerTemplate))
+		"{not_doing}", cmp.Or(strings.TrimSpace(t.NotDoing), "(none)"), "{outcomes}", bullets(t.Outcomes), "{ready_cmd}", readyCmd(bin, t.Outcomes),
+		"{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", bin).Replace(workerTemplate))
 	termID, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, world.RunSpec{
 		Name: workerName(id, t.ID, len(t.Attempts)), Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
 		Argv: world.ClaudeArgv(flow.RoleWorker, workerModel, "medium", "bypassPermissions"), Prompt: prompt,
@@ -461,6 +463,23 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 		a.RunID = termID
 	}
 	return "started worker " + termID, abort, err
+}
+
+func readyCmd(bin string, outcomes []flow.Outcome) string {
+	parts := []string{bin + " factory report ready"}
+	if !needsProofs(outcomes) {
+		return parts[0]
+	}
+	for _, o := range outcomes {
+		flag, val := "--proof", "<command>"
+		if strings.HasPrefix(o.ProvedBy, "manual:") {
+			flag, val = "--artifact", "<path>"
+		} else if cmd, ok := strings.CutPrefix(o.ProvedBy, "cmd:"); ok {
+			val = strings.TrimSpace(cmd)
+		}
+		parts = append(parts, flag+" '"+strings.ReplaceAll(o.Text+"="+val, "'", `'\''`)+"'")
+	}
+	return strings.Join(parts, " ")
 }
 
 // workerModel is the model every worker runs until Resolve (slice 5b).

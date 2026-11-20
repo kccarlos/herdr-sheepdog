@@ -9,6 +9,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -89,9 +92,10 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 
 func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int, args json.RawMessage) error {
 	var req struct {
-		Head    string  `json:"head"`
-		Reject  *string `json:"reject"`
-		Nothing *string `json:"nothing_to_change"`
+		Head    string       `json:"head"`
+		Reject  *string      `json:"reject"`
+		Nothing *string      `json:"nothing_to_change"`
+		Proofs  []flow.Proof `json:"proofs"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(args))
 	dec.DisallowUnknownFields()
@@ -143,11 +147,108 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 	case rel == flow.RelSame:
 		return e.refuse(id, "nothing_new", "The worktree has no commit ahead of the current head.")
 	}
+	var proofs []flow.Proof
+	if needsProofs(t.Outcomes) || len(req.Proofs) > 0 {
+		var code, why string
+		if proofs, code, why = checkProofs(t.Outcomes, req.Proofs, a.Worktree); code != "" {
+			return e.refuse(id, code, why)
+		}
+	}
 	if mo, _ := world.MergeOnly(ctx, a.Worktree, h, tip); mo { // a ready at a merge-only tip is N20's move too: no round
 		a.MergeOnly = append(a.MergeOnly, flow.Advance{From: h, To: tip})
 	}
-	a.Ready, a.NothingToChange = append(a.Ready, flow.Ready{Head: tip}), ""
-	return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "ready", "head": tip}, Rule: "ready", Decision: "ready", Why: tip})
+	a.Ready, a.NothingToChange = append(a.Ready, flow.Ready{Head: tip, Proofs: proofs}), ""
+	return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "ready", "head": tip, "proofs": proofs}, Rule: "ready", Decision: "ready", Why: tip})
+}
+
+func needsProofs(outcomes []flow.Outcome) bool {
+	return slices.ContainsFunc(outcomes, func(o flow.Outcome) bool { return o.ProvedBy != "" })
+}
+
+func checkProofs(outcomes []flow.Outcome, raw []flow.Proof, worktree string) ([]flow.Proof, string, string) {
+	want, seen, out := make(map[string]flow.Outcome, len(outcomes)), make(map[string]bool, len(outcomes)), make([]flow.Proof, 0, len(raw))
+	for _, o := range outcomes {
+		want[o.Text] = o
+	}
+	var failed, missing []string
+	for _, p := range raw {
+		name := cleanRejectWhy(p.Outcome)
+		o, ok := want[name]
+		p.Outcome, p.Command, p.Artifact, p.OutputPath = name, cleanRejectWhy(p.Command), strings.TrimSpace(p.Artifact), strings.TrimSpace(p.OutputPath)
+		manual := strings.HasPrefix(o.ProvedBy, "manual:")
+		switch {
+		case !ok:
+			return nil, "invalid_report", fmt.Sprintf("Proof names unknown outcome %q.", name)
+		case seen[name]:
+			return nil, "invalid_report", fmt.Sprintf("Duplicate proof for outcome %q.", name)
+		case (p.Command == "") == (p.Artifact == ""):
+			return nil, "invalid_report", fmt.Sprintf("Proof for %q must carry either a command or an artifact.", name)
+		case utf8.RuneCountInString(p.Command) > maxRejectWhyRunes || utf8.RuneCountInString(p.OutputPath) > maxRejectWhyRunes || utf8.RuneCountInString(p.Artifact) > maxRejectWhyRunes:
+			return nil, "invalid_report", fmt.Sprintf("Proof for %q has a field longer than %d characters.", name, maxRejectWhyRunes)
+		case (p.Artifact != "") != manual:
+			return nil, "invalid_report", fmt.Sprintf("Outcome %q proof kind does not match proved_by (%s).", name, o.ProvedBy)
+		case p.Command != "" && p.OutputPath == "":
+			return nil, "invalid_report", fmt.Sprintf("Proof for %q has no output path.", name)
+		}
+		seen[name] = true
+		if p.Artifact != "" {
+			path := p.Artifact
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(worktree, path)
+			}
+			if _, err := os.Stat(path); err != nil {
+				failed = append(failed, fmt.Sprintf("%q: artifact %q does not exist", name, p.Artifact))
+			}
+		} else if p.Exit != 0 {
+			failed = append(failed, fmt.Sprintf("%q (%s, exit %d): %s", name, p.Command, p.Exit, proofHead(p.OutputPath, worktree)))
+		}
+		out = append(out, p)
+	}
+	for _, o := range outcomes {
+		if !seen[o.Text] {
+			missing = append(missing, fmt.Sprintf("%q", o.Text))
+		}
+	}
+	if len(missing) > 0 {
+		return nil, "outcome_missing", "Missing proof for outcome(s): " + strings.Join(missing, ", ") + "."
+	}
+	if len(failed) > 0 {
+		return nil, "proof_failed", "Proof(s) failed: " + strings.Join(failed, "; ") + "."
+	}
+	return out, "", ""
+}
+
+func proofHead(path, worktree string) string {
+	gitDir := filepath.Join(worktree, ".git")
+	if b, err := os.ReadFile(gitDir); err == nil {
+		if t, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "gitdir:"); !ok {
+			return "(output unreadable)"
+		} else if gitDir = strings.TrimSpace(t); !filepath.IsAbs(gitDir) {
+			gitDir = filepath.Join(worktree, gitDir)
+		}
+	}
+	fi, err := os.Lstat(path)
+	realDir, err1 := filepath.EvalSymlinks(gitDir)
+	realPath, err2 := filepath.EvalSymlinks(path)
+	if rel, err3 := filepath.Rel(realDir, realPath); err != nil || !fi.Mode().IsRegular() || err1 != nil || err2 != nil || err3 != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return "(output unreadable)"
+	}
+	f, err := os.Open(realPath)
+	if err != nil {
+		return "(output unreadable)"
+	}
+	defer func() { _ = f.Close() }()
+	buf, _ := io.ReadAll(io.LimitReader(f, 4096))
+	var lines []string
+	for l := range strings.Lines(string(buf)) {
+		if s := cleanRejectWhy(l); s != "" && len(lines) < 5 {
+			lines = append(lines, s)
+		}
+	}
+	if r := []rune(strings.Join(lines, " | ")); len(r) > maxRejectWhyRunes {
+		return string(r[:maxRejectWhyRunes])
+	}
+	return cmp.Or(strings.Join(lines, " | "), "(no output)")
 }
 
 const maxRejectWhyRunes = 500
@@ -272,15 +373,20 @@ func (e *Engine) runByTokenLocked(token string) (string, flow.State, string, int
 	return "", flow.State{}, "", -1
 }
 
-// planOutcome is the JSON shape of an outcome accepted in plans, amends and
-// split children (design.md 3, 11.7). Unlike flow.Outcome it never accepts
-// legacy plain strings.
-type planOutcome struct {
-	Text     string `json:"text"`
-	ProvedBy string `json:"proved_by"`
+type planOutcome flow.Outcome
+
+func (o *planOutcome) UnmarshalJSON(data []byte) error {
+	*o = planOutcome{}
+	if len(data) > 0 && data[0] == '"' {
+		return json.Unmarshal(data, &o.Text)
+	}
+	type alias planOutcome
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	return dec.Decode((*alias)(o))
 }
 
-// planTask is the part of design.md 3's plan record that slice 3.2 accepts.
+// planTask is the part of design.md 3's plan record that slice 3 accepts.
 type planTask struct {
 	ID        string        `json:"id"`
 	Title     string        `json:"title"`
@@ -326,13 +432,14 @@ func checkScope(t planTask) []string {
 }
 
 // checkOutcomes is design.md 11.7's Outcomes check (prompts.md 3.1): at least
-// one outcome per task, each with non-empty text and a proved_by of kind
-// cmd:, test:, or manual:.
+// one outcome per task, each with non-empty unique text and a proved_by of kind
+// cmd:, test:, or manual:, both capped at maxRejectWhyRunes.
 func checkOutcomes(id string, raw []planOutcome) ([]flow.Outcome, []string) {
 	if len(raw) == 0 {
 		return nil, []string{fmt.Sprintf("outcomes: task %q needs at least one outcome", id)}
 	}
 	out := make([]flow.Outcome, len(raw))
+	seen := make(map[string]bool, len(raw))
 	var fails []string
 	for i, o := range raw {
 		text, pb := cleanRejectWhy(o.Text), cleanRejectWhy(o.ProvedBy)
@@ -340,9 +447,20 @@ func checkOutcomes(id string, raw []planOutcome) ([]flow.Outcome, []string) {
 		if text == "" {
 			label = fmt.Sprintf("outcome %d", i+1)
 			fails = append(fails, fmt.Sprintf("outcomes: task %q %s needs text", id, label))
+		} else if strings.ContainsAny(o.Text, "=\n\r") {
+			fails = append(fails, fmt.Sprintf("outcomes: task %q %s text cannot contain '=' or a newline", id, label))
+		} else if utf8.RuneCountInString(text) > maxRejectWhyRunes {
+			label = fmt.Sprintf("outcome %d", i+1)
+			fails = append(fails, fmt.Sprintf("outcomes: task %q %s text is longer than %d characters", id, label, maxRejectWhyRunes))
+		} else if seen[text] {
+			fails = append(fails, fmt.Sprintf("outcomes: task %q has duplicate outcome %q", id, text))
+		} else {
+			seen[text] = true
 		}
 		if pb == "" {
 			fails = append(fails, fmt.Sprintf("outcomes: task %q %s needs proved_by (cmd:, test:, or manual:)", id, label))
+		} else if utf8.RuneCountInString(pb) > maxRejectWhyRunes {
+			fails = append(fails, fmt.Sprintf("outcomes: task %q %s proved_by is longer than %d characters", id, label, maxRejectWhyRunes))
 		} else if kind, rest, ok := strings.Cut(pb, ":"); !ok || (kind != "cmd" && kind != "test" && kind != "manual") {
 			fails = append(fails, fmt.Sprintf("outcomes: task %q %s has unknown proved_by %q (use cmd:, test:, or manual:)", id, label, pb))
 		} else if rest = strings.TrimSpace(rest); rest == "" {

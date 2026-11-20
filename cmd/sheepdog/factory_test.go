@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -443,6 +445,136 @@ func TestFactoryReportReadyCLI(t *testing.T) {
 	}
 }
 
+// TestFactoryReportReadyProofsCLI checks PR 3.3a: the report client runs each
+// --proof command in a linked git worktree, saves combined output under the
+// worktree's .git dir (leaving git status clean), records exit codes and
+// timeouts, checks --artifact existence, and sends proofs to the daemon.
+func TestFactoryReportReadyProofsCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+
+	var lastReq struct {
+		Verb string `json:"verb"`
+		Args struct {
+			Head   string       `json:"head"`
+			Proofs []flow.Proof `json:"proofs"`
+		} `json:"args"`
+	}
+	posted := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		posted = true
+		lastReq = struct {
+			Verb string `json:"verb"`
+			Args struct {
+				Head   string       `json:"head"`
+				Proofs []flow.Proof `json:"proofs"`
+			} `json:"args"`
+		}{}
+		_ = json.NewDecoder(r.Body).Decode(&lastReq)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(srv.Close)
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	t.Setenv("SHEEPDOG_WEB_PORT", port)
+	t.Setenv("SHEEPDOG_RUN_TOKEN", "tok-worker-1")
+
+	// Set up a main repo and a linked worktree (so .git is a file, not a dir).
+	mainRepo := filepath.Join(t.TempDir(), "main")
+	wt := filepath.Join(t.TempDir(), "wt")
+	gitRun := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=T", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=T", "GIT_COMMITTER_EMAIL=t@example.com")
+		b, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, b)
+		}
+		return strings.TrimSpace(string(b))
+	}
+	if b, err := exec.Command("git", "init", mainRepo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, b)
+	}
+	_ = os.WriteFile(filepath.Join(mainRepo, "a.txt"), []byte("a\n"), 0o600)
+	gitRun(mainRepo, "add", "a.txt")
+	gitRun(mainRepo, "commit", "-m", "feat: init")
+	gitRun(mainRepo, "worktree", "add", "-b", "task/t1", wt)
+	t.Chdir(wt)
+
+	art := filepath.Join(t.TempDir(), "shot.png")
+	_ = os.WriteFile(art, []byte("png"), 0o600)
+
+	var out, errBuf bytes.Buffer
+	code := run(context.Background(), []string{
+		"factory", "report", "ready",
+		"--proof", "tests pass=echo ok-out; echo ok-err >&2",
+		"--proof", "lint fails=echo bad-line >&2; exit 3",
+		"--artifact", "looks right=" + art,
+	}, &out, &errBuf)
+	if code != 0 || !posted {
+		t.Fatalf("code=%d posted=%v stderr=%s", code, posted, errBuf.String())
+	}
+	if len(lastReq.Args.Proofs) != 3 {
+		t.Fatalf("proofs = %+v, want 3", lastReq.Args.Proofs)
+	}
+	p0, p1, p2 := lastReq.Args.Proofs[0], lastReq.Args.Proofs[1], lastReq.Args.Proofs[2]
+	if p0.Outcome != "tests pass" || p0.Exit != 0 || !filepath.IsAbs(p0.OutputPath) || !strings.Contains(p0.OutputPath, "sheepdog-proofs") {
+		t.Fatalf("p0 = %+v", p0)
+	}
+	if b, err := os.ReadFile(p0.OutputPath); err != nil || !strings.Contains(string(b), "ok-out") || !strings.Contains(string(b), "ok-err") {
+		t.Fatalf("p0 output = %q, err=%v", b, err)
+	}
+	if p1.Outcome != "lint fails" || p1.Exit != 3 {
+		t.Fatalf("p1 = %+v, want exit 3", p1)
+	}
+	if b, err := os.ReadFile(p1.OutputPath); err != nil || !strings.Contains(string(b), "bad-line") {
+		t.Fatalf("p1 output = %q, err=%v", b, err)
+	}
+	if p2.Outcome != "looks right" || p2.Artifact != art {
+		t.Fatalf("p2 = %+v", p2)
+	}
+	// Output files live under the worktree's .git dir, so git status stays clean.
+	if status := gitRun(wt, "status", "--porcelain"); status != "" {
+		t.Fatalf("worktree dirtied by proof outputs: %q", status)
+	}
+
+	// Non-existent artifact is refused before calling the daemon.
+	posted = false
+	out.Reset()
+	errBuf.Reset()
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--artifact", "looks right=no-such-file.png"}, &out, &errBuf); code != 1 || posted {
+		t.Fatalf("missing artifact: code=%d posted=%v stderr=%s", code, posted, errBuf.String())
+	}
+
+	// Timed-out proof gets exit 124 and notes the timeout in its output file.
+	oldTimeout := proofTimeout
+	proofTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { proofTimeout = oldTimeout })
+	posted = false
+	out.Reset()
+	errBuf.Reset()
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "slow=sleep 5"}, &out, &errBuf); code != 0 || !posted {
+		t.Fatalf("timeout proof: code=%d posted=%v stderr=%s", code, posted, errBuf.String())
+	}
+	if len(lastReq.Args.Proofs) != 1 || lastReq.Args.Proofs[0].Exit != 124 {
+		t.Fatalf("timeout proof = %+v, want exit 124", lastReq.Args.Proofs)
+	}
+
+	// Bad syntax or combining --proof with --reject/--nothing-to-change -> exit 2.
+	for _, bad := range [][]string{
+		{"--proof", "no-equals"},
+		{"--proof", "=cmd"},
+		{"--artifact", "outcome="},
+		{"--proof", "a=true", "--reject", "w"},
+		{"--artifact", "a=" + art, "--nothing-to-change", "--why", "w"},
+	} {
+		if code := run(context.Background(), append([]string{"factory", "report", "ready"}, bad...), &out, &errBuf); code != 2 {
+			t.Fatalf("report ready %v code=%d, want 2", bad, code)
+		}
+	}
+}
+
 // TestFactoryLogCLI reads log.jsonl straight from the data dir named by
 // --config, one line per step in local time; -n keeps the last lines.
 func TestFactoryLogCLI(t *testing.T) {
@@ -566,4 +698,136 @@ func TestFactoryTaskAndAmendCLI(t *testing.T) {
 	if args, _ := lastBody["args"].(map[string]any); lastBody["verb"] != "plan amend" || args["why"] != "w" {
 		t.Fatalf("plan amend sent %+v", lastBody)
 	}
+}
+
+func setupProofTestEnv(t *testing.T) (wt string, lastProofs *[]flow.Proof) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+
+	var proofs []flow.Proof
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Args struct {
+				Proofs []flow.Proof `json:"proofs"`
+			} `json:"args"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		proofs = req.Args.Proofs
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(srv.Close)
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	t.Setenv("SHEEPDOG_WEB_PORT", port)
+	t.Setenv("SHEEPDOG_RUN_TOKEN", "tok-worker-1")
+
+	mainRepo := filepath.Join(t.TempDir(), "main")
+	wt = filepath.Join(t.TempDir(), "wt")
+	gitRun := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=T", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=T", "GIT_COMMITTER_EMAIL=t@example.com")
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, b)
+		}
+	}
+	if b, err := exec.Command("git", "init", mainRepo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, b)
+	}
+	_ = os.WriteFile(filepath.Join(mainRepo, "a.txt"), []byte("a\n"), 0o600)
+	gitRun(mainRepo, "add", "a.txt")
+	gitRun(mainRepo, "commit", "-m", "feat: init")
+	gitRun(mainRepo, "worktree", "add", "-b", "task/t1", wt)
+	return wt, &proofs
+}
+
+// TestFactoryReportReadyProofRunsAtWorktreeRoot checks item 1: running
+// `report ready --proof` from a subfolder still runs the proof at the worktree root.
+func TestFactoryReportReadyProofRunsAtWorktreeRoot(t *testing.T) {
+	wt, proofs := setupProofTestEnv(t)
+	sub := filepath.Join(wt, "sub", "dir")
+	if err := os.MkdirAll(sub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(sub)
+
+	var out, errBuf bytes.Buffer
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "at root=test -f a.txt && pwd"}, &out, &errBuf); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errBuf.String())
+	}
+	if len(*proofs) != 1 || (*proofs)[0].Exit != 0 {
+		t.Fatalf("proofs = %+v, want exit 0 at worktree root", *proofs)
+	}
+	got, err := os.ReadFile((*proofs)[0].OutputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDir, _ := filepath.EvalSymlinks(wt)
+	gotDir, _ := filepath.EvalSymlinks(strings.TrimSpace(string(got)))
+	if gotDir != wantDir {
+		t.Fatalf("proof ran in %q, want worktree root %q", gotDir, wantDir)
+	}
+}
+
+// TestFactoryReportReadyProofOutputBounded checks item 4a: proof output is
+// capped at 64 KiB and notes the truncation.
+func TestFactoryReportReadyProofOutputBounded(t *testing.T) {
+	wt, proofs := setupProofTestEnv(t)
+	t.Chdir(wt)
+
+	var out, errBuf bytes.Buffer
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "noisy=head -c 100000 /dev/zero | tr '\\0' 'x'"}, &out, &errBuf); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errBuf.String())
+	}
+	if len(*proofs) != 1 || (*proofs)[0].Exit != 0 {
+		t.Fatalf("proofs = %+v, want exit 0", *proofs)
+	}
+	b, err := os.ReadFile((*proofs)[0].OutputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) > 64*1024+256 || !strings.Contains(string(b), "truncated") {
+		t.Fatalf("output len=%d (contains truncated=%v), want <= %d with truncation note", len(b), strings.Contains(string(b), "truncated"), 64*1024+256)
+	}
+}
+
+// TestFactoryReportReadyProofTimeoutKillsProcessGroup checks item 4b: on
+// timeout the whole process group is killed, not just sh.
+func TestFactoryReportReadyProofTimeoutKillsProcessGroup(t *testing.T) {
+	wt, proofs := setupProofTestEnv(t)
+	t.Chdir(wt)
+
+	oldTimeout := proofTimeout
+	proofTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { proofTimeout = oldTimeout })
+
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+	cmdStr := fmt.Sprintf("sleep 30 & echo $! > %s; wait", pidFile)
+	var out, errBuf bytes.Buffer
+	if code := run(context.Background(), []string{"factory", "report", "ready", "--proof", "hang=" + cmdStr}, &out, &errBuf); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errBuf.String())
+	}
+	if len(*proofs) != 1 || (*proofs)[0].Exit != 124 {
+		t.Fatalf("proofs = %+v, want exit 124", *proofs)
+	}
+	rawPID, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("read child pid: %v", err)
+	}
+	childPID, err := strconv.Atoi(strings.TrimSpace(string(rawPID)))
+	if err != nil || childPID <= 0 {
+		t.Fatalf("invalid child pid %q: %v", rawPID, err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(childPID, syscall.SIGKILL) })
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if errors.Is(syscall.Kill(childPID, 0), syscall.ESRCH) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("grandchild pid %d still alive after proof timeout", childPID)
 }

@@ -63,21 +63,12 @@ type Outcome struct {
 // UnmarshalJSON accepts both {text, proved_by} and legacy plain-string
 // outcomes from stored state written before PR 3.2.
 func (o *Outcome) UnmarshalJSON(data []byte) error {
+	*o = Outcome{}
 	if len(data) > 0 && data[0] == '"' {
-		var s string
-		if err := json.Unmarshal(data, &s); err != nil {
-			return err
-		}
-		*o = Outcome{Text: s}
-		return nil
+		return json.Unmarshal(data, &o.Text)
 	}
 	type alias Outcome
-	var a alias
-	if err := json.Unmarshal(data, &a); err != nil {
-		return err
-	}
-	*o = Outcome(a)
-	return nil
+	return json.Unmarshal(data, (*alias)(o))
 }
 
 // Task is a planned task. It has no phase field: rows derive where it is.
@@ -236,9 +227,20 @@ type ReviewRun struct {
 	IdleSince *time.Time `json:"idle_since,omitempty"`
 }
 
+// Proof is one outcome's evidence attached to a ready report (design.md 3, 7.2):
+// either a command run by the report client or a manual artifact path.
+type Proof struct {
+	Outcome    string `json:"outcome"`
+	Command    string `json:"command,omitempty"`
+	Exit       int    `json:"exit"`
+	OutputPath string `json:"output_path,omitempty"`
+	Artifact   string `json:"artifact,omitempty"`
+}
+
 // Ready is the worker's "done at this commit".
 type Ready struct {
-	Head string `json:"head"`
+	Head   string  `json:"head"`
+	Proofs []Proof `json:"proofs,omitempty"`
 }
 
 // Reject is the worker's rejection of every finding of a reviewer's round at

@@ -531,7 +531,7 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 	if views := ghCalls(t, gh, "pr view"); len(views) != 0 {
 		t.Fatalf("PR read before any ready report: %q", views)
 	}
-	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`"}`)); err != nil {
+	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`","proofs":[{"outcome":"go test ./... passes","command":"go test ./...","exit":0,"output_path":"/tmp/p1.log"}]}`)); err != nil {
 		t.Fatalf("Report ready: %v", err)
 	}
 	// GitHub down after ready: "no PR" is not known, so N26 waits and the
@@ -974,7 +974,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	gitIn(t, wt, "commit", "-m", "feat: initial Greet")
 	c1 := gitIn(t, wt, "rev-parse", "HEAD")
 	writePRJSON(t, gh, "pr.json", c1, `[{"__typename":"CheckRun","name":"ci","status":"IN_PROGRESS","conclusion":""}]`)
-	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`"}`)); err != nil {
+	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`","proofs":[{"outcome":"go test passes","command":"go test ./...","exit":0,"output_path":"/tmp/p1.log"}]}`)); err != nil {
 		t.Fatal(err)
 	}
 	eng.passProject(ctx, id, false) // N26
@@ -1058,7 +1058,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	}
 	gitIn(t, wt, "commit", "-am", "fix: handle empty name")
 	c2 := gitIn(t, wt, "rev-parse", "HEAD")
-	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c2+`"}`)); err != nil {
+	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c2+`","proofs":[{"outcome":"go test passes","command":"go test ./...","exit":0,"output_path":"/tmp/p2.log"}]}`)); err != nil {
 		t.Fatal(err)
 	}
 	writePRJSON(t, gh, "view.json", c1, `[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]`)
@@ -1533,7 +1533,7 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 	c1 := gitIn(t, wt, "rev-parse", "HEAD")
 	writePRJSON(t, gh, "pr.json", c1, `[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]`)
 	writePRJSON(t, gh, "view.json", c1, `[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]`)
-	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`"}`)); err != nil {
+	if err := eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`","proofs":[{"outcome":"go vet passes","command":"go vet ./...","exit":0,"output_path":"/tmp/p1.log"}]}`)); err != nil {
 		t.Fatal(err)
 	}
 	eng.passProject(ctx, id, false) // N26
@@ -1645,5 +1645,42 @@ func TestRejectionPromptOnlyNewestRejectedRoundAtHead(t *testing.T) {
 	}
 	if strings.Contains(got, "round 1 why") || strings.Contains(got, "/r/1.md") {
 		t.Fatalf("rejectionPrompt for rejected round 2 leaked round 1 reject: %q", got)
+	}
+}
+
+// TestWorkerPromptAllReadyLinesUseProofForm checks item 2: every ready line in
+// the worker prompt (initial, after refusal, after review findings) uses {ready_cmd}.
+func TestWorkerPromptAllReadyLinesUseProofForm(t *testing.T) {
+	rc := readyCmd("sheepdog", []flow.Outcome{
+		{Text: "tests pass", ProvedBy: "cmd: go test ./..."},
+	})
+	prompt := strings.NewReplacer("{ready_cmd}", rc, "{sheepdog}", "sheepdog").Replace(workerTemplate)
+	if n := strings.Count(prompt, rc); n != 3 {
+		t.Fatalf("worker prompt contains readyCmd %d time(s), want 3 (initial, retry, after review):\n%s", n, prompt)
+	}
+}
+
+// TestReadyCmdShellSingleQuotes checks item 3b: readyCmd single-quotes proof
+// and artifact arguments so shell metacharacters ($, backticks, single quotes)
+// are never expanded when copied into a shell.
+func TestReadyCmdShellSingleQuotes(t *testing.T) {
+	got := readyCmd("sheepdog", []flow.Outcome{
+		{Text: "`sheepdog status` shows $HOME and it's ok", ProvedBy: "cmd: echo $USER `id`"},
+		{Text: "it's $1 `art`", ProvedBy: "manual: screenshot"},
+	})
+	wantProof := `--proof '` + "`sheepdog status` shows $HOME and it'\\''s ok=echo $USER `id`" + `'`
+	wantArt := `--artifact '` + "it'\\''s $1 `art`=<path>" + `'`
+	if !strings.Contains(got, wantProof) || !strings.Contains(got, wantArt) {
+		t.Fatalf("readyCmd =\n  %s\nwant both:\n  %s\n  %s", got, wantProof, wantArt)
+	}
+	// Verify sh -c evaluates the --proof argument verbatim without expanding $ or backticks.
+	arg := strings.TrimPrefix(wantProof, "--proof ")
+	out, err := exec.Command("sh", "-c", "printf '%s' "+arg).CombinedOutput()
+	if err != nil {
+		t.Fatalf("sh -c: %v: %s", err, out)
+	}
+	wantLit := "`sheepdog status` shows $HOME and it's ok=echo $USER `id`"
+	if string(out) != wantLit {
+		t.Fatalf("sh expanded argument to %q, want %q", string(out), wantLit)
 	}
 }

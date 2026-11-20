@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
@@ -1045,13 +1047,18 @@ func TestPlanOutcomesProvedBy(t *testing.T) {
 			t.Errorf("refusal %q missing %q", err, want)
 		}
 	}
-	// Plain-string outcomes and unknown outcome fields are refused in plan apply.
-	for _, bad := range []string{
-		`{"tasks":[{"id":"A","title":"feat: a","estimate_lines":30,` + testScopeJSON + `,"outcomes":["plain string"]}]}`,
-		`{"tasks":[{"id":"A","title":"feat: a","estimate_lines":30,` + testScopeJSON + `,"outcomes":[{"text":"a","proved_by":"cmd: true","extra":1}]}]}`,
+	// Plain-string outcomes are refused through checkOutcomes naming task and
+	// outcome; unknown outcome fields, duplicates, and >500-rune fields are refused.
+	for _, bad := range []struct{ body, want string }{
+		{`{"tasks":[{"id":"A","title":"feat: a","estimate_lines":30,` + testScopeJSON + `,"outcomes":["plain string"]}]}`, `task "A" outcome "plain string" needs proved_by`},
+		{`{"tasks":[{"id":"A","title":"feat: a","estimate_lines":30,` + testScopeJSON + `,"outcomes":[{"text":"a","proved_by":"cmd: true","extra":1}]}]}`, `unknown field "extra"`},
+		{`{"tasks":[{"id":"A","title":"feat: a","estimate_lines":30,` + testScopeJSON + `,"outcomes":[{"text":"dup","proved_by":"cmd: true"},{"text":"dup\t","proved_by":"cmd: true"}]}]}`, `task "A" has duplicate outcome "dup"`},
+		{`{"tasks":[{"id":"A","title":"feat: a","estimate_lines":30,` + testScopeJSON + `,"outcomes":[{"text":"` + strings.Repeat("x", 501) + `","proved_by":"cmd: true"}]}]}`, `task "A" outcome 1 text is longer than 500 characters`},
+		{`{"tasks":[{"id":"A","title":"feat: a","estimate_lines":30,` + testScopeJSON + `,"outcomes":[{"text":"ok","proved_by":"cmd: ` + strings.Repeat("y", 496) + `"}]}]}`, `task "A" outcome "ok" proved_by is longer than 500 characters`},
 	} {
-		if err := eng.Report("tok-coord", "plan apply", json.RawMessage(bad)); refusalCode(err) != "plan_invalid" {
-			t.Errorf("bad apply %s = %v, want plan_invalid", bad, err)
+		err := eng.Report("tok-coord", "plan apply", json.RawMessage(bad.body))
+		if refusalCode(err) != "plan_invalid" || !strings.Contains(err.Error(), bad.want) {
+			t.Errorf("bad apply %s = %v, want plan_invalid containing %q", bad.body, err, bad.want)
 		}
 	}
 	if got, _ := LoadState(paths.State(id)); got.Seq != 1 || len(got.Tasks) != 0 {
@@ -1060,7 +1067,7 @@ func TestPlanOutcomesProvedBy(t *testing.T) {
 
 	// Valid plan apply with all three proved_by kinds (cmd:, test:, manual:).
 	validApply := `{"tasks":[{"id":"T1","title":"feat: greet","estimate_lines":30,` + testScopeJSON + `,"outcomes":[` +
-		`{"text":"builds\ncleanly","proved_by":"cmd:go build ./..."},` +
+		`{"text":"builds  cleanly","proved_by":"cmd:go build ./..."},` +
 		`{"text":"greets name","proved_by":"test: TestGreet"},` +
 		`{"text":"looks right","proved_by":"manual: screenshot of home screen"}` +
 		`]}]}`
@@ -1077,7 +1084,7 @@ func TestPlanOutcomesProvedBy(t *testing.T) {
 		t.Fatalf("stored outcomes = %+v, want %+v", got.Tasks[0].Outcomes, wantOutcomes)
 	}
 
-	// plan amend: empty outcomes, missing/unknown proved_by, plain string on existing task, and bad added task -> refused, nothing changes.
+	// plan amend: empty outcomes, missing/unknown proved_by, plain string on existing task, duplicate, >500 runes, and bad added task -> refused, nothing changes.
 	for _, amend := range []struct {
 		body string
 		want string
@@ -1085,7 +1092,8 @@ func TestPlanOutcomesProvedBy(t *testing.T) {
 		{`{"why":"w","tasks":[{"id":"T1","outcomes":[]}]}`, `task "T1" needs at least one outcome`},
 		{`{"why":"w","tasks":[{"id":"T1","outcomes":[{"text":"x"}]}]}`, `task "T1" outcome "x" needs proved_by`},
 		{`{"why":"w","tasks":[{"id":"T1","outcomes":[{"text":"x","proved_by":"shell: ls"}]}]}`, `task "T1" outcome "x" has unknown proved_by "shell: ls"`},
-		{`{"why":"w","tasks":[{"id":"T1","outcomes":["plain"]}]}`, `task "T1"`},
+		{`{"why":"w","tasks":[{"id":"T1","outcomes":["plain"]}]}`, `task "T1" outcome "plain" needs proved_by`},
+		{`{"why":"w","tasks":[{"id":"T1","outcomes":[{"text":"same","proved_by":"cmd: true"},{"text":"same","proved_by":"cmd: true"}]}]}`, `task "T1" has duplicate outcome "same"`},
 		{`{"why":"w","tasks":[{"id":"T2","title":"feat: two","estimate_lines":30,` + testScopeJSON + `}]}`, `task "T2" needs at least one outcome`},
 		{`{"why":"w","tasks":[{"id":"T2","title":"feat: two","estimate_lines":30,` + testScopeJSON + `,"outcomes":[{"text":"y","proved_by":"bogus"}]}]}`, `task "T2" outcome "y" has unknown proved_by "bogus"`},
 	} {
@@ -1094,11 +1102,11 @@ func TestPlanOutcomesProvedBy(t *testing.T) {
 			t.Errorf("amend %s = %v, want plan_invalid containing %q", amend.body, err, amend.want)
 		}
 	}
-	if st2, _ := LoadState(paths.State(id)); st2.Seq != 2 || len(st2.Tasks) != 1 {
-		t.Fatalf("refused amend mutated state: seq=%d tasks=%d", st2.Seq, len(st2.Tasks))
+	if st2, _ := LoadState(paths.State(id)); st2.Seq != 2 || len(st2.Tasks) != 1 || len(st2.Tasks[0].Outcomes) != 3 || st2.Tasks[0].Outcomes[0] != wantOutcomes[0] {
+		t.Fatalf("refused amend mutated state: seq=%d tasks=%+v", st2.Seq, st2.Tasks)
 	}
 
-	// split children: missing outcome, missing/unknown proved_by, plain string -> refused, nothing changes.
+	// split children: missing outcome, missing/unknown proved_by, plain string -> refused naming task & outcome, nothing changes.
 	got.Tasks[0].Recaps = []flow.Recap{{Trigger: "review", Allowed: []string{"split", "drop"}}}
 	if err := SaveState(paths.State(id), got); err != nil {
 		t.Fatal(err)
@@ -1110,7 +1118,7 @@ func TestPlanOutcomesProvedBy(t *testing.T) {
 		{`{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":"feat: a","estimate_lines":20,` + testScopeJSON + `}]}`, `task "T1a" needs at least one outcome`},
 		{`{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":"feat: a","estimate_lines":20,` + testScopeJSON + `,"outcomes":[{"text":"a works"}]}]}`, `task "T1a" outcome "a works" needs proved_by`},
 		{`{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":"feat: a","estimate_lines":20,` + testScopeJSON + `,"outcomes":[{"text":"a works","proved_by":"other: x"}]}]}`, `task "T1a" outcome "a works" has unknown proved_by "other: x"`},
-		{`{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":"feat: a","estimate_lines":20,` + testScopeJSON + `,"outcomes":["plain"]}]}`, `cannot unmarshal`},
+		{`{"task":"T1","choice":"split","why":"w","children":[{"id":"T1a","title":"feat: a","estimate_lines":20,` + testScopeJSON + `,"outcomes":["plain"]}]}`, `task "T1a" outcome "plain" needs proved_by`},
 	} {
 		err := eng.Report("tok-coord", "recap decide", json.RawMessage(split.body))
 		if refusalCode(err) != "plan_invalid" || !strings.Contains(err.Error(), split.want) {
@@ -1119,5 +1127,295 @@ func TestPlanOutcomesProvedBy(t *testing.T) {
 	}
 	if st3, _ := LoadState(paths.State(id)); st3.Seq != 2 || len(st3.Tasks) != 1 || st3.Tasks[0].Split != nil {
 		t.Fatalf("refused split mutated state: seq=%d tasks=%+v", st3.Seq, st3.Tasks)
+	}
+}
+
+// TestReportReadyProofs checks design.md 7.2 and PR 3.3a: ready refuses
+// outcome_missing, proof_failed (naming each failing proof with first lines of
+// its output, and missing artifacts), and invalid_report (unknown/duplicate/wrong
+// kind); stores proofs on Ready when valid; and leaves old tasks with no
+// proved_by unaffected.
+func TestReportReadyProofs(t *testing.T) {
+	ctx := context.Background()
+	paths := testPaths(t)
+	repo, baseSHA := initGitRepoWithRemote(t)
+	eng := New(paths, nil)
+
+	const projID = "proj-proofs"
+	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: proofs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "p.go"), []byte("package demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt.Path, "add", "p.go")
+	gitIn(t, wt.Path, "commit", "-m", "feat: p")
+	c1 := gitIn(t, wt.Path, "rev-parse", "HEAD")
+
+	saveTask := func(outcomes []flow.Outcome) {
+		t.Helper()
+		st := flow.State{
+			Seq:      1,
+			Project:  flow.Project{ID: projID, Folder: repo, Started: true},
+			Settings: flow.DefaultSettings(),
+			Tasks: []flow.Task{{
+				ID: "T1", Title: "feat: proofs", Outcomes: outcomes,
+				Attempts: []flow.Attempt{{
+					SizeCap: 100, BaseCommit: baseSHA, Branch: wt.Branch, Worktree: wt.Path,
+					RunTokenHash: tokenHash("tok-worker"),
+					Ready:        []flow.Ready{}, Rounds: []flow.Round{}, Accepts: []flow.Accept{}, Acts: []flow.Act{},
+				}},
+			}},
+		}
+		if err := SaveState(paths.State(projID), st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send := func(proofs []flow.Proof) error {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{"head": c1, "proofs": proofs})
+		return eng.Report("tok-worker", "ready", raw)
+	}
+
+	outcomes := []flow.Outcome{
+		{Text: "builds", ProvedBy: "cmd: go build ./..."},
+		{Text: "tests pass", ProvedBy: "test: TestFoo"},
+		{Text: "looks right", ProvedBy: "manual: screenshot"},
+	}
+	saveTask(outcomes)
+
+	gitDir := gitIn(t, wt.Path, "rev-parse", "--git-dir")
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(wt.Path, gitDir)
+	}
+	proofDir := filepath.Join(gitDir, "sheepdog-proofs")
+	_ = os.MkdirAll(proofDir, 0o700)
+	okLog := filepath.Join(proofDir, "ok.log")
+	failLog := filepath.Join(proofDir, "fail.log")
+	artFile := filepath.Join(t.TempDir(), "shot.png")
+	_ = os.WriteFile(okLog, []byte("ok\n"), 0o600)
+	_ = os.WriteFile(failLog, []byte("FAIL pkg/foo\nline two error\n"), 0o600)
+	_ = os.WriteFile(artFile, []byte("png"), 0o600)
+
+	// Missing outcomes -> outcome_missing naming each missing one.
+	err = send([]flow.Proof{{Outcome: "builds", Command: "go build ./...", Exit: 0, OutputPath: okLog}})
+	if refusalCode(err) != "outcome_missing" || !strings.Contains(err.Error(), `"tests pass"`) || !strings.Contains(err.Error(), `"looks right"`) {
+		t.Fatalf("missing proof = %v, want outcome_missing naming tests pass and looks right", err)
+	}
+
+	// Failing command proof -> proof_failed naming command, exit, and first lines of output.
+	err = send([]flow.Proof{
+		{Outcome: "builds", Command: "go build ./...", Exit: 0, OutputPath: okLog},
+		{Outcome: "tests pass", Command: "go test ./...", Exit: 2, OutputPath: failLog},
+		{Outcome: "looks right", Artifact: artFile},
+	})
+	if refusalCode(err) != "proof_failed" || !strings.Contains(err.Error(), `"tests pass"`) || !strings.Contains(err.Error(), "exit 2") || !strings.Contains(err.Error(), "FAIL pkg/foo") {
+		t.Fatalf("failing proof = %v, want proof_failed with output head", err)
+	}
+
+	// Missing artifact -> proof_failed naming artifact.
+	err = send([]flow.Proof{
+		{Outcome: "builds", Command: "go build ./...", Exit: 0, OutputPath: okLog},
+		{Outcome: "tests pass", Command: "go test ./...", Exit: 0, OutputPath: okLog},
+		{Outcome: "looks right", Artifact: filepath.Join(t.TempDir(), "missing.png")},
+	})
+	if refusalCode(err) != "proof_failed" || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("missing artifact = %v, want proof_failed", err)
+	}
+
+	// Unknown outcome, duplicate proof, artifact on non-manual, command on manual -> invalid_report.
+	for name, ps := range map[string][]flow.Proof{
+		"unknown":            {{Outcome: "nope", Command: "true", Exit: 0, OutputPath: okLog}},
+		"duplicate":          {{Outcome: "builds", Command: "true", Exit: 0, OutputPath: okLog}, {Outcome: "builds", Command: "true", Exit: 0, OutputPath: okLog}},
+		"artifact on cmd":    {{Outcome: "builds", Artifact: artFile}},
+		"command on manual":  {{Outcome: "looks right", Command: "true", Exit: 0, OutputPath: okLog}},
+		"missing outputpath": {{Outcome: "builds", Command: "true", Exit: 0}},
+	} {
+		if err := send(ps); refusalCode(err) != "invalid_report" {
+			t.Errorf("%s: err = %v, want invalid_report", name, err)
+		}
+	}
+	if cur, _ := LoadState(paths.State(projID)); cur.Seq != 1 {
+		t.Fatalf("refusals mutated state: seq=%d", cur.Seq)
+	}
+
+	// Valid proofs -> accepted and persisted on flow.Ready.
+	good := []flow.Proof{
+		{Outcome: "builds", Command: "go build ./...", Exit: 0, OutputPath: okLog},
+		{Outcome: "tests pass", Command: "go test ./...", Exit: 0, OutputPath: okLog},
+		{Outcome: "looks right", Artifact: artFile},
+	}
+	if err := send(good); err != nil {
+		t.Fatalf("valid proofs: %v", err)
+	}
+	cur, _ := LoadState(paths.State(projID))
+	if cur.Seq != 2 || len(cur.Tasks[0].Attempts[0].Ready) != 1 || len(cur.Tasks[0].Attempts[0].Ready[0].Proofs) != 3 ||
+		cur.Tasks[0].Attempts[0].Ready[0].Proofs[2].Artifact != artFile {
+		t.Fatalf("stored ready = %+v", cur.Tasks[0].Attempts[0].Ready)
+	}
+
+	// Old task whose outcomes have no proved_by still accepts ready with no proofs.
+	saveTask([]flow.Outcome{{Text: "legacy outcome"}})
+	if err := eng.Report("tok-worker", "ready", json.RawMessage(`{"head":"`+c1+`"}`)); err != nil {
+		t.Fatalf("legacy task ready without proofs: %v", err)
+	}
+}
+
+// TestCheckOutcomesRejectsEqualsAndNewline checks item 3a: outcome text with
+// '=' or a newline is refused at plan time through checkOutcomes naming task and outcome.
+func TestCheckOutcomesRejectsEqualsAndNewline(t *testing.T) {
+	for _, tc := range []struct {
+		name, text, wantOutcome string
+	}{
+		{"equals", "x=1 printed", "x=1 printed"},
+		{"newline", "line1\nline2", "line1 line2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `{"tasks":[{"id":"T1","title":"feat: x","estimate_lines":20,` + testScopeJSON + `,"outcomes":[{"text":` + strconvQuote(tc.text) + `,"proved_by":"cmd: true"}]}]}`
+			_, fails := checkPlan(json.RawMessage(raw), 400)
+			got := strings.Join(fails, "; ")
+			if len(fails) == 0 || !strings.Contains(got, `task "T1"`) || !strings.Contains(got, tc.wantOutcome) {
+				t.Fatalf("checkPlan(%s) fails = %q, want failure naming task T1 and outcome %q", tc.name, got, tc.wantOutcome)
+			}
+		})
+	}
+}
+
+// TestReportReadyProofCleaningCapsAndPathGuard checks item 5:
+// output excerpts and command are cleaned with cleanRejectWhy; command,
+// output_path and artifact are capped at 500 runes; proofHead reads only
+// regular files inside the worktree's .git dir and never blocks on a FIFO.
+func TestReportReadyProofCleaningCapsAndPathGuard(t *testing.T) {
+	ctx := context.Background()
+	paths := testPaths(t)
+	repo, baseSHA := initGitRepoWithRemote(t)
+	eng := New(paths, nil)
+
+	const projID = "proj-proof-clean"
+	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: clean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(wt.Path, "c.go"), []byte("package demo\n"), 0o600)
+	gitIn(t, wt.Path, "add", "c.go")
+	gitIn(t, wt.Path, "commit", "-m", "feat: c")
+	c1 := gitIn(t, wt.Path, "rev-parse", "HEAD")
+
+	st := flow.State{
+		Seq:      1,
+		Project:  flow.Project{ID: projID, Folder: repo, Started: true},
+		Settings: flow.DefaultSettings(),
+		Tasks: []flow.Task{{
+			ID: "T1", Title: "feat: clean",
+			Outcomes: []flow.Outcome{
+				{Text: "tests pass", ProvedBy: "cmd: go test ./..."},
+				{Text: "looks right", ProvedBy: "manual: screenshot"},
+			},
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: baseSHA, Branch: wt.Branch, Worktree: wt.Path,
+				RunTokenHash: tokenHash("tok-worker"),
+				Ready:        []flow.Ready{}, Rounds: []flow.Round{}, Accepts: []flow.Accept{}, Acts: []flow.Act{},
+			}},
+		}},
+	}
+	if err := SaveState(paths.State(projID), st); err != nil {
+		t.Fatal(err)
+	}
+
+	gitDir := gitIn(t, wt.Path, "rev-parse", "--git-dir")
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(wt.Path, gitDir)
+	}
+	proofDir := filepath.Join(gitDir, "sheepdog-proofs")
+	if err := os.MkdirAll(proofDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	artFile := filepath.Join(t.TempDir(), "shot.png")
+	_ = os.WriteFile(artFile, []byte("png"), 0o600)
+
+	send := func(proofs []flow.Proof) error {
+		raw, _ := json.Marshal(map[string]any{"head": c1, "proofs": proofs})
+		return eng.Report("tok-worker", "ready", raw)
+	}
+
+	// 1. ANSI/control bytes in failing output (inside .git) and command are cleaned.
+	dirtyLog := filepath.Join(proofDir, "dirty.log")
+	_ = os.WriteFile(dirtyLog, []byte("bad \x1b[31mred\x1b[0m\x00line\n"), 0o600)
+	err = send([]flow.Proof{
+		{Outcome: "tests pass", Command: "go\x1b[31m\ntest", Exit: 1, OutputPath: dirtyLog},
+		{Outcome: "looks right", Artifact: artFile},
+	})
+	if refusalCode(err) != "proof_failed" || strings.ContainsAny(err.Error(), "\x1b\x00\n") || !strings.Contains(err.Error(), "bad [31mred [0m line") || !strings.Contains(err.Error(), "go [31m test") {
+		t.Fatalf("dirty proof refusal = %q, want cleaned command and excerpt", err)
+	}
+
+	// 2. Fields longer than 500 runes are refused invalid_report.
+	longStr := strings.Repeat("a", 501)
+	for name, ps := range map[string][]flow.Proof{
+		"long command":     {{Outcome: "tests pass", Command: longStr, Exit: 0, OutputPath: dirtyLog}, {Outcome: "looks right", Artifact: artFile}},
+		"long output_path": {{Outcome: "tests pass", Command: "true", Exit: 0, OutputPath: longStr}, {Outcome: "looks right", Artifact: artFile}},
+		"long artifact":    {{Outcome: "tests pass", Command: "true", Exit: 0, OutputPath: dirtyLog}, {Outcome: "looks right", Artifact: longStr}},
+	} {
+		if err := send(ps); refusalCode(err) != "invalid_report" {
+			t.Errorf("%s: err = %v, want invalid_report", name, err)
+		}
+	}
+
+	// 3. Output path outside worktree's .git is never read.
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	_ = os.WriteFile(outside, []byte("TOP_SECRET_LINE\n"), 0o600)
+	err = send([]flow.Proof{
+		{Outcome: "tests pass", Command: "false", Exit: 1, OutputPath: outside},
+		{Outcome: "looks right", Artifact: artFile},
+	})
+	if refusalCode(err) != "proof_failed" || strings.Contains(err.Error(), "TOP_SECRET_LINE") || !strings.Contains(err.Error(), "(output unreadable)") {
+		t.Fatalf("outside output_path = %v, want (output unreadable) without leaking file", err)
+	}
+
+	// 4. FIFO inside .git does not block os.Open.
+	fifo := filepath.Join(proofDir, "hang.fifo")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- send([]flow.Proof{
+			{Outcome: "tests pass", Command: "false", Exit: 1, OutputPath: fifo},
+			{Outcome: "looks right", Artifact: artFile},
+		})
+	}()
+	select {
+	case err := <-done:
+		if refusalCode(err) != "proof_failed" || !strings.Contains(err.Error(), "(output unreadable)") {
+			t.Fatalf("fifo output_path = %v, want proof_failed with (output unreadable)", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		// Unblock the leaked goroutine by opening the write end so the test exits cleanly.
+		if wf, oerr := os.OpenFile(fifo, os.O_WRONLY|syscall.O_NONBLOCK, 0); oerr == nil {
+			_ = wf.Close()
+		}
+		t.Fatal("proofHead blocked on FIFO output_path")
+	}
+}
+
+// TestLoadStateAllowsUnknownOutcomeFields checks item 6: DisallowUnknownFields
+// applies only to new plans, not when loading state.json.
+func TestLoadStateAllowsUnknownOutcomeFields(t *testing.T) {
+	paths := testPaths(t)
+	raw := `{"seq":1,"project":{"id":"proj-future","started":true},"tasks":[{"id":"T1","title":"feat: x","outcomes":[{"text":"works","proved_by":"cmd: true","future_field":123}]}]}`
+	statePath := paths.State("proj-future")
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(statePath, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := LoadState(statePath)
+	if err != nil {
+		t.Fatalf("LoadState failed on unknown outcome field: %v", err)
+	}
+	if len(st.Tasks) != 1 || len(st.Tasks[0].Outcomes) != 1 || st.Tasks[0].Outcomes[0].Text != "works" {
+		t.Fatalf("loaded tasks = %+v", st.Tasks)
 	}
 }
