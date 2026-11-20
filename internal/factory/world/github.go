@@ -176,7 +176,7 @@ func PRSnapshot(ctx context.Context, repoDir, branch string) (p flow.PR, warn, e
 	wfPending, failedRuns := false, map[string]bool{}
 	if p.Head != "" { // H's own workflow runs: an unfinished one waits, and only a failed one is re-run
 		if wfPending, failedRuns, err = headRuns(ctx, repoDir, repo, p.Head); err != nil {
-			p.ChecksUnread = true // N33/N34 never re-run on it
+			p.ChecksUnread, failedRuns = true, nil // N33/N34 never re-run on it, nor on the pages read before the error
 			if base := flow.Rollup(checks, false); base == flow.ChecksGreen || base == flow.ChecksAbsent {
 				checks = nil // never green unread: absent, N36 holds it in the grace, then N43
 			}

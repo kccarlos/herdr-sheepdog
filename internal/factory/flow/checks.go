@@ -23,7 +23,7 @@ type Check struct {
 	Stop         string `json:"-"` // why CANCELLED, from annotations: "timeout", "external" (canceled by someone), else unknown
 }
 
-// LatestChecks keeps the newest run per check, keyed by workflow and name:
+// LatestChecks keeps the newest run per check, keyed by kind, workflow and name:
 // same-named checks of two workflows are two checks. An unfinished run (not
 // completed) is the newest, so a queued re-run (gh prints its start as
 // year 1) replaces the verdict it reruns. Otherwise by StartedAt, else
@@ -32,7 +32,8 @@ func LatestChecks(checks []Check) []Check {
 	idx, out := map[string]int{}, make([]Check, 0, len(checks))
 	for _, c := range checks {
 		name := cmp.Or(c.Name, c.Context)
-		if prev, ok := idx[c.WorkflowName+"/"+name]; name != "" && ok {
+		k := c.Kind + "/" + c.WorkflowName + "/" + name // a check run never replaces a status
+		if prev, ok := idx[k]; name != "" && ok {
 			b := out[prev]
 			if cu, bu := c.unfinished(), b.unfinished(); cu != bu {
 				if cu {
@@ -48,7 +49,7 @@ func LatestChecks(checks []Check) []Check {
 			continue
 		}
 		if name != "" {
-			idx[c.WorkflowName+"/"+name] = len(out)
+			idx[k] = len(out)
 		}
 		out = append(out, c)
 	}

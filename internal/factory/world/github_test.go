@@ -132,11 +132,12 @@ func TestChecksRollupTable(t *testing.T) {
 			{Kind: "CheckRun", Name: "check", Status: "COMPLETED", Conclusion: "CANCELLED", StartedAt: "2026-11-20T09:00:00Z"},
 			{Kind: "CheckRun", Name: "check", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: "2026-11-20T09:05:00Z"},
 		}, false, flow.ChecksGreen},
-		"unknown conclusion": {[]flow.Check{run("COMPLETED", "STALE")}, false, flow.ChecksRed},
-		"status success":     {[]flow.Check{ctx("SUCCESS")}, false, flow.ChecksGreen},
-		"status pending":     {[]flow.Check{ok, ctx("PENDING")}, false, flow.ChecksPending},
-		"status expected":    {[]flow.Check{ctx("EXPECTED")}, false, flow.ChecksPending},
-		"status error":       {[]flow.Check{ok, ctx("ERROR")}, false, flow.ChecksRed},
+		"unknown conclusion":                  {[]flow.Check{run("COMPLETED", "STALE")}, false, flow.ChecksRed},
+		"a check run never replaces a status": {[]flow.Check{{Kind: "StatusContext", Context: "ci", State: "PENDING"}, {Kind: "CheckRun", Name: "ci", Status: "COMPLETED", Conclusion: "SUCCESS"}}, false, flow.ChecksPending},
+		"status success":                      {[]flow.Check{ctx("SUCCESS")}, false, flow.ChecksGreen},
+		"status pending":                      {[]flow.Check{ok, ctx("PENDING")}, false, flow.ChecksPending},
+		"status expected":                     {[]flow.Check{ctx("EXPECTED")}, false, flow.ChecksPending},
+		"status error":                        {[]flow.Check{ok, ctx("ERROR")}, false, flow.ChecksRed},
 	} {
 		if got := flow.Rollup(c.checks, c.wfPending); got != c.want {
 			t.Errorf("%s: Rollup = %s, want %s", name, got, c.want)
@@ -680,5 +681,25 @@ func TestDispatchWorkflowExactFileOnly(t *testing.T) {
 	}
 	if got := append(ghCalls(t, gh, "workflow run"), ghCalls(t, gh, "api repos/acme/demo/actions/workflows/")...); len(got) != 0 {
 		t.Fatalf("dispatched %q", got)
+	}
+}
+
+// TestPRSnapshotPartialRunListNoTarget: when H's run list fails on a later
+// page, the ids read on earlier pages are not used: no re-run target.
+func TestPRSnapshotPartialRunListNoTarget(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	writeGH(t, gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"h1","mergeable":"MERGEABLE","baseRefName":"main","statusCheckRollup":[`+
+		`{"__typename":"CheckRun","name":"test","workflowName":"ci","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/acme/demo/actions/runs/5/job/50"}]}`)
+	runs := []string{`{"id":5,"status":"completed","conclusion":"failure"}`}
+	for i := 1; i < 100; i++ {
+		runs = append(runs, fmt.Sprintf(`{"id":%d,"status":"completed","conclusion":"success"}`, 1000+i))
+	}
+	writeGH(t, gh, "workflow-runs.json", `{"total_count":150,"workflow_runs":[`+strings.Join(runs, ",")+`]}`)
+	writeGH(t, gh, "workflow-runs.2.json", `not json`)
+	p, warn, err := PRSnapshot(ctx, repo, "b")
+	if err != nil || warn == nil || p.Checks != flow.ChecksRed || !p.ChecksUnread || len(p.Failed) != 1 || p.Failed[0].Run != "" {
+		t.Fatalf("partial run list: %+v, warn %v, err %v; want red, checks_unread, a failure with no run", p, warn, err)
 	}
 }
