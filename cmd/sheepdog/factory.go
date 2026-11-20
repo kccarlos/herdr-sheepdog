@@ -35,7 +35,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog factory <start|stop|status|log|plan|task|recap|report|doctor> [flags] [folder]")
 	fprintln(w, "  start <folder> --goal \"<sentence>\" [--max-running N]   start the factory coordinator for a repo")
 	fprintln(w, "  stop [<folder>]                      stop a started factory project and its runs")
-	fprintln(w, "  status [<folder>]                    one line per task: id, title, stage, last rule and why")
+	fprintln(w, "  status [<folder>]                    one line per task: id, title, stage, last logged rule, age and why")
 	fprintln(w, "  log [<folder>] [-n N]                each engine step: time, task, rule, asked, decision, why")
 	fprintln(w, "  plan apply <file>                    (coordinator only) apply a JSON plan")
 	fprintln(w, "  plan amend <file>                    (coordinator only) change tasks' title, brief, outcomes, estimate_lines or add tasks, with a why")

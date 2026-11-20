@@ -77,14 +77,14 @@ func projectViewOf(s flow.State) ProjectView {
 }
 
 func GraphViewOf(s flow.State, logs []LogLine) GraphView {
-	done, idx, deps, lastLog := make(map[string]bool, len(s.Tasks)), make(map[string]int, len(s.Tasks)), map[string][]string{}, map[string]LogLine{}
+	idx, deps, lastLog := make(map[string]int, len(s.Tasks)), map[string][]string{}, map[string]LogLine{}
 	for _, l := range logs {
 		if l.Task != "" {
 			lastLog[l.Task] = l
 		}
 	}
 	for i, t := range s.Tasks {
-		idx[t.ID], done[t.ID] = i, t.Done != nil
+		idx[t.ID] = i
 		for _, after := range t.After {
 			deps[after] = append(deps[after], t.ID)
 		}
@@ -101,7 +101,7 @@ func GraphViewOf(s flow.State, logs []LogLine) GraphView {
 	}
 	tasks := make([]TaskView, 0, len(s.Tasks))
 	for i, t := range s.Tasks {
-		stage, why := taskStageWhy(t, s.Settings, s.Project.Started, done)
+		stage, why := taskStageWhy(t, s.Tasks, s.Settings, s.Project.Started)
 		l, model, term, rounds := lastLog[t.ID], "", "", 0
 		if n := len(t.Attempts); n > 0 {
 			rounds = len(slices.DeleteFunc(slices.Clone(flow.Counted(t.Attempts[n-1])), func(r flow.Round) bool { return r.Kind == flow.RoundSendBack }))
@@ -197,8 +197,10 @@ var stateStage = map[string][2]string{
 	flow.Passed: {"ci", "Waiting on CI and merge"}, flow.NoLadderRow: {"blocked_or_failed", "Waiting on the coordinator"},
 }
 
-func taskStageWhy(t flow.Task, settings flow.Settings, started bool, done map[string]bool) (string, string) {
+func taskStageWhy(t flow.Task, tasks []flow.Task, settings flow.Settings, started bool) (string, string) {
 	a, st, why := flow.OpenAttempt(t), "", ""
+	notDone, dropped := flow.UnmetDeps(t, tasks)
+	unmet := append(notDone, dropped...)
 	switch {
 	case flow.Ended(t):
 		st = "done"
@@ -206,8 +208,8 @@ func taskStageWhy(t flow.Task, settings flow.Settings, started bool, done map[st
 		st = "parked"
 	case flow.OpenRecap(t) != nil:
 		st, why = flow.RecapAnswer, "At "+cmp.Or(flow.OpenRecap(t).Trigger, "a")+" recap, waiting on the coordinator"
-	case a == nil && slices.ContainsFunc(t.After, func(d string) bool { return !done[d] }):
-		st, why = "waiting_on_dep", "Waiting on "+strings.Join(slices.DeleteFunc(slices.Clone(t.After), func(d string) bool { return done[d] }), ", ")
+	case a == nil && len(unmet) > 0:
+		st, why = "waiting_on_dep", "Waiting on "+strings.Join(unmet, ", ")
 	case a == nil:
 		st, why = "queued", map[bool]string{true: "Queued to start", false: "Project is stopped"}[started]
 	case a.NothingToChange != "":

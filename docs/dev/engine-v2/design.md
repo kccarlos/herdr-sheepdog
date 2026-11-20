@@ -403,6 +403,9 @@ There is no queue. N10's "a slot is free" is decided by one pure function over a
 | N23 with the worker idle | `idle` | — |
 | N16, N20–N23, N26–N29, N32, N39 | `working` | "Working · model · round 1 of 2", "Checking 3 outcomes" |
 
+In slice 4, stage comes from one view function over stored state (`GraphViewOf`), not from a field on each row, because the engine only logs acting rows and N9/N10 changes.
+That function does not yet emit `idle` (N23 with an idle worker) or `owner_answer`/`owner_gate`, and it distinguishes `queued` from `waiting_on_dep` from `flow.UnmetDeps` over stored state rather than from N10/N9 log lines.
+
 ## 5. The run table
 
 A run is one agent process in one hc terminal: coordinator, worker, reviewer, retro reviewer, designer, verifier. There is **one** way to start one (section 9). A run is found again by its own label (`sheepdog.run`) and the terminal's creation time, never by an address alone or a role label, so a reused address or a hand-started agent is not taken for a run.

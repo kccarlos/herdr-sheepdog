@@ -1,11 +1,8 @@
 package factory
 
 import (
-	"bufio"
-	"bytes"
 	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 )
@@ -22,11 +20,12 @@ import (
 // has a reviewed round): folder's project, or the one started project when
 // folder is empty. A torn last line (an append that did not finish) is skipped.
 func ProjectLog(ctx context.Context, paths Paths, folder string, n int) ([]LogLine, string, error) {
-	id, s, err := (&Engine{Paths: paths}).findProjectLocked(ctx, folder)
+	e := &Engine{Paths: paths}
+	id, _, err := e.findProjectLocked(ctx, folder)
 	if err != nil {
 		return nil, "", err
 	}
-	lines, err := readLogFile(paths.Log(id), false)
+	s, lines, err := e.loadProjectCopy(id)
 	if err != nil {
 		return nil, "", err
 	}
@@ -34,28 +33,6 @@ func ProjectLog(ctx context.Context, paths Paths, folder string, n int) ([]LogLi
 		lines = lines[len(lines)-n:]
 	}
 	return lines, FormatFirstLook(s.Tasks), nil
-}
-
-func readLogFile(path string, missingOK bool) ([]LogLine, error) {
-	if err := guardTestPath(path); err != nil {
-		return nil, err
-	}
-	data, err := os.ReadFile(path)
-	if missingOK && os.IsNotExist(err) {
-		return nil, nil
-	} else if err != nil {
-		return nil, err
-	}
-	var lines []LogLine
-	sc := bufio.NewScanner(bytes.NewReader(data))
-	sc.Buffer(nil, 16<<20)
-	for sc.Scan() {
-		var l LogLine
-		if json.Unmarshal(sc.Bytes(), &l) == nil {
-			lines = append(lines, l)
-		}
-	}
-	return lines, sc.Err()
 }
 
 // FormatFirstLook formats the project's first-look pass rate (tasks whose
@@ -83,6 +60,18 @@ func FormatLogLine(l LogLine) string {
 // TaskStatus is one task's status for `sheepdog factory status` (design.md 4.11).
 type TaskStatus struct {
 	ID, Title, Stage, Rule, Why string
+	At                          time.Time
+	Stale                       bool
+}
+
+var ruleStage = map[string]string{
+	"N1": "done", "N2": "done",
+	"S1": "blocked_or_failed", "S2": "blocked_or_failed",
+	"N3": "blocked_or_failed", "N6": "blocked_or_failed", "N8": "blocked_or_failed",
+	"N12": "blocked_or_failed", "N25": "blocked_or_failed", "N43": "blocked_or_failed",
+	"N9": "waiting_on_dep", "N10": "queued", "N11": "queued",
+	"N20": "working", "N22": "working", "N23": "working", "N26": "working", "N29": "working", "N39": "working",
+	"N36": "ci", "N41": "ci", "N42": "ci",
 }
 
 // StatusViewOf derives each task's status from stored state and log.jsonl.
@@ -98,9 +87,13 @@ func StatusViewOf(s flow.State, logs []LogLine) []TaskStatus {
 	g := GraphViewOf(s, logs)
 	out := make([]TaskStatus, len(g.Tasks))
 	for i, tv := range g.Tasks {
-		ts := TaskStatus{ID: tv.Ref, Title: tv.Title, Stage: tv.Stage, Why: "no pass yet"}
+		why := "no logged row"
+		if tv.WhyWaiting != "" {
+			why = tv.WhyWaiting + " (no logged row)"
+		}
+		ts := TaskStatus{ID: tv.Ref, Title: tv.Title, Stage: tv.Stage, Why: why}
 		if l, ok := last[tv.Ref]; ok {
-			ts.Rule, ts.Why = l.Rule, l.Why
+			ts.Rule, ts.Why, ts.At, ts.Stale = l.Rule, l.Why, l.At, ruleStage[l.Rule] != tv.Stage
 		}
 		out[i] = ts
 	}
@@ -111,58 +104,85 @@ func StatusViewOf(s flow.State, logs []LogLine) []TaskStatus {
 // started/stored project when folder is empty). It makes no hc, git or gh calls
 // and works when the daemon is stopped.
 func ProjectStatus(paths Paths, folder string) ([]TaskStatus, error) {
-	id, s, err := findStoredProject(paths, strings.TrimSpace(folder))
+	id, err := findStoredProject(paths, strings.TrimSpace(folder))
 	if err != nil {
 		return nil, err
 	}
-	logs, err := readLogFile(paths.Log(id), true)
+	s, logs, err := (&Engine{Paths: paths}).loadProjectCopy(id)
 	if err != nil {
 		return nil, err
 	}
 	return StatusViewOf(s, logs), nil
 }
 
-func findStoredProject(paths Paths, target string) (string, flow.State, error) {
+func findStoredProject(paths Paths, target string) (string, error) {
 	dir := filepath.Join(paths.DataDir, "factory", "projects")
 	if err := guardTestPath(dir); err != nil {
-		return "", flow.State{}, err
+		return "", err
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil && !os.IsNotExist(err) {
-		return "", flow.State{}, err
+		return "", err
 	}
 	var started, all []string
-	states := map[string]flow.State{}
+	var loadErr error
 	for _, ent := range entries {
+		if !ent.IsDir() {
+			continue
+		}
 		s, err := LoadState(paths.State(ent.Name()))
 		if err != nil {
+			err = fmt.Errorf("load project %s: %w", ent.Name(), err)
+			if target == ent.Name() {
+				return "", err
+			}
+			loadErr = cmp.Or(loadErr, err)
 			continue
 		}
 		if target != "" {
-			if ent.Name() == target || sameFolder(s.Project.Folder, target) {
-				return ent.Name(), s, nil
+			if ent.Name() == target || underFolder(s.Project.Folder, target) {
+				return ent.Name(), nil
 			}
 			continue
 		}
-		states[ent.Name()] = s
 		all = append(all, ent.Name())
 		if s.Project.Started {
 			started = append(started, ent.Name())
 		}
 	}
 	switch {
+	case target != "" && loadErr != nil:
+		return "", loadErr
 	case target != "":
-		return "", flow.State{}, fmt.Errorf("no factory project for %s", target)
+		return "", fmt.Errorf("no factory project for %s", target)
 	case len(started) == 1:
-		return started[0], states[started[0]], nil
+		return started[0], nil
 	case len(started) > 1:
-		return "", flow.State{}, errors.New("multiple projects started; pass sheepdog factory status <folder>")
+		return "", errors.New("multiple projects started; pass sheepdog factory status <folder>")
 	case len(all) == 1:
-		return all[0], states[all[0]], nil
+		return all[0], nil
 	case len(all) > 1:
-		return "", flow.State{}, errors.New("multiple factory projects; pass sheepdog factory status <folder>")
+		return "", errors.New("multiple factory projects; pass sheepdog factory status <folder>")
+	case loadErr != nil:
+		return "", loadErr
 	default:
-		return "", flow.State{}, errors.New("no factory project found")
+		return "", errors.New("no factory project found")
+	}
+}
+
+func underFolder(root, target string) bool {
+	if root == "" || target == "" {
+		return false
+	}
+	for dir := filepath.Clean(target); ; {
+		if sameFolder(root, dir) {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
 	}
 }
 
@@ -179,14 +199,41 @@ func sameFolder(a, b string) bool {
 	return false
 }
 
+func formatAge(now, at time.Time) string {
+	if at.IsZero() {
+		return ""
+	}
+	d := max(0, now.Sub(at))
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds ago", int(d/time.Second))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d/time.Minute))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d/time.Hour))
+	default:
+		return fmt.Sprintf("%dd ago", int(d/(24*time.Hour)))
+	}
+}
+
 // FormatStatusLine formats one task status line: id, short title, stage, last
-// matched row and its why. Full commit ids are cut to 7.
+// logged row, its age and why. Full commit ids are cut to 7.
 func FormatStatusLine(ts TaskStatus) string {
-	title := strings.Join(strings.Fields(ts.Title), " ")
+	id, title, rule, why := cmp.Or(cleanRejectWhy(ts.ID), "-"), cleanRejectWhy(ts.Title), cleanRejectWhy(ts.Rule), cmp.Or(cleanRejectWhy(ts.Why), "-")
 	if r := []rune(title); len(r) > 36 {
 		title = string(r[:35]) + "…"
 	}
-	why := cmp.Or(strings.Join(strings.Fields(ts.Why), " "), "-")
-	s := fmt.Sprintf("%-6s %-36s %-17s %-4s %s", ts.ID, title, ts.Stage, cmp.Or(ts.Rule, "-"), why)
+	age := formatAge(time.Now(), ts.At)
+	colRule, tail := cmp.Or(rule, "-"), why
+	switch {
+	case rule == "":
+	case ts.Stale && age != "":
+		colRule, tail = "-", fmt.Sprintf("(last logged %s %s) %s", rule, age, why)
+	case ts.Stale:
+		colRule, tail = "-", fmt.Sprintf("(last logged %s) %s", rule, why)
+	case age != "":
+		tail = age + " " + why
+	}
+	s := fmt.Sprintf("%-6s %-36s %-17s %-4s %s", id, title, ts.Stage, colRule, tail)
 	return fullSHA.ReplaceAllStringFunc(s, func(m string) string { return m[:7] })
 }

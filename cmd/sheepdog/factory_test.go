@@ -728,7 +728,7 @@ func TestFactoryStatusCLI(t *testing.T) {
 		t.Fatalf("status lines = %d, want 4:\n%s", len(lines), out.String())
 	}
 	graph := factory.GraphViewOf(st, logs)
-	for i, wantSub := range []string{"N1", "N23", "waiting on T2", "no pass yet"} {
+	for i, wantSub := range []string{"N1", "N23", "waiting on T2", "no logged row"} {
 		if !strings.Contains(lines[i], graph.Tasks[i].Stage) || !strings.Contains(lines[i], wantSub) {
 			t.Errorf("line %d = %q, want stage %q and %q", i, lines[i], graph.Tasks[i].Stage, wantSub)
 		}
