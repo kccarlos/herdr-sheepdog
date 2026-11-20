@@ -143,14 +143,14 @@ func TestStatusLineAgeStaleAndParkedNoLog(t *testing.T) {
 		Project:  flow.Project{ID: "proj-age", Folder: "/tmp/age", Started: true},
 		Tasks: []flow.Task{
 			{ID: "T0", Title: "feat: merged dep", Done: &flow.Merged{MergedCommit: "aaa"}},
-			{ID: "T1", Title: "feat: in ci", Attempts: []flow.Attempt{{
+			{ID: "T1", Title: "feat: in ci", LastRow: "N36", Attempts: []flow.Attempt{{
 				BaseCommit: "000", Ready: []flow.Ready{{Head: "h1"}},
 				Rounds: []flow.Round{
 					{N: 1, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
 					{N: 2, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
 				},
 			}}},
-			{ID: "T2", Title: "feat: now queued", After: []string{"T0"}},
+			{ID: "T2", Title: "feat: now queued", After: []string{"T0"}, LastRow: "N10"},
 			{ID: "T3", Title: "feat: working", Attempts: []flow.Attempt{{BaseCommit: "000", RunID: "w-3"}}},
 			{ID: "T4", Title: "feat: parked before start", Parked: true},
 		},
@@ -235,5 +235,61 @@ func TestProjectStatusSubfolderAndCorruptState(t *testing.T) {
 		if err == nil || strings.Contains(err.Error(), "no factory project") {
 			t.Errorf("ProjectStatus(corrupt, %q) err = %v, want load error", target, err)
 		}
+	}
+}
+
+func TestStatusEveryTaskRowFreshAndStage(t *testing.T) {
+	validStage := map[string]bool{
+		"done": true, "blocked_or_failed": true, "waiting_on_dep": true,
+		"queued": true, "working": true, "ci": true,
+	}
+	for _, r := range flow.LadderRows {
+		if !validStage[r.Stage] {
+			t.Errorf("LadderRows[%s].Stage = %q, want valid 4.11 stage", r.ID, r.Stage)
+		}
+	}
+	passedTask := func(id, title string) flow.Task {
+		return flow.Task{
+			ID: id, Title: title,
+			Attempts: []flow.Attempt{{
+				BaseCommit: "000", PR: 42, Ready: []flow.Ready{{Head: "h1"}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+				},
+			}},
+		}
+	}
+	now := time.Now()
+	for _, r := range flow.TaskRows {
+		t.Run(r.ID, func(t *testing.T) {
+			if !validStage[r.Stage] {
+				t.Fatalf("TaskRows[%s].Stage = %q, want valid 4.11 stage", r.ID, r.Stage)
+			}
+			task := passedTask("T1", "feat: "+r.ID)
+			switch r.ID {
+			case "N4":
+				task = passedTask("T1", "feat: closed PR")
+			case "N32":
+				task = passedTask("T1", "feat: passed task with conflict")
+			}
+			st := flow.State{
+				Settings: flow.DefaultSettings(),
+				Project:  flow.Project{ID: "proj-row", Folder: "/tmp/row", Started: true},
+				Tasks:    []flow.Task{task},
+			}
+			logs := []LogLine{{Seq: 1, At: now, By: "engine", Task: "T1", Rule: r.ID, Why: "matched " + r.ID}}
+			got := StatusViewOf(st, logs)
+			graph := GraphViewOf(st, logs)
+			if got[0].Stage != r.Stage || graph.Tasks[0].Stage != r.Stage {
+				t.Errorf("%s: status stage=%q graph stage=%q, want %q", r.ID, got[0].Stage, graph.Tasks[0].Stage, r.Stage)
+			}
+			if got[0].Stale {
+				t.Errorf("%s: Stale=true, want false (stage=%q)", r.ID, got[0].Stage)
+			}
+			if line := FormatStatusLine(got[0]); strings.Contains(line, "(last logged") || !strings.Contains(line, r.ID) {
+				t.Errorf("%s formatted = %q, want live %s line", r.ID, line, r.ID)
+			}
+		})
 	}
 }

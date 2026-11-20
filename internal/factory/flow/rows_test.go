@@ -241,6 +241,11 @@ func TestTablesCheck(t *testing.T) {
 	if err := CheckTable(TaskRows); err != nil {
 		t.Error(err)
 	}
+	for _, r := range TaskRows {
+		if r.Stage == "" {
+			t.Errorf("TaskRows[%s]: empty Stage", r.ID)
+		}
+	}
 	if err := CheckTable(LadderRows); err != nil {
 		t.Error(err)
 	}
@@ -1314,6 +1319,53 @@ func TestPRAdoptTable(t *testing.T) {
 	for _, r := range PRAdoptRows {
 		if !covered[r.ID] {
 			t.Errorf("PRAdoptRows row %s has no case", r.ID)
+		}
+	}
+}
+
+// TestN36CIStalledWake checks that checks pending past ci_stalled_minutes wake
+// the coordinator once per H, not again at the same H, and do not wake under
+// the limit or when GitHub is unanswered/unavailable.
+func TestN36CIStalledWake(t *testing.T) {
+	limit := time.Duration(DefaultSettings().CIStalledMinutes) * time.Minute
+	under := with(pending, func(in *In) { in.Now = now.Add(limit - time.Second) })
+	if r, d := FirstMatch(TaskRows, under); r.ID != "N36" || len(d.Asked) != 0 {
+		t.Fatalf("pending under ci_stalled_minutes: %s %v, want N36 nil", r.ID, d.Asked)
+	}
+	stalled := with(pending, func(in *In) { in.Now = now.Add(limit) })
+	wantWake := "wake_coordinator@ci_stalled@c1"
+	if r, d := FirstMatch(TaskRows, stalled); r.ID != "N36" || !slices.Equal(d.Asked, []string{wantWake}) {
+		t.Fatalf("pending at ci_stalled_minutes: %s %v, want N36 [%s]", r.ID, d.Asked, wantWake)
+	}
+	// Repeat at same H after wake recorded -> no second wake.
+	a0(&stalled).Acts = append(a0(&stalled).Acts, Act{Key: wantWake, Result: "done", At: stalled.Now})
+	if r, d := FirstMatch(TaskRows, stalled); r.ID != "N36" || len(d.Asked) != 0 {
+		t.Fatalf("pending repeat at same H: %s %v, want N36 nil", r.ID, d.Asked)
+	}
+	// New H past ci_stalled_minutes -> wakes once for the new H.
+	newH := with(pending, func(in *In) {
+		a0(in).Acts = []Act{{Key: wantWake, Result: "done", At: now}}
+		a0(in).Ready = append(a0(in).Ready, Ready{Head: "c2"})
+		a0(in).Rounds = append(a0(in).Rounds,
+			Round{N: 3, Kind: RoundFull, Head: "c2", Verdict: VerdictPass},
+			Round{N: 4, Kind: RoundFull, Head: "c2", Verdict: VerdictPass},
+		)
+		in.Facts.Tip, in.Facts.PR.Head = "c2", "c2"
+		in.Settings.CIStalledMinutes = CIStalledMin
+		in.Now = now.Add(time.Duration(CIStalledMin) * time.Minute)
+	})
+	if r, d := FirstMatch(TaskRows, newH); r.ID != "N36" || !slices.Equal(d.Asked, []string{"wake_coordinator@ci_stalled@c2"}) {
+		t.Fatalf("pending at new H past ci_stalled_minutes: %s %v, want N36 wake for c2", r.ID, d.Asked)
+	}
+	// Unanswered, unavailable, or zero HeadSince never fires ci_stalled.
+	for name, f := range map[string]func(*In){
+		"unanswered":    noAnswer,
+		"githubUnavail": func(in *In) { in.Facts.GitHubUnavailable = true },
+		"zeroHeadSince": func(in *In) { in.Facts.PR.HeadSince = time.Time{} },
+	} {
+		in := with(pending, func(in *In) { in.Now = now.Add(limit) }, f)
+		if r, d := FirstMatch(TaskRows, in); r.ID != "N36" || len(d.Asked) != 0 {
+			t.Errorf("%s: %s %v, want N36 nil", name, r.ID, d.Asked)
 		}
 	}
 }

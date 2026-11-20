@@ -103,6 +103,7 @@ type Task struct {
 	Dropped       *Dropped  `json:"dropped,omitempty"`
 	Split         *Split    `json:"split,omitempty"`
 	Parked        bool      `json:"parked,omitempty"`
+	LastRow       string    `json:"last_row,omitempty"`
 	Recaps        []Recap   `json:"recaps,omitempty"`
 	Acts          []Act     `json:"acts,omitempty"`
 	Attempts      []Attempt `json:"attempts"`

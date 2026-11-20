@@ -63,19 +63,9 @@ type TaskStatus struct {
 	Stale                       bool
 }
 
-var ruleStage = map[string]string{
-	"N1": "done", "N2": "done",
-	"S1": "blocked_or_failed", "S2": "blocked_or_failed",
-	"N3": "blocked_or_failed", "N4": "blocked_or_failed", "N6": "blocked_or_failed", "N7": "blocked_or_failed", "N8": "blocked_or_failed",
-	"N12": "blocked_or_failed", "N25": "blocked_or_failed", "N43": "blocked_or_failed",
-	"N9": "waiting_on_dep", "N10": "queued", "N11": "queued",
-	"N20": "working", "N22": "working", "N23": "working", "N26": "working", "N29": "working", "N39": "working",
-	"N33": "ci", "N34": "ci", "N35": "ci", "N36": "ci", "N38": "ci", "N41": "ci", "N42": "ci",
-}
-
 // StatusViewOf derives each task's status from stored state and log.jsonl.
-// Stage comes from GraphViewOf so `sheepdog factory status` and `/factory`
-// always agree from one function.
+// Stage comes from the rows via GraphViewOf so `sheepdog factory status`,
+// `/factory`, and the stale check always agree from one source.
 func StatusViewOf(s flow.State, logs []LogLine) []TaskStatus {
 	lastLog, lastRow := lastTaskRows(logs)
 	g := graphViewOf(s, lastLog, lastRow)
@@ -87,7 +77,7 @@ func StatusViewOf(s flow.State, logs []LogLine) []TaskStatus {
 		}
 		ts := TaskStatus{ID: tv.Ref, Title: tv.Title, Stage: tv.Stage, Why: why}
 		if l, ok := lastRow[tv.Ref]; ok {
-			ts.Rule, ts.Why, ts.At, ts.Stale = l.Rule, l.Why, l.At, ruleStage[l.Rule] != tv.Stage
+			ts.Rule, ts.Why, ts.At, ts.Stale = l.Rule, l.Why, l.At, taskRows[l.Rule].Stage != tv.Stage
 		}
 		out[i] = ts
 	}

@@ -422,6 +422,8 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	}
 	now := time.Now()
 	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[ti], Settings: s.Settings, Facts: facts, Now: now})
+	rowChanged := s.Tasks[ti].LastRow != r.ID
+	s.Tasks[ti].LastRow = r.ID
 	waitKey := id + "/" + s.Tasks[ti].ID
 	if r.ID != "N9" && r.ID != "N10" && r.ID != "N38" {
 		delete(e.waits, waitKey)
@@ -438,6 +440,11 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		}
 	}
 	if len(d.Asked) == 0 {
+		if rowChanged {
+			if err := SaveState(e.Paths.State(id), *s); err != nil {
+				e.logError("factory.commit_error", id, err)
+			}
+		}
 		return
 	}
 	var decs []string
