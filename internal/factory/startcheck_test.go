@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -51,6 +52,7 @@ func runStart(t *testing.T, workflow string, over startFake) map[string]onboard.
 		"gh repo view o/r --json defaultBranchRef,viewerPermission": out(repoView),
 		"gh api repos/o/r/branches/main/protection":                 {Exit: 1, Stderr: "HTTP 404: Branch not protected"},
 		"gh api repos/o/r/rules/branches/main":                      out("[]"),
+		"fetch --prune origin":                                      out(""),
 	}
 	if workflow == "" {
 		delete(f, "ls-tree --name-only origin/main .github/workflows/")
@@ -104,6 +106,10 @@ func TestStartChecksStatuses(t *testing.T) {
 		{"free plan has no rulesets", goodWorkflow, startFake{"rules/branches/main": {Exit: 1, Stderr: "HTTP 403: Upgrade to GitHub Pro or make this repository public to enable this feature."}}, "review rule", onboard.OK},
 		{"rulesets unreadable", goodWorkflow, startFake{"rules/branches/main": {Exit: 1, Stderr: "HTTP 500"}}, "review rule", onboard.Warn},
 		{"branch 404 is not unprotected", goodWorkflow, startFake{"gh api repos/o/r/branches/main": {Exit: 1, Stderr: "HTTP 404"}}, "review rule", onboard.Warn},
+		{"fetch fails", goodWorkflow, startFake{"fetch --prune origin": {Exit: 128, Stderr: "could not read Username"}}, "start fetch", onboard.Warn},
+		{"ruleset-only protection gives no warn", goodWorkflow, startFake{"gh api repos/o/r/branches/main": out(`{"protected":true}`)}, "review rule", onboard.OK},
+		{"classic code-owner review", goodWorkflow, startFake{"gh api repos/o/r/branches/main": out(`{"protected":true}`), "branches/main/protection": out(`{"required_pull_request_reviews":{"required_approving_review_count":0,"require_code_owner_reviews":true}}`)}, "review rule", onboard.Fail},
+		{"ruleset code-owner review", goodWorkflow, startFake{"rules/branches/main": out(`[{"type":"pull_request","parameters":{"required_approving_review_count":0,"require_code_owner_review":true}}]`)}, "review rule", onboard.Fail},
 		{"workflow only on disk", "", nil, "pr workflow", onboard.Fail},
 		{"workflow on another remote branch only", goodWorkflow, startFake{"ls-tree --name-only origin/main .github/workflows/": {Exit: 1}}, "pr workflow", onboard.Fail},
 		{"no origin, two remotes", goodWorkflow, startFake{"remote": out("mine\nfork")}, "github remote", onboard.Fail},
@@ -175,5 +181,23 @@ func TestStartChecksWorkflowIgnoresDisk(t *testing.T) {
 		if r.Name == "pr workflow" && r.Status != onboard.Fail {
 			t.Fatalf("pr workflow = %+v", r)
 		}
+	}
+}
+
+// TestStartChecksGitNeverPrompts: every git call runs with prompts off.
+func TestStartChecksGitNeverPrompts(t *testing.T) {
+	git := 0
+	run := func(_ context.Context, _ string, env []string, argv ...string) CommandOutput {
+		if argv[0] == "git" {
+			git++
+			if !slices.Contains(env, "GIT_TERMINAL_PROMPT=0") || !slices.Contains(env, "GIT_ASKPASS=") {
+				t.Errorf("git %v ran with env %v", argv, env)
+			}
+		}
+		return CommandOutput{Stdout: "origin"}
+	}
+	StartChecks(context.Background(), DoctorOptions{Folder: t.TempDir(), RunCommand: run})
+	if git == 0 {
+		t.Fatal("no git call seen")
 	}
 }

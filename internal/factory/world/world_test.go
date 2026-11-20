@@ -1281,3 +1281,14 @@ func TestChangedLinesTimeoutReturnsDeadlineExceeded(t *testing.T) {
 		t.Fatalf("ChangedLines under hung git diff = %v in %s, want context.DeadlineExceeded killed mid-run", err, elapsed)
 	}
 }
+
+func TestPushRemote(t *testing.T) {
+	for _, c := range []struct {
+		names []string
+		want  string
+	}{{nil, ""}, {[]string{"a"}, "a"}, {[]string{"a", "b"}, ""}, {[]string{"a", "origin"}, "origin"}} {
+		if got := PushRemote(c.names); got != c.want {
+			t.Errorf("PushRemote(%v) = %q, want %q", c.names, got, c.want)
+		}
+	}
+}

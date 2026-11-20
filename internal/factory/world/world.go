@@ -479,15 +479,25 @@ func realPath(p string) string {
 	return p
 }
 
+// PushRemote picks the remote the engine pushes to: origin, else the only
+// remote, else "" (none).
+func PushRemote(names []string) string {
+	switch {
+	case slices.Contains(names, "origin"):
+		return "origin"
+	case len(names) == 1:
+		return names[0]
+	}
+	return ""
+}
+
 func remoteBaseCommit(ctx context.Context, repo string, fetch bool) (string, string, error) {
 	out, err := gitCmd(ctx, repo, "remote")
 	if err != nil {
 		return "", "", err
 	}
-	names, remote := strings.Fields(out), "origin"
-	if !slices.Contains(names, "origin") && len(names) == 1 {
-		remote = names[0]
-	} else if !slices.Contains(names, "origin") {
+	remote := PushRemote(strings.Fields(out))
+	if remote == "" {
 		return "", "", fmt.Errorf("world: no unique git remote in %s", repo)
 	}
 	if fetch {
