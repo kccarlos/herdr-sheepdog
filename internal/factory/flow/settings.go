@@ -2,7 +2,10 @@ package flow
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -121,7 +124,7 @@ func (s Settings) Changed() []string {
 		out = append(out, "dispatch_workflow "+s.DispatchWorkflow)
 	}
 	if len(s.Models) > 0 {
-		out = append(out, "models "+modelRoles(s.Models))
+		out = append(out, "models "+strings.Join(slices.Sorted(maps.Keys(s.Models)), ","))
 	}
 	return out
 }

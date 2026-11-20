@@ -8,14 +8,19 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -45,6 +50,10 @@ var verbRoles = map[string]string{
 // Report is the acceptance step for everything a run's terminal sends: the
 // token names the run, and through it the role and the project.
 func (e *Engine) Report(token, verb string, args json.RawMessage) error {
+	var facts flow.ResolveFacts
+	if clis := e.planProbeCLIs(token, verb, args); len(clis) > 0 {
+		facts = planResolveFacts(context.Background(), clis)
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	want, ok := verbRoles[verb]
@@ -68,18 +77,18 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 		return e.acceptReadyLocked(id, &s, role, ti, args)
 	}
 	if verb == "recap decide" {
-		return e.acceptRecapDecideLocked(id, &s, role, args)
+		return e.acceptRecapDecideLocked(id, &s, role, args, facts)
 	}
 	if verb == "task" {
 		return e.acceptTaskLocked(id, &s, role, args)
 	}
 	if verb == "plan amend" {
-		return e.acceptAmendLocked(id, &s, role, args)
+		return e.acceptAmendLocked(id, &s, role, args, facts)
 	}
 	if len(s.Tasks) > 0 {
 		return e.refuse(id, "plan_exists", "A plan already exists; change it with plan amend.")
 	}
-	tasks, fails := checkPlanWith(args, nil, "", s.Settings)
+	tasks, fails := checkPlanWith(args, nil, "", s.Settings, facts)
 	if len(fails) > 0 {
 		return e.refuse(id, "plan_invalid", strings.Join(fails, "; ")+".")
 	}
@@ -647,11 +656,6 @@ type planFile struct {
 	Tasks []planTask `json:"tasks"`
 }
 
-// checkPlan runs the Shape check of design.md 11.7 and returns every failure.
-func checkPlan(raw json.RawMessage, limit int) ([]flow.Task, []string) {
-	return checkPlanWith(raw, nil, "", flow.Settings{TaskSizeLimit: limit})
-}
-
 // checkPriority validates the optional plan priority field (design.md 3, 4.10).
 func checkPriority(id, raw string) (string, []string) {
 	p := strings.TrimSpace(raw)
@@ -675,7 +679,7 @@ func checkEstimate(id string, est, limit int) []string {
 
 var validTaskID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
 
-func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, s flow.Settings) ([]flow.Task, []string) {
+func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, s flow.Settings, facts flow.ResolveFacts) ([]flow.Task, []string) {
 	var p planFile
 	var fails []string
 	dec := json.NewDecoder(bytes.NewReader(raw))
@@ -749,7 +753,7 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, s
 		fails = append(fails, fmt.Sprintf("shape: the after links make a cycle through %q", id))
 	}
 	if len(fails) == 0 && len(tasks) > 0 {
-		fails = checkTasksLaunch(tasks, s)
+		fails = checkTasksLaunch(tasks, s, facts)
 	}
 	return tasks, fails
 }
@@ -776,7 +780,7 @@ func replaceDep(after []string, old string, repl []string) []string {
 	return out
 }
 
-func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, args json.RawMessage) error {
+func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, args json.RawMessage, facts flow.ResolveFacts) error {
 	var req struct {
 		Task     string            `json:"task"`
 		Choice   string            `json:"choice"`
@@ -879,7 +883,7 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 	raw, _ := json.Marshal(struct {
 		Tasks []json.RawMessage `json:"tasks"`
 	}{Tasks: req.Children})
-	children, fails := checkPlanWith(raw, s.Tasks, t.ID, s.Settings)
+	children, fails := checkPlanWith(raw, s.Tasks, t.ID, s.Settings, facts)
 	if len(fails) > 0 {
 		return e.refuse(id, "plan_invalid", strings.Join(fails, "; ")+".")
 	}
@@ -976,7 +980,7 @@ type amendTask struct {
 // ended task is not changed. A changed brief or outcomes is a boundary:
 // earlier rounds stop covering, an in-flight review is stopped, and an open
 // recap may then decide new. A live worker is told once what changed.
-func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args json.RawMessage) error {
+func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args json.RawMessage, facts flow.ResolveFacts) error {
 	var req struct {
 		Why   string            `json:"why"`
 		Tasks []json.RawMessage `json:"tasks"`
@@ -1000,6 +1004,7 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		outcomes []flow.Outcome
 		after    []string
 		priority string
+		request  map[string][]flow.Candidate
 	}
 	var changes []change
 	var fresh []json.RawMessage
@@ -1022,7 +1027,7 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 			fails = append(fails, fmt.Sprintf("task %q has ended and is not changed", s.Tasks[ti].ID))
 			continue
 		}
-		before, outs, after, prio := len(fails), []flow.Outcome(nil), []string(nil), ""
+		before, outs, after, prio, reqMap := len(fails), []flow.Outcome(nil), []string(nil), "", map[string][]flow.Candidate(nil)
 		if c.Title != nil {
 			fails = append(fails, checkTitle(s.Tasks[ti].ID, *c.Title)...)
 		}
@@ -1051,18 +1056,25 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 			if err := flow.ValidateCandidates("request", *c.Request); err != nil {
 				fails = append(fails, fmt.Sprintf("shape: task %q %s", s.Tasks[ti].ID, err))
 			} else {
-				reqTasks = append(reqTasks, flow.Task{ID: s.Tasks[ti].ID, Request: *c.Request})
+				if len(*c.Request) > 0 {
+					reqMap = make(map[string][]flow.Candidate, len(s.Tasks[ti].Request)+len(*c.Request))
+					maps.Copy(reqMap, s.Tasks[ti].Request)
+					maps.Copy(reqMap, *c.Request)
+				}
+				merged := s.Tasks[ti]
+				merged.Request = reqMap
+				reqTasks = append(reqTasks, merged)
 			}
 		}
 		if len(fails) == before {
-			changes = append(changes, change{ti, c, outs, after, prio})
+			changes = append(changes, change{ti, c, outs, after, prio, reqMap})
 		}
 	}
 	var added []flow.Task
 	if len(fresh) > 0 {
 		raw, _ := json.Marshal(map[string]any{"tasks": fresh})
 		var f []string
-		added, f = checkPlanWith(raw, s.Tasks, "", s.Settings)
+		added, f = checkPlanWith(raw, s.Tasks, "", s.Settings, facts)
 		fails = append(fails, f...)
 	}
 	if slices.ContainsFunc(changes, func(ch change) bool { return ch.c.After != nil }) {
@@ -1089,7 +1101,7 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		}
 	}
 	if len(fails) == 0 && len(reqTasks) > 0 {
-		fails = checkTasksLaunch(reqTasks, s.Settings)
+		fails = checkTasksLaunch(reqTasks, s.Settings, facts)
 	}
 	if len(fails) > 0 {
 		return e.refuse(id, "plan_invalid", strings.Join(fails, "; ")+".")
@@ -1114,8 +1126,8 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		if c.Priority != nil && ch.priority != t.Priority {
 			t.Priority, what = ch.priority, append(what, "priority")
 		}
-		if c.Request != nil {
-			t.Request, what = *c.Request, append(what, "request")
+		if c.Request != nil && !reflect.DeepEqual(ch.request, t.Request) {
+			t.Request, what = ch.request, append(what, "request")
 		}
 		a := flow.OpenAttempt(*t)
 		var capNote string
@@ -1152,10 +1164,11 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 			continue
 		}
 		done = append(done, t.ID+" ("+strings.Join(what, ", ")+")"+capNote)
-		if a != nil && a.RunID != "" {
+		workerWhat := slices.DeleteFunc(slices.Clone(what), func(f string) bool { return f == "request" })
+		if a != nil && a.RunID != "" && len(workerWhat) > 0 {
 			rc := readyCmd(cmp.Or(e.Bin, "sheepdog"), t.Outcomes)
 			msg := fmt.Sprintf("The plan changed for task %s (%s): %s\nTitle: %s\nBrief:\n%s\nOutcomes:\n%s\nEarlier review rounds no longer count. If your work must change, commit and run %s again; otherwise wait.",
-				t.ID, strings.Join(what, ", "), why, t.Title, cmp.Or(strings.TrimSpace(t.Brief), "(none)"), bullets(t.Outcomes), rc)
+				t.ID, strings.Join(workerWhat, ", "), why, t.Title, cmp.Or(strings.TrimSpace(t.Brief), "(none)"), bullets(t.Outcomes), rc)
 			if err := world.SendRun(ctx, e.HC, a.RunID, msg); err != nil { // a restarted worker reads the new plan anyway
 				e.logError("factory.exec_error", id, err)
 			}
@@ -1197,12 +1210,74 @@ func cycleAt(ids []string, after map[string][]string) string {
 	return ""
 }
 
+var cliProbeArgv = map[string][]string{
+	"claude": {"claude", "auth", "status", "--json"},
+	"codex":  {"codex", "login", "status"},
+	"agy":    {"agy", "models"},
+}
+
 // planResolveFacts supplies non-quota CLI facts for plan launch checks
 // (design.md 9.1, 11.7). Tests override it so no real CLI or network is called.
-var planResolveFacts = probeResolveFacts
+var planResolveFacts = func(ctx context.Context, clis []string) flow.ResolveFacts {
+	return probeResolveFacts(ctx, clis, DoctorOptions{})
+}
 
-func checkTasksLaunch(tasks []flow.Task, s flow.Settings) []string {
-	facts, fails := planResolveFacts(context.Background()), []string(nil)
+func (e *Engine) planProbeCLIs(token, verb string, args json.RawMessage) []string {
+	if verb != "plan apply" && verb != "plan amend" && verb != "recap decide" {
+		return nil
+	}
+	e.mu.Lock()
+	id, s, role, ti := e.runByTokenLocked(token)
+	e.mu.Unlock()
+	var req struct {
+		Choice          string
+		Tasks, Children []amendTask
+	}
+	if id == "" || role != flow.RoleCoordinator || (ti >= 0 && flow.Ended(s.Tasks[ti])) || json.Unmarshal(args, &req) != nil {
+		return nil
+	}
+	if verb == "recap decide" && strings.TrimSpace(req.Choice) == "split" {
+		req.Tasks = req.Children
+	} else if verb == "recap decide" || (verb == "plan apply" && len(s.Tasks) > 0) {
+		return nil
+	}
+	seen, hasReq := map[string]bool{}, len(s.Settings.Models) > 0
+	add := func(m map[string][]flow.Candidate) {
+		for _, cs := range m {
+			for _, c := range cs {
+				if cli := strings.TrimSpace(c.CLI); cliProbeArgv[cli] != nil {
+					seen[cli] = true
+				}
+			}
+		}
+	}
+	for _, c := range req.Tasks {
+		if c.Request == nil {
+			continue
+		}
+		hasReq = true
+		add(*c.Request)
+		if idx := slices.IndexFunc(s.Tasks, func(x flow.Task) bool { return x.ID == strings.TrimSpace(c.ID) }); verb == "plan amend" && idx >= 0 {
+			add(s.Tasks[idx].Request)
+		}
+	}
+	if !hasReq || len(req.Tasks) == 0 {
+		return nil
+	}
+	add(s.Settings.Models)
+	for r, cs := range flow.DefaultModels(s.Settings) {
+		if r != flow.RoleCoordinator && len(s.Settings.Models[r]) == 0 {
+			add(map[string][]flow.Candidate{r: cs})
+		}
+	}
+	return slices.Sorted(maps.Keys(seen))
+}
+
+func checkTasksLaunch(tasks []flow.Task, s flow.Settings, facts flow.ResolveFacts) []string {
+	if len(facts.CLIs) == 0 {
+		return nil
+	}
+	var fails []string
 	for _, t := range tasks {
 		f, roles := facts, []string{flow.RoleReviewer}
 		for role := range t.Request {
@@ -1222,22 +1297,65 @@ func checkTasksLaunch(tasks []flow.Task, s flow.Settings) []string {
 	return fails
 }
 
-func probeResolveFacts(ctx context.Context) flow.ResolveFacts {
-	o, clis := (DoctorOptions{}).withDefaults(), map[string]flow.CLIFacts{}
-	for cli, argv := range map[string][]string{"claude": {"claude", "auth", "status", "--json"}, "codex": {"codex", "login", "status"}, "agy": {"agy", "models"}} {
-		c := o.run(ctx, o.TempDir, argv...)
-		f := flow.CLIFacts{Installed: c.Err == nil && c.Exit != 127}
-		if f.Installed && cli == "claude" {
-			f.SignedIn = claudeLoggedIn(c)
-		} else if f.Installed && cli == "codex" {
-			f.SignedIn = codexLoggedIn(c)
-		} else if ms := parseAgyModels(c.Stdout); f.Installed && cmdOK(c) && len(ms) > 0 {
-			f.SignedIn, f.Models = true, map[string]bool{}
-			for _, m := range ms {
-				f.Models[m] = true
-			}
+func probeResolveFacts(ctx context.Context, clis []string, opts DoctorOptions) flow.ResolveFacts {
+	o := opts.withDefaults()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out := make(map[string]flow.CLIFacts, len(clis))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, cli := range clis {
+		if argv := cliProbeArgv[cli]; len(argv) > 0 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				var env []string
+				if cli == "claude" {
+					env = []string{"DISABLE_AUTOUPDATER=1"}
+				}
+				f := classifyProbe(cli, o.RunCommand(ctx, o.TempDir, env, argv...))
+				mu.Lock()
+				out[cli] = f
+				mu.Unlock()
+			}()
 		}
-		clis[cli] = f
 	}
-	return flow.ResolveFacts{CLIs: clis}
+	wg.Wait()
+	return flow.ResolveFacts{CLIs: out}
+}
+
+func classifyProbe(cli string, c CommandOutput) flow.CLIFacts {
+	if c.Exit == 127 || errors.Is(c.Err, exec.ErrNotFound) || errors.Is(c.Err, os.ErrNotExist) {
+		return flow.CLIFacts{}
+	}
+	if c.TimedOut || c.Err != nil {
+		return flow.CLIFacts{Unknown: true}
+	}
+	out := strings.ToLower(c.Stdout + "\n" + c.Stderr)
+	switch cli {
+	case "claude":
+		var st struct {
+			LoggedIn *bool `json:"loggedIn"`
+		}
+		if json.Unmarshal([]byte(strings.TrimSpace(c.Stdout)), &st) == nil && st.LoggedIn != nil {
+			return flow.CLIFacts{Installed: true, SignedIn: *st.LoggedIn}
+		}
+	case "codex":
+		if strings.Contains(out, "not logged in") {
+			return flow.CLIFacts{Installed: true}
+		}
+	case "agy":
+		if ms := parseAgyModels(c.Stdout); c.Exit == 0 && len(ms) > 0 {
+			models := make(map[string]bool, len(ms))
+			for _, m := range ms {
+				models[m] = true
+			}
+			return flow.CLIFacts{Installed: true, SignedIn: true, Models: models}
+		}
+		if c.Exit != 0 && (strings.Contains(out, "sign in") || strings.Contains(out, "logged in") || strings.Contains(out, "unauthenticated")) {
+			return flow.CLIFacts{Installed: true}
+		}
+		return flow.CLIFacts{Unknown: true}
+	}
+	return flow.CLIFacts{Installed: c.Exit == 0, SignedIn: c.Exit == 0, Unknown: c.Exit != 0}
 }

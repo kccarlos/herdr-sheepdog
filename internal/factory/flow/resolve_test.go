@@ -16,7 +16,7 @@ func TestResolveFirstCandidateWins(t *testing.T) {
 		RoleWorker: {{CLI: "codex", Model: "gpt-6.2-sol", Effort: "high"}, {CLI: "claude", Model: "sonnet", Effort: "medium"}},
 	}}
 	in, why := Resolve(RoleWorker, task, DefaultSettings(), allCLIsSignedIn())
-	want := Intent{Role: RoleWorker, CLI: "codex", Model: "gpt-6.2-sol", Effort: "high", Perm: PermWorktree, Continue: ContinueFresh}
+	want := Intent{Role: RoleWorker, CLI: "codex", Model: "gpt-6.2-sol", Effort: "high", Perm: PermFull, Continue: ContinueFresh}
 	if why != "" || in != want {
 		t.Fatalf("Resolve = (%+v, %q), want (%+v, \"\")", in, why, want)
 	}
@@ -104,7 +104,7 @@ func TestResolveDefaultsMatchToday(t *testing.T) {
 		t.Fatalf("coordinator default = (%+v, %q)", cIn, why)
 	}
 	wIn, why := Resolve(RoleWorker, Task{}, def, facts)
-	if why != "" || wIn != (Intent{RoleWorker, "claude", "sonnet", "medium", PermWorktree, ContinueFresh}) {
+	if why != "" || wIn != (Intent{RoleWorker, "claude", "sonnet", "medium", PermFull, ContinueFresh}) {
 		t.Fatalf("worker default = (%+v, %q)", wIn, why)
 	}
 	facts.Worker = Candidate{CLI: wIn.CLI, Model: wIn.Model, Effort: wIn.Effort}
@@ -145,5 +145,45 @@ func TestSettingsModelsValidation(t *testing.T) {
 	}
 	if _, why := Resolve("boss", Task{}, DefaultSettings(), allCLIsSignedIn()); !strings.Contains(why, "unknown role") {
 		t.Fatalf("Resolve(unknown role) = %q", why)
+	}
+}
+
+func TestResolveWorkerDesignerPermFull(t *testing.T) {
+	s := DefaultSettings()
+	s.Models = map[string][]Candidate{RoleDesigner: {{CLI: "claude", Model: "opus", Effort: "medium"}}}
+	for _, role := range []string{RoleWorker, RoleDesigner} {
+		in, why := Resolve(role, Task{}, s, allCLIsSignedIn())
+		if why != "" || in.Perm != PermFull {
+			t.Fatalf("Resolve(%s) = (%+v, %q), want Perm=%q", role, in, why, PermFull)
+		}
+	}
+}
+
+func TestValidateCandidatesTrimsAndRefusesCoordinator(t *testing.T) {
+	m := map[string][]Candidate{RoleWorker: {{CLI: " claude ", Model: " sonnet ", Effort: " high "}}}
+	if err := ValidateCandidates("models", m); err != nil {
+		t.Fatalf("ValidateCandidates with spaces = %v, want nil", err)
+	}
+	if got := m[RoleWorker][0]; got != (Candidate{CLI: "claude", Model: "sonnet", Effort: "high"}) {
+		t.Fatalf("trimmed candidate = %+v, want trimmed fields", got)
+	}
+	req := map[string][]Candidate{RoleCoordinator: {{CLI: "claude", Model: "opus", Effort: "medium"}}}
+	if err := ValidateCandidates("request", req); err == nil {
+		t.Fatal("ValidateCandidates(request, coordinator) = nil, want error")
+	}
+}
+
+func TestResolveUnknownDoesNotRefuse(t *testing.T) {
+	facts := ResolveFacts{CLIs: map[string]CLIFacts{"codex": {Unknown: true}}}
+	s := DefaultSettings()
+	s.Models = map[string][]Candidate{RoleWorker: {{CLI: "codex", Model: "gpt-6.2-sol", Effort: "medium"}}}
+	if in, why := Resolve(RoleWorker, Task{}, s, facts); why != "" || in.CLI != "codex" {
+		t.Fatalf("Resolve(unknown) = (%+v, %q), want codex with no error", in, why)
+	}
+	// Reviewer-differs still applies even when CLI sign-in is unknown.
+	facts.Worker = Candidate{CLI: "codex", Model: "gpt-6.2-sol"}
+	s.Models[RoleReviewer] = []Candidate{{CLI: "codex", Model: "gpt-6.2-sol", Effort: "medium"}}
+	if _, why := Resolve(RoleReviewer, Task{}, s, facts); why != "the reviewer must differ from the worker" {
+		t.Fatalf("Resolve(reviewer unknown same as worker) = %q", why)
 	}
 }
