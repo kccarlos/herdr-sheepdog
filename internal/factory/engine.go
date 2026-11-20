@@ -282,6 +282,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		e.logError("factory.hc_error", id, coordErr)
 	}
 	e.observeBaseLocked(ctx, id, &s)
+	e.sweepProjectLocked(ctx, id, &s)
 	baseTried := s.Project.Base != nil && s.Project.Base.Red && flow.Done(s.Project.Acts, flow.AskTellBaseRed+"@"+s.Project.Base.SpellID)
 	var candidates []string
 	workerRun, workerState, workerErr := map[string]flow.Run{}, map[string]flow.RunState{}, map[string]error{}

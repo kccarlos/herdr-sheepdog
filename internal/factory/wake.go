@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -119,4 +120,29 @@ func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.Stat
 	}
 	s.Project.Wakes = nil
 	e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "J12", Asked: keys, Decision: fmt.Sprintf("delivered %d wake(s) to the coordinator", len(keys)), Why: "wakes held and the coordinator is idle"})
+}
+
+func (e *Engine) sweepProjectLocked(ctx context.Context, id string, s *flow.State) {
+	now := e.now()
+	if last := flow.LastAct(s.Project.Acts, "sweep"); last != nil && now.Sub(last.At) < 10*time.Minute {
+		return
+	}
+	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
+	probes := world.Sweep(gctx, e.HC, s.Project.Folder, filepath.Join(e.Paths.project(id), "worktrees"), *s)
+	cancel()
+	for _, p := range probes {
+		e.logOnce("factory.sweep_unknown", id, p.Probe, map[bool]error{true: fmt.Errorf("%s", p.Unknown)}[p.Unknown != ""])
+	}
+	s.Project.Acts = append(slices.DeleteFunc(s.Project.Acts, func(a flow.Act) bool { return a.Key == "sweep" }), flow.Act{Key: "sweep", Result: "done", At: now})
+	var asked, whys []string
+	for _, w := range flow.SweepWakes(s.Project.Acts, probes) {
+		s.Project.Acts = append(s.Project.Acts, flow.Act{Key: w.ActKey, Result: "done", At: now})
+		holdProjectWake(s, w.WakeKey, "sweep: "+w.Summary, w.Summary, now)
+		asked, whys = append(asked, w.ActKey), append(whys, w.Summary)
+	}
+	if len(asked) > 0 {
+		e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "sweep", Asked: asked, Decision: fmt.Sprintf("sweep found %d leftover(s): %s", len(asked), strings.Join(whys, "; ")), Why: strings.Join(whys, "; ")})
+	} else {
+		e.saveLocked(id, *s)
+	}
 }
