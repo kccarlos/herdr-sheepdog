@@ -178,8 +178,9 @@ func checkSweepLeftovers(ctx context.Context, o DoctorOptions, hcOK bool, dir st
 		return nil
 	}
 	s, wtRoot, p, stateWhy, client := flow.State{}, "", Paths{DataDir: o.DataDir}, "", (*hc.Client)(nil)
+	var findErr error
 	if o.DataDir != "" && id == "" {
-		id, _ = findStoredProject(p, repo)
+		id, findErr = findStoredProject(p, repo)
 	}
 	if id != "" && o.DataDir != "" {
 		if loaded, lerr := LoadState(p.State(id)); lerr != nil {
@@ -192,6 +193,8 @@ func checkSweepLeftovers(ctx context.Context, o DoctorOptions, hcOK bool, dir st
 		}
 	} else if id != "" {
 		stateWhy = "no data dir to load factory state for " + id
+	} else if findErr != nil && !strings.HasPrefix(findErr.Error(), "no factory project for ") {
+		out = append(out, resWarn("sweep", "unknown: "+cleanReason(findErr.Error()), "check leftovers manually"))
 	} else {
 		out = append(out, resSkip("sweep", "leftover checks skipped: this folder has no factory project yet"))
 	}

@@ -451,11 +451,52 @@ func TestDoctorNoStateReportsUnknownNeverItemsAndRunsLocalBase(t *testing.T) {
 			t.Errorf("missing leftover local_base in %+v", rs)
 		}
 	})
+
+	t.Run("no git project id with damaged state.json", func(t *testing.T) {
+		repo, _ := makeRepo(false)
+		corruptPaths := Paths{DataDir: t.TempDir()}
+		if err := os.MkdirAll(filepath.Dir(corruptPaths.State("proj-corrupt")), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(corruptPaths.State("proj-corrupt"), []byte("{corrupt"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		srv := hctest.New(t)
+		srv.OnRun = func(term hc.Terminal, _ hc.RunParams) { srv.FinishExit(term.Address, "exited", 0) }
+		rs := Doctor(ctx, DoctorOptions{
+			Folder: repo, HCSocket: srv.Path, DataDir: corruptPaths.DataDir, Canary: false,
+			TempDir: t.TempDir(), LookPath: env.lookPath, RunCommand: env.run,
+			VolumeTimeout: time.Second, AuthTimeout: time.Second,
+		})
+		var warnCount int
+		var gotLocalBase bool
+		for _, r := range rs {
+			switch r.Name {
+			case "sweep":
+				if r.Status != onboard.Warn || !strings.Contains(r.Detail, "load project proj-corrupt") {
+					t.Errorf("sweep = %+v, want Warn with load project error", r)
+				}
+				warnCount++
+			case "sweep terminals", "sweep worktrees", "sweep branches":
+				t.Errorf("unexpected per-probe sweep result: %+v", r)
+			case "leftover local_base":
+				if strings.Contains(r.Detail, "1 commit ahead") {
+					gotLocalBase = true
+				}
+			}
+		}
+		if warnCount != 1 {
+			t.Errorf("sweep warn count = %d, want 1 (%+v)", warnCount, rs)
+		}
+		if !gotLocalBase {
+			t.Errorf("missing leftover local_base in %+v", rs)
+		}
+	})
 }
 
 func TestDoctorUnreachableHCReportsSingleStrayTerminalWarn(t *testing.T) {
 	ctx := context.Background()
-	repo, id, paths, srv, _, _, _ := setupSweepRepo(t)
+	repo, _, paths, srv, _, _, _ := setupSweepRepo(t)
 	srv.Close()
 
 	for _, tc := range []struct {
@@ -486,7 +527,6 @@ func TestDoctorUnreachableHCReportsSingleStrayTerminalWarn(t *testing.T) {
 			if r.Status != onboard.Warn || !strings.Contains(r.Detail, tc.wantSub) || strings.TrimPrefix(r.Detail, "unknown: ") == "" {
 				t.Fatalf("sweep terminals = %+v, want Warn containing %q with reason", r, tc.wantSub)
 			}
-			_ = id
 		})
 	}
 }
