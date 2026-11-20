@@ -18,21 +18,31 @@ type Settings struct {
 	RetroFromRound             int `json:"retro_from_round"`               // L12 (design.md 10.1)
 	ChecksGraceMinutes         int `json:"checks_grace_minutes"`           // N36 (design.md 10.1)
 	StuckMinutes               int `json:"stuck_minutes"`                  // S2, until slice 5a (design.md 10.1)
+	ContinuesPerTask           int `json:"continues_per_task"`             // a recap's continue (design.md 4.3, 10.1)
+	ContinueLines              int `json:"continue_lines"`                 // the cap after a continue (design.md 4.9)
+	TaskSizeLimit              int `json:"task_size_limit"`                // plan checks (design.md 11.5)
+	SizeCapFactor              int `json:"size_cap_factor"`                // N12: size_cap = factor × estimate_lines
 }
 
 // Range limits for each setting.
 const (
-	ReviewRoundsMin = 1
-	ReviewRoundsMax = 5
-	MaxRoundsMax    = 10
-	RetroMajorsMin  = 2
-	RetroMajorsMax  = 4
-	RetroFromMin    = 2
-	RetroFromMax    = 6
-	ChecksGraceMin  = 1
-	ChecksGraceMax  = 60
-	StuckMin        = 5
-	StuckMax        = 240
+	ReviewRoundsMin  = 1
+	ReviewRoundsMax  = 5
+	MaxRoundsMax     = 10
+	RetroMajorsMin   = 2
+	RetroMajorsMax   = 4
+	RetroFromMin     = 2
+	RetroFromMax     = 6
+	ChecksGraceMin   = 1
+	ChecksGraceMax   = 60
+	StuckMin         = 5
+	StuckMax         = 240
+	ContinuesMax     = 3
+	ContinueLinesMax = 500
+	SizeLimitMin     = 50
+	SizeLimitMax     = 2000
+	SizeFactorMin    = 1
+	SizeFactorMax    = 5
 )
 
 // DefaultSettings are slice 2's defaults: two passing rounds on the final head
@@ -42,6 +52,7 @@ func DefaultSettings() Settings {
 		ReviewRounds: 2, MaxRounds: 5,
 		RetroAfterRoundsWithMajors: 2, RetroFromRound: 3,
 		ChecksGraceMinutes: 5, StuckMinutes: 30,
+		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2,
 	}
 }
 
@@ -56,11 +67,15 @@ func (s Settings) Changed() []string {
 		got, def int
 	}{
 		{"checks_grace_minutes", s.ChecksGraceMinutes, d.ChecksGraceMinutes},
+		{"continue_lines", s.ContinueLines, d.ContinueLines},
+		{"continues_per_task", s.ContinuesPerTask, d.ContinuesPerTask},
 		{"max_rounds", s.MaxRounds, d.MaxRounds},
 		{"retro_after_rounds_with_majors", s.RetroAfterRoundsWithMajors, d.RetroAfterRoundsWithMajors},
 		{"retro_from_round", s.RetroFromRound, d.RetroFromRound},
 		{"review_rounds", s.ReviewRounds, d.ReviewRounds},
+		{"size_cap_factor", s.SizeCapFactor, d.SizeCapFactor},
 		{"stuck_minutes", s.StuckMinutes, d.StuckMinutes},
+		{"task_size_limit", s.TaskSizeLimit, d.TaskSizeLimit},
 	} {
 		if c.got != c.def {
 			out = append(out, fmt.Sprintf("%s %d", c.name, c.got))
@@ -81,6 +96,10 @@ func (s Settings) Validate() error {
 		{"retro_from_round", s.RetroFromRound, RetroFromMin, RetroFromMax},
 		{"checks_grace_minutes", s.ChecksGraceMinutes, ChecksGraceMin, ChecksGraceMax},
 		{"stuck_minutes", s.StuckMinutes, StuckMin, StuckMax},
+		{"continues_per_task", s.ContinuesPerTask, 0, ContinuesMax},
+		{"continue_lines", s.ContinueLines, 0, ContinueLinesMax},
+		{"task_size_limit", s.TaskSizeLimit, SizeLimitMin, SizeLimitMax},
+		{"size_cap_factor", s.SizeCapFactor, SizeFactorMin, SizeFactorMax},
 	} {
 		if r.v < r.low || r.v > r.high {
 			return fmt.Errorf("%s %d: allowed %d–%d", r.name, r.v, r.low, r.high)

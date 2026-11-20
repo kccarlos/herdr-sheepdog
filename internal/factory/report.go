@@ -73,7 +73,7 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 	if len(s.Tasks) > 0 {
 		return e.refuse(id, "plan_exists", "A plan already exists; change it with plan amend.")
 	}
-	tasks, fails := checkPlan(args)
+	tasks, fails := checkPlan(args, s.Settings.TaskSizeLimit)
 	if len(fails) > 0 {
 		return e.refuse(id, "plan_invalid", strings.Join(fails, "; ")+".")
 	}
@@ -141,6 +141,9 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 		return e.refuse(id, "pull_first", "The attempt head moved past the worktree tip; pull first.")
 	case rel == flow.RelSame:
 		return e.refuse(id, "nothing_new", "The worktree has no commit ahead of the current head.")
+	}
+	if mo, _ := world.MergeOnly(ctx, a.Worktree, h, tip); mo { // a ready at a merge-only tip is N20's move too: no round
+		a.MergeOnly = append(a.MergeOnly, flow.Advance{From: h, To: tip})
 	}
 	a.Ready, a.NothingToChange = append(a.Ready, flow.Ready{Head: tip}), ""
 	return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "ready", "head": tip}, Rule: "ready", Decision: "ready", Why: tip})
@@ -275,6 +278,7 @@ type planTask struct {
 	Brief    string   `json:"brief"`
 	Outcomes []string `json:"outcomes"`
 	After    []string `json:"after"`
+	Estimate int      `json:"estimate_lines"`
 }
 
 type planFile struct {
@@ -282,11 +286,23 @@ type planFile struct {
 }
 
 // checkPlan runs the Shape check of design.md 11.7 and returns every failure.
-func checkPlan(raw json.RawMessage) ([]flow.Task, []string) {
-	return checkPlanWith(raw, nil, "")
+func checkPlan(raw json.RawMessage, limit int) ([]flow.Task, []string) {
+	return checkPlanWith(raw, nil, "", limit)
 }
 
-func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string) ([]flow.Task, []string) {
+// checkEstimate is design.md 11.5's plan check: estimate_lines is required,
+// and a task over task_size_limit is split before it exists.
+func checkEstimate(id string, est, limit int) []string {
+	if est <= 0 {
+		return []string{fmt.Sprintf("shape: task %q needs estimate_lines above 0", id)}
+	}
+	if est > limit {
+		return []string{fmt.Sprintf("size: task %q estimates %d lines, over task_size_limit %d: split it before it exists", id, est, limit)}
+	}
+	return nil
+}
+
+func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, limit int) ([]flow.Task, []string) {
 	var p planFile
 	var fails []string
 	dec := json.NewDecoder(bytes.NewReader(raw))
@@ -321,6 +337,7 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string) (
 		if cleanRejectWhy(t.Title) == "" {
 			fails = append(fails, fmt.Sprintf("shape: task %q has no title", t.ID))
 		}
+		fails = append(fails, checkEstimate(t.ID, t.Estimate, limit)...)
 	}
 	after := map[string][]string{}
 	for _, et := range existing {
@@ -338,7 +355,7 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string) (
 			}
 		}
 		after[t.ID] = t.After
-		tasks[i] = flow.Task{ID: t.ID, Title: cleanRejectWhy(t.Title), Brief: t.Brief, Outcomes: t.Outcomes, After: t.After, SplitFrom: parentID, Attempts: []flow.Attempt{}}
+		tasks[i] = flow.Task{ID: t.ID, Title: cleanRejectWhy(t.Title), Brief: t.Brief, Outcomes: t.Outcomes, After: t.After, EstimateLines: t.Estimate, SplitFrom: parentID, Attempts: []flow.Attempt{}}
 	}
 	if id := cycleAt(p.Tasks, after); id != "" {
 		fails = append(fails, fmt.Sprintf("shape: the after links make a cycle through %q", id))
@@ -405,6 +422,27 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why},
 			Rule: "recap decide", Decision: "dropped", Why: why})
 	}
+	if choice == flow.ChoiceContinue {
+		a := flow.OpenAttempt(*t)
+		if a == nil {
+			return e.refuse(id, "not_allowed", "continue needs an open attempt.")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
+		defer cancel()
+		lines, err := world.ChangedLines(ctx, a.Worktree, "HEAD") // the same measure as N12's
+		if err != nil {
+			return err
+		}
+		a.SizeCap, rc.Decided = lines+s.Settings.ContinueLines, &flow.RecapDecision{Choice: choice, Why: why}
+		if a.RunID != "" {
+			msg := fmt.Sprintf("The coordinator lets task %s go on: %s. Your size cap is now %d changed lines (%d now). Continue the task.", t.ID, why, a.SizeCap, lines)
+			if err := world.SendRun(ctx, e.HC, a.RunID, msg); err != nil {
+				e.logError("factory.exec_error", id, err)
+			}
+		}
+		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why},
+			Rule: "recap decide", Decision: fmt.Sprintf("continue; size cap %d", a.SizeCap), Why: why})
+	}
 	if choice == "new" {
 		if !rc.Amended {
 			return e.refuse(id, "not_allowed", "new is allowed only after plan amend changed the task's brief or outcomes since the recap opened.")
@@ -429,7 +467,7 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 	raw, _ := json.Marshal(struct {
 		Tasks []json.RawMessage `json:"tasks"`
 	}{Tasks: req.Children})
-	children, fails := checkPlanWith(raw, s.Tasks, t.ID)
+	children, fails := checkPlanWith(raw, s.Tasks, t.ID, s.Settings.TaskSizeLimit)
 	if len(fails) > 0 {
 		return e.refuse(id, "plan_invalid", strings.Join(fails, "; ")+".")
 	}
@@ -515,6 +553,7 @@ type amendTask struct {
 	Title    *string   `json:"title"`
 	Brief    *string   `json:"brief"`
 	Outcomes *[]string `json:"outcomes"`
+	Estimate *int      `json:"estimate_lines"`
 }
 
 // acceptAmendLocked is plan amend (design.md 3.1, 4.9, 7.2): changes to
@@ -558,11 +597,13 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		d.DisallowUnknownFields()
 		switch err := d.Decode(&c); {
 		case err != nil:
-			fails = append(fails, fmt.Sprintf("shape: task %q: %s (only title, brief and outcomes change)", s.Tasks[ti].ID, strings.TrimPrefix(err.Error(), "json: ")))
+			fails = append(fails, fmt.Sprintf("shape: task %q: %s (only title, brief, outcomes and estimate_lines change)", s.Tasks[ti].ID, strings.TrimPrefix(err.Error(), "json: ")))
 		case flow.Ended(s.Tasks[ti]):
 			fails = append(fails, fmt.Sprintf("task %q has ended and is not changed", s.Tasks[ti].ID))
 		case c.Title != nil && cleanRejectWhy(*c.Title) == "":
 			fails = append(fails, fmt.Sprintf("shape: task %q has no title", s.Tasks[ti].ID))
+		case c.Estimate != nil && checkEstimate(s.Tasks[ti].ID, *c.Estimate, s.Settings.TaskSizeLimit) != nil:
+			fails = append(fails, checkEstimate(s.Tasks[ti].ID, *c.Estimate, s.Settings.TaskSizeLimit)...)
 		default:
 			changes = append(changes, change{ti, c})
 		}
@@ -571,7 +612,7 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 	if len(fresh) > 0 {
 		raw, _ := json.Marshal(map[string]any{"tasks": fresh})
 		var f []string
-		added, f = checkPlanWith(raw, s.Tasks, "")
+		added, f = checkPlanWith(raw, s.Tasks, "", s.Settings.TaskSizeLimit)
 		fails = append(fails, f...)
 	}
 	if len(fails) > 0 {
@@ -592,6 +633,12 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 			t.Outcomes, what = *c.Outcomes, append(what, "outcomes")
 		}
 		a := flow.OpenAttempt(*t)
+		if c.Estimate != nil && *c.Estimate != t.EstimateLines {
+			t.EstimateLines, what = *c.Estimate, append(what, "estimate_lines")
+			if a != nil { // design.md 4.9: a changed estimate changes size_cap
+				a.SizeCap = s.Settings.SizeCapFactor * t.EstimateLines
+			}
+		}
 		if slices.Contains(what, "brief") || slices.Contains(what, "outcomes") {
 			if rc := flow.OpenRecap(*t); rc != nil {
 				rc.Amended = true

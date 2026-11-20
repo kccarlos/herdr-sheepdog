@@ -31,7 +31,7 @@ func TestStateRoundTrip(t *testing.T) {
 		Tasks: []flow.Task{{
 			ID: "t1", Title: "Add x", Brief: "b", Outcomes: []string{"x works"},
 			Done: &flow.Merged{MergedCommit: "abc"},
-			Attempts: []flow.Attempt{{
+			Attempts: []flow.Attempt{{SizeCap: 100,
 				BaseCommit: "000", Branch: "t1", Worktree: "/w", PR: 3, RunID: "r1",
 				Ready:   []flow.Ready{{Head: "111"}},
 				Rounds:  []flow.Round{{N: 1, Kind: "full", Head: "111", Reviewer: flow.Reviewer{CLI: "claude", Model: "m", Effort: "high"}, Verdict: "pass", ReportPath: "r.md"}},

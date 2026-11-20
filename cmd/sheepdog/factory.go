@@ -29,7 +29,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "  stop [<folder>]                      stop a started factory project and its runs")
 	fprintln(w, "  log [<folder>] [-n N]                each engine step: time, task, rule, asked, decision, why")
 	fprintln(w, "  plan apply <file>                    (coordinator only) apply a JSON plan")
-	fprintln(w, "  plan amend <file>                    (coordinator only) change tasks' title, brief, outcomes or add tasks, with a why")
+	fprintln(w, "  plan amend <file>                    (coordinator only) change tasks' title, brief, outcomes, estimate_lines or add tasks, with a why")
 	fprintln(w, "  task <park|unpark|drop|close|send-back> <task> --why \"<why>\"  (coordinator only)")
 	fprintln(w, "  recap decide <task> <choice> --why \"<why>\" [--child '<json>' ...]  (coordinator only) decide an open recap")
 	fprintln(w, "  report ready [--reject \"<why>\"]      (worker only) report HEAD ready, or reject the latest review's findings")

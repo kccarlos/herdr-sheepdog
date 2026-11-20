@@ -52,20 +52,22 @@ type Wake struct {
 
 // Task is a planned task. It has no phase field: rows derive where it is.
 type Task struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	Brief     string    `json:"brief"`
-	Outcomes  []string  `json:"outcomes"`
-	After     []string  `json:"after,omitempty"`
-	SplitFrom string    `json:"split_from,omitempty"`
-	Done      *Merged   `json:"done,omitempty"`
-	Closed    *Closed   `json:"closed,omitempty"`
-	Dropped   *Dropped  `json:"dropped,omitempty"`
-	Split     *Split    `json:"split,omitempty"`
-	Parked    bool      `json:"parked,omitempty"`
-	Recaps    []Recap   `json:"recaps,omitempty"`
-	Acts      []Act     `json:"acts,omitempty"`
-	Attempts  []Attempt `json:"attempts"`
+	ID       string   `json:"id"`
+	Title    string   `json:"title"`
+	Brief    string   `json:"brief"`
+	Outcomes []string `json:"outcomes"`
+	After    []string `json:"after,omitempty"`
+	// EstimateLines is the plan's estimate of changed lines (design.md 11.5).
+	EstimateLines int       `json:"estimate_lines"`
+	SplitFrom     string    `json:"split_from,omitempty"`
+	Done          *Merged   `json:"done,omitempty"`
+	Closed        *Closed   `json:"closed,omitempty"`
+	Dropped       *Dropped  `json:"dropped,omitempty"`
+	Split         *Split    `json:"split,omitempty"`
+	Parked        bool      `json:"parked,omitempty"`
+	Recaps        []Recap   `json:"recaps,omitempty"`
+	Acts          []Act     `json:"acts,omitempty"`
+	Attempts      []Attempt `json:"attempts"`
 }
 
 // Merged is the done mark: the task's PR merged at this commit.
@@ -100,6 +102,28 @@ type Recap struct {
 type RecapDecision struct {
 	Choice string `json:"choice"`
 	Why    string `json:"why"`
+}
+
+// Recap choices and triggers (design.md 4.3, 4.9).
+const (
+	ChoiceContinue = "continue"
+	TriggerReview  = "review"
+	TriggerSize    = "size"
+)
+
+// SizeRecapAllowed is a size recap's choices: continue only while the task
+// has used fewer than continues_per_task (design.md 4.3).
+func SizeRecapAllowed(t Task, s Settings) []string {
+	used := 0
+	for _, r := range t.Recaps {
+		if r.Decided != nil && r.Decided.Choice == ChoiceContinue {
+			used++
+		}
+	}
+	if used < s.ContinuesPerTask {
+		return []string{ChoiceContinue, "split", "new", "drop"}
+	}
+	return []string{"split", "new", "drop"}
 }
 
 // Ended reports whether t carries a terminal mark (design.md 4.1, N1).
@@ -138,6 +162,17 @@ type Attempt struct {
 	// changed the brief or outcomes: those rounds no longer cover (design.md 3.1).
 	Boundary int    `json:"boundary,omitempty"`
 	Closed   string `json:"closed,omitempty"` // the note a recap's "new" closed this attempt with
+	// SizeCap is N12's limit on changed lines at the tip (design.md 3, 11.5).
+	SizeCap int `json:"size_cap"`
+	// MergeOnly are H's moves to a tip that was ahead of it by merges of the
+	// base only (N20, design.md 3.1), in order.
+	MergeOnly []Advance `json:"merge_only,omitempty"`
+}
+
+// Advance is one merge_only move of H, observed with git when it was made.
+type Advance struct {
+	From string `json:"from"`
+	To   string `json:"to"`
 }
 
 // OpenAttempt is t's current attempt, or nil before the first or once a

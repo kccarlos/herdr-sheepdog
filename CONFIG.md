@@ -542,6 +542,17 @@ before a line is written.
 |---|---|---|---|
 | `computer.name` | `SHEEPDOG_COMPUTER_NAME` | the system's computer name | What the apps call this computer (`GET /api/hello` `computer.name`). Empty uses macOS's computer name (System Settings ▸ General ▸ Sharing), else the host name. The app may rename it on the phone. The app tells computers apart by the daemon id in `<data_dir>/tls/daemon_id`, made once at first start. |
 
+## Factory size settings
+
+These factory settings live in each project's `state.json`, not in the config file, and no command changes them yet. A task's plan must carry `estimate_lines`.
+
+| Setting | Default | Range | Meaning |
+|---|---|---|---|
+| `task_size_limit` | `400` | 50–2000 | A planned task estimated above this many changed lines is refused: split it first. |
+| `size_cap_factor` | `2` | 1–5 | A task's size cap is this times its `estimate_lines`; past it the task stops at a size recap. |
+| `continue_lines` | `60` | 0–500 | A recap's `continue` sets the cap to the changed lines now plus this. |
+| `continues_per_task` | `1` | 0–3 | How many times a task may `continue`. |
+
 ## What sheepdog stores
 
 Everything is under two directories (and `data_dir` moves the second).

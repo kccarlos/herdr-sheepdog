@@ -1010,6 +1010,25 @@ func TestReviewRangesExcludeMergedBaseChanges(t *testing.T) {
 	runGit(t, other, "commit", "-m", "feat: base b2")
 	runGit(t, other, "push", "origin", "main")
 
+	// merge_only (design.md 3.1): a clean base merge is; a normal commit or a
+	// diverged pair is not. Changed lines leave out what the base brought in.
+	for _, c := range []struct {
+		x, h string
+		want bool
+	}{{c2a, m1, true}, {c1, m1, false}, {m1, c2b, false}, {c2a, b1, false}} {
+		if got, err := MergeOnly(ctx, wt.Path, c.x, c.h); err != nil || got != c.want {
+			t.Errorf("MergeOnly(%s, %s) = (%v, %v), want %v", c.x, c.h, got, err, c.want)
+		}
+	}
+	for _, c := range []struct {
+		tip  string
+		want int
+	}{{c1, 2}, {m1, 4}, {c2b, 4}} { // new files task.go and pre.go, 2 lines each; base_only.go never counts
+		if n, err := ChangedLines(ctx, wt.Path, c.tip); err != nil || n != c.want {
+			t.Errorf("ChangedLines(%s) = (%d, %v), want %d", c.tip, n, err, c.want)
+		}
+	}
+
 	// Delta from c1 to m1 (fix then merge): [c1..c2a], no base_only.go.
 	r1, err := DeltaRanges(ctx, wt.Path, c1, m1)
 	if err != nil || !slices.Equal(r1, []string{c1 + ".." + c2a}) {
@@ -1142,6 +1161,12 @@ func TestDeltaRangesIncludesHandEditedBaseMerge(t *testing.T) {
 	runGit(t, wt.Path, "add", "smuggled.go")
 	runGit(t, wt.Path, "commit", "-m", "merge: with extra edit")
 	m2 := runGit(t, wt.Path, "rev-parse", "HEAD")
+
+	for _, pair := range [][2]string{{c1, m1}, {m1, m2}} { // hand-resolved, and an extra edit in a merge
+		if mo, err := MergeOnly(ctx, wt.Path, pair[0], pair[1]); err != nil || mo {
+			t.Errorf("MergeOnly(%s, %s) = (%v, %v), want false", pair[0], pair[1], mo, err)
+		}
+	}
 
 	ranges2, err := DeltaRanges(ctx, wt.Path, m1, m2)
 	if err != nil || !slices.Equal(ranges2, []string{m1 + ".." + m2}) {

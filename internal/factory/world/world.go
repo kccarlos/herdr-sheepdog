@@ -613,6 +613,48 @@ func DeltaRanges(ctx context.Context, worktree, since, head string) ([]string, e
 	return ranges, nil
 }
 
+// ChangedLines is the lines added plus removed at tip against its merge base
+// with the base branch, as git last fetched it (N12, design.md 11.5). It
+// does not fetch: it runs every pass. Binary files count no lines.
+func ChangedLines(ctx context.Context, dir, tip string) (int, error) {
+	ref, _, err := remoteBaseCommit(ctx, dir, false)
+	if err != nil {
+		return 0, err
+	}
+	out, err := gitCmd(ctx, dir, "diff", "--numstat", ref+"..."+tip)
+	n := 0
+	for ln := range strings.Lines(out) {
+		var add, del int
+		if _, e := fmt.Sscanf(ln, "%d\t%d", &add, &del); e == nil {
+			n += add + del
+		}
+	}
+	return n, err
+}
+
+// MergeOnly reports whether h is ahead of x by clean merges of the base
+// branch only, on the first-parent line (design.md 3.1). It does not fetch.
+func MergeOnly(ctx context.Context, dir, x, h string) (bool, error) {
+	ref, _, err := remoteBaseCommit(ctx, dir, false)
+	if err != nil {
+		return false, err
+	}
+	mb, err := gitCmd(ctx, dir, "merge-base", h, ref)
+	if err != nil || x == h || !isAncestor(ctx, dir, x, h) {
+		return false, err
+	}
+	out, err := gitCmd(ctx, dir, "rev-list", "--first-parent", "--parents", x+".."+h)
+	if err != nil {
+		return false, err
+	}
+	for ln := range strings.Lines(out) {
+		if !cleanBaseMerge(ctx, dir, strings.Fields(ln), mb) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func cleanBaseMerge(ctx context.Context, dir string, f []string, mb string) bool {
 	if len(f) != 3 || !isAncestor(ctx, dir, f[2], mb) {
 		return false
