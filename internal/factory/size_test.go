@@ -532,7 +532,15 @@ func TestWorkerAndReviewerPromptsShowOutcomesWithProofs(t *testing.T) {
 	l.edit(func(s *flow.State) {
 		s.Tasks[1].Attempts[0].RunTokenHash = tokenHash("tok-worker-t2")
 	})
-	l.report("tok-worker-t2", "ready", `{"head":"`+c+`"}`, "")
+	art := filepath.Join(t.TempDir(), "home.png")
+	if err := os.WriteFile(art, []byte("png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l.report("tok-worker-t2", "ready", `{"head":"`+c+`","proofs":[`+
+		`{"outcome":"returns greeting","command":"go test -run TestGreet","exit":0,"output_path":"/tmp/p1.log"},`+
+		`{"outcome":"builds cleanly","command":"go build ./...","exit":0,"output_path":"/tmp/p2.log"},`+
+		`{"outcome":"button aligns","artifact":`+strconvQuote(art)+`}`+
+		`]}`, "")
 	l.pass() // N26 push + open PR for T2
 	l.pass() // N29 starts reviewer for T2
 
@@ -542,6 +550,10 @@ func TestWorkerAndReviewerPromptsShowOutcomesWithProofs(t *testing.T) {
 		"- button aligns (proved by: manual: screenshot of home screen)"
 	if !strings.Contains(workerPrompt, wantBlock) {
 		t.Fatalf("worker prompt missing outcomes with proofs:\n%s", workerPrompt)
+	}
+	wantReady := `factory report ready --proof "returns greeting=<command>" --proof "builds cleanly=go build ./..." --artifact "button aligns=<path>"`
+	if !strings.Contains(workerPrompt, wantReady) {
+		t.Fatalf("worker prompt missing ready --proof form:\n%s", workerPrompt)
 	}
 	if !strings.Contains(reviewerPrompt, wantBlock) {
 		t.Fatalf("reviewer prompt missing outcomes with proofs:\n%s", reviewerPrompt)

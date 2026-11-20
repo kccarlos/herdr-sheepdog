@@ -4,6 +4,7 @@
 package flow
 
 import (
+	"bytes"
 	"encoding/json"
 	"time"
 )
@@ -73,7 +74,9 @@ func (o *Outcome) UnmarshalJSON(data []byte) error {
 	}
 	type alias Outcome
 	var a alias
-	if err := json.Unmarshal(data, &a); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&a); err != nil {
 		return err
 	}
 	*o = Outcome(a)
@@ -236,9 +239,20 @@ type ReviewRun struct {
 	IdleSince *time.Time `json:"idle_since,omitempty"`
 }
 
+// Proof is one outcome's evidence attached to a ready report (design.md 3, 7.2):
+// either a command run by the report client or a manual artifact path.
+type Proof struct {
+	Outcome    string `json:"outcome"`
+	Command    string `json:"command,omitempty"`
+	Exit       int    `json:"exit"`
+	OutputPath string `json:"output_path,omitempty"`
+	Artifact   string `json:"artifact,omitempty"`
+}
+
 // Ready is the worker's "done at this commit".
 type Ready struct {
-	Head string `json:"head"`
+	Head   string  `json:"head"`
+	Proofs []Proof `json:"proofs,omitempty"`
 }
 
 // Reject is the worker's rejection of every finding of a reviewer's round at

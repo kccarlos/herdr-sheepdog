@@ -16,6 +16,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
 
@@ -37,7 +38,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "  plan amend <file>                    (coordinator only) change tasks' title, brief, outcomes, estimate_lines or add tasks, with a why")
 	fprintln(w, "  task <park|unpark|drop|close|send-back> <task> --why \"<why>\"  (coordinator only)")
 	fprintln(w, "  recap decide <task> <choice> --why \"<why>\" [--child '<json>' ...]  (coordinator only) decide an open recap")
-	fprintln(w, "  report ready [--reject \"<why>\"]      (worker only) report HEAD ready, or reject the latest review's findings")
+	fprintln(w, "  report ready [--proof \"<outcome>=<cmd>\" ...] [--artifact \"<outcome>=<path>\" ...] [--reject \"<why>\"]  (worker only) run proofs and report HEAD ready, or reject findings")
 	fprintln(w, "  report ready --nothing-to-change --why \"<why>\"  (worker only) report that the task needs no change")
 	fprintln(w, "  doctor                               check unattended factory prerequisites:")
 	fprintln(w, "           herdr-core (hc), timed project-volume probe inside herdr-core")
@@ -45,7 +46,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "           logged-in agent CLI (claude, codex or agy) plus a canary start")
 	fprintln(w, "           inside herdr-core, gh login with the default repo pinned, and")
 	fprintln(w, "           codexbar. Exit 1 on FAIL.")
-	fprintln(w, "flags: --goal TEXT, --reject WHY, --nothing-to-change, --why TEXT, --child JSON, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
+	fprintln(w, "flags: --goal TEXT, --proof OUTCOME=CMD, --artifact OUTCOME=PATH, --reject WHY, --nothing-to-change, --why TEXT, --child JSON, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
 }
 
 // runFactory dispatches the `sheepdog factory` command group.
@@ -241,7 +242,8 @@ func runFactoryRecap(ctx context.Context, args []string, stdout, stderr io.Write
 	return 0
 }
 
-// runFactoryReport sends `report ready [--reject "<why>"]` with the worktree's HEAD and the run's token.
+var proofTimeout = 5 * time.Minute
+
 func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 || args[0] != "ready" {
 		printFactoryUsage(stderr)
@@ -253,6 +255,23 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 	why := fs.String("reject", "", "reject every finding of the latest review round with a reason")
 	nothing := fs.Bool("nothing-to-change", false, "report that the task needs no change")
 	nothingWhy := fs.String("why", "", "reason for --nothing-to-change")
+	var proofs []flow.Proof
+	addKV := func(name string, artifact bool) func(string) error {
+		return func(s string) error {
+			k, v, ok := strings.Cut(s, "=")
+			if k, v = strings.TrimSpace(k), strings.TrimSpace(v); !ok || k == "" || v == "" {
+				return errors.New("--" + name + ` must be "<outcome>=<value>"`)
+			}
+			if artifact {
+				proofs = append(proofs, flow.Proof{Outcome: k, Artifact: v})
+			} else {
+				proofs = append(proofs, flow.Proof{Outcome: k, Command: v})
+			}
+			return nil
+		}
+	}
+	fs.Func("proof", `proof command ("<outcome>=<command>", repeatable)`, addKV("proof", false))
+	fs.Func("artifact", `manual artifact ("<outcome>=<path>", repeatable)`, addKV("artifact", true))
 	if err := fs.Parse(args[1:]); err != nil {
 		return flagExit(err)
 	}
@@ -262,28 +281,27 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 			reject = why
 		}
 	})
-	if fs.NArg() != 0 || (*nothing && reject != nil) || (!*nothing && *nothingWhy != "") {
+	if fs.NArg() != 0 || (*nothing && reject != nil) || (!*nothing && *nothingWhy != "") || (len(proofs) > 0 && (*nothing || reject != nil)) {
 		printFactoryUsage(stderr)
 		return 2
 	}
-	gctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(gctx, "git", "rev-parse", "--verify", "HEAD^{commit}")
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.CombinedOutput()
-	head := strings.TrimSpace(string(out))
+	head, err := gitRevParse(ctx, "--verify", "HEAD^{commit}")
+	if err == nil && len(proofs) > 0 {
+		err = runProofs(ctx, head, proofs)
+	}
 	if err == nil {
-		body := map[string]string{"head": head}
+		body := map[string]any{"head": head}
 		if reject != nil {
 			body["reject"] = *reject
 		}
 		if *nothing {
 			body["nothing_to_change"] = *nothingWhy
 		}
+		if len(proofs) > 0 {
+			body["proofs"] = proofs
+		}
 		raw, _ := json.Marshal(body)
 		err = postFactoryReport(ctx, "ready", raw)
-	} else {
-		err = errors.New(err.Error() + ": " + head)
 	}
 	if err != nil {
 		fprintf(stderr, "sheepdog factory report ready: %v\n", err)
@@ -299,6 +317,68 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	fprintf(stdout, "ready %s\n", head)
 	return 0
+}
+
+func gitRevParse(ctx context.Context, args ...string) (string, error) {
+	gctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(gctx, "git", append([]string{"rev-parse"}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	out, err := cmd.CombinedOutput()
+	if s := strings.TrimSpace(string(out)); err != nil {
+		return "", errors.New(err.Error() + ": " + s)
+	} else {
+		return s, nil
+	}
+}
+
+func runProofs(ctx context.Context, head string, proofs []flow.Proof) error {
+	gitDir, err := gitRevParse(ctx, "--git-dir")
+	if err == nil {
+		gitDir, err = filepath.Abs(gitDir)
+	}
+	if err != nil {
+		return err
+	}
+	proofDir := filepath.Join(gitDir, "sheepdog-proofs")
+	for i := range proofs {
+		p := &proofs[i]
+		if p.Artifact != "" {
+			abs, err := filepath.Abs(p.Artifact)
+			if err == nil {
+				_, err = os.Stat(abs)
+			}
+			if err != nil {
+				return errors.New("artifact for " + strconv.Quote(p.Outcome) + ": " + err.Error())
+			}
+			p.Artifact = abs
+			continue
+		}
+		if err := os.MkdirAll(proofDir, 0o700); err != nil {
+			return err
+		}
+		pctx, cancel := context.WithTimeout(ctx, proofTimeout)
+		cmd := exec.CommandContext(pctx, "sh", "-c", p.Command)
+		cmd.WaitDelay = time.Second
+		combined, runErr := cmd.CombinedOutput()
+		timedOut := errors.Is(pctx.Err(), context.DeadlineExceeded)
+		cancel()
+		var ee *exec.ExitError
+		switch {
+		case runErr == nil:
+		case timedOut:
+			p.Exit, combined = 124, append(combined, ("\n[proof timed out after "+proofTimeout.String()+"]\n")...)
+		case errors.As(runErr, &ee):
+			p.Exit = ee.ExitCode()
+		default:
+			p.Exit, combined = 1, append(combined, ("\n"+runErr.Error()+"\n")...)
+		}
+		p.OutputPath = filepath.Join(proofDir, head[:min(12, len(head))]+"-"+strconv.Itoa(i+1)+".log")
+		if err := os.WriteFile(p.OutputPath, combined, 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func postFactoryReport(ctx context.Context, verb string, args json.RawMessage) error {
