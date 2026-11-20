@@ -511,7 +511,7 @@ Held wakes merge only when their kind and their task are the same. The owner's w
 | `no_pool` | yes | no coordinator candidate has a usable pool, or no worker candidate of any open task has one. (One role's pools being empty stops only the tasks that need that role; they wait at their own rows) | a pool is usable again |
 | `disk` | yes | the disk is over the limit, or a write failed for space | the reading is back under the limit |
 | `consent_prompt` | yes | the volume probe fails. It is run after two blank starts in a row and after two timed-out calls on the project folder. Blank starts with a healthy folder are ordinary start failures (section 4.8, J6), not this alert | the volume probe answers |
-| `main_red` | no: it holds merges and branch updates only (N38), so a task that repairs the base can start and merge | the base's newest finished run has been red for `main_red_minutes` | the newest finished run is green |
+| `main_red` | no: it holds merges and branch updates only (N38), so a task that repairs the base can start and merge | the runs on the base's head commit have been red for `main_red_minutes` | every run on the base's head commit finished and none is red |
 | `ci_stalled` | no | N36 for `ci_stalled_minutes` | the task leaves N36 |
 | `agents_down` | no | the coordinator cannot be kept alive (J5, J6, J9, J10); or agents on two different CLIs started blank in a row while the project folder answers (a herdr-core or CLI fault, counted as an outage, not as each task's failure) | a coordinator run is alive and has taken a turn; an agent has started |
 
@@ -1112,12 +1112,8 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | O15 | A `plan amend` that lowers `estimate_lines` after a size recap's `continue` can drop `size_cap` below what the `continue` granted, because the decided recap is no longer open, and so open a second size recap |
 | O16 | `plan amend` cannot change `for_whom`, `if_skipped`, `smallest` or `not_doing` on an existing task, only `title`, `brief`, `outcomes` and `estimate_lines`. Whether a changed `not_doing` should be a brief boundary (section 3.1) is not decided |
 | O17 | The template test (prompts.md 7) checks the flags of each command a template names against the usage's global flags line, not per subcommand, so a flag that exists for another command passes. The `{ready_cmd}` line's flags are not checked there; other tests pin them |
-| O18 | The base's red spell is keyed by its head commit, so the same commit going red, green and red again gets no second wake or tell. Owner: slice 5a's keys |
-| O19 | A workflow file that fails to start (`startup_failure`) on the base reads green. Owner: the checks rollup |
-| O20 | After two failed tells for N38 the next held task's worker is told and the coordinator is woken a second time in the same spell. Owner: slice 5a's back-off |
-| O21 | The base observer makes two GitHub calls per pass, and more when a run on the head commit was cancelled by hand. Owner: cheap sync |
-| O22 | N7 is keyed on `H` only, so a second, different problem at the same `H` gets no tell. Owner: slice 5a |
-| O23 | A PR on another base reads as no PR, so N26 tries the push again (refused, no second PR) until S2 wakes the coordinator. Owner: slice 5a's back-off |
+| O18 | The base observer makes two GitHub calls per pass, and more when a run on the head commit was cancelled by hand. Owner: cheap sync |
+| O19 | A workflow file that fails to start (`startup_failure`) on the base reads green: the base observer does not count it red, though the checks rollup does |
 
 ### 17.5 The audit by simulation, and what it means
 
