@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"testing"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
@@ -64,8 +63,9 @@ func StartChecks(ctx context.Context, opts DoctorOptions) []onboard.Result {
 		}
 	}
 	gh := checkStartGH(ctx, o, &r)
-	r.empty = (r.view != nil && r.view.DefaultBranchRef.Name == "") || (top != "" && r.view == nil && gitLine(ctx, o, r.root, "rev-parse", "--verify", "HEAD") == "")
-	return append(append(append(out, checkStartCLIs(ctx, o, r)...), gh, checkStartRemote(ctx, o, r), checkPRWorkflow(ctx, o, r)), checkStartProtection(ctx, o, r)...)
+	r.empty = r.view != nil && r.view.DefaultBranchRef.Name == ""
+	out = append(append(out, checkStartCLIs(ctx, o, r)...), gh, checkStartRemote(ctx, o, r), checkPRWorkflow(ctx, o, r))
+	return append(out, checkStartProtection(ctx, o, r)...)
 }
 
 func checkGitVersion(ctx context.Context, o DoctorOptions) onboard.Result {
@@ -77,35 +77,36 @@ func checkGitVersion(ctx context.Context, o DoctorOptions) onboard.Result {
 	}
 	maj, _ := strconv.Atoi(m[1])
 	if minV, _ := strconv.Atoi(m[2]); maj < 2 || (maj == 2 && minV < 38) {
-		return resFail(name, fmt.Sprintf("git %d.%d is older than 2.38 (needed by git merge-tree --write-tree)", maj, minV), fix)
+		msg := fmt.Sprintf("git %d.%d is older than 2.38 (needed by git merge-tree --write-tree)", maj, minV)
+		return resFail(name, msg, fix)
 	}
 	return resOK(name, firstLine(c.Stdout))
 }
 
 // Slice 5b's Resolve will replace this with the resolved worker and reviewer CLIs.
 func checkStartCLIs(ctx context.Context, o DoctorOptions, r startRepo) []onboard.Result {
-	out := []onboard.Result{checkStartCLI(ctx, o, "claude", "install Claude Code, then run: claude auth login", "run: claude auth login", []string{"claude", "auth", "status", "--json"}, claudeLoggedIn)}
-	if o.DataDir == "" && !testing.Testing() {
-		p, _ := DefaultPaths()
-		o.DataDir = p.DataDir
-	}
+	out := []onboard.Result{checkStartCLI(ctx, o, "claude", "Claude Code", "run: claude auth login",
+		claudeLoggedIn, "claude", "auth", "status", "--json")}
 	if p := (Paths{DataDir: o.DataDir}); o.DataDir != "" {
 		if id, err := findStoredProject(p, r.root); err == nil {
 			if s, err := LoadState(p.State(id)); err == nil && s.Settings.SecondReviewer == "codex" {
-				out = append(out, checkStartCLI(ctx, o, "codex", "install Codex CLI, then run: codex login", "run: codex login", []string{"codex", "login", "status"}, codexLoggedIn))
+				out = append(out, checkStartCLI(ctx, o, "codex", "Codex CLI", "run: codex login",
+					codexLoggedIn, "codex", "login", "status"))
 			}
 		}
 	}
 	return out
 }
 
-func checkStartCLI(ctx context.Context, o DoctorOptions, cli, installFix, loginFix string, argv []string, ok func(CommandOutput) bool) onboard.Result {
-	if name, c := "start "+cli, o.run(ctx, o.TempDir, argv...); c.Err != nil || c.Exit == 127 {
-		return resFail(name, cli+" is not installed", installFix)
+func checkStartCLI(ctx context.Context, o DoctorOptions, cli, pkg, loginFix string,
+	ok func(CommandOutput) bool, argv ...string) onboard.Result {
+	name, c := "start "+cli, o.run(ctx, o.TempDir, argv...)
+	if c.Err != nil || c.Exit == 127 {
+		return resFail(name, cli+" is not installed", "install "+pkg+", then "+loginFix)
 	} else if !ok(c) {
 		return resFail(name, cli+" is not signed in", loginFix)
 	}
-	return resOK("start "+cli, cli+" is signed in")
+	return resOK(name, cli+" is signed in")
 }
 
 func checkStartGH(ctx context.Context, o DoctorOptions, r *startRepo) onboard.Result {
@@ -129,10 +130,12 @@ func checkStartGH(ctx context.Context, o DoctorOptions, r *startRepo) onboard.Re
 func checkStartRemote(ctx context.Context, o DoctorOptions, r startRepo) onboard.Result {
 	const name = "github remote"
 	switch {
-	case r.empty:
-		return resFail(name, firstNonEmpty(r.slug, r.root)+" is an empty repository (no commits or default branch)", "push a first commit to "+firstNonEmpty(gitLine(ctx, o, r.root, "symbolic-ref", "--quiet", "--short", "HEAD"), "main"))
 	case r.slug == "":
 		return resFail(name, "no GitHub remote in "+r.root, "add one: git remote add origin https://github.com/<owner>/<repo>.git")
+	case r.empty:
+		base := firstNonEmpty(gitLine(ctx, o, r.root, "symbolic-ref", "--quiet", "--short", "HEAD"), "main")
+		return resFail(name, r.slug+" is an empty repository (no commits or default branch)",
+			"push a first commit to "+base)
 	case r.view == nil:
 		return resSkip(name, r.slug+": needs the gh check above to pass")
 	}
@@ -149,7 +152,8 @@ func checkStartRemote(ctx context.Context, o DoctorOptions, r startRepo) onboard
 }
 
 // checkPRWorkflow parses the YAML `on:` trigger of workflows on the remote base
-// the engine builds on, not the working tree.
+// the engine builds on, not the working tree. Known gap: a `branches:` filter
+// limited to other branches still passes.
 func checkPRWorkflow(ctx context.Context, o DoctorOptions, r startRepo) onboard.Result {
 	const name = "pr workflow"
 	if r.empty {
@@ -171,7 +175,9 @@ func checkPRWorkflow(ctx context.Context, o DoctorOptions, r startRepo) onboard.
 		}
 	}
 	if filteredFile != "" {
-		return resWarn(name, filteredFile+" on "+ref+" filters on.pull_request with paths/paths-ignore; a PR touching only filtered paths gets no checks and waits at N35", "remove paths/paths-ignore from on.pull_request or add an unfiltered PR workflow")
+		return resWarn(name, filteredFile+" on "+ref+" filters on.pull_request with paths/paths-ignore; "+
+			"a PR touching only filtered paths gets no checks and waits at N35",
+			"remove paths/paths-ignore from on.pull_request or add an unfiltered PR workflow")
 	}
 	return resFail(name, "no workflow in .github/workflows on "+ref+" runs on pull_request, so no PR would ever get checks",
 		"add .github/workflows/ci.yml with `on: pull_request` that runs your tests, commit it to the base branch and push")
@@ -184,7 +190,10 @@ func checkPRWorkflow(ctx context.Context, o DoctorOptions, r startRepo) onboard.
 func checkStartProtection(ctx context.Context, o DoctorOptions, r startRepo) []onboard.Result {
 	const review, prot = "review rule", "base protection"
 	if r.empty || r.view == nil {
-		msg := map[bool]string{true: "repo is empty (no default branch yet)", false: "needs the gh check above to pass"}[r.empty]
+		msg := "needs the gh check above to pass"
+		if r.empty {
+			msg = "repo is empty (no default branch yet)"
+		}
 		return []onboard.Result{resSkip(review, msg), resSkip(prot, msg)}
 	}
 	base := r.view.DefaultBranchRef.Name
@@ -258,47 +267,54 @@ func checkStartProtection(ctx context.Context, o DoctorOptions, r startRepo) []o
 	return append(res, resWarn(prot, base+" has no branch protection or ruleset (not required)", "optional: require the CI check on "+base+" in GitHub settings"))
 }
 
-func codexLoggedIn(c CommandOutput) bool {
-	return cmdOK(c) && !strings.Contains(strings.ToLower(c.Stdout+"\n"+c.Stderr), "not logged in")
-}
 func isPRTrigger(k string) bool { return k == "pull_request" || k == "pull_request_target" }
 
 // parsePRWorkflow inspects a workflow's top-level YAML `on:` trigger (string,
 // list or map). It returns hasPR when pull_request or pull_request_target is a
 // trigger, and filtered when every such trigger defines paths or paths-ignore.
 func parsePRWorkflow(src string) (bool, bool) {
-	lines := strings.Split(strings.ReplaceAll(src, "\r\n", "\n"), "\n")
+	lines := strings.Split(strings.ReplaceAll(strings.TrimPrefix(src, "\uFEFF"), "\r\n", "\n"), "\n")
 	for i, ln := range lines {
-		if j := yamlScan(ln, func(j int, c byte) bool { return c == '#' && (j == 0 || ln[j-1] == ' ' || ln[j-1] == '\t') }); j >= 0 {
+		if j := yamlScan(ln, func(j int, c byte) bool {
+			return c == '#' && (j == 0 || ln[j-1] == ' ' || ln[j-1] == '\t')
+		}); j >= 0 {
 			ln = ln[:j]
 		}
 		lines[i] = strings.TrimRight(ln, " \t")
 	}
 	collect := func(i int, b string) string {
-		for _, d := yamlFlow(b); len(b) > 0 && (b[0] == '[' || b[0] == '{') && d > 0 && i+1 < len(lines); _, d = yamlFlow(b) {
+		for _, d := yamlFlow(b); len(b) > 0 && (b[0] == '[' || b[0] == '{') && d > 0 && i+1 < len(lines); {
 			i, b = i+1, b+" "+strings.TrimSpace(lines[i+1])
+			_, d = yamlFlow(b)
 		}
 		return b
 	}
+	isPaths := func(s string) bool { k, _, ok := yamlKey(s); return ok && (k == "paths" || k == "paths-ignore") }
+	trimTrigger := func(s string) bool { return isPRTrigger(strings.Trim(strings.TrimSpace(s), "\"'")) }
 	hasPaths := func(v string) bool {
 		items, _ := yamlFlow(strings.TrimSuffix(strings.TrimPrefix(v, "{"), "}"))
-		return len(v) >= 2 && v[0] == '{' && v[len(v)-1] == '}' && slices.ContainsFunc(items, func(s string) bool { k, _, ok := yamlKey(s); return ok && (k == "paths" || k == "paths-ignore") })
+		return len(v) >= 2 && v[0] == '{' && v[len(v)-1] == '}' && slices.ContainsFunc(items, isPaths)
 	}
 	for i, ln := range lines {
-		if k, rest, ok := yamlKey(ln); len(ln) > 0 && ln[0] != ' ' && ln[0] != '\t' && ok && k == "on" {
-			if rest != "" {
+		if k, rest, ok := yamlKey(ln); len(ln) > 0 && ln[0] != ' ' && ln[0] != '\t' && ok && (k == "on" || k == "true") {
+			if strings.HasPrefix(rest, "&") {
+				_, rest, _ = strings.Cut(strings.ReplaceAll(rest, "\t", " "), " ")
+			}
+			if rest = strings.TrimSpace(rest); rest != "" {
 				v := collect(i, rest)
-				if len(v) < 2 || (v[0] != '[' && v[0] != '{') || (v[0] == '[' && v[len(v)-1] != ']') || (v[0] == '{' && v[len(v)-1] != '}') {
-					return isPRTrigger(strings.Trim(strings.TrimSpace(v), "\"'")), false
+				if len(v) < 2 || (v[0] != '[' || v[len(v)-1] != ']') && (v[0] != '{' || v[len(v)-1] != '}') {
+					return trimTrigger(v), false
 				}
 				items, _ := yamlFlow(v[1 : len(v)-1])
 				if v[0] == '[' {
-					return slices.ContainsFunc(items, func(s string) bool { return isPRTrigger(strings.Trim(strings.TrimSpace(s), "\"'")) }), false
+					return slices.ContainsFunc(items, trimTrigger), false
 				}
 				hasPR, unfilt := false, false
 				for _, it := range items {
 					if tk, val, tok := yamlKey(it); tok && isPRTrigger(tk) {
 						hasPR, unfilt = true, unfilt || !hasPaths(val)
+					} else if !tok && trimTrigger(it) {
+						hasPR, unfilt = true, true
 					}
 				}
 				return hasPR, hasPR && !unfilt
@@ -320,13 +336,13 @@ func parsePRWorkflow(src string) (bool, bool) {
 					if inPR && child < 0 {
 						child = ind
 					}
-					if tk, _, tok := yamlKey(tr); inPR && ind == child && tok && (tk == "paths" || tk == "paths-ignore") {
+					if inPR && ind == child && isPaths(tr) {
 						filt, inPR = filt+1, false
 					}
 					continue
 				}
 				inPR, child = false, -1
-				if tr[0] == '-' && (len(tr) == 1 || tr[1] == ' ' || tr[1] == '\t') && isPRTrigger(strings.Trim(strings.TrimSpace(tr[1:]), "\"'")) {
+				if tr[0] == '-' && (len(tr) == 1 || tr[1] == ' ' || tr[1] == '\t') && trimTrigger(tr[1:]) {
 					return true, false
 				}
 				if tk, val, tok := yamlKey(tr); tok && isPRTrigger(tk) {
@@ -370,7 +386,9 @@ func yamlFlow(s string) ([]string, int) {
 
 func yamlKey(s string) (string, string, bool) {
 	s = strings.TrimSpace(s)
-	if i := yamlScan(s, func(i int, c byte) bool { return c == ':' && (i+1 == len(s) || s[i+1] == ' ' || s[i+1] == '\t') }); s != "" && s[0] != '-' && i >= 0 {
+	if i := yamlScan(s, func(i int, c byte) bool {
+		return c == ':' && (i+1 == len(s) || s[i+1] == ' ' || s[i+1] == '\t')
+	}); s != "" && s[0] != '-' && i >= 0 {
 		return strings.Trim(strings.TrimSpace(s[:i]), "\"'"), strings.TrimSpace(s[i+1:]), true
 	}
 	return "", "", false

@@ -65,6 +65,28 @@ func TestFactoryStartRefusedByChecks(t *testing.T) {
 	}
 }
 
+func TestFactoryStartPassesConfigDataDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	customData := filepath.Join(home, "custom-data")
+	cfgFile := filepath.Join(home, "config.toml")
+	if err := os.WriteFile(cfgFile, []byte("data_dir = \""+customData+"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var gotOpts factory.DoctorOptions
+	old := factoryStartChecks
+	factoryStartChecks = func(_ context.Context, o factory.DoctorOptions) []onboard.Result {
+		gotOpts = o
+		return []onboard.Result{{Name: "start claude", Status: onboard.Fail, Detail: "signed out", Fix: "login"}}
+	}
+	t.Cleanup(func() { factoryStartChecks = old })
+	var out, errBuf bytes.Buffer
+	_ = run(context.Background(), []string{"factory", "start", home, "--goal", "g", "--config", cfgFile}, &out, &errBuf)
+	if gotOpts.DataDir != customData {
+		t.Fatalf("start --config DataDir = %q, want %q", gotOpts.DataDir, customData)
+	}
+}
+
 func TestFactoryCommandCLI(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -201,6 +223,20 @@ func TestFactoryCommandCLI(t *testing.T) {
 		code := run(context.Background(), []string{"factory", "doctor", "--no-canary"}, &out, &errBuf)
 		if code != 0 || gotOpts.HCSocket != cfgSock || gotOpts.ClaudeModel != "" {
 			t.Fatalf("valid default config: code=%d opts=%+v stderr=%s", code, gotOpts, errBuf.String())
+		}
+	})
+
+	t.Run("doctor --config passes data_dir to runner", func(t *testing.T) {
+		stubResults = []onboard.Result{{Name: "herdr-core", Status: onboard.OK, Detail: "ok"}}
+		customData := filepath.Join(home, "custom-data")
+		cfgFile := filepath.Join(home, "custom.toml")
+		if err := os.WriteFile(cfgFile, []byte("data_dir = \""+customData+"\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var out, errBuf bytes.Buffer
+		code := run(context.Background(), []string{"factory", "doctor", "--config", cfgFile, "--no-canary"}, &out, &errBuf)
+		if code != 0 || gotOpts.DataDir != customData {
+			t.Fatalf("doctor --config: code=%d DataDir=%q want %q stderr=%s", code, gotOpts.DataDir, customData, errBuf.String())
 		}
 	})
 }

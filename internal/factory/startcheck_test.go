@@ -2,6 +2,8 @@ package factory
 
 import (
 	"context"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -104,6 +106,10 @@ func TestStartChecksStatuses(t *testing.T) {
 		{"workflow block list", "on:\n  - push\n  - pull_request\njobs: {}\n", nil, "pr workflow", onboard.OK},
 		{"workflow quoted on indent 0 list", "'on':\n- pull_request\njobs: {}\n", nil, "pr workflow", onboard.OK},
 		{"workflow flow map", "on: { push: {}, pull_request: {} }\njobs: {}\n", nil, "pr workflow", onboard.OK},
+		{"workflow utf8 bom", "\uFEFFon: pull_request\njobs: {}\n", nil, "pr workflow", onboard.OK},
+		{"workflow flow map null values", "on: {pull_request, push}\njobs: {}\n", nil, "pr workflow", onboard.OK},
+		{"workflow anchor block map", "on: &triggers\n  pull_request:\njobs: {}\n", nil, "pr workflow", onboard.OK},
+		{"workflow yaml 1.1 true key", "true:\n  pull_request:\njobs: {}\n", nil, "pr workflow", onboard.OK},
 		{"workflow push only", "on: push\njobs: {}\n", nil, "pr workflow", onboard.Fail},
 		{"workflow pull_request only in if", "on: push\njobs:\n  ci:\n    if: github.event_name == 'pull_request'\n    runs-on: ubuntu-latest\n", nil, "pr workflow", onboard.Fail},
 		{"workflow pull_request only in string", "name: pull_request check\non: push\njobs:\n  ci:\n    steps:\n      - run: echo pull_request\n", nil, "pr workflow", onboard.Fail},
@@ -111,13 +117,27 @@ func TestStartChecksStatuses(t *testing.T) {
 		{"workflow none", "", nil, "pr workflow", onboard.Fail},
 		{"workflow paths-ignore warns", "on:\n  pull_request:\n    paths-ignore:\n      - 'docs/**'\njobs: {}\n", nil, "pr workflow", onboard.Warn},
 		{"workflow paths warns", "on:\n  pull_request:\n    paths: ['src/**']\njobs: {}\n", nil, "pr workflow", onboard.Warn},
+		{"workflow pull_request_target paths warns", "on:\n  pull_request_target:\n    paths: ['src/**']\njobs: {}\n", nil, "pr workflow", onboard.Warn},
+		{"workflow .yaml filtered warns", "on:\n  pull_request:\n    paths-ignore: ['docs/**']\njobs: {}\n", startFake{
+			"ls-tree --name-only origin/main .github/workflows/": out(".github/workflows/ci.yaml"),
+			"show origin/main:.github/workflows/ci.yaml":         out("on:\n  pull_request:\n    paths-ignore: ['docs/**']\njobs: {}\n"),
+		}, "pr workflow", onboard.Warn},
 		{"workflow flow map paths warns", "on: { pull_request: { paths: [src/**] } }\njobs: {}\n", nil, "pr workflow", onboard.Warn},
 		{"workflow push paths-ignore does not warn", "on:\n  push:\n    paths-ignore: ['docs/**']\n  pull_request:\n    branches: [main]\njobs: {}\n", nil, "pr workflow", onboard.OK},
 		{"git version 2.38 ok", goodWorkflow, startFake{"git --version": out("git version 2.38.0\n")}, "git version", onboard.OK},
+		{"git version 2.38 rc ok", goodWorkflow, startFake{"git --version": out("git version 2.38.0-rc1\n")}, "git version", onboard.OK},
+		{"git version 2.38 apple ok", goodWorkflow, startFake{"git --version": out("git version 2.38.0 (Apple Git-143)\n")}, "git version", onboard.OK},
 		{"git version 3.0 ok", goodWorkflow, startFake{"git --version": out("git version 3.0.0\n")}, "git version", onboard.OK},
 		{"git version 2.37 fails", goodWorkflow, startFake{"git --version": out("git version 2.37.1 (Apple Git-137.1)\n")}, "git version", onboard.Fail},
+		{"git version 2.37 rc fails", goodWorkflow, startFake{"git --version": out("git version 2.37.9-rc0\n")}, "git version", onboard.Fail},
+		{"git version odd output fails", goodWorkflow, startFake{"git --version": out("hub version x\n")}, "git version", onboard.Fail},
 		{"git version missing fails", goodWorkflow, startFake{"git --version": {Exit: 127, Stderr: "not found"}}, "git version", onboard.Fail},
 		{"empty remote repo fails", goodWorkflow, startFake{"gh repo view o/r --json defaultBranchRef,viewerPermission": out(`{"defaultBranchRef":null,"viewerPermission":"ADMIN"}`)}, "github remote", onboard.Fail},
+		{"unborn local head with gh failure is not empty", goodWorkflow, startFake{
+			"rev-parse --verify HEAD":                                   {Exit: 128},
+			"refs/remotes/origin/HEAD":                                  {Exit: 1},
+			"gh repo view o/r --json defaultBranchRef,viewerPermission": {Exit: 1, Stderr: "not logged in"},
+		}, "github remote", onboard.Skip},
 		{"no review required", goodWorkflow, nil, "review rule", onboard.OK},
 		{"protection with 0 approvals", goodWorkflow, startFake{"gh api repos/o/r/branches/main": out(`{"protected":true}`), "branches/main/protection": protect("0")}, "review rule", onboard.OK},
 		{"protection needs approval", goodWorkflow, startFake{"gh api repos/o/r/branches/main": out(`{"protected":true}`), "branches/main/protection": protect("1")}, "review rule", onboard.Fail},
@@ -270,6 +290,7 @@ func TestStartChecksSecondReviewerCodex(t *testing.T) {
 	}{
 		{"codex signed in", out("Logged in using ChatGPT\n"), onboard.OK},
 		{"codex signed out", CommandOutput{Exit: 1, Stdout: "Not logged in\n"}, onboard.Fail},
+		{"codex exit 0 not logged in", CommandOutput{Exit: 0, Stderr: "Not logged in\n"}, onboard.Fail},
 		{"codex missing", CommandOutput{Exit: 127}, onboard.Fail},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -292,6 +313,27 @@ func TestStartChecksSecondReviewerCodex(t *testing.T) {
 	for _, r := range StartChecks(context.Background(), DoctorOptions{Folder: other, DataDir: dataDir, RunCommand: f.run}) {
 		if r.Name == "start codex" {
 			t.Fatalf("unexpected start codex check for default settings: %+v", r)
+		}
+	}
+
+	// Empty DataDir means no project state (check claude only), even when XDG_DATA_HOME has state.
+	t.Setenv("XDG_DATA_HOME", dataDir)
+	f2 := makeFake(CommandOutput{Exit: 127})
+	for _, r := range StartChecks(context.Background(), DoctorOptions{Folder: root, RunCommand: f2.run}) {
+		if r.Name == "start codex" {
+			t.Fatalf("empty DataDir must not read project state: %+v", r)
+		}
+	}
+}
+
+func TestStartCheckNoTestingImport(t *testing.T) {
+	f, err := parser.ParseFile(token.NewFileSet(), "startcheck.go", nil, parser.ImportsOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, imp := range f.Imports {
+		if imp.Path.Value == `"testing"` {
+			t.Fatalf("startcheck.go must not import testing")
 		}
 	}
 }
@@ -318,16 +360,29 @@ func TestStartChecksTempRepos(t *testing.T) {
 		return CommandOutput{Exit: 1, Stderr: "no gh"}
 	}
 
-	t.Run("empty local repo fails with push a first commit", func(t *testing.T) {
+	t.Run("empty local repo with no remote fails with no GitHub remote", func(t *testing.T) {
 		empty := t.TempDir()
 		runGit(empty, "init", "-b", "main")
 		rs := StartChecks(context.Background(), DoctorOptions{Folder: empty, RunCommand: hybrid})
 		r := findResult(t, rs, "github remote")
-		if r.Status != onboard.Fail || !strings.Contains(r.Fix, "push a first commit to main") {
-			t.Fatalf("empty repo github remote = %+v", r)
+		if r.Status != onboard.Fail || !strings.Contains(r.Detail, "no GitHub remote") || !strings.Contains(r.Fix, "git remote add origin") {
+			t.Fatalf("no-remote empty repo github remote = %+v", r)
 		}
-		if w := findResult(t, rs, "pr workflow"); w.Status != onboard.Skip {
-			t.Fatalf("empty repo pr workflow = %+v, want Skip", w)
+	})
+
+	t.Run("empty remote repo fails with push a first commit and skips downstream", func(t *testing.T) {
+		res := runStart(t, goodWorkflow, startFake{
+			"gh repo view o/r --json defaultBranchRef,viewerPermission": out(`{"defaultBranchRef":null,"viewerPermission":"ADMIN"}`),
+			"symbolic-ref --quiet --short HEAD":                         out("main"),
+		})
+		r := res["github remote"]
+		if r.Status != onboard.Fail || !strings.Contains(r.Fix, "push a first commit to main") {
+			t.Fatalf("empty remote github remote = %+v", r)
+		}
+		for _, skipped := range []string{"pr workflow", "review rule", "base protection"} {
+			if s := res[skipped]; s.Status != onboard.Skip {
+				t.Fatalf("empty remote %s = %+v, want Skip", skipped, s)
+			}
 		}
 	})
 

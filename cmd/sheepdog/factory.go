@@ -108,9 +108,10 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 		home, _ := os.UserHomeDir()
 		folder = resolveTargetFolder(fs.Arg(0), home)
 	}
+	cfg, err := config.Load(*configPath)
 	if sub == "start" {
 		var failed []string
-		for _, r := range factoryStartChecks(ctx, factory.DoctorOptions{Folder: folder, GHHost: os.Getenv("GH_HOST")}) {
+		for _, r := range factoryStartChecks(ctx, factory.DoctorOptions{Folder: folder, DataDir: cfg.DataDir, GHHost: os.Getenv("GH_HOST")}) {
 			if r.Status == onboard.Fail {
 				failed = append(failed, r.Line())
 			}
@@ -120,7 +121,6 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 			return 1
 		}
 	}
-	cfg, err := config.Load(*configPath)
 	if err == nil {
 		body := map[string]any{"folder": folder, "project": folder, "goal": strings.TrimSpace(*goal), "token": os.Getenv(runTokenEnv), "max_running": *maxRunning}
 		err = postJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/factory/"+sub, body)
@@ -524,7 +524,7 @@ func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	folder = resolveTargetFolder(folder, home)
 
-	socket, badCfg := resolveFactoryConfig(*hcSocket, *configPath, home)
+	socket, dataDir, badCfg := resolveFactoryConfig(*hcSocket, *configPath, home)
 	if badCfg != nil {
 		fprintln(stdout, badCfg.Line())
 		return 1
@@ -536,6 +536,7 @@ func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writ
 		Canary:   !*noCanary,
 		Home:     home,
 		GHHost:   os.Getenv("GH_HOST"),
+		DataDir:  dataDir,
 	})
 	for _, r := range results {
 		fprintln(stdout, r.Line())
@@ -594,7 +595,7 @@ func resolveTargetFolder(raw, home string) string {
 	return filepath.Clean(f)
 }
 
-func resolveFactoryConfig(explicitSocket, configPath, home string) (socket string, badCfg *onboard.Result) {
+func resolveFactoryConfig(explicitSocket, configPath, home string) (socket, dataDir string, badCfg *onboard.Result) {
 	explicitCfg := strings.TrimSpace(configPath)
 	cfgPath := explicitCfg
 	if cfgPath == "" {
@@ -606,7 +607,7 @@ func resolveFactoryConfig(explicitSocket, configPath, home string) (socket strin
 			Detail: err.Error(),
 			Fix:    "pass an existing --config PATH",
 		}
-		return "", &r
+		return "", "", &r
 	}
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
@@ -616,12 +617,12 @@ func resolveFactoryConfig(explicitSocket, configPath, home string) (socket strin
 			Detail: err.Error(),
 			Fix:    "fix " + cfgPath + " or pass --config PATH",
 		}
-		return "", &r
+		return "", "", &r
 	}
 	if explicitSock := strings.TrimSpace(explicitSocket); explicitSock != "" {
-		return expandHomePath(explicitSock, home), nil
+		return expandHomePath(explicitSock, home), cfg.DataDir, nil
 	}
-	return expandHomePath(cfg.Herdr.HCSocketPath(), home), nil
+	return expandHomePath(cfg.Herdr.HCSocketPath(), home), cfg.DataDir, nil
 }
 
 func expandHomePath(p, home string) string {
