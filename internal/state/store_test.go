@@ -453,3 +453,36 @@ func TestReleasedAgentLeavesItsPaneRow(t *testing.T) {
 		t.Fatalf("agents after release = %+v, want none", rows)
 	}
 }
+
+func TestQuestionSurvivesDoneToIdleAndClosesOnWorking(t *testing.T) {
+	s, err := Open("", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustApply(t, s, tr("w5:p1", herdr.StateWorking, herdr.StateDone, t0))
+	if _, err := s.Update("w5:p1", func(a *Agent) {
+		a.LastBlock = &Block{Question: "whether it can create claude.txt", SeenAt: t0}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	q := PendingAction{ID: "ap-1", PaneID: "w5:p1", Kind: PendingAnswerPrompt, Question: "whether it can create claude.txt", CreatedAt: t0}
+	if err := s.SetQuestion(q); err != nil {
+		t.Fatal(err)
+	}
+
+	mustApply(t, s, tr("w5:p1", herdr.StateDone, herdr.StateIdle, t0.Add(5*time.Second)))
+	if got, ok := s.Question("ap-1"); !ok || got.PaneID != "w5:p1" {
+		t.Fatalf("question after done -> idle = %+v, %v; want preserved", got, ok)
+	}
+	if row, _ := s.Get("w5:p1"); row.LastBlock == nil || row.LastBlock.Answered {
+		t.Fatalf("last_block after done -> idle = %+v; want unanswered", row.LastBlock)
+	}
+
+	mustApply(t, s, tr("w5:p1", herdr.StateIdle, herdr.StateWorking, t0.Add(10*time.Second)))
+	if _, ok := s.Question("ap-1"); ok {
+		t.Fatal("question still open after idle -> working")
+	}
+	if row, _ := s.Get("w5:p1"); row.LastBlock == nil || !row.LastBlock.Answered {
+		t.Fatalf("last_block after idle -> working = %+v; want answered", row.LastBlock)
+	}
+}

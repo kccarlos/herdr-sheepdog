@@ -134,5 +134,8 @@ func (s *Supervisor) promptState(a announcement) string {
 	case row.State == herdr.StateBlocked:
 		return brain.PromptWaiting
 	}
+	if q, ok := s.store.Question(a.pending); ok && q.PaneID == a.row.PaneID {
+		return brain.PromptWaiting
+	}
 	return brain.PromptGone
 }
