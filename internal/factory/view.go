@@ -77,10 +77,13 @@ func projectViewOf(s flow.State) ProjectView {
 }
 
 func GraphViewOf(s flow.State, logs []LogLine) GraphView {
-	idx, deps, lastLog := make(map[string]int, len(s.Tasks)), map[string][]string{}, map[string]LogLine{}
+	idx, deps, lastLog, lastRow := make(map[string]int, len(s.Tasks)), map[string][]string{}, map[string]LogLine{}, map[string]string{}
 	for _, l := range logs {
 		if l.Task != "" {
 			lastLog[l.Task] = l
+			if slices.ContainsFunc(flow.TaskRows, func(r flow.Row[flow.In]) bool { return r.ID == l.Rule }) {
+				lastRow[l.Task] = l.Rule
+			}
 		}
 	}
 	for i, t := range s.Tasks {
@@ -101,7 +104,7 @@ func GraphViewOf(s flow.State, logs []LogLine) GraphView {
 	}
 	tasks := make([]TaskView, 0, len(s.Tasks))
 	for i, t := range s.Tasks {
-		stage, why := taskStageWhy(t, s.Tasks, s.Settings, s.Project.Started)
+		stage, why := taskStageWhy(t, s.Tasks, s.Settings, s.Project.Started, lastRow[t.ID])
 		l, model, term, rounds := lastLog[t.ID], "", "", 0
 		if n := len(t.Attempts); n > 0 {
 			rounds = len(slices.DeleteFunc(slices.Clone(flow.Counted(t.Attempts[n-1])), func(r flow.Round) bool { return r.Kind == flow.RoundSendBack }))
@@ -197,7 +200,7 @@ var stateStage = map[string][2]string{
 	flow.Passed: {"ci", "Waiting on CI and merge"}, flow.NoLadderRow: {"blocked_or_failed", "Waiting on the coordinator"},
 }
 
-func taskStageWhy(t flow.Task, tasks []flow.Task, settings flow.Settings, started bool) (string, string) {
+func taskStageWhy(t flow.Task, tasks []flow.Task, settings flow.Settings, started bool, lastRule string) (string, string) {
 	a, st, why := flow.OpenAttempt(t), "", ""
 	notDone, dropped := flow.UnmetDeps(t, tasks)
 	unmet := append(notDone, dropped...)
@@ -222,6 +225,8 @@ func taskStageWhy(t flow.Task, tasks []flow.Task, settings flow.Settings, starte
 			why = fmt.Sprintf("In review round %d", a.Review.Round)
 		} else if st == flow.Review {
 			why = fmt.Sprintf("In review round %d", len(a.Rounds)+1)
+		} else if st == flow.Passed && lastRule == "N38" {
+			why = "Waiting on the base branch"
 		}
 	}
 	if info, ok := stateStage[st]; ok {

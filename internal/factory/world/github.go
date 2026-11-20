@@ -346,6 +346,75 @@ func headRuns(ctx context.Context, dir, repo, head string) (bool, map[string]boo
 	return pending, failed, err
 }
 
+// BaseRun is the newest finished push workflow run on the base branch.
+type BaseRun struct {
+	ID                          int64
+	Branch, HeadSHA, Conclusion string
+	Red, Known                  bool
+}
+
+// BaseStatus reads the newest finished push workflow run on the push remote's
+// base branch (design.md 7.3, N38, KB-MRG-47). Failure, timed_out and
+// cancelled-by-limit count red; success counts green; skipped/neutral and
+// external cancels are skipped. Read errors are returned so callers keep the
+// last known state and never flip red.
+func BaseStatus(ctx context.Context, repoDir string) (BaseRun, error) {
+	repo, err := ghRepo(ctx, repoDir)
+	if err != nil {
+		return BaseRun{}, err
+	}
+	ref, _, err := remoteBaseCommit(ctx, repoDir, false)
+	if err != nil {
+		return BaseRun{}, err
+	}
+	base := strings.TrimPrefix(ref, "refs/remotes/"+pushRemote+"/")
+	var resp struct {
+		WorkflowRuns []struct {
+			ID         int64
+			HeadSHA    string `json:"head_sha"`
+			Conclusion string
+		} `json:"workflow_runs"`
+	}
+	if err := ghAPI(ctx, repoDir, "repos/"+repo+"/actions/runs?branch="+url.QueryEscape(base)+"&event=push&status=completed&per_page=10", &resp); err != nil {
+		return BaseRun{}, err
+	}
+	for _, r := range resp.WorkflowRuns {
+		switch c := strings.ToLower(r.Conclusion); c {
+		case "failure", "timed_out", "startup_failure", "action_required":
+			return BaseRun{ID: r.ID, Branch: base, HeadSHA: r.HeadSHA, Conclusion: c, Red: true, Known: true}, nil
+		case "success":
+			return BaseRun{ID: r.ID, Branch: base, HeadSHA: r.HeadSHA, Conclusion: c, Known: true}, nil
+		case "cancelled":
+			if lim, err := runCancelledByLimit(ctx, repoDir, repo, r.ID); err != nil || lim {
+				return BaseRun{ID: r.ID, Branch: base, HeadSHA: r.HeadSHA, Conclusion: "cancelled_timeout", Red: lim, Known: lim}, err
+			}
+		}
+	}
+	return BaseRun{Branch: base}, nil
+}
+
+func runCancelledByLimit(ctx context.Context, dir, repo string, runID int64) (bool, error) {
+	limited := false
+	err := ghPages(ctx, dir, fmt.Sprintf("repos/%s/actions/runs/%d/jobs", repo, runID), 100, func(raw []byte) (int, error) {
+		var resp struct {
+			Jobs []struct {
+				ID         int64
+				Conclusion string
+			}
+		}
+		err := json.Unmarshal(raw, &resp)
+		for _, j := range resp.Jobs {
+			if err == nil && strings.EqualFold(j.Conclusion, "cancelled") {
+				var stop string
+				stop, err = checkRunStop(ctx, dir, repo, j.ID)
+				limited = limited || stop == "timeout"
+			}
+		}
+		return len(resp.Jobs), err
+	})
+	return limited, err
+}
+
 // MergePR asks GitHub to squash-merge PR number, pinned to head: GitHub
 // refuses it if the PR head moved. Never --admin, --auto or --delete-branch
 // (design.md 9.4, KB-MRG-10). The squash body is the caller's, built from

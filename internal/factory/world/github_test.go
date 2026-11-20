@@ -55,6 +55,8 @@ api\ *)
     f="$D/check-runs$sfx.json"; case "$2" in *filter=all*) [ -f "$D/check-runs.all$sfx.json" ] && f="$D/check-runs.all$sfx.json" ;; esac
     cat "$f" 2>/dev/null || echo '{"total_count":0,"check_runs":[]}' ;;
   */commits/*/status*) failif status; cat "$D/status$sfx.json" 2>/dev/null || echo '{"state":"pending","total_count":0,"statuses":[]}' ;;
+  */actions/runs/*/jobs*) failif run_jobs; cat "$D/run-jobs$sfx.json" 2>/dev/null || echo '{"jobs":[]}' ;;
+  */actions/runs*branch=*) failif base_runs; cat "$D/base-runs.json" 2>/dev/null || echo '{"workflow_runs":[]}' ;;
   */actions/runs*) failif workflow_runs; cat "$D/workflow-runs$sfx.json" 2>/dev/null || echo '{"total_count":0,"workflow_runs":[]}' ;;
   */compare/*) failif compare; cat "$D/compare.json" 2>/dev/null || echo '{"behind_by":0}' ;;
   *) echo "unexpected gh api $2" >&2; exit 2 ;;
@@ -749,5 +751,57 @@ func TestUpdateBranch(t *testing.T) {
 	writeGH(t, gh, "update_branch_fail", "")
 	if err := UpdateBranch(ctx, repo, 7, "abc1234"); err == nil {
 		t.Fatal("UpdateBranch succeeded when fake gh failed")
+	}
+}
+
+func TestBaseStatus(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+
+	// Empty runs list -> unknown, not red.
+	got, err := BaseStatus(ctx, repo)
+	if err != nil || got.Known || got.Red || got.Branch != "main" {
+		t.Fatalf("empty = %+v, %v", got, err)
+	}
+	wantCall := "api repos/acme/demo/actions/runs?branch=main&event=push&status=completed&per_page=10"
+	if calls := ghCalls(t, gh, "api repos/acme/demo/actions/runs"); len(calls) != 1 || calls[0] != wantCall {
+		t.Fatalf("calls = %q, want [%q]", calls, wantCall)
+	}
+
+	// Failure and timed_out count red; success counts green.
+	for _, tc := range []struct {
+		name, body string
+		red, known bool
+		id         int64
+	}{
+		{"failure", `{"workflow_runs":[{"id":11,"head_sha":"aaa","conclusion":"failure"}]}`, true, true, 11},
+		{"timed_out", `{"workflow_runs":[{"id":12,"head_sha":"bbb","conclusion":"timed_out"}]}`, true, true, 12},
+		{"success", `{"workflow_runs":[{"id":13,"head_sha":"ccc","conclusion":"success"}]}`, false, true, 13},
+		{"skipped then failure", `{"workflow_runs":[{"id":14,"head_sha":"ddd","conclusion":"skipped"},{"id":15,"head_sha":"eee","conclusion":"failure"}]}`, true, true, 15},
+	} {
+		writeGH(t, gh, "base-runs.json", tc.body)
+		got, err := BaseStatus(ctx, repo)
+		if err != nil || got.Red != tc.red || got.Known != tc.known || got.ID != tc.id {
+			t.Errorf("%s: got %+v, %v; want red=%v known=%v id=%d", tc.name, got, err, tc.red, tc.known, tc.id)
+		}
+	}
+
+	// Cancelled by job time limit counts red; external cancel falls through to older success (green).
+	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[{"id":20,"head_sha":"fff","conclusion":"cancelled"},{"id":19,"head_sha":"eee","conclusion":"success"}]}`)
+	writeGH(t, gh, "run-jobs.json", `{"jobs":[{"id":501,"conclusion":"cancelled"}]}`)
+	writeGH(t, gh, "annotations.json", `[{"message":"The job has exceeded the maximum execution time of 60m0s"}]`)
+	if got, err := BaseStatus(ctx, repo); err != nil || !got.Red || !got.Known || got.ID != 20 {
+		t.Fatalf("cancelled by limit = %+v, %v; want red id=20", got, err)
+	}
+	writeGH(t, gh, "annotations.json", `[{"message":"The run was canceled by @someone."}]`)
+	if got, err := BaseStatus(ctx, repo); err != nil || got.Red || !got.Known || got.ID != 19 {
+		t.Fatalf("cancelled externally = %+v, %v; want green id=19", got, err)
+	}
+
+	// Read error returns err (never flips red).
+	writeGH(t, gh, "base_runs_fail", "")
+	if _, err := BaseStatus(ctx, repo); err == nil {
+		t.Fatal("BaseStatus succeeded on base_runs_fail")
 	}
 }

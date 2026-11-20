@@ -119,6 +119,11 @@ type Facts struct {
 	// GitHubUnavailable is the project fact raised when GitHub cannot be read
 	// (design.md 7.3); it holds merges (N42) and never marks the repo non-GitHub.
 	GitHubUnavailable bool `json:"github_unavailable,omitempty"`
+	// BaseRed is the project fact from the base observer (design.md 7.3, N38).
+	BaseRed       bool      `json:"base_red,omitempty"`
+	BaseRedSince  time.Time `json:"base_red_since,omitempty"`
+	BaseRedRun    string    `json:"base_red_run,omitempty"`
+	BaseRedOldest bool      `json:"base_red_oldest,omitempty"`
 }
 
 // In is what a row sees: the task's records, the settings, the facts and

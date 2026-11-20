@@ -22,6 +22,7 @@ type Settings struct {
 	RetroAfterRoundsWithMajors int `json:"retro_after_rounds_with_majors"` // L12 (design.md 10.1)
 	RetroFromRound             int `json:"retro_from_round"`               // L12 (design.md 10.1)
 	ChecksGraceMinutes         int `json:"checks_grace_minutes"`           // N35, N36 (design.md 10.1)
+	MainRedMinutes             int `json:"main_red_minutes"`               // N38 (design.md 10.1)
 	CIFailsPerHour             int `json:"ci_fails_per_hour"`              // N13 (design.md 10.1)
 	FlakeReruns                int `json:"flake_reruns"`                   // N33, N34 (design.md 10.1)
 	StuckMinutes               int `json:"stuck_minutes"`                  // S2, until slice 5a (design.md 10.1)
@@ -49,6 +50,8 @@ const (
 	RetroFromMax      = 6
 	ChecksGraceMin    = 1
 	ChecksGraceMax    = 60
+	MainRedMin        = 5
+	MainRedMax        = 600
 	CIFailsPerHourMin = 1
 	CIFailsPerHourMax = 10
 	FlakeRerunsMax    = 3
@@ -70,7 +73,7 @@ func DefaultSettings() Settings {
 	return Settings{
 		ReviewRounds: 2, MaxRounds: 5,
 		RetroAfterRoundsWithMajors: 2, RetroFromRound: 3,
-		ChecksGraceMinutes: 5, CIFailsPerHour: 3, FlakeReruns: 1, StuckMinutes: 30,
+		ChecksGraceMinutes: 5, MainRedMinutes: 60, CIFailsPerHour: 3, FlakeReruns: 1, StuckMinutes: 30,
 		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2, MaxRunning: 3,
 		SecondReviewer: "opus",
 	}
@@ -91,6 +94,7 @@ func (s Settings) Changed() []string {
 		{"continue_lines", s.ContinueLines, d.ContinueLines},
 		{"continues_per_task", s.ContinuesPerTask, d.ContinuesPerTask},
 		{"flake_reruns", s.FlakeReruns, d.FlakeReruns},
+		{"main_red_minutes", s.MainRedMinutes, d.MainRedMinutes},
 		{"max_rounds", s.MaxRounds, d.MaxRounds},
 		{"max_running", s.MaxRunning, d.MaxRunning},
 		{"retro_after_rounds_with_majors", s.RetroAfterRoundsWithMajors, d.RetroAfterRoundsWithMajors},
@@ -124,6 +128,7 @@ func (s Settings) Validate() error {
 		{"retro_after_rounds_with_majors", s.RetroAfterRoundsWithMajors, RetroMajorsMin, RetroMajorsMax},
 		{"retro_from_round", s.RetroFromRound, RetroFromMin, RetroFromMax},
 		{"checks_grace_minutes", s.ChecksGraceMinutes, ChecksGraceMin, ChecksGraceMax},
+		{"main_red_minutes", s.MainRedMinutes, MainRedMin, MainRedMax},
 		{"ci_fails_per_hour", s.CIFailsPerHour, CIFailsPerHourMin, CIFailsPerHourMax},
 		{"flake_reruns", s.FlakeReruns, 0, FlakeRerunsMax},
 		{"stuck_minutes", s.StuckMinutes, StuckMin, StuckMax},

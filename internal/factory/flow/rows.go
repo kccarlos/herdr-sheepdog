@@ -24,6 +24,7 @@ const (
 	AskPushPR       = "push_and_open_pr"
 	AskRerunCI      = "rerun_ci"
 	AskTellCI       = "tell_worker_ci"
+	AskTellBaseRed  = "tell_worker_base_red"
 	AskDispatchCI   = "dispatch_ci"
 	AskUpdateBranch = "update_branch"
 	AskFailUpdate   = "fail_update_branch"
@@ -130,6 +131,7 @@ func githubAvail(in In) bool          { return !githubUnavail(in) }
 func prBehindBase(in In) bool         { return in.Facts.PR.Behind && !in.Facts.PR.BehindUnknown }
 func prBehindUnknown(in In) bool      { return in.Facts.PR.BehindUnknown }
 func notBehind(in In) bool            { return !in.Facts.PR.Behind && !in.Facts.PR.BehindUnknown }
+func baseRed(in In) bool              { return in.Facts.BaseRed }
 func checksGreen(in In) bool          { return in.Facts.PR.Checks == ChecksGreen }
 func checksRed(in In) bool            { return in.Facts.PR.Checks == ChecksRed }
 func checksStoppedExt(in In) bool     { return in.Facts.PR.Checks == ChecksStoppedExternal }
@@ -328,6 +330,14 @@ var TaskRows = []Row[In]{
 		}
 		return say("no checks past checks_grace_minutes: push a change that triggers a workflow, ask for an owner override, or drop the task",
 			once(in.acts(), key(AskWake, "no_checks", h)))(in)
+	}},
+	{ID: "N38", WaitsOn: "the base branch", When: ciReady(all(baseRed, anyOf(prBehindBase, prBehindUnknown))), Then: func(in In) Decision {
+		if !in.Facts.BaseRedOldest || in.Facts.BaseRedSince.IsZero() || in.Now.Sub(in.Facts.BaseRedSince) < time.Duration(in.Settings.MainRedMinutes)*time.Minute {
+			return say("the base branch is red: holding branch updates and merges")(in)
+		}
+		spell := cmp.Or(in.Facts.BaseRedRun, in.Facts.BaseRedSince.UTC().Format(time.RFC3339))
+		return say("the base branch has been red past main_red_minutes: tell the oldest held task's worker to merge the base and say ready (or land a fix PR directly)",
+			ensureRun(in, in.Facts.Worker, AskStartWorker), once(in.acts(), key(AskTellBaseRed, spell)), once(in.acts(), key(AskWake, "base_red_held", spell)))(in)
 	}},
 	{ID: "N36", WaitsOn: "CI", When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown)),
 		Then: func(in In) Decision {
