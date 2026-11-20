@@ -177,13 +177,16 @@ func checkSweepLeftovers(ctx context.Context, o DoctorOptions, hcOK bool, dir st
 	if err != nil {
 		return nil
 	}
-	s, wtRoot, p := flow.State{}, "", Paths{DataDir: o.DataDir}
+	s, wtRoot, p, lerr := flow.State{}, "", Paths{DataDir: o.DataDir}, os.ErrNotExist
 	if o.DataDir != "" && id == "" {
 		id, _ = findStoredProject(p, repo)
 	}
 	if o.DataDir != "" && id != "" {
-		s, _ = LoadState(p.State(id))
+		s, lerr = LoadState(p.State(id))
 		wtRoot = filepath.Join(p.project(id), "worktrees")
+	}
+	if (lerr != nil || s.Project.Started && s.Project.RunID == "") && id != "" {
+		s.Project.RunID = coordName(id)
 	}
 	var client *hc.Client
 	if s.Project.ID = id; hcOK && id != "" {

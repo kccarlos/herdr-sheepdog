@@ -215,3 +215,91 @@ func TestEngineSweepLogLineNamesItems(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctorLiveCoordinatorReportsNoStray(t *testing.T) {
+	ctx := context.Background()
+	bare := filepath.Join(t.TempDir(), "remote.git")
+	repo := filepath.Join(t.TempDir(), "repo")
+	gitIn(t, t.TempDir(), "init", "--bare", "--initial-branch=main", bare)
+	gitIn(t, t.TempDir(), "clone", bare, repo)
+	gitIn(t, repo, "config", "user.email", "test@example.com")
+	gitIn(t, repo, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("init\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, repo, "add", "a.txt")
+	gitIn(t, repo, "commit", "-m", "init")
+	gitIn(t, repo, "push", "-u", "origin", "main")
+	gitIn(t, repo, "remote", "set-head", "origin", "main")
+	repo, id, err := world.RepoProject(ctx, repo, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	coord, err := client.Run(ctx, hc.RunParams{
+		Name:   coordName(id),
+		Cwd:    repo,
+		Argv:   []string{"true"},
+		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleCoordinator, "sheepdog.run": "run-coord"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.OnRun = func(term hc.Terminal, _ hc.RunParams) {
+		srv.FinishExit(term.Address, "exited", 0)
+	}
+
+	matchingPaths := Paths{DataDir: t.TempDir()}
+	if err := SaveState(matchingPaths.State(id), flow.State{
+		Project:  flow.Project{ID: id, Folder: repo, Started: true, RunID: coord.Address, Run: &flow.RunRecord{ID: "run-coord", Address: coord.Address, Role: flow.RoleCoordinator, State: flow.PhaseIdle}},
+		Settings: flow.DefaultSettings(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stoppedPaths := Paths{DataDir: t.TempDir()}
+	if err := SaveState(stoppedPaths.State(id), flow.State{
+		Project:  flow.Project{ID: id, Folder: repo, Started: false},
+		Settings: flow.DefaultSettings(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	env := newFakeEnv("hc", "claude", "gh", "codexbar")
+	env.handlers["claude auth"] = func(string, []string, []string) CommandOutput { return CommandOutput{Stdout: `{"loggedIn":true}`} }
+	env.handlers["gh auth"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 0} }
+	env.handlers["git -C"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 1} }
+	env.handlers["codexbar --version"] = func(string, []string, []string) CommandOutput { return CommandOutput{Stdout: "1.0"} }
+
+	runDoc := func(dataDir string) []string {
+		rs := Doctor(ctx, DoctorOptions{
+			Folder: repo, HCSocket: srv.Path, DataDir: dataDir, Canary: false,
+			TempDir: t.TempDir(), LookPath: env.lookPath, RunCommand: env.run,
+			VolumeTimeout: time.Second, AuthTimeout: time.Second,
+		})
+		var strays []string
+		for _, r := range rs {
+			if r.Name == "leftover stray_terminal" {
+				strays = append(strays, r.Detail)
+			}
+		}
+		return strays
+	}
+
+	for _, tc := range []struct {
+		name    string
+		dataDir string
+		want    int
+	}{
+		{"matching DataDir", matchingPaths.DataDir, 0},
+		{"mismatched DataDir", t.TempDir(), 0},
+		{"stopped project flags leftover coordinator", stoppedPaths.DataDir, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := runDoc(tc.dataDir); len(got) != tc.want {
+				t.Fatalf("Doctor(%s) stray_terminal = %v, want %d", tc.name, got, tc.want)
+			}
+		})
+	}
+}
