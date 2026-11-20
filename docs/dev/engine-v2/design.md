@@ -378,7 +378,7 @@ Each is a record, accepted by the table in section 7.2. The rules above then lan
 | recap decision: `split` (children pass the plan checks) | mark `split`; children carry `split_from` and the retro's worker change; dependants move to the children | N1 |
 | recap decision: `new` (the brief was amended since the recap opened) | closes the attempt and its PR (with a note); the old branch is kept | N11 |
 | recap decision: `drop` | mark | N1 |
-| `plan amend` on a started task | changed plan fields, with a why | the worker is told once what changed; a changed worker request restarts the worker with a handoff; a changed estimate changes `size_cap` |
+| `plan amend` on a started task | changed plan fields, with a why | the worker is told once what changed; a changed worker request restarts the worker with a handoff; a changed estimate applies to the next attempt and may lower the open attempt's `size_cap` when no size recap is open, never raising an open attempt's `size_cap` |
 | the owner answers yes to an `override` card (section 4.3b) | an override at each named commit; an open recap of those tasks is closed | N15–N19b |
 
 ### 4.10 Scheduling

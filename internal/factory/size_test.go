@@ -3,6 +3,7 @@ package factory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -32,7 +33,7 @@ func TestPlanEstimateRequiredAndLimited(t *testing.T) {
 	} {
 		l.report("tok-coord", "plan amend", bad, "plan_invalid")
 	}
-	l.report("tok-coord", "plan amend", `{"why":"bigger than thought","tasks":[{"id":"T1","estimate_lines":30},{"id":"T2","title":"feat: two","estimate_lines":40}]}`, "")
+	l.report("tok-coord", "plan amend", `{"why":"bigger than thought","tasks":[{"id":"T1","estimate_lines":30},{"id":"T2","title":"feat: two","estimate_lines":40,`+testScopeJSON+`}]}`, "")
 	if st := l.state(); st.Tasks[0].EstimateLines != 30 || st.Tasks[0].Attempts[0].SizeCap != 60 {
 		t.Fatalf("after amend: estimate %d, size_cap %d, want 30 and 60", st.Tasks[0].EstimateLines, st.Tasks[0].Attempts[0].SizeCap)
 	}
@@ -259,4 +260,108 @@ func commitFile(t *testing.T, dir, name, body string) string {
 	gitIn(t, dir, "add", name)
 	gitIn(t, dir, "commit", "-m", "feat: "+name)
 	return gitIn(t, dir, "rev-parse", "HEAD")
+}
+
+// TestAmendEstimateSizeCapRules checks the two PR 3.1 amend fixes (design.md 4.9):
+// raising estimate_lines on a started task never raises the open attempt's
+// size_cap (bypassing continues_per_task), and while a size recap is open no
+// estimate amend changes the open attempt's size_cap; the new estimate applies
+// to the next attempt (recap decide new) or to an unstarted task.
+func TestAmendEstimateSizeCapRules(t *testing.T) {
+	l := newLanding(t).withTokens()
+	// T1 starts with EstimateLines=50, SizeCap=100.
+	// 1. Raising estimate on a started task (no recap): estimate updates, SizeCap stays 100.
+	l.report("tok-coord", "plan amend", `{"why":"bigger","tasks":[{"id":"T1","estimate_lines":200}]}`, "")
+	if st := l.state(); st.Tasks[0].EstimateLines != 200 || st.Tasks[0].Attempts[0].SizeCap != 100 {
+		t.Fatalf("after raise amend: estimate %d, size_cap %d, want 200 and 100", st.Tasks[0].EstimateLines, st.Tasks[0].Attempts[0].SizeCap)
+	}
+	// 2. Lowering estimate when no size recap is open lowers SizeCap.
+	l.report("tok-coord", "plan amend", `{"why":"tighter","tasks":[{"id":"T1","estimate_lines":25}]}`, "")
+	if st := l.state(); st.Tasks[0].EstimateLines != 25 || st.Tasks[0].Attempts[0].SizeCap != 50 {
+		t.Fatalf("after lower amend: estimate %d, size_cap %d, want 25 and 50", st.Tasks[0].EstimateLines, st.Tasks[0].Attempts[0].SizeCap)
+	}
+	// 3. Open a size recap: neither raising nor lowering estimate changes SizeCap.
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Recaps = []flow.Recap{{Trigger: flow.TriggerSize, Allowed: []string{"continue", "split", "new", "drop"}}}
+	})
+	l.report("tok-coord", "plan amend", `{"why":"raise during size recap","tasks":[{"id":"T1","estimate_lines":150}]}`, "")
+	if st := l.state(); st.Tasks[0].EstimateLines != 150 || st.Tasks[0].Attempts[0].SizeCap != 50 {
+		t.Fatalf("raise during size recap: estimate %d, size_cap %d, want 150 and 50", st.Tasks[0].EstimateLines, st.Tasks[0].Attempts[0].SizeCap)
+	}
+	l.report("tok-coord", "plan amend", `{"why":"lower during size recap","tasks":[{"id":"T1","estimate_lines":10,"brief":"new brief"}]}`, "")
+	if st := l.state(); st.Tasks[0].EstimateLines != 10 || st.Tasks[0].Attempts[0].SizeCap != 50 {
+		t.Fatalf("lower during size recap: estimate %d, size_cap %d, want 10 and 50", st.Tasks[0].EstimateLines, st.Tasks[0].Attempts[0].SizeCap)
+	}
+	// 4. recap decide new starts attempt 2 with the amended estimate_lines (10 * 2 = 20).
+	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"new","why":"fresh start"}`, "")
+	l.pass() // N11 starts attempt 2
+	if a := l.state().Tasks[0].Attempts; len(a) != 2 || a[1].SizeCap != 20 {
+		t.Fatalf("attempt 2 size_cap = %+v, want 20", a)
+	}
+	// 5. Unstarted task: raising estimate sets its first attempt's SizeCap.
+	l.report("tok-coord", "plan amend", `{"why":"add T2","tasks":[{"id":"T2","title":"feat: two","estimate_lines":30,`+testScopeJSON+`}]}`, "")
+	l.report("tok-coord", "plan amend", `{"why":"raise unstarted","tasks":[{"id":"T2","estimate_lines":90}]}`, "")
+	l.pass() // N11 starts T2
+	if a := l.state().Tasks[1].Attempts; len(a) != 1 || a[0].SizeCap != 180 {
+		t.Fatalf("unstarted T2 size_cap = %+v, want 180", a)
+	}
+}
+
+// TestChangedLinesTimeoutOpensSizeRecap: a changed-lines read that times out
+// counts as over size_cap (N12 opens a size recap) instead of skipping the
+// pass, and is cached per (tip, H); a non-timeout error still skips the pass.
+func TestChangedLinesTimeoutOpensSizeRecap(t *testing.T) {
+	orig := changedLines
+	t.Cleanup(func() { changedLines = orig })
+
+	// Non-timeout error skips the pass and opens no recap.
+	lErr := newLanding(t)
+	changedLines = func(context.Context, string, string) (int, error) {
+		return 0, errors.New("git broken")
+	}
+	lErr.pass()
+	if rc := lErr.state().Tasks[0].Recaps; len(rc) != 0 {
+		t.Fatalf("non-timeout error opened recap: %+v", rc)
+	}
+
+	// Timeout opens a size recap via N12, then N6 wakes the coordinator and tells the worker.
+	l := newLanding(t)
+	calls := 0
+	changedLines = func(context.Context, string, string) (int, error) {
+		calls++
+		return 0, context.DeadlineExceeded
+	}
+	l.pass() // N12
+	l.pass() // N6: uses cached timeout reading, wakes coordinator, tells worker
+	if calls != 1 {
+		t.Fatalf("changedLines called %d times for same (tip, H), want 1", calls)
+	}
+	st := l.state()
+	if len(st.Tasks[0].Recaps) != 1 || st.Tasks[0].Recaps[0].Trigger != flow.TriggerSize {
+		t.Fatalf("recaps after timeout = %+v, want one size recap", st.Tasks[0].Recaps)
+	}
+	if w := st.Project.Wakes; len(w) != 1 || !strings.Contains(w[0].Facts, "changed lines timed out, size cap 100") {
+		t.Fatalf("wakes = %+v, want timeout facts", w)
+	}
+	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 1 || !strings.Contains(sends[0], "timed out reading changed lines") {
+		t.Fatalf("worker sends = %q, want timeout stop message", sends)
+	}
+}
+
+// TestWorkerPromptShowsNotDoing checks prompts.md 5.3: the worker prompt
+// carries the task's not_doing fence.
+func TestWorkerPromptShowsNotDoing(t *testing.T) {
+	l := newLanding(t).withTokens()
+	var prompt string
+	l.srv.OnRun = func(_ hc.Terminal, p hc.RunParams) {
+		if strings.Contains(p.Name, "-t2-") && len(p.Argv) > 0 {
+			prompt = p.Argv[len(p.Argv)-1]
+		}
+	}
+	l.report("tok-coord", "plan amend", `{"why":"add T2","tasks":[{"id":"T2","title":"feat: two","brief":"Do two.","estimate_lines":30,"for_whom":"u","if_skipped":"x","smallest":"s","not_doing":"caching or retries"}]}`, "")
+	l.pass() // N11 for T2
+	l.pass() // N23 starts worker for T2
+	if !strings.Contains(prompt, "Not doing:\ncaching or retries") {
+		t.Fatalf("worker prompt missing not_doing:\n%s", prompt)
+	}
 }

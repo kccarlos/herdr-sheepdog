@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"unicode"
@@ -271,14 +272,49 @@ func (e *Engine) runByTokenLocked(token string) (string, flow.State, string, int
 	return "", flow.State{}, "", -1
 }
 
-// planTask is the part of design.md 3's plan record that slice 1 accepts.
+// planTask is the part of design.md 3's plan record that slice 3.1 accepts.
 type planTask struct {
-	ID       string   `json:"id"`
-	Title    string   `json:"title"`
-	Brief    string   `json:"brief"`
-	Outcomes []string `json:"outcomes"`
-	After    []string `json:"after"`
-	Estimate int      `json:"estimate_lines"`
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Brief     string   `json:"brief"`
+	ForWhom   string   `json:"for_whom"`
+	IfSkipped string   `json:"if_skipped"`
+	Smallest  string   `json:"smallest"`
+	NotDoing  string   `json:"not_doing"`
+	Outcomes  []string `json:"outcomes"`
+	After     []string `json:"after"`
+	Estimate  int      `json:"estimate_lines"`
+}
+
+var conventionalTitleRE = regexp.MustCompile(`^(feat|fix|docs|refactor|test|chore|perf|ci|build|style|revert)(\([A-Za-z0-9._/-]+\))?!?: \S.*$`)
+
+// checkTitle is design.md 11.7's Title check: a Conventional Commit subject.
+func checkTitle(id, raw string) []string {
+	title := cleanRejectWhy(raw)
+	if title == "" {
+		return []string{fmt.Sprintf("shape: task %q has no title", id)}
+	}
+	if !conventionalTitleRE.MatchString(title) {
+		return []string{fmt.Sprintf("title: task %q title %q must be a Conventional Commit subject (type(scope)?: subject)", id, title)}
+	}
+	return nil
+}
+
+// checkScope is design.md 11.7's Scope check (prompts.md 3.1): all four
+// scope fields must be non-empty after cleaning.
+func checkScope(t planTask) []string {
+	var fails []string
+	for _, f := range []struct{ name, val string }{
+		{"for_whom", t.ForWhom},
+		{"if_skipped", t.IfSkipped},
+		{"smallest", t.Smallest},
+		{"not_doing", t.NotDoing},
+	} {
+		if cleanRejectWhy(f.val) == "" {
+			fails = append(fails, fmt.Sprintf("scope: task %q needs %s", t.ID, f.name))
+		}
+	}
+	return fails
 }
 
 type planFile struct {
@@ -334,9 +370,8 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, l
 		} else {
 			ids[t.ID], newIDs = true, append(newIDs, t.ID)
 		}
-		if cleanRejectWhy(t.Title) == "" {
-			fails = append(fails, fmt.Sprintf("shape: task %q has no title", t.ID))
-		}
+		fails = append(fails, checkTitle(t.ID, t.Title)...)
+		fails = append(fails, checkScope(*t)...)
 		fails = append(fails, checkEstimate(t.ID, t.Estimate, limit)...)
 	}
 	after := map[string][]string{}
@@ -355,7 +390,12 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, l
 			}
 		}
 		after[t.ID] = t.After
-		tasks[i] = flow.Task{ID: t.ID, Title: cleanRejectWhy(t.Title), Brief: t.Brief, Outcomes: t.Outcomes, After: t.After, EstimateLines: t.Estimate, SplitFrom: parentID, Attempts: []flow.Attempt{}}
+		tasks[i] = flow.Task{
+			ID: t.ID, Title: cleanRejectWhy(t.Title), Brief: t.Brief,
+			ForWhom: cleanRejectWhy(t.ForWhom), IfSkipped: cleanRejectWhy(t.IfSkipped),
+			Smallest: cleanRejectWhy(t.Smallest), NotDoing: cleanRejectWhy(t.NotDoing),
+			Outcomes: t.Outcomes, After: t.After, EstimateLines: t.Estimate, SplitFrom: parentID, Attempts: []flow.Attempt{},
+		}
 	}
 	if id := cycleAt(p.Tasks, after); id != "" {
 		fails = append(fails, fmt.Sprintf("shape: the after links make a cycle through %q", id))
@@ -600,8 +640,8 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 			fails = append(fails, fmt.Sprintf("shape: task %q: %s (only title, brief, outcomes and estimate_lines change)", s.Tasks[ti].ID, strings.TrimPrefix(err.Error(), "json: ")))
 		case flow.Ended(s.Tasks[ti]):
 			fails = append(fails, fmt.Sprintf("task %q has ended and is not changed", s.Tasks[ti].ID))
-		case c.Title != nil && cleanRejectWhy(*c.Title) == "":
-			fails = append(fails, fmt.Sprintf("shape: task %q has no title", s.Tasks[ti].ID))
+		case c.Title != nil && checkTitle(s.Tasks[ti].ID, *c.Title) != nil:
+			fails = append(fails, checkTitle(s.Tasks[ti].ID, *c.Title)...)
 		case c.Estimate != nil && checkEstimate(s.Tasks[ti].ID, *c.Estimate, s.Settings.TaskSizeLimit) != nil:
 			fails = append(fails, checkEstimate(s.Tasks[ti].ID, *c.Estimate, s.Settings.TaskSizeLimit)...)
 		default:
@@ -635,8 +675,9 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		a := flow.OpenAttempt(*t)
 		if c.Estimate != nil && *c.Estimate != t.EstimateLines {
 			t.EstimateLines, what = *c.Estimate, append(what, "estimate_lines")
-			if a != nil { // design.md 4.9: a changed estimate changes size_cap
-				a.SizeCap = s.Settings.SizeCapFactor * t.EstimateLines
+			if a != nil && (flow.OpenRecap(*t) == nil || flow.OpenRecap(*t).Trigger != flow.TriggerSize) {
+				// design.md 4.9: may lower an open attempt's size_cap (never raise it, and never change it while a size recap is open).
+				a.SizeCap = min(a.SizeCap, s.Settings.SizeCapFactor*t.EstimateLines)
 			}
 		}
 		if slices.Contains(what, "brief") || slices.Contains(what, "outcomes") {

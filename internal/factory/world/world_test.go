@@ -1254,3 +1254,16 @@ func TestMergeOnlyEdgeCases(t *testing.T) {
 		}
 	}
 }
+
+// TestChangedLinesTimeoutReturnsDeadlineExceeded: when git exceeds the context
+// deadline, ChangedLines returns an error matching context.DeadlineExceeded so
+// readTipLocked can treat it as over size_cap.
+func TestChangedLinesTimeoutReturnsDeadlineExceeded(t *testing.T) {
+	wt := sizeRepo(t)
+	tip := commitFile(t, wt, "a.go", "package a\n")
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if _, err := ChangedLines(ctx, wt, tip); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ChangedLines with expired deadline = %v, want context.DeadlineExceeded", err)
+	}
+}

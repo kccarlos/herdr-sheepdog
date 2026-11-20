@@ -434,7 +434,7 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 		t.Fatalf("expected coordinator start, got %d runs", len(runs))
 	}
 	coordTok := runs[0].Env["SHEEPDOG_RUN_TOKEN"]
-	plan := `{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: add Greet helper","brief":"Write Greet(name).","outcomes":["go test ./... passes"],"after":[]}]}`
+	plan := `{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: add Greet helper","brief":"Write Greet(name).",` + testScopeJSON + `,"outcomes":["go test ./... passes"],"after":[]}]}`
 	if err := eng.Report(coordTok, "plan apply", []byte(plan)); err != nil {
 		t.Fatalf("plan apply: %v", err)
 	}
@@ -667,7 +667,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	}
 	id1 := eng1.projectDirs()[0].Name()
 	eng1.passProject(ctx, id1, false)
-	if err := eng1.Report(runs1[0].Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"t1","estimate_lines":50,"title":"feat: x"}]}`)); err != nil {
+	if err := eng1.Report(runs1[0].Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"t1","estimate_lines":50,"title":"feat: x",`+testScopeJSON+`}]}`)); err != nil {
 		t.Fatal(err)
 	}
 	runFor(eng1, 80*time.Millisecond)
@@ -724,7 +724,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 		t.Fatal("coordinator did not start")
 	}
 	id3 := eng3.projectDirs()[0].Name()
-	if err := eng3.Report(coordRun.Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"t1","estimate_lines":50,"title":"feat: x"}]}`)); err != nil {
+	if err := eng3.Report(coordRun.Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"t1","estimate_lines":50,"title":"feat: x",`+testScopeJSON+`}]}`)); err != nil {
 		t.Fatal(err)
 	}
 	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(5 * time.Millisecond) {
@@ -942,7 +942,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	// Coordinator starts and applies 1-task plan; N11 creates worktree; N23 starts worker.
 	eng.passProject(ctx, id, false)
 	coordTok := runs[0].Env["SHEEPDOG_RUN_TOKEN"]
-	if err := eng.Report(coordTok, "plan apply", []byte(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: add Greet","brief":"Greet non-empty names.","outcomes":["go test ./... passes"]}]}`)); err != nil {
+	if err := eng.Report(coordTok, "plan apply", []byte(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: add Greet","brief":"Greet non-empty names.",`+testScopeJSON+`,"outcomes":["go test ./... passes"]}]}`)); err != nil {
 		t.Fatal(err)
 	}
 	eng.passProject(ctx, id, false) // N11
@@ -1497,7 +1497,7 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 
 	eng.passProject(ctx, id, false) // J7 coordinator
 	coordTok := runs[0].Env["SHEEPDOG_RUN_TOKEN"]
-	if err := eng.Report(coordTok, "plan apply", []byte(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: add Version constant","brief":"Add const Version = 1. No test needed for this one-line constant.","outcomes":["go vet ./... passes"]}]}`)); err != nil {
+	if err := eng.Report(coordTok, "plan apply", []byte(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: add Version constant","brief":"Add const Version = 1. No test needed for this one-line constant.",`+testScopeJSON+`,"outcomes":["go vet ./... passes"]}]}`)); err != nil {
 		t.Fatal(err)
 	}
 	eng.passProject(ctx, id, false) // N11

@@ -480,7 +480,10 @@ func realPath(p string) string {
 }
 
 func remoteBaseCommit(ctx context.Context, repo string, fetch bool) (string, string, error) {
-	out, _ := gitCmd(ctx, repo, "remote")
+	out, err := gitCmd(ctx, repo, "remote")
+	if err != nil {
+		return "", "", err
+	}
 	names, remote := strings.Fields(out), "origin"
 	if !slices.Contains(names, "origin") && len(names) == 1 {
 		remote = names[0]
@@ -689,6 +692,9 @@ func gitCmd(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if gctx.Err() != nil {
+			return "", fmt.Errorf("%w: %v: %s", gctx.Err(), err, strings.TrimSpace(string(out)))
+		}
 		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)), nil

@@ -376,7 +376,7 @@ func TestN25N6RecapOpensOnceWakesCoordinatorAndSplits(t *testing.T) {
 	}
 
 	// Coordinator splits T1 into T1a.
-	if err := l.eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T1","choice":"split","why":"smaller scope","children":[{"id":"T1a","estimate_lines":50,"title":"feat: part a"}]}`)); err != nil {
+	if err := l.eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T1","choice":"split","why":"smaller scope","children":[{"id":"T1a","estimate_lines":50,"title":"feat: part a",`+testScopeJSON+`}]}`)); err != nil {
 		t.Fatalf("recap decide split: %v", err)
 	}
 	l.pass() // T1 -> N1 cleanup (closes PR #7, keeps branch); T1a -> N11 new attempt

@@ -46,7 +46,11 @@ func taskFacts(t flow.Task, f flow.Facts) string {
 	if rc := flow.OpenRecap(t); rc != nil {
 		out += fmt.Sprintf("; recap trigger %s, allowed [%s]", rc.Trigger, strings.Join(rc.Allowed, ", "))
 		if a := flow.OpenAttempt(t); a != nil && rc.Trigger == flow.TriggerSize {
-			out += fmt.Sprintf("; changed lines %d, size cap %d, estimate %d", f.Lines, a.SizeCap, t.EstimateLines)
+			if f.LinesTimeout {
+				out += fmt.Sprintf("; changed lines timed out, size cap %d, estimate %d", a.SizeCap, t.EstimateLines)
+			} else {
+				out += fmt.Sprintf("; changed lines %d, size cap %d, estimate %d", f.Lines, a.SizeCap, t.EstimateLines)
+			}
 		}
 	}
 	return out

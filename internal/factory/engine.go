@@ -31,7 +31,10 @@ var workerTemplate string
 //go:embed reviewer.md
 var reviewerTemplate string
 
-var lockGitTimeout = 15 * time.Second
+var (
+	lockGitTimeout = 15 * time.Second
+	changedLines   = world.ChangedLines
+)
 
 // ghTimeout bounds one GitHub executor or snapshot (a push plus gh calls).
 var ghTimeout = time.Minute
@@ -55,9 +58,10 @@ type Engine struct {
 // tipFacts are N12's and N20's git facts for one tip and H: the merge base,
 // and so the line count, moves only with the tip.
 type tipFacts struct {
-	tip, h    string
-	lines     int
-	mergeOnly bool
+	tip, h       string
+	lines        int
+	linesTimeout bool
+	mergeOnly    bool
 }
 
 // New constructs an Engine. Nothing runs or touches disk until Run or Start.
@@ -329,7 +333,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
 		tip, rel, _, err := world.InspectWorktree(gctx, a.Worktree, flow.H(a))
 		if err == nil {
-			facts.Lines, facts.TipMergeOnly, err = e.readTipLocked(gctx, a, tip, rel)
+			facts.Lines, facts.LinesTimeout, facts.TipMergeOnly, err = e.readTipLocked(gctx, a, tip, rel)
 		}
 		cancel()
 		if e.logOnce("factory.git_error", id, a.Worktree, err); err != nil {
@@ -404,27 +408,31 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 
 // readTipLocked reads the changed lines at tip and whether it is ahead of H
 // by merges of the base only, once per tip and H. The base commit itself
-// has no changed lines.
-func (e *Engine) readTipLocked(ctx context.Context, a flow.Attempt, tip string, rel flow.Rel) (int, bool, error) {
+// has no changed lines. A changed-lines read that times out counts as over
+// size_cap (design.md 3, last_tip).
+func (e *Engine) readTipLocked(ctx context.Context, a flow.Attempt, tip string, rel flow.Rel) (int, bool, bool, error) {
 	h := flow.H(a)
 	if c, ok := e.tips[a.Worktree]; ok && c.tip == tip && c.h == h {
-		return c.lines, c.mergeOnly, nil
+		return c.lines, c.linesTimeout, c.mergeOnly, nil
 	}
 	c, err := tipFacts{tip: tip, h: h}, error(nil)
 	if tip != a.BaseCommit {
-		c.lines, err = world.ChangedLines(ctx, a.Worktree, tip)
+		c.lines, err = changedLines(ctx, a.Worktree, tip)
+		if errors.Is(err, context.DeadlineExceeded) {
+			c.linesTimeout, err = true, nil
+		}
 	}
-	if err == nil && rel == flow.RelAhead {
+	if err == nil && !c.linesTimeout && rel == flow.RelAhead {
 		c.mergeOnly, err = world.MergeOnly(ctx, a.Worktree, h, tip)
 	}
 	if err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
 	if e.tips == nil {
 		e.tips = map[string]tipFacts{}
 	}
 	e.tips[a.Worktree] = c
-	return c.lines, c.mergeOnly, nil
+	return c.lines, c.linesTimeout, c.mergeOnly, nil
 }
 
 func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
@@ -445,7 +453,8 @@ func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, t
 
 func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
-	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"), "{outcomes}", bullets(t.Outcomes), "{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", cmp.Or(e.Bin, "sheepdog")).Replace(workerTemplate))
+	prompt := strings.TrimSpace(strings.NewReplacer("{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
+		"{not_doing}", cmp.Or(strings.TrimSpace(t.NotDoing), "(none)"), "{outcomes}", bullets(t.Outcomes), "{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", cmp.Or(e.Bin, "sheepdog")).Replace(workerTemplate))
 	termID, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, world.RunSpec{
 		Name: workerName(id, t.ID, len(t.Attempts)), Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
 		Argv: world.ClaudeArgv(flow.RoleWorker, workerModel, "medium", "bypassPermissions"), Prompt: prompt,
@@ -717,6 +726,9 @@ func openRecap(t *flow.Task, trigger string, allowed []string) string {
 func (e *Engine) execTellStop(ctx context.Context, _ string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
 	a := flow.OpenAttempt(s.Tasks[ti])
 	msg := fmt.Sprintf("Task %s is over its size cap: %d changed lines, cap %d. Stop now and write nothing more; the coordinator decides how the task goes on.", s.Tasks[ti].ID, f.Lines, a.SizeCap)
+	if f.LinesTimeout {
+		msg = fmt.Sprintf("Task %s timed out reading changed lines (counts as over cap %d). Stop now and write nothing more; the coordinator decides how the task goes on.", s.Tasks[ti].ID, a.SizeCap)
+	}
 	return "told worker to stop at the size cap", false, world.SendRun(ctx, e.HC, a.RunID, msg)
 }
 

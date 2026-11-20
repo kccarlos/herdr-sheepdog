@@ -785,3 +785,17 @@ func TestSizeRecapAllowed(t *testing.T) {
 		t.Fatalf("after one continue (default 1) allowed %v", got)
 	}
 }
+
+// TestN12LinesTimeout: a changed-lines read that timed out matches N12 even
+// when Facts.Lines is 0 (design.md 3, last_tip).
+func TestN12LinesTimeout(t *testing.T) {
+	in := In{
+		Task:     Task{Attempts: []Attempt{{BaseCommit: "b0", SizeCap: 100}}},
+		Settings: DefaultSettings(),
+		Facts:    Facts{Tip: "c1", TipRel: RelAhead, Lines: 0, LinesTimeout: true},
+	}
+	r, d := FirstMatch(TaskRows, in)
+	if r.ID != "N12" || len(d.Asked) != 1 || d.Asked[0] != "open_size_recap@0" || !strings.Contains(d.Why, "timed out") {
+		t.Fatalf("FirstMatch = (%s, %+v), want N12 opening size recap with timeout why", r.ID, d)
+	}
+}

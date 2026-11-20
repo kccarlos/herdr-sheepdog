@@ -197,10 +197,15 @@ var TaskRows = []Row[In]{
 		return say("no attempt: start one", once(in.acts(), AskNewAttempt))(in)
 	}},
 	// N12 has no "no owner override covers H" clause until slice 7.
-	{ID: "N12", WaitsOn: "the coordinator", When: func(in In) bool { return hasAttempt(in) && in.Facts.Lines > in.attempt().SizeCap },
+	{ID: "N12", WaitsOn: "the coordinator", When: func(in In) bool {
+		return hasAttempt(in) && (in.Facts.LinesTimeout || in.Facts.Lines > in.attempt().SizeCap)
+	},
 		Then: func(in In) Decision {
-			return say(fmt.Sprintf("%d changed lines, over the size cap %d", in.Facts.Lines, in.attempt().SizeCap),
-				once(in.acts(), key(AskSizeRecap, len(in.Task.Recaps))))(in)
+			why := fmt.Sprintf("%d changed lines, over the size cap %d", in.Facts.Lines, in.attempt().SizeCap)
+			if in.Facts.LinesTimeout {
+				why = fmt.Sprintf("changed-lines read timed out (counts as over the size cap %d)", in.attempt().SizeCap)
+			}
+			return say(why, once(in.acts(), key(AskSizeRecap, len(in.Task.Recaps))))(in)
 		}},
 	{ID: "N20", WaitsOn: "the engine", When: func(in In) bool { return hasAttempt(in) && tipAhead(in) && in.Facts.TipMergeOnly },
 		Then: func(in In) Decision {
