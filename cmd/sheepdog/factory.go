@@ -24,20 +24,23 @@ import (
 var factoryDoctorRunner = factory.Doctor
 
 func printFactoryUsage(w io.Writer) {
-	fprintln(w, "usage: sheepdog factory <start|stop|log|plan|recap|report|doctor> [flags] [folder]")
+	fprintln(w, "usage: sheepdog factory <start|stop|log|plan|task|recap|report|doctor> [flags] [folder]")
 	fprintln(w, "  start <folder> --goal \"<sentence>\"   start the factory coordinator for a repo")
 	fprintln(w, "  stop [<folder>]                      stop a started factory project and its runs")
 	fprintln(w, "  log [<folder>] [-n N]                each engine step: time, task, rule, asked, decision, why")
 	fprintln(w, "  plan apply <file>                    (coordinator only) apply a JSON plan")
+	fprintln(w, "  plan amend <file>                    (coordinator only) change tasks' title, brief, outcomes or add tasks, with a why")
+	fprintln(w, "  task <park|unpark|drop|close|send-back> <task> --why \"<why>\"  (coordinator only)")
 	fprintln(w, "  recap decide <task> <choice> --why \"<why>\" [--child '<json>' ...]  (coordinator only) decide an open recap")
 	fprintln(w, "  report ready [--reject \"<why>\"]      (worker only) report HEAD ready, or reject the latest review's findings")
+	fprintln(w, "  report ready --nothing-to-change --why \"<why>\"  (worker only) report that the task needs no change")
 	fprintln(w, "  doctor                               check unattended factory prerequisites:")
 	fprintln(w, "           herdr-core (hc), timed project-volume probe inside herdr-core")
 	fprintln(w, "           (macOS consent prompts and external-disk stalls), at least one")
 	fprintln(w, "           logged-in agent CLI (claude, codex or agy) plus a canary start")
 	fprintln(w, "           inside herdr-core, gh login with the default repo pinned, and")
 	fprintln(w, "           codexbar. Exit 1 on FAIL.")
-	fprintln(w, "flags: --goal TEXT, --reject WHY, --why TEXT, --child JSON, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
+	fprintln(w, "flags: --goal TEXT, --reject WHY, --nothing-to-change, --why TEXT, --child JSON, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
 }
 
 // runFactory dispatches the `sheepdog factory` command group.
@@ -55,6 +58,8 @@ func runFactory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return runFactoryPlan(ctx, args[1:], stdout, stderr)
 	case "recap":
 		return runFactoryRecap(ctx, args[1:], stdout, stderr)
+	case "task":
+		return runFactoryTask(ctx, args[1:], stdout, stderr)
 	case "report":
 		return runFactoryReport(ctx, args[1:], stdout, stderr)
 	case "doctor":
@@ -142,9 +147,9 @@ func runFactoryLog(ctx context.Context, args []string, stdout, stderr io.Writer)
 // runTokenEnv names the run's token the engine puts in each run's environment.
 const runTokenEnv = "SHEEPDOG_RUN_TOKEN"
 
-// runFactoryPlan sends `plan apply <file>` with the run's token; the engine checks it.
+// runFactoryPlan sends `plan apply|amend <file>` with the run's token; the engine checks it.
 func runFactoryPlan(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) != 2 || args[0] != "apply" {
+	if len(args) != 2 || (args[0] != "apply" && args[0] != "amend") {
 		printFactoryUsage(stderr)
 		return 2
 	}
@@ -153,13 +158,35 @@ func runFactoryPlan(ctx context.Context, args []string, stdout, stderr io.Writer
 		err = errors.New(args[1] + " is not valid JSON")
 	}
 	if err == nil {
-		err = postFactoryReport(ctx, "plan apply", json.RawMessage(raw))
+		err = postFactoryReport(ctx, "plan "+args[0], json.RawMessage(raw))
 	}
 	if err != nil {
-		fprintf(stderr, "sheepdog factory plan apply: %v\n", err)
+		fprintf(stderr, "sheepdog factory plan %s: %v\n", args[0], err)
 		return 1
 	}
-	fprintln(stdout, "plan applied")
+	fprintf(stdout, "plan %s\n", map[string]string{"apply": "applied", "amend": "amended"}[args[0]])
+	return 0
+}
+
+// runFactoryTask sends `task <action> <task> --why "<why>"` with the run's token.
+func runFactoryTask(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("factory task", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() { printFactoryUsage(stderr) }
+	why := fs.String("why", "", "reason for the command")
+	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
+		return flagExit(err)
+	}
+	if fs.NArg() != 2 {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	raw, _ := json.Marshal(map[string]string{"action": fs.Arg(0), "task": fs.Arg(1), "why": *why})
+	if err := postFactoryReport(ctx, "task", raw); err != nil {
+		fprintf(stderr, "sheepdog factory task %s: %v\n", fs.Arg(0), err)
+		return 1
+	}
+	fprintf(stdout, "task %s: %s\n", fs.Arg(1), fs.Arg(0))
 	return 0
 }
 
@@ -207,12 +234,10 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 	fs.SetOutput(stderr)
 	fs.Usage = func() { printFactoryUsage(stderr) }
 	why := fs.String("reject", "", "reject every finding of the latest review round with a reason")
+	nothing := fs.Bool("nothing-to-change", false, "report that the task needs no change")
+	nothingWhy := fs.String("why", "", "reason for --nothing-to-change")
 	if err := fs.Parse(args[1:]); err != nil {
 		return flagExit(err)
-	}
-	if fs.NArg() != 0 {
-		printFactoryUsage(stderr)
-		return 2
 	}
 	var reject *string
 	fs.Visit(func(f *flag.Flag) {
@@ -220,6 +245,10 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 			reject = why
 		}
 	})
+	if fs.NArg() != 0 || (*nothing && reject != nil) || (!*nothing && *nothingWhy != "") {
+		printFactoryUsage(stderr)
+		return 2
+	}
 	gctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(gctx, "git", "rev-parse", "--verify", "HEAD^{commit}")
@@ -230,6 +259,9 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 		body := map[string]string{"head": head}
 		if reject != nil {
 			body["reject"] = *reject
+		}
+		if *nothing {
+			body["nothing_to_change"] = *nothingWhy
 		}
 		raw, _ := json.Marshal(body)
 		err = postFactoryReport(ctx, "ready", raw)
@@ -242,6 +274,10 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	if reject != nil {
 		fprintf(stdout, "rejected %s\n", head)
+		return 0
+	}
+	if *nothing {
+		fprintf(stdout, "nothing to change at %s\n", head)
 		return 0
 	}
 	fprintf(stdout, "ready %s\n", head)

@@ -51,17 +51,18 @@ func coveringRoundRejected(in In) bool {
 }
 
 func morePassesNeeded(in In) bool {
-	return passingCovering(*in.attempt(), headH(in)) < in.Settings.ReviewRounds
+	return len(PassingCovering(*in.attempt(), headH(in))) < in.Settings.ReviewRounds
 }
 
-func passingCovering(a Attempt, h string) int {
-	n := 0
-	for _, r := range a.Rounds {
+// PassingCovering is the passing rounds that cover h (design.md 3.1, 4.6).
+func PassingCovering(a Attempt, h string) []Round {
+	var out []Round
+	for _, r := range Counted(a) {
 		if Covers(r.Head, h) && r.Verdict == VerdictPass {
-			n++
+			out = append(out, r)
 		}
 	}
-	return n
+	return out
 }
 
 // nonConverging is L12's guard: the last retro_after_rounds_with_majors

@@ -22,6 +22,7 @@ const (
 	AskCleanup      = "cleanup"
 	AskWake         = "wake_coordinator"
 	AskStopTask     = "stop_task"
+	AskStopRuns     = "stop_runs"
 )
 
 // commitKeyed are the verbs whose key ends in the commit it is for.
@@ -161,6 +162,14 @@ var TaskRows = []Row[In]{
 		}
 		return Decision{Asked: asked, Why: "the PR is merged"}
 	}},
+	// N3 asks while a run is recorded, not once: the stop clears the
+	// records, and a failed stop is tried again next pass.
+	{ID: "N3", WaitsOn: "the coordinator", When: func(in In) bool { return in.Task.Parked }, Then: func(in In) Decision {
+		if a := in.attempt(); a != nil && (a.RunID != "" || a.Review != nil) {
+			return say("parked: stop its runs", []string{AskStopRuns})(in)
+		}
+		return say("parked")(in)
+	}},
 	{ID: "S1", WaitsOn: "the owner", When: all(hasAttempt, anyOf(workerGone, all(ladderSays(Review), reviewGone))), Then: func(in In) Decision {
 		who := "worker"
 		if !workerGone(in) {
@@ -170,6 +179,10 @@ var TaskRows = []Row[In]{
 	}},
 	{ID: "N6", WaitsOn: "the coordinator", When: recapOpen, Then: func(in In) Decision {
 		return say("a recap is open", once(in.acts(), key(AskWake, "recap", len(in.Task.Recaps))))(in)
+	}},
+	{ID: "N8", WaitsOn: "the coordinator", When: func(in In) bool { return hasAttempt(in) && in.attempt().NothingToChange != "" }, Then: func(in In) Decision {
+		a := in.attempt()
+		return say("the worker says nothing to change: "+a.NothingToChange, once(in.acts(), key(AskWake, "nothing_to_change", len(a.Rounds))))(in)
 	}},
 	{ID: "N11", WaitsOn: "the engine", When: noAttempt, Then: func(in In) Decision {
 		return say("no attempt: start one", once(in.acts(), AskNewAttempt))(in)

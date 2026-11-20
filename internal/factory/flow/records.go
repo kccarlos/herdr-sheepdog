@@ -14,8 +14,9 @@ const (
 
 // Round kinds of slice 2 (design.md 3, 4.6).
 const (
-	RoundFull  = "full"
-	RoundDelta = "delta"
+	RoundFull     = "full"
+	RoundDelta    = "delta"
+	RoundSendBack = "send_back" // the coordinator's "changes", with a why (design.md 4.9)
 )
 
 // State is one project's state.json. Seq counts the inputs committed to it.
@@ -61,6 +62,7 @@ type Task struct {
 	Closed    *Closed   `json:"closed,omitempty"`
 	Dropped   *Dropped  `json:"dropped,omitempty"`
 	Split     *Split    `json:"split,omitempty"`
+	Parked    bool      `json:"parked,omitempty"`
 	Recaps    []Recap   `json:"recaps,omitempty"`
 	Acts      []Act     `json:"acts,omitempty"`
 	Attempts  []Attempt `json:"attempts"`
@@ -91,6 +93,7 @@ type Recap struct {
 	Trigger string         `json:"trigger"`
 	Allowed []string       `json:"allowed"`
 	Decided *RecapDecision `json:"decided,omitempty"`
+	Amended bool           `json:"amended,omitempty"` // a plan amend changed the brief or outcomes since it opened
 }
 
 // RecapDecision is the coordinator's decision closing a recap.
@@ -128,7 +131,26 @@ type Attempt struct {
 	Rounds       []Round    `json:"rounds"`
 	Accepts      []Accept   `json:"accepts"`
 	Acts         []Act      `json:"acts"`
+	// NothingToChange is the worker's reason for "nothing to change"; a later
+	// ready or send-back clears it (design.md 3.2).
+	NothingToChange string `json:"nothing_to_change,omitempty"`
+	// Boundary is how many rounds were recorded when a plan amend last
+	// changed the brief or outcomes: those rounds no longer cover (design.md 3.1).
+	Boundary int    `json:"boundary,omitempty"`
+	Closed   string `json:"closed,omitempty"` // the note a recap's "new" closed this attempt with
 }
+
+// OpenAttempt is t's current attempt, or nil before the first or once a
+// recap's "new" closed it.
+func OpenAttempt(t Task) *Attempt {
+	if n := len(t.Attempts); n > 0 && t.Attempts[n-1].Closed == "" {
+		return &t.Attempts[n-1]
+	}
+	return nil
+}
+
+// Counted is a's rounds after its boundary: the only ones that can cover.
+func Counted(a Attempt) []Round { return a.Rounds[min(a.Boundary, len(a.Rounds)):] }
 
 // ReviewRun is the active reviewer run started for the attempt's next round.
 type ReviewRun struct {
@@ -173,6 +195,7 @@ type Round struct {
 	Verdict    string   `json:"verdict"`
 	Majors     int      `json:"majors"`
 	ReportPath string   `json:"report_path"`
+	Why        string   `json:"why,omitempty"` // a send-back's reason
 }
 
 // Accept records that the bar (or an override) accepted a commit.
