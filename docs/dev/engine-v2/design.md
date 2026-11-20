@@ -1112,6 +1112,12 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | O15 | A `plan amend` that lowers `estimate_lines` after a size recap's `continue` can drop `size_cap` below what the `continue` granted, because the decided recap is no longer open, and so open a second size recap |
 | O16 | `plan amend` cannot change `for_whom`, `if_skipped`, `smallest` or `not_doing` on an existing task, only `title`, `brief`, `outcomes` and `estimate_lines`. Whether a changed `not_doing` should be a brief boundary (section 3.1) is not decided |
 | O17 | The template test (prompts.md 7) checks the flags of each command a template names against the usage's global flags line, not per subcommand, so a flag that exists for another command passes. The `{ready_cmd}` line's flags are not checked there; other tests pin them |
+| O18 | The base's red spell is keyed by its head commit, so the same commit going red, green and red again gets no second wake or tell. Owner: slice 5a's keys |
+| O19 | A workflow file that fails to start (`startup_failure`) on the base reads green. Owner: the checks rollup |
+| O20 | After two failed tells for N38 the next held task's worker is told and the coordinator is woken a second time in the same spell. Owner: slice 5a's back-off |
+| O21 | The base observer makes two GitHub calls per pass, and more when a run on the head commit was cancelled by hand. Owner: cheap sync |
+| O22 | N7 is keyed on `H` only, so a second, different problem at the same `H` gets no tell. Owner: slice 5a |
+| O23 | A PR on another base reads as no PR, so N26 tries the push again (refused, no second PR) until S2 wakes the coordinator. Owner: slice 5a's back-off |
 
 ### 17.5 The audit by simulation, and what it means
 
