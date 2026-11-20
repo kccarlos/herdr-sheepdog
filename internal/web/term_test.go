@@ -619,3 +619,148 @@ func TestTermObserverToldWhenControlIsFree(t *testing.T) {
 		t.Errorf("term-free after disconnect = %+v", m)
 	}
 }
+
+type blockingShells struct {
+	*fakeShells
+	mu       sync.Mutex
+	entering chan struct{}
+	proceed  chan struct{}
+}
+
+func (b *blockingShells) OpenShell(ctx context.Context, workspaceID, cwd string) (herdr.PaneInfo, error) {
+	b.mu.Lock()
+	ent, proc := b.entering, b.proceed
+	b.mu.Unlock()
+	if ent != nil {
+		close(ent)
+	}
+	if proc != nil {
+		<-proc
+	}
+	return b.fakeShells.OpenShell(ctx, workspaceID, cwd)
+}
+
+func TestTermOpenShellCloseAndDisconnectRaces(t *testing.T) {
+	t.Run("CloseDuringOpenShell", func(t *testing.T) {
+		root := t.TempDir()
+		bs := &blockingShells{
+			fakeShells: &fakeShells{},
+			entering:   make(chan struct{}),
+			proceed:    make(chan struct{}),
+		}
+		ft := &fakeTerm{version: "0.9.5"}
+		d := ft.deps()
+		d.Shells, d.ProjectRoots = bs, []string{root}
+		h := newHarness(t, harnessOpts{term: d})
+		h.srv.shellOn.Store(true)
+
+		c, _ := helloReady(t, h)
+		c.send(shellOpen(1, root))
+		<-bs.entering
+		c.send(termproto.Message{Type: termproto.TypeClose, Ch: 1})
+		// Barrier message on the reader goroutine so closeChan(1) has run before shellPane returns.
+		c.send(termproto.Message{Type: "unknown", Ch: 99})
+		if m := c.expect(termproto.TypeError); m.Ch != 99 {
+			t.Fatalf("barrier = %+v", m)
+		}
+		close(bs.proceed)
+
+		if m := c.expect(termproto.TypeClosed); m.Ch != 1 || m.Reason != termproto.ReasonReleased {
+			t.Fatalf("after term-close during openShell: got %+v, want term-closed released", m)
+		}
+		ft.mu.Lock()
+		started := len(ft.bridges)
+		ft.mu.Unlock()
+		if started != 0 {
+			t.Fatalf("bridges started after term-close during openShell = %d, want 0", started)
+		}
+		h.srv.term.mu.Lock()
+		leaked := h.srv.term.bridges
+		h.srv.term.mu.Unlock()
+		if leaked != 0 {
+			t.Fatalf("leaked bridges = %d, want 0", leaked)
+		}
+	})
+
+	t.Run("DisconnectDuringOpenShell", func(t *testing.T) {
+		root := t.TempDir()
+		bs := &blockingShells{
+			fakeShells: &fakeShells{},
+			entering:   make(chan struct{}),
+			proceed:    make(chan struct{}),
+		}
+		ft := &fakeTerm{version: "0.9.5"}
+		d := ft.deps()
+		d.Shells, d.ProjectRoots = bs, []string{root}
+		h := newHarness(t, harnessOpts{term: d})
+		h.srv.shellOn.Store(true)
+
+		c, _ := helloReady(t, h)
+		c.send(shellOpen(2, root))
+		<-bs.entering
+		_ = c.conn.Close(websocket.StatusNormalClosure, "bye")
+		// Wait until c's reader has exited and set c.reason before shellPane returns.
+		waitFor(t, 2*time.Second, func() bool {
+			h.srv.term.mu.Lock()
+			var tc *termConn
+			for conn := range h.srv.term.conns {
+				tc = conn
+			}
+			h.srv.term.mu.Unlock()
+			if tc == nil {
+				return true
+			}
+			tc.mu.Lock()
+			defer tc.mu.Unlock()
+			return tc.reason != ""
+		}, "client closing")
+		close(bs.proceed)
+
+		waitFor(t, 2*time.Second, func() bool {
+			return len(termEvents(h, "web.term.disconnect")) == 1
+		}, "client disconnect logged")
+		// Give any untracked openShell/startBridge goroutine a moment if it was not waited on.
+		time.Sleep(30 * time.Millisecond)
+
+		h.srv.term.mu.Lock()
+		leaked := h.srv.term.bridges
+		h.srv.term.mu.Unlock()
+		if leaked != 0 {
+			t.Fatalf("leaked bridges after disconnect during openShell = %d, want 0", leaked)
+		}
+	})
+
+	t.Run("StartBridgeChecksClosingBeforeStart", func(t *testing.T) {
+		starts := 0
+		srv := &termServer{
+			deps: TermDeps{
+				Start: func(_ context.Context, o herdr.BridgeOptions) (TermBridge, error) {
+					starts++
+					return &fakeBridge{opts: o, done: make(chan struct{})}, nil
+				},
+			},
+		}
+		h := newHarness(t, harnessOpts{})
+		srv.s = h.srv
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		c := &termConn{t: srv, device: "dev1", ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), chans: map[int]*termChan{}}
+		if !srv.reserve("dev1") {
+			t.Fatal("reserve failed")
+		}
+		tc := &termChan{ch: 1, pane: "w1:p1", kind: "agent", mode: termproto.ModeObserve, cols: 80, rows: 24, gen: 1, closing: true}
+		c.chans[1] = tc
+		c.startBridge(tc, 1, false)
+		if starts != 0 {
+			t.Fatalf("Start called %d times on closing channel, want 0", starts)
+		}
+		srv.mu.Lock()
+		leaked := srv.bridges
+		leakedDev := srv.perDevice["dev1"]
+		srv.mu.Unlock()
+		if leaked != 0 || leakedDev != 0 {
+			t.Fatalf("leaked bridges = %d, perDevice = %d, want 0", leaked, leakedDev)
+		}
+	})
+}
+
