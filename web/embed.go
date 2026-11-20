@@ -6,7 +6,7 @@ package web
 
 import "embed"
 
-// FS contains voice/, debug/, setup/ and static/ (shared assets such as the logo).
+// FS contains voice/, debug/, setup/, factory/ and static/ (shared assets such as the logo).
 //
-//go:embed voice debug static setup
+//go:embed voice debug static setup factory
 var FS embed.FS
