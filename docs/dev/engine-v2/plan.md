@@ -236,6 +236,8 @@ Each is planned in PRs only at the review point before it. "Done when" lines are
 - **Size guess.** 900. **Spike first.** S0.10 (what the supervisor's existing card can show). **Leaves out.** Delegation rules and rule read-back (slice 14); push and voice for alerts; `touch`.
 - **From review point 3.** A worker that has committed cannot ask the coordinator anything: `--nothing-to-change` is refused over the base, so the worker template tells it to take its pick and name the question in `--skipped`, which only the reviewer reads. `report ask` closes this. The front-end track's ask cards wait on this slice.
 
+- **From PR W3's reviews (closed, 2026-11-20).** The owner-proof guard of design 7.1 is not in the code: build it here (a gated answer from this computer with no ticket is refused). A browser on this computer enrols with a short code from the Mac menu-bar app (design D17, O20). A paired browser signs in again with its stored key after a daemon restart and on a 401 from `/factory`, instead of offering to pair again; the code is fetched when the owner asks for it, not on page load.
+
 ### Slice 7: the override
 
 - **Goal.** The owner's "merge these now".
