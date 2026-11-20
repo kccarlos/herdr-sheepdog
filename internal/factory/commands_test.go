@@ -192,7 +192,7 @@ func TestAmendBriefReviewsSameHeadAgain(t *testing.T) {
 		t.Fatal("refusals changed state")
 	}
 
-	l.report("tok-coord", "plan amend", `{"why":"retitle","tasks":[{"id":"T1","estimate_lines":50,"title":"feat: y"},{"id":"T2","estimate_lines":50,"title":"feat: new",`+testScopeJSON+`,"after":["T1"]}]}`, "")
+	l.report("tok-coord", "plan amend", `{"why":"retitle","tasks":[{"id":"T1","estimate_lines":50,"title":"feat: y"},{"id":"T2","estimate_lines":50,"title":"feat: new",`+testPlanJSON+`,"after":["T1"]}]}`, "")
 	st := l.state()
 	if st.Tasks[0].Title != "feat: y" || st.Tasks[0].Attempts[0].Boundary != 0 || len(st.Tasks) != 3 || st.Tasks[2].ID != "T2" {
 		t.Fatalf("after title amend: %+v", st.Tasks)
@@ -223,7 +223,7 @@ func TestRecapDecideNewOnlyAfterAmend(t *testing.T) {
 		s.Tasks[0].Recaps = []flow.Recap{{Trigger: "review", Allowed: []string{"split", "new", "drop"}}}
 	})
 	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"new","why":"start over"}`, "not_allowed")
-	l.report("tok-coord", "plan amend", `{"why":"narrower","tasks":[{"id":"T1","outcomes":["go test ./... passes"]}]}`, "")
+	l.report("tok-coord", "plan amend", `{"why":"narrower","tasks":[{"id":"T1","outcomes":[{"text":"go test passes","proved_by":"cmd: go test ./..."}]}]}`, "")
 	if !l.state().Tasks[0].Recaps[0].Amended {
 		t.Fatal("amend did not mark the open recap amended")
 	}
@@ -323,7 +323,7 @@ func TestWhysCleanedAndCapped(t *testing.T) {
 	if r := l.state().Tasks[0].Attempts[0].Rounds[2]; r.Why != "add a test" {
 		t.Fatalf("send-back why = %q, want cleaned", r.Why)
 	}
-	l.report("tok-coord", "plan amend", `{"why":"w\u001b[2J","tasks":[{"id":"T1","estimate_lines":50,"title":"feat:\ny"},{"id":"T2","estimate_lines":50,"title":"feat:\u0007 z",`+testScopeJSON+`}]}`, "")
+	l.report("tok-coord", "plan amend", `{"why":"w\u001b[2J","tasks":[{"id":"T1","estimate_lines":50,"title":"feat:\ny"},{"id":"T2","estimate_lines":50,"title":"feat:\u0007 z",`+testPlanJSON+`}]}`, "")
 	if st := l.state(); st.Tasks[0].Title != "feat: y" || st.Tasks[1].Title != "feat: z" {
 		t.Fatalf("titles = %q, %q, want cleaned", st.Tasks[0].Title, st.Tasks[1].Title)
 	}

@@ -34,7 +34,7 @@ func TestPlanEstimateRequiredAndLimited(t *testing.T) {
 	} {
 		l.report("tok-coord", "plan amend", bad, "plan_invalid")
 	}
-	l.report("tok-coord", "plan amend", `{"why":"bigger than thought","tasks":[{"id":"T1","estimate_lines":30},{"id":"T2","title":"feat: two","estimate_lines":40,`+testScopeJSON+`}]}`, "")
+	l.report("tok-coord", "plan amend", `{"why":"bigger than thought","tasks":[{"id":"T1","estimate_lines":30},{"id":"T2","title":"feat: two","estimate_lines":40,`+testPlanJSON+`}]}`, "")
 	if st := l.state(); st.Tasks[0].EstimateLines != 30 || st.Tasks[0].Attempts[0].SizeCap != 60 {
 		t.Fatalf("after amend: estimate %d, size_cap %d, want 30 and 60", st.Tasks[0].EstimateLines, st.Tasks[0].Attempts[0].SizeCap)
 	}
@@ -306,7 +306,7 @@ func TestAmendEstimateSizeCapRules(t *testing.T) {
 		t.Fatalf("attempt 2 size_cap = %+v, want 20", a)
 	}
 	// 5. Unstarted task: raising estimate sets its first attempt's SizeCap.
-	l.report("tok-coord", "plan amend", `{"why":"add T2","tasks":[{"id":"T2","title":"feat: two","estimate_lines":30,`+testScopeJSON+`}]}`, "")
+	l.report("tok-coord", "plan amend", `{"why":"add T2","tasks":[{"id":"T2","title":"feat: two","estimate_lines":30,`+testPlanJSON+`}]}`, "")
 	l.report("tok-coord", "plan amend", `{"why":"raise unstarted","tasks":[{"id":"T2","estimate_lines":90}]}`, "")
 	l.pass() // N11 starts T2
 	if a := l.state().Tasks[1].Attempts; len(a) != 1 || a[0].SizeCap != 180 {
@@ -488,10 +488,67 @@ func TestWorkerPromptShowsNotDoing(t *testing.T) {
 			prompt = p.Argv[len(p.Argv)-1]
 		}
 	}
-	l.report("tok-coord", "plan amend", `{"why":"add T2","tasks":[{"id":"T2","title":"feat: two","brief":"Do two.","estimate_lines":30,"for_whom":"u","if_skipped":"x","smallest":"s","not_doing":"caching or retries"}]}`, "")
+	l.report("tok-coord", "plan amend", `{"why":"add T2","tasks":[{"id":"T2","title":"feat: two","brief":"Do two.","estimate_lines":30,"for_whom":"u","if_skipped":"x","smallest":"s","not_doing":"caching or retries",`+testOutcomesJSON+`}]}`, "")
 	l.pass() // N11 for T2
 	l.pass() // N23 starts worker for T2
 	if !strings.Contains(prompt, "Not doing:\ncaching or retries") {
 		t.Fatalf("worker prompt missing not_doing:\n%s", prompt)
+	}
+}
+
+// TestWorkerAndReviewerPromptsShowOutcomesWithProofs checks PR 3.2: both the
+// worker prompt and the reviewer prompt list each outcome with its proof, one
+// per line, and the coordinator template shows the outcome shape.
+func TestWorkerAndReviewerPromptsShowOutcomesWithProofs(t *testing.T) {
+	l := newLanding(t).withTokens()
+	var workerPrompt, reviewerPrompt string
+	l.srv.OnRun = func(_ hc.Terminal, p hc.RunParams) {
+		if len(p.Argv) == 0 {
+			return
+		}
+		switch {
+		case strings.Contains(p.Name, "worker-") && strings.Contains(p.Name, "-t2-"):
+			workerPrompt = p.Argv[len(p.Argv)-1]
+		case strings.Contains(p.Name, "rev-") && strings.Contains(p.Name, "-t2-"):
+			reviewerPrompt = p.Argv[len(p.Argv)-1]
+		}
+	}
+	l.report("tok-coord", "plan amend", `{"why":"add T2","tasks":[{"id":"T2","title":"feat: two","brief":"Do two.","estimate_lines":30,`+testScopeJSON+`,"outcomes":[`+
+		`{"text":"returns greeting","proved_by":"test: TestGreet"},`+
+		`{"text":"builds cleanly","proved_by":"cmd: go build ./..."},`+
+		`{"text":"button aligns","proved_by":"manual: screenshot of home screen"}`+
+		`]}]}`, "")
+	l.pass() // N11 creates worktree for T2
+	l.pass() // N23 starts worker for T2
+
+	st := l.state()
+	wt := st.Tasks[1].Attempts[0].Worktree
+	if err := os.WriteFile(filepath.Join(wt, "two.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "add", "two.txt")
+	gitIn(t, wt, "commit", "-m", "feat: two")
+	c := strings.TrimSpace(gitIn(t, wt, "rev-parse", "HEAD"))
+	l.edit(func(s *flow.State) {
+		s.Tasks[1].Attempts[0].RunTokenHash = tokenHash("tok-worker-t2")
+	})
+	l.report("tok-worker-t2", "ready", `{"head":"`+c+`"}`, "")
+	l.pass() // N26 push + open PR for T2
+	l.pass() // N29 starts reviewer for T2
+
+	wantBlock := "Outcomes:\n" +
+		"- returns greeting (proved by: test: TestGreet)\n" +
+		"- builds cleanly (proved by: cmd: go build ./...)\n" +
+		"- button aligns (proved by: manual: screenshot of home screen)"
+	if !strings.Contains(workerPrompt, wantBlock) {
+		t.Fatalf("worker prompt missing outcomes with proofs:\n%s", workerPrompt)
+	}
+	if !strings.Contains(reviewerPrompt, wantBlock) {
+		t.Fatalf("reviewer prompt missing outcomes with proofs:\n%s", reviewerPrompt)
+	}
+	for _, want := range []string{`"proved_by"`, "cmd:", "test:", "manual:"} {
+		if !strings.Contains(coordinatorTemplate, want) {
+			t.Errorf("coordinator template missing %q:\n%s", want, coordinatorTemplate)
+		}
 	}
 }
