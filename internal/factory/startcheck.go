@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
 
@@ -43,31 +44,28 @@ func cmdOK(c CommandOutput) bool { return c.Err == nil && !c.TimedOut && c.Exit 
 // external calls go through opts.RunCommand, so tests use a fake.
 func StartChecks(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	o := opts.withDefaults()
+	run := o.RunCommand
+	o.RunCommand = func(ctx context.Context, dir string, env []string, argv ...string) CommandOutput {
+		if argv[0] == "git" { // a credential prompt must fail fast, not wait
+			env = append(slices.Clone(env), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=")
+		}
+		return run(ctx, dir, env, argv...)
+	}
 	r := startRepo{root: gitLine(ctx, o, o.Folder, "rev-parse", "--show-toplevel")}
 	if r.root == "" {
 		r.root = o.Folder
 	}
-	r.remote = engineRemote(strings.Fields(gitOut(ctx, o, r.root, "remote")))
+	r.remote = world.PushRemote(strings.Fields(gitOut(ctx, o, r.root, "remote")))
 	r.slug = resolveRemoteSlug(ctx, o, r.root, r.remote)
-	if r.remote != "" {
-		gitOut(ctx, o, r.root, "fetch", "--prune", r.remote) // like the engine; a failed fetch just leaves the last known state
+	var out []onboard.Result
+	if r.remote != "" { // like the engine
+		if !cmdOK(o.run(ctx, o.TempDir, "git", "-C", r.root, "fetch", "--prune", r.remote)) {
+			out = append(out, resWarn("start fetch", "could not fetch "+r.remote+", so the refs below may be stale", "run: git fetch "+r.remote+" (sign in to git if it asks)"))
+		}
 	}
 	gh := checkStartGH(ctx, o, &r)
-	out := []onboard.Result{checkStartCLI(ctx, o), gh, checkStartRemote(ctx, o, r), checkPRWorkflow(ctx, o, r)}
+	out = append(out, checkStartCLI(ctx, o), gh, checkStartRemote(ctx, o, r), checkPRWorkflow(ctx, o, r))
 	return append(out, checkStartProtection(ctx, o, r)...)
-}
-
-// engineRemote picks the remote as world.remoteBaseCommit does: origin, else
-// the only remote, else none. (That logic is inline in package world, so it is
-// repeated here; extract it there to share.)
-func engineRemote(names []string) string {
-	switch {
-	case slices.Contains(names, "origin"):
-		return "origin"
-	case len(names) == 1:
-		return names[0]
-	}
-	return ""
 }
 
 func checkStartCLI(ctx context.Context, o DoctorOptions) onboard.Result {
@@ -167,7 +165,8 @@ func checkStartProtection(ctx context.Context, o DoctorOptions, r startRepo) []o
 	var rules []struct {
 		Type       string `json:"type"`
 		Parameters struct {
-			Count int `json:"required_approving_review_count"`
+			Count int  `json:"required_approving_review_count"`
+			Owner bool `json:"require_code_owner_review"`
 		} `json:"parameters"`
 	}
 	rc := o.run(ctx, r.root, "gh", "api", "repos/"+r.slug+"/rules/branches/"+url.PathEscape(base))
@@ -178,10 +177,11 @@ func checkStartProtection(ctx context.Context, o DoctorOptions, r startRepo) []o
 	case !noRulesets:
 		return unread("rulesets", rc)
 	}
-	need := 0
+	need, owner := 0, false
 	for _, x := range rules {
 		if x.Type == "pull_request" {
 			need = max(need, x.Parameters.Count)
+			owner = owner || x.Parameters.Owner
 		}
 	}
 	var warn *CommandOutput
@@ -189,19 +189,28 @@ func checkStartProtection(ctx context.Context, o DoctorOptions, r startRepo) []o
 		pc := o.run(ctx, r.root, "gh", "api", path+"/protection")
 		var p struct {
 			Reviews struct {
-				Count int `json:"required_approving_review_count"`
+				Count int  `json:"required_approving_review_count"`
+				Owner bool `json:"require_code_owner_reviews"`
 			} `json:"required_pull_request_reviews"`
 		}
-		if !cmdOK(pc) || json.Unmarshal([]byte(pc.Stdout), &p) != nil {
+		all := pc.Stderr + pc.Stdout
+		notClassic := strings.Contains(all, "404") && strings.Contains(strings.ToLower(all), "not protected") // protected by a ruleset only
+		if !notClassic && (!cmdOK(pc) || json.Unmarshal([]byte(pc.Stdout), &p) != nil) {
 			warn = &pc
 		}
-		need = max(need, p.Reviews.Count)
+		need, owner = max(need, p.Reviews.Count), owner || p.Reviews.Owner
 	}
 	res := []onboard.Result{resOK(review, base+" requires no approving review")}
 	switch {
-	case need > 0:
-		res[0] = resFail(review, fmt.Sprintf("%s requires %d approving review(s) and the engine merges by itself", base, need),
-			"in GitHub, set required approvals on "+base+" to 0 in its branch protection rule or ruleset")
+	case need > 0 || owner:
+		what := fmt.Sprintf("%d approving review(s)", need)
+		if need == 0 {
+			what = "a code-owner review"
+		} else if owner {
+			what += " and a code-owner review"
+		}
+		res[0] = resFail(review, fmt.Sprintf("%s requires %s and the engine merges by itself", base, what),
+			"in GitHub, set required approvals on "+base+" to 0 and turn off code-owner review in its branch protection rule or ruleset")
 	case warn != nil:
 		res[0] = unread("the approval count (protected; needs admin)", *warn)[0]
 	}
