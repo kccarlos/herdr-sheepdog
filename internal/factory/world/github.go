@@ -134,9 +134,8 @@ type rawPRView struct {
 // it falls back to REST check-runs and commit statuses; if that also fails,
 // or the network fails, Checks is unreadable and err is returned so the
 // caller raises github_unavailable. A failure is never remembered as "not a
-// GitHub repo" (KB-GIT-20). The extra calls (annotations, workflow runs,
-// compare) never hold a merge: a failure is returned in warn and leaves
-// "stopped from outside", no unfinished workflow and not behind. HeadRel and
+// GitHub repo" (KB-GIT-20). A failed extra call is returned in warn, never
+// green or re-runnable: stopped_unknown, absent, BehindUnknown. HeadRel and
 // HeadSince are left to the caller.
 func PRSnapshot(ctx context.Context, repoDir, branch string) (p flow.PR, warn, err error) {
 	repo, err := ghRepo(ctx, repoDir)
@@ -169,13 +168,15 @@ func PRSnapshot(ctx context.Context, repoDir, branch string) (p flow.PR, warn, e
 	checks := flow.LatestChecks(v.StatusCheckRollup)
 	for i, c := range checks {
 		if id := checkRunID(c); id > 0 && strings.EqualFold(c.Status, "COMPLETED") && strings.EqualFold(c.Conclusion, "CANCELLED") {
-			checks[i].TimedOut, err = checkRunTimedOut(ctx, repoDir, repo, id)
+			checks[i].Stop, err = checkRunStop(ctx, repoDir, repo, id)
 			warns = append(warns, err)
 		}
 	}
 	wfPending := false
 	if base := flow.Rollup(checks, false); p.Head != "" && (base == flow.ChecksGreen || base == flow.ChecksAbsent) {
-		wfPending, err = hasPendingWorkflow(ctx, repoDir, repo, p.Head)
+		if wfPending, err = hasPendingWorkflow(ctx, repoDir, repo, p.Head); err != nil {
+			checks = nil // never green unread: absent, N36 holds it in the grace, then N43
+		}
 		warns = append(warns, err)
 	}
 	p.Checks = flow.Rollup(checks, wfPending)
@@ -184,15 +185,15 @@ func PRSnapshot(ctx context.Context, repoDir, branch string) (p flow.PR, warn, e
 			BehindBy int `json:"behind_by"`
 		}
 		err = ghAPI(ctx, repoDir, "repos/"+repo+"/compare/"+escapeRef(v.BaseRefName)+"..."+p.Head, &cmpResp)
-		p.Behind = err == nil && cmpResp.BehindBy > 0
+		p.Behind, p.BehindUnknown = err == nil && cmpResp.BehindBy > 0, err != nil
 		warns = append(warns, err)
 	}
 	return p, errors.Join(warns...), nil
 }
 
 // escapeRef escapes each segment of a branch name and keeps its slashes
-// raw: GitHub reads compare/release/1.0...H (the S0.6 spike compared
-// main...s06/behind).
+// raw, as in the S0.6 spike's compare main...s06/behind (a slash on the
+// head side; a slashed base is not verified live).
 func escapeRef(ref string) string {
 	segs := strings.Split(ref, "/")
 	for i, s := range segs {
@@ -217,22 +218,20 @@ func ghAPI(ctx context.Context, dir, endpoint string, dst any) error {
 	return nil
 }
 
-// maxPages bounds a paged REST read (100 items a page).
-const maxPages = 10
+const maxPages = 10 // bounds a paged REST read
 
-// ghPages reads endpoint page by page; page decodes one and returns how
-// many items it held. More than maxPages full pages is an error, never a
-// partial read.
-func ghPages(ctx context.Context, dir, endpoint string, page func([]byte) (int, error)) error {
+// ghPages reads endpoint per items a page (the endpoint's cap); page returns
+// how many items one held. Over maxPages full pages is an error, never partial.
+func ghPages(ctx context.Context, dir, endpoint string, per int, page func([]byte) (int, error)) error {
 	sep := map[bool]string{false: "?", true: "&"}[strings.Contains(endpoint, "?")]
 	for n := 1; n <= maxPages; n++ {
-		out, err := ghCmd(ctx, dir, "api", fmt.Sprintf("%s%sper_page=100&page=%d", endpoint, sep, n))
+		out, err := ghCmd(ctx, dir, "api", fmt.Sprintf("%s%sper_page=%d&page=%d", endpoint, sep, per, n))
 		if err != nil {
 			return err
 		}
 		if got, err := page([]byte(out)); err != nil {
 			return fmt.Errorf("world: gh api %s: %w", endpoint, err)
-		} else if got < 100 {
+		} else if got < per {
 			return nil
 		}
 	}
@@ -259,7 +258,7 @@ func decodeSnapshot(data []byte) (rawPRView, flow.PR, error) {
 // its check suite) and every commit status.
 func fetchCheckRuns(ctx context.Context, dir, repo, head string) ([]flow.Check, error) {
 	var checks []flow.Check
-	err := ghPages(ctx, dir, "repos/"+repo+"/commits/"+head+"/check-runs", func(raw []byte) (int, error) {
+	err := ghPages(ctx, dir, "repos/"+repo+"/commits/"+head+"/check-runs", 100, func(raw []byte) (int, error) {
 		var resp struct {
 			CheckRuns []struct {
 				ID                       int64
@@ -279,7 +278,7 @@ func fetchCheckRuns(ctx context.Context, dir, repo, head string) ([]flow.Check, 
 	if err != nil {
 		return nil, err
 	}
-	err = ghPages(ctx, dir, "repos/"+repo+"/commits/"+head+"/status", func(raw []byte) (int, error) {
+	err = ghPages(ctx, dir, "repos/"+repo+"/commits/"+head+"/status", 100, func(raw []byte) (int, error) {
 		var resp struct {
 			Statuses []struct{ Context, State string }
 		}
@@ -306,10 +305,11 @@ func checkRunID(c flow.Check) int64 {
 	return 0
 }
 
-// checkRunTimedOut: a failed read is not a time limit (stopped from outside).
-func checkRunTimedOut(ctx context.Context, dir, repo string, id int64) (bool, error) {
+// checkRunStop is why a run was cancelled: "timeout", "" (from outside),
+// or "unknown" when the annotations cannot be read (never re-run).
+func checkRunStop(ctx context.Context, dir, repo string, id int64) (string, error) {
 	timedOut := false
-	err := ghPages(ctx, dir, fmt.Sprintf("repos/%s/check-runs/%d/annotations", repo, id), func(raw []byte) (int, error) {
+	err := ghPages(ctx, dir, fmt.Sprintf("repos/%s/check-runs/%d/annotations", repo, id), 50, func(raw []byte) (int, error) {
 		var anns []struct{ Message string }
 		err := json.Unmarshal(raw, &anns)
 		timedOut = timedOut || slices.ContainsFunc(anns, func(a struct{ Message string }) bool {
@@ -317,14 +317,16 @@ func checkRunTimedOut(ctx context.Context, dir, repo string, id int64) (bool, er
 		})
 		return len(anns), err
 	})
-	return timedOut && err == nil, err
+	if !timedOut && err != nil {
+		return "unknown", err
+	}
+	return map[bool]string{true: "timeout"}[timedOut], err
 }
 
-// hasPendingWorkflow: a failed read is no unfinished workflow (the head-age
-// grace still holds an absent PR).
+// hasPendingWorkflow: an unfinished run seen counts even if a later page fails.
 func hasPendingWorkflow(ctx context.Context, dir, repo, head string) (bool, error) {
 	pending := false
-	err := ghPages(ctx, dir, "repos/"+repo+"/actions/runs?head_sha="+head, func(raw []byte) (int, error) {
+	err := ghPages(ctx, dir, "repos/"+repo+"/actions/runs?head_sha="+head, 100, func(raw []byte) (int, error) {
 		var resp struct {
 			WorkflowRuns []struct{ Status string } `json:"workflow_runs"`
 		}
@@ -334,7 +336,7 @@ func hasPendingWorkflow(ctx context.Context, dir, repo, head string) (bool, erro
 		})
 		return len(resp.WorkflowRuns), err
 	})
-	return pending && err == nil, err
+	return pending, err
 }
 
 // MergePR asks GitHub to squash-merge PR number, pinned to head: GitHub

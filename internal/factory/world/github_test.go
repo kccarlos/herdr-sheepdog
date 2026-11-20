@@ -118,7 +118,9 @@ func TestChecksRollupTable(t *testing.T) {
 		"skipped and in progress":  {[]flow.Check{skip, run("IN_PROGRESS", "")}, false, flow.ChecksPending},
 		"failure beats pending":    {[]flow.Check{run("IN_PROGRESS", ""), run("COMPLETED", "FAILURE")}, false, flow.ChecksRed},
 		"timed_out":                {[]flow.Check{ok, run("COMPLETED", "TIMED_OUT")}, false, flow.ChecksStoppedTimeout},
-		"cancelled by timeout":     {[]flow.Check{ok, {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", TimedOut: true}}, false, flow.ChecksStoppedTimeout},
+		"cancelled by timeout":     {[]flow.Check{ok, {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "timeout"}}, false, flow.ChecksStoppedTimeout},
+		"cancelled, cause unread":  {[]flow.Check{ok, {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "unknown"}}, false, flow.ChecksStoppedUnknown},
+		"unread beats outside":     {[]flow.Check{run("COMPLETED", "CANCELLED"), {Kind: "CheckRun", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "unknown"}}, false, flow.ChecksStoppedUnknown},
 		"cancelled from outside":   {[]flow.Check{ok, run("COMPLETED", "CANCELLED")}, false, flow.ChecksStoppedExternal},
 		"cancelled replaced": {[]flow.Check{
 			{Kind: "CheckRun", Name: "check", Status: "COMPLETED", Conclusion: "CANCELLED", StartedAt: "2026-11-20T09:00:00Z"},
@@ -547,9 +549,10 @@ func TestPRSnapshotFallbackReadsEverything(t *testing.T) {
 
 // TestPRSnapshotOptionalCallFails: a failed annotations, workflow-runs or
 // compare call never makes the snapshot unreadable. A cancelled run whose
-// annotations cannot be read is stopped from outside (the coordinator is
-// told, nothing is re-run); a failed workflow-runs read leaves absent to the
-// head-age grace; a failed compare leaves Behind false.
+// annotations cannot be read is stopped_unknown (N34 treats it as a time
+// limit: the coordinator is told, nothing is re-run); a failed workflow-runs
+// read is never green (absent: N36 holds it in the grace, then N43); a
+// failed compare leaves Behind false with BehindUnknown set.
 func TestPRSnapshotOptionalCallFails(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := repoWithGitHubOrigin(t)
@@ -557,9 +560,9 @@ func TestPRSnapshotOptionalCallFails(t *testing.T) {
 		fail, view, workflow, extra string
 		want                        flow.Checks
 	}{
-		{"annotations", "stopped_timeout.json", "stopped_timeout.workflow-runs.json", "stopped_timeout.annotations.json", flow.ChecksStoppedExternal},
+		{"annotations", "stopped_timeout.json", "stopped_timeout.workflow-runs.json", "stopped_timeout.annotations.json", flow.ChecksStoppedUnknown},
 		{"workflow_runs", "absent.json", "", "", flow.ChecksAbsent},
-		{"workflow_runs", "green.json", "", "", flow.ChecksGreen},
+		{"workflow_runs", "green.json", "", "", flow.ChecksAbsent},
 		{"compare", "behind.json", "green.workflow-runs.json", "behind.compare.json", flow.ChecksGreen},
 	} {
 		gh := installFakeGH(t)
@@ -572,8 +575,31 @@ func TestPRSnapshotOptionalCallFails(t *testing.T) {
 		}
 		writeGH(t, gh, c.fail+"_fail", "")
 		p, warn, err := PRSnapshot(ctx, repo, "b")
-		if err != nil || warn == nil || !p.Answered || p.Checks != c.want || p.Behind {
+		if err != nil || warn == nil || !p.Answered || p.Checks != c.want || p.Behind || p.BehindUnknown != (c.fail == "compare") {
 			t.Errorf("%s fails on %s: %+v, warn %v, err %v; want answered %s, not behind, a warning", c.fail, c.view, p, warn, err, c.want)
 		}
+	}
+}
+
+// TestCheckRunsRoundTwo: a completed check without a start time never hides
+// a failure of the same check, and annotations are paged 50 at a time (the
+// endpoint's cap), so a timeout line on page 2 is read.
+func TestCheckRunsRoundTwo(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	writeGH(t, gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"h1","mergeable":"MERGEABLE","baseRefName":"main","statusCheckRollup":[`+
+		`{"__typename":"CheckRun","name":"test","workflowName":"ci","status":"COMPLETED","conclusion":"SUCCESS"},`+
+		`{"__typename":"CheckRun","name":"test","workflowName":"ci","status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-11-20T10:00:05Z"}]}`)
+	if p, _, err := PRSnapshot(ctx, repo, "b"); err != nil || p.Checks != flow.ChecksRed {
+		t.Errorf("completed success without a start beside a failure: %s, %v; want red", p.Checks, err)
+	}
+	gh = installFakeGH(t)
+	copySnap(t, "stopped_timeout.json", filepath.Join(gh, "view.json"))
+	copySnap(t, "stopped_timeout.workflow-runs.json", filepath.Join(gh, "workflow-runs.json"))
+	writeGH(t, gh, "annotations.json", "["+strings.Repeat(`{"message":"warning"},`, 49)+`{"message":"warning"}]`)
+	copySnap(t, "stopped_timeout.annotations.json", filepath.Join(gh, "annotations.2.json"))
+	if p, _, err := PRSnapshot(ctx, repo, "b"); err != nil || p.Checks != flow.ChecksStoppedTimeout {
+		t.Errorf("timeout annotation on page 2: %s, %v; want stopped_timeout", p.Checks, err)
 	}
 }

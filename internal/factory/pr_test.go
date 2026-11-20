@@ -5,8 +5,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -19,7 +21,7 @@ const fakeGHScript = `#!/bin/sh
 D=%DIR%
 printf '%s\n' "$*" >> "$D/argv"
 [ -f "$D/fail" ] && { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
-failif() { [ -f "$D/$1_fail" ] && { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }; return 0; }
+failif() { [ -f "$D/$1_fail" ] && { echo "gh: Resource not accessible by integration (HTTP 403)" >&2; exit 1; }; return 0; }
 case "$1 $2" in
 "pr list") if [ -f "$D/view.json" ]; then printf "[%s]" "$(cat "$D/view.json")"; else echo '[]'; fi ;;
 "pr create") cp "$D/pr.json" "$D/view.json" && echo "https://github.com/acme/demo/pull/7" ;;
@@ -231,5 +233,45 @@ func TestGitHubUnavailableHoldsMerge(t *testing.T) {
 	}
 	if n := strings.Count(daemonLog.String(), "factory.gh_partial"); n != 1 {
 		t.Fatalf("a failing compare was logged %d times, want once:\n%s", n, daemonLog.String())
+	}
+}
+
+// TestWorkflowRunsDeniedHoldsMerge: a persistent 403 on actions/runs never
+// lets a green PR merge: it reads absent, N36 holds it in the checks grace
+// and N43 wakes the coordinator after it, never N42.
+func TestWorkflowRunsDeniedHoldsMerge(t *testing.T) {
+	ctx := context.Background()
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := installFakeGH(t)
+	eng := New(testPaths(t), nil)
+	if err := eng.Start(repo, "Goal", 0); err != nil {
+		t.Fatal(err)
+	}
+	id, s, err := eng.findProjectLocked(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, repo, "commit", "--allow-empty", "-m", "feat: x")
+	c1 := gitIn(t, repo, "rev-parse", "HEAD")
+	s.Tasks = []flow.Task{{ID: "t1", Title: "feat: x", EstimateLines: 50, Attempts: []flow.Attempt{{
+		SizeCap: 100, BaseCommit: base, Branch: "task/t1", Worktree: repo, Ready: []flow.Ready{{Head: c1}},
+		Rounds: []flow.Round{{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass}, {N: 2, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass}},
+	}}}}
+	writePRJSON(t, gh, "view.json", c1, `[{"__typename":"CheckRun","name":"check","workflowName":"ci","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-20T10:00:00Z"}]`)
+	if err := os.WriteFile(filepath.Join(gh, "workflow_runs_fail"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, age := range []time.Duration{time.Minute, time.Hour} {
+		eng.mu.Lock()
+		p := eng.readPRLocked(ctx, id, &s, 0)
+		unavail := eng.ghUnavail[id]
+		eng.mu.Unlock()
+		r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[0], Settings: s.Settings, Now: p.HeadSince.Add(age),
+			Facts: flow.Facts{PR: p, Tip: c1, TipRel: flow.RelSame, Worker: flow.Run{State: flow.RunIdle}, GitHubUnavailable: unavail}})
+		want := map[bool]string{true: "N36", false: "N43"}[age < time.Duration(s.Settings.ChecksGraceMinutes)*time.Minute]
+		if p.Checks == flow.ChecksGreen || unavail || r.ID != want || slices.Contains(d.Asked, flow.AskMerge+"@"+c1) {
+			t.Fatalf("head age %s: checks=%s unavail=%t row=%s asked=%v; want %s and no merge", age, p.Checks, unavail, r.ID, d.Asked, want)
+		}
 	}
 }

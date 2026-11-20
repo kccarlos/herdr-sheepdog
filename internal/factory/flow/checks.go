@@ -18,13 +18,13 @@ type Check struct {
 	StartedAt    string `json:"startedAt,omitempty"`
 	WorkflowName string `json:"workflowName,omitempty"` // or the REST check suite: part of the check's key
 	DetailsURL   string `json:"detailsUrl,omitempty"`
-	TimedOut     bool   `json:"-"` // set from check-run annotations when CANCELLED hit a job timeout
+	Stop         string `json:"-"` // why CANCELLED, from annotations: "timeout", "unknown" (unread) or "" (from outside)
 }
 
 // LatestChecks keeps the newest run per check, keyed by workflow and name:
 // same-named checks of two workflows are two checks. An unfinished run (not
-// completed, or no start time yet: gh prints year 1) is the newest, so a
-// queued re-run replaces the verdict it reruns. Otherwise by StartedAt, else
+// completed) is the newest, so a queued re-run (gh prints its start as
+// year 1) replaces the verdict it reruns. Otherwise by StartedAt, else
 // ID, else later position. Unnamed checks are kept as-is.
 func LatestChecks(checks []Check) []Check {
 	idx, out := map[string]int{}, make([]Check, 0, len(checks))
@@ -54,12 +54,12 @@ func LatestChecks(checks []Check) []Check {
 }
 
 func (c Check) unfinished() bool {
-	return c.Kind != "StatusContext" && (!strings.EqualFold(c.Status, "COMPLETED") || c.StartedAt == "" || strings.HasPrefix(c.StartedAt, "0001-"))
+	return c.Kind != "StatusContext" && !strings.EqualFold(c.Status, "COMPLETED")
 }
 
 // verdict folds one check to "success", "pass" (neutral or skipped: passing,
-// but nothing ran), "pending", "stopped_timeout", "stopped_external" or "red".
-// Anything unknown is "red": it is never green.
+// but nothing ran), "pending", "stopped_<timeout|unknown|external>" or
+// "red". Anything unknown is "red": it is never green.
 func (c Check) verdict() string {
 	if c.Kind == "StatusContext" {
 		switch strings.ToUpper(c.State) {
@@ -81,10 +81,7 @@ func (c Check) verdict() string {
 	case "TIMED_OUT":
 		return "stopped_timeout"
 	case "CANCELLED":
-		if c.TimedOut {
-			return "stopped_timeout"
-		}
-		return "stopped_external"
+		return cmp.Or(map[string]string{"timeout": "stopped_timeout", "unknown": "stopped_unknown"}[c.Stop], "stopped_external")
 	}
 	return "red"
 }
@@ -102,6 +99,8 @@ func Rollup(checks []Check, workflowPending bool) Checks {
 		return ChecksRed
 	case seen["stopped_timeout"]:
 		return ChecksStoppedTimeout
+	case seen["stopped_unknown"]:
+		return ChecksStoppedUnknown
 	case seen["stopped_external"]:
 		return ChecksStoppedExternal
 	case seen["pending"] || workflowPending:

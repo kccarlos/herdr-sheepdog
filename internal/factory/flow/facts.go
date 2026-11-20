@@ -33,6 +33,7 @@ const (
 	ChecksRed             Checks = "red"
 	ChecksStoppedTimeout  Checks = "stopped_timeout"
 	ChecksStoppedExternal Checks = "stopped_external"
+	ChecksStoppedUnknown  Checks = "stopped_unknown" // cancelled, annotations unread: N34 treats it as a time limit, never re-runs
 	ChecksPending         Checks = "pending"
 	ChecksAbsent          Checks = "absent"
 	ChecksGreen           Checks = "green"
@@ -79,6 +80,7 @@ type PR struct {
 	Mergeable      Mergeable `json:"mergeable"`
 	Checks         Checks    `json:"checks"`
 	Behind         bool      `json:"behind"`
+	BehindUnknown  bool      `json:"behind_unknown,omitempty"` // compare failed: Behind false is not "not behind" (N40)
 	ReviewRequired bool      `json:"review_required,omitempty"`
 }
 
