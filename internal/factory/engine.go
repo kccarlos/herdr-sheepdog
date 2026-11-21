@@ -480,10 +480,22 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 	if p.NewGoal && len(s.Tasks) > p.NewGoalTasks && slices.ContainsFunc(s.Tasks[p.NewGoalTasks:], func(t flow.Task) bool { return t.SplitFrom == "" }) {
 		p.NewGoal, p.NewGoalTasks, dirty = false, 0, true
 	}
+	if r := p.Run; len(p.CoordWakesInFlight) > 0 && r != nil {
+		if r.Turn <= p.CoordWakeTurn && r.State == flow.PhaseEnded {
+			for _, w := range p.CoordWakesInFlight {
+				if !slices.ContainsFunc(p.Wakes, func(queued flow.Wake) bool { return queued.Task == w.Task && queued.Key == w.Key }) {
+					p.Wakes = append(p.Wakes, w)
+				}
+			}
+		}
+		if r.State == flow.PhaseEnded || r.Turn > p.CoordWakeTurn {
+			p.CoordWakesInFlight, dirty = nil, true
+		}
+	}
 	if r := p.Run; r != nil && r.State == flow.PhaseEnded && (p.RunID != "" || p.RunTokenHash != "" || !p.CoordWakeAt.IsZero() || !p.CoordErrorAt.IsZero() || (!flow.IsCoordR29(r) && p.CoordDialogStucks != 0)) {
 		p.RunID, p.RunTokenHash, dirty = "", "", true
 		clearCoordTrack(p, !flow.IsCoordR29(r), false)
-	} else if r != nil && r.State != flow.PhaseEnded && !p.CoordWakeAt.IsZero() && (r.Turn > p.CoordWakeTurn || r.Status == "working") {
+	} else if r != nil && r.State != flow.PhaseEnded && !p.CoordWakeAt.IsZero() && (r.Turn > p.CoordWakeTurn || r.CLI != world.CodexCLI && r.Status == "working") {
 		p.CoordWakeAt, dirty = time.Time{}, true
 	}
 	if dirty {
@@ -616,11 +628,7 @@ func (e *Engine) probeLaunchFacts(ctx context.Context, role string, task flow.Ta
 func launchCapability(role string) func(flow.Candidate) string {
 	return func(c flow.Candidate) string {
 		switch role {
-		case flow.RoleWorker, flow.RoleCoordinator:
-			if c.CLI == "claude" {
-				return ""
-			}
-		case flow.RoleReviewer:
+		case flow.RoleWorker, flow.RoleCoordinator, flow.RoleReviewer:
 			if c.CLI == "claude" || c.CLI == world.CodexCLI {
 				return ""
 			}
@@ -634,11 +642,15 @@ func intentCandidate(in flow.Intent) flow.Candidate {
 }
 
 func resolveWorker(t flow.Task, s flow.Settings, facts flow.ResolveFacts) (flow.Intent, string) {
+	check := facts.Check
 	facts.Check = func(c flow.Candidate) string {
 		if why := launchCapability(flow.RoleWorker)(c); why != "" {
 			return why
 		}
 		_, why := flow.Resolve(flow.RoleReviewer, t, s, flow.ResolveFacts{Worker: c, Check: launchCapability(flow.RoleReviewer)})
+		if why == "" && check != nil {
+			return check(c)
+		}
 		return why
 	}
 	return flow.Resolve(flow.RoleWorker, t, s, facts)
@@ -647,7 +659,10 @@ func resolveWorker(t flow.Task, s flow.Settings, facts flow.ResolveFacts) (flow.
 func launchArgv(role string, c flow.Candidate, cwd, session string, resume bool) []string {
 	switch c.CLI {
 	case world.CodexCLI:
-		return world.CodexArgv(c.Model, c.Effort, cwd)
+		if role == flow.RoleReviewer {
+			return world.CodexArgv(c.Model, c.Effort, cwd)
+		}
+		return world.CodexWorkArgv(c.Model, c.Effort, cwd, session)
 	case "claude":
 		mode := "bypassPermissions"
 		if role == flow.RoleReviewer {
@@ -658,9 +673,32 @@ func launchArgv(role string, c flow.Candidate, cwd, session string, resume bool)
 	return nil
 }
 
+func (e *Engine) codexHomeDir() string {
+	return filepath.Join(e.Paths.DataDir, "factory", "codex-home")
+}
+
+func (e *Engine) checkCodexHome(env map[string]string, check func(flow.Candidate) string) func(flow.Candidate) string {
+	return func(c flow.Candidate) string {
+		if check != nil {
+			if why := check(c); why != "" {
+				return why
+			}
+		}
+		if c.CLI == world.CodexCLI {
+			home, err := world.CodexHome(e.codexHomeDir())
+			if err != nil {
+				return err.Error()
+			}
+			env["CODEX_HOME"] = home
+		}
+		return ""
+	}
+}
+
 func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State, why string, now time.Time) {
 	facts := e.probeLaunchFacts(ctx, flow.RoleCoordinator, flow.Task{}, s.Settings)
-	facts.Check = launchCapability(flow.RoleCoordinator)
+	env := map[string]string{}
+	facts.Check = e.checkCodexHome(env, launchCapability(flow.RoleCoordinator))
 	in, wait := flow.Resolve(flow.RoleCoordinator, flow.Task{}, s.Settings, facts)
 	if wait != "" {
 		e.logProjectWaitLocked(id, s, "J7", "waiting", wait)
@@ -678,7 +716,7 @@ func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State,
 	}
 	delete(e.waits, id+"/project")
 	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &s.Project.RunTokenHash, &s.Project.Run, adopt, flow.RunRecord{Role: flow.RoleCoordinator, CLI: in.CLI}, world.RunSpec{
-		Name: coordName(id), Cwd: s.Project.Folder, ClaudeConfig: e.Paths.ClaudeConfig,
+		Name: coordName(id), Cwd: s.Project.Folder, ClaudeConfig: e.Paths.ClaudeConfig, Env: env,
 		Argv:   launchArgv(flow.RoleCoordinator, intentCandidate(in), s.Project.Folder, "", false),
 		Prompt: map[bool]string{true: coordinatorPrompt(coordinatorTemplate, s.Project, bin), false: coordSummary(*s, bin, false)}[len(s.Tasks) == 0],
 		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleCoordinator, "sheepdog.model": in.Model, "sheepdog.effort": in.Effort},
@@ -791,7 +829,7 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 	if (*recp).State == flow.PhaseEnded || e.HC == nil {
 		return (*recp).TaskRun(), nil
 	}
-	evs, err := world.ObserveRun(ctx, e.HC, **recp)
+	evs, err := world.ObserveRun(ctx, e.HC, **recp, e.codexHomeDir())
 	if err != nil {
 		return flow.Run{}, err
 	}
@@ -909,6 +947,12 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 		rec.SessionID = term.Argv[i+1]
 	}
 	choice := terminalChoice(term, flow.Candidate{CLI: rec.CLI, Model: rec.Model})
+	if !minted && choice.CLI == world.CodexCLI {
+		rec.SessionID, rec.Resumed = "", false
+		if prevRec != nil && prevRec.ID == term.Labels["sheepdog.run"] {
+			rec.SessionID, rec.Resumed, rec.StartedAt = prevRec.SessionID, prevRec.Resumed, prevRec.StartedAt
+		}
+	}
 	rec.ID, rec.CLI, rec.Model = "", choice.CLI, choice.Model
 	rec, _, _ = flow.StepRun(rec, flow.RunEvent{Kind: flow.EvLaunched, Address: term.Address, RunID: term.Labels["sheepdog.run"], CreatedMS: term.CreatedMS}, s.Settings, now)
 	rec.Resumable, *recp = rec.SessionID != "", &rec
@@ -1240,9 +1284,11 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	if err != nil {
 		return "", true, err
 	}
-	choice := flow.Candidate{}
+	choice, env := flow.Candidate{}, map[string]string{}
 	if term.State != "live" {
-		in, why := resolveWorker(*t, s.Settings, e.probeLaunchFacts(ctx, flow.RoleWorker, *t, s.Settings))
+		facts := e.probeLaunchFacts(ctx, flow.RoleWorker, *t, s.Settings)
+		facts.Check = e.checkCodexHome(env, nil)
+		in, why := resolveWorker(*t, s.Settings, facts)
 		if why != "" {
 			return "", false, launchWait(why)
 		}
@@ -1250,12 +1296,14 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	} else {
 		choice = terminalChoice(term, storedWorkerModel(*t))
 	}
-	sid, resume, bin := world.NewUUID(), mode == flow.ContinueResume && prev != nil && prev.SessionID != "" && prev.CLI == choice.CLI, cmp.Or(e.Bin, "sheepdog")
+	sid, resume, bin := "", mode == flow.ContinueResume && prev != nil && prev.SessionID != "" && prev.CLI == choice.CLI, cmp.Or(e.Bin, "sheepdog")
 	if mode == flow.ContinueResume && !resume {
 		mode = flow.ContinueHandoff
 	}
-	if resume || (adopt && prev != nil && prev.SessionID != "") {
+	if resume || (adopt && prev != nil && prev.CLI == choice.CLI && prev.SessionID != "") {
 		sid = prev.SessionID
+	} else if choice.CLI == "claude" {
+		sid = world.NewUUID()
 	}
 	prompt := workerPrompt(workerTemplate, *t, *a, bin)
 	if resume {
@@ -1269,7 +1317,7 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 		}
 	}
 	termID, delivered, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, &a.Run, adopt, flow.RunRecord{Role: flow.RoleWorker, CLI: choice.CLI, SessionID: sid, Resumed: resume}, world.RunSpec{
-		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
+		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig, Env: env,
 		Argv: launchArgv(flow.RoleWorker, choice, a.Worktree, sid, resume), Prompt: prompt,
 		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleWorker, "sheepdog.task": t.ID, "sheepdog.model": choice.Model, "sheepdog.effort": choice.Effort},
 	}, term)
@@ -1566,7 +1614,7 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 			if choice.CLI != world.CodexCLI {
 				break
 			}
-			dir := filepath.Join(e.Paths.DataDir, "factory", "codex-home")
+			dir := e.codexHomeDir()
 			home, err := world.CodexHome(dir)
 			if err == nil {
 				env = map[string]string{"CODEX_HOME": home}

@@ -224,11 +224,12 @@ func assertCodexUnattended(t *testing.T, role string, p hc.RunParams, cwd, effor
 			t.Errorf("%s argv lacks -c %s: %q", role, a, argv)
 		}
 	}
-	if !slices.Contains(argv, "shell_environment_policy.ignore_default_excludes=true") {
-		// Codex strips env vars named like *TOKEN* from its shell commands by
-		// default, which would hide SHEEPDOG_RUN_TOKEN from `sheepdog factory
-		// report ready`. (From Codex's documented default; verify live.)
-		t.Errorf("%s argv lacks -c shell_environment_policy.ignore_default_excludes=true, so the run token never reaches its report command: %q", role, argv)
+	// The run token must reach the launched terminal's environment, and
+	// nothing in the argv may remove it from Codex's shell commands.
+	for _, a := range argv {
+		if strings.HasPrefix(a, "shell_environment_policy") && (strings.HasPrefix(a, "shell_environment_policy.exclude") || strings.HasPrefix(a, "shell_environment_policy.include_only") || strings.Contains(a, "inherit=none") || strings.Contains(a, "inherit=core") || strings.Contains(a, "ignore_default_excludes=false") || strings.Contains(a, "SHEEPDOG")) {
+			t.Errorf("%s argv carries an env policy that can hide the run token: %q", role, a)
+		}
 	}
 	if p.Env["SHEEPDOG_RUN_TOKEN"] == "" || p.Env["HC_SOCKET"] == "" {
 		t.Errorf("%s env lacks the run token or HC_SOCKET: %v", role, mapKeys(p.Env))
