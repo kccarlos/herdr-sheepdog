@@ -276,7 +276,7 @@ func TestRowCases(t *testing.T) {
 		{"N6", with(ciRecap), []string{"wake_coordinator@recap@1", "tell_worker_stop@1"}},
 		{"N6", with(sizeRecap, func(in *In) { in.Facts.Worker = Run{} }), []string{"wake_coordinator@recap@1"}},
 		{"N6", with(sizeRecap, workerEnded), []string{"wake_coordinator@recap@1"}},
-		{"N7", with(diverged), []string{"tell_worker_diverged@c1"}},
+		{"N7", with(diverged), []string{"tell_worker_diverged@tip@c1"}},
 		{"N8", with(nothingF, prGone), []string{"wake_coordinator@nothing_to_change@0"}},
 		{"N9", with(noAttempts, waitDep), nil},
 		{"N9", with(noAttempts, dropDep), []string{"wake_coordinator@dep_dropped@T2"}},
@@ -298,6 +298,7 @@ func TestRowCases(t *testing.T) {
 		{"N23", with(notReady, noRounds, prGone, waitDep), []string{"start_worker"}}, // open attempt with unmet deps still matches an attempt row, not N9
 		{"N25", with(streakRecap), []string{"open_recap@review"}},
 		{"N26", with(noRounds, prGone), []string{"push_and_open_pr@c1"}},
+		{"N26", with(noRounds, prGone, func(in *In) { in.Facts.PR.Number, in.Facts.PR.OtherBase = 7, "release" }), []string{"wake_coordinator@pr_other_base@7@release"}},
 		{"N26", with(noRounds, prGone, noAnswer), nil},                    // "no PR" from a failed read: wait, no push
 		{"N26", with(noRounds, prBehind, noAnswer), nil},                  // a stale behind PR, unanswered: wait
 		{"N26", with(noRounds, func(in *In) { in.Facts.PR = PR{} }), nil}, // no snapshot yet
@@ -319,6 +320,10 @@ func TestRowCases(t *testing.T) {
 			in.Facts.BaseRedSpell = "sha101"
 			in.Now = now.Add(time.Duration(DefaultSettings().MainRedMinutes) * time.Minute)
 		}), []string{"tell_worker_base_red@sha101", "wake_coordinator@base_red_held@sha101"}},
+		{"N38", with(baseRedF, behind, func(in *In) {
+			in.Facts.BaseRedSpell, in.Facts.BaseRedWoken = "sha101", true
+			in.Now = now.Add(time.Duration(DefaultSettings().MainRedMinutes) * time.Minute)
+		}), []string{"tell_worker_base_red@sha101"}},
 		{"N38", with(baseRedF, behind, func(in *In) {
 			in.Now = now.Add(time.Duration(DefaultSettings().MainRedMinutes) * time.Minute)
 		}), nil},
@@ -773,18 +778,18 @@ func TestMergeAfterRetryAndWakeCommands(t *testing.T) {
 	}
 	n7 := with(diverged, func(in *In) {
 		in.Task.ID = "T7"
-		a0(in).Acts = []Act{{Key: key(AskTellDiverged, "c1"), Result: "done", At: now.Add(-time.Hour)}}
+		a0(in).Acts = []Act{{Key: key(AskTellDiverged, "tip", "c1"), Result: "done", At: now.Add(-time.Hour)}}
 	})
 	if _, d := FirstMatch(TaskRows, n7); !strings.Contains(d.Why, `task say T7 --why`) || !strings.Contains(d.Why, `task retry T7 --why`) {
 		t.Fatalf("N7 why = %q, want exact task say and task retry commands", d.Why)
 	}
 	// After N7 wake + retry, N7 tells the worker again and wakes again if still diverged.
 	a0(&n7).Acts = append(a0(&n7).Acts,
-		Act{Key: key(AskWake, "diverged", "c1"), Result: "done", At: now},
+		Act{Key: key(AskWake, "diverged", "tip", "c1"), Result: "done", At: now},
 		Act{Key: AskRetry, Result: "done", At: now},
 	)
-	if r, d := FirstMatch(TaskRows, n7); r.ID != "N7" || !slices.Contains(d.Asked, key(AskTellDiverged, "c1")) {
-		t.Fatalf("N7 after retry: %s %v, want tell_worker_diverged@c1", r.ID, d.Asked)
+	if r, d := FirstMatch(TaskRows, n7); r.ID != "N7" || !slices.Contains(d.Asked, key(AskTellDiverged, "tip", "c1")) {
+		t.Fatalf("N7 after retry: %s %v, want tell_worker_diverged@tip@c1", r.ID, d.Asked)
 	}
 }
 
@@ -1470,15 +1475,18 @@ func TestN7DivergedAndForeignPush(t *testing.T) {
 	prForeign := func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel, in.Facts.PR.HeadMergeOnly = "f8", RelAhead, false }
 	tipBehindUncovered := func(in *In) { in.Facts.Tip, in.Facts.TipRel = "b0", RelBehind }
 
-	for name, mod := range map[string]func(*In){
-		"tip diverged":         diverged,
-		"PR head diverged":     prDiv,
-		"PR head foreign push": prForeign,
-		"tip behind uncovered": tipBehindUncovered,
+	for name, tc := range map[string]struct {
+		mod  func(*In)
+		kind string
+	}{
+		"tip diverged":         {diverged, "tip"},
+		"PR head diverged":     {prDiv, "pr_diverged"},
+		"PR head foreign push": {prForeign, "pr_foreign"},
+		"tip behind uncovered": {tipBehindUncovered, "tip"},
 	} {
-		in := with(mod)
-		tellKey := "tell_worker_diverged@c1"
-		wakeKey := "wake_coordinator@diverged@c1"
+		in := with(tc.mod)
+		tellKey := "tell_worker_diverged@" + tc.kind + "@c1"
+		wakeKey := "wake_coordinator@diverged@" + tc.kind + "@c1"
 		r, d := FirstMatch(TaskRows, in)
 		if r.ID != "N7" || !slices.Equal(d.Asked, []string{tellKey}) {
 			t.Fatalf("%s first = %s %v, want N7 [%s]", name, r.ID, d.Asked, tellKey)

@@ -948,16 +948,17 @@ func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args js
 				return x.Result == "done" && strings.HasPrefix(x.Key, flow.AskWake+"@"+prefix)
 			})
 		}
-		isN4 := a != nil && t.LastRow == "N4"
+		isN4 := a != nil && (t.LastRow == "N4" || t.LastRow == "N26" && hasWake("pr_other_base@"))
 		isN7 := a != nil && t.LastRow == "N7" && (hasWake("diverged@") || hasWake("merge_only_unknown@"))
 		isN5 := (t.LastRow == "N5" && flow.HasExhausted(*acts, s.Settings)) ||
 			(t.LastRow == "N3" && flow.Exhausted(*acts, flow.AskStopRuns, s.Settings)) ||
 			(a != nil && (flow.Done(recent, flow.AskWake+"@worker_failed") || hasWake("reviewer_failed@")))
 		if !isN4 && !isN5 && !isN7 {
-			return e.refuse(id, "nothing_to_retry", fmt.Sprintf("Task %q has nothing to retry (it is not at N4, N5 or N7).", t.ID))
+			return e.refuse(id, "nothing_to_retry", fmt.Sprintf("Task %q has nothing to retry (it is not at N4, N5, N7 or a PR on another base).", t.ID))
 		}
 		if isN4 {
-			note := fmt.Sprintf("Closed by sheepdog factory: retried after PR closed (%s).", why)
+			reason := map[bool]string{false: "PR closed", true: "PR on another base"}[t.LastRow == "N26"]
+			note := fmt.Sprintf("Closed by sheepdog factory: retried after %s (%s).", reason, why)
 			ctx, cancel := context.WithTimeout(context.Background(), ghTimeout)
 			defer cancel()
 			if _, err := closeOpenPR(ctx, s.Project.Folder, *a, note); err != nil {

@@ -880,3 +880,16 @@ func TestPushAndOpenPRTitleCap(t *testing.T) {
 		t.Fatalf("pr create = %q, want title cut to 256 runes (%d runes)", creates, len([]rune(wantTitle)))
 	}
 }
+
+// TestRollupNewerRunReplacesOlderCancelled verifies design 4.3: an older
+// cancelled workflow run is replaced by a newer passing run of the same
+// workflow and check name on one head.
+func TestRollupNewerRunReplacesOlderCancelled(t *testing.T) {
+	checks := []flow.Check{
+		{Kind: "CheckRun", Name: "check", WorkflowName: "ci", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "unknown", StartedAt: "2026-11-20T09:00:00Z", DetailsURL: "https://github.com/acme/demo/actions/runs/100/job/1001"},
+		{Kind: "CheckRun", Name: "check", WorkflowName: "ci", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: "2026-11-20T09:05:00Z", DetailsURL: "https://github.com/acme/demo/actions/runs/200/job/2001"},
+	}
+	if got := flow.Rollup(checks, false); got != flow.ChecksGreen {
+		t.Fatalf("older cancelled run + newer passing run Rollup = %s, want green", got)
+	}
+}

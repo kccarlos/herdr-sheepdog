@@ -182,6 +182,9 @@ func PRSnapshot(ctx context.Context, repoDir, branch string, number int) (p flow
 		return p, nil, err
 	}
 	if v.BaseRefName != base {
+		if number > 0 {
+			return flow.PR{Answered: true, Number: v.Number, State: flow.PRNone, OtherBase: cmp.Or(v.BaseRefName, "unknown")}, nil, nil
+		}
 		return flow.PR{Answered: true, State: flow.PRNone}, nil, nil
 	}
 	if p.State != flow.PROpen {
