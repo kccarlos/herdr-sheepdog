@@ -49,7 +49,7 @@ func Fail(class string, err error) error {
 
 func hcFail(err error) error { return Fail(FailureClass(err), err) }
 
-var httpSettledRe = regexp.MustCompile(`\bHTTP(?:/\d(?:\.\d)?)? (?:401|403|404|422)\b`)
+var httpSettledRe = regexp.MustCompile(`\bHTTP(?:/\d(?:\.\d)?)? (?:401|404|422)\b`)
 
 // FailureClass returns err's section 8 failure class from structured facts:
 // explicit Fail tag, context deadline, process exit code, or gh/hc status.
@@ -64,7 +64,7 @@ func FailureClass(err error) string {
 		return ce.Class
 	case errors.Is(err, context.DeadlineExceeded):
 		return flow.ClassTimeout
-	case errors.As(err, &he) && (he.Code == -32600 || he.Code == -32601 || he.Code == -32602 || he.Code == 401 || he.Code == 403 || he.Code == 404 || he.Code == 422):
+	case errors.As(err, &he) && (he.Code == -32600 || he.Code == -32601 || he.Code == -32602 || he.Code == 401 || he.Code == 404 || he.Code == 422):
 		return flow.ClassSettled
 	case errors.As(err, &ee) && (ee.ExitCode() == 4 || ee.ExitCode() == 126 || ee.ExitCode() == 127):
 		return flow.ClassSettled

@@ -503,8 +503,8 @@ func TestSection8EngineBackoffOutageN5AndRetry(t *testing.T) {
 		t.Fatalf("after 31m at N5: row=%s sends=%d merges=%d", st.Tasks[0].LastRow, len(sendsTo(t, l.srv.Requests(), coord)), len(ghCalls(t, l.gh, "pr merge")))
 	}
 
-	// Record a retry act and switch failure to a settled HTTP 403 refusal -> asked once, then N5 at once!
-	writeGHFile(t, l.gh, "merge_fail", "HTTP 403: the base branch policy prohibits the merge")
+	// Record a retry act and switch failure to a settled HTTP 422 refusal -> asked once, then N5 at once!
+	writeGHFile(t, l.gh, "merge_fail", "HTTP 422: the base branch policy prohibits the merge")
 	l.edit(func(s *flow.State) {
 		a := &s.Tasks[0].Attempts[0]
 		a.Acts = append(a.Acts, flow.Act{Key: flow.AskRetry, Result: "done", At: now})
