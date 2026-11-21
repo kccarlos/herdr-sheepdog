@@ -63,7 +63,7 @@ func once(acts []Act, k string) []string {
 
 func ensureStep(in In, k string) (due, exhausted bool) {
 	last, _, tries, counted, settled := actFailures(in.acts(), k)
-	switch base := time.Duration(in.Settings.EnsureBackoffMinutes) * time.Minute; {
+	switch {
 	case settled || counted > 0 && counted >= in.Settings.EnsureFailures:
 		return false, true
 	case last == nil || last.Result == "done":
@@ -71,8 +71,14 @@ func ensureStep(in In, k string) (due, exhausted bool) {
 	case last.Result != "failed" || last.At.IsZero():
 		return false, false
 	default:
-		return in.Now.Sub(last.At) >= min(base<<min(max(0, tries-countBase), maxBackoffShift), max(base, maxEnsureBackoff)), false
+		return in.Now.Sub(last.At) >= EnsureBackoff(in.Settings, tries), false
 	}
+}
+
+// EnsureBackoff is the capped retry delay after tries consecutive failures.
+func EnsureBackoff(s Settings, tries int) time.Duration {
+	base := time.Duration(s.EnsureBackoffMinutes) * time.Minute
+	return min(base<<min(max(0, tries-countBase), maxBackoffShift), max(base, maxEnsureBackoff))
 }
 
 // ensure asks for k by key and retries failed tries with doubling back-off
@@ -81,6 +87,10 @@ func ensure(in In, k string) []string {
 	if k == "" || Done(doneActs(in.acts(), k), k) {
 		return nil
 	}
+	return ensureRepeat(in, k)
+}
+
+func ensureRepeat(in In, k string) []string {
 	due, exhausted := ensureStep(in, k)
 	if in.probe && exhausted || !in.probe && due {
 		return []string{k}
@@ -118,30 +128,31 @@ func EnsureRun(in In, role string) []string {
 	if role == RoleReviewer {
 		firstKey = key(AskStartReview, round, h)
 	}
+	noSlot := in.Facts.NoSlot && !in.probe
 	switch {
 	case (last == nil || inFlight) && !Done(a.Acts, firstKey):
-		if role != RoleReviewer && in.Facts.NoSlot {
+		if role != RoleReviewer && noSlot {
 			return nil
 		}
 		return ensure(in, firstKey)
 	case inFlight || last != nil && last.Result == EndStopped:
 		if role == RoleReviewer {
-			return []string{key(AskStartReview, round, ContinueResume, h)}
-		} else if in.Facts.NoSlot {
+			return ensureRepeat(in, key(AskStartReview, round, ContinueResume, h))
+		} else if noSlot {
 			return nil
 		}
-		return []string{workerStartAsk(in, last, 0)}
+		return ensureRepeat(in, workerStartAsk(in, last, 0))
 	case last == nil:
 		return nil
 	case last.Result == EndQuota || last.Result == EndSignedOut:
 		// Quota and signed-out rows are slice 5b.
 	case role == RoleReviewer && tries < in.Settings.ReviewerRetries:
-		return []string{key(AskStartReview, round, tries+countBase, h)}
+		return ensureRepeat(in, key(AskStartReview, round, tries+countBase, h))
 	case role == RoleWorker && a.Restarts < in.Settings.WorkerRestarts:
-		if !last.EndedAt.IsZero() && in.Now.Sub(last.EndedAt) < time.Duration(in.Settings.EnsureBackoffMinutes)*time.Minute<<a.Restarts || in.Facts.NoSlot {
+		if !last.EndedAt.IsZero() && in.Now.Sub(last.EndedAt) < time.Duration(in.Settings.EnsureBackoffMinutes)*time.Minute<<a.Restarts || noSlot {
 			return nil
 		}
-		return []string{workerStartAsk(in, last, a.Restarts+countBase)}
+		return ensureRepeat(in, workerStartAsk(in, last, a.Restarts+countBase))
 	}
 	// Otherwise it counts as a failure; N5 with retry is PR 5a.3.
 	if role == RoleReviewer {
@@ -311,7 +322,22 @@ func init() {
 	rowsBelowN5 = TaskRows[i+countBase:]
 }
 
+func recordedLiveRuns(a *Attempt) bool {
+	return a != nil && (a.RunID != "" || a.Run != nil && a.Run.State != PhaseEnded ||
+		a.Review != nil && (a.Review.RunID != "" || a.Review.Run != nil && a.Review.Run.State != PhaseEnded))
+}
+
+func parkedStopExhausted(in In) bool {
+	return in.Task.Parked && recordedLiveRuns(in.attempt()) && Exhausted(in.acts(), AskStopRuns, in.Settings)
+}
+
 func n5Key(in In) string {
+	if in.Task.Parked {
+		if parkedStopExhausted(in) {
+			return AskStopRuns
+		}
+		return ""
+	}
 	in.probe = true
 	if r, d := FirstMatch(rowsBelowN5, in); r.ID != "N43" {
 		for _, k := range d.Asked {
@@ -360,20 +386,16 @@ var TaskRows = []Row[In]{
 		}
 		return Decision{Asked: asked, Why: "the PR is merged"}
 	}},
-	// N3 asks while a live run is recorded, not once: the stop ends the run
-	// records as stopped, and a failed stop backs off and wakes once per section 8.
-	{ID: "N3", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return in.Task.Parked }, Then: func(in In) Decision {
-		if a := in.attempt(); a != nil && (a.RunID != "" || a.Run != nil && a.Run.State != PhaseEnded ||
-			a.Review != nil && (a.Review.RunID != "" || a.Review.Run != nil && a.Review.Run.State != PhaseEnded)) {
-			if due, exhausted := ensureStep(in, AskStopRuns); due {
+	// A parked task's live runs are stopped with the same back-off and N5 budget.
+	{ID: "N3", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return in.Task.Parked && !parkedStopExhausted(in) }, Then: func(in In) Decision {
+		if recordedLiveRuns(in.attempt()) {
+			if due, _ := ensureStep(in, AskStopRuns); due {
 				return say("parked: stop its runs", []string{AskStopRuns})(in)
-			} else if exhausted {
-				return say(n5Why(in.Task.ID, in.acts(), AskStopRuns), n5Wake(in.acts(), AskStopRuns))(in)
 			}
 		}
 		return say("parked")(in)
 	}},
-	{ID: "N4", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: prClosed, Then: func(in In) Decision {
+	{ID: "N4", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return prClosed(in) && !parkedStopExhausted(in) }, Then: func(in In) Decision {
 		return say(fmt.Sprintf("the PR was closed without merging (never reopened; run `sheepdog factory task retry %s --why \"<why>\"` to start a new attempt)", in.Task.ID), once(in.acts(), key(AskWake, "pr_closed")))(in)
 	}},
 	{ID: "N5", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return n5Key(in) != "" }, Then: func(in In) Decision {
@@ -389,7 +411,7 @@ var TaskRows = []Row[In]{
 		}
 		return say("a recap is open", once(in.acts(), key(AskWake, "recap", n)), tell)(in)
 	}},
-	{ID: "N7", WaitsOn: "the worker; then the coordinator", Stage: "blocked_or_failed", When: all(hasAttempt, anyOf(tipDivergedOrUncovered, PRHeadDivergedOrForeign, prHeadMergeOnlyUnknown)), Then: func(in In) Decision {
+	{ID: "N7", WaitsOn: "the worker; then the coordinator", Stage: "blocked_or_failed", When: all(hasAttempt, func(in In) bool { return !overBuildTime(in) }, anyOf(tipDivergedOrUncovered, PRHeadDivergedOrForeign, prHeadMergeOnlyUnknown)), Then: func(in In) Decision {
 		h, acts := headH(in), SinceRetry(in.acts())
 		if !tipDivergedOrUncovered(in) && !PRHeadDivergedOrForeign(in) {
 			if in.Now.Sub(in.Facts.PR.HeadSince) >= checksGrace(in) {
@@ -444,9 +466,7 @@ var TaskRows = []Row[In]{
 			return say(why, ensure(in, key(AskCIRecap, len(in.Task.Recaps))))(in)
 		}},
 	// N14 has no "no owner override covers H" clause until slice 7.
-	{ID: "N14", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool {
-		return hasAttempt(in) && !ladderSays(Passed)(in) && WorkingTime(in.Task) >= time.Duration(in.Settings.BuildHours)*time.Hour
-	},
+	{ID: "N14", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: all(hasAttempt, overBuildTime),
 		Then: func(in In) Decision {
 			why := fmt.Sprintf("worker spent %s working (limit %dh)", WorkingTime(in.Task).Truncate(time.Minute), in.Settings.BuildHours)
 			return say(why, ensure(in, key(AskTimeRecap, len(in.Task.Recaps))))(in)
@@ -649,6 +669,10 @@ func RecentCIFails(t Task, now time.Time) []CIFail {
 }
 
 func ciFailCount(in In) int { return len(RecentCIFails(in.Task, in.Now)) }
+
+func overBuildTime(in In) bool {
+	return WorkingTime(in.Task) >= time.Duration(in.Settings.BuildHours)*time.Hour && !ladderSays(Passed)(in)
+}
 
 // WorkingTime returns how long the open attempt's worker run has spent in
 // PhaseWorking since the last recap decision (design.md 4.3, N14).

@@ -389,6 +389,8 @@ func TestBaseRedGreenRedSameSHAWakesAndTellsAgain(t *testing.T) {
 	}
 
 	// Re-run passes at the same sha -> base_green wake.
+	setStatusAt(t, l, l.worker, "idle", now.Add(time.Second))
+	now = now.Add(30 * time.Second)
 	writeBaseRuns(t, l.gh, `{"workflow_runs":[{"id":901,"head_sha":"samesha1234567","status":"completed","conclusion":"success"}]}`)
 	l.pass()
 

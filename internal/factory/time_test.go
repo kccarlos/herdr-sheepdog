@@ -10,6 +10,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 )
 
 // TestN14BuildHoursRecapResetAndIdleExcluded verifies N14 end to end:
@@ -110,14 +111,19 @@ func TestN14BuildHoursRecapResetAndIdleExcluded(t *testing.T) {
 
 func setStatusAt(t *testing.T, l *landing, id, state string, at time.Time) {
 	t.Helper()
-	l.srv.SetStatus(id, &hc.Status{App: "claude-code", State: state})
-	term, err := l.client.Get(context.Background(), id)
+	setTerminalStatusAt(t, l.srv, l.client, id, state, at)
+}
+
+func setTerminalStatusAt(t testing.TB, srv *hctest.Server, client *hc.Client, id, state string, at time.Time) {
+	t.Helper()
+	srv.SetStatus(id, &hc.Status{App: "claude-code", State: state})
+	term, err := client.Get(context.Background(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ms := uint64(at.UnixMilli())
 	term.StatusMS = &ms
-	l.srv.Add(term)
+	srv.Add(term)
 }
 
 // TestClockSleepIdleOnTimeAndRestartNoInflation verifies design.md 2.5:

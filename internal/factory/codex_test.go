@@ -17,6 +17,8 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
+const codexModel = "gpt-6.2-sol"
+
 // TestReviewerCandidatesBySetting: round 1 is opus either way; the second
 // passing round is Codex only when second_reviewer = "codex".
 func TestReviewerCandidatesBySetting(t *testing.T) {
@@ -33,12 +35,11 @@ func TestReviewerCandidatesBySetting(t *testing.T) {
 		{cdx, []string{"opus"}, codexModel},
 		{cdx, []string{"opus", codexModel}, "opus"},
 	} {
-		if got := nextReviewerModel(workerModel, tc.passed, reviewerCandidates(tc.st)); got != tc.want {
-			t.Errorf("%s after %v = %q, want %q", tc.st.SecondReviewer, tc.passed, got, tc.want)
+		facts := flow.UnprobedFacts
+		facts.Worker = flow.DefaultModels(def)[flow.RoleWorker][0]
+		if got, why := flow.ResolveReviewer(flow.Task{}, tc.st, facts, tc.passed); why != "" || got.Model != tc.want {
+			t.Errorf("%s after %v = %q (%q), want %q", tc.st.SecondReviewer, tc.passed, got.Model, why, tc.want)
 		}
-	}
-	if r := reviewerOf(codexModel); r.CLI != world.CodexCLI || reviewerOf("opus").CLI != "claude" {
-		t.Errorf("reviewerOf CLI wrong: %+v", r)
 	}
 	if cdx.Validate() != nil || def.Validate() != nil {
 		t.Error("opus and codex must validate")
@@ -273,7 +274,7 @@ func TestEveryRunStartNamesModelAndEffort(t *testing.T) {
 
 	st, _ = LoadState(paths.State(id))
 	st.Tasks[0].Attempts[0].Review = nil
-	st.Tasks[0].Attempts[0].Rounds = []flow.Round{{N: 1, Kind: flow.RoundFull, Head: c1, Reviewer: reviewerOf("opus"), Verdict: flow.VerdictPass}}
+	st.Tasks[0].Attempts[0].Rounds = []flow.Round{{N: 1, Kind: flow.RoundFull, Head: c1, Reviewer: flow.Reviewer{CLI: "claude", Model: "opus", Effort: "medium"}, Verdict: flow.VerdictPass}}
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
 	}

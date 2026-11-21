@@ -187,3 +187,24 @@ func TestResolveUnknownDoesNotRefuse(t *testing.T) {
 		t.Fatalf("Resolve(reviewer unknown same as worker) = %q", why)
 	}
 }
+
+func TestResolveReviewerPrefersUnusedIndependentModel(t *testing.T) {
+	for _, tc := range []struct {
+		worker string
+		used   []string
+		want   string
+	}{
+		{"opus", nil, "sonnet"},
+		{"haiku", nil, "opus"},
+		{"haiku", []string{"opus"}, "sonnet"},
+		{"haiku", []string{"opus", "sonnet"}, "opus"},
+		{"sonnet", []string{"opus"}, "opus"},
+	} {
+		facts := allCLIsSignedIn()
+		facts.Worker = Candidate{CLI: "claude", Model: tc.worker}
+		in, why := ResolveReviewer(Task{}, DefaultSettings(), facts, tc.used)
+		if why != "" || in.Model != tc.want {
+			t.Errorf("worker=%s used=%v: reviewer=%s reason=%q, want %s", tc.worker, tc.used, in.Model, why, tc.want)
+		}
+	}
+}

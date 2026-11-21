@@ -202,6 +202,7 @@ func TestAmendBriefReviewsSameHeadAgain(t *testing.T) {
 	if st.Tasks[0].Title != "feat: y" || st.Tasks[0].Attempts[0].Boundary != 0 || len(st.Tasks) != 3 || st.Tasks[2].ID != "T2" {
 		t.Fatalf("after title amend: %+v", st.Tasks)
 	}
+	l.finishWorkerTurn()
 	l.report("tok-coord", "plan amend", `{"why":"the owner changed scope","tasks":[{"id":"T1","brief":"also handle empty input"}]}`, "")
 	if a := l.state().Tasks[0].Attempts[0]; a.Boundary != 2 {
 		t.Fatalf("boundary = %d, want 2", a.Boundary)
@@ -526,8 +527,8 @@ func TestTaskRetryN7SayStillDivergedToldAndWokenAgain(t *testing.T) {
 		t.Fatalf("N7 initial tell sends = %d, want 1", got)
 	}
 	// Worker turn ends still diverged -> pass 2 wakes coordinator once.
+	setStatusAt(t, l, l.worker, "idle", now.Add(time.Second))
 	now = now.Add(time.Minute)
-	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Run.LastTurnEnd = now })
 	l.pass()
 	if st := l.state(); st.Tasks[0].LastRow != "N7" || len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != "diverged@tip@"+l.c1 {
 		t.Fatalf("N7 first wake: row=%s wakes=%+v", st.Tasks[0].LastRow, st.Project.Wakes)
@@ -543,14 +544,15 @@ func TestTaskRetryN7SayStillDivergedToldAndWokenAgain(t *testing.T) {
 	l.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"again"}`, "nothing_to_retry")
 
 	// Pass 3: N7 tells the worker again.
+	setStatusAt(t, l, l.worker, "idle", now.Add(time.Second))
 	now = now.Add(time.Minute)
 	l.pass()
 	if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 3 {
 		t.Fatalf("after N7 retry tell sends = %d, want 3", got)
 	}
 	// Worker's next turn ends still diverged -> pass 4 wakes coordinator again.
+	setStatusAt(t, l, l.worker, "idle", now.Add(time.Second))
 	now = now.Add(time.Minute)
-	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Run.LastTurnEnd = now })
 	l.pass()
 	if st := l.state(); len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != "diverged@tip@"+l.c1 {
 		t.Fatalf("N7 second wake after retry: wakes=%+v", st.Project.Wakes)

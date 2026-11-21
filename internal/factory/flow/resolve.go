@@ -96,10 +96,29 @@ func ValidateCandidates(field string, m map[string][]Candidate) error {
 	return nil
 }
 
+// SameModel identifies a model by its CLI and model name, independent of effort.
+func (c Candidate) SameModel(other Candidate) bool {
+	return c.CLI != "" && c.CLI == other.CLI && c.Model == other.Model
+}
+
+// ResolveReviewer prefers an eligible model that has not been used in this review.
+func ResolveReviewer(task Task, settings Settings, facts ResolveFacts, used []string) (Intent, string) {
+	if len(used) > 0 {
+		if in, why := resolve(RoleReviewer, task, settings, facts, used); why == "" {
+			return in, ""
+		}
+	}
+	return Resolve(RoleReviewer, task, settings, facts)
+}
+
 // Resolve walks task.Request[role] then settings.Models[role] (falling back to
 // DefaultModels when unset) and returns the first candidate that passes every
 // check decidable from facts, or the first failing reason (design.md 9.1).
 func Resolve(role string, task Task, settings Settings, facts ResolveFacts) (Intent, string) {
+	return resolve(role, task, settings, facts, nil)
+}
+
+func resolve(role string, task Task, settings Settings, facts ResolveFacts, skip []string) (Intent, string) {
 	perm, ok := rolePerm[role]
 	if !ok {
 		return Intent{}, fmt.Sprintf("unknown role %q", role)
@@ -110,6 +129,9 @@ func Resolve(role string, task Task, settings Settings, facts ResolveFacts) (Int
 	}
 	first := ""
 	for _, c := range slices.Concat(task.Request[role], proj) {
+		if slices.Contains(skip, c.Model) {
+			continue
+		}
 		cf := facts.CLIs[c.CLI]
 		if !cf.Unknown && !cf.Installed {
 			first = cmp.Or(first, c.CLI+" is not installed")
@@ -117,7 +139,7 @@ func Resolve(role string, task Task, settings Settings, facts ResolveFacts) (Int
 			first = cmp.Or(first, c.CLI+" is not signed in")
 		} else if !cf.Unknown && cf.Models != nil && !cf.Models[c.Model] {
 			first = cmp.Or(first, fmt.Sprintf("model %s is not offered to this account", c.Model))
-		} else if (role == RoleReviewer || role == RoleRetro) && facts.Worker.CLI != "" && c.CLI == facts.Worker.CLI && c.Model == facts.Worker.Model {
+		} else if (role == RoleReviewer || role == RoleRetro) && c.SameModel(facts.Worker) {
 			first = cmp.Or(first, "the reviewer must differ from the worker")
 		} else {
 			// Pool usability (design.md 7.3) and designer canvas capability (9.1)

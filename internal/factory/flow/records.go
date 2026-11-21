@@ -403,7 +403,10 @@ func actFailures(acts []Act, key string) (last, cause *Act, tries, counted int, 
 		switch {
 		case s[i].Key != key:
 		case s[i].Result != "failed":
-			return &s[i], nil, 0, 0, false
+			if last == nil {
+				last = &s[i]
+			}
+			return last, cause, tries, counted, settled
 		default:
 			if last == nil {
 				last = &s[i]
@@ -420,6 +423,12 @@ func actFailures(acts []Act, key string) (last, cause *Act, tries, counted int, 
 	return last, cause, tries, counted, settled
 }
 
+// ActRetry returns the latest act and the number of tries since success or retry.
+func ActRetry(acts []Act, key string) (last *Act, tries int) {
+	last, _, tries, _, _ = actFailures(acts, key)
+	return last, tries
+}
+
 func doneActs(acts []Act, key string) []Act {
 	if strings.HasPrefix(key, AskMerge+"@") || strings.HasPrefix(key, AskUpdateBranch+"@") || strings.HasPrefix(key, AskTellDiverged+"@") ||
 		strings.HasPrefix(key, AskNudgeReview+"@") || strings.HasPrefix(key, AskStopReview+"@") {
@@ -429,10 +438,10 @@ func doneActs(acts []Act, key string) []Act {
 }
 
 // Exhausted reports whether key has hit ensure_failures in a row or a settled
-// failure since the last retry, with no done act (design.md 8, N5).
+// failure since the last success or retry (design.md 8, N5).
 func Exhausted(acts []Act, key string, s Settings) bool {
 	_, _, _, n, settled := actFailures(acts, key)
-	return !Done(doneActs(acts, key), key) && (settled || n > 0 && n >= s.EnsureFailures)
+	return settled || n > 0 && n >= s.EnsureFailures
 }
 
 // HasExhausted reports whether any key in acts is currently exhausted

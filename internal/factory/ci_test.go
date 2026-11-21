@@ -68,6 +68,8 @@ func TestCIRedAgainTellsWorkerOnceKBGIT14(t *testing.T) {
 	}
 
 	// Engine updated branch (TipRel == RelBehind): execTellCI adds "Pull first".
+	l.finishWorkerTurn()
+	l.pass()
 	s := l.state()
 	dec, _, err := l.eng.execTellCI(context.Background(), l.id, &s, 0, flow.Facts{
 		TipRel: flow.RelBehind,
@@ -277,6 +279,7 @@ func TestCITellsOncePerRun(t *testing.T) {
 	l.edit(func(s *flow.State) { s.Settings.FlakeReruns = 0 })
 	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("a", "COMPLETED", "FAILURE", "42", "420")+"]")
 	l.pass()
+	l.finishWorkerTurn()
 	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("a", "COMPLETED", "FAILURE", "42", "420")+","+ciCheck("b", "COMPLETED", "FAILURE", "55", "550")+"]")
 	l.pass()
 	l.pass()
@@ -618,6 +621,8 @@ func TestN32ConflictTellsWorkerOnce(t *testing.T) {
 		t.Fatal("conflicted PR was merged")
 	}
 	// Engine updated branch (TipRel == RelBehind): execTellConflict adds "Pull first".
+	l.finishWorkerTurn()
+	l.pass()
 	s := l.state()
 	if _, _, err := l.eng.execTellConflict(context.Background(), l.id, &s, 0, flow.Facts{TipRel: flow.RelBehind, PR: flow.PR{Number: 7}}); err != nil {
 		t.Fatalf("execTellConflict(behind): %v", err)

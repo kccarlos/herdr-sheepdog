@@ -1110,6 +1110,9 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 				}
 				merged := s.Tasks[ti]
 				merged.Request = reqMap
+				if !slices.Equal(s.Tasks[ti].Request[flow.RoleWorker], reqMap[flow.RoleWorker]) {
+					merged.Attempts = nil // preflight the worker the amended request will launch
+				}
 				reqTasks = append(reqTasks, merged)
 			}
 		}
@@ -1348,6 +1351,7 @@ func checkTasksLaunch(tasks []flow.Task, s flow.Settings, facts flow.ResolveFact
 	var fails []string
 	for _, t := range tasks {
 		f, roles := facts, []string{flow.RoleReviewer}
+		f.Worker = storedWorkerModel(t)
 		for role := range t.Request {
 			if role != flow.RoleWorker && role != flow.RoleReviewer {
 				roles = append(roles, role)
@@ -1357,7 +1361,7 @@ func checkTasksLaunch(tasks []flow.Task, s flow.Settings, facts flow.ResolveFact
 		for _, role := range append([]string{flow.RoleWorker}, roles...) {
 			if in, why := flow.Resolve(role, t, s, f); why != "" {
 				fails = append(fails, fmt.Sprintf("launch: task %q %s: %s", t.ID, role, why))
-			} else if role == flow.RoleWorker {
+			} else if role == flow.RoleWorker && f.Worker.Model == "" {
 				f.Worker = flow.Candidate{CLI: in.CLI, Model: in.Model, Effort: in.Effort}
 			}
 		}
