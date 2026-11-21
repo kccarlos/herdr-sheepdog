@@ -74,7 +74,6 @@ func FailureClass(err error) string {
 type RunSpec struct {
 	Name, Cwd, Prompt, ClaudeConfig string
 	Argv                            []string
-	Fresh                           bool              // caller already resolved ownership
 	Labels, Env                     map[string]string // Env holds secrets: never argv
 }
 
@@ -133,20 +132,9 @@ const reviewerTools = "Read Grep Glob LS " +
 	"Bash(go build:*) Bash(go test:*) Bash(go vet:*) Bash(gofmt -l:*) Bash(make test:*) " +
 	"Bash(npm test:*) Bash(pytest:*) Bash(python3 -m pytest:*) Bash(python3 -m unittest:*)"
 
-// StartTerminal launches spec in herdr-core (or adopts a live same-name terminal) and returns its terminal record and whether an hc check failed before launch.
+// StartTerminal launches spec in herdr-core after the caller resolves terminal ownership.
+// The boolean reports whether beforeLaunch aborted the launch.
 func StartTerminal(ctx context.Context, client *hc.Client, spec RunSpec, beforeLaunch func() error) (hc.Terminal, bool, error) {
-	if client != nil && spec.Name != "" && !spec.Fresh {
-		switch t, err := client.Get(ctx, spec.Name); {
-		case err != nil && !errors.Is(err, hc.ErrNotFound):
-			return hc.Terminal{}, true, hcFail(err)
-		case err == nil && t.State == "live":
-			return t, false, nil
-		case err == nil:
-			if _, rerr := client.Remove(ctx, t.Address); rerr != nil && !errors.Is(rerr, hc.ErrNotFound) {
-				return hc.Terminal{}, false, hcFail(rerr)
-			}
-		}
-	}
 	if client == nil || strings.TrimSpace(spec.Cwd) == "" || len(spec.Argv) == 0 {
 		return hc.Terminal{}, false, Fail(flow.ClassSettled, errors.New("world: StartTerminal requires hc client, Cwd and Argv"))
 	}

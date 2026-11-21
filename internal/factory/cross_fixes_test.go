@@ -302,7 +302,7 @@ func TestVerify13ReviewerUsesLaunchedWorkerModel(t *testing.T) {
 		t.Errorf("reviewer model=%q for launched opus worker, want sonnet", got)
 	}
 	s.Settings.Models = map[string][]flow.Candidate{flow.RoleReviewer: {{CLI: "claude", Model: "opus", Effort: "medium"}}}
-	if fails := checkTasksLaunch(s.Tasks, s.Settings, flow.UnprobedFacts); len(fails) != 1 || !strings.Contains(fails[0], "the reviewer must differ from the worker") {
+	if fails := checkTasksLaunch(s.Tasks, s.Settings); len(fails) != 1 || !strings.Contains(fails[0], "the reviewer must differ from the worker") {
 		t.Errorf("launch check with only the stored worker's model available for review = %v, want independence error", fails)
 	}
 }
