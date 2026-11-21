@@ -244,7 +244,11 @@ func (e *Engine) checkProofs(ctx context.Context, outcomes []flow.Outcome, raw [
 				failed = append(failed, fmt.Sprintf("%q: artifact %q does not exist", name, p.Artifact))
 			}
 		} else if p.Exit != 0 {
-			failed = append(failed, fmt.Sprintf("%q (%s, exit %d): %s", name, flow.CleanText(p.Command), p.Exit, e.proofHead(ctx, p.OutputPath, worktree)))
+			output, err := e.proofHead(ctx, p.OutputPath, worktree)
+			if err != nil {
+				return nil, "", "", err
+			}
+			failed = append(failed, fmt.Sprintf("%q (%s, exit %d): %s", name, flow.CleanText(p.Command), p.Exit, output))
 		}
 		out = append(out, p)
 	}
@@ -262,10 +266,13 @@ func (e *Engine) checkProofs(ctx context.Context, outcomes []flow.Outcome, raw [
 	return out, "", "", nil
 }
 
-func (e *Engine) proofHead(ctx context.Context, path, worktree string) string {
+func (e *Engine) proofHead(ctx context.Context, path, worktree string) (string, error) {
 	buf, err := e.git.ProofOutput(ctx, worktree, path)
+	if errors.Is(err, world.ErrProofOutputRejected) {
+		return "(output unreadable)", nil
+	}
 	if err != nil {
-		return "(output unreadable)"
+		return "", err
 	}
 	var lines []string
 	for l := range strings.Lines(string(buf)) {
@@ -273,7 +280,7 @@ func (e *Engine) proofHead(ctx context.Context, path, worktree string) string {
 			lines = append(lines, s)
 		}
 	}
-	return flow.CapRunes(cmp.Or(strings.Join(lines, " | "), "(no output)"), maxRejectWhyRunes)
+	return flow.CapRunes(cmp.Or(strings.Join(lines, " | "), "(no output)"), maxRejectWhyRunes), nil
 }
 
 const maxRejectWhyRunes = 500

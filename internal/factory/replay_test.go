@@ -39,7 +39,11 @@ func filled(role, tmpl string) string {
 		return workerPrompt(tmpl, t, a, "sheepdog")
 	}
 	e := &Engine{}
-	return e.reviewerPrompt(context.Background(), tmpl, t, a, "c1", flow.RoundFull, "git diff b..c1", e.rejectionPrompt("p", "T1", a, "c1"), 2)
+	prompt, err := e.reviewerPrompt(context.Background(), tmpl, t, a, "c1", flow.RoundFull, "git diff b..c1", e.rejectionPrompt("p", "T1", a, "c1"), 2)
+	if err != nil {
+		panic(err)
+	}
+	return prompt
 }
 
 func loadSituations(t *testing.T) []situation {

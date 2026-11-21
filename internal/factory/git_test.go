@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -39,13 +40,19 @@ func newGitTestEngine(t *testing.T, paths Paths, client *hc.Client) *Engine {
 func TestDaemonProjectPathsUseMachineExec(t *testing.T) {
 	ctx := context.Background()
 	parent := t.TempDir()
-	// Only the login-session runner can see these paths.
+	// The login-session runner can resolve the alias and read the proof.
 	root := filepath.Join(parent, "login-session-only")
 	alias := filepath.Join(parent, "alias")
 	proof := filepath.Join(root, ".git", "sheepdog-proofs", "p.log")
+	if err := os.MkdirAll(filepath.Dir(proof), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(proof, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	paths := testPaths(t)
 	eng := New(paths, nil)
-	state := flow.State{Project: flow.Project{ID: "project", Folder: alias, Started: true}}
+	state := flow.State{Project: flow.Project{ID: "project", Folder: root, Started: true}}
 	if err := SaveState(paths.State("project"), state); err != nil {
 		t.Fatal(err)
 	}
@@ -62,8 +69,6 @@ func TestDaemonProjectPathsUseMachineExec(t *testing.T) {
 			return hc.ExecResult{Code: &one}, nil
 		case p.Cwd == root && slices.Contains(p.Argv, proof):
 			return hc.ExecResult{Code: &zero, Stdout: []byte("login-session proof\n")}, nil
-		case slices.Contains(p.Argv, alias):
-			return hc.ExecResult{Code: &zero, Stdout: []byte(root + "\x00" + root + "\x00")}, nil
 		default:
 			return hc.ExecResult{}, errors.New("unexpected machine.exec call")
 		}
@@ -74,11 +79,28 @@ func TestDaemonProjectPathsUseMachineExec(t *testing.T) {
 	}
 	a := flow.Attempt{Worktree: root, Review: &flow.ReviewRun{Code: "review"},
 		Ready: []flow.Ready{{Head: "c1", Proofs: []flow.Proof{{Command: "test", OutputPath: proof}}}}}
-	if prompt := eng.reviewerPrompt(ctx, "{proofs}", flow.Task{}, a, "c1", "", "", "", 1); !strings.Contains(prompt, "login-session proof") {
-		t.Errorf("reviewer prompt missing worktree proof: %q", prompt)
+	type result struct {
+		prompt string
+		err    error
 	}
-	if got := len(srv.Requests()); got != 4 {
-		t.Errorf("machine.exec calls = %d, want 4", got)
+	done := make(chan result, 1)
+	go func() {
+		prompt, err := eng.reviewerPrompt(ctx, "{proofs}", flow.Task{}, a, "c1", "", "", "", 1)
+		done <- result{prompt, err}
+	}()
+	select {
+	case got := <-done:
+		if got.err != nil || !strings.Contains(got.prompt, "login-session proof") {
+			t.Errorf("reviewer prompt missing worktree proof: %q, %v", got.prompt, got.err)
+		}
+	case <-time.After(2 * time.Second):
+		if writer, err := os.OpenFile(proof, os.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
+			_ = writer.Close()
+		}
+		t.Fatal("reviewer prompt blocked on the local proof FIFO")
+	}
+	if got := len(srv.Requests()); got != 3 {
+		t.Errorf("machine.exec calls = %d, want 3", got)
 	}
 }
 
@@ -326,5 +348,116 @@ func TestTaskCloseSharesRepositoryGitBackoff(t *testing.T) {
 	err := l.eng.Report("tok-coord", "task", []byte(`{"action":"close","task":"T1","why":"already done"}`))
 	if !errors.Is(err, world.ErrGitSuppressed) || len(srv.Requests()) != 1 {
 		t.Fatalf("task close returned %v after %d git calls, want suppression after one call", err, len(srv.Requests()))
+	}
+}
+
+func TestReviewerDefersWhenProofReadIsUnknown(t *testing.T) {
+	l := newLanding(t)
+	for _, failure := range []string{"RPC", "timeout", "truncation", "budget", "lookup"} {
+		t.Run(failure, func(t *testing.T) {
+			s := l.state()
+			a := &s.Tasks[0].Attempts[0]
+			a.Rounds = nil
+			a.Ready[0].Proofs = []flow.Proof{{Command: "true", OutputPath: filepath.Join(l.wt, "proof")}}
+			prev := &flow.ReviewRun{Round: 1, Head: l.c1, Code: "review", Reviewer: flow.Reviewer{CLI: "claude", Model: "opus"}, Retries: 2}
+			a.Review = prev
+			ctx := context.Background()
+			if failure == "budget" {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, time.Second)
+				defer cancel()
+			}
+			srv := hctest.New(t)
+			srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+				code := 0
+				if p.Argv[0] == "git" {
+					return hctest.GitExec(p)
+				}
+				switch failure {
+				case "RPC":
+					return hc.ExecResult{}, errors.New("lost proof reply")
+				case "timeout":
+					return hc.ExecResult{TimedOut: true}, nil
+				case "truncation":
+					return hc.ExecResult{Code: &code, Truncated: true}, nil
+				case "budget":
+					<-ctx.Done()
+					return hc.ExecResult{}, ctx.Err()
+				default:
+					code = 3
+					return hc.ExecResult{Code: &code, Stderr: []byte("proof lookup failed")}, nil
+				}
+			}
+			l.eng.git = world.NewGit(hc.NewClient(srv.Path), nil, nil)
+			before := len(l.srv.Requests())
+			_, deferLaunch, err := l.eng.execStartReviewer(ctx, l.id, &s, 0, flow.Facts{Ask: "start_reviewer@head@retry@1"})
+			if err == nil || !deferLaunch || a.Review != prev || a.Review.Retries != 2 || a.Review.Run != nil || len(l.srv.Requests()) != before+1 {
+				t.Errorf("review launch on %s: defer=%v err=%v retries=%d run started=%v terminal RPCs=%d", failure, deferLaunch, err, a.Review.Retries, a.Review.Run != nil, len(l.srv.Requests())-before)
+			}
+		})
+	}
+}
+
+func TestProjectLookupSkipsUnrelatedStoredFolders(t *testing.T) {
+	paths := testPaths(t)
+	eng := New(paths, nil)
+	parent := t.TempDir()
+	target := filepath.Join(parent, "target")
+	for _, id := range []string{"old-a", "old-b"} {
+		if err := SaveState(paths.State(id), flow.State{Project: flow.Project{ID: id, Folder: filepath.Join(parent, id)}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := hctest.New(t)
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if p.Cwd == target {
+			return hc.ExecResult{}, errors.New("target does not exist")
+		}
+		if p.Cwd == "/" && slices.Contains(p.Argv, target) {
+			zero := 0
+			return hc.ExecResult{Code: &zero, Stdout: []byte(target + "\x00")}, nil
+		}
+		return hc.ExecResult{}, errors.New("unrelated stored folder")
+	}
+	eng.git = world.NewGit(hc.NewClient(srv.Path), nil, nil)
+	if _, _, err := eng.findProjectLocked(context.Background(), target); err == nil || err.Error() != "no started factory project" || len(srv.Requests()) != 2 {
+		t.Errorf("findProjectLocked = %v after %d RPCs, want no match after one canonicalization", err, len(srv.Requests()))
+	}
+}
+
+func TestCodexReviewerUsesStoredWorktree(t *testing.T) {
+	l := newLanding(t)
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := l.state()
+	a := &s.Tasks[0].Attempts[0]
+	a.Rounds = nil
+	a.Review = &flow.ReviewRun{Round: 1, Head: l.c1, Code: "review", Reviewer: flow.Reviewer{CLI: world.CodexCLI, Model: "gpt-5.4"}}
+	srv := hctest.New(t)
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if slices.Contains(p.Argv, "--show-toplevel") {
+			return hc.ExecResult{}, errors.New("unexpected second worktree resolution")
+		}
+		return hctest.GitExec(p)
+	}
+	l.eng.git = world.NewGit(hc.NewClient(srv.Path), nil, nil)
+	if _, _, err := l.eng.execStartReviewer(context.Background(), l.id, &s, 0, flow.Facts{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProjectLogUsesStoredLookup(t *testing.T) {
+	paths := testPaths(t)
+	if err := SaveState(paths.State("stopped"), flow.State{Project: flow.Project{ID: "stopped", Folder: t.TempDir()}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendLog(paths.Log("stopped"), LogLine{Seq: 1, Decision: "stopped"}); err != nil {
+		t.Fatal(err)
+	}
+	if lines, _, err := ProjectLog(context.Background(), paths, "", 0); err != nil || len(lines) != 1 {
+		t.Errorf("ProjectLog = %v, %v, want the single stored project's log", lines, err)
 	}
 }

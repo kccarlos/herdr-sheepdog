@@ -169,7 +169,8 @@ func (g *Git) run(ctx context.Context, dir, command string, args []string, env m
 	}
 	folder, _ := ctx.Value(gitRepoKey{}).(string)
 	repo := cmp.Or(folder, dir)
-	if command == "git" && g.suppressed(repo) {
+	projectCommand := command == "git" || command == "/bin/sh"
+	if projectCommand && g.suppressed(repo) {
 		return hc.ExecResult{}, ErrGitSuppressed
 	}
 	verb := ""
@@ -204,8 +205,8 @@ func (g *Git) run(ctx context.Context, dir, command string, args []string, env m
 	r, err := client.Exec(callCtx, hc.ExecParams{
 		Cwd: dir, Argv: append([]string{command}, args...), Timeout: &limit, Env: env,
 	})
-	stalled := command == "git" && !network && verb != "diff" && (r.TimedOut || errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil)
-	if command == "git" && (stalled || err == nil && !r.TimedOut && r.Code != nil && r.Signal == nil) {
+	stalled := projectCommand && !network && verb != "diff" && (r.TimedOut || errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil)
+	if projectCommand && (stalled || err == nil && !r.TimedOut && r.Code != nil && r.Signal == nil) {
 		g.finishProbe(repo, stalled)
 	}
 	if err != nil || r.TimedOut || r.Truncated || r.Signal != nil || r.Code == nil || *r.Code != 0 {
