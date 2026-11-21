@@ -109,7 +109,7 @@ var (
 		in.Task.Recaps = []Recap{{Trigger: TriggerTime, Allowed: []string{ChoiceContinue, "split", "new", "drop"}}}
 	}
 	overTime = func(in *In) {
-		a0(in).Run = &RunRecord{State: PhaseWorking, WorkingSince: now.Add(-time.Duration(DefaultSettings().BuildHours) * time.Hour)}
+		a0(in).Working = time.Duration(DefaultSettings().BuildHours) * time.Hour
 	}
 	ciFailed3 = func(in *In) {
 		a0(in).CIFails = []CIFail{
@@ -555,66 +555,59 @@ func TestNoS2AndTimeLimitsN14N29(t *testing.T) {
 			t.Fatal("S2 row still present in TaskRows")
 		}
 	}
-	// N14: working time accumulates only in PhaseWorking (not PhaseIdle), resets on recap decision, and is skipped when ladder passed.
+	// N14 reads Attempt.Working (single accumulator), resets when cleared, and is skipped when ladder passed.
 	s := DefaultSettings()
-	rec := RunRecord{Role: RoleWorker, State: PhaseStarting, StartedAt: now}
-	t0 := now
-	rec, _, _ = StepRun(rec, RunEvent{Kind: EvStatus, Status: "working"}, s, t0)                                           // -> working at t0
-	rec, _, _ = StepRun(rec, RunEvent{Kind: EvStatus, Status: "done"}, s, t0.Add(2*time.Hour))                             // still working until idle grace
-	rec, _, _ = StepRun(rec, RunEvent{Kind: EvTick}, s, t0.Add(2*time.Hour+time.Duration(s.IdleGraceSeconds)*time.Second)) // -> idle after 2h20s working
-	if rec.State != PhaseIdle || rec.Working != 2*time.Hour+time.Duration(s.IdleGraceSeconds)*time.Second {
-		t.Fatalf("after working->idle: state=%s working=%v", rec.State, rec.Working)
-	}
-	// 10h spent idle does not count toward build_hours (4h).
-	idleAt := t0.Add(12 * time.Hour)
-	in := with(noRounds, func(in *In) { a0(in).Run = &rec; in.Now = idleAt })
-	if got := WorkingTime(in.Task, idleAt); got != rec.Working {
-		t.Fatalf("WorkingTime during 10h idle = %v, want %v", got, rec.Working)
+	in := with(noRounds, func(in *In) { a0(in).Working = time.Duration(s.BuildHours)*time.Hour - time.Minute })
+	if got := WorkingTime(in.Task); got != a0(&in).Working {
+		t.Fatalf("WorkingTime = %v, want %v", got, a0(&in).Working)
 	}
 	if r, _ := FirstMatch(TaskRows, in); r.ID == "N14" {
-		t.Fatalf("N14 fired during idle time: %v", WorkingTime(in.Task, idleAt))
+		t.Fatalf("N14 fired under build_hours: %v", WorkingTime(in.Task))
 	}
-	// Resume working for another 2h -> crosses 4h -> N14 opens time recap.
-	rec, _, _ = StepRun(rec, RunEvent{Kind: EvDeliver, Msg: "go"}, s, idleAt)
-	atLimit := idleAt.Add(2 * time.Hour)
-	in.Now = atLimit
-	a0(&in).Run = &rec
+	a0(&in).Working = time.Duration(s.BuildHours) * time.Hour
 	if r, d := FirstMatch(TaskRows, in); r.ID != "N14" || !slices.Equal(d.Asked, []string{"open_time_recap@0"}) {
-		t.Fatalf("past build_hours = %s %v, want N14 [open_time_recap@0]", r.ID, d.Asked)
+		t.Fatalf("at build_hours = %s %v, want N14 [open_time_recap@0]", r.ID, d.Asked)
 	}
-	// Recap decision resets the window.
-	in.Task.Recaps = []Recap{{Trigger: TriggerTime, Decided: &RecapDecision{Choice: ChoiceContinue, At: atLimit}}}
-	a0(&in).Run.Working = 0
+	// Clearing Attempt.Working on recap continue resets N14.
+	in.Task.Recaps = []Recap{{Trigger: TriggerTime, Decided: &RecapDecision{Choice: ChoiceContinue, At: now}}}
+	a0(&in).Working = 0
 	if r, _ := FirstMatch(TaskRows, in); r.ID == "N14" {
-		t.Fatalf("N14 still fired after recap decision")
+		t.Fatalf("N14 still fired after recap continue reset")
 	}
 	// Ladder == Passed does not fire N14.
 	if r, _ := FirstMatch(TaskRows, with(overTime)); r.ID != "N42" {
 		t.Fatalf("ladder passed with overTime = %s, want N42", r.ID)
 	}
 
-	// N29: idle no-tag reviewer gets one nudge, then stop; young bg job holds off; review_minutes stops even while working.
+	// N29: idle no-tag reviewer gets one nudge, then stop; refused reviewer waits until review_minutes; review_minutes stops even while working.
 	revIdle := with(noRounds, func(in *In) {
-		in.Facts.Reviewer = Run{State: RunIdle, StartedAt: now, LastTurnEnd: now}
+		a0(in).Review = &ReviewRun{Round: 1, Head: "c1"}
+		in.Facts.Reviewer = Run{State: RunIdle, LastTurnEnd: now}
 	})
 	if r, d := FirstMatch(TaskRows, revIdle); r.ID != "N29" || !slices.Equal(d.Asked, []string{"nudge_reviewer@1@0@c1"}) {
 		t.Fatalf("idle reviewer first = %s %v, want N29 nudge", r.ID, d.Asked)
-	}
-	// Young background job holds off nudge.
-	withBg := revIdle
-	withBg.Facts.Reviewer.BgJobAt = now.Add(-time.Duration(s.BackgroundJobMinutes-1) * time.Minute)
-	if r, d := FirstMatch(TaskRows, withBg); r.ID != "N29" || len(d.Asked) != 0 {
-		t.Fatalf("idle reviewer with young bg job = %s %v, want wait", r.ID, d.Asked)
 	}
 	// After nudge done, idle again -> stop.
 	a0(&revIdle).Acts = []Act{{Key: "nudge_reviewer@1@0@c1", Result: "done", At: now}}
 	if r, d := FirstMatch(TaskRows, revIdle); r.ID != "N29" || !slices.Equal(d.Asked, []string{"stop_reviewer@1@0@c1"}) {
 		t.Fatalf("idle reviewer after nudge = %s %v, want N29 stop", r.ID, d.Asked)
 	}
+	// Refused idle reviewer is not nudged, but is stopped once Age reaches review_minutes.
+	revRefused := with(noRounds, func(in *In) {
+		a0(in).Review = &ReviewRun{Round: 1, Head: "c1", Age: time.Duration(s.ReviewMinutes-1) * time.Minute}
+		in.Facts.Reviewer = Run{State: RunIdle, Refused: true}
+	})
+	if r, d := FirstMatch(TaskRows, revRefused); r.ID != "N29" || len(d.Asked) != 0 {
+		t.Fatalf("refused reviewer under review_minutes = %s %v, want wait", r.ID, d.Asked)
+	}
+	a0(&revRefused).Review.Age = time.Duration(s.ReviewMinutes) * time.Minute
+	if r, d := FirstMatch(TaskRows, revRefused); r.ID != "N29" || !slices.Equal(d.Asked, []string{"stop_reviewer@1@0@c1"}) {
+		t.Fatalf("refused reviewer at review_minutes = %s %v, want N29 stop", r.ID, d.Asked)
+	}
 	// Reviewer older than review_minutes is stopped even while working.
 	revOld := with(noRounds, func(in *In) {
-		in.Facts.Reviewer = Run{State: RunWorking, StartedAt: now}
-		in.Now = now.Add(time.Duration(s.ReviewMinutes) * time.Minute)
+		a0(in).Review = &ReviewRun{Round: 1, Head: "c1", Age: time.Duration(s.ReviewMinutes) * time.Minute}
+		in.Facts.Reviewer = Run{State: RunWorking}
 	})
 	if r, d := FirstMatch(TaskRows, revOld); r.ID != "N29" || !slices.Equal(d.Asked, []string{"stop_reviewer@1@0@c1"}) {
 		t.Fatalf("reviewer past review_minutes = %s %v, want N29 stop", r.ID, d.Asked)

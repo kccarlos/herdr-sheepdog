@@ -837,12 +837,6 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 			a.SizeCap, dec = newCap, fmt.Sprintf("continue; size cap %d%s", newCap, note)
 		}
 		a.Working = 0
-		if a.Run != nil {
-			a.Run.Working = 0
-			if a.Run.State == flow.PhaseWorking {
-				a.Run.WorkingSince = now
-			}
-		}
 		rc.Decided = &flow.RecapDecision{Choice: choice, Why: why, At: now}
 		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why},
 			Rule: "recap decide", Decision: dec, Why: why})

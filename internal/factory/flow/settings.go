@@ -35,7 +35,6 @@ type Settings struct {
 	QuietMinutes               int `json:"quiet_minutes"`                  // R21 (design.md 10.1)
 	InterruptSeconds           int `json:"interrupt_seconds"`              // R21, R22 (design.md 10.1)
 	ReviewMinutes              int `json:"review_minutes"`                 // N29 (design.md 10.1)
-	BackgroundJobMinutes       int `json:"background_job_minutes"`         // 4.4, N29, N39 (design.md 10.1)
 	BlockedMinutes             int `json:"blocked_minutes"`                // R29 (design.md 10.1)
 	WorkerRestarts             int `json:"worker_restarts"`                // 4.8 (design.md 10.1)
 	ReviewerRetries            int `json:"reviewer_retries"`               // 4.8 (design.md 10.1)
@@ -84,7 +83,6 @@ const (
 	InterruptMin                          = 10
 	InterruptMax                          = 600
 	ReviewMin, ReviewMax                  = 10, 240
-	BackgroundJobMin, BackgroundJobMax    = 1, 240
 	BlockedMin                            = 1
 	BlockedMax                            = 120
 	WorkerRestartsMax, ReviewerRetriesMax = 10, 5
@@ -107,7 +105,7 @@ func DefaultSettings() Settings {
 		ReviewRounds: 2, MaxRounds: 5,
 		RetroAfterRoundsWithMajors: 2, RetroFromRound: 3,
 		ChecksGraceMinutes: 5, CIStalledMinutes: 90, MainRedMinutes: 60, CIFailsPerHour: 3, BuildHours: 4, FlakeReruns: 1,
-		StartMinutes: 2, IdleGraceSeconds: 20, QuietMinutes: 20, InterruptSeconds: 90, ReviewMinutes: 45, BackgroundJobMinutes: 30, BlockedMinutes: 10,
+		StartMinutes: 2, IdleGraceSeconds: 20, QuietMinutes: 20, InterruptSeconds: 90, ReviewMinutes: 45, BlockedMinutes: 10,
 		WorkerRestarts: 3, ReviewerRetries: 2, EnsureFailures: 3, EnsureBackoffMinutes: 1,
 		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2, MaxRunning: 3,
 		SecondReviewer: "opus",
@@ -124,7 +122,6 @@ func (s Settings) Changed() []string {
 		name     string
 		got, def int
 	}{
-		{"background_job_minutes", s.BackgroundJobMinutes, d.BackgroundJobMinutes},
 		{"blocked_minutes", s.BlockedMinutes, d.BlockedMinutes},
 		{"build_hours", s.BuildHours, d.BuildHours},
 		{"checks_grace_minutes", s.ChecksGraceMinutes, d.ChecksGraceMinutes},
@@ -188,7 +185,6 @@ func (s Settings) Validate() error {
 		{"quiet_minutes", s.QuietMinutes, QuietMin, QuietMax},
 		{"interrupt_seconds", s.InterruptSeconds, InterruptMin, InterruptMax},
 		{"review_minutes", s.ReviewMinutes, ReviewMin, ReviewMax},
-		{"background_job_minutes", s.BackgroundJobMinutes, BackgroundJobMin, BackgroundJobMax},
 		{"blocked_minutes", s.BlockedMinutes, BlockedMin, BlockedMax},
 		{"worker_restarts", s.WorkerRestarts, 0, WorkerRestartsMax},
 		{"reviewer_retries", s.ReviewerRetries, 0, ReviewerRetriesMax},

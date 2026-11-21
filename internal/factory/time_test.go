@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -22,6 +23,7 @@ func TestN14BuildHoursRecapResetAndIdleExcluded(t *testing.T) {
 	l := newLanding(t).withTokens()
 	now := time.Now().UTC().Truncate(time.Second)
 	l.eng.Now = func() time.Time { return now }
+	l.eng.PassInterval = 5 * time.Minute // 10m per-pass cap so 10m steps run in a few passes
 	l.edit(func(s *flow.State) {
 		s.Settings.BuildHours = 1
 		s.Tasks[0].Attempts[0].Ready = nil
@@ -32,7 +34,7 @@ func TestN14BuildHoursRecapResetAndIdleExcluded(t *testing.T) {
 	// Worker works 40m (with periodic activity so R21 quiet never fires), then goes idle for 3h:
 	// idle time must not count toward the 1h build_hours limit.
 	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "working"})
-	l.pass() // R8 -> working at 10:00
+	l.pass() // R8 -> working
 	for i := 1; i <= 4; i++ {
 		now = now.Add(10 * time.Minute)
 		l.srv.SetScreen(l.worker, "working "+strings.Repeat("a", i))
@@ -78,8 +80,8 @@ func TestN14BuildHoursRecapResetAndIdleExcluded(t *testing.T) {
 	// Coordinator decides continue: resets working time count without changing SizeCap.
 	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"continue","why":"keep going"}`, "")
 	st = l.state()
-	if st.Tasks[0].Attempts[0].SizeCap != 100 || flow.OpenRecap(st.Tasks[0]) != nil || flow.WorkingTime(st.Tasks[0], now) != 0 {
-		t.Fatalf("after continue: cap=%d open=%+v working=%v", st.Tasks[0].Attempts[0].SizeCap, flow.OpenRecap(st.Tasks[0]), flow.WorkingTime(st.Tasks[0], now))
+	if st.Tasks[0].Attempts[0].SizeCap != 100 || flow.OpenRecap(st.Tasks[0]) != nil || flow.WorkingTime(st.Tasks[0]) != 0 {
+		t.Fatalf("after continue: cap=%d open=%+v working=%v", st.Tasks[0].Attempts[0].SizeCap, flow.OpenRecap(st.Tasks[0]), flow.WorkingTime(st.Tasks[0]))
 	}
 	l.pass()
 	if flow.OpenRecap(l.state().Tasks[0]) != nil {
@@ -98,49 +100,179 @@ func TestN14BuildHoursRecapResetAndIdleExcluded(t *testing.T) {
 	}
 }
 
-// TestClockSleepGapNotCounted verifies design.md 2.5: a gap over 60 s between
-// ticks (the Mac slept) is subtracted from the engine clock so it counts
-// neither as worker working time (N14) nor as reviewer age (N29).
-func TestClockSleepGapNotCounted(t *testing.T) {
+func setStatusAt(t *testing.T, l *landing, id, state string, at time.Time) {
+	t.Helper()
+	l.srv.SetStatus(id, &hc.Status{App: "claude-code", State: state})
+	term, err := l.client.Get(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := uint64(at.UnixMilli())
+	term.StatusMS = &ms
+	l.srv.Add(term)
+}
+
+// TestClockSleepIdleOnTimeAndRestartNoInflation verifies design.md 2.5:
+//   - a simulated 6h sleep (wall advances 6h, monotonic advances 0) adds 0 to
+//     working time and review age;
+//   - because the engine stays in wall time, a run reporting done with wall
+//     StatusMS after wake still goes idle after idle_grace_seconds;
+//   - a daemon restart after sleep keeps the stored totals without inflating them.
+func TestClockSleepIdleOnTimeAndRestartNoInflation(t *testing.T) {
 	l := newLanding(t)
-	raw := time.Now().UTC().Truncate(time.Second)
-	l.eng.Now = func() time.Time { return raw }
+	wall := time.Now().UTC().Truncate(time.Second)
+	var monoDelta time.Duration
+	l.eng.Now = func() time.Time { return wall }
+	l.eng.Since = func(time.Time) time.Duration { return monoDelta }
 	l.edit(func(s *flow.State) {
 		s.Settings.BuildHours = 1
 		s.Settings.ReviewMinutes = 10
 		s.Tasks[0].Attempts[0].Rounds = nil
-		s.Tasks[0].Attempts[0].Run = &flow.RunRecord{Address: l.worker, Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseWorking, StartedAt: raw, WorkingSince: raw, LastActivity: raw}
+		s.Tasks[0].Attempts[0].Run = &flow.RunRecord{Address: l.worker, Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseWorking, StartedAt: wall, LastActivity: wall}
 	})
-	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "working"})
+	setStatusAt(t, l, l.worker, "working", wall)
 
-	// Tick 0: starts reviewer round 1 at raw=12:00:00.
-	l.eng.tickClock()
+	// Pass 0: starts reviewer round 1.
 	l.pass()
 	revID := l.state().Tasks[0].Attempts[0].Review.RunID
 	if revID == "" {
 		t.Fatal("expected round 1 reviewer to start")
 	}
-	l.srv.SetStatus(revID, &hc.Status{App: "claude-code", State: "working"})
+	setStatusAt(t, l, revID, "working", wall)
 
-	// Normal 30s tick: counted (30s <= 60s).
-	raw = raw.Add(30 * time.Second)
-	l.eng.tickClock()
+	// Normal 15s pass: adds 15s to working time and review age.
+	wall, monoDelta = wall.Add(15*time.Second), 15*time.Second
+	l.pass()
+	st := l.state()
+	if got := flow.WorkingTime(st.Tasks[0]); got != 15*time.Second {
+		t.Fatalf("WorkingTime after 15s = %v, want 15s", got)
+	}
+	if got := st.Tasks[0].Attempts[0].Review.Age; got != 15*time.Second {
+		t.Fatalf("Review.Age after 15s = %v, want 15s", got)
+	}
+
+	// Simulated 6h machine sleep: wall advances 6h, monotonic advances 0s.
+	wall, monoDelta = wall.Add(6*time.Hour), 0
+	l.pass()
+	st = l.state()
+	if len(st.Tasks[0].Recaps) != 0 {
+		t.Fatalf("sleep triggered N14 recap: %+v", st.Tasks[0].Recaps)
+	}
+	if st.Tasks[0].Attempts[0].Review.RunID != revID || st.Tasks[0].Attempts[0].Review.Age != 15*time.Second {
+		t.Fatalf("sleep inflated/stopped reviewer: %+v", st.Tasks[0].Attempts[0].Review)
+	}
+	if got := flow.WorkingTime(st.Tasks[0]); got != 15*time.Second {
+		t.Fatalf("WorkingTime after 6h sleep = %v, want 15s", got)
+	}
+
+	// After wake, worker finishes with wall-clock StatusMS -> must go idle on time.
+	setStatusAt(t, l, l.worker, "done", wall)
+	monoDelta = 0
+	l.pass()
+	wall, monoDelta = wall.Add(25*time.Second), 25*time.Second
+	l.pass()
+	if got := l.state().Tasks[0].Attempts[0].Run.State; got != flow.PhaseIdle {
+		t.Fatalf("after wake + 25s done (wall StatusMS): worker state = %s, want idle", got)
+	}
+
+	// Daemon restart after sleep keeps accumulated totals without inflating any age.
+	eng2 := New(l.paths, l.client)
+	eng2.Now = func() time.Time { return wall }
+	eng2.passProject(context.Background(), l.id, false)
+	st = l.state()
+	if len(st.Tasks[0].Recaps) != 0 {
+		t.Fatalf("daemon restart after sleep triggered N14 recap: %+v", st.Tasks[0].Recaps)
+	}
+	if st.Tasks[0].Attempts[0].Review.RunID != revID || st.Tasks[0].Attempts[0].Review.Retries != 0 || st.Tasks[0].Attempts[0].Review.Age != 40*time.Second {
+		t.Fatalf("daemon restart after sleep inflated/stopped reviewer: %+v", st.Tasks[0].Attempts[0].Review)
+	}
+	if got := flow.WorkingTime(st.Tasks[0]); got != 40*time.Second {
+		t.Fatalf("WorkingTime after restart = %v, want 40s", got)
+	}
+}
+
+// TestClockRestartAfterSleepNoInflation verifies that restarting the daemon
+// right after a 6h sleep (before any post-wake pass on the old Engine) does not
+// inflate stored working time or review age.
+func TestClockRestartAfterSleepNoInflation(t *testing.T) {
+	l := newLanding(t)
+	wall := time.Now().UTC().Truncate(time.Second)
+	l.eng.Now = func() time.Time { return wall }
+	l.edit(func(s *flow.State) {
+		s.Settings.BuildHours = 1
+		s.Settings.ReviewMinutes = 10
+		s.Tasks[0].Attempts[0].Rounds = nil
+		s.Tasks[0].Attempts[0].Run = &flow.RunRecord{Address: l.worker, Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseWorking, StartedAt: wall, LastActivity: wall}
+	})
+	setStatusAt(t, l, l.worker, "working", wall)
+	l.pass()
+	revID := l.state().Tasks[0].Attempts[0].Review.RunID
+	setStatusAt(t, l, revID, "working", wall)
+	wall = wall.Add(15 * time.Second)
 	l.pass()
 
-	// Mac sleeps for 6 hours (gap > 60s): subtracted from the clock!
-	raw = raw.Add(6 * time.Hour)
-	l.eng.tickClock()
-	l.pass()
+	// Sleep 6h, then restart daemon immediately.
+	wall = wall.Add(6 * time.Hour)
+	eng2 := New(l.paths, l.client)
+	eng2.Now = func() time.Time { return wall }
+	eng2.passProject(context.Background(), l.id, false)
+	wall = wall.Add(15 * time.Second)
+	eng2.passProject(context.Background(), l.id, false)
 
 	st := l.state()
 	if len(st.Tasks[0].Recaps) != 0 {
-		t.Fatalf("sleep gap triggered N14 recap: %+v", st.Tasks[0].Recaps)
+		t.Fatalf("daemon restart after sleep triggered N14 recap: %+v", st.Tasks[0].Recaps)
 	}
-	if st.Tasks[0].Attempts[0].Review.RunID != revID || st.Tasks[0].Attempts[0].Review.Retries != 0 {
-		t.Fatalf("sleep gap stopped reviewer: %+v", st.Tasks[0].Attempts[0].Review)
+	if st.Tasks[0].Attempts[0].Review.RunID != revID || st.Tasks[0].Attempts[0].Review.Retries != 0 || st.Tasks[0].Attempts[0].Review.Age != 30*time.Second {
+		t.Fatalf("daemon restart after sleep inflated/stopped reviewer: %+v", st.Tasks[0].Attempts[0].Review)
 	}
-	if wt := flow.WorkingTime(st.Tasks[0], l.eng.now()); wt != 30*time.Second {
-		t.Fatalf("WorkingTime after 30s + 6h sleep = %v, want 30s", wt)
+	if got := flow.WorkingTime(st.Tasks[0]); got != 30*time.Second {
+		t.Fatalf("WorkingTime after restart + 15s = %v, want 30s", got)
+	}
+}
+
+// TestClockSlowPassCappedNotFrozen verifies that a slow pass (90s, default 15s
+// tick -> 30s cap) adds at most the cap (30s) rather than 90s or 0s, and never
+// freezes the clock for N14 or review_minutes.
+func TestClockSlowPassCappedNotFrozen(t *testing.T) {
+	l := newLanding(t)
+	wall := time.Now().UTC().Truncate(time.Second)
+	l.eng.Now = func() time.Time { return wall }
+	l.edit(func(s *flow.State) {
+		s.Settings.BuildHours = 1
+		s.Settings.ReviewMinutes = 10
+		s.Tasks[0].Attempts[0].Rounds = nil
+		s.Tasks[0].Attempts[0].Run = &flow.RunRecord{Address: l.worker, Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseWorking, StartedAt: wall, LastActivity: wall}
+	})
+	setStatusAt(t, l, l.worker, "working", wall)
+	l.pass()
+	revID := l.state().Tasks[0].Attempts[0].Review.RunID
+	setStatusAt(t, l, revID, "working", wall)
+
+	// Slow pass 1 (90s): capped at 2*15s = 30s (not 0s and not 90s).
+	wall = wall.Add(90 * time.Second)
+	l.srv.SetScreen(l.worker, "slow pass 1")
+	l.srv.SetScreen(revID, "slow rev 1")
+	l.pass()
+	st := l.state()
+	if got := flow.WorkingTime(st.Tasks[0]); got != 30*time.Second {
+		t.Fatalf("WorkingTime after 90s slow pass = %v, want 30s", got)
+	}
+	if got := st.Tasks[0].Attempts[0].Review.Age; got != 30*time.Second {
+		t.Fatalf("Review.Age after 90s slow pass = %v, want 30s", got)
+	}
+
+	// Slow pass 2 (90s): adds another 30s -> 1m total (clock is not frozen).
+	wall = wall.Add(90 * time.Second)
+	l.srv.SetScreen(l.worker, "slow pass 2")
+	l.srv.SetScreen(revID, "slow rev 2")
+	l.pass()
+	st = l.state()
+	if got := flow.WorkingTime(st.Tasks[0]); got != time.Minute {
+		t.Fatalf("WorkingTime after two 90s slow passes = %v, want 1m", got)
+	}
+	if got := st.Tasks[0].Attempts[0].Review.Age; got != time.Minute {
+		t.Fatalf("Review.Age after two 90s slow passes = %v, want 1m", got)
 	}
 }
 
@@ -193,6 +325,7 @@ func TestN29ReviewMinutesStopsAndRetries(t *testing.T) {
 	l := newLanding(t)
 	now := time.Date(2026, 11, 20, 15, 0, 0, 0, time.UTC)
 	l.eng.Now = func() time.Time { return now }
+	l.eng.PassInterval = 5 * time.Minute // 10m cap so 9m + 1m steps run in two passes
 	l.edit(func(s *flow.State) {
 		s.Settings.ReviewMinutes = 10
 		s.Tasks[0].Attempts[0].Rounds = nil
@@ -215,15 +348,15 @@ func TestN29ReviewMinutesStopsAndRetries(t *testing.T) {
 		t.Fatalf("at review_minutes: review=%+v run=%+v, want stopped as stuck", rev, rev.Run)
 	}
 
-	l.pass() // 4.8 starts retry 1
+	l.pass() // 4.8 starts retry 1 with fresh Age == 0
 	rev = l.state().Tasks[0].Attempts[0].Review
-	if rev.RunID == "" || rev.Retries != 1 {
-		t.Fatalf("after review_minutes stop: review=%+v, want retry 1", rev)
+	if rev.RunID == "" || rev.Retries != 1 || rev.Age != 0 {
+		t.Fatalf("after review_minutes stop: review=%+v, want retry 1 with Age 0", rev)
 	}
 }
 
-// TestS2AndStuckMinutesGone verifies S2 is gone: no row in TaskRows and no
-// stuck_minutes field in DefaultSettings JSON.
+// TestS2AndStuckMinutesGone verifies S2 is gone and neither stuck_minutes nor
+// background_job_minutes appears in DefaultSettings JSON.
 func TestS2AndStuckMinutesGone(t *testing.T) {
 	for _, r := range flow.TaskRows {
 		if r.ID == "S2" {
@@ -237,4 +370,67 @@ func TestS2AndStuckMinutesGone(t *testing.T) {
 	if strings.Contains(string(raw), "stuck_minutes") {
 		t.Fatalf("stuck_minutes still in DefaultSettings JSON: %s", raw)
 	}
+	if strings.Contains(string(raw), "background_job_minutes") {
+		t.Fatalf("background_job_minutes still in DefaultSettings JSON: %s", raw)
+	}
+}
+
+// TestOldStateWithStuckMinutesAndNoWorkingSince verifies that an old state.json
+// carrying stuck_minutes (and lacking build_hours/review_minutes) loads with
+// defaults, and a pre-upgrade working worker record counts from the first pass.
+func TestOldStateWithStuckMinutesAndNoWorkingSince(t *testing.T) {
+	l := newLanding(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	l.eng.Now = func() time.Time { return now }
+	l.eng.PassInterval = 5 * time.Minute
+	raw := `{
+		"seq": 5,
+		"project": {"id": "` + l.id + `", "folder": ` + mustJSON(t, l.repo) + `, "goal": "Goal", "started": true, "run_id": "coord-elsewhere"},
+		"settings": {"review_rounds": 2, "stuck_minutes": 30},
+		"tasks": [{
+			"id": "T1", "title": "feat: x", "estimate_lines": 50,
+			"attempts": [{
+				"base_commit": ` + mustJSON(t, l.state().Tasks[0].Attempts[0].BaseCommit) + `,
+				"branch": ` + mustJSON(t, l.branch) + `,
+				"worktree": ` + mustJSON(t, l.wt) + `,
+				"pr": 7, "size_cap": 100,
+				"run_id": ` + mustJSON(t, l.worker) + `,
+				"run": {"Address": ` + mustJSON(t, l.worker) + `, "Role": "worker", "CLI": "claude", "State": "working", "StartedAt": ` + mustJSON(t, now) + `, "LastActivity": ` + mustJSON(t, now) + `},
+				"ready": [], "rounds": [], "accepts": [], "acts": []
+			}]
+		}]
+	}`
+	if err := writeAtomic(l.paths.State(l.id), []byte(raw)); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(l.paths.State(l.id))
+	if err != nil {
+		t.Fatalf("LoadState old state with stuck_minutes: %v", err)
+	}
+	if loaded.Settings.BuildHours != 4 || loaded.Settings.ReviewMinutes != 45 {
+		t.Fatalf("old state defaults: BuildHours=%d ReviewMinutes=%d, want 4, 45", loaded.Settings.BuildHours, loaded.Settings.ReviewMinutes)
+	}
+	if err := loaded.Settings.Validate(); err != nil {
+		t.Fatalf("old state settings Validate: %v", err)
+	}
+	l.edit(func(s *flow.State) { s.Settings.BuildHours = 1 })
+	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "working"})
+	l.pass()
+	for i := 1; i <= 6; i++ {
+		now = now.Add(10 * time.Minute)
+		l.srv.SetScreen(l.worker, "old-state "+strings.Repeat("x", i))
+		l.pass()
+	}
+	if rc := l.state().Tasks[0].Recaps; len(rc) != 1 || rc[0].Trigger != flow.TriggerTime {
+		t.Fatalf("old-state working worker after 1h: recaps = %+v, want 1 time recap", rc)
+	}
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }

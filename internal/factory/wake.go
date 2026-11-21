@@ -83,7 +83,7 @@ func taskFacts(t flow.Task, f flow.Facts, now time.Time) string {
 			}
 		}
 		if rc.Trigger == flow.TriggerTime {
-			out += fmt.Sprintf("; working time %s", flow.WorkingTime(t, now).Truncate(time.Minute))
+			out += fmt.Sprintf("; working time %s", flow.WorkingTime(t).Truncate(time.Minute))
 		}
 	}
 	return out

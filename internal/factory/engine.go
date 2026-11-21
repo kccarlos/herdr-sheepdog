@@ -38,54 +38,61 @@ var lockGitTimeout = 15 * time.Second
 // ghTimeout bounds one GitHub executor or snapshot (a push plus gh calls).
 var ghTimeout = time.Minute
 
-// sleepGap is the tick-to-tick gap above which the Mac slept and the gap is
-// subtracted from the engine clock (design.md 2.5, 10.1).
-const sleepGap = 60 * time.Second
-
 // Engine runs the factory loop and handles owner start and stop commands.
 type Engine struct {
 	Paths        Paths
 	HC           *hc.Client
 	Log          logging.Logger
 	PassInterval time.Duration
-	Now          func() time.Time  // clock; nil uses time.Now
-	Bin          string            // sheepdog binary named in run prompts
-	RunEnv       map[string]string // added to every run's environment (daemon port)
+	Now          func() time.Time              // wall clock; nil uses time.Now
+	Since        func(time.Time) time.Duration // monotonic elapsed since previous pass; nil uses time.Since (wall delta when Now is set)
+	Bin          string                        // sheepdog binary named in run prompts
+	RunEnv       map[string]string             // added to every run's environment (daemon port)
 
-	mu          sync.Mutex
-	wake        chan struct{}
-	lastTick    time.Time           // last raw wall-clock tick (design.md 2.5)
-	sleepOffset time.Duration       // subtracted sleep gaps over sleepGap
-	prs         map[string]flow.PR  // last PR snapshot per attempt worktree (in memory)
-	errs        map[string]string   // last gh or git error per worktree and kind, logged once per change
-	tips        map[string]tipFacts // last git reading per worktree (in memory)
-	waits       map[string]string   // last N9/N10/N38 wait reason per project/task, logged once per change
-	ghUnavail   map[string]bool     // project fact github_unavailable (design.md 7.3)
-	hcUnavail   map[string]bool     // project fact hc_unavailable (design.md 7.3)
+	mu        sync.Mutex
+	wake      chan struct{}
+	lastPass  map[string]time.Time // monotonic reading of previous pass per project (design.md 2.5)
+	prs       map[string]flow.PR   // last PR snapshot per attempt worktree (in memory)
+	errs      map[string]string    // last gh or git error per worktree and kind, logged once per change
+	tips      map[string]tipFacts  // last git reading per worktree (in memory)
+	waits     map[string]string    // last N9/N10/N38 wait reason per project/task, logged once per change
+	ghUnavail map[string]bool      // project fact github_unavailable (design.md 7.3)
+	hcUnavail map[string]bool      // project fact hc_unavailable (design.md 7.3)
 }
 
-func (e *Engine) rawNow() time.Time {
+func (e *Engine) now() time.Time {
 	if e.Now != nil {
 		return e.Now()
 	}
 	return time.Now()
 }
 
-func (e *Engine) now() time.Time {
-	return e.rawNow().Add(-e.sleepOffset)
-}
-
-// tickClock subtracts any gap over 60 s between ticks (the Mac slept, design.md 2.5).
-func (e *Engine) tickClock() {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	raw := e.rawNow()
-	if !e.lastTick.IsZero() {
-		if gap := raw.Sub(e.lastTick); gap > sleepGap {
-			e.sleepOffset += gap
-		}
+// passDelta returns the monotonic time since id's previous pass (capped at
+// 2× the pass interval), so machine sleep does not count toward N14/N29
+// durations without shifting wall time, and slow passes neither freeze nor jump.
+func (e *Engine) passDelta(id string) time.Duration {
+	prev := e.lastPass[id]
+	if e.lastPass == nil {
+		e.lastPass = map[string]time.Time{}
 	}
-	e.lastTick = raw
+	if prev.IsZero() {
+		e.lastPass[id] = e.now()
+		return 0
+	}
+	var dt time.Duration
+	switch {
+	case e.Since != nil:
+		dt = e.Since(prev)
+	case e.Now == nil:
+		dt = time.Since(prev)
+	default:
+		dt = e.now().Sub(prev)
+	}
+	e.lastPass[id] = e.now()
+	if dt <= 0 {
+		return 0
+	}
+	return min(dt, 2*cmp.Or(e.PassInterval, flow.PassInterval))
 }
 
 // tipFacts are N12's and N20's git facts for one tip and H: the merge base,
@@ -246,6 +253,7 @@ func (e *Engine) Stop(project string) error {
 		stopTaskRuns(&s.Tasks[ti], s.Settings, now)
 	}
 	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base = "", "", nil, false, nil, nil
+	delete(e.lastPass, id)
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "stop"}, Rule: "stop", Decision: "stopped", Why: "stopped by owner"})
 }
 
@@ -254,7 +262,6 @@ func (e *Engine) Run(ctx context.Context) {
 	t := time.NewTicker(cmp.Or(e.PassInterval, flow.PassInterval))
 	defer t.Stop()
 	for trim := true; ; trim = false {
-		e.tickClock()
 		for _, ent := range e.projectDirs() {
 			if ctx.Err() == nil && ent.IsDir() {
 				e.passProject(ctx, ent.Name(), trim)
@@ -291,8 +298,10 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		}
 	}
 	if !s.Project.Started {
+		delete(e.lastPass, id)
 		return
 	}
+	dt := e.passDelta(id)
 	if s.Project.RunID == "" && flow.Count(s.Project.Acts, "coordinator") == 0 {
 		termID, _, abort, err := e.launchRunLocked(ctx, id, &s, &s.Project.RunTokenHash, &s.Project.Run, s.Project.Run == nil || s.Project.Run.State != flow.PhaseEnded, flow.RunRecord{Role: flow.RoleCoordinator, CLI: "claude"}, world.RunSpec{
 			Name: coordName(id), Cwd: s.Project.Folder, ClaudeConfig: e.Paths.ClaudeConfig,
@@ -333,11 +342,20 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	for ti := range s.Tasks {
 		t := &s.Tasks[ti]
 		if a := flow.OpenAttempt(*t); a != nil && !flow.Ended(*t) && (a.RunID != "" || a.Run != nil && a.Run.State == flow.PhaseEnded) {
+			wasWorking := a.Run != nil && a.Run.State == flow.PhaseWorking
 			hcChecked = hcChecked || a.RunID != "" && (a.Run == nil || a.Run.State != flow.PhaseEnded)
 			r, rerr := e.advanceRunLocked(ctx, id, t.ID, &s, a.RunID, flow.RoleWorker, "claude", &a.Run)
 			hcErr = cmp.Or(hcErr, rerr)
+			save := false
+			if dt > 0 && rerr == nil && wasWorking {
+				a.Working += dt
+				save = true
+			}
 			if a.Run != nil && a.Run.State == flow.PhaseEnded && (len(a.Run.Held) > 0 || a.RunID != "") {
 				a.Held, a.Run.Held, a.RunID, a.RunTokenHash = appendHeld(a.Held, a.Run.Held...), nil, "", ""
+				save = true
+			}
+			if save {
 				e.saveLocked(id, s)
 			}
 			workerRun[t.ID], workerState[t.ID], workerErr[t.ID] = r, r.State, rerr
@@ -360,7 +378,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	granted := flow.GrantSlots(candidates, s.Tasks, flow.RunningTasks(s.Tasks, workerState), s.Settings.MaxRunning)
 	for i := range s.Tasks {
 		if ctx.Err() == nil {
-			e.passTaskLocked(ctx, id, &s, i, granted[s.Tasks[i].ID], workerRun[s.Tasks[i].ID], workerErr[s.Tasks[i].ID], &baseTried)
+			e.passTaskLocked(ctx, id, &s, i, granted[s.Tasks[i].ID], workerRun[s.Tasks[i].ID], workerErr[s.Tasks[i].ID], &baseTried, dt)
 		}
 	}
 	if ctx.Err() == nil && coordErr == nil {
@@ -515,7 +533,7 @@ func actOutage(verb string, f flow.Facts) bool {
 	}
 }
 
-func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int, hasSlot bool, workerRun flow.Run, workerErr error, baseTried *bool) {
+func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int, hasSlot bool, workerRun flow.Run, workerErr error, baseTried *bool, dt time.Duration) {
 	facts := flow.Facts{GitHubUnavailable: e.ghUnavail[id], HCUnavailable: e.hcUnavail[id]}
 	if b := s.Project.Base; b != nil && b.Red {
 		facts.BaseRed, facts.BaseRedSince = true, b.Since
@@ -557,7 +575,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 			facts.PR = e.readPRLocked(ctx, id, s, ti)
 		}
 		facts.GitHubUnavailable = e.ghUnavail[id]
-		if e.observeReviewLocked(ctx, id, s, ti, &facts) {
+		if e.observeReviewLocked(ctx, id, s, ti, &facts, dt) {
 			return
 		}
 	} else if oa == nil && !flow.Ended(s.Tasks[ti]) {
@@ -718,10 +736,6 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 		model, effort = res.Model, res.Effort
 	}
 	adopt := prev == nil || prev.State != flow.PhaseEnded
-	if !adopt && prev != nil && prev.Working > 0 {
-		a.Working += prev.Working
-		prev.Working = 0
-	}
 	sid, resume, bin := world.NewUUID(), mode == flow.ContinueResume && prev != nil && prev.SessionID != "", cmp.Or(e.Bin, "sheepdog")
 	if resume || (adopt && prev != nil && prev.SessionID != "") {
 		sid = prev.SessionID
@@ -867,7 +881,7 @@ func passingModels(a flow.Attempt, h string) []string {
 
 // observeReviewLocked checks an active reviewer run: stops it if its round is
 // void, or reads and accepts its verdict tag once idle (design.md 4.5, 4.8).
-func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.State, ti int, facts *flow.Facts) bool {
+func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.State, ti int, facts *flow.Facts, dt time.Duration) bool {
 	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
 	if a.Review == nil {
 		return false
@@ -897,13 +911,22 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		}
 		return false
 	}
+	wasLive := a.Review.Run != nil && a.Review.Run.State != "" && a.Review.Run.State != flow.PhaseEnded
 	var err error
 	if facts.Reviewer, err = e.advanceRunLocked(ctx, id, t.ID, s, a.Review.RunID, flow.RoleReviewer, cmp.Or(a.Review.Reviewer.CLI, "claude"), &a.Review.Run); err != nil {
 		e.logError("factory.hc_error", id, err)
 		return true
 	}
+	save := false
+	if dt > 0 && wasLive {
+		a.Review.Age += dt
+		save = true
+	}
 	if a.Review.Run != nil && a.Review.Run.State == flow.PhaseEnded && a.Review.RunID != "" {
 		a.Review.RunID, a.Review.RunTokenHash = "", ""
+		save = true
+	}
+	if save {
 		e.saveLocked(id, *s)
 	}
 	codex := a.Review.Reviewer.CLI == world.CodexCLI

@@ -224,7 +224,7 @@ type Attempt struct {
 	MergeOnly []Advance `json:"merge_only,omitempty"`
 	// CIFails records distinct commits of this attempt seen with a failing check run (N13).
 	CIFails []CIFail `json:"ci_fails,omitempty"`
-	// Working is working-state time accrued by earlier worker runs of this attempt since the last recap decision (N14).
+	// Working is accumulated PhaseWorking time in this attempt since the last recap decision (N14).
 	Working time.Duration `json:"working,omitempty"`
 }
 
@@ -248,17 +248,18 @@ func Counted(a Attempt) []Round { return a.Rounds[min(a.Boundary, len(a.Rounds))
 
 // ReviewRun is the active reviewer run started for the attempt's next round.
 type ReviewRun struct {
-	RunID        string     `json:"run_id,omitempty"`
-	RunTokenHash string     `json:"run_token_sha256,omitempty"`
-	Run          *RunRecord `json:"run,omitempty"`
-	Round        int        `json:"round"`
-	Kind         string     `json:"kind,omitempty"`
-	Head         string     `json:"head"`
-	Code         string     `json:"code"`
-	Reviewer     Reviewer   `json:"reviewer"`
-	Retries      int        `json:"retries,omitempty"`
-	FailedModels []string   `json:"failed_models,omitempty"`
-	RefusalSent  bool       `json:"refusal_sent,omitempty"`
+	RunID        string        `json:"run_id,omitempty"`
+	RunTokenHash string        `json:"run_token_sha256,omitempty"`
+	Run          *RunRecord    `json:"run,omitempty"`
+	Round        int           `json:"round"`
+	Kind         string        `json:"kind,omitempty"`
+	Head         string        `json:"head"`
+	Code         string        `json:"code"`
+	Reviewer     Reviewer      `json:"reviewer"`
+	Retries      int           `json:"retries,omitempty"`
+	FailedModels []string      `json:"failed_models,omitempty"`
+	RefusalSent  bool          `json:"refusal_sent,omitempty"`
+	Age          time.Duration `json:"age,omitempty"`
 }
 
 // Proof is one outcome's evidence attached to a ready report (design.md 3, 7.2):

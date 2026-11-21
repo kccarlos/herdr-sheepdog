@@ -130,7 +130,7 @@ The daemon can be a launchd service (*not verified by me; `internal/service` exi
 
 ### 2.5 The clock
 
-Rules compare ages ("the reviewer started more than `review_minutes` ago") against one clock. The loop ticks every 15 s. If two ticks are more than 60 s apart (the Mac slept), the gap is subtracted from the clock, so a night's sleep does not make every timer fire at once. That is the only clock rule; no deadline is stored.
+Stored timestamps and the engine's `now()` stay in wall time (the same clock herdr-core's `status_ms` uses). The loop ticks every 15 s. The two durations that must not include machine sleep — worker working time (N14, `build_hours`) and reviewer age (N29, `review_minutes`) — are accumulated per pass from Go's monotonic clock (`time.Since`, which does not advance while macOS sleeps), capped per pass at 2 × the tick interval (30 s), and stored in `state.json` so restarts keep them.
 
 ## 3. Records
 
@@ -276,6 +276,8 @@ The row that opens a recap also stores its allowed choices. `continue` is allowe
 | N27 | (from the evidence increment on) no evidence covers `H`, and no owner override covers `H` | the task's checks run at `H` (section 11.6) | the engine |
 | N28 | the ladder says "retro" for `H` | a retro run for `H` (a first retro, or the delta check of a bounded fix) | the retro reviewer |
 | N29 | the ladder says "review" for `H` | a reviewer run for that round at `H` (section 4.8); its report is read when it goes idle; with no report and no background job of its own younger than `background_job_minutes`: one nudge, then stop it; a run older than `review_minutes` is stopped | the reviewer |
+
+Gap (N29 background jobs): herdr-core does not yet report a run's background jobs, so `background_job_minutes` and the young-background-job hold are not shipped yet; an idle reviewer with no report tag is nudged once and then stopped (a reviewer whose tag was refused waits until `review_minutes`).
 
 Red checks while a review runs are not acted on. Telling the worker at once would move the head under the reviewer; N33 acts when the review has passed.
 
@@ -795,7 +797,7 @@ These are mechanics: how a thing is done once a row has asked for it. They decid
 
 Settings that are choices, not numbers, are set the same way: `design_gate` (review model or owner), `delegation` (kinds, scope, until), `notify_level`, `merge_policy`, `project_priority`, `models` per role, `verify` (section 11.6). Until `models` and candidate lists exist (slice 5b), `second_reviewer` (section 9.2) is the one choice built.
 
-The engine's own machinery has a few fixed numbers that are not rules about work: the loop's 15 s tick, the 60 s sleep test, how often GitHub is read, and the report client's limits on a proof (5 minutes, 64 KiB of output). They are constants in code.
+The engine's own machinery has a few fixed numbers that are not rules about work: the loop's 15 s tick, the 2 × tick per-pass duration cap (30 s), how often GitHub is read, and the report client's limits on a proof (5 minutes, 64 KiB of output). They are constants in code.
 
 **Not a setting, ever:** the rows themselves, the acceptance table, the owner's proof, the invariants, "no checks is never green", "never merge a commit no reviewer passed, unless the owner overrode that very commit". Rails stay in code; a row change goes through review and shows up in the generated table document.
 
