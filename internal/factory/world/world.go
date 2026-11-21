@@ -350,27 +350,39 @@ func ScreenClass(cli, text string) string {
 	return flow.ScreenNone
 }
 
-// Match the captured menu as a suffix, preserving the selected option and
-// the layout that distinguishes the menu from phrases in agent output.
+var agyTrustDialog = [...]string{
+	"Do you trust the contents of this project?",
+	"",
+	"Antigravity CLI requires permission to read, edit, and execute files here.",
+	"",
+	"> Yes, I trust this folder",
+	"  No, exit",
+	"",
+	"  ↑/↓ Navigate · enter Confirm",
+}
+
+func equalDialogLine(line, want string) bool {
+	return strings.TrimRight(line, " \t") == want
+}
+
+// Match the captured menu and one status line at the bottom of the screen.
 func agyTrustSelected(lines []string) bool {
-	dialog := [...]string{
-		"Do you trust the contents of this project?",
-		"",
-		"Antigravity CLI requires permission to read, edit, and execute files here.",
-		"",
-		"> Yes, I trust this folder",
-		"  No, exit",
-		"",
-		"  ↑/↓ Navigate · enter Confirm",
-	}
-	if len(lines) <= len(dialog) {
+	n := len(lines) - len(agyTrustDialog) - 1
+	if n < 0 {
 		return false
 	}
-	tail := lines[len(lines)-len(dialog)-1:]
-	return strings.TrimSpace(tail[len(dialog)]) == "Gemini 3.8 Flash · high" &&
-		slices.EqualFunc(tail[:len(dialog)], dialog[:], func(line, want string) bool {
-			return strings.TrimRight(line, " \t") == want
-		})
+	return strings.TrimSpace(lines[len(lines)-1]) != "" &&
+		slices.EqualFunc(lines[n:len(lines)-1], agyTrustDialog[:], equalDialogLine)
+}
+
+func agyTrustDrawing(text string) bool {
+	lines := strings.Split(strings.TrimRight(text, "\n \t"), "\n")
+	for n := 1; n <= min(len(lines), len(agyTrustDialog)); n++ {
+		if slices.EqualFunc(lines[len(lines)-n:], agyTrustDialog[:n], equalDialogLine) {
+			return true
+		}
+	}
+	return false
 }
 
 // ObserveRun reads rec's terminal and screen from herdr-core and emits the events for one pass (design.md 5, 7.3).
@@ -393,11 +405,11 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]f
 	if t.State != "live" {
 		return []flow.RunEvent{{Kind: flow.EvExit, Reason: deref(t.Reason)}}, nil
 	}
-	cls, hash, nonEmpty := "", "", false
+	cls, hash, clean := "", "", ""
 	// Complete describes the older history. The current screen can still supply evidence.
 	if rd, rerr := client.Read(ctx, rec.Address, 200); rerr == nil {
-		clean := ansiRe.ReplaceAllString(strings.ReplaceAll(rd.Text, "\r\n", "\n"), "")
-		nonEmpty, cls = strings.TrimSpace(clean) != "", ScreenClass(rec.CLI, clean)
+		clean = ansiRe.ReplaceAllString(strings.ReplaceAll(rd.Text, "\r\n", "\n"), "")
+		cls = ScreenClass(rec.CLI, clean)
 		if rd.Text != "" {
 			sum := sha256.Sum256([]byte(strings.Join(strings.Fields(noiseRe.ReplaceAllString(durationRe.ReplaceAllString(clean, " "), " ")), " ")))
 			hash = hex.EncodeToString(sum[:8])
@@ -406,22 +418,24 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]f
 	var evs []flow.RunEvent
 	s := t.Status
 	starting := rec.State == flow.PhaseStarting
-	verifiedTrust := starting && rec.CLI == "agy" && cls == flow.ScreenTrust &&
+	agyStarting := starting && rec.CLI == "agy"
+	permission := s != nil && s.State == "blocked" && deref(s.Kind) == "permission"
+	verifiedTrust := agyStarting && cls == flow.ScreenTrust &&
 		rec.ID != "" && rec.CreatedMS != 0 && t.CreatedMS == rec.CreatedMS
-	trustBlocked := verifiedTrust && s != nil && s.State == "blocked" && deref(s.Kind) == "permission"
+	trustBlocked := permission && verifiedTrust
+	waitForScreen := permission && agyStarting && (strings.TrimSpace(clean) == "" || agyTrustDrawing(clean))
 	if trustBlocked || (starting && !rec.StatusReported && s == nil && cls != "" &&
 		(rec.CLI != "agy" || cls != flow.ScreenTrust || verifiedTrust)) {
 		evs = append(evs, flow.RunEvent{Kind: flow.EvScreen, Screen: cls, ScreenHash: hash})
-		if rec.CLI == CodexCLI && nonEmpty && cls == flow.ScreenNone {
+		if rec.CLI == CodexCLI && cls == flow.ScreenNone && strings.TrimSpace(clean) != "" {
 			evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: "working"})
 		}
 	}
 	if hash != "" && rec.ScreenHash != "" && hash != rec.ScreenHash {
 		evs = append(evs, flow.RunEvent{Kind: flow.EvActivity, ScreenHash: hash})
 	}
-	// While the verified menu is visible, R3/R6 handle it. A subsequent
-	// observation handles any new status against the screen then visible.
-	if s != nil && !trustBlocked && (!rec.StatusReported || s.State != rec.Status || deref(s.Kind) != rec.BlockedKind || s.Msg != rec.Question || t.Turn != rec.Turn) {
+	// Leave starting runs eligible for R3 while the menu is drawing or unreadable.
+	if s != nil && !trustBlocked && !waitForScreen && (!rec.StatusReported || s.State != rec.Status || deref(s.Kind) != rec.BlockedKind || s.Msg != rec.Question || t.Turn != rec.Turn) {
 		var at time.Time
 		if ms := deref(t.StatusMS); ms > 0 {
 			at = time.UnixMilli(int64(ms))
