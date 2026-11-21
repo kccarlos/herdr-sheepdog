@@ -54,24 +54,32 @@ func (in ProjectIn) heartbeatDue() bool {
 	return in.past(in.CoordLastWakeAt, in.HeartbeatMinutes) || in.CoordLastWakeAt.IsZero() && in.Run != nil && in.past(in.Run.StartedAt, in.HeartbeatMinutes)
 }
 
-// coordSilent also catches a coordinator that answered with a question and applied no plan.
 func (in ProjectIn) coordSilent() bool {
-	return in.Run != nil && in.Run.State != PhaseEnded && (!in.CoordWakeAt.IsZero() && in.Run.Turn <= in.CoordWakeTurn && in.past(in.CoordWakeAt, in.CoordinatorSilentMinutes) || len(in.Tasks) == 0 && in.idle() && in.past(in.Run.LastTurnEnd, in.CoordinatorSilentMinutes))
+	return in.idle() && !in.CoordWakeAt.IsZero() && in.Run.Turn <= in.CoordWakeTurn && in.past(in.CoordWakeAt, in.CoordinatorSilentMinutes)
 }
 
 func (in ProjectIn) startBlockedWhy() string {
-	// owner_typing_minutes wait needs an hc "owner typed" fact that does not exist yet (spike S0.8).
+	var gapUntil, capUntil time.Time
 	if last := LastAct(in.Acts, AskStartCoordinator); last != nil && !in.past(last.At, in.CoordinatorGapMinutes) {
-		return "waiting for coordinator_gap_minutes before restarting coordinator"
+		gapUntil = last.At.Add(time.Duration(in.CoordinatorGapMinutes) * time.Minute)
 	}
-	recent := 0
+	var recent []time.Time
 	for _, a := range in.Acts {
 		if a.Key == AskStartCoordinator && in.Now.Sub(a.At) < coordStartWindow {
-			recent++
+			recent = append(recent, a.At)
 		}
 	}
+	if in.CoordinatorStartsPerHour > 0 && len(recent) >= in.CoordinatorStartsPerHour {
+		slices.SortFunc(recent, time.Time.Compare)
+		capUntil = recent[len(recent)-in.CoordinatorStartsPerHour].Add(coordStartWindow)
+	}
 	// Hourly limit raises agents_down in slice 5b (alerts table).
-	return map[bool]string{true: "coordinator_starts_per_hour reached; waiting"}[recent >= in.CoordinatorStartsPerHour]
+	if !capUntil.IsZero() && !gapUntil.After(capUntil) {
+		return "coordinator_starts_per_hour reached; waiting (allowed at " + capUntil.UTC().Format(time.RFC3339) + ")"
+	} else if !gapUntil.IsZero() {
+		return "waiting for coordinator_gap_minutes before restarting coordinator (allowed at " + gapUntil.UTC().Format(time.RFC3339) + ")"
+	}
+	return ""
 }
 
 func pdec(why string, ask ...string) Decision { return Decision{Asked: ask, Why: why} }

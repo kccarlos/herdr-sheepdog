@@ -55,7 +55,7 @@ type Engine struct {
 	prs       map[string]flow.PR   // last PR snapshot per attempt worktree (in memory)
 	errs      map[string]string    // last gh or git error per worktree and kind, logged once per change
 	tips      map[string]tipFacts  // last git reading per worktree (in memory)
-	waits     map[string]string    // last N9/N10/N38 wait reason per project/task, logged once per change
+	waits     map[string]string    // last wait/finished reason per project or task (N9/N10/N38, J4/J6), logged once per change
 	ghUnavail map[string]bool      // project fact github_unavailable (design.md 7.3)
 	hcUnavail map[string]bool      // project fact hc_unavailable (design.md 7.3)
 }
@@ -140,9 +140,15 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 			s.Project.RunID, s.Project.RunTokenHash, s.Project.Run = "", "", nil
 		}
 	}
-	s.Project.NewGoal = s.Project.NewGoal || s.Project.Goal != "" && goal != s.Project.Goal && len(s.Tasks) > 0
+	if s.Project.Goal != "" && goal != s.Project.Goal && len(s.Tasks) > 0 {
+		s.Project.NewGoal, s.Project.NewGoalTasks = true, len(s.Tasks)
+		if s.Project.RunID != "" || (s.Project.Run != nil && s.Project.Run.State != flow.PhaseEnded) {
+			holdProjectWake(&s, "new_goal", "owner gave a new goal", "goal: "+goal, e.now())
+		}
+	}
 	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts, s.Project.Base = root, goal, true, nil, nil
 	clearCoordTrack(&s.Project, true, true)
+	delete(e.waits, id+"/project")
 	// The owner starting again is slice 1's retry (plan.md: "the owner
 	// starts again"): failed executor acts no longer block their ask.
 	for ti := range s.Tasks {
@@ -254,9 +260,10 @@ func (e *Engine) Stop(project string) error {
 	for ti := range s.Tasks {
 		stopTaskRuns(&s.Tasks[ti], s.Settings, now)
 	}
-	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal = "", "", nil, false, nil, nil, false
+	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks = "", "", nil, false, nil, nil, false, 0
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastPass, id)
+	delete(e.waits, id+"/project")
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "stop"}, Rule: "stop", Decision: "stopped", Why: "stopped by owner"})
 }
 
@@ -384,13 +391,13 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 		checked = checked || p.RunID != "" && (p.Run == nil || p.Run.State != flow.PhaseEnded)
 		_, err = e.advanceRunLocked(ctx, id, "", s, p.RunID, flow.RoleCoordinator, "claude", &p.Run)
 	}
-	if p.NewGoal && !flow.AllTasksEnded(s.Tasks) {
-		p.NewGoal, dirty = false, true
+	if p.NewGoal && len(s.Tasks) > p.NewGoalTasks && slices.ContainsFunc(s.Tasks[p.NewGoalTasks:], func(t flow.Task) bool { return t.SplitFrom == "" }) {
+		p.NewGoal, p.NewGoalTasks, dirty = false, 0, true
 	}
 	if r := p.Run; r != nil && r.State == flow.PhaseEnded && (p.RunID != "" || p.RunTokenHash != "" || !p.CoordWakeAt.IsZero() || !p.CoordErrorAt.IsZero() || (!flow.IsCoordR29(r) && p.CoordDialogStucks != 0)) {
 		p.RunID, p.RunTokenHash, dirty = "", "", true
 		clearCoordTrack(p, !flow.IsCoordR29(r), false)
-	} else if r != nil && r.State != flow.PhaseEnded && !p.CoordWakeAt.IsZero() && r.Turn > p.CoordWakeTurn {
+	} else if r != nil && r.State != flow.PhaseEnded && !p.CoordWakeAt.IsZero() && (r.Turn > p.CoordWakeTurn || r.Status == "working") {
 		p.CoordWakeAt, dirty = time.Time{}, true
 	}
 	if dirty {
@@ -401,50 +408,60 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 
 // passProjectRulesLocked evaluates flow.ProjectRows and executes the matched coordinator action.
 func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.State) {
-	for range 2 {
-		now := e.now()
-		r, d := flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now})
-		if len(d.Asked) == 0 {
-			return
+	now := e.now()
+	r, d := flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now})
+	if len(d.Asked) > 0 && d.Asked[0] == flow.AskCoordDialogStuck {
+		s.Project.CoordDialogStucks++
+		s.Project.Acts = append(s.Project.Acts, flow.Act{Key: flow.CoordStuckKey(s.Project.Run), Result: "done", At: now})
+		if s.Project.CoordDialogStucks >= 2 {
+			e.logEvent("factory.coordinator_stuck", map[string]string{"project": id, "count": fmt.Sprint(s.Project.CoordDialogStucks), "why": d.Why})
 		}
-		commit := func(dec string) {
-			e.commitLogLocked(id, s, LogLine{By: "engine", Rule: r.ID, Asked: d.Asked, Decision: dec, Why: d.Why})
-		}
-		switch ask := d.Asked[0]; ask {
-		case flow.AskCoordDialogStuck:
-			s.Project.CoordDialogStucks++
-			s.Project.Acts = append(s.Project.Acts, flow.Act{Key: flow.CoordStuckKey(s.Project.Run), Result: "done", At: now})
-			if s.Project.CoordDialogStucks >= 2 {
-				e.logEvent("factory.coordinator_stuck", map[string]string{"project": id, "count": fmt.Sprint(s.Project.CoordDialogStucks), "why": d.Why})
+		e.commitLogLocked(id, s, LogLine{By: "engine", Rule: r.ID, Asked: d.Asked, Decision: map[bool]string{true: "coordinator stuck at dialog twice in a row; owner attention needed", false: fmt.Sprintf("coordinator stuck at dialog (count %d)", s.Project.CoordDialogStucks)}[s.Project.CoordDialogStucks >= 2], Why: d.Why})
+		r, d = flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now})
+	}
+	waitKey := id + "/project"
+	if r.ID == "J6" || (r.ID == "J4" && s.Project.RunID == "" && (s.Project.Run == nil || s.Project.Run.State == flow.PhaseEnded)) {
+		if waitVal := r.ID + ":" + d.Why; e.waits[waitKey] != waitVal {
+			if e.waits == nil {
+				e.waits = map[string]string{}
 			}
-			commit(map[bool]string{true: "coordinator stuck at dialog twice in a row; owner attention needed", false: fmt.Sprintf("coordinator stuck at dialog (count %d)", s.Project.CoordDialogStucks)}[s.Project.CoordDialogStucks >= 2])
-			continue
-		case flow.AskStartCoordinator:
-			e.startCoordLocked(ctx, id, s, d.Why)
-		case flow.AskStopCoordinator:
-			if e.stopCoordTerminalsLocked(ctx, id, *s) {
-				stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
-				s.Project.RunID, s.Project.RunTokenHash = "", ""
-				clearCoordTrack(&s.Project, true, false)
-				commit("stopped coordinator")
-			}
-		case flow.AskDeliverWakes:
-			e.deliverWakesLocked(ctx, id, s, now)
-		default:
-			msg := map[string]string{flow.AskFinalJournal: "All tasks in this plan have ended. Write one final journal line summarizing what landed and any open risks.", flow.AskCoordGoOn: "Your last turn ended with an error. Check your state and go on with the work.", flow.AskHeartbeat: coordSummary(*s, "", true)}[ask]
-			if e.sendCoordLocked(ctx, id, s, msg, now, ask != flow.AskFinalJournal) == nil {
-				switch ask {
-				case flow.AskFinalJournal:
-					s.Project.Acts = append(s.Project.Acts, flow.Act{Key: flow.FinalJournalKey(s.Tasks), Result: "done", At: now})
-				case flow.AskCoordGoOn:
-					s.Project.CoordErrorAt, s.Project.CoordErrorTurn = now, s.Project.Run.Turn
-				case flow.AskHeartbeat:
-					s.Project.CoordLastWakeAt = now
-				}
-				commit(map[string]string{flow.AskFinalJournal: "asked coordinator for final journal line", flow.AskCoordGoOn: "told coordinator to go on", flow.AskHeartbeat: "sent heartbeat wake to coordinator"}[ask])
-			}
+			e.waits[waitKey] = waitVal
+			e.commitLogLocked(id, s, LogLine{By: "engine", Rule: r.ID, Decision: cmp.Or(map[string]string{"J4": "finished"}[r.ID], "waiting"), Why: d.Why})
 		}
 		return
+	}
+	delete(e.waits, waitKey)
+	if len(d.Asked) == 0 {
+		return
+	}
+	commit := func(dec string) {
+		e.commitLogLocked(id, s, LogLine{By: "engine", Rule: r.ID, Asked: d.Asked, Decision: dec, Why: d.Why})
+	}
+	switch ask := d.Asked[0]; ask {
+	case flow.AskStartCoordinator:
+		e.startCoordLocked(ctx, id, s, d.Why)
+	case flow.AskStopCoordinator:
+		if e.stopCoordTerminalsLocked(ctx, id, *s) {
+			stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
+			s.Project.RunID, s.Project.RunTokenHash = "", ""
+			clearCoordTrack(&s.Project, true, false)
+			commit("stopped coordinator")
+		}
+	case flow.AskDeliverWakes:
+		e.deliverWakesLocked(ctx, id, s, now)
+	default:
+		msg := map[string]string{flow.AskFinalJournal: "All tasks in this plan have ended. Write one final journal line summarizing what landed and any open risks.", flow.AskCoordGoOn: "Your last turn ended with an error. Check your state and go on with the work.", flow.AskHeartbeat: coordSummary(*s, "", true)}[ask]
+		if e.sendCoordLocked(ctx, id, s, msg, now, ask != flow.AskFinalJournal) == nil {
+			switch ask {
+			case flow.AskFinalJournal:
+				s.Project.Acts = append(s.Project.Acts, flow.Act{Key: flow.FinalJournalKey(s.Tasks), Result: "done", At: now})
+			case flow.AskCoordGoOn:
+				s.Project.CoordErrorAt, s.Project.CoordErrorTurn = now, s.Project.Run.Turn
+			case flow.AskHeartbeat:
+				s.Project.CoordLastWakeAt = now
+			}
+			commit(map[string]string{flow.AskFinalJournal: "asked coordinator for final journal line", flow.AskCoordGoOn: "told coordinator to go on", flow.AskHeartbeat: "sent heartbeat wake to coordinator"}[ask])
+		}
 	}
 }
 

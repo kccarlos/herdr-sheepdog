@@ -704,7 +704,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 		t.Fatalf("failing NewWorktree task acts = %+v (err=%v)", st1.Tasks[0].Acts, err)
 	}
 
-	// 2. Failing coordinator StartRun over many passes asks J7 once.
+	// 2. Failing coordinator StartRun over many passes asks J7 once, then logs J6 waiting once.
 	srv2 := hctest.New(t)
 	p2 := testPaths(t)
 	p2.ClaudeConfig = "/nonexistent-sheepdog-test-guard/.claude.json"
@@ -714,10 +714,10 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 		t.Fatal(err)
 	}
 	id2 := eng2.projectDirs()[0].Name()
-	runUntilLogged(eng2, id2, 2)
+	runUntilLogged(eng2, id2, 3)
 	log2, _ := os.ReadFile(eng2.Paths.Log(id2))
-	if lines := strings.Split(strings.TrimSpace(string(log2)), "\n"); len(lines) != 2 {
-		t.Fatalf("failing coordinator StartRun wrote %d log lines (want 2: start, 1 J7):\n%s", len(lines), log2)
+	if lines := strings.Split(strings.TrimSpace(string(log2)), "\n"); len(lines) != 3 {
+		t.Fatalf("failing coordinator StartRun wrote %d log lines (want 3: start, 1 J7, 1 J6):\n%s", len(lines), log2)
 	}
 	if st2, err := LoadState(eng2.Paths.State(id2)); err != nil || flow.Count(st2.Project.Acts, "coordinator") != 1 || flow.Done(st2.Project.Acts, "coordinator") {
 		t.Fatalf("failing coordinator project acts = %+v (err=%v)", st2.Project.Acts, err)

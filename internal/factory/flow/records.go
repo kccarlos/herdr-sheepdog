@@ -52,6 +52,7 @@ type Project struct {
 	Wakes             []Wake     `json:"wakes,omitempty"` // held until J12 delivers them
 	Base              *BaseState `json:"base,omitempty"`
 	NewGoal           bool       `json:"new_goal,omitempty"`            // J4: owner gave a new goal after a plan existed
+	NewGoalTasks      int        `json:"new_goal_tasks,omitempty"`      // J4: task count when NewGoal was set
 	CoordDialogStucks int        `json:"coord_dialog_stucks,omitempty"` // J10: consecutive R29 dialog-stuck ends
 	CoordErrorAt      time.Time  `json:"coord_error_at,omitempty"`      // J8: when coordinator was last told to go on
 	CoordErrorTurn    uint64     `json:"coord_error_turn,omitempty"`    // J8: coordinator turn at last go-on tell

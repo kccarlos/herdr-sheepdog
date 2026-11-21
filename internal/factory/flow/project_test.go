@@ -147,17 +147,6 @@ func TestProjectRowsTableAndEachRow(t *testing.T) {
 			wantRow: "J9", wantAsk: []string{AskStopCoordinator},
 		},
 		{
-			name: "J9 idle with no plan applied past coordinator_silent_minutes stops coordinator",
-			in: ProjectIn{
-				Project: Project{
-					Started: true,
-					Run:     &RunRecord{ID: "r1", State: PhaseIdle, Turn: 1, StartedAt: now.Add(-35 * time.Minute), LastTurnEnd: now.Add(-30 * time.Minute)},
-				},
-				Settings: def, Now: now,
-			},
-			wantRow: "J9", wantAsk: []string{AskStopCoordinator},
-		},
-		{
 			name: "J12 held wakes when idle",
 			in: ProjectIn{
 				Project:  Project{Started: true, Run: idleRun, Wakes: []Wake{{Key: "k1", Task: "T1"}}},
@@ -206,6 +195,62 @@ func TestProjectRowsTableAndEachRow(t *testing.T) {
 	if r, d := FirstMatch(ProjectRows, in2); r.ID != "J10" || !strings.Contains(d.Why, "twice in a row") {
 		t.Errorf("J10 2nd time = (%s, %q), want J10 mentioning twice in a row", r.ID, d.Why)
 	}
+}
+
+func TestProjectRowsReviewFixes(t *testing.T) {
+	def := DefaultSettings()
+	openTask := Task{ID: "T1", Title: "feat: open"}
+
+	t.Run("J9 does not stop working coordinator", func(t *testing.T) {
+		in := ProjectIn{
+			Project: Project{
+				Started: true, CoordWakeAt: now.Add(-45 * time.Minute), CoordWakeTurn: 1,
+				Run: &RunRecord{ID: "r1", State: PhaseWorking, Status: "working", Turn: 1, StartedAt: now.Add(-50 * time.Minute)},
+			},
+			Tasks: []Task{openTask}, Settings: def, Now: now,
+		}
+		if r, d := FirstMatch(ProjectRows, in); r.ID != "J14" {
+			t.Fatalf("got (%s, why=%q), want J14", r.ID, d.Why)
+		}
+	})
+
+	t.Run("J9 does not stop idle plan-less coordinator without delivered wake", func(t *testing.T) {
+		in := ProjectIn{
+			Project: Project{
+				Started: true,
+				Run:     &RunRecord{ID: "r1", State: PhaseIdle, Turn: 1, StartedAt: now.Add(-35 * time.Minute), LastTurnEnd: now.Add(-30 * time.Minute)},
+			},
+			Settings: def, Now: now,
+		}
+		if r, d := FirstMatch(ProjectRows, in); r.ID != "J14" {
+			t.Fatalf("got (%s, why=%q), want J14", r.ID, d.Why)
+		}
+	})
+
+	t.Run("J6 gap and hourly cap report allow time", func(t *testing.T) {
+		gapIn := ProjectIn{
+			Project:  Project{Started: true, Acts: []Act{{Key: AskStartCoordinator, Result: "done", At: now.Add(-5 * time.Minute)}}},
+			Tasks:    []Task{openTask},
+			Settings: def, Now: now,
+		}
+		wantGap := now.Add(5 * time.Minute).UTC().Format(time.RFC3339)
+		if r, d := FirstMatch(ProjectRows, gapIn); r.ID != "J6" || !strings.Contains(d.Why, wantGap) {
+			t.Fatalf("J6 gap = (%s, %q), want J6 naming %s", r.ID, d.Why, wantGap)
+		}
+		capIn := ProjectIn{
+			Project: Project{Started: true, Acts: []Act{
+				{Key: AskStartCoordinator, Result: "done", At: now.Add(-50 * time.Minute)},
+				{Key: AskStartCoordinator, Result: "done", At: now.Add(-35 * time.Minute)},
+				{Key: AskStartCoordinator, Result: "done", At: now.Add(-15 * time.Minute)},
+			}},
+			Tasks:    []Task{openTask},
+			Settings: def, Now: now,
+		}
+		wantCap := now.Add(10 * time.Minute).UTC().Format(time.RFC3339)
+		if r, d := FirstMatch(ProjectRows, capIn); r.ID != "J6" || !strings.Contains(d.Why, wantCap) {
+			t.Fatalf("J6 hourly cap = (%s, %q), want J6 naming %s", r.ID, d.Why, wantCap)
+		}
+	})
 }
 
 func TestProjectRowsPairwisePriority(t *testing.T) {

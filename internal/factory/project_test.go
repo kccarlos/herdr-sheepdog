@@ -117,8 +117,8 @@ func TestJ4NoRestartAfterLastTaskEnds(t *testing.T) {
 	if len(h.runs) != 1 || h.state().Project.RunID != "" {
 		t.Fatalf("J4 restarted coordinator after all tasks ended: runs=%d runID=%q", len(h.runs), h.state().Project.RunID)
 	}
-	if j4 := logRules(t, h.paths.Log(h.id), "J4"); len(j4) != 2 {
-		t.Fatalf("J4 log lines = %+v, want 2 (ask final journal, stop)", j4)
+	if j4 := logRules(t, h.paths.Log(h.id), "J4"); len(j4) != 3 || j4[2].Decision != "finished" {
+		t.Fatalf("J4 log lines = %+v, want 3 (ask final journal, stop, finished)", j4)
 	}
 
 	// New owner goal clears J4's finished hold and J7 starts a coordinator.
@@ -238,11 +238,10 @@ func TestJ8ErrorTellThenStopAndRestart(t *testing.T) {
 	}
 }
 
-// TestJ9SilenceStopsAndJ7Restarts verifies J9: delivered wakes with no turn for
-// coordinator_silent_minutes stop the coordinator so J7 restarts it, and a
-// coordinator that answered with a question and applied no plan is also caught.
+// TestJ9SilenceStopsAndJ7Restarts verifies J9: delivered wakes with no turn
+// while the coordinator remains idle for coordinator_silent_minutes stop the
+// coordinator so J7 restarts it.
 func TestJ9SilenceStopsAndJ7Restarts(t *testing.T) {
-	// Part A: delivered wakes with no follow-up turn.
 	h := newProjectHarness(t, "J9 wakes")
 	h.pass() // J7 start #1
 	coord1 := h.state().Project.RunID
@@ -254,13 +253,11 @@ func TestJ9SilenceStopsAndJ7Restarts(t *testing.T) {
 	if len(sendsTo(t, h.srv.Requests(), coord1)) != 1 || h.state().Project.CoordWakeAt.IsZero() {
 		t.Fatalf("J12 did not deliver wake and arm J9: wakeAt=%v", h.state().Project.CoordWakeAt)
 	}
-	// Keep screen changing so R21 does not fire first; coordinator never finishes a turn.
+	// Coordinator stays idle in hc (never starts working) until 30m elapses.
 	h.now = h.now.Add(15 * time.Minute)
-	h.srv.SetScreen(coord1, "still reading files...")
-	h.pass()
+	h.pass() // R17 sees idle status
 	h.now = h.now.Add(14*time.Minute + 59*time.Second)
-	h.srv.SetScreen(coord1, "still thinking about files...")
-	h.pass()
+	h.pass() // R20 -> PhaseIdle, 29m59s < 30m
 	if h.state().Project.RunID != coord1 {
 		t.Fatalf("J9 stopped coordinator before coordinator_silent_minutes")
 	}
@@ -272,24 +269,6 @@ func TestJ9SilenceStopsAndJ7Restarts(t *testing.T) {
 	h.pass() // 30m >= gap 10m -> J7 restarts immediately
 	if len(h.runs) != 2 || h.state().Project.RunID == "" {
 		t.Fatalf("J7 did not restart after J9: runs=%d runID=%q", len(h.runs), h.state().Project.RunID)
-	}
-
-	// Part B: coordinator answered with a question and applied no plan.
-	h2 := newProjectHarness(t, "J9 no plan")
-	h2.pass() // J7 start #1 (no tasks yet)
-	c1 := h2.state().Project.RunID
-	h2.srv.SetStatus(c1, &hc.Status{App: "claude-code", State: "working"})
-	h2.now = h2.now.Add(5 * time.Second)
-	h2.pass()
-	h2.coordIdleWithStatus(c1, "idle") // answered with a question, no plan applied
-	h2.now = h2.now.Add(30 * time.Minute)
-	h2.pass() // J9 stops it
-	if h2.state().Project.RunID != "" || len(logRules(t, h2.paths.Log(h2.id), "J9")) != 1 {
-		t.Fatalf("J9 did not catch idle coordinator with no plan: runID=%q", h2.state().Project.RunID)
-	}
-	h2.pass() // J7 restarts it with goal
-	if len(h2.runs) != 2 || h2.state().Project.RunID == "" {
-		t.Fatalf("J7 did not restart no-plan coordinator after J9: runs=%d", len(h2.runs))
 	}
 }
 
@@ -476,8 +455,10 @@ func TestOneCoordinatorAndOldProcessGroupGoneBeforeRestart(t *testing.T) {
 
 	// Trigger J9 silence -> stops coord1 (and its whole process group + stray) -> next pass J7 starts replacement.
 	h.coordIdleWithStatus(coord1, "idle") // J12 delivers wake
-	h.now = h.now.Add(30 * time.Minute)
-	h.pass() // J9 stops old coordinator & process group & stray
+	h.now = h.now.Add(time.Minute)
+	h.pass() // R17 sees idle status
+	h.now = h.now.Add(29 * time.Minute)
+	h.pass() // R20 -> PhaseIdle; J9 stops old coordinator & process group & stray
 	if syscall.Kill(-oldPGID, 0) == nil {
 		t.Fatalf("KB-COO-12: old process group %d survived J9 stop", oldPGID)
 	}
@@ -495,5 +476,192 @@ func TestOneCoordinatorAndOldProcessGroupGoneBeforeRestart(t *testing.T) {
 	h.pass() // R33 + J7 replacement
 	if !checkedReplacement || h.state().Project.RunID == "" || h.state().Project.RunID == coord2 {
 		t.Fatalf("owner-killed coordinator not replaced cleanly: checked=%v runID=%q", checkedReplacement, h.state().Project.RunID)
+	}
+}
+
+// TestJ9NeverStopsWorkingCoordinator verifies that once hc reports working
+// after wake delivery, the J9 silence clock is cleared and neither a long
+// working turn nor a machine sleep stops the coordinator.
+func TestJ9NeverStopsWorkingCoordinator(t *testing.T) {
+	h := newProjectHarness(t, "J9 working")
+	h.pass() // J7 start #1
+	coord1 := h.state().Project.RunID
+	h.edit(func(s *flow.State) {
+		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: open"}}
+		s.Project.Wakes = []flow.Wake{{Key: "worker_failed", Task: "T1", Why: "N23", Facts: "title x", At: h.now}}
+	})
+	h.coordIdleWithStatus(coord1, "idle") // J12 delivers wake, arms CoordWakeAt
+	if h.state().Project.CoordWakeAt.IsZero() {
+		t.Fatal("J12 did not arm CoordWakeAt")
+	}
+
+	// Coordinator starts a turn: hctest reports working -> clears CoordWakeAt.
+	h.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+	h.now = h.now.Add(15 * time.Second)
+	h.pass()
+	if !h.state().Project.CoordWakeAt.IsZero() {
+		t.Fatalf("CoordWakeAt not cleared after coordinator reported working: %v", h.state().Project.CoordWakeAt)
+	}
+
+	// Long working turn past coordinator_silent_minutes (45m > 30m) with screen activity.
+	for _, screen := range []string{"reading repo...", "running tests...", "writing plan..."} {
+		h.now = h.now.Add(15 * time.Minute)
+		h.srv.SetScreen(coord1, screen)
+		h.pass()
+	}
+	if h.state().Project.RunID != coord1 || len(logRules(t, h.paths.Log(h.id), "J9")) != 0 || len(h.runs) != 1 {
+		t.Fatalf("J9 stopped working coordinator: runID=%q runs=%d j9=%+v", h.state().Project.RunID, len(h.runs), logRules(t, h.paths.Log(h.id), "J9"))
+	}
+
+	// Machine sleep jump while working must not trigger J9 either.
+	h.now = h.now.Add(2 * time.Hour)
+	h.srv.SetScreen(coord1, "resumed after sleep")
+	h.pass()
+	if h.state().Project.RunID != coord1 || len(logRules(t, h.paths.Log(h.id), "J9")) != 0 {
+		t.Fatalf("J9 stopped coordinator after machine sleep: runID=%q j9=%+v", h.state().Project.RunID, logRules(t, h.paths.Log(h.id), "J9"))
+	}
+}
+
+// TestJ9DoesNotStopPlanlessCoordinatorWithoutWake verifies that a coordinator
+// with no plan yet that finished a turn (e.g. waiting on the owner) is never
+// stopped and restarted in a loop by J9 when no wakes were delivered.
+func TestJ9DoesNotStopPlanlessCoordinatorWithoutWake(t *testing.T) {
+	h := newProjectHarness(t, "J9 planless")
+	h.pass() // J7 start #1 (no tasks yet)
+	c1 := h.state().Project.RunID
+	h.srv.SetStatus(c1, &hc.Status{App: "claude-code", State: "working"})
+	h.now = h.now.Add(5 * time.Second)
+	h.pass()
+	h.coordIdleWithStatus(c1, "idle") // asked owner a question, waiting
+
+	h.now = h.now.Add(30 * time.Minute)
+	h.pass()
+	h.now = h.now.Add(15 * time.Minute)
+	h.pass()
+	if h.state().Project.RunID != c1 || len(h.runs) != 1 || len(logRules(t, h.paths.Log(h.id), "J9")) != 0 {
+		t.Fatalf("J9 stopped plan-less coordinator without delivered wake: runID=%q runs=%d j9=%+v", h.state().Project.RunID, len(h.runs), logRules(t, h.paths.Log(h.id), "J9"))
+	}
+}
+
+// TestJ4KeepsNewGoalWhileTasksOpenUntilPlanApplied verifies that giving a new
+// goal while tasks are still open keeps NewGoal until a new task is added, so
+// J4 never finishes the project when the old tasks end.
+func TestJ4KeepsNewGoalWhileTasksOpenUntilPlanApplied(t *testing.T) {
+	h := newProjectHarness(t, "Goal 1")
+	h.pass() // J7 start #1
+	coord1 := h.state().Project.RunID
+	h.edit(func(s *flow.State) {
+		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: goal 1"}}
+	})
+	h.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+	h.now = h.now.Add(5 * time.Second)
+	h.pass()
+
+	// Owner gives Goal 2 while T1 is still open.
+	if err := h.eng.Start(h.repo, "Goal 2", 2); err != nil {
+		t.Fatal(err)
+	}
+	h.now = h.now.Add(15 * time.Second)
+	h.pass()
+	if !h.state().Project.NewGoal {
+		t.Fatal("NewGoal cleared while old task T1 was still open and no new plan was applied")
+	}
+
+	// T1 finishes -> J4 must NOT finish the project while Goal 2 is unplanned,
+	// and the live coordinator receives the new_goal wake.
+	h.edit(func(s *flow.State) {
+		s.Tasks[0].Done = &flow.Merged{MergedCommit: "m1"}
+	})
+	h.coordIdleWithStatus(coord1, "idle")
+	if j4 := logRules(t, h.paths.Log(h.id), "J4"); len(j4) != 0 || h.state().Project.RunID != coord1 || !h.state().Project.NewGoal {
+		t.Fatalf("J4 finished project despite pending new goal: j4=%+v runID=%q newGoal=%v", j4, h.state().Project.RunID, h.state().Project.NewGoal)
+	}
+	if sends := sendsTo(t, h.srv.Requests(), coord1); len(sends) != 1 || !strings.Contains(sends[0], "Goal 2") {
+		t.Fatalf("live coordinator wakes = %q, want 1 new_goal wake naming Goal 2", sends)
+	}
+
+	// Coordinator adds a task for Goal 2 -> clears NewGoal.
+	h.edit(func(s *flow.State) {
+		s.Tasks = append(s.Tasks, flow.Task{ID: "T2", Title: "feat: goal 2"})
+	})
+	h.now = h.now.Add(15 * time.Second)
+	h.pass()
+	if h.state().Project.NewGoal {
+		t.Fatal("NewGoal still set after new task T2 was added")
+	}
+
+	// Once T2 also ends and coordinator finishes its final journal, J4 finishes.
+	h.edit(func(s *flow.State) {
+		s.Tasks[1].Done = &flow.Merged{MergedCommit: "m2"}
+	})
+	h.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+	h.now = h.now.Add(5 * time.Second)
+	h.pass()
+	h.coordIdleWithStatus(coord1, "idle") // J4 asks final journal
+	h.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+	h.now = h.now.Add(5 * time.Second)
+	h.pass()
+	h.coordIdleWithStatus(coord1, "idle") // J4 stops coordinator
+	h.now = h.now.Add(15 * time.Second)
+	h.pass() // J4 logs finished
+	if h.state().Project.RunID != "" || len(logRules(t, h.paths.Log(h.id), "J4")) != 3 {
+		t.Fatalf("J4 did not finish after Goal 2 tasks ended: runID=%q j4=%+v", h.state().Project.RunID, logRules(t, h.paths.Log(h.id), "J4"))
+	}
+}
+
+// TestJ6AndJ4LogOncePerChange verifies that J6 logs once when holding (gap or
+// hourly cap, naming the allow time) and J4 logs once when finishing a project.
+func TestJ6AndJ4LogOncePerChange(t *testing.T) {
+	h := newProjectHarness(t, "J6 log goal")
+	h.pass() // start #1 at 10:00:00Z
+	h.edit(func(s *flow.State) {
+		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: open"}}
+	})
+
+	// Gap hold: kill #1 at 10:02 -> 3 passes before 10:10 log J6 exactly once naming 10:10:00Z.
+	h.srv.Finish(h.state().Project.RunID, "killed")
+	h.now = h.now.Add(2 * time.Minute)
+	h.pass()
+	h.now = h.now.Add(time.Minute)
+	h.pass()
+	h.now = h.now.Add(time.Minute)
+	h.pass()
+	j6 := logRules(t, h.paths.Log(h.id), "J6")
+	if len(j6) != 1 || j6[0].Decision != "waiting" || !strings.Contains(j6[0].Why, "2026-11-20T10:10:00Z") {
+		t.Fatalf("J6 gap log = %+v, want 1 waiting line naming 2026-11-20T10:10:00Z", j6)
+	}
+
+	// Start #2 at 10:10, kill at 10:12, start #3 at 10:20, kill at 10:35 -> hourly cap until 11:00:00Z.
+	h.now = h.now.Add(6 * time.Minute) // 10:10
+	h.pass()                           // start #2
+	h.srv.Finish(h.state().Project.RunID, "killed")
+	h.now = h.now.Add(10 * time.Minute) // 10:20
+	h.pass()                            // start #3
+	h.srv.Finish(h.state().Project.RunID, "killed")
+	h.now = h.now.Add(15 * time.Minute) // 10:35
+	h.pass()
+	h.now = h.now.Add(5 * time.Minute)
+	h.pass()
+	h.now = h.now.Add(5 * time.Minute)
+	h.pass()
+	j6 = logRules(t, h.paths.Log(h.id), "J6")
+	if len(j6) != 2 || j6[1].Decision != "waiting" || !strings.Contains(j6[1].Why, "2026-11-20T11:00:00Z") {
+		t.Fatalf("J6 hourly cap log = %+v, want 2nd waiting line naming 2026-11-20T11:00:00Z", j6)
+	}
+
+	// J4 finished when coordinator is already gone logs once across multiple passes.
+	h2 := newProjectHarness(t, "J4 silent finish")
+	h2.pass() // start #1
+	h2.srv.Finish(h2.state().Project.RunID, "exited")
+	h2.edit(func(s *flow.State) {
+		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: done", Done: &flow.Merged{MergedCommit: "m1"}}}
+	})
+	for range 3 {
+		h2.now = h2.now.Add(time.Minute)
+		h2.pass()
+	}
+	j4 := logRules(t, h2.paths.Log(h2.id), "J4")
+	if len(j4) != 1 || j4[0].Decision != "finished" || !strings.Contains(j4[0].Why, "Finished") {
+		t.Fatalf("J4 finished log = %+v, want 1 finished line", j4)
 	}
 }

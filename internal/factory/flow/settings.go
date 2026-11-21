@@ -42,7 +42,6 @@ type Settings struct {
 	EnsureBackoffMinutes       int `json:"ensure_backoff_minutes"`         // 4.8, section 8 (design.md 10.1)
 	CoordinatorStartsPerHour   int `json:"coordinator_starts_per_hour"`    // J6 (design.md 10.1)
 	CoordinatorGapMinutes      int `json:"coordinator_gap_minutes"`        // J6 (design.md 10.1)
-	OwnerTypingMinutes         int `json:"owner_typing_minutes"`           // J6 (design.md 10.1; hc fact pending spike S0.8)
 	CoordinatorSilentMinutes   int `json:"coordinator_silent_minutes"`     // J9 (design.md 10.1)
 	HeartbeatMinutes           int `json:"heartbeat_minutes"`              // J13 (design.md 10.1)
 	ContinuesPerTask           int `json:"continues_per_task"`             // a recap's continue (design.md 4.3, 10.1)
@@ -62,48 +61,49 @@ type Settings struct {
 
 // Range limits for each setting.
 const (
-	ReviewRoundsMin                                                                          = 1
-	ReviewRoundsMax                                                                          = 5
-	MaxRoundsMax                                                                             = 10
-	RetroMajorsMin                                                                           = 2
-	RetroMajorsMax                                                                           = 4
-	RetroFromMin                                                                             = 2
-	RetroFromMax                                                                             = 6
-	ChecksGraceMin                                                                           = 1
-	ChecksGraceMax                                                                           = 60
-	CIStalledMin                                                                             = 10
-	CIStalledMax                                                                             = 600
-	MainRedMin                                                                               = 5
-	MainRedMax                                                                               = 600
-	CIFailsPerHourMin                                                                        = 1
-	CIFailsPerHourMax                                                                        = 10
-	BuildHoursMin, BuildHoursMax                                                             = 1, 48
-	FlakeRerunsMax                                                                           = 3
-	StartMin                                                                                 = 1
-	StartMax                                                                                 = 15
-	IdleGraceMin                                                                             = 5
-	IdleGraceMax                                                                             = 120
-	QuietMin                                                                                 = 5
-	QuietMax                                                                                 = 120
-	InterruptMin                                                                             = 10
-	InterruptMax                                                                             = 600
-	ReviewMin, ReviewMax                                                                     = 10, 240
-	BlockedMin                                                                               = 1
-	BlockedMax                                                                               = 120
-	WorkerRestartsMax, ReviewerRetriesMax                                                    = 10, 5
-	EnsureFailuresMin, EnsureFailuresMax                                                     = 1, 10
-	EnsureBackoffMin, EnsureBackoffMax                                                       = 1, 60
-	CoordStartsMin, CoordStartsMax, CoordGapMin, CoordGapMax, OwnerTypingMin, OwnerTypingMax = 1, 10, 1, 60, 1, 60
-	CoordSilentMin, CoordSilentMax, HeartbeatMin, HeartbeatMax                               = 5, 240, 10, 600
-	ContinuesMax                                                                             = 3
-	ContinueLinesMax                                                                         = 500
-	SizeLimitMin                                                                             = 50
-	SizeLimitMax                                                                             = 2000
-	SizeFactorMin                                                                            = 1
-	SizeFactorMax                                                                            = 5
-	MaxRunningMin                                                                            = 1
-	MaxRunningMax                                                                            = 20
+	ReviewRoundsMin                       = 1
+	ReviewRoundsMax                       = 5
+	MaxRoundsMax                          = 10
+	RetroMajorsMin                        = 2
+	RetroMajorsMax                        = 4
+	RetroFromMin                          = 2
+	RetroFromMax                          = 6
+	ChecksGraceMin                        = 1
+	ChecksGraceMax                        = 60
+	CIStalledMin                          = 10
+	CIStalledMax                          = 600
+	MainRedMin                            = 5
+	MainRedMax                            = 600
+	CIFailsPerHourMin                     = 1
+	CIFailsPerHourMax                     = 10
+	BuildHoursMin, BuildHoursMax          = 1, 48
+	FlakeRerunsMax                        = 3
+	StartMin                              = 1
+	StartMax                              = 15
+	IdleGraceMin                          = 5
+	IdleGraceMax                          = 120
+	QuietMin                              = 5
+	QuietMax                              = 120
+	InterruptMin                          = 10
+	InterruptMax                          = 600
+	ReviewMin, ReviewMax                  = 10, 240
+	BlockedMin                            = 1
+	BlockedMax                            = 120
+	WorkerRestartsMax, ReviewerRetriesMax = 10, 5
+	EnsureFailuresMin, EnsureFailuresMax  = 1, 10
+	EnsureBackoffMin, EnsureBackoffMax    = 1, 60
+	ContinuesMax                          = 3
+	ContinueLinesMax                      = 500
+	SizeLimitMin                          = 50
+	SizeLimitMax                          = 2000
+	SizeFactorMin                         = 1
+	SizeFactorMax                         = 5
+	MaxRunningMin                         = 1
+	MaxRunningMax                         = 20
 )
+
+const CoordStartsMin, CoordStartsMax, CoordGapMin, CoordGapMax = 1, 10, 1, 60
+const CoordSilentMin, CoordSilentMax, HeartbeatMin, HeartbeatMax = 5, 240, 10, 600
 
 // DefaultSettings are the engine's defaults: two passing rounds on the final head
 // (design.md 10.1, D12).
@@ -114,7 +114,7 @@ func DefaultSettings() Settings {
 		ChecksGraceMinutes: 5, CIStalledMinutes: 90, MainRedMinutes: 60, CIFailsPerHour: 3, BuildHours: 4, FlakeReruns: 1,
 		StartMinutes: 2, IdleGraceSeconds: 20, QuietMinutes: 20, InterruptSeconds: 90, ReviewMinutes: 45, BlockedMinutes: 10,
 		WorkerRestarts: 3, ReviewerRetries: 2, EnsureFailures: 3, EnsureBackoffMinutes: 1,
-		CoordinatorStartsPerHour: 3, CoordinatorGapMinutes: 10, OwnerTypingMinutes: 5, CoordinatorSilentMinutes: 30, HeartbeatMinutes: 60,
+		CoordinatorStartsPerHour: 3, CoordinatorGapMinutes: 10, CoordinatorSilentMinutes: 30, HeartbeatMinutes: 60,
 		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2, MaxRunning: 3,
 		SecondReviewer: "opus",
 	}
@@ -149,7 +149,6 @@ func (s Settings) Changed() []string {
 		{"main_red_minutes", s.MainRedMinutes, d.MainRedMinutes},
 		{"max_rounds", s.MaxRounds, d.MaxRounds},
 		{"max_running", s.MaxRunning, d.MaxRunning},
-		{"owner_typing_minutes", s.OwnerTypingMinutes, d.OwnerTypingMinutes},
 		{"quiet_minutes", s.QuietMinutes, d.QuietMinutes},
 		{"retro_after_rounds_with_majors", s.RetroAfterRoundsWithMajors, d.RetroAfterRoundsWithMajors},
 		{"retro_from_round", s.RetroFromRound, d.RetroFromRound},
@@ -205,7 +204,6 @@ func (s Settings) Validate() error {
 		{"ensure_backoff_minutes", s.EnsureBackoffMinutes, EnsureBackoffMin, EnsureBackoffMax},
 		{"coordinator_starts_per_hour", s.CoordinatorStartsPerHour, CoordStartsMin, CoordStartsMax},
 		{"coordinator_gap_minutes", s.CoordinatorGapMinutes, CoordGapMin, CoordGapMax},
-		{"owner_typing_minutes", s.OwnerTypingMinutes, OwnerTypingMin, OwnerTypingMax},
 		{"coordinator_silent_minutes", s.CoordinatorSilentMinutes, CoordSilentMin, CoordSilentMax},
 		{"heartbeat_minutes", s.HeartbeatMinutes, HeartbeatMin, HeartbeatMax},
 		{"continues_per_task", s.ContinuesPerTask, 0, ContinuesMax},
