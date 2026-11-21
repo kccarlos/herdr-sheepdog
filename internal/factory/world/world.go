@@ -385,10 +385,14 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]f
 		return []flow.RunEvent{{Kind: flow.EvExit, Reason: deref(t.Reason)}}, nil
 	}
 	cls, hash, nonEmpty := "", "", false
-	if rd, rerr := client.Read(ctx, rec.Address, 200); rerr == nil && rd.Complete {
+	// Complete describes the older history. The current screen can still supply evidence.
+	if rd, rerr := client.Read(ctx, rec.Address, 200); rerr == nil {
 		clean := ansiRe.ReplaceAllString(strings.ReplaceAll(rd.Text, "\r\n", "\n"), "")
-		sum := sha256.Sum256([]byte(strings.Join(strings.Fields(noiseRe.ReplaceAllString(durationRe.ReplaceAllString(clean, " "), " ")), " ")))
-		hash, nonEmpty, cls = hex.EncodeToString(sum[:8]), strings.TrimSpace(clean) != "", ScreenClass(rec.CLI, clean)
+		nonEmpty, cls = strings.TrimSpace(clean) != "", ScreenClass(rec.CLI, clean)
+		if rd.Text != "" {
+			sum := sha256.Sum256([]byte(strings.Join(strings.Fields(noiseRe.ReplaceAllString(durationRe.ReplaceAllString(clean, " "), " ")), " ")))
+			hash = hex.EncodeToString(sum[:8])
+		}
 	}
 	var evs []flow.RunEvent
 	if cls != "" && rec.State == flow.PhaseStarting && !rec.StatusReported && t.Status == nil {
@@ -407,6 +411,7 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]f
 		}
 		evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: s.State, StatusKind: deref(s.Kind), Msg: s.Msg, Turn: t.Turn, StatusAt: at})
 	}
+	// An empty hash marks an unavailable screen; this tick cannot prove the run stayed quiet.
 	return append(evs, flow.RunEvent{Kind: flow.EvTick, Screen: cls, ScreenHash: hash, Model: t.Labels["sheepdog.model"]}), nil
 }
 

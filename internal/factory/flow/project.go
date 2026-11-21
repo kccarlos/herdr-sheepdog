@@ -82,9 +82,9 @@ func (in ProjectIn) startBlockedWhy() string {
 	}
 	// Hourly limit raises agents_down in slice 5b (alerts table).
 	if !capUntil.IsZero() && !gapUntil.After(capUntil) {
-		return "coordinator_starts_per_hour reached; waiting (allowed at " + capUntil.UTC().Format(time.RFC3339) + ")"
+		return "coordinator_starts_per_hour reached; waiting (allowed at " + capUntil.Local().Format(time.RFC3339) + ")"
 	} else if !gapUntil.IsZero() {
-		return "waiting for coordinator_gap_minutes before restarting coordinator (allowed at " + gapUntil.UTC().Format(time.RFC3339) + ")"
+		return "waiting for coordinator_gap_minutes before restarting coordinator (allowed at " + gapUntil.Local().Format(time.RFC3339) + ")"
 	}
 	return ""
 }
@@ -102,9 +102,9 @@ func pcond(id, waits, stage string, when, sel func(ProjectIn) bool, yes, no Deci
 
 // ProjectRows is the ordered project rule table for the coordinator (design.md section 6).
 // J1 (doctor) is slice 8; J3/J5 (alerts/sign-in) are slice 5b; J11 (rotation) is slice 13.
+// J2 lives in passProject's early return and Engine.Stop.
 // J10 sits before J6/J7 so an R29 dialog-stuck end is noted before J6 waits or J7 restarts it.
 var ProjectRows = []Row[ProjectIn]{
-	pcond("J2", "owner", "stopped", func(in ProjectIn) bool { return !in.Started }, ProjectIn.alive, pdec("Stopped by you: stop the coordinator", AskStopCoordinator), pdec("Stopped by you")),
 	prow("J4", "none", "finished", func(in ProjectIn) bool { return AllTasksEnded(in.Tasks) && !in.NewGoal && len(in.Wakes) == 0 }, func(in ProjectIn) Decision {
 		if !in.alive() || !in.idle() {
 			return pdec(map[bool]string{true: "Finished: all tasks ended", false: "Finished: waiting for coordinator to finish final journal line"}[!in.alive()])
@@ -113,7 +113,13 @@ var ProjectRows = []Row[ProjectIn]{
 	}),
 	// Alerts (agents_down) are slice 5b; second time in a row logs plainly for the owner.
 	pcond("J10", "engine", "running", func(in ProjectIn) bool { return IsCoordR29(in.Run) && !Done(in.Acts, CoordStuckKey(in.Run)) }, func(in ProjectIn) bool { return in.CoordDialogStucks >= firstDialogStuck }, pdec("coordinator stuck at a dialog twice in a row (R29); needs owner attention", AskCoordDialogStuck), pdec("coordinator ended stuck at a dialog (R29); J7 will restart it", AskCoordDialogStuck)),
-	prow("J6", "engine", "running", func(in ProjectIn) bool { return !in.alive() && in.startBlockedWhy() != "" }, func(in ProjectIn) Decision { return pdec(cmp.Or(in.coordStopWhy(), in.startBlockedWhy())) }),
+	prow("J6", "engine", "running", func(in ProjectIn) bool { return !in.alive() && in.startBlockedWhy() != "" }, func(in ProjectIn) Decision {
+		why := in.startBlockedWhy()
+		if stopWhy := in.coordStopWhy(); stopWhy != "" {
+			why += ". " + stopWhy
+		}
+		return pdec(why)
+	}),
 	prow("J7", "engine", "running", func(in ProjectIn) bool { return !in.alive() }, func(in ProjectIn) Decision {
 		return pdec(cmp.Or(in.coordStopWhy(), map[bool]string{true: "project started with no coordinator run", false: "no coordinator run is alive; start with handoff"}[len(in.Tasks) == 0]), AskStartCoordinator)
 	}),

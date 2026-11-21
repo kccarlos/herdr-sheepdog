@@ -896,14 +896,18 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	for deadline := time.Now().Add(3 * time.Second); len(workerRequests()) < 1 && time.Now().Before(deadline); {
 		runFor(eng3, 40*time.Millisecond)
 	}
-	runFor(eng3, 80*time.Millisecond)
+	runUntilLogged(eng3, id3, 6)
 	if methods := workerRequests(); len(methods) != 1 {
 		lg, _ := os.ReadFile(eng3.Paths.Log(id3))
 		t.Fatalf("failing worker StartRun sent %d worker hc requests across many passes, want 1 (1 try): %v\nlog:\n%s", len(methods), methods, lg)
 	}
 	log3, _ := os.ReadFile(eng3.Paths.Log(id3))
-	if lines := strings.Split(strings.TrimSpace(string(log3)), "\n"); len(lines) != 5 {
-		t.Fatalf("failing worker StartRun wrote %d log lines (want 5):\n%s", len(lines), log3)
+	if lines := strings.Split(strings.TrimSpace(string(log3)), "\n"); len(lines) != 6 {
+		t.Fatalf("failing worker StartRun wrote %d log lines (want 6, including one N23 hold):\n%s", len(lines), log3)
+	}
+	if n23 := logRules(t, eng3.Paths.Log(id3), "N23"); len(n23) != 2 || len(n23[0].Asked) != 1 ||
+		n23[1].Decision != "waiting" || !strings.Contains(n23[1].Why, "back-off") {
+		t.Fatalf("N23 log = %+v, want one worker start and one back-off hold", n23)
 	}
 	if st3, err := LoadState(eng3.Paths.State(id3)); err != nil || flow.Count(st3.Tasks[0].Attempts[0].Acts, flow.AskStartWorker) != 1 || flow.Done(st3.Tasks[0].Attempts[0].Acts, flow.AskStartWorker) {
 		t.Fatalf("failing worker attempt acts = %+v (err=%v)", st3.Tasks[0].Attempts[0].Acts, err)

@@ -474,7 +474,6 @@ func TestEnsureRun(t *testing.T) {
 		in   In
 		want []string
 	}{
-		"pending waits":               {wBase(func(in *In) { in.Facts.Worker.Pending = true }), nil},
 		"none yet starts fresh":       {wBase(), []string{"start_worker"}},
 		"none yet waits without slot": {wBase(noSlotF), nil},
 		"live idle needs nothing":     {wBase(func(in *In) { in.Facts.Worker.State = RunIdle }), nil},
@@ -1613,11 +1612,15 @@ func TestPRAdoptTable(t *testing.T) {
 // the limit or when GitHub is unanswered/unavailable.
 func TestN36CIStalledWake(t *testing.T) {
 	limit := time.Duration(DefaultSettings().CIStalledMinutes) * time.Minute
-	under := with(pending, func(in *In) { in.Now = now.Add(limit - time.Second) })
+	pendingSpell := func(in *In) {
+		pending(in)
+		a0(in).PendingChecks = &PendingChecks{Head: "c1", Since: now}
+	}
+	under := with(pendingSpell, func(in *In) { in.Now = now.Add(limit - time.Second) })
 	if r, d := FirstMatch(TaskRows, under); r.ID != "N36" || len(d.Asked) != 0 {
 		t.Fatalf("pending under ci_stalled_minutes: %s %v, want N36 nil", r.ID, d.Asked)
 	}
-	stalled := with(pending, func(in *In) { in.Now = now.Add(limit) })
+	stalled := with(pendingSpell, func(in *In) { in.Now = now.Add(limit) })
 	wantWake := "wake_coordinator@ci_stalled@c1"
 	if r, d := FirstMatch(TaskRows, stalled); r.ID != "N36" || !slices.Equal(d.Asked, []string{wantWake}) {
 		t.Fatalf("pending at ci_stalled_minutes: %s %v, want N36 [%s]", r.ID, d.Asked, wantWake)
@@ -1636,19 +1639,19 @@ func TestN36CIStalledWake(t *testing.T) {
 			Round{N: 4, Kind: RoundFull, Head: "c2", Verdict: VerdictPass},
 		)
 		in.Facts.Tip, in.Facts.PR.Head = "c2", "c2"
+		a0(in).PendingChecks = &PendingChecks{Head: "c2", Since: now}
 		in.Settings.CIStalledMinutes = CIStalledMin
 		in.Now = now.Add(time.Duration(CIStalledMin) * time.Minute)
 	})
 	if r, d := FirstMatch(TaskRows, newH); r.ID != "N36" || !slices.Equal(d.Asked, []string{"wake_coordinator@ci_stalled@c2"}) {
 		t.Fatalf("pending at new H past ci_stalled_minutes: %s %v, want N36 wake for c2", r.ID, d.Asked)
 	}
-	// Unanswered, unavailable, or zero HeadSince never fires ci_stalled.
+	// Unanswered or unavailable GitHub never fires ci_stalled.
 	for name, f := range map[string]func(*In){
 		"unanswered":    noAnswer,
 		"githubUnavail": func(in *In) { in.Facts.GitHubUnavailable = true },
-		"zeroHeadSince": func(in *In) { in.Facts.PR.HeadSince = time.Time{} },
 	} {
-		in := with(pending, func(in *In) { in.Now = now.Add(limit) }, f)
+		in := with(pendingSpell, func(in *In) { in.Now = now.Add(limit) }, f)
 		if r, d := FirstMatch(TaskRows, in); r.ID != "N36" || len(d.Asked) != 0 {
 			t.Errorf("%s: %s %v, want N36 nil", name, r.ID, d.Asked)
 		}

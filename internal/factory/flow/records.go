@@ -116,6 +116,7 @@ type Task struct {
 	Dropped       *Dropped               `json:"dropped,omitempty"`
 	Split         *Split                 `json:"split,omitempty"`
 	Parked        bool                   `json:"parked,omitempty"`
+	HoldWhy       string                 `json:"hold_why,omitempty"`
 	LastRow       string                 `json:"last_row,omitempty"`
 	Recaps        []Recap                `json:"recaps,omitempty"`
 	Acts          []Act                  `json:"acts,omitempty"`
@@ -232,9 +233,16 @@ type Attempt struct {
 	// merges of the base only (N20, N40, design.md 3.1), in order.
 	MergeOnly []Advance `json:"merge_only,omitempty"`
 	// CIFails records distinct commits of this attempt seen with a failing check run (N13).
-	CIFails []CIFail `json:"ci_fails,omitempty"`
+	CIFails       []CIFail       `json:"ci_fails,omitempty"`
+	PendingChecks *PendingChecks `json:"pending_checks,omitempty"`
 	// Working is accumulated PhaseWorking time in this attempt since the last recap decision (N14).
 	Working time.Duration `json:"working,omitempty"`
+}
+
+// PendingChecks records the first observation of a pending spell at a PR head.
+type PendingChecks struct {
+	Head  string    `json:"head"`
+	Since time.Time `json:"since"`
 }
 
 // Advance is one merge_only move of H, observed with git when it was made.

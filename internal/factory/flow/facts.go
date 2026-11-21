@@ -94,7 +94,6 @@ type PR struct {
 // last working->idle turn ended (in memory, for N7's post-tell wake).
 type Run struct {
 	State       RunState  `json:"state"`
-	Pending     bool      `json:"pending"`
 	LastTurnEnd time.Time `json:"last_turn_end,omitempty"`
 	Refused     bool      `json:"refused,omitempty"`
 }

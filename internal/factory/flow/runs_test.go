@@ -164,7 +164,7 @@ func TestRunRowsTable(t *testing.T) {
 					t.Errorf("R21 record = %+v", r)
 				}
 			}},
-		{"R22 still quiet after interrupt stops as stuck", RunRecord{State: PhaseWorking, LastActivity: now, InterruptedAt: now.Add(20 * time.Minute)}, RunEvent{Kind: EvTick}, 20*time.Minute + 90*time.Second,
+		{"R22 still quiet after interrupt stops as stuck", RunRecord{State: PhaseWorking, LastActivity: now, InterruptedAt: now.Add(20 * time.Minute)}, RunEvent{Kind: EvTick, ScreenHash: "h0"}, 20*time.Minute + 90*time.Second,
 			"R22", PhaseEnded, EndStuck, []string{RunActStop}, nil},
 		{"R23 activity after interrupt clears interrupt", RunRecord{State: PhaseWorking, LastActivity: now, InterruptedAt: now.Add(20 * time.Minute)}, RunEvent{Kind: EvActivity, ScreenHash: "h9"}, 20*time.Minute + 10*time.Second,
 			"R23", PhaseWorking, "", nil, func(t *testing.T, r RunRecord) {
