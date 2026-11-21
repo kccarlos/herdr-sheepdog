@@ -94,9 +94,10 @@ func CodexHome(dir string) (string, error) {
 var ErrCodexAuthDiverged = errors.New("world: the scoped Codex sign-in is a file, not a link to yours")
 
 var (
-	codexPromptRe = regexp.MustCompile(`(?m)^›[ \t\x{00a0}]`)
-	codexIDRe     = regexp.MustCompile(`^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$`)
-	codexReplyRe  = regexp.MustCompile(`(?m)^•[ \t]`)
+	codexPromptRe  = regexp.MustCompile(`(?m)^›[ \t\x{00a0}]`)
+	codexWorkingRe = regexp.MustCompile(`^[ \t\x{00a0}]*\S[ \t\x{00a0}]+Working \(.*esc to interrupt`)
+	codexIDRe      = regexp.MustCompile(`^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$`)
+	codexReplyRe   = regexp.MustCompile(`(?m)^•[ \t]`)
 )
 
 // ReadCodexReport is ReadReport for a Codex run. Codex sends herdr-core no
@@ -136,7 +137,7 @@ func codexReply(text string) string {
 func codexScreenStatus(text string) string {
 	lines := strings.Split(strings.TrimRight(text, "\n \t"), "\n")
 	for _, line := range lines[max(0, len(lines)-16):] {
-		if strings.Contains(line, "esc to interrupt") {
+		if codexWorkingRe.MatchString(line) {
 			return "working"
 		}
 	}
