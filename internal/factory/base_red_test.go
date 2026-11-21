@@ -21,6 +21,7 @@ func writeBaseRuns(t *testing.T, ghDir, body string) {
 // base observer's red/green/red wakes, status+/factory stage agreement, and
 // that N40 resumes once the base turns green.
 func TestBaseRedHoldsBehindAndGreenResumesKBMRG47(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
@@ -89,6 +90,7 @@ func TestBaseRedHoldsBehindAndGreenResumesKBMRG47(t *testing.T) {
 // TestBaseRedNotBehindStillMerges verifies that a PR not behind the base with
 // green checks still merges even while the base is red (it may repair the base).
 func TestBaseRedNotBehindStillMerges(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":0}`)
@@ -104,6 +106,7 @@ func TestBaseRedNotBehindStillMerges(t *testing.T) {
 // once per red spell, only the oldest held task's worker is told to merge the
 // base and say ready, and the coordinator is woken once naming that way out.
 func TestBaseRedPastMainRedMinutesOldestTaskOnce(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	ctx := context.Background()
 	// Add a second (younger) task T2 also passed and behind.
@@ -195,6 +198,7 @@ func TestBaseRedPastMainRedMinutesOldestTaskOnce(t *testing.T) {
 // TestBaseRedReadErrorKeepsLastState verifies that a runs-list read error never
 // flips the base red and keeps the last known state when already red.
 func TestBaseRedReadErrorKeepsLastState(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
@@ -228,6 +232,7 @@ func TestBaseRedReadErrorKeepsLastState(t *testing.T) {
 // TestBaseRedRerunStaysRed verifies that a re-run in progress on a red head
 // commit keeps the base red (no base_green wake, no update-branch).
 func TestBaseRedRerunStaysRed(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
@@ -250,6 +255,7 @@ func TestBaseRedRerunStaysRed(t *testing.T) {
 // spell id = first red head sha) persists in state.json across engine restarts,
 // and that Stop/Start resets it consistently with Project.Acts.
 func TestBaseRedSurvivesRestartAndStopStart(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
@@ -300,6 +306,7 @@ func TestBaseRedSurvivesRestartAndStopStart(t *testing.T) {
 // TestBaseRedWaitTextClearsOnGreen verifies that GraphViewOf derives N38's wait
 // text from the row's WaitsOn and clears it once the base is no longer red.
 func TestBaseRedWaitTextClearsOnGreen(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
@@ -321,6 +328,7 @@ func TestBaseRedWaitTextClearsOnGreen(t *testing.T) {
 // TestBaseRedFailedTellRetriesOnceNextPass verifies that a failed worker tell
 // does not mark the red spell escalated, and retries after ensure_backoff_minutes.
 func TestBaseRedFailedTellRetriesOnceNextPass(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	now := time.Now()
 	l.eng.Now = func() time.Time { return now }
@@ -361,6 +369,7 @@ func TestBaseRedFailedTellRetriesOnceNextPass(t *testing.T) {
 // red on the same base commit sha opens a new spell, wakes the coordinator
 // again, and may tell a held worker once more after main_red_minutes.
 func TestBaseRedGreenRedSameSHAWakesAndTellsAgain(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	now := time.Now()
 	l.eng.Now = func() time.Time { return now }
@@ -408,6 +417,7 @@ func TestBaseRedGreenRedSameSHAWakesAndTellsAgain(t *testing.T) {
 // first held task's N38 tell fails out and a second held task is told in the
 // same red spell, the coordinator is woken once per spell for base_red_held.
 func TestBaseRedFailedTellFallbackWakesOncePerSpell(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	now := time.Now()
 	l.eng.Now = func() time.Time { return now }

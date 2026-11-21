@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -36,22 +35,6 @@ type restartWorld struct {
 	workTok  string
 	workerID string
 	commits  []string
-	merged   string
-	runs     []hc.RunParams
-}
-
-func installParallelFakeGH(t *testing.T) {
-	t.Helper()
-	bin := t.TempDir()
-	script := strings.Replace(fakeGHScript, "D=%DIR%", `D="$(git config --get sheepdog.fakeGhDir)"`, 1)
-	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	orig := os.Getenv("PATH")
-	if err := os.Setenv("PATH", bin+string(os.PathListSeparator)+orig); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Setenv("PATH", orig) })
 }
 
 func newRestartWorld(t *testing.T, goal string) *restartWorld {
@@ -59,8 +42,7 @@ func newRestartWorld(t *testing.T, goal string) *restartWorld {
 	srv := hctest.New(t)
 	repo, _ := initGitRepoWithRemote(t)
 	githubOrigin(t, repo)
-	gh := t.TempDir()
-	gitIn(t, repo, "config", "--local", "sheepdog.fakeGhDir", gh)
+	gh := bindRepoFakeGH(t, repo)
 	w := &restartWorld{
 		t:      t,
 		ctx:    context.Background(),
@@ -72,7 +54,6 @@ func newRestartWorld(t *testing.T, goal string) *restartWorld {
 		now:    time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC),
 	}
 	srv.OnRun = func(term hc.Terminal, p hc.RunParams) {
-		w.runs = append(w.runs, p)
 		switch p.Labels["sheepdog.role"] {
 		case flow.RoleCoordinator:
 			w.coordTok = p.Env["SHEEPDOG_RUN_TOKEN"]
@@ -90,13 +71,9 @@ func newRestartWorld(t *testing.T, goal string) *restartWorld {
 }
 
 func (w *restartWorld) newEngine() {
-	w.eng = New(w.paths, w.client)
+	w.eng = newTestEngine(w.t, w.paths, w.client)
 	w.eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 	w.eng.Now = func() time.Time { return w.now }
-	w.eng.onInvariant = func(vs []flow.InvariantViolation) {
-		w.t.Helper()
-		w.t.Fatalf("invariant broken after pass: %+v", vs)
-	}
 }
 
 func (w *restartWorld) restart() {
@@ -172,7 +149,6 @@ func (w *restartWorld) setReviewerVerdict(verdict string, majors int) {
 
 func (w *restartWorld) markPRMerged(sha string) {
 	w.t.Helper()
-	w.merged = sha
 	head := w.commits[len(w.commits)-1]
 	body := `{"number":7,"state":"MERGED","headRefOid":"` + head + `","mergeable":"UNKNOWN","statusCheckRollup":` + greenRollup + `,"baseRefName":"main","mergeCommit":{"oid":"` + sha + `"}}`
 	writeGHFile(w.t, w.gh, "view.json", body)
@@ -185,11 +161,26 @@ func (w *restartWorld) normalize(s string) string {
 	return s
 }
 
+func (w *restartWorld) waitIdle(addr string) {
+	w.srv.SetStatus(addr, &hc.Status{App: "claude-code", State: "idle"})
+	w.now = w.now.Add(5 * time.Second)
+	w.pass()
+	w.now = w.now.Add(25 * time.Second)
+	w.pass()
+}
+
+func (w *restartWorld) passReviewRound() {
+	w.setReviewerVerdict(flow.VerdictPass, 0)
+	w.now = w.now.Add(5 * time.Second)
+	w.pass()
+	w.now = w.now.Add(25 * time.Second)
+	w.pass()
+}
+
 type restartEnd struct {
 	TaskDone     string
-	PRState      string
 	PRCreates    int
-	PRMerges     int
+	PRMerges     []string
 	CIReruns     int
 	Rounds       []string
 	Accepts      []string
@@ -198,7 +189,7 @@ type restartEnd struct {
 	TaskActs     []string
 	AttemptActs  []string
 	LiveTaskRuns int
-	CoordAlive   bool
+	LiveCoords   int
 	WorktreeGone bool
 }
 
@@ -212,49 +203,51 @@ func (w *restartWorld) summarize() restartEnd {
 		done = t0.Done.MergedCommit
 	}
 	normActs := func(acts []flow.Act) []string {
-		seen := map[string]string{}
-		for _, a := range acts {
-			seen[w.normalize(a.Key)] = a.Result
-		}
 		var out []string
-		for k, r := range seen {
-			out = append(out, k+"="+r)
+		for _, a := range acts {
+			out = append(out, w.normalize(a.Key)+"="+a.Result)
 		}
 		slices.Sort(out)
 		return out
 	}
-	var rounds, accepts []string
+	var rounds, accepts, merges []string
 	for _, r := range a0.Rounds {
 		rounds = append(rounds, fmt.Sprintf("r%d:%s:%s", r.N, w.normalize(r.Head), r.Verdict))
 	}
 	for _, ac := range a0.Accepts {
 		accepts = append(accepts, fmt.Sprintf("%s:%s:%v", w.normalize(ac.Head), ac.By, ac.Rounds))
 	}
+	for _, call := range ghCalls(w.t, w.gh, "pr merge") {
+		fs := strings.Fields(call)
+		prNum, head := "", ""
+		if len(fs) > 2 {
+			prNum = fs[2]
+		}
+		if i := slices.Index(fs, "--match-head-commit"); i >= 0 && i+1 < len(fs) {
+			head = w.normalize(fs[i+1])
+		}
+		merges = append(merges, prNum+"@"+head)
+	}
 	list, err := w.client.List(w.ctx, false)
 	if err != nil {
 		w.t.Fatal(err)
 	}
-	liveTask, coordAlive := 0, false
+	liveTask, liveCoords := 0, 0
 	for _, tm := range list.Terminals {
 		if tm.State != "live" {
 			continue
 		}
 		if tm.Labels["sheepdog.role"] == flow.RoleCoordinator {
-			coordAlive = true
+			liveCoords++
 		} else {
 			liveTask++
 		}
 	}
 	_, wtErr := os.Stat(a0.Worktree)
-	prState := ""
-	if raw, err := os.ReadFile(filepath.Join(w.gh, "view.json")); err == nil && strings.Contains(string(raw), `"MERGED"`) {
-		prState = "MERGED"
-	}
 	return restartEnd{
 		TaskDone:     done,
-		PRState:      prState,
 		PRCreates:    len(ghCalls(w.t, w.gh, "pr create")),
-		PRMerges:     len(ghCalls(w.t, w.gh, "pr merge")),
+		PRMerges:     merges,
 		CIReruns:     len(ghCalls(w.t, w.gh, "run rerun")),
 		Rounds:       rounds,
 		Accepts:      accepts,
@@ -263,7 +256,7 @@ func (w *restartWorld) summarize() restartEnd {
 		TaskActs:     normActs(t0.Acts),
 		AttemptActs:  normActs(a0.Acts),
 		LiveTaskRuns: liveTask,
-		CoordAlive:   coordAlive,
+		LiveCoords:   liveCoords,
 		WorktreeGone: os.IsNotExist(wtErr),
 	}
 }
@@ -277,6 +270,22 @@ type restartHistory struct {
 	name  string
 	setup func(*testing.T) *restartWorld
 	steps []restartStep
+}
+
+func setupRunningWorker(t *testing.T, goal string, reviewRounds int) *restartWorld {
+	t.Helper()
+	w := newRestartWorld(t, goal)
+	if reviewRounds > 0 {
+		w.edit(func(s *flow.State) { s.Settings.ReviewRounds = reviewRounds })
+	}
+	w.pass() // J7 start coord
+	w.applyPlan()
+	w.pass() // N11 new attempt
+	w.pass() // N23 start worker
+	w.srv.SetStatus(w.workerID, &hc.Status{App: "claude-code", State: "working"})
+	w.now = w.now.Add(5 * time.Second)
+	w.pass()
+	return w
 }
 
 func restartHistories() []restartHistory {
@@ -295,13 +304,10 @@ func restartHistories() []restartHistory {
 				{"plan apply", func(w *restartWorld) { w.applyPlan() }},
 				passStep("N11 new attempt", 0),
 				passStep("N23 start worker", 0),
-				{"worker idle R9", func(w *restartWorld) {
-					w.srv.SetStatus(w.workerID, &hc.Status{App: "claude-code", State: "idle"})
-					w.now = w.now.Add(5 * time.Second)
-					w.pass()
+				{"worker idle and ready c1", func(w *restartWorld) {
+					w.waitIdle(w.workerID)
+					w.commitAndReady("package demo\n", greenRollup, true)
 				}},
-				passStep("worker idle R20", 25*time.Second),
-				{"commit c1 and ready", func(w *restartWorld) { w.commitAndReady("package demo\n", greenRollup, true) }},
 				passStep("N26 push and open PR", 0),
 				passStep("N29 start round 1", 0),
 				{"round 1 changes R9", func(w *restartWorld) {
@@ -309,53 +315,39 @@ func restartHistories() []restartHistory {
 					w.now = w.now.Add(5 * time.Second)
 					w.pass()
 				}},
-				passStep("round 1 changes verdict", 25*time.Second),
-				passStep("N22 tell findings", 0),
-				{"commit c2 and ready", func(w *restartWorld) { w.commitAndReady("package demo\n// fixed\n", greenRollup, false) }},
-				{"N26 push c2", func(w *restartWorld) {
+				{"round 1 changes verdict and N22 findings", func(w *restartWorld) {
+					w.now = w.now.Add(25 * time.Second)
+					w.pass()
+					w.pass()
+				}},
+				{"commit c2, ready and N26 push", func(w *restartWorld) {
+					w.commitAndReady("package demo\n// fixed\n", greenRollup, false)
 					w.pass()
 					writePRJSON(w.t, w.gh, "view.json", w.commits[len(w.commits)-1], greenRollup)
 				}},
-				passStep("N29 start round 2", 0),
-				{"round 2 pass R9", func(w *restartWorld) {
-					w.setReviewerVerdict(flow.VerdictPass, 0)
-					w.now = w.now.Add(5 * time.Second)
+				{"round 2 and round 3 pass", func(w *restartWorld) {
 					w.pass()
-				}},
-				passStep("round 2 pass verdict", 25*time.Second),
-				passStep("N29 start round 3", 0),
-				{"round 3 pass R9", func(w *restartWorld) {
-					w.setReviewerVerdict(flow.VerdictPass, 0)
-					w.now = w.now.Add(5 * time.Second)
+					w.passReviewRound()
 					w.pass()
+					w.passReviewRound()
 				}},
-				passStep("round 3 pass verdict", 25*time.Second),
 				passStep("N42 accept and merge", 0),
-				passStep("N41 wait while open", 15*time.Second),
-				{"PR merged and N2 done", func(w *restartWorld) {
+				{"PR merged, N2 done and N1 cleanup", func(w *restartWorld) {
 					w.markPRMerged("merged-h1")
 					w.now = w.now.Add(15 * time.Second)
 					w.pass()
+					w.now = w.now.Add(15 * time.Second)
+					w.pass()
 				}},
-				passStep("N1 cleanup", 15*time.Second),
 			},
 		},
 		{
 			name: "ci_red_then_green",
 			setup: func(t *testing.T) *restartWorld {
-				w := newRestartWorld(t, "CI red then green")
-				w.pass()
-				w.applyPlan()
-				w.pass()
-				w.pass()
-				w.srv.SetStatus(w.workerID, &hc.Status{App: "claude-code", State: "idle"})
-				w.now = w.now.Add(5 * time.Second)
-				w.pass()
-				w.now = w.now.Add(25 * time.Second)
-				w.pass()
+				w := setupRunningWorker(t, "CI red then green", 0)
+				w.waitIdle(w.workerID)
 				red := checkRollup("FAILURE", "44714", "13621")
 				w.commitAndReady("package demo\n", red, true)
-				w.pass() // N26 pushes and opens PR #7 with red check
 				w.edit(func(s *flow.State) {
 					c1 := w.commits[0]
 					s.Tasks[0].Attempts[0].Rounds = []flow.Round{
@@ -366,6 +358,7 @@ func restartHistories() []restartHistory {
 				return w
 			},
 			steps: []restartStep{
+				passStep("N26 push and open red PR", 0),
 				passStep("N33 rerun failed CI", 0),
 				passStep("N33 wait stale red", 30*time.Second),
 				{"CI turns green and N42 merges", func(w *restartWorld) {
@@ -373,28 +366,21 @@ func restartHistories() []restartHistory {
 					w.now = w.now.Add(30 * time.Second)
 					w.pass()
 				}},
-				passStep("N41 wait while open", 15*time.Second),
-				{"PR merged and N2 done", func(w *restartWorld) {
+				{"N41 wait, PR merged, N2 done and N1 cleanup", func(w *restartWorld) {
+					w.now = w.now.Add(15 * time.Second)
+					w.pass()
 					w.markPRMerged("merged-h2")
 					w.now = w.now.Add(15 * time.Second)
 					w.pass()
+					w.now = w.now.Add(15 * time.Second)
+					w.pass()
 				}},
-				passStep("N1 cleanup", 15*time.Second),
 			},
 		},
 		{
 			name:  "worker_killed_and_restarted",
-			setup: func(t *testing.T) *restartWorld { return newRestartWorld(t, "Worker killed and restarted") },
+			setup: func(t *testing.T) *restartWorld { return setupRunningWorker(t, "Worker killed and restarted", 1) },
 			steps: []restartStep{
-				passStep("J7 start coord", 0),
-				{"plan apply", func(w *restartWorld) { w.applyPlan() }},
-				passStep("N11 new attempt", 0),
-				passStep("N23 start worker", 0),
-				{"worker working", func(w *restartWorld) {
-					w.srv.SetStatus(w.workerID, &hc.Status{App: "claude-code", State: "working"})
-					w.now = w.now.Add(5 * time.Second)
-					w.pass()
-				}},
 				{"kill worker mid-turn", func(w *restartWorld) {
 					if _, err := w.client.Kill(w.ctx, w.workerID); err != nil {
 						w.t.Fatal(err)
@@ -404,50 +390,27 @@ func restartHistories() []restartHistory {
 				}},
 				passStep("wait in backoff", 30*time.Second),
 				passStep("N23 resume worker", 35*time.Second),
-				{"resumed worker idle R9", func(w *restartWorld) {
-					w.srv.SetStatus(w.workerID, &hc.Status{App: "claude-code", State: "idle"})
-					w.now = w.now.Add(5 * time.Second)
+				{"ready, N26 PR and N29 review pass", func(w *restartWorld) {
+					w.waitIdle(w.workerID)
+					w.commitAndReady("package demo\n", greenRollup, true)
 					w.pass()
-				}},
-				passStep("resumed worker idle R20", 25*time.Second),
-				{"commit c1 and ready", func(w *restartWorld) { w.commitAndReady("package demo\n", greenRollup, true) }},
-				passStep("N26 push and open PR", 0),
-				passStep("N29 start round 1", 0),
-				{"round 1 pass R9", func(w *restartWorld) {
-					w.setReviewerVerdict(flow.VerdictPass, 0)
-					w.now = w.now.Add(5 * time.Second)
 					w.pass()
+					w.passReviewRound()
 				}},
-				passStep("round 1 pass verdict", 25*time.Second),
-				passStep("N29 start round 2", 0),
-				{"round 2 pass R9", func(w *restartWorld) {
-					w.setReviewerVerdict(flow.VerdictPass, 0)
-					w.now = w.now.Add(5 * time.Second)
+				{"N42 merge, N2 done and N1 cleanup", func(w *restartWorld) {
 					w.pass()
-				}},
-				passStep("round 2 pass verdict", 25*time.Second),
-				passStep("N42 accept and merge", 0),
-				{"PR merged and N2 done", func(w *restartWorld) {
 					w.markPRMerged("merged-h3")
 					w.now = w.now.Add(15 * time.Second)
 					w.pass()
+					w.now = w.now.Add(15 * time.Second)
+					w.pass()
 				}},
-				passStep("N1 cleanup", 15*time.Second),
 			},
 		},
 		{
 			name:  "coordinator_killed_and_replaced",
-			setup: func(t *testing.T) *restartWorld { return newRestartWorld(t, "Coordinator killed and replaced") },
+			setup: func(t *testing.T) *restartWorld { return setupRunningWorker(t, "Coordinator killed and replaced", 1) },
 			steps: []restartStep{
-				passStep("J7 start coord 1", 0),
-				{"plan apply", func(w *restartWorld) { w.applyPlan() }},
-				passStep("N11 new attempt", 0),
-				passStep("N23 start worker", 0),
-				{"worker working", func(w *restartWorld) {
-					w.srv.SetStatus(w.workerID, &hc.Status{App: "claude-code", State: "working"})
-					w.now = w.now.Add(5 * time.Second)
-					w.pass()
-				}},
 				{"kill coordinator 1", func(w *restartWorld) {
 					if _, err := w.client.Kill(w.ctx, w.state().Project.RunID); err != nil {
 						w.t.Fatal(err)
@@ -457,52 +420,29 @@ func restartHistories() []restartHistory {
 				}},
 				passStep("J6 gap wait", 4*time.Minute),
 				passStep("J7 replace coordinator", 5*time.Minute),
-				{"worker idle R9", func(w *restartWorld) {
-					w.srv.SetStatus(w.workerID, &hc.Status{App: "claude-code", State: "idle"})
-					w.now = w.now.Add(5 * time.Second)
+				{"ready, N26 PR, N29 review and N42 merge", func(w *restartWorld) {
+					w.waitIdle(w.workerID)
+					w.commitAndReady("package demo\n", greenRollup, true)
+					w.pass()
+					w.pass()
+					w.passReviewRound()
 					w.pass()
 				}},
-				passStep("worker idle R20", 25*time.Second),
-				{"commit c1 and ready", func(w *restartWorld) { w.commitAndReady("package demo\n", greenRollup, true) }},
-				passStep("N26 push and open PR", 0),
-				passStep("N29 start round 1", 0),
-				{"round 1 pass R9", func(w *restartWorld) {
-					w.setReviewerVerdict(flow.VerdictPass, 0)
-					w.now = w.now.Add(5 * time.Second)
-					w.pass()
-				}},
-				passStep("round 1 pass verdict", 25*time.Second),
-				passStep("N29 start round 2", 0),
-				{"round 2 pass R9", func(w *restartWorld) {
-					w.setReviewerVerdict(flow.VerdictPass, 0)
-					w.now = w.now.Add(5 * time.Second)
-					w.pass()
-				}},
-				passStep("round 2 pass verdict", 25*time.Second),
-				passStep("N42 accept and merge", 0),
-				{"PR merged and N2 done", func(w *restartWorld) {
+				{"N2 done, N1 cleanup and J4 final journal", func(w *restartWorld) {
 					w.markPRMerged("merged-h4")
 					w.now = w.now.Add(15 * time.Second)
 					w.pass()
+					w.now = w.now.Add(15 * time.Second)
+					w.pass()
+					w.waitIdle(w.state().Project.RunID)
 				}},
-				passStep("N1 cleanup", 15*time.Second),
-				{"coord 2 idle R9", func(w *restartWorld) {
-					w.srv.SetStatus(w.state().Project.RunID, &hc.Status{App: "claude-code", State: "idle"})
+				{"J4 stop coord 2", func(w *restartWorld) {
+					cid := w.state().Project.RunID
+					w.srv.SetStatus(cid, &hc.Status{App: "claude-code", State: "working"})
 					w.now = w.now.Add(5 * time.Second)
 					w.pass()
+					w.waitIdle(cid)
 				}},
-				passStep("J4 final journal", 25*time.Second),
-				{"coord 2 working", func(w *restartWorld) {
-					w.srv.SetStatus(w.state().Project.RunID, &hc.Status{App: "claude-code", State: "working"})
-					w.now = w.now.Add(5 * time.Second)
-					w.pass()
-				}},
-				{"coord 2 idle R9", func(w *restartWorld) {
-					w.srv.SetStatus(w.state().Project.RunID, &hc.Status{App: "claude-code", State: "idle"})
-					w.now = w.now.Add(5 * time.Second)
-					w.pass()
-				}},
-				passStep("J4 stop coord 2", 25*time.Second),
 			},
 		},
 	}
@@ -525,10 +465,11 @@ func runRestartHistory(t *testing.T, h restartHistory, restartAfter int) restart
 
 // TestRestartAfterEveryStep verifies plan.md slice 5a's done-when: a restart of
 // the daemon after every step of every history gives the same end state (task
-// done/merged, PR merged, same act keys, no duplicate PRs or merges, no extra
-// live runs, and all invariants I1–I5 holding after every pass).
+// done/merged, exact PR merge target, same act multiset, no duplicate PRs or
+// merges, no extra live runs or coordinators, and all invariants I1–I5 holding
+// after every pass).
 func TestRestartAfterEveryStep(t *testing.T) {
-	installParallelFakeGH(t)
+	t.Parallel()
 	histories := restartHistories()
 	totalSteps := 0
 	for _, h := range histories {
@@ -536,7 +477,7 @@ func TestRestartAfterEveryStep(t *testing.T) {
 		t.Run(h.name, func(t *testing.T) {
 			t.Parallel()
 			want := runRestartHistory(t, h, -1)
-			if want.TaskDone == "" || want.PRState != "MERGED" || want.PRMerges != 1 || want.PRCreates > 1 || want.LiveTaskRuns != 0 || !want.WorktreeGone {
+			if want.TaskDone == "" || len(want.PRMerges) != 1 || !strings.HasPrefix(want.PRMerges[0], "7@<c") || want.PRCreates > 1 || want.LiveTaskRuns != 0 || want.LiveCoords > 1 || !want.WorktreeGone {
 				t.Fatalf("baseline %s bad end state: %+v", h.name, want)
 			}
 			for k, step := range h.steps {

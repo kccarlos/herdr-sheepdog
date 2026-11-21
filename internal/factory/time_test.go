@@ -20,6 +20,7 @@ import (
 //   - a recap decision (continue) resets the working-time count without
 //     changing size_cap, and another build_hours opens a second recap without continue.
 func TestN14BuildHoursRecapResetAndIdleExcluded(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t).withTokens()
 	now := time.Now().UTC().Truncate(time.Second)
 	l.eng.Now = func() time.Time { return now }
@@ -126,6 +127,7 @@ func setStatusAt(t *testing.T, l *landing, id, state string, at time.Time) {
 //     StatusMS after wake still goes idle after idle_grace_seconds;
 //   - a daemon restart after sleep keeps the stored totals without inflating them.
 func TestClockSleepIdleOnTimeAndRestartNoInflation(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	wall := time.Now().UTC().Truncate(time.Second)
 	var monoDelta time.Duration
@@ -202,6 +204,7 @@ func TestClockSleepIdleOnTimeAndRestartNoInflation(t *testing.T) {
 // right after a 6h sleep (before any post-wake pass on the old Engine) does not
 // inflate stored working time or review age.
 func TestClockRestartAfterSleepNoInflation(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	wall := time.Now().UTC().Truncate(time.Second)
 	l.eng.Now = func() time.Time { return wall }
@@ -242,6 +245,7 @@ func TestClockRestartAfterSleepNoInflation(t *testing.T) {
 // tick -> 30s cap) adds at most the cap (30s) rather than 90s or 0s, and never
 // freezes the clock for N14 or review_minutes.
 func TestClockSlowPassCappedNotFrozen(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	wall := time.Now().UTC().Truncate(time.Second)
 	l.eng.Now = func() time.Time { return wall }
@@ -287,6 +291,7 @@ func TestClockSlowPassCappedNotFrozen(t *testing.T) {
 // no <report> tag gets one nudge asking for its report tag, then is stopped if
 // it goes idle again with no tag, and 4.8 starts the next reviewer try.
 func TestN29IdleReviewerNudgeThenStopAndRetry(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	now := time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)
 	l.eng.Now = func() time.Time { return now }
@@ -329,6 +334,7 @@ func TestN29IdleReviewerNudgeThenStopAndRetry(t *testing.T) {
 // TestN29ReviewMinutesStopsAndRetries verifies N29: a reviewer run older than
 // review_minutes is stopped even while working, and 4.8 starts the next try.
 func TestN29ReviewMinutesStopsAndRetries(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	now := time.Date(2026, 11, 20, 15, 0, 0, 0, time.UTC)
 	l.eng.Now = func() time.Time { return now }
@@ -365,6 +371,7 @@ func TestN29ReviewMinutesStopsAndRetries(t *testing.T) {
 // TestS2AndStuckMinutesGone verifies S2 is gone and neither stuck_minutes nor
 // background_job_minutes appears in DefaultSettings JSON.
 func TestS2AndStuckMinutesGone(t *testing.T) {
+	t.Parallel()
 	for _, r := range flow.TaskRows {
 		if r.ID == "S2" {
 			t.Fatal("S2 row still in flow.TaskRows")
@@ -386,6 +393,7 @@ func TestS2AndStuckMinutesGone(t *testing.T) {
 // carrying stuck_minutes (and lacking build_hours/review_minutes) loads with
 // defaults, and a pre-upgrade working worker record counts from the first pass.
 func TestOldStateWithStuckMinutesAndNoWorkingSince(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	now := time.Now().UTC().Truncate(time.Second)
 	l.eng.Now = func() time.Time { return now }

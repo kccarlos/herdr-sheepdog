@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,11 +28,112 @@ func testPaths(t *testing.T) Paths {
 	return Paths{DataDir: t.TempDir(), ClaudeConfig: filepath.Join(t.TempDir(), ".claude.json")}
 }
 
+var (
+	gitTmplOnce sync.Once
+	gitTmplDir  string
+	gitTmplBase string
+	gitTmplErr  error
+)
+
+func TestMain(m *testing.M) {
+	origPath := os.Getenv("PATH")
+	ghBin, err := os.MkdirTemp("", "sheepdog-gh-shim-")
+	if err == nil {
+		resolve := "g=.git\n[ -f \"$g\" ] && { read _ g < \"$g\"; g=\"${g%/worktrees/*}\"; }\n[ -f \"$g/fake-gh-dir\" ] || { PATH=\"$SHEEPDOG_ORIG_PATH\" exec gh \"$@\"; }\nread D < \"$g/fake-gh-dir\""
+		script := strings.Replace(fakeGHScript, "D=%DIR%", resolve, 1)
+		if os.WriteFile(filepath.Join(ghBin, "gh"), []byte(script), 0o700) == nil {
+			_ = os.Setenv("SHEEPDOG_ORIG_PATH", origPath)
+			_ = os.Setenv("PATH", ghBin+string(os.PathListSeparator)+origPath)
+		}
+	}
+	code := m.Run()
+	_ = os.RemoveAll(ghBin)
+	if gitTmplDir != "" {
+		_ = os.RemoveAll(gitTmplDir)
+	}
+	os.Exit(code)
+}
+
+func bindRepoFakeGH(t *testing.T, repo string) string {
+	t.Helper()
+	gh := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, ".git", "fake-gh-dir"), []byte(gh+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return gh
+}
+
+func ensureGitTemplates(t *testing.T) {
+	t.Helper()
+	gitTmplOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "sheepdog-git-tmpl-")
+		if err != nil {
+			gitTmplErr = err
+			return
+		}
+		gitTmplDir = dir
+		runGit := func(cwd string, args ...string) (string, error) {
+			cmd := exec.Command("git", args...)
+			cmd.Dir = cwd
+			cmd.Env = append(os.Environ(),
+				"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+				"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+				"GIT_TERMINAL_PROMPT=0",
+			)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				return "", errors.New("git " + strings.Join(args, " ") + ": " + err.Error() + ": " + string(out))
+			}
+			return strings.TrimSpace(string(out)), nil
+		}
+		empty := filepath.Join(dir, "empty")
+		bare := filepath.Join(dir, "remote.git")
+		repo := filepath.Join(dir, "repo")
+		if _, err := runGit(dir, "init", empty); err != nil {
+			gitTmplErr = err
+			return
+		}
+		if _, err := runGit(dir, "init", "--bare", "--initial-branch=main", bare); err != nil {
+			gitTmplErr = err
+			return
+		}
+		if _, err := runGit(dir, "init", "--initial-branch=main", repo); err != nil {
+			gitTmplErr = err
+			return
+		}
+		if _, err := runGit(repo, "remote", "add", "origin", bare); err != nil {
+			gitTmplErr = err
+			return
+		}
+		if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example.com/demo\n\ngo 1.23\n"), 0o600); err != nil {
+			gitTmplErr = err
+			return
+		}
+		if _, err := runGit(repo, "add", "go.mod"); err != nil {
+			gitTmplErr = err
+			return
+		}
+		if _, err := runGit(repo, "commit", "-m", "chore: init"); err != nil {
+			gitTmplErr = err
+			return
+		}
+		if _, err := runGit(repo, "push", "-u", "origin", "main"); err != nil {
+			gitTmplErr = err
+			return
+		}
+		gitTmplBase, gitTmplErr = runGit(repo, "rev-parse", "HEAD")
+	})
+	if gitTmplErr != nil {
+		t.Fatal(gitTmplErr)
+	}
+}
+
 func initGitRepo(t *testing.T) string {
 	t.Helper()
+	ensureGitTemplates(t)
 	repo := filepath.Join(t.TempDir(), "repo")
-	if out, err := exec.Command("git", "init", repo).CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v: %s", err, out)
+	if err := os.CopyFS(repo, os.DirFS(filepath.Join(gitTmplDir, "empty"))); err != nil {
+		t.Fatalf("copy git template: %v", err)
 	}
 	return repo
 }
@@ -376,23 +478,26 @@ func TestStopWithoutHC(t *testing.T) {
 
 func initGitRepoWithRemote(t *testing.T) (repo, baseCommit string) {
 	t.Helper()
+	ensureGitTemplates(t)
 	tmp := t.TempDir()
 	bare := filepath.Join(tmp, "remote.git")
-	if out, err := exec.Command("git", "init", "--bare", "--initial-branch=main", bare).CombinedOutput(); err != nil {
-		t.Fatalf("git init --bare: %v: %s", err, out)
-	}
 	repo = filepath.Join(tmp, "repo")
-	if out, err := exec.Command("git", "init", "--initial-branch=main", repo).CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v: %s", err, out)
+	if err := os.CopyFS(bare, os.DirFS(filepath.Join(gitTmplDir, "remote.git"))); err != nil {
+		t.Fatalf("copy bare git template: %v", err)
 	}
-	gitIn(t, repo, "remote", "add", "origin", bare)
-	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example.com/demo\n\ngo 1.23\n"), 0o600); err != nil {
+	if err := os.CopyFS(repo, os.DirFS(filepath.Join(gitTmplDir, "repo"))); err != nil {
+		t.Fatalf("copy git repo template: %v", err)
+	}
+	cfgPath := filepath.Join(repo, ".git", "config")
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
 		t.Fatal(err)
 	}
-	gitIn(t, repo, "add", "go.mod")
-	gitIn(t, repo, "commit", "-m", "chore: init")
-	gitIn(t, repo, "push", "-u", "origin", "main")
-	return repo, gitIn(t, repo, "rev-parse", "HEAD")
+	updated := strings.ReplaceAll(string(raw), filepath.Join(gitTmplDir, "remote.git"), bare)
+	if err := os.WriteFile(cfgPath, []byte(updated), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return repo, gitTmplBase
 }
 
 func gitIn(t *testing.T, dir string, args ...string) string {

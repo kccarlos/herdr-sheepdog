@@ -35,6 +35,7 @@ func (l *landing) withTokens() *landing {
 // TestTaskCommandsAcceptance: the acceptance table rows for park, unpark,
 // drop, close and send-back (design.md 7.2).
 func TestTaskCommandsAcceptance(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t).withTokens()
 	l.edit(func(s *flow.State) {
 		s.Tasks = append(s.Tasks, flow.Task{ID: "T2", Title: "feat: after", EstimateLines: 50, After: []string{"T1"}},
@@ -89,6 +90,7 @@ func TestTaskCommandsAcceptance(t *testing.T) {
 // TestN3ParkStopsRunsUnparkStartsAgain: a parked task keeps no run alive;
 // after unpark the rows start the worker again.
 func TestN3ParkStopsRunsUnparkStartsAgain(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t).withTokens()
 	ctx := context.Background()
 	rev, err := startRun(ctx, l.client, world.RunSpec{Name: "rev-t1", Cwd: l.wt, Argv: []string{"sh"}})
@@ -129,6 +131,7 @@ func TestN3ParkStopsRunsUnparkStartsAgain(t *testing.T) {
 // with the worker (no review, no merge) through a commit without ready, and
 // a ready again hands it back to review (KB-TSK-3, KB-RUN-6).
 func TestSendBackStaysWithWorkerUntilReady(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t).withTokens()
 	ctx := context.Background()
 	rev, err := startRun(ctx, l.client, world.RunSpec{Name: "rev-t1-3", Cwd: l.wt, Argv: []string{"sh"}})
@@ -179,6 +182,7 @@ func TestSendBackStaysWithWorkerUntilReady(t *testing.T) {
 // again rather than merged; the worker is told once. Title-only amends and
 // new tasks are no boundary; ended tasks and other fields are refused.
 func TestAmendBriefReviewsSameHeadAgain(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t).withTokens()
 	l.edit(func(s *flow.State) {
 		s.Tasks = append(s.Tasks, flow.Task{ID: "T3", Title: "feat: ended", EstimateLines: 50, Dropped: &flow.Dropped{Why: "x"}})
@@ -219,6 +223,7 @@ func TestAmendBriefReviewsSameHeadAgain(t *testing.T) {
 // amended since the recap opened; then it closes the attempt and its PR with
 // a note (keeping the branch), and N11 starts a new attempt.
 func TestRecapDecideNewOnlyAfterAmend(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t).withTokens()
 	l.edit(func(s *flow.State) {
 		s.Tasks[0].Recaps = []flow.Recap{{Trigger: "review", Allowed: []string{"split", "new", "drop"}}}
@@ -250,6 +255,7 @@ func TestRecapDecideNewOnlyAfterAmend(t *testing.T) {
 // and no commit over the base; N8 wakes the coordinator once; close is
 // refused before it and accepted after, and N1 then cleans up.
 func TestNothingToChangeN8ThenClose(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	paths := testPaths(t)
 	repo, base := initGitRepoWithRemote(t)
@@ -316,6 +322,7 @@ func TestNothingToChangeN8ThenClose(t *testing.T) {
 // command (nothing-to-change) and coordinator ones (send-back, plan amend,
 // whose titles are cleaned too).
 func TestWhysCleanedAndCapped(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t).withTokens()
 	long := strings.Repeat("x", 501)
 	l.report("tok-coord", "task", `{"action":"send-back","task":"T1","why":"`+long+`"}`, "invalid_report")
@@ -341,6 +348,7 @@ func TestWhysCleanedAndCapped(t *testing.T) {
 // TestRecapDecideNewCloseFailureKeepsRuns: a failed gh close leaves the
 // worker alive and nothing committed, and returns the error.
 func TestRecapDecideNewCloseFailureKeepsRuns(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t).withTokens()
 	l.edit(func(s *flow.State) {
 		s.Tasks[0].Recaps = []flow.Recap{{Trigger: "review", Allowed: []string{"split", "new", "drop"}, Amended: true}}
@@ -367,6 +375,7 @@ func TestRecapDecideNewCloseFailureKeepsRuns(t *testing.T) {
 // counts restart from zero; works for both attempt-level (merge) and
 // task-level (new_attempt) failures, plus owner-quit / worker-restart resets.
 func TestTaskRetryN5AndRefusals(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t).withTokens()
 	now := l.eng.now()
 	l.eng.Now = func() time.Time { return now }
@@ -433,6 +442,7 @@ func TestTaskRetryN5AndRefusals(t *testing.T) {
 // say message, closes the attempt, and N11/N26 start a new attempt and open a
 // new PR on a new branch while the old PR stays closed.
 func TestTaskRetryN4StartsNewAttemptAndBranch(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t).withTokens()
 	now := l.eng.now()
 	l.eng.Now = func() time.Time { return now }
@@ -501,6 +511,7 @@ func TestTaskRetryN4StartsNewAttemptAndBranch(t *testing.T) {
 // TestTaskRetryN7SayStillDivergedToldAndWokenAgain verifies N7 -> say ->
 // still diverged -> retry -> worker told again -> coordinator woken again.
 func TestTaskRetryN7SayStillDivergedToldAndWokenAgain(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t).withTokens()
 	now := l.eng.now()
 	l.eng.Now = func() time.Time { return now }
@@ -549,6 +560,7 @@ func TestTaskRetryN7SayStillDivergedToldAndWokenAgain(t *testing.T) {
 // TestTaskRetryZeroBudgetStartsRun verifies worker_restarts: 0 and
 // reviewer_retries: 0: failure -> retry -> next pass starts the run.
 func TestTaskRetryZeroBudgetStartsRun(t *testing.T) {
+	t.Parallel()
 	// Worker with worker_restarts: 0.
 	lw := newLanding(t).withTokens()
 	now := lw.eng.now()
@@ -596,6 +608,7 @@ func TestTaskRetryZeroBudgetStartsRun(t *testing.T) {
 // re-opening merge@H; worker_failed/reviewer_failed wakes & coordinator.md
 // name retry; wakes use e.Bin; say refuses no_worker instead of a raw error.
 func TestTaskRetryAndSaySmallFixes(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t).withTokens()
 	l.eng.Bin = "/opt/custom/sheepdog"
 	now := l.eng.now()
@@ -668,6 +681,7 @@ func TestTaskRetryAndSaySmallFixes(t *testing.T) {
 // cleaned and capped; delivered immediately to an idle worker; held for a
 // working worker and delivered once it goes idle.
 func TestTaskSayDeliversIdleHoldsWorkingAndRefusesNoAttempt(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t).withTokens()
 	now := l.eng.now()
 	l.eng.Now = func() time.Time { return now }

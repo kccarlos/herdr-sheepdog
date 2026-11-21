@@ -25,12 +25,6 @@ func cleanSnapshot() InvariantSnapshot {
 				}},
 			}},
 		},
-		TaskFacts: map[string]Facts{
-			"T1": {
-				Tip: "c1", TipRel: RelSame, Worker: Run{State: RunIdle},
-				PR: PR{Answered: true, Number: 7, State: PROpen, Head: "c1", HeadRel: RelSame, Checks: ChecksGreen, Mergeable: MergeableClean},
-			},
-		},
 		Now: t0,
 	}
 }
@@ -69,7 +63,7 @@ func TestCheckInvariantsCleanStates(t *testing.T) {
 		}
 	})
 
-	t.Run("missing coordinator allowed under J6 gap and J4 finished and pending start", func(t *testing.T) {
+	t.Run("missing coordinator allowed under J6 gap, J7 pending start, and J4 finished", func(t *testing.T) {
 		snap := cleanSnapshot()
 		snap.State.Project.RunID, snap.State.Project.Run = "", &RunRecord{Role: RoleCoordinator, State: PhaseEnded, Result: EndExited}
 		snap.State.Project.Acts = []Act{{Key: AskStartCoordinator, Result: "done", At: snap.Now.Add(-time.Minute)}}
@@ -79,9 +73,8 @@ func TestCheckInvariantsCleanStates(t *testing.T) {
 
 		snap2 := cleanSnapshot()
 		snap2.State.Project.RunID, snap2.State.Project.Run = "", nil
-		snap2.CoordPendingStart = true
 		if vs := CheckInvariants(snap2); len(vs) != 0 {
-			t.Fatalf("pending start should satisfy I2, got %+v", vs)
+			t.Fatalf("J7 pending start should satisfy I2, got %+v", vs)
 		}
 
 		snap3 := cleanSnapshot()
@@ -93,6 +86,19 @@ func TestCheckInvariantsCleanStates(t *testing.T) {
 		}
 	})
 
+	t.Run("skipped task is not judged on stale live reviewer", func(t *testing.T) {
+		snap := cleanSnapshot()
+		snap.State.Tasks[0].Recaps = []Recap{{Trigger: TriggerSize, Allowed: []string{"drop"}}}
+		snap.State.Tasks[0].Attempts[0].Review = &ReviewRun{
+			Round: 1, Head: "c1", RunID: "rev-1",
+			Run: &RunRecord{Address: "rev-1", Role: RoleReviewer, State: PhaseWorking},
+		}
+		snap.Skipped = map[string]bool{"T1": true}
+		if vs := CheckInvariants(snap); len(vs) != 0 {
+			t.Fatalf("skipped task should not trigger I1 on stale reviewer, got %+v", vs)
+		}
+	})
+
 	t.Run("merge asked with matching accept record", func(t *testing.T) {
 		snap := cleanSnapshot()
 		a := &snap.State.Tasks[0].Attempts[0]
@@ -100,6 +106,15 @@ func TestCheckInvariantsCleanStates(t *testing.T) {
 		a.Acts = []Act{{Key: AskMerge + "@c1", Result: "done", At: snap.Now}}
 		if vs := CheckInvariants(snap); len(vs) != 0 {
 			t.Fatalf("accepted merge should satisfy I4, got %+v", vs)
+		}
+	})
+
+	t.Run("ended run with run_id still set is not live for I1", func(t *testing.T) {
+		snap := cleanSnapshot()
+		a := &snap.State.Tasks[0].Attempts[0]
+		a.Run = &RunRecord{Address: "w1", Role: RoleWorker, State: PhaseEnded, Result: EndExited}
+		if vs := CheckInvariants(snap); len(vs) != 0 {
+			t.Fatalf("observed ended worker with stale RunID should not trigger I1, got %+v", vs)
 		}
 	})
 }
@@ -145,25 +160,22 @@ func TestCheckInvariantsViolations(t *testing.T) {
 		}
 	})
 
-	t.Run("I1 live run on closed attempt and dangling run_id", func(t *testing.T) {
+	t.Run("I1 live run on closed attempt", func(t *testing.T) {
 		snap := cleanSnapshot()
 		snap.State.Tasks[0].Attempts = append([]Attempt{{
 			BaseCommit: "b0", Branch: "task/old", Worktree: "/wt/old", Closed: "retried",
 			RunID: "w-old", Run: &RunRecord{Address: "w-old", Role: RoleWorker, State: PhaseWorking},
 		}}, snap.State.Tasks[0].Attempts...)
-		snap.State.Project.Run = &RunRecord{Address: "coord-1", Role: RoleCoordinator, State: PhaseEnded}
 		vs := CheckInvariants(snap)
 		if !hasViolation(vs, "I1", "closed attempt 1 has live worker") {
 			t.Fatalf("want I1 closed attempt violation, got %+v", vs)
 		}
-		if !hasViolation(vs, "I1", "coordinator run_id coord-1 still set after run ended") {
-			t.Fatalf("want I1 dangling coordinator run_id violation, got %+v", vs)
-		}
 	})
 
-	t.Run("I2 missing coordinator with no pending start or J6", func(t *testing.T) {
+	t.Run("I2 missing coordinator when matched row is neither J6 nor J7", func(t *testing.T) {
 		snap := cleanSnapshot()
-		snap.State.Project.RunID, snap.State.Project.Run = "", nil
+		snap.State.Project.RunID = ""
+		snap.State.Project.Run = &RunRecord{Role: RoleCoordinator, State: PhaseEnded, Result: EndStuck, BlockedSince: snap.Now}
 		vs := CheckInvariants(snap)
 		if !hasViolation(vs, "I2", "project should have a coordinator") {
 			t.Fatalf("want I2 missing coordinator violation, got %+v", vs)
@@ -194,18 +206,14 @@ func TestCheckInvariantsViolations(t *testing.T) {
 		}
 	})
 
-	t.Run("I5 multiple open attempts and multiple PRs for one attempt", func(t *testing.T) {
+	t.Run("I5 multiple open attempts", func(t *testing.T) {
 		snap := cleanSnapshot()
 		snap.State.Tasks[0].Attempts = append(snap.State.Tasks[0].Attempts, Attempt{
 			BaseCommit: "b0", Branch: "task/1b", Worktree: "/wt/1b", PR: 7,
 		})
-		snap.TaskFacts["T1"] = Facts{PR: PR{Answered: true, Number: 8, State: PROpen}}
 		vs := CheckInvariants(snap)
 		if !hasViolation(vs, "I5", "has 2 open attempts") {
 			t.Fatalf("want I5 multiple open attempts violation, got %+v", vs)
-		}
-		if !hasViolation(vs, "I5", "PR #7 but GitHub reported PR #8") {
-			t.Fatalf("want I5 multiple PRs violation, got %+v", vs)
 		}
 	})
 }
