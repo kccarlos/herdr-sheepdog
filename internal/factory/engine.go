@@ -1808,6 +1808,12 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 		if p.State == flow.PRNone {
 			p = last
 		}
+		if p.State == flow.PRMerged || p.State == flow.PRClosed {
+			p.State = flow.PRNone // a stale terminal state could end the attempt
+		}
+		if p.Head == last.Head {
+			p.HeadSince = last.HeadSince
+		}
 		p.Answered, p.Checks = false, flow.ChecksUnreadable // never the last read's checks
 	} else {
 		if p.Head != "" {
@@ -1900,8 +1906,7 @@ func (e *Engine) logError(typ, id string, err error) {
 }
 
 func (e *Engine) observeGitHub(id string, err error) {
-	var gitErr *world.GitError
-	if !errors.As(err, &gitErr) && !errors.Is(err, world.ErrGitSuppressed) && world.FailureClass(err) != flow.ClassSettled {
+	if err == nil || world.GitHubUnavailable(err) {
 		setFlag(&e.ghUnavail, id, err != nil)
 	}
 }

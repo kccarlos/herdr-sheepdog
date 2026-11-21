@@ -19,6 +19,7 @@ const (
 	gitReplyGrace     = 6 * time.Second
 	gitLocalLimit     = 20 * time.Second
 	gitNetworkLimit   = 40 * time.Second
+	ghRequestLimit    = 30 * time.Second
 	GitStageTimeout   = gitLocalLimit + gitReplyGrace + 2*time.Second
 	GitNetworkTimeout = gitNetworkLimit + gitReplyGrace + 2*time.Second
 	GitPassTimeout    = 90 * time.Second
@@ -26,6 +27,8 @@ const (
 	maxGitBackoff     = 5 * time.Minute
 	maxGitEpisodes    = 128
 )
+
+var prSnapshotLimit = time.Minute
 
 var ErrGitSuppressed = errors.New("git temporarily suppressed after an exec deadline")
 
@@ -60,29 +63,31 @@ func NewGit(client *hc.Client, now func() time.Time, log func(event, folder stri
 	return &Git{client: client, now: now, log: log, episodes: make(map[string]gitEpisode)}
 }
 
-// GitError carries the child outcome together with any RPC failure.
+// GitError carries the git or gh child outcome together with any RPC failure.
 type GitError struct {
 	Result     hc.ExecResult
 	RPC        error
+	command    string
 	suppressed bool
 }
 
 func (e *GitError) Error() string {
+	command := cmp.Or(e.command, "git")
 	switch {
 	case e.suppressed:
 		return ErrGitSuppressed.Error()
 	case e.RPC != nil:
 		return e.RPC.Error()
 	case e.Result.TimedOut:
-		return "git child timed out"
+		return command + " child timed out"
 	case e.Result.Truncated:
-		return "git output truncated by herdr-core"
+		return command + " output truncated by herdr-core"
 	case e.Result.Signal != nil:
-		return fmt.Sprintf("git killed by signal %d: %s", *e.Result.Signal, strings.TrimSpace(string(e.Result.Stderr)))
+		return fmt.Sprintf("%s killed by signal %d: %s", command, *e.Result.Signal, strings.TrimSpace(string(e.Result.Stderr)))
 	case e.Result.Code != nil:
-		return fmt.Sprintf("git exit status %d: %s", *e.Result.Code, strings.TrimSpace(string(e.Result.Stderr)))
+		return fmt.Sprintf("%s exit status %d: %s", command, *e.Result.Code, strings.TrimSpace(string(e.Result.Stderr)))
 	default:
-		return "herdr-core returned no git exit status"
+		return "herdr-core returned no " + command + " exit status"
 	}
 }
 
@@ -140,16 +145,20 @@ func (g *Git) finishProbe(repo string, stalled bool) {
 
 // Run returns the complete captured child result or an error.
 func (g *Git) Run(ctx context.Context, dir string, args ...string) (hc.ExecResult, error) {
+	return g.run(ctx, dir, "git", args, map[string]string{"GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": ""})
+}
+
+func (g *Git) run(ctx context.Context, dir, command string, args []string, env map[string]string) (hc.ExecResult, error) {
 	if g == nil || g.client == nil {
-		return hc.ExecResult{}, &GitError{RPC: errors.New("git requires a herdr-core client")}
+		return hc.ExecResult{}, &GitError{command: command, RPC: errors.New("command requires a herdr-core client")}
 	}
 	dir, err := filepath.Abs(dir)
 	if err != nil {
-		return hc.ExecResult{}, &GitError{RPC: err}
+		return hc.ExecResult{}, &GitError{command: command, RPC: err}
 	}
 	folder, _ := ctx.Value(gitRepoKey{}).(string)
 	repo := cmp.Or(folder, dir)
-	if g.suppressed(repo) {
+	if command == "git" && g.suppressed(repo) {
 		return hc.ExecResult{}, ErrGitSuppressed
 	}
 	verb := ""
@@ -158,13 +167,15 @@ func (g *Git) Run(ctx context.Context, dir string, args ...string) (hc.ExecResul
 	}
 	budget, grace := gitLocalLimit, gitReplyGrace
 	network := verb == "push" || verb == "fetch" || verb == "ls-remote"
-	if network {
+	if command == "gh" {
+		budget = ghRequestLimit
+	} else if network {
 		budget = gitNetworkLimit
 	}
 	if end, ok := ctx.Deadline(); ok {
 		left := time.Until(end)
 		if left <= 0 {
-			return hc.ExecResult{}, &GitError{RPC: context.DeadlineExceeded}
+			return hc.ExecResult{}, &GitError{command: command, RPC: context.DeadlineExceeded}
 		}
 		// Leave time to recognize an RPC deadline before the stage expires.
 		left -= min(500*time.Millisecond, left/6)
@@ -180,15 +191,14 @@ func (g *Git) Run(ctx context.Context, dir string, args ...string) (hc.ExecResul
 	callCtx, cancel := context.WithTimeout(ctx, client.Timeout)
 	defer cancel()
 	r, err := client.Exec(callCtx, hc.ExecParams{
-		Cwd: dir, Argv: append([]string{"git"}, args...), Timeout: &limit,
-		Env: map[string]string{"GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": ""},
+		Cwd: dir, Argv: append([]string{command}, args...), Timeout: &limit, Env: env,
 	})
-	stalled := !network && verb != "diff" && (r.TimedOut || errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil)
-	if stalled || err == nil && !r.TimedOut && r.Code != nil && r.Signal == nil {
+	stalled := command == "git" && !network && verb != "diff" && (r.TimedOut || errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil)
+	if command == "git" && (stalled || err == nil && !r.TimedOut && r.Code != nil && r.Signal == nil) {
 		g.finishProbe(repo, stalled)
 	}
 	if err != nil || r.TimedOut || r.Truncated || r.Signal != nil || r.Code == nil || *r.Code != 0 {
-		return r, &GitError{Result: r, RPC: err, suppressed: stalled}
+		return r, &GitError{command: command, Result: r, RPC: err, suppressed: stalled}
 	}
 	return r, nil
 }

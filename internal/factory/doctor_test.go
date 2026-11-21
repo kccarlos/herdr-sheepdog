@@ -128,14 +128,11 @@ func TestDoctorAllGreenAndCleansUpProbeTerminal(t *testing.T) {
 			return CommandOutput{Stdout: "origin\nupstream\n"}
 		case "symbolic-ref --quiet --short HEAD":
 			return CommandOutput{Stdout: "main\n"}
-		case "config --get remote.origin.url":
-			return CommandOutput{Stdout: "git@github-work:alice/repo.git\n"}
+		case "remote get-url --all origin", "remote get-url --push --all origin":
+			return CommandOutput{Stdout: "git@github.com:alice/repo.git\n"}
 		default:
 			return CommandOutput{Exit: 1}
 		}
-	}
-	env.handlers["gh repo"] = func(string, []string, []string) CommandOutput {
-		return CommandOutput{Stdout: "alice/repo\n"}
 	}
 	env.handlers["codexbar --version"] = func(string, []string, []string) CommandOutput {
 		return CommandOutput{Stdout: "CodexBar 0.84.0\n"}
@@ -471,7 +468,7 @@ func TestCheckAgentCLIsMatrix(t *testing.T) {
 	})
 }
 
-func TestCheckGHPinningAndNote33(t *testing.T) {
+func TestCheckGHOrigin(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
 
@@ -494,82 +491,40 @@ func TestCheckGHPinningAndNote33(t *testing.T) {
 		}
 	})
 
-	makeGitHandlers := func(remotes, originURL, pinned string) *fakeEnv {
-		env := newFakeEnv("gh")
-		env.handlers["gh auth"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 0} }
-		env.handlers["git -C"] = func(_ string, _ []string, argv []string) CommandOutput {
-			switch strings.Join(argv[3:], " ") {
-			case "rev-parse --show-toplevel":
-				return CommandOutput{Stdout: "/Users/alice/repo\n"}
-			case "remote":
-				return CommandOutput{Stdout: remotes}
-			case "symbolic-ref --quiet --short HEAD":
-				return CommandOutput{Stdout: "main\n"}
-			case "config --get remote.origin.url":
-				return CommandOutput{Stdout: originURL + "\n"}
-			default:
-				return CommandOutput{Exit: 1}
+	for _, tc := range []struct {
+		name, fetch, push string
+		want              onboard.Status
+	}{
+		{"matching origin ignores local default", "https://github.com/acme/fork.git", "git@github.com:acme/fork.git", onboard.OK},
+		{"mismatched origin", "https://github.com/acme/fork.git", "git@github.com:acme/other.git", onboard.Warn},
+		{"missing origin", "", "", onboard.Warn},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newFakeEnv("gh")
+			env.handlers["gh auth"] = func(string, []string, []string) CommandOutput { return CommandOutput{} }
+			env.handlers["gh repo"] = func(string, []string, []string) CommandOutput {
+				t.Fatal("doctor consulted the local gh default")
+				return CommandOutput{}
 			}
-		}
-		env.handlers["gh repo"] = func(string, []string, []string) CommandOutput {
-			if pinned == "" {
-				return CommandOutput{Exit: 0, Stderr: "X No default remote repository has been set.\n"}
+			env.handlers["git -C"] = func(_ string, _ []string, argv []string) CommandOutput {
+				switch strings.Join(argv[3:], " ") {
+				case "rev-parse --show-toplevel":
+					return out(tmp)
+				case "remote get-url --all origin":
+					return out(tc.fetch)
+				case "remote get-url --push --all origin":
+					return out(tc.push)
+				default:
+					return CommandOutput{Exit: 1}
+				}
 			}
-			return CommandOutput{Exit: 0, Stdout: pinned + "\n"}
-		}
-		return env
+			r := CheckGH(ctx, DoctorOptions{Folder: tmp, TempDir: tmp, LookPath: env.lookPath, RunCommand: env.run}, true)
+			if r.Status != tc.want || tc.want == onboard.Warn && r.Fix == "" {
+				t.Errorf("gh check = %+v, want %s", r, tc.want)
+			}
+		})
 	}
 
-	t.Run("unpinned single origin warns with exact command", func(t *testing.T) {
-		env := makeGitHandlers("origin\n", "https://github.com/alice/fork.git", "")
-		r := CheckGH(ctx, DoctorOptions{Folder: "/Users/alice/repo", TempDir: tmp, LookPath: env.lookPath, RunCommand: env.run}, true)
-		if r.Status != onboard.Warn || !strings.Contains(r.Fix, "gh repo set-default alice/fork") {
-			t.Errorf("unpinned origin = %+v", r)
-		}
-	})
-
-	t.Run("note 33: unpinned with upstream remote fails", func(t *testing.T) {
-		env := makeGitHandlers("origin\nupstream\n", "https://github.com/alice/fork.git", "")
-		r := CheckGH(ctx, DoctorOptions{Folder: "/Users/alice/repo", TempDir: tmp, LookPath: env.lookPath, RunCommand: env.run}, true)
-		if r.Status != onboard.Fail || !strings.Contains(r.Detail, "upstream") || !strings.Contains(r.Fix, "gh repo set-default alice/fork") {
-			t.Errorf("unpinned with upstream = %+v", r)
-		}
-	})
-
-	t.Run("note 33: pinned to upstream instead of origin fails", func(t *testing.T) {
-		env := makeGitHandlers("origin\nupstream\n", "https://github.com/alice/fork.git", "bob/original")
-		r := CheckGH(ctx, DoctorOptions{Folder: "/Users/alice/repo", TempDir: tmp, LookPath: env.lookPath, RunCommand: env.run}, true)
-		if r.Status != onboard.Fail || !strings.Contains(r.Detail, "bob/original") || !strings.Contains(r.Fix, "gh repo set-default alice/fork") {
-			t.Errorf("pinned to upstream = %+v", r)
-		}
-	})
-
-	t.Run("pinned to push remote passes", func(t *testing.T) {
-		env := makeGitHandlers("origin\nupstream\n", "https://github.com/alice/fork.git", "Alice/Fork")
-		r := CheckGH(ctx, DoctorOptions{Folder: "/Users/alice/repo", TempDir: tmp, LookPath: env.lookPath, RunCommand: env.run}, true)
-		if r.Status != onboard.OK {
-			t.Errorf("pinned to origin = %+v", r)
-		}
-	})
-
-	t.Run("unpinned with github remote also fails", func(t *testing.T) {
-		env := makeGitHandlers("origin\ngithub\n", "https://github.com/alice/fork.git", "")
-		r := CheckGH(ctx, DoctorOptions{Folder: "/Users/alice/repo", TempDir: tmp, LookPath: env.lookPath, RunCommand: env.run}, true)
-		if r.Status != onboard.Fail || !strings.Contains(r.Detail, "github") {
-			t.Errorf("unpinned with github remote = %+v", r)
-		}
-	})
-
-	t.Run("view timeout warns instead of false fail", func(t *testing.T) {
-		env := makeGitHandlers("origin\nupstream\n", "https://github.com/alice/fork.git", "")
-		env.handlers["gh repo"] = func(string, []string, []string) CommandOutput {
-			return CommandOutput{TimedOut: true}
-		}
-		r := CheckGH(ctx, DoctorOptions{Folder: "/Users/alice/repo", TempDir: tmp, LookPath: env.lookPath, RunCommand: env.run}, true)
-		if r.Status != onboard.Warn || !strings.Contains(r.Detail, "could not check") {
-			t.Errorf("view timeout = %+v, want Warn", r)
-		}
-	})
 }
 
 func TestCheckCodexbar(t *testing.T) {

@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 )
 
 // fakeGHScript records each call's argv (one line, words joined by spaces)
@@ -25,6 +27,13 @@ import (
 const fakeGHScript = `#!/bin/sh
 D=%DIR%
 printf '%s\n' "$*" >> "$D/argv"
+if [ -f "$D/local-default" ]; then
+  [ "$GH_HOST" = github.com ] || exit 1
+  case "$*" in
+    *"--repo acme/demo"*|api*"repos/acme/demo/"*) ;;
+    *) echo "routed to $(cat "$D/local-default")" >&2; exit 1 ;;
+  esac
+fi
 [ -f "$D/fail" ] && { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
 failif() { [ -f "$D/$1_fail" ] && { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }; return 0; }
 case "$*" in *"--state open"*) grep -q '"state":"OPEN"' "$D/view.json" 2>/dev/null || { echo '[]'; exit 0; } ;; esac
@@ -184,6 +193,7 @@ func TestNoChecksNeverMerges(t *testing.T) {
 func TestPushAndOpenPROnceThenAdopts(t *testing.T) {
 	ctx := context.Background()
 	gh := installFakeGH(t)
+	writeGH(t, gh, "local-default", "acme/other")
 	repo, bare := repoWithGitHubOrigin(t)
 	runGit(t, repo, "switch", "-c", "task/t1-x")
 	runGit(t, repo, "commit", "--allow-empty", "-m", "feat: x")
@@ -195,6 +205,9 @@ func TestPushAndOpenPROnceThenAdopts(t *testing.T) {
 	// Before: no PR is an answer, not a failure.
 	if p, _, err := fixtureGit(t).PRSnapshot(ctx, repo, "task/t1-x", 0); err != nil || !p.Answered || p.State != flow.PRNone {
 		t.Fatalf("snapshot before PR = %+v, %v", p, err)
+	}
+	if p, _, err := fixtureGit(t).PRSnapshot(ctx, repo, "task/t1-x", 7); err == nil || p.Answered {
+		t.Fatalf("missing recorded PR = %+v, %v", p, err)
 	}
 	for i := range 2 {
 		n, err := fixtureGit(t).PushAndOpenPR(ctx, repo, "task/t1-x", c1, "feat: x", "Brief.\n\nOpened by the sheepdog factory.")
@@ -215,6 +228,15 @@ func TestPushAndOpenPROnceThenAdopts(t *testing.T) {
 	}
 	if views := ghCalls(t, gh, "pr view"); !strings.Contains(views[len(views)-1], "pr view 7 --repo acme/demo --json "+prViewFields) {
 		t.Fatalf("pr view argv = %q", views)
+	}
+	if err := fixtureGit(t).MergePR(ctx, repo, 7, c1, "squash message"); err != nil {
+		t.Fatal(err)
+	}
+	if calls := ghCalls(t, gh, "pr merge"); len(calls) != 1 || !strings.Contains(calls[0], "--repo acme/demo --squash --match-head-commit "+c1) {
+		t.Fatalf("merge argv = %q", calls)
+	}
+	if len(ghCalls(t, gh, "api repos/acme/demo/actions/runs")) == 0 {
+		t.Fatal("snapshot did not read checks from origin")
 	}
 	if rel, err := fixtureGit(t).Relation(ctx, repo, c1, runGit(t, repo, "rev-parse", "main")); err != nil || rel != flow.RelBehind {
 		t.Fatalf("Relation(main vs c1) = %s, %v", rel, err)
@@ -251,7 +273,7 @@ func TestGHRepoIsRequired(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init")
 	runGit(t, repo, "remote", "add", "origin", "/srv/git/demo.git")
-	if _, _, err := fixtureGit(t).PRSnapshot(context.Background(), repo, "b", 0); err == nil || !strings.Contains(err.Error(), "not a github.com repo") {
+	if _, _, err := fixtureGit(t).PRSnapshot(context.Background(), repo, "b", 0); !errors.Is(err, ErrOriginMismatch) {
 		t.Fatalf("PRSnapshot without a GitHub remote: %v", err)
 	}
 }
@@ -482,7 +504,7 @@ func TestPRSnapshotNetworkFailureNotNonGitHub(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, _, err := fixtureGit(t).PRSnapshot(ctx, repo, "s06/green", 0)
-	if err == nil || p.Checks != flow.ChecksUnreadable || strings.Contains(err.Error(), "not a github.com repo") {
+	if err == nil || p.Checks != flow.ChecksUnreadable || errors.Is(err, ErrOriginMismatch) {
 		t.Fatalf("network failure = %+v, %v", p, err)
 	}
 	if err := os.Remove(failFile); err != nil {
@@ -891,5 +913,37 @@ func TestRollupNewerRunReplacesOlderCancelled(t *testing.T) {
 	}
 	if got := flow.Rollup(checks, false); got != flow.ChecksGreen {
 		t.Fatalf("older cancelled run + newer passing run Rollup = %s, want green", got)
+	}
+}
+
+func TestPRSnapshotOwnDeadlineBoundsOptionalRequests(t *testing.T) {
+	limit := prSnapshotLimit
+	prSnapshotLimit = 2 * time.Second
+	t.Cleanup(func() { prSnapshotLimit = limit })
+	gh := installFakeGH(t)
+	repo, _ := repoWithGitHubOrigin(t)
+	copySnap(t, "green.json", filepath.Join(gh, "view.json"))
+	srv := hctest.New(t)
+	compare := make(chan float64, 1)
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if p.Argv[0] == "gh" && strings.Contains(p.Argv[2], "/compare/") {
+			compare <- *p.Timeout
+			time.Sleep(2 * time.Second)
+			return hc.ExecResult{Code: new(int), Stdout: []byte(`{"behind_by":0}`)}, nil
+		}
+		return hctest.GitExec(p)
+	}
+	g := NewGit(hc.NewClient(srv.Path), nil, nil)
+	p, _, err := g.PRSnapshot(context.Background(), repo, "b", 0)
+	if err == nil || p.Answered || p.Checks != flow.ChecksUnreadable {
+		t.Fatalf("aggregate deadline gave %+v, %v", p, err)
+	}
+	select {
+	case budget := <-compare:
+		if budget <= 0 || budget >= prSnapshotLimit.Seconds() {
+			t.Fatalf("compare request budget = %g s", budget)
+		}
+	default:
+		t.Fatal("snapshot did not reach the compare request")
 	}
 }
