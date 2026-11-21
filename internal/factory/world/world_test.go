@@ -452,6 +452,43 @@ func TestScreenClassUIOnlyAndVerifiedKeys(t *testing.T) {
 	}
 }
 
+// TestScreenClassTrustIsOnlyTheBottomDialog: a trust class (and with it a key)
+// needs the whole agy dialog at the bottom of the screen with "Yes" selected.
+// The same words quoted in agent output with more output after them, a dialog
+// whose cursor sits on "No, exit" and a different Yes option are not trust.
+func TestScreenClassTrustIsOnlyTheBottomDialog(t *testing.T) {
+	agyTrust, err := os.ReadFile("../../../testdata/herdr/agy-trust-dialog.screen.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	quoted := "⏺ The start screen of the agent said:\n" +
+		"  ⏺ Do you trust the contents of this project?\n" +
+		"  > Yes, I trust this folder\n" +
+		"    No, exit\n" +
+		"⏺ I pressed enter by hand earlier, so I carry on with the task now.\n" +
+		"⏺ Reading internal/factory/world/world.go\n" +
+		"  Type your message or @path\n\n" +
+		"                                            Gemini 3.8 Flash · high\n"
+	for _, tc := range []struct {
+		name, screen, want string
+	}{
+		{"real dialog at the bottom", string(agyTrust), flow.ScreenTrust},
+		{"quoted in agent output with output after it", quoted, flow.ScreenNone},
+		{"quoted inside a long answer, output after it", "⏺ Long answer\n" + quoted, flow.ScreenNone},
+		{"cursor on No, exit", "Do you trust the contents of this project?\n\n  Yes, I trust this folder\n> No, exit\n\n  ↑/↓ Navigate · enter Confirm\n   Gemini 3.8 Flash · high\n", flow.ScreenNone},
+		{"different Yes option", "Do you trust the contents of this project?\n\n> Yes, trust and allow everything\n  No, exit\n\n  ↑/↓ Navigate · enter Confirm\n   Gemini 3.8 Flash · high\n", flow.ScreenNone},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ScreenClass("agy", tc.screen); got != tc.want {
+				t.Errorf("ScreenClass(agy) = %q, want %q", got, tc.want)
+			}
+			if keys := flow.ScreenKeys("agy", ScreenClass("agy", tc.screen)); (tc.want == flow.ScreenTrust) != (len(keys) == 1 && keys[0] == "enter") {
+				t.Errorf("keys = %v for class %q", keys, tc.want)
+			}
+		})
+	}
+}
+
 // TestRepoProjectIDSurvivesRename checks KB-TSK-2 (design.md 3).
 func TestRepoProjectIDSurvivesRename(t *testing.T) {
 	ctx := context.Background()
