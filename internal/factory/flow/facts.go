@@ -78,8 +78,7 @@ type PR struct {
 	HeadRel              Rel       `json:"head_rel"`                          // Head against H
 	HeadMergeOnly        bool      `json:"head_merge_only,omitempty"`         // Head is ahead of H by clean merges of the base only (N20/N40)
 	HeadMergeOnlyUnknown bool      `json:"head_merge_only_unknown,omitempty"` // merge-tree or fetch failed: HeadMergeOnly false is not "foreign" (N7)
-	PendingSince         time.Time `json:"pending_since,omitzero"`
-	HeadSince            time.Time `json:"head_since"` // when Head was first seen; the checks grace counts from it
+	HeadSince            time.Time `json:"head_since"`                        // when Head was first seen; the checks grace counts from it
 	Mergeable            Mergeable `json:"mergeable"`
 	Checks               Checks    `json:"checks"`
 	Failed               []Failure `json:"failed,omitempty"`  // the red or outside-cancelled checks (N33, N34)

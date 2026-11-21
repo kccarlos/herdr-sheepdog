@@ -102,6 +102,7 @@ func pcond(id, waits, stage string, when, sel func(ProjectIn) bool, yes, no Deci
 
 // ProjectRows is the ordered project rule table for the coordinator (design.md section 6).
 // J1 (doctor) is slice 8; J3/J5 (alerts/sign-in) are slice 5b; J11 (rotation) is slice 13.
+// J2 lives in passProject's early return and Engine.Stop.
 // J10 sits before J6/J7 so an R29 dialog-stuck end is noted before J6 waits or J7 restarts it.
 var ProjectRows = []Row[ProjectIn]{
 	prow("J4", "none", "finished", func(in ProjectIn) bool { return AllTasksEnded(in.Tasks) && !in.NewGoal && len(in.Wakes) == 0 }, func(in ProjectIn) Decision {

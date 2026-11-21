@@ -1788,7 +1788,7 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 		if p.State == flow.PRNone {
 			p = last
 		}
-		p.Answered, p.Checks, p.PendingSince = false, flow.ChecksUnreadable, time.Time{} // never the last read's checks
+		p.Answered, p.Checks = false, flow.ChecksUnreadable // never the last read's checks
 	} else {
 		if p.Head != "" {
 			p.HeadSince = last.HeadSince
@@ -1834,7 +1834,6 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 			if oldPending == nil || oldPending.Head != p.Head {
 				oa.PendingChecks = &flow.PendingChecks{Head: p.Head, Since: e.now().Round(0)}
 			}
-			p.PendingSince = oa.PendingChecks.Since
 		case p.State != flow.PROpen || p.Checks != flow.ChecksUnreadable || oldPending != nil && p.Head != "" && p.Head != oldPending.Head:
 			oa.PendingChecks = nil
 		}

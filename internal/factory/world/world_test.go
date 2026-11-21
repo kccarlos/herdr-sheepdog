@@ -327,6 +327,89 @@ func TestObserveRunScreensActivityAndExit(t *testing.T) {
 	}
 }
 
+func TestObserveRunScreenEvidence(t *testing.T) {
+	dir, err := os.MkdirTemp("", "hcs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "hc.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	replies := []map[string]any{
+		{"result": hc.ReadResult{Text: "first line", Complete: true}},
+		{"result": hc.ReadResult{Text: "first line", Complete: false}},
+		{"result": hc.ReadResult{Text: "second line", Complete: false}},
+		{"error": map[string]any{"code": -32000, "message": "read failed"}},
+		{"result": hc.ReadResult{Complete: true}},
+	}
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer func() { _ = conn.Close() }()
+				var req struct {
+					ID     uint64 `json:"id"`
+					Method string `json:"method"`
+				}
+				if err := json.NewDecoder(conn).Decode(&req); err != nil {
+					return
+				}
+				reply := map[string]any{"result": hc.Terminal{Address: "t1", State: "live"}}
+				if req.Method == "terminal.read" {
+					reply, replies = replies[0], replies[1:]
+				}
+				reply["jsonrpc"], reply["id"] = "2.0", req.ID
+				_ = json.NewEncoder(conn).Encode(reply)
+			}()
+		}
+	}()
+
+	client := hc.NewClient(sock)
+	rec := flow.RunRecord{Address: "t1", State: flow.PhaseWorking}
+	baseline, err := ObserveRun(t.Context(), client, rec)
+	if err != nil || len(baseline) != 1 || baseline[0].Kind != flow.EvTick || baseline[0].ScreenHash == "" {
+		t.Fatalf("baseline = %+v, %v, want a tick with a screen hash", baseline, err)
+	}
+	rec.ScreenHash = baseline[0].ScreenHash
+	for _, tc := range []struct {
+		name     string
+		evidence bool
+		activity bool
+	}{
+		{"unchanged incomplete", true, false},
+		{"changed incomplete", true, true},
+		{"failed", false, false},
+		{"empty", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evs, err := ObserveRun(t.Context(), client, rec)
+			if err != nil || len(evs) == 0 {
+				t.Fatalf("ObserveRun = %+v, %v, want events ending in a tick", evs, err)
+			}
+			tick := evs[len(evs)-1]
+			activity := slices.ContainsFunc(evs, func(ev flow.RunEvent) bool {
+				return ev.Kind == flow.EvActivity && ev.ScreenHash == tick.ScreenHash
+			})
+			wantEvents := 1
+			if tc.activity {
+				wantEvents++
+			}
+			if tick.Kind != flow.EvTick || (tick.ScreenHash != "") != tc.evidence ||
+				activity != tc.activity || len(evs) != wantEvents {
+				t.Errorf("screen events = %+v, want evidence=%t activity=%t", evs, tc.evidence, tc.activity)
+			}
+		})
+	}
+}
+
 func TestScreenClassUIOnlyAndVerifiedKeys(t *testing.T) {
 	agyTrust, err := os.ReadFile("../../../testdata/herdr/agy-trust-dialog.screen.txt")
 	if err != nil {

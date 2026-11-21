@@ -33,7 +33,7 @@ func TestR18NeedsStatusNewerThanHeldSend(t *testing.T) {
 	}
 }
 
-func TestQuietRowsRequireCompleteScreenEvidence(t *testing.T) {
+func TestQuietRowsRequireScreenEvidence(t *testing.T) {
 	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
 	s := DefaultSettings()
 	rec := RunRecord{State: PhaseWorking, LastActivity: now.Add(-time.Hour)}
@@ -46,7 +46,7 @@ func TestQuietRowsRequireCompleteScreenEvidence(t *testing.T) {
 		t.Errorf("unknown screen at interrupt deadline matched %s, want R23", row.ID)
 	}
 	if _, row, _ := StepRun(rec, RunEvent{Kind: EvTick, ScreenHash: "same"}, s, now); row.ID != "R22" {
-		t.Errorf("complete quiet screen at interrupt deadline matched %s, want R22", row.ID)
+		t.Errorf("unchanged screen at interrupt deadline matched %s, want R22", row.ID)
 	}
 }
 
@@ -82,5 +82,48 @@ func TestN42RetriesLostMergeOutcomeAfterBackoff(t *testing.T) {
 	in.Now = in.Now.Add(time.Second)
 	if row, d := FirstMatch(TaskRows, in); row.ID != "N42" || !slices.Equal(d.Asked, []string{"merge@c1"}) {
 		t.Fatalf("at back-off = %s %v, want N42 merge for still-open PR", row.ID, d.Asked)
+	}
+}
+
+func TestN23ReportsEnsureRunBackoff(t *testing.T) {
+	in := with(noRounds, func(in *In) {
+		in.Facts.Worker.State = RunNone
+		a := a0(in)
+		a.Ready = nil
+		a.Run = &RunRecord{State: PhaseEnded, Result: EndExited, EndedAt: in.Now}
+	})
+	if got := EnsureRun(in, RoleWorker); len(got) != 0 {
+		t.Fatalf("EnsureRun during back-off = %v, want no start", got)
+	}
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N23" || !d.Hold || d.Why != "waiting for worker restart back-off" || len(d.Asked) != 0 {
+		t.Errorf("N23 during back-off = %s %+v, want a restart back-off hold", r.ID, d)
+	}
+	in.Now = in.Now.Add(time.Duration(in.Settings.EnsureBackoffMinutes) * time.Minute)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N23" || d.Hold || !slices.Equal(d.Asked, []string{"start_worker@handoff@1"}) {
+		t.Errorf("N23 at restart deadline = %s %+v, want a worker start", r.ID, d)
+	}
+}
+
+func TestN36UsesPendingSpellForPRHead(t *testing.T) {
+	in := with(pending, func(in *In) {
+		in.Now = in.Now.Add(time.Duration(in.Settings.CIStalledMinutes) * time.Minute)
+	})
+	wantWake := []string{"wake_coordinator@ci_stalled@c1"}
+	for _, tc := range []struct {
+		name  string
+		spell *PendingChecks
+		want  []string
+	}{
+		{"missing", nil, nil},
+		{"different head", &PendingChecks{Head: "c0", Since: now}, nil},
+		{"zero time", &PendingChecks{Head: "c1"}, nil},
+		{"current head", &PendingChecks{Head: "c1", Since: now}, wantWake},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a0(&in).PendingChecks = tc.spell
+			if r, d := FirstMatch(TaskRows, in); r.ID != "N36" || !slices.Equal(d.Asked, tc.want) {
+				t.Errorf("pending spell %+v: %s %v, want N36 %v", tc.spell, r.ID, d.Asked, tc.want)
+			}
+		})
 	}
 }

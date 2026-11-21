@@ -100,13 +100,16 @@ func TestN36PendingSpellKeepsWallTimeAcrossRestart(t *testing.T) {
 	deadline := time.Duration(l.state().Settings.CIStalledMinutes) * time.Minute
 	now = now.Add(2 * deadline)
 	writePRJSON(t, l.gh, "view.json", l.c1, `[{"__typename":"CheckRun","name":"ci","status":"IN_PROGRESS"}]`)
+	s := l.state()
+	l.eng.readPRLocked(t.Context(), l.id, &s, 0)
+	spell := s.Tasks[0].Attempts[0].PendingChecks
+	if spell == nil || spell.Head != l.c1 || spell.Since != now.Round(0) {
+		t.Fatalf("pending spell = %+v, want head %s at wall time %v", spell, l.c1, now.Round(0))
+	}
 	l.pass()
 	wakeKey := flow.AskWake + "@ci_stalled@" + l.c1
 	if flow.Done(l.state().Tasks[0].Attempts[0].Acts, wakeKey) {
 		t.Fatal("N36 woke on the first pending observation of an old head")
-	}
-	if p := l.eng.prs[l.wt].PendingSince; p != p.Round(0) {
-		t.Fatalf("pending time has a monotonic reading: %v", p)
 	}
 	l.eng = newTestEngine(t, l.paths, l.client)
 	l.eng.Now = func() time.Time { return now }
