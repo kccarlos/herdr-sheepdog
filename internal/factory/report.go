@@ -163,12 +163,12 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 	var touched string
 	var skipped *string
 	if req.Touched != nil {
-		if touched = cleanRejectWhy(*req.Touched); utf8.RuneCountInString(touched) > maxRejectWhyRunes {
+		if touched = flow.CleanText(*req.Touched); utf8.RuneCountInString(touched) > maxRejectWhyRunes {
 			return e.refuse(id, "invalid_report", fmt.Sprintf("--touched is longer than %d characters.", maxRejectWhyRunes))
 		}
 	}
 	if req.Skipped != nil {
-		s := cleanRejectWhy(*req.Skipped)
+		s := flow.CleanText(*req.Skipped)
 		if utf8.RuneCountInString(s) > maxRejectWhyRunes {
 			return e.refuse(id, "invalid_report", fmt.Sprintf("--skipped is longer than %d characters.", maxRejectWhyRunes))
 		}
@@ -205,7 +205,7 @@ func checkProofs(outcomes []flow.Outcome, raw []flow.Proof, worktree string) ([]
 	}
 	var failed, missing []string
 	for _, p := range raw {
-		name := cleanRejectWhy(p.Outcome)
+		name := flow.CleanText(p.Outcome)
 		o, ok := want[name]
 		p.Outcome, p.Command, p.Artifact, p.OutputPath = name, strings.TrimSpace(p.Command), strings.TrimSpace(p.Artifact), strings.TrimSpace(p.OutputPath)
 		manual := strings.HasPrefix(o.ProvedBy, "manual:")
@@ -233,7 +233,7 @@ func checkProofs(outcomes []flow.Outcome, raw []flow.Proof, worktree string) ([]
 				failed = append(failed, fmt.Sprintf("%q: artifact %q does not exist", name, p.Artifact))
 			}
 		} else if p.Exit != 0 {
-			failed = append(failed, fmt.Sprintf("%q (%s, exit %d): %s", name, cleanRejectWhy(p.Command), p.Exit, proofHead(p.OutputPath, worktree)))
+			failed = append(failed, fmt.Sprintf("%q (%s, exit %d): %s", name, flow.CleanText(p.Command), p.Exit, proofHead(p.OutputPath, worktree)))
 		}
 		out = append(out, p)
 	}
@@ -274,21 +274,18 @@ func proofHead(path, worktree string) string {
 	buf, _ := io.ReadAll(io.LimitReader(f, 4096))
 	var lines []string
 	for l := range strings.Lines(string(buf)) {
-		if s := cleanRejectWhy(l); s != "" && len(lines) < 5 {
+		if s := flow.CleanText(l); s != "" && len(lines) < 5 {
 			lines = append(lines, s)
 		}
 	}
-	if r := []rune(strings.Join(lines, " | ")); len(r) > maxRejectWhyRunes {
-		return string(r[:maxRejectWhyRunes])
-	}
-	return cmp.Or(strings.Join(lines, " | "), "(no output)")
+	return flow.CapRunes(cmp.Or(strings.Join(lines, " | "), "(no output)"), maxRejectWhyRunes)
 }
 
 const maxRejectWhyRunes = 500
 
 // cleanWhy cleans a free-text reason and refuses it when empty or over the cap.
 func (e *Engine) cleanWhy(id, raw, what, flag string) (string, error) {
-	why := cleanRejectWhy(raw)
+	why := flow.CleanText(raw)
 	if why == "" {
 		return "", e.refuse(id, "why_missing", fmt.Sprintf("A %s must carry a non-empty reason (%s \"<why>\").", what, flag))
 	}
@@ -297,8 +294,6 @@ func (e *Engine) cleanWhy(id, raw, what, flag string) (string, error) {
 	}
 	return why, nil
 }
-
-func cleanRejectWhy(raw string) string { return flow.CleanText(raw) }
 
 type replyLines struct {
 	majors    int
@@ -309,8 +304,6 @@ type replyLines struct {
 	deletable string
 	notRun    string
 }
-
-func capRunes(s string, limit int) string { return flow.CapRunes(s, limit) }
 
 func unwrapReply(s string) string {
 	for {
@@ -359,7 +352,7 @@ func parseReplyLine(l string) (key, val string, ok bool) {
 		v = strings.TrimPrefix(v, "`")
 	}
 	key = strings.ToLower(strings.Trim(k, "*` \t"))
-	val = unwrapReply(cleanRejectWhy(v))
+	val = unwrapReply(flow.CleanText(v))
 	if strings.Count(val, "`")%2 == 1 && strings.HasSuffix(val, "`") {
 		val = unwrapReply(val[:len(val)-1])
 	}
@@ -418,11 +411,11 @@ func parseReplyLines(body string) replyLines {
 				rl.misses = n
 			}
 		case "class":
-			rl.class = capRunes(val, maxRejectWhyRunes)
+			rl.class = flow.CapRunes(val, maxRejectWhyRunes)
 		case "deletable":
-			rl.deletable = capRunes(val, maxRejectWhyRunes)
+			rl.deletable = flow.CapRunes(val, maxRejectWhyRunes)
 		case "not run":
-			rl.notRun = capRunes(val, maxRejectWhyRunes)
+			rl.notRun = flow.CapRunes(val, maxRejectWhyRunes)
 		}
 	}
 	return rl
@@ -571,7 +564,7 @@ var conventionalTitleRE = regexp.MustCompile(`^(feat|fix|docs|refactor|test|chor
 
 // checkTitle is design.md 11.7's Title check: a Conventional Commit subject.
 func checkTitle(id, raw string) []string {
-	title := cleanRejectWhy(raw)
+	title := flow.CleanText(raw)
 	if title == "" {
 		return []string{fmt.Sprintf("shape: task %q has no title", id)}
 	}
@@ -591,7 +584,7 @@ func checkScope(t planTask) []string {
 		{"smallest", t.Smallest},
 		{"not_doing", t.NotDoing},
 	} {
-		if cleanRejectWhy(f.val) == "" {
+		if flow.CleanText(f.val) == "" {
 			fails = append(fails, fmt.Sprintf("scope: task %q needs %s", t.ID, f.name))
 		}
 	}
@@ -609,7 +602,7 @@ func checkOutcomes(id string, raw []planOutcome) ([]flow.Outcome, []string) {
 	seen := make(map[string]bool, len(raw))
 	var fails []string
 	for i, o := range raw {
-		text, pb := cleanRejectWhy(o.Text), cleanRejectWhy(o.ProvedBy)
+		text, pb := flow.CleanText(o.Text), flow.CleanText(o.ProvedBy)
 		label := fmt.Sprintf("outcome %q", text)
 		if text == "" {
 			label = fmt.Sprintf("outcome %d", i+1)
@@ -731,9 +724,9 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, s
 		}
 		after[t.ID] = t.After
 		tasks[i] = flow.Task{
-			ID: t.ID, Title: cleanRejectWhy(t.Title), Brief: t.Brief,
-			ForWhom: cleanRejectWhy(t.ForWhom), IfSkipped: cleanRejectWhy(t.IfSkipped),
-			Smallest: cleanRejectWhy(t.Smallest), NotDoing: cleanRejectWhy(t.NotDoing),
+			ID: t.ID, Title: flow.CleanText(t.Title), Brief: t.Brief,
+			ForWhom: flow.CleanText(t.ForWhom), IfSkipped: flow.CleanText(t.IfSkipped),
+			Smallest: flow.CleanText(t.Smallest), NotDoing: flow.CleanText(t.NotDoing),
 			Outcomes: outcomes[i], After: t.After, Priority: t.Priority, EstimateLines: t.Estimate, Request: t.Request, SplitFrom: parentID, Attempts: []flow.Attempt{},
 		}
 	}
@@ -1099,8 +1092,8 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 	var done []string
 	for _, ch := range changes {
 		t, c, what := &s.Tasks[ch.ti], ch.c, []string{}
-		if c.Title != nil && cleanRejectWhy(*c.Title) != t.Title {
-			t.Title, what = cleanRejectWhy(*c.Title), append(what, "title")
+		if c.Title != nil && flow.CleanText(*c.Title) != t.Title {
+			t.Title, what = flow.CleanText(*c.Title), append(what, "title")
 		}
 		if c.Brief != nil && *c.Brief != t.Brief {
 			t.Brief, what = *c.Brief, append(what, "brief")

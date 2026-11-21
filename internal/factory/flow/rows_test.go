@@ -618,24 +618,32 @@ func TestSection8BackoffDoublingN5OutageAndRetry(t *testing.T) {
 		t.Fatalf("at 1m backoff: %s %v, want N42 [%s]", r.ID, d.Asked, k)
 	}
 
-	// 2. Failure during github_unavailable (Uncounted=true) is not counted toward doubling or N5.
+	// 2. Uncounted outage failure still doubles back-off (now 2m), without counting toward N5.
 	t1 := in.Now
-	a0(&in).Acts = append(a0(&in).Acts, Act{Key: k, Result: "failed", Class: ClassSettled, Err: "outage", Uncounted: true, At: t1})
-	in.Now = t1.Add(time.Minute) // still 1m backoff (1 counted failure, not 2 and not settled N5)
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: k, Result: "failed", Class: ClassTransient, Err: "outage", Uncounted: true, At: t1})
+	in.Now = t1.Add(time.Minute)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N42" || len(d.Asked) != 0 {
+		t.Fatalf("after uncounted failure + 1m (before doubled 2m): %s %v, want N42 nil", r.ID, d.Asked)
+	}
+	in.Now = t1.Add(2*time.Minute - time.Second)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N42" || len(d.Asked) != 0 {
+		t.Fatalf("before 2m doubled backoff after uncounted: %s %v, want N42 nil", r.ID, d.Asked)
+	}
+	in.Now = t1.Add(2 * time.Minute)
 	if r, d := FirstMatch(TaskRows, in); r.ID != "N42" || !slices.Equal(d.Asked, []string{k}) {
-		t.Fatalf("after uncounted outage failure + 1m: %s %v, want N42 [%s]", r.ID, d.Asked, k)
+		t.Fatalf("at 2m doubled backoff after uncounted: %s %v, want N42 [%s]", r.ID, d.Asked, k)
 	}
 
-	// 3. Transient failure 2: back-off doubles to 2m (not retried at 1m59s; retried at 2m).
+	// 3. Transient failure 2 (2 counted, 3 total tries): back-off doubles to 4m, still not N5.
 	t2 := in.Now
 	a0(&in).Acts = append(a0(&in).Acts, Act{Key: k, Result: "failed", Class: ClassTransient, Err: "HTTP 503", At: t2})
-	in.Now = t2.Add(2*time.Minute - time.Second)
+	in.Now = t2.Add(4*time.Minute - time.Second)
 	if r, d := FirstMatch(TaskRows, in); r.ID != "N42" || len(d.Asked) != 0 {
-		t.Fatalf("before 2m doubled backoff: %s %v, want N42 nil", r.ID, d.Asked)
+		t.Fatalf("before 4m backoff: %s %v, want N42 nil", r.ID, d.Asked)
 	}
-	in.Now = t2.Add(2 * time.Minute)
+	in.Now = t2.Add(4 * time.Minute)
 	if r, d := FirstMatch(TaskRows, in); r.ID != "N42" || !slices.Equal(d.Asked, []string{k}) {
-		t.Fatalf("at 2m doubled backoff: %s %v, want N42 [%s]", r.ID, d.Asked, k)
+		t.Fatalf("at 4m backoff: %s %v, want N42 [%s]", r.ID, d.Asked, k)
 	}
 
 	// 4. Failure 3 (reaches ensure_failures=3): goes to N5, wakes once with cleaned+capped last words, never re-fires.
@@ -665,6 +673,64 @@ func TestSection8BackoffDoublingN5OutageAndRetry(t *testing.T) {
 	a0(&in).Acts = append(a0(&in).Acts, Act{Key: k, Result: "failed", Class: ClassSettled, Err: "HTTP 403: forbidden", At: in.Now})
 	if r, d := FirstMatch(TaskRows, in); r.ID != "N5" || !slices.Equal(d.Asked, []string{"wake_coordinator@failed@1@merge@c1"}) || !strings.Contains(d.Why, "HTTP 403: forbidden") {
 		t.Fatalf("after 1 settled failure: %s %v (%q), want immediate N5", r.ID, d.Asked, d.Why)
+	}
+
+	// 7. Many uncounted outage failures cap back-off at 30m and never reach N5.
+	capIn := landing()
+	a0(&capIn).Acts = []Act{{Key: "record_accept@c1", Result: "done", At: now}}
+	for i := range 6 {
+		a0(&capIn).Acts = append(a0(&capIn).Acts, Act{Key: k, Result: "failed", Class: ClassTransient, Uncounted: true, At: now.Add(time.Duration(i) * time.Minute)})
+	}
+	lastAt := now.Add(5 * time.Minute)
+	capIn.Now = lastAt.Add(30*time.Minute - time.Second)
+	if r, d := FirstMatch(TaskRows, capIn); r.ID != "N42" || len(d.Asked) != 0 {
+		t.Fatalf("before 30m cap: %s %v, want N42 nil", r.ID, d.Asked)
+	}
+	capIn.Now = lastAt.Add(30 * time.Minute)
+	if r, d := FirstMatch(TaskRows, capIn); r.ID != "N42" || !slices.Equal(d.Asked, []string{k}) {
+		t.Fatalf("at 30m cap: %s %v, want N42 [%s]", r.ID, d.Asked, k)
+	}
+}
+
+func TestN3StopRunsSharedBackoffOutageAndExhaustedWake(t *testing.T) {
+	in := with(parked, runsLive)
+	// Uncounted outage failure backs off (1m, then 2m) instead of hot-looping every pass.
+	a0(&in).Acts = []Act{{Key: AskStopRuns, Result: "failed", Class: ClassTransient, Uncounted: true, At: now}}
+	in.Now = now.Add(15 * time.Second)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N3" || len(d.Asked) != 0 {
+		t.Fatalf("N3 uncounted + 15s: %s %v, want N3 nil (no hot loop)", r.ID, d.Asked)
+	}
+	in.Now = now.Add(time.Minute)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N3" || !slices.Equal(d.Asked, []string{AskStopRuns}) {
+		t.Fatalf("N3 uncounted + 1m: %s %v, want N3 [%s]", r.ID, d.Asked, AskStopRuns)
+	}
+	t1 := in.Now
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: AskStopRuns, Result: "failed", Class: ClassTransient, Uncounted: true, At: t1})
+	in.Now = t1.Add(time.Minute)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N3" || len(d.Asked) != 0 {
+		t.Fatalf("N3 2nd uncounted + 1m: %s %v, want N3 nil (2m doubled backoff)", r.ID, d.Asked)
+	}
+	in.Now = t1.Add(2 * time.Minute)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N3" || !slices.Equal(d.Asked, []string{AskStopRuns}) {
+		t.Fatalf("N3 2nd uncounted + 2m: %s %v, want N3 [%s]", r.ID, d.Asked, AskStopRuns)
+	}
+
+	// Exhausted stop_runs wakes the coordinator once (runs still alive), then waits silently until retry.
+	ex := with(parked, runsLive)
+	for i := range DefaultSettings().EnsureFailures {
+		a0(&ex).Acts = append(a0(&ex).Acts, Act{Key: AskStopRuns, Result: "failed", Class: ClassTransient, Err: "pid\nstill alive", At: now.Add(time.Duration(i) * time.Minute)})
+	}
+	r, d := FirstMatch(TaskRows, ex)
+	if r.ID != "N3" || !slices.Equal(d.Asked, []string{"wake_coordinator@failed@stop_runs"}) || !strings.Contains(d.Why, "stop_runs failed (transient): pid still alive") {
+		t.Fatalf("N3 exhausted: %s %v (%q), want once wake naming stop_runs failure", r.ID, d.Asked, d.Why)
+	}
+	a0(&ex).Acts = append(a0(&ex).Acts, Act{Key: "wake_coordinator@failed@stop_runs", Result: "done", At: now})
+	if r, d := FirstMatch(TaskRows, ex); r.ID != "N3" || len(d.Asked) != 0 {
+		t.Fatalf("N3 exhausted repeat: %s %v, want N3 nil", r.ID, d.Asked)
+	}
+	a0(&ex).Acts = append(a0(&ex).Acts, Act{Key: AskRetry, Result: "done", At: now})
+	if r, d := FirstMatch(TaskRows, ex); r.ID != "N3" || !slices.Equal(d.Asked, []string{AskStopRuns}) {
+		t.Fatalf("N3 after retry: %s %v, want N3 [%s]", r.ID, d.Asked, AskStopRuns)
 	}
 }
 

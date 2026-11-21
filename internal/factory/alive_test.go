@@ -580,7 +580,7 @@ func methodFailProxy(t *testing.T, target, method string, fail *atomic.Bool) str
 					Method string `json:"method"`
 				}
 				_ = json.Unmarshal(line, &req)
-				if req.Method == method && fail.Load() {
+				if (req.Method == method || strings.Contains(string(line), method)) && fail.Load() {
 					_, _ = fmt.Fprintf(c, `{"jsonrpc":"2.0","id":%d,"error":{"code":-32000,"message":"%s failed"}}`+"\n", req.ID, method)
 					return
 				}
@@ -737,45 +737,62 @@ func TestActBackoffDoublingOutageN5AndRetryE2E(t *testing.T) {
 	l := newLanding(t)
 	now := time.Now()
 	l.eng.Now = func() time.Time { return now }
-	var failSend atomic.Bool
-	l.eng.HC = hc.NewClient(methodFailProxy(t, l.srv.Path, "terminal.send", &failSend))
+	var failSend, failCoord atomic.Bool
+	pSend := methodFailProxy(t, l.srv.Path, "terminal.send", &failSend)
+	coordID, err := startRun(context.Background(), l.client, world.RunSpec{Name: "coord-outage", Cwd: l.repo, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.eng.HC = hc.NewClient(methodFailProxy(t, pSend, coordID, &failCoord))
 	l.edit(func(s *flow.State) {
+		s.Project.RunID = coordID
 		s.Tasks[0].Attempts[0].Rounds = []flow.Round{{N: 1, Kind: flow.RoundFull, Head: l.c1, Verdict: flow.VerdictChanges, Majors: 1, ReportPath: "/r/1.md"}}
 	})
 
-	// 1. Outage: fail gh (github_unavailable) while terminal.send fails -> Uncounted, never reaches N5 even after 3 tries.
+	// 1. An hour of hc_unavailable while an hc act (tell_worker_findings) fails:
+	//    doubles back-off up to 30m cap, overwrites in place (1 act), never reaches N5.
 	failSend.Store(true)
-	writeGHFile(t, l.gh, "fail", "")
-	for range 3 {
+	failCoord.Store(true)
+	for range 60 {
 		l.pass()
 		now = now.Add(time.Minute)
 	}
-	_ = os.Remove(filepath.Join(l.gh, "fail"))
-	if s := l.state(); s.Tasks[0].LastRow == "N5" || s.Tasks[0].LastRow == "S2" || len(s.Project.Wakes) != 0 {
-		t.Fatalf("outage failures counted toward N5/S2: row=%s wakes=%+v acts=%+v", s.Tasks[0].LastRow, s.Project.Wakes, s.Tasks[0].Attempts[0].Acts)
+	sOut := l.state()
+	if got := flow.Count(sOut.Tasks[0].Attempts[0].Acts, "tell_worker_findings@1"); got != 1 {
+		t.Fatalf("tell_worker_findings acts after 1h hc outage = %d, want 1 overwritten entry (acts=%+v)", got, sOut.Tasks[0].Attempts[0].Acts)
+	}
+	if last := flow.LastAct(sOut.Tasks[0].Attempts[0].Acts, "tell_worker_findings@1"); last == nil || !last.Uncounted {
+		t.Fatalf("last tell_worker_findings act = %+v, want Uncounted=true", last)
+	}
+	if sOut.Tasks[0].LastRow == "N5" || sOut.Tasks[0].LastRow == "S2" || len(sOut.Project.Wakes) != 0 {
+		t.Fatalf("hc outage failures reached N5/S2: row=%s wakes=%+v", sOut.Tasks[0].LastRow, sOut.Project.Wakes)
 	}
 
-	// 2. GitHub back: 3 counted transient failures with 1m then 2m doubling back-off -> N5 wakes once.
-	l.pass() // counted failure 1 at now
+	// 2. hc back, GitHub down (github_unavailable): hc act failure IS counted (wrong system flag!) -> 3 tries -> N5 wakes once.
+	failCoord.Store(false)
+	writeGHFile(t, l.gh, "fail", "")
+	l.edit(func(st *flow.State) { st.Tasks[0].Attempts[0].Acts = nil })
+	l.pass() // counted failure 1 at now (despite github_unavailable!)
 	now = now.Add(59 * time.Second)
 	l.pass() // before 1m back-off: must not retry
-	if got := flow.Count(l.state().Tasks[0].Attempts[0].Acts, "tell_worker_findings@1"); got != 4 {
-		t.Fatalf("retried before 1m backoff: count=%d, want 4 (3 uncounted + 1 counted)", got)
+	if got := flow.Count(l.state().Tasks[0].Attempts[0].Acts, "tell_worker_findings@1"); got != 1 {
+		t.Fatalf("retried before 1m backoff: count=%d, want 1", got)
 	}
 	now = now.Add(time.Second)
 	l.pass() // at 1m: counted failure 2
 	now = now.Add(2*time.Minute - time.Second)
 	l.pass() // before 2m doubled back-off: must not retry
-	if got := flow.Count(l.state().Tasks[0].Attempts[0].Acts, "tell_worker_findings@1"); got != 5 {
-		t.Fatalf("retried before 2m doubled backoff: count=%d, want 5", got)
+	if got := flow.Count(l.state().Tasks[0].Attempts[0].Acts, "tell_worker_findings@1"); got != 2 {
+		t.Fatalf("retried before 2m doubled backoff: count=%d, want 2", got)
 	}
 	now = now.Add(time.Second)
 	l.pass() // at 2m: counted failure 3 (hits ensure_failures=3)
+	_ = os.Remove(filepath.Join(l.gh, "fail"))
 	l.pass() // lands on N5 and wakes once
 	now = now.Add(40 * time.Minute)
 	l.pass() // past stuck_minutes: stays N5, never S2, never re-wakes or re-fires
 	s := l.state()
-	if s.Tasks[0].LastRow != "N5" || flow.Count(s.Tasks[0].Attempts[0].Acts, "tell_worker_findings@1") != 6 {
+	if s.Tasks[0].LastRow != "N5" || flow.Count(s.Tasks[0].Attempts[0].Acts, "tell_worker_findings@1") != 3 {
 		t.Fatalf("after 3 counted failures: row=%s acts=%+v", s.Tasks[0].LastRow, s.Tasks[0].Attempts[0].Acts)
 	}
 	if len(s.Project.Wakes) != 1 || s.Project.Wakes[0].Key != "failed@tell_worker_findings@1" || !strings.Contains(s.Project.Wakes[0].Why, "terminal.send failed") {

@@ -349,6 +349,7 @@ type Act struct {
 	Class     string    `json:"class,omitempty"`
 	Err       string    `json:"err,omitempty"`
 	Uncounted bool      `json:"uncounted,omitempty"`
+	Tries     int       `json:"tries,omitempty"`
 	At        time.Time `json:"at"`
 }
 
@@ -382,17 +383,18 @@ func sinceRetry(acts []Act) []Act {
 	return acts
 }
 
-func actFailures(acts []Act, key string) (last, cause *Act, counted int, settled bool) {
+func actFailures(acts []Act, key string) (last, cause *Act, tries, counted int, settled bool) {
 	s := sinceRetry(acts)
 	for i := len(s) - 1; i >= 0; i-- {
 		switch {
 		case s[i].Key != key:
 		case s[i].Result != "failed":
-			return &s[i], nil, 0, false
+			return &s[i], nil, 0, 0, false
 		default:
 			if last == nil {
 				last = &s[i]
 			}
+			tries += max(1, s[i].Tries)
 			if !s[i].Uncounted {
 				if cause == nil {
 					cause = &s[i]
@@ -401,13 +403,13 @@ func actFailures(acts []Act, key string) (last, cause *Act, counted int, settled
 			}
 		}
 	}
-	return last, cause, counted, settled
+	return last, cause, tries, counted, settled
 }
 
 // Exhausted reports whether key has hit ensure_failures in a row or a settled
 // failure since the last retry, with no done act (design.md 8, N5).
 func Exhausted(acts []Act, key string, s Settings) bool {
-	_, _, n, settled := actFailures(acts, key)
+	_, _, _, n, settled := actFailures(acts, key)
 	return !Done(acts, key) && (settled || n > 0 && n >= s.EnsureFailures)
 }
 

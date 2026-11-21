@@ -47,20 +47,16 @@ func Fail(class string, err error) error {
 	return &CodedError{Class: class, Err: err}
 }
 
-func hcFail(err error) error {
-	if errors.Is(err, context.DeadlineExceeded) {
-		return Fail(flow.ClassTimeout, err)
-	}
-	return Fail(flow.ClassTransient, err)
-}
+func hcFail(err error) error { return Fail(FailureClass(err), err) }
 
-func hasAnySub(s, list string) bool {
-	return slices.ContainsFunc(strings.Split(list, "|"), func(p string) bool { return strings.Contains(s, p) })
-}
+var httpSettledRe = regexp.MustCompile(`\bHTTP(?:/\d(?:\.\d)?)? (?:401|403|404|422)\b`)
 
-// FailureClass returns err's section 8 failure class: transient, settled or timeout.
+// FailureClass returns err's section 8 failure class from structured facts:
+// explicit Fail tag, context deadline, process exit code, or gh/hc status.
 func FailureClass(err error) string {
 	var ce *CodedError
+	var he *hc.Error
+	var ee *exec.ExitError
 	switch {
 	case err == nil:
 		return ""
@@ -68,13 +64,14 @@ func FailureClass(err error) string {
 		return ce.Class
 	case errors.Is(err, context.DeadlineExceeded):
 		return flow.ClassTimeout
-	case hasAnySub(strings.ToLower(err.Error()), "rate limit|secondary rate|abuse detection|http 429|too many requests|http 500|http 502|http 503|http 504|bad gateway|service unavailable|internal server error|gateway timeout|connection refused|connection reset|no such host|network is unreachable|tls handshake|i/o timeout|unexpected eof"):
-		return flow.ClassTransient
-	case hasAnySub(strings.ToLower(err.Error()), "http 401|http 403|http 404|http 405|http 422|bad credentials|resource not accessible|forbidden|authentication failed|not logged in|permission denied|permission to |could not read username|not found|could not resolve to|no pull requests found|unknown revision|validation failed|prohibits|not allowed|not mergeable|head branch was modified|[rejected]|non-fast-forward|already exists"):
+	case errors.As(err, &he) && (he.Code == -32600 || he.Code == -32601 || he.Code == -32602 || he.Code == 401 || he.Code == 403 || he.Code == 404 || he.Code == 422):
 		return flow.ClassSettled
-	default:
-		return flow.ClassTransient
+	case errors.As(err, &ee) && (ee.ExitCode() == 4 || ee.ExitCode() == 126 || ee.ExitCode() == 127):
+		return flow.ClassSettled
+	case httpSettledRe.MatchString(err.Error()):
+		return flow.ClassSettled
 	}
+	return flow.ClassTransient
 }
 
 // RunSpec describes one terminal run to launch in herdr-core.

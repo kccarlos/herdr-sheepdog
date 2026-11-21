@@ -55,7 +55,7 @@ func (e *Engine) execMerge(ctx context.Context, id string, s *flow.State, ti int
 		Worker: worker, GitHubUnavailable: e.ghUnavail[id], BaseRed: f.BaseRed, BaseRedSince: f.BaseRedSince, BaseRedSpell: f.BaseRedSpell,
 	}
 	if r, _ := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[ti], Settings: s.Settings, Facts: fresh, Now: e.now()}); r.ID != "N42" {
-		return "", false, world.Fail(flow.ClassTransient, fmt.Errorf("factory: merge aborted on fresh check (row %s)", r.ID))
+		return fmt.Sprintf("merge called off on fresh check (row %s)", r.ID), true, nil
 	}
 	num = cmp.Or(num, p.Number)
 	return fmt.Sprintf("asked GitHub to merge PR #%d at %s", num, h), false, world.MergePR(gctx, s.Project.Folder, num, h, prBody(t))
@@ -70,15 +70,11 @@ func (e *Engine) execMarkDone(_ context.Context, _ string, s *flow.State, ti int
 	return fmt.Sprintf("done: PR #%d merged as %s", f.PR.Number, f.PR.MergedCommit), false, nil
 }
 
-// execCleanup is N1's Cleanup (design.md 4.7, 8), re-testing N1 and reading
-// fresh facts just before branch delete, PR close and worktree removal.
+// execCleanup is N1's Cleanup (design.md 4.7, 8): checks N1 once under e.mu
+// and reads fresh PR, hc terminal and worktree facts before acting.
 func (e *Engine) execCleanup(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t := &s.Tasks[ti]
-	isN1 := func() bool {
-		r, _ := flow.FirstMatch(flow.TaskRows, flow.In{Task: *t, Settings: s.Settings, Now: e.now()})
-		return r.ID == "N1"
-	}
-	if !isN1() {
+	if r, _ := flow.FirstMatch(flow.TaskRows, flow.In{Task: *t, Settings: s.Settings, Now: e.now()}); r.ID != "N1" {
 		return "", false, world.Fail(flow.ClassSettled, errors.New("factory: cleanup requires N1"))
 	}
 	if err := e.stopRuns(ctx, taskRuns(id, *t)); err != nil {
@@ -92,22 +88,19 @@ func (e *Engine) execCleanup(ctx context.Context, id string, s *flow.State, ti i
 	a := t.Attempts[len(t.Attempts)-1]
 	gctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
-	if t.Done != nil && isN1() {
+	if t.Done != nil {
 		if err := world.DeleteRemoteBranch(gctx, s.Project.Folder, a.Branch); err != nil {
 			return "", false, err
 		}
 		steps = append(steps, "deleted remote branch "+a.Branch)
 	}
-	if note := closePRNote(*t); note != "" && isN1() {
+	if note := closePRNote(*t); note != "" {
 		closed, err := closeOpenPR(gctx, s.Project.Folder, a, note)
 		if err != nil {
 			return "", false, err
 		} else if closed {
 			steps = append(steps, fmt.Sprintf("closed PR #%d", a.PR))
 		}
-	}
-	if !isN1() {
-		return "", false, world.Fail(flow.ClassSettled, errors.New("factory: cleanup requires N1"))
 	}
 	if e.HC != nil && a.Worktree != "" {
 		list, err := e.HC.List(gctx, true)

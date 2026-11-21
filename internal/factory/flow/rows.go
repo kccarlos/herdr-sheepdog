@@ -36,7 +36,9 @@ const (
 	AskWake         = "wake_coordinator"
 	AskStopRuns     = "stop_runs"
 
-	countBase = 1 // 1-based restart, retry and back-off shift index
+	countBase        = 1 // 1-based restart, retry and back-off shift index
+	maxBackoffShift  = 10
+	maxEnsureBackoff = 30 * time.Minute
 )
 
 // key joins a verb and what it is for: "merge@3f9c".
@@ -56,15 +58,28 @@ func once(acts []Act, k string) []string {
 	return []string{k}
 }
 
+func ensureStep(in In, k string) (due, exhausted bool) {
+	last, _, tries, counted, settled := actFailures(in.acts(), k)
+	switch base := time.Duration(in.Settings.EnsureBackoffMinutes) * time.Minute; {
+	case settled || counted > 0 && counted >= in.Settings.EnsureFailures:
+		return false, true
+	case last == nil || last.Result == "done":
+		return true, false
+	case last.Result != "failed" || last.At.IsZero():
+		return false, false
+	default:
+		return in.Now.Sub(last.At) >= min(base<<min(max(0, tries-countBase), maxBackoffShift), max(base, maxEnsureBackoff)), false
+	}
+}
+
 // ensure asks for k by key and retries failed tries with doubling back-off
 // until settled or ensure_failures in a row (design.md section 8).
 func ensure(in In, k string) []string {
 	if k == "" || Done(in.acts(), k) {
 		return nil
 	}
-	last, _, n, settled := actFailures(in.acts(), k)
-	exhausted := settled || (n > 0 && n >= in.Settings.EnsureFailures)
-	if in.probe && exhausted || !in.probe && !exhausted && (last == nil || last.Result == "failed" && !last.At.IsZero() && in.Now.Sub(last.At) >= time.Duration(in.Settings.EnsureBackoffMinutes)*time.Minute<<max(0, n-countBase)) {
+	due, exhausted := ensureStep(in, k)
+	if in.probe && exhausted || !in.probe && due {
 		return []string{k}
 	}
 	return nil
@@ -329,7 +344,7 @@ func n5Wake(acts []Act, fk string) []string {
 }
 
 func n5Why(acts []Act, fk string) string {
-	_, cause, _, _ := actFailures(acts, fk)
+	_, cause, _, _, _ := actFailures(acts, fk)
 	cls, words := ClassTransient, ""
 	if cause != nil {
 		cls, words = cmp.Or(cause.Class, ClassTransient), CleanErr(cause.Err)
@@ -363,12 +378,14 @@ var TaskRows = []Row[In]{
 		return Decision{Asked: asked, Why: "the PR is merged"}
 	}},
 	// N3 asks while a live run is recorded, not once: the stop ends the run
-	// records as stopped, and a failed stop backs off per section 8.
+	// records as stopped, and a failed stop backs off and wakes once per section 8.
 	{ID: "N3", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return in.Task.Parked }, Then: func(in In) Decision {
 		if a := in.attempt(); a != nil && (a.RunID != "" || a.Run != nil && a.Run.State != PhaseEnded ||
 			a.Review != nil && (a.Review.RunID != "" || a.Review.Run != nil && a.Review.Run.State != PhaseEnded)) {
-			if last, _, n, settled := actFailures(in.acts(), AskStopRuns); !settled && (n == 0 || n < in.Settings.EnsureFailures && !last.At.IsZero() && in.Now.Sub(last.At) >= time.Duration(in.Settings.EnsureBackoffMinutes)*time.Minute<<max(0, n-countBase)) {
+			if due, exhausted := ensureStep(in, AskStopRuns); due {
 				return say("parked: stop its runs", []string{AskStopRuns})(in)
+			} else if exhausted {
+				return say(n5Why(in.acts(), AskStopRuns), n5Wake(in.acts(), AskStopRuns))(in)
 			}
 		}
 		return say("parked")(in)
