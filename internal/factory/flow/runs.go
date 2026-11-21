@@ -21,6 +21,8 @@ const (
 	liveSet, firstHeld                                                                = "starting|working|idle|blocked", 1
 )
 
+const EvSession = "session"
+
 // RunRecord is a run's persisted state in state.json (design.md sections 3 and 5).
 type RunRecord struct {
 	ID, Address, Role, CLI, Model, SessionID, State, Result, Screen, ScreenHash, Status, BlockedKind, Question, Reason string
@@ -28,6 +30,7 @@ type RunRecord struct {
 	StartedAt, EndedAt, StatusSince, LastActivity, LastTurnEnd, BlockedSince, InterruptedAt, LastSentAt                time.Time
 	StatusReported, Resumable, Resumed                                                                                 bool
 	ScreensAnswered, Held                                                                                              []string
+	SentScreenHash                                                                                                     string     `json:"sent_screen_hash,omitempty"`
 	AwaitHeldStatus                                                                                                    bool       `json:"await_held_status,omitempty"`
 	StopRetry                                                                                                          *StopRetry `json:"stop_retry,omitempty"`
 	KeyRetry                                                                                                           *KeyRetry  `json:"key_retry,omitempty"`
@@ -59,6 +62,8 @@ type RunEvent struct {
 	Kind, Address, RunID, Screen, ScreenHash, Status, StatusKind, Msg, Reason, Model string
 	CreatedMS, Turn                                                                  uint64
 	StatusAt                                                                         time.Time
+	SessionID                                                                        string
+	Inferred                                                                         bool
 	Urgent                                                                           bool
 }
 
@@ -142,6 +147,7 @@ var RunRows = []Row[RunIn]{
 	rrow("R25", PhaseWorking, EvDeliver, func(x RunIn) bool { return x.E.Urgent }, PhaseWorking, RunActInterrupt, RunActSend),
 	rrow("R26", "starting|working|blocked", EvDeliver, nil, ""),
 	rrow("R27", "idle|blocked", "status:working", nil, PhaseWorking),
+	rrow("R27", PhaseIdle, "status:unknown", func(x RunIn) bool { return x.E.Inferred }, PhaseWorking),
 	rrow("R28", PhaseBlocked, "status:idle|status:done", nil, PhaseWorking),
 	rrow("R29", PhaseBlocked, EvTick, func(x RunIn) bool { return x.R.BlockedKind == "auth" && x.blockedOut() }, "ended(signed_out)", RunActStop),
 	rrow("R29", PhaseBlocked, EvTick, RunIn.blockedOut, "ended(stuck)", RunActStop),
@@ -156,6 +162,10 @@ var RunRows = []Row[RunIn]{
 
 // StepRun runs FirstMatch over RunRows and returns the updated RunRecord, matched row and decision.
 func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, Row[RunIn], Decision) {
+	if ev.Kind == EvSession {
+		rec.SessionID, rec.Resumable = ev.SessionID, ev.SessionID != ""
+		return rec, Row[RunIn]{}, Decision{}
+	}
 	sentAt := rec.LastSentAt
 	if rec.State == PhaseWorking && rec.Status == "" {
 		sentAt = cmp.Or(sentAt, rec.StatusSince) // R24/R25 records saved before LastSentAt was added.
@@ -163,7 +173,7 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 	// R21/R22 bound a quiet run while it waits for fresh status after a send.
 	if ev.Kind == EvStatus {
 		stale := !ev.StatusAt.IsZero() && !ev.StatusAt.After(sentAt)
-		unverified := ev.StatusAt.IsZero() && rec.AwaitHeldStatus && ev.Turn <= rec.Turn
+		unverified := ev.StatusAt.IsZero() && rec.AwaitHeldStatus && !ev.Inferred && ev.Turn <= rec.Turn
 		if stale || unverified {
 			return rec, Row[RunIn]{}, Decision{}
 		}
@@ -200,6 +210,9 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 				rec.LastActivity = now
 			}
 		}
+		if ev.Inferred && ev.Status == "working" {
+			rec.LastTurnEnd, rec.SentScreenHash = time.Time{}, ""
+		}
 		if ev.Turn > rec.Turn {
 			rec.LastTurnEnd = time.Time{}
 		}
@@ -215,12 +228,17 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 		rec.State, rec.StatusReported, rec.Status, rec.BlockedKind, rec.Question = PhaseBlocked, true, "blocked", ev.StatusKind, ev.Msg
 	case r.ID == "R18":
 		rec.Held = rec.Held[firstHeld:]
+		rec.finishCodexTurn(now)
 		fallthrough
 	case inSet("R24|R25", r.ID):
 		rec.LastSentAt = now
+		if rec.observesCodexTurns() {
+			rec.SentScreenHash, rec.LastTurnEnd = rec.ScreenHash, time.Time{}
+		}
 		rec.AwaitHeldStatus = rec.AwaitHeldStatus || r.ID == "R18"
 		rec.State, rec.Status, rec.StatusSince, rec.LastActivity, rec.InterruptedAt = PhaseWorking, "", now, now, time.Time{}
 	case r.ID == "R20":
+		rec.finishCodexTurn(now)
 		if rec.LastTurnEnd.IsZero() || !rec.StatusSince.Before(rec.LastTurnEnd) {
 			rec.LastTurnEnd = now
 		}
@@ -233,4 +251,15 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 		rec.Reason = ev.Reason
 	}
 	return rec, r, d
+}
+
+func (r RunRecord) observesCodexTurns() bool {
+	return r.CLI == "codex" && (r.Role == RoleWorker || r.Role == RoleCoordinator)
+}
+
+func (r *RunRecord) finishCodexTurn(now time.Time) {
+	if r.observesCodexTurns() && r.LastTurnEnd.IsZero() {
+		r.Turn++
+		r.LastTurnEnd = now
+	}
 }

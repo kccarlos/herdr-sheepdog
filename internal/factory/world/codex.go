@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
@@ -24,16 +25,30 @@ const CodexCLI = "codex"
 // hooks are off (no hooks-review prompt, and no project hook runs), and no
 // update check. Spike S0.3 and PR D3's step 0. StartRun appends the prompt.
 func CodexArgv(model, effort, cwd string) []string {
+	return codexArgv(model, effort, cwd, []string{"codex"}, []string{"-s", "read-only", "-a", "never"})
+}
+
+// CodexWorkArgv launches or resumes a full-access worker or coordinator.
+func CodexWorkArgv(model, effort, cwd, session string) []string {
+	command := []string{"codex"}
+	if session != "" {
+		command = append(command, "resume", session)
+	}
+	return codexArgv(model, effort, cwd, command, []string{"--dangerously-bypass-approvals-and-sandbox"})
+}
+
+func codexArgv(model, effort, cwd string, command, options []string) []string {
 	model, effort, cwd = strings.TrimSpace(model), strings.TrimSpace(effort), strings.TrimSpace(cwd)
 	if model == "" || effort == "" || cwd == "" {
 		return nil
 	}
 	key, _ := json.Marshal(cwd)    // a JSON string is a TOML basic string
 	eff, _ := json.Marshal(effort) // likewise
-	return []string{"codex", "--no-daemon", "--no-alt-screen", "-m", model, "-s", "read-only", "-a", "never",
-		"-c", "projects={" + string(key) + "={trust_level=\"trusted\"}}",
+	argv := append(command, "--no-daemon", "--no-alt-screen", "-m", model)
+	argv = append(argv, options...)
+	return append(argv, "-c", "projects={"+string(key)+"={trust_level=\"trusted\"}}",
 		"-c", "features.hooks=false", "-c", "check_for_update_on_startup=false",
-		"-c", "model_reasoning_effort=" + string(eff)}
+		"-c", "model_reasoning_effort="+string(eff))
 }
 
 // CodexHome makes dir a Codex home that holds only a link to the owner's
@@ -80,6 +95,7 @@ var ErrCodexAuthDiverged = errors.New("world: the scoped Codex sign-in is a file
 
 var (
 	codexPromptRe = regexp.MustCompile(`(?m)^›[ \t\x{00a0}]`)
+	codexIDRe     = regexp.MustCompile(`^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$`)
 	codexReplyRe  = regexp.MustCompile(`(?m)^•[ \t]`)
 )
 
@@ -113,4 +129,89 @@ func codexReply(text string) string {
 		return ""
 	}
 	return clean[start+r[0]:]
+}
+
+// Look for the current composer after the transcript. An active turn can
+// draw the same composer, with the interrupt hint just above it.
+func codexScreenStatus(text string) string {
+	lines := strings.Split(strings.TrimRight(text, "\n \t"), "\n")
+	for _, line := range lines[max(0, len(lines)-16):] {
+		if strings.Contains(line, "esc to interrupt") {
+			return "working"
+		}
+	}
+	tail := lines[max(0, len(lines)-8):]
+	for i := len(tail) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(tail[i])
+		if line == "" || line == "? for shortcuts" || strings.HasPrefix(tail[i], "  ") && strings.Contains(line, " · ") {
+			continue // Codex's optional footer follows the composer.
+		}
+		if codexPromptRe.MatchString(tail[i]) {
+			return "idle"
+		}
+		break
+	}
+	return "unknown"
+}
+
+// codexSession accepts only one rollout with metadata tying it to this
+// launch. A missing or ambiguous rollout leaves continuation to the handoff.
+func codexSession(home, cwd string, started time.Time) string {
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" || started.IsZero() {
+		return ""
+	}
+	cwd = filepath.Clean(cwd)
+	paths, err := filepath.Glob(filepath.Join(home, "sessions", "[0-9][0-9][0-9][0-9]", "[0-9][0-9]", "[0-9][0-9]", "rollout-*.jsonl"))
+	if err != nil {
+		return ""
+	}
+	id := ""
+	for _, path := range paths {
+		meta := codexRolloutMeta(path)
+		if !meta.ownSession() || meta.Timestamp.Before(started) || meta.Cwd == "" || filepath.Clean(meta.Cwd) != cwd {
+			continue
+		}
+		if id != "" {
+			return ""
+		}
+		id = meta.ID
+	}
+	return id
+}
+
+type rolloutMeta struct {
+	ID             string          `json:"id"`
+	SessionID      string          `json:"session_id"`
+	Cwd            string          `json:"cwd"`
+	Timestamp      time.Time       `json:"timestamp"`
+	Source         json.RawMessage `json:"source"`
+	ParentThreadID string          `json:"parent_thread_id"`
+}
+
+func (m rolloutMeta) ownSession() bool {
+	var src string
+	return codexIDRe.MatchString(m.ID) &&
+		(m.SessionID == "" || m.SessionID == m.ID) &&
+		m.ParentThreadID == "" &&
+		json.Unmarshal(m.Source, &src) == nil && src == "cli"
+}
+
+func codexRolloutMeta(path string) rolloutMeta {
+	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+		return rolloutMeta{}
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return rolloutMeta{}
+	}
+	defer func() { _ = f.Close() }()
+	var entry struct {
+		Type    string
+		Payload rolloutMeta
+	}
+	if json.NewDecoder(f).Decode(&entry) == nil && entry.Type == "session_meta" {
+		return entry.Payload
+	}
+	return rolloutMeta{}
 }

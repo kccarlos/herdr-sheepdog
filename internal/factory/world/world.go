@@ -386,7 +386,7 @@ func agyTrustDrawing(text string) bool {
 }
 
 // ObserveRun reads rec's terminal and screen from herdr-core and emits the events for one pass (design.md 5, 7.3).
-func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]flow.RunEvent, error) {
+func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, codexHome ...string) ([]flow.RunEvent, error) {
 	if rec.State == flow.PhaseEnded {
 		return nil, nil
 	}
@@ -405,12 +405,20 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]f
 	if t.State != "live" {
 		return []flow.RunEvent{{Kind: flow.EvExit, Reason: deref(t.Reason)}}, nil
 	}
-	cls, hash, clean := "", "", ""
+	cls, hash, clean, nonEmpty := "", "", "", false
+	infer := rec.CLI == CodexCLI && (rec.Role == flow.RoleWorker || rec.Role == flow.RoleCoordinator) && t.Status == nil
+	codexStatus, lines := "unknown", 200
+	if infer {
+		lines = 0 // Read the current screen without older scrollback.
+	}
 	// Complete describes the older history. The current screen can still supply evidence.
-	if rd, rerr := client.Read(ctx, rec.Address, 200); rerr == nil {
+	if rd, rerr := client.Read(ctx, rec.Address, lines); rerr == nil {
 		clean = ansiRe.ReplaceAllString(strings.ReplaceAll(rd.Text, "\r\n", "\n"), "")
-		cls = ScreenClass(rec.CLI, clean)
-		if rd.Text != "" {
+		nonEmpty, cls = strings.TrimSpace(clean) != "", ScreenClass(rec.CLI, clean)
+		if infer && cls == flow.ScreenNone {
+			codexStatus = codexScreenStatus(clean)
+		}
+		if nonEmpty {
 			sum := sha256.Sum256([]byte(strings.Join(strings.Fields(noiseRe.ReplaceAllString(durationRe.ReplaceAllString(clean, " "), " ")), " ")))
 			hash = hex.EncodeToString(sum[:8])
 		}
@@ -423,11 +431,11 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]f
 	verifiedTrust := agyStarting && cls == flow.ScreenTrust &&
 		rec.ID != "" && rec.CreatedMS != 0 && t.CreatedMS == rec.CreatedMS
 	trustBlocked := permission && verifiedTrust
-	waitForScreen := permission && agyStarting && (strings.TrimSpace(clean) == "" || agyTrustDrawing(clean))
+	waitForScreen := permission && agyStarting && (!nonEmpty || agyTrustDrawing(clean))
 	if trustBlocked || (starting && !rec.StatusReported && s == nil && cls != "" &&
 		(rec.CLI != "agy" || cls != flow.ScreenTrust || verifiedTrust)) {
 		evs = append(evs, flow.RunEvent{Kind: flow.EvScreen, Screen: cls, ScreenHash: hash})
-		if rec.CLI == CodexCLI && cls == flow.ScreenNone && strings.TrimSpace(clean) != "" {
+		if rec.CLI == CodexCLI && !infer && nonEmpty && cls == flow.ScreenNone {
 			evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: "working"})
 		}
 	}
@@ -441,6 +449,19 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]f
 			at = time.UnixMilli(int64(ms))
 		}
 		evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: s.State, StatusKind: deref(s.Kind), Msg: s.Msg, Turn: t.Turn, StatusAt: at})
+	}
+	if infer && nonEmpty {
+		if codexStatus == "idle" && hash == rec.SentScreenHash {
+			codexStatus = "unknown"
+		}
+		if codexStatus != rec.Status && (codexStatus != "unknown" || rec.Status == "idle") {
+			evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: codexStatus, ScreenHash: hash, Inferred: true})
+		}
+	}
+	if rec.CLI == CodexCLI && rec.Role == flow.RoleWorker && rec.SessionID == "" && len(codexHome) > 0 {
+		if sid := codexSession(codexHome[0], t.Cwd, rec.StartedAt); sid != "" {
+			evs = append(evs, flow.RunEvent{Kind: flow.EvSession, SessionID: sid})
+		}
 	}
 	// An empty hash marks an unavailable screen; this tick cannot prove the run stayed quiet.
 	return append(evs, flow.RunEvent{Kind: flow.EvTick, Screen: cls, ScreenHash: hash, Model: t.Labels["sheepdog.model"]}), nil

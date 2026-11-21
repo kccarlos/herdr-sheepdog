@@ -267,6 +267,10 @@ func (e *Engine) Stop(project string) error {
 	for ti := range s.Tasks {
 		stopTaskRuns(&s.Tasks[ti], s.Settings, now)
 	}
+	if s.Project.Run != nil {
+		stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
+		reconcileCoordWakes(&s.Project)
+	}
 	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants = "", "", nil, false, nil, nil, false, 0, nil
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastPass, id)
@@ -435,8 +439,27 @@ func (e *Engine) checkInvariantsLocked(id string, s *flow.State, skipped map[str
 }
 
 func clearCoordTrack(p *flow.Project, stucks, lastWake bool) {
-	p.CoordErrorAt, p.CoordErrorTurn, p.CoordWakeAt, p.CoordWakeTurn = time.Time{}, 0, time.Time{}, 0
+	p.CoordErrorAt, p.CoordErrorTurn, p.CoordWakeAt = time.Time{}, 0, time.Time{}
+	if len(p.CoordWakesInFlight) == 0 {
+		p.CoordWakeTurn = 0
+	}
 	p.CoordDialogStucks, p.CoordLastWakeAt = map[bool]int{false: p.CoordDialogStucks}[stucks], map[bool]time.Time{false: p.CoordLastWakeAt}[lastWake]
+}
+
+func reconcileCoordWakes(p *flow.Project) bool {
+	r := p.Run
+	if len(p.CoordWakesInFlight) == 0 || r == nil || (r.State != flow.PhaseEnded && r.Turn <= p.CoordWakeTurn) {
+		return false
+	}
+	if r.State == flow.PhaseEnded && r.Turn <= p.CoordWakeTurn {
+		for _, w := range p.CoordWakesInFlight {
+			if !slices.ContainsFunc(p.Wakes, func(queued flow.Wake) bool { return queued.Task == w.Task && queued.Key == w.Key }) {
+				p.Wakes = append(p.Wakes, w)
+			}
+		}
+	}
+	p.CoordWakesInFlight = nil
+	return true
 }
 
 func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.State) (bool, error) {
@@ -480,10 +503,13 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 	if p.NewGoal && len(s.Tasks) > p.NewGoalTasks && slices.ContainsFunc(s.Tasks[p.NewGoalTasks:], func(t flow.Task) bool { return t.SplitFrom == "" }) {
 		p.NewGoal, p.NewGoalTasks, dirty = false, 0, true
 	}
+	if reconcileCoordWakes(p) {
+		dirty = true
+	}
 	if r := p.Run; r != nil && r.State == flow.PhaseEnded && (p.RunID != "" || p.RunTokenHash != "" || !p.CoordWakeAt.IsZero() || !p.CoordErrorAt.IsZero() || (!flow.IsCoordR29(r) && p.CoordDialogStucks != 0)) {
 		p.RunID, p.RunTokenHash, dirty = "", "", true
 		clearCoordTrack(p, !flow.IsCoordR29(r), false)
-	} else if r != nil && r.State != flow.PhaseEnded && !p.CoordWakeAt.IsZero() && (r.Turn > p.CoordWakeTurn || r.Status == "working") {
+	} else if r != nil && r.State != flow.PhaseEnded && !p.CoordWakeAt.IsZero() && (r.Turn > p.CoordWakeTurn || r.CLI != world.CodexCLI && r.Status == "working") {
 		p.CoordWakeAt, dirty = time.Time{}, true
 	}
 	if dirty {
@@ -528,6 +554,7 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 			return
 		}
 		stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
+		reconcileCoordWakes(&s.Project)
 		s.Project.RunID, s.Project.RunTokenHash = "", ""
 		clearCoordTrack(&s.Project, true, false)
 		commit("stopped coordinator")
@@ -616,11 +643,7 @@ func (e *Engine) probeLaunchFacts(ctx context.Context, role string, task flow.Ta
 func launchCapability(role string) func(flow.Candidate) string {
 	return func(c flow.Candidate) string {
 		switch role {
-		case flow.RoleWorker, flow.RoleCoordinator:
-			if c.CLI == "claude" {
-				return ""
-			}
-		case flow.RoleReviewer:
+		case flow.RoleWorker, flow.RoleCoordinator, flow.RoleReviewer:
 			if c.CLI == "claude" || c.CLI == world.CodexCLI {
 				return ""
 			}
@@ -634,11 +657,15 @@ func intentCandidate(in flow.Intent) flow.Candidate {
 }
 
 func resolveWorker(t flow.Task, s flow.Settings, facts flow.ResolveFacts) (flow.Intent, string) {
+	check := facts.Check
 	facts.Check = func(c flow.Candidate) string {
 		if why := launchCapability(flow.RoleWorker)(c); why != "" {
 			return why
 		}
 		_, why := flow.Resolve(flow.RoleReviewer, t, s, flow.ResolveFacts{Worker: c, Check: launchCapability(flow.RoleReviewer)})
+		if why == "" && check != nil {
+			return check(c)
+		}
 		return why
 	}
 	return flow.Resolve(flow.RoleWorker, t, s, facts)
@@ -647,7 +674,13 @@ func resolveWorker(t flow.Task, s flow.Settings, facts flow.ResolveFacts) (flow.
 func launchArgv(role string, c flow.Candidate, cwd, session string, resume bool) []string {
 	switch c.CLI {
 	case world.CodexCLI:
-		return world.CodexArgv(c.Model, c.Effort, cwd)
+		if role == flow.RoleReviewer {
+			return world.CodexArgv(c.Model, c.Effort, cwd)
+		}
+		if !resume {
+			session = ""
+		}
+		return world.CodexWorkArgv(c.Model, c.Effort, cwd, session)
 	case "claude":
 		mode := "bypassPermissions"
 		if role == flow.RoleReviewer {
@@ -658,10 +691,54 @@ func launchArgv(role string, c flow.Candidate, cwd, session string, resume bool)
 	return nil
 }
 
+func (e *Engine) codexHomeDir() string {
+	return filepath.Join(e.Paths.DataDir, "factory", "codex-home")
+}
+
+func (e *Engine) codexHome(id string) (string, error) {
+	dir := e.codexHomeDir()
+	home, err := world.CodexHome(dir)
+	if err == nil {
+		e.logOnce("factory.codex_home_error", id, dir, nil)
+		return home, nil
+	}
+	if errors.Is(err, world.ErrCodexAuthDiverged) {
+		e.logOnce("factory.codex_auth_diverged", id, dir, errors.New("scoped Codex sign-in was refreshed. Check codex login and move the scoped auth.json to re-enable it"))
+	} else {
+		e.logOnce("factory.codex_home_error", id, dir, err)
+	}
+	return "", err
+}
+
+func (e *Engine) resolveLaunch(id string, facts flow.ResolveFacts, resolve func(flow.ResolveFacts) (flow.Intent, string)) (flow.Intent, map[string]string, string) {
+	base := facts.Check
+	for {
+		in, why := resolve(facts)
+		if why != "" || in.CLI != world.CodexCLI {
+			return in, nil, why
+		}
+		home, err := e.codexHome(id)
+		if err == nil {
+			return in, map[string]string{"CODEX_HOME": home}, ""
+		}
+		facts.Check = func(c flow.Candidate) string {
+			if c.CLI == world.CodexCLI {
+				return err.Error()
+			}
+			if base != nil {
+				return base(c)
+			}
+			return ""
+		}
+	}
+}
+
 func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State, why string, now time.Time) {
 	facts := e.probeLaunchFacts(ctx, flow.RoleCoordinator, flow.Task{}, s.Settings)
 	facts.Check = launchCapability(flow.RoleCoordinator)
-	in, wait := flow.Resolve(flow.RoleCoordinator, flow.Task{}, s.Settings, facts)
+	in, env, wait := e.resolveLaunch(id, facts, func(f flow.ResolveFacts) (flow.Intent, string) {
+		return flow.Resolve(flow.RoleCoordinator, flow.Task{}, s.Settings, f)
+	})
 	if wait != "" {
 		e.logProjectWaitLocked(id, s, "J7", "waiting", wait)
 		return
@@ -678,7 +755,7 @@ func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State,
 	}
 	delete(e.waits, id+"/project")
 	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &s.Project.RunTokenHash, &s.Project.Run, adopt, flow.RunRecord{Role: flow.RoleCoordinator, CLI: in.CLI}, world.RunSpec{
-		Name: coordName(id), Cwd: s.Project.Folder, ClaudeConfig: e.Paths.ClaudeConfig,
+		Name: coordName(id), Cwd: s.Project.Folder, ClaudeConfig: e.Paths.ClaudeConfig, Env: env,
 		Argv:   launchArgv(flow.RoleCoordinator, intentCandidate(in), s.Project.Folder, "", false),
 		Prompt: map[bool]string{true: coordinatorPrompt(coordinatorTemplate, s.Project, bin), false: coordSummary(*s, bin, false)}[len(s.Tasks) == 0],
 		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleCoordinator, "sheepdog.model": in.Model, "sheepdog.effort": in.Effort},
@@ -791,7 +868,7 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 	if (*recp).State == flow.PhaseEnded || e.HC == nil {
 		return (*recp).TaskRun(), nil
 	}
-	evs, err := world.ObserveRun(ctx, e.HC, **recp)
+	evs, err := world.ObserveRun(ctx, e.HC, **recp, e.codexHomeDir())
 	if err != nil {
 		return flow.Run{}, err
 	}
@@ -930,6 +1007,12 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 		rec.SessionID = term.Argv[i+1]
 	}
 	choice := terminalChoice(term, flow.Candidate{CLI: rec.CLI, Model: rec.Model})
+	if !minted && choice.CLI == world.CodexCLI {
+		rec.SessionID, rec.Resumed = "", false
+		if prevRec != nil && prevRec.ID == term.Labels["sheepdog.run"] {
+			rec.SessionID, rec.Resumed, rec.StartedAt = prevRec.SessionID, prevRec.Resumed, prevRec.StartedAt
+		}
+	}
 	rec.ID, rec.CLI, rec.Model = "", choice.CLI, choice.Model
 	rec, _, _ = flow.StepRun(rec, flow.RunEvent{Kind: flow.EvLaunched, Address: term.Address, RunID: term.Labels["sheepdog.run"], CreatedMS: term.CreatedMS}, s.Settings, now)
 	rec.Resumable, *recp = rec.SessionID != "", &rec
@@ -1232,7 +1315,10 @@ func (e *Engine) readTipLocked(ctx context.Context, a flow.Attempt, tip string, 
 
 func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, n := &s.Tasks[ti], len(s.Tasks[ti].Attempts)+1
-	if _, why := resolveWorker(*t, s.Settings, e.probeLaunchFacts(ctx, flow.RoleWorker, *t, s.Settings)); why != "" {
+	facts := e.probeLaunchFacts(ctx, flow.RoleWorker, *t, s.Settings)
+	if _, _, why := e.resolveLaunch(id, facts, func(f flow.ResolveFacts) (flow.Intent, string) {
+		return resolveWorker(*t, s.Settings, f)
+	}); why != "" {
 		return "", false, launchWait(why)
 	}
 	// The branch carries the project and the attempt, so a new project on
@@ -1261,22 +1347,27 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	if err != nil {
 		return "", true, err
 	}
-	choice := flow.Candidate{}
+	choice, env := flow.Candidate{}, map[string]string(nil)
 	if term.State != "live" {
-		in, why := resolveWorker(*t, s.Settings, e.probeLaunchFacts(ctx, flow.RoleWorker, *t, s.Settings))
+		facts := e.probeLaunchFacts(ctx, flow.RoleWorker, *t, s.Settings)
+		in, codexEnv, why := e.resolveLaunch(id, facts, func(f flow.ResolveFacts) (flow.Intent, string) {
+			return resolveWorker(*t, s.Settings, f)
+		})
 		if why != "" {
 			return "", false, launchWait(why)
 		}
-		choice = intentCandidate(in)
+		choice, env = intentCandidate(in), codexEnv
 	} else {
 		choice = terminalChoice(term, storedWorkerModel(*t))
 	}
-	sid, resume, bin := world.NewUUID(), mode == flow.ContinueResume && prev != nil && prev.SessionID != "" && prev.CLI == choice.CLI, cmp.Or(e.Bin, "sheepdog")
+	sid, resume, bin := "", mode == flow.ContinueResume && prev != nil && prev.SessionID != "" && prev.CLI == choice.CLI, cmp.Or(e.Bin, "sheepdog")
 	if mode == flow.ContinueResume && !resume {
 		mode = flow.ContinueHandoff
 	}
-	if resume || (adopt && prev != nil && prev.SessionID != "") {
+	if resume || (adopt && (term.State == "live" || choice.CLI == "claude") && prev != nil && prev.CLI == choice.CLI && prev.SessionID != "") {
 		sid = prev.SessionID
+	} else if choice.CLI == "claude" {
+		sid = world.NewUUID()
 	}
 	prompt := workerPrompt(workerTemplate, *t, *a, bin)
 	if resume {
@@ -1290,7 +1381,7 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 		}
 	}
 	termID, delivered, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, &a.Run, adopt, flow.RunRecord{Role: flow.RoleWorker, CLI: choice.CLI, SessionID: sid, Resumed: resume}, world.RunSpec{
-		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
+		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig, Env: env,
 		Argv: launchArgv(flow.RoleWorker, choice, a.Worktree, sid, resume), Prompt: prompt,
 		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleWorker, "sheepdog.task": t.ID, "sheepdog.model": choice.Model, "sheepdog.effort": choice.Effort},
 	}, term)
@@ -1587,17 +1678,10 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 			if choice.CLI != world.CodexCLI {
 				break
 			}
-			dir := filepath.Join(e.Paths.DataDir, "factory", "codex-home")
-			home, err := world.CodexHome(dir)
+			home, err := e.codexHome(id)
 			if err == nil {
 				env = map[string]string{"CODEX_HOME": home}
-				e.logOnce("factory.codex_home_error", id, dir, nil)
 				break
-			}
-			if errors.Is(err, world.ErrCodexAuthDiverged) {
-				e.logOnce("factory.codex_auth_diverged", id, dir, errors.New("scoped Codex sign-in was refreshed. Check codex login and move the scoped auth.json to re-enable it"))
-			} else {
-				e.logOnce("factory.codex_home_error", id, dir, err)
 			}
 			facts.Check = func(c flow.Candidate) string {
 				if c.CLI == world.CodexCLI {
