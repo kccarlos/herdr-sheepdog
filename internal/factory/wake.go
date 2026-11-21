@@ -82,6 +82,9 @@ func taskFacts(t flow.Task, f flow.Facts, now time.Time) string {
 				out += fmt.Sprintf("; %d failing CI commit(s)", len(fails))
 			}
 		}
+		if rc.Trigger == flow.TriggerTime {
+			out += fmt.Sprintf("; working time %s", flow.WorkingTime(t).Truncate(time.Minute))
+		}
 	}
 	return out
 }

@@ -28,17 +28,18 @@ type Settings struct {
 	CIStalledMinutes           int `json:"ci_stalled_minutes"`             // N36 (design.md 10.1)
 	MainRedMinutes             int `json:"main_red_minutes"`               // N38 (design.md 10.1)
 	CIFailsPerHour             int `json:"ci_fails_per_hour"`              // N13 (design.md 10.1)
+	BuildHours                 int `json:"build_hours"`                    // N14 (design.md 10.1)
 	FlakeReruns                int `json:"flake_reruns"`                   // N33, N34 (design.md 10.1)
 	StartMinutes               int `json:"start_minutes"`                  // R11, R14 (design.md 10.1)
 	IdleGraceSeconds           int `json:"idle_grace_seconds"`             // R18–R20 (design.md 10.1)
 	QuietMinutes               int `json:"quiet_minutes"`                  // R21 (design.md 10.1)
 	InterruptSeconds           int `json:"interrupt_seconds"`              // R21, R22 (design.md 10.1)
+	ReviewMinutes              int `json:"review_minutes"`                 // N29 (design.md 10.1)
 	BlockedMinutes             int `json:"blocked_minutes"`                // R29 (design.md 10.1)
 	WorkerRestarts             int `json:"worker_restarts"`                // 4.8 (design.md 10.1)
 	ReviewerRetries            int `json:"reviewer_retries"`               // 4.8 (design.md 10.1)
 	EnsureFailures             int `json:"ensure_failures"`                // N5, section 8 (design.md 10.1)
 	EnsureBackoffMinutes       int `json:"ensure_backoff_minutes"`         // 4.8, section 8 (design.md 10.1)
-	StuckMinutes               int `json:"stuck_minutes"`                  // reduced S2 until 5a.5 (design.md 10.1)
 	CoordinatorStartsPerHour   int `json:"coordinator_starts_per_hour"`    // J6 (design.md 10.1)
 	CoordinatorGapMinutes      int `json:"coordinator_gap_minutes"`        // J6 (design.md 10.1)
 	OwnerTypingMinutes         int `json:"owner_typing_minutes"`           // J6 (design.md 10.1; hc fact pending spike S0.8)
@@ -76,6 +77,7 @@ const (
 	MainRedMax                                                                               = 600
 	CIFailsPerHourMin                                                                        = 1
 	CIFailsPerHourMax                                                                        = 10
+	BuildHoursMin, BuildHoursMax                                                             = 1, 48
 	FlakeRerunsMax                                                                           = 3
 	StartMin                                                                                 = 1
 	StartMax                                                                                 = 15
@@ -85,12 +87,12 @@ const (
 	QuietMax                                                                                 = 120
 	InterruptMin                                                                             = 10
 	InterruptMax                                                                             = 600
+	ReviewMin, ReviewMax                                                                     = 10, 240
 	BlockedMin                                                                               = 1
 	BlockedMax                                                                               = 120
 	WorkerRestartsMax, ReviewerRetriesMax                                                    = 10, 5
 	EnsureFailuresMin, EnsureFailuresMax                                                     = 1, 10
 	EnsureBackoffMin, EnsureBackoffMax                                                       = 1, 60
-	StuckMin, StuckMax                                                                       = 5, 240
 	CoordStartsMin, CoordStartsMax, CoordGapMin, CoordGapMax, OwnerTypingMin, OwnerTypingMax = 1, 10, 1, 60, 1, 60
 	CoordSilentMin, CoordSilentMax, HeartbeatMin, HeartbeatMax                               = 5, 240, 10, 600
 	ContinuesMax                                                                             = 3
@@ -109,9 +111,9 @@ func DefaultSettings() Settings {
 	return Settings{
 		ReviewRounds: 2, MaxRounds: 5,
 		RetroAfterRoundsWithMajors: 2, RetroFromRound: 3,
-		ChecksGraceMinutes: 5, CIStalledMinutes: 90, MainRedMinutes: 60, CIFailsPerHour: 3, FlakeReruns: 1,
-		StartMinutes: 2, IdleGraceSeconds: 20, QuietMinutes: 20, InterruptSeconds: 90, BlockedMinutes: 10,
-		WorkerRestarts: 3, ReviewerRetries: 2, EnsureFailures: 3, EnsureBackoffMinutes: 1, StuckMinutes: 30,
+		ChecksGraceMinutes: 5, CIStalledMinutes: 90, MainRedMinutes: 60, CIFailsPerHour: 3, BuildHours: 4, FlakeReruns: 1,
+		StartMinutes: 2, IdleGraceSeconds: 20, QuietMinutes: 20, InterruptSeconds: 90, ReviewMinutes: 45, BlockedMinutes: 10,
+		WorkerRestarts: 3, ReviewerRetries: 2, EnsureFailures: 3, EnsureBackoffMinutes: 1,
 		CoordinatorStartsPerHour: 3, CoordinatorGapMinutes: 10, OwnerTypingMinutes: 5, CoordinatorSilentMinutes: 30, HeartbeatMinutes: 60,
 		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2, MaxRunning: 3,
 		SecondReviewer: "opus",
@@ -129,6 +131,7 @@ func (s Settings) Changed() []string {
 		got, def int
 	}{
 		{"blocked_minutes", s.BlockedMinutes, d.BlockedMinutes},
+		{"build_hours", s.BuildHours, d.BuildHours},
 		{"checks_grace_minutes", s.ChecksGraceMinutes, d.ChecksGraceMinutes},
 		{"ci_fails_per_hour", s.CIFailsPerHour, d.CIFailsPerHour},
 		{"ci_stalled_minutes", s.CIStalledMinutes, d.CIStalledMinutes},
@@ -150,11 +153,11 @@ func (s Settings) Changed() []string {
 		{"quiet_minutes", s.QuietMinutes, d.QuietMinutes},
 		{"retro_after_rounds_with_majors", s.RetroAfterRoundsWithMajors, d.RetroAfterRoundsWithMajors},
 		{"retro_from_round", s.RetroFromRound, d.RetroFromRound},
+		{"review_minutes", s.ReviewMinutes, d.ReviewMinutes},
 		{"review_rounds", s.ReviewRounds, d.ReviewRounds},
 		{"reviewer_retries", s.ReviewerRetries, d.ReviewerRetries},
 		{"size_cap_factor", s.SizeCapFactor, d.SizeCapFactor},
 		{"start_minutes", s.StartMinutes, d.StartMinutes},
-		{"stuck_minutes", s.StuckMinutes, d.StuckMinutes},
 		{"task_size_limit", s.TaskSizeLimit, d.TaskSizeLimit},
 		{"worker_restarts", s.WorkerRestarts, d.WorkerRestarts},
 	} {
@@ -188,17 +191,18 @@ func (s Settings) Validate() error {
 		{"ci_stalled_minutes", s.CIStalledMinutes, CIStalledMin, CIStalledMax},
 		{"main_red_minutes", s.MainRedMinutes, MainRedMin, MainRedMax},
 		{"ci_fails_per_hour", s.CIFailsPerHour, CIFailsPerHourMin, CIFailsPerHourMax},
+		{"build_hours", s.BuildHours, BuildHoursMin, BuildHoursMax},
 		{"flake_reruns", s.FlakeReruns, 0, FlakeRerunsMax},
 		{"start_minutes", s.StartMinutes, StartMin, StartMax},
 		{"idle_grace_seconds", s.IdleGraceSeconds, IdleGraceMin, IdleGraceMax},
 		{"quiet_minutes", s.QuietMinutes, QuietMin, QuietMax},
 		{"interrupt_seconds", s.InterruptSeconds, InterruptMin, InterruptMax},
+		{"review_minutes", s.ReviewMinutes, ReviewMin, ReviewMax},
 		{"blocked_minutes", s.BlockedMinutes, BlockedMin, BlockedMax},
 		{"worker_restarts", s.WorkerRestarts, 0, WorkerRestartsMax},
 		{"reviewer_retries", s.ReviewerRetries, 0, ReviewerRetriesMax},
 		{"ensure_failures", s.EnsureFailures, EnsureFailuresMin, EnsureFailuresMax},
 		{"ensure_backoff_minutes", s.EnsureBackoffMinutes, EnsureBackoffMin, EnsureBackoffMax},
-		{"stuck_minutes", s.StuckMinutes, StuckMin, StuckMax},
 		{"coordinator_starts_per_hour", s.CoordinatorStartsPerHour, CoordStartsMin, CoordStartsMax},
 		{"coordinator_gap_minutes", s.CoordinatorGapMinutes, CoordGapMin, CoordGapMax},
 		{"owner_typing_minutes", s.OwnerTypingMinutes, OwnerTypingMin, OwnerTypingMax},

@@ -105,6 +105,12 @@ var (
 	ciRecap    = func(in *In) {
 		in.Task.Recaps = []Recap{{Trigger: TriggerCI, Allowed: []string{ChoiceContinue, "split", "new", "drop"}}}
 	}
+	timeRecap = func(in *In) {
+		in.Task.Recaps = []Recap{{Trigger: TriggerTime, Allowed: []string{ChoiceContinue, "split", "new", "drop"}}}
+	}
+	overTime = func(in *In) {
+		a0(in).Working = time.Duration(DefaultSettings().BuildHours) * time.Hour
+	}
 	ciFailed3 = func(in *In) {
 		a0(in).CIFails = []CIFail{
 			{Head: "f1", At: now.Add(-30 * time.Minute)},
@@ -250,10 +256,6 @@ func TestRowCases(t *testing.T) {
 		in    In
 		asked []string
 	}{
-		{"S2", with(noRounds, func(in *In) {
-			in.Facts.Reviewer = Run{State: RunIdle, LastTurnEnd: now}
-			in.Now = now.Add(time.Duration(DefaultSettings().StuckMinutes) * time.Minute)
-		}), []string{"wake_coordinator@stuck@reviewer_idle@1@c1"}},
 		{"N1", with(done), []string{"cleanup"}},
 		{"N1", with(splitMark), []string{"cleanup"}},
 		{"N1", with(droppedMark), []string{"cleanup"}},
@@ -274,6 +276,7 @@ func TestRowCases(t *testing.T) {
 		{"N6", with(openRecap), []string{"wake_coordinator@recap@1"}},
 		{"N6", with(sizeRecap), []string{"wake_coordinator@recap@1", "tell_worker_stop@1"}},
 		{"N6", with(ciRecap), []string{"wake_coordinator@recap@1", "tell_worker_stop@1"}},
+		{"N6", with(timeRecap), []string{"wake_coordinator@recap@1", "tell_worker_stop@1"}},
 		{"N6", with(sizeRecap, func(in *In) { in.Facts.Worker = Run{} }), []string{"wake_coordinator@recap@1"}},
 		{"N6", with(sizeRecap, workerEnded), []string{"wake_coordinator@recap@1"}},
 		{"N7", with(diverged), []string{"tell_worker_diverged@tip@c1"}},
@@ -287,6 +290,7 @@ func TestRowCases(t *testing.T) {
 		{"N12", with(overCap), []string{"open_size_recap@0"}},
 		{"N12", with(func(in *In) { in.Facts.Lines = 1 }), []string{"open_size_recap@0"}}, // no estimate (cap 0) never turns the check off (KB-CAP-18)
 		{"N13", with(noRounds, ciFailed3), []string{"open_ci_recap@0"}},
+		{"N14", with(noRounds, overTime), []string{"open_time_recap@0"}},
 		{"N42", with(atCap), []string{"record_accept@c1", "merge@c1"}}, // at the cap is not over it
 		{"N20", with(mergeTip), []string{"move_h_merge_only@m2"}},
 		{"N20", with(func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel, in.Facts.PR.HeadMergeOnly = "m2", RelAhead, true }), []string{"move_h_merge_only@m2"}},
@@ -364,10 +368,6 @@ func TestRowOrder(t *testing.T) {
 		neighbours bool
 		in         In
 	}{
-		{"S2", "N29", false, with(noRounds, func(in *In) {
-			in.Facts.Reviewer = Run{State: RunIdle, LastTurnEnd: now}
-			in.Now = now.Add(time.Duration(DefaultSettings().StuckMinutes) * time.Minute)
-		})},
 		{"N1", "N2", true, with(done, merged)},
 		{"N2", "N3", true, with(merged, parked)},
 		{"N3", "N4", true, with(parked, closedPR)},
@@ -391,8 +391,11 @@ func TestRowOrder(t *testing.T) {
 		{"N6", "N29", false, with(openRecap, noRounds)},
 		{"N6", "N12", false, with(openRecap, overCap)},
 		{"N6", "N13", false, with(openRecap, noRounds, ciFailed3)},
+		{"N6", "N14", false, with(openRecap, noRounds, overTime)},
 		{"N12", "N13", true, with(overCap, noRounds, ciFailed3)},
-		{"N13", "N20", true, with(noRounds, ciFailed3, mergeTip)},
+		{"N13", "N14", true, with(noRounds, ciFailed3, overTime)},
+		{"N14", "N20", true, with(noRounds, overTime, mergeTip)},
+		{"N14", "N29", false, with(noRounds, overTime)},
 		{"N13", "N29", false, with(noRounds, ciFailed3)},
 		{"N20", "N22", true, with(changes, mergeTip)},
 		{"N12", "N23", false, with(overCap, tipAheadF)},
@@ -550,60 +553,69 @@ func TestEnsureRun(t *testing.T) {
 	}
 }
 
-func TestS2IdleReviewerOnlyAndNoFailedAct(t *testing.T) {
-	wait := time.Duration(DefaultSettings().StuckMinutes) * time.Minute
-	// Failed acts no longer match S2 even past stuck_minutes; they back off or match N5.
-	for name, in := range map[string]In{
-		"merge": with(func(in *In) {
-			a0(in).Acts = []Act{{Key: "merge@c1", Result: "failed", At: now}}
-			in.Now = now.Add(wait)
-		}),
-		"push_pr": with(noRounds, prGone, func(in *In) {
-			a0(in).Acts = []Act{{Key: "push_and_open_pr@c1", Result: "failed", At: now}}
-			in.Now = now.Add(wait)
-		}),
-		"update_branch": with(behind, func(in *In) {
-			a0(in).Acts = []Act{{Key: "update_branch@c1", Result: "failed", At: now}}
-			in.Now = now.Add(wait)
-		}),
-		"cleanup": with(done, func(in *In) {
-			a0(in).Acts = []Act{{Key: "cleanup", Result: "failed", At: now}}
-			in.Now = now.Add(wait)
-		}),
-		"new_attempt": with(noAttempts, func(in *In) {
-			in.Task.Acts = []Act{{Key: "new_attempt", Result: "failed", At: now}}
-			in.Now = now.Add(wait)
-		}),
-		"tell_findings": with(changes, func(in *In) {
-			a0(in).Acts = []Act{{Key: "tell_worker_findings@1", Result: "failed", At: now}}
-			in.Now = now.Add(wait)
-		}),
-		"tell_ci": with(red, func(in *In) {
-			in.Facts.PR.Failed = []Failure{{Run: "42"}}
-			a0(in).Acts = []Act{{Key: "tell_worker_ci@42@c1", Result: "failed", At: now}}
-			in.Now = now.Add(wait)
-		}),
-		"settled_merge": with(func(in *In) {
-			a0(in).Acts = []Act{{Key: "merge@c1", Result: "failed", Class: ClassSettled, At: now}}
-			in.Now = now.Add(wait)
-		}),
-	} {
-		if r, d := FirstMatch(TaskRows, in); r.ID == "S2" {
-			t.Errorf("%s: S2 fired for a failed act (%v)", name, d.Asked)
+func TestNoS2AndTimeLimitsN14N29(t *testing.T) {
+	// S2 is gone from TaskRows.
+	for _, r := range TaskRows {
+		if r.ID == "S2" {
+			t.Fatal("S2 row still present in TaskRows")
 		}
 	}
-	// S2 still wakes once for an idle reviewer with no report tag until PR 5a.5.
-	idle := with(noRounds, func(in *In) {
-		in.Facts.Reviewer = Run{State: RunIdle, LastTurnEnd: now}
-		in.Now = now.Add(wait)
-	})
-	want := "wake_coordinator@stuck@reviewer_idle@1@c1"
-	if r, d := FirstMatch(TaskRows, idle); r.ID != "S2" || !slices.Equal(d.Asked, []string{want}) {
-		t.Fatalf("idle reviewer: got %s %v, want S2 [%s]", r.ID, d.Asked, want)
+	// N14 reads Attempt.Working (single accumulator), resets when cleared, and is skipped when ladder passed.
+	s := DefaultSettings()
+	in := with(noRounds, func(in *In) { a0(in).Working = time.Duration(s.BuildHours)*time.Hour - time.Minute })
+	if got := WorkingTime(in.Task); got != a0(&in).Working {
+		t.Fatalf("WorkingTime = %v, want %v", got, a0(&in).Working)
 	}
-	a0(&idle).Acts = []Act{{Key: want, Result: "done", At: idle.Now}}
-	if r2, _ := FirstMatch(TaskRows, idle); r2.ID == "S2" {
-		t.Fatal("S2 still matched after its wake act was recorded")
+	if r, _ := FirstMatch(TaskRows, in); r.ID == "N14" {
+		t.Fatalf("N14 fired under build_hours: %v", WorkingTime(in.Task))
+	}
+	a0(&in).Working = time.Duration(s.BuildHours) * time.Hour
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N14" || !slices.Equal(d.Asked, []string{"open_time_recap@0"}) {
+		t.Fatalf("at build_hours = %s %v, want N14 [open_time_recap@0]", r.ID, d.Asked)
+	}
+	// Clearing Attempt.Working on recap continue resets N14.
+	in.Task.Recaps = []Recap{{Trigger: TriggerTime, Decided: &RecapDecision{Choice: ChoiceContinue, At: now}}}
+	a0(&in).Working = 0
+	if r, _ := FirstMatch(TaskRows, in); r.ID == "N14" {
+		t.Fatalf("N14 still fired after recap continue reset")
+	}
+	// Ladder == Passed does not fire N14.
+	if r, _ := FirstMatch(TaskRows, with(overTime)); r.ID != "N42" {
+		t.Fatalf("ladder passed with overTime = %s, want N42", r.ID)
+	}
+
+	// N29: idle no-tag reviewer gets one nudge, then stop; refused reviewer waits until review_minutes; review_minutes stops even while working.
+	revIdle := with(noRounds, func(in *In) {
+		a0(in).Review = &ReviewRun{Round: 1, Head: "c1"}
+		in.Facts.Reviewer = Run{State: RunIdle, LastTurnEnd: now}
+	})
+	if r, d := FirstMatch(TaskRows, revIdle); r.ID != "N29" || !slices.Equal(d.Asked, []string{"nudge_reviewer@1@0@c1"}) {
+		t.Fatalf("idle reviewer first = %s %v, want N29 nudge", r.ID, d.Asked)
+	}
+	// After nudge done, idle again -> stop.
+	a0(&revIdle).Acts = []Act{{Key: "nudge_reviewer@1@0@c1", Result: "done", At: now}}
+	if r, d := FirstMatch(TaskRows, revIdle); r.ID != "N29" || !slices.Equal(d.Asked, []string{"stop_reviewer@1@0@c1"}) {
+		t.Fatalf("idle reviewer after nudge = %s %v, want N29 stop", r.ID, d.Asked)
+	}
+	// Refused idle reviewer is not nudged, but is stopped once Age reaches review_minutes.
+	revRefused := with(noRounds, func(in *In) {
+		a0(in).Review = &ReviewRun{Round: 1, Head: "c1", Age: time.Duration(s.ReviewMinutes-1) * time.Minute}
+		in.Facts.Reviewer = Run{State: RunIdle, Refused: true}
+	})
+	if r, d := FirstMatch(TaskRows, revRefused); r.ID != "N29" || len(d.Asked) != 0 {
+		t.Fatalf("refused reviewer under review_minutes = %s %v, want wait", r.ID, d.Asked)
+	}
+	a0(&revRefused).Review.Age = time.Duration(s.ReviewMinutes) * time.Minute
+	if r, d := FirstMatch(TaskRows, revRefused); r.ID != "N29" || !slices.Equal(d.Asked, []string{"stop_reviewer@1@0@c1"}) {
+		t.Fatalf("refused reviewer at review_minutes = %s %v, want N29 stop", r.ID, d.Asked)
+	}
+	// Reviewer older than review_minutes is stopped even while working.
+	revOld := with(noRounds, func(in *In) {
+		a0(in).Review = &ReviewRun{Round: 1, Head: "c1", Age: time.Duration(s.ReviewMinutes) * time.Minute}
+		in.Facts.Reviewer = Run{State: RunWorking}
+	})
+	if r, d := FirstMatch(TaskRows, revOld); r.ID != "N29" || !slices.Equal(d.Asked, []string{"stop_reviewer@1@0@c1"}) {
+		t.Fatalf("reviewer past review_minutes = %s %v, want N29 stop", r.ID, d.Asked)
 	}
 }
 
@@ -1393,9 +1405,9 @@ func TestMergeOnlyTable(t *testing.T) {
 }
 
 // TestN40BehindAndKBMRG6 covers N40 (KB-MRG-43: update once, wait within grace,
-// failed try past grace, S2 wake after stuck_minutes, BehindUnknown waits at N36,
-// not behind merges at N42), merge_only PR head moving H, and KB-MRG-6 (stray
-// worker wake with no new commit never undoes a pass).
+// failed try past grace, BehindUnknown waits at N36, not behind merges at N42),
+// merge_only PR head moving H, and KB-MRG-6 (stray worker wake with no new
+// commit never undoes a pass).
 func TestN40BehindAndKBMRG6(t *testing.T) {
 	grace := time.Duration(DefaultSettings().ChecksGraceMinutes) * time.Minute
 	in := with(behind)
