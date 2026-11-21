@@ -66,6 +66,7 @@ type CommandFunc func(ctx context.Context, dir string, extraEnv []string, argv .
 type DoctorOptions struct {
 	Folder        string
 	HCSocket      string
+	Git           *world.Git
 	Canary        bool
 	ClaudeModel   string
 	GOOS          string
@@ -160,6 +161,7 @@ func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	inHC := hcOK && !customRunner
 	if inHC {
 		o.RunCommand = hcExecRunner(o.HCSocket)
+		o.Git = world.NewGit(hc.NewClient(o.HCSocket), nil)
 	}
 	out = append(out, checkAgentCLIs(ctx, o, inHC, customLookPath, volumeOK, probedDir)...)
 	out = append(out, checkGH(ctx, o, inHC, customLookPath, volumeOK, probedDir))
@@ -173,9 +175,13 @@ func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 func checkSweepLeftovers(ctx context.Context, o DoctorOptions, hcOK bool, dir string) (out []onboard.Result) {
 	gctx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	defer cancel()
-	repo, id, err := world.RepoProject(gctx, dir, false)
+	git := world.NewGit(hc.NewClient(o.HCSocket), nil)
+	repo, id, err := git.RepoProject(gctx, dir, false)
 	if err != nil {
-		return nil
+		if _, lookupErr := findStoredProject(Paths{DataDir: o.DataDir}, dir); lookupErr != nil {
+			return nil
+		}
+		return []onboard.Result{resWarn("sweep terminals", "unknown: "+cleanReason(map[bool]string{false: "no hc client", true: err.Error()}[hcOK]), "check terminals manually")}
 	}
 	s, wtRoot, p, stateWhy, client := flow.State{}, "", Paths{DataDir: o.DataDir}, "", (*hc.Client)(nil)
 	var findErr error
@@ -198,7 +204,7 @@ func checkSweepLeftovers(ctx context.Context, o DoctorOptions, hcOK bool, dir st
 	} else {
 		out = append(out, resSkip("sweep", "leftover checks skipped: this folder has no factory project yet"))
 	}
-	for _, pr := range world.Sweep(gctx, client, repo, wtRoot, s) {
+	for _, pr := range git.Sweep(gctx, client, repo, wtRoot, s) {
 		if id == "" && pr.Probe != "local_base" {
 			continue
 		}
@@ -1007,6 +1013,13 @@ func ambiguousGHRemote(remotes []string, pushRemote string) string {
 func gitOut(ctx context.Context, o DoctorOptions, dir string, args ...string) string {
 	gCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	defer cancel()
+	if o.Git != nil {
+		r, err := o.Git.Run(gCtx, dir, args...)
+		if err == nil {
+			return strings.TrimSpace(string(r.Stdout))
+		}
+		return ""
+	}
 	res := o.RunCommand(gCtx, o.TempDir, nil, append([]string{"git", "-C", dir}, args...)...)
 	if res.Err != nil || res.TimedOut || res.Exit != 0 {
 		return ""

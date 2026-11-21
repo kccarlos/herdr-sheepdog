@@ -191,7 +191,7 @@ func TestClockSleepIdleOnTimeAndRestartNoInflation(t *testing.T) {
 	}
 
 	// Daemon restart after sleep keeps accumulated totals without inflating any age.
-	eng2 := New(l.paths, l.client)
+	eng2 := newGitTestEngine(t, l.paths, l.client)
 	eng2.Now = func() time.Time { return wall }
 	eng2.passProject(context.Background(), l.id, false)
 	st = l.state()
@@ -229,7 +229,7 @@ func TestClockRestartAfterSleepNoInflation(t *testing.T) {
 
 	// Sleep 6h, then restart daemon immediately.
 	wall = wall.Add(6 * time.Hour)
-	eng2 := New(l.paths, l.client)
+	eng2 := newGitTestEngine(t, l.paths, l.client)
 	eng2.Now = func() time.Time { return wall }
 	eng2.passProject(context.Background(), l.id, false)
 	wall = wall.Add(15 * time.Second)

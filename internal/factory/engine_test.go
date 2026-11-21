@@ -154,7 +154,7 @@ func TestEngineLoopStartsOneCoordinatorAndStopsCleanly(t *testing.T) {
 	paths := testPaths(t)
 	repo := initGitRepo(t)
 
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.PassInterval = 15 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -269,11 +269,11 @@ func TestEngineStopKillsUnrecordedCoordinator(t *testing.T) {
 	repo := initGitRepo(t)
 	ctx := context.Background()
 
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	if err := eng.Start(repo, "Ship slice 1.", 0); err != nil {
 		t.Fatal(err)
 	}
-	_, projID, err := world.RepoProject(ctx, repo, false)
+	_, projID, err := fixtureGit(t).RepoProject(ctx, repo, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,13 +316,13 @@ func TestEngineCrashAdoptTrimAndOutage(t *testing.T) {
 		}
 	}
 
-	eng1 := New(paths, client)
+	eng1 := newGitTestEngine(t, paths, client)
 	eng1.PassInterval = 15 * time.Millisecond
 	stop1 := runEngine(eng1)
 	if err := eng1.Start(repo, "Goal A", 0); err != nil {
 		t.Fatal(err)
 	}
-	_, projID, err := world.RepoProject(ctx, repo, false)
+	_, projID, err := fixtureGit(t).RepoProject(ctx, repo, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +353,7 @@ func TestEngineCrashAdoptTrimAndOutage(t *testing.T) {
 	_ = f.Close()
 
 	// (a) Second Engine on same Paths and hctest with RunID persisted: trims log and spawns no duplicate.
-	eng2 := New(paths, client)
+	eng2 := newGitTestEngine(t, paths, client)
 	eng2.PassInterval = 15 * time.Millisecond
 	stop2 := runEngine(eng2)
 	time.Sleep(60 * time.Millisecond)
@@ -379,7 +379,7 @@ func TestEngineCrashAdoptTrimAndOutage(t *testing.T) {
 	if err := SaveState(paths.State(projID), st); err != nil {
 		t.Fatal(err)
 	}
-	eng3 := New(paths, client)
+	eng3 := newGitTestEngine(t, paths, client)
 	eng3.PassInterval = 15 * time.Millisecond
 	stop3 := runEngine(eng3)
 	deadline = time.Now().Add(2 * time.Second)
@@ -400,7 +400,7 @@ func TestEngineCrashAdoptTrimAndOutage(t *testing.T) {
 
 	// (d) hc unreachable (closed socket): Start does not clear persisted RunID.
 	srv.Close()
-	eng4 := New(paths, client)
+	eng4 := newGitTestEngine(t, paths, client)
 	if err := eng4.Start(repo, "Goal B during hc outage", 0); err != nil {
 		t.Fatalf("(d) Start during hc outage: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestPassProjectLogsErrorsAndSkipsDeadRunState(t *testing.T) {
 	ctx := context.Background()
 
 	var logBuf bytes.Buffer
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.Log = logging.NewJSONLLogger(&logBuf)
 
 	const projID = "proj-deadbeef"
@@ -476,7 +476,7 @@ func TestPassProjectLogsErrorsAndSkipsDeadRunState(t *testing.T) {
 // stop instead of failing.
 func TestStopWithoutHC(t *testing.T) {
 	repo := initGitRepo(t)
-	e := New(Paths{DataDir: t.TempDir()}, nil)
+	e := newGitTestEngine(t, Paths{DataDir: t.TempDir()}, nil)
 	if err := e.Start(repo, "a goal", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -541,7 +541,7 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 	ctx := context.Background()
 
 	var logBuf bytes.Buffer
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.Log = logging.NewJSONLLogger(&logBuf)
 	eng.Bin = "/tmp/sheepdog-bin"
 	eng.RunEnv = map[string]string{"SHEEPDOG_WEB_PORT": "17777"}
@@ -795,7 +795,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	srv1 := hctest.New(t)
 	var runs1 []hc.RunParams
 	srv1.OnRun = func(_ hc.Terminal, p hc.RunParams) { runs1 = append(runs1, p) }
-	eng1 := New(testPaths(t), hc.NewClient(srv1.Path))
+	eng1 := newGitTestEngine(t, testPaths(t), hc.NewClient(srv1.Path))
 	eng1.PassInterval = 10 * time.Millisecond
 	repoNoRemote := initGitRepo(t)
 	if err := eng1.Start(repoNoRemote, "Goal with no remote", 0); err != nil {
@@ -841,7 +841,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	srv3 := hctest.New(t)
 	runs3Ch := make(chan hc.RunParams, 8)
 	srv3.OnRun = func(_ hc.Terminal, p hc.RunParams) { runs3Ch <- p }
-	eng3 := New(testPaths(t), hc.NewClient(srv3.Path))
+	eng3 := newGitTestEngine(t, testPaths(t), hc.NewClient(srv3.Path))
 	eng3.PassInterval = time.Hour
 	repo3, _ := initGitRepoWithRemote(t)
 	rctx, cancel := context.WithCancel(ctx)
@@ -921,7 +921,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 func TestExecutorFailureRecordedWhenPassCancelled(t *testing.T) {
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -956,7 +956,7 @@ func TestAttemptWorktreePathPerAttemptAndLockGitTimeout(t *testing.T) {
 	ctx := context.Background()
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -986,7 +986,7 @@ func TestEngineLockGitCallsUseTimeout(t *testing.T) {
 
 	paths := testPaths(t)
 	repo, baseSHA := initGitRepoWithRemote(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 	const projID = "proj-timeout"
 	st := flow.State{
 		Seq:      1,
@@ -1026,7 +1026,7 @@ func TestEngineLockGitCallsUseTimeout(t *testing.T) {
 // so failed executor acts stop blocking their ask; done acts stay.
 func TestStartClearsFailedActs(t *testing.T) {
 	repo := initGitRepo(t)
-	e := New(Paths{DataDir: t.TempDir()}, nil)
+	e := newGitTestEngine(t, Paths{DataDir: t.TempDir()}, nil)
 	if err := e.Start(repo, "a goal", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -1074,7 +1074,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 	gh := installFakeGH(t)
 
 	var logBuf bytes.Buffer
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.Log = logging.NewJSONLLogger(&logBuf)
 	eng.Bin = "/tmp/sheepdog-bin"
 
@@ -1300,7 +1300,7 @@ func testVoidReview(t *testing.T, dirty bool) {
 	repo, _ := initGitRepoWithRemote(t)
 	githubOrigin(t, repo)
 	gh := installFakeGH(t)
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	var logBuf bytes.Buffer
 	eng.Log = logging.NewJSONLLogger(&logBuf)
 	if err := eng.Start(repo, "Goal", 0); err != nil {
@@ -1413,7 +1413,7 @@ func TestEngineRebaseAfterReviewedCommitFallsBackToFull(t *testing.T) {
 	githubOrigin(t, repo)
 	gh := installFakeGH(t)
 
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -1472,7 +1472,7 @@ func TestEngineRebaseAfterReviewedCommitFallsBackToFull(t *testing.T) {
 	c2 := gitIn(t, wt, "rev-parse", "HEAD")
 
 	// DeltaRanges on diverged (c1, c2) agrees: full range b1..c2 with no base_only.go.
-	dr, err := world.DeltaRanges(ctx, wt, c1, c2)
+	dr, err := fixtureGit(t).DeltaRanges(ctx, wt, c1, c2)
 	if err != nil || !slices.Equal(dr, []string{b1 + ".." + c2}) {
 		t.Errorf("DeltaRanges(c1, c2) after rebase = (%v, %v), want [%s..%s]", dr, err, b1, c2)
 	} else if diff := gitIn(t, wt, "diff", dr[0]); strings.Contains(diff, "base_only.go") || !strings.Contains(diff, "+var V = 2") {
@@ -1517,7 +1517,7 @@ func TestEngineReuseReviewerSkipsGitWork(t *testing.T) {
 	gh := installFakeGH(t)
 
 	var logBuf bytes.Buffer
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.Log = logging.NewJSONLLogger(&logBuf)
 	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
@@ -1594,7 +1594,7 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 	githubOrigin(t, repo)
 	gh := installFakeGH(t)
 
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.Bin = "/tmp/sheepdog-bin"
 	if err := eng.Start(repo, "Add Version constant.", 0); err != nil {
 		t.Fatal(err)
@@ -1707,7 +1707,7 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 }
 
 func TestRejectionPromptOnlyNewestRejectedRoundAtHead(t *testing.T) {
-	eng := New(testPaths(t), nil)
+	eng := newGitTestEngine(t, testPaths(t), nil)
 	base := flow.Attempt{
 		Rounds: []flow.Round{
 			{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictChanges, Majors: 1, ReportPath: "/r/1.md"},
@@ -1793,7 +1793,7 @@ func TestReviewerPromptIncludesProofsTouchedSkippedAndRule(t *testing.T) {
 	githubOrigin(t, repo)
 	gh := installFakeGH(t)
 
-	eng := New(paths, hc.NewClient(srv.Path))
+	eng := newGitTestEngine(t, paths, hc.NewClient(srv.Path))
 	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -1954,9 +1954,9 @@ func TestProoflessTaskPromptAndTouchedOnlyReady(t *testing.T) {
 	ctx := context.Background()
 	paths := testPaths(t)
 	repo, baseSHA := initGitRepoWithRemote(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 	const projID = "proj-proofless"
-	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "docs: update")
+	wt, err := fixtureGit(t).NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "docs: update")
 	if err != nil {
 		t.Fatal(err)
 	}

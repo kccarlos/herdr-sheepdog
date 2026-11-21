@@ -22,7 +22,7 @@ func withPlanFacts(t *testing.T, facts flow.ResolveFacts) {
 
 func TestPlanApplyLaunchChecks(t *testing.T) {
 	newCoord := func(s flow.Settings) (*Engine, string, string) {
-		eng := New(testPaths(t), nil)
+		eng := newGitTestEngine(t, testPaths(t), nil)
 		st := flow.State{Seq: 1, Settings: s, Project: flow.Project{ID: "p1", Started: true, RunTokenHash: tokenHash("tok")}}
 		if err := SaveState(eng.Paths.State("p1"), st); err != nil {
 			t.Fatal(err)
@@ -98,7 +98,7 @@ func TestPlanApplyDefaultProjectDoesNotProbe(t *testing.T) {
 	}
 	t.Cleanup(func() { planResolveFacts = prev })
 
-	eng := New(testPaths(t), nil)
+	eng := newGitTestEngine(t, testPaths(t), nil)
 	st := flow.State{Seq: 1, Settings: flow.DefaultSettings(), Project: flow.Project{ID: "p1", Started: true, RunTokenHash: tokenHash("tok")}}
 	if err := SaveState(eng.Paths.State("p1"), st); err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestPlanApplyProbeTimeoutDoesNotRefuse(t *testing.T) {
 	}
 	t.Cleanup(func() { planResolveFacts = prev })
 
-	eng := New(testPaths(t), nil)
+	eng := newGitTestEngine(t, testPaths(t), nil)
 	st := flow.State{Seq: 1, Settings: flow.DefaultSettings(), Project: flow.Project{ID: "p1", Started: true, RunTokenHash: tokenHash("tok")}}
 	if err := SaveState(eng.Paths.State("p1"), st); err != nil {
 		t.Fatal(err)

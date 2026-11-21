@@ -120,7 +120,7 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 	h := flow.H(*a)
 	ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
 	defer cancel()
-	tip, rel, clean, err := world.InspectWorktree(ctx, a.Worktree, h)
+	tip, rel, clean, err := e.git.InspectWorktree(ctx, a.Worktree, h)
 	if err != nil {
 		return err
 	}
@@ -187,7 +187,7 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 			return e.refuse(id, "invalid_report", `A ready report with proofs must state what was skipped or not checked (--skipped "<what was left out>", or --skipped "" when nothing was skipped).`)
 		}
 	}
-	if mo, _ := world.MergeOnly(ctx, a.Worktree, h, tip); mo { // a ready at a merge-only tip is N20's move too: no round
+	if mo, _ := e.git.MergeOnly(ctx, a.Worktree, h, tip); mo { // a ready at a merge-only tip is N20's move too: no round
 		a.MergeOnly = append(a.MergeOnly, flow.Advance{From: h, To: tip})
 	}
 	a.Ready, a.NothingToChange = append(a.Ready, flow.Ready{Head: tip, Proofs: proofs, Touched: touched, Skipped: skipped}), ""
@@ -808,7 +808,7 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		if rc.Trigger == flow.TriggerSize {
 			ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
 			defer cancel()
-			lines, err := world.ChangedLines(ctx, a.Worktree, "HEAD") // the same measure as N12's
+			lines, err := e.git.ChangedLines(ctx, a.Worktree, "HEAD") // the same measure as N12's
 			base := lines
 			if err != nil {
 				e.logError("factory.git_error", id, err)
@@ -849,7 +849,7 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		if a := flow.OpenAttempt(*t); a != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), ghTimeout)
 			defer cancel()
-			if _, err := closeOpenPR(ctx, s.Project.Folder, *a, note); err != nil {
+			if _, err := e.closeOpenPR(ctx, s.Project.Folder, *a, note); err != nil {
 				return err // before any run is stopped: the task is as it was
 			}
 			if err := e.stopRuns(ctx, taskRuns(id, *t)); err != nil {
@@ -925,7 +925,7 @@ func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args js
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
 		defer cancel()
-		if tip, _, _, err := world.InspectWorktree(ctx, a.Worktree, flow.H(*a)); err != nil {
+		if tip, _, _, err := e.git.InspectWorktree(ctx, a.Worktree, flow.H(*a)); err != nil {
 			return err
 		} else if tip != a.BaseCommit {
 			return e.refuse(id, "nothing_new", "The worker committed since it reported nothing to change; send it back or wait for its ready.")
@@ -962,7 +962,7 @@ func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args js
 			note := fmt.Sprintf("Closed by sheepdog factory: retried after %s (%s).", reason, why)
 			ctx, cancel := context.WithTimeout(context.Background(), ghTimeout)
 			defer cancel()
-			if _, err := closeOpenPR(ctx, s.Project.Folder, *a, note); err != nil {
+			if _, err := e.closeOpenPR(ctx, s.Project.Folder, *a, note); err != nil {
 				return err // before any run is stopped: the task is as it was
 			}
 			if err := e.stopRuns(ctx, taskRuns(id, *t)); err != nil {

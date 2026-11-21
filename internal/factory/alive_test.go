@@ -47,7 +47,7 @@ func TestWorkerKilledMidTurnResumedAndTaskFinishes(t *testing.T) {
 	gh := installFakeGH(t)
 	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
 
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 	eng.Now = func() time.Time { return now }
 	if err := eng.Start(repo, "Demo alive", 2); err != nil {
@@ -175,7 +175,7 @@ func TestResumeFailedFallsBackToHandoffNote(t *testing.T) {
 	repo, _ := initGitRepoWithRemote(t)
 	now := time.Date(2026, 11, 20, 11, 0, 0, 0, time.UTC)
 
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 	eng.Now = func() time.Time { return now }
 	if err := eng.Start(repo, "Handoff goal", 2); err != nil {
@@ -248,7 +248,7 @@ func TestWorkerRestartsBackoffSlotsAndCoordinatorWake(t *testing.T) {
 	repo, _ := initGitRepoWithRemote(t)
 	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
 
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 	eng.Now = func() time.Time { return now }
 	if err := eng.Start(repo, "Backoff goal", 1); err != nil { // max_running = 1
@@ -435,7 +435,7 @@ func TestParkUnparkAndAmendRequestRestartUncounted(t *testing.T) {
 	repo, _ := initGitRepoWithRemote(t)
 	now := time.Date(2026, 11, 20, 13, 0, 0, 0, time.UTC)
 
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 	eng.Now = func() time.Time { return now }
 	if err := eng.Start(repo, "Park goal", 2); err != nil {
@@ -501,7 +501,7 @@ func TestReviewerNoReportRetriesCandidateRotationThenFails(t *testing.T) {
 	repo, _ := initGitRepoWithRemote(t)
 	githubOrigin(t, repo)
 	gh := installFakeGH(t)
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 	if err := eng.Start(repo, "Reviewer retries", 2); err != nil {
 		t.Fatal(err)
@@ -929,7 +929,7 @@ func TestSessionIDSavedBeforeLaunchAndKeptAcrossCrash(t *testing.T) {
 	client := hc.NewClient(srv.Path)
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 	if err := eng.Start(repo, "Crash goal", 2); err != nil {
 		t.Fatal(err)
@@ -983,7 +983,7 @@ func TestResumableFalseWhenLaunchFails(t *testing.T) {
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
 	now := time.Date(2026, 11, 20, 16, 0, 0, 0, time.UTC)
-	eng := New(paths, hc.NewClient(methodFailProxy(t, srv.Path, "terminal.run", &failRun)))
+	eng := newGitTestEngine(t, paths, hc.NewClient(methodFailProxy(t, srv.Path, "terminal.run", &failRun)))
 	eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 	eng.Now = func() time.Time { return now }
 	if err := eng.Start(repo, "Launch fail goal", 2); err != nil {

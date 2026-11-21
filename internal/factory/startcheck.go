@@ -48,6 +48,17 @@ func StartChecks(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	run := o.RunCommand
 	o.RunCommand = func(ctx context.Context, dir string, env []string, argv ...string) CommandOutput {
 		if argv[0] == "git" { // a credential prompt must fail fast, not wait
+			if o.Git != nil {
+				args := argv[1:]
+				if len(args) >= 2 && args[0] == "-C" {
+					dir, args = args[1], args[2:]
+				}
+				r, err := o.Git.Run(ctx, dir, args...)
+				if err != nil {
+					return CommandOutput{Exit: -1, Err: err, Stderr: err.Error()}
+				}
+				return CommandOutput{Stdout: string(r.Stdout), Stderr: string(r.Stderr)}
+			}
 			env = append(slices.Clone(env), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=")
 		}
 		return run(ctx, dir, env, argv...)

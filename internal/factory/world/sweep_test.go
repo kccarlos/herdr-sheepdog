@@ -14,7 +14,7 @@ import (
 
 func mustGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	out, err := gitCmd(context.Background(), dir, args...)
+	out, err := fixtureGit(t).gitCmd(context.Background(), dir, args...)
 	if err != nil {
 		t.Fatalf("git %v: %v", args, err)
 	}
@@ -39,17 +39,17 @@ func TestSweepFindersAndUnknown(t *testing.T) {
 	mustGit(t, repo, "remote", "set-head", "origin", "main")
 
 	// Open attempt T1 (owned: must NOT be flagged).
-	wt1, err := NewWorktree(ctx, repo, filepath.Join(wtRoot, "T1-1"), "T1", "active")
+	wt1, err := fixtureGit(t).NewWorktree(ctx, repo, filepath.Join(wtRoot, "T1-1"), "T1", "active")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Done task T2 whose worktree is still present (must be flagged).
-	wt2, err := NewWorktree(ctx, repo, filepath.Join(wtRoot, "T2-1"), "T2", "done")
+	wt2, err := fixtureGit(t).NewWorktree(ctx, repo, filepath.Join(wtRoot, "T2-1"), "T2", "done")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Orphan worktree under wtRoot + orphan task/* branch (both flagged).
-	wtOrphan, err := NewWorktree(ctx, repo, filepath.Join(wtRoot, "T9-1"), "T9", "orphan")
+	wtOrphan, err := fixtureGit(t).NewWorktree(ctx, repo, filepath.Join(wtRoot, "T9-1"), "T9", "orphan")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestSweepFindersAndUnknown(t *testing.T) {
 		},
 	}
 
-	probes := Sweep(ctx, client, repo, wtRoot, st)
+	probes := fixtureGit(t).Sweep(ctx, client, repo, wtRoot, st)
 	byProbe := map[string]flow.SweepProbe{}
 	for _, p := range probes {
 		if p.Unknown != "" {
@@ -146,7 +146,7 @@ func TestSweepFindersAndUnknown(t *testing.T) {
 	}
 
 	// Probe errors must report Unknown, never a false negative.
-	badProbes := Sweep(ctx, nil, t.TempDir(), "", st)
+	badProbes := fixtureGit(t).Sweep(ctx, nil, t.TempDir(), "", st)
 	for _, p := range badProbes {
 		if p.Unknown == "" {
 			t.Errorf("probe %s reported empty Unknown on failure (items=%+v)", p.Probe, p.Items)
@@ -212,7 +212,7 @@ func TestSweepLeftoverWorktreeInProjectDirReportedOnceWithBranch(t *testing.T) {
 
 	st := flow.State{Project: flow.Project{ID: "proj-wt1", Folder: repo}}
 	byProbe := map[string]flow.SweepProbe{}
-	for _, p := range Sweep(ctx, nil, repo, filepath.Dir(wtDir), st) {
+	for _, p := range fixtureGit(t).Sweep(ctx, nil, repo, filepath.Dir(wtDir), st) {
 		byProbe[p.Probe] = p
 	}
 	wtItems := byProbe["worktrees"].Items
@@ -242,20 +242,20 @@ func TestSweepOwnershipAnyAttemptAndDoneCleanupGate(t *testing.T) {
 	mustGit(t, repo, "remote", "set-head", "origin", "main")
 
 	// T1: done, worktree cleanly removed, local branch still exists -> NOT a leftover branch.
-	wt1, err := NewWorktree(ctx, repo, filepath.Join(wtRoot, "T1-1"), "T1", "done-clean")
+	wt1, err := fixtureGit(t).NewWorktree(ctx, repo, filepath.Join(wtRoot, "T1-1"), "T1", "done-clean")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed, err := RemoveWorktree(ctx, repo, wt1.Path); err != nil || !removed {
+	if removed, err := fixtureGit(t).RemoveWorktree(ctx, repo, wt1.Path); err != nil || !removed {
 		t.Fatalf("RemoveWorktree(T1) = %v, %v", removed, err)
 	}
 	// T2: done, NO cleanup act yet, worktree still present -> NOT reported (pre-N1 pass).
-	wt2, err := NewWorktree(ctx, repo, filepath.Join(wtRoot, "T2-1"), "T2", "done-pre-cleanup")
+	wt2, err := fixtureGit(t).NewWorktree(ctx, repo, filepath.Join(wtRoot, "T2-1"), "T2", "done-pre-cleanup")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// T3: done, cleanup act exists, worktree still present -> MUST be reported.
-	wt3, err := NewWorktree(ctx, repo, filepath.Join(wtRoot, "T3-1"), "T3", "done-after-cleanup")
+	wt3, err := fixtureGit(t).NewWorktree(ctx, repo, filepath.Join(wtRoot, "T3-1"), "T3", "done-after-cleanup")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,16 +263,16 @@ func TestSweepOwnershipAnyAttemptAndDoneCleanupGate(t *testing.T) {
 	mustGit(t, repo, "branch", "task/T4-dropped")
 	mustGit(t, repo, "branch", "task/T5-split")
 	// T6: retry-closed attempt 1 (worktree kept on purpose by engine) + open attempt 2 -> NEITHER reported.
-	wt6a, err := NewWorktree(ctx, repo, filepath.Join(wtRoot, "T6-1"), "T6-1", "retry-closed")
+	wt6a, err := fixtureGit(t).NewWorktree(ctx, repo, filepath.Join(wtRoot, "T6-1"), "T6-1", "retry-closed")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wt6b, err := NewWorktree(ctx, repo, filepath.Join(wtRoot, "T6-2"), "T6-2", "active")
+	wt6b, err := fixtureGit(t).NewWorktree(ctx, repo, filepath.Join(wtRoot, "T6-2"), "T6-2", "active")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// True orphans named by no attempt -> MUST be reported.
-	wtOrphan, err := NewWorktree(ctx, repo, filepath.Join(wtRoot, "T9-1"), "T9", "orphan")
+	wtOrphan, err := fixtureGit(t).NewWorktree(ctx, repo, filepath.Join(wtRoot, "T9-1"), "T9", "orphan")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestSweepOwnershipAnyAttemptAndDoneCleanupGate(t *testing.T) {
 	}
 
 	byProbe := map[string]flow.SweepProbe{}
-	for _, p := range Sweep(ctx, nil, repo, wtRoot, st) {
+	for _, p := range fixtureGit(t).Sweep(ctx, nil, repo, wtRoot, st) {
 		byProbe[p.Probe] = p
 	}
 	gotWT := map[string]string{}
@@ -330,7 +330,7 @@ func TestSweepWithoutStateReportsUnknownAndRunsLocalBase(t *testing.T) {
 	mustGit(t, repo, "push", "-u", "origin", "main")
 	mustGit(t, repo, "remote", "set-head", "origin", "main")
 
-	if _, err := NewWorktree(ctx, repo, filepath.Join(wtRoot, "T1-1"), "T1", "active"); err != nil {
+	if _, err := fixtureGit(t).NewWorktree(ctx, repo, filepath.Join(wtRoot, "T1-1"), "T1", "active"); err != nil {
 		t.Fatal(err)
 	}
 	mustGit(t, repo, "branch", "task/user-branch")
@@ -347,7 +347,7 @@ func TestSweepWithoutStateReportsUnknownAndRunsLocalBase(t *testing.T) {
 	}
 
 	byProbe := map[string]flow.SweepProbe{}
-	for _, p := range Sweep(ctx, client, repo, wtRoot, flow.State{}) {
+	for _, p := range fixtureGit(t).Sweep(ctx, client, repo, wtRoot, flow.State{}) {
 		byProbe[p.Probe] = p
 	}
 	for _, name := range []string{"terminals", "worktrees", "branches"} {

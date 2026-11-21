@@ -19,6 +19,8 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
 
@@ -114,7 +116,7 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 			fprintf(stderr, "sheepdog factory start: warning: could not read project settings (%v); codex check skipped\n", err)
 		}
 		var failed []string
-		for _, r := range factoryStartChecks(ctx, factory.DoctorOptions{Folder: folder, DataDir: cfg.DataDir, GHHost: os.Getenv("GH_HOST")}) {
+		for _, r := range factoryStartChecks(ctx, factory.DoctorOptions{Folder: folder, DataDir: cfg.DataDir, GHHost: os.Getenv("GH_HOST"), Git: world.NewGit(hc.NewClient(cfg.Herdr.HCSocketPath()), nil)}) {
 			if r.Status == onboard.Fail {
 				failed = append(failed, r.Line())
 			}
@@ -373,9 +375,11 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 			return 1
 		}
 	}
-	head, err := gitRevParse(ctx, "--verify", "HEAD^{commit}")
+	socket := cmp.Or(os.Getenv("HC_SOCKET"), os.Getenv("SHEEPDOG_HC_SOCKET"), (config.Herdr{}).HCSocketPath())
+	git := world.NewGit(hc.NewClient(socket), nil)
+	head, err := gitRevParse(ctx, git, "--verify", "HEAD^{commit}")
 	if err == nil && len(proofs) > 0 {
-		err = runProofs(ctx, head, proofs)
+		err = runProofs(ctx, git, head, proofs)
 	}
 	if err == nil {
 		body := map[string]any{"head": head}
@@ -413,25 +417,16 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 	return 0
 }
 
-func gitRevParse(ctx context.Context, args ...string) (string, error) {
+func gitRevParse(ctx context.Context, git *world.Git, args ...string) (string, error) {
 	gctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(gctx, "git", append([]string{"rev-parse"}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.CombinedOutput()
-	s := strings.TrimSpace(string(out))
-	if err != nil {
-		return "", errors.New(err.Error() + ": " + s)
-	}
-	return s, nil
+	r, err := git.Run(gctx, ".", append([]string{"rev-parse"}, args...)...)
+	return strings.TrimSpace(string(r.Stdout)), err
 }
 
-func runProofs(ctx context.Context, head string, proofs []flow.Proof) error {
-	out, err := gitRevParse(ctx, "--git-dir", "--show-toplevel")
+func runProofs(ctx context.Context, git *world.Git, head string, proofs []flow.Proof) error {
+	out, err := gitRevParse(ctx, git, "--absolute-git-dir", "--show-toplevel")
 	gitDir, topLevel, _ := strings.Cut(out, "\n")
-	if err == nil {
-		gitDir, err = filepath.Abs(gitDir)
-	}
 	if err != nil {
 		return err
 	}

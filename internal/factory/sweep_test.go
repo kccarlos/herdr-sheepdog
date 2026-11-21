@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
-	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
@@ -33,13 +32,13 @@ func setupSweepRepo(t *testing.T) (repo, id string, paths Paths, srv *hctest.Ser
 	gitIn(t, repo, "remote", "set-head", "origin", "main")
 
 	var err error
-	repo, id, err = world.RepoProject(ctx, repo, true)
+	repo, id, err = fixtureGit(t).RepoProject(ctx, repo, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	paths = Paths{DataDir: t.TempDir()}
 
-	wt2, err := world.NewWorktree(ctx, repo, paths.Worktree(id, "T2", 1), "T2-1", "done task")
+	wt2, err := fixtureGit(t).NewWorktree(ctx, repo, paths.Worktree(id, "T2", 1), "T2-1", "done task")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,6 +59,8 @@ func setupSweepRepo(t *testing.T) (repo, id string, paths Paths, srv *hctest.Ser
 	localSHA = gitIn(t, repo, "rev-parse", "refs/heads/main")
 
 	srv = hctest.New(t)
+
+	srv.OnExec = hctest.GitExec
 	client := hc.NewClient(srv.Path)
 	coord, err := client.Run(ctx, hc.RunParams{Name: coordName(id), Cwd: repo, Argv: []string{"true"}, Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleCoordinator, "sheepdog.run": "run-coord"}})
 	if err != nil {
@@ -87,7 +88,7 @@ func setupSweepRepo(t *testing.T) (repo, id string, paths Paths, srv *hctest.Ser
 func TestEngineSweepWakesOnceAndThrottled10Minutes(t *testing.T) {
 	repo, id, paths, srv, strayAddr, wt2Path, localSHA := setupSweepRepo(t)
 	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
-	eng := New(paths, hc.NewClient(srv.Path))
+	eng := newGitTestEngine(t, paths, hc.NewClient(srv.Path))
 	eng.Now = func() time.Time { return now }
 
 	// Pass 1: sweep finds stray terminal, done T2 worktree, leftover branches (wt2 + orphan), local main ahead.
@@ -188,7 +189,7 @@ func TestDoctorListsSweepLeftoversAsWarn(t *testing.T) {
 
 func TestEngineSweepLogLineNamesItems(t *testing.T) {
 	_, id, paths, srv, strayAddr, wt2Path, _ := setupSweepRepo(t)
-	eng := New(paths, hc.NewClient(srv.Path))
+	eng := newGitTestEngine(t, paths, hc.NewClient(srv.Path))
 	eng.passProject(context.Background(), id, false)
 
 	lines, _, err := ProjectLog(context.Background(), paths, id, 0)
@@ -231,12 +232,14 @@ func TestDoctorLiveCoordinatorReportsNoStray(t *testing.T) {
 	gitIn(t, repo, "commit", "-m", "init")
 	gitIn(t, repo, "push", "-u", "origin", "main")
 	gitIn(t, repo, "remote", "set-head", "origin", "main")
-	repo, id, err := world.RepoProject(ctx, repo, true)
+	repo, id, err := fixtureGit(t).RepoProject(ctx, repo, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	srv := hctest.New(t)
+
+	srv.OnExec = hctest.GitExec
 	client := hc.NewClient(srv.Path)
 	coord, err := client.Run(ctx, hc.RunParams{
 		Name:   coordName(id),
@@ -325,7 +328,7 @@ func TestDoctorNoStateReportsUnknownNeverItemsAndRunsLocalBase(t *testing.T) {
 		}
 		gitIn(t, repo, "add", "a.txt")
 		gitIn(t, repo, "commit", "-m", "ahead 1")
-		repo, id, err := world.RepoProject(ctx, repo, initProject)
+		repo, id, err := fixtureGit(t).RepoProject(ctx, repo, initProject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -370,10 +373,11 @@ func TestDoctorNoStateReportsUnknownNeverItemsAndRunsLocalBase(t *testing.T) {
 	t.Run("mismatched or corrupt state with live worker and worktree", func(t *testing.T) {
 		repo, id := makeRepo(true)
 		realPaths := Paths{DataDir: t.TempDir()}
-		if _, err := world.NewWorktree(ctx, repo, realPaths.Worktree(id, "T1", 1), "T1", "active"); err != nil {
+		if _, err := fixtureGit(t).NewWorktree(ctx, repo, realPaths.Worktree(id, "T1", 1), "T1", "active"); err != nil {
 			t.Fatal(err)
 		}
 		srv := hctest.New(t)
+		srv.OnExec = hctest.GitExec
 		client := hc.NewClient(srv.Path)
 		for _, p := range []hc.RunParams{
 			{Name: coordName(id), Cwd: repo, Argv: []string{"true"}, Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleCoordinator}},
@@ -419,6 +423,7 @@ func TestDoctorNoStateReportsUnknownNeverItemsAndRunsLocalBase(t *testing.T) {
 		repo, _ := makeRepo(false)
 		gitIn(t, repo, "branch", "task/my-feature")
 		srv := hctest.New(t)
+		srv.OnExec = hctest.GitExec
 		srv.OnRun = func(term hc.Terminal, _ hc.RunParams) { srv.FinishExit(term.Address, "exited", 0) }
 		rs := Doctor(ctx, DoctorOptions{
 			Folder: repo, HCSocket: srv.Path, DataDir: t.TempDir(), Canary: false,
@@ -462,6 +467,7 @@ func TestDoctorNoStateReportsUnknownNeverItemsAndRunsLocalBase(t *testing.T) {
 			t.Fatal(err)
 		}
 		srv := hctest.New(t)
+		srv.OnExec = hctest.GitExec
 		srv.OnRun = func(term hc.Terminal, _ hc.RunParams) { srv.FinishExit(term.Address, "exited", 0) }
 		rs := Doctor(ctx, DoctorOptions{
 			Folder: repo, HCSocket: srv.Path, DataDir: corruptPaths.DataDir, Canary: false,

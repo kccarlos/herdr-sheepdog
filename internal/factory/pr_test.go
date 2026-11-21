@@ -156,7 +156,7 @@ func TestPRSnapshotFactsAndFailure(t *testing.T) {
 	githubOrigin(t, repo)
 	gh := installFakeGH(t)
 	paths := testPaths(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestGitHubUnavailableHoldsMerge(t *testing.T) {
 	repo, base := initGitRepoWithRemote(t)
 	githubOrigin(t, repo)
 	gh := installFakeGH(t)
-	eng := New(testPaths(t), nil)
+	eng := newGitTestEngine(t, testPaths(t), nil)
 	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +298,7 @@ func TestWorkflowRunsDeniedHoldsMerge(t *testing.T) {
 	repo, base := initGitRepoWithRemote(t)
 	githubOrigin(t, repo)
 	gh := installFakeGH(t)
-	eng := New(testPaths(t), nil)
+	eng := newGitTestEngine(t, testPaths(t), nil)
 	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}

@@ -22,6 +22,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
 
@@ -427,6 +428,7 @@ func TestFactoryPlanApplyCLI(t *testing.T) {
 // TestFactoryReportReadyCLI checks that `sheepdog factory report ready` reads
 // HEAD from the worktree and sends it with SHEEPDOG_RUN_TOKEN (design.md 7.2, 9.3).
 func TestFactoryReportReadyCLI(t *testing.T) {
+	setFactoryGitSocket(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
@@ -548,6 +550,7 @@ func TestFactoryReportReadyCLI(t *testing.T) {
 // worktree's .git dir (leaving git status clean), records exit codes and
 // timeouts, checks --artifact existence, and sends proofs to the daemon.
 func TestFactoryReportReadyProofsCLI(t *testing.T) {
+	setFactoryGitSocket(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
@@ -896,6 +899,7 @@ func TestFactoryTaskAndAmendCLI(t *testing.T) {
 }
 
 func setupProofTestEnv(t *testing.T) (wt string, lastProofs *[]flow.Proof) {
+	setFactoryGitSocket(t)
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -1032,6 +1036,7 @@ func TestFactoryReportReadyProofTimeoutKillsProcessGroup(t *testing.T) {
 // --skipped ""), omitted when not passed, and refused with --reject or
 // --nothing-to-change.
 func TestFactoryReportReadyTouchedSkippedCLI(t *testing.T) {
+	setFactoryGitSocket(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
@@ -1165,4 +1170,11 @@ func TestFactoryTemplatesNameRealCommands(t *testing.T) {
 			t.Errorf("%s: no `{sheepdog} factory` command found; the check reads nothing", role)
 		}
 	}
+}
+
+func setFactoryGitSocket(t *testing.T) {
+	t.Helper()
+	srv := hctest.New(t)
+	srv.OnExec = hctest.GitExec
+	t.Setenv("HC_SOCKET", srv.Path)
 }

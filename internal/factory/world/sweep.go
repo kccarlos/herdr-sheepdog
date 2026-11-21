@@ -14,15 +14,15 @@ import (
 
 // Sweep runs all sweep finders for a project (design.md 11.3): stray terminals,
 // orphan or done-task worktrees, orphan task/* branches, and local base ahead.
-func Sweep(ctx context.Context, client *hc.Client, repo, worktreeRoot string, s flow.State) []flow.SweepProbe {
+func (g *Git) Sweep(ctx context.Context, client *hc.Client, repo, worktreeRoot string, s flow.State) []flow.SweepProbe {
 	lbProbe := flow.SweepProbe{Probe: "local_base"}
-	if ref, _, err := remoteBaseCommit(ctx, repo, false); err != nil {
+	if ref, _, err := g.remoteBaseCommit(ctx, repo, false); err != nil {
 		lbProbe.Unknown = err.Error()
 	} else {
 		rb := strings.TrimPrefix(ref, "refs/remotes/")
 		_, base, _ := strings.Cut(rb, "/")
-		sha, e1 := gitCmd(ctx, repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+base+"^{commit}")
-		out, e2 := gitCmd(ctx, repo, "rev-list", "--count", ref+"..refs/heads/"+base)
+		sha, e1 := g.gitCmd(ctx, repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+base+"^{commit}")
+		out, e2 := g.gitCmd(ctx, repo, "rev-list", "--count", ref+"..refs/heads/"+base)
 		if n, e3 := strconv.Atoi(strings.TrimSpace(out)); cmp.Or(e1, e2, e3) != nil {
 			lbProbe.Unknown = cmp.Or(e1, e2, e3).Error()
 		} else if n > 0 {
@@ -45,7 +45,7 @@ func Sweep(ctx context.Context, client *hc.Client, repo, worktreeRoot string, s 
 		}
 	}
 	wtProbe, brProbe, wtBr := flow.SweepProbe{Probe: "worktrees"}, flow.SweepProbe{Probe: "branches"}, map[string]bool{}
-	if out, err := gitCmd(ctx, repo, "worktree", "list", "--porcelain"); err != nil {
+	if out, err := g.gitCmd(ctx, repo, "worktree", "list", "--porcelain"); err != nil {
 		wtProbe.Unknown = err.Error()
 	} else {
 		mainRepo, wtRoot := realPath(repo), realPath(worktreeRoot)
@@ -69,7 +69,7 @@ func Sweep(ctx context.Context, client *hc.Client, repo, worktreeRoot string, s 
 			}
 		}
 	}
-	if out, err := gitCmd(ctx, repo, "branch", "--list", "--format=%(refname:short)", "task/*"); err != nil {
+	if out, err := g.gitCmd(ctx, repo, "branch", "--list", "--format=%(refname:short)", "task/*"); err != nil {
 		brProbe.Unknown = err.Error()
 	} else {
 		for ln := range strings.Lines(out) {

@@ -260,9 +260,9 @@ func TestNothingToChangeN8ThenClose(t *testing.T) {
 	ctx := context.Background()
 	paths := testPaths(t)
 	repo, base := initGitRepoWithRemote(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 	const id = "proj-nothing"
-	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(id, "T1", 1), "T1", "feat: x")
+	wt, err := fixtureGit(t).NewWorktree(ctx, repo, paths.Worktree(id, "T1", 1), "T1", "feat: x")
 	if err != nil {
 		t.Fatal(err)
 	}

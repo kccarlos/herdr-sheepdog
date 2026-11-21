@@ -31,8 +31,11 @@ const pushRemote = "origin"
 // ghRepo is OWNER/NAME of the push remote, read from its configured URL
 // (before any insteadOf rewrite). A gh call with no repo is refused
 // (design.md 9.4).
-func ghRepo(ctx context.Context, dir string) (string, error) {
-	url, _ := gitCmd(ctx, dir, "config", "--get", "remote."+pushRemote+".url")
+func (g *Git) ghRepo(ctx context.Context, dir string) (string, error) {
+	url, err := g.gitCmd(ctx, dir, "config", "--get", "remote."+pushRemote+".url")
+	if err != nil && !gitExit(err, 1) {
+		return "", err
+	}
 	m := githubRepoRe.FindStringSubmatch(url)
 	if m == nil {
 		return "", Fail(flow.ClassSettled, fmt.Errorf("world: remote %s of %s is not a github.com repo (%q)", pushRemote, dir, url))
@@ -84,15 +87,15 @@ func capTitle(s string) string {
 // branch that moved elsewhere refuses it) and makes sure one PR is open for
 // branch against the remote base, decided by flow.PRAdoptRows (design.md 9.4,
 // KB-GIT-2). It returns the PR number.
-func PushAndOpenPR(ctx context.Context, worktree, branch, head, title, body string) (int, error) {
-	repo, err := ghRepo(ctx, worktree)
+func (g *Git) PushAndOpenPR(ctx context.Context, worktree, branch, head, title, body string) (int, error) {
+	repo, err := g.ghRepo(ctx, worktree)
 	if err != nil {
 		return 0, err
 	}
-	if _, err := gitCmd(ctx, worktree, "push", pushRemote, head+":refs/heads/"+branch); err != nil {
+	if _, err := g.gitCmd(ctx, worktree, "push", pushRemote, head+":refs/heads/"+branch); err != nil {
 		return 0, err
 	}
-	ref, _, err := remoteBaseCommit(ctx, worktree, false)
+	ref, _, err := g.remoteBaseCommit(ctx, worktree, false)
 	if err != nil {
 		return 0, err
 	}
@@ -152,12 +155,12 @@ type rawPRView struct {
 // (KB-GIT-20). A failed extra call is returned in warn, never green or
 // re-runnable: stopped_unknown, absent, BehindUnknown. HeadRel and HeadSince
 // are left to the caller.
-func PRSnapshot(ctx context.Context, repoDir, branch string, number int) (p flow.PR, warn, err error) {
-	repo, err := ghRepo(ctx, repoDir)
+func (g *Git) PRSnapshot(ctx context.Context, repoDir, branch string, number int) (p flow.PR, warn, err error) {
+	repo, err := g.ghRepo(ctx, repoDir)
 	if err != nil {
 		return flow.PR{}, nil, err
 	}
-	baseRef, _, err := remoteBaseCommit(ctx, repoDir, false)
+	baseRef, _, err := g.remoteBaseCommit(ctx, repoDir, false)
 	if err != nil {
 		return flow.PR{Checks: flow.ChecksUnreadable}, nil, err
 	}
@@ -392,12 +395,12 @@ type BaseRun struct {
 // and none is red; unknown while any run is still in progress or when no run
 // exists for that commit (path-ignored push). Read errors are returned so
 // callers keep the last known state and never flip red.
-func BaseStatus(ctx context.Context, repoDir string) (BaseRun, error) {
-	repo, err := ghRepo(ctx, repoDir)
+func (g *Git) BaseStatus(ctx context.Context, repoDir string) (BaseRun, error) {
+	repo, err := g.ghRepo(ctx, repoDir)
 	if err != nil {
 		return BaseRun{}, err
 	}
-	ref, _, err := remoteBaseCommit(ctx, repoDir, false)
+	ref, _, err := g.remoteBaseCommit(ctx, repoDir, false)
 	if err != nil {
 		return BaseRun{}, err
 	}
@@ -481,11 +484,11 @@ func runCancelledByLimit(ctx context.Context, dir, repo string, runID int64) (bo
 // (design.md 9.4, KB-MRG-10). The squash body is the caller's, built from
 // task fields only. Its result is not trusted: only a later snapshot that
 // reads merged ends the task (N2, KB-MRG-9).
-func MergePR(ctx context.Context, repoDir string, number int, head, body string) error {
+func (g *Git) MergePR(ctx context.Context, repoDir string, number int, head, body string) error {
 	if number <= 0 || head == "" {
 		return Fail(flow.ClassSettled, fmt.Errorf("world: merge needs a PR number and a head (got #%d at %q)", number, head))
 	}
-	repo, err := ghRepo(ctx, repoDir)
+	repo, err := g.ghRepo(ctx, repoDir)
 	if err != nil {
 		return err
 	}
@@ -495,11 +498,11 @@ func MergePR(ctx context.Context, repoDir string, number int, head, body string)
 
 // ClosePR closes PR number with a short comment and keeps its branch (never
 // --delete-branch, never merges; design.md 4.1 N1, 4.9).
-func ClosePR(ctx context.Context, repoDir string, number int, note string) error {
+func (g *Git) ClosePR(ctx context.Context, repoDir string, number int, note string) error {
 	if number <= 0 || strings.TrimSpace(note) == "" {
 		return Fail(flow.ClassSettled, fmt.Errorf("world: close PR needs a PR number and a note (got #%d)", number))
 	}
-	repo, err := ghRepo(ctx, repoDir)
+	repo, err := g.ghRepo(ctx, repoDir)
 	if err != nil {
 		return err
 	}
@@ -510,15 +513,15 @@ func ClosePR(ctx context.Context, repoDir string, number int, note string) error
 // DeleteRemoteBranch deletes branch on the push remote. The caller calls it
 // only once the PR reads merged, never as part of the merge (design.md
 // 9.4). A branch already gone (GitHub may delete it on merge) is not an error.
-func DeleteRemoteBranch(ctx context.Context, dir, branch string) error {
+func (g *Git) DeleteRemoteBranch(ctx context.Context, dir, branch string) error {
 	if branch == "" {
 		return Fail(flow.ClassSettled, errors.New("world: no branch to delete"))
 	}
-	out, err := gitCmd(ctx, dir, "ls-remote", "--heads", pushRemote, "refs/heads/"+branch)
+	out, err := g.gitCmd(ctx, dir, "ls-remote", "--heads", pushRemote, "refs/heads/"+branch)
 	if err != nil || out == "" {
 		return err
 	}
-	_, err = gitCmd(ctx, dir, "push", pushRemote, "--delete", "refs/heads/"+branch)
+	_, err = g.gitCmd(ctx, dir, "push", pushRemote, "--delete", "refs/heads/"+branch)
 	return err
 }
 
@@ -529,8 +532,8 @@ var ErrNoDispatchWorkflow = errors.New("world: no dispatch_workflow set, or its 
 
 // RerunFailedJobs asks GitHub Actions to re-run the failed (or cancelled)
 // jobs of one workflow run (design.md 9.4, N33, N34).
-func RerunFailedJobs(ctx context.Context, repoDir, runID string) error {
-	repo, err := ghRepo(ctx, repoDir)
+func (g *Git) RerunFailedJobs(ctx context.Context, repoDir, runID string) error {
+	repo, err := g.ghRepo(ctx, repoDir)
 	if err != nil {
 		return err
 	}
@@ -540,11 +543,11 @@ func RerunFailedJobs(ctx context.Context, repoDir, runID string) error {
 
 // UpdateBranch asks GitHub to bring PR number up to date with its base using a
 // merge commit, pinned to expectedHead (design.md 9.4, N40, KB-MRG-43).
-func UpdateBranch(ctx context.Context, repoDir string, number int, expectedHead string) error {
+func (g *Git) UpdateBranch(ctx context.Context, repoDir string, number int, expectedHead string) error {
 	if number <= 0 || expectedHead == "" {
 		return Fail(flow.ClassSettled, fmt.Errorf("world: update-branch needs a PR number and an expected head (got #%d at %q)", number, expectedHead))
 	}
-	repo, err := ghRepo(ctx, repoDir)
+	repo, err := g.ghRepo(ctx, repoDir)
 	if err != nil {
 		return err
 	}
@@ -555,16 +558,19 @@ func UpdateBranch(ctx context.Context, repoDir string, number int, expectedHead 
 // DispatchWorkflow dispatches the owner-named workflow on branch, only if
 // .github/workflows/<name> exists at head. Dispatch is opt-in by name: a
 // dispatchable workflow can deploy or release (design.md 9.4, N35).
-func DispatchWorkflow(ctx context.Context, worktree, branch, head, name string) error {
+func (g *Git) DispatchWorkflow(ctx context.Context, worktree, branch, head, name string) error {
 	if !flow.WorkflowFile.MatchString(name) { // also here: settings are reloaded from disk each pass
 		return ErrNoDispatchWorkflow
 	}
-	repo, err := ghRepo(ctx, worktree)
+	repo, err := g.ghRepo(ctx, worktree)
 	if err != nil {
 		return err
 	}
-	if _, err := gitCmd(ctx, worktree, "cat-file", "-e", head+":.github/workflows/"+name); err != nil {
-		return ErrNoDispatchWorkflow
+	if _, err := g.gitCmd(ctx, worktree, "cat-file", "-e", head+":.github/workflows/"+name); err != nil {
+		if gitExit(err, 128) {
+			return ErrNoDispatchWorkflow
+		}
+		return err
 	}
 	// The file's own dispatches endpoint: gh workflow run would resolve the
 	// value as an id or a display name too.
