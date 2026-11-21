@@ -56,10 +56,14 @@ func CheckInvariants(snap InvariantSnapshot) []InvariantViolation {
 			switch {
 			case closed:
 				pfx = fmt.Sprintf("task %s closed attempt %d", t.ID, i+1)
-			case Ended(t) && (Done(a.Acts, AskCleanup) || Exhausted(a.Acts, AskCleanup, s.Settings)):
-				pfx = "ended task " + t.ID + " still"
-			case t.Parked && Exhausted(a.Acts, AskStopRuns, s.Settings):
-				pfx = "parked task " + t.ID + " (stop_runs exhausted)"
+			case Ended(t):
+				if Done(a.Acts, AskCleanup) || Exhausted(a.Acts, AskCleanup, s.Settings) {
+					pfx = "ended task " + t.ID + " still"
+				}
+			case t.Parked:
+				if Exhausted(a.Acts, AskStopRuns, s.Settings) {
+					pfx = "parked task " + t.ID + " (stop_runs exhausted)"
+				}
 			case rLive && !snap.Skipped[t.ID]:
 				rev, in := a.Review, In{Task: t, Settings: s.Settings, Now: snap.Now}
 				switch {

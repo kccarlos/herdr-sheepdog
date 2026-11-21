@@ -368,7 +368,9 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	}
 	if ctx.Err() == nil {
 		now := e.now()
-		e.passProjectRulesLocked(ctx, id, &s, now)
+		if coordErr == nil {
+			e.passProjectRulesLocked(ctx, id, &s, now)
+		}
 		e.checkInvariantsLocked(id, &s, skipped, now)
 	}
 }

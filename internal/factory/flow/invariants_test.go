@@ -55,6 +55,28 @@ func TestCheckInvariantsCleanStates(t *testing.T) {
 		}
 	})
 
+	t.Run("ended or parked task retrying stop with stale live reviewer is being stopped", func(t *testing.T) {
+		snap := cleanSnapshot()
+		snap.State.Tasks[0].Dropped = &Dropped{Why: "obsolete"}
+		a := &snap.State.Tasks[0].Attempts[0]
+		a.Rounds = []Round{{N: 1, Kind: RoundSendBack, Head: "c1", Verdict: VerdictChanges, Why: "rethink"}}
+		a.Review = &ReviewRun{Round: 1, Head: "c1", RunID: "rev-1", Run: &RunRecord{Address: "rev-1", Role: RoleReviewer, State: PhaseWorking}}
+		a.Acts = []Act{{Key: AskCleanup, Result: "failed", Class: ClassTransient, Err: "kill failed", At: snap.Now}}
+		if vs := CheckInvariants(snap); len(vs) != 0 {
+			t.Fatalf("ended task retrying cleanup should not fire I1, got %+v", vs)
+		}
+
+		snap2 := cleanSnapshot()
+		snap2.State.Tasks[0].Parked = true
+		a2 := &snap2.State.Tasks[0].Attempts[0]
+		a2.Rounds = []Round{{N: 1, Kind: RoundSendBack, Head: "c1", Verdict: VerdictChanges, Why: "rethink"}}
+		a2.Review = &ReviewRun{Round: 1, Head: "c1", RunID: "rev-1", Run: &RunRecord{Address: "rev-1", Role: RoleReviewer, State: PhaseWorking}}
+		a2.Acts = []Act{{Key: AskStopRuns, Result: "failed", Class: ClassTransient, Err: "kill failed", At: snap2.Now}}
+		if vs := CheckInvariants(snap2); len(vs) != 0 {
+			t.Fatalf("parked task retrying stop_runs should not fire I1, got %+v", vs)
+		}
+	})
+
 	t.Run("parked task before stop_runs exhausts is being stopped", func(t *testing.T) {
 		snap := cleanSnapshot()
 		snap.State.Tasks[0].Parked = true

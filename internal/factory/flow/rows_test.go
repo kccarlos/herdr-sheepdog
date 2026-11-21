@@ -1687,3 +1687,29 @@ func TestN29UnansweredPRHoldsReviewer(t *testing.T) {
 		t.Fatalf("exhausted start_reviewer while unanswered = %s, want N5", r.ID)
 	}
 }
+
+// TestN29UnclassifiedPRHeadHoldsReviewer verifies that an answered open PR
+// whose head relation is unknown (empty HeadRel, e.g. commit missing locally
+// and fetch failed) holds N29 from starting or resuming a reviewer until known.
+func TestN29UnclassifiedPRHeadHoldsReviewer(t *testing.T) {
+	stoppedUnknown := with(noRounds, reviewEnded, func(in *In) {
+		in.Facts.PR.Head, in.Facts.PR.HeadRel = "ext2", ""
+		a0(in).Review = &ReviewRun{Round: 1, Head: "c1", Run: &RunRecord{State: PhaseEnded, Result: EndStopped}}
+	})
+	if r, d := FirstMatch(TaskRows, stoppedUnknown); r.ID != "N29" || len(d.Asked) != 0 {
+		t.Fatalf("unclassified PR head with stopped reviewer = %s %v, want N29 nil", r.ID, d.Asked)
+	}
+	freshUnknown := with(noRounds, func(in *In) {
+		in.Facts.PR.Head, in.Facts.PR.HeadRel = "ext2", ""
+	})
+	if r, d := FirstMatch(TaskRows, freshUnknown); r.ID != "N29" || len(d.Asked) != 0 {
+		t.Fatalf("unclassified PR head with fresh reviewer = %s %v, want N29 nil", r.ID, d.Asked)
+	}
+	exUnknown := with(noRounds, func(in *In) {
+		in.Facts.PR.Head, in.Facts.PR.HeadRel = "ext2", ""
+		a0(in).Acts = []Act{{Key: "start_reviewer@1@c1", Result: "failed", Class: ClassSettled, Err: "boom", At: now}}
+	})
+	if r, _ := FirstMatch(TaskRows, exUnknown); r.ID != "N5" {
+		t.Fatalf("exhausted start_reviewer with unclassified PR head = %s, want N5", r.ID)
+	}
+}

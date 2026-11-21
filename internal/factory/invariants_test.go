@@ -1,8 +1,13 @@
 package factory
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -722,5 +727,215 @@ func TestGHShimFailsHardWithoutFakeGHDir(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "no fake-gh-dir") {
 		t.Fatalf("gh in unbound dir failed with %v (%q), want hard shim failure naming no fake-gh-dir", err, string(out))
+	}
+}
+
+func failOnceProxy(t *testing.T, target, method string) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "sdp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	ln, err := net.Listen("unix", filepath.Join(dir, "s"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	var failed atomic.Bool
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer func() { _ = c.Close() }()
+				line, err := bufio.NewReader(c).ReadBytes('\n')
+				if err != nil {
+					return
+				}
+				var req struct {
+					ID     uint64 `json:"id"`
+					Method string `json:"method"`
+				}
+				_ = json.Unmarshal(line, &req)
+				if req.Method == method && failed.CompareAndSwap(false, true) {
+					_, _ = fmt.Fprintf(c, `{"jsonrpc":"2.0","id":%d,"error":{"code":-32000,"message":"%s failed once"}}`+"\n", req.ID, method)
+					return
+				}
+				up, err := net.Dial("unix", target)
+				if err != nil {
+					return
+				}
+				defer func() { _ = up.Close() }()
+				if _, err := up.Write(line); err == nil {
+					_, _ = io.Copy(c, up)
+				}
+			}()
+		}
+	}()
+	return ln.Addr().String()
+}
+
+// TestCoordReadErrorSkipsProjectRules verifies fix 1: when the coordinator's
+// status read fails (coordErr != nil), project rules do not act on the stale
+// record (no J9 stop even past coordinator_silent_minutes).
+func TestCoordReadErrorSkipsProjectRules(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h := newProjectHarness(t, "J9 coordErr guard")
+	h.pass() // J7 starts coord1
+	coord1 := h.state().Project.RunID
+	h.edit(func(s *flow.State) {
+		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: open"}}
+		s.Project.Wakes = []flow.Wake{{Key: "worker_failed", Task: "T1", Why: "N23", Facts: "title x", At: h.now}}
+	})
+	h.coordIdleWithStatus(coord1, "idle") // J12 delivers wake, records CoordWakeAt
+	// Bring coordinator record back to PhaseIdle before timeout, then advance past coordinator_silent_minutes.
+	h.now = h.now.Add(15 * time.Minute)
+	h.pass()
+	h.now = h.now.Add(14*time.Minute + 59*time.Second)
+	h.pass() // PhaseIdle at 29m59s
+	if st := h.state(); st.Project.Run == nil || st.Project.Run.State != flow.PhaseIdle || st.Project.CoordWakeAt.IsZero() {
+		t.Fatalf("expected idle coordinator with delivered wake, got run=%+v wakeAt=%v", st.Project.Run, st.Project.CoordWakeAt)
+	}
+
+	// Coordinator begins working just as its next status read fails (once), while
+	// subsequent list/stop RPCs would succeed. Past coordinator_silent_minutes, J9
+	// must not act on the stale idle record.
+	h.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+	h.now = h.now.Add(time.Minute)
+	h.eng.HC = hc.NewClient(failOnceProxy(t, h.srv.Path, "terminal.get"))
+	h.pass()
+	if st := h.state(); st.Project.RunID != coord1 {
+		t.Fatalf("J9 stopped coordinator on failed status read: runID=%q j9=%+v", st.Project.RunID, logRules(t, h.paths.Log(h.id), "J9"))
+	}
+	if j9 := logRules(t, h.paths.Log(h.id), "J9"); len(j9) != 0 {
+		t.Fatalf("unexpected J9 log lines on failed status read: %+v", j9)
+	}
+	if tm, err := h.client.Get(ctx, coord1); err != nil || tm.State != "live" {
+		t.Fatalf("coordinator terminal not live after failed status read: tm=%+v err=%v", tm, err)
+	}
+
+	// Next pass reads working status cleanly, clears CoordWakeAt, and keeps running.
+	h.now = h.now.Add(15 * time.Second)
+	h.pass()
+	if st := h.state(); st.Project.RunID != coord1 || !st.Project.CoordWakeAt.IsZero() {
+		t.Fatalf("coordinator did not recover cleanly: runID=%q wakeAt=%v", st.Project.RunID, st.Project.CoordWakeAt)
+	}
+}
+
+// TestUnclassifiedPRHeadHoldsReviewer verifies fix 2: after N7 stops round 1 on
+// a force-push, a second force-push whose commit is missing locally and cannot
+// be fetched leaves HeadRel empty; N29 must hold with no reviewer relaunch.
+func TestUnclassifiedPRHeadHoldsReviewer(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	l := newLanding(t)
+	revName := reviewerName(l.id, "T1", 1, 1)
+	revID, err := startRun(ctx, l.client, world.RunSpec{Name: revName, Cwd: l.wt, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.srv.SetStatus(revID, &hc.Status{App: "claude-code", State: "working"})
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Attempts[0].Rounds = nil
+		s.Tasks[0].Attempts[0].Review = &flow.ReviewRun{Round: 1, Head: l.c1, Code: "div", RunID: revID}
+	})
+
+	// Pass 1: first force-push stops round 1 via N7 (EndStopped).
+	ext1 := pushExternalToBranch(t, l, true, "force1.txt", "diverged 1\n")
+	writePRJSON(t, l.gh, "view.json", ext1, greenRollup)
+	l.pass()
+	if st := l.state(); st.Tasks[0].LastRow != "N7" || st.Tasks[0].Attempts[0].Review == nil ||
+		st.Tasks[0].Attempts[0].Review.RunID != "" || st.Tasks[0].Attempts[0].Review.Run == nil ||
+		st.Tasks[0].Attempts[0].Review.Run.Result != flow.EndStopped {
+		t.Fatalf("pass 1 diverged PR: row=%s review=%+v, want N7 EndStopped", st.Tasks[0].LastRow, st.Tasks[0].Attempts[0].Review)
+	}
+
+	// Pass 2: second force-push arrives on GitHub, but remote cannot be fetched so
+	// HeadRel is empty (unclassified). N29 must hold without relaunching round 1.
+	ext2 := pushExternalToBranch(t, l, true, "force2.txt", "diverged 2\n")
+	writePRJSON(t, l.gh, "view.json", ext2, greenRollup)
+	bare := gitIn(t, l.repo, "remote", "get-url", "--push", "origin")
+	if err := os.Rename(bare, bare+".offline"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Rename(bare+".offline", bare) })
+	l.pass()
+	if rv := l.state().Tasks[0].Attempts[0].Review; rv == nil || rv.RunID != "" || rv.Run == nil || rv.Run.Result != flow.EndStopped {
+		t.Fatalf("unclassified PR head relaunched reviewer: %+v", rv)
+	}
+	if rs, _ := termState(ctx, l.client, revName); rs != flow.RunGone {
+		t.Fatalf("reviewer terminal started for unclassified PR head: %s", rs)
+	}
+
+	// Pass 3: remote comes back, fetch classifies ext2 as diverged -> N7, still no relaunch.
+	if err := os.Rename(bare+".offline", bare); err != nil {
+		t.Fatal(err)
+	}
+	l.pass()
+	if st := l.state(); st.Tasks[0].LastRow != "N7" || st.Tasks[0].Attempts[0].Review.RunID != "" {
+		t.Fatalf("after fetch classified ext2: row=%s review=%+v, want N7 no reviewer", st.Tasks[0].LastRow, st.Tasks[0].Attempts[0].Review)
+	}
+}
+
+// TestInvariantCleanupRetryWithStaleReviewerNotI1 verifies fix 3: send-back
+// then drop with a reviewer in flight, followed by a transient cleanup stop
+// failure, records no I1 line and queues no wake while cleanup is retrying.
+func TestInvariantCleanupRetryWithStaleReviewerNotI1(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	l := newLanding(t).withTokens()
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	l.eng.Now = func() time.Time { return now }
+	var violations []flow.InvariantViolation
+	l.eng.onInvariant = func(vs []flow.InvariantViolation) { violations = append(violations, vs...) }
+
+	revID, err := startRun(ctx, l.client, world.RunSpec{Name: reviewerName(l.id, "T1", 1, 1), Cwd: l.wt, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.srv.SetStatus(revID, &hc.Status{App: "claude-code", State: "working"})
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Attempts[0].Rounds = nil
+		s.Tasks[0].Attempts[0].Review = &flow.ReviewRun{Round: 1, Head: l.c1, Code: "sb", RunID: revID}
+	})
+
+	// Send-back advances the round, then drop routes straight to N1 cleanup.
+	l.report("tok-coord", "task", `{"action":"send-back","task":"T1","why":"rethink approach"}`, "")
+	l.report("tok-coord", "task", `{"action":"drop","task":"T1","why":"no longer needed"}`, "")
+
+	// Transient cleanup stop failure leaves reviewer live within back-off.
+	var failKill atomic.Bool
+	failKill.Store(true)
+	l.eng.HC = hc.NewClient(methodFailProxy(t, l.srv.Path, "terminal.kill", &failKill))
+	l.pass()
+	now = now.Add(30 * time.Second)
+	l.pass() // still within 1m back-off
+
+	if len(violations) != 0 {
+		t.Fatalf("unexpected invariant violations during cleanup retry: %+v", violations)
+	}
+	if i1 := logRules(t, l.paths.Log(l.id), "I1"); len(i1) != 0 {
+		t.Fatalf("unexpected I1 log lines during cleanup retry: %+v", i1)
+	}
+	if ws := l.state().Project.Wakes; len(ws) != 0 {
+		t.Fatalf("unexpected coordinator wakes during cleanup retry: %+v", ws)
+	}
+	if act := flow.LastAct(l.state().Tasks[0].Attempts[0].Acts, flow.AskCleanup); act == nil || act.Result != "failed" {
+		t.Fatalf("expected recorded failed cleanup act, got %+v", act)
+	}
+
+	// After hc recovers and back-off elapses, cleanup stops the reviewer cleanly.
+	failKill.Store(false)
+	now = now.Add(2 * time.Minute)
+	l.pass()
+	if len(violations) != 0 || len(logRules(t, l.paths.Log(l.id), "I1")) != 0 || len(l.state().Project.Wakes) != 0 {
+		t.Fatalf("unexpected I1 after cleanup recovery: vs=%+v wakes=%+v", violations, l.state().Project.Wakes)
+	}
+	if rs, _ := termState(ctx, l.client, revID); rs != flow.RunGone {
+		t.Fatalf("reviewer after cleanup recovery = %s, want gone", rs)
 	}
 }
