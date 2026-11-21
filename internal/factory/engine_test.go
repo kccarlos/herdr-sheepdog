@@ -266,8 +266,6 @@ func TestEngineCrashAdoptTrimAndOutage(t *testing.T) {
 		t.Fatal(err)
 	}
 	st.Project.RunID = ""
-	st.Project.Run.Address, st.Project.Run.CreatedMS = "", 0
-	st.Project.Run.State = flow.PhaseStarting
 	if err := SaveState(paths.State(projID), st); err != nil {
 		t.Fatal(err)
 	}

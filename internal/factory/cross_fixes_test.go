@@ -87,6 +87,51 @@ func TestVerify2FailedRunStopStaysLiveAndBacksOff(t *testing.T) {
 	}
 }
 
+func TestJ7RestartStopBacksOffAndGivesUp(t *testing.T) {
+	h := newProjectHarness(t, "Goal")
+	h.srv.Add(hc.Terminal{Address: "old-coord", Name: coordName(h.id), State: "live", Labels: testCoordLabels(h.id, "old-run")})
+	var failKill atomic.Bool
+	failKill.Store(true)
+	h.eng.HC = hc.NewClient(methodFailProxy(t, h.srv.Path, "terminal.kill", &failKill))
+	h.edit(func(s *flow.State) {
+		s.Settings.EnsureFailures = 5
+		s.Project.Run = &flow.RunRecord{ID: "old-run", Address: "old-coord", State: flow.PhaseEnded, Result: flow.EndLost}
+	})
+	settings := h.state().Settings
+	stopAttempts := func() int { return strings.Count(h.logBuf.String(), "terminal.kill failed") }
+	for tries := 1; tries <= settings.EnsureFailures; tries++ {
+		before := stopAttempts()
+		h.pass()
+		if got := stopAttempts() - before; got != 1 {
+			t.Fatalf("try %d at back-off deadline: got %d failed stops, want 1", tries, got)
+		}
+		if tries < settings.EnsureFailures {
+			delay := flow.EnsureBackoff(settings, tries)
+			h.now = h.now.Add(delay - time.Second)
+			h.pass()
+			if got := stopAttempts() - before; got != 1 {
+				t.Errorf("try %d before %s back-off elapsed: got %d failed stops, want 1", tries, delay, got)
+			}
+			h.now = h.now.Add(time.Second)
+		}
+	}
+	h.pass()
+	h.now = h.now.Add(time.Hour)
+	h.pass()
+	if got := stopAttempts(); got != 5 || len(h.runs) != 0 {
+		t.Errorf("after give-up: got %d failed stops and %d launches, want 5 and 0", got, len(h.runs))
+	}
+	giveUps := 0
+	for _, wake := range h.state().Project.Wakes {
+		if wake.Key == "failed@"+flow.AskStopCoordinator {
+			giveUps++
+		}
+	}
+	if giveUps != 1 {
+		t.Errorf("after five failed stops: got %d stop_coordinator give-up wakes, want 1", giveUps)
+	}
+}
+
 func TestVerify9RestartStopFailureRecordsAct(t *testing.T) {
 	l := newLanding(t)
 	now := time.Date(2026, 11, 20, 15, 0, 0, 0, time.UTC)

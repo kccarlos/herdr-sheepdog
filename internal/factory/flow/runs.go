@@ -150,6 +150,7 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 	if rec.State == PhaseWorking && rec.Status == "" {
 		sentAt = cmp.Or(sentAt, rec.StatusSince) // R24/R25 records saved before LastSentAt was added.
 	}
+	// R21/R22 bound a quiet run while it waits for fresh status after a send.
 	if ev.Kind == EvStatus && !ev.StatusAt.IsZero() && !ev.StatusAt.After(sentAt) {
 		return rec, Row[RunIn]{}, Decision{}
 	}

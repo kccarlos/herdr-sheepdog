@@ -461,27 +461,13 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 	case flow.AskStartCoordinator:
 		e.startCoordLocked(ctx, id, s, d.Why)
 	case flow.AskStopCoordinator:
-		last := flow.LastAct(s.Project.Acts, ask)
-		if last != nil && now.Sub(last.At) < flow.EnsureBackoff(s.Settings, last.Tries) {
+		if !e.stopCoordWithBackoffLocked(ctx, id, s, now) {
 			return
 		}
-		if err := e.stopCoordTerminalsLocked(ctx, id, *s); err != nil {
-			e.logError("factory.hc_error", id, err)
-			failure := flow.Act{Key: ask, Result: "failed", At: now, Tries: 1}
-			if last == nil {
-				s.Project.Acts = append(s.Project.Acts, failure)
-			} else {
-				failure.Tries += last.Tries
-				*last = failure
-			}
-			e.saveLocked(id, *s)
-		} else {
-			s.Project.Acts = slices.DeleteFunc(s.Project.Acts, func(a flow.Act) bool { return a.Key == ask })
-			stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
-			s.Project.RunID, s.Project.RunTokenHash = "", ""
-			clearCoordTrack(&s.Project, true, false)
-			commit("stopped coordinator")
-		}
+		stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
+		s.Project.RunID, s.Project.RunTokenHash = "", ""
+		clearCoordTrack(&s.Project, true, false)
+		commit("stopped coordinator")
 	case flow.AskDeliverWakes:
 		e.deliverWakesLocked(ctx, id, s, now)
 	default:
@@ -502,11 +488,8 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 
 func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State, why string) {
 	adopt, bin := s.Project.Run == nil || s.Project.Run.State != flow.PhaseEnded, cmp.Or(e.Bin, "sheepdog")
-	if !adopt {
-		if err := e.stopCoordTerminalsLocked(ctx, id, *s); err != nil {
-			e.logError("factory.hc_error", id, err)
-			return
-		}
+	if !adopt && !e.stopCoordWithBackoffLocked(ctx, id, s, e.now()) {
+		return
 	}
 	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &s.Project.RunTokenHash, &s.Project.Run, adopt, flow.RunRecord{Role: flow.RoleCoordinator, CLI: "claude"}, world.RunSpec{
 		Name: coordName(id), Cwd: s.Project.Folder, ClaudeConfig: e.Paths.ClaudeConfig,
@@ -548,6 +531,31 @@ func (e *Engine) coordTerminalsLocked(ctx context.Context, id string, rec *flow.
 		}
 	}
 	return owned, nil
+}
+
+// stopCoordWithBackoffLocked shares the stop budget between project stops and J7 restarts.
+func (e *Engine) stopCoordWithBackoffLocked(ctx context.Context, id string, s *flow.State, now time.Time) bool {
+	const key = flow.AskStopCoordinator
+	p := &s.Project
+	if flow.Exhausted(p.Acts, key, s.Settings) {
+		return false
+	}
+	tries := flow.Count(p.Acts, key)
+	if last := flow.LastAct(p.Acts, key); last != nil && now.Sub(last.At) < flow.EnsureBackoff(s.Settings, tries) {
+		return false
+	}
+	if err := e.stopCoordTerminalsLocked(ctx, id, *s); err != nil {
+		e.logError("factory.hc_error", id, err)
+		words := flow.CleanErr(err.Error())
+		p.Acts = append(p.Acts, flow.Act{Key: key, Result: "failed", At: now, Class: world.FailureClass(err), Err: words})
+		if flow.Exhausted(p.Acts, key, s.Settings) {
+			holdProjectWake(s, "failed@"+key, "gave up stopping the coordinator", words, now)
+		}
+		e.saveLocked(id, *s)
+		return false
+	}
+	p.Acts = slices.DeleteFunc(p.Acts, func(a flow.Act) bool { return a.Key == key })
+	return true
 }
 
 // stopCoordTerminalsLocked stops labelled coordinator terminals and their process groups.
@@ -662,10 +670,7 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 	runID, minted, prevRec, prevHash := "run-"+strings.ToLower(rand.Text()[:12]), false, *recp, *hash
 	if rec.Role == flow.RoleCoordinator && e.HC != nil {
 		spec.Fresh = true
-		if t, err := e.HC.Get(ctx, spec.Name); err == nil {
-			if t.Labels["sheepdog.run"] == "" {
-				e.logOnce("factory.coordinator_name_collision", id, t.Address, fmt.Errorf("leaving terminal %s without this project's coordinator run label alone", t.Address))
-			}
+		if _, err := e.HC.Get(ctx, spec.Name); err == nil {
 			spec.Name = hcName(spec.Name + "-" + runID)
 		}
 	}
