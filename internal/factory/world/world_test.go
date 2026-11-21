@@ -1468,7 +1468,7 @@ func TestMergeOnlyEdgeCases(t *testing.T) {
 }
 
 // TestChangedLinesTimeoutReturnsDeadlineExceeded: when a running git diff is
-// killed mid-run by the context deadline, ChangedLines returns an error
+// killed mid-run by its child deadline, ChangedLines returns an error
 // matching context.DeadlineExceeded so readTipLocked treats it as over
 // size_cap.
 func TestChangedLinesTimeoutReturnsDeadlineExceeded(t *testing.T) {
@@ -1485,12 +1485,20 @@ func TestChangedLinesTimeoutReturnsDeadlineExceeded(t *testing.T) {
 	}
 	t.Setenv("PATH", fakeBin+":"+os.Getenv("PATH"))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	srv := hctest.New(t)
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if p.Argv[1] == "diff" {
+			limit := 0.15
+			p.Timeout = &limit
+		}
+		return hctest.GitExec(p)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	start := time.Now()
-	_, err = fixtureGit(t).ChangedLines(ctx, wt, tip)
-	if elapsed := time.Since(start); !GitTimedOut(err) || elapsed < 100*time.Millisecond || elapsed > time.Second {
-		t.Fatalf("ChangedLines under hung git diff = %v in %s, want context.DeadlineExceeded killed mid-run", err, elapsed)
+	git := NewGit(hc.NewClient(srv.Path), nil, nil)
+	_, err = git.ChangedLines(ctx, wt, tip)
+	if !GitTimedOut(err) || !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, ErrChangedLinesOverCap) {
+		t.Fatalf("ChangedLines under hung git diff = %v, want a confirmed diff timeout treated as over cap", err)
 	}
 }
 

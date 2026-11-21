@@ -92,6 +92,33 @@ func TestGitDeadlineAllowsProcessSweep(t *testing.T) {
 	}
 }
 
+func TestGitLateSecondReplyArmsBackoff(t *testing.T) {
+	srv := hctest.New(t)
+	release := make(chan struct{})
+	defer close(release)
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if p.Argv[1] == "status" {
+			<-release
+		}
+		code := 0
+		return hc.ExecResult{Code: &code}, nil
+	}
+	g := NewGit(hc.NewClient(srv.Path), nil, nil)
+	repo := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := g.Run(ctx, repo, "rev-parse", "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := g.Run(ctx, repo, "status")
+	if !errors.Is(err, context.DeadlineExceeded) || len(srv.Requests()) != 2 {
+		t.Fatalf("expected late reply on the second call, got %v after %d calls", err, len(srv.Requests()))
+	}
+	if !g.suppressed(repo) {
+		t.Fatalf("second call's deadline did not arm back-off: %v", err)
+	}
+}
+
 func TestNewWorktreeAdoptionPropagatesGitFailure(t *testing.T) {
 	wt := sizeRepo(t)
 	repo := filepath.Join(filepath.Dir(wt), "repo")
@@ -143,16 +170,33 @@ func TestGitRepositoryBackoffEpisode(t *testing.T) {
 		t.Fatalf("sibling worktree = %v after %d calls, first error %v", blocked, calls, deadline)
 	}
 	now = now.Add(gitBackoff)
-	if g.suppressed(repo) || len(g.blocked) != 0 {
-		t.Fatalf("expired cooldown was retained: %v", g.blocked)
+	if g.suppressed(repo) {
+		t.Fatal("first cooldown did not expire")
 	}
 	if _, err := g.Run(ctx, second, "status"); !GitTimedOut(err) || calls != 2 || len(events) != 1 {
 		t.Fatalf("retry = %v after %d calls, events %v", err, calls, events)
 	}
-	now = now.Add(gitBackoff)
+	delays := []time.Duration{60, 120, 240, 300, 300}
+	for i, delay := range delays {
+		delay *= time.Second
+		now = now.Add(delay - time.Nanosecond)
+		if !g.suppressed(repo) {
+			t.Fatalf("retry allowed before %v back-off elapsed", delay)
+		}
+		now = now.Add(time.Nanosecond)
+		if g.suppressed(repo) {
+			t.Fatalf("retry still blocked after %v back-off elapsed", delay)
+		}
+		if i == len(delays)-1 {
+			break
+		}
+		if _, err := g.Run(ctx, second, "status"); !GitTimedOut(err) {
+			t.Fatalf("retry after %v back-off = %v", delay, err)
+		}
+	}
 	stalled = false
-	if _, err := g.Run(ctx, second, "status"); err != nil || len(g.blocked) != 0 || len(g.episodes) != 0 {
-		t.Fatalf("recovery = %v, cooldowns %v, episodes %v", err, g.blocked, g.episodes)
+	if _, err := g.Run(ctx, second, "status"); err != nil || len(g.episodes) != 0 {
+		t.Fatalf("recovery = %v, episodes %v", err, g.episodes)
 	}
 	if want := []string{"factory.git_suppressed " + repo, "factory.git_recovered " + repo}; !slices.Equal(events, want) {
 		t.Fatalf("episode events = %v, want %v", events, want)

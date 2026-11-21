@@ -841,8 +841,8 @@ func setFlag(m *map[string]bool, id string, on bool) {
 
 func actOutage(verb string, f flow.Facts, err error) bool {
 	var gitErr *world.GitError
-	if errors.As(err, &gitErr) {
-		return gitErr.RPC != nil && f.HCUnavailable
+	if errors.As(err, &gitErr) && gitErr.RPC != nil {
+		return f.HCUnavailable
 	}
 	switch verb {
 	case flow.AskNewAttempt, flow.AskPushPR, flow.AskRerunCI, flow.AskDispatchCI, flow.AskUpdateBranch, flow.AskMerge:

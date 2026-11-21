@@ -23,6 +23,7 @@ const (
 	GitNetworkTimeout = gitNetworkLimit + gitReplyGrace + 2*time.Second
 	GitPassTimeout    = 90 * time.Second
 	gitBackoff        = 30 * time.Second
+	maxGitBackoff     = 5 * time.Minute
 	maxGitEpisodes    = 128
 )
 
@@ -44,15 +45,19 @@ type Git struct {
 	now      func() time.Time
 	log      func(event, folder string)
 	mu       sync.Mutex
-	blocked  map[string]time.Time
-	episodes map[string]bool
+	episodes map[string]gitEpisode
+}
+
+type gitEpisode struct {
+	until time.Time
+	delay time.Duration
 }
 
 func NewGit(client *hc.Client, now func() time.Time, log func(event, folder string)) *Git {
 	if now == nil {
 		now = time.Now
 	}
-	return &Git{client: client, now: now, log: log, blocked: make(map[string]time.Time), episodes: make(map[string]bool)}
+	return &Git{client: client, now: now, log: log, episodes: make(map[string]gitEpisode)}
 }
 
 // GitError carries the child outcome together with any RPC failure.
@@ -105,34 +110,27 @@ func gitExit(err error, code int) bool {
 func (g *Git) suppressed(repo string) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	now := g.now()
-	for key, until := range g.blocked {
-		if !now.Before(until) {
-			delete(g.blocked, key)
-		}
-	}
-	return !g.blocked[repo].IsZero()
+	return g.now().Before(g.episodes[repo].until)
 }
 
 // finishProbe keeps a bounded episode history across expired cooldowns.
 func (g *Git) finishProbe(repo string, stalled bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	active := g.episodes[repo]
+	episode, active := g.episodes[repo]
 	if stalled {
 		if !active && len(g.episodes) == maxGitEpisodes {
 			for old := range g.episodes {
 				delete(g.episodes, old)
-				delete(g.blocked, old)
 				break
 			}
 		}
-		g.blocked[repo], g.episodes[repo] = g.now().Add(gitBackoff), true
+		delay := min(maxGitBackoff, max(gitBackoff, 2*episode.delay))
+		g.episodes[repo] = gitEpisode{until: g.now().Add(delay), delay: delay}
 		if !active && g.log != nil {
 			g.log("factory.git_suppressed", repo)
 		}
 	} else if active {
-		delete(g.blocked, repo)
 		delete(g.episodes, repo)
 		if g.log != nil {
 			g.log("factory.git_recovered", repo)
@@ -168,6 +166,8 @@ func (g *Git) Run(ctx context.Context, dir string, args ...string) (hc.ExecResul
 		if left <= 0 {
 			return hc.ExecResult{}, &GitError{RPC: context.DeadlineExceeded}
 		}
+		// Leave time to recognize an RPC deadline before the stage expires.
+		left -= min(500*time.Millisecond, left/6)
 		if left <= grace {
 			grace = left / 3
 		}
@@ -176,7 +176,10 @@ func (g *Git) Run(ctx context.Context, dir string, args ...string) (hc.ExecResul
 	limit := budget.Seconds()
 	client := *g.client
 	client.Timeout = budget + grace
-	r, err := client.Exec(ctx, hc.ExecParams{
+	// Exec's own timeout floor can exceed the available reply window.
+	callCtx, cancel := context.WithTimeout(ctx, client.Timeout)
+	defer cancel()
+	r, err := client.Exec(callCtx, hc.ExecParams{
 		Cwd: dir, Argv: append([]string{"git"}, args...), Timeout: &limit,
 		Env: map[string]string{"GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": ""},
 	})

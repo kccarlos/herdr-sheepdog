@@ -231,3 +231,54 @@ func TestGitActUsesTheFailingSystemOutage(t *testing.T) {
 		}
 	}
 }
+
+func TestGitExitDuringGitHubOutageDoesNotExhaustRetries(t *testing.T) {
+	l := newLanding(t)
+	gitIn(t, l.repo, "worktree", "remove", l.wt)
+	l.edit(func(s *flow.State) {
+		s.Settings.EnsureFailures = 1
+		s.Tasks[0].Attempts = nil
+	})
+	writeGHFile(t, l.gh, "fail", "") // HTTP 502 while observing the base
+	srv := hctest.New(t)
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if p.Argv[1] == "fetch" {
+			code := 128
+			return hc.ExecResult{Code: &code, Stderr: []byte("unable to access remote: HTTP 503")}, nil
+		}
+		return hctest.GitExec(p)
+	}
+	l.eng.git = world.NewGit(hc.NewClient(srv.Path), l.eng.now, nil)
+	l.pass()
+
+	s := l.state()
+	acts := s.Tasks[0].Acts
+	last := flow.LastAct(acts, flow.AskNewAttempt)
+	if !l.eng.ghUnavail[l.id] || last == nil || last.Result != "failed" || !strings.Contains(last.Err, "git exit status 128") {
+		t.Fatalf("expected a git fetch exit during GitHub outage, got acts=%+v, github_unavailable=%v", acts, l.eng.ghUnavail[l.id])
+	}
+	if !last.Uncounted || flow.Exhausted(acts, last.Key, s.Settings) {
+		t.Fatalf("git fetch exit consumed ensure_failures during GitHub outage: %+v", *last)
+	}
+}
+
+func TestTaskCloseSharesRepositoryGitBackoff(t *testing.T) {
+	l := newLanding(t).withTokens()
+	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].NothingToChange = "already done" })
+	repo := l.state().Project.Folder
+	srv := hctest.New(t)
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if p.Cwd == repo {
+			return hc.ExecResult{TimedOut: true}, nil
+		}
+		return hctest.GitExec(p)
+	}
+	l.eng.git = world.NewGit(hc.NewClient(srv.Path), l.eng.now, nil)
+	if _, err := l.eng.git.Run(context.Background(), repo, "status"); !world.GitTimedOut(err) {
+		t.Fatalf("expected a repository timeout, got %v", err)
+	}
+	err := l.eng.Report("tok-coord", "task", []byte(`{"action":"close","task":"T1","why":"already done"}`))
+	if !errors.Is(err, world.ErrGitSuppressed) || len(srv.Requests()) != 1 {
+		t.Fatalf("task close returned %v after %d git calls, want suppression after one call", err, len(srv.Requests()))
+	}
+}

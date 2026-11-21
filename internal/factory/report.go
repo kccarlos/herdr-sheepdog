@@ -927,7 +927,7 @@ func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args js
 		if a == nil || a.NothingToChange == "" {
 			return e.refuse(id, "not_allowed", "close is allowed only after the worker reported nothing to change.")
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
+		ctx, cancel := context.WithTimeout(world.GitRepository(context.Background(), s.Project.Folder), lockGitTimeout)
 		defer cancel()
 		if tip, _, _, err := e.git.InspectWorktree(ctx, a.Worktree, flow.H(*a)); err != nil {
 			return err
