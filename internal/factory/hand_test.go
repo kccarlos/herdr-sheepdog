@@ -112,8 +112,12 @@ func TestN7ForcePushedAndForeignPRHead(t *testing.T) {
 			l.pass()
 			l.pass()
 			wakes := l.state().Project.Wakes
-			if len(wakes) != 1 || wakes[0].Key != "diverged@"+l.c1 || !strings.Contains(wakes[0].Why, "say") || !strings.Contains(wakes[0].Why, "retry") {
-				t.Fatalf("wakes = %+v, want 1 N7 wake naming say+retry", wakes)
+			wantKey := "diverged@pr_foreign@" + l.c1
+			if force {
+				wantKey = "diverged@pr_diverged@" + l.c1
+			}
+			if len(wakes) != 1 || wakes[0].Key != wantKey || !strings.Contains(wakes[0].Why, "say") || !strings.Contains(wakes[0].Why, "retry") {
+				t.Fatalf("wakes = %+v, want 1 N7 wake %q naming say+retry", wakes, wantKey)
 			}
 			if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 1 {
 				t.Fatalf("worker told %d times, want 1", got)
@@ -278,8 +282,8 @@ func TestN7TellsOnceAndWakesOncePerH(t *testing.T) {
 		t.Fatalf("after turn end at t2 sends = %d, want 1 (no second tell)", got)
 	}
 	wakes := l.state().Project.Wakes
-	if len(wakes) != 1 || wakes[0].Key != "diverged@"+l.c1 {
-		t.Fatalf("wakes = %+v, want 1 wake keyed diverged@%s", wakes, l.c1)
+	if len(wakes) != 1 || wakes[0].Key != "diverged@tip@"+l.c1 {
+		t.Fatalf("wakes = %+v, want 1 wake keyed diverged@tip@%s", wakes, l.c1)
 	}
 
 	// Another commit t3 does not tell or wake again for the same H.
@@ -303,7 +307,7 @@ func TestN7WaitsForWorkerTurnBeforeWaking(t *testing.T) {
 		l.edit(func(s *flow.State) {
 			a := &s.Tasks[0].Attempts[0]
 			for i := range a.Acts {
-				if a.Acts[i].Key == flow.AskTellDiverged+"@"+l.c1 {
+				if a.Acts[i].Key == flow.AskTellDiverged+"@pr_diverged@"+l.c1 {
 					a.Acts[i].At = time.Now().Add(-time.Duration(s.Settings.ChecksGraceMinutes+1) * time.Minute)
 				}
 			}
@@ -337,8 +341,8 @@ func TestN7WaitsForWorkerTurnBeforeWaking(t *testing.T) {
 		// Pass 4: worker is idle again (turn ended within grace) -> wakes once early.
 		setIdle(t, l.srv, l.client, l.worker, "idle")
 		l.pass()
-		if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != "diverged@"+l.c1 {
-			t.Fatalf("pass 4 (after turn end): wakes = %+v, want 1 wake keyed diverged@%s", wakes, l.c1)
+		if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != "diverged@pr_diverged@"+l.c1 {
+			t.Fatalf("pass 4 (after turn end): wakes = %+v, want 1 wake keyed diverged@pr_diverged@%s", wakes, l.c1)
 		}
 	})
 
@@ -357,8 +361,8 @@ func TestN7WaitsForWorkerTurnBeforeWaking(t *testing.T) {
 		ageTell(l)
 		l.pass()
 		l.pass()
-		if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != "diverged@"+l.c1 {
-			t.Fatalf("after grace without working: wakes = %+v, want 1 wake keyed diverged@%s", wakes, l.c1)
+		if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != "diverged@pr_diverged@"+l.c1 {
+			t.Fatalf("after grace without working: wakes = %+v, want 1 wake keyed diverged@pr_diverged@%s", wakes, l.c1)
 		}
 		if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 1 {
 			t.Fatalf("worker told %d times, want 1", got)
@@ -382,8 +386,8 @@ func TestN7WaitsForWorkerTurnBeforeWaking(t *testing.T) {
 		ageTell(l)
 		l.pass()
 		l.pass()
-		if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != "diverged@"+l.c1 {
-			t.Fatalf("after restart and grace: wakes = %+v, want 1 wake keyed diverged@%s", wakes, l.c1)
+		if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != "diverged@pr_diverged@"+l.c1 {
+			t.Fatalf("after restart and grace: wakes = %+v, want 1 wake keyed diverged@pr_diverged@%s", wakes, l.c1)
 		}
 		if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 1 {
 			t.Fatalf("worker told %d times, want 1", got)
@@ -441,5 +445,52 @@ func TestN7DivergedTipAfterUpdateBranchToldToPull(t *testing.T) {
 	sends := sendsTo(t, l.srv.Requests(), l.worker)
 	if len(sends) != 1 || !strings.Contains(sends[0], "pull") || strings.Contains(sends[0], "restore") {
 		t.Fatalf("sent = %q, want pull (not restore)", sends)
+	}
+}
+
+// TestN7SecondDifferentProblemAtSameHTold verifies item 3: when a diverged tip
+// at H is told and restored without moving H, a later different N7 problem
+// (foreign commit on the PR head) at the same H is told once more.
+func TestN7SecondDifferentProblemAtSameHTold(t *testing.T) {
+	l := newLanding(t)
+	// Problem 1: diverged tip at H = c1 -> worker told once.
+	gitIn(t, l.wt, "commit", "--allow-empty", "--amend", "-m", "feat: diverged tip")
+	l.pass()
+	if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 1 {
+		t.Fatalf("after diverged tip sends = %d, want 1", got)
+	}
+	// Worker restores tip to c1 without a new ready; then a foreign commit hits the PR head at the same H.
+	gitIn(t, l.wt, "reset", "--hard", l.c1)
+	ext := pushExternalToBranch(t, l, false, "foreign2.txt", "foreign\n")
+	writePRJSON(t, l.gh, "view.json", ext, greenRollup)
+	l.pass()
+	sends := sendsTo(t, l.srv.Requests(), l.worker)
+	if len(sends) != 2 || !strings.Contains(sends[1], "PR #7") {
+		t.Fatalf("after second different N7 problem at same H sends = %q, want 2 (second naming PR #7)", sends)
+	}
+}
+
+// TestN26PROnOtherBaseStopsPushingAndWakesOnce verifies item 4: when the
+// attempt's PR number reads as another base, N26 does not push again every
+// pass; it waits, wakes the coordinator once, and retry closes the attempt.
+func TestN26PROnOtherBaseStopsPushingAndWakesOnce(t *testing.T) {
+	l := newLanding(t).withTokens()
+	writeGHFile(t, l.gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"`+l.c1+`","mergeable":"MERGEABLE","statusCheckRollup":`+greenRollup+`,"baseRefName":"release"}`)
+	l.pass()
+	l.pass()
+	if got := ghCalls(t, l.gh, "pr list"); len(got) != 0 {
+		t.Fatalf("N26 pushed/listed PRs for other-base PR: %q", got)
+	}
+	if got := ghCalls(t, l.gh, "pr create"); len(got) != 0 {
+		t.Fatalf("N26 created a second PR for other-base PR: %q", got)
+	}
+	wakes := l.state().Project.Wakes
+	if len(wakes) != 1 || !strings.HasPrefix(wakes[0].Key, "pr_other_base@") || !strings.Contains(wakes[0].Why, "retry") {
+		t.Fatalf("wakes = %+v, want 1 pr_other_base wake naming retry", wakes)
+	}
+	// Coordinator can retry, closing the attempt for a new one.
+	l.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"PR #7 retargeted to release"}`, "")
+	if a := l.state().Tasks[0].Attempts[0]; !strings.Contains(a.Closed, "PR on another base") {
+		t.Fatalf("attempt Closed = %q, want note naming PR on another base", a.Closed)
 	}
 }

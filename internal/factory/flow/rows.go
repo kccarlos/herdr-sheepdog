@@ -397,7 +397,8 @@ var TaskRows = []Row[In]{
 			}
 			return say("cannot tell if PR head is merge_only: wait")(in)
 		}
-		tk := key(AskTellDiverged, h)
+		kind := n7Kind(in)
+		tk := key(AskTellDiverged, kind, h)
 		tell := LastAct(acts, tk)
 		if tell == nil || tell.Result != "done" {
 			return say(N7Why(in, false), EnsureRun(in, RoleWorker), ensure(in, tk))(in)
@@ -405,7 +406,7 @@ var TaskRows = []Row[In]{
 		if working(in) || (!in.Facts.Worker.LastTurnEnd.After(tell.At) && in.Now.Sub(tell.At) < checksGrace(in)) {
 			return say(N7Why(in, false), EnsureRun(in, RoleWorker))(in)
 		}
-		return say(N7Why(in, true), once(acts, key(AskWake, "diverged", h)))(in)
+		return say(N7Why(in, true), once(acts, key(AskWake, "diverged", kind, h)))(in)
 	}},
 	{ID: "N8", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return hasAttempt(in) && in.attempt().NothingToChange != "" }, Then: func(in In) Decision {
 		a := in.attempt()
@@ -474,6 +475,10 @@ var TaskRows = []Row[In]{
 		if unanswered(in) && !in.probe { // "no PR" from a failed read is a guess: wait, so push is not spent blindly
 			return say("GitHub did not answer: wait for a snapshot")(in)
 		}
+		if in.Facts.PR.OtherBase != "" {
+			return say(fmt.Sprintf("PR #%d targets base %q instead of the project base: waiting (run `sheepdog factory task retry %s --why \"<why>\"` to start a new attempt)",
+				in.Facts.PR.Number, in.Facts.PR.OtherBase, in.Task.ID), once(SinceRetry(in.acts()), key(AskWake, "pr_other_base", in.Facts.PR.Number, in.Facts.PR.OtherBase)))(in)
+		}
 		return say("GitHub does not have H", ensure(in, key(AskPushPR, headH(in))))(in)
 	}},
 	{ID: "N29", WaitsOn: "the reviewer", Stage: "working", When: ladderSays(Review), Then: func(in In) Decision {
@@ -523,8 +528,12 @@ var TaskRows = []Row[In]{
 			return say("the base branch is red: holding branch updates and merges")(in)
 		}
 		spell := in.Facts.BaseRedSpell
+		var wake []string
+		if !in.Facts.BaseRedWoken {
+			wake = once(in.acts(), key(AskWake, "base_red_held", spell))
+		}
 		return say("the base branch has been red past main_red_minutes: tell the oldest held task's worker to merge the base and say ready (or land a fix PR directly)",
-			EnsureRun(in, RoleWorker), ensure(in, key(AskTellBaseRed, spell)), once(in.acts(), key(AskWake, "base_red_held", spell)))(in)
+			EnsureRun(in, RoleWorker), ensure(in, key(AskTellBaseRed, spell)), wake)(in)
 	}},
 	{ID: "N36", WaitsOn: "CI", Stage: "ci", Why: WhyCI, When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown)),
 		Then: func(in In) Decision {
@@ -567,6 +576,16 @@ var TaskRows = []Row[In]{
 		p := in.Facts.PR
 		return say("no rule matched", once(in.acts(), key(AskWake, "no_rule_matched", headH(in), p.State, p.Checks, p.Mergeable, in.Facts.TipRel)))(in)
 	}},
+}
+
+func n7Kind(in In) string {
+	if PRHeadDivergedOrForeign(in) {
+		if in.Facts.PR.HeadRel == RelDiverged {
+			return "pr_diverged"
+		}
+		return "pr_foreign"
+	}
+	return "tip"
 }
 
 // N7Why describes the N7 stall for in, shared by the row and executor so they

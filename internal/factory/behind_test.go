@@ -241,7 +241,7 @@ func TestN40HandEditedUpdateHeadNeverMovesH(t *testing.T) {
 		t.Fatalf("hand-edited merge was merged: %q", got)
 	}
 	wakes := l.state().Project.Wakes
-	if len(wakes) != 1 || wakes[0].Key != "diverged@"+l.c1 {
+	if len(wakes) != 1 || wakes[0].Key != "diverged@pr_foreign@"+l.c1 {
 		t.Fatalf("wakes = %+v, want 1 N7 wake for %s", wakes, l.c1)
 	}
 }

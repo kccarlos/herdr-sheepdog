@@ -87,6 +87,7 @@ type PR struct {
 	BehindUnknown        bool      `json:"behind_unknown,omitempty"` // compare failed: Behind false is not "not behind" (N40)
 	ChecksUnread         bool      `json:"checks_unread,omitempty"`  // H's workflow runs unread: absent is not "no checks" (N35 never dispatches); N33/N34 never re-run
 	ReviewRequired       bool      `json:"review_required,omitempty"`
+	OtherBase            string    `json:"other_base,omitempty"` // attempt's PR targets another base (N26 waits and wakes once)
 }
 
 // Run is one run's state, whether a start for it is in flight, and when its
@@ -132,6 +133,7 @@ type Facts struct {
 	BaseRed      bool      `json:"base_red,omitempty"`
 	BaseRedSince time.Time `json:"base_red_since,omitempty"`
 	BaseRedSpell string    `json:"base_red_spell,omitempty"`
+	BaseRedWoken bool      `json:"base_red_woken,omitempty"`
 }
 
 // In is what a row sees: the task's records, the settings, the facts and

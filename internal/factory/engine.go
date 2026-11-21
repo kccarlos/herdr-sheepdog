@@ -539,6 +539,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		facts.BaseRed, facts.BaseRedSince = true, b.Since
 		if !*baseTried {
 			facts.BaseRedSpell = b.SpellID
+			facts.BaseRedWoken = flow.Done(s.Project.Acts, flow.AskWake+"@base_red_held@"+b.SpellID)
 		}
 	}
 	// An ended task needs no facts (N1 matches first), and cleanup may
@@ -632,6 +633,9 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		verb, _, _ := strings.Cut(ask, "@")
 		if verb == flow.AskWake {
 			act(ask, "done", "", "", false)
+			if strings.HasPrefix(ask, flow.AskWake+"@base_red_held@") {
+				s.Project.Acts = append(s.Project.Acts, flow.Act{Key: ask, Result: "done", At: now})
+			}
 			decs = append(decs, holdWake(s, ti, r.ID, d.Why, ask, facts, e.Bin, now))
 			continue
 		}
@@ -651,6 +655,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		if abort && err != nil {
 			return
 		} else if abort {
+			act(ask, "failed", flow.ClassTransient, dec, true)
 			decs = append(decs, dec)
 		} else if errors.Is(err, world.ErrNoDispatchWorkflow) {
 			act(ask, "skipped", "", "", false)
@@ -1395,12 +1400,21 @@ func (e *Engine) observeBaseLocked(ctx context.Context, id string, s *flow.State
 	now := e.now()
 	kind, dec, why := "base_green", "base turned green", fmt.Sprintf("base branch %s is green again (%s, run %d)", res.Branch, res.HeadSHA[:min(len(res.HeadSHA), 7)], res.ID)
 	if res.Red {
-		s.Project.Base = &flow.BaseState{Red: true, Since: now, SpellID: res.HeadSHA}
 		kind, dec, why = "base_red", "base turned red", fmt.Sprintf("base branch %s is red since %s (run %d, %s): holding branch updates and merges", res.Branch, res.HeadSHA[:min(len(res.HeadSHA), 7)], res.ID, res.Conclusion)
+	}
+	n, prefix := 1, flow.AskWake+"@"+kind+"@"+res.HeadSHA+"@"
+	for _, a := range s.Project.Acts {
+		if strings.HasPrefix(a.Key, prefix) {
+			n++
+		}
+	}
+	spell := fmt.Sprintf("%s@%d", res.HeadSHA, n)
+	if res.Red {
+		s.Project.Base = &flow.BaseState{Red: true, Since: now, SpellID: spell}
 	} else {
 		s.Project.Base = nil
 	}
-	wakeKey := kind + "@" + res.HeadSHA
+	wakeKey := kind + "@" + spell
 	actKey := flow.AskWake + "@" + wakeKey
 	var asked []string
 	if flow.Count(s.Project.Acts, actKey) == 0 {

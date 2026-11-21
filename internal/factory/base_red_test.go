@@ -38,8 +38,8 @@ func TestBaseRedHoldsBehindAndGreenResumesKBMRG47(t *testing.T) {
 		t.Fatalf("merge called while base red: %q", got)
 	}
 	wakes := l.state().Project.Wakes
-	if len(wakes) != 1 || wakes[0].Key != "base_red@deadbeef1234567890" {
-		t.Fatalf("wakes on red = %+v, want 1 base_red@deadbeef1234567890", wakes)
+	if len(wakes) != 1 || wakes[0].Key != "base_red@deadbeef1234567890@1" {
+		t.Fatalf("wakes on red = %+v, want 1 base_red@deadbeef1234567890@1", wakes)
 	}
 	// Shared stage function: status and /factory both name the base branch and agree on stage.
 	st, logs := l.state(), l.logLines()
@@ -72,8 +72,8 @@ func TestBaseRedHoldsBehindAndGreenResumesKBMRG47(t *testing.T) {
 		t.Fatalf("update-branch calls after green = %q, want 1", got)
 	}
 	wakes = l.state().Project.Wakes
-	if len(wakes) != 2 || wakes[1].Key != "base_green@cafebabe1234567890" {
-		t.Fatalf("wakes after green = %+v, want base_red then base_green@cafebabe1234567890", wakes)
+	if len(wakes) != 2 || wakes[1].Key != "base_green@cafebabe1234567890@1" {
+		t.Fatalf("wakes after green = %+v, want base_red then base_green@cafebabe1234567890@1", wakes)
 	}
 
 	// Base turns red again (badc0ffe1234567890): red -> green -> red wakes again.
@@ -81,8 +81,8 @@ func TestBaseRedHoldsBehindAndGreenResumesKBMRG47(t *testing.T) {
 	writeBaseRuns(t, l.gh, `{"workflow_runs":[{"id":103,"head_sha":"badc0ffe1234567890","status":"completed","conclusion":"timed_out"}]}`)
 	l.pass()
 	wakes = l.state().Project.Wakes
-	if len(wakes) != 3 || wakes[2].Key != "base_red@badc0ffe1234567890" {
-		t.Fatalf("wakes after red->green->red = %+v, want base_red@badc0ffe1234567890", wakes)
+	if len(wakes) != 3 || wakes[2].Key != "base_red@badc0ffe1234567890@1" {
+		t.Fatalf("wakes after red->green->red = %+v, want base_red@badc0ffe1234567890@1", wakes)
 	}
 }
 
@@ -171,7 +171,7 @@ func TestBaseRedPastMainRedMinutesOldestTaskOnce(t *testing.T) {
 	}
 	heldWakes := 0
 	for _, w := range l.state().Project.Wakes {
-		if w.Key == "base_red_held@deadbeef1234567890" {
+		if w.Key == "base_red_held@deadbeef1234567890@1" {
 			heldWakes++
 			if w.Task != "T1" || !strings.Contains(w.Why, "merge the base") {
 				t.Errorf("base_red_held wake = %+v, want task T1 naming merge the base", w)
@@ -218,8 +218,8 @@ func TestBaseRedReadErrorKeepsLastState(t *testing.T) {
 	writeGHFile(t, l.gh, "base_runs_fail", "")
 	l.pass()
 	wakes := l.state().Project.Wakes
-	if len(wakes) != 1 || wakes[0].Key != "base_red@deadbeef1234567890" {
-		t.Fatalf("wakes after red then read error = %+v, want only base_red@deadbeef1234567890", wakes)
+	if len(wakes) != 1 || wakes[0].Key != "base_red@deadbeef1234567890@1" {
+		t.Fatalf("wakes after red then read error = %+v, want only base_red@deadbeef1234567890@1", wakes)
 	}
 	if b := l.state().Project.Base; b == nil || !b.Red {
 		t.Fatal("base flipped to green on read error")
@@ -267,8 +267,8 @@ func TestBaseRedSurvivesRestartAndStopStart(t *testing.T) {
 
 	// Must NOT wake a second time in the same red spell, and keeps original spell ID and Since.
 	st := l.state()
-	if len(st.Project.Wakes) != 1 || st.Project.Base == nil || st.Project.Base.SpellID != "redsha1" {
-		t.Fatalf("after restart: wakes=%+v base=%+v, want 1 wake and spell redsha1", st.Project.Wakes, st.Project.Base)
+	if len(st.Project.Wakes) != 1 || st.Project.Base == nil || st.Project.Base.SpellID != "redsha1@1" {
+		t.Fatalf("after restart: wakes=%+v base=%+v, want 1 wake and spell redsha1@1", st.Project.Wakes, st.Project.Base)
 	}
 
 	// Age past main_red_minutes, escalate once, then restart again: must NOT tell or wake twice.
@@ -355,5 +355,109 @@ func TestBaseRedFailedTellRetriesOnceNextPass(t *testing.T) {
 	l.pass()
 	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 1 {
 		t.Fatalf("sends after failed tell + retry = %d (%q), want 1", len(sends), sends)
+	}
+}
+
+// TestBaseRedGreenRedSameSHAWakesAndTellsAgain verifies item 1: red -> green ->
+// red on the same base commit sha opens a new spell, wakes the coordinator
+// again, and may tell a held worker once more after main_red_minutes.
+func TestBaseRedGreenRedSameSHAWakesAndTellsAgain(t *testing.T) {
+	l := newLanding(t)
+	now := time.Now()
+	l.eng.Now = func() time.Time { return now }
+	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
+	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
+	writeGHFile(t, l.gh, "base-ref.json", `{"object":{"sha":"samesha1234567"}}`)
+
+	// Spell 1: red at samesha1234567 -> base_red wake, escalate past main_red_minutes.
+	writeBaseRuns(t, l.gh, `{"workflow_runs":[{"id":901,"head_sha":"samesha1234567","status":"completed","conclusion":"failure"}]}`)
+	l.pass()
+	l.edit(func(s *flow.State) {
+		s.Project.Base.Since = now.Add(-time.Duration(s.Settings.MainRedMinutes+1) * time.Minute)
+	})
+	l.pass()
+	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 1 {
+		t.Fatalf("spell 1 sends = %d, want 1", len(sends))
+	}
+
+	// Re-run passes at the same sha -> base_green wake.
+	writeBaseRuns(t, l.gh, `{"workflow_runs":[{"id":901,"head_sha":"samesha1234567","status":"completed","conclusion":"success"}]}`)
+	l.pass()
+
+	// Spell 2: a later re-run fails at the same sha -> new base_red wake, and tells again past main_red_minutes.
+	writeBaseRuns(t, l.gh, `{"workflow_runs":[{"id":901,"head_sha":"samesha1234567","status":"completed","conclusion":"failure"}]}`)
+	l.pass()
+	redWakes := 0
+	for _, w := range l.state().Project.Wakes {
+		if strings.HasPrefix(w.Key, "base_red@") {
+			redWakes++
+		}
+	}
+	if redWakes != 2 {
+		t.Fatalf("base_red wakes after red->green->red on same sha = %d, want 2 (all: %+v)", redWakes, l.state().Project.Wakes)
+	}
+	l.edit(func(s *flow.State) {
+		s.Project.Base.Since = now.Add(-time.Duration(s.Settings.MainRedMinutes+1) * time.Minute)
+	})
+	l.pass()
+	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 2 {
+		t.Fatalf("sends after second red spell on same sha = %d, want 2", len(sends))
+	}
+}
+
+// TestBaseRedFailedTellFallbackWakesOncePerSpell verifies item 2: when the
+// first held task's N38 tell fails out and a second held task is told in the
+// same red spell, the coordinator is woken once per spell for base_red_held.
+func TestBaseRedFailedTellFallbackWakesOncePerSpell(t *testing.T) {
+	l := newLanding(t)
+	now := time.Now()
+	l.eng.Now = func() time.Time { return now }
+	ctx := context.Background()
+	w2, err := startRun(ctx, l.client, world.RunSpec{Name: "worker-t2-n38", Cwd: l.wt, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setIdle(t, l.srv, l.client, w2, "idle")
+	l.edit(func(s *flow.State) {
+		s.Settings.EnsureFailures = 2
+		s.Tasks[0].Attempts[0].RunID = ""
+		s.Tasks[0].Attempts[0].Acts = append(s.Tasks[0].Attempts[0].Acts, flow.Act{Key: flow.AskStartWorker, Result: "done"})
+		s.Tasks = append(s.Tasks, flow.Task{
+			ID: "T2", Title: "feat: y", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: s.Tasks[0].Attempts[0].BaseCommit, Branch: l.branch, Worktree: l.wt, PR: 7, RunID: w2,
+				Ready: []flow.Ready{{Head: l.c1}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: "full", Head: l.c1, Verdict: flow.VerdictPass},
+					{N: 2, Kind: "full", Head: l.c1, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{}, Acts: []flow.Act{},
+			}},
+		})
+	})
+	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
+	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
+	writeGHFile(t, l.gh, "base-ref.json", `{"object":{"sha":"cascadesha1"}}`)
+	writeBaseRuns(t, l.gh, `{"workflow_runs":[{"id":902,"head_sha":"cascadesha1","status":"completed","conclusion":"failure"}]}`)
+	l.pass()
+	l.edit(func(s *flow.State) {
+		s.Project.Base.Since = now.Add(-time.Duration(s.Settings.MainRedMinutes+1) * time.Minute)
+	})
+	// Pass 1 & 2: T1 fails tell_worker_base_red twice (hits EnsureFailures=2); pass 3: T1 is at N5, T2 is told.
+	l.pass()
+	now = now.Add(time.Minute)
+	l.pass()
+	l.pass()
+	if sends2 := sendsTo(t, l.srv.Requests(), w2); len(sends2) != 1 {
+		t.Fatalf("T2 worker sends = %d, want 1 fallback tell", len(sends2))
+	}
+	heldWakes := 0
+	for _, w := range l.state().Project.Wakes {
+		if strings.HasPrefix(w.Key, "base_red_held@") {
+			heldWakes++
+		}
+	}
+	if heldWakes != 1 {
+		t.Fatalf("base_red_held wakes = %d, want 1 (all: %+v)", heldWakes, l.state().Project.Wakes)
 	}
 }

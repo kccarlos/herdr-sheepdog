@@ -627,3 +627,47 @@ func TestN37ReviewRequiredWakesOnce(t *testing.T) {
 		t.Fatal("review_required PR was merged")
 	}
 }
+
+// TestN13OldAttemptCIFailsDoNotCarryOver verifies item 5 end to end: failing
+// CI commits recorded on a closed attempt do not count toward N13 on a new
+// attempt.
+func TestN13OldAttemptCIFailsDoNotCarryOver(t *testing.T) {
+	l := newLanding(t).withTokens()
+	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Rounds = []flow.Round{} })
+	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "91", "910"))
+	l.pass()
+	c2 := commitFile(t, l.wt, "f2.txt", "f2\n")
+	gitIn(t, l.wt, "push", "origin", c2+":refs/heads/"+l.branch)
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Ready = append(a.Ready, flow.Ready{Head: c2})
+		a.Review = nil
+	})
+	writePRJSON(t, l.gh, "view.json", c2, checkRollup("FAILURE", "92", "920"))
+	l.pass()
+	if n := len(l.state().Tasks[0].Attempts[0].CIFails); n != 2 {
+		t.Fatalf("attempt 1 CIFails = %d, want 2", n)
+	}
+
+	// Close attempt 1 via PR closed + retry, then open attempt 2 with 1 failing CI commit.
+	writeGHFile(t, l.gh, "view.json", `{"number":7,"state":"CLOSED","headRefOid":"`+c2+`","mergeable":"MERGEABLE","statusCheckRollup":[],"baseRefName":"main"}`)
+	l.pass()
+	l.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"reopen on new branch"}`, "")
+	l.pass() // N11 creates attempt 2
+	st := l.state()
+	if len(st.Tasks[0].Attempts) != 2 {
+		t.Fatalf("attempts = %d, want 2", len(st.Tasks[0].Attempts))
+	}
+	a2 := st.Tasks[0].Attempts[1]
+	c3 := commitFile(t, a2.Worktree, "f3.txt", "f3\n")
+	gitIn(t, a2.Worktree, "push", "origin", c3+":refs/heads/"+a2.Branch)
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Attempts[1].Ready = []flow.Ready{{Head: c3}}
+		s.Tasks[0].Attempts[1].PR = 8
+	})
+	writeGHFile(t, l.gh, "view.json", `{"number":8,"state":"OPEN","headRefOid":"`+c3+`","mergeable":"MERGEABLE","statusCheckRollup":`+checkRollup("FAILURE", "93", "930")+`,"baseRefName":"main"}`)
+	l.pass()
+	if got := l.state().Tasks[0]; len(got.Recaps) != 0 || len(got.Attempts[1].CIFails) != 1 {
+		t.Fatalf("attempt 2 after 1 fail: recaps=%d ci_fails=%d, want 0 and 1", len(got.Recaps), len(got.Attempts[1].CIFails))
+	}
+}

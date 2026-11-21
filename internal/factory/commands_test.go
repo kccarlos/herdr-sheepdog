@@ -518,7 +518,7 @@ func TestTaskRetryN7SayStillDivergedToldAndWokenAgain(t *testing.T) {
 	now = now.Add(time.Minute)
 	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Run.LastTurnEnd = now })
 	l.pass()
-	if st := l.state(); st.Tasks[0].LastRow != "N7" || len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != "diverged@"+l.c1 {
+	if st := l.state(); st.Tasks[0].LastRow != "N7" || len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != "diverged@tip@"+l.c1 {
 		t.Fatalf("N7 first wake: row=%s wakes=%+v", st.Tasks[0].LastRow, st.Project.Wakes)
 	}
 	// Coordinator received the wake, sends say, tip is still diverged, then runs retry.
@@ -541,7 +541,7 @@ func TestTaskRetryN7SayStillDivergedToldAndWokenAgain(t *testing.T) {
 	now = now.Add(time.Minute)
 	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Run.LastTurnEnd = now })
 	l.pass()
-	if st := l.state(); len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != "diverged@"+l.c1 {
+	if st := l.state(); len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != "diverged@tip@"+l.c1 {
 		t.Fatalf("N7 second wake after retry: wakes=%+v", st.Project.Wakes)
 	}
 }
