@@ -33,6 +33,13 @@ type RunRecord struct {
 	SentScreenHash                                                                                                     string     `json:"sent_screen_hash,omitempty"`
 	AwaitHeldStatus                                                                                                    bool       `json:"await_held_status,omitempty"`
 	StopRetry                                                                                                          *StopRetry `json:"stop_retry,omitempty"`
+	KeyRetry                                                                                                           *KeyRetry  `json:"key_retry,omitempty"`
+}
+
+// KeyRetry backs off failed attempts to answer a start dialog.
+type KeyRetry struct {
+	At    time.Time
+	Tries int
 }
 
 // StopRetry preserves a run-table stop until the executor succeeds.
@@ -182,6 +189,7 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 	}
 	if res, ok := strings.CutPrefix(d.Why, "ended("); ok {
 		rec.State, rec.Result, rec.EndedAt, rec.StopRetry = PhaseEnded, strings.TrimSuffix(res, ")"), now, nil
+		rec.KeyRetry = nil
 	}
 	stAt := cmp.Or(ev.StatusAt, now)
 	switch {
