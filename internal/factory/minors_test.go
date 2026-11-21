@@ -51,15 +51,13 @@ func TestMergeSeesAcceptOnDiskAtCall(t *testing.T) {
 	}
 	dir := t.TempDir()
 	captured := filepath.Join(dir, "state-at-merge.json")
-	t.Setenv("TEST_GH", gh)
-	t.Setenv("TEST_STATE", l.paths.State(l.id))
-	t.Setenv("TEST_CAPTURED", captured)
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(`#!/bin/sh
+	script := fmt.Sprintf(`#!/bin/sh
 if [ "$1 $2" = "pr merge" ]; then
-	cp "$TEST_STATE" "$TEST_CAPTURED" || exit 1
+	cp %q %q || exit 1
 fi
-exec "$TEST_GH" "$@"
-`), 0o700); err != nil {
+exec %q "$@"
+`, l.paths.State(l.id), captured, gh)
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))

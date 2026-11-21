@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,9 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
@@ -29,6 +33,7 @@ case "$1 $2" in
 "pr list") if [ -f "$D/view.json" ]; then printf "[%s]" "$(cat "$D/view.json")"; else echo '[]'; fi ;;
 "pr create") cp "$D/pr.json" "$D/view.json" && echo "https://github.com/acme/demo/pull/7" ;;
 "pr view")
+  failif pr_view
   if [ -f "$D/view_denied" ]; then
     case "$*" in *statusCheckRollup*)
       echo "GraphQL: Resource not accessible by personal access token (repository.pullRequest.statusCheckRollup.nodes.0.commit.statusCheckRollup.contexts.nodes.0)" >&2
@@ -210,6 +215,30 @@ func TestPRSnapshotFactsAndFailure(t *testing.T) {
 	}
 }
 
+func TestBaseStatusPermissionDeniedDoesNotSetGitHubUnavailable(t *testing.T) {
+	for _, read := range []string{"base_ref", "base_runs"} {
+		t.Run(read, func(t *testing.T) {
+			repo, _ := initGitRepoWithRemote(t)
+			githubOrigin(t, repo)
+			gh := installFakeGH(t)
+			if err := os.WriteFile(filepath.Join(gh, read+"_fail"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			eng := newGitTestEngine(t, testPaths(t), nil)
+			p := flow.State{}
+			p.Project.Folder = repo
+			eng.observeBaseLocked(context.Background(), "project", &p)
+			if eng.ghUnavail["project"] {
+				t.Fatal("base status HTTP 403 set github_unavailable")
+			}
+			_, err := eng.git.BaseStatus(context.Background(), repo)
+			if world.FailureClass(err) != flow.ClassSettled || world.GitHubUnavailable(err) {
+				t.Fatalf("base status HTTP 403 = %v, want settled permission failure", err)
+			}
+		})
+	}
+}
+
 // TestGitHubUnavailableHoldsMerge verifies denied -> fallback -> unreadable ->
 // github_unavailable holds N42, and a network failure is never remembered as
 // "not a GitHub repo" (KB-GIT-20): once GitHub answers again, N42 merges.
@@ -248,6 +277,15 @@ func TestGitHubUnavailableHoldsMerge(t *testing.T) {
 			Facts: flow.Facts{PR: p, Tip: c1, TipRel: flow.RelSame, Worker: flow.Run{State: flow.RunIdle}, GitHubUnavailable: unavail},
 		})
 		return p, unavail, r.ID, d.Asked
+	}
+
+	// Denied access to the PR itself leaves the snapshot unanswered.
+	writeGHFile(t, gh, "pr_view_fail", "")
+	if p, unavail, row, asked := eval(); p.Answered || unavail || row != "N26" || len(asked) != 0 {
+		t.Fatalf("PR view denied: answered=%t unavail=%t row=%s asked=%v", p.Answered, unavail, row, asked)
+	}
+	if err := os.Remove(filepath.Join(gh, "pr_view_fail")); err != nil {
+		t.Fatal(err)
 	}
 
 	// Denied pr view + denied REST check-runs -> unreadable + github_unavailable holds merge.
@@ -327,5 +365,91 @@ func TestWorkflowRunsDeniedHoldsMerge(t *testing.T) {
 		if p.Checks == flow.ChecksGreen || unavail || r.ID != want || slices.Contains(d.Asked, flow.AskMerge+"@"+c1) {
 			t.Fatalf("head age %s: checks=%s unavail=%t row=%s asked=%v; want %s and no merge", age, p.Checks, unavail, r.ID, d.Asked, want)
 		}
+	}
+}
+
+func TestInterruptedGitHubSnapshotHoldsMergeAndPush(t *testing.T) {
+	for _, name := range []string{"request timeout", "snapshot ceiling", "truncated", "gh RPC failure", "origin git timeout", "different push URL", "HTTP 502", "network error"} {
+		t.Run(name, func(t *testing.T) {
+			l := newLanding(t)
+			if name == "different push URL" {
+				gitIn(t, l.repo, "remote", "set-url", "--push", "origin", "https://github.com/acme/other.git")
+			}
+			srv := hctest.New(t)
+			reached := make(chan struct{}, 1)
+			srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+				if name == "origin git timeout" && slices.Contains(p.Argv, "get-url") {
+					reached <- struct{}{}
+					return hc.ExecResult{TimedOut: true}, nil
+				}
+				if p.Argv[0] != "gh" || !strings.Contains(strings.Join(p.Argv, " "), "/compare/") {
+					return hctest.GitExec(p)
+				}
+				if p.Timeout == nil || *p.Timeout <= 0 || *p.Timeout > 30 {
+					t.Errorf("invalid GitHub request budget: %v", p.Timeout)
+				}
+				reached <- struct{}{}
+				one := 1
+				switch name {
+				case "request timeout":
+					return hc.ExecResult{TimedOut: true}, nil
+				case "snapshot ceiling":
+					// The preceding reads succeeded. The shared deadline limits this
+					// final request and expires before an RPC reply arrives.
+					if p.Timeout != nil && *p.Timeout >= 1 {
+						t.Error("compare received a fresh budget after earlier reads")
+					}
+					time.Sleep(time.Second)
+					return hc.ExecResult{Code: new(int), Stdout: []byte(`{"behind_by":0}`)}, nil
+				case "truncated":
+					return hc.ExecResult{Code: new(int), Truncated: true, Stdout: []byte(`{"behind_by":0}`)}, nil
+				case "HTTP 502":
+					return hc.ExecResult{Code: &one, Stdout: []byte("HTTP 502: Bad Gateway")}, nil
+				case "network error":
+					return hc.ExecResult{Code: &one, Stderr: []byte("dial tcp: lookup api.github.com: no such host")}, nil
+				default:
+					return hc.ExecResult{}, errors.New("fixture lost the gh reply: HTTP 502")
+				}
+			}
+			l.eng.git = world.NewGit(hc.NewClient(srv.Path), nil, nil)
+			ctx := context.Background()
+			if name == "snapshot ceiling" {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, time.Second)
+				defer cancel()
+			}
+			s := l.state()
+			p := l.eng.readPRLocked(ctx, l.id, &s, 0)
+			unavailable := name == "HTTP 502" || name == "network error"
+			if p.Answered || p.Checks != flow.ChecksUnreadable || l.eng.ghUnavail[l.id] != unavailable {
+				t.Fatalf("snapshot = %+v, github_unavailable=%t, want unreadable with outage=%t", p, l.eng.ghUnavail[l.id], unavailable)
+			}
+			if name == "different push URL" {
+				if _, err := l.eng.git.PushAndOpenPR(ctx, l.wt, l.branch, l.c1, "feat: x", "Body"); !errors.Is(err, world.ErrOriginMismatch) {
+					t.Fatalf("PushAndOpenPR error = %v", err)
+				}
+				if err := l.eng.git.DeleteRemoteBranch(ctx, l.repo, l.branch); !errors.Is(err, world.ErrOriginMismatch) {
+					t.Fatalf("DeleteRemoteBranch error = %v", err)
+				}
+				if _, err := os.Stat(filepath.Join(l.gh, "argv")); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("expected no gh invocation log, stat returned %v", err)
+				}
+			} else {
+				select {
+				case <-reached:
+				default:
+					t.Fatal("fixture never reached the failing request")
+				}
+			}
+			for _, snapshot := range []flow.PR{p, {Checks: p.Checks}} {
+				_, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[0], Settings: s.Settings,
+					Facts: flow.Facts{PR: snapshot, Tip: l.c1, TipRel: flow.RelSame, Worker: flow.Run{State: flow.RunIdle}}})
+				for _, ask := range d.Asked {
+					if strings.HasPrefix(ask, flow.AskMerge+"@") || strings.HasPrefix(ask, flow.AskPushPR+"@") {
+						t.Fatalf("an unanswered snapshot asked for %q", ask)
+					}
+				}
+			}
+		})
 	}
 }

@@ -7,13 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
-// GitExec emulates machine.exec for Git in a fixture checkout.
+// GitExec emulates machine.exec for Git and fake gh in a fixture checkout.
 func GitExec(p hc.ExecParams) (hc.ExecResult, error) {
 	dir, err := filepath.EvalSymlinks(p.Cwd)
 	if err != nil {
@@ -25,8 +26,28 @@ func GitExec(p hc.ExecParams) (hc.ExecResult, error) {
 	}
 	rel, err := filepath.Rel(tmp, dir)
 	if err != nil || !filepath.IsLocal(rel) || len(p.Argv) == 0 ||
-		p.Argv[0] != "git" || p.Timeout == nil || *p.Timeout <= 0 || p.Env["GIT_TERMINAL_PROMPT"] != "0" || p.Env["GIT_ASKPASS"] != "" {
+		p.Timeout == nil || *p.Timeout <= 0 {
 		return hc.ExecResult{}, fmt.Errorf("unexpected fixture git request in %s", dir)
+	}
+	switch p.Argv[0] {
+	case "git":
+		if p.Env["GIT_TERMINAL_PROMPT"] != "0" || p.Env["GIT_ASKPASS"] != "" {
+			return hc.ExecResult{}, fmt.Errorf("fixture git did not disable prompts")
+		}
+	case "gh":
+		bin, err := exec.LookPath("gh")
+		if err != nil {
+			return hc.ExecResult{}, err
+		}
+		bin, err = filepath.EvalSymlinks(bin)
+		rel, relErr := filepath.Rel(tmp, bin)
+		if err != nil || relErr != nil || !filepath.IsLocal(rel) ||
+			p.Env["GH_PROMPT_DISABLED"] != "1" || p.Env["GH_NO_UPDATE_NOTIFIER"] != "1" {
+			return hc.ExecResult{}, fmt.Errorf("fixture gh requires a temporary binary and disabled prompts")
+		}
+		p.Argv[0] = bin
+	default:
+		return hc.ExecResult{}, fmt.Errorf("unexpected fixture executable %q", p.Argv[0])
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*p.Timeout*float64(time.Second)))
 	defer cancel()
@@ -34,10 +55,30 @@ func GitExec(p hc.ExecParams) (hc.ExecResult, error) {
 	cmd.Dir, cmd.WaitDelay = dir, time.Second
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + tmp, "TMPDIR=" + tmp, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_ALLOW_PROTOCOL=file", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS="}
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + tmp, "TMPDIR=" + tmp, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_ALLOW_PROTOCOL=file"}
+	for k, v := range p.Env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err = cmd.Run()
+	// Fixtures map a synthetic GitHub remote to a local bare repository.
+	// Expose its GitHub URL to identity checks while keeping file transport.
+	if err == nil && len(p.Argv) > 2 && p.Argv[0] == "git" && p.Argv[1] == "remote" && p.Argv[2] == "get-url" {
+		urls := strings.Split(stdout.String(), "\n")
+		for i, target := range urls {
+			if !filepath.IsAbs(target) {
+				continue
+			}
+			config := exec.CommandContext(ctx, "git", "config", "--get", "url."+target+".insteadOf")
+			config.Dir, config.Env = dir, cmd.Env
+			if raw, err := config.Output(); err == nil && strings.TrimSpace(string(raw)) == "https://github.com/acme/demo.git" {
+				urls[i] = strings.TrimSpace(string(raw))
+			}
+		}
+		stdout.Reset()
+		stdout.WriteString(strings.Join(urls, "\n"))
+	}
 	r := hc.ExecResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), TimedOut: ctx.Err() != nil}
 	if len(r.Stdout) > 8<<20 || len(r.Stderr) > 1<<20 {
 		r.Stdout, r.Stderr, r.Truncated = r.Stdout[:min(len(r.Stdout), 8<<20)], r.Stderr[:min(len(r.Stderr), 1<<20)], true

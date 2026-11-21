@@ -32,6 +32,7 @@ type startRepo struct {
 	root, remote, slug string
 	empty              bool
 	view               *ghRepoView
+	originErr          error
 }
 
 func (o DoctorOptions) run(ctx context.Context, dir string, argv ...string) CommandOutput {
@@ -47,13 +48,16 @@ func cmdOK(c CommandOutput) bool { return c.Err == nil && !c.TimedOut && c.Exit 
 // external calls go through opts.RunCommand, so tests use a fake.
 func StartChecks(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	o := opts.withDefaults()
-	run, gitRun := o.RunCommand, o.RunCommand
+	run, projectRun := o.RunCommand, o.RunCommand
 	inHC := opts.HCSocket != ""
 	if inHC {
-		gitRun = hcExecRunner(o.HCSocket)
+		projectRun = hcExecRunner(o.HCSocket)
 	}
 	var gitFailure []onboard.Result
 	o.RunCommand = func(ctx context.Context, dir string, env []string, argv ...string) CommandOutput {
+		if argv[0] == "gh" {
+			return projectRun(ctx, dir, append(slices.Clone(env), "GH_PROMPT_DISABLED=1", "GH_NO_UPDATE_NOTIFIER=1", "GH_HOST=github.com", "GH_REPO="), argv...)
+		}
 		if argv[0] != "git" {
 			return run(ctx, dir, env, argv...)
 		}
@@ -61,13 +65,14 @@ func StartChecks(ctx context.Context, opts DoctorOptions) []onboard.Result {
 			return CommandOutput{Exit: -1}
 		}
 		env = append(slices.Clone(env), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=")
-		c := gitRun(ctx, dir, env, argv...)
+		c := projectRun(ctx, dir, env, argv...)
 		args := argv[1:]
 		if args[0] == "-C" {
 			args = args[2:]
 		}
 		verb := args[0]
 		missing := c.Err == nil && c.Exit == 1 && (verb == "config" || verb == "symbolic-ref" || verb == "rev-parse" && slices.Contains(args, "--quiet"))
+		missing = missing || c.Err == nil && c.Exit == 2 && verb == "remote" && args[1] == "get-url"
 		if inHC && !cmdOK(c) && !missing && (verb != "fetch" || c.Err != nil || c.TimedOut) {
 			detail, fix := "git failed", "run git "+strings.Join(args, " ")+" in the project folder and resolve the error"
 			var gitErr *world.GitError
@@ -80,11 +85,10 @@ func StartChecks(ctx context.Context, opts DoctorOptions) []onboard.Result {
 		return c
 	}
 	top := gitLine(ctx, o, o.Folder, "rev-parse", "--show-toplevel")
-	r := startRepo{root: firstNonEmpty(top, o.Folder)}
-	r.remote = world.PushRemote(strings.Fields(gitOut(ctx, o, r.root, "remote")))
-	r.slug = resolveRemoteSlug(ctx, o, r.root, r.remote)
+	r := startRepo{root: firstNonEmpty(top, o.Folder), remote: "origin"}
+	r.slug, r.originErr = readGitHubOrigin(ctx, o, r.root)
 	out := []onboard.Result{checkGitVersion(ctx, o)}
-	if r.remote != "" { // like the engine
+	if r.slug != "" { // like the engine
 		fetch, cancel := context.WithTimeout(ctx, world.GitNetworkTimeout)
 		defer cancel()
 		if !cmdOK(o.RunCommand(fetch, o.TempDir, nil, "git", "-C", r.root, "fetch", "--prune", r.remote)) {
@@ -149,10 +153,10 @@ func checkStartGH(ctx context.Context, o DoctorOptions, r *startRepo) onboard.Re
 	if r.slug == "" {
 		return resSkip(name, "no GitHub remote to check access to")
 	}
-	c := o.run(ctx, o.TempDir, "gh", "repo", "view", r.slug, "--json", "defaultBranchRef,viewerPermission")
+	c := o.run(ctx, r.root, "gh", "repo", "view", r.slug, "--json", "defaultBranchRef,viewerPermission")
 	var v ghRepoView
 	if !cmdOK(c) || json.Unmarshal([]byte(c.Stdout), &v) != nil {
-		return resFail(name, "cannot read "+r.slug+" with gh (not installed, not signed in, or no access): "+cleanReason(firstNonEmpty(c.Stderr, "no answer")),
+		return resFail(name, "cannot read "+r.slug+" with gh (not installed, not signed in, or no access): "+cleanReason(firstNonEmpty(c.Stderr, errText(c.Err), "no answer")),
 			"install GitHub CLI (https://cli.github.com) if missing, then "+fix)
 	}
 	if p := v.ViewerPermission; p != "WRITE" && p != "MAINTAIN" && p != "ADMIN" {
@@ -166,7 +170,7 @@ func checkStartRemote(ctx context.Context, o DoctorOptions, r startRepo) onboard
 	const name = "github remote"
 	switch {
 	case r.slug == "":
-		return resFail(name, "no GitHub remote in "+r.root, "add one: git remote add origin https://github.com/<owner>/<repo>.git")
+		return resFail(name, cleanReason(errText(r.originErr)), originFix(r.originErr))
 	case r.empty:
 		base := firstNonEmpty(gitLine(ctx, o, r.root, "symbolic-ref", "--quiet", "--short", "HEAD"), "main")
 		return resFail(name, r.slug+" is an empty repository (no commits or default branch)",
@@ -244,7 +248,7 @@ func checkStartProtection(ctx context.Context, o DoctorOptions, r startRepo) []o
 	path := "repos/" + r.slug + "/branches/" + url.PathEscape(base)
 	byHand := "check by hand that " + base + " does not require an approving review"
 	unread := func(what string, c CommandOutput) []onboard.Result {
-		return []onboard.Result{resWarn(review, "could not read "+what+" of "+base+": "+cleanReason(firstNonEmpty(c.Stderr, c.Stdout, "no answer")), byHand), resSkip(prot, "unknown")}
+		return []onboard.Result{resWarn(review, "could not read "+what+" of "+base+": "+cleanReason(firstNonEmpty(c.Stderr, errText(c.Err), c.Stdout, "no answer")), byHand), resSkip(prot, "unknown")}
 	}
 	bc := o.run(ctx, r.root, "gh", "api", path)
 	var b struct {
@@ -261,7 +265,7 @@ func checkStartProtection(ctx context.Context, o DoctorOptions, r startRepo) []o
 		} `json:"parameters"`
 	}
 	rc := o.run(ctx, r.root, "gh", "api", "repos/"+r.slug+"/rules/branches/"+url.PathEscape(base))
-	noRulesets := strings.Contains(rc.Stderr+rc.Stdout, "403") && strings.Contains(strings.ToLower(rc.Stderr+rc.Stdout), "upgrade to github pro")
+	noRulesets := rc.Err == nil && !rc.TimedOut && strings.Contains(rc.Stderr+rc.Stdout, "403") && strings.Contains(strings.ToLower(rc.Stderr+rc.Stdout), "upgrade to github pro")
 	switch {
 	case cmdOK(rc):
 		_ = json.Unmarshal([]byte(rc.Stdout), &rules)
@@ -285,7 +289,7 @@ func checkStartProtection(ctx context.Context, o DoctorOptions, r startRepo) []o
 			} `json:"required_pull_request_reviews"`
 		}
 		all := pc.Stderr + pc.Stdout
-		notClassic := strings.Contains(all, "404") && strings.Contains(strings.ToLower(all), "not protected") // protected by a ruleset only
+		notClassic := pc.Err == nil && !pc.TimedOut && strings.Contains(all, "404") && strings.Contains(strings.ToLower(all), "not protected") // protected by a ruleset only
 		if !notClassic && (!cmdOK(pc) || json.Unmarshal([]byte(pc.Stdout), &p) != nil) {
 			warn = &pc
 		}

@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -71,7 +70,6 @@ type DoctorOptions struct {
 	GOOS          string
 	Home          string
 	TempDir       string
-	GHHost        string
 	DataDir       string
 	LookPath      func(string) (string, error)
 	RunCommand    CommandFunc
@@ -136,7 +134,7 @@ func resSkip(name, detail string) onboard.Result {
 
 // Doctor runs the factory prerequisite checks in fixed order: herdr-core, the
 // timed project-volume probe inside herdr-core, agent CLI logins + canary
-// starts, gh login + pinned default repo, and codexbar. When herdr-core is up,
+// starts, gh login + origin validation, and codexbar. When herdr-core is up,
 // child probes execute inside herdr-core's own environment without copying the
 // caller shell's PATH or credentials.
 func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
@@ -863,14 +861,19 @@ func hcExecRunner(socket string) CommandFunc {
 	client := hc.NewClient(socket)
 	git := world.NewGit(client, nil, nil)
 	return func(ctx context.Context, dir string, extraEnv []string, argv ...string) CommandOutput {
-		if argv[0] == "git" {
+		if argv[0] == "git" || argv[0] == "gh" {
 			args := argv[1:]
 			if len(args) >= 2 && args[0] == "-C" {
 				dir, args = args[1], args[2:]
 			}
-			r, err := git.Run(ctx, dir, args...)
+			run := git.Run
+			if argv[0] == "gh" {
+				run = git.RunGH
+			}
+			r, err := run(ctx, dir, args...)
 			out := CommandOutput{Exit: -1, Stdout: string(r.Stdout), Stderr: string(r.Stderr), TimedOut: r.TimedOut, Err: err}
-			if r.Code != nil && !r.Truncated && r.Signal == nil && !r.TimedOut {
+			var child *world.GitError
+			if r.Code != nil && !r.Truncated && r.Signal == nil && !r.TimedOut && (!errors.As(err, &child) || child.RPC == nil) {
 				out.Exit, out.Err = *r.Code, nil
 			}
 			return out
@@ -925,9 +928,7 @@ func extraEnvMap(extraEnv []string) map[string]string {
 	return m
 }
 
-// CheckGH checks that `gh` is on PATH, authenticated, and — when the target
-// folder has a GitHub push remote — that `gh repo set-default` is pinned to
-// that push remote so an `upstream` or `github` remote cannot redirect PRs.
+// CheckGH checks gh authentication and the project origin.
 func CheckGH(ctx context.Context, o DoctorOptions, volumeOK bool) onboard.Result {
 	customLookPath := o.LookPath != nil
 	o = o.withDefaults()
@@ -960,7 +961,7 @@ func checkGH(ctx context.Context, o DoctorOptions, inHC, customLookPath, volumeO
 		return resWarn(name, "gh is not logged in (local-merge mode only)", "run: gh auth login")
 	}
 	if !volumeOK {
-		return resOK(name, "logged in (repo pin check skipped until project volume answers)")
+		return resOK(name, "logged in (checking origin requires a reachable project volume)")
 	}
 
 	gitDir := o.Folder
@@ -970,55 +971,14 @@ func checkGH(ctx context.Context, o DoctorOptions, inHC, customLookPath, volumeO
 	repoRoot := gitLine(ctx, o, gitDir, "rev-parse", "--show-toplevel")
 	if repoRoot == "" {
 		return resWarn(name, fmt.Sprintf("logged in; %s is not a git repo yet (local-merge mode only)", o.Folder),
-			"initialize git, add a GitHub origin remote and run gh repo set-default <owner/repo>")
+			"initialize git and add a GitHub origin remote")
 	}
 
-	remotes := strings.Fields(gitOut(ctx, o, repoRoot, "remote"))
-	pushRemote := resolvePushRemote(ctx, o, repoRoot, remotes)
-	slug := resolveRemoteSlug(ctx, o, repoRoot, pushRemote)
-	if slug == "" {
-		return resWarn(name, fmt.Sprintf("logged in; no GitHub push remote in %s (local-merge mode only)", repoRoot),
-			fmt.Sprintf("add a GitHub origin remote and run in %s: gh repo set-default <owner/repo>", repoRoot))
+	slug, err := readGitHubOrigin(ctx, o, repoRoot)
+	if err != nil {
+		return resWarn(name, "logged in; "+cleanReason(err.Error()), originFix(err))
 	}
-
-	vCtx, vCancel := context.WithTimeout(ctx, o.AuthTimeout)
-	viewOut := o.RunCommand(vCtx, repoRoot, nil, "gh", "repo", "set-default", "--view")
-	vCancel()
-	combinedLower := strings.ToLower(viewOut.Stderr + "\n" + viewOut.Stdout)
-	if viewOut.Err != nil || viewOut.TimedOut || (viewOut.Exit != 0 && !strings.Contains(combinedLower, "no default")) {
-		why := cleanReason(firstNonEmpty(errText(viewOut.Err), viewOut.Stderr, viewOut.Stdout, "timed out"))
-		return resWarn(name, fmt.Sprintf("logged in, but could not check default repo in %s: %s", repoRoot, why),
-			fmt.Sprintf("run in %s: gh repo set-default %s", repoRoot, slug))
-	}
-
-	pinned := strings.TrimSpace(firstLine(viewOut.Stdout))
-	hijackRemote := ambiguousGHRemote(remotes, pushRemote)
-
-	switch {
-	case pinned == "" && hijackRemote != "":
-		return resFail(name,
-			fmt.Sprintf("logged in, but default repo is not pinned while remote %s exists (gh would target %s instead of %s)", hijackRemote, hijackRemote, slug),
-			fmt.Sprintf("run in %s: gh repo set-default %s", repoRoot, slug))
-	case pinned == "":
-		return resWarn(name, fmt.Sprintf("logged in, but default repo is not pinned for %s", slug),
-			fmt.Sprintf("run in %s: gh repo set-default %s", repoRoot, slug))
-	case !strings.EqualFold(pinned, slug):
-		return resFail(name, fmt.Sprintf("logged in, but default repo is pinned to %s instead of push remote %s", pinned, slug),
-			fmt.Sprintf("run in %s: gh repo set-default %s", repoRoot, slug))
-	default:
-		return resOK(name, fmt.Sprintf("logged in; default repo pinned to %s", pinned))
-	}
-}
-
-// ambiguousGHRemote returns a higher-priority remote ("upstream" or "github")
-// that gh's own remote order prefers over pushRemote when unpinned.
-func ambiguousGHRemote(remotes []string, pushRemote string) string {
-	for _, r := range []string{"upstream", "github"} {
-		if r != pushRemote && slices.Contains(remotes, r) {
-			return r
-		}
-	}
-	return ""
+	return resOK(name, "logged in; factory GitHub calls target "+slug)
 }
 
 func gitOut(ctx context.Context, o DoctorOptions, dir string, args ...string) string {
@@ -1035,97 +995,33 @@ func gitLine(ctx context.Context, o DoctorOptions, dir string, args ...string) s
 	return firstLine(gitOut(ctx, o, dir, args...))
 }
 
-func resolvePushRemote(ctx context.Context, o DoctorOptions, dir string, remotes []string) string {
-	if len(remotes) == 0 {
-		return ""
-	}
-	br := gitLine(ctx, o, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
-	type cand struct {
-		name          string
-		allowUpstream bool
-	}
-	var cands []cand
-	if br != "" {
-		cands = append(cands, cand{gitLine(ctx, o, dir, "config", "--get", "branch."+br+".pushRemote"), true})
-	}
-	cands = append(cands, cand{gitLine(ctx, o, dir, "config", "--get", "remote.pushDefault"), true})
-	if br != "" {
-		cands = append(cands, cand{gitLine(ctx, o, dir, "config", "--get", "branch."+br+".remote"), false})
-	}
-	for _, c := range cands {
-		if c.name != "" && slices.Contains(remotes, c.name) && (c.allowUpstream || c.name != "upstream") {
-			return c.name
+func readGitHubOrigin(ctx context.Context, o DoctorOptions, dir string) (string, error) {
+	return world.GitHubOrigin(func(args ...string) (string, error) {
+		c := o.run(ctx, o.TempDir, append([]string{"git", "-C", dir}, args...)...)
+		switch {
+		case cmdOK(c):
+			return strings.TrimSpace(c.Stdout), nil
+		case c.TimedOut:
+			return "", fmt.Errorf("reading origin: %w", context.DeadlineExceeded)
+		case c.Err != nil:
+			return "", c.Err
+		case c.Exit == 2:
+			return "", nil // git remote get-url's missing-remote exit
+		default:
+			return "", fmt.Errorf("reading origin: %s", firstNonEmpty(c.Stderr, "git failed"))
 		}
-	}
-	if slices.Contains(remotes, "origin") {
-		return "origin"
-	}
-	for _, r := range remotes {
-		if r != "upstream" {
-			return r
-		}
-	}
-	return ""
+	})
 }
 
-func resolveRemoteSlug(ctx context.Context, o DoctorOptions, dir, remote string) string {
-	if remote == "" {
-		return ""
+func originFix(err error) string {
+	switch {
+	case errors.Is(err, world.ErrNoOrigin):
+		return "add one: git remote add origin https://github.com/<owner>/<repo>.git"
+	case errors.Is(err, world.ErrOriginMismatch):
+		return "set origin's fetch and push URLs to the same GitHub repository and remove any extra URLs"
+	default:
+		return "run git remote get-url --all origin and git remote get-url --push --all origin in the project folder and resolve the error"
 	}
-	ghHost := strings.ToLower(strings.TrimSpace(o.GHHost))
-	if pushURL := gitLine(ctx, o, dir, "config", "--get", "remote."+remote+".pushurl"); pushURL != "" {
-		if slug := RepoFromURL(pushURL, ghHost); slug != "" {
-			return slug
-		}
-	}
-	return RepoFromURL(gitLine(ctx, o, dir, "config", "--get", "remote."+remote+".url"), ghHost)
-}
-
-var (
-	schemeRemoteRe = regexp.MustCompile(`^(?:https?|ssh|git)://(?:[^/@]+@)?([^/:]+)(?::\d+)?/(.+)$`)
-	scpRemoteRe    = regexp.MustCompile(`^(?:[^/@:]+@)?([A-Za-z0-9._-]{2,}):/?(.+)$`)
-	slugPartRe     = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-)
-
-// RepoFromURL extracts "owner/name" from a GitHub HTTPS, git://, ssh:// or
-// SCP-style remote URL (including SSH host aliases).
-func RepoFromURL(rawURL, ghHost string) string {
-	u := strings.TrimSpace(rawURL)
-	if u == "" {
-		return ""
-	}
-	isSSH := !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "git://")
-	var m []string
-	if strings.Contains(u, "://") {
-		m = schemeRemoteRe.FindStringSubmatch(u)
-	} else {
-		m = scpRemoteRe.FindStringSubmatch(u)
-	}
-	if m == nil {
-		return ""
-	}
-	host := strings.ToLower(m[1])
-	path := strings.TrimSuffix(strings.Trim(m[2], "/"), ".git")
-	ghHost = strings.ToLower(strings.TrimSpace(ghHost))
-	if isSSH {
-		for _, other := range []string{"gitlab", "bitbucket", "codeberg", "sr.ht", "sourcehut"} {
-			if strings.Contains(host, other) {
-				return ""
-			}
-		}
-	} else if !strings.Contains(host, "github") && (ghHost == "" || host != ghHost) {
-		return ""
-	}
-	parts := strings.Split(path, "/")
-	if len(parts) != 2 {
-		return ""
-	}
-	for _, p := range parts {
-		if p == "." || p == ".." || !slugPartRe.MatchString(p) {
-			return ""
-		}
-	}
-	return path
 }
 
 // CheckCodexbar reports whether `codexbar` is on PATH for reading quota pools.

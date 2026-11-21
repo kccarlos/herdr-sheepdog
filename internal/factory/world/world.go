@@ -16,7 +16,6 @@ import (
 	"maps"
 	"math/rand/v2"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -56,7 +55,6 @@ var httpSettledRe = regexp.MustCompile(`\bHTTP(?:/\d(?:\.\d)?)? (?:401|404|422)\
 func FailureClass(err error) string {
 	var ce *CodedError
 	var he *hc.Error
-	var ee *exec.ExitError
 	switch {
 	case err == nil:
 		return ""
@@ -65,8 +63,6 @@ func FailureClass(err error) string {
 	case errors.Is(err, context.DeadlineExceeded):
 		return flow.ClassTimeout
 	case errors.As(err, &he) && (he.Code == -32600 || he.Code == -32601 || he.Code == -32602 || he.Code == 401 || he.Code == 404 || he.Code == 422):
-		return flow.ClassSettled
-	case errors.As(err, &ee) && (ee.ExitCode() == 4 || ee.ExitCode() == 126 || ee.ExitCode() == 127):
 		return flow.ClassSettled
 	case gitExit(err, 126), gitExit(err, 127), httpSettledRe.MatchString(err.Error()):
 		return flow.ClassSettled
@@ -681,18 +677,6 @@ func realPath(p string) string {
 	return p
 }
 
-// PushRemote picks the remote the engine pushes to: origin, else the only
-// remote, else "" (none).
-func PushRemote(names []string) string {
-	switch {
-	case slices.Contains(names, "origin"):
-		return "origin"
-	case len(names) == 1:
-		return names[0]
-	}
-	return ""
-}
-
 // FetchRemote fetches the push remote so the remote base and remote PR heads
 // are in the local object store.
 func (g *Git) FetchRemote(ctx context.Context, dir string) error {
@@ -701,44 +685,42 @@ func (g *Git) FetchRemote(ctx context.Context, dir string) error {
 }
 
 func (g *Git) remoteBaseCommit(ctx context.Context, repo string, fetch bool) (string, string, error) {
-	out, err := g.gitCmd(ctx, repo, "remote")
-	if err != nil {
+	if _, err := g.gitCmd(ctx, repo, "remote", "get-url", pushRemote); err != nil {
+		if gitExit(err, 2) {
+			return "", "", Fail(flow.ClassSettled, ErrNoOrigin)
+		}
 		return "", "", err
 	}
-	remote := PushRemote(strings.Fields(out))
-	if remote == "" {
-		return "", "", Fail(flow.ClassSettled, fmt.Errorf("world: no unique git remote in %s", repo))
-	}
 	if fetch {
-		if _, err := g.gitCmd(ctx, repo, "fetch", "--prune", remote); err != nil {
+		if _, err := g.gitCmd(ctx, repo, "fetch", "--prune", pushRemote); err != nil {
 			return "", "", err
 		}
 	}
-	ref, err := g.gitCmd(ctx, repo, "symbolic-ref", "--quiet", "refs/remotes/"+remote+"/HEAD")
+	ref, err := g.gitCmd(ctx, repo, "symbolic-ref", "--quiet", "refs/remotes/"+pushRemote+"/HEAD")
 	if err != nil && !gitExit(err, 1) {
 		return "", "", err
 	}
-	if strings.HasPrefix(ref, "refs/remotes/"+remote+"/") {
+	if strings.HasPrefix(ref, "refs/remotes/"+pushRemote+"/") {
 		sha, err := g.gitCmd(ctx, repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
 		if !gitExit(err, 1) {
 			return ref, sha, err
 		}
 	}
-	ls, err := g.gitCmd(ctx, repo, "ls-remote", "--symref", remote, "HEAD")
+	ls, err := g.gitCmd(ctx, repo, "ls-remote", "--symref", pushRemote, "HEAD")
 	if err != nil {
 		return "", "", err
 	}
 	for _, ln := range strings.Split(ls, "\n") {
 		if b, ok := strings.CutPrefix(ln, "ref: refs/heads/"); ok {
 			if b, ok = strings.CutSuffix(b, "\tHEAD"); ok && b != "" {
-				ref := "refs/remotes/" + remote + "/" + b
+				ref := "refs/remotes/" + pushRemote + "/" + b
 				if sha, err := g.gitCmd(ctx, repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); !gitExit(err, 1) {
 					return ref, sha, err
 				}
 			}
 		}
 	}
-	return "", "", Fail(flow.ClassSettled, fmt.Errorf("world: no remote base branch on %s", remote))
+	return "", "", Fail(flow.ClassSettled, fmt.Errorf("world: no remote base branch on %s", pushRemote))
 }
 
 // InspectWorktree reads worktree's HEAD, its commit relation to ref, and

@@ -3,7 +3,6 @@ package world
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -118,8 +117,8 @@ func TestClosePR(t *testing.T) {
 }
 
 func TestFailureClass(t *testing.T) {
-	exitErr := func(code string) error {
-		return exec.Command("sh", "-c", "exit "+code).Run()
+	ghErr := func(code int, stderr string) error {
+		return &GitError{command: "gh", Result: hc.ExecResult{Code: &code, Stderr: []byte(stderr)}}
 	}
 	for _, tc := range []struct {
 		name string
@@ -129,9 +128,8 @@ func TestFailureClass(t *testing.T) {
 		{"deadline", context.DeadlineExceeded, flow.ClassTimeout},
 		{"explicit settled", Fail(flow.ClassSettled, os.ErrPermission), flow.ClassSettled},
 		{"plain os error", os.ErrNotExist, flow.ClassTransient},
-		{"exit 4 (gh auth)", exitErr("4"), flow.ClassSettled},
-		{"exit 127 (missing cmd)", exitErr("127"), flow.ClassSettled},
-		{"exit 1 (generic)", exitErr("1"), flow.ClassTransient},
+		{"exit 127 (missing cmd)", ghErr(127, ""), flow.ClassSettled},
+		{"exit 1 (generic)", ghErr(1, ""), flow.ClassTransient},
 		{"hc invalid params (-32602)", hcFail(&hc.Error{Code: -32602, Message: "invalid params"}), flow.ClassSettled},
 		{"hc HTTP 403", hcFail(&hc.Error{Code: 403, Message: "forbidden"}), flow.ClassTransient},
 		{"hc server error (-32000)", hcFail(&hc.Error{Code: -32000, Kind: "unavailable", Message: "busy"}), flow.ClassTransient},
@@ -139,8 +137,8 @@ func TestFailureClass(t *testing.T) {
 		{"gh HTTP 502", errString("HTTP 502: Bad Gateway"), flow.ClassTransient},
 		{"gh HTTP 429", errString("HTTP 429: Too Many Requests"), flow.ClassTransient},
 		{"gh HTTP 401", errString("HTTP 401: Bad credentials"), flow.ClassSettled},
-		{"gh HTTP 403", errString("gh: Resource not accessible by integration (HTTP 403)"), flow.ClassTransient},
-		{"gh HTTP 403 rate limit", errString("HTTP 403: API rate limit exceeded"), flow.ClassTransient},
+		{"gh HTTP 403", ghErr(1, "gh: Resource not accessible by integration (HTTP 403)"), flow.ClassTransient},
+		{"gh HTTP 403 rate limit", ghErr(1, "HTTP 403: API rate limit exceeded"), flow.ClassTransient},
 		{"gh HTTP 404", errString("gh: Not Found (HTTP 404)"), flow.ClassSettled},
 		{"gh HTTP 422", errString("HTTP 422: Validation Failed"), flow.ClassSettled},
 		{"gh HTTP 405 (unlisted -> transient)", errString("HTTP 405: Method Not Allowed"), flow.ClassTransient},

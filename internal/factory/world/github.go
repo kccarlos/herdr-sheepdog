@@ -7,18 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
-	"testing"
-	"time"
 	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
 // githubRepoRe takes OWNER/NAME from a github.com remote URL only: https,
@@ -28,49 +24,78 @@ var githubRepoRe = regexp.MustCompile(`^(?:(?:https|ssh)://(?:[^/@\s]+@)?github\
 // pushRemote is the remote the engine pushes to and names on every gh call.
 const pushRemote = "origin"
 
-// ghRepo is OWNER/NAME of the push remote, read from its configured URL
-// (before any insteadOf rewrite). A gh call with no repo is refused
-// (design.md 9.4).
-func (g *Git) ghRepo(ctx context.Context, dir string) (string, error) {
-	url, err := g.gitCmd(ctx, dir, "config", "--get", "remote."+pushRemote+".url")
-	if err != nil && !gitExit(err, 1) {
+var (
+	ErrNoOrigin       = errors.New("no GitHub remote named origin")
+	ErrOriginMismatch = errors.New("origin fetch and push URLs must all target the same github.com repo")
+)
+
+// ErrChecksDenied marks a denied REST fallback for required PR checks.
+var ErrChecksDenied = errors.New("PR checks fallback denied")
+
+// GitHubOrigin reads effective URLs, including Git URL rewrites and all push targets.
+func GitHubOrigin(read func(...string) (string, error)) (string, error) {
+	fetch, err := read("remote", "get-url", "--all", pushRemote)
+	if err != nil && !gitExit(err, 2) {
 		return "", err
 	}
-	m := githubRepoRe.FindStringSubmatch(url)
-	if m == nil {
-		return "", Fail(flow.ClassSettled, fmt.Errorf("world: remote %s of %s is not a github.com repo (%q)", pushRemote, dir, url))
+	if fetch == "" {
+		return "", Fail(flow.ClassSettled, ErrNoOrigin)
 	}
-	return m[1], nil
+	push, err := read("remote", "get-url", "--push", "--all", pushRemote)
+	if err != nil {
+		return "", err
+	}
+	var slug string
+	for _, target := range strings.Split(fetch+"\n"+push, "\n") {
+		m := githubRepoRe.FindStringSubmatch(target)
+		if m == nil || slug != "" && !strings.EqualFold(slug, m[1]) {
+			return "", Fail(flow.ClassSettled, ErrOriginMismatch)
+		}
+		slug = cmp.Or(slug, m[1])
+	}
+	return slug, nil
 }
 
-// ghCmd runs gh non-interactively in dir. Under go test, gh must be a fake
-// in the temp dir, so no test reaches GitHub.
-func ghCmd(ctx context.Context, dir string, args ...string) (string, error) {
-	bin, err := exec.LookPath("gh")
-	if err != nil {
-		return "", Fail(flow.ClassSettled, err)
+func (g *Git) ghRepo(ctx context.Context, dir string) (string, error) {
+	return GitHubOrigin(func(args ...string) (string, error) { return g.gitCmd(ctx, dir, args...) })
+}
+
+// RunGH returns the captured stdout, stderr and exit status from herdr-core.
+func (g *Git) RunGH(ctx context.Context, dir string, args ...string) (hc.ExecResult, error) {
+	r, err := g.run(ctx, dir, "gh", args, map[string]string{
+		"GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1", "NO_COLOR": "1",
+		"GH_HOST": "github.com", "GH_REPO": "",
+	})
+	if gitExit(err, 4) {
+		err = Fail(flow.ClassSettled, err)
 	}
-	if testing.Testing() {
-		if rel, rerr := filepath.Rel(os.TempDir(), bin); rerr != nil || strings.HasPrefix(rel, "..") {
-			return "", Fail(flow.ClassSettled, fmt.Errorf("world: gh %s is outside the temp dir under go test", bin))
-		}
+	return r, err
+}
+
+func (g *Git) ghCmd(ctx context.Context, dir string, args ...string) (string, error) {
+	r, err := g.RunGH(ctx, dir, args...)
+	return strings.TrimSpace(string(r.Stdout)), err
+}
+
+var ghOutage = regexp.MustCompile(`(?i)\bHTTP(?:/\d(?:\.\d)?)? (?:5\d\d|429)\b|rate limit|error connecting|dial (?:tcp|udp)|connection (?:refused|reset)|no such host|network (?:error|failure|is unreachable)|no route to host|i/o timeout|TLS handshake timeout|timeout awaiting response headers|context deadline exceeded|unexpected EOF`)
+
+// GitHubUnavailable identifies a GitHub read failure reported by gh itself.
+func GitHubUnavailable(err error) bool {
+	if !gitExit(err, 1) {
+		return false
 	}
-	gctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(gctx, bin, args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GH_PROMPT_DISABLED=1", "GH_NO_UPDATE_NOTIFIER=1", "NO_COLOR=1")
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		if gctx.Err() != nil {
-			return "", Fail(flow.ClassTimeout, fmt.Errorf("gh %s: %w: %v: %s", strings.Join(args[:min(2, len(args))], " "), gctx.Err(), err, strings.TrimSpace(stderr.String())))
-		}
-		raw := fmt.Errorf("gh %s: %w: %s", strings.Join(args[:min(2, len(args))], " "), err, strings.TrimSpace(stderr.String()))
-		return "", Fail(FailureClass(raw), raw)
-	}
-	return strings.TrimSpace(string(out)), nil
+	var child *GitError
+	return errors.As(err, &child) && child.command == "gh" && ghOutage.MatchString(ghOutput(child))
+}
+
+func ghOutput(child *GitError) string {
+	return string(child.Result.Stderr) + "\n" + string(child.Result.Stdout)
+}
+
+func snapshotInterrupted(err error) bool {
+	var child *GitError
+	return errors.As(err, &child) && (child.RPC != nil || child.Result.TimedOut || child.Result.Truncated ||
+		child.Result.Signal != nil || child.Result.Code == nil || GitHubUnavailable(err))
 }
 
 // maxPRTitleRunes is GitHub's PR title length limit (cut on a rune boundary).
@@ -101,9 +126,9 @@ func (g *Git) PushAndOpenPR(ctx context.Context, worktree, branch, head, title, 
 	}
 	base := strings.TrimPrefix(ref, "refs/remotes/"+pushRemote+"/")
 	// No headRefOid check: GitHub can lag on updating a PR's head SHA after a re-push.
-	out, err := ghCmd(ctx, worktree, "pr", "list", "--repo", repo, "--head", branch, "--state", "all", "--json", "number,state,baseRefName,isCrossRepository")
+	out, err := g.ghCmd(ctx, worktree, "pr", "list", "--repo", repo, "--head", branch, "--state", "all", "--json", "number,state,baseRefName,isCrossRepository")
 	if err != nil {
-		return 0, err
+		return 0, ghReadError(err)
 	}
 	var prs []struct {
 		Number             int
@@ -126,7 +151,7 @@ func (g *Git) PushAndOpenPR(ctx context.Context, worktree, branch, head, title, 
 	case flow.PRRefuse:
 		return 0, Fail(flow.ClassSettled, fmt.Errorf("world: %s: %s", branch, why))
 	}
-	out, err = ghCmd(ctx, worktree, "pr", "create", "--repo", repo, "--head", branch, "--base", base, "--title", capTitle(title), "--body", body)
+	out, err = g.ghCmd(ctx, worktree, "pr", "create", "--repo", repo, "--head", branch, "--base", base, "--title", capTitle(title), "--body", body)
 	if err != nil {
 		return 0, err
 	}
@@ -146,16 +171,22 @@ type rawPRView struct {
 	MergeCommit                                               struct{ Oid string }
 }
 
-// PRSnapshot reads the PR by number when number > 0, else by branch (design.md
-// 7.3). No PR (or a PR whose base differs from the project base) is an answer
-// (State none). When gh pr view is denied on statusCheckRollup, it falls back
-// to REST check-runs and commit statuses; if that also fails, or the network
-// fails, Checks is unreadable and err is returned so the caller raises
-// github_unavailable. A failure is never remembered as "not a GitHub repo"
-// (KB-GIT-20). A failed extra call is returned in warn, never green or
-// re-runnable: stopped_unknown, absent, BehindUnknown. HeadRel and HeadSince
-// are left to the caller.
+// PRSnapshot reads by recorded number if available, otherwise by branch
+// (design.md 7.3). An unreadable recorded PR stays unanswered. If pr view
+// cannot read the rollup, the snapshot tries REST check runs and statuses.
+// Deadlines and interrupted requests invalidate the snapshot. Optional API
+// refusals are returned in warn and keep the affected facts unknown.
 func (g *Git) PRSnapshot(ctx context.Context, repoDir, branch string, number int) (p flow.PR, warn, err error) {
+	ctx, cancel := context.WithTimeout(ctx, prSnapshotLimit)
+	defer cancel()
+	defer func() {
+		if ctx.Err() != nil && err == nil {
+			err = ctx.Err()
+		}
+		if err != nil {
+			p.Answered, p.Checks = false, flow.ChecksUnreadable
+		}
+	}()
 	repo, err := g.ghRepo(ctx, repoDir)
 	if err != nil {
 		return flow.PR{}, nil, err
@@ -170,15 +201,17 @@ func (g *Git) PRSnapshot(ctx context.Context, repoDir, branch string, number int
 		target = strconv.Itoa(number)
 	}
 	checksDenied := false
-	raw, err := ghCmd(ctx, repoDir, "pr", "view", target, "--repo", repo, "--json", prViewFields)
-	if err != nil && (strings.Contains(err.Error(), "no pull requests found") || strings.Contains(err.Error(), "Could not resolve to a PullRequest")) {
-		return flow.PR{Answered: true, State: flow.PRNone}, nil, nil
-	} else if err != nil && isChecksDenied(err) {
-		checksDenied = true
-		raw, err = ghCmd(ctx, repoDir, "pr", "view", target, "--repo", repo, "--json", strings.Replace(prViewFields, "statusCheckRollup,", "", 1))
+	raw, err := g.ghCmd(ctx, repoDir, "pr", "view", target, "--repo", repo, "--json", prViewFields)
+	if gitExit(err, 1) && !snapshotInterrupted(err) {
+		if number <= 0 && (strings.Contains(err.Error(), "no pull requests found") || strings.Contains(err.Error(), "Could not resolve to a PullRequest")) {
+			return flow.PR{Answered: true, State: flow.PRNone}, nil, nil
+		}
+		if checksDenied = ghPermissionDenied(err) || strings.Contains(err.Error(), "statusCheckRollup"); checksDenied {
+			raw, err = g.ghCmd(ctx, repoDir, "pr", "view", target, "--repo", repo, "--json", strings.Replace(prViewFields, "statusCheckRollup,", "", 1))
+		}
 	}
 	if err != nil {
-		return flow.PR{Checks: flow.ChecksUnreadable}, nil, err
+		return flow.PR{Checks: flow.ChecksUnreadable}, nil, ghReadError(err)
 	}
 	v, p, err := decodeSnapshot([]byte(raw))
 	if err != nil {
@@ -195,8 +228,10 @@ func (g *Git) PRSnapshot(ctx context.Context, repoDir, branch string, number int
 		return p, nil, nil
 	}
 	if checksDenied && p.Head != "" {
-		if v.StatusCheckRollup, err = fetchCheckRuns(ctx, repoDir, repo, p.Head); err != nil {
-			p.Answered, p.Checks = false, flow.ChecksUnreadable
+		if v.StatusCheckRollup, err = g.fetchCheckRuns(ctx, repoDir, repo, p.Head); err != nil {
+			if ghPermissionDenied(err) {
+				err = fmt.Errorf("%w: %w", ErrChecksDenied, err)
+			}
 			return p, nil, err
 		}
 	}
@@ -205,14 +240,20 @@ func (g *Git) PRSnapshot(ctx context.Context, repoDir, branch string, number int
 	for i, c := range all {
 		all[i].Actions = c.Actions || !checksDenied && c.WorkflowName != "" // the rollup names only an Actions run's workflow; REST reads the app
 		if id := flow.CheckRunID(c); id > 0 && strings.EqualFold(c.Status, "COMPLETED") && strings.EqualFold(c.Conclusion, "CANCELLED") {
-			all[i].Stop, err = checkRunStop(ctx, repoDir, repo, id)
+			all[i].Stop, err = g.checkRunStop(ctx, repoDir, repo, id)
+			if snapshotInterrupted(err) {
+				return p, nil, err
+			}
 			warns = append(warns, err)
 		}
 	}
 	checks := flow.LatestChecks(all)
 	wfPending, failedRuns := false, map[string]bool{}
 	if p.Head != "" { // H's own workflow runs: an unfinished one waits, and only a failed one is re-run
-		if wfPending, failedRuns, err = headRuns(ctx, repoDir, repo, p.Head); err != nil {
+		if wfPending, failedRuns, err = g.headRuns(ctx, repoDir, repo, p.Head); err != nil {
+			if snapshotInterrupted(err) {
+				return p, nil, err
+			}
 			p.ChecksUnread, failedRuns = true, nil // N33/N34 never re-run on it, nor on the pages read before the error
 			if base := flow.Rollup(checks, false); base == flow.ChecksGreen || base == flow.ChecksAbsent {
 				checks = nil // never green unread: absent, N36 holds it in the grace, then N43
@@ -227,7 +268,10 @@ func (g *Git) PRSnapshot(ctx context.Context, repoDir, branch string, number int
 		var cmpResp struct {
 			BehindBy int `json:"behind_by"`
 		}
-		err = ghAPI(ctx, repoDir, "repos/"+repo+"/compare/"+escapeRef(v.BaseRefName)+"..."+p.Head, &cmpResp)
+		err = g.ghAPI(ctx, repoDir, "repos/"+repo+"/compare/"+escapeRef(v.BaseRefName)+"..."+p.Head, &cmpResp)
+		if snapshotInterrupted(err) {
+			return p, nil, err
+		}
 		p.Behind, p.BehindUnknown = err == nil && cmpResp.BehindBy > 0, err != nil
 		warns = append(warns, err)
 	}
@@ -245,15 +289,25 @@ func escapeRef(ref string) string {
 	return strings.Join(segs, "/")
 }
 
-func isChecksDenied(err error) bool {
-	s := err.Error()
-	return strings.Contains(s, "Resource not accessible") || strings.Contains(s, "HTTP 403") || strings.Contains(s, "statusCheckRollup")
+var ghDenied = regexp.MustCompile(`(?i)\bHTTP(?:/\d(?:\.\d)?)? 403\b|Resource not accessible`)
+
+func ghPermissionDenied(err error) bool {
+	var child *GitError
+	return gitExit(err, 1) && errors.As(err, &child) && child.command == "gh" &&
+		ghDenied.MatchString(ghOutput(child)) && !GitHubUnavailable(err)
 }
 
-func ghAPI(ctx context.Context, dir, endpoint string, dst any) error {
-	out, err := ghCmd(ctx, dir, "api", endpoint)
+func ghReadError(err error) error {
+	if ghPermissionDenied(err) {
+		return Fail(flow.ClassSettled, err)
+	}
+	return err
+}
+
+func (g *Git) ghAPI(ctx context.Context, dir, endpoint string, dst any) error {
+	out, err := g.ghCmd(ctx, dir, "api", endpoint)
 	if err != nil {
-		return err
+		return ghReadError(err)
 	}
 	if err := json.Unmarshal([]byte(out), dst); err != nil {
 		return fmt.Errorf("world: gh api %s: %w", endpoint, err)
@@ -265,12 +319,12 @@ const maxPages = 10 // bounds a paged REST read
 
 // ghPages reads endpoint per items a page (the endpoint's cap); page returns
 // how many items one held. Over maxPages full pages is an error, never partial.
-func ghPages(ctx context.Context, dir, endpoint string, per int, page func([]byte) (int, error)) error {
+func (g *Git) ghPages(ctx context.Context, dir, endpoint string, per int, page func([]byte) (int, error)) error {
 	sep := map[bool]string{false: "?", true: "&"}[strings.Contains(endpoint, "?")]
 	for n := 1; n <= maxPages; n++ {
-		out, err := ghCmd(ctx, dir, "api", fmt.Sprintf("%s%sper_page=%d&page=%d", endpoint, sep, per, n))
+		out, err := g.ghCmd(ctx, dir, "api", fmt.Sprintf("%s%sper_page=%d&page=%d", endpoint, sep, per, n))
 		if err != nil {
-			return err
+			return ghReadError(err)
 		}
 		if got, err := page([]byte(out)); err != nil {
 			return fmt.Errorf("world: gh api %s: %w", endpoint, err)
@@ -299,10 +353,10 @@ func decodeSnapshot(data []byte) (rawPRView, flow.PR, error) {
 
 // fetchCheckRuns is the REST fallback: every check run of head (keyed by
 // its check suite) and every commit status.
-func fetchCheckRuns(ctx context.Context, dir, repo, head string) ([]flow.Check, error) {
+func (g *Git) fetchCheckRuns(ctx context.Context, dir, repo, head string) ([]flow.Check, error) {
 	var checks []flow.Check
 	// filter=all: every attempt, so an earlier timed-out one still vetoes its run.
-	err := ghPages(ctx, dir, "repos/"+repo+"/commits/"+head+"/check-runs?filter=all", 100, func(raw []byte) (int, error) {
+	err := g.ghPages(ctx, dir, "repos/"+repo+"/commits/"+head+"/check-runs?filter=all", 100, func(raw []byte) (int, error) {
 		var resp struct {
 			CheckRuns []struct {
 				ID                       int64
@@ -323,7 +377,7 @@ func fetchCheckRuns(ctx context.Context, dir, repo, head string) ([]flow.Check, 
 	if err != nil {
 		return nil, err
 	}
-	err = ghPages(ctx, dir, "repos/"+repo+"/commits/"+head+"/status", 100, func(raw []byte) (int, error) {
+	err = g.ghPages(ctx, dir, "repos/"+repo+"/commits/"+head+"/status", 100, func(raw []byte) (int, error) {
 		var resp struct {
 			Statuses []struct{ Context, State string }
 		}
@@ -339,9 +393,9 @@ func fetchCheckRuns(ctx context.Context, dir, repo, head string) ([]flow.Check, 
 // checkRunStop is why a run was cancelled, from its annotations (S0.6):
 // "timeout" (the job's own time limit), "external" (a canceled-by line),
 // else "unknown": no evidence either way, or unread (never re-run).
-func checkRunStop(ctx context.Context, dir, repo string, id int64) (string, error) {
+func (g *Git) checkRunStop(ctx context.Context, dir, repo string, id int64) (string, error) {
 	stop := "unknown"
-	err := ghPages(ctx, dir, fmt.Sprintf("repos/%s/check-runs/%d/annotations", repo, id), 50, func(raw []byte) (int, error) {
+	err := g.ghPages(ctx, dir, fmt.Sprintf("repos/%s/check-runs/%d/annotations", repo, id), 50, func(raw []byte) (int, error) {
 		var anns []struct{ Message string }
 		err := json.Unmarshal(raw, &anns)
 		for _, a := range anns {
@@ -362,9 +416,9 @@ func checkRunStop(ctx context.Context, dir, repo string, id int64) (string, erro
 // headRuns reads head's workflow runs: whether one is unfinished (seen
 // even if a later page fails) and the ids of those completed with a
 // failure or a cancel, the only runs N33/N34 may re-run.
-func headRuns(ctx context.Context, dir, repo, head string) (bool, map[string]bool, error) {
+func (g *Git) headRuns(ctx context.Context, dir, repo, head string) (bool, map[string]bool, error) {
 	pending, failed := false, map[string]bool{}
-	err := ghPages(ctx, dir, "repos/"+repo+"/actions/runs?head_sha="+head, 100, func(raw []byte) (int, error) {
+	err := g.ghPages(ctx, dir, "repos/"+repo+"/actions/runs?head_sha="+head, 100, func(raw []byte) (int, error) {
 		var resp struct {
 			WorkflowRuns []struct {
 				ID                 int64
@@ -406,13 +460,13 @@ func (g *Git) BaseStatus(ctx context.Context, repoDir string) (BaseRun, error) {
 	}
 	base := strings.TrimPrefix(ref, "refs/remotes/"+pushRemote+"/")
 	var headRef struct{ Object struct{ SHA string } }
-	if err := ghAPI(ctx, repoDir, "repos/"+repo+"/git/ref/heads/"+escapeRef(base), &headRef); err != nil || headRef.Object.SHA == "" {
+	if err := g.ghAPI(ctx, repoDir, "repos/"+repo+"/git/ref/heads/"+escapeRef(base), &headRef); err != nil || headRef.Object.SHA == "" {
 		return BaseRun{}, cmp.Or(err, fmt.Errorf("world: empty head sha for base %s", base))
 	}
 	head := headRef.Object.SHA
 	red, firstID, firstConc, total, pending := BaseRun{}, int64(0), "", 0, false
 	endpoint := "repos/" + repo + "/actions/runs?branch=" + url.QueryEscape(base) + "&event=push&head_sha=" + url.QueryEscape(head)
-	err = ghPages(ctx, repoDir, endpoint, 100, func(raw []byte) (int, error) {
+	err = g.ghPages(ctx, repoDir, endpoint, 100, func(raw []byte) (int, error) {
 		var resp struct {
 			WorkflowRuns []struct {
 				ID                 int64
@@ -438,7 +492,7 @@ func (g *Git) BaseStatus(ctx context.Context, repoDir string) (BaseRun, error) {
 			case "failure", "timed_out":
 				red = BaseRun{ID: r.ID, Branch: base, HeadSHA: head, Conclusion: c, Red: true, Known: true}
 			case "cancelled":
-				if lim, err := runCancelledByLimit(ctx, repoDir, repo, r.ID); err != nil {
+				if lim, err := g.runCancelledByLimit(ctx, repoDir, repo, r.ID); err != nil {
 					return 0, err
 				} else if lim {
 					red = BaseRun{ID: r.ID, Branch: base, HeadSHA: head, Conclusion: "cancelled_timeout", Red: true, Known: true}
@@ -457,9 +511,9 @@ func (g *Git) BaseStatus(ctx context.Context, repoDir string) (BaseRun, error) {
 	return BaseRun{ID: firstID, Branch: base, HeadSHA: head, Conclusion: firstConc, Known: true}, nil
 }
 
-func runCancelledByLimit(ctx context.Context, dir, repo string, runID int64) (bool, error) {
+func (g *Git) runCancelledByLimit(ctx context.Context, dir, repo string, runID int64) (bool, error) {
 	limited := false
-	err := ghPages(ctx, dir, fmt.Sprintf("repos/%s/actions/runs/%d/jobs", repo, runID), 100, func(raw []byte) (int, error) {
+	err := g.ghPages(ctx, dir, fmt.Sprintf("repos/%s/actions/runs/%d/jobs", repo, runID), 100, func(raw []byte) (int, error) {
 		var resp struct {
 			Jobs []struct {
 				ID         int64
@@ -470,7 +524,7 @@ func runCancelledByLimit(ctx context.Context, dir, repo string, runID int64) (bo
 		for _, j := range resp.Jobs {
 			if err == nil && strings.EqualFold(j.Conclusion, "cancelled") {
 				var stop string
-				stop, err = checkRunStop(ctx, dir, repo, j.ID)
+				stop, err = g.checkRunStop(ctx, dir, repo, j.ID)
 				limited = limited || stop == "timeout"
 			}
 		}
@@ -492,7 +546,7 @@ func (g *Git) MergePR(ctx context.Context, repoDir string, number int, head, bod
 	if err != nil {
 		return err
 	}
-	_, err = ghCmd(ctx, repoDir, "pr", "merge", strconv.Itoa(number), "--repo", repo, "--squash", "--match-head-commit", head, "--body", body)
+	_, err = g.ghCmd(ctx, repoDir, "pr", "merge", strconv.Itoa(number), "--repo", repo, "--squash", "--match-head-commit", head, "--body", body)
 	return err
 }
 
@@ -506,7 +560,7 @@ func (g *Git) ClosePR(ctx context.Context, repoDir string, number int, note stri
 	if err != nil {
 		return err
 	}
-	_, err = ghCmd(ctx, repoDir, "pr", "close", strconv.Itoa(number), "--repo", repo, "--comment", note)
+	_, err = g.ghCmd(ctx, repoDir, "pr", "close", strconv.Itoa(number), "--repo", repo, "--comment", note)
 	return err
 }
 
@@ -516,6 +570,9 @@ func (g *Git) ClosePR(ctx context.Context, repoDir string, number int, note stri
 func (g *Git) DeleteRemoteBranch(ctx context.Context, dir, branch string) error {
 	if branch == "" {
 		return Fail(flow.ClassSettled, errors.New("world: no branch to delete"))
+	}
+	if _, err := g.ghRepo(ctx, dir); err != nil {
+		return err
 	}
 	out, err := g.gitCmd(ctx, dir, "ls-remote", "--heads", pushRemote, "refs/heads/"+branch)
 	if err != nil || out == "" {
@@ -537,7 +594,7 @@ func (g *Git) RerunFailedJobs(ctx context.Context, repoDir, runID string) error 
 	if err != nil {
 		return err
 	}
-	_, err = ghCmd(ctx, repoDir, "run", "rerun", runID, "--failed", "--repo", repo)
+	_, err = g.ghCmd(ctx, repoDir, "run", "rerun", runID, "--failed", "--repo", repo)
 	return err
 }
 
@@ -551,7 +608,7 @@ func (g *Git) UpdateBranch(ctx context.Context, repoDir string, number int, expe
 	if err != nil {
 		return err
 	}
-	_, err = ghCmd(ctx, repoDir, "api", "-X", "PUT", "repos/"+repo+"/pulls/"+strconv.Itoa(number)+"/update-branch", "-f", "expected_head_sha="+expectedHead)
+	_, err = g.ghCmd(ctx, repoDir, "api", "-X", "PUT", "repos/"+repo+"/pulls/"+strconv.Itoa(number)+"/update-branch", "-f", "expected_head_sha="+expectedHead)
 	return err
 }
 
@@ -574,6 +631,6 @@ func (g *Git) DispatchWorkflow(ctx context.Context, worktree, branch, head, name
 	}
 	// The file's own dispatches endpoint: gh workflow run would resolve the
 	// value as an id or a display name too.
-	_, err = ghCmd(ctx, worktree, "api", "repos/"+repo+"/actions/workflows/"+name+"/dispatches", "-X", "POST", "-f", "ref="+branch)
+	_, err = g.ghCmd(ctx, worktree, "api", "repos/"+repo+"/actions/workflows/"+name+"/dispatches", "-X", "POST", "-f", "ref="+branch)
 	return err
 }

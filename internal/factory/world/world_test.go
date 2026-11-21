@@ -1501,14 +1501,3 @@ func TestChangedLinesTimeoutReturnsDeadlineExceeded(t *testing.T) {
 		t.Fatalf("ChangedLines under hung git diff = %v, want a confirmed diff timeout treated as over cap", err)
 	}
 }
-
-func TestPushRemote(t *testing.T) {
-	for _, c := range []struct {
-		names []string
-		want  string
-	}{{nil, ""}, {[]string{"a"}, "a"}, {[]string{"a", "b"}, ""}, {[]string{"a", "origin"}, "origin"}} {
-		if got := PushRemote(c.names); got != c.want {
-			t.Errorf("PushRemote(%v) = %q, want %q", c.names, got, c.want)
-		}
-	}
-}

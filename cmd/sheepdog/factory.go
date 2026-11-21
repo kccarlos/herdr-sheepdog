@@ -49,7 +49,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "           herdr-core (hc), timed project-volume probe inside herdr-core")
 	fprintln(w, "           (macOS consent prompts and external-disk stalls), at least one")
 	fprintln(w, "           logged-in agent CLI (claude, codex or agy) plus a canary start")
-	fprintln(w, "           inside herdr-core, gh login with the default repo pinned, and")
+	fprintln(w, "           inside herdr-core, gh login and matching origin fetch and push URLs, and")
 	fprintln(w, "           codexbar. Exit 1 on FAIL.")
 	fprintln(w, "flags: --goal TEXT, --max-running N, --proof OUTCOME=CMD, --artifact OUTCOME=PATH, --touched TEXT, --skipped TEXT, --reject WHY, --nothing-to-change, --why TEXT, --child JSON, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
 }
@@ -116,7 +116,7 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 			fprintf(stderr, "sheepdog factory start: warning: could not read project settings (%v); codex check skipped\n", err)
 		}
 		var failed []string
-		for _, r := range factoryStartChecks(ctx, factory.DoctorOptions{Folder: folder, DataDir: cfg.DataDir, GHHost: os.Getenv("GH_HOST"), HCSocket: cfg.Herdr.HCSocketPath()}) {
+		for _, r := range factoryStartChecks(ctx, factory.DoctorOptions{Folder: folder, DataDir: cfg.DataDir, HCSocket: cfg.Herdr.HCSocketPath()}) {
 			if r.Status == onboard.Fail {
 				failed = append(failed, r.Line())
 			}
@@ -533,7 +533,6 @@ func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writ
 		HCSocket: socket,
 		Canary:   !*noCanary,
 		Home:     home,
-		GHHost:   os.Getenv("GH_HOST"),
 		DataDir:  dataDir,
 	})
 	for _, r := range results {
