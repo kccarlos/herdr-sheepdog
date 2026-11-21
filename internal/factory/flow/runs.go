@@ -14,7 +14,7 @@ const (
 	EndStuck, EndExited, EndLost, EndStopped                                          = "stuck", "exited", "lost", "stopped"
 	EvLaunched, EvLaunchFailed, EvScreen, EvStatus, EvDeliver                         = "launched", "launch_failed", "screen", "status", "deliver"
 	EvActivity, EvTick, EvExit, EvLost, EvStop                                        = "activity", "tick", "exit", "lost", "stop"
-	ScreenNone, ScreenTrust, ScreenConfirm, ScreenOnboarding                          = "none", "trust", "confirm", "onboarding"
+	ScreenNone, ScreenTrust, ScreenConfirm                                            = "none", "trust", "confirm"
 	ScreenSignedOut, ScreenLimit                                                      = "signed_out", "limit"
 	RunActKeys, RunActSend, RunActSendHeld, RunActInterrupt, RunActStop, RunActRemove = "press_keys", "send_message", "send_held", "interrupt", "stop_run", "remove_terminal"
 	RefuseRunEnded                                                                    = "run_ended"
@@ -28,6 +28,7 @@ type RunRecord struct {
 	StartedAt, EndedAt, StatusSince, LastActivity, LastTurnEnd, BlockedSince, InterruptedAt, LastSentAt                time.Time
 	StatusReported, Resumable, Resumed                                                                                 bool
 	ScreensAnswered, Held                                                                                              []string
+	AwaitHeldStatus                                                                                                    bool       `json:"await_held_status,omitempty"`
 	StopRetry                                                                                                          *StopRetry `json:"stop_retry,omitempty"`
 }
 
@@ -71,7 +72,7 @@ func ScreenKeys(cli, screen string) []string {
 }
 
 func inSet(list, v string) bool { return slices.Contains(strings.Split(list, "|"), v) }
-func isDialog(s string) bool    { return inSet("trust|confirm|onboarding", s) }
+func isDialog(s string) bool    { return inSet("trust|confirm", s) }
 func isRevRole(r string) bool   { return inSet("reviewer|retro", r) }
 func matchEv(on string, e RunEvent) bool {
 	return inSet(on, e.Kind) || inSet(on, e.Kind+":"+cmp.Or(e.Screen, e.Status))
@@ -123,9 +124,11 @@ var RunRows = []Row[RunIn]{
 		return x.idle() && x.R.Status != "error" && cmp.Or(x.E.Screen, x.R.Screen) == ScreenLimit
 	}, "ended(quota)", RunActStop),
 	rrow("R20", PhaseWorking, EvTick, RunIn.idle, PhaseIdle),
-	rrow("R21", PhaseWorking, EvTick, func(x RunIn) bool { return x.R.InterruptedAt.IsZero() && x.pastMin(x.R.LastActivity, x.S.QuietMinutes) }, PhaseWorking, RunActInterrupt),
+	rrow("R21", PhaseWorking, EvTick, func(x RunIn) bool {
+		return x.E.ScreenHash != "" && x.R.InterruptedAt.IsZero() && x.pastMin(x.R.LastActivity, x.S.QuietMinutes)
+	}, PhaseWorking, RunActInterrupt),
 	rrow("R22", PhaseWorking, EvTick, func(x RunIn) bool {
-		return !x.R.LastActivity.After(x.R.InterruptedAt) && x.pastSec(x.R.InterruptedAt, x.S.InterruptSeconds)
+		return x.E.ScreenHash != "" && !x.R.LastActivity.After(x.R.InterruptedAt) && x.pastSec(x.R.InterruptedAt, x.S.InterruptSeconds)
 	}, "ended(stuck)", RunActStop),
 	rrow("R23", PhaseWorking, "tick|activity", nil, PhaseWorking),
 	rrow("R24", PhaseIdle, EvDeliver, nil, PhaseWorking, RunActSend),
@@ -151,8 +154,13 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 		sentAt = cmp.Or(sentAt, rec.StatusSince) // R24/R25 records saved before LastSentAt was added.
 	}
 	// R21/R22 bound a quiet run while it waits for fresh status after a send.
-	if ev.Kind == EvStatus && !ev.StatusAt.IsZero() && !ev.StatusAt.After(sentAt) {
-		return rec, Row[RunIn]{}, Decision{}
+	if ev.Kind == EvStatus {
+		stale := !ev.StatusAt.IsZero() && !ev.StatusAt.After(sentAt)
+		unverified := ev.StatusAt.IsZero() && rec.AwaitHeldStatus && ev.Turn <= rec.Turn
+		if stale || unverified {
+			return rec, Row[RunIn]{}, Decision{}
+		}
+		rec.AwaitHeldStatus = false
 	}
 	rec.Held, rec.ScreensAnswered = slices.Clone(rec.Held), slices.Clone(rec.ScreensAnswered)
 	r, d := FirstMatch(RunRows, RunIn{R: rec, E: ev, S: s, Now: now})
@@ -198,7 +206,12 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 		}
 		rec.State, rec.StatusReported, rec.Status, rec.BlockedKind, rec.Question = PhaseBlocked, true, "blocked", ev.StatusKind, ev.Msg
 	case r.ID == "R18":
-		rec.Held, rec.StatusSince, rec.LastActivity = rec.Held[firstHeld:], now, now
+		rec.Held = rec.Held[firstHeld:]
+		fallthrough
+	case inSet("R24|R25", r.ID):
+		rec.LastSentAt = now
+		rec.AwaitHeldStatus = rec.AwaitHeldStatus || r.ID == "R18"
+		rec.State, rec.Status, rec.StatusSince, rec.LastActivity, rec.InterruptedAt = PhaseWorking, "", now, now, time.Time{}
 	case r.ID == "R20":
 		if rec.LastTurnEnd.IsZero() || !rec.StatusSince.Before(rec.LastTurnEnd) {
 			rec.LastTurnEnd = now
@@ -206,9 +219,6 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 		rec.State, rec.InterruptedAt, rec.Turn = PhaseIdle, time.Time{}, max(rec.Turn, ev.Turn)
 	case r.ID == "R21":
 		rec.InterruptedAt, rec.ScreenHash = now, ""
-	case inSet("R24|R25", r.ID):
-		rec.LastSentAt = now
-		rec.State, rec.Status, rec.StatusSince, rec.LastActivity, rec.InterruptedAt = PhaseWorking, "", now, now, time.Time{}
 	case r.ID == "R26":
 		rec.Held = append(rec.Held, ev.Msg)
 	case r.ID == "R33":

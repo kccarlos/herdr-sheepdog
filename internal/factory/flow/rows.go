@@ -68,6 +68,9 @@ func ensureStep(in In, k string) (due, exhausted bool) {
 		return false, true
 	case last == nil || last.Result == "done":
 		return true, false
+	case last.Result == "asked" && strings.HasPrefix(k, AskMerge+"@"):
+		// A restart may have lost the outcome. Retry a still-open PR after back-off.
+		return in.Now.Sub(last.At) >= EnsureBackoff(in.Settings, tries), false
 	case last.Result != "failed" || last.At.IsZero():
 		return false, false
 	default:
@@ -114,7 +117,7 @@ func EnsureRun(in In, role string) []string {
 		}
 	}
 	// A stopping alert (section 6) is slice 5b.
-	if r.State == RunWorking || r.State == RunIdle || r.Pending {
+	if r.State == RunWorking || r.State == RunIdle {
 		return nil
 	}
 	inFlight := last != nil && last.State == PhaseStarting && last.Address == ""
@@ -149,7 +152,7 @@ func EnsureRun(in In, role string) []string {
 	case role == RoleReviewer && tries < in.Settings.ReviewerRetries:
 		return ensureRepeat(in, key(AskStartReview, round, tries+countBase, h))
 	case role == RoleWorker && a.Restarts < in.Settings.WorkerRestarts:
-		if !last.EndedAt.IsZero() && in.Now.Sub(last.EndedAt) < time.Duration(in.Settings.EnsureBackoffMinutes)*time.Minute<<a.Restarts || noSlot {
+		if workerRestartBackoff(in, last, a.Restarts) || noSlot {
 			return nil
 		}
 		return ensureRepeat(in, workerStartAsk(in, last, a.Restarts+countBase))
@@ -159,6 +162,10 @@ func EnsureRun(in In, role string) []string {
 		return once(SinceRetry(a.Acts), key(AskWake, "reviewer_failed", round, h))
 	}
 	return once(SinceRetry(a.Acts), key(AskWake, "worker_failed"))
+}
+
+func workerRestartBackoff(in In, last *RunRecord, restarts int) bool {
+	return !last.EndedAt.IsZero() && in.Now.Sub(last.EndedAt) < time.Duration(in.Settings.EnsureBackoffMinutes)*time.Minute<<restarts
 }
 
 func workerStartAsk(in In, last *RunRecord, n int) string {
@@ -486,14 +493,20 @@ var TaskRows = []Row[In]{
 			ensure(in, key(AskTellFindings, r.N)))(in)
 	}},
 	{ID: "N23", WaitsOn: "the worker", Stage: "working", When: all(hasAttempt, anyOf(noReady, tipAhead)), Then: func(in In) Decision {
-		return say("the worker is working", EnsureRun(in, RoleWorker))(in)
+		asked := EnsureRun(in, RoleWorker)
+		a := in.attempt()
+		if len(asked) == 0 && in.Facts.Worker.State == RunGone && a.Run != nil && a.Run.State == PhaseEnded && a.Restarts < in.Settings.WorkerRestarts &&
+			!inSet("stopped|quota|signed_out", a.Run.Result) && workerRestartBackoff(in, a.Run, a.Restarts) {
+			return Decision{Why: "waiting for worker restart back-off", Hold: true}
+		}
+		return Decision{Why: "the worker is working", Asked: asked}
 	}},
 	{ID: "N25", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: ladderSays(RecapAnswer), Then: func(in In) Decision {
 		return say("the ladder says recap", ensure(in, key(AskOpenRecap, "review")))(in)
 	}},
 	{ID: "N26", WaitsOn: "the engine", Stage: "working", When: all(hasAttempt, anyOf(noPR, all(prOpen, prBehindH))), Then: func(in In) Decision {
 		if unanswered(in) && !in.probe { // "no PR" from a failed read is a guess: wait, so push is not spent blindly
-			return say("GitHub did not answer: wait for a snapshot")(in)
+			return Decision{Why: "GitHub did not answer: wait for a snapshot", Hold: true}
 		}
 		if in.Facts.PR.OtherBase != "" {
 			return say(fmt.Sprintf("PR #%d targets base %q instead of the project base: waiting (run `sheepdog factory task retry %s --why \"<why>\"` to start a new attempt)",
@@ -558,7 +571,7 @@ var TaskRows = []Row[In]{
 	{ID: "N36", WaitsOn: "CI", Stage: "ci", Why: WhyCI, When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown)),
 		Then: func(in In) Decision {
 			// Stands in for the ci_stalled alert until slice 5b builds the alerts table.
-			if checksPend(in) && prHeadIsH(in) && answered(in) && githubAvail(in) && !in.Facts.PR.HeadSince.IsZero() && in.Now.Sub(in.Facts.PR.HeadSince) >= ciStalled(in) {
+			if checksPend(in) && prHeadIsH(in) && answered(in) && githubAvail(in) && !in.Facts.PR.PendingSince.IsZero() && in.Now.Sub(in.Facts.PR.PendingSince) >= ciStalled(in) {
 				return say("checks pending past ci_stalled_minutes", once(in.acts(), key(AskWake, "ci_stalled", headH(in))))(in)
 			}
 			if prBehindUnknown(in) && !anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn)(in) && in.Now.Sub(in.Facts.PR.HeadSince) >= checksGrace(in) {

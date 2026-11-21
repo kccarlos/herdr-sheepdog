@@ -262,6 +262,8 @@ func taskWhy(t flow.Task, a *flow.Attempt, unmet []string, started bool, stage s
 		return "Worker failed, waiting on the coordinator"
 	case stage == "waiting_on_dep" && len(unmet) > 0:
 		return "Waiting on " + strings.Join(unmet, ", ")
+	case t.HoldWhy != "":
+		return t.HoldWhy
 	case stage == "working" && revActive(a):
 		return fmt.Sprintf("In review round %d", len(a.Rounds)+1)
 	case r.Why == flow.WhyCI:

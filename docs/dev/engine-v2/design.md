@@ -495,13 +495,13 @@ First match wins.
 | J3 | a stopping alert is active (`no_pool`, `disk`, `consent_prompt`) and no coordinator run is alive | nothing starts (tasks wait at N10) | "Stopped", with the fix |
 | J4 | a plan exists, every milestone is done, no task is open, and the owner has given no new goal since | the final journal entry; then no coordinator | "Finished" |
 | J5 | the coordinator is signed out | the alert `agents_down` with the at-the-Mac fix; no restart until doctor sees it signed in | running |
-| J6 | no coordinator run is alive; the owner typed in its terminal within `owner_typing_minutes`, or a start is not allowed yet (`coordinator_gap_minutes`, `coordinator_starts_per_hour`) | wait; raise `agents_down` if the hourly limit is the reason | running |
+| J6 | no coordinator run is alive; a start is not allowed yet (`coordinator_gap_minutes`, `coordinator_starts_per_hour`) | wait; raise `agents_down` if the hourly limit is the reason | running |
 | J7 | no coordinator run is alive | start one: fresh with the goal if there is no plan, else with a handoff built from the store; held wakes are kept for it | "Planning" with no plan, else running |
 | J8 | the coordinator reported an error at the end of a turn | first time: tell it to go on. Again within `quiet_minutes`: stop it (J7 follows) | running |
 | J9 | wakes were delivered, no coordinator turn followed for `coordinator_silent_minutes`, and no stopping alert is active | stop it (J7 follows); the second time in a row, raise `agents_down` | running |
 | J10 | the coordinator's run ended as `stuck` at a dialog (R29) | J7 restarts it. The second time in a row, tell the owner (the one coordinator event that speaks) and raise `agents_down` | running |
 | J11 | a rotation is due (`rotate_after_hours`, `rotate_after_turns`, or the template changed), the coordinator is idle, and no stopping alert is active | ask it for the journal entry; when written, or after `handoff_minutes`: write the fact part, stop the run (J7 follows) | running |
-| J12 | wakes are held and the coordinator is idle | deliver them as one batch | running |
+| J12 | wakes are held and the coordinator is idle | deliver up to 20 as one batch and keep the rest held | running |
 | J13 | no wake for `heartbeat_minutes` and the coordinator is idle | a heartbeat wake | running |
 | J14 | otherwise | — | running ("nothing needs you" when no owner ask is open) |
 
@@ -791,7 +791,7 @@ These are mechanics: how a thing is done once a row has asked for it. They decid
 | `ensure_failures`, `ensure_backoff_minutes` | 3, 1 | 1–10, 1–60 | N5, section 8 |
 | `start_minutes`, `idle_grace_seconds`, `quiet_minutes`, `interrupt_seconds`, `review_minutes` | 2, 20, 20, 90, 45 | 1–15, 5–120, 5–120, 10–600, 10–240 | R11, R18–R22, N29 |
 | `background_job_minutes`, `blocked_minutes` | 30, 10 | 1–240, 1–120 | the worker watch of 4.4, N29, N39; R29 |
-| `coordinator_starts_per_hour`, `coordinator_gap_minutes`, `owner_typing_minutes`, `coordinator_silent_minutes` | 3, 10, 5, 30 | 1–10, 1–60, 1–60, 5–240 | J6, J9 |
+| `coordinator_starts_per_hour`, `coordinator_gap_minutes`, `coordinator_silent_minutes` | 3, 10, 30 | 1–10, 1–60, 5–240 | J6, J9 |
 | `rotate_after_hours`, `rotate_after_turns`, `handoff_minutes`, `heartbeat_minutes` | 4, 150, 5, 60 | 1–24, 20–1000, 1–30, 10–600 | J11, J13 |
 | `pool_floor_percent`, `pool_minutes`, `sweep_minutes` | 5, 5, 5 | 0–50, 1–60, 1–60 | section 7.3 |
 

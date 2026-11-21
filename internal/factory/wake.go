@@ -133,17 +133,18 @@ func coordSummary(s flow.State, bin string, heartbeat bool) string {
 		cmp.Or(strings.Join(ws, ", "), "none"), strings.Join(ls, ""), changed, coordinatorPrompt(coordinatorTemplate, s.Project, bin))
 }
 
-// deliverWakesLocked is J12: when the coordinator run is idle, every held wake
-// goes as one batch (at-least-once: a failed send or commit keeps wakes held).
+// deliverWakesLocked is J12: when the coordinator run is idle, one bounded batch
+// of held wakes is sent (at-least-once: a failed send or commit keeps wakes held).
 func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.State, now time.Time) {
 	if len(s.Project.Wakes) == 0 || s.Project.RunID == "" || e.HC == nil || e.sendCoordLocked(ctx, id, s, wakeMessage(*s), now, true) != nil {
 		return
 	}
-	keys := make([]string, len(s.Project.Wakes))
-	for i, w := range s.Project.Wakes {
+	n := min(len(s.Project.Wakes), maxFactsWakes)
+	keys := make([]string, n)
+	for i, w := range s.Project.Wakes[:n] {
 		keys[i] = cmp.Or(w.Task, "project") + ":" + w.Key
 	}
-	s.Project.Wakes, s.Project.CoordLastWakeAt = nil, now
+	s.Project.Wakes, s.Project.CoordLastWakeAt = s.Project.Wakes[n:], now
 	e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "J12", Asked: keys, Decision: fmt.Sprintf("delivered %d wake(s) to the coordinator", len(keys)), Why: "wakes held and the coordinator is idle"})
 }
 

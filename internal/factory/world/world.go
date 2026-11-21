@@ -407,6 +407,7 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]f
 		}
 		evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: s.State, StatusKind: deref(s.Kind), Msg: s.Msg, Turn: t.Turn, StatusAt: at})
 	}
+	// An empty hash marks an unavailable screen; this tick cannot prove the run stayed quiet.
 	return append(evs, flow.RunEvent{Kind: flow.EvTick, Screen: cls, ScreenHash: hash, Model: t.Labels["sheepdog.model"]}), nil
 }
 

@@ -34,8 +34,8 @@ func TestHistoryHappyPath(t *testing.T) {
 			w.task.Attempts = []Attempt{{BaseCommit: "b0", Branch: "t1"}}
 			w.facts.Tip, w.facts.TipRel = "b0", RelSame
 		}},
-		{"N23", []string{"start_worker"}, func(w *world) { w.facts.Worker.Pending = true }},
-		{"N23", nil, func(w *world) { w.facts.Worker = Run{State: RunWorking} }},
+		{"N23", []string{"start_worker"}, func(w *world) { w.facts.Worker = Run{State: RunWorking} }},
+		{"N23", nil, nil},
 		{"N23", nil, func(w *world) { w.facts.Tip, w.facts.TipRel = "c1", RelAhead }},
 		{"N23", nil, func(w *world) { // worker reports ready at c1; GitHub answers: no PR
 			w.att().Ready = append(w.att().Ready, Ready{Head: "c1"})
@@ -47,8 +47,8 @@ func TestHistoryHappyPath(t *testing.T) {
 			w.facts.PR = PR{Answered: true, Number: 1, State: PROpen, Head: "c1", HeadRel: RelSame,
 				Checks: ChecksPending, Mergeable: MergeableUnknown}
 		}},
-		{"N29", []string{"start_reviewer@1@c1"}, func(w *world) { w.facts.Reviewer.Pending = true }},
-		{"N29", nil, func(w *world) { w.facts.Reviewer = Run{State: RunWorking} }},
+		{"N29", []string{"start_reviewer@1@c1"}, func(w *world) { w.facts.Reviewer = Run{State: RunWorking} }},
+		{"N29", nil, nil},
 		{"N29", nil, func(w *world) { // verdict in; the loop stops round 1's reviewer
 			w.att().Rounds = append(w.att().Rounds, Round{N: 1, Kind: "full", Head: "c1", Verdict: VerdictChanges, Majors: 2})
 			w.facts.Reviewer = Run{State: RunGone}

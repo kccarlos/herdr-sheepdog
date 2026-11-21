@@ -716,7 +716,7 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 					return old.TaskRun(), nil
 				}
 				if act == flow.RunActSendHeld {
-					(*recp).Held = old.Held
+					**recp = old
 				}
 			}
 		}
@@ -899,6 +899,12 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[ti], Settings: s.Settings, Facts: facts, Now: now})
 	rowChanged := s.Tasks[ti].LastRow != r.ID
 	s.Tasks[ti].LastRow = r.ID
+	holdWhy := ""
+	if len(d.Asked) == 0 && d.Hold {
+		holdWhy = d.Why
+	}
+	holdChanged := s.Tasks[ti].HoldWhy != holdWhy
+	s.Tasks[ti].HoldWhy = holdWhy
 	waitKey := id + "/" + s.Tasks[ti].ID
 	if r.ID != "N9" && r.ID != "N10" && r.ID != "N38" {
 		delete(e.waits, waitKey)
@@ -913,7 +919,9 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		}
 	}
 	if len(d.Asked) == 0 {
-		if rowChanged {
+		if holdWhy != "" && (rowChanged || holdChanged) {
+			e.commitLogLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: facts, Rule: r.ID, Decision: "waiting", Why: holdWhy})
+		} else if rowChanged || holdChanged {
 			e.saveLocked(id, *s)
 		}
 		return true
@@ -926,7 +934,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 			acts = &oa.Acts
 		}
 		entry := flow.Act{Key: k, Result: res, Class: cls, Err: flow.CleanErr(errText), Uncounted: uncounted, At: now}
-		if n := len(*acts); res != "asked" && n > 0 && (*acts)[n-1].Key == k && (*acts)[n-1].Result == "asked" {
+		if n := len(*acts); n > 0 && (*acts)[n-1].Key == k && (*acts)[n-1].Result == "asked" {
 			*acts = (*acts)[:n-1]
 		}
 		for i := len(*acts) - 1; res == "failed" && uncounted && i >= 0 && (*acts)[i].Key != flow.AskRetry; i-- {
@@ -955,7 +963,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		// An executor runs to its end even when the pass is cancelled (its
 		// calls carry their own timeouts), so its outcome is recorded and
 		// the next pass does not ask again; the rest waits for that pass.
-		if verb == flow.AskRerunCI || verb == flow.AskDispatchCI || verb == flow.AskUpdateBranch { // a GitHub call whose outcome can be lost: saved as asked first, never sent twice
+		if verb == flow.AskRerunCI || verb == flow.AskDispatchCI || verb == flow.AskUpdateBranch || verb == flow.AskMerge { // persist intent (and any accept) before a GitHub call whose outcome can be lost
 			act(ask, "asked", "", "", false)
 			if !e.saveLocked(id, *s) {
 				return true
@@ -1780,7 +1788,7 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 		if p.State == flow.PRNone {
 			p = last
 		}
-		p.Answered, p.Checks = false, flow.ChecksUnreadable // never the last read's checks
+		p.Answered, p.Checks, p.PendingSince = false, flow.ChecksUnreadable, time.Time{} // never the last read's checks
 	} else {
 		if p.Head != "" {
 			p.HeadSince = last.HeadSince
@@ -1819,7 +1827,19 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 		oa.CIFails = append(oa.CIFails, flow.CIFail{Head: p.Head, At: e.now()})
 		ciFailAdded = true
 	}
-	if (ciFailAdded || !reflect.DeepEqual(p, last)) && ctx.Err() == nil {
+	oldPending := oa.PendingChecks
+	if p.Answered {
+		switch {
+		case p.State == flow.PROpen && p.Head != "" && p.Checks == flow.ChecksPending:
+			if oldPending == nil || oldPending.Head != p.Head {
+				oa.PendingChecks = &flow.PendingChecks{Head: p.Head, Since: e.now().Round(0)}
+			}
+			p.PendingSince = oa.PendingChecks.Since
+		case p.State != flow.PROpen || p.Checks != flow.ChecksUnreadable || oldPending != nil && p.Head != "" && p.Head != oldPending.Head:
+			oa.PendingChecks = nil
+		}
+	}
+	if (oldPending != oa.PendingChecks || ciFailAdded || !reflect.DeepEqual(p, last)) && ctx.Err() == nil {
 		if e.prs == nil {
 			e.prs = map[string]flow.PR{}
 		}

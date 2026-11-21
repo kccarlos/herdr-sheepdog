@@ -642,8 +642,8 @@ func TestJ6AndJ4LogOncePerChange(t *testing.T) {
 	h.now = h.now.Add(time.Minute)
 	h.pass()
 	j6 := logRules(t, h.paths.Log(h.id), "J6")
-	if len(j6) != 1 || j6[0].Decision != "waiting" || !strings.Contains(j6[0].Why, "2026-11-20T10:10:00Z") {
-		t.Fatalf("J6 gap log = %+v, want 1 waiting line naming 2026-11-20T10:10:00Z", j6)
+	if len(j6) != 1 || j6[0].Decision != "waiting" || !strings.Contains(j6[0].Why, h.now.Add(6*time.Minute).Local().Format(time.RFC3339)) {
+		t.Fatalf("J6 gap log = %+v, want 1 waiting line naming 10:10Z in local time", j6)
 	}
 
 	// Start #2 at 10:10, kill at 10:12, start #3 at 10:20, kill at 10:35 -> hourly cap until 11:00:00Z.
@@ -660,8 +660,8 @@ func TestJ6AndJ4LogOncePerChange(t *testing.T) {
 	h.now = h.now.Add(5 * time.Minute)
 	h.pass()
 	j6 = logRules(t, h.paths.Log(h.id), "J6")
-	if len(j6) != 2 || j6[1].Decision != "waiting" || !strings.Contains(j6[1].Why, "2026-11-20T11:00:00Z") {
-		t.Fatalf("J6 hourly cap log = %+v, want 2nd waiting line naming 2026-11-20T11:00:00Z", j6)
+	if len(j6) != 2 || j6[1].Decision != "waiting" || !strings.Contains(j6[1].Why, h.now.Add(15*time.Minute).Local().Format(time.RFC3339)) {
+		t.Fatalf("J6 hourly cap log = %+v, want 2nd waiting line naming 11:00Z in local time", j6)
 	}
 
 	// J4 finished when coordinator is already gone logs once across multiple passes.

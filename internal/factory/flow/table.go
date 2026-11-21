@@ -6,6 +6,7 @@ import "fmt"
 type Decision struct {
 	Asked []string `json:"asked"`
 	Why   string   `json:"why"`
+	Hold  bool     `json:"-"` // show this no-ask reason on the task surfaces
 }
 
 // WhyCI is set on rows whose owner-facing why line is "Waiting on CI and merge"

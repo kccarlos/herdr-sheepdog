@@ -27,7 +27,7 @@ func landing() In {
 		Facts: Facts{
 			Tip: "c1", TipRel: RelSame, Worker: Run{State: RunIdle},
 			PR: PR{Answered: true, Number: 1, State: PROpen, Head: "c1", HeadRel: RelSame,
-				HeadSince: now, Mergeable: MergeableClean, Checks: ChecksGreen},
+				HeadSince: now, PendingSince: now, Mergeable: MergeableClean, Checks: ChecksGreen},
 		},
 		Now: now,
 	}
@@ -474,7 +474,6 @@ func TestEnsureRun(t *testing.T) {
 		in   In
 		want []string
 	}{
-		"pending waits":               {wBase(func(in *In) { in.Facts.Worker.Pending = true }), nil},
 		"none yet starts fresh":       {wBase(), []string{"start_worker"}},
 		"none yet waits without slot": {wBase(noSlotF), nil},
 		"live idle needs nothing":     {wBase(func(in *In) { in.Facts.Worker.State = RunIdle }), nil},
@@ -1642,11 +1641,11 @@ func TestN36CIStalledWake(t *testing.T) {
 	if r, d := FirstMatch(TaskRows, newH); r.ID != "N36" || !slices.Equal(d.Asked, []string{"wake_coordinator@ci_stalled@c2"}) {
 		t.Fatalf("pending at new H past ci_stalled_minutes: %s %v, want N36 wake for c2", r.ID, d.Asked)
 	}
-	// Unanswered, unavailable, or zero HeadSince never fires ci_stalled.
+	// Unanswered, unavailable, or zero PendingSince never fires ci_stalled.
 	for name, f := range map[string]func(*In){
-		"unanswered":    noAnswer,
-		"githubUnavail": func(in *In) { in.Facts.GitHubUnavailable = true },
-		"zeroHeadSince": func(in *In) { in.Facts.PR.HeadSince = time.Time{} },
+		"unanswered":       noAnswer,
+		"githubUnavail":    func(in *In) { in.Facts.GitHubUnavailable = true },
+		"zeroPendingSince": func(in *In) { in.Facts.PR.PendingSince = time.Time{} },
 	} {
 		in := with(pending, func(in *In) { in.Now = now.Add(limit) }, f)
 		if r, d := FirstMatch(TaskRows, in); r.ID != "N36" || len(d.Asked) != 0 {

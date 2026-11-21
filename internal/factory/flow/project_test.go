@@ -23,16 +23,6 @@ func TestProjectRowsTableAndEachRow(t *testing.T) {
 		wantAsk []string
 	}{
 		{
-			name:    "J2 stopped with no coordinator",
-			in:      ProjectIn{Project: Project{Started: false}, Settings: def, Now: now},
-			wantRow: "J2",
-		},
-		{
-			name:    "J2 stopped with live coordinator asks stop",
-			in:      ProjectIn{Project: Project{Started: false, Run: idleRun}, Settings: def, Now: now},
-			wantRow: "J2", wantAsk: []string{AskStopCoordinator},
-		},
-		{
 			name:    "J4 all tasks ended, no coordinator -> finished, no restart",
 			in:      ProjectIn{Project: Project{Started: true}, Tasks: []Task{doneTask}, Settings: def, Now: now},
 			wantRow: "J4",
@@ -233,7 +223,7 @@ func TestProjectRowsReviewFixes(t *testing.T) {
 			Tasks:    []Task{openTask},
 			Settings: def, Now: now,
 		}
-		wantGap := now.Add(5 * time.Minute).UTC().Format(time.RFC3339)
+		wantGap := now.Add(5 * time.Minute).Local().Format(time.RFC3339)
 		if r, d := FirstMatch(ProjectRows, gapIn); r.ID != "J6" || !strings.Contains(d.Why, wantGap) {
 			t.Fatalf("J6 gap = (%s, %q), want J6 naming %s", r.ID, d.Why, wantGap)
 		}
@@ -246,7 +236,7 @@ func TestProjectRowsReviewFixes(t *testing.T) {
 			Tasks:    []Task{openTask},
 			Settings: def, Now: now,
 		}
-		wantCap := now.Add(10 * time.Minute).UTC().Format(time.RFC3339)
+		wantCap := now.Add(10 * time.Minute).Local().Format(time.RFC3339)
 		if r, d := FirstMatch(ProjectRows, capIn); r.ID != "J6" || !strings.Contains(d.Why, wantCap) {
 			t.Fatalf("J6 hourly cap = (%s, %q), want J6 naming %s", r.ID, d.Why, wantCap)
 		}
@@ -261,7 +251,6 @@ func TestProjectRowsPairwisePriority(t *testing.T) {
 		winner, loser string
 		in            ProjectIn
 	}{
-		{"J2", "J4", ProjectIn{Project: Project{Started: false}, Tasks: []Task{doneTask}, Settings: def, Now: now}},
 		{"J4", "J10", ProjectIn{Project: Project{Started: true, Run: &RunRecord{ID: "r1", State: PhaseEnded, Result: EndStuck, BlockedSince: now}}, Tasks: []Task{doneTask}, Settings: def, Now: now}},
 		{"J10", "J6", ProjectIn{Project: Project{Started: true, Acts: []Act{{Key: AskStartCoordinator, Result: "done", At: now}}, Run: &RunRecord{ID: "r1", State: PhaseEnded, Result: EndStuck, BlockedSince: now}}, Tasks: []Task{openTask}, Settings: def, Now: now}},
 		{"J6", "J7", ProjectIn{Project: Project{Started: true, Acts: []Act{{Key: AskStartCoordinator, Result: "done", At: now}}}, Tasks: []Task{openTask}, Settings: def, Now: now}},
