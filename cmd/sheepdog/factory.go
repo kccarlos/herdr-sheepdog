@@ -39,7 +39,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "  log [<folder>] [-n N]                each engine step: time, task, rule, asked, decision, why")
 	fprintln(w, "  plan apply <file>                    (coordinator only) apply a JSON plan")
 	fprintln(w, "  plan amend <file>                    (coordinator only) change tasks' title, brief, outcomes, estimate_lines or add tasks, with a why")
-	fprintln(w, "  task <park|unpark|drop|close|send-back> <task> --why \"<why>\"  (coordinator only)")
+	fprintln(w, "  task <park|unpark|drop|close|send-back|retry|say> <task> --why \"<why>\"  (coordinator only)")
 	fprintln(w, "  recap decide <task> <choice> --why \"<why>\" [--child '<json>' ...]  (coordinator only) decide an open recap")
 	fprintln(w, "  report ready [--proof \"<outcome>=<cmd>\" ...] [--artifact \"<outcome>=<path>\" ...] [--touched \"<places>\"] [--skipped \"<what was left out>\"] [--reject \"<why>\"]  (worker only) run proofs and report HEAD ready, or reject findings")
 	fprintln(w, "  report ready --nothing-to-change --why \"<why>\"  (worker only) report that the task needs no change")

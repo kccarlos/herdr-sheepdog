@@ -15,11 +15,16 @@ import (
 
 // holdWake queues a wake_coordinator@<key> ask as a held wake, once per
 // task and key, with the task's facts as they are now (design.md 10, J12).
-func holdWake(s *flow.State, ti int, row, why, ask string, f flow.Facts, now time.Time) string {
+func holdWake(s *flow.State, ti int, row, why, ask string, f flow.Facts, bin string, now time.Time) string {
 	t := s.Tasks[ti]
 	_, k, _ := strings.Cut(ask, "@")
 	if slices.ContainsFunc(s.Project.Wakes, func(w flow.Wake) bool { return w.Task == t.ID && w.Key == k }) {
 		return "wake already held"
+	}
+	bin = cmp.Or(bin, "sheepdog")
+	why = strings.ReplaceAll(why, "sheepdog factory ", bin+" factory ")
+	if k == "worker_failed" || strings.HasPrefix(k, "reviewer_failed@") {
+		why += fmt.Sprintf("; run `%s factory task retry %s --why \"<why>\"`", bin, t.ID)
 	}
 	s.Project.Wakes = append(s.Project.Wakes, flow.Wake{Key: k, Task: t.ID, Why: row + ": " + why, Facts: taskFacts(t, f, now), At: now})
 	return "wake held for the coordinator"

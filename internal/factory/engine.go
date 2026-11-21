@@ -587,7 +587,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		verb, _, _ := strings.Cut(ask, "@")
 		if verb == flow.AskWake {
 			act(ask, "done", "", "", false)
-			decs = append(decs, holdWake(s, ti, r.ID, d.Why, ask, facts, now))
+			decs = append(decs, holdWake(s, ti, r.ID, d.Why, ask, facts, e.Bin, now))
 			continue
 		}
 		fn := taskExecutors[verb]
@@ -1089,6 +1089,8 @@ func appendHeld(held []string, msgs ...string) []string {
 	return held
 }
 
+var errNoWorkerRun = errors.New("factory: no worker run")
+
 func (e *Engine) deliverWorkerLocked(ctx context.Context, id, taskID string, s *flow.State, a *flow.Attempt, msg string, urgent bool) error {
 	if a != nil && a.RunID != "" && e.HC != nil && (a.Run == nil || a.Run.State == flow.PhaseWorking && a.Run.Status == "") {
 		if a.Run == nil {
@@ -1105,7 +1107,7 @@ func (e *Engine) deliverWorkerLocked(ctx context.Context, id, taskID string, s *
 			a.Held = appendHeld(a.Held, msg)
 			return nil
 		}
-		return errors.New("factory: no worker run")
+		return errNoWorkerRun
 	}
 	next, row, dec := flow.StepRun(*a.Run, flow.RunEvent{Kind: flow.EvDeliver, Msg: msg, Urgent: urgent}, s.Settings, e.now())
 	if row.ID == "R36" {

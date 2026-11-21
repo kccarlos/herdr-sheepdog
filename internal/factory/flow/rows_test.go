@@ -654,7 +654,7 @@ func TestSection8BackoffDoublingN5OutageAndRetry(t *testing.T) {
 	if r.ID != "N5" || !slices.Equal(d.Asked, []string{"wake_coordinator@failed@merge@c1"}) {
 		t.Fatalf("at ensure_failures: %s %v, want N5 wake once", r.ID, d.Asked)
 	}
-	if !strings.Contains(d.Why, "merge@c1 failed (timeout): line1 line2 ") || strings.ContainsAny(d.Why, "\n\x07") || len([]rune(d.Why)) > MaxActErrRunes+40 {
+	if !strings.Contains(d.Why, "merge@c1 failed (timeout): line1 line2 ") || !strings.Contains(d.Why, "task retry ") || strings.ContainsAny(d.Why, "\n\x07") || len([]rune(d.Why)) > MaxActErrRunes+120 {
 		t.Fatalf("N5 why not cleaned/capped: len=%d why=%q", len([]rune(d.Why)), d.Why)
 	}
 	a0(&in).Acts = append(a0(&in).Acts, Act{Key: "wake_coordinator@failed@merge@c1", Result: "done", At: t3})
@@ -731,6 +731,60 @@ func TestN3StopRunsSharedBackoffOutageAndExhaustedWake(t *testing.T) {
 	a0(&ex).Acts = append(a0(&ex).Acts, Act{Key: AskRetry, Result: "done", At: now})
 	if r, d := FirstMatch(TaskRows, ex); r.ID != "N3" || !slices.Equal(d.Asked, []string{AskStopRuns}) {
 		t.Fatalf("N3 after retry: %s %v, want N3 [%s]", r.ID, d.Asked, AskStopRuns)
+	}
+}
+
+// TestMergeAfterRetryAndWakeCommands checks that after a retry, mergeAsked and
+// ensure agree (a done merge whose PR is still open is asked again, and failing
+// again reaches N5), and that N4, N5 and N7 wake texts name the exact task
+// retry / task say commands.
+func TestMergeAfterRetryAndWakeCommands(t *testing.T) {
+	// 1. Done merge whose PR is still open: N41 before retry, N42 asking merge@c1 after retry.
+	in := landing()
+	in.Task.ID = "T1"
+	a0(&in).Acts = []Act{
+		{Key: "record_accept@c1", Result: "done", At: now},
+		{Key: "merge@c1", Result: "done", At: now},
+	}
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N41" || len(d.Asked) != 0 {
+		t.Fatalf("before retry with done merge: %s %v, want N41 nil", r.ID, d.Asked)
+	}
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: AskRetry, Result: "done", At: now})
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N42" || !slices.Equal(d.Asked, []string{"merge@c1"}) {
+		t.Fatalf("after retry with prior done merge: %s %v, want N42 [merge@c1]", r.ID, d.Asked)
+	}
+	// Failing settled after retry reaches N5 (not masked by pre-retry done merge).
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: "merge@c1", Result: "failed", Class: ClassSettled, Err: "HTTP 422", At: now})
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N5" || !slices.Equal(d.Asked, []string{"wake_coordinator@failed@1@merge@c1"}) {
+		t.Fatalf("settled merge failure after prior done+retry: %s %v, want N5", r.ID, d.Asked)
+	}
+
+	// 2. N4, N5 and N7 wake texts name exact commands with task ID.
+	n4 := with(closedPR, func(in *In) { in.Task.ID = "T4" })
+	if _, d := FirstMatch(TaskRows, n4); !strings.Contains(d.Why, `task retry T4 --why`) {
+		t.Fatalf("N4 why = %q, want exact task retry command", d.Why)
+	}
+	n5 := with(func(in *In) {
+		in.Task.ID = "T5"
+		a0(in).Acts = []Act{{Key: "merge@c1", Result: "failed", Class: ClassSettled, Err: "HTTP 422", At: now}}
+	})
+	if _, d := FirstMatch(TaskRows, n5); !strings.Contains(d.Why, `task retry T5 --why`) {
+		t.Fatalf("N5 why = %q, want exact task retry command", d.Why)
+	}
+	n7 := with(diverged, func(in *In) {
+		in.Task.ID = "T7"
+		a0(in).Acts = []Act{{Key: key(AskTellDiverged, "c1"), Result: "done", At: now.Add(-time.Hour)}}
+	})
+	if _, d := FirstMatch(TaskRows, n7); !strings.Contains(d.Why, `task say T7 --why`) || !strings.Contains(d.Why, `task retry T7 --why`) {
+		t.Fatalf("N7 why = %q, want exact task say and task retry commands", d.Why)
+	}
+	// After N7 wake + retry, N7 tells the worker again and wakes again if still diverged.
+	a0(&n7).Acts = append(a0(&n7).Acts,
+		Act{Key: key(AskWake, "diverged", "c1"), Result: "done", At: now},
+		Act{Key: AskRetry, Result: "done", At: now},
+	)
+	if r, d := FirstMatch(TaskRows, n7); r.ID != "N7" || !slices.Contains(d.Asked, key(AskTellDiverged, "c1")) {
+		t.Fatalf("N7 after retry: %s %v, want tell_worker_diverged@c1", r.ID, d.Asked)
 	}
 }
 
