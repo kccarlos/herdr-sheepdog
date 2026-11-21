@@ -20,6 +20,7 @@ func checkRollup(conclusion, runID, jobID string) string {
 // is re-run once via gh run rerun --failed, turns green, and merges with no
 // review round spent.
 func TestCIRedRerunThenGreenNoRound(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "44714", "13621"))
 	l.pass()
@@ -46,6 +47,7 @@ func TestCIRedRerunThenGreenNoRound(t *testing.T) {
 // and a repeat ready at the same commit does not re-tell (KB-GIT-14). When H is
 // ahead of tip (engine updated branch), the message starts with "Pull first".
 func TestCIRedAgainTellsWorkerOnceKBGIT14(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "44714", "100"))
 	l.pass() // re-run
@@ -87,6 +89,7 @@ func TestCIRedAgainTellsWorkerOnceKBGIT14(t *testing.T) {
 // is re-run once then wakes the coordinator once; a job time limit, or a
 // cancel whose cause cannot be read, wakes once without re-running.
 func TestCIStoppedExternalAndTimeout(t *testing.T) {
+	t.Parallel()
 	t.Run("external cancel", func(t *testing.T) {
 		l := newLanding(t)
 		writeGHFile(t, l.gh, "annotations.json", `[{"message":"The run was canceled by @example-user."}]`)
@@ -139,6 +142,7 @@ func TestCIStoppedExternalAndTimeout(t *testing.T) {
 // the coordinator once naming the ways out; without workflow_dispatch it skips
 // directly to the wake; absent checks never merge.
 func TestCINoChecksDispatchAndWake(t *testing.T) {
+	t.Parallel()
 	agePR := func(l *landing) {
 		l.eng.mu.Lock()
 		p := l.eng.prs[l.wt]
@@ -217,6 +221,7 @@ func TestCINoChecksDispatchAndWake(t *testing.T) {
 // TestCIExecutorFailuresRecordedOnce verifies failed rerun and dispatch calls
 // are recorded as acts and not retried on every pass.
 func TestCIExecutorFailuresRecordedOnce(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	if err := os.WriteFile(filepath.Join(l.gh, "rerun_fail"), nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -251,6 +256,7 @@ func writeGHFile(t *testing.T, dir, name, body string) {
 // TestCIWaitsForUnfinishedChecks: a red job beside an unfinished one is not
 // re-run and not told until every check has finished.
 func TestCIWaitsForUnfinishedChecks(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("a", "COMPLETED", "FAILURE", "61", "610")+","+ciCheck("b", "IN_PROGRESS", "", "61", "611")+"]")
 	l.pass()
@@ -268,6 +274,7 @@ func TestCIWaitsForUnfinishedChecks(t *testing.T) {
 // TestCITellsOncePerRun: with re-runs off, run 42 is told once; when run 55
 // also fails while 42 stays red, only 55 is told.
 func TestCITellsOncePerRun(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	l.edit(func(s *flow.State) { s.Settings.FlakeReruns = 0 })
 	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("a", "COMPLETED", "FAILURE", "42", "420")+"]")
@@ -286,6 +293,7 @@ func TestCITellsOncePerRun(t *testing.T) {
 // budget; a failed request for run 55 is spent, never sent again for the
 // same job once run 42 clears.
 func TestCIRerunBudgetPerRun(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	l.edit(func(s *flow.State) { s.Settings.FlakeReruns = 2 })
 	writeGHFile(t, l.gh, "rerun_fail_55", "")
@@ -312,6 +320,7 @@ func TestCIRerunBudgetPerRun(t *testing.T) {
 // canceled-by annotation is an unknown stop: one wake, never a re-run; a
 // later read that finds the time limit does not wake again.
 func TestCICancelNeedsEvidence(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("CANCELLED", "57001", "10"))
 	l.pass()
@@ -330,6 +339,7 @@ func TestCICancelNeedsEvidence(t *testing.T) {
 // changes waits at most checks_grace_minutes, then the worker is told once
 // and nothing is re-run again.
 func TestCIStaleRerunWaitIsBounded(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "44714", "100"))
 	l.pass() // re-run
@@ -353,6 +363,7 @@ func TestCIStaleRerunWaitIsBounded(t *testing.T) {
 // fails, the intent saved before the call keeps the next pass from sending
 // it again.
 func TestCIRerunNotRepeatedAfterFailedCommit(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "44714", "100"))
 	if err := os.Chmod(l.paths.Log(l.id), 0o400); err != nil { // the commit's log append fails
@@ -369,6 +380,7 @@ func TestCIRerunNotRepeatedAfterFailedCommit(t *testing.T) {
 // owner did not name, however dispatchable; with dispatch_workflow = ci.yml
 // a failed dispatch is recorded once, sent once, and wakes once.
 func TestCIDispatchOptInAndFailureOnce(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	wfDir := filepath.Join(l.wt, ".github", "workflows")
 	if err := os.MkdirAll(wfDir, 0o700); err != nil {
@@ -410,6 +422,7 @@ func TestCIDispatchOptInAndFailureOnce(t *testing.T) {
 // TestCIWaitsForPendingStatus: a pending commit status beside a red job
 // holds the re-run and the tell, like an unfinished check run.
 func TestCIWaitsForPendingStatus(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("a", "COMPLETED", "FAILURE", "62", "620")+`,{"__typename":"StatusContext","context":"ci/jenkins","state":"PENDING"}]`)
 	l.pass()
@@ -424,6 +437,7 @@ func TestCIWaitsForPendingStatus(t *testing.T) {
 // check linking to a run, or an Actions URL of another repository, is told,
 // never re-run.
 func TestCIRerunOnlyActionsRunsOfThisRepo(t *testing.T) {
+	t.Parallel()
 	for name, rollup := range map[string]string{
 		"external check": `[{"__typename":"CheckRun","name":"ext","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/acme/demo/actions/runs/999/job/1"}]`,
 		"other repo":     `[{"__typename":"CheckRun","name":"a","workflowName":"ci","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/other/repo/actions/runs/998/job/1"}]`,
@@ -443,6 +457,7 @@ func TestCIRerunOnlyActionsRunsOfThisRepo(t *testing.T) {
 // waits; a same-repo run id that is not a run of H is never re-run; an
 // unreadable run list never re-runs and tells after checks_grace_minutes.
 func TestCIRunListGatesReruns(t *testing.T) {
+	t.Parallel()
 	t.Run("run in progress", func(t *testing.T) {
 		l := newLanding(t)
 		writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("a", "COMPLETED", "FAILURE", "70", "700")+"]")
@@ -489,6 +504,7 @@ func TestCIRunListGatesReruns(t *testing.T) {
 // dependents, so a run holding a job stopped by its own time limit (here an
 // always() job after a failed build) is never re-run; the worker is told.
 func TestCINoRerunOfARunWithATimeLimit(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writeGHFile(t, l.gh, "annotations.json", `[{"message":"The job has exceeded the maximum execution time of 1m0s"}]`)
 	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("build", "COMPLETED", "FAILURE", "80", "800")+","+ciCheck("report", "COMPLETED", "CANCELLED", "80", "801")+"]")
@@ -504,6 +520,7 @@ func TestCINoRerunOfARunWithATimeLimit(t *testing.T) {
 // workflows with display name ci); run 80 is still never re-run, because
 // eligibility reads every check of H, not the deduped ones.
 func TestCINoRerunWhenATimeLimitIsDeduped(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writeGHFile(t, l.gh, "annotations.json", `[{"message":"The job has exceeded the maximum execution time of 1m0s"}]`)
 	writePRJSON(t, l.gh, "view.json", l.c1, "["+ciCheck("build", "COMPLETED", "FAILURE", "80", "800")+","+
@@ -521,6 +538,7 @@ func TestCINoRerunWhenATimeLimitIsDeduped(t *testing.T) {
 // recap decision (continue) resets the window without changing size_cap; three
 // more failing commits open a second recap without continue.
 func TestN13CIRecapAndWindowReset(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t).withTokens()
 	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Rounds = []flow.Round{} })
 	pushFail := func(file, rollup string) string {
@@ -590,6 +608,7 @@ func TestN13CIRecapAndWindowReset(t *testing.T) {
 // once per H to merge the base (never rebase), resolve, commit, and report ready;
 // repeat passes do not tell again; TipRel == RelBehind prefixes "Pull first".
 func TestN32ConflictTellsWorkerOnce(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writeGHFile(t, l.gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"`+l.c1+`","mergeable":"CONFLICTING","statusCheckRollup":`+greenRollup+`,"baseRefName":"main"}`)
 	l.pass()
@@ -618,6 +637,7 @@ func TestN32ConflictTellsWorkerOnce(t *testing.T) {
 // REVIEW_REQUIRED wakes the coordinator once per H with facts naming the repo
 // setting and stating nobody in the factory can approve, and never merges.
 func TestN37ReviewRequiredWakesOnce(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writeGHFile(t, l.gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"`+l.c1+`","mergeable":"MERGEABLE","reviewDecision":"REVIEW_REQUIRED","statusCheckRollup":`+greenRollup+`,"baseRefName":"main"}`)
 	l.pass()
@@ -637,6 +657,7 @@ func TestN37ReviewRequiredWakesOnce(t *testing.T) {
 // CI commits recorded on a closed attempt do not count toward N13 on a new
 // attempt.
 func TestN13OldAttemptCIFailsDoNotCarryOver(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t).withTokens()
 	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Rounds = []flow.Round{} })
 	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "91", "910"))

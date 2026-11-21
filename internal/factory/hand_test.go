@@ -17,6 +17,7 @@ import (
 // stops any active reviewer, wakes the coordinator once, never reopens the PR,
 // never opens a second PR, and never merges.
 func TestN4PRClosedByHand(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	revID, err := startRun(context.Background(), l.client, world.RunSpec{Name: "rev-t1-1", Cwd: l.wt, Argv: []string{"sh"}})
 	if err != nil {
@@ -84,6 +85,7 @@ func pushExternalToBranch(t *testing.T, l *landing, force bool, file, content st
 // worker is told once, waits while working, coordinator is woken once at turn
 // end naming say+retry, and the PR is never merged.
 func TestN7ForcePushedAndForeignPRHead(t *testing.T) {
+	t.Parallel()
 	for name, force := range map[string]bool{"force-pushed": true, "foreign commit": false} {
 		t.Run(name, func(t *testing.T) {
 			l := newLanding(t)
@@ -134,6 +136,7 @@ func TestN7ForcePushedAndForeignPRHead(t *testing.T) {
 // the PR, or when the tip is behind H without covering it), N7 tells the worker
 // to pull (`git pull --ff-only`).
 func TestN7TipBehindAfterUpdateBranchToldToPull(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	// Base moves; simulate update-branch creating merge commit m1 and moving H to m1 while worktree stays at c1.
 	if err := os.WriteFile(filepath.Join(l.repo, "base.go"), []byte("package demo\nvar B = 1\n"), 0o600); err != nil {
@@ -206,6 +209,7 @@ func simulateUpdateBranch(t *testing.T, l *landing) string {
 // unknown (not foreign), so N7 waits instead of telling/waking; once fetch
 // recovers on the next pass, N20 moves H to the merge commit.
 func TestN7UpdateBranchMergeOnlyFetchFailsWaits(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	m1 := simulateUpdateBranch(t, l)
 	// Fetch m1 into l.wt's object store without updating refs/remotes/origin/main
@@ -259,6 +263,7 @@ func TestN7UpdateBranchMergeOnlyFetchFailsWaits(t *testing.T) {
 // only, so a worker committing again on a diverged tip is not told a second
 // time and the coordinator is woken once at turn end.
 func TestN7TellsOnceAndWakesOncePerH(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	// Diverge tip at t1.
 	gitIn(t, l.wt, "commit", "--allow-empty", "--amend", "-m", "feat: diverged t1")
@@ -303,6 +308,7 @@ func TestN7TellsOnceAndWakesOncePerH(t *testing.T) {
 // (a turn shorter than a pass) or the engine restarts after the tell (losing
 // in-memory turn state), N7 wakes the coordinator once past checks_grace_minutes.
 func TestN7WaitsForWorkerTurnBeforeWaking(t *testing.T) {
+	t.Parallel()
 	ageTell := func(l *landing) {
 		l.edit(func(s *flow.State) {
 			a := &s.Tasks[0].Attempts[0]
@@ -405,6 +411,7 @@ func TestN7WaitsForWorkerTurnBeforeWaking(t *testing.T) {
 // PR number, PRSnapshot reads by number (`gh pr view <n>`), and a PR whose
 // base differs from the project base is not ours (never merged, never wakes N4).
 func TestPRSnapshotByNumberAndBaseCheck(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	l.pass()
 	views := ghCalls(t, l.gh, "pr view")
@@ -435,6 +442,7 @@ func TestPRSnapshotByNumberAndBaseCheck(t *testing.T) {
 // the worker committed without pulling, N7 tells the worker to pull (merge
 // origin/<branch>), not restore.
 func TestN7DivergedTipAfterUpdateBranchToldToPull(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	m1 := simulateUpdateBranch(t, l)
 	writePRJSON(t, l.gh, "view.json", m1, greenRollup)
@@ -458,6 +466,7 @@ func TestN7DivergedTipAfterUpdateBranchToldToPull(t *testing.T) {
 // at H is told and restored without moving H, a later different N7 problem
 // (foreign commit on the PR head) at the same H is told once more.
 func TestN7SecondDifferentProblemAtSameHTold(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	// Problem 1: diverged tip at H = c1 -> worker told once.
 	gitIn(t, l.wt, "commit", "--allow-empty", "--amend", "-m", "feat: diverged tip")
@@ -481,6 +490,7 @@ func TestN7SecondDifferentProblemAtSameHTold(t *testing.T) {
 // attempt's PR number reads as another base, N26 does not push again every
 // pass; it waits, wakes the coordinator once, and retry closes the attempt.
 func TestN26PROnOtherBaseStopsPushingAndWakesOnce(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t).withTokens()
 	writeGHFile(t, l.gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"`+l.c1+`","mergeable":"MERGEABLE","statusCheckRollup":`+greenRollup+`,"baseRefName":"release"}`)
 	l.pass()

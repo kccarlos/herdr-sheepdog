@@ -88,9 +88,23 @@ func ghCalls(t *testing.T, dir, prefix string) []string {
 // still reaches the local bare remote (insteadOf).
 func githubOrigin(t *testing.T, repo string) {
 	t.Helper()
-	bare := gitIn(t, repo, "config", "--get", "remote.origin.url")
-	gitIn(t, repo, "remote", "set-url", "origin", "https://github.com/acme/demo.git")
-	gitIn(t, repo, "config", "url."+bare+".insteadOf", "https://github.com/acme/demo.git")
+	cfgPath := filepath.Join(repo, ".git", "config")
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	const pfx = "\turl = "
+	i := strings.Index(s, pfx)
+	if i < 0 {
+		t.Fatalf("no remote url in %s", cfgPath)
+	}
+	end := strings.IndexByte(s[i+len(pfx):], '\n')
+	bare := strings.TrimSpace(s[i+len(pfx) : i+len(pfx)+end])
+	s = strings.Replace(s, pfx+bare, pfx+"https://github.com/acme/demo.git", 1) + "\n[url \"" + bare + "\"]\n\tinsteadOf = https://github.com/acme/demo.git\n"
+	if err := os.WriteFile(cfgPath, []byte(s), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // writePRJSON writes PR #7 at head with rollup into the fake gh's file:

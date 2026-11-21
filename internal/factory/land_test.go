@@ -40,8 +40,8 @@ func newLanding(t *testing.T) *landing {
 	l := &landing{t: t, srv: srv, client: hc.NewClient(srv.Path), paths: testPaths(t), log: &bytes.Buffer{}}
 	repo, base := initGitRepoWithRemote(t)
 	githubOrigin(t, repo)
-	l.repo, l.gh = repo, installFakeGH(t)
-	l.eng = New(l.paths, l.client)
+	l.repo, l.gh = repo, bindRepoFakeGH(t, repo)
+	l.eng = newTestEngine(t, l.paths, l.client)
 	l.eng.Log = logging.NewJSONLLogger(l.log)
 	if err := l.eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)

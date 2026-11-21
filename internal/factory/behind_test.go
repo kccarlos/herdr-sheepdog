@@ -18,6 +18,7 @@ import (
 // waits while the new head's checks are pending, and merges only when the new
 // head's checks pass — with no new review round spent.
 func TestN40BehindUpdateAndMergeNoRound(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	// Base moves on origin/main; PR #7 at c1 reads behind.
 	if err := os.WriteFile(filepath.Join(l.repo, "base.go"), []byte("package demo\nvar Base = 1\n"), 0o600); err != nil {
@@ -101,6 +102,7 @@ func TestN40BehindUpdateAndMergeNoRound(t *testing.T) {
 // move the PR head within checks_grace_minutes, N40 records a failed try and
 // does not re-ask update-branch.
 func TestN40BehindPastGraceFailedTry(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
@@ -131,6 +133,7 @@ func TestN40BehindPastGraceFailedTry(t *testing.T) {
 // it holds at N36 within checks_grace_minutes, wakes the coordinator once past
 // the grace, and merges once compare succeeds with behind_by 0.
 func TestN40BehindUnknownWaits(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare_fail", "")
@@ -174,6 +177,7 @@ func TestN40BehindUnknownWaits(t *testing.T) {
 // right after N40 asks update_branch@H (while GitHub has not moved the head
 // yet), the engine never merges the old H.
 func TestN40CompareFailsAfterUpdateAskedNoMerge(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
@@ -197,6 +201,7 @@ func TestN40CompareFailsAfterUpdateAskedNoMerge(t *testing.T) {
 // ahead of H with a hand-edited merge commit never moves H, never merges, and
 // matches N7 (tells worker once, then wakes coordinator once).
 func TestN40HandEditedUpdateHeadNeverMovesH(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	if err := os.WriteFile(filepath.Join(l.repo, "base.go"), []byte("package demo\nvar Base = 1\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -249,6 +254,7 @@ func TestN40HandEditedUpdateHeadNeverMovesH(t *testing.T) {
 // TestN40UpdateBranchImmediateFailNoLoop verifies that an immediate failure of
 // update-branch records a failed act without looping.
 func TestN40UpdateBranchImmediateFailNoLoop(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
@@ -272,6 +278,7 @@ func TestN40UpdateBranchImmediateFailNoLoop(t *testing.T) {
 // TestTipKeepsRoundRequiresCovers verifies that a worker tip behind H keeps an
 // in-flight round only when H covers that tip via merge_only moves.
 func TestTipKeepsRoundRequiresCovers(t *testing.T) {
+	t.Parallel()
 	a := flow.Attempt{
 		BaseCommit: "b0",
 		Ready:      []flow.Ready{{Head: "c1"}},
@@ -289,6 +296,7 @@ func TestTipKeepsRoundRequiresCovers(t *testing.T) {
 // wakes and ends its turn with no new commit keeps its pass and merges once
 // checks are green, with no review round spent.
 func TestKBMRG6WakeNoCommitKeepsPass(t *testing.T) {
+	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	// Worker wakes (working), no new commit: N39 holds, no merge, pass kept.

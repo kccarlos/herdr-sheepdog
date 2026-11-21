@@ -44,7 +44,7 @@ func newProjectHarness(t *testing.T, goal string) *projectHarness {
 		now:    time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC),
 	}
 	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { h.runs = append(h.runs, p) }
-	h.eng = New(h.paths, h.client)
+	h.eng = newTestEngine(t, h.paths, h.client)
 	h.eng.Log = logging.NewJSONLLogger(h.logBuf)
 	h.eng.Now = func() time.Time { return h.now }
 	if err := h.eng.Start(h.repo, goal, 2); err != nil {
@@ -87,6 +87,7 @@ func (h *projectHarness) coordIdleWithStatus(addr, status string) {
 // stopped and never restarted; a coordinator already gone is not restarted; and
 // a new owner goal resumes J7.
 func TestJ4NoRestartAfterLastTaskEnds(t *testing.T) {
+	t.Parallel()
 	h := newProjectHarness(t, "Goal 1")
 	h.pass() // J7 starts coord 1
 	coord1 := h.state().Project.RunID
@@ -139,6 +140,7 @@ func TestJ4NoRestartAfterLastTaskEnds(t *testing.T) {
 // coordinator_gap_minutes since the last start, and waits when
 // coordinator_starts_per_hour is reached until the oldest start leaves the hour.
 func TestJ6WaitsForGapAndHourlyCap(t *testing.T) {
+	t.Parallel()
 	h := newProjectHarness(t, "J6 goal")
 	h.pass() // start #1 at t=0
 	h.edit(func(s *flow.State) {
@@ -194,6 +196,7 @@ func TestJ6WaitsForGapAndHourlyCap(t *testing.T) {
 // coordinator to go on the first time, does not re-fire on the same turn, and
 // stops it on a second error within quiet_minutes so J7 restarts it.
 func TestJ8ErrorTellThenStopAndRestart(t *testing.T) {
+	t.Parallel()
 	h := newProjectHarness(t, "J8 goal")
 	h.pass() // J7 start #1
 	coord1 := h.state().Project.RunID
@@ -246,6 +249,7 @@ func TestJ8ErrorTellThenStopAndRestart(t *testing.T) {
 // while the coordinator remains idle for coordinator_silent_minutes stop the
 // coordinator so J7 restarts it.
 func TestJ9SilenceStopsAndJ7Restarts(t *testing.T) {
+	t.Parallel()
 	h := newProjectHarness(t, "J9 wakes")
 	h.pass() // J7 start #1
 	coord1 := h.state().Project.RunID
@@ -280,6 +284,7 @@ func TestJ9SilenceStopsAndJ7Restarts(t *testing.T) {
 // ends are restarted by J7; the second time in a row writes a plain owner log
 // line (daemon event + log.jsonl); a normal exit resets the streak.
 func TestJ10DialogStuckRestartThenPlainLogSecondTime(t *testing.T) {
+	t.Parallel()
 	h := newProjectHarness(t, "J10 goal")
 	h.pass() // J7 start #1
 	h.edit(func(s *flow.State) { s.Tasks = []flow.Task{{ID: "T1", Title: "feat: open"}} })
@@ -330,6 +335,7 @@ func TestJ10DialogStuckRestartThenPlainLogSecondTime(t *testing.T) {
 // while the coordinator is working or before heartbeat_minutes; once idle past
 // heartbeat_minutes, a heartbeat wake carries open task status and non-default settings.
 func TestJ13HeartbeatAfterIntervalOnlyWhenIdle(t *testing.T) {
+	t.Parallel()
 	h := newProjectHarness(t, "J13 goal")
 	h.pass() // J7 start #1 at t=0
 	coord := h.state().Project.RunID
@@ -387,6 +393,7 @@ func TestJ13HeartbeatAfterIntervalOnlyWhenIdle(t *testing.T) {
 // replacement starts in the repo folder with live workers named in its handoff,
 // and the old coordinator's whole process group is gone before the new one starts.
 func TestOneCoordinatorAndOldProcessGroupGoneBeforeRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	h := newProjectHarness(t, "KB-COO-1/4/12 goal")
 	h.pass() // J7 start #1
@@ -487,6 +494,7 @@ func TestOneCoordinatorAndOldProcessGroupGoneBeforeRestart(t *testing.T) {
 // after wake delivery, the J9 silence clock is cleared and neither a long
 // working turn nor a machine sleep stops the coordinator.
 func TestJ9NeverStopsWorkingCoordinator(t *testing.T) {
+	t.Parallel()
 	h := newProjectHarness(t, "J9 working")
 	h.pass() // J7 start #1
 	coord1 := h.state().Project.RunID
@@ -530,6 +538,7 @@ func TestJ9NeverStopsWorkingCoordinator(t *testing.T) {
 // with no plan yet that finished a turn (e.g. waiting on the owner) is never
 // stopped and restarted in a loop by J9 when no wakes were delivered.
 func TestJ9DoesNotStopPlanlessCoordinatorWithoutWake(t *testing.T) {
+	t.Parallel()
 	h := newProjectHarness(t, "J9 planless")
 	h.pass() // J7 start #1 (no tasks yet)
 	c1 := h.state().Project.RunID
@@ -551,6 +560,7 @@ func TestJ9DoesNotStopPlanlessCoordinatorWithoutWake(t *testing.T) {
 // goal while tasks are still open keeps NewGoal until a new task is added, so
 // J4 never finishes the project when the old tasks end.
 func TestJ4KeepsNewGoalWhileTasksOpenUntilPlanApplied(t *testing.T) {
+	t.Parallel()
 	h := newProjectHarness(t, "Goal 1")
 	h.pass() // J7 start #1
 	coord1 := h.state().Project.RunID
@@ -616,6 +626,7 @@ func TestJ4KeepsNewGoalWhileTasksOpenUntilPlanApplied(t *testing.T) {
 // TestJ6AndJ4LogOncePerChange verifies that J6 logs once when holding (gap or
 // hourly cap, naming the allow time) and J4 logs once when finishing a project.
 func TestJ6AndJ4LogOncePerChange(t *testing.T) {
+	t.Parallel()
 	h := newProjectHarness(t, "J6 log goal")
 	h.pass() // start #1 at 10:00:00Z
 	h.edit(func(s *flow.State) {

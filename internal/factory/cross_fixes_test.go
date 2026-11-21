@@ -159,7 +159,7 @@ func TestCoordinatorStopsDoNotCountOutages(t *testing.T) {
 					t.Errorf("try %d: row=%s why=%q, want %s", i+1, r.ID, d.Why, row)
 					break
 				}
-				h.eng.passProjectRulesLocked(context.Background(), h.id, &s)
+				h.eng.passProjectRulesLocked(context.Background(), h.id, &s, h.now)
 				if got := flow.Count(s.Project.Acts, key); got != i+1 {
 					t.Errorf("try %d: %d failed stops, want %d", i+1, got, i+1)
 					break
