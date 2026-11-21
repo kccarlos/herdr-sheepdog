@@ -799,9 +799,18 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 	if before.StopRetry != nil && evs[0].Kind != flow.EvLost {
 		evs = []flow.RunEvent{{Kind: flow.EvStop}}
 	}
+events:
 	for _, ev := range evs {
 		old := **recp
 		next, row, dec := flow.StepRun(old, ev, s.Settings, now)
+		if row.ID == "R3" {
+			old.Screen = next.Screen
+			if retry := old.KeyRetry; retry != nil && now.Sub(retry.At) < flow.PassInterval<<min(max(retry.Tries-1, 0), 3) {
+				**recp = old
+				continue
+			}
+			next.KeyRetry = nil
+		}
 		stop := slices.Contains(dec.Asked, flow.RunActStop)
 		if retry := old.StopRetry; stop && retry != nil {
 			if now.Sub(retry.At) < flow.EnsureBackoff(s.Settings, retry.Tries) {
@@ -818,6 +827,15 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 			}
 			if aerr := world.ActRun(ctx, e.HC, next, act, msg); aerr != nil {
 				e.logError("factory.exec_error", id, aerr)
+				if act == flow.RunActKeys {
+					tries := 1
+					if old.KeyRetry != nil {
+						tries += old.KeyRetry.Tries
+					}
+					old.KeyRetry = &flow.KeyRetry{At: now, Tries: tries}
+					**recp = old
+					continue events
+				}
 				if act == flow.RunActStop {
 					tries := 1
 					if old.StopRetry != nil {
@@ -836,6 +854,9 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 		if (old.State != flow.PhaseEnded && next.State == flow.PhaseEnded && (!fresh || taskID != "")) || row.ID == "R3" || row.ID == "R21" {
 			e.commitLogLocked(id, s, LogLine{By: "engine", Task: taskID, Rule: row.ID, Asked: dec.Asked, Decision: dec.Why, Why: fmt.Sprintf("%s run %s: %s", role, next.Address, cmp.Or(next.Reason, dec.Why))})
 			before = next
+		}
+		if row.ID == "R3" {
+			break // Observe the screen again before acting on its timeout.
 		}
 	}
 	if !reflect.DeepEqual(before, **recp) {
