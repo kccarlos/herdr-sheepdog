@@ -827,35 +827,6 @@ func TestActBackoffDoublingOutageN5AndRetryE2E(t *testing.T) {
 	}
 }
 
-// TestS2IdleReviewerNoTagWakesAfterStuckMinutes verifies reduced S2 (until 5a.5):
-// a reviewer idle with no <report> tag wakes the coordinator once after stuck_minutes.
-func TestS2IdleReviewerNoTagWakesAfterStuckMinutes(t *testing.T) {
-	l := newLanding(t)
-	now := time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)
-	l.eng.Now = func() time.Time { return now }
-	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Rounds = nil })
-	l.pass() // N29 starts round 1 reviewer
-	revID := l.state().Tasks[0].Attempts[0].Review.RunID
-	l.srv.SetScreen(revID, "❯ prompt\n\n⏺ Reviewed everything, forgot the tag.\n")
-	l.srv.SetStatus(revID, &hc.Status{App: "claude-code", State: "done"})
-	now = now.Add(5 * time.Second)
-	l.pass() // R9 -> working
-	now = now.Add(25 * time.Second)
-	l.pass() // R20 -> idle (ReportNotYet)
-	now = now.Add(29 * time.Minute)
-	l.pass()
-	if w := l.state().Project.Wakes; len(w) != 0 {
-		t.Fatalf("woke before stuck_minutes: %+v", w)
-	}
-	now = now.Add(2 * time.Minute)
-	l.pass() // S2 wakes once
-	l.pass() // no duplicate wake
-	w := l.state().Project.Wakes
-	if len(w) != 1 || w[0].Key != "stuck@reviewer_idle@1@"+l.c1 {
-		t.Fatalf("wakes past stuck_minutes = %+v, want [stuck@reviewer_idle@1@%s]", w, l.c1)
-	}
-}
-
 // TestRestartStopsOldLiveTerminalInsteadOfAdopting verifies Item 3a: when an
 // ended worker restarts while an old terminal with the same name is still live,
 // the engine stops the old terminal first and launches a fresh terminal that

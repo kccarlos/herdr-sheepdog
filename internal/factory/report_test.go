@@ -1797,7 +1797,7 @@ func TestVerdictRefusalTellsReviewerOnce(t *testing.T) {
 		t.Fatalf("repeated refusals sent %d times, want 1: %q", len(got), got)
 	}
 
-	// Reviewer fixes its reply and re-sends: accepted without waiting for stuck_minutes.
+	// Reviewer fixes its reply and re-sends: accepted right away.
 	srv.SetScreen("t-rev", "❯ Your verdict was refused\n\n⏺ self-check misses: 0\ndeletable: none\n"+
 		`<report>{"code":"code1","round":1,"head":"`+c1+`","verdict":"pass","majors":0}</report>`+"\n")
 	eng.passProject(ctx, projID, false)

@@ -96,6 +96,7 @@ type Run struct {
 	State       RunState  `json:"state"`
 	Pending     bool      `json:"pending"`
 	LastTurnEnd time.Time `json:"last_turn_end,omitempty"`
+	Refused     bool      `json:"refused,omitempty"`
 }
 
 // Facts are one pass's observations of a task. Plain data, no I/O.

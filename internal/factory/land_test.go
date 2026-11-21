@@ -497,7 +497,7 @@ func TestSection8EngineBackoffOutageN5AndRetry(t *testing.T) {
 		t.Fatalf("coordinator wake sends = %q, want 1 cleaned message with failed@merge and last words", sends)
 	}
 
-	// Even past stuck_minutes (31m), neither N42 nor S2 fires again — no loop.
+	// Even 31m later, N5 stays quiet and N42 never fires again — no loop.
 	now = now.Add(31 * time.Minute)
 	l.pass()
 	if st := l.state(); st.Tasks[0].LastRow != "N5" || len(sendsTo(t, l.srv.Requests(), coord)) != 1 || len(ghCalls(t, l.gh, "pr merge")) != 3 {
