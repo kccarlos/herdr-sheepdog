@@ -246,9 +246,16 @@ func TestDialogKeysAgyTrustBlockedPermissionOnceAcrossRestart(t *testing.T) {
 	r.restart()
 	r.pass()
 	r.wantAttempts("after daemon restart", 1)
-	if run := r.st.Project.Run; run.State == flow.PhaseEnded {
-		t.Errorf("run ended (%s) while the dialog was being answered", run.Result)
+	if run := r.st.Project.Run; run.State != flow.PhaseStarting {
+		t.Errorf("run state = %s(%s) after the answer, want starting (not blocked, not ended)", run.State, run.Result)
 	}
+	// The dialog never clears: the start timeout ends the run as stuck, with no second key.
+	r.now = r.now.Add(time.Duration(r.st.Settings.StartMinutes) * time.Minute)
+	r.pass()
+	if run := r.st.Project.Run; run.State != flow.PhaseEnded || run.Result != flow.EndStuck {
+		t.Errorf("after start_minutes run = %s(%s), want ended(stuck)", run.State, run.Result)
+	}
+	r.wantAttempts("after the start timeout", 1)
 }
 
 // TestDialogKeysAgyTrustWithoutStatusOnceAcrossRestart: the same screen with no
@@ -385,6 +392,116 @@ func TestDialogKeysRetryRechecksTerminalAndScreen(t *testing.T) {
 			r.wantAttempts("retry pass after the change", 1)
 			if got := r.delivered(); len(got) != 0 {
 				t.Errorf("keys reached the terminal: %v", got)
+			}
+		})
+	}
+}
+
+// TestDialogKeysFailingSendStillEndsAtStartTimeout: if herdr-core keeps
+// rejecting terminal.keys, the run is not stuck in a retry loop. The start
+// timeout (R11, start_minutes) still ends it as stuck, as on main, and the
+// failures are logged.
+func TestDialogKeysFailingSendStillEndsAtStartTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status *hc.Status
+	}{{"no status", nil}, {"blocked permission", permission()}} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newDialogRig(t, "agy", readScreen(t, "agy-trust-dialog.screen.txt"), tc.status)
+			r.proxy.failKeys.Store(1 << 30)
+			for range 4 {
+				r.pass()
+			}
+			if run := r.st.Project.Run; run.State != flow.PhaseStarting {
+				t.Fatalf("before start_minutes run = %s(%s), want starting", run.State, run.Result)
+			}
+			r.now = r.st.Project.Run.StartedAt.Add(time.Duration(r.st.Settings.StartMinutes) * time.Minute)
+			r.pass()
+			if run := r.st.Project.Run; run.State != flow.PhaseEnded || run.Result != flow.EndStuck {
+				t.Errorf("after start_minutes run = %s(%s), want ended(stuck)", run.State, run.Result)
+			}
+			if !strings.Contains(r.log.String(), "factory.exec_error") {
+				t.Errorf("failed key sends not logged as factory.exec_error")
+			}
+			if r.keyLogLines() != 0 {
+				t.Errorf("log claims a key press that never happened")
+			}
+			attempts := r.proxy.keyAttempts.Load()
+			r.pass()
+			r.pass()
+			r.wantAttempts("after the run ended", int(attempts))
+		})
+	}
+}
+
+// TestDialogKeysOtherModelStatusLine: the dialog is the same with any model
+// and effort on the status line below it. It still gets its one Enter.
+func TestDialogKeysOtherModelStatusLine(t *testing.T) {
+	trust := readScreen(t, "agy-trust-dialog.screen.txt")
+	for _, model := range []string{"Gemini 4 Carbon · high", "Gemini 3.8 Flash · medium", "Claude Sonnet 5.5 · medium"} {
+		for _, st := range []*hc.Status{nil, permission()} {
+			name := model + ", no status"
+			if st != nil {
+				name = model + ", blocked permission"
+			}
+			t.Run(name, func(t *testing.T) {
+				screen := strings.Replace(trust, "Gemini 3.8 Flash · high", model, 1)
+				if screen == trust && model != "Gemini 3.8 Flash · high" {
+					t.Fatal("fixture has no model line to replace")
+				}
+				r := newDialogRig(t, "agy", screen, st)
+				r.pass()
+				r.pass()
+				r.wantAttempts("two passes", 1)
+				if got := r.delivered(); len(got) != 1 || !slices.Equal(got[0], []string{"enter"}) {
+					t.Errorf("delivered keys = %v, want exactly [[enter]]", got)
+				}
+			})
+		}
+	}
+}
+
+// TestDialogKeysAgentOutputAfterDialogGetsNone: the full dialog text followed
+// by more agent output is not the bottom UI, with any status line.
+func TestDialogKeysAgentOutputAfterDialogGetsNone(t *testing.T) {
+	trust := readScreen(t, "agy-trust-dialog.screen.txt")
+	after := "\n⏺ The dialog above is what the start screen printed.\n⏺ Reading internal/factory/world/world.go\n  Type your message or @path\n"
+	for _, st := range []*hc.Status{nil, permission()} {
+		r := newDialogRig(t, "agy", trust+after, st)
+		r.pass()
+		r.pass()
+		r.wantAttempts("two passes", 0)
+	}
+}
+
+// TestDialogKeysPassWithoutVerifiedScreenThenFullDialog: under
+// blocked(permission) one pass sees an unreadable or half-drawn screen. Later
+// passes show the full verified dialog and the run still gets its one Enter;
+// it is not left blocked for good.
+func TestDialogKeysPassWithoutVerifiedScreenThenFullDialog(t *testing.T) {
+	trust := readScreen(t, "agy-trust-dialog.screen.txt")
+	for _, tc := range []struct {
+		name  string
+		setup func(r *dialogRig)
+		heal  func(r *dialogRig)
+	}{
+		{"unreadable screen", func(r *dialogRig) { r.proxy.failRead.Store(true) }, func(r *dialogRig) { r.proxy.failRead.Store(false) }},
+		{"half-drawn screen", func(r *dialogRig) { r.srv.SetScreen("t1", "Do you trust the contents of this project?\n") }, func(r *dialogRig) { r.srv.SetScreen("t1", trust) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newDialogRig(t, "agy", trust, permission())
+			tc.setup(r)
+			r.pass()
+			r.wantAttempts("pass without the verified screen", 0)
+			tc.heal(r)
+			r.pass()
+			r.pass()
+			r.wantAttempts("passes showing the full dialog", 1)
+			if got := r.delivered(); len(got) != 1 || !slices.Equal(got[0], []string{"enter"}) {
+				t.Errorf("delivered keys = %v, want exactly [[enter]]", got)
+			}
+			if run := r.st.Project.Run; run.State == flow.PhaseBlocked || run.State == flow.PhaseEnded {
+				t.Errorf("run = %s(%s), want it still starting after the answer", run.State, run.Result)
 			}
 		})
 	}
