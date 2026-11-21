@@ -29,6 +29,51 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
+// CodedError wraps an executor error with its section 8 failure class.
+type CodedError struct {
+	Class string
+	Err   error
+}
+
+func (e *CodedError) Error() string { return e.Err.Error() }
+func (e *CodedError) Unwrap() error { return e.Err }
+
+// Fail tags err with class unless err is nil or already tagged.
+func Fail(class string, err error) error {
+	var ce *CodedError
+	if err == nil || errors.As(err, &ce) && ce.Class != "" {
+		return err
+	}
+	return &CodedError{Class: class, Err: err}
+}
+
+func hcFail(err error) error { return Fail(FailureClass(err), err) }
+
+var httpSettledRe = regexp.MustCompile(`\bHTTP(?:/\d(?:\.\d)?)? (?:401|404|422)\b`)
+
+// FailureClass returns err's section 8 failure class from structured facts:
+// explicit Fail tag, context deadline, process exit code, or gh/hc status.
+func FailureClass(err error) string {
+	var ce *CodedError
+	var he *hc.Error
+	var ee *exec.ExitError
+	switch {
+	case err == nil:
+		return ""
+	case errors.As(err, &ce) && ce.Class != "":
+		return ce.Class
+	case errors.Is(err, context.DeadlineExceeded):
+		return flow.ClassTimeout
+	case errors.As(err, &he) && (he.Code == -32600 || he.Code == -32601 || he.Code == -32602 || he.Code == 401 || he.Code == 404 || he.Code == 422):
+		return flow.ClassSettled
+	case errors.As(err, &ee) && (ee.ExitCode() == 4 || ee.ExitCode() == 126 || ee.ExitCode() == 127):
+		return flow.ClassSettled
+	case httpSettledRe.MatchString(err.Error()):
+		return flow.ClassSettled
+	}
+	return flow.ClassTransient
+}
+
 // RunSpec describes one terminal run to launch in herdr-core.
 type RunSpec struct {
 	Name, Cwd, Prompt, ClaudeConfig string
@@ -96,17 +141,17 @@ func StartTerminal(ctx context.Context, client *hc.Client, spec RunSpec, beforeL
 	if client != nil && spec.Name != "" {
 		switch t, err := client.Get(ctx, spec.Name); {
 		case err != nil && !errors.Is(err, hc.ErrNotFound):
-			return hc.Terminal{}, true, err
+			return hc.Terminal{}, true, hcFail(err)
 		case err == nil && t.State == "live":
 			return t, false, nil
 		case err == nil:
 			if _, rerr := client.Remove(ctx, t.Address); rerr != nil && !errors.Is(rerr, hc.ErrNotFound) {
-				return hc.Terminal{}, false, rerr
+				return hc.Terminal{}, false, hcFail(rerr)
 			}
 		}
 	}
 	if client == nil || strings.TrimSpace(spec.Cwd) == "" || len(spec.Argv) == 0 {
-		return hc.Terminal{}, false, errors.New("world: StartTerminal requires hc client, Cwd and Argv")
+		return hc.Terminal{}, false, Fail(flow.ClassSettled, errors.New("world: StartTerminal requires hc client, Cwd and Argv"))
 	}
 	if beforeLaunch != nil {
 		if err := beforeLaunch(); err != nil {
@@ -115,7 +160,7 @@ func StartTerminal(ctx context.Context, client *hc.Client, spec RunSpec, beforeL
 	}
 	if isClaudeArgv(spec.Argv) {
 		if err := preAcceptClaudeTrust(spec.ClaudeConfig, spec.Cwd); err != nil {
-			return hc.Terminal{}, false, err
+			return hc.Terminal{}, false, Fail(flow.ClassSettled, err)
 		}
 	}
 	argv := append([]string(nil), spec.Argv...)
@@ -125,7 +170,7 @@ func StartTerminal(ctx context.Context, client *hc.Client, spec RunSpec, beforeL
 	labels := map[string]string{"herdr.space": randID(), "herdr.tab": randID(), "herdr.seen": "0"}
 	maps.Copy(labels, spec.Labels)
 	t, err := client.Run(ctx, hc.RunParams{Name: spec.Name, Cwd: spec.Cwd, Argv: argv, Labels: labels, Env: spec.Env, NoParent: true, NoNotify: true})
-	return t, false, err
+	return t, false, hcFail(err)
 }
 
 func isClaudeArgv(argv []string) bool {
@@ -216,10 +261,10 @@ func childMap(parent map[string]any, key string) (map[string]any, bool) {
 // SendRun pastes text into terminal id and submits it.
 func SendRun(ctx context.Context, client *hc.Client, id, text string) error {
 	if client == nil || id == "" {
-		return errors.New("world: SendRun requires hc client and terminal id")
+		return Fail(flow.ClassSettled, errors.New("world: SendRun requires hc client and terminal id"))
 	}
 	_, err := client.Send(ctx, id, text, false)
-	return err
+	return hcFail(err)
 }
 
 // StopRun kills terminal id, removes it, and verifies both the terminal and its
@@ -232,7 +277,7 @@ func StopRun(ctx context.Context, client *hc.Client, id string) error {
 	if errors.Is(err, hc.ErrNotFound) {
 		return nil
 	} else if err != nil {
-		return err
+		return hcFail(err)
 	}
 	pid := 0
 	if t.PID != nil && *t.PID > 1 && *t.PID != os.Getpid() && *t.PID != syscall.Getpgrp() {
@@ -240,11 +285,11 @@ func StopRun(ctx context.Context, client *hc.Client, id string) error {
 		_ = syscall.Kill(-pid, syscall.SIGTERM)
 	}
 	if _, err := client.Kill(ctx, id); err != nil && !errors.Is(err, hc.ErrNotFound) && !errors.Is(err, hc.ErrFinished) {
-		return err
+		return hcFail(err)
 	}
 	for i := 0; i <= 80; i++ {
 		if _, rerr := client.Remove(ctx, id); rerr != nil && !errors.Is(rerr, hc.ErrNotFound) && !errors.Is(rerr, hc.ErrLive) {
-			return rerr
+			return hcFail(rerr)
 		}
 		_, gerr := client.Get(ctx, id)
 		procGone := pid == 0 || (syscall.Kill(pid, 0) != nil && syscall.Kill(-pid, 0) != nil)
@@ -257,7 +302,7 @@ func StopRun(ctx context.Context, client *hc.Client, id string) error {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	return fmt.Errorf("world: %s or pid %d still alive after stop", id, pid)
+	return Fail(flow.ClassTransient, fmt.Errorf("world: %s or pid %d still alive after stop", id, pid))
 }
 
 func deref[T any](p *T) (z T) {
@@ -548,12 +593,12 @@ type Worktree struct{ Path, Branch, BaseCommit string }
 func NewWorktree(ctx context.Context, repo, worktreeDir, taskID, title string) (Worktree, error) {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" || taskID == "." || taskID == ".." || strings.ContainsAny(taskID, "/\\ \t\n") {
-		return Worktree{}, fmt.Errorf("world: invalid task id %q", taskID)
+		return Worktree{}, Fail(flow.ClassSettled, fmt.Errorf("world: invalid task id %q", taskID))
 	}
 	if testing.Testing() {
 		abs, err := filepath.Abs(worktreeDir)
 		if rel, rerr := filepath.Rel(os.TempDir(), abs); err != nil || rerr != nil || strings.HasPrefix(rel, "..") {
-			return Worktree{}, fmt.Errorf("world: %s is outside the temp dir under go test", worktreeDir)
+			return Worktree{}, Fail(flow.ClassSettled, fmt.Errorf("world: %s is outside the temp dir under go test", worktreeDir))
 		}
 	}
 	slug := strings.Trim(nonSlugRe.ReplaceAllString(strings.ToLower(title), "-"), "-")
@@ -631,7 +676,7 @@ func remoteBaseCommit(ctx context.Context, repo string, fetch bool) (string, str
 	}
 	remote := PushRemote(strings.Fields(out))
 	if remote == "" {
-		return "", "", fmt.Errorf("world: no unique git remote in %s", repo)
+		return "", "", Fail(flow.ClassSettled, fmt.Errorf("world: no unique git remote in %s", repo))
 	}
 	if fetch {
 		if _, err := gitCmd(ctx, repo, "fetch", "--prune", remote); err != nil {
@@ -657,7 +702,7 @@ func remoteBaseCommit(ctx context.Context, repo string, fetch bool) (string, str
 			}
 		}
 	}
-	return "", "", fmt.Errorf("world: no remote base branch on %s", remote)
+	return "", "", Fail(flow.ClassSettled, fmt.Errorf("world: no remote base branch on %s", remote))
 }
 
 // InspectWorktree reads worktree's HEAD, its commit relation to ref, and
@@ -860,9 +905,10 @@ func gitCmd(ctx context.Context, dir string, args ...string) (string, error) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if gctx.Err() != nil {
-			return "", fmt.Errorf("%w: %v: %s", gctx.Err(), err, strings.TrimSpace(string(out)))
+			return "", Fail(flow.ClassTimeout, fmt.Errorf("%w: %v: %s", gctx.Err(), err, strings.TrimSpace(string(out))))
 		}
-		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+		raw := fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+		return "", Fail(FailureClass(raw), raw)
 	}
 	return strings.TrimSpace(string(out)), nil
 }

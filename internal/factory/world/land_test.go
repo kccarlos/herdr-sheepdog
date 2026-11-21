@@ -3,11 +3,13 @@ package world
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
 // TestMergePRPinnedSquash: the merge names the repo, squashes, pins the
@@ -114,3 +116,46 @@ func TestClosePR(t *testing.T) {
 		t.Fatalf("close without number or note called gh: %q", ghCalls(t, gh, ""))
 	}
 }
+
+func TestFailureClass(t *testing.T) {
+	exitErr := func(code string) error {
+		return exec.Command("sh", "-c", "exit "+code).Run()
+	}
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"deadline", context.DeadlineExceeded, flow.ClassTimeout},
+		{"explicit settled", Fail(flow.ClassSettled, os.ErrPermission), flow.ClassSettled},
+		{"plain os error", os.ErrNotExist, flow.ClassTransient},
+		{"exit 4 (gh auth)", exitErr("4"), flow.ClassSettled},
+		{"exit 127 (missing cmd)", exitErr("127"), flow.ClassSettled},
+		{"exit 1 (generic)", exitErr("1"), flow.ClassTransient},
+		{"hc invalid params (-32602)", hcFail(&hc.Error{Code: -32602, Message: "invalid params"}), flow.ClassSettled},
+		{"hc HTTP 403", hcFail(&hc.Error{Code: 403, Message: "forbidden"}), flow.ClassTransient},
+		{"hc server error (-32000)", hcFail(&hc.Error{Code: -32000, Kind: "unavailable", Message: "busy"}), flow.ClassTransient},
+		{"gh HTTP 500", errString("HTTP 500: Internal Server Error"), flow.ClassTransient},
+		{"gh HTTP 502", errString("HTTP 502: Bad Gateway"), flow.ClassTransient},
+		{"gh HTTP 429", errString("HTTP 429: Too Many Requests"), flow.ClassTransient},
+		{"gh HTTP 401", errString("HTTP 401: Bad credentials"), flow.ClassSettled},
+		{"gh HTTP 403", errString("gh: Resource not accessible by integration (HTTP 403)"), flow.ClassTransient},
+		{"gh HTTP 403 rate limit", errString("HTTP 403: API rate limit exceeded"), flow.ClassTransient},
+		{"gh HTTP 404", errString("gh: Not Found (HTTP 404)"), flow.ClassSettled},
+		{"gh HTTP 422", errString("HTTP 422: Validation Failed"), flow.ClassSettled},
+		{"gh HTTP 405 (unlisted -> transient)", errString("HTTP 405: Method Not Allowed"), flow.ClassTransient},
+		{"prose without status (head modified)", errString("GraphQL: Head branch was modified"), flow.ClassTransient},
+		{"prose without status (policy)", errString("the base branch policy prohibits the merge"), flow.ClassTransient},
+		{"prose without status (non-ff)", errString("! [rejected] main -> main (non-fast-forward)"), flow.ClassTransient},
+		{"prose without status (not found)", errString("branch not found"), flow.ClassTransient},
+		{"prose without status (already exists)", errString("worktree already exists"), flow.ClassTransient},
+	} {
+		if got := FailureClass(tc.err); got != tc.want {
+			t.Errorf("%s: FailureClass(%v) = %q, want %q", tc.name, tc.err, got, tc.want)
+		}
+	}
+}
+
+type errString string
+
+func (e errString) Error() string { return string(e) }

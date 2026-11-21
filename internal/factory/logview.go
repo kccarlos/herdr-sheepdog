@@ -203,7 +203,7 @@ func formatAge(now, at time.Time) string {
 // FormatStatusLine formats one task status line: id, short title, stage, last
 // logged row, its age and why. Full commit ids are cut to 7.
 func FormatStatusLine(ts TaskStatus) string {
-	id, title, rule, why := cmp.Or(cleanRejectWhy(ts.ID), "-"), cleanRejectWhy(ts.Title), cleanRejectWhy(ts.Rule), cmp.Or(cleanRejectWhy(ts.Why), "-")
+	id, title, rule, why := cmp.Or(flow.CleanText(ts.ID), "-"), flow.CleanText(ts.Title), flow.CleanText(ts.Rule), cmp.Or(flow.CleanText(ts.Why), "-")
 	if r := []rune(title); len(r) > 36 {
 		title = string(r[:35]) + "…"
 	}

@@ -345,3 +345,233 @@ func TestLandCleanupSplitAndDrop(t *testing.T) {
 		})
 	}
 }
+
+// TestIrreversibleActionsRecheckFreshFacts verifies section 8's irreversible-action
+// guard: execMerge re-reads fresh facts and aborts without calling gh pr merge if
+// N42 no longer holds (e.g. checks turned red or worker started working), and
+// execCleanup keeps a worktree when a stray live terminal is inside it.
+func TestIrreversibleActionsRecheckFreshFacts(t *testing.T) {
+	l := newLanding(t)
+	ctx := context.Background()
+	f := flow.Facts{
+		Tip: l.c1, TipRel: flow.RelSame, Worker: flow.Run{State: flow.RunIdle},
+		PR: flow.PR{Answered: true, Number: 7, State: flow.PROpen, Head: l.c1, HeadRel: flow.RelSame, Mergeable: flow.MergeableClean, Checks: flow.ChecksGreen},
+	}
+	// Flip PR checks to red on disk after the pass's snapshot: execMerge must re-read and call off (non-error) before gh pr merge.
+	writePRJSON(t, l.gh, "view.json", l.c1, `[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"FAILURE"}]`)
+	st := l.state()
+	if dec, calledOff, err := l.eng.execMerge(ctx, l.id, &st, 0, f); err != nil || !calledOff || !strings.Contains(dec, "called off") {
+		t.Fatalf("execMerge with stale green facts = (%q, calledOff=%v, err=%v), want non-error call-off", dec, calledOff, err)
+	}
+	if merges := ghCalls(t, l.gh, "pr merge"); len(merges) != 0 {
+		t.Fatalf("gh pr merge called despite fresh red checks: %q", merges)
+	}
+
+	// Three consecutive call-offs across full engine passes record no failed merge act and never reach N5,
+	// then merge immediately with no back-off once fresh facts hold N42.
+	lCall := newLanding(t)
+	greenView, err := os.ReadFile(filepath.Join(lCall.gh, "view.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	redView := strings.Replace(string(greenView), `"SUCCESS"`, `"FAILURE"`, 1)
+	flipBin := t.TempDir()
+	realFakeGH, err := os.ReadFile(filepath.Join(strings.Split(os.Getenv("PATH"), string(os.PathListSeparator))[0], "gh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	realPath := filepath.Join(flipBin, "real-gh")
+	if err := os.WriteFile(realPath, realFakeGH, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	flipFlag := filepath.Join(flipBin, "flip")
+	wrapper := "#!/bin/sh\n" +
+		"if [ \"$1 $2\" = \"pr view\" ] && [ -f " + strconvQuote(flipFlag) + " ]; then\n" +
+		"  c=" + strconvQuote(filepath.Join(flipBin, "n")) + "\n" +
+		"  if [ -f \"$c\" ]; then rm -f \"$c\"; printf '%s' " + strconvQuote(redView) + "; exit 0; fi\n" +
+		"  : > \"$c\"\n" +
+		"fi\n" +
+		"exec " + strconvQuote(realPath) + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(flipBin, "gh"), []byte(wrapper), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", flipBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := os.WriteFile(flipFlag, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	callNow := time.Now()
+	lCall.eng.Now = func() time.Time { return callNow }
+	for range 3 {
+		lCall.pass()
+		callNow = callNow.Add(5 * time.Minute)
+	}
+	lCall.pass()
+	stCall := lCall.state()
+	if stCall.Tasks[0].LastRow == "N5" || len(stCall.Project.Wakes) != 0 || flow.Count(stCall.Tasks[0].Attempts[0].Acts, "merge@"+lCall.c1) != 0 {
+		t.Fatalf("after 3 fresh-check call-offs: row=%s wakes=%+v acts=%+v, want not N5 and 0 merge acts", stCall.Tasks[0].LastRow, stCall.Project.Wakes, stCall.Tasks[0].Attempts[0].Acts)
+	}
+	_ = os.Remove(flipFlag)
+	lCall.pass()
+	if merges := ghCalls(t, lCall.gh, "pr merge"); len(merges) != 1 {
+		t.Fatalf("merges after call-offs cleared = %q, want 1 immediate merge", merges)
+	}
+
+	// Cleanup with a stray live terminal inside the worktree keeps the worktree.
+	if _, err := startRun(ctx, l.client, world.RunSpec{Name: "stray-shell", Cwd: l.wt, Argv: []string{"sh"}}); err != nil {
+		t.Fatal(err)
+	}
+	l.edit(func(s *flow.State) { s.Tasks[0].Closed = &flow.Closed{Why: "done elsewhere"} })
+	l.pass()
+	if _, err := os.Stat(l.wt); err != nil {
+		t.Fatalf("worktree removed while live terminal was inside: %v", err)
+	}
+	if !strings.Contains(l.log.String(), "live terminal inside") {
+		t.Fatalf("missing worktree_kept log for live terminal:\n%s", l.log.String())
+	}
+}
+
+// TestSection8EngineBackoffOutageN5AndRetry exercises section 8 end-to-end
+// through passProject: transient backoff + doubling, uncounted failures during
+// github_unavailable and hc_unavailable, ensure_failures -> single N5 wake with
+// cleaned/capped last words (never S2), recorded retry clearing N5, and a
+// single settled refusal going straight to N5.
+func TestSection8EngineBackoffOutageN5AndRetry(t *testing.T) {
+	l := newLanding(t)
+	coord, err := startRun(context.Background(), l.client, world.RunSpec{Name: "coord", Cwd: l.repo, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setIdle(t, l.srv, l.client, coord, "idle")
+	l.edit(func(s *flow.State) { s.Project.RunID = coord })
+	now := time.Now()
+	l.eng.Now = func() time.Time { return now }
+	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
+	writeGHFile(t, l.gh, "merge_fail", "HTTP 502: Bad Gateway\n\x07"+strings.Repeat("z", 600))
+
+	// Try 1 fails transiently at t=0; not retried at 59s; retried at +1m.
+	l.pass()
+	if got := len(ghCalls(t, l.gh, "pr merge")); got != 1 {
+		t.Fatalf("merge calls at t=0 = %d, want 1", got)
+	}
+	now = now.Add(59 * time.Second)
+	l.pass()
+	if got := len(ghCalls(t, l.gh, "pr merge")); got != 1 {
+		t.Fatalf("merge retried before 1m backoff: calls=%d", got)
+	}
+
+	// Failure of merge (a GitHub act) during hc_unavailable is STILL counted (wrong system's outage flag).
+	now = now.Add(time.Second)
+	origHC := l.eng.HC
+	l.eng.HC = hc.NewClient(filepath.Join(t.TempDir(), "missing.sock"))
+	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].RunID = "" })
+	l.pass() // Try 2 (counted #2)
+	l.eng.HC = origHC
+	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].RunID = l.worker })
+	acts := l.state().Tasks[0].Attempts[0].Acts
+	if last := acts[len(acts)-1]; last.Uncounted {
+		t.Fatalf("GitHub merge failure during hc_unavailable was marked uncounted: %+v", last)
+	}
+	if got := len(ghCalls(t, l.gh, "pr merge")); got != 2 {
+		t.Fatalf("merge calls after counted #2 = %d, want 2", got)
+	}
+	// Backoff doubles to 2m: not retried at +1m59s, retried at +2m (counted #3 -> hits ensure_failures=3).
+	now = now.Add(2*time.Minute - time.Second)
+	l.pass()
+	if got := len(ghCalls(t, l.gh, "pr merge")); got != 2 {
+		t.Fatalf("merge retried before doubled 2m backoff: calls=%d", got)
+	}
+	now = now.Add(time.Second)
+	l.pass() // Try 3 fails -> reaches ensure_failures=3
+	l.pass() // N5 fires wake_coordinator@failed@merge@<c1>
+
+	st := l.state()
+	if st.Tasks[0].LastRow != "N5" {
+		t.Fatalf("row after ensure_failures = %s, want N5", st.Tasks[0].LastRow)
+	}
+	if len(st.Project.Wakes) != 0 {
+		t.Fatalf("pending wakes after coordinator delivery = %+v, want 0", st.Project.Wakes)
+	}
+	sends := sendsTo(t, l.srv.Requests(), coord)
+	if len(sends) != 1 || !strings.Contains(sends[0], "failed@merge@"+l.c1) || !strings.Contains(sends[0], "HTTP 502: Bad Gateway") || strings.Contains(sends[0], "\x07") {
+		t.Fatalf("coordinator wake sends = %q, want 1 cleaned message with failed@merge and last words", sends)
+	}
+
+	// Even past stuck_minutes (31m), neither N42 nor S2 fires again — no loop.
+	now = now.Add(31 * time.Minute)
+	l.pass()
+	if st := l.state(); st.Tasks[0].LastRow != "N5" || len(sendsTo(t, l.srv.Requests(), coord)) != 1 || len(ghCalls(t, l.gh, "pr merge")) != 3 {
+		t.Fatalf("after 31m at N5: row=%s sends=%d merges=%d", st.Tasks[0].LastRow, len(sendsTo(t, l.srv.Requests(), coord)), len(ghCalls(t, l.gh, "pr merge")))
+	}
+
+	// Record a retry act and switch failure to a settled HTTP 422 refusal -> asked once, then N5 at once!
+	writeGHFile(t, l.gh, "merge_fail", "HTTP 422: the base branch policy prohibits the merge")
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Acts = append(a.Acts, flow.Act{Key: flow.AskRetry, Result: "done", At: now})
+	})
+	l.pass() // retries merge@c1 once -> fails with ClassSettled
+	l.pass() // goes straight to N5 on 1 settled failure
+	st = l.state()
+	if st.Tasks[0].LastRow != "N5" || len(sendsTo(t, l.srv.Requests(), coord)) != 2 || len(ghCalls(t, l.gh, "pr merge")) != 4 {
+		t.Fatalf("after retry + settled refusal: row=%s sends=%d merges=%d", st.Tasks[0].LastRow, len(sendsTo(t, l.srv.Requests(), coord)), len(ghCalls(t, l.gh, "pr merge")))
+	}
+}
+
+// TestGitHubOutageHourBoundedTriesAndNoStateGrowth verifies that an hour of
+// github_unavailable gives a bounded number of tries (doubling back-off with a
+// 30m cap) and overwrites the uncounted act in place (no state growth), while
+// a settled failure is never uncounted even during github_unavailable.
+func TestGitHubOutageHourBoundedTriesAndNoStateGrowth(t *testing.T) {
+	l := newLanding(t)
+	now := time.Now()
+	l.eng.Now = func() time.Time { return now }
+	l.edit(func(s *flow.State) { s.Tasks[0].Dropped = &flow.Dropped{Why: "obsolete"} })
+	writeGHFile(t, l.gh, "fail", "") // HTTP 502: Bad Gateway -> github_unavailable
+
+	for range 60 {
+		l.pass()
+		now = now.Add(time.Minute)
+	}
+	st := l.state()
+	a := st.Tasks[0].Attempts[0]
+	if views := len(ghCalls(t, l.gh, "pr view")); views != 6 {
+		t.Fatalf("cleanup pr view tries during 1h github_unavailable = %d, want 6 (doubling backoff capped at 30m)", views)
+	}
+	if acts := flow.Count(a.Acts, flow.AskCleanup); acts != 1 {
+		t.Fatalf("cleanup acts in state.json after 1h outage = %d, want 1 overwritten entry (acts=%+v)", acts, a.Acts)
+	}
+	if len(st.Project.Wakes) != 0 {
+		t.Fatalf("wakes during transient github_unavailable = %+v, want none", st.Project.Wakes)
+	}
+
+	// A settled failure (HTTP 401) is never uncounted even while github_unavailable holds -> wakes once at once.
+	_ = os.Remove(filepath.Join(l.gh, "fail"))
+	writeGHFile(t, l.gh, "close_fail", "")
+	// Replace pr close failure message via view+close: make pr close output HTTP 401 via a gh shim.
+	binDir := t.TempDir()
+	origGH, err := os.ReadFile(filepath.Join(strings.Split(os.Getenv("PATH"), string(os.PathListSeparator))[0], "gh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	origPath := filepath.Join(binDir, "orig-gh")
+	if err := os.WriteFile(origPath, origGH, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	shim := "#!/bin/sh\nif [ \"$1 $2\" = \"run list\" ]; then echo 'HTTP 502: Bad Gateway' >&2; exit 1; fi\nif [ \"$1 $2\" = \"pr close\" ]; then echo 'HTTP 401: Bad credentials' >&2; exit 1; fi\nexec " + strconvQuote(origPath) + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(shim), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	l.eng.ghUnavail = map[string]bool{l.id: true}
+	now = now.Add(30 * time.Minute)
+	l.pass() // cleanup fails with settled HTTP 401 while github_unavailable is true -> counted!
+	l.pass() // N1 emits failed@cleanup wake once
+	st = l.state()
+	last := flow.LastAct(st.Tasks[0].Attempts[0].Acts, flow.AskCleanup)
+	if last == nil || last.Uncounted || last.Class != flow.ClassSettled {
+		t.Fatalf("settled cleanup act during github_unavailable = %+v, want Uncounted=false Class=settled", last)
+	}
+	if len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != "failed@cleanup" {
+		t.Fatalf("wakes after settled cleanup failure = %+v, want [failed@cleanup]", st.Project.Wakes)
+	}
+}

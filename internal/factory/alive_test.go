@@ -580,7 +580,7 @@ func methodFailProxy(t *testing.T, target, method string, fail *atomic.Bool) str
 					Method string `json:"method"`
 				}
 				_ = json.Unmarshal(line, &req)
-				if req.Method == method && fail.Load() {
+				if (req.Method == method || strings.Contains(string(line), method)) && fail.Load() {
 					_, _ = fmt.Fprintf(c, `{"jsonrpc":"2.0","id":%d,"error":{"code":-32000,"message":"%s failed"}}`+"\n", req.ID, method)
 					return
 				}
@@ -726,30 +726,104 @@ func TestOwnerStopStartRestartsWorker(t *testing.T) {
 	}
 }
 
-// TestS2FailedMergeWakesAfterStuckMinutes verifies reduced S2 (until 5a.3 N5):
-// a failed non-run act (merge@H) wakes the coordinator once after stuck_minutes.
-func TestS2FailedMergeWakesAfterStuckMinutes(t *testing.T) {
+// TestActBackoffDoublingOutageN5AndRetryE2E verifies PR 5a.3a end to end:
+//  1. A failure while github_unavailable is known is marked Uncounted and not counted.
+//  2. Transient failures retry after back-off (1m, then doubled 2m) and not before.
+//  3. ensure_failures (3) in a row lands on N5 (never S2), waking the coordinator
+//     once with what failed and its cleaned last words, and never re-fires.
+//  4. Recording a retry act clears N5 so the key is asked again.
+//  5. One settled failure lands on N5 at once.
+func TestActBackoffDoublingOutageN5AndRetryE2E(t *testing.T) {
 	l := newLanding(t)
 	now := time.Now()
 	l.eng.Now = func() time.Time { return now }
-	if err := os.WriteFile(filepath.Join(l.gh, "merge_fail"), nil, 0o600); err != nil {
+	var failSend, failCoord atomic.Bool
+	pSend := methodFailProxy(t, l.srv.Path, "terminal.send", &failSend)
+	coordID, err := startRun(context.Background(), l.client, world.RunSpec{Name: "coord-outage", Cwd: l.repo, Argv: []string{"sh"}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	l.pass() // N42 asks merge@c1 -> fails
-	if ac := flow.LastAct(l.state().Tasks[0].Attempts[0].Acts, "merge@"+l.c1); ac == nil || ac.Result != "failed" {
-		t.Fatalf("merge act = %+v, want failed", ac)
+	l.eng.HC = hc.NewClient(methodFailProxy(t, pSend, coordID, &failCoord))
+	l.edit(func(s *flow.State) {
+		s.Project.RunID = coordID
+		s.Tasks[0].Attempts[0].Rounds = []flow.Round{{N: 1, Kind: flow.RoundFull, Head: l.c1, Verdict: flow.VerdictChanges, Majors: 1, ReportPath: "/r/1.md"}}
+	})
+
+	// 1. An hour of hc_unavailable while an hc act (tell_worker_findings) fails:
+	//    doubles back-off up to 30m cap, overwrites in place (1 act), never reaches N5.
+	failSend.Store(true)
+	failCoord.Store(true)
+	for range 60 {
+		l.pass()
+		now = now.Add(time.Minute)
 	}
-	now = now.Add(29 * time.Minute)
+	sOut := l.state()
+	if got := flow.Count(sOut.Tasks[0].Attempts[0].Acts, "tell_worker_findings@1"); got != 1 {
+		t.Fatalf("tell_worker_findings acts after 1h hc outage = %d, want 1 overwritten entry (acts=%+v)", got, sOut.Tasks[0].Attempts[0].Acts)
+	}
+	if last := flow.LastAct(sOut.Tasks[0].Attempts[0].Acts, "tell_worker_findings@1"); last == nil || !last.Uncounted {
+		t.Fatalf("last tell_worker_findings act = %+v, want Uncounted=true", last)
+	}
+	if sOut.Tasks[0].LastRow == "N5" || sOut.Tasks[0].LastRow == "S2" || len(sOut.Project.Wakes) != 0 {
+		t.Fatalf("hc outage failures reached N5/S2: row=%s wakes=%+v", sOut.Tasks[0].LastRow, sOut.Project.Wakes)
+	}
+
+	// 2. hc back, GitHub down (github_unavailable): hc act failure IS counted (wrong system flag!) -> 3 tries -> N5 wakes once.
+	failCoord.Store(false)
+	writeGHFile(t, l.gh, "fail", "")
+	l.edit(func(st *flow.State) { st.Tasks[0].Attempts[0].Acts = nil })
+	l.pass() // counted failure 1 at now (despite github_unavailable!)
+	now = now.Add(59 * time.Second)
+	l.pass() // before 1m back-off: must not retry
+	if got := flow.Count(l.state().Tasks[0].Attempts[0].Acts, "tell_worker_findings@1"); got != 1 {
+		t.Fatalf("retried before 1m backoff: count=%d, want 1", got)
+	}
+	now = now.Add(time.Second)
+	l.pass() // at 1m: counted failure 2
+	now = now.Add(2*time.Minute - time.Second)
+	l.pass() // before 2m doubled back-off: must not retry
+	if got := flow.Count(l.state().Tasks[0].Attempts[0].Acts, "tell_worker_findings@1"); got != 2 {
+		t.Fatalf("retried before 2m doubled backoff: count=%d, want 2", got)
+	}
+	now = now.Add(time.Second)
+	l.pass() // at 2m: counted failure 3 (hits ensure_failures=3)
+	_ = os.Remove(filepath.Join(l.gh, "fail"))
+	l.pass() // lands on N5 and wakes once
+	now = now.Add(40 * time.Minute)
+	l.pass() // past stuck_minutes: stays N5, never S2, never re-wakes or re-fires
+	s := l.state()
+	if s.Tasks[0].LastRow != "N5" || flow.Count(s.Tasks[0].Attempts[0].Acts, "tell_worker_findings@1") != 3 {
+		t.Fatalf("after 3 counted failures: row=%s acts=%+v", s.Tasks[0].LastRow, s.Tasks[0].Attempts[0].Acts)
+	}
+	if len(s.Project.Wakes) != 1 || s.Project.Wakes[0].Key != "failed@tell_worker_findings@1" || !strings.Contains(s.Project.Wakes[0].Why, "terminal.send failed") {
+		t.Fatalf("N5 wakes = %+v, want 1 failed@tell_worker_findings@1 with last words", s.Project.Wakes)
+	}
+
+	// 3. Recorded retry clears N5; tell succeeds on the next pass!
+	failSend.Store(false)
+	l.edit(func(st *flow.State) {
+		st.Project.Wakes = nil
+		st.Tasks[0].Attempts[0].Acts = append(st.Tasks[0].Attempts[0].Acts, flow.Act{Key: flow.AskRetry, Result: "done", At: now})
+	})
 	l.pass()
-	if w := l.state().Project.Wakes; len(w) != 0 {
-		t.Fatalf("woke before stuck_minutes: %+v", w)
+	if !flow.Done(l.state().Tasks[0].Attempts[0].Acts, "tell_worker_findings@1") {
+		t.Fatalf("key not asked again after retry: %+v", l.state().Tasks[0].Attempts[0].Acts)
 	}
-	now = now.Add(2 * time.Minute)
-	l.pass() // S2 wakes once
-	l.pass() // no duplicate wake
-	w := l.state().Project.Wakes
-	if len(w) != 1 || w[0].Key != "stuck@merge@"+l.c1 {
-		t.Fatalf("wakes past stuck_minutes = %+v, want [stuck@merge@%s]", w, l.c1)
+
+	// 4. Settled failure (merge refused: Head branch was modified) -> N5 at once without retrying, never S2.
+	l2 := newLanding(t)
+	l2.eng.Now = func() time.Time { return now }
+	writeGHFile(t, l2.gh, "merge_fail", "")
+	l2.pass() // try 1 fails settled
+	l2.pass() // N5 wakes once immediately
+	now = now.Add(40 * time.Minute)
+	l2.pass() // never retries, never S2
+	s2 := l2.state()
+	if s2.Tasks[0].LastRow != "N5" || len(ghCalls(t, l2.gh, "pr merge")) != 1 {
+		t.Fatalf("settled merge failure: row=%s merges=%q, want N5 and 1 merge call", s2.Tasks[0].LastRow, ghCalls(t, l2.gh, "pr merge"))
+	}
+	if len(s2.Project.Wakes) != 1 || s2.Project.Wakes[0].Key != "failed@merge@"+l2.c1 || !strings.Contains(s2.Project.Wakes[0].Why, "Head branch was modified") {
+		t.Fatalf("settled N5 wake = %+v, want 1 wake naming merge@%s and Head branch was modified", s2.Project.Wakes, l2.c1)
 	}
 }
 

@@ -35,7 +35,7 @@ func ghRepo(ctx context.Context, dir string) (string, error) {
 	url, _ := gitCmd(ctx, dir, "config", "--get", "remote."+pushRemote+".url")
 	m := githubRepoRe.FindStringSubmatch(url)
 	if m == nil {
-		return "", fmt.Errorf("world: remote %s of %s is not a github.com repo (%q)", pushRemote, dir, url)
+		return "", Fail(flow.ClassSettled, fmt.Errorf("world: remote %s of %s is not a github.com repo (%q)", pushRemote, dir, url))
 	}
 	return m[1], nil
 }
@@ -45,11 +45,11 @@ func ghRepo(ctx context.Context, dir string) (string, error) {
 func ghCmd(ctx context.Context, dir string, args ...string) (string, error) {
 	bin, err := exec.LookPath("gh")
 	if err != nil {
-		return "", err
+		return "", Fail(flow.ClassSettled, err)
 	}
 	if testing.Testing() {
 		if rel, rerr := filepath.Rel(os.TempDir(), bin); rerr != nil || strings.HasPrefix(rel, "..") {
-			return "", fmt.Errorf("world: gh %s is outside the temp dir under go test", bin)
+			return "", Fail(flow.ClassSettled, fmt.Errorf("world: gh %s is outside the temp dir under go test", bin))
 		}
 	}
 	gctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -61,7 +61,11 @@ func ghCmd(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("gh %s: %w: %s", strings.Join(args[:min(2, len(args))], " "), err, strings.TrimSpace(stderr.String()))
+		if gctx.Err() != nil {
+			return "", Fail(flow.ClassTimeout, fmt.Errorf("gh %s: %w: %v: %s", strings.Join(args[:min(2, len(args))], " "), gctx.Err(), err, strings.TrimSpace(stderr.String())))
+		}
+		raw := fmt.Errorf("gh %s: %w: %s", strings.Join(args[:min(2, len(args))], " "), err, strings.TrimSpace(stderr.String()))
+		return "", Fail(FailureClass(raw), raw)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -117,7 +121,7 @@ func PushAndOpenPR(ctx context.Context, worktree, branch, head, title, body stri
 	case flow.PRAdopt:
 		return n, nil
 	case flow.PRRefuse:
-		return 0, fmt.Errorf("world: %s: %s", branch, why)
+		return 0, Fail(flow.ClassSettled, fmt.Errorf("world: %s: %s", branch, why))
 	}
 	out, err = ghCmd(ctx, worktree, "pr", "create", "--repo", repo, "--head", branch, "--base", base, "--title", capTitle(title), "--body", body)
 	if err != nil {
@@ -476,7 +480,7 @@ func runCancelledByLimit(ctx context.Context, dir, repo string, runID int64) (bo
 // reads merged ends the task (N2, KB-MRG-9).
 func MergePR(ctx context.Context, repoDir string, number int, head, body string) error {
 	if number <= 0 || head == "" {
-		return fmt.Errorf("world: merge needs a PR number and a head (got #%d at %q)", number, head)
+		return Fail(flow.ClassSettled, fmt.Errorf("world: merge needs a PR number and a head (got #%d at %q)", number, head))
 	}
 	repo, err := ghRepo(ctx, repoDir)
 	if err != nil {
@@ -490,7 +494,7 @@ func MergePR(ctx context.Context, repoDir string, number int, head, body string)
 // --delete-branch, never merges; design.md 4.1 N1, 4.9).
 func ClosePR(ctx context.Context, repoDir string, number int, note string) error {
 	if number <= 0 || strings.TrimSpace(note) == "" {
-		return fmt.Errorf("world: close PR needs a PR number and a note (got #%d)", number)
+		return Fail(flow.ClassSettled, fmt.Errorf("world: close PR needs a PR number and a note (got #%d)", number))
 	}
 	repo, err := ghRepo(ctx, repoDir)
 	if err != nil {
@@ -505,7 +509,7 @@ func ClosePR(ctx context.Context, repoDir string, number int, note string) error
 // 9.4). A branch already gone (GitHub may delete it on merge) is not an error.
 func DeleteRemoteBranch(ctx context.Context, dir, branch string) error {
 	if branch == "" {
-		return errors.New("world: no branch to delete")
+		return Fail(flow.ClassSettled, errors.New("world: no branch to delete"))
 	}
 	out, err := gitCmd(ctx, dir, "ls-remote", "--heads", pushRemote, "refs/heads/"+branch)
 	if err != nil || out == "" {
@@ -535,7 +539,7 @@ func RerunFailedJobs(ctx context.Context, repoDir, runID string) error {
 // merge commit, pinned to expectedHead (design.md 9.4, N40, KB-MRG-43).
 func UpdateBranch(ctx context.Context, repoDir string, number int, expectedHead string) error {
 	if number <= 0 || expectedHead == "" {
-		return fmt.Errorf("world: update-branch needs a PR number and an expected head (got #%d at %q)", number, expectedHead)
+		return Fail(flow.ClassSettled, fmt.Errorf("world: update-branch needs a PR number and an expected head (got #%d at %q)", number, expectedHead))
 	}
 	repo, err := ghRepo(ctx, repoDir)
 	if err != nil {

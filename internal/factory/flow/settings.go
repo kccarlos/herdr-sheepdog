@@ -36,8 +36,9 @@ type Settings struct {
 	BlockedMinutes             int `json:"blocked_minutes"`                // R29 (design.md 10.1)
 	WorkerRestarts             int `json:"worker_restarts"`                // 4.8 (design.md 10.1)
 	ReviewerRetries            int `json:"reviewer_retries"`               // 4.8 (design.md 10.1)
+	EnsureFailures             int `json:"ensure_failures"`                // N5, section 8 (design.md 10.1)
 	EnsureBackoffMinutes       int `json:"ensure_backoff_minutes"`         // 4.8, section 8 (design.md 10.1)
-	StuckMinutes               int `json:"stuck_minutes"`                  // reduced S2 until 5a.3/5a.5 (design.md 10.1)
+	StuckMinutes               int `json:"stuck_minutes"`                  // reduced S2 until 5a.5 (design.md 10.1)
 	ContinuesPerTask           int `json:"continues_per_task"`             // a recap's continue (design.md 4.3, 10.1)
 	ContinueLines              int `json:"continue_lines"`                 // the cap after a continue (design.md 4.9)
 	TaskSizeLimit              int `json:"task_size_limit"`                // plan checks (design.md 11.5)
@@ -82,6 +83,7 @@ const (
 	BlockedMin                            = 1
 	BlockedMax                            = 120
 	WorkerRestartsMax, ReviewerRetriesMax = 10, 5
+	EnsureFailuresMin, EnsureFailuresMax  = 1, 10
 	EnsureBackoffMin, EnsureBackoffMax    = 1, 60
 	StuckMin, StuckMax                    = 5, 240
 	ContinuesMax                          = 3
@@ -102,7 +104,7 @@ func DefaultSettings() Settings {
 		RetroAfterRoundsWithMajors: 2, RetroFromRound: 3,
 		ChecksGraceMinutes: 5, CIStalledMinutes: 90, MainRedMinutes: 60, CIFailsPerHour: 3, FlakeReruns: 1,
 		StartMinutes: 2, IdleGraceSeconds: 20, QuietMinutes: 20, InterruptSeconds: 90, BlockedMinutes: 10,
-		WorkerRestarts: 3, ReviewerRetries: 2, EnsureBackoffMinutes: 1, StuckMinutes: 30,
+		WorkerRestarts: 3, ReviewerRetries: 2, EnsureFailures: 3, EnsureBackoffMinutes: 1, StuckMinutes: 30,
 		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2, MaxRunning: 3,
 		SecondReviewer: "opus",
 	}
@@ -125,6 +127,7 @@ func (s Settings) Changed() []string {
 		{"continue_lines", s.ContinueLines, d.ContinueLines},
 		{"continues_per_task", s.ContinuesPerTask, d.ContinuesPerTask},
 		{"ensure_backoff_minutes", s.EnsureBackoffMinutes, d.EnsureBackoffMinutes},
+		{"ensure_failures", s.EnsureFailures, d.EnsureFailures},
 		{"flake_reruns", s.FlakeReruns, d.FlakeReruns},
 		{"idle_grace_seconds", s.IdleGraceSeconds, d.IdleGraceSeconds},
 		{"interrupt_seconds", s.InterruptSeconds, d.InterruptSeconds},
@@ -180,6 +183,7 @@ func (s Settings) Validate() error {
 		{"blocked_minutes", s.BlockedMinutes, BlockedMin, BlockedMax},
 		{"worker_restarts", s.WorkerRestarts, 0, WorkerRestartsMax},
 		{"reviewer_retries", s.ReviewerRetries, 0, ReviewerRetriesMax},
+		{"ensure_failures", s.EnsureFailures, EnsureFailuresMin, EnsureFailuresMax},
 		{"ensure_backoff_minutes", s.EnsureBackoffMinutes, EnsureBackoffMin, EnsureBackoffMax},
 		{"stuck_minutes", s.StuckMinutes, StuckMin, StuckMax},
 		{"continues_per_task", s.ContinuesPerTask, 0, ContinuesMax},

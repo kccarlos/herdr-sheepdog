@@ -36,8 +36,9 @@ const (
 	AskWake         = "wake_coordinator"
 	AskStopRuns     = "stop_runs"
 
-	baseRedTellTries = 2 // one retry on the next pass if the worker tell fails
-	countBase        = 1 // 1-based restart and retry key index
+	countBase        = 1 // 1-based restart, retry and back-off shift index
+	maxBackoffShift  = 10
+	maxEnsureBackoff = 30 * time.Minute
 )
 
 // key joins a verb and what it is for: "merge@3f9c".
@@ -49,13 +50,39 @@ func key(verb string, parts ...any) string {
 	return strings.Join(s, "@")
 }
 
-// once asks for k unless acts already hold it, whatever its result. Retries
-// and back-off are section 8 (slice 5a).
+// once asks for k unless acts already hold a done entry for it.
 func once(acts []Act, k string) []string {
-	if k == "" || Count(acts, k) > 0 {
+	if k == "" || Done(acts, k) {
 		return nil
 	}
 	return []string{k}
+}
+
+func ensureStep(in In, k string) (due, exhausted bool) {
+	last, _, tries, counted, settled := actFailures(in.acts(), k)
+	switch base := time.Duration(in.Settings.EnsureBackoffMinutes) * time.Minute; {
+	case settled || counted > 0 && counted >= in.Settings.EnsureFailures:
+		return false, true
+	case last == nil || last.Result == "done":
+		return true, false
+	case last.Result != "failed" || last.At.IsZero():
+		return false, false
+	default:
+		return in.Now.Sub(last.At) >= min(base<<min(max(0, tries-countBase), maxBackoffShift), max(base, maxEnsureBackoff)), false
+	}
+}
+
+// ensure asks for k by key and retries failed tries with doubling back-off
+// until settled or ensure_failures in a row (design.md section 8).
+func ensure(in In, k string) []string {
+	if k == "" || Done(in.acts(), k) {
+		return nil
+	}
+	due, exhausted := ensureStep(in, k)
+	if in.probe && exhausted || !in.probe && due {
+		return []string{k}
+	}
+	return nil
 }
 
 // EnsureRun is design.md 4.8's first-match table for a role's run (worker or
@@ -89,11 +116,11 @@ func EnsureRun(in In, role string) []string {
 		firstKey = key(AskStartReview, round, h)
 	}
 	switch {
-	case (last == nil || inFlight) && Count(a.Acts, firstKey) == 0:
+	case (last == nil || inFlight) && !Done(a.Acts, firstKey):
 		if role != RoleReviewer && in.Facts.NoSlot {
 			return nil
 		}
-		return []string{firstKey}
+		return ensure(in, firstKey)
 	case inFlight || last != nil && last.Result == EndStopped:
 		if role == RoleReviewer {
 			return []string{key(AskStartReview, round, ContinueResume, h)}
@@ -141,6 +168,12 @@ func WantsWorkerSlot(t Task, s Settings, now time.Time) bool {
 	}
 	asks := EnsureRun(In{Task: t, Settings: s, Facts: Facts{Worker: Run{State: RunGone}}, Now: now}, RoleWorker)
 	return len(asks) > 0 && strings.HasPrefix(asks[0], AskStartWorker)
+}
+
+// WantsNewAttempt reports whether a task with no open attempt is ready to ask
+// for AskNewAttempt if granted a free slot (design.md 4.2, 8).
+func WantsNewAttempt(t Task, s Settings, now time.Time) bool {
+	return len(ensure(In{Task: t, Settings: s, Now: now}, AskNewAttempt)) > 0
 }
 
 // Clause is one named part of a row's condition (design.md 4: "each clause
@@ -233,7 +266,7 @@ func reviewRequired(in In) bool       { return in.Facts.PR.ReviewRequired }
 func noReviewRequired(in In) bool     { return !reviewRequired(in) }
 func working(in In) bool              { return in.Facts.Worker.State == RunWorking }
 func notWorking(in In) bool           { return !working(in) }
-func mergeAsked(in In) bool           { return Count(in.acts(), key(AskMerge, headH(in))) > 0 }
+func mergeAsked(in In) bool           { return Done(sinceRetry(in.acts()), key(AskMerge, headH(in))) }
 
 func checksGrace(in In) time.Duration {
 	return time.Duration(in.Settings.ChecksGraceMinutes) * time.Minute
@@ -268,9 +301,8 @@ func join(asked [][]string) []string {
 	return out
 }
 
-// stuckKey backs the reduced S2 fallback: failed non-run acts until PR 5a.3
-// (N5 retry), and an idle no-tag reviewer until PR 5a.5 (time limits). It
-// returns "" once its wake act exists so S2 lets go on the next pass.
+// stuckKey backs the reduced S2 fallback: an idle no-tag reviewer until PR
+// 5a.5 (review_minutes). It returns "" once its wake act exists so S2 lets go.
 func stuckKey(in In) string {
 	if in.Task.Parked || prClosed(in) {
 		return ""
@@ -282,59 +314,95 @@ func stuckKey(in In) string {
 		Count(in.acts(), key(AskWake, "stuck", "reviewer_idle", nextRound(*a), h)) == 0 {
 		return key(AskWake, "stuck", "reviewer_idle", nextRound(*a), h)
 	}
-	for _, ac := range in.acts() {
-		verb, _, _ := strings.Cut(ac.Key, "@")
-		if last := LastAct(in.acts(), ac.Key); last == nil || last.Result != "failed" || last.At.IsZero() || in.Now.Sub(last.At) < d || Count(in.acts(), key(AskWake, "stuck", ac.Key)) > 0 {
-			continue
-		}
-		if ended(in) && verb == AskCleanup || prMerged(in) && verb == AskMarkDone ||
-			!ended(in) && !prMerged(in) && (verb == AskNewAttempt ||
-				inSet("merge|push_and_open_pr|update_branch|tell_worker_diverged|tell_worker_conflict|tell_worker_ci", verb) && strings.HasSuffix(ac.Key, "@"+h) && (verb != AskUpdateBranch || prBehindBase(in)) ||
-				verb == AskTellFindings && ladderSays(Fix)(in) && ac.Key == key(AskTellFindings, newestCovering(*in.attempt(), h).N) ||
-				verb == AskTellStop && recapOpen(in) && ac.Key == key(AskTellStop, len(in.Task.Recaps)) ||
-				verb == AskTellBaseRed && in.Facts.BaseRed && ac.Key == key(AskTellBaseRed, in.Facts.BaseRedSpell) && Count(in.acts(), ac.Key) >= baseRedTellTries) {
-			return key(AskWake, "stuck", ac.Key)
+	return ""
+}
+
+var rowsBelowN5 []Row[In]
+
+func init() {
+	i := slices.IndexFunc(TaskRows, func(r Row[In]) bool { return r.ID == "N5" })
+	rowsBelowN5 = TaskRows[i+countBase:]
+}
+
+func n5Key(in In) string {
+	in.probe = true
+	if r, d := FirstMatch(rowsBelowN5, in); r.ID != "N43" {
+		for _, k := range d.Asked {
+			if !strings.HasPrefix(k, AskWake+"@") && Exhausted(in.acts(), k, in.Settings) {
+				return k
+			}
 		}
 	}
 	return ""
 }
 
+func n5Wake(acts []Act, fk string) []string {
+	if r := Count(acts, AskRetry); r > 0 {
+		return once(acts, key(AskWake, "failed", r, fk))
+	}
+	return once(acts, key(AskWake, "failed", fk))
+}
+
+func n5Why(acts []Act, fk string) string {
+	_, cause, _, _, _ := actFailures(acts, fk)
+	cls, words := ClassTransient, ""
+	if cause != nil {
+		cls, words = cmp.Or(cause.Class, ClassTransient), CleanErr(cause.Err)
+	}
+	if words != "" {
+		return fmt.Sprintf("%s failed (%s): %s", fk, cls, words)
+	}
+	return fmt.Sprintf("%s failed (%s)", fk, cls)
+}
+
 // TaskRows is the task table in design.md section 4's order, using EnsureRun
 // (4.8) wherever a row needs a worker or reviewer run.
 var TaskRows = []Row[In]{
-	// Reduced S2 fallback until PR 5a.3 (N5 retry) and PR 5a.5 (time limits).
+	// Reduced S2 fallback until PR 5a.5 (review_minutes).
 	{ID: "S2", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return len(once(in.acts(), stuckKey(in))) > 0 }, Then: func(in In) Decision {
 		k := stuckKey(in)
 		return say("stuck past stuck_minutes: "+k, once(in.acts(), k))(in)
 	}},
 	{ID: "N1", WaitsOn: "nobody", Stage: "done", When: ended, Then: func(in In) Decision {
-		return say("ended: stop its runs and clean up", once(in.acts(), AskCleanup))(in)
+		asked := ensure(in, AskCleanup)
+		if Exhausted(in.acts(), AskCleanup, in.Settings) {
+			asked = append(asked, n5Wake(in.acts(), AskCleanup)...)
+		}
+		return say("ended: stop its runs and clean up", asked)(in)
 	}},
 	{ID: "N2", WaitsOn: "nobody", Stage: "done", When: prMerged, Then: func(in In) Decision {
-		asked := once(in.acts(), AskMarkDone)
+		asked := ensure(in, AskMarkDone)
 		if !hasAccept(in, in.Facts.PR.Head) {
 			asked = append(asked, once(in.acts(), key(AskWake, "merged_outside_bar"))...)
 		}
 		return Decision{Asked: asked, Why: "the PR is merged"}
 	}},
 	// N3 asks while a live run is recorded, not once: the stop ends the run
-	// records as stopped, and a failed stop is tried again next pass.
+	// records as stopped, and a failed stop backs off and wakes once per section 8.
 	{ID: "N3", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return in.Task.Parked }, Then: func(in In) Decision {
 		if a := in.attempt(); a != nil && (a.RunID != "" || a.Run != nil && a.Run.State != PhaseEnded ||
 			a.Review != nil && (a.Review.RunID != "" || a.Review.Run != nil && a.Review.Run.State != PhaseEnded)) {
-			return say("parked: stop its runs", []string{AskStopRuns})(in)
+			if due, exhausted := ensureStep(in, AskStopRuns); due {
+				return say("parked: stop its runs", []string{AskStopRuns})(in)
+			} else if exhausted {
+				return say(n5Why(in.acts(), AskStopRuns), n5Wake(in.acts(), AskStopRuns))(in)
+			}
 		}
 		return say("parked")(in)
 	}},
 	{ID: "N4", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: prClosed, Then: func(in In) Decision {
 		return say("the PR was closed without merging (never reopened; retry starts a new attempt)", once(in.acts(), key(AskWake, "pr_closed")))(in)
 	}},
+	{ID: "N5", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return n5Key(in) != "" }, Then: func(in In) Decision {
+		fk := n5Key(in)
+		return say(n5Why(in.acts(), fk), n5Wake(in.acts(), fk))(in)
+	}},
 	// N6 tells a live worker of a size or ci recap once to stop (it has no
 	// recap-written report yet, so nothing waits for one).
 	{ID: "N6", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: recapOpen, Then: func(in In) Decision {
 		n, tell, trig := len(in.Task.Recaps), []string(nil), OpenRecap(in.Task).Trigger
 		if (trig == TriggerSize || trig == TriggerCI) && (in.Facts.Worker.State == RunWorking || in.Facts.Worker.State == RunIdle) {
-			tell = once(in.acts(), key(AskTellStop, n))
+			tell = ensure(in, key(AskTellStop, n))
 		}
 		return say("a recap is open", once(in.acts(), key(AskWake, "recap", n)), tell)(in)
 	}},
@@ -349,7 +417,7 @@ var TaskRows = []Row[In]{
 		tk := key(AskTellDiverged, h)
 		tell := LastAct(in.acts(), tk)
 		if tell == nil || tell.Result != "done" {
-			return say(N7Why(in, false), EnsureRun(in, RoleWorker), once(in.acts(), tk))(in)
+			return say(N7Why(in, false), EnsureRun(in, RoleWorker), ensure(in, tk))(in)
 		}
 		if working(in) || (!in.Facts.Worker.LastTurnEnd.After(tell.At) && in.Now.Sub(tell.At) < checksGrace(in)) {
 			return say(N7Why(in, false), EnsureRun(in, RoleWorker))(in)
@@ -370,7 +438,7 @@ var TaskRows = []Row[In]{
 	// N10: milestone and quota (no worker candidate resolves) come in later slices (design.md 4.2).
 	{ID: "N10", WaitsOn: "a slot", Stage: "queued", When: all(noAttempt, noSlot), Then: say("no slot is free")},
 	{ID: "N11", WaitsOn: "the engine", Stage: "queued", When: noAttempt, Then: func(in In) Decision {
-		return say("no attempt: start one", once(in.acts(), AskNewAttempt))(in)
+		return say("no attempt: start one", ensure(in, AskNewAttempt))(in)
 	}},
 	// N12 has no "no owner override covers H" clause until slice 7.
 	{ID: "N12", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool {
@@ -381,7 +449,7 @@ var TaskRows = []Row[In]{
 			if in.Facts.LinesTimeout {
 				why = fmt.Sprintf("changed-lines read timed out (counts as over the size cap %d)", in.attempt().SizeCap)
 			}
-			return say(why, once(in.acts(), key(AskSizeRecap, len(in.Task.Recaps))))(in)
+			return say(why, ensure(in, key(AskSizeRecap, len(in.Task.Recaps))))(in)
 		}},
 	// N13 has no "no owner override covers H" clause until slice 7.
 	{ID: "N13", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool {
@@ -389,40 +457,40 @@ var TaskRows = []Row[In]{
 	},
 		Then: func(in In) Decision {
 			why := fmt.Sprintf("%d commits failed CI in the last hour (limit %d)", ciFailCount(in), in.Settings.CIFailsPerHour)
-			return say(why, once(in.acts(), key(AskCIRecap, len(in.Task.Recaps))))(in)
+			return say(why, ensure(in, key(AskCIRecap, len(in.Task.Recaps))))(in)
 		}},
 	{ID: "N20", WaitsOn: "the engine", Stage: "working", When: func(in In) bool {
 		return hasAttempt(in) && ((tipAhead(in) && in.Facts.TipMergeOnly) || prHeadAheadMergeOnly(in))
 	},
 		Then: func(in In) Decision {
 			if tipAhead(in) && in.Facts.TipMergeOnly {
-				return say("the tip is ahead of H by merges of the base only: H moves to it, no round", once(in.acts(), key(AskMergeOnly, in.Facts.Tip)))(in)
+				return say("the tip is ahead of H by merges of the base only: H moves to it, no round", ensure(in, key(AskMergeOnly, in.Facts.Tip)))(in)
 			}
-			return say("the PR head is ahead of H by merges of the base only: H moves to it, no round", once(in.acts(), key(AskMergeOnly, in.Facts.PR.Head)))(in)
+			return say("the PR head is ahead of H by merges of the base only: H moves to it, no round", ensure(in, key(AskMergeOnly, in.Facts.PR.Head)))(in)
 		}},
 	{ID: "N22", WaitsOn: "the worker", Stage: "working", When: ladderSays(Fix), Then: func(in In) Decision {
 		r := newestCovering(*in.attempt(), headH(in))
 		return say("the ladder says fix", EnsureRun(in, RoleWorker),
-			once(in.acts(), key(AskTellFindings, r.N)))(in)
+			ensure(in, key(AskTellFindings, r.N)))(in)
 	}},
 	{ID: "N23", WaitsOn: "the worker", Stage: "working", When: all(hasAttempt, anyOf(noReady, tipAhead)), Then: func(in In) Decision {
 		return say("the worker is working", EnsureRun(in, RoleWorker))(in)
 	}},
 	{ID: "N25", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: ladderSays(RecapAnswer), Then: func(in In) Decision {
-		return say("the ladder says recap", once(in.acts(), key(AskOpenRecap, "review")))(in)
+		return say("the ladder says recap", ensure(in, key(AskOpenRecap, "review")))(in)
 	}},
 	{ID: "N26", WaitsOn: "the engine", Stage: "working", When: all(hasAttempt, anyOf(noPR, all(prOpen, prBehindH))), Then: func(in In) Decision {
-		if unanswered(in) { // "no PR" from a failed read is a guess: wait, so the once-only push is not spent
+		if unanswered(in) && !in.probe { // "no PR" from a failed read is a guess: wait, so push is not spent blindly
 			return say("GitHub did not answer: wait for a snapshot")(in)
 		}
-		return say("GitHub does not have H", once(in.acts(), key(AskPushPR, headH(in))))(in)
+		return say("GitHub does not have H", ensure(in, key(AskPushPR, headH(in))))(in)
 	}},
 	{ID: "N29", WaitsOn: "the reviewer", Stage: "working", When: ladderSays(Review), Then: func(in In) Decision {
 		return say("the ladder says review", EnsureRun(in, RoleReviewer))(in)
 	}},
 	{ID: "N32", WaitsOn: "the worker", Stage: "working", When: ciReady(mergeConflict), Then: func(in In) Decision {
 		return say("PR conflicts with the base: tell the worker once to merge the base (never rebase)",
-			EnsureRun(in, RoleWorker), once(in.acts(), key(AskTellConflict, headH(in))))(in)
+			EnsureRun(in, RoleWorker), ensure(in, key(AskTellConflict, headH(in))))(in)
 	}},
 	{ID: "N33", WaitsOn: "CI; then the worker", Stage: "ci", When: ciReady(checksRed), Then: func(in In) Decision {
 		h := headH(in)
@@ -431,7 +499,7 @@ var TaskRows = []Row[In]{
 		}
 		var tells []string
 		for _, run := range ciRuns(in) {
-			tells = append(tells, once(in.acts(), key(AskTellCI, run, h))...)
+			tells = append(tells, ensure(in, key(AskTellCI, run, h))...)
 		}
 		return say("checks red at H: tell the worker once per failing run", EnsureRun(in, RoleWorker), tells)(in)
 	}},
@@ -464,13 +532,8 @@ var TaskRows = []Row[In]{
 			return say("the base branch is red: holding branch updates and merges")(in)
 		}
 		spell := in.Facts.BaseRedSpell
-		tk := key(AskTellBaseRed, spell)
-		var tell []string
-		if !Done(in.acts(), tk) && Count(in.acts(), tk) < baseRedTellTries {
-			tell = []string{tk}
-		}
 		return say("the base branch has been red past main_red_minutes: tell the oldest held task's worker to merge the base and say ready (or land a fix PR directly)",
-			EnsureRun(in, RoleWorker), tell, once(in.acts(), key(AskWake, "base_red_held", spell)))(in)
+			EnsureRun(in, RoleWorker), ensure(in, key(AskTellBaseRed, spell)), once(in.acts(), key(AskWake, "base_red_held", spell)))(in)
 	}},
 	{ID: "N36", WaitsOn: "CI", Stage: "ci", Why: WhyCI, When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown)),
 		Then: func(in In) Decision {
@@ -491,12 +554,9 @@ var TaskRows = []Row[In]{
 	{ID: "N40", WaitsOn: "GitHub", Stage: "ci", Why: WhyCI, When: ciReady(prBehindBase), Then: func(in In) Decision {
 		h := headH(in)
 		uk := key(AskUpdateBranch, h)
-		act := LastAct(in.acts(), uk)
-		if act == nil {
-			return say("PR is behind the base: update branch with a merge commit", []string{uk})(in)
-		}
-		if act.Result == "failed" {
-			return say("branch update failed for H")(in)
+		act := LastAct(sinceRetry(in.acts()), uk)
+		if act == nil || act.Result == "failed" {
+			return say("PR is behind the base: update branch with a merge commit", ensure(in, uk))(in)
 		}
 		if in.Now.Sub(act.At) < checksGrace(in) {
 			return say("branch update asked; waiting for the new head")(in)
@@ -509,7 +569,7 @@ var TaskRows = []Row[In]{
 		When: all(ladderSays(Passed), prOpen, prHeadIsH, tipAtOrBehindH, answered, githubAvail, checksGreen, mergeClean, noReviewRequired, notBehind, notWorking),
 		Then: func(in In) Decision {
 			h := headH(in)
-			return say("passed, green and mergeable at H", once(in.acts(), key(AskAccept, h)), once(in.acts(), key(AskMerge, h)))(in)
+			return say("passed, green and mergeable at H", ensure(in, key(AskAccept, h)), ensure(in, key(AskMerge, h)))(in)
 		}},
 	{ID: "N43", WaitsOn: "the coordinator", Stage: "blocked_or_failed", Then: func(in In) Decision {
 		// Once per stall: H and the facts that left it unmatched.

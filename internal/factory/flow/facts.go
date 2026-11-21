@@ -125,6 +125,8 @@ type Facts struct {
 	// GitHubUnavailable is the project fact raised when GitHub cannot be read
 	// (design.md 7.3); it holds merges (N42) and never marks the repo non-GitHub.
 	GitHubUnavailable bool `json:"github_unavailable,omitempty"`
+	// HCUnavailable is the project fact raised when herdr-core cannot be reached (design.md 7.3).
+	HCUnavailable bool `json:"hc_unavailable,omitempty"`
 	// BaseRed is the project fact from the base observer (design.md 7.3, N38).
 	BaseRed      bool      `json:"base_red,omitempty"`
 	BaseRedSince time.Time `json:"base_red_since,omitempty"`
@@ -138,6 +140,7 @@ type In struct {
 	Settings Settings
 	Facts    Facts
 	Now      time.Time
+	probe    bool
 }
 
 // attempt is the task's current attempt, or nil before the first.

@@ -1400,7 +1400,7 @@ func TestCheckOutcomesRejectsEqualsAndNewline(t *testing.T) {
 }
 
 // TestReportReadyProofCleaningCapsAndPathGuard checks item 5:
-// output excerpts and command are cleaned with cleanRejectWhy; command,
+// output excerpts and command are cleaned with flow.CleanText; command,
 // output_path and artifact are capped at 500 runes; proofHead reads only
 // regular files inside the worktree's .git dir and never blocks on a FIFO.
 func TestReportReadyProofCleaningCapsAndPathGuard(t *testing.T) {
