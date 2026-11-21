@@ -247,8 +247,7 @@ func TestN40HandEditedUpdateHeadNeverMovesH(t *testing.T) {
 }
 
 // TestN40UpdateBranchImmediateFailNoLoop verifies that an immediate failure of
-// update-branch records a failed act without looping, and S2 wakes past
-// stuck_minutes.
+// update-branch records a failed act without looping.
 func TestN40UpdateBranchImmediateFailNoLoop(t *testing.T) {
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)

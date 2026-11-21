@@ -706,7 +706,7 @@ Per-CLI differences that are **data**: base command, fixed environment (Claude C
 | The rest of the argv | `--no-daemon` (its own app server, never a shared one), `--no-alt-screen` (the scrollback `hc read` needs), a read-only sandbox, never an approval prompt, model and effort stated |
 | The owner's own instructions | The run's `CODEX_HOME` is one folder per data dir (`<data_dir>/factory/codex-home`) holding only a link to the owner's `auth.json`, so the reviewer reads none of the owner's global instructions, config or skills. If Codex has replaced that link with a file (a sign-in refresh), the engine never touches it: that round runs on Claude opus and the daemon log names the fix |
 | A repo's own `.codex/config.toml` | Still loads in a trusted folder; no per-run override turns it off without a prompt (O14) |
-| Status | The report tag ends the run: the screen is read every pass, after the last prompt echo, with no wait for idle. Non-empty output moves the run to `working`, so a review with no tag that goes quiet ends via R21–R22 and retries under section 4.8 (`reviewer_retries`), while one that goes idle with no tag wakes the coordinator after `stuck_minutes` until `review_minutes` lands in PR 5a.5 |
+| Status | The report tag ends the run: the screen is read every pass, after the last prompt echo, with no wait for idle. Non-empty output moves the run to `working`, so a review with no tag that goes quiet ends via R21–R22, an idle run with no tag is nudged once then stopped by N29, and a run older than `review_minutes` is stopped by N29, each retrying under section 4.8 (`reviewer_retries`) |
 
 Per-CLI differences that need **code**: pre-setting trust for a worktree, the agy sandbox wrapper for read-only runs, listing models.
 
@@ -788,7 +788,6 @@ These are mechanics: how a thing is done once a row has asked for it. They decid
 | `worker_restarts`, `reviewer_retries` | 3, 2 | 0–10, 0–5 | section 4.8 |
 | `ensure_failures`, `ensure_backoff_minutes` | 3, 1 | 1–10, 1–60 | N5, section 8 |
 | `start_minutes`, `idle_grace_seconds`, `quiet_minutes`, `interrupt_seconds`, `review_minutes` | 2, 20, 20, 90, 45 | 1–15, 5–120, 5–120, 10–600, 10–240 | R11, R18–R22, N29 |
-| `stuck_minutes` | 30 | 5–240 | the reduced S2 fallback row, kept until PR 5a.3 (N5 and section 8 retries) and PR 5a.5 (`review_minutes`) replace it; counted from a failed non-run act or the reviewer going idle with no report tag |
 | `background_job_minutes`, `blocked_minutes` | 30, 10 | 1–240, 1–120 | the worker watch of 4.4, N29, N39; R29 |
 | `coordinator_starts_per_hour`, `coordinator_gap_minutes`, `owner_typing_minutes`, `coordinator_silent_minutes` | 3, 10, 5, 30 | 1–10, 1–60, 1–60, 5–240 | J6, J9 |
 | `rotate_after_hours`, `rotate_after_turns`, `handoff_minutes`, `heartbeat_minutes` | 4, 150, 5, 60 | 1–24, 20–1000, 1–30, 10–600 | J11, J13 |

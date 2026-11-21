@@ -38,6 +38,10 @@ var lockGitTimeout = 15 * time.Second
 // ghTimeout bounds one GitHub executor or snapshot (a push plus gh calls).
 var ghTimeout = time.Minute
 
+// sleepGap is the tick-to-tick gap above which the Mac slept and the gap is
+// subtracted from the engine clock (design.md 2.5, 10.1).
+const sleepGap = 60 * time.Second
+
 // Engine runs the factory loop and handles owner start and stop commands.
 type Engine struct {
 	Paths        Paths
@@ -48,21 +52,40 @@ type Engine struct {
 	Bin          string            // sheepdog binary named in run prompts
 	RunEnv       map[string]string // added to every run's environment (daemon port)
 
-	mu        sync.Mutex
-	wake      chan struct{}
-	prs       map[string]flow.PR  // last PR snapshot per attempt worktree (in memory)
-	errs      map[string]string   // last gh or git error per worktree and kind, logged once per change
-	tips      map[string]tipFacts // last git reading per worktree (in memory)
-	waits     map[string]string   // last N9/N10/N38 wait reason per project/task, logged once per change
-	ghUnavail map[string]bool     // project fact github_unavailable (design.md 7.3)
-	hcUnavail map[string]bool     // project fact hc_unavailable (design.md 7.3)
+	mu          sync.Mutex
+	wake        chan struct{}
+	lastTick    time.Time           // last raw wall-clock tick (design.md 2.5)
+	sleepOffset time.Duration       // subtracted sleep gaps over sleepGap
+	prs         map[string]flow.PR  // last PR snapshot per attempt worktree (in memory)
+	errs        map[string]string   // last gh or git error per worktree and kind, logged once per change
+	tips        map[string]tipFacts // last git reading per worktree (in memory)
+	waits       map[string]string   // last N9/N10/N38 wait reason per project/task, logged once per change
+	ghUnavail   map[string]bool     // project fact github_unavailable (design.md 7.3)
+	hcUnavail   map[string]bool     // project fact hc_unavailable (design.md 7.3)
 }
 
-func (e *Engine) now() time.Time {
+func (e *Engine) rawNow() time.Time {
 	if e.Now != nil {
 		return e.Now()
 	}
 	return time.Now()
+}
+
+func (e *Engine) now() time.Time {
+	return e.rawNow().Add(-e.sleepOffset)
+}
+
+// tickClock subtracts any gap over 60 s between ticks (the Mac slept, design.md 2.5).
+func (e *Engine) tickClock() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	raw := e.rawNow()
+	if !e.lastTick.IsZero() {
+		if gap := raw.Sub(e.lastTick); gap > sleepGap {
+			e.sleepOffset += gap
+		}
+	}
+	e.lastTick = raw
 }
 
 // tipFacts are N12's and N20's git facts for one tip and H: the merge base,
@@ -197,7 +220,7 @@ func (e *Engine) stopRuns(ctx context.Context, runs []string) error {
 
 func dropFailed(acts []flow.Act) []flow.Act {
 	return slices.DeleteFunc(acts, func(a flow.Act) bool {
-		return a.Result == "failed" || a.Key == flow.AskWake+"@worker_failed" || strings.HasPrefix(a.Key, flow.AskWake+"@reviewer_failed@") || strings.HasPrefix(a.Key, flow.AskWake+"@stuck@") || strings.HasPrefix(a.Key, flow.AskWake+"@failed@")
+		return a.Result == "failed" || a.Key == flow.AskWake+"@worker_failed" || strings.HasPrefix(a.Key, flow.AskWake+"@reviewer_failed@") || strings.HasPrefix(a.Key, flow.AskWake+"@failed@")
 	})
 }
 
@@ -231,6 +254,7 @@ func (e *Engine) Run(ctx context.Context) {
 	t := time.NewTicker(cmp.Or(e.PassInterval, flow.PassInterval))
 	defer t.Stop()
 	for trim := true; ; trim = false {
+		e.tickClock()
 		for _, ent := range e.projectDirs() {
 			if ctx.Err() == nil && ent.IsDir() {
 				e.passProject(ctx, ent.Name(), trim)
@@ -443,10 +467,13 @@ var taskExecutors = map[string]taskExec{
 	flow.AskStartWorker:  (*Engine).execStartWorker,
 	flow.AskPushPR:       (*Engine).execPushPR,
 	flow.AskStartReview:  (*Engine).execStartReviewer,
+	flow.AskNudgeReview:  (*Engine).execNudgeReviewer,
+	flow.AskStopReview:   (*Engine).execStopReviewer,
 	flow.AskTellFindings: (*Engine).execTellFindings,
 	flow.AskOpenRecap:    (*Engine).execOpenRecap,
 	flow.AskSizeRecap:    (*Engine).execSizeRecap,
 	flow.AskCIRecap:      (*Engine).execCIRecap,
+	flow.AskTimeRecap:    (*Engine).execTimeRecap,
 	flow.AskTellStop:     (*Engine).execTellStop,
 	flow.AskTellDiverged: (*Engine).execTellDiverged,
 	flow.AskTellConflict: (*Engine).execTellConflict,
@@ -479,7 +506,7 @@ func actOutage(verb string, f flow.Facts) bool {
 	switch verb {
 	case flow.AskNewAttempt, flow.AskPushPR, flow.AskRerunCI, flow.AskDispatchCI, flow.AskUpdateBranch, flow.AskMerge:
 		return f.GitHubUnavailable
-	case flow.AskStartWorker, flow.AskStartReview, flow.AskTellFindings, flow.AskTellStop, flow.AskTellDiverged, flow.AskTellConflict, flow.AskTellCI, flow.AskTellBaseRed, flow.AskStopRuns:
+	case flow.AskStartWorker, flow.AskStartReview, flow.AskNudgeReview, flow.AskStopReview, flow.AskTellFindings, flow.AskTellStop, flow.AskTellDiverged, flow.AskTellConflict, flow.AskTellCI, flow.AskTellBaseRed, flow.AskStopRuns:
 		return f.HCUnavailable
 	case flow.AskCleanup:
 		return f.GitHubUnavailable || f.HCUnavailable
@@ -691,6 +718,10 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 		model, effort = res.Model, res.Effort
 	}
 	adopt := prev == nil || prev.State != flow.PhaseEnded
+	if !adopt && prev != nil && prev.Working > 0 {
+		a.Working += prev.Working
+		prev.Working = 0
+	}
 	sid, resume, bin := world.NewUUID(), mode == flow.ContinueResume && prev != nil && prev.SessionID != "", cmp.Or(e.Bin, "sheepdog")
 	if resume || (adopt && prev != nil && prev.SessionID != "") {
 		sid = prev.SessionID
@@ -913,6 +944,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	err = e.acceptVerdictLocked(ctx, id, s, ti, rd)
 	var ref *Refusal
 	if errors.As(err, &ref) {
+		facts.Reviewer.Refused = true
 		if e.HC != nil && a.Review != nil && a.Review.RunID != "" && !a.Review.RefusalSent {
 			msg := fmt.Sprintf("Your verdict was refused (%s). Fix it and end with the report tag again.", ref.Why)
 			sctx, scancel := context.WithTimeout(ctx, lockGitTimeout)
@@ -1154,6 +1186,49 @@ func (e *Engine) execCIRecap(_ context.Context, _ string, s *flow.State, ti int,
 	return openRecap(&s.Tasks[ti], flow.TriggerCI, flow.SizeRecapAllowed(s.Tasks[ti], s.Settings)), false, nil
 }
 
+// execTimeRecap is N14: open a time recap with the choices it allows now.
+func (e *Engine) execTimeRecap(_ context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	return openRecap(&s.Tasks[ti], flow.TriggerTime, flow.SizeRecapAllowed(s.Tasks[ti], s.Settings)), false, nil
+}
+
+// execNudgeReviewer is N29: nudge an idle reviewer with no report tag once.
+func (e *Engine) execNudgeReviewer(ctx context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	a := flow.OpenAttempt(s.Tasks[ti])
+	if a == nil || a.Review == nil || a.Review.Run == nil || a.Review.RunID == "" {
+		return "reviewer already gone", false, nil
+	}
+	msg := fmt.Sprintf("You went idle with no report tag. End your reply with `<report>{\"code\":%q,\"round\":%d,\"head\":%q,\"verdict\":\"pass\"|\"changes\",\"majors\":N}</report>`.", a.Review.Code, a.Review.Round, a.Review.Head)
+	next, _, dec := flow.StepRun(*a.Review.Run, flow.RunEvent{Kind: flow.EvDeliver, Msg: msg}, s.Settings, e.now())
+	for _, act := range dec.Asked {
+		if err := world.ActRun(ctx, e.HC, next, act, msg); err != nil {
+			return "", false, err
+		}
+	}
+	*a.Review.Run = next
+	return fmt.Sprintf("nudged reviewer %s for report tag (round %d)", a.Review.RunID, a.Review.Round), false, nil
+}
+
+// execStopReviewer is N29: stop a reviewer that stayed idle with no report
+// after its nudge, or ran past review_minutes; ending as stuck lets 4.8 retry.
+func (e *Engine) execStopReviewer(ctx context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	a := flow.OpenAttempt(s.Tasks[ti])
+	if a == nil || a.Review == nil {
+		return "reviewer already gone", false, nil
+	}
+	runID := a.Review.RunID
+	if runID != "" {
+		if err := e.stopRuns(ctx, []string{runID}); err != nil {
+			return "", false, err
+		}
+	}
+	if a.Review.Run == nil {
+		a.Review.Run = &flow.RunRecord{Role: flow.RoleReviewer}
+	}
+	a.Review.Run.State, a.Review.Run.Result, a.Review.Run.EndedAt = flow.PhaseEnded, flow.EndStuck, e.now()
+	a.Review.RunID, a.Review.RunTokenHash = "", ""
+	return fmt.Sprintf("stopped reviewer %s (round %d)", runID, a.Review.Round), false, nil
+}
+
 func openRecap(t *flow.Task, trigger string, allowed []string) string {
 	if flow.OpenRecap(*t) == nil {
 		t.Recaps = append(t.Recaps, flow.Recap{Trigger: trigger, Allowed: allowed})
@@ -1161,12 +1236,16 @@ func openRecap(t *flow.Task, trigger string, allowed []string) string {
 	return fmt.Sprintf("opened recap (trigger %s, allowed %s)", trigger, strings.Join(allowed, ", "))
 }
 
-// execTellStop is N6 for a size or ci recap: the worker is told once to stop.
+// execTellStop is N6 for a size, ci or time recap: the worker is told once to stop.
 func (e *Engine) execTellStop(ctx context.Context, id string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
 	t, a := s.Tasks[ti], flow.OpenAttempt(s.Tasks[ti])
 	if rc := flow.OpenRecap(t); rc != nil && rc.Trigger == flow.TriggerCI {
 		msg := fmt.Sprintf("Task %s hit %d failing CI commits in the last hour. Stop now and write nothing more; the coordinator decides how the task goes on.", t.ID, s.Settings.CIFailsPerHour)
 		return "told worker to stop at the CI failure limit", false, e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, true)
+	}
+	if rc := flow.OpenRecap(t); rc != nil && rc.Trigger == flow.TriggerTime {
+		msg := fmt.Sprintf("Task %s hit its %dh working time limit. Stop now and write nothing more; the coordinator decides how the task goes on.", t.ID, s.Settings.BuildHours)
+		return "told worker to stop at the build time limit", false, e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, true)
 	}
 	msg := fmt.Sprintf("Task %s is over its size cap: %d changed lines, cap %d. Stop now and write nothing more; the coordinator decides how the task goes on.", t.ID, f.Lines, a.SizeCap)
 	if f.LinesTimeout {
@@ -1290,7 +1369,7 @@ func (e *Engine) observeBaseLocked(ctx context.Context, id string, s *flow.State
 	if e.logOnce("factory.base_error", id, id, err); err != nil || !res.Known || res.Red == wasRed {
 		return
 	}
-	now := time.Now()
+	now := e.now()
 	kind, dec, why := "base_green", "base turned green", fmt.Sprintf("base branch %s is green again (%s, run %d)", res.Branch, res.HeadSHA[:min(len(res.HeadSHA), 7)], res.ID)
 	if res.Red {
 		s.Project.Base = &flow.BaseState{Red: true, Since: now, SpellID: res.HeadSHA}
@@ -1367,7 +1446,7 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 		if p.Head != "" {
 			p.HeadSince = last.HeadSince
 			if p.Head != last.Head || p.HeadSince.IsZero() {
-				p.HeadSince = time.Now()
+				p.HeadSince = e.now()
 			}
 			h := flow.H(a)
 			p.HeadRel, err = world.Relation(gctx, a.Worktree, h, p.Head)
@@ -1398,7 +1477,7 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 	oa := &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
 	if p.Answered && p.State == flow.PROpen && p.Head != "" && p.Checks == flow.ChecksRed &&
 		!slices.ContainsFunc(oa.CIFails, func(f flow.CIFail) bool { return f.Head == p.Head }) {
-		oa.CIFails = append(oa.CIFails, flow.CIFail{Head: p.Head, At: time.Now()})
+		oa.CIFails = append(oa.CIFails, flow.CIFail{Head: p.Head, At: e.now()})
 		ciFailAdded = true
 	}
 	if (ciFailAdded || !reflect.DeepEqual(p, last)) && ctx.Err() == nil {

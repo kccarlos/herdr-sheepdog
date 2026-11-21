@@ -160,6 +160,7 @@ const (
 	TriggerReview  = "review"
 	TriggerSize    = "size"
 	TriggerCI      = "ci"
+	TriggerTime    = "time"
 )
 
 // SizeRecapAllowed is a size recap's choices: continue only while the task
@@ -223,6 +224,8 @@ type Attempt struct {
 	MergeOnly []Advance `json:"merge_only,omitempty"`
 	// CIFails records distinct commits of this attempt seen with a failing check run (N13).
 	CIFails []CIFail `json:"ci_fails,omitempty"`
+	// Working is working-state time accrued by earlier worker runs of this attempt since the last recap decision (N14).
+	Working time.Duration `json:"working,omitempty"`
 }
 
 // Advance is one merge_only move of H, observed with git when it was made.
@@ -408,7 +411,8 @@ func actFailures(acts []Act, key string) (last, cause *Act, tries, counted int, 
 }
 
 func doneActs(acts []Act, key string) []Act {
-	if strings.HasPrefix(key, AskMerge+"@") || strings.HasPrefix(key, AskUpdateBranch+"@") || strings.HasPrefix(key, AskTellDiverged+"@") {
+	if strings.HasPrefix(key, AskMerge+"@") || strings.HasPrefix(key, AskUpdateBranch+"@") || strings.HasPrefix(key, AskTellDiverged+"@") ||
+		strings.HasPrefix(key, AskNudgeReview+"@") || strings.HasPrefix(key, AskStopReview+"@") {
 		return SinceRetry(acts)
 	}
 	return acts

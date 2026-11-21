@@ -14,10 +14,13 @@ const (
 	AskNewAttempt   = "new_attempt"
 	AskStartWorker  = "start_worker"
 	AskStartReview  = "start_reviewer"
+	AskNudgeReview  = "nudge_reviewer"
+	AskStopReview   = "stop_reviewer"
 	AskTellFindings = "tell_worker_findings"
 	AskOpenRecap    = "open_recap"
 	AskSizeRecap    = "open_size_recap"
 	AskCIRecap      = "open_ci_recap"
+	AskTimeRecap    = "open_time_recap"
 	AskTellStop     = "tell_worker_stop"
 	AskTellDiverged = "tell_worker_diverged"
 	AskTellConflict = "tell_worker_conflict"
@@ -301,22 +304,6 @@ func join(asked [][]string) []string {
 	return out
 }
 
-// stuckKey backs the reduced S2 fallback: an idle no-tag reviewer until PR
-// 5a.5 (review_minutes). It returns "" once its wake act exists so S2 lets go.
-func stuckKey(in In) string {
-	if in.Task.Parked || prClosed(in) {
-		return ""
-	}
-	d, h := time.Duration(in.Settings.StuckMinutes)*time.Minute, headH(in)
-	if a := in.attempt(); !ended(in) && !prMerged(in) && !recapOpen(in) && ladderSays(Review)(in) &&
-		!noPR(in) && (!prOpen(in) || !prBehindH(in)) && in.Facts.Reviewer.State == RunIdle &&
-		!in.Facts.Reviewer.LastTurnEnd.IsZero() && in.Now.Sub(in.Facts.Reviewer.LastTurnEnd) >= d &&
-		Count(in.acts(), key(AskWake, "stuck", "reviewer_idle", nextRound(*a), h)) == 0 {
-		return key(AskWake, "stuck", "reviewer_idle", nextRound(*a), h)
-	}
-	return ""
-}
-
 var rowsBelowN5 []Row[In]
 
 func init() {
@@ -359,11 +346,6 @@ func n5Why(taskID string, acts []Act, fk string) string {
 // TaskRows is the task table in design.md section 4's order, using EnsureRun
 // (4.8) wherever a row needs a worker or reviewer run.
 var TaskRows = []Row[In]{
-	// Reduced S2 fallback until PR 5a.5 (review_minutes).
-	{ID: "S2", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return len(once(in.acts(), stuckKey(in))) > 0 }, Then: func(in In) Decision {
-		k := stuckKey(in)
-		return say("stuck past stuck_minutes: "+k, once(in.acts(), k))(in)
-	}},
 	{ID: "N1", WaitsOn: "nobody", Stage: "done", When: ended, Then: func(in In) Decision {
 		asked := ensure(in, AskCleanup)
 		if Exhausted(in.acts(), AskCleanup, in.Settings) {
@@ -398,11 +380,11 @@ var TaskRows = []Row[In]{
 		fk := n5Key(in)
 		return say(n5Why(in.Task.ID, in.acts(), fk), n5Wake(in.acts(), fk))(in)
 	}},
-	// N6 tells a live worker of a size or ci recap once to stop (it has no
+	// N6 tells a live worker of a size, ci or time recap once to stop (it has no
 	// recap-written report yet, so nothing waits for one).
 	{ID: "N6", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: recapOpen, Then: func(in In) Decision {
 		n, tell, trig := len(in.Task.Recaps), []string(nil), OpenRecap(in.Task).Trigger
-		if (trig == TriggerSize || trig == TriggerCI) && (in.Facts.Worker.State == RunWorking || in.Facts.Worker.State == RunIdle) {
+		if (trig == TriggerSize || trig == TriggerCI || trig == TriggerTime) && (in.Facts.Worker.State == RunWorking || in.Facts.Worker.State == RunIdle) {
 			tell = ensure(in, key(AskTellStop, n))
 		}
 		return say("a recap is open", once(in.acts(), key(AskWake, "recap", n)), tell)(in)
@@ -460,6 +442,14 @@ var TaskRows = []Row[In]{
 			why := fmt.Sprintf("%d commits failed CI in the last hour (limit %d)", ciFailCount(in), in.Settings.CIFailsPerHour)
 			return say(why, ensure(in, key(AskCIRecap, len(in.Task.Recaps))))(in)
 		}},
+	// N14 has no "no owner override covers H" clause until slice 7.
+	{ID: "N14", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool {
+		return hasAttempt(in) && !ladderSays(Passed)(in) && in.Settings.BuildHours > 0 && WorkingTime(in.Task, in.Now) >= time.Duration(in.Settings.BuildHours)*time.Hour
+	},
+		Then: func(in In) Decision {
+			why := fmt.Sprintf("worker spent %s working (limit %dh)", WorkingTime(in.Task, in.Now).Truncate(time.Minute), in.Settings.BuildHours)
+			return say(why, ensure(in, key(AskTimeRecap, len(in.Task.Recaps))))(in)
+		}},
 	{ID: "N20", WaitsOn: "the engine", Stage: "working", When: func(in In) bool {
 		return hasAttempt(in) && ((tipAhead(in) && in.Facts.TipMergeOnly) || prHeadAheadMergeOnly(in))
 	},
@@ -487,7 +477,7 @@ var TaskRows = []Row[In]{
 		return say("GitHub does not have H", ensure(in, key(AskPushPR, headH(in))))(in)
 	}},
 	{ID: "N29", WaitsOn: "the reviewer", Stage: "working", When: ladderSays(Review), Then: func(in In) Decision {
-		return say("the ladder says review", EnsureRun(in, RoleReviewer))(in)
+		return say("the ladder says review", n29Asks(in))(in)
 	}},
 	{ID: "N32", WaitsOn: "the worker", Stage: "working", When: ciReady(mergeConflict), Then: func(in In) Decision {
 		return say("PR conflicts with the base: tell the worker once to merge the base (never rebase)",
@@ -640,6 +630,58 @@ func RecentCIFails(t Task, now time.Time) []CIFail {
 }
 
 func ciFailCount(in In) int { return len(RecentCIFails(in.Task, in.Now)) }
+
+// WorkingTime returns how long the open attempt's worker run has spent in
+// PhaseWorking since the last recap decision (design.md 4.3, N14).
+func WorkingTime(t Task, now time.Time) time.Duration {
+	a := OpenAttempt(t)
+	if a == nil {
+		return 0
+	}
+	d := a.Working
+	if a.Run != nil {
+		d += a.Run.Working
+		if a.Run.State == PhaseWorking && !a.Run.WorkingSince.IsZero() {
+			since := a.Run.WorkingSince
+			for _, r := range t.Recaps {
+				if r.Decided != nil && r.Decided.At.After(since) {
+					since = r.Decided.At
+				}
+			}
+			if now.After(since) {
+				d += now.Sub(since)
+			}
+		}
+	}
+	return d
+}
+
+// n29Asks enforces N29's reviewer limits: stop a run older than review_minutes;
+// an idle reviewer with no report and no background job younger than
+// background_job_minutes gets one nudge, then is stopped so 4.8 retries.
+func n29Asks(in In) []string {
+	r, a, h := in.Facts.Reviewer, in.attempt(), headH(in)
+	if r.State != RunWorking && r.State != RunIdle {
+		return EnsureRun(in, RoleReviewer)
+	}
+	round, tries := nextRound(*a), 0
+	if a.Review != nil && a.Review.Round == round && Covers(*a, a.Review.Head, h) {
+		tries = a.Review.Retries
+	}
+	stopKey := key(AskStopReview, round, tries, h)
+	if !r.StartedAt.IsZero() && in.Now.Sub(r.StartedAt) >= time.Duration(in.Settings.ReviewMinutes)*time.Minute {
+		return ensure(in, stopKey)
+	}
+	youngBg := !r.BgJobAt.IsZero() && in.Now.Sub(r.BgJobAt) < time.Duration(in.Settings.BackgroundJobMinutes)*time.Minute
+	if r.State == RunIdle && !r.Refused && !youngBg {
+		nudgeKey := key(AskNudgeReview, round, tries, h)
+		if !Done(SinceRetry(in.acts()), nudgeKey) {
+			return ensure(in, nudgeKey)
+		}
+		return ensure(in, stopKey)
+	}
+	return nil
+}
 
 // ciRuns are the failing checks' run ids, sorted; "none" for a check
 // with no run (a status, or no run in its URL).

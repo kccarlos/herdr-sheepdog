@@ -25,7 +25,8 @@ const (
 type RunRecord struct {
 	ID, Address, Role, CLI, SessionID, State, Result, Screen, ScreenHash, Status, BlockedKind, Question, Reason string
 	CreatedMS, Turn                                                                                             uint64
-	StartedAt, EndedAt, StatusSince, LastActivity, LastTurnEnd, BlockedSince, InterruptedAt                     time.Time
+	StartedAt, EndedAt, StatusSince, LastActivity, LastTurnEnd, BlockedSince, InterruptedAt, WorkingSince       time.Time
+	Working                                                                                                     time.Duration
 	StatusReported, Resumable, Resumed                                                                          bool
 	ScreensAnswered, Held                                                                                       []string
 }
@@ -35,7 +36,7 @@ func (r *RunRecord) TaskRun() Run {
 	if r == nil || r.State == "" {
 		return Run{}
 	}
-	return Run{State: cmp.Or(map[string]RunState{PhaseEnded: RunGone, PhaseIdle: RunIdle}[r.State], RunWorking), LastTurnEnd: r.LastTurnEnd}
+	return Run{State: cmp.Or(map[string]RunState{PhaseEnded: RunGone, PhaseIdle: RunIdle}[r.State], RunWorking), LastTurnEnd: r.LastTurnEnd, StartedAt: r.StartedAt}
 }
 
 // RunEvent is one input to the run table reported by world or the engine.
@@ -138,6 +139,7 @@ var RunRows = []Row[RunIn]{
 
 // StepRun runs FirstMatch over RunRows and returns the updated RunRecord, matched row and decision.
 func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, Row[RunIn], Decision) {
+	prevState := rec.State
 	rec.Held, rec.ScreensAnswered = slices.Clone(rec.Held), slices.Clone(rec.ScreensAnswered)
 	r, d := FirstMatch(RunRows, RunIn{R: rec, E: ev, S: s, Now: now})
 	if ev.ScreenHash != "" && rec.State != PhaseEnded {
@@ -193,6 +195,14 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 		rec.Held = append(rec.Held, ev.Msg)
 	case r.ID == "R33":
 		rec.Reason = ev.Reason
+	}
+	if prevState != PhaseWorking && rec.State == PhaseWorking {
+		rec.WorkingSince = now
+	} else if prevState == PhaseWorking && rec.State != PhaseWorking {
+		if !rec.WorkingSince.IsZero() && now.After(rec.WorkingSince) {
+			rec.Working += now.Sub(rec.WorkingSince)
+		}
+		rec.WorkingSince = time.Time{}
 	}
 	return rec, r, d
 }

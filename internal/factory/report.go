@@ -790,7 +790,7 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 	if err != nil {
 		return err
 	}
-	now := time.Now()
+	now := e.now()
 	if choice == "drop" {
 		if len(req.Children) > 0 {
 			return e.refuse(id, "invalid_report", "drop does not take --child tasks.")
@@ -835,6 +835,13 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		dec := "continue"
 		if rc.Trigger == flow.TriggerSize {
 			a.SizeCap, dec = newCap, fmt.Sprintf("continue; size cap %d%s", newCap, note)
+		}
+		a.Working = 0
+		if a.Run != nil {
+			a.Run.Working = 0
+			if a.Run.State == flow.PhaseWorking {
+				a.Run.WorkingSince = now
+			}
 		}
 		rc.Decided = &flow.RecapDecision{Choice: choice, Why: why, At: now}
 		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why},

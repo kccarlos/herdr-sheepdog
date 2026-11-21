@@ -56,8 +56,8 @@ func TestStateRoundTrip(t *testing.T) {
 	}
 }
 
-// TestLoadStateFillsNewSettings: a state.json written before stuck_minutes
-// existed loads it at its default and keeps the settings it has.
+// TestLoadStateFillsNewSettings: a state.json written before newer settings
+// existed loads them at their defaults and keeps the settings it has.
 func TestLoadStateFillsNewSettings(t *testing.T) {
 	path := Paths{DataDir: t.TempDir()}.State("p1")
 	if err := writeAtomic(path, []byte(`{"seq":3,"settings":{"review_rounds":1,"checks_grace_minutes":9}}`)); err != nil {
