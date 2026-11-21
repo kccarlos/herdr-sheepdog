@@ -193,11 +193,11 @@ func TestPushAndOpenPROnceThenAdopts(t *testing.T) {
 	}
 
 	// Before: no PR is an answer, not a failure.
-	if p, _, err := PRSnapshot(ctx, repo, "task/t1-x", 0); err != nil || !p.Answered || p.State != flow.PRNone {
+	if p, _, err := fixtureGit(t).PRSnapshot(ctx, repo, "task/t1-x", 0); err != nil || !p.Answered || p.State != flow.PRNone {
 		t.Fatalf("snapshot before PR = %+v, %v", p, err)
 	}
 	for i := range 2 {
-		n, err := PushAndOpenPR(ctx, repo, "task/t1-x", c1, "feat: x", "Brief.\n\nOpened by the sheepdog factory.")
+		n, err := fixtureGit(t).PushAndOpenPR(ctx, repo, "task/t1-x", c1, "feat: x", "Brief.\n\nOpened by the sheepdog factory.")
 		if err != nil || n != 7 {
 			t.Fatalf("call %d: PushAndOpenPR = %d, %v", i+1, n, err)
 		}
@@ -209,14 +209,14 @@ func TestPushAndOpenPROnceThenAdopts(t *testing.T) {
 	if len(creates) != 1 || len(ghCalls(t, gh, "pr list")) != 2 || !strings.Contains(creates[0], "--repo acme/demo --head task/t1-x --base main --title feat: x --body Brief.") {
 		t.Fatalf("gh calls:\n%s", strings.Join(ghCalls(t, gh, ""), "\n"))
 	}
-	p, _, err := PRSnapshot(ctx, repo, "task/t1-x", 7)
+	p, _, err := fixtureGit(t).PRSnapshot(ctx, repo, "task/t1-x", 7)
 	if err != nil || !reflect.DeepEqual(p, flow.PR{Answered: true, Number: 7, State: flow.PROpen, Head: c1, Mergeable: flow.MergeableUnknown, Checks: flow.ChecksAbsent}) {
 		t.Fatalf("snapshot = %+v, %v", p, err)
 	}
 	if views := ghCalls(t, gh, "pr view"); !strings.Contains(views[len(views)-1], "pr view 7 --repo acme/demo --json "+prViewFields) {
 		t.Fatalf("pr view argv = %q", views)
 	}
-	if rel, err := Relation(ctx, repo, c1, runGit(t, repo, "rev-parse", "main")); err != nil || rel != flow.RelBehind {
+	if rel, err := fixtureGit(t).Relation(ctx, repo, c1, runGit(t, repo, "rev-parse", "main")); err != nil || rel != flow.RelBehind {
 		t.Fatalf("Relation(main vs c1) = %s, %v", rel, err)
 	}
 
@@ -227,7 +227,7 @@ func TestPushAndOpenPROnceThenAdopts(t *testing.T) {
 	runGit(t, repo, "commit", "--allow-empty", "--amend", "-m", "feat: theirs")
 	runGit(t, repo, "push", "origin", "HEAD:refs/heads/task/t2") // someone else's commit
 	theirs := runGit(t, repo, "rev-parse", "HEAD")
-	if _, err := PushAndOpenPR(ctx, repo, "task/t2", mine, "feat: t2", "b"); err == nil {
+	if _, err := fixtureGit(t).PushAndOpenPR(ctx, repo, "task/t2", mine, "feat: t2", "b"); err == nil {
 		t.Fatal("push over a diverged remote branch succeeded")
 	}
 	if got := runGit(t, bare, "rev-parse", "refs/heads/task/t2"); got != theirs {
@@ -241,7 +241,7 @@ func TestPushAndOpenPROnceThenAdopts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(gh, "fail"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if p, _, err := PRSnapshot(ctx, repo, "task/t1-x", 7); err == nil || p.Answered {
+	if p, _, err := fixtureGit(t).PRSnapshot(ctx, repo, "task/t1-x", 7); err == nil || p.Answered {
 		t.Fatalf("failed gh call gave %+v, %v", p, err)
 	}
 }
@@ -251,7 +251,7 @@ func TestGHRepoIsRequired(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init")
 	runGit(t, repo, "remote", "add", "origin", "/srv/git/demo.git")
-	if _, _, err := PRSnapshot(context.Background(), repo, "b", 0); err == nil || !strings.Contains(err.Error(), "not a github.com repo") {
+	if _, _, err := fixtureGit(t).PRSnapshot(context.Background(), repo, "b", 0); err == nil || !strings.Contains(err.Error(), "not a github.com repo") {
 		t.Fatalf("PRSnapshot without a GitHub remote: %v", err)
 	}
 }
@@ -278,7 +278,7 @@ func TestGHRepoHosts(t *testing.T) {
 		repo := t.TempDir()
 		runGit(t, repo, "init")
 		runGit(t, repo, "remote", "add", "origin", url)
-		got, err := ghRepo(context.Background(), repo)
+		got, err := fixtureGit(t).ghRepo(context.Background(), repo)
 		if got != want || (err == nil) != (want != "") {
 			t.Errorf("ghRepo(%s) = %q, %v; want %q", url, got, err, want)
 		}
@@ -304,7 +304,7 @@ func TestPushAndOpenPRRefusesOtherPRs(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(gh, "view.json"), []byte(`{"number":7,`+pr+`}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if n, err := PushAndOpenPR(ctx, repo, "task/t1-x", c1, "feat: x", "b"); err == nil || !strings.Contains(err.Error(), "no second PR") {
+		if n, err := fixtureGit(t).PushAndOpenPR(ctx, repo, "task/t1-x", c1, "feat: x", "b"); err == nil || !strings.Contains(err.Error(), "no second PR") {
 			t.Errorf("%s: PushAndOpenPR = %d, %v; want refused", name, n, err)
 		}
 	}
@@ -318,7 +318,7 @@ func TestPushAndOpenPRRefusesOtherPRs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(gh, "view.json"), []byte(`{"number":7,`+lag+`}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := PushAndOpenPR(ctx, repo, "task/t1-x", c1, "feat: x", "b"); err != nil || n != 7 {
+	if n, err := fixtureGit(t).PushAndOpenPR(ctx, repo, "task/t1-x", c1, "feat: x", "b"); err != nil || n != 7 {
 		t.Fatalf("lagging head: PushAndOpenPR = %d, %v; want PR #7 adopted", n, err)
 	}
 	if creates := ghCalls(t, gh, "pr create"); len(creates) != 0 {
@@ -366,7 +366,7 @@ func TestPRSnapshotS06Classes(t *testing.T) {
 			if c.annotations != "" {
 				copySnap(t, c.annotations, filepath.Join(gh, "annotations.json"))
 			}
-			p, warn, err := PRSnapshot(ctx, repo, "s06/"+c.name, 0)
+			p, warn, err := fixtureGit(t).PRSnapshot(ctx, repo, "s06/"+c.name, 0)
 			if err != nil || warn != nil {
 				t.Fatalf("PRSnapshot: %v, %v", err, warn)
 			}
@@ -394,7 +394,7 @@ func TestPRSnapshotDeniedFallbackAndUnreadable(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Fallback to REST check-runs succeeds.
-	p, _, err := PRSnapshot(ctx, repo, "s06/green", 0)
+	p, _, err := fixtureGit(t).PRSnapshot(ctx, repo, "s06/green", 0)
 	if err != nil || !p.Answered || p.Checks != flow.ChecksGreen {
 		t.Fatalf("fallback snapshot = %+v, %v; want answered green", p, err)
 	}
@@ -405,7 +405,7 @@ func TestPRSnapshotDeniedFallbackAndUnreadable(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(gh, "check_runs_denied"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	p, _, err = PRSnapshot(ctx, repo, "s06/green", 0)
+	p, _, err = fixtureGit(t).PRSnapshot(ctx, repo, "s06/green", 0)
 	if err == nil || p.Answered || p.Checks != flow.ChecksUnreadable {
 		t.Fatalf("both denied = %+v, %v; want unreadable + err", p, err)
 	}
@@ -419,13 +419,13 @@ func TestPRSnapshotBehindAndReviewRequired(t *testing.T) {
 	gh := installFakeGH(t)
 	copySnap(t, "behind-before.json", filepath.Join(gh, "view.json"))
 	copySnap(t, "behind-before.compare.json", filepath.Join(gh, "compare.json"))
-	p, _, err := PRSnapshot(ctx, repo, "s06/behind", 0)
+	p, _, err := fixtureGit(t).PRSnapshot(ctx, repo, "s06/behind", 0)
 	if err != nil || p.Behind || p.ReviewRequired {
 		t.Fatalf("before mover: %+v, %v; want Behind=false ReviewRequired=false", p, err)
 	}
 	copySnap(t, "behind.json", filepath.Join(gh, "view.json"))
 	copySnap(t, "behind.compare.json", filepath.Join(gh, "compare.json"))
-	p, _, err = PRSnapshot(ctx, repo, "s06/behind", 0)
+	p, _, err = fixtureGit(t).PRSnapshot(ctx, repo, "s06/behind", 0)
 	if err != nil || !p.Behind || p.Checks != flow.ChecksGreen {
 		t.Fatalf("after mover: %+v, %v; want Behind=true green", p, err)
 	}
@@ -441,13 +441,13 @@ func TestPRSnapshotBehindAndReviewRequired(t *testing.T) {
 	}
 	writeGH(t, gh, "view.json", strings.Replace(string(raw), `"baseRefName": "main"`, `"baseRefName": "release/1.0"`, 1))
 	// A PR on another base than origin/HEAD is treated as not ours (PRNone).
-	if pOther, _, err := PRSnapshot(ctx, repo, "s06/behind", 0); err != nil || !pOther.Answered || pOther.State != flow.PRNone {
+	if pOther, _, err := fixtureGit(t).PRSnapshot(ctx, repo, "s06/behind", 0); err != nil || !pOther.Answered || pOther.State != flow.PRNone {
 		t.Fatalf("other-base PR = %+v, %v; want answered PRNone", pOther, err)
 	}
 	// When the project base itself is release/1.0, compare keeps its slash raw.
 	runGit(t, repo, "update-ref", "refs/remotes/origin/release/1.0", "refs/remotes/origin/main")
 	runGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/release/1.0")
-	if _, _, err := PRSnapshot(ctx, repo, "s06/behind", 0); err != nil {
+	if _, _, err := fixtureGit(t).PRSnapshot(ctx, repo, "s06/behind", 0); err != nil {
 		t.Fatal(err)
 	}
 	runGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
@@ -463,7 +463,7 @@ func TestPRSnapshotBehindAndReviewRequired(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(gh, "view.json"), []byte(rev), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	p, _, err = PRSnapshot(ctx, repo, "s06/review", 0)
+	p, _, err = fixtureGit(t).PRSnapshot(ctx, repo, "s06/review", 0)
 	if err != nil || !p.ReviewRequired {
 		t.Fatalf("review_required: %+v, %v; want ReviewRequired=true", p, err)
 	}
@@ -481,14 +481,14 @@ func TestPRSnapshotNetworkFailureNotNonGitHub(t *testing.T) {
 	if err := os.WriteFile(failFile, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	p, _, err := PRSnapshot(ctx, repo, "s06/green", 0)
+	p, _, err := fixtureGit(t).PRSnapshot(ctx, repo, "s06/green", 0)
 	if err == nil || p.Checks != flow.ChecksUnreadable || strings.Contains(err.Error(), "not a github.com repo") {
 		t.Fatalf("network failure = %+v, %v", p, err)
 	}
 	if err := os.Remove(failFile); err != nil {
 		t.Fatal(err)
 	}
-	p, _, err = PRSnapshot(ctx, repo, "s06/green", 0)
+	p, _, err = fixtureGit(t).PRSnapshot(ctx, repo, "s06/green", 0)
 	if err != nil || !p.Answered || p.Checks != flow.ChecksGreen {
 		t.Fatalf("after recovery = %+v, %v; want answered green", p, err)
 	}
@@ -522,7 +522,7 @@ func TestPRSnapshotNoCheckHidesAnother(t *testing.T) {
 	} {
 		gh := installFakeGH(t)
 		writeGH(t, gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"h1","mergeable":"MERGEABLE","baseRefName":"main","statusCheckRollup":[`+c.rollup+`]}`)
-		if p, _, err := PRSnapshot(ctx, repo, "b", 0); err != nil || p.Checks != c.want {
+		if p, _, err := fixtureGit(t).PRSnapshot(ctx, repo, "b", 0); err != nil || p.Checks != c.want {
 			t.Errorf("%s: checks = %s, %v; want %s", name, p.Checks, err, c.want)
 		}
 	}
@@ -561,7 +561,7 @@ func TestPRSnapshotFallbackReadsEverything(t *testing.T) {
 		for f, body := range c.files {
 			writeGH(t, gh, f, body)
 		}
-		if p, _, _ := PRSnapshot(ctx, repo, "s06/green", 0); p.Checks != c.want {
+		if p, _, _ := fixtureGit(t).PRSnapshot(ctx, repo, "s06/green", 0); p.Checks != c.want {
 			t.Errorf("%s: checks = %s, want %s", name, p.Checks, c.want)
 		}
 	}
@@ -594,7 +594,7 @@ func TestPRSnapshotOptionalCallFails(t *testing.T) {
 			copySnap(t, c.extra, filepath.Join(gh, strings.TrimPrefix(filepath.Ext(strings.TrimSuffix(c.extra, ".json")), ".")+".json"))
 		}
 		writeGH(t, gh, c.fail+"_fail", "")
-		p, warn, err := PRSnapshot(ctx, repo, "b", 0)
+		p, warn, err := fixtureGit(t).PRSnapshot(ctx, repo, "b", 0)
 		if err != nil || warn == nil || !p.Answered || p.Checks != c.want || p.Behind || p.BehindUnknown != (c.fail == "compare") || p.ChecksUnread != (c.fail == "workflow_runs") {
 			t.Errorf("%s fails on %s: %+v, warn %v, err %v; want answered %s, not behind, a warning", c.fail, c.view, p, warn, err, c.want)
 		}
@@ -611,7 +611,7 @@ func TestCheckRunsRoundTwo(t *testing.T) {
 	writeGH(t, gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"h1","mergeable":"MERGEABLE","baseRefName":"main","statusCheckRollup":[`+
 		`{"__typename":"CheckRun","name":"test","workflowName":"ci","status":"COMPLETED","conclusion":"SUCCESS"},`+
 		`{"__typename":"CheckRun","name":"test","workflowName":"ci","status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-11-20T10:00:05Z"}]}`)
-	if p, _, err := PRSnapshot(ctx, repo, "b", 0); err != nil || p.Checks != flow.ChecksRed {
+	if p, _, err := fixtureGit(t).PRSnapshot(ctx, repo, "b", 0); err != nil || p.Checks != flow.ChecksRed {
 		t.Errorf("completed success without a start beside a failure: %s, %v; want red", p.Checks, err)
 	}
 	gh = installFakeGH(t)
@@ -619,7 +619,7 @@ func TestCheckRunsRoundTwo(t *testing.T) {
 	copySnap(t, "stopped_timeout.workflow-runs.json", filepath.Join(gh, "workflow-runs.json"))
 	writeGH(t, gh, "annotations.json", "["+strings.Repeat(`{"message":"warning"},`, 49)+`{"message":"warning"}]`)
 	copySnap(t, "stopped_timeout.annotations.json", filepath.Join(gh, "annotations.2.json"))
-	if p, _, err := PRSnapshot(ctx, repo, "b", 0); err != nil || p.Checks != flow.ChecksStoppedTimeout {
+	if p, _, err := fixtureGit(t).PRSnapshot(ctx, repo, "b", 0); err != nil || p.Checks != flow.ChecksStoppedTimeout {
 		t.Errorf("timeout annotation on page 2: %s, %v; want stopped_timeout", p.Checks, err)
 	}
 }
@@ -630,7 +630,7 @@ func TestRerunFailedJobsAndDispatchWorkflow(t *testing.T) {
 	gh := installFakeGH(t)
 
 	// RerunFailedJobs calls gh run rerun <id> --failed --repo acme/demo.
-	if err := RerunFailedJobs(ctx, repo, "101"); err != nil {
+	if err := fixtureGit(t).RerunFailedJobs(ctx, repo, "101"); err != nil {
 		t.Fatal(err)
 	}
 	wantReruns := []string{"run rerun 101 --failed --repo acme/demo"}
@@ -642,7 +642,7 @@ func TestRerunFailedJobsAndDispatchWorkflow(t *testing.T) {
 	// file missing at head never does, a named file present is dispatched.
 	head := runGit(t, repo, "rev-parse", "HEAD")
 	for _, name := range []string{"", "ci.yml"} {
-		if err := DispatchWorkflow(ctx, repo, "task/t1", head, name); !errors.Is(err, ErrNoDispatchWorkflow) {
+		if err := fixtureGit(t).DispatchWorkflow(ctx, repo, "task/t1", head, name); !errors.Is(err, ErrNoDispatchWorkflow) {
 			t.Fatalf("name %q before the file err = %v, want ErrNoDispatchWorkflow", name, err)
 		}
 	}
@@ -656,10 +656,10 @@ func TestRerunFailedJobsAndDispatchWorkflow(t *testing.T) {
 	runGit(t, repo, "add", ".github/workflows/ci.yml")
 	runGit(t, repo, "commit", "-m", "ci: add dispatch")
 	head = runGit(t, repo, "rev-parse", "HEAD")
-	if err := DispatchWorkflow(ctx, repo, "task/t1", head, ""); !errors.Is(err, ErrNoDispatchWorkflow) {
+	if err := fixtureGit(t).DispatchWorkflow(ctx, repo, "task/t1", head, ""); !errors.Is(err, ErrNoDispatchWorkflow) {
 		t.Fatalf("empty name with a dispatchable file err = %v, want ErrNoDispatchWorkflow", err)
 	}
-	if err := DispatchWorkflow(ctx, repo, "task/t1", head, "ci.yml"); err != nil {
+	if err := fixtureGit(t).DispatchWorkflow(ctx, repo, "task/t1", head, "ci.yml"); err != nil {
 		t.Fatal(err)
 	}
 	if got := ghCalls(t, gh, "api repos/acme/demo/actions/workflows/"); !slices.Equal(got, []string{"api repos/acme/demo/actions/workflows/ci.yml/dispatches -X POST -f ref=task/t1"}) {
@@ -688,7 +688,7 @@ func TestDispatchWorkflowExactFileOnly(t *testing.T) {
 	runGit(t, repo, "commit", "-m", "ci")
 	head := runGit(t, repo, "rev-parse", "HEAD")
 	for _, n := range append(names, "a/b.yml") {
-		if err := DispatchWorkflow(ctx, repo, "task/t1", head, n); !errors.Is(err, ErrNoDispatchWorkflow) {
+		if err := fixtureGit(t).DispatchWorkflow(ctx, repo, "task/t1", head, n); !errors.Is(err, ErrNoDispatchWorkflow) {
 			t.Errorf("DispatchWorkflow(%q) err = %v, want ErrNoDispatchWorkflow", n, err)
 		}
 	}
@@ -711,7 +711,7 @@ func TestPRSnapshotPartialRunListNoTarget(t *testing.T) {
 	}
 	writeGH(t, gh, "workflow-runs.json", `{"total_count":150,"workflow_runs":[`+strings.Join(runs, ",")+`]}`)
 	writeGH(t, gh, "workflow-runs.2.json", `not json`)
-	p, warn, err := PRSnapshot(ctx, repo, "b", 0)
+	p, warn, err := fixtureGit(t).PRSnapshot(ctx, repo, "b", 0)
 	if err != nil || warn == nil || p.Checks != flow.ChecksRed || !p.ChecksUnread || len(p.Failed) != 1 || p.Failed[0].Run != "" {
 		t.Fatalf("partial run list: %+v, warn %v, err %v; want red, checks_unread, a failure with no run", p, warn, err)
 	}
@@ -733,7 +733,7 @@ func TestPRSnapshotFallbackSeesEarlierAttempts(t *testing.T) {
 	writeGH(t, gh, "check-runs.all.json", `{"total_count":3,"check_runs":[`+cr(900, "build", "failure")+","+cr(901, "report", "cancelled")+","+cr(902, "report", "success")+`]}`)
 	writeGH(t, gh, "annotations.json", `[{"message":"The job has exceeded the maximum execution time of 1m0s"}]`)
 	writeGH(t, gh, "workflow-runs.json", `{"total_count":1,"workflow_runs":[{"id":90,"status":"completed","conclusion":"failure"}]}`)
-	p, _, err := PRSnapshot(ctx, repo, "b", 0)
+	p, _, err := fixtureGit(t).PRSnapshot(ctx, repo, "b", 0)
 	if err != nil || p.Checks != flow.ChecksRed || len(p.Failed) != 1 || p.Failed[0].Run != "" {
 		t.Fatalf("fallback with an earlier timed-out attempt: %+v, %v; want red with no re-run target", p, err)
 	}
@@ -743,13 +743,13 @@ func TestUpdateBranch(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := repoWithGitHubOrigin(t)
 	gh := installFakeGH(t)
-	if err := UpdateBranch(ctx, repo, 0, "abc"); err == nil {
-		t.Fatal("UpdateBranch(0, abc) succeeded")
+	if err := fixtureGit(t).UpdateBranch(ctx, repo, 0, "abc"); err == nil {
+		t.Fatal("fixtureGit(t).UpdateBranch(0, abc) succeeded")
 	}
-	if err := UpdateBranch(ctx, repo, 7, ""); err == nil {
-		t.Fatal("UpdateBranch(7, empty) succeeded")
+	if err := fixtureGit(t).UpdateBranch(ctx, repo, 7, ""); err == nil {
+		t.Fatal("fixtureGit(t).UpdateBranch(7, empty) succeeded")
 	}
-	if err := UpdateBranch(ctx, repo, 7, "abc1234"); err != nil {
+	if err := fixtureGit(t).UpdateBranch(ctx, repo, 7, "abc1234"); err != nil {
 		t.Fatalf("UpdateBranch: %v", err)
 	}
 	got := ghCalls(t, gh, "api -X PUT")
@@ -758,7 +758,7 @@ func TestUpdateBranch(t *testing.T) {
 		t.Fatalf("UpdateBranch calls = %q, want [%q]", got, want)
 	}
 	writeGH(t, gh, "update_branch_fail", "")
-	if err := UpdateBranch(ctx, repo, 7, "abc1234"); err == nil {
+	if err := fixtureGit(t).UpdateBranch(ctx, repo, 7, "abc1234"); err == nil {
 		t.Fatal("UpdateBranch succeeded when fake gh failed")
 	}
 }
@@ -769,7 +769,7 @@ func TestBaseStatus(t *testing.T) {
 	gh := installFakeGH(t)
 
 	// Empty runs list (path-ignored push) -> unknown, not red.
-	got, err := BaseStatus(ctx, repo)
+	got, err := fixtureGit(t).BaseStatus(ctx, repo)
 	if err != nil || got.Known || got.Red || got.Branch != "main" {
 		t.Fatalf("empty = %+v, %v", got, err)
 	}
@@ -790,7 +790,7 @@ func TestBaseStatus(t *testing.T) {
 		{"skipped and failure", `{"workflow_runs":[{"id":14,"status":"completed","conclusion":"skipped"},{"id":15,"status":"completed","conclusion":"failure"}]}`, true, true, 15},
 	} {
 		writeGH(t, gh, "base-runs.json", tc.body)
-		got, err := BaseStatus(ctx, repo)
+		got, err := fixtureGit(t).BaseStatus(ctx, repo)
 		if err != nil || got.Red != tc.red || got.Known != tc.known || got.ID != tc.id {
 			t.Errorf("%s: got %+v, %v; want red=%v known=%v id=%d", tc.name, got, err, tc.red, tc.known, tc.id)
 		}
@@ -800,17 +800,17 @@ func TestBaseStatus(t *testing.T) {
 	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[{"id":20,"status":"completed","conclusion":"cancelled"},{"id":19,"status":"completed","conclusion":"success"}]}`)
 	writeGH(t, gh, "run-jobs.json", `{"jobs":[{"id":501,"conclusion":"cancelled"}]}`)
 	writeGH(t, gh, "annotations.json", `[{"message":"The job has exceeded the maximum execution time of 60m0s"}]`)
-	if got, err := BaseStatus(ctx, repo); err != nil || !got.Red || !got.Known || got.ID != 20 {
+	if got, err := fixtureGit(t).BaseStatus(ctx, repo); err != nil || !got.Red || !got.Known || got.ID != 20 {
 		t.Fatalf("cancelled by limit = %+v, %v; want red id=20", got, err)
 	}
 	writeGH(t, gh, "annotations.json", `[{"message":"The run was canceled by @someone."}]`)
-	if got, err := BaseStatus(ctx, repo); err != nil || got.Red || !got.Known {
+	if got, err := fixtureGit(t).BaseStatus(ctx, repo); err != nil || got.Red || !got.Known {
 		t.Fatalf("cancelled externally = %+v, %v; want green", got, err)
 	}
 
 	// Read error returns err (never flips red).
 	writeGH(t, gh, "base_runs_fail", "")
-	if _, err := BaseStatus(ctx, repo); err == nil {
+	if _, err := fixtureGit(t).BaseStatus(ctx, repo); err == nil {
 		t.Fatal("BaseStatus succeeded on base_runs_fail")
 	}
 }
@@ -824,7 +824,7 @@ func TestBaseStatusHeadCommit(t *testing.T) {
 
 	// Passing workflow listed first cannot hide a failing workflow on the same head commit.
 	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[{"id":202,"head_sha":"`+head+`","status":"completed","conclusion":"success"},{"id":201,"head_sha":"`+head+`","status":"completed","conclusion":"failure"}]}`)
-	got, err := BaseStatus(ctx, repo)
+	got, err := fixtureGit(t).BaseStatus(ctx, repo)
 	if err != nil || !got.Red || !got.Known || got.HeadSHA != head {
 		t.Fatalf("two workflows (pass then fail) = %+v, %v; want red known head=%s", got, err, head)
 	}
@@ -835,7 +835,7 @@ func TestBaseStatusHeadCommit(t *testing.T) {
 
 	// Re-run in progress (or another workflow still running) with no red run yet -> unknown (keep last value).
 	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[{"id":201,"head_sha":"`+head+`","status":"in_progress","conclusion":""},{"id":202,"head_sha":"`+head+`","status":"completed","conclusion":"success"}]}`)
-	got, err = BaseStatus(ctx, repo)
+	got, err = fixtureGit(t).BaseStatus(ctx, repo)
 	if err != nil || got.Known || got.Red {
 		t.Fatalf("in-progress rerun alongside pass = %+v, %v; want unknown (keep last value)", got, err)
 	}
@@ -852,7 +852,7 @@ func TestBaseStatusHeadCommit(t *testing.T) {
 	p1.WriteString(`]}`)
 	writeGH(t, gh, "base-runs.json", p1.String())
 	writeGH(t, gh, "base-runs.2.json", `{"workflow_runs":[{"id":2000,"head_sha":"`+head+`","status":"completed","conclusion":"failure"}]}`)
-	got, err = BaseStatus(ctx, repo)
+	got, err = fixtureGit(t).BaseStatus(ctx, repo)
 	if err != nil || !got.Red || !got.Known {
 		t.Fatalf("paged runs (fail on page 2) = %+v, %v; want red known", got, err)
 	}
@@ -871,7 +871,7 @@ func TestPushAndOpenPRTitleCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	longTitle := "feat: " + strings.Repeat("é", 294) // 300 runes (>300 bytes)
-	if n, err := PushAndOpenPR(ctx, repo, "task/t1-cap", c1, longTitle, "body"); err != nil || n != 7 {
+	if n, err := fixtureGit(t).PushAndOpenPR(ctx, repo, "task/t1-cap", c1, longTitle, "body"); err != nil || n != 7 {
 		t.Fatalf("PushAndOpenPR = %d, %v", n, err)
 	}
 	creates := ghCalls(t, gh, "pr create")

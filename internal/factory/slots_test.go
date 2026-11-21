@@ -23,7 +23,7 @@ func TestSchedulingDepsAndCap(t *testing.T) {
 	ctx := context.Background()
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 
 	// Invalid max_running is refused without saving; 0 keeps the existing/default value.
 	for _, bad := range []int{-1, flow.MaxRunningMax + 1} {
@@ -37,7 +37,7 @@ func TestSchedulingDepsAndCap(t *testing.T) {
 	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
-	_, id, err := world.RepoProject(ctx, repo, false)
+	_, id, err := fixtureGit(t).RepoProject(ctx, repo, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,11 +131,11 @@ func TestFailedNewAttemptDoesNotTakeSlot(t *testing.T) {
 	ctx := context.Background()
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 	if err := eng.Start(repo, "Goal", 2); err != nil {
 		t.Fatal(err)
 	}
-	_, id, err := world.RepoProject(ctx, repo, false)
+	_, id, err := fixtureGit(t).RepoProject(ctx, repo, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,11 +181,11 @@ func TestDeadWorkersFreeSlots(t *testing.T) {
 	client := hc.NewClient(srv.Path)
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	if err := eng.Start(repo, "Goal", 2); err != nil {
 		t.Fatal(err)
 	}
-	_, id, err := world.RepoProject(ctx, repo, false)
+	_, id, err := fixtureGit(t).RepoProject(ctx, repo, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,11 +228,11 @@ func TestDroppedDepWakesAndAmendUnblocks(t *testing.T) {
 	client := hc.NewClient(srv.Path)
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	if err := eng.Start(repo, "Goal", 2); err != nil {
 		t.Fatal(err)
 	}
-	_, id, err := world.RepoProject(ctx, repo, false)
+	_, id, err := fixtureGit(t).RepoProject(ctx, repo, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,11 +307,11 @@ func TestWaitReasonLoggedOncePerChange(t *testing.T) {
 	ctx := context.Background()
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 	if err := eng.Start(repo, "Goal", 1); err != nil {
 		t.Fatal(err)
 	}
-	_, id, err := world.RepoProject(ctx, repo, false)
+	_, id, err := fixtureGit(t).RepoProject(ctx, repo, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,11 +373,11 @@ func TestIdleWorkerHoldsSlot(t *testing.T) {
 	client := hc.NewClient(srv.Path)
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	if err := eng.Start(repo, "Goal", 2); err != nil {
 		t.Fatal(err)
 	}
-	_, id, err := world.RepoProject(ctx, repo, false)
+	_, id, err := fixtureGit(t).RepoProject(ctx, repo, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,11 +415,11 @@ func TestReviewerGoneKeepsSlotWhileWorkerRuns(t *testing.T) {
 	client := hc.NewClient(srv.Path)
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	if err := eng.Start(repo, "Goal", 2); err != nil {
 		t.Fatal(err)
 	}
-	_, id, err := world.RepoProject(ctx, repo, false)
+	_, id, err := fixtureGit(t).RepoProject(ctx, repo, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,11 +478,11 @@ func TestWorkerRunStateReadOncePerPass(t *testing.T) {
 	client := hc.NewClient(srv.Path)
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	if err := eng.Start(repo, "Goal", 2); err != nil {
 		t.Fatal(err)
 	}
-	_, id, err := world.RepoProject(ctx, repo, false)
+	_, id, err := fixtureGit(t).RepoProject(ctx, repo, false)
 	if err != nil {
 		t.Fatal(err)
 	}

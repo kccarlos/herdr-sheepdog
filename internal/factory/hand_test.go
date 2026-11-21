@@ -389,7 +389,7 @@ func TestN7WaitsForWorkerTurnBeforeWaking(t *testing.T) {
 		l.pass() // idle worker is told
 		// Engine restarts: in-memory workerTurn map is lost.
 		oldLog := l.eng.Log
-		l.eng = New(l.paths, l.client)
+		l.eng = newGitTestEngine(t, l.paths, l.client)
 		l.eng.Log = oldLog
 
 		ageTell(l)

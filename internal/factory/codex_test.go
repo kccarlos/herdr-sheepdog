@@ -70,7 +70,7 @@ func codexSetup(t *testing.T) (*hctest.Server, *Engine, Paths, string, string, s
 	repo, _ := initGitRepoWithRemote(t)
 	githubOrigin(t, repo)
 	gh := installFakeGH(t)
-	eng := New(paths, hc.NewClient(srv.Path))
+	eng := newGitTestEngine(t, paths, hc.NewClient(srv.Path))
 	logs := &bytes.Buffer{}
 	eng.Log = logging.NewJSONLLogger(logs)
 	if err := eng.Start(repo, "Goal", 0); err != nil {

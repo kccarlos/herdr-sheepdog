@@ -24,7 +24,7 @@ import (
 
 func newTestEngine(t *testing.T, paths Paths, client *hc.Client) *Engine {
 	t.Helper()
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.onInvariant = func(vs []flow.InvariantViolation) {
 		t.Helper()
 		t.Fatalf("invariant broken after pass: %+v", vs)
@@ -100,7 +100,7 @@ func TestInvariantProductionLogOnceAndWakeCoordinator(t *testing.T) {
 
 	// Restarted daemon with the same violations still present must neither re-log nor re-wake.
 	var restartLog bytes.Buffer
-	eng2 := New(l.paths, l.client)
+	eng2 := newGitTestEngine(t, l.paths, l.client)
 	eng2.Log = logging.NewJSONLLogger(&restartLog)
 	eng2.Now = func() time.Time { return now }
 	eng2.passProject(ctx, l.id, true)
@@ -293,7 +293,7 @@ func TestInvariantRestartNoRelogRecurrenceWakesAndErrorEvent(t *testing.T) {
 
 	// Restarted daemon with the same persisted violation must neither re-log nor re-wake.
 	var restartLog bytes.Buffer
-	eng2 := New(l.paths, l.client)
+	eng2 := newGitTestEngine(t, l.paths, l.client)
 	eng2.Log = logging.NewJSONLLogger(&restartLog)
 	eng2.Now = func() time.Time { return now }
 	eng2.passProject(ctx, l.id, true)
@@ -334,7 +334,7 @@ func TestInvariantRestartNoRelogRecurrenceWakesAndErrorEvent(t *testing.T) {
 func TestRecapOpeningUncountedDuringHCOutage(t *testing.T) {
 	t.Parallel()
 	for _, verb := range []string{flow.AskOpenRecap, flow.AskSizeRecap, flow.AskCIRecap, flow.AskTimeRecap} {
-		if !actOutage(verb, flow.Facts{HCUnavailable: true}) {
+		if !actOutage(verb, flow.Facts{HCUnavailable: true}, nil) {
 			t.Errorf("actOutage(%q, HCUnavailable=true) = false, want true", verb)
 		}
 	}
@@ -506,7 +506,7 @@ func TestInvariantPerSubjectSkipAndRecurrence(t *testing.T) {
 
 	// Second task T2 with its own worktree (at l.c1 so view.json matches H),
 	// worker, and unwanted live reviewer.
-	wt2, err := world.NewWorktree(ctx, l.repo, l.paths.Worktree(l.id, "T2", 1), "T2-1", "feat: y")
+	wt2, err := fixtureGit(t).NewWorktree(ctx, l.repo, l.paths.Worktree(l.id, "T2", 1), "T2-1", "feat: y")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -598,7 +598,7 @@ func TestInvariantPerSubjectSkipAndRecurrence(t *testing.T) {
 
 	// Restart daemon with both stored violations active -> no re-log, no re-wake.
 	var restartLog bytes.Buffer
-	eng2 := New(l.paths, l.client)
+	eng2 := newGitTestEngine(t, l.paths, l.client)
 	eng2.Log = logging.NewJSONLLogger(&restartLog)
 	eng2.Now = func() time.Time { return now }
 	eng2.passProject(ctx, l.id, true)

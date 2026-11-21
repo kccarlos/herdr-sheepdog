@@ -460,7 +460,7 @@ func TestRepoProjectIDSurvivesRename(t *testing.T) {
 	if out, err := exec.Command("git", "init", repo).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
-	root1, id1, err := RepoProject(ctx, repo, true)
+	root1, id1, err := fixtureGit(t).RepoProject(ctx, repo, true)
 	if err != nil || id1 == "" || root1 == "" {
 		t.Fatalf("RepoProject init = %q, %q, %v", root1, id1, err)
 	}
@@ -468,7 +468,7 @@ func TestRepoProjectIDSurvivesRename(t *testing.T) {
 	if err := os.Rename(repo, renamed); err != nil {
 		t.Fatal(err)
 	}
-	_, id2, err := RepoProject(ctx, renamed, false)
+	_, id2, err := fixtureGit(t).RepoProject(ctx, renamed, false)
 	if err != nil || id2 != id1 {
 		t.Fatalf("after rename id = %q (err %v), want %q", id2, err, id1)
 	}
@@ -486,11 +486,11 @@ func TestRepoProjectRejectsPathSeparatorsAndDots(t *testing.T) {
 		if out, err := exec.Command("git", "-C", repo, "config", "--local", "sheepdog.projectId", bad).CombinedOutput(); err != nil {
 			t.Fatalf("git config %q: %v: %s", bad, err, out)
 		}
-		if _, id, err := RepoProject(ctx, repo, false); err != nil || id != "" {
+		if _, id, err := fixtureGit(t).RepoProject(ctx, repo, false); err != nil || id != "" {
 			t.Fatalf("RepoProject(%q, init=false) = %q, %v; want empty id", bad, id, err)
 		}
 	}
-	if _, id, err := RepoProject(ctx, repo, true); err != nil || !strings.HasPrefix(id, "proj-") {
+	if _, id, err := fixtureGit(t).RepoProject(ctx, repo, true); err != nil || !strings.HasPrefix(id, "proj-") {
 		t.Fatalf("RepoProject(init=true after bad id) = %q, %v; want fresh proj-*", id, err)
 	}
 }
@@ -660,7 +660,7 @@ func TestNewWorktreeFromRemoteBaseAndIdempotent(t *testing.T) {
 	localTip := runGit(t, repo, "rev-parse", "HEAD")
 
 	wtDir := filepath.Join(tmp, "data", "factory", "projects", "proj-1", "worktrees", "T1")
-	wt1, err := NewWorktree(ctx, repo, wtDir, "T1", "feat: Add Greeting Helper!")
+	wt1, err := fixtureGit(t).NewWorktree(ctx, repo, wtDir, "T1", "feat: Add Greeting Helper!")
 	if err != nil {
 		t.Fatalf("NewWorktree: %v", err)
 	}
@@ -694,7 +694,7 @@ func TestNewWorktreeFromRemoteBaseAndIdempotent(t *testing.T) {
 	runGit(t, other, "commit", "-am", "feat: remote v2")
 	runGit(t, other, "push", "origin", "main")
 
-	wt2, err := NewWorktree(ctx, repo, wtDir, "T1", "feat: Add Greeting Helper!")
+	wt2, err := fixtureGit(t).NewWorktree(ctx, repo, wtDir, "T1", "feat: Add Greeting Helper!")
 	if err != nil {
 		t.Fatalf("second NewWorktree: %v", err)
 	}
@@ -706,19 +706,19 @@ func TestNewWorktreeFromRemoteBaseAndIdempotent(t *testing.T) {
 	}
 
 	// InspectWorktree: dirty vs clean and commit relations.
-	tip, rel, clean, err := InspectWorktree(ctx, wt1.Path, b1)
+	tip, rel, clean, err := fixtureGit(t).InspectWorktree(ctx, wt1.Path, b1)
 	if err != nil || tip != c1 || rel != flow.RelAhead || clean {
 		t.Fatalf("dirty InspectWorktree = (%s, %s, %v, %v)", tip, rel, clean, err)
 	}
 	if err := os.Remove(filepath.Join(wt1.Path, "untracked.txt")); err != nil {
 		t.Fatal(err)
 	}
-	if _, rel, clean, err = InspectWorktree(ctx, wt1.Path, c1); err != nil || rel != flow.RelSame || !clean {
+	if _, rel, clean, err = fixtureGit(t).InspectWorktree(ctx, wt1.Path, c1); err != nil || rel != flow.RelSame || !clean {
 		t.Fatalf("clean same InspectWorktree = (%s, %v, %v)", rel, clean, err)
 	}
 
 	// Guard: refusing worktree outside os.TempDir() under go test.
-	if _, err := NewWorktree(ctx, repo, "/nonexistent-sheepdog-test-guard/wt", "T2", "feat: x"); err == nil {
+	if _, err := fixtureGit(t).NewWorktree(ctx, repo, "/nonexistent-sheepdog-test-guard/wt", "T2", "feat: x"); err == nil {
 		t.Fatal("expected test guard error outside os.TempDir()")
 	}
 }
@@ -756,7 +756,7 @@ func TestNewWorktreeUsesRemoteDefaultBranchNotUpstream(t *testing.T) {
 	runGit(t, repo, "config", "remote.origin.followRemoteHead", "never")
 	_ = exec.Command("git", "-C", repo, "remote", "set-head", "origin", "-d").Run()
 
-	wt, err := NewWorktree(ctx, repo, filepath.Join(tmp, "wt-1"), "t1", "feat: task on default")
+	wt, err := fixtureGit(t).NewWorktree(ctx, repo, filepath.Join(tmp, "wt-1"), "t1", "feat: task on default")
 	if err != nil {
 		t.Fatalf("NewWorktree: %v", err)
 	}
@@ -790,14 +790,14 @@ func TestInspectWorktreeShowsUntrackedDespiteGitConfig(t *testing.T) {
 	runGit(t, repo, "push", "-u", "origin", "main")
 	runGit(t, repo, "config", "status.showUntrackedFiles", "no")
 
-	wt, err := NewWorktree(ctx, repo, filepath.Join(tmp, "wt-1"), "t1", "feat: dirty check")
+	wt, err := fixtureGit(t).NewWorktree(ctx, repo, filepath.Join(tmp, "wt-1"), "t1", "feat: dirty check")
 	if err != nil {
 		t.Fatalf("NewWorktree: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(wt.Path, "untracked.tmp"), []byte("dirty\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, clean, err := InspectWorktree(ctx, wt.Path, wt.BaseCommit); err != nil || clean {
+	if _, _, clean, err := fixtureGit(t).InspectWorktree(ctx, wt.Path, wt.BaseCommit); err != nil || clean {
 		t.Fatalf("InspectWorktree with status.showUntrackedFiles=no: clean=%v err=%v, want clean=false", clean, err)
 	}
 }
@@ -1167,7 +1167,7 @@ func TestReviewRangesExcludeMergedBaseChanges(t *testing.T) {
 	runGit(t, repo, "push", "-u", "origin", "main")
 	b0 := runGit(t, repo, "rev-parse", "HEAD")
 
-	wt, err := NewWorktree(ctx, repo, filepath.Join(tmp, "wt-1"), "t1", "feat: task")
+	wt, err := fixtureGit(t).NewWorktree(ctx, repo, filepath.Join(tmp, "wt-1"), "t1", "feat: task")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1192,7 +1192,7 @@ func TestReviewRangesExcludeMergedBaseChanges(t *testing.T) {
 	b1 := runGit(t, other, "rev-parse", "HEAD")
 
 	// Full round at c1 while base is ahead at b1: merge base is still b0.
-	if mb, err := MergeBase(ctx, wt.Path, c1); err != nil || mb != b0 {
+	if mb, err := fixtureGit(t).MergeBase(ctx, wt.Path, c1); err != nil || mb != b0 {
 		t.Fatalf("MergeBase(c1) = (%s, %v), want %s", mb, err, b0)
 	}
 
@@ -1228,7 +1228,7 @@ func TestReviewRangesExcludeMergedBaseChanges(t *testing.T) {
 		x, h string
 		want bool
 	}{{c2a, m1, true}, {c1, m1, false}, {m1, c2b, false}, {c2a, b1, false}} {
-		if got, err := MergeOnly(ctx, wt.Path, c.x, c.h); err != nil || got != c.want {
+		if got, err := fixtureGit(t).MergeOnly(ctx, wt.Path, c.x, c.h); err != nil || got != c.want {
 			t.Errorf("MergeOnly(%s, %s) = (%v, %v), want %v", c.x, c.h, got, err, c.want)
 		}
 	}
@@ -1236,21 +1236,21 @@ func TestReviewRangesExcludeMergedBaseChanges(t *testing.T) {
 		tip  string
 		want int
 	}{{c1, 2}, {m1, 4}, {c2b, 4}} { // new files task.go and pre.go, 2 lines each; base_only.go never counts
-		if n, err := ChangedLines(ctx, wt.Path, c.tip); err != nil || n != c.want {
+		if n, err := fixtureGit(t).ChangedLines(ctx, wt.Path, c.tip); err != nil || n != c.want {
 			t.Errorf("ChangedLines(%s) = (%d, %v), want %d", c.tip, n, err, c.want)
 		}
 	}
 
 	// Delta from c1 to m1 (fix then merge): [c1..c2a], no base_only.go.
-	r1, err := DeltaRanges(ctx, wt.Path, c1, m1)
+	r1, err := fixtureGit(t).DeltaRanges(ctx, wt.Path, c1, m1)
 	if err != nil || !slices.Equal(r1, []string{c1 + ".." + c2a}) {
-		t.Fatalf("DeltaRanges(c1, m1) = (%v, %v), want [%s..%s]", r1, err, c1, c2a)
+		t.Fatalf("fixtureGit(t).DeltaRanges(c1, m1) = (%v, %v), want [%s..%s]", r1, err, c1, c2a)
 	}
 
 	// Delta from c1 to c2b (fix, merge, fix): [c1..c2a, m1..c2b], leaving out b1 and b2.
-	ranges, err := DeltaRanges(ctx, wt.Path, c1, c2b)
+	ranges, err := fixtureGit(t).DeltaRanges(ctx, wt.Path, c1, c2b)
 	if err != nil || !slices.Equal(ranges, []string{c1 + ".." + c2a, m1 + ".." + c2b}) {
-		t.Fatalf("DeltaRanges(c1, c2b) = (%v, %v)", ranges, err)
+		t.Fatalf("fixtureGit(t).DeltaRanges(c1, c2b) = (%v, %v)", ranges, err)
 	}
 	var deltaDiff strings.Builder
 	for _, r := range ranges {
@@ -1268,7 +1268,7 @@ func TestReviewRangesExcludeMergedBaseChanges(t *testing.T) {
 	}
 
 	// Full at c2b (L8 second pass): MergeBase computed now is b1, leaving out b1 and b2.
-	mb, err := MergeBase(ctx, wt.Path, c2b)
+	mb, err := fixtureGit(t).MergeBase(ctx, wt.Path, c2b)
 	if err != nil || mb != b1 {
 		t.Fatalf("MergeBase(c2b) = (%s, %v), want %s", mb, err, b1)
 	}
@@ -1308,7 +1308,7 @@ func TestDeltaRangesIncludesHandEditedBaseMerge(t *testing.T) {
 	runGit(t, repo, "commit", "-m", "chore: b0")
 	runGit(t, repo, "push", "-u", "origin", "main")
 
-	wt, err := NewWorktree(ctx, repo, filepath.Join(tmp, "wt-1"), "t1", "feat: task")
+	wt, err := fixtureGit(t).NewWorktree(ctx, repo, filepath.Join(tmp, "wt-1"), "t1", "feat: task")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1348,9 +1348,9 @@ func TestDeltaRangesIncludesHandEditedBaseMerge(t *testing.T) {
 	runGit(t, wt.Path, "commit", "-m", "merge: resolve shared.go")
 	m1 := runGit(t, wt.Path, "rev-parse", "HEAD")
 
-	ranges, err := DeltaRanges(ctx, wt.Path, c1, m1)
+	ranges, err := fixtureGit(t).DeltaRanges(ctx, wt.Path, c1, m1)
 	if err != nil || !slices.Equal(ranges, []string{c1 + ".." + m1}) {
-		t.Fatalf("DeltaRanges(c1, m1) = (%v, %v), want [%s..%s]", ranges, err, c1, m1)
+		t.Fatalf("fixtureGit(t).DeltaRanges(c1, m1) = (%v, %v), want [%s..%s]", ranges, err, c1, m1)
 	}
 	diff := runGit(t, wt.Path, "diff", ranges[0])
 	if !strings.Contains(diff, `+var Shared = "hand-resolved"`) {
@@ -1375,14 +1375,14 @@ func TestDeltaRangesIncludesHandEditedBaseMerge(t *testing.T) {
 	m2 := runGit(t, wt.Path, "rev-parse", "HEAD")
 
 	for _, pair := range [][2]string{{c1, m1}, {m1, m2}} { // hand-resolved, and an extra edit in a merge
-		if mo, err := MergeOnly(ctx, wt.Path, pair[0], pair[1]); err != nil || mo {
+		if mo, err := fixtureGit(t).MergeOnly(ctx, wt.Path, pair[0], pair[1]); err != nil || mo {
 			t.Errorf("MergeOnly(%s, %s) = (%v, %v), want false", pair[0], pair[1], mo, err)
 		}
 	}
 
-	ranges2, err := DeltaRanges(ctx, wt.Path, m1, m2)
+	ranges2, err := fixtureGit(t).DeltaRanges(ctx, wt.Path, m1, m2)
 	if err != nil || !slices.Equal(ranges2, []string{m1 + ".." + m2}) {
-		t.Fatalf("DeltaRanges(m1, m2) = (%v, %v), want [%s..%s]", ranges2, err, m1, m2)
+		t.Fatalf("fixtureGit(t).DeltaRanges(m1, m2) = (%v, %v), want [%s..%s]", ranges2, err, m1, m2)
 	}
 	if diff2 := runGit(t, wt.Path, "diff", ranges2[0]); !strings.Contains(diff2, "smuggled.go") {
 		t.Fatalf("delta diff missing extra merge edit:\n%s", diff2)
@@ -1409,7 +1409,7 @@ func sizeRepo(t *testing.T) string {
 	runGit(t, repo, "add", "README.md")
 	runGit(t, repo, "commit", "-m", "chore: b0")
 	runGit(t, repo, "push", "-u", "origin", "main")
-	w, err := NewWorktree(context.Background(), repo, filepath.Join(tmp, "wt-1"), "t1", "feat: task")
+	w, err := fixtureGit(t).NewWorktree(context.Background(), repo, filepath.Join(tmp, "wt-1"), "t1", "feat: task")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1433,7 +1433,7 @@ func TestChangedLinesCountsBinaryMarkedFiles(t *testing.T) {
 	commitFile(t, wt, ".gitattributes", "*.gen -diff\n")
 	commitFile(t, wt, "big.gen", strings.Repeat("x\n", 100))
 	tip := commitFile(t, wt, "nul.txt", "a\x00b\nc\n") // a NUL byte makes git call it binary
-	if n, err := ChangedLines(context.Background(), wt, tip); err != nil || n != 103 {
+	if n, err := fixtureGit(t).ChangedLines(context.Background(), wt, tip); err != nil || n != 103 {
 		t.Fatalf("ChangedLines = (%d, %v), want 103", n, err)
 	}
 }
@@ -1461,14 +1461,14 @@ func TestMergeOnlyEdgeCases(t *testing.T) {
 		{"empty range", c1[:12], c1}, // two spellings of one commit
 		{"clean merge of a non-base branch", c1, m},
 	} {
-		if mo, err := MergeOnly(ctx, wt, c.x, c.h); err != nil || mo {
+		if mo, err := fixtureGit(t).MergeOnly(ctx, wt, c.x, c.h); err != nil || mo {
 			t.Errorf("%s: MergeOnly = (%v, %v), want (false, nil)", c.name, mo, err)
 		}
 	}
 }
 
 // TestChangedLinesTimeoutReturnsDeadlineExceeded: when a running git diff is
-// killed mid-run by the context deadline, ChangedLines returns an error
+// killed mid-run by its child deadline, ChangedLines returns an error
 // matching context.DeadlineExceeded so readTipLocked treats it as over
 // size_cap.
 func TestChangedLinesTimeoutReturnsDeadlineExceeded(t *testing.T) {
@@ -1485,12 +1485,20 @@ func TestChangedLinesTimeoutReturnsDeadlineExceeded(t *testing.T) {
 	}
 	t.Setenv("PATH", fakeBin+":"+os.Getenv("PATH"))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	srv := hctest.New(t)
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if p.Argv[1] == "diff" {
+			limit := 0.15
+			p.Timeout = &limit
+		}
+		return hctest.GitExec(p)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	start := time.Now()
-	_, err = ChangedLines(ctx, wt, tip)
-	if elapsed := time.Since(start); !errors.Is(err, context.DeadlineExceeded) || elapsed < 100*time.Millisecond || elapsed > time.Second {
-		t.Fatalf("ChangedLines under hung git diff = %v in %s, want context.DeadlineExceeded killed mid-run", err, elapsed)
+	git := NewGit(hc.NewClient(srv.Path), nil, nil)
+	_, err = git.ChangedLines(ctx, wt, tip)
+	if !GitTimedOut(err) || !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, ErrChangedLinesOverCap) {
+		t.Fatalf("ChangedLines under hung git diff = %v, want a confirmed diff timeout treated as over cap", err)
 	}
 }
 

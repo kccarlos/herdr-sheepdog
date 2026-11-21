@@ -68,7 +68,7 @@ func FailureClass(err error) string {
 		return flow.ClassSettled
 	case errors.As(err, &ee) && (ee.ExitCode() == 4 || ee.ExitCode() == 126 || ee.ExitCode() == 127):
 		return flow.ClassSettled
-	case httpSettledRe.MatchString(err.Error()):
+	case gitExit(err, 126), gitExit(err, 127), httpSettledRe.MatchString(err.Error()):
 		return flow.ClassSettled
 	}
 	return flow.ClassTransient
@@ -579,21 +579,22 @@ func decodeReportJSON(s string) (Report, bool) {
 
 // RepoProject resolves folder's git top-level directory and its project id in
 // local git config, minting and writing one when init is true (design.md 3).
-func RepoProject(ctx context.Context, folder string, init bool) (string, string, error) {
-	root, err := gitCmd(ctx, folder, "rev-parse", "--show-toplevel")
+func (g *Git) RepoProject(ctx context.Context, folder string, init bool) (string, string, error) {
+	root, err := g.gitCmd(ctx, folder, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return "", "", fmt.Errorf("not a git repository (%s): %w", folder, err)
+		return "", "", fmt.Errorf("read git project folder %s: %w", folder, err)
 	}
-	if real, err := filepath.EvalSymlinks(root); err == nil {
-		root = real
+	id, err := g.gitCmd(ctx, root, "config", "--local", "--get", "sheepdog.projectId")
+	if err != nil && !gitExit(err, 1) {
+		return "", "", err
 	}
-	id, _ := gitCmd(ctx, root, "config", "--local", "--get", "sheepdog.projectId")
+	err = nil
 	if id == "." || id == ".." || strings.ContainsAny(id, `/\`) {
 		id = ""
 	}
 	if id == "" && init {
 		id = "proj-" + randID()
-		_, err = gitCmd(ctx, root, "config", "--local", "sheepdog.projectId", id)
+		_, err = g.gitCmd(ctx, root, "config", "--local", "sheepdog.projectId", id)
 	}
 	return root, id, err
 }
@@ -604,14 +605,24 @@ type Worktree struct{ Path, Branch, BaseCommit string }
 // NewWorktree fetches the remote base and creates branch task/<id>-<slug> and a
 // worktree at worktreeDir from the fresh remote base (design.md 9.4, KB-WKT-1,
 // KB-WKT-7). An existing worktree of repo at worktreeDir is adopted unchanged.
-func NewWorktree(ctx context.Context, repo, worktreeDir, taskID, title string) (Worktree, error) {
+func (g *Git) NewWorktree(ctx context.Context, repo, worktreeDir, taskID, title string) (Worktree, error) {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" || taskID == "." || taskID == ".." || strings.ContainsAny(taskID, "/\\ \t\n") {
 		return Worktree{}, Fail(flow.ClassSettled, fmt.Errorf("world: invalid task id %q", taskID))
 	}
 	if testing.Testing() {
 		abs, err := filepath.Abs(worktreeDir)
-		if rel, rerr := filepath.Rel(os.TempDir(), abs); err != nil || rerr != nil || strings.HasPrefix(rel, "..") {
+		tmp, terr := filepath.EvalSymlinks(os.TempDir())
+		// A new worktree may have missing parents. Resolve the nearest existing ancestor.
+		var resolved string
+		for candidate := abs; err == nil; candidate = filepath.Dir(candidate) {
+			resolved, err = filepath.EvalSymlinks(candidate)
+			if _, statErr := os.Lstat(candidate); err == nil || !os.IsNotExist(statErr) {
+				break
+			}
+			err = nil
+		}
+		if rel, rerr := filepath.Rel(tmp, resolved); err != nil || terr != nil || rerr != nil || strings.HasPrefix(rel, "..") {
 			return Worktree{}, Fail(flow.ClassSettled, fmt.Errorf("world: %s is outside the temp dir under go test", worktreeDir))
 		}
 	}
@@ -623,34 +634,40 @@ func NewWorktree(ctx context.Context, repo, worktreeDir, taskID, title string) (
 	if slug != "" {
 		branch += "-" + slug
 	}
-	repo = realPath(repo)
+	ctx = GitRepository(ctx, repo)
 	if _, err := os.Stat(filepath.Join(worktreeDir, ".git")); err == nil {
 		worktreeDir = realPath(worktreeDir)
-		c1, e1 := gitCmd(ctx, repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
-		c2, e2 := gitCmd(ctx, worktreeDir, "rev-parse", "--path-format=absolute", "--git-common-dir")
-		if e1 == nil && e2 == nil && c1 == c2 {
-			if b, _ := gitCmd(ctx, worktreeDir, "symbolic-ref", "--quiet", "--short", "HEAD"); b != "" {
-				branch = b
+		c1, err := g.gitCmd(ctx, repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		if err != nil {
+			return Worktree{}, err
+		}
+		c2, err := g.gitCmd(ctx, worktreeDir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		if err != nil {
+			return Worktree{}, err
+		}
+		if c1 == c2 {
+			if branch, err = g.gitCmd(ctx, worktreeDir, "symbolic-ref", "--quiet", "--short", "HEAD"); err != nil {
+				return Worktree{}, err
 			}
-			ref, _, _ := remoteBaseCommit(ctx, repo, false)
-			base, _ = gitCmd(ctx, worktreeDir, "merge-base", "HEAD", ref)
-			if base == "" {
-				if base, err = gitCmd(ctx, worktreeDir, "rev-parse", "--verify", "HEAD^{commit}"); err != nil {
-					return Worktree{}, err
-				}
+			ref, _, err := g.remoteBaseCommit(ctx, repo, false)
+			if err != nil {
+				return Worktree{}, err
+			}
+			if base, err = g.gitCmd(ctx, worktreeDir, "merge-base", "HEAD", ref); err != nil {
+				return Worktree{}, err
 			}
 		}
 	}
 	if base == "" {
 		var err error
-		if _, base, err = remoteBaseCommit(ctx, repo, true); err != nil {
+		if _, base, err = g.remoteBaseCommit(ctx, repo, true); err != nil {
 			return Worktree{}, err
 		}
-		_, _ = gitCmd(ctx, repo, "worktree", "prune")
+		_, _ = g.gitCmd(ctx, repo, "worktree", "prune")
 		if err := os.MkdirAll(filepath.Dir(worktreeDir), 0o700); err != nil {
 			return Worktree{}, err
 		}
-		if _, err := gitCmd(ctx, repo, "worktree", "add", "--no-track", "-b", branch, worktreeDir, base); err != nil {
+		if _, err := g.gitCmd(ctx, repo, "worktree", "add", "--no-track", "-b", branch, worktreeDir, base); err != nil {
 			return Worktree{}, err
 		}
 	}
@@ -678,13 +695,13 @@ func PushRemote(names []string) string {
 
 // FetchRemote fetches the push remote so the remote base and remote PR heads
 // are in the local object store.
-func FetchRemote(ctx context.Context, dir string) error {
-	_, _, err := remoteBaseCommit(ctx, dir, true)
+func (g *Git) FetchRemote(ctx context.Context, dir string) error {
+	_, _, err := g.remoteBaseCommit(ctx, dir, true)
 	return err
 }
 
-func remoteBaseCommit(ctx context.Context, repo string, fetch bool) (string, string, error) {
-	out, err := gitCmd(ctx, repo, "remote")
+func (g *Git) remoteBaseCommit(ctx context.Context, repo string, fetch bool) (string, string, error) {
+	out, err := g.gitCmd(ctx, repo, "remote")
 	if err != nil {
 		return "", "", err
 	}
@@ -693,16 +710,21 @@ func remoteBaseCommit(ctx context.Context, repo string, fetch bool) (string, str
 		return "", "", Fail(flow.ClassSettled, fmt.Errorf("world: no unique git remote in %s", repo))
 	}
 	if fetch {
-		if _, err := gitCmd(ctx, repo, "fetch", "--prune", remote); err != nil {
+		if _, err := g.gitCmd(ctx, repo, "fetch", "--prune", remote); err != nil {
 			return "", "", err
 		}
 	}
-	if ref, _ := gitCmd(ctx, repo, "symbolic-ref", "--quiet", "refs/remotes/"+remote+"/HEAD"); strings.HasPrefix(ref, "refs/remotes/"+remote+"/") {
-		if sha, err := gitCmd(ctx, repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err == nil {
-			return ref, sha, nil
+	ref, err := g.gitCmd(ctx, repo, "symbolic-ref", "--quiet", "refs/remotes/"+remote+"/HEAD")
+	if err != nil && !gitExit(err, 1) {
+		return "", "", err
+	}
+	if strings.HasPrefix(ref, "refs/remotes/"+remote+"/") {
+		sha, err := g.gitCmd(ctx, repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+		if !gitExit(err, 1) {
+			return ref, sha, err
 		}
 	}
-	ls, err := gitCmd(ctx, repo, "ls-remote", "--symref", remote, "HEAD")
+	ls, err := g.gitCmd(ctx, repo, "ls-remote", "--symref", remote, "HEAD")
 	if err != nil {
 		return "", "", err
 	}
@@ -710,8 +732,8 @@ func remoteBaseCommit(ctx context.Context, repo string, fetch bool) (string, str
 		if b, ok := strings.CutPrefix(ln, "ref: refs/heads/"); ok {
 			if b, ok = strings.CutSuffix(b, "\tHEAD"); ok && b != "" {
 				ref := "refs/remotes/" + remote + "/" + b
-				if sha, err := gitCmd(ctx, repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err == nil {
-					return ref, sha, nil
+				if sha, err := g.gitCmd(ctx, repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); !gitExit(err, 1) {
+					return ref, sha, err
 				}
 			}
 		}
@@ -721,13 +743,16 @@ func remoteBaseCommit(ctx context.Context, repo string, fetch bool) (string, str
 
 // InspectWorktree reads worktree's HEAD, its commit relation to ref, and
 // whether the working tree is clean (design.md 3.1, 7.2, 7.3).
-func InspectWorktree(ctx context.Context, worktree, ref string) (string, flow.Rel, bool, error) {
-	tip, e1 := gitCmd(ctx, worktree, "rev-parse", "--verify", "HEAD^{commit}")
-	status, e2 := gitCmd(ctx, worktree, "status", "--porcelain", "--untracked-files=normal")
-	if err := errors.Join(e1, e2); err != nil {
+func (g *Git) InspectWorktree(ctx context.Context, worktree, ref string) (string, flow.Rel, bool, error) {
+	tip, err := g.gitCmd(ctx, worktree, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
 		return "", "", false, err
 	}
-	rel, err := Relation(ctx, worktree, ref, tip)
+	status, err := g.gitCmd(ctx, worktree, "status", "--porcelain", "--untracked-files=normal")
+	if err != nil {
+		return "", "", false, err
+	}
+	rel, err := g.Relation(ctx, worktree, ref, tip)
 	if err != nil {
 		return "", "", false, err
 	}
@@ -738,23 +763,23 @@ func InspectWorktree(ctx context.Context, worktree, ref string) (string, flow.Re
 // or untracked work is never destroyed (design.md 9.4, KB-MRG-78), and git
 // itself refuses a dirty one (no --force). A worktree already gone counts
 // as removed. It reports whether the worktree is gone.
-func RemoveWorktree(ctx context.Context, repo, worktree string) (bool, error) {
+func (g *Git) RemoveWorktree(ctx context.Context, repo, worktree string) (bool, error) {
 	if _, err := os.Stat(worktree); os.IsNotExist(err) {
-		_, err = gitCmd(ctx, repo, "worktree", "prune")
+		_, err = g.gitCmd(ctx, repo, "worktree", "prune")
 		return err == nil, err
 	}
-	status, err := gitCmd(ctx, worktree, "status", "--porcelain", "--untracked-files=normal")
+	status, err := g.gitCmd(ctx, worktree, "status", "--porcelain", "--untracked-files=normal")
 	if err != nil || status != "" {
 		return false, err
 	}
-	_, err = gitCmd(ctx, repo, "worktree", "remove", worktree)
+	_, err = g.gitCmd(ctx, repo, "worktree", "remove", worktree)
 	return err == nil, err
 }
 
 // Relation is how commit x stands to ref in dir's repository: same, ahead
 // (a descendant), behind (an ancestor) or diverged (design.md 3.1).
-func Relation(ctx context.Context, dir, ref, x string) (flow.Rel, error) {
-	counts, err := gitCmd(ctx, dir, "rev-list", "--left-right", "--count", ref+"..."+x)
+func (g *Git) Relation(ctx context.Context, dir, ref, x string) (flow.Rel, error) {
+	counts, err := g.gitCmd(ctx, dir, "rev-list", "--left-right", "--count", ref+"..."+x)
 	var behind, ahead int
 	if err == nil {
 		_, err = fmt.Sscanf(counts, "%d %d", &behind, &ahead)
@@ -774,27 +799,29 @@ func Relation(ctx context.Context, dir, ref, x string) (flow.Rel, error) {
 
 // MergeBase fetches the push remote's default branch and returns the merge
 // base of head with it, computed now (design.md 9.4, KB-REV-12, KB-REV-13).
-func MergeBase(ctx context.Context, worktree, head string) (string, error) {
-	ref, _, err := remoteBaseCommit(ctx, worktree, true)
+func (g *Git) MergeBase(ctx context.Context, worktree, head string) (string, error) {
+	ref, _, err := g.remoteBaseCommit(ctx, worktree, true)
 	if err != nil {
 		return "", err
 	}
-	return gitCmd(ctx, worktree, "merge-base", head, ref)
+	return g.gitCmd(ctx, worktree, "merge-base", head, ref)
 }
 
 // DeltaRanges returns the p..c git diff range(s) of non-merge-only commits on
 // the first-parent line from since to head, leaving out clean merges of the
 // remote base branch; if since is not an ancestor of head, it returns the full
 // range mb..head (design.md 3.1, 9.4, KB-REV-12, KB-REV-13).
-func DeltaRanges(ctx context.Context, worktree, since, head string) ([]string, error) {
-	mb, err := MergeBase(ctx, worktree, head)
+func (g *Git) DeltaRanges(ctx context.Context, worktree, since, head string) ([]string, error) {
+	mb, err := g.MergeBase(ctx, worktree, head)
 	if err != nil {
 		return nil, err
 	}
-	if !isAncestor(ctx, worktree, since, head) {
+	if ancestor, err := g.isAncestor(ctx, worktree, since, head); err != nil {
+		return nil, err
+	} else if !ancestor {
 		return []string{mb + ".." + head}, nil
 	}
-	out, err := gitCmd(ctx, worktree, "rev-list", "--reverse", "--first-parent", "--parents", since+".."+head)
+	out, err := g.gitCmd(ctx, worktree, "rev-list", "--reverse", "--first-parent", "--parents", since+".."+head)
 	if err != nil {
 		return nil, err
 	}
@@ -804,7 +831,7 @@ func DeltaRanges(ctx context.Context, worktree, since, head string) ([]string, e
 		if len(f) < 2 {
 			continue
 		}
-		mc, err := inspectMergeCommit(ctx, worktree, f, mb)
+		mc, err := g.inspectMergeCommit(ctx, worktree, f, mb)
 		if err != nil {
 			return nil, err
 		}
@@ -825,18 +852,24 @@ func DeltaRanges(ctx context.Context, worktree, since, head string) ([]string, e
 	return ranges, nil
 }
 
+var ErrChangedLinesOverCap = errors.New("changed lines over cap or unreadable in full")
+
 // ChangedLines is the lines added plus removed at tip against its merge base
 // with the base branch, as git last fetched it (N12, design.md 11.5). It
 // does not fetch: it runs every pass. Every file counts as text, so no
 // attribute or NUL byte the worker commits can hide lines.
-func ChangedLines(ctx context.Context, dir, tip string) (int, error) {
-	ref, _, err := remoteBaseCommit(ctx, dir, false)
+func (g *Git) ChangedLines(ctx context.Context, dir, tip string) (int, error) {
+	ref, _, err := g.remoteBaseCommit(ctx, dir, false)
 	if err != nil {
 		return 0, err
 	}
 	// The patch, not --numstat: numstat still calls a -diff or NUL file
 	// binary under --text.
-	out, err := gitCmd(ctx, dir, "diff", "--text", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=0", ref+"..."+tip)
+	out, err := g.gitCmd(ctx, dir, "diff", "--text", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=0", ref+"..."+tip)
+	var result *GitError
+	if GitTimedOut(err) || errors.As(err, &result) && result.RPC == nil && result.Result.Truncated {
+		return 0, fmt.Errorf("%w: %w", ErrChangedLinesOverCap, err)
+	}
 	n, hunk := 0, false
 	for ln := range strings.Lines(out) {
 		switch {
@@ -854,25 +887,31 @@ func ChangedLines(ctx context.Context, dir, tip string) (int, error) {
 // MergeOnly reports whether h is ahead of x by clean merges of the base
 // branch only, on the first-parent line (design.md 3.1, 9.4). It does not
 // fetch; the decision is made by flow.MergeOnlyRows.
-func MergeOnly(ctx context.Context, dir, x, h string) (bool, error) {
-	ref, _, err := remoteBaseCommit(ctx, dir, false)
+func (g *Git) MergeOnly(ctx context.Context, dir, x, h string) (bool, error) {
+	ref, _, err := g.remoteBaseCommit(ctx, dir, false)
 	if err != nil {
 		return false, err
 	}
 	if x == h {
 		return false, nil
 	}
-	mb, err := gitCmd(ctx, dir, "merge-base", h, ref)
-	if err != nil || !isAncestor(ctx, dir, x, h) { // no common ancestor is "not merge_only"; only a cancelled read is an error
-		return false, ctx.Err()
+	mb, err := g.gitCmd(ctx, dir, "merge-base", h, ref)
+	if err != nil {
+		if gitExit(err, 1) { // no common ancestor
+			return false, nil
+		}
+		return false, err
 	}
-	out, err := gitCmd(ctx, dir, "rev-list", "--first-parent", "--parents", x+".."+h)
+	if ancestor, err := g.isAncestor(ctx, dir, x, h); err != nil || !ancestor {
+		return false, err
+	}
+	out, err := g.gitCmd(ctx, dir, "rev-list", "--first-parent", "--parents", x+".."+h)
 	if err != nil || out == "" {
 		return false, err
 	}
 	var commits []flow.MergeCommit
 	for ln := range strings.Lines(out) {
-		mc, err := inspectMergeCommit(ctx, dir, strings.Fields(ln), mb)
+		mc, err := g.inspectMergeCommit(ctx, dir, strings.Fields(ln), mb)
 		if err != nil {
 			return false, err
 		}
@@ -881,24 +920,24 @@ func MergeOnly(ctx context.Context, dir, x, h string) (bool, error) {
 	return flow.IsMergeOnly(flow.MergeOnlyIn{Rel: flow.RelAhead, Commits: commits}), nil
 }
 
-func inspectMergeCommit(ctx context.Context, dir string, f []string, mb string) (flow.MergeCommit, error) {
+func (g *Git) inspectMergeCommit(ctx context.Context, dir string, f []string, mb string) (flow.MergeCommit, error) {
 	c := flow.MergeCommit{Parents: max(0, len(f)-1)}
 	if c.Parents != 2 {
 		return c, nil
 	}
-	c.SecondInBase = isAncestor(ctx, dir, f[2], mb)
-	if !c.SecondInBase {
-		return c, ctx.Err()
+	ancestor, err := g.isAncestor(ctx, dir, f[2], mb)
+	c.SecondInBase = ancestor
+	if err != nil || !ancestor {
+		return c, err
 	}
-	want, err := gitCmd(ctx, dir, "merge-tree", "--write-tree", f[1], f[2])
+	want, err := g.gitCmd(ctx, dir, "merge-tree", "--write-tree", f[1], f[2])
 	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) && ee.ExitCode() == 1 && ctx.Err() == nil {
+		if gitExit(err, 1) {
 			return c, nil // merge conflict: not a clean merge
 		}
 		return c, err
 	}
-	got, err := gitCmd(ctx, dir, "rev-parse", f[0]+"^{tree}")
+	got, err := g.gitCmd(ctx, dir, "rev-parse", f[0]+"^{tree}")
 	if err != nil {
 		return c, err
 	}
@@ -906,25 +945,12 @@ func inspectMergeCommit(ctx context.Context, dir string, f []string, mb string) 
 	return c, nil
 }
 
-func isAncestor(ctx context.Context, dir, a, b string) bool {
-	_, err := gitCmd(ctx, dir, "merge-base", "--is-ancestor", a, b)
-	return err == nil
-}
-
-func gitCmd(ctx context.Context, dir string, args ...string) (string, error) {
-	gctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(gctx, "git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		if gctx.Err() != nil {
-			return "", Fail(flow.ClassTimeout, fmt.Errorf("%w: %v: %s", gctx.Err(), err, strings.TrimSpace(string(out))))
-		}
-		raw := fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
-		return "", Fail(FailureClass(raw), raw)
+func (g *Git) isAncestor(ctx context.Context, dir, a, b string) (bool, error) {
+	_, err := g.gitCmd(ctx, dir, "merge-base", "--is-ancestor", a, b)
+	if gitExit(err, 1) {
+		return false, nil
 	}
-	return strings.TrimSpace(string(out)), nil
+	return err == nil, err
 }
 
 func randID() string { return fmt.Sprintf("%08x", rand.Uint32()) }

@@ -20,19 +20,19 @@ func TestMergePRPinnedSquash(t *testing.T) {
 	repo, _ := repoWithGitHubOrigin(t)
 	gh := installFakeGH(t)
 	head := strings.Repeat("c", 40)
-	if err := MergePR(ctx, repo, 7, head, "body"); err != nil {
+	if err := fixtureGit(t).MergePR(ctx, repo, 7, head, "body"); err != nil {
 		t.Fatal(err)
 	}
 	if got := ghCalls(t, gh, "pr merge"); len(got) != 1 || got[0] != "pr merge 7 --repo acme/demo --squash --match-head-commit "+head+" --body body" {
 		t.Fatalf("merge argv = %q", got)
 	}
-	if MergePR(ctx, repo, 0, head, "b") == nil || MergePR(ctx, repo, 7, "", "b") == nil || len(ghCalls(t, gh, "pr merge")) != 1 {
+	if fixtureGit(t).MergePR(ctx, repo, 0, head, "b") == nil || fixtureGit(t).MergePR(ctx, repo, 7, "", "b") == nil || len(ghCalls(t, gh, "pr merge")) != 1 {
 		t.Fatalf("merge without a number or head: calls %q", ghCalls(t, gh, ""))
 	}
 	if err := os.WriteFile(filepath.Join(gh, "merge_fail"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := MergePR(ctx, repo, 7, head, "b"); err == nil || !strings.Contains(err.Error(), "Head branch was modified") {
+	if err := fixtureGit(t).MergePR(ctx, repo, 7, head, "b"); err == nil || !strings.Contains(err.Error(), "Head branch was modified") {
 		t.Fatalf("refused merge err = %v", err)
 	}
 }
@@ -60,7 +60,7 @@ func TestRemoveWorktreeOnlyClean(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(wt, "wip.txt"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if gone, err := RemoveWorktree(ctx, repo, wt); err != nil || gone {
+	if gone, err := fixtureGit(t).RemoveWorktree(ctx, repo, wt); err != nil || gone {
 		t.Fatalf("dirty worktree: gone=%v err=%v", gone, err)
 	}
 	if _, err := os.Stat(filepath.Join(wt, "wip.txt")); err != nil {
@@ -70,7 +70,7 @@ func TestRemoveWorktreeOnlyClean(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if gone, err := RemoveWorktree(ctx, repo, wt); err != nil || !gone {
+		if gone, err := fixtureGit(t).RemoveWorktree(ctx, repo, wt); err != nil || !gone {
 			t.Fatalf("clean worktree: gone=%v err=%v", gone, err)
 		}
 	}
@@ -86,14 +86,14 @@ func TestDeleteRemoteBranchIdempotent(t *testing.T) {
 	repo, bare := repoWithGitHubOrigin(t)
 	runGit(t, repo, "push", "origin", "HEAD:refs/heads/task/x")
 	for range 2 {
-		if err := DeleteRemoteBranch(ctx, repo, "task/x"); err != nil {
+		if err := fixtureGit(t).DeleteRemoteBranch(ctx, repo, "task/x"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if out := runGit(t, bare, "branch", "--list", "task/x"); out != "" {
 		t.Fatalf("remote branch still there: %q", out)
 	}
-	if DeleteRemoteBranch(ctx, repo, "") == nil {
+	if fixtureGit(t).DeleteRemoteBranch(ctx, repo, "") == nil {
 		t.Fatal("empty branch accepted")
 	}
 }
@@ -102,7 +102,7 @@ func TestClosePR(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := repoWithGitHubOrigin(t)
 	gh := installFakeGH(t)
-	if err := ClosePR(ctx, repo, 7, "split into T1a, T1b"); err != nil {
+	if err := fixtureGit(t).ClosePR(ctx, repo, 7, "split into T1a, T1b"); err != nil {
 		t.Fatal(err)
 	}
 	got := ghCalls(t, gh, "pr close")
@@ -112,7 +112,7 @@ func TestClosePR(t *testing.T) {
 	if strings.Contains(got[0], "--delete-branch") {
 		t.Fatalf("close passed --delete-branch: %q", got[0])
 	}
-	if ClosePR(ctx, repo, 0, "note") == nil || ClosePR(ctx, repo, 7, "  ") == nil || len(ghCalls(t, gh, "pr close")) != 1 {
+	if fixtureGit(t).ClosePR(ctx, repo, 0, "note") == nil || fixtureGit(t).ClosePR(ctx, repo, 7, "  ") == nil || len(ghCalls(t, gh, "pr close")) != 1 {
 		t.Fatalf("close without number or note called gh: %q", ghCalls(t, gh, ""))
 	}
 }

@@ -316,7 +316,7 @@ func TestEngineViewsLockFreeCorruptStateAndBadLogLine(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 	// Hold the engine lock (simulating a pass in flight) and verify reads still return.
 	eng.mu.Lock()
 	defer eng.mu.Unlock()

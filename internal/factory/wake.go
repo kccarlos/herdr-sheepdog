@@ -157,10 +157,13 @@ func (e *Engine) sweepProjectLocked(ctx context.Context, id string, s *flow.Stat
 		return
 	}
 	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
-	probes := world.Sweep(gctx, e.HC, s.Project.Folder, filepath.Join(e.Paths.project(id), "worktrees"), *s)
+	probes := e.git.Sweep(gctx, e.HC, s.Project.Folder, filepath.Join(e.Paths.project(id), "worktrees"), *s)
 	cancel()
 	for _, p := range probes {
-		e.logOnce("factory.sweep_unknown", id, p.Probe, map[bool]error{true: fmt.Errorf("%s", p.Unknown)}[p.Unknown != ""])
+		if p.Unknown == world.ErrGitSuppressed.Error() {
+			continue
+		}
+		e.logOnce("factory.sweep_unknown", id, id+"/"+p.Probe, map[bool]error{true: fmt.Errorf("%s", p.Unknown)}[p.Unknown != ""])
 	}
 	s.Project.Acts = append(slices.DeleteFunc(s.Project.Acts, func(a flow.Act) bool { return a.Key == "sweep" }), flow.Act{Key: "sweep", Result: "done", At: now})
 	var asked, whys []string

@@ -35,11 +35,15 @@ func (e *Engine) execMerge(ctx context.Context, id string, s *flow.State, ti int
 	h, num := flow.H(*a), cmp.Or(a.PR, f.PR.Number)
 	gctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
-	tip, rel, _, err := world.InspectWorktree(gctx, a.Worktree, h)
+	gitCtx, cancelGit := context.WithTimeout(gctx, lockGitTimeout)
+	tip, rel, _, err := e.git.InspectWorktree(gitCtx, a.Worktree, h)
+	cancelGit()
 	if err != nil {
 		return "", false, err
 	}
-	lines, linesTO, tipMO, err := e.readTipLocked(gctx, *a, tip, rel)
+	gitCtx, cancelGit = context.WithTimeout(gctx, lockGitTimeout)
+	lines, linesTO, tipMO, err := e.readTipLocked(gitCtx, *a, tip, rel)
+	cancelGit()
 	if err != nil {
 		return "", false, err
 	}
@@ -58,7 +62,7 @@ func (e *Engine) execMerge(ctx context.Context, id string, s *flow.State, ti int
 		return fmt.Sprintf("merge called off on fresh check (row %s)", r.ID), true, nil
 	}
 	num = cmp.Or(num, p.Number)
-	return fmt.Sprintf("asked GitHub to merge PR #%d at %s", num, h), false, world.MergePR(gctx, s.Project.Folder, num, h, prBody(t))
+	return fmt.Sprintf("asked GitHub to merge PR #%d at %s", num, h), false, e.git.MergePR(gctx, s.Project.Folder, num, h, prBody(t))
 }
 
 // execMarkDone is N2: done{merged commit} from the snapshot that reads merged.
@@ -89,13 +93,13 @@ func (e *Engine) execCleanup(ctx context.Context, id string, s *flow.State, ti i
 	gctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
 	if t.Done != nil {
-		if err := world.DeleteRemoteBranch(gctx, s.Project.Folder, a.Branch); err != nil {
+		if err := e.git.DeleteRemoteBranch(gctx, s.Project.Folder, a.Branch); err != nil {
 			return "", false, err
 		}
 		steps = append(steps, "deleted remote branch "+a.Branch)
 	}
 	if note := closePRNote(*t); note != "" {
-		closed, err := closeOpenPR(gctx, s.Project.Folder, a, note)
+		closed, err := e.closeOpenPR(gctx, s.Project.Folder, a, note)
 		if err != nil {
 			return "", false, err
 		} else if closed {
@@ -112,7 +116,7 @@ func (e *Engine) execCleanup(ctx context.Context, id string, s *flow.State, ti i
 			return strings.Join(append(steps, "kept worktree "+a.Worktree+" (live terminal inside)"), "; "), false, nil
 		}
 	}
-	removed, err := world.RemoveWorktree(gctx, s.Project.Folder, a.Worktree)
+	removed, err := e.git.RemoveWorktree(gctx, s.Project.Folder, a.Worktree)
 	switch {
 	case err != nil:
 		return "", false, err
@@ -137,13 +141,13 @@ func closePRNote(t flow.Task) string {
 }
 
 // closeOpenPR closes a's PR with note when GitHub still reads it open.
-func closeOpenPR(ctx context.Context, folder string, a flow.Attempt, note string) (bool, error) {
+func (e *Engine) closeOpenPR(ctx context.Context, folder string, a flow.Attempt, note string) (bool, error) {
 	if a.PR <= 0 {
 		return false, nil
 	}
-	p, _, err := world.PRSnapshot(ctx, folder, a.Branch, a.PR)
+	p, _, err := e.git.PRSnapshot(ctx, folder, a.Branch, a.PR)
 	if err != nil || p.State != flow.PROpen {
 		return false, err
 	}
-	return true, world.ClosePR(ctx, folder, a.PR, note)
+	return true, e.git.ClosePR(ctx, folder, a.PR, note)
 }

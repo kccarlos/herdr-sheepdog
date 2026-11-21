@@ -28,7 +28,7 @@ func TestWorkerDiedMidTurnSeenAsGone(t *testing.T) {
 			paths := testPaths(t)
 			repo, _ := initGitRepoWithRemote(t)
 			now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
-			eng := New(paths, client)
+			eng := newGitTestEngine(t, paths, client)
 			eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 			eng.Now = func() time.Time { return now }
 			if err := eng.Start(repo, "Goal", 2); err != nil {
@@ -104,7 +104,7 @@ func TestStartTrustScreenToldApartFromBlank(t *testing.T) {
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
 	now := time.Date(2026, 11, 20, 11, 0, 0, 0, time.UTC)
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 	eng.Now = func() time.Time { return now }
 	if err := eng.Start(repo, "Goal", 4); err != nil {
@@ -206,7 +206,7 @@ func TestRunStateSurvivesRestart(t *testing.T) {
 	repo, _ := initGitRepoWithRemote(t)
 	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
 
-	eng1 := New(paths, client)
+	eng1 := newGitTestEngine(t, paths, client)
 	eng1.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 	eng1.Now = func() time.Time { return now }
 	if err := eng1.Start(repo, "Goal", 1); err != nil {
@@ -247,7 +247,7 @@ func TestRunStateSurvivesRestart(t *testing.T) {
 
 	// Fresh Engine instance after daemon restart: live idle run stays idle with same ID, StartedAt and LastTurnEnd.
 	now = now.Add(3 * time.Minute)
-	eng2 := New(paths, client)
+	eng2 := newGitTestEngine(t, paths, client)
 	eng2.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 	eng2.Now = func() time.Time { return now }
 	eng2.passProject(ctx, id, true)
@@ -269,7 +269,7 @@ func TestIdleRunWithLimitProseStaysIdle(t *testing.T) {
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
 	now := time.Date(2026, 11, 20, 13, 0, 0, 0, time.UTC)
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 	eng.Now = func() time.Time { return now }
 	if err := eng.Start(repo, "Goal", 1); err != nil {
@@ -322,7 +322,7 @@ func TestQuietRunInterruptedOnceThenEndedStuck(t *testing.T) {
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
 	now := time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 	eng.Now = func() time.Time { return now }
 	if err := eng.Start(repo, "Goal", 1); err != nil {

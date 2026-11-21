@@ -47,7 +47,7 @@ func newLanding(t *testing.T) *landing {
 		t.Fatal(err)
 	}
 	l.id = l.eng.projectDirs()[0].Name()
-	wt, err := world.NewWorktree(ctx, repo, l.paths.Worktree(l.id, "T1", 1), "T1-1", "feat: x")
+	wt, err := fixtureGit(t).NewWorktree(ctx, repo, l.paths.Worktree(l.id, "T1", 1), "T1-1", "feat: x")
 	if err != nil {
 		t.Fatal(err)
 	}

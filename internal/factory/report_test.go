@@ -33,7 +33,7 @@ func TestRunTokenInEnvNotArgvOrLog(t *testing.T) {
 	var got hc.RunParams
 	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { got = p }
 	var logBuf bytes.Buffer
-	eng := New(testPaths(t), hc.NewClient(srv.Path))
+	eng := newGitTestEngine(t, testPaths(t), hc.NewClient(srv.Path))
 	eng.Log = logging.NewJSONLLogger(&logBuf)
 	eng.RunEnv = map[string]string{"SHEEPDOG_WEB_PORT": "17777"}
 	repo := initGitRepo(t)
@@ -85,7 +85,7 @@ func TestRunTokenInEnvNotArgvOrLog(t *testing.T) {
 // TestFailedLaunchClearsToken: when the pass finds the coordinator gone and
 // cannot start it, no token is left that a run could report with.
 func TestFailedLaunchClearsToken(t *testing.T) {
-	eng := New(testPaths(t), hc.NewClient(hctest.New(t).Path))
+	eng := newGitTestEngine(t, testPaths(t), hc.NewClient(hctest.New(t).Path))
 	if err := eng.Start(initGitRepo(t), "a goal", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func refusalCode(err error) string {
 // plan apply's Shape and Apply checks (design.md 7.2, 11.7; KB-REV-5).
 func TestReportAcceptance(t *testing.T) {
 	var logBuf bytes.Buffer
-	eng := New(testPaths(t), nil)
+	eng := newGitTestEngine(t, testPaths(t), nil)
 	eng.Log = logging.NewJSONLLogger(&logBuf)
 	coord := flow.State{Seq: 1, Settings: flow.DefaultSettings(), Project: flow.Project{ID: "proj-a", Started: true, RunTokenHash: tokenHash("tok-coord-a")}}
 	worker := flow.State{Seq: 1, Project: flow.Project{ID: "proj-b", Started: true, RunTokenHash: tokenHash("tok-coord-b")},
@@ -222,10 +222,10 @@ func TestReportReadyAcceptance(t *testing.T) {
 	ctx := context.Background()
 	paths := testPaths(t)
 	repo, baseSHA := initGitRepoWithRemote(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 
 	const projID = "proj-ready"
-	created, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: x")
+	created, err := fixtureGit(t).NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: x")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestVerdictAcceptance(t *testing.T) {
 	client := hc.NewClient(srv.Path)
 	paths := testPaths(t)
 	var logBuf bytes.Buffer
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.Log = logging.NewJSONLLogger(&logBuf)
 
 	const projID = "proj-verdict"
@@ -479,11 +479,11 @@ func TestReportReadyRejectAcceptance(t *testing.T) {
 	paths := testPaths(t)
 	repo, baseSHA := initGitRepoWithRemote(t)
 	var logBuf bytes.Buffer
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 	eng.Log = logging.NewJSONLLogger(&logBuf)
 
 	const projID = "proj-reject"
-	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: add constant")
+	wt, err := fixtureGit(t).NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: add constant")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,10 +615,10 @@ func TestReportReadyRejectWhySanitizeAndLength(t *testing.T) {
 	ctx := context.Background()
 	paths := testPaths(t)
 	repo, baseSHA := initGitRepoWithRemote(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 
 	const projID = "proj-reject-why"
-	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: clean why")
+	wt, err := fixtureGit(t).NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: clean why")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -701,10 +701,10 @@ func TestReportReadyRejectRefusedWhenLadderSaysRecap(t *testing.T) {
 	ctx := context.Background()
 	paths := testPaths(t)
 	repo, baseSHA := initGitRepoWithRemote(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 
 	const projID = "proj-reject-recap"
-	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: x")
+	wt, err := fixtureGit(t).NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: x")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -774,7 +774,7 @@ func TestReportReadyRejectRefusedWhenLadderSaysRecap(t *testing.T) {
 func TestRecapDecideAcceptance(t *testing.T) {
 	paths := testPaths(t)
 	var logBuf bytes.Buffer
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 	eng.Log = logging.NewJSONLLogger(&logBuf)
 	const id = "proj-recap"
 
@@ -873,7 +873,7 @@ func TestRecapDecideAcceptance(t *testing.T) {
 // decidable, and the why is cleaned and capped like a reject why.
 func TestRecapDecideRefusesEndedTaskAndCleansWhy(t *testing.T) {
 	paths := testPaths(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 	const id = "proj-recap-ended"
 	save := func(done bool) {
 		t.Helper()
@@ -921,7 +921,7 @@ func TestRecapDecideRefusesEndedTaskAndCleansWhy(t *testing.T) {
 // Conventional Commit subjects everywhere.
 func TestPlanScopeAndTitle(t *testing.T) {
 	paths := testPaths(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 	const id = "proj-scope"
 	st := flow.State{
 		Seq:      1,
@@ -1032,7 +1032,7 @@ func strconvQuote(s string) string {
 // rejected in plans/amends/splits.
 func TestPlanOutcomesProvedBy(t *testing.T) {
 	paths := testPaths(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 	const id = "proj-outcomes"
 	st := flow.State{
 		Seq:      1,
@@ -1160,10 +1160,10 @@ func TestReportReadyProofs(t *testing.T) {
 	ctx := context.Background()
 	paths := testPaths(t)
 	repo, baseSHA := initGitRepoWithRemote(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 
 	const projID = "proj-proofs"
-	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: proofs")
+	wt, err := fixtureGit(t).NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: proofs")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1292,10 +1292,10 @@ func TestReportReadyTouchedSkippedAndRawCommand(t *testing.T) {
 	ctx := context.Background()
 	paths := testPaths(t)
 	repo, baseSHA := initGitRepoWithRemote(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 
 	const projID = "proj-touched"
-	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: touched")
+	wt, err := fixtureGit(t).NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: touched")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1407,10 +1407,10 @@ func TestReportReadyProofCleaningCapsAndPathGuard(t *testing.T) {
 	ctx := context.Background()
 	paths := testPaths(t)
 	repo, baseSHA := initGitRepoWithRemote(t)
-	eng := New(paths, nil)
+	eng := newGitTestEngine(t, paths, nil)
 
 	const projID = "proj-proof-clean"
-	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: clean")
+	wt, err := fixtureGit(t).NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: clean")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1743,10 +1743,10 @@ func TestVerdictRefusalTellsReviewerOnce(t *testing.T) {
 	client := hc.NewClient(srv.Path)
 	paths := testPaths(t)
 	repo, baseSHA := initGitRepoWithRemote(t)
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 
 	const projID = "proj-refuse-tell"
-	wt, err := world.NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: x")
+	wt, err := fixtureGit(t).NewWorktree(ctx, repo, paths.Worktree(projID, "T1", 1), "T1", "feat: x")
 	if err != nil {
 		t.Fatal(err)
 	}

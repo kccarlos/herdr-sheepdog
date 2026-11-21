@@ -60,7 +60,7 @@ func TestJ12HeldWakesOneBatchWhenIdle(t *testing.T) {
 	srv := hctest.New(t)
 	client := hc.NewClient(srv.Path)
 	paths := testPaths(t)
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	const id = "proj-wake"
 	at := time.Now()
 	st := flow.State{Seq: 1, Project: flow.Project{ID: id, Folder: t.TempDir(), Started: true, RunID: "gone1", Acts: []flow.Act{{Key: flow.AskStartCoordinator, Result: "done", At: at}}}, Settings: flow.DefaultSettings()}
@@ -124,7 +124,7 @@ func TestReviewerRetriesFailureWakesOnce(t *testing.T) {
 	repo, _ := initGitRepoWithRemote(t)
 	githubOrigin(t, repo)
 	gh := installFakeGH(t)
-	eng := New(paths, client)
+	eng := newGitTestEngine(t, paths, client)
 	eng.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 	if err := eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
@@ -244,7 +244,7 @@ func TestJ12DeliveryAtLeastOnce(t *testing.T) {
 	var fail atomic.Bool
 	fail.Store(true)
 	paths := testPaths(t)
-	eng := New(paths, hc.NewClient(sendFailProxy(t, srv.Path, &fail)))
+	eng := newGitTestEngine(t, paths, hc.NewClient(sendFailProxy(t, srv.Path, &fail)))
 	const id = "proj-once"
 	pastMS := uint64(time.Now().Add(-time.Minute).UnixMilli())
 	srv.Add(hc.Terminal{Address: "coord1", Name: "coord", State: "live", Labels: testCoordLabels(id, "run-coord1"), Status: &hc.Status{App: "claude-code", State: "idle"}, StatusMS: &pastMS})

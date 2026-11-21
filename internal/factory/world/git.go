@@ -1,0 +1,202 @@
+package world
+
+import (
+	"cmp"
+	"context"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+)
+
+const (
+	// herdr-core sweep.rs waits HUP 0.5 s, TERM 0.5 s, and KILL 2 s.
+	// exec.rs then reaps the child and allows up to 2 s for pipe drain.
+	gitReplyGrace     = 6 * time.Second
+	gitLocalLimit     = 20 * time.Second
+	gitNetworkLimit   = 40 * time.Second
+	GitStageTimeout   = gitLocalLimit + gitReplyGrace + 2*time.Second
+	GitNetworkTimeout = gitNetworkLimit + gitReplyGrace + 2*time.Second
+	GitPassTimeout    = 90 * time.Second
+	gitBackoff        = 30 * time.Second
+	maxGitBackoff     = 5 * time.Minute
+	maxGitEpisodes    = 128
+)
+
+var ErrGitSuppressed = errors.New("git temporarily suppressed after an exec deadline")
+
+type gitRepoKey struct{}
+
+// GitRepository shares the repository's back-off across its worktrees.
+func GitRepository(ctx context.Context, folder string) context.Context {
+	if abs, err := filepath.Abs(folder); folder != "" && err == nil {
+		return context.WithValue(ctx, gitRepoKey{}, abs)
+	}
+	return ctx
+}
+
+// Git runs project Git commands in herdr-core's login session.
+type Git struct {
+	client   *hc.Client
+	now      func() time.Time
+	log      func(event, folder string)
+	mu       sync.Mutex
+	episodes map[string]gitEpisode
+}
+
+type gitEpisode struct {
+	until time.Time
+	delay time.Duration
+}
+
+func NewGit(client *hc.Client, now func() time.Time, log func(event, folder string)) *Git {
+	if now == nil {
+		now = time.Now
+	}
+	return &Git{client: client, now: now, log: log, episodes: make(map[string]gitEpisode)}
+}
+
+// GitError carries the child outcome together with any RPC failure.
+type GitError struct {
+	Result     hc.ExecResult
+	RPC        error
+	suppressed bool
+}
+
+func (e *GitError) Error() string {
+	switch {
+	case e.suppressed:
+		return ErrGitSuppressed.Error()
+	case e.RPC != nil:
+		return e.RPC.Error()
+	case e.Result.TimedOut:
+		return "git child timed out"
+	case e.Result.Truncated:
+		return "git output truncated by herdr-core"
+	case e.Result.Signal != nil:
+		return fmt.Sprintf("git killed by signal %d: %s", *e.Result.Signal, strings.TrimSpace(string(e.Result.Stderr)))
+	case e.Result.Code != nil:
+		return fmt.Sprintf("git exit status %d: %s", *e.Result.Code, strings.TrimSpace(string(e.Result.Stderr)))
+	default:
+		return "herdr-core returned no git exit status"
+	}
+}
+
+func (e *GitError) Is(err error) bool { return e.suppressed && err == ErrGitSuppressed }
+
+func (e *GitError) Unwrap() error {
+	if e.RPC == nil && e.Result.TimedOut {
+		return context.DeadlineExceeded
+	}
+	return e.RPC
+}
+
+// GitTimedOut reports a deadline confirmed by herdr-core for the child.
+func GitTimedOut(err error) bool {
+	var e *GitError
+	return errors.As(err, &e) && e.RPC == nil && e.Result.TimedOut
+}
+
+func gitExit(err error, code int) bool {
+	var e *GitError
+	return errors.As(err, &e) && e.RPC == nil && !e.Result.TimedOut && !e.Result.Truncated &&
+		e.Result.Signal == nil && e.Result.Code != nil && *e.Result.Code == code
+}
+
+func (g *Git) suppressed(repo string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.now().Before(g.episodes[repo].until)
+}
+
+// finishProbe keeps a bounded episode history across expired cooldowns.
+func (g *Git) finishProbe(repo string, stalled bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	episode, active := g.episodes[repo]
+	if stalled {
+		if !active && len(g.episodes) == maxGitEpisodes {
+			for old := range g.episodes {
+				delete(g.episodes, old)
+				break
+			}
+		}
+		delay := min(maxGitBackoff, max(gitBackoff, 2*episode.delay))
+		g.episodes[repo] = gitEpisode{until: g.now().Add(delay), delay: delay}
+		if !active && g.log != nil {
+			g.log("factory.git_suppressed", repo)
+		}
+	} else if active {
+		delete(g.episodes, repo)
+		if g.log != nil {
+			g.log("factory.git_recovered", repo)
+		}
+	}
+}
+
+// Run returns the complete captured child result or an error.
+func (g *Git) Run(ctx context.Context, dir string, args ...string) (hc.ExecResult, error) {
+	if g == nil || g.client == nil {
+		return hc.ExecResult{}, &GitError{RPC: errors.New("git requires a herdr-core client")}
+	}
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return hc.ExecResult{}, &GitError{RPC: err}
+	}
+	folder, _ := ctx.Value(gitRepoKey{}).(string)
+	repo := cmp.Or(folder, dir)
+	if g.suppressed(repo) {
+		return hc.ExecResult{}, ErrGitSuppressed
+	}
+	verb := ""
+	if len(args) > 0 {
+		verb = args[0]
+	}
+	budget, grace := gitLocalLimit, gitReplyGrace
+	network := verb == "push" || verb == "fetch" || verb == "ls-remote"
+	if network {
+		budget = gitNetworkLimit
+	}
+	if end, ok := ctx.Deadline(); ok {
+		left := time.Until(end)
+		if left <= 0 {
+			return hc.ExecResult{}, &GitError{RPC: context.DeadlineExceeded}
+		}
+		// Leave time to recognize an RPC deadline before the stage expires.
+		left -= min(500*time.Millisecond, left/6)
+		if left <= grace {
+			grace = left / 3
+		}
+		budget = min(budget, left-grace)
+	}
+	limit := budget.Seconds()
+	client := *g.client
+	client.Timeout = budget + grace
+	// Exec's own timeout floor can exceed the available reply window.
+	callCtx, cancel := context.WithTimeout(ctx, client.Timeout)
+	defer cancel()
+	r, err := client.Exec(callCtx, hc.ExecParams{
+		Cwd: dir, Argv: append([]string{"git"}, args...), Timeout: &limit,
+		Env: map[string]string{"GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": ""},
+	})
+	stalled := !network && verb != "diff" && (r.TimedOut || errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil)
+	if stalled || err == nil && !r.TimedOut && r.Code != nil && r.Signal == nil {
+		g.finishProbe(repo, stalled)
+	}
+	if err != nil || r.TimedOut || r.Truncated || r.Signal != nil || r.Code == nil || *r.Code != 0 {
+		return r, &GitError{Result: r, RPC: err, suppressed: stalled}
+	}
+	return r, nil
+}
+
+func (g *Git) gitCmd(ctx context.Context, dir string, args ...string) (string, error) {
+	r, err := g.Run(ctx, dir, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(r.Stdout)), nil
+}

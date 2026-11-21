@@ -110,7 +110,7 @@ func TestBaseRedPastMainRedMinutesOldestTaskOnce(t *testing.T) {
 	l := newLanding(t)
 	ctx := context.Background()
 	// Add a second (younger) task T2 also passed and behind.
-	wt2, err := world.NewWorktree(ctx, l.repo, l.paths.Worktree(l.id, "T2", 1), "T2-1", "feat: y")
+	wt2, err := fixtureGit(t).NewWorktree(ctx, l.repo, l.paths.Worktree(l.id, "T2", 1), "T2-1", "feat: y")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestBaseRedSurvivesRestartAndStopStart(t *testing.T) {
 	l.pass()
 
 	// Daemon restarts with a brand-new Engine; a second failing push landed on main while down.
-	eng2 := New(l.paths, l.client)
+	eng2 := newGitTestEngine(t, l.paths, l.client)
 	eng2.Bin = l.eng.Bin
 	writeGHFile(t, l.gh, "base-ref.json", `{"object":{"sha":"redsha2"}}`)
 	writeBaseRuns(t, l.gh, `{"workflow_runs":[{"id":602,"head_sha":"redsha2","status":"completed","conclusion":"failure"}]}`)
@@ -281,7 +281,7 @@ func TestBaseRedSurvivesRestartAndStopStart(t *testing.T) {
 		s.Project.Base.Since = time.Now().Add(-time.Duration(s.Settings.MainRedMinutes+1) * time.Minute)
 	})
 	eng2.passProject(context.Background(), l.id, false)
-	eng3 := New(l.paths, l.client)
+	eng3 := newGitTestEngine(t, l.paths, l.client)
 	eng3.Bin = l.eng.Bin
 	eng3.passProject(context.Background(), l.id, false)
 	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 1 {

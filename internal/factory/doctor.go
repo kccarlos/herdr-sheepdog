@@ -173,9 +173,13 @@ func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 func checkSweepLeftovers(ctx context.Context, o DoctorOptions, hcOK bool, dir string) (out []onboard.Result) {
 	gctx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	defer cancel()
-	repo, id, err := world.RepoProject(gctx, dir, false)
+	git := world.NewGit(hc.NewClient(o.HCSocket), nil, nil)
+	repo, id, err := git.RepoProject(gctx, dir, false)
 	if err != nil {
-		return nil
+		if _, lookupErr := findStoredProject(Paths{DataDir: o.DataDir}, dir); lookupErr != nil {
+			return nil
+		}
+		return []onboard.Result{resWarn("sweep terminals", "unknown: "+cleanReason(map[bool]string{false: "no hc client", true: err.Error()}[hcOK]), "check terminals manually")}
 	}
 	s, wtRoot, p, stateWhy, client := flow.State{}, "", Paths{DataDir: o.DataDir}, "", (*hc.Client)(nil)
 	var findErr error
@@ -198,7 +202,7 @@ func checkSweepLeftovers(ctx context.Context, o DoctorOptions, hcOK bool, dir st
 	} else {
 		out = append(out, resSkip("sweep", "leftover checks skipped: this folder has no factory project yet"))
 	}
-	for _, pr := range world.Sweep(gctx, client, repo, wtRoot, s) {
+	for _, pr := range git.Sweep(gctx, client, repo, wtRoot, s) {
 		if id == "" && pr.Probe != "local_base" {
 			continue
 		}
@@ -856,7 +860,21 @@ func canaryTimeoutResult(cliName string, o DoctorOptions, canaryDir string, inHC
 // pane, so macOS attributes file-access consent prompts to herdr-core and
 // doctor catches missing PATH/auth entries that factory workers would hit.
 func hcExecRunner(socket string) CommandFunc {
+	client := hc.NewClient(socket)
+	git := world.NewGit(client, nil, nil)
 	return func(ctx context.Context, dir string, extraEnv []string, argv ...string) CommandOutput {
+		if argv[0] == "git" {
+			args := argv[1:]
+			if len(args) >= 2 && args[0] == "-C" {
+				dir, args = args[1], args[2:]
+			}
+			r, err := git.Run(ctx, dir, args...)
+			out := CommandOutput{Exit: -1, Stdout: string(r.Stdout), Stderr: string(r.Stderr), TimedOut: r.TimedOut, Err: err}
+			if r.Code != nil && !r.Truncated && r.Signal == nil && !r.TimedOut {
+				out.Exit, out.Err = *r.Code, nil
+			}
+			return out
+		}
 		start := time.Now()
 		sec := defaultCanaryTimeout.Seconds()
 		if dl, ok := ctx.Deadline(); ok {
@@ -864,7 +882,6 @@ func hcExecRunner(socket string) CommandFunc {
 				sec = rem
 			}
 		}
-		client := hc.NewClient(socket)
 		res, err := client.Exec(ctx, hc.ExecParams{
 			Argv:    append([]string{"sh", "-c", cleanExecScript, "sh"}, argv...),
 			Cwd:     dir,
