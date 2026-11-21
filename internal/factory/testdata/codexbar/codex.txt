@@ -1,0 +1,8 @@
+== Codex 0.171.0 (oauth) ==
+Weekly: 9% left [=-----------]
+Pace: 37% in deficit | Expected 54% used | Runs out in 8h 57m
+Resets in 3d 5h
+Credits: 0 left
+Limit Reset Credits: 0 available
+Account: account@example.invalid
+Plan: Plus

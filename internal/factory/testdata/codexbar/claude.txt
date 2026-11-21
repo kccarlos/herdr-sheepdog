@@ -1,0 +1,10 @@
+== Claude (web) ==
+Session: 75% left [=========---]
+Pace: 51% in reserve | Expected 76% used | Lasts until reset
+Resets in 1h 13m
+Weekly: 11% left [=-----------]
+Pace: 6% in deficit | Expected 83% used | Runs out in 17h 10m
+Resets in 1d 5h
+Limit Reset Credits: 2 available · Expires Dec 15 at 8:59 PM
+Account: account@example.invalid
+Plan: Claude Max 5x
