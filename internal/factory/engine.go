@@ -49,15 +49,16 @@ type Engine struct {
 	Bin          string                        // sheepdog binary named in run prompts
 	RunEnv       map[string]string             // added to every run's environment (daemon port)
 
-	mu        sync.Mutex
-	wake      chan struct{}
-	lastPass  map[string]time.Time // monotonic reading of previous pass per project (design.md 2.5)
-	prs       map[string]flow.PR   // last PR snapshot per attempt worktree (in memory)
-	errs      map[string]string    // last gh or git error per worktree and kind, logged once per change
-	tips      map[string]tipFacts  // last git reading per worktree (in memory)
-	waits     map[string]string    // last wait/finished reason per project or task (N9/N10/N38, J4/J6), logged once per change
-	ghUnavail map[string]bool      // project fact github_unavailable (design.md 7.3)
-	hcUnavail map[string]bool      // project fact hc_unavailable (design.md 7.3)
+	mu          sync.Mutex
+	wake        chan struct{}
+	lastPass    map[string]time.Time            // monotonic reading of previous pass per project (design.md 2.5)
+	prs         map[string]flow.PR              // last PR snapshot per attempt worktree (in memory)
+	errs        map[string]string               // last gh or git error per worktree and kind, logged once per change
+	tips        map[string]tipFacts             // last git reading per worktree (in memory)
+	waits       map[string]string               // last wait/finished reason per project or task (N9/N10/N38, J4/J6), logged once per change
+	ghUnavail   map[string]bool                 // project fact github_unavailable (design.md 7.3)
+	hcUnavail   map[string]bool                 // project fact hc_unavailable (design.md 7.3)
+	onInvariant func([]flow.InvariantViolation) // test hook; nil in production
 }
 
 func (e *Engine) now() time.Time {
@@ -146,7 +147,7 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 			holdProjectWake(&s, "new_goal", "owner gave a new goal", "goal: "+goal, e.now())
 		}
 	}
-	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts, s.Project.Base = root, goal, true, nil, nil
+	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.Invariants = root, goal, true, nil, nil, nil
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.waits, id+"/project")
 	// The owner starting again is slice 1's retry (plan.md: "the owner
@@ -260,7 +261,7 @@ func (e *Engine) Stop(project string) error {
 	for ti := range s.Tasks {
 		stopTaskRuns(&s.Tasks[ti], s.Settings, now)
 	}
-	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks = "", "", nil, false, nil, nil, false, 0
+	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants = "", "", nil, false, nil, nil, false, 0, nil
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastPass, id)
 	delete(e.waits, id+"/project")
@@ -359,13 +360,69 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		setFlag(&e.hcUnavail, id, hcErr != nil && world.FailureClass(hcErr) != flow.ClassSettled)
 	}
 	granted := flow.GrantSlots(candidates, s.Tasks, flow.RunningTasks(s.Tasks, workerState), s.Settings.MaxRunning)
+	skipped := map[string]bool{}
 	for i := range s.Tasks {
-		if ctx.Err() == nil {
-			e.passTaskLocked(ctx, id, &s, i, granted[s.Tasks[i].ID], workerRun[s.Tasks[i].ID], workerErr[s.Tasks[i].ID], &baseTried, dt)
+		if ctx.Err() == nil && !e.passTaskLocked(ctx, id, &s, i, granted[s.Tasks[i].ID], workerRun[s.Tasks[i].ID], workerErr[s.Tasks[i].ID], &baseTried, dt) {
+			skipped[s.Tasks[i].ID] = true
 		}
 	}
-	if ctx.Err() == nil && coordErr == nil {
-		e.passProjectRulesLocked(ctx, id, &s)
+	if ctx.Err() == nil {
+		now := e.now()
+		if coordErr == nil {
+			e.passProjectRulesLocked(ctx, id, &s, now)
+		}
+		e.checkInvariantsLocked(id, &s, skipped, now)
+	}
+}
+
+// checkInvariantsLocked checks I1–I5 after every pass: logs each broken
+// invariant once per subject occurrence and wakes the coordinator once, without repairing.
+func (e *Engine) checkInvariantsLocked(id string, s *flow.State, skipped map[string]bool, now time.Time) {
+	byKey, allKeys, cleared := map[string][]string{}, map[string]struct{}{}, false
+	vs := flow.CheckInvariants(flow.InvariantSnapshot{State: *s, Skipped: skipped, Now: now})
+	for _, v := range vs {
+		k := v.ID + "@" + v.Subject
+		byKey[k], allKeys[k] = append(byKey[k], v.Why), struct{}{}
+	}
+	for k := range s.Project.Invariants {
+		allKeys[k] = struct{}{}
+	}
+	for _, k := range slices.Sorted(maps.Keys(allKeys)) {
+		rule, subj, _ := strings.Cut(k, "@")
+		why, pfx := strings.Join(byKey[k], "; "), flow.AskWake+"@invariant@"+k+"@"
+		if rule == "I1" && skipped[subj] && (why == "" || s.Project.Invariants[k] != "") {
+			continue
+		}
+		if why == "" {
+			s.Project.Acts = slices.DeleteFunc(s.Project.Acts, func(a flow.Act) bool { return strings.HasPrefix(a.Key, pfx) })
+			delete(s.Project.Invariants, k)
+			cleared = true
+		} else if s.Project.Invariants[k] != why {
+			if s.Project.Invariants == nil {
+				s.Project.Invariants = map[string]string{}
+			}
+			s.Project.Invariants[k] = why
+			s.Project.Acts = slices.DeleteFunc(s.Project.Acts, func(a flow.Act) bool { return strings.HasPrefix(a.Key, pfx) })
+			wk := "invariant@" + k + "@" + tokenHash(why)[:8]
+			ak := flow.AskWake + "@" + wk
+			s.Project.Acts = append(s.Project.Acts, flow.Act{Key: ak, Result: "done", At: now})
+			holdProjectWake(s, wk, rule+": "+why, "invariant "+rule+" broken: "+why, now)
+			if err := e.commitLocked(id, s, LogLine{By: "engine", Rule: rule, Asked: []string{ak}, Decision: "error: invariant broken", Why: why}); err != nil {
+				e.logError("factory.commit_error", id, err)
+				return
+			}
+			cleared = false
+			e.logEvent("factory.invariant_error", map[string]string{"project": id, "rule": rule, "error": why})
+		}
+	}
+	if cleared {
+		if len(s.Project.Invariants) == 0 {
+			s.Project.Invariants = nil
+		}
+		e.saveLocked(id, *s)
+	}
+	if len(vs) > 0 && e.onInvariant != nil {
+		e.onInvariant(vs)
 	}
 }
 
@@ -407,8 +464,7 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 }
 
 // passProjectRulesLocked evaluates flow.ProjectRows and executes the matched coordinator action.
-func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.State) {
-	now := e.now()
+func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.State, now time.Time) {
 	r, d := flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now})
 	if len(d.Asked) > 0 && d.Asked[0] == flow.AskCoordDialogStuck {
 		s.Project.CoordDialogStucks++
@@ -439,7 +495,7 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 	}
 	switch ask := d.Asked[0]; ask {
 	case flow.AskStartCoordinator:
-		e.startCoordLocked(ctx, id, s, d.Why)
+		e.startCoordLocked(ctx, id, s, d.Why, now)
 	case flow.AskStopCoordinator:
 		if e.stopCoordTerminalsLocked(ctx, id, *s) {
 			stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
@@ -465,7 +521,7 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 	}
 }
 
-func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State, why string) {
+func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State, why string, now time.Time) {
 	adopt, bin := s.Project.Run == nil || s.Project.Run.State != flow.PhaseEnded, cmp.Or(e.Bin, "sheepdog")
 	if !adopt && !e.stopCoordTerminalsLocked(ctx, id, *s) {
 		return
@@ -479,7 +535,7 @@ func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State,
 	if abort {
 		return
 	}
-	now, line := e.now(), LogLine{By: "engine", Facts: map[string]any{"coordinator": flow.RunGone}, Rule: "J7", Asked: []string{flow.AskStartCoordinator}}
+	line := LogLine{By: "engine", Facts: map[string]any{"coordinator": flow.RunGone}, Rule: "J7", Asked: []string{flow.AskStartCoordinator}}
 	if err != nil {
 		e.logError("factory.exec_error", id, err)
 		s.Project.Acts, line.Why = append(s.Project.Acts, flow.Act{Key: flow.AskStartCoordinator, Result: "failed", At: now}), err.Error()
@@ -669,7 +725,7 @@ func actOutage(verb string, f flow.Facts) bool {
 	switch verb {
 	case flow.AskNewAttempt, flow.AskPushPR, flow.AskRerunCI, flow.AskDispatchCI, flow.AskUpdateBranch, flow.AskMerge:
 		return f.GitHubUnavailable
-	case flow.AskStartWorker, flow.AskStartReview, flow.AskNudgeReview, flow.AskStopReview, flow.AskTellFindings, flow.AskTellStop, flow.AskTellDiverged, flow.AskTellConflict, flow.AskTellCI, flow.AskTellBaseRed, flow.AskStopRuns:
+	case flow.AskStartWorker, flow.AskStartReview, flow.AskNudgeReview, flow.AskStopReview, flow.AskTellFindings, flow.AskTellStop, flow.AskTellDiverged, flow.AskTellConflict, flow.AskTellCI, flow.AskTellBaseRed, flow.AskStopRuns, flow.AskOpenRecap, flow.AskSizeRecap, flow.AskCIRecap, flow.AskTimeRecap:
 		return f.HCUnavailable
 	case flow.AskCleanup:
 		return f.GitHubUnavailable || f.HCUnavailable
@@ -678,7 +734,7 @@ func actOutage(verb string, f flow.Facts) bool {
 	}
 }
 
-func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int, hasSlot bool, workerRun flow.Run, workerErr error, baseTried *bool, dt time.Duration) {
+func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int, hasSlot bool, workerRun flow.Run, workerErr error, baseTried *bool, dt time.Duration) bool {
 	facts := flow.Facts{GitHubUnavailable: e.ghUnavail[id], HCUnavailable: e.hcUnavail[id]}
 	if b := s.Project.Base; b != nil && b.Red {
 		facts.BaseRed, facts.BaseRedSince = true, b.Since
@@ -708,11 +764,11 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		}
 		cancel()
 		if e.logOnce("factory.git_error", id, a.Worktree, err); err != nil {
-			return
+			return false
 		}
 		if workerErr != nil {
 			e.logError("factory.hc_error", id, workerErr)
-			return
+			return false
 		}
 		facts.Worker = workerRun
 		facts.NoSlot = workerRun.State == flow.RunGone && !hasSlot
@@ -722,7 +778,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		}
 		facts.GitHubUnavailable = e.ghUnavail[id]
 		if e.observeReviewLocked(ctx, id, s, ti, &facts, dt) {
-			return
+			return false
 		}
 	} else if oa == nil && !flow.Ended(s.Tasks[ti]) {
 		facts.DepsNotDone, facts.DepsDropped = flow.UnmetDeps(s.Tasks[ti], s.Tasks)
@@ -742,14 +798,14 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		e.waits[waitKey] = waitVal
 		if len(d.Asked) == 0 {
 			e.commitLogLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: facts, Rule: r.ID, Decision: "waiting", Why: d.Why})
-			return
+			return true
 		}
 	}
 	if len(d.Asked) == 0 {
 		if rowChanged {
 			e.saveLocked(id, *s)
 		}
-		return
+		return true
 	}
 	var decs []string
 	whys := []string{d.Why}
@@ -791,14 +847,14 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		if verb == flow.AskRerunCI || verb == flow.AskDispatchCI || verb == flow.AskUpdateBranch { // a GitHub call whose outcome can be lost: saved as asked first, never sent twice
 			act(ask, "asked", "", "", false)
 			if !e.saveLocked(id, *s) {
-				return
+				return true
 			}
 		}
 		f := facts
 		f.Ask = ask
 		dec, abort, err := fn(e, context.WithoutCancel(ctx), id, s, ti, f)
 		if abort && err != nil {
-			return
+			return true
 		} else if abort {
 			act(ask, "failed", flow.ClassTransient, dec, true)
 			decs = append(decs, dec)
@@ -826,6 +882,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		}
 	}
 	e.commitLogLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: facts, Rule: r.ID, Asked: d.Asked, Decision: strings.Join(decs, "; "), Why: strings.Join(whys, "; ")})
+	return true
 }
 
 // readTipLocked reads the changed lines at tip and whether it is ahead of H
@@ -1037,7 +1094,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		return false
 	}
 	voidRound := func(stopped bool) bool {
-		if err := world.StopRun(ctx, e.HC, a.Review.RunID); err != nil {
+		if err := e.stopRuns(ctx, []string{cmp.Or(a.Review.RunID, reviewerName(id, t.ID, len(t.Attempts), a.Review.Round))}); err != nil {
 			e.logError("factory.hc_error", id, err)
 			return true
 		}
@@ -1049,7 +1106,8 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		return !e.saveLocked(id, *s)
 	}
 	if flow.Ended(*t) || facts.PR.State == flow.PRMerged || facts.PR.State == flow.PRClosed ||
-		flow.OpenRecap(*t) != nil || !tipKeepsRound(*a, a.Review.Head, *facts) || a.Review.Round != len(a.Rounds)+1 {
+		flow.OpenRecap(*t) != nil || !tipKeepsRound(*a, a.Review.Head, *facts) ||
+		flow.PRHeadDivergedOrForeign(flow.In{Task: *t, Facts: *facts}) || a.Review.Round != len(a.Rounds)+1 {
 		if a.Review.RunID == "" && a.Review.Run != nil && a.Review.Run.State == flow.PhaseEnded {
 			return false
 		}
@@ -1345,23 +1403,23 @@ func (e *Engine) execTellFindings(ctx context.Context, id string, s *flow.State,
 
 // execOpenRecap is N25: open a review-triggered recap once per attempt
 // (allowed split, new, drop: never continue after a review trigger).
-func (e *Engine) execOpenRecap(_ context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
-	return openRecap(&s.Tasks[ti], flow.TriggerReview, []string{"split", "new", "drop"}), false, nil
+func (e *Engine) execOpenRecap(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	return e.openRecapLocked(ctx, id, s, ti, flow.TriggerReview, []string{"split", "new", "drop"})
 }
 
 // execSizeRecap is N12: open a size recap with the choices it allows now.
-func (e *Engine) execSizeRecap(_ context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
-	return openRecap(&s.Tasks[ti], flow.TriggerSize, flow.SizeRecapAllowed(s.Tasks[ti], s.Settings)), false, nil
+func (e *Engine) execSizeRecap(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	return e.openRecapLocked(ctx, id, s, ti, flow.TriggerSize, flow.SizeRecapAllowed(s.Tasks[ti], s.Settings))
 }
 
 // execCIRecap is N13: open a ci recap with the choices it allows now.
-func (e *Engine) execCIRecap(_ context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
-	return openRecap(&s.Tasks[ti], flow.TriggerCI, flow.SizeRecapAllowed(s.Tasks[ti], s.Settings)), false, nil
+func (e *Engine) execCIRecap(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	return e.openRecapLocked(ctx, id, s, ti, flow.TriggerCI, flow.SizeRecapAllowed(s.Tasks[ti], s.Settings))
 }
 
 // execTimeRecap is N14: open a time recap with the choices it allows now.
-func (e *Engine) execTimeRecap(_ context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
-	return openRecap(&s.Tasks[ti], flow.TriggerTime, flow.SizeRecapAllowed(s.Tasks[ti], s.Settings)), false, nil
+func (e *Engine) execTimeRecap(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	return e.openRecapLocked(ctx, id, s, ti, flow.TriggerTime, flow.SizeRecapAllowed(s.Tasks[ti], s.Settings))
 }
 
 // execNudgeReviewer is N29: nudge an idle reviewer with no report tag once.
@@ -1402,11 +1460,18 @@ func (e *Engine) execStopReviewer(ctx context.Context, _ string, s *flow.State, 
 	return fmt.Sprintf("stopped reviewer %s (round %d)", runID, a.Review.Round), false, nil
 }
 
-func openRecap(t *flow.Task, trigger string, allowed []string) string {
+func (e *Engine) openRecapLocked(ctx context.Context, id string, s *flow.State, ti int, trigger string, allowed []string) (string, bool, error) {
+	t := &s.Tasks[ti]
+	if a := flow.OpenAttempt(*t); a != nil && a.Review != nil && (a.Review.RunID != "" || a.Review.Run == nil || a.Review.Run.State != flow.PhaseEnded) {
+		if err := e.stopRuns(ctx, []string{cmp.Or(a.Review.RunID, reviewerName(id, t.ID, len(t.Attempts), a.Review.Round))}); err != nil {
+			return "", false, err
+		}
+		stopReviewRec(a.Review, s.Settings, e.now())
+	}
 	if flow.OpenRecap(*t) == nil {
 		t.Recaps = append(t.Recaps, flow.Recap{Trigger: trigger, Allowed: allowed})
 	}
-	return fmt.Sprintf("opened recap (trigger %s, allowed %s)", trigger, strings.Join(allowed, ", "))
+	return fmt.Sprintf("opened recap (trigger %s, allowed %s)", trigger, strings.Join(allowed, ", ")), false, nil
 }
 
 // execTellStop is N6 for a size, ci or time recap: the worker is told once to stop.

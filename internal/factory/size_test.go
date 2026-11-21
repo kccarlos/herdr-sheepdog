@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
@@ -240,15 +241,27 @@ func TestRecapStopsReviewerInFlight(t *testing.T) {
 		t.Fatalf("review = %+v, want one running", rev)
 	}
 	l.report("tok-coord", "plan amend", `{"why":"smaller","tasks":[{"id":"T1","estimate_lines":3}]}`, "")
-	l.pass() // N12 opens the size recap
+	l.pass() // N12 opens the size recap and stops the in-flight reviewer immediately (N6, I1)
 	if flow.OpenRecap(l.state().Tasks[0]) == nil {
 		t.Fatal("no size recap opened")
 	}
-	l.passReport(rev)
-	l.pass()
 	a := l.state().Tasks[0].Attempts[0]
 	if rs, _ := termState(ctx, l.client, rev.RunID); rs != flow.RunGone || a.Review == nil || a.Review.RunID != "" || a.Review.Run == nil || a.Review.Run.Result != flow.EndStopped || len(a.Rounds) != 0 {
 		t.Fatalf("with a recap open: reviewer %s, review %+v, rounds %+v", rs, a.Review, a.Rounds)
+	}
+	// If a live reviewer still exists alongside an open recap (e.g. crash before stop),
+	// observeReviewLocked stops it and ignores its verdict tag.
+	rev2ID, err := startRun(ctx, l.client, world.RunSpec{Name: "rev-t1-recap", Cwd: l.wt, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev2 := &flow.ReviewRun{Round: 1, Head: c2, Code: "recapcode", RunID: rev2ID}
+	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Review = rev2 })
+	l.passReport(rev2)
+	l.pass()
+	a = l.state().Tasks[0].Attempts[0]
+	if rs, _ := termState(ctx, l.client, rev2ID); rs != flow.RunGone || a.Review == nil || a.Review.RunID != "" || a.Review.Run == nil || a.Review.Run.Result != flow.EndStopped || len(a.Rounds) != 0 {
+		t.Fatalf("observeReview with open recap: reviewer %s, review %+v, rounds %+v", rs, a.Review, a.Rounds)
 	}
 }
 
