@@ -432,8 +432,12 @@ func TestIrreversibleActionsRecheckFreshFacts(t *testing.T) {
 		t.Fatalf("merges after call-offs cleared and backoff elapsed = %q, want 1 merge", merges)
 	}
 
-	// Cleanup with a stray live terminal inside the worktree keeps the worktree.
-	if _, err := startRun(ctx, l.client, world.RunSpec{Name: "stray-shell", Cwd: l.wt, Argv: []string{"sh"}}); err != nil {
+	// Cleanup keeps the worktree when a live terminal names it through a symlink.
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(l.wt, alias); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := startRun(ctx, l.client, world.RunSpec{Name: "stray-shell", Cwd: alias, Argv: []string{"sh"}}); err != nil {
 		t.Fatal(err)
 	}
 	l.edit(func(s *flow.State) { s.Tasks[0].Closed = &flow.Closed{Why: "done elsewhere"} })

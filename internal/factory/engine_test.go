@@ -1929,7 +1929,7 @@ func TestProofPromptQuotesHostileCommandAndArtifact(t *testing.T) {
 			Touched: "f.go",
 		}},
 	}
-	got := proofPrompt(a, "c1")
+	got := (&Engine{}).proofPrompt(context.Background(), a, "c1")
 	wantCmd := "- tests pass: " + strconv.Quote(hostileCmd) + " (exit 0):"
 	wantArt := "- looks right: artifact " + strconv.Quote(hostileArt)
 	if !strings.Contains(got, wantCmd) {
@@ -2000,7 +2000,7 @@ func TestProoflessTaskPromptAndTouchedOnlyReady(t *testing.T) {
 		t.Fatalf("touched-only ready: %v", err)
 	}
 	st, _ := LoadState(paths.State(projID))
-	got := proofPrompt(st.Tasks[0].Attempts[0], c1)
+	got := eng.proofPrompt(ctx, st.Tasks[0].Attempts[0], c1)
 	if !strings.Contains(got, "Touched: README.md") {
 		t.Errorf("touched-only proofPrompt missing Touched:\n%s", got)
 	}
@@ -2015,7 +2015,7 @@ func TestProoflessTaskPromptAndTouchedOnlyReady(t *testing.T) {
 		t.Fatalf("touched + empty skipped ready: %v", err)
 	}
 	st, _ = LoadState(paths.State(projID))
-	got = proofPrompt(st.Tasks[0].Attempts[0], c1)
+	got = eng.proofPrompt(ctx, st.Tasks[0].Attempts[0], c1)
 	if !strings.Contains(got, "Skipped: (nothing skipped)") {
 		t.Errorf("explicit empty skipped proofPrompt missing (nothing skipped):\n%s", got)
 	}

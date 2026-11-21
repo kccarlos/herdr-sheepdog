@@ -27,13 +27,17 @@ func TestCodexArgvGolden(t *testing.T) {
 	if CodexArgv("", "medium", "/tmp") != nil || CodexArgv("m", "", "/tmp") != nil || CodexArgv("m", "medium", " ") != nil {
 		t.Fatal("CodexArgv without model, effort or cwd should be nil")
 	}
-	real := t.TempDir()
+	real := sizeRepo(t)
 	link := filepath.Join(t.TempDir(), "link")
 	if err := os.Symlink(real, link); err != nil {
 		t.Fatal(err)
 	}
-	if r, _ := filepath.EvalSymlinks(real); CodexArgv("m", "high", link)[10] != `projects={"`+r+`"={trust_level="trusted"}}` {
-		t.Fatalf("trust key not resolved: %q", CodexArgv("m", "high", link)[10])
+	root, err := fixtureGit(t).WorktreeRoot(context.Background(), link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := filepath.EvalSymlinks(real); CodexArgv("m", "high", root)[10] != `projects={"`+r+`"={trust_level="trusted"}}` {
+		t.Fatalf("trust key not resolved: %q", CodexArgv("m", "high", root)[10])
 	}
 	if got := CodexArgv("m", "high", "/tmp"); got[len(got)-1] != `model_reasoning_effort="high"` {
 		t.Fatalf("effort arg = %q", got[len(got)-1])

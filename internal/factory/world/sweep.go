@@ -32,44 +32,43 @@ func (g *Git) Sweep(ctx context.Context, client *hc.Client, repo, worktreeRoot s
 	if s.Project.ID == "" {
 		return []flow.SweepProbe{{Probe: "terminals", Unknown: "no project state"}, {Probe: "worktrees", Unknown: "no project state"}, {Probe: "branches", Unknown: "no project state"}, lbProbe}
 	}
-	ownedWT, ownedBr, doneWT := map[string]bool{}, map[string]bool{}, map[string]string{}
+	ownedBr, doneWT := map[string]bool{}, map[string]string{}
 	for _, t := range s.Tasks {
 		cleaned := flow.Count(t.Acts, flow.AskCleanup) > 0
 		for _, a := range t.Attempts {
-			ownedWT[realPath(a.Worktree)], ownedBr[a.Branch], cleaned = true, true, cleaned || flow.Count(a.Acts, flow.AskCleanup) > 0
+			ownedBr[a.Branch], cleaned = true, cleaned || flow.Count(a.Acts, flow.AskCleanup) > 0
 		}
 		for _, a := range t.Attempts {
+			doneWT[a.Worktree] = ""
 			if t.Done != nil && cleaned {
-				doneWT[realPath(a.Worktree)] = t.ID
+				doneWT[a.Worktree] = t.ID
 			}
 		}
 	}
 	wtProbe, brProbe, wtBr := flow.SweepProbe{Probe: "worktrees"}, flow.SweepProbe{Probe: "branches"}, map[string]bool{}
-	if out, err := g.gitCmd(ctx, repo, "worktree", "list", "--porcelain"); err != nil {
+	if roots, branches, err := g.sweepWorktreePaths(ctx, repo, worktreeRoot, doneWT); err != nil {
 		wtProbe.Unknown = err.Error()
 	} else {
-		mainRepo, wtRoot := realPath(repo), realPath(worktreeRoot)
-		for stanza := range strings.SplitSeq(out, "\n\n") {
-			var wt, br string
-			for ln := range strings.Lines(stanza) {
-				if raw, ok := strings.CutPrefix(strings.TrimSpace(ln), "worktree "); ok {
-					wt = realPath(raw)
-				} else if ref, ok := strings.CutPrefix(strings.TrimSpace(ln), "branch refs/heads/"); ok {
-					br = ref
-				}
-			}
+		mainRepo, wtRoot, owned := roots[repo], roots[worktreeRoot], map[string]string{}
+		for path, task := range doneWT {
+			owned[roots[path]] = cmp.Or(task, owned[roots[path]])
+		}
+		for _, entry := range branches {
+			wt, br := roots[entry.path], entry.branch
 			if wt == "" || wt == mainRepo {
 				continue
 			}
 			note := map[bool]string{true: " (branch " + br + ")"}[br != ""]
-			if tid, ok := doneWT[wt]; ok {
+			if tid, ok := owned[wt]; tid != "" {
 				wtProbe.Items, wtBr[br] = append(wtProbe.Items, flow.SweepItem{Kind: "worktree", Key: wt, Summary: fmt.Sprintf("a leftover worktree %s of done task %s%s", wt, tid, note)}), true
-			} else if rel, rerr := filepath.Rel(wtRoot, wt); !ownedWT[wt] && wtRoot != "" && rerr == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+			} else if rel, rerr := filepath.Rel(wtRoot, wt); !ok && wtRoot != "" && rerr == nil && rel != "." && filepath.IsLocal(rel) {
 				wtProbe.Items, wtBr[br] = append(wtProbe.Items, flow.SweepItem{Kind: "worktree", Key: wt, Summary: fmt.Sprintf("a leftover worktree %s owned by no attempt%s", wt, note)}), true
 			}
 		}
 	}
-	if out, err := g.gitCmd(ctx, repo, "branch", "--list", "--format=%(refname:short)", "task/*"); err != nil {
+	if wtProbe.Unknown != "" {
+		brProbe.Unknown = wtProbe.Unknown
+	} else if out, err := g.gitCmd(ctx, repo, "branch", "--list", "--format=%(refname:short)", "task/*"); err != nil {
 		brProbe.Unknown = err.Error()
 	} else {
 		for ln := range strings.Lines(out) {
@@ -79,6 +78,35 @@ func (g *Git) Sweep(ctx context.Context, client *hc.Client, repo, worktreeRoot s
 		}
 	}
 	return []flow.SweepProbe{SweepTerminals(ctx, client, s), wtProbe, brProbe, lbProbe}
+}
+
+type sweepWorktree struct{ path, branch string }
+
+func (g *Git) sweepWorktreePaths(ctx context.Context, repo, root string, owned map[string]string) (map[string]string, []sweepWorktree, error) {
+	r, err := g.Run(ctx, repo, "worktree", "list", "--porcelain", "-z")
+	if err != nil {
+		return nil, nil, err
+	}
+	paths := []string{repo, root}
+	for path := range owned {
+		paths = append(paths, path)
+	}
+	var listed []sweepWorktree
+	for stanza := range strings.SplitSeq(string(r.Stdout), "\x00\x00") {
+		var item sweepWorktree
+		for field := range strings.SplitSeq(stanza, "\x00") {
+			if path, ok := strings.CutPrefix(field, "worktree "); ok {
+				item.path = path
+			} else if branch, ok := strings.CutPrefix(field, "branch refs/heads/"); ok {
+				item.branch = branch
+			}
+		}
+		if item.path != "" {
+			listed, paths = append(listed, item), append(paths, item.path)
+		}
+	}
+	resolved, err := g.CanonicalPaths(ctx, repo, paths...)
+	return resolved, listed, err
 }
 
 // SweepTerminals finds live factory-labelled terminals that no active run owns.

@@ -14,7 +14,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
-// GitExec emulates machine.exec for Git and fake gh in a fixture checkout.
+// GitExec emulates machine.exec for project commands in a fixture checkout.
 func GitExec(p hc.ExecParams) (hc.ExecResult, error) {
 	dir, err := filepath.EvalSymlinks(p.Cwd)
 	if err != nil {
@@ -30,6 +30,10 @@ func GitExec(p hc.ExecParams) (hc.ExecResult, error) {
 		return hc.ExecResult{}, fmt.Errorf("unexpected fixture git request in %s", dir)
 	}
 	switch p.Argv[0] {
+	case "/bin/sh":
+		if len(p.Argv) < 4 || p.Argv[1] != "-c" || p.Argv[3] != "sheepdog-project-path" {
+			return hc.ExecResult{}, fmt.Errorf("unexpected fixture shell request")
+		}
 	case "git":
 		if p.Env["GIT_TERMINAL_PROMPT"] != "0" || p.Env["GIT_ASKPASS"] != "" {
 			return hc.ExecResult{}, fmt.Errorf("fixture git did not disable prompts")

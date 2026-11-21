@@ -124,7 +124,7 @@ func findStoredProject(paths Paths, target string) (string, error) {
 			continue
 		}
 		if target != "" {
-			if ent.Name() == target || underFolder(s.Project.Folder, target) {
+			if ent.Name() == target || underFolderLocal(s.Project.Folder, target) {
 				return ent.Name(), nil
 			}
 			continue
@@ -155,6 +155,12 @@ func findStoredProject(paths Paths, target string) (string, error) {
 }
 
 func underFolder(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	return root != "" && target != "" && err == nil && filepath.IsLocal(rel)
+}
+
+// underFolderLocal is used only by commands in the owner's login session.
+func underFolderLocal(root, target string) bool {
 	if root == "" || target == "" {
 		return false
 	}

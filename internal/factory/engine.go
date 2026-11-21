@@ -1150,9 +1150,9 @@ func workerPrompt(tmpl string, t flow.Task, a flow.Attempt, bin string) string {
 		"{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", bin)
 }
 
-func reviewerPrompt(tmpl string, t flow.Task, a flow.Attempt, h, kind, diff, rejections string, round int) string {
+func (e *Engine) reviewerPrompt(ctx context.Context, tmpl string, t flow.Task, a flow.Attempt, h, kind, diff, rejections string, round int) string {
 	return fill(tmpl, "{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
-		"{outcomes}", bullets(t.Outcomes), "{proofs}", proofPrompt(a, h), "{rejections}", rejections, "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code)
+		"{outcomes}", bullets(t.Outcomes), "{proofs}", e.proofPrompt(ctx, a, h), "{rejections}", rejections, "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code)
 }
 
 func readyCmd(bin string, outcomes []flow.Outcome) string {
@@ -1378,12 +1378,20 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	}
 	model, effort := a.Review.Reviewer.Model, cmp.Or(a.Review.Reviewer.Effort, "medium")
 	argv := world.ClaudeArgv(flow.RoleReviewer, model, effort, "dontAsk")
+	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
+	defer cancel()
 	if env != nil {
-		argv = world.CodexArgv(model, effort, a.Worktree)
+		root, err := e.git.WorktreeRoot(gctx, a.Worktree)
+		if err != nil {
+			a.Review = prev
+			return "", true, err
+		}
+		argv = world.CodexArgv(model, effort, root)
 	}
+	prompt := e.reviewerPrompt(gctx, reviewerTemplate, *t, *a, h, kind, diff, e.rejectionPrompt(id, t.ID, *a, h), round)
 	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, &a.Review.Run, adopt, flow.RunRecord{Role: flow.RoleReviewer, CLI: cmp.Or(a.Review.Reviewer.CLI, "claude")}, world.RunSpec{
 		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
-		Argv: argv, Prompt: reviewerPrompt(reviewerTemplate, *t, *a, h, kind, diff, e.rejectionPrompt(id, t.ID, *a, h), round), Env: env,
+		Argv: argv, Prompt: prompt, Env: env,
 		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleReviewer, "sheepdog.task": t.ID, "sheepdog.model": model},
 	})
 	if err == nil {
@@ -1426,7 +1434,7 @@ func (e *Engine) reviewDiffPrompt(ctx context.Context, a flow.Attempt, head stri
 
 const emptySkippedRule = "a worker that lists nothing skipped and whose reviewer finds an unhandled caller has a major"
 
-func proofPrompt(a flow.Attempt, head string) string {
+func (e *Engine) proofPrompt(ctx context.Context, a flow.Attempt, head string) string {
 	var r *flow.Ready
 	for i := len(a.Ready) - 1; i >= 0; i-- {
 		if flow.Covers(a, a.Ready[i].Head, head) {
@@ -1443,7 +1451,7 @@ func proofPrompt(a flow.Attempt, head string) string {
 		if p.Artifact != "" {
 			fmt.Fprintf(&b, "\n- %s: artifact %q", p.Outcome, p.Artifact)
 		} else {
-			fmt.Fprintf(&b, "\n- %s: %q (exit %d): %s", p.Outcome, p.Command, p.Exit, proofHead(p.OutputPath, a.Worktree))
+			fmt.Fprintf(&b, "\n- %s: %q (exit %d): %s", p.Outcome, p.Command, p.Exit, e.proofHead(ctx, p.OutputPath, a.Worktree))
 		}
 	}
 	fmt.Fprintf(&b, "\nTouched: %s", cmp.Or(r.Touched, "(none)"))
@@ -1973,8 +1981,13 @@ func (e *Engine) commitLocked(id string, s *flow.State, l LogLine) error {
 }
 
 func (e *Engine) findProjectLocked(ctx context.Context, target string) (string, flow.State, error) {
+	var lookupErr error
 	if target != "" && e.git != nil {
-		if root, id, _ := e.git.RepoProject(ctx, target, false); id != "" {
+		root, id, err := e.git.RepoProject(ctx, target, false)
+		if filepath.IsAbs(target) {
+			lookupErr = err
+		}
+		if id != "" {
 			target = id
 		} else if root != "" {
 			target = root
@@ -1986,8 +1999,19 @@ func (e *Engine) findProjectLocked(ctx context.Context, target string) (string, 
 		if err != nil {
 			continue
 		}
-		if target != "" && (ent.Name() == target || underFolder(s.Project.Folder, target)) {
-			return ent.Name(), s, nil
+		if target != "" {
+			root := s.Project.Folder
+			if ent.Name() == target || underFolder(root, target) || e.git == nil && underFolderLocal(root, target) {
+				return ent.Name(), s, nil
+			}
+			if e.git != nil && filepath.IsAbs(target) {
+				dirs, err := e.git.CanonicalPaths(ctx, root, root, target)
+				if err != nil {
+					lookupErr = cmp.Or(lookupErr, err)
+				} else if underFolder(dirs[root], dirs[target]) {
+					return ent.Name(), s, nil
+				}
+			}
 		}
 		if target == "" && s.Project.Started {
 			if match.Project.ID != "" {
@@ -1999,5 +2023,5 @@ func (e *Engine) findProjectLocked(ctx context.Context, target string) (string, 
 	if match.Project.ID != "" {
 		return match.Project.ID, match, nil
 	}
-	return "", flow.State{}, errors.New("no started factory project")
+	return "", flow.State{}, cmp.Or(lookupErr, errors.New("no started factory project"))
 }

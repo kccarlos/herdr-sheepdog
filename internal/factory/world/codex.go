@@ -18,7 +18,7 @@ import (
 const CodexCLI = "codex"
 
 // CodexArgv returns the launch argv for a Codex reviewer in cwd: model and
-// effort stated, a read-only sandbox, never an approval prompt, and the run
+// effort stated and cwd already canonical, a read-only sandbox, never an approval prompt, and the run
 // kept inside herdr-core (--no-daemon). Per run, through -c overrides that
 // write nothing to Codex's config: cwd is trusted (no folder-trust prompt),
 // hooks are off (no hooks-review prompt, and no project hook runs), and no
@@ -27,9 +27,6 @@ func CodexArgv(model, effort, cwd string) []string {
 	model, effort, cwd = strings.TrimSpace(model), strings.TrimSpace(effort), strings.TrimSpace(cwd)
 	if model == "" || effort == "" || cwd == "" {
 		return nil
-	}
-	if real, err := filepath.EvalSymlinks(cwd); err == nil {
-		cwd = real // Codex keys trust by the resolved folder (step 0: /tmp → /private/tmp)
 	}
 	key, _ := json.Marshal(cwd)    // a JSON string is a TOML basic string
 	eff, _ := json.Marshal(effort) // likewise

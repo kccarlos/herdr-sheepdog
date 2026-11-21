@@ -10,7 +10,6 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
-	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
 // execRecordAccept is N42's accept by the bar at H. N42 asks it with the
@@ -111,7 +110,21 @@ func (e *Engine) execCleanup(ctx context.Context, id string, s *flow.State, ti i
 		if err != nil {
 			return "", false, world.Fail(flow.ClassTransient, err)
 		}
-		if slices.ContainsFunc(list.Terminals, func(tm hc.Terminal) bool { return tm.State == "live" && underFolder(a.Worktree, tm.Cwd) }) {
+		var live []string
+		for _, tm := range list.Terminals {
+			if tm.State == "live" && tm.Cwd != "" {
+				live = append(live, tm.Cwd)
+			}
+		}
+		keep := slices.ContainsFunc(live, func(dir string) bool { return underFolder(a.Worktree, dir) })
+		if !keep && len(live) > 0 {
+			dirs, err := e.git.CanonicalPaths(gctx, s.Project.Folder, append(live, a.Worktree)...)
+			if err != nil {
+				return "", false, err
+			}
+			keep = slices.ContainsFunc(live, func(dir string) bool { return underFolder(dirs[a.Worktree], dirs[dir]) })
+		}
+		if keep {
 			e.logEvent("factory.worktree_kept", map[string]string{"project": id, "task": t.ID, "worktree": a.Worktree, "why": "live terminal inside"})
 			return strings.Join(append(steps, "kept worktree "+a.Worktree+" (live terminal inside)"), "; "), false, nil
 		}

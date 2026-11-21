@@ -36,6 +36,52 @@ func newGitTestEngine(t *testing.T, paths Paths, client *hc.Client) *Engine {
 	return e
 }
 
+func TestDaemonProjectPathsUseMachineExec(t *testing.T) {
+	ctx := context.Background()
+	parent := t.TempDir()
+	// Only the login-session runner can see these paths.
+	root := filepath.Join(parent, "login-session-only")
+	alias := filepath.Join(parent, "alias")
+	proof := filepath.Join(root, ".git", "sheepdog-proofs", "p.log")
+	paths := testPaths(t)
+	eng := New(paths, nil)
+	state := flow.State{Project: flow.Project{ID: "project", Folder: alias, Started: true}}
+	if err := SaveState(paths.State("project"), state); err != nil {
+		t.Fatal(err)
+	}
+	srv := hctest.New(t)
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if p.Timeout == nil || *p.Timeout <= 0 {
+			return hc.ExecResult{}, errors.New("missing child deadline")
+		}
+		zero, one := 0, 1
+		switch {
+		case p.Cwd == alias && slices.Contains(p.Argv, "--show-toplevel"):
+			return hc.ExecResult{Code: &zero, Stdout: []byte(root + "\n")}, nil
+		case slices.Contains(p.Argv, "sheepdog.projectId"):
+			return hc.ExecResult{Code: &one}, nil
+		case p.Cwd == root && slices.Contains(p.Argv, proof):
+			return hc.ExecResult{Code: &zero, Stdout: []byte("login-session proof\n")}, nil
+		case slices.Contains(p.Argv, alias):
+			return hc.ExecResult{Code: &zero, Stdout: []byte(root + "\x00" + root + "\x00")}, nil
+		default:
+			return hc.ExecResult{}, errors.New("unexpected machine.exec call")
+		}
+	}
+	eng.git = world.NewGit(hc.NewClient(srv.Path), nil, nil)
+	if id, _, err := eng.findProjectLocked(ctx, alias); err != nil || id != "project" {
+		t.Errorf("daemon project lookup = %q, %v", id, err)
+	}
+	a := flow.Attempt{Worktree: root, Review: &flow.ReviewRun{Code: "review"},
+		Ready: []flow.Ready{{Head: "c1", Proofs: []flow.Proof{{Command: "test", OutputPath: proof}}}}}
+	if prompt := eng.reviewerPrompt(ctx, "{proofs}", flow.Task{}, a, "c1", "", "", "", 1); !strings.Contains(prompt, "login-session proof") {
+		t.Errorf("reviewer prompt missing worktree proof: %q", prompt)
+	}
+	if got := len(srv.Requests()); got != 4 {
+		t.Errorf("machine.exec calls = %d, want 4", got)
+	}
+}
+
 func TestGitRPCFailureLeavesTaskFactsUnknown(t *testing.T) {
 	l := newLanding(t)
 	srv := hctest.New(t)

@@ -208,11 +208,22 @@ func TestSweepLeftoverWorktreeInProjectDirReportedOnceWithBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustGit(t, repo, "worktree", "add", "-b", "task/T99-stray", wtDir, "origin/main")
-	wtReal := realPath(wtDir)
+	wtReal, err := filepath.EvalSymlinks(wtDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	st := flow.State{Project: flow.Project{ID: "proj-wt1", Folder: repo}}
 	byProbe := map[string]flow.SweepProbe{}
-	for _, p := range fixtureGit(t).Sweep(ctx, nil, repo, filepath.Dir(wtDir), st) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wtRoot, err := filepath.Rel(cwd, filepath.Dir(wtDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range fixtureGit(t).Sweep(ctx, nil, repo, wtRoot, st) {
 		byProbe[p.Probe] = p
 	}
 	wtItems := byProbe["worktrees"].Items
