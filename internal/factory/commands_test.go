@@ -426,32 +426,37 @@ func TestTaskRetryN5AndRefusals(t *testing.T) {
 	if !flow.Done(l.state().Tasks[2].Acts, flow.AskRetry) || flow.HasExhausted(l.state().Tasks[2].Acts, l.state().Settings) {
 		t.Fatalf("T3 acts after retry = %+v", l.state().Tasks[2].Acts)
 	}
-
-	// Owner-quit worker run: retry allows it to start again.
-	l.edit(func(s *flow.State) {
-		a := &s.Tasks[0].Attempts[0]
-		a.RunID = ""
-		a.Run = &flow.RunRecord{Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseEnded, Result: flow.EndOwnerQuit}
-		a.Restarts = s.Settings.WorkerRestarts
-	})
-	l.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"restart worker"}`, "")
-	a := l.state().Tasks[0].Attempts[0]
-	if a.Restarts != 0 || a.Run.Result != flow.EndStopped {
-		t.Fatalf("after owner-quit retry: restarts=%d result=%s", a.Restarts, a.Run.Result)
-	}
 }
 
-// TestTaskRetryN4StartsNewAttemptAndBranch verifies N4 -> retry -> closes the
-// attempt, stops its runs, and N11 starts a new attempt on a new branch.
+// TestTaskRetryN4StartsNewAttemptAndBranch verifies N4 -> retry -> reads the PR
+// fresh and closes it with closeOpenPR, stops runs, reports any dropped held
+// say message, closes the attempt, and N11/N26 start a new attempt and open a
+// new PR on a new branch while the old PR stays closed.
 func TestTaskRetryN4StartsNewAttemptAndBranch(t *testing.T) {
 	l := newLanding(t).withTokens()
+	now := l.eng.now()
+	l.eng.Now = func() time.Time { return now }
 	writeGHFile(t, l.gh, "view.json", `{"number":7,"state":"CLOSED","headRefOid":"`+l.c1+`","mergeable":"MERGEABLE","statusCheckRollup":[],"baseRefName":"main"}`)
 	l.pass()
 	st := l.state()
 	if st.Tasks[0].LastRow != "N4" || len(st.Project.Wakes) != 1 || !strings.Contains(st.Project.Wakes[0].Why, `task retry T1 --why`) {
 		t.Fatalf("at N4: row=%s wakes=%+v", st.Tasks[0].LastRow, st.Project.Wakes)
 	}
+	// Hold a say message on the working worker, and reopen the PR before retry runs.
+	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "working"})
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Attempts[0].Run = &flow.RunRecord{Address: l.worker, Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseWorking, Status: "working", StatusSince: now}
+	})
+	l.report("tok-coord", "task", `{"action":"say","task":"T1","why":"keep this in mind"}`, "")
+	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
+
 	l.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"PR was closed by hand"}`, "")
+	if closes := ghCalls(t, l.gh, "pr close"); len(closes) != 1 || !strings.Contains(closes[0], "7") {
+		t.Fatalf("N4 retry did not close reopened PR #7: pr close calls = %q", closes)
+	}
+	if last := l.logLines()[len(l.logLines())-1]; !strings.Contains(last.Decision, "dropped 1 held message") {
+		t.Fatalf("N4 retry decision = %q, want dropped held message reported", last.Decision)
+	}
 	if st := l.state(); len(st.Tasks[0].Attempts) != 1 || st.Tasks[0].Attempts[0].Closed == "" {
 		t.Fatalf("after N4 retry: attempts=%+v", st.Tasks[0].Attempts)
 	}
@@ -461,11 +466,200 @@ func TestTaskRetryN4StartsNewAttemptAndBranch(t *testing.T) {
 	// Second retry before new attempt is refused.
 	l.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"again"}`, "nothing_to_retry")
 
-	// Next pass: N11 creates attempt 2 on a new branch.
+	// Next pass: N11 creates attempt 2 on a new branch; then a ready commit opens a new PR on it.
 	l.pass()
 	st = l.state()
 	if len(st.Tasks[0].Attempts) != 2 || st.Tasks[0].Attempts[1].Branch == l.branch || st.Tasks[0].Attempts[1].Branch == "" {
 		t.Fatalf("after N11: attempts=%+v (old branch %q)", st.Tasks[0].Attempts, l.branch)
+	}
+	a2 := st.Tasks[0].Attempts[1]
+	if err := os.WriteFile(filepath.Join(a2.Worktree, "x2.go"), []byte("package demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, a2.Worktree, "add", "x2.go")
+	gitIn(t, a2.Worktree, "commit", "-m", "feat: x2")
+	c2 := gitIn(t, a2.Worktree, "rev-parse", "HEAD")
+	if err := os.Remove(filepath.Join(l.gh, "view.json")); err != nil {
+		t.Fatal(err)
+	}
+	writePRJSON(t, l.gh, "pr.json", c2, greenRollup)
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[1]
+		a.Ready = []flow.Ready{{Head: c2}}
+		a.Acts = append(a.Acts, flow.Act{Key: flow.AskStartWorker, Result: "done", At: now})
+	})
+	l.pass()
+	creates := ghCalls(t, l.gh, "pr create")
+	if len(creates) != 1 || !strings.Contains(creates[0], a2.Branch) {
+		t.Fatalf("pr create calls = %q, want 1 on new branch %q", creates, a2.Branch)
+	}
+	if reopens := ghCalls(t, l.gh, "pr reopen"); len(reopens) != 0 {
+		t.Fatalf("old PR was reopened: %q", reopens)
+	}
+}
+
+// TestTaskRetryN7SayStillDivergedToldAndWokenAgain verifies N7 -> say ->
+// still diverged -> retry -> worker told again -> coordinator woken again.
+func TestTaskRetryN7SayStillDivergedToldAndWokenAgain(t *testing.T) {
+	l := newLanding(t).withTokens()
+	now := l.eng.now()
+	l.eng.Now = func() time.Time { return now }
+	// Diverge the worktree tip from H (l.c1) via an amended commit.
+	gitIn(t, l.wt, "commit", "--amend", "-m", "feat: diverged")
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Attempts[0].Run = &flow.RunRecord{Address: l.worker, Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseIdle, LastTurnEnd: now}
+	})
+	// Pass 1: N7 tells the worker once.
+	l.pass()
+	if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 1 {
+		t.Fatalf("N7 initial tell sends = %d, want 1", got)
+	}
+	// Worker turn ends still diverged -> pass 2 wakes coordinator once.
+	now = now.Add(time.Minute)
+	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Run.LastTurnEnd = now })
+	l.pass()
+	if st := l.state(); st.Tasks[0].LastRow != "N7" || len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != "diverged@"+l.c1 {
+		t.Fatalf("N7 first wake: row=%s wakes=%+v", st.Tasks[0].LastRow, st.Project.Wakes)
+	}
+	// Coordinator received the wake, sends say, tip is still diverged, then runs retry.
+	l.edit(func(s *flow.State) { s.Project.Wakes = nil })
+	l.report("tok-coord", "task", `{"action":"say","task":"T1","why":"restore the branch"}`, "")
+	if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 2 {
+		t.Fatalf("after say sends = %d, want 2", got)
+	}
+	l.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"still diverged"}`, "")
+	// Immediate second retry is refused.
+	l.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"again"}`, "nothing_to_retry")
+
+	// Pass 3: N7 tells the worker again.
+	now = now.Add(time.Minute)
+	l.pass()
+	if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 3 {
+		t.Fatalf("after N7 retry tell sends = %d, want 3", got)
+	}
+	// Worker's next turn ends still diverged -> pass 4 wakes coordinator again.
+	now = now.Add(time.Minute)
+	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Run.LastTurnEnd = now })
+	l.pass()
+	if st := l.state(); len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != "diverged@"+l.c1 {
+		t.Fatalf("N7 second wake after retry: wakes=%+v", st.Project.Wakes)
+	}
+}
+
+// TestTaskRetryZeroBudgetStartsRun verifies worker_restarts: 0 and
+// reviewer_retries: 0: failure -> retry -> next pass starts the run.
+func TestTaskRetryZeroBudgetStartsRun(t *testing.T) {
+	// Worker with worker_restarts: 0.
+	lw := newLanding(t).withTokens()
+	now := lw.eng.now()
+	lw.eng.Now = func() time.Time { return now }
+	lw.edit(func(s *flow.State) {
+		s.Settings.WorkerRestarts = 0
+		a := &s.Tasks[0].Attempts[0]
+		a.Ready, a.Rounds, a.RunID = nil, nil, ""
+		a.Run = &flow.RunRecord{Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseEnded, Result: flow.EndExited, EndedAt: now}
+		a.Acts = []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now}}
+	})
+	lw.pass() // wakes worker_failed
+	if st := lw.state(); len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != "worker_failed" {
+		t.Fatalf("worker budget 0 wakes = %+v, want worker_failed", st.Project.Wakes)
+	}
+	lw.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"restart worker"}`, "")
+	lw.pass() // must start worker uncounted
+	if a := lw.state().Tasks[0].Attempts[0]; a.RunID == "" {
+		t.Fatalf("worker not started after retry with worker_restarts=0: run=%+v acts=%+v", a.Run, a.Acts)
+	}
+
+	// Reviewer with reviewer_retries: 0.
+	lr := newLanding(t).withTokens()
+	now = lr.eng.now()
+	lr.eng.Now = func() time.Time { return now }
+	lr.edit(func(s *flow.State) {
+		s.Settings.ReviewerRetries = 0
+		a := &s.Tasks[0].Attempts[0]
+		a.Rounds = nil
+		a.Review = &flow.ReviewRun{Round: 1, Head: lr.c1, Run: &flow.RunRecord{Role: flow.RoleReviewer, CLI: "claude", State: flow.PhaseEnded, Result: flow.EndFailed, EndedAt: now}}
+		a.Acts = []flow.Act{{Key: "start_reviewer@1@" + lr.c1, Result: "done", At: now}}
+	})
+	lr.pass() // wakes reviewer_failed
+	if st := lr.state(); len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != "reviewer_failed@1@"+lr.c1 {
+		t.Fatalf("reviewer budget 0 wakes = %+v, want reviewer_failed", st.Project.Wakes)
+	}
+	lr.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"restart reviewer"}`, "")
+	lr.pass() // must start reviewer uncounted
+	if a := lr.state().Tasks[0].Attempts[0]; a.Review == nil || a.Review.RunID == "" {
+		t.Fatalf("reviewer not started after retry with reviewer_retries=0: review=%+v acts=%+v", a.Review, a.Acts)
+	}
+}
+
+// TestTaskRetryAndSaySmallFixes covers: spent restarts alone refused without
+// re-opening merge@H; worker_failed/reviewer_failed wakes & coordinator.md
+// name retry; wakes use e.Bin; say refuses no_worker instead of a raw error.
+func TestTaskRetryAndSaySmallFixes(t *testing.T) {
+	l := newLanding(t).withTokens()
+	l.eng.Bin = "/opt/custom/sheepdog"
+	now := l.eng.now()
+	l.eng.Now = func() time.Time { return now }
+
+	// 1. Spent restarts alone (no failure wake) -> retry refused, merge@H stays done.
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].LastRow = "N41"
+		a := &s.Tasks[0].Attempts[0]
+		a.Restarts = s.Settings.WorkerRestarts
+		a.RunID = ""
+		a.Run = &flow.RunRecord{Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseEnded, Result: flow.EndStopped, EndedAt: now}
+		a.Acts = []flow.Act{{Key: "merge@" + l.c1, Result: "done", At: now}}
+	})
+	l.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"nothing failed"}`, "nothing_to_retry")
+	if a := l.state().Tasks[0].Attempts[0]; flow.Count(a.Acts, flow.AskRetry) != 0 {
+		t.Fatalf("refused retry recorded AskRetry (would re-open merge@H): acts=%+v", a.Acts)
+	}
+
+	// 2. say with no worker run after start_worker -> no_worker refusal, never raw error.
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.RunID, a.Run = "", nil
+		a.Acts = []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now}}
+	})
+	l.report("tok-coord", "task", `{"action":"say","task":"T1","why":"hello"}`, "no_worker")
+
+	// 3. worker_failed and reviewer_failed wakes name retry and use e.Bin.
+	l.edit(func(s *flow.State) {
+		s.Project.Wakes = nil
+		a := &s.Tasks[0].Attempts[0]
+		a.Ready, a.Rounds, a.RunID = nil, nil, ""
+		a.Restarts = s.Settings.WorkerRestarts
+		a.Run = &flow.RunRecord{Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseEnded, Result: flow.EndExited, EndedAt: now}
+		a.Acts = []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now}}
+	})
+	l.pass()
+	if w := l.state().Project.Wakes; len(w) != 1 || !strings.Contains(w[0].Why, "/opt/custom/sheepdog factory task retry T1 --why") {
+		t.Fatalf("worker_failed wake = %+v, want retry command with e.Bin", w)
+	}
+	l.edit(func(s *flow.State) {
+		s.Project.Wakes = nil
+		a := &s.Tasks[0].Attempts[0]
+		a.Ready = []flow.Ready{{Head: l.c1}}
+		a.Rounds = nil
+		a.Review = &flow.ReviewRun{Round: 1, Head: l.c1, Retries: s.Settings.ReviewerRetries, Run: &flow.RunRecord{Role: flow.RoleReviewer, CLI: "claude", State: flow.PhaseEnded, Result: flow.EndFailed, EndedAt: now}}
+		a.Acts = []flow.Act{{Key: "start_reviewer@1@" + l.c1, Result: "done", At: now}}
+	})
+	l.pass()
+	if w := l.state().Project.Wakes; len(w) != 1 || !strings.Contains(w[0].Why, "/opt/custom/sheepdog factory task retry T1 --why") {
+		t.Fatalf("reviewer_failed wake = %+v, want retry command with e.Bin", w)
+	}
+
+	// 4. N4 wake uses e.Bin, not hardcoded sheepdog.
+	l.edit(func(s *flow.State) { s.Project.Wakes = nil })
+	writeGHFile(t, l.gh, "view.json", `{"number":7,"state":"CLOSED","headRefOid":"`+l.c1+`","mergeable":"MERGEABLE","statusCheckRollup":[],"baseRefName":"main"}`)
+	l.pass()
+	if w := l.state().Project.Wakes; len(w) != 1 || !strings.Contains(w[0].Why, "/opt/custom/sheepdog factory task retry T1 --why") || strings.Contains(w[0].Why, "`sheepdog factory") {
+		t.Fatalf("N4 wake = %+v, want e.Bin not hardcoded sheepdog", w)
+	}
+
+	// 5. coordinator.md names retry and say.
+	if !strings.Contains(coordinatorTemplate, "send-back|retry|say") {
+		t.Fatalf("coordinator.md missing retry|say:\n%s", coordinatorTemplate)
 	}
 }
 

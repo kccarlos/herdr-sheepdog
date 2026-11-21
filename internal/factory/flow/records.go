@@ -374,7 +374,8 @@ func CapRunes(s string, limit int) string {
 // CleanErr cleans and caps an act's error text for storing and wakes.
 func CleanErr(raw string) string { return CapRunes(CleanText(raw), MaxActErrRunes) }
 
-func sinceRetry(acts []Act) []Act {
+// SinceRetry returns the acts recorded after the latest retry act (or all acts).
+func SinceRetry(acts []Act) []Act {
 	for i := len(acts) - 1; i >= 0; i-- {
 		if acts[i].Key == AskRetry {
 			return acts[i+1:]
@@ -384,7 +385,7 @@ func sinceRetry(acts []Act) []Act {
 }
 
 func actFailures(acts []Act, key string) (last, cause *Act, tries, counted int, settled bool) {
-	s := sinceRetry(acts)
+	s := SinceRetry(acts)
 	for i := len(s) - 1; i >= 0; i-- {
 		switch {
 		case s[i].Key != key:
@@ -407,8 +408,8 @@ func actFailures(acts []Act, key string) (last, cause *Act, tries, counted int, 
 }
 
 func doneActs(acts []Act, key string) []Act {
-	if strings.HasPrefix(key, AskMerge+"@") || strings.HasPrefix(key, AskUpdateBranch+"@") {
-		return sinceRetry(acts)
+	if strings.HasPrefix(key, AskMerge+"@") || strings.HasPrefix(key, AskUpdateBranch+"@") || strings.HasPrefix(key, AskTellDiverged+"@") {
+		return SinceRetry(acts)
 	}
 	return acts
 }

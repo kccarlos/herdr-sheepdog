@@ -132,8 +132,6 @@ func EnsureRun(in In, role string) []string {
 		return nil
 	case last.Result == EndQuota || last.Result == EndSignedOut:
 		// Quota and signed-out rows are slice 5b.
-	case last.Result == EndOwnerQuit:
-		return once(sinceRetry(a.Acts), key(AskWake, "owner_quit", role))
 	case role == RoleReviewer && tries < in.Settings.ReviewerRetries:
 		return []string{key(AskStartReview, round, tries+countBase, h)}
 	case role == RoleWorker && a.Restarts < in.Settings.WorkerRestarts:
@@ -144,9 +142,9 @@ func EnsureRun(in In, role string) []string {
 	}
 	// Otherwise it counts as a failure; N5 with retry is PR 5a.3.
 	if role == RoleReviewer {
-		return once(sinceRetry(a.Acts), key(AskWake, "reviewer_failed", round, h))
+		return once(SinceRetry(a.Acts), key(AskWake, "reviewer_failed", round, h))
 	}
-	return once(sinceRetry(a.Acts), key(AskWake, "worker_failed"))
+	return once(SinceRetry(a.Acts), key(AskWake, "worker_failed"))
 }
 
 func workerStartAsk(in In, last *RunRecord, n int) string {
@@ -268,7 +266,7 @@ func reviewRequired(in In) bool       { return in.Facts.PR.ReviewRequired }
 func noReviewRequired(in In) bool     { return !reviewRequired(in) }
 func working(in In) bool              { return in.Facts.Worker.State == RunWorking }
 func notWorking(in In) bool           { return !working(in) }
-func mergeAsked(in In) bool           { return Done(sinceRetry(in.acts()), key(AskMerge, headH(in))) }
+func mergeAsked(in In) bool           { return Done(SinceRetry(in.acts()), key(AskMerge, headH(in))) }
 
 func checksGrace(in In) time.Duration {
 	return time.Duration(in.Settings.ChecksGraceMinutes) * time.Minute
@@ -410,22 +408,22 @@ var TaskRows = []Row[In]{
 		return say("a recap is open", once(in.acts(), key(AskWake, "recap", n)), tell)(in)
 	}},
 	{ID: "N7", WaitsOn: "the worker; then the coordinator", Stage: "blocked_or_failed", When: all(hasAttempt, anyOf(tipDivergedOrUncovered, PRHeadDivergedOrForeign, prHeadMergeOnlyUnknown)), Then: func(in In) Decision {
-		h := headH(in)
+		h, acts := headH(in), SinceRetry(in.acts())
 		if !tipDivergedOrUncovered(in) && !PRHeadDivergedOrForeign(in) {
 			if in.Now.Sub(in.Facts.PR.HeadSince) >= checksGrace(in) {
-				return say("cannot tell if PR head is merge_only past checks_grace_minutes", once(in.acts(), key(AskWake, "merge_only_unknown", h)))(in)
+				return say("cannot tell if PR head is merge_only past checks_grace_minutes", once(acts, key(AskWake, "merge_only_unknown", h)))(in)
 			}
 			return say("cannot tell if PR head is merge_only: wait")(in)
 		}
 		tk := key(AskTellDiverged, h)
-		tell := LastAct(in.acts(), tk)
+		tell := LastAct(acts, tk)
 		if tell == nil || tell.Result != "done" {
 			return say(N7Why(in, false), EnsureRun(in, RoleWorker), ensure(in, tk))(in)
 		}
 		if working(in) || (!in.Facts.Worker.LastTurnEnd.After(tell.At) && in.Now.Sub(tell.At) < checksGrace(in)) {
 			return say(N7Why(in, false), EnsureRun(in, RoleWorker))(in)
 		}
-		return say(N7Why(in, true), once(in.acts(), key(AskWake, "diverged", h)))(in)
+		return say(N7Why(in, true), once(acts, key(AskWake, "diverged", h)))(in)
 	}},
 	{ID: "N8", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return hasAttempt(in) && in.attempt().NothingToChange != "" }, Then: func(in In) Decision {
 		a := in.attempt()
@@ -557,7 +555,7 @@ var TaskRows = []Row[In]{
 	{ID: "N40", WaitsOn: "GitHub", Stage: "ci", Why: WhyCI, When: ciReady(prBehindBase), Then: func(in In) Decision {
 		h := headH(in)
 		uk := key(AskUpdateBranch, h)
-		act := LastAct(sinceRetry(in.acts()), uk)
+		act := LastAct(SinceRetry(in.acts()), uk)
 		if act == nil || act.Result == "failed" {
 			return say("PR is behind the base: update branch with a merge commit", ensure(in, uk))(in)
 		}

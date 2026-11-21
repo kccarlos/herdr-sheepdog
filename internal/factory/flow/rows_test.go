@@ -778,24 +778,13 @@ func TestMergeAfterRetryAndWakeCommands(t *testing.T) {
 	if _, d := FirstMatch(TaskRows, n7); !strings.Contains(d.Why, `task say T7 --why`) || !strings.Contains(d.Why, `task retry T7 --why`) {
 		t.Fatalf("N7 why = %q, want exact task say and task retry commands", d.Why)
 	}
-
-	// 3. Owner-quit run does not restart, wakes once, and restarts after retry sets EndStopped.
-	oq := with(notReady, noRounds, prGone, func(in *In) {
-		in.Facts.Worker = Run{State: RunGone}
-		a0(in).Run = &RunRecord{Role: RoleWorker, CLI: "claude", State: PhaseEnded, Result: EndOwnerQuit}
-		a0(in).Acts = []Act{{Key: AskStartWorker, Result: "done", At: now}}
-	})
-	if asks := EnsureRun(oq, RoleWorker); !slices.Equal(asks, []string{"wake_coordinator@owner_quit@worker"}) {
-		t.Fatalf("owner_quit EnsureRun = %v, want wake once", asks)
-	}
-	a0(&oq).Acts = append(a0(&oq).Acts, Act{Key: "wake_coordinator@owner_quit@worker", Result: "done", At: now})
-	if asks := EnsureRun(oq, RoleWorker); len(asks) != 0 {
-		t.Fatalf("owner_quit repeat EnsureRun = %v, want nil", asks)
-	}
-	a0(&oq).Run.Result = EndStopped
-	a0(&oq).Acts = append(a0(&oq).Acts, Act{Key: AskRetry, Result: "done", At: now})
-	if asks := EnsureRun(oq, RoleWorker); len(asks) != 1 || !strings.HasPrefix(asks[0], AskStartWorker) {
-		t.Fatalf("owner_quit after retry EnsureRun = %v, want start_worker", asks)
+	// After N7 wake + retry, N7 tells the worker again and wakes again if still diverged.
+	a0(&n7).Acts = append(a0(&n7).Acts,
+		Act{Key: key(AskWake, "diverged", "c1"), Result: "done", At: now},
+		Act{Key: AskRetry, Result: "done", At: now},
+	)
+	if r, d := FirstMatch(TaskRows, n7); r.ID != "N7" || !slices.Contains(d.Asked, key(AskTellDiverged, "c1")) {
+		t.Fatalf("N7 after retry: %s %v, want tell_worker_diverged@c1", r.ID, d.Asked)
 	}
 }
 
