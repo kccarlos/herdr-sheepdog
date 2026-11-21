@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
@@ -357,5 +358,168 @@ func TestRecapDecideNewCloseFailureKeepsRuns(t *testing.T) {
 	}
 	if st := l.state(); st.Seq != seq || st.Tasks[0].Attempts[0].Closed != "" || st.Tasks[0].Attempts[0].RunID != l.worker {
 		t.Fatalf("state changed after a failed new: seq %d->%d attempt %+v", seq, st.Seq, st.Tasks[0].Attempts[0])
+	}
+}
+
+// TestTaskRetryN5AndRefusals verifies: retry is refused when not at N5/N4
+// (nothing_to_retry) and on ended tasks (already_closed); at N5 it records
+// retry in the failing key's acts list so the key is asked again and failure
+// counts restart from zero; works for both attempt-level (merge) and
+// task-level (new_attempt) failures, plus owner-quit / worker-restart resets.
+func TestTaskRetryN5AndRefusals(t *testing.T) {
+	l := newLanding(t).withTokens()
+	now := l.eng.now()
+	l.eng.Now = func() time.Time { return now }
+	l.edit(func(s *flow.State) {
+		s.Tasks = append(s.Tasks, flow.Task{ID: "T2", Title: "feat: ended", EstimateLines: 50, Closed: &flow.Closed{Why: "done"}})
+	})
+
+	// Refusals: worker role, ended task, healthy task not at N4/N5.
+	l.report("tok-worker", "task", `{"action":"retry","task":"T1","why":"try"}`, "kind_not_allowed")
+	l.report("tok-coord", "task", `{"action":"retry","task":"T2","why":"try"}`, "already_closed")
+	l.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"try"}`, "nothing_to_retry")
+
+	// Drive T1 to N5 via 3 transient merge failures.
+	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
+	writeGHFile(t, l.gh, "merge_fail", "HTTP 502: Bad Gateway")
+	l.pass()
+	now = now.Add(time.Minute)
+	l.pass()
+	now = now.Add(2 * time.Minute)
+	l.pass()
+	l.pass() // N5 wakes
+	st := l.state()
+	if st.Tasks[0].LastRow != "N5" || len(st.Project.Wakes) != 1 || !strings.Contains(st.Project.Wakes[0].Why, `task retry T1 --why`) {
+		t.Fatalf("at N5: row=%s wakes=%+v", st.Tasks[0].LastRow, st.Project.Wakes)
+	}
+
+	// Retry clears N5; a second immediate retry is refused; removing merge_fail lets it merge.
+	l.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"GitHub back"}`, "")
+	l.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"again"}`, "nothing_to_retry")
+	if err := os.Remove(filepath.Join(l.gh, "merge_fail")); err != nil {
+		t.Fatal(err)
+	}
+	l.pass()
+	if got := len(ghCalls(t, l.gh, "pr merge")); got != 4 {
+		t.Fatalf("merge calls after retry = %d, want 4", got)
+	}
+	// If it fails again after retry, counts restarted from zero (1 transient failure does not reach N5).
+	writeGHFile(t, l.gh, "merge_fail", "HTTP 502: Bad Gateway")
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Acts = append(a.Acts, flow.Act{Key: flow.AskRetry, Result: "done", At: now})
+	})
+	l.pass() // 1st failure after retry
+	l.pass() // still waiting in backoff at N42, not N5
+	if row := l.state().Tasks[0].LastRow; row != "N42" {
+		t.Fatalf("after 1 failure post-retry: row=%s, want N42 (counts restarted from zero)", row)
+	}
+
+	// Task-level failure (new_attempt in t.Acts when no open attempt): retry records in t.Acts.
+	l.edit(func(s *flow.State) {
+		s.Tasks = append(s.Tasks, flow.Task{
+			ID: "T3", Title: "feat: new", EstimateLines: 50, LastRow: "N5",
+			Acts: []flow.Act{{Key: flow.AskNewAttempt, Result: "failed", Class: flow.ClassSettled, Err: "bad ref", At: now}},
+		})
+	})
+	l.report("tok-coord", "task", `{"action":"retry","task":"T3","why":"fixed remote"}`, "")
+	if !flow.Done(l.state().Tasks[2].Acts, flow.AskRetry) || flow.HasExhausted(l.state().Tasks[2].Acts, l.state().Settings) {
+		t.Fatalf("T3 acts after retry = %+v", l.state().Tasks[2].Acts)
+	}
+
+	// Owner-quit worker run: retry allows it to start again.
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.RunID = ""
+		a.Run = &flow.RunRecord{Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseEnded, Result: flow.EndOwnerQuit}
+		a.Restarts = s.Settings.WorkerRestarts
+	})
+	l.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"restart worker"}`, "")
+	a := l.state().Tasks[0].Attempts[0]
+	if a.Restarts != 0 || a.Run.Result != flow.EndStopped {
+		t.Fatalf("after owner-quit retry: restarts=%d result=%s", a.Restarts, a.Run.Result)
+	}
+}
+
+// TestTaskRetryN4StartsNewAttemptAndBranch verifies N4 -> retry -> closes the
+// attempt, stops its runs, and N11 starts a new attempt on a new branch.
+func TestTaskRetryN4StartsNewAttemptAndBranch(t *testing.T) {
+	l := newLanding(t).withTokens()
+	writeGHFile(t, l.gh, "view.json", `{"number":7,"state":"CLOSED","headRefOid":"`+l.c1+`","mergeable":"MERGEABLE","statusCheckRollup":[],"baseRefName":"main"}`)
+	l.pass()
+	st := l.state()
+	if st.Tasks[0].LastRow != "N4" || len(st.Project.Wakes) != 1 || !strings.Contains(st.Project.Wakes[0].Why, `task retry T1 --why`) {
+		t.Fatalf("at N4: row=%s wakes=%+v", st.Tasks[0].LastRow, st.Project.Wakes)
+	}
+	l.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"PR was closed by hand"}`, "")
+	if st := l.state(); len(st.Tasks[0].Attempts) != 1 || st.Tasks[0].Attempts[0].Closed == "" {
+		t.Fatalf("after N4 retry: attempts=%+v", st.Tasks[0].Attempts)
+	}
+	if rs, _ := termState(context.Background(), l.client, l.worker); rs != flow.RunGone {
+		t.Fatalf("old worker still live after N4 retry: %s", rs)
+	}
+	// Second retry before new attempt is refused.
+	l.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"again"}`, "nothing_to_retry")
+
+	// Next pass: N11 creates attempt 2 on a new branch.
+	l.pass()
+	st = l.state()
+	if len(st.Tasks[0].Attempts) != 2 || st.Tasks[0].Attempts[1].Branch == l.branch || st.Tasks[0].Attempts[1].Branch == "" {
+		t.Fatalf("after N11: attempts=%+v (old branch %q)", st.Tasks[0].Attempts, l.branch)
+	}
+}
+
+// TestTaskSayDeliversIdleHoldsWorkingAndRefusesNoAttempt verifies task say:
+// refused with no open attempt (no_worker), on ended task (already_closed),
+// cleaned and capped; delivered immediately to an idle worker; held for a
+// working worker and delivered once it goes idle.
+func TestTaskSayDeliversIdleHoldsWorkingAndRefusesNoAttempt(t *testing.T) {
+	l := newLanding(t).withTokens()
+	now := l.eng.now()
+	l.eng.Now = func() time.Time { return now }
+	l.edit(func(s *flow.State) {
+		s.Tasks = append(s.Tasks,
+			flow.Task{ID: "T2", Title: "feat: no attempt", EstimateLines: 50},
+			flow.Task{ID: "T3", Title: "feat: ended", EstimateLines: 50, Closed: &flow.Closed{Why: "x"}})
+	})
+	l.report("tok-worker", "task", `{"action":"say","task":"T1","why":"hi"}`, "kind_not_allowed")
+	l.report("tok-coord", "task", `{"action":"say","task":"T2","why":"hi"}`, "no_worker")
+	l.report("tok-coord", "task", `{"action":"say","task":"T3","why":"hi"}`, "already_closed")
+	l.report("tok-coord", "task", `{"action":"say","task":"T1","why":"  "}`, "why_missing")
+	l.report("tok-coord", "task", `{"action":"say","task":"T1","why":"`+strings.Repeat("x", 501)+`"}`, "invalid_report")
+
+	// Idle worker: delivered immediately (R24), cleaned.
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Attempts[0].Run = &flow.RunRecord{Address: l.worker, Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseIdle}
+	})
+	l.report("tok-coord", "task", `{"action":"say","task":"T1","why":"restore\n\u0007 branch"}`, "")
+	sends := sendsTo(t, l.srv.Requests(), l.worker)
+	if len(sends) != 1 || !strings.Contains(sends[0], "restore branch") || strings.ContainsAny(sends[0], "\n\x07") {
+		t.Fatalf("idle say sends = %q, want 1 cleaned message", sends)
+	}
+
+	// Working worker: held in Run.Held (R26), not sent until idle grace passes (R18).
+	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "working"})
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Attempts[0].Run = &flow.RunRecord{Address: l.worker, Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseWorking, Status: "working", StatusSince: now}
+	})
+	l.report("tok-coord", "task", `{"action":"say","task":"T1","why":"check origin/main"}`, "")
+	if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 1 {
+		t.Fatalf("working say sent immediately: sends=%d, want 1", got)
+	}
+	if held := l.state().Tasks[0].Attempts[0].Run.Held; len(held) != 1 || !strings.Contains(held[0], "check origin/main") {
+		t.Fatalf("working say held = %q, want 1 held message", held)
+	}
+	// Worker becomes idle and idle grace elapses -> R18 delivers held message.
+	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "idle"})
+	l.pass()
+	now = now.Add(time.Duration(l.state().Settings.IdleGraceSeconds) * time.Second)
+	l.pass()
+	sends = sendsTo(t, l.srv.Requests(), l.worker)
+	if len(sends) != 2 || !strings.Contains(sends[1], "check origin/main") {
+		t.Fatalf("after idle grace sends = %q, want held message delivered", sends)
+	}
+	if held := l.state().Tasks[0].Attempts[0].Run.Held; len(held) != 0 {
+		t.Fatalf("held after delivery = %q, want empty", held)
 	}
 }

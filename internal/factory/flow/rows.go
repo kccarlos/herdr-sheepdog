@@ -75,7 +75,7 @@ func ensureStep(in In, k string) (due, exhausted bool) {
 // ensure asks for k by key and retries failed tries with doubling back-off
 // until settled or ensure_failures in a row (design.md section 8).
 func ensure(in In, k string) []string {
-	if k == "" || Done(in.acts(), k) {
+	if k == "" || Done(doneActs(in.acts(), k), k) {
 		return nil
 	}
 	due, exhausted := ensureStep(in, k)
@@ -131,7 +131,9 @@ func EnsureRun(in In, role string) []string {
 	case last == nil:
 		return nil
 	case last.Result == EndQuota || last.Result == EndSignedOut:
-		// Quota and signed-out rows are slice 5b; owner-quit detection awaits herdr-core (U12) and retry (5a.3/5a.4).
+		// Quota and signed-out rows are slice 5b.
+	case last.Result == EndOwnerQuit:
+		return once(sinceRetry(a.Acts), key(AskWake, "owner_quit", role))
 	case role == RoleReviewer && tries < in.Settings.ReviewerRetries:
 		return []string{key(AskStartReview, round, tries+countBase, h)}
 	case role == RoleWorker && a.Restarts < in.Settings.WorkerRestarts:
@@ -142,9 +144,9 @@ func EnsureRun(in In, role string) []string {
 	}
 	// Otherwise it counts as a failure; N5 with retry is PR 5a.3.
 	if role == RoleReviewer {
-		return once(a.Acts, key(AskWake, "reviewer_failed", round, h))
+		return once(sinceRetry(a.Acts), key(AskWake, "reviewer_failed", round, h))
 	}
-	return once(a.Acts, key(AskWake, "worker_failed"))
+	return once(sinceRetry(a.Acts), key(AskWake, "worker_failed"))
 }
 
 func workerStartAsk(in In, last *RunRecord, n int) string {
@@ -343,16 +345,17 @@ func n5Wake(acts []Act, fk string) []string {
 	return once(acts, key(AskWake, "failed", fk))
 }
 
-func n5Why(acts []Act, fk string) string {
+func n5Why(taskID string, acts []Act, fk string) string {
 	_, cause, _, _, _ := actFailures(acts, fk)
 	cls, words := ClassTransient, ""
 	if cause != nil {
 		cls, words = cmp.Or(cause.Class, ClassTransient), CleanErr(cause.Err)
 	}
+	cmd := fmt.Sprintf("task retry %s --why \"<why>\"", taskID)
 	if words != "" {
-		return fmt.Sprintf("%s failed (%s): %s", fk, cls, words)
+		return fmt.Sprintf("%s failed (%s): %s; run `sheepdog factory %s`", fk, cls, words, cmd)
 	}
-	return fmt.Sprintf("%s failed (%s)", fk, cls)
+	return fmt.Sprintf("%s failed (%s); run `sheepdog factory %s`", fk, cls, cmd)
 }
 
 // TaskRows is the task table in design.md section 4's order, using EnsureRun
@@ -385,17 +388,17 @@ var TaskRows = []Row[In]{
 			if due, exhausted := ensureStep(in, AskStopRuns); due {
 				return say("parked: stop its runs", []string{AskStopRuns})(in)
 			} else if exhausted {
-				return say(n5Why(in.acts(), AskStopRuns), n5Wake(in.acts(), AskStopRuns))(in)
+				return say(n5Why(in.Task.ID, in.acts(), AskStopRuns), n5Wake(in.acts(), AskStopRuns))(in)
 			}
 		}
 		return say("parked")(in)
 	}},
 	{ID: "N4", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: prClosed, Then: func(in In) Decision {
-		return say("the PR was closed without merging (never reopened; retry starts a new attempt)", once(in.acts(), key(AskWake, "pr_closed")))(in)
+		return say(fmt.Sprintf("the PR was closed without merging (never reopened; run `sheepdog factory task retry %s --why \"<why>\"` to start a new attempt)", in.Task.ID), once(in.acts(), key(AskWake, "pr_closed")))(in)
 	}},
 	{ID: "N5", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool { return n5Key(in) != "" }, Then: func(in In) Decision {
 		fk := n5Key(in)
-		return say(n5Why(in.acts(), fk), n5Wake(in.acts(), fk))(in)
+		return say(n5Why(in.Task.ID, in.acts(), fk), n5Wake(in.acts(), fk))(in)
 	}},
 	// N6 tells a live worker of a size or ci recap once to stop (it has no
 	// recap-written report yet, so nothing waits for one).
@@ -597,7 +600,7 @@ func N7Why(in In, wake bool) string {
 		msg = fmt.Sprintf("worktree tip %s diverged from H %s — restore branch %s (never rebase or force-push)", in.Facts.Tip, h, branch)
 	}
 	if wake {
-		return msg + " and still holds after the worker's turn: use say to the worker, then retry"
+		return fmt.Sprintf("%s and still holds after the worker's turn: run `sheepdog factory task say %s --why \"<message>\"` then `sheepdog factory task retry %s --why \"<why>\"`", msg, in.Task.ID, in.Task.ID)
 	}
 	return msg
 }

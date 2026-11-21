@@ -11,7 +11,7 @@ import (
 const (
 	PhaseStarting, PhaseWorking, PhaseIdle, PhaseBlocked, PhaseEnded                  = "starting", "working", "idle", "blocked", "ended"
 	EndFailed, EndSignedOut, EndQuota, EndBlank, EndError, EndResumeFailed            = "failed", "signed_out", "quota", "blank", "error", "resume_failed"
-	EndStuck, EndExited, EndLost, EndStopped                                          = "stuck", "exited", "lost", "stopped"
+	EndStuck, EndExited, EndLost, EndStopped, EndOwnerQuit                            = "stuck", "exited", "lost", "stopped", "owner_quit"
 	EvLaunched, EvLaunchFailed, EvScreen, EvStatus, EvDeliver                         = "launched", "launch_failed", "screen", "status", "deliver"
 	EvActivity, EvTick, EvExit, EvLost, EvStop                                        = "activity", "tick", "exit", "lost", "stop"
 	ScreenNone, ScreenTrust, ScreenConfirm, ScreenOnboarding                          = "none", "trust", "confirm", "onboarding"

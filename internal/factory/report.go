@@ -937,8 +937,59 @@ func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args js
 		n := len(a.Rounds) + 1
 		a.Rounds = append(a.Rounds, flow.Round{N: n, Kind: flow.RoundSendBack, Head: flow.H(*a), Verdict: flow.VerdictChanges, Why: why})
 		a.NothingToChange, line.Decision = "", fmt.Sprintf("sent back (round %d)", n)
+	case "retry":
+		acts := &t.Acts
+		if a != nil {
+			acts = &a.Acts
+		}
+		now := e.now()
+		isN4 := a != nil && (t.LastRow == "N4" || e.prs[a.Worktree].State == flow.PRClosed)
+		workerFailed := a != nil && a.Run != nil && a.Run.State == flow.PhaseEnded && (a.Restarts >= s.Settings.WorkerRestarts || a.Run.Result == flow.EndOwnerQuit)
+		reviewFailed := a != nil && a.Review != nil && a.Review.Run != nil && a.Review.Run.State == flow.PhaseEnded && (a.Review.Retries >= s.Settings.ReviewerRetries || a.Review.Run.Result == flow.EndOwnerQuit)
+		isN5 := (t.LastRow == "N5" && flow.HasExhausted(*acts, s.Settings)) ||
+			(t.LastRow == "N3" && flow.Exhausted(*acts, flow.AskStopRuns, s.Settings)) ||
+			workerFailed || reviewFailed
+		if !isN4 && !isN5 {
+			return e.refuse(id, "nothing_to_retry", fmt.Sprintf("Task %q has nothing to retry (it is not at N4 or N5).", t.ID))
+		}
+		if isN4 {
+			ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
+			defer cancel()
+			if err := e.stopRuns(ctx, taskRuns(id, *t)); err != nil {
+				return err
+			}
+			stopTaskRuns(t, s.Settings, now)
+			*acts = append(*acts, flow.Act{Key: flow.AskRetry, Result: "done", At: now})
+			a.Closed = fmt.Sprintf("Closed by sheepdog factory: retried after PR closed (%s).", why)
+			line.Decision = "retried; attempt closed for a new one"
+		} else {
+			*acts = append(*acts, flow.Act{Key: flow.AskRetry, Result: "done", At: now})
+			if a != nil {
+				a.Restarts = 0
+				if a.Run != nil && a.Run.State == flow.PhaseEnded && a.Run.Result == flow.EndOwnerQuit {
+					a.Run.Result = flow.EndStopped
+				}
+				if a.Review != nil {
+					a.Review.Retries, a.Review.FailedModels = 0, nil
+					if a.Review.Run != nil && a.Review.Run.State == flow.PhaseEnded && a.Review.Run.Result == flow.EndOwnerQuit {
+						a.Review.Run.Result = flow.EndStopped
+					}
+				}
+			}
+			line.Decision = "retried"
+		}
+	case "say":
+		if a == nil {
+			return e.refuse(id, "no_worker", fmt.Sprintf("Task %q has no open attempt to message.", t.ID))
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
+		defer cancel()
+		if err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, "Message from the coordinator: "+why, false); err != nil {
+			return err
+		}
+		line.Decision = "said to worker"
 	default:
-		return e.refuse(id, "invalid_report", fmt.Sprintf("%q is not a task command; use park, unpark, drop, close or send-back.", req.Action))
+		return e.refuse(id, "invalid_report", fmt.Sprintf("%q is not a task command; use park, unpark, drop, close, send-back, retry or say.", req.Action))
 	}
 	return e.commitLocked(id, s, line)
 }
