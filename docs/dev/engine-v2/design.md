@@ -1119,6 +1119,10 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | O18 | The base observer makes two GitHub calls per pass, and more when a run on the head commit was cancelled by hand. Owner: cheap sync |
 | O19 | A workflow file that fails to start (`startup_failure`) on the base reads green: the base observer does not count it red, though the checks rollup does |
 | O20 | How the menu-bar app gets a pairing code over a channel other programs of the same user cannot read (for example the Mac app as a paired device whose key is in its own Keychain), whether `GET /api/pair` and `sheepdog pair` stop giving codes to any caller on this computer, and a limit on enrol attempts that also covers callers on this computer, since a short code can be guessed by retrying. Owner: slice 6 |
+| O21 | A hung coordinator can lose a wake's text when the engine replaces it. The engine has already marked the wake delivered. Slice 5b, cross-PR finding #3 |
+| O22 | A recorded PR number that GitHub can no longer read can look like confirmed absence to N26. Keep the PR read unknown in that case. Slice 5b, cross-PR finding #15 |
+| O23 | Screen phrase matching can mistake agent output for CLI status. R19 can end an idle run whose last line starts with a limit phrase. Slice 5b, cross-PR finding #17 |
+| O24 | R21 can interrupt a worker when Claude Code folds a long command's output and only the stripped timer changes. Count a live foreground child as activity in slice 5b |
 
 ### 17.5 The audit by simulation, and what it means
 
