@@ -59,7 +59,7 @@ type Project struct {
 	CoordWakeAt       time.Time         `json:"coord_wake_at,omitempty"`       // J9: oldest delivered wake awaiting a turn
 	CoordWakeTurn     uint64            `json:"coord_wake_turn,omitempty"`     // J9: coordinator turn when CoordWakeAt was sent
 	CoordLastWakeAt   time.Time         `json:"coord_last_wake_at,omitempty"`  // J13: last wake or heartbeat delivered
-	Invariants        map[string]string `json:"invariants,omitempty"`          // active violation per invariant rule (I1–I5)
+	Invariants        map[string]string `json:"invariants,omitempty"`          // active violation per invariant rule and subject (I1–I5)
 }
 
 // Wake is a held wake for the coordinator (design.md 10, J12): queued once

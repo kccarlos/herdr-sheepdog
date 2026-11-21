@@ -3,6 +3,9 @@ package factory
 import (
 	"bytes"
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -481,4 +484,243 @@ func TestCrashBeforeReviewRunIDStoppedByName(t *testing.T) {
 			t.Fatalf("reviewer relaunched on subsequent N6 pass: %s", rs)
 		}
 	})
+}
+
+// TestInvariantPerSubjectSkipAndRecurrence verifies that stored invariant
+// violations are keyed per (invariant, subject): skipping one task keeps its
+// stored violation without disturbing another task, clearing and re-breaking
+// one subject while another holds the same invariant open wakes again, and
+// A->B->A on one subject wakes at each start while restarts stay quiet.
+func TestInvariantPerSubjectSkipAndRecurrence(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	l := newLanding(t)
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	l.eng.Now = func() time.Time { return now }
+	l.eng.onInvariant = nil
+
+	// Second task T2 with its own worktree (at l.c1 so view.json matches H),
+	// worker, and unwanted live reviewer.
+	wt2, err := world.NewWorktree(ctx, l.repo, l.paths.Worktree(l.id, "T2", 1), "T2-1", "feat: y")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt2.Path, "reset", "--hard", l.c1)
+	w2, err := startRun(ctx, l.client, world.RunSpec{Name: "worker-t2", Cwd: wt2.Path, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setIdle(t, l.srv, l.client, w2, "idle")
+	rev1, err := startRun(ctx, l.client, world.RunSpec{Name: "rev-t1-i1", Cwd: l.wt, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "working"})
+	rev2, err := startRun(ctx, l.client, world.RunSpec{Name: "rev-t2-i1", Cwd: wt2.Path, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.srv.SetStatus(rev2, &hc.Status{App: "claude-code", State: "working"})
+
+	// Both T1 and T2 have passed the ladder and asked merge (N41 wait), yet both
+	// carry an unwanted live reviewer (I1 on T1 and I1 on T2).
+	l.edit(func(s *flow.State) {
+		a1 := &s.Tasks[0].Attempts[0]
+		a1.Accepts = []flow.Accept{{Head: l.c1, By: "bar"}}
+		a1.Acts = []flow.Act{{Key: flow.AskMerge + "@" + l.c1, Result: "done", At: now}}
+		a1.Review = &flow.ReviewRun{Round: 3, Head: l.c1, Code: "r1", RunID: rev1, Run: &flow.RunRecord{Address: rev1, Role: flow.RoleReviewer, State: flow.PhaseWorking}}
+		s.Tasks = append(s.Tasks, flow.Task{
+			ID: "T2", Title: "feat: y", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: wt2.BaseCommit, Branch: wt2.Branch, Worktree: wt2.Path, PR: 7, RunID: w2,
+				Ready:   []flow.Ready{{Head: l.c1}},
+				Rounds:  []flow.Round{{N: 1, Kind: "full", Head: l.c1, Verdict: flow.VerdictPass}, {N: 2, Kind: "full", Head: l.c1, Verdict: flow.VerdictPass}},
+				Accepts: []flow.Accept{{Head: l.c1, By: "bar"}},
+				Acts:    []flow.Act{{Key: flow.AskMerge + "@" + l.c1, Result: "done", At: now}},
+				Review:  &flow.ReviewRun{Round: 3, Head: l.c1, Code: "r2", RunID: rev2, Run: &flow.RunRecord{Address: rev2, Role: flow.RoleReviewer, State: flow.PhaseWorking}},
+			}},
+		})
+	})
+
+	deliverWakes := func() {
+		t.Helper()
+		l.srv.SetStatus("coord-elsewhere", &hc.Status{App: "claude-code", State: "idle"})
+		now = now.Add(5 * time.Second)
+		l.pass()
+		now = now.Add(25 * time.Second)
+		l.pass()
+		l.srv.SetStatus("coord-elsewhere", &hc.Status{App: "claude-code", State: "working"})
+		if ws := l.state().Project.Wakes; len(ws) != 0 {
+			t.Fatalf("expected wakes delivered, still held: %+v", ws)
+		}
+	}
+
+	// Pass 1: both I1@T1 and I1@T2 start -> logged once each, 2 wakes held.
+	l.pass()
+	if got := logRules(t, l.paths.Log(l.id), "I1"); len(got) != 2 {
+		t.Fatalf("pass 1 I1 log lines = %d, want 2: %+v", len(got), got)
+	}
+	if ws := l.state().Project.Wakes; len(ws) != 2 {
+		t.Fatalf("pass 1 wakes = %+v, want 2 (T1 and T2)", ws)
+	}
+	deliverWakes()
+
+	// Skip T1 (hc error on T1's worker) while T2 still violates I1:
+	// T1 keeps its stored state (neither cleared nor re-logged), T2 is unchanged.
+	var failW1 atomic.Bool
+	failW1.Store(true)
+	l.eng.HC = hc.NewClient(methodFailProxy(t, l.srv.Path, l.worker, &failW1))
+	now = now.Add(15 * time.Second)
+	l.pass()
+	if got := logRules(t, l.paths.Log(l.id), "I1"); len(got) != 2 {
+		t.Fatalf("skip T1 manufactured I1 log change: len=%d, want 2", len(got))
+	}
+	if ws := l.state().Project.Wakes; len(ws) != 0 {
+		t.Fatalf("skip T1 queued spurious wake: %+v", ws)
+	}
+
+	// T1 recovers: both still violate I1 -> still no re-log and no re-wake.
+	failW1.Store(false)
+	l.eng.HC = l.client
+	now = now.Add(15 * time.Second)
+	l.pass()
+	if got := logRules(t, l.paths.Log(l.id), "I1"); len(got) != 2 {
+		t.Fatalf("recover T1 re-logged I1: len=%d, want 2", len(got))
+	}
+	if ws := l.state().Project.Wakes; len(ws) != 0 {
+		t.Fatalf("recover T1 queued spurious wake: %+v", ws)
+	}
+
+	// Restart daemon with both stored violations active -> no re-log, no re-wake.
+	var restartLog bytes.Buffer
+	eng2 := New(l.paths, l.client)
+	eng2.Log = logging.NewJSONLLogger(&restartLog)
+	eng2.Now = func() time.Time { return now }
+	eng2.passProject(ctx, l.id, true)
+	if restartLog.String() != "" || len(logRules(t, l.paths.Log(l.id), "I1")) != 2 || len(l.state().Project.Wakes) != 0 {
+		t.Fatalf("restart re-logged or re-woke: log=%q i1=%d wakes=%+v", restartLog.String(), len(logRules(t, l.paths.Log(l.id), "I1")), l.state().Project.Wakes)
+	}
+
+	// Fix T2 while T1 remains broken, then re-break T2 -> T2 wakes again!
+	l.edit(func(s *flow.State) { s.Tasks[1].Attempts[0].Review = nil })
+	now = now.Add(15 * time.Second)
+	l.pass()
+	l.edit(func(s *flow.State) {
+		s.Tasks[1].Attempts[0].Review = &flow.ReviewRun{Round: 3, Head: l.c1, Code: "r2", RunID: rev2, Run: &flow.RunRecord{Address: rev2, Role: flow.RoleReviewer, State: flow.PhaseWorking}}
+	})
+	now = now.Add(15 * time.Second)
+	l.pass()
+	if got := logRules(t, l.paths.Log(l.id), "I1"); len(got) != 3 {
+		t.Fatalf("T2 recurrence I1 log lines = %d, want 3", len(got))
+	}
+	if ws := l.state().Project.Wakes; len(ws) != 1 || !strings.Contains(ws[0].Why, "T2") {
+		t.Fatalf("T2 recurrence wakes = %+v, want 1 naming T2", ws)
+	}
+	deliverWakes()
+
+	// A -> B -> A on one subject (I4@T1) without clearing in between wakes at each start.
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Attempts[0].Accepts = nil // A: unaccepted merge@c1
+	})
+	now = now.Add(15 * time.Second)
+	l.pass()
+	if got := logRules(t, l.paths.Log(l.id), "I4"); len(got) != 1 || len(l.state().Project.Wakes) != 1 {
+		t.Fatalf("I4 A start: logs=%d wakes=%+v, want 1 and 1", len(got), l.state().Project.Wakes)
+	}
+	deliverWakes()
+
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Attempts[0].Acts = append(s.Tasks[0].Attempts[0].Acts, flow.Act{Key: flow.AskMerge + "@deadbeef", Result: "done", At: now}) // B: c1 + deadbeef
+	})
+	now = now.Add(15 * time.Second)
+	l.pass()
+	if got := logRules(t, l.paths.Log(l.id), "I4"); len(got) != 2 || len(l.state().Project.Wakes) != 1 {
+		t.Fatalf("I4 B start: logs=%d wakes=%+v, want 2 and 1", len(got), l.state().Project.Wakes)
+	}
+	deliverWakes()
+
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Attempts[0].Acts = []flow.Act{{Key: flow.AskMerge + "@" + l.c1, Result: "done", At: now}} // back to A
+	})
+	now = now.Add(15 * time.Second)
+	l.pass()
+	if got := logRules(t, l.paths.Log(l.id), "I4"); len(got) != 3 {
+		t.Fatalf("I4 return to A logs = %d, want 3", len(got))
+	}
+	if ws := l.state().Project.Wakes; len(ws) != 1 {
+		t.Fatalf("I4 return to A wakes = %+v, want 1", ws)
+	}
+}
+
+// TestUnansweredPRReadHoldsReviewer verifies that when a diverged PR head stops
+// the reviewer and the next PR read fails (Answered=false), N29 holds without
+// relaunching the reviewer until a fresh answered PR snapshot returns, at which
+// point N7 holds if still diverged or N29 resumes if the PR matches H.
+func TestUnansweredPRReadHoldsReviewer(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	l := newLanding(t)
+	revName := reviewerName(l.id, "T1", 1, 1)
+	revID, err := startRun(ctx, l.client, world.RunSpec{Name: revName, Cwd: l.wt, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.srv.SetStatus(revID, &hc.Status{App: "claude-code", State: "working"})
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Attempts[0].Rounds = nil
+		s.Tasks[0].Attempts[0].Review = &flow.ReviewRun{Round: 1, Head: l.c1, Code: "div", RunID: revID}
+	})
+
+	// Pass 1: diverged PR head stops the reviewer (EndStopped) and N7 matches.
+	ext := pushExternalToBranch(t, l, true, "force.txt", "diverged\n")
+	writePRJSON(t, l.gh, "view.json", ext, greenRollup)
+	l.pass()
+	if st := l.state(); st.Tasks[0].LastRow != "N7" || st.Tasks[0].Attempts[0].Review == nil ||
+		st.Tasks[0].Attempts[0].Review.RunID != "" || st.Tasks[0].Attempts[0].Review.Run == nil ||
+		st.Tasks[0].Attempts[0].Review.Run.Result != flow.EndStopped {
+		t.Fatalf("pass 1 diverged PR: row=%s review=%+v, want N7 EndStopped", st.Tasks[0].LastRow, st.Tasks[0].Attempts[0].Review)
+	}
+
+	// Pass 2: PR read fails (Answered=false) -> N29 must hold, not relaunch.
+	if err := os.WriteFile(filepath.Join(l.gh, "fail"), []byte("1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l.pass()
+	if rv := l.state().Tasks[0].Attempts[0].Review; rv == nil || rv.RunID != "" || rv.Run == nil || rv.Run.Result != flow.EndStopped {
+		t.Fatalf("unanswered PR read relaunched reviewer: %+v", rv)
+	}
+	if rs, _ := termState(ctx, l.client, revName); rs != flow.RunGone {
+		t.Fatalf("reviewer terminal started during unanswered PR read: %s", rs)
+	}
+
+	// Pass 3: fresh answered read returns still diverged -> N7 applies, no relaunch.
+	if err := os.Remove(filepath.Join(l.gh, "fail")); err != nil {
+		t.Fatal(err)
+	}
+	l.pass()
+	if st := l.state(); st.Tasks[0].LastRow != "N7" || st.Tasks[0].Attempts[0].Review.RunID != "" {
+		t.Fatalf("answered still-diverged PR: row=%s review=%+v, want N7 no reviewer", st.Tasks[0].LastRow, st.Tasks[0].Attempts[0].Review)
+	}
+
+	// Pass 4: fresh answered read returns PR at H -> N29 resumes reviewer uncounted.
+	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
+	l.pass()
+	if st := l.state(); st.Tasks[0].LastRow != "N29" || st.Tasks[0].Attempts[0].Review.RunID == "" || st.Tasks[0].Attempts[0].Review.Retries != 0 {
+		t.Fatalf("answered PR back at H: row=%s review=%+v, want N29 resumed reviewer retries=0", st.Tasks[0].LastRow, st.Tasks[0].Attempts[0].Review)
+	}
+}
+
+// TestGHShimFailsHardWithoutFakeGHDir verifies that the TestMain gh shim never
+// falls back to the real gh CLI when run from a directory with no fake-gh-dir.
+func TestGHShimFailsHardWithoutFakeGHDir(t *testing.T) {
+	t.Parallel()
+	cmd := exec.Command("gh", "--version")
+	cmd.Dir = t.TempDir()
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("gh succeeded in unbound dir (fell back to real gh): %s", out)
+	}
+	if !strings.Contains(string(out), "no fake-gh-dir") {
+		t.Fatalf("gh in unbound dir failed with %v (%q), want hard shim failure naming no fake-gh-dir", err, string(out))
+	}
 }

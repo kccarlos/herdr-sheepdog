@@ -10,7 +10,7 @@ import (
 )
 
 // InvariantViolation is one broken invariant (I1–I5) found after a pass (design.md 8).
-type InvariantViolation struct{ ID, Why string }
+type InvariantViolation struct{ ID, Subject, Why string }
 
 // InvariantSnapshot is the post-pass stored state CheckInvariants judges.
 type InvariantSnapshot struct {
@@ -23,16 +23,17 @@ type InvariantSnapshot struct {
 // the post-pass stored state.
 func CheckInvariants(snap InvariantSnapshot) []InvariantViolation {
 	s, p, out, writers := snap.State, snap.State.Project, []InvariantViolation(nil), map[string][]string{}
-	add := func(id, format string, args ...any) {
-		out = append(out, InvariantViolation{id, fmt.Sprintf(format, args...)})
+	add := func(id, subj, format string, args ...any) {
+		out = append(out, InvariantViolation{id, subj, fmt.Sprintf(format, args...)})
 	}
 	runLive := func(id string, r *RunRecord) bool {
 		return r != nil && r.State != PhaseEnded || r == nil && id != ""
 	}
 	pr, _ := FirstMatch(ProjectRows, ProjectIn{Project: p, Tasks: s.Tasks, Settings: s.Settings, Now: snap.Now})
 	coordAlive := runLive(p.RunID, p.Run)
+	// I2 cannot fire under the current rule table (J6/J7/J10 cover it); it guards future rule changes.
 	if p.Started && (!AllTasksEnded(s.Tasks) || p.NewGoal) && !coordAlive && pr.ID != "J6" && pr.ID != "J7" {
-		add("I2", "project should have a coordinator (matched %s, no live run or J6/J7 reason)", pr.ID)
+		add("I2", "project", "project should have a coordinator (matched %s, no live run or J6/J7 reason)", pr.ID)
 	}
 	if coordAlive && p.Folder != "" {
 		writers[filepath.Clean(p.Folder)] = append(writers[filepath.Clean(p.Folder)], "coordinator")
@@ -43,7 +44,7 @@ func CheckInvariants(snap InvariantSnapshot) []InvariantViolation {
 			openCount += map[bool]int{true: 1}[a.Closed == ""]
 			for _, act := range a.Acts {
 				if head, ok := strings.CutPrefix(act.Key, AskMerge+"@"); ok && (head == "" || !slices.ContainsFunc(a.Accepts, func(ac Accept) bool { return ac.Head == head })) {
-					add("I4", "task %s attempt %d asked merge for %q without an accept record", t.ID, i+1, head)
+					add("I4", t.ID, "task %s attempt %d asked merge for %q without an accept record", t.ID, i+1, head)
 				}
 			}
 			wLive := runLive(a.RunID, a.Run)
@@ -63,28 +64,28 @@ func CheckInvariants(snap InvariantSnapshot) []InvariantViolation {
 				rev, in := a.Review, In{Task: t, Settings: s.Settings, Now: snap.Now}
 				switch {
 				case OpenRecap(t) != nil:
-					add("I1", "task %s has unwanted live reviewer run: recap is open (N6)", t.ID)
+					add("I1", t.ID, "task %s has unwanted live reviewer run: recap is open (N6)", t.ID)
 				case len(a.Ready) == 0:
-					add("I1", "task %s has unwanted live reviewer run: no ready report in attempt", t.ID)
+					add("I1", t.ID, "task %s has unwanted live reviewer run: no ready report in attempt", t.ID)
 				case rev.Round != len(a.Rounds)+1 || !Covers(a, rev.Head, H(a)):
-					add("I1", "task %s has unwanted live reviewer run: round %d/%s no longer matches current round %d/%s", t.ID, rev.Round, rev.Head, len(a.Rounds)+1, H(a))
+					add("I1", t.ID, "task %s has unwanted live reviewer run: round %d/%s no longer matches current round %d/%s", t.ID, rev.Round, rev.Head, len(a.Rounds)+1, H(a))
 				case Ladder(in) != Review:
-					add("I1", "task %s has unwanted live reviewer run: ladder says %s", t.ID, Ladder(in))
+					add("I1", t.ID, "task %s has unwanted live reviewer run: ladder says %s", t.ID, Ladder(in))
 				}
 			}
 			for j, on := range [2]bool{wLive, rLive} {
 				if pfx != "" && on {
-					add("I1", "%s has live %s run", pfx, [2]string{RoleWorker, RoleReviewer}[j])
+					add("I1", t.ID, "%s has live %s run", pfx, [2]string{RoleWorker, RoleReviewer}[j])
 				}
 			}
 		}
 		if openCount > 1 {
-			add("I5", "task %s has %d open attempts", t.ID, openCount)
+			add("I5", t.ID, "task %s has %d open attempts", t.ID, openCount)
 		}
 	}
 	for _, wt := range slices.Sorted(maps.Keys(writers)) {
 		if len(writers[wt]) > 1 {
-			add("I3", "worktree %s shared by writable live runs: %s", wt, strings.Join(writers[wt], ", "))
+			add("I3", wt, "worktree %s shared by writable live runs: %s", wt, strings.Join(writers[wt], ", "))
 		}
 	}
 	return out

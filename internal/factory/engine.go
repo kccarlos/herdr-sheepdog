@@ -374,37 +374,38 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 }
 
 // checkInvariantsLocked checks I1–I5 after every pass: logs each broken
-// invariant once per occurrence and wakes the coordinator once, without repairing.
+// invariant once per subject occurrence and wakes the coordinator once, without repairing.
 func (e *Engine) checkInvariantsLocked(id string, s *flow.State, skipped map[string]bool, now time.Time) {
-	byID, cleared := map[string][]string{}, false
+	byKey, allKeys, cleared := map[string][]string{}, map[string]struct{}{}, false
 	vs := flow.CheckInvariants(flow.InvariantSnapshot{State: *s, Skipped: skipped, Now: now})
 	for _, v := range vs {
-		byID[v.ID] = append(byID[v.ID], v.Why)
+		k := v.ID + "@" + v.Subject
+		byKey[k], allKeys[k] = append(byKey[k], v.Why), struct{}{}
 	}
-	for _, rule := range []string{"I1", "I2", "I3", "I4", "I5"} {
-		why, pfx := strings.Join(byID[rule], "; "), flow.AskWake+"@invariant@"+rule+"@"
+	for k := range s.Project.Invariants {
+		allKeys[k] = struct{}{}
+	}
+	for _, k := range slices.Sorted(maps.Keys(allKeys)) {
+		rule, subj, _ := strings.Cut(k, "@")
+		why, pfx := strings.Join(byKey[k], "; "), flow.AskWake+"@invariant@"+k+"@"
+		if rule == "I1" && skipped[subj] && (why == "" || s.Project.Invariants[k] != "") {
+			continue
+		}
 		if why == "" {
-			if rule == "I1" && len(skipped) > 0 {
-				continue
-			}
-			before := len(s.Project.Acts)
 			s.Project.Acts = slices.DeleteFunc(s.Project.Acts, func(a flow.Act) bool { return strings.HasPrefix(a.Key, pfx) })
-			if _, ok := s.Project.Invariants[rule]; ok || len(s.Project.Acts) != before {
-				delete(s.Project.Invariants, rule)
-				cleared = true
-			}
-		} else if s.Project.Invariants[rule] != why {
+			delete(s.Project.Invariants, k)
+			cleared = true
+		} else if s.Project.Invariants[k] != why {
 			if s.Project.Invariants == nil {
 				s.Project.Invariants = map[string]string{}
 			}
-			s.Project.Invariants[rule] = why
-			wk := "invariant@" + rule + "@" + tokenHash(why)[:8]
-			ak, asked := flow.AskWake+"@"+wk, []string(nil)
-			if !flow.Done(s.Project.Acts, ak) {
-				s.Project.Acts, asked = append(s.Project.Acts, flow.Act{Key: ak, Result: "done", At: now}), []string{ak}
-				holdProjectWake(s, wk, rule+": "+why, "invariant "+rule+" broken: "+why, now)
-			}
-			if err := e.commitLocked(id, s, LogLine{By: "engine", Rule: rule, Asked: asked, Decision: "error: invariant broken", Why: why}); err != nil {
+			s.Project.Invariants[k] = why
+			s.Project.Acts = slices.DeleteFunc(s.Project.Acts, func(a flow.Act) bool { return strings.HasPrefix(a.Key, pfx) })
+			wk := "invariant@" + k + "@" + tokenHash(why)[:8]
+			ak := flow.AskWake + "@" + wk
+			s.Project.Acts = append(s.Project.Acts, flow.Act{Key: ak, Result: "done", At: now})
+			holdProjectWake(s, wk, rule+": "+why, "invariant "+rule+" broken: "+why, now)
+			if err := e.commitLocked(id, s, LogLine{By: "engine", Rule: rule, Asked: []string{ak}, Decision: "error: invariant broken", Why: why}); err != nil {
 				e.logError("factory.commit_error", id, err)
 				return
 			}

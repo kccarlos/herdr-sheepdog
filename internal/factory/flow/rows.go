@@ -665,6 +665,9 @@ func WorkingTime(t Task) time.Duration {
 func n29Asks(in In) []string {
 	r, a, h := in.Facts.Reviewer, in.attempt(), headH(in)
 	if r.State != RunWorking && r.State != RunIdle {
+		if unanswered(in) && !in.probe { // PR state unknown (may be diverged/merged/closed): hold until answered
+			return nil
+		}
 		return EnsureRun(in, RoleReviewer)
 	}
 	round, tries, age := nextRound(*a), 0, time.Duration(0)

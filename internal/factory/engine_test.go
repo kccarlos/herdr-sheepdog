@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,15 +37,22 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	origPath := os.Getenv("PATH")
 	ghBin, err := os.MkdirTemp("", "sheepdog-gh-shim-")
-	if err == nil {
-		resolve := "g=.git\n[ -f \"$g\" ] && { read _ g < \"$g\"; g=\"${g%/worktrees/*}\"; }\n[ -f \"$g/fake-gh-dir\" ] || { PATH=\"$SHEEPDOG_ORIG_PATH\" exec gh \"$@\"; }\nread D < \"$g/fake-gh-dir\""
-		script := strings.Replace(fakeGHScript, "D=%DIR%", resolve, 1)
-		if os.WriteFile(filepath.Join(ghBin, "gh"), []byte(script), 0o700) == nil {
-			_ = os.Setenv("SHEEPDOG_ORIG_PATH", origPath)
-			_ = os.Setenv("PATH", ghBin+string(os.PathListSeparator)+origPath)
-		}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "test gh shim: mkdir: %v\n", err)
+		os.Exit(2)
+	}
+	resolve := "g=.git\n[ -f \"$g\" ] && { read _ g < \"$g\"; g=\"${g%/worktrees/*}\"; }\n[ -f \"$g/fake-gh-dir\" ] || { echo \"test gh shim: no fake-gh-dir for $(pwd)\" >&2; exit 2; }\nread D < \"$g/fake-gh-dir\""
+	script := strings.Replace(fakeGHScript, "D=%DIR%", resolve, 1)
+	if err := os.WriteFile(filepath.Join(ghBin, "gh"), []byte(script), 0o700); err != nil {
+		_ = os.RemoveAll(ghBin)
+		fmt.Fprintf(os.Stderr, "test gh shim: write: %v\n", err)
+		os.Exit(2)
+	}
+	if err := os.Setenv("PATH", ghBin+string(os.PathListSeparator)+os.Getenv("PATH")); err != nil {
+		_ = os.RemoveAll(ghBin)
+		fmt.Fprintf(os.Stderr, "test gh shim: setenv PATH: %v\n", err)
+		os.Exit(2)
 	}
 	code := m.Run()
 	_ = os.RemoveAll(ghBin)

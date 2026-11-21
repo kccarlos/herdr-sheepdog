@@ -29,9 +29,9 @@ func cleanSnapshot() InvariantSnapshot {
 	}
 }
 
-func hasViolation(vs []InvariantViolation, id, substr string) bool {
+func hasViolation(vs []InvariantViolation, id, subj, substr string) bool {
 	return slices.ContainsFunc(vs, func(v InvariantViolation) bool {
-		return v.ID == id && strings.Contains(v.Why, substr)
+		return v.ID == id && v.Subject == subj && strings.Contains(v.Why, substr)
 	})
 }
 
@@ -125,7 +125,7 @@ func TestCheckInvariantsViolations(t *testing.T) {
 		snap.State.Tasks[0].Done = &Merged{MergedCommit: "m1"}
 		snap.State.Tasks[0].Attempts[0].Acts = []Act{{Key: AskCleanup, Result: "done", At: snap.Now}}
 		vs := CheckInvariants(snap)
-		if !hasViolation(vs, "I1", "ended task T1 still has live worker") {
+		if !hasViolation(vs, "I1", "T1", "ended task T1 still has live worker") {
 			t.Fatalf("want I1 ended worker violation, got %+v", vs)
 		}
 	})
@@ -138,7 +138,7 @@ func TestCheckInvariantsViolations(t *testing.T) {
 			Run: &RunRecord{Address: "rev-1", Role: RoleReviewer, State: PhaseWorking},
 		}
 		vs := CheckInvariants(snap)
-		if !hasViolation(vs, "I1", "recap is open") {
+		if !hasViolation(vs, "I1", "T1", "recap is open") {
 			t.Fatalf("want I1 reviewer-during-recap violation, got %+v", vs)
 		}
 	})
@@ -155,7 +155,7 @@ func TestCheckInvariantsViolations(t *testing.T) {
 			Run: &RunRecord{Address: "rev-3", Role: RoleReviewer, State: PhaseWorking},
 		}
 		vs := CheckInvariants(snap)
-		if !hasViolation(vs, "I1", "ladder says passed") {
+		if !hasViolation(vs, "I1", "T1", "ladder says passed") {
 			t.Fatalf("want I1 unwanted reviewer violation, got %+v", vs)
 		}
 	})
@@ -167,7 +167,7 @@ func TestCheckInvariantsViolations(t *testing.T) {
 			RunID: "w-old", Run: &RunRecord{Address: "w-old", Role: RoleWorker, State: PhaseWorking},
 		}}, snap.State.Tasks[0].Attempts...)
 		vs := CheckInvariants(snap)
-		if !hasViolation(vs, "I1", "closed attempt 1 has live worker") {
+		if !hasViolation(vs, "I1", "T1", "closed attempt 1 has live worker") {
 			t.Fatalf("want I1 closed attempt violation, got %+v", vs)
 		}
 	})
@@ -177,7 +177,7 @@ func TestCheckInvariantsViolations(t *testing.T) {
 		snap.State.Project.RunID = ""
 		snap.State.Project.Run = &RunRecord{Role: RoleCoordinator, State: PhaseEnded, Result: EndStuck, BlockedSince: snap.Now}
 		vs := CheckInvariants(snap)
-		if !hasViolation(vs, "I2", "project should have a coordinator") {
+		if !hasViolation(vs, "I2", "project", "project should have a coordinator") {
 			t.Fatalf("want I2 missing coordinator violation, got %+v", vs)
 		}
 	})
@@ -192,7 +192,7 @@ func TestCheckInvariantsViolations(t *testing.T) {
 			}},
 		})
 		vs := CheckInvariants(snap)
-		if !hasViolation(vs, "I3", "/wt/1") {
+		if !hasViolation(vs, "I3", "/wt/1", "/wt/1") {
 			t.Fatalf("want I3 shared worktree violation, got %+v", vs)
 		}
 	})
@@ -201,7 +201,7 @@ func TestCheckInvariantsViolations(t *testing.T) {
 		snap := cleanSnapshot()
 		snap.State.Tasks[0].Attempts[0].Acts = []Act{{Key: AskMerge + "@c1", Result: "done", At: snap.Now}}
 		vs := CheckInvariants(snap)
-		if !hasViolation(vs, "I4", "without an accept record") {
+		if !hasViolation(vs, "I4", "T1", "without an accept record") {
 			t.Fatalf("want I4 unaccepted merge violation, got %+v", vs)
 		}
 	})
@@ -212,7 +212,7 @@ func TestCheckInvariantsViolations(t *testing.T) {
 			BaseCommit: "b0", Branch: "task/1b", Worktree: "/wt/1b", PR: 7,
 		})
 		vs := CheckInvariants(snap)
-		if !hasViolation(vs, "I5", "has 2 open attempts") {
+		if !hasViolation(vs, "I5", "T1", "has 2 open attempts") {
 			t.Fatalf("want I5 multiple open attempts violation, got %+v", vs)
 		}
 	})

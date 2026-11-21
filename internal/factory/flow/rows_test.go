@@ -1654,3 +1654,36 @@ func TestN36CIStalledWake(t *testing.T) {
 		}
 	}
 }
+
+// TestN29UnansweredPRHoldsReviewer verifies that an unanswered PR snapshot
+// holds N29 from starting or resuming a stopped reviewer until GitHub answers.
+func TestN29UnansweredPRHoldsReviewer(t *testing.T) {
+	stoppedDiv := with(noRounds, reviewEnded, noAnswer, func(in *In) {
+		in.Facts.PR.Head, in.Facts.PR.HeadRel = "ext", RelDiverged
+		a0(in).Review = &ReviewRun{Round: 1, Head: "c1", Run: &RunRecord{State: PhaseEnded, Result: EndStopped}}
+	})
+	if r, d := FirstMatch(TaskRows, stoppedDiv); r.ID != "N29" || len(d.Asked) != 0 {
+		t.Fatalf("unanswered PR with stopped reviewer = %s %v, want N29 nil", r.ID, d.Asked)
+	}
+	// Fresh unanswered PR open at H also holds N29 start.
+	freshUnanswered := with(noRounds, noAnswer)
+	if r, d := FirstMatch(TaskRows, freshUnanswered); r.ID != "N29" || len(d.Asked) != 0 {
+		t.Fatalf("unanswered PR with fresh reviewer = %s %v, want N29 nil", r.ID, d.Asked)
+	}
+	// Answered PR still diverged -> N7; answered PR back at H -> N29 resumes uncounted.
+	stoppedDiv.Facts.PR.Answered = true
+	if r, _ := FirstMatch(TaskRows, stoppedDiv); r.ID != "N7" {
+		t.Fatalf("answered still-diverged PR = %s, want N7", r.ID)
+	}
+	stoppedDiv.Facts.PR.Head, stoppedDiv.Facts.PR.HeadRel = "c1", RelSame
+	if r, d := FirstMatch(TaskRows, stoppedDiv); r.ID != "N29" || !slices.Equal(d.Asked, []string{"start_reviewer@1@resume@c1"}) {
+		t.Fatalf("answered PR back at H = %s %v, want N29 [start_reviewer@1@resume@c1]", r.ID, d.Asked)
+	}
+	// Exhausted settled start_reviewer still surfaces as N5 even while unanswered.
+	exUnanswered := with(noRounds, noAnswer, func(in *In) {
+		a0(in).Acts = []Act{{Key: "start_reviewer@1@c1", Result: "failed", Class: ClassSettled, Err: "boom", At: now}}
+	})
+	if r, _ := FirstMatch(TaskRows, exUnanswered); r.ID != "N5" {
+		t.Fatalf("exhausted start_reviewer while unanswered = %s, want N5", r.ID)
+	}
+}

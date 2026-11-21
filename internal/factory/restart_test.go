@@ -315,30 +315,29 @@ func restartHistories() []restartHistory {
 					w.now = w.now.Add(5 * time.Second)
 					w.pass()
 				}},
-				{"round 1 changes verdict and N22 findings", func(w *restartWorld) {
+				{"round 1 changes verdict", func(w *restartWorld) {
 					w.now = w.now.Add(25 * time.Second)
 					w.pass()
-					w.pass()
 				}},
-				{"commit c2, ready and N26 push", func(w *restartWorld) {
+				passStep("N22 tell findings", 0),
+				{"commit c2 and ready", func(w *restartWorld) {
 					w.commitAndReady("package demo\n// fixed\n", greenRollup, false)
+				}},
+				{"N26 push c2", func(w *restartWorld) {
 					w.pass()
 					writePRJSON(w.t, w.gh, "view.json", w.commits[len(w.commits)-1], greenRollup)
 				}},
-				{"round 2 and round 3 pass", func(w *restartWorld) {
-					w.pass()
-					w.passReviewRound()
-					w.pass()
-					w.passReviewRound()
-				}},
+				passStep("N29 start round 2", 0),
+				{"round 2 pass verdict", func(w *restartWorld) { w.passReviewRound() }},
+				passStep("N29 start round 3", 0),
+				{"round 3 pass verdict", func(w *restartWorld) { w.passReviewRound() }},
 				passStep("N42 accept and merge", 0),
-				{"PR merged, N2 done and N1 cleanup", func(w *restartWorld) {
+				{"PR merged, N2 done", func(w *restartWorld) {
 					w.markPRMerged("merged-h1")
 					w.now = w.now.Add(15 * time.Second)
 					w.pass()
-					w.now = w.now.Add(15 * time.Second)
-					w.pass()
 				}},
+				passStep("N1 cleanup", 15*time.Second),
 			},
 		},
 		{
@@ -366,15 +365,13 @@ func restartHistories() []restartHistory {
 					w.now = w.now.Add(30 * time.Second)
 					w.pass()
 				}},
-				{"N41 wait, PR merged, N2 done and N1 cleanup", func(w *restartWorld) {
-					w.now = w.now.Add(15 * time.Second)
-					w.pass()
+				passStep("N41 wait merge", 15*time.Second),
+				{"PR merged, N2 done", func(w *restartWorld) {
 					w.markPRMerged("merged-h2")
 					w.now = w.now.Add(15 * time.Second)
 					w.pass()
-					w.now = w.now.Add(15 * time.Second)
-					w.pass()
 				}},
+				passStep("N1 cleanup", 15*time.Second),
 			},
 		},
 		{
@@ -390,21 +387,20 @@ func restartHistories() []restartHistory {
 				}},
 				passStep("wait in backoff", 30*time.Second),
 				passStep("N23 resume worker", 35*time.Second),
-				{"ready, N26 PR and N29 review pass", func(w *restartWorld) {
+				{"worker idle and ready", func(w *restartWorld) {
 					w.waitIdle(w.workerID)
 					w.commitAndReady("package demo\n", greenRollup, true)
-					w.pass()
-					w.pass()
-					w.passReviewRound()
 				}},
-				{"N42 merge, N2 done and N1 cleanup", func(w *restartWorld) {
-					w.pass()
+				passStep("N26 push and open PR", 0),
+				passStep("N29 start review", 0),
+				{"review pass verdict", func(w *restartWorld) { w.passReviewRound() }},
+				passStep("N42 accept and merge", 0),
+				{"PR merged, N2 done", func(w *restartWorld) {
 					w.markPRMerged("merged-h3")
 					w.now = w.now.Add(15 * time.Second)
 					w.pass()
-					w.now = w.now.Add(15 * time.Second)
-					w.pass()
 				}},
+				passStep("N1 cleanup", 15*time.Second),
 			},
 		},
 		{
@@ -420,22 +416,21 @@ func restartHistories() []restartHistory {
 				}},
 				passStep("J6 gap wait", 4*time.Minute),
 				passStep("J7 replace coordinator", 5*time.Minute),
-				{"ready, N26 PR, N29 review and N42 merge", func(w *restartWorld) {
+				{"worker idle and ready", func(w *restartWorld) {
 					w.waitIdle(w.workerID)
 					w.commitAndReady("package demo\n", greenRollup, true)
-					w.pass()
-					w.pass()
-					w.passReviewRound()
-					w.pass()
 				}},
-				{"N2 done, N1 cleanup and J4 final journal", func(w *restartWorld) {
+				passStep("N26 push and open PR", 0),
+				passStep("N29 start review", 0),
+				{"review pass verdict", func(w *restartWorld) { w.passReviewRound() }},
+				passStep("N42 accept and merge", 0),
+				{"PR merged, N2 done", func(w *restartWorld) {
 					w.markPRMerged("merged-h4")
 					w.now = w.now.Add(15 * time.Second)
 					w.pass()
-					w.now = w.now.Add(15 * time.Second)
-					w.pass()
-					w.waitIdle(w.state().Project.RunID)
 				}},
+				passStep("N1 cleanup", 15*time.Second),
+				{"J4 final journal", func(w *restartWorld) { w.waitIdle(w.state().Project.RunID) }},
 				{"J4 stop coord 2", func(w *restartWorld) {
 					cid := w.state().Project.RunID
 					w.srv.SetStatus(cid, &hc.Status{App: "claude-code", State: "working"})
