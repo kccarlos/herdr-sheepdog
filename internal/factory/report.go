@@ -948,7 +948,7 @@ func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args js
 				return x.Result == "done" && strings.HasPrefix(x.Key, flow.AskWake+"@"+prefix)
 			})
 		}
-		isN4 := a != nil && t.LastRow == "N4"
+		isN4 := a != nil && (t.LastRow == "N4" || t.LastRow == "N26" && hasWake("pr_other_base@"))
 		isN7 := a != nil && t.LastRow == "N7" && (hasWake("diverged@") || hasWake("merge_only_unknown@"))
 		isN5 := (t.LastRow == "N5" && flow.HasExhausted(*acts, s.Settings)) ||
 			(t.LastRow == "N3" && flow.Exhausted(*acts, flow.AskStopRuns, s.Settings)) ||

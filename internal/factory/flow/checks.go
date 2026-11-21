@@ -32,7 +32,7 @@ func LatestChecks(checks []Check) []Check {
 	idx, out := map[string]int{}, make([]Check, 0, len(checks))
 	for _, c := range checks {
 		name := cmp.Or(c.Name, c.Context)
-		k := c.Kind + "/" + c.WorkflowName + "/" + name // a check run never replaces a status
+		k := c.Kind + "/" + c.WorkflowName + "/" + urlID(c.DetailsURL, "/actions/runs/") + "/" + name // a check run never replaces a status; two workflow runs stay apart
 		if prev, ok := idx[k]; name != "" && ok {
 			b := out[prev]
 			if cu, bu := c.unfinished(), b.unfinished(); cu != bu {

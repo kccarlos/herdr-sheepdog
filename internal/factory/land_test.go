@@ -407,13 +407,14 @@ func TestIrreversibleActionsRecheckFreshFacts(t *testing.T) {
 	}
 	lCall.pass()
 	stCall := lCall.state()
-	if stCall.Tasks[0].LastRow == "N5" || len(stCall.Project.Wakes) != 0 || flow.Count(stCall.Tasks[0].Attempts[0].Acts, "merge@"+lCall.c1) != 0 {
-		t.Fatalf("after 3 fresh-check call-offs: row=%s wakes=%+v acts=%+v, want not N5 and 0 merge acts", stCall.Tasks[0].LastRow, stCall.Project.Wakes, stCall.Tasks[0].Attempts[0].Acts)
+	if stCall.Tasks[0].LastRow == "N5" || len(stCall.Project.Wakes) != 0 || flow.Count(stCall.Tasks[0].Attempts[0].Acts, "merge@"+lCall.c1) != 1 {
+		t.Fatalf("after 4 fresh-check call-offs: row=%s wakes=%+v acts=%+v, want not N5 and 1 uncounted merge act", stCall.Tasks[0].LastRow, stCall.Project.Wakes, stCall.Tasks[0].Attempts[0].Acts)
 	}
 	_ = os.Remove(flipFlag)
+	callNow = callNow.Add(8 * time.Minute)
 	lCall.pass()
 	if merges := ghCalls(t, lCall.gh, "pr merge"); len(merges) != 1 {
-		t.Fatalf("merges after call-offs cleared = %q, want 1 immediate merge", merges)
+		t.Fatalf("merges after call-offs cleared and backoff elapsed = %q, want 1 merge", merges)
 	}
 
 	// Cleanup with a stray live terminal inside the worktree keeps the worktree.
@@ -573,5 +574,84 @@ func TestGitHubOutageHourBoundedTriesAndNoStateGrowth(t *testing.T) {
 	}
 	if len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != "failed@cleanup" {
 		t.Fatalf("wakes after settled cleanup failure = %+v, want [failed@cleanup]", st.Project.Wakes)
+	}
+}
+
+// TestMergeCallOffBacksOff verifies item 7: a merge called off by the fresh
+// check is recorded as an uncounted note so it waits for the shared back-off
+// instead of re-reading fresh facts every 15 s, never counts toward N5, and
+// merges once back-off passes and fresh facts hold N42.
+func TestMergeCallOffBacksOff(t *testing.T) {
+	l := newLanding(t)
+	greenView, err := os.ReadFile(filepath.Join(l.gh, "view.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	redView := strings.Replace(string(greenView), `"SUCCESS"`, `"FAILURE"`, 1)
+	flipBin := t.TempDir()
+	realFakeGH, err := os.ReadFile(filepath.Join(strings.Split(os.Getenv("PATH"), string(os.PathListSeparator))[0], "gh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	realPath := filepath.Join(flipBin, "real-gh")
+	if err := os.WriteFile(realPath, realFakeGH, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	flipFlag := filepath.Join(flipBin, "flip")
+	wrapper := "#!/bin/sh\n" +
+		"if [ \"$1 $2\" = \"pr view\" ] && [ -f " + strconvQuote(flipFlag) + " ]; then\n" +
+		"  c=" + strconvQuote(filepath.Join(flipBin, "n")) + "\n" +
+		"  if [ -f \"$c\" ]; then rm -f \"$c\"; printf '%s' " + strconvQuote(redView) + "; exit 0; fi\n" +
+		"  : > \"$c\"\n" +
+		"fi\n" +
+		"exec " + strconvQuote(realPath) + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(flipBin, "gh"), []byte(wrapper), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", flipBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := os.WriteFile(flipFlag, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	l.eng.Now = func() time.Time { return now }
+
+	// Pass 1 (t=0): N42 calls execMerge -> fresh check calls off, recorded as uncounted note.
+	l.pass()
+	acts := l.state().Tasks[0].Attempts[0].Acts
+	last := flow.LastAct(acts, "merge@"+l.c1)
+	if last == nil || !last.Uncounted {
+		t.Fatalf("after call-off: merge act = %+v, want Uncounted=true", last)
+	}
+	viewsAfter1 := len(ghCalls(t, l.gh, "pr view"))
+
+	// Pass 2 (t=15s, within 1m back-off): must NOT re-run execMerge (only 1 pr view for the pass snapshot).
+	now = now.Add(15 * time.Second)
+	l.pass()
+	if got := len(ghCalls(t, l.gh, "pr view")) - viewsAfter1; got != 1 {
+		t.Fatalf("pr view calls during backoff = %d, want 1 (snapshot only, no fresh merge check)", got)
+	}
+
+	// Pass 3 (t=1m): back-off elapsed -> retries execMerge, called off again (Tries=2, overwritten in place).
+	_ = os.Remove(filepath.Join(flipBin, "n")) // pass 2 only ran the snapshot view, leaving the toggle file set
+	now = now.Add(45 * time.Second)
+	l.pass()
+	if st := l.state(); st.Tasks[0].LastRow == "N5" || len(st.Project.Wakes) != 0 || flow.Count(st.Tasks[0].Attempts[0].Acts, "merge@"+l.c1) != 1 || flow.LastAct(st.Tasks[0].Attempts[0].Acts, "merge@"+l.c1).Tries != 2 {
+		t.Fatalf("after 2nd call-off: row=%s wakes=%+v acts=%+v, want not N5, 0 wakes, 1 overwritten act with Tries=2",
+			st.Tasks[0].LastRow, st.Project.Wakes, st.Tasks[0].Attempts[0].Acts)
+	}
+
+	// Pass 4 (t=2m, only 1m after pass 3, within doubled 2m back-off): still waits.
+	_ = os.Remove(flipFlag)
+	now = now.Add(time.Minute)
+	l.pass()
+	if merges := ghCalls(t, l.gh, "pr merge"); len(merges) != 0 {
+		t.Fatalf("merged before doubled 2m back-off elapsed: %q", merges)
+	}
+
+	// Pass 5 (t=3m, 2m after pass 3): back-off elapsed -> merges once.
+	now = now.Add(time.Minute)
+	l.pass()
+	if merges := ghCalls(t, l.gh, "pr merge"); len(merges) != 1 {
+		t.Fatalf("merges after back-off elapsed = %q, want 1", merges)
 	}
 }
