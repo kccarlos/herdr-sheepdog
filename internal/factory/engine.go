@@ -55,6 +55,7 @@ type Engine struct {
 	tips      map[string]tipFacts // last git reading per worktree (in memory)
 	waits     map[string]string   // last N9/N10/N38 wait reason per project/task, logged once per change
 	ghUnavail map[string]bool     // project fact github_unavailable (design.md 7.3)
+	hcUnavail map[string]bool     // project fact hc_unavailable (design.md 7.3)
 }
 
 func (e *Engine) now() time.Time {
@@ -196,7 +197,7 @@ func (e *Engine) stopRuns(ctx context.Context, runs []string) error {
 
 func dropFailed(acts []flow.Act) []flow.Act {
 	return slices.DeleteFunc(acts, func(a flow.Act) bool {
-		return a.Result == "failed" || a.Key == flow.AskWake+"@worker_failed" || strings.HasPrefix(a.Key, flow.AskWake+"@reviewer_failed@") || strings.HasPrefix(a.Key, flow.AskWake+"@stuck@")
+		return a.Result == "failed" || a.Key == flow.AskWake+"@worker_failed" || strings.HasPrefix(a.Key, flow.AskWake+"@reviewer_failed@") || strings.HasPrefix(a.Key, flow.AskWake+"@stuck@") || strings.HasPrefix(a.Key, flow.AskWake+"@failed@")
 	})
 }
 
@@ -295,6 +296,9 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		}
 	}
 	coordRun, coordErr := e.advanceRunLocked(ctx, id, "", &s, s.Project.RunID, flow.RoleCoordinator, "claude", &s.Project.Run)
+	if s.Project.RunID != "" || coordErr != nil {
+		e.setHCUnavailLocked(id, coordErr)
+	}
 	if coordErr != nil {
 		e.logError("factory.hc_error", id, coordErr)
 	}
@@ -307,6 +311,9 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		t := &s.Tasks[ti]
 		if a := flow.OpenAttempt(*t); a != nil && !flow.Ended(*t) && (a.RunID != "" || a.Run != nil && a.Run.State == flow.PhaseEnded) {
 			r, rerr := e.advanceRunLocked(ctx, id, t.ID, &s, a.RunID, flow.RoleWorker, "claude", &a.Run)
+			if a.RunID != "" || rerr != nil {
+				e.setHCUnavailLocked(id, rerr)
+			}
 			if a.Run != nil && a.Run.State == flow.PhaseEnded && (len(a.Run.Held) > 0 || a.RunID != "") {
 				a.Held, a.Run.Held, a.RunID, a.RunTokenHash = appendHeld(a.Held, a.Run.Held...), nil, "", ""
 				e.saveLocked(id, s)
@@ -315,7 +322,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 			if r.State == flow.RunGone && flow.WantsWorkerSlot(*t, s.Settings, e.now()) {
 				candidates = append(candidates, t.ID)
 			}
-		} else if a == nil && !flow.Ended(*t) && !t.Parked && flow.OpenRecap(*t) == nil && flow.Count(t.Acts, flow.AskNewAttempt) == 0 {
+		} else if a == nil && !flow.Ended(*t) && !t.Parked && flow.OpenRecap(*t) == nil && flow.WantsNewAttempt(*t, s.Settings, e.now()) {
 			if notDone, dropped := flow.UnmetDeps(*t, s.Tasks); len(notDone) == 0 && len(dropped) == 0 {
 				candidates = append(candidates, t.ID)
 			}
@@ -452,8 +459,19 @@ var taskExecutors = map[string]taskExec{
 	flow.AskStopRuns:     (*Engine).execStopRuns,
 }
 
+func (e *Engine) setHCUnavailLocked(id string, err error) {
+	if err == nil {
+		delete(e.hcUnavail, id)
+	} else {
+		if e.hcUnavail == nil {
+			e.hcUnavail = map[string]bool{}
+		}
+		e.hcUnavail[id] = true
+	}
+}
+
 func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int, hasSlot bool, workerRun flow.Run, workerErr error, baseTried *bool) {
-	var facts flow.Facts
+	facts := flow.Facts{GitHubUnavailable: e.ghUnavail[id], HCUnavailable: e.hcUnavail[id]}
 	if b := s.Project.Base; b != nil && b.Red {
 		facts.BaseRed, facts.BaseRedSince = true, b.Since
 		if !*baseTried {
@@ -499,7 +517,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		}
 	} else if oa == nil && !flow.Ended(s.Tasks[ti]) {
 		facts.DepsNotDone, facts.DepsDropped = flow.UnmetDeps(s.Tasks[ti], s.Tasks)
-		facts.NoSlot = !hasSlot && flow.Count(s.Tasks[ti].Acts, flow.AskNewAttempt) == 0
+		facts.NoSlot = !hasSlot && !flow.Exhausted(s.Tasks[ti].Acts, flow.AskNewAttempt, s.Settings)
 	}
 	now := e.now()
 	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[ti], Settings: s.Settings, Facts: facts, Now: now})
@@ -526,21 +544,22 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	}
 	var decs []string
 	whys := []string{d.Why}
-	act := func(k, res string) { // an outcome replaces the intent saved for it
+	act := func(k, res, cls, errText string, uncounted bool) { // an outcome replaces the intent saved for it
 		acts := &s.Tasks[ti].Acts
 		if oa := flow.OpenAttempt(s.Tasks[ti]); oa != nil {
 			acts = &oa.Acts
 		}
+		entry := flow.Act{Key: k, Result: res, Class: cls, Err: flow.CleanErr(errText), Uncounted: uncounted, At: now}
 		if n := len(*acts); n > 0 && (*acts)[n-1].Key == k && (*acts)[n-1].Result == "asked" {
-			(*acts)[n-1].Result = res
+			(*acts)[n-1] = entry
 			return
 		}
-		*acts = append(*acts, flow.Act{Key: k, Result: res, At: now})
+		*acts = append(*acts, entry)
 	}
 	for i, ask := range d.Asked {
 		verb, _, _ := strings.Cut(ask, "@")
 		if verb == flow.AskWake {
-			act(ask, "done")
+			act(ask, "done", "", "", false)
 			decs = append(decs, holdWake(s, ti, r.ID, d.Why, ask, facts, now))
 			continue
 		}
@@ -549,7 +568,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		// calls carry their own timeouts), so its outcome is recorded and
 		// the next pass does not ask again; the rest waits for that pass.
 		if verb == flow.AskRerunCI || verb == flow.AskDispatchCI || verb == flow.AskUpdateBranch { // a GitHub call whose outcome can be lost: saved as asked first, never sent twice
-			act(ask, "asked")
+			act(ask, "asked", "", "", false)
 			if !e.saveLocked(id, *s) {
 				return
 			}
@@ -560,14 +579,14 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		if abort {
 			return
 		} else if errors.Is(err, world.ErrNoDispatchWorkflow) {
-			act(ask, "skipped")
+			act(ask, "skipped", "", "", false)
 			decs = append(decs, "no dispatch_workflow set, or its file is missing")
 		} else if err != nil {
 			e.logError("factory.exec_error", id, err)
-			act(ask, "failed")
+			act(ask, "failed", world.FailureClass(err), err.Error(), facts.GitHubUnavailable || facts.HCUnavailable)
 			whys = append(whys, err.Error())
 		} else {
-			act(ask, "done")
+			act(ask, "done", "", "", false)
 			decs = append(decs, dec)
 		}
 		if verb == flow.AskTellBaseRed {
@@ -624,6 +643,7 @@ func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, t
 	defer cancel()
 	wt, err := world.NewWorktree(gctx, s.Project.Folder, e.Paths.Worktree(id, t.ID, n), tag, t.Title)
 	if err == nil {
+		t.Acts = slices.DeleteFunc(t.Acts, func(a flow.Act) bool { return a.Key == flow.AskNewAttempt && a.Result == "failed" })
 		t.Attempts = append(t.Attempts, flow.Attempt{BaseCommit: wt.BaseCommit, Branch: wt.Branch, Worktree: wt.Path, Ready: []flow.Ready{}, Rounds: []flow.Round{}, Accepts: []flow.Accept{}, Acts: []flow.Act{},
 			SizeCap: s.Settings.SizeCapFactor * t.EstimateLines})
 	}
@@ -1232,6 +1252,9 @@ func (e *Engine) observeBaseLocked(ctx context.Context, id string, s *flow.State
 	res, err := world.BaseStatus(gctx, s.Project.Folder)
 	cancel()
 	wasRed := s.Project.Base != nil && s.Project.Base.Red
+	if err == nil {
+		delete(e.ghUnavail, id)
+	}
 	if e.logOnce("factory.base_error", id, id, err); err != nil || !res.Known || res.Red == wasRed {
 		return
 	}
@@ -1269,9 +1292,10 @@ func (e *Engine) execUpdateBranch(ctx context.Context, _ string, s *flow.State, 
 func (e *Engine) execFailUpdate(_ context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	a := flow.OpenAttempt(s.Tasks[ti])
 	uk := flow.AskUpdateBranch + "@" + flow.H(*a)
-	for i := range a.Acts {
+	for i := len(a.Acts) - 1; i >= 0; i-- {
 		if a.Acts[i].Key == uk {
-			a.Acts[i].Result = "failed"
+			a.Acts[i].Result, a.Acts[i].Class, a.Acts[i].Err, a.Acts[i].At = "failed", flow.ClassTimeout, "branch update did not move the PR head within checks_grace_minutes", e.now()
+			break
 		}
 	}
 	return "branch update timed out for " + flow.H(*a) + " (failed try)", false, nil

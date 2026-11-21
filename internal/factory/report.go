@@ -298,14 +298,7 @@ func (e *Engine) cleanWhy(id, raw, what, flag string) (string, error) {
 	return why, nil
 }
 
-func cleanRejectWhy(raw string) string {
-	return strings.Join(strings.Fields(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029' {
-			return ' '
-		}
-		return r
-	}, raw)), " ")
-}
+func cleanRejectWhy(raw string) string { return flow.CleanText(raw) }
 
 type replyLines struct {
 	majors    int
@@ -317,12 +310,7 @@ type replyLines struct {
 	notRun    string
 }
 
-func capRunes(s string, limit int) string {
-	if utf8.RuneCountInString(s) <= limit {
-		return s
-	}
-	return string([]rune(s)[:limit])
-}
+func capRunes(s string, limit int) string { return flow.CapRunes(s, limit) }
 
 func unwrapReply(s string) string {
 	for {

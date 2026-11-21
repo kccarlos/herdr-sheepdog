@@ -677,7 +677,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 		runFor(e, 80*time.Millisecond)
 	}
 
-	// 1. Failing NewWorktree (repo has no remote) over many passes asks N11 once.
+	// 1. Failing NewWorktree (repo has no remote) over many passes asks N11 once, then settles at N5 once.
 	srv1 := hctest.New(t)
 	var runs1 []hc.RunParams
 	srv1.OnRun = func(_ hc.Terminal, p hc.RunParams) { runs1 = append(runs1, p) }
@@ -692,13 +692,13 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	if err := eng1.Report(runs1[0].Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"t1","estimate_lines":50,"title":"feat: x",`+testPlanJSON+`}]}`)); err != nil {
 		t.Fatal(err)
 	}
-	runUntilLogged(eng1, id1, 4)
+	runUntilLogged(eng1, id1, 5)
 	log1, err := os.ReadFile(eng1.Paths.Log(id1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lines := strings.Split(strings.TrimSpace(string(log1)), "\n"); len(lines) != 4 {
-		t.Fatalf("failing NewWorktree wrote %d log lines (want 4: start, J7, plan apply, 1 N11):\n%s", len(lines), log1)
+	if lines := strings.Split(strings.TrimSpace(string(log1)), "\n"); len(lines) != 5 {
+		t.Fatalf("failing NewWorktree wrote %d log lines (want 5: start, J7, plan apply, 1 N11, 1 N5):\n%s", len(lines), log1)
 	}
 	if st1, err := LoadState(eng1.Paths.State(id1)); err != nil || flow.Count(st1.Tasks[0].Acts, flow.AskNewAttempt) != 1 || flow.Done(st1.Tasks[0].Acts, flow.AskNewAttempt) {
 		t.Fatalf("failing NewWorktree task acts = %+v (err=%v)", st1.Tasks[0].Acts, err)

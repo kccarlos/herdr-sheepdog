@@ -66,7 +66,7 @@ func TestCheckTable(t *testing.T) {
 
 func TestActs(t *testing.T) {
 	at := time.Unix(0, 0)
-	acts := []Act{{"merge@3f9c", "failed", at}, {"merge@3f9c", "done", at}, {"push", "failed", at}}
+	acts := []Act{{Key: "merge@3f9c", Result: "failed", At: at}, {Key: "merge@3f9c", Result: "done", At: at}, {Key: "push", Result: "failed", At: at}}
 	if !Done(acts, "merge@3f9c") || Done(acts, "push") || Done(acts, "x") {
 		t.Error("Done")
 	}
@@ -100,6 +100,7 @@ func TestSettingsRange(t *testing.T) {
 		"blocked_minutes":                func(s *Settings, n int) { s.BlockedMinutes = n },
 		"worker_restarts":                func(s *Settings, n int) { s.WorkerRestarts = n },
 		"reviewer_retries":               func(s *Settings, n int) { s.ReviewerRetries = n },
+		"ensure_failures":                func(s *Settings, n int) { s.EnsureFailures = n },
 		"ensure_backoff_minutes":         func(s *Settings, n int) { s.EnsureBackoffMinutes = n },
 		"stuck_minutes":                  func(s *Settings, n int) { s.StuckMinutes = n },
 		"max_running":                    func(s *Settings, n int) { s.MaxRunning = n },
@@ -121,6 +122,7 @@ func TestSettingsRange(t *testing.T) {
 		"blocked_minutes":                {BlockedMin, BlockedMax},
 		"worker_restarts":                {0, WorkerRestartsMax},
 		"reviewer_retries":               {0, ReviewerRetriesMax},
+		"ensure_failures":                {EnsureFailuresMin, EnsureFailuresMax},
 		"ensure_backoff_minutes":         {EnsureBackoffMin, EnsureBackoffMax},
 		"stuck_minutes":                  {StuckMin, StuckMax},
 		"max_running":                    {MaxRunningMin, MaxRunningMax},

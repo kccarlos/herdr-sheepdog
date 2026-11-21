@@ -320,9 +320,11 @@ func TestBaseRedWaitTextClearsOnGreen(t *testing.T) {
 }
 
 // TestBaseRedFailedTellRetriesOnceNextPass verifies that a failed worker tell
-// does not mark the red spell escalated, so it is retried once on the next pass.
+// does not mark the red spell escalated, and retries after ensure_backoff_minutes.
 func TestBaseRedFailedTellRetriesOnceNextPass(t *testing.T) {
 	l := newLanding(t)
+	now := time.Now()
+	l.eng.Now = func() time.Time { return now }
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
 	writeGHFile(t, l.gh, "base-ref.json", `{"object":{"sha":"failsha1"}}`)
@@ -331,7 +333,7 @@ func TestBaseRedFailedTellRetriesOnceNextPass(t *testing.T) {
 
 	// Age past main_red_minutes and clear RunID (with start_worker already recorded) so tell fails on pass 1.
 	l.edit(func(s *flow.State) {
-		s.Project.Base.Since = time.Now().Add(-time.Duration(s.Settings.MainRedMinutes+1) * time.Minute)
+		s.Project.Base.Since = now.Add(-time.Duration(s.Settings.MainRedMinutes+1) * time.Minute)
 		s.Tasks[0].Attempts[0].RunID = ""
 		s.Tasks[0].Attempts[0].Acts = append(s.Tasks[0].Attempts[0].Acts, flow.Act{Key: flow.AskStartWorker, Result: "done"})
 	})
@@ -340,10 +342,15 @@ func TestBaseRedFailedTellRetriesOnceNextPass(t *testing.T) {
 		t.Fatalf("sends when RunID empty = %q, want 0", sends)
 	}
 
-	// Restore RunID: next pass must retry the tell once and succeed.
+	// Restore RunID: before back-off it waits; past back-off it retries once and succeeds.
 	l.edit(func(s *flow.State) {
 		s.Tasks[0].Attempts[0].RunID = l.worker
 	})
+	l.pass()
+	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 0 {
+		t.Fatalf("sends before backoff = %q, want 0", sends)
+	}
+	now = now.Add(time.Minute)
 	l.pass()
 	l.pass()
 	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 1 {

@@ -114,3 +114,38 @@ func TestClosePR(t *testing.T) {
 		t.Fatalf("close without number or note called gh: %q", ghCalls(t, gh, ""))
 	}
 }
+
+func TestFailureClass(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{context.DeadlineExceeded, flow.ClassTimeout},
+		{Fail(flow.ClassSettled, os.ErrPermission), flow.ClassSettled},
+		{os.ErrNotExist, flow.ClassTransient},
+	} {
+		if got := FailureClass(tc.err); got != tc.want {
+			t.Errorf("FailureClass(%v) = %q, want %q", tc.err, got, tc.want)
+		}
+	}
+	for msg, want := range map[string]string{
+		"HTTP 502: Bad Gateway":                            flow.ClassTransient,
+		"HTTP 429: Too Many Requests":                      flow.ClassTransient,
+		"HTTP 403: API rate limit exceeded":                flow.ClassTransient,
+		"dial tcp: connection refused":                     flow.ClassTransient,
+		"HTTP 401: Bad credentials":                        flow.ClassSettled,
+		"HTTP 403: Resource not accessible by integration": flow.ClassSettled,
+		"HTTP 404: Not Found":                              flow.ClassSettled,
+		"GraphQL: Head branch was modified":                flow.ClassSettled,
+		"the base branch policy prohibits the merge":       flow.ClassSettled,
+		"! [rejected] main -> main (non-fast-forward)":     flow.ClassSettled,
+	} {
+		if got := FailureClass(&os.PathError{Op: "gh", Path: "x", Err: errString(msg)}); got != want {
+			t.Errorf("FailureClass(%q) = %q, want %q", msg, got, want)
+		}
+	}
+}
+
+type errString string
+
+func (e errString) Error() string { return string(e) }

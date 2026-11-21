@@ -5,7 +5,9 @@ package flow
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
+	"unicode"
 )
 
 // Roles of Slice 1 (design.md 9.1).
@@ -334,11 +336,79 @@ type Accept struct {
 	Rounds []int  `json:"rounds"`
 }
 
+// Failure classes and retry marker of section 8 (design.md 4.9, 8).
+const (
+	ClassTransient, ClassSettled, ClassTimeout, AskRetry = "transient", "settled", "timeout", "retry"
+	MaxActErrRunes                                       = 500
+)
+
 // Act is one entry of the engine's own ledger: a thing it did or tried.
 type Act struct {
-	Key    string    `json:"key"`
-	Result string    `json:"result"`
-	At     time.Time `json:"at"`
+	Key       string    `json:"key"`
+	Result    string    `json:"result"`
+	Class     string    `json:"class,omitempty"`
+	Err       string    `json:"err,omitempty"`
+	Uncounted bool      `json:"uncounted,omitempty"`
+	At        time.Time `json:"at"`
+}
+
+// CleanText collapses whitespace and control/format characters to single spaces.
+func CleanText(raw string) string {
+	return strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029' {
+			return ' '
+		}
+		return r
+	}, raw)), " ")
+}
+
+// CapRunes truncates s to at most limit runes.
+func CapRunes(s string, limit int) string {
+	if r := []rune(s); len(r) > limit {
+		return string(r[:limit])
+	}
+	return s
+}
+
+// CleanErr cleans and caps an act's error text for storing and wakes.
+func CleanErr(raw string) string { return CapRunes(CleanText(raw), MaxActErrRunes) }
+
+func sinceRetry(acts []Act) []Act {
+	for i := len(acts) - 1; i >= 0; i-- {
+		if acts[i].Key == AskRetry {
+			return acts[i+1:]
+		}
+	}
+	return acts
+}
+
+func actFailures(acts []Act, key string) (last, cause *Act, counted int, settled bool) {
+	s := sinceRetry(acts)
+	for i := len(s) - 1; i >= 0; i-- {
+		switch {
+		case s[i].Key != key:
+		case s[i].Result != "failed":
+			return &s[i], nil, 0, false
+		default:
+			if last == nil {
+				last = &s[i]
+			}
+			if !s[i].Uncounted {
+				if cause == nil {
+					cause = &s[i]
+				}
+				counted, settled = counted+1, settled || s[i].Class == ClassSettled
+			}
+		}
+	}
+	return last, cause, counted, settled
+}
+
+// Exhausted reports whether key has hit ensure_failures in a row or a settled
+// failure since the last retry, with no done act (design.md 8, N5).
+func Exhausted(acts []Act, key string, s Settings) bool {
+	_, _, n, settled := actFailures(acts, key)
+	return !Done(acts, key) && (settled || n > 0 && n >= s.EnsureFailures)
 }
 
 // Done reports whether an act with key succeeded ("done").

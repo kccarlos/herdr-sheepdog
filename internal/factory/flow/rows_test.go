@@ -250,10 +250,6 @@ func TestRowCases(t *testing.T) {
 		in    In
 		asked []string
 	}{
-		{"S2", with(func(in *In) {
-			a0(in).Acts = []Act{{Key: "merge@c1", Result: "failed", At: now}}
-			in.Now = now.Add(time.Duration(DefaultSettings().StuckMinutes) * time.Minute)
-		}), []string{"wake_coordinator@stuck@merge@c1"}},
 		{"S2", with(noRounds, func(in *In) {
 			in.Facts.Reviewer = Run{State: RunIdle, LastTurnEnd: now}
 			in.Now = now.Add(time.Duration(DefaultSettings().StuckMinutes) * time.Minute)
@@ -265,6 +261,16 @@ func TestRowCases(t *testing.T) {
 		{"N3", with(parked, runsLive), []string{"stop_runs"}},
 		{"N3", with(parked), nil},
 		{"N4", with(closedPR), []string{"wake_coordinator@pr_closed"}},
+		{"N5", with(func(in *In) {
+			a0(in).Acts = []Act{{Key: "merge@c1", Result: "failed", Class: ClassSettled, Err: "HTTP 405: Pull Request is not mergeable", At: now}}
+		}), []string{"wake_coordinator@failed@merge@c1"}},
+		{"N5", with(func(in *In) {
+			a0(in).Acts = []Act{
+				{Key: "merge@c1", Result: "failed", Class: ClassTransient, At: now},
+				{Key: "merge@c1", Result: "failed", Class: ClassTransient, At: now.Add(time.Minute)},
+				{Key: "merge@c1", Result: "failed", Class: ClassTimeout, Err: "context deadline exceeded", At: now.Add(3 * time.Minute)},
+			}
+		}), []string{"wake_coordinator@failed@merge@c1"}},
 		{"N6", with(openRecap), []string{"wake_coordinator@recap@1"}},
 		{"N6", with(sizeRecap), []string{"wake_coordinator@recap@1", "tell_worker_stop@1"}},
 		{"N6", with(ciRecap), []string{"wake_coordinator@recap@1", "tell_worker_stop@1"}},
@@ -353,14 +359,20 @@ func TestRowOrder(t *testing.T) {
 		neighbours bool
 		in         In
 	}{
-		{"S2", "N1", true, with(done, func(in *In) {
-			a0(in).Acts = []Act{{Key: "cleanup", Result: "failed", At: now}}
+		{"S2", "N29", false, with(noRounds, func(in *In) {
+			in.Facts.Reviewer = Run{State: RunIdle, LastTurnEnd: now}
 			in.Now = now.Add(time.Duration(DefaultSettings().StuckMinutes) * time.Minute)
 		})},
 		{"N1", "N2", true, with(done, merged)},
 		{"N2", "N3", true, with(merged, parked)},
 		{"N3", "N4", true, with(parked, closedPR)},
-		{"N4", "N6", true, with(closedPR, openRecap)},
+		{"N4", "N5", true, with(closedPR, noRounds, func(in *In) {
+			a0(in).Acts = []Act{{Key: "start_reviewer@1@c1", Result: "failed", Class: ClassSettled, At: now}}
+		})},
+		{"N5", "N6", true, with(sizeRecap, func(in *In) {
+			a0(in).Acts = []Act{{Key: "tell_worker_stop@1", Result: "failed", Class: ClassSettled, At: now}}
+		})},
+		{"N4", "N6", false, with(closedPR, openRecap)},
 		{"N6", "N7", true, with(openRecap, diverged)},
 		{"N7", "N8", true, with(diverged, nothingF)},
 		{"N8", "N23", false, with(nothingF, prGone)},
@@ -533,59 +545,126 @@ func TestEnsureRun(t *testing.T) {
 	}
 }
 
-func TestS2ReducedFallbackAllNonRunActsAndIdleReviewer(t *testing.T) {
+func TestS2IdleReviewerOnlyAndNoFailedAct(t *testing.T) {
 	wait := time.Duration(DefaultSettings().StuckMinutes) * time.Minute
-	for name, tc := range map[string]struct {
-		in   In
-		want string
-	}{
-		"merge": {with(func(in *In) {
+	// Failed acts no longer match S2 even past stuck_minutes; they back off or match N5.
+	for name, in := range map[string]In{
+		"merge": with(func(in *In) {
 			a0(in).Acts = []Act{{Key: "merge@c1", Result: "failed", At: now}}
 			in.Now = now.Add(wait)
-		}), "wake_coordinator@stuck@merge@c1"},
-		"push_pr": {with(noRounds, prGone, func(in *In) {
+		}),
+		"push_pr": with(noRounds, prGone, func(in *In) {
 			a0(in).Acts = []Act{{Key: "push_and_open_pr@c1", Result: "failed", At: now}}
 			in.Now = now.Add(wait)
-		}), "wake_coordinator@stuck@push_and_open_pr@c1"},
-		"update_branch": {with(behind, func(in *In) {
+		}),
+		"update_branch": with(behind, func(in *In) {
 			a0(in).Acts = []Act{{Key: "update_branch@c1", Result: "failed", At: now}}
 			in.Now = now.Add(wait)
-		}), "wake_coordinator@stuck@update_branch@c1"},
-		"cleanup": {with(done, func(in *In) {
+		}),
+		"cleanup": with(done, func(in *In) {
 			a0(in).Acts = []Act{{Key: "cleanup", Result: "failed", At: now}}
 			in.Now = now.Add(wait)
-		}), "wake_coordinator@stuck@cleanup"},
-		"new_attempt": {with(noAttempts, func(in *In) {
+		}),
+		"new_attempt": with(noAttempts, func(in *In) {
 			in.Task.Acts = []Act{{Key: "new_attempt", Result: "failed", At: now}}
 			in.Now = now.Add(wait)
-		}), "wake_coordinator@stuck@new_attempt"},
-		"tell_findings": {with(changes, func(in *In) {
+		}),
+		"tell_findings": with(changes, func(in *In) {
 			a0(in).Acts = []Act{{Key: "tell_worker_findings@1", Result: "failed", At: now}}
 			in.Now = now.Add(wait)
-		}), "wake_coordinator@stuck@tell_worker_findings@1"},
-		"tell_ci": {with(red, func(in *In) {
+		}),
+		"tell_ci": with(red, func(in *In) {
 			in.Facts.PR.Failed = []Failure{{Run: "42"}}
 			a0(in).Acts = []Act{{Key: "tell_worker_ci@42@c1", Result: "failed", At: now}}
 			in.Now = now.Add(wait)
-		}), "wake_coordinator@stuck@tell_worker_ci@42@c1"},
-		"idle_reviewer_no_tag": {with(noRounds, func(in *In) {
-			in.Facts.Reviewer = Run{State: RunIdle, LastTurnEnd: now}
+		}),
+		"settled_merge": with(func(in *In) {
+			a0(in).Acts = []Act{{Key: "merge@c1", Result: "failed", Class: ClassSettled, At: now}}
 			in.Now = now.Add(wait)
-		}), "wake_coordinator@stuck@reviewer_idle@1@c1"},
+		}),
 	} {
-		r, d := FirstMatch(TaskRows, tc.in)
-		if r.ID != "S2" || !slices.Equal(d.Asked, []string{tc.want}) {
-			t.Errorf("%s: got %s %v, want S2 [%s]", name, r.ID, d.Asked, tc.want)
+		if r, d := FirstMatch(TaskRows, in); r.ID == "S2" {
+			t.Errorf("%s: S2 fired for a failed act (%v)", name, d.Asked)
 		}
-		after := tc.in
-		if a := after.attempt(); a != nil {
-			a.Acts = append(slices.Clone(a.Acts), Act{Key: tc.want, Result: "done", At: after.Now})
-		} else {
-			after.Task.Acts = append(slices.Clone(after.Task.Acts), Act{Key: tc.want, Result: "done", At: after.Now})
-		}
-		if r2, _ := FirstMatch(TaskRows, after); r2.ID == "S2" {
-			t.Errorf("%s: S2 still matched after its wake act was recorded", name)
-		}
+	}
+	// S2 still wakes once for an idle reviewer with no report tag until PR 5a.5.
+	idle := with(noRounds, func(in *In) {
+		in.Facts.Reviewer = Run{State: RunIdle, LastTurnEnd: now}
+		in.Now = now.Add(wait)
+	})
+	want := "wake_coordinator@stuck@reviewer_idle@1@c1"
+	if r, d := FirstMatch(TaskRows, idle); r.ID != "S2" || !slices.Equal(d.Asked, []string{want}) {
+		t.Fatalf("idle reviewer: got %s %v, want S2 [%s]", r.ID, d.Asked, want)
+	}
+	a0(&idle).Acts = []Act{{Key: want, Result: "done", At: idle.Now}}
+	if r2, _ := FirstMatch(TaskRows, idle); r2.ID == "S2" {
+		t.Fatal("S2 still matched after its wake act was recorded")
+	}
+}
+
+func TestSection8BackoffDoublingN5OutageAndRetry(t *testing.T) {
+	in := landing()
+	k := "merge@c1"
+	a0(&in).Acts = []Act{{Key: "record_accept@c1", Result: "done", At: now}}
+
+	// 1. Transient failure 1: not retried before 1m back-off; retried at 1m.
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: k, Result: "failed", Class: ClassTransient, Err: "HTTP 502", At: now})
+	in.Now = now.Add(59 * time.Second)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N42" || len(d.Asked) != 0 {
+		t.Fatalf("before 1m backoff: %s %v, want N42 nil", r.ID, d.Asked)
+	}
+	in.Now = now.Add(time.Minute)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N42" || !slices.Equal(d.Asked, []string{k}) {
+		t.Fatalf("at 1m backoff: %s %v, want N42 [%s]", r.ID, d.Asked, k)
+	}
+
+	// 2. Failure during github_unavailable (Uncounted=true) is not counted toward doubling or N5.
+	t1 := in.Now
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: k, Result: "failed", Class: ClassSettled, Err: "outage", Uncounted: true, At: t1})
+	in.Now = t1.Add(time.Minute) // still 1m backoff (1 counted failure, not 2 and not settled N5)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N42" || !slices.Equal(d.Asked, []string{k}) {
+		t.Fatalf("after uncounted outage failure + 1m: %s %v, want N42 [%s]", r.ID, d.Asked, k)
+	}
+
+	// 3. Transient failure 2: back-off doubles to 2m (not retried at 1m59s; retried at 2m).
+	t2 := in.Now
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: k, Result: "failed", Class: ClassTransient, Err: "HTTP 503", At: t2})
+	in.Now = t2.Add(2*time.Minute - time.Second)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N42" || len(d.Asked) != 0 {
+		t.Fatalf("before 2m doubled backoff: %s %v, want N42 nil", r.ID, d.Asked)
+	}
+	in.Now = t2.Add(2 * time.Minute)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N42" || !slices.Equal(d.Asked, []string{k}) {
+		t.Fatalf("at 2m doubled backoff: %s %v, want N42 [%s]", r.ID, d.Asked, k)
+	}
+
+	// 4. Failure 3 (reaches ensure_failures=3): goes to N5, wakes once with cleaned+capped last words, never re-fires.
+	longErr := "line1\n\x07line2   " + strings.Repeat("x", 600)
+	t3 := in.Now
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: k, Result: "failed", Class: ClassTimeout, Err: longErr, At: t3})
+	r, d := FirstMatch(TaskRows, in)
+	if r.ID != "N5" || !slices.Equal(d.Asked, []string{"wake_coordinator@failed@merge@c1"}) {
+		t.Fatalf("at ensure_failures: %s %v, want N5 wake once", r.ID, d.Asked)
+	}
+	if !strings.Contains(d.Why, "merge@c1 failed (timeout): line1 line2 ") || strings.ContainsAny(d.Why, "\n\x07") || len([]rune(d.Why)) > MaxActErrRunes+40 {
+		t.Fatalf("N5 why not cleaned/capped: len=%d why=%q", len([]rune(d.Why)), d.Why)
+	}
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: "wake_coordinator@failed@merge@c1", Result: "done", At: t3})
+	in.Now = t3.Add(time.Hour)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N5" || len(d.Asked) != 0 {
+		t.Fatalf("N5 repeat pass: %s %v, want N5 nil", r.ID, d.Asked)
+	}
+
+	// 5. After a recorded retry act, N5 clears and the key is asked again.
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: AskRetry, Result: "done", At: in.Now})
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N42" || !slices.Equal(d.Asked, []string{k}) {
+		t.Fatalf("after recorded retry: %s %v, want N42 [%s]", r.ID, d.Asked, k)
+	}
+
+	// 6. One settled failure -> N5 at once (with fresh retry-indexed wake key).
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: k, Result: "failed", Class: ClassSettled, Err: "HTTP 403: forbidden", At: in.Now})
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N5" || !slices.Equal(d.Asked, []string{"wake_coordinator@failed@1@merge@c1"}) || !strings.Contains(d.Why, "HTTP 403: forbidden") {
+		t.Fatalf("after 1 settled failure: %s %v (%q), want immediate N5", r.ID, d.Asked, d.Why)
 	}
 }
 
@@ -883,6 +962,10 @@ func TestSettingsChanged(t *testing.T) {
 	s.ReviewRounds = 1
 	if got := s.Changed(); !slices.Equal(got, []string{"checks_grace_minutes 7", "review_rounds 1", "worker_restarts 5"}) {
 		t.Errorf("changed with review_rounds 1: %v", got)
+	}
+	s.EnsureFailures = 4
+	if !slices.Contains(s.Changed(), "ensure_failures 4") {
+		t.Errorf("changed missing ensure_failures: %v", s.Changed())
 	}
 }
 
@@ -1206,10 +1289,14 @@ func TestN40BehindAndKBMRG6(t *testing.T) {
 	if r, d := FirstMatch(TaskRows, in); r.ID != "N40" || !slices.Equal(d.Asked, []string{"fail_update_branch@c1"}) {
 		t.Fatalf("N40 past grace = %s %v, want fail_update_branch@c1", r.ID, d.Asked)
 	}
-	// Once marked failed, N40 waits (never re-asks).
-	a0(&in).Acts[0].Result = "failed"
+	// Once marked failed at in.Now, N40 waits during back-off, then retries past back-off.
+	a0(&in).Acts[0] = Act{Key: "update_branch@c1", Result: "failed", Class: ClassTimeout, At: in.Now}
 	if r, d := FirstMatch(TaskRows, in); r.ID != "N40" || len(d.Asked) != 0 {
-		t.Fatalf("N40 failed = %s %v, want wait", r.ID, d.Asked)
+		t.Fatalf("N40 failed within backoff = %s %v, want wait", r.ID, d.Asked)
+	}
+	in.Now = in.Now.Add(time.Duration(DefaultSettings().EnsureBackoffMinutes) * time.Minute)
+	if r, d := FirstMatch(TaskRows, in); r.ID != "N40" || !slices.Equal(d.Asked, []string{"update_branch@c1"}) {
+		t.Fatalf("N40 past backoff = %s %v, want retry update_branch@c1", r.ID, d.Asked)
 	}
 	// BehindUnknown always holds at N36 (never merges, never asks update_branch);
 	// past checks_grace_minutes it wakes the coordinator once and keeps holding.
