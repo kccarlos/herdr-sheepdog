@@ -125,13 +125,13 @@ func TestStatusControlCharsAndBadTaskID(t *testing.T) {
 	// plan apply / amend / split children all validate IDs through checkPlanWith.
 	for _, badID := range []string{"T1\x1b[2J", "T1\nX", "bad id", "a/b", strings.Repeat("a", 33)} {
 		raw := []byte(`{"tasks":[{"id":` + `"` + strings.ReplaceAll(strings.ReplaceAll(badID, "\x1b", `\u001b`), "\n", `\n`) + `"` + `,"title":"feat: x","for_whom":"u","if_skipped":"s","smallest":"m","not_doing":"n","outcomes":[{"text":"ok","proved_by":"cmd: true"}],"estimate_lines":10}]}`)
-		_, fails := checkPlanWith(raw, nil, "", flow.Settings{TaskSizeLimit: 400}, flow.ResolveFacts{})
+		_, fails := checkPlanWith(raw, nil, "", flow.Settings{TaskSizeLimit: 400})
 		if len(fails) == 0 {
 			t.Errorf("checkPlanWith accepted bad task id %q", badID)
 		}
 	}
 	goodRaw := []byte(`{"tasks":[{"id":"SDF-53_a.1","title":"feat: x","for_whom":"u","if_skipped":"s","smallest":"m","not_doing":"n","outcomes":[{"text":"ok","proved_by":"cmd: true"}],"estimate_lines":10}]}`)
-	if _, fails := checkPlanWith(goodRaw, nil, "", flow.Settings{TaskSizeLimit: 400}, flow.ResolveFacts{}); len(fails) != 0 {
+	if _, fails := checkPlanWith(goodRaw, nil, "", flow.Settings{TaskSizeLimit: 400}); len(fails) != 0 {
 		t.Errorf("checkPlanWith rejected valid task id: %v", fails)
 	}
 }

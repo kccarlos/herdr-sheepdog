@@ -29,6 +29,7 @@ func fixtureGit(t *testing.T) *world.Git {
 func newGitTestEngine(t *testing.T, paths Paths, client *hc.Client) *Engine {
 	t.Helper()
 	e := New(paths, client)
+	e.probeLaunch = func(context.Context, []string) flow.ResolveFacts { return flow.ResolveFacts{} }
 	srv := hctest.New(t)
 	srv.OnExec = hctest.GitExec
 	e.git = world.NewGit(hc.NewClient(srv.Path), e.now, func(event, folder string) {

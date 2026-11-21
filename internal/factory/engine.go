@@ -49,6 +49,8 @@ type Engine struct {
 	Bin          string                        // sheepdog binary named in run prompts
 	RunEnv       map[string]string             // added to every run's environment (daemon port)
 
+	probeLaunch func(context.Context, []string) flow.ResolveFacts // test hook
+	cliProbes   map[string]cachedCLIProbe                         // shared across launches and projects under mu
 	git         *world.Git
 	mu          sync.Mutex
 	wake        chan struct{}
@@ -453,6 +455,8 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 					p.Run = &flow.RunRecord{Role: flow.RoleCoordinator, CLI: "claude", State: flow.PhaseStarting}
 				}
 				p.Run.Address, p.Run.ID, p.Run.CreatedMS = t.Address, t.Labels["sheepdog.run"], t.CreatedMS
+				choice := terminalChoice(t, flow.Candidate{CLI: p.Run.CLI, Model: p.Run.Model})
+				p.Run.CLI, p.Run.Model = choice.CLI, choice.Model
 				p.Run.StartedAt = cmp.Or(p.Run.StartedAt, e.now())
 				p.Run.LastActivity = cmp.Or(p.Run.LastActivity, p.Run.StartedAt)
 				p.RunID, dirty = t.Address, true
@@ -557,7 +561,111 @@ func (e *Engine) logProjectWaitLocked(id string, s *flow.State, row, decision, w
 	e.commitLogLocked(id, s, LogLine{By: "engine", Rule: row, Decision: decision, Why: why})
 }
 
+type launchWait string
+
+func (w launchWait) Error() string { return string(w) }
+
+// cliProbeTTL lets launches share login checks while picking up sign-in changes promptly.
+const cliProbeTTL = 2 * time.Minute
+
+type cachedCLIProbe struct {
+	at    time.Time
+	facts flow.CLIFacts
+	known bool
+}
+
+// probeLaunchFacts is called under e.mu by launch executors.
+func (e *Engine) probeLaunchFacts(ctx context.Context, role string, task flow.Task, settings flow.Settings) flow.ResolveFacts {
+	now := e.now()
+	var clis, stale []string
+	for _, c := range flow.Candidates(role, task, settings) {
+		if len(cliProbeArgv[c.CLI]) == 0 || slices.Contains(clis, c.CLI) {
+			continue
+		}
+		clis = append(clis, c.CLI)
+		if probe, ok := e.cliProbes[c.CLI]; !ok || now.Sub(probe.at) >= cliProbeTTL {
+			stale = append(stale, c.CLI)
+		}
+	}
+	if len(stale) > 0 {
+		var probed flow.ResolveFacts
+		switch {
+		case e.probeLaunch != nil:
+			probed = e.probeLaunch(ctx, stale)
+		case e.HC != nil && e.HC.Socket != "":
+			probed = probeResolveFacts(ctx, stale, hcExecRunner(e.HC.Socket))
+		}
+		if e.cliProbes == nil {
+			e.cliProbes = make(map[string]cachedCLIProbe)
+		}
+		probedAt := e.now()
+		for _, cli := range stale {
+			facts, known := probed.CLIs[cli]
+			e.cliProbes[cli] = cachedCLIProbe{at: probedAt, facts: facts, known: known}
+		}
+	}
+	facts := flow.ResolveFacts{CLIs: make(map[string]flow.CLIFacts, len(clis))}
+	for _, cli := range clis {
+		if probe := e.cliProbes[cli]; probe.known {
+			facts.CLIs[cli] = probe.facts
+		}
+	}
+	return facts
+}
+
+func launchCapability(role string) func(flow.Candidate) string {
+	return func(c flow.Candidate) string {
+		switch role {
+		case flow.RoleWorker, flow.RoleCoordinator:
+			if c.CLI == "claude" {
+				return ""
+			}
+		case flow.RoleReviewer:
+			if c.CLI == "claude" || c.CLI == world.CodexCLI {
+				return ""
+			}
+		}
+		return fmt.Sprintf("the engine cannot launch %s as %s yet", c.CLI, role)
+	}
+}
+
+func intentCandidate(in flow.Intent) flow.Candidate {
+	return flow.Candidate{CLI: in.CLI, Model: in.Model, Effort: in.Effort}
+}
+
+func resolveWorker(t flow.Task, s flow.Settings, facts flow.ResolveFacts) (flow.Intent, string) {
+	facts.Check = func(c flow.Candidate) string {
+		if why := launchCapability(flow.RoleWorker)(c); why != "" {
+			return why
+		}
+		_, why := flow.Resolve(flow.RoleReviewer, t, s, flow.ResolveFacts{Worker: c, Check: launchCapability(flow.RoleReviewer)})
+		return why
+	}
+	return flow.Resolve(flow.RoleWorker, t, s, facts)
+}
+
+func launchArgv(role string, c flow.Candidate, cwd, session string, resume bool) []string {
+	switch c.CLI {
+	case world.CodexCLI:
+		return world.CodexArgv(c.Model, c.Effort, cwd)
+	case "claude":
+		mode := "bypassPermissions"
+		if role == flow.RoleReviewer {
+			mode = "dontAsk"
+		}
+		return world.ClaudeSessionArgv(role, c.Model, c.Effort, mode, session, resume)
+	}
+	return nil
+}
+
 func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State, why string, now time.Time) {
+	facts := e.probeLaunchFacts(ctx, flow.RoleCoordinator, flow.Task{}, s.Settings)
+	facts.Check = launchCapability(flow.RoleCoordinator)
+	in, wait := flow.Resolve(flow.RoleCoordinator, flow.Task{}, s.Settings, facts)
+	if wait != "" {
+		e.logProjectWaitLocked(id, s, "J7", "waiting", wait)
+		return
+	}
 	adopt, bin := s.Project.Run == nil || s.Project.Run.State != flow.PhaseEnded, cmp.Or(e.Bin, "sheepdog")
 	if !adopt {
 		stopped := e.stopCoordWithBackoffLocked(ctx, id, s, now, true)
@@ -569,12 +677,12 @@ func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State,
 		why = d.Why
 	}
 	delete(e.waits, id+"/project")
-	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &s.Project.RunTokenHash, &s.Project.Run, adopt, flow.RunRecord{Role: flow.RoleCoordinator, CLI: "claude"}, world.RunSpec{
+	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &s.Project.RunTokenHash, &s.Project.Run, adopt, flow.RunRecord{Role: flow.RoleCoordinator, CLI: in.CLI}, world.RunSpec{
 		Name: coordName(id), Cwd: s.Project.Folder, ClaudeConfig: e.Paths.ClaudeConfig,
-		Argv:   world.ClaudeArgv(flow.RoleCoordinator, "opus", "medium", "bypassPermissions"),
+		Argv:   launchArgv(flow.RoleCoordinator, intentCandidate(in), s.Project.Folder, "", false),
 		Prompt: map[bool]string{true: coordinatorPrompt(coordinatorTemplate, s.Project, bin), false: coordSummary(*s, bin, false)}[len(s.Tasks) == 0],
-		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleCoordinator, "sheepdog.model": "opus"},
-	})
+		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleCoordinator, "sheepdog.model": in.Model, "sheepdog.effort": in.Effort},
+	}, hc.Terminal{})
 	if abort {
 		return
 	}
@@ -585,7 +693,7 @@ func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State,
 	} else {
 		s.Project.RunID, s.Project.Acts = termID, append(s.Project.Acts, flow.Act{Key: flow.AskStartCoordinator, Result: "done", At: now})
 		clearCoordTrack(&s.Project, false, true)
-		line.Asked, line.Decision, line.Why = []string{"coordinator:" + termID}, "started coordinator", why
+		line.Asked, line.Decision, line.Why = []string{"coordinator:" + termID}, "started coordinator "+in.CLI+"/"+in.Model, why
 	}
 	e.commitLogLocked(id, s, line)
 }
@@ -738,9 +846,18 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 
 // launchRunLocked persists the run label, session ID and token hash before launch.
 // Worker and reviewer crash recovery can still find an existing run by name.
-func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, hash *string, recp **flow.RunRecord, adopt bool, rec flow.RunRecord, spec world.RunSpec) (string, bool, bool, error) {
-	if rec.Role != flow.RoleCoordinator && !adopt && e.HC != nil {
-		if err := world.StopRun(ctx, e.HC, spec.Name); err != nil {
+func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, hash *string, recp **flow.RunRecord, adopt bool, rec flow.RunRecord, spec world.RunSpec, term hc.Terminal) (string, bool, bool, error) {
+	// The caller already looked up an adoptable terminal. Use that result
+	// for both adoption and removal so a fresh launch does not look it up again.
+	if rec.Role != flow.RoleCoordinator && e.HC != nil {
+		var err error
+		switch {
+		case !adopt:
+			err = world.StopRun(ctx, e.HC, spec.Name)
+		case term.Address != "" && term.State != "live":
+			_, err = e.HC.Remove(ctx, term.Address)
+		}
+		if err != nil && !errors.Is(err, hc.ErrNotFound) {
 			e.logError("factory.hc_error", id, err)
 			return "", false, true, err
 		}
@@ -753,25 +870,28 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 	}
 	runID, minted, prevRec, prevHash := "run-"+strings.ToLower(rand.Text()[:12]), false, *recp, *hash
 	if rec.Role == flow.RoleCoordinator && e.HC != nil {
-		spec.Fresh = true
 		if _, err := e.HC.Get(ctx, spec.Name); err == nil {
 			spec.Name = hcName(spec.Name + "-" + runID)
 		}
 	}
-	spec.Labels["sheepdog.run"], spec.Env = runID, env
+	spec.Labels["sheepdog.run"], spec.Labels["sheepdog.cli"], spec.Env = runID, rec.CLI, env
 	rec.ID, rec.Model = runID, spec.Labels["sheepdog.model"]
 	now := e.now()
 	rec.State, rec.StartedAt, rec.LastActivity = flow.PhaseStarting, now, now
-	term, abort, err := world.StartTerminal(ctx, e.HC, spec, func() error {
-		tok := rand.Text()
-		*hash, *recp, env["SHEEPDOG_RUN_TOKEN"], minted = tokenHash(tok), &rec, tok, true
-		if sErr := SaveState(e.Paths.State(id), *s); sErr != nil {
-			*hash, *recp = prevHash, prevRec
-			e.logError("factory.commit_error", id, sErr)
-			return sErr
-		}
-		return nil
-	})
+	var abort bool
+	var err error
+	if term.State != "live" {
+		term, abort, err = world.StartTerminal(ctx, e.HC, spec, func() error {
+			tok := rand.Text()
+			*hash, *recp, env["SHEEPDOG_RUN_TOKEN"], minted = tokenHash(tok), &rec, tok, true
+			if sErr := SaveState(e.Paths.State(id), *s); sErr != nil {
+				*hash, *recp = prevHash, prevRec
+				e.logError("factory.commit_error", id, sErr)
+				return sErr
+			}
+			return nil
+		})
+	}
 	if err != nil {
 		if abort && !minted {
 			e.logError("factory.hc_error", id, err)
@@ -788,10 +908,39 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 	if i := max(slices.Index(term.Argv, "--session-id"), slices.Index(term.Argv, "--resume")); !minted && i >= 0 && i+1 < len(term.Argv) {
 		rec.SessionID = term.Argv[i+1]
 	}
-	rec.ID, rec.Model = "", term.Labels["sheepdog.model"]
+	choice := terminalChoice(term, flow.Candidate{CLI: rec.CLI, Model: rec.Model})
+	rec.ID, rec.CLI, rec.Model = "", choice.CLI, choice.Model
 	rec, _, _ = flow.StepRun(rec, flow.RunEvent{Kind: flow.EvLaunched, Address: term.Address, RunID: term.Labels["sheepdog.run"], CreatedMS: term.CreatedMS}, s.Settings, now)
 	rec.Resumable, *recp = rec.SessionID != "", &rec
 	return term.Address, minted || len(term.Argv) > 0 && term.Argv[len(term.Argv)-1] == spec.Prompt, false, nil
+}
+
+func (e *Engine) lookupLaunchTerminal(ctx context.Context, name string, adopt bool) (hc.Terminal, error) {
+	if e.HC != nil && adopt {
+		t, err := e.HC.Get(ctx, name)
+		if err == nil {
+			return t, nil
+		}
+		if err != nil && !errors.Is(err, hc.ErrNotFound) {
+			return hc.Terminal{}, err
+		}
+	}
+	return hc.Terminal{}, nil
+}
+
+func terminalChoice(t hc.Terminal, fallback flow.Candidate) flow.Candidate {
+	arg := func(flag string) string {
+		if i := slices.Index(t.Argv, flag); i >= 0 && i+1 < len(t.Argv) {
+			return t.Argv[i+1]
+		}
+		return ""
+	}
+	cli, model, effort := t.Labels["sheepdog.cli"], t.Labels["sheepdog.model"], t.Labels["sheepdog.effort"]
+	if len(t.Argv) > 0 && filepath.Base(t.Argv[0]) == world.CodexCLI {
+		cli, model = world.CodexCLI, cmp.Or(model, arg("-m"))
+	}
+	return flow.Candidate{CLI: cmp.Or(cli, fallback.CLI, "claude"), Model: cmp.Or(model, arg("--model"), fallback.Model),
+		Effort: cmp.Or(effort, arg("--effort"), fallback.Effort, "medium")}
 }
 
 type taskExec func(e *Engine, ctx context.Context, id string, s *flow.State, ti int, f flow.Facts) (decision string, abort bool, err error)
@@ -920,7 +1069,8 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	if len(d.Asked) == 0 && d.Hold {
 		holdWhy = d.Why
 	}
-	holdChanged := s.Tasks[ti].HoldWhy != holdWhy
+	previousHold := s.Tasks[ti].HoldWhy
+	holdChanged := previousHold != holdWhy
 	s.Tasks[ti].HoldWhy = holdWhy
 	waitKey := id + "/" + s.Tasks[ti].ID
 	if r.ID != "N9" && r.ID != "N10" && r.ID != "N38" {
@@ -989,6 +1139,14 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		f := facts
 		f.Ask = ask
 		dec, abort, err := fn(e, context.WithoutCancel(ctx), id, s, ti, f)
+		var wait launchWait
+		if errors.As(err, &wait) {
+			s.Tasks[ti].HoldWhy = wait.Error()
+			if rowChanged || previousHold != wait.Error() || len(decs) > 0 {
+				e.commitLogLocked(id, s, LogLine{By: "engine", Task: task.ID, Rule: r.ID, Asked: d.Asked[:i+1], Decision: "waiting", Why: wait.Error()})
+			}
+			return true
+		}
 		if abort && err == nil {
 			act(ask, "failed", flow.ClassTransient, dec, true)
 			decs = append(decs, dec)
@@ -1053,6 +1211,9 @@ func (e *Engine) readTipLocked(ctx context.Context, a flow.Attempt, tip string, 
 
 func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, n := &s.Tasks[ti], len(s.Tasks[ti].Attempts)+1
+	if _, why := resolveWorker(*t, s.Settings, e.probeLaunchFacts(ctx, flow.RoleWorker, *t, s.Settings)); why != "" {
+		return "", false, launchWait(why)
+	}
 	// The branch carries the project and the attempt, so a new project on
 	// the same repo never reuses a branch an older PR (even a closed one)
 	// already names (seen live: a closed PR from an earlier run blocked N26).
@@ -1074,13 +1235,25 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	if len(parts) > 1 {
 		mode = parts[1]
 	}
-	def := flow.DefaultModels(s.Settings)[flow.RoleWorker][0]
-	model, effort := def.Model, def.Effort
-	if res, _ := flow.Resolve(flow.RoleWorker, *t, s.Settings, flow.UnprobedFacts); res.CLI == "claude" && res.Model != "" {
-		model, effort = res.Model, res.Effort
+	adopt, name := prev == nil || prev.State != flow.PhaseEnded, workerName(id, t.ID, len(t.Attempts))
+	term, err := e.lookupLaunchTerminal(ctx, name, adopt)
+	if err != nil {
+		return "", true, err
 	}
-	adopt := prev == nil || prev.State != flow.PhaseEnded
-	sid, resume, bin := world.NewUUID(), mode == flow.ContinueResume && prev != nil && prev.SessionID != "", cmp.Or(e.Bin, "sheepdog")
+	choice := flow.Candidate{}
+	if term.State != "live" {
+		in, why := resolveWorker(*t, s.Settings, e.probeLaunchFacts(ctx, flow.RoleWorker, *t, s.Settings))
+		if why != "" {
+			return "", false, launchWait(why)
+		}
+		choice = intentCandidate(in)
+	} else {
+		choice = terminalChoice(term, storedWorkerModel(*t))
+	}
+	sid, resume, bin := world.NewUUID(), mode == flow.ContinueResume && prev != nil && prev.SessionID != "" && prev.CLI == choice.CLI, cmp.Or(e.Bin, "sheepdog")
+	if mode == flow.ContinueResume && !resume {
+		mode = flow.ContinueHandoff
+	}
 	if resume || (adopt && prev != nil && prev.SessionID != "") {
 		sid = prev.SessionID
 	}
@@ -1095,11 +1268,11 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 			prompt = "Messages held for you:\n" + strings.Join(a.Held, "\n\n") + "\n\n" + prompt
 		}
 	}
-	termID, delivered, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, &a.Run, adopt, flow.RunRecord{Role: flow.RoleWorker, CLI: "claude", SessionID: sid, Resumed: resume}, world.RunSpec{
-		Name: workerName(id, t.ID, len(t.Attempts)), Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
-		Argv: world.ClaudeSessionArgv(flow.RoleWorker, model, effort, "bypassPermissions", sid, resume), Prompt: prompt,
-		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleWorker, "sheepdog.task": t.ID, "sheepdog.model": model},
-	})
+	termID, delivered, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, &a.Run, adopt, flow.RunRecord{Role: flow.RoleWorker, CLI: choice.CLI, SessionID: sid, Resumed: resume}, world.RunSpec{
+		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
+		Argv: launchArgv(flow.RoleWorker, choice, a.Worktree, sid, resume), Prompt: prompt,
+		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleWorker, "sheepdog.task": t.ID, "sheepdog.model": choice.Model, "sheepdog.effort": choice.Effort},
+	}, term)
 	if counted && !abort {
 		a.Restarts++
 	}
@@ -1109,7 +1282,7 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 		}
 		a.RunID, a.Held = termID, nil
 	}
-	return "started worker " + termID, abort, err
+	return "started worker " + termID + " (" + choice.CLI + "/" + choice.Model + ")", abort, err
 }
 
 func (e *Engine) handoffNote(id string, t flow.Task, a flow.Attempt) string {
@@ -1177,18 +1350,43 @@ func readyCmd(bin string, outcomes []flow.Outcome) string {
 }
 
 func storedWorkerModel(t flow.Task) flow.Candidate {
-	if a := flow.OpenAttempt(t); a != nil && a.Run != nil && a.Run.Model != "" {
-		return flow.Candidate{CLI: cmp.Or(a.Run.CLI, "claude"), Model: a.Run.Model}
+	if a := flow.OpenAttempt(t); a != nil && a.Run != nil && a.Run.CLI != "" && a.Run.Model != "" {
+		return flow.Candidate{CLI: a.Run.CLI, Model: a.Run.Model}
 	}
 	return flow.Candidate{}
 }
 
-func passingModels(a flow.Attempt, h string) []string {
-	var out []string
-	for _, r := range flow.PassingCovering(a, h) {
-		out = append(out, r.Reviewer.Model)
+func reviewChoice(t flow.Task, s flow.Settings, a flow.Attempt, h string, facts flow.ResolveFacts, failed []string) (flow.Intent, string, string) {
+	var used []flow.Candidate
+	for _, r := range flow.Counted(a) {
+		if r.Reviewer.Model != "" && flow.Covers(a, r.Head, h) {
+			c := flow.Candidate(r.Reviewer)
+			c.CLI = cmp.Or(c.CLI, "claude")
+			used = append(used, c)
+		}
 	}
-	return out
+	for _, name := range failed {
+		cli, model, qualified := strings.Cut(name, "/")
+		if qualified && launchCapability(flow.RoleReviewer)(flow.Candidate{CLI: cli}) == "" {
+			used = append(used, flow.Candidate{CLI: cli, Model: model})
+			continue
+		}
+		// Stored failures from older daemons only identify the model name.
+		for _, c := range flow.Candidates(flow.RoleReviewer, t, s) {
+			if c.Model == name {
+				used = append(used, c)
+			}
+		}
+	}
+	unused := facts
+	unused.Avoid = used
+	in, why := flow.Resolve(flow.RoleReviewer, t, s, unused)
+	if why == "" || len(used) == 0 {
+		return in, "", why
+	}
+	repeatWhy := why
+	in, why = flow.Resolve(flow.RoleReviewer, t, s, facts)
+	return in, repeatWhy, why
 }
 
 // observeReviewLocked checks an active reviewer run: stops it if its round is
@@ -1318,35 +1516,83 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	if a.Review != nil && a.Review.Round == round && flow.Covers(*a, a.Review.Head, h) {
 		retries, failed = a.Review.Retries, slices.Clone(a.Review.FailedModels)
 		if counted && a.Review.Reviewer.Model != "" {
-			failed = append(failed, a.Review.Reviewer.Model)
+			failed = append(failed, cmp.Or(a.Review.Reviewer.CLI, "claude")+"/"+a.Review.Reviewer.Model)
 		}
 	}
 	name := reviewerName(id, t.ID, len(t.Attempts), round)
-	facts := flow.ResolveFacts{CLIs: map[string]flow.CLIFacts{"claude": {Unknown: true}, world.CodexCLI: {Unknown: true}}, Worker: storedWorkerModel(*t)}
-	if facts.Worker.Model == "" {
-		facts.Worker = flow.DefaultModels(s.Settings)[flow.RoleWorker][0]
+	worker := storedWorkerModel(*t)
+	workers := []flow.Candidate{worker}
+	workerNote := ""
+	if worker.Model == "" {
+		workers = flow.Candidates(flow.RoleWorker, *t, s.Settings)
+		workerNote = ". Worker identity is unknown. Selected a reviewer distinct from every worker candidate"
 	}
-	adopt := prev == nil || (prev.Run == nil || prev.Run.State != flow.PhaseEnded) && !flow.Candidate(prev.Reviewer).SameModel(facts.Worker)
-	var kind, diff string
-	if e.HC != nil && adopt {
-		if gt, err := e.HC.Get(ctx, name); err != nil && !errors.Is(err, hc.ErrNotFound) {
-			e.logError("factory.hc_error", id, err)
-			return "", true, err
-		} else if err == nil && gt.State == "live" {
+	check := func(c flow.Candidate) string {
+		if slices.ContainsFunc(workers, c.SameModel) {
+			return "the reviewer must differ from the worker"
+		}
+		return launchCapability(flow.RoleReviewer)(c)
+	}
+	adopt := prev == nil || prev.Run == nil || prev.Run.State != flow.PhaseEnded
+	term, err := e.lookupLaunchTerminal(ctx, name, adopt)
+	if err != nil {
+		return "", true, err
+	}
+	var choice flow.Candidate
+	var kind, diff, repeat string
+	var env map[string]string
+	if term.State == "live" {
+		choice = terminalChoice(term, flow.Candidate{})
+		if choice.CLI == "" || choice.Model == "" || check(choice) != "" {
+			term, adopt = hc.Terminal{}, false
+		} else {
 			kind = flow.RoundFull
 		}
 	}
-	if a.Review == nil || a.Review.Round != round || !flow.Covers(*a, a.Review.Head, h) || a.Review.Code == "" || !adopt {
-		intent, why := flow.ResolveReviewer(*t, s.Settings, facts, append(passingModels(*a, h), failed...))
-		if why != "" {
-			return "", false, world.Fail(flow.ClassSettled, errors.New(why))
+	if term.State != "live" {
+		facts := e.probeLaunchFacts(ctx, flow.RoleReviewer, *t, s.Settings)
+		facts.Check = check
+		for {
+			in, repeatWhy, why := reviewChoice(*t, s.Settings, *a, h, facts, failed)
+			if why != "" {
+				return "", false, launchWait(why)
+			}
+			choice = intentCandidate(in)
+			if repeatWhy != "" {
+				repeat = ". Repeating a reviewer in a fresh session because " + repeatWhy
+			} else {
+				repeat = ""
+			}
+			if choice.CLI != world.CodexCLI {
+				break
+			}
+			dir := filepath.Join(e.Paths.DataDir, "factory", "codex-home")
+			home, err := world.CodexHome(dir)
+			if err == nil {
+				env = map[string]string{"CODEX_HOME": home}
+				e.logOnce("factory.codex_home_error", id, dir, nil)
+				break
+			}
+			if errors.Is(err, world.ErrCodexAuthDiverged) {
+				e.logOnce("factory.codex_auth_diverged", id, dir, errors.New("scoped Codex sign-in was refreshed. Check codex login and move the scoped auth.json to re-enable it"))
+			} else {
+				e.logOnce("factory.codex_home_error", id, dir, err)
+			}
+			facts.Check = func(c flow.Candidate) string {
+				if c.CLI == world.CodexCLI {
+					return err.Error()
+				}
+				return check(c)
+			}
 		}
-		a.Review = &flow.ReviewRun{Round: round, Head: h, Code: strings.ToLower(rand.Text()[:10]), Reviewer: flow.Reviewer{CLI: intent.CLI, Model: intent.Model, Effort: intent.Effort}, Retries: retries, FailedModels: failed}
 	}
-	// Keep the previous review intact until a launch can proceed.
-	review := *a.Review
+	review := flow.ReviewRun{Round: round, Head: h, Code: strings.ToLower(rand.Text()[:10]), Retries: retries, FailedModels: failed}
+	if adopt && prev != nil && prev.Round == round && flow.Covers(*a, prev.Head, h) && prev.Code != "" {
+		review = *prev
+	}
+	review.Reviewer = flow.Reviewer(choice)
 	a.Review = &review
-	if counted {
+	if counted && term.State != "live" {
 		a.Review.Retries = retries + 1
 	}
 	if kind == "" {
@@ -1361,51 +1607,26 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	}
 	a.Review.Kind = cmp.Or(a.Review.Kind, kind)
 	kind = a.Review.Kind
-	var env map[string]string
-	if a.Review.Reviewer.CLI == world.CodexCLI {
-		dir := filepath.Join(e.Paths.DataDir, "factory", "codex-home")
-		home, err := world.CodexHome(dir)
-		switch {
-		case errors.Is(err, world.ErrCodexAuthDiverged):
-			e.logEvent("factory.codex_auth_diverged", map[string]string{"project": id, "task": t.ID, "file": filepath.Join(dir, "auth.json"),
-				"fix": "Codex refreshed its sign-in inside sheepdog's Codex home. Check `codex login`; then move or remove that file to use Codex again."})
-			delete(facts.CLIs, world.CodexCLI)
-			intent, why := flow.Resolve(flow.RoleReviewer, *t, s.Settings, facts)
-			if why != "" {
-				a.Review = prev
-				return "", false, world.Fail(flow.ClassSettled, errors.New(why))
-			}
-			a.Review.Reviewer = flow.Reviewer{CLI: intent.CLI, Model: intent.Model, Effort: intent.Effort}
-		case err != nil:
-			a.Review.Run = &flow.RunRecord{Role: flow.RoleReviewer, State: flow.PhaseEnded, Result: flow.EndFailed, EndedAt: e.now()}
-			return "", false, err
-		default:
-			env = map[string]string{"CODEX_HOME": home}
-		}
-	}
-	model, effort := a.Review.Reviewer.Model, cmp.Or(a.Review.Reviewer.Effort, "medium")
-	argv := world.ClaudeArgv(flow.RoleReviewer, model, effort, "dontAsk")
+	model, effort := choice.Model, choice.Effort
+	argv := launchArgv(flow.RoleReviewer, choice, a.Worktree, "", false)
 	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
 	defer cancel()
-	if env != nil {
-		argv = world.CodexArgv(model, effort, a.Worktree)
-	}
 	prompt, err := e.reviewerPrompt(gctx, reviewerTemplate, *t, *a, h, kind, diff, e.rejectionPrompt(id, t.ID, *a, h), round)
 	if err != nil {
 		a.Review = prev
 		return "", true, err
 	}
-	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, &a.Review.Run, adopt, flow.RunRecord{Role: flow.RoleReviewer, CLI: cmp.Or(a.Review.Reviewer.CLI, "claude")}, world.RunSpec{
+	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, &a.Review.Run, adopt, flow.RunRecord{Role: flow.RoleReviewer, CLI: choice.CLI}, world.RunSpec{
 		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
 		Argv: argv, Prompt: prompt, Env: env,
-		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleReviewer, "sheepdog.task": t.ID, "sheepdog.model": model},
-	})
+		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleReviewer, "sheepdog.task": t.ID, "sheepdog.model": model, "sheepdog.effort": effort},
+	}, term)
 	if err == nil {
 		a.Review.RunID = termID
 	} else if abort {
 		a.Review = prev
 	}
-	return fmt.Sprintf("started reviewer %s (round %d, %s, %s)", termID, round, kind, model), abort, err
+	return fmt.Sprintf("started reviewer %s (round %d, %s, %s/%s)%s", termID, round, kind, choice.CLI, model, workerNote+repeat), abort, err
 }
 
 func (e *Engine) reviewDiffPrompt(ctx context.Context, a flow.Attempt, head string) (kind, diff string, err error) {
