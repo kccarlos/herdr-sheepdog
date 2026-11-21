@@ -78,6 +78,7 @@ func FailureClass(err error) string {
 type RunSpec struct {
 	Name, Cwd, Prompt, ClaudeConfig string
 	Argv                            []string
+	Fresh                           bool              // caller already resolved ownership
 	Labels, Env                     map[string]string // Env holds secrets: never argv
 }
 
@@ -138,7 +139,7 @@ const reviewerTools = "Read Grep Glob LS " +
 
 // StartTerminal launches spec in herdr-core (or adopts a live same-name terminal) and returns its terminal record and whether an hc check failed before launch.
 func StartTerminal(ctx context.Context, client *hc.Client, spec RunSpec, beforeLaunch func() error) (hc.Terminal, bool, error) {
-	if client != nil && spec.Name != "" {
+	if client != nil && spec.Name != "" && !spec.Fresh {
 		switch t, err := client.Get(ctx, spec.Name); {
 		case err != nil && !errors.Is(err, hc.ErrNotFound):
 			return hc.Terminal{}, true, hcFail(err)
@@ -270,6 +271,11 @@ func SendRun(ctx context.Context, client *hc.Client, id, text string) error {
 // StopRun kills terminal id, removes it, and verifies both the terminal and its
 // OS process group are gone (design.md 9.4).
 func StopRun(ctx context.Context, client *hc.Client, id string) error {
+	return StopLabeledRun(ctx, client, id, "", 0)
+}
+
+// StopLabeledRun checks the run label and creation time before stopping a terminal.
+func StopLabeledRun(ctx context.Context, client *hc.Client, id, label string, createdMS uint64) error {
 	if client == nil || id == "" {
 		return nil
 	}
@@ -278,6 +284,9 @@ func StopRun(ctx context.Context, client *hc.Client, id string) error {
 		return nil
 	} else if err != nil {
 		return hcFail(err)
+	}
+	if label != "" && t.Labels["sheepdog.run"] != label || createdMS != 0 && t.CreatedMS != createdMS {
+		return nil
 	}
 	pid := 0
 	if t.PID != nil && *t.PID > 1 && *t.PID != os.Getpid() && *t.PID != syscall.Getpgrp() {
@@ -398,7 +407,7 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]f
 		}
 		evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: s.State, StatusKind: deref(s.Kind), Msg: s.Msg, Turn: t.Turn, StatusAt: at})
 	}
-	return append(evs, flow.RunEvent{Kind: flow.EvTick, Screen: cls, ScreenHash: hash}), nil
+	return append(evs, flow.RunEvent{Kind: flow.EvTick, Screen: cls, ScreenHash: hash, Model: t.Labels["sheepdog.model"]}), nil
 }
 
 // ActRun executes one run-table act against herdr-core.
@@ -418,7 +427,7 @@ func ActRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, act, msg
 	case flow.RunActInterrupt:
 		_, err = client.Interrupt(ctx, rec.Address, 0)
 	case flow.RunActStop:
-		err = StopRun(ctx, client, rec.Address)
+		err = StopLabeledRun(ctx, client, rec.Address, rec.ID, rec.CreatedMS)
 	case flow.RunActRemove:
 		if _, rerr := client.Remove(ctx, rec.Address); !errors.Is(rerr, hc.ErrNotFound) && !errors.Is(rerr, hc.ErrLive) {
 			err = rerr

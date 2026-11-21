@@ -98,11 +98,11 @@ func pcond(id, waits, stage string, when, sel func(ProjectIn) bool, yes, no Deci
 // J10 sits before J6/J7 so an R29 dialog-stuck end is noted before J6 waits or J7 restarts it.
 var ProjectRows = []Row[ProjectIn]{
 	pcond("J2", "owner", "stopped", func(in ProjectIn) bool { return !in.Started }, ProjectIn.alive, pdec("Stopped by you: stop the coordinator", AskStopCoordinator), pdec("Stopped by you")),
-	prow("J4", "none", "finished", func(in ProjectIn) bool { return AllTasksEnded(in.Tasks) && !in.NewGoal }, func(in ProjectIn) Decision {
+	prow("J4", "none", "finished", func(in ProjectIn) bool { return AllTasksEnded(in.Tasks) && !in.NewGoal && len(in.Wakes) == 0 }, func(in ProjectIn) Decision {
 		if !in.alive() || !in.idle() {
-			return pdec(map[bool]string{true: "Finished: all tasks ended", false: "Finished: waiting for coordinator to finish final journal line"}[!in.alive()])
+			return pdec(map[bool]string{true: "Finished: all tasks ended", false: "Waiting for coordinator to finish final journal line"}[!in.alive()])
 		}
-		return map[bool]Decision{true: pdec("Finished: stop coordinator after final journal line", AskStopCoordinator), false: pdec("Finished: ask coordinator for final journal line", AskFinalJournal)}[Done(in.Acts, FinalJournalKey(in.Tasks))]
+		return map[bool]Decision{true: pdec("Stop coordinator after final journal line", AskStopCoordinator), false: pdec("Ask coordinator for final journal line", AskFinalJournal)}[Done(in.Acts, FinalJournalKey(in.Tasks))]
 	}),
 	// Alerts (agents_down) are slice 5b; second time in a row logs plainly for the owner.
 	pcond("J10", "engine", "running", func(in ProjectIn) bool { return IsCoordR29(in.Run) && !Done(in.Acts, CoordStuckKey(in.Run)) }, func(in ProjectIn) bool { return in.CoordDialogStucks >= firstDialogStuck }, pdec("coordinator stuck at a dialog twice in a row (R29); needs owner attention", AskCoordDialogStuck), pdec("coordinator ended stuck at a dialog (R29); J7 will restart it", AskCoordDialogStuck)),

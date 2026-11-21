@@ -61,7 +61,6 @@ func TestJ12HeldWakesOneBatchWhenIdle(t *testing.T) {
 	client := hc.NewClient(srv.Path)
 	paths := testPaths(t)
 	eng := New(paths, client)
-	srv.Add(hc.Terminal{Address: "coord1", Name: "coord", State: "live", Status: &hc.Status{App: "claude-code", State: "working"}})
 	const id = "proj-wake"
 	at := time.Now()
 	st := flow.State{Seq: 1, Project: flow.Project{ID: id, Folder: t.TempDir(), Started: true, RunID: "gone1", Acts: []flow.Act{{Key: flow.AskStartCoordinator, Result: "done", At: at}}}, Settings: flow.DefaultSettings()}
@@ -85,6 +84,7 @@ func TestJ12HeldWakesOneBatchWhenIdle(t *testing.T) {
 	}
 	save()
 	held("no coordinator run")
+	srv.Add(hc.Terminal{Address: "coord1", Name: "coord", State: "live", Labels: testCoordLabels(id, "run-coord1"), Status: &hc.Status{App: "claude-code", State: "working"}})
 	st.Project.RunID = "coord1"
 	save()
 	held("coordinator working")
@@ -245,9 +245,9 @@ func TestJ12DeliveryAtLeastOnce(t *testing.T) {
 	fail.Store(true)
 	paths := testPaths(t)
 	eng := New(paths, hc.NewClient(sendFailProxy(t, srv.Path, &fail)))
-	pastMS := uint64(time.Now().Add(-time.Minute).UnixMilli())
-	srv.Add(hc.Terminal{Address: "coord1", Name: "coord", State: "live", Status: &hc.Status{App: "claude-code", State: "idle"}, StatusMS: &pastMS})
 	const id = "proj-once"
+	pastMS := uint64(time.Now().Add(-time.Minute).UnixMilli())
+	srv.Add(hc.Terminal{Address: "coord1", Name: "coord", State: "live", Labels: testCoordLabels(id, "run-coord1"), Status: &hc.Status{App: "claude-code", State: "idle"}, StatusMS: &pastMS})
 	st := flow.State{Seq: 1, Project: flow.Project{ID: id, Folder: t.TempDir(), Started: true, RunID: "coord1"}, Settings: flow.DefaultSettings()}
 	st.Project.Wakes = []flow.Wake{{Key: "worker_failed", Task: "T1", Why: "N23: worker failed", Facts: `title "feat: x"`, At: time.Now()}}
 	if err := SaveState(paths.State(id), st); err != nil {
@@ -306,7 +306,8 @@ func TestWakeMessageBounded(t *testing.T) {
 func TestN25N6RecapOpensOnceWakesCoordinatorAndSplits(t *testing.T) {
 	l := newLanding(t)
 	pastMS := uint64(time.Now().Add(-time.Minute).UnixMilli())
-	l.srv.Add(hc.Terminal{Address: "coord1", Name: "coord", State: "live", Status: &hc.Status{App: "claude-code", State: "idle"}, StatusMS: &pastMS})
+	l.srv.Finish("coord-elsewhere", "exited")
+	l.srv.Add(hc.Terminal{Address: "coord1", Name: "coord", State: "live", Labels: testCoordLabels(l.id, "run-coord1"), Status: &hc.Status{App: "claude-code", State: "idle"}, StatusMS: &pastMS})
 	l.edit(func(s *flow.State) {
 		s.Project.RunID = "coord1"
 		s.Project.RunTokenHash = tokenHash("tok-coord")

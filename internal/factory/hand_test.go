@@ -108,7 +108,7 @@ func TestN7ForcePushedAndForeignPRHead(t *testing.T) {
 			}
 
 			// Pass 3 after worker turn ends and divergence still holds: wakes coordinator once.
-			setIdle(t, l.srv, l.client, l.worker, "idle")
+			l.finishWorkerTurn()
 			l.pass()
 			l.pass()
 			wakes := l.state().Project.Wakes
@@ -276,7 +276,7 @@ func TestN7TellsOnceAndWakesOncePerH(t *testing.T) {
 	}
 
 	// Worker turn ends at t2: must wake once (keyed on H), NOT send a second tell.
-	setIdle(t, l.srv, l.client, l.worker, "idle")
+	l.finishWorkerTurn()
 	l.pass()
 	if got := len(sendsTo(t, l.srv.Requests(), l.worker)); got != 1 {
 		t.Fatalf("after turn end at t2 sends = %d, want 1 (no second tell)", got)
@@ -339,7 +339,7 @@ func TestN7WaitsForWorkerTurnBeforeWaking(t *testing.T) {
 		}
 
 		// Pass 4: worker is idle again (turn ended within grace) -> wakes once early.
-		setIdle(t, l.srv, l.client, l.worker, "idle")
+		l.finishWorkerTurn()
 		l.pass()
 		if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != "diverged@pr_diverged@"+l.c1 {
 			t.Fatalf("pass 4 (after turn end): wakes = %+v, want 1 wake keyed diverged@pr_diverged@%s", wakes, l.c1)
@@ -359,6 +359,9 @@ func TestN7WaitsForWorkerTurnBeforeWaking(t *testing.T) {
 
 		// Worker never showed as working (turn shorter than a pass); tell ages past grace.
 		ageTell(l)
+		at := l.eng.now().Add(time.Second)
+		setStatusAt(t, l, l.worker, "idle", at)
+		l.eng.Now = func() time.Time { return at.Add(time.Minute) }
 		l.pass()
 		l.pass()
 		if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != "diverged@pr_diverged@"+l.c1 {
@@ -384,6 +387,9 @@ func TestN7WaitsForWorkerTurnBeforeWaking(t *testing.T) {
 		l.eng.Log = oldLog
 
 		ageTell(l)
+		at := l.eng.now().Add(time.Second)
+		setStatusAt(t, l, l.worker, "idle", at)
+		l.eng.Now = func() time.Time { return at.Add(time.Minute) }
 		l.pass()
 		l.pass()
 		if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != "diverged@pr_diverged@"+l.c1 {
@@ -461,6 +467,7 @@ func TestN7SecondDifferentProblemAtSameHTold(t *testing.T) {
 	}
 	// Worker restores tip to c1 without a new ready; then a foreign commit hits the PR head at the same H.
 	gitIn(t, l.wt, "reset", "--hard", l.c1)
+	l.finishWorkerTurn()
 	ext := pushExternalToBranch(t, l, false, "foreign2.txt", "foreign\n")
 	writePRJSON(t, l.gh, "view.json", ext, greenRollup)
 	l.pass()

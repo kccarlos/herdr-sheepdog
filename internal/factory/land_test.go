@@ -63,7 +63,7 @@ func newLanding(t *testing.T) *landing {
 		t.Fatal(err)
 	}
 	setIdle(t, srv, l.client, l.worker, "idle")
-	srv.Add(hc.Terminal{Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live", Status: &hc.Status{App: "claude-code", State: "working"}})
+	srv.Add(hc.Terminal{Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live", Labels: testCoordLabels(l.id, "run-elsewhere"), Status: &hc.Status{App: "claude-code", State: "working"}})
 	l.edit(func(s *flow.State) {
 		s.Project.RunID = "coord-elsewhere" // the coordinator is not this test's business
 		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: x", EstimateLines: 50, Attempts: []flow.Attempt{{SizeCap: 100,
@@ -138,6 +138,20 @@ func setIdle(t testing.TB, srv *hctest.Server, client *hc.Client, id, state stri
 	ms := uint64(time.Now().Add(-time.Minute).UnixMilli())
 	term.StatusMS = &ms
 	srv.Add(term)
+}
+
+// finishTurn supplies a new hc status sample and advances past idle grace.
+func finishTurn(t testing.TB, eng *Engine, srv *hctest.Server, client *hc.Client, id, state string) {
+	t.Helper()
+	at := eng.now().Add(time.Second)
+	srv.SetStatus(id, &hc.Status{App: "claude-code", State: "working"})
+	setTerminalStatusAt(t, srv, client, id, state, at)
+	eng.Now = func() time.Time { return at.Add(30 * time.Second) }
+}
+
+func (l *landing) finishWorkerTurn() {
+	l.t.Helper()
+	finishTurn(l.t, l.eng, l.srv, l.client, l.worker, "idle")
 }
 
 func termState(ctx context.Context, client *hc.Client, id string) (flow.RunState, error) {
@@ -439,10 +453,11 @@ func TestIrreversibleActionsRecheckFreshFacts(t *testing.T) {
 // single settled refusal going straight to N5.
 func TestSection8EngineBackoffOutageN5AndRetry(t *testing.T) {
 	l := newLanding(t)
-	coord, err := startRun(context.Background(), l.client, world.RunSpec{Name: "coord", Cwd: l.repo, Argv: []string{"sh"}})
+	coord, err := startRun(context.Background(), l.client, world.RunSpec{Name: "coord", Cwd: l.repo, Argv: []string{"sh"}, Labels: testCoordLabels(l.id, "run-merge")})
 	if err != nil {
 		t.Fatal(err)
 	}
+	l.srv.Finish("coord-elsewhere", "exited")
 	setIdle(t, l.srv, l.client, coord, "idle")
 	l.edit(func(s *flow.State) { s.Project.RunID = coord })
 	now := time.Now()
@@ -499,9 +514,11 @@ func TestSection8EngineBackoffOutageN5AndRetry(t *testing.T) {
 	}
 
 	// Coordinator takes a turn on the wake so J9 does not stop it during the 31m jump.
-	l.srv.SetStatus(coord, &hc.Status{App: "claude-code", State: "working"})
+	now = now.Add(time.Second)
+	setStatusAt(t, l, coord, "working", now)
 	l.pass()
-	setIdle(t, l.srv, l.client, coord, "idle")
+	setStatusAt(t, l, coord, "idle", now.Add(time.Second))
+	now = now.Add(30 * time.Second)
 	l.pass()
 	// Even 31m later, N5 stays quiet and N42 never fires again — no loop.
 	now = now.Add(31 * time.Minute)

@@ -738,12 +738,12 @@ func TestN3StopRunsSharedBackoffOutageAndExhaustedWake(t *testing.T) {
 		a0(&ex).Acts = append(a0(&ex).Acts, Act{Key: AskStopRuns, Result: "failed", Class: ClassTransient, Err: "pid\nstill alive", At: now.Add(time.Duration(i) * time.Minute)})
 	}
 	r, d := FirstMatch(TaskRows, ex)
-	if r.ID != "N3" || !slices.Equal(d.Asked, []string{"wake_coordinator@failed@stop_runs"}) || !strings.Contains(d.Why, "stop_runs failed (transient): pid still alive") {
-		t.Fatalf("N3 exhausted: %s %v (%q), want once wake naming stop_runs failure", r.ID, d.Asked, d.Why)
+	if r.ID != "N5" || !slices.Equal(d.Asked, []string{"wake_coordinator@failed@stop_runs"}) || !strings.Contains(d.Why, "stop_runs failed (transient): pid still alive") {
+		t.Fatalf("N5 exhausted: %s %v (%q), want once wake naming stop_runs failure", r.ID, d.Asked, d.Why)
 	}
 	a0(&ex).Acts = append(a0(&ex).Acts, Act{Key: "wake_coordinator@failed@stop_runs", Result: "done", At: now})
-	if r, d := FirstMatch(TaskRows, ex); r.ID != "N3" || len(d.Asked) != 0 {
-		t.Fatalf("N3 exhausted repeat: %s %v, want N3 nil", r.ID, d.Asked)
+	if r, d := FirstMatch(TaskRows, ex); r.ID != "N5" || len(d.Asked) != 0 {
+		t.Fatalf("N5 exhausted repeat: %s %v, want N5 nil", r.ID, d.Asked)
 	}
 	a0(&ex).Acts = append(a0(&ex).Acts, Act{Key: AskRetry, Result: "done", At: now})
 	if r, d := FirstMatch(TaskRows, ex); r.ID != "N3" || !slices.Equal(d.Asked, []string{AskStopRuns}) {

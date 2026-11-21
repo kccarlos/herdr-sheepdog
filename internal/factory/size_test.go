@@ -71,6 +71,7 @@ func TestSizeCapRecapContinue(t *testing.T) {
 		t.Fatalf("worker sends = %q, want one stop", sends)
 	}
 
+	l.finishWorkerTurn()
 	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"continue","why":"the test needs room"}`, "")
 	st := l.state()
 	if a := st.Tasks[0].Attempts[0]; a.SizeCap != 1+st.Settings.ContinueLines || flow.OpenRecap(st.Tasks[0]) != nil {
@@ -451,6 +452,7 @@ func TestContinueUnderGitTimeout(t *testing.T) {
 	}
 
 	// Keep slow set during continue: ChangedLines times out, SendRun must still succeed.
+	l.finishWorkerTurn()
 	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"continue","why":"git is slow"}`, "")
 	sends := sendsTo(t, l.srv.Requests(), l.worker)
 	if len(sends) != 2 || !strings.Contains(sends[1], "lets task T1 go on") || !strings.Contains(sends[1], "size cap is now 160") {

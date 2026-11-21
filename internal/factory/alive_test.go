@@ -739,10 +739,11 @@ func TestActBackoffDoublingOutageN5AndRetryE2E(t *testing.T) {
 	l.eng.Now = func() time.Time { return now }
 	var failSend, failCoord atomic.Bool
 	pSend := methodFailProxy(t, l.srv.Path, "terminal.send", &failSend)
-	coordID, err := startRun(context.Background(), l.client, world.RunSpec{Name: "coord-outage", Cwd: l.repo, Argv: []string{"sh"}})
+	coordID, err := startRun(context.Background(), l.client, world.RunSpec{Name: "coord-outage", Cwd: l.repo, Argv: []string{"sh"}, Labels: testCoordLabels(l.id, "run-outage")})
 	if err != nil {
 		t.Fatal(err)
 	}
+	l.srv.Finish("coord-elsewhere", "exited")
 	l.eng.HC = hc.NewClient(methodFailProxy(t, pSend, coordID, &failCoord))
 	l.edit(func(s *flow.State) {
 		s.Project.RunID = coordID
@@ -901,6 +902,7 @@ func TestHeldMessagesClearedOnlyAfterSuccessfulLaunch(t *testing.T) {
 	// 2. Old terminal killed, but terminal.run fails -> Held still kept.
 	failKill.Store(false)
 	failRun.Store(true)
+	now = now.Add(time.Duration(l.state().Settings.EnsureBackoffMinutes) * time.Minute)
 	l.pass()
 	if got := l.state().Tasks[0].Attempts[0].Held; len(got) != 1 {
 		t.Fatalf("Held cleared when terminal.run failed: %q", got)
@@ -1149,7 +1151,7 @@ func TestCrashWindowRestartTakesOverLiveTerminalAndReviewerRetry(t *testing.T) {
 		a := &s.Tasks[0].Attempts[0]
 		a.Ready = []flow.Ready{{Head: l.c1}}
 		a.Rounds = nil
-		a.Review = &flow.ReviewRun{Round: 1, Head: l.c1, Code: "code123456", Reviewer: flow.Reviewer{CLI: "claude", Model: "sonnet"}, Retries: 1, FailedModels: []string{"opus"},
+		a.Review = &flow.ReviewRun{Round: 1, Head: l.c1, Code: "code123456", Reviewer: flow.Reviewer{CLI: "claude", Model: "opus"}, Retries: 1, FailedModels: []string{"opus"},
 			Run: &flow.RunRecord{Role: flow.RoleReviewer, CLI: "claude", State: flow.PhaseStarting, StartedAt: time.Now(), LastActivity: time.Now()}}
 		a.Acts = []flow.Act{{Key: flow.AskStartWorker, Result: "done"}, {Key: "push_and_open_pr@" + l.c1, Result: "done"}, {Key: "start_reviewer@1@" + l.c1, Result: "done"}}
 	})

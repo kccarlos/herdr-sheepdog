@@ -23,11 +23,19 @@ const (
 
 // RunRecord is a run's persisted state in state.json (design.md sections 3 and 5).
 type RunRecord struct {
-	ID, Address, Role, CLI, SessionID, State, Result, Screen, ScreenHash, Status, BlockedKind, Question, Reason string
-	CreatedMS, Turn                                                                                             uint64
-	StartedAt, EndedAt, StatusSince, LastActivity, LastTurnEnd, BlockedSince, InterruptedAt                     time.Time
-	StatusReported, Resumable, Resumed                                                                          bool
-	ScreensAnswered, Held                                                                                       []string
+	ID, Address, Role, CLI, Model, SessionID, State, Result, Screen, ScreenHash, Status, BlockedKind, Question, Reason string
+	CreatedMS, Turn                                                                                                    uint64
+	StartedAt, EndedAt, StatusSince, LastActivity, LastTurnEnd, BlockedSince, InterruptedAt, LastSentAt                time.Time
+	StatusReported, Resumable, Resumed                                                                                 bool
+	ScreensAnswered, Held                                                                                              []string
+	StopRetry                                                                                                          *StopRetry `json:"stop_retry,omitempty"`
+}
+
+// StopRetry preserves a run-table stop until the executor succeeds.
+type StopRetry struct {
+	Row, Result string
+	At          time.Time
+	Tries       int
 }
 
 // TaskRun projects a RunRecord into the Run fact that task rows read.
@@ -40,10 +48,10 @@ func (r *RunRecord) TaskRun() Run {
 
 // RunEvent is one input to the run table reported by world or the engine.
 type RunEvent struct {
-	Kind, Address, RunID, Screen, ScreenHash, Status, StatusKind, Msg, Reason string
-	CreatedMS, Turn                                                           uint64
-	StatusAt                                                                  time.Time
-	Urgent                                                                    bool
+	Kind, Address, RunID, Screen, ScreenHash, Status, StatusKind, Msg, Reason, Model string
+	CreatedMS, Turn                                                                  uint64
+	StatusAt                                                                         time.Time
+	Urgent                                                                           bool
 }
 
 // RunIn is what a run row sees: the run record, event, settings and clock.
@@ -138,13 +146,23 @@ var RunRows = []Row[RunIn]{
 
 // StepRun runs FirstMatch over RunRows and returns the updated RunRecord, matched row and decision.
 func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, Row[RunIn], Decision) {
+	sentAt := rec.LastSentAt
+	if rec.State == PhaseWorking && rec.Status == "" {
+		sentAt = cmp.Or(sentAt, rec.StatusSince) // R24/R25 records saved before LastSentAt was added.
+	}
+	if ev.Kind == EvStatus && !ev.StatusAt.IsZero() && !ev.StatusAt.After(sentAt) {
+		return rec, Row[RunIn]{}, Decision{}
+	}
 	rec.Held, rec.ScreensAnswered = slices.Clone(rec.Held), slices.Clone(rec.ScreensAnswered)
 	r, d := FirstMatch(RunRows, RunIn{R: rec, E: ev, S: s, Now: now})
+	if rec.Model == "" {
+		rec.Model = ev.Model
+	}
 	if ev.ScreenHash != "" && rec.State != PhaseEnded {
 		rec.ScreenHash = ev.ScreenHash
 	}
 	if res, ok := strings.CutPrefix(d.Why, "ended("); ok {
-		rec.State, rec.Result, rec.EndedAt = PhaseEnded, strings.TrimSuffix(res, ")"), now
+		rec.State, rec.Result, rec.EndedAt, rec.StopRetry = PhaseEnded, strings.TrimSuffix(res, ")"), now, nil
 	}
 	stAt := cmp.Or(ev.StatusAt, now)
 	switch {
@@ -188,6 +206,7 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 	case r.ID == "R21":
 		rec.InterruptedAt, rec.ScreenHash = now, ""
 	case inSet("R24|R25", r.ID):
+		rec.LastSentAt = now
 		rec.State, rec.Status, rec.StatusSince, rec.LastActivity, rec.InterruptedAt = PhaseWorking, "", now, now, time.Time{}
 	case r.ID == "R26":
 		rec.Held = append(rec.Held, ev.Msg)

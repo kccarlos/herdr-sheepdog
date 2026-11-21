@@ -17,6 +17,10 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
+func testCoordLabels(id, run string) map[string]string {
+	return map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleCoordinator, "sheepdog.run": run}
+}
+
 type projectHarness struct {
 	t      *testing.T
 	srv    *hctest.Server
@@ -416,7 +420,7 @@ func TestOneCoordinatorAndOldProcessGroupGoneBeforeRestart(t *testing.T) {
 	})
 	h.srv.Add(hc.Terminal{
 		Address: "coord-stray", Name: "coord-stray", State: "live",
-		Labels: map[string]string{"sheepdog.project": h.id, "sheepdog.role": flow.RoleCoordinator},
+		Labels: testCoordLabels(h.id, "run-stray"),
 	})
 	h.edit(func(s *flow.State) {
 		s.Tasks = []flow.Task{{

@@ -230,7 +230,7 @@ func TestN40HandEditedUpdateHeadNeverMovesH(t *testing.T) {
 	l.pass() // N7 tells worker
 	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "working"})
 	l.pass()
-	setIdle(t, l.srv, l.client, l.worker, "idle")
+	l.finishWorkerTurn()
 	l.pass()
 
 	a := l.state().Tasks[0].Attempts[0]
