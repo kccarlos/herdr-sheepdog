@@ -40,12 +40,15 @@ type Candidate struct {
 type CLIFacts struct {
 	Installed, SignedIn, Unknown bool
 	Models                       map[string]bool
+	QuotaWait                    string
 }
 
 // ResolveFacts holds the non-I/O world facts Resolve checks (design.md 9.1).
 type ResolveFacts struct {
 	CLIs   map[string]CLIFacts
-	Worker Candidate // worker's (CLI, Model) for the reviewer/retro check
+	Worker Candidate              // worker's (CLI, Model) for the reviewer/retro check
+	Check  func(Candidate) string // additional role capability or launch checks
+	Avoid  []Candidate            // models already used in this round sequence
 }
 
 // UnprobedFacts marks known CLIs inconclusive so Resolve picks the first
@@ -101,44 +104,44 @@ func (c Candidate) SameModel(other Candidate) bool {
 	return c.CLI != "" && c.CLI == other.CLI && c.Model == other.Model
 }
 
-// ResolveReviewer prefers an eligible model that has not been used in this review.
-func ResolveReviewer(task Task, settings Settings, facts ResolveFacts, used []string) (Intent, string) {
-	if len(used) > 0 {
-		if in, why := resolve(RoleReviewer, task, settings, facts, used); why == "" {
-			return in, ""
-		}
+// Candidates returns the effective order, with legacy defaults for unset roles.
+func Candidates(role string, task Task, settings Settings) []Candidate {
+	project := settings.Models[role]
+	if len(project) == 0 {
+		project = DefaultModels(settings)[role]
 	}
-	return Resolve(RoleReviewer, task, settings, facts)
+	return slices.Concat(task.Request[role], project)
 }
 
-// Resolve walks task.Request[role] then settings.Models[role] (falling back to
-// DefaultModels when unset) and returns the first candidate that passes every
-// check decidable from facts, or the first failing reason (design.md 9.1).
+// Resolve walks the effective list and returns the first passing candidate or
+// the first failing reason (design.md 9.1).
 func Resolve(role string, task Task, settings Settings, facts ResolveFacts) (Intent, string) {
-	return resolve(role, task, settings, facts, nil)
-}
-
-func resolve(role string, task Task, settings Settings, facts ResolveFacts, skip []string) (Intent, string) {
 	perm, ok := rolePerm[role]
 	if !ok {
 		return Intent{}, fmt.Sprintf("unknown role %q", role)
 	}
-	proj := settings.Models[role]
-	if len(proj) == 0 {
-		proj = DefaultModels(settings)[role]
-	}
 	first := ""
-	for _, c := range slices.Concat(task.Request[role], proj) {
-		if slices.Contains(skip, c.Model) {
+	for _, c := range Candidates(role, task, settings) {
+		if slices.ContainsFunc(facts.Avoid, c.SameModel) {
 			continue
 		}
-		cf := facts.CLIs[c.CLI]
-		if !cf.Unknown && !cf.Installed {
+		cf, probed := facts.CLIs[c.CLI]
+		var why string
+		if _, known := UnprobedFacts.CLIs[c.CLI]; !known {
+			why = fmt.Sprintf("unknown cli %q", c.CLI)
+		} else if facts.Check != nil {
+			why = facts.Check(c)
+		}
+		if why != "" {
+			first = cmp.Or(first, why)
+		} else if probed && !cf.Unknown && !cf.Installed {
 			first = cmp.Or(first, c.CLI+" is not installed")
-		} else if !cf.Unknown && !cf.SignedIn {
+		} else if probed && !cf.Unknown && !cf.SignedIn {
 			first = cmp.Or(first, c.CLI+" is not signed in")
 		} else if !cf.Unknown && cf.Models != nil && !cf.Models[c.Model] {
 			first = cmp.Or(first, fmt.Sprintf("model %s is not offered to this account", c.Model))
+		} else if cf.QuotaWait != "" {
+			first = cmp.Or(first, cf.QuotaWait)
 		} else if (role == RoleReviewer || role == RoleRetro) && c.SameModel(facts.Worker) {
 			first = cmp.Or(first, "the reviewer must differ from the worker")
 		} else {

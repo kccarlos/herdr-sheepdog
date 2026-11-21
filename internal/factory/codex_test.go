@@ -37,7 +37,15 @@ func TestReviewerCandidatesBySetting(t *testing.T) {
 	} {
 		facts := flow.UnprobedFacts
 		facts.Worker = flow.DefaultModels(def)[flow.RoleWorker][0]
-		if got, why := flow.ResolveReviewer(flow.Task{}, tc.st, facts, tc.passed); why != "" || got.Model != tc.want {
+		a := flow.Attempt{}
+		for _, model := range tc.passed {
+			cli := "claude"
+			if model == codexModel {
+				cli = "codex"
+			}
+			a.Rounds = append(a.Rounds, flow.Round{Head: "h", Verdict: flow.VerdictPass, Reviewer: flow.Reviewer{CLI: cli, Model: model}})
+		}
+		if got, _, why := reviewChoice(flow.Task{}, tc.st, a, "h", facts, nil); why != "" || got.Model != tc.want {
 			t.Errorf("%s after %v = %q (%q), want %q", tc.st.SecondReviewer, tc.passed, got.Model, why, tc.want)
 		}
 	}
@@ -241,15 +249,21 @@ func TestEngineCodexReviewerAdoptedAfterCrash(t *testing.T) {
 	st, _ := LoadState(paths.State(id))
 	run := st.Tasks[0].Attempts[0].Review.RunID
 	a := &st.Tasks[0].Attempts[0]
-	a.Review = nil // a crash before the record and its start act were committed; the terminal lives on
+	a.Review.RunID = "" // terminal.run succeeded before its returned address was saved
+	a.Review.Run.Address = ""
+	st.Settings.Models = map[string][]flow.Candidate{flow.RoleReviewer: {{CLI: "claude", Model: "haiku", Effort: "high"}}}
 	a.Acts = slices.DeleteFunc(a.Acts, func(x flow.Act) bool { return strings.HasPrefix(x.Key, flow.AskStartReview+"@") })
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
 	}
+	eng = newGitTestEngine(t, paths, eng.HC)
+	eng.probeLaunch = func(context.Context, []string) flow.ResolveFacts {
+		return flow.ResolveFacts{CLIs: map[string]flow.CLIFacts{"codex": {Installed: true}}}
+	}
 	eng.passProject(ctx, id, false)
 	st, _ = LoadState(paths.State(id))
 	rev := st.Tasks[0].Attempts[0].Review
-	if rev == nil || rev.RunID != run || rev.Reviewer.CLI != world.CodexCLI {
+	if rev == nil || rev.RunID != run || rev.Reviewer.CLI != world.CodexCLI || rev.Run.CLI != world.CodexCLI || rev.Run.Model != codexModel {
 		t.Fatalf("adopted review = %+v, want run %s on codex", rev, run)
 	}
 }

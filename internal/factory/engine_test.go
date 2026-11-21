@@ -828,6 +828,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	p2 := testPaths(t)
 	p2.ClaudeConfig = "/nonexistent-sheepdog-test-guard/.claude.json"
 	eng2 := New(p2, hc.NewClient(srv2.Path))
+	eng2.probeLaunch = eng1.probeLaunch
 	eng2.PassInterval = 10 * time.Millisecond
 	if err := eng2.Start(initGitRepo(t), "Goal with failing coord", 0); err != nil {
 		t.Fatal(err)
@@ -853,6 +854,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 		return hctest.GitExec(p)
 	}
 	eng3 := New(testPaths(t), hc.NewClient(srv3.Path))
+	eng3.probeLaunch = eng1.probeLaunch
 	repo3, _ := initGitRepoWithRemote(t)
 	if err := eng3.Start(repo3, "Goal", 0); err != nil {
 		t.Fatal(err)

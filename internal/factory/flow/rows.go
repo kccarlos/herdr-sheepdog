@@ -150,7 +150,7 @@ func ensureRun(in In, role string) (asks []string, backoff bool) {
 		} else if noSlot {
 			return nil, false
 		}
-		return ensureRepeat(in, workerStartAsk(in, last, 0)), false
+		return ensureRepeat(in, workerStartAsk(last, 0)), false
 	case last == nil:
 		return nil, false
 	case last.Result == EndQuota || last.Result == EndSignedOut:
@@ -164,7 +164,7 @@ func ensureRun(in In, role string) (asks []string, backoff bool) {
 		if noSlot {
 			return nil, false
 		}
-		return ensureRepeat(in, workerStartAsk(in, last, a.Restarts+countBase)), false
+		return ensureRepeat(in, workerStartAsk(last, a.Restarts+countBase)), false
 	}
 	// Otherwise it counts as a failure; N5 with retry is PR 5a.3.
 	if role == RoleReviewer {
@@ -177,9 +177,9 @@ func workerRestartBackoff(in In, last *RunRecord, restarts int) bool {
 	return !last.EndedAt.IsZero() && in.Now.Sub(last.EndedAt) < time.Duration(in.Settings.EnsureBackoffMinutes)*time.Minute<<restarts
 }
 
-func workerStartAsk(in In, last *RunRecord, n int) string {
+func workerStartAsk(last *RunRecord, n int) string {
 	mode := ContinueHandoff
-	if res, _ := Resolve(RoleWorker, in.Task, in.Settings, UnprobedFacts); (last.Resumable || last.State == PhaseStarting && last.Resumed) && last.SessionID != "" && last.CLI == cmp.Or(res.CLI, "claude") {
+	if (last.Resumable || last.State == PhaseStarting && last.Resumed) && last.SessionID != "" {
 		mode = ContinueResume
 	}
 	if n == 0 {

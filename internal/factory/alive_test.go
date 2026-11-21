@@ -420,12 +420,6 @@ func TestHeldMessagesLifecycle(t *testing.T) {
 // backoff, and plan amend changing request.worker restarts with a handoff
 // without counting.
 func TestParkUnparkAndAmendRequestRestartUncounted(t *testing.T) {
-	origProbe := planResolveFacts
-	planResolveFacts = func(context.Context, []string) flow.ResolveFacts {
-		return flow.ResolveFacts{CLIs: map[string]flow.CLIFacts{"claude": {Installed: true, SignedIn: true}, "codex": {Installed: true, SignedIn: true}}}
-	}
-	t.Cleanup(func() { planResolveFacts = origProbe })
-
 	ctx := context.Background()
 	srv := hctest.New(t)
 	var runs []hc.RunParams

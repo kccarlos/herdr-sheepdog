@@ -90,6 +90,7 @@ func TestResolveModelsOfferedAndFirstFailingReason(t *testing.T) {
 		t.Fatalf("offered model = (%+v, %q)", in, why)
 	}
 	// Not installed CLI -> not installed reason.
+	facts.CLIs["claude"] = CLIFacts{}
 	s.Models[RoleWorker] = []Candidate{{CLI: "claude", Model: "sonnet", Effort: "medium"}}
 	if _, why := Resolve(RoleWorker, Task{}, s, facts); why != "claude is not installed" {
 		t.Fatalf("not installed reason = %q", why)
@@ -202,7 +203,14 @@ func TestResolveReviewerPrefersUnusedIndependentModel(t *testing.T) {
 	} {
 		facts := allCLIsSignedIn()
 		facts.Worker = Candidate{CLI: "claude", Model: tc.worker}
-		in, why := ResolveReviewer(Task{}, DefaultSettings(), facts, tc.used)
+		for _, model := range tc.used {
+			facts.Avoid = append(facts.Avoid, Candidate{CLI: "claude", Model: model})
+		}
+		in, why := Resolve(RoleReviewer, Task{}, DefaultSettings(), facts)
+		if why != "" {
+			facts.Avoid = nil
+			in, why = Resolve(RoleReviewer, Task{}, DefaultSettings(), facts)
+		}
 		if why != "" || in.Model != tc.want {
 			t.Errorf("worker=%s used=%v: reviewer=%s reason=%q, want %s", tc.worker, tc.used, in.Model, why, tc.want)
 		}
