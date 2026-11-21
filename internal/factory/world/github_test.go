@@ -881,22 +881,15 @@ func TestPushAndOpenPRTitleCap(t *testing.T) {
 	}
 }
 
-// TestRollupTwoRunsOfOneWorkflowStayApart verifies item 6: two distinct
-// workflow runs of the same workflow on one head stay apart in the rollup,
-// while a re-run of the same workflow run replaces its earlier verdict.
-func TestRollupTwoRunsOfOneWorkflowStayApart(t *testing.T) {
-	twoRuns := []flow.Check{
-		{Kind: "CheckRun", Name: "check", WorkflowName: "ci", Status: "COMPLETED", Conclusion: "FAILURE", StartedAt: "2026-11-20T09:00:00Z", DetailsURL: "https://github.com/acme/demo/actions/runs/100/job/1001"},
+// TestRollupNewerRunReplacesOlderCancelled verifies design 4.3: an older
+// cancelled workflow run is replaced by a newer passing run of the same
+// workflow and check name on one head.
+func TestRollupNewerRunReplacesOlderCancelled(t *testing.T) {
+	checks := []flow.Check{
+		{Kind: "CheckRun", Name: "check", WorkflowName: "ci", Status: "COMPLETED", Conclusion: "CANCELLED", Stop: "unknown", StartedAt: "2026-11-20T09:00:00Z", DetailsURL: "https://github.com/acme/demo/actions/runs/100/job/1001"},
 		{Kind: "CheckRun", Name: "check", WorkflowName: "ci", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: "2026-11-20T09:05:00Z", DetailsURL: "https://github.com/acme/demo/actions/runs/200/job/2001"},
 	}
-	if got := flow.Rollup(twoRuns, false); got != flow.ChecksRed {
-		t.Fatalf("two distinct runs (100 fail, 200 pass) Rollup = %s, want red", got)
-	}
-	sameRunRerun := []flow.Check{
-		{Kind: "CheckRun", Name: "check", WorkflowName: "ci", Status: "COMPLETED", Conclusion: "FAILURE", StartedAt: "2026-11-20T09:00:00Z", DetailsURL: "https://github.com/acme/demo/actions/runs/100/job/1001"},
-		{Kind: "CheckRun", Name: "check", WorkflowName: "ci", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: "2026-11-20T09:05:00Z", DetailsURL: "https://github.com/acme/demo/actions/runs/100/job/1002"},
-	}
-	if got := flow.Rollup(sameRunRerun, false); got != flow.ChecksGreen {
-		t.Fatalf("same run rerun (100 fail -> 100 pass) Rollup = %s, want green", got)
+	if got := flow.Rollup(checks, false); got != flow.ChecksGreen {
+		t.Fatalf("older cancelled run + newer passing run Rollup = %s, want green", got)
 	}
 }

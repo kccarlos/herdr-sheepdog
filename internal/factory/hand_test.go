@@ -490,7 +490,7 @@ func TestN26PROnOtherBaseStopsPushingAndWakesOnce(t *testing.T) {
 	}
 	// Coordinator can retry, closing the attempt for a new one.
 	l.report("tok-coord", "task", `{"action":"retry","task":"T1","why":"PR #7 retargeted to release"}`, "")
-	if a := l.state().Tasks[0].Attempts[0]; a.Closed == "" {
-		t.Fatalf("attempt not closed by retry: %+v", a)
+	if a := l.state().Tasks[0].Attempts[0]; !strings.Contains(a.Closed, "PR on another base") {
+		t.Fatalf("attempt Closed = %q, want note naming PR on another base", a.Closed)
 	}
 }
