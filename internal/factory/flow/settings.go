@@ -40,6 +40,10 @@ type Settings struct {
 	ReviewerRetries            int `json:"reviewer_retries"`               // 4.8 (design.md 10.1)
 	EnsureFailures             int `json:"ensure_failures"`                // N5, section 8 (design.md 10.1)
 	EnsureBackoffMinutes       int `json:"ensure_backoff_minutes"`         // 4.8, section 8 (design.md 10.1)
+	CoordinatorStartsPerHour   int `json:"coordinator_starts_per_hour"`    // J6 (design.md 10.1)
+	CoordinatorGapMinutes      int `json:"coordinator_gap_minutes"`        // J6 (design.md 10.1)
+	CoordinatorSilentMinutes   int `json:"coordinator_silent_minutes"`     // J9 (design.md 10.1)
+	HeartbeatMinutes           int `json:"heartbeat_minutes"`              // J13 (design.md 10.1)
 	ContinuesPerTask           int `json:"continues_per_task"`             // a recap's continue (design.md 4.3, 10.1)
 	ContinueLines              int `json:"continue_lines"`                 // the cap after a continue (design.md 4.9)
 	TaskSizeLimit              int `json:"task_size_limit"`                // plan checks (design.md 11.5)
@@ -98,6 +102,9 @@ const (
 	MaxRunningMax                         = 20
 )
 
+const CoordStartsMin, CoordStartsMax, CoordGapMin, CoordGapMax = 1, 10, 1, 60
+const CoordSilentMin, CoordSilentMax, HeartbeatMin, HeartbeatMax = 5, 240, 10, 600
+
 // DefaultSettings are the engine's defaults: two passing rounds on the final head
 // (design.md 10.1, D12).
 func DefaultSettings() Settings {
@@ -107,6 +114,7 @@ func DefaultSettings() Settings {
 		ChecksGraceMinutes: 5, CIStalledMinutes: 90, MainRedMinutes: 60, CIFailsPerHour: 3, BuildHours: 4, FlakeReruns: 1,
 		StartMinutes: 2, IdleGraceSeconds: 20, QuietMinutes: 20, InterruptSeconds: 90, ReviewMinutes: 45, BlockedMinutes: 10,
 		WorkerRestarts: 3, ReviewerRetries: 2, EnsureFailures: 3, EnsureBackoffMinutes: 1,
+		CoordinatorStartsPerHour: 3, CoordinatorGapMinutes: 10, CoordinatorSilentMinutes: 30, HeartbeatMinutes: 60,
 		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2, MaxRunning: 3,
 		SecondReviewer: "opus",
 	}
@@ -129,9 +137,13 @@ func (s Settings) Changed() []string {
 		{"ci_stalled_minutes", s.CIStalledMinutes, d.CIStalledMinutes},
 		{"continue_lines", s.ContinueLines, d.ContinueLines},
 		{"continues_per_task", s.ContinuesPerTask, d.ContinuesPerTask},
+		{"coordinator_gap_minutes", s.CoordinatorGapMinutes, d.CoordinatorGapMinutes},
+		{"coordinator_silent_minutes", s.CoordinatorSilentMinutes, d.CoordinatorSilentMinutes},
+		{"coordinator_starts_per_hour", s.CoordinatorStartsPerHour, d.CoordinatorStartsPerHour},
 		{"ensure_backoff_minutes", s.EnsureBackoffMinutes, d.EnsureBackoffMinutes},
 		{"ensure_failures", s.EnsureFailures, d.EnsureFailures},
 		{"flake_reruns", s.FlakeReruns, d.FlakeReruns},
+		{"heartbeat_minutes", s.HeartbeatMinutes, d.HeartbeatMinutes},
 		{"idle_grace_seconds", s.IdleGraceSeconds, d.IdleGraceSeconds},
 		{"interrupt_seconds", s.InterruptSeconds, d.InterruptSeconds},
 		{"main_red_minutes", s.MainRedMinutes, d.MainRedMinutes},
@@ -190,6 +202,10 @@ func (s Settings) Validate() error {
 		{"reviewer_retries", s.ReviewerRetries, 0, ReviewerRetriesMax},
 		{"ensure_failures", s.EnsureFailures, EnsureFailuresMin, EnsureFailuresMax},
 		{"ensure_backoff_minutes", s.EnsureBackoffMinutes, EnsureBackoffMin, EnsureBackoffMax},
+		{"coordinator_starts_per_hour", s.CoordinatorStartsPerHour, CoordStartsMin, CoordStartsMax},
+		{"coordinator_gap_minutes", s.CoordinatorGapMinutes, CoordGapMin, CoordGapMax},
+		{"coordinator_silent_minutes", s.CoordinatorSilentMinutes, CoordSilentMin, CoordSilentMax},
+		{"heartbeat_minutes", s.HeartbeatMinutes, HeartbeatMin, HeartbeatMax},
 		{"continues_per_task", s.ContinuesPerTask, 0, ContinuesMax},
 		{"continue_lines", s.ContinueLines, 0, ContinueLinesMax},
 		{"task_size_limit", s.TaskSizeLimit, SizeLimitMin, SizeLimitMax},

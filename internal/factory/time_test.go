@@ -31,24 +31,31 @@ func TestN14BuildHoursRecapResetAndIdleExcluded(t *testing.T) {
 		s.Tasks[0].Attempts[0].Run = &flow.RunRecord{Address: l.worker, Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseStarting, StartedAt: now, LastActivity: now}
 	})
 
+	coordStep := 0
+	pass := func() {
+		coordStep++
+		l.srv.SetScreen("coord-elsewhere", "coord "+strings.Repeat("z", coordStep))
+		l.pass()
+	}
+
 	// Worker works 40m (with periodic activity so R21 quiet never fires), then goes idle for 3h:
 	// idle time must not count toward the 1h build_hours limit.
 	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "working"})
-	l.pass() // R8 -> working
+	pass() // R8 -> working
 	for i := 1; i <= 4; i++ {
 		now = now.Add(10 * time.Minute)
 		l.srv.SetScreen(l.worker, "working "+strings.Repeat("a", i))
-		l.pass()
+		pass()
 	}
 	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "done"})
-	l.pass()
+	pass()
 	now = now.Add(25 * time.Second)
-	l.pass() // R20 -> idle (~40m25s working)
+	pass() // R20 -> idle (~40m25s working)
 	if st := l.state().Tasks[0].Attempts[0].Run.State; st != flow.PhaseIdle {
 		t.Fatalf("worker state = %s, want idle", st)
 	}
 	now = now.Add(3 * time.Hour)
-	l.pass() // 3h idle: must not trigger N14
+	pass() // 3h idle: must not trigger N14
 	if rc := l.state().Tasks[0].Recaps; len(rc) != 0 {
 		t.Fatalf("idle time opened recap: %+v", rc)
 	}
@@ -56,14 +63,14 @@ func TestN14BuildHoursRecapResetAndIdleExcluded(t *testing.T) {
 	// Worker resumes working and stays busy past 1h total working time (20m more):
 	// N14 opens a time recap; N6 wakes coordinator once and interrupts+tells worker once.
 	l.srv.SetStatus(l.worker, &hc.Status{App: "claude-code", State: "working"})
-	l.pass() // R27 -> working
+	pass() // R27 -> working
 	for i := 1; i <= 2; i++ {
 		now = now.Add(10 * time.Minute)
 		l.srv.SetScreen(l.worker, "busy "+strings.Repeat("b", i))
-		l.pass()
+		pass()
 	}
-	l.pass() // N6: wake once + tell stop once
-	l.pass() // repeat pass: no second wake or tell
+	pass() // N6: wake once + tell stop once
+	pass() // repeat pass: no second wake or tell
 
 	st := l.state()
 	if len(st.Tasks[0].Recaps) != 1 || st.Tasks[0].Recaps[0].Trigger != flow.TriggerTime ||
@@ -83,7 +90,7 @@ func TestN14BuildHoursRecapResetAndIdleExcluded(t *testing.T) {
 	if st.Tasks[0].Attempts[0].SizeCap != 100 || flow.OpenRecap(st.Tasks[0]) != nil || flow.WorkingTime(st.Tasks[0]) != 0 {
 		t.Fatalf("after continue: cap=%d open=%+v working=%v", st.Tasks[0].Attempts[0].SizeCap, flow.OpenRecap(st.Tasks[0]), flow.WorkingTime(st.Tasks[0]))
 	}
-	l.pass()
+	pass()
 	if flow.OpenRecap(l.state().Tasks[0]) != nil {
 		t.Fatalf("reopened time recap immediately after continue: %+v", l.state().Tasks[0].Recaps)
 	}
@@ -92,7 +99,7 @@ func TestN14BuildHoursRecapResetAndIdleExcluded(t *testing.T) {
 	for i := 1; i <= 6; i++ {
 		now = now.Add(10 * time.Minute)
 		l.srv.SetScreen(l.worker, "second "+strings.Repeat("c", i))
-		l.pass()
+		pass()
 	}
 	rc := l.state().Tasks[0].Recaps
 	if len(rc) != 2 || rc[1].Trigger != flow.TriggerTime || slices.Contains(rc[1].Allowed, flow.ChoiceContinue) {

@@ -107,30 +107,50 @@ func wakeMessage(s flow.State) string {
 	return b.String()
 }
 
-// deliverWakesLocked is J12: when the coordinator run is idle, every held
-// wake goes to it as one message, then is logged (one line listing the
-// keys) and cleared. While it works, or with no run, they stay held; a
-// coordinator that died is J7's to restart, and the wakes wait for it.
-// Delivery is at-least-once: a send that went through but whose commit
-// failed leaves the wakes held, and the next pass sends them again. A
-// duplicate wake is cheaper than a lost one.
-func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.State, coordSt flow.RunState) {
-	if len(s.Project.Wakes) == 0 || s.Project.RunID == "" || e.HC == nil || coordSt != flow.RunIdle {
+// coordSummary builds J13's heartbeat wake (heartbeat=true) or J7's restart handoff (KB-COO-4, design.md 6).
+func coordSummary(s flow.State, bin string, heartbeat bool) string {
+	open, ws, ls := 0, []string{}, []string{}
+	for _, t := range s.Tasks {
+		if a := flow.OpenAttempt(t); a != nil && a.RunID != "" && (a.Run == nil || a.Run.State != flow.PhaseEnded) {
+			ws = append(ws, fmt.Sprintf("%s (%s %s)", a.RunID, t.ID, t.Title))
+		}
+		if !flow.Ended(t) {
+			open++
+		} else if heartbeat {
+			continue
+		}
+		if len(ls) < maxFactsWakes {
+			st, why := taskStageWhy(t, s.Tasks, s.Settings, s.Project.Started)
+			ls = append(ls, fmt.Sprintf("- %s (%s): %s — %s\n", t.ID, st, cmp.Or(t.LastRow, "-"), cmp.Or(why, st)))
+		}
+	}
+	changed := cmp.Or(strings.Join(s.Settings.Changed(), ", "), "none")
+	if heartbeat {
+		body := map[bool]string{true: fmt.Sprintf("No plan applied yet. Goal: %s\n", s.Project.Goal), false: fmt.Sprintf("Tasks: %d open, %d ended.\n%s", open, len(s.Tasks)-open, strings.Join(ls, ""))}[len(s.Tasks) == 0]
+		return fmt.Sprintf("Wake: heartbeat (no wake for %dm).\n%sSettings that differ from their default: %s.", s.Settings.HeartbeatMinutes, body, changed)
+	}
+	return fmt.Sprintf("Handoff from the store (replacement coordinator; held wakes follow once idle):\nLive workers: %s.\n%sSettings that differ from their default: %s.\n\n%s",
+		cmp.Or(strings.Join(ws, ", "), "none"), strings.Join(ls, ""), changed, coordinatorPrompt(coordinatorTemplate, s.Project, bin))
+}
+
+// deliverWakesLocked is J12: when the coordinator run is idle, every held wake
+// goes as one batch (at-least-once: a failed send or commit keeps wakes held).
+func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.State, now time.Time) {
+	if len(s.Project.Wakes) == 0 || s.Project.RunID == "" || e.HC == nil || e.sendCoordLocked(ctx, id, s, wakeMessage(*s), now, true) != nil {
 		return
 	}
-	if err := world.SendRun(ctx, e.HC, s.Project.RunID, wakeMessage(*s)); err != nil {
-		e.logError("factory.exec_error", id, err)
-		return
+	keys := make([]string, len(s.Project.Wakes))
+	for i, w := range s.Project.Wakes {
+		keys[i] = cmp.Or(w.Task, "project") + ":" + w.Key
 	}
-	var keys []string
-	for _, w := range s.Project.Wakes {
-		keys = append(keys, cmp.Or(w.Task, "project")+":"+w.Key)
-	}
-	s.Project.Wakes = nil
+	s.Project.Wakes, s.Project.CoordLastWakeAt = nil, now
 	e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "J12", Asked: keys, Decision: fmt.Sprintf("delivered %d wake(s) to the coordinator", len(keys)), Why: "wakes held and the coordinator is idle"})
 }
 
 func (e *Engine) sweepProjectLocked(ctx context.Context, id string, s *flow.State) {
+	if s.Project.Folder == "" {
+		return
+	}
 	now := e.now()
 	if last := flow.LastAct(s.Project.Acts, "sweep"); last != nil && now.Sub(last.At) < 10*time.Minute {
 		return

@@ -1064,7 +1064,7 @@ func TestRoundKind(t *testing.T) {
 // (design.md 2.3). 0 as "empty" is allowed.
 func TestNoNumberInRules(t *testing.T) {
 	fset := token.NewFileSet()
-	for _, name := range []string{"rows.go", "ladder.go", "runs.go"} {
+	for _, name := range []string{"rows.go", "ladder.go", "runs.go", "project.go"} {
 		f, err := parser.ParseFile(fset, name, nil, 0)
 		if err != nil {
 			t.Fatal(err)
