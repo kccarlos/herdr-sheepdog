@@ -29,6 +29,9 @@ var (
 	ErrOriginMismatch = errors.New("origin fetch and push URLs must all target the same github.com repo")
 )
 
+// ErrChecksDenied marks a denied REST fallback for required PR checks.
+var ErrChecksDenied = errors.New("PR checks fallback denied")
+
 // GitHubOrigin reads effective URLs, including Git URL rewrites and all push targets.
 func GitHubOrigin(read func(...string) (string, error)) (string, error) {
 	fetch, err := read("remote", "get-url", "--all", pushRemote)
@@ -82,7 +85,7 @@ func GitHubUnavailable(err error) bool {
 		return false
 	}
 	var child *GitError
-	return errors.As(err, &child) && child.command == "gh" && (ghOutage.MatchString(ghOutput(child)) || isChecksDenied(err))
+	return errors.As(err, &child) && child.command == "gh" && ghOutage.MatchString(ghOutput(child))
 }
 
 func ghOutput(child *GitError) string {
@@ -92,7 +95,7 @@ func ghOutput(child *GitError) string {
 func snapshotInterrupted(err error) bool {
 	var child *GitError
 	return errors.As(err, &child) && (child.RPC != nil || child.Result.TimedOut || child.Result.Truncated ||
-		child.Result.Signal != nil || child.Result.Code == nil || gitExit(err, 1) && ghOutage.MatchString(ghOutput(child)))
+		child.Result.Signal != nil || child.Result.Code == nil || GitHubUnavailable(err))
 }
 
 // maxPRTitleRunes is GitHub's PR title length limit (cut on a rune boundary).
@@ -125,7 +128,7 @@ func (g *Git) PushAndOpenPR(ctx context.Context, worktree, branch, head, title, 
 	// No headRefOid check: GitHub can lag on updating a PR's head SHA after a re-push.
 	out, err := g.ghCmd(ctx, worktree, "pr", "list", "--repo", repo, "--head", branch, "--state", "all", "--json", "number,state,baseRefName,isCrossRepository")
 	if err != nil {
-		return 0, err
+		return 0, ghReadError(err)
 	}
 	var prs []struct {
 		Number             int
@@ -203,12 +206,12 @@ func (g *Git) PRSnapshot(ctx context.Context, repoDir, branch string, number int
 		if number <= 0 && (strings.Contains(err.Error(), "no pull requests found") || strings.Contains(err.Error(), "Could not resolve to a PullRequest")) {
 			return flow.PR{Answered: true, State: flow.PRNone}, nil, nil
 		}
-		if checksDenied = isChecksDenied(err); checksDenied {
+		if checksDenied = ghPermissionDenied(err) || strings.Contains(err.Error(), "statusCheckRollup"); checksDenied {
 			raw, err = g.ghCmd(ctx, repoDir, "pr", "view", target, "--repo", repo, "--json", strings.Replace(prViewFields, "statusCheckRollup,", "", 1))
 		}
 	}
 	if err != nil {
-		return flow.PR{Checks: flow.ChecksUnreadable}, nil, err
+		return flow.PR{Checks: flow.ChecksUnreadable}, nil, ghReadError(err)
 	}
 	v, p, err := decodeSnapshot([]byte(raw))
 	if err != nil {
@@ -226,6 +229,9 @@ func (g *Git) PRSnapshot(ctx context.Context, repoDir, branch string, number int
 	}
 	if checksDenied && p.Head != "" {
 		if v.StatusCheckRollup, err = g.fetchCheckRuns(ctx, repoDir, repo, p.Head); err != nil {
+			if ghPermissionDenied(err) {
+				err = fmt.Errorf("%w: %w", ErrChecksDenied, err)
+			}
 			return p, nil, err
 		}
 	}
@@ -283,15 +289,25 @@ func escapeRef(ref string) string {
 	return strings.Join(segs, "/")
 }
 
-func isChecksDenied(err error) bool {
-	s := err.Error()
-	return strings.Contains(s, "Resource not accessible") || strings.Contains(s, "HTTP 403") || strings.Contains(s, "statusCheckRollup")
+var ghDenied = regexp.MustCompile(`(?i)\bHTTP(?:/\d(?:\.\d)?)? 403\b|Resource not accessible`)
+
+func ghPermissionDenied(err error) bool {
+	var child *GitError
+	return gitExit(err, 1) && errors.As(err, &child) && child.command == "gh" &&
+		ghDenied.MatchString(ghOutput(child)) && !GitHubUnavailable(err)
+}
+
+func ghReadError(err error) error {
+	if ghPermissionDenied(err) {
+		return Fail(flow.ClassSettled, err)
+	}
+	return err
 }
 
 func (g *Git) ghAPI(ctx context.Context, dir, endpoint string, dst any) error {
 	out, err := g.ghCmd(ctx, dir, "api", endpoint)
 	if err != nil {
-		return err
+		return ghReadError(err)
 	}
 	if err := json.Unmarshal([]byte(out), dst); err != nil {
 		return fmt.Errorf("world: gh api %s: %w", endpoint, err)
@@ -308,7 +324,7 @@ func (g *Git) ghPages(ctx context.Context, dir, endpoint string, per int, page f
 	for n := 1; n <= maxPages; n++ {
 		out, err := g.ghCmd(ctx, dir, "api", fmt.Sprintf("%s%sper_page=%d&page=%d", endpoint, sep, per, n))
 		if err != nil {
-			return err
+			return ghReadError(err)
 		}
 		if got, err := page([]byte(out)); err != nil {
 			return fmt.Errorf("world: gh api %s: %w", endpoint, err)

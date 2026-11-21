@@ -1906,7 +1906,7 @@ func (e *Engine) logError(typ, id string, err error) {
 }
 
 func (e *Engine) observeGitHub(id string, err error) {
-	if err == nil || world.GitHubUnavailable(err) {
+	if err == nil || world.GitHubUnavailable(err) || errors.Is(err, world.ErrChecksDenied) {
 		setFlag(&e.ghUnavail, id, err != nil)
 	}
 }

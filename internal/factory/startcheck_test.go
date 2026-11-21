@@ -50,7 +50,6 @@ func runStart(t *testing.T, workflow string, over startFake) map[string]onboard.
 		"git --version":                                             out("git version 2.45.0\n"),
 		"rev-parse --show-toplevel":                                 out(root),
 		"rev-parse --verify HEAD":                                   out("abc1234\n"),
-		"remote":                                                    out("origin"),
 		"remote get-url --all origin":                               out("https://github.com/o/r.git"),
 		"remote get-url --push --all origin":                        out("https://github.com/o/r.git"),
 		"refs/remotes/origin/HEAD":                                  out("origin/main"),
@@ -159,7 +158,6 @@ func TestStartChecksStatuses(t *testing.T) {
 		{"workflow only on disk", "", nil, "pr workflow", onboard.Fail},
 		{"workflow on another remote branch only", goodWorkflow, startFake{"ls-tree --name-only origin/main .github/workflows/": {Exit: 1}}, "pr workflow", onboard.Fail},
 		{"no origin, two remotes", goodWorkflow, startFake{"remote get-url --all origin": {Exit: 2}}, "github remote", onboard.Fail},
-		{"only remote is not origin", goodWorkflow, startFake{"remote": out("mine"), "config --get remote.mine.url": out("https://github.com/o/r.git"), "refs/remotes/mine/HEAD": out("mine/main")}, "gh push access", onboard.OK},
 		{"no protection is reported, not required", goodWorkflow, nil, "base protection", onboard.Warn},
 		{"protection present", goodWorkflow, startFake{"gh api repos/o/r/branches/main": out(`{"protected":true}`), "branches/main/protection": protect("0")}, "base protection", onboard.OK},
 		{"ruleset present", goodWorkflow, startFake{"rules/branches/main": out(`[{"type":"required_status_checks"}]`)}, "base protection", onboard.OK},
@@ -235,7 +233,6 @@ func TestStartChecksWorkflowIgnoresDisk(t *testing.T) {
 		"git --version":                          out("git version 2.45.0\n"),
 		"rev-parse --show-toplevel":              out(root),
 		"rev-parse --verify HEAD":                out("abc1234\n"),
-		"remote":                                 out("origin"),
 		"remote get-url --all origin":            out("https://github.com/o/r.git"),
 		"remote get-url --push --all origin":     out("https://github.com/o/r.git"),
 		"rev-parse --verify --quiet origin/HEAD": out("abc1234\n"),
@@ -284,7 +281,6 @@ func TestStartChecksSecondReviewerCodex(t *testing.T) {
 			"git --version":                                             out("git version 2.45.0\n"),
 			"rev-parse --show-toplevel":                                 out(root),
 			"rev-parse --verify HEAD":                                   out("abc1234\n"),
-			"remote":                                                    out("origin"),
 			"remote get-url --all origin":                               out("https://github.com/o/r.git"),
 			"remote get-url --push --all origin":                        out("https://github.com/o/r.git"),
 			"refs/remotes/origin/HEAD":                                  out("origin/main"),
@@ -494,7 +490,6 @@ func TestStartChecksReportsWorkflowGitFailure(t *testing.T) {
 	fake := startFake{
 		"git --version":                                             out("git version 2.45.0"),
 		"rev-parse --show-toplevel":                                 out(root),
-		"git remote":                                                out("origin"),
 		"remote get-url --all origin":                               out("https://github.com/o/r.git"),
 		"remote get-url --push --all origin":                        out("https://github.com/o/r.git"),
 		"symbolic-ref --quiet --short refs/remotes/origin/HEAD":     out("origin/main"),
@@ -521,11 +516,13 @@ func TestStartChecksReportsWorkflowGitFailure(t *testing.T) {
 }
 
 func TestStartChecksRefusesDifferentOriginTargets(t *testing.T) {
-	for _, name := range []string{"missing", "mismatched", "multiple", "rewritten"} {
+	for _, name := range []string{"missing", "only remote is not origin", "mismatched", "multiple", "rewritten"} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
 			gitIn(t, root, "init", "-b", "main")
-			if name != "missing" {
+			if name == "only remote is not origin" {
+				gitIn(t, root, "remote", "add", "upstream", "https://github.com/acme/demo.git")
+			} else if name != "missing" {
 				gitIn(t, root, "remote", "add", "origin", "https://github.com/acme/demo.git")
 			}
 			switch name {
@@ -548,8 +545,11 @@ func TestStartChecksRefusesDifferentOriginTargets(t *testing.T) {
 				RunCommand: startFake{"claude auth status --json": out(`{"loggedIn":true}`)}.run})
 			r := findResult(t, rs, "github remote")
 			fix := "same GitHub repository"
-			if name == "missing" {
+			if name == "missing" || name == "only remote is not origin" {
 				fix = "git remote add origin"
+				if gh := findResult(t, rs, "gh push access"); gh.Status != onboard.Skip {
+					t.Fatalf("gh push access = %+v, want skip without origin", gh)
+				}
 			}
 			if r.Status != onboard.Fail || !strings.Contains(r.Fix, fix) {
 				t.Fatalf("origin preflight = %+v, want failure with %q", r, fix)

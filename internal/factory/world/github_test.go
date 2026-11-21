@@ -916,6 +916,28 @@ func TestRollupNewerRunReplacesOlderCancelled(t *testing.T) {
 	}
 }
 
+func TestPRSnapshotLeavesTimeForGitReads(t *testing.T) {
+	if prSnapshotLimit < ghRequestLimit+gitReplyGrace || prSnapshotLimit > 40*time.Second {
+		t.Fatalf("PR snapshot budget = %s, want %s to 40s", prSnapshotLimit, ghRequestLimit+gitReplyGrace)
+	}
+}
+
+func TestRemoteBaseCommitRequiresOrigin(t *testing.T) {
+	repo, _ := repoWithGitHubOrigin(t)
+	runGit(t, repo, "remote", "set-head", "origin", "main")
+	runGit(t, repo, "remote", "rename", "origin", "upstream")
+	// Leftover origin refs must not substitute for a configured remote.
+	runGit(t, repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+	runGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	g := fixtureGit(t)
+	for _, fetch := range []bool{false, true} {
+		ref, sha, err := g.remoteBaseCommit(context.Background(), repo, fetch)
+		if !errors.Is(err, ErrNoOrigin) || ref != "" || sha != "" {
+			t.Errorf("fetch=%t: remote base = %q %q, err=%v, want no origin", fetch, ref, sha, err)
+		}
+	}
+}
+
 func TestPRSnapshotOwnDeadlineBoundsOptionalRequests(t *testing.T) {
 	limit := prSnapshotLimit
 	prSnapshotLimit = 2 * time.Second

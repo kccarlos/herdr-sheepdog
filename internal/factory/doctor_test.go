@@ -527,6 +527,15 @@ func TestCheckGHOrigin(t *testing.T) {
 
 }
 
+func TestCheckGHWithoutProjectVolume(t *testing.T) {
+	env := newFakeEnv("gh")
+	env.handlers["gh auth"] = func(string, []string, []string) CommandOutput { return CommandOutput{} }
+	r := CheckGH(context.Background(), DoctorOptions{TempDir: t.TempDir(), LookPath: env.lookPath, RunCommand: env.run}, false)
+	if r.Status != onboard.OK || !strings.Contains(r.Detail, "origin") || strings.Contains(r.Detail, "pin") {
+		t.Fatalf("gh check without project volume = %+v, want origin check deferred", r)
+	}
+}
+
 func TestCheckCodexbar(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
@@ -536,28 +545,6 @@ func TestCheckCodexbar(t *testing.T) {
 	}
 	if r := CheckCodexbar(ctx, DoctorOptions{GOOS: "linux", TempDir: tmp, LookPath: missing.lookPath, RunCommand: missing.run}); r.Status != onboard.Warn || strings.Contains(r.Fix, "brew install") {
 		t.Errorf("linux missing codexbar = %+v", r)
-	}
-}
-
-func TestRepoFromURL(t *testing.T) {
-	cases := []struct {
-		url, host, want string
-	}{
-		{"https://github.com/alice/sheepdog.git", "", "alice/sheepdog"},
-		{"https://github.com/alice/sheepdog", "", "alice/sheepdog"},
-		{"git" + "@" + "github.com:alice/sheepdog.git", "", "alice/sheepdog"},
-		{"git@github-alias:alice/sheepdog", "", "alice/sheepdog"},
-		{"ssh://git@github.com/alice/sheepdog.git", "", "alice/sheepdog"},
-		{"https://ghe.example.com/alice/sheepdog.git", "ghe.example.com", "alice/sheepdog"},
-		{"https://gitlab.com/alice/sheepdog.git", "", ""},
-		{"git" + "@" + "gitlab.com:alice/sheepdog.git", "", ""},
-		{"git" + "@" + "codeberg.org:alice/sheepdog.git", "", ""},
-		{"/local/path/repo", "", ""},
-	}
-	for _, tc := range cases {
-		if got := RepoFromURL(tc.url, tc.host); got != tc.want {
-			t.Errorf("RepoFromURL(%q, %q) = %q, want %q", tc.url, tc.host, got, tc.want)
-		}
 	}
 }
 

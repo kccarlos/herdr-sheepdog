@@ -28,7 +28,8 @@ const (
 	maxGitEpisodes    = 128
 )
 
-var prSnapshotLimit = time.Minute
+// Leave room in the engine's read deadline for the git reads after the snapshot.
+var prSnapshotLimit = 40 * time.Second
 
 var ErrGitSuppressed = errors.New("git temporarily suppressed after an exec deadline")
 

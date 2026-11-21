@@ -70,7 +70,6 @@ type DoctorOptions struct {
 	GOOS          string
 	Home          string
 	TempDir       string
-	GHHost        string
 	DataDir       string
 	LookPath      func(string) (string, error)
 	RunCommand    CommandFunc
@@ -962,7 +961,7 @@ func checkGH(ctx context.Context, o DoctorOptions, inHC, customLookPath, volumeO
 		return resWarn(name, "gh is not logged in (local-merge mode only)", "run: gh auth login")
 	}
 	if !volumeOK {
-		return resOK(name, "logged in (repo pin check skipped until project volume answers)")
+		return resOK(name, "logged in (checking origin requires a reachable project volume)")
 	}
 
 	gitDir := o.Folder
@@ -1023,53 +1022,6 @@ func originFix(err error) string {
 	default:
 		return "run git remote get-url --all origin and git remote get-url --push --all origin in the project folder and resolve the error"
 	}
-}
-
-var (
-	schemeRemoteRe = regexp.MustCompile(`^(?:https?|ssh|git)://(?:[^/@]+@)?([^/:]+)(?::\d+)?/(.+)$`)
-	scpRemoteRe    = regexp.MustCompile(`^(?:[^/@:]+@)?([A-Za-z0-9._-]{2,}):/?(.+)$`)
-	slugPartRe     = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-)
-
-// RepoFromURL extracts "owner/name" from a GitHub HTTPS, git://, ssh:// or
-// SCP-style remote URL (including SSH host aliases).
-func RepoFromURL(rawURL, ghHost string) string {
-	u := strings.TrimSpace(rawURL)
-	if u == "" {
-		return ""
-	}
-	isSSH := !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "git://")
-	var m []string
-	if strings.Contains(u, "://") {
-		m = schemeRemoteRe.FindStringSubmatch(u)
-	} else {
-		m = scpRemoteRe.FindStringSubmatch(u)
-	}
-	if m == nil {
-		return ""
-	}
-	host := strings.ToLower(m[1])
-	path := strings.TrimSuffix(strings.Trim(m[2], "/"), ".git")
-	ghHost = strings.ToLower(strings.TrimSpace(ghHost))
-	if isSSH {
-		for _, other := range []string{"gitlab", "bitbucket", "codeberg", "sr.ht", "sourcehut"} {
-			if strings.Contains(host, other) {
-				return ""
-			}
-		}
-	} else if !strings.Contains(host, "github") && (ghHost == "" || host != ghHost) {
-		return ""
-	}
-	parts := strings.Split(path, "/")
-	if len(parts) != 2 {
-		return ""
-	}
-	for _, p := range parts {
-		if p == "." || p == ".." || !slugPartRe.MatchString(p) {
-			return ""
-		}
-	}
-	return path
 }
 
 // CheckCodexbar reports whether `codexbar` is on PATH for reading quota pools.

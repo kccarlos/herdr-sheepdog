@@ -33,6 +33,7 @@ case "$1 $2" in
 "pr list") if [ -f "$D/view.json" ]; then printf "[%s]" "$(cat "$D/view.json")"; else echo '[]'; fi ;;
 "pr create") cp "$D/pr.json" "$D/view.json" && echo "https://github.com/acme/demo/pull/7" ;;
 "pr view")
+  failif pr_view
   if [ -f "$D/view_denied" ]; then
     case "$*" in *statusCheckRollup*)
       echo "GraphQL: Resource not accessible by personal access token (repository.pullRequest.statusCheckRollup.nodes.0.commit.statusCheckRollup.contexts.nodes.0)" >&2
@@ -214,6 +215,30 @@ func TestPRSnapshotFactsAndFailure(t *testing.T) {
 	}
 }
 
+func TestBaseStatusPermissionDeniedDoesNotSetGitHubUnavailable(t *testing.T) {
+	for _, read := range []string{"base_ref", "base_runs"} {
+		t.Run(read, func(t *testing.T) {
+			repo, _ := initGitRepoWithRemote(t)
+			githubOrigin(t, repo)
+			gh := installFakeGH(t)
+			if err := os.WriteFile(filepath.Join(gh, read+"_fail"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			eng := newGitTestEngine(t, testPaths(t), nil)
+			p := flow.State{}
+			p.Project.Folder = repo
+			eng.observeBaseLocked(context.Background(), "project", &p)
+			if eng.ghUnavail["project"] {
+				t.Fatal("base status HTTP 403 set github_unavailable")
+			}
+			_, err := eng.git.BaseStatus(context.Background(), repo)
+			if world.FailureClass(err) != flow.ClassSettled || world.GitHubUnavailable(err) {
+				t.Fatalf("base status HTTP 403 = %v, want settled permission failure", err)
+			}
+		})
+	}
+}
+
 // TestGitHubUnavailableHoldsMerge verifies denied -> fallback -> unreadable ->
 // github_unavailable holds N42, and a network failure is never remembered as
 // "not a GitHub repo" (KB-GIT-20): once GitHub answers again, N42 merges.
@@ -252,6 +277,15 @@ func TestGitHubUnavailableHoldsMerge(t *testing.T) {
 			Facts: flow.Facts{PR: p, Tip: c1, TipRel: flow.RelSame, Worker: flow.Run{State: flow.RunIdle}, GitHubUnavailable: unavail},
 		})
 		return p, unavail, r.ID, d.Asked
+	}
+
+	// Denied access to the PR itself leaves the snapshot unanswered.
+	writeGHFile(t, gh, "pr_view_fail", "")
+	if p, unavail, row, asked := eval(); p.Answered || unavail || row != "N26" || len(asked) != 0 {
+		t.Fatalf("PR view denied: answered=%t unavail=%t row=%s asked=%v", p.Answered, unavail, row, asked)
+	}
+	if err := os.Remove(filepath.Join(gh, "pr_view_fail")); err != nil {
+		t.Fatal(err)
 	}
 
 	// Denied pr view + denied REST check-runs -> unreadable + github_unavailable holds merge.
