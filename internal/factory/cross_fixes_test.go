@@ -3,6 +3,8 @@ package factory
 import (
 	"context"
 	"errors"
+	"io"
+	"os"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -12,6 +14,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
+	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
 func TestVerify1CoordinatorIdentity(t *testing.T) {
@@ -301,6 +304,141 @@ func TestVerify13ReviewerUsesLaunchedWorkerModel(t *testing.T) {
 	s.Settings.Models = map[string][]flow.Candidate{flow.RoleReviewer: {{CLI: "claude", Model: "opus", Effort: "medium"}}}
 	if fails := checkTasksLaunch(s.Tasks, s.Settings, flow.UnprobedFacts); len(fails) != 1 || !strings.Contains(fails[0], "the reviewer must differ from the worker") {
 		t.Errorf("launch check with only the stored worker's model available for review = %v, want independence error", fails)
+	}
+}
+
+func TestTaskAbortRecordsFailureAndBacksOff(t *testing.T) {
+	for _, name := range []string{"worker get", "worker state save", "reviewer get"} {
+		t.Run(name, func(t *testing.T) {
+			l := newLanding(t)
+			s := l.state()
+			a := &s.Tasks[0].Attempts[0]
+			a.Rounds = nil
+			now := time.Now()
+			l.eng.Now = func() time.Time { return now }
+			key, wantErr := flow.AskStartWorker, "terminal.get failed"
+			var worker flow.Run
+			if name == "reviewer get" {
+				key = flow.AskStartReview + "@1@" + l.c1
+				worker.State = flow.RunIdle
+				// Exercise the uncounted back-off used during a known hc outage.
+				l.eng.hcUnavail = map[string]bool{l.id: true}
+			} else {
+				a.Ready, a.RunID = nil, ""
+			}
+			if err := SaveState(l.paths.State(l.id), s); err != nil {
+				t.Fatal(err)
+			}
+			var failGet atomic.Bool
+			if name == "worker state save" {
+				wantErr = "rename"
+				installLaunchSaveFailure(t, l)
+			} else {
+				failGet.Store(true)
+				l.eng.HC = hc.NewClient(methodFailProxy(t, l.srv.Path, "terminal.get", &failGet))
+			}
+
+			runCalls := countRPC(l.srv, "terminal.run")
+			pass := func() {
+				baseTried := false
+				if evaluated := l.eng.passTaskLocked(context.Background(), l.id, &s, 0, true, worker, nil, &baseTried, 0); !evaluated {
+					t.Error("task evaluated a row but was reported as skipped for I1")
+				}
+			}
+			pass()
+			s = l.state()
+			act := flow.LastAct(s.Tasks[0].Attempts[0].Acts, key)
+			if act == nil || act.Result != "failed" || act.Class != flow.ClassTransient || act.Uncounted != (name == "reviewer get") {
+				t.Errorf("persisted %s act = %+v, want transient failure (uncounted=%t)", key, act, name == "reviewer get")
+			}
+			if got := l.log.String(); !strings.Contains(got, "factory.exec_error") || !strings.Contains(got, wantErr) {
+				t.Errorf("missing factory.exec_error for %s", name)
+			}
+			lines := l.logLines()
+			if len(lines) == 0 || !slices.Equal(lines[len(lines)-1].Asked, []string{key}) || !strings.Contains(lines[len(lines)-1].Why, wantErr) {
+				t.Errorf("missing committed failure reason for %s", key)
+			}
+			if got := countRPC(l.srv, "terminal.run"); got != runCalls {
+				t.Errorf("failed pass launched a terminal")
+			}
+			failGet.Store(false)
+			now = now.Add(time.Second)
+			pass()
+			if got := countRPC(l.srv, "terminal.run"); got != runCalls {
+				t.Errorf("retried %s before back-off elapsed", key)
+			}
+			now = now.Add(time.Duration(s.Settings.EnsureBackoffMinutes) * time.Minute)
+			pass()
+			if got := countRPC(l.srv, "terminal.run"); got != runCalls+1 {
+				t.Errorf("terminal runs after back-off = %d, want %d", got, runCalls+1)
+			}
+		})
+	}
+}
+
+type launchSaveFailureWriter struct {
+	io.Writer
+	t    *testing.T
+	path string
+}
+
+func (w *launchSaveFailureWriter) Write(p []byte) (int, error) {
+	if w.path != "" && strings.Contains(string(p), "factory.commit_error") {
+		// Clear the obstruction after the pre-launch save fails, so the
+		// subsequent commit of the act can write the state.
+		if err := os.Remove(w.path); err != nil {
+			w.t.Fatal(err)
+		}
+		if err := os.Rename(w.path+".original", w.path); err != nil {
+			w.t.Fatal(err)
+		}
+		w.path = ""
+	}
+	return w.Writer.Write(p)
+}
+
+func installLaunchSaveFailure(t *testing.T, l *landing) {
+	t.Helper()
+	path := l.paths.State(l.id)
+	if err := os.Rename(path, path+".original"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	l.eng.Log = logging.NewJSONLLogger(&launchSaveFailureWriter{Writer: l.log, t: t, path: path})
+}
+
+func TestTaskAbortCommitsEarlierAsk(t *testing.T) {
+	l := newLanding(t)
+	s := l.state()
+	a := &s.Tasks[0].Attempts[0]
+	a.Ready, a.Rounds, a.RunID = nil, nil, ""
+	var failGet atomic.Bool
+	failGet.Store(true)
+	l.eng.HC = hc.NewClient(methodFailProxy(t, l.srv.Path, "terminal.get", &failGet))
+
+	const earlier, later = flow.AskWake + "@before_start", flow.AskWake + "@after_start"
+	// Give N23 a batch with a wake on either side of the real start executor.
+	i := slices.IndexFunc(flow.TaskRows, func(row flow.Row[flow.In]) bool { return row.ID == "N23" })
+	then := flow.TaskRows[i].Then
+	t.Cleanup(func() { flow.TaskRows[i].Then = then })
+	flow.TaskRows[i].Then = func(in flow.In) flow.Decision {
+		d := then(in)
+		d.Asked = append([]string{earlier}, d.Asked...)
+		d.Asked = append(d.Asked, later)
+		return d
+	}
+	baseTried := false
+	l.eng.passTaskLocked(context.Background(), l.id, &s, 0, true, flow.Run{}, nil, &baseTried, 0)
+	s = l.state()
+	wakes := s.Project.Wakes
+	if len(wakes) != 1 || wakes[0].Key != "before_start" || !flow.Done(s.Tasks[0].Attempts[0].Acts, earlier) {
+		t.Errorf("persisted wakes = %+v, want only the earlier ask's wake and done act", wakes)
+	}
+	lines := l.logLines()
+	if want := []string{earlier, flow.AskStartWorker}; len(lines) == 0 || !slices.Equal(lines[len(lines)-1].Asked, want) {
+		t.Errorf("missing committed batch ending at the failed ask: want %v", want)
 	}
 }
 

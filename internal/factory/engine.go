@@ -55,7 +55,7 @@ type Engine struct {
 	prs         map[string]flow.PR              // last PR snapshot per attempt worktree (in memory)
 	errs        map[string]string               // last gh or git error per worktree and kind, logged once per change
 	tips        map[string]tipFacts             // last git reading per worktree (in memory)
-	waits       map[string]string               // last wait/finished reason per project or task (N9/N10/N38, J4/J6), logged once per change
+	waits       map[string]string               // last wait/finished reason per project or task, logged once per change
 	ghUnavail   map[string]bool                 // project fact github_unavailable (design.md 7.3)
 	hcUnavail   map[string]bool                 // project fact hc_unavailable (design.md 7.3)
 	onInvariant func([]flow.InvariantViolation) // test hook; nil in production
@@ -731,18 +731,13 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 	return (*recp).TaskRun(), nil
 }
 
-// restartStopError marks a failed stop before a replacement run can launch.
-type restartStopError struct{ error }
-
-func (e restartStopError) Unwrap() error { return e.error }
-
 // launchRunLocked persists the run label, session ID and token hash before launch.
 // Worker and reviewer crash recovery can still find an existing run by name.
 func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, hash *string, recp **flow.RunRecord, adopt bool, rec flow.RunRecord, spec world.RunSpec) (string, bool, bool, error) {
 	if rec.Role != flow.RoleCoordinator && !adopt && e.HC != nil {
 		if err := world.StopRun(ctx, e.HC, spec.Name); err != nil {
 			e.logError("factory.hc_error", id, err)
-			return "", false, true, restartStopError{err}
+			return "", false, true, err
 		}
 	}
 	env := map[string]string{}
@@ -849,6 +844,7 @@ func actOutage(verb string, f flow.Facts) bool {
 	}
 }
 
+// passTaskLocked reports whether the task reached rule evaluation for I1.
 func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int, hasSlot bool, workerRun flow.Run, workerErr error, baseTried *bool, dt time.Duration) bool {
 	facts := flow.Facts{GitHubUnavailable: e.ghUnavail[id], HCUnavailable: e.hcUnavail[id]}
 	if b := s.Project.Base; b != nil && b.Red {
@@ -968,10 +964,6 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		f := facts
 		f.Ask = ask
 		dec, abort, err := fn(e, context.WithoutCancel(ctx), id, s, ti, f)
-		var stopErr restartStopError
-		if abort && err != nil && !errors.As(err, &stopErr) {
-			return true
-		}
 		if abort && err == nil {
 			act(ask, "failed", flow.ClassTransient, dec, true)
 			decs = append(decs, dec)
