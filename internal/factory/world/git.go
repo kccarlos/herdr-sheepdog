@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
@@ -37,13 +38,22 @@ type gitRepoKey struct{}
 
 // GitRepository shares the repository's back-off across its worktrees.
 func GitRepository(ctx context.Context, folder string) context.Context {
-	if abs, err := filepath.Abs(folder); folder != "" && err == nil {
+	if abs, err := absolutePath(folder); folder != "" && err == nil {
 		return context.WithValue(ctx, gitRepoKey{}, abs)
 	}
 	return ctx
 }
 
-// Git runs project Git commands in herdr-core's login session.
+// absolutePath avoids os.Getwd's filesystem checks of PWD on relative paths.
+func absolutePath(path string) (string, error) {
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path), nil
+	}
+	dir, err := syscall.Getwd()
+	return filepath.Join(dir, path), err
+}
+
+// Git runs project commands in herdr-core's login session.
 type Git struct {
 	client   *hc.Client
 	now      func() time.Time
@@ -153,13 +163,14 @@ func (g *Git) run(ctx context.Context, dir, command string, args []string, env m
 	if g == nil || g.client == nil {
 		return hc.ExecResult{}, &GitError{command: command, RPC: errors.New("command requires a herdr-core client")}
 	}
-	dir, err := filepath.Abs(dir)
+	dir, err := absolutePath(dir)
 	if err != nil {
 		return hc.ExecResult{}, &GitError{command: command, RPC: err}
 	}
 	folder, _ := ctx.Value(gitRepoKey{}).(string)
 	repo := cmp.Or(folder, dir)
-	if command == "git" && g.suppressed(repo) {
+	projectCommand := command == "git" || command == "/bin/sh"
+	if projectCommand && g.suppressed(repo) {
 		return hc.ExecResult{}, ErrGitSuppressed
 	}
 	verb := ""
@@ -194,8 +205,8 @@ func (g *Git) run(ctx context.Context, dir, command string, args []string, env m
 	r, err := client.Exec(callCtx, hc.ExecParams{
 		Cwd: dir, Argv: append([]string{command}, args...), Timeout: &limit, Env: env,
 	})
-	stalled := command == "git" && !network && verb != "diff" && (r.TimedOut || errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil)
-	if command == "git" && (stalled || err == nil && !r.TimedOut && r.Code != nil && r.Signal == nil) {
+	stalled := projectCommand && !network && verb != "diff" && (r.TimedOut || errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil)
+	if projectCommand && (stalled || err == nil && !r.TimedOut && r.Code != nil && r.Signal == nil) {
 		g.finishProbe(repo, stalled)
 	}
 	if err != nil || r.TimedOut || r.Truncated || r.Signal != nil || r.Code == nil || *r.Code != 0 {

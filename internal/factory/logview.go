@@ -16,15 +16,14 @@ import (
 
 // ProjectLog reads the last n lines (all when n <= 0) of a project's
 // log.jsonl and its formatted first-look pass rate summary (empty when no task
-// has a reviewed round): folder's project, or the one started project when
-// folder is empty. A torn last line (an append that did not finish) is skipped.
-func ProjectLog(ctx context.Context, paths Paths, folder string, n int) ([]LogLine, string, error) {
-	e := &Engine{Paths: paths}
-	id, _, err := e.findProjectLocked(ctx, folder)
+// has a reviewed round). It uses the same stored project lookup as
+// ProjectStatus and skips an incomplete last line.
+func ProjectLog(_ context.Context, paths Paths, folder string, n int) ([]LogLine, string, error) {
+	id, err := findStoredProject(paths, strings.TrimSpace(folder))
 	if err != nil {
 		return nil, "", err
 	}
-	s, lines, err := e.loadProjectCopy(id)
+	s, lines, err := (&Engine{Paths: paths}).loadProjectCopy(id)
 	if err != nil {
 		return nil, "", err
 	}
@@ -124,7 +123,7 @@ func findStoredProject(paths Paths, target string) (string, error) {
 			continue
 		}
 		if target != "" {
-			if ent.Name() == target || underFolder(s.Project.Folder, target) {
+			if ent.Name() == target || underFolderLocal(s.Project.Folder, target) {
 				return ent.Name(), nil
 			}
 			continue
@@ -155,6 +154,12 @@ func findStoredProject(paths Paths, target string) (string, error) {
 }
 
 func underFolder(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	return root != "" && target != "" && err == nil && filepath.IsLocal(rel)
+}
+
+// underFolderLocal is used only by commands in the owner's login session.
+func underFolderLocal(root, target string) bool {
 	if root == "" || target == "" {
 		return false
 	}

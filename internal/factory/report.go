@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"os"
 	"os/exec"
@@ -177,7 +176,11 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 	var proofs []flow.Proof
 	if needsProofs(t.Outcomes) || len(req.Proofs) > 0 {
 		var code, why string
-		if proofs, code, why = checkProofs(t.Outcomes, req.Proofs, a.Worktree); code != "" {
+		proofs, code, why, err = e.checkProofs(ctx, t.Outcomes, req.Proofs, a.Worktree)
+		if err != nil {
+			return err
+		}
+		if code != "" {
 			return e.refuse(id, code, why)
 		}
 		if touched == "" {
@@ -202,7 +205,7 @@ func needsProofs(outcomes []flow.Outcome) bool {
 	return slices.ContainsFunc(outcomes, func(o flow.Outcome) bool { return o.ProvedBy != "" })
 }
 
-func checkProofs(outcomes []flow.Outcome, raw []flow.Proof, worktree string) ([]flow.Proof, string, string) {
+func (e *Engine) checkProofs(ctx context.Context, outcomes []flow.Outcome, raw []flow.Proof, worktree string) ([]flow.Proof, string, string, error) {
 	want, seen, out := make(map[string]flow.Outcome, len(outcomes)), make(map[string]bool, len(outcomes)), make([]flow.Proof, 0, len(raw))
 	for _, o := range outcomes {
 		want[o.Text] = o
@@ -215,17 +218,17 @@ func checkProofs(outcomes []flow.Outcome, raw []flow.Proof, worktree string) ([]
 		manual := strings.HasPrefix(o.ProvedBy, "manual:")
 		switch {
 		case !ok:
-			return nil, "invalid_report", fmt.Sprintf("Proof names unknown outcome %q.", name)
+			return nil, "invalid_report", fmt.Sprintf("Proof names unknown outcome %q.", name), nil
 		case seen[name]:
-			return nil, "invalid_report", fmt.Sprintf("Duplicate proof for outcome %q.", name)
+			return nil, "invalid_report", fmt.Sprintf("Duplicate proof for outcome %q.", name), nil
 		case (p.Command == "") == (p.Artifact == ""):
-			return nil, "invalid_report", fmt.Sprintf("Proof for %q must carry either a command or an artifact.", name)
+			return nil, "invalid_report", fmt.Sprintf("Proof for %q must carry either a command or an artifact.", name), nil
 		case utf8.RuneCountInString(p.Command) > maxRejectWhyRunes || utf8.RuneCountInString(p.OutputPath) > maxRejectWhyRunes || utf8.RuneCountInString(p.Artifact) > maxRejectWhyRunes:
-			return nil, "invalid_report", fmt.Sprintf("Proof for %q has a field longer than %d characters.", name, maxRejectWhyRunes)
+			return nil, "invalid_report", fmt.Sprintf("Proof for %q has a field longer than %d characters.", name, maxRejectWhyRunes), nil
 		case (p.Artifact != "") != manual:
-			return nil, "invalid_report", fmt.Sprintf("Outcome %q proof kind does not match proved_by (%s).", name, o.ProvedBy)
+			return nil, "invalid_report", fmt.Sprintf("Outcome %q proof kind does not match proved_by (%s).", name, o.ProvedBy), nil
 		case p.Command != "" && p.OutputPath == "":
-			return nil, "invalid_report", fmt.Sprintf("Proof for %q has no output path.", name)
+			return nil, "invalid_report", fmt.Sprintf("Proof for %q has no output path.", name), nil
 		}
 		seen[name] = true
 		if p.Artifact != "" {
@@ -233,11 +236,19 @@ func checkProofs(outcomes []flow.Outcome, raw []flow.Proof, worktree string) ([]
 			if !filepath.IsAbs(path) {
 				path = filepath.Join(worktree, path)
 			}
-			if _, err := os.Stat(path); err != nil {
+			exists, err := e.git.PathExists(ctx, worktree, path)
+			if err != nil {
+				return nil, "", "", err
+			}
+			if !exists {
 				failed = append(failed, fmt.Sprintf("%q: artifact %q does not exist", name, p.Artifact))
 			}
 		} else if p.Exit != 0 {
-			failed = append(failed, fmt.Sprintf("%q (%s, exit %d): %s", name, flow.CleanText(p.Command), p.Exit, proofHead(p.OutputPath, worktree)))
+			output, err := e.proofHead(ctx, p.OutputPath, worktree)
+			if err != nil {
+				return nil, "", "", err
+			}
+			failed = append(failed, fmt.Sprintf("%q (%s, exit %d): %s", name, flow.CleanText(p.Command), p.Exit, output))
 		}
 		out = append(out, p)
 	}
@@ -247,42 +258,29 @@ func checkProofs(outcomes []flow.Outcome, raw []flow.Proof, worktree string) ([]
 		}
 	}
 	if len(missing) > 0 {
-		return nil, "outcome_missing", "Missing proof for outcome(s): " + strings.Join(missing, ", ") + "."
+		return nil, "outcome_missing", "Missing proof for outcome(s): " + strings.Join(missing, ", ") + ".", nil
 	}
 	if len(failed) > 0 {
-		return nil, "proof_failed", "Proof(s) failed: " + strings.Join(failed, "; ") + "."
+		return nil, "proof_failed", "Proof(s) failed: " + strings.Join(failed, "; ") + ".", nil
 	}
-	return out, "", ""
+	return out, "", "", nil
 }
 
-func proofHead(path, worktree string) string {
-	gitDir := filepath.Join(worktree, ".git")
-	if b, err := os.ReadFile(gitDir); err == nil {
-		if t, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "gitdir:"); !ok {
-			return "(output unreadable)"
-		} else if gitDir = strings.TrimSpace(t); !filepath.IsAbs(gitDir) {
-			gitDir = filepath.Join(worktree, gitDir)
-		}
+func (e *Engine) proofHead(ctx context.Context, path, worktree string) (string, error) {
+	buf, err := e.git.ProofOutput(ctx, worktree, path)
+	if errors.Is(err, world.ErrProofOutputRejected) {
+		return "(output unreadable)", nil
 	}
-	fi, err := os.Lstat(path)
-	realDir, err1 := filepath.EvalSymlinks(gitDir)
-	realPath, err2 := filepath.EvalSymlinks(path)
-	if rel, err3 := filepath.Rel(realDir, realPath); err != nil || !fi.Mode().IsRegular() || err1 != nil || err2 != nil || err3 != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-		return "(output unreadable)"
-	}
-	f, err := os.Open(realPath)
 	if err != nil {
-		return "(output unreadable)"
+		return "", err
 	}
-	defer func() { _ = f.Close() }()
-	buf, _ := io.ReadAll(io.LimitReader(f, 4096))
 	var lines []string
 	for l := range strings.Lines(string(buf)) {
 		if s := flow.CleanText(l); s != "" && len(lines) < 5 {
 			lines = append(lines, s)
 		}
 	}
-	return flow.CapRunes(cmp.Or(strings.Join(lines, " | "), "(no output)"), maxRejectWhyRunes)
+	return flow.CapRunes(cmp.Or(strings.Join(lines, " | "), "(no output)"), maxRejectWhyRunes), nil
 }
 
 const maxRejectWhyRunes = 500

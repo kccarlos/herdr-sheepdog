@@ -201,7 +201,7 @@ func preAcceptClaudeTrust(configPath, cwd string) error {
 			return fmt.Errorf("world: %s is outside the temp dir under go test", path)
 		}
 	}
-	absCwd, err := filepath.Abs(cwd)
+	absCwd, err := absolutePath(cwd)
 	if err != nil {
 		return nil
 	}
@@ -576,7 +576,7 @@ func decodeReportJSON(s string) (Report, bool) {
 // RepoProject resolves folder's git top-level directory and its project id in
 // local git config, minting and writing one when init is true (design.md 3).
 func (g *Git) RepoProject(ctx context.Context, folder string, init bool) (string, string, error) {
-	root, err := g.gitCmd(ctx, folder, "rev-parse", "--show-toplevel")
+	root, err := g.WorktreeRoot(ctx, folder)
 	if err != nil {
 		return "", "", fmt.Errorf("read git project folder %s: %w", folder, err)
 	}
@@ -631,8 +631,15 @@ func (g *Git) NewWorktree(ctx context.Context, repo, worktreeDir, taskID, title 
 		branch += "-" + slug
 	}
 	ctx = GitRepository(ctx, repo)
-	if _, err := os.Stat(filepath.Join(worktreeDir, ".git")); err == nil {
-		worktreeDir = realPath(worktreeDir)
+	worktreeDir, err := absolutePath(worktreeDir)
+	if err != nil {
+		return Worktree{}, err
+	}
+	exists, err := g.PathExists(ctx, repo, filepath.Join(worktreeDir, ".git"))
+	if err != nil {
+		return Worktree{}, err
+	}
+	if exists {
 		c1, err := g.gitCmd(ctx, repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
 		if err != nil {
 			return Worktree{}, err
@@ -660,21 +667,27 @@ func (g *Git) NewWorktree(ctx context.Context, repo, worktreeDir, taskID, title 
 			return Worktree{}, err
 		}
 		_, _ = g.gitCmd(ctx, repo, "worktree", "prune")
-		if err := os.MkdirAll(filepath.Dir(worktreeDir), 0o700); err != nil {
+		if _, err := g.pathCommand(ctx, repo, `umask 077; exec mkdir -p "$1"`, filepath.Dir(worktreeDir)); err != nil {
 			return Worktree{}, err
 		}
 		if _, err := g.gitCmd(ctx, repo, "worktree", "add", "--no-track", "-b", branch, worktreeDir, base); err != nil {
 			return Worktree{}, err
 		}
 	}
-	return Worktree{Path: realPath(worktreeDir), Branch: branch, BaseCommit: base}, nil
+	root, err := g.WorktreeRoot(ctx, worktreeDir)
+	if err != nil {
+		return Worktree{}, err
+	}
+	return Worktree{Path: root, Branch: branch, BaseCommit: base}, nil
 }
 
-func realPath(p string) string {
-	if r, err := filepath.EvalSymlinks(p); err == nil {
-		return r
+// WorktreeRoot returns Git's canonical top-level path for a checkout.
+func (g *Git) WorktreeRoot(ctx context.Context, dir string) (string, error) {
+	root, err := g.gitCmd(ctx, dir, "rev-parse", "--show-toplevel")
+	if err == nil && !filepath.IsAbs(root) {
+		err = errors.New("git did not return a worktree root")
 	}
-	return p
+	return root, err
 }
 
 // FetchRemote fetches the push remote so the remote base and remote PR heads
@@ -746,8 +759,20 @@ func (g *Git) InspectWorktree(ctx context.Context, worktree, ref string) (string
 // itself refuses a dirty one (no --force). A worktree already gone counts
 // as removed. It reports whether the worktree is gone.
 func (g *Git) RemoveWorktree(ctx context.Context, repo, worktree string) (bool, error) {
-	if _, err := os.Stat(worktree); os.IsNotExist(err) {
-		_, err = g.gitCmd(ctx, repo, "worktree", "prune")
+	var exists bool
+	var err error
+	if worktree != "" {
+		worktree, err = absolutePath(worktree)
+		if err != nil {
+			return false, err
+		}
+		exists, err = g.PathExists(ctx, repo, worktree)
+	}
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		_, err := g.gitCmd(ctx, repo, "worktree", "prune")
 		return err == nil, err
 	}
 	status, err := g.gitCmd(ctx, worktree, "status", "--porcelain", "--untracked-files=normal")

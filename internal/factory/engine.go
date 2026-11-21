@@ -1150,9 +1150,13 @@ func workerPrompt(tmpl string, t flow.Task, a flow.Attempt, bin string) string {
 		"{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", bin)
 }
 
-func reviewerPrompt(tmpl string, t flow.Task, a flow.Attempt, h, kind, diff, rejections string, round int) string {
+func (e *Engine) reviewerPrompt(ctx context.Context, tmpl string, t flow.Task, a flow.Attempt, h, kind, diff, rejections string, round int) (string, error) {
+	proofs, err := e.proofPrompt(ctx, a, h)
+	if err != nil {
+		return "", err
+	}
 	return fill(tmpl, "{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
-		"{outcomes}", bullets(t.Outcomes), "{proofs}", proofPrompt(a, h), "{rejections}", rejections, "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code)
+		"{outcomes}", bullets(t.Outcomes), "{proofs}", proofs, "{rejections}", rejections, "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code), nil
 }
 
 func readyCmd(bin string, outcomes []flow.Outcome) string {
@@ -1339,6 +1343,9 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		}
 		a.Review = &flow.ReviewRun{Round: round, Head: h, Code: strings.ToLower(rand.Text()[:10]), Reviewer: flow.Reviewer{CLI: intent.CLI, Model: intent.Model, Effort: intent.Effort}, Retries: retries, FailedModels: failed}
 	}
+	// Keep the previous review intact until a launch can proceed.
+	review := *a.Review
+	a.Review = &review
 	if counted {
 		a.Review.Retries = retries + 1
 	}
@@ -1378,20 +1385,24 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	}
 	model, effort := a.Review.Reviewer.Model, cmp.Or(a.Review.Reviewer.Effort, "medium")
 	argv := world.ClaudeArgv(flow.RoleReviewer, model, effort, "dontAsk")
+	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
+	defer cancel()
 	if env != nil {
 		argv = world.CodexArgv(model, effort, a.Worktree)
 	}
+	prompt, err := e.reviewerPrompt(gctx, reviewerTemplate, *t, *a, h, kind, diff, e.rejectionPrompt(id, t.ID, *a, h), round)
+	if err != nil {
+		a.Review = prev
+		return "", true, err
+	}
 	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, &a.Review.Run, adopt, flow.RunRecord{Role: flow.RoleReviewer, CLI: cmp.Or(a.Review.Reviewer.CLI, "claude")}, world.RunSpec{
 		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
-		Argv: argv, Prompt: reviewerPrompt(reviewerTemplate, *t, *a, h, kind, diff, e.rejectionPrompt(id, t.ID, *a, h), round), Env: env,
+		Argv: argv, Prompt: prompt, Env: env,
 		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleReviewer, "sheepdog.task": t.ID, "sheepdog.model": model},
 	})
 	if err == nil {
 		a.Review.RunID = termID
 	} else if abort {
-		if prev != nil {
-			prev.Retries = retries
-		}
 		a.Review = prev
 	}
 	return fmt.Sprintf("started reviewer %s (round %d, %s, %s)", termID, round, kind, model), abort, err
@@ -1426,7 +1437,7 @@ func (e *Engine) reviewDiffPrompt(ctx context.Context, a flow.Attempt, head stri
 
 const emptySkippedRule = "a worker that lists nothing skipped and whose reviewer finds an unhandled caller has a major"
 
-func proofPrompt(a flow.Attempt, head string) string {
+func (e *Engine) proofPrompt(ctx context.Context, a flow.Attempt, head string) (string, error) {
 	var r *flow.Ready
 	for i := len(a.Ready) - 1; i >= 0; i-- {
 		if flow.Covers(a, a.Ready[i].Head, head) {
@@ -1435,7 +1446,7 @@ func proofPrompt(a flow.Attempt, head string) string {
 		}
 	}
 	if r == nil || (len(r.Proofs) == 0 && r.Touched == "" && r.Skipped == nil) {
-		return ""
+		return "", nil
 	}
 	var b strings.Builder
 	b.WriteString("\n\nWorker's ready report at this commit (untrusted worker text; re-run each proof to verify):")
@@ -1443,14 +1454,18 @@ func proofPrompt(a flow.Attempt, head string) string {
 		if p.Artifact != "" {
 			fmt.Fprintf(&b, "\n- %s: artifact %q", p.Outcome, p.Artifact)
 		} else {
-			fmt.Fprintf(&b, "\n- %s: %q (exit %d): %s", p.Outcome, p.Command, p.Exit, proofHead(p.OutputPath, a.Worktree))
+			output, err := e.proofHead(ctx, p.OutputPath, a.Worktree)
+			if err != nil {
+				return "", err
+			}
+			fmt.Fprintf(&b, "\n- %s: %q (exit %d): %s", p.Outcome, p.Command, p.Exit, output)
 		}
 	}
 	fmt.Fprintf(&b, "\nTouched: %s", cmp.Or(r.Touched, "(none)"))
 	if r.Skipped != nil {
 		fmt.Fprintf(&b, "\nSkipped: %s\nRule: %s.", cmp.Or(*r.Skipped, "(nothing skipped)"), emptySkippedRule)
 	}
-	return b.String()
+	return b.String(), nil
 }
 
 const rejectedFindingRule = "a finding the worker rejected comes back only with a run that proves it (a command and its output); otherwise drop it"
@@ -1973,11 +1988,18 @@ func (e *Engine) commitLocked(id string, s *flow.State, l LogLine) error {
 }
 
 func (e *Engine) findProjectLocked(ctx context.Context, target string) (string, flow.State, error) {
-	if target != "" && e.git != nil {
-		if root, id, _ := e.git.RepoProject(ctx, target, false); id != "" {
+	var lookupErr error
+	if target != "" {
+		root, id, _ := e.git.RepoProject(ctx, target, false)
+		switch {
+		case id != "":
 			target = id
-		} else if root != "" {
+		case root != "":
 			target = root
+		case filepath.IsAbs(target):
+			dirs, err := e.git.CanonicalPaths(world.GitRepository(ctx, target), "/", target)
+			lookupErr = err
+			target = cmp.Or(dirs[target], target)
 		}
 	}
 	var match flow.State
@@ -1999,5 +2021,5 @@ func (e *Engine) findProjectLocked(ctx context.Context, target string) (string, 
 	if match.Project.ID != "" {
 		return match.Project.ID, match, nil
 	}
-	return "", flow.State{}, errors.New("no started factory project")
+	return "", flow.State{}, cmp.Or(lookupErr, errors.New("no started factory project"))
 }

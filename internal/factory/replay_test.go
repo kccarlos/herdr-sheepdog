@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"regexp"
@@ -37,7 +38,12 @@ func filled(role, tmpl string) string {
 	case "worker":
 		return workerPrompt(tmpl, t, a, "sheepdog")
 	}
-	return reviewerPrompt(tmpl, t, a, "c1", flow.RoundFull, "git diff b..c1", (&Engine{}).rejectionPrompt("p", "T1", a, "c1"), 2)
+	e := &Engine{}
+	prompt, err := e.reviewerPrompt(context.Background(), tmpl, t, a, "c1", flow.RoundFull, "git diff b..c1", e.rejectionPrompt("p", "T1", a, "c1"), 2)
+	if err != nil {
+		panic(err)
+	}
+	return prompt
 }
 
 func loadSituations(t *testing.T) []situation {
