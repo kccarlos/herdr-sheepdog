@@ -3,6 +3,7 @@ package factory
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -87,49 +88,160 @@ func TestVerify2FailedRunStopStaysLiveAndBacksOff(t *testing.T) {
 	}
 }
 
-func TestJ7RestartStopBacksOffAndGivesUp(t *testing.T) {
+func TestJ7RestartStopRecoversAndDeliversWake(t *testing.T) {
+	h, failKill := restartStopHarness(t)
+	const wakeKey = "failed@" + flow.AskStopCoordinator
+	stopAttempts := func() int { return strings.Count(h.logBuf.String(), "terminal.kill failed") }
+	backoffs := []time.Duration{1, 2, 4, 8, 16, 30}
+	for i, minutes := range backoffs {
+		h.pass()
+		if got := stopAttempts(); got != i+1 {
+			t.Errorf("try %d at back-off deadline: got %d failed stops in total, want %d", i+1, got, i+1)
+		}
+		if i == 5 {
+			failKill.Store(false)
+		}
+		delay := minutes * time.Minute
+		h.now = h.now.Add(delay - time.Second)
+		h.pass()
+		if got := stopAttempts(); got > i+1 || len(h.runs) != 0 {
+			t.Errorf("try %d before %s back-off elapsed: got %d failed stops and %d launches", i+1, delay, got, len(h.runs))
+		}
+		if i >= 4 {
+			wakes := slices.DeleteFunc(h.state().Project.Wakes, func(w flow.Wake) bool { return w.Key != wakeKey })
+			if len(wakes) != 1 {
+				t.Errorf("after %d failed stops: got %d %s wakes, want one", i+1, len(wakes), wakeKey)
+			}
+		}
+		h.now = h.now.Add(time.Second)
+	}
+	if kills := countRPC(h.srv, "terminal.kill"); kills != 0 {
+		t.Errorf("before capped back-off elapsed: kills=%d, want 0", kills)
+	}
+	h.pass()
+	coord := h.state().Project.RunID
+	if len(h.runs) != 1 || coord == "" {
+		t.Fatalf("after six failed stops and recovery: launches=%d run_id=%q, want a replacement", len(h.runs), coord)
+	}
+	h.coordIdleWithStatus(coord, "idle")
+	h.pass()
+	if sends := sendsTo(t, h.srv.Requests(), coord); len(sends) != 1 || !strings.Contains(sends[0], wakeKey) {
+		t.Errorf("replacement coordinator sends = %q, want one %s", sends, wakeKey)
+	}
+	if wakes := h.state().Project.Wakes; len(wakes) != 0 {
+		t.Errorf("wakes still held after delivery: %+v", wakes)
+	}
+}
+
+func TestCoordinatorStopsDoNotCountOutages(t *testing.T) {
+	for _, row := range []string{"J4", "J7", "J8", "J9"} {
+		t.Run(row, func(t *testing.T) {
+			h, _ := restartStopHarness(t)
+			s := h.state()
+			if row != "J7" {
+				s.Project.Run.State, s.Project.RunID = flow.PhaseIdle, s.Project.Run.Address
+				switch row {
+				case "J4":
+					s.Tasks = []flow.Task{{ID: "T1", Done: &flow.Merged{}}}
+					s.Project.Acts = append(s.Project.Acts, flow.Act{Key: flow.FinalJournalKey(s.Tasks), Result: "done"})
+				case "J8":
+					s.Project.Run.Status, s.Project.Run.Turn = "error", 1
+					s.Project.CoordErrorAt = h.now.Add(-time.Second)
+				case "J9":
+					s.Project.CoordWakeAt = h.now.Add(-time.Hour)
+				}
+			}
+			h.eng.hcUnavail = map[string]bool{h.id: true}
+			const key = flow.AskStopCoordinator
+			for i := range 20 {
+				r, d := flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: h.now})
+				if r.ID != row {
+					t.Errorf("try %d: row=%s why=%q, want %s", i+1, r.ID, d.Why, row)
+					break
+				}
+				h.eng.passProjectRulesLocked(context.Background(), h.id, &s)
+				if got := flow.Count(s.Project.Acts, key); got != i+1 {
+					t.Errorf("try %d: %d failed stops, want %d", i+1, got, i+1)
+					break
+				}
+				h.now = h.now.Add(flow.EnsureBackoff(s.Settings, i+1))
+				if row == "J8" {
+					s.Project.CoordErrorAt = h.now.Add(-time.Second)
+				}
+			}
+			last := flow.LastAct(s.Project.Acts, key)
+			if last == nil || !last.Uncounted || flow.Exhausted(s.Project.Acts, key, s.Settings) || len(s.Project.Wakes) != 0 {
+				t.Errorf("outage stops: last=%+v exhausted=%v wakes=%+v, want uncounted failures and no give-up", last, flow.Exhausted(s.Project.Acts, key, s.Settings), s.Project.Wakes)
+			}
+		})
+	}
+}
+
+func TestJ7RestartStopHoldWhyLogsOncePerChange(t *testing.T) {
+	h, fail := restartStopHarness(t)
+	h.edit(func(s *flow.State) {
+		s.Tasks = []flow.Task{{ID: "T1", Parked: true}}
+	})
+	h.pass()
+	s := h.state()
+	in := flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: h.now}
+	for _, row := range []string{"J7", "J6"} {
+		if row == "J6" {
+			in.Acts = append(in.Acts, flow.Act{Key: flow.AskStartCoordinator, Result: "done", At: h.now})
+		}
+		r, d := flow.FirstMatch(flow.ProjectRows, in)
+		if r.ID != row || !strings.Contains(d.Why, "could not stop the old coordinator") || !strings.Contains(d.Why, "terminal.kill failed") {
+			t.Errorf("project why = (%s, %q), want %s with the old coordinator stop error", r.ID, d.Why, row)
+		}
+	}
+	h.pass()
+	h.now = h.now.Add(time.Minute)
+	h.pass()
+	h.pass()
+	reportPath := h.paths.Log(h.id)
+	if lines := append(logRules(t, reportPath, "J7"), logRules(t, reportPath, "J6")...); len(lines) != 1 ||
+		!strings.Contains(lines[0].Why, "could not stop the old coordinator") || !strings.Contains(lines[0].Why, "terminal.kill failed") {
+		t.Errorf("repeated stop error log = %+v, want one line with the stop error", lines)
+	}
+	h.eng.HC = hc.NewClient(methodFailProxy(t, h.srv.Path, "terminal.get", fail))
+	h.now = h.now.Add(2 * time.Minute)
+	h.pass()
+	h.pass()
+	if lines := append(logRules(t, reportPath, "J7"), logRules(t, reportPath, "J6")...); len(lines) != 2 ||
+		!strings.Contains(lines[1].Why, "terminal.get failed") {
+		t.Errorf("changed stop error log = %+v, want a second line with the new error", lines)
+	}
+}
+
+func TestJ7RestartStopBackoffResetsAfterSuccess(t *testing.T) {
+	h, _ := restartStopHarness(t)
+	const key = flow.AskStopCoordinator
+	h.edit(func(s *flow.State) {
+		s.Project.Acts = []flow.Act{
+			{Key: key, Result: "failed", At: h.now.Add(-3 * time.Hour)},
+			{Key: key, Result: "done", At: h.now.Add(-2 * time.Hour)},
+			{Key: key, Result: "failed", At: h.now},
+		}
+	})
+	h.now = h.now.Add(time.Minute)
+	h.pass()
+	if got := strings.Count(h.logBuf.String(), "terminal.kill failed"); got != 1 {
+		t.Errorf("at the first retry deadline after success: got %d stop attempts, want 1", got)
+	}
+}
+
+func restartStopHarness(t *testing.T) (*projectHarness, *atomic.Bool) {
+	t.Helper()
 	h := newProjectHarness(t, "Goal")
 	h.srv.Add(hc.Terminal{Address: "old-coord", Name: coordName(h.id), State: "live", Labels: testCoordLabels(h.id, "old-run")})
-	var failKill atomic.Bool
+	failKill := new(atomic.Bool)
 	failKill.Store(true)
-	h.eng.HC = hc.NewClient(methodFailProxy(t, h.srv.Path, "terminal.kill", &failKill))
+	h.eng.HC = hc.NewClient(methodFailProxy(t, h.srv.Path, "terminal.kill", failKill))
 	h.edit(func(s *flow.State) {
-		s.Settings.EnsureFailures = 5
+		s.Settings.EnsureFailures, s.Settings.EnsureBackoffMinutes = 5, 1
 		s.Project.Run = &flow.RunRecord{ID: "old-run", Address: "old-coord", State: flow.PhaseEnded, Result: flow.EndLost}
 	})
-	settings := h.state().Settings
-	stopAttempts := func() int { return strings.Count(h.logBuf.String(), "terminal.kill failed") }
-	for tries := 1; tries <= settings.EnsureFailures; tries++ {
-		before := stopAttempts()
-		h.pass()
-		if got := stopAttempts() - before; got != 1 {
-			t.Fatalf("try %d at back-off deadline: got %d failed stops, want 1", tries, got)
-		}
-		if tries < settings.EnsureFailures {
-			delay := flow.EnsureBackoff(settings, tries)
-			h.now = h.now.Add(delay - time.Second)
-			h.pass()
-			if got := stopAttempts() - before; got != 1 {
-				t.Errorf("try %d before %s back-off elapsed: got %d failed stops, want 1", tries, delay, got)
-			}
-			h.now = h.now.Add(time.Second)
-		}
-	}
-	h.pass()
-	h.now = h.now.Add(time.Hour)
-	h.pass()
-	if got := stopAttempts(); got != 5 || len(h.runs) != 0 {
-		t.Errorf("after give-up: got %d failed stops and %d launches, want 5 and 0", got, len(h.runs))
-	}
-	giveUps := 0
-	for _, wake := range h.state().Project.Wakes {
-		if wake.Key == "failed@"+flow.AskStopCoordinator {
-			giveUps++
-		}
-	}
-	if giveUps != 1 {
-		t.Errorf("after five failed stops: got %d stop_coordinator give-up wakes, want 1", giveUps)
-	}
+	return h, failKill
 }
 
 func TestVerify9RestartStopFailureRecordsAct(t *testing.T) {

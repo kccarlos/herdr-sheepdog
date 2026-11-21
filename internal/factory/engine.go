@@ -55,7 +55,7 @@ type Engine struct {
 	prs       map[string]flow.PR   // last PR snapshot per attempt worktree (in memory)
 	errs      map[string]string    // last gh or git error per worktree and kind, logged once per change
 	tips      map[string]tipFacts  // last git reading per worktree (in memory)
-	waits     map[string]string    // last wait/finished reason per project or task (N9/N10/N38, J4/J6), logged once per change
+	waits     map[string]string    // last wait/finished reason per project or task, logged once per change
 	ghUnavail map[string]bool      // project fact github_unavailable (design.md 7.3)
 	hcUnavail map[string]bool      // project fact hc_unavailable (design.md 7.3)
 }
@@ -429,7 +429,10 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 // passProjectRulesLocked evaluates flow.ProjectRows and executes the matched coordinator action.
 func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.State) {
 	now := e.now()
-	r, d := flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now})
+	match := func() (flow.Row[flow.ProjectIn], flow.Decision) {
+		return flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now})
+	}
+	r, d := match()
 	if len(d.Asked) > 0 && d.Asked[0] == flow.AskCoordDialogStuck {
 		s.Project.CoordDialogStucks++
 		s.Project.Acts = append(s.Project.Acts, flow.Act{Key: flow.CoordStuckKey(s.Project.Run), Result: "done", At: now})
@@ -437,20 +440,21 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 			e.logEvent("factory.coordinator_stuck", map[string]string{"project": id, "count": fmt.Sprint(s.Project.CoordDialogStucks), "why": d.Why})
 		}
 		e.commitLogLocked(id, s, LogLine{By: "engine", Rule: r.ID, Asked: d.Asked, Decision: map[bool]string{true: "coordinator stuck at dialog twice in a row; owner attention needed", false: fmt.Sprintf("coordinator stuck at dialog (count %d)", s.Project.CoordDialogStucks)}[s.Project.CoordDialogStucks >= 2], Why: d.Why})
-		r, d = flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now})
+		r, d = match()
 	}
-	waitKey := id + "/project"
-	if r.ID == "J6" || (r.ID == "J4" && s.Project.RunID == "" && (s.Project.Run == nil || s.Project.Run.State == flow.PhaseEnded)) {
-		if waitVal := r.ID + ":" + d.Why; e.waits[waitKey] != waitVal {
-			if e.waits == nil {
-				e.waits = map[string]string{}
-			}
-			e.waits[waitKey] = waitVal
-			e.commitLogLocked(id, s, LogLine{By: "engine", Rule: r.ID, Decision: cmp.Or(map[string]string{"J4": "finished"}[r.ID], "waiting"), Why: d.Why})
+	if r.ID == "J7" && s.Project.Run != nil && s.Project.Run.State == flow.PhaseEnded {
+		stopped := e.stopCoordWithBackoffLocked(ctx, id, s, now, true)
+		r, d = match()
+		if !stopped {
+			e.logProjectWaitLocked(id, s, r.ID, "waiting", d.Why)
+			return
 		}
+	}
+	if r.ID == "J6" || (r.ID == "J4" && s.Project.RunID == "" && (s.Project.Run == nil || s.Project.Run.State == flow.PhaseEnded)) {
+		e.logProjectWaitLocked(id, s, r.ID, cmp.Or(map[string]string{"J4": "finished"}[r.ID], "waiting"), d.Why)
 		return
 	}
-	delete(e.waits, waitKey)
+	delete(e.waits, id+"/project")
 	if len(d.Asked) == 0 {
 		return
 	}
@@ -461,7 +465,7 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 	case flow.AskStartCoordinator:
 		e.startCoordLocked(ctx, id, s, d.Why)
 	case flow.AskStopCoordinator:
-		if !e.stopCoordWithBackoffLocked(ctx, id, s, now) {
+		if !e.stopCoordWithBackoffLocked(ctx, id, s, now, false) {
 			return
 		}
 		stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
@@ -486,11 +490,20 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 	}
 }
 
-func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State, why string) {
-	adopt, bin := s.Project.Run == nil || s.Project.Run.State != flow.PhaseEnded, cmp.Or(e.Bin, "sheepdog")
-	if !adopt && !e.stopCoordWithBackoffLocked(ctx, id, s, e.now()) {
+func (e *Engine) logProjectWaitLocked(id string, s *flow.State, row, decision, why string) {
+	key := id + "/project"
+	if e.waits[key] == why {
 		return
 	}
+	if e.waits == nil {
+		e.waits = map[string]string{}
+	}
+	e.waits[key] = why
+	e.commitLogLocked(id, s, LogLine{By: "engine", Rule: row, Decision: decision, Why: why})
+}
+
+func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State, why string) {
+	adopt, bin := s.Project.Run == nil || s.Project.Run.State != flow.PhaseEnded, cmp.Or(e.Bin, "sheepdog")
 	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &s.Project.RunTokenHash, &s.Project.Run, adopt, flow.RunRecord{Role: flow.RoleCoordinator, CLI: "claude"}, world.RunSpec{
 		Name: coordName(id), Cwd: s.Project.Folder, ClaudeConfig: e.Paths.ClaudeConfig,
 		Argv:   world.ClaudeArgv(flow.RoleCoordinator, "opus", "medium", "bypassPermissions"),
@@ -533,23 +546,26 @@ func (e *Engine) coordTerminalsLocked(ctx context.Context, id string, rec *flow.
 	return owned, nil
 }
 
-// stopCoordWithBackoffLocked shares the stop budget between project stops and J7 restarts.
-func (e *Engine) stopCoordWithBackoffLocked(ctx context.Context, id string, s *flow.State, now time.Time) bool {
+// stopCoordWithBackoffLocked shares the stop budget. J7 keeps retrying so a
+// replacement coordinator can deliver the wake.
+func (e *Engine) stopCoordWithBackoffLocked(ctx context.Context, id string, s *flow.State, now time.Time, restarting bool) bool {
 	const key = flow.AskStopCoordinator
 	p := &s.Project
-	if flow.Exhausted(p.Acts, key, s.Settings) {
+	exhausted := flow.Exhausted(p.Acts, key, s.Settings)
+	if exhausted && !restarting {
 		return false
 	}
-	tries := flow.Count(p.Acts, key)
-	if last := flow.LastAct(p.Acts, key); last != nil && now.Sub(last.At) < flow.EnsureBackoff(s.Settings, tries) {
+	if last, tries := flow.ActRetry(p.Acts, key); tries > 0 && now.Sub(last.At) < flow.EnsureBackoff(s.Settings, tries) {
 		return false
 	}
 	if err := e.stopCoordTerminalsLocked(ctx, id, *s); err != nil {
 		e.logError("factory.hc_error", id, err)
-		words := flow.CleanErr(err.Error())
-		p.Acts = append(p.Acts, flow.Act{Key: key, Result: "failed", At: now, Class: world.FailureClass(err), Err: words})
-		if flow.Exhausted(p.Acts, key, s.Settings) {
-			holdProjectWake(s, "failed@"+key, "gave up stopping the coordinator", words, now)
+		words, cls := flow.CleanErr(err.Error()), world.FailureClass(err)
+		uncounted := cls != flow.ClassSettled && actOutage(key, flow.Facts{HCUnavailable: e.hcUnavail[id]})
+		p.Acts = append(p.Acts, flow.Act{Key: key, Result: "failed", At: now, Class: cls, Err: words, Uncounted: uncounted})
+		if !exhausted && flow.Exhausted(p.Acts, key, s.Settings) {
+			why := map[bool]string{true: "could not stop the old coordinator", false: "gave up stopping the coordinator"}[restarting]
+			holdProjectWake(s, "failed@"+key, why, words, now)
 		}
 		e.saveLocked(id, *s)
 		return false
@@ -759,7 +775,7 @@ func actOutage(verb string, f flow.Facts) bool {
 	switch verb {
 	case flow.AskNewAttempt, flow.AskPushPR, flow.AskRerunCI, flow.AskDispatchCI, flow.AskUpdateBranch, flow.AskMerge:
 		return f.GitHubUnavailable
-	case flow.AskStartWorker, flow.AskStartReview, flow.AskNudgeReview, flow.AskStopReview, flow.AskTellFindings, flow.AskTellStop, flow.AskTellDiverged, flow.AskTellConflict, flow.AskTellCI, flow.AskTellBaseRed, flow.AskStopRuns:
+	case flow.AskStartWorker, flow.AskStartReview, flow.AskNudgeReview, flow.AskStopReview, flow.AskTellFindings, flow.AskTellStop, flow.AskTellDiverged, flow.AskTellConflict, flow.AskTellCI, flow.AskTellBaseRed, flow.AskStopRuns, flow.AskStopCoordinator:
 		return f.HCUnavailable
 	case flow.AskCleanup:
 		return f.GitHubUnavailable || f.HCUnavailable

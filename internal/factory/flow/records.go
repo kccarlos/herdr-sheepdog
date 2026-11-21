@@ -422,6 +422,12 @@ func actFailures(acts []Act, key string) (last, cause *Act, tries, counted int, 
 	return last, cause, tries, counted, settled
 }
 
+// ActRetry returns the latest act and the number of tries since success or retry.
+func ActRetry(acts []Act, key string) (last *Act, tries int) {
+	last, _, tries, _, _ = actFailures(acts, key)
+	return last, tries
+}
+
 func doneActs(acts []Act, key string) []Act {
 	if strings.HasPrefix(key, AskMerge+"@") || strings.HasPrefix(key, AskUpdateBranch+"@") || strings.HasPrefix(key, AskTellDiverged+"@") ||
 		strings.HasPrefix(key, AskNudgeReview+"@") || strings.HasPrefix(key, AskStopReview+"@") {
