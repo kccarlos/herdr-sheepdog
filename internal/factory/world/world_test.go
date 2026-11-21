@@ -277,6 +277,10 @@ func TestRunStateOutageAndChildProcessGroupStop(t *testing.T) {
 }
 
 func TestObserveRunScreensActivityAndExit(t *testing.T) {
+	realAgyTrust, err := os.ReadFile("../../../testdata/herdr/agy-trust-dialog.screen.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	srv := hctest.New(t)
 	client := hc.NewClient(srv.Path)
@@ -285,7 +289,7 @@ func TestObserveRunScreensActivityAndExit(t *testing.T) {
 		cli, screen, wantClass string
 		wantKeys               []string
 	}{
-		{"agy", "Do you trust the contents of this project?\n> Yes, I trust this folder\n  No, exit", flow.ScreenTrust, []string{"enter"}},
+		{"agy", string(realAgyTrust), flow.ScreenTrust, []string{"enter"}},
 		{"claude", "Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder", flow.ScreenTrust, nil},
 		{CodexCLI, "Hooks need review\n1. Yes\n3. Continue without trusting", flow.ScreenConfirm, nil},
 		{"claude", "Not logged in · Please run /login", flow.ScreenSignedOut, nil},

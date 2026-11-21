@@ -333,6 +333,9 @@ func matchUI(lines []string, spec, trim string) bool {
 // dialog, sign-out and usage-limit screens (design.md 5, 9.2; spikes S0.2, S0.8).
 func ScreenClass(cli, text string) string {
 	lines := strings.Split(strings.TrimRight(ansiRe.ReplaceAllString(strings.ReplaceAll(text, "\r\n", "\n"), ""), "\n \t"), "\n")
+	if cli == "agy" && agyTrustSelected(lines) {
+		return flow.ScreenTrust
+	}
 	var ui []string
 	for _, ln := range lines[max(0, len(lines)-screenTailLines):] {
 		if s := strings.TrimLeft(strings.ToLower(strings.TrimSpace(ln)), "⏺●⎿⚠✕✗•·│✨\u200a "); s != "" {
@@ -351,13 +354,35 @@ func ScreenClass(cli, text string) string {
 		{CodexCLI, flow.ScreenConfirm, "update available!*", "2. skip"},
 		{"agy", flow.ScreenSignedOut, "not signed in*|please sign in to*", ""},
 		{"agy", flow.ScreenLimit, "individual quota reached*|you've hit your limit*|you've hit your usage limit*", ""},
-		{"agy", flow.ScreenTrust, "do you trust the contents of this project?", "> yes, i trust this folder"},
 	} {
 		if r[0] == cli && matchUI(ui, r[2], "") && (r[3] == "" || matchUI(ui, r[3], "❯› ")) {
 			return r[1]
 		}
 	}
 	return flow.ScreenNone
+}
+
+// Match the captured menu as a suffix, preserving the selected option and
+// the layout that distinguishes the menu from phrases in agent output.
+func agyTrustSelected(lines []string) bool {
+	dialog := [...]string{
+		"Do you trust the contents of this project?",
+		"",
+		"Antigravity CLI requires permission to read, edit, and execute files here.",
+		"",
+		"> Yes, I trust this folder",
+		"  No, exit",
+		"",
+		"  ↑/↓ Navigate · enter Confirm",
+	}
+	if len(lines) <= len(dialog) {
+		return false
+	}
+	tail := lines[len(lines)-len(dialog)-1:]
+	return strings.TrimSpace(tail[len(dialog)]) == "Gemini 3.8 Flash · high" &&
+		slices.EqualFunc(tail[:len(dialog)], dialog[:], func(line, want string) bool {
+			return strings.TrimRight(line, " \t") == want
+		})
 }
 
 // ObserveRun reads rec's terminal and screen from herdr-core and emits the events for one pass (design.md 5, 7.3).
@@ -391,7 +416,13 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]f
 		}
 	}
 	var evs []flow.RunEvent
-	if cls != "" && rec.State == flow.PhaseStarting && !rec.StatusReported && t.Status == nil {
+	s := t.Status
+	starting := rec.State == flow.PhaseStarting
+	verifiedTrust := starting && rec.CLI == "agy" && cls == flow.ScreenTrust &&
+		rec.ID != "" && rec.CreatedMS != 0 && t.CreatedMS == rec.CreatedMS
+	trustBlocked := verifiedTrust && s != nil && s.State == "blocked" && deref(s.Kind) == "permission"
+	if trustBlocked || (starting && !rec.StatusReported && s == nil && cls != "" &&
+		(rec.CLI != "agy" || cls != flow.ScreenTrust || verifiedTrust)) {
 		evs = append(evs, flow.RunEvent{Kind: flow.EvScreen, Screen: cls, ScreenHash: hash})
 		if rec.CLI == CodexCLI && nonEmpty && cls == flow.ScreenNone {
 			evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: "working"})
@@ -400,7 +431,9 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord) ([]f
 	if hash != "" && rec.ScreenHash != "" && hash != rec.ScreenHash {
 		evs = append(evs, flow.RunEvent{Kind: flow.EvActivity, ScreenHash: hash})
 	}
-	if s := t.Status; s != nil && (!rec.StatusReported || s.State != rec.Status || deref(s.Kind) != rec.BlockedKind || s.Msg != rec.Question || t.Turn != rec.Turn) {
+	// While the verified menu is visible, R3/R6 handle it. A subsequent
+	// observation handles any new status against the screen then visible.
+	if s != nil && !trustBlocked && (!rec.StatusReported || s.State != rec.Status || deref(s.Kind) != rec.BlockedKind || s.Msg != rec.Question || t.Turn != rec.Turn) {
 		var at time.Time
 		if ms := deref(t.StatusMS); ms > 0 {
 			at = time.UnixMilli(int64(ms))

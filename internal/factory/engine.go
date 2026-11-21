@@ -691,6 +691,7 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 	if before.StopRetry != nil && evs[0].Kind != flow.EvLost {
 		evs = []flow.RunEvent{{Kind: flow.EvStop}}
 	}
+events:
 	for _, ev := range evs {
 		old := **recp
 		next, row, dec := flow.StepRun(old, ev, s.Settings, now)
@@ -710,6 +711,10 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 			}
 			if aerr := world.ActRun(ctx, e.HC, next, act, msg); aerr != nil {
 				e.logError("factory.exec_error", id, aerr)
+				if act == flow.RunActKeys {
+					**recp = old
+					break events
+				}
 				if act == flow.RunActStop {
 					tries := 1
 					if old.StopRetry != nil {
@@ -728,6 +733,9 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 		if (old.State != flow.PhaseEnded && next.State == flow.PhaseEnded && (!fresh || taskID != "")) || row.ID == "R3" || row.ID == "R21" {
 			e.commitLogLocked(id, s, LogLine{By: "engine", Task: taskID, Rule: row.ID, Asked: dec.Asked, Decision: dec.Why, Why: fmt.Sprintf("%s run %s: %s", role, next.Address, cmp.Or(next.Reason, dec.Why))})
 			before = next
+		}
+		if row.ID == "R3" {
+			break // Observe the screen again before acting on its status or timeout.
 		}
 	}
 	if !reflect.DeepEqual(before, **recp) {

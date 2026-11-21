@@ -144,7 +144,7 @@ func TestStartTrustScreenToldApartFromBlank(t *testing.T) {
 	perm := "permission"
 	srv.SetStatus(wAgyBlocked, &hc.Status{App: "agy", State: "blocked", Kind: &perm, Msg: "Trust this folder?"})
 	srv.SetScreen(wBlank, "")
-	srv.SetScreen(wAgyTrust, "Do you trust the contents of this project?\n> Yes, I trust this folder\n  No, exit\n")
+	srv.SetScreen(wAgyTrust, readScreen(t, "agy-trust-dialog.screen.txt"))
 
 	reqsBefore := len(srv.Requests())
 	now = now.Add(10 * time.Second)
