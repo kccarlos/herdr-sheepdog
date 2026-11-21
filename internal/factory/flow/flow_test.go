@@ -103,6 +103,11 @@ func TestSettingsRange(t *testing.T) {
 		"ensure_failures":                func(s *Settings, n int) { s.EnsureFailures = n },
 		"ensure_backoff_minutes":         func(s *Settings, n int) { s.EnsureBackoffMinutes = n },
 		"stuck_minutes":                  func(s *Settings, n int) { s.StuckMinutes = n },
+		"coordinator_starts_per_hour":    func(s *Settings, n int) { s.CoordinatorStartsPerHour = n },
+		"coordinator_gap_minutes":        func(s *Settings, n int) { s.CoordinatorGapMinutes = n },
+		"owner_typing_minutes":           func(s *Settings, n int) { s.OwnerTypingMinutes = n },
+		"coordinator_silent_minutes":     func(s *Settings, n int) { s.CoordinatorSilentMinutes = n },
+		"heartbeat_minutes":              func(s *Settings, n int) { s.HeartbeatMinutes = n },
 		"max_running":                    func(s *Settings, n int) { s.MaxRunning = n },
 	}
 	limits := map[string][2]int{
@@ -125,6 +130,11 @@ func TestSettingsRange(t *testing.T) {
 		"ensure_failures":                {EnsureFailuresMin, EnsureFailuresMax},
 		"ensure_backoff_minutes":         {EnsureBackoffMin, EnsureBackoffMax},
 		"stuck_minutes":                  {StuckMin, StuckMax},
+		"coordinator_starts_per_hour":    {CoordStartsMin, CoordStartsMax},
+		"coordinator_gap_minutes":        {CoordGapMin, CoordGapMax},
+		"owner_typing_minutes":           {OwnerTypingMin, OwnerTypingMax},
+		"coordinator_silent_minutes":     {CoordSilentMin, CoordSilentMax},
+		"heartbeat_minutes":              {HeartbeatMin, HeartbeatMax},
 		"max_running":                    {MaxRunningMin, MaxRunningMax},
 	}
 	for name, lim := range limits {

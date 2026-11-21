@@ -41,16 +41,23 @@ type BaseState struct {
 
 // Project is the project record of the skeleton.
 type Project struct {
-	ID           string     `json:"id"`
-	Folder       string     `json:"folder,omitempty"`
-	Goal         string     `json:"goal,omitempty"`
-	Started      bool       `json:"started,omitempty"`
-	RunID        string     `json:"run_id,omitempty"`           // coordinator terminal identity
-	RunTokenHash string     `json:"run_token_sha256,omitempty"` // SHA-256 hex of the coordinator's SHEEPDOG_RUN_TOKEN
-	Run          *RunRecord `json:"run,omitempty"`
-	Acts         []Act      `json:"acts,omitempty"`
-	Wakes        []Wake     `json:"wakes,omitempty"` // held until J12 delivers them
-	Base         *BaseState `json:"base,omitempty"`
+	ID                string     `json:"id"`
+	Folder            string     `json:"folder,omitempty"`
+	Goal              string     `json:"goal,omitempty"`
+	Started           bool       `json:"started,omitempty"`
+	RunID             string     `json:"run_id,omitempty"`           // coordinator terminal identity
+	RunTokenHash      string     `json:"run_token_sha256,omitempty"` // SHA-256 hex of the coordinator's SHEEPDOG_RUN_TOKEN
+	Run               *RunRecord `json:"run,omitempty"`
+	Acts              []Act      `json:"acts,omitempty"`
+	Wakes             []Wake     `json:"wakes,omitempty"` // held until J12 delivers them
+	Base              *BaseState `json:"base,omitempty"`
+	NewGoal           bool       `json:"new_goal,omitempty"`            // J4: owner gave a new goal after a plan existed
+	CoordDialogStucks int        `json:"coord_dialog_stucks,omitempty"` // J10: consecutive R29 dialog-stuck ends
+	CoordErrorAt      time.Time  `json:"coord_error_at,omitempty"`      // J8: when coordinator was last told to go on
+	CoordErrorTurn    uint64     `json:"coord_error_turn,omitempty"`    // J8: coordinator turn at last go-on tell
+	CoordWakeAt       time.Time  `json:"coord_wake_at,omitempty"`       // J9: oldest delivered wake awaiting a turn
+	CoordWakeTurn     uint64     `json:"coord_wake_turn,omitempty"`     // J9: coordinator turn when CoordWakeAt was sent
+	CoordLastWakeAt   time.Time  `json:"coord_last_wake_at,omitempty"`  // J13: last wake or heartbeat delivered
 }
 
 // Wake is a held wake for the coordinator (design.md 10, J12): queued once

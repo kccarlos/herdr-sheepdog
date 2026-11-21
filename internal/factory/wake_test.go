@@ -63,9 +63,9 @@ func TestJ12HeldWakesOneBatchWhenIdle(t *testing.T) {
 	eng := New(paths, client)
 	srv.Add(hc.Terminal{Address: "coord1", Name: "coord", State: "live", Status: &hc.Status{App: "claude-code", State: "working"}})
 	const id = "proj-wake"
-	st := flow.State{Seq: 1, Project: flow.Project{ID: id, Folder: t.TempDir(), Started: true, RunID: "gone1"}, Settings: flow.DefaultSettings()}
-	st.Settings.WorkerRestarts = 1
 	at := time.Now()
+	st := flow.State{Seq: 1, Project: flow.Project{ID: id, Folder: t.TempDir(), Started: true, RunID: "gone1", Acts: []flow.Act{{Key: flow.AskStartCoordinator, Result: "done", At: at}}}, Settings: flow.DefaultSettings()}
+	st.Settings.WorkerRestarts = 1
 	st.Project.Wakes = []flow.Wake{
 		{Key: "worker_failed", Task: "T1", Why: "N23: the worker is working", Facts: `title "feat: x"; H c1; PR #7, checks green; last verdict none`, At: at},
 		{Key: "no_rule_matched@c2@open@red@clean@same", Task: "T2", Why: "N43: no rule matched", Facts: `title "feat: y"`, At: at},

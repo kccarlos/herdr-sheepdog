@@ -63,6 +63,7 @@ func newLanding(t *testing.T) *landing {
 		t.Fatal(err)
 	}
 	setIdle(t, srv, l.client, l.worker, "idle")
+	srv.Add(hc.Terminal{Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live", Status: &hc.Status{App: "claude-code", State: "working"}})
 	l.edit(func(s *flow.State) {
 		s.Project.RunID = "coord-elsewhere" // the coordinator is not this test's business
 		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: x", EstimateLines: 50, Attempts: []flow.Attempt{{SizeCap: 100,
@@ -497,6 +498,11 @@ func TestSection8EngineBackoffOutageN5AndRetry(t *testing.T) {
 		t.Fatalf("coordinator wake sends = %q, want 1 cleaned message with failed@merge and last words", sends)
 	}
 
+	// Coordinator takes a turn on the wake so J9 does not stop it during the 31m jump.
+	l.srv.SetStatus(coord, &hc.Status{App: "claude-code", State: "working"})
+	l.pass()
+	setIdle(t, l.srv, l.client, coord, "idle")
+	l.pass()
 	// Even past stuck_minutes (31m), neither N42 nor S2 fires again — no loop.
 	now = now.Add(31 * time.Minute)
 	l.pass()

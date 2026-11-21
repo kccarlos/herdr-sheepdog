@@ -317,7 +317,7 @@ func TestPassProjectLogsErrorsAndSkipsDeadRunState(t *testing.T) {
 	realRepo, _ := filepath.EvalSymlinks(repo)
 	st := flow.State{
 		Seq:      1,
-		Project:  flow.Project{ID: projID, Folder: realRepo, Goal: "Goal", Started: true, RunID: "t1"},
+		Project:  flow.Project{ID: projID, Folder: realRepo, Goal: "Goal", Started: true, RunID: "t1", Acts: []flow.Act{{Key: flow.AskStartCoordinator, Result: "done", At: time.Now()}}},
 		Settings: flow.DefaultSettings(),
 	}
 	if err := SaveState(paths.State(projID), st); err != nil {
@@ -345,7 +345,7 @@ func TestPassProjectLogsErrorsAndSkipsDeadRunState(t *testing.T) {
 	}
 
 	// Force commitLocked failure by replacing log.jsonl with a directory while RunID is empty.
-	st.Project.RunID = ""
+	st.Project.RunID, st.Project.Acts = "", nil
 	if err := SaveState(paths.State(projID), st); err != nil {
 		t.Fatal(err)
 	}
