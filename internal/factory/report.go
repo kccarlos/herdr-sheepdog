@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -1276,7 +1275,6 @@ func cycleAt(ids []string, after map[string][]string) string {
 var cliProbeArgv = map[string][]string{
 	"claude": {"claude", "auth", "status", "--json"},
 	"codex":  {"codex", "login", "status"},
-	"agy":    {"agy", "models"},
 }
 
 // checkTasksLaunch checks structural feasibility. Live account facts belong
@@ -1312,8 +1310,7 @@ func checkTasksLaunch(tasks []flow.Task, s flow.Settings) []string {
 	return fails
 }
 
-func probeResolveFacts(ctx context.Context, clis []string, opts DoctorOptions) flow.ResolveFacts {
-	o := opts.withDefaults()
+func probeResolveFacts(ctx context.Context, clis []string, run CommandFunc) flow.ResolveFacts {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	out := make(map[string]flow.CLIFacts, len(clis))
@@ -1328,10 +1325,11 @@ func probeResolveFacts(ctx context.Context, clis []string, opts DoctorOptions) f
 				if cli == "claude" {
 					env = []string{"DISABLE_AUTOUPDATER=1"}
 				}
-				f := classifyProbe(cli, o.RunCommand(ctx, o.TempDir, env, argv...))
-				mu.Lock()
-				out[cli] = f
-				mu.Unlock()
+				if f, ok := classifyProbe(cli, run(ctx, os.TempDir(), env, argv...)); ok {
+					mu.Lock()
+					out[cli] = f
+					mu.Unlock()
+				}
 			}()
 		}
 	}
@@ -1339,41 +1337,28 @@ func probeResolveFacts(ctx context.Context, clis []string, opts DoctorOptions) f
 	return flow.ResolveFacts{CLIs: out}
 }
 
-func classifyProbe(cli string, c CommandOutput) flow.CLIFacts {
-	if c.Exit == 127 || errors.Is(c.Err, exec.ErrNotFound) || errors.Is(c.Err, os.ErrNotExist) {
-		return flow.CLIFacts{}
-	}
+func classifyProbe(cli string, c CommandOutput) (flow.CLIFacts, bool) {
 	if c.TimedOut || c.Err != nil {
-		return flow.CLIFacts{Unknown: true}
+		return flow.CLIFacts{}, false
 	}
-	out := strings.ToLower(c.Stdout + "\n" + c.Stderr)
-	if c.Exit != 0 && world.ScreenClass(cli, out) == flow.ScreenLimit {
-		return flow.CLIFacts{Installed: true, SignedIn: true, QuotaWait: "waiting for " + cli + " quota"}
+	if c.Exit == 127 {
+		return flow.CLIFacts{}, true
 	}
 	switch cli {
 	case "claude":
 		var st struct {
 			LoggedIn *bool `json:"loggedIn"`
 		}
-		if json.Unmarshal([]byte(strings.TrimSpace(c.Stdout)), &st) == nil && st.LoggedIn != nil {
-			return flow.CLIFacts{Installed: true, SignedIn: *st.LoggedIn}
+		if json.Unmarshal([]byte(c.Stdout), &st) == nil && st.LoggedIn != nil {
+			return flow.CLIFacts{Installed: true, SignedIn: *st.LoggedIn}, true
 		}
 	case "codex":
-		if strings.Contains(out, "not logged in") {
-			return flow.CLIFacts{Installed: true}
+		if strings.Contains(strings.ToLower(c.Stdout+"\n"+c.Stderr), "not logged in") {
+			return flow.CLIFacts{Installed: true}, true
 		}
-	case "agy":
-		if ms := parseAgyModels(c.Stdout); c.Exit == 0 && len(ms) > 0 {
-			models := make(map[string]bool, len(ms))
-			for _, m := range ms {
-				models[m] = true
-			}
-			return flow.CLIFacts{Installed: true, SignedIn: true, Models: models}
+		if c.Exit == 0 {
+			return flow.CLIFacts{Installed: true, SignedIn: true}, true
 		}
-		if c.Exit != 0 && (strings.Contains(out, "sign in") || strings.Contains(out, "logged in") || strings.Contains(out, "unauthenticated")) {
-			return flow.CLIFacts{Installed: true}
-		}
-		return flow.CLIFacts{Unknown: true}
 	}
-	return flow.CLIFacts{Installed: c.Exit == 0, SignedIn: c.Exit == 0, Unknown: c.Exit != 0}
+	return flow.CLIFacts{}, false
 }

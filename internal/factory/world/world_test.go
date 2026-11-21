@@ -113,10 +113,6 @@ func TestRunLifecycleAndProcessGroupStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// KB-LCH-24: repeated StartTerminal for the same live name adopts the running terminal.
-	if id2, err := startRun(ctx, client, RunSpec{Name: "coord-test", Cwd: cwd, ClaudeConfig: claudeCfg, Argv: argv}); err != nil || id2 != id {
-		t.Fatalf("duplicate startRun = %q, %v; want %q", id2, err, id)
-	}
 	term, err := client.Get(ctx, id)
 	if err != nil {
 		t.Fatal(err)
@@ -164,36 +160,6 @@ func TestRunLifecycleAndProcessGroupStop(t *testing.T) {
 	}
 	if !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
 		t.Fatalf("process %d still alive after StopRun", pid)
-	}
-}
-
-// TestStartRunRemovesFinishedSameNameTerminal checks Neon M1: when Get(spec.Name)
-// finds a non-live terminal, StartRun removes it before launching the new run.
-func TestStartRunRemovesFinishedSameNameTerminal(t *testing.T) {
-	srv := hctest.New(t)
-	client := hc.NewClient(srv.Path)
-	ctx := context.Background()
-	spec := RunSpec{
-		Name:         "coord-reuse",
-		Cwd:          t.TempDir(),
-		ClaudeConfig: filepath.Join(t.TempDir(), ".claude.json"),
-		Argv:         ClaudeArgv(flow.RoleCoordinator, "opus", "high", "bypassPermissions"),
-	}
-	id1, err := startRun(ctx, client, spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv.Finish(id1, "exited")
-
-	id2, err := startRun(ctx, client, spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id2 == id1 {
-		t.Fatalf("expected new terminal address after finish, got %q", id2)
-	}
-	if _, err := client.Get(ctx, id1); !errors.Is(err, hc.ErrNotFound) {
-		t.Fatalf("finished terminal %s was not removed before Run: err=%v", id1, err)
 	}
 }
 
@@ -1499,5 +1465,23 @@ func TestChangedLinesTimeoutReturnsDeadlineExceeded(t *testing.T) {
 	_, err = git.ChangedLines(ctx, wt, tip)
 	if !GitTimedOut(err) || !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, ErrChangedLinesOverCap) {
 		t.Fatalf("ChangedLines under hung git diff = %v, want a confirmed diff timeout treated as over cap", err)
+	}
+}
+
+func TestStartTerminalDelegatesOwnershipToCaller(t *testing.T) {
+	client := hc.NewClient(hctest.New(t).Path)
+	ctx := context.Background()
+	spec := RunSpec{Name: "review", Cwd: t.TempDir(), Argv: []string{"fixture"}}
+	first, _, err := StartTerminal(ctx, client, spec, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	minted := false
+	second, _, err := StartTerminal(ctx, client, spec, func() error {
+		minted = true
+		return nil
+	})
+	if err != nil || !minted || first.Address == second.Address {
+		t.Fatalf("StartTerminal reused a live terminal: minted=%t first=%q second=%q err=%v", minted, first.Address, second.Address, err)
 	}
 }

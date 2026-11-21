@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -92,104 +91,40 @@ func TestPlanApplyDoesNotProbe(t *testing.T) {
 }
 
 func TestProbeResolveFacts(t *testing.T) {
-	t.Run("signed in and DISABLE_AUTOUPDATER", func(t *testing.T) {
-		var sawClaudeEnv atomic.Bool
-		facts := probeResolveFacts(context.Background(), []string{"claude", "codex", "agy"}, DoctorOptions{
-			RunCommand: func(_ context.Context, _ string, env []string, argv ...string) CommandOutput {
-				switch argv[0] {
-				case "claude":
-					sawClaudeEnv.Store(slices.Contains(env, "DISABLE_AUTOUPDATER=1"))
-					return CommandOutput{Stdout: `{"loggedIn":true}`, Exit: 0}
-				case "codex":
-					return CommandOutput{Stdout: "Logged in using ChatGPT\n", Exit: 0}
-				case "agy":
-					return CommandOutput{Stdout: "gemini-4-neon-medium  Gemini 4 Neon\n", Exit: 0}
-				}
-				return CommandOutput{Exit: 1}
-			},
-		})
-		if !sawClaudeEnv.Load() {
-			t.Fatal("claude probe missing DISABLE_AUTOUPDATER=1")
+	var sawClaudeEnv atomic.Bool
+	facts := probeResolveFacts(context.Background(), []string{"claude", "codex"}, func(_ context.Context, _ string, env []string, argv ...string) CommandOutput {
+		if argv[0] == "claude" {
+			sawClaudeEnv.Store(slices.Contains(env, "DISABLE_AUTOUPDATER=1"))
+			return CommandOutput{Stdout: `{"loggedIn":true}`, Exit: 0}
 		}
-		if c := facts.CLIs["claude"]; !c.Installed || !c.SignedIn || c.Unknown {
-			t.Fatalf("claude = %+v", c)
-		}
-		if c := facts.CLIs["codex"]; !c.Installed || !c.SignedIn || c.Unknown {
-			t.Fatalf("codex = %+v", c)
-		}
-		if c := facts.CLIs["agy"]; !c.Installed || !c.SignedIn || !c.Models["gemini-4-neon-medium"] {
-			t.Fatalf("agy = %+v", c)
-		}
+		return CommandOutput{Stdout: "Not logged in\n", Exit: 1}
 	})
+	if !sawClaudeEnv.Load() {
+		t.Fatal("claude probe missing DISABLE_AUTOUPDATER=1")
+	}
+	if c := facts.CLIs["claude"]; !c.Installed || !c.SignedIn {
+		t.Fatalf("claude = %+v", c)
+	}
+	if c := facts.CLIs["codex"]; !c.Installed || c.SignedIn {
+		t.Fatalf("codex = %+v", c)
+	}
 
-	t.Run("signed out and not installed", func(t *testing.T) {
-		facts := probeResolveFacts(context.Background(), []string{"claude", "codex", "agy"}, DoctorOptions{
-			RunCommand: func(_ context.Context, _ string, _ []string, argv ...string) CommandOutput {
-				switch argv[0] {
-				case "claude":
-					return CommandOutput{Stdout: `{"loggedIn":false}`, Exit: 1}
-				case "codex":
-					return CommandOutput{Stdout: "Not logged in\n", Exit: 1}
-				case "agy":
-					return CommandOutput{Stderr: "Error: Please sign in\n", Exit: 1}
-				}
-				return CommandOutput{Exit: 127}
-			},
-		})
-		for _, cli := range []string{"claude", "codex", "agy"} {
-			if c := facts.CLIs[cli]; !c.Installed || c.SignedIn || c.Unknown {
-				t.Fatalf("signed-out %s = %+v", cli, c)
-			}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	facts = probeResolveFacts(ctx, []string{"claude", "codex"}, func(ctx context.Context, _ string, _ []string, argv ...string) CommandOutput {
+		if argv[0] == "claude" {
+			<-ctx.Done()
+			return CommandOutput{Exit: -1, TimedOut: true}
 		}
-		missing := probeResolveFacts(context.Background(), []string{"claude", "codex"}, DoctorOptions{
-			RunCommand: func(_ context.Context, _ string, _ []string, argv ...string) CommandOutput {
-				if argv[0] == "claude" {
-					return CommandOutput{Exit: 127}
-				}
-				return CommandOutput{Exit: -1, Err: exec.ErrNotFound}
-			},
-		})
-		for _, cli := range []string{"claude", "codex"} {
-			if c := missing.CLIs[cli]; c.Installed || c.Unknown {
-				t.Fatalf("not-installed %s = %+v", cli, c)
-			}
-		}
+		return CommandOutput{Stderr: "unexpected error", Exit: 2}
 	})
-
-	t.Run("known quota error", func(t *testing.T) {
-		got := classifyProbe("codex", CommandOutput{Exit: 1, Stderr: "You've hit your usage limit"})
-		if got.Unknown || got.QuotaWait != "waiting for codex quota" {
-			t.Fatalf("quota probe = %+v", got)
-		}
-	})
-
-	t.Run("hang unreadable exit and empty model list are unknown", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-		defer cancel()
-		start := time.Now()
-		facts := probeResolveFacts(ctx, []string{"claude", "codex", "agy"}, DoctorOptions{
-			RunCommand: func(ctx context.Context, _ string, _ []string, argv ...string) CommandOutput {
-				switch argv[0] {
-				case "claude":
-					<-ctx.Done()
-					return CommandOutput{Exit: -1, TimedOut: true}
-				case "codex":
-					return CommandOutput{Stderr: "unexpected error", Exit: 2}
-				case "agy":
-					return CommandOutput{Stdout: "", Exit: 0}
-				}
-				return CommandOutput{Exit: 1}
-			},
-		})
-		if time.Since(start) > time.Second {
-			t.Fatalf("probe took %v, want bounded by ctx", time.Since(start))
-		}
-		for _, cli := range []string{"claude", "codex", "agy"} {
-			if c := facts.CLIs[cli]; !c.Unknown {
-				t.Fatalf("unknown %s = %+v, want Unknown=true", cli, c)
-			}
-		}
-	})
+	if time.Since(start) > time.Second {
+		t.Fatalf("probe took %v, want bounded by ctx", time.Since(start))
+	}
+	if len(facts.CLIs) != 0 {
+		t.Fatalf("expected no settled probe results, got %+v", facts.CLIs)
+	}
 }
 
 func TestPlanAmendKeepsStoredWorkerAndRequestOnlyNoWorkerNotice(t *testing.T) {
@@ -261,8 +196,12 @@ func TestLaunchWaitsBeforeWorktreeAndUsesProbedModels(t *testing.T) {
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
 	}
+	now := time.Now()
+	eng.Now = func() time.Time { return now }
+	probes := 0
 	account := flow.CLIFacts{Installed: true}
 	eng.probeLaunch = func(context.Context, []string) flow.ResolveFacts {
+		probes++
 		return flow.ResolveFacts{CLIs: map[string]flow.CLIFacts{"claude": account}}
 	}
 	plan := json.RawMessage(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: x",` + testPlanJSON + `, "request":{"worker":[{"cli":"claude","model":"unoffered","effort":"high"}]}}]}`)
@@ -284,12 +223,17 @@ func TestLaunchWaitsBeforeWorktreeAndUsesProbedModels(t *testing.T) {
 		}
 	}
 	checkWait("claude is not signed in")
-	account.SignedIn, account.QuotaWait = true, "waiting for quota"
-	checkWait("waiting for quota")
-	account.QuotaWait = ""
+	if probes != 1 {
+		t.Fatalf("N11 and J7 probed %d times, want one shared probe", probes)
+	}
+	now = now.Add(cliProbeTTL)
+	account.SignedIn = true
 	account.Models = map[string]bool{"coordinator-model": true, "worker-model": true, "opus": true}
 	eng.passProject(ctx, id, false) // N11 and J7
 	eng.passProject(ctx, id, false) // N23
+	if probes != 2 {
+		t.Fatalf("after refresh and N23: %d probes, want two total", probes)
+	}
 	st = load()
 	for _, want := range []struct {
 		run           *flow.RunRecord
@@ -322,8 +266,9 @@ func TestReviewerLaunchFallsBackFromSignedOutCandidate(t *testing.T) {
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
 	}
+	eng.cliProbes = nil
 	eng.probeLaunch = func(_ context.Context, clis []string) flow.ResolveFacts {
-		if !slices.Equal(clis, []string{"claude", "codex"}) {
+		if !slices.Equal(clis, []string{"codex", "claude"}) {
 			t.Fatalf("probed %v, want Claude and Codex", clis)
 		}
 		return flow.ResolveFacts{CLIs: map[string]flow.CLIFacts{
@@ -355,12 +300,12 @@ func TestReviewerLadderUsesCLIWithModelAndExplicitList(t *testing.T) {
 	facts := flow.ResolveFacts{Worker: flow.Candidate{CLI: "claude", Model: "worker"}}
 	a := flow.Attempt{Rounds: []flow.Round{{Head: "h", Verdict: flow.VerdictPass, Reviewer: flow.Reviewer{CLI: "claude", Model: "shared"}}}}
 	in, repeat, why := reviewChoice(flow.Task{}, s, a, "h", facts, nil)
-	if why != "" || repeat || in.CLI != "codex" || in.Model != "shared" {
-		t.Fatalf("after Claude's pass: %+v repeat=%t reason=%q", in, repeat, why)
+	if why != "" || repeat != "" || in.CLI != "codex" || in.Model != "shared" {
+		t.Fatalf("after Claude's pass: %+v repeat=%q reason=%q", in, repeat, why)
 	}
 	facts.Worker.Model = "shared"
 	in, repeat, why = reviewChoice(flow.Task{}, s, a, "h", facts, []string{"codex/shared"})
-	if why != "" || !repeat || in.CLI != "codex" || in.Model != "shared" {
-		t.Fatalf("after Codex ran out of alternatives: %+v repeat=%t reason=%q", in, repeat, why)
+	if why != "" || repeat == "" || in.CLI != "codex" || in.Model != "shared" {
+		t.Fatalf("after Codex ran out of alternatives: %+v repeat=%q reason=%q", in, repeat, why)
 	}
 }

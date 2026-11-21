@@ -175,7 +175,7 @@ func TestValidateCandidatesTrimsAndRefusesCoordinator(t *testing.T) {
 }
 
 func TestResolveUnknownDoesNotRefuse(t *testing.T) {
-	facts := ResolveFacts{CLIs: map[string]CLIFacts{"codex": {Unknown: true}}}
+	facts := ResolveFacts{}
 	s := DefaultSettings()
 	s.Models = map[string][]Candidate{RoleWorker: {{CLI: "codex", Model: "gpt-6.2-sol", Effort: "medium"}}}
 	if in, why := Resolve(RoleWorker, Task{}, s, facts); why != "" || in.CLI != "codex" {

@@ -134,7 +134,7 @@ func graphViewOf(s flow.State, lastLog map[string]LogLine) GraphView {
 		if a := flow.OpenAttempt(t); revActive(a) {
 			model, term = a.Review.Reviewer.Model, cmp.Or(a.Review.RunID, a.RunID)
 		} else if a != nil && a.RunID != "" {
-			model, term = cmp.Or(storedWorkerModel(t).Model, flow.DefaultModels(s.Settings)[flow.RoleWorker][0].Model), a.RunID
+			model, term = storedWorkerModel(t).Model, a.RunID
 		}
 		tasks = append(tasks, TaskView{
 			Ref: t.ID, Title: t.Title, Stage: stage, WhyWaiting: why, After: append([]string{}, t.After...), Dependents: append([]string{}, deps[t.ID]...),

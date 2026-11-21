@@ -35,12 +35,11 @@ type Candidate struct {
 }
 
 // CLIFacts is what Resolve knows about one CLI: whether it is installed and
-// signed in, whether the probe was inconclusive (Unknown), and the models
-// offered to this account (nil means unknown).
+// signed in and the models offered to this account (nil means unknown).
+// An inconclusive probe is absent from ResolveFacts.CLIs.
 type CLIFacts struct {
-	Installed, SignedIn, Unknown bool
-	Models                       map[string]bool
-	QuotaWait                    string
+	Installed, SignedIn bool
+	Models              map[string]bool
 }
 
 // ResolveFacts holds the non-I/O world facts Resolve checks (design.md 9.1).
@@ -51,9 +50,7 @@ type ResolveFacts struct {
 	Avoid  []Candidate            // models already used in this round sequence
 }
 
-// UnprobedFacts marks known CLIs inconclusive so Resolve picks the first
-// configured candidate when CLI probes have not run this pass.
-var UnprobedFacts = ResolveFacts{CLIs: map[string]CLIFacts{"claude": {Unknown: true}, "codex": {Unknown: true}, "agy": {Unknown: true}}}
+var knownCLIs = []string{"claude", "codex", "agy"}
 
 // Intent is the resolved launch intent for a role (design.md 9.1).
 type Intent struct{ Role, CLI, Model, Effort, Perm, Continue string }
@@ -87,8 +84,8 @@ func ValidateCandidates(field string, m map[string][]Candidate) error {
 		for i := range m[role] {
 			c := &m[role][i]
 			c.CLI, c.Model, c.Effort = strings.TrimSpace(c.CLI), strings.TrimSpace(c.Model), strings.TrimSpace(c.Effort)
-			if c.CLI != "claude" && c.CLI != "codex" && c.CLI != "agy" {
-				return fmt.Errorf("%s.%s[%d]: unknown cli %q (allowed claude, codex, agy)", field, role, i, c.CLI)
+			if !slices.Contains(knownCLIs, c.CLI) {
+				return fmt.Errorf("%s.%s[%d]: unknown cli %q (allowed %s)", field, role, i, c.CLI, strings.Join(knownCLIs, ", "))
 			} else if c.Model == "" {
 				return fmt.Errorf("%s.%s[%d]: model is required", field, role, i)
 			} else if c.Effort != "low" && c.Effort != "medium" && c.Effort != "high" {
@@ -127,21 +124,19 @@ func Resolve(role string, task Task, settings Settings, facts ResolveFacts) (Int
 		}
 		cf, probed := facts.CLIs[c.CLI]
 		var why string
-		if _, known := UnprobedFacts.CLIs[c.CLI]; !known {
+		if !slices.Contains(knownCLIs, c.CLI) {
 			why = fmt.Sprintf("unknown cli %q", c.CLI)
 		} else if facts.Check != nil {
 			why = facts.Check(c)
 		}
 		if why != "" {
 			first = cmp.Or(first, why)
-		} else if probed && !cf.Unknown && !cf.Installed {
+		} else if probed && !cf.Installed {
 			first = cmp.Or(first, c.CLI+" is not installed")
-		} else if probed && !cf.Unknown && !cf.SignedIn {
+		} else if probed && !cf.SignedIn {
 			first = cmp.Or(first, c.CLI+" is not signed in")
-		} else if !cf.Unknown && cf.Models != nil && !cf.Models[c.Model] {
+		} else if cf.Models != nil && !cf.Models[c.Model] {
 			first = cmp.Or(first, fmt.Sprintf("model %s is not offered to this account", c.Model))
-		} else if cf.QuotaWait != "" {
-			first = cmp.Or(first, cf.QuotaWait)
 		} else if (role == RoleReviewer || role == RoleRetro) && c.SameModel(facts.Worker) {
 			first = cmp.Or(first, "the reviewer must differ from the worker")
 		} else {

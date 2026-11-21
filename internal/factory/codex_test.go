@@ -35,7 +35,7 @@ func TestReviewerCandidatesBySetting(t *testing.T) {
 		{cdx, []string{"opus"}, codexModel},
 		{cdx, []string{"opus", codexModel}, "opus"},
 	} {
-		facts := flow.UnprobedFacts
+		facts := flow.ResolveFacts{}
 		facts.Worker = flow.DefaultModels(def)[flow.RoleWorker][0]
 		a := flow.Attempt{}
 		for _, model := range tc.passed {
