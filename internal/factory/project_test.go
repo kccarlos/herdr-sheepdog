@@ -43,6 +43,10 @@ func newProjectHarness(t *testing.T, goal string) *projectHarness {
 	h.eng = New(h.paths, h.client)
 	h.eng.Log = logging.NewJSONLLogger(h.logBuf)
 	h.eng.Now = func() time.Time { return h.now }
+	h.eng.onInvariant = func(vs []flow.InvariantViolation) {
+		h.t.Helper()
+		h.t.Fatalf("invariant broken after pass: %+v", vs)
+	}
 	if err := h.eng.Start(h.repo, goal, 2); err != nil {
 		t.Fatal(err)
 	}

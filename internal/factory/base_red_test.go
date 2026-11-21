@@ -118,6 +118,8 @@ func TestBaseRedPastMainRedMinutesOldestTaskOnce(t *testing.T) {
 	gitIn(t, wt2.Path, "commit", "-m", "feat: y")
 	c2 := gitIn(t, wt2.Path, "rev-parse", "HEAD")
 	gitIn(t, wt2.Path, "push", "origin", c2+":refs/heads/"+wt2.Branch)
+	// Keep T2 in its own worktree (I3) at l.c1 so both T1 and T2 have tip == H == l.c1 and are held by N38.
+	gitIn(t, wt2.Path, "reset", "--hard", l.c1)
 	w2, err := startRun(ctx, l.client, world.RunSpec{Name: "worker-t2", Cwd: wt2.Path, Argv: []string{"sh"}})
 	if err != nil {
 		t.Fatal(err)
@@ -136,9 +138,6 @@ func TestBaseRedPastMainRedMinutesOldestTaskOnce(t *testing.T) {
 				Accepts: []flow.Accept{}, Acts: []flow.Act{},
 			}},
 		})
-		// Align T2's Ready/tip by using T1's worktree head on T2? No: inspect checks tip == H;
-		// point T2's worktree to l.wt so both have tip == H == l.c1 and are held by N38.
-		s.Tasks[1].Attempts[0].Worktree = l.wt
 	})
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)

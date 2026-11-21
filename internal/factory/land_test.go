@@ -43,6 +43,10 @@ func newLanding(t *testing.T) *landing {
 	l.repo, l.gh = repo, installFakeGH(t)
 	l.eng = New(l.paths, l.client)
 	l.eng.Log = logging.NewJSONLLogger(l.log)
+	l.eng.onInvariant = func(vs []flow.InvariantViolation) {
+		l.t.Helper()
+		l.t.Fatalf("invariant broken after pass: %+v", vs)
+	}
 	if err := l.eng.Start(repo, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
