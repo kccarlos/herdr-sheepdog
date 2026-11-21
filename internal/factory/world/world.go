@@ -454,7 +454,7 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 		if codexStatus == "idle" && hash == rec.SentScreenHash {
 			codexStatus = "unknown"
 		}
-		if codexStatus != rec.Status && (codexStatus != "unknown" || rec.Status == "idle") {
+		if codexStatus != rec.Status && codexStatus != "unknown" {
 			evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: codexStatus, ScreenHash: hash, Inferred: true})
 		}
 	}

@@ -147,7 +147,6 @@ var RunRows = []Row[RunIn]{
 	rrow("R25", PhaseWorking, EvDeliver, func(x RunIn) bool { return x.E.Urgent }, PhaseWorking, RunActInterrupt, RunActSend),
 	rrow("R26", "starting|working|blocked", EvDeliver, nil, ""),
 	rrow("R27", "idle|blocked", "status:working", nil, PhaseWorking),
-	rrow("R27", PhaseIdle, "status:unknown", func(x RunIn) bool { return x.E.Inferred }, PhaseWorking),
 	rrow("R28", PhaseBlocked, "status:idle|status:done", nil, PhaseWorking),
 	rrow("R29", PhaseBlocked, EvTick, func(x RunIn) bool { return x.R.BlockedKind == "auth" && x.blockedOut() }, "ended(signed_out)", RunActStop),
 	rrow("R29", PhaseBlocked, EvTick, RunIn.blockedOut, "ended(stuck)", RunActStop),

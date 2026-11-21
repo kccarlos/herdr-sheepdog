@@ -700,7 +700,7 @@ One interface, three data rows (Claude Code, Codex, agy). Facts are in [notes/ad
 
 Per-CLI differences that are **data**: base command, fixed environment (Claude Code's auto-updater is switched off on every start and resume, because an updated binary made macOS ask for volume access and every new agent hung), the flags for model, effort and each permission mode, how the first prompt is passed, the resume form, the session file location, the pool name. Three adapter rules from field failures: environment markers of the parent session are removed before a start, or the new agent writes no transcript and cannot be found or resumed; Codex runs on its own app server, never a shared one (a shared one once made every turn fail); and a CLI's own config file is edited only to pre-set trust for a worktree, keeping its mode and every other field, honouring a config-folder override, and leaving a malformed file alone (Claude Code; Codex needs no edit, below).
 
-**Codex as a reviewer, as built** (opt-in with the project setting `second_reviewer`, whose row is in [CONFIG.md](../../../CONFIG.md); facts from spike S0.3's Codex half and PR #700). Codex reviews a round only when an opus pass already covers the head, so it gives L8's second passing round; every other round, and every worker, stays on Claude Code until `Resolve` and candidate lists (slice 5b).
+**Codex as a reviewer, as built** (opt-in with the project setting `second_reviewer`, whose row is in [CONFIG.md](../../../CONFIG.md); facts from spike S0.3's Codex half and PR #700). Codex reviews a round only when an opus pass already covers the head, so it gives L8's second passing round; every other round stays on Claude Code until candidate lists (`models`) select otherwise.
 
 | Fact | Rule |
 |---|---|
@@ -709,6 +709,8 @@ Per-CLI differences that are **data**: base command, fixed environment (Claude C
 | The owner's own instructions | The run's `CODEX_HOME` is one folder per data dir (`<data_dir>/factory/codex-home`) holding only a link to the owner's `auth.json`, so the reviewer reads none of the owner's global instructions, config or skills. If Codex has replaced that link with a file (a sign-in refresh), the engine never touches it: that round runs on Claude opus and the daemon log names the fix |
 | A repo's own `.codex/config.toml` | Still loads in a trusted folder; no per-run override turns it off without a prompt (O14) |
 | Status | The report tag ends the run: the screen is read every pass, after the last prompt echo, with no wait for idle. Non-empty output moves the run to `working`, so a review with no tag that goes quiet ends via R21–R22, an idle run with no tag is nudged once then stopped by N29, and a run older than `review_minutes` is stopped by N29, each retrying under section 4.8 (`reviewer_retries`) |
+
+**Codex as worker and coordinator** (slice 5b.5, PR #740): runs unattended with `--dangerously-bypass-approvals-and-sandbox` and the same `-c` overrides and scoped `CODEX_HOME`. Turn end is read from the current screen (the `Working (... esc to interrupt)` status line reads `working`; the composer line without it reads `idle`; an unrecognised screen or an unchanged `sent_screen_hash` stays silent and keeps the run's state), and a worker's session id is read from its unique `session_meta` rollout in the scoped `CODEX_HOME` (matching `cwd` after start; a coordinator restarts fresh).
 
 Per-CLI differences that need **code**: pre-setting trust for a worktree, the agy sandbox wrapper for read-only runs, listing models.
 
@@ -1119,7 +1121,7 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | O18 | The base observer makes two GitHub calls per pass, and more when a run on the head commit was cancelled by hand. Owner: cheap sync |
 | O19 | A workflow file that fails to start (`startup_failure`) on the base reads green: the base observer does not count it red, though the checks rollup does |
 | O20 | How the menu-bar app gets a pairing code over a channel other programs of the same user cannot read (for example the Mac app as a paired device whose key is in its own Keychain), whether `GET /api/pair` and `sheepdog pair` stop giving codes to any caller on this computer, and a limit on enrol attempts that also covers callers on this computer, since a short code can be guessed by retrying. Owner: slice 6 |
-| O21 | A hung coordinator can lose a wake's text when the engine replaces it. The engine has already marked the wake delivered. Slice 5b, cross-PR finding #3 |
+| O21 | A hung coordinator can lose a wake's text when the engine replaces it. The engine has already marked the wake delivered. **Done (5b.5, #740):** requeues interrupted wakes for every coordinator CLI |
 | O22 | A recorded PR number that GitHub can no longer read can look like confirmed absence to N26. Keep the PR read unknown in that case. Slice 5b, cross-PR finding #15 |
 | O23 | Screen phrase matching can mistake agent output for CLI status. R19 can end an idle run whose last line starts with a limit phrase. Slice 5b, cross-PR finding #17 |
 | O24 | R21 can interrupt a worker when Claude Code folds a long command's output and only the stripped timer changes. Count a live foreground child as activity in slice 5b |
