@@ -118,7 +118,7 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 	t := &s.Tasks[ti]
 	a := &t.Attempts[len(t.Attempts)-1]
 	h := flow.H(*a)
-	ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
+	ctx, cancel := context.WithTimeout(world.GitRepository(context.Background(), s.Project.Folder), lockGitTimeout)
 	defer cancel()
 	tip, rel, clean, err := e.git.InspectWorktree(ctx, a.Worktree, h)
 	if err != nil {
@@ -187,7 +187,11 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 			return e.refuse(id, "invalid_report", `A ready report with proofs must state what was skipped or not checked (--skipped "<what was left out>", or --skipped "" when nothing was skipped).`)
 		}
 	}
-	if mo, _ := e.git.MergeOnly(ctx, a.Worktree, h, tip); mo { // a ready at a merge-only tip is N20's move too: no round
+	mctx, mcancel := context.WithTimeout(world.GitRepository(context.Background(), s.Project.Folder), lockGitTimeout)
+	defer mcancel()
+	if mo, err := e.git.MergeOnly(mctx, a.Worktree, h, tip); err != nil {
+		return err
+	} else if mo { // a ready at a merge-only tip is N20's move too: no round
 		a.MergeOnly = append(a.MergeOnly, flow.Advance{From: h, To: tip})
 	}
 	a.Ready, a.NothingToChange = append(a.Ready, flow.Ready{Head: tip, Proofs: proofs, Touched: touched, Skipped: skipped}), ""
@@ -806,7 +810,7 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		}
 		newCap, note, msg := a.SizeCap, "", fmt.Sprintf("The coordinator lets task %s go on: %s. Continue the task.", t.ID, why)
 		if rc.Trigger == flow.TriggerSize {
-			ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
+			ctx, cancel := context.WithTimeout(world.GitRepository(context.Background(), s.Project.Folder), lockGitTimeout)
 			defer cancel()
 			lines, err := e.git.ChangedLines(ctx, a.Worktree, "HEAD") // the same measure as N12's
 			base := lines

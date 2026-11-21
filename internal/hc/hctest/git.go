@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -25,8 +24,8 @@ func GitExec(p hc.ExecParams) (hc.ExecResult, error) {
 		return hc.ExecResult{}, err
 	}
 	rel, err := filepath.Rel(tmp, dir)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") || len(p.Argv) == 0 ||
-		p.Argv[0] != "git" || p.Timeout == nil || *p.Timeout <= 0 || p.Env["GIT_TERMINAL_PROMPT"] != "0" {
+	if err != nil || !filepath.IsLocal(rel) || len(p.Argv) == 0 ||
+		p.Argv[0] != "git" || p.Timeout == nil || *p.Timeout <= 0 || p.Env["GIT_TERMINAL_PROMPT"] != "0" || p.Env["GIT_ASKPASS"] != "" {
 		return hc.ExecResult{}, fmt.Errorf("unexpected fixture git request in %s", dir)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*p.Timeout*float64(time.Second)))
@@ -35,10 +34,7 @@ func GitExec(p hc.ExecParams) (hc.ExecResult, error) {
 	cmd.Dir, cmd.WaitDelay = dir, time.Second
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + tmp, "TMPDIR=" + tmp, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_ALLOW_PROTOCOL=file"}
-	for k, v := range p.Env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + tmp, "TMPDIR=" + tmp, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_ALLOW_PROTOCOL=file", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS="}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err = cmd.Run()
@@ -49,7 +45,7 @@ func GitExec(p hc.ExecParams) (hc.ExecResult, error) {
 	if cmd.ProcessState == nil {
 		return r, err
 	}
-	if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+	if status := cmd.ProcessState.Sys().(syscall.WaitStatus); status.Signaled() {
 		signal := int(status.Signal())
 		r.Signal = &signal
 	} else {

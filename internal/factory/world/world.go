@@ -68,7 +68,7 @@ func FailureClass(err error) string {
 		return flow.ClassSettled
 	case errors.As(err, &ee) && (ee.ExitCode() == 4 || ee.ExitCode() == 126 || ee.ExitCode() == 127):
 		return flow.ClassSettled
-	case httpSettledRe.MatchString(err.Error()):
+	case gitExit(err, 126), gitExit(err, 127), httpSettledRe.MatchString(err.Error()):
 		return flow.ClassSettled
 	}
 	return flow.ClassTransient
@@ -612,7 +612,17 @@ func (g *Git) NewWorktree(ctx context.Context, repo, worktreeDir, taskID, title 
 	}
 	if testing.Testing() {
 		abs, err := filepath.Abs(worktreeDir)
-		if rel, rerr := filepath.Rel(os.TempDir(), abs); err != nil || rerr != nil || strings.HasPrefix(rel, "..") {
+		tmp, terr := filepath.EvalSymlinks(os.TempDir())
+		// A new worktree may have missing parents. Resolve the nearest existing ancestor.
+		var resolved string
+		for candidate := abs; err == nil; candidate = filepath.Dir(candidate) {
+			resolved, err = filepath.EvalSymlinks(candidate)
+			if _, statErr := os.Lstat(candidate); err == nil || !os.IsNotExist(statErr) {
+				break
+			}
+			err = nil
+		}
+		if rel, rerr := filepath.Rel(tmp, resolved); err != nil || terr != nil || rerr != nil || strings.HasPrefix(rel, "..") {
 			return Worktree{}, Fail(flow.ClassSettled, fmt.Errorf("world: %s is outside the temp dir under go test", worktreeDir))
 		}
 	}
@@ -624,20 +634,27 @@ func (g *Git) NewWorktree(ctx context.Context, repo, worktreeDir, taskID, title 
 	if slug != "" {
 		branch += "-" + slug
 	}
+	ctx = GitRepository(ctx, repo)
 	if _, err := os.Stat(filepath.Join(worktreeDir, ".git")); err == nil {
 		worktreeDir = realPath(worktreeDir)
-		c1, e1 := g.gitCmd(ctx, repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
-		c2, e2 := g.gitCmd(ctx, worktreeDir, "rev-parse", "--path-format=absolute", "--git-common-dir")
-		if e1 == nil && e2 == nil && c1 == c2 {
-			if b, _ := g.gitCmd(ctx, worktreeDir, "symbolic-ref", "--quiet", "--short", "HEAD"); b != "" {
-				branch = b
+		c1, err := g.gitCmd(ctx, repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		if err != nil {
+			return Worktree{}, err
+		}
+		c2, err := g.gitCmd(ctx, worktreeDir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		if err != nil {
+			return Worktree{}, err
+		}
+		if c1 == c2 {
+			if branch, err = g.gitCmd(ctx, worktreeDir, "symbolic-ref", "--quiet", "--short", "HEAD"); err != nil {
+				return Worktree{}, err
 			}
-			ref, _, _ := g.remoteBaseCommit(ctx, repo, false)
-			base, _ = g.gitCmd(ctx, worktreeDir, "merge-base", "HEAD", ref)
-			if base == "" {
-				if base, err = g.gitCmd(ctx, worktreeDir, "rev-parse", "--verify", "HEAD^{commit}"); err != nil {
-					return Worktree{}, err
-				}
+			ref, _, err := g.remoteBaseCommit(ctx, repo, false)
+			if err != nil {
+				return Worktree{}, err
+			}
+			if base, err = g.gitCmd(ctx, worktreeDir, "merge-base", "HEAD", ref); err != nil {
+				return Worktree{}, err
 			}
 		}
 	}
@@ -835,6 +852,8 @@ func (g *Git) DeltaRanges(ctx context.Context, worktree, since, head string) ([]
 	return ranges, nil
 }
 
+var ErrChangedLinesOverCap = errors.New("changed lines over cap or unreadable in full")
+
 // ChangedLines is the lines added plus removed at tip against its merge base
 // with the base branch, as git last fetched it (N12, design.md 11.5). It
 // does not fetch: it runs every pass. Every file counts as text, so no
@@ -847,6 +866,10 @@ func (g *Git) ChangedLines(ctx context.Context, dir, tip string) (int, error) {
 	// The patch, not --numstat: numstat still calls a -diff or NUL file
 	// binary under --text.
 	out, err := g.gitCmd(ctx, dir, "diff", "--text", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=0", ref+"..."+tip)
+	var result *GitError
+	if GitTimedOut(err) || errors.As(err, &result) && result.RPC == nil && result.Result.Truncated {
+		return 0, fmt.Errorf("%w: %w", ErrChangedLinesOverCap, err)
+	}
 	n, hunk := 0, false
 	for ln := range strings.Lines(out) {
 		switch {

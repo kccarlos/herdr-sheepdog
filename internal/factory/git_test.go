@@ -22,7 +22,7 @@ func fixtureGit(t *testing.T) *world.Git {
 	t.Helper()
 	srv := hctest.New(t)
 	srv.OnExec = hctest.GitExec
-	return world.NewGit(hc.NewClient(srv.Path), nil)
+	return world.NewGit(hc.NewClient(srv.Path), nil, nil)
 }
 
 func newGitTestEngine(t *testing.T, paths Paths, client *hc.Client) *Engine {
@@ -30,8 +30,8 @@ func newGitTestEngine(t *testing.T, paths Paths, client *hc.Client) *Engine {
 	e := New(paths, client)
 	srv := hctest.New(t)
 	srv.OnExec = hctest.GitExec
-	e.git = world.NewGit(hc.NewClient(srv.Path), func(folder string) {
-		e.logEvent("factory.git_suppressed", map[string]string{"folder": folder})
+	e.git = world.NewGit(hc.NewClient(srv.Path), e.now, func(event, folder string) {
+		e.logEvent(event, map[string]string{"folder": folder})
 	})
 	return e
 }
@@ -45,10 +45,10 @@ func TestGitRPCFailureLeavesTaskFactsUnknown(t *testing.T) {
 		}
 		return hctest.GitExec(p)
 	}
-	l.eng.git = world.NewGit(hc.NewClient(srv.Path), nil)
+	l.eng.git = world.NewGit(hc.NewClient(srv.Path), nil, nil)
 	l.pass()
 	task := l.state().Tasks[0]
-	if task.LastRow != "" || len(task.Recaps) != 0 || len(l.eng.tips) != 0 || l.eng.git.Suppressed(l.wt) {
+	if task.LastRow != "" || len(task.Recaps) != 0 || len(l.eng.tips) != 0 {
 		t.Fatalf("failed RPC changed task facts: row=%q, recaps=%v, tips=%v", task.LastRow, task.Recaps, l.eng.tips)
 	}
 	if !strings.Contains(l.log.String(), "fixture lost the machine.exec reply") {
@@ -77,6 +77,10 @@ func TestHungGitDoesNotSkipHealthyProjectInSameTick(t *testing.T) {
 		}
 	}
 	if err := os.Remove(eng.Paths.State(hung.id)); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := filepath.EvalSymlinks(hung.repo)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -116,10 +120,12 @@ func TestHungGitDoesNotSkipHealthyProjectInSameTick(t *testing.T) {
 		case <-tick.C:
 			s, err := LoadState(eng.Paths.State("b-healthy"))
 			if err == nil && len(s.Tasks[0].Attempts) == 1 && s.Tasks[0].LastRow == "N11" {
+				// N11 saves the attempt before the project finishes its other rules.
+				eng.mu.Lock()
 				cancel()
+				eng.mu.Unlock()
 				<-done
-				if !eng.git.Suppressed(hung.wt) || strings.Count(hung.log.String(), "factory.git_suppressed") != 1 ||
-					strings.Count(hung.log.String(), "git child timed out") != 1 {
+				if !strings.Contains(hung.log.String(), `"folder":"`+repo+`"`) || strings.Count(hung.log.String(), "factory.git_suppressed") != 1 {
 					t.Fatalf("timeout or suppression missing: %s", hung.log)
 				}
 				eng.passProject(context.Background(), "a-hung", false)
@@ -128,6 +134,100 @@ func TestHungGitDoesNotSkipHealthyProjectInSameTick(t *testing.T) {
 				}
 				return
 			}
+		}
+	}
+}
+
+func TestTruncatedChangedLinesOpensSizeRecap(t *testing.T) {
+	l := newLanding(t)
+	srv := hctest.New(t)
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if p.Argv[1] == "diff" {
+			code := 0
+			return hc.ExecResult{Code: &code, Truncated: true}, nil
+		}
+		return hctest.GitExec(p)
+	}
+	l.eng.git = world.NewGit(hc.NewClient(srv.Path), nil, nil)
+	l.pass()
+	if recap := flow.OpenRecap(l.state().Tasks[0]); recap == nil || recap.Trigger != flow.TriggerSize {
+		t.Fatalf("truncated diff must open a size recap, got %+v", recap)
+	}
+}
+
+func TestReadyRefusesUnknownMergeOnly(t *testing.T) {
+	l := newLanding(t).withTokens()
+	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Ready = nil })
+	srv := hctest.New(t)
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if p.Argv[1] == "merge-base" && p.Argv[2] != "--is-ancestor" {
+			return hc.ExecResult{}, errors.New("lost merge-only reply")
+		}
+		return hctest.GitExec(p)
+	}
+	l.eng.git = world.NewGit(hc.NewClient(srv.Path), nil, nil)
+	err := l.eng.Report("tok-worker", "ready", []byte(`{"head":"`+l.c1+`"}`))
+	if err == nil || !strings.Contains(err.Error(), "lost merge-only reply") || len(l.state().Tasks[0].Attempts[0].Ready) != 0 {
+		t.Fatalf("ready with unknown merge-only returned %v", err)
+	}
+}
+
+func TestNonSizeRecapStillObservesClosedPR(t *testing.T) {
+	l := newLanding(t)
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Recaps = []flow.Recap{{Trigger: flow.TriggerCI}}
+	})
+	srv := hctest.New(t)
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if p.Argv[1] == "diff" {
+			return hc.ExecResult{TimedOut: true}, nil
+		}
+		return hctest.GitExec(p)
+	}
+	l.eng.git = world.NewGit(hc.NewClient(srv.Path), l.eng.now, nil)
+	l.pass()
+	if err := os.WriteFile(filepath.Join(l.gh, "view.json"), []byte(
+		`{"number":7,"state":"CLOSED","headRefOid":"`+l.c1+`","baseRefName":"main"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l.pass()
+	if row := l.state().Tasks[0].LastRow; row != "N4" {
+		t.Fatalf("closed PR with CI recap: row %s, want N4", row)
+	}
+}
+
+func TestGitFailuresDoNotSetGitHubUnavailable(t *testing.T) {
+	for _, transport := range []bool{false, true} {
+		l := newLanding(t)
+		srv := hctest.New(t)
+		srv.OnExec = func(hc.ExecParams) (hc.ExecResult, error) {
+			code := 128
+			return hc.ExecResult{Code: &code}, nil
+		}
+		if transport {
+			srv.Close()
+		}
+		l.eng.git = world.NewGit(hc.NewClient(srv.Path), nil, nil)
+		s := l.state()
+		l.eng.observeBaseLocked(context.Background(), l.id, &s)
+		if l.eng.ghUnavail[l.id] {
+			t.Errorf("base read set github_unavailable for git failure (transport=%v)", transport)
+		}
+		l.eng.readPRLocked(context.Background(), l.id, &s, 0)
+		if l.eng.ghUnavail[l.id] {
+			t.Errorf("PR read set github_unavailable for git failure (transport=%v)", transport)
+		}
+	}
+}
+
+func TestGitActUsesTheFailingSystemOutage(t *testing.T) {
+	hcDown := flow.Facts{HCUnavailable: true}
+	ghDown := flow.Facts{GitHubUnavailable: true}
+	rpcErr := &world.GitError{RPC: errors.New("socket unavailable")}
+	for _, verb := range []string{flow.AskNewAttempt, flow.AskPushPR, flow.AskMerge} {
+		if !actOutage(verb, hcDown, rpcErr) || actOutage(verb, ghDown, rpcErr) ||
+			actOutage(verb, hcDown, errors.New("gh failed")) {
+			t.Errorf("%s attributed the failure to the wrong system", verb)
 		}
 	}
 }

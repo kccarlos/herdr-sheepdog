@@ -1489,7 +1489,7 @@ func TestChangedLinesTimeoutReturnsDeadlineExceeded(t *testing.T) {
 	defer cancel()
 	start := time.Now()
 	_, err = fixtureGit(t).ChangedLines(ctx, wt, tip)
-	if elapsed := time.Since(start); !errors.Is(err, context.DeadlineExceeded) || elapsed < 100*time.Millisecond || elapsed > time.Second {
+	if elapsed := time.Since(start); !GitTimedOut(err) || elapsed < 100*time.Millisecond || elapsed > time.Second {
 		t.Fatalf("ChangedLines under hung git diff = %v in %s, want context.DeadlineExceeded killed mid-run", err, elapsed)
 	}
 }

@@ -3,6 +3,7 @@ package factory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
 
@@ -45,23 +47,37 @@ func cmdOK(c CommandOutput) bool { return c.Err == nil && !c.TimedOut && c.Exit 
 // external calls go through opts.RunCommand, so tests use a fake.
 func StartChecks(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	o := opts.withDefaults()
-	run := o.RunCommand
+	run, gitRun := o.RunCommand, o.RunCommand
+	inHC := opts.HCSocket != ""
+	if inHC {
+		gitRun = hcExecRunner(o.HCSocket)
+	}
+	var gitFailure []onboard.Result
 	o.RunCommand = func(ctx context.Context, dir string, env []string, argv ...string) CommandOutput {
-		if argv[0] == "git" { // a credential prompt must fail fast, not wait
-			if o.Git != nil {
-				args := argv[1:]
-				if len(args) >= 2 && args[0] == "-C" {
-					dir, args = args[1], args[2:]
-				}
-				r, err := o.Git.Run(ctx, dir, args...)
-				if err != nil {
-					return CommandOutput{Exit: -1, Err: err, Stderr: err.Error()}
-				}
-				return CommandOutput{Stdout: string(r.Stdout), Stderr: string(r.Stderr)}
-			}
-			env = append(slices.Clone(env), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=")
+		if argv[0] != "git" {
+			return run(ctx, dir, env, argv...)
 		}
-		return run(ctx, dir, env, argv...)
+		if gitFailure != nil {
+			return CommandOutput{Exit: -1}
+		}
+		env = append(slices.Clone(env), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=")
+		c := gitRun(ctx, dir, env, argv...)
+		args := argv[1:]
+		if args[0] == "-C" {
+			args = args[2:]
+		}
+		verb := args[0]
+		missing := c.Err == nil && c.Exit == 1 && (verb == "config" || verb == "symbolic-ref" || verb == "rev-parse" && slices.Contains(args, "--quiet"))
+		if inHC && !cmdOK(c) && !missing && (verb != "fetch" || c.Err != nil || c.TimedOut) {
+			detail, fix := "git failed", "run git "+strings.Join(args, " ")+" in the project folder and resolve the error"
+			var gitErr *world.GitError
+			var rpcErr *hc.Error
+			if errors.As(c.Err, &gitErr) && gitErr.RPC != nil && (!errors.As(gitErr.RPC, &rpcErr) || rpcErr.Kind == "unavailable") {
+				detail, fix = "herdr-core unavailable", "run: hc server start (or check the configured hc socket)"
+			}
+			gitFailure = []onboard.Result{resFail("start git", detail+": "+cleanReason(firstNonEmpty(c.Stderr, errText(c.Err))), fix)}
+		}
+		return c
 	}
 	top := gitLine(ctx, o, o.Folder, "rev-parse", "--show-toplevel")
 	r := startRepo{root: firstNonEmpty(top, o.Folder)}
@@ -69,13 +85,21 @@ func StartChecks(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	r.slug = resolveRemoteSlug(ctx, o, r.root, r.remote)
 	out := []onboard.Result{checkGitVersion(ctx, o)}
 	if r.remote != "" { // like the engine
-		if !cmdOK(o.run(ctx, o.TempDir, "git", "-C", r.root, "fetch", "--prune", r.remote)) {
-			out = append(out, resWarn("start fetch", "could not fetch "+r.remote+", so the refs below may be stale", "run: git fetch "+r.remote+" (sign in to git if it asks)"))
+		fetch, cancel := context.WithTimeout(ctx, world.GitNetworkTimeout)
+		defer cancel()
+		if !cmdOK(o.RunCommand(fetch, o.TempDir, nil, "git", "-C", r.root, "fetch", "--prune", r.remote)) {
+			out = append(out, resWarn("start fetch", "git failed to fetch "+r.remote+", so the refs below may be stale", "run: git fetch "+r.remote+" (sign in to git if it asks)"))
 		}
+	}
+	if gitFailure != nil {
+		return gitFailure
 	}
 	gh := checkStartGH(ctx, o, &r)
 	r.empty = r.view != nil && r.view.DefaultBranchRef.Name == ""
 	out = append(append(out, checkStartCLIs(ctx, o, r)...), gh, checkStartRemote(ctx, o, r), checkPRWorkflow(ctx, o, r))
+	if gitFailure != nil {
+		return gitFailure
+	}
 	return append(out, checkStartProtection(ctx, o, r)...)
 }
 

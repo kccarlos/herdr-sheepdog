@@ -341,6 +341,7 @@ func fakeGitDiff(t *testing.T) (slow, fail string) {
 	script := "#!/bin/sh\n" +
 		"for arg in \"$@\"; do\n" +
 		"  if [ \"$arg\" = \"diff\" ]; then\n" +
+		"    echo diff >> " + strconv.Quote(slow+".calls") + "\n" +
 		"    if [ -f " + strconv.Quote(slow) + " ]; then exec sleep 3; fi\n" +
 		"    if [ -f " + strconv.Quote(fail) + " ]; then echo 'git diff failed' >&2; exit 1; fi\n" +
 		"  fi\n" +
@@ -357,6 +358,15 @@ func fakeGitDiff(t *testing.T) (slow, fail string) {
 // counts as over size_cap (N12 opens a size recap) instead of skipping the
 // pass, and is never cached so after continue a normal read opens no second
 // recap; a non-timeout error still skips the pass.
+func diffCalls(t *testing.T, slow string) int {
+	t.Helper()
+	b, err := os.ReadFile(slow + ".calls")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Count(string(b), "\n")
+}
+
 func TestChangedLinesTimeoutOpensSizeRecap(t *testing.T) {
 	old := lockGitTimeout
 	lockGitTimeout = 500 * time.Millisecond
@@ -396,8 +406,12 @@ func TestChangedLinesTimeoutOpensSizeRecap(t *testing.T) {
 
 	// Once git diff recovers, continue + next pass must read again and open no second recap.
 	_ = os.Remove(slow)
+	before := diffCalls(t, slow)
 	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"continue","why":"transient stall"}`, "")
 	l.pass()
+	if got := diffCalls(t, slow) - before; got != 2 {
+		t.Errorf("continue and next pass ran git diff %d times, want 2", got)
+	}
 	if rc := l.state().Tasks[0].Recaps; len(rc) != 1 || flow.OpenRecap(l.state().Tasks[0]) != nil {
 		t.Fatalf("recaps after continue + normal pass = %+v, want no second recap", rc)
 	}
@@ -466,7 +480,11 @@ func TestContinueUnderGitTimeout(t *testing.T) {
 
 	// Keep slow set during continue: ChangedLines times out, SendRun must still succeed.
 	l.finishWorkerTurn()
+	before := diffCalls(t, slow)
 	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"continue","why":"git is slow"}`, "")
+	if got := diffCalls(t, slow) - before; got != 1 {
+		t.Errorf("continue ran git diff %d times, want 1", got)
+	}
 	sends := sendsTo(t, l.srv.Requests(), l.worker)
 	if len(sends) != 2 || !strings.Contains(sends[1], "lets task T1 go on") || !strings.Contains(sends[1], "size cap is now 160") {
 		t.Fatalf("worker sends after continue under git timeout = %q, want continue message", sends)

@@ -66,7 +66,6 @@ type CommandFunc func(ctx context.Context, dir string, extraEnv []string, argv .
 type DoctorOptions struct {
 	Folder        string
 	HCSocket      string
-	Git           *world.Git
 	Canary        bool
 	ClaudeModel   string
 	GOOS          string
@@ -161,7 +160,6 @@ func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	inHC := hcOK && !customRunner
 	if inHC {
 		o.RunCommand = hcExecRunner(o.HCSocket)
-		o.Git = world.NewGit(hc.NewClient(o.HCSocket), nil)
 	}
 	out = append(out, checkAgentCLIs(ctx, o, inHC, customLookPath, volumeOK, probedDir)...)
 	out = append(out, checkGH(ctx, o, inHC, customLookPath, volumeOK, probedDir))
@@ -175,7 +173,7 @@ func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 func checkSweepLeftovers(ctx context.Context, o DoctorOptions, hcOK bool, dir string) (out []onboard.Result) {
 	gctx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	defer cancel()
-	git := world.NewGit(hc.NewClient(o.HCSocket), nil)
+	git := world.NewGit(hc.NewClient(o.HCSocket), nil, nil)
 	repo, id, err := git.RepoProject(gctx, dir, false)
 	if err != nil {
 		if _, lookupErr := findStoredProject(Paths{DataDir: o.DataDir}, dir); lookupErr != nil {
@@ -862,7 +860,21 @@ func canaryTimeoutResult(cliName string, o DoctorOptions, canaryDir string, inHC
 // pane, so macOS attributes file-access consent prompts to herdr-core and
 // doctor catches missing PATH/auth entries that factory workers would hit.
 func hcExecRunner(socket string) CommandFunc {
+	client := hc.NewClient(socket)
+	git := world.NewGit(client, nil, nil)
 	return func(ctx context.Context, dir string, extraEnv []string, argv ...string) CommandOutput {
+		if argv[0] == "git" {
+			args := argv[1:]
+			if len(args) >= 2 && args[0] == "-C" {
+				dir, args = args[1], args[2:]
+			}
+			r, err := git.Run(ctx, dir, args...)
+			out := CommandOutput{Exit: -1, Stdout: string(r.Stdout), Stderr: string(r.Stderr), TimedOut: r.TimedOut, Err: err}
+			if r.Code != nil && !r.Truncated && r.Signal == nil && !r.TimedOut {
+				out.Exit, out.Err = *r.Code, nil
+			}
+			return out
+		}
 		start := time.Now()
 		sec := defaultCanaryTimeout.Seconds()
 		if dl, ok := ctx.Deadline(); ok {
@@ -870,7 +882,6 @@ func hcExecRunner(socket string) CommandFunc {
 				sec = rem
 			}
 		}
-		client := hc.NewClient(socket)
 		res, err := client.Exec(ctx, hc.ExecParams{
 			Argv:    append([]string{"sh", "-c", cleanExecScript, "sh"}, argv...),
 			Cwd:     dir,
@@ -1013,13 +1024,6 @@ func ambiguousGHRemote(remotes []string, pushRemote string) string {
 func gitOut(ctx context.Context, o DoctorOptions, dir string, args ...string) string {
 	gCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	defer cancel()
-	if o.Git != nil {
-		r, err := o.Git.Run(gCtx, dir, args...)
-		if err == nil {
-			return strings.TrimSpace(string(r.Stdout))
-		}
-		return ""
-	}
 	res := o.RunCommand(gCtx, o.TempDir, nil, append([]string{"git", "-C", dir}, args...)...)
 	if res.Err != nil || res.TimedOut || res.Exit != 0 {
 		return ""

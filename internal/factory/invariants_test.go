@@ -334,7 +334,7 @@ func TestInvariantRestartNoRelogRecurrenceWakesAndErrorEvent(t *testing.T) {
 func TestRecapOpeningUncountedDuringHCOutage(t *testing.T) {
 	t.Parallel()
 	for _, verb := range []string{flow.AskOpenRecap, flow.AskSizeRecap, flow.AskCIRecap, flow.AskTimeRecap} {
-		if !actOutage(verb, flow.Facts{HCUnavailable: true}) {
+		if !actOutage(verb, flow.Facts{HCUnavailable: true}, nil) {
 			t.Errorf("actOutage(%q, HCUnavailable=true) = false, want true", verb)
 		}
 	}

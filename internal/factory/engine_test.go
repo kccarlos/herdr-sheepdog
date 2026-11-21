@@ -766,29 +766,33 @@ func TestTerminalNamesFitHC(t *testing.T) {
 // and write a bounded number of log lines.
 func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	ctx := context.Background()
-	runFor := func(e *Engine, d time.Duration) {
-		rctx, cancel := context.WithCancel(ctx)
+	runUntilLogged := func(e *Engine, id string, want int) {
+		t.Helper()
+		rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
 			e.Run(rctx)
 		}()
-		time.Sleep(d)
-		cancel()
-		<-done
-	}
-	// runUntilLogged runs passes until the log has want lines (or 3 s), then
-	// keeps passing for one more window so a retry would show. A fixed window
-	// alone was flaky under -race on a shared CI runner.
-	runUntilLogged := func(e *Engine, id string, want int) {
-		for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
-			runFor(e, 40*time.Millisecond)
+		defer func() { cancel(); <-done }()
+		tick := time.NewTicker(10 * time.Millisecond)
+		defer tick.Stop()
+		for {
 			b, _ := os.ReadFile(e.Paths.Log(id))
-			if len(strings.Split(strings.TrimSpace(string(b)), "\n")) >= want {
-				break
+			if strings.Count(string(b), "\n") >= want {
+				cancel()
+				<-done
+				for range 3 {
+					e.passProject(ctx, id, false)
+				}
+				return
+			}
+			select {
+			case <-rctx.Done():
+				t.Fatalf("waiting for %d log lines, got:\n%s", want, b)
+			case <-tick.C:
 			}
 		}
-		runFor(e, 80*time.Millisecond)
 	}
 
 	// 1. Failing NewWorktree (repo has no remote) over many passes asks N11 once, then settles at N5 once.
@@ -820,6 +824,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 
 	// 2. Failing coordinator StartRun over many passes asks J7 once, then logs J6 waiting once.
 	srv2 := hctest.New(t)
+	srv2.OnExec = hctest.GitExec
 	p2 := testPaths(t)
 	p2.ClaudeConfig = "/nonexistent-sheepdog-test-guard/.claude.json"
 	eng2 := New(p2, hc.NewClient(srv2.Path))
@@ -841,41 +846,49 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	srv3 := hctest.New(t)
 	runs3Ch := make(chan hc.RunParams, 8)
 	srv3.OnRun = func(_ hc.Terminal, p hc.RunParams) { runs3Ch <- p }
-	eng3 := newGitTestEngine(t, testPaths(t), hc.NewClient(srv3.Path))
-	eng3.PassInterval = time.Hour
+	srv3.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if p.Argv[1] == "status" {
+			time.Sleep(120 * time.Millisecond)
+		}
+		return hctest.GitExec(p)
+	}
+	eng3 := New(testPaths(t), hc.NewClient(srv3.Path))
 	repo3, _ := initGitRepoWithRemote(t)
-	rctx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		eng3.Run(rctx)
-	}()
 	if err := eng3.Start(repo3, "Goal", 0); err != nil {
 		t.Fatal(err)
 	}
+	select {
+	case <-eng3.wake:
+	default:
+		t.Fatal("start did not wake the engine")
+	}
+	id3 := eng3.projectDirs()[0].Name()
+	eng3.passProject(ctx, id3, false)
 	var coordRun hc.RunParams
 	select {
 	case coordRun = <-runs3Ch:
-	case <-time.After(2 * time.Second):
+	default:
 		t.Fatal("coordinator did not start")
 	}
-	id3 := eng3.projectDirs()[0].Name()
 	if err := eng3.Report(coordRun.Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"t1","estimate_lines":50,"title":"feat: x",`+testPlanJSON+`}]}`)); err != nil {
 		t.Fatal(err)
 	}
-	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(5 * time.Millisecond) {
-		if st, err := LoadState(eng3.Paths.State(id3)); err == nil && len(st.Tasks) == 1 && len(st.Tasks[0].Attempts) == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("N11 did not create attempt after plan apply")
-		}
+	select {
+	case <-eng3.wake: // consume the report's wake as Run would
+	default:
+		t.Fatal("plan apply did not wake the engine")
 	}
-	time.Sleep(40 * time.Millisecond)
-	cancel()
-	<-done
+	eng3.passProject(ctx, id3, false)
+	if st, err := LoadState(eng3.Paths.State(id3)); err != nil || len(st.Tasks) != 1 || len(st.Tasks[0].Attempts) != 1 {
+		t.Fatalf("N11 did not create attempt after plan apply: %v", err)
+	}
+	select {
+	case <-eng3.wake:
+		t.Fatal("engine pass commit woke the loop")
+	default:
+	}
 	if len(runs3Ch) != 0 {
-		t.Fatalf("engine pass commit woke loop early and started worker without tick: extra runs=%d", len(runs3Ch))
+		t.Fatalf("attempt creation started a worker in the same pass: extra runs=%d", len(runs3Ch))
 	}
 
 	eng3.Paths.ClaudeConfig = "/nonexistent-sheepdog-test-guard/.claude.json"
@@ -889,12 +902,6 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 			}
 		}
 		return methods
-	}
-	// Wait for the one worker start try (1 StartTerminal Get), then keep
-	// passing and check it is never retried.
-	runFor(eng3, 80*time.Millisecond)
-	for deadline := time.Now().Add(3 * time.Second); len(workerRequests()) < 1 && time.Now().Before(deadline); {
-		runFor(eng3, 40*time.Millisecond)
 	}
 	runUntilLogged(eng3, id3, 6)
 	if methods := workerRequests(); len(methods) != 1 {

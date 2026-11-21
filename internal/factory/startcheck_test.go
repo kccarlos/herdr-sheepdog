@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
 
@@ -460,5 +462,49 @@ func TestStartChecksGitNeverPrompts(t *testing.T) {
 	StartChecks(context.Background(), DoctorOptions{Folder: t.TempDir(), RunCommand: run})
 	if git == 0 {
 		t.Fatal("no git call seen")
+	}
+}
+
+func TestStartChecksReportsGitFailure(t *testing.T) {
+	srv := hctest.New(t)
+	srv.OnExec = func(hc.ExecParams) (hc.ExecResult, error) {
+		code := 128
+		return hc.ExecResult{Code: &code, Stderr: []byte("canary git failure")}, nil
+	}
+	for _, want := range []string{"git failed", "herdr-core unavailable"} {
+		opts := DoctorOptions{Folder: t.TempDir(), HCSocket: srv.Path, RunCommand: startFake{}.run}
+		rs := StartChecks(context.Background(), opts)
+		if len(rs) != 1 || rs[0].Status != onboard.Fail || !strings.Contains(rs[0].Detail, want) ||
+			rs[0].Fix == "" || strings.Contains(rs[0].Fix, "git remote add") {
+			t.Errorf("want %q with its fix, got %+v", want, rs)
+		}
+		srv.Close()
+	}
+}
+
+func TestStartChecksReportsWorkflowGitFailure(t *testing.T) {
+	root := t.TempDir()
+	srv := hctest.New(t)
+	fake := startFake{
+		"git --version":                  out("git version 2.45.0"),
+		"rev-parse --show-toplevel":      out(root),
+		"git remote":                     out("origin"),
+		"config --get remote.origin.url": out("https://github.com/o/r.git"),
+		"symbolic-ref --quiet --short refs/remotes/origin/HEAD":     out("origin/main"),
+		"rev-parse --verify --quiet origin/main":                    out("abc1234"),
+		"ls-tree --name-only origin/main .github/workflows/":        out(".github/workflows/ci.yml"),
+		"show origin/main:.github/workflows/ci.yml":                 out(goodWorkflow),
+		"fetch --prune origin":                                      out(""),
+		"gh repo view o/r --json defaultBranchRef,viewerPermission": out(repoView),
+	}
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		c := fake.run(context.Background(), p.Cwd, nil, p.Argv...)
+		return hc.ExecResult{Code: &c.Exit, Stdout: []byte(c.Stdout), Truncated: p.Argv[1] == "show"}, nil
+	}
+	results := StartChecks(context.Background(), DoctorOptions{Folder: root, HCSocket: srv.Path, RunCommand: fake.run})
+	if len(results) != 1 || results[0].Status != onboard.Fail ||
+		!strings.Contains(results[0].Detail, "git failed") || !strings.Contains(results[0].Detail, "truncated") ||
+		!strings.Contains(results[0].Fix, "git show ") {
+		t.Fatalf("truncated workflow should report the failed git show: %+v", results)
 	}
 }

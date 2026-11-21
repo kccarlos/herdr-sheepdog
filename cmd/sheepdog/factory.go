@@ -116,7 +116,7 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 			fprintf(stderr, "sheepdog factory start: warning: could not read project settings (%v); codex check skipped\n", err)
 		}
 		var failed []string
-		for _, r := range factoryStartChecks(ctx, factory.DoctorOptions{Folder: folder, DataDir: cfg.DataDir, GHHost: os.Getenv("GH_HOST"), Git: world.NewGit(hc.NewClient(cfg.Herdr.HCSocketPath()), nil)}) {
+		for _, r := range factoryStartChecks(ctx, factory.DoctorOptions{Folder: folder, DataDir: cfg.DataDir, GHHost: os.Getenv("GH_HOST"), HCSocket: cfg.Herdr.HCSocketPath()}) {
 			if r.Status == onboard.Fail {
 				failed = append(failed, r.Line())
 			}
@@ -376,7 +376,7 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 		}
 	}
 	socket := cmp.Or(os.Getenv("HC_SOCKET"), os.Getenv("SHEEPDOG_HC_SOCKET"), (config.Herdr{}).HCSocketPath())
-	git := world.NewGit(hc.NewClient(socket), nil)
+	git := world.NewGit(hc.NewClient(socket), nil, nil)
 	head, err := gitRevParse(ctx, git, "--verify", "HEAD^{commit}")
 	if err == nil && len(proofs) > 0 {
 		err = runProofs(ctx, git, head, proofs)

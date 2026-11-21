@@ -33,7 +33,7 @@ var workerTemplate string
 //go:embed reviewer.md
 var reviewerTemplate string
 
-var lockGitTimeout = 15 * time.Second
+var lockGitTimeout = world.GitStageTimeout
 
 // ghTimeout bounds one GitHub executor or snapshot (a push plus gh calls).
 var ghTimeout = time.Minute
@@ -49,18 +49,17 @@ type Engine struct {
 	Bin          string                        // sheepdog binary named in run prompts
 	RunEnv       map[string]string             // added to every run's environment (daemon port)
 
-	git          *world.Git
-	mu           sync.Mutex
-	wake         chan struct{}
-	lastPass     map[string]time.Time // monotonic reading of previous pass per project (design.md 2.5)
-	prs          map[string]flow.PR   // last PR snapshot per attempt worktree (in memory)
-	errs         map[string]string    // last gh or git error per worktree and kind, logged once per change
-	lineTimeouts map[string]bool
-	tips         map[string]tipFacts             // last git reading per worktree (in memory)
-	waits        map[string]string               // last wait/finished reason per project or task, logged once per change
-	ghUnavail    map[string]bool                 // project fact github_unavailable (design.md 7.3)
-	hcUnavail    map[string]bool                 // project fact hc_unavailable (design.md 7.3)
-	onInvariant  func([]flow.InvariantViolation) // test hook; nil in production
+	git         *world.Git
+	mu          sync.Mutex
+	wake        chan struct{}
+	lastPass    map[string]time.Time            // monotonic reading of previous pass per project (design.md 2.5)
+	prs         map[string]flow.PR              // last PR snapshot per attempt worktree (in memory)
+	errs        map[string]string               // last gh or git error per worktree and kind, logged once per change
+	tips        map[string]tipFacts             // last git reading per worktree (in memory)
+	waits       map[string]string               // last wait/finished reason per project or task, logged once per change
+	ghUnavail   map[string]bool                 // project fact github_unavailable (design.md 7.3)
+	hcUnavail   map[string]bool                 // project fact hc_unavailable (design.md 7.3)
+	onInvariant func([]flow.InvariantViolation) // test hook; nil in production
 }
 
 func (e *Engine) now() time.Time {
@@ -109,7 +108,7 @@ type tipFacts struct {
 // New constructs an Engine. Nothing runs or touches disk until Run or Start.
 func New(paths Paths, client *hc.Client) *Engine {
 	e := &Engine{Paths: paths, HC: client, wake: make(chan struct{}, 1)}
-	e.git = world.NewGit(client, func(folder string) { e.logEvent("factory.git_suppressed", map[string]string{"folder": folder}) })
+	e.git = world.NewGit(client, e.now, func(event, folder string) { e.logEvent(event, map[string]string{"folder": folder}) })
 	return e
 }
 
@@ -317,6 +316,8 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		delete(e.lastPass, id)
 		return
 	}
+	ctx, cancel := context.WithTimeout(world.GitRepository(ctx, s.Project.Folder), world.GitPassTimeout)
+	defer cancel()
 	dt := e.passDelta(id)
 	hcChecked, coordErr := e.observeCoordLocked(ctx, id, &s)
 	hcErr := coordErr
@@ -625,7 +626,7 @@ func (e *Engine) stopCoordWithBackoffLocked(ctx context.Context, id string, s *f
 	if err := e.stopCoordTerminalsLocked(ctx, id, *s); err != nil {
 		e.logError("factory.hc_error", id, err)
 		words, cls := flow.CleanErr(err.Error()), world.FailureClass(err)
-		uncounted := cls != flow.ClassSettled && actOutage(key, flow.Facts{HCUnavailable: e.hcUnavail[id]})
+		uncounted := cls != flow.ClassSettled && actOutage(key, flow.Facts{HCUnavailable: e.hcUnavail[id]}, err)
 		p.Acts = append(p.Acts, flow.Act{Key: key, Result: "failed", At: now, Class: cls, Err: words, Uncounted: uncounted})
 		if !exhausted && flow.Exhausted(p.Acts, key, s.Settings) {
 			why := map[bool]string{true: "could not stop the old coordinator", false: "gave up stopping the coordinator"}[restarting]
@@ -838,7 +839,11 @@ func setFlag(m *map[string]bool, id string, on bool) {
 	}
 }
 
-func actOutage(verb string, f flow.Facts) bool {
+func actOutage(verb string, f flow.Facts, err error) bool {
+	var gitErr *world.GitError
+	if errors.As(err, &gitErr) {
+		return gitErr.RPC != nil && f.HCUnavailable
+	}
 	switch verb {
 	case flow.AskNewAttempt, flow.AskPushPR, flow.AskRerunCI, flow.AskDispatchCI, flow.AskUpdateBranch, flow.AskMerge:
 		return f.GitHubUnavailable
@@ -865,14 +870,9 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	// have removed its worktree.
 	task := s.Tasks[ti]
 	oa := flow.OpenAttempt(task)
-	if oa != nil && !flow.Ended(task) && flow.OpenRecap(task) != nil && e.lineTimeouts[oa.Worktree] && e.git.Suppressed(oa.Worktree) {
-		if workerErr != nil {
-			return false
-		}
-		facts.Worker, facts.LinesTimeout = workerRun, true // notify from the confirmed size timeout during back-off
-	} else if oa != nil && !flow.Ended(task) {
+	if oa != nil && !flow.Ended(task) {
 		a := *oa
-		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout/3)
+		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
 		tip, rel, _, err := e.git.InspectWorktree(gctx, a.Worktree, flow.H(a))
 		readyHead := a.BaseCommit
 		if n := len(a.Ready); n > 0 {
@@ -884,19 +884,16 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 			facts.TipDivergedByMergeOnly = rrel == flow.RelAhead
 		}
 		cancel()
-		if !errors.Is(err, world.ErrGitSuppressed) {
-			e.logOnce("factory.git_error", id, a.Worktree, err)
-		}
+		e.logOnce("factory.git_error", id, a.Worktree, err)
 		if err != nil {
 			return false
 		}
-		lctx, lcancel := context.WithTimeout(ctx, lockGitTimeout*2/3)
+		lctx, lcancel := context.WithTimeout(ctx, lockGitTimeout)
 		facts.Lines, facts.LinesTimeout, facts.TipMergeOnly, err = e.readTipLocked(lctx, a, tip, rel)
 		lcancel()
 		if e.logOnce("factory.git_size_error", id, a.Worktree, err); err != nil {
 			return false
 		}
-		setFlag(&e.lineTimeouts, a.Worktree, facts.LinesTimeout)
 		if workerErr != nil {
 			e.logError("factory.hc_error", id, workerErr)
 			return false
@@ -1003,7 +1000,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 				e.logError("factory.exec_error", id, err)
 			}
 			cls := world.FailureClass(err)
-			act(ask, "failed", cls, err.Error(), errors.Is(err, world.ErrGitSuppressed) || cls != flow.ClassSettled && actOutage(verb, facts))
+			act(ask, "failed", cls, err.Error(), errors.Is(err, world.ErrGitSuppressed) || cls != flow.ClassSettled && actOutage(verb, facts, err))
 			whys = append(whys, err.Error())
 		} else {
 			act(ask, "done", "", "", false)
@@ -1037,7 +1034,7 @@ func (e *Engine) readTipLocked(ctx context.Context, a flow.Attempt, tip string, 
 	c, err := tipFacts{tip: tip, h: h}, error(nil)
 	if tip != a.BaseCommit {
 		c.lines, err = e.git.ChangedLines(ctx, a.Worktree, tip)
-		if world.GitTimedOut(err) {
+		if errors.Is(err, world.ErrChangedLinesOverCap) {
 			return 0, true, false, nil
 		}
 	}
@@ -1060,7 +1057,7 @@ func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, t
 	// the same repo never reuses a branch an older PR (even a closed one)
 	// already names (seen live: a closed PR from an earlier run blocked N26).
 	tag := fmt.Sprintf("%s-%s-%d", strings.TrimPrefix(id, "proj-"), t.ID, n)
-	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
+	gctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
 	wt, err := e.git.NewWorktree(gctx, s.Project.Folder, e.Paths.Worktree(id, t.ID, n), tag, t.Title)
 	if err == nil {
@@ -1265,7 +1262,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	tip, _, clean, err := e.git.InspectWorktree(gctx, a.Worktree, flow.H(*a))
 	cancel()
 	if err != nil {
-		e.logError("factory.git_error", id, err)
+		e.logOnce("factory.git_error", id, a.Worktree, err)
 		return true
 	}
 	if !clean || tip != facts.Tip {
@@ -1726,9 +1723,7 @@ func (e *Engine) observeBaseLocked(ctx context.Context, id string, s *flow.State
 	res, err := e.git.BaseStatus(gctx, s.Project.Folder)
 	cancel()
 	wasRed := s.Project.Base != nil && s.Project.Base.Red
-	if err == nil || world.FailureClass(err) != flow.ClassSettled {
-		setFlag(&e.ghUnavail, id, err != nil)
-	}
+	e.observeGitHub(id, err)
 	if e.logOnce("factory.base_error", id, id, err); err != nil || !res.Known || res.Red == wasRed {
 		return
 	}
@@ -1808,7 +1803,7 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 	last := e.prs[a.Worktree]
 	p, warn, err := e.git.PRSnapshot(gctx, s.Project.Folder, a.Branch, a.PR)
 	e.logOnce("factory.gh_partial", id, a.Worktree, warn)
-	setFlag(&e.ghUnavail, id, err != nil)
+	e.observeGitHub(id, err)
 	if e.logOnce("factory.gh_error", id, a.Worktree, err); err != nil {
 		if p.State == flow.PRNone {
 			p = last
@@ -1904,9 +1899,19 @@ func (e *Engine) logError(typ, id string, err error) {
 	e.logEvent(typ, map[string]string{"project": id, "error": err.Error()})
 }
 
+func (e *Engine) observeGitHub(id string, err error) {
+	var gitErr *world.GitError
+	if !errors.As(err, &gitErr) && !errors.Is(err, world.ErrGitSuppressed) && world.FailureClass(err) != flow.ClassSettled {
+		setFlag(&e.ghUnavail, id, err != nil)
+	}
+}
+
 // logOnce logs err unless it repeats the last error of typ for key; a nil
 // err clears it, so the next failure is logged again.
 func (e *Engine) logOnce(typ, id, key string, err error) {
+	if errors.Is(err, world.ErrGitSuppressed) {
+		return
+	}
 	k := typ + " " + key
 	if err == nil {
 		delete(e.errs, k)

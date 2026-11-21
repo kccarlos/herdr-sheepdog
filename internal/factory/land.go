@@ -35,13 +35,13 @@ func (e *Engine) execMerge(ctx context.Context, id string, s *flow.State, ti int
 	h, num := flow.H(*a), cmp.Or(a.PR, f.PR.Number)
 	gctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
-	gitCtx, cancelGit := context.WithTimeout(gctx, lockGitTimeout/3)
+	gitCtx, cancelGit := context.WithTimeout(gctx, lockGitTimeout)
 	tip, rel, _, err := e.git.InspectWorktree(gitCtx, a.Worktree, h)
 	cancelGit()
 	if err != nil {
 		return "", false, err
 	}
-	gitCtx, cancelGit = context.WithTimeout(gctx, lockGitTimeout*2/3)
+	gitCtx, cancelGit = context.WithTimeout(gctx, lockGitTimeout)
 	lines, linesTO, tipMO, err := e.readTipLocked(gitCtx, *a, tip, rel)
 	cancelGit()
 	if err != nil {
