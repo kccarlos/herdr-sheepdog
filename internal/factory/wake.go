@@ -144,8 +144,12 @@ func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.Stat
 	for i, w := range s.Project.Wakes[:n] {
 		keys[i] = cmp.Or(w.Task, "project") + ":" + w.Key
 	}
-	if s.Project.Run != nil && s.Project.Run.CLI == world.CodexCLI {
-		s.Project.CoordWakesInFlight = slices.Clone(s.Project.Wakes[:n])
+	if s.Project.Run != nil {
+		for _, w := range s.Project.Wakes[:n] {
+			if !slices.ContainsFunc(s.Project.CoordWakesInFlight, func(f flow.Wake) bool { return f.Task == w.Task && f.Key == w.Key }) {
+				s.Project.CoordWakesInFlight = append(s.Project.CoordWakesInFlight, w)
+			}
+		}
 		s.Project.CoordWakeTurn = s.Project.Run.Turn
 	}
 	s.Project.Wakes, s.Project.CoordLastWakeAt = s.Project.Wakes[n:], now

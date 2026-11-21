@@ -721,8 +721,8 @@ func TestCodexLaunchWaitsAreLoggedOnce(t *testing.T) {
 			c.pass()
 		}
 		st := c.state()
-		if len(*c.runs) != 1 || st.Tasks[0].Attempts[0].RunID != "" || !strings.Contains(strings.ToLower(st.Tasks[0].HoldWhy), "not signed in") {
-			t.Fatalf("runs %d, runID %q, hold %q", len(*c.runs), st.Tasks[0].Attempts[0].RunID, st.Tasks[0].HoldWhy)
+		if len(*c.runs) != 1 || len(st.Tasks[0].Attempts) != 0 || !strings.Contains(strings.ToLower(st.Tasks[0].HoldWhy), "not signed in") {
+			t.Fatalf("runs %d, attempts %d, hold %q: want no run, no attempt and the reason", len(*c.runs), len(st.Tasks[0].Attempts), st.Tasks[0].HoldWhy)
 		}
 		n := 0
 		for _, l := range c.logLinesWaiting() {

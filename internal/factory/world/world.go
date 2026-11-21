@@ -431,7 +431,7 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 	verifiedTrust := agyStarting && cls == flow.ScreenTrust &&
 		rec.ID != "" && rec.CreatedMS != 0 && t.CreatedMS == rec.CreatedMS
 	trustBlocked := permission && verifiedTrust
-	waitForScreen := permission && agyStarting && (strings.TrimSpace(clean) == "" || agyTrustDrawing(clean))
+	waitForScreen := permission && agyStarting && (!nonEmpty || agyTrustDrawing(clean))
 	if trustBlocked || (starting && !rec.StatusReported && s == nil && cls != "" &&
 		(rec.CLI != "agy" || cls != flow.ScreenTrust || verifiedTrust)) {
 		evs = append(evs, flow.RunEvent{Kind: flow.EvScreen, Screen: cls, ScreenHash: hash})
@@ -450,7 +450,7 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 		}
 		evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: s.State, StatusKind: deref(s.Kind), Msg: s.Msg, Turn: t.Turn, StatusAt: at})
 	}
-	if infer {
+	if infer && nonEmpty {
 		if codexStatus == "idle" && hash == rec.SentScreenHash {
 			codexStatus = "unknown"
 		}

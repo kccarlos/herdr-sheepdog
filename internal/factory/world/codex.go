@@ -1,7 +1,6 @@
 package world
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -42,9 +41,6 @@ func codexArgv(model, effort, cwd string, command, options []string) []string {
 	model, effort, cwd = strings.TrimSpace(model), strings.TrimSpace(effort), strings.TrimSpace(cwd)
 	if model == "" || effort == "" || cwd == "" {
 		return nil
-	}
-	if real, err := filepath.EvalSymlinks(cwd); err == nil {
-		cwd = real
 	}
 	key, _ := json.Marshal(cwd)    // a JSON string is a TOML basic string
 	eff, _ := json.Marshal(effort) // likewise
@@ -139,12 +135,12 @@ func codexReply(text string) string {
 // draw the same composer, with the interrupt hint just above it.
 func codexScreenStatus(text string) string {
 	lines := strings.Split(strings.TrimRight(text, "\n \t"), "\n")
-	tail := lines[max(0, len(lines)-8):]
-	for _, line := range tail {
-		if strings.HasPrefix(line, "• ") && strings.Contains(line, "esc to interrupt") {
+	for _, line := range lines[max(0, len(lines)-16):] {
+		if strings.Contains(line, "esc to interrupt") {
 			return "working"
 		}
 	}
+	tail := lines[max(0, len(lines)-8):]
 	for i := len(tail) - 1; i >= 0; i-- {
 		line := strings.TrimSpace(tail[i])
 		if line == "" || line == "? for shortcuts" || strings.HasPrefix(tail[i], "  ") && strings.Contains(line, " · ") {
@@ -161,10 +157,11 @@ func codexScreenStatus(text string) string {
 // codexSession accepts only one rollout with metadata tying it to this
 // launch. A missing or ambiguous rollout leaves continuation to the handoff.
 func codexSession(home, cwd string, started time.Time) string {
-	cwd, err := filepath.EvalSymlinks(cwd)
-	if err != nil || started.IsZero() {
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" || started.IsZero() {
 		return ""
 	}
+	cwd = filepath.Clean(cwd)
 	paths, err := filepath.Glob(filepath.Join(home, "sessions", "[0-9][0-9][0-9][0-9]", "[0-9][0-9]", "[0-9][0-9]", "rollout-*.jsonl"))
 	if err != nil {
 		return ""
@@ -172,7 +169,7 @@ func codexSession(home, cwd string, started time.Time) string {
 	id := ""
 	for _, path := range paths {
 		meta := codexRolloutMeta(path)
-		if !codexIDRe.MatchString(meta.ID) || meta.Timestamp.Before(started) || meta.Cwd != cwd {
+		if !meta.ownSession() || meta.Timestamp.Before(started) || meta.Cwd == "" || filepath.Clean(meta.Cwd) != cwd {
 			continue
 		}
 		if id != "" {
@@ -184,8 +181,20 @@ func codexSession(home, cwd string, started time.Time) string {
 }
 
 type rolloutMeta struct {
-	ID, Cwd   string
-	Timestamp time.Time
+	ID             string          `json:"id"`
+	SessionID      string          `json:"session_id"`
+	Cwd            string          `json:"cwd"`
+	Timestamp      time.Time       `json:"timestamp"`
+	Source         json.RawMessage `json:"source"`
+	ParentThreadID string          `json:"parent_thread_id"`
+}
+
+func (m rolloutMeta) ownSession() bool {
+	var src string
+	return codexIDRe.MatchString(m.ID) &&
+		(m.SessionID == "" || m.SessionID == m.ID) &&
+		m.ParentThreadID == "" &&
+		json.Unmarshal(m.Source, &src) == nil && src == "cli"
 }
 
 func codexRolloutMeta(path string) rolloutMeta {
@@ -197,12 +206,11 @@ func codexRolloutMeta(path string) rolloutMeta {
 		return rolloutMeta{}
 	}
 	defer func() { _ = f.Close() }()
-	line := bufio.NewScanner(f)
 	var entry struct {
 		Type    string
 		Payload rolloutMeta
 	}
-	if line.Scan() && json.Unmarshal(line.Bytes(), &entry) == nil && entry.Type == "session_meta" {
+	if json.NewDecoder(f).Decode(&entry) == nil && entry.Type == "session_meta" {
 		return entry.Payload
 	}
 	return rolloutMeta{}
