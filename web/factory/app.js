@@ -1,11 +1,10 @@
 // The factory page (design.md 12.1, the FactoryWeb* boards): polls the factory
 // views and delegates ask answers and browser pairing to asks.js.
-import { renderAskCardsHTML, createAskFlow, browserAskDeps } from './asks.js';
+import { esc, renderAskCardsHTML, createAskFlow, browserAskDeps } from './asks.js';
 
 const POLL_MS = 3000, GIVE_UP_MS = 8000;
 const $ = (id) => document.getElementById(id);
 const enc = encodeURIComponent;
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const clock = (t, sec) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: sec ? '2-digit' : undefined });
 // stage (design.md 4.11) -> board group label, dot colour; ORDER is the boards' group order.
 const STAGE = { blocked_or_failed: ['blocked', 'blocked'], ci: ['waiting on CI', 'working'], working: ['working', 'working'],
@@ -18,9 +17,14 @@ const started = Date.now();
 const askFlow = createAskFlow(browserAskDeps());
 const askUI = { busyId: '', error: '', errorAskId: '', needsPairing: false, pairMessage: '', pairError: '', pairingBusy: false, pending: null };
 
-async function get(url) {
+async function get(url, retried = false) {
   const r = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(2 * POLL_MS) });
   const body = await r.json().catch(() => ({}));
+  if (r.status === 401 && !retried) {
+    const auth = await askFlow.reauth();
+    if (auth.ok) { askUI.needsPairing = false; return get(url, true); }
+    throw Object.assign(new Error(body.error || 'HTTP 401'), { http: true, needsPairing: auth.needsPairing, pairMessage: auth.message });
+  }
   if (!r.ok) throw Object.assign(new Error(body.error || `HTTP ${r.status}`), { http: true });
   return body;
 }
@@ -45,11 +49,11 @@ async function poll() {
     if (p) {
       try {
         [graph, { lines: log }] = await Promise.all([get(`/api/factory/projects/${enc(p)}/graph`), get(`/api/factory/projects/${enc(p)}/log?n=100`)]);
-      } catch (e) { if (!e.http) throw e; problem = e.message; }
+      } catch (e) { if (!e.http) throw e; if (e.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: e.pairMessage || '' }); problem = e.message; }
     }
     next = { projects, asks, p, task, graph, log: log || [], problem };
   } catch (e) {
-    if (e.http) next = { projects: [], asks: [], p: '', task, graph: null, log: [], problem: e.message };
+    if (e.http) { if (e.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: e.pairMessage || '' }); next = { projects: [], asks: [], p: '', task, graph: null, log: [], problem: e.message }; }
     else off = true;
   }
   busy = false;
@@ -164,15 +168,16 @@ $('asks').addEventListener('submit', async (e) => {
   const form = e.target.closest('form[data-pair-form]');
   if (!form || askUI.pairingBusy) return;
   e.preventDefault();
+  const code = form.elements.code?.value || '';
   Object.assign(askUI, { pairingBusy: true, pairError: '' });
   render();
-  const res = await askFlow.pairWithCode(form.elements.code?.value || '').catch((err) => ({ ok: false, message: err.message || 'Pairing failed.' }));
+  const res = await askFlow.pairWithCode(code).catch((err) => ({ ok: false, message: err.message || 'Pairing failed.' }));
   askUI.pairingBusy = false;
   if (!res.ok) { askUI.pairError = res.message || 'Pairing failed.'; return render(); }
   const pending = askUI.pending;
   Object.assign(askUI, { needsPairing: false, pending: null });
   render();
-  if (pending) await submitAnswer(pending.askId, pending.option);
+  if (pending) await submitAnswer(pending.askId, pending.option); else poll();
 });
 
 $('retry').addEventListener('click', poll);

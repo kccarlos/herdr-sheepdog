@@ -77,6 +77,15 @@ func deviceOf(r *http.Request) string {
 	return id
 }
 
+func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Path: "/", MaxAge: -1, HttpOnly: true, Secure: r.TLS != nil || forwardedHTTPS(r), SameSite: http.SameSiteStrictMode})
+}
+
+func hasSessionCookie(r *http.Request) bool {
+	c, err := r.Cookie(sessionCookie)
+	return err == nil && c.Value != ""
+}
+
 // authFunc wraps h with device auth. A missing or bad ticket answers 401
 // {"error":"unauthorized","reason":…} and logs web.device.auth_failed
 // (never the ticket). A ticket presented on loopback is checked too, so a
@@ -85,6 +94,9 @@ func (s *Server) authFunc(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		dev, reason := s.authenticate(r)
 		if reason != "" {
+			if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer "+ticketPrefix) && hasSessionCookie(r) {
+				clearSessionCookie(w, r)
+			}
 			fields := map[string]any{"reason": reason, "remote": r.RemoteAddr, "path": r.URL.Path}
 			if s.kindOf(r.RemoteAddr) == "loopback" {
 				if why := s.isUntrustedLoopback(r); why != "" {
@@ -241,6 +253,9 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	fail := func(reason string) {
 		if reason == "bad_signature" && limited {
 			s.limits.fail("signature", src, badSignaturesPerMinute, s.deps.Now())
+		}
+		if (reason == reasonDeviceRevoked || reason == reasonUnknownDevice) && (req.Client == "browser" || hasSessionCookie(r)) {
+			clearSessionCookie(w, r)
 		}
 		s.log.Log(logSource, "web.device.auth_failed", "", map[string]any{"reason": reason, "remote": r.RemoteAddr, "device_id": req.DeviceID})
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized", "reason": reason})

@@ -2,7 +2,7 @@
 // WebCrypto re-authentication after a daemon restart or 401 (design.md 7.1).
 import { enroll, signIn, keyStore } from '../voice/pairing.js';
 
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 export const PAIR_HINT = 'Pair this browser to answer asks: open the Sheepdog menu-bar app on this Mac for a short pairing code, then enter it below.';
 
 export function renderAskCardsHTML(asks, state = {}) {
@@ -25,13 +25,21 @@ export function renderAskCardsHTML(asks, state = {}) {
 }
 
 export function createAskFlow(deps) {
-  let daemonId = '';
+  let daemonId = '', reauthInFlight = null;
   const resolveId = async () => {
-    if (daemonId) return daemonId;
-    const r = await deps.fetch('/api/hello', { cache: 'no-store' });
+    const r = await deps.fetch('/api/hello', { cache: 'no-store' }).catch(() => null);
     const b = r && r.ok ? await r.json().catch(() => ({})) : {};
-    return (daemonId = (b && b.computer && b.computer.id) || '');
+    return (daemonId = (b && b.computer && b.computer.id) || daemonId);
   };
+  const reauth = () => (reauthInFlight ||= (async () => {
+    const did = await resolveId();
+    if (!did) return { ok: false, needsPairing: true, message: PAIR_HINT };
+    const auth = await signIn(did, deps).catch(() => ({ ok: false, reason: 'error' }));
+    if (auth.ok) return { ok: true, daemonId: did };
+    if (auth.reason === 'device_revoked' || auth.reason === 'unknown_device') return { ok: false, reason: auth.reason, needsPairing: true, message: 'This browser was removed. ' + PAIR_HINT };
+    if (auth.reason === 'no_key') return { ok: false, reason: 'no_key', needsPairing: true, message: PAIR_HINT };
+    return { ok: false, reason: auth.reason || 'error' };
+  })().finally(() => { reauthInFlight = null; }));
   const postAnswer = async (id, option) => {
     const r = await deps.fetch(`/api/factory/asks/${encodeURIComponent(id)}/answer`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ option }),
@@ -39,6 +47,7 @@ export function createAskFlow(deps) {
     return { r, body: await r.json().catch(() => ({})) };
   };
   return {
+    reauth,
     async pairWithCode(code) {
       const clean = String(code || '').trim();
       if (!clean) return { ok: false, message: 'Enter the pairing code from the Sheepdog menu-bar app.' };
@@ -55,18 +64,12 @@ export function createAskFlow(deps) {
       if (r.ok) return { ok: true, ...body };
       const authNeeded = r.status === 401 || (r.status === 403 && (body.code === 'proof_required' || body.error === 'proof_required'));
       if (!authNeeded) return { ok: false, status: r.status, code: body.code, message: body.error || `Could not answer (${r.status}).` };
-      const did = await resolveId();
-      if (did) {
-        const auth = await signIn(did, deps).catch(() => ({ ok: false, reason: 'error' }));
-        if (auth.ok) {
-          ({ r, body } = await postAnswer(id, option));
-          return r.ok ? { ok: true, ...body } : { ok: false, status: r.status, code: body.code, message: body.error || `Could not answer (${r.status}).` };
-        }
-        if (auth.reason === 'device_revoked' || auth.reason === 'unknown_device') {
-          return { ok: false, needsPairing: true, message: 'This browser was removed. ' + PAIR_HINT };
-        }
+      const auth = await reauth();
+      if (auth.ok) {
+        ({ r, body } = await postAnswer(id, option));
+        return r.ok ? { ok: true, ...body } : { ok: false, status: r.status, code: body.code, message: body.error || `Could not answer (${r.status}).` };
       }
-      return { ok: false, needsPairing: true, message: PAIR_HINT };
+      return { ok: false, needsPairing: true, message: auth.message || PAIR_HINT };
     },
   };
 }

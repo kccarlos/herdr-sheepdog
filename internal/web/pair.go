@@ -90,6 +90,11 @@ func normalizeShortCode(s string) string {
 	return strings.NewReplacer(" ", "", "\t", "", "-", "").Replace(strings.ToUpper(s))
 }
 
+func isBrowserShortCode(code string) bool {
+	norm := normalizeShortCode(code)
+	return len(norm) == 8 && strings.IndexFunc(norm, func(r rune) bool { return (r < '0' || r > '9') && (r < 'A' || r > 'Z') }) < 0
+}
+
 // burn uses code once: "" when it worked, else code_used or code_expired.
 func (e *enrollCodes) burn(code string, now time.Time) string {
 	reason, _ := e.tryBurn(code, now)
@@ -281,8 +286,8 @@ func (s *Server) handleBrowserCode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"code": code, "expires": exp.UTC(), "expires_in": int(BrowserCodeLifetime / time.Second)})
 }
 
-func (s *Server) burnEnrollCode(kind, code string, now time.Time) string {
-	if kind == DeviceBrowser {
+func (s *Server) burnEnrollCode(kind, code string, allowShort bool, now time.Time) string {
+	if allowShort && kind == DeviceBrowser {
 		if reason, known := s.browserEnroll.tryBurn(normalizeShortCode(code), now); known {
 			return reason
 		}
@@ -319,7 +324,12 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "public_key: "+err.Error())
 		return
 	}
-	if reason := s.burnEnrollCode(req.Kind, req.Code, now); reason != "" {
+	if remote && req.Kind == DeviceBrowser && isBrowserShortCode(req.Code) {
+		s.log.Log(logSource, "web.pair.code_refused", "", map[string]any{"reason": "loopback_only", "remote": r.RemoteAddr})
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Browser short codes can only be used on this computer.", "reason": "loopback_only"})
+		return
+	}
+	if reason := s.burnEnrollCode(req.Kind, req.Code, !remote, now); reason != "" {
 		blocked := s.limits.fail("enroll", src, badCodesPerMinute, now)
 		s.log.Log(logSource, "web.pair.code_refused", "", map[string]any{"reason": reason, "remote": r.RemoteAddr})
 		if !remote && blocked {
