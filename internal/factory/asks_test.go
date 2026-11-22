@@ -1273,6 +1273,203 @@ func TestReviewerDecisionAskDeliveryAndClosure(t *testing.T) {
 	})
 }
 
+// TestReviewerDecisionAskAnsweredWhileWorking verifies the round-2 major fix
+// through real engine passes (without hand-editing RunRecord state):
+//   - A live reviewer opens a decision ask and ends its turn (or finishes its
+//     turn after the coordinator answers).
+//   - The coordinator answers while the reviewer run is still PhaseWorking.
+//   - Before delivery, the ask is either still open or answered with delivery
+//     pending; on the next passes when the reviewer becomes idle past
+//     IdleGraceSeconds, the answer is delivered to that reviewer exactly once
+//     (the same way a worker's held messages are), never to the worker.
+//   - N29 neither nudges nor ends the reviewer while its answer is pending or
+//     when delivery completes.
+func TestReviewerDecisionAskAnsweredWhileWorking(t *testing.T) {
+	t.Parallel()
+
+	assertNoN29 := func(t *testing.T, rr *reviewerAskRig, revAddr string) {
+		t.Helper()
+		st := rr.state()
+		att := st.Tasks[0].Attempts[0]
+		for _, act := range att.Acts {
+			if strings.HasPrefix(act.Key, flow.AskNudgeReview+"@") || strings.HasPrefix(act.Key, flow.AskStopReview+"@") {
+				t.Fatalf("N29 fired unexpectedly on reviewer %s: act=%+v", revAddr, act)
+			}
+		}
+		for _, msg := range sendsTo(t, rr.srv.Requests(), revAddr) {
+			if strings.Contains(msg, "no report tag") {
+				t.Fatalf("N29 nudged reviewer %s while answer pending/delivered: %q", revAddr, msg)
+			}
+		}
+		tm, err := rr.client.Get(rr.ctx, revAddr)
+		if err != nil || tm.State != "live" {
+			t.Fatalf("reviewer terminal %s not live: term=%+v err=%v", revAddr, tm, err)
+		}
+		if att.Review == nil || att.Review.Run == nil || att.Review.Run.State == flow.PhaseEnded {
+			t.Fatalf("reviewer run ended unexpectedly: %+v", att.Review)
+		}
+	}
+
+	assertPendingAskState := func(t *testing.T, rr *reviewerAskRig, wantOption, wantWhy string) {
+		t.Helper()
+		st := rr.state()
+		ask := st.Asks[0]
+		rev := st.Tasks[0].Attempts[0].Review
+		switch ask.Status {
+		case flow.AskStatusOpen:
+		case flow.AskStatusAnswered:
+			if rev == nil || rev.Run == nil || len(rev.Run.Held) == 0 {
+				t.Fatalf("ask marked answered while delivery pending, but Review.Run.Held is empty: ask=%+v rev=%+v", ask, rev)
+			}
+			held := strings.Join(rev.Run.Held, "\n")
+			if !strings.Contains(held, wantOption) || !strings.Contains(held, wantWhy) {
+				t.Fatalf("pending Review.Run.Held = %q, want %q and %q", rev.Run.Held, wantOption, wantWhy)
+			}
+		default:
+			t.Fatalf("unexpected ask status while answer pending: %+v", ask)
+		}
+	}
+
+	assertDeliveredOnce := func(t *testing.T, rr *reviewerAskRig, revAddr string, revBefore, workerBefore int, wantOption, wantWhy string) {
+		t.Helper()
+		assertNoN29(t, rr, revAddr)
+		revSends := sendsTo(t, rr.srv.Requests(), revAddr)[revBefore:]
+		if len(revSends) != 1 || !strings.Contains(revSends[0], wantOption) || !strings.Contains(revSends[0], wantWhy) {
+			t.Fatalf("reviewer %s sends after idle = %q, want 1 message with %q and %q", revAddr, revSends, wantOption, wantWhy)
+		}
+		st := rr.state()
+		ask := st.Asks[0]
+		if ask.Status != flow.AskStatusAnswered || ask.Answer != wantOption || ask.Why != wantWhy || ask.AnsweredBy != flow.RoleCoordinator {
+			t.Fatalf("ask after delivery = %+v, want answered(%q, %q, %q)", ask, wantOption, wantWhy, flow.RoleCoordinator)
+		}
+		rev := st.Tasks[0].Attempts[0].Review
+		if rev == nil || rev.Run == nil || rev.Run.State != flow.PhaseWorking || len(rev.Run.Held) != 0 {
+			t.Fatalf("reviewer run after delivery = %+v, want PhaseWorking with empty Held", rev)
+		}
+		if workerSends := sendsTo(t, rr.srv.Requests(), rr.workerID)[workerBefore:]; len(workerSends) != 0 || len(st.Tasks[0].Attempts[0].Held) != 0 {
+			t.Fatalf("worker wrongly received reviewer answer: sends=%q held=%q", workerSends, st.Tasks[0].Attempts[0].Held)
+		}
+	}
+
+	t.Run("reviewer_ends_turn_answered_within_grace_delivered_when_idle", func(t *testing.T) {
+		t.Parallel()
+		rr := newReviewerAskRig(t, 1)
+		rev1, revTok1 := rr.currentReviewer()
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "working"})
+		rr.pass()
+
+		if err := rr.eng.Report(revTok1, "ask", json.RawMessage(`{"kind":"decision","question":"Is helper exported intentionally?","options":["Yes","No"],"recommend":"Yes"}`)); err != nil {
+			t.Fatalf("reviewer report ask: %v", err)
+		}
+		askID := rr.state().Asks[0].ID
+
+		// Reviewer ends its turn waiting for the answer; the first pass observes
+		// Status=="idle" within IdleGraceSeconds (PhaseWorking) and J12 wakes coordinator.
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "idle"})
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass()
+		if st := rr.state(); st.Tasks[0].Attempts[0].Review.Run.State != flow.PhaseWorking {
+			t.Fatalf("reviewer run before answer = %+v, want %q", st.Tasks[0].Attempts[0].Review.Run, flow.PhaseWorking)
+		}
+
+		revBefore := len(sendsTo(t, rr.srv.Requests(), rev1))
+		workerBefore := len(sendsTo(t, rr.srv.Requests(), rr.workerID))
+
+		if err := rr.eng.Report(rr.coordTok, "answer", json.RawMessage(fmt.Sprintf(`{"ask":%q,"option":"Yes","why":"public package API"}`, askID))); err != nil {
+			t.Fatalf("coordinator answer while reviewer working: %v", err)
+		}
+		if got := sendsTo(t, rr.srv.Requests(), rev1)[revBefore:]; len(got) != 0 {
+			t.Fatalf("answer sent before reviewer became idle past grace: %q", got)
+		}
+		assertPendingAskState(t, rr, "Yes", "public package API")
+
+		// Intermediate pass still within IdleGraceSeconds: answer remains pending and N29 stays silent.
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass()
+		assertNoN29(t, rr, rev1)
+		if got := sendsTo(t, rr.srv.Requests(), rev1)[revBefore:]; len(got) != 0 {
+			t.Fatalf("answer sent prematurely within idle grace: %q", got)
+		}
+		assertPendingAskState(t, rr, "Yes", "public package API")
+
+		// Next pass past IdleGraceSeconds: reviewer is idle, so the answer is delivered once without N29 nudge/stop.
+		rr.now = rr.now.Add(20 * time.Second)
+		rr.pass()
+		assertDeliveredOnce(t, rr, rev1, revBefore, workerBefore, "Yes", "public package API")
+
+		// Further passes before and after the reviewer resumes working never re-deliver or trigger N29.
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass()
+		assertDeliveredOnce(t, rr, rev1, revBefore, workerBefore, "Yes", "public package API")
+
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "working"})
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass()
+		assertDeliveredOnce(t, rr, rev1, revBefore, workerBefore, "Yes", "public package API")
+
+		rr.passReviewRound()
+		if st := rr.state(); len(st.Tasks[0].Attempts[0].Rounds) != 1 || st.Tasks[0].Attempts[0].Rounds[0].Verdict != flow.VerdictPass {
+			t.Fatalf("rounds after answered reviewer finished = %+v, want 1 pass round", st.Tasks[0].Attempts[0].Rounds)
+		}
+	})
+
+	t.Run("answered_while_hc_working_then_reviewer_ends_turn", func(t *testing.T) {
+		t.Parallel()
+		rr := newReviewerAskRig(t, 1)
+		rev1, revTok1 := rr.currentReviewer()
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "working"})
+		rr.pass()
+
+		if err := rr.eng.Report(revTok1, "ask", json.RawMessage(`{"kind":"decision","question":"Treat missing validation as major?","options":["Yes","No"],"recommend":"Yes"}`)); err != nil {
+			t.Fatalf("reviewer report ask: %v", err)
+		}
+		askID := rr.state().Asks[0].ID
+
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass() // J12 wakes coordinator while reviewer is still working
+
+		revBefore := len(sendsTo(t, rr.srv.Requests(), rev1))
+		workerBefore := len(sendsTo(t, rr.srv.Requests(), rr.workerID))
+
+		if err := rr.eng.Report(rr.coordTok, "answer", json.RawMessage(fmt.Sprintf(`{"ask":%q,"option":"No","why":"validated at caller"}`, askID))); err != nil {
+			t.Fatalf("coordinator answer while reviewer working: %v", err)
+		}
+
+		// Reviewer stays working on a subsequent pass; answer stays pending.
+		rr.now = rr.now.Add(15 * time.Second)
+		rr.pass()
+		assertNoN29(t, rr, rev1)
+		if got := sendsTo(t, rr.srv.Requests(), rev1)[revBefore:]; len(got) != 0 {
+			t.Fatalf("answer sent while reviewer still working: %q", got)
+		}
+		assertPendingAskState(t, rr, "No", "validated at caller")
+
+		// Reviewer ends its turn -> within grace stays pending, then past grace delivers once.
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "idle"})
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass()
+		assertNoN29(t, rr, rev1)
+		if got := sendsTo(t, rr.srv.Requests(), rev1)[revBefore:]; len(got) != 0 {
+			t.Fatalf("answer sent before idle grace elapsed: %q", got)
+		}
+		assertPendingAskState(t, rr, "No", "validated at caller")
+
+		rr.now = rr.now.Add(20 * time.Second)
+		rr.pass()
+		assertDeliveredOnce(t, rr, rev1, revBefore, workerBefore, "No", "validated at caller")
+
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "working"})
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass()
+		assertDeliveredOnce(t, rr, rev1, revBefore, workerBefore, "No", "validated at caller")
+
+		rr.passReviewRound()
+		if st := rr.state(); len(st.Tasks[0].Attempts[0].Rounds) != 1 || st.Tasks[0].Attempts[0].Rounds[0].Verdict != flow.VerdictPass {
+			t.Fatalf("rounds after answered reviewer finished = %+v, want 1 pass round", st.Tasks[0].Attempts[0].Rounds)
+		}
+	})
+}
+
 // TestProofsStoreSafetyAndPersistence checks proofs.json hygiene (KB-TST-1,
 // design.md 15, 16): real-home Paths are refused, empty DataDir fails clearly
 // instead of minting an unverifiable proof, missing proofs.json starts empty,
