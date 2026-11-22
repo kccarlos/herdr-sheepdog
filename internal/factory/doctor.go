@@ -483,8 +483,7 @@ const (
 func authProbeUnknown(out CommandOutput) (string, bool) {
 	if out.TimedOut {
 		return "unknown (timed out)", true
-	}
-	if out.Err != nil {
+	} else if out.Err != nil {
 		return fmt.Sprintf("unknown (%s)", cleanReason(out.Err.Error())), true
 	}
 	return "", false
@@ -543,6 +542,7 @@ func checkAgentCLIs(ctx context.Context, o DoctorOptions, inHC, customLookPath, 
 		ready       []string
 		timedOut    []string
 		notInHCPath []string
+		unknown     []string
 		installed   int
 		loggedIn    int
 	)
@@ -553,6 +553,9 @@ func checkAgentCLIs(ctx context.Context, o DoctorOptions, inHC, customLookPath, 
 		}
 		if oc.state == cliNotInHCPath {
 			notInHCPath = append(notInHCPath, oc.name)
+		}
+		if oc.state == cliAuthUnknown {
+			unknown = append(unknown, oc.name+": "+strings.TrimPrefix(oc.result.Detail, "sign-in "))
 		}
 		if oc.state >= cliCanaryFailed {
 			loggedIn++
@@ -579,6 +582,9 @@ func checkAgentCLIs(ctx context.Context, o DoctorOptions, inHC, customLookPath, 
 		out = append(out, resFail("agent clis",
 			fmt.Sprintf("agent CLI on PATH locally, but not on herdr-core's PATH (%s)", strings.Join(notInHCPath, ", ")),
 			"run: hc server restart, then run sheepdog factory doctor again"))
+	case loggedIn == 0 && len(unknown) > 0:
+		out = append(out, resFail("agent clis", "agent CLI sign-in "+strings.Join(unknown, "; "),
+			"check the unknown CLI probes above and run sheepdog factory doctor again"))
 	case loggedIn == 0:
 		out = append(out, resFail("agent clis", "no agent CLI is logged in",
 			"sign in to at least one CLI: claude auth login, codex login, or agy"))

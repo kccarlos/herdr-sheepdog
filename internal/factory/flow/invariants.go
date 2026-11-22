@@ -26,11 +26,8 @@ func CheckInvariants(snap InvariantSnapshot) []InvariantViolation {
 	add := func(id, subj, format string, args ...any) {
 		out = append(out, InvariantViolation{id, subj, fmt.Sprintf(format, args...)})
 	}
-	runLive := func(id string, r *RunRecord) bool {
-		return r != nil && r.State != PhaseEnded || r == nil && id != ""
-	}
 	pr, _ := FirstMatch(ProjectRows, ProjectIn{Project: p, Tasks: s.Tasks, Settings: s.Settings, Now: snap.Now})
-	coordAlive := runLive(p.RunID, p.Run)
+	coordAlive := RunLive(p.RunID, p.Run)
 	// I2 cannot fire under the current rule table (J3/J5/J6/J7/J10 cover it); it guards future rule changes.
 	if p.Started && (!AllTasksEnded(s.Tasks) || p.NewGoal) && !coordAlive && pr.ID != "J3" && pr.ID != "J5" && pr.ID != "J6" && pr.ID != "J7" {
 		add("I2", "project", "project should have a coordinator (matched %s, no live run or J3/J5/J6/J7 reason)", pr.ID)
@@ -47,8 +44,8 @@ func CheckInvariants(snap InvariantSnapshot) []InvariantViolation {
 					add("I4", t.ID, "task %s attempt %d asked merge for %q without an accept record", t.ID, i+1, head)
 				}
 			}
-			wLive := runLive(a.RunID, a.Run)
-			rLive := a.Review != nil && runLive(a.Review.RunID, a.Review.Run)
+			wLive := RunLive(a.RunID, a.Run)
+			rLive := a.Review != nil && RunLive(a.Review.RunID, a.Review.Run)
 			if wLive && a.Worktree != "" {
 				writers[filepath.Clean(a.Worktree)] = append(writers[filepath.Clean(a.Worktree)], fmt.Sprintf("%s/a%d/worker", t.ID, i+1))
 			}

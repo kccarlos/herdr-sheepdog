@@ -42,29 +42,29 @@ const (
 
 // Alert is one persisted project alert or outage episode (design.md 6, 7.3).
 type Alert struct {
-	Kind     string    `json:"kind"`
-	Cause    string    `json:"cause"`
-	At       time.Time `json:"at"`
-	Stopping bool      `json:"stopping,omitempty"`
-	Fix      string    `json:"fix,omitempty"`
-	Rule     string    `json:"rule,omitempty"`
-	Scope    string    `json:"scope,omitempty"`
+	Kind  string    `json:"kind"`
+	Cause string    `json:"cause"`
+	At    time.Time `json:"at"`
+	Fix   string    `json:"fix,omitempty"`
+	Rule  string    `json:"rule,omitempty"`
+	Scope string    `json:"scope,omitempty"`
 }
 
-// StoppingAlert returns the first active stopping alert (sorted by key), or nil.
+func (a Alert) IsStopping() bool {
+	return a.Kind == AlertNoPool || a.Kind == AlertDisk || a.Kind == AlertConsentPrompt
+}
 func StoppingAlert(alerts map[string]Alert) *Alert {
 	for _, k := range slices.Sorted(maps.Keys(alerts)) {
-		if a := alerts[k]; a.Stopping {
+		if a := alerts[k]; a.IsStopping() {
 			return &a
 		}
 	}
 	return nil
 }
-
-// HasAlert reports whether an active alert of kind is persisted on p.
+func RunLive(id string, r *RunRecord) bool {
+	return r != nil && r.State != PhaseEnded || r == nil && id != ""
+}
 func (p Project) HasAlert(kind string) bool { _, ok := p.Alerts[kind]; return ok }
-
-// CoordSignOutHold reports whether J5 is holding the coordinator on sign-out.
 func (p Project) CoordSignOutHold() bool {
 	a, ok := p.Alerts[AlertAgentsDown]
 	return ok && strings.HasPrefix(a.Scope, "signed_out:")
@@ -92,6 +92,7 @@ type Project struct {
 	NewGoal            bool              `json:"new_goal,omitempty"`            // J4: owner gave a new goal after a plan existed
 	NewGoalTasks       int               `json:"new_goal_tasks,omitempty"`      // J4: task count when NewGoal was set
 	CoordDialogStucks  int               `json:"coord_dialog_stucks,omitempty"` // J10: consecutive R29 dialog-stuck ends
+	CoordSilentStops   int               `json:"coord_silent_stops,omitempty"`  // J9: consecutive silent coordinator stops
 	CoordErrorAt       time.Time         `json:"coord_error_at,omitempty"`      // J8: when coordinator was last told to go on
 	CoordErrorTurn     uint64            `json:"coord_error_turn,omitempty"`    // J8: coordinator turn at last go-on tell
 	CoordWakeAt        time.Time         `json:"coord_wake_at,omitempty"`       // J9: oldest delivered wake awaiting a turn

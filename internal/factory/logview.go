@@ -84,11 +84,8 @@ func StatusViewOf(s flow.State, logs []LogLine) []TaskStatus {
 	}
 	for _, k := range slices.Sorted(maps.Keys(s.Project.Alerts)) {
 		a := s.Project.Alerts[k]
-		why := cmp.Or(a.Cause, a.Kind)
-		if a.Fix != "" {
-			why += " — " + a.Fix
-		}
-		out = append(out, TaskStatus{ID: "ALERT", Title: a.Kind, Stage: map[bool]string{true: "stopped", false: "alert"}[a.Stopping], Rule: a.Rule, Why: why, At: a.At})
+		why := cmp.Or(a.Cause, a.Kind) + map[bool]string{true: " — " + a.Fix}[a.Fix != ""]
+		out = append(out, TaskStatus{ID: "ALERT", Title: a.Kind, Stage: map[bool]string{true: "stopped", false: "alert"}[a.IsStopping()], Rule: a.Rule, Why: why, At: a.At})
 	}
 	return out
 }

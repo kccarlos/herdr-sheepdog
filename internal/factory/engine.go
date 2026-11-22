@@ -157,7 +157,7 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 			holdProjectWake(&s, "new_goal", "owner gave a new goal", "goal: "+goal, e.now())
 		}
 	}
-	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.Invariants, s.Project.Alerts, s.Project.WaitKey = root, goal, true, nil, nil, nil, nil, ""
+	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = root, goal, true, nil, nil, nil, "", 0
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastSweep, id)
 	// The owner starting again is slice 1's retry (plan.md: "the owner
@@ -278,7 +278,7 @@ func (e *Engine) Stop(project string) error {
 		stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
 		reconcileCoordWakes(&s.Project)
 	}
-	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants, s.Project.Alerts, s.Project.WaitKey = "", "", nil, false, nil, nil, false, 0, nil, nil, ""
+	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = "", "", nil, false, nil, nil, false, 0, nil, "", 0
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastPass, id)
 	delete(e.lastSweep, id)
@@ -337,17 +337,13 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	ctx, cancel := context.WithTimeout(world.GitRepository(ctx, s.Project.Folder), world.GitPassTimeout)
 	defer cancel()
 	dt := e.passDelta(id)
-	coordWasEnded := s.Project.Run != nil && s.Project.Run.State == flow.PhaseEnded
 	hcChecked, coordErr := e.observeCoordLocked(ctx, id, &s)
 	hcErr := coordErr
 	if coordErr != nil {
 		e.logError("factory.hc_error", id, coordErr)
 	}
-	justSignedOut := !coordWasEnded && s.Project.Run != nil && s.Project.Run.State == flow.PhaseEnded && s.Project.Run.Result == flow.EndSignedOut
-	e.passCoordFallback = e.observeCoordSignInLocked(ctx, id, &s, justSignedOut, e.now())
-	e.passBaseHCErr = nil
-	e.observeBaseLocked(ctx, id, &s)
-	if e.passBaseHCErr != nil {
+	e.passCoordFallback = e.observeCoordSignInLocked(ctx, id, &s, e.now())
+	if e.observeBaseLocked(ctx, id, &s); e.passBaseHCErr != nil {
 		hcErr, hcChecked = cmp.Or(hcErr, e.passBaseHCErr), true
 	}
 	e.sweepProjectLocked(ctx, id, &s, codexProbe)
@@ -399,18 +395,25 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		setFlag(&e.hcUnavail, id, unavail)
 		e.reconcileAlertLocked(id, &s, flow.AlertHCUnavailable, unavail, flow.Alert{Kind: flow.AlertHCUnavailable, Cause: cmp.Or(flow.CleanErr(errText(hcErr)), "herdr-core is unreachable"), At: e.now()}, "alert", "")
 	}
-	e.observeNoPoolLocked(id, &s, e.now())
 	granted := flow.GrantSlots(candidates, s.Tasks, flow.RunningTasks(s.Tasks, workerState), s.Settings.MaxRunning)
 	for _, tid := range poolHeld {
 		granted[tid] = true
 	}
-	skipped := map[string]bool{}
+	obs, skipped := make([]*flow.Facts, len(s.Tasks)), map[string]bool{}
 	for i := range s.Tasks {
-		if ctx.Err() == nil && !e.passTaskLocked(ctx, id, &s, i, granted[s.Tasks[i].ID], workerRun[s.Tasks[i].ID], workerErr[s.Tasks[i].ID], &baseTried, dt) {
+		if f, ok := e.observeTaskLocked(ctx, id, &s, i, granted[s.Tasks[i].ID], workerRun[s.Tasks[i].ID], workerErr[s.Tasks[i].ID], baseTried, dt); ctx.Err() == nil && ok {
+			obs[i] = &f
+		} else {
 			skipped[s.Tasks[i].ID] = true
 		}
 	}
 	if ctx.Err() == nil {
+		e.observeNoPoolLocked(ctx, id, &s, obs, e.now())
+		for i := range s.Tasks {
+			if ctx.Err() == nil && obs[i] != nil {
+				e.actTaskLocked(ctx, id, &s, i, *obs[i], &baseTried)
+			}
+		}
 		now := e.now()
 		if coordErr == nil {
 			e.passProjectRulesLocked(ctx, id, &s, now)
@@ -538,11 +541,11 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 	if reconcileCoordWakes(p) {
 		dirty = true
 	}
-	if r := p.Run; r != nil && r.State == flow.PhaseEnded && (p.RunID != "" || p.RunTokenHash != "" || !p.CoordWakeAt.IsZero() || !p.CoordErrorAt.IsZero() || (!flow.IsCoordR29(r) && p.CoordDialogStucks != 0)) {
-		p.RunID, p.RunTokenHash, dirty = "", "", true
+	if r := p.Run; r != nil && r.State == flow.PhaseEnded && (p.RunID != "" || p.RunTokenHash != "" || !p.CoordWakeAt.IsZero() || !p.CoordErrorAt.IsZero() || (!flow.IsCoordR29(r) && p.CoordDialogStucks != 0) || (r.Result != flow.EndStopped && p.CoordSilentStops != 0)) {
+		p.RunID, p.RunTokenHash, p.CoordSilentStops, dirty = "", "", map[bool]int{true: p.CoordSilentStops}[r.Result == flow.EndStopped], true
 		clearCoordTrack(p, !flow.IsCoordR29(r), false)
 	} else if r != nil && r.State != flow.PhaseEnded && !p.CoordWakeAt.IsZero() && (r.Turn > p.CoordWakeTurn || r.CLI != world.CodexCLI && r.Status == "working") {
-		p.CoordWakeAt, dirty = time.Time{}, true
+		p.CoordWakeAt, p.CoordSilentStops, dirty = time.Time{}, map[bool]int{false: p.CoordSilentStops}[r.Turn > p.CoordWakeTurn], true
 	}
 	if dirty {
 		e.saveLocked(id, *s)
@@ -556,19 +559,20 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 		return flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now, CoordFallbackReady: e.passCoordFallback})
 	}
 	r, d := match()
-	if r.ID == "J3" || r.ID == "J5" {
-		return
-	}
 	if len(d.Asked) > 0 && d.Asked[0] == flow.AskCoordDialogStuck {
 		s.Project.CoordDialogStucks++
 		s.Project.Acts = append(s.Project.Acts, flow.Act{Key: flow.CoordStuckKey(s.Project.Run), Result: "done", At: now})
 		if s.Project.CoordDialogStucks >= 2 {
 			e.logEvent("factory.coordinator_stuck", map[string]string{"project": id, "count": fmt.Sprint(s.Project.CoordDialogStucks), "why": d.Why})
+			e.reconcileAlertLocked(id, s, flow.AlertAgentsDown+"@j10", true, flow.Alert{Kind: flow.AlertAgentsDown, Cause: d.Why, At: now, Rule: "J10", Scope: "j10_stuck"}, "alert", "")
 		}
 		e.commitLogLocked(id, s, LogLine{By: "engine", Rule: r.ID, Asked: d.Asked, Decision: map[bool]string{true: "coordinator stuck at dialog twice in a row; owner attention needed", false: fmt.Sprintf("coordinator stuck at dialog (count %d)", s.Project.CoordDialogStucks)}[s.Project.CoordDialogStucks >= 2], Why: d.Why})
 		r, d = match()
 	}
-	if r.ID == "J6" || (r.ID == "J4" && s.Project.RunID == "" && (s.Project.Run == nil || s.Project.Run.State == flow.PhaseEnded)) {
+	if r.ID == "J6" || (r.ID == "J4" && !flow.RunLive(s.Project.RunID, s.Project.Run)) {
+		if capWhy, capped := flow.CoordHourlyCap(s.Project, s.Settings, now); r.ID == "J6" && capped {
+			e.reconcileAlertLocked(id, s, flow.AlertAgentsDown+"@j6", true, flow.Alert{Kind: flow.AlertAgentsDown, Cause: capWhy, At: now, Rule: "J6", Scope: "j6_cap"}, "alert", "")
+		}
 		e.logProjectWaitLocked(id, s, r.ID, cmp.Or(map[string]string{"J4": "finished"}[r.ID], "waiting"), d.Why, r.ID+":"+d.Why)
 		return
 	}
@@ -595,6 +599,9 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 		reconcileCoordWakes(&s.Project)
 		s.Project.RunID, s.Project.RunTokenHash = "", ""
 		clearCoordTrack(&s.Project, true, false)
+		if s.Project.CoordSilentStops = map[bool]int{true: s.Project.CoordSilentStops + 1}[r.ID == "J9"]; s.Project.CoordSilentStops >= 2 {
+			e.reconcileAlertLocked(id, s, flow.AlertAgentsDown+"@j9", true, flow.Alert{Kind: flow.AlertAgentsDown, Cause: d.Why, At: now, Rule: "J9", Scope: "j9_silent"}, "alert", "")
+		}
 		commit("stopped coordinator")
 	case flow.AskDeliverWakes:
 		e.deliverWakesLocked(ctx, id, s, now)
@@ -758,18 +765,16 @@ func (e *Engine) codexHome(id string) (string, error) {
 func (e *Engine) resolveLaunch(ctx context.Context, id, role string, task flow.Task, s flow.State, check func(flow.Candidate) flow.ResolveReason, resolve func(flow.ResolveFacts) (flow.Intent, flow.ResolveReason)) (flow.Intent, map[string]string, flow.ResolveReason) {
 	facts := e.probeLaunchFacts(ctx, role, task, s.Settings)
 	if role == flow.RoleCoordinator && s.Project.CoordSignOutHold() {
-		check = positiveCoordCheck(facts.CLIs)
+		check = e.positiveCoordCheck(id, facts.CLIs)
 	}
 	facts.Check = check
 	for {
 		in, reason := resolve(facts)
 		if reason.Why != "" {
 			return in, nil, reason
-		}
-		if stop := flow.StoppingAlert(s.Project.Alerts); stop != nil {
+		} else if stop := flow.StoppingAlert(s.Project.Alerts); stop != nil {
 			return flow.Intent{}, nil, flow.ResolveReason{Why: "stopped: " + cmp.Or(stop.Fix, stop.Cause)}
-		}
-		if in.CLI != world.CodexCLI {
+		} else if in.CLI != world.CodexCLI {
 			return in, nil, reason
 		}
 		home, err := e.codexHome(id)
@@ -799,7 +804,7 @@ func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State,
 	adopt, bin := s.Project.Run == nil || s.Project.Run.State != flow.PhaseEnded, cmp.Or(e.Bin, "sheepdog")
 	if !adopt {
 		stopped := e.stopCoordWithBackoffLocked(ctx, id, s, now, true)
-		r, d := flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now})
+		r, d := flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now, CoordFallbackReady: e.passCoordFallback})
 		if !stopped {
 			e.logProjectWaitLocked(id, s, r.ID, "waiting", d.Why, r.ID+":"+d.Why)
 			return
@@ -1211,17 +1216,20 @@ func actOutage(verb string, f flow.Facts, err error) bool {
 	}
 }
 
-// passTaskLocked reports whether the task reached rule evaluation for I1.
 func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int, hasSlot bool, workerRun flow.Run, workerErr error, baseTried *bool, dt time.Duration) bool {
-	facts := flow.Facts{
-		GitHubUnavailable: e.ghUnavail[id] || s.Project.HasAlert(flow.AlertGitHubUnavailable),
-		HCUnavailable:     e.hcUnavail[id] || s.Project.HasAlert(flow.AlertHCUnavailable),
+	if f, ok := e.observeTaskLocked(ctx, id, s, ti, hasSlot, workerRun, workerErr, *baseTried, dt); ok {
+		e.actTaskLocked(ctx, id, s, ti, f, baseTried)
+		return true
 	}
+	return false
+}
+
+func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State, ti int, hasSlot bool, workerRun flow.Run, workerErr error, baseTried bool, dt time.Duration) (flow.Facts, bool) {
+	facts := flow.Facts{GitHubUnavailable: e.ghUnavail[id] || s.Project.HasAlert(flow.AlertGitHubUnavailable), HCUnavailable: e.hcUnavail[id] || s.Project.HasAlert(flow.AlertHCUnavailable)}
 	if b := s.Project.Base; b != nil && b.Red {
 		facts.BaseRed, facts.BaseRedSince = true, b.Since
-		if !*baseTried {
-			facts.BaseRedSpell = b.SpellID
-			facts.BaseRedWoken = flow.Done(s.Project.Acts, flow.AskWake+"@base_red_held@"+b.SpellID)
+		if !baseTried {
+			facts.BaseRedSpell, facts.BaseRedWoken = b.SpellID, flow.Done(s.Project.Acts, flow.AskWake+"@base_red_held@"+b.SpellID)
 		}
 	}
 	// An ended task needs no facts (N1 matches first), and cleanup may
@@ -1244,17 +1252,17 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		cancel()
 		e.logOnce("factory.git_error", id, a.Worktree, err)
 		if err != nil {
-			return false
+			return facts, false
 		}
 		lctx, lcancel := context.WithTimeout(ctx, lockGitTimeout)
 		facts.Lines, facts.LinesTimeout, facts.TipMergeOnly, err = e.readTipLocked(lctx, a, tip, rel)
 		lcancel()
 		if e.logOnce("factory.git_size_error", id, a.Worktree, err); err != nil {
-			return false
+			return facts, false
 		}
 		if workerErr != nil {
 			e.logError("factory.hc_error", id, workerErr)
-			return false
+			return facts, false
 		}
 		facts.Worker = workerRun
 		facts.NoSlot = workerRun.State == flow.RunGone && !hasSlot
@@ -1264,15 +1272,23 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		}
 		facts.GitHubUnavailable = e.ghUnavail[id] || s.Project.HasAlert(flow.AlertGitHubUnavailable)
 		if e.observeReviewLocked(ctx, id, s, ti, &facts, dt) {
-			return false
+			return facts, false
 		}
 	} else if oa == nil && !flow.Ended(s.Tasks[ti]) {
 		facts.DepsNotDone, facts.DepsDropped = flow.UnmetDeps(s.Tasks[ti], s.Tasks)
 		facts.NoSlot = !hasSlot && !flow.Exhausted(s.Tasks[ti].Acts, flow.AskNewAttempt, s.Settings)
 	}
-	now := e.now()
-	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[ti], Settings: s.Settings, Facts: facts, Now: now})
-	e.reconcileCIStalledLocked(id, s, s.Tasks[ti], r.ID, facts, now)
+	return facts, true
+}
+
+func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti int, facts flow.Facts, baseTried *bool) {
+	facts.GitHubUnavailable = e.ghUnavail[id] || s.Project.HasAlert(flow.AlertGitHubUnavailable)
+	if *baseTried {
+		facts.BaseRedSpell, facts.BaseRedWoken = "", false
+	}
+	task, now := s.Tasks[ti], e.now()
+	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: task, Settings: s.Settings, Facts: facts, Now: now})
+	e.reconcileCIStalledLocked(id, s, task, r.ID, facts, now)
 	rowChanged := s.Tasks[ti].LastRow != r.ID
 	s.Tasks[ti].LastRow = r.ID
 	holdWhy := ""
@@ -1292,7 +1308,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		e.waits[waitKey] = waitVal
 		if len(d.Asked) == 0 {
 			e.commitLogLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: facts, Rule: r.ID, Decision: "waiting", Why: d.Why})
-			return true
+			return
 		}
 	}
 	if len(d.Asked) == 0 {
@@ -1301,7 +1317,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		} else if rowChanged || holdChanged {
 			e.saveLocked(id, *s)
 		}
-		return true
+		return
 	}
 	var decs []string
 	whys := []string{d.Why}
@@ -1343,7 +1359,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		if verb == flow.AskRerunCI || verb == flow.AskDispatchCI || verb == flow.AskUpdateBranch || verb == flow.AskMerge { // persist intent (and any accept) before a GitHub call whose outcome can be lost
 			act(ask, "asked", "", "", false)
 			if !e.saveLocked(id, *s) {
-				return true
+				return
 			}
 		}
 		f := facts
@@ -1357,7 +1373,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 			} else if previousHold != wait.Why {
 				e.saveLocked(id, *s)
 			}
-			return true
+			return
 		}
 		if abort && err == nil {
 			act(ask, "failed", flow.ClassTransient, dec, true)
@@ -1388,7 +1404,6 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		}
 	}
 	e.commitLogLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: facts, Rule: r.ID, Asked: d.Asked, Decision: strings.Join(decs, "; "), Why: strings.Join(whys, "; ")})
-	return true
 }
 
 // readTipLocked reads the changed lines at tip and whether it is ahead of H
@@ -2187,6 +2202,7 @@ func (e *Engine) execTellBaseRed(ctx context.Context, id string, s *flow.State, 
 // persists the red spell in s.Project.Base. Read errors keep the last known
 // value and never flip the base red.
 func (e *Engine) observeBaseLocked(ctx context.Context, id string, s *flow.State) {
+	e.passBaseHCErr = nil
 	if s.Project.Folder == "" {
 		return
 	}
@@ -2199,16 +2215,11 @@ func (e *Engine) observeBaseLocked(ctx context.Context, id string, s *flow.State
 	}
 	wasRed, now := s.Project.Base != nil && s.Project.Base.Red, e.now()
 	e.observeGitHubLocked(id, s, err)
-	checkMainRed := func() {
-		if b := s.Project.Base; b != nil && b.Red && now.Sub(b.Since) >= time.Duration(s.Settings.MainRedMinutes)*time.Minute {
-			e.reconcileAlertLocked(id, s, flow.AlertMainRed, true, flow.Alert{Kind: flow.AlertMainRed, Cause: fmt.Sprintf("base branch red past %dm (%s)", s.Settings.MainRedMinutes, b.SpellID), At: now, Rule: "N38"}, "N38", "")
-		}
-	}
 	if e.logOnce("factory.base_error", id, id, err); err != nil || !res.Known || res.Red == wasRed {
-		if err == nil && res.Known && !res.Red {
-			e.reconcileAlertLocked(id, s, flow.AlertMainRed, false, flow.Alert{}, "", "")
-		} else {
-			checkMainRed()
+		b := s.Project.Base
+		mainRed := b != nil && b.Red && now.Sub(b.Since) >= time.Duration(s.Settings.MainRedMinutes)*time.Minute
+		if mainRed || err == nil && res.Known && !res.Red {
+			e.reconcileAlertLocked(id, s, flow.AlertMainRed, mainRed, flow.Alert{Kind: flow.AlertMainRed, Cause: fmt.Sprintf("base branch red past %dm (%s)", s.Settings.MainRedMinutes, cmp.Or(b, &flow.BaseState{}).SpellID), At: now, Rule: "N38"}, "N38", "")
 		}
 		return
 	}
@@ -2227,10 +2238,7 @@ func (e *Engine) observeBaseLocked(ctx context.Context, id string, s *flow.State
 		s.Project.Base = &flow.BaseState{Red: true, Since: now, SpellID: spell}
 	} else {
 		s.Project.Base = nil
-		delete(s.Project.Alerts, flow.AlertMainRed)
-		if len(s.Project.Alerts) == 0 {
-			s.Project.Alerts = nil
-		}
+		e.reconcileAlertLocked(id, s, flow.AlertMainRed, false, flow.Alert{}, "", "")
 	}
 	wakeKey := kind + "@" + spell
 	actKey := flow.AskWake + "@" + wakeKey
@@ -2393,15 +2401,9 @@ func (e *Engine) logError(typ, id string, err error) {
 	e.logEvent(typ, map[string]string{"project": id, "error": err.Error()})
 }
 
-func (e *Engine) observeGitHub(id string, err error) {
+func (e *Engine) observeGitHubLocked(id string, s *flow.State, err error) {
 	if err == nil || world.GitHubUnavailable(err) || errors.Is(err, world.ErrChecksDenied) {
 		setFlag(&e.ghUnavail, id, err != nil)
-	}
-}
-
-func (e *Engine) observeGitHubLocked(id string, s *flow.State, err error) {
-	e.observeGitHub(id, err)
-	if err == nil || world.GitHubUnavailable(err) || errors.Is(err, world.ErrChecksDenied) {
 		e.reconcileAlertLocked(id, s, flow.AlertGitHubUnavailable, err != nil, flow.Alert{Kind: flow.AlertGitHubUnavailable, Cause: cmp.Or(flow.CleanErr(errText(err)), "GitHub is unreachable"), At: e.now()}, "alert", "")
 	}
 }
