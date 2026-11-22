@@ -730,6 +730,8 @@ Per-CLI differences that are **data**: base command, fixed environment (Claude C
 | Pool | An `agy` candidate with a `gemini-*` model reads the CodexBar `antigravity` pool (KB-QTA-4); other `agy` models have no pool (`unknown`, which never blocks) |
 | Doctor | `sheepdog factory doctor` checks `agy` when a role's candidates include it: the binary and status are checked through herdr-core, and a missing binary or an unreadable status is reported with its reason (`unknown` is never "fine" and never "signed out") |
 
+Round 3 (C): `--mode auto` still stopped on permission prompts for `sheepdog` commands, so all three `agy` roles start with `--dangerously-skip-permissions` instead; the reviewer keeps its `"do not modify, create or delete any files; read and run tests only"` first-prompt instruction and `GEMINI_API_KEY` is still never set.
+
 Per-CLI differences that need **code**: pre-setting trust for a worktree, the agy sandbox wrapper for read-only runs, listing models.
 
 Read-only for Claude Code is the `dontAsk` mode with an allow list of read tools and the usual test runners, passed as one `--allowedTools=` argument (as separate values the flag swallows the prompt that follows). This is a rule on the model, backed by the clean-worktree check on the verdict (section 7.2). It is not a sandbox: a test runner runs the worker's code.

@@ -2,6 +2,8 @@ package world
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -195,4 +197,200 @@ func TestAgyScreenClassScopesLimitToBottomUIAndStripsFooterTail(t *testing.T) {
 	if strings.Contains(tail, "Auto mode:") || strings.Contains(tail, "esc to cancel") {
 		t.Errorf("EvTick.Tail leaked agy footer/input box:\n%s", tail)
 	}
+}
+
+// TestAgyRound3ArgvDangerouslySkipPermissionsAndNoGeminiAPIKey verifies
+// Decision C on AgyArgv: fresh and resumed argvs include
+// --dangerously-skip-permissions and never carry GEMINI_API_KEY.
+func TestAgyRound3ArgvDangerouslySkipPermissionsAndNoGeminiAPIKey(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "paid-key-must-not-leak")
+	for _, tc := range []struct {
+		name, session string
+	}{
+		{"fresh", ""},
+		{"resumed", "70f9969a-d48c-40e4-8f30-5d6e6d0ffe7b"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			argv := AgyArgv("gemini-4-carbon-medium", tc.session, "")
+			if len(argv) < 6 || argv[0] != "env" || argv[1] != "-u" || argv[2] != "GEMINI_API_KEY" || argv[3] != AgyCLI {
+				t.Fatalf("AgyArgv(%q) = %q, want env -u GEMINI_API_KEY agy ...", tc.session, argv)
+			}
+			if !slices.Contains(argv, "--dangerously-skip-permissions") {
+				t.Fatalf("AgyArgv(%q) = %q, want --dangerously-skip-permissions", tc.session, argv)
+			}
+			if tc.session != "" && !slices.Contains(argv, "--conversation") {
+				t.Fatalf("resumed AgyArgv(%q) = %q, want --conversation", tc.session, argv)
+			}
+			for i, a := range argv {
+				if i == 2 {
+					continue
+				}
+				if strings.Contains(a, "GEMINI_API_KEY") || strings.Contains(a, "paid-key-must-not-leak") {
+					t.Errorf("argv[%d] leaked GEMINI_API_KEY: %q", i, a)
+				}
+			}
+		})
+	}
+}
+
+// TestReadReportAgyRound3ThoughtNoBlankAndNudgeNoBlock verifies Decision E on
+// the two round-2 review failure scenarios for parseAgyReport:
+// (1) a reply immediately following a `▸ Thought` + 1-line preview with no
+// blank line (both with and without a blank line before `<report>`); and
+// (2) a direct follow-up reply (N29 nudge or invalid_report refusal) with no
+// `▸` or `●` block after the last `─ / > ` prompt echo.
+func TestReadReportAgyRound3ThoughtNoBlankAndNudgeNoBlock(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	srv.Add(hc.Terminal{
+		Address: "t-agy",
+		Name:    "rev-agy",
+		State:   "live",
+		Argv:    []string{"env", "-u", "GEMINI_API_KEY", AgyCLI, "--model", "gemini-4-hydrogen-high"},
+		Labels:  map[string]string{"sheepdog.cli": AgyCLI},
+		Status:  &hc.Status{App: "antigravity", State: "done"},
+	})
+
+	read := func(t *testing.T, screen string) ReportRead {
+		t.Helper()
+		srv.SetScreen("t-agy", screen)
+		rd, err := ReadReport(ctx, client, "t-agy", "c0de12")
+		if err != nil {
+			t.Fatalf("ReadReport: %v", err)
+		}
+		return rd
+	}
+
+	thoughtHeader := "● Bash(git diff main..HEAD) (ctrl+o to expand)\n" +
+		"  +major: tool output must not count\n\n" +
+		"▸ Thought for 3s, 913 tokens\n" +
+		"  Checking item.go; major: thought preview must not count.\n"
+
+	t.Run("thought then reply with no blank line and no blank before tag", func(t *testing.T) {
+		screen := agyReviewHdr + thoughtHeader +
+			"  Checked item.go and ran go test.\n" +
+			"  self-check misses: 0\n" +
+			"  class: none\n" +
+			"  deletable: none\n" +
+			"  not run: none\n" +
+			"  <report>{\"code\":\"c0de12\",\"round\":1,\"head\":\"abc123\",\"verdict\":\"pass\",\"majors\":0}</report>\n\n" +
+			agyInputBox
+		rd := read(t, screen)
+		if rd.Status != ReportFound || rd.Report.Verdict != "pass" || rd.Report.Majors != 0 {
+			t.Fatalf("ReadReport = %+v, want found/pass/0", rd)
+		}
+		if !strings.Contains(rd.Body, "Checked item.go") || !strings.Contains(rd.Body, "self-check misses: 0") || !strings.Contains(rd.Body, "deletable: none") {
+			t.Errorf("Body missing reply lines:\n%s", rd.Body)
+		}
+		if strings.Contains(rd.Body, "Thought for 3s") || strings.Contains(rd.Body, "thought preview must not count") || strings.Contains(rd.Body, "tool output must not count") {
+			t.Errorf("Body leaked thought or tool block:\n%s", rd.Body)
+		}
+	})
+
+	t.Run("thought then findings with no blank line and blank line before tag", func(t *testing.T) {
+		screen := agyReviewHdr + thoughtHeader +
+			"  major: item.go:12 misses nil guard\n" +
+			"  self-check misses: 1\n" +
+			"  class: none\n" +
+			"  deletable: none\n" +
+			"  not run: none\n\n" +
+			"  <report>{\"code\":\"c0de12\",\"round\":1,\"head\":\"abc123\",\"verdict\":\"changes\",\"majors\":1}</report>\n\n" +
+			agyInputBox
+		rd := read(t, screen)
+		if rd.Status != ReportFound || rd.Report.Verdict != "changes" || rd.Report.Majors != 1 {
+			t.Fatalf("ReadReport = %+v, want found/changes/1", rd)
+		}
+		if got := strings.Count(rd.Body, "major:"); got != 1 || !strings.Contains(rd.Body, "item.go:12 misses nil guard") {
+			t.Errorf("Body should have 1 real major line, got %d:\n%s", got, rd.Body)
+		}
+		if !strings.Contains(rd.Body, "self-check misses: 1") || !strings.Contains(rd.Body, "deletable: none") {
+			t.Errorf("Body swallowed findings/self-check lines above blank line:\n%s", rd.Body)
+		}
+	})
+
+	t.Run("real captured agy-edit-prompt thought-to-reply fixture", func(t *testing.T) {
+		raw, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "herdr", "agy-edit-prompt.screen.txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		all := strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n")
+		if len(all) < 15 || !strings.HasPrefix(all[11], "▸ Thought") {
+			t.Fatalf("unexpected agy-edit-prompt.screen.txt layout: %q", all[:min(15, len(all))])
+		}
+		prefix := strings.Join(all[:15], "\n") + "\n"
+		screen := prefix +
+			"  self-check misses: 0\n" +
+			"  class: none\n" +
+			"  deletable: none\n" +
+			"  not run: none\n" +
+			"  <report>{\"code\":\"c0de12\",\"round\":1,\"head\":\"abc123\",\"verdict\":\"pass\",\"majors\":0}</report>\n\n" +
+			agyInputBox
+		rd := read(t, screen)
+		if rd.Status != ReportFound || rd.Report.Verdict != "pass" || rd.Report.Majors != 0 {
+			t.Fatalf("ReadReport(agy-edit-prompt) = %+v, want found/pass/0", rd)
+		}
+		if !strings.Contains(rd.Body, "mathlib_test.go:11-15") || !strings.Contains(rd.Body, "self-check misses: 0") {
+			t.Errorf("Body missing reply lines after thought:\n%s", rd.Body)
+		}
+		if strings.Contains(rd.Body, "TestClampUpper") || strings.Contains(rd.Body, "Thought for 3s") {
+			t.Errorf("Body leaked collapsed thought preview:\n%s", rd.Body)
+		}
+	})
+
+	t.Run("N29 nudge answer with no block reads reply and tag", func(t *testing.T) {
+		turn1 := agyReviewHdr + agyBlocks + "  Checked item.go.\n\n"
+		nudgeTurn := agyRule + "\n" +
+			"> You went idle with no report tag. End your reply with `<report>{\"code\":\"c0de12\",\"round\":1,\"head\":\"abc123\",\"verdict\":\"pass\"|\"changes\",\"majors\":N}</report>`.\n\n" +
+			"  self-check misses: 0\n" +
+			"  class: none\n" +
+			"  deletable: none\n" +
+			"  not run: none\n" +
+			"  <report>{\"code\":\"c0de12\",\"round\":1,\"head\":\"abc123\",\"verdict\":\"pass\",\"majors\":0}</report>\n\n" +
+			agyInputBox
+		rd := read(t, turn1+nudgeTurn)
+		if rd.Status != ReportFound || rd.Report.Verdict != "pass" || rd.Report.Majors != 0 {
+			t.Fatalf("ReadReport(N29 nudge no block) = %+v, want found/pass/0", rd)
+		}
+		if !strings.Contains(rd.Body, "self-check misses: 0") || !strings.Contains(rd.Body, "deletable: none") {
+			t.Errorf("Body missing nudge reply lines:\n%s", rd.Body)
+		}
+		if strings.Contains(rd.Body, "You went idle") || strings.Contains(rd.Body, "Checked item.go.") || strings.Contains(rd.Body, "Bash(git diff") {
+			t.Errorf("Body leaked prompt echo or turn 1:\n%s", rd.Body)
+		}
+	})
+
+	t.Run("refusal retry answer with no block reads reply and tag", func(t *testing.T) {
+		turn1 := agyReviewHdr + agyBlocks + "  <report>{\"code\":\"c0de12\",\"round\":1,\"head\":\"abc123\",\"verdict\":\"changes\",\"majors\":1}</report>\n\n"
+		retryTurn := agyRule + "\n" +
+			"> Your verdict was refused (The reply must include a self-check misses: <n> line.). Fix it and end with the report tag again.\n\n" +
+			"  major: item.go:12 misses nil guard\n" +
+			"  self-check misses: 1\n" +
+			"  class: none\n" +
+			"  deletable: none\n" +
+			"  not run: none\n" +
+			"  <report>{\"code\":\"c0de12\",\"round\":1,\"head\":\"abc123\",\"verdict\":\"changes\",\"majors\":1}</report>\n\n" +
+			agyInputBox
+		rd := read(t, turn1+retryTurn)
+		if rd.Status != ReportFound || rd.Report.Verdict != "changes" || rd.Report.Majors != 1 {
+			t.Fatalf("ReadReport(refusal retry no block) = %+v, want found/changes/1", rd)
+		}
+		if got := strings.Count(rd.Body, "major:"); got != 1 || !strings.Contains(rd.Body, "item.go:12 misses nil guard") || !strings.Contains(rd.Body, "self-check misses: 1") {
+			t.Errorf("Body missing refusal retry lines:\n%s", rd.Body)
+		}
+		if strings.Contains(rd.Body, "Your verdict was refused") || strings.Contains(rd.Body, "Bash(git diff") {
+			t.Errorf("Body leaked refusal prompt or turn 1:\n%s", rd.Body)
+		}
+	})
+
+	t.Run("N29 nudge reply without tag still reads as not_yet", func(t *testing.T) {
+		turn1 := agyReviewHdr + agyBlocks + "  Checked item.go.\n\n"
+		nudgeNoTag := agyRule + "\n" +
+			"> You went idle with no report tag. End your reply with `<report>{\"code\":\"c0de12\",\"round\":1,\"head\":\"abc123\",\"verdict\":\"pass\"|\"changes\",\"majors\":N}</report>`.\n\n" +
+			"  Re-checking the proof.\n\n" +
+			agyInputBox
+		if rd := read(t, turn1+nudgeNoTag); rd.Status != ReportNotYet {
+			t.Fatalf("ReadReport(N29 nudge without reply tag) = %+v, want not_yet", rd)
+		}
+	})
 }
