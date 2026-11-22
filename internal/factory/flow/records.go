@@ -5,6 +5,8 @@ package flow
 
 import (
 	"encoding/json"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -30,6 +32,42 @@ type State struct {
 	Project  Project  `json:"project"`
 	Settings Settings `json:"settings"`
 	Tasks    []Task   `json:"tasks"`
+}
+
+// Alert kinds (design.md 6, 7.3).
+const (
+	AlertNoPool, AlertDisk, AlertConsentPrompt, AlertMainRed                    = "no_pool", "disk", "consent_prompt", "main_red"
+	AlertCIStalled, AlertAgentsDown, AlertGitHubUnavailable, AlertHCUnavailable = "ci_stalled", "agents_down", "github_unavailable", "hc_unavailable"
+)
+
+// Alert is one persisted project alert or outage episode (design.md 6, 7.3).
+type Alert struct {
+	Kind     string    `json:"kind"`
+	Cause    string    `json:"cause"`
+	At       time.Time `json:"at"`
+	Stopping bool      `json:"stopping,omitempty"`
+	Fix      string    `json:"fix,omitempty"`
+	Rule     string    `json:"rule,omitempty"`
+	Scope    string    `json:"scope,omitempty"`
+}
+
+// StoppingAlert returns the first active stopping alert (sorted by key), or nil.
+func StoppingAlert(alerts map[string]Alert) *Alert {
+	for _, k := range slices.Sorted(maps.Keys(alerts)) {
+		if a := alerts[k]; a.Stopping {
+			return &a
+		}
+	}
+	return nil
+}
+
+// HasAlert reports whether an active alert of kind is persisted on p.
+func (p Project) HasAlert(kind string) bool { _, ok := p.Alerts[kind]; return ok }
+
+// CoordSignOutHold reports whether J5 is holding the coordinator on sign-out.
+func (p Project) CoordSignOutHold() bool {
+	a, ok := p.Alerts[AlertAgentsDown]
+	return ok && strings.HasPrefix(a.Scope, "signed_out:")
 }
 
 // BaseState is the persisted base-branch red spell (design.md 7.3, N38).
@@ -61,6 +99,7 @@ type Project struct {
 	CoordWakeTurn      uint64            `json:"coord_wake_turn,omitempty"`    // J9: coordinator turn when CoordWakeAt was sent
 	CoordLastWakeAt    time.Time         `json:"coord_last_wake_at,omitempty"` // J13: last wake or heartbeat delivered
 	WaitKey            string            `json:"wait_key,omitempty"`           // episode key for J4/J6/J7 wait deduplication
+	Alerts             map[string]Alert  `json:"alerts,omitempty"`             // active persisted alert/outage episodes (design.md 6, 7.3)
 	Invariants         map[string]string `json:"invariants,omitempty"`         // active violation per invariant rule and subject (I1–I5)
 	SweepItems         map[string]string `json:"sweep_items,omitempty"`        // active sweep wake key -> probe name
 	SweepUnknown       map[string]string `json:"sweep_unknown,omitempty"`      // active unknown sweep probe -> reason

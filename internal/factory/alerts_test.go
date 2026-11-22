@@ -363,6 +363,9 @@ func alertEpisodeLogs(t *testing.T, paths Paths, folder, kind string) []LogLine 
 	}
 	var out []LogLine
 	for _, l := range lines {
+		if l.By != "engine" || l.Rule == "start" {
+			continue
+		}
 		if l.Task != "" && l.Rule == "N36" && l.Decision == "woke coordinator" {
 			continue
 		}

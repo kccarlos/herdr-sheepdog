@@ -49,24 +49,26 @@ type Engine struct {
 	Bin          string                        // sheepdog binary named in run prompts
 	RunEnv       map[string]string             // added to every run's environment (daemon port)
 
-	probeLaunch   func(context.Context, []string) flow.ResolveFacts // test hook
-	poolRun       CommandFunc                                       // provider quota reader hook; nil uses hcExecRunner
-	cliProbes     map[string]cachedCLIProbe                         // shared across launches and projects under mu
-	pools         map[string]cachedPool                             // shared per-provider quota readings under mu
-	passPools     map[string]poolReading                            // current pass's immutable pool readings under mu
-	passPoolCheck func(flow.Candidate) flow.ResolveReason           // current pass's immutable pool check under mu
-	git           *world.Git
-	mu            sync.Mutex
-	wake          chan struct{}
-	lastPass      map[string]time.Time            // monotonic reading of previous pass per project (design.md 2.5)
-	lastSweep     map[string]time.Time            // per-process last sweep per project (design.md 7.3)
-	prs           map[string]flow.PR              // last PR snapshot per attempt worktree (in memory)
-	errs          map[string]string               // last gh or git error per worktree and kind, logged once per change
-	tips          map[string]tipFacts             // last git reading per worktree (in memory)
-	waits         map[string]string               // last wait/finished reason per project or task, logged once per change
-	ghUnavail     map[string]bool                 // project fact github_unavailable (design.md 7.3)
-	hcUnavail     map[string]bool                 // project fact hc_unavailable (design.md 7.3)
-	onInvariant   func([]flow.InvariantViolation) // test hook; nil in production
+	probeLaunch       func(context.Context, []string) flow.ResolveFacts // test hook
+	poolRun           CommandFunc                                       // provider quota reader hook; nil uses hcExecRunner
+	cliProbes         map[string]cachedCLIProbe                         // shared across launches and projects under mu
+	pools             map[string]cachedPool                             // shared per-provider quota readings under mu
+	passPools         map[string]poolReading                            // current pass's immutable pool readings under mu
+	passPoolCheck     func(flow.Candidate) flow.ResolveReason           // current pass's immutable pool check under mu
+	passCoordFallback bool                                              // current pass's J5 fallback sign-in check under mu
+	passBaseHCErr     error                                             // current pass's HC RPC error from observeBaseLocked under mu
+	git               *world.Git
+	mu                sync.Mutex
+	wake              chan struct{}
+	lastPass          map[string]time.Time            // monotonic reading of previous pass per project (design.md 2.5)
+	lastSweep         map[string]time.Time            // per-process last sweep per project (design.md 7.3)
+	prs               map[string]flow.PR              // last PR snapshot per attempt worktree (in memory)
+	errs              map[string]string               // last gh or git error per worktree and kind, logged once per change
+	tips              map[string]tipFacts             // last git reading per worktree (in memory)
+	waits             map[string]string               // last wait/finished reason per project or task, logged once per change
+	ghUnavail         map[string]bool                 // project fact github_unavailable (design.md 7.3)
+	hcUnavail         map[string]bool                 // project fact hc_unavailable (design.md 7.3)
+	onInvariant       func([]flow.InvariantViolation) // test hook; nil in production
 }
 
 func (e *Engine) now() time.Time {
@@ -155,7 +157,7 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 			holdProjectWake(&s, "new_goal", "owner gave a new goal", "goal: "+goal, e.now())
 		}
 	}
-	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.Invariants, s.Project.WaitKey = root, goal, true, nil, nil, nil, ""
+	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.Invariants, s.Project.Alerts, s.Project.WaitKey = root, goal, true, nil, nil, nil, nil, ""
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastSweep, id)
 	// The owner starting again is slice 1's retry (plan.md: "the owner
@@ -276,7 +278,7 @@ func (e *Engine) Stop(project string) error {
 		stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
 		reconcileCoordWakes(&s.Project)
 	}
-	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants, s.Project.WaitKey = "", "", nil, false, nil, nil, false, 0, nil, ""
+	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants, s.Project.Alerts, s.Project.WaitKey = "", "", nil, false, nil, nil, false, 0, nil, nil, ""
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastPass, id)
 	delete(e.lastSweep, id)
@@ -331,16 +333,23 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	}
 	e.passPools = pools
 	e.passPoolCheck = poolCheck(pools, e.Paths.poolCooldowns(), s.Settings.PoolFloorPercent, e.now())
-	defer func() { e.passPools, e.passPoolCheck = nil, nil }()
+	defer func() { e.passPools, e.passPoolCheck, e.passCoordFallback, e.passBaseHCErr = nil, nil, false, nil }()
 	ctx, cancel := context.WithTimeout(world.GitRepository(ctx, s.Project.Folder), world.GitPassTimeout)
 	defer cancel()
 	dt := e.passDelta(id)
+	coordWasEnded := s.Project.Run != nil && s.Project.Run.State == flow.PhaseEnded
 	hcChecked, coordErr := e.observeCoordLocked(ctx, id, &s)
 	hcErr := coordErr
 	if coordErr != nil {
 		e.logError("factory.hc_error", id, coordErr)
 	}
+	justSignedOut := !coordWasEnded && s.Project.Run != nil && s.Project.Run.State == flow.PhaseEnded && s.Project.Run.Result == flow.EndSignedOut
+	e.passCoordFallback = e.observeCoordSignInLocked(ctx, id, &s, justSignedOut, e.now())
+	e.passBaseHCErr = nil
 	e.observeBaseLocked(ctx, id, &s)
+	if e.passBaseHCErr != nil {
+		hcErr, hcChecked = cmp.Or(hcErr, e.passBaseHCErr), true
+	}
 	e.sweepProjectLocked(ctx, id, &s, codexProbe)
 	baseTried := s.Project.Base != nil && s.Project.Base.Red && flow.Done(s.Project.Acts, flow.AskTellBaseRed+"@"+s.Project.Base.SpellID)
 	var candidates, poolHeld []string
@@ -381,13 +390,16 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 			}
 		}
 	}
-	if hcErr == nil && !hcChecked && e.hcUnavail[id] && e.HC != nil {
+	if hcErr == nil && !hcChecked && (e.hcUnavail[id] || s.Project.HasAlert(flow.AlertHCUnavailable)) && e.HC != nil {
 		_, hcErr = e.HC.Hello(ctx)
 		hcChecked = true
 	}
-	if hcChecked || hcErr != nil {
-		setFlag(&e.hcUnavail, id, hcErr != nil && world.FailureClass(hcErr) != flow.ClassSettled)
+	if ctx.Err() == nil && (hcChecked || hcErr != nil) {
+		unavail := hcErr != nil && world.FailureClass(hcErr) != flow.ClassSettled
+		setFlag(&e.hcUnavail, id, unavail)
+		e.reconcileAlertLocked(id, &s, flow.AlertHCUnavailable, unavail, flow.Alert{Kind: flow.AlertHCUnavailable, Cause: cmp.Or(flow.CleanErr(errText(hcErr)), "herdr-core is unreachable"), At: e.now()}, "alert", "")
 	}
+	e.observeNoPoolLocked(id, &s, e.now())
 	granted := flow.GrantSlots(candidates, s.Tasks, flow.RunningTasks(s.Tasks, workerState), s.Settings.MaxRunning)
 	for _, tid := range poolHeld {
 		granted[tid] = true
@@ -541,9 +553,12 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 // passProjectRulesLocked evaluates flow.ProjectRows and executes the matched coordinator action.
 func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.State, now time.Time) {
 	match := func() (flow.Row[flow.ProjectIn], flow.Decision) {
-		return flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now})
+		return flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now, CoordFallbackReady: e.passCoordFallback})
 	}
 	r, d := match()
+	if r.ID == "J3" || r.ID == "J5" {
+		return
+	}
 	if len(d.Asked) > 0 && d.Asked[0] == flow.AskCoordDialogStuck {
 		s.Project.CoordDialogStucks++
 		s.Project.Acts = append(s.Project.Acts, flow.Act{Key: flow.CoordStuckKey(s.Project.Run), Result: "done", At: now})
@@ -634,14 +649,17 @@ type cachedCLIProbe struct {
 
 // probeLaunchFacts is called under e.mu by launch executors.
 func (e *Engine) probeLaunchFacts(ctx context.Context, role string, task flow.Task, settings flow.Settings) flow.ResolveFacts {
-	now := e.now()
+	now, ttl := e.now(), cliProbeTTL
+	if p := time.Duration(settings.PoolMinutes) * time.Minute; p > 0 && p < ttl {
+		ttl = p
+	}
 	var clis, stale []string
 	for _, c := range flow.Candidates(role, task, settings) {
 		if len(cliProbeArgv[c.CLI]) == 0 || slices.Contains(clis, c.CLI) {
 			continue
 		}
 		clis = append(clis, c.CLI)
-		if probe, ok := e.cliProbes[c.CLI]; !ok || now.Sub(probe.at) >= cliProbeTTL {
+		if probe, ok := e.cliProbes[c.CLI]; !ok || now.Before(probe.at) || now.Sub(probe.at) >= ttl {
 			stale = append(stale, c.CLI)
 		}
 	}
@@ -737,12 +755,21 @@ func (e *Engine) codexHome(id string) (string, error) {
 	return "", err
 }
 
-func (e *Engine) resolveLaunch(ctx context.Context, id, role string, task flow.Task, settings flow.Settings, check func(flow.Candidate) flow.ResolveReason, resolve func(flow.ResolveFacts) (flow.Intent, flow.ResolveReason)) (flow.Intent, map[string]string, flow.ResolveReason) {
-	facts := e.probeLaunchFacts(ctx, role, task, settings)
+func (e *Engine) resolveLaunch(ctx context.Context, id, role string, task flow.Task, s flow.State, check func(flow.Candidate) flow.ResolveReason, resolve func(flow.ResolveFacts) (flow.Intent, flow.ResolveReason)) (flow.Intent, map[string]string, flow.ResolveReason) {
+	facts := e.probeLaunchFacts(ctx, role, task, s.Settings)
+	if role == flow.RoleCoordinator && s.Project.CoordSignOutHold() {
+		check = positiveCoordCheck(facts.CLIs)
+	}
 	facts.Check = check
 	for {
 		in, reason := resolve(facts)
-		if reason.Why != "" || in.CLI != world.CodexCLI {
+		if reason.Why != "" {
+			return in, nil, reason
+		}
+		if stop := flow.StoppingAlert(s.Project.Alerts); stop != nil {
+			return flow.Intent{}, nil, flow.ResolveReason{Why: "stopped: " + cmp.Or(stop.Fix, stop.Cause)}
+		}
+		if in.CLI != world.CodexCLI {
 			return in, nil, reason
 		}
 		home, err := e.codexHome(id)
@@ -762,7 +789,7 @@ func (e *Engine) resolveLaunch(ctx context.Context, id, role string, task flow.T
 }
 
 func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State, why string, now time.Time) {
-	in, env, wait := e.resolveLaunch(ctx, id, flow.RoleCoordinator, flow.Task{}, s.Settings, launchCapability(flow.RoleCoordinator), func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
+	in, env, wait := e.resolveLaunch(ctx, id, flow.RoleCoordinator, flow.Task{}, *s, launchCapability(flow.RoleCoordinator), func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
 		return flow.ResolveWithReason(flow.RoleCoordinator, flow.Task{}, s.Settings, f)
 	})
 	if wait.Why != "" {
@@ -837,7 +864,7 @@ func (e *Engine) stopCoordWithBackoffLocked(ctx context.Context, id string, s *f
 	if err := e.stopCoordTerminalsLocked(ctx, id, *s); err != nil {
 		e.logError("factory.hc_error", id, err)
 		words, cls := flow.CleanErr(err.Error()), world.FailureClass(err)
-		uncounted := cls != flow.ClassSettled && actOutage(key, flow.Facts{HCUnavailable: e.hcUnavail[id]}, err)
+		uncounted := cls != flow.ClassSettled && actOutage(key, flow.Facts{HCUnavailable: e.hcUnavail[id] || s.Project.HasAlert(flow.AlertHCUnavailable)}, err)
 		p.Acts = append(p.Acts, flow.Act{Key: key, Result: "failed", At: now, Class: cls, Err: words, Uncounted: uncounted})
 		if !exhausted && flow.Exhausted(p.Acts, key, s.Settings) {
 			why := map[bool]string{true: "could not stop the old coordinator", false: "gave up stopping the coordinator"}[restarting]
@@ -1186,7 +1213,10 @@ func actOutage(verb string, f flow.Facts, err error) bool {
 
 // passTaskLocked reports whether the task reached rule evaluation for I1.
 func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, ti int, hasSlot bool, workerRun flow.Run, workerErr error, baseTried *bool, dt time.Duration) bool {
-	facts := flow.Facts{GitHubUnavailable: e.ghUnavail[id], HCUnavailable: e.hcUnavail[id]}
+	facts := flow.Facts{
+		GitHubUnavailable: e.ghUnavail[id] || s.Project.HasAlert(flow.AlertGitHubUnavailable),
+		HCUnavailable:     e.hcUnavail[id] || s.Project.HasAlert(flow.AlertHCUnavailable),
+	}
 	if b := s.Project.Base; b != nil && b.Red {
 		facts.BaseRed, facts.BaseRedSince = true, b.Since
 		if !*baseTried {
@@ -1232,7 +1262,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		if len(a.Ready) > 0 { // no PR can exist before the first ready
 			facts.PR = e.readPRLocked(ctx, id, s, ti)
 		}
-		facts.GitHubUnavailable = e.ghUnavail[id]
+		facts.GitHubUnavailable = e.ghUnavail[id] || s.Project.HasAlert(flow.AlertGitHubUnavailable)
 		if e.observeReviewLocked(ctx, id, s, ti, &facts, dt) {
 			return false
 		}
@@ -1242,6 +1272,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	}
 	now := e.now()
 	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[ti], Settings: s.Settings, Facts: facts, Now: now})
+	e.reconcileCIStalledLocked(id, s, s.Tasks[ti], r.ID, facts, now)
 	rowChanged := s.Tasks[ti].LastRow != r.ID
 	s.Tasks[ti].LastRow = r.ID
 	holdWhy := ""
@@ -1392,7 +1423,7 @@ func (e *Engine) readTipLocked(ctx context.Context, a flow.Attempt, tip string, 
 
 func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, n := &s.Tasks[ti], len(s.Tasks[ti].Attempts)+1
-	if _, _, reason := e.resolveLaunch(ctx, id, flow.RoleWorker, *t, s.Settings, nil, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
+	if _, _, reason := e.resolveLaunch(ctx, id, flow.RoleWorker, *t, *s, nil, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
 		return resolveWorker(*t, s.Settings, f)
 	}); reason.Why != "" {
 		return "", false, launchWaitFor(reason)
@@ -1425,7 +1456,7 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	}
 	choice, env := flow.Candidate{}, map[string]string(nil)
 	if term.State != "live" {
-		in, codexEnv, reason := e.resolveLaunch(ctx, id, flow.RoleWorker, *t, s.Settings, nil, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
+		in, codexEnv, reason := e.resolveLaunch(ctx, id, flow.RoleWorker, *t, *s, nil, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
 			return resolveWorker(*t, s.Settings, f)
 		})
 		if reason.Why != "" {
@@ -1766,7 +1797,7 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	}
 	if term.State != "live" {
 		var repeatWhy string
-		in, codexEnv, reason := e.resolveLaunch(ctx, id, flow.RoleReviewer, *t, s.Settings, check, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
+		in, codexEnv, reason := e.resolveLaunch(ctx, id, flow.RoleReviewer, *t, *s, check, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
 			var in flow.Intent
 			var r flow.ResolveReason
 			in, repeatWhy, r = reviewChoiceReason(*t, s.Settings, *a, h, f, failed)
@@ -2162,12 +2193,25 @@ func (e *Engine) observeBaseLocked(ctx context.Context, id string, s *flow.State
 	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
 	res, err := e.git.BaseStatus(gctx, s.Project.Folder)
 	cancel()
-	wasRed := s.Project.Base != nil && s.Project.Base.Red
-	e.observeGitHub(id, err)
+	var ge *world.GitError
+	if errors.As(err, &ge) && ge.RPC != nil && ctx.Err() == nil {
+		e.passBaseHCErr = ge.RPC
+	}
+	wasRed, now := s.Project.Base != nil && s.Project.Base.Red, e.now()
+	e.observeGitHubLocked(id, s, err)
+	checkMainRed := func() {
+		if b := s.Project.Base; b != nil && b.Red && now.Sub(b.Since) >= time.Duration(s.Settings.MainRedMinutes)*time.Minute {
+			e.reconcileAlertLocked(id, s, flow.AlertMainRed, true, flow.Alert{Kind: flow.AlertMainRed, Cause: fmt.Sprintf("base branch red past %dm (%s)", s.Settings.MainRedMinutes, b.SpellID), At: now, Rule: "N38"}, "N38", "")
+		}
+	}
 	if e.logOnce("factory.base_error", id, id, err); err != nil || !res.Known || res.Red == wasRed {
+		if err == nil && res.Known && !res.Red {
+			e.reconcileAlertLocked(id, s, flow.AlertMainRed, false, flow.Alert{}, "", "")
+		} else {
+			checkMainRed()
+		}
 		return
 	}
-	now := e.now()
 	kind, dec, why := "base_green", "base turned green", fmt.Sprintf("base branch %s is green again (%s, run %d)", res.Branch, res.HeadSHA[:min(len(res.HeadSHA), 7)], res.ID)
 	if res.Red {
 		kind, dec, why = "base_red", "base turned red", fmt.Sprintf("base branch %s is red since %s (run %d, %s): holding branch updates and merges", res.Branch, res.HeadSHA[:min(len(res.HeadSHA), 7)], res.ID, res.Conclusion)
@@ -2183,6 +2227,10 @@ func (e *Engine) observeBaseLocked(ctx context.Context, id string, s *flow.State
 		s.Project.Base = &flow.BaseState{Red: true, Since: now, SpellID: spell}
 	} else {
 		s.Project.Base = nil
+		delete(s.Project.Alerts, flow.AlertMainRed)
+		if len(s.Project.Alerts) == 0 {
+			s.Project.Alerts = nil
+		}
 	}
 	wakeKey := kind + "@" + spell
 	actKey := flow.AskWake + "@" + wakeKey
@@ -2243,7 +2291,7 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 	last := e.prs[a.Worktree]
 	p, warn, err := e.git.PRSnapshot(gctx, s.Project.Folder, a.Branch, a.PR)
 	e.logOnce("factory.gh_partial", id, a.Worktree, warn)
-	e.observeGitHub(id, err)
+	e.observeGitHubLocked(id, s, err)
 	if e.logOnce("factory.gh_error", id, a.Worktree, err); err != nil {
 		if p.State == flow.PRNone {
 			p = last
@@ -2348,6 +2396,13 @@ func (e *Engine) logError(typ, id string, err error) {
 func (e *Engine) observeGitHub(id string, err error) {
 	if err == nil || world.GitHubUnavailable(err) || errors.Is(err, world.ErrChecksDenied) {
 		setFlag(&e.ghUnavail, id, err != nil)
+	}
+}
+
+func (e *Engine) observeGitHubLocked(id string, s *flow.State, err error) {
+	e.observeGitHub(id, err)
+	if err == nil || world.GitHubUnavailable(err) || errors.Is(err, world.ErrChecksDenied) {
+		e.reconcileAlertLocked(id, s, flow.AlertGitHubUnavailable, err != nil, flow.Alert{Kind: flow.AlertGitHubUnavailable, Cause: cmp.Or(flow.CleanErr(errText(err)), "GitHub is unreachable"), At: e.now()}, "alert", "")
 	}
 }
 

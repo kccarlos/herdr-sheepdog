@@ -31,9 +31,9 @@ func CheckInvariants(snap InvariantSnapshot) []InvariantViolation {
 	}
 	pr, _ := FirstMatch(ProjectRows, ProjectIn{Project: p, Tasks: s.Tasks, Settings: s.Settings, Now: snap.Now})
 	coordAlive := runLive(p.RunID, p.Run)
-	// I2 cannot fire under the current rule table (J6/J7/J10 cover it); it guards future rule changes.
-	if p.Started && (!AllTasksEnded(s.Tasks) || p.NewGoal) && !coordAlive && pr.ID != "J6" && pr.ID != "J7" {
-		add("I2", "project", "project should have a coordinator (matched %s, no live run or J6/J7 reason)", pr.ID)
+	// I2 cannot fire under the current rule table (J3/J5/J6/J7/J10 cover it); it guards future rule changes.
+	if p.Started && (!AllTasksEnded(s.Tasks) || p.NewGoal) && !coordAlive && pr.ID != "J3" && pr.ID != "J5" && pr.ID != "J6" && pr.ID != "J7" {
+		add("I2", "project", "project should have a coordinator (matched %s, no live run or J3/J5/J6/J7 reason)", pr.ID)
 	}
 	if coordAlive && p.Folder != "" {
 		writers[filepath.Clean(p.Folder)] = append(writers[filepath.Clean(p.Folder)], "coordinator")

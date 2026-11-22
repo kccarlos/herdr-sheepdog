@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -68,8 +70,8 @@ type TaskStatus struct {
 func StatusViewOf(s flow.State, logs []LogLine) []TaskStatus {
 	lastLog, lastRow := lastTaskRows(logs)
 	g := graphViewOf(s, lastLog)
-	out := make([]TaskStatus, len(g.Tasks))
-	for i, tv := range g.Tasks {
+	out := make([]TaskStatus, 0, len(g.Tasks)+len(s.Project.Alerts))
+	for _, tv := range g.Tasks {
 		why := "no logged row"
 		if tv.WhyWaiting != "" {
 			why = tv.WhyWaiting + " (no logged row)"
@@ -78,7 +80,15 @@ func StatusViewOf(s flow.State, logs []LogLine) []TaskStatus {
 		if l, ok := lastRow[tv.Ref]; ok {
 			ts.Rule, ts.Why, ts.At, ts.Stale = l.Rule, tv.WhyWaiting, l.At, taskRows[l.Rule].Stage != tv.Stage && !strings.Contains(" "+strings.Join(l.Asked, " ")+" ", " "+flow.AskWake+"@worker_failed ")
 		}
-		out[i] = ts
+		out = append(out, ts)
+	}
+	for _, k := range slices.Sorted(maps.Keys(s.Project.Alerts)) {
+		a := s.Project.Alerts[k]
+		why := cmp.Or(a.Cause, a.Kind)
+		if a.Fix != "" {
+			why += " — " + a.Fix
+		}
+		out = append(out, TaskStatus{ID: "ALERT", Title: a.Kind, Stage: map[bool]string{true: "stopped", false: "alert"}[a.Stopping], Rule: a.Rule, Why: why, At: a.At})
 	}
 	return out
 }

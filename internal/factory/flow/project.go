@@ -19,7 +19,8 @@ type ProjectIn struct {
 	Project
 	Tasks []Task
 	Settings
-	Now time.Time
+	Now                time.Time
+	CoordFallbackReady bool // J5: another configured coordinator candidate has a positive sign-in check
 }
 
 // AllTasksEnded reports whether a plan exists and every task carries a terminal mark (J4).
@@ -55,7 +56,7 @@ func (in ProjectIn) heartbeatDue() bool {
 }
 
 func (in ProjectIn) coordSilent() bool {
-	return in.idle() && !in.CoordWakeAt.IsZero() && in.Run.Turn <= in.CoordWakeTurn && in.past(in.CoordWakeAt, in.CoordinatorSilentMinutes)
+	return in.idle() && StoppingAlert(in.Alerts) == nil && !in.CoordWakeAt.IsZero() && in.Run.Turn <= in.CoordWakeTurn && in.past(in.CoordWakeAt, in.CoordinatorSilentMinutes)
 }
 
 func (in ProjectIn) coordStopWhy() string {
@@ -89,6 +90,11 @@ func (in ProjectIn) startBlockedWhy() string {
 	return ""
 }
 
+// CoordStartBlocked reports whether J6 currently holds coordinator starts.
+func CoordStartBlocked(p Project, s Settings, now time.Time) bool {
+	return ProjectIn{Project: p, Settings: s, Now: now}.startBlockedWhy() != ""
+}
+
 func pdec(why string, ask ...string) Decision { return Decision{Asked: ask, Why: why} }
 func prow(id, waits, stage string, when func(ProjectIn) bool, then func(ProjectIn) Decision) Row[ProjectIn] {
 	return Row[ProjectIn]{ID: id, WaitsOn: waits, Stage: stage, When: when, Then: then}
@@ -105,11 +111,19 @@ func pcond(id, waits, stage string, when, sel func(ProjectIn) bool, yes, no Deci
 // J2 lives in passProject's early return and Engine.Stop.
 // J10 sits before J6/J7 so an R29 dialog-stuck end is noted before J6 waits or J7 restarts it.
 var ProjectRows = []Row[ProjectIn]{
+	prow("J3", "owner", "stopped", func(in ProjectIn) bool { return StoppingAlert(in.Alerts) != nil && !in.alive() }, func(in ProjectIn) Decision {
+		a := StoppingAlert(in.Alerts)
+		return pdec("Stopped: " + cmp.Or(a.Fix, a.Cause))
+	}),
 	prow("J4", "none", "finished", func(in ProjectIn) bool { return AllTasksEnded(in.Tasks) && !in.NewGoal && len(in.Wakes) == 0 }, func(in ProjectIn) Decision {
 		if !in.alive() || !in.idle() {
 			return pdec(map[bool]string{true: "Finished: all tasks ended", false: "Finished: waiting for coordinator to finish final journal line"}[!in.alive()])
 		}
 		return map[bool]Decision{true: pdec("Finished: stop coordinator after final journal line", AskStopCoordinator), false: pdec("Finished: ask coordinator for final journal line", AskFinalJournal)}[Done(in.Acts, FinalJournalKey(in.Tasks))]
+	}),
+	prow("J5", "owner", "running", func(in ProjectIn) bool { return !in.alive() && in.CoordSignOutHold() && !in.CoordFallbackReady }, func(in ProjectIn) Decision {
+		a := in.Alerts[AlertAgentsDown]
+		return pdec(cmp.Or(a.Fix, a.Cause))
 	}),
 	// Alerts (agents_down) are slice 5b; second time in a row logs plainly for the owner.
 	pcond("J10", "engine", "running", func(in ProjectIn) bool { return IsCoordR29(in.Run) && !Done(in.Acts, CoordStuckKey(in.Run)) }, func(in ProjectIn) bool { return in.CoordDialogStucks >= firstDialogStuck }, pdec("coordinator stuck at a dialog twice in a row (R29); needs owner attention", AskCoordDialogStuck), pdec("coordinator ended stuck at a dialog (R29); J7 will restart it", AskCoordDialogStuck)),
