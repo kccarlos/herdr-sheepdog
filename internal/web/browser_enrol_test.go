@@ -136,7 +136,7 @@ func (f *browserEnrolFixture) doRemote(method, path string, body any, ticket str
 
 // enrollAndSignInApp enrolls a paired app device (e.g. phone or Mac menu-bar app)
 // via the phone pairing store and returns its device ID and Bearer ticket.
-func (f *browserEnrolFixture) enrollAndSignInApp(name, kind string) (string, string, *ecdsa.PrivateKey) {
+func (f *browserEnrolFixture) enrollAndSignInApp(name, kind string) (string, string) {
 	f.t.Helper()
 	key, pub := newDeviceKey(f.t)
 	code, _, _, err := f.srv.enroll.current(f.now, true)
@@ -154,7 +154,7 @@ func (f *browserEnrolFixture) enrollAndSignInApp(name, kind string) (string, str
 		f.t.Fatal(err)
 	}
 	ticket := f.signInApp(key, er.DeviceID)
-	return er.DeviceID, ticket, key
+	return er.DeviceID, ticket
 }
 
 func (f *browserEnrolFixture) signInApp(key *ecdsa.PrivateKey, deviceID string) string {
@@ -237,7 +237,7 @@ func TestBrowserEnrollCodeAuthAndLifecycle(t *testing.T) {
 	}
 
 	// Authenticated paired device (e.g. Mac menu-bar app) gets a short 5-minute code.
-	_, appTicket, _ := f.enrollAndSignInApp("Test Menu Bar", DeviceIOS)
+	_, appTicket := f.enrollAndSignInApp("Test Menu Bar", DeviceIOS)
 	wCode := f.doLoopback(http.MethodPost, "/api/pair/browser-code", nil, appTicket)
 	if wCode.Code != http.StatusOK {
 		t.Fatalf("authenticated POST /api/pair/browser-code = %d %s, want 200", wCode.Code, wCode.Body.String())
@@ -323,7 +323,7 @@ func TestPhoneQRPairingUnchangedByBrowserCode(t *testing.T) {
 	if err := f.srv.Listen("0.0.0.0:0"); err != nil {
 		t.Fatal(err)
 	}
-	_, appTicket, _ := f.enrollAndSignInApp("Test Menu Bar", DeviceIOS)
+	_, appTicket := f.enrollAndSignInApp("Test Menu Bar", DeviceIOS)
 
 	// Loopback GET /api/pair issues a phone QR link.
 	wPair := f.doLoopback(http.MethodGet, "/api/pair?new=1", nil, "")
@@ -521,7 +521,7 @@ func TestFactoryAsksListAndAnswerProof(t *testing.T) {
 	}
 
 	// A paired phone (Bearer ticket) can also answer ask-open-2 and logs its device_id.
-	phoneDevID, phoneTicket, _ := f.enrollAndSignInApp("Test Phone", DeviceIOS)
+	phoneDevID, phoneTicket := f.enrollAndSignInApp("Test Phone", DeviceIOS)
 	wPhoneAns := f.doRemote(http.MethodPost, "/api/factory/asks/ask-open-2/answer", map[string]any{"option": "Publish v0.2.0"}, phoneTicket)
 	if wPhoneAns.Code != http.StatusOK {
 		t.Fatalf("paired phone answer = %d %s, want 200", wPhoneAns.Code, wPhoneAns.Body.String())
