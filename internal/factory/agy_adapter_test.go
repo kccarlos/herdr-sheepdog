@@ -202,7 +202,7 @@ func (r *agyRig) edit(fn func(*flow.State)) {
 
 func assertAgyFreshArgv(t *testing.T, role, model string, p hc.RunParams, wantPromptParts ...string) {
 	t.Helper()
-	wantHead := []string{"env", "-u", "GEMINI_API_KEY", "agy", "--model", model, "--mode", "auto"}
+	wantHead := []string{"env", "-u", "GEMINI_API_KEY", "agy", "--model", model, "--dangerously-skip-permissions"}
 	if len(p.Argv) != len(wantHead)+1 || !slices.Equal(p.Argv[:len(wantHead)], wantHead) {
 		t.Fatalf("%s argv = %q, want %q followed by -i=<prompt>", role, p.Argv, wantHead)
 	}

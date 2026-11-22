@@ -230,7 +230,7 @@ func TestAgyRound3ReviewerThoughtNoBlankAndNudgeNoBlock(t *testing.T) {
 		b.WriteString("  class: none\n")
 		b.WriteString("  deletable: none\n")
 		b.WriteString("  not run: none\n\n")
-		b.WriteString(fmt.Sprintf("  <report>{\"code\":%q,\"round\":1,\"head\":%q,\"verdict\":\"changes\",\"majors\":1}</report>\n\n", code, c1))
+		fmt.Fprintf(&b, "  <report>{\"code\":%q,\"round\":1,\"head\":%q,\"verdict\":\"changes\",\"majors\":1}</report>\n\n", code, c1)
 		b.WriteString("────────────────────────────────────────────────────────────────────────────────\n")
 		b.WriteString("> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)\n")
 		b.WriteString("────────────────────────────────────────────────────────────────────────────────\n")
