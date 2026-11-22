@@ -918,10 +918,10 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 	if before.StopRetry != nil && evs[0].Kind != flow.EvLost {
 		evs = []flow.RunEvent{{Kind: flow.EvStop}}
 	} else if n := len(evs); n > 0 && evs[n-1].Kind == flow.EvTick {
-		if p := poolProvider(flow.Candidate{CLI: before.CLI, Model: before.Model}); p != "" && poolWaitReason(p, e.passPools[p], s.Settings.PoolFloorPercent, now).Kind == flow.ReasonPool || before.HandoffHeld {
-			pool := cmp.Or(p, before.CLI)
-			why := fmt.Sprintf("the %s pool reached its floor", pool)
-			evs = slices.Insert(evs, n-1, flow.RunEvent{Kind: flow.EvPoolFloor, Screen: evs[n-1].Screen, Msg: "The " + why[4:] + ". Write your handoff and stop.", Reason: why, HandoffUsed: handoffPools != nil && slices.Contains(*handoffPools, pool)})
+		cand := flow.Candidate{CLI: before.CLI, Model: before.Model}
+		if p := poolProvider(cand); p != "" && poolWaitReason(p, poolFamily(cand), e.passPools[p], s.Settings.PoolFloorPercent, now).Kind == flow.ReasonPool || before.HandoffHeld {
+			why := fmt.Sprintf("the %s pool reached its floor", cmp.Or(p, before.CLI))
+			evs = slices.Insert(evs, n-1, flow.RunEvent{Kind: flow.EvPoolFloor, Screen: evs[n-1].Screen, Msg: "The " + why[4:] + ". Write your handoff and stop.", Reason: why, HandoffUsed: handoffPools != nil && slices.Contains(*handoffPools, poolCooldownKey(cand))})
 		}
 	}
 events:
@@ -958,7 +958,7 @@ events:
 		if r31Send {
 			if handoffPools != nil {
 				prevPools = slices.Clone(*handoffPools)
-				if pool := cmp.Or(poolProvider(flow.Candidate{CLI: next.CLI, Model: next.Model}), next.CLI); !slices.Contains(*handoffPools, pool) {
+				if pool := poolCooldownKey(flow.Candidate{CLI: next.CLI, Model: next.Model}); !slices.Contains(*handoffPools, pool) {
 					*handoffPools = append(*handoffPools, pool)
 				}
 			}

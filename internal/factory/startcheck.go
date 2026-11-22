@@ -49,13 +49,12 @@ func cmdOK(c CommandOutput) bool { return c.Err == nil && !c.TimedOut && c.Exit 
 // anything (design.md 11): each line is ok, warn or fail with one fix. All
 // external calls go through opts.RunCommand, so tests use a fake.
 func StartChecks(ctx context.Context, opts DoctorOptions) []onboard.Result {
-	customRunner := opts.RunCommand != nil
 	o := opts.withDefaults()
 	run, projectRun := o.RunCommand, o.RunCommand
 	inHC := opts.HCSocket != ""
 	if inHC {
 		projectRun = hcExecRunner(o.HCSocket)
-		if !customRunner {
+		if opts.RunCommand == nil {
 			run = projectRun
 		}
 	}
@@ -128,60 +127,26 @@ func checkGitVersion(ctx context.Context, o DoctorOptions) onboard.Result {
 	return resOK(name, firstLine(c.Stdout))
 }
 
-func projectStartCLIs(o DoctorOptions, root string) []string {
-	if o.DataDir == "" {
-		return []string{"claude"}
-	}
-	p := Paths{DataDir: o.DataDir}
-	id, err := findStoredProject(p, root)
-	if err != nil {
-		return []string{"claude"}
-	}
-	s, err := LoadState(p.State(id))
-	if err != nil {
-		return []string{"claude"}
+func checkStartCLIs(ctx context.Context, o DoctorOptions, r startRepo) []onboard.Result {
+	var s flow.State
+	if o.DataDir != "" {
+		if id, err := findStoredProject(Paths{DataDir: o.DataDir}, r.root); err == nil {
+			s, _ = LoadState(Paths{DataDir: o.DataDir}.State(id))
+		}
 	}
 	used := map[string]bool{}
-	add := func(cs []flow.Candidate) {
-		for _, c := range cs {
-			used[c.CLI] = true
-		}
+	for _, c := range projectCandidates(s) {
+		used[c.CLI] = true
 	}
-	for _, role := range []string{flow.RoleCoordinator, flow.RoleWorker, flow.RoleReviewer} {
-		add(flow.Candidates(role, flow.Task{}, s.Settings))
-	}
-	for _, cs := range s.Settings.Models {
-		add(cs)
-	}
-	for _, t := range s.Tasks {
-		if !flow.Ended(t) {
-			for _, cs := range t.Request {
-				add(cs)
-			}
-		}
-	}
-	var out []string
-	for _, cli := range []string{"claude", world.CodexCLI, world.AgyCLI} {
-		if used[cli] {
-			out = append(out, cli)
-		}
-	}
-	return out
-}
-
-func checkStartCLIs(ctx context.Context, o DoctorOptions, r startRepo) []onboard.Result {
 	var out []onboard.Result
-	for _, cli := range projectStartCLIs(o, r.root) {
-		switch cli {
-		case "claude":
-			out = append(out, checkStartCLI(ctx, o, "claude", "Claude Code", "run: claude auth login",
-				claudeLoggedIn, "claude", "auth", "status", "--json"))
-		case world.CodexCLI:
-			out = append(out, checkStartCLI(ctx, o, "codex", "Codex CLI", "run: codex login",
-				codexLoggedIn, "codex", "login", "status"))
-		case world.AgyCLI:
-			out = append(out, checkStartAgy(ctx, o))
-		}
+	if used["claude"] {
+		out = append(out, checkStartCLI(ctx, o, "claude", "Claude Code", "run: claude auth login", claudeLoggedIn, "claude", "auth", "status", "--json"))
+	}
+	if used[world.CodexCLI] {
+		out = append(out, checkStartCLI(ctx, o, "codex", "Codex CLI", "run: codex login", codexLoggedIn, "codex", "login", "status"))
+	}
+	if used[world.AgyCLI] {
+		out = append(out, checkStartAgy(ctx, o))
 	}
 	return out
 }

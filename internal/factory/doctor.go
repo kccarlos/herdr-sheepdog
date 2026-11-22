@@ -474,6 +474,7 @@ const (
 	cliMissing cliProbeState = iota
 	cliNotInHCPath
 	cliSignedOut
+	cliUnknown
 	cliCanaryFailed
 	cliCanaryTimedOut
 	cliReady
@@ -528,28 +529,26 @@ func checkAgentCLIs(ctx context.Context, o DoctorOptions, inHC, customLookPath, 
 	wg.Wait()
 
 	var (
-		out         = make([]onboard.Result, 0, len(outcomes)+1)
-		ready       []string
-		timedOut    []string
-		notInHCPath []string
-		installed   int
-		loggedIn    int
+		out                                   = make([]onboard.Result, 0, len(outcomes)+1)
+		ready, timedOut, notInHCPath, unknown []string
+		installed, loggedIn                   int
 	)
 	for _, oc := range outcomes {
 		out = append(out, oc.result)
 		if oc.state != cliMissing {
 			installed++
 		}
-		if oc.state == cliNotInHCPath {
-			notInHCPath = append(notInHCPath, oc.name)
-		}
 		if oc.state >= cliCanaryFailed {
 			loggedIn++
 		}
-		if oc.state == cliCanaryTimedOut {
+		switch oc.state {
+		case cliNotInHCPath:
+			notInHCPath = append(notInHCPath, oc.name)
+		case cliUnknown:
+			unknown = append(unknown, oc.name)
+		case cliCanaryTimedOut:
 			timedOut = append(timedOut, oc.name)
-		}
-		if oc.state == cliReady {
+		case cliReady:
 			ready = append(ready, oc.name)
 		}
 	}
@@ -568,6 +567,10 @@ func checkAgentCLIs(ctx context.Context, o DoctorOptions, inHC, customLookPath, 
 		out = append(out, resFail("agent clis",
 			fmt.Sprintf("agent CLI on PATH locally, but not on herdr-core's PATH (%s)", strings.Join(notInHCPath, ", ")),
 			"run: hc server restart, then run sheepdog factory doctor again"))
+	case loggedIn == 0 && len(unknown) > 0:
+		out = append(out, resFail("agent clis",
+			fmt.Sprintf("could not read status for %s (no ready agent CLI)", strings.Join(unknown, ", ")),
+			"check the warning above and run sheepdog factory doctor again"))
 	case loggedIn == 0:
 		out = append(out, resFail("agent clis", "no agent CLI is logged in",
 			"sign in to at least one CLI: claude auth login, codex login, or agy"))
@@ -781,7 +784,7 @@ func checkAgy(ctx context.Context, o DoctorOptions, pctx probeContext) cliOutcom
 		if agySignedOut(authOut) {
 			return cliOutcome{name: name, state: cliSignedOut, result: resWarn(name, "installed, not logged in", "run agy without arguments and sign in")}
 		}
-		return cliOutcome{name: name, state: cliSignedOut, result: resWarn(name, "could not read agy status: "+agyUnreadableReason(authOut), "run agy models in a terminal to check agy")}
+		return cliOutcome{name: name, state: cliUnknown, result: resWarn(name, "could not read agy status: "+agyUnreadableReason(authOut), "run agy models in a terminal to check agy")}
 	}
 	if !o.Canary {
 		return cliOutcome{name: name, state: cliReady, result: resOK(name, "logged in (canary skipped)")}
@@ -817,11 +820,8 @@ func agySignedOut(c CommandOutput) bool {
 		return false
 	}
 	low := strings.ToLower(c.Stdout + "\n" + c.Stderr)
-	return strings.Contains(low, "not signed in") ||
-		strings.Contains(low, "please sign in") ||
-		strings.Contains(low, "not logged in") ||
-		strings.Contains(low, "sign in to") ||
-		strings.Contains(low, "unauthenticated")
+	return strings.Contains(low, "not signed in") || strings.Contains(low, "please sign in") ||
+		strings.Contains(low, "not logged in") || strings.Contains(low, "sign in to") || strings.Contains(low, "unauthenticated")
 }
 
 func agyUnreadableReason(c CommandOutput) string {
@@ -832,9 +832,8 @@ func agyUnreadableReason(c CommandOutput) string {
 		return cleanReason(c.Err.Error())
 	case c.Exit == 0:
 		return "no models listed"
-	default:
-		return cleanReason(firstNonEmpty(c.Stderr, c.Stdout, fmt.Sprintf("exit %d", c.Exit)))
 	}
+	return cleanReason(firstNonEmpty(c.Stderr, c.Stdout, fmt.Sprintf("exit %d", c.Exit)))
 }
 
 func parseAgyModels(stdout string) []string {

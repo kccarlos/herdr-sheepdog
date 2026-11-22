@@ -1360,15 +1360,14 @@ func classifyProbe(cli string, c CommandOutput) (flow.CLIFacts, bool) {
 			return flow.CLIFacts{Installed: true, SignedIn: true}, true
 		}
 	case world.AgyCLI:
-		if c.Exit == 0 {
-			if models := parseAgyModels(c.Stdout); len(models) > 0 {
-				m := make(map[string]bool, len(models))
-				for _, id := range models {
-					m[id] = true
-				}
-				return flow.CLIFacts{Installed: true, SignedIn: true, Models: m}, true
+		if models := parseAgyModels(c.Stdout); c.Exit == 0 && len(models) > 0 {
+			m := make(map[string]bool, len(models))
+			for _, id := range models {
+				m[id] = true
 			}
-		} else if agySignedOut(c) {
+			return flow.CLIFacts{Installed: true, SignedIn: true, Models: m}, true
+		}
+		if agySignedOut(c) {
 			return flow.CLIFacts{Installed: true}, true
 		}
 	}

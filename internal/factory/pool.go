@@ -24,6 +24,7 @@ type poolWindow struct {
 	Minutes int
 	Left    int
 	Reset   time.Time
+	Family  string
 }
 
 // poolReading is one provider's parsed quota snapshot; Known is false whenever
@@ -44,19 +45,31 @@ type codexBarWindow struct {
 	ResetsAt      string   `json:"resetsAt"`
 }
 
-// parsePool decodes `codexbar usage --provider <p> --json` output into
-// primary/secondary windows. Scoped extra windows and dashboard duplicates are
-// ignored; any error, non-zero exit or missing percentage yields unknown.
+func antigravityFamily(s string) string {
+	if low := strings.ToLower(s); strings.Contains(low, "gemini") {
+		return "gemini"
+	} else if strings.Contains(low, "3p") || strings.Contains(low, "claude") || strings.Contains(low, "gpt") {
+		return "3p"
+	}
+	return ""
+}
+
+// parsePool decodes `codexbar usage --provider <p> --json` output into quota
+// windows; antigravity windows are scoped by model family (gemini vs 3p).
 func parsePool(provider string, out CommandOutput) poolReading {
 	if out.Err != nil || out.TimedOut || out.Exit != 0 {
 		return poolReading{}
 	}
 	var entries []struct {
-		Provider string `json:"provider"`
-		Usage    *struct {
-			Primary   *codexBarWindow `json:"primary"`
-			Secondary *codexBarWindow `json:"secondary"`
-		} `json:"usage"`
+		Provider         string            `json:"provider"`
+		RateWindowLabels map[string]string `json:"rateWindowLabels"`
+		Usage            *struct {
+			Primary, Secondary *codexBarWindow
+			ExtraRateWindows   []struct {
+				ID, Title string
+				Window    *codexBarWindow
+			}
+		}
 	}
 	if json.Unmarshal([]byte(out.Stdout), &entries) != nil {
 		return poolReading{}
@@ -66,18 +79,29 @@ func parsePool(provider string, out CommandOutput) poolReading {
 			continue
 		}
 		var wins []poolWindow
-		for _, raw := range []*codexBarWindow{ent.Usage.Primary, ent.Usage.Secondary} {
+		add := func(raw *codexBarWindow, fam string) bool {
 			if raw == nil || raw.UsedPercent == nil || math.IsNaN(*raw.UsedPercent) || math.IsInf(*raw.UsedPercent, 0) {
-				continue
+				return false
 			}
-			var reset time.Time
-			if raw.ResetsAt != "" {
-				if ts, err := time.Parse(time.RFC3339Nano, raw.ResetsAt); err == nil {
-					reset = ts
+			reset, _ := time.Parse(time.RFC3339Nano, raw.ResetsAt)
+			wins = append(wins, poolWindow{Minutes: raw.WindowMinutes, Left: max(0, min(100, int(math.Round(100-*raw.UsedPercent)))), Reset: reset, Family: fam})
+			return true
+		}
+		if strings.EqualFold(provider, "antigravity") {
+			seen := map[string]bool{}
+			for _, ew := range ent.Usage.ExtraRateWindows {
+				if fam := cmp.Or(antigravityFamily(ew.ID), antigravityFamily(ew.Title)); fam != "" && add(ew.Window, fam) {
+					seen[fam] = true
 				}
 			}
-			left := max(0, min(100, int(math.Round(100-*raw.UsedPercent))))
-			wins = append(wins, poolWindow{Minutes: raw.WindowMinutes, Left: left, Reset: reset})
+			for k, raw := range map[string]*codexBarWindow{"primary": ent.Usage.Primary, "secondary": ent.Usage.Secondary} {
+				if fam := antigravityFamily(ent.RateWindowLabels[k]); fam != "" && !seen[fam] {
+					add(raw, fam)
+				}
+			}
+		} else {
+			add(ent.Usage.Primary, "")
+			add(ent.Usage.Secondary, "")
 		}
 		if len(wins) > 0 {
 			return poolReading{Known: true, Windows: wins}
@@ -86,40 +110,60 @@ func parsePool(provider string, out CommandOutput) poolReading {
 	return poolReading{}
 }
 
-func poolProvider(c flow.Candidate) string {
-	switch c.CLI {
-	case "claude", world.CodexCLI:
-		return c.CLI
-	case "agy":
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.Model)), "gemini-") {
-			return "antigravity"
-		}
+func poolFamily(c flow.Candidate) string {
+	if m := strings.ToLower(strings.TrimSpace(c.Model)); c.CLI != world.AgyCLI {
+		return ""
+	} else if strings.HasPrefix(m, "gemini-") {
+		return "gemini"
+	} else if strings.HasPrefix(m, "claude-") || strings.HasPrefix(m, "gpt-") {
+		return "3p"
 	}
 	return ""
 }
 
-func projectPoolProviders(s flow.State) []string {
-	var out []string
-	add := func(cs []flow.Candidate) {
-		for _, c := range cs {
-			if p := poolProvider(c); p != "" && !slices.Contains(out, p) {
-				out = append(out, p)
-			}
-		}
+func poolProvider(c flow.Candidate) string {
+	if c.CLI == "claude" || c.CLI == world.CodexCLI {
+		return c.CLI
 	}
-	add(flow.Candidates(flow.RoleCoordinator, flow.Task{}, s.Settings))
-	add(flow.Candidates(flow.RoleWorker, flow.Task{}, s.Settings))
-	add(flow.Candidates(flow.RoleReviewer, flow.Task{}, s.Settings))
+	if poolFamily(c) != "" {
+		return "antigravity"
+	}
+	return ""
+}
+
+func poolCooldownKey(c flow.Candidate) string {
+	if fam := poolFamily(c); fam != "" {
+		return c.CLI + "/antigravity/" + fam
+	}
+	return c.CLI + "/" + cmp.Or(poolProvider(c), c.CLI)
+}
+
+func projectCandidates(s flow.State) []flow.Candidate {
+	var out []flow.Candidate
+	for _, role := range []string{flow.RoleCoordinator, flow.RoleWorker, flow.RoleReviewer} {
+		out = append(out, flow.Candidates(role, flow.Task{}, s.Settings)...)
+	}
 	if s.Project.Run != nil && s.Project.Run.State != flow.PhaseEnded {
-		add([]flow.Candidate{{CLI: s.Project.Run.CLI, Model: s.Project.Run.Model}})
+		out = append(out, flow.Candidate{CLI: s.Project.Run.CLI, Model: s.Project.Run.Model})
 	}
 	for _, t := range s.Tasks {
 		if !flow.Ended(t) {
-			add(flow.Candidates(flow.RoleWorker, t, s.Settings))
-			add(flow.Candidates(flow.RoleReviewer, t, s.Settings))
-			if a := flow.OpenAttempt(t); a != nil && a.Run != nil && a.Run.State != flow.PhaseEnded {
-				add([]flow.Candidate{{CLI: a.Run.CLI, Model: a.Run.Model}})
+			for _, cs := range t.Request {
+				out = append(out, cs...)
 			}
+			if a := flow.OpenAttempt(t); a != nil && a.Run != nil && a.Run.State != flow.PhaseEnded {
+				out = append(out, flow.Candidate{CLI: a.Run.CLI, Model: a.Run.Model})
+			}
+		}
+	}
+	return out
+}
+
+func projectPoolProviders(s flow.State) []string {
+	var out []string
+	for _, c := range projectCandidates(s) {
+		if p := poolProvider(c); p != "" && !slices.Contains(out, p) {
+			out = append(out, p)
 		}
 	}
 	return out
@@ -154,11 +198,11 @@ func loadCooldowns(path string) map[string]time.Time {
 }
 
 func (e *Engine) recordQuotaCooldownLocked(s flow.State, c flow.Candidate, limitLine string, now time.Time) {
-	p, path := poolProvider(c), e.Paths.poolCooldowns()
+	path := e.Paths.poolCooldowns()
 	until := cmp.Or(world.ParseLimitReset(limitLine, now), now.Add(time.Duration(s.Settings.PoolMinutes)*time.Minute))
 	m := loadCooldowns(path)
 	maps.DeleteFunc(m, func(_ string, t time.Time) bool { return !now.Before(t) })
-	if k := c.CLI + "/" + cmp.Or(p, c.CLI); until.After(m[k]) {
+	if k := poolCooldownKey(c); until.After(m[k]) {
 		m[k] = until
 	}
 	if data, err := json.MarshalIndent(m, "", "  "); err == nil {
@@ -173,14 +217,14 @@ func quotaReason(cause string, reset, now time.Time) flow.ResolveReason {
 	return flow.ResolveReason{Kind: flow.ReasonPool, Why: "waiting for quota: " + cause}
 }
 
-func poolWaitReason(provider string, r poolReading, floor int, now time.Time) flow.ResolveReason {
+func poolWaitReason(provider, family string, r poolReading, floor int, now time.Time) flow.ResolveReason {
 	if !r.Known {
 		return flow.ResolveReason{}
 	}
 	blocked := false
 	var earliest time.Time
 	for _, w := range r.Windows {
-		if !w.Reset.IsZero() && !now.Before(w.Reset) {
+		if (w.Family != "" && family != "" && w.Family != family) || (!w.Reset.IsZero() && !now.Before(w.Reset)) {
 			continue
 		}
 		if w.Left <= floor {
@@ -200,11 +244,11 @@ func poolCheck(pools map[string]poolReading, cooldownPath string, floor int, now
 	return func(c flow.Candidate) flow.ResolveReason {
 		p := poolProvider(c)
 		var cd, pr flow.ResolveReason
-		if until := loadCooldowns(cooldownPath)[c.CLI+"/"+cmp.Or(p, c.CLI)]; now.Before(until) {
+		if until := loadCooldowns(cooldownPath)[poolCooldownKey(c)]; now.Before(until) {
 			cd = quotaReason(cmp.Or(p, c.CLI)+" hit its usage limit", until, now)
 		}
 		if p != "" {
-			pr = poolWaitReason(p, pools[p], floor, now)
+			pr = poolWaitReason(p, poolFamily(c), pools[p], floor, now)
 		}
 		if cd.Why != "" && (pr.Why == "" || pr.Reset.IsZero() || !pr.Reset.After(cd.Reset)) {
 			return cd
@@ -271,7 +315,7 @@ func (e *Engine) refreshPools(ctx context.Context, id string) map[string]poolRea
 	}
 	for p, r := range fresh {
 		if !r.Known {
-			if prev, ok := e.pools[p]; ok && !poolWaitReason(p, prev.reading, floor, at).Reset.IsZero() {
+			if prev, ok := e.pools[p]; ok && !poolWaitReason(p, "", prev.reading, floor, at).Reset.IsZero() {
 				r = prev.reading
 			}
 		}
