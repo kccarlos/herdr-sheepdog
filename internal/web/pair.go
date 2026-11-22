@@ -67,6 +67,15 @@ func (e *enrollCodes) retireLocked(code, reason string) {
 	}
 }
 
+// expire retires the active code as code_expired, if any.
+func (e *enrollCodes) expire() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.cur != "" {
+		e.retireLocked(e.cur, "code_expired")
+	}
+}
+
 // issueShort mints a single-use 5-minute XXXX-XXXX code, retiring any active code.
 func (e *enrollCodes) issueShort(now time.Time) (string, time.Time, error) {
 	e.mu.Lock()
@@ -453,6 +462,7 @@ func (s *Server) handleResetPairing(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	_, _, _, _ = s.enroll.current(s.deps.Now(), true)
+	s.browserEnroll.expire()
 	s.log.Log(logSource, "web.device.reset_pairing", "", map[string]any{"count": len(done)})
 	s.log.Log(logSource, "web.tls.rotate", "", map[string]any{"old_pin": old, "new_pin": s.deps.TLS.Pin(), "phase": "reset"})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(done)})

@@ -1,6 +1,6 @@
 // The factory page (design.md 12.1, the FactoryWeb* boards): polls the factory
 // views and delegates ask answers and browser pairing to asks.js.
-import { esc, renderAskCardsHTML, createAskFlow, browserAskDeps } from './asks.js';
+import { esc, isOwnerAsk, renderAskCardsHTML, createAskFlow, browserAskDeps } from './asks.js';
 
 const POLL_MS = 3000, GIVE_UP_MS = 8000;
 const $ = (id) => document.getElementById(id);
@@ -92,7 +92,7 @@ function render() {
   $('aside').hidden = !!t;
   set($('main'), t ? taskHTML(t) : boardHTML(tasks));
   set($('projects'), `<h2>projects</h2>${data.projects.map(projHTML).join('') || '<p class="muted">None yet.</p>'}`);
-  const asks = data.asks || [];
+  const asks = (data.asks || []).filter(isOwnerAsk);
   set($('asks'), `<div class="head"><h2>asks for you</h2>${asks.length ? `<span>${asks.length} open</span>` : ''}</div>${renderAskCardsHTML(asks, askUI)}`);
   const runs = tasks.filter((x) => x.terminal);
   set($('agents'), `<div class="head"><h2>agents</h2><span>${runs.length} running</span></div>` + (runs.map((x) =>

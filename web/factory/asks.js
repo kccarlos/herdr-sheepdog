@@ -3,10 +3,11 @@
 import { enroll, signIn, keyStore } from '../voice/pairing.js';
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+export const isOwnerAsk = (a) => Boolean(a && a.gated !== false && a.kind !== 'decision');
 export const PAIR_HINT = 'Pair this browser to answer asks: open the Sheepdog menu-bar app on this Mac for a short pairing code, then enter it below.';
 
 export function renderAskCardsHTML(asks, state = {}) {
-  const list = Array.isArray(asks) ? asks : [];
+  const list = Array.isArray(asks) ? asks.filter(isOwnerAsk) : [];
   let html = list.length ? list.map((a) => {
     const busy = state.busyId === a.id;
     const meta = [a.kind && `<span class="chip">${esc(a.kind)}</span>`, a.task && `<code>${esc(a.task)}</code>`].filter(Boolean).join('');

@@ -105,7 +105,13 @@ func (s *Server) handleFactoryAsks(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "factory is not available")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"protocol": 1, "asks": append([]flow.Ask{}, asker.Asks(true)...)})
+	asks := []flow.Ask{}
+	for _, a := range asker.Asks(true) {
+		if a.Gated && a.Kind != flow.KindDecision {
+			asks = append(asks, a)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"protocol": 1, "asks": asks})
 }
 
 func (s *Server) handleFactoryAskAnswer(w http.ResponseWriter, r *http.Request) {
