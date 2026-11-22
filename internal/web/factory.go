@@ -5,8 +5,10 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 )
 
 // Factory is the factory engine's surface: read-only views, owner commands
@@ -18,6 +20,13 @@ type Factory interface {
 	Start(folder, goal string, maxRunning int) error
 	Stop(project string) error
 	Report(token, verb string, args json.RawMessage) error
+}
+
+// factoryAsker is the optional half of Factory backing open asks and owner answers.
+type factoryAsker interface {
+	Asks(open bool) []flow.Ask
+	MintProof(askID, option, inputKind, deviceID string) (factory.AnswerProof, error)
+	Answer(askID, option string, proof factory.AnswerProof) error
 }
 
 // handleFactory serves POST /api/factory/{start,stop,report}. A start or stop
@@ -88,4 +97,55 @@ func (s *Server) handleFactoryView(kind string) http.HandlerFunc {
 			writeJSON(w, http.StatusOK, v)
 		}
 	}
+}
+
+func (s *Server) handleFactoryAsks(w http.ResponseWriter, _ *http.Request) {
+	asker, ok := s.deps.Factory.(factoryAsker)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "factory is not available")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"protocol": 1, "asks": append([]flow.Ask{}, asker.Asks(true)...)})
+}
+
+func (s *Server) handleFactoryAskAnswer(w http.ResponseWriter, r *http.Request) {
+	dev := deviceOf(r)
+	if dev == "" || dev == localDevice {
+		writeJSON(w, http.StatusForbidden, map[string]string{"code": "proof_required", "error": "proof_required"})
+		return
+	}
+	asker, ok := s.deps.Factory.(factoryAsker)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "factory is not available")
+		return
+	}
+	var req struct{ Option string }
+	if err := readJSON(r, &req); err != nil || strings.TrimSpace(req.Option) == "" {
+		writeError(w, http.StatusBadRequest, `want {"option": "…"}`)
+		return
+	}
+	askID := strings.TrimSpace(r.PathValue("id"))
+	proof, err := asker.MintProof(askID, req.Option, factory.ProofInputTap, dev)
+	if err == nil {
+		err = asker.Answer(askID, req.Option, proof)
+	}
+	if err != nil {
+		writeFactoryRefusal(w, err)
+		return
+	}
+	s.log.Log(logSource, "web.factory.ask_answered", "", map[string]any{"ask_id": askID, "device_id": dev})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "ask_id": askID, "device_id": dev})
+}
+
+func writeFactoryRefusal(w http.ResponseWriter, err error) {
+	var ref *factory.Refusal
+	if !errors.As(err, &ref) {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	status := map[string]int{"not_found": http.StatusNotFound, flow.RefuseClosed: http.StatusConflict, "proof_required": http.StatusForbidden, "proof_rejected": http.StatusForbidden}[ref.Code]
+	if status == 0 {
+		status = http.StatusBadRequest
+	}
+	writeJSON(w, status, map[string]string{"code": ref.Code, "error": ref.Error()})
 }

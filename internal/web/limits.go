@@ -69,13 +69,16 @@ func (l *rateLimiter) allow(bucket, ip string, limit int, now time.Time) bool {
 	return l.count(bucket, ip, now) <= limit
 }
 
-// fail counts one failure; past limit, the address is blocked for bucket.
-func (l *rateLimiter) fail(bucket, ip string, limit int, now time.Time) {
+// fail counts one failure; past limit, the address is blocked for bucket and
+// fail reports true.
+func (l *rateLimiter) fail(bucket, ip string, limit int, now time.Time) bool {
 	if l.count(bucket, ip, now) > limit {
 		l.mu.Lock()
 		l.blocked[bucket+"|"+ip] = now.Add(limitBlock)
 		l.mu.Unlock()
+		return true
 	}
+	return false
 }
 
 // isBlocked reports whether ip waits out a block for bucket.
