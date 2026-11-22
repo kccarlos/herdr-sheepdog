@@ -39,8 +39,9 @@ type Transition struct {
 	// directory; the supervisor reads the worker's own transcript from
 	// them (docs/dev/iteration-2.md WP4). Not logged: a session names a
 	// transcript on disk.
-	Session *AgentSession `json:"-"`
-	Cwd     string        `json:"-"`
+	Session *AgentSession     `json:"-"`
+	Cwd     string            `json:"-"`
+	Labels  map[string]string `json:"labels,omitempty"`
 }
 
 // WatcherConfig tunes the Watcher; zero values take the defaults below.

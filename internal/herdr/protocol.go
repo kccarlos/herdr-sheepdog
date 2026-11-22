@@ -116,6 +116,8 @@ type AgentInfo struct {
 	// Session is the agent's own session as its integration hook reported
 	// it (pane.report_agent_session); nil when none was reported.
 	Session *AgentSession `json:"agent_session,omitempty"`
+	// Labels carries terminal labels (such as sheepdog.project and sheepdog.role).
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // AgentSession is herdr's agent_session object (docs/dev/herdr-protocol.md

@@ -181,6 +181,9 @@ type Config struct {
 	// nothing; with nothing muted every decision is what it was before
 	// mutes existed.
 	Mutes *attention.Mutes
+	// Factory is the optional factory engine bridged into supervisor asks and
+	// owner voice start/stop commands (design.md 12.3).
+	Factory Factory
 	// Now overrides the clock (tests).
 	Now func() time.Time
 	// WorkerLog reads the workers' own session transcripts for the work
