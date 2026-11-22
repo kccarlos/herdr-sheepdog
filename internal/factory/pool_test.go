@@ -750,3 +750,342 @@ func TestPoolReadIsBoundedAndHoldsNoEngineLock(t *testing.T) {
 		}
 	}
 }
+
+// reasonHasDay reports whether a wait reason includes both the reset's day
+// (for example "Sun", "Sunday", "Nov 22" or "2026-11-22") and its clock time.
+func reasonHasDay(why string, reset time.Time) bool {
+	if !reasonHasTime(why, reset) {
+		return false
+	}
+	for _, ts := range []time.Time{reset.Local(), reset.UTC()} {
+		for _, layout := range []string{"Mon", "Monday", "Jan 2", "2006-01-02"} {
+			if strings.Contains(why, ts.Format(layout)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestPoolFloorSurvivesFailedRefreshUntilReset (round 2, design 7.3): a known
+// reading at or under the floor whose blocking window's reset is still in the
+// future stays in force until that reset even when a refresh after pool_minutes
+// fails (timeout, hc error or bad JSON). After the reset passes, either a fresh
+// good reading or a failed reading (unknown never blocks) lets the task start.
+func TestPoolFloorSurvivesFailedRefreshUntilReset(t *testing.T) {
+	failures := []struct {
+		name string
+		out  CommandOutput
+	}{
+		{name: "timeout", out: CommandOutput{Exit: -1, TimedOut: true}},
+		{name: "hc error", out: CommandOutput{Exit: -1, Err: errors.New("hc: connection refused")}},
+		{name: "bad JSON", out: CommandOutput{Stdout: "<html>not json</html>"}},
+	}
+	for _, f := range failures {
+		for _, afterReset := range []string{"good reading after reset", "failed reading after reset"} {
+			t.Run(f.name+"/"+afterReset, func(t *testing.T) {
+				c := newCodexRoles(t, nil, true)
+				fake := newPoolFake(t)
+				c.eng.poolRun = fake.run
+				fake.healthy(*c.now)
+				poolPlan(c, poolTask("T1", ""))
+
+				poolNext(c)
+				reset := c.now.Add(90 * time.Minute)
+				fake.set("claude", poolOut("claude", *c.now, &poolWin{2, 90 * time.Minute}, &poolWin{60, 72 * time.Hour}, nil))
+				c.pass()
+				c.noWorktreeNoSlot()
+				if n := roleRuns(*c.runs, flow.RoleWorker); n != 0 {
+					t.Fatalf("worker started at 2%% floor: %d runs", n)
+				}
+
+				// Advance past pool_minutes before the reset and fail the refresh.
+				*c.now = c.now.Add(6 * time.Minute)
+				readsBefore := fake.claudeReads()
+				fake.set("claude", f.out)
+				c.pass()
+				if fake.claudeReads() != readsBefore+1 {
+					t.Fatalf("claude reads = %d, want %d (refresh should have run)", fake.claudeReads(), readsBefore+1)
+				}
+				if n := roleRuns(*c.runs, flow.RoleWorker); n != 0 {
+					t.Fatalf("failed refresh before reset started a worker: %d worker run(s)", n)
+				}
+				c.noWorktreeNoSlot()
+				if why := c.state().Tasks[0].HoldWhy; !strings.Contains(strings.ToLower(why), "quota") || !strings.Contains(why, "claude") || !reasonHasTime(why, reset) {
+					t.Fatalf("hold reason after failed refresh = %q, want quota, claude and %s", why, reset.Format("3:04 PM"))
+				}
+				if w := c.quotaWaits(); len(w) != 1 {
+					t.Fatalf("quota waits logged %d times before reset, want 1: %+v", len(w), w)
+				}
+
+				// A second refresh failure before the reset also keeps the task held.
+				*c.now = c.now.Add(6 * time.Minute)
+				c.pass()
+				c.noWorktreeNoSlot()
+				if n := roleRuns(*c.runs, flow.RoleWorker); n != 0 {
+					t.Fatalf("second failed refresh before reset started a worker: %d worker run(s)", n)
+				}
+				if w := c.quotaWaits(); len(w) != 1 {
+					t.Fatalf("quota waits logged %d times, want 1: %+v", len(w), w)
+				}
+
+				// After the reset passes, both a fresh good reading and a failed
+				// (unknown) reading let the task start.
+				*c.now = reset.Add(time.Minute)
+				if afterReset == "good reading after reset" {
+					fake.healthy(*c.now)
+				} else {
+					fake.set("claude", f.out)
+				}
+				c.pass()
+				c.pass()
+				st := c.state()
+				if len(st.Tasks[0].Attempts) != 1 || roleRuns(*c.runs, flow.RoleWorker) != 1 || st.Tasks[0].HoldWhy != "" {
+					t.Fatalf("after reset (%s): attempts=%d workerRuns=%d hold=%q", afterReset, len(st.Tasks[0].Attempts), roleRuns(*c.runs, flow.RoleWorker), st.Tasks[0].HoldWhy)
+				}
+				if w := c.quotaWaits(); len(w) != 1 {
+					t.Errorf("total quota waits = %d, want 1", len(w))
+				}
+			})
+		}
+	}
+}
+
+// TestPoolWaitReasonAcrossCandidates (round 2): when every candidate is at its
+// floor, the wait reason names the soonest reset across them; and in a mixed
+// list where an earlier candidate is not installed or not signed in while a
+// later candidate is at its floor, the quota reason (naming quota and the
+// reset time) is visible and not hidden (satisfied whether quota wins as the
+// binding blocker or both reasons are shown).
+func TestPoolWaitReasonAcrossCandidates(t *testing.T) {
+	t.Run("worker two candidates at floor names soonest reset", func(t *testing.T) {
+		models := map[string][]flow.Candidate{
+			flow.RoleWorker: {
+				{CLI: "claude", Model: "sonnet", Effort: "medium"},
+				{CLI: "codex", Model: codexModel, Effort: "high"},
+			},
+		}
+		c := newCodexRoles(t, models, true)
+		fake := newPoolFake(t)
+		c.eng.poolRun = fake.run
+		fake.healthy(*c.now)
+		poolPlan(c, poolTask("T1", ""))
+
+		poolNext(c)
+		soonest := c.now.Add(1 * time.Hour)
+		later := c.now.Add(3 * time.Hour)
+		fake.set("claude", poolOut("claude", *c.now, &poolWin{2, 3 * time.Hour}, &poolWin{60, 72 * time.Hour}, nil))
+		fake.set("codex", poolOut("codex", *c.now, nil, &poolWin{2, 1 * time.Hour}, nil))
+		c.pass()
+		c.pass()
+
+		c.noWorktreeNoSlot()
+		if n := roleRuns(*c.runs, flow.RoleWorker); n != 0 {
+			t.Fatalf("worker started while both pools at floor: %d runs", n)
+		}
+		why := c.state().Tasks[0].HoldWhy
+		if !strings.Contains(strings.ToLower(why), "quota") || !reasonHasTime(why, soonest) || reasonHasTime(why, later) {
+			t.Fatalf("hold reason = %q, want soonest reset %s (not later %s)", why, soonest.Format("3:04 PM"), later.Format("3:04 PM"))
+		}
+		if w := c.quotaWaits(); len(w) != 1 || !reasonHasTime(w[0].Why, soonest) || reasonHasTime(w[0].Why, later) {
+			t.Fatalf("logged waits = %+v, want one naming soonest %s", w, soonest.Format("3:04 PM"))
+		}
+
+		// Once codex resets (claude still at floor), T1 starts on codex.
+		*c.now = soonest.Add(time.Minute)
+		fake.set("codex", poolOut("codex", *c.now, nil, &poolWin{60, 72 * time.Hour}, nil))
+		c.pass()
+		c.pass()
+		st := c.state()
+		if len(st.Tasks[0].Attempts) != 1 || st.Tasks[0].Attempts[0].Run == nil || st.Tasks[0].Attempts[0].Run.CLI != "codex" {
+			t.Fatalf("after soonest reset: attempts = %+v, want worker started on codex", st.Tasks[0].Attempts)
+		}
+	})
+
+	t.Run("reviewer two candidates at floor names soonest reset", func(t *testing.T) {
+		_, eng, paths, id, _, _, runs, _ := codexSetup(t)
+		now := time.Now().Add(10 * time.Minute)
+		eng.Now = func() time.Time { return now }
+		fake := newPoolFake(t)
+		eng.poolRun = fake.run
+		soonest := now.Add(1 * time.Hour)
+		later := now.Add(3 * time.Hour)
+		fake.set("claude", poolOut("claude", now, &poolWin{2, 3 * time.Hour}, &poolWin{60, 72 * time.Hour}, nil))
+		fake.set("codex", poolOut("codex", now, nil, &poolWin{2, 1 * time.Hour}, nil))
+		before := roleRuns(*runs, flow.RoleReviewer)
+		for range 3 {
+			eng.passProject(context.Background(), id, false)
+			now = now.Add(time.Minute)
+		}
+		if n := roleRuns(*runs, flow.RoleReviewer); n != before {
+			t.Fatalf("reviewer started while both pools at floor: %d new runs", n-before)
+		}
+		st, err := LoadState(paths.State(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		why := st.Tasks[0].HoldWhy
+		if !strings.Contains(strings.ToLower(why), "quota") || !reasonHasTime(why, soonest) || reasonHasTime(why, later) {
+			t.Fatalf("reviewer hold reason = %q, want soonest reset %s (not later %s)", why, soonest.Format("3:04 PM"), later.Format("3:04 PM"))
+		}
+	})
+
+	for _, tc := range []struct {
+		name  string
+		codex flow.CLIFacts
+	}{
+		{name: "mixed list not installed", codex: flow.CLIFacts{Installed: false}},
+		{name: "mixed list not signed in", codex: flow.CLIFacts{Installed: true, SignedIn: false}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			models := map[string][]flow.Candidate{
+				flow.RoleWorker: {
+					{CLI: "codex", Model: codexModel, Effort: "high"},
+					{CLI: "claude", Model: "sonnet", Effort: "medium"},
+				},
+			}
+			c := newCodexRoles(t, models, true)
+			c.eng.probeLaunch = func(context.Context, []string) flow.ResolveFacts {
+				return flow.ResolveFacts{CLIs: map[string]flow.CLIFacts{
+					"codex":  tc.codex,
+					"claude": {Installed: true, SignedIn: true},
+				}}
+			}
+			fake := newPoolFake(t)
+			c.eng.poolRun = fake.run
+			fake.healthy(*c.now)
+			poolPlan(c, poolTask("T1", ""))
+
+			poolNext(c)
+			reset := c.now.Add(90 * time.Minute)
+			fake.set("claude", poolOut("claude", *c.now, &poolWin{2, 90 * time.Minute}, &poolWin{60, 72 * time.Hour}, nil))
+			c.pass()
+			c.pass()
+
+			c.noWorktreeNoSlot()
+			if n := roleRuns(*c.runs, flow.RoleWorker); n != 0 {
+				t.Fatalf("worker started: %d runs", n)
+			}
+			why := c.state().Tasks[0].HoldWhy
+			if !strings.Contains(strings.ToLower(why), "quota") || !strings.Contains(why, "claude") || !reasonHasTime(why, reset) {
+				t.Fatalf("hold reason = %q, want visible quota reason for claude with reset %s", why, reset.Format("3:04 PM"))
+			}
+			if w := c.quotaWaits(); len(w) != 1 || !reasonHasTime(w[0].Why, reset) {
+				t.Fatalf("logged waits = %+v, want one quota wait naming %s", w, reset.Format("3:04 PM"))
+			}
+
+			// When claude resets, T1 starts on claude (confirming quota was binding).
+			*c.now = reset.Add(time.Minute)
+			fake.healthy(*c.now)
+			c.pass()
+			c.pass()
+			st := c.state()
+			if len(st.Tasks[0].Attempts) != 1 || st.Tasks[0].Attempts[0].Run == nil || st.Tasks[0].Attempts[0].Run.CLI != "claude" {
+				t.Fatalf("after claude reset: attempts = %+v, want worker started on claude", st.Tasks[0].Attempts)
+			}
+		})
+	}
+}
+
+// TestPoolWaitReasonShowsDayWhenMoreThanADayAway (round 2): when the blocking
+// reset is more than a day away, the wait reason names the day as well as the
+// clock time so voice and logs do not sound like today.
+func TestPoolWaitReasonShowsDayWhenMoreThanADayAway(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		provider string
+		models   map[string][]flow.Candidate
+		five     *poolWin
+		week     *poolWin
+	}{
+		{
+			name:     "codex weekly 50h away",
+			provider: "codex",
+			models:   codexWorkerOnly,
+			week:     &poolWin{2, 50 * time.Hour},
+		},
+		{
+			name:     "claude weekly 50h away",
+			provider: "claude",
+			five:     &poolWin{80, 2 * time.Hour},
+			week:     &poolWin{2, 50 * time.Hour},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newCodexRoles(t, tc.models, true)
+			fake := newPoolFake(t)
+			c.eng.poolRun = fake.run
+			fake.healthy(*c.now)
+			poolPlan(c, poolTask("T1", ""))
+
+			poolNext(c)
+			reset := c.now.Add(50 * time.Hour)
+			fake.set(tc.provider, poolOut(tc.provider, *c.now, tc.five, tc.week, nil))
+			c.pass()
+			c.pass()
+
+			c.noWorktreeNoSlot()
+			why := c.state().Tasks[0].HoldWhy
+			if !strings.Contains(strings.ToLower(why), "quota") || !reasonHasDay(why, reset) {
+				t.Fatalf("hold reason = %q, want quota with day and clock time for %s", why, reset.Format(time.RFC3339))
+			}
+			if w := c.quotaWaits(); len(w) != 1 || !reasonHasDay(w[0].Why, reset) {
+				t.Fatalf("logged waits = %+v, want one with day and clock time for %s", w, reset.Format(time.RFC3339))
+			}
+		})
+	}
+}
+
+// TestCoordinatorPoolFloorWaitsAndStartsAfterReset (round 2): a coordinator
+// whose only candidate is at its floor stays held (J7 logs one wait with the
+// quota reason and launches nothing) and starts on the first pass after reset.
+func TestCoordinatorPoolFloorWaitsAndStartsAfterReset(t *testing.T) {
+	c := newCodexRoles(t, nil, true) // default coordinator: claude/opus only
+	fake := newPoolFake(t)
+	c.eng.poolRun = fake.run
+	reset := c.now.Add(90 * time.Minute)
+	fake.set("claude", poolOut("claude", *c.now, &poolWin{2, 90 * time.Minute}, &poolWin{60, 72 * time.Hour}, nil))
+
+	for range 3 {
+		c.pass()
+		*c.now = c.now.Add(time.Minute)
+	}
+	if len(*c.runs) != 0 {
+		t.Fatalf("coordinator started while its pool was at the floor: %d run(s)", len(*c.runs))
+	}
+	st := c.state()
+	if st.Project.RunID != "" || flow.LastAct(st.Project.Acts, flow.AskStartCoordinator) != nil {
+		t.Fatalf("coordinator state changed while waiting on quota: RunID=%q Acts=%+v", st.Project.RunID, st.Project.Acts)
+	}
+	var j7Waits []LogLine
+	for _, l := range c.logLinesWaiting() {
+		if l.Rule == "J7" {
+			j7Waits = append(j7Waits, l)
+		}
+	}
+	if len(j7Waits) != 1 {
+		t.Fatalf("J7 waiting log lines = %d, want 1: %+v", len(j7Waits), j7Waits)
+	}
+	if why := j7Waits[0].Why; !strings.Contains(strings.ToLower(why), "quota") || !strings.Contains(why, "claude") || !reasonHasTime(why, reset) {
+		t.Fatalf("J7 wait reason = %q, want quota, claude and %s", why, reset.Format("3:04 PM"))
+	}
+
+	*c.now = reset.Add(time.Minute)
+	fake.healthy(*c.now)
+	c.pass()
+	if len(*c.runs) != 1 || c.last().Labels["sheepdog.role"] != flow.RoleCoordinator {
+		t.Fatalf("coordinator did not start after reset: runs=%d", len(*c.runs))
+	}
+	if c.state().Project.RunID == "" {
+		t.Fatal("Project.RunID is empty after coordinator started")
+	}
+	j7Waits = nil
+	for _, l := range c.logLinesWaiting() {
+		if l.Rule == "J7" {
+			j7Waits = append(j7Waits, l)
+		}
+	}
+	if len(j7Waits) != 1 {
+		t.Errorf("total J7 waiting log lines = %d, want 1", len(j7Waits))
+	}
+}
