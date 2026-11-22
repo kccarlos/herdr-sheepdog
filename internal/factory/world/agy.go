@@ -120,8 +120,7 @@ func agyInputAnchor(lines []string) int {
 
 // parseAgyReport strips agy's input box, echoed `> ` prompt and `▸`/`●` blocks.
 func parseAgyReport(text, code string) ReportRead {
-	clean := ansiRe.ReplaceAllString(strings.ReplaceAll(text, "\r\n", "\n"), "")
-	lines := strings.Split(strings.TrimRight(clean, "\n \t"), "\n")
+	lines := strings.Split(strings.TrimRight(ansiRe.ReplaceAllString(strings.ReplaceAll(text, "\r\n", "\n"), ""), "\n \t"), "\n")
 	if anc := agyInputAnchor(lines); anc >= 0 {
 		lines = lines[:anc]
 	}
@@ -137,7 +136,7 @@ func parseAgyReport(text, code string) ReportRead {
 	if lastBlock < 0 && promptIdx >= 0 {
 		start := len(lines)
 		for i := promptIdx + 1; i < len(lines); i++ {
-			if strings.Contains(lines[i], `"majors":<n>}</report>`) {
+			if strings.Contains(lines[i], `"majors":<n>}`) {
 				start = i + 1
 				break
 			}
@@ -161,5 +160,15 @@ func parseAgyReport(text, code string) ReportRead {
 			}
 		}
 	}
-	return parseReportTag(strings.TrimSpace(strings.Join(out, "\n")), code)
+	if rd := parseReportTag(strings.TrimSpace(strings.Join(out, "\n")), code); rd.Status != ReportNotYet || code == "" {
+		return rd
+	}
+	for i := len(out) - 1; i >= 0; i-- {
+		raw := strings.TrimSpace(out[i])
+		if rep, ok := decodeReportJSON(raw); ok && rep.Code == code &&
+			rep.Round > 0 && rep.Head != "" && (rep.Verdict == flow.VerdictPass || rep.Verdict == flow.VerdictChanges) && rep.Majors >= 0 {
+			return ReportRead{Status: ReportFound, Report: rep, Raw: raw, Body: strings.TrimSpace(strings.Join(out[:i], "\n"))}
+		}
+	}
+	return ReportRead{Status: ReportNotYet}
 }

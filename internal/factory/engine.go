@@ -1833,7 +1833,7 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		return "", true, err
 	}
 	if choice.CLI == world.AgyCLI {
-		prompt = "Do not modify, create or delete any files; read and run tests only.\n\n" + prompt
+		prompt = "Do not modify, create or delete any files; read and run tests only. Put the <report> tag inside a fenced code block.\n\n" + prompt
 	}
 	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, &a.Review.Run, adopt, flow.RunRecord{Role: flow.RoleReviewer, CLI: choice.CLI}, world.RunSpec{
 		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
