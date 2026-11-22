@@ -1,5 +1,7 @@
 package flow
 
+import "fmt"
+
 // SweepItem is one leftover or drift found by the sweep (design.md 11.3).
 type SweepItem struct{ Kind, Key, Summary string }
 
@@ -26,4 +28,51 @@ func SweepWakes(acts []Act, probes []SweepProbe) (out []SweepWake) {
 		}
 	}
 	return out
+}
+
+// SweepEpisodes reconciles probes against persisted active sweep items and
+// unknown probe reasons, returning new wakes, newly unknown probes, and
+// recovered probe names. Unknown probes never clear active items.
+func SweepEpisodes(active, unknown *map[string]string, probes []SweepProbe) (wakes []SweepWake, unknownProbes, unknownMsgs, recovered []string) {
+	for _, p := range probes {
+		if p.Unknown != "" {
+			if (*unknown)[p.Probe] != p.Unknown {
+				if *unknown == nil {
+					*unknown = map[string]string{}
+				}
+				(*unknown)[p.Probe] = p.Unknown
+				unknownProbes = append(unknownProbes, p.Probe)
+				unknownMsgs = append(unknownMsgs, fmt.Sprintf("%s unknown: %s", p.Probe, p.Unknown))
+			}
+			continue
+		}
+		if _, ok := (*unknown)[p.Probe]; ok {
+			delete(*unknown, p.Probe)
+			recovered = append(recovered, p.Probe)
+		}
+		present := map[string]bool{}
+		for _, it := range p.Items {
+			wk := "sweep@" + it.Kind + "@" + it.Key
+			present[wk] = true
+			if (*active)[wk] == "" {
+				if *active == nil {
+					*active = map[string]string{}
+				}
+				(*active)[wk] = p.Probe
+				wakes = append(wakes, SweepWake{AskWake + "@" + wk, wk, it.Summary})
+			}
+		}
+		for wk, pr := range *active {
+			if pr == p.Probe && !present[wk] {
+				delete(*active, wk)
+			}
+		}
+	}
+	if len(*active) == 0 {
+		*active = nil
+	}
+	if len(*unknown) == 0 {
+		*unknown = nil
+	}
+	return wakes, unknownProbes, unknownMsgs, recovered
 }

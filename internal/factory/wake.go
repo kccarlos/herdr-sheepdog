@@ -161,27 +161,60 @@ func (e *Engine) sweepProjectLocked(ctx context.Context, id string, s *flow.Stat
 		return
 	}
 	now := e.now()
-	if last := flow.LastAct(s.Project.Acts, "sweep"); last != nil && now.Sub(last.At) < 10*time.Minute {
+	interval := time.Duration(cmp.Or(s.Settings.SweepMinutes, flow.DefaultSettings().SweepMinutes)) * time.Minute
+	if prev, ok := e.lastSweep[id]; ok && now.Sub(prev) < interval {
 		return
 	}
-	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
+	gctx, cancel := context.WithTimeout(ctx, min(3*lockGitTimeout, world.GitStageTimeout))
 	probes := e.git.Sweep(gctx, e.HC, s.Project.Folder, filepath.Join(e.Paths.project(id), "worktrees"), *s)
 	cancel()
+	if ctx.Err() != nil {
+		return
+	}
+	if e.Paths.DataDir != "" {
+		probes = append(probes, world.SweepCodexHome(e.codexHomeDir()))
+	}
+	var active []flow.SweepProbe
 	for _, p := range probes {
 		if p.Unknown == world.ErrGitSuppressed.Error() {
 			continue
 		}
-		e.logOnce("factory.sweep_unknown", id, id+"/"+p.Probe, map[bool]error{true: fmt.Errorf("%s", p.Unknown)}[p.Unknown != ""])
+		if (p.Probe == "local_base" && p.Unknown == world.ErrNoOrigin.Error()) || strings.Contains(p.Unknown, "not a git repository") {
+			e.logOnce("factory.sweep_unknown", id, id+"/"+p.Probe, fmt.Errorf("%s", p.Unknown))
+			continue
+		}
+		active = append(active, p)
 	}
+	wakes, unknownProbes, unknownMsgs, recovered := flow.SweepEpisodes(&s.Project.SweepItems, &s.Project.SweepUnknown, active)
+	for _, pr := range recovered {
+		e.logOnce("factory.sweep_unknown", id, id+"/"+pr, nil)
+	}
+	for _, pr := range unknownProbes {
+		e.logOnce("factory.sweep_unknown", id, id+"/"+pr, fmt.Errorf("%s", s.Project.SweepUnknown[pr]))
+	}
+	if e.lastSweep == nil {
+		e.lastSweep = map[string]time.Time{}
+	}
+	e.lastSweep[id] = now
 	s.Project.Acts = append(slices.DeleteFunc(s.Project.Acts, func(a flow.Act) bool { return a.Key == "sweep" }), flow.Act{Key: "sweep", Result: "done", At: now})
 	var asked, whys []string
-	for _, w := range flow.SweepWakes(s.Project.Acts, probes) {
-		s.Project.Acts = append(s.Project.Acts, flow.Act{Key: w.ActKey, Result: "done", At: now})
+	for _, w := range wakes {
 		holdProjectWake(s, w.WakeKey, "sweep: "+w.Summary, w.Summary, now)
 		asked, whys = append(asked, w.ActKey), append(whys, w.Summary)
 	}
-	if len(asked) > 0 {
-		e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "sweep", Asked: asked, Decision: fmt.Sprintf("sweep found %d leftover(s): %s", len(asked), strings.Join(whys, "; ")), Why: strings.Join(whys, "; ")})
+	for _, pr := range unknownProbes {
+		asked = append(asked, "sweep_unknown@"+pr)
+	}
+	allWhys := append(slices.Clone(whys), unknownMsgs...)
+	if len(allWhys) > 0 {
+		why := strings.Join(allWhys, "; ")
+		decision := fmt.Sprintf("sweep unknown: %s", why)
+		if len(whys) > 0 && len(unknownMsgs) == 0 {
+			decision = fmt.Sprintf("sweep found %d leftover(s): %s", len(whys), why)
+		} else if len(whys) > 0 {
+			decision = fmt.Sprintf("sweep found %d leftover(s) and %d unknown(s): %s", len(whys), len(unknownMsgs), why)
+		}
+		e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "sweep", Asked: asked, Decision: decision, Why: why})
 	} else {
 		e.saveLocked(id, *s)
 	}

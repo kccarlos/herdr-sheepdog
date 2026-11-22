@@ -200,12 +200,20 @@ func checkSweepLeftovers(ctx context.Context, o DoctorOptions, hcOK bool, dir st
 	} else {
 		out = append(out, resSkip("sweep", "leftover checks skipped: this folder has no factory project yet"))
 	}
-	for _, pr := range git.Sweep(gctx, client, repo, wtRoot, s) {
-		if id == "" && pr.Probe != "local_base" {
+	probes := git.Sweep(gctx, client, repo, wtRoot, s)
+	if o.DataDir != "" {
+		probes = append(probes, world.SweepCodexHome(filepath.Join(o.DataDir, "factory", "codex-home")))
+	}
+	for _, pr := range probes {
+		if id == "" && pr.Probe != "local_base" && pr.Probe != "codex_home" {
 			continue
 		}
 		if pr.Unknown != "" {
-			out = append(out, resWarn("sweep "+pr.Probe, "unknown: "+cleanReason(map[bool]string{true: stateWhy, false: pr.Unknown}[stateWhy != "" && pr.Probe != "local_base"]), "check "+pr.Probe+" manually"))
+			why := pr.Unknown
+			if stateWhy != "" && pr.Probe != "local_base" && pr.Probe != "codex_home" {
+				why = stateWhy
+			}
+			out = append(out, resWarn("sweep "+pr.Probe, "unknown: "+cleanReason(why), "check "+pr.Probe+" manually"))
 		}
 		for _, it := range pr.Items {
 			out = append(out, resWarn("leftover "+it.Kind, it.Summary, "inspect and clean up manually"))

@@ -954,10 +954,10 @@ func TestEngineSweepOncePerEpisodeAndReusedAddress(t *testing.T) {
 // still pending or retrying is not reported as retained, including across a
 // daemon restart between done (N2) and cleanup (N1).
 func TestEngineSweepRestartBetweenDoneAndCleanup(t *testing.T) {
-	setupDoneCleanup := func(t *testing.T, dirty, persistedSweep bool, acts []flow.Act) (repo, id, wtPath string, paths Paths, srv *hctest.Server, now time.Time) {
+	setupDoneCleanup := func(t *testing.T, dirty, persistedSweep bool, acts []flow.Act) (id, wtPath string, paths Paths, srv *hctest.Server, now time.Time) {
 		t.Helper()
 		ctx := context.Background()
-		repo, _ = initGitRepoWithRemote(t)
+		repo, _ := initGitRepoWithRemote(t)
 		githubOrigin(t, repo)
 		bindRepoFakeGH(t, repo)
 		var err error
@@ -1009,11 +1009,11 @@ func TestEngineSweepRestartBetweenDoneAndCleanup(t *testing.T) {
 		if err := SaveState(paths.State(id), st); err != nil {
 			t.Fatal(err)
 		}
-		return repo, id, wtPath, paths, srv, now
+		return id, wtPath, paths, srv, now
 	}
 
 	t.Run("restart between done and cleanup with clean worktree", func(t *testing.T) {
-		_, id, wtPath, paths, srv, now := setupDoneCleanup(t, false, true, nil)
+		id, wtPath, paths, srv, now := setupDoneCleanup(t, false, true, nil)
 		eng := newGitTestEngine(t, paths, hc.NewClient(srv.Path))
 		eng.Now = func() time.Time { return now }
 		eng.passProject(context.Background(), id, false)
@@ -1036,7 +1036,7 @@ func TestEngineSweepRestartBetweenDoneAndCleanup(t *testing.T) {
 	t.Run("restart while cleanup is retrying after transient failure", func(t *testing.T) {
 		now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
 		acts := []flow.Act{{Key: flow.AskCleanup, Result: "failed", Class: flow.ClassTransient, Err: "temporary error", At: now.Add(-10 * time.Second)}}
-		_, id, wtPath, paths, srv, now := setupDoneCleanup(t, false, false, acts)
+		id, wtPath, paths, srv, now := setupDoneCleanup(t, false, false, acts)
 		eng := newGitTestEngine(t, paths, hc.NewClient(srv.Path))
 		eng.Now = func() time.Time { return now }
 		eng.passProject(context.Background(), id, false)
@@ -1061,7 +1061,7 @@ func TestEngineSweepRestartBetweenDoneAndCleanup(t *testing.T) {
 	})
 
 	t.Run("restart between done and cleanup with dirty worktree reports only after cleanup retains it", func(t *testing.T) {
-		_, id, wtPath, paths, srv, now := setupDoneCleanup(t, true, false, nil)
+		id, wtPath, paths, srv, now := setupDoneCleanup(t, true, false, nil)
 		eng := newGitTestEngine(t, paths, hc.NewClient(srv.Path))
 		eng.Now = func() time.Time { return now }
 
@@ -1106,11 +1106,11 @@ func TestEngineSweepAndDoctorListCodexHomeWithoutReadingAuth(t *testing.T) {
 	anyCountRe := regexp.MustCompile(`\b[0-9]+\s+files?\b`)
 	anySizeRe := regexp.MustCompile(`\b[0-9]+(\.[0-9]+)?\s*(B|bytes?|KiB|KB|MiB|MB)\b`)
 
-	populateCodexHome := func(t *testing.T, paths Paths) (codexHome, ownerAuth string) {
+	populateCodexHome := func(t *testing.T, paths Paths) (codexHome string) {
 		t.Helper()
 		codexHome = filepath.Join(paths.DataDir, "factory", "codex-home")
 		ownerDir := t.TempDir()
-		ownerAuth = filepath.Join(ownerDir, "auth.json")
+		ownerAuth := filepath.Join(ownerDir, "auth.json")
 		// Pad auth.json to 4096 bytes so following the symlink would skew size away from 500 bytes.
 		payload := authSecret + strings.Repeat("x", 4096-len(authSecret))
 		if err := os.WriteFile(ownerAuth, []byte(payload), 0o600); err != nil {
@@ -1131,7 +1131,7 @@ func TestEngineSweepAndDoctorListCodexHomeWithoutReadingAuth(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(codexHome, "log", "codex.log"), bytes.Repeat([]byte("b"), 200), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		return codexHome, ownerAuth
+		return codexHome
 	}
 
 	mentionsCodexHome := func(s, dir string) bool {
@@ -1150,7 +1150,7 @@ func TestEngineSweepAndDoctorListCodexHomeWithoutReadingAuth(t *testing.T) {
 
 	t.Run("engine sweep lists location, count and size once per episode without leaking auth", func(t *testing.T) {
 		_, id, paths, srv, _, _, _ := setupSweepRepo(t)
-		codexHome, _ := populateCodexHome(t, paths)
+		codexHome := populateCodexHome(t, paths)
 
 		var logBuf bytes.Buffer
 		now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
@@ -1243,7 +1243,7 @@ func TestEngineSweepAndDoctorListCodexHomeWithoutReadingAuth(t *testing.T) {
 			t.Skip("root bypasses chmod 0000")
 		}
 		_, id, paths, srv, _, _, _ := setupSweepRepo(t)
-		codexHome, _ := populateCodexHome(t, paths)
+		codexHome := populateCodexHome(t, paths)
 		authPath := filepath.Join(codexHome, "auth.json")
 		if err := os.Remove(authPath); err != nil {
 			t.Fatal(err)
@@ -1288,7 +1288,7 @@ func TestEngineSweepAndDoctorListCodexHomeWithoutReadingAuth(t *testing.T) {
 
 	t.Run("doctor lists shared codex home", func(t *testing.T) {
 		repo, _, paths, srv, _, _, _ := setupSweepRepo(t)
-		codexHome, _ := populateCodexHome(t, paths)
+		codexHome := populateCodexHome(t, paths)
 		srv.OnRun = func(term hc.Terminal, _ hc.RunParams) { srv.FinishExit(term.Address, "exited", 0) }
 		env := newFakeEnv("hc", "claude", "gh", "codexbar")
 		env.handlers["claude auth"] = func(string, []string, []string) CommandOutput { return CommandOutput{Stdout: `{"loggedIn":true}`} }

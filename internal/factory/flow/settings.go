@@ -49,6 +49,7 @@ type Settings struct {
 	TaskSizeLimit              int `json:"task_size_limit"`                // plan checks (design.md 11.5)
 	SizeCapFactor              int `json:"size_cap_factor"`                // N12: size_cap = factor × estimate_lines
 	MaxRunning                 int `json:"max_running"`                    // N10: concurrent tasks (design.md 4.10, 10.1)
+	SweepMinutes               int `json:"sweep_minutes"`                  // sweep interval (design.md 7.3, 10.1)
 	// SecondReviewer reviews the second passing round (L8): opus in a
 	// fresh session, or codex (world.CodexArgv's model).
 	SecondReviewer string `json:"second_reviewer"`
@@ -100,6 +101,7 @@ const (
 	SizeFactorMax                         = 5
 	MaxRunningMin                         = 1
 	MaxRunningMax                         = 20
+	SweepMin, SweepMax                    = 1, 60
 )
 
 const CoordStartsMin, CoordStartsMax, CoordGapMin, CoordGapMax = 1, 10, 1, 60
@@ -115,7 +117,7 @@ func DefaultSettings() Settings {
 		StartMinutes: 2, IdleGraceSeconds: 20, QuietMinutes: 20, InterruptSeconds: 90, ReviewMinutes: 45, BlockedMinutes: 10,
 		WorkerRestarts: 3, ReviewerRetries: 2, EnsureFailures: 3, EnsureBackoffMinutes: 1,
 		CoordinatorStartsPerHour: 3, CoordinatorGapMinutes: 10, CoordinatorSilentMinutes: 30, HeartbeatMinutes: 60,
-		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2, MaxRunning: 3,
+		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2, MaxRunning: 3, SweepMinutes: 5,
 		SecondReviewer: "opus",
 	}
 }
@@ -157,6 +159,7 @@ func (s Settings) Changed() []string {
 		{"reviewer_retries", s.ReviewerRetries, d.ReviewerRetries},
 		{"size_cap_factor", s.SizeCapFactor, d.SizeCapFactor},
 		{"start_minutes", s.StartMinutes, d.StartMinutes},
+		{"sweep_minutes", s.SweepMinutes, d.SweepMinutes},
 		{"task_size_limit", s.TaskSizeLimit, d.TaskSizeLimit},
 		{"worker_restarts", s.WorkerRestarts, d.WorkerRestarts},
 	} {
@@ -211,6 +214,7 @@ func (s Settings) Validate() error {
 		{"task_size_limit", s.TaskSizeLimit, SizeLimitMin, SizeLimitMax},
 		{"size_cap_factor", s.SizeCapFactor, SizeFactorMin, SizeFactorMax},
 		{"max_running", s.MaxRunning, MaxRunningMin, MaxRunningMax},
+		{"sweep_minutes", s.SweepMinutes, SweepMin, SweepMax},
 	} {
 		if r.v < r.low || r.v > r.high {
 			return fmt.Errorf("%s %d: allowed %d–%d", r.name, r.v, r.low, r.high)

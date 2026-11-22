@@ -55,6 +55,7 @@ type Engine struct {
 	mu          sync.Mutex
 	wake        chan struct{}
 	lastPass    map[string]time.Time            // monotonic reading of previous pass per project (design.md 2.5)
+	lastSweep   map[string]time.Time            // per-process last sweep per project (design.md 7.3)
 	prs         map[string]flow.PR              // last PR snapshot per attempt worktree (in memory)
 	errs        map[string]string               // last gh or git error per worktree and kind, logged once per change
 	tips        map[string]tipFacts             // last git reading per worktree (in memory)
@@ -150,8 +151,9 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 			holdProjectWake(&s, "new_goal", "owner gave a new goal", "goal: "+goal, e.now())
 		}
 	}
-	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.Invariants = root, goal, true, nil, nil, nil
+	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.Invariants, s.Project.SweepItems, s.Project.SweepUnknown = root, goal, true, nil, nil, nil, nil, nil
 	clearCoordTrack(&s.Project, true, true)
+	delete(e.lastSweep, id)
 	delete(e.waits, id+"/project")
 	// The owner starting again is slice 1's retry (plan.md: "the owner
 	// starts again"): failed executor acts no longer block their ask.
@@ -271,9 +273,10 @@ func (e *Engine) Stop(project string) error {
 		stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
 		reconcileCoordWakes(&s.Project)
 	}
-	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants = "", "", nil, false, nil, nil, false, 0, nil
+	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants, s.Project.SweepItems, s.Project.SweepUnknown = "", "", nil, false, nil, nil, false, 0, nil, nil, nil
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastPass, id)
+	delete(e.lastSweep, id)
 	delete(e.waits, id+"/project")
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "stop"}, Rule: "stop", Decision: "stopped", Why: "stopped by owner"})
 }

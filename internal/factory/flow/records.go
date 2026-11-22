@@ -61,6 +61,8 @@ type Project struct {
 	CoordWakeTurn      uint64            `json:"coord_wake_turn,omitempty"`    // J9: coordinator turn when CoordWakeAt was sent
 	CoordLastWakeAt    time.Time         `json:"coord_last_wake_at,omitempty"` // J13: last wake or heartbeat delivered
 	Invariants         map[string]string `json:"invariants,omitempty"`         // active violation per invariant rule and subject (I1–I5)
+	SweepItems         map[string]string `json:"sweep_items,omitempty"`        // active sweep wake key -> probe name
+	SweepUnknown       map[string]string `json:"sweep_unknown,omitempty"`      // active unknown sweep probe -> reason
 }
 
 // Wake is a held wake for the coordinator (design.md 10, J12): queued once
