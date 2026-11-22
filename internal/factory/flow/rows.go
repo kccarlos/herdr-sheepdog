@@ -153,8 +153,15 @@ func ensureRun(in In, role string) (asks []string, backoff bool) {
 		return ensureRepeat(in, workerStartAsk(last, 0)), false
 	case last == nil:
 		return nil, false
-	case last.Result == EndQuota || last.Result == EndSignedOut:
-		// Quota and signed-out rows are slice 5b.
+	case last.Result == EndQuota:
+		if role == RoleReviewer {
+			return ensureRepeat(in, key(AskStartReview, round, ContinueResume, h)), false
+		} else if noSlot {
+			return nil, false
+		}
+		return ensureRepeat(in, key(AskStartWorker, ContinueHandoff)), false
+	case last.Result == EndSignedOut:
+		// Signed-out row is slice 5b.
 	case role == RoleReviewer && tries < in.Settings.ReviewerRetries:
 		return ensureRepeat(in, key(AskStartReview, round, tries+countBase, h)), false
 	case role == RoleWorker && a.Restarts < in.Settings.WorkerRestarts:

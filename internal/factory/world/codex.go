@@ -134,12 +134,15 @@ func codexReply(text string) string {
 
 // Look for the current composer after the transcript. An active turn can
 // draw the same composer, with the interrupt hint just above it.
-func codexScreenStatus(text string) string {
+func codexScreenStatus(text string, limit bool) string {
 	lines := strings.Split(strings.TrimRight(text, "\n \t"), "\n")
 	for _, line := range lines[max(0, len(lines)-16):] {
 		if codexWorkingRe.MatchString(line) {
 			return "working"
 		}
+	}
+	if limit {
+		return "idle"
 	}
 	tail := lines[max(0, len(lines)-8):]
 	for i := len(tail) - 1; i >= 0; i-- {

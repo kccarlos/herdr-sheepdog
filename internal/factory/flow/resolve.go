@@ -185,6 +185,9 @@ func ResolveWithReason(role string, task Task, settings Settings, facts ResolveF
 			return Intent{role, c.CLI, c.Model, c.Effort, perm, ContinueFresh}, ResolveReason{}
 		}
 	}
+	if pool.Why != "" && first.Why != "" {
+		return Intent{}, ResolveReason{Kind: ReasonOther, Why: pool.Why + "; " + first.Why, Reset: pool.Reset}
+	}
 	for _, r := range []ResolveReason{pool, first, fallback} {
 		if r.Why != "" {
 			return Intent{}, r
