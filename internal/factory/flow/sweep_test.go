@@ -6,10 +6,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 )
 
-func TestSweepWakesOnceAndSkipsUnknown(t *testing.T) {
+func TestSweepEpisodesOnceAndSkipsUnknown(t *testing.T) {
 	probes := []SweepProbe{
 		{Probe: "terminals", Items: []SweepItem{
 			{Kind: "stray_terminal", Key: "t3ab", Summary: "a stray agent terminal t3ab with factory labels"},
@@ -25,24 +24,27 @@ func TestSweepWakesOnceAndSkipsUnknown(t *testing.T) {
 			{Kind: "local_base", Key: "abc1234", Summary: "the local main is 2 commits ahead of origin/main"},
 		}},
 	}
-	wakes := SweepWakes(nil, probes)
-	if len(wakes) != 3 {
-		t.Fatalf("SweepWakes = %+v, want 3 wakes", wakes)
+	var active, unknown map[string]string
+	wakes := []Wake{{Key: "sweep@local_base@abc1234"}}
+	notices, changed := SweepEpisodes(&active, &unknown, &wakes, probes)
+	if !changed || len(notices) != 4 {
+		t.Fatalf("SweepEpisodes = (%+v, %v), want 4 notices and changed=true", notices, changed)
 	}
-	if wakes[0].WakeKey != "sweep@stray_terminal@t3ab" || wakes[1].WakeKey != "sweep@worktree@/tmp/wt/T2-1" || wakes[2].WakeKey != "sweep@local_base@abc1234" {
-		t.Fatalf("unexpected wake keys: %+v", wakes)
+	if notices[0].WakeKey != "sweep@stray_terminal@t3ab" || notices[1].WakeKey != "sweep@worktree@/tmp/wt/T2-1" ||
+		notices[2].WakeKey != "" || notices[2].ActKey != "sweep_unknown@branches" ||
+		notices[3].WakeKey != "sweep@local_base@abc1234" {
+		t.Fatalf("unexpected notices: %+v", notices)
 	}
-	var acts []Act
-	for _, w := range wakes {
-		acts = append(acts, Act{Key: w.ActKey, Result: "done", At: time.Unix(100, 0)})
+	// Repeating probes (even with a different unknown reason) emits nothing.
+	probes[2].Unknown = "deadline exceeded"
+	if again, ch := SweepEpisodes(&active, &unknown, &wakes, probes); len(again) != 0 || ch {
+		t.Fatalf("second SweepEpisodes = (%+v, %v), want none and changed=false", again, ch)
 	}
-	if again := SweepWakes(acts, probes); len(again) != 0 {
-		t.Fatalf("second SweepWakes = %+v, want none", again)
-	}
-	// A new base SHA wakes once again.
+	// A new base SHA clears the old held wake and wakes once again; branches recovery clears unknown.
+	probes[2].Unknown, probes[2].Items = "", nil
 	probes[3].Items[0].Key = "def5678"
-	if next := SweepWakes(acts, probes); len(next) != 1 || next[0].WakeKey != "sweep@local_base@def5678" {
-		t.Fatalf("new base SHA wakes = %+v, want 1 for def5678", next)
+	if next, ch := SweepEpisodes(&active, &unknown, &wakes, probes); !ch || len(next) != 1 || next[0].WakeKey != "sweep@local_base@def5678" || len(wakes) != 0 || unknown != nil {
+		t.Fatalf("new base SHA = (%+v, %v, wakes=%+v, unknown=%+v), want 1 for def5678 and cleared state", next, ch, wakes, unknown)
 	}
 }
 

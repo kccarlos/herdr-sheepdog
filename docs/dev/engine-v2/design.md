@@ -828,6 +828,8 @@ Under form B most drift cannot happen: a task's situation is read from records a
 | a task waiting on the coordinator for `coordinator_silent_minutes` with no coordinator turn since | the coordinator is silent (J9 acts) |
 | the local base ahead of the remote | someone committed to the base locally |
 
+The sweep also lists the shared Codex home (location, size, file count) as one item per episode, never reading its files.
+
 A probe that cannot run reports `unknown` with the reason, never a negative.
 
 ### 11.4 Design loop

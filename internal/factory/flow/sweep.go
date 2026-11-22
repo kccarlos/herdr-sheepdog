@@ -1,6 +1,6 @@
 package flow
 
-import "fmt"
+import "slices"
 
 // SweepItem is one leftover or drift found by the sweep (design.md 11.3).
 type SweepItem struct{ Kind, Key, Summary string }
@@ -12,67 +12,53 @@ type SweepProbe struct {
 	Items          []SweepItem
 }
 
-// SweepWake is one coordinator wake from the project-level sweep rule.
-type SweepWake struct{ ActKey, WakeKey, Summary string }
-
-// SweepWakes emits one coordinator wake per found item unless already recorded.
-// Wake keys are stable (sweep@<kind>@<key>) and permanent in the project's act
-// log, so a reused terminal address or worktree path does not wake twice (accepted).
-func SweepWakes(acts []Act, probes []SweepProbe) (out []SweepWake) {
-	seen := map[string]bool{}
-	for _, p := range probes {
-		for _, it := range p.Items {
-			if wk := "sweep@" + it.Kind + "@" + it.Key; p.Unknown == "" && !seen[wk] && !Done(acts, AskWake+"@"+wk) {
-				seen[wk], out = true, append(out, SweepWake{AskWake + "@" + wk, wk, it.Summary})
-			}
-		}
-	}
-	return out
-}
+// SweepNotice is one new leftover wake (WakeKey != "") or unknown probe from SweepEpisodes.
+type SweepNotice struct{ ActKey, WakeKey, Summary string }
 
 // SweepEpisodes reconciles probes against persisted active sweep items and
-// unknown probe reasons, returning new wakes, newly unknown probes, and
-// recovered probe names. Unknown probes never clear active items.
-func SweepEpisodes(active, unknown *map[string]string, probes []SweepProbe) (wakes []SweepWake, unknownProbes, unknownMsgs, recovered []string) {
+// unknown probes, clearing recovered held wakes and returning new notices.
+func SweepEpisodes(active, unknown *map[string]string, wakes *[]Wake, probes []SweepProbe) (notices []SweepNotice, changed bool) {
+	put := func(m *map[string]string, k, v string) {
+		if *m == nil {
+			*m = map[string]string{}
+		}
+		(*m)[k], changed = v, true
+	}
 	for _, p := range probes {
 		if p.Unknown != "" {
-			if (*unknown)[p.Probe] != p.Unknown {
-				if *unknown == nil {
-					*unknown = map[string]string{}
-				}
-				(*unknown)[p.Probe] = p.Unknown
-				unknownProbes = append(unknownProbes, p.Probe)
-				unknownMsgs = append(unknownMsgs, fmt.Sprintf("%s unknown: %s", p.Probe, p.Unknown))
+			if (*unknown)[p.Probe] == "" {
+				put(unknown, p.Probe, p.Unknown)
+				notices = append(notices, SweepNotice{ActKey: "sweep_unknown@" + p.Probe, Summary: p.Probe + " unknown: " + p.Unknown})
 			}
 			continue
 		}
-		if _, ok := (*unknown)[p.Probe]; ok {
+		if (*unknown)[p.Probe] != "" {
 			delete(*unknown, p.Probe)
-			recovered = append(recovered, p.Probe)
+			changed = true
 		}
 		present := map[string]bool{}
 		for _, it := range p.Items {
 			wk := "sweep@" + it.Kind + "@" + it.Key
 			present[wk] = true
 			if (*active)[wk] == "" {
-				if *active == nil {
-					*active = map[string]string{}
-				}
-				(*active)[wk] = p.Probe
-				wakes = append(wakes, SweepWake{AskWake + "@" + wk, wk, it.Summary})
+				put(active, wk, p.Probe)
+				notices = append(notices, SweepNotice{AskWake + "@" + wk, wk, it.Summary})
 			}
 		}
 		for wk, pr := range *active {
 			if pr == p.Probe && !present[wk] {
 				delete(*active, wk)
+				changed = true
+				if wakes != nil {
+					*wakes = slices.DeleteFunc(*wakes, func(w Wake) bool { return w.Task == "" && w.Key == wk })
+				}
 			}
 		}
 	}
-	if len(*active) == 0 {
-		*active = nil
+	for _, m := range []*map[string]string{active, unknown} {
+		if len(*m) == 0 {
+			*m = nil
+		}
 	}
-	if len(*unknown) == 0 {
-		*unknown = nil
-	}
-	return wakes, unknownProbes, unknownMsgs, recovered
+	return notices, changed
 }

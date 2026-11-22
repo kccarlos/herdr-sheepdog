@@ -247,15 +247,15 @@ func TestEngineLoopStartsOneCoordinatorAndStopsCleanly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Project.Started || st.Project.RunID != "" || st.Seq != 3 {
+	if st.Project.Started || st.Project.RunID != "" || st.Seq != 4 {
 		t.Fatalf("final state = %+v", st)
 	}
 	logBytes, err := os.ReadFile(paths.Log(projID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lines := strings.Split(strings.TrimSpace(string(logBytes)), "\n"); len(lines) != 3 {
-		t.Fatalf("expected 3 log commits (start, J7, stop), got %d:\n%s", len(lines), string(logBytes))
+	if lines := strings.Split(strings.TrimSpace(string(logBytes)), "\n"); len(lines) != 4 {
+		t.Fatalf("expected 4 log commits (start, sweep, J7, stop), got %d:\n%s", len(lines), string(logBytes))
 	}
 }
 
@@ -366,7 +366,7 @@ func TestEngineCrashAdoptTrimAndOutage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lines := strings.Split(strings.TrimSpace(string(logRaw)), "\n"); len(lines) != 2 || strings.Contains(string(logRaw), "uncommitted") {
+	if lines := strings.Split(strings.TrimSpace(string(logRaw)), "\n"); len(lines) != 3 || strings.Contains(string(logRaw), "uncommitted") {
 		t.Fatalf("(c) TrimLog did not drop uncommitted lines:\n%s", string(logRaw))
 	}
 
@@ -810,13 +810,13 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 	if err := eng1.Report(runs1[0].Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"t1","estimate_lines":50,"title":"feat: x",`+testPlanJSON+`}]}`)); err != nil {
 		t.Fatal(err)
 	}
-	runUntilLogged(eng1, id1, 5)
+	runUntilLogged(eng1, id1, 6)
 	log1, err := os.ReadFile(eng1.Paths.Log(id1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lines := strings.Split(strings.TrimSpace(string(log1)), "\n"); len(lines) != 5 {
-		t.Fatalf("failing NewWorktree wrote %d log lines (want 5: start, J7, plan apply, 1 N11, 1 N5):\n%s", len(lines), log1)
+	if lines := strings.Split(strings.TrimSpace(string(log1)), "\n"); len(lines) != 6 {
+		t.Fatalf("failing NewWorktree wrote %d log lines (want 6: start, sweep, J7, plan apply, 1 N11, 1 N5):\n%s", len(lines), log1)
 	}
 	if st1, err := LoadState(eng1.Paths.State(id1)); err != nil || flow.Count(st1.Tasks[0].Acts, flow.AskNewAttempt) != 1 || flow.Done(st1.Tasks[0].Acts, flow.AskNewAttempt) {
 		t.Fatalf("failing NewWorktree task acts = %+v (err=%v)", st1.Tasks[0].Acts, err)
@@ -834,10 +834,10 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 		t.Fatal(err)
 	}
 	id2 := eng2.projectDirs()[0].Name()
-	runUntilLogged(eng2, id2, 3)
+	runUntilLogged(eng2, id2, 4)
 	log2, _ := os.ReadFile(eng2.Paths.Log(id2))
-	if lines := strings.Split(strings.TrimSpace(string(log2)), "\n"); len(lines) != 3 {
-		t.Fatalf("failing coordinator StartRun wrote %d log lines (want 3: start, 1 J7, 1 J6):\n%s", len(lines), log2)
+	if lines := strings.Split(strings.TrimSpace(string(log2)), "\n"); len(lines) != 4 {
+		t.Fatalf("failing coordinator StartRun wrote %d log lines (want 4: start, sweep, 1 J7, 1 J6):\n%s", len(lines), log2)
 	}
 	if st2, err := LoadState(eng2.Paths.State(id2)); err != nil || flow.Count(st2.Project.Acts, "coordinator") != 1 || flow.Done(st2.Project.Acts, "coordinator") {
 		t.Fatalf("failing coordinator project acts = %+v (err=%v)", st2.Project.Acts, err)

@@ -3,13 +3,13 @@ package world
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"testing"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
@@ -18,12 +18,29 @@ import (
 // Sweep runs all sweep finders for a project (design.md 11.3): stray terminals,
 // orphan or done-task worktrees, orphan task/* branches, and local base ahead.
 func (g *Git) Sweep(ctx context.Context, client *hc.Client, repo, worktreeRoot string, s flow.State) []flow.SweepProbe {
-	lbProbe := g.sweepLocalBase(ctx, repo)
+	lbProbe := flow.SweepProbe{Probe: "local_base"}
+	if ref, rsha, err := g.remoteBaseCommit(ctx, repo, false); err != nil {
+		lbProbe.Unknown = err.Error()
+	} else {
+		_, base, _ := strings.Cut(strings.TrimPrefix(ref, "refs/remotes/"), "/")
+		localRef := "refs/heads/" + base
+		if sha, e1 := g.gitCmd(ctx, repo, "rev-parse", "--verify", "--quiet", localRef+"^{commit}"); gitExit(e1, 1) {
+			lbProbe.Unknown = "missing local base branch " + localRef
+		} else if e1 != nil {
+			lbProbe.Unknown = e1.Error()
+		} else if sha != rsha {
+			out, e2 := g.gitCmd(ctx, repo, "rev-list", "--count", rsha+".."+sha)
+			if n, e3 := strconv.Atoi(strings.TrimSpace(out)); cmp.Or(e2, e3) != nil {
+				lbProbe.Unknown = cmp.Or(e2, e3).Error()
+			} else if n > 0 {
+				lbProbe.Items = []flow.SweepItem{{Kind: "local_base", Key: sha, Summary: fmt.Sprintf("the local %s is %d %s ahead of the last-fetched tracking ref %s (%s)", base, n, map[bool]string{true: "commit", false: "commits"}[n == 1], ref, rsha[:min(len(rsha), 7)])}}
+			}
+		}
+	}
 	if s.Project.ID == "" {
 		return []flow.SweepProbe{{Probe: "terminals", Unknown: "no project state"}, {Probe: "worktrees", Unknown: "no project state"}, {Probe: "branches", Unknown: "no project state"}, lbProbe}
 	}
-	cfg := s.Settings
-	cfg.EnsureFailures = cmp.Or(cfg.EnsureFailures, flow.DefaultSettings().EnsureFailures)
+	cfg := flow.Settings{EnsureFailures: cmp.Or(s.Settings.EnsureFailures, flow.DefaultSettings().EnsureFailures)}
 	cleanupDone := func(acts []flow.Act) bool {
 		return flow.Done(acts, flow.AskCleanup) || flow.Exhausted(acts, flow.AskCleanup, cfg)
 	}
@@ -89,81 +106,33 @@ func (g *Git) sweepWorktreePaths(ctx context.Context, repo, root string, owned m
 	var listed []sweepWorktree
 	for stanza := range strings.SplitSeq(string(r.Stdout), "\x00\x00") {
 		var item sweepWorktree
+		var prunable bool
 		for field := range strings.SplitSeq(stanza, "\x00") {
 			if path, ok := strings.CutPrefix(field, "worktree "); ok {
 				item.path = path
 			} else if branch, ok := strings.CutPrefix(field, "branch refs/heads/"); ok {
 				item.branch = branch
+			} else if field == "prunable" || strings.HasPrefix(field, "prunable ") {
+				prunable = true
 			}
 		}
-		if item.path != "" {
-			listed, paths = append(listed, item), append(paths, item.path)
+		if item.path == "" {
+			continue
 		}
+		if prunable {
+			if exists, perr := g.PathExists(ctx, repo, item.path); perr != nil {
+				return nil, nil, perr
+			} else if !exists {
+				continue
+			}
+		}
+		listed, paths = append(listed, item), append(paths, item.path)
 	}
 	if len(listed) <= 1 {
 		return nil, nil, nil
 	}
 	resolved, err := g.CanonicalPaths(ctx, repo, paths...)
 	return resolved, listed, err
-}
-
-func (g *Git) sweepLocalBase(ctx context.Context, repo string) flow.SweepProbe {
-	p := flow.SweepProbe{Probe: "local_base"}
-	ref, err := g.gitCmd(ctx, repo, "symbolic-ref", "--quiet", "refs/remotes/"+pushRemote+"/HEAD")
-	if err != nil && !gitExit(err, 1) {
-		p.Unknown = err.Error()
-		return p
-	}
-	var rsha, sha, base, localRef string
-	readRefs := func(r string) error {
-		_, base, _ = strings.Cut(strings.TrimPrefix(r, "refs/remotes/"), "/")
-		localRef = "refs/heads/" + base
-		out, err := g.gitCmd(ctx, repo, "for-each-ref", "--format=%(refname)%09%(objectname)", r, localRef)
-		if err != nil {
-			return err
-		}
-		for ln := range strings.Lines(out) {
-			if name, oid, ok := strings.Cut(strings.TrimSpace(ln), "\t"); ok {
-				switch name {
-				case r:
-					rsha = oid
-				case localRef:
-					sha = oid
-				}
-			}
-		}
-		return nil
-	}
-	if strings.HasPrefix(ref, "refs/remotes/"+pushRemote+"/") {
-		if err := readRefs(ref); err != nil {
-			p.Unknown = err.Error()
-			return p
-		}
-	}
-	if rsha == "" {
-		if ref, rsha, err = g.remoteBaseCommit(ctx, repo, false); err != nil {
-			p.Unknown = err.Error()
-			return p
-		}
-		if err := readRefs(ref); err != nil {
-			p.Unknown = err.Error()
-			return p
-		}
-	}
-	if sha == "" {
-		p.Unknown = fmt.Sprintf("missing local base branch %s", localRef)
-		return p
-	}
-	if sha == rsha {
-		return p
-	}
-	out, err := g.gitCmd(ctx, repo, "rev-list", "--count", ref+".."+localRef)
-	if n, nerr := strconv.Atoi(strings.TrimSpace(out)); cmp.Or(err, nerr) != nil {
-		p.Unknown = cmp.Or(err, nerr).Error()
-	} else if n > 0 {
-		p.Items = []flow.SweepItem{{Kind: "local_base", Key: sha, Summary: fmt.Sprintf("the local %s is %d %s ahead of the last-fetched tracking ref %s (%s)", base, n, map[bool]string{true: "commit", false: "commits"}[n == 1], ref, rsha[:min(len(rsha), 7)])}}
-	}
-	return p
 }
 
 // SweepTerminals finds live factory-labelled terminals that no active run owns.
@@ -175,16 +144,12 @@ func SweepTerminals(ctx context.Context, client *hc.Client, s flow.State) flow.S
 	if err != nil {
 		return flow.SweepProbe{Probe: "terminals", Unknown: err.Error()}
 	}
-	type runRef struct {
-		addr, id  string
-		createdMS uint64
-	}
-	var refs []runRef
+	var refs []flow.RunRecord
 	add := func(addr string, r *flow.RunRecord) {
 		if r == nil && addr != "" {
-			refs = append(refs, runRef{addr: addr})
+			refs = append(refs, flow.RunRecord{Address: addr})
 		} else if r != nil && r.State != flow.PhaseEnded {
-			refs = append(refs, runRef{addr: cmp.Or(r.Address, addr), id: r.ID, createdMS: r.CreatedMS})
+			refs = append(refs, flow.RunRecord{Address: cmp.Or(r.Address, addr), ID: r.ID, CreatedMS: r.CreatedMS})
 		}
 	}
 	add(s.Project.RunID, s.Project.Run)
@@ -197,27 +162,10 @@ func SweepTerminals(ctx context.Context, client *hc.Client, s flow.State) flow.S
 		}
 	}
 	owned := func(t hc.Terminal) bool {
-		for _, ref := range refs {
-			switch {
-			case ref.id != "" && ref.createdMS != 0:
-				if t.Labels["sheepdog.run"] == ref.id && t.CreatedMS == ref.createdMS {
-					return true
-				}
-			case ref.id != "":
-				if t.Labels["sheepdog.run"] == ref.id {
-					return true
-				}
-			case ref.createdMS != 0:
-				if ref.addr != "" && (t.Address == ref.addr || t.Name == ref.addr) && t.CreatedMS == ref.createdMS {
-					return true
-				}
-			default:
-				if ref.addr != "" && (t.Address == ref.addr || t.Name == ref.addr) {
-					return true
-				}
-			}
-		}
-		return false
+		return slices.ContainsFunc(refs, func(ref flow.RunRecord) bool {
+			return matchesRunTerminal(t, ref.ID, ref.CreatedMS) &&
+				(ref.ID != "" || ref.Address != "" && (t.Address == ref.Address || t.Name == ref.Address))
+		})
 	}
 	p := flow.SweepProbe{Probe: "terminals"}
 	for _, t := range list.Terminals {
@@ -228,54 +176,43 @@ func SweepTerminals(ctx context.Context, client *hc.Client, s flow.State) flow.S
 	return p
 }
 
-// SweepCodexHome reports the location, file count and gathered byte size of the
-// shared Codex home without opening files or following symlinks (design.md 11.3).
-func SweepCodexHome(dir string) flow.SweepProbe {
+const codexHomeScript = `LC_ALL=C
+if err=$(stat "$1" 2>&1 >/dev/null); then [ ! -L "$1" ] && [ -d "$1" ] || { printf 'not a directory: %s\n' "$1" >&2; exit 2; }; else case "$err" in *": No such file or directory"|*": Not a directory") exit 3;; esac; printf '%s\n' "$err" >&2; exit 2; fi
+if stat -f %z "$1" >/dev/null 2>&1; then f=-f; m=%z; else f=-c; m=%s; fi
+cd "$1" 2>/dev/null || { err=$(cd "$1" 2>&1); printf '%s: %s\n' "${err##*: }" "$1" >&2; exit 2; }
+out=$(find -P . -type f -exec stat "$f" "$m" {} +) || exit 2
+printf '%s\n' "$out" | awk 'NF {n++; b+=$1} END {printf "%d %d\n", n+0, b+0}'`
+
+// SweepCodexHome reports the shared Codex home via herdr-core without opening files or following symlinks (design.md 11.3).
+func (g *Git) SweepCodexHome(ctx context.Context, dir string) flow.SweepProbe {
 	p := flow.SweepProbe{Probe: "codex_home"}
 	if dir == "" {
 		return p
 	}
-	if _, err := os.Lstat(dir); errors.Is(err, fs.ErrNotExist) {
-		return p
-	} else if err != nil {
+	abs, err := absolutePath(dir)
+	if rel, rerr := filepath.Rel(os.TempDir(), abs); err == nil && testing.Testing() && (rerr != nil || strings.HasPrefix(rel, "..")) {
+		err = fmt.Errorf("world: %s is outside the temp dir under go test", dir)
+	}
+	if err != nil {
 		p.Unknown = err.Error()
 		return p
 	}
-	var files int
-	var total int64
-	if err := filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.Type()&fs.ModeSymlink != 0 || !d.Type().IsRegular() {
-			return nil
-		}
-		info, ierr := d.Info()
-		if ierr != nil {
-			return ierr
-		}
-		files++
-		total += info.Size()
-		return nil
-	}); err != nil {
-		var pe *fs.PathError
-		if errors.As(err, &pe) {
-			p.Unknown = fmt.Sprintf("%v: %s", pe.Err, pe.Path)
+	r, err := g.pathCommand(GitRepository(ctx, abs), os.TempDir(), codexHomeScript, abs)
+	switch {
+	case gitExit(err, 3):
+	case GitTimedOut(err):
+		p.Unknown = "codex-home probe timed out"
+	case gitExit(err, 2) && strings.TrimSpace(string(r.Stderr)) != "":
+		p.Unknown = strings.TrimSpace(string(r.Stderr))
+	case err != nil:
+		p.Unknown = err.Error()
+	default:
+		var files, total int64
+		if n, serr := fmt.Sscanf(string(r.Stdout), "%d %d", &files, &total); serr != nil || n != 2 {
+			p.Unknown = "unexpected codex-home inventory response"
 		} else {
-			p.Unknown = err.Error()
+			p.Items = []flow.SweepItem{{Kind: "codex_home", Key: dir, Summary: fmt.Sprintf("shared codex-home at %s (%d %s, %d B)", dir, files, map[bool]string{true: "file", false: "files"}[files == 1], total)}}
 		}
-		return p
 	}
-	if files == 0 {
-		return p
-	}
-	size := fmt.Sprintf("%d B", total)
-	if total >= 1024*1024 {
-		size = fmt.Sprintf("%.1f MiB", float64(total)/(1024*1024))
-	} else if total >= 1024 {
-		size = fmt.Sprintf("%.1f KiB", float64(total)/1024)
-	}
-	noun := map[bool]string{true: "file", false: "files"}[files == 1]
-	p.Items = []flow.SweepItem{{Kind: "codex_home", Key: dir, Summary: fmt.Sprintf("shared codex-home at %s (%d %s, %s)", dir, files, noun, size)}}
 	return p
 }
