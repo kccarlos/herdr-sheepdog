@@ -256,8 +256,47 @@ function matchCompound(el, token) {
   return true;
 }
 
+function splitDescendantSelector(sel) {
+  const parts = [];
+  let cur = '';
+  let bracketDepth = 0;
+  let quote = '';
+  const src = String(sel || '').trim();
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (quote) {
+      cur += ch;
+      if (ch === '\\' && i + 1 < src.length) {
+        cur += src[++i];
+      } else if (ch === quote) {
+        quote = '';
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      cur += ch;
+    } else if (ch === '[') {
+      bracketDepth++;
+      cur += ch;
+    } else if (ch === ']') {
+      if (bracketDepth > 0) bracketDepth--;
+      cur += ch;
+    } else if (bracketDepth === 0 && /\s/.test(ch)) {
+      if (cur) {
+        parts.push(cur);
+        cur = '';
+      }
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur) parts.push(cur);
+  return parts;
+}
+
 function matchSingleSelector(el, sel) {
-  const parts = sel.trim().split(/\s+/).filter(Boolean);
+  const parts = splitDescendantSelector(sel);
   if (!parts.length || !matchCompound(el, parts[parts.length - 1])) return false;
   let cur = el.parentElement;
   for (let i = parts.length - 2; i >= 0; i--) {
@@ -454,36 +493,50 @@ function createMiniDocument(htmlSource) {
 
 function createFakeIndexedDB() {
   const dbs = new Map();
+  let pending = 0;
   return {
     dbs,
+    get pending() { return pending; },
     open(name) {
       const req = { result: null, error: null, onupgradeneeded: null, onsuccess: null, onerror: null };
+      pending++;
       queueMicrotask(() => {
-        const isNew = !dbs.has(name);
-        if (isNew) dbs.set(name, new Map());
-        const stores = dbs.get(name);
-        const db = {
-          createObjectStore(s) { if (!stores.has(s)) stores.set(s, new Map()); },
-          transaction(s) {
-            const map = stores.get(s) || new Map();
-            const tx = {
-              oncomplete: null,
-              onerror: null,
-              objectStore() {
-                return {
-                  put(val, key) { map.set(key, val); return { result: key }; },
-                  get(key) { return { result: map.get(key) }; },
-                  delete(key) { map.delete(key); return { result: undefined }; },
-                };
-              },
-            };
-            queueMicrotask(() => tx.oncomplete?.({}));
-            return tx;
-          },
-        };
-        req.result = db;
-        if (isNew) req.onupgradeneeded?.({});
-        req.onsuccess?.({});
+        try {
+          const isNew = !dbs.has(name);
+          if (isNew) dbs.set(name, new Map());
+          const stores = dbs.get(name);
+          const db = {
+            createObjectStore(s) { if (!stores.has(s)) stores.set(s, new Map()); },
+            transaction(s) {
+              const map = stores.get(s) || new Map();
+              const tx = {
+                oncomplete: null,
+                onerror: null,
+                objectStore() {
+                  return {
+                    put(val, key) { map.set(key, val); return { result: key }; },
+                    get(key) { return { result: map.get(key) }; },
+                    delete(key) { map.delete(key); return { result: undefined }; },
+                  };
+                },
+              };
+              pending++;
+              queueMicrotask(() => {
+                try {
+                  tx.oncomplete?.({});
+                } finally {
+                  pending--;
+                }
+              });
+              return tx;
+            },
+          };
+          req.result = db;
+          if (isNew) req.onupgradeneeded?.({});
+          req.onsuccess?.({});
+        } finally {
+          pending--;
+        }
       });
       return req;
     },
@@ -654,37 +707,121 @@ async function bootFactoryPage(t, daemon) {
   const idb = createFakeIndexedDB();
   const origSetTimeout = globalThis.setTimeout;
   const origClearTimeout = globalThis.clearTimeout;
+  const origCrypto = globalThis.crypto;
   const prev = {
     document: Object.getOwnPropertyDescriptor(globalThis, 'document'),
     location: Object.getOwnPropertyDescriptor(globalThis, 'location'),
     indexedDB: Object.getOwnPropertyDescriptor(globalThis, 'indexedDB'),
     fetch: Object.getOwnPropertyDescriptor(globalThis, 'fetch'),
+    crypto: Object.getOwnPropertyDescriptor(globalThis, 'crypto'),
     addEventListener: Object.getOwnPropertyDescriptor(globalThis, 'addEventListener'),
     scrollTo: Object.getOwnPropertyDescriptor(globalThis, 'scrollTo'),
   };
 
+  const pending = new Set();
+  const track = (p) => {
+    if (p && typeof p.then === 'function') {
+      const marker = Promise.resolve(p).then(
+        () => pending.delete(marker),
+        () => pending.delete(marker),
+      );
+      pending.add(marker);
+    }
+    return p;
+  };
+
+  const origSubtle = origCrypto.subtle;
+  const trackedSubtle = new Proxy(origSubtle, {
+    get(target, prop) {
+      const val = Reflect.get(target, prop, target);
+      if (typeof val !== 'function') return val;
+      return (...args) => track(val.apply(target, args));
+    },
+  });
+  const trackedCrypto = new Proxy(origCrypto, {
+    get(target, prop) {
+      if (prop === 'subtle') return trackedSubtle;
+      const val = Reflect.get(target, prop, target);
+      return typeof val === 'function' ? val.bind(target) : val;
+    },
+  });
+
+  let disposed = false;
   let nextPollFn = null;
   let timerSeq = 1000;
+  const activeFakeTimers = new Set();
+  const activeRealTimers = new Set();
   globalThis.setTimeout = (fn, ms, ...args) => {
+    if (disposed) return ++timerSeq;
     if (Number(ms) >= 500) {
-      nextPollFn = fn;
-      return ++timerSeq;
+      const id = ++timerSeq;
+      activeFakeTimers.add(id);
+      nextPollFn = () => {
+        if (disposed || !activeFakeTimers.has(id)) return;
+        activeFakeTimers.delete(id);
+        return fn(...args);
+      };
+      return id;
     }
-    return origSetTimeout(fn, ms, ...args);
+    const id = origSetTimeout(() => {
+      activeRealTimers.delete(id);
+      if (!disposed) fn(...args);
+    }, ms);
+    activeRealTimers.add(id);
+    return id;
   };
   globalThis.clearTimeout = (id) => {
-    if (typeof id === 'number' && id > 1000) return;
+    if (typeof id === 'number' && id > 1000) {
+      activeFakeTimers.delete(id);
+      if (activeFakeTimers.size === 0) nextPollFn = null;
+      return;
+    }
+    activeRealTimers.delete(id);
     origClearTimeout(id);
+  };
+
+  const wrappedFetch = (path, init) => {
+    if (disposed) return Promise.reject(new Error('factory page test disposed'));
+    return track(daemon.fetch(path, init));
   };
 
   Object.defineProperty(globalThis, 'document', { value: doc, configurable: true, writable: true });
   Object.defineProperty(globalThis, 'location', { value: { hash: '', href: 'http://127.0.0.1:7777/factory' }, configurable: true, writable: true });
   Object.defineProperty(globalThis, 'indexedDB', { value: idb, configurable: true, writable: true });
-  Object.defineProperty(globalThis, 'fetch', { value: daemon.fetch, configurable: true, writable: true });
+  Object.defineProperty(globalThis, 'fetch', { value: wrappedFetch, configurable: true, writable: true });
+  Object.defineProperty(globalThis, 'crypto', { value: trackedCrypto, configurable: true, writable: true });
   Object.defineProperty(globalThis, 'addEventListener', { value: () => {}, configurable: true, writable: true });
   Object.defineProperty(globalThis, 'scrollTo', { value: () => {}, configurable: true, writable: true });
 
-  t.after(() => {
+  const hasPendingWork = () =>
+    pending.size > 0 || daemon.inFlight > 0 || idb.pending > 0 || activeRealTimers.size > 0;
+
+  const flush = async () => {
+    const deadline = Date.now() + 5000;
+    let quiet = 0;
+    while (quiet < 3) {
+      while (pending.size > 0) {
+        await Promise.allSettled([...pending]);
+      }
+      await new Promise((r) => origSetTimeout(r, 0));
+      if (hasPendingWork()) {
+        quiet = 0;
+        if (Date.now() > deadline) {
+          throw new Error('flush() timed out waiting for pending async work');
+        }
+        continue;
+      }
+      quiet++;
+    }
+  };
+
+  t.after(async () => {
+    disposed = true;
+    nextPollFn = null;
+    activeFakeTimers.clear();
+    for (const id of activeRealTimers) origClearTimeout(id);
+    activeRealTimers.clear();
+    await flush().catch(() => {});
     globalThis.setTimeout = origSetTimeout;
     globalThis.clearTimeout = origClearTimeout;
     for (const [k, desc] of Object.entries(prev)) {
@@ -692,14 +829,6 @@ async function bootFactoryPage(t, daemon) {
       else delete globalThis[k];
     }
   });
-
-  const flush = async () => {
-    let quiet = 0;
-    for (let i = 0; i < 40 && quiet < 3; i++) {
-      await new Promise((r) => origSetTimeout(r, 0));
-      quiet = daemon.inFlight === 0 ? quiet + 1 : 0;
-    }
-  };
 
   await import(`./app.js?boot=${++appImportSeq}`);
   await flush();
