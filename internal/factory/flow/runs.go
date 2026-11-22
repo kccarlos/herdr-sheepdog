@@ -144,7 +144,7 @@ var RunRows = []Row[RunIn]{
 	rrow("R15", "starting|working", "status:blocked", nil, PhaseBlocked),
 	rrow("R16", "starting|working", EvStatus, func(x RunIn) bool { return x.E.Status == "error" && isRevRole(x.R.Role) }, "ended(error)", RunActStop),
 	rrow("R17", PhaseWorking, EvStatus, nil, PhaseWorking),
-	rrow("R18", PhaseWorking, EvTick, func(x RunIn) bool { return x.idle() && len(x.R.Held) > 0 && !isRevRole(x.R.Role) && !x.R.HandoffSent }, PhaseWorking, RunActSendHeld),
+	rrow("R18", PhaseWorking, EvTick, func(x RunIn) bool { return x.idle() && len(x.R.Held) > 0 && !x.R.HandoffSent }, PhaseWorking, RunActSendHeld),
 	rrow("R19", PhaseWorking, EvTick, RunIn.isR19, "ended(quota)", RunActStop),
 	rrow("R31", PhaseWorking, EvTick, func(x RunIn) bool { return x.R.HandoffSent && x.idle() }, "ended(quota)", RunActStop),
 	rrow("R20", PhaseWorking, EvTick, RunIn.idle, PhaseIdle),

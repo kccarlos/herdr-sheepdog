@@ -1664,6 +1664,10 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	if save {
 		e.saveLocked(id, *s)
 	}
+	facts.Reviewer.AskPending = a.Review.RunID != "" && ((a.Review.Run != nil && len(a.Review.Run.Held) > 0) ||
+		slices.ContainsFunc(s.Asks, func(ask flow.Ask) bool {
+			return ask.Status == flow.AskStatusOpen && ask.AskedBy == flow.RoleReviewer && ask.RunID == a.Review.RunID
+		}))
 	codex := a.Review.Reviewer.CLI == world.CodexCLI
 	if facts.Reviewer.State == flow.RunGone || !codex && facts.Reviewer.State != flow.RunIdle {
 		return false

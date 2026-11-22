@@ -731,7 +731,7 @@ func n29Asks(in In) []string {
 	if age >= time.Duration(in.Settings.ReviewMinutes)*time.Minute {
 		return ensure(in, stopKey)
 	}
-	if r.State == RunIdle && !r.Refused {
+	if r.State == RunIdle && !r.Refused && !r.AskPending {
 		nudgeKey := key(AskNudgeReview, round, tries, h)
 		if !Done(SinceRetry(in.acts()), nudgeKey) {
 			return ensure(in, nudgeKey)
