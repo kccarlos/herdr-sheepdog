@@ -5,11 +5,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1483,5 +1486,1043 @@ func TestEngineSweepUnknownLogsReasonOncePerEpisode(t *testing.T) {
 	sLines = sweepLogLines(t, paths, id)
 	if len(sLines) != 2 {
 		t.Fatalf("sweep unknown log lines after recovery and second failure = %d (%+v), want 2", len(sLines), sLines)
+	}
+}
+
+// Round 2, finding 1 (Codex blocker 1): the Codex-home inventory must run
+// through the bounded herdr-core runner (not direct os.Lstat/filepath.WalkDir
+// in the daemon), without holding the engine lock across it, and timeouts or
+// refusals from herdr-core must surface as unknown with their reason.
+func TestEngineAndDoctorCodexHomeThroughHCWithoutEngineLock(t *testing.T) {
+	const authSecret = "TEST-HC-CODEX-SECRET"
+	fileCountRe := regexp.MustCompile(`\b2\s+files?\b`)
+	size500Re := regexp.MustCompile(`\b500\s*(B|bytes?)\b`)
+
+	setupRepo := func(t *testing.T) (repo, id string, paths Paths) {
+		t.Helper()
+		ctx := context.Background()
+		repo, _ = initGitRepoWithRemote(t)
+		var err error
+		repo, id, err = fixtureGit(t).RepoProject(ctx, repo, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		paths = testPaths(t)
+		return repo, id, paths
+	}
+
+	populate := func(t *testing.T, paths Paths) string {
+		t.Helper()
+		codexHome := filepath.Join(paths.DataDir, "factory", "codex-home")
+		ownerDir := t.TempDir()
+		ownerAuth := filepath.Join(ownerDir, "auth.json")
+		if err := os.WriteFile(ownerAuth, []byte(authSecret+strings.Repeat("x", 4096)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(codexHome, "sessions"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(ownerAuth, filepath.Join(codexHome, "auth.json")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(codexHome, "sessions", "r1.jsonl"), bytes.Repeat([]byte("a"), 300), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(codexHome, "codex.log"), bytes.Repeat([]byte("b"), 200), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return codexHome
+	}
+
+	isCodexExec := func(p hc.ExecParams, codexHome string) bool {
+		if p.Cwd == codexHome {
+			return true
+		}
+		return slices.ContainsFunc(p.Argv, func(a string) bool {
+			return strings.Contains(a, codexHome) || strings.Contains(a, "codex-home")
+		})
+	}
+
+	t.Run("engine sweep reads codex home via bounded hc without holding engine lock", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root bypasses chmod 0000")
+		}
+		ctx := context.Background()
+		repo, id, paths := setupRepo(t)
+		codexHome := populate(t, paths)
+		if err := os.Chmod(codexHome, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(codexHome, 0o700) })
+
+		srv := hctest.New(t)
+		eng := New(paths, hc.NewClient(srv.Path))
+		eng.probeLaunch = func(context.Context, []string) flow.ResolveFacts { return flow.ResolveFacts{} }
+		now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+		eng.Now = func() time.Time { return now }
+
+		client := hc.NewClient(srv.Path)
+		coord, err := client.Run(ctx, hc.RunParams{
+			Name: coordName(id), Cwd: repo, Argv: []string{"true"},
+			Labels: testCoordLabels(id, "run-coord"),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		st := flow.State{
+			Project:  flow.Project{ID: id, Folder: repo, Goal: "codex hc", Started: true, RunID: coord.Address, Run: &flow.RunRecord{ID: "run-coord", Address: coord.Address, Role: flow.RoleCoordinator, State: flow.PhaseWorking, CreatedMS: coord.CreatedMS}},
+			Settings: flow.DefaultSettings(),
+		}
+		if err := SaveState(paths.State(id), st); err != nil {
+			t.Fatal(err)
+		}
+
+		var chmodMu sync.Mutex
+		var codexCalls, unboundedCalls, lockedCalls atomic.Int32
+		srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+			if isCodexExec(p, codexHome) {
+				codexCalls.Add(1)
+				if p.Timeout == nil || *p.Timeout <= 0 {
+					unboundedCalls.Add(1)
+				}
+				if eng.mu.TryLock() {
+					eng.mu.Unlock()
+				} else {
+					lockedCalls.Add(1)
+				}
+				chmodMu.Lock()
+				_ = os.Chmod(codexHome, 0o700)
+				res, execErr := hctest.GitExec(p)
+				_ = os.Chmod(codexHome, 0o000)
+				chmodMu.Unlock()
+				return res, execErr
+			}
+			return hctest.GitExec(p)
+		}
+
+		eng.passProject(ctx, id, false)
+
+		if codexCalls.Load() == 0 {
+			t.Fatalf("codex-home probe bypassed herdr-core (0 machine.exec calls for %s)", codexHome)
+		}
+		if unboundedCalls.Load() != 0 {
+			t.Fatalf("%d codex-home machine.exec call(s) had no bounded timeout", unboundedCalls.Load())
+		}
+		if lockedCalls.Load() != 0 {
+			t.Fatalf("engine lock was held across %d codex-home machine.exec call(s)", lockedCalls.Load())
+		}
+		loaded, err := LoadState(paths.State(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var codexText string
+		for _, w := range loaded.Project.Wakes {
+			if strings.Contains(w.Why+" "+w.Facts, codexHome) {
+				codexText = w.Why + " " + w.Facts
+				break
+			}
+		}
+		if codexText == "" || !fileCountRe.MatchString(codexText) || !size500Re.MatchString(codexText) {
+			t.Fatalf("codex-home wake = %q (all wakes=%+v), want 2 files and 500 B/bytes via hc", codexText, loaded.Project.Wakes)
+		}
+		if strings.Contains(codexText, authSecret) {
+			t.Fatalf("auth secret leaked: %q", codexText)
+		}
+	})
+
+	t.Run("doctor reads codex home via hc", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root bypasses chmod 0000")
+		}
+		ctx := context.Background()
+		repo, _, paths := setupRepo(t)
+		codexHome := populate(t, paths)
+		if err := os.Chmod(codexHome, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(codexHome, 0o700) })
+
+		srv := hctest.New(t)
+		srv.OnRun = func(term hc.Terminal, _ hc.RunParams) { srv.FinishExit(term.Address, "exited", 0) }
+		var chmodMu sync.Mutex
+		var docCalls atomic.Int32
+		srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+			if isCodexExec(p, codexHome) {
+				docCalls.Add(1)
+				chmodMu.Lock()
+				_ = os.Chmod(codexHome, 0o700)
+				res, execErr := hctest.GitExec(p)
+				_ = os.Chmod(codexHome, 0o000)
+				chmodMu.Unlock()
+				return res, execErr
+			}
+			return hctest.GitExec(p)
+		}
+		env := newFakeEnv("hc", "claude", "gh", "codexbar")
+		env.handlers["claude auth"] = func(string, []string, []string) CommandOutput { return CommandOutput{Stdout: `{"loggedIn":true}`} }
+		env.handlers["gh auth"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 0} }
+		env.handlers["git -C"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 1} }
+		env.handlers["codexbar --version"] = func(string, []string, []string) CommandOutput { return CommandOutput{Stdout: "1.0"} }
+
+		rs := Doctor(ctx, DoctorOptions{
+			Folder: repo, HCSocket: srv.Path, DataDir: paths.DataDir, Canary: false,
+			TempDir: t.TempDir(), LookPath: env.lookPath, RunCommand: env.run,
+			VolumeTimeout: time.Second, AuthTimeout: time.Second,
+		})
+		if docCalls.Load() == 0 {
+			t.Fatalf("doctor codex-home probe bypassed herdr-core (0 machine.exec calls)")
+		}
+		var detail string
+		for _, r := range rs {
+			if r.Name == "leftover codex_home" {
+				detail = r.Detail
+			}
+		}
+		if detail == "" || !fileCountRe.MatchString(detail) || !size500Re.MatchString(detail) {
+			t.Fatalf("doctor codex_home = %q (all=%+v), want 2 files and 500 B/bytes", detail, rs)
+		}
+	})
+
+	t.Run("hc timeout or permission refusal yields unknown with reason", func(t *testing.T) {
+		for _, tc := range []struct {
+			name    string
+			res     hc.ExecResult
+			err     error
+			wantSub string
+		}{
+			{
+				name:    "timeout",
+				res:     hc.ExecResult{TimedOut: true},
+				wantSub: "timed out",
+			},
+			{
+				name:    "refused",
+				err:     errors.New("access refused by herdr-core"),
+				wantSub: "access refused",
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				ctx := context.Background()
+				repo, id, paths := setupRepo(t)
+				codexHome := populate(t, paths) // readable locally so direct WalkDir would falsely succeed
+
+				srv := hctest.New(t)
+				srv.OnRun = func(term hc.Terminal, _ hc.RunParams) { srv.FinishExit(term.Address, "exited", 0) }
+				srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+					if isCodexExec(p, codexHome) {
+						return tc.res, tc.err
+					}
+					return hctest.GitExec(p)
+				}
+				client := hc.NewClient(srv.Path)
+				coord, err := client.Run(ctx, hc.RunParams{
+					Name: coordName(id), Cwd: repo, Argv: []string{"true"},
+					Labels: testCoordLabels(id, "run-coord"),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				st := flow.State{
+					Project:  flow.Project{ID: id, Folder: repo, Goal: "codex hc fail", Started: true, RunID: coord.Address, Run: &flow.RunRecord{ID: "run-coord", Address: coord.Address, Role: flow.RoleCoordinator, State: flow.PhaseWorking, CreatedMS: coord.CreatedMS}},
+					Settings: flow.DefaultSettings(),
+				}
+				if err := SaveState(paths.State(id), st); err != nil {
+					t.Fatal(err)
+				}
+				eng := New(paths, client)
+				eng.probeLaunch = func(context.Context, []string) flow.ResolveFacts { return flow.ResolveFacts{} }
+				eng.passProject(ctx, id, false)
+
+				loaded, _ := LoadState(paths.State(id))
+				for _, w := range loaded.Project.Wakes {
+					if strings.Contains(w.Key, "codex_home") {
+						t.Fatalf("failed hc probe emitted codex_home wake: %+v", w)
+					}
+				}
+				var sawEngineUnknown bool
+				for _, l := range sweepLogLines(t, paths, id) {
+					low := strings.ToLower(l.Decision + " " + l.Why)
+					if strings.Contains(low, "codex_home") && strings.Contains(low, "unknown") && strings.Contains(low, tc.wantSub) {
+						sawEngineUnknown = true
+					}
+				}
+				if !sawEngineUnknown {
+					t.Fatalf("engine sweep logs = %+v, want codex_home unknown containing %q", sweepLogLines(t, paths, id), tc.wantSub)
+				}
+
+				env := newFakeEnv("hc", "claude", "gh", "codexbar")
+				env.handlers["claude auth"] = func(string, []string, []string) CommandOutput { return CommandOutput{Stdout: `{"loggedIn":true}`} }
+				env.handlers["gh auth"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 0} }
+				env.handlers["git -C"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 1} }
+				env.handlers["codexbar --version"] = func(string, []string, []string) CommandOutput { return CommandOutput{Stdout: "1.0"} }
+				rs := Doctor(ctx, DoctorOptions{
+					Folder: repo, HCSocket: srv.Path, DataDir: paths.DataDir, Canary: false,
+					TempDir: t.TempDir(), LookPath: env.lookPath, RunCommand: env.run,
+					VolumeTimeout: time.Second, AuthTimeout: time.Second,
+				})
+				var sawDocUnknown bool
+				for _, r := range rs {
+					if r.Name == "sweep codex_home" && r.Status == onboard.Warn && strings.HasPrefix(r.Detail, "unknown: ") && strings.Contains(strings.ToLower(r.Detail), tc.wantSub) {
+						sawDocUnknown = true
+					}
+				}
+				if !sawDocUnknown {
+					t.Fatalf("doctor results = %+v, want Warn 'sweep codex_home' unknown containing %q", rs, tc.wantSub)
+				}
+			})
+		}
+	})
+}
+
+// Round 2, finding 2 (Codex major 2, Carbon minor a & 3): a freshly created
+// Codex home (empty or holding only the auth symlink) is listed with its path,
+// 0 files, and 0 bytes; a symlink or regular file at that location reports
+// unknown with a reason; and Doctor still reports the home when the project
+// folder check fails early.
+func TestSweepAndDoctorEmptyAndNonDirCodexHome(t *testing.T) {
+	const authSecret = "TEST-EMPTY-CODEX-SECRET"
+	zeroFilesRe := regexp.MustCompile(`\b0\s+files?\b`)
+	zeroBytesRe := regexp.MustCompile(`\b0\s*(B|bytes?)\b`)
+
+	fakeDoctorEnv := func() *fakeEnv {
+		env := newFakeEnv("hc", "claude", "gh", "codexbar")
+		env.handlers["claude auth"] = func(string, []string, []string) CommandOutput { return CommandOutput{Stdout: `{"loggedIn":true}`} }
+		env.handlers["gh auth"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 0} }
+		env.handlers["git -C"] = func(string, []string, []string) CommandOutput { return CommandOutput{Exit: 1} }
+		env.handlers["codexbar --version"] = func(string, []string, []string) CommandOutput { return CommandOutput{Stdout: "1.0"} }
+		return env
+	}
+
+	for _, tc := range []struct {
+		name     string
+		authOnly bool
+	}{
+		{"fresh codex home with only auth symlink", true},
+		{"empty codex home directory", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo, id, paths, srv, _, _, _ := setupSweepRepo(t)
+			srv.OnRun = func(term hc.Terminal, _ hc.RunParams) { srv.FinishExit(term.Address, "exited", 0) }
+			codexHome := filepath.Join(paths.DataDir, "factory", "codex-home")
+			if err := os.MkdirAll(codexHome, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if tc.authOnly {
+				ownerAuth := filepath.Join(t.TempDir(), "auth.json")
+				if err := os.WriteFile(ownerAuth, []byte(authSecret+strings.Repeat("x", 4096)), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(ownerAuth, filepath.Join(codexHome, "auth.json")); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			eng := newGitTestEngine(t, paths, hc.NewClient(srv.Path))
+			eng.passProject(ctx, id, false)
+
+			st, err := LoadState(paths.State(id))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wakeText string
+			for _, w := range st.Project.Wakes {
+				if strings.Contains(w.Why+" "+w.Facts, codexHome) {
+					wakeText = w.Why + " " + w.Facts
+					break
+				}
+			}
+			if wakeText == "" || !zeroFilesRe.MatchString(wakeText) || !zeroBytesRe.MatchString(wakeText) {
+				t.Fatalf("codex home wake = %q (all=%+v), want path %s with 0 files and 0 B/bytes", wakeText, st.Project.Wakes, codexHome)
+			}
+			if strings.Contains(wakeText, authSecret) {
+				t.Fatalf("auth secret leaked: %q", wakeText)
+			}
+
+			env := fakeDoctorEnv()
+			rs := Doctor(ctx, DoctorOptions{
+				Folder: repo, HCSocket: srv.Path, DataDir: paths.DataDir, Canary: false,
+				TempDir: t.TempDir(), LookPath: env.lookPath, RunCommand: env.run,
+				VolumeTimeout: time.Second, AuthTimeout: time.Second,
+			})
+			var docDetail string
+			for _, r := range rs {
+				if r.Name == "leftover codex_home" {
+					docDetail = r.Detail
+				}
+			}
+			if docDetail == "" || !strings.Contains(docDetail, codexHome) || !zeroFilesRe.MatchString(docDetail) || !zeroBytesRe.MatchString(docDetail) {
+				t.Fatalf("doctor leftover codex_home = %q (all=%+v), want path %s with 0 files and 0 B/bytes", docDetail, rs, codexHome)
+			}
+		})
+	}
+
+	for _, kind := range []string{"symlink", "regular file"} {
+		t.Run("non-directory codex home ("+kind+") reports unknown with reason", func(t *testing.T) {
+			ctx := context.Background()
+			repo, id, paths, srv, _, _, _ := setupSweepRepo(t)
+			srv.OnRun = func(term hc.Terminal, _ hc.RunParams) { srv.FinishExit(term.Address, "exited", 0) }
+			codexHome := filepath.Join(paths.DataDir, "factory", "codex-home")
+			if err := os.MkdirAll(filepath.Dir(codexHome), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if kind == "symlink" {
+				if err := os.Symlink(t.TempDir(), codexHome); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.WriteFile(codexHome, []byte("not a directory\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			eng := newGitTestEngine(t, paths, hc.NewClient(srv.Path))
+			eng.passProject(ctx, id, false)
+
+			st, _ := LoadState(paths.State(id))
+			for _, w := range st.Project.Wakes {
+				if strings.Contains(w.Key, "codex_home") {
+					t.Fatalf("non-directory codex_home emitted leftover wake: %+v", w)
+				}
+			}
+			var sawUnknown bool
+			for _, l := range sweepLogLines(t, paths, id) {
+				low := strings.ToLower(l.Decision + " " + l.Why)
+				if strings.Contains(low, "codex_home") && strings.Contains(low, "unknown:") && strings.TrimSpace(strings.SplitN(low, "unknown:", 2)[1]) != "" {
+					sawUnknown = true
+				}
+			}
+			if !sawUnknown {
+				t.Fatalf("engine sweep log = %+v, want codex_home unknown with reason", sweepLogLines(t, paths, id))
+			}
+
+			env := fakeDoctorEnv()
+			rs := Doctor(ctx, DoctorOptions{
+				Folder: repo, HCSocket: srv.Path, DataDir: paths.DataDir, Canary: false,
+				TempDir: t.TempDir(), LookPath: env.lookPath, RunCommand: env.run,
+				VolumeTimeout: time.Second, AuthTimeout: time.Second,
+			})
+			var docWarn bool
+			for _, r := range rs {
+				if r.Name == "leftover codex_home" {
+					t.Fatalf("doctor reported non-directory codex_home as leftover instead of unknown: %+v", r)
+				}
+				if r.Name == "sweep codex_home" && r.Status == onboard.Warn && strings.HasPrefix(r.Detail, "unknown: ") && strings.TrimSpace(strings.TrimPrefix(r.Detail, "unknown: ")) != "" {
+					docWarn = true
+				}
+			}
+			if !docWarn {
+				t.Fatalf("doctor results = %+v, want Warn 'sweep codex_home' with 'unknown: <reason>'", rs)
+			}
+		})
+	}
+
+	t.Run("doctor still reports codex home when project folder check fails early", func(t *testing.T) {
+		ctx := context.Background()
+		makeHome := func(t *testing.T) (Paths, string) {
+			t.Helper()
+			paths := testPaths(t)
+			codexHome := filepath.Join(paths.DataDir, "factory", "codex-home")
+			if err := os.MkdirAll(codexHome, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(codexHome, "note.log"), bytes.Repeat([]byte("z"), 100), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return paths, codexHome
+		}
+
+		t.Run("non-git folder", func(t *testing.T) {
+			paths, codexHome := makeHome(t)
+			srv := hctest.New(t)
+			srv.OnExec = hctest.GitExec
+			srv.OnRun = func(term hc.Terminal, _ hc.RunParams) { srv.FinishExit(term.Address, "exited", 0) }
+			env := fakeDoctorEnv()
+			rs := Doctor(ctx, DoctorOptions{
+				Folder: t.TempDir(), HCSocket: srv.Path, DataDir: paths.DataDir, Canary: false,
+				TempDir: t.TempDir(), LookPath: env.lookPath, RunCommand: env.run,
+				VolumeTimeout: time.Second, AuthTimeout: time.Second,
+			})
+			var found bool
+			for _, r := range rs {
+				if r.Name == "leftover codex_home" && strings.Contains(r.Detail, codexHome) {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("doctor omitted codex_home on non-git folder: %+v", rs)
+			}
+		})
+
+		t.Run("project volume check failed", func(t *testing.T) {
+			paths, codexHome := makeHome(t)
+			notDir := filepath.Join(t.TempDir(), "not-a-dir.txt")
+			if err := os.WriteFile(notDir, []byte("file\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			srv := hctest.New(t)
+			srv.OnExec = hctest.GitExec
+			srv.OnRun = func(term hc.Terminal, _ hc.RunParams) { srv.FinishExit(term.Address, "exited", 2) }
+			env := fakeDoctorEnv()
+			rs := Doctor(ctx, DoctorOptions{
+				Folder: notDir, HCSocket: srv.Path, DataDir: paths.DataDir, Canary: false,
+				TempDir: t.TempDir(), LookPath: env.lookPath, RunCommand: env.run,
+				VolumeTimeout: time.Second, AuthTimeout: time.Second,
+			})
+			var volFailed, found bool
+			for _, r := range rs {
+				if r.Name == "project volume" && r.Status == onboard.Fail {
+					volFailed = true
+				}
+				if r.Name == "leftover codex_home" && strings.Contains(r.Detail, codexHome) {
+					found = true
+				}
+			}
+			if !volFailed {
+				t.Fatalf("expected project volume check to fail: %+v", rs)
+			}
+			if !found {
+				t.Fatalf("doctor omitted codex_home when project volume check failed: %+v", rs)
+			}
+		})
+	})
+}
+
+// Round 2, finding 3 (Codex major 3, Carbon major 1B): one episode per probe
+// until a success, even when failure texts alternate; and no-origin /
+// not-a-git-repository failures go through the same persisted episode path.
+func TestEngineSweepUnknownOneEpisodeUntilSuccess(t *testing.T) {
+	setupStartedRepo := func(t *testing.T) (repo, bare, id string, paths Paths, srv *hctest.Server) {
+		t.Helper()
+		ctx := context.Background()
+		bare = filepath.Join(t.TempDir(), "remote.git")
+		repo = filepath.Join(t.TempDir(), "repo")
+		gitIn(t, t.TempDir(), "init", "--bare", "--initial-branch=main", bare)
+		gitIn(t, t.TempDir(), "clone", bare, repo)
+		gitIn(t, repo, "config", "user.email", "test@example.com")
+		gitIn(t, repo, "config", "user.name", "Test")
+		if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("init\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, repo, "add", "a.txt")
+		gitIn(t, repo, "commit", "-m", "init")
+		gitIn(t, repo, "push", "-u", "origin", "main")
+		gitIn(t, repo, "remote", "set-head", "origin", "main")
+		var err error
+		repo, id, err = fixtureGit(t).RepoProject(ctx, repo, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		paths = testPaths(t)
+		srv = hctest.New(t)
+		srv.OnExec = hctest.GitExec
+		client := hc.NewClient(srv.Path)
+		coord, err := client.Run(ctx, hc.RunParams{
+			Name: coordName(id), Cwd: repo, Argv: []string{"true"},
+			Labels: testCoordLabels(id, "run-coord"),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		st := flow.State{
+			Project:  flow.Project{ID: id, Folder: repo, Goal: "episode test", Started: true, RunID: coord.Address, Run: &flow.RunRecord{ID: "run-coord", Address: coord.Address, Role: flow.RoleCoordinator, State: flow.PhaseWorking, CreatedMS: coord.CreatedMS}},
+			Settings: flow.DefaultSettings(),
+		}
+		if err := SaveState(paths.State(id), st); err != nil {
+			t.Fatal(err)
+		}
+		return repo, bare, id, paths, srv
+	}
+
+	startErrMsgProxy := func(t *testing.T, upstream string, msg *atomic.Value) string {
+		t.Helper()
+		dir, err := os.MkdirTemp("", "hce")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		sock := filepath.Join(dir, "hc.sock")
+		ln, err := net.Listen("unix", sock)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = ln.Close() })
+		go func() {
+			for {
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				go func(c net.Conn) {
+					defer func() { _ = c.Close() }()
+					line, err := bufio.NewReader(c).ReadBytes('\n')
+					if err != nil {
+						return
+					}
+					var req struct {
+						ID     uint64 `json:"id"`
+						Method string `json:"method"`
+					}
+					if json.Unmarshal(line, &req) != nil {
+						return
+					}
+					if errText, _ := msg.Load().(string); req.Method == "terminal.list" && errText != "" {
+						_ = json.NewEncoder(c).Encode(map[string]any{
+							"jsonrpc": "2.0",
+							"id":      req.ID,
+							"error":   map[string]any{"code": -32000, "message": errText},
+						})
+						return
+					}
+					up, err := net.Dial("unix", upstream)
+					if err != nil {
+						return
+					}
+					defer func() { _ = up.Close() }()
+					if _, err := up.Write(line); err != nil {
+						return
+					}
+					if reply, err := bufio.NewReader(up).ReadBytes('\n'); err == nil {
+						_, _ = c.Write(reply)
+					}
+				}(conn)
+			}
+		}()
+		return sock
+	}
+
+	t.Run("alternating failure texts across three sweeps log once until recovery", func(t *testing.T) {
+		ctx := context.Background()
+		_, _, id, paths, srv := setupStartedRepo(t)
+		var errMsg atomic.Value
+		proxySock := startErrMsgProxy(t, srv.Path, &errMsg)
+
+		var logBuf bytes.Buffer
+		now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+		eng := newGitTestEngine(t, paths, hc.NewClient(proxySock))
+		eng.Now = func() time.Time { return now }
+		eng.Log = logging.NewJSONLLogger(&logBuf)
+
+		for i, text := range []string{"connection refused", "deadline exceeded", "connection refused"} {
+			errMsg.Store(text)
+			if i > 0 {
+				now = now.Add(5 * time.Minute)
+			}
+			eng.passProject(ctx, id, false)
+			if got := len(sweepLogLines(t, paths, id)); got != 1 {
+				t.Fatalf("after sweep %d (%q): sweep log lines = %d, want 1 (%+v)", i+1, text, got, sweepLogLines(t, paths, id))
+			}
+			if n := strings.Count(logBuf.String(), "factory.sweep_unknown"); n != 1 {
+				t.Fatalf("after sweep %d (%q): factory.sweep_unknown events = %d, want 1", i+1, text, n)
+			}
+		}
+
+		// Successful observation clears the episode.
+		errMsg.Store("")
+		now = now.Add(5 * time.Minute)
+		eng.passProject(ctx, id, false)
+
+		// Next failure starts a new episode and logs once more.
+		errMsg.Store("deadline exceeded")
+		now = now.Add(5 * time.Minute)
+		eng.passProject(ctx, id, false)
+		if got := len(sweepLogLines(t, paths, id)); got != 2 {
+			t.Fatalf("after recovery and second outage: sweep log lines = %d, want 2", got)
+		}
+		if n := strings.Count(logBuf.String(), "factory.sweep_unknown"); n != 2 {
+			t.Fatalf("after recovery and second outage: factory.sweep_unknown events = %d, want 2", n)
+		}
+	})
+
+	t.Run("no-origin outage uses persisted episode path across restart and recovery", func(t *testing.T) {
+		ctx := context.Background()
+		repo, bare, id, paths, srv := setupStartedRepo(t)
+		gitIn(t, repo, "remote", "remove", "origin")
+
+		var logBuf1 bytes.Buffer
+		now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+		eng1 := newGitTestEngine(t, paths, hc.NewClient(srv.Path))
+		eng1.Now = func() time.Time { return now }
+		eng1.Log = logging.NewJSONLLogger(&logBuf1)
+
+		// Pass 1: logs one unknown sweep line and one factory.sweep_unknown event, persisted in state.json.
+		eng1.passProject(ctx, id, false)
+		sLines := sweepLogLines(t, paths, id)
+		if len(sLines) != 1 || !strings.Contains(strings.ToLower(sLines[0].Decision+" "+sLines[0].Why), "local_base") {
+			t.Fatalf("pass 1 sweep log lines = %+v, want 1 local_base unknown line", sLines)
+		}
+		if n := strings.Count(logBuf1.String(), "factory.sweep_unknown"); n != 1 {
+			t.Fatalf("pass 1 factory.sweep_unknown events = %d, want 1", n)
+		}
+		st, _ := LoadState(paths.State(id))
+		if st.Project.SweepUnknown["local_base"] == "" {
+			t.Fatalf("pass 1 did not persist SweepUnknown[local_base]: %+v", st.Project.SweepUnknown)
+		}
+
+		// Restart during the same outage: logs nothing new.
+		var logBuf2 bytes.Buffer
+		now = now.Add(time.Minute)
+		eng2 := newGitTestEngine(t, paths, hc.NewClient(srv.Path))
+		eng2.Now = func() time.Time { return now }
+		eng2.Log = logging.NewJSONLLogger(&logBuf2)
+		eng2.passProject(ctx, id, false)
+		if got := len(sweepLogLines(t, paths, id)); got != 1 {
+			t.Fatalf("restart during same outage added sweep log line: %d", got)
+		}
+		if n := strings.Count(logBuf2.String(), "factory.sweep_unknown"); n != 0 {
+			t.Fatalf("restart during same outage re-emitted factory.sweep_unknown: %s", logBuf2.String())
+		}
+
+		// Recover origin -> ends the episode.
+		gitIn(t, repo, "remote", "add", "origin", bare)
+		gitIn(t, repo, "fetch", "origin")
+		gitIn(t, repo, "remote", "set-head", "origin", "main")
+		now = now.Add(5 * time.Minute)
+		eng2.passProject(ctx, id, false)
+		st, _ = LoadState(paths.State(id))
+		if st.Project.SweepUnknown["local_base"] != "" {
+			t.Fatalf("recovery did not clear SweepUnknown[local_base]: %+v", st.Project.SweepUnknown)
+		}
+
+		// Remove origin again on the same daemon -> new episode logs again.
+		gitIn(t, repo, "remote", "remove", "origin")
+		now = now.Add(5 * time.Minute)
+		eng2.passProject(ctx, id, false)
+		if got := len(sweepLogLines(t, paths, id)); got != 2 {
+			t.Fatalf("second no-origin episode sweep log lines = %d, want 2", got)
+		}
+		if n := strings.Count(logBuf2.String(), "factory.sweep_unknown"); n != 1 {
+			t.Fatalf("second no-origin episode factory.sweep_unknown events = %d, want 1", n)
+		}
+	})
+
+	t.Run("not-a-git-repository outage uses persisted episode path across restart and recovery", func(t *testing.T) {
+		ctx := context.Background()
+		repo, _, id, paths, srv := setupStartedRepo(t)
+		gitDir := filepath.Join(repo, ".git")
+		hiddenGitDir := filepath.Join(repo, ".git.hidden")
+		if err := os.Rename(gitDir, hiddenGitDir); err != nil {
+			t.Fatal(err)
+		}
+
+		var logBuf1 bytes.Buffer
+		now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+		eng1 := newGitTestEngine(t, paths, hc.NewClient(srv.Path))
+		eng1.Now = func() time.Time { return now }
+		eng1.Log = logging.NewJSONLLogger(&logBuf1)
+
+		eng1.passProject(ctx, id, false)
+		if got := len(sweepLogLines(t, paths, id)); got != 1 {
+			t.Fatalf("pass 1 sweep log lines = %d, want 1 (%+v)", got, sweepLogLines(t, paths, id))
+		}
+		if n := strings.Count(logBuf1.String(), "factory.sweep_unknown"); n == 0 {
+			t.Fatalf("pass 1 missing factory.sweep_unknown event")
+		}
+		st, _ := LoadState(paths.State(id))
+		if len(st.Project.SweepUnknown) == 0 {
+			t.Fatalf("pass 1 did not persist SweepUnknown for not-a-git-repository")
+		}
+
+		// Restart during the same outage: logs nothing new.
+		var logBuf2 bytes.Buffer
+		now = now.Add(time.Minute)
+		eng2 := newGitTestEngine(t, paths, hc.NewClient(srv.Path))
+		eng2.Now = func() time.Time { return now }
+		eng2.Log = logging.NewJSONLLogger(&logBuf2)
+		eng2.passProject(ctx, id, false)
+		if got := len(sweepLogLines(t, paths, id)); got != 1 {
+			t.Fatalf("restart during same outage added sweep log line: %d", got)
+		}
+		if n := strings.Count(logBuf2.String(), "factory.sweep_unknown"); n != 0 {
+			t.Fatalf("restart during same outage re-emitted factory.sweep_unknown: %s", logBuf2.String())
+		}
+
+		// Restore .git -> ends the episode.
+		if err := os.Rename(hiddenGitDir, gitDir); err != nil {
+			t.Fatal(err)
+		}
+		now = now.Add(5 * time.Minute)
+		eng2.passProject(ctx, id, false)
+		st, _ = LoadState(paths.State(id))
+		if len(st.Project.SweepUnknown) != 0 {
+			t.Fatalf("recovery did not clear SweepUnknown: %+v", st.Project.SweepUnknown)
+		}
+
+		// Hide .git again -> new episode logs again.
+		if err := os.Rename(gitDir, hiddenGitDir); err != nil {
+			t.Fatal(err)
+		}
+		now = now.Add(5 * time.Minute)
+		eng2.passProject(ctx, id, false)
+		if got := len(sweepLogLines(t, paths, id)); got != 2 {
+			t.Fatalf("second not-a-git-repository episode sweep log lines = %d, want 2", got)
+		}
+		if n := strings.Count(logBuf2.String(), "factory.sweep_unknown"); n == 0 {
+			t.Fatalf("second not-a-git-repository episode did not emit factory.sweep_unknown")
+		}
+	})
+}
+
+// Round 2, finding 4 (Codex major 4): a retained worktree moved away without
+// `git worktree prune` (listed as prunable by git) counts as gone so its
+// episode ends, and reappearing later starts a new episode.
+func TestEngineSweepPrunableWorktreeEndsEpisodeAndReappearsAsNew(t *testing.T) {
+	ctx := context.Background()
+	repo, id, paths, srv, _, wt2Path, _ := setupSweepRepo(t)
+	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	eng := newGitTestEngine(t, paths, hc.NewClient(srv.Path))
+	eng.Now = func() time.Time { return now }
+
+	// Pass 1: retained worktree wt2Path is reported.
+	eng.passProject(ctx, id, false)
+	st, _ := LoadState(paths.State(id))
+	if !hasWakeMatching(st.Project.Wakes, "sweep@worktree@", wt2Path) {
+		t.Fatalf("pass 1 missing worktree wake for %s: %+v", wt2Path, st.Project.Wakes)
+	}
+	logsAfterPass1 := len(sweepLogLines(t, paths, id))
+	clearProjectWakes(t, paths, id)
+
+	// Move wt2Path away without pruning git worktree metadata.
+	movedPath := wt2Path + ".moved"
+	if err := os.Rename(wt2Path, movedPath); err != nil {
+		t.Fatal(err)
+	}
+	if listOut := gitIn(t, repo, "worktree", "list", "--porcelain"); !strings.Contains(listOut, "prunable") {
+		t.Fatalf("expected git worktree list to show prunable entry:\n%s", listOut)
+	}
+
+	// Pass 2 (+5m): prunable worktree counts as gone, ending its episode while leaving git registration untouched.
+	now = now.Add(5 * time.Minute)
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	for k := range st.Project.SweepItems {
+		if strings.Contains(k, wt2Path) {
+			t.Fatalf("stale prunable worktree kept episode active in SweepItems: %+v", st.Project.SweepItems)
+		}
+	}
+	if listOut := gitIn(t, repo, "worktree", "list", "--porcelain"); !strings.Contains(listOut, "prunable") {
+		t.Fatalf("sweep pruned git worktree metadata instead of leaving it untouched:\n%s", listOut)
+	}
+
+	// Move wt2Path back: new episode must report again!
+	if err := os.Rename(movedPath, wt2Path); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(5 * time.Minute)
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	if !hasWakeMatching(st.Project.Wakes, "sweep@worktree@", wt2Path) {
+		t.Fatalf("reappeared worktree %s did not report as a new episode (wakes=%+v)", wt2Path, st.Project.Wakes)
+	}
+	if len(sweepLogLines(t, paths, id)) <= logsAfterPass1 {
+		t.Fatalf("reappeared worktree did not append a new sweep log line")
+	}
+}
+
+// Round 2, finding 5 (Codex major 5): while the coordinator stays busy, an item
+// that recovers and recurs at the same key delivers the new episode's facts to
+// the coordinator when it becomes idle, rather than swallowing the new wake.
+func TestEngineSweepHeldWakeDoesNotSwallowNextEpisode(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := initGitRepoWithRemote(t)
+	var err error
+	repo, id, err := fixtureGit(t).RepoProject(ctx, repo, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := testPaths(t)
+	srv := hctest.New(t)
+	srv.OnExec = hctest.GitExec
+	client := hc.NewClient(srv.Path)
+	coord, err := client.Run(ctx, hc.RunParams{
+		Name: coordName(id), Cwd: repo, Argv: []string{"true"},
+		Labels: testCoordLabels(id, "run-coord"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.SetStatus(coord.Address, &hc.Status{App: "claude-code", State: "working"})
+
+	wtPath := paths.Worktree(id, "T9", 1)
+	if err := os.MkdirAll(filepath.Dir(wtPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, repo, "worktree", "add", "-b", "task/orphan-ep1", wtPath, "origin/main")
+
+	t0 := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	now := t0
+	st := flow.State{
+		Project: flow.Project{
+			ID: id, Folder: repo, Goal: "held wake recurrence", Started: true, RunID: coord.Address,
+			Run: &flow.RunRecord{ID: "run-coord", Address: coord.Address, Role: flow.RoleCoordinator, State: flow.PhaseWorking, CreatedMS: coord.CreatedMS},
+		},
+		Settings: flow.DefaultSettings(),
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	eng := newGitTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return now }
+
+	// Episode 1 at t0 while coordinator is busy -> wake held with task/orphan-ep1.
+	eng.passProject(ctx, id, false)
+	if len(sendsTo(t, srv.Requests(), coord.Address)) != 0 {
+		t.Fatalf("coordinator received wake while working")
+	}
+
+	// Recover at t0+5m while coordinator stays busy.
+	gitIn(t, repo, "worktree", "remove", "--force", wtPath)
+	now = t0.Add(5 * time.Minute)
+	eng.passProject(ctx, id, false)
+
+	// Recur at the same path with new branch/facts at t2 while coordinator stays busy.
+	t2 := t0.Add(10 * time.Minute)
+	now = t2
+	gitIn(t, repo, "worktree", "add", "-b", "task/orphan-ep2", wtPath, "origin/main")
+	eng.passProject(ctx, id, false)
+	if len(sendsTo(t, srv.Requests(), coord.Address)) != 0 {
+		t.Fatalf("coordinator received wake while still working")
+	}
+
+	// Coordinator becomes idle past idle_grace_seconds and receives held wakes.
+	now = t2.Add(time.Minute)
+	srv.SetStatus(coord.Address, &hc.Status{App: "claude-code", State: "idle"})
+	term, err := client.Get(ctx, coord.Address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pastMS := uint64(now.Add(-time.Minute).UnixMilli())
+	term.StatusMS = &pastMS
+	srv.Add(term)
+	for range 3 {
+		eng.passProject(ctx, id, false)
+	}
+
+	sends := sendsTo(t, srv.Requests(), coord.Address)
+	if len(sends) == 0 {
+		t.Fatalf("idle coordinator received no wake")
+	}
+	joined := strings.Join(sends, "\n")
+	if !strings.Contains(joined, "task/orphan-ep2") || !strings.Contains(joined, t2.Format(time.RFC3339)) {
+		t.Fatalf("coordinator did not receive new episode facts (task/orphan-ep2 at %s):\n%s", t2.Format(time.RFC3339), joined)
+	}
+}
+
+// Round 2, finding 6 (Codex minor 6, Carbon minor 2): persisted sweep_minutes
+// of -1, 0, or 61 on a started project is clamped to 1–60 or refused at load
+// per design 10.1, never running every pass or silently becoming 5 or 61.
+func TestEngineSweepIntervalBoundsAtLoadOrUse(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		val  int
+	}{
+		{"negative", -1},
+		{"explicit zero", 0},
+		{"above max", 61},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo, id, paths, srv, _, _, _ := setupSweepRepo(t)
+			setSweepMinutesInState(t, paths.State(id), tc.val)
+
+			now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+			eng := newGitTestEngine(t, paths, hc.NewClient(srv.Path))
+			eng.Now = func() time.Time { return now }
+
+			_, loadErr := LoadState(paths.State(id))
+			if loadErr != nil {
+				// Refused at load: passProject must not sweep either.
+				eng.passProject(ctx, id, false)
+				now = now.Add(15 * time.Second)
+				eng.passProject(ctx, id, false)
+				if lines := sweepLogLines(t, paths, id); len(lines) != 0 {
+					t.Fatalf("refused state still swept: %+v", lines)
+				}
+				return
+			}
+
+			// Clamped at load or use: initial sweep runs at t0.
+			eng.passProject(ctx, id, false)
+
+			// At +15s: must NEVER sweep on every pass.
+			gitIn(t, repo, "branch", "task/at-15s")
+			now = now.Add(15 * time.Second)
+			eng.passProject(ctx, id, false)
+			st, err := LoadState(paths.State(id))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hasWakeMatching(st.Project.Wakes, "sweep@branch@", "task/at-15s") {
+				t.Fatalf("sweep_minutes=%d ran at +15s (every pass): %+v", tc.val, st.Project.Wakes)
+			}
+
+			switch tc.val {
+			case 0:
+				// Explicit 0 clamped to SweepMin (1m) must sweep at +1m, not wait 5m.
+				gitIn(t, repo, "branch", "task/at-1m")
+				now = now.Add(45 * time.Second)
+				eng.passProject(ctx, id, false)
+				st, _ = LoadState(paths.State(id))
+				if !hasWakeMatching(st.Project.Wakes, "sweep@branch@", "task/at-1m") {
+					t.Fatalf("sweep_minutes=0 did not clamp to 1m (did not run at +1m): %+v", st.Project.Wakes)
+				}
+			case 61:
+				// 61 clamped to SweepMax (60m) must sweep at +60m, not wait 61m.
+				gitIn(t, repo, "branch", "task/at-60m")
+				now = now.Add(60*time.Minute - 15*time.Second)
+				eng.passProject(ctx, id, false)
+				st, _ = LoadState(paths.State(id))
+				if !hasWakeMatching(st.Project.Wakes, "sweep@branch@", "task/at-60m") {
+					t.Fatalf("sweep_minutes=61 did not clamp to 60m (did not run at +60m): %+v", st.Project.Wakes)
+				}
+			}
+		})
+	}
+}
+
+// Round 2, finding 8 (Codex minor 8): starting an already-running project with
+// a new goal keeps active sweep episodes, so a still-retained worktree is not
+// re-reported during the immediate sweep.
+func TestEngineStartWithNewGoalKeepsActiveSweepEpisodes(t *testing.T) {
+	ctx := context.Background()
+	repo, id, paths, srv, _, wt2Path, _ := setupSweepRepo(t)
+	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	eng := newGitTestEngine(t, paths, hc.NewClient(srv.Path))
+	eng.Now = func() time.Time { return now }
+
+	// Pass 1: retained worktree wt2Path is reported.
+	eng.passProject(ctx, id, false)
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasWakeMatching(st.Project.Wakes, "sweep@worktree@", wt2Path) {
+		t.Fatalf("pass 1 missing retained worktree wake: %+v", st.Project.Wakes)
+	}
+	clearProjectWakes(t, paths, id)
+	logsBeforeStart := len(sweepLogLines(t, paths, id))
+
+	// Owner starts the already-running project with a new goal.
+	if err := eng.Start(repo, "new goal while worktree still retained", 0); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	gitIn(t, repo, "branch", "task/canary-after-start")
+
+	// Immediate pass runs sweep (since Start resets lastSweep) and finds the canary,
+	// but must NOT re-report the still-retained wt2Path.
+	now = now.Add(10 * time.Second)
+	eng.passProject(ctx, id, false)
+	st, _ = LoadState(paths.State(id))
+	if !hasWakeMatching(st.Project.Wakes, "sweep@branch@", "task/canary-after-start") {
+		t.Fatalf("immediate sweep after Start did not run (wakes=%+v)", st.Project.Wakes)
+	}
+	if hasWakeMatching(st.Project.Wakes, "sweep@worktree@", wt2Path) {
+		t.Fatalf("Start with new goal re-reported still-retained worktree %s: %+v", wt2Path, st.Project.Wakes)
+	}
+	for _, l := range sweepLogLines(t, paths, id)[logsBeforeStart:] {
+		if strings.Contains(l.Decision+" "+l.Why, wt2Path) {
+			t.Fatalf("Start with new goal re-logged still-retained worktree %s: %+v", wt2Path, l)
+		}
 	}
 }

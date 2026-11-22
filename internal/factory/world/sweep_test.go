@@ -2,9 +2,12 @@ package world
 
 import (
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -687,5 +690,146 @@ func TestSweepLocalBaseNamesComparedRefAndUnknownReason(t *testing.T) {
 	}
 	if !strings.Contains(lb.Unknown, "refs/heads/main") && !strings.Contains(strings.ToLower(lb.Unknown), "local") && !strings.Contains(lb.Unknown, "main") {
 		t.Errorf("local_base Unknown = %q, want plain reason naming missing local main branch", lb.Unknown)
+	}
+}
+
+// Round 2, finding 7 (Codex minor 7): the base-ahead count is computed from
+// the two resolved commits so a ref moving between lookup and rev-list cannot
+// make the count disagree with the named SHAs.
+func TestSweepLocalBaseCountsResolvedCommits(t *testing.T) {
+	setup := func(t *testing.T) (repo, c0, c1, c2 string) {
+		t.Helper()
+		bare := filepath.Join(t.TempDir(), "remote.git")
+		repo = filepath.Join(t.TempDir(), "repo")
+		mustGit(t, t.TempDir(), "init", "--bare", "--initial-branch=main", bare)
+		mustGit(t, t.TempDir(), "clone", bare, repo)
+		mustGit(t, repo, "config", "user.email", "test@example.com")
+		mustGit(t, repo, "config", "user.name", "Test")
+		if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("init\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		mustGit(t, repo, "add", "a.txt")
+		mustGit(t, repo, "commit", "-m", "init")
+		mustGit(t, repo, "push", "-u", "origin", "main")
+		mustGit(t, repo, "remote", "set-head", "origin", "main")
+		c0 = mustGit(t, repo, "rev-parse", "refs/remotes/origin/main")
+
+		if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("ahead 1\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		mustGit(t, repo, "add", "a.txt")
+		mustGit(t, repo, "commit", "-m", "ahead 1")
+		c1 = mustGit(t, repo, "rev-parse", "refs/heads/main")
+
+		if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("ahead 2\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		mustGit(t, repo, "add", "a.txt")
+		mustGit(t, repo, "commit", "-m", "ahead 2")
+		c2 = mustGit(t, repo, "rev-parse", "refs/heads/main")
+
+		mustGit(t, repo, "reset", "--hard", c1)
+		return repo, c0, c1, c2
+	}
+
+	for _, tc := range []struct {
+		name      string
+		targetRef string
+		newSHA    func(c1, c2 string) string
+	}{
+		{"local ref advances before rev-list", "refs/heads/main", func(_, c2 string) string { return c2 }},
+		{"tracking ref advances before rev-list", "refs/remotes/origin/main", func(c1, _ string) string { return c1 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo, c0, c1, c2 := setup(t)
+			target := tc.newSHA(c1, c2)
+
+			srv := hctest.New(t)
+			var once sync.Once
+			srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+				if len(p.Argv) >= 2 && p.Argv[0] == "git" && p.Argv[1] == "rev-list" {
+					once.Do(func() {
+						if out, err := exec.Command("git", "-C", repo, "update-ref", tc.targetRef, target).CombinedOutput(); err != nil {
+							t.Errorf("update-ref %s: %v: %s", tc.targetRef, err, out)
+						}
+					})
+				}
+				return hctest.GitExec(p)
+			}
+			g := NewGit(hc.NewClient(srv.Path), nil, nil)
+
+			var lb flow.SweepProbe
+			for _, p := range g.Sweep(ctx, nil, repo, "", flow.State{Project: flow.Project{ID: "proj-lb-sha", Folder: repo}}) {
+				if p.Probe == "local_base" {
+					lb = p
+				}
+			}
+			if lb.Unknown != "" || len(lb.Items) != 1 {
+				t.Fatalf("local_base = %+v, want 1 item matching resolved SHAs %s..%s", lb, c0[:7], c1[:7])
+			}
+			it := lb.Items[0]
+			if it.Key != c1 || !strings.Contains(it.Summary, "1 commit ahead") || !strings.Contains(it.Summary, "refs/remotes/origin/main") || !strings.Contains(it.Summary, c0[:7]) {
+				t.Fatalf("local_base item = %+v, want Key=%s and '1 commit ahead' of refs/remotes/origin/main (%s)", it, c1, c0[:7])
+			}
+		})
+	}
+}
+
+// Round 2, finding 9 (Carbon major 2): removing remote.origin from git config
+// while leaving refs/remotes/origin/* intact must report unknown (ErrNoOrigin),
+// matching remoteBaseCommit instead of reporting clean or stale ahead counts.
+func TestSweepLocalBaseRemovedOriginWithLeftoverRefs(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		ahead bool
+	}{
+		{"local main matches leftover remote ref", false},
+		{"local main ahead of leftover remote ref", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			bare := filepath.Join(t.TempDir(), "remote.git")
+			repo := filepath.Join(t.TempDir(), "repo")
+			mustGit(t, t.TempDir(), "init", "--bare", "--initial-branch=main", bare)
+			mustGit(t, t.TempDir(), "clone", bare, repo)
+			mustGit(t, repo, "config", "user.email", "test@example.com")
+			mustGit(t, repo, "config", "user.name", "Test")
+			if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("init\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			mustGit(t, repo, "add", "a.txt")
+			mustGit(t, repo, "commit", "-m", "init")
+			mustGit(t, repo, "push", "-u", "origin", "main")
+			mustGit(t, repo, "remote", "set-head", "origin", "main")
+			if tc.ahead {
+				if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("local\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				mustGit(t, repo, "add", "a.txt")
+				mustGit(t, repo, "commit", "-m", "local ahead")
+			}
+
+			// Remove remote.origin config section without deleting refs/remotes/origin/*.
+			mustGit(t, repo, "config", "--remove-section", "remote.origin")
+			if ref := mustGit(t, repo, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"); ref != "refs/remotes/origin/main" {
+				t.Fatalf("expected leftover refs/remotes/origin/HEAD, got %q", ref)
+			}
+
+			g := fixtureGit(t)
+			if _, _, err := g.remoteBaseCommit(ctx, repo, false); !errors.Is(err, ErrNoOrigin) {
+				t.Fatalf("remoteBaseCommit err = %v, want ErrNoOrigin", err)
+			}
+
+			var lb flow.SweepProbe
+			for _, p := range g.Sweep(ctx, nil, repo, "", flow.State{Project: flow.Project{ID: "proj-removed-origin", Folder: repo}}) {
+				if p.Probe == "local_base" {
+					lb = p
+				}
+			}
+			if lb.Unknown == "" || !strings.Contains(lb.Unknown, ErrNoOrigin.Error()) || len(lb.Items) != 0 {
+				t.Fatalf("local_base = %+v, want Unknown containing %q and 0 items", lb, ErrNoOrigin.Error())
+			}
+		})
 	}
 }
