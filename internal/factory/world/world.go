@@ -307,27 +307,37 @@ func deref[T any](p *T) (z T) {
 
 const screenTailLines = 12
 
-func matchUI(lines []string, spec, trim string) bool {
-	return slices.ContainsFunc(strings.Split(spec, "|"), func(pat string) bool {
+func matchUI(lines []string, spec, trim string) int {
+	found := -1
+	for _, pat := range strings.Split(spec, "|") {
 		p, wild := strings.CutSuffix(pat, "*")
-		return slices.ContainsFunc(lines, func(ln string) bool {
+		for i, ln := range lines {
 			s := strings.TrimLeft(ln, trim)
-			return (wild && strings.HasPrefix(s, p)) || (!wild && s == pat)
-		})
-	})
+			if (wild && strings.HasPrefix(s, p)) || (!wild && s == pat) {
+				found = max(found, i)
+			}
+		}
+	}
+	return found
 }
 
 // ScreenClass classifies the bottom UI region of text against cli's known
 // dialog, sign-out and usage-limit screens (design.md 5, 9.2; spikes S0.2, S0.8).
 func ScreenClass(cli, text string) string {
+	cls, _ := screenClassify(cli, text)
+	return cls
+}
+
+func screenClassify(cli, text string) (string, string) {
 	lines := strings.Split(strings.TrimRight(ansiRe.ReplaceAllString(strings.ReplaceAll(text, "\r\n", "\n"), ""), "\n \t"), "\n")
 	if cli == "agy" && agyTrustSelected(lines) {
-		return flow.ScreenTrust
+		return flow.ScreenTrust, ""
 	}
-	var ui []string
+	var ui, rawUI []string
 	for _, ln := range lines[max(0, len(lines)-screenTailLines):] {
-		if s := strings.TrimLeft(strings.ToLower(strings.TrimSpace(ln)), "⏺●⎿⚠✕✗•·│✨\u200a "); s != "" {
-			ui = append(ui, s)
+		raw := strings.TrimLeft(strings.TrimSpace(ln), "⏺●⎿⚠✕✗•·│✨\u200a ")
+		if raw != "" {
+			ui, rawUI = append(ui, strings.ToLower(raw)), append(rawUI, raw)
 		}
 	}
 	for _, r := range [][4]string{
@@ -343,11 +353,61 @@ func ScreenClass(cli, text string) string {
 		{"agy", flow.ScreenSignedOut, "not signed in*|please sign in to*", ""},
 		{"agy", flow.ScreenLimit, "individual quota reached*|you've hit your limit*|you've hit your usage limit*", ""},
 	} {
-		if r[0] == cli && matchUI(ui, r[2], "") && (r[3] == "" || matchUI(ui, r[3], "❯› ")) {
-			return r[1]
+		if r[0] == cli {
+			if idx := matchUI(ui, r[2], ""); idx >= 0 && (r[3] == "" || matchUI(ui, r[3], "❯› ") >= 0) {
+				return r[1], rawUI[idx]
+			}
 		}
 	}
-	return flow.ScreenNone
+	return flow.ScreenNone, ""
+}
+
+var (
+	limitTZRe    = regexp.MustCompile(`\(([A-Za-z0-9_/+.-]+)\)`)
+	limitResetRe = regexp.MustCompile(`(?i)\b(?:resets?|try again)\s+(?:at\s+)?(?:([A-Z][a-z]{2})\s+(\d{1,2})(?:,|\s+at)?\s+)?(\d{1,2}(?::\d{2})?)\s*(am|pm)\b`)
+)
+
+// ParseLimitReset parses the reset time printed inside a matched CLI usage-limit
+// banner line relative to now; returns zero when the line prints no valid time.
+func ParseLimitReset(line string, now time.Time) time.Time {
+	m := limitResetRe.FindStringSubmatch(line)
+	if m == nil {
+		return time.Time{}
+	}
+	loc := now.Location()
+	if tz := limitTZRe.FindStringSubmatch(line); tz != nil {
+		loaded, err := time.LoadLocation(tz[1])
+		if err != nil {
+			return time.Time{}
+		}
+		loc = loaded
+	}
+	clock, layout := m[3]+strings.ToLower(m[4]), "3pm"
+	if strings.Contains(clock, ":") {
+		layout = "3:04pm"
+	}
+	clk, err := time.Parse(layout, clock)
+	if err != nil {
+		return time.Time{}
+	}
+	ref := now.In(loc)
+	month, day := ref.Month(), ref.Day()
+	if m[1] != "" {
+		d, err := time.Parse("Jan 2", m[1]+" "+m[2])
+		if err != nil {
+			return time.Time{}
+		}
+		month, day = d.Month(), d.Day()
+	}
+	cand := time.Date(ref.Year(), month, day, clk.Hour(), clk.Minute(), 0, 0, loc)
+	if !cand.After(now) {
+		if m[1] != "" {
+			cand = cand.AddDate(1, 0, 0)
+		} else {
+			cand = cand.AddDate(0, 0, 1)
+		}
+	}
+	return cand.UTC()
 }
 
 var agyTrustDialog = [...]string{
@@ -405,7 +465,7 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 	if t.State != "live" {
 		return []flow.RunEvent{{Kind: flow.EvExit, Reason: deref(t.Reason)}}, nil
 	}
-	cls, hash, clean, nonEmpty := "", "", "", false
+	cls, limitLine, hash, clean, nonEmpty := "", "", "", "", false
 	infer := rec.CLI == CodexCLI && (rec.Role == flow.RoleWorker || rec.Role == flow.RoleCoordinator) && t.Status == nil
 	codexStatus, lines := "unknown", 200
 	if infer {
@@ -414,7 +474,11 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 	// Complete describes the older history. The current screen can still supply evidence.
 	if rd, rerr := client.Read(ctx, rec.Address, lines); rerr == nil {
 		clean = ansiRe.ReplaceAllString(strings.ReplaceAll(rd.Text, "\r\n", "\n"), "")
-		nonEmpty, cls = strings.TrimSpace(clean) != "", ScreenClass(rec.CLI, clean)
+		nonEmpty = strings.TrimSpace(clean) != ""
+		cls, limitLine = screenClassify(rec.CLI, clean)
+		if cls != flow.ScreenLimit {
+			limitLine = ""
+		}
 		if infer && cls == flow.ScreenNone {
 			codexStatus = codexScreenStatus(clean)
 		}
@@ -434,7 +498,7 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 	waitForScreen := permission && agyStarting && (!nonEmpty || agyTrustDrawing(clean))
 	if trustBlocked || (starting && !rec.StatusReported && s == nil && cls != "" &&
 		(rec.CLI != "agy" || cls != flow.ScreenTrust || verifiedTrust)) {
-		evs = append(evs, flow.RunEvent{Kind: flow.EvScreen, Screen: cls, ScreenHash: hash})
+		evs = append(evs, flow.RunEvent{Kind: flow.EvScreen, Screen: cls, ScreenHash: hash, LimitLine: limitLine})
 		if rec.CLI == CodexCLI && !infer && nonEmpty && cls == flow.ScreenNone {
 			evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: "working"})
 		}
@@ -464,7 +528,7 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 		}
 	}
 	// An empty hash marks an unavailable screen; this tick cannot prove the run stayed quiet.
-	return append(evs, flow.RunEvent{Kind: flow.EvTick, Screen: cls, ScreenHash: hash, Model: t.Labels["sheepdog.model"]}), nil
+	return append(evs, flow.RunEvent{Kind: flow.EvTick, Screen: cls, ScreenHash: hash, LimitLine: limitLine, Model: t.Labels["sheepdog.model"]}), nil
 }
 
 // ActRun executes one run-table act against herdr-core.

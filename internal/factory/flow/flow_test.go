@@ -107,6 +107,7 @@ func TestSettingsRange(t *testing.T) {
 		"coordinator_starts_per_hour":    func(s *Settings, n int) { s.CoordinatorStartsPerHour = n },
 		"coordinator_gap_minutes":        func(s *Settings, n int) { s.CoordinatorGapMinutes = n },
 		"coordinator_silent_minutes":     func(s *Settings, n int) { s.CoordinatorSilentMinutes = n },
+		"handoff_minutes":                func(s *Settings, n int) { s.HandoffMinutes = n },
 		"heartbeat_minutes":              func(s *Settings, n int) { s.HeartbeatMinutes = n },
 		"max_running":                    func(s *Settings, n int) { s.MaxRunning = n },
 	}
@@ -134,6 +135,7 @@ func TestSettingsRange(t *testing.T) {
 		"coordinator_starts_per_hour":    {CoordStartsMin, CoordStartsMax},
 		"coordinator_gap_minutes":        {CoordGapMin, CoordGapMax},
 		"coordinator_silent_minutes":     {CoordSilentMin, CoordSilentMax},
+		"handoff_minutes":                {HandoffMin, HandoffMax},
 		"heartbeat_minutes":              {HeartbeatMin, HeartbeatMax},
 		"max_running":                    {MaxRunningMin, MaxRunningMax},
 	}

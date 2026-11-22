@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -128,6 +129,46 @@ func poolStale(c cachedPool, now time.Time, ttl time.Duration) bool {
 	return false
 }
 
+func formatReset(reset, now time.Time) string {
+	layout := "3:04 PM"
+	if reset.Sub(now) > 24*time.Hour {
+		layout = "Mon 3:04 PM"
+	}
+	return reset.Local().Format(layout)
+}
+
+func cooldownKey(cli, provider string) string {
+	return cli + "/" + cmp.Or(provider, cli)
+}
+
+func reviewerQuotaWait(reset, now time.Time) string {
+	if !reset.IsZero() {
+		return "All reviewers are out of quota; retries at " + formatReset(reset, now)
+	}
+	return "All reviewers are out of quota"
+}
+
+func floorHandoffMsg(pool string) string {
+	return fmt.Sprintf("The %s pool reached its floor. Write your handoff and stop.", pool)
+}
+
+func recordQuotaCooldown(s *flow.State, cli, limitLine string, now time.Time) {
+	p := poolProvider(flow.Candidate{CLI: cli})
+	until := world.ParseLimitReset(limitLine, now)
+	if until.IsZero() {
+		until = now.Add(time.Duration(s.Settings.PoolMinutes) * time.Minute)
+	}
+	if s.Project.PoolCooldowns == nil {
+		s.Project.PoolCooldowns = map[string]time.Time{}
+	}
+	for k, t := range s.Project.PoolCooldowns {
+		if !now.Before(t) {
+			delete(s.Project.PoolCooldowns, k)
+		}
+	}
+	s.Project.PoolCooldowns[cooldownKey(cli, p)] = until
+}
+
 func poolWaitReason(provider string, r poolReading, floor int, now time.Time) flow.ResolveReason {
 	if !r.Known {
 		return flow.ResolveReason{}
@@ -149,21 +190,28 @@ func poolWaitReason(provider string, r poolReading, floor int, now time.Time) fl
 		return flow.ResolveReason{}
 	}
 	if !earliest.IsZero() {
-		layout := "3:04 PM"
-		if earliest.Sub(now) > 24*time.Hour {
-			layout = "Mon 3:04 PM"
-		}
-		return flow.ResolveReason{Kind: flow.ReasonPool, Why: fmt.Sprintf("waiting for quota until %s: the %s pool is at its floor", earliest.Local().Format(layout), provider), Reset: earliest}
+		return flow.ResolveReason{Kind: flow.ReasonPool, Why: fmt.Sprintf("waiting for quota until %s: the %s pool is at its floor", formatReset(earliest, now), provider), Reset: earliest}
 	}
 	return flow.ResolveReason{Kind: flow.ReasonPool, Why: fmt.Sprintf("waiting for quota: the %s pool is at its floor", provider)}
 }
 
-func poolCheck(pools map[string]poolReading, floor int, now time.Time) func(flow.Candidate) flow.ResolveReason {
+func poolCheck(pools map[string]poolReading, cooldowns *map[string]time.Time, floor int, now time.Time) func(flow.Candidate) flow.ResolveReason {
 	return func(c flow.Candidate) flow.ResolveReason {
-		if p := poolProvider(c); p != "" {
-			return poolWaitReason(p, pools[p], floor, now)
+		p := poolProvider(c)
+		var cd flow.ResolveReason
+		if cooldowns != nil {
+			if until := (*cooldowns)[cooldownKey(c.CLI, p)]; !until.IsZero() && now.Before(until) {
+				cd = flow.ResolveReason{Kind: flow.ReasonPool, Why: fmt.Sprintf("waiting for quota until %s: %s hit its usage limit", formatReset(until, now), cmp.Or(p, c.CLI)), Reset: until}
+			}
 		}
-		return flow.ResolveReason{}
+		var pr flow.ResolveReason
+		if p != "" {
+			pr = poolWaitReason(p, pools[p], floor, now)
+		}
+		if cd.Why != "" && (pr.Why == "" || pr.Reset.IsZero() || !pr.Reset.After(cd.Reset)) {
+			return cd
+		}
+		return pr
 	}
 }
 

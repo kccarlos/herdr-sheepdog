@@ -53,6 +53,7 @@ type Engine struct {
 	poolRun       CommandFunc                                       // provider quota reader hook; nil uses hcExecRunner
 	cliProbes     map[string]cachedCLIProbe                         // shared across launches and projects under mu
 	pools         map[string]cachedPool                             // shared per-provider quota readings under mu
+	passPools     map[string]poolReading                            // current pass's immutable pool readings under mu
 	passPoolCheck func(flow.Candidate) flow.ResolveReason           // current pass's immutable pool check under mu
 	git           *world.Git
 	mu            sync.Mutex
@@ -326,8 +327,9 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		delete(e.lastPass, id)
 		return
 	}
-	e.passPoolCheck = poolCheck(pools, s.Settings.PoolFloorPercent, e.now())
-	defer func() { e.passPoolCheck = nil }()
+	e.passPools = pools
+	e.passPoolCheck = poolCheck(pools, &s.Project.PoolCooldowns, s.Settings.PoolFloorPercent, e.now())
+	defer func() { e.passPools, e.passPoolCheck = nil, nil }()
 	ctx, cancel := context.WithTimeout(world.GitRepository(ctx, s.Project.Folder), world.GitPassTimeout)
 	defer cancel()
 	dt := e.passDelta(id)
@@ -891,6 +893,12 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 	before := **recp
 	if before.StopRetry != nil && evs[0].Kind != flow.EvLost {
 		evs = []flow.RunEvent{{Kind: flow.EvStop}}
+	} else {
+		p := poolProvider(flow.Candidate{CLI: before.CLI})
+		if p != "" && poolWaitReason(p, e.passPools[p], s.Settings.PoolFloorPercent, now).Kind == flow.ReasonPool || before.HandoffHeld {
+			pool := cmp.Or(p, before.CLI)
+			evs = append(evs, flow.RunEvent{Kind: flow.EvPoolFloor, Msg: floorHandoffMsg(pool), Reason: fmt.Sprintf("the %s pool reached its floor", pool)})
+		}
 	}
 events:
 	for _, ev := range evs {
@@ -911,6 +919,9 @@ events:
 			}
 			row.ID, next.Result = retry.Row, retry.Result
 			dec.Why = "ended(" + retry.Result + ")"
+		}
+		if old.StopRetry == nil && (row.ID == "R5" || row.ID == "R19") && next.State == flow.PhaseEnded && next.Result == flow.EndQuota {
+			recordQuotaCooldown(s, next.CLI, ev.LimitLine, now)
 		}
 		**recp = next
 		for _, act := range dec.Asked {
@@ -939,12 +950,17 @@ events:
 					e.saveLocked(id, *s)
 					return old.TaskRun(), nil
 				}
+				if row.ID == "R31" && (act == flow.RunActInterrupt || act == flow.RunActSend) {
+					old.HandoffDeadline, old.Reason = next.HandoffDeadline, next.Reason
+					**recp = old
+					continue events
+				}
 				if act == flow.RunActSendHeld {
 					**recp = old
 				}
 			}
 		}
-		if (old.State != flow.PhaseEnded && next.State == flow.PhaseEnded && (!fresh || taskID != "")) || row.ID == "R3" || row.ID == "R21" {
+		if (old.State != flow.PhaseEnded && next.State == flow.PhaseEnded && (!fresh || taskID != "")) || row.ID == "R3" || row.ID == "R21" || (row.ID == "R31" && slices.Contains(dec.Asked, flow.RunActSend)) {
 			e.commitLogLocked(id, s, LogLine{By: "engine", Task: taskID, Rule: row.ID, Asked: dec.Asked, Decision: dec.Why, Why: fmt.Sprintf("%s run %s: %s", role, next.Address, cmp.Or(next.Reason, dec.Why))})
 			before = next
 		}
@@ -1388,13 +1404,10 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	prompt := workerPrompt(workerTemplate, *t, *a, bin)
 	if resume {
 		prompt = cmp.Or(strings.Join(a.Held, "\n\n"), "Continue where you left off in this worktree (check git status and git log -1); when done, commit and run "+readyCmd(bin, t.Outcomes)+".")
-	} else {
-		if mode == flow.ContinueHandoff {
-			prompt = e.handoffNote(id, *t, *a) + prompt
-		}
-		if len(a.Held) > 0 {
-			prompt = "Messages held for you:\n" + strings.Join(a.Held, "\n\n") + "\n\n" + prompt
-		}
+	} else if mode == flow.ContinueHandoff {
+		prompt = e.handoffNote(ctx, id, *t, *a) + prompt
+	} else if len(a.Held) > 0 {
+		prompt = "Messages held for you:\n" + strings.Join(a.Held, "\n\n") + "\n\n" + prompt
 	}
 	termID, delivered, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, &a.Run, adopt, flow.RunRecord{Role: flow.RoleWorker, CLI: choice.CLI, SessionID: sid, Resumed: resume}, world.RunSpec{
 		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig, Env: env,
@@ -1413,7 +1426,7 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	return "started worker " + termID + " (" + choice.CLI + "/" + choice.Model + ")", abort, err
 }
 
-func (e *Engine) handoffNote(id string, t flow.Task, a flow.Attempt) string {
+func (e *Engine) handoffNote(ctx context.Context, id string, t flow.Task, a flow.Attempt) string {
 	bp := e.Paths.Brief(id, t.ID)
 	_ = writeAtomic(bp, []byte(fmt.Sprintf("# %s: %s\n\n%s\n\n## Outcomes\n\n%s\n", t.ID, t.Title, cmp.Or(strings.TrimSpace(t.Brief), "(none)"), bullets(t.Outcomes))))
 	rounds, last := "none", "none"
@@ -1429,7 +1442,33 @@ func (e *Engine) handoffNote(id string, t flow.Task, a flow.Attempt) string {
 			last = lr.ReportPath
 		}
 	}
-	return fmt.Sprintf("Handoff from an earlier worker run:\n- Brief: %s\n- Rounds so far: %s\n- Last findings: %s\n\n", bp, rounds, last)
+	commits, dirty := "none", "none"
+	if e.git != nil && a.Worktree != "" {
+		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
+		logArgs := []string{"log", "--oneline", "--abbrev=7", "-n", "10"}
+		if a.BaseCommit != "" {
+			logArgs = []string{"log", "--oneline", "--abbrev=7", a.BaseCommit + "..HEAD"}
+		}
+		if res, err := e.git.Run(gctx, a.Worktree, logArgs...); err == nil {
+			commits = cmp.Or(strings.TrimSpace(string(res.Stdout)), "none")
+		}
+		if res, err := e.git.Run(gctx, a.Worktree, "status", "--porcelain", "--untracked-files=normal"); err == nil {
+			dirty = cmp.Or(strings.TrimSpace(string(res.Stdout)), "none")
+		}
+		cancel()
+	}
+	var b strings.Builder
+	b.WriteString("Handoff from an earlier worker run:\n")
+	if a.Run != nil && a.Run.Reason != "" {
+		fmt.Fprintf(&b, "- Reason: %s\n", a.Run.Reason)
+	}
+	fmt.Fprintf(&b, "- Worktree: %s\n- Brief: %s\n- Branch commits: %s\n- Uncommitted files: %s\n- Rounds so far: %s\n- Last findings: %s\n",
+		a.Worktree, bp, commits, dirty, rounds, last)
+	if len(a.Held) > 0 {
+		fmt.Fprintf(&b, "- Held messages:\n%s\n", strings.Join(a.Held, "\n\n"))
+	}
+	b.WriteString("\n")
+	return b.String()
 }
 
 // sourceMark is a rule line's trailing source, e.g. " [KB-REV-63]" (prompts.md 1).
@@ -1485,6 +1524,11 @@ func storedWorkerModel(t flow.Task) flow.Candidate {
 }
 
 func reviewChoice(t flow.Task, s flow.Settings, a flow.Attempt, h string, facts flow.ResolveFacts, failed []string) (flow.Intent, string, string) {
+	in, repeatWhy, reason := reviewChoiceReason(t, s, a, h, facts, failed)
+	return in, repeatWhy, reason.Why
+}
+
+func reviewChoiceReason(t flow.Task, s flow.Settings, a flow.Attempt, h string, facts flow.ResolveFacts, failed []string) (flow.Intent, string, flow.ResolveReason) {
 	var used []flow.Candidate
 	for _, r := range flow.Counted(a) {
 		if r.Reviewer.Model != "" && flow.Covers(a, r.Head, h) {
@@ -1508,13 +1552,13 @@ func reviewChoice(t flow.Task, s flow.Settings, a flow.Attempt, h string, facts 
 	}
 	unused := facts
 	unused.Avoid = used
-	in, why := flow.Resolve(flow.RoleReviewer, t, s, unused)
-	if why == "" || len(used) == 0 {
-		return in, "", why
+	in, reason := flow.ResolveWithReason(flow.RoleReviewer, t, s, unused)
+	if reason.Why == "" || len(used) == 0 {
+		return in, "", reason
 	}
-	repeatWhy := why
-	in, why = flow.Resolve(flow.RoleReviewer, t, s, facts)
-	return in, repeatWhy, why
+	repeatWhy := reason.Why
+	in, reason = flow.ResolveWithReason(flow.RoleReviewer, t, s, facts)
+	return in, repeatWhy, reason
 }
 
 // observeReviewLocked checks an active reviewer run: stops it if its round is
@@ -1681,8 +1725,12 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		facts := e.probeLaunchFacts(ctx, flow.RoleReviewer, *t, s.Settings)
 		facts.Check = check
 		for {
-			in, repeatWhy, why := reviewChoice(*t, s.Settings, *a, h, facts, failed)
-			if why != "" {
+			in, repeatWhy, reason := reviewChoiceReason(*t, s.Settings, *a, h, facts, failed)
+			if reason.Why != "" {
+				why := reason.Why
+				if reason.Kind == flow.ReasonPool {
+					why = reviewerQuotaWait(reason.Reset, e.now())
+				}
 				return "", false, launchWait(why)
 			}
 			choice = intentCandidate(in)
