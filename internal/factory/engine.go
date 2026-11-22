@@ -345,7 +345,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	baseTried := s.Project.Base != nil && s.Project.Base.Red && flow.Done(s.Project.Acts, flow.AskTellBaseRed+"@"+s.Project.Base.SpellID)
 	var candidates, poolHeld []string
 	queue := func(t flow.Task) {
-		if _, r := resolveWorker(t, s.Settings, flow.ResolveFacts{Pool: e.passPoolCheck}); r.Why != "" {
+		if _, r := resolveWorkerReason(t, s.Settings, flow.ResolveFacts{Pool: e.passPoolCheck}); r.Why != "" {
 			poolHeld = append(poolHeld, t.ID)
 			return
 		}
@@ -675,7 +675,7 @@ func launchCapability(role string) func(flow.Candidate) flow.ResolveReason {
 	return func(c flow.Candidate) flow.ResolveReason {
 		switch role {
 		case flow.RoleWorker, flow.RoleCoordinator, flow.RoleReviewer:
-			if c.CLI == "claude" || c.CLI == world.CodexCLI {
+			if c.CLI == "claude" || c.CLI == world.CodexCLI || c.CLI == world.AgyCLI {
 				return flow.ResolveReason{}
 			}
 		}
@@ -687,7 +687,12 @@ func intentCandidate(in flow.Intent) flow.Candidate {
 	return flow.Candidate{CLI: in.CLI, Model: in.Model, Effort: in.Effort}
 }
 
-func resolveWorker(t flow.Task, s flow.Settings, facts flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
+func resolveWorker(t flow.Task, s flow.Settings, facts flow.ResolveFacts) (flow.Intent, string) {
+	in, r := resolveWorkerReason(t, s, facts)
+	return in, r.Why
+}
+
+func resolveWorkerReason(t flow.Task, s flow.Settings, facts flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
 	check := facts.Check
 	facts.Check = func(c flow.Candidate) flow.ResolveReason {
 		if r := launchCapability(flow.RoleWorker)(c); r.Why != "" {
@@ -712,6 +717,11 @@ func launchArgv(role string, c flow.Candidate, cwd, session string, resume bool)
 			session = ""
 		}
 		return world.CodexWorkArgv(c.Model, c.Effort, cwd, session)
+	case world.AgyCLI:
+		if role == flow.RoleReviewer || !resume {
+			session = ""
+		}
+		return world.AgyArgv(c.Model, session, "")
 	case "claude":
 		mode := "bypassPermissions"
 		if role == flow.RoleReviewer {
@@ -1078,11 +1088,11 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 		*recp = &rec
 		return "", false, abort, err
 	}
-	if i := max(slices.Index(term.Argv, "--session-id"), slices.Index(term.Argv, "--resume")); !minted && i >= 0 && i+1 < len(term.Argv) {
+	if i := max(slices.Index(term.Argv, "--session-id"), slices.Index(term.Argv, "--resume"), slices.Index(term.Argv, "--conversation")); !minted && i >= 0 && i+1 < len(term.Argv) {
 		rec.SessionID = term.Argv[i+1]
 	}
 	choice := terminalChoice(term, flow.Candidate{CLI: rec.CLI, Model: rec.Model})
-	if !minted && choice.CLI == world.CodexCLI {
+	if !minted && (choice.CLI == world.CodexCLI || choice.CLI == world.AgyCLI && rec.SessionID == "") {
 		rec.SessionID, rec.Resumed = "", false
 		if prevRec != nil && prevRec.ID == term.Labels["sheepdog.run"] {
 			rec.SessionID, rec.Resumed, rec.StartedAt = prevRec.SessionID, prevRec.Resumed, prevRec.StartedAt
@@ -1091,7 +1101,7 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 	rec.ID, rec.CLI, rec.Model = "", choice.CLI, choice.Model
 	rec, _, _ = flow.StepRun(rec, flow.RunEvent{Kind: flow.EvLaunched, Address: term.Address, RunID: term.Labels["sheepdog.run"], CreatedMS: term.CreatedMS}, s.Settings, now)
 	rec.Resumable, *recp = rec.SessionID != "", &rec
-	return term.Address, minted || len(term.Argv) > 0 && term.Argv[len(term.Argv)-1] == spec.Prompt, false, nil
+	return term.Address, minted || len(term.Argv) > 0 && (term.Argv[len(term.Argv)-1] == spec.Prompt || term.Argv[len(term.Argv)-1] == "-i="+spec.Prompt), false, nil
 }
 
 func (e *Engine) lookupLaunchTerminal(ctx context.Context, name string, adopt bool) (hc.Terminal, error) {
@@ -1115,8 +1125,10 @@ func terminalChoice(t hc.Terminal, fallback flow.Candidate) flow.Candidate {
 		return ""
 	}
 	cli, model, effort := t.Labels["sheepdog.cli"], t.Labels["sheepdog.model"], t.Labels["sheepdog.effort"]
-	if len(t.Argv) > 0 && filepath.Base(t.Argv[0]) == world.CodexCLI {
+	if bin := world.ArgvCLI(t.Argv); bin == world.CodexCLI {
 		cli, model = world.CodexCLI, cmp.Or(model, arg("-m"))
+	} else if cli == "" && bin == world.AgyCLI {
+		cli = world.AgyCLI
 	}
 	return flow.Candidate{CLI: cmp.Or(cli, fallback.CLI, "claude"), Model: cmp.Or(model, arg("--model"), fallback.Model),
 		Effort: cmp.Or(effort, arg("--effort"), fallback.Effort, "medium")}
@@ -1393,7 +1405,7 @@ func (e *Engine) readTipLocked(ctx context.Context, a flow.Attempt, tip string, 
 func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, n := &s.Tasks[ti], len(s.Tasks[ti].Attempts)+1
 	if _, _, reason := e.resolveLaunch(ctx, id, flow.RoleWorker, *t, s.Settings, nil, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
-		return resolveWorker(*t, s.Settings, f)
+		return resolveWorkerReason(*t, s.Settings, f)
 	}); reason.Why != "" {
 		return "", false, launchWaitFor(reason)
 	}
@@ -1426,7 +1438,7 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	choice, env := flow.Candidate{}, map[string]string(nil)
 	if term.State != "live" {
 		in, codexEnv, reason := e.resolveLaunch(ctx, id, flow.RoleWorker, *t, s.Settings, nil, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
-			return resolveWorker(*t, s.Settings, f)
+			return resolveWorkerReason(*t, s.Settings, f)
 		})
 		if reason.Why != "" {
 			return "", false, launchWaitFor(reason)
@@ -1819,6 +1831,9 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	if err != nil {
 		a.Review = prev
 		return "", true, err
+	}
+	if choice.CLI == world.AgyCLI {
+		prompt = "Do not modify, create or delete any files; read and run tests only.\n\n" + prompt
 	}
 	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, &a.Review.Run, adopt, flow.RunRecord{Role: flow.RoleReviewer, CLI: choice.CLI}, world.RunSpec{
 		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,

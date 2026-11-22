@@ -778,7 +778,10 @@ func checkAgy(ctx context.Context, o DoctorOptions, pctx probeContext) cliOutcom
 	}
 	models := parseAgyModels(authOut.Stdout)
 	if authOut.Err != nil || authOut.TimedOut || authOut.Exit != 0 || len(models) == 0 {
-		return cliOutcome{name: name, state: cliSignedOut, result: resWarn(name, "installed, not logged in", "run agy without arguments and sign in")}
+		if agySignedOut(authOut) {
+			return cliOutcome{name: name, state: cliSignedOut, result: resWarn(name, "installed, not logged in", "run agy without arguments and sign in")}
+		}
+		return cliOutcome{name: name, state: cliSignedOut, result: resWarn(name, "could not read agy status: "+agyUnreadableReason(authOut), "run agy models in a terminal to check agy")}
 	}
 	if !o.Canary {
 		return cliOutcome{name: name, state: cliReady, result: resOK(name, "logged in (canary skipped)")}
@@ -807,6 +810,31 @@ func checkAgy(ctx context.Context, o DoctorOptions, pctx probeContext) cliOutcom
 		return cliOutcome{name: name, state: cliCanaryFailed, result: resWarn(name, "logged in, but canary start failed: "+why, "run agy once in a terminal to check sign-in and quota")}
 	}
 	return cliOutcome{name: name, state: cliReady, result: resOK(name, fmt.Sprintf("logged in; canary start ok (%s, %dms)", model, cOut.Duration.Milliseconds()))}
+}
+
+func agySignedOut(c CommandOutput) bool {
+	if c.Err != nil || c.TimedOut || c.Exit == 127 {
+		return false
+	}
+	low := strings.ToLower(c.Stdout + "\n" + c.Stderr)
+	return strings.Contains(low, "not signed in") ||
+		strings.Contains(low, "please sign in") ||
+		strings.Contains(low, "not logged in") ||
+		strings.Contains(low, "sign in to") ||
+		strings.Contains(low, "unauthenticated")
+}
+
+func agyUnreadableReason(c CommandOutput) string {
+	switch {
+	case c.TimedOut:
+		return "timed out"
+	case c.Err != nil:
+		return cleanReason(c.Err.Error())
+	case c.Exit == 0:
+		return "no models listed"
+	default:
+		return cleanReason(firstNonEmpty(c.Stderr, c.Stdout, fmt.Sprintf("exit %d", c.Exit)))
+	}
 }
 
 func parseAgyModels(stdout string) []string {

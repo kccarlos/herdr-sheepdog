@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
@@ -47,11 +49,15 @@ func cmdOK(c CommandOutput) bool { return c.Err == nil && !c.TimedOut && c.Exit 
 // anything (design.md 11): each line is ok, warn or fail with one fix. All
 // external calls go through opts.RunCommand, so tests use a fake.
 func StartChecks(ctx context.Context, opts DoctorOptions) []onboard.Result {
+	customRunner := opts.RunCommand != nil
 	o := opts.withDefaults()
 	run, projectRun := o.RunCommand, o.RunCommand
 	inHC := opts.HCSocket != ""
 	if inHC {
 		projectRun = hcExecRunner(o.HCSocket)
+		if !customRunner {
+			run = projectRun
+		}
 	}
 	var gitFailure []onboard.Result
 	o.RunCommand = func(ctx context.Context, dir string, env []string, argv ...string) CommandOutput {
@@ -122,19 +128,77 @@ func checkGitVersion(ctx context.Context, o DoctorOptions) onboard.Result {
 	return resOK(name, firstLine(c.Stdout))
 }
 
-// Slice 5b's Resolve will replace this with the resolved worker and reviewer CLIs.
-func checkStartCLIs(ctx context.Context, o DoctorOptions, r startRepo) []onboard.Result {
-	out := []onboard.Result{checkStartCLI(ctx, o, "claude", "Claude Code", "run: claude auth login",
-		claudeLoggedIn, "claude", "auth", "status", "--json")}
-	if p := (Paths{DataDir: o.DataDir}); o.DataDir != "" {
-		if id, err := findStoredProject(p, r.root); err == nil {
-			if s, err := LoadState(p.State(id)); err == nil && s.Settings.SecondReviewer == "codex" {
-				out = append(out, checkStartCLI(ctx, o, "codex", "Codex CLI", "run: codex login",
-					codexLoggedIn, "codex", "login", "status"))
+func projectStartCLIs(o DoctorOptions, root string) []string {
+	if o.DataDir == "" {
+		return []string{"claude"}
+	}
+	p := Paths{DataDir: o.DataDir}
+	id, err := findStoredProject(p, root)
+	if err != nil {
+		return []string{"claude"}
+	}
+	s, err := LoadState(p.State(id))
+	if err != nil {
+		return []string{"claude"}
+	}
+	used := map[string]bool{}
+	add := func(cs []flow.Candidate) {
+		for _, c := range cs {
+			used[c.CLI] = true
+		}
+	}
+	for _, role := range []string{flow.RoleCoordinator, flow.RoleWorker, flow.RoleReviewer} {
+		add(flow.Candidates(role, flow.Task{}, s.Settings))
+	}
+	for _, cs := range s.Settings.Models {
+		add(cs)
+	}
+	for _, t := range s.Tasks {
+		if !flow.Ended(t) {
+			for _, cs := range t.Request {
+				add(cs)
 			}
 		}
 	}
+	var out []string
+	for _, cli := range []string{"claude", world.CodexCLI, world.AgyCLI} {
+		if used[cli] {
+			out = append(out, cli)
+		}
+	}
 	return out
+}
+
+func checkStartCLIs(ctx context.Context, o DoctorOptions, r startRepo) []onboard.Result {
+	var out []onboard.Result
+	for _, cli := range projectStartCLIs(o, r.root) {
+		switch cli {
+		case "claude":
+			out = append(out, checkStartCLI(ctx, o, "claude", "Claude Code", "run: claude auth login",
+				claudeLoggedIn, "claude", "auth", "status", "--json"))
+		case world.CodexCLI:
+			out = append(out, checkStartCLI(ctx, o, "codex", "Codex CLI", "run: codex login",
+				codexLoggedIn, "codex", "login", "status"))
+		case world.AgyCLI:
+			out = append(out, checkStartAgy(ctx, o))
+		}
+	}
+	return out
+}
+
+func checkStartAgy(ctx context.Context, o DoctorOptions) onboard.Result {
+	const name, signInFix = "start agy", "run agy without arguments and sign in"
+	c := o.run(ctx, o.TempDir, world.AgyCLI, "models")
+	switch {
+	case c.Exit == 127 || errors.Is(c.Err, exec.ErrNotFound):
+		return resFail(name, "agy is not installed", "install Antigravity CLI (agy), then "+signInFix)
+	case cmdOK(c) && len(parseAgyModels(c.Stdout)) > 0:
+		return resOK(name, "agy is signed in")
+	case agySignedOut(c):
+		return resFail(name, "agy is not signed in", signInFix)
+	default:
+		return resWarn(name, "could not read agy status: "+agyUnreadableReason(c), "run agy models in a terminal and check herdr-core")
+	}
 }
 
 func checkStartCLI(ctx context.Context, o DoctorOptions, cli, pkg, loginFix string,

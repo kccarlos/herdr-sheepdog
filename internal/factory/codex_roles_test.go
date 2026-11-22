@@ -249,8 +249,8 @@ func mapKeys(m map[string]string) []string {
 }
 
 // TestPlanApplyAcceptsCodexWorker: a task whose worker resolves to Codex is
-// accepted, since the engine can now launch it; one that resolves to agy is
-// still refused (agy launch is a later slice).
+// accepted, since the engine can now launch it; an unlaunchable role is still
+// refused.
 func TestPlanApplyAcceptsCodexWorker(t *testing.T) {
 	newCoord := func(s flow.Settings) (*Engine, string, string) {
 		eng := newGitTestEngine(t, testPaths(t), nil)
@@ -280,13 +280,11 @@ func TestPlanApplyAcceptsCodexWorker(t *testing.T) {
 	}
 	_ = id
 
-	// agy is still not launchable as a worker.
-	s = flow.DefaultSettings()
-	s.Models = map[string][]flow.Candidate{flow.RoleWorker: {{CLI: "agy", Model: "gemini-4-neon-medium", Effort: "medium"}}}
-	eng, _, tok = newCoord(s)
-	err := eng.Report(tok, "plan apply", plan)
-	if refusalCode(err) != "plan_invalid" || !strings.Contains(err.Error(), "the engine cannot launch agy as worker yet") {
-		t.Fatalf("agy worker: err = %v", err)
+	// Unlaunchable roles are still refused at plan time.
+	eng, _, tok = newCoord(flow.DefaultSettings())
+	err := eng.Report(tok, "plan apply", json.RawMessage(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: x",`+testPlanJSON+`,"request":{"designer":[{"cli":"agy","model":"gemini-4-neon-medium","effort":"medium"}]}}]}`))
+	if refusalCode(err) != "plan_invalid" || !strings.Contains(err.Error(), "the engine cannot launch agy as designer yet") {
+		t.Fatalf("unsupported role: err = %v", err)
 	}
 }
 

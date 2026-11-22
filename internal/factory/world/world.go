@@ -143,30 +143,32 @@ func StartTerminal(ctx context.Context, client *hc.Client, spec RunSpec, beforeL
 			return hc.Terminal{}, true, err
 		}
 	}
-	if isClaudeArgv(spec.Argv) {
+	cli := ArgvCLI(spec.Argv)
+	if cli == "claude" {
 		if err := preAcceptClaudeTrust(spec.ClaudeConfig, spec.Cwd); err != nil {
 			return hc.Terminal{}, false, Fail(flow.ClassSettled, err)
 		}
 	}
 	argv := append([]string(nil), spec.Argv...)
 	if spec.Prompt != "" {
-		argv = append(argv, spec.Prompt)
+		if cli == AgyCLI {
+			argv = append(argv, "-i="+spec.Prompt)
+		} else {
+			argv = append(argv, spec.Prompt)
+		}
+	}
+	env := spec.Env
+	if cli == AgyCLI && len(env) > 0 {
+		env = maps.Clone(env)
+		maps.DeleteFunc(env, func(k, _ string) bool { return strings.Contains(k, "GEMINI_API_KEY") })
 	}
 	labels := map[string]string{"herdr.space": randID(), "herdr.tab": randID(), "herdr.seen": "0"}
 	maps.Copy(labels, spec.Labels)
-	t, err := client.Run(ctx, hc.RunParams{Name: spec.Name, Cwd: spec.Cwd, Argv: argv, Labels: labels, Env: spec.Env, NoParent: true, NoNotify: true})
+	t, err := client.Run(ctx, hc.RunParams{Name: spec.Name, Cwd: spec.Cwd, Argv: argv, Labels: labels, Env: env, NoParent: true, NoNotify: true})
 	return t, false, hcFail(err)
 }
 
-func isClaudeArgv(argv []string) bool {
-	for i, a := range argv {
-		if (i == 0 && filepath.Base(a) == "env") || (strings.Contains(a, "=") && !strings.HasPrefix(a, "-")) {
-			continue
-		}
-		return filepath.Base(a) == "claude"
-	}
-	return false
-}
+func isClaudeArgv(argv []string) bool { return ArgvCLI(argv) == "claude" }
 
 func defaultClaudeConfig() string {
 	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
@@ -562,8 +564,9 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 	if hash != "" && rec.ScreenHash != "" && hash != rec.ScreenHash {
 		evs = append(evs, flow.RunEvent{Kind: flow.EvActivity, ScreenHash: hash})
 	}
-	// Leave starting runs eligible for R3 while the menu is drawing or unreadable.
-	if s != nil && !trustBlocked && !waitForScreen && (!rec.StatusReported || s.State != rec.Status || deref(s.Kind) != rec.BlockedKind || s.Msg != rec.Question || t.Turn != rec.Turn) {
+	// Leave starting runs eligible for R3 while the menu is drawing or unreadable,
+	// and treat agy's brief startup blocked/auth check as starting.
+	if s != nil && !trustBlocked && !waitForScreen && !agyEarlyAuth(rec, t) && (!rec.StatusReported || s.State != rec.Status || deref(s.Kind) != rec.BlockedKind || s.Msg != rec.Question || t.Turn != rec.Turn) {
 		var at time.Time
 		if ms := deref(t.StatusMS); ms > 0 {
 			at = time.UnixMilli(int64(ms))
@@ -578,8 +581,14 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 			evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: codexStatus, ScreenHash: hash, Inferred: true})
 		}
 	}
-	if rec.CLI == CodexCLI && rec.Role == flow.RoleWorker && rec.SessionID == "" && len(codexHome) > 0 {
-		if sid := codexSession(codexHome[0], t.Cwd, rec.StartedAt); sid != "" {
+	if rec.Role == flow.RoleWorker && rec.SessionID == "" {
+		var sid string
+		if rec.CLI == CodexCLI && len(codexHome) > 0 {
+			sid = codexSession(codexHome[0], t.Cwd, rec.StartedAt)
+		} else if rec.CLI == AgyCLI {
+			sid = agySession(ctx, client, t.Cwd, rec.StartedAt)
+		}
+		if sid != "" {
 			evs = append(evs, flow.RunEvent{Kind: flow.EvSession, SessionID: sid})
 		}
 	}

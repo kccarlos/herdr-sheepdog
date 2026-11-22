@@ -1273,8 +1273,9 @@ func cycleAt(ids []string, after map[string][]string) string {
 }
 
 var cliProbeArgv = map[string][]string{
-	"claude": {"claude", "auth", "status", "--json"},
-	"codex":  {"codex", "login", "status"},
+	"claude":       {"claude", "auth", "status", "--json"},
+	world.CodexCLI: {"codex", "login", "status"},
+	world.AgyCLI:   {"agy", "models"},
 }
 
 // checkTasksLaunch checks structural feasibility. Live account facts belong
@@ -1294,7 +1295,7 @@ func checkTasksLaunch(tasks []flow.Task, s flow.Settings) []string {
 			switch role {
 			case flow.RoleWorker:
 				if worker.Model == "" {
-					in, r := resolveWorker(t, s, flow.ResolveFacts{})
+					in, r := resolveWorkerReason(t, s, flow.ResolveFacts{})
 					why, worker = r.Why, intentCandidate(in)
 				}
 			default:
@@ -1351,12 +1352,24 @@ func classifyProbe(cli string, c CommandOutput) (flow.CLIFacts, bool) {
 		if json.Unmarshal([]byte(c.Stdout), &st) == nil && st.LoggedIn != nil {
 			return flow.CLIFacts{Installed: true, SignedIn: *st.LoggedIn}, true
 		}
-	case "codex":
+	case world.CodexCLI:
 		if strings.Contains(strings.ToLower(c.Stdout+"\n"+c.Stderr), "not logged in") {
 			return flow.CLIFacts{Installed: true}, true
 		}
 		if c.Exit == 0 {
 			return flow.CLIFacts{Installed: true, SignedIn: true}, true
+		}
+	case world.AgyCLI:
+		if c.Exit == 0 {
+			if models := parseAgyModels(c.Stdout); len(models) > 0 {
+				m := make(map[string]bool, len(models))
+				for _, id := range models {
+					m[id] = true
+				}
+				return flow.CLIFacts{Installed: true, SignedIn: true, Models: m}, true
+			}
+		} else if agySignedOut(c) {
+			return flow.CLIFacts{Installed: true}, true
 		}
 	}
 	return flow.CLIFacts{}, false
