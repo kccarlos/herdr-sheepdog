@@ -53,9 +53,10 @@ const (
 
 // ResolveReason is a typed rejection from a Resolve check.
 type ResolveReason struct {
-	Kind  ReasonKind
-	Why   string
-	Reset time.Time // earliest blocking reset when Kind == ReasonPool
+	Kind        ReasonKind
+	Why         string
+	Reset       time.Time // earliest blocking reset when Kind == ReasonPool
+	PoolBlocked bool
 }
 
 // ReviewerDiffers is the typed reason when a reviewer candidate matches the worker.
@@ -186,7 +187,7 @@ func ResolveWithReason(role string, task Task, settings Settings, facts ResolveF
 		}
 	}
 	if pool.Why != "" && first.Why != "" {
-		return Intent{}, ResolveReason{Kind: ReasonOther, Why: pool.Why + "; " + first.Why, Reset: pool.Reset}
+		return Intent{}, ResolveReason{Kind: ReasonOther, Why: pool.Why + "; " + first.Why, Reset: pool.Reset, PoolBlocked: true}
 	}
 	for _, r := range []ResolveReason{pool, first, fallback} {
 		if r.Why != "" {
