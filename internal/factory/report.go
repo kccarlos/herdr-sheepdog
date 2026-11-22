@@ -42,7 +42,7 @@ var verbRoles = map[string]string{
 	"start": owner, "stop": owner,
 	"plan apply": flow.RoleCoordinator, "recap decide": flow.RoleCoordinator,
 	"plan amend": flow.RoleCoordinator, "task": flow.RoleCoordinator,
-	"ready": flow.RoleWorker,
+	"ready": flow.RoleWorker, "ask": "", "answer": flow.RoleCoordinator,
 }
 
 // Report is the acceptance step for everything a run's terminal sends: the
@@ -61,22 +61,24 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 	if id == "" {
 		return e.refuse("", "invalid_token", "The token matches no run the factory started.")
 	}
-	if role != want {
+	if want != "" && role != want {
 		return e.refuse(id, "kind_not_allowed", fmt.Sprintf("A %s may not send %s; only the %s may.", role, verb, want))
 	}
 	if ti >= 0 && flow.Ended(s.Tasks[ti]) {
 		return e.refuse(id, "already_closed", fmt.Sprintf("Task %q has ended; it takes no more reports.", s.Tasks[ti].ID))
 	}
-	if verb == "ready" {
+	switch verb {
+	case "ready":
 		return e.acceptReadyLocked(id, &s, role, ti, args)
-	}
-	if verb == "recap decide" {
+	case "ask":
+		return e.acceptAskLocked(id, &s, role, ti, args)
+	case "answer":
+		return e.acceptAnswerLocked(id, &s, role, args)
+	case "recap decide":
 		return e.acceptRecapDecideLocked(id, &s, role, args)
-	}
-	if verb == "task" {
+	case "task":
 		return e.acceptTaskLocked(id, &s, role, args)
-	}
-	if verb == "plan amend" {
+	case "plan amend":
 		return e.acceptAmendLocked(id, &s, role, args)
 	}
 	if len(s.Tasks) > 0 {
@@ -95,6 +97,12 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 		Decision: "plan applied", Why: fmt.Sprintf("%d task(s): %s", len(tasks), strings.Join(titles, ", "))})
 }
 
+func decodeStrict(raw []byte, dst any) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	return dec.Decode(dst)
+}
+
 func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int, args json.RawMessage) error {
 	var req struct {
 		Head    string       `json:"head"`
@@ -104,9 +112,7 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 		Touched *string      `json:"touched"`
 		Skipped *string      `json:"skipped"`
 	}
-	dec := json.NewDecoder(bytes.NewReader(args))
-	dec.DisallowUnknownFields()
-	if len(bytes.TrimSpace(args)) == 0 || dec.Decode(&req) != nil || strings.TrimSpace(req.Head) == "" {
+	if len(bytes.TrimSpace(args)) == 0 || decodeStrict(args, &req) != nil || strings.TrimSpace(req.Head) == "" {
 		return e.refuse(id, "invalid_report", "A ready report must carry the worktree head commit.")
 	}
 	t := &s.Tasks[ti]
@@ -536,9 +542,7 @@ func (o *planOutcome) UnmarshalJSON(data []byte) error {
 		return json.Unmarshal(data, &o.Text)
 	}
 	type alias planOutcome
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	return dec.Decode((*alias)(o))
+	return decodeStrict(data, (*alias)(o))
 }
 
 // planTask is the part of design.md 3's plan record that slice 3 accepts.
@@ -660,9 +664,7 @@ var validTaskID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
 func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, s flow.Settings) ([]flow.Task, []string) {
 	var p planFile
 	var fails []string
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&p); err != nil {
+	if err := decodeStrict(raw, &p); err != nil {
 		fails = append(fails, "shape: "+strings.TrimPrefix(err.Error(), "json: "))
 		p = planFile{} // the strict decode may have stopped half way
 		if json.Unmarshal(raw, &p) != nil {
@@ -765,9 +767,7 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		Why      string            `json:"why"`
 		Children []json.RawMessage `json:"children,omitempty"`
 	}
-	dec := json.NewDecoder(bytes.NewReader(args))
-	dec.DisallowUnknownFields()
-	if len(bytes.TrimSpace(args)) == 0 || dec.Decode(&req) != nil || strings.TrimSpace(req.Task) == "" || strings.TrimSpace(req.Choice) == "" {
+	if len(bytes.TrimSpace(args)) == 0 || decodeStrict(args, &req) != nil || strings.TrimSpace(req.Task) == "" || strings.TrimSpace(req.Choice) == "" {
 		return e.refuse(id, "invalid_report", "A recap decision must carry task and choice.")
 	}
 	taskID, choice := strings.TrimSpace(req.Task), strings.TrimSpace(req.Choice)
@@ -1029,9 +1029,7 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		Why   string            `json:"why"`
 		Tasks []json.RawMessage `json:"tasks"`
 	}
-	dec := json.NewDecoder(bytes.NewReader(args))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
+	if err := decodeStrict(args, &req); err != nil {
 		return e.refuse(id, "plan_invalid", "shape: "+strings.TrimPrefix(err.Error(), "json: ")+".")
 	}
 	why, err := e.cleanWhy(id, req.Why, "plan amend", `"why"`)
@@ -1061,9 +1059,7 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 			fresh = append(fresh, raw)
 			continue
 		}
-		d := json.NewDecoder(bytes.NewReader(raw))
-		d.DisallowUnknownFields()
-		if err := d.Decode(&c); err != nil {
+		if err := decodeStrict(raw, &c); err != nil {
 			fails = append(fails, fmt.Sprintf("shape: task %q: %s (only title, brief, outcomes, estimate_lines, after, priority and request change)", s.Tasks[ti].ID, strings.TrimPrefix(err.Error(), "json: ")))
 			continue
 		}
