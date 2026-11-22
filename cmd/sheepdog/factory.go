@@ -250,16 +250,24 @@ func runFactoryPlan(ctx context.Context, args []string, stdout, stderr io.Writer
 
 // runFactoryTask sends `task <action> <task> --why "<why>"` with the run's token.
 func runFactoryTask(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := factoryFlags("factory task", stderr)
-	why := fs.String("why", "", "reason for the command")
+	a0, a1, why, exit := parseTwoArgWhy("factory task", args, stderr)
+	if exit >= 0 {
+		return exit
+	}
+	return sendFactoryReport(ctx, "factory task "+a0, "task", map[string]string{"action": a0, "task": a1, "why": why}, "task "+a1+": "+a0, stdout, stderr)
+}
+
+func parseTwoArgWhy(name string, args []string, stderr io.Writer) (string, string, string, int) {
+	fs := factoryFlags(name, stderr)
+	why := fs.String("why", "", "reason")
 	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
-		return flagExit(err)
+		return "", "", "", flagExit(err)
 	}
 	if fs.NArg() != 2 {
 		printFactoryUsage(stderr)
-		return 2
+		return "", "", "", 2
 	}
-	return sendFactoryReport(ctx, "factory task "+fs.Arg(0), "task", map[string]string{"action": fs.Arg(0), "task": fs.Arg(1), "why": *why}, "task "+fs.Arg(1)+": "+fs.Arg(0), stdout, stderr)
+	return fs.Arg(0), fs.Arg(1), *why, -1
 }
 
 // runFactoryRecap sends `recap decide <task> <choice> --why "<why>" [--child '<json>' ...]` with the run's token.
@@ -387,23 +395,16 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 		if skippedArg != nil {
 			body["skipped"] = *skippedArg
 		}
-		raw, _ := json.Marshal(body)
-		err = postFactoryReport(ctx, "ready", raw)
+		msg := "ready " + head
+		if reject != nil {
+			msg = "rejected " + head
+		} else if *nothing {
+			msg = "nothing to change at " + head
+		}
+		return sendFactoryReport(ctx, "factory report ready", "ready", body, msg, stdout, stderr)
 	}
-	if err != nil {
-		fprintf(stderr, "sheepdog factory report ready: %v\n", err)
-		return 1
-	}
-	if reject != nil {
-		fprintf(stdout, "rejected %s\n", head)
-		return 0
-	}
-	if *nothing {
-		fprintf(stdout, "nothing to change at %s\n", head)
-		return 0
-	}
-	fprintf(stdout, "ready %s\n", head)
-	return 0
+	fprintf(stderr, "sheepdog factory report ready: %v\n", err)
+	return 1
 }
 
 func gitRevParse(ctx context.Context, git *world.Git, args ...string) (string, error) {
@@ -501,28 +502,24 @@ func runFactoryAsk(ctx context.Context, args []string, isReport bool, stdout, st
 }
 
 func runFactoryAnswer(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := factoryFlags("factory answer", stderr)
-	why := fs.String("why", "", "reason")
-	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
-		return flagExit(err)
+	a0, a1, why, exit := parseTwoArgWhy("factory answer", args, stderr)
+	if exit >= 0 {
+		return exit
 	}
-	if fs.NArg() != 2 {
-		printFactoryUsage(stderr)
-		return 2
-	}
-	return sendFactoryReport(ctx, "factory answer", "answer", map[string]string{"ask": fs.Arg(0), "option": fs.Arg(1), "why": *why}, "answered "+fs.Arg(0), stdout, stderr)
+	return sendFactoryReport(ctx, "factory answer", "answer", map[string]string{"ask": a0, "option": a1, "why": why}, "answered "+a0, stdout, stderr)
 }
 
 func postFactoryReport(ctx context.Context, verb string, args json.RawMessage) error {
 	// In a run's terminal the engine set SHEEPDOG_WEB_PORT: no config file needed.
+	url := ""
 	if port, err := strconv.Atoi(os.Getenv("SHEEPDOG_WEB_PORT")); err == nil && port > 0 {
-		return postJSON(ctx, daemon.LocalURL("", port), "/api/factory/report", map[string]any{"token": os.Getenv(runTokenEnv), "verb": verb, "args": args})
-	}
-	cfg, err := config.Load("")
-	if err != nil {
+		url = daemon.LocalURL("", port)
+	} else if cfg, err := config.Load(""); err != nil {
 		return err
+	} else {
+		url = daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port)
 	}
-	return postJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/factory/report", map[string]any{"token": os.Getenv(runTokenEnv), "verb": verb, "args": args})
+	return postJSON(ctx, url, "/api/factory/report", map[string]any{"token": os.Getenv(runTokenEnv), "verb": verb, "args": args})
 }
 
 func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int {

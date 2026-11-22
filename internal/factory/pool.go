@@ -145,11 +145,7 @@ func formatReset(reset, now time.Time) string {
 
 func loadCooldowns(path string) map[string]time.Time {
 	m := map[string]time.Time{}
-	if guardTestPath(path) == nil {
-		if data, err := os.ReadFile(path); err == nil {
-			_ = json.Unmarshal(data, &m)
-		}
-	}
+	_ = readJSON(path, &m)
 	return m
 }
 
@@ -161,9 +157,7 @@ func (e *Engine) recordQuotaCooldownLocked(s flow.State, c flow.Candidate, limit
 	if k := c.CLI + "/" + cmp.Or(p, c.CLI); until.After(m[k]) {
 		m[k] = until
 	}
-	if data, err := json.MarshalIndent(m, "", "  "); err == nil {
-		_ = writeAtomic(path, append(data, '\n'))
-	}
+	_ = writeJSON(path, m)
 }
 
 func quotaReason(cause string, reset, now time.Time) flow.ResolveReason {

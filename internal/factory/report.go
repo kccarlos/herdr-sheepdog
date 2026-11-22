@@ -54,7 +54,7 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 	if !ok {
 		return e.refuse("", "kind_not_allowed", fmt.Sprintf("%q is not a report the factory knows.", verb))
 	}
-	id, s, role, ti := e.runByTokenLocked(token)
+	id, s, role, ti, runID := e.runByTokenLocked(token)
 	if want == owner {
 		return e.refuse(id, "kind_not_allowed", fmt.Sprintf("A run's terminal cannot %s the factory; the owner runs it from a terminal with no run's token.", verb))
 	}
@@ -71,7 +71,7 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 	case "ready":
 		return e.acceptReadyLocked(id, &s, role, ti, args)
 	case "ask":
-		return e.acceptAskLocked(id, &s, role, ti, args)
+		return e.acceptAskLocked(id, &s, role, ti, runID, args)
 	case "answer":
 		return e.acceptAnswerLocked(id, &s, role, args)
 	case "recap decide":
@@ -289,7 +289,7 @@ const maxRejectWhyRunes = 500
 // cleanWhy cleans a free-text reason and refuses it when empty or over the cap.
 func (e *Engine) cleanWhy(id, raw, what, flag string) (string, error) {
 	why := flow.CleanText(raw)
-	if why == "" {
+	if why == "" && what != "" {
 		return "", e.refuse(id, "why_missing", fmt.Sprintf("A %s must carry a non-empty reason (%s \"<why>\").", what, flag))
 	}
 	if utf8.RuneCountInString(why) > maxRejectWhyRunes {
@@ -508,30 +508,30 @@ func tokenHash(token string) string {
 
 // runByTokenLocked finds the run holding token: a project's coordinator or a
 // task's open attempt worker.
-func (e *Engine) runByTokenLocked(token string) (string, flow.State, string, int) {
-	h := tokenHash(token)
+func (e *Engine) runByTokenLocked(token string) (id string, state flow.State, role string, ti int, runID string) {
+	h, ti := tokenHash(token), -1
 	same := func(t string) bool {
 		return token != "" && t != "" && subtle.ConstantTimeCompare([]byte(t), []byte(h)) == 1
 	}
-	for _, ent := range e.projectDirs() {
-		s, err := LoadState(e.Paths.State(ent.Name()))
-		if err != nil {
-			continue
-		}
+	e.eachStateLocked(func(pid string, s flow.State) bool {
 		if same(s.Project.RunTokenHash) {
-			return ent.Name(), s, flow.RoleCoordinator, -1
+			id, state, role, runID = pid, s, flow.RoleCoordinator, s.Project.RunID
+			return false
 		}
-		for ti, t := range s.Tasks {
+		for i, t := range s.Tasks {
 			if n := len(t.Attempts); n > 0 {
 				if a := t.Attempts[n-1]; same(a.RunTokenHash) {
-					return ent.Name(), s, flow.RoleWorker, ti
+					id, state, role, ti, runID = pid, s, flow.RoleWorker, i, a.RunID
+					return false
 				} else if a.Review != nil && same(a.Review.RunTokenHash) {
-					return ent.Name(), s, flow.RoleReviewer, ti
+					id, state, role, ti, runID = pid, s, flow.RoleReviewer, i, a.Review.RunID
+					return false
 				}
 			}
 		}
-	}
-	return "", flow.State{}, "", -1
+		return true
+	})
+	return
 }
 
 type planOutcome flow.Outcome

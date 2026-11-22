@@ -312,6 +312,14 @@ func (e *Engine) projectDirs() []os.DirEntry {
 	return entries
 }
 
+func (e *Engine) eachStateLocked(fn func(id string, s flow.State) bool) {
+	for _, ent := range e.projectDirs() {
+		if s, err := LoadState(e.Paths.State(ent.Name())); err == nil && !fn(ent.Name(), s) {
+			return
+		}
+	}
+}
+
 func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	pools := e.refreshPools(ctx, id)
 	codexProbe := e.probeCodexHome(ctx, id)
@@ -1917,6 +1925,20 @@ func appendHeld(held []string, msgs ...string) []string {
 
 var errNoWorkerRun = errors.New("factory: no worker run")
 
+func (e *Engine) deliverRunLocked(ctx context.Context, rec *flow.RunRecord, s flow.Settings, msg string, urgent bool, now time.Time) (string, flow.Decision, error) {
+	next, row, dec := flow.StepRun(*rec, flow.RunEvent{Kind: flow.EvDeliver, Msg: msg, Urgent: urgent}, s, now)
+	if row.ID == "R36" {
+		return row.ID, dec, errNoWorkerRun
+	}
+	for _, act := range dec.Asked {
+		if err := world.ActRun(ctx, e.HC, next, act, msg); err != nil {
+			return row.ID, dec, err
+		}
+	}
+	*rec = next
+	return row.ID, dec, nil
+}
+
 func (e *Engine) deliverWorkerLocked(ctx context.Context, id, taskID string, s *flow.State, a *flow.Attempt, msg string, urgent bool) error {
 	if a != nil && a.RunID != "" && e.HC != nil && (a.Run == nil || a.Run.State == flow.PhaseWorking && a.Run.Status == "") {
 		if a.Run == nil {
@@ -1935,19 +1957,13 @@ func (e *Engine) deliverWorkerLocked(ctx context.Context, id, taskID string, s *
 		}
 		return errNoWorkerRun
 	}
-	next, row, dec := flow.StepRun(*a.Run, flow.RunEvent{Kind: flow.EvDeliver, Msg: msg, Urgent: urgent}, s.Settings, e.now())
-	if row.ID == "R36" {
+	rowID, dec, err := e.deliverRunLocked(ctx, a.Run, s.Settings, msg, urgent, e.now())
+	if rowID == "R36" {
 		a.Held = appendHeld(a.Held, msg)
-		e.commitLogLocked(id, s, LogLine{By: "engine", Task: taskID, Rule: row.ID, Decision: dec.Why, Why: fmt.Sprintf("worker run %s ended (%s): held on task", a.Run.Address, a.Run.Result)})
+		e.commitLogLocked(id, s, LogLine{By: "engine", Task: taskID, Rule: rowID, Decision: dec.Why, Why: fmt.Sprintf("worker run %s ended (%s): held on task", a.Run.Address, a.Run.Result)})
 		return nil
 	}
-	for _, act := range dec.Asked {
-		if err := world.ActRun(ctx, e.HC, next, act, msg); err != nil {
-			return err
-		}
-	}
-	*a.Run = next
-	return nil
+	return err
 }
 
 func (e *Engine) execTellFindings(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
@@ -1992,13 +2008,9 @@ func (e *Engine) execNudgeReviewer(ctx context.Context, _ string, s *flow.State,
 		return "reviewer already gone", false, nil
 	}
 	msg := fmt.Sprintf("You went idle with no report tag. End your reply with `<report>{\"code\":%q,\"round\":%d,\"head\":%q,\"verdict\":\"pass\"|\"changes\",\"majors\":N}</report>`.", a.Review.Code, a.Review.Round, a.Review.Head)
-	next, _, dec := flow.StepRun(*a.Review.Run, flow.RunEvent{Kind: flow.EvDeliver, Msg: msg}, s.Settings, e.now())
-	for _, act := range dec.Asked {
-		if err := world.ActRun(ctx, e.HC, next, act, msg); err != nil {
-			return "", false, err
-		}
+	if _, _, err := e.deliverRunLocked(ctx, a.Review.Run, s.Settings, msg, false, e.now()); err != nil {
+		return "", false, err
 	}
-	*a.Review.Run = next
 	return fmt.Sprintf("nudged reviewer %s for report tag (round %d)", a.Review.RunID, a.Review.Round), false, nil
 }
 

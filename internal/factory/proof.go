@@ -3,9 +3,8 @@ package factory
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
+	"errors"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -37,42 +36,45 @@ func (e *Engine) MintProof(askID, option, inputKind, deviceID string) (AnswerPro
 	if !proofSourceOK(inputKind, deviceID) || askID == "" || option == "" {
 		return AnswerProof{}, e.refuse("", "proof_rejected", "Owner answer proof requires tap or voice input from a paired device or live voice session.")
 	}
-	var b [6]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return AnswerProof{}, err
-	}
 	now := e.now()
-	p := AnswerProof{ID: "prf-" + hex.EncodeToString(b[:]), AskID: askID, Option: option, InputKind: inputKind, DeviceID: deviceID, At: now}
-	if e.Paths.DataDir != "" {
-		data, err := json.MarshalIndent(append(e.loadProofsLocked(now), p), "", "  ")
-		if err != nil {
-			return AnswerProof{}, err
+	all, err := e.loadProofsLocked(now)
+	var b [6]byte
+	var p AnswerProof
+	if err == nil {
+		if _, err = rand.Read(b[:]); err == nil {
+			p = AnswerProof{ID: "prf-" + hex.EncodeToString(b[:]), AskID: askID, Option: option, InputKind: inputKind, DeviceID: deviceID, At: now}
+			err = writeJSON(e.Paths.proofs(), append(all, p))
 		}
-		if err := writeAtomic(filepath.Join(e.Paths.DataDir, "factory", "proofs.json"), append(data, '\n')); err != nil {
-			return AnswerProof{}, err
-		}
+	}
+	if err != nil {
+		return AnswerProof{}, err
 	}
 	return p, nil
 }
 
-func (e *Engine) loadProofsLocked(now time.Time) []AnswerProof {
-	var all []AnswerProof
-	if data, err := os.ReadFile(filepath.Join(e.Paths.DataDir, "factory", "proofs.json")); e.Paths.DataDir == "" || err != nil || json.Unmarshal(data, &all) != nil {
-		return nil
+func (e *Engine) loadProofsLocked(now time.Time) ([]AnswerProof, error) {
+	if strings.TrimSpace(e.Paths.DataDir) == "" {
+		return nil, errors.New("factory: DataDir is required for answer proofs")
 	}
-	return slices.DeleteFunc(all, func(p AnswerProof) bool { return now.Sub(p.At) > proofRetention })
+	var all []AnswerProof
+	if err := readJSON(e.Paths.proofs(), &all); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	return slices.DeleteFunc(all, func(p AnswerProof) bool { return now.Sub(p.At) > proofRetention }), nil
 }
 
-func (e *Engine) verifyProofLocked(askID, resolved, raw string, proof AnswerProof, now time.Time) (string, string) {
-	switch {
-	case strings.TrimSpace(proof.ID) == "":
-		return "proof_required", "Gated asks require an owner AnswerProof from a paired device or live voice."
-	case !proofSourceOK(proof.InputKind, proof.DeviceID):
-		return "proof_rejected", "Owner answer proof must come from a paired device tap or live voice."
-	case slices.ContainsFunc(e.loadProofsLocked(now), func(p AnswerProof) bool {
-		return p.ID == proof.ID && p.AskID == askID && (p.Option == resolved || p.Option == raw) && p.InputKind == proof.InputKind && p.DeviceID == proof.DeviceID
-	}):
-		return "", ""
+func (e *Engine) verifyProofLocked(askID, resolved, raw string, proof AnswerProof, now time.Time) (string, string, error) {
+	if strings.TrimSpace(proof.ID) == "" {
+		return "proof_required", "Gated asks require an owner AnswerProof from a paired device or live voice.", nil
 	}
-	return "proof_rejected", "AnswerProof is unknown, expired, or does not match this ask and option."
+	if !proofSourceOK(proof.InputKind, proof.DeviceID) {
+		return "proof_rejected", "Owner answer proof must come from a paired device tap or live voice.", nil
+	}
+	all, err := e.loadProofsLocked(now)
+	if err != nil || slices.ContainsFunc(all, func(p AnswerProof) bool {
+		return p.ID == proof.ID && p.AskID == askID && (p.Option == resolved || p.Option == raw) && p.InputKind == proof.InputKind && p.DeviceID == proof.DeviceID
+	}) {
+		return "", "", err
+	}
+	return "proof_rejected", "AnswerProof is unknown, expired, or does not match this ask and option.", nil
 }

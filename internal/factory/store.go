@@ -62,6 +62,7 @@ func (p Paths) Brief(id, task string) string {
 func (p Paths) poolCooldowns() string {
 	return filepath.Join(p.DataDir, "factory", "pool-cooldowns.json")
 }
+func (p Paths) proofs() string { return filepath.Join(p.DataDir, "factory", "proofs.json") }
 
 func (p Paths) CodexHome() string { return filepath.Join(p.DataDir, "factory", "codex-home") }
 
@@ -84,22 +85,25 @@ type LogLine struct {
 // the engine never guesses (design.md 15).
 func LoadState(path string) (flow.State, error) {
 	s := flow.State{Settings: flow.DefaultSettings()} // a setting newer than the file keeps its default
-	if err := guardTestPath(path); err != nil {
-		return s, err
-	}
-	data, err := os.ReadFile(path)
+	return s, readJSON(path, &s)
+}
+
+func readJSON(path string, dst any) error {
+	data, err := readGuarded(path)
 	if err != nil {
-		return s, err
+		return err
 	}
-	if err := json.Unmarshal(data, &s); err != nil {
-		return s, fmt.Errorf("factory: %s: %w", path, err)
+	if err := json.Unmarshal(data, dst); err != nil {
+		return fmt.Errorf("factory: %s: %w", path, err)
 	}
-	return s, nil
+	return nil
 }
 
 // SaveState writes state.json with a temporary file and a rename, mode 0600.
-func SaveState(path string, s flow.State) error {
-	data, err := json.MarshalIndent(s, "", "  ")
+func SaveState(path string, s flow.State) error { return writeJSON(path, s) }
+
+func writeJSON(path string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -132,10 +136,7 @@ func AppendLog(path string, l LogLine) error {
 // TrimLog drops log lines past seq, left by a crash between the log write
 // and the state write (design.md 14). A torn last line is dropped too.
 func TrimLog(path string, seq int64) error {
-	if err := guardTestPath(path); err != nil {
-		return err
-	}
-	data, err := os.ReadFile(path)
+	data, err := readGuarded(path)
 	if os.IsNotExist(err) {
 		return nil
 	} else if err != nil {
@@ -178,6 +179,13 @@ func guardTestPath(path string) error {
 		return fmt.Errorf("factory: %s is outside the temp dir under go test", path)
 	}
 	return nil
+}
+
+func readGuarded(path string) ([]byte, error) {
+	if err := guardTestPath(path); err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
 }
 
 func writeAtomic(path string, data []byte) error {
