@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
@@ -113,12 +114,17 @@ func TestSweepFindersAndUnknown(t *testing.T) {
 	if len(byProbe["terminals"].Items) != 2 {
 		t.Fatalf("terminals = %+v, want 2 stray terminals", byProbe["terminals"].Items)
 	}
-	gotTerms := map[string]string{}
+	var gotStray, gotEnded bool
 	for _, it := range byProbe["terminals"].Items {
-		gotTerms[it.Key] = it.Summary
+		if strings.Contains(it.Summary, "a stray agent terminal "+stray.Address+" with factory labels") {
+			gotStray = true
+		}
+		if strings.Contains(it.Summary, endedStray.Address) {
+			gotEnded = true
+		}
 	}
-	if !strings.Contains(gotTerms[stray.Address], "a stray agent terminal "+stray.Address+" with factory labels") || gotTerms[endedStray.Address] == "" {
-		t.Fatalf("unexpected stray terminals: %+v", gotTerms)
+	if !gotStray || !gotEnded {
+		t.Fatalf("unexpected stray terminals: %+v", byProbe["terminals"].Items)
 	}
 
 	// Worktrees: wt2 (done task T2) and wtOrphan (no open attempt), NOT wt1.
@@ -139,10 +145,10 @@ func TestSweepFindersAndUnknown(t *testing.T) {
 		t.Fatalf("branches = %+v, want only task/orphan-only", gotBr)
 	}
 
-	// Local base ahead: 2 commits ahead, keyed by localMainSHA.
+	// Local base ahead: 2 commits ahead, keyed by localMainSHA, naming the compared ref.
 	lb := byProbe["local_base"].Items
-	if len(lb) != 1 || lb[0].Key != localMainSHA || lb[0].Summary != "the local main is 2 commits ahead of origin/main" {
-		t.Fatalf("local_base = %+v, want 2 commits ahead keyed by %s", lb, localMainSHA)
+	if len(lb) != 1 || lb[0].Key != localMainSHA || !strings.Contains(lb[0].Summary, "the local main is 2 commits ahead") || !strings.Contains(lb[0].Summary, "refs/remotes/origin/main") {
+		t.Fatalf("local_base = %+v, want 2 commits ahead naming refs/remotes/origin/main keyed by %s", lb, localMainSHA)
 	}
 
 	// Probe errors must report Unknown, never a false negative.
@@ -370,5 +376,316 @@ func TestSweepWithoutStateReportsUnknownAndRunsLocalBase(t *testing.T) {
 	lb := byProbe["local_base"]
 	if lb.Unknown != "" || len(lb.Items) != 1 || !strings.Contains(lb.Items[0].Summary, "1 commit ahead") {
 		t.Errorf("local_base without state = %+v, want 1 commit ahead", lb)
+	}
+}
+
+// Slice 5b row 5b.10 (design.md 5, 11.3): terminal ownership matches run label
+// plus creation time (with a legacy fallback when older state lacks them), and
+// stray terminals at a reused address with a new creation time get distinct keys.
+func TestSweepTerminalsIdentityAndReusedAddress(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	cwd := t.TempDir()
+
+	// Active worker run with modern identity: sheepdog.run + CreatedMS.
+	stModern := flow.State{
+		Project: flow.Project{ID: "proj-id", Folder: cwd},
+		Tasks: []flow.Task{{
+			ID: "T1",
+			Attempts: []flow.Attempt{{
+				RunID: "t1",
+				Run: &flow.RunRecord{
+					ID:        "run-w1",
+					Address:   "t1",
+					Role:      flow.RoleWorker,
+					State:     flow.PhaseWorking,
+					CreatedMS: 1000,
+				},
+			}},
+		}},
+	}
+
+	t.Run("exact run label and creation time is owned", func(t *testing.T) {
+		srv.Add(hc.Terminal{
+			Address: "t1", Name: "worker-1", State: "live", Cwd: cwd, CreatedMS: 1000,
+			Labels: map[string]string{"sheepdog.project": "proj-id", "sheepdog.role": flow.RoleWorker, "sheepdog.run": "run-w1"},
+		})
+		defer srv.Remove("t1")
+		p := SweepTerminals(ctx, client, stModern)
+		if p.Unknown != "" || len(p.Items) != 0 {
+			t.Fatalf("matching run label + CreatedMS = %+v, want 0 strays", p)
+		}
+	})
+
+	t.Run("reused address with different creation time and label is stray", func(t *testing.T) {
+		srv.Add(hc.Terminal{
+			Address: "t1", Name: "worker-reused", State: "live", Cwd: cwd, CreatedMS: 2000,
+			Labels: map[string]string{"sheepdog.project": "proj-id", "sheepdog.role": flow.RoleWorker, "sheepdog.run": "run-other"},
+		})
+		defer srv.Remove("t1")
+		p := SweepTerminals(ctx, client, stModern)
+		if p.Unknown != "" || len(p.Items) != 1 {
+			t.Fatalf("reused address t1 with different run+CreatedMS = %+v, want 1 stray", p)
+		}
+	})
+
+	t.Run("same run label with different creation time is stray", func(t *testing.T) {
+		srv.Add(hc.Terminal{
+			Address: "t2", Name: "worker-recycled", State: "live", Cwd: cwd, CreatedMS: 2000,
+			Labels: map[string]string{"sheepdog.project": "proj-id", "sheepdog.role": flow.RoleWorker, "sheepdog.run": "run-w1"},
+		})
+		defer srv.Remove("t2")
+		p := SweepTerminals(ctx, client, stModern)
+		if p.Unknown != "" || len(p.Items) != 1 {
+			t.Fatalf("same run label with mismatched CreatedMS = %+v, want 1 stray", p)
+		}
+	})
+
+	t.Run("matching run label and creation time at moved address is owned", func(t *testing.T) {
+		srv.Add(hc.Terminal{
+			Address: "t3", Name: "worker-1", State: "live", Cwd: cwd, CreatedMS: 1000,
+			Labels: map[string]string{"sheepdog.project": "proj-id", "sheepdog.role": flow.RoleWorker, "sheepdog.run": "run-w1"},
+		})
+		defer srv.Remove("t3")
+		p := SweepTerminals(ctx, client, stModern)
+		if p.Unknown != "" || len(p.Items) != 0 {
+			t.Fatalf("matching run label + CreatedMS at different address = %+v, want 0 strays", p)
+		}
+	})
+
+	t.Run("legacy fallback without RunRecord or CreatedMS", func(t *testing.T) {
+		srv.Add(hc.Terminal{
+			Address: "t-leg1", Name: "coord-leg", State: "live", Cwd: cwd, CreatedMS: 5000,
+			Labels: map[string]string{"sheepdog.project": "proj-leg", "sheepdog.role": flow.RoleCoordinator},
+		})
+		srv.Add(hc.Terminal{
+			Address: "t-leg2", Name: "worker-leg", State: "live", Cwd: cwd, CreatedMS: 6000,
+			Labels: map[string]string{"sheepdog.project": "proj-leg", "sheepdog.role": flow.RoleWorker, "sheepdog.run": "run-leg"},
+		})
+		srv.Add(hc.Terminal{
+			Address: "t-leg3", Name: "rev-leg", State: "live", Cwd: cwd, CreatedMS: 7000,
+			Labels: map[string]string{"sheepdog.project": "proj-leg", "sheepdog.role": flow.RoleReviewer},
+		})
+		defer func() {
+			srv.Remove("t-leg1")
+			srv.Remove("t-leg2")
+			srv.Remove("t-leg3")
+		}()
+		stLegacy := flow.State{
+			Project: flow.Project{ID: "proj-leg", Folder: cwd, RunID: "coord-leg"}, // nil RunRecord: legacy name match
+			Tasks: []flow.Task{{
+				ID: "T1",
+				Attempts: []flow.Attempt{{
+					RunID: "t-leg2",
+					Run:   &flow.RunRecord{ID: "run-leg", Address: "t-leg2", State: flow.PhaseWorking}, // CreatedMS==0: legacy run-label match
+					Review: &flow.ReviewRun{
+						RunID: "t-leg3",
+						Run:   &flow.RunRecord{Address: "t-leg3", State: flow.PhaseWorking}, // ID=="" && CreatedMS==0: legacy address match
+					},
+				}},
+			}},
+		}
+		p := SweepTerminals(ctx, client, stLegacy)
+		if p.Unknown != "" || len(p.Items) != 0 {
+			t.Fatalf("legacy fallback = %+v, want 0 strays", p)
+		}
+	})
+
+	t.Run("reused stray address with new creation time gets distinct key", func(t *testing.T) {
+		stEmpty := flow.State{Project: flow.Project{ID: "proj-stray", Folder: cwd}}
+		srv.Add(hc.Terminal{
+			Address: "t9", Name: "stray-1", State: "live", Cwd: cwd, CreatedMS: 1000,
+			Labels: map[string]string{"sheepdog.project": "proj-stray", "sheepdog.role": flow.RoleWorker, "sheepdog.run": "run-s1"},
+		})
+		p1 := SweepTerminals(ctx, client, stEmpty)
+		if p1.Unknown != "" || len(p1.Items) != 1 {
+			t.Fatalf("first stray = %+v, want 1 item", p1)
+		}
+		srv.Add(hc.Terminal{
+			Address: "t9", Name: "stray-2", State: "live", Cwd: cwd, CreatedMS: 2000,
+			Labels: map[string]string{"sheepdog.project": "proj-stray", "sheepdog.role": flow.RoleWorker, "sheepdog.run": "run-s2"},
+		})
+		defer srv.Remove("t9")
+		p2 := SweepTerminals(ctx, client, stEmpty)
+		if p2.Unknown != "" || len(p2.Items) != 1 {
+			t.Fatalf("second stray = %+v, want 1 item", p2)
+		}
+		if p1.Items[0].Key == p2.Items[0].Key {
+			t.Fatalf("reused address t9 with CreatedMS 1000 vs 2000 produced identical Key %q, want distinct episode keys", p1.Items[0].Key)
+		}
+	})
+}
+
+// Slice 5b row 5b.10 (design.md 11.3; KB-WKT-5): a done task whose cleanup is
+// still in progress (not yet started, asked, transiently failing under retry
+// budget, or retrying after retry) is NOT reported as retained; only a
+// completed cleanup that retained the worktree or an exhausted/failed cleanup
+// is reported, and the worktrees stay in place.
+func TestSweepDoneWorktreeCleanupInProgressVsRetainedOrFailed(t *testing.T) {
+	ctx := context.Background()
+	bare := filepath.Join(t.TempDir(), "remote.git")
+	repo := filepath.Join(t.TempDir(), "repo")
+	wtRoot := filepath.Join(t.TempDir(), "worktrees")
+	mustGit(t, t.TempDir(), "init", "--bare", "--initial-branch=main", bare)
+	mustGit(t, t.TempDir(), "clone", bare, repo)
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+	mustGit(t, repo, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("init\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repo, "add", "a.txt")
+	mustGit(t, repo, "commit", "-m", "init")
+	mustGit(t, repo, "push", "-u", "origin", "main")
+	mustGit(t, repo, "remote", "set-head", "origin", "main")
+
+	mkWT := func(id string) Worktree {
+		wt, err := fixtureGit(t).NewWorktree(ctx, repo, filepath.Join(wtRoot, id+"-1"), id, "case")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return wt
+	}
+	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	wtPending := mkWT("T1")
+	wtAsked := mkWT("T2")
+	wtRetrying := mkWT("T3")
+	wtAfterRetry := mkWT("T4")
+	wtRetained := mkWT("T5")
+	wtExhausted := mkWT("T6")
+	wtSettled := mkWT("T7")
+
+	st := flow.State{
+		Project:  flow.Project{ID: "proj-clean", Folder: repo},
+		Settings: flow.DefaultSettings(), // EnsureFailures == 3
+		Tasks: []flow.Task{
+			{ID: "T1", Done: &flow.Merged{MergedCommit: "c1"}, Attempts: []flow.Attempt{{Branch: wtPending.Branch, Worktree: wtPending.Path}}},
+			{ID: "T2", Done: &flow.Merged{MergedCommit: "c2"}, Attempts: []flow.Attempt{{Branch: wtAsked.Branch, Worktree: wtAsked.Path, Acts: []flow.Act{{Key: flow.AskCleanup, Result: "asked", At: now}}}}},
+			{ID: "T3", Done: &flow.Merged{MergedCommit: "c3"}, Attempts: []flow.Attempt{{Branch: wtRetrying.Branch, Worktree: wtRetrying.Path, Acts: []flow.Act{{Key: flow.AskCleanup, Result: "failed", Class: flow.ClassTransient, Err: "temporary error", At: now}}}}},
+			{ID: "T4", Done: &flow.Merged{MergedCommit: "c4"}, Attempts: []flow.Attempt{{Branch: wtAfterRetry.Branch, Worktree: wtAfterRetry.Path, Acts: []flow.Act{
+				{Key: flow.AskCleanup, Result: "failed", Class: flow.ClassTransient, At: now.Add(-3 * time.Minute)},
+				{Key: flow.AskCleanup, Result: "failed", Class: flow.ClassTransient, At: now.Add(-2 * time.Minute)},
+				{Key: flow.AskCleanup, Result: "failed", Class: flow.ClassTransient, At: now.Add(-1 * time.Minute)},
+				{Key: flow.AskRetry, Result: "done", At: now},
+			}}}},
+			{ID: "T5", Done: &flow.Merged{MergedCommit: "c5"}, Attempts: []flow.Attempt{{Branch: wtRetained.Branch, Worktree: wtRetained.Path, Acts: []flow.Act{{Key: flow.AskCleanup, Result: "done", At: now}}}}},
+			{ID: "T6", Done: &flow.Merged{MergedCommit: "c6"}, Attempts: []flow.Attempt{{Branch: wtExhausted.Branch, Worktree: wtExhausted.Path, Acts: []flow.Act{
+				{Key: flow.AskCleanup, Result: "failed", Class: flow.ClassTransient, At: now.Add(-3 * time.Minute)},
+				{Key: flow.AskCleanup, Result: "failed", Class: flow.ClassTransient, At: now.Add(-2 * time.Minute)},
+				{Key: flow.AskCleanup, Result: "failed", Class: flow.ClassTransient, At: now.Add(-1 * time.Minute)},
+			}}}},
+			{ID: "T7", Done: &flow.Merged{MergedCommit: "c7"}, Attempts: []flow.Attempt{{Branch: wtSettled.Branch, Worktree: wtSettled.Path, Acts: []flow.Act{{Key: flow.AskCleanup, Result: "failed", Class: flow.ClassSettled, Err: "permission denied", At: now}}}}},
+		},
+	}
+
+	byProbe := map[string]flow.SweepProbe{}
+	for _, p := range fixtureGit(t).Sweep(ctx, nil, repo, wtRoot, st) {
+		byProbe[p.Probe] = p
+	}
+	if byProbe["worktrees"].Unknown != "" {
+		t.Fatalf("worktrees unexpected unknown: %s", byProbe["worktrees"].Unknown)
+	}
+	got := map[string]string{}
+	for _, it := range byProbe["worktrees"].Items {
+		got[it.Key] = it.Summary
+	}
+	for _, tc := range []struct {
+		id, path string
+		want     bool
+	}{
+		{"T1 (pending cleanup)", wtPending.Path, false},
+		{"T2 (asked in flight)", wtAsked.Path, false},
+		{"T3 (1 transient failure, retrying)", wtRetrying.Path, false},
+		{"T4 (retrying after AskRetry)", wtAfterRetry.Path, false},
+		{"T5 (cleanup done, retained)", wtRetained.Path, true},
+		{"T6 (cleanup exhausted)", wtExhausted.Path, true},
+		{"T7 (cleanup settled failure)", wtSettled.Path, true},
+	} {
+		_, present := got[tc.path]
+		if present != tc.want {
+			t.Errorf("%s: reported=%v, want %v (summary=%q)", tc.id, present, tc.want, got[tc.path])
+		}
+		if _, err := os.Stat(tc.path); err != nil {
+			t.Errorf("%s: sweep modified or removed worktree %s: %v", tc.id, tc.path, err)
+		}
+	}
+}
+
+// Slice 5b row 5b.10 (design.md 11.3; KB-ENV-9): the base-ahead line names the
+// compared tracking ref and explains its local/fetched basis without fetching,
+// and an unreadable local_base probe names its reason.
+func TestSweepLocalBaseNamesComparedRefAndUnknownReason(t *testing.T) {
+	ctx := context.Background()
+	bare := filepath.Join(t.TempDir(), "remote.git")
+	repo := filepath.Join(t.TempDir(), "repo")
+	other := filepath.Join(t.TempDir(), "other")
+	mustGit(t, t.TempDir(), "init", "--bare", "--initial-branch=main", bare)
+	mustGit(t, t.TempDir(), "clone", bare, repo)
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+	mustGit(t, repo, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("init\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repo, "add", "a.txt")
+	mustGit(t, repo, "commit", "-m", "init")
+	mustGit(t, repo, "push", "-u", "origin", "main")
+	mustGit(t, repo, "remote", "set-head", "origin", "main")
+	remoteSHA := mustGit(t, repo, "rev-parse", "refs/remotes/origin/main")
+
+	// Advance remote bare repo from a second clone without fetching in repo.
+	mustGit(t, t.TempDir(), "clone", bare, other)
+	mustGit(t, other, "config", "user.email", "test@example.com")
+	mustGit(t, other, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(other, "remote.txt"), []byte("upstream\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, other, "add", "remote.txt")
+	mustGit(t, other, "commit", "-m", "remote move")
+	mustGit(t, other, "push", "origin", "main")
+
+	// Local main commits ahead of the last-fetched tracking ref.
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("ahead\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repo, "add", "a.txt")
+	mustGit(t, repo, "commit", "-m", "local ahead")
+
+	var lb flow.SweepProbe
+	for _, p := range fixtureGit(t).Sweep(ctx, nil, repo, "", flow.State{Project: flow.Project{ID: "proj-lb", Folder: repo}}) {
+		if p.Probe == "local_base" {
+			lb = p
+		}
+	}
+	if lb.Unknown != "" || len(lb.Items) != 1 {
+		t.Fatalf("local_base = %+v, want 1 item", lb)
+	}
+	summary := lb.Items[0].Summary
+	lower := strings.ToLower(summary)
+	if !strings.Contains(summary, "refs/remotes/origin/main") {
+		t.Errorf("local_base summary = %q, want compared ref refs/remotes/origin/main", summary)
+	}
+	if !strings.Contains(lower, "fetched") && !strings.Contains(lower, "tracking") && !strings.Contains(summary, remoteSHA[:7]) {
+		t.Errorf("local_base summary = %q, want comparison basis (fetched/tracking ref or %s)", summary, remoteSHA[:7])
+	}
+	// Sweep must never mutate or fetch the local tracking ref.
+	if gotSHA := mustGit(t, repo, "rev-parse", "refs/remotes/origin/main"); gotSHA != remoteSHA {
+		t.Fatalf("sweep mutated refs/remotes/origin/main from %s to %s", remoteSHA, gotSHA)
+	}
+
+	// Missing local base branch (detached HEAD, refs/heads/main deleted) must report
+	// unknown naming the missing local branch/ref rather than a bare exit status.
+	mustGit(t, repo, "checkout", "--detach", "HEAD")
+	mustGit(t, repo, "branch", "-D", "main")
+	lb = flow.SweepProbe{}
+	for _, p := range fixtureGit(t).Sweep(ctx, nil, repo, "", flow.State{Project: flow.Project{ID: "proj-lb", Folder: repo}}) {
+		if p.Probe == "local_base" {
+			lb = p
+		}
+	}
+	if lb.Unknown == "" || len(lb.Items) != 0 {
+		t.Fatalf("local_base without local main = %+v, want Unknown with 0 items", lb)
+	}
+	if !strings.Contains(lb.Unknown, "refs/heads/main") && !strings.Contains(strings.ToLower(lb.Unknown), "local") && !strings.Contains(lb.Unknown, "main") {
+		t.Errorf("local_base Unknown = %q, want plain reason naming missing local main branch", lb.Unknown)
 	}
 }
