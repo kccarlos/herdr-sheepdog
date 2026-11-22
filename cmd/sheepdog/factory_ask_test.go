@@ -280,3 +280,153 @@ func TestFactoryAskAndAnswerCLIFlagsAndRefusals(t *testing.T) {
 		t.Fatalf("malformed CLI invocations posted %d request(s)", len(calls)-before)
 	}
 }
+
+// TestFactoryAnswerCLIWhenWorkerDiedBetweenPasses verifies that `sheepdog factory answer`
+// succeeds (HTTP 200, exit 0) and holds the answer on Attempt.Held when an idle
+// worker terminal exited in hc before the next pass observed it (KB-ASK-10).
+func TestFactoryAnswerCLIWhenWorkerDiedBetweenPasses(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+
+	srv := hctest.New(t)
+	srv.OnExec = hctest.GitExec
+	t.Setenv("HC_SOCKET", srv.Path)
+	client := hc.NewClient(srv.Path)
+	paths := factory.Paths{DataDir: t.TempDir(), ClaudeConfig: filepath.Join(t.TempDir(), ".claude.json")}
+	eng := factory.New(paths, client)
+
+	repo := filepath.Join(t.TempDir(), "repo")
+	wt := filepath.Join(t.TempDir(), "wt")
+	gitRun := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		b, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, b)
+		}
+		return strings.TrimSpace(string(b))
+	}
+	if b, err := exec.Command("git", "init", "--initial-branch=main", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, b)
+	}
+	_ = os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main\n"), 0o600)
+	gitRun(repo, "add", "main.go")
+	gitRun(repo, "commit", "-m", "chore: init")
+	baseSHA := gitRun(repo, "rev-parse", "HEAD")
+	gitRun(repo, "worktree", "add", "-b", "task/proj-cli-dead-T1-1", wt)
+	_ = os.WriteFile(filepath.Join(wt, "feature.go"), []byte("package main\n// committed work\n"), 0o600)
+	gitRun(wt, "add", "feature.go")
+	gitRun(wt, "commit", "-m", "feat: partial work")
+
+	idleAt := uint64(time.Now().Add(-time.Minute).UnixMilli())
+	srv.Add(hc.Terminal{
+		Address: "coord-1", Name: "coord-1", State: "live", CreatedMS: 10, StatusMS: &idleAt,
+		Labels: map[string]string{"sheepdog.project": "proj-cli-dead", "sheepdog.role": flow.RoleCoordinator, "sheepdog.run": "run-coord"},
+		Status: &hc.Status{App: "claude-code", State: "idle"},
+	})
+	srv.Add(hc.Terminal{
+		Address: "worker-1", Name: "worker-1", State: "live", CreatedMS: 20, StatusMS: &idleAt,
+		Labels: map[string]string{"sheepdog.project": "proj-cli-dead", "sheepdog.role": flow.RoleWorker, "sheepdog.task": "T1", "sheepdog.run": "run-worker"},
+		Status: &hc.Status{App: "claude-code", State: "idle"},
+	})
+
+	st := flow.State{
+		Seq:      1,
+		Settings: flow.DefaultSettings(),
+		Project: flow.Project{
+			ID: "proj-cli-dead", Folder: repo, Goal: "Build feature", Started: true,
+			RunID: "coord-1", RunTokenHash: testTokenSHA("tok-coord-cli"),
+			Run: &flow.RunRecord{ID: "run-coord", Address: "coord-1", CreatedMS: 10, Role: flow.RoleCoordinator, CLI: "claude", State: flow.PhaseIdle, Status: "idle", StatusReported: true},
+		},
+		Tasks: []flow.Task{{
+			ID: "T1", Title: "feat: add cache", EstimateLines: 50,
+			Outcomes: []flow.Outcome{{Text: "cache works", ProvedBy: "cmd: go test ./..."}},
+			Attempts: []flow.Attempt{{
+				BaseCommit: baseSHA, Branch: "task/proj-cli-dead-T1-1", Worktree: wt, SizeCap: 100,
+				RunID: "worker-1", RunTokenHash: testTokenSHA("tok-worker-cli"),
+				Run:     &flow.RunRecord{ID: "run-worker", Address: "worker-1", CreatedMS: 20, Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseIdle, Status: "idle", StatusReported: true},
+				Ready:   []flow.Ready{},
+				Rounds:  []flow.Round{},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done"}},
+			}},
+		}},
+	}
+	if err := factory.SaveState(paths.State("proj-cli-dead"), st); err != nil {
+		t.Fatal(err)
+	}
+
+	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Token string          `json:"token"`
+			Verb  string          `json:"verb"`
+			Args  json.RawMessage `json:"args"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := eng.Report(req.Token, req.Verb, req.Args); err != nil {
+			var ref *factory.Refusal
+			code := http.StatusInternalServerError
+			if errors.As(err, &ref) {
+				code = http.StatusBadRequest
+			}
+			w.WriteHeader(code)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	t.Cleanup(httpSrv.Close)
+	_, port, _ := net.SplitHostPort(httpSrv.Listener.Addr().String())
+	t.Setenv("SHEEPDOG_WEB_PORT", port)
+	t.Chdir(wt)
+
+	t.Setenv("SHEEPDOG_RUN_TOKEN", "tok-worker-cli")
+	var out, errBuf bytes.Buffer
+	code := run(context.Background(), []string{
+		"factory", "report", "ask", "Keep cache in SQLite or Plain JSON?",
+		"--option", "SQLite", "--option", "Plain JSON", "--recommend", "SQLite",
+	}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("report ask exit=%d stdout=%q stderr=%q", code, out.String(), errBuf.String())
+	}
+	loaded, err := factory.LoadState(paths.State("proj-cli-dead"))
+	if err != nil || len(loaded.Asks) != 1 {
+		t.Fatalf("State.Asks = %+v (err=%v)", loaded.Asks, err)
+	}
+	askID := loaded.Asks[0].ID
+
+	// Worker terminal dies between passes while state.json still shows PhaseIdle.
+	if _, err := client.Kill(context.Background(), "worker-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("SHEEPDOG_RUN_TOKEN", "tok-coord-cli")
+	out.Reset()
+	errBuf.Reset()
+	code = run(context.Background(), []string{
+		"factory", "answer", askID, "Plain JSON", "--why", "avoid extra driver",
+	}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("factory answer when worker died between passes exit=%d stdout=%q stderr=%q", code, out.String(), errBuf.String())
+	}
+
+	loaded, err = factory.LoadState(paths.State("proj-cli-dead"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Asks[0].Status != flow.AskStatusAnswered || loaded.Asks[0].Answer != "Plain JSON" {
+		t.Fatalf("State.Asks after answer = %+v", loaded.Asks[0])
+	}
+	if held := loaded.Tasks[0].Attempts[0].Held; len(held) != 1 || !strings.Contains(held[0], "Plain JSON") || !strings.Contains(held[0], "avoid extra driver") {
+		t.Fatalf("Attempt.Held = %q, want 1 held answer with Plain JSON and reason", held)
+	}
+}
