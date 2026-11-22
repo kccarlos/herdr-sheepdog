@@ -350,7 +350,7 @@ func TestAntigravityPoolByModelFamily(t *testing.T) {
 	settings.PoolMinutes = 1
 	settings.PoolFloorPercent = 5
 
-	resolveWithPoolJSON := func(t *testing.T, name string, jsonOut string, cands []flow.Candidate) (flow.Intent, flow.ResolveReason) {
+	resolveWithPoolJSON := func(t *testing.T, _ string, jsonOut string, cands []flow.Candidate) (flow.Intent, flow.ResolveReason) {
 		t.Helper()
 		paths := testPaths(t)
 		eng := newGitTestEngine(t, paths, nil)
