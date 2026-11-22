@@ -60,6 +60,7 @@ type Project struct {
 	CoordWakesInFlight []Wake            `json:"coord_wakes_in_flight,omitempty"`
 	CoordWakeTurn      uint64            `json:"coord_wake_turn,omitempty"`    // J9: coordinator turn when CoordWakeAt was sent
 	CoordLastWakeAt    time.Time         `json:"coord_last_wake_at,omitempty"` // J13: last wake or heartbeat delivered
+	WaitKey            string            `json:"wait_key,omitempty"`           // episode key for J4/J6/J7 wait deduplication
 	Invariants         map[string]string `json:"invariants,omitempty"`         // active violation per invariant rule and subject (I1–I5)
 	SweepItems         map[string]string `json:"sweep_items,omitempty"`        // active sweep wake key -> probe name
 	SweepUnknown       map[string]string `json:"sweep_unknown,omitempty"`      // active unknown sweep probe -> reason
@@ -120,6 +121,7 @@ type Task struct {
 	Split         *Split                 `json:"split,omitempty"`
 	Parked        bool                   `json:"parked,omitempty"`
 	HoldWhy       string                 `json:"hold_why,omitempty"`
+	HoldKey       string                 `json:"hold_key,omitempty"`
 	LastRow       string                 `json:"last_row,omitempty"`
 	Recaps        []Recap                `json:"recaps,omitempty"`
 	Acts          []Act                  `json:"acts,omitempty"`
@@ -223,6 +225,7 @@ type Attempt struct {
 	Acts         []Act      `json:"acts"`
 	Restarts     int        `json:"restarts,omitempty"`
 	Held         []string   `json:"held,omitempty"`
+	HandoffPools []string   `json:"handoff_pools,omitempty"`
 	// NothingToChange is the worker's reason for "nothing to change"; a later
 	// ready or send-back clears it (design.md 3.2).
 	NothingToChange string `json:"nothing_to_change,omitempty"`

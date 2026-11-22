@@ -43,6 +43,7 @@ type Settings struct {
 	CoordinatorStartsPerHour   int `json:"coordinator_starts_per_hour"`    // J6 (design.md 10.1)
 	CoordinatorGapMinutes      int `json:"coordinator_gap_minutes"`        // J6 (design.md 10.1)
 	CoordinatorSilentMinutes   int `json:"coordinator_silent_minutes"`     // J9 (design.md 10.1)
+	HandoffMinutes             int `json:"handoff_minutes"`                // R31, J11 (design.md 10.1)
 	HeartbeatMinutes           int `json:"heartbeat_minutes"`              // J13 (design.md 10.1)
 	ContinuesPerTask           int `json:"continues_per_task"`             // a recap's continue (design.md 4.3, 10.1)
 	ContinueLines              int `json:"continue_lines"`                 // the cap after a continue (design.md 4.9)
@@ -107,7 +108,7 @@ const (
 )
 
 const CoordStartsMin, CoordStartsMax, CoordGapMin, CoordGapMax = 1, 10, 1, 60
-const CoordSilentMin, CoordSilentMax, HeartbeatMin, HeartbeatMax = 5, 240, 10, 600
+const CoordSilentMin, CoordSilentMax, HandoffMin, HandoffMax, HeartbeatMin, HeartbeatMax = 5, 240, 1, 30, 10, 600
 const PoolFloorMax, PoolMin, PoolMax = 50, 1, 60
 
 // DefaultSettings are the engine's defaults: two passing rounds on the final head
@@ -119,7 +120,7 @@ func DefaultSettings() Settings {
 		ChecksGraceMinutes: 5, CIStalledMinutes: 90, MainRedMinutes: 60, CIFailsPerHour: 3, BuildHours: 4, FlakeReruns: 1,
 		StartMinutes: 2, IdleGraceSeconds: 20, QuietMinutes: 20, InterruptSeconds: 90, ReviewMinutes: 45, BlockedMinutes: 10,
 		WorkerRestarts: 3, ReviewerRetries: 2, EnsureFailures: 3, EnsureBackoffMinutes: 1,
-		CoordinatorStartsPerHour: 3, CoordinatorGapMinutes: 10, CoordinatorSilentMinutes: 30, HeartbeatMinutes: 60,
+		CoordinatorStartsPerHour: 3, CoordinatorGapMinutes: 10, CoordinatorSilentMinutes: 30, HandoffMinutes: 5, HeartbeatMinutes: 60,
 		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2, MaxRunning: 3,
 		PoolFloorPercent: 5, PoolMinutes: 5, SweepMinutes: 5,
 		SecondReviewer: "opus",
@@ -149,6 +150,7 @@ func (s Settings) Changed() []string {
 		{"ensure_backoff_minutes", s.EnsureBackoffMinutes, d.EnsureBackoffMinutes},
 		{"ensure_failures", s.EnsureFailures, d.EnsureFailures},
 		{"flake_reruns", s.FlakeReruns, d.FlakeReruns},
+		{"handoff_minutes", s.HandoffMinutes, d.HandoffMinutes},
 		{"heartbeat_minutes", s.HeartbeatMinutes, d.HeartbeatMinutes},
 		{"idle_grace_seconds", s.IdleGraceSeconds, d.IdleGraceSeconds},
 		{"interrupt_seconds", s.InterruptSeconds, d.InterruptSeconds},
@@ -214,6 +216,7 @@ func (s Settings) Validate() error {
 		{"coordinator_starts_per_hour", s.CoordinatorStartsPerHour, CoordStartsMin, CoordStartsMax},
 		{"coordinator_gap_minutes", s.CoordinatorGapMinutes, CoordGapMin, CoordGapMax},
 		{"coordinator_silent_minutes", s.CoordinatorSilentMinutes, CoordSilentMin, CoordSilentMax},
+		{"handoff_minutes", s.HandoffMinutes, HandoffMin, HandoffMax},
 		{"heartbeat_minutes", s.HeartbeatMinutes, HeartbeatMin, HeartbeatMax},
 		{"continues_per_task", s.ContinuesPerTask, 0, ContinuesMax},
 		{"continue_lines", s.ContinueLines, 0, ContinueLinesMax},

@@ -1293,10 +1293,9 @@ func checkTasksLaunch(tasks []flow.Task, s flow.Settings) []string {
 			var why string
 			switch role {
 			case flow.RoleWorker:
-				var in flow.Intent
 				if worker.Model == "" {
-					in, why = resolveWorker(t, s, flow.ResolveFacts{})
-					worker = intentCandidate(in)
+					in, r := resolveWorker(t, s, flow.ResolveFacts{})
+					why, worker = r.Why, intentCandidate(in)
 				}
 			default:
 				_, why = flow.Resolve(role, t, s, flow.ResolveFacts{Worker: worker, Check: launchCapability(role)})

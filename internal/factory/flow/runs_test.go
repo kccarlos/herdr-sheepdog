@@ -34,6 +34,7 @@ func TestRunRowsCheckAndCompleteness(t *testing.T) {
 		{Kind: EvStop},
 		{Kind: EvDeliver, Msg: "m1"},
 		{Kind: EvDeliver, Msg: "stop", Urgent: true},
+		{Kind: EvPoolFloor, Msg: "write your handoff and stop"},
 	}
 	for _, st := range []string{PhaseStarting, PhaseWorking, PhaseIdle, PhaseBlocked} {
 		for _, ev := range events {
@@ -207,6 +208,12 @@ func TestRunRowsTable(t *testing.T) {
 		{"R29 auth blocked past limit stops as signed_out", RunRecord{State: PhaseBlocked, BlockedSince: now, BlockedKind: "auth"}, RunEvent{Kind: EvTick}, 10 * time.Minute,
 			"R29", PhaseEnded, EndSignedOut, []string{RunActStop}, nil},
 		{"R30 idle tick stays idle", RunRecord{State: PhaseIdle}, RunEvent{Kind: EvTick}, 0, "R30", PhaseIdle, "", nil, nil},
+		{"R31 working worker floor handoff", work, RunEvent{Kind: EvPoolFloor, Msg: "write your handoff and stop"}, 0, "R31", PhaseWorking, "", []string{RunActInterrupt, RunActSend}, func(t *testing.T, r RunRecord) {
+			if !r.HandoffSent || !r.HandoffDeadline.Equal(now.Add(time.Duration(def.HandoffMinutes)*time.Minute)) {
+				t.Errorf("R31 record = %+v", r)
+			}
+		}},
+		{"R32 reviewer ignores pool floor", RunRecord{State: PhaseWorking, Role: RoleReviewer}, RunEvent{Kind: EvPoolFloor}, 0, "R32", PhaseWorking, "", nil, nil},
 		{"R33 exit removes terminal", work, RunEvent{Kind: EvExit, Reason: "killed"}, 0,
 			"R33", PhaseEnded, EndExited, []string{RunActRemove}, func(t *testing.T, r RunRecord) {
 				if r.Reason != "killed" || r.TaskRun().State != RunGone {
