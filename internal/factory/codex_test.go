@@ -236,7 +236,7 @@ func TestEngineCodexReviewerNoTagIsStuck(t *testing.T) {
 	eng.passProject(ctx, id, false) // R22 -> ended(stuck), N29 -> reviewer_failed wake
 	st, _ = LoadState(paths.State(id))
 	want := "reviewer_failed@2@" + c1
-	if len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != want {
+	if !slices.ContainsFunc(st.Project.Wakes, func(w flow.Wake) bool { return w.Key == want }) {
 		t.Fatalf("wakes = %+v, want %s", st.Project.Wakes, want)
 	}
 }

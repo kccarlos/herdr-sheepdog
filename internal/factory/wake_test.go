@@ -264,7 +264,7 @@ func TestJ12DeliveryAtLeastOnce(t *testing.T) {
 	check("send failed", 0, 1)
 
 	fail.Store(false)
-	if err := os.WriteFile(paths.Log(id), nil, 0o400); err != nil { // the commit's log append fails
+	if err := os.Chmod(paths.Log(id), 0o400); err != nil { // the commit's log append fails
 		t.Fatal(err)
 	}
 	eng.passProject(ctx, id, false)

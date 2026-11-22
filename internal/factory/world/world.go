@@ -258,6 +258,10 @@ func StopRun(ctx context.Context, client *hc.Client, id string) error {
 	return StopLabeledRun(ctx, client, id, "", 0)
 }
 
+func matchesRunTerminal(t hc.Terminal, label string, createdMS uint64) bool {
+	return (label == "" || t.Labels["sheepdog.run"] == label) && (createdMS == 0 || t.CreatedMS == createdMS)
+}
+
 // StopLabeledRun checks the run label and creation time before stopping a terminal.
 func StopLabeledRun(ctx context.Context, client *hc.Client, id, label string, createdMS uint64) error {
 	if client == nil || id == "" {
@@ -269,7 +273,7 @@ func StopLabeledRun(ctx context.Context, client *hc.Client, id, label string, cr
 	} else if err != nil {
 		return hcFail(err)
 	}
-	if label != "" && t.Labels["sheepdog.run"] != label || createdMS != 0 && t.CreatedMS != createdMS {
+	if !matchesRunTerminal(t, label, createdMS) {
 		return nil
 	}
 	pid := 0

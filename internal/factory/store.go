@@ -60,6 +60,8 @@ func (p Paths) Brief(id, task string) string {
 	return filepath.Join(p.project(id), "briefs", task+".md")
 }
 
+func (p Paths) CodexHome() string { return filepath.Join(p.DataDir, "factory", "codex-home") }
+
 // LogLine is one pass in log.jsonl.
 type LogLine struct {
 	Seq      int64     `json:"seq"`
