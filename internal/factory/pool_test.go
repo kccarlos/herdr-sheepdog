@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -154,7 +155,11 @@ func poolNext(c *codexRoles) { *c.now = c.now.Add(6 * time.Minute) }
 // reasonHasTime reports whether a wait reason names the reset time as the
 // owner reads it on the clock ("until 11:30 AM"), in local time or UTC.
 func reasonHasTime(why string, reset time.Time) bool {
-	return strings.Contains(why, reset.Local().Format("3:04 PM")) || strings.Contains(why, reset.UTC().Format("3:04 PM"))
+	// A word boundary before the hour, so "2:04 AM" is not found in "12:04 AM".
+	has := func(clock string) bool {
+		return regexp.MustCompile(`(^|[^0-9])` + regexp.QuoteMeta(clock)).MatchString(why)
+	}
+	return has(reset.Local().Format("3:04 PM")) || has(reset.UTC().Format("3:04 PM"))
 }
 
 // roleRuns counts the started runs of one role (the coordinator may start
