@@ -480,7 +480,7 @@ func TestAgyObserveRunStatusesAndEarlyAuth(t *testing.T) {
 // non-gemini-* agy models on an unknown pool that never blocks.
 func TestAgyResolveAndAntigravityPool(t *testing.T) {
 	geminiCand := flow.Candidate{CLI: "agy", Model: agyWorkerModel, Effort: "medium"}
-	otherCand := flow.Candidate{CLI: "agy", Model: agyNonGemini, Effort: "medium"}
+	otherCand := flow.Candidate{CLI: "agy", Model: "custom-agy-model", Effort: "medium"}
 	claudeCand := flow.Candidate{CLI: "claude", Model: "sonnet", Effort: "medium"}
 
 	if got := poolProvider(geminiCand); got != "antigravity" {
@@ -506,7 +506,7 @@ func TestAgyResolveAndAntigravityPool(t *testing.T) {
 	fake := newPoolFake(t)
 	r.eng.poolRun = fake.run
 	fake.healthy(*r.now)
-	fake.set("antigravity", poolOut("antigravity", *r.now, &poolWin{80, 3 * time.Hour}, &poolWin{70, 72 * time.Hour}, nil))
+	fake.set("antigravity", antigravityPoolOut(*r.now, 80, 3*time.Hour, 70))
 
 	r.pass() // J7 coordinator
 	coordTok := (*r.runs)[0].Env["SHEEPDOG_RUN_TOKEN"]
@@ -526,14 +526,14 @@ func TestAgyResolveAndAntigravityPool(t *testing.T) {
 		t.Error("engine did not read codexbar --provider antigravity for agy gemini-* candidate")
 	}
 
-	// Floor exhaustion on antigravity holds an agy-gemini-only task, while a non-gemini agy task starts.
+	// Floor exhaustion on antigravity holds an agy-gemini-only task, while an unpooled agy task starts.
 	rFloor := newAgyRig(t, map[string][]flow.Candidate{
 		flow.RoleWorker: {geminiCand},
 	})
 	fakeFloor := newPoolFake(t)
 	rFloor.eng.poolRun = fakeFloor.run
 	fakeFloor.healthy(*rFloor.now)
-	fakeFloor.set("antigravity", poolOut("antigravity", *rFloor.now, &poolWin{80, 3 * time.Hour}, &poolWin{70, 72 * time.Hour}, nil))
+	fakeFloor.set("antigravity", antigravityPoolOut(*rFloor.now, 80, 3*time.Hour, 70))
 	rFloor.pass() // J7
 	tokFloor := (*rFloor.runs)[0].Env["SHEEPDOG_RUN_TOKEN"]
 	planBoth := `{"tasks":[` +
@@ -545,7 +545,7 @@ func TestAgyResolveAndAntigravityPool(t *testing.T) {
 	}
 	*rFloor.now = rFloor.now.Add(6 * time.Minute)
 	reset := rFloor.now.Add(90 * time.Minute)
-	fakeFloor.set("antigravity", poolOut("antigravity", *rFloor.now, &poolWin{2, 90 * time.Minute}, &poolWin{70, 72 * time.Hour}, nil))
+	fakeFloor.set("antigravity", antigravityPoolOut(*rFloor.now, 2, 90*time.Minute, 70))
 	for range 3 {
 		rFloor.pass()
 	}
@@ -554,7 +554,7 @@ func TestAgyResolveAndAntigravityPool(t *testing.T) {
 		t.Fatalf("gemini agy task at antigravity floor = attempts %d hold %q, want held naming antigravity and reset", len(stFloor.Tasks[0].Attempts), stFloor.Tasks[0].HoldWhy)
 	}
 	if len(stFloor.Tasks[1].Attempts) != 1 || stFloor.Tasks[1].Attempts[0].Run == nil || stFloor.Tasks[1].Attempts[0].Run.Model != agyNonGemini {
-		t.Fatalf("non-gemini agy task (unknown pool) did not start: %+v", stFloor.Tasks[1])
+		t.Fatalf("non-gemini agy task with healthy 3p pool did not start: %+v", stFloor.Tasks[1])
 	}
 }
 
