@@ -86,10 +86,10 @@ func (f *poolFake) set(provider string, out CommandOutput) {
 	f.out[provider] = out
 }
 
-func (f *poolFake) count(provider string) int {
+func (f *poolFake) claudeReads() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.calls[provider]
+	return f.calls["claude"]
 }
 
 func (f *poolFake) run(ctx context.Context, _ string, _ []string, argv ...string) CommandOutput {
@@ -174,9 +174,10 @@ func failedWake(st flow.State) bool {
 	return slices.ContainsFunc(st.Project.Wakes, func(w flow.Wake) bool { return strings.HasPrefix(w.Key, "reviewer_failed") })
 }
 
-// quotaWaits returns the logged "waiting" lines for the task whose reason is
+// quotaWaits returns the logged "waiting" lines for task T1 whose reason is
 // about quota (the coordinator's own J7 waits are not counted).
-func (c *codexRoles) quotaWaits(task string) []LogLine {
+func (c *codexRoles) quotaWaits() []LogLine {
+	const task = "T1"
 	var out []LogLine
 	for _, l := range c.logLinesWaiting() {
 		if l.Task == task && strings.Contains(strings.ToLower(l.Why), "quota") {
@@ -187,7 +188,8 @@ func (c *codexRoles) quotaWaits(task string) []LogLine {
 }
 
 // noWorktreeNoSlot checks the two things a held task must not have used.
-func (c *codexRoles) noWorktreeNoSlot(task string) {
+func (c *codexRoles) noWorktreeNoSlot() {
+	const task = "T1"
 	c.t.Helper()
 	st := c.state()
 	for _, tk := range st.Tasks {
@@ -288,12 +290,12 @@ func TestPoolFloorHoldsQueuedTaskThenStartsAfterReset(t *testing.T) {
 	if n := roleRuns(*c.runs, flow.RoleWorker); n != 0 {
 		t.Fatalf("a worker started at its pool floor: %d worker run(s), last argv[0:3] %q", n, c.last().Argv[:3])
 	}
-	c.noWorktreeNoSlot("T1")
+	c.noWorktreeNoSlot()
 	st := c.state()
 	if why := st.Tasks[0].HoldWhy; !strings.Contains(strings.ToLower(why), "quota") || !strings.Contains(why, "claude") || !reasonHasTime(why, reset) {
 		t.Fatalf("hold reason %q, want quota, the pool and the reset time %s", why, reset.Format("3:04 PM"))
 	}
-	if w := c.quotaWaits("T1"); len(w) != 1 || w[0].Task != "T1" || !reasonHasTime(w[0].Why, reset) {
+	if w := c.quotaWaits(); len(w) != 1 || w[0].Task != "T1" || !reasonHasTime(w[0].Why, reset) {
 		t.Fatalf("logged waits %+v, want exactly one for T1 naming the reset time", w)
 	}
 
@@ -311,8 +313,8 @@ func TestPoolFloorHoldsQueuedTaskThenStartsAfterReset(t *testing.T) {
 	if why := c.state().Tasks[0].HoldWhy; why != "" {
 		t.Errorf("hold reason %q stayed after the task started", why)
 	}
-	if len(c.quotaWaits("T1")) != 1 {
-		t.Errorf("waits logged %d times in all, want 1", len(c.quotaWaits("T1")))
+	if len(c.quotaWaits()) != 1 {
+		t.Errorf("waits logged %d times in all, want 1", len(c.quotaWaits()))
 	}
 }
 
@@ -335,8 +337,8 @@ func TestPoolWaitSurvivesRestart(t *testing.T) {
 		*c.now = c.now.Add(time.Minute)
 		c.pass()
 	}
-	c.noWorktreeNoSlot("T1")
-	if w := c.quotaWaits("T1"); len(w) != 1 {
+	c.noWorktreeNoSlot()
+	if w := c.quotaWaits(); len(w) != 1 {
 		t.Fatalf("waits logged %d times across a restart, want 1: %+v", len(w), w)
 	}
 	*c.now = reset.Add(time.Minute)
@@ -393,7 +395,7 @@ func TestPoolFloorEdges(t *testing.T) {
 			}
 			st := c.state()
 			if tc.held {
-				c.noWorktreeNoSlot("T1")
+				c.noWorktreeNoSlot()
 				if tc.reasonIn != nil && !reasonHasTime(st.Tasks[0].HoldWhy, c.now.Add(*tc.reasonIn)) {
 					t.Errorf("reason %q does not name the reset at %s", st.Tasks[0].HoldWhy, c.now.Add(*tc.reasonIn).Format("3:04 PM"))
 				}
@@ -427,8 +429,8 @@ func TestPoolHealthyCandidateIsUsedAndNoSlotIsSpent(t *testing.T) {
 		if len(*c.runs) != 2 || filepath.Base(c.last().Argv[0]) != "codex" || len(st.Tasks[0].Attempts) != 1 || st.Tasks[0].Attempts[0].Run == nil || st.Tasks[0].Attempts[0].Run.CLI != "codex" {
 			t.Fatalf("worker not started on codex: %d runs, last argv[0:3] %q, attempts %d", len(*c.runs), c.last().Argv[:3], len(st.Tasks[0].Attempts))
 		}
-		if st.Tasks[0].HoldWhy != "" || len(c.quotaWaits("T1")) != 0 {
-			t.Errorf("a task that found a candidate was held: %q, waits %+v", st.Tasks[0].HoldWhy, c.quotaWaits("T1"))
+		if st.Tasks[0].HoldWhy != "" || len(c.quotaWaits()) != 0 {
+			t.Errorf("a task that found a candidate was held: %q, waits %+v", st.Tasks[0].HoldWhy, c.quotaWaits())
 		}
 	})
 	t.Run("held task keeps no slot", func(t *testing.T) {
@@ -449,7 +451,7 @@ func TestPoolHealthyCandidateIsUsedAndNoSlotIsSpent(t *testing.T) {
 		if len(st.Tasks[0].Attempts) != 0 {
 			t.Fatalf("T1 started on an exhausted pool: %d attempt(s)", len(st.Tasks[0].Attempts))
 		}
-		c.noWorktreeNoSlot("T1")
+		c.noWorktreeNoSlot()
 		if len(st.Tasks[1].Attempts) != 1 || st.Tasks[1].Attempts[0].Run == nil || st.Tasks[1].Attempts[0].Run.CLI != "codex" {
 			t.Fatalf("T2 (codex, healthy) did not take the only slot while T1 waits on quota: %d attempt(s), hold %q", len(st.Tasks[1].Attempts), st.Tasks[1].HoldWhy)
 		}
@@ -485,10 +487,10 @@ func TestUnknownPoolNeverBlocks(t *testing.T) {
 				c.pass()
 			}
 			st := c.state()
-			if len(*c.runs) != 2 || len(st.Tasks[0].Attempts) != 1 || st.Tasks[0].HoldWhy != "" || len(c.quotaWaits("T1")) != 0 {
-				t.Fatalf("task on an unreadable pool: %d runs, attempts %d, hold %q, waits %+v", len(*c.runs), len(st.Tasks[0].Attempts), st.Tasks[0].HoldWhy, c.quotaWaits("T1"))
+			if len(*c.runs) != 2 || len(st.Tasks[0].Attempts) != 1 || st.Tasks[0].HoldWhy != "" || len(c.quotaWaits()) != 0 {
+				t.Fatalf("task on an unreadable pool: %d runs, attempts %d, hold %q, waits %+v", len(*c.runs), len(st.Tasks[0].Attempts), st.Tasks[0].HoldWhy, c.quotaWaits())
 			}
-			if fake.count("claude") == 0 {
+			if fake.claudeReads() == 0 {
 				t.Fatal("the pool was never read")
 			}
 		})
@@ -505,7 +507,7 @@ func TestUnknownPoolNeverBlocks(t *testing.T) {
 		reset := c.now.Add(90 * time.Minute)
 		fake.set("claude", poolOut("claude", *c.now, &poolWin{2, 90 * time.Minute}, &poolWin{60, 72 * time.Hour}, nil))
 		c.pass()
-		c.noWorktreeNoSlot("T1")
+		c.noWorktreeNoSlot()
 		*c.now = reset.Add(time.Minute)
 		fake.set("claude", CommandOutput{Exit: -1, TimedOut: true})
 		c.pass()
@@ -622,20 +624,20 @@ func TestPoolReadingIsSharedAndRefreshed(t *testing.T) {
 		if len(*c.runs) < 3 {
 			t.Fatalf("workers did not start: %d runs", len(*c.runs))
 		}
-		if n := fake.count("claude"); n != 1 {
+		if n := fake.claudeReads(); n != 1 {
 			t.Fatalf("claude read %d times for three launches in one minute, want 1", n)
 		}
 		*c.now = c.now.Add(4 * time.Minute) // under pool_minutes (5)
 		c.pass()
 		c.pass()
-		if n := fake.count("claude"); n != 1 {
+		if n := fake.claudeReads(); n != 1 {
 			t.Fatalf("claude read %d times inside pool_minutes, want 1", n)
 		}
 		*c.now = c.now.Add(2 * time.Minute) // 6 minutes in
 		for range 3 {
 			c.pass()
 		}
-		if n := fake.count("claude"); n != 2 {
+		if n := fake.claudeReads(); n != 2 {
 			t.Fatalf("claude read %d times after pool_minutes passed, want 2 (one refresh shared by every launch)", n)
 		}
 	})
@@ -659,19 +661,19 @@ func TestPoolReadingIsSharedAndRefreshed(t *testing.T) {
 		}
 		c.pass()
 		c.pass()
-		c.noWorktreeNoSlot("T1")
-		if n := fake.count("claude"); n != 1 {
+		c.noWorktreeNoSlot()
+		if n := fake.claudeReads(); n != 1 {
 			t.Fatalf("claude read %d times, want 1", n)
 		}
 		*c.now = c.now.Add(9 * time.Minute) // before the reset: no new reading
 		c.pass()
-		if n := fake.count("claude"); n != 1 {
+		if n := fake.claudeReads(); n != 1 {
 			t.Fatalf("claude read again %d times before its reset, want 1", n)
 		}
 		*c.now = c.now.Add(2 * time.Minute) // 11 minutes: past the reset, far inside pool_minutes
 		fake.healthy(*c.now)
 		c.pass()
-		if n := fake.count("claude"); n != 2 {
+		if n := fake.claudeReads(); n != 2 {
 			t.Fatalf("claude read %d times; the first pass after a reset must read again, want 2", n)
 		}
 		if len(c.state().Tasks[0].Attempts) != 1 {

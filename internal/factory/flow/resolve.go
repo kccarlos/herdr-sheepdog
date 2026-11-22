@@ -47,6 +47,7 @@ type ResolveFacts struct {
 	CLIs   map[string]CLIFacts
 	Worker Candidate              // worker's (CLI, Model) for the reviewer/retro check
 	Check  func(Candidate) string // additional role capability or launch checks
+	Pool   func(Candidate) string // pool usability check (design.md 7.3, 9.1)
 	Avoid  []Candidate            // models already used in this round sequence
 }
 
@@ -117,7 +118,7 @@ func Resolve(role string, task Task, settings Settings, facts ResolveFacts) (Int
 	if !ok {
 		return Intent{}, fmt.Sprintf("unknown role %q", role)
 	}
-	first := ""
+	first, fallback := "", ""
 	for _, c := range Candidates(role, task, settings) {
 		if slices.ContainsFunc(facts.Avoid, c.SameModel) {
 			continue
@@ -130,7 +131,11 @@ func Resolve(role string, task Task, settings Settings, facts ResolveFacts) (Int
 			why = facts.Check(c)
 		}
 		if why != "" {
-			first = cmp.Or(first, why)
+			if why == "the reviewer must differ from the worker" {
+				fallback = cmp.Or(fallback, why)
+			} else {
+				first = cmp.Or(first, why)
+			}
 		} else if probed && !cf.Installed {
 			first = cmp.Or(first, c.CLI+" is not installed")
 		} else if probed && !cf.SignedIn {
@@ -138,12 +143,16 @@ func Resolve(role string, task Task, settings Settings, facts ResolveFacts) (Int
 		} else if cf.Models != nil && !cf.Models[c.Model] {
 			first = cmp.Or(first, fmt.Sprintf("model %s is not offered to this account", c.Model))
 		} else if (role == RoleReviewer || role == RoleRetro) && c.SameModel(facts.Worker) {
-			first = cmp.Or(first, "the reviewer must differ from the worker")
+			fallback = cmp.Or(fallback, "the reviewer must differ from the worker")
+		} else if facts.Pool != nil {
+			if pwhy := facts.Pool(c); pwhy != "" {
+				first = cmp.Or(first, pwhy)
+				continue
+			}
+			return Intent{role, c.CLI, c.Model, c.Effort, perm, ContinueFresh}, ""
 		} else {
-			// Pool usability (design.md 7.3) and designer canvas capability (9.1)
-			// are checked in slice 5b's pools PR and the design loop.
 			return Intent{role, c.CLI, c.Model, c.Effort, perm, ContinueFresh}, ""
 		}
 	}
-	return Intent{}, cmp.Or(first, fmt.Sprintf("no candidates for %s", role))
+	return Intent{}, cmp.Or(first, fallback, fmt.Sprintf("no candidates for %s", role))
 }

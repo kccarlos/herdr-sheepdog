@@ -49,19 +49,22 @@ type Engine struct {
 	Bin          string                        // sheepdog binary named in run prompts
 	RunEnv       map[string]string             // added to every run's environment (daemon port)
 
-	probeLaunch func(context.Context, []string) flow.ResolveFacts // test hook
-	cliProbes   map[string]cachedCLIProbe                         // shared across launches and projects under mu
-	git         *world.Git
-	mu          sync.Mutex
-	wake        chan struct{}
-	lastPass    map[string]time.Time            // monotonic reading of previous pass per project (design.md 2.5)
-	prs         map[string]flow.PR              // last PR snapshot per attempt worktree (in memory)
-	errs        map[string]string               // last gh or git error per worktree and kind, logged once per change
-	tips        map[string]tipFacts             // last git reading per worktree (in memory)
-	waits       map[string]string               // last wait/finished reason per project or task, logged once per change
-	ghUnavail   map[string]bool                 // project fact github_unavailable (design.md 7.3)
-	hcUnavail   map[string]bool                 // project fact hc_unavailable (design.md 7.3)
-	onInvariant func([]flow.InvariantViolation) // test hook; nil in production
+	probeLaunch   func(context.Context, []string) flow.ResolveFacts // test hook
+	poolRun       CommandFunc                                       // provider quota reader hook; nil uses hcExecRunner
+	cliProbes     map[string]cachedCLIProbe                         // shared across launches and projects under mu
+	pools         map[string]cachedPool                             // shared per-provider quota readings under mu
+	passPoolCheck func(flow.Candidate) string                       // current pass's immutable pool check under mu
+	git           *world.Git
+	mu            sync.Mutex
+	wake          chan struct{}
+	lastPass      map[string]time.Time            // monotonic reading of previous pass per project (design.md 2.5)
+	prs           map[string]flow.PR              // last PR snapshot per attempt worktree (in memory)
+	errs          map[string]string               // last gh or git error per worktree and kind, logged once per change
+	tips          map[string]tipFacts             // last git reading per worktree (in memory)
+	waits         map[string]string               // last wait/finished reason per project or task, logged once per change
+	ghUnavail     map[string]bool                 // project fact github_unavailable (design.md 7.3)
+	hcUnavail     map[string]bool                 // project fact hc_unavailable (design.md 7.3)
+	onInvariant   func([]flow.InvariantViolation) // test hook; nil in production
 }
 
 func (e *Engine) now() time.Time {
@@ -307,6 +310,7 @@ func (e *Engine) projectDirs() []os.DirEntry {
 }
 
 func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
+	pools := e.refreshPools(ctx, id)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	s, err := LoadState(e.Paths.State(id))
@@ -322,6 +326,8 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		delete(e.lastPass, id)
 		return
 	}
+	e.passPoolCheck = poolCheck(pools, s.Settings.PoolFloorPercent, e.now())
+	defer func() { e.passPoolCheck = nil }()
 	ctx, cancel := context.WithTimeout(world.GitRepository(ctx, s.Project.Folder), world.GitPassTimeout)
 	defer cancel()
 	dt := e.passDelta(id)
@@ -333,7 +339,14 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	e.observeBaseLocked(ctx, id, &s)
 	e.sweepProjectLocked(ctx, id, &s)
 	baseTried := s.Project.Base != nil && s.Project.Base.Red && flow.Done(s.Project.Acts, flow.AskTellBaseRed+"@"+s.Project.Base.SpellID)
-	var candidates []string
+	var candidates, poolHeld []string
+	queue := func(t flow.Task) {
+		if _, why := resolveWorker(t, s.Settings, flow.ResolveFacts{Pool: e.passPoolCheck}); why != "" {
+			poolHeld = append(poolHeld, t.ID)
+			return
+		}
+		candidates = append(candidates, t.ID)
+	}
 	workerRun, workerState, workerErr := map[string]flow.Run{}, map[string]flow.RunState{}, map[string]error{}
 	for ti := range s.Tasks {
 		t := &s.Tasks[ti]
@@ -356,11 +369,11 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 			}
 			workerRun[t.ID], workerState[t.ID], workerErr[t.ID] = r, r.State, rerr
 			if r.State == flow.RunGone && flow.WantsWorkerSlot(*t, s.Settings, e.now()) {
-				candidates = append(candidates, t.ID)
+				queue(*t)
 			}
 		} else if a == nil && !flow.Ended(*t) && !t.Parked && flow.OpenRecap(*t) == nil && flow.WantsNewAttempt(*t, s.Settings, e.now()) {
 			if notDone, dropped := flow.UnmetDeps(*t, s.Tasks); len(notDone) == 0 && len(dropped) == 0 {
-				candidates = append(candidates, t.ID)
+				queue(*t)
 			}
 		}
 	}
@@ -372,6 +385,9 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		setFlag(&e.hcUnavail, id, hcErr != nil && world.FailureClass(hcErr) != flow.ClassSettled)
 	}
 	granted := flow.GrantSlots(candidates, s.Tasks, flow.RunningTasks(s.Tasks, workerState), s.Settings.MaxRunning)
+	for _, tid := range poolHeld {
+		granted[tid] = true
+	}
 	skipped := map[string]bool{}
 	for i := range s.Tasks {
 		if ctx.Err() == nil && !e.passTaskLocked(ctx, id, &s, i, granted[s.Tasks[i].ID], workerRun[s.Tasks[i].ID], workerErr[s.Tasks[i].ID], &baseTried, dt) {
@@ -631,7 +647,7 @@ func (e *Engine) probeLaunchFacts(ctx context.Context, role string, task flow.Ta
 			e.cliProbes[cli] = cachedCLIProbe{at: probedAt, facts: facts, known: known}
 		}
 	}
-	facts := flow.ResolveFacts{CLIs: make(map[string]flow.CLIFacts, len(clis))}
+	facts := flow.ResolveFacts{CLIs: make(map[string]flow.CLIFacts, len(clis)), Pool: e.passPoolCheck}
 	for _, cli := range clis {
 		if probe := e.cliProbes[cli]; probe.known {
 			facts.CLIs[cli] = probe.facts
