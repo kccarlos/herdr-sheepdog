@@ -473,11 +473,21 @@ type cliProbeState int
 const (
 	cliMissing cliProbeState = iota
 	cliNotInHCPath
+	cliAuthUnknown
 	cliSignedOut
 	cliCanaryFailed
 	cliCanaryTimedOut
 	cliReady
 )
+
+func authProbeUnknown(out CommandOutput) (string, bool) {
+	if out.TimedOut {
+		return "unknown (timed out)", true
+	} else if out.Err != nil {
+		return fmt.Sprintf("unknown (%s)", cleanReason(out.Err.Error())), true
+	}
+	return "", false
+}
 
 type cliOutcome struct {
 	name   string
@@ -532,6 +542,7 @@ func checkAgentCLIs(ctx context.Context, o DoctorOptions, inHC, customLookPath, 
 		ready       []string
 		timedOut    []string
 		notInHCPath []string
+		unknown     []string
 		installed   int
 		loggedIn    int
 	)
@@ -542,6 +553,9 @@ func checkAgentCLIs(ctx context.Context, o DoctorOptions, inHC, customLookPath, 
 		}
 		if oc.state == cliNotInHCPath {
 			notInHCPath = append(notInHCPath, oc.name)
+		}
+		if oc.state == cliAuthUnknown {
+			unknown = append(unknown, oc.name+": "+strings.TrimPrefix(oc.result.Detail, "sign-in "))
 		}
 		if oc.state >= cliCanaryFailed {
 			loggedIn++
@@ -568,6 +582,9 @@ func checkAgentCLIs(ctx context.Context, o DoctorOptions, inHC, customLookPath, 
 		out = append(out, resFail("agent clis",
 			fmt.Sprintf("agent CLI on PATH locally, but not on herdr-core's PATH (%s)", strings.Join(notInHCPath, ", ")),
 			"run: hc server restart, then run sheepdog factory doctor again"))
+	case loggedIn == 0 && len(unknown) > 0:
+		out = append(out, resFail("agent clis", "agent CLI sign-in "+strings.Join(unknown, "; "),
+			"check the unknown CLI probes above and run sheepdog factory doctor again"))
 	case loggedIn == 0:
 		out = append(out, resFail("agent clis", "no agent CLI is logged in",
 			"sign in to at least one CLI: claude auth login, codex login, or agy"))
@@ -613,6 +630,9 @@ func checkClaude(ctx context.Context, o DoctorOptions, pctx probeContext) cliOut
 	cancel()
 	if oc, done := handleHCPathStatus(name, authOut, o, pctx); done {
 		return oc
+	}
+	if why, unk := authProbeUnknown(authOut); unk {
+		return cliOutcome{name: name, state: cliAuthUnknown, result: resWarn(name, "sign-in "+why, "run: claude auth status --json")}
 	}
 	if !claudeLoggedIn(authOut) {
 		return cliOutcome{name: name, state: cliSignedOut, result: resWarn(name, "installed, not logged in", "run: claude auth login")}
@@ -701,6 +721,9 @@ func checkCodex(ctx context.Context, o DoctorOptions, pctx probeContext) cliOutc
 	if oc, done := handleHCPathStatus(name, authOut, o, pctx); done {
 		return oc
 	}
+	if why, unk := authProbeUnknown(authOut); unk {
+		return cliOutcome{name: name, state: cliAuthUnknown, result: resWarn(name, "sign-in "+why, "run: codex login status")}
+	}
 	if !codexLoggedIn(authOut) {
 		return cliOutcome{name: name, state: cliSignedOut, result: resWarn(name, "installed, not logged in", "run: codex login")}
 	}
@@ -776,8 +799,11 @@ func checkAgy(ctx context.Context, o DoctorOptions, pctx probeContext) cliOutcom
 	if oc, done := handleHCPathStatus(name, authOut, o, pctx); done {
 		return oc
 	}
+	if why, unk := authProbeUnknown(authOut); unk {
+		return cliOutcome{name: name, state: cliAuthUnknown, result: resWarn(name, "sign-in "+why, "run: agy models")}
+	}
 	models := parseAgyModels(authOut.Stdout)
-	if authOut.Err != nil || authOut.TimedOut || authOut.Exit != 0 || len(models) == 0 {
+	if authOut.Exit != 0 || len(models) == 0 {
 		return cliOutcome{name: name, state: cliSignedOut, result: resWarn(name, "installed, not logged in", "run agy without arguments and sign in")}
 	}
 	if !o.Canary {
@@ -963,12 +989,15 @@ func checkGH(ctx context.Context, o DoctorOptions, inHC, customLookPath, volumeO
 		}
 		return missingRes
 	}
-	if authOut.Err != nil || authOut.TimedOut || authOut.Exit != 0 {
-		if inHC && !customLookPath && (authOut.Err != nil || authOut.TimedOut) {
+	if why, unk := authProbeUnknown(authOut); unk {
+		if inHC && !customLookPath {
 			if _, err := o.LookPath("gh"); err != nil {
 				return missingRes
 			}
 		}
+		return resWarn(name, "gh sign-in "+why+" (local-merge mode only)", "run: gh auth status")
+	}
+	if authOut.Exit != 0 {
 		return resWarn(name, "gh is not logged in (local-merge mode only)", "run: gh auth login")
 	}
 	if !volumeOK {

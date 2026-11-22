@@ -55,7 +55,7 @@ func (e *Engine) execMerge(ctx context.Context, id string, s *flow.State, ti int
 	p := e.readPRLocked(gctx, id, s, ti)
 	fresh := flow.Facts{
 		PR: p, Tip: tip, TipRel: rel, TipMergeOnly: tipMO, Lines: lines, LinesTimeout: linesTO,
-		Worker: worker, GitHubUnavailable: e.ghUnavail[id], BaseRed: f.BaseRed, BaseRedSince: f.BaseRedSince, BaseRedSpell: f.BaseRedSpell,
+		Worker: worker, GitHubUnavailable: e.ghUnavail[id] || s.Project.HasAlert(flow.AlertGitHubUnavailable), BaseRed: f.BaseRed, BaseRedSince: f.BaseRedSince, BaseRedSpell: f.BaseRedSpell,
 	}
 	if r, _ := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[ti], Settings: s.Settings, Facts: fresh, Now: e.now()}); r.ID != "N42" {
 		return fmt.Sprintf("merge called off on fresh check (row %s)", r.ID), true, nil
