@@ -22,7 +22,7 @@ func AgyArgv(model, session, prompt string) []string {
 	if model, session = strings.TrimSpace(model), strings.TrimSpace(session); model == "" {
 		return nil
 	}
-	argv := []string{"env", "-u", "GEMINI_API_KEY", AgyCLI, "--model", model, "--mode", "auto"}
+	argv := []string{"env", "-u", "GEMINI_API_KEY", AgyCLI, "--model", model, "--dangerously-skip-permissions"}
 	if session != "" {
 		argv = append(argv, "--conversation", session)
 	}
@@ -125,17 +125,40 @@ func parseAgyReport(text, code string) ReportRead {
 	if anc := agyInputAnchor(lines); anc >= 0 {
 		lines = lines[:anc]
 	}
-	var out []string
-	inBlock, afterPrompt := false, true
+	promptIdx, lastBlock := -1, -1
 	for i, ln := range lines {
 		if isAgyPromptLine(ln) && (i == 0 || isRuleLine(lines[i-1])) {
-			out, inBlock, afterPrompt = nil, false, false
+			promptIdx, lastBlock = i, -1
 		} else if isAgyBlockHeader(ln) {
-			inBlock, afterPrompt = true, true
-		} else if inBlock {
-			inBlock = strings.TrimSpace(ln) != ""
-		} else if afterPrompt {
-			out = append(out, ln)
+			lastBlock = i
+		}
+	}
+	var out []string
+	if lastBlock < 0 && promptIdx >= 0 {
+		start := len(lines)
+		for i := promptIdx + 1; i < len(lines); i++ {
+			if strings.Contains(lines[i], `"majors":<n>}</report>`) {
+				start = i + 1
+				break
+			}
+			if start == len(lines) && strings.TrimSpace(lines[i]) == "" {
+				start = i + 1
+			}
+		}
+		out = lines[start:]
+	} else {
+		inBlock, afterPrompt := false, promptIdx < 0
+		for i := max(promptIdx, 0); i < len(lines); i++ {
+			if ln := lines[i]; isAgyBlockHeader(ln) {
+				inBlock, afterPrompt = i != lastBlock || !strings.HasPrefix(ln, "▸"), true
+				if !inBlock && i+1 < len(lines) && strings.TrimSpace(lines[i+1]) != "" {
+					i++
+				}
+			} else if inBlock {
+				inBlock = strings.TrimSpace(ln) != ""
+			} else if afterPrompt {
+				out = append(out, ln)
+			}
 		}
 	}
 	return parseReportTag(strings.TrimSpace(strings.Join(out, "\n")), code)

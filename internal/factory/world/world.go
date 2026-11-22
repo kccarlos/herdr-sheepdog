@@ -504,6 +504,9 @@ func agyTrustSelected(lines []string) bool {
 
 func agyTrustDrawing(text string) bool {
 	lines := strings.Split(strings.TrimRight(text, "\n \t"), "\n")
+	if head := strings.Split(strings.TrimLeft(strings.TrimRight(text, "\n \t"), "\n"), "\n"); len(head) <= 4 && equalDialogLine(head[0], "Accessing workspace:") && (len(head) == 1 || equalDialogLine(head[1], "")) {
+		return true
+	}
 	for n := 1; n <= min(len(lines), len(agyTrustDialog)); n++ {
 		if slices.EqualFunc(lines[len(lines)-n:], agyTrustDialog[:n], equalDialogLine) {
 			return true
