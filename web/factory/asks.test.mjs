@@ -198,3 +198,642 @@ test('after a daemon restart an enrolled browser re-authenticates with its WebCr
   );
   assert.deepEqual(daemon.answered[1], { id: 'ask-demo-2', option: 'Publish v0.2.0', device_id: 'dev-browser-1' });
 });
+
+// --- Round 2: full /factory page (app.js + asks.js) tests ---
+
+const VOID_TAGS = new Set(['AREA', 'BASE', 'BR', 'COL', 'EMBED', 'HR', 'IMG', 'INPUT', 'LINK', 'META', 'SOURCE', 'TRACK', 'WBR']);
+
+function decodeEntities(s) {
+  return String(s ?? '')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+function matchCompound(el, token) {
+  let rest = token.trim();
+  if (!rest) return false;
+  if (rest.startsWith('*')) {
+    rest = rest.slice(1);
+    if (!rest) return true;
+  } else {
+    const tagMatch = rest.match(/^[a-zA-Z][a-zA-Z0-9-]*/);
+    if (tagMatch) {
+      if (el.tagName !== tagMatch[0].toUpperCase()) return false;
+      rest = rest.slice(tagMatch[0].length);
+    }
+  }
+  while (rest.length > 0) {
+    if (rest[0] === '#') {
+      const m = rest.match(/^#([A-Za-z0-9_-]+)/);
+      if (!m || el.id !== m[1]) return false;
+      rest = rest.slice(m[0].length);
+    } else if (rest[0] === '.') {
+      const m = rest.match(/^\.([A-Za-z0-9_-]+)/);
+      if (!m || !el.className.split(/\s+/).includes(m[1])) return false;
+      rest = rest.slice(m[0].length);
+    } else if (rest[0] === '[') {
+      const m = rest.match(/^\[([A-Za-z0-9_:-]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\]]*)))?\]/);
+      if (!m) return false;
+      const attr = m[1].toLowerCase();
+      const want = m[2] ?? m[3] ?? m[4];
+      if (want === undefined) {
+        if (attr === 'open' ? !el.open : attr === 'disabled' ? !el.disabled : attr === 'hidden' ? !el.hidden : !el.hasAttribute(attr)) {
+          return false;
+        }
+      } else if (el.getAttribute(attr) !== want) {
+        return false;
+      }
+      rest = rest.slice(m[0].length);
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+function matchSingleSelector(el, sel) {
+  const parts = sel.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length || !matchCompound(el, parts[parts.length - 1])) return false;
+  let cur = el.parentElement;
+  for (let i = parts.length - 2; i >= 0; i--) {
+    while (cur && !matchCompound(cur, parts[i])) cur = cur.parentElement;
+    if (!cur) return false;
+    cur = cur.parentElement;
+  }
+  return true;
+}
+
+class MiniElement {
+  constructor(tagName, ownerDocument) {
+    this.nodeType = 1;
+    this.tagName = tagName.toUpperCase();
+    this.ownerDocument = ownerDocument;
+    this.parentElement = null;
+    this._nodes = [];
+    this._attrs = new Map();
+    this._listeners = new Map();
+    this._rawHTML = '';
+    this._value = undefined;
+    this.selectionStart = 0;
+    this.selectionEnd = 0;
+    this.dataset = new Proxy({}, {
+      get: (_, prop) => {
+        if (typeof prop !== 'string') return undefined;
+        const k = 'data-' + prop.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+        return this._attrs.get(k);
+      },
+      set: (_, prop, val) => {
+        const k = 'data-' + String(prop).replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+        this.setAttribute(k, String(val));
+        return true;
+      },
+    });
+    this.elements = new Proxy({}, {
+      get: (_, prop) => {
+        if (typeof prop !== 'string') return undefined;
+        return this.querySelectorAll('input, button, select, textarea')
+          .find((c) => c.getAttribute('name') === prop || c.id === prop);
+      },
+    });
+  }
+  get children() { return this._nodes.filter((n) => n.nodeType === 1); }
+  get id() { return this._attrs.get('id') || ''; }
+  set id(v) { this.setAttribute('id', v); }
+  get className() { return this._attrs.get('class') || ''; }
+  set className(v) { this.setAttribute('class', v); }
+  get hidden() { return this._attrs.has('hidden'); }
+  set hidden(v) { if (v) this._attrs.set('hidden', ''); else this._attrs.delete('hidden'); }
+  get disabled() { return this._attrs.has('disabled'); }
+  set disabled(v) { if (v) this._attrs.set('disabled', ''); else this._attrs.delete('disabled'); }
+  get open() { return this._attrs.has('open'); }
+  set open(v) { if (v) this._attrs.set('open', ''); else this._attrs.delete('open'); }
+  get value() { return this._value !== undefined ? this._value : (this._attrs.get('value') || ''); }
+  set value(v) { this._value = String(v ?? ''); }
+  get name() { return this._attrs.get('name') || ''; }
+  set name(v) { this.setAttribute('name', v); }
+  getAttribute(k) {
+    const v = this._attrs.get(String(k).toLowerCase());
+    return v === undefined ? null : v;
+  }
+  setAttribute(k, v) { this._attrs.set(String(k).toLowerCase(), String(v)); }
+  hasAttribute(k) { return this._attrs.has(String(k).toLowerCase()); }
+  removeAttribute(k) { this._attrs.delete(String(k).toLowerCase()); }
+  get textContent() {
+    return this._nodes.map((n) => (n.nodeType === 3 ? n.textContent : n.textContent)).join('');
+  }
+  set textContent(v) {
+    this._rawHTML = String(v ?? '');
+    this._nodes = v ? [{ nodeType: 3, textContent: String(v) }] : [];
+  }
+  get innerHTML() { return this._rawHTML; }
+  set innerHTML(html) {
+    const src = String(html ?? '');
+    this._rawHTML = src;
+    this._nodes = parseHTMLFragment(src, this.ownerDocument, this);
+  }
+  contains(other) {
+    for (let cur = other; cur; cur = cur.parentElement) {
+      if (cur === this) return true;
+    }
+    return false;
+  }
+  matches(selector) {
+    return String(selector).split(',').some((s) => matchSingleSelector(this, s));
+  }
+  closest(selector) {
+    for (let cur = this; cur; cur = cur.parentElement) {
+      if (cur.nodeType === 1 && cur.matches(selector)) return cur;
+    }
+    return null;
+  }
+  querySelectorAll(selector) {
+    const out = [];
+    const walk = (node) => {
+      for (const ch of node.children) {
+        if (ch.matches(selector)) out.push(ch);
+        walk(ch);
+      }
+    };
+    walk(this);
+    return out;
+  }
+  querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+  focus() { if (this.ownerDocument) this.ownerDocument.activeElement = this; }
+  setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
+  addEventListener(type, fn) {
+    if (!this._listeners.has(type)) this._listeners.set(type, []);
+    this._listeners.get(type).push(fn);
+  }
+  dispatchEvent(ev) {
+    const e = ev || { type: '' };
+    if (!e.target) e.target = this;
+    e.defaultPrevented = Boolean(e.defaultPrevented);
+    e.preventDefault ||= () => { e.defaultPrevented = true; };
+    e.stopPropagation ||= () => { e._stopped = true; };
+    for (let cur = this; cur && !e._stopped; cur = cur.parentElement) {
+      for (const fn of cur._listeners.get(e.type) || []) fn(e);
+    }
+    return !e.defaultPrevented;
+  }
+  click() {
+    if (!this.disabled) this.dispatchEvent({ type: 'click', bubbles: true });
+  }
+}
+
+function parseHTMLFragment(html, doc, parent) {
+  const root = { _nodes: [], parentElement: null };
+  const stack = [root];
+  const tagRe = /<!--[\s\S]*?-->|<\/([a-zA-Z][a-zA-Z0-9-]*)\s*>|<([a-zA-Z][a-zA-Z0-9-]*)((?:\s+[A-Za-z_:][-A-Za-z0-9_:.]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*\/?>/g;
+  let last = 0;
+  let m;
+  while ((m = tagRe.exec(html)) !== null) {
+    if (m.index > last) {
+      stack[stack.length - 1]._nodes.push({ nodeType: 3, textContent: decodeEntities(html.slice(last, m.index)) });
+    }
+    last = tagRe.lastIndex;
+    if (m[0].startsWith('<!--')) continue;
+    if (m[1]) {
+      const closeTag = m[1].toUpperCase();
+      for (let i = stack.length - 1; i > 0; i--) {
+        if (stack[i].tagName === closeTag) {
+          stack.length = i;
+          break;
+        }
+      }
+      continue;
+    }
+    const el = new MiniElement(m[2], doc);
+    const parentNode = stack[stack.length - 1];
+    el.parentElement = parentNode === root ? parent : parentNode;
+    parentNode._nodes.push(el);
+    const attrSrc = m[3] || '';
+    const attrRe = /([A-Za-z_:][-A-Za-z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+    let am;
+    while ((am = attrRe.exec(attrSrc)) !== null) {
+      const rawVal = am[2] ?? am[3] ?? am[4] ?? '';
+      el.setAttribute(am[1], decodeEntities(rawVal));
+    }
+    if (!VOID_TAGS.has(el.tagName) && !m[0].endsWith('/>')) {
+      stack.push(el);
+    }
+  }
+  if (last < html.length) {
+    stack[stack.length - 1]._nodes.push({ nodeType: 3, textContent: decodeEntities(html.slice(last)) });
+  }
+  return root._nodes;
+}
+
+function createMiniDocument(htmlSource) {
+  const doc = {
+    activeElement: null,
+    root: null,
+    getElementById(id) {
+      return (function find(node) {
+        for (const ch of node.children) {
+          if (ch.id === id) return ch;
+          const hit = find(ch);
+          if (hit) return hit;
+        }
+        return null;
+      })(this.root);
+    },
+    querySelector(sel) { return this.root.querySelector(sel); },
+    querySelectorAll(sel) { return this.root.querySelectorAll(sel); },
+    createElement(tag) { return new MiniElement(tag, this); },
+  };
+  const holder = new MiniElement('document', doc);
+  holder._nodes = parseHTMLFragment(htmlSource, doc, null);
+  doc.root = holder;
+  return doc;
+}
+
+function createFakeIndexedDB() {
+  const dbs = new Map();
+  return {
+    dbs,
+    open(name) {
+      const req = { result: null, error: null, onupgradeneeded: null, onsuccess: null, onerror: null };
+      queueMicrotask(() => {
+        const isNew = !dbs.has(name);
+        if (isNew) dbs.set(name, new Map());
+        const stores = dbs.get(name);
+        const db = {
+          createObjectStore(s) { if (!stores.has(s)) stores.set(s, new Map()); },
+          transaction(s) {
+            const map = stores.get(s) || new Map();
+            const tx = {
+              oncomplete: null,
+              onerror: null,
+              objectStore() {
+                return {
+                  put(val, key) { map.set(key, val); return { result: key }; },
+                  get(key) { return { result: map.get(key) }; },
+                  delete(key) { map.delete(key); return { result: undefined }; },
+                };
+              },
+            };
+            queueMicrotask(() => tx.oncomplete?.({}));
+            return tx;
+          },
+        };
+        req.result = db;
+        if (isNew) req.onupgradeneeded?.({});
+        req.onsuccess?.({});
+      });
+      return req;
+    },
+  };
+}
+
+function fakeFactoryPageDaemon({ shortCode = 'ABCD-EFGH', daemonId = 'DAEMON_PAGE_1', requireSessionForReads = false } = {}) {
+  const calls = [];
+  const answered = [];
+  const openAsks = fixture.asks.map((a) => ({ ...a }));
+  const challenges = new Set();
+  const tickets = new Set();
+  const cookieJar = { session: '' };
+  let enrolledPub = null;
+  let enrolledDeviceId = '';
+  let revoked = false;
+  let sticky401 = false;
+  let nonceSeq = 0;
+  let sessSeq = 0;
+  let inFlight = 0;
+
+  const signedText = (dId, devId, nonce, unix) =>
+    ['sheepdog-auth-v1', dId, '', devId, nonce, String(unix), 'session'].join('\n');
+
+  const reply = (status, obj) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => obj,
+  });
+
+  const checkAuth = (sentCookie) => {
+    if (sticky401) {
+      if (sentCookie && cookieJar.session === sentCookie) cookieJar.session = '';
+      return { ok: false, status: 401, body: { error: 'unauthorized', reason: 'session_expired' } };
+    }
+    if (sentCookie) {
+      if (revoked || !tickets.has(sentCookie)) {
+        if (cookieJar.session === sentCookie) cookieJar.session = '';
+        return { ok: false, status: 401, body: { error: 'unauthorized', reason: revoked ? 'device_revoked' : 'session_expired' } };
+      }
+      return { ok: true, device: enrolledDeviceId };
+    }
+    if (requireSessionForReads) {
+      return { ok: false, status: 401, body: { error: 'unauthorized', reason: 'no_session' } };
+    }
+    return { ok: true, device: 'local' };
+  };
+
+  const fetch = async (path, init = {}) => {
+    const method = init.method || 'GET';
+    const sentCookie = cookieJar.session;
+    calls.push({ method, path, sentCookie });
+    inFlight++;
+    try {
+      await Promise.resolve();
+      const body = init.body ? JSON.parse(init.body) : null;
+
+      if (path === '/api/hello') {
+        return reply(200, { computer: { id: daemonId, name: 'Test Mac' } });
+      }
+      if (path === '/api/devices/enroll') {
+        const norm = String(body.code || '').replace(/[\s-]+/g, '').toUpperCase();
+        const want = shortCode.replace(/[\s-]+/g, '').toUpperCase();
+        if (body.kind !== 'browser' || norm !== want) {
+          return reply(410, { reason: 'code_used', error: 'Invalid or used code.' });
+        }
+        const raw = Uint8Array.from(atob(body.public_key.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+        enrolledPub = await webcrypto.subtle.importKey('raw', raw, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']);
+        enrolledDeviceId = 'dev-browser-1';
+        revoked = false;
+        return reply(200, { device_id: enrolledDeviceId, daemon_id: daemonId, name: body.name || 'Test Browser' });
+      }
+      if (path === '/api/auth/challenge') {
+        const nonce = `NONCE-${++nonceSeq}`;
+        challenges.add(nonce);
+        return reply(200, { nonce, daemon_id: daemonId, expires_in: 60 });
+      }
+      if (path === '/api/auth/session') {
+        if (!challenges.delete(body.nonce)) {
+          return reply(401, { error: 'unauthorized', reason: 'bad_nonce' });
+        }
+        if (revoked) {
+          cookieJar.session = '';
+          return reply(401, { error: 'unauthorized', reason: 'device_revoked' });
+        }
+        if (!enrolledPub || body.device_id !== enrolledDeviceId || body.client !== 'browser') {
+          cookieJar.session = '';
+          return reply(401, { error: 'unauthorized', reason: 'unknown_device' });
+        }
+        const sig = Uint8Array.from(atob(body.signature.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+        const ok = await webcrypto.subtle.verify(
+          { name: 'ECDSA', hash: 'SHA-256' },
+          enrolledPub,
+          sig,
+          new TextEncoder().encode(signedText(daemonId, body.device_id, body.nonce, body.time)),
+        );
+        if (!ok) return reply(401, { error: 'unauthorized', reason: 'bad_signature' });
+        const t = `sess-${++sessSeq}`;
+        tickets.add(t);
+        cookieJar.session = t;
+        return reply(200, { expires_in: 43200, device: { id: enrolledDeviceId, name: 'Test Browser' } });
+      }
+
+      if (path === '/api/state' || path.startsWith('/api/factory/')) {
+        const auth = checkAuth(sentCookie);
+        if (!auth.ok) return reply(auth.status, auth.body);
+
+        if (path === '/api/state') {
+          return reply(200, { ok: true });
+        }
+        if (path === '/api/factory/projects') {
+          return reply(200, {
+            protocol: 1,
+            projects: [{ id: 'proj-demo', goal: 'demo goal', running: true, counts: { working: 1 } }],
+          });
+        }
+        if (path === '/api/factory/projects/proj-demo/graph') {
+          return reply(200, {
+            protocol: 1,
+            project: 'proj-demo',
+            tasks: [{ ref: 'T1', title: 'feat: demo task', stage: 'working', layer: 1, after: [], dependents: [] }],
+          });
+        }
+        if (path.startsWith('/api/factory/projects/proj-demo/log')) {
+          return reply(200, { protocol: 1, project: 'proj-demo', lines: [] });
+        }
+        if (path === '/api/factory/asks') {
+          return reply(200, { protocol: 1, asks: openAsks.filter((a) => a.status === 'open') });
+        }
+        const m = path.match(/^\/api\/factory\/asks\/([^/]+)\/answer$/);
+        if (m && method === 'POST') {
+          if (auth.device === 'local' || !auth.device) {
+            return reply(403, { code: 'proof_required', error: 'proof_required' });
+          }
+          const ask = openAsks.find((a) => a.id === m[1]);
+          if (!ask || ask.status !== 'open') {
+            return reply(409, { code: 'already_closed', error: 'already_closed' });
+          }
+          ask.status = 'answered';
+          answered.push({ id: m[1], option: body.option, device_id: auth.device });
+          return reply(200, { ok: true, ask_id: m[1], device_id: auth.device });
+        }
+      }
+      return reply(404, { error: 'not found' });
+    } finally {
+      inFlight--;
+    }
+  };
+
+  return {
+    fetch,
+    calls,
+    answered,
+    cookieJar,
+    get inFlight() { return inFlight; },
+    restartDaemon() { tickets.clear(); },
+    revokeDevice() { revoked = true; tickets.clear(); },
+    setRequireSessionForReads(v) { requireSessionForReads = v; },
+    setSticky401(v) { sticky401 = v; },
+  };
+}
+
+let appImportSeq = 0;
+
+async function bootFactoryPage(t, daemon) {
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  const doc = createMiniDocument(html);
+  const idb = createFakeIndexedDB();
+  const origSetTimeout = globalThis.setTimeout;
+  const origClearTimeout = globalThis.clearTimeout;
+  const prev = {
+    document: Object.getOwnPropertyDescriptor(globalThis, 'document'),
+    location: Object.getOwnPropertyDescriptor(globalThis, 'location'),
+    indexedDB: Object.getOwnPropertyDescriptor(globalThis, 'indexedDB'),
+    fetch: Object.getOwnPropertyDescriptor(globalThis, 'fetch'),
+    addEventListener: Object.getOwnPropertyDescriptor(globalThis, 'addEventListener'),
+    scrollTo: Object.getOwnPropertyDescriptor(globalThis, 'scrollTo'),
+  };
+
+  let nextPollFn = null;
+  let timerSeq = 1000;
+  globalThis.setTimeout = (fn, ms, ...args) => {
+    if (Number(ms) >= 500) {
+      nextPollFn = fn;
+      return ++timerSeq;
+    }
+    return origSetTimeout(fn, ms, ...args);
+  };
+  globalThis.clearTimeout = (id) => {
+    if (typeof id === 'number' && id > 1000) return;
+    origClearTimeout(id);
+  };
+
+  Object.defineProperty(globalThis, 'document', { value: doc, configurable: true, writable: true });
+  Object.defineProperty(globalThis, 'location', { value: { hash: '', href: 'http://127.0.0.1:7777/factory' }, configurable: true, writable: true });
+  Object.defineProperty(globalThis, 'indexedDB', { value: idb, configurable: true, writable: true });
+  Object.defineProperty(globalThis, 'fetch', { value: daemon.fetch, configurable: true, writable: true });
+  Object.defineProperty(globalThis, 'addEventListener', { value: () => {}, configurable: true, writable: true });
+  Object.defineProperty(globalThis, 'scrollTo', { value: () => {}, configurable: true, writable: true });
+
+  t.after(() => {
+    globalThis.setTimeout = origSetTimeout;
+    globalThis.clearTimeout = origClearTimeout;
+    for (const [k, desc] of Object.entries(prev)) {
+      if (desc) Object.defineProperty(globalThis, k, desc);
+      else delete globalThis[k];
+    }
+  });
+
+  const flush = async () => {
+    let quiet = 0;
+    for (let i = 0; i < 40 && quiet < 3; i++) {
+      await new Promise((r) => origSetTimeout(r, 0));
+      quiet = daemon.inFlight === 0 ? quiet + 1 : 0;
+    }
+  };
+
+  await import(`./app.js?boot=${++appImportSeq}`);
+  await flush();
+
+  return {
+    doc,
+    idb,
+    flush,
+    async pollNow() {
+      if (nextPollFn) nextPollFn();
+      else doc.getElementById('retry').click();
+      await flush();
+    },
+  };
+}
+
+test('after a daemon restart an enrolled browser on /factory that gets 401 signs in again with its stored WebCrypto key, retries once and keeps working', async (t) => {
+  const daemon = fakeFactoryPageDaemon({ daemonId: 'DAEMON_RESTART_1' });
+  const page = await bootFactoryPage(t, daemon);
+  const asksEl = page.doc.getElementById('asks');
+  const mainEl = page.doc.getElementById('main');
+
+  // Initial loopback poll shows the project board and both open asks.
+  assert.match(mainEl.innerHTML, /T1/);
+  assert.match(asksEl.innerHTML, /Approve the plan for T1\?/);
+
+  // Clicking an option before pairing shows the pairing form on demand, then pairing submits the answer.
+  const firstBtn = asksEl.querySelector('button[data-ask-id="ask-demo-1"][data-option="Approve"]');
+  assert.ok(firstBtn, 'expected Approve button for ask-demo-1');
+  firstBtn.click();
+  await page.flush();
+
+  const pairInput = asksEl.querySelector('#pair-code');
+  const pairForm = asksEl.querySelector('form[data-pair-form]');
+  assert.ok(pairInput && pairForm, 'expected on-demand short-code pairing form');
+  pairInput.value = 'ABCD-EFGH';
+  pairForm.dispatchEvent({ type: 'submit', bubbles: true });
+  await page.flush();
+
+  assert.equal(daemon.answered.length, 1);
+  assert.deepEqual(daemon.answered[0], { id: 'ask-demo-1', option: 'Approve', device_id: 'dev-browser-1' });
+  assert.ok(daemon.cookieJar.session !== '', 'browser cookie jar holds active session cookie');
+
+  // Daemon restarts: in-memory session tickets are emptied while browser still holds the stale cookie + IndexedDB key.
+  daemon.restartDaemon();
+  const mark = daemon.calls.length;
+  await page.pollNow();
+  const sinceRestart = daemon.calls.slice(mark);
+
+  // Must sign in automatically with stored WebCrypto key (never re-enrolling or fetching /api/pair*).
+  assert.ok(
+    sinceRestart.some((c) => c.method === 'POST' && c.path === '/api/auth/session'),
+    'expected automatic WebCrypto POST /api/auth/session on 401 during /factory poll',
+  );
+  assert.ok(
+    !sinceRestart.some((c) => c.path === '/api/devices/enroll' || c.path.startsWith('/api/pair')),
+    'must not re-enroll or fetch /api/pair* after daemon restart',
+  );
+
+  // Failed poll GETs are retried once (initial 401 + single retry -> 200).
+  const projCalls = sinceRestart.filter((c) => c.path === '/api/factory/projects').length;
+  const askCalls = sinceRestart.filter((c) => c.path === '/api/factory/asks').length;
+  assert.equal(projCalls, 2, `expected GET /api/factory/projects to retry once (2 calls), got ${projCalls}`);
+  assert.ok(askCalls >= 1 && askCalls <= 2, `expected GET /api/factory/asks <= 2 calls, got ${askCalls}`);
+
+  // Board and remaining ask stay live (no lockout error, no pairing prompt) and answering works.
+  assert.doesNotMatch(mainEl.innerHTML, /can(&#39;|')t show the factory|unauthorized/i);
+  assert.match(mainEl.innerHTML, /T1/);
+  assert.match(asksEl.innerHTML, /Tag and publish v0\.2\.0\?/);
+  assert.equal(asksEl.querySelector('#pair-code'), null);
+
+  const secondBtn = asksEl.querySelector('button[data-ask-id="ask-demo-2"][data-option="Publish v0.2.0"]');
+  assert.ok(secondBtn, 'expected Publish v0.2.0 button after restart');
+  secondBtn.click();
+  await page.flush();
+  assert.deepEqual(daemon.answered[1], { id: 'ask-demo-2', option: 'Publish v0.2.0', device_id: 'dev-browser-1' });
+
+  // Even if the server keeps returning 401 after sign-in, a poll retries at most once (no loop).
+  daemon.setSticky401(true);
+  const stickyMark = daemon.calls.length;
+  await page.pollNow();
+  const stickyProjCalls = daemon.calls.slice(stickyMark).filter((c) => c.path === '/api/factory/projects').length;
+  assert.ok(stickyProjCalls <= 2, `expected at most 1 retry under sticky 401, got ${stickyProjCalls} calls`);
+});
+
+test('on /factory an unenrolled browser getting 401 sees the pairing hint without looping, and a revoked session cookie stops being sent', async (t) => {
+  const daemon = fakeFactoryPageDaemon({ daemonId: 'DAEMON_UNENROLLED_1', requireSessionForReads: true });
+  const page = await bootFactoryPage(t, daemon);
+  const asksEl = page.doc.getElementById('asks');
+
+  // 1. Unenrolled browser getting 401 does not loop and shows the pairing hint.
+  const initialProjCalls = daemon.calls.filter((c) => c.path === '/api/factory/projects').length;
+  const initialAskCalls = daemon.calls.filter((c) => c.path === '/api/factory/asks').length;
+  assert.ok(initialProjCalls <= 2, `unenrolled 401 must not loop on /api/factory/projects (got ${initialProjCalls})`);
+  assert.ok(initialAskCalls <= 2, `unenrolled 401 must not loop on /api/factory/asks (got ${initialAskCalls})`);
+  assert.equal(
+    daemon.calls.filter((c) => c.path === '/api/auth/session').length,
+    0,
+    'unenrolled browser has no key and must not post /api/auth/session',
+  );
+  assert.ok(
+    !daemon.calls.some((c) => c.path.startsWith('/api/pair')),
+    'must never auto-fetch /api/pair*',
+  );
+  assert.ok(asksEl.querySelector('#pair-code'), 'unenrolled browser getting 401 must see the pairing hint/form');
+  assert.match(asksEl.innerHTML, /menu.?bar|pair/i);
+
+  // 2. Pair the browser, then revoke it: the dead cookie is cleared instead of sent forever, and no loop occurs.
+  asksEl.querySelector('#pair-code').value = 'ABCD-EFGH';
+  asksEl.querySelector('form[data-pair-form]').dispatchEvent({ type: 'submit', bubbles: true });
+  await page.flush();
+  await page.pollNow();
+  assert.ok(daemon.cookieJar.session !== '', 'expected active session cookie after pairing');
+
+  daemon.setRequireSessionForReads(false);
+  daemon.revokeDevice();
+  const revMark = daemon.calls.length;
+  await page.pollNow();
+  const revCalls = daemon.calls.slice(revMark);
+  assert.ok(
+    revCalls.filter((c) => c.path === '/api/factory/projects').length <= 2,
+    'revoked browser must not loop on /api/factory/projects',
+  );
+  assert.equal(daemon.cookieJar.session, '', 'revoked session cookie must be cleared');
+  assert.equal(
+    page.idb.dbs.get('sheepdog')?.get('devices')?.size || 0,
+    0,
+    'revoked browser key must be forgotten on 401 re-auth refusal',
+  );
+
+  // Next poll sends no dead cookie at all.
+  const afterClearMark = daemon.calls.length;
+  await page.pollNow();
+  const afterClear = daemon.calls.slice(afterClearMark);
+  assert.ok(afterClear.length > 0);
+  assert.ok(afterClear.every((c) => c.sentCookie === ''), 'cleared cookie must not be sent again');
+});

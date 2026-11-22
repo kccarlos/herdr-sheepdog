@@ -2,15 +2,19 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -532,5 +536,393 @@ func TestFactoryAsksListAndAnswerProof(t *testing.T) {
 	}
 	if !strings.Contains(string(logBytes), phoneDevID) {
 		t.Fatalf("factory log missing phone device_id %q: %s", phoneDevID, string(logBytes))
+	}
+}
+
+// Round 2, Major 1: a browser short code can be tested only by an unproxied
+// loopback request. Any loopback request carrying X-Forwarded-For (rotated
+// every guess) or any other proxy or Funnel signal, or any non-loopback
+// request, is refused before checking the short code and does not burn it.
+// Every unproxied loopback guess shares one rate-limit bucket (6th wrong guess
+// is 429 however headers vary), and phone QR pairing keeps working.
+func TestBrowserShortCodeUnproxiedLoopbackOnly(t *testing.T) {
+	t.Run("proxied_and_remote_refused_without_burning", func(t *testing.T) {
+		f := newBrowserEnrolFixture(t, nil)
+		_, appTicket := f.enrollAndSignInApp("Test Menu Bar", DeviceIOS)
+
+		issueShort := func() string {
+			t.Helper()
+			w := f.doLoopback(http.MethodPost, "/api/pair/browser-code", nil, appTicket)
+			if w.Code != http.StatusOK {
+				t.Fatalf("POST /api/pair/browser-code = %d %s, want 200", w.Code, w.Body.String())
+			}
+			var out struct {
+				Code string `json:"code"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || out.Code == "" {
+				t.Fatalf("decode browser-code = %v (%s)", err, w.Body.String())
+			}
+			return out.Code
+		}
+
+		// Issue one short code and replace it so retiredCode is expired and activeCode is live.
+		retiredCode := issueShort()
+		f.now = f.now.Add(time.Second)
+		activeCode := issueShort()
+
+		_, pub := newDeviceKey(t)
+		postEnroll := func(remoteAddr, host string, tlsState *tls.ConnectionState, hdrs map[string]string, code string) *httptest.ResponseRecorder {
+			t.Helper()
+			b, err := json.Marshal(map[string]any{
+				"code": code, "public_key": pub, "name": "Test Browser", "kind": DeviceBrowser,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := httptest.NewRequest(http.MethodPost, "/api/devices/enroll", bytes.NewReader(b))
+			r.Header.Set("Content-Type", "application/json")
+			r.RemoteAddr, r.Host, r.TLS = remoteAddr, host, tlsState
+			for k, v := range hdrs {
+				r.Header.Set(k, v)
+			}
+			w := httptest.NewRecorder()
+			f.srv.Handler().ServeHTTP(w, r)
+			return w
+		}
+
+		assertRefusedBeforeCheck := func(desc string, w *httptest.ResponseRecorder) {
+			t.Helper()
+			body := w.Body.String()
+			if w.Code != http.StatusForbidden && w.Code != http.StatusBadRequest {
+				t.Fatalf("%s: status = %d %s, want 403 or 400 (refused before checking short code)", desc, w.Code, body)
+			}
+			if strings.Contains(body, "code_used") || strings.Contains(body, "code_expired") {
+				t.Fatalf("%s: response leaked short-code check result: %s", desc, body)
+			}
+		}
+
+		// 1. Loopback requests rotating X-Forwarded-For on every guess (wrong, retired, and live codes).
+		guesses := []string{
+			"2345-6789", "3456-789A", "4567-89AB", "5678-9ABC",
+			"6789-ABCD", "789A-BCDE", "89AB-CDEF", retiredCode,
+			activeCode, strings.ToLower(strings.ReplaceAll(activeCode, "-", " ")),
+		}
+		for i, g := range guesses {
+			xff := fmt.Sprintf("203.0.113.%d", i+1)
+			w := postEnroll("127.0.0.1:5000", "127.0.0.1:7777", nil, map[string]string{"X-Forwarded-For": xff}, g)
+			assertRefusedBeforeCheck(fmt.Sprintf("loopback X-Forwarded-For=%s code=%q", xff, g), w)
+		}
+
+		// 2. Loopback requests carrying any other proxy or Funnel header.
+		proxyHeaders := []struct{ k, v string }{
+			{"X-Forwarded-Host", "tunnel.example.test"},
+			{"X-Forwarded-Proto", "https"},
+			{"X-Forwarded-Port", "443"},
+			{"Forwarded", "for=203.0.113.10;proto=https"},
+			{"X-Real-IP", "203.0.113.10"},
+			{"Tailscale-Funnel-Request", "?1"},
+			{"Tailscale-User-Login", "owner@example.test"},
+			{"Tailscale-User-Name", "Test Owner"},
+			{"Tailscale-Headers-Info", "https://tailscale.com/s/ih"},
+			{"CF-Connecting-IP", "203.0.113.10"},
+			{"True-Client-IP", "203.0.113.10"},
+		}
+		for _, h := range proxyHeaders {
+			for _, c := range []string{retiredCode, activeCode} {
+				w := postEnroll("127.0.0.1:5000", "127.0.0.1:7777", nil, map[string]string{h.k: h.v}, c)
+				assertRefusedBeforeCheck(fmt.Sprintf("loopback %s=%s", h.k, h.v), w)
+			}
+		}
+
+		// Active Tailscale Funnel (including TCPForward Funnel with no HTTP headers).
+		f.srv.deps.TailscaleFunnel = func(context.Context, int) (bool, error) { return true, nil }
+		wFunnel := postEnroll("127.0.0.1:5000", "127.0.0.1:7777", nil, nil, activeCode)
+		assertRefusedBeforeCheck("loopback with active TailscaleFunnel", wFunnel)
+		f.srv.deps.TailscaleFunnel = nil
+		f.now = f.now.Add(10 * time.Second) // expire funnelCache TTL (5s) within 5m code lifetime
+
+		// 3. Non-loopback requests (IPv4 and IPv6 over TLS).
+		for _, peer := range []struct{ remote, host string }{
+			{"192.0.2.50:5000", "192.0.2.20:7777"},
+			{"[2001:db8::50]:5000", "[2001:db8::20]:7777"},
+		} {
+			for _, c := range []string{retiredCode, activeCode, "2345-6789"} {
+				w := postEnroll(peer.remote, peer.host, &tls.ConnectionState{}, nil, c)
+				assertRefusedBeforeCheck("remote "+peer.remote, w)
+			}
+		}
+
+		// None of the refused attempts enrolled a browser or burned activeCode.
+		if got := len(f.srv.devices.active()); got != 1 {
+			t.Fatalf("active devices after refused attempts = %d, want 1", got)
+		}
+		wOK := postEnroll("127.0.0.1:5000", "127.0.0.1:7777", nil, nil, activeCode)
+		if wOK.Code != http.StatusOK {
+			t.Fatalf("unproxied loopback enroll with unburned short code = %d %s, want 200", wOK.Code, wOK.Body.String())
+		}
+	})
+
+	t.Run("loopback_single_bucket_and_phone_pairing_preserved", func(t *testing.T) {
+		old := pairSysAddrs
+		pairSysAddrs = func() ([]pair.IfaceAddr, error) {
+			return []pair.IfaceAddr{{Iface: "en0", IP: net.ParseIP("192.168.1.20")}}, nil
+		}
+		t.Cleanup(func() { pairSysAddrs = old })
+
+		f := newBrowserEnrolFixture(t, nil)
+		if err := f.srv.Listen("0.0.0.0:0"); err != nil {
+			t.Fatal(err)
+		}
+		_, appTicket := f.enrollAndSignInApp("Test Menu Bar", DeviceIOS)
+		wShort := f.doLoopback(http.MethodPost, "/api/pair/browser-code", nil, appTicket)
+		if wShort.Code != http.StatusOK {
+			t.Fatalf("POST /api/pair/browser-code = %d %s", wShort.Code, wShort.Body.String())
+		}
+		var issued struct {
+			Code string `json:"code"`
+		}
+		_ = json.Unmarshal(wShort.Body.Bytes(), &issued)
+
+		_, pub := newDeviceKey(t)
+		sendLoopbackGuess := func(remoteAddr, host, code string, hdrs map[string]string) *httptest.ResponseRecorder {
+			t.Helper()
+			b, _ := json.Marshal(map[string]any{
+				"code": code, "public_key": pub, "name": "Test Browser", "kind": DeviceBrowser,
+			})
+			r := httptest.NewRequest(http.MethodPost, "/api/devices/enroll", bytes.NewReader(b))
+			r.Header.Set("Content-Type", "application/json")
+			r.RemoteAddr, r.Host = remoteAddr, host
+			for k, v := range hdrs {
+				r.Header.Set(k, v)
+			}
+			w := httptest.NewRecorder()
+			f.srv.Handler().ServeHTTP(w, r)
+			return w
+		}
+
+		// 5 unproxied wrong guesses varying loopback IP, Host, Origin, User-Agent, custom headers, and blank XFF.
+		variations := []struct {
+			remote, host, code string
+			hdrs               map[string]string
+		}{
+			{"127.0.0.1:5001", "127.0.0.1:7777", "2345-6789", map[string]string{"User-Agent": "Guess/1"}},
+			{"[::1]:5002", "[::1]:7777", "3456-789A", map[string]string{"Origin": "http://[::1]:7777", "User-Agent": "Guess/2"}},
+			{"127.0.0.2:5003", "localhost:7777", "4567-89AB", map[string]string{"Origin": "http://localhost:7777", "X-Client-IP": "198.51.100.3"}},
+			{"127.0.0.1:5004", "127.0.0.1:7777", "5678-9ABC", map[string]string{"Via": "1.1 local", "X-Forwarded-For": "   "}},
+			{"[::1]:5005", "localhost:7777", "6789-ABCD", map[string]string{"Accept-Language": "en-GB", "X-Request-ID": "req-5"}},
+		}
+		for i, v := range variations {
+			w := sendLoopbackGuess(v.remote, v.host, v.code, v.hdrs)
+			if w.Code != http.StatusGone {
+				t.Fatalf("unproxied wrong guess %d = %d %s, want 410", i+1, w.Code, w.Body.String())
+			}
+		}
+
+		// Spoofing X-Forwarded-For after 5 wrong guesses cannot test or burn issued.Code.
+		wSpoof := sendLoopbackGuess("127.0.0.1:5099", "127.0.0.1:7777", issued.Code, map[string]string{"X-Forwarded-For": "203.0.113.99"})
+		if wSpoof.Code != http.StatusForbidden && wSpoof.Code != http.StatusBadRequest {
+			t.Fatalf("spoofed XFF guess = %d %s, want 403 or 400", wSpoof.Code, wSpoof.Body.String())
+		}
+
+		// 6th unproxied wrong guess (even from another loopback IP/headers) hits 429 rate_limited.
+		w6 := sendLoopbackGuess("127.0.0.42:5006", "127.0.0.1:7777", "789A-BCDE", map[string]string{
+			"User-Agent": "Guess/6", "X-Client-IP": "203.0.113.42",
+		})
+		var body6 map[string]string
+		_ = json.Unmarshal(w6.Body.Bytes(), &body6)
+		if w6.Code != http.StatusTooManyRequests || body6["reason"] != "rate_limited" {
+			t.Fatalf("6th unproxied wrong guess = %d %v, want 429 rate_limited", w6.Code, body6)
+		}
+
+		// Even the live short code is blocked on loopback while rate-limited.
+		wBlocked := sendLoopbackGuess("127.0.0.1:5007", "127.0.0.1:7777", issued.Code, nil)
+		if wBlocked.Code != http.StatusTooManyRequests {
+			t.Fatalf("live short code while loopback blocked = %d %s, want 429", wBlocked.Code, wBlocked.Body.String())
+		}
+
+		// Phone QR pairing through normal paths (remote TLS and reverse proxy) keeps working.
+		nextQRCode := func() string {
+			t.Helper()
+			wPair := f.doLoopback(http.MethodGet, "/api/pair?new=1", nil, "")
+			if wPair.Code != http.StatusOK {
+				t.Fatalf("GET /api/pair?new=1 = %d %s", wPair.Code, wPair.Body.String())
+			}
+			var qr PairResponse
+			if err := json.Unmarshal(wPair.Body.Bytes(), &qr); err != nil || qr.Link == "" {
+				t.Fatalf("decode pair response = %v (%s)", err, wPair.Body.String())
+			}
+			parsed, err := pair.ParseLink(qr.Link)
+			if err != nil || parsed.Code == "" {
+				t.Fatalf("ParseLink(%q) = %v", qr.Link, err)
+			}
+			return parsed.Code
+		}
+
+		_, phonePub := newDeviceKey(t)
+		wPhone := f.doRemote(http.MethodPost, "/api/devices/enroll", map[string]any{
+			"code": nextQRCode(), "public_key": phonePub, "name": "Test Phone", "kind": DeviceIOS,
+		}, "")
+		if wPhone.Code != http.StatusOK {
+			t.Fatalf("remote TLS phone enroll = %d %s, want 200", wPhone.Code, wPhone.Body.String())
+		}
+
+		_, padPub := newDeviceKey(t)
+		padBody, _ := json.Marshal(map[string]any{
+			"code": nextQRCode(), "public_key": padPub, "name": "Test Pad", "kind": DeviceIPadOS,
+		})
+		rPad := httptest.NewRequest(http.MethodPost, "/api/devices/enroll", bytes.NewReader(padBody))
+		rPad.RemoteAddr, rPad.Host = "127.0.0.1:54321", "127.0.0.1:7777"
+		rPad.Header.Set("Content-Type", "application/json")
+		rPad.Header.Set("X-Forwarded-For", "100.64.0.44")
+		rPad.Header.Set("X-Forwarded-Proto", "https")
+		wPad := httptest.NewRecorder()
+		f.srv.Handler().ServeHTTP(wPad, rPad)
+		if wPad.Code != http.StatusOK {
+			t.Fatalf("reverse-proxied iPadOS QR enroll = %d %s, want 200", wPad.Code, wPad.Body.String())
+		}
+	})
+}
+
+// Round 2, Major 2 (server side): a revoked or unknown session cookie is
+// cleared (Max-Age=-1 / Max-Age=0 or past Expires) instead of being sent
+// forever by the browser, while owner answers still require device proof.
+func TestSessionCookieClearedWhenRevokedOrUnknown(t *testing.T) {
+	now := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	f := newBrowserEnrolFixture(t, []flow.Ask{{
+		ID:        "ask-open-1",
+		Project:   "proj-demo",
+		Kind:      flow.KindGate,
+		Gated:     true,
+		Question:  "Approve the plan for T1?",
+		Options:   []string{"Approve", "Request changes"},
+		Recommend: "Approve",
+		Task:      "T1",
+		At:        now,
+		Status:    flow.AskStatusOpen,
+	}})
+
+	_, appTicket := f.enrollAndSignInApp("Test Pad App", DeviceIPadOS)
+	wCode := f.doLoopback(http.MethodPost, "/api/pair/browser-code", nil, appTicket)
+	if wCode.Code != http.StatusOK {
+		t.Fatalf("POST /api/pair/browser-code = %d %s", wCode.Code, wCode.Body.String())
+	}
+	var issued struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(wCode.Body.Bytes(), &issued)
+
+	browserKey, browserPub := newDeviceKey(t)
+	wEnroll := f.doLoopback(http.MethodPost, "/api/devices/enroll", map[string]any{
+		"code": issued.Code, "public_key": browserPub, "name": "Test Browser", "kind": DeviceBrowser,
+	}, "")
+	if wEnroll.Code != http.StatusOK {
+		t.Fatalf("browser enroll = %d %s", wEnroll.Code, wEnroll.Body.String())
+	}
+	var browserER EnrollResponse
+	_ = json.Unmarshal(wEnroll.Body.Bytes(), &browserER)
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseURL, err := url.Parse("http://127.0.0.1:7777/api/factory/asks")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	doJar := func(method, path string, body any) *httptest.ResponseRecorder {
+		t.Helper()
+		var req *http.Request
+		if body != nil {
+			b, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req = httptest.NewRequest(method, "http://127.0.0.1:7777"+path, bytes.NewReader(b))
+			req.Header.Set("Content-Type", "application/json")
+		} else {
+			req = httptest.NewRequest(method, "http://127.0.0.1:7777"+path, nil)
+		}
+		req.RemoteAddr, req.Host = "127.0.0.1:5000", "127.0.0.1:7777"
+		if method != http.MethodGet && method != http.MethodHead {
+			req.Header.Set("Origin", "http://127.0.0.1:7777")
+		}
+		for _, c := range jar.Cookies(req.URL) {
+			req.AddCookie(c)
+		}
+		w := httptest.NewRecorder()
+		f.srv.Handler().ServeHTTP(w, req)
+		jar.SetCookies(req.URL, w.Result().Cookies())
+		return w
+	}
+
+	assertCookieCleared := func(desc string, w *httptest.ResponseRecorder) {
+		t.Helper()
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("%s: status = %d %s, want 401", desc, w.Code, w.Body.String())
+		}
+		cleared := false
+		for _, c := range w.Result().Cookies() {
+			if c.Name == sessionCookie && c.Value == "" && (c.MaxAge < 0 || (!c.Expires.IsZero() && !c.Expires.After(f.now))) {
+				cleared = true
+				break
+			}
+		}
+		if !cleared {
+			t.Fatalf("%s: 401 response did not clear %s cookie (Set-Cookie=%v)", desc, sessionCookie, w.Header().Values("Set-Cookie"))
+		}
+		if rem := jar.Cookies(baseURL); len(rem) != 0 {
+			t.Fatalf("%s: cookie jar still holds %+v after clear", desc, rem)
+		}
+	}
+
+	// 1. Daemon restart empties in-memory sessions -> stale session cookie is rejected 401 and cleared.
+	jar.SetCookies(baseURL, []*http.Cookie{f.signInBrowser(browserKey, browserER.DeviceID)})
+	if w := doJar(http.MethodGet, "/api/factory/asks", nil); w.Code != http.StatusOK {
+		t.Fatalf("signed-in GET /api/factory/asks = %d %s, want 200", w.Code, w.Body.String())
+	}
+	f.srv.auth = newAuthState()
+	assertCookieCleared("stale cookie after daemon restart", doJar(http.MethodGet, "/api/factory/asks", nil))
+	if wNext := doJar(http.MethodGet, "/api/factory/asks", nil); wNext.Code != http.StatusOK {
+		t.Fatalf("follow-up loopback GET /api/factory/asks after cookie cleared = %d %s, want 200", wNext.Code, wNext.Body.String())
+	}
+
+	// 2. Arbitrary unknown session cookie is cleared on first 401.
+	jar.SetCookies(baseURL, []*http.Cookie{{Name: sessionCookie, Value: "unknown-session-ticket", Path: "/"}})
+	assertCookieCleared("unknown session cookie", doJar(http.MethodGet, "/api/factory/projects", nil))
+	if wNext := doJar(http.MethodGet, "/api/factory/projects", nil); wNext.Code != http.StatusOK {
+		t.Fatalf("follow-up loopback GET /api/factory/projects = %d %s, want 200", wNext.Code, wNext.Body.String())
+	}
+
+	// 3. Revoked device session cookie (via setup DELETE /api/devices/{id}) is cleared.
+	jar.SetCookies(baseURL, []*http.Cookie{f.signInBrowser(browserKey, browserER.DeviceID)})
+	rRev := httptest.NewRequest(http.MethodDelete, "http://127.0.0.1:7777/api/devices/"+browserER.DeviceID, strings.NewReader("{}"))
+	rRev.RemoteAddr, rRev.Host = "127.0.0.1:5000", "127.0.0.1:7777"
+	rRev.Header.Set("Content-Type", "application/json")
+	rRev.Header.Set("Origin", "http://127.0.0.1:7777")
+	wRev := httptest.NewRecorder()
+	f.srv.Handler().ServeHTTP(wRev, rRev)
+	if wRev.Code != http.StatusOK {
+		t.Fatalf("revoke browser = %d %s", wRev.Code, wRev.Body.String())
+	}
+	assertCookieCleared("revoked browser cookie after DELETE /api/devices/{id}", doJar(http.MethodGet, "/api/factory/asks", nil))
+	if wNext := doJar(http.MethodGet, "/api/factory/asks", nil); wNext.Code != http.StatusOK {
+		t.Fatalf("follow-up loopback GET after revoke clear = %d %s, want 200", wNext.Code, wNext.Body.String())
+	}
+
+	// Also verify tickets still present in auth.tickets for a revoked or missing device clear the cookie.
+	f.srv.auth.mu.Lock()
+	f.srv.auth.tickets["ticket-revoked-dev"] = ticket{device: browserER.DeviceID, expires: f.now.Add(time.Hour)}
+	f.srv.auth.tickets["ticket-unknown-dev"] = ticket{device: "dev-missing", expires: f.now.Add(time.Hour)}
+	f.srv.auth.mu.Unlock()
+	jar.SetCookies(baseURL, []*http.Cookie{{Name: sessionCookie, Value: "ticket-revoked-dev", Path: "/"}})
+	assertCookieCleared("ticket for revoked device", doJar(http.MethodGet, "/api/factory/asks", nil))
+	jar.SetCookies(baseURL, []*http.Cookie{{Name: sessionCookie, Value: "ticket-unknown-dev", Path: "/"}})
+	assertCookieCleared("ticket for unknown device", doJar(http.MethodGet, "/api/factory/asks", nil))
+
+	// Owner proof rail still holds: without signing in as an active paired device, answering is 403 proof_required.
+	wNoProof := doJar(http.MethodPost, "/api/factory/asks/ask-open-1/answer", map[string]any{"option": "Approve"})
+	if wNoProof.Code != http.StatusForbidden || !strings.Contains(wNoProof.Body.String(), "proof_required") {
+		t.Fatalf("answer without device session after cookie clear = %d %s, want 403 proof_required", wNoProof.Code, wNoProof.Body.String())
 	}
 }
