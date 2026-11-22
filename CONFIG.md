@@ -567,6 +567,7 @@ These factory settings live in each project's `state.json`, not in the config fi
 | `coordinator_gap_minutes` | `10` | 1–60 | Minimum minutes between coordinator starts before J6 allows a restart. |
 | `coordinator_silent_minutes` | `30` | 5–240 | Minutes without a coordinator turn after delivered wakes before J9 stops the coordinator so J7 restarts it. |
 | `heartbeat_minutes` | `60` | 10–600 | Minutes with no wake while the coordinator is idle before J13 sends a heartbeat wake with the status of open tasks. |
+| `handoff_minutes` | `5` | 1–30 | Minutes a worker or designer has to write its handoff and stop after its pool reaches `pool_floor_percent` before the engine stops it with `quota` (R31). |
 | `sweep_minutes` | `5` | 1–60 | Minutes between periodic sweeps of stray factory-labelled terminals, leftover worktrees and branches, local base commits ahead of the last-fetched remote tracking ref, and the shared Codex home (also runs once at daemon start). |
 | `pool_floor_percent` | `5` | 0–50 | Minimum percent left required on every provider-supported quota window before starting a coordinator, worker or reviewer on that pool; a pool at or below this floor waits for its reset, and an unreadable reading is unknown and never blocks. |
 | `pool_minutes` | `5` | 1–60 | Minutes a shared CodexBar quota reading per provider stays fresh before the engine reads it again; a reading whose window reset time passes is refreshed on the next pass even inside this interval. |

@@ -1,9 +1,11 @@
 package factory
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"slices"
@@ -88,9 +90,12 @@ func poolProvider(c flow.Candidate) string {
 	switch c.CLI {
 	case "claude", world.CodexCLI:
 		return c.CLI
-	default:
-		return ""
+	case "agy":
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.Model)), "gemini-") {
+			return "antigravity"
+		}
 	}
+	return ""
 }
 
 func projectPoolProviders(s flow.State) []string {
@@ -105,10 +110,16 @@ func projectPoolProviders(s flow.State) []string {
 	add(flow.Candidates(flow.RoleCoordinator, flow.Task{}, s.Settings))
 	add(flow.Candidates(flow.RoleWorker, flow.Task{}, s.Settings))
 	add(flow.Candidates(flow.RoleReviewer, flow.Task{}, s.Settings))
+	if s.Project.Run != nil && s.Project.Run.State != flow.PhaseEnded {
+		add([]flow.Candidate{{CLI: s.Project.Run.CLI, Model: s.Project.Run.Model}})
+	}
 	for _, t := range s.Tasks {
 		if !flow.Ended(t) {
 			add(flow.Candidates(flow.RoleWorker, t, s.Settings))
 			add(flow.Candidates(flow.RoleReviewer, t, s.Settings))
+			if a := flow.OpenAttempt(t); a != nil && a.Run != nil && a.Run.State != flow.PhaseEnded {
+				add([]flow.Candidate{{CLI: a.Run.CLI, Model: a.Run.Model}})
+			}
 		}
 	}
 	return out
@@ -126,6 +137,40 @@ func poolStale(c cachedPool, now time.Time, ttl time.Duration) bool {
 		}
 	}
 	return false
+}
+
+func formatReset(reset, now time.Time) string {
+	return reset.Local().Format(map[bool]string{true: "Mon 3:04 PM", false: "3:04 PM"}[reset.Sub(now) > 24*time.Hour])
+}
+
+func loadCooldowns(path string) map[string]time.Time {
+	m := map[string]time.Time{}
+	if guardTestPath(path) == nil {
+		if data, err := os.ReadFile(path); err == nil {
+			_ = json.Unmarshal(data, &m)
+		}
+	}
+	return m
+}
+
+func (e *Engine) recordQuotaCooldownLocked(s flow.State, c flow.Candidate, limitLine string, now time.Time) {
+	p, path := poolProvider(c), e.Paths.poolCooldowns()
+	until := cmp.Or(world.ParseLimitReset(limitLine, now), now.Add(time.Duration(s.Settings.PoolMinutes)*time.Minute))
+	m := loadCooldowns(path)
+	maps.DeleteFunc(m, func(_ string, t time.Time) bool { return !now.Before(t) })
+	if k := c.CLI + "/" + cmp.Or(p, c.CLI); until.After(m[k]) {
+		m[k] = until
+	}
+	if data, err := json.MarshalIndent(m, "", "  "); err == nil {
+		_ = writeAtomic(path, append(data, '\n'))
+	}
+}
+
+func quotaReason(cause string, reset, now time.Time) flow.ResolveReason {
+	if !reset.IsZero() {
+		return flow.ResolveReason{Kind: flow.ReasonPool, Why: fmt.Sprintf("waiting for quota until %s: %s", formatReset(reset, now), cause), Reset: reset}
+	}
+	return flow.ResolveReason{Kind: flow.ReasonPool, Why: "waiting for quota: " + cause}
 }
 
 func poolWaitReason(provider string, r poolReading, floor int, now time.Time) flow.ResolveReason {
@@ -148,22 +193,23 @@ func poolWaitReason(provider string, r poolReading, floor int, now time.Time) fl
 	if !blocked {
 		return flow.ResolveReason{}
 	}
-	if !earliest.IsZero() {
-		layout := "3:04 PM"
-		if earliest.Sub(now) > 24*time.Hour {
-			layout = "Mon 3:04 PM"
-		}
-		return flow.ResolveReason{Kind: flow.ReasonPool, Why: fmt.Sprintf("waiting for quota until %s: the %s pool is at its floor", earliest.Local().Format(layout), provider), Reset: earliest}
-	}
-	return flow.ResolveReason{Kind: flow.ReasonPool, Why: fmt.Sprintf("waiting for quota: the %s pool is at its floor", provider)}
+	return quotaReason(fmt.Sprintf("the %s pool is at its floor", provider), earliest, now)
 }
 
-func poolCheck(pools map[string]poolReading, floor int, now time.Time) func(flow.Candidate) flow.ResolveReason {
+func poolCheck(pools map[string]poolReading, cooldownPath string, floor int, now time.Time) func(flow.Candidate) flow.ResolveReason {
 	return func(c flow.Candidate) flow.ResolveReason {
-		if p := poolProvider(c); p != "" {
-			return poolWaitReason(p, pools[p], floor, now)
+		p := poolProvider(c)
+		var cd, pr flow.ResolveReason
+		if until := loadCooldowns(cooldownPath)[c.CLI+"/"+cmp.Or(p, c.CLI)]; now.Before(until) {
+			cd = quotaReason(cmp.Or(p, c.CLI)+" hit its usage limit", until, now)
 		}
-		return flow.ResolveReason{}
+		if p != "" {
+			pr = poolWaitReason(p, pools[p], floor, now)
+		}
+		if cd.Why != "" && (pr.Why == "" || pr.Reset.IsZero() || !pr.Reset.After(cd.Reset)) {
+			return cd
+		}
+		return pr
 	}
 }
 

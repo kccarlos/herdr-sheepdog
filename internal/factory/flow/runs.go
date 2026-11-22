@@ -13,7 +13,7 @@ const (
 	EndFailed, EndSignedOut, EndQuota, EndBlank, EndError, EndResumeFailed            = "failed", "signed_out", "quota", "blank", "error", "resume_failed"
 	EndStuck, EndExited, EndLost, EndStopped                                          = "stuck", "exited", "lost", "stopped"
 	EvLaunched, EvLaunchFailed, EvScreen, EvStatus, EvDeliver                         = "launched", "launch_failed", "screen", "status", "deliver"
-	EvActivity, EvTick, EvExit, EvLost, EvStop                                        = "activity", "tick", "exit", "lost", "stop"
+	EvActivity, EvTick, EvExit, EvLost, EvStop, EvPoolFloor                           = "activity", "tick", "exit", "lost", "stop", "pool_floor"
 	ScreenNone, ScreenTrust, ScreenConfirm                                            = "none", "trust", "confirm"
 	ScreenSignedOut, ScreenLimit                                                      = "signed_out", "limit"
 	RunActKeys, RunActSend, RunActSendHeld, RunActInterrupt, RunActStop, RunActRemove = "press_keys", "send_message", "send_held", "interrupt", "stop_run", "remove_terminal"
@@ -32,6 +32,10 @@ type RunRecord struct {
 	ScreensAnswered, Held                                                                                              []string
 	SentScreenHash                                                                                                     string     `json:"sent_screen_hash,omitempty"`
 	AwaitHeldStatus                                                                                                    bool       `json:"await_held_status,omitempty"`
+	HandoffDeadline                                                                                                    time.Time  `json:"handoff_deadline,omitempty"`
+	HandoffSent                                                                                                        bool       `json:"handoff_sent,omitempty"`
+	HandoffHeld                                                                                                        bool       `json:"handoff_held,omitempty"`
+	LastChat                                                                                                           string     `json:"last_chat,omitempty"`
 	StopRetry                                                                                                          *StopRetry `json:"stop_retry,omitempty"`
 	KeyRetry                                                                                                           *KeyRetry  `json:"key_retry,omitempty"`
 }
@@ -63,8 +67,8 @@ type RunEvent struct {
 	CreatedMS, Turn                                                                  uint64
 	StatusAt                                                                         time.Time
 	SessionID                                                                        string
-	Inferred                                                                         bool
-	Urgent                                                                           bool
+	LimitLine, Tail                                                                  string
+	Inferred, Urgent, HandoffUsed                                                    bool
 }
 
 // RunIn is what a run row sees: the run record, event, settings and clock.
@@ -83,21 +87,29 @@ func ScreenKeys(cli, screen string) []string {
 	return nil
 }
 
-func inSet(list, v string) bool { return slices.Contains(strings.Split(list, "|"), v) }
-func isDialog(s string) bool    { return inSet("trust|confirm", s) }
-func isRevRole(r string) bool   { return inSet("reviewer|retro", r) }
+func inSet(list, v string) bool        { return slices.Contains(strings.Split(list, "|"), v) }
+func isDialog(s string) bool           { return inSet("trust|confirm", s) }
+func isRevRole(r string) bool          { return inSet("reviewer|retro", r) }
+func isFloorHandoffRole(r string) bool { return inSet(RoleWorker+"|"+RoleDesigner, r) }
 func matchEv(on string, e RunEvent) bool {
 	return inSet(on, e.Kind) || inSet(on, e.Kind+":"+cmp.Or(e.Screen, e.Status))
 }
 func (x RunIn) past(t time.Time, d time.Duration) bool { return !t.IsZero() && x.Now.Sub(t) >= d }
 func (x RunIn) pastMin(t time.Time, m int) bool        { return x.past(t, time.Duration(m)*time.Minute) }
 func (x RunIn) pastSec(t time.Time, s int) bool        { return x.past(t, time.Duration(s)*time.Second) }
+func (x RunIn) handoffPending() bool                   { return !x.R.HandoffDeadline.IsZero() }
 func (x RunIn) startOut() bool {
-	return !x.R.StatusReported && x.pastMin(x.R.StartedAt, x.S.StartMinutes)
+	return !x.handoffPending() && !x.R.StatusReported && x.pastMin(x.R.StartedAt, x.S.StartMinutes)
 }
-func (x RunIn) blockedOut() bool { return x.pastMin(x.R.BlockedSince, x.S.BlockedMinutes) }
+func (x RunIn) blockedOut() bool {
+	return !x.handoffPending() && x.pastMin(x.R.BlockedSince, x.S.BlockedMinutes)
+}
 func (x RunIn) idle() bool {
 	return inSet("idle|done|error", x.R.Status) && x.pastSec(x.R.StatusSince, x.S.IdleGraceSeconds)
+}
+func (x RunIn) handoffDue() bool { return x.handoffPending() && !x.Now.Before(x.R.HandoffDeadline) }
+func (x RunIn) isR19() bool {
+	return x.R.State == PhaseWorking && x.idle() && x.R.Status != "error" && cmp.Or(x.E.Screen, x.R.Screen) == ScreenLimit
 }
 
 func rrow(id, from, on string, guard func(RunIn) bool, to string, acts ...string) Row[RunIn] {
@@ -105,8 +117,8 @@ func rrow(id, from, on string, guard func(RunIn) bool, to string, acts ...string
 	return Row[RunIn]{ID: id, WaitsOn: "none", When: when, Then: func(x RunIn) Decision { return Decision{Asked: acts, Why: cmp.Or(to, x.R.State)} }}
 }
 
-// RunRows is the run transition table of design.md section 5: R1-R6, R8-R30, R33-R37.
-// R7 (typed first prompt) waits for non-argv launches; R31 and R32 (pool_floor) are slice 5b.
+// RunRows is the run transition table of design.md section 5: R1-R6, R8-R37.
+// R7 (typed first prompt) waits for non-argv launches.
 var RunRows = []Row[RunIn]{
 	rrow("R1", PhaseStarting, EvLaunched, nil, PhaseStarting),
 	rrow("R2", PhaseStarting, EvLaunchFailed, nil, "ended(failed)"),
@@ -121,6 +133,7 @@ var RunRows = []Row[RunIn]{
 		return inSet("idle|done", x.E.Status) || x.E.Status == "error" && !isRevRole(x.R.Role)
 	}, PhaseWorking),
 	rrow("R10", PhaseStarting, EvStatus, func(x RunIn) bool { return x.E.Status != "blocked" && x.E.Status != "error" }, PhaseStarting),
+	rrow("R31", liveSet, EvTick, func(x RunIn) bool { return x.handoffDue() && !x.isR19() }, "ended(quota)", RunActStop),
 	rrow("R11", PhaseStarting, EvTick, func(x RunIn) bool { return x.startOut() && isDialog(x.R.Screen) }, "ended(stuck)", RunActStop),
 	rrow("R11", PhaseStarting, EvTick, RunIn.startOut, "ended(blank)", RunActStop),
 	rrow("R12", PhaseStarting, "tick|activity", nil, PhaseStarting),
@@ -131,16 +144,15 @@ var RunRows = []Row[RunIn]{
 	rrow("R15", "starting|working", "status:blocked", nil, PhaseBlocked),
 	rrow("R16", "starting|working", EvStatus, func(x RunIn) bool { return x.E.Status == "error" && isRevRole(x.R.Role) }, "ended(error)", RunActStop),
 	rrow("R17", PhaseWorking, EvStatus, nil, PhaseWorking),
-	rrow("R18", PhaseWorking, EvTick, func(x RunIn) bool { return x.idle() && len(x.R.Held) > 0 && !isRevRole(x.R.Role) }, PhaseWorking, RunActSendHeld),
-	rrow("R19", PhaseWorking, EvTick, func(x RunIn) bool {
-		return x.idle() && x.R.Status != "error" && cmp.Or(x.E.Screen, x.R.Screen) == ScreenLimit
-	}, "ended(quota)", RunActStop),
+	rrow("R18", PhaseWorking, EvTick, func(x RunIn) bool { return x.idle() && len(x.R.Held) > 0 && !isRevRole(x.R.Role) && !x.R.HandoffSent }, PhaseWorking, RunActSendHeld),
+	rrow("R19", PhaseWorking, EvTick, RunIn.isR19, "ended(quota)", RunActStop),
+	rrow("R31", PhaseWorking, EvTick, func(x RunIn) bool { return x.R.HandoffSent && x.idle() }, "ended(quota)", RunActStop),
 	rrow("R20", PhaseWorking, EvTick, RunIn.idle, PhaseIdle),
 	rrow("R21", PhaseWorking, EvTick, func(x RunIn) bool {
-		return x.E.ScreenHash != "" && x.R.InterruptedAt.IsZero() && x.pastMin(x.R.LastActivity, x.S.QuietMinutes)
+		return !x.handoffPending() && x.E.ScreenHash != "" && x.R.InterruptedAt.IsZero() && x.pastMin(x.R.LastActivity, x.S.QuietMinutes)
 	}, PhaseWorking, RunActInterrupt),
 	rrow("R22", PhaseWorking, EvTick, func(x RunIn) bool {
-		return x.E.ScreenHash != "" && !x.R.LastActivity.After(x.R.InterruptedAt) && x.pastSec(x.R.InterruptedAt, x.S.InterruptSeconds)
+		return !x.handoffPending() && x.E.ScreenHash != "" && !x.R.LastActivity.After(x.R.InterruptedAt) && x.pastSec(x.R.InterruptedAt, x.S.InterruptSeconds)
 	}, "ended(stuck)", RunActStop),
 	rrow("R23", PhaseWorking, "tick|activity", nil, PhaseWorking),
 	rrow("R24", PhaseIdle, EvDeliver, nil, PhaseWorking, RunActSend),
@@ -151,6 +163,14 @@ var RunRows = []Row[RunIn]{
 	rrow("R29", PhaseBlocked, EvTick, func(x RunIn) bool { return x.R.BlockedKind == "auth" && x.blockedOut() }, "ended(signed_out)", RunActStop),
 	rrow("R29", PhaseBlocked, EvTick, RunIn.blockedOut, "ended(stuck)", RunActStop),
 	rrow("R30", "idle|blocked", "status|tick|activity|screen|launched|launch_failed", nil, ""),
+	rrow("R31", PhaseWorking, EvPoolFloor, func(x RunIn) bool {
+		return isFloorHandoffRole(x.R.Role) && !x.R.HandoffSent && !x.E.HandoffUsed && cmp.Or(x.E.Screen, x.R.Screen) != ScreenLimit
+	}, PhaseWorking, RunActInterrupt, RunActSend),
+	rrow("R31", PhaseIdle, EvPoolFloor, func(x RunIn) bool {
+		return isFloorHandoffRole(x.R.Role) && !x.R.HandoffSent && !x.E.HandoffUsed && cmp.Or(x.E.Screen, x.R.Screen) != ScreenLimit
+	}, PhaseWorking, RunActSend),
+	rrow("R31", liveSet, EvPoolFloor, func(x RunIn) bool { return isFloorHandoffRole(x.R.Role) }, ""),
+	rrow("R32", liveSet, EvPoolFloor, nil, ""),
 	rrow("R33", liveSet, EvExit, nil, "ended(exited)", RunActRemove),
 	rrow("R33", liveSet, EvLost, nil, "ended(lost)"),
 	rrow("R34", liveSet, EvStop, nil, "ended(stopped)", RunActStop),
@@ -185,6 +205,18 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 	}
 	if ev.ScreenHash != "" && rec.State != PhaseEnded {
 		rec.ScreenHash = ev.ScreenHash
+	}
+	if ev.Tail != "" {
+		rec.LastChat = ev.Tail
+	}
+	if r.ID == "R31" && ev.Kind == EvPoolFloor {
+		rec.HandoffDeadline = cmp.Or(rec.HandoffDeadline, now.Add(time.Duration(s.HandoffMinutes)*time.Minute))
+		rec.Reason = cmp.Or(ev.Reason, rec.Reason)
+		if slices.Contains(d.Asked, RunActSend) {
+			rec.HandoffSent, rec.HandoffHeld = true, false
+		} else if rec.State == PhaseStarting && !rec.HandoffSent && !ev.HandoffUsed {
+			rec.HandoffHeld = true
+		}
 	}
 	if res, ok := strings.CutPrefix(d.Why, "ended("); ok {
 		rec.State, rec.Result, rec.EndedAt, rec.StopRetry = PhaseEnded, strings.TrimSuffix(res, ")"), now, nil
@@ -229,7 +261,7 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 		rec.Held = rec.Held[firstHeld:]
 		rec.finishCodexTurn(now)
 		fallthrough
-	case inSet("R24|R25", r.ID):
+	case inSet("R24|R25", r.ID) || (r.ID == "R31" && slices.Contains(d.Asked, RunActSend)):
 		rec.LastSentAt = now
 		if rec.observesCodexTurns() {
 			rec.SentScreenHash, rec.LastTurnEnd = rec.ScreenHash, time.Time{}

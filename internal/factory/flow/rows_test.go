@@ -493,9 +493,9 @@ func TestEnsureRun(t *testing.T) {
 			a0(in).Restarts = 1
 			a0(in).Run = &RunRecord{State: PhaseEnded, Result: EndResumeFailed, CLI: "claude", SessionID: "s1", Resumable: false, EndedAt: now.Add(-2 * time.Minute)}
 		}), []string{"start_worker@handoff@2"}},
-		"quota wakes coordinator once": {wBase(workerEnded, func(in *In) {
+		"quota starts handoff uncounted": {wBase(workerEnded, func(in *In) {
 			a0(in).Run = &RunRecord{State: PhaseEnded, Result: EndQuota, EndedAt: now}
-		}), []string{"wake_coordinator@worker_failed"}},
+		}), []string{"start_worker@handoff"}},
 		"restarts exhausted wakes coordinator once": {wBase(workerEnded, func(in *In) {
 			a0(in).Restarts = DefaultSettings().WorkerRestarts
 			a0(in).Run = &RunRecord{State: PhaseEnded, Result: EndExited, EndedAt: now.Add(-time.Hour)}

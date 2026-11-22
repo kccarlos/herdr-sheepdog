@@ -59,6 +59,9 @@ func (p Paths) Report(id, task string, round int) string {
 func (p Paths) Brief(id, task string) string {
 	return filepath.Join(p.project(id), "briefs", task+".md")
 }
+func (p Paths) poolCooldowns() string {
+	return filepath.Join(p.DataDir, "factory", "pool-cooldowns.json")
+}
 
 func (p Paths) CodexHome() string { return filepath.Join(p.DataDir, "factory", "codex-home") }
 
