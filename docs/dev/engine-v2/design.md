@@ -466,6 +466,12 @@ Runs are driven by events, so this is a transition table. Every cell is written;
 | R36 | `ended` | `deliver` | — | same | refuse `run_ended` (the message goes back to the task or project, whose rules restart the run) |
 | R37 | `ended` | every other event | — | same | — |
 
+**R31, the floor handoff.** Each worker or designer on the affected pool gets one urgent "write your handoff and stop" per attempt. Remember delivery and the deadline across a restart. Deliver at once to a working run or to an idle run, which starts its handoff turn. Hold it for a starting run until it is ready. For a blocked run, only the deadline applies. Stop with `quota` when the run next goes idle after delivery or when `handoff_minutes` have passed since the floor was seen, whichever comes first.
+
+Resolve the next run through the pool gate. It takes over in the same worktree with its uncommitted work and held owner messages. The handoff gives the branch commits, uncommitted files, held messages, `the <pool> pool reached its floor` and the worktree path. It points to the brief. When no candidate is usable, the task waits with the soonest reset in its reason, including the day when the reset is more than a day away.
+
+**R32, other roles.** Coordinators and reviewers keep running at the floor without a handoff. On an R5 or R19 quota end, a reviewer keeps the round and its head and spends no try. When every reviewer pool is out, show `All reviewers are out of quota; retries at <time>`. A coordinator's quota end puts its in-flight wake back on the queue.
+
 The matrix (row ids; every cell filled):
 
 | | `launched` / `launch_failed` | `screen` | `status` | `activity` | `tick` | `exit` / `lost` | `deliver` | `stop` | `pool_floor` |
@@ -619,6 +625,7 @@ A failed read is not a snapshot. `gh` being unreachable is the project fact `git
 | Sweep, at daemon start and every `sweep_minutes` | hc terminals with factory labels, `git worktree list`, the local base against the remote | strays and leftovers (section 11.3) |
 
 - **A pool is usable** when each of its windows (the 5-hour one and the weekly one) reads above `pool_floor_percent`, or when it cannot be read at all: an unknown reading is `unknown`, never "empty", and a run on it is tried. A known reading at or under the floor stays in force until its blocking window's reset even if a later refresh fails; once that reset passes, an unreadable refresh is unknown again and does not block. A pool on which a run just ended with a usage limit is unusable until the reset time it printed, or for `pool_minutes` when it printed none.
+- **Remember a quota end** for the run's CLI and pool across a restart. On R5 or R19, use the time in the CLI's own limit message, or now plus `pool_minutes` if it gives no time. Only that message supplies the reset. A pool reading or quoted output elsewhere on the screen cannot set it. The cooldown holds until that time even when a newer reading says the pool is usable.
 - Changed lines leave out files the repo marks generated in `.gitattributes` (`linguist-generated`). The engine keeps no list of file names; doctor offers once, at project start, to add the usual lock and project files there.
 
 ## 8. Making sure: executors, failure, and the few invariants
