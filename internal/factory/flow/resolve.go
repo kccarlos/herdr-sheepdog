@@ -1,11 +1,11 @@
 package flow
 
 import (
-	"cmp"
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Additional roles, permission modes and continue modes (design.md 9.1).
@@ -42,12 +42,32 @@ type CLIFacts struct {
 	Models              map[string]bool
 }
 
+// ReasonKind classifies why Resolve skipped a candidate.
+type ReasonKind int
+
+const (
+	ReasonOther ReasonKind = iota
+	ReasonReviewerDiffers
+	ReasonPool
+)
+
+// ResolveReason is a typed rejection from a Resolve check.
+type ResolveReason struct {
+	Kind  ReasonKind
+	Why   string
+	Reset time.Time // earliest blocking reset when Kind == ReasonPool
+}
+
+// ReviewerDiffers is the typed reason when a reviewer candidate matches the worker.
+var ReviewerDiffers = ResolveReason{Kind: ReasonReviewerDiffers, Why: "the reviewer must differ from the worker"}
+
 // ResolveFacts holds the non-I/O world facts Resolve checks (design.md 9.1).
 type ResolveFacts struct {
 	CLIs   map[string]CLIFacts
-	Worker Candidate              // worker's (CLI, Model) for the reviewer/retro check
-	Check  func(Candidate) string // additional role capability or launch checks
-	Avoid  []Candidate            // models already used in this round sequence
+	Worker Candidate                     // worker's (CLI, Model) for the reviewer/retro check
+	Check  func(Candidate) ResolveReason // additional role capability or launch checks
+	Pool   func(Candidate) ResolveReason // pool usability check (design.md 7.3, 9.1)
+	Avoid  []Candidate                   // models already used in this round sequence
 }
 
 var knownCLIs = []string{"claude", "codex", "agy"}
@@ -111,39 +131,64 @@ func Candidates(role string, task Task, settings Settings) []Candidate {
 }
 
 // Resolve walks the effective list and returns the first passing candidate or
-// the first failing reason (design.md 9.1).
+// the highest-priority failing reason (design.md 9.1).
 func Resolve(role string, task Task, settings Settings, facts ResolveFacts) (Intent, string) {
+	in, r := ResolveWithReason(role, task, settings, facts)
+	return in, r.Why
+}
+
+// ResolveWithReason is Resolve returning the typed rejection reason.
+func ResolveWithReason(role string, task Task, settings Settings, facts ResolveFacts) (Intent, ResolveReason) {
 	perm, ok := rolePerm[role]
 	if !ok {
-		return Intent{}, fmt.Sprintf("unknown role %q", role)
+		return Intent{}, ResolveReason{Why: fmt.Sprintf("unknown role %q", role)}
 	}
-	first := ""
+	var pool, first, fallback ResolveReason
+	setFirst := func(dst *ResolveReason, r ResolveReason) {
+		if dst.Why == "" {
+			*dst = r
+		}
+	}
 	for _, c := range Candidates(role, task, settings) {
 		if slices.ContainsFunc(facts.Avoid, c.SameModel) {
 			continue
 		}
 		cf, probed := facts.CLIs[c.CLI]
-		var why string
+		var r ResolveReason
 		if !slices.Contains(knownCLIs, c.CLI) {
-			why = fmt.Sprintf("unknown cli %q", c.CLI)
+			r = ResolveReason{Why: fmt.Sprintf("unknown cli %q", c.CLI)}
 		} else if facts.Check != nil {
-			why = facts.Check(c)
+			r = facts.Check(c)
 		}
-		if why != "" {
-			first = cmp.Or(first, why)
-		} else if probed && !cf.Installed {
-			first = cmp.Or(first, c.CLI+" is not installed")
-		} else if probed && !cf.SignedIn {
-			first = cmp.Or(first, c.CLI+" is not signed in")
-		} else if cf.Models != nil && !cf.Models[c.Model] {
-			first = cmp.Or(first, fmt.Sprintf("model %s is not offered to this account", c.Model))
-		} else if (role == RoleReviewer || role == RoleRetro) && c.SameModel(facts.Worker) {
-			first = cmp.Or(first, "the reviewer must differ from the worker")
-		} else {
-			// Pool usability (design.md 7.3) and designer canvas capability (9.1)
-			// are checked in slice 5b's pools PR and the design loop.
-			return Intent{role, c.CLI, c.Model, c.Effort, perm, ContinueFresh}, ""
+		switch {
+		case r.Why != "" && r.Kind == ReasonReviewerDiffers:
+			setFirst(&fallback, r)
+		case r.Why != "":
+			setFirst(&first, r)
+		case probed && !cf.Installed:
+			setFirst(&first, ResolveReason{Why: c.CLI + " is not installed"})
+		case probed && !cf.SignedIn:
+			setFirst(&first, ResolveReason{Why: c.CLI + " is not signed in"})
+		case cf.Models != nil && !cf.Models[c.Model]:
+			setFirst(&first, ResolveReason{Why: fmt.Sprintf("model %s is not offered to this account", c.Model)})
+		case (role == RoleReviewer || role == RoleRetro) && c.SameModel(facts.Worker):
+			setFirst(&fallback, ReviewerDiffers)
+		default:
+			if facts.Pool != nil {
+				if pr := facts.Pool(c); pr.Why != "" {
+					if pool.Why == "" || (!pr.Reset.IsZero() && (pool.Reset.IsZero() || pr.Reset.Before(pool.Reset))) {
+						pool = pr
+					}
+					continue
+				}
+			}
+			return Intent{role, c.CLI, c.Model, c.Effort, perm, ContinueFresh}, ResolveReason{}
 		}
 	}
-	return Intent{}, cmp.Or(first, fmt.Sprintf("no candidates for %s", role))
+	for _, r := range []ResolveReason{pool, first, fallback} {
+		if r.Why != "" {
+			return Intent{}, r
+		}
+	}
+	return Intent{}, ResolveReason{Why: fmt.Sprintf("no candidates for %s", role)}
 }
