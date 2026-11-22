@@ -520,13 +520,19 @@ Held wakes merge only when their kind and their task are the same. The owner's w
 | Alert | Stops the factory | Raised when | Cleared when |
 |---|---|---|---|
 | `no_pool` | yes | no coordinator candidate has a usable pool, or no worker candidate of any open task has one. (One role's pools being empty stops only the tasks that need that role; they wait at their own rows) | a pool is usable again |
-| `disk` | yes | the disk is over the limit, or a write failed for space | the reading is back under the limit |
-| `consent_prompt` | yes | the volume probe fails. It is run after two blank starts in a row and after two timed-out calls on the project folder. Blank starts with a healthy folder are ordinary start failures (section 4.8, J6), not this alert | the volume probe answers |
+| `disk` | yes | positive disk-full evidence only: an `ENOSPC` from a store or git write, or the project folder's or data directory's volume reading at least `disk_full_percent` (default 90%, range 50–99) used; both volumes are measured and the affected volume is named in the alert | a write succeeds and both volumes read under `disk_full_percent` (an unknown reading never raises or clears it) |
+| `consent_prompt` | yes | positive evidence from a protected-folder probe of the project folder through herdr-core: two consecutive probe timeouts or two consecutive blank results (the shape doctor already detects). An hc outage or another inconclusive failure is `hc_unavailable` or unknown, never `consent_prompt`. Blank starts with a healthy folder are ordinary start failures (section 4.8, J6), not this alert | the first good protected-folder probe |
 | `main_red` | no: it holds merges and branch updates only (N38), so a task that repairs the base can start and merge | the runs on the base's head commit have been red for `main_red_minutes` | every run on the base's head commit finished and none is red |
 | `ci_stalled` | no | N36 for `ci_stalled_minutes` | the task leaves N36 |
 | `agents_down` | no | the coordinator cannot be kept alive (J5, J6, J9, J10); or agents on two different CLIs started blank in a row while the project folder answers (a herdr-core or CLI fault, counted as an outage, not as each task's failure) | a coordinator run is alive and has taken a turn; an agent has started |
 
 `agents_down` is a sixth kind; the contract has five (open item O3).
+
+**Notes on `consent_prompt` and `disk` (5b.9).**
+- `consent_prompt` is raised only on positive evidence from a protected-folder probe of the project folder through herdr-core: two consecutive probe timeouts (while the temp folder answers) or two consecutive blank results (exit 0 with empty output / no probed directory). An hc outage or any inconclusive failure (for example both the project folder and temp folder timing out, or an RPC error) is `hc_unavailable` or `unknown (<reason>)`, never `consent_prompt`. It clears on the first good probe.
+- `disk` is raised only on positive evidence: an `ENOSPC` from a store or git write, or either the project folder's volume or the data directory's volume reading at or above `disk_full_percent` (default 90, range 50–99). Both volumes are measured and named in the alert; an unreadable volume is `unknown (<reason>)` and never raises or clears `disk`. It clears when a write succeeds and both readings are below `disk_full_percent`.
+- When the store cannot write (for example on `ENOSPC`), `disk` stays active in memory, is shown by `factory status`, and is logged to stderr; it is persisted to `state.json` on the first successful write.
+- Both `consent_prompt` and `disk` are stopping alerts (they hold new starts across roles per section 6 / J3) and are probed again on every pass while active.
 
 The coordinator is started in the project's repo folder, never a home folder or another project's.
 
@@ -803,6 +809,7 @@ These are mechanics: how a thing is done once a row has asked for it. They decid
 | `coordinator_starts_per_hour`, `coordinator_gap_minutes`, `coordinator_silent_minutes` | 3, 10, 30 | 1–10, 1–60, 5–240 | J6, J9 |
 | `rotate_after_hours`, `rotate_after_turns`, `handoff_minutes`, `heartbeat_minutes` | 4, 150, 5, 60 | 1–24, 20–1000, 1–30, 10–600 | J11, J13 |
 | `pool_floor_percent`, `pool_minutes`, `sweep_minutes` | 5, 5, 5 | 0–50, 1–60, 1–60 | section 7.3 |
+| `disk_full_percent` | 90 | 50–99 | section 6, 7.3 (`disk` alert) |
 
 Settings that are choices, not numbers, are set the same way: `design_gate` (review model or owner), `delegation` (kinds, scope, until), `notify_level`, `merge_policy`, `project_priority`, `models` per role, `verify` (section 11.6). Until `models` and candidate lists exist (slice 5b), `second_reviewer` (section 9.2) is the one choice built.
 

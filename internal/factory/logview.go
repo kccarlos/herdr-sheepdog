@@ -98,6 +98,12 @@ func ProjectStatus(paths Paths, folder string) ([]TaskStatus, error) {
 	return StatusViewOf(s, logs), nil
 }
 
+// ProjectStatus returns status rows for folder, merging any active in-memory
+// alerts (such as an unpersisted disk ENOSPC alert) with stored state.
+func (e *Engine) ProjectStatus(folder string) ([]TaskStatus, error) {
+	return ProjectStatus(e.Paths, folder)
+}
+
 func findStoredProject(paths Paths, target string) (string, error) {
 	dir := filepath.Join(paths.DataDir, "factory", "projects")
 	if err := guardTestPath(dir); err != nil {

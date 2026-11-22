@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"maps"
 	"os"
@@ -38,11 +39,20 @@ var lockGitTimeout = world.GitStageTimeout
 // ghTimeout bounds one GitHub executor or snapshot (a push plus gh calls).
 var ghTimeout = time.Minute
 
+// DiskReading is one volume's space reading for the disk alert observer (design.md 6, 7.3).
+type DiskReading struct {
+	Volume      string
+	UsedPercent int
+	Known       bool
+	Unknown     string
+}
+
 // Engine runs the factory loop and handles owner start and stop commands.
 type Engine struct {
 	Paths        Paths
 	HC           *hc.Client
 	Log          logging.Logger
+	Stderr       io.Writer // where unpersistable alerts (e.g. disk ENOSPC) are logged; nil uses os.Stderr
 	PassInterval time.Duration
 	Now          func() time.Time              // wall clock; nil uses time.Now
 	Since        func(time.Time) time.Duration // monotonic elapsed since previous pass; nil uses time.Since (wall delta when Now is set)
@@ -51,6 +61,10 @@ type Engine struct {
 
 	probeLaunch   func(context.Context, []string) flow.ResolveFacts // test hook
 	poolRun       CommandFunc                                       // provider quota reader hook; nil uses hcExecRunner
+	diskRead      func(context.Context, string) DiskReading         // volume space reader hook; nil uses real volume reader
+	writeState    func(string, flow.State) error                    // store write hook; nil uses SaveState
+	writeLog      func(string, LogLine) error                       // log append hook; nil uses AppendLog
+	volumeTimeout time.Duration                                     // protected-folder probe timeout; 0 uses defaultVolumeTimeout
 	cliProbes     map[string]cachedCLIProbe                         // shared across launches and projects under mu
 	pools         map[string]cachedPool                             // shared per-provider quota readings under mu
 	passPools     map[string]poolReading                            // current pass's immutable pool readings under mu
