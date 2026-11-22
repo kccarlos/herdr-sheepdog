@@ -90,9 +90,12 @@ func poolProvider(c flow.Candidate) string {
 	switch c.CLI {
 	case "claude", world.CodexCLI:
 		return c.CLI
-	default:
-		return ""
+	case "agy":
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.Model)), "gemini-") {
+			return "antigravity"
+		}
 	}
+	return ""
 }
 
 func projectPoolProviders(s flow.State) []string {
@@ -108,14 +111,14 @@ func projectPoolProviders(s flow.State) []string {
 	add(flow.Candidates(flow.RoleWorker, flow.Task{}, s.Settings))
 	add(flow.Candidates(flow.RoleReviewer, flow.Task{}, s.Settings))
 	if s.Project.Run != nil && s.Project.Run.State != flow.PhaseEnded {
-		add([]flow.Candidate{{CLI: s.Project.Run.CLI}})
+		add([]flow.Candidate{{CLI: s.Project.Run.CLI, Model: s.Project.Run.Model}})
 	}
 	for _, t := range s.Tasks {
 		if !flow.Ended(t) {
 			add(flow.Candidates(flow.RoleWorker, t, s.Settings))
 			add(flow.Candidates(flow.RoleReviewer, t, s.Settings))
 			if a := flow.OpenAttempt(t); a != nil && a.Run != nil && a.Run.State != flow.PhaseEnded {
-				add([]flow.Candidate{{CLI: a.Run.CLI}})
+				add([]flow.Candidate{{CLI: a.Run.CLI, Model: a.Run.Model}})
 			}
 		}
 	}
@@ -150,12 +153,12 @@ func loadCooldowns(path string) map[string]time.Time {
 	return m
 }
 
-func (e *Engine) recordQuotaCooldownLocked(s flow.State, cli, limitLine string, now time.Time) {
-	p, path := poolProvider(flow.Candidate{CLI: cli}), e.Paths.poolCooldowns()
+func (e *Engine) recordQuotaCooldownLocked(s flow.State, c flow.Candidate, limitLine string, now time.Time) {
+	p, path := poolProvider(c), e.Paths.poolCooldowns()
 	until := cmp.Or(world.ParseLimitReset(limitLine, now), now.Add(time.Duration(s.Settings.PoolMinutes)*time.Minute))
 	m := loadCooldowns(path)
 	maps.DeleteFunc(m, func(_ string, t time.Time) bool { return !now.Before(t) })
-	if k := cli + "/" + cmp.Or(p, cli); until.After(m[k]) {
+	if k := c.CLI + "/" + cmp.Or(p, c.CLI); until.After(m[k]) {
 		m[k] = until
 	}
 	if data, err := json.MarshalIndent(m, "", "  "); err == nil {

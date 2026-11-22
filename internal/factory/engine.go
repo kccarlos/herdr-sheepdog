@@ -737,8 +737,9 @@ func (e *Engine) codexHome(id string) (string, error) {
 	return "", err
 }
 
-func (e *Engine) resolveLaunch(id string, facts flow.ResolveFacts, resolve func(flow.ResolveFacts) (flow.Intent, flow.ResolveReason)) (flow.Intent, map[string]string, flow.ResolveReason) {
-	base := facts.Check
+func (e *Engine) resolveLaunch(ctx context.Context, id, role string, task flow.Task, settings flow.Settings, check func(flow.Candidate) flow.ResolveReason, resolve func(flow.ResolveFacts) (flow.Intent, flow.ResolveReason)) (flow.Intent, map[string]string, flow.ResolveReason) {
+	facts := e.probeLaunchFacts(ctx, role, task, settings)
+	facts.Check = check
 	for {
 		in, reason := resolve(facts)
 		if reason.Why != "" || in.CLI != world.CodexCLI {
@@ -752,24 +753,16 @@ func (e *Engine) resolveLaunch(id string, facts flow.ResolveFacts, resolve func(
 			if c.CLI == world.CodexCLI {
 				return flow.ResolveReason{Why: err.Error()}
 			}
-			if base != nil {
-				return base(c)
+			if check != nil {
+				return check(c)
 			}
 			return flow.ResolveReason{}
 		}
 	}
 }
 
-func (e *Engine) resolveWorkerLaunch(id string, t flow.Task, s flow.Settings, facts flow.ResolveFacts) (flow.Intent, map[string]string, flow.ResolveReason) {
-	return e.resolveLaunch(id, facts, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
-		return resolveWorker(t, s, f)
-	})
-}
-
 func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State, why string, now time.Time) {
-	facts := e.probeLaunchFacts(ctx, flow.RoleCoordinator, flow.Task{}, s.Settings)
-	facts.Check = launchCapability(flow.RoleCoordinator)
-	in, env, wait := e.resolveLaunch(id, facts, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
+	in, env, wait := e.resolveLaunch(ctx, id, flow.RoleCoordinator, flow.Task{}, s.Settings, launchCapability(flow.RoleCoordinator), func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
 		return flow.ResolveWithReason(flow.RoleCoordinator, flow.Task{}, s.Settings, f)
 	})
 	if wait.Why != "" {
@@ -915,10 +908,10 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 	if before.StopRetry != nil && evs[0].Kind != flow.EvLost {
 		evs = []flow.RunEvent{{Kind: flow.EvStop}}
 	} else if n := len(evs); n > 0 && evs[n-1].Kind == flow.EvTick {
-		if p := poolProvider(flow.Candidate{CLI: before.CLI}); p != "" && poolWaitReason(p, e.passPools[p], s.Settings.PoolFloorPercent, now).Kind == flow.ReasonPool || before.HandoffHeld {
+		if p := poolProvider(flow.Candidate{CLI: before.CLI, Model: before.Model}); p != "" && poolWaitReason(p, e.passPools[p], s.Settings.PoolFloorPercent, now).Kind == flow.ReasonPool || before.HandoffHeld {
 			pool := cmp.Or(p, before.CLI)
 			why := fmt.Sprintf("the %s pool reached its floor", pool)
-			evs = slices.Insert(evs, n-1, flow.RunEvent{Kind: flow.EvPoolFloor, Msg: "The " + why[4:] + ". Write your handoff and stop.", Reason: why, HandoffUsed: handoffPools != nil && slices.Contains(*handoffPools, pool)})
+			evs = slices.Insert(evs, n-1, flow.RunEvent{Kind: flow.EvPoolFloor, Screen: evs[n-1].Screen, Msg: "The " + why[4:] + ". Write your handoff and stop.", Reason: why, HandoffUsed: handoffPools != nil && slices.Contains(*handoffPools, pool)})
 		}
 	}
 events:
@@ -941,7 +934,7 @@ events:
 			row.ID, next.Result, dec.Why = retry.Row, retry.Result, "ended("+retry.Result+")"
 		}
 		if old.StopRetry == nil && (row.ID == "R5" || row.ID == "R19") && next.State == flow.PhaseEnded && next.Result == flow.EndQuota {
-			e.recordQuotaCooldownLocked(*s, next.CLI, ev.LimitLine, now)
+			e.recordQuotaCooldownLocked(*s, flow.Candidate{CLI: next.CLI, Model: next.Model}, ev.LimitLine, now)
 		}
 		r31Send := row.ID == "R31" && slices.Contains(dec.Asked, flow.RunActSend)
 		var prevPools []string
@@ -955,7 +948,7 @@ events:
 		if r31Send {
 			if handoffPools != nil {
 				prevPools = slices.Clone(*handoffPools)
-				if pool := cmp.Or(poolProvider(flow.Candidate{CLI: next.CLI}), next.CLI); !slices.Contains(*handoffPools, pool) {
+				if pool := cmp.Or(poolProvider(flow.Candidate{CLI: next.CLI, Model: next.Model}), next.CLI); !slices.Contains(*handoffPools, pool) {
 					*handoffPools = append(*handoffPools, pool)
 				}
 			}
@@ -1399,7 +1392,9 @@ func (e *Engine) readTipLocked(ctx context.Context, a flow.Attempt, tip string, 
 
 func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, n := &s.Tasks[ti], len(s.Tasks[ti].Attempts)+1
-	if _, _, reason := e.resolveWorkerLaunch(id, *t, s.Settings, e.probeLaunchFacts(ctx, flow.RoleWorker, *t, s.Settings)); reason.Why != "" {
+	if _, _, reason := e.resolveLaunch(ctx, id, flow.RoleWorker, *t, s.Settings, nil, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
+		return resolveWorker(*t, s.Settings, f)
+	}); reason.Why != "" {
 		return "", false, launchWaitFor(reason)
 	}
 	// The branch carries the project and the attempt, so a new project on
@@ -1430,7 +1425,9 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	}
 	choice, env := flow.Candidate{}, map[string]string(nil)
 	if term.State != "live" {
-		in, codexEnv, reason := e.resolveWorkerLaunch(id, *t, s.Settings, e.probeLaunchFacts(ctx, flow.RoleWorker, *t, s.Settings))
+		in, codexEnv, reason := e.resolveLaunch(ctx, id, flow.RoleWorker, *t, s.Settings, nil, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
+			return resolveWorker(*t, s.Settings, f)
+		})
 		if reason.Why != "" {
 			return "", false, launchWaitFor(reason)
 		}
@@ -1768,39 +1765,25 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		}
 	}
 	if term.State != "live" {
-		facts := e.probeLaunchFacts(ctx, flow.RoleReviewer, *t, s.Settings)
-		facts.Check = check
-		for {
-			in, repeatWhy, reason := reviewChoiceReason(*t, s.Settings, *a, h, facts, failed)
-			if reason.Why != "" {
-				if reason.Kind == flow.ReasonPool {
-					reason.Why = "All reviewers are out of quota"
-					if !reason.Reset.IsZero() {
-						reason.Why += "; retries at " + formatReset(reason.Reset, e.now())
-					}
+		var repeatWhy string
+		in, codexEnv, reason := e.resolveLaunch(ctx, id, flow.RoleReviewer, *t, s.Settings, check, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
+			var in flow.Intent
+			var r flow.ResolveReason
+			in, repeatWhy, r = reviewChoiceReason(*t, s.Settings, *a, h, f, failed)
+			return in, r
+		})
+		if reason.Why != "" {
+			if reason.Kind == flow.ReasonPool {
+				reason.Why = "All reviewers are out of quota"
+				if !reason.Reset.IsZero() {
+					reason.Why += "; retries at " + formatReset(reason.Reset, e.now())
 				}
-				return "", false, launchWaitFor(reason)
 			}
-			choice = intentCandidate(in)
-			if repeatWhy != "" {
-				repeat = ". Repeating a reviewer in a fresh session because " + repeatWhy
-			} else {
-				repeat = ""
-			}
-			if choice.CLI != world.CodexCLI {
-				break
-			}
-			home, err := e.codexHome(id)
-			if err == nil {
-				env = map[string]string{"CODEX_HOME": home}
-				break
-			}
-			facts.Check = func(c flow.Candidate) flow.ResolveReason {
-				if c.CLI == world.CodexCLI {
-					return flow.ResolveReason{Why: err.Error()}
-				}
-				return check(c)
-			}
+			return "", false, launchWaitFor(reason)
+		}
+		choice, env = intentCandidate(in), codexEnv
+		if repeatWhy != "" {
+			repeat = ". Repeating a reviewer in a fresh session because " + repeatWhy
 		}
 	}
 	review := flow.ReviewRun{Round: round, Head: h, Code: strings.ToLower(rand.Text()[:10]), Retries: retries, FailedModels: failed}

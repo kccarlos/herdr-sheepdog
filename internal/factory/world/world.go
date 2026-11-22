@@ -316,7 +316,7 @@ func matchUI(lines []string, spec, trim string) int {
 	for _, pat := range strings.Split(spec, "|") {
 		p, wild := strings.CutSuffix(pat, "*")
 		for i, ln := range lines {
-			s := strings.TrimLeft(ln, trim)
+			s := strings.ToLower(strings.TrimLeft(ln, trim))
 			if (wild && strings.HasPrefix(s, p)) || (!wild && s == pat) {
 				found = max(found, i)
 			}
@@ -335,7 +335,8 @@ func ScreenClass(cli, text string) string {
 func uiAnchor(cli string, lines []string) int {
 	for i := len(lines) - 1; i >= max(0, len(lines)-screenTailLines); i-- {
 		switch ln := lines[i]; {
-		case cli == "claude" && strings.HasPrefix(ln, "⏺"), cli == CodexCLI && codexReplyRe.MatchString(ln):
+		case cli == "claude" && (strings.HasPrefix(ln, "⏺") || strings.HasPrefix(ln, "●") || strings.HasPrefix(ln, "  ⎿")),
+			cli == CodexCLI && (codexReplyRe.MatchString(ln) || strings.HasPrefix(ln, "  └")):
 			return -1
 		case cli == "claude" && i > 0 && strings.HasPrefix(ln, "❯") && strings.HasPrefix(strings.TrimSpace(lines[i-1]), "────────") && strings.Trim(strings.TrimSpace(lines[i-1]), "─") == "":
 			return i - 1
@@ -347,10 +348,10 @@ func uiAnchor(cli string, lines []string) int {
 }
 
 // limitUILines extracts only cli's own bottom UI area for usage-limit matching (O23).
-func limitUILines(cli string, lines []string) (low, raw []string) {
+func limitUILines(cli string, lines []string) (raw []string) {
 	add := func(s, trim string) {
 		if s = strings.TrimLeft(strings.TrimSpace(s), trim); s != "" {
-			low, raw = append(low, strings.ToLower(s)), append(raw, s)
+			raw = append(raw, s)
 		}
 	}
 	prefix, trim := "⚠", "⚠✕✗ "
@@ -366,23 +367,26 @@ func limitUILines(cli string, lines []string) (low, raw []string) {
 				add(lines[i], prefix+" ")
 			}
 		}
-		slices.Reverse(low)
 		slices.Reverse(raw)
 		for _, ln := range lines[anc+1:] {
 			if s := strings.TrimSpace(ln); cli != "claude" || (!strings.HasPrefix(s, "❯") && strings.Trim(s, "─") != "") {
 				add(ln, trim)
 			}
 		}
-		return low, raw
+		return raw
+	}
+	for _, ln := range lines {
+		if cli == "claude" && (strings.HasPrefix(ln, "⏺") || strings.HasPrefix(ln, "●") || strings.HasPrefix(ln, "❯") || strings.HasPrefix(ln, "  ⎿")) ||
+			cli == CodexCLI && (codexReplyRe.MatchString(ln) || codexPromptRe.MatchString(ln) || strings.HasPrefix(ln, "  └")) {
+			return nil
+		}
 	}
 	for _, ln := range lines[max(0, len(lines)-screenTailLines):] {
-		s := strings.TrimSpace(ln)
-		quoted := cli == "claude" && (strings.HasPrefix(s, "⏺") || strings.HasPrefix(s, "●") || strings.HasPrefix(ln, "  ⎿")) || cli == CodexCLI && codexReplyRe.MatchString(ln)
-		if !quoted {
+		if !strings.HasPrefix(ln, " ") && !strings.HasPrefix(ln, "\t") {
 			add(ln, trim)
 		}
 	}
-	return low, raw
+	return raw
 }
 
 func screenChatTail(cli, clean string) string {
@@ -401,15 +405,15 @@ func screenClassify(cli, text string) (string, string) {
 	if cli == "agy" && agyTrustSelected(lines) {
 		return flow.ScreenTrust, ""
 	}
-	var ui, rawUI []string
+	var ui []string
 	for _, ln := range lines[max(0, len(lines)-screenTailLines):] {
 		if raw := strings.TrimLeft(strings.TrimSpace(ln), "⏺●⎿⚠✕✗•·│✨\u200a "); raw != "" {
-			ui, rawUI = append(ui, strings.ToLower(raw)), append(rawUI, raw)
+			ui = append(ui, raw)
 		}
 	}
-	limitUI, rawLimit := ui, rawUI
+	limitUI := ui
 	if cli == "claude" || cli == CodexCLI {
-		limitUI, rawLimit = limitUILines(cli, lines)
+		limitUI = limitUILines(cli, lines)
 	}
 	for _, r := range [][4]string{
 		{"claude", flow.ScreenSignedOut, "not logged in · please run /login*|invalid api key · please run /login*|not logged in|please run /login", ""},
@@ -426,7 +430,7 @@ func screenClassify(cli, text string) (string, string) {
 	} {
 		if r[0] == cli && r[1] == flow.ScreenLimit {
 			if idx := matchUI(limitUI, r[2], ""); idx >= 0 {
-				return r[1], rawLimit[idx]
+				return r[1], limitUI[idx]
 			}
 		} else if r[0] == cli && matchUI(ui, r[2], "") >= 0 && (r[3] == "" || matchUI(ui, r[3], "❯› ") >= 0) {
 			return r[1], ""
@@ -448,24 +452,15 @@ func ParseLimitReset(line string, now time.Time) time.Time {
 	if m[5] != "" {
 		loc, err = time.LoadLocation(m[5])
 	}
-	clock := m[3]
+	if err != nil {
+		return time.Time{}
+	}
+	ref, clock := now.In(loc), m[3]
 	if !strings.Contains(clock, ":") {
 		clock += ":00"
 	}
-	clk, cerr := time.Parse("3:04pm", clock+strings.ToLower(m[4]))
-	if err != nil || cerr != nil {
-		return time.Time{}
-	}
-	ref := now.In(loc)
-	month, day := ref.Month(), ref.Day()
-	if m[1] != "" {
-		d, derr := time.Parse("Jan 2", m[1]+" "+m[2])
-		if derr != nil {
-			return time.Time{}
-		}
-		month, day = d.Month(), d.Day()
-	}
-	if cand := time.Date(ref.Year(), month, day, clk.Hour(), clk.Minute(), 0, 0, loc); cand.After(now) {
+	monthDay := cmp.Or(m[1], ref.Format("Jan")) + " " + cmp.Or(m[2], ref.Format("2"))
+	if cand, err := time.ParseInLocation("2006 Jan 2 3:04pm", fmt.Sprintf("%d %s %s%s", ref.Year(), monthDay, clock, strings.ToLower(m[4])), loc); err == nil && cand.After(now) {
 		return cand.UTC()
 	}
 	return time.Time{}
@@ -537,8 +532,8 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 		clean = ansiRe.ReplaceAllString(strings.ReplaceAll(rd.Text, "\r\n", "\n"), "")
 		nonEmpty = strings.TrimSpace(clean) != ""
 		cls, limitLine = screenClassify(rec.CLI, clean)
-		if infer && cls == flow.ScreenNone {
-			codexStatus = codexScreenStatus(clean)
+		if infer && (cls == flow.ScreenNone || cls == flow.ScreenLimit && rec.State != flow.PhaseStarting) {
+			codexStatus = codexScreenStatus(clean, cls == flow.ScreenLimit)
 		}
 		if nonEmpty {
 			if rec.Role == flow.RoleWorker || rec.Role == flow.RoleDesigner {

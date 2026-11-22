@@ -163,8 +163,12 @@ var RunRows = []Row[RunIn]{
 	rrow("R29", PhaseBlocked, EvTick, func(x RunIn) bool { return x.R.BlockedKind == "auth" && x.blockedOut() }, "ended(signed_out)", RunActStop),
 	rrow("R29", PhaseBlocked, EvTick, RunIn.blockedOut, "ended(stuck)", RunActStop),
 	rrow("R30", "idle|blocked", "status|tick|activity|screen|launched|launch_failed", nil, ""),
-	rrow("R31", PhaseWorking, EvPoolFloor, func(x RunIn) bool { return isFloorHandoffRole(x.R.Role) && !x.R.HandoffSent && !x.E.HandoffUsed }, PhaseWorking, RunActInterrupt, RunActSend),
-	rrow("R31", PhaseIdle, EvPoolFloor, func(x RunIn) bool { return isFloorHandoffRole(x.R.Role) && !x.R.HandoffSent && !x.E.HandoffUsed }, PhaseWorking, RunActSend),
+	rrow("R31", PhaseWorking, EvPoolFloor, func(x RunIn) bool {
+		return isFloorHandoffRole(x.R.Role) && !x.R.HandoffSent && !x.E.HandoffUsed && cmp.Or(x.E.Screen, x.R.Screen) != ScreenLimit
+	}, PhaseWorking, RunActInterrupt, RunActSend),
+	rrow("R31", PhaseIdle, EvPoolFloor, func(x RunIn) bool {
+		return isFloorHandoffRole(x.R.Role) && !x.R.HandoffSent && !x.E.HandoffUsed && cmp.Or(x.E.Screen, x.R.Screen) != ScreenLimit
+	}, PhaseWorking, RunActSend),
 	rrow("R31", liveSet, EvPoolFloor, func(x RunIn) bool { return isFloorHandoffRole(x.R.Role) }, ""),
 	rrow("R32", liveSet, EvPoolFloor, nil, ""),
 	rrow("R33", liveSet, EvExit, nil, "ended(exited)", RunActRemove),
