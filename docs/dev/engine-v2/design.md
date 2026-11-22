@@ -542,11 +542,12 @@ The coordinator is started in the project's repo folder, never a home folder or 
 | A4 | `open` | `cancel` | — | `cancelled` | — |
 | A5 | `answered`, `cancelled` | `answer`, `cancel` | — | same | refuse `already_closed` |
 
-Whether an `ask_open` or an `answer` is valid at all (who may send it, the owner's proof) is the acceptance table's job, below. All six cells (two states × two events, plus the two ways to open) are rows.
+Whether an `ask_open` or an `answer` is valid at all (who may send it, the owner's proof) is the acceptance table's job, below. All six cells (two states × two events, plus the two ways to open) are rows. Delegation (`A1`) arrives in slice 14; until then every valid `ask_open` matches `A2`.
 
-- **Who an ask belongs to.** A `decision` ask (a worker asking the coordinator) belongs to its task and is cancelled when the task ends. Every other kind belongs to the project, may name the task it is about, and outlives the worker and the task: a release question once died with its worker's terminal (field note 31).
+- **Ask records and kinds.** Project asks live in `State.Asks` (`projects/<id>/state.json`) and carry `id`, `project`, `folder`, `kind`, `gated` (`kind != "decision"`), `question`, `options`, `recommend`, `task`, `head`, `asked_by`, `run_id`, `at`, `status` (`open`, `answered`, `cancelled`), `answer`, `why`, `answered_at`, `answered_by` (`coordinator`, `owner`, `rule`), `proof_id` and `device_id`. The closed v1 ask kinds are `decision`, `gate`, `release`, `paid-key`, `delete`, `install`, `reset` and `rule` (`override` arrives in slice 7); any other or empty kind is refused `unknown_kind`.
+- **Who an ask belongs to.** A `decision` ask (a worker asking the coordinator) belongs to its task and is cancelled when the task ends. Every other kind belongs to the project, may name the task it is about, and outlives the worker and the task: a release question once died with its worker's terminal (field note 31). When a task's original worker run has ended or been replaced before its `decision` ask is answered, `A3` delivers the answer to the task's open attempt worker (or holds it in `Attempt.Held` for the next worker start, KB-ASK-10); when the coordinator opened a gated ask, `A3` delivers/wakes the coordinator with the owner's answer.
 - **Gated kinds** are all kinds except `decision`: their answer needs the daemon's proof of the owner's tap or words, or a delegation rule where one is allowed.
-- **The owner's proof** means: the answer came from a device that holds a session ticket from the daemon, or from the owner's live voice. A paired phone holds one. So does a browser that has enrolled with the daemon: the factory web page may then answer every ask, the never-delegable kinds included, exactly as a paired phone does (owner decision D15). **An answer to a gated ask that comes from this computer with no ticket is never the owner's**, whatever page or origin it claims: the setup page's origin check stops another website in the browser, not a program on the machine, and agents run as the owner's user. This guard is not in the daemon yet (spike S0.9 found no such check: `AnswerTap` takes no device), so slice 6 builds it. It is not about which screen the owner used. **A browser on this computer enrols with a short code** that the owner reads in the Mac menu-bar app and types into the page (owner decision D17); once slice 6 is built, the daemon hands that code, or a link carrying it, only to the menu-bar app, never to another caller on this computer.
+- **The owner's proof** means: the answer came from a device that holds a session ticket from the daemon, or from the owner's live voice. In-process (`internal/factory/proof.go`), `Engine.MintProof(askID, option, inputKind, deviceID)` mints a short-lived `AnswerProof` (`prf-` + 12 hex characters, persisted in `<data_dir>/factory/proofs.json` mode `0600` with 24 h retention), refusing `deviceID == ""` or `"local"` and any `inputKind` other than `"tap"` or `"voice"` (`proof_rejected`); `Engine.Answer(askID, option, proof)` requires a verified minted proof on every gated ask (`proof_required` when empty, `proof_rejected` when unminted, expired, mismatched on `ask_id` or `option`, `"local"`, or non-`tap`/`voice`) and logs `device_id`. A paired phone holds a ticket. So does a browser that has enrolled with the daemon: the factory web page may then answer every ask, the never-delegable kinds included, exactly as a paired phone does (owner decision D15). **An answer to a gated ask that comes from this computer with no ticket is never the owner's**, whatever page or origin it claims: the setup page's origin check stops another website in the browser, not a program on the machine, and agents run as the owner's user. This guard is not in the daemon yet (spike S0.9 found no such check: `AnswerTap` takes no device), so slice 6 builds it. It is not about which screen the owner used. **A browser on this computer enrols with a short code** that the owner reads in the Mac menu-bar app and types into the page (owner decision D17); once slice 6 is built, the daemon hands that code, or a link carrying it, only to the menu-bar app, never to another caller on this computer.
 - **What this stops, and what it does not.** It stops an agent taking a shortcut. It does not stop a hostile process running as the owner's user, which could enrol its own device or edit the state file. Today an agent does not even need to be hostile: `GET /api/pair` is open to any caller on this computer and gives it an enrol code whenever the daemon can pair a phone at all (a non-loopback `web.bind`, or `web.advertise`), so four HTTP calls (pair, enroll, challenge, session) enrol a device; slice 6 closes that path (O20). The check on that is after the fact: every override and every rule change is written to the log and the owner's digest with the device that answered.
 - **Never delegable:** an override, a paid key, a quota reset, a release with no stated scope, a rule change.
 - An ask about a task stores the commit it was asked at. A yes is a record at that commit. On any pass, an open gate ask whose commit no longer covers the task's `H` is cancelled, so the owner is never asked about a commit that is gone.
@@ -568,8 +569,8 @@ Every report and command enters here. Valid: it becomes a record. Not valid, or 
 | plan review report (from the plan-review slice) | the plan reviewer run the engine started | the tag carries that run's one-time code; each finding names a task and one of `delete`, `shrink`, `merge`, `split`, `design-first`, with a why | `invalid_report` |
 | the coordinator's answer to a plan finding (from the plan-review slice) | the coordinator | each finding is answered done, or rejected with a why; then the plan is submitted again | `finding_unanswered` |
 | `retro` | the retro run the engine started | the tag carries that run's one-time code; the commit is that run's; the cause is in the fixed set; the tag parses | `invalid_report`; the task's retro is not used |
-| `ask` | a worker or reviewer (kind `decision`, `sheepdog factory report ask`); the coordinator (any kind, `sheepdog factory ask --kind <kind>`; for an override `--kind override --task A --task B`, and the engine fills the card); the owner (kind `override`, from the phone, the factory page, or `sheepdog factory override` in a terminal with no run's token) | 2 to 9 distinct options; a recommended one; one line; a way to say yes as well as no; option text the card can show as written | `invalid_ask`, `kind_not_allowed` |
-| `answer` | the coordinator (kind `decision`); the owner, with the daemon's proof of a tap or spoken words; a delegation rule | the ask is open; the option exists; a gated kind has a verified proof | `already_closed`, `invalid_option`, `proof_required`, `not_delegable` |
+| `ask` | a worker or reviewer (kind `decision`, `sheepdog factory report ask "<question>" --option ... --recommend ...`); the coordinator (any kind, `sheepdog factory ask --kind <kind> [--task <task>] "<question>" --option ... --recommend ...`; for an override `--kind override --task A --task B`, and the engine fills the card); the owner (kind `override`, from the phone, the factory page, or `sheepdog factory override` in a terminal with no run's token) | known kind; 2 to 9 distinct non-blank options; a recommended one among the options; one single-line question of 1 to 300 characters; when the recommended option is a negative or a wait, another option starts with `Yes` (KB-ASK-9); no option ends with a short word in parentheses such as `Switch (v2)` (KB-ASK-9) | `unknown_kind`, `invalid_ask`, `kind_not_allowed` |
+| `answer` | the coordinator (kind `decision`, `sheepdog factory answer <ask> "<option>" [--why "<why>"]`); the owner, with the daemon's in-process `AnswerProof` (`Engine.MintProof` + `Engine.Answer`) of a paired-device tap or live spoken words; a delegation rule | the ask exists and is `open`; the option matches an entry of `ask.options` (or its 1-based index); an optional `--why` is at most 500 characters; a gated kind has a verified `AnswerProof` (`input_kind` in `tap, voice` and `device_id` non-empty and not `"local"`) | `not_found`, `already_closed`, `invalid_option`, `proof_required`, `proof_rejected`, `kind_not_allowed`, `invalid_report`, `not_delegable` |
 | `plan apply`, `plan amend` | the coordinator | the plan checks pass (section 11.7); an amend has a why | `plan_invalid`, with every failing check |
 | recap decision | the coordinator | the task is not ended; a recap is open; the choice is in its allowed set; a why is given; split: the children pass the plan checks; new: the brief was amended since the recap opened | `already_closed`, `no_recap`, `not_allowed` (naming the allowed set) |
 | `park`, `unpark`, `drop`, `close`, `retry`, `send-back` | the coordinator | the task is not ended; a why is given; `close` only after a "nothing to change" report | `already_closed`, `why_missing` |
@@ -930,35 +931,44 @@ Sources: [notes/go-surface-notes.md](notes/go-surface-notes.md). Line counts are
 
 | Code | Lines | Fate |
 |---|---|---|
-| `internal/factory/proof.go` | 314 | **Keep.** The engine verifies a proof by calling it in process |
+| `internal/factory/proof.go` | 314 | **Gone from `main`; rebuilt in slice 6.** The engine mints and verifies `AnswerProof` in process (`MintProof`, `Answer`) |
 | `internal/factory/doctor.go` | 1,700 | **Keep,** minus the engine and Python checks; add the "Running now" part from the sweep |
-| `internal/factory/contract.go` | 1,385 | **Replace.** Its types and enums become the views' types; the decode-from-CLI layer goes |
-| `internal/factory/client.go` | 728 | **Delete.** Its method set becomes the engine's Go interface |
-| `internal/factory/tick.go` | 834 | **Delete.** The loop is a goroutine in the daemon. Keep its two rules: nothing runs until a project is started; tests resolve paths away from the real home |
-| `internal/factory/engine.go`, `python.go`, `factory_embed.go` | 423, 368, ~20 | **Delete** |
-| `internal/web/factory.go`, the loopback proof route | 83 | **Delete.** It exists only for a second process |
-| `internal/supervisor/factory.go` | 796 | **Gone from the tree** (spike S0.9, 2026-11-20), with the answer guard it held; slice 6 builds the guard again on the engine interface |
-| `internal/herdr/factory.go`, `supervisor/factory_quiet.go` | 40, 50 | **Keep.** Change the coordinator rule to the addendum's (blocked speaks; done and idle are silent) |
-| `cmd/sheepdog/factory.go` | — | Keep `doctor`; delete `python-*`; add `start`, `stop`, `log`, `report`, and the coordinator verbs |
-| `Makefile` `test-factory`, the CI factory job | — | **Delete** |
-| `factory/` (Python, tests, templates) | ~41,000 | Leaves main at cutover; how is the owner's call ([plan.md](plan.md)) |
+| `internal/factory/contract.go` | 1,385 | **Gone from `main`.** Its ask, view and refusal shapes live in `flow` and `factory` |
+| `internal/factory/client.go` | 728 | **Gone from `main`.** Its method set becomes the engine's Go methods |
+| `internal/factory/tick.go` | 834 | **Gone from `main`.** The loop is a goroutine in the daemon. Keep its two rules: nothing runs until a project is started; tests resolve paths away from the real home |
+| `internal/factory/engine.go`, `python.go`, `factory_embed.go` | 423, 368, ~20 | **Old Python glue gone from `main`** (`internal/factory/engine.go` is now the v2 engine) |
+| `internal/web/factory.go`, the loopback proof route | 83 | **Loopback proof route gone from `main`** (`internal/web/factory.go` now serves v2's factory routes) |
+| `internal/supervisor/factory.go` | 796 | **Gone from `main`** (spike S0.9, 2026-11-20), with the answer guard it held; slice 6 builds the guard again on the engine |
+| `internal/herdr/factory.go`, `supervisor/factory_quiet.go` | 40, 50 | **Gone from `main`; rebuilt in slice 6.** Coordinator rule follows the addendum (blocked speaks; done and idle are silent) |
+| `cmd/sheepdog/factory.go` | — | Keep `doctor`; `python-*` gone; add `start`, `stop`, `status`, `log`, `report` (`ready`, `ask`), `ask`, `answer`, and the coordinator verbs |
+| `Makefile` `test-factory`, the CI factory job | — | **Gone from `main`** |
+| `factory/` (Python, tests, templates) | ~41,000 | **Gone from `main`** |
 
 Not built in Go today and needed by the approved design: alerts to push and voice, the digest, `say`, rules read-back, the graph endpoint, `stop`, owner touch. They become calls on the engine interface, which is cheaper than through a CLI.
 
 ### 12.3 The engine's Go interface
 
 ```go
+type Change struct {
+    Project string `json:"project,omitempty"`
+    Kind    string `json:"kind"`
+    AskID   string `json:"ask_id,omitempty"`
+    Task    string `json:"task,omitempty"`
+    Seq     int64  `json:"seq,omitempty"`
+}
+
 type Engine interface {
     // reads (views)
-    Projects() []Project;  Graph(project) Graph;  Asks(open bool) []Ask
-    Digest(since) Digest;  Rules(project) []Rule; Alerts(since) []Alert;  Log(project, n) []LogLine
+    Projects() []ProjectView;  Graph(project string) (GraphView, error);  Asks(open bool) []flow.Ask
+    Digest(since) Digest;  Rules(project) []Rule;  Alerts(since) []Alert;  LogLines(project string, n int) ([]LogEntry, error)
     // owner actions (each becomes an event)
-    Start(folder, answers) error;  Stop(project) error;  Say(project, text) error
-    Answer(ask, option, proof) error;  ProposeRule(...) (Ask, error);  RevokeRule(...) error
-    Touch(terminal, device, kind, n)          // owner typed into a factory terminal: logged, answers nothing
+    Start(folder, goal string, maxRunning int) error;  Stop(project string) error;  Say(project, text string) error
+    MintProof(askID, option, inputKind, deviceID string) (AnswerProof, error)
+    Answer(askID, option string, proof AnswerProof) error;  ProposeRule(...) (flow.Ask, error);  RevokeRule(...) error
+    Touch(terminal, device, kind string, n int) // owner typed into a factory terminal: logged, answers nothing
     // agent reports (from the CLI client, checked against the role table)
-    Report(runToken, verb, args) error
-    Changes() <-chan Change                   // the supervisor and web push from this
+    Report(runToken, verb string, args json.RawMessage) error
+    Changes() <-chan Change                     // one Change per ask, answer, cancel or say; supervisor and web push from this
 }
 ```
 

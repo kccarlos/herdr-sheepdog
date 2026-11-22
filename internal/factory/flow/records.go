@@ -30,6 +30,7 @@ type State struct {
 	Project  Project  `json:"project"`
 	Settings Settings `json:"settings"`
 	Tasks    []Task   `json:"tasks"`
+	Asks     []Ask    `json:"asks,omitempty"`
 }
 
 // BaseState is the persisted base-branch red spell (design.md 7.3, N38).
