@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -181,29 +182,38 @@ func TestQuotaFloorHandoffAtMostOnceAcrossCrashAndLostReply(t *testing.T) {
 		deadline := q.now.Add(handoffMinutes * time.Minute)
 		q.atFloor("claude", q.now.Add(2*time.Hour))
 
+		var mu sync.Mutex
 		var savedState, savedLog []byte
 		var snapped bool
 		proxy.setHook(func(method string, params json.RawMessage, forward func() ([]byte, bool, error)) ([]byte, bool) {
 			resp, _, _ := forward()
-			if !snapped && isHandoffSendTo(method, params, w) {
-				snapped = true
-				savedState, _ = os.ReadFile(q.paths.State(q.id))
-				savedLog, _ = os.ReadFile(q.paths.Log(q.id))
+			if isHandoffSendTo(method, params, w) {
+				mu.Lock()
+				if !snapped {
+					snapped = true
+					savedState, _ = os.ReadFile(q.paths.State(q.id))
+					savedLog, _ = os.ReadFile(q.paths.Log(q.id))
+				}
+				mu.Unlock()
 			}
 			return resp, false
 		})
 		q.pass()
 		proxy.setHook(nil)
-		if !snapped || proxy.acceptedHandoffs(t, w) != 1 {
-			t.Fatalf("fixture did not intercept accepted handoff send: snapped=%v accepted=%d", snapped, proxy.acceptedHandoffs(t, w))
+		mu.Lock()
+		gotSnapped := snapped
+		stateSnap, logSnap := savedState, savedLog
+		mu.Unlock()
+		if !gotSnapped || proxy.acceptedHandoffs(t, w) != 1 {
+			t.Fatalf("fixture did not intercept accepted handoff send: snapped=%v accepted=%d", gotSnapped, proxy.acceptedHandoffs(t, w))
 		}
 
 		// Simulate a crash right after herdr-core accepted terminal.send and
 		// before any post-send state commit reached disk.
-		if err := os.WriteFile(q.paths.State(q.id), savedState, 0o600); err != nil {
+		if err := os.WriteFile(q.paths.State(q.id), stateSnap, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(q.paths.Log(q.id), savedLog, 0o600); err != nil {
+		if err := os.WriteFile(q.paths.Log(q.id), logSnap, 0o600); err != nil {
 			t.Fatal(err)
 		}
 		q.restart()
@@ -238,19 +248,18 @@ func TestQuotaFloorHandoffAtMostOnceAcrossCrashAndLostReply(t *testing.T) {
 		deadline := q.now.Add(handoffMinutes * time.Minute)
 		q.atFloor("claude", q.now.Add(2*time.Hour))
 
-		dropped := false
+		var dropped atomic.Bool
 		proxy.setHook(func(method string, params json.RawMessage, forward func() ([]byte, bool, error)) ([]byte, bool) {
 			resp, _, _ := forward()
-			if !dropped && isHandoffSendTo(method, params, w) {
-				dropped = true
+			if isHandoffSendTo(method, params, w) && dropped.CompareAndSwap(false, true) {
 				return nil, true // hc accepted the send, then the reply connection dropped
 			}
 			return resp, false
 		})
 		q.pass()
 		proxy.setHook(nil)
-		if !dropped || proxy.acceptedHandoffs(t, w) != 1 {
-			t.Fatalf("fixture did not drop reply after accepted send: dropped=%v accepted=%d", dropped, proxy.acceptedHandoffs(t, w))
+		if !dropped.Load() || proxy.acceptedHandoffs(t, w) != 1 {
+			t.Fatalf("fixture did not drop reply after accepted send: dropped=%v accepted=%d", dropped.Load(), proxy.acceptedHandoffs(t, w))
 		}
 
 		q.pass()
@@ -286,10 +295,9 @@ func TestQuotaFloorHandoffAtMostOnceAcrossCrashAndLostReply(t *testing.T) {
 		*q.now = q.now.Add(time.Minute)
 		q.atFloor("claude", q.now.Add(2*time.Hour))
 
-		refusedOnce := false
+		var refusedOnce atomic.Bool
 		proxy.setHook(func(method string, params json.RawMessage, forward func() ([]byte, bool, error)) ([]byte, bool) {
-			if !refusedOnce && isHandoffSendTo(method, params, w) {
-				refusedOnce = true
+			if isHandoffSendTo(method, params, w) && refusedOnce.CompareAndSwap(false, true) {
 				// Worker hits a permission prompt after ObserveRun: herdr-core
 				// refuses non-forced terminal.send with ErrBlocked before accepting.
 				q.status(w, "blocked")
@@ -299,8 +307,8 @@ func TestQuotaFloorHandoffAtMostOnceAcrossCrashAndLostReply(t *testing.T) {
 		})
 		q.pass()
 		proxy.setHook(nil)
-		if !refusedOnce || proxy.acceptedHandoffs(t, w) != 0 {
-			t.Fatalf("fixture send was not refused before accept: refusedOnce=%v accepted=%d", refusedOnce, proxy.acceptedHandoffs(t, w))
+		if !refusedOnce.Load() || proxy.acceptedHandoffs(t, w) != 0 {
+			t.Fatalf("fixture send was not refused before accept: refusedOnce=%v accepted=%d", refusedOnce.Load(), proxy.acceptedHandoffs(t, w))
 		}
 
 		// Once the worker is working again before the deadline, the cleared
@@ -475,7 +483,7 @@ func TestQuotaFloorDeadlinePrecedesAndHoldsTimeouts(t *testing.T) {
 				q := newQuotaHistory(t, nil)
 				q.edit(func(s *flow.State) {
 					s.Settings.QuietMinutes = 2
-					s.Settings.InterruptSeconds = 20
+					s.Settings.InterruptSeconds = 70
 				})
 				q.setHandoffMinutes(6)
 				q.startWorkers(poolTask("T1", ""))
@@ -485,10 +493,11 @@ func TestQuotaFloorDeadlinePrecedesAndHoldsTimeouts(t *testing.T) {
 				q.pass()
 
 				// Trigger R21 interrupt before the floor is reached, then reach
-				// R22's quiet-kill threshold on the exact pass the floor is seen.
+				// R22's quiet-kill threshold (and exceed PoolMinutes) on the exact
+				// pass the floor is seen.
 				*q.now = q.now.Add(2*time.Minute + 5*time.Second)
 				q.pass() // R21
-				*q.now = q.now.Add(25 * time.Second)
+				*q.now = q.now.Add(75 * time.Second)
 				deadline := q.now.Add(6 * time.Minute)
 				q.atFloor("claude", q.now.Add(2*time.Hour))
 				q.pass()
@@ -1095,7 +1104,7 @@ func TestQuotaHandoffCarriesOutgoingChatAndUnknownGitReads(t *testing.T) {
 		const gitReason = "worktree git index is unreadable"
 		var afterInspect sync.Map
 		gitServer.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
-			if p.Cwd == a.Worktree && slices.Contains(p.Argv, "merge-base") {
+			if p.Cwd == a.Worktree && slices.Contains(p.Argv, "rev-list") {
 				afterInspect.Store(a.Worktree, true)
 			}
 			if _, ok := afterInspect.Load(a.Worktree); ok && p.Cwd == a.Worktree && (slices.Contains(p.Argv, "log") || slices.Contains(p.Argv, "status")) {
@@ -1159,10 +1168,9 @@ func TestQuotaRecoveryKeepsResultAcrossLaunchFailure(t *testing.T) {
 		// Codex recovers; fail the replacement terminal.run once with a transient drop.
 		*q.now = q.now.Add(2 * time.Minute)
 		q.pools.set("codex", poolOut("codex", *q.now, nil, &poolWin{70, 72 * time.Hour}, nil))
-		failedOnce := false
+		var failedOnce atomic.Bool
 		proxy.setHook(func(method string, _ json.RawMessage, forward func() ([]byte, bool, error)) ([]byte, bool) {
-			if !failedOnce && method == "terminal.run" {
-				failedOnce = true
+			if method == "terminal.run" && failedOnce.CompareAndSwap(false, true) {
 				return nil, true
 			}
 			resp, _, _ := forward()
@@ -1170,7 +1178,7 @@ func TestQuotaRecoveryKeepsResultAcrossLaunchFailure(t *testing.T) {
 		})
 		q.pass()
 		proxy.setHook(nil)
-		if !failedOnce {
+		if !failedOnce.Load() {
 			t.Fatal("fixture did not fail replacement terminal.run")
 		}
 
@@ -1242,10 +1250,9 @@ func TestQuotaRecoveryKeepsResultAcrossLaunchFailure(t *testing.T) {
 		// hitting a transient terminal.run failure.
 		now = now.Add(2 * time.Minute)
 		pools.healthy(now)
-		failedOnce := false
+		var failedOnce atomic.Bool
 		proxy.setHook(func(method string, _ json.RawMessage, forward func() ([]byte, bool, error)) ([]byte, bool) {
-			if !failedOnce && method == "terminal.run" {
-				failedOnce = true
+			if method == "terminal.run" && failedOnce.CompareAndSwap(false, true) {
 				return nil, true
 			}
 			resp, _, _ := forward()
@@ -1253,7 +1260,7 @@ func TestQuotaRecoveryKeepsResultAcrossLaunchFailure(t *testing.T) {
 		})
 		eng.passProject(ctx, id, false)
 		proxy.setHook(nil)
-		if !failedOnce {
+		if !failedOnce.Load() {
 			t.Fatal("fixture did not fail reviewer replacement terminal.run")
 		}
 
