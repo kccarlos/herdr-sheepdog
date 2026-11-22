@@ -926,3 +926,195 @@ func TestSessionCookieClearedWhenRevokedOrUnknown(t *testing.T) {
 		t.Fatalf("answer without device session after cookie clear = %d %s, want 403 proof_required", wNoProof.Code, wNoProof.Body.String())
 	}
 }
+
+// Round 3, Major 1: POST /api/devices/reset-pairing must invalidate any active
+// browser short code (as code_expired), while a new code minted after the
+// reset works.
+func TestResetPairingInvalidatesBrowserShortCode(t *testing.T) {
+	f := newBrowserEnrolFixture(t, nil)
+	_, appTicket := f.enrollAndSignInApp("Test Menu Bar", DeviceIOS)
+
+	// Mint a browser short code before resetting pairing.
+	wPreCode := f.doLoopback(http.MethodPost, "/api/pair/browser-code", nil, appTicket)
+	if wPreCode.Code != http.StatusOK {
+		t.Fatalf("POST /api/pair/browser-code = %d %s, want 200", wPreCode.Code, wPreCode.Body.String())
+	}
+	var preIssued struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(wPreCode.Body.Bytes(), &preIssued); err != nil || preIssued.Code == "" {
+		t.Fatalf("decode pre-reset browser-code = %v (%s)", err, wPreCode.Body.String())
+	}
+
+	// Owner resets pairing from setup within the 5-minute short-code window.
+	f.now = f.now.Add(10 * time.Second)
+	wReset := f.doLoopback(http.MethodPost, "/api/devices/reset-pairing", map[string]any{}, "")
+	if wReset.Code != http.StatusOK {
+		t.Fatalf("POST /api/devices/reset-pairing = %d %s, want 200", wReset.Code, wReset.Body.String())
+	}
+
+	// The pre-reset browser short code must no longer enrol (refused as expired).
+	browserKey, browserPub := newDeviceKey(t)
+	wPreEnroll := f.doLoopback(http.MethodPost, "/api/devices/enroll", map[string]any{
+		"code": preIssued.Code, "public_key": browserPub, "name": "Test Browser", "kind": DeviceBrowser,
+	}, "")
+	var preEnrollBody map[string]string
+	_ = json.Unmarshal(wPreEnroll.Body.Bytes(), &preEnrollBody)
+	if wPreEnroll.Code != http.StatusGone || preEnrollBody["reason"] != "code_expired" {
+		t.Fatalf("enroll with pre-reset browser short code = %d %s, want 410 code_expired", wPreEnroll.Code, wPreEnroll.Body.String())
+	}
+
+	// The revoked app session can no longer mint a browser short code.
+	if wOldApp := f.doLoopback(http.MethodPost, "/api/pair/browser-code", nil, appTicket); wOldApp.Code != http.StatusUnauthorized {
+		t.Fatalf("pre-reset app session POST /api/pair/browser-code = %d %s, want 401", wOldApp.Code, wOldApp.Body.String())
+	}
+
+	// A newly paired app after the reset can mint a new browser short code that works.
+	_, newAppTicket := f.enrollAndSignInApp("Test Menu Bar After Reset", DeviceIOS)
+	wPostCode := f.doLoopback(http.MethodPost, "/api/pair/browser-code", nil, newAppTicket)
+	if wPostCode.Code != http.StatusOK {
+		t.Fatalf("post-reset POST /api/pair/browser-code = %d %s, want 200", wPostCode.Code, wPostCode.Body.String())
+	}
+	var postIssued struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(wPostCode.Body.Bytes(), &postIssued); err != nil || postIssued.Code == "" {
+		t.Fatalf("decode post-reset browser-code = %v (%s)", err, wPostCode.Body.String())
+	}
+
+	wPostEnroll := f.doLoopback(http.MethodPost, "/api/devices/enroll", map[string]any{
+		"code": postIssued.Code, "public_key": browserPub, "name": "Test Browser", "kind": DeviceBrowser,
+	}, "")
+	if wPostEnroll.Code != http.StatusOK {
+		t.Fatalf("enroll with post-reset browser short code = %d %s, want 200", wPostEnroll.Code, wPostEnroll.Body.String())
+	}
+	var er EnrollResponse
+	if err := json.Unmarshal(wPostEnroll.Body.Bytes(), &er); err != nil || er.DeviceID == "" {
+		t.Fatalf("post-reset enroll response = %s (err=%v)", wPostEnroll.Body.String(), err)
+	}
+	if cookie := f.signInBrowser(browserKey, er.DeviceID); cookie == nil || cookie.Value == "" {
+		t.Fatal("expected valid browser session cookie after post-reset enroll")
+	}
+}
+
+// Round 3, Major 2 (server side): GET /api/factory/asks lists only asks for
+// the owner (open gated asks per design.md 7.1), excluding worker decision asks
+// meant for the coordinator.
+func TestFactoryAsksExcludesWorkerDecisionAsks(t *testing.T) {
+	now := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+
+	t.Run("mixed_open_asks", func(t *testing.T) {
+		f := newBrowserEnrolFixture(t, []flow.Ask{
+			{
+				ID:        "ask-decision-worker",
+				Project:   "proj-demo",
+				Kind:      flow.KindDecision,
+				Gated:     false,
+				AskedBy:   flow.RoleWorker,
+				Question:  "Should T1 use helper A or B?",
+				Options:   []string{"Helper A", "Helper B"},
+				Recommend: "Helper A",
+				Task:      "T1",
+				At:        now,
+				Status:    flow.AskStatusOpen,
+			},
+			{
+				ID:        "ask-gate-owner",
+				Project:   "proj-demo",
+				Kind:      flow.KindGate,
+				Gated:     true,
+				AskedBy:   flow.RoleCoordinator,
+				Question:  "Approve the plan for T1?",
+				Options:   []string{"Approve", "Request changes"},
+				Recommend: "Approve",
+				Task:      "T1",
+				At:        now.Add(time.Second),
+				Status:    flow.AskStatusOpen,
+			},
+			{
+				ID:        "ask-release-owner",
+				Project:   "proj-demo",
+				Kind:      flow.KindRelease,
+				Gated:     true,
+				AskedBy:   flow.RoleCoordinator,
+				Question:  "Tag and publish v0.2.0?",
+				Options:   []string{"Publish v0.2.0", "Hold"},
+				Recommend: "Publish v0.2.0",
+				At:        now.Add(2 * time.Second),
+				Status:    flow.AskStatusOpen,
+			},
+			{
+				ID:        "ask-closed-owner",
+				Project:   "proj-demo",
+				Kind:      flow.KindGate,
+				Gated:     true,
+				AskedBy:   flow.RoleCoordinator,
+				Question:  "Already answered ask",
+				Options:   []string{"Yes", "No"},
+				Recommend: "Yes",
+				At:        now.Add(-time.Minute),
+				Status:    flow.AskStatusAnswered,
+				Answer:    "Yes",
+			},
+		})
+
+		// Engine.Asks(true) still returns the worker decision ask for the coordinator.
+		if engOpen := f.eng.Asks(true); len(engOpen) != 3 || engOpen[0].ID != "ask-decision-worker" {
+			t.Fatalf("Engine.Asks(true) = %+v, want all 3 open asks including ask-decision-worker", engOpen)
+		}
+
+		// GET /api/factory/asks on loopback and for a paired device lists only the 2 open owner asks.
+		_, phoneTicket := f.enrollAndSignInApp("Test Phone", DeviceIOS)
+		for _, tc := range []struct {
+			name string
+			w    *httptest.ResponseRecorder
+		}{
+			{"loopback", f.doLoopback(http.MethodGet, "/api/factory/asks", nil, "")},
+			{"paired_remote", f.doRemote(http.MethodGet, "/api/factory/asks", nil, phoneTicket)},
+		} {
+			if tc.w.Code != http.StatusOK {
+				t.Fatalf("%s GET /api/factory/asks = %d %s, want 200", tc.name, tc.w.Code, tc.w.Body.String())
+			}
+			var resp struct {
+				Protocol int        `json:"protocol"`
+				Asks     []flow.Ask `json:"asks"`
+			}
+			if err := json.Unmarshal(tc.w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("%s decode asks: %v (%s)", tc.name, err, tc.w.Body.String())
+			}
+			if resp.Protocol != 1 || len(resp.Asks) != 2 || resp.Asks[0].ID != "ask-gate-owner" || resp.Asks[1].ID != "ask-release-owner" {
+				t.Fatalf("%s asks = %+v, want only [ask-gate-owner ask-release-owner] (no worker decision ask)", tc.name, resp.Asks)
+			}
+		}
+	})
+
+	t.Run("only_decision_ask_open_returns_empty_array", func(t *testing.T) {
+		f := newBrowserEnrolFixture(t, []flow.Ask{
+			{
+				ID:        "ask-decision-only",
+				Project:   "proj-demo",
+				Kind:      flow.KindDecision,
+				Gated:     false,
+				AskedBy:   flow.RoleWorker,
+				Question:  "Should T1 use helper A or B?",
+				Options:   []string{"Helper A", "Helper B"},
+				Recommend: "Helper A",
+				Task:      "T1",
+				At:        now,
+				Status:    flow.AskStatusOpen,
+			},
+		})
+
+		w := f.doLoopback(http.MethodGet, "/api/factory/asks", nil, "")
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET /api/factory/asks = %d %s, want 200", w.Code, w.Body.String())
+		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+			t.Fatalf("decode raw asks: %v (%s)", err, w.Body.String())
+		}
+		if strings.TrimSpace(string(raw["asks"])) != "[]" {
+			t.Fatalf("asks JSON = %s, want empty array [] (never null, no decision ask)", string(raw["asks"]))
+		}
+	})
+}

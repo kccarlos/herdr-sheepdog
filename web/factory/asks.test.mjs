@@ -543,10 +543,10 @@ function createFakeIndexedDB() {
   };
 }
 
-function fakeFactoryPageDaemon({ shortCode = 'ABCD-EFGH', daemonId = 'DAEMON_PAGE_1', requireSessionForReads = false } = {}) {
+function fakeFactoryPageDaemon({ shortCode = 'ABCD-EFGH', daemonId = 'DAEMON_PAGE_1', requireSessionForReads = false, asks = fixture.asks } = {}) {
   const calls = [];
   const answered = [];
-  const openAsks = fixture.asks.map((a) => ({ ...a }));
+  const openAsks = asks.map((a) => ({ ...a }));
   const challenges = new Set();
   const tickets = new Set();
   const cookieJar = { session: '' };
@@ -965,4 +965,63 @@ test('on /factory an unenrolled browser getting 401 sees the pairing hint withou
   const afterClear = daemon.calls.slice(afterClearMark);
   assert.ok(afterClear.length > 0);
   assert.ok(afterClear.every((c) => c.sentCookie === ''), 'cleared cookie must not be sent again');
+});
+
+test('the /factory page shows no card for a worker decision ask meant for the coordinator', async (t) => {
+  const workerDecisionAsk = {
+    id: 'ask-decision-worker-1',
+    project: 'proj-demo',
+    kind: 'decision',
+    gated: false,
+    asked_by: 'worker',
+    question: 'Should T1 use helper A or helper B?',
+    options: ['Helper A', 'Helper B'],
+    recommend: 'Helper A',
+    task: 'T1',
+    at: '2026-11-22T12:00:00Z',
+    status: 'open',
+  };
+  const ownerGateAsk = { ...fixture.asks[0] };
+
+  await t.test('renderAskCardsHTML excludes worker decision asks', () => {
+    const mixedHtml = renderAskCardsHTML([workerDecisionAsk, ownerGateAsk], {});
+    assert.doesNotMatch(mixedHtml, /ask-decision-worker-1/);
+    assert.doesNotMatch(mixedHtml, /Should T1 use helper A or helper B\?/);
+    assert.match(mixedHtml, /ask-demo-1/);
+    assert.match(mixedHtml, /Approve the plan for T1\?/);
+
+    const decisionOnlyHtml = renderAskCardsHTML([workerDecisionAsk], {});
+    assert.doesNotMatch(decisionOnlyHtml, /ask-decision-worker-1/);
+    assert.doesNotMatch(decisionOnlyHtml, /ask-card/);
+    assert.match(decisionOnlyHtml, /No open asks right now\./);
+  });
+
+  await t.test('booted /factory page hides decision ask among mixed asks and counts only owner asks', async (t) => {
+    const daemon = fakeFactoryPageDaemon({
+      daemonId: 'DAEMON_DECISION_MIXED',
+      asks: [workerDecisionAsk, ownerGateAsk],
+    });
+    const page = await bootFactoryPage(t, daemon);
+    const asksEl = page.doc.getElementById('asks');
+
+    assert.equal(asksEl.querySelectorAll('.ask-card').length, 1, 'only the owner ask card should render');
+    assert.equal(asksEl.querySelector('[data-ask-id="ask-decision-worker-1"]'), null);
+    assert.doesNotMatch(asksEl.innerHTML, /Should T1 use helper A or helper B\?/);
+    assert.ok(asksEl.querySelector('[data-ask-id="ask-demo-1"]'), 'owner gate ask card must still render');
+    assert.match(asksEl.innerHTML, /1 open/);
+  });
+
+  await t.test('booted /factory page shows no ask card when only a worker decision ask is open', async (t) => {
+    const daemon = fakeFactoryPageDaemon({
+      daemonId: 'DAEMON_DECISION_ONLY',
+      asks: [workerDecisionAsk],
+    });
+    const page = await bootFactoryPage(t, daemon);
+    const asksEl = page.doc.getElementById('asks');
+
+    assert.equal(asksEl.querySelectorAll('.ask-card').length, 0, 'worker decision ask must not render as a card');
+    assert.doesNotMatch(asksEl.innerHTML, /Should T1 use helper A or helper B\?/);
+    assert.match(asksEl.innerHTML, /No open asks right now\./);
+    assert.doesNotMatch(asksEl.innerHTML, /\b1 open\b/);
+  });
 });
