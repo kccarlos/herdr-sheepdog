@@ -394,3 +394,194 @@ func TestReadReportAgyRound3ThoughtNoBlankAndNudgeNoBlock(t *testing.T) {
 		}
 	})
 }
+
+// TestReadReportAgyRound4HiddenTagFallback verifies design.md 9.2 (round 4):
+// when agy's Markdown rendering hides `<report>` and `</report>`, leaving only
+// the bare JSON object line in agy's own reply (after the last prompt echo),
+// ReadReport falls back to the last bare JSON object line whose code equals the
+// round's code and that decodes as a valid report; a bare JSON line with a
+// different code is not a report; the prompt echo's template never counts; and
+// a visible `<report>` tag still works.
+func TestReadReportAgyRound4HiddenTagFallback(t *testing.T) {
+	const (
+		code = "matn62unlw"
+		head = "c0d13cc143ceb3633bf4f46deb50527a40ca01e7"
+	)
+
+	hiddenBytes, err := os.ReadFile(filepath.Join("..", "testdata", "agy-review-hidden-tag.screen.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hiddenRaw := strings.ReplaceAll(string(hiddenBytes), "\r\n", "\n")
+	if strings.Contains(hiddenRaw, "@") || strings.Contains(hiddenRaw, "/Users/") {
+		t.Fatalf("fixture agy-review-hidden-tag.screen.txt contains unredacted identity or path")
+	}
+	beforeNudge, _, hasNudge := strings.Cut(hiddenRaw, "\n────────")
+	if !hasNudge {
+		t.Fatalf("unexpected agy-review-hidden-tag.screen.txt layout: missing trailing nudge rule")
+	}
+
+	liveBytes, err := os.ReadFile(filepath.Join("..", "testdata", "agy-review-screen-live.screen.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveRaw := strings.ReplaceAll(string(liveBytes), "\r\n", "\n")
+	if (strings.Contains(liveRaw, "@") && !strings.Contains(liveRaw, "account@example.invalid")) || strings.Contains(liveRaw, "/Users/") {
+		t.Fatalf("fixture agy-review-screen-live.screen.txt contains unredacted identity or path")
+	}
+	liveHdr, _, hasEndTag := strings.Cut(liveRaw, "</report>")
+	if !hasEndTag {
+		t.Fatalf("unexpected agy-review-screen-live.screen.txt layout: missing </report>")
+	}
+	liveHdr = strings.ReplaceAll(liveHdr+"</report>\n", "yxoznnqgmi", code)
+
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	srv.Add(hc.Terminal{
+		Address: "t-agy",
+		Name:    "rev-agy",
+		State:   "live",
+		Argv:    AgyArgv("gemini-4-hydrogen-high", "", ""),
+		Labels:  map[string]string{"sheepdog.cli": AgyCLI},
+		Status:  &hc.Status{App: "antigravity", State: "done"},
+	})
+
+	read := func(t *testing.T, screen string) ReportRead {
+		t.Helper()
+		srv.SetScreen("t-agy", screen)
+		rd, err := ReadReport(ctx, client, "t-agy", code)
+		if err != nil {
+			t.Fatalf("ReadReport: %v", err)
+		}
+		return rd
+	}
+
+	assertPassMatn62unlw := func(t *testing.T, rd ReportRead) {
+		t.Helper()
+		if rd.Status != ReportFound || rd.Report.Code != code || rd.Report.Round != 1 || rd.Report.Head != head || rd.Report.Verdict != "pass" || rd.Report.Majors != 0 {
+			t.Fatalf("ReadReport = %+v, want found pass/0 for code %s at head %s", rd, code, head)
+		}
+		if !strings.Contains(rd.Body, "self-check misses: 0") || !strings.Contains(rd.Body, "deletable: none") {
+			t.Errorf("Body missing reply lines:\n%s", rd.Body)
+		}
+		for _, leaked := range []string{"Bash(git", "Thought for 25s", "You review task", "Auto mode:", "esc to cancel"} {
+			if strings.Contains(rd.Body, leaked) {
+				t.Errorf("Body leaked %q:\n%s", leaked, rd.Body)
+			}
+		}
+	}
+
+	t.Run("hidden-tag capture with live prompt header read as pass majors 0", func(t *testing.T) {
+		screen := liveHdr + "\n" + beforeNudge + "\n\n" + agyInputBox
+		assertPassMatn62unlw(t, read(t, screen))
+	})
+
+	t.Run("hidden-tag capture scrolled past prompt header read as pass majors 0", func(t *testing.T) {
+		screen := beforeNudge + "\n\n" + agyInputBox
+		assertPassMatn62unlw(t, read(t, screen))
+	})
+
+	t.Run("hidden-tag reply after N29 nudge read as pass majors 0", func(t *testing.T) {
+		screen := liveHdr + agyBlocks + "  Checked files.\n\n" + agyRule + "\n" +
+			"> You went idle with no report tag. End your reply with `<report>{\"code\":\"" + code + "\",\"round\":1,\"head\":\"" + head + "\",\"verdict\":\"pass\"|\"changes\",\"majors\":N}</report>`.\n\n" +
+			"  self-check misses: 0\n" +
+			"  class: none\n" +
+			"  deletable: none\n" +
+			"  not run: none\n" +
+			"  {\"code\":\"" + code + "\",\"round\":1,\"head\":\"" + head + "\",\"verdict\":\"pass\",\"majors\":0}\n\n" +
+			agyInputBox
+		assertPassMatn62unlw(t, read(t, screen))
+	})
+
+	t.Run("bare JSON line with different code is not a report", func(t *testing.T) {
+		wrongOnly := liveHdr + agyBlocks +
+			"  self-check misses: 0\n" +
+			"  class: none\n" +
+			"  deletable: none\n" +
+			"  not run: none\n" +
+			"  {\"code\":\"othercode9\",\"round\":1,\"head\":\"" + head + "\",\"verdict\":\"pass\",\"majors\":0}\n\n" +
+			agyInputBox
+		if rd := read(t, wrongOnly); rd.Status != ReportNotYet {
+			t.Fatalf("ReadReport(wrong-code bare JSON) = %+v, want not_yet", rd)
+		}
+
+		// A later bare JSON line with a different code must not shadow an earlier matching bare JSON line.
+		matchingThenWrong := liveHdr + agyBlocks +
+			"  self-check misses: 0\n" +
+			"  class: none\n" +
+			"  deletable: none\n" +
+			"  not run: none\n" +
+			"  {\"code\":\"" + code + "\",\"round\":1,\"head\":\"" + head + "\",\"verdict\":\"pass\",\"majors\":0}\n" +
+			"  {\"code\":\"othercode9\",\"round\":1,\"head\":\"" + head + "\",\"verdict\":\"changes\",\"majors\":1}\n\n" +
+			agyInputBox
+		assertPassMatn62unlw(t, read(t, matchingThenWrong))
+
+		// A matching bare JSON line inside a tool output block must not count as agy's own reply.
+		inToolOnly := liveHdr +
+			"● Bash(cat report.json) (ctrl+o to expand)\n" +
+			"  {\"code\":\"" + code + "\",\"round\":1,\"head\":\"" + head + "\",\"verdict\":\"pass\",\"majors\":0}\n\n" +
+			"  Still checking.\n\n" +
+			agyInputBox
+		if rd := read(t, inToolOnly); rd.Status != ReportNotYet {
+			t.Fatalf("ReadReport(bare JSON in tool block only) = %+v, want not_yet", rd)
+		}
+	})
+
+	t.Run("template in prompt echo is never a report", func(t *testing.T) {
+		echoedFirst := liveHdr + agyBlocks + "  Checking tests.\n\n" + agyInputBox
+		if rd := read(t, echoedFirst); rd.Status != ReportNotYet {
+			t.Fatalf("ReadReport(first prompt template only) = %+v, want not_yet", rd)
+		}
+
+		strippedHdr := strings.ReplaceAll(strings.ReplaceAll(liveHdr, "<report>", ""), "</report>", "")
+		if rd := read(t, strippedHdr+agyBlocks+"  Checking tests.\n\n"+agyInputBox); rd.Status != ReportNotYet {
+			t.Fatalf("ReadReport(stripped prompt template only) = %+v, want not_yet", rd)
+		}
+
+		nudgeTemplateOnly := liveHdr + agyBlocks + "  Checked.\n\n" + agyRule + "\n" +
+			"> You went idle with no report tag. End your reply with `{\"code\":\"" + code + "\",\"round\":1,\"head\":\"" + head + "\",\"verdict\":\"pass\"|\"changes\",\"majors\":N}`.\n\n" +
+			"  Re-checking.\n\n" + agyInputBox
+		if rd := read(t, nudgeTemplateOnly); rd.Status != ReportNotYet {
+			t.Fatalf("ReadReport(nudge template only) = %+v, want not_yet", rd)
+		}
+
+		// Even if agy quotes the invalid template line in its reply, only the valid matching bare JSON counts.
+		quotedTemplateThenValid := liveHdr + agyBlocks +
+			"  Format reminder: {\"code\":\"" + code + "\",\"round\":1,\"head\":\"" + head + "\",\"verdict\":\"pass|changes\",\"majors\":<n>}\n" +
+			"  self-check misses: 0\n" +
+			"  class: none\n" +
+			"  deletable: none\n" +
+			"  not run: none\n" +
+			"  {\"code\":\"" + code + "\",\"round\":1,\"head\":\"" + head + "\",\"verdict\":\"pass\",\"majors\":0}\n\n" +
+			agyInputBox
+		assertPassMatn62unlw(t, read(t, quotedTemplateThenValid))
+	})
+
+	t.Run("visible report tag still works and takes precedence over bare JSON", func(t *testing.T) {
+		fenced := liveHdr + agyBlocks +
+			"  self-check misses: 0\n" +
+			"  class: none\n" +
+			"  deletable: none\n" +
+			"  not run: none\n\n" +
+			"  ```\n" +
+			"  <report>{\"code\":\"" + code + "\",\"round\":1,\"head\":\"" + head + "\",\"verdict\":\"pass\",\"majors\":0}</report>\n" +
+			"  ```\n\n" +
+			agyInputBox
+		assertPassMatn62unlw(t, read(t, fenced))
+
+		bareThenVisibleTag := liveHdr + agyBlocks +
+			"  {\"code\":\"" + code + "\",\"round\":1,\"head\":\"" + head + "\",\"verdict\":\"pass\",\"majors\":0}\n" +
+			"  major: item.go:1 missing doc comment\n" +
+			"  self-check misses: 1\n" +
+			"  class: none\n" +
+			"  deletable: none\n" +
+			"  not run: none\n" +
+			"  <report>{\"code\":\"" + code + "\",\"round\":1,\"head\":\"" + head + "\",\"verdict\":\"changes\",\"majors\":1}</report>\n\n" +
+			agyInputBox
+		rd := read(t, bareThenVisibleTag)
+		if rd.Status != ReportFound || rd.Report.Verdict != "changes" || rd.Report.Majors != 1 {
+			t.Fatalf("ReadReport(bare JSON then visible tag) = %+v, want found/changes/1", rd)
+		}
+	})
+}

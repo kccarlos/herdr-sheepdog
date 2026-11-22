@@ -732,6 +732,8 @@ Per-CLI differences that are **data**: base command, fixed environment (Claude C
 
 Round 3 (C): `--mode auto` still stopped on permission prompts for `sheepdog` commands, so all three `agy` roles start with `--dangerously-skip-permissions` instead; the reviewer keeps its `"do not modify, create or delete any files; read and run tests only"` first-prompt instruction and `GEMINI_API_KEY` is still never set.
 
+Round 4: for an agy reviewer, the report is the `<report>` tag when visible, or else the last bare JSON object line in agy's own reply (after the last prompt echo) whose `code` equals the round's code and that decodes as a valid report (the prompt echo's template never counts), and the reviewer's first prompt asks agy to put the `<report>` tag inside a fenced code block.
+
 Per-CLI differences that need **code**: pre-setting trust for a worktree, the agy sandbox wrapper for read-only runs, listing models.
 
 Read-only for Claude Code is the `dontAsk` mode with an allow list of read tools and the usual test runners, passed as one `--allowedTools=` argument (as separate values the flag swallows the prompt that follows). This is a rule on the model, backed by the clean-worktree check on the verdict (section 7.2). It is not a sandbox: a test runner runs the worker's code.
