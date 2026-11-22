@@ -618,7 +618,7 @@ A failed read is not a snapshot. `gh` being unreachable is the project fact `git
 | Volume probe | a timed read of the project folder through hc | alerts `consent_prompt`, `disk` |
 | Sweep, at daemon start and every `sweep_minutes` | hc terminals with factory labels, `git worktree list`, the local base against the remote | strays and leftovers (section 11.3) |
 
-- **A pool is usable** when each of its windows (the 5-hour one and the weekly one) reads above `pool_floor_percent`, or when it cannot be read: an unknown reading is `unknown`, never "empty", and a run on it is tried. A pool on which a run just ended with a usage limit is unusable until the reset time it printed, or for `pool_minutes` when it printed none.
+- **A pool is usable** when each of its windows (the 5-hour one and the weekly one) reads above `pool_floor_percent`, or when it cannot be read at all: an unknown reading is `unknown`, never "empty", and a run on it is tried. A known reading at or under the floor stays in force until its blocking window's reset even if a later refresh fails; once that reset passes, an unreadable refresh is unknown again and does not block. A pool on which a run just ended with a usage limit is unusable until the reset time it printed, or for `pool_minutes` when it printed none.
 - Changed lines leave out files the repo marks generated in `.gitattributes` (`linguist-generated`). The engine keeps no list of file names; doctor offers once, at project start, to add the usual lock and project files there.
 
 ## 8. Making sure: executors, failure, and the few invariants

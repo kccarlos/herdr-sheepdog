@@ -53,7 +53,7 @@ type Engine struct {
 	poolRun       CommandFunc                                       // provider quota reader hook; nil uses hcExecRunner
 	cliProbes     map[string]cachedCLIProbe                         // shared across launches and projects under mu
 	pools         map[string]cachedPool                             // shared per-provider quota readings under mu
-	passPoolCheck func(flow.Candidate) string                       // current pass's immutable pool check under mu
+	passPoolCheck func(flow.Candidate) flow.ResolveReason           // current pass's immutable pool check under mu
 	git           *world.Git
 	mu            sync.Mutex
 	wake          chan struct{}
@@ -656,15 +656,15 @@ func (e *Engine) probeLaunchFacts(ctx context.Context, role string, task flow.Ta
 	return facts
 }
 
-func launchCapability(role string) func(flow.Candidate) string {
-	return func(c flow.Candidate) string {
+func launchCapability(role string) func(flow.Candidate) flow.ResolveReason {
+	return func(c flow.Candidate) flow.ResolveReason {
 		switch role {
 		case flow.RoleWorker, flow.RoleCoordinator, flow.RoleReviewer:
 			if c.CLI == "claude" || c.CLI == world.CodexCLI {
-				return ""
+				return flow.ResolveReason{}
 			}
 		}
-		return fmt.Sprintf("the engine cannot launch %s as %s yet", c.CLI, role)
+		return flow.ResolveReason{Why: fmt.Sprintf("the engine cannot launch %s as %s yet", c.CLI, role)}
 	}
 }
 
@@ -674,15 +674,15 @@ func intentCandidate(in flow.Intent) flow.Candidate {
 
 func resolveWorker(t flow.Task, s flow.Settings, facts flow.ResolveFacts) (flow.Intent, string) {
 	check := facts.Check
-	facts.Check = func(c flow.Candidate) string {
-		if why := launchCapability(flow.RoleWorker)(c); why != "" {
-			return why
+	facts.Check = func(c flow.Candidate) flow.ResolveReason {
+		if r := launchCapability(flow.RoleWorker)(c); r.Why != "" {
+			return r
 		}
-		_, why := flow.Resolve(flow.RoleReviewer, t, s, flow.ResolveFacts{Worker: c, Check: launchCapability(flow.RoleReviewer)})
-		if why == "" && check != nil {
+		_, r := flow.ResolveWithReason(flow.RoleReviewer, t, s, flow.ResolveFacts{Worker: c, Check: launchCapability(flow.RoleReviewer)})
+		if r.Why == "" && check != nil {
 			return check(c)
 		}
-		return why
+		return r
 	}
 	return flow.Resolve(flow.RoleWorker, t, s, facts)
 }
@@ -737,14 +737,14 @@ func (e *Engine) resolveLaunch(id string, facts flow.ResolveFacts, resolve func(
 		if err == nil {
 			return in, map[string]string{"CODEX_HOME": home}, ""
 		}
-		facts.Check = func(c flow.Candidate) string {
+		facts.Check = func(c flow.Candidate) flow.ResolveReason {
 			if c.CLI == world.CodexCLI {
-				return err.Error()
+				return flow.ResolveReason{Why: err.Error()}
 			}
 			if base != nil {
 				return base(c)
 			}
-			return ""
+			return flow.ResolveReason{}
 		}
 	}
 }
@@ -1495,7 +1495,7 @@ func reviewChoice(t flow.Task, s flow.Settings, a flow.Attempt, h string, facts 
 	}
 	for _, name := range failed {
 		cli, model, qualified := strings.Cut(name, "/")
-		if qualified && launchCapability(flow.RoleReviewer)(flow.Candidate{CLI: cli}) == "" {
+		if qualified && launchCapability(flow.RoleReviewer)(flow.Candidate{CLI: cli}).Why == "" {
 			used = append(used, flow.Candidate{CLI: cli, Model: model})
 			continue
 		}
@@ -1655,9 +1655,9 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		workers = flow.Candidates(flow.RoleWorker, *t, s.Settings)
 		workerNote = ". Worker identity is unknown. Selected a reviewer distinct from every worker candidate"
 	}
-	check := func(c flow.Candidate) string {
+	check := func(c flow.Candidate) flow.ResolveReason {
 		if slices.ContainsFunc(workers, c.SameModel) {
-			return "the reviewer must differ from the worker"
+			return flow.ReviewerDiffers
 		}
 		return launchCapability(flow.RoleReviewer)(c)
 	}
@@ -1671,7 +1671,7 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	var env map[string]string
 	if term.State == "live" {
 		choice = terminalChoice(term, flow.Candidate{})
-		if choice.CLI == "" || choice.Model == "" || check(choice) != "" {
+		if choice.CLI == "" || choice.Model == "" || check(choice).Why != "" {
 			term, adopt = hc.Terminal{}, false
 		} else {
 			kind = flow.RoundFull
@@ -1699,9 +1699,9 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 				env = map[string]string{"CODEX_HOME": home}
 				break
 			}
-			facts.Check = func(c flow.Candidate) string {
+			facts.Check = func(c flow.Candidate) flow.ResolveReason {
 				if c.CLI == world.CodexCLI {
-					return err.Error()
+					return flow.ResolveReason{Why: err.Error()}
 				}
 				return check(c)
 			}

@@ -1,7 +1,6 @@
 package factory
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -129,9 +128,9 @@ func poolStale(c cachedPool, now time.Time, ttl time.Duration) bool {
 	return false
 }
 
-func poolWaitReason(provider string, r poolReading, floor int, now time.Time) string {
+func poolWaitReason(provider string, r poolReading, floor int, now time.Time) flow.ResolveReason {
 	if !r.Known {
-		return ""
+		return flow.ResolveReason{}
 	}
 	blocked := false
 	var earliest time.Time
@@ -147,20 +146,24 @@ func poolWaitReason(provider string, r poolReading, floor int, now time.Time) st
 		}
 	}
 	if !blocked {
-		return ""
+		return flow.ResolveReason{}
 	}
 	if !earliest.IsZero() {
-		return fmt.Sprintf("waiting for quota until %s: the %s pool is at its floor", earliest.Local().Format("3:04 PM"), provider)
+		layout := "3:04 PM"
+		if earliest.Sub(now) > 24*time.Hour {
+			layout = "Mon 3:04 PM"
+		}
+		return flow.ResolveReason{Kind: flow.ReasonPool, Why: fmt.Sprintf("waiting for quota until %s: the %s pool is at its floor", earliest.Local().Format(layout), provider), Reset: earliest}
 	}
-	return fmt.Sprintf("waiting for quota: the %s pool is at its floor", provider)
+	return flow.ResolveReason{Kind: flow.ReasonPool, Why: fmt.Sprintf("waiting for quota: the %s pool is at its floor", provider)}
 }
 
-func poolCheck(pools map[string]poolReading, floor int, now time.Time) func(flow.Candidate) string {
-	return func(c flow.Candidate) string {
+func poolCheck(pools map[string]poolReading, floor int, now time.Time) func(flow.Candidate) flow.ResolveReason {
+	return func(c flow.Candidate) flow.ResolveReason {
 		if p := poolProvider(c); p != "" {
 			return poolWaitReason(p, pools[p], floor, now)
 		}
-		return ""
+		return flow.ResolveReason{}
 	}
 }
 
@@ -185,7 +188,7 @@ func (e *Engine) refreshPools(ctx context.Context, id string) map[string]poolRea
 	}
 	now, runner := e.now(), e.poolRunnerLocked()
 	providers := projectPoolProviders(s)
-	ttl := time.Duration(cmp.Or(s.Settings.PoolMinutes, flow.DefaultSettings().PoolMinutes)) * time.Minute
+	ttl, floor := time.Duration(s.Settings.PoolMinutes)*time.Minute, s.Settings.PoolFloorPercent
 	snap := make(map[string]poolReading, len(providers))
 	var stale []string
 	for _, p := range providers {
@@ -221,6 +224,11 @@ func (e *Engine) refreshPools(ctx context.Context, id string) map[string]poolRea
 		e.pools = make(map[string]cachedPool, len(fresh))
 	}
 	for p, r := range fresh {
+		if !r.Known {
+			if prev, ok := e.pools[p]; ok && !poolWaitReason(p, prev.reading, floor, at).Reset.IsZero() {
+				r = prev.reading
+			}
+		}
 		e.pools[p] = cachedPool{at: at, reading: r}
 		snap[p] = r
 	}
