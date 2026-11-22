@@ -63,6 +63,8 @@ func (p Paths) poolCooldowns() string {
 	return filepath.Join(p.DataDir, "factory", "pool-cooldowns.json")
 }
 
+func (p Paths) CodexHome() string { return filepath.Join(p.DataDir, "factory", "codex-home") }
+
 // LogLine is one pass in log.jsonl.
 type LogLine struct {
 	Seq      int64     `json:"seq"`

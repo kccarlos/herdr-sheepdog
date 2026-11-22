@@ -165,6 +165,22 @@ func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	if volumeOK {
 		out = append(out, checkSweepLeftovers(ctx, o, hcOK, firstNonEmpty(probedDir, o.Folder))...)
 	}
+	if hcOK && o.DataDir != "" {
+		gctx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
+		defer cancel()
+		out = append(out, sweepProbeResults(world.NewGit(hc.NewClient(o.HCSocket), nil, nil).SweepCodexHome(gctx, Paths{DataDir: o.DataDir}.CodexHome()), "")...)
+	}
+	return out
+}
+
+func sweepProbeResults(pr flow.SweepProbe, stateWhy string) (out []onboard.Result) {
+	if pr.Unknown != "" {
+		why := map[bool]string{true: stateWhy, false: pr.Unknown}[stateWhy != "" && pr.Probe != "local_base"]
+		out = append(out, resWarn("sweep "+pr.Probe, "unknown: "+cleanReason(why), "check "+pr.Probe+" manually"))
+	}
+	for _, it := range pr.Items {
+		out = append(out, resWarn("leftover "+it.Kind, it.Summary, "inspect and clean up manually"))
+	}
 	return out
 }
 
@@ -204,12 +220,7 @@ func checkSweepLeftovers(ctx context.Context, o DoctorOptions, hcOK bool, dir st
 		if id == "" && pr.Probe != "local_base" {
 			continue
 		}
-		if pr.Unknown != "" {
-			out = append(out, resWarn("sweep "+pr.Probe, "unknown: "+cleanReason(map[bool]string{true: stateWhy, false: pr.Unknown}[stateWhy != "" && pr.Probe != "local_base"]), "check "+pr.Probe+" manually"))
-		}
-		for _, it := range pr.Items {
-			out = append(out, resWarn("leftover "+it.Kind, it.Summary, "inspect and clean up manually"))
-		}
+		out = append(out, sweepProbeResults(pr, stateWhy)...)
 	}
 	return out
 }

@@ -59,6 +59,7 @@ type Engine struct {
 	mu            sync.Mutex
 	wake          chan struct{}
 	lastPass      map[string]time.Time            // monotonic reading of previous pass per project (design.md 2.5)
+	lastSweep     map[string]time.Time            // per-process last sweep per project (design.md 7.3)
 	prs           map[string]flow.PR              // last PR snapshot per attempt worktree (in memory)
 	errs          map[string]string               // last gh or git error per worktree and kind, logged once per change
 	tips          map[string]tipFacts             // last git reading per worktree (in memory)
@@ -113,7 +114,7 @@ type tipFacts struct {
 
 // New constructs an Engine. Nothing runs or touches disk until Run or Start.
 func New(paths Paths, client *hc.Client) *Engine {
-	e := &Engine{Paths: paths, HC: client, wake: make(chan struct{}, 1)}
+	e := &Engine{Paths: paths, HC: client, wake: make(chan struct{}, 1), lastSweep: map[string]time.Time{}}
 	e.git = world.NewGit(client, e.now, func(event, folder string) { e.logEvent(event, map[string]string{"folder": folder}) })
 	return e
 }
@@ -156,6 +157,7 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 	}
 	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.Invariants, s.Project.WaitKey = root, goal, true, nil, nil, nil, ""
 	clearCoordTrack(&s.Project, true, true)
+	delete(e.lastSweep, id)
 	// The owner starting again is slice 1's retry (plan.md: "the owner
 	// starts again"): failed executor acts no longer block their ask.
 	for ti := range s.Tasks {
@@ -277,6 +279,7 @@ func (e *Engine) Stop(project string) error {
 	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants, s.Project.WaitKey = "", "", nil, false, nil, nil, false, 0, nil, ""
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastPass, id)
+	delete(e.lastSweep, id)
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "stop"}, Rule: "stop", Decision: "stopped", Why: "stopped by owner"})
 }
 
@@ -310,6 +313,7 @@ func (e *Engine) projectDirs() []os.DirEntry {
 
 func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	pools := e.refreshPools(ctx, id)
+	codexProbe := e.probeCodexHome(ctx, id)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	s, err := LoadState(e.Paths.State(id))
@@ -337,7 +341,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		e.logError("factory.hc_error", id, coordErr)
 	}
 	e.observeBaseLocked(ctx, id, &s)
-	e.sweepProjectLocked(ctx, id, &s)
+	e.sweepProjectLocked(ctx, id, &s, codexProbe)
 	baseTried := s.Project.Base != nil && s.Project.Base.Red && flow.Done(s.Project.Acts, flow.AskTellBaseRed+"@"+s.Project.Base.SpellID)
 	var candidates, poolHeld []string
 	queue := func(t flow.Task) {
@@ -718,12 +722,8 @@ func launchArgv(role string, c flow.Candidate, cwd, session string, resume bool)
 	return nil
 }
 
-func (e *Engine) codexHomeDir() string {
-	return filepath.Join(e.Paths.DataDir, "factory", "codex-home")
-}
-
 func (e *Engine) codexHome(id string) (string, error) {
-	dir := e.codexHomeDir()
+	dir := e.Paths.CodexHome()
 	home, err := world.CodexHome(dir)
 	if err == nil {
 		e.logOnce("factory.codex_home_error", id, dir, nil)
@@ -901,7 +901,7 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 	if (*recp).State == flow.PhaseEnded || e.HC == nil {
 		return (*recp).TaskRun(), nil
 	}
-	evs, err := world.ObserveRun(ctx, e.HC, **recp, e.codexHomeDir())
+	evs, err := world.ObserveRun(ctx, e.HC, **recp, e.Paths.CodexHome())
 	if err != nil {
 		return flow.Run{}, err
 	}

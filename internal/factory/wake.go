@@ -156,33 +156,53 @@ func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.Stat
 	e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "J12", Asked: keys, Decision: fmt.Sprintf("delivered %d wake(s) to the coordinator", len(keys)), Why: "wakes held and the coordinator is idle"})
 }
 
-func (e *Engine) sweepProjectLocked(ctx context.Context, id string, s *flow.State) {
-	if s.Project.Folder == "" {
-		return
+func (e *Engine) sweepDueLocked(id string, s flow.State, now time.Time) bool {
+	prev, ok := e.lastSweep[id]
+	return s.Project.Started && s.Project.Folder != "" && (!ok || now.Sub(prev) >= time.Duration(min(flow.SweepMax, max(flow.SweepMin, s.Settings.SweepMinutes)))*time.Minute)
+}
+
+func (e *Engine) probeCodexHome(ctx context.Context, id string) flow.SweepProbe {
+	e.mu.Lock()
+	s, err := LoadState(e.Paths.State(id))
+	due := e.Paths.DataDir != "" && err == nil && e.sweepDueLocked(id, s, e.now())
+	e.mu.Unlock()
+	if !due {
+		return flow.SweepProbe{}
 	}
+	pctx, cancel := context.WithTimeout(ctx, min(lockGitTimeout, world.GitStageTimeout))
+	defer cancel()
+	return e.git.SweepCodexHome(pctx, e.Paths.CodexHome())
+}
+
+func (e *Engine) sweepProjectLocked(ctx context.Context, id string, s *flow.State, codex flow.SweepProbe) {
 	now := e.now()
-	if last := flow.LastAct(s.Project.Acts, "sweep"); last != nil && now.Sub(last.At) < 10*time.Minute {
+	if !e.sweepDueLocked(id, *s, now) {
 		return
 	}
-	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
+	gctx, cancel := context.WithTimeout(ctx, min(3*lockGitTimeout, world.GitStageTimeout))
 	probes := e.git.Sweep(gctx, e.HC, s.Project.Folder, filepath.Join(e.Paths.project(id), "worktrees"), *s)
 	cancel()
-	for _, p := range probes {
-		if p.Unknown == world.ErrGitSuppressed.Error() {
-			continue
-		}
-		e.logOnce("factory.sweep_unknown", id, id+"/"+p.Probe, map[bool]error{true: fmt.Errorf("%s", p.Unknown)}[p.Unknown != ""])
+	if ctx.Err() != nil {
+		return
 	}
-	s.Project.Acts = append(slices.DeleteFunc(s.Project.Acts, func(a flow.Act) bool { return a.Key == "sweep" }), flow.Act{Key: "sweep", Result: "done", At: now})
+	if codex.Probe != "" {
+		probes = append(probes, codex)
+	}
+	notices, changed := flow.SweepEpisodes(&s.Project.SweepItems, &s.Project.SweepUnknown, &s.Project.Wakes, probes)
+	e.lastSweep[id] = now
 	var asked, whys []string
-	for _, w := range flow.SweepWakes(s.Project.Acts, probes) {
-		s.Project.Acts = append(s.Project.Acts, flow.Act{Key: w.ActKey, Result: "done", At: now})
-		holdProjectWake(s, w.WakeKey, "sweep: "+w.Summary, w.Summary, now)
-		asked, whys = append(asked, w.ActKey), append(whys, w.Summary)
+	for _, n := range notices {
+		asked, whys = append(asked, n.ActKey), append(whys, n.Summary)
+		if n.WakeKey != "" {
+			holdProjectWake(s, n.WakeKey, "sweep: "+n.Summary, n.Summary, now)
+		} else {
+			e.logEvent("factory.sweep_unknown", map[string]string{"project": id, "error": n.Summary})
+		}
 	}
-	if len(asked) > 0 {
-		e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "sweep", Asked: asked, Decision: fmt.Sprintf("sweep found %d leftover(s): %s", len(asked), strings.Join(whys, "; ")), Why: strings.Join(whys, "; ")})
-	} else {
+	if len(notices) > 0 {
+		why := strings.Join(whys, "; ")
+		e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "sweep", Asked: asked, Decision: "sweep: " + why, Why: why})
+	} else if changed {
 		e.saveLocked(id, *s)
 	}
 }
