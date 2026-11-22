@@ -41,27 +41,27 @@ type BaseState struct {
 
 // Project is the project record of the skeleton.
 type Project struct {
-	ID                 string               `json:"id"`
-	Folder             string               `json:"folder,omitempty"`
-	Goal               string               `json:"goal,omitempty"`
-	Started            bool                 `json:"started,omitempty"`
-	RunID              string               `json:"run_id,omitempty"`           // coordinator terminal identity
-	RunTokenHash       string               `json:"run_token_sha256,omitempty"` // SHA-256 hex of the coordinator's SHEEPDOG_RUN_TOKEN
-	Run                *RunRecord           `json:"run,omitempty"`
-	Acts               []Act                `json:"acts,omitempty"`
-	Wakes              []Wake               `json:"wakes,omitempty"` // held until J12 delivers them
-	Base               *BaseState           `json:"base,omitempty"`
-	NewGoal            bool                 `json:"new_goal,omitempty"`            // J4: owner gave a new goal after a plan existed
-	NewGoalTasks       int                  `json:"new_goal_tasks,omitempty"`      // J4: task count when NewGoal was set
-	CoordDialogStucks  int                  `json:"coord_dialog_stucks,omitempty"` // J10: consecutive R29 dialog-stuck ends
-	CoordErrorAt       time.Time            `json:"coord_error_at,omitempty"`      // J8: when coordinator was last told to go on
-	CoordErrorTurn     uint64               `json:"coord_error_turn,omitempty"`    // J8: coordinator turn at last go-on tell
-	CoordWakeAt        time.Time            `json:"coord_wake_at,omitempty"`       // J9: oldest delivered wake awaiting a turn
-	CoordWakesInFlight []Wake               `json:"coord_wakes_in_flight,omitempty"`
-	CoordWakeTurn      uint64               `json:"coord_wake_turn,omitempty"`    // J9: coordinator turn when CoordWakeAt was sent
-	CoordLastWakeAt    time.Time            `json:"coord_last_wake_at,omitempty"` // J13: last wake or heartbeat delivered
-	PoolCooldowns      map[string]time.Time `json:"pool_cooldowns,omitempty"`     // 7.3: quota-end cooldowns per (cli, pool)
-	Invariants         map[string]string    `json:"invariants,omitempty"`         // active violation per invariant rule and subject (I1–I5)
+	ID                 string            `json:"id"`
+	Folder             string            `json:"folder,omitempty"`
+	Goal               string            `json:"goal,omitempty"`
+	Started            bool              `json:"started,omitempty"`
+	RunID              string            `json:"run_id,omitempty"`           // coordinator terminal identity
+	RunTokenHash       string            `json:"run_token_sha256,omitempty"` // SHA-256 hex of the coordinator's SHEEPDOG_RUN_TOKEN
+	Run                *RunRecord        `json:"run,omitempty"`
+	Acts               []Act             `json:"acts,omitempty"`
+	Wakes              []Wake            `json:"wakes,omitempty"` // held until J12 delivers them
+	Base               *BaseState        `json:"base,omitempty"`
+	NewGoal            bool              `json:"new_goal,omitempty"`            // J4: owner gave a new goal after a plan existed
+	NewGoalTasks       int               `json:"new_goal_tasks,omitempty"`      // J4: task count when NewGoal was set
+	CoordDialogStucks  int               `json:"coord_dialog_stucks,omitempty"` // J10: consecutive R29 dialog-stuck ends
+	CoordErrorAt       time.Time         `json:"coord_error_at,omitempty"`      // J8: when coordinator was last told to go on
+	CoordErrorTurn     uint64            `json:"coord_error_turn,omitempty"`    // J8: coordinator turn at last go-on tell
+	CoordWakeAt        time.Time         `json:"coord_wake_at,omitempty"`       // J9: oldest delivered wake awaiting a turn
+	CoordWakesInFlight []Wake            `json:"coord_wakes_in_flight,omitempty"`
+	CoordWakeTurn      uint64            `json:"coord_wake_turn,omitempty"`    // J9: coordinator turn when CoordWakeAt was sent
+	CoordLastWakeAt    time.Time         `json:"coord_last_wake_at,omitempty"` // J13: last wake or heartbeat delivered
+	WaitKey            string            `json:"wait_key,omitempty"`           // episode key for J4/J6/J7 wait deduplication
+	Invariants         map[string]string `json:"invariants,omitempty"`         // active violation per invariant rule and subject (I1–I5)
 }
 
 // Wake is a held wake for the coordinator (design.md 10, J12): queued once
@@ -119,6 +119,7 @@ type Task struct {
 	Split         *Split                 `json:"split,omitempty"`
 	Parked        bool                   `json:"parked,omitempty"`
 	HoldWhy       string                 `json:"hold_why,omitempty"`
+	HoldKey       string                 `json:"hold_key,omitempty"`
 	LastRow       string                 `json:"last_row,omitempty"`
 	Recaps        []Recap                `json:"recaps,omitempty"`
 	Acts          []Act                  `json:"acts,omitempty"`
@@ -222,6 +223,7 @@ type Attempt struct {
 	Acts         []Act      `json:"acts"`
 	Restarts     int        `json:"restarts,omitempty"`
 	Held         []string   `json:"held,omitempty"`
+	HandoffPools []string   `json:"handoff_pools,omitempty"`
 	// NothingToChange is the worker's reason for "nothing to change"; a later
 	// ready or send-back clears it (design.md 3.2).
 	NothingToChange string `json:"nothing_to_change,omitempty"`

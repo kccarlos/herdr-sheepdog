@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"slices"
@@ -106,10 +107,16 @@ func projectPoolProviders(s flow.State) []string {
 	add(flow.Candidates(flow.RoleCoordinator, flow.Task{}, s.Settings))
 	add(flow.Candidates(flow.RoleWorker, flow.Task{}, s.Settings))
 	add(flow.Candidates(flow.RoleReviewer, flow.Task{}, s.Settings))
+	if s.Project.Run != nil && s.Project.Run.State != flow.PhaseEnded {
+		add([]flow.Candidate{{CLI: s.Project.Run.CLI}})
+	}
 	for _, t := range s.Tasks {
 		if !flow.Ended(t) {
 			add(flow.Candidates(flow.RoleWorker, t, s.Settings))
 			add(flow.Candidates(flow.RoleReviewer, t, s.Settings))
+			if a := flow.OpenAttempt(t); a != nil && a.Run != nil && a.Run.State != flow.PhaseEnded {
+				add([]flow.Candidate{{CLI: a.Run.CLI}})
+			}
 		}
 	}
 	return out
@@ -130,43 +137,37 @@ func poolStale(c cachedPool, now time.Time, ttl time.Duration) bool {
 }
 
 func formatReset(reset, now time.Time) string {
-	layout := "3:04 PM"
-	if reset.Sub(now) > 24*time.Hour {
-		layout = "Mon 3:04 PM"
-	}
-	return reset.Local().Format(layout)
+	return reset.Local().Format(map[bool]string{true: "Mon 3:04 PM", false: "3:04 PM"}[reset.Sub(now) > 24*time.Hour])
 }
 
-func cooldownKey(cli, provider string) string {
-	return cli + "/" + cmp.Or(provider, cli)
-}
-
-func reviewerQuotaWait(reset, now time.Time) string {
-	if !reset.IsZero() {
-		return "All reviewers are out of quota; retries at " + formatReset(reset, now)
-	}
-	return "All reviewers are out of quota"
-}
-
-func floorHandoffMsg(pool string) string {
-	return fmt.Sprintf("The %s pool reached its floor. Write your handoff and stop.", pool)
-}
-
-func recordQuotaCooldown(s *flow.State, cli, limitLine string, now time.Time) {
-	p := poolProvider(flow.Candidate{CLI: cli})
-	until := world.ParseLimitReset(limitLine, now)
-	if until.IsZero() {
-		until = now.Add(time.Duration(s.Settings.PoolMinutes) * time.Minute)
-	}
-	if s.Project.PoolCooldowns == nil {
-		s.Project.PoolCooldowns = map[string]time.Time{}
-	}
-	for k, t := range s.Project.PoolCooldowns {
-		if !now.Before(t) {
-			delete(s.Project.PoolCooldowns, k)
+func loadCooldowns(path string) map[string]time.Time {
+	m := map[string]time.Time{}
+	if guardTestPath(path) == nil {
+		if data, err := os.ReadFile(path); err == nil {
+			_ = json.Unmarshal(data, &m)
 		}
 	}
-	s.Project.PoolCooldowns[cooldownKey(cli, p)] = until
+	return m
+}
+
+func (e *Engine) recordQuotaCooldownLocked(s flow.State, cli, limitLine string, now time.Time) {
+	p, path := poolProvider(flow.Candidate{CLI: cli}), e.Paths.poolCooldowns()
+	until := cmp.Or(world.ParseLimitReset(limitLine, now), now.Add(time.Duration(s.Settings.PoolMinutes)*time.Minute))
+	m := loadCooldowns(path)
+	maps.DeleteFunc(m, func(_ string, t time.Time) bool { return !now.Before(t) })
+	if k := cli + "/" + cmp.Or(p, cli); until.After(m[k]) {
+		m[k] = until
+	}
+	if data, err := json.MarshalIndent(m, "", "  "); err == nil {
+		_ = writeAtomic(path, append(data, '\n'))
+	}
+}
+
+func quotaReason(cause string, reset, now time.Time) flow.ResolveReason {
+	if !reset.IsZero() {
+		return flow.ResolveReason{Kind: flow.ReasonPool, Why: fmt.Sprintf("waiting for quota until %s: %s", formatReset(reset, now), cause), Reset: reset}
+	}
+	return flow.ResolveReason{Kind: flow.ReasonPool, Why: "waiting for quota: " + cause}
 }
 
 func poolWaitReason(provider string, r poolReading, floor int, now time.Time) flow.ResolveReason {
@@ -189,22 +190,16 @@ func poolWaitReason(provider string, r poolReading, floor int, now time.Time) fl
 	if !blocked {
 		return flow.ResolveReason{}
 	}
-	if !earliest.IsZero() {
-		return flow.ResolveReason{Kind: flow.ReasonPool, Why: fmt.Sprintf("waiting for quota until %s: the %s pool is at its floor", formatReset(earliest, now), provider), Reset: earliest}
-	}
-	return flow.ResolveReason{Kind: flow.ReasonPool, Why: fmt.Sprintf("waiting for quota: the %s pool is at its floor", provider)}
+	return quotaReason(fmt.Sprintf("the %s pool is at its floor", provider), earliest, now)
 }
 
-func poolCheck(pools map[string]poolReading, cooldowns *map[string]time.Time, floor int, now time.Time) func(flow.Candidate) flow.ResolveReason {
+func poolCheck(pools map[string]poolReading, cooldownPath string, floor int, now time.Time) func(flow.Candidate) flow.ResolveReason {
 	return func(c flow.Candidate) flow.ResolveReason {
 		p := poolProvider(c)
-		var cd flow.ResolveReason
-		if cooldowns != nil {
-			if until := (*cooldowns)[cooldownKey(c.CLI, p)]; !until.IsZero() && now.Before(until) {
-				cd = flow.ResolveReason{Kind: flow.ReasonPool, Why: fmt.Sprintf("waiting for quota until %s: %s hit its usage limit", formatReset(until, now), cmp.Or(p, c.CLI)), Reset: until}
-			}
+		var cd, pr flow.ResolveReason
+		if until := loadCooldowns(cooldownPath)[c.CLI+"/"+cmp.Or(p, c.CLI)]; now.Before(until) {
+			cd = quotaReason(cmp.Or(p, c.CLI)+" hit its usage limit", until, now)
 		}
-		var pr flow.ResolveReason
 		if p != "" {
 			pr = poolWaitReason(p, pools[p], floor, now)
 		}

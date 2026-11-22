@@ -154,9 +154,8 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 			holdProjectWake(&s, "new_goal", "owner gave a new goal", "goal: "+goal, e.now())
 		}
 	}
-	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.Invariants = root, goal, true, nil, nil, nil
+	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.Invariants, s.Project.WaitKey = root, goal, true, nil, nil, nil, ""
 	clearCoordTrack(&s.Project, true, true)
-	delete(e.waits, id+"/project")
 	// The owner starting again is slice 1's retry (plan.md: "the owner
 	// starts again"): failed executor acts no longer block their ask.
 	for ti := range s.Tasks {
@@ -275,10 +274,9 @@ func (e *Engine) Stop(project string) error {
 		stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
 		reconcileCoordWakes(&s.Project)
 	}
-	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants = "", "", nil, false, nil, nil, false, 0, nil
+	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants, s.Project.WaitKey = "", "", nil, false, nil, nil, false, 0, nil, ""
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastPass, id)
-	delete(e.waits, id+"/project")
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "stop"}, Rule: "stop", Decision: "stopped", Why: "stopped by owner"})
 }
 
@@ -328,7 +326,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		return
 	}
 	e.passPools = pools
-	e.passPoolCheck = poolCheck(pools, &s.Project.PoolCooldowns, s.Settings.PoolFloorPercent, e.now())
+	e.passPoolCheck = poolCheck(pools, e.Paths.poolCooldowns(), s.Settings.PoolFloorPercent, e.now())
 	defer func() { e.passPools, e.passPoolCheck = nil, nil }()
 	ctx, cancel := context.WithTimeout(world.GitRepository(ctx, s.Project.Folder), world.GitPassTimeout)
 	defer cancel()
@@ -343,7 +341,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	baseTried := s.Project.Base != nil && s.Project.Base.Red && flow.Done(s.Project.Acts, flow.AskTellBaseRed+"@"+s.Project.Base.SpellID)
 	var candidates, poolHeld []string
 	queue := func(t flow.Task) {
-		if _, why := resolveWorker(t, s.Settings, flow.ResolveFacts{Pool: e.passPoolCheck}); why != "" {
+		if _, r := resolveWorker(t, s.Settings, flow.ResolveFacts{Pool: e.passPoolCheck}); r.Why != "" {
 			poolHeld = append(poolHeld, t.ID)
 			return
 		}
@@ -466,10 +464,10 @@ func clearCoordTrack(p *flow.Project, stucks, lastWake bool) {
 
 func reconcileCoordWakes(p *flow.Project) bool {
 	r := p.Run
-	if len(p.CoordWakesInFlight) == 0 || r == nil || (r.State != flow.PhaseEnded && r.Turn <= p.CoordWakeTurn) {
+	if len(p.CoordWakesInFlight) == 0 || r == nil || (r.State != flow.PhaseEnded && (r.State != flow.PhaseIdle || r.Turn <= p.CoordWakeTurn)) {
 		return false
 	}
-	if r.State == flow.PhaseEnded && r.Turn <= p.CoordWakeTurn {
+	if r.State == flow.PhaseEnded && (r.Result == flow.EndQuota || r.Turn <= p.CoordWakeTurn) {
 		for _, w := range p.CoordWakesInFlight {
 			if !slices.ContainsFunc(p.Wakes, func(queued flow.Wake) bool { return queued.Task == w.Task && queued.Key == w.Key }) {
 				p.Wakes = append(p.Wakes, w)
@@ -552,11 +550,14 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 		r, d = match()
 	}
 	if r.ID == "J6" || (r.ID == "J4" && s.Project.RunID == "" && (s.Project.Run == nil || s.Project.Run.State == flow.PhaseEnded)) {
-		e.logProjectWaitLocked(id, s, r.ID, cmp.Or(map[string]string{"J4": "finished"}[r.ID], "waiting"), d.Why)
+		e.logProjectWaitLocked(id, s, r.ID, cmp.Or(map[string]string{"J4": "finished"}[r.ID], "waiting"), d.Why, r.ID+":"+d.Why)
 		return
 	}
-	if r.ID != "J7" {
-		delete(e.waits, id+"/project")
+	if r.ID != "J7" && s.Project.WaitKey != "" {
+		s.Project.WaitKey = ""
+		if len(d.Asked) == 0 {
+			e.saveLocked(id, *s)
+		}
 	}
 	if len(d.Asked) == 0 {
 		return
@@ -594,21 +595,29 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 	}
 }
 
-func (e *Engine) logProjectWaitLocked(id string, s *flow.State, row, decision, why string) {
-	key := id + "/project"
-	if e.waits[key] == why {
+func (e *Engine) logProjectWaitLocked(id string, s *flow.State, row, decision, why, key string) {
+	if s.Project.WaitKey == key {
 		return
 	}
-	if e.waits == nil {
-		e.waits = map[string]string{}
-	}
-	e.waits[key] = why
+	s.Project.WaitKey = key
 	e.commitLogLocked(id, s, LogLine{By: "engine", Rule: row, Decision: decision, Why: why})
 }
 
-type launchWait string
+type launchWait struct{ Why, Key string }
 
-func (w launchWait) Error() string { return string(w) }
+func (w launchWait) Error() string { return w.Why }
+
+func launchWaitFor(r flow.ResolveReason) launchWait {
+	if r.Reset.IsZero() {
+		return launchWait{Why: r.Why, Key: cmp.Or(map[bool]string{true: "quota"}[r.Kind == flow.ReasonPool], r.Why)}
+	}
+	ts := r.Reset.UTC().Format(time.RFC3339)
+	if r.Kind == flow.ReasonPool {
+		return launchWait{Why: r.Why, Key: "quota@" + ts}
+	}
+	_, rest, _ := strings.Cut(r.Why, "; ")
+	return launchWait{Why: r.Why, Key: "mixed@" + ts + "@" + rest}
+}
 
 // cliProbeTTL lets launches share login checks while picking up sign-in changes promptly.
 const cliProbeTTL = 2 * time.Minute
@@ -674,7 +683,7 @@ func intentCandidate(in flow.Intent) flow.Candidate {
 	return flow.Candidate{CLI: in.CLI, Model: in.Model, Effort: in.Effort}
 }
 
-func resolveWorker(t flow.Task, s flow.Settings, facts flow.ResolveFacts) (flow.Intent, string) {
+func resolveWorker(t flow.Task, s flow.Settings, facts flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
 	check := facts.Check
 	facts.Check = func(c flow.Candidate) flow.ResolveReason {
 		if r := launchCapability(flow.RoleWorker)(c); r.Why != "" {
@@ -686,7 +695,7 @@ func resolveWorker(t flow.Task, s flow.Settings, facts flow.ResolveFacts) (flow.
 		}
 		return r
 	}
-	return flow.Resolve(flow.RoleWorker, t, s, facts)
+	return flow.ResolveWithReason(flow.RoleWorker, t, s, facts)
 }
 
 func launchArgv(role string, c flow.Candidate, cwd, session string, resume bool) []string {
@@ -728,16 +737,16 @@ func (e *Engine) codexHome(id string) (string, error) {
 	return "", err
 }
 
-func (e *Engine) resolveLaunch(id string, facts flow.ResolveFacts, resolve func(flow.ResolveFacts) (flow.Intent, string)) (flow.Intent, map[string]string, string) {
+func (e *Engine) resolveLaunch(id string, facts flow.ResolveFacts, resolve func(flow.ResolveFacts) (flow.Intent, flow.ResolveReason)) (flow.Intent, map[string]string, flow.ResolveReason) {
 	base := facts.Check
 	for {
-		in, why := resolve(facts)
-		if why != "" || in.CLI != world.CodexCLI {
-			return in, nil, why
+		in, reason := resolve(facts)
+		if reason.Why != "" || in.CLI != world.CodexCLI {
+			return in, nil, reason
 		}
 		home, err := e.codexHome(id)
 		if err == nil {
-			return in, map[string]string{"CODEX_HOME": home}, ""
+			return in, map[string]string{"CODEX_HOME": home}, flow.ResolveReason{}
 		}
 		facts.Check = func(c flow.Candidate) flow.ResolveReason {
 			if c.CLI == world.CodexCLI {
@@ -751,14 +760,20 @@ func (e *Engine) resolveLaunch(id string, facts flow.ResolveFacts, resolve func(
 	}
 }
 
+func (e *Engine) resolveWorkerLaunch(id string, t flow.Task, s flow.Settings, facts flow.ResolveFacts) (flow.Intent, map[string]string, flow.ResolveReason) {
+	return e.resolveLaunch(id, facts, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
+		return resolveWorker(t, s, f)
+	})
+}
+
 func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State, why string, now time.Time) {
 	facts := e.probeLaunchFacts(ctx, flow.RoleCoordinator, flow.Task{}, s.Settings)
 	facts.Check = launchCapability(flow.RoleCoordinator)
-	in, env, wait := e.resolveLaunch(id, facts, func(f flow.ResolveFacts) (flow.Intent, string) {
-		return flow.Resolve(flow.RoleCoordinator, flow.Task{}, s.Settings, f)
+	in, env, wait := e.resolveLaunch(id, facts, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
+		return flow.ResolveWithReason(flow.RoleCoordinator, flow.Task{}, s.Settings, f)
 	})
-	if wait != "" {
-		e.logProjectWaitLocked(id, s, "J7", "waiting", wait)
+	if wait.Why != "" {
+		e.logProjectWaitLocked(id, s, "J7", "waiting", wait.Why, "J7:"+launchWaitFor(wait).Key)
 		return
 	}
 	adopt, bin := s.Project.Run == nil || s.Project.Run.State != flow.PhaseEnded, cmp.Or(e.Bin, "sheepdog")
@@ -766,12 +781,12 @@ func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State,
 		stopped := e.stopCoordWithBackoffLocked(ctx, id, s, now, true)
 		r, d := flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now})
 		if !stopped {
-			e.logProjectWaitLocked(id, s, r.ID, "waiting", d.Why)
+			e.logProjectWaitLocked(id, s, r.ID, "waiting", d.Why, r.ID+":"+d.Why)
 			return
 		}
 		why = d.Why
 	}
-	delete(e.waits, id+"/project")
+	s.Project.WaitKey = ""
 	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &s.Project.RunTokenHash, &s.Project.Run, adopt, flow.RunRecord{Role: flow.RoleCoordinator, CLI: in.CLI}, world.RunSpec{
 		Name: coordName(id), Cwd: s.Project.Folder, ClaudeConfig: e.Paths.ClaudeConfig, Env: env,
 		Argv:   launchArgv(flow.RoleCoordinator, intentCandidate(in), s.Project.Folder, "", false),
@@ -891,13 +906,19 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 		return flow.Run{}, err
 	}
 	before := **recp
+	var handoffPools *[]string
+	if i := slices.IndexFunc(s.Tasks, func(t flow.Task) bool { return role == flow.RoleWorker && taskID != "" && t.ID == taskID }); i >= 0 {
+		if a := flow.OpenAttempt(s.Tasks[i]); a != nil {
+			handoffPools = &a.HandoffPools
+		}
+	}
 	if before.StopRetry != nil && evs[0].Kind != flow.EvLost {
 		evs = []flow.RunEvent{{Kind: flow.EvStop}}
-	} else {
-		p := poolProvider(flow.Candidate{CLI: before.CLI})
-		if p != "" && poolWaitReason(p, e.passPools[p], s.Settings.PoolFloorPercent, now).Kind == flow.ReasonPool || before.HandoffHeld {
+	} else if n := len(evs); n > 0 && evs[n-1].Kind == flow.EvTick {
+		if p := poolProvider(flow.Candidate{CLI: before.CLI}); p != "" && poolWaitReason(p, e.passPools[p], s.Settings.PoolFloorPercent, now).Kind == flow.ReasonPool || before.HandoffHeld {
 			pool := cmp.Or(p, before.CLI)
-			evs = append(evs, flow.RunEvent{Kind: flow.EvPoolFloor, Msg: floorHandoffMsg(pool), Reason: fmt.Sprintf("the %s pool reached its floor", pool)})
+			why := fmt.Sprintf("the %s pool reached its floor", pool)
+			evs = slices.Insert(evs, n-1, flow.RunEvent{Kind: flow.EvPoolFloor, Msg: "The " + why[4:] + ". Write your handoff and stop.", Reason: why, HandoffUsed: handoffPools != nil && slices.Contains(*handoffPools, pool)})
 		}
 	}
 events:
@@ -917,13 +938,33 @@ events:
 			if now.Sub(retry.At) < flow.EnsureBackoff(s.Settings, retry.Tries) {
 				break
 			}
-			row.ID, next.Result = retry.Row, retry.Result
-			dec.Why = "ended(" + retry.Result + ")"
+			row.ID, next.Result, dec.Why = retry.Row, retry.Result, "ended("+retry.Result+")"
 		}
 		if old.StopRetry == nil && (row.ID == "R5" || row.ID == "R19") && next.State == flow.PhaseEnded && next.Result == flow.EndQuota {
-			recordQuotaCooldown(s, next.CLI, ev.LimitLine, now)
+			e.recordQuotaCooldownLocked(*s, next.CLI, ev.LimitLine, now)
+		}
+		r31Send := row.ID == "R31" && slices.Contains(dec.Asked, flow.RunActSend)
+		var prevPools []string
+		revertR31 := func(rec flow.RunRecord) {
+			**recp = rec
+			if handoffPools != nil {
+				*handoffPools = prevPools
+			}
 		}
 		**recp = next
+		if r31Send {
+			if handoffPools != nil {
+				prevPools = slices.Clone(*handoffPools)
+				if pool := cmp.Or(poolProvider(flow.Candidate{CLI: next.CLI}), next.CLI); !slices.Contains(*handoffPools, pool) {
+					*handoffPools = append(*handoffPools, pool)
+				}
+			}
+			if !e.saveLocked(id, *s) {
+				revertR31(old)
+				continue events
+			}
+			before = next
+		}
 		for _, act := range dec.Asked {
 			msg := ev.Msg
 			if act == flow.RunActSendHeld && len(old.Held) > 0 {
@@ -950,9 +991,14 @@ events:
 					e.saveLocked(id, *s)
 					return old.TaskRun(), nil
 				}
-				if row.ID == "R31" && (act == flow.RunActInterrupt || act == flow.RunActSend) {
-					old.HandoffDeadline, old.Reason = next.HandoffDeadline, next.Reason
-					**recp = old
+				if r31Send {
+					var he *hc.Error
+					if act == flow.RunActInterrupt || errors.As(aerr, &he) {
+						old.HandoffDeadline, old.Reason = next.HandoffDeadline, next.Reason
+						revertR31(old)
+						e.saveLocked(id, *s)
+						before = old
+					}
 					continue events
 				}
 				if act == flow.RunActSendHeld {
@@ -960,7 +1006,7 @@ events:
 				}
 			}
 		}
-		if (old.State != flow.PhaseEnded && next.State == flow.PhaseEnded && (!fresh || taskID != "")) || row.ID == "R3" || row.ID == "R21" || (row.ID == "R31" && slices.Contains(dec.Asked, flow.RunActSend)) {
+		if (old.State != flow.PhaseEnded && next.State == flow.PhaseEnded && (!fresh || taskID != "")) || row.ID == "R3" || row.ID == "R21" || r31Send {
 			e.commitLogLocked(id, s, LogLine{By: "engine", Task: taskID, Rule: row.ID, Asked: dec.Asked, Decision: dec.Why, Why: fmt.Sprintf("%s run %s: %s", role, next.Address, cmp.Or(next.Reason, dec.Why))})
 			before = next
 		}
@@ -1026,6 +1072,10 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 		if abort && !minted {
 			e.logError("factory.hc_error", id, err)
 			return "", false, true, err
+		}
+		if prevRec != nil && prevRec.State == flow.PhaseEnded && prevRec.Result == flow.EndQuota {
+			*hash, *recp = "", prevRec
+			return "", false, abort, err
 		}
 		*hash, rec.Model = "", ""
 		if prevRec != nil {
@@ -1205,9 +1255,9 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	if len(d.Asked) == 0 && d.Hold {
 		holdWhy = d.Why
 	}
-	previousHold := s.Tasks[ti].HoldWhy
+	previousHold, previousHoldKey := s.Tasks[ti].HoldWhy, s.Tasks[ti].HoldKey
 	holdChanged := previousHold != holdWhy
-	s.Tasks[ti].HoldWhy = holdWhy
+	s.Tasks[ti].HoldWhy, s.Tasks[ti].HoldKey = holdWhy, holdWhy
 	waitKey := id + "/" + s.Tasks[ti].ID
 	if r.ID != "N9" && r.ID != "N10" && r.ID != "N38" {
 		delete(e.waits, waitKey)
@@ -1277,9 +1327,11 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 		dec, abort, err := fn(e, context.WithoutCancel(ctx), id, s, ti, f)
 		var wait launchWait
 		if errors.As(err, &wait) {
-			s.Tasks[ti].HoldWhy = wait.Error()
-			if rowChanged || previousHold != wait.Error() || len(decs) > 0 {
-				e.commitLogLocked(id, s, LogLine{By: "engine", Task: task.ID, Rule: r.ID, Asked: d.Asked[:i+1], Decision: "waiting", Why: wait.Error()})
+			s.Tasks[ti].HoldWhy, s.Tasks[ti].HoldKey = wait.Why, wait.Key
+			if rowChanged || previousHoldKey != wait.Key || len(decs) > 0 {
+				e.commitLogLocked(id, s, LogLine{By: "engine", Task: task.ID, Rule: r.ID, Asked: d.Asked[:i+1], Decision: "waiting", Why: wait.Why})
+			} else if previousHold != wait.Why {
+				e.saveLocked(id, *s)
 			}
 			return true
 		}
@@ -1347,11 +1399,8 @@ func (e *Engine) readTipLocked(ctx context.Context, a flow.Attempt, tip string, 
 
 func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t, n := &s.Tasks[ti], len(s.Tasks[ti].Attempts)+1
-	facts := e.probeLaunchFacts(ctx, flow.RoleWorker, *t, s.Settings)
-	if _, _, why := e.resolveLaunch(id, facts, func(f flow.ResolveFacts) (flow.Intent, string) {
-		return resolveWorker(*t, s.Settings, f)
-	}); why != "" {
-		return "", false, launchWait(why)
+	if _, _, reason := e.resolveWorkerLaunch(id, *t, s.Settings, e.probeLaunchFacts(ctx, flow.RoleWorker, *t, s.Settings)); reason.Why != "" {
+		return "", false, launchWaitFor(reason)
 	}
 	// The branch carries the project and the attempt, so a new project on
 	// the same repo never reuses a branch an older PR (even a closed one)
@@ -1381,12 +1430,9 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	}
 	choice, env := flow.Candidate{}, map[string]string(nil)
 	if term.State != "live" {
-		facts := e.probeLaunchFacts(ctx, flow.RoleWorker, *t, s.Settings)
-		in, codexEnv, why := e.resolveLaunch(id, facts, func(f flow.ResolveFacts) (flow.Intent, string) {
-			return resolveWorker(*t, s.Settings, f)
-		})
-		if why != "" {
-			return "", false, launchWait(why)
+		in, codexEnv, reason := e.resolveWorkerLaunch(id, *t, s.Settings, e.probeLaunchFacts(ctx, flow.RoleWorker, *t, s.Settings))
+		if reason.Why != "" {
+			return "", false, launchWaitFor(reason)
 		}
 		choice, env = intentCandidate(in), codexEnv
 	} else {
@@ -1404,10 +1450,13 @@ func (e *Engine) execStartWorker(ctx context.Context, id string, s *flow.State, 
 	prompt := workerPrompt(workerTemplate, *t, *a, bin)
 	if resume {
 		prompt = cmp.Or(strings.Join(a.Held, "\n\n"), "Continue where you left off in this worktree (check git status and git log -1); when done, commit and run "+readyCmd(bin, t.Outcomes)+".")
-	} else if mode == flow.ContinueHandoff {
-		prompt = e.handoffNote(ctx, id, *t, *a) + prompt
-	} else if len(a.Held) > 0 {
-		prompt = "Messages held for you:\n" + strings.Join(a.Held, "\n\n") + "\n\n" + prompt
+	} else {
+		if len(a.Held) > 0 {
+			prompt = "Messages held for you:\n" + strings.Join(a.Held, "\n\n") + "\n\n" + prompt
+		}
+		if mode == flow.ContinueHandoff {
+			prompt = e.handoffNote(ctx, id, *t, *a) + prompt
+		}
 	}
 	termID, delivered, abort, err := e.launchRunLocked(ctx, id, s, &a.RunTokenHash, &a.Run, adopt, flow.RunRecord{Role: flow.RoleWorker, CLI: choice.CLI, SessionID: sid, Resumed: resume}, world.RunSpec{
 		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig, Env: env,
@@ -1445,30 +1494,27 @@ func (e *Engine) handoffNote(ctx context.Context, id string, t flow.Task, a flow
 	commits, dirty := "none", "none"
 	if e.git != nil && a.Worktree != "" {
 		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
-		logArgs := []string{"log", "--oneline", "--abbrev=7", "-n", "10"}
-		if a.BaseCommit != "" {
-			logArgs = []string{"log", "--oneline", "--abbrev=7", a.BaseCommit + "..HEAD"}
+		defer cancel()
+		gitField := func(args ...string) string {
+			res, err := e.git.Run(gctx, a.Worktree, args...)
+			if err != nil {
+				return fmt.Sprintf("unknown (%s)", flow.CleanErr(err.Error()))
+			}
+			return cmp.Or(strings.TrimSpace(string(res.Stdout)), "none")
 		}
-		if res, err := e.git.Run(gctx, a.Worktree, logArgs...); err == nil {
-			commits = cmp.Or(strings.TrimSpace(string(res.Stdout)), "none")
-		}
-		if res, err := e.git.Run(gctx, a.Worktree, "status", "--porcelain", "--untracked-files=normal"); err == nil {
-			dirty = cmp.Or(strings.TrimSpace(string(res.Stdout)), "none")
-		}
-		cancel()
+		commits = gitField("log", "--oneline", "--abbrev=7", map[bool]string{true: a.BaseCommit + "..HEAD", false: "-n10"}[a.BaseCommit != ""])
+		dirty = gitField("status", "--porcelain", "--untracked-files=normal")
 	}
-	var b strings.Builder
-	b.WriteString("Handoff from an earlier worker run:\n")
+	out := "Handoff from an earlier worker run:\n"
 	if a.Run != nil && a.Run.Reason != "" {
-		fmt.Fprintf(&b, "- Reason: %s\n", a.Run.Reason)
+		out += "- Reason: " + a.Run.Reason + "\n"
 	}
-	fmt.Fprintf(&b, "- Worktree: %s\n- Brief: %s\n- Branch commits: %s\n- Uncommitted files: %s\n- Rounds so far: %s\n- Last findings: %s\n",
+	out += fmt.Sprintf("- Worktree: %s\n- Brief: %s\n- Branch commits: %s\n- Uncommitted files: %s\n- Rounds so far: %s\n- Last findings: %s\n",
 		a.Worktree, bp, commits, dirty, rounds, last)
-	if len(a.Held) > 0 {
-		fmt.Fprintf(&b, "- Held messages:\n%s\n", strings.Join(a.Held, "\n\n"))
+	if a.Run != nil && a.Run.LastChat != "" {
+		out += "- Last chat:\n" + a.Run.LastChat + "\n"
 	}
-	b.WriteString("\n")
-	return b.String()
+	return out + "\n"
 }
 
 // sourceMark is a rule line's trailing source, e.g. " [KB-REV-63]" (prompts.md 1).
@@ -1727,11 +1773,13 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		for {
 			in, repeatWhy, reason := reviewChoiceReason(*t, s.Settings, *a, h, facts, failed)
 			if reason.Why != "" {
-				why := reason.Why
 				if reason.Kind == flow.ReasonPool {
-					why = reviewerQuotaWait(reason.Reset, e.now())
+					reason.Why = "All reviewers are out of quota"
+					if !reason.Reset.IsZero() {
+						reason.Why += "; retries at " + formatReset(reason.Reset, e.now())
+					}
 				}
-				return "", false, launchWait(why)
+				return "", false, launchWaitFor(reason)
 			}
 			choice = intentCandidate(in)
 			if repeatWhy != "" {
@@ -1764,6 +1812,7 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	if counted && term.State != "live" {
 		a.Review.Retries = retries + 1
 	}
+	prevQuota := prev != nil && prev.Run != nil && prev.Run.State == flow.PhaseEnded && prev.Run.Result == flow.EndQuota
 	if kind == "" {
 		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
 		var err error
@@ -1771,6 +1820,9 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		cancel()
 		if err != nil {
 			a.Review.Run = &flow.RunRecord{Role: flow.RoleReviewer, State: flow.PhaseEnded, Result: flow.EndFailed, EndedAt: e.now()}
+			if prevQuota {
+				a.Review = prev
+			}
 			return "", false, err
 		}
 	}
@@ -1792,7 +1844,7 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	}, term)
 	if err == nil {
 		a.Review.RunID = termID
-	} else if abort {
+	} else if abort || prevQuota {
 		a.Review = prev
 	}
 	return fmt.Sprintf("started reviewer %s (round %d, %s, %s/%s)%s", termID, round, kind, choice.CLI, model, workerNote+repeat), abort, err

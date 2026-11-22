@@ -328,6 +328,70 @@ func ScreenClass(cli, text string) string {
 	return cls
 }
 
+func uiAnchor(cli string, lines []string) int {
+	for i := len(lines) - 1; i >= max(0, len(lines)-screenTailLines); i-- {
+		switch ln := lines[i]; {
+		case cli == "claude" && strings.HasPrefix(ln, "⏺"), cli == CodexCLI && codexReplyRe.MatchString(ln):
+			return -1
+		case cli == "claude" && i > 0 && strings.HasPrefix(ln, "❯") && strings.HasPrefix(strings.TrimSpace(lines[i-1]), "────────") && strings.Trim(strings.TrimSpace(lines[i-1]), "─") == "":
+			return i - 1
+		case cli == CodexCLI && codexPromptRe.MatchString(ln):
+			return i
+		}
+	}
+	return -1
+}
+
+// limitUILines extracts only cli's own bottom UI area for usage-limit matching (O23).
+func limitUILines(cli string, lines []string) (low, raw []string) {
+	add := func(s, trim string) {
+		if s = strings.TrimLeft(strings.TrimSpace(s), trim); s != "" {
+			low, raw = append(low, strings.ToLower(s)), append(raw, s)
+		}
+	}
+	prefix, trim := "⚠", "⚠✕✗ "
+	if cli == "claude" {
+		prefix, trim = "⎿", "⎿⚠✕✗ "
+	}
+	if anc := uiAnchor(cli, lines); anc >= 0 {
+		for i := anc - 1; i >= 0; i-- {
+			if strings.TrimSpace(lines[i]) != "" {
+				if !strings.HasPrefix(lines[i], prefix) {
+					break
+				}
+				add(lines[i], prefix+" ")
+			}
+		}
+		slices.Reverse(low)
+		slices.Reverse(raw)
+		for _, ln := range lines[anc+1:] {
+			if s := strings.TrimSpace(ln); cli != "claude" || (!strings.HasPrefix(s, "❯") && strings.Trim(s, "─") != "") {
+				add(ln, trim)
+			}
+		}
+		return low, raw
+	}
+	for _, ln := range lines[max(0, len(lines)-screenTailLines):] {
+		s := strings.TrimSpace(ln)
+		quoted := cli == "claude" && (strings.HasPrefix(s, "⏺") || strings.HasPrefix(s, "●") || strings.HasPrefix(ln, "  ⎿")) || cli == CodexCLI && codexReplyRe.MatchString(ln)
+		if !quoted {
+			add(ln, trim)
+		}
+	}
+	return low, raw
+}
+
+func screenChatTail(cli, clean string) string {
+	lines := strings.Split(strings.TrimRight(clean, "\n \t"), "\n")
+	if anc := uiAnchor(cli, lines); anc >= 0 {
+		lines = lines[:anc]
+	}
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return flow.CapRunes(strings.TrimSpace(strings.Join(lines[max(0, len(lines)-20):], "\n")), 2000)
+}
+
 func screenClassify(cli, text string) (string, string) {
 	lines := strings.Split(strings.TrimRight(ansiRe.ReplaceAllString(strings.ReplaceAll(text, "\r\n", "\n"), ""), "\n \t"), "\n")
 	if cli == "agy" && agyTrustSelected(lines) {
@@ -335,10 +399,13 @@ func screenClassify(cli, text string) (string, string) {
 	}
 	var ui, rawUI []string
 	for _, ln := range lines[max(0, len(lines)-screenTailLines):] {
-		raw := strings.TrimLeft(strings.TrimSpace(ln), "⏺●⎿⚠✕✗•·│✨\u200a ")
-		if raw != "" {
+		if raw := strings.TrimLeft(strings.TrimSpace(ln), "⏺●⎿⚠✕✗•·│✨\u200a "); raw != "" {
 			ui, rawUI = append(ui, strings.ToLower(raw)), append(rawUI, raw)
 		}
+	}
+	limitUI, rawLimit := ui, rawUI
+	if cli == "claude" || cli == CodexCLI {
+		limitUI, rawLimit = limitUILines(cli, lines)
 	}
 	for _, r := range [][4]string{
 		{"claude", flow.ScreenSignedOut, "not logged in · please run /login*|invalid api key · please run /login*|not logged in|please run /login", ""},
@@ -353,61 +420,51 @@ func screenClassify(cli, text string) (string, string) {
 		{"agy", flow.ScreenSignedOut, "not signed in*|please sign in to*", ""},
 		{"agy", flow.ScreenLimit, "individual quota reached*|you've hit your limit*|you've hit your usage limit*", ""},
 	} {
-		if r[0] == cli {
-			if idx := matchUI(ui, r[2], ""); idx >= 0 && (r[3] == "" || matchUI(ui, r[3], "❯› ") >= 0) {
-				return r[1], rawUI[idx]
+		if r[0] == cli && r[1] == flow.ScreenLimit {
+			if idx := matchUI(limitUI, r[2], ""); idx >= 0 {
+				return r[1], rawLimit[idx]
 			}
+		} else if r[0] == cli && matchUI(ui, r[2], "") >= 0 && (r[3] == "" || matchUI(ui, r[3], "❯› ") >= 0) {
+			return r[1], ""
 		}
 	}
 	return flow.ScreenNone, ""
 }
 
-var (
-	limitTZRe    = regexp.MustCompile(`\(([A-Za-z0-9_/+.-]+)\)`)
-	limitResetRe = regexp.MustCompile(`(?i)\b(?:resets?|try again)\s+(?:at\s+)?(?:([A-Z][a-z]{2})\s+(\d{1,2})(?:,|\s+at)?\s+)?(\d{1,2}(?::\d{2})?)\s*(am|pm)\b`)
-)
+var limitResetRe = regexp.MustCompile(`(?i)\b(?:resets?|try again)\s+(?:at\s+)?(?:([A-Z][a-z]{2})\s+(\d{1,2})(?:,|\s+at)?\s+)?(\d{1,2}(?::\d{2})?)\s*(am|pm)\b(?:\s*\(([A-Za-z0-9_/+.-]+)\))?`)
 
 // ParseLimitReset parses the reset time printed inside a matched CLI usage-limit
-// banner line relative to now; returns zero when the line prints no valid time.
+// banner line relative to now; returns zero when the line prints no valid future time.
 func ParseLimitReset(line string, now time.Time) time.Time {
 	m := limitResetRe.FindStringSubmatch(line)
 	if m == nil {
 		return time.Time{}
 	}
-	loc := now.Location()
-	if tz := limitTZRe.FindStringSubmatch(line); tz != nil {
-		loaded, err := time.LoadLocation(tz[1])
-		if err != nil {
-			return time.Time{}
-		}
-		loc = loaded
+	loc, err := now.Location(), error(nil)
+	if m[5] != "" {
+		loc, err = time.LoadLocation(m[5])
 	}
-	clock, layout := m[3]+strings.ToLower(m[4]), "3pm"
-	if strings.Contains(clock, ":") {
-		layout = "3:04pm"
+	clock := m[3]
+	if !strings.Contains(clock, ":") {
+		clock += ":00"
 	}
-	clk, err := time.Parse(layout, clock)
-	if err != nil {
+	clk, cerr := time.Parse("3:04pm", clock+strings.ToLower(m[4]))
+	if err != nil || cerr != nil {
 		return time.Time{}
 	}
 	ref := now.In(loc)
 	month, day := ref.Month(), ref.Day()
 	if m[1] != "" {
-		d, err := time.Parse("Jan 2", m[1]+" "+m[2])
-		if err != nil {
+		d, derr := time.Parse("Jan 2", m[1]+" "+m[2])
+		if derr != nil {
 			return time.Time{}
 		}
 		month, day = d.Month(), d.Day()
 	}
-	cand := time.Date(ref.Year(), month, day, clk.Hour(), clk.Minute(), 0, 0, loc)
-	if !cand.After(now) {
-		if m[1] != "" {
-			cand = cand.AddDate(1, 0, 0)
-		} else {
-			cand = cand.AddDate(0, 0, 1)
-		}
+	if cand := time.Date(ref.Year(), month, day, clk.Hour(), clk.Minute(), 0, 0, loc); cand.After(now) {
+		return cand.UTC()
 	}
-	return cand.UTC()
+	return time.Time{}
 }
 
 var agyTrustDialog = [...]string{
@@ -465,7 +522,7 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 	if t.State != "live" {
 		return []flow.RunEvent{{Kind: flow.EvExit, Reason: deref(t.Reason)}}, nil
 	}
-	cls, limitLine, hash, clean, nonEmpty := "", "", "", "", false
+	cls, limitLine, tail, hash, clean, nonEmpty := "", "", "", "", "", false
 	infer := rec.CLI == CodexCLI && (rec.Role == flow.RoleWorker || rec.Role == flow.RoleCoordinator) && t.Status == nil
 	codexStatus, lines := "unknown", 200
 	if infer {
@@ -476,13 +533,13 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 		clean = ansiRe.ReplaceAllString(strings.ReplaceAll(rd.Text, "\r\n", "\n"), "")
 		nonEmpty = strings.TrimSpace(clean) != ""
 		cls, limitLine = screenClassify(rec.CLI, clean)
-		if cls != flow.ScreenLimit {
-			limitLine = ""
-		}
 		if infer && cls == flow.ScreenNone {
 			codexStatus = codexScreenStatus(clean)
 		}
 		if nonEmpty {
+			if rec.Role == flow.RoleWorker || rec.Role == flow.RoleDesigner {
+				tail = screenChatTail(rec.CLI, clean)
+			}
 			sum := sha256.Sum256([]byte(strings.Join(strings.Fields(noiseRe.ReplaceAllString(durationRe.ReplaceAllString(clean, " "), " ")), " ")))
 			hash = hex.EncodeToString(sum[:8])
 		}
@@ -528,7 +585,7 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 		}
 	}
 	// An empty hash marks an unavailable screen; this tick cannot prove the run stayed quiet.
-	return append(evs, flow.RunEvent{Kind: flow.EvTick, Screen: cls, ScreenHash: hash, LimitLine: limitLine, Model: t.Labels["sheepdog.model"]}), nil
+	return append(evs, flow.RunEvent{Kind: flow.EvTick, Screen: cls, ScreenHash: hash, LimitLine: limitLine, Tail: tail, Model: t.Labels["sheepdog.model"]}), nil
 }
 
 // ActRun executes one run-table act against herdr-core.
