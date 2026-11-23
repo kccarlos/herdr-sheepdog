@@ -3,30 +3,116 @@ package factory
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
-func (e *Engine) reconcileAlertLocked(id string, s *flow.State, key string, active bool, a flow.Alert, logRule, logDec string) {
-	if !active {
-		if _, ok := s.Project.Alerts[key]; ok {
+type alertKey struct{ id, key string }
+type pendingAlert struct {
+	alert        flow.Alert
+	rule, dec    string
+	logSeq       int64
+	stderrLogged bool
+}
+
+func setProjectAlert(s *flow.State, key string, a flow.Alert) {
+	if s.Project.Alerts == nil {
+		s.Project.Alerts = map[string]flow.Alert{}
+	}
+	s.Project.Alerts[key] = a
+}
+
+func (e *Engine) mergeMemAlertsLocked(id string, s *flow.State) {
+	for k, p := range e.memAlerts {
+		if k.id == id {
+			if s.Project.Alerts[k.key].Kind == "" {
+				setProjectAlert(s, k.key, p.alert)
+			}
+			s.Seq = max(s.Seq, p.logSeq)
+		}
+	}
+}
+
+func (e *Engine) flushMemAlertsLocked(id string, s *flow.State) {
+	for k, p := range e.memAlerts {
+		if k.id == id && s.Project.Alerts[k.key].Kind != "" {
+			if p.logSeq != 0 {
+				delete(e.memAlerts, k)
+			} else {
+				e.persistAlertLocked(id, s, k.key, s.Project.Alerts[k.key], p.rule, p.dec, false)
+			}
+		}
+	}
+}
+
+func (e *Engine) persistAlertLocked(id string, s *flow.State, key string, a flow.Alert, logRule, logDec string, clear bool) {
+	rule, dec, ak := cmp.Or(logRule, "alert"), cmp.Or(logDec, "alert raised: "+a.Kind), alertKey{id, key}
+	p, err := e.memAlerts[ak], error(nil)
+	if (!clear || p.alert.Kind != "") && p.logSeq == 0 {
+		s.Seq++
+		if err = e.appendLogLocked(id, LogLine{Seq: s.Seq, At: time.Now(), Project: id, By: "engine", Rule: rule, Asked: []string{a.Kind}, Decision: dec, Why: a.Cause}); err != nil {
+			s.Seq--
+		} else {
+			p.logSeq = s.Seq
+		}
+	} else {
+		s.Seq = max(s.Seq, p.logSeq)
+	}
+	if err == nil {
+		if clear {
 			if delete(s.Project.Alerts, key); len(s.Project.Alerts) == 0 {
 				s.Project.Alerts = nil
 			}
-			e.saveLocked(id, *s)
+		}
+		if err = e.saveStateLocked(id, *s); err == nil {
+			delete(e.memAlerts, ak)
+			return
+		}
+		if clear {
+			setProjectAlert(s, key, a)
+		}
+	}
+	e.logError("factory.commit_error", id, err)
+	if (clear || a.Kind != flow.AlertDisk) && p.alert.Kind == "" {
+		if p.logSeq != 0 {
+			s.Seq--
+		}
+		return
+	}
+	p.alert, p.rule, p.dec = a, rule, dec
+	if !p.stderrLogged {
+		_, _ = fmt.Fprintf(cmp.Or[io.Writer](e.Stderr, os.Stderr), "factory: alert %s (unpersisted): %s (%v)\n", a.Kind, a.Cause, err)
+		p.stderrLogged = true
+	}
+	e.memAlerts[ak] = p
+}
+
+func (e *Engine) reconcileAlertLocked(id string, s *flow.State, key string, active bool, a flow.Alert, logRule, logDec string) {
+	ak := alertKey{id, key}
+	if !active {
+		if cur, ok := s.Project.Alerts[key]; ok {
+			p := e.memAlerts[ak]
+			e.persistAlertLocked(id, s, key, cur, p.rule, p.dec, true)
 		}
 	} else if cur, ok := s.Project.Alerts[key]; !ok || cur.Scope != a.Scope {
-		if s.Project.Alerts == nil {
-			s.Project.Alerts = map[string]flow.Alert{}
-		}
 		a.At = a.At.UTC()
-		s.Project.Alerts[key] = a
-		e.commitLogLocked(id, s, LogLine{By: "engine", Rule: cmp.Or(logRule, "alert"), Asked: []string{a.Kind}, Decision: cmp.Or(logDec, "alert raised: "+a.Kind), Why: a.Cause})
+		setProjectAlert(s, key, a)
+		delete(e.memAlerts, ak)
+		e.persistAlertLocked(id, s, key, a, logRule, logDec, false)
+	} else if p, up := e.memAlerts[ak]; up && !e.storeENOSPC[id] {
+		e.persistAlertLocked(id, s, key, cur, p.rule, p.dec, false)
 	}
 }
 
@@ -150,4 +236,131 @@ func (e *Engine) reconcileCIStalledLocked(id string, s *flow.State, t flow.Task,
 	} else if had && (cur.Scope != h || f.PR.Answered && (f.PR.State != flow.PROpen || f.PR.Head != cur.Scope || f.PR.Checks != flow.ChecksPending && f.PR.Checks != flow.ChecksUnreadable)) {
 		e.reconcileAlertLocked(id, s, key, false, flow.Alert{}, "", "")
 	}
+}
+
+func hcBoundedExec(ctx context.Context, client *hc.Client, timeout time.Duration, argv ...string) (hc.ExecResult, bool, error) {
+	limit, c := timeout.Seconds(), *client
+	c.Timeout = timeout + min(timeout, 2*time.Second)
+	pctx, cancel := context.WithTimeout(ctx, c.Timeout)
+	defer cancel()
+	res, err := c.Exec(pctx, hc.ExecParams{Argv: argv, Cwd: os.TempDir(), Timeout: &limit})
+	return res, res.TimedOut || err != nil && pctx.Err() != nil && ctx.Err() == nil, err
+}
+
+func (e *Engine) observeConsentDiskLocked(ctx context.Context, id string, s *flow.State, now time.Time) error {
+	if prev := e.lastProbe[id]; !s.Project.HasAlert(flow.AlertConsentPrompt) && !s.Project.HasAlert(flow.AlertDisk) && !e.storeENOSPC[id] && e.consentStreaks[id] == "" && !prev.IsZero() && !now.Before(prev) && now.Sub(prev) < flow.PassInterval {
+		return nil
+	}
+	e.lastProbe[id] = now
+	err := e.observeConsentLocked(ctx, id, s, now)
+	e.observeDiskLocked(ctx, id, s, now, false)
+	return err
+}
+
+func (e *Engine) observeConsentLocked(ctx context.Context, id string, s *flow.State, now time.Time) error {
+	if e.HC == nil || s.Project.Folder == "" {
+		return nil
+	}
+	timeout, tempDir := cmp.Or(e.volumeTimeout, defaultVolumeTimeout), os.TempDir()
+	probe := func(target string) (string, error) {
+		res, timedOut, err := hcBoundedExec(ctx, e.HC, timeout, "sh", "-c", probeScript, "sh", target)
+		if err != nil && !timedOut {
+			var he *hc.Error
+			if errors.As(err, &he) {
+				return "", nil
+			}
+			return "", err
+		}
+		probed, ok := parseProbedDir(string(res.Stdout)), !timedOut && derefExit(res.Code) == 0
+		same := probed != "" && strings.TrimPrefix(filepath.Clean(probed), "/private") == strings.TrimPrefix(filepath.Clean(target), "/private")
+		return map[bool]string{timedOut: "timeout", ok && probed == "": "blank", ok && same: "ok"}[true], nil
+	}
+	badKind, err := probe(s.Project.Folder)
+	if badKind != "timeout" && badKind != "blank" {
+		delete(e.consentStreaks, id)
+		if badKind == "ok" {
+			e.reconcileAlertLocked(id, s, flow.AlertConsentPrompt, false, flow.Alert{}, "", "")
+		}
+		return err
+	}
+	if tk, terr := probe(tempDir); terr != nil || tk != "ok" {
+		delete(e.consentStreaks, id)
+		return terr
+	}
+	prev := e.consentStreaks[id]
+	e.consentStreaks[id] = badKind
+	if prev == badKind || s.Project.HasAlert(flow.AlertConsentPrompt) {
+		home, _ := os.UserHomeDir()
+		prompt, fix := consentPrompt(home, s.Project.Folder)
+		cause := fmt.Sprintf("project folder %s %s twice in herdr-core (%s)", s.Project.Folder, map[string]string{"timeout": "timed out", "blank": "returned blank"}[badKind], prompt)
+		e.reconcileAlertLocked(id, s, flow.AlertConsentPrompt, true, flow.Alert{Kind: flow.AlertConsentPrompt, Cause: cause, Fix: fix, At: now, Rule: "J3"}, "J3", "")
+	}
+	return nil
+}
+
+var dfCapacity = regexp.MustCompile(`\s+(\d+)%\s+(.+)$`)
+
+func (e *Engine) readDiskVolume(ctx context.Context, path string) DiskReading {
+	if path == "" || e.diskRead == nil && e.HC == nil {
+		return DiskReading{Unknown: map[bool]string{true: "empty path", false: "no herdr-core client"}[path == ""]}
+	} else if e.diskRead != nil {
+		return e.diskRead(ctx, path)
+	}
+	res, timedOut, err := hcBoundedExec(ctx, e.HC, cmp.Or(e.volumeTimeout, defaultVolumeTimeout), "df", "-kP", path)
+	if timedOut || err != nil || derefExit(res.Code) != 0 {
+		return DiskReading{Unknown: cmp.Or(map[bool]string{true: "df timed out"}[timedOut], flow.CleanErr(errText(err)), flow.CleanErr(string(res.Stderr)), "df failed")}
+	}
+	lines := strings.Split(strings.TrimSpace(string(res.Stdout)), "\n")
+	if m := dfCapacity.FindStringSubmatch(lines[len(lines)-1]); len(lines) >= 2 && m != nil {
+		if pct, perr := strconv.Atoi(m[1]); perr == nil {
+			return DiskReading{Volume: strings.TrimSpace(m[2]), UsedPercent: pct, Known: true}
+		}
+	}
+	return DiskReading{Unknown: "unparseable df output"}
+}
+
+func (e *Engine) observeDiskLocked(ctx context.Context, id string, s *flow.State, now time.Time, gitFull bool) {
+	proj, data := e.readDiskVolume(ctx, s.Project.Folder), e.readDiskVolume(ctx, e.Paths.DataDir)
+	limit, projVol, dataVol := cmp.Or(s.Settings.DiskFullPercent, flow.DefaultSettings().DiskFullPercent), cmp.Or(proj.Volume, s.Project.Folder), cmp.Or(data.Volume, e.Paths.DataDir)
+	storeFull := e.storeENOSPC[id]
+	delete(e.storeENOSPC, id)
+	var causes, vols []string
+	for _, c := range []struct {
+		on       bool
+		vol, msg string
+	}{
+		{storeFull, dataVol, "store write failed (no space left on device) on " + dataVol},
+		{gitFull || e.git != nil && e.git.TakeNoSpace(s.Project.Folder), projVol, "git write failed (no space left on device) on " + projVol},
+		{proj.Known && proj.UsedPercent >= limit, projVol, fmt.Sprintf("volume %s is %d%% full (limit %d%%)", projVol, proj.UsedPercent, limit)},
+		{data.Known && data.UsedPercent >= limit, dataVol, fmt.Sprintf("volume %s is %d%% full (limit %d%%)", dataVol, data.UsedPercent, limit)},
+	} {
+		if c.on {
+			causes = append(causes, c.msg)
+			if !slices.Contains(vols, c.vol) {
+				vols = append(vols, c.vol)
+			}
+		}
+	}
+	raise := func(cause, fixVols string) {
+		e.reconcileAlertLocked(id, s, flow.AlertDisk, true, flow.Alert{Kind: flow.AlertDisk, Cause: cause, Fix: "free space on " + fixVols, At: now, Rule: "J3"}, "J3", "")
+	}
+	if len(causes) > 0 {
+		raise(strings.Join(causes, "; "), strings.Join(vols, ", "))
+		return
+	}
+	if !s.Project.HasAlert(flow.AlertDisk) || !proj.Known || !data.Known {
+		return
+	}
+	if e.git != nil && s.Project.Folder != "" {
+		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
+		_, err := e.git.Run(gctx, s.Project.Folder, "config", "--local", "sheepdog.projectId", id)
+		cancel()
+		if err != nil {
+			if e.git.TakeNoSpace(s.Project.Folder) {
+				raise("git write failed (no space left on device) on "+projVol, projVol)
+			}
+			return
+		}
+	}
+	e.reconcileAlertLocked(id, s, flow.AlertDisk, false, flow.Alert{}, "", "")
 }

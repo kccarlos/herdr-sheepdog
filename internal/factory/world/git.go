@@ -60,6 +60,7 @@ type Git struct {
 	log      func(event, folder string)
 	mu       sync.Mutex
 	episodes map[string]gitEpisode
+	enospc   map[string]bool
 }
 
 type gitEpisode struct {
@@ -71,7 +72,7 @@ func NewGit(client *hc.Client, now func() time.Time, log func(event, folder stri
 	if now == nil {
 		now = time.Now
 	}
-	return &Git{client: client, now: now, log: log, episodes: make(map[string]gitEpisode)}
+	return &Git{client: client, now: now, log: log, episodes: make(map[string]gitEpisode), enospc: make(map[string]bool)}
 }
 
 // GitError carries the git or gh child outcome together with any RPC failure.
@@ -210,9 +211,27 @@ func (g *Git) run(ctx context.Context, dir, command string, args []string, env m
 		g.finishProbe(repo, stalled)
 	}
 	if err != nil || r.TimedOut || r.Truncated || r.Signal != nil || r.Code == nil || *r.Code != 0 {
+		if command == "git" && (errors.Is(err, syscall.ENOSPC) || strings.Contains(strings.ToLower(string(r.Stderr)), "no space left on device")) {
+			g.mu.Lock()
+			g.enospc[repo] = true
+			g.mu.Unlock()
+		}
 		return r, &GitError{command: command, Result: r, RPC: err, suppressed: stalled}
 	}
 	return r, nil
+}
+
+// TakeNoSpace reports and clears whether a git call on folder hit ENOSPC.
+func (g *Git) TakeNoSpace(folder string) bool {
+	repo, err := absolutePath(folder)
+	if err != nil {
+		repo = filepath.Clean(folder)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	hit := g.enospc[repo]
+	delete(g.enospc, repo)
+	return hit
 }
 
 func (g *Git) gitCmd(ctx context.Context, dir string, args ...string) (string, error) {
