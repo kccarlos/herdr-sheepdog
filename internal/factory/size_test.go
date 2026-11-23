@@ -494,6 +494,7 @@ func TestContinueUnderGitTimeout(t *testing.T) {
 		l.eng.logEvent(event, map[string]string{"folder": folder})
 	})
 	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"continue","why":"git is slow"}`, "")
+	lockGitTimeout = old // the rest of the test runs real git; give it the normal limit
 	if got := continueCalls.Load(); got != 1 {
 		t.Errorf("continue ran git diff %d times, want 1", got)
 	}
