@@ -346,7 +346,7 @@ Each is planned in PRs only at the review point before it. "Done when" lines are
 **Open items (logged in [design.md](design.md) 17.4)**
 
 1. **`O31`** (**design reviewer settles before 8.1 is briefed**): whether `checkStartCLIs` in `Engine.Start` fails when any listed candidate is signed out (conflicting with J5 on voice/HTTP restarts) or passes whenever each required role has a signed-in candidate.
-2. **`O33`** (**settle before 8.3/8.4**): whether `docs/dev/factory/owner-contract.md` becomes a short pointer to [design.md](design.md) 12.1 and 12.3; fate of `testdata/factory/owner-contract-v1.json`; and whether `docs/dev/factory/{engine-audit,baseline}.md` are deleted in 8.4 or archived.
+2. **`O33`** (**settled 2026-11-23 in [design.md](design.md) 17.4**): `docs/dev/factory/owner-contract.md` becomes a short pointer page in 8.3; `testdata/factory/owner-contract-v1.json` (after mapping its 14 refusal cases) and `docs/dev/factory/{engine-audit,baseline}.md` are deleted in 8.4 with the owner's yes.
 3. **`O35`** (**settle before 8.4**): what C2's "all have passing tests" means with 342 of 427 v1 rows in [knowledge-base.md](knowledge-base.md) unnamed in `internal/` and `cmd/` (88 distinct `KB-…` ids named; includes `KB-STA-20`).
 4. **`O36`** (**owner decision, settle before 8.4**): where the old `factory/` history is kept now that `main` never held it and only the local tag `pre-reset-4df3a038` remains (remote copy deleted by the owner on 2026-11-22), whether the local tag is enough, and whether [knowledge-base.md](knowledge-base.md) citations must stay reachable.
 5. Non-blocking items logged in [design.md](design.md) 17.4: **`O30`** (whether `KB-LCH-4` covers `doctor.go` canary probes), **`O32`** (`flow/asks.go` `negWaitRE`/`yesOptRE`), and **`O34`** (generated `docs/dev/factory/rules.md` check).
@@ -362,7 +362,7 @@ Each is planned in PRs only at the review point before it. "Done when" lines are
 | 11 Plan review | The plan reviewer run and template, `plan_review_rounds`, the milestone design note (prompts.md 3.2, 3.3) | A plan with an "optional" backlog task comes back with "delete" | — |
 | 12 The retro round | L2 to L6, L11, N28, the retro template | The SDF-16 history draws one retro at round 3; the second FIX ends in a recap with no `continue` (KB-RET-1, KB-RET-4) | — |
 | 13 Rotation and the journal | J11; design 11.1 | A fresh coordinator continues from the entry; an entry exists with facts even when the coordinator does not answer | — |
-| 14 Settings by voice and card | The `rule` ask, read-back, delegation (A1) | A setting changes only when the owner answers its card; `sheepdog factory set` only raises the card | — |
+| 14 Settings by voice and card | The `rule` ask, read-back, delegation (A1) | A setting changes only when the owner answers its card; `sheepdog factory set` only raises the card; revoking a non-delegation rule without an owner `AnswerProof` is refused `proof_required` | — |
 | later | Alerts to push and voice and the digest; milestones, critical path and the verify task; agy (spike S0.1); the design loop; cheap sync and a cap on PRs in CI; secrets; the approved phone and iPad boards; background-job detection (needs an hc change); token budgets; machine load holds | | |
 
 From review point 3:

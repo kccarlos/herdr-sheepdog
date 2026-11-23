@@ -971,7 +971,7 @@ Automating a loop that produces poor code produces more of it. At project start 
 
 ### 12.1 What the surfaces read
 
-Every surface reads a **view**: a pure function of the stored state. The JSON shapes stay those of owner contract v1 (`testdata/factory/owner-contract-v1.json` is kept as the golden file), plus the fields the approved addendum adds.
+Every surface reads a **view**: a pure function of the stored state. The JSON shapes are those of the Go types the engine returns (`ProjectView`, `GraphView`, `flow.Ask`, `LogEntry` and the others of section 12.3), read through the routes in `internal/web/factory.go`. There is no separate contract fixture (rule V1 below).
 
 | Surface (canvas board) | View | Built from |
 |---|---|---|
@@ -984,6 +984,13 @@ Every surface reads a **view**: a pure function of the stored state. The JSON sh
 | Voice digest | merged, waiting, pools, alerts; any PR merged outside the accept bar; any task that has waited on the coordinator for hours | a pure function over state and log; no model |
 | Override result | one short line per answered-Yes override card (voice, APNs, log; no card) | `flow.OverrideResult` over state (section 4.3b) |
 | Quiet rule | labels on every factory terminal | set at every start; enforced where it is today (`herdr.IsFactoryQuiet`) |
+
+**One source for the shapes (V1, V2).**
+
+| ID | Rule |
+|---|---|
+| V1 | A shape the owner's surfaces read is defined once, by the JSON tags of the Go type that the engine returns. No hand-kept copy of the shapes (a fixture file or a contract document) is kept beside the code |
+| V2 | Owner contract v1 (the Python engine's boundary) is superseded. `docs/dev/factory/owner-contract.md` is a pointer to this section, 12.3, 7.1 and section 6. Each refusal case of its old fixture is covered by a Go test or by a knowledge-base row marked later; none was dropped without one |
 
 **Order of building the surfaces (owner decision D14).** The web first: one factory page in the daemon's existing web, beside setup, voice and debug, with the factory section, the ask and override cards, and the log, the same content as the approved boards. The iOS and iPad boards follow once the web version has been used. Neither client has any factory code today.
 
@@ -1005,6 +1012,7 @@ Sources: [notes/go-surface-notes.md](notes/go-surface-notes.md). Line counts are
 | `cmd/sheepdog/factory.go` | — | Keep `doctor`; `python-*` gone; add `start`, `stop`, `status`, `log`, `report` (`ready`, `ask`), `ask`, `answer`, and the coordinator verbs |
 | `Makefile` `test-factory`, the CI factory job | — | **Gone from `main`** |
 | `factory/` (Python, tests, templates) | ~41,000 | **Gone from `main`** |
+| `docs/dev/factory/owner-contract.md`, `engine-audit.md`, `baseline.md`; `testdata/factory/owner-contract-v1.json` | 481, 391, 127; 1,147 | **Pointer page in 8.3; the other three deleted in 8.4** (O33). The full texts stay in git history |
 
 Not built in Go today and needed by the approved design: alerts to push and voice, the digest, `say`, rules read-back, the graph endpoint, `stop`, owner touch. They become calls on the engine interface, which is cheaper than through a CLI.
 
@@ -1216,7 +1224,7 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | O30 | Whether `KB-LCH-4` ("every start states model and effort, never a CLI default") applies to `doctor.go`'s read-only canary probes (`checkClaude` omits `--effort`; `checkCodex` omits `--model`) or only to engine agent runs |
 | O31 | (**design reviewer settles before 8.1 is briefed**) Once `StartChecks` runs inside `Engine.Start` (J1), whether `checkStartCLIs` should fail when any candidate in `projectCandidates(s)` is missing or signed out (today's CLI rule, which conflicts with J5's hold-and-fallback for a signed-out coordinator on voice/HTTP restarts) or pass whenever each required role has at least one signed-in candidate |
 | O32 | Whether and how to replace `flow/asks.go`'s hand-kept `negWaitRE`/`yesOptRE` regexes for `KB-ASK-9` so no hand-kept word list remains in ask validation |
-| O33 | (**settle before 8.3/8.4**) Whether `docs/dev/factory/owner-contract.md` (481 lines written around the Python CLI) becomes a short pointer page to sections 12.1 and 12.3; whether `testdata/factory/owner-contract-v1.json` (currently loaded by no Go test) gets a Go golden test or is retired; and whether `docs/dev/factory/{engine-audit,baseline}.md` are deleted in 8.4 or archived as history |
+| O33 | The old owner-contract document, its fixture, and the two phase 0 documents. **Decided (design review, 2026-11-23, section 12.1 V1, V2):** `docs/dev/factory/owner-contract.md` becomes a pointer page in 8.3. `testdata/factory/owner-contract-v1.json` is retired in 8.4 with no Go golden test: every v2 shape differs from it, and a new fixture would be a hand-kept copy of the Go types; its 14 refusal cases are first mapped to Go tests or to knowledge-base rows marked later. `docs/dev/factory/engine-audit.md` and `baseline.md` are deleted in 8.4, not archived; all four files are in `main`'s history. The deletes wait for the owner's yes with the rest of 8.4 |
 | O34 | Whether sections 4.11 and 16's generated `docs/dev/factory/rules.md` table check is required for version 1 or deferred |
 | O35 | (**settle before 8.4**) What C2's "all have passing tests" means given 427 version 1 rows in [knowledge-base.md](knowledge-base.md) with 88 distinct `KB-…` ids named under `internal/` and `cmd/` and 342 rows unnamed — which classes need dedicated tests, which are met by the slice 8.2 exit run, and which move later (including `KB-STA-20`) |
 | O36 | (**owner decision, settle before 8.4**) Where the old `factory/` history is kept now that `main` has no commit that ever held `factory/` and the owner deleted the remote copy of `pre-reset-4df3a038` on 2026-11-22 keeping only a local tag — whether the local tag is enough, and whether [knowledge-base.md](knowledge-base.md)'s citations of old files must stay reachable |
