@@ -69,6 +69,7 @@ type Engine struct {
 	ghUnavail         map[string]bool                 // project fact github_unavailable (design.md 7.3)
 	hcUnavail         map[string]bool                 // project fact hc_unavailable (design.md 7.3)
 	onInvariant       func([]flow.InvariantViolation) // test hook; nil in production
+	changeSubs        []chan Change                   // Ask/Answer/Say subscribers under mu
 }
 
 func (e *Engine) now() time.Time {
@@ -313,6 +314,14 @@ func (e *Engine) projectDirs() []os.DirEntry {
 	return entries
 }
 
+func (e *Engine) eachStateLocked(fn func(id string, s flow.State) bool) {
+	for _, ent := range e.projectDirs() {
+		if s, err := LoadState(e.Paths.State(ent.Name())); err == nil && !fn(ent.Name(), s) {
+			return
+		}
+	}
+}
+
 func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	pools := e.refreshPools(ctx, id)
 	codexProbe := e.probeCodexHome(ctx, id)
@@ -362,9 +371,19 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		if a := flow.OpenAttempt(*t); a != nil && !flow.Ended(*t) && (a.RunID != "" || a.Run != nil && a.Run.State == flow.PhaseEnded) {
 			wasWorking := a.Run != nil && a.Run.State == flow.PhaseWorking
 			hcChecked = hcChecked || a.RunID != "" && (a.Run == nil || a.Run.State != flow.PhaseEnded)
+			var prevHeld, prevRunHeld []string
+			if !t.Parked && e.HC != nil && a.RunID != "" && len(a.Held) > 0 && a.Run != nil && a.Run.State != flow.PhaseEnded && !a.Run.HandoffSent {
+				prevHeld, prevRunHeld = a.Held, a.Run.Held
+				a.Run.Held, a.Held = appendHeld(slices.Clone(a.Run.Held), a.Held...), nil
+			}
 			r, rerr := e.advanceRunLocked(ctx, id, t.ID, &s, a.RunID, flow.RoleWorker, "claude", &a.Run)
 			hcErr = cmp.Or(hcErr, rerr)
 			save := false
+			if rerr != nil && len(prevHeld) > 0 {
+				a.Held, a.Run.Held = prevHeld, prevRunHeld
+			} else if len(prevHeld) > 0 && len(a.Run.Held) > 0 {
+				save = true
+			}
 			if dt > 0 && rerr == nil && wasWorking {
 				a.Working += dt
 				save = true
@@ -1713,6 +1732,10 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	if save {
 		e.saveLocked(id, *s)
 	}
+	facts.Reviewer.AskPending = a.Review.RunID != "" && ((a.Review.Run != nil && len(a.Review.Run.Held) > 0) ||
+		slices.ContainsFunc(s.Asks, func(ask flow.Ask) bool {
+			return ask.Status == flow.AskStatusOpen && ask.AskedBy == flow.RoleReviewer && ask.RunID == a.Review.RunID
+		}))
 	codex := a.Review.Reviewer.CLI == world.CodexCLI
 	if facts.Reviewer.State == flow.RunGone || !codex && facts.Reviewer.State != flow.RunIdle {
 		return false
@@ -1977,6 +2000,20 @@ func appendHeld(held []string, msgs ...string) []string {
 
 var errNoWorkerRun = errors.New("factory: no worker run")
 
+func (e *Engine) deliverRunLocked(ctx context.Context, rec *flow.RunRecord, s flow.Settings, msg string, urgent bool, now time.Time) (string, flow.Decision, error) {
+	next, row, dec := flow.StepRun(*rec, flow.RunEvent{Kind: flow.EvDeliver, Msg: msg, Urgent: urgent}, s, now)
+	if row.ID == "R36" {
+		return row.ID, dec, errNoWorkerRun
+	}
+	for _, act := range dec.Asked {
+		if err := world.ActRun(ctx, e.HC, next, act, msg); err != nil {
+			return row.ID, dec, err
+		}
+	}
+	*rec = next
+	return row.ID, dec, nil
+}
+
 func (e *Engine) deliverWorkerLocked(ctx context.Context, id, taskID string, s *flow.State, a *flow.Attempt, msg string, urgent bool) error {
 	if a != nil && a.RunID != "" && e.HC != nil && (a.Run == nil || a.Run.State == flow.PhaseWorking && a.Run.Status == "") {
 		if a.Run == nil {
@@ -1995,19 +2032,13 @@ func (e *Engine) deliverWorkerLocked(ctx context.Context, id, taskID string, s *
 		}
 		return errNoWorkerRun
 	}
-	next, row, dec := flow.StepRun(*a.Run, flow.RunEvent{Kind: flow.EvDeliver, Msg: msg, Urgent: urgent}, s.Settings, e.now())
-	if row.ID == "R36" {
+	rowID, dec, err := e.deliverRunLocked(ctx, a.Run, s.Settings, msg, urgent, e.now())
+	if rowID == "R36" {
 		a.Held = appendHeld(a.Held, msg)
-		e.commitLogLocked(id, s, LogLine{By: "engine", Task: taskID, Rule: row.ID, Decision: dec.Why, Why: fmt.Sprintf("worker run %s ended (%s): held on task", a.Run.Address, a.Run.Result)})
+		e.commitLogLocked(id, s, LogLine{By: "engine", Task: taskID, Rule: rowID, Decision: dec.Why, Why: fmt.Sprintf("worker run %s ended (%s): held on task", a.Run.Address, a.Run.Result)})
 		return nil
 	}
-	for _, act := range dec.Asked {
-		if err := world.ActRun(ctx, e.HC, next, act, msg); err != nil {
-			return err
-		}
-	}
-	*a.Run = next
-	return nil
+	return err
 }
 
 func (e *Engine) execTellFindings(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
@@ -2052,13 +2083,9 @@ func (e *Engine) execNudgeReviewer(ctx context.Context, _ string, s *flow.State,
 		return "reviewer already gone", false, nil
 	}
 	msg := fmt.Sprintf("You went idle with no report tag. End your reply with `<report>{\"code\":%q,\"round\":%d,\"head\":%q,\"verdict\":\"pass\"|\"changes\",\"majors\":N}</report>`.", a.Review.Code, a.Review.Round, a.Review.Head)
-	next, _, dec := flow.StepRun(*a.Review.Run, flow.RunEvent{Kind: flow.EvDeliver, Msg: msg}, s.Settings, e.now())
-	for _, act := range dec.Asked {
-		if err := world.ActRun(ctx, e.HC, next, act, msg); err != nil {
-			return "", false, err
-		}
+	if _, _, err := e.deliverRunLocked(ctx, a.Review.Run, s.Settings, msg, false, e.now()); err != nil {
+		return "", false, err
 	}
-	*a.Review.Run = next
 	return fmt.Sprintf("nudged reviewer %s for report tag (round %d)", a.Review.RunID, a.Review.Round), false, nil
 }
 
