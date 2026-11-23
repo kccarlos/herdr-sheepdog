@@ -61,7 +61,7 @@ Owner decision, 2026-11-19: after slice 2 the work runs on three tracks at once.
 - The shared files are `engine.go`, `report.go`, `world/world.go`, the route table in `internal/web/server.go`, `cmd/sheepdog/factory.go`, design.md and this file. A track keeps its change to them small and merges it on the latest main.
 - The rest of slice 5b (launchd and git through herdr-core, pools and sign-in, alerts, the sweep) is on no track yet; it is placed at the review point after slice 5a.
 - `internal/factory/world` and `cmd/sheepdog/factory.go` are shared by the core and adapters tracks: the adapters track adds files and one subcommand there and does not edit the core's functions.
-- Slices 10 to 12 (evidence by the engine, plan review, the retro round) go to the core track after slice 7; slices 13 and 14 are placed at the review point after slice 7. C3 stays last, after the exit test.
+- Slices 11 and 12 (plan review, the retro round; slice 10 is parked) go to the core track after slice 7; slices 13 and 14 are placed at the review point after slice 7. C3 stays last, after the exit test.
 - State at review point 3: the front end is paused after its page (PR #699) until slice 6's asks; the adapters track is done except C3 (section 7).
 
 ## 3. Slice 1: the walking skeleton
