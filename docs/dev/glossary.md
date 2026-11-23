@@ -28,13 +28,13 @@ Terms used by `internal/factory` and [`docs/dev/engine-v2/design.md`](engine-v2/
 |---|---|
 | **Owner** | **The user**, in factory docs: sets goals, answers gated asks, and approves overrides or standing rules. |
 | **Factory engine** | The single-writer Go loop inside the daemon (`internal/factory`) that drives started projects from plan to merge over `herdr-core` (`hc`), git worktrees, and GitHub (`gh`). |
-| **Coordinator** | The single Opus-class agent run per factory project in `hc`. Plans tasks (`plan apply` / `plan amend`), answers `decision` asks, decides recaps, and escalates gated asks to the owner. |
+| **Coordinator** | The single coordinator agent run per factory project in `hc` (Claude `opus` by default; configurable via `models.coordinator` with Claude, Codex, or `agy`). Plans tasks (`plan apply` / `plan amend`), answers `decision` asks, decides recaps, and escalates gated asks to the owner. |
 | **Worker / reviewer** | Task runs started by the engine in `hc`: workers implement tasks in worktrees and run `sheepdog factory report ready`; reviewers judge diffs in fresh sessions and run `sheepdog factory report review` (or emit a `<report>` tag on Codex). |
 | **Run** | One agent process in one `hc` terminal, authenticated to the daemon with `SHEEPDOG_RUN_TOKEN` in its environment (never on its command line). |
 | **Record / Fact / Rule** | A **record** is a stored commit-tied decision or report in `state.json`; a **fact** is a live world reading from observers (PR checks, worktree tip, run state, quota pools); a **rule** is one row of the ordered first-match table (`internal/factory/flow`). |
 | **Head (`H`) / Covers** | `H` is an attempt's current commit. An earlier record (review round, gate answer, or override) **covers** `H` when `H` is the same commit or ahead of it only by clean base merges (`merge_only`). |
 | **Ask / Gated ask / Answer proof** | A structured question (`flow.Ask`). `decision` asks are answered by the coordinator; gated kinds (`gate`, `release`, `override`, `paid-key`, `delete`, `install`, `reset`, `rule`) go to the owner and require an in-process `AnswerProof` (`proofs.json`) from a paired-device tap or live voice answer. |
-| **Quiet rule (factory)** | `herdr.IsFactoryQuiet`: non-coordinator factory terminals stay silent to voice and APNs pushes; only owner asks, factory alerts, override results, and coordinator dialog blocks reach the owner. |
+| **Quiet rule (factory)** | `herdr.IsFactoryQuiet` silences non-coordinator factory terminals completely and silences coordinator transitions except `blocked` (`StateBlocked`), so only owner asks, override results, and coordinator dialog blocks reach voice and APNs pushes on `main` (factory alerts are persisted in `state.json` and `log.jsonl` and surfaced in `sheepdog factory status` and `log`). |
 | **Stopping alert** | A persisted alert episode (`no_pool`, `disk`, `consent_prompt`) that holds new factory starts until its clear condition is observed; non-stopping alerts (`main_red`, `ci_stalled`, `agents_down`) surface conditions without halting unrelated starts. |
 
 ## Former names
