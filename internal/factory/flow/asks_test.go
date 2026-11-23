@@ -109,10 +109,10 @@ func TestAskTableTransitionsA2ToA5(t *testing.T) {
 	}
 }
 
-// TestValidateAskRules checks KB-ASK-6, KB-ASK-9 and KB-ASK-15 in pure flow:
-// question bounds and single-line rule, closed kind enum, 2..9 distinct non-blank
-// options, recommendation membership, parenthetical key rejection, and negative/wait
-// recommendation requiring a "Yes" option.
+// TestValidateAskRules checks KB-ASK-6, KB-ASK-9 (parentheses), KB-ASK-15 and
+// design.md 7.1 AQ3 in pure flow: question bounds and single-line rule, closed
+// kind enum, 2..9 distinct non-blank options, recommendation membership, and
+// parenthetical key rejection.
 func TestValidateAskRules(t *testing.T) {
 	nineOpts := []string{"Opt 1", "Opt 2", "Opt 3", "Opt 4", "Opt 5", "Opt 6", "Opt 7", "Opt 8", "Opt 9"}
 	tenOpts := append(slices.Clone(nineOpts), "Opt 10")
@@ -143,7 +143,7 @@ func TestValidateAskRules(t *testing.T) {
 			wantGated: true,
 		},
 		{
-			name: "negative or wait recommendation paired with a Yes option (KB-ASK-9)",
+			name: "negative or wait recommendation paired with a Yes option",
 			ask: Ask{
 				Kind:      KindRelease,
 				Question:  "Ship v1.4.0 now?",
@@ -159,6 +159,36 @@ func TestValidateAskRules(t *testing.T) {
 				Question:  "Delete stale remote branch experiment/old-prototype?",
 				Options:   []string{"Delete branch", "Keep branch"},
 				Recommend: "Keep branch",
+			},
+			wantGated: true,
+		},
+		{
+			name: "recommended wait without a Yes option (AQ3)",
+			ask: Ask{
+				Kind:      KindRelease,
+				Question:  "Ship now?",
+				Options:   []string{"Ship release", "Wait for review"},
+				Recommend: "Wait for review",
+			},
+			wantGated: true,
+		},
+		{
+			name: "recommended negative without a Yes option (AQ3)",
+			ask: Ask{
+				Kind:      KindRelease,
+				Question:  "Ship now?",
+				Options:   []string{"Ship release", "Do not ship"},
+				Recommend: "Do not ship",
+			},
+			wantGated: true,
+		},
+		{
+			name: "recommended negative first without a Yes option (AQ3)",
+			ask: Ask{
+				Kind:      KindRelease,
+				Question:  "Ship now?",
+				Options:   []string{"Do not ship", "Ship release"},
+				Recommend: "Do not ship",
 			},
 			wantGated: true,
 		},
@@ -240,16 +270,6 @@ func TestValidateAskRules(t *testing.T) {
 		{
 			name:     "option holding short word in parentheses (KB-ASK-9)",
 			ask:      Ask{Kind: KindDecision, Question: "Switch protocol?", Options: []string{"Switch (v2)", "Stay"}, Recommend: "Stay"},
-			wantCode: "invalid_ask",
-		},
-		{
-			name:     "recommended wait without a Yes option (KB-ASK-9)",
-			ask:      Ask{Kind: KindRelease, Question: "Ship now?", Options: []string{"Ship release", "Wait for review"}, Recommend: "Wait for review"},
-			wantCode: "invalid_ask",
-		},
-		{
-			name:     "recommended negative without a Yes option (KB-ASK-9)",
-			ask:      Ask{Kind: KindRelease, Question: "Ship now?", Options: []string{"Ship release", "Do not ship"}, Recommend: "Do not ship"},
 			wantCode: "invalid_ask",
 		},
 	}

@@ -121,6 +121,152 @@ func TestFactoryOverridePhoneCardMultiLineCommandAndAPNsNoOptions(t *testing.T) 
 	}
 }
 
+// TestFactoryAskAPNsNoOptions verifies design.md 7.1 AQ2 (O32): every factory
+// ask push, regardless of kind or who opened it (coordinator release, engine
+// N31 gate, engine N24), omits quick-reply Options, is not KindApproval, sets
+// aps.category = AGENT and interruption-level = time-sensitive, and keeps
+// sheepdog.pending_id as the fask- id so tapping opens the card.
+func TestFactoryAskAPNsNoOptions(t *testing.T) {
+	cases := []struct {
+		name string
+		ask  flow.Ask
+	}{
+		{
+			name: "coordinator_release",
+			ask: flow.Ask{
+				ID:        "ask-demo-rel-1",
+				Project:   "demo",
+				Kind:      flow.KindRelease,
+				Gated:     true,
+				Question:  "Ship release v1.4.0 now?",
+				Options:   []string{"Ship release", "Wait for review"},
+				Recommend: "Wait for review",
+				AskedBy:   flow.RoleCoordinator,
+				At:        t0,
+			},
+		},
+		{
+			name: "engine_N31_gate",
+			ask: flow.Ask{
+				ID:        "ask-demo-n31-1",
+				Project:   "demo",
+				Kind:      flow.KindGate,
+				Gated:     true,
+				Question:  "Merge T1 at abcdef1?",
+				Options:   []string{flow.GateOptionMerge, flow.GateOptionHold},
+				Recommend: flow.GateOptionMerge,
+				Task:      "T1",
+				Head:      "abcdef1234567890",
+				AskedBy:   flow.AskedByN31,
+				At:        t0,
+			},
+		},
+		{
+			name: "engine_N24",
+			ask: flow.Ask{
+				ID:        "ask-demo-n24-1",
+				Project:   "demo",
+				Kind:      flow.KindGate,
+				Gated:     true,
+				Question:  "Task T2 hit review recap — drop it, or tell me how to go on?",
+				Options:   []string{flow.N24OptionDrop, flow.N24OptionContinue},
+				Recommend: flow.N24OptionDrop,
+				Task:      "T2",
+				Head:      "1234567890abcdef",
+				AskedBy:   flow.AskedByN24,
+				At:        t0,
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			eng := newFakeFactory()
+			fn := &fakeNotifier{}
+			h := newHarness(t, withNotifier(fn), func(c *Config) { c.Factory = eng })
+			startFactorySupervisor(t, h)
+
+			eng.openAsk(tc.ask)
+			waitFor(t, func() bool { return len(fn.all()) >= 1 }, tc.name+" APNs notification")
+
+			notifs := fn.all()
+			if len(notifs) != 1 {
+				t.Fatalf("APNs notifications = %d (%+v), want 1", len(notifs), notifs)
+			}
+			n := notifs[0]
+			if len(n.Options) != 0 {
+				t.Fatalf("APNs notification carried quick-reply options %+v, want omitted", n.Options)
+			}
+			if n.Kind == push.KindApproval {
+				t.Fatalf("push Notification.Kind = %q, must not be %q", n.Kind, push.KindApproval)
+			}
+			payload := n.Payload()
+			aps, _ := payload["aps"].(map[string]any)
+			if aps["category"] != push.CategoryAgent {
+				t.Fatalf("APNs aps.category = %v, want %q", aps["category"], push.CategoryAgent)
+			}
+			if aps["interruption-level"] != "time-sensitive" {
+				t.Fatalf("APNs interruption-level = %v, want time-sensitive", aps["interruption-level"])
+			}
+			sd, _ := payload["sheepdog"].(map[string]any)
+			wantPendingID := factoryAskPrefix + tc.ask.ID
+			if sd["pending_id"] != wantPendingID {
+				t.Fatalf("APNs sheepdog.pending_id = %v, want %q", sd["pending_id"], wantPendingID)
+			}
+		})
+	}
+}
+
+// TestFactoryAskCardOptionsAndTapAnswer verifies design.md 7.1 AQ1 (O32):
+// removing quick-reply options from APNs leaves the in-app card intact with
+// every option in order, Recommended on the stored recommendation, and paired
+// tap answering via answerFactoryTap with a tap proof.
+func TestFactoryAskCardOptionsAndTapAnswer(t *testing.T) {
+	eng := newFakeFactory()
+	fn := &fakeNotifier{}
+	h := newHarness(t, withNotifier(fn), func(c *Config) { c.Factory = eng })
+	startFactorySupervisor(t, h)
+
+	eng.openAsk(flow.Ask{
+		ID:        "ask-demo-rel-1",
+		Project:   "demo",
+		Kind:      flow.KindRelease,
+		Gated:     true,
+		Question:  "Ship release v1.4.0 now?",
+		Options:   []string{"Ship release", "Wait for review"},
+		Recommend: "Wait for review",
+		AskedBy:   flow.RoleCoordinator,
+		At:        t0,
+	})
+	waitFor(t, func() bool { return len(h.sup.FactoryQuestions()) == 1 }, "release ask to surface in FactoryQuestions")
+
+	card := h.sup.FactoryQuestions()[0]
+	wantID := factoryAskPrefix + "ask-demo-rel-1"
+	if card.ID != wantID {
+		t.Fatalf("card.ID = %q, want %q", card.ID, wantID)
+	}
+	wantOpts := []state.Option{
+		{Label: "Ship release", Recommended: false},
+		{Label: "Wait for review", Recommended: true},
+	}
+	if !reflect.DeepEqual(card.Options, wantOpts) {
+		t.Fatalf("card.Options = %+v, want %+v", card.Options, wantOpts)
+	}
+
+	if _, err := h.sup.answerFactoryTap(card.ID, 2, "dev-phone-1"); err != nil {
+		t.Fatalf("answerFactoryTap(%q, 2, dev-phone-1): %v", card.ID, err)
+	}
+	got := eng.askByID("ask-demo-rel-1")
+	if got.Status != flow.AskStatusAnswered || got.Answer != "Wait for review" || got.DeviceID != "dev-phone-1" || got.ProofID == "" {
+		t.Fatalf("answered ask = %+v, want answered Wait for review by dev-phone-1 with proof", got)
+	}
+	proofs := eng.mintedProofs()
+	if len(proofs) != 1 || proofs[0].ID != got.ProofID || proofs[0].InputKind != factory.ProofInputTap ||
+		proofs[0].Option != "Wait for review" || proofs[0].DeviceID != "dev-phone-1" {
+		t.Fatalf("minted proofs = %+v, want 1 tap proof for Wait for review by dev-phone-1", proofs)
+	}
+}
+
 // pubSubFactory matches *factory.Engine.Changes() subscription semantics: only
 // subscribers that already called Changes() receive emitted events.
 type pubSubFactory struct {
