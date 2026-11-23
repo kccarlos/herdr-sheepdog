@@ -3,16 +3,20 @@ package factory
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -34,6 +38,8 @@ type restartWorld struct {
 	coordTok string
 	workTok  string
 	workerID string
+	revMu    sync.Mutex
+	revToks  map[string]string
 	commits  []string
 }
 
@@ -44,14 +50,15 @@ func newRestartWorld(t *testing.T, goal string) *restartWorld {
 	githubOrigin(t, repo)
 	gh := bindRepoFakeGH(t, repo)
 	w := &restartWorld{
-		t:      t,
-		ctx:    context.Background(),
-		srv:    srv,
-		client: hc.NewClient(srv.Path),
-		paths:  testPaths(t),
-		repo:   repo,
-		gh:     gh,
-		now:    time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC),
+		t:       t,
+		ctx:     context.Background(),
+		srv:     srv,
+		client:  hc.NewClient(srv.Path),
+		paths:   testPaths(t),
+		repo:    repo,
+		gh:      gh,
+		now:     time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC),
+		revToks: map[string]string{},
 	}
 	srv.OnRun = func(term hc.Terminal, p hc.RunParams) {
 		switch p.Labels["sheepdog.role"] {
@@ -60,6 +67,10 @@ func newRestartWorld(t *testing.T, goal string) *restartWorld {
 		case flow.RoleWorker:
 			w.workTok = p.Env["SHEEPDOG_RUN_TOKEN"]
 			w.workerID = term.Address
+		case flow.RoleReviewer:
+			w.revMu.Lock()
+			w.revToks[term.Address] = p.Env["SHEEPDOG_RUN_TOKEN"]
+			w.revMu.Unlock()
 		}
 	}
 	w.newEngine()
@@ -130,21 +141,84 @@ func (w *restartWorld) commitAndReady(content, rollup string, openPR bool) {
 	}
 }
 
+func (w *restartWorld) reviewerToken(runID string) string {
+	w.revMu.Lock()
+	defer w.revMu.Unlock()
+	return w.revToks[runID]
+}
+
+// submitFakeReviewerVerdict delivers a fake reviewer's verdict through its
+// CLI's real channel: Claude and agy reviewers write the engine's draft
+// findings file and call Engine.Report(tok, "review", ...); Codex reviewers
+// keep printing a screen <report> tag.
+func submitFakeReviewerVerdict(t *testing.T, eng *Engine, srv *hctest.Server, paths Paths, projID, taskID string, rv *flow.ReviewRun, revTok, verdict string, misses int, findings string) error {
+	t.Helper()
+	if rv == nil || rv.RunID == "" {
+		t.Fatalf("expected active reviewer, got %+v", rv)
+	}
+	if rv.Reviewer.CLI == world.CodexCLI {
+		majors := countExactMajors(findings)
+		var body strings.Builder
+		body.WriteString("› prompt\n\n• Review done.\n")
+		if strings.TrimSpace(findings) != "" {
+			for line := range strings.Lines(findings) {
+				body.WriteString("• " + strings.TrimRight(line, "\r\n") + "\n")
+			}
+		}
+		fmt.Fprintf(&body, "• self-check misses: %d\n• deletable: none\n\n  <report>{\"code\":%q,\"round\":%d,\"head\":%q,\"verdict\":%q,\"majors\":%d}</report>\n",
+			misses, rv.Code, rv.Round, rv.Head, verdict, majors)
+		srv.SetScreen(rv.RunID, body.String())
+		return nil
+	}
+	if revTok == "" {
+		t.Fatalf("missing reviewer token for %s (round %d, cli %q)", rv.RunID, rv.Round, rv.Reviewer.CLI)
+	}
+	draft := paths.ReviewDraft(projID, taskID, rv.Round, rv.Code)
+	if err := os.MkdirAll(filepath.Dir(draft), 0o700); err != nil {
+		t.Fatalf("mkdir review draft dir: %v", err)
+	}
+	if err := os.WriteFile(draft, []byte(findings), 0o600); err != nil {
+		t.Fatalf("write review draft %s: %v", draft, err)
+	}
+	rawFindings, err := os.ReadFile(draft)
+	if err != nil {
+		t.Fatalf("read review draft %s: %v", draft, err)
+	}
+	payload, err := json.Marshal(map[string]any{
+		"verdict":           verdict,
+		"code":              rv.Code,
+		"head":              rv.Head,
+		"self_check_misses": misses,
+		"deletable":         "none",
+		"class":             "none",
+		"not_run":           "none",
+		"findings":          string(rawFindings),
+	})
+	if err != nil {
+		t.Fatalf("marshal review report: %v", err)
+	}
+	return eng.Report(revTok, "review", payload)
+}
+
 func (w *restartWorld) setReviewerVerdict(verdict string, majors int) {
 	w.t.Helper()
-	rv := w.state().Tasks[0].Attempts[0].Review
+	st := w.state()
+	t0 := st.Tasks[0]
+	rv := t0.Attempts[0].Review
 	if rv == nil || rv.RunID == "" {
 		w.t.Fatalf("expected active reviewer, got %+v", rv)
 	}
-	var body strings.Builder
-	body.WriteString("❯ prompt\n\n⏺ Review done.\n")
-	for range majors {
-		body.WriteString("major: fix issue\n")
+	var findings strings.Builder
+	if majors == 0 {
+		findings.WriteString("Review done.\n")
+	} else {
+		for range majors {
+			findings.WriteString("major: fix issue\n")
+		}
 	}
-	fmt.Fprintf(&body, "self-check misses: 0\ndeletable: none\n<report>{\"code\":%q,\"round\":%d,\"head\":%q,\"verdict\":%q,\"majors\":%d}</report>\n",
-		rv.Code, rv.Round, rv.Head, verdict, majors)
-	w.srv.SetScreen(rv.RunID, body.String())
-	w.srv.SetStatus(rv.RunID, &hc.Status{App: "claude-code", State: "done"})
+	if err := submitFakeReviewerVerdict(w.t, w.eng, w.srv, w.paths, w.id, t0.ID, rv, w.reviewerToken(rv.RunID), verdict, 0, findings.String()); err != nil {
+		w.t.Fatalf("setReviewerVerdict(%s, %d): %v", verdict, majors, err)
+	}
 }
 
 func (w *restartWorld) markPRMerged(sha string) {
@@ -170,11 +244,14 @@ func (w *restartWorld) waitIdle(addr string) {
 }
 
 func (w *restartWorld) passReviewRound() {
+	rv := w.state().Tasks[0].Attempts[0].Review
 	w.setReviewerVerdict(flow.VerdictPass, 0)
-	w.now = w.now.Add(5 * time.Second)
-	w.pass()
-	w.now = w.now.Add(25 * time.Second)
-	w.pass()
+	if rv != nil && rv.Reviewer.CLI == world.CodexCLI {
+		w.now = w.now.Add(5 * time.Second)
+		w.pass()
+		w.now = w.now.Add(25 * time.Second)
+		w.pass()
+	}
 }
 
 type restartEnd struct {

@@ -166,10 +166,13 @@ func TestReadyAtMergeOnlyTip(t *testing.T) {
 	}
 }
 
-// passReport makes rev's reviewer idle with a valid pass tag for round at head.
+// passReport submits a valid pass verdict for rev's reviewer through its
+// CLI's channel (report review command for Claude/agy, screen tag for Codex).
 func (l *landing) passReport(rev *flow.ReviewRun) {
-	l.srv.SetScreen(rev.RunID, "❯ prompt\n\n⏺ Fine.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rev.Code+"\",\"round\":"+strconv.Itoa(rev.Round)+",\"head\":\""+rev.Head+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
-	setIdle(l.t, l.srv, l.client, rev.RunID, "done")
+	l.t.Helper()
+	if err := submitFakeReviewerVerdict(l.t, l.eng, l.srv, l.paths, l.id, "T1", rev, l.reviewerToken(rev.RunID), flow.VerdictPass, 0, "Fine.\n"); err != nil {
+		l.t.Fatalf("passReport round %d: %v", rev.Round, err)
+	}
 }
 
 // TestRoundInFlightSurvivesMergeOnlyMove: a clean base merge while round 1
@@ -251,14 +254,17 @@ func TestRecapStopsReviewerInFlight(t *testing.T) {
 		t.Fatalf("with a recap open: reviewer %s, review %+v, rounds %+v", rs, a.Review, a.Rounds)
 	}
 	// If a live reviewer still exists alongside an open recap (e.g. crash before stop),
-	// observeReviewLocked stops it and ignores its verdict tag.
+	// report review is refused already_closed (RV2) and observeReviewLocked stops it.
 	rev2ID, err := startRun(ctx, l.client, world.RunSpec{Name: "rev-t1-recap", Cwd: l.wt, Argv: []string{"sh"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	rev2 := &flow.ReviewRun{Round: 1, Head: c2, Code: "recapcode", RunID: rev2ID}
+	const rev2Tok = "tok-rev-recap"
+	rev2 := &flow.ReviewRun{Round: 1, Head: c2, Code: "recapcode", RunID: rev2ID, RunTokenHash: tokenHash(rev2Tok)}
 	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Review = rev2 })
-	l.passReport(rev2)
+	if err := submitFakeReviewerVerdict(t, l.eng, l.srv, l.paths, l.id, "T1", rev2, rev2Tok, flow.VerdictPass, 0, "Fine.\n"); refusalCode(err) != "already_closed" {
+		t.Fatalf("review verdict while recap open = %v, want already_closed", err)
+	}
 	l.pass()
 	a = l.state().Tasks[0].Attempts[0]
 	if rs, _ := termState(ctx, l.client, rev2ID); rs != flow.RunGone || a.Review == nil || a.Review.RunID != "" || a.Review.Run == nil || a.Review.Run.Result != flow.EndStopped || len(a.Rounds) != 0 {

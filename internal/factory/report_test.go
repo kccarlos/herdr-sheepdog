@@ -1734,9 +1734,9 @@ func TestParseReplyLinesTolerance(t *testing.T) {
 	})
 }
 
-// TestVerdictRefusalTellsReviewerOnce checks that a refused verdict sends the
-// refusal reason to the reviewer run once so it can fix and re-send, never
-// loops on repeated refusals, and accepts the corrected reply.
+// TestVerdictRefusalTellsReviewerOnce checks that a refused Codex screen-tag
+// verdict sends the refusal reason to the reviewer run once so it can fix and
+// re-send, never loops on repeated refusals, and accepts the corrected reply.
 func TestVerdictRefusalTellsReviewerOnce(t *testing.T) {
 	ctx := context.Background()
 	srv := hctest.New(t)
@@ -1757,8 +1757,7 @@ func TestVerdictRefusalTellsReviewerOnce(t *testing.T) {
 	gitIn(t, wt.Path, "commit", "-m", "feat: x")
 	c1 := gitIn(t, wt.Path, "rev-parse", "HEAD")
 
-	pastMS := uint64(time.Now().Add(-time.Minute).UnixMilli())
-	srv.Add(hc.Terminal{Address: "t-rev", Name: "rev-1", State: "live", Status: &hc.Status{App: "claude-code", State: "done"}, StatusMS: &pastMS})
+	srv.Add(hc.Terminal{Address: "t-rev", Name: "rev-1", State: "live"})
 	st := flow.State{
 		Seq:      1,
 		Project:  flow.Project{ID: projID, Folder: repo, Started: true, RunID: "t-coord"},
@@ -1770,7 +1769,7 @@ func TestVerdictRefusalTellsReviewerOnce(t *testing.T) {
 				Ready: []flow.Ready{{Head: c1}},
 				Review: &flow.ReviewRun{
 					RunID: "t-rev", Round: 1, Head: c1, Code: "code1",
-					Reviewer: flow.Reviewer{CLI: "claude", Model: "opus", Effort: "medium"},
+					Reviewer: flow.Reviewer{CLI: world.CodexCLI, Model: codexModel, Effort: "high"},
 				},
 			}},
 		}},
@@ -1780,8 +1779,8 @@ func TestVerdictRefusalTellsReviewerOnce(t *testing.T) {
 	}
 
 	// First refusal: missing deletable line -> reviewer is told why once.
-	srv.SetScreen("t-rev", "❯ Review round 1\n\n⏺ Looks good.\nself-check misses: 0\n"+
-		`<report>{"code":"code1","round":1,"head":"`+c1+`","verdict":"pass","majors":0}</report>`+"\n")
+	srv.SetScreen("t-rev", "› Review round 1\n\n• Looks good.\n• self-check misses: 0\n"+
+		`  <report>{"code":"code1","round":1,"head":"`+c1+`","verdict":"pass","majors":0}</report>`+"\n")
 	eng.passProject(ctx, projID, false)
 	sends := sendsTo(t, srv.Requests(), "t-rev")
 	if len(sends) != 1 || !strings.Contains(sends[0], "deletable:") {
@@ -1790,16 +1789,16 @@ func TestVerdictRefusalTellsReviewerOnce(t *testing.T) {
 
 	// Second pass with same invalid screen, and third with a different invalid screen: never sent again.
 	eng.passProject(ctx, projID, false)
-	srv.SetScreen("t-rev", "❯ Your verdict was refused\n\n⏺ Still missing misses.\ndeletable: none\n"+
-		`<report>{"code":"code1","round":1,"head":"`+c1+`","verdict":"pass","majors":0}</report>`+"\n")
+	srv.SetScreen("t-rev", "› Your verdict was refused\n\n• Still missing misses.\n• deletable: none\n"+
+		`  <report>{"code":"code1","round":1,"head":"`+c1+`","verdict":"pass","majors":0}</report>`+"\n")
 	eng.passProject(ctx, projID, false)
 	if got := sendsTo(t, srv.Requests(), "t-rev"); len(got) != 1 {
 		t.Fatalf("repeated refusals sent %d times, want 1: %q", len(got), got)
 	}
 
 	// Reviewer fixes its reply and re-sends: accepted right away.
-	srv.SetScreen("t-rev", "❯ Your verdict was refused\n\n⏺ self-check misses: 0\ndeletable: none\n"+
-		`<report>{"code":"code1","round":1,"head":"`+c1+`","verdict":"pass","majors":0}</report>`+"\n")
+	srv.SetScreen("t-rev", "› Your verdict was refused\n\n• self-check misses: 0\n• deletable: none\n"+
+		`  <report>{"code":"code1","round":1,"head":"`+c1+`","verdict":"pass","majors":0}</report>`+"\n")
 	eng.passProject(ctx, projID, false)
 	cur, err := LoadState(paths.State(projID))
 	if err != nil {

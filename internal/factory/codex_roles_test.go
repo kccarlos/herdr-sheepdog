@@ -17,10 +17,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -46,22 +48,29 @@ func codexIdleScreen(echo string, secs int) string {
 }
 
 type codexRoles struct {
-	t     *testing.T
-	srv   *hctest.Server
-	cl    *hc.Client
-	eng   *Engine
-	paths Paths
-	id    string
-	repo  string
-	gh    string
-	runs  *[]hc.RunParams
-	now   *time.Time
-	logs  *bytes.Buffer
-	home  string // the engine's scoped Codex home
+	t       *testing.T
+	srv     *hctest.Server
+	cl      *hc.Client
+	eng     *Engine
+	paths   Paths
+	id      string
+	repo    string
+	gh      string
+	runs    *[]hc.RunParams
+	now     *time.Time
+	logs    *bytes.Buffer
+	home    string // the engine's scoped Codex home
+	revMu   sync.Mutex
+	revToks map[string]string
 }
 
 func (c *codexRoles) last() hc.RunParams { return (*c.runs)[len(*c.runs)-1] }
 func (c *codexRoles) pass()              { c.eng.passProject(context.Background(), c.id, false) }
+func (c *codexRoles) reviewerToken(runID string) string {
+	c.revMu.Lock()
+	defer c.revMu.Unlock()
+	return c.revToks[runID]
+}
 func (c *codexRoles) state() flow.State {
 	c.t.Helper()
 	s, err := LoadState(c.paths.State(c.id))
@@ -124,10 +133,17 @@ func newCodexRoles(t *testing.T, models map[string][]flow.Candidate, signedIn bo
 		}
 	}
 	t.Setenv("CODEX_HOME", codexHome)
-	c := &codexRoles{t: t, srv: hctest.New(t), paths: testPaths(t), runs: &[]hc.RunParams{}, logs: &bytes.Buffer{}}
+	c := &codexRoles{t: t, srv: hctest.New(t), paths: testPaths(t), runs: &[]hc.RunParams{}, logs: &bytes.Buffer{}, revToks: map[string]string{}}
 	now := codexRolesT0
 	c.now = &now
-	c.srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { *c.runs = append(*c.runs, p) }
+	c.srv.OnRun = func(term hc.Terminal, p hc.RunParams) {
+		*c.runs = append(*c.runs, p)
+		if p.Labels["sheepdog.role"] == flow.RoleReviewer {
+			c.revMu.Lock()
+			c.revToks[term.Address] = p.Env["SHEEPDOG_RUN_TOKEN"]
+			c.revMu.Unlock()
+		}
+	}
 	c.cl = hc.NewClient(c.srv.Path)
 	c.repo, _ = initGitRepoWithRemote(t)
 	githubOrigin(t, c.repo)
@@ -361,13 +377,18 @@ func TestCodexWorkerReadyAndMerge(t *testing.T) {
 		if rv == nil || rv.Round != round {
 			t.Fatalf("round %d review = %+v", round, rv)
 		}
-		c.srv.SetScreen(rv.RunID, "❯ prompt\n\n⏺ Looks good.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rv.Code+"\",\"round\":"+jsonNumber(round)+",\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
-		c.srv.SetStatus(rv.RunID, &hc.Status{App: "claude-code", State: "done"})
-		c.pass()
-		*c.now = c.now.Add(25 * time.Second)
-		c.pass()
-		if round == 1 {
-			c.pass() // N29 starts round 2
+		if err := submitFakeReviewerVerdict(t, c.eng, c.srv, c.paths, c.id, "T1", rv, c.reviewerToken(rv.RunID), flow.VerdictPass, 0, "Looks good.\n"); err != nil {
+			t.Fatalf("round %d review verdict: %v", round, err)
+		}
+		if rv.Reviewer.CLI == world.CodexCLI {
+			c.pass()
+			*c.now = c.now.Add(25 * time.Second)
+			c.pass()
+			if round == 1 {
+				c.pass() // N29 starts round 2
+			}
+		} else {
+			c.pass() // stops accepted reviewer and advances (starts round 2 or N42)
 		}
 	}
 	c.pass() // N42 asks merge

@@ -5,7 +5,6 @@ package factory
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -97,7 +96,7 @@ func TestAgyRound3AllRolesArgvSkipPermissionsAndNoGeminiKey(t *testing.T) {
 		t.Fatalf("reviewer did not launch on agy: %d runs", len(*r.runs))
 	}
 	revParams := r.last()
-	assertAgySkipPermArgv(t, "reviewer", agyReviewModel, revParams, "Review round 1", "<report>")
+	assertAgySkipPermArgv(t, "reviewer", agyReviewModel, revParams, "Review round 1", "factory report review")
 	prompt, _ := strings.CutPrefix(revParams.Argv[len(revParams.Argv)-1], "-i=")
 	if !strings.Contains(strings.ToLower(prompt), wantReadOnly) {
 		t.Fatalf("agy reviewer -i= first prompt lacks %q:\n%s", wantReadOnly, prompt)
@@ -194,119 +193,6 @@ func TestAgyRound3CoordinatorTrustDialogGetsOneKey(t *testing.T) {
 		r.pass()
 		if keys := terminalKeyCalls(r.srv.Requests(), coordID); len(keys) != 1 {
 			t.Fatalf("keys sent on later pass = %v, want still 1", keys)
-		}
-	})
-}
-
-// TestAgyRound3ReviewerThoughtNoBlankAndNudgeNoBlock verifies Decision E end-to-end:
-// (1) a reviewer reply immediately after `▸ Thought` + 1-line preview with no
-// blank line (with a blank line before `<report>` per reviewer.md) is accepted;
-// (2) an N29 nudge reply on Turn 2 with no `▸` or `●` block is accepted.
-func TestAgyRound3ReviewerThoughtNoBlankAndNudgeNoBlock(t *testing.T) {
-	t.Run("thought then reply with no blank line", func(t *testing.T) {
-		r, revID, c1, prompt := startAgyReviewerRig(t)
-		code := r.state().Tasks[0].Attempts[0].Review.Code
-
-		var b strings.Builder
-		b.WriteString("\n      ▄▀▀▄        Antigravity CLI 1.5.14\n")
-		b.WriteString("     ▀▀▀▀▀▀       account@example.invalid (Google AI Ultra)\n")
-		b.WriteString("    ▀▀▀▀▀▀▀▀      Gemini 4 Hydrogen (High)\n")
-		b.WriteString("   ▄▀▀    ▀▀▄     ~/wt\n")
-		b.WriteString("  ▄▀▀      ▀▀▄\n")
-		b.WriteString("────────────────────────────────────────────────────────────\n")
-		plines := strings.Split(strings.TrimRight(prompt, "\n"), "\n")
-		b.WriteString("> " + plines[0] + "\n")
-		for _, ln := range plines[1:] {
-			b.WriteString("  " + ln + "\n")
-		}
-		b.WriteString("\n● Bash(git diff main..HEAD) (ctrl+o to expand)\n")
-		b.WriteString("  +major: tool output must not count\n\n")
-		b.WriteString("▸ Thought for 3s, 913 tokens\n")
-		b.WriteString("  Checking item.go; major: thought preview must not count.\n")
-		// Real agy shape: NO blank line between collapsed thought preview and reply;
-		// blank line before <report> per reviewer.md.
-		b.WriteString("  major: item.go:1 lacks a package doc comment.\n")
-		b.WriteString("  self-check misses: 1\n")
-		b.WriteString("  class: none\n")
-		b.WriteString("  deletable: none\n")
-		b.WriteString("  not run: none\n\n")
-		fmt.Fprintf(&b, "  <report>{\"code\":%q,\"round\":1,\"head\":%q,\"verdict\":\"changes\",\"majors\":1}</report>\n\n", code, c1)
-		b.WriteString("────────────────────────────────────────────────────────────────────────────────\n")
-		b.WriteString("> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)\n")
-		b.WriteString("────────────────────────────────────────────────────────────────────────────────\n")
-		b.WriteString("esc to cancel                                  auto · Gemini 4 Hydrogen · high\n")
-
-		r.srv.SetScreen(revID, b.String())
-		r.srv.SetStatus(revID, &hc.Status{App: "antigravity", State: "done", Msg: "Found one major issue."})
-		*r.now = r.now.Add(5 * time.Second)
-		r.pass()
-		*r.now = r.now.Add(25 * time.Second)
-		r.pass()
-
-		a := r.state().Tasks[0].Attempts[0]
-		if a.Review != nil || len(a.Rounds) != 1 {
-			t.Fatalf("after thought-then-reply without blank line: review=%+v rounds=%+v (logs:\n%s)", a.Review, a.Rounds, r.logs.String())
-		}
-		rnd := a.Rounds[0]
-		if rnd.Verdict != flow.VerdictChanges || rnd.Majors != 1 || rnd.SelfCheckMisses == nil || *rnd.SelfCheckMisses != 1 {
-			t.Fatalf("round 1 = %+v, want changes with 1 major and 1 miss", rnd)
-		}
-		body, err := os.ReadFile(rnd.ReportPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(body), "item.go:1 lacks a package doc comment") {
-			t.Errorf("saved report missing finding:\n%s", string(body))
-		}
-		if strings.Contains(string(body), "thought preview must not count") || strings.Contains(string(body), "tool output must not count") {
-			t.Errorf("saved report leaked thought or tool output:\n%s", string(body))
-		}
-	})
-
-	t.Run("N29 nudge answer with no block appended on turn 2", func(t *testing.T) {
-		r, revID, c1, prompt := startAgyReviewerRig(t)
-		code := r.state().Tasks[0].Attempts[0].Review.Code
-
-		// Turn 1 ends idle without <report>.
-		turn1 := formatAgyScreen(prompt, "Checked item.go; all tests pass.")
-		r.srv.SetScreen(revID, turn1)
-		r.srv.SetStatus(revID, &hc.Status{App: "antigravity", State: "done", Msg: "Checked item.go; all tests pass."})
-		*r.now = r.now.Add(5 * time.Second)
-		r.pass()
-		*r.now = r.now.Add(25 * time.Second)
-		r.pass() // N29 sends nudge
-
-		sends := sendsTo(t, r.srv.Requests(), revID)
-		if len(sends) != 1 || !strings.Contains(sends[0], "You went idle with no report tag") {
-			t.Fatalf("sends to agy reviewer = %q, want 1 N29 nudge", sends)
-		}
-
-		// Turn 2 appends the echoed nudge prompt and direct reply with NO ▸ or ● block.
-		idxBox := strings.Index(turn1, "────────────────────────────────────────────────────────────────────────────────\n> Auto mode:")
-		if idxBox < 0 {
-			t.Fatalf("missing input box in turn1")
-		}
-		turn2 := turn1[:idxBox] +
-			"────────────────────────────────────────────────────────────\n" +
-			"> " + sends[0] + "\n\n" +
-			"  Checked item.go and proofs; everything matches.\n" +
-			"  self-check misses: 0\n" +
-			"  class: none\n" +
-			"  deletable: none\n" +
-			"  not run: none\n" +
-			fmt.Sprintf("  <report>{\"code\":%q,\"round\":1,\"head\":%q,\"verdict\":\"pass\",\"majors\":0}</report>\n\n", code, c1) +
-			turn1[idxBox:]
-
-		r.srv.SetScreen(revID, turn2)
-		r.srv.SetStatus(revID, &hc.Status{App: "antigravity", State: "done", Msg: "Added report tag."})
-		*r.now = r.now.Add(5 * time.Second)
-		r.pass()
-		*r.now = r.now.Add(25 * time.Second)
-		r.pass()
-
-		a := r.state().Tasks[0].Attempts[0]
-		if a.Review != nil || len(a.Rounds) != 1 || a.Rounds[0].Verdict != flow.VerdictPass {
-			t.Fatalf("after Turn 2 nudge reply without block: review=%+v rounds=%+v (logs:\n%s)", a.Review, a.Rounds, r.logs.String())
 		}
 	})
 }

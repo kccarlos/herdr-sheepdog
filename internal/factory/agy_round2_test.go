@@ -18,43 +18,6 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
 
-func formatAgyScreen(prompt, reply string) string {
-	var b strings.Builder
-	b.WriteString("\n      ▄▀▀▄        Antigravity CLI 1.5.14\n")
-	b.WriteString("     ▀▀▀▀▀▀       account@example.invalid (Google AI Ultra)\n")
-	b.WriteString("    ▀▀▀▀▀▀▀▀      Gemini 4 Hydrogen (High)\n")
-	b.WriteString("   ▄▀▀    ▀▀▄     ~/wt\n")
-	b.WriteString("  ▄▀▀      ▀▀▄\n")
-	b.WriteString("────────────────────────────────────────────────────────────\n")
-	lines := strings.Split(strings.TrimRight(prompt, "\n"), "\n")
-	if len(lines) > 0 {
-		b.WriteString("> " + lines[0] + "\n")
-		for _, ln := range lines[1:] {
-			b.WriteString("  " + ln + "\n")
-		}
-	}
-	b.WriteString("\n▸ Thought for 4s, 210 tokens\n")
-	b.WriteString("  Checking the diff and running tests.\n")
-	b.WriteString("  major: thought text must never count as a finding.\n")
-	b.WriteString("  deletable: thought text must never count.\n\n")
-	b.WriteString("● Bash(git diff main..HEAD) (ctrl+o to expand)\n")
-	b.WriteString("  +major: tool output must never count as a finding.\n")
-	b.WriteString("  +self-check misses: 9\n")
-	b.WriteString("  +deletable: tool output must never count.\n\n")
-	b.WriteString("● Read(~/wt/item.go) (ctrl+o to expand)\n\n")
-	if reply != "" {
-		for _, ln := range strings.Split(strings.TrimRight(reply, "\n"), "\n") {
-			b.WriteString("  " + ln + "\n")
-		}
-		b.WriteString("\n")
-	}
-	b.WriteString("────────────────────────────────────────────────────────────────────────────────\n")
-	b.WriteString("> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)\n")
-	b.WriteString("────────────────────────────────────────────────────────────────────────────────\n")
-	b.WriteString("esc to cancel                                  auto · Gemini 4 Hydrogen · high\n")
-	return b.String()
-}
-
 func startAgyReviewerRig(t *testing.T) (*agyRig, string, string, string) {
 	t.Helper()
 	r := newAgyRig(t, map[string][]flow.Candidate{
@@ -98,144 +61,46 @@ func startAgyReviewerRig(t *testing.T) (*agyRig, string, string, string) {
 	return r, rv.RunID, c1, prompt
 }
 
-// TestAgyReviewerCleanPassWithEchoedTemplateAndToolBlocks verifies that a clean
-// pass (majors: 0) from an agy reviewer is accepted even though the echoed
-// reviewer.md prompt contains a `major:` line and template <report>, and the
-// screen includes `▸ Thought` and `● Bash`/`● Read` blocks and agy's input box.
-func TestAgyReviewerCleanPassWithEchoedTemplateAndToolBlocks(t *testing.T) {
-	r, revID, c1, prompt := startAgyReviewerRig(t)
-	code := r.state().Tasks[0].Attempts[0].Review.Code
-
-	reply := strings.Join([]string{
-		"Checked item.go and proofs; everything matches.",
-		"self-check misses: 0",
-		"class: none",
-		"deletable: none",
-		"not run: none",
-		fmt.Sprintf(`<report>{"code":%q,"round":1,"head":%q,"verdict":"pass","majors":0}</report>`, code, c1),
-	}, "\n")
-	r.srv.SetScreen(revID, formatAgyScreen(prompt, reply))
-	r.srv.SetStatus(revID, &hc.Status{App: "antigravity", State: "done", Msg: "Checked item.go and proofs."})
-
-	*r.now = r.now.Add(5 * time.Second)
-	r.pass() // R9 -> working
-	*r.now = r.now.Add(25 * time.Second)
-	r.pass() // R20 -> idle -> ReadReport -> acceptVerdictLocked
-
-	st := r.state()
-	a := st.Tasks[0].Attempts[0]
-	if a.Review != nil || len(a.Rounds) != 1 {
-		t.Fatalf("after clean agy pass: review=%+v rounds=%+v, want accepted round 1 (logs:\n%s)", a.Review, a.Rounds, r.logs.String())
-	}
-	rnd := a.Rounds[0]
-	if rnd.Verdict != flow.VerdictPass || rnd.Majors != 0 || rnd.SelfCheckMisses == nil || *rnd.SelfCheckMisses != 0 {
-		t.Fatalf("round 1 = %+v, want pass with 0 majors and 0 self-check misses", rnd)
-	}
-	body, err := os.ReadFile(rnd.ReportPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, leaked := range []string{"You review task", "is only for what is wrong", "Thought for 4s", "Bash(git diff", "self-check misses: 9", "Auto mode:", "esc to cancel"} {
-		if strings.Contains(string(body), leaked) {
-			t.Errorf("saved report %s leaked %q:\n%s", rnd.ReportPath, leaked, string(body))
-		}
-	}
-}
-
-// TestAgyReviewerOneMajorAcceptedAndRecorded verifies that an agy reviewer reply
-// with one real `major:` line and `majors: 1` is accepted (ignoring `major:`
-// in the echoed reviewer template, thought block, and tool block).
-func TestAgyReviewerOneMajorAcceptedAndRecorded(t *testing.T) {
-	r, revID, c1, prompt := startAgyReviewerRig(t)
-	code := r.state().Tasks[0].Attempts[0].Review.Code
-
-	reply := strings.Join([]string{
-		"major: item.go:1 lacks a package doc comment or exported symbol.",
-		"self-check misses: 1",
-		"class: none",
-		"deletable: none",
-		"not run: none",
-		fmt.Sprintf(`<report>{"code":%q,"round":1,"head":%q,"verdict":"changes","majors":1}</report>`, code, c1),
-	}, "\n")
-	r.srv.SetScreen(revID, formatAgyScreen(prompt, reply))
-	r.srv.SetStatus(revID, &hc.Status{App: "antigravity", State: "done", Msg: "Found one major issue."})
-
-	*r.now = r.now.Add(5 * time.Second)
-	r.pass()
-	*r.now = r.now.Add(25 * time.Second)
-	r.pass()
-
-	st := r.state()
-	a := st.Tasks[0].Attempts[0]
-	if a.Review != nil || len(a.Rounds) != 1 {
-		t.Fatalf("after agy 1-major verdict: review=%+v rounds=%+v, want accepted round 1 (logs:\n%s)", a.Review, a.Rounds, r.logs.String())
-	}
-	rnd := a.Rounds[0]
-	if rnd.Verdict != flow.VerdictChanges || rnd.Majors != 1 || rnd.SelfCheckMisses == nil || *rnd.SelfCheckMisses != 1 {
-		t.Fatalf("round 1 = %+v, want changes with 1 major and 1 miss", rnd)
-	}
-	body, err := os.ReadFile(rnd.ReportPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(body), "item.go:1 lacks a package doc comment") {
-		t.Errorf("saved report missing real major finding:\n%s", string(body))
-	}
-	if strings.Contains(string(body), "tool output must never count") || strings.Contains(string(body), "is only for what is wrong") {
-		t.Errorf("saved report leaked echoed prompt or tool block:\n%s", string(body))
-	}
-}
-
 // TestAgyReviewerMissingReportNudgedOnceByN29 verifies that when an agy
-// reviewer goes idle without a <report> tag, the echoed template's sample
-// <report> tag reads as ReportNotYet (so N29 nudges once) and never triggers
-// invalid_report refusal.
+// reviewer goes idle without submitting a verdict, N29 nudges it once to run
+// `factory report review` (never logging invalid_report), and a subsequent
+// report review command is accepted and stops the reviewer on the next pass.
 func TestAgyReviewerMissingReportNudgedOnceByN29(t *testing.T) {
-	r, revID, c1, prompt := startAgyReviewerRig(t)
-	code := r.state().Tasks[0].Attempts[0].Review.Code
+	r, revID, _, prompt := startAgyReviewerRig(t)
 
-	// First turn ends without <report>, while the echoed prompt above has the template tag.
-	r.srv.SetScreen(revID, formatAgyScreen(prompt, "Checked item.go; all tests pass."))
+	// First turn ends idle without calling `factory report review`.
+	r.srv.SetScreen(revID, "> "+prompt+"\n\n  Checked item.go; all tests pass.\n")
 	r.srv.SetStatus(revID, &hc.Status{App: "antigravity", State: "done", Msg: "Checked item.go; all tests pass."})
 
 	*r.now = r.now.Add(5 * time.Second)
 	r.pass() // R9 -> working
 	*r.now = r.now.Add(25 * time.Second)
-	r.pass() // R20 -> idle (ReportNotYet) -> N29 nudges once
+	r.pass() // R20 -> idle -> N29 nudges once
 
 	rv := r.state().Tasks[0].Attempts[0].Review
 	if rv == nil || rv.RefusalSent {
-		t.Fatalf("missing <report> tag treated as refusal instead of N29 nudge: review=%+v logs:\n%s", rv, r.logs.String())
+		t.Fatalf("missing verdict treated as refusal instead of N29 nudge: review=%+v logs:\n%s", rv, r.logs.String())
 	}
 	if strings.Contains(r.logs.String(), `"invalid_report"`) {
-		t.Fatalf("missing <report> tag logged invalid_report from template echo:\n%s", r.logs.String())
+		t.Fatalf("missing verdict logged invalid_report:\n%s", r.logs.String())
 	}
 	sends := sendsTo(t, r.srv.Requests(), revID)
-	if len(sends) != 1 || !strings.Contains(sends[0], "You went idle with no report tag") {
-		t.Fatalf("sends to agy reviewer = %q, want 1 N29 nudge asking for report tag", sends)
+	if len(sends) != 1 || !strings.Contains(sends[0], "factory report review") || strings.Contains(sends[0], "<report>") {
+		t.Fatalf("sends to agy reviewer = %q, want 1 N29 nudge naming factory report review (no <report> tag)", sends)
 	}
 	if rv.Run == nil || rv.Run.State != flow.PhaseWorking {
 		t.Fatalf("after N29 nudge state = %+v, want working", rv.Run)
 	}
 
-	// Reviewer replies with the report tag on the next turn and is accepted.
-	reply := strings.Join([]string{
-		"self-check misses: 0",
-		"class: none",
-		"deletable: none",
-		"not run: none",
-		fmt.Sprintf(`<report>{"code":%q,"round":1,"head":%q,"verdict":"pass","majors":0}</report>`, code, c1),
-	}, "\n")
-	r.srv.SetScreen(revID, formatAgyScreen(prompt, reply))
-	r.srv.SetStatus(revID, &hc.Status{App: "antigravity", State: "done", Msg: "Added report tag."})
-	*r.now = r.now.Add(5 * time.Second)
-	r.pass()
-	*r.now = r.now.Add(25 * time.Second)
-	r.pass()
+	// Reviewer submits a pass verdict via the review report command and is accepted.
+	if err := submitFakeReviewerVerdict(t, r.eng, r.srv, r.paths, r.id, "T1", rv, r.reviewerToken(revID), flow.VerdictPass, 0, "Checked item.go; all tests pass.\n"); err != nil {
+		t.Fatalf("report review after nudge: %v", err)
+	}
+	r.pass() // stops accepted reviewer silently
 
 	a := r.state().Tasks[0].Attempts[0]
-	if a.Review != nil || len(a.Rounds) != 1 || a.Rounds[0].Verdict != flow.VerdictPass {
-		t.Fatalf("after nudge reply: review=%+v rounds=%+v, want round 1 pass", a.Review, a.Rounds)
+	if len(a.Rounds) != 1 || a.Rounds[0].Verdict != flow.VerdictPass || (a.Review != nil && a.Review.RunID == revID) {
+		t.Fatalf("after nudge command verdict: review=%+v rounds=%+v, want round 1 pass with rev1 stopped", a.Review, a.Rounds)
 	}
 }
 
