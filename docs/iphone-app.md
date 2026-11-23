@@ -450,7 +450,9 @@ crossed bell. A computer without this feature does not show the controls.
 
 When an agent needs you, the daemon sends a time-sensitive notification through
 Apple's push service, even if the app is closed. **Approve** and **Decline**
-work from it (both need your passcode); tapping it opens that agent.
+work from it (both need your passcode); tapping it opens that agent. A factory
+question has no Approve or Decline on the notification: tap it to open the card
+and pick an option, or say the option.
 
 Apple only delivers a notification sent with the push key of the team that
 publishes the app, so there are three ways to set this up (`push.mode` in

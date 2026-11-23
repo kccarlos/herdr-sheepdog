@@ -69,7 +69,7 @@ func (s *Supervisor) syncFactoryAsks() {
 	s.factoryOpMu.Lock()
 	all := s.cfg.Factory.Asks(false)
 	var next []state.PendingAction
-	names, overrideIDs := make(map[string]string, len(all)), map[string]bool{}
+	names := make(map[string]string, len(all))
 	for _, a := range all {
 		if !a.Gated || a.Status != flow.AskStatusOpen {
 			continue
@@ -79,7 +79,6 @@ func (s *Supervisor) syncFactoryAsks() {
 			opts[i] = state.Option{Label: lbl, Recommended: lbl == a.Recommend}
 		}
 		pid := factoryAskPrefix + a.ID
-		overrideIDs[pid] = a.Kind == flow.KindOverride
 		if names[pid] = strings.TrimSpace(a.Task); names[pid] == "" {
 			names[pid] = strings.TrimSpace(a.Project)
 		}
@@ -99,11 +98,7 @@ func (s *Supervisor) syncFactoryAsks() {
 		if !slices.Contains(prev, p.ID) {
 			s.log.Log(logSource, "pending.created", p.PaneID, s.pendingCreated(p))
 			if s.cfg.Notifier != nil {
-				kind, pushOpts := push.KindApproval, s.pushOptions(p.Options)
-				if overrideIDs[p.ID] {
-					kind, pushOpts = push.KindBlocked, nil
-				}
-				notifies = append(notifies, push.Notification{EventID: "fask:" + p.ID, PendingID: p.ID, PaneID: p.PaneID, Kind: kind, Agent: s.cfg.Redactor.String(s.aliasOf(p.PaneID)), Text: s.cfg.Redactor.String(p.Question), Options: pushOpts, NeedsYou: true})
+				notifies = append(notifies, push.Notification{EventID: "fask:" + p.ID, PendingID: p.ID, PaneID: p.PaneID, Kind: push.KindBlocked, Agent: s.cfg.Redactor.String(s.aliasOf(p.PaneID)), Text: s.cfg.Redactor.String(p.Question), NeedsYou: true})
 			}
 		}
 	}

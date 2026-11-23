@@ -61,8 +61,6 @@ type AskEvent struct{ Kind, Answer, Why, By, ProofID, DeviceID string }
 var (
 	validAskKinds = []string{KindDecision, KindGate, KindRelease, KindPaidKey, KindDelete, KindInstall, KindReset, KindRule, KindOverride}
 	parenKeyRE    = regexp.MustCompile(`\([^()\s]+\)$`)
-	negWaitRE     = regexp.MustCompile(`^(?:no|not|don't|dont|do not|never|decline|reject|deny|cancel|abort|stop|wait|hold|defer|postpone|skip|pause)(?:$|[\s,.:;-])`)
-	yesOptRE      = regexp.MustCompile(`^yes(?:$|[\s,.:;-])`)
 )
 
 // DelegableAsk reports whether a delegation rule may answer a (design.md 4.3b, 7.1).
@@ -92,7 +90,7 @@ func StepAsk(a Ask, ev AskEvent, now time.Time) (Ask, string, Decision) {
 	return a, "", Decision{}
 }
 
-// ValidateAsk checks KB-ASK-6, KB-ASK-9 and KB-ASK-15 and returns the cleaned Ask.
+// ValidateAsk checks KB-ASK-6, KB-ASK-9 (parentheses) and KB-ASK-15 (AQ3) and returns the cleaned Ask.
 func ValidateAsk(a Ask) (Ask, string, string) {
 	a.Kind, a.Task, a.Gated = strings.TrimSpace(a.Kind), strings.TrimSpace(a.Task), strings.TrimSpace(a.Kind) != KindDecision
 	a.Targets = slices.Clone(a.Targets)
@@ -116,9 +114,6 @@ func ValidateAsk(a Ask) (Ask, string, string) {
 	a.Question, a.Options, a.Recommend = q, opts, CleanText(a.Recommend)
 	if a.Recommend == "" || !seen[a.Recommend] {
 		return Ask{}, "invalid_ask", "Recommended option must be one of the options."
-	}
-	if negWaitRE.MatchString(strings.ToLower(a.Recommend)) && !slices.ContainsFunc(opts, func(o string) bool { return yesOptRE.MatchString(strings.ToLower(o)) }) {
-		return Ask{}, "invalid_ask", "When the recommended option is negative or wait, another option must start with Yes."
 	}
 	return a, "", ""
 }
