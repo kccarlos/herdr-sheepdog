@@ -193,7 +193,10 @@ func TestEventTurnTimeout(t *testing.T) {
 	defer close(block)
 	m := braintest.NewModel(braintest.Step{Block: block})
 	h := newHarness(t, m, func(c *Config) {
-		c.AnnounceTurnTimeout, c.AnnounceTimeout = 50*time.Millisecond, 60*time.Millisecond
+		// Leave enough headroom for pre-step setup (transcript write,
+		// prompt assembly) under -race load so the call blocks inside
+		// the model rather than timing out before Generate runs.
+		c.AnnounceTurnTimeout, c.AnnounceTimeout = 400*time.Millisecond, 500*time.Millisecond
 		c.FinalGrace = -1
 	})
 	start := time.Now()
@@ -201,14 +204,26 @@ func TestEventTurnTimeout(t *testing.T) {
 	if err == nil || time.Since(start) > 2*time.Second {
 		t.Fatalf("err = %v after %s", err, time.Since(start))
 	}
-	fb := payload(h.log.ofType("brain.fallback")[0])
+	fbs := h.log.ofType("brain.fallback")
+	if len(fbs) != 1 {
+		t.Fatalf("brain.fallback = %v", fbs)
+	}
+	fb := payload(fbs[0])
 	if fb["reason"] != "timeout" || fb["kind"] != "announce" || fb["trigger"] != "event" {
 		t.Errorf("fallback = %v", fb)
 	}
-	if text := h.model.Calls()[0].Text(); !strings.Contains(text, "Event from the supervisor (announce): agent=\"auth\" event=\"done\" template=\"auth finished.\"\nPromises this event keeps (the user asked to be told; your line says so, with the result):\n- pr-1: \"tell me\" (when auth finishes)\nNothing has been said about this yet.") {
+	calls := h.model.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("model calls = %d, want 1", len(calls))
+	}
+	if text := calls[0].Text(); !strings.Contains(text, "Event from the supervisor (announce): agent=\"auth\" event=\"done\" template=\"auth finished.\"\nPromises this event keeps (the user asked to be told; your line says so, with the result):\n- pr-1: \"tell me\" (when auth finishes)\nNothing has been said about this yet.") {
 		t.Errorf("request = %s", text)
 	}
-	if step := payload(h.log.ofType("brain.step")[0]); step["prompt_tokens_est"] == nil {
+	steps := h.log.ofType("brain.step")
+	if len(steps) != 1 {
+		t.Fatalf("brain.step = %v", steps)
+	}
+	if step := payload(steps[0]); step["prompt_tokens_est"] == nil {
 		t.Errorf("brain.step on timeout lacks prompt_tokens_est: %v", step)
 	}
 }
