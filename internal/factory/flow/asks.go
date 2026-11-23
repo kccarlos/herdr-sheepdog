@@ -10,38 +10,49 @@ import (
 )
 
 const (
-	AskStatusOpen, AskStatusAnswered, AskStatusCancelled                                           = "open", "answered", "cancelled"
-	KindDecision, KindGate, KindRelease, KindPaidKey, KindDelete, KindInstall, KindReset, KindRule = "decision", "gate", "release", "paid-key", "delete", "install", "reset", "rule"
-	EvAskOpen, EvAskAnswer, EvAskCancel                                                            = "ask_open", "answer", "cancel"
-	AskNotifyOwner, AskDeliverAnswer, RefuseClosed                                                 = "notify_owner", "deliver_answer", "already_closed"
-	MaxAskQuestionLen, MinAskOptions, MaxAskOptions                                                = 300, 2, 9
-	GateOptionMerge, GateOptionHold                                                                = "Merge", "Hold"
-	N24OptionDrop, N24OptionContinue                                                               = "Drop", "Continue"
-	AskedByN24, AskedByN31                                                                         = "N24", "N31"
+	AskStatusOpen, AskStatusAnswered, AskStatusCancelled                                                         = "open", "answered", "cancelled"
+	KindDecision, KindGate, KindRelease, KindPaidKey, KindDelete, KindInstall, KindReset, KindRule, KindOverride = "decision", "gate", "release", "paid-key", "delete", "install", "reset", "rule", "override"
+	EvAskOpen, EvAskAnswer, EvAskCancel                                                                          = "ask_open", "answer", "cancel"
+	AskNotifyOwner, AskDeliverAnswer, RefuseClosed, RefuseNotDelegable                                           = "notify_owner", "deliver_answer", "already_closed", "not_delegable"
+	MaxAskQuestionLen, MinAskOptions, MaxAskOptions                                                              = 300, 2, 9
+	GateOptionMerge, GateOptionHold                                                                              = "Merge", "Hold"
+	N24OptionDrop, N24OptionContinue                                                                             = "Drop", "Continue"
+	OverrideOptionMerge, OverrideOptionCancel                                                                    = "Yes, merge now", "No, wait"
+	AskedByN24, AskedByN31                                                                                       = "N24", "N31"
 )
+
+// OverrideTarget is one task bound into an engine-filled override card (design.md 4.3b, plan.md 7.1).
+type OverrideTarget struct {
+	Task       string `json:"task"`
+	PR         int    `json:"pr,omitempty"`
+	Head       string `json:"head"`
+	Checks     Checks `json:"checks"`
+	Unreported bool   `json:"unreported,omitempty"`
+}
 
 // Ask is one structured question stored in State.Asks (design.md 3, 7.1).
 type Ask struct {
-	ID         string    `json:"id"`
-	Project    string    `json:"project,omitempty"`
-	Folder     string    `json:"folder,omitempty"`
-	Kind       string    `json:"kind"`
-	Gated      bool      `json:"gated"`
-	Question   string    `json:"question"`
-	Options    []string  `json:"options"`
-	Recommend  string    `json:"recommend"`
-	Task       string    `json:"task,omitempty"`
-	Head       string    `json:"head,omitempty"`
-	AskedBy    string    `json:"asked_by,omitempty"`
-	RunID      string    `json:"run_id,omitempty"`
-	At         time.Time `json:"at"`
-	Status     string    `json:"status"`
-	Answer     string    `json:"answer,omitempty"`
-	Why        string    `json:"why,omitempty"`
-	AnsweredAt time.Time `json:"answered_at,omitempty"`
-	AnsweredBy string    `json:"answered_by,omitempty"`
-	ProofID    string    `json:"proof_id,omitempty"`
-	DeviceID   string    `json:"device_id,omitempty"`
+	ID         string           `json:"id"`
+	Project    string           `json:"project,omitempty"`
+	Folder     string           `json:"folder,omitempty"`
+	Kind       string           `json:"kind"`
+	Gated      bool             `json:"gated"`
+	Question   string           `json:"question"`
+	Options    []string         `json:"options"`
+	Recommend  string           `json:"recommend"`
+	Task       string           `json:"task,omitempty"`
+	Head       string           `json:"head,omitempty"`
+	Targets    []OverrideTarget `json:"targets,omitempty"`
+	AskedBy    string           `json:"asked_by,omitempty"`
+	RunID      string           `json:"run_id,omitempty"`
+	At         time.Time        `json:"at"`
+	Status     string           `json:"status"`
+	Answer     string           `json:"answer,omitempty"`
+	Why        string           `json:"why,omitempty"`
+	AnsweredAt time.Time        `json:"answered_at,omitempty"`
+	AnsweredBy string           `json:"answered_by,omitempty"`
+	ProofID    string           `json:"proof_id,omitempty"`
+	DeviceID   string           `json:"device_id,omitempty"`
 }
 
 // AskEvent is one input to the pure ask table A2–A5 (design.md 7.1).

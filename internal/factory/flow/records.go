@@ -270,6 +270,7 @@ type Attempt struct {
 	Ready        []Ready    `json:"ready"`
 	Rejects      []Reject   `json:"rejects,omitempty"`
 	Rounds       []Round    `json:"rounds"`
+	Overrides    []Override `json:"overrides,omitempty"`
 	Accepts      []Accept   `json:"accepts"`
 	Acts         []Act      `json:"acts"`
 	Restarts     int        `json:"restarts,omitempty"`
@@ -403,6 +404,15 @@ func FirstLookPassRate(tasks []Task) (passed, reviewed int) {
 		}
 	}
 	return passed, reviewed
+}
+
+// Override records the owner's yes to an override card for this task at the
+// commit and checks state the card showed (design.md 3, 4.3b, plan.md 7.1).
+type Override struct {
+	Head        string `json:"head"`
+	ChecksShown Checks `json:"checks_shown"`
+	Spent       bool   `json:"spent,omitempty"`
+	ProofID     string `json:"proof_id,omitempty"`
 }
 
 // Accept records that the bar (or an override) accepted a commit.
