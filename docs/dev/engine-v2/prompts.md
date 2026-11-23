@@ -318,8 +318,9 @@ A finding needs a run or a reproduced state, with the command and its real outpu
 `major:` is only for what is wrong, unsafe, loses data, breaks a caller or leaves an outcome unmet; a product choice or a preference is not a finding, and style is at most `minor:`. [agy.md]
 A fix you propose gets the same restraint as the code: the smallest complete change; never propose weakening validation, data-loss handling, security or accessibility. [old template]
 A check you cannot run here goes in `--not-run` with the reason; do not wait on it. [KB-WKT-11; replay R1]
-Write your findings to `{findings_path}` (outside the worktree), one per line starting with plain `major:` or `minor:` (no bullets or bold), each with its file, line and run. [design.md 7.2; spike S-REV-2]
-Submit your verdict with one command (`pass` when 0 `major:` lines, `changes` when >= 1 `major:` line; `--self-check-misses` is a non-negative integer for findings the worker's checks should have caught; `--deletable` is required, `"none"` is an answer; for `pass` with no findings, you may omit the findings flag): [design.md 7.2; prompts.md 3.5]
+Write your findings to `{findings_path}` (outside the worktree), even on a `pass` (a `pass` simply has zero `major:` lines); never leave it empty. [design.md 7.2; spike S-REV-2]
+Include every finding one per line starting with plain `major:` or `minor:` (no bullets or bold) with `file:line` and run, plus `deletable: <text or none>` and `not run: <text or none>`. [design.md 7.2; prompts.md 3.5]
+Submit your verdict with one command (`pass` when 0 `major:` lines, `changes` when >= 1 `major:` line; `--self-check-misses` is a non-negative integer for findings the worker's checks should have caught; `--deletable` is required, `"none"` is an answer; always include the findings flag): [design.md 7.2; prompts.md 3.5]
 
 {sheepdog} factory report review <pass|changes> --code {code} --head {head} --self-check-misses <n> --deletable "<text or none>" --class "<text or none>" --not-run "<text or none>" --findings {findings_path}
 
