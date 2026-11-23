@@ -42,12 +42,7 @@ func (s *Supervisor) notify(a announcement, kept []state.Promise, text string) {
 		n.Kind = push.KindApproval
 		n.PendingID = a.pending
 		if p, _, ok := s.questionByID(a.pending); ok {
-			for i, o := range p.Options {
-				if o.Meta {
-					continue
-				}
-				n.Options = append(n.Options, push.Option{Index: i + 1, Label: s.cfg.Redactor.String(o.Label)})
-			}
+			n.Options = s.pushOptions(p.Options)
 		}
 	case a.event == brain.PromiseEventBlocked:
 		n.Kind = push.KindBlocked
@@ -55,4 +50,14 @@ func (s *Supervisor) notify(a announcement, kept []state.Promise, text string) {
 		n.Kind = a.event
 	}
 	s.cfg.Notifier.Notify(n)
+}
+
+func (s *Supervisor) pushOptions(opts []state.Option) []push.Option {
+	out := make([]push.Option, 0, len(opts))
+	for i, o := range opts {
+		if !o.Meta {
+			out = append(out, push.Option{Index: i + 1, Label: s.cfg.Redactor.String(o.Label)})
+		}
+	}
+	return out
 }
