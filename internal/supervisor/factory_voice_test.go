@@ -9,8 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/genai"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 )
 
 type fakeFactoryProject struct {
@@ -179,9 +184,37 @@ func (f *fakeFactory) firstAsk() flow.Ask {
 	return f.asks[0]
 }
 
-func TestFactoryAskVoiceAnswerRequiresLiveVoice(t *testing.T) {
+func (f *fakeFactory) mintedProofs() []factory.AnswerProof {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]factory.AnswerProof, 0, len(f.proofs))
+	for _, p := range f.proofs {
+		out = append(out, p)
+	}
+	return out
+}
+
+func TestFactoryVoiceBareWordsNeverAnswerAskAndDisplacementRailHolds(t *testing.T) {
 	eng := newFakeFactory()
-	h := newHarness(t, func(c *Config) { c.Factory = eng })
+	eng.projects["demo"] = &fakeFactoryProject{
+		id:         "demo",
+		folder:     "/work/demo",
+		goal:       "ship slice 6",
+		running:    true,
+		activeRuns: []string{"demo-coord", "demo-T1-w1"},
+		tasks:      []string{"T1", "T2"},
+	}
+
+	m := braintest.NewModel(
+		braintest.Step{Text: braintest.Reply("Nothing is waiting for yes.", "")},
+		braintest.Step{Text: braintest.Reply("Okay, standing by.", "")},
+		braintest.Step{Text: braintest.Reply("Sure, standing by.", "")},
+	)
+	h := newBrainHarness(t, m, func(c *Config) {
+		c.Factory = eng
+		c.bareAnswers = false
+	})
+
 	runCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -199,53 +232,108 @@ func TestFactoryAskVoiceAnswerRequiresLiveVoice(t *testing.T) {
 		Kind:      flow.KindRelease,
 		Gated:     true,
 		Question:  "Cut release v1.2 now?",
-		Options:   []string{"Yes, ship it", "Hold"},
-		Recommend: "Yes, ship it",
+		Options:   []string{"Tag 0.1.31", "Hold"},
+		Recommend: "Tag 0.1.31",
 		Task:      "T1",
 		At:        t0,
 	})
 
-	// Give the ask bridge a moment to consume Engine.Changes.
 	deadline := time.Now().Add(200 * time.Millisecond)
 	for time.Now().Before(deadline) && h.log.count("pending.created") == 0 {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// 1. Model-initiated relay without user speech must not answer.
-	h.clock.Advance(time.Second)
-	h.relay("yes")
-	if a := eng.firstAsk(); a.Status != flow.AskStatusOpen {
-		t.Fatalf("model-initiated relay answered ask: %+v", a)
+	// 1. Saying "yes", "okay" or "sure" never answers a factory ask or mints proof,
+	// and each utterance goes through the normal orchestrator path.
+	for i, word := range []string{"yes", "okay", "sure"} {
+		h.clock.Advance(time.Second)
+		res := h.say(word)
+		if a := eng.firstAsk(); a.Status != flow.AskStatusOpen {
+			t.Fatalf("saying %q answered factory ask: %+v", word, a)
+		}
+		if proofs := eng.mintedProofs(); len(proofs) != 0 {
+			t.Fatalf("saying %q minted factory proof(s): %+v", word, proofs)
+		}
+		if gotTurns := h.log.count("brain.turn"); gotTurns != i+1 {
+			t.Fatalf("after %q: brain.turn = %d, want %d (utterance bypassed orchestrator)", word, gotTurns, i+1)
+		}
+		if res.Spoken == "" {
+			t.Fatalf("after %q: empty orchestrator reply", word)
+		}
 	}
 
-	// 2. Typed input (not live voice) must not answer a gated ask.
+	// 2. Another agent's displacement-rail question still gets its answer via the
+	// orchestrator while a silent background factory ask is open (even when an
+	// instruction on docs replaced the single PendingAction slot, and when docs
+	// blocks unannounced after auth's question was told).
+	h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
+	h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
+	h.block(authPane, "codex-approval-prompt.screen.txt")
+	authLine := h.lastPushText()
+	h.speak(authLine)
 	h.clock.Advance(time.Second)
-	h.sup.ShepherdInput(InputTyped, "yes")
-	h.relay("yes")
-	if a := eng.firstAsk(); a.Status != flow.AskStatusOpen {
-		t.Fatalf("typed input answered gated ask: %+v", a)
+
+	// docs blocks unannounced (displacing the pending slot while auth remains told in s.told),
+	// and the user says "yes" meant for auth.
+	h.block(docsPane, "codex-git-prompt.screen.txt")
+	m.Add(
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"y"}})}},
+		braintest.Step{Text: braintest.Reply("Told auth yes.", "")},
+	)
+	h.clock.Advance(500 * time.Millisecond)
+	res := h.say("yes")
+	if res.Spoken != "Told auth yes." {
+		t.Fatalf("orchestrator reply for auth's told question = %+v, want Told auth yes.", res)
+	}
+	if got := h.keysTo(authPane); got != 1 {
+		t.Fatalf("keys sent to auth = %d, want 1", got)
+	}
+	if got := h.keysTo(docsPane); got != 0 {
+		t.Fatalf("keys sent to unannounced docs = %d, want 0", got)
+	}
+	if a := eng.firstAsk(); a.Status != flow.AskStatusOpen || len(eng.mintedProofs()) != 0 {
+		t.Fatalf("factory ask changed during worker answer: ask=%+v proofs=%+v", a, eng.mintedProofs())
 	}
 
-	// 3. Disconnected voice must not answer a gated ask.
-	h.clock.Advance(time.Second)
-	h.sup.SetVoiceConnected(false)
-	h.hear("yes")
-	h.relay("yes")
-	if a := eng.firstAsk(); a.Status != flow.AskStatusOpen {
-		t.Fatalf("disconnected voice answered gated ask: %+v", a)
+	// Also verify displacement-rail refusal still blocks unannounced docs when user says "okay".
+	h.srv.SetScreen(authPane, "running tests\n")
+	h.transition(authPane, herdr.StateBlocked, herdr.StateWorking)
+	m.Add(
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "docs", "keys": []any{"y"}})}},
+		braintest.Step{Text: braintest.Reply("Docs just asked a new question; confirm first.", "")},
+	)
+	h.clock.Advance(500 * time.Millisecond)
+	_ = h.say("okay")
+	if got := h.keysTo(docsPane); got != 0 || h.displacedBlocks() != 1 {
+		t.Fatalf("displacement rail on docs: keys=%d displacedBlocks=%d, want 0 and 1", got, h.displacedBlocks())
+	}
+	if a := eng.firstAsk(); a.Status != flow.AskStatusOpen || len(eng.mintedProofs()) != 0 {
+		t.Fatalf("factory ask changed on okay: ask=%+v proofs=%+v", a, eng.mintedProofs())
 	}
 
-	// 4. Live voice answers the gated ask with a minted voice proof.
+	// 3. Voice "stop the factory" and "start the factory" still work.
 	h.clock.Advance(time.Second)
-	h.sup.SetVoiceConnected(true)
-	h.hear("yes")
-	h.relay("yes")
-	a := eng.firstAsk()
-	if a.Status != flow.AskStatusAnswered || a.Answer != "Yes, ship it" {
-		t.Fatalf("live voice did not answer ask: %+v", a)
+	stopRes := h.say("stop the factory")
+	if stopRes.Spoken == "" {
+		t.Fatal("stop the factory returned empty spoken reply")
 	}
-	if a.ProofID == "" || a.DeviceID == "" || a.DeviceID == "local" {
-		t.Fatalf("live voice answer missing valid proof/device: %+v", a)
+	eng.mu.Lock()
+	stopped := slices.Contains(eng.stopped, "demo") && !eng.projects["demo"].running
+	eng.mu.Unlock()
+	if !stopped {
+		t.Fatalf("stop the factory did not stop demo")
+	}
+
+	h.clock.Advance(time.Second)
+	startRes := h.say("start the factory")
+	if startRes.Spoken == "" {
+		t.Fatal("start the factory returned empty spoken reply")
+	}
+	eng.mu.Lock()
+	restarted := len(eng.started) == 1 && eng.projects["demo"].running
+	eng.mu.Unlock()
+	if !restarted {
+		t.Fatalf("start the factory did not restart demo")
 	}
 }
 
