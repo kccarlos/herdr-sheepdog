@@ -64,11 +64,11 @@ func (s *Supervisor) syncFactoryAsks() {
 		if !slices.Contains(prev, p.ID) {
 			s.log.Log(logSource, "pending.created", p.PaneID, s.pendingCreated(p))
 			if s.cfg.Notifier != nil {
-				var pushOpts []push.Option
-				if !overrideIDs[p.ID] {
-					pushOpts = s.pushOptions(p.Options)
+				kind, pushOpts := push.KindApproval, s.pushOptions(p.Options)
+				if overrideIDs[p.ID] {
+					kind, pushOpts = push.KindBlocked, nil
 				}
-				s.cfg.Notifier.Notify(push.Notification{EventID: "fask:" + p.ID, PendingID: p.ID, PaneID: p.PaneID, Kind: push.KindApproval, Agent: s.cfg.Redactor.String(s.aliasOf(p.PaneID)), Text: s.cfg.Redactor.String(p.Question), Options: pushOpts, NeedsYou: true})
+				s.cfg.Notifier.Notify(push.Notification{EventID: "fask:" + p.ID, PendingID: p.ID, PaneID: p.PaneID, Kind: kind, Agent: s.cfg.Redactor.String(s.aliasOf(p.PaneID)), Text: s.cfg.Redactor.String(p.Question), Options: pushOpts, NeedsYou: true})
 			}
 		}
 	}

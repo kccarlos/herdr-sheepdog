@@ -123,7 +123,11 @@ func (s *Server) handleFactoryAsks(w http.ResponseWriter, _ *http.Request) {
 	asks := []factoryAskView{}
 	for _, a := range asker.Asks(true) {
 		if a.Gated && a.Kind != flow.KindDecision {
-			asks = append(asks, factoryAskView{Ask: a, Command: flow.FormatAskCommand(a)})
+			v := factoryAskView{Ask: a}
+			if a.Kind == flow.KindOverride {
+				v.Command = flow.FormatAskCommand(a)
+			}
+			asks = append(asks, v)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"protocol": 1, "asks": asks})

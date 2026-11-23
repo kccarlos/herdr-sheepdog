@@ -145,14 +145,12 @@ func (e *Engine) acceptOverrideAskLocked(id string, s *flow.State, role, runID s
 	if role != flow.RoleCoordinator {
 		return e.refuse(id, "kind_not_allowed", fmt.Sprintf("A %s may not open an override ask.", role))
 	}
-	if len(rawTasks) == 0 && strings.TrimSpace(rawTask) != "" {
-		rawTasks = []string{rawTask}
-	}
-	if len(rawTasks) == 0 {
-		return e.refuse(id, "invalid_ask", "An override ask must name at least one task.")
+	if strings.TrimSpace(rawTask) != "" || len(rawTasks) == 0 {
+		return e.refuse(id, "invalid_ask", "An override ask must name at least one task in tasks.")
 	}
 	seen := make(map[string]bool, len(rawTasks))
 	taskIdxs := make([]int, 0, len(rawTasks))
+	names := make([]string, 0, len(rawTasks))
 	for _, raw := range rawTasks {
 		tid := strings.TrimSpace(raw)
 		if tid == "" || seen[tid] {
@@ -168,11 +166,10 @@ func (e *Engine) acceptOverrideAskLocked(id string, s *flow.State, role, runID s
 			return e.refuse(id, "invalid_ask", fmt.Sprintf("Task %q has no ready report.", tid))
 		}
 		seen[tid] = true
-		taskIdxs = append(taskIdxs, ti)
+		taskIdxs, names = append(taskIdxs, ti), append(names, tid)
 	}
 	repoCtx := world.GitRepository(context.Background(), s.Project.Folder)
 	targets := make([]flow.OverrideTarget, 0, len(taskIdxs))
-	names := make([]string, 0, len(taskIdxs))
 	for _, ti := range taskIdxs {
 		t := s.Tasks[ti]
 		att := flow.OpenAttempt(t)
@@ -188,8 +185,11 @@ func (e *Engine) acceptOverrideAskLocked(id string, s *flow.State, role, runID s
 			unreported = !clean || rel == flow.RelAhead || rel == flow.RelDiverged
 		}
 		p := e.prs[att.Worktree]
-		if (!p.Answered || p.State != flow.PROpen || p.Head != h) && att.PR > 0 && e.git != nil {
+		if e.git != nil {
 			p = e.readPRLocked(repoCtx, id, s, ti)
+		}
+		if p.State == flow.PRClosed || p.State == flow.PRMerged {
+			return e.refuse(id, "invalid_ask", fmt.Sprintf("Task %q PR is already %s.", t.ID, p.State))
 		}
 		prNum := att.PR
 		if prNum == 0 && p.State == flow.PROpen {
@@ -202,7 +202,6 @@ func (e *Engine) acceptOverrideAskLocked(id string, s *flow.State, role, runID s
 			checks = flow.ChecksUnreadable
 		}
 		targets = append(targets, flow.OverrideTarget{Task: t.ID, PR: prNum, Head: h, Checks: checks, Unreported: unreported})
-		names = append(names, t.ID)
 	}
 	ask, row, dec, code, why := e.openEngineAskLocked(id, s, flow.Ask{
 		Kind:      flow.KindOverride,
@@ -240,13 +239,8 @@ func (e *Engine) answerAskLocked(id string, s *flow.State, ai int, option, why, 
 	if a.Status != flow.AskStatusOpen {
 		return e.refuse(id, flow.RefuseClosed, fmt.Sprintf("Ask %q is already %s.", a.ID, a.Status))
 	}
-	var resolved string
-	var ok bool
-	if a.Kind == flow.KindOverride {
-		if slices.Contains(a.Options, option) {
-			resolved, ok = option, true
-		}
-	} else {
+	resolved, ok := option, slices.Contains(a.Options, option)
+	if a.Kind != flow.KindOverride {
 		resolved, ok = flow.ResolveAskOption(a.Options, option)
 	}
 	if a.Gated || proof != (AnswerProof{}) {
@@ -260,9 +254,6 @@ func (e *Engine) answerAskLocked(id string, s *flow.State, ai int, option, why, 
 		return e.refuse(id, "invalid_option", fmt.Sprintf("%q is not one of ask %q's options.", option, a.ID))
 	}
 	next, row, dec := flow.StepAsk(a, flow.AskEvent{Kind: flow.EvAskAnswer, Answer: resolved, Why: why, By: by, ProofID: proof.ID, DeviceID: proof.DeviceID}, now)
-	if dec.Why == flow.RefuseNotDelegable {
-		return e.refuse(id, flow.RefuseNotDelegable, fmt.Sprintf("Ask %q (%s) cannot be answered by a delegation rule.", a.ID, a.Kind))
-	}
 	msg := fmt.Sprintf("Answer to %s: %s", next.ID, next.Answer) + map[bool]string{true: " — " + next.Why}[next.Why != ""]
 	input := map[string]any{"verb": "answer", "ask": next.ID, "option": next.Answer, "why": next.Why, "proof_id": next.ProofID, "device_id": next.DeviceID}
 	if slices.Contains(dec.Asked, flow.AskDeliverAnswer) {
@@ -297,7 +288,7 @@ func (e *Engine) answerAskLocked(id string, s *flow.State, ai int, option, why, 
 	if next.Kind == flow.KindOverride && next.AnsweredBy == owner && next.Answer == flow.OverrideOptionMerge {
 		for _, tgt := range next.Targets {
 			if ti := slices.IndexFunc(s.Tasks, func(t flow.Task) bool { return t.ID == tgt.Task }); ti >= 0 && !flow.Ended(s.Tasks[ti]) {
-				if att := flow.OpenAttempt(s.Tasks[ti]); att != nil {
+				if att := flow.OpenAttempt(s.Tasks[ti]); att != nil && (slices.ContainsFunc(att.Ready, func(r flow.Ready) bool { return r.Head == tgt.Head }) || slices.ContainsFunc(att.MergeOnly, func(m flow.Advance) bool { return m.From == tgt.Head || m.To == tgt.Head })) {
 					att.Overrides = append(att.Overrides, flow.Override{Head: tgt.Head, ChecksShown: tgt.Checks, Spent: false, ProofID: next.ProofID})
 				}
 			}
