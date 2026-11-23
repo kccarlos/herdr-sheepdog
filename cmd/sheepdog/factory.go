@@ -168,8 +168,12 @@ func runFactoryStatus(ctx context.Context, args []string, stdout, stderr io.Writ
 	cfg, err := config.Load(*configPath)
 	var tasks []factory.TaskStatus
 	if err == nil {
+		queryFolder := folder
+		if queryFolder != "" {
+			queryFolder = canonicalFolder(queryFolder)
+		}
 		var resp struct{ Tasks []factory.TaskStatus }
-		if getJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/factory/status?"+url.Values{"folder": {folder}, "data_dir": {cfg.DataDir}}.Encode(), &resp) == nil {
+		if getJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/factory/status?"+url.Values{"folder": {queryFolder}, "data_dir": {cfg.DataDir}}.Encode(), &resp) == nil {
 			tasks = resp.Tasks
 		} else {
 			tasks, err = factory.ProjectStatus(factory.Paths{DataDir: cfg.DataDir}, folder)
@@ -597,6 +601,27 @@ func resolveTargetFolder(raw, home string) string {
 		return filepath.Join(wd, f)
 	}
 	return filepath.Clean(f)
+}
+
+// canonicalFolder resolves symlinks on path in the owner's login session,
+// retaining any missing suffix below an existing directory.
+func canonicalFolder(path string) string {
+	for cur, tail := filepath.Clean(path), ""; ; {
+		if real, err := filepath.EvalSymlinks(cur); err == nil {
+			if tail == "" {
+				return real
+			}
+			return filepath.Join(real, tail)
+		} else if _, lerr := os.Lstat(cur); lerr == nil || !os.IsNotExist(lerr) {
+			return path
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return path
+		}
+		tail = filepath.Join(filepath.Base(cur), tail)
+		cur = parent
+	}
 }
 
 func resolveFactoryConfig(explicitSocket, configPath, home string) (socket, dataDir string, badCfg *onboard.Result) {

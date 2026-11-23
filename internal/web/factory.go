@@ -74,7 +74,7 @@ func (s *Server) handleFactoryView(kind string) http.HandlerFunc {
 			e, ok := s.deps.Factory.(*factory.Engine)
 			if q := r.URL.Query(); !ok || q.Get("data_dir") != "" && filepath.Clean(q.Get("data_dir")) != filepath.Clean(e.Paths.DataDir) {
 				err = factory.ErrProjectNotFound
-			} else if tasks, serr := e.ProjectStatus(q.Get("folder")); serr != nil {
+			} else if tasks, serr := e.ProjectStatusLexical(q.Get("folder")); serr != nil {
 				err = serr
 			} else {
 				v = map[string]any{"tasks": append([]factory.TaskStatus{}, tasks...)}

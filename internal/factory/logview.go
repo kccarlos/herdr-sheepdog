@@ -100,7 +100,17 @@ func ProjectStatus(paths Paths, folder string) ([]TaskStatus, error) {
 // ProjectStatus returns status rows for folder, merging any active in-memory
 // alerts (such as an unpersisted disk ENOSPC alert) with stored state.
 func (e *Engine) ProjectStatus(folder string) ([]TaskStatus, error) {
-	id, err := findStoredProject(e.Paths, strings.TrimSpace(folder))
+	return e.projectStatus(folder, underFolderLocal)
+}
+
+// ProjectStatusLexical returns status rows for folder using only lexical path
+// matching (underFolder), without calling EvalSymlinks on project folders.
+func (e *Engine) ProjectStatusLexical(folder string) ([]TaskStatus, error) {
+	return e.projectStatus(folder, underFolder)
+}
+
+func (e *Engine) projectStatus(folder string, match func(root, target string) bool) ([]TaskStatus, error) {
+	id, err := findStoredProjectWith(e.Paths, strings.TrimSpace(folder), match)
 	if err != nil {
 		return nil, err
 	}
@@ -115,6 +125,10 @@ func (e *Engine) ProjectStatus(folder string) ([]TaskStatus, error) {
 }
 
 func findStoredProject(paths Paths, target string) (string, error) {
+	return findStoredProjectWith(paths, target, underFolderLocal)
+}
+
+func findStoredProjectWith(paths Paths, target string, match func(root, target string) bool) (string, error) {
 	dir := filepath.Join(paths.DataDir, "factory", "projects")
 	if err := guardTestPath(dir); err != nil {
 		return "", err
@@ -139,7 +153,7 @@ func findStoredProject(paths Paths, target string) (string, error) {
 			continue
 		}
 		if target != "" {
-			if ent.Name() == target || underFolderLocal(s.Project.Folder, target) {
+			if ent.Name() == target || match(s.Project.Folder, target) {
 				return ent.Name(), nil
 			}
 			continue
