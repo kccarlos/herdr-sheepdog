@@ -1407,7 +1407,7 @@ func TestReviewerDecisionAskAnsweredWhileWorking(t *testing.T) {
 			}
 		}
 		for _, msg := range sendsTo(t, rr.srv.Requests(), revAddr) {
-			if strings.Contains(msg, "no report tag") {
+			if strings.Contains(msg, "no report tag") || strings.Contains(msg, "without submitting a verdict") {
 				t.Fatalf("N29 nudged reviewer %s while answer pending/delivered: %q", revAddr, msg)
 			}
 		}

@@ -294,8 +294,9 @@ func TestClockSlowPassCappedNotFrozen(t *testing.T) {
 }
 
 // TestN29IdleReviewerNudgeThenStopAndRetry verifies N29: an idle reviewer with
-// no <report> tag gets one nudge asking for its report tag, then is stopped if
-// it goes idle again with no tag, and 4.8 starts the next reviewer try.
+// no verdict submitted gets one nudge asking it to run `factory report review`,
+// then is stopped if it goes idle again without submitting, and 4.8 starts the
+// next reviewer try.
 func TestN29IdleReviewerNudgeThenStopAndRetry(t *testing.T) {
 	t.Parallel()
 	l := newLanding(t)
@@ -304,16 +305,16 @@ func TestN29IdleReviewerNudgeThenStopAndRetry(t *testing.T) {
 	l.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].Rounds = nil })
 	l.pass() // N29 starts round 1 reviewer (try 0, opus)
 	rev0 := l.state().Tasks[0].Attempts[0].Review.RunID
-	l.srv.SetScreen(rev0, "❯ prompt\n\n⏺ Reviewed everything, forgot the tag.\n")
+	l.srv.SetScreen(rev0, "❯ prompt\n\n⏺ Reviewed everything, forgot to submit.\n")
 	l.srv.SetStatus(rev0, &hc.Status{App: "claude-code", State: "done"})
 	now = now.Add(5 * time.Second)
 	l.pass() // R9 -> working
 	now = now.Add(25 * time.Second)
-	l.pass() // R20 -> idle (ReportNotYet) -> N29 nudges once (R24 -> working)
+	l.pass() // R20 -> idle -> N29 nudges once (R24 -> working)
 
 	sends := sendsTo(t, l.srv.Requests(), rev0)
-	if len(sends) != 1 || !strings.Contains(sends[0], "<report>") {
-		t.Fatalf("nudge sends = %q, want 1 nudge asking for <report> tag", sends)
+	if len(sends) != 1 || !strings.Contains(sends[0], "factory report review") || strings.Contains(sends[0], "<report>") {
+		t.Fatalf("nudge sends = %q, want 1 nudge asking for factory report review (no <report> tag)", sends)
 	}
 	if l.state().Tasks[0].Attempts[0].Review.Run.State != flow.PhaseWorking {
 		t.Fatalf("after nudge state = %s, want working", l.state().Tasks[0].Attempts[0].Review.Run.State)

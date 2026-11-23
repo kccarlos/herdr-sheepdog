@@ -10,6 +10,8 @@
   {"id": "W9", "role": "worker", "notes": "prompts.md 7", "message": "It compiles; you are about to say ready.",
    "run": ["sheepdog factory report ready --proof"], "says": ["\"it compiles\" is not proof", "real output"]},
   {"id": "R1", "role": "reviewer", "notes": "#840", "message": "The project's check needs the network and writes outside the folder.",
+   "says": ["cannot run", "`--not-run`", "do not wait"], "never": ["herdr-app check", "shepherdr doctor"]},
+  {"id": "R1-codex", "role": "reviewer-codex", "notes": "#840 (transitional Codex screen-tag prompt)", "message": "The project's check needs the network and writes outside the folder.",
    "says": ["cannot run", "`not run:`", "do not wait"], "never": ["herdr-app check", "shepherdr doctor"]},
   {"id": "R2", "role": "reviewer", "notes": "field note 32; held by the engine's rejection block, not the template", "message": "Round 2. The worker rejected your round-1 finding about the cache key, with a reason.",
    "says": ["rejected comes back only with a run that proves it"]},

@@ -39,7 +39,13 @@ func TestWorkerKilledMidTurnResumedAndTaskFinishes(t *testing.T) {
 	ctx := context.Background()
 	srv := hctest.New(t)
 	var runs []hc.RunParams
-	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { runs = append(runs, p) }
+	revToks := map[string]string{}
+	srv.OnRun = func(term hc.Terminal, p hc.RunParams) {
+		runs = append(runs, p)
+		if p.Labels["sheepdog.role"] == flow.RoleReviewer {
+			revToks[term.Address] = p.Env["SHEEPDOG_RUN_TOKEN"]
+		}
+	}
 	client := hc.NewClient(srv.Path)
 	paths := testPaths(t)
 	repo, _ := initGitRepoWithRemote(t)
@@ -135,16 +141,24 @@ func TestWorkerKilledMidTurnResumedAndTaskFinishes(t *testing.T) {
 	passRound := func(round int) {
 		st, _ = LoadState(paths.State(id))
 		rv := st.Tasks[0].Attempts[0].Review
-		srv.SetScreen(rv.RunID, "❯ prompt\n\n⏺ Looks good.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rv.Code+"\",\"round\":"+strings.TrimSpace(jsonNumber(round))+",\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
-		srv.SetStatus(rv.RunID, &hc.Status{App: "claude-code", State: "done"})
-		eng.passProject(ctx, id, false)
-		now = now.Add(25 * time.Second)
-		eng.passProject(ctx, id, false)
+		if rv == nil || rv.Round != round {
+			t.Fatalf("round %d review = %+v", round, rv)
+		}
+		if err := submitFakeReviewerVerdict(t, eng, srv, paths, id, "T1", rv, revToks[rv.RunID], flow.VerdictPass, 0, "Looks good.\n"); err != nil {
+			t.Fatalf("round %d review verdict: %v", round, err)
+		}
+		if rv.Reviewer.CLI == world.CodexCLI {
+			eng.passProject(ctx, id, false)
+			now = now.Add(25 * time.Second)
+			eng.passProject(ctx, id, false)
+		} else {
+			eng.passProject(ctx, id, false)
+		}
 	}
 	passRound(1)
-	eng.passProject(ctx, id, false) // N29 starts round 2
+	eng.passProject(ctx, id, false) // N29 starts round 2 (idempotent if already started)
 	passRound(2)
-	eng.passProject(ctx, id, false) // N42 asks merge
+	eng.passProject(ctx, id, false) // N42 asks merge (idempotent if already asked)
 	mergedJSON := `[{"number":7,"state":"MERGED","headRefOid":"` + c1 + `","baseRefName":"main","isCrossRepository":false,"mergeCommit":{"oid":"merged99"},"mergeStateStatus":"CLEAN","reviewDecision":"","statusCheckRollup":` + greenRollup + `}]`
 	writeGHFile(t, gh, "pr.json", mergedJSON)
 	writeGHFile(t, gh, "view.json", mergedJSON[1:len(mergedJSON)-1])
@@ -154,11 +168,6 @@ func TestWorkerKilledMidTurnResumedAndTaskFinishes(t *testing.T) {
 	if st.Tasks[0].Done == nil || st.Tasks[0].Done.MergedCommit != "merged99" {
 		t.Fatalf("task did not finish merged: %+v", st.Tasks[0])
 	}
-}
-
-func jsonNumber(n int) string {
-	b, _ := json.Marshal(n)
-	return string(b)
 }
 
 // TestResumeFailedFallsBackToHandoffNote verifies R13 + 4.8 handoff: when a

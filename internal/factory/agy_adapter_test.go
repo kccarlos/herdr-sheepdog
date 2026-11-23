@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -79,6 +80,14 @@ type agyRig struct {
 	daemonHome string
 	hcHome     string
 	shellExecs atomic.Int32
+	revMu      sync.Mutex
+	revToks    map[string]string
+}
+
+func (r *agyRig) reviewerToken(runID string) string {
+	r.revMu.Lock()
+	defer r.revMu.Unlock()
+	return r.revToks[runID]
 }
 
 func newAgyRig(t *testing.T, models map[string][]flow.Candidate) *agyRig {
@@ -95,6 +104,7 @@ func newAgyRig(t *testing.T, models map[string][]flow.Candidate) *agyRig {
 		logs:       &bytes.Buffer{},
 		daemonHome: daemonHome,
 		hcHome:     hcHome,
+		revToks:    map[string]string{},
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	r.now = &now
@@ -102,6 +112,11 @@ func newAgyRig(t *testing.T, models map[string][]flow.Candidate) *agyRig {
 		term.CreatedMS = uint64(r.now.UnixMilli())
 		r.srv.Add(term)
 		*r.runs = append(*r.runs, p)
+		if p.Labels["sheepdog.role"] == flow.RoleReviewer {
+			r.revMu.Lock()
+			r.revToks[term.Address] = p.Env["SHEEPDOG_RUN_TOKEN"]
+			r.revMu.Unlock()
+		}
 	}
 	r.srv.OnExec = r.execInHC
 	r.cl = hc.NewClient(r.srv.Path)
@@ -299,7 +314,7 @@ func TestAgyLaunchCapabilityAndRoleArgv(t *testing.T) {
 	if len(*r.runs) != 3 {
 		t.Fatalf("reviewer did not launch on agy: %d runs", len(*r.runs))
 	}
-	assertAgyFreshArgv(t, "reviewer", agyReviewModel, r.last(), "Review round 1", "<report>")
+	assertAgyFreshArgv(t, "reviewer", agyReviewModel, r.last(), "Review round 1", "factory report review")
 }
 
 // TestAgyObserveRunStatusesAndEarlyAuth checks Decision 2 (spike S0.1):
@@ -927,13 +942,18 @@ func TestAgyWorkerReadyAndMergeHistory(t *testing.T) {
 		if rv == nil || rv.Round != round {
 			t.Fatalf("round %d review = %+v", round, rv)
 		}
-		r.srv.SetScreen(rv.RunID, "❯ prompt\n\n⏺ Looks good.\nself-check misses: 0\ndeletable: none\n<report>{\"code\":\""+rv.Code+"\",\"round\":"+jsonNumber(round)+",\"head\":\""+c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
-		r.srv.SetStatus(rv.RunID, &hc.Status{App: "claude-code", State: "done"})
-		r.pass()
-		*r.now = r.now.Add(25 * time.Second)
-		r.pass()
-		if round == 1 {
-			r.pass() // N29 starts round 2 reviewer
+		if err := submitFakeReviewerVerdict(t, r.eng, r.srv, r.paths, r.id, "T1", rv, r.reviewerToken(rv.RunID), flow.VerdictPass, 0, "Looks good.\n"); err != nil {
+			t.Fatalf("round %d review verdict: %v", round, err)
+		}
+		if rv.Reviewer.CLI == world.CodexCLI {
+			r.pass()
+			*r.now = r.now.Add(25 * time.Second)
+			r.pass()
+			if round == 1 {
+				r.pass() // N29 starts round 2 reviewer
+			}
+		} else {
+			r.pass() // stops accepted reviewer and advances (starts round 2 or N42)
 		}
 	}
 	r.pass() // N42 asks merge
@@ -990,7 +1010,7 @@ func TestAgyReviewerFirstPromptReadOnlyInstruction(t *testing.T) {
 		t.Fatalf("agy reviewer did not start: %+v", rv)
 	}
 	revParams := r.last()
-	assertAgyFreshArgv(t, "reviewer", agyReviewModel, revParams, "Review round 1", "<report>")
+	assertAgyFreshArgv(t, "reviewer", agyReviewModel, revParams, "Review round 1", "factory report review")
 	prompt, _ := strings.CutPrefix(revParams.Argv[len(revParams.Argv)-1], "-i=")
 	if !strings.Contains(strings.ToLower(prompt), wantInstruction) {
 		t.Fatalf("agy reviewer -i= first prompt lacks %q:\n%s", wantInstruction, prompt)
