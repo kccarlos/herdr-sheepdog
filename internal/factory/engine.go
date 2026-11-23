@@ -459,13 +459,18 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	}
 	if ctx.Err() == nil {
 		e.observeNoPoolLocked(ctx, id, &s, obs, e.now())
+		ranTasks := false
 		for i := range s.Tasks {
 			if ctx.Err() == nil && obs[i] != nil {
+				ranTasks = true
 				e.actTaskLocked(ctx, id, &s, i, *obs[i], &baseTried)
 				e.checkENOSPCLocked(ctx, id, &s, e.now())
 			}
 		}
 		now := e.now()
+		if ranTasks {
+			e.emitOverrideResultsLocked(id, &s, now)
+		}
 		if coordErr == nil {
 			e.passProjectRulesLocked(ctx, id, &s, now)
 		}
@@ -1230,35 +1235,36 @@ type taskExec func(e *Engine, ctx context.Context, id string, s *flow.State, ti 
 // wake_coordinator is held for J12 (wake.go); others (stop_task) are
 // logged as "not built yet".
 var taskExecutors = map[string]taskExec{
-	flow.AskNewAttempt:   (*Engine).execNewAttempt,
-	flow.AskStartWorker:  (*Engine).execStartWorker,
-	flow.AskPushPR:       (*Engine).execPushPR,
-	flow.AskStartReview:  (*Engine).execStartReviewer,
-	flow.AskNudgeReview:  (*Engine).execNudgeReviewer,
-	flow.AskStopReview:   (*Engine).execStopReviewer,
-	flow.AskTellFindings: (*Engine).execTellFindings,
-	flow.AskOpenRecap:    (*Engine).execOpenRecap,
-	flow.AskOwnerNoRecap: (*Engine).execOpenRecap,
-	flow.AskSizeRecap:    (*Engine).execSizeRecap,
-	flow.AskCIRecap:      (*Engine).execCIRecap,
-	flow.AskTimeRecap:    (*Engine).execTimeRecap,
-	flow.AskOpenN24:      (*Engine).execOpenGateAsk,
-	flow.AskOpenGate:     (*Engine).execOpenGateAsk,
-	flow.AskTellStop:     (*Engine).execTellStop,
-	flow.AskTellDiverged: (*Engine).execTellDiverged,
-	flow.AskTellConflict: (*Engine).execTellConflict,
-	flow.AskMergeOnly:    (*Engine).execMergeOnly,
-	flow.AskRerunCI:      (*Engine).execRerunCI,
-	flow.AskTellCI:       (*Engine).execTellCI,
-	flow.AskTellBaseRed:  (*Engine).execTellBaseRed,
-	flow.AskDispatchCI:   (*Engine).execDispatchCI,
-	flow.AskUpdateBranch: (*Engine).execUpdateBranch,
-	flow.AskFailUpdate:   (*Engine).execFailUpdate,
-	flow.AskAccept:       (*Engine).execRecordAccept,
-	flow.AskMerge:        (*Engine).execMerge,
-	flow.AskMarkDone:     (*Engine).execMarkDone,
-	flow.AskCleanup:      (*Engine).execCleanup,
-	flow.AskStopRuns:     (*Engine).execStopRuns,
+	flow.AskNewAttempt:    (*Engine).execNewAttempt,
+	flow.AskStartWorker:   (*Engine).execStartWorker,
+	flow.AskPushPR:        (*Engine).execPushPR,
+	flow.AskStartReview:   (*Engine).execStartReviewer,
+	flow.AskNudgeReview:   (*Engine).execNudgeReviewer,
+	flow.AskStopReview:    (*Engine).execStopReviewer,
+	flow.AskTellFindings:  (*Engine).execTellFindings,
+	flow.AskOpenRecap:     (*Engine).execOpenRecap,
+	flow.AskOwnerNoRecap:  (*Engine).execOpenRecap,
+	flow.AskSizeRecap:     (*Engine).execSizeRecap,
+	flow.AskCIRecap:       (*Engine).execCIRecap,
+	flow.AskTimeRecap:     (*Engine).execTimeRecap,
+	flow.AskOpenN24:       (*Engine).execOpenGateAsk,
+	flow.AskOpenGate:      (*Engine).execOpenGateAsk,
+	flow.AskTellStop:      (*Engine).execTellStop,
+	flow.AskTellDiverged:  (*Engine).execTellDiverged,
+	flow.AskTellConflict:  (*Engine).execTellConflict,
+	flow.AskMergeOnly:     (*Engine).execMergeOnly,
+	flow.AskRerunCI:       (*Engine).execRerunCI,
+	flow.AskTellCI:        (*Engine).execTellCI,
+	flow.AskTellBaseRed:   (*Engine).execTellBaseRed,
+	flow.AskDispatchCI:    (*Engine).execDispatchCI,
+	flow.AskUpdateBranch:  (*Engine).execUpdateBranch,
+	flow.AskFailUpdate:    (*Engine).execFailUpdate,
+	flow.AskAccept:        (*Engine).execRecordAccept,
+	flow.AskMerge:         (*Engine).execMerge,
+	flow.AskSpendOverride: (*Engine).execSpendOverride,
+	flow.AskMarkDone:      (*Engine).execMarkDone,
+	flow.AskCleanup:       (*Engine).execCleanup,
+	flow.AskStopRuns:      (*Engine).execStopRuns,
 }
 
 func setFlag(m *map[string]bool, id string, on bool) {
@@ -1314,6 +1320,9 @@ func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State
 		}
 	}
 	oa := flow.OpenAttempt(task)
+	if !flow.Ended(task) {
+		facts.DepsNotDone, facts.DepsDropped = flow.UnmetDeps(task, s.Tasks)
+	}
 	if oa != nil && !flow.Ended(task) {
 		a := *oa
 		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
@@ -1353,7 +1362,6 @@ func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State
 			return facts, false
 		}
 	} else if oa == nil && !flow.Ended(s.Tasks[ti]) {
-		facts.DepsNotDone, facts.DepsDropped = flow.UnmetDeps(s.Tasks[ti], s.Tasks)
 		facts.NoSlot = !hasSlot && !flow.Exhausted(s.Tasks[ti].Acts, flow.AskNewAttempt, s.Settings)
 	}
 	return facts, true
@@ -1365,6 +1373,10 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 		facts.BaseRedSpell, facts.BaseRedWoken = "", false
 	}
 	task, now := s.Tasks[ti], e.now()
+	if !flow.Ended(task) {
+		facts.DepsNotDone, facts.DepsDropped = flow.UnmetDeps(task, s.Tasks)
+		facts.OtherMergeInFlight = otherMergeInFlight(s.Tasks, ti)
+	}
 	if !flow.Ended(task) && !e.cancelStaleGateAsksLocked(id, s, ti, now) {
 		return
 	}
@@ -1766,7 +1778,8 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	}
 	if flow.Ended(*t) || facts.PR.State == flow.PRMerged || facts.PR.State == flow.PRClosed ||
 		flow.OpenRecap(*t) != nil || !tipKeepsRound(*a, a.Review.Head, *facts) ||
-		flow.PRHeadDivergedOrForeign(flow.In{Task: *t, Facts: *facts}) || a.Review.Round != len(a.Rounds)+1 {
+		flow.PRHeadDivergedOrForeign(flow.In{Task: *t, Facts: *facts}) || a.Review.Round != len(a.Rounds)+1 ||
+		flow.CoveringOverride(*a, flow.H(*a)) != nil {
 		if a.Review.RunID == "" && a.Review.Run != nil && a.Review.Run.State == flow.PhaseEnded {
 			return false
 		}

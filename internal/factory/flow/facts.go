@@ -189,6 +189,16 @@ func Covers(a Attempt, x, h string) bool {
 	return x == h
 }
 
+// CoveringOverride returns the newest unspent override in a that covers h, or nil (design.md 3, 4.3b).
+func CoveringOverride(a Attempt, h string) *Override {
+	for i := len(a.Overrides) - 1; i >= 0; i-- {
+		if !a.Overrides[i].Spent && a.Overrides[i].Head != "" && Covers(a, a.Overrides[i].Head, h) {
+			return &a.Overrides[i]
+		}
+	}
+	return nil
+}
+
 // newestCovering is the newest round that covers h, or nil.
 func newestCovering(a Attempt, h string) *Round {
 	rs := Counted(a)

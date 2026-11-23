@@ -467,6 +467,7 @@ type Supervisor struct {
 
 	factoryMu   sync.Mutex
 	factoryAsks []state.PendingAction
+	factoryCh   <-chan factory.Change
 }
 
 // interruptGrace is how long after a user cancel a pane's working -> done
@@ -509,6 +510,9 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 	if cfg.Mutes != nil {
 		cfg.Mutes.OnExpire(s.muteExpired)
 	}
+	if cfg.Factory != nil {
+		s.factoryCh = cfg.Factory.Changes()
+	}
 	if s.brain != nil {
 		s.brain.SetHost(brainHost{s})
 		// The orchestrator's notices about itself (a provider failing over and
@@ -539,9 +543,11 @@ func (s *Supervisor) Run(ctx context.Context) {
 	// Once at startup, the roster is already loaded (state.Open ran
 	// before New): catches a pane whose prompt changed while the daemon
 	// was down, which no post-answer poll ever ran for.
-	var factoryCh <-chan factory.Change
+	factoryCh := s.factoryCh
 	if s.cfg.Factory != nil {
-		factoryCh = s.cfg.Factory.Changes()
+		if factoryCh == nil {
+			factoryCh = s.cfg.Factory.Changes()
+		}
 		s.syncFactoryAsks()
 	}
 	s.reconcileReprompts(ctx)
@@ -549,11 +555,11 @@ func (s *Supervisor) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case _, ok := <-factoryCh:
-			if ok {
-				s.syncFactoryAsks()
-			} else {
+		case c, ok := <-factoryCh:
+			if !ok {
 				factoryCh = nil
+			} else {
+				s.handleFactoryChange(c)
 			}
 		case <-expiry.C:
 			s.ExpirePending()

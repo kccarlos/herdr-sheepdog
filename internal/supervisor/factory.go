@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"slices"
@@ -34,6 +35,32 @@ func (s *Supervisor) FactoryQuestions() []state.PendingAction {
 	s.factoryMu.Lock()
 	defer s.factoryMu.Unlock()
 	return slices.Clone(s.factoryAsks)
+}
+
+func (s *Supervisor) handleFactoryChange(c factory.Change) {
+	if c.Kind == flow.AskOverrideResult {
+		s.deliverFactoryOverrideResult(c)
+		return
+	}
+	s.syncFactoryAsks()
+}
+
+func (s *Supervisor) deliverFactoryOverrideResult(c factory.Change) {
+	text := strings.TrimSpace(c.Text)
+	if text == "" {
+		return
+	}
+	s.pushTagged("", text, voice.UrgencyIdle, fromDaemon(map[string]any{"factory_override_result": c.AskID}))
+	if s.cfg.Notifier != nil {
+		paneID := factoryPanePrefix + c.Project
+		s.cfg.Notifier.Notify(push.Notification{
+			EventID: fmt.Sprintf("fovr:%s:%d", cmp.Or(c.AskID, c.Project), c.Seq),
+			PaneID:  paneID,
+			Kind:    push.KindDone,
+			Agent:   s.cfg.Redactor.String(s.aliasOf(paneID)),
+			Text:    s.cfg.Redactor.String(text),
+		})
+	}
 }
 
 func (s *Supervisor) syncFactoryAsks() {

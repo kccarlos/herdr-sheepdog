@@ -291,11 +291,33 @@ func (e *Engine) answerAskLocked(id string, s *flow.State, ai int, option, why, 
 			if ti := slices.IndexFunc(s.Tasks, func(t flow.Task) bool { return t.ID == tgt.Task }); ti >= 0 && !flow.Ended(s.Tasks[ti]) {
 				if att := flow.OpenAttempt(s.Tasks[ti]); att != nil && (slices.ContainsFunc(att.Ready, func(r flow.Ready) bool { return r.Head == tgt.Head }) || slices.ContainsFunc(att.MergeOnly, func(m flow.Advance) bool { return m.From == tgt.Head || m.To == tgt.Head })) {
 					att.Overrides = append(att.Overrides, flow.Override{Head: tgt.Head, ChecksShown: tgt.Checks, Spent: false, ProofID: next.ProofID})
+					if flow.Covers(*att, tgt.Head, flow.H(*att)) {
+						if rc := flow.OpenRecap(s.Tasks[ti]); rc != nil {
+							rc.Decided = &flow.RecapDecision{Choice: "override", Why: "owner override " + next.ID, At: now}
+						}
+					}
 				}
 			}
 		}
 	}
 	return e.commitChangeLocked(id, s, LogLine{By: next.AnsweredBy, Task: next.Task, Input: input, Rule: row, Asked: dec.Asked, Decision: "answered " + next.ID, Why: next.Answer}, Change{Kind: "ask_answer", AskID: next.ID, Task: next.Task})
+}
+
+func (e *Engine) emitOverrideResultsLocked(id string, s *flow.State, now time.Time) {
+	for _, ev := range flow.OverrideResult(*s, now) {
+		ti := slices.IndexFunc(s.Tasks, func(t flow.Task) bool { return t.ID == ev.Task })
+		if ti < 0 {
+			continue
+		}
+		prevLen := len(s.Tasks[ti].Acts)
+		s.Tasks[ti].Acts = append(s.Tasks[ti].Acts, flow.Act{Key: flow.AskOverrideResult + "@" + ev.AskID, Result: "done", At: now})
+		err := e.commitChangeLocked(id, s, LogLine{By: "engine", Task: ev.Task, Rule: ev.Rule, Decision: "override result", Why: ev.Text}, Change{Kind: flow.AskOverrideResult, AskID: ev.AskID, Task: ev.Task, Text: ev.Text})
+		if err != nil {
+			s.Tasks[ti].Acts = s.Tasks[ti].Acts[:prevLen]
+			e.logError("factory.commit_error", id, err)
+			return
+		}
+	}
 }
 
 func (e *Engine) deliverReviewerAskLocked(ctx context.Context, s *flow.State, att *flow.Attempt, runID, msg string, now time.Time) string {

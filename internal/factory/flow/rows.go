@@ -48,6 +48,12 @@ const (
 	maxEnsureBackoff = 30 * time.Minute
 )
 
+const (
+	checksRankGreen = iota
+	checksRankPending
+	checksRankRed
+)
+
 // key joins a verb and what it is for: "merge@3f9c".
 func key(verb string, parts ...any) string {
 	s := []string{verb}
@@ -320,6 +326,31 @@ func ownerGateNo(in In) bool {
 func splitRetroUnanswered(in In) bool {
 	return in.Task.SplitFrom != "" && in.Facts.SplitFromHadRetro && !OwnerAnsweredN24(in.Asks, in.Task.ID)
 }
+func overrideCovers(in In) bool {
+	a := in.attempt()
+	return a != nil && CoveringOverride(*a, headH(in)) != nil
+}
+func noOverrideCovers(in In) bool   { return !overrideCovers(in) }
+func otherMergeInFlight(in In) bool { return in.Facts.OtherMergeInFlight }
+func checksRank(c Checks) int {
+	switch c {
+	case ChecksGreen:
+		return checksRankGreen
+	case ChecksPending:
+		return checksRankPending
+	default:
+		return checksRankRed
+	}
+}
+func checksWorseThanShown(in In) bool {
+	a := in.attempt()
+	if a == nil {
+		return false
+	}
+	ov := CoveringOverride(*a, headH(in))
+	return ov != nil && checksRank(in.Facts.PR.Checks) > checksRank(ov.ChecksShown)
+}
+func checksNoWorseThanShown(in In) bool { return !checksWorseThanShown(in) }
 
 func checksGrace(in In) time.Duration {
 	return time.Duration(in.Settings.ChecksGraceMinutes) * time.Minute
@@ -443,7 +474,7 @@ var TaskRows = []Row[In]{
 	}},
 	// N6 tells a live worker of a size, ci or time recap once to stop (it has no
 	// recap-written report yet, so nothing waits for one).
-	{ID: "N6", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: recapOpen, Then: func(in In) Decision {
+	{ID: "N6", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: all(recapOpen, noOverrideCovers), Then: func(in In) Decision {
 		n, tell, trig := len(in.Task.Recaps), []string(nil), OpenRecap(in.Task).Trigger
 		if (trig == TriggerSize || trig == TriggerCI || trig == TriggerTime) && (in.Facts.Worker.State == RunWorking || in.Facts.Worker.State == RunIdle) {
 			tell = ensure(in, key(AskTellStop, n))
@@ -485,9 +516,8 @@ var TaskRows = []Row[In]{
 	{ID: "N11", WaitsOn: "the engine", Stage: "queued", When: noAttempt, Then: func(in In) Decision {
 		return say("no attempt: start one", ensure(in, AskNewAttempt))(in)
 	}},
-	// N12 has no "no owner override covers H" clause until slice 7.
 	{ID: "N12", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool {
-		return hasAttempt(in) && (in.Facts.LinesTimeout || in.Facts.Lines > in.attempt().SizeCap)
+		return hasAttempt(in) && !overrideCovers(in) && (in.Facts.LinesTimeout || in.Facts.Lines > in.attempt().SizeCap)
 	},
 		Then: func(in In) Decision {
 			why := fmt.Sprintf("%d changed lines, over the size cap %d", in.Facts.Lines, in.attempt().SizeCap)
@@ -496,20 +526,45 @@ var TaskRows = []Row[In]{
 			}
 			return say(why, ensure(in, key(AskSizeRecap, len(in.Task.Recaps))))(in)
 		}},
-	// N13 has no "no owner override covers H" clause until slice 7.
 	{ID: "N13", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool {
-		return hasAttempt(in) && !ladderSays(Passed)(in) && in.Settings.CIFailsPerHour > 0 && ciFailCount(in) >= in.Settings.CIFailsPerHour
+		return hasAttempt(in) && !overrideCovers(in) && !ladderSays(Passed)(in) && in.Settings.CIFailsPerHour > 0 && ciFailCount(in) >= in.Settings.CIFailsPerHour
 	},
 		Then: func(in In) Decision {
 			why := fmt.Sprintf("%d commits failed CI in the last hour (limit %d)", ciFailCount(in), in.Settings.CIFailsPerHour)
 			return say(why, ensure(in, key(AskCIRecap, len(in.Task.Recaps))))(in)
 		}},
-	// N14 has no "no owner override covers H" clause until slice 7.
-	{ID: "N14", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: all(hasAttempt, overBuildTime),
+	{ID: "N14", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: all(hasAttempt, noOverrideCovers, overBuildTime),
 		Then: func(in In) Decision {
 			why := fmt.Sprintf("worker spent %s working (limit %dh)", WorkingTime(in.Task).Truncate(time.Minute), in.Settings.BuildHours)
 			return say(why, ensure(in, key(AskTimeRecap, len(in.Task.Recaps))))(in)
 		}},
+	{ID: "N15", WaitsOn: "the engine", Stage: "ci", When: all(overrideCovers, anyOf(noPR, all(prOpen, prBehindH))), Then: func(in In) Decision {
+		if (unanswered(in) || githubUnavail(in)) && !in.probe {
+			return Decision{Why: "GitHub did not answer: wait for a snapshot", Hold: true}
+		}
+		if in.Facts.PR.OtherBase != "" {
+			return say(fmt.Sprintf("PR #%d targets base %q instead of the project base: waiting (run `sheepdog factory task retry %s --why \"<why>\"` to start a new attempt)",
+				in.Facts.PR.Number, in.Facts.PR.OtherBase, in.Task.ID), once(SinceRetry(in.acts()), key(AskWake, "pr_other_base", in.Facts.PR.Number, in.Facts.PR.OtherBase)))(in)
+		}
+		return say("override: GitHub does not have H", ensure(in, key(AskPushPR, headH(in))))(in)
+	}},
+	{ID: "N16", WaitsOn: "the worker", Stage: "working", When: all(overrideCovers, prOpen, prHeadIsH, answered, githubAvail, mergeConflict), Then: func(in In) Decision {
+		return say("override: PR conflicts with the base: tell the worker once to merge the base (never rebase)",
+			EnsureRun(in, RoleWorker), ensure(in, key(AskTellConflict, headH(in))))(in)
+	}},
+	{ID: "N17", WaitsOn: "those tasks", Stage: "waiting_on_dep", When: all(overrideCovers, anyOf(depsNotDone, depsDropped, otherMergeInFlight)), Then: func(in In) Decision {
+		if depsNotDone(in) || depsDropped(in) {
+			return say(n9Why(in))(in)
+		}
+		return say("another merge of this project is in flight")(in)
+	}},
+	{ID: "N19", WaitsOn: "GitHub", Stage: "ci", When: all(overrideCovers, prOpen, prHeadIsH, answered, githubAvail, anyOf(mergeAsked, checksNoWorseThanShown)), Then: func(in In) Decision {
+		h := headH(in)
+		return say("override covers H and checks are no worse than shown", ensure(in, key(AskAccept, h)), ensure(in, key(AskMerge, h)))(in)
+	}},
+	{ID: "N19b", WaitsOn: "the engine", Stage: "ci", When: all(overrideCovers, prOpen, prHeadIsH, answered, githubAvail, func(in In) bool { return !mergeAsked(in) && checksWorseThanShown(in) }), Then: func(in In) Decision {
+		return say("checks got worse after the card was made", ensure(in, key(AskSpendOverride, headH(in))))(in)
+	}},
 	{ID: "N20", WaitsOn: "the engine", Stage: "working", When: func(in In) bool {
 		return hasAttempt(in) && ((tipAhead(in) && in.Facts.TipMergeOnly) || prHeadAheadMergeOnly(in))
 	},
