@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
@@ -71,11 +72,15 @@ type Engine struct {
 	passPoolCheck     func(flow.Candidate) flow.ResolveReason           // current pass's immutable pool check under mu
 	passCoordFallback bool                                              // current pass's J5 fallback sign-in check under mu
 	passBaseHCErr     error                                             // current pass's HC RPC error from observeBaseLocked under mu
+	passDisk          passDiskState                                     // current pass's volume readings and store ENOSPC under mu
 	git               *world.Git
 	mu                sync.Mutex
 	wake              chan struct{}
 	lastPass          map[string]time.Time            // monotonic reading of previous pass per project (design.md 2.5)
 	lastSweep         map[string]time.Time            // per-process last sweep per project (design.md 7.3)
+	lastProbe         map[string]time.Time            // per-process last consent/disk probe per project
+	consentStreaks    map[string]consentStreak        // consecutive positive consent-probe failures per project
+	memAlerts         map[alertKey]pendingAlert       // active alerts kept in memory when store writes fail
 	prs               map[string]flow.PR              // last PR snapshot per attempt worktree (in memory)
 	errs              map[string]string               // last gh or git error per worktree and kind, logged once per change
 	tips              map[string]tipFacts             // last git reading per worktree (in memory)
@@ -174,6 +179,8 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = root, goal, true, nil, nil, nil, "", 0
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastSweep, id)
+	delete(e.lastProbe, id)
+	delete(e.consentStreaks, id)
 	// The owner starting again is slice 1's retry (plan.md: "the owner
 	// starts again"): failed executor acts no longer block their ask.
 	for ti := range s.Tasks {
@@ -296,6 +303,8 @@ func (e *Engine) Stop(project string) error {
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastPass, id)
 	delete(e.lastSweep, id)
+	delete(e.lastProbe, id)
+	delete(e.consentStreaks, id)
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "stop"}, Rule: "stop", Decision: "stopped", Why: "stopped by owner"})
 }
 
@@ -336,8 +345,10 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	if err != nil {
 		return
 	}
+	e.passDisk = passDiskState{}
 	if trim {
 		if err := TrimLog(e.Paths.Log(id), s.Seq); err != nil {
+			e.passDisk.storeENOSPC = e.passDisk.storeENOSPC || errors.Is(err, syscall.ENOSPC)
 			e.logError("factory.trim_error", id, err)
 		}
 	}
@@ -345,9 +356,12 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		delete(e.lastPass, id)
 		return
 	}
+	e.mergeMemAlertsLocked(id, &s)
 	e.passPools = pools
 	e.passPoolCheck = poolCheck(pools, e.Paths.poolCooldowns(), s.Settings.PoolFloorPercent, e.now())
-	defer func() { e.passPools, e.passPoolCheck, e.passCoordFallback, e.passBaseHCErr = nil, nil, false, nil }()
+	defer func() {
+		e.passPools, e.passPoolCheck, e.passCoordFallback, e.passBaseHCErr, e.passDisk = nil, nil, false, nil, passDiskState{}
+	}()
 	ctx, cancel := context.WithTimeout(world.GitRepository(ctx, s.Project.Folder), world.GitPassTimeout)
 	defer cancel()
 	dt := e.passDelta(id)
@@ -360,7 +374,9 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	if e.observeBaseLocked(ctx, id, &s); e.passBaseHCErr != nil {
 		hcErr, hcChecked = cmp.Or(hcErr, e.passBaseHCErr), true
 	}
+	e.observeConsentDiskLocked(ctx, id, &s, e.now())
 	e.sweepProjectLocked(ctx, id, &s, codexProbe)
+	e.checkENOSPCLocked(ctx, id, &s, e.now())
 	baseTried := s.Project.Base != nil && s.Project.Base.Red && flow.Done(s.Project.Acts, flow.AskTellBaseRed+"@"+s.Project.Base.SpellID)
 	var candidates, poolHeld []string
 	queue := func(t flow.Task) {
@@ -433,6 +449,13 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 			e.passProjectRulesLocked(ctx, id, &s, now)
 		}
 		e.checkInvariantsLocked(id, &s, skipped, now)
+		e.checkENOSPCLocked(ctx, id, &s, now)
+	}
+}
+
+func (e *Engine) checkENOSPCLocked(ctx context.Context, id string, s *flow.State, now time.Time) {
+	if gitFull := e.git != nil && e.git.TakeNoSpace(s.Project.Folder); !s.Project.HasAlert(flow.AlertDisk) && (e.passDisk.storeENOSPC || gitFull) {
+		e.observeDiskLocked(ctx, id, s, now, false, gitFull)
 	}
 }
 
@@ -1099,7 +1122,7 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 		term, abort, err = world.StartTerminal(ctx, e.HC, spec, func() error {
 			tok := rand.Text()
 			*hash, *recp, env["SHEEPDOG_RUN_TOKEN"], minted = tokenHash(tok), &rec, tok, true
-			if sErr := SaveState(e.Paths.State(id), *s); sErr != nil {
+			if sErr := e.saveStateLocked(e.Paths.State(id), *s); sErr != nil {
 				*hash, *recp = prevHash, prevRec
 				e.logError("factory.commit_error", id, sErr)
 				return sErr
@@ -2451,8 +2474,14 @@ func (e *Engine) logEvent(typ string, fields map[string]string) {
 	}
 }
 
+func (e *Engine) saveStateLocked(path string, s flow.State) error {
+	err := map[bool]func(string, flow.State) error{true: e.writeState, false: SaveState}[e.writeState != nil](path, s)
+	e.passDisk.storeENOSPC = e.passDisk.storeENOSPC || errors.Is(err, syscall.ENOSPC)
+	return err
+}
+
 func (e *Engine) saveLocked(id string, s flow.State) bool {
-	err := SaveState(e.Paths.State(id), s)
+	err := e.saveStateLocked(e.Paths.State(id), s)
 	if err != nil {
 		e.logError("factory.commit_error", id, err)
 	}
@@ -2468,10 +2497,13 @@ func (e *Engine) commitLogLocked(id string, s *flow.State, l LogLine) {
 func (e *Engine) commitLocked(id string, s *flow.State, l LogLine) error {
 	s.Seq++
 	l.Seq, l.At, l.Project = s.Seq, time.Now(), id
-	if err := AppendLog(e.Paths.Log(id), l); err != nil {
+	if err := map[bool]func(string, LogLine) error{true: e.writeLog, false: AppendLog}[e.writeLog != nil](e.Paths.Log(id), l); err != nil {
+		e.passDisk.storeENOSPC = e.passDisk.storeENOSPC || errors.Is(err, syscall.ENOSPC)
+		s.Seq--
 		return err
 	}
-	if err := SaveState(e.Paths.State(id), *s); err != nil {
+	if err := e.saveStateLocked(e.Paths.State(id), *s); err != nil {
+		s.Seq--
 		return err
 	}
 	if l.By != "engine" {

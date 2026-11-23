@@ -94,21 +94,24 @@ func StatusViewOf(s flow.State, logs []LogLine) []TaskStatus {
 // started/stored project when folder is empty). It makes no hc, git or gh calls
 // and works when the daemon is stopped.
 func ProjectStatus(paths Paths, folder string) ([]TaskStatus, error) {
-	id, err := findStoredProject(paths, strings.TrimSpace(folder))
-	if err != nil {
-		return nil, err
-	}
-	s, logs, err := (&Engine{Paths: paths}).loadProjectCopy(id)
-	if err != nil {
-		return nil, err
-	}
-	return StatusViewOf(s, logs), nil
+	return (&Engine{Paths: paths}).ProjectStatus(folder)
 }
 
 // ProjectStatus returns status rows for folder, merging any active in-memory
 // alerts (such as an unpersisted disk ENOSPC alert) with stored state.
 func (e *Engine) ProjectStatus(folder string) ([]TaskStatus, error) {
-	return ProjectStatus(e.Paths, folder)
+	id, err := findStoredProject(e.Paths, strings.TrimSpace(folder))
+	if err != nil {
+		return nil, err
+	}
+	s, logs, err := e.loadProjectCopy(id)
+	if err != nil {
+		return nil, err
+	}
+	e.mu.Lock()
+	e.mergeMemAlertsLocked(id, &s)
+	e.mu.Unlock()
+	return StatusViewOf(s, logs), nil
 }
 
 func findStoredProject(paths Paths, target string) (string, error) {
