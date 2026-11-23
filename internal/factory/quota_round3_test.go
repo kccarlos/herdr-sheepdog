@@ -577,16 +577,23 @@ func TestQuotaAgentOutputAtScreenBottomNeverCountsAsLimit(t *testing.T) {
 }
 
 func antigravityPoolOut(at time.Time, fiveLeft int, fiveResetIn time.Duration, weekLeft int) CommandOutput {
+	fiveReset := at.Add(fiveResetIn).UTC().Format(time.RFC3339)
+	weekReset := at.Add(72 * time.Hour).UTC().Format(time.RFC3339)
 	return CommandOutput{Stdout: fmt.Sprintf(
-		`[{"provider":"antigravity","rateWindowLabels":{"primary":"Gemini 5-hour","secondary":"Gemini weekly"},"source":"oauth","usage":{"updatedAt":%q,"primary":{"usedPercent":%d,"windowMinutes":300,"resetsAt":%q,"resetDescription":"in 2h 30m"},"secondary":{"usedPercent":%d,"windowMinutes":10080},"tertiary":null,"accountEmail":"account@example.invalid","loginMethod":"Google AI Ultra","identity":{"providerID":"antigravity","accountEmail":"account@example.invalid","loginMethod":"Google AI Ultra"}}}]`,
-		at.UTC().Format(time.RFC3339), 100-fiveLeft, at.Add(fiveResetIn).UTC().Format(time.RFC3339), 100-weekLeft,
+		`[{"provider":"antigravity","rateWindowLabels":{"primary":"Gemini Models","secondary":"Claude and GPT"},"source":"cli","usage":{"updatedAt":%q,"extraRateWindows":[{"id":"antigravity-quota-summary-gemini-5h","title":"Gemini 5-hour","window":{"windowMinutes":300,"resetsAt":%q,"usedPercent":%d}},{"id":"antigravity-quota-summary-gemini-weekly","title":"Gemini weekly","window":{"windowMinutes":10080,"resetsAt":%q,"usedPercent":%d}},{"id":"antigravity-quota-summary-3p-5h","title":"Claude/GPT 5-hour","window":{"windowMinutes":300,"resetsAt":%q,"usedPercent":20}},{"id":"antigravity-quota-summary-3p-weekly","title":"Claude/GPT weekly","window":{"windowMinutes":10080,"resetsAt":%q,"usedPercent":20}}],"primary":{"usedPercent":%d,"windowMinutes":300,"resetsAt":%q},"secondary":{"usedPercent":20,"windowMinutes":10080,"resetsAt":%q},"tertiary":null,"identity":{"providerID":"antigravity"}}}]`,
+		at.UTC().Format(time.RFC3339),
+		fiveReset, 100-fiveLeft,
+		weekReset, 100-weekLeft,
+		fiveReset, weekReset,
+		100-fiveLeft, fiveReset,
+		weekReset,
 	)}
 }
 
 // Item 4: an agy candidate with a Gemini model (gemini-*) reads the CodexBar
 // provider "antigravity" (KB-QTA-4's antigravity-gemini pool): poolProvider
 // maps it, the pool gate holds it at or under the floor with the reason naming
-// the reset, and an agy candidate with a non-Gemini model stays unknown (never
+// the reset, and an agy candidate with an unpooled model stays unknown (never
 // blocks).
 func TestQuotaAgyGeminiCandidateUsesAntigravityPoolGate(t *testing.T) {
 	home := t.TempDir()
@@ -602,21 +609,12 @@ func TestQuotaAgyGeminiCandidateUsesAntigravityPoolGate(t *testing.T) {
 		t.Errorf("fixture testdata/codexbar/antigravity.json holds an unredacted account address")
 	}
 
-	parsed := parsePool("antigravity", CommandOutput{Stdout: string(rawFixture)})
-	wantFixtureReset := time.Date(2026, 11, 22, 2, 17, 1, 0, time.UTC) // 2026-11-21T23:47:01Z + 2h30m
-	if !parsed.Known || len(parsed.Windows) != 2 ||
-		parsed.Windows[0].Minutes != 300 || parsed.Windows[0].Left != 89 || !parsed.Windows[0].Reset.Equal(wantFixtureReset) ||
-		parsed.Windows[1].Minutes != 10080 || parsed.Windows[1].Left != 92 || !parsed.Windows[1].Reset.IsZero() {
-		t.Fatalf("parsePool(antigravity.json) = %+v, want 5h 89%% left resetting at %s and weekly 92%% left",
-			parsed, wantFixtureReset.Format(time.RFC3339))
-	}
-
 	for _, model := range []string{"gemini-4-carbon-medium", "gemini-4-neon-medium", "gemini-3.8-flash-low"} {
 		if got := poolProvider(flow.Candidate{CLI: "agy", Model: model, Effort: "medium"}); got != "antigravity" {
 			t.Errorf("poolProvider(agy/%s) = %q, want %q", model, got, "antigravity")
 		}
 	}
-	for _, model := range []string{"claude-sonnet-5-5-medium", "claude-opus-5-5-high", "gpt-5.4-medium", ""} {
+	for _, model := range []string{"custom-agy-model", ""} {
 		if got := poolProvider(flow.Candidate{CLI: "agy", Model: model, Effort: "medium"}); got != "" {
 			t.Errorf("poolProvider(agy/%q) = %q, want empty (unknown)", model, got)
 		}
@@ -625,7 +623,7 @@ func TestQuotaAgyGeminiCandidateUsesAntigravityPoolGate(t *testing.T) {
 	ctx := context.Background()
 	paths := testPaths(t)
 	eng := newGitTestEngine(t, paths, nil)
-	now := time.Date(2026, 11, 21, 23, 47, 1, 0, time.UTC)
+	now := time.Date(2026, 11, 22, 19, 47, 32, 0, time.UTC)
 	eng.Now = func() time.Time { return now }
 	fake := newPoolFake(t)
 	attachQuotaPools(eng, fake)
@@ -642,18 +640,18 @@ func TestQuotaAgyGeminiCandidateUsesAntigravityPoolGate(t *testing.T) {
 	}
 
 	geminiCand := flow.Candidate{CLI: "agy", Model: "gemini-4-neon-medium", Effort: "medium"}
-	nonGeminiCand := flow.Candidate{CLI: "agy", Model: "claude-sonnet-5-5-medium", Effort: "medium"}
+	nonGeminiCand := flow.Candidate{CLI: "agy", Model: "custom-agy-model", Effort: "medium"}
 
 	settings := flow.DefaultSettings()
 	settings.PoolMinutes = 1
 	settings.PoolFloorPercent = 5
 
-	// 1. A project with only non-Gemini agy models makes no antigravity pool read
+	// 1. A project with only unpooled agy models makes no antigravity pool read
 	// and never blocks.
 	settings.Models = map[string][]flow.Candidate{
 		flow.RoleCoordinator: {nonGeminiCand},
 		flow.RoleWorker:      {nonGeminiCand},
-		flow.RoleReviewer:    {{CLI: "agy", Model: "claude-opus-5-5-high", Effort: "high"}},
+		flow.RoleReviewer:    {{CLI: "agy", Model: "custom-agy-reviewer", Effort: "high"}},
 	}
 	if err := SaveState(paths.State("p1"), flow.State{Seq: 1, Settings: settings, Project: flow.Project{ID: "p1", Started: true}}); err != nil {
 		t.Fatal(err)

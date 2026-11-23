@@ -143,30 +143,32 @@ func StartTerminal(ctx context.Context, client *hc.Client, spec RunSpec, beforeL
 			return hc.Terminal{}, true, err
 		}
 	}
-	if isClaudeArgv(spec.Argv) {
+	cli := ArgvCLI(spec.Argv)
+	if cli == "claude" {
 		if err := preAcceptClaudeTrust(spec.ClaudeConfig, spec.Cwd); err != nil {
 			return hc.Terminal{}, false, Fail(flow.ClassSettled, err)
 		}
 	}
 	argv := append([]string(nil), spec.Argv...)
 	if spec.Prompt != "" {
-		argv = append(argv, spec.Prompt)
+		if cli == AgyCLI {
+			argv = append(argv, "-i="+spec.Prompt)
+		} else {
+			argv = append(argv, spec.Prompt)
+		}
+	}
+	env := spec.Env
+	if cli == AgyCLI && len(env) > 0 {
+		env = maps.Clone(env)
+		maps.DeleteFunc(env, func(k, _ string) bool { return strings.Contains(k, "GEMINI_API_KEY") })
 	}
 	labels := map[string]string{"herdr.space": randID(), "herdr.tab": randID(), "herdr.seen": "0"}
 	maps.Copy(labels, spec.Labels)
-	t, err := client.Run(ctx, hc.RunParams{Name: spec.Name, Cwd: spec.Cwd, Argv: argv, Labels: labels, Env: spec.Env, NoParent: true, NoNotify: true})
+	t, err := client.Run(ctx, hc.RunParams{Name: spec.Name, Cwd: spec.Cwd, Argv: argv, Labels: labels, Env: env, NoParent: true, NoNotify: true})
 	return t, false, hcFail(err)
 }
 
-func isClaudeArgv(argv []string) bool {
-	for i, a := range argv {
-		if (i == 0 && filepath.Base(a) == "env") || (strings.Contains(a, "=") && !strings.HasPrefix(a, "-")) {
-			continue
-		}
-		return filepath.Base(a) == "claude"
-	}
-	return false
-}
+func isClaudeArgv(argv []string) bool { return ArgvCLI(argv) == "claude" }
 
 func defaultClaudeConfig() string {
 	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
@@ -333,12 +335,15 @@ func ScreenClass(cli, text string) string {
 }
 
 func uiAnchor(cli string, lines []string) int {
+	if cli == AgyCLI {
+		return agyInputAnchor(lines)
+	}
 	for i := len(lines) - 1; i >= max(0, len(lines)-screenTailLines); i-- {
 		switch ln := lines[i]; {
 		case cli == "claude" && (strings.HasPrefix(ln, "⏺") || strings.HasPrefix(ln, "●") || strings.HasPrefix(ln, "  ⎿")),
 			cli == CodexCLI && (codexReplyRe.MatchString(ln) || strings.HasPrefix(ln, "  └")):
 			return -1
-		case cli == "claude" && i > 0 && strings.HasPrefix(ln, "❯") && strings.HasPrefix(strings.TrimSpace(lines[i-1]), "────────") && strings.Trim(strings.TrimSpace(lines[i-1]), "─") == "":
+		case cli == "claude" && i > 0 && strings.HasPrefix(ln, "❯") && isRuleLine(lines[i-1]):
 			return i - 1
 		case cli == CodexCLI && codexPromptRe.MatchString(ln):
 			return i
@@ -360,16 +365,21 @@ func limitUILines(cli string, lines []string) (raw []string) {
 	}
 	if anc := uiAnchor(cli, lines); anc >= 0 {
 		for i := anc - 1; i >= 0; i-- {
-			if strings.TrimSpace(lines[i]) != "" {
-				if !strings.HasPrefix(lines[i], prefix) {
-					break
-				}
-				add(lines[i], prefix+" ")
+			ln := lines[i]
+			if strings.TrimSpace(ln) == "" {
+				continue
+			}
+			if cli == AgyCLI && !strings.HasPrefix(ln, " ") && !strings.HasPrefix(ln, "\t") && !isAgyBlockHeader(ln) && !isAgyPromptLine(ln) && !isRuleLine(ln) {
+				add(ln, trim)
+			} else if cli != AgyCLI && strings.HasPrefix(ln, prefix) {
+				add(ln, prefix+" ")
+			} else {
+				break
 			}
 		}
 		slices.Reverse(raw)
 		for _, ln := range lines[anc+1:] {
-			if s := strings.TrimSpace(ln); cli != "claude" || (!strings.HasPrefix(s, "❯") && strings.Trim(s, "─") != "") {
+			if s := strings.TrimSpace(ln); (cli != "claude" || !strings.HasPrefix(s, "❯") && strings.Trim(s, "─") != "") && (cli != AgyCLI || !isAgyPromptLine(s) && !isRuleLine(s)) {
 				add(ln, trim)
 			}
 		}
@@ -377,7 +387,8 @@ func limitUILines(cli string, lines []string) (raw []string) {
 	}
 	for _, ln := range lines {
 		if cli == "claude" && (strings.HasPrefix(ln, "⏺") || strings.HasPrefix(ln, "●") || strings.HasPrefix(ln, "❯") || strings.HasPrefix(ln, "  ⎿")) ||
-			cli == CodexCLI && (codexReplyRe.MatchString(ln) || codexPromptRe.MatchString(ln) || strings.HasPrefix(ln, "  └")) {
+			cli == CodexCLI && (codexReplyRe.MatchString(ln) || codexPromptRe.MatchString(ln) || strings.HasPrefix(ln, "  └")) ||
+			cli == AgyCLI && (isAgyBlockHeader(ln) || isAgyPromptLine(ln)) {
 			return nil
 		}
 	}
@@ -412,7 +423,7 @@ func screenClassify(cli, text string) (string, string) {
 		}
 	}
 	limitUI := ui
-	if cli == "claude" || cli == CodexCLI {
+	if cli == "claude" || cli == CodexCLI || cli == AgyCLI {
 		limitUI = limitUILines(cli, lines)
 	}
 	for _, r := range [][4]string{
@@ -493,6 +504,9 @@ func agyTrustSelected(lines []string) bool {
 
 func agyTrustDrawing(text string) bool {
 	lines := strings.Split(strings.TrimRight(text, "\n \t"), "\n")
+	if head := strings.Split(strings.TrimLeft(strings.TrimRight(text, "\n \t"), "\n"), "\n"); len(head) <= 4 && equalDialogLine(head[0], "Accessing workspace:") && (len(head) == 1 || equalDialogLine(head[1], "")) {
+		return true
+	}
 	for n := 1; n <= min(len(lines), len(agyTrustDialog)); n++ {
 		if slices.EqualFunc(lines[len(lines)-n:], agyTrustDialog[:n], equalDialogLine) {
 			return true
@@ -562,8 +576,9 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 	if hash != "" && rec.ScreenHash != "" && hash != rec.ScreenHash {
 		evs = append(evs, flow.RunEvent{Kind: flow.EvActivity, ScreenHash: hash})
 	}
-	// Leave starting runs eligible for R3 while the menu is drawing or unreadable.
-	if s != nil && !trustBlocked && !waitForScreen && (!rec.StatusReported || s.State != rec.Status || deref(s.Kind) != rec.BlockedKind || s.Msg != rec.Question || t.Turn != rec.Turn) {
+	// Leave starting runs eligible for R3 while the menu is drawing or unreadable,
+	// and treat agy's brief startup blocked/auth check as starting.
+	if s != nil && !trustBlocked && !waitForScreen && !agyEarlyAuth(rec, t) && (!rec.StatusReported || s.State != rec.Status || deref(s.Kind) != rec.BlockedKind || s.Msg != rec.Question || t.Turn != rec.Turn) {
 		var at time.Time
 		if ms := deref(t.StatusMS); ms > 0 {
 			at = time.UnixMilli(int64(ms))
@@ -578,8 +593,14 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 			evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: codexStatus, ScreenHash: hash, Inferred: true})
 		}
 	}
-	if rec.CLI == CodexCLI && rec.Role == flow.RoleWorker && rec.SessionID == "" && len(codexHome) > 0 {
-		if sid := codexSession(codexHome[0], t.Cwd, rec.StartedAt); sid != "" {
+	if rec.Role == flow.RoleWorker && rec.SessionID == "" {
+		var sid string
+		if rec.CLI == CodexCLI && len(codexHome) > 0 {
+			sid = codexSession(codexHome[0], t.Cwd, rec.StartedAt)
+		} else if rec.CLI == AgyCLI {
+			sid = agySession(ctx, client, t.Cwd, rec.StartedAt)
+		}
+		if sid != "" {
 			evs = append(evs, flow.RunEvent{Kind: flow.EvSession, SessionID: sid})
 		}
 	}
@@ -659,27 +680,32 @@ func ReadReport(ctx context.Context, client *hc.Client, term, code string) (Repo
 	if client == nil || strings.TrimSpace(term) == "" {
 		return ReportRead{}, errors.New("world: ReadReport requires hc client and terminal")
 	}
-	if err := waitReportIdle(ctx, client, term); err != nil {
+	t, err := waitReportIdle(ctx, client, term)
+	if err != nil {
 		return ReportRead{}, err
 	}
 	res, err := client.Read(ctx, term, reportReadLines)
-	if err != nil || !res.Complete {
+	if err != nil || (!res.Complete && !isAgyTerminal(t)) {
 		return ReportRead{Status: ReportNotYet}, err
+	}
+	if isAgyTerminal(t) {
+		return parseAgyReport(res.Text, code), nil
 	}
 	return parseReportText(res.Text, code), nil
 }
 
-func waitReportIdle(ctx context.Context, client *hc.Client, term string) error {
-	if t, err := client.Get(ctx, term); err != nil || termIdle(t) {
-		return err
+func waitReportIdle(ctx context.Context, client *hc.Client, term string) (hc.Terminal, error) {
+	t, err := client.Get(ctx, term)
+	if err != nil || termIdle(t) {
+		return t, err
 	}
 	sub, err := client.Subscribe(ctx, hc.SubscribeFilter{Terminal: term})
 	if err != nil {
-		return err
+		return t, err
 	}
 	defer func() { _ = sub.Close() }()
 	if _, snap := sub.Snapshot(); len(snap) == 0 || termIdle(snap[0]) {
-		return nil
+		return t, nil
 	}
 	for n := range sub.Events() {
 		var sd hc.StatusData
@@ -688,10 +714,10 @@ func waitReportIdle(ctx context.Context, client *hc.Client, term string) error {
 			(n.Method == "event" && (n.Type == "finished" || n.Type == "removed" || n.Type == "lost" ||
 				(n.Type == "status" && n.DecodeData(&sd) == nil && sd.Status != nil && stateIdle(sd.Status.State)) ||
 				(n.Type == "turn" && n.DecodeData(&td) == nil && stateIdle(td.State)))) {
-			return nil
+			return t, nil
 		}
 	}
-	return cmp.Or(ctx.Err(), sub.Err())
+	return t, cmp.Or(ctx.Err(), sub.Err())
 }
 
 func termIdle(t hc.Terminal) bool {
@@ -716,6 +742,10 @@ func parseReportText(text, code string) ReportRead {
 		}
 		clean = clean[m[len(m)-1][0]+r[0]:]
 	}
+	return parseReportTag(clean, code)
+}
+
+func parseReportTag(clean, code string) ReportRead {
 	openIdx := strings.LastIndex(clean, "<report>")
 	if openIdx < 0 {
 		return ReportRead{Status: ReportNotYet}
