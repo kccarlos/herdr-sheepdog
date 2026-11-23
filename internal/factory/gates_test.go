@@ -52,7 +52,7 @@ func answerOwnerAsk(t *testing.T, eng *Engine, askID, option string) {
 	}
 }
 
-func openAsksForTask(st flow.State, taskID string) []flow.Ask {
+func openAsksForTask(st flow.State, taskID string) []flow.Ask { //nolint:unparam // test helper kept general
 	var out []flow.Ask
 	for _, a := range st.Asks {
 		if a.Task == taskID && a.Status == flow.AskStatusOpen {
