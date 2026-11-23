@@ -58,26 +58,33 @@ func (s *Supervisor) syncFactoryAsks() {
 		}
 		next = append(next, state.PendingAction{ID: factoryAskPrefix + a.ID, PaneID: factoryPanePrefix + a.Project, Kind: state.PendingAnswerPrompt, SpokenSummary: a.Question, Question: a.Question, Command: cmd, Options: opts, CreatedAt: a.At})
 	}
-	prev := s.factoryAsks
+	prev := s.store.Snapshot().Session.FactoryAsks
 	s.factoryAsks = next
+	var ids []string
 	for _, p := range next {
-		if slices.ContainsFunc(prev, func(x state.PendingAction) bool { return x.ID == p.ID }) {
-			continue
-		}
-		s.log.Log(logSource, "pending.created", p.PaneID, s.pendingCreated(p))
-		if s.cfg.Notifier != nil {
-			s.cfg.Notifier.Notify(push.Notification{EventID: "fask:" + p.ID, PendingID: p.ID, PaneID: p.PaneID, Kind: push.KindApproval, Agent: s.cfg.Redactor.String(s.aliasOf(p.PaneID)), Text: s.cfg.Redactor.String(p.Question), Options: s.pushOptions(p.Options), NeedsYou: true})
+		ids = append(ids, p.ID)
+		if !slices.Contains(prev, p.ID) {
+			s.log.Log(logSource, "pending.created", p.PaneID, s.pendingCreated(p))
+			if s.cfg.Notifier != nil {
+				s.cfg.Notifier.Notify(push.Notification{EventID: "fask:" + p.ID, PendingID: p.ID, PaneID: p.PaneID, Kind: push.KindApproval, Agent: s.cfg.Redactor.String(s.aliasOf(p.PaneID)), Text: s.cfg.Redactor.String(p.Question), Options: s.pushOptions(p.Options), NeedsYou: true})
+			}
 		}
 	}
-	for _, p := range prev {
-		if slices.ContainsFunc(next, func(x state.PendingAction) bool { return x.ID == p.ID }) {
-			continue
+	for _, id := range prev {
+		if !slices.Contains(ids, id) {
+			var paneID string
+			if i := slices.IndexFunc(all, func(a flow.Ask) bool { return factoryAskPrefix+a.ID == id }); i >= 0 {
+				paneID = factoryPanePrefix + all[i].Project
+				if all[i].Status == flow.AskStatusAnswered {
+					s.log.Log(logSource, "pending.confirmed", paneID, map[string]any{"id": id, "kind": state.PendingAnswerPrompt, "answer": all[i].Answer})
+					continue
+				}
+			}
+			s.log.Log(logSource, "pending.cancelled", paneID, map[string]any{"id": id, "kind": state.PendingAnswerPrompt, "reason": "cancelled"})
 		}
-		if i := slices.IndexFunc(all, func(a flow.Ask) bool { return factoryAskPrefix+a.ID == p.ID }); i >= 0 && all[i].Status == flow.AskStatusAnswered {
-			s.log.Log(logSource, "pending.confirmed", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "answer": all[i].Answer})
-		} else {
-			s.log.Log(logSource, "pending.cancelled", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "reason": "cancelled"})
-		}
+	}
+	if !slices.Equal(prev, ids) {
+		_ = s.store.UpdateSession(func(ss *state.Session) { ss.FactoryAsks = ids })
 	}
 }
 
@@ -110,6 +117,9 @@ func (s *Supervisor) answerFactoryTap(id string, option int, deviceID string) (v
 	if gone {
 		return voice.ToolResult{}, ErrPendingGone
 	}
+	_ = s.store.UpdateSession(func(ss *state.Session) {
+		ss.FactoryAsks = slices.DeleteFunc(ss.FactoryAsks, func(x string) bool { return x == p.ID })
+	})
 	s.log.Log(logSource, "pending.confirmed", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "answer": optLabel, "option": option, "via": factory.ProofInputTap, "device_id": proof.DeviceID, "proof_id": proof.ID})
 	return voice.ToolResult{Spoken: "Answered " + optLabel + "."}, nil
 }

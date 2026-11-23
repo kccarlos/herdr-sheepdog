@@ -354,6 +354,7 @@ type Session struct {
 	// ToldPrompts are the prompts told to the user, oldest first, open or
 	// recently closed, so the displacement rail survives a restart.
 	ToldPrompts []ToldPrompt `json:"told_prompts,omitempty"`
+	FactoryAsks []string     `json:"factory_asks,omitempty"`
 }
 
 // MaxInvestigations is how many investigation records the session keeps
@@ -449,6 +450,7 @@ func (t Table) clone() Table {
 		out.Session.Investigations = nil
 	}
 	out.Session.ToldPrompts = append([]ToldPrompt(nil), t.Session.ToldPrompts...)
+	out.Session.FactoryAsks = append([]string(nil), t.Session.FactoryAsks...)
 	return out
 }
 
