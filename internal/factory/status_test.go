@@ -242,6 +242,7 @@ func TestStatusEveryTaskRowFreshAndStage(t *testing.T) {
 	validStage := map[string]bool{
 		"done": true, "blocked_or_failed": true, "waiting_on_dep": true,
 		"queued": true, "working": true, "ci": true,
+		"owner_gate": true, "owner_answer": true,
 	}
 	for _, r := range flow.LadderRows {
 		if !validStage[r.Stage] {

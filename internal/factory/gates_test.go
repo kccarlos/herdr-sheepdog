@@ -496,7 +496,7 @@ func TestN1HistoryCancelsDecisionAsksKeepsOwnerAsks(t *testing.T) {
 	})
 
 	// Drop T1 so N1 runs cleanup.
-	if err := r.eng.Report(r.coordTok, "drop", json.RawMessage(`{"task":"T1","why":"superseded"}`)); err != nil {
+	if err := r.eng.Report(r.coordTok, "task", json.RawMessage(`{"action":"drop","task":"T1","why":"superseded"}`)); err != nil {
 		t.Fatalf("drop T1: %v", err)
 	}
 	r.pass() // N1 cleanup
