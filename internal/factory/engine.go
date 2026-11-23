@@ -334,7 +334,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	e.passPools = pools
 	e.passPoolCheck = poolCheck(pools, e.Paths.poolCooldowns(), s.Settings.PoolFloorPercent, e.now())
 	defer func() { e.passPools, e.passPoolCheck, e.passCoordFallback, e.passBaseHCErr = nil, nil, false, nil }()
-	ctx, cancel := context.WithTimeout(world.GitRepository(ctx, s.Project.Folder), world.GitPassTimeout)
+	ctx, cancel := context.WithTimeout(world.WithProcessTable(world.GitRepository(ctx, s.Project.Folder)), world.GitPassTimeout)
 	defer cancel()
 	dt := e.passDelta(id)
 	hcChecked, coordErr := e.observeCoordLocked(ctx, id, &s)

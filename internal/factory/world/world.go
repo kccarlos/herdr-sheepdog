@@ -575,6 +575,8 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 	}
 	if hash != "" && rec.ScreenHash != "" && hash != rec.ScreenHash {
 		evs = append(evs, flow.RunEvent{Kind: flow.EvActivity, ScreenHash: hash})
+	} else if rec.State == flow.PhaseWorking && hasLiveDescendant(ctx, client, agentPID(t)) {
+		evs = append(evs, flow.RunEvent{Kind: flow.EvActivity, ScreenHash: hash})
 	}
 	// Leave starting runs eligible for R3 while the menu is drawing or unreadable,
 	// and treat agy's brief startup blocked/auth check as starting.
