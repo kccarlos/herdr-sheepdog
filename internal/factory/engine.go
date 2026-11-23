@@ -24,6 +24,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
+	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
 
 //go:embed coordinator.md
@@ -58,10 +59,11 @@ type Engine struct {
 	Log          logging.Logger
 	Stderr       io.Writer // where unpersistable alerts (e.g. disk ENOSPC) are logged; nil uses os.Stderr
 	PassInterval time.Duration
-	Now          func() time.Time              // wall clock; nil uses time.Now
-	Since        func(time.Time) time.Duration // monotonic elapsed since previous pass; nil uses time.Since (wall delta when Now is set)
-	Bin          string                        // sheepdog binary named in run prompts
-	RunEnv       map[string]string             // added to every run's environment (daemon port)
+	Now          func() time.Time                                      // wall clock; nil uses time.Now
+	Since        func(time.Time) time.Duration                         // monotonic elapsed since previous pass; nil uses time.Since (wall delta when Now is set)
+	Bin          string                                                // sheepdog binary named in run prompts
+	RunEnv       map[string]string                                     // added to every run's environment (daemon port)
+	StartCheck   func(context.Context, DoctorOptions) []onboard.Result // nil runs StartChecks
 
 	probeLaunch       func(context.Context, []string) flow.ResolveFacts // test hook
 	poolRun           CommandFunc                                       // provider quota reader hook; nil uses hcExecRunner

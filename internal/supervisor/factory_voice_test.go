@@ -3,6 +3,8 @@ package supervisor
 import (
 	"context"
 	"fmt"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -15,7 +17,10 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
@@ -1340,5 +1345,82 @@ func TestFactoryVoiceStopRestNeverAnswersAsk(t *testing.T) {
 				t.Fatalf("VA8: pending.confirmed = %+v, want heard=%q", confirmed, tc.exact)
 			}
 		})
+	}
+}
+
+// TestFactoryVoiceStartRefusedByEngineStartChecks_KB_STA_18 verifies O31 row 10 / J1a:
+// voice "start the factory" (factoryControl(true)) cannot bypass Engine.Start's
+// start checks on a known stopped project.
+func TestFactoryVoiceStartRefusedByEngineStartChecks_KB_STA_18(t *testing.T) {
+	dataDir := t.TempDir()
+	repo := filepath.Join(t.TempDir(), "repo")
+	if b, err := exec.Command("git", "init", "-b", "main", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, b)
+	}
+	if b, err := exec.Command("git", "-C", repo, "config", "--local", "sheepdog.projectId", "demo").CombinedOutput(); err != nil {
+		t.Fatalf("git config projectId: %v: %s", err, b)
+	}
+	paths := factory.Paths{DataDir: dataDir}
+	if err := factory.SaveState(paths.State("demo"), flow.State{
+		Seq:      1,
+		Project:  flow.Project{ID: "demo", Folder: repo, Goal: "ship 8.1", Started: false},
+		Settings: flow.DefaultSettings(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	hcSrv := hctest.New(t)
+	hcSrv.OnExec = hctest.GitExec
+	eng := factory.New(paths, hc.NewClient(hcSrv.Path))
+	checkCalls := 0
+	eng.StartCheck = func(ctx context.Context, opts factory.DoctorOptions) []onboard.Result {
+		checkCalls++
+		opts.HCSocket = ""
+		opts.RunCommand = func(_ context.Context, _ string, _ []string, argv ...string) factory.CommandOutput {
+			key := strings.Join(argv, " ")
+			switch {
+			case strings.HasSuffix(key, "git --version"):
+				return factory.CommandOutput{Stdout: "git version 2.45.0\n"}
+			case strings.HasSuffix(key, "rev-parse --show-toplevel"):
+				return factory.CommandOutput{Stdout: repo}
+			case strings.HasSuffix(key, "remote get-url --all origin"), strings.HasSuffix(key, "remote get-url --push --all origin"):
+				return factory.CommandOutput{Stdout: "https://github.com/o/r.git"}
+			case strings.HasSuffix(key, "refs/remotes/origin/HEAD"):
+				return factory.CommandOutput{Stdout: "origin/main"}
+			case strings.HasSuffix(key, "rev-parse --verify --quiet origin/main"):
+				return factory.CommandOutput{Stdout: "abc1234\n"}
+			case strings.HasSuffix(key, "fetch --prune origin"):
+				return factory.CommandOutput{}
+			case strings.HasSuffix(key, "claude auth status --json"):
+				return factory.CommandOutput{Stdout: `{"loggedIn":false}`}
+			case strings.HasSuffix(key, "ls-tree --name-only origin/main .github/workflows/"):
+				return factory.CommandOutput{Stdout: ".github/workflows/ci.yml"}
+			case strings.HasSuffix(key, "show origin/main:.github/workflows/ci.yml"):
+				return factory.CommandOutput{Stdout: "on:\n  pull_request:\n    branches: [main]\njobs: {}\n"}
+			case strings.Contains(key, "gh repo view"):
+				return factory.CommandOutput{Stdout: `{"defaultBranchRef":{"name":"main"},"viewerPermission":"WRITE"}`}
+			case strings.Contains(key, "gh api repos/o/r/branches/main"):
+				return factory.CommandOutput{Stdout: `{"protected":false}`}
+			case strings.Contains(key, "gh api repos/o/r/rules/branches/main"):
+				return factory.CommandOutput{Stdout: "[]"}
+			default:
+				return factory.CommandOutput{Exit: 1, Stderr: "unexpected: " + key}
+			}
+		}
+		return factory.StartChecks(ctx, opts)
+	}
+
+	h := newHarness(t, func(c *Config) { c.Factory = eng })
+	res := h.say("start the factory")
+
+	if checkCalls != 1 {
+		t.Fatalf("Engine.StartCheck calls = %d, want 1", checkCalls)
+	}
+	if !strings.Contains(res.Spoken, "Could not update the factory") || !strings.Contains(res.Spoken, "claude auth login") {
+		t.Fatalf("voice start spoken = %q, want refusal with claude auth login fix", res.Spoken)
+	}
+	projs := eng.Projects()
+	if len(projs) != 1 || projs[0].Running {
+		t.Fatalf("refused voice start left projects = %+v, want demo stopped", projs)
 	}
 }
