@@ -101,10 +101,11 @@ type Run struct {
 
 // Facts are one pass's observations of a task. Plain data, no I/O.
 type Facts struct {
-	Ask    string `json:"-"` // the ask an executor runs for (its key)
-	PR     PR     `json:"pr"`
-	Tip    string `json:"tip"`
-	TipRel Rel    `json:"tip_rel"` // the worktree tip against H
+	Ask      string `json:"-"` // the ask an executor runs for (its key)
+	PR       PR     `json:"pr"`
+	Tip      string `json:"tip"`
+	TipClean bool   `json:"tip_clean,omitempty"` // stub (reviewer verdict command, RV7): the worktree has no changes at Tip
+	TipRel   Rel    `json:"tip_rel"`             // the worktree tip against H
 	// TipMergeOnly: the tip is ahead of H by merges of the base only (N20).
 	TipMergeOnly bool `json:"tip_merge_only,omitempty"`
 	// TipDivergedByMergeOnly: TipRel is diverged only because H moved by

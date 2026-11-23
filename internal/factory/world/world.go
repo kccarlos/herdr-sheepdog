@@ -103,6 +103,14 @@ func ClaudeArgv(role, model, effort, permissionMode string) []string {
 	return argv
 }
 
+// ClaudeReviewerArgv returns the launch argv for a Claude Code reviewer with
+// the read-only base tools plus Bash(<bin> factory report review:*) and
+// Edit(//<findingsPath>) for that round's scratch findings file (design.md 9.2).
+// Stub for TDD step 1; implementation fills in the two per-run rules.
+func ClaudeReviewerArgv(model, effort, bin, findingsPath string) []string {
+	return ClaudeArgv(flow.RoleReviewer, model, effort, "dontAsk")
+}
+
 // NewUUID returns a random version-4 UUID for Claude session ids (spike S0.8).
 func NewUUID() string {
 	var b [16]byte
