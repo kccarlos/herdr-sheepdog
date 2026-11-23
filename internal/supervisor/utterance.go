@@ -276,6 +276,9 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 	if res, ok := s.resetConfirmFastPath(ctx, text); ok {
 		return res, false
 	}
+	if res, ok := s.factoryVoiceFastPath(c, forceSync); ok {
+		return res, false
+	}
 	sync := (s.cfg.ReplyWait < 0 || forceSync) && !daemon
 	// The turn is detached from the tool call unless it is synchronous:
 	// the voice cancels a handler's context as soon as the handler

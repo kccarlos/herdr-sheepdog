@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"maps"
 	"strings"
 	"time"
 
@@ -98,7 +99,7 @@ func (s *Supervisor) pollReprompt(paneID string) {
 		}
 		polls++
 		row, ok := s.store.Get(paneID)
-		if !ok || row.State != herdr.StateBlocked {
+		if !ok || row.State != herdr.StateBlocked || herdr.IsFactoryQuiet(row.Labels, herdr.StateBlocked) {
 			outcome = "left_blocked"
 			break
 		}
@@ -157,7 +158,7 @@ func (s *Supervisor) reconcileReprompts(ctx context.Context) {
 			s.checkQuestion(ctx, row, q)
 			continue
 		}
-		if row.State != herdr.StateBlocked {
+		if row.State != herdr.StateBlocked || herdr.IsFactoryQuiet(row.Labels, herdr.StateBlocked) {
 			continue
 		}
 		if row.LastBlock != nil && !row.LastBlock.Answered {
@@ -356,6 +357,7 @@ func (s *Supervisor) raiseReprompt(ctx context.Context, row state.Agent, prompt 
 	t := herdr.Transition{
 		PaneID: row.PaneID, From: herdr.StateBlocked, To: herdr.StateBlocked, At: s.cfg.Now(),
 		Agent: row.Kind, Name: row.Name, WorkspaceID: row.Workspace, WorkspaceLabel: row.WorkspaceLabel, Source: source,
+		Labels: maps.Clone(row.Labels),
 	}
 	s.log.Log(logSource, "herdr.state", row.PaneID, map[string]any{"state": herdr.StateBlocked, "source": source, "agent": row.Kind})
 	s.log.Log(logSource, "herdr.transition", row.PaneID, t)
