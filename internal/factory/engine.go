@@ -334,7 +334,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	e.passPools = pools
 	e.passPoolCheck = poolCheck(pools, e.Paths.poolCooldowns(), s.Settings.PoolFloorPercent, e.now())
 	defer func() { e.passPools, e.passPoolCheck, e.passCoordFallback, e.passBaseHCErr = nil, nil, false, nil }()
-	ctx, cancel := context.WithTimeout(world.WithProcessTable(world.GitRepository(ctx, s.Project.Folder)), world.GitPassTimeout)
+	ctx, cancel := context.WithTimeout(world.WithProcessTable(world.GitRepository(ctx, s.Project.Folder), time.Duration(s.Settings.StartMinutes)*time.Minute), world.GitPassTimeout)
 	defer cancel()
 	dt := e.passDelta(id)
 	hcChecked, coordErr := e.observeCoordLocked(ctx, id, &s)
@@ -936,7 +936,7 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 	if (*recp).State == flow.PhaseEnded || e.HC == nil {
 		return (*recp).TaskRun(), nil
 	}
-	evs, err := world.ObserveRun(world.WithNow(ctx, now), e.HC, **recp, e.Paths.CodexHome())
+	evs, err := world.ObserveRun(ctx, e.HC, **recp, e.Paths.CodexHome())
 	if err != nil {
 		return flow.Run{}, err
 	}

@@ -36,7 +36,6 @@ type RunRecord struct {
 	HandoffSent                                                                                                        bool       `json:"handoff_sent,omitempty"`
 	HandoffHeld                                                                                                        bool       `json:"handoff_held,omitempty"`
 	LastChat                                                                                                           string     `json:"last_chat,omitempty"`
-	WorkingSince                                                                                                       time.Time  `json:"working_since,omitempty"`
 	StopRetry                                                                                                          *StopRetry `json:"stop_retry,omitempty"`
 	KeyRetry                                                                                                           *KeyRetry  `json:"key_retry,omitempty"`
 }
@@ -199,7 +198,6 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 		}
 		rec.AwaitHeldStatus = false
 	}
-	oldState := rec.State
 	rec.Held, rec.ScreensAnswered = slices.Clone(rec.Held), slices.Clone(rec.ScreensAnswered)
 	r, d := FirstMatch(RunRows, RunIn{R: rec, E: ev, S: s, Now: now})
 	if rec.Model == "" {
@@ -282,9 +280,6 @@ func StepRun(rec RunRecord, ev RunEvent, s Settings, now time.Time) (RunRecord, 
 		rec.Held = append(rec.Held, ev.Msg)
 	case r.ID == "R33":
 		rec.Reason = ev.Reason
-	}
-	if oldState == PhaseIdle && rec.State == PhaseWorking {
-		rec.WorkingSince = now
 	}
 	return rec, r, d
 }
