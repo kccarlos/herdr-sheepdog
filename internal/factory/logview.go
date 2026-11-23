@@ -68,8 +68,8 @@ type TaskStatus struct {
 // Stage comes from the rows via GraphViewOf so `sheepdog factory status`,
 // `/factory`, and the stale check always agree from one source.
 func StatusViewOf(s flow.State, logs []LogLine) []TaskStatus {
-	lastLog, lastRow := lastTaskRows(logs)
-	g := graphViewOf(s, lastLog)
+	lastRow := lastTaskRows(logs)
+	g := graphViewOf(s, lastRow)
 	out := make([]TaskStatus, 0, len(g.Tasks)+len(s.Project.Alerts))
 	for _, tv := range g.Tasks {
 		why := "no logged row"
