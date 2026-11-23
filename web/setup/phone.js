@@ -57,9 +57,17 @@ export function deviceKind(d) {
   switch (d && d.kind) {
     case 'ios': return 'iPhone';
     case 'ipados': return 'iPad';
+    case 'macos': return 'Mac';
     case 'browser': return 'Browser';
   }
   return 'Device';
+}
+
+// devicesSectionState reports whether the setup page's Devices section and its
+// empty-state hint should be shown for phoneEnabled and paired device count.
+export function devicesSectionState(phoneEnabled, count) {
+  const n = count || 0;
+  return { show: !!(phoneEnabled || n > 0), showEmpty: !!(phoneEnabled && n === 0) };
 }
 
 // lastSeen says when and how a device last came in: "Wi-Fi · 5 min ago",

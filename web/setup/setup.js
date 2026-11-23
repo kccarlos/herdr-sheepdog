@@ -6,7 +6,7 @@ import { voiceChoice, vertexFields, savedNote, validateBody, checkLine } from '.
 import { voiceCards, family, pickOf, talkLine, pickReady, modelsLine, modelOptions, changed, vertexModel } from './voice.js';
 import { cardRadios, initialChoice, nextCard, cardFor, summary } from './start.js';
 import { presetById, savedPreset, orchValue, panel, keyLabel, savedAs, autoFind, localLine, modelToFill, pickGroups, geminiStatus, anthropicModelsLine } from './presets.js';
-import { shellSwitch, shellSaved, tsnetSwitch, tsnetSaved, countdown, deviceKind, lastSeen } from './phone.js';
+import { shellSwitch, shellSaved, tsnetSwitch, tsnetSaved, countdown, deviceKind, devicesSectionState, lastSeen } from './phone.js';
 
 const $ = (id) => document.getElementById(id);
 let state = null;
@@ -173,10 +173,10 @@ function render() {
     $('tsnet-box').classList.toggle('hidden', !ts.show);
     $('tsnet-on').checked = ts.checked;
     if (!$('tsnet-on').disabled) $('tsnet-note').textContent = ts.note;
-    loadDevices();
   } else {
     $('phone-state').textContent = '';
   }
+  loadDevices();
 
   // 5. Talk
   const herdrNote = s.herdr.ok
@@ -793,12 +793,15 @@ function tickCode() {
   $('qr').classList.toggle('expired', !left);
 }
 
-// Devices: the paired phones and browsers, each with rename and revoke.
+// Devices: the paired phones, Macs and browsers, each with rename and revoke.
 async function loadDevices() {
   const r = await fetch('/api/devices', { cache: 'no-store' }).then((x) => x.json()).catch(() => null);
-  if (!r) return;
+  if (!r || !Array.isArray(r.devices)) return;
+  const ds = devicesSectionState(!!(state && state.phone && state.phone.enabled), r.devices.length);
+  $('devices-section').classList.toggle('hidden', !ds.show);
+  $('devices-empty').classList.toggle('hidden', !ds.showEmpty);
   const list = $('devices');
-  const key = JSON.stringify(r.devices.map((d) => [d.id, d.name, d.last_seen]));
+  const key = JSON.stringify(r.devices.map((d) => [d.id, d.name, d.kind, d.last_seen]));
   if (list.dataset.key === key) return;
   list.dataset.key = key;
   list.textContent = '';
@@ -824,12 +827,11 @@ async function loadDevices() {
     li.append(name, meta, rename, revoke);
     list.append(li);
   }
-  $('devices-empty').classList.toggle('hidden', r.devices.length > 0);
 }
 
 async function deviceCall(method, path, body) {
   const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ error: String(e) }));
-  $('phone-msg2').textContent = r.error || '';
+  $('devices-msg').textContent = r.error || '';
   $('devices').dataset.key = '';
   await loadDevices();
   return r;
@@ -991,12 +993,16 @@ function init() {
   $('disconnect-all').addEventListener('click', async () => {
     if (!confirm('Disconnect all devices? Every phone and browser will need to scan the code again.')) return;
     const r = await deviceCall('POST', '/api/devices/disconnect-all', {});
-    if (!r.error) $('phone-msg2').textContent = 'Disconnected ' + r.count + '.';
+    if (!r.error) $('devices-msg').textContent = 'Disconnected ' + r.count + '.';
   });
   $('reset-pairing').addEventListener('click', async () => {
     if (!confirm('Reset pairing? Every phone and browser will need to scan the code again, and each will show a security warning until it does.')) return;
     const r = await deviceCall('POST', '/api/devices/reset-pairing', {});
-    if (!r.error) { $('phone-msg2').textContent = 'Pairing reset: new certificate, new code.'; showCode(false); }
+    if (!r.error) {
+      const phoneOn = !!(state && state.phone && state.phone.enabled);
+      $('devices-msg').textContent = phoneOn ? 'Pairing reset: new certificate, new code.' : 'Pairing reset: new certificate.';
+      if (phoneOn) showCode(false);
+    }
   });
   setInterval(tickCode, 1000);
   $('demo-start').addEventListener('click', async () => {
