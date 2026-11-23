@@ -1,7 +1,10 @@
 package world
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -582,6 +585,128 @@ func TestReadReportAgyRound4HiddenTagFallback(t *testing.T) {
 		rd := read(t, bareThenVisibleTag)
 		if rd.Status != ReportFound || rd.Report.Verdict != "changes" || rd.Report.Majors != 1 {
 			t.Fatalf("ReadReport(bare JSON then visible tag) = %+v, want found/changes/1", rd)
+		}
+	})
+}
+
+// TestReadReportAgyRound5IncompleteRead verifies that ReadReport parses an agy
+// terminal's screen even when herdr-core reports Complete: false (because agy
+// redraws a full-screen TUI so hc read marks it incomplete), while non-agy
+// terminals still return ReportNotYet on an incomplete read.
+func TestReadReportAgyRound5IncompleteRead(t *testing.T) {
+	const (
+		code = "iickwvgmwk"
+		head = "c642d5fb0d4a481709a1e0fd70c78c133f3082e6"
+	)
+
+	rawBytes, err := os.ReadFile(filepath.Join("..", "testdata", "agy-review-incomplete.screen.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agyScreen := strings.ReplaceAll(string(rawBytes), "\r\n", "\n")
+	if (strings.Contains(agyScreen, "@") && !strings.Contains(agyScreen, "account@example.invalid")) || strings.Contains(agyScreen, "/Users/") {
+		t.Fatalf("fixture agy-review-incomplete.screen.txt contains unredacted identity or path")
+	}
+
+	terminals := map[string]hc.Terminal{
+		"t-agy": {
+			Address: "t-agy",
+			Name:    "rev-agy",
+			State:   "live",
+			Argv:    AgyArgv("gemini-4-carbon-medium", "", ""),
+			Labels:  map[string]string{"sheepdog.cli": AgyCLI},
+			Status:  &hc.Status{App: "antigravity", State: "done"},
+		},
+		"t-claude": {
+			Address: "t-claude",
+			Name:    "rev-claude",
+			State:   "live",
+			Labels:  map[string]string{"sheepdog.cli": "claude"},
+			Status:  &hc.Status{App: "claude-code", State: "done"},
+		},
+	}
+	reads := map[string]hc.ReadResult{
+		"t-agy": {
+			Complete: false,
+			How:      "stitched",
+			Text:     agyScreen,
+		},
+		"t-claude": {
+			Complete: false,
+			How:      "stitched",
+			Text:     "⏺ Done.\n<report>{\"code\":\"" + code + "\",\"round\":1,\"head\":\"" + head + "\",\"verdict\":\"pass\",\"majors\":0}</report>\n",
+		},
+	}
+
+	dir, err := os.MkdirTemp("", "hcr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "hc.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer func() { _ = c.Close() }()
+				line, err := bufio.NewReader(c).ReadBytes('\n')
+				if err != nil {
+					return
+				}
+				var req struct {
+					ID     uint64 `json:"id"`
+					Method string `json:"method"`
+					Params struct {
+						Terminal string `json:"terminal"`
+					} `json:"params"`
+				}
+				_ = json.Unmarshal(line, &req)
+				enc := json.NewEncoder(c)
+				switch req.Method {
+				case "terminal.get":
+					_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": terminals[req.Params.Terminal]})
+				case "terminal.read":
+					_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": reads[req.Params.Terminal]})
+				}
+			}(conn)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	client := hc.NewClient(sock)
+
+	t.Run("agy incomplete read returns found pass majors 0", func(t *testing.T) {
+		rd, err := ReadReport(ctx, client, "t-agy", code)
+		if err != nil {
+			t.Fatalf("ReadReport(t-agy): %v", err)
+		}
+		if rd.Status != ReportFound || rd.Report.Code != code || rd.Report.Round != 1 || rd.Report.Head != head || rd.Report.Verdict != "pass" || rd.Report.Majors != 0 {
+			t.Fatalf("ReadReport(t-agy) = %+v, want found pass/0 for code %s", rd, code)
+		}
+		if !strings.Contains(rd.Body, "self-check misses: 0") {
+			t.Errorf("Body missing reply lines:\n%s", rd.Body)
+		}
+		for _, leaked := range []string{"You review task", "Bash(git diff", "Thought for 1m 2s"} {
+			if strings.Contains(rd.Body, leaked) {
+				t.Errorf("Body leaked %q:\n%s", leaked, rd.Body)
+			}
+		}
+	})
+
+	t.Run("non-agy incomplete read still returns not_yet", func(t *testing.T) {
+		rd, err := ReadReport(ctx, client, "t-claude", code)
+		if err != nil || rd.Status != ReportNotYet {
+			t.Fatalf("ReadReport(t-claude) = (%+v, %v), want not_yet", rd, err)
 		}
 	})
 }
