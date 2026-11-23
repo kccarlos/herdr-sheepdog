@@ -1363,7 +1363,7 @@ func TestPushTimeoutsRecycle(t *testing.T) {
 	c1, c2 := newFakeConn("c1"), newFakeConn("c2")
 	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2)}}
 	h := newHarness(t, Config{PushGap: 5 * time.Millisecond, TurnTimeout: 40 * time.Millisecond}, d)
-	c1.serve(handleMsg("handle-B"))
+	acceptHandle(t, h, c1, "handle-B")
 
 	for _, text := range []string{"first", "second", "third"} {
 		if err := h.s.Push(text, voice.UrgencyIdle); err != nil {
