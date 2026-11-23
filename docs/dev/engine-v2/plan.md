@@ -34,13 +34,13 @@
 | 7 | The override | "Merge these now": one card listing two open PRs; a yes merges them without waiting for CI or review | 360–515 | — |
 | 8 | Doctor and the switch | Every start path enforces start checks in code (J1); the version 1 exit test passes live; living docs match v2 and the last old-engine files leave under owner sign-off (old Python engine and glue already off `main`, design.md 12.2) | 140–400 (net negative in 8.4) | — |
 | | **Version 1 complete** | The exit test of slice 8 | **10,500 to 11,500** (+110–170 Swift) | |
-| 9 | The factory page on the web | One page beside setup, voice and debug: tasks by what they wait on and why, the cards with session-ticket answers (D15), and the log (W1, W2, ask cards and browser enrolment already on `main`) | 0–25 net (1 tiny PR + live demo) | — (S0.9 done in 6.4–6.5) |
+| 9 | The factory page on the web (**done**, #777) | One page beside setup, voice and debug: tasks by what they wait on and why (including `owner_gate` and `owner_answer` stages above `blocked_or_failed`, `HoldWhy` precedence), the cards with session-ticket answers and silent restart re-auth (D15, D17), and the log | 0–25 net (1 tiny PR + live demo) | — (S0.9 done in 6.4–6.5) |
 | 10 | Evidence by the engine (**parked 2026-11-23 by the owner**: across 23 kept run logs, 38 review verdicts and 0 rounds spent on a task whose own tests failed; CI and the reviewer already catch it. Revisit only if real projects show such rounds) | The engine runs each task's proofs again in a clean checkout; a failed proof costs no review round | 400 | S0.7 |
 | 11 | Plan review | A plan with an "optional" task comes back with "delete" before any code is written | 250 | — |
-| 12 | The retro round | A task with majors in rounds 2 and 3 gets one retro, then a bounded fix or a recap | 405–585 (3 PRs) | — |
+| 12 | The retro round (**next**, cut into 12.1–12.3; not yet shipped) | A task with majors in rounds 2 and 3 gets one retro, then a bounded fix or a recap | 405–585 (3 PRs) | — |
 | 13 | Rotation and the journal | A fresh coordinator every few hours continues from a written entry | 250 | — |
 | 14 | Settings by voice and card | "Review rounds 1 for this project": read back, confirmed, in force at the next pass | 350 | — |
-| later | Alerts to push and voice and the digest; milestones and the verify task; agy; the design loop; cheap sync; secrets; the phone and iPad boards | | | S0.1 for agy |
+| later | Alerts to push and voice and the digest; milestones and the verify task; the design loop; cheap sync; secrets; the phone and iPad boards (`agy` already shipped in #745) | | | — |
 
 Every size here is a guess. The checker of this plan redid slice 1 on design.md section 13's bases and found it a third larger than first written; the later guesses were raised by about that much and are not better founded. Review point 1 replaces them with a measured cost per rule row.
 
@@ -62,7 +62,7 @@ Owner decision, 2026-11-19: after slice 2 the work runs on three tracks at once.
 - The rest of slice 5b (launchd and git through herdr-core, pools and sign-in, alerts, the sweep) is on no track yet; it is placed at the review point after slice 5a.
 - `internal/factory/world` and `cmd/sheepdog/factory.go` are shared by the core and adapters tracks: the adapters track adds files and one subcommand there and does not edit the core's functions.
 - Slices 11 and 12 (plan review, the retro round; slice 10 is parked) go to the core track after slice 7; slices 13 and 14 are placed at the review point after slice 7. C3 stays last, after the exit test.
-- State at review point 3: the front end is paused after its page (PR #699) until slice 6's asks; the adapters track is done except C3 (section 7).
+- *Historical snapshot (review point 3):* the front end paused after PR #699 until slice 6's asks, and the adapters track waited on C3. **Current state:** version 1 (slices 1–8), `agy` (#745), O32 (#774), and slice 9 (`/factory`, #777) are complete on `main`; slice 10 is parked (#775); slice 12 (the retro round) is next (not yet shipped).
 
 ## 3. Slice 1: the walking skeleton
 
@@ -387,7 +387,7 @@ Each is planned in PRs only at the review point before it. "Done when" lines are
 - **Done when.** `/factory` shows each task with what it waits on and why; a card answered there counts only when the browser holds a session ticket (D15, `KB-ASK-19`, `KB-TSK-19`).
 - **Its review question.** Watching a real multi-task run on `/factory`, which missing detail or action (for example project alerts, task detail, answered-card history, or agent-free override initiation `O28`) made you drop back to the terminal?
 - **Size guess.** 0–25 net Go and JS lines (about 10–30 added, net negative in Go) in one tiny PR (`9.1`), plus its clean-browser live demo. Almost all of slice 9 is already merged on `main`, so the slice is one small PR rather than invented work. **Leaves out.** Project alerts on `/factory` (a task held by a stopping alert already shows `"stopped: <fix>"` via `HoldWhy`, and `sheepdog factory status` lists project alerts); the phone and iPad boards ([design.md](design.md) D14, later); agent-free override initiation (`O28`); start shell, send-a-request box, pools bar, milestones progress and critical-path ETA (`FactoryWebMain.dc.html`, later slices); `LogEntry.Wake`/`Model` (`LogLine` does not write them yet); `idle` stage emission ([design.md](design.md) 4.11); and cross-page links from `/voice` or `/debug`.
-- **Current state on `main` (verified 2026-11-23).** W1 view API (#695), W2 `/factory` page (#699), and ask cards, D15 session-ticket answers and D17 browser enrolment (#750, #754, #757; S0.9 done in 6.4–6.5) are already on `main`. What remains is `9.1` below and the first clean-browser live run on `kccarlos/test_repo`.
+- **Current state on `main` (verified 2026-11-23).** **Done (#777):** W1 view API (#695), W2 `/factory` page (#699), ask cards / D15 session-ticket answers / D17 browser enrolment (#750, #754, #757; S0.9 done in 6.4–6.5), and `9.1` below (`owner_gate`/`owner_answer` stages at top, `HoldWhy` precedence, `lastRow` fix, and the clean-browser live demo on `kccarlos/test_repo`, logged in section 7) are all merged on `main`.
 - **Dependencies and execution order (2026-11-23).** No prerequisites left: version 1 (slices 1–8) is complete on `main`, and `9.1` can start immediately without overlapping core `flow`/executor files (aside from two lines in `design.md`).
 
 | # | PR | Lines | Done when (and what can be watched) |
@@ -409,7 +409,7 @@ Each is planned in PRs only at the review point before it. "Done when" lines are
 | 12 The retro round | Cut into 12.1–12.3 in [Slice 12](#slice-12-the-retro-round) (`L2`–`L6`, `L11`, `N28`, shared `Attempt.Review` slot with `Kind: retro`, `retros[]`, `retro.md`, `report retro`, one retro line on `N6` recap wake) | The SDF-16 history draws one retro at round 3; the second `FIX` ends in a `review` recap with no `continue`; `SHIP` (`L6` -> `N42`) and `REDESIGN` (`L2` -> `N25`) are each answered by a rule (`KB-RET-1`, `KB-RET-2`, `KB-RET-4`, `KB-RET-5`). Bad retro reports are refused without spending the retro, exhausted or unavailable retros fall through to `L12` (or `L3` recap on a failed delta check), and retro tokens cannot call `report review` (`KB-RET-3`, `KB-RET-12`, M4) | Low confidence (`KB-RET-6`), split-child brief inheritance (`KB-RET-7` first sentence), per-outcome wakes (`KB-RET-8` beyond the recap wake line), 11.2 retro summary and routing table (`KB-RET-14`, moved to `later`), folder tasks (`KB-RET-10`), token counts, Codex `RoleRetro` until S-REV-2 |
 | 13 Rotation and the journal | J11; design 11.1 | A fresh coordinator continues from the entry; an entry exists with facts even when the coordinator does not answer | — |
 | 14 Settings by voice and card | The `rule` ask, read-back, delegation (A1) | A setting changes only when the owner answers its card; `sheepdog factory set` only raises the card; revoking a non-delegation rule without an owner `AnswerProof` is refused `proof_required` | — |
-| later | Alerts to push and voice and the digest; milestones, critical path and the verify task; agy (spike S0.1); the design loop; cheap sync and a cap on PRs in CI; secrets; the approved phone and iPad boards; background-job detection (needs an hc change); token budgets; machine load holds; 11.2 30-day retro summary, model-routing table and 3× cause rule-proposal ask (`KB-RET-14`) | | |
+| later | Alerts to push and voice and the digest; milestones, critical path and the verify task; the design loop; cheap sync and a cap on PRs in CI; secrets; the approved phone and iPad boards; background-job detection (needs an hc change); token budgets; machine load holds; 11.2 30-day retro summary, model-routing table and 3× cause rule-proposal ask (`KB-RET-14`) (`agy` already shipped in #745) | | |
 
 From review point 3:
 
@@ -524,11 +524,11 @@ Each is a short script against real CLIs in a private herdr-core, with the captu
 | S0.2 | Where each CLI's session id comes from under herdr-core; does a resume keep model and effort? | 5a |
 | S0.4 | Does the daemon run under launchd here, and can `hc exec` read a project folder the daemon cannot? | 5b |
 | S0.8 | What herdr-core can report: output activity, child processes, "the owner typed", "the owner quit it"; does killing a terminal end its process group? | 5a |
-| S0.10 | Can the supervisor's existing card show an override of two tasks with their commits and check states? (Run on 2026-11-22: yes, `answer_prompt` + multi-line `command` shows slice 6 asks and 2–3 task overrides with server fields only and no iOS build; APNs push omits `options` on overrides) | 6 |
+| S0.10 | Can the supervisor's existing card show an override of two tasks with their commits and check states? (Run on 2026-11-22: yes, `answer_prompt` + multi-line `command` shows slice 6 asks and 2–3 task overrides with server fields only and no iOS build; APNs push omits `options` on overrides — later extended to all factory asks by O32, #774) | 6 |
 | S0.11 | Record GitHub's real "branch must be up to date" merge refusal on a repo that supports branch protection (not `kccarlos/test_repo`, which is private on a plan without it), so `world` can classify it for N18 (`O27`) | N18 (after slice 7) |
 | S0.9 | Can a browser on this computer enrol with the daemon and hold a session ticket? (Answered and built in slice 6, PRs 6.4 #750 and 6.5 #754: yes, via short code from `Sheepdog.app` and non-extractable WebCrypto P-256 cookie session, [design.md](design.md) 7.1 / D15 / D17 / O20) | 9 (done in 6) |
-| S0.7 | Time to run a real task's proofs in a clean checkout | 10 |
-| S0.1 | Does agy report status to herdr-core like Claude Code and Codex? | the agy slice |
+| S0.7 | Time to run a real task's proofs in a clean checkout (parked with slice 10 on 2026-11-23) | 10 (parked) |
+| S0.1 | Does agy report status to herdr-core like Claude Code and Codex? (Done; `agy` adapter shipped in #745) | done (#745) |
 
 ## 6. Cutover
 

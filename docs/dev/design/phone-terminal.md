@@ -1,12 +1,14 @@
 # Phone terminal: a real agent window on the iPhone
 
-Status: **being built** (phase 0 decided 2026-10-20). Phases 1–5 below are
-the implementation plan.
+Status: **built and shipped** (`/term`, SwiftTerm, `internal/web/term.go`,
+[docs/iphone-app.md](../../iphone-app.md)); kept as the design record (phase 0
+decided 2026-10-20).
 
 **Goal.** Anything the user can do at the computer, they can do from the
 phone, so they can leave the computer. The phone talks only to the daemon
-(HTTP and WebSocket over the LAN or Tailscale, with token auth). It never
-uses SSH.
+(HTTP and WebSocket over the LAN or Tailscale; static token auth was
+superseded by paired-device TLS and `sds_` session tickets in
+[security.md](security.md)). It never uses SSH.
 
 **Decisions**
 

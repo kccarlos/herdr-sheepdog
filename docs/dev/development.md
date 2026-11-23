@@ -21,7 +21,7 @@ each also still runs under its older top-level name (`sheepdog eval` =
 | `sheepdog eval` | The conversation eval sets (`--set assistant\|svp\|regressions\|extracted\|expanded\|all`); offline by default, `--live` calls the model. `eval extract` / `eval expand` build cases from the event log. `eval sim` runs simulated-user conversations graded by an LLM judge (`--live`, `--repeat`, `--fallback-provider`; [`eval/eval-campaign-2026-10-03.md`](eval/eval-campaign-2026-10-03.md)). |
 | `sheepdog scorecard` | Ear and latency metrics over the event log ([`iteration-2.md`](iteration-2.md) "Scorecard metrics"). |
 | `sheepdog feedback` | The user's feedback marks from the app ("that paused", `POST /api/feedback`), each diagnosed from its 30 s snapshot: model gap, delivery gap, client playback, reply wait (`--last N`, `--format json`; [`ws-contract.md`](ws-contract.md) "Feedback and drains"). |
-| `sheepdog bench` \| `bench validate` | The tier-2 voice benchmark: synthetic speech through a phone emulator into scratch daemons ([`bench/README.md`](bench/README.md), results in [`bench/tier2-2026-10-03.md`](bench/tier2-2026-10-03.md)). |
+| `sheepdog bench` \| `bench validate` | The tier-2 voice benchmark: synthetic speech through a phone emulator into scratch daemons (`internal/bench`, `testdata/bench`; experiment index in [`eval/README.md`](eval/README.md)). |
 | `sheepdog audio-e2e` | Speak scripted scenarios (macOS `say` + noise) into a running daemon's `/ws` ([`history/audio-e2e-results.md`](history/audio-e2e-results.md)). |
 | `sheepdog version` \| `help` | Version, commit and build date \| the command list. |
 
@@ -86,7 +86,7 @@ and Node for the browser tests.
 make build         # bin/sheepdog
 make run-dev       # serve --voice=off --herdr=mock --dev, for poking at /debug
 make test          # go test -race ./...
-make test-web      # web/voice, web/debug and web/static *.test.mjs, and the panel's (skipped without node)
+make test-web      # web/voice, web/debug, web/static, web/setup, web/factory *.test.mjs, and the panel's (skipped without node)
 make test-panel    # only the herdr-app panel's tests, mods/sheepdog (`herdr-app check mods/sheepdog` is its load check, run by hand)
 make vet lint
 make eval          # offline eval sets (no network)
@@ -247,7 +247,10 @@ Look at every image before you commit it: demo names only, no real host, address
 - **agy blocks:** herdr 0.9.0 does not detect Antigravity CLI prompts as
   `blocked` (needs a local agent-detection override or an upstream fix), so
   sheepdog cannot tell you an agy agent is waiting.
-- **Push needs an APNs key** from the team that owns the app
-  ([push.md](push.md)); without it nothing is pushed while the app is closed.
+- **Self-built iOS apps need their own APNs key or relay**
+  ([push.md](push.md)): the shared push relay (`push.mode = "relay"`,
+  on by default) works out of the box for the published TestFlight and App
+  Store app, while a self-built app under your own Apple team must configure
+  `[push.apns]` or a self-hosted relay for background notifications.
 - **Not yet checked on a device:** AirPods and route changes
   ([status.md](status.md)).

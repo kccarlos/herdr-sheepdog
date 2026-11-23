@@ -716,6 +716,8 @@ other caller with `403 {"error":"loopback_only"}` (`web.loopback_only
   hooks), `POST /api/prompts/reload`, `GET /api/voice/system_prompt`,
   `GET /api/brain/{transcript,context,system_prompt}`,
   `GET /api/context/*`, `/testdata/*`;
+- factory local board and CLI control: the `/factory` page,
+  `GET /api/factory/status`, `POST /api/factory/{start,stop,report}`;
 - the setup page, `/setup` and `/api/setup/*`, which also wants a change
   from its own origin as JSON (*Auth*).
 
@@ -806,7 +808,7 @@ Only this computer gets one (loopback only):
   state or log line carries a code.
 
 **Enrolling.** `POST /api/devices/enroll` (public; the code is the
-credential) `{"code":"…","public_key":"<base64url>","name":"iPhone","kind":"ios"|"ipados"|"browser","hardware":true}`:
+credential) `{"code":"…","public_key":"<base64url>","name":"iPhone","kind":"ios"|"ipados"|"browser"|"macos","hardware":true}`:
 
 - `public_key` is the device's P-256 public key as the uncompressed point
   (65 bytes, `0x04‖X‖Y`); a DER SubjectPublicKeyInfo is accepted too.
@@ -818,6 +820,19 @@ credential) `{"code":"…","public_key":"<base64url>","name":"iPhone","kind":"io
   is `code_used`.
 - `400` for a bad key or kind. Logged as `web.device.enroll {device_id,
   kind, name, hardware, remote_kind}`.
+- `kind: "macos"` (used by `Sheepdog.app`) accepts an empty `code` only from
+  unproxied loopback with a loopback `Host` (`403 loopback_only` /
+  `host_not_allowed` otherwise, `400` with a non-empty `code`), defaulting the
+  name to `"Mac"`. Wrong-code guesses on loopback are rate-limited like remote
+  callers (`429 rate_limited` on the 6th wrong guess in a minute).
+
+**Local browser short code.** `POST /api/pair/browser-code` (`accessDevice`,
+refusing ticketless loopback with `403 device_session_required`) issues a
+5-minute, single-use 8-character short code (`{"code","expires","expires_in":300}`)
+for `kind: "browser"` only, without disturbing active phone QR codes.
+`Sheepdog.app` (**Pair browser…**) uses it after enrolling as `macos` so the
+owner can pair a local browser on `/factory` to answer gated asks
+([`engine-v2/design.md`](engine-v2/design.md) §7.1).
 
 After pairing, a phone that allows notifications registers with
 `POST /api/push/register` (authenticated like the rest of `/api`). The
@@ -1158,7 +1173,13 @@ answer a question by tap. All three need a paired device under "Auth".
   rail as a spoken answer (docs/dev/roles.md "The one rail"), the option's
   keys go to the worker, and the answer is `{"ok": true, "spoken":
   "Told auth Yes."}`; the voice is told silently ("The user tapped
-  Yes on auth's question"). A question that is no longer open (answered,
+  Yes on auth's question"). Open gated factory asks also appear in
+  `questions` with `id: "fask-<ask_id>"` (`pane_id: "factory:<project>"`),
+  and answering one through `POST /api/pending/answer` requires a paired
+  device session (`403 proof_required` on ticketless loopback) and mints an
+  in-process `AnswerProof` ([`engine-v2/design.md`](engine-v2/design.md)
+  §7.1); factory ask pushes carry no quick-reply options (O32, [`push.md`](push.md)).
+  A question that is no longer open (answered,
   replaced, or expired and gone from the screen) is `409
   {"error":"that question is no longer open"}`; an option the question
   does not have is `400`.
@@ -1865,6 +1886,27 @@ and Control+Option+Space are the other fixed choices), with no Accessibility
 permission. Key-down starts push-to-talk; a release at or after 300 ms ends
 it, while a shorter release also toggles mute. The choice is stored in the
 app's `UserDefaults` as `hotkey.shortcut`.
+
+## Factory
+
+The factory engine (`internal/factory`) serves nine HTTP routes alongside the
+`/factory` board (`accessLoopback`). Per rule V1 in
+[`engine-v2/design.md`](engine-v2/design.md#121-what-the-surfaces-read), the
+Go structs returned by `internal/factory` and `internal/web/factory.go` are
+the single source of truth for factory JSON shapes (no duplicate schema is
+kept here):
+
+- **Paired device (`accessDevice`):** `GET /api/factory/projects`,
+  `GET /api/factory/projects/{id}/graph`, `GET /api/factory/projects/{id}/log`,
+  `GET /api/factory/asks`, and `POST /api/factory/asks/{id}/answer` (refuses
+  ticketless loopback with `403 proof_required` and mints an in-process
+  `AnswerProof` for paired devices).
+- **Loopback only (`accessLoopback`):** `GET /api/factory/status`,
+  `POST /api/factory/start`, `POST /api/factory/stop`, and
+  `POST /api/factory/report`.
+
+See [`engine-v2/design.md`](engine-v2/design.md) §7.1 (asks, browser
+enrolment, `AnswerProof`, and O32 no-quick-reply pushes) and §12.1 (views).
 
 ## Non-goals
 

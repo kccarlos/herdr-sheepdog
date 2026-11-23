@@ -246,8 +246,8 @@ xcrun notarytool store-credentials sheepdog-notary \
 
 or pass it per run with `NOTARY_KEY=<.p8 path> NOTARY_KEY_ID=… NOTARY_ISSUER=…`
 (all three, which then take precedence over the profile). A key with the
-Developer role is enough; the iOS app's key works too (see the iOS repo's
-`docs/dev/signing.md`).
+Developer role is enough; the iOS app's key works too (see
+[`ios/docs/dev/xcode-cloud.md`](../../ios/docs/dev/xcode-cloud.md)).
 
 Check the profile with `xcrun notarytool history --keychain-profile
 sheepdog-notary`.
