@@ -466,7 +466,9 @@ func normalizeAnswer(a string) string {
 // optionNumber extracts an option index from "2", "option 2", "the
 // second one", or 0.
 func optionNumber(a string) int {
-	a = strings.TrimSuffix(a, " one")
+	if a != "option one" {
+		a = strings.TrimSuffix(a, " one")
+	}
 	if m := reOptionNumber.FindStringSubmatch(a); m != nil {
 		n, _ := strconv.Atoi(m[1])
 		return n

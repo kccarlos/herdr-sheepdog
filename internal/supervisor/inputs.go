@@ -136,6 +136,7 @@ type claim struct {
 	// reason it failed; empty for a fresh claim.
 	retryOf     string
 	retryReason string
+	stopRest    bool
 }
 
 // maxInputs bounds the remembered inputs.
