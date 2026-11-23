@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -1487,4 +1488,68 @@ func TestFactoryStatusCanonicalizesSymlinkBeforeDaemonRequest(t *testing.T) {
 			t.Fatalf("daemon received folder=%q for %q, want canonical %q", got, tc.arg, tc.want)
 		}
 	}
+}
+
+// TestReorderFactoryArgsDerivesValueFlagsFromFlagSet verifies that adding a new
+// value flag (string, int, or Func) or bool flag to any subcommand's FlagSet
+// reorders trailing flags automatically from fs.Lookup without touching any
+// hand-kept flag list.
+func TestReorderFactoryArgsDerivesValueFlagsFromFlagSet(t *testing.T) {
+	newFS := func() (*flag.FlagSet, *string, *int, *bool, *[]string) {
+		fs := flag.NewFlagSet("factory test-subcmd", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		extra := fs.String("brand-new-flag", "", "new value flag")
+		count := fs.Int("brand-new-count", 0, "new int flag")
+		toggle := fs.Bool("brand-new-bool", false, "new bool flag")
+		var items []string
+		fs.Func("brand-new-item", "new repeatable flag", func(v string) error {
+			items = append(items, v)
+			return nil
+		})
+		return fs, extra, count, toggle, &items
+	}
+
+	t.Run("trailing new value, int, func and bool flags reorder cleanly", func(t *testing.T) {
+		fs, extra, count, toggle, items := newFS()
+		args := []string{
+			"pass",
+			"--brand-new-flag", "alpha",
+			"--brand-new-bool",
+			"--brand-new-count", "-1",
+			"--brand-new-item", "first",
+			"-brand-new-item", "-",
+		}
+		if err := fs.Parse(reorderFactoryArgs(fs, args)); err != nil {
+			t.Fatalf("Parse failed: %v", err)
+		}
+		if fs.NArg() != 1 || fs.Arg(0) != "pass" {
+			t.Fatalf("positional args = %q, want [pass]", fs.Args())
+		}
+		if *extra != "alpha" || *count != -1 || !*toggle || !slices.Equal(*items, []string{"first", "-"}) {
+			t.Fatalf("parsed = extra:%q count:%d bool:%v items:%q", *extra, *count, *toggle, *items)
+		}
+	})
+
+	t.Run("inline equals and double-dash terminator keep positional args", func(t *testing.T) {
+		fs, extra, _, toggle, _ := newFS()
+		args := []string{"pos1", "--brand-new-flag=inline", "--brand-new-bool", "--", "--brand-new-flag", "literal"}
+		if err := fs.Parse(reorderFactoryArgs(fs, args)); err != nil {
+			t.Fatalf("Parse failed: %v", err)
+		}
+		if *extra != "inline" || !*toggle {
+			t.Fatalf("parsed = extra:%q bool:%v", *extra, *toggle)
+		}
+		wantPos := []string{"pos1", "--brand-new-flag", "literal"}
+		if !slices.Equal(fs.Args(), wantPos) {
+			t.Fatalf("positional args = %q, want %q", fs.Args(), wantPos)
+		}
+	})
+
+	t.Run("unknown trailing flag still fails Parse", func(t *testing.T) {
+		fs, _, _, _, _ := newFS()
+		args := []string{"pass", "--unknown-flag", "v"}
+		if err := fs.Parse(reorderFactoryArgs(fs, args)); err == nil {
+			t.Fatalf("Parse succeeded for unknown flag, want error (pos=%q)", fs.Args())
+		}
+	})
 }
