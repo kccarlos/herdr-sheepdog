@@ -767,6 +767,9 @@ func TestStartChecksGHUnknownAndDoctorCleanup_KB_STA_18(t *testing.T) {
 				r := runStart(t, goodWorkflow, startFake{
 					"gh repo view o/r --json defaultBranchRef,viewerPermission": tc.out,
 				})["gh push access"]
+				if r.Status != onboard.Warn {
+					t.Fatalf("gh push access (%s) status = %v, want Warn: %+v", tc.name, r.Status, r)
+				}
 				low := strings.ToLower(r.Detail)
 				if !strings.Contains(low, "unknown (") || !strings.Contains(low, tc.want) {
 					t.Fatalf("gh push access (%s) = %+v, want unknown (<reason>) containing %q", tc.name, r, tc.want)
@@ -864,19 +867,180 @@ func TestStartChecksDaemonLookupIsLexicalOnly_KB_ENV_7(t *testing.T) {
 }
 
 func TestStartChecksGHMissingViaHC_KB_STA_18(t *testing.T) {
-	root := t.TempDir()
-	srv := hctest.New(t)
-	fake := makeStartCheckFake(root, nil)
-	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
-		if len(p.Argv) > 0 && p.Argv[0] == "gh" {
-			return hc.ExecResult{}, &hc.Error{Kind: "exec_failed", Message: "spawn gh: No such file or directory"}
+	t.Run("herdr-core spawn_failed missing gh fails", func(t *testing.T) {
+		root := t.TempDir()
+		srv := hctest.New(t)
+		fake := makeStartCheckFake(root, nil)
+		srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+			if len(p.Argv) > 0 && p.Argv[0] == "gh" {
+				return hc.ExecResult{}, &hc.Error{
+					Kind:    "spawn_failed",
+					Message: "cannot start gh: No such file or directory (os error 2)",
+				}
+			}
+			c := fake.run(context.Background(), p.Cwd, nil, p.Argv...)
+			return hc.ExecResult{Code: &c.Exit, Stdout: []byte(c.Stdout), Stderr: []byte(c.Stderr)}, nil
 		}
-		c := fake.run(context.Background(), p.Cwd, nil, p.Argv...)
-		return hc.ExecResult{Code: &c.Exit, Stdout: []byte(c.Stdout), Stderr: []byte(c.Stderr)}, nil
+		rs := StartChecks(context.Background(), DoctorOptions{Folder: root, HCSocket: srv.Path, RunCommand: fake.run})
+		r := findResult(t, rs, "gh push access")
+		if r.Status != onboard.Fail || !strings.Contains(strings.ToLower(r.Detail), "not installed") {
+			t.Fatalf("missing gh via hc spawn_failed = %+v, want Fail (not installed)", r)
+		}
+	})
+
+	t.Run("hctest.GitExec missing gh emits spawn_failed and fails", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		root := t.TempDir()
+		srv := hctest.New(t)
+		fake := makeStartCheckFake(root, nil)
+		srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+			if len(p.Argv) > 0 && p.Argv[0] == "gh" {
+				return hctest.GitExec(p)
+			}
+			c := fake.run(context.Background(), p.Cwd, nil, p.Argv...)
+			return hc.ExecResult{Code: &c.Exit, Stdout: []byte(c.Stdout), Stderr: []byte(c.Stderr)}, nil
+		}
+		timeout := 2.0
+		_, execErr := hc.NewClient(srv.Path).Exec(context.Background(), hc.ExecParams{
+			Argv:    []string{"gh", "--version"},
+			Cwd:     root,
+			Timeout: &timeout,
+		})
+		var rpcErr *hc.Error
+		if !errors.As(execErr, &rpcErr) || rpcErr.Kind != "spawn_failed" || rpcErr.Message != "cannot start gh: No such file or directory (os error 2)" {
+			t.Fatalf("hctest.GitExec missing gh = %#v, want spawn_failed capture", execErr)
+		}
+
+		rs := StartChecks(context.Background(), DoctorOptions{Folder: root, HCSocket: srv.Path, RunCommand: fake.run})
+		r := findResult(t, rs, "gh push access")
+		if r.Status != onboard.Fail || !strings.Contains(strings.ToLower(r.Detail), "not installed") {
+			t.Fatalf("missing gh via hctest.GitExec = %+v, want Fail (not installed)", r)
+		}
+	})
+
+	t.Run("hc method not found stays Warn unknown", func(t *testing.T) {
+		root := t.TempDir()
+		srv := hctest.New(t)
+		fake := makeStartCheckFake(root, nil)
+		srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+			if len(p.Argv) > 0 && p.Argv[0] == "gh" {
+				return hc.ExecResult{}, &hc.Error{Code: -32601, Message: "method not found"}
+			}
+			c := fake.run(context.Background(), p.Cwd, nil, p.Argv...)
+			return hc.ExecResult{Code: &c.Exit, Stdout: []byte(c.Stdout), Stderr: []byte(c.Stderr)}, nil
+		}
+		rs := StartChecks(context.Background(), DoctorOptions{Folder: root, HCSocket: srv.Path, RunCommand: fake.run})
+		r := findResult(t, rs, "gh push access")
+		if r.Status != onboard.Warn || !strings.Contains(strings.ToLower(r.Detail), "unknown (") {
+			t.Fatalf("method not found via hc = %+v, want Warn (unknown)", r)
+		}
+	})
+}
+
+func TestStartChecksGHLocalNotInstalled_KB_STA_18(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		out  CommandOutput
+	}{
+		{"exit 127", CommandOutput{Exit: 127}},
+		{"exec.ErrNotFound", CommandOutput{Exit: -1, Err: exec.ErrNotFound}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := runStart(t, goodWorkflow, startFake{
+				"gh repo view o/r --json defaultBranchRef,viewerPermission": tc.out,
+			})["gh push access"]
+			if r.Status != onboard.Fail || !strings.Contains(strings.ToLower(r.Detail), "not installed") || r.Fix == "" {
+				t.Fatalf("local gh %s = %+v, want Fail (not installed) with fix", tc.name, r)
+			}
+		})
 	}
-	rs := StartChecks(context.Background(), DoctorOptions{Folder: root, HCSocket: srv.Path, RunCommand: fake.run})
-	r := findResult(t, rs, "gh push access")
-	if r.Status != onboard.Fail || !strings.Contains(strings.ToLower(r.Detail), "not installed") {
-		t.Fatalf("missing gh via hc = %+v, want Fail (not installed)", r)
+}
+
+func TestEngineStartRefusalListsAllFailLinesAndNoWarnLines_KB_STA_18(t *testing.T) {
+	paths := testPaths(t)
+	repo := initGitRepo(t)
+	eng := newGitTestEngine(t, paths, nil)
+	failA := resFail("check-a", "first failure", "fix a")
+	failB := resFail("check-b", "second failure", "fix b")
+	warnR := resWarn("check-warn", "non-blocking warning", "fix warn")
+	okR := resOK("check-ok", "all good")
+	eng.StartCheck = func(context.Context, DoctorOptions) []onboard.Result {
+		return []onboard.Result{okR, warnR, failA, failB}
 	}
+	err := eng.Start(repo, "verify refusal lines", 0)
+	if err == nil {
+		t.Fatal("Engine.Start succeeded, want refusal")
+	}
+	msg := err.Error()
+	for _, want := range []string{failA.Line(), failB.Line()} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("Engine.Start refusal missing Fail line %q:\n%s", want, msg)
+		}
+	}
+	for _, unwanted := range []string{warnR.Line(), "check-warn", "non-blocking warning", okR.Line()} {
+		if strings.Contains(msg, unwanted) {
+			t.Errorf("Engine.Start refusal unexpectedly included %q:\n%s", unwanted, msg)
+		}
+	}
+}
+
+func TestGlobToRegexpCharacterClassEdgeCases_KB_STA_18(t *testing.T) {
+	t.Run("positive class must never match slash", func(t *testing.T) {
+		for _, tc := range []struct {
+			pat      string
+			match    []string
+			notMatch []string
+		}{
+			{
+				pat:      "a[.-0]b",
+				match:    []string{"a.b", "a0b"},
+				notMatch: []string{"a/b"},
+			},
+			{
+				pat:      "a[a/b]c",
+				match:    []string{"aac", "abc"},
+				notMatch: []string{"a/c"},
+			},
+		} {
+			re, err := globToRegexp(tc.pat)
+			if err != nil {
+				t.Fatalf("globToRegexp(%q) error = %v", tc.pat, err)
+			}
+			for _, s := range tc.match {
+				if !re.MatchString(s) {
+					t.Errorf("globToRegexp(%q) (%s) did not match %q", tc.pat, re.String(), s)
+				}
+			}
+			for _, s := range tc.notMatch {
+				if re.MatchString(s) {
+					t.Errorf("globToRegexp(%q) (%s) matched slash in %q", tc.pat, re.String(), s)
+				}
+				if matchBranchList([]string{tc.pat}, s) {
+					t.Errorf("matchBranchList([%q], %q) = true, want false", tc.pat, s)
+				}
+			}
+		}
+	})
+
+	t.Run("unescaped open bracket inside class compiles", func(t *testing.T) {
+		for _, pat := range []string{"v[[:a]", "v[[:a:]", "v[[:alpha:]"} {
+			re, err := globToRegexp(pat)
+			if err != nil {
+				t.Fatalf("globToRegexp(%q) failed to compile: %v", pat, err)
+			}
+			for _, s := range []string{"v[", "v:", "va"} {
+				if !re.MatchString(s) {
+					t.Errorf("globToRegexp(%q) (%s) did not match %q", pat, re.String(), s)
+				}
+			}
+			for _, s := range []string{"vb", "v/"} {
+				if re.MatchString(s) {
+					t.Errorf("globToRegexp(%q) (%s) unexpectedly matched %q", pat, re.String(), s)
+				}
+			}
+			if !matchBranchList([]string{pat}, "va") {
+				t.Errorf("matchBranchList([%q], %q) = false, want true", pat, "va")
+			}
+		}
+	})
 }

@@ -3,6 +3,7 @@ package hctest
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -29,6 +30,7 @@ func GitExec(p hc.ExecParams) (hc.ExecResult, error) {
 		p.Timeout == nil || *p.Timeout <= 0 {
 		return hc.ExecResult{}, fmt.Errorf("unexpected fixture git request in %s", dir)
 	}
+	prog := p.Argv[0]
 	switch p.Argv[0] {
 	case "/bin/sh":
 		if len(p.Argv) < 4 || p.Argv[1] != "-c" || p.Argv[3] != "sheepdog-project-path" {
@@ -41,6 +43,13 @@ func GitExec(p hc.ExecParams) (hc.ExecResult, error) {
 	case "gh":
 		bin, err := exec.LookPath("gh")
 		if err != nil {
+			if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
+				return hc.ExecResult{}, &hc.Error{
+					Code:    -32000,
+					Kind:    "spawn_failed",
+					Message: fmt.Sprintf("cannot start %s: No such file or directory (os error 2)", prog),
+				}
+			}
 			return hc.ExecResult{}, err
 		}
 		bin, err = filepath.EvalSymlinks(bin)
@@ -88,6 +97,13 @@ func GitExec(p hc.ExecParams) (hc.ExecResult, error) {
 		r.Stdout, r.Stderr, r.Truncated = r.Stdout[:min(len(r.Stdout), 8<<20)], r.Stderr[:min(len(r.Stderr), 1<<20)], true
 	}
 	if cmd.ProcessState == nil {
+		if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
+			return r, &hc.Error{
+				Code:    -32000,
+				Kind:    "spawn_failed",
+				Message: fmt.Sprintf("cannot start %s: No such file or directory (os error 2)", prog),
+			}
+		}
 		return r, err
 	}
 	if status := cmd.ProcessState.Sys().(syscall.WaitStatus); status.Signaled() {
