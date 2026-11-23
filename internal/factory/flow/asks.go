@@ -139,7 +139,8 @@ func OpenOwnerAskForTask(asks []Ask, taskID string) *Ask {
 	var fallback *Ask
 	for i := range asks {
 		a := &asks[i]
-		if a.Task != taskID || a.Status != AskStatusOpen || !a.Gated {
+		named := taskID != "" && (a.Task == taskID || a.Kind == KindOverride && slices.ContainsFunc(a.Targets, func(t OverrideTarget) bool { return t.Task == taskID }))
+		if !named || a.Status != AskStatusOpen || !a.Gated {
 			continue
 		}
 		if a.Kind == KindGate {

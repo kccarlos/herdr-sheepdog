@@ -365,9 +365,8 @@ func checksAbsentPastGrace(in In) bool {
 	return in.Facts.PR.Checks == ChecksAbsent && in.Now.Sub(in.Facts.PR.HeadSince) >= checksGrace(in)
 }
 func checksSeenNone(in In) bool { return !in.Facts.PR.ChecksUnread } // absent from a failed read is not "no checks"
-func checksUnread(in In) bool   { return in.Facts.PR.ChecksUnread }
 func ciReady(c Clause) Clause {
-	return all(ladderSays(Passed), prOpen, prHeadIsH, answered, githubAvail, c)
+	return all(ladderSays(Passed), noOverrideCovers, prOpen, prHeadIsH, answered, githubAvail, c)
 }
 
 func ladderSays(answer string) Clause {
@@ -577,7 +576,7 @@ var TaskRows = []Row[In]{
 		return say("the ladder says fix", EnsureRun(in, RoleWorker),
 			ensure(in, key(AskTellFindings, r.N)))(in)
 	}},
-	{ID: "N23", WaitsOn: "the worker", Stage: "working", When: all(hasAttempt, anyOf(noReady, tipAhead)), Then: func(in In) Decision {
+	{ID: "N23", WaitsOn: "the worker", Stage: "working", When: all(hasAttempt, noOverrideCovers, anyOf(noReady, tipAhead)), Then: func(in In) Decision {
 		asked, backoff := ensureRun(in, RoleWorker)
 		if backoff {
 			return Decision{Why: "waiting for worker restart back-off", Hold: true}
@@ -603,10 +602,10 @@ var TaskRows = []Row[In]{
 	{ID: "N29", WaitsOn: "the reviewer", Stage: "working", When: ladderSays(Review), Then: func(in In) Decision {
 		return say("the ladder says review", n29Asks(in))(in)
 	}},
-	{ID: "N30", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: all(ladderSays(Passed), ownerGateNo), Then: func(in In) Decision {
+	{ID: "N30", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: all(ladderSays(Passed), noOverrideCovers, ownerGateNo), Then: func(in In) Decision {
 		return say("the owner answered no to the gate ask", ensure(in, key(AskOwnerNoRecap, len(in.Task.Recaps))))(in)
 	}},
-	{ID: "N31", WaitsOn: "the owner", Stage: "owner_gate", When: all(ladderSays(Passed), anyOf(hasOpenOwnerAsk, func(in In) bool { return ownerGateApplies(in) && !gateYesCoversH(in) })), Then: func(in In) Decision {
+	{ID: "N31", WaitsOn: "the owner", Stage: "owner_gate", When: all(ladderSays(Passed), noOverrideCovers, anyOf(hasOpenOwnerAsk, func(in In) bool { return ownerGateApplies(in) && !gateYesCoversH(in) })), Then: func(in In) Decision {
 		if !hasOpenOwnerAsk(in) && ownerGateApplies(in) && !gateYesCoversH(in) {
 			return say("owner gate applies: ask the owner to approve H", []string{key(AskOpenGate, headH(in))})(in)
 		}
@@ -663,8 +662,11 @@ var TaskRows = []Row[In]{
 		return say("the base branch has been red past main_red_minutes: tell the oldest held task's worker to merge the base and say ready (or land a fix PR directly)",
 			EnsureRun(in, RoleWorker), ensure(in, key(AskTellBaseRed, spell)), wake)(in)
 	}},
-	{ID: "N36", WaitsOn: "CI", Stage: "ci", Why: WhyCI, When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown, all(overrideCovers, checksUnread))),
+	{ID: "N36", WaitsOn: "CI", Stage: "ci", Why: WhyCI, When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown, overrideCovers)),
 		Then: func(in In) Decision {
+			if overrideCovers(in) {
+				return say("override held: waiting for a readable PR snapshot at H")(in)
+			}
 			// Stands in for the ci_stalled alert until slice 5b builds the alerts table.
 			spell := in.attempt().PendingChecks
 			if checksPend(in) && prHeadIsH(in) && answered(in) && githubAvail(in) &&
