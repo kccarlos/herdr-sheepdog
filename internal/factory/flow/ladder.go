@@ -7,6 +7,7 @@ const (
 	Passed      = "passed"
 	Fix         = "fix"
 	Review      = "review"
+	RetroAnswer = "retro"
 	RecapAnswer = "recap"
 	NoLadderRow = "no ladder rule matched"
 )

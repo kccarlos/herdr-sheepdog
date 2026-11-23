@@ -139,6 +139,42 @@ func TestCheckInvariantsCleanStates(t *testing.T) {
 			t.Fatalf("observed ended worker with stale RunID should not trigger I1, got %+v", vs)
 		}
 	})
+
+	t.Run("active task with live retro run when ladder says retro (L11 and L5)", func(t *testing.T) {
+		snap := cleanSnapshot()
+		a := &snap.State.Tasks[0].Attempts[0]
+		a.Rounds = []Round{
+			{N: 1, Kind: RoundFull, Head: "c0", Verdict: VerdictChanges, Majors: 1},
+			{N: 2, Kind: RoundDelta, Head: "c0b", Verdict: VerdictChanges, Majors: 1},
+			{N: 3, Kind: RoundDelta, Head: "c1", Verdict: VerdictChanges, Majors: 1},
+		}
+		a.Review = &ReviewRun{
+			Round: 4, Kind: RoundRetro, Head: "c1", RunID: "rev-4",
+			Run: &RunRecord{Address: "rev-4", Role: RoleRetro, State: PhaseWorking},
+		}
+		if vs := CheckInvariants(snap); len(vs) != 0 {
+			t.Fatalf("L11 live retro run should satisfy I1, got %+v", vs)
+		}
+
+		// L5 delta-check retro run at c2 after round 4 FIX at c1.
+		snapDelta := cleanSnapshot()
+		ad := &snapDelta.State.Tasks[0].Attempts[0]
+		ad.Ready = []Ready{{Head: "c1"}, {Head: "c2"}}
+		ad.Rounds = []Round{
+			{N: 1, Kind: RoundFull, Head: "c0", Verdict: VerdictChanges, Majors: 1},
+			{N: 2, Kind: RoundDelta, Head: "c0b", Verdict: VerdictChanges, Majors: 1},
+			{N: 3, Kind: RoundDelta, Head: "c1", Verdict: VerdictChanges, Majors: 1},
+			{N: 4, Kind: RoundRetro, Head: "c1", Verdict: VerdictFix, Majors: 1},
+		}
+		snapDelta.State.Tasks[0].Retros = []Retro{{Attempt: 1, Round: 4, Cause: "patch-shaped-fix", At: snapDelta.Now}}
+		ad.Review = &ReviewRun{
+			Round: 5, Kind: RoundRetro, Head: "c2", RunID: "rev-5",
+			Run: &RunRecord{Address: "rev-5", Role: RoleRetro, State: PhaseWorking},
+		}
+		if vs := CheckInvariants(snapDelta); len(vs) != 0 {
+			t.Fatalf("L5 live retro delta-check run should satisfy I1, got %+v", vs)
+		}
+	})
 }
 
 func TestCheckInvariantsViolations(t *testing.T) {
@@ -179,6 +215,56 @@ func TestCheckInvariantsViolations(t *testing.T) {
 		vs := CheckInvariants(snap)
 		if !hasViolation(vs, "I1", "T1", "ladder says passed") {
 			t.Fatalf("want I1 unwanted reviewer violation, got %+v", vs)
+		}
+	})
+
+	t.Run("I1 live retro run when ladder says review (kind mismatch)", func(t *testing.T) {
+		snap := cleanSnapshot()
+		snap.State.Tasks[0].Attempts[0].Review = &ReviewRun{
+			Round: 1, Kind: RoundRetro, Head: "c1", RunID: "rev-1",
+			Run: &RunRecord{Address: "rev-1", Role: RoleRetro, State: PhaseWorking},
+		}
+		vs := CheckInvariants(snap)
+		if !hasViolation(vs, "I1", "T1", "ladder says review") {
+			t.Fatalf("want I1 kind-mismatch violation for live retro run while ladder says review, got %+v", vs)
+		}
+	})
+
+	t.Run("I1 live reviewer run when ladder says retro (kind mismatch)", func(t *testing.T) {
+		snap := cleanSnapshot()
+		a := &snap.State.Tasks[0].Attempts[0]
+		a.Rounds = []Round{
+			{N: 1, Kind: RoundFull, Head: "c0", Verdict: VerdictChanges, Majors: 1},
+			{N: 2, Kind: RoundDelta, Head: "c0b", Verdict: VerdictChanges, Majors: 1},
+			{N: 3, Kind: RoundDelta, Head: "c1", Verdict: VerdictChanges, Majors: 1},
+		}
+		a.Review = &ReviewRun{
+			Round: 4, Kind: RoundFull, Head: "c1", RunID: "rev-4",
+			Run: &RunRecord{Address: "rev-4", Role: RoleReviewer, State: PhaseWorking},
+		}
+		vs := CheckInvariants(snap)
+		if !hasViolation(vs, "I1", "T1", "ladder says retro") {
+			t.Fatalf("want I1 kind-mismatch violation for live reviewer run while ladder says retro, got %+v", vs)
+		}
+	})
+
+	t.Run("I1 live retro run after ladder passed via L6 SHIP", func(t *testing.T) {
+		snap := cleanSnapshot()
+		a := &snap.State.Tasks[0].Attempts[0]
+		a.Rounds = []Round{
+			{N: 1, Kind: RoundFull, Head: "c0", Verdict: VerdictChanges, Majors: 1},
+			{N: 2, Kind: RoundDelta, Head: "c0b", Verdict: VerdictChanges, Majors: 1},
+			{N: 3, Kind: RoundDelta, Head: "c1", Verdict: VerdictChanges, Majors: 1},
+			{N: 4, Kind: RoundRetro, Head: "c1", Verdict: VerdictShip, Majors: 0},
+		}
+		snap.State.Tasks[0].Retros = []Retro{{Attempt: 1, Round: 4, Cause: "none", At: snap.Now}}
+		a.Review = &ReviewRun{
+			Round: 5, Kind: RoundRetro, Head: "c1", RunID: "rev-5",
+			Run: &RunRecord{Address: "rev-5", Role: RoleRetro, State: PhaseWorking},
+		}
+		vs := CheckInvariants(snap)
+		if !hasViolation(vs, "I1", "T1", "ladder says passed") {
+			t.Fatalf("want I1 violation for live retro run after L6 SHIP, got %+v", vs)
 		}
 	})
 

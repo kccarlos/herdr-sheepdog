@@ -19,12 +19,47 @@ const (
 	RoleReviewer    = "reviewer"
 )
 
-// Round kinds of slice 2 (design.md 3, 4.6).
+// Round kinds of slices 2 and 12 (design.md 3, 4.6).
 const (
 	RoundFull     = "full"
 	RoundDelta    = "delta"
+	RoundRetro    = "retro"
 	RoundSendBack = "send_back" // the coordinator's "changes", with a why (design.md 4.9)
 )
+
+// Retro verdicts and change kinds (design.md 3, 4.6, 7.2).
+const (
+	VerdictShip     = "ship"
+	VerdictFix      = "fix"
+	VerdictRedesign = "redesign"
+	ChangeKindCheck = "check"
+	ChangeKindBrief = "brief"
+)
+
+// RetroCauses is the fixed 8-cause set for retro reports (design.md 7.2, KB-RET-15).
+var RetroCauses = []string{
+	"task-too-big",
+	"wrong-seam",
+	"vague-brief",
+	"design-needed-first",
+	"patch-shaped-fix",
+	"worker-model",
+	"reviewer-narrow",
+	"none",
+}
+
+// Retro is one persisted retro outcome on a task, joined to its RoundRetro
+// record in Attempt.Rounds by Attempt (1-based) and Round (design.md 3, 7.2).
+type Retro struct {
+	Attempt               int       `json:"attempt"`
+	Round                 int       `json:"round"`
+	Cause                 string    `json:"cause"`
+	WorkerChange          string    `json:"worker_change"`
+	WorkerChangeKind      string    `json:"worker_change_kind"`
+	CoordinatorChange     string    `json:"coordinator_change"`
+	CoordinatorChangeKind string    `json:"coordinator_change_kind"`
+	At                    time.Time `json:"at"`
+}
 
 // State is one project's state.json. Seq counts the inputs committed to it.
 type State struct {
@@ -172,6 +207,7 @@ type Task struct {
 	HoldKey       string                 `json:"hold_key,omitempty"`
 	LastRow       string                 `json:"last_row,omitempty"`
 	Recaps        []Recap                `json:"recaps,omitempty"`
+	Retros        []Retro                `json:"retros,omitempty"`
 	Acts          []Act                  `json:"acts,omitempty"`
 	Attempts      []Attempt              `json:"attempts"`
 }
@@ -334,6 +370,9 @@ type ReviewRun struct {
 	RefusalSent  bool          `json:"refusal_sent,omitempty"`
 	Age          time.Duration `json:"age,omitempty"`
 }
+
+// Role returns RoleRetro for a retro run in the shared review slot, else RoleReviewer.
+func (r *ReviewRun) Role() string { return RoleReviewer }
 
 // Proof is one outcome's evidence attached to a ready report (design.md 3, 7.2):
 // either a command run by the report client or a manual artifact path.

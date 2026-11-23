@@ -60,11 +60,59 @@ var (
 	changes     = func(in *In) {
 		a0(in).Rounds = []Round{{N: 1, Kind: RoundFull, Head: "c1", Verdict: VerdictChanges, Majors: 1}}
 	}
-	streakRecap = func(in *In) {
+	retroStreak = func(in *In) {
 		a0(in).Rounds = []Round{
 			{N: 1, Kind: RoundFull, Head: "c0", Verdict: VerdictChanges, Majors: 1},
 			{N: 2, Kind: RoundDelta, Head: "c0b", Verdict: VerdictChanges, Majors: 1},
 			{N: 3, Kind: RoundDelta, Head: "c1", Verdict: VerdictChanges, Majors: 1},
+		}
+	}
+	retroUnavail    = func(in *In) { in.Facts.RetroUnavailable = true }
+	retrosExhausted = func(in *In) {
+		in.Task.Retros = []Retro{{Attempt: 1, Round: 4, Cause: "wrong-seam", At: now.Add(-time.Hour)}}
+	}
+	streakRecap = func(in *In) {
+		retroStreak(in)
+		in.Facts.RetroUnavailable = true
+	}
+	retroFix = func(in *In) {
+		retroStreak(in)
+		a0(in).Rounds = append(a0(in).Rounds, Round{N: 4, Kind: RoundRetro, Head: "c1", Verdict: VerdictFix, Majors: 1})
+		in.Task.Retros = []Retro{{Attempt: 1, Round: 4, Cause: "patch-shaped-fix", WorkerChange: "fix class", WorkerChangeKind: ChangeKindCheck, CoordinatorChange: "add test", CoordinatorChangeKind: ChangeKindCheck, At: now}}
+	}
+	retroFixReadyC2 = func(in *In) {
+		retroFix(in)
+		a0(in).Ready = append(a0(in).Ready, Ready{Head: "c2"})
+		in.Facts.Tip, in.Facts.PR.Head = "c2", "c2"
+	}
+	retroSecondFix = func(in *In) {
+		retroStreak(in)
+		a0(in).Rounds = append(a0(in).Rounds,
+			Round{N: 4, Kind: RoundRetro, Head: "c0c", Verdict: VerdictFix, Majors: 1},
+			Round{N: 5, Kind: RoundRetro, Head: "c1", Verdict: VerdictFix, Majors: 1},
+		)
+		in.Task.Retros = []Retro{
+			{Attempt: 1, Round: 4, Cause: "patch-shaped-fix", At: now.Add(-time.Minute)},
+			{Attempt: 1, Round: 5, Cause: "patch-shaped-fix", At: now},
+		}
+	}
+	retroShip = func(in *In) {
+		retroStreak(in)
+		a0(in).Rounds = append(a0(in).Rounds, Round{N: 4, Kind: RoundRetro, Head: "c1", Verdict: VerdictShip, Majors: 0})
+		in.Task.Retros = []Retro{{Attempt: 1, Round: 4, Cause: "none", At: now}}
+	}
+	retroRedesign = func(in *In) {
+		retroStreak(in)
+		a0(in).Rounds = append(a0(in).Rounds, Round{N: 4, Kind: RoundRetro, Head: "c1", Verdict: VerdictRedesign, Majors: 1})
+		in.Task.Retros = []Retro{{Attempt: 1, Round: 4, Cause: "wrong-seam", At: now}}
+	}
+	maxRoundsNoStreak = func(in *In) {
+		a0(in).Rounds = []Round{
+			{N: 1, Kind: RoundFull, Head: "c0", Verdict: VerdictChanges, Majors: 1},
+			{N: 2, Kind: RoundDelta, Head: "c0b", Verdict: VerdictPass},
+			{N: 3, Kind: RoundDelta, Head: "c0c", Verdict: VerdictChanges, Majors: 1},
+			{N: 4, Kind: RoundDelta, Head: "c0d", Verdict: VerdictPass},
+			{N: 5, Kind: RoundDelta, Head: "c1", Verdict: VerdictChanges, Majors: 1},
 		}
 	}
 	parked   = func(in *In) { in.Task.Parked = true }
@@ -315,18 +363,25 @@ func TestRowCases(t *testing.T) {
 		{"N42", with(movedToM2), []string{"record_accept@m2", "merge@m2"}},                                                                   // the passes at c1 still cover m2
 		{"N42", with(movedToM2, func(in *In) { in.Facts.Tip, in.Facts.TipRel = "c1", RelBehind }), []string{"record_accept@m2", "merge@m2"}}, // PR updated on GitHub: tip behind H still merges
 		{"N22", with(changes), []string{"tell_worker_findings@1"}},
+		{"N22", with(retroFix), []string{"tell_worker_findings@4"}},
 		{"N23", with(notReady, noRounds, prGone), []string{"start_worker"}},
 		{"N23", with(notReady, noRounds, prGone, waitDep), []string{"start_worker"}}, // open attempt with unmet deps still matches an attempt row, not N9
-		{"N24", with(streakRecap, splitOfRetro), []string{"open_n24_ask@c1"}},
+		{"N24", with(retroStreak, splitOfRetro), []string{"open_n24_ask@c1"}},
 		{"N25", with(streakRecap), []string{"open_recap@review"}},
+		{"N25", with(retroRedesign), []string{"open_recap@review"}},
+		{"N25", with(retroSecondFix), []string{"open_recap@review"}},
 		{"N26", with(noRounds, prGone), []string{"push_and_open_pr@c1"}},
 		{"N26", with(noRounds, prGone, func(in *In) { in.Facts.PR.Number, in.Facts.PR.OtherBase = 7, "release" }), []string{"wake_coordinator@pr_other_base@7@release"}},
 		{"N26", with(noRounds, prGone, noAnswer), nil},                    // "no PR" from a failed read: wait, no push
 		{"N26", with(noRounds, prBehind, noAnswer), nil},                  // a stale behind PR, unanswered: wait
 		{"N26", with(noRounds, func(in *In) { in.Facts.PR = PR{} }), nil}, // no snapshot yet
+		{"N28", with(retroStreak), []string{"start_retro@4@c1"}},
+		{"N28", with(retroFixReadyC2), []string{"start_retro@5@c2"}},
+		{"N28", with(retroStreak, noAnswer), nil},
 		{"N29", with(noRounds), []string{"start_reviewer@1@c1"}},
 		{"N29", with(onePass), []string{"start_reviewer@2@c1"}},
 		{"N29", with(changes, rejected), []string{"start_reviewer@2@c1"}}, // L10: reject consumes no round number
+		{"N42", with(retroShip), []string{"record_accept@c1", "merge@c1"}},
 		{"N30", with(gateOwnerTask, func(in *In) {
 			in.Asks = []Ask{answeredN31Ask("ask-gate-no", "t", "c1", GateOptionHold, now)}
 		}), []string{"open_owner_no_recap@0"}},
@@ -438,12 +493,18 @@ func TestRowOrder(t *testing.T) {
 		{"N12", "N23", false, with(overCap, tipAheadF)},
 		{"N22", "N23", true, with(changes, tipAheadF)},
 		{"N22", "N26", false, with(changes, prBehind)},
-		{"N23", "N24", true, with(streakRecap, splitOfRetro, tipAheadF)},
-		{"N24", "N25", true, with(streakRecap, splitOfRetro)},
+		{"N6", "N28", false, with(openRecap, retroStreak)},
+		{"N12", "N28", false, with(overCap, retroStreak)},
+		{"N13", "N28", false, with(retroStreak, ciFailed3)},
+		{"N14", "N28", false, with(retroStreak, overTime)},
+		{"N23", "N24", true, with(retroStreak, splitOfRetro, tipAheadF)},
+		{"N24", "N25", true, with(retroStreak, splitOfRetro)},
 		{"N23", "N25", false, with(streakRecap, tipAheadF)},
+		{"N23", "N28", false, with(retroStreak, tipAheadF)},
 		{"N25", "N26", true, with(streakRecap, prGone)},
 		{"N23", "N36", false, with(tipAheadF, pending)},
-		{"N26", "N29", true, with(noRounds, prGone)},
+		{"N26", "N28", true, with(retroStreak, prGone)},
+		{"N26", "N29", false, with(noRounds, prGone)},
 		{"N30", "N31", true, with(gateOwnerTask, func(in *In) {
 			in.Asks = []Ask{answeredN31Ask("ask-gate-no", "t", "c1", GateOptionHold, now)}
 		})},
@@ -480,6 +541,19 @@ func TestRowOrder(t *testing.T) {
 		if r, _ := FirstMatch(rows, c.in); r.ID != c.lose {
 			t.Errorf("swapped %s/%s: got %s", c.win, c.lose, r.ID)
 		}
+	}
+	// Disjoint neighbours N28 and N29: N28 sits immediately before N29, and swapping keeps both winners.
+	i28 := slices.IndexFunc(TaskRows, func(r Row[In]) bool { return r.ID == "N28" })
+	if i28 < 0 || i28+1 >= len(TaskRows) || TaskRows[i28+1].ID != "N29" {
+		t.Fatalf("N28 and N29 are not neighbours in TaskRows (N28 idx=%d)", i28)
+	}
+	swap2829 := slices.Clone(TaskRows)
+	swap2829[i28], swap2829[i28+1] = swap2829[i28+1], swap2829[i28]
+	if r, _ := FirstMatch(swap2829, with(retroStreak)); r.ID != "N28" {
+		t.Errorf("swapped N28/N29 on retroStreak: got %s, want N28", r.ID)
+	}
+	if r, _ := FirstMatch(swap2829, with(noRounds)); r.ID != "N29" {
+		t.Errorf("swapped N28/N29 on noRounds: got %s, want N29", r.ID)
 	}
 }
 
@@ -858,6 +932,14 @@ func TestLadder(t *testing.T) {
 	}{
 		{"L1", Passed, with(noRounds, withOverride("c1", ChecksPending, false))},
 		{"L1", Passed, with(changes, withOverride("c1", ChecksGreen, false))},
+		{"L2", RecapAnswer, with(retroRedesign)},
+		{"L3", RecapAnswer, with(retroSecondFix)},
+		{"L3", RecapAnswer, with(retroFixReadyC2, retroUnavail)},
+		{"L4", Fix, with(retroFix)},
+		{"L4", Fix, with(retroFix, movedToM2)},
+		{"L5", RetroAnswer, with(retroFixReadyC2)},
+		{"L6", Passed, with(retroShip)},
+		{"L6", Passed, with(retroShip, movedToM2)},
 		{"L7", Review, with(noRounds)},
 		{"L7", Review, with(func(in *In) { a0(in).Ready = append(a0(in).Ready, Ready{Head: "c2"}) })},
 		{"L8", Review, with(onePass)},
@@ -868,7 +950,11 @@ func TestLadder(t *testing.T) {
 			a0(in).Rounds = []Round{{N: 1, Kind: RoundDelta, Head: "c1", Verdict: VerdictChanges}}
 			a0(in).Rejects = []Reject{{Head: "c1", Round: 1, Why: "delta claim wrong"}}
 		})},
+		{"L11", RetroAnswer, with(retroStreak)},
 		{"L12", RecapAnswer, with(streakRecap)},
+		{"L12", RecapAnswer, with(retroStreak, splitOfRetro)},
+		{"L12", RecapAnswer, with(retroStreak, retrosExhausted)},
+		{"L12", RecapAnswer, with(maxRoundsNoStreak)},
 		{"L13", Fix, with(changes)},
 		{"L13", Fix, with(changes, rejected, func(in *In) { // round 2 after a round-1 reject asks for changes -> Fix until round 2 is fixed or rejected
 			a0(in).Rounds = append(a0(in).Rounds, Round{N: 2, Kind: RoundFull, Head: "c1", Verdict: VerdictChanges})
@@ -892,10 +978,10 @@ func TestLadder(t *testing.T) {
 	}
 }
 
-// TestLadderOrder checks L1/L7/L8/L9/L10/L12/L13 ordering and neighbour swaps
-// (design.md 16, KB-REV-62, KB-CAP-1, KB-CAP-9).
+// TestLadderOrder checks L1–L13 ordering and neighbour swaps
+// (design.md 4.6, 16, KB-REV-62, KB-CAP-1, KB-CAP-9, KB-RET-1, KB-RET-2, KB-RET-4, KB-RET-5).
 func TestLadderOrder(t *testing.T) {
-	wantIDs := []string{"L1", "L7", "L8", "L9", "L10", "L12", "L13", "L-"}
+	wantIDs := []string{"L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L11", "L12", "L13", "L-"}
 	var gotIDs []string
 	for _, r := range LadderRows {
 		gotIDs = append(gotIDs, r.ID)
@@ -903,89 +989,100 @@ func TestLadderOrder(t *testing.T) {
 	if !slices.Equal(gotIDs, wantIDs) {
 		t.Fatalf("ladder rows = %v, want %v", gotIDs, wantIDs)
 	}
-	// Neighbours L1 and L7: both hold on an override with no rounds; L1 wins
-	// (Passed), and swapping makes L7 win (Review).
-	ovrNoRounds := with(noRounds, withOverride("c1", ChecksGreen, false))
-	if !LadderRows[0].When(ovrNoRounds) || !LadderRows[1].When(ovrNoRounds) {
-		t.Fatal("expected both L1 and L7 conditions to hold on override with no rounds")
+	idxOf := func(id string) int {
+		i := slices.IndexFunc(LadderRows, func(r Row[In]) bool { return r.ID == id })
+		if i < 0 {
+			t.Fatalf("ladder row %s missing", id)
+		}
+		return i
 	}
-	if r, d := FirstMatch(LadderRows, ovrNoRounds); r.ID != "L1" || d.Why != Passed {
-		t.Fatalf("L1 vs L7: got %s (%s), want L1 (%s)", r.ID, d.Why, Passed)
+	checkOverlap := func(win, lose, winAns, loseAns string, neighbours bool, in In) {
+		t.Helper()
+		iw, il := idxOf(win), idxOf(lose)
+		if !LadderRows[iw].When(in) || !LadderRows[il].When(in) {
+			t.Fatalf("expected both %s and %s conditions to hold", win, lose)
+		}
+		if r, d := FirstMatch(LadderRows, in); r.ID != win || d.Why != winAns {
+			t.Fatalf("%s vs %s: got %s (%s), want %s (%s)", win, lose, r.ID, d.Why, win, winAns)
+		}
+		if !neighbours {
+			return
+		}
+		if il != iw+1 {
+			t.Fatalf("%s and %s are not neighbours", win, lose)
+		}
+		swapped := slices.Clone(LadderRows)
+		swapped[iw], swapped[il] = swapped[il], swapped[iw]
+		if r, d := FirstMatch(swapped, in); r.ID != lose || d.Why != loseAns {
+			t.Fatalf("swapped %s/%s: got %s (%s), want %s (%s)", win, lose, r.ID, d.Why, lose, loseAns)
+		}
 	}
-	swap17 := slices.Clone(LadderRows)
-	swap17[0], swap17[1] = swap17[1], swap17[0]
-	if r, d := FirstMatch(swap17, ovrNoRounds); r.ID != "L7" || d.Why != Review {
-		t.Fatalf("swapped L1/L7: got %s (%s), want L7 (%s)", r.ID, d.Why, Review)
+	checkDisjoint := func(a, b string, inA, inB In) {
+		t.Helper()
+		ia, ib := idxOf(a), idxOf(b)
+		if ib != ia+1 {
+			t.Fatalf("%s and %s are not neighbours", a, b)
+		}
+		swapped := slices.Clone(LadderRows)
+		swapped[ia], swapped[ib] = swapped[ib], swapped[ia]
+		if r, _ := FirstMatch(swapped, inA); r.ID != a {
+			t.Fatalf("swapped %s/%s on %s case matched %s, want %s", a, b, a, r.ID, a)
+		}
+		if r, _ := FirstMatch(swapped, inB); r.ID != b {
+			t.Fatalf("swapped %s/%s on %s case matched %s, want %s", a, b, b, r.ID, b)
+		}
 	}
-	// Neighbours L7 and L8: disjoint on both noRounds and onePass, so swapping keeps each winner.
-	swap78 := slices.Clone(LadderRows)
-	swap78[1], swap78[2] = swap78[2], swap78[1]
-	if r, _ := FirstMatch(swap78, with(noRounds)); r.ID != "L7" {
-		t.Fatalf("swapped L7/L8 on noRounds matched %s, want L7", r.ID)
-	}
-	if r, _ := FirstMatch(swap78, with(onePass)); r.ID != "L8" {
-		t.Fatalf("swapped L7/L8 on onePass matched %s, want L8", r.ID)
-	}
-	// Neighbours L8 and L9: both hold on onePass; L8 wins, and swapping makes L9 win.
-	in := with(onePass)
-	if !LadderRows[2].When(in) || !LadderRows[3].When(in) {
-		t.Fatal("expected both L8 and L9 conditions to hold on onePass")
-	}
-	if r, d := FirstMatch(LadderRows, in); r.ID != "L8" || d.Why != Review {
-		t.Fatalf("L8 vs L9: got %s (%s), want L8 (%s)", r.ID, d.Why, Review)
-	}
-	swap89 := slices.Clone(LadderRows)
-	swap89[2], swap89[3] = swap89[3], swap89[2]
-	if r, d := FirstMatch(swap89, in); r.ID != "L9" || d.Why != Passed {
-		t.Fatalf("swapped L8/L9: got %s (%s), want L9 (%s)", r.ID, d.Why, Passed)
-	}
-	// Neighbours L9 and L10: disjoint on landing() (pass) and rejected changes.
-	swap910 := slices.Clone(LadderRows)
-	swap910[3], swap910[4] = swap910[4], swap910[3]
-	if r, _ := FirstMatch(swap910, landing()); r.ID != "L9" {
-		t.Fatalf("swapped L9/L10 on landing() matched %s, want L9", r.ID)
-	}
-	if r, _ := FirstMatch(swap910, with(changes, rejected)); r.ID != "L10" {
-		t.Fatalf("swapped L9/L10 on rejected changes matched %s, want L10", r.ID)
-	}
-	// Neighbours L10 and L12: both hold on a rejected streak round; L10 wins,
-	// and swapping makes L12 win.
-	rejStreak := with(streakRecap, func(in *In) {
+
+	// Overlapping neighbour pairs (swapping reverses the winner).
+	checkOverlap("L1", "L2", Passed, RecapAnswer, true, with(retroRedesign, withOverride("c1", ChecksGreen, false)))
+	checkOverlap("L3", "L4", RecapAnswer, Fix, true, with(retroSecondFix))
+	checkOverlap("L8", "L9", Review, Passed, true, with(onePass))
+	rejStreak := with(retroStreak, func(in *In) {
 		a0(in).Rejects = []Reject{{Head: "c1", Round: 3, Why: "wrong"}}
 	})
-	if !LadderRows[4].When(rejStreak) || !LadderRows[5].When(rejStreak) {
-		t.Fatal("expected both L10 and L12 conditions to hold on rejected streak")
-	}
-	if r, d := FirstMatch(LadderRows, rejStreak); r.ID != "L10" || d.Why != Review {
-		t.Fatalf("L10 vs L12: got %s (%s), want L10 (%s)", r.ID, d.Why, Review)
-	}
-	swap1012 := slices.Clone(LadderRows)
-	swap1012[4], swap1012[5] = swap1012[5], swap1012[4]
-	if r, d := FirstMatch(swap1012, rejStreak); r.ID != "L12" || d.Why != RecapAnswer {
-		t.Fatalf("swapped L10/L12: got %s (%s), want L12 (%s)", r.ID, d.Why, RecapAnswer)
-	}
-	// Neighbours L12 and L13: both hold on streakRecap; L12 wins (Recap),
-	// and swapping makes L13 win (Fix).
-	sIn := with(streakRecap)
-	if !LadderRows[5].When(sIn) || !LadderRows[6].When(sIn) {
-		t.Fatal("expected both L12 and L13 conditions to hold on streakRecap")
-	}
-	if r, d := FirstMatch(LadderRows, sIn); r.ID != "L12" || d.Why != RecapAnswer {
-		t.Fatalf("L12 vs L13: got %s (%s), want L12 (%s)", r.ID, d.Why, RecapAnswer)
-	}
-	swap1213 := slices.Clone(LadderRows)
-	swap1213[5], swap1213[6] = swap1213[6], swap1213[5]
-	if r, d := FirstMatch(swap1213, sIn); r.ID != "L13" || d.Why != Fix {
-		t.Fatalf("swapped L12/L13: got %s (%s), want L13 (%s)", r.ID, d.Why, Fix)
+	checkOverlap("L10", "L11", Review, RetroAnswer, true, rejStreak)
+	checkOverlap("L11", "L12", RetroAnswer, RecapAnswer, true, with(retroStreak))
+	checkOverlap("L12", "L13", RecapAnswer, Fix, true, with(streakRecap))
+
+	// Disjoint neighbour pairs (swapping preserves both winners).
+	checkDisjoint("L2", "L3", with(retroRedesign), with(retroSecondFix))
+	checkDisjoint("L4", "L5", with(retroFix), with(retroFixReadyC2))
+	checkDisjoint("L5", "L6", with(retroFixReadyC2), with(retroShip))
+	checkDisjoint("L6", "L7", with(retroShip), with(noRounds))
+	checkDisjoint("L7", "L8", with(noRounds), with(onePass))
+	checkDisjoint("L9", "L10", landing(), with(changes, rejected))
+
+	// Key non-neighbour overlapping pairs (design.md 4.6, table-audit F2.1/FX.1).
+	checkOverlap("L1", "L3", Passed, RecapAnswer, false, with(retroSecondFix, withOverride("c1", ChecksGreen, false)))
+	checkOverlap("L1", "L4", Passed, Fix, false, with(retroFix, withOverride("c1", ChecksGreen, false)))
+	checkOverlap("L1", "L5", Passed, RetroAnswer, false, with(retroFixReadyC2, withOverride("c2", ChecksGreen, false)))
+	checkOverlap("L1", "L7", Passed, Review, false, with(noRounds, withOverride("c1", ChecksGreen, false)))
+	checkOverlap("L1", "L11", Passed, RetroAnswer, false, with(retroStreak, withOverride("c1", ChecksGreen, false)))
+	checkOverlap("L3", "L5", RecapAnswer, RetroAnswer, false, with(retroFixReadyC2, retroUnavail))
+	checkOverlap("L5", "L7", RetroAnswer, Review, false, with(retroFixReadyC2))
+	checkOverlap("L2", "L7", RecapAnswer, Review, false, with(retroRedesign, func(in *In) {
+		a0(in).Ready = append(a0(in).Ready, Ready{Head: "c2"})
+		in.Facts.Tip, in.Facts.PR.Head = "c2", "c2"
+	}))
+	// Send-back at c1 after retro SHIP at c1: newest covering is send_back, so L6 is false and L13 wins.
+	sbAfterShip := with(retroShip, func(in *In) {
+		a0(in).Rounds = append(a0(in).Rounds, Round{N: 5, Kind: RoundSendBack, Head: "c1", Verdict: VerdictChanges, Why: "rethink"})
+	})
+	if r, d := FirstMatch(LadderRows, sbAfterShip); r.ID != "L13" || d.Why != Fix {
+		t.Fatalf("send_back after retro SHIP: got %s (%s), want L13 (%s)", r.ID, d.Why, Fix)
 	}
 }
 
-// TestLadderL12StreakAndMaxRounds checks KB-CAP-1 and KB-CAP-9:
-// rounds 1, 2, 3 with majors hit L12 at round 3 when retro_from_round is 3;
-// a pass in between resets the streak; max_rounds hits L12 even without a streak.
+// TestLadderL12StreakAndMaxRounds checks KB-CAP-1, KB-CAP-9, and KB-RET-1:
+// rounds 1, 2, 3 with majors hit L11 (retro) when retros are available and L12
+// (recap) when retro is unavailable; a pass in between resets the streak;
+// max_rounds hits L12 even without a streak (skipping L11).
 func TestLadderL12StreakAndMaxRounds(t *testing.T) {
-	mk := func(rounds ...Round) In {
-		return with(func(in *In) { a0(in).Rounds = rounds })
+	mk := func(unavail bool, rounds ...Round) In {
+		return with(func(in *In) {
+			a0(in).Rounds = rounds
+			in.Facts.RetroUnavailable = unavail
+		})
 	}
 	chg := func(n int, head string) Round {
 		return Round{N: n, Kind: RoundFull, Head: head, Verdict: VerdictChanges, Majors: 1}
@@ -997,13 +1094,15 @@ func TestLadderL12StreakAndMaxRounds(t *testing.T) {
 		in   In
 		want string
 	}{
-		"round 1 changes -> fix":                {mk(chg(1, "c1")), Fix},
-		"round 2 changes -> fix (below from 3)": {mk(chg(1, "c0"), chg(2, "c1")), Fix},
-		"round 3 changes -> recap (streak 2)":   {mk(chg(1, "c0"), chg(2, "c0b"), chg(3, "c1")), RecapAnswer},
-		"pass in between resets streak":         {mk(chg(1, "c0"), pass(2, "c0b"), chg(3, "c1")), Fix},
-		"streak resumes at round 4":             {mk(chg(1, "c0"), pass(2, "c0b"), chg(3, "c0c"), chg(4, "c1")), RecapAnswer},
-		"max_rounds 5 without streak -> recap":  {mk(chg(1, "c0"), pass(2, "c0b"), chg(3, "c0c"), pass(4, "c0d"), chg(5, "c1")), RecapAnswer},
-		"send_back does not count toward L12":   {mk(chg(1, "c0"), chg(2, "c0b"), Round{N: 3, Kind: "send_back", Head: "c1", Verdict: VerdictChanges, Majors: 1}), Fix},
+		"round 1 changes -> fix":                         {mk(false, chg(1, "c1")), Fix},
+		"round 2 changes -> fix (below from 3)":          {mk(false, chg(1, "c0"), chg(2, "c1")), Fix},
+		"round 3 changes -> retro (streak 2, L11)":       {mk(false, chg(1, "c0"), chg(2, "c0b"), chg(3, "c1")), RetroAnswer},
+		"round 3 changes unavailable -> recap (L12)":     {mk(true, chg(1, "c0"), chg(2, "c0b"), chg(3, "c1")), RecapAnswer},
+		"pass in between resets streak":                  {mk(false, chg(1, "c0"), pass(2, "c0b"), chg(3, "c1")), Fix},
+		"streak resumes at round 4 -> retro (L11)":       {mk(false, chg(1, "c0"), pass(2, "c0b"), chg(3, "c0c"), chg(4, "c1")), RetroAnswer},
+		"streak resumes at round 4 unavailable -> recap": {mk(true, chg(1, "c0"), pass(2, "c0b"), chg(3, "c0c"), chg(4, "c1")), RecapAnswer},
+		"max_rounds 5 without streak -> recap (L12)":     {mk(false, chg(1, "c0"), pass(2, "c0b"), chg(3, "c0c"), pass(4, "c0d"), chg(5, "c1")), RecapAnswer},
+		"send_back does not count toward L11/L12":        {mk(false, chg(1, "c0"), chg(2, "c0b"), Round{N: 3, Kind: "send_back", Head: "c1", Verdict: VerdictChanges, Majors: 1}), Fix},
 	} {
 		if got := Ladder(c.in); got != c.want {
 			t.Errorf("%s: Ladder = %s, want %s", name, got, c.want)
@@ -1012,25 +1111,33 @@ func TestLadderL12StreakAndMaxRounds(t *testing.T) {
 }
 
 // TestLadderL12NonDefaultStreak: with retro_from_round 2, a streak setting of 3
-// opens the recap one round later (round 3) than the default 2 (round 2).
+// triggers L11 (or L12 when retro unavailable) one round later (round 3) than
+// the default 2 (round 2).
 func TestLadderL12NonDefaultStreak(t *testing.T) {
 	chg := func(n int, head string) Round {
 		return Round{N: n, Kind: RoundFull, Head: head, Verdict: VerdictChanges, Majors: 1}
 	}
-	mk := func(k int, rounds ...Round) In {
+	mk := func(k int, unavail bool, rounds ...Round) In {
 		return with(func(in *In) {
 			a0(in).Rounds = rounds
+			in.Facts.RetroUnavailable = unavail
 			in.Settings.RetroFromRound, in.Settings.RetroAfterRoundsWithMajors = 2, k
 		})
 	}
-	if got := Ladder(mk(2, chg(1, "c0"), chg(2, "c1"))); got != RecapAnswer {
-		t.Fatalf("2 rounds with streak setting 2 = %s, want recap", got)
+	if got := Ladder(mk(2, false, chg(1, "c0"), chg(2, "c1"))); got != RetroAnswer {
+		t.Fatalf("2 rounds with streak setting 2 (retro available) = %s, want retro", got)
 	}
-	if got := Ladder(mk(3, chg(1, "c0"), chg(2, "c1"))); got != Fix {
+	if got := Ladder(mk(2, true, chg(1, "c0"), chg(2, "c1"))); got != RecapAnswer {
+		t.Fatalf("2 rounds with streak setting 2 (unavailable) = %s, want recap", got)
+	}
+	if got := Ladder(mk(3, false, chg(1, "c0"), chg(2, "c1"))); got != Fix {
 		t.Fatalf("2 rounds with streak setting 3 = %s, want fix", got)
 	}
-	if got := Ladder(mk(3, chg(1, "c0"), chg(2, "c0b"), chg(3, "c1"))); got != RecapAnswer {
-		t.Fatalf("3 rounds with streak setting 3 = %s, want recap", got)
+	if got := Ladder(mk(3, false, chg(1, "c0"), chg(2, "c0b"), chg(3, "c1"))); got != RetroAnswer {
+		t.Fatalf("3 rounds with streak setting 3 (retro available) = %s, want retro", got)
+	}
+	if got := Ladder(mk(3, true, chg(1, "c0"), chg(2, "c0b"), chg(3, "c1"))); got != RecapAnswer {
+		t.Fatalf("3 rounds with streak setting 3 (unavailable) = %s, want recap", got)
 	}
 }
 

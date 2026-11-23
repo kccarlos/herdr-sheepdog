@@ -80,6 +80,9 @@ func TestSettingsRange(t *testing.T) {
 	if def.ReviewRounds != 2 {
 		t.Fatalf("DefaultSettings().ReviewRounds = %d, want 2", def.ReviewRounds)
 	}
+	if def.RetrosPerTask != 1 {
+		t.Fatalf("DefaultSettings().RetrosPerTask = %d, want 1", def.RetrosPerTask)
+	}
 	if err := def.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -88,6 +91,7 @@ func TestSettingsRange(t *testing.T) {
 		"max_rounds":                     func(s *Settings, n int) { s.MaxRounds = n },
 		"retro_after_rounds_with_majors": func(s *Settings, n int) { s.RetroAfterRoundsWithMajors = n },
 		"retro_from_round":               func(s *Settings, n int) { s.RetroFromRound = n },
+		"retros_per_task":                func(s *Settings, n int) { s.RetrosPerTask = n },
 		"checks_grace_minutes":           func(s *Settings, n int) { s.ChecksGraceMinutes = n },
 		"ci_stalled_minutes":             func(s *Settings, n int) { s.CIStalledMinutes = n },
 		"main_red_minutes":               func(s *Settings, n int) { s.MainRedMinutes = n },
@@ -116,6 +120,7 @@ func TestSettingsRange(t *testing.T) {
 		"max_rounds":                     {def.ReviewRounds, MaxRoundsMax},
 		"retro_after_rounds_with_majors": {RetroMajorsMin, RetroMajorsMax},
 		"retro_from_round":               {RetroFromMin, RetroFromMax},
+		"retros_per_task":                {0, RetrosPerTaskMax},
 		"checks_grace_minutes":           {ChecksGraceMin, ChecksGraceMax},
 		"ci_stalled_minutes":             {CIStalledMin, CIStalledMax},
 		"main_red_minutes":               {MainRedMin, MainRedMax},
@@ -182,5 +187,14 @@ func TestSettingsRange(t *testing.T) {
 	s2.CIStalledMinutes = 10
 	if !slices.Contains(s2.Changed(), "ci_stalled_minutes 10") {
 		t.Errorf("Changed() = %q, want ci_stalled_minutes 10", s2.Changed())
+	}
+	s3 := DefaultSettings()
+	s3.RetrosPerTask = 0
+	if !slices.Contains(s3.Changed(), "retros_per_task 0") {
+		t.Errorf("Changed() with RetrosPerTask=0 = %q, want retros_per_task 0", s3.Changed())
+	}
+	s3.RetrosPerTask = RetrosPerTaskMax
+	if !slices.Contains(s3.Changed(), "retros_per_task 2") {
+		t.Errorf("Changed() with RetrosPerTask=2 = %q, want retros_per_task 2", s3.Changed())
 	}
 }

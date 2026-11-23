@@ -22,8 +22,9 @@ const PassInterval = 15 * time.Second
 type Settings struct {
 	ReviewRounds               int `json:"review_rounds"`
 	MaxRounds                  int `json:"max_rounds"`                     // L12 (design.md 10.1)
-	RetroAfterRoundsWithMajors int `json:"retro_after_rounds_with_majors"` // L12 (design.md 10.1)
-	RetroFromRound             int `json:"retro_from_round"`               // L12 (design.md 10.1)
+	RetroAfterRoundsWithMajors int `json:"retro_after_rounds_with_majors"` // L11, L12 (design.md 10.1)
+	RetroFromRound             int `json:"retro_from_round"`               // L11, L12 (design.md 10.1)
+	RetrosPerTask              int `json:"retros_per_task"`                // L11 (design.md 10.1)
 	ChecksGraceMinutes         int `json:"checks_grace_minutes"`           // N35, N36 (design.md 10.1)
 	CIStalledMinutes           int `json:"ci_stalled_minutes"`             // N36 (design.md 10.1)
 	MainRedMinutes             int `json:"main_red_minutes"`               // N38 (design.md 10.1)
@@ -75,6 +76,7 @@ const (
 	RetroMajorsMax                        = 4
 	RetroFromMin                          = 2
 	RetroFromMax                          = 6
+	RetrosPerTaskMax                      = 2
 	ChecksGraceMin                        = 1
 	ChecksGraceMax                        = 60
 	CIStalledMin                          = 10
