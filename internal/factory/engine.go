@@ -72,14 +72,14 @@ type Engine struct {
 	passPoolCheck     func(flow.Candidate) flow.ResolveReason           // current pass's immutable pool check under mu
 	passCoordFallback bool                                              // current pass's J5 fallback sign-in check under mu
 	passBaseHCErr     error                                             // current pass's HC RPC error from observeBaseLocked under mu
-	passDisk          passDiskState                                     // current pass's volume readings and store ENOSPC under mu
+	storeENOSPC       map[string]bool                                   // pending store ENOSPC per project under mu
 	git               *world.Git
 	mu                sync.Mutex
 	wake              chan struct{}
 	lastPass          map[string]time.Time            // monotonic reading of previous pass per project (design.md 2.5)
 	lastSweep         map[string]time.Time            // per-process last sweep per project (design.md 7.3)
 	lastProbe         map[string]time.Time            // per-process last consent/disk probe per project
-	consentStreaks    map[string]consentStreak        // consecutive positive consent-probe failures per project
+	consentStreaks    map[string]string               // consecutive positive consent-probe failure kind per project
 	memAlerts         map[alertKey]pendingAlert       // active alerts kept in memory when store writes fail
 	prs               map[string]flow.PR              // last PR snapshot per attempt worktree (in memory)
 	errs              map[string]string               // last gh or git error per worktree and kind, logged once per change
@@ -135,7 +135,7 @@ type tipFacts struct {
 
 // New constructs an Engine. Nothing runs or touches disk until Run or Start.
 func New(paths Paths, client *hc.Client) *Engine {
-	e := &Engine{Paths: paths, HC: client, wake: make(chan struct{}, 1), lastSweep: map[string]time.Time{}}
+	e := &Engine{Paths: paths, HC: client, wake: make(chan struct{}, 1), lastSweep: map[string]time.Time{}, lastProbe: map[string]time.Time{}, consentStreaks: map[string]string{}, memAlerts: map[alertKey]pendingAlert{}}
 	e.git = world.NewGit(client, e.now, func(event, folder string) { e.logEvent(event, map[string]string{"folder": folder}) })
 	return e
 }
@@ -161,6 +161,7 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 	} else if err != nil {
 		return err
 	}
+	e.mergeMemAlertsLocked(id, &s)
 	if maxRunning != 0 {
 		s.Settings.MaxRunning = maxRunning
 	}
@@ -281,6 +282,7 @@ func (e *Engine) Stop(project string) error {
 	if err != nil {
 		return err
 	}
+	e.mergeMemAlertsLocked(id, &s)
 	if err := e.stopCoordTerminalsLocked(ctx, id, s); err != nil {
 		return err
 	}
@@ -345,10 +347,8 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	if err != nil {
 		return
 	}
-	e.passDisk = passDiskState{}
 	if trim {
-		if err := TrimLog(e.Paths.Log(id), s.Seq); err != nil {
-			e.passDisk.storeENOSPC = e.passDisk.storeENOSPC || errors.Is(err, syscall.ENOSPC)
+		if err := e.noteStoreENOSPC(id, TrimLog(e.Paths.Log(id), s.Seq)); err != nil {
 			e.logError("factory.trim_error", id, err)
 		}
 	}
@@ -360,7 +360,8 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	e.passPools = pools
 	e.passPoolCheck = poolCheck(pools, e.Paths.poolCooldowns(), s.Settings.PoolFloorPercent, e.now())
 	defer func() {
-		e.passPools, e.passPoolCheck, e.passCoordFallback, e.passBaseHCErr, e.passDisk = nil, nil, false, nil, passDiskState{}
+		e.passPools, e.passPoolCheck, e.passCoordFallback, e.passBaseHCErr = nil, nil, false, nil
+		delete(e.storeENOSPC, id)
 	}()
 	ctx, cancel := context.WithTimeout(world.GitRepository(ctx, s.Project.Folder), world.GitPassTimeout)
 	defer cancel()
@@ -371,10 +372,10 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		e.logError("factory.hc_error", id, coordErr)
 	}
 	e.passCoordFallback = e.observeCoordSignInLocked(ctx, id, &s, e.now())
-	if e.observeBaseLocked(ctx, id, &s); e.passBaseHCErr != nil {
-		hcErr, hcChecked = cmp.Or(hcErr, e.passBaseHCErr), true
+	e.observeBaseLocked(ctx, id, &s)
+	if err := cmp.Or(e.passBaseHCErr, e.observeConsentDiskLocked(ctx, id, &s, e.now())); err != nil {
+		hcErr, hcChecked = cmp.Or(hcErr, err), true
 	}
-	e.observeConsentDiskLocked(ctx, id, &s, e.now())
 	e.sweepProjectLocked(ctx, id, &s, codexProbe)
 	e.checkENOSPCLocked(ctx, id, &s, e.now())
 	baseTried := s.Project.Base != nil && s.Project.Base.Red && flow.Done(s.Project.Acts, flow.AskTellBaseRed+"@"+s.Project.Base.SpellID)
@@ -442,6 +443,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		for i := range s.Tasks {
 			if ctx.Err() == nil && obs[i] != nil {
 				e.actTaskLocked(ctx, id, &s, i, *obs[i], &baseTried)
+				e.checkENOSPCLocked(ctx, id, &s, e.now())
 			}
 		}
 		now := e.now()
@@ -449,13 +451,13 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 			e.passProjectRulesLocked(ctx, id, &s, now)
 		}
 		e.checkInvariantsLocked(id, &s, skipped, now)
-		e.checkENOSPCLocked(ctx, id, &s, now)
 	}
+	e.checkENOSPCLocked(ctx, id, &s, e.now())
 }
 
 func (e *Engine) checkENOSPCLocked(ctx context.Context, id string, s *flow.State, now time.Time) {
-	if gitFull := e.git != nil && e.git.TakeNoSpace(s.Project.Folder); !s.Project.HasAlert(flow.AlertDisk) && (e.passDisk.storeENOSPC || gitFull) {
-		e.observeDiskLocked(ctx, id, s, now, false, gitFull)
+	if gitFull := e.git != nil && e.git.TakeNoSpace(s.Project.Folder); !s.Project.HasAlert(flow.AlertDisk) && (e.storeENOSPC[id] || gitFull) {
+		e.observeDiskLocked(ctx, id, s, now, gitFull)
 	}
 }
 
@@ -2474,14 +2476,23 @@ func (e *Engine) logEvent(typ string, fields map[string]string) {
 	}
 }
 
-func (e *Engine) saveStateLocked(path string, s flow.State) error {
-	err := map[bool]func(string, flow.State) error{true: e.writeState, false: SaveState}[e.writeState != nil](path, s)
-	e.passDisk.storeENOSPC = e.passDisk.storeENOSPC || errors.Is(err, syscall.ENOSPC)
+func (e *Engine) noteStoreENOSPC(id string, err error) error {
+	if errors.Is(err, syscall.ENOSPC) {
+		setFlag(&e.storeENOSPC, id, true)
+	}
 	return err
 }
 
+func (e *Engine) saveStateLocked(id string, s flow.State) error {
+	return e.noteStoreENOSPC(id, map[bool]func(string, flow.State) error{true: e.writeState, false: SaveState}[e.writeState != nil](e.Paths.State(id), s))
+}
+
+func (e *Engine) appendLogLocked(id string, l LogLine) error {
+	return e.noteStoreENOSPC(id, map[bool]func(string, LogLine) error{true: e.writeLog, false: AppendLog}[e.writeLog != nil](e.Paths.Log(id), l))
+}
+
 func (e *Engine) saveLocked(id string, s flow.State) bool {
-	err := e.saveStateLocked(e.Paths.State(id), s)
+	err := e.saveStateLocked(id, s)
 	if err != nil {
 		e.logError("factory.commit_error", id, err)
 	}
@@ -2497,15 +2508,15 @@ func (e *Engine) commitLogLocked(id string, s *flow.State, l LogLine) {
 func (e *Engine) commitLocked(id string, s *flow.State, l LogLine) error {
 	s.Seq++
 	l.Seq, l.At, l.Project = s.Seq, time.Now(), id
-	if err := map[bool]func(string, LogLine) error{true: e.writeLog, false: AppendLog}[e.writeLog != nil](e.Paths.Log(id), l); err != nil {
-		e.passDisk.storeENOSPC = e.passDisk.storeENOSPC || errors.Is(err, syscall.ENOSPC)
+	if err := e.appendLogLocked(id, l); err != nil {
 		s.Seq--
 		return err
 	}
-	if err := e.saveStateLocked(e.Paths.State(id), *s); err != nil {
+	if err := e.saveStateLocked(id, *s); err != nil {
 		s.Seq--
 		return err
 	}
+	e.flushMemAlertsLocked(id, s)
 	if l.By != "engine" {
 		select {
 		case e.wake <- struct{}{}:

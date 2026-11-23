@@ -598,6 +598,7 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"GET /api/context/brain", accessLoopback, s.handleContextBrain},
 		route{"GET /api/context/voice", accessLoopback, s.handleContextVoice},
 		route{"GET /api/context/timeline", accessLoopback, s.handleContextTimeline},
+		route{"GET /api/factory/status", accessLoopback, s.handleFactoryView("status")},
 		route{"POST /api/factory/start", accessLoopback, s.handleFactory("start")},
 		route{"POST /api/factory/stop", accessLoopback, s.handleFactory("stop")},
 		route{"POST /api/factory/report", accessLoopback, s.handleFactory("report")},

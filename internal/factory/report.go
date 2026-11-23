@@ -61,6 +61,7 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 	if id == "" {
 		return e.refuse("", "invalid_token", "The token matches no run the factory started.")
 	}
+	e.mergeMemAlertsLocked(id, &s)
 	if role != want {
 		return e.refuse(id, "kind_not_allowed", fmt.Sprintf("A %s may not send %s; only the %s may.", role, verb, want))
 	}
@@ -464,7 +465,7 @@ func (e *Engine) acceptVerdictLocked(ctx context.Context, id string, s *flow.Sta
 	path := e.Paths.Report(id, t.ID, rev.Round)
 	body := fmt.Sprintf("# Review round %d: %s (%d major(s))\n\nTask: %s — %s\nCommit: %s\n\n## Findings\n\n%s\n",
 		rev.Round, rep.Verdict, rep.Majors, t.ID, t.Title, rev.Head, cmp.Or(rd.Body, "(none)"))
-	if err := writeAtomic(path, []byte(body)); err != nil {
+	if err := e.noteStoreENOSPC(id, writeAtomic(path, []byte(body))); err != nil {
 		return err
 	}
 	if err := world.StopRun(ctx, e.HC, rev.RunID); err != nil {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,7 +65,7 @@ func runFactory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	case "start", "stop":
 		return runFactoryCmd(ctx, args[0], args[1:], stdout, stderr)
 	case "status":
-		return runFactoryStatus(args[1:], stdout, stderr)
+		return runFactoryStatus(ctx, args[1:], stdout, stderr)
 	case "log":
 		return runFactoryLog(ctx, args[1:], stdout, stderr)
 	case "plan":
@@ -144,9 +145,10 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 	return 0
 }
 
-// runFactoryStatus prints one line per task from stored state and log.jsonl
-// without calling hc, git or gh; works when the daemon is stopped.
-func runFactoryStatus(args []string, stdout, stderr io.Writer) int {
+// runFactoryStatus prints one line per task from the running daemon (including
+// unpersisted in-memory alerts) or falls back to stored state and log.jsonl
+// when the daemon is stopped.
+func runFactoryStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("factory status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { printFactoryUsage(stderr) }
@@ -166,7 +168,12 @@ func runFactoryStatus(args []string, stdout, stderr io.Writer) int {
 	cfg, err := config.Load(*configPath)
 	var tasks []factory.TaskStatus
 	if err == nil {
-		tasks, err = factory.ProjectStatus(factory.Paths{DataDir: cfg.DataDir}, folder)
+		var resp struct{ Tasks []factory.TaskStatus }
+		if getJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/factory/status?"+url.Values{"folder": {folder}, "data_dir": {cfg.DataDir}}.Encode(), &resp) == nil {
+			tasks = resp.Tasks
+		} else {
+			tasks, err = factory.ProjectStatus(factory.Paths{DataDir: cfg.DataDir}, folder)
+		}
 	}
 	if err != nil {
 		fprintf(stderr, "sheepdog factory status: %v\n", err)
