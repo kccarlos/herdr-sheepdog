@@ -412,11 +412,15 @@ Each is a short script against real CLIs in a private herdr-core, with the captu
 
 **C4: how the old code left main.** `factory/` and `factory_embed.go` are already off `main` ([design.md](design.md) 12.2), and `main`'s history holds no commit that ever had `factory/`. The preservation tag is `pre-reset-4df3a038`; on 2026-11-22 the owner deleted the remote copy of that tag and kept only a local tag. Do not plan to push that tag again; on 2026-11-23 the owner decided that the local tag is enough (`O36`).
 
-**Pre-C3 checks (carried late to 8.4).** The two checks planned before removing `python.go` — whether any other project runs on the installed copy of the old engine, and whether the daemon without `python.go` can still drive that copy — were never written down before `python.go` left `main` (recorded as late in section 7 and carried to PR 8.4). A revert restores code, not state: the new engine's state lives under `<data_dir>/factory/projects`, the old one's under `<data_dir>/tasks`, and terminals started by the new engine would be left without an owner.
+**Pre-C3 checks (recorded late in 8.4, 2026-11-23).** The two checks planned before removing `python.go` were carried late into PR 8.4 and recorded here:
 
-**C5: open work.** No importer is planned. The old store's shape is the thing being replaced, and most open SDF tasks patch the old engine and are now moot.
+- **Whether the daemon without `python.go` still drives the old installed copy:** **No.** Verified on `main` (`internal/` and `cmd/` `*.go`): `internal/factory/python.go`, `factory_embed.go`, `factory/`, `internal/factory/client.go`, `internal/factory/tick.go`, `internal/factory/contract.go`, `cmd/sheepdog`'s `python-*` commands, the loopback `answer-proof` route, `Makefile`'s `test-factory` and the CI factory job are all gone, and nothing in Go code calls `python.go`, `factory_embed`, `herdr-task`, `answer-proof`, `python-install`, `python-check`, `python-status`, `factory.py` or `shepherdr`. The daemon on `main` runs only the in-process v2 Go engine (`internal/factory.Engine`) against `<data_dir>/factory/projects/<id>/state.json` and never touches `<data_dir>/tasks/`.
+- **Whether any other project runs on the old installed copy:** Any standalone installed copy of the old Python engine under the owner's home (and its `<data_dir>/tasks/` store) is separate from the `main` tree and unaffected by PR 8.4's deletions. Verifying and moving any other projects on that host-local copy remains an owner operational step at **C6** (after slices through 12 have run on sheepdog for a week and the K3 tests are in).
+- **Revert note:** A revert restores code, not state: the new engine's state lives under `<data_dir>/factory/projects`, the old one's under `<data_dir>/tasks`, and terminals started by the new engine would be left without an owner.
 
-- Save one export of the old task list as a reference file.
+**C5: open work (recorded in 8.4, 2026-11-23).** No importer is planned. The old store's shape is the thing being replaced, and most open SDF tasks patch the old engine and are now moot.
+
+- Save one export of the old task list as a reference file. **Record:** No reference export is committed in this repository; the old store (`<data_dir>/tasks/<slug>.json`) lives on the owner's machine outside the repo (and outside sandboxed worktrees), so any one-off export is saved host-locally outside git before the old store is retired.
 - The new coordinator re-plans what still matters from that list and the approved addendum.
 - PR #672, and the paused tasks' worktrees and branches, are closed or removed only after the owner says so.
 
