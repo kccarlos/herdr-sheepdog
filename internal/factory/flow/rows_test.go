@@ -311,7 +311,7 @@ func TestRowCases(t *testing.T) {
 		{"N29", with(onePass), []string{"start_reviewer@2@c1"}},
 		{"N29", with(changes, rejected), []string{"start_reviewer@2@c1"}}, // L10: reject consumes no round number
 		{"N30", with(gateOwnerTask, func(in *In) {
-			in.Asks = []Ask{answeredAsk("ask-gate-no", KindGate, "t", "c1", "No, hold", "owner", now)}
+			in.Asks = []Ask{answeredN31Ask("ask-gate-no", "t", "c1", GateOptionHold, now)}
 		}), []string{"open_owner_no_recap@0"}},
 		{"N31", with(gateOwnerTask), []string{"open_gate_ask@c1"}},
 		{"N32", with(conflict), []string{"tell_worker_conflict@c1"}},
@@ -413,7 +413,7 @@ func TestRowOrder(t *testing.T) {
 		{"N23", "N36", false, with(tipAheadF, pending)},
 		{"N26", "N29", true, with(noRounds, prGone)},
 		{"N30", "N31", true, with(gateOwnerTask, func(in *In) {
-			in.Asks = []Ask{answeredAsk("ask-gate-no", KindGate, "t", "c1", "No, hold", "owner", now)}
+			in.Asks = []Ask{answeredN31Ask("ask-gate-no", "t", "c1", GateOptionHold, now)}
 		})},
 		{"N31", "N32", true, with(gateOwnerTask, conflict)},
 		{"N32", "N33", true, with(conflict, red)},

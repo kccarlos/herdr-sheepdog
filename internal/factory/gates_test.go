@@ -17,30 +17,6 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
-func findOptionPrefix(t *testing.T, opts []string, prefix string) string {
-	t.Helper()
-	low := strings.ToLower(prefix)
-	for _, o := range opts {
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(o)), low) {
-			return o
-		}
-	}
-	t.Fatalf("no option starting with %q in %v", prefix, opts)
-	return ""
-}
-
-func findOptionContains(t *testing.T, opts []string, sub string) string {
-	t.Helper()
-	low := strings.ToLower(sub)
-	for _, o := range opts {
-		if strings.Contains(strings.ToLower(o), low) {
-			return o
-		}
-	}
-	t.Fatalf("no option containing %q in %v", sub, opts)
-	return ""
-}
-
 func answerOwnerAsk(t *testing.T, eng *Engine, askID, option string) {
 	t.Helper()
 	proof, err := eng.MintProof(askID, option, ProofInputTap, "dev-phone-1")
@@ -168,9 +144,12 @@ func TestN31HistoryOwnerGatePlanToMerge(t *testing.T) {
 		t.Fatalf("merged before owner gate yes on second pass: %v", merges)
 	}
 
-	// Owner answers yes with verified proof -> next pass merges via N42.
-	yesOpt := findOptionPrefix(t, ask.Options, "Yes")
-	answerOwnerAsk(t, w.eng, ask.ID, yesOpt)
+	// Owner answers with engine Merge option and verified proof -> next pass merges via N42.
+	if !slices.Equal(ask.Options, []string{flow.GateOptionMerge, flow.GateOptionHold}) || ask.Recommend != flow.GateOptionMerge || ask.AskedBy != flow.AskedByN31 {
+		t.Fatalf("N31 ask options/recommend/askedBy = (%v, %q, %q), want ([%s %s], %q, %q)",
+			ask.Options, ask.Recommend, ask.AskedBy, flow.GateOptionMerge, flow.GateOptionHold, flow.GateOptionMerge, flow.AskedByN31)
+	}
+	answerOwnerAsk(t, w.eng, ask.ID, flow.GateOptionMerge)
 	w.pass()
 
 	st = w.state()
@@ -201,8 +180,7 @@ func TestN31HistoryDesignGateSetting(t *testing.T) {
 		if len(asks) != 1 || asks[0].Kind != flow.KindGate {
 			t.Fatalf("open asks = %+v, want 1 gate ask", asks)
 		}
-		yesOpt := findOptionPrefix(t, asks[0].Options, "Yes")
-		answerOwnerAsk(t, w.eng, asks[0].ID, yesOpt)
+		answerOwnerAsk(t, w.eng, asks[0].ID, flow.GateOptionMerge)
 		w.pass()
 		if merges := ghCalls(t, w.gh, "pr merge"); len(merges) != 1 {
 			t.Fatalf("pr merge calls after yes = %d, want 1", len(merges))
@@ -232,7 +210,7 @@ func TestN30HistoryOwnerGateNoOpensOwnerNoRecap(t *testing.T) {
 	if len(asks) != 1 {
 		t.Fatalf("open asks = %d, want 1", len(asks))
 	}
-	noOpt := findOptionPrefix(t, asks[0].Options, "No")
+	noOpt := flow.GateOptionHold
 	coordBefore := len(sendsTo(t, w.srv.Requests(), coordAddr))
 	answerOwnerAsk(t, w.eng, asks[0].ID, noOpt)
 
@@ -407,7 +385,11 @@ func TestN24HistorySplitChildAfterRetroDrop(t *testing.T) {
 		t.Fatalf("open owner asks for T1 = %+v, want 1 gated ask", asks)
 	}
 
-	dropOpt := findOptionContains(t, asks[0].Options, "drop")
+	if !slices.Equal(asks[0].Options, []string{flow.N24OptionDrop, flow.N24OptionContinue}) || asks[0].AskedBy != flow.AskedByN24 {
+		t.Fatalf("N24 ask options/askedBy = (%v, %q), want ([%s %s], %q)",
+			asks[0].Options, asks[0].AskedBy, flow.N24OptionDrop, flow.N24OptionContinue, flow.AskedByN24)
+	}
+	dropOpt := flow.N24OptionDrop
 	answerOwnerAsk(t, w.eng, asks[0].ID, dropOpt)
 	w.pass() // N1 marks/cleans up dropped task
 
@@ -434,17 +416,7 @@ func TestN24HistorySplitChildAfterRetroContinueToN25(t *testing.T) {
 	if len(asks) != 1 {
 		t.Fatalf("open asks for T1 = %d, want 1", len(asks))
 	}
-	dropOpt := findOptionContains(t, asks[0].Options, "drop")
-	var goOnOpt string
-	for _, o := range asks[0].Options {
-		if o != dropOpt {
-			goOnOpt = o
-			break
-		}
-	}
-	if goOnOpt == "" {
-		t.Fatalf("no non-drop option in %v", asks[0].Options)
-	}
+	goOnOpt := flow.N24OptionContinue
 
 	coordBefore := len(sendsTo(t, w.srv.Requests(), coordAddr))
 	answerOwnerAsk(t, w.eng, asks[0].ID, goOnOpt)
@@ -612,5 +584,233 @@ func TestViewOwnerAnswerAndOwnerGateStages(t *testing.T) {
 	pv := ProjectsView([]flow.State{st})[0]
 	if pv.Counts["owner_gate"] != 1 || pv.Counts["owner_answer"] != 2 {
 		t.Errorf("ProjectsView Counts = %v, want owner_gate=1 owner_answer=2", pv.Counts)
+	}
+}
+
+// TestN31HistoryInvalidOptionRefusedThenMergeOptionMerges checks review round 1:
+// an engine N31 ask carries its named options (Merge/Hold), refuses a non-option
+// answer at answer time leaving the ask open and unmerged, and merges once
+// answered with its own Merge option.
+func TestN31HistoryInvalidOptionRefusedThenMergeOptionMerges(t *testing.T) {
+	t.Parallel()
+	w := setupPassedGateWorld(t, `,"gate":"owner"`, nil)
+
+	w.pass() // N31 opens engine gate ask
+	asks := openAsksForTask(w.state(), "T1")
+	if len(asks) != 1 {
+		t.Fatalf("open asks = %d, want 1", len(asks))
+	}
+	ask := asks[0]
+	if !slices.Equal(ask.Options, []string{flow.GateOptionMerge, flow.GateOptionHold}) || ask.Recommend != flow.GateOptionMerge || ask.AskedBy != flow.AskedByN31 {
+		t.Fatalf("N31 ask = (opts=%v rec=%q by=%q), want ([%s %s] %q %q)",
+			ask.Options, ask.Recommend, ask.AskedBy, flow.GateOptionMerge, flow.GateOptionHold, flow.GateOptionMerge, flow.AskedByN31)
+	}
+
+	// Answering with a non-option is refused invalid_option and leaves the ask open.
+	badProof, err := w.eng.MintProof(ask.ID, "Yes, merge", ProofInputTap, "dev-phone-1")
+	if err != nil {
+		t.Fatalf("MintProof(non-option): %v", err)
+	}
+	if err := w.eng.Answer(ask.ID, "Yes, merge", badProof); refusalCode(err) != "invalid_option" {
+		t.Fatalf("Engine.Answer(non-option) = %v, want invalid_option", err)
+	}
+	if still := openAsksForTask(w.state(), "T1"); len(still) != 1 || still[0].Status != flow.AskStatusOpen {
+		t.Fatalf("ask after refused non-option = %+v, want still open", still)
+	}
+	w.pass()
+	if merges := ghCalls(t, w.gh, "pr merge"); len(merges) != 0 {
+		t.Fatalf("merged after refused answer: %v", merges)
+	}
+
+	// Answering with the engine's Merge option covers H and merges via N42.
+	answerOwnerAsk(t, w.eng, ask.ID, flow.GateOptionMerge)
+	w.pass()
+	if st := w.state(); st.Tasks[0].LastRow != "N42" {
+		t.Fatalf("LastRow after Merge = %q, want N42", st.Tasks[0].LastRow)
+	}
+	if merges := ghCalls(t, w.gh, "pr merge"); len(merges) != 1 {
+		t.Fatalf("pr merge calls after Merge = %d, want 1", len(merges))
+	}
+}
+
+// TestCoordinatorGateAskNeverSatisfiesN31AndWakesCoordinator checks review round 1:
+// a gate ask opened by the coordinator with free options ("Approve and merge" /
+// "Revise first") is never read as yes/no by N30/N31, wakes the coordinator via A3,
+// and leaves N31 to open its own engine gate ask.
+func TestCoordinatorGateAskNeverSatisfiesN31AndWakesCoordinator(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, answer string
+	}{
+		{"approve_and_merge_does_not_satisfy_N31", "Approve and merge"},
+		{"revise_first_does_not_trigger_N30", "Revise first"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			w := setupPassedGateWorld(t, `,"gate":"owner"`, nil)
+			coordAddr := w.state().Project.RunID
+
+			payload := `{"kind":"gate","task":"T1","question":"Approve T1 API change?","options":["Approve and merge","Revise first"],"recommend":"Approve and merge"}`
+			if err := w.eng.Report(w.coordTok, "ask", json.RawMessage(payload)); err != nil {
+				t.Fatalf("coordinator gate ask: %v", err)
+			}
+			askID := openAsksForTask(w.state(), "T1")[0].ID
+			coordBefore := len(sendsTo(t, w.srv.Requests(), coordAddr))
+
+			answerOwnerAsk(t, w.eng, askID, tc.answer)
+			w.pass() // J12 delivers A3 coordinator wake; N31 opens engine Merge/Hold ask
+
+			st := w.state()
+			if flow.OpenRecap(st.Tasks[0]) != nil {
+				t.Fatalf("coordinator gate ask opened recap: %+v", st.Tasks[0].Recaps)
+			}
+			if merges := ghCalls(t, w.gh, "pr merge"); len(merges) != 0 {
+				t.Fatalf("coordinator gate ask allowed merge: %v", merges)
+			}
+			if st.Tasks[0].LastRow != "N31" {
+				t.Fatalf("LastRow = %q, want N31", st.Tasks[0].LastRow)
+			}
+			openNow := openAsksForTask(st, "T1")
+			if len(openNow) != 1 || openNow[0].AskedBy != flow.AskedByN31 || !slices.Equal(openNow[0].Options, []string{flow.GateOptionMerge, flow.GateOptionHold}) {
+				t.Fatalf("open asks after coordinator gate answer = %+v, want 1 N31 Merge/Hold ask", openNow)
+			}
+			coordSends := strings.Join(sendsTo(t, w.srv.Requests(), coordAddr)[coordBefore:], "\n")
+			if !strings.Contains(coordSends, tc.answer) {
+				t.Errorf("coordinator wake missing %q:\n%s", tc.answer, coordSends)
+			}
+		})
+	}
+}
+
+// TestNonN24GateAskDropOptionNeverDropsTask checks review round 1: an answer
+// starting with "Drop" on a coordinator-opened gate ask never marks the task Dropped.
+func TestNonN24GateAskDropOptionNeverDropsTask(t *testing.T) {
+	t.Parallel()
+	r := newAskRig(t)
+	payload := `{"kind":"gate","task":"T1","question":"Drop legacy flag and merge?","options":["Drop legacy flag and merge","Keep legacy flag"],"recommend":"Drop legacy flag and merge"}`
+	if err := r.eng.Report(r.coordTok, "ask", json.RawMessage(payload)); err != nil {
+		t.Fatalf("coordinator gate ask: %v", err)
+	}
+	askID := r.state().Asks[0].ID
+	coordBefore := len(sendsTo(t, r.srv.Requests(), r.coordAddr))
+
+	answerOwnerAsk(t, r.eng, askID, "Drop legacy flag and merge")
+	if st := r.state(); st.Tasks[0].Dropped != nil {
+		t.Fatalf("non-N24 gate ask marked T1 Dropped: %+v", st.Tasks[0].Dropped)
+	}
+	r.pass()
+	if st := r.state(); st.Tasks[0].Dropped != nil || st.Tasks[0].LastRow == "N1" {
+		t.Fatalf("T1 dropped/cleaned up after non-N24 gate ask: dropped=%+v lastRow=%q", st.Tasks[0].Dropped, st.Tasks[0].LastRow)
+	}
+	coordSends := strings.Join(sendsTo(t, r.srv.Requests(), r.coordAddr)[coordBefore:], "\n")
+	if !strings.Contains(coordSends, "Drop legacy flag and merge") {
+		t.Errorf("coordinator wake missing answer:\n%s", coordSends)
+	}
+}
+
+// TestSlotsHistoryEarlierOwnerAnswerLosesPriority checks review round 1 in the
+// full engine pass: an owner answer from before a task's earlier slot grant no
+// longer outranks an urgent task for the single extra slot.
+func TestSlotsHistoryEarlierOwnerAnswerLosesPriority(t *testing.T) {
+	t.Parallel()
+	w := newRestartWorld(t, "Earlier owner answer expires")
+	w.edit(func(s *flow.State) { s.Settings.MaxRunning = 1 })
+	w.pass() // J7 start coordinator
+	coordAddr := w.state().Project.RunID
+	w.applyPlan()
+	w.waitIdle(coordAddr)
+	w.pass() // N11 T1
+	w.pass() // N23 start worker T1
+	w.srv.SetStatus(w.workerID, &hc.Status{App: "claude-code", State: "working"})
+
+	t0, t1 := w.now.Add(-2*time.Minute), w.now.Add(-time.Minute)
+	w.edit(func(s *flow.State) {
+		s.Tasks = append(s.Tasks,
+			flow.Task{
+				ID: "T2", EstimateLines: 50, Title: "feat: old owner answer", Brief: "Already used slot once.",
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", Closed: "new attempt",
+					Acts: []flow.Act{{Key: flow.AskNewAttempt, Result: "done", At: t1}},
+				}},
+			},
+			flow.Task{ID: "T3", EstimateLines: 50, Priority: flow.PriorityUrgent, Title: "feat: urgent task", Brief: "Should beat stale owner answer."},
+		)
+		s.Asks = append(s.Asks, flow.Ask{
+			ID: "ask-t2-old", Project: w.id, Kind: flow.KindRelease, Gated: true,
+			Question: "Start T2?", Options: []string{"Yes", "No"}, Recommend: "Yes",
+			Task: "T2", AskedBy: flow.RoleCoordinator, Status: flow.AskStatusAnswered,
+			Answer: "Yes", AnsweredBy: "owner", At: t0.Add(-time.Minute), AnsweredAt: t0,
+		})
+	})
+	w.pass()
+
+	st := w.state()
+	if len(st.Tasks[1].Attempts) != 1 {
+		t.Fatalf("T2 with stale owner answer should not have started attempt 2: attempts=%d", len(st.Tasks[1].Attempts))
+	}
+	if len(st.Tasks[2].Attempts) != 1 {
+		t.Fatalf("urgent T3 should have taken the extra slot ahead of stale owner-answered T2: attempts=%d", len(st.Tasks[2].Attempts))
+	}
+}
+
+// TestReviewRecapWakeIgnoresEarlierN31Answer checks review round 1 (Carbon Major 2 /
+// Hydrogen Minor 2): a review recap wake attaches owner words only from an N24 ask,
+// never from an earlier N31 merge-gate ask.
+func TestReviewRecapWakeIgnoresEarlierN31Answer(t *testing.T) {
+	t0 := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	st := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "proj-wake", Started: true},
+		Tasks: []flow.Task{{
+			ID: "T1", Title: "feat: gated", Gate: flow.GateOwner,
+			Recaps: []flow.Recap{{Trigger: flow.TriggerReview, Allowed: []string{"split", "new", "drop"}}},
+			Attempts: []flow.Attempt{{
+				BaseCommit: "b0",
+				Ready:      []flow.Ready{{Head: "c1"}, {Head: "c2"}},
+			}},
+		}},
+		Asks: []flow.Ask{{
+			ID: "ask-n31", Kind: flow.KindGate, Gated: true, Task: "T1", Head: "c1",
+			Options: []string{flow.GateOptionMerge, flow.GateOptionHold}, Recommend: flow.GateOptionMerge,
+			AskedBy: flow.AskedByN31, Status: flow.AskStatusAnswered, Answer: flow.GateOptionMerge,
+			AnsweredBy: "owner", At: t0, AnsweredAt: t0,
+		}},
+	}
+	holdWake(&st, 0, "N6", "a recap is open", "wake_coordinator@recap@1", flow.Facts{}, "sheepdog", t0.Add(time.Minute))
+	if len(st.Project.Wakes) != 1 {
+		t.Fatalf("wakes = %d, want 1", len(st.Project.Wakes))
+	}
+	if strings.Contains(st.Project.Wakes[0].Facts, "owner answered") {
+		t.Fatalf("review recap wake leaked earlier N31 answer: %q", st.Project.Wakes[0].Facts)
+	}
+
+	// An N24 answer IS attached to a review recap wake.
+	st.Project.Wakes = nil
+	st.Asks = append(st.Asks, flow.Ask{
+		ID: "ask-n24", Kind: flow.KindGate, Gated: true, Task: "T1", Head: "c2",
+		Options: []string{flow.N24OptionDrop, flow.N24OptionContinue}, Recommend: flow.N24OptionDrop,
+		AskedBy: flow.AskedByN24, Status: flow.AskStatusAnswered, Answer: flow.N24OptionContinue,
+		Why: "keep the retry path", AnsweredBy: "owner", At: t0.Add(time.Second), AnsweredAt: t0.Add(2 * time.Second),
+	})
+	holdWake(&st, 0, "N6", "a recap is open", "wake_coordinator@recap@1", flow.Facts{}, "sheepdog", t0.Add(time.Minute))
+	if len(st.Project.Wakes) != 1 || !strings.Contains(st.Project.Wakes[0].Facts, flow.N24OptionContinue) {
+		t.Fatalf("review recap wake missing N24 answer: %+v", st.Project.Wakes)
+	}
+}
+
+// TestStatusViewOpenReleaseAskOnN31NotStale checks review round 1 (Carbon Minor 1 /
+// Hydrogen Minor 3): a fresh N31 log row paired with an open non-gate owner ask
+// (stage owner_answer) is not marked Stale.
+func TestStatusViewOpenReleaseAskOnN31NotStale(t *testing.T) {
+	t0 := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	st := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "proj-st", Folder: "/tmp/st", Started: true},
+		Tasks:    []flow.Task{{ID: "T1", Title: "feat: release", LastRow: "N31"}},
+		Asks:     []flow.Ask{{ID: "a1", Kind: flow.KindRelease, Gated: true, Task: "T1", Question: "Tag v1.2.0?", Status: flow.AskStatusOpen, At: t0}},
+	}
+	got := StatusViewOf(st, []LogLine{{Seq: 1, At: t0, By: "engine", Task: "T1", Rule: "N31", Why: "waiting on an open owner ask"}})
+	if len(got) != 1 || got[0].Stage != "owner_answer" || got[0].Stale {
+		t.Fatalf("StatusViewOf = %+v, want stage=owner_answer Stale=false", got)
 	}
 }

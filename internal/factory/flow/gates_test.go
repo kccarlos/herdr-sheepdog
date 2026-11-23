@@ -44,6 +44,30 @@ func answeredAsk(id, kind, task, head, answer, by string, at time.Time) Ask {
 	return a
 }
 
+func openN31Ask(id, task, head string) Ask {
+	a := openAsk(id, KindGate, task, head)
+	a.Options, a.Recommend, a.AskedBy = []string{GateOptionMerge, GateOptionHold}, GateOptionMerge, AskedByN31
+	return a
+}
+
+func answeredN31Ask(id, task, head, answer string, at time.Time) Ask { //nolint:unparam // test helper kept general
+	a := openN31Ask(id, task, head)
+	a.Status, a.Answer, a.AnsweredBy, a.AnsweredAt = AskStatusAnswered, answer, "owner", at
+	return a
+}
+
+func openN24Ask(id, task, head string) Ask {
+	a := openAsk(id, KindGate, task, head)
+	a.Options, a.Recommend, a.AskedBy = []string{N24OptionDrop, N24OptionContinue}, N24OptionDrop, AskedByN24
+	return a
+}
+
+func answeredN24Ask(id, task, head, answer string, at time.Time) Ask {
+	a := openN24Ask(id, task, head)
+	a.Status, a.Answer, a.AnsweredBy, a.AnsweredAt = AskStatusAnswered, answer, "owner", at
+	return a
+}
+
 // TestN24SplitChildAfterRetro checks design.md 4.5 N24 and plan.md 6.2:
 // when the ladder says recap for H on a split child whose parent already had a
 // retro, N24 holds for an owner ask ("drop it, or tell me how to go on?")
@@ -66,7 +90,7 @@ func TestN24SplitChildAfterRetro(t *testing.T) {
 		{
 			name: "open_n24_ask_waits_without_opening_duplicate",
 			in: with(streakRecap, splitOfRetro, func(in *In) {
-				in.Asks = []Ask{openAsk("ask-n24-1", KindGate, "t", "c1")}
+				in.Asks = []Ask{openN24Ask("ask-n24-1", "t", "c1")}
 			}),
 			wantRow:   "N24",
 			wantAsked: false,
@@ -88,7 +112,7 @@ func TestN24SplitChildAfterRetro(t *testing.T) {
 		{
 			name: "owner_already_answered_n24_ask_falls_through_to_N25",
 			in: with(streakRecap, splitOfRetro, func(in *In) {
-				in.Asks = []Ask{answeredAsk("ask-n24-1", KindGate, "t", "c1", "Continue with guidance", "owner", now)}
+				in.Asks = []Ask{answeredN24Ask("ask-n24-1", "t", "c1", N24OptionContinue, now)}
 			}),
 			wantRow: "N25",
 		},
@@ -131,7 +155,7 @@ func TestN24SplitChildAfterRetro(t *testing.T) {
 func TestN30OwnerGateNo(t *testing.T) {
 	noAt := now.Add(-2 * time.Minute)
 	ownerNo := func(in *In) {
-		in.Asks = []Ask{answeredAsk("ask-gate-no", KindGate, "t", "c1", "No, hold", "owner", noAt)}
+		in.Asks = []Ask{answeredN31Ask("ask-gate-no", "t", "c1", GateOptionHold, noAt)}
 	}
 	cases := []struct {
 		name    string
@@ -206,7 +230,7 @@ func TestN31OwnerGateAndOpenOwnerAsk(t *testing.T) {
 		{
 			name: "gate_owner_with_open_gate_ask_for_H_waits_without_duplicate",
 			in: with(gateOwnerTask, func(in *In) {
-				in.Asks = []Ask{openAsk("ask-gate-1", KindGate, "t", "c1")}
+				in.Asks = []Ask{openN31Ask("ask-gate-1", "t", "c1")}
 			}),
 			wantRow:   "N31",
 			wantAsked: false,
@@ -227,14 +251,14 @@ func TestN31OwnerGateAndOpenOwnerAsk(t *testing.T) {
 		{
 			name: "gate_owner_with_yes_at_H_passes_to_N42",
 			in: with(gateOwnerTask, func(in *In) {
-				in.Asks = []Ask{answeredAsk("ask-gate-1", KindGate, "t", "c1", "Yes, merge", "owner", yesAt)}
+				in.Asks = []Ask{answeredN31Ask("ask-gate-1", "t", "c1", GateOptionMerge, yesAt)}
 			}),
 			wantRow: "N42",
 		},
 		{
 			name: "gate_owner_yes_at_c1_still_covers_merge_only_m2",
 			in: with(gateOwnerTask, movedToM2, func(in *In) {
-				in.Asks = []Ask{answeredAsk("ask-gate-1", KindGate, "t", "c1", "Yes, merge", "owner", yesAt)}
+				in.Asks = []Ask{answeredN31Ask("ask-gate-1", "t", "c1", GateOptionMerge, yesAt)}
 			}),
 			wantRow: "N42",
 		},
@@ -247,7 +271,7 @@ func TestN31OwnerGateAndOpenOwnerAsk(t *testing.T) {
 					Round{N: 4, Kind: RoundFull, Head: "c2", Verdict: VerdictPass},
 				)
 				in.Facts.Tip, in.Facts.PR.Head = "c2", "c2"
-				in.Asks = []Ask{answeredAsk("ask-gate-1", KindGate, "t", "c1", "Yes, merge", "owner", yesAt)}
+				in.Asks = []Ask{answeredN31Ask("ask-gate-1", "t", "c1", GateOptionMerge, yesAt)}
 			}),
 			wantRow:   "N31",
 			wantAsked: true,
@@ -437,6 +461,223 @@ func TestGrantSlotsOwnerAnsweredPriorityAndExtraSlot(t *testing.T) {
 			candidates: []string{"O1", "O2"},
 			running:    2, maxRunning: 2,
 			want: nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := GrantSlots(tc.candidates, tc.tasks, tc.running, tc.maxRunning, tc.asks...)
+			var ids []string
+			for id := range got {
+				ids = append(ids, id)
+			}
+			slices.Sort(ids)
+			want := slices.Clone(tc.want)
+			slices.Sort(want)
+			if !slices.Equal(ids, want) {
+				t.Errorf("GrantSlots = %v, want %v", ids, want)
+			}
+		})
+	}
+}
+
+// TestReviewR1EngineOptionsCoordinatorGateAndScoping covers PR 6.2 review round 1
+// failure scenarios in pure flow: exact engine option matching (no word-list regex),
+// coordinator gate asks never satisfying N31 or tripping N30 (and waking the
+// coordinator via A3), newer N31 Hold overriding older Merge, N31 answers not
+// skipping N24, and GateNoSinceRecap rejecting empty/BaseCommit-only heads.
+func TestReviewR1EngineOptionsCoordinatorGateAndScoping(t *testing.T) {
+	t0, t1 := now.Add(-2*time.Minute), now.Add(-time.Minute)
+	coordGate := func(id, ans string) Ask {
+		return Ask{
+			ID: id, Kind: KindGate, Gated: true, Question: "Approve T1 API change?",
+			Options: []string{"Approve and merge", "Revise first"}, Recommend: "Approve and merge",
+			Task: "t", Head: "c1", AskedBy: RoleCoordinator, RunID: "coord-1",
+			Status: AskStatusAnswered, Answer: ans, AnsweredBy: "owner", At: t0, AnsweredAt: t1,
+		}
+	}
+
+	cases := []struct {
+		name      string
+		in        In
+		wantRow   string
+		wantAsked []string
+	}{
+		{
+			name:    "engine_N31_trimmed_Merge_covers_H_and_merges",
+			in:      with(gateOwnerTask, func(in *In) { in.Asks = []Ask{answeredN31Ask("a1", "t", "c1", "  Merge  ", t1)} }),
+			wantRow: "N42",
+		},
+		{
+			name:      "engine_N31_non_option_Yes_merge_never_satisfies_N31",
+			in:        with(gateOwnerTask, func(in *In) { in.Asks = []Ask{answeredN31Ask("a1", "t", "c1", "Yes, merge", t1)} }),
+			wantRow:   "N31",
+			wantAsked: []string{"open_gate_ask@c1"},
+		},
+		{
+			name:      "engine_N31_non_option_No_hold_never_triggers_N30",
+			in:        with(gateOwnerTask, func(in *In) { in.Asks = []Ask{answeredN31Ask("a1", "t", "c1", "No, hold", t1)} }),
+			wantRow:   "N31",
+			wantAsked: []string{"open_gate_ask@c1"},
+		},
+		{
+			name:      "coordinator_gate_Approve_and_merge_never_satisfies_N31",
+			in:        with(gateOwnerTask, func(in *In) { in.Asks = []Ask{coordGate("c1", "Approve and merge")} }),
+			wantRow:   "N31",
+			wantAsked: []string{"open_gate_ask@c1"},
+		},
+		{
+			name:      "coordinator_gate_Revise_first_never_triggers_N30",
+			in:        with(gateOwnerTask, func(in *In) { in.Asks = []Ask{coordGate("c2", "Revise first")} }),
+			wantRow:   "N31",
+			wantAsked: []string{"open_gate_ask@c1"},
+		},
+		{
+			name: "coordinator_gate_Yes_or_Merge_never_satisfies_N31",
+			in: with(gateOwnerTask, func(in *In) {
+				a := coordGate("c3", GateOptionMerge)
+				a.Options = []string{GateOptionMerge, GateOptionHold}
+				in.Asks = []Ask{a}
+			}),
+			wantRow:   "N31",
+			wantAsked: []string{"open_gate_ask@c1"},
+		},
+		{
+			name: "coordinator_gate_No_or_Hold_never_triggers_N30",
+			in: with(gateOwnerTask, func(in *In) {
+				a := coordGate("c4", GateOptionHold)
+				a.Options = []string{GateOptionMerge, GateOptionHold}
+				in.Asks = []Ask{a}
+			}),
+			wantRow:   "N31",
+			wantAsked: []string{"open_gate_ask@c1"},
+		},
+		{
+			name: "newer_N31_Hold_overrides_older_N31_Merge_at_same_H",
+			in: with(gateOwnerTask, func(in *In) {
+				in.Asks = []Ask{
+					answeredN31Ask("a-yes", "t", "c1", GateOptionMerge, t0),
+					answeredN31Ask("a-no", "t", "c1", GateOptionHold, t1),
+				}
+			}),
+			wantRow: "N30",
+		},
+		{
+			name: "earlier_N31_answer_does_not_skip_N24_on_split_retro_child",
+			in: with(streakRecap, splitOfRetro, gateOwnerTask, func(in *In) {
+				in.Asks = []Ask{answeredN31Ask("a-prev", "t", "c0", GateOptionHold, t0)}
+			}),
+			wantRow:   "N24",
+			wantAsked: []string{"open_n24_ask@c1"},
+		},
+		{
+			name:      "N31_Hold_with_empty_head_does_not_trigger_N30",
+			in:        with(gateOwnerTask, func(in *In) { in.Asks = []Ask{answeredN31Ask("a-empty", "t", "", GateOptionHold, t1)} }),
+			wantRow:   "N31",
+			wantAsked: []string{"open_gate_ask@c1"},
+		},
+		{
+			name:      "N31_Hold_at_BaseCommit_only_does_not_trigger_N30",
+			in:        with(gateOwnerTask, func(in *In) { in.Asks = []Ask{answeredN31Ask("a-base", "t", "b0", GateOptionHold, t1)} }),
+			wantRow:   "N31",
+			wantAsked: []string{"open_gate_ask@c1"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, d := FirstMatch(TaskRows, tc.in)
+			if r.ID != tc.wantRow {
+				t.Fatalf("FirstMatch = %s (%s, asked=%v), want %s", r.ID, d.Why, d.Asked, tc.wantRow)
+			}
+			if tc.wantAsked != nil && !slices.Equal(d.Asked, tc.wantAsked) {
+				t.Fatalf("Asked = %v, want %v", d.Asked, tc.wantAsked)
+			}
+		})
+	}
+
+	// Coordinator gate ask answered -> StepAsk A3 wakes the coordinator.
+	openCoord := Ask{
+		ID: "c-open", Kind: KindGate, Gated: true, Question: "Approve T1 API change?",
+		Options: []string{"Approve and merge", "Revise first"}, Recommend: "Approve and merge",
+		Task: "t", Head: "c1", AskedBy: RoleCoordinator, RunID: "coord-1", Status: AskStatusOpen, At: t0,
+	}
+	ans, row, dec := StepAsk(openCoord, AskEvent{Kind: EvAskAnswer, Answer: "Approve and merge", By: "owner"}, t1)
+	if row != "A3" || ans.Status != AskStatusAnswered || !slices.Equal(dec.Asked, []string{AskWake}) {
+		t.Fatalf("StepAsk coordinator gate answer = (%s, %s, %v), want A3 answered [%s]", row, ans.Status, dec.Asked, AskWake)
+	}
+}
+
+// TestReviewR1GrantSlotsEarlierOwnerAnswerExpires checks that an owner answer
+// from before a task's last slot grant (new_attempt or start_worker done) no
+// longer gives owner-answered priority or the extra slot.
+func TestReviewR1GrantSlotsEarlierOwnerAnswerExpires(t *testing.T) {
+	t0, t1, t2 := now.Add(-10*time.Minute), now.Add(-5*time.Minute), now.Add(-time.Minute)
+	cases := []struct {
+		name       string
+		tasks      []Task
+		asks       []Ask
+		candidates []string
+		running    int
+		maxRunning int
+		want       []string
+	}{
+		{
+			name: "answer_before_previous_attempt_slot_loses_priority_to_urgent",
+			tasks: []Task{
+				{ID: "U1", EstimateLines: 10, Priority: PriorityUrgent},
+				{ID: "O1", EstimateLines: 10, Attempts: []Attempt{{
+					BaseCommit: "b0", Closed: "new",
+					Acts: []Act{{Key: AskNewAttempt, Result: "done", At: t1}},
+				}}},
+			},
+			asks:       []Ask{answeredAsk("ask-old", KindRelease, "O1", "", "Yes", "owner", t0)},
+			candidates: []string{"U1", "O1"},
+			running:    1, maxRunning: 2,
+			want: []string{"U1"},
+		},
+		{
+			name: "answer_before_previous_attempt_slot_gets_no_extra_slot_at_cap",
+			tasks: []Task{
+				{ID: "N1", EstimateLines: 200},
+				{ID: "O1", EstimateLines: 10, Attempts: []Attempt{{
+					BaseCommit: "b0", Closed: "new",
+					Acts: []Act{{Key: AskNewAttempt, Result: "done", At: t1}},
+				}}},
+			},
+			asks:       []Ask{answeredAsk("ask-old", KindRelease, "O1", "", "Yes", "owner", t0)},
+			candidates: []string{"N1", "O1"},
+			running:    2, maxRunning: 2,
+			want: nil,
+		},
+		{
+			name: "answer_at_same_time_as_worker_start_loses_extra_slot_on_later_restart",
+			tasks: []Task{
+				{ID: "U1", EstimateLines: 10, Priority: PriorityUrgent},
+				{ID: "O1", EstimateLines: 10, Attempts: []Attempt{{
+					BaseCommit: "b0", Run: &RunRecord{State: PhaseEnded, Result: EndExited},
+					Acts: []Act{{Key: AskStartWorker, Result: "done", At: t1}},
+				}}},
+			},
+			asks:       []Ask{answeredAsk("ask-same", KindGate, "O1", "", GateOptionMerge, "owner", t1)},
+			candidates: []string{"U1", "O1"},
+			running:    2, maxRunning: 2,
+			want: []string{"U1"},
+		},
+		{
+			name: "fresh_answer_after_earlier_slot_regains_priority",
+			tasks: []Task{
+				{ID: "U1", EstimateLines: 10, Priority: PriorityUrgent},
+				{ID: "O1", EstimateLines: 10, Attempts: []Attempt{{
+					BaseCommit: "b0", Run: &RunRecord{State: PhaseEnded, Result: EndExited},
+					Acts: []Act{{Key: AskStartWorker, Result: "done", At: t1}},
+				}}},
+			},
+			asks: []Ask{
+				answeredAsk("ask-old", KindRelease, "O1", "", "Yes", "owner", t0),
+				answeredAsk("ask-new", KindRelease, "O1", "", "Yes", "owner", t2),
+			},
+			candidates: []string{"U1", "O1"},
+			running:    2, maxRunning: 2,
+			want: []string{"O1"},
 		},
 	}
 	for _, tc := range cases {
