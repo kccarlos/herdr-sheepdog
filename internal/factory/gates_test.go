@@ -278,7 +278,8 @@ func TestStaleGateAskCancelledWhenHMoves(t *testing.T) {
 		// Worker commits c2 and reports ready -> H moves past c1.
 		w.commitAndReady("package demo\n// v2\n", greenRollup, true)
 		c2 := w.commits[1]
-		w.pass() // cancels stale gate ask and pushes c2
+		writePRJSON(t, w.gh, "view.json", c2, greenRollup) // the PR now shows c2, as GitHub would after the push
+		w.pass()                                           // cancels stale gate ask and pushes c2
 
 		st := w.state()
 		idx := slices.IndexFunc(st.Asks, func(a flow.Ask) bool { return a.ID == firstAskID })
