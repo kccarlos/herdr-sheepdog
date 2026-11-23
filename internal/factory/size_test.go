@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
@@ -451,7 +452,7 @@ func TestContinueWhenLineReadFails(t *testing.T) {
 func TestContinueUnderGitTimeout(t *testing.T) {
 	l := newLanding(t).withTokens()
 	writePRJSON(t, l.gh, "view.json", l.c1, "[]")
-	slow, _, calls := fakeDiffExec(t, l.eng)
+	slow, _, _ := fakeDiffExec(t, l.eng)
 	slow.Store(true)
 	l.pass() // N12: timeout opens size recap
 	l.pass() // N6: wakes coordinator, tells worker to stop
@@ -459,11 +460,29 @@ func TestContinueUnderGitTimeout(t *testing.T) {
 		t.Fatalf("worker sends before continue = %q, want one stop", sends)
 	}
 
-	// Keep slow set during continue: ChangedLines times out, SendRun must still succeed.
+	// Shorten lockGitTimeout and block the single git diff call until ctx is done,
+	// so ChangedLines deterministically starves its budget while SendRun still succeeds.
 	l.finishWorkerTurn()
-	before := calls.Load()
+	old := lockGitTimeout
+	lockGitTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { lockGitTimeout = old })
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	srv := hctest.New(t)
+	var continueCalls atomic.Int32
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if len(p.Argv) > 1 && p.Argv[0] == "git" && p.Argv[1] == "diff" {
+			continueCalls.Add(1)
+			<-ctx.Done()
+			return hc.ExecResult{TimedOut: true}, nil
+		}
+		return hctest.GitExec(p)
+	}
+	l.eng.git = world.NewGit(hc.NewClient(srv.Path), l.eng.now, func(event, folder string) {
+		l.eng.logEvent(event, map[string]string{"folder": folder})
+	})
 	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"continue","why":"git is slow"}`, "")
-	if got := calls.Load() - before; got != 1 {
+	if got := continueCalls.Load(); got != 1 {
 		t.Errorf("continue ran git diff %d times, want 1", got)
 	}
 	sends := sendsTo(t, l.srv.Requests(), l.worker)
@@ -476,7 +495,6 @@ func TestContinueUnderGitTimeout(t *testing.T) {
 	}
 
 	// If SendRun fails, continue returns an error and does not commit the decision.
-	slow.Store(false)
 	lFail := newLanding(t).withTokens()
 	lFail.edit(func(s *flow.State) {
 		s.Tasks[0].Attempts[0].RunID = "missing-worker"
