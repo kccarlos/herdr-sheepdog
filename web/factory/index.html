@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="/static/shared.css">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="stylesheet" href="/factory/style.css">
-<script src="/factory/app.js" defer></script>
+<script type="module" src="/factory/app.js"></script>
 </head>
 <body>
 <div id="offline" class="banner" role="status" hidden></div>
@@ -30,10 +30,7 @@
     <main id="main"></main>
     <aside id="aside">
       <section aria-label="Projects" class="card" id="projects"></section>
-      <section aria-label="Open asks" class="card">
-        <h2>asks for you</h2>
-        <p class="muted">Ask cards arrive in a later version. Nothing on this page can answer, start or stop yet.</p>
-      </section>
+      <section aria-label="Open asks" class="card" id="asks"></section>
       <section aria-label="Agent tree" class="card" id="agents"></section>
     </aside>
   </div>

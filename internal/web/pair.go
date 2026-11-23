@@ -1,7 +1,9 @@
 package web
 
 import (
+	"crypto/rand"
 	"crypto/subtle"
+	"math/big"
 	"net"
 	"net/http"
 	"strconv"
@@ -13,7 +15,12 @@ import (
 )
 
 // EnrollCodeLifetime is how long a pairing code works (once).
-const EnrollCodeLifetime = 10 * time.Minute
+// BrowserCodeLifetime is the shorter lifetime of a browser-only short code.
+const (
+	EnrollCodeLifetime  = 10 * time.Minute
+	BrowserCodeLifetime = 5 * time.Minute
+	browserCodeAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+)
 
 // enrollCodes is the one current pairing code and the recent ones that
 // no longer work, so a refusal can say why. Showing a new code
@@ -60,23 +67,67 @@ func (e *enrollCodes) retireLocked(code, reason string) {
 	}
 }
 
-// burn uses code once: "" when it worked, else code_used or
-// code_expired.
-func (e *enrollCodes) burn(code string, now time.Time) string {
+// expire retires the active code as code_expired, if any.
+func (e *enrollCodes) expire() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.cur != "" {
+		e.retireLocked(e.cur, "code_expired")
+	}
+}
+
+// issueShort mints a single-use 5-minute XXXX-XXXX code, retiring any active code.
+func (e *enrollCodes) issueShort(now time.Time) (string, time.Time, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.cur != "" {
+		e.retireLocked(e.cur, "code_expired")
+	}
+	var buf [8]byte
+	for i := range buf {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(browserCodeAlphabet))))
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		buf[i] = browserCodeAlphabet[n.Int64()]
+	}
+	e.cur, e.expires = string(buf[:]), now.Add(BrowserCodeLifetime)
+	return e.cur[:4] + "-" + e.cur[4:], e.expires, nil
+}
+
+func normalizeShortCode(s string) string {
+	return strings.NewReplacer(" ", "", "\t", "", "-", "").Replace(strings.ToUpper(s))
+}
+
+func isBrowserShortCode(code string) bool {
+	norm := normalizeShortCode(code)
+	return len(norm) == 8 && strings.IndexFunc(norm, func(r rune) bool { return (r < '0' || r > '9') && (r < 'A' || r > 'Z') }) < 0
+}
+
+// burn uses code once: "" when it worked, else code_used or code_expired.
+func (e *enrollCodes) burn(code string, now time.Time) string {
+	reason, _ := e.tryBurn(code, now)
+	return reason
+}
+
+func (e *enrollCodes) tryBurn(code string, now time.Time) (string, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if code == "" {
+		return "code_used", false
+	}
 	if e.cur != "" && subtle.ConstantTimeCompare([]byte(code), []byte(e.cur)) == 1 {
 		if now.After(e.expires) {
 			e.retireLocked(code, "code_expired")
-			return "code_expired"
+			return "code_expired", true
 		}
 		e.retireLocked(code, "code_used")
-		return ""
+		return "", true
 	}
 	if r, ok := e.old[code]; ok {
-		return r
+		return r, true
 	}
-	return "code_used"
+	return "code_used", false
 }
 
 // PairResponse is GET /api/pair (loopback only): the one-time pairing
@@ -226,12 +277,43 @@ type EnrollResponse struct {
 	Name     string `json:"name"`
 }
 
+// handleBrowserCode is POST /api/pair/browser-code: issues a short, single-use,
+// 5-minute browser-only enrolment code to a paired device session.
+func (s *Server) handleBrowserCode(w http.ResponseWriter, r *http.Request) {
+	dev := deviceOf(r)
+	if dev == "" || dev == localDevice {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "device_session_required", "reason": "device_session_required"})
+		return
+	}
+	code, exp, err := s.browserEnroll.issueShort(s.deps.Now())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.log.Log(logSource, "web.pair.browser_code", "", map[string]any{"device_id": dev, "expires": exp.UTC()})
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{"code": code, "expires": exp.UTC(), "expires_in": int(BrowserCodeLifetime / time.Second)})
+}
+
+func (s *Server) burnEnrollCode(kind, code string, allowShort bool, now time.Time) string {
+	if allowShort && kind == DeviceBrowser {
+		if reason, known := s.browserEnroll.tryBurn(normalizeShortCode(code), now); known {
+			return reason
+		}
+	}
+	return s.enroll.burn(code, now)
+}
+
 // handleEnroll records a device's public key in exchange for the one-time
 // pairing code (public: the code is the credential).
 func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 	remote := s.isRateLimitedCaller(r)
-	src := s.rateLimitSource(r)
-	if remote && s.limits.isBlocked("enroll", src, s.deps.Now()) {
+	src := "loopback"
+	if remote {
+		src = s.rateLimitSource(r)
+	}
+	now := s.deps.Now()
+	if s.limits.isBlocked("enroll", src, now) {
 		writeRateLimited(w)
 		return
 	}
@@ -251,11 +333,18 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "public_key: "+err.Error())
 		return
 	}
-	if reason := s.enroll.burn(req.Code, s.deps.Now()); reason != "" {
-		if remote {
-			s.limits.fail("enroll", src, badCodesPerMinute, s.deps.Now())
-		}
+	if remote && req.Kind == DeviceBrowser && isBrowserShortCode(req.Code) {
+		s.log.Log(logSource, "web.pair.code_refused", "", map[string]any{"reason": "loopback_only", "remote": r.RemoteAddr})
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Browser short codes can only be used on this computer.", "reason": "loopback_only"})
+		return
+	}
+	if reason := s.burnEnrollCode(req.Kind, req.Code, !remote, now); reason != "" {
+		blocked := s.limits.fail("enroll", src, badCodesPerMinute, now)
 		s.log.Log(logSource, "web.pair.code_refused", "", map[string]any{"reason": reason, "remote": r.RemoteAddr})
+		if !remote && blocked {
+			writeRateLimited(w)
+			return
+		}
 		writeJSON(w, http.StatusGone, map[string]string{"error": "This code was already used or has expired. Show a new code on your computer and scan it.", "reason": reason})
 		return
 	}
@@ -373,6 +462,7 @@ func (s *Server) handleResetPairing(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	_, _, _, _ = s.enroll.current(s.deps.Now(), true)
+	s.browserEnroll.expire()
 	s.log.Log(logSource, "web.device.reset_pairing", "", map[string]any{"count": len(done)})
 	s.log.Log(logSource, "web.tls.rotate", "", map[string]any{"old_pin": old, "new_pin": s.deps.TLS.Pin(), "phase": "reset"})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(done)})

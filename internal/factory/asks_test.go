@@ -1011,6 +1011,116 @@ func TestWorkerAnswerHeldWhenWorkerDiedOrHCDownBetweenPasses(t *testing.T) {
 	})
 }
 
+// TestLiveWorkerReceivesHeldAnswerAfterTransientHCSendError verifies KB-ASK-5
+// and design.md 7.3: when a worker asks a decision question and waits idle, a
+// transient hc send error while the coordinator answers leaves the answer
+// command succeeding and holds the message; once hc recovers, a later engine
+// pass delivers the held answer exactly once to the same live idle worker (not
+// only to a new replacement run), with no duplicate after a daemon restart.
+func TestLiveWorkerReceivesHeldAnswerAfterTransientHCSendError(t *testing.T) {
+	t.Parallel()
+	r := newAskRig(t)
+	var failSend atomic.Bool
+	r.client = hc.NewClient(methodFailProxy(t, r.srv.Path, "terminal.send", &failSend))
+	r.newEngine()
+	firstWorker := r.workerID
+
+	if err := r.eng.Report(r.workTok, "ask", json.RawMessage(`{"kind":"decision","question":"Keep cache in SQLite or Plain JSON?","options":["SQLite","Plain JSON"],"recommend":"SQLite"}`)); err != nil {
+		t.Fatalf("worker report ask: %v", err)
+	}
+	askID := r.state().Asks[0].ID
+
+	// J12 delivers ask:<id> wake to coordinator while worker remains idle.
+	r.now = r.now.Add(5 * time.Second)
+	r.pass()
+
+	r.srv.SetStatus(r.coordAddr, &hc.Status{App: "claude-code", State: "working"})
+	workerBefore := len(sendsTo(t, r.srv.Requests(), firstWorker))
+	seqBefore := r.state().Seq
+
+	// hc refuses terminal.send while the coordinator answers; answer still succeeds and holds the message.
+	failSend.Store(true)
+	ansPayload := fmt.Sprintf(`{"ask":%q,"option":"Plain JSON","why":"keep stdlib only"}`, askID)
+	if err := r.eng.Report(r.coordTok, "answer", json.RawMessage(ansPayload)); err != nil {
+		t.Fatalf("coordinator answer during transient hc send error: %v", err)
+	}
+	failSend.Store(false)
+
+	st := r.state()
+	if st.Seq != seqBefore+1 {
+		t.Fatalf("state seq = %d, want %d (single commit per answer)", st.Seq, seqBefore+1)
+	}
+	if st.Asks[0].Status != flow.AskStatusAnswered || st.Asks[0].Answer != "Plain JSON" || st.Asks[0].Why != "keep stdlib only" {
+		t.Fatalf("answered ask = %+v", st.Asks[0])
+	}
+	if got := sendsTo(t, r.srv.Requests(), firstWorker)[workerBefore:]; len(got) != 0 {
+		t.Fatalf("worker received message while hc refused terminal.send: %q", got)
+	}
+	att := st.Tasks[0].Attempts[0]
+	var runHeld []string
+	if att.Run != nil {
+		runHeld = att.Run.Held
+	}
+	if len(att.Held)+len(runHeld) != 1 {
+		t.Fatalf("held messages after refused send = Attempt.Held:%q Run.Held:%q, want 1", att.Held, runHeld)
+	}
+
+	// Coordinator finishes its turn and hc has recovered; later passes deliver the held answer
+	// exactly once to the same live idle worker.
+	r.srv.SetStatus(r.coordAddr, &hc.Status{App: "claude-code", State: "idle"})
+	r.now = r.now.Add(5 * time.Second)
+	r.pass()
+	r.now = r.now.Add(25 * time.Second)
+	r.pass()
+
+	if r.workerID != firstWorker {
+		t.Fatalf("unexpected replacement worker started: first=%q now=%q", firstWorker, r.workerID)
+	}
+	tm, err := r.client.Get(r.ctx, firstWorker)
+	if err != nil || tm.State != "live" {
+		t.Fatalf("worker %s not live after hc recovery: term=%+v err=%v", firstWorker, tm, err)
+	}
+	st = r.state()
+	att = st.Tasks[0].Attempts[0]
+	if len(st.Tasks[0].Attempts) != 1 || att.RunID != firstWorker {
+		t.Fatalf("attempt/run changed unexpectedly: attempts=%+v", st.Tasks[0].Attempts)
+	}
+	gotSends := sendsTo(t, r.srv.Requests(), firstWorker)[workerBefore:]
+	if len(gotSends) != 1 || !strings.Contains(gotSends[0], "Plain JSON") || !strings.Contains(gotSends[0], "keep stdlib only") {
+		t.Fatalf("live idle worker %s sends after hc recovery = %q (Attempt.Held=%q), want 1 delivery with Plain JSON and reason", firstWorker, gotSends, att.Held)
+	}
+	if len(att.Held) != 0 || (att.Run != nil && len(att.Run.Held) != 0) {
+		var rHeld []string
+		if att.Run != nil {
+			rHeld = att.Run.Held
+		}
+		t.Fatalf("held messages not cleared after delivery: Attempt.Held=%q Run.Held=%q", att.Held, rHeld)
+	}
+
+	// Daemon restart and further passes must not re-deliver the answer.
+	r.restart()
+	r.now = r.now.Add(5 * time.Second)
+	r.pass()
+	r.now = r.now.Add(25 * time.Second)
+	r.pass()
+
+	if afterRestart := sendsTo(t, r.srv.Requests(), firstWorker)[workerBefore:]; len(afterRestart) != 1 {
+		t.Fatalf("duplicate or altered sends after restart: %q (want exactly 1)", afterRestart)
+	}
+	if r.workerID != firstWorker {
+		t.Fatalf("replacement worker started after restart: first=%q now=%q", firstWorker, r.workerID)
+	}
+	st = r.state()
+	att = st.Tasks[0].Attempts[0]
+	if len(att.Held) != 0 || (att.Run != nil && len(att.Run.Held) != 0) {
+		var rHeld []string
+		if att.Run != nil {
+			rHeld = att.Run.Held
+		}
+		t.Fatalf("held messages reappeared after restart: Attempt.Held=%q Run.Held=%q", att.Held, rHeld)
+	}
+}
+
 type reviewerAskRig struct {
 	*askRig
 	mu     sync.Mutex

@@ -5,6 +5,8 @@ package flow
 
 import (
 	"encoding/json"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -33,6 +35,42 @@ type State struct {
 	Asks     []Ask    `json:"asks,omitempty"`
 }
 
+// Alert kinds (design.md 6, 7.3).
+const (
+	AlertNoPool, AlertDisk, AlertConsentPrompt, AlertMainRed                    = "no_pool", "disk", "consent_prompt", "main_red"
+	AlertCIStalled, AlertAgentsDown, AlertGitHubUnavailable, AlertHCUnavailable = "ci_stalled", "agents_down", "github_unavailable", "hc_unavailable"
+)
+
+// Alert is one persisted project alert or outage episode (design.md 6, 7.3).
+type Alert struct {
+	Kind  string    `json:"kind"`
+	Cause string    `json:"cause"`
+	At    time.Time `json:"at"`
+	Fix   string    `json:"fix,omitempty"`
+	Rule  string    `json:"rule,omitempty"`
+	Scope string    `json:"scope,omitempty"`
+}
+
+func (a Alert) IsStopping() bool {
+	return a.Kind == AlertNoPool || a.Kind == AlertDisk || a.Kind == AlertConsentPrompt
+}
+func StoppingAlert(alerts map[string]Alert) *Alert {
+	for _, k := range slices.Sorted(maps.Keys(alerts)) {
+		if a := alerts[k]; a.IsStopping() {
+			return &a
+		}
+	}
+	return nil
+}
+func RunLive(id string, r *RunRecord) bool {
+	return r != nil && r.State != PhaseEnded || r == nil && id != ""
+}
+func (p Project) HasAlert(kind string) bool { _, ok := p.Alerts[kind]; return ok }
+func (p Project) CoordSignOutHold() bool {
+	a, ok := p.Alerts[AlertAgentsDown]
+	return ok && strings.HasPrefix(a.Scope, "signed_out:")
+}
+
 // BaseState is the persisted base-branch red spell (design.md 7.3, N38).
 type BaseState struct {
 	Red     bool      `json:"red,omitempty"`
@@ -55,6 +93,7 @@ type Project struct {
 	NewGoal            bool              `json:"new_goal,omitempty"`            // J4: owner gave a new goal after a plan existed
 	NewGoalTasks       int               `json:"new_goal_tasks,omitempty"`      // J4: task count when NewGoal was set
 	CoordDialogStucks  int               `json:"coord_dialog_stucks,omitempty"` // J10: consecutive R29 dialog-stuck ends
+	CoordSilentStops   int               `json:"coord_silent_stops,omitempty"`  // J9: consecutive silent coordinator stops
 	CoordErrorAt       time.Time         `json:"coord_error_at,omitempty"`      // J8: when coordinator was last told to go on
 	CoordErrorTurn     uint64            `json:"coord_error_turn,omitempty"`    // J8: coordinator turn at last go-on tell
 	CoordWakeAt        time.Time         `json:"coord_wake_at,omitempty"`       // J9: oldest delivered wake awaiting a turn
@@ -62,6 +101,7 @@ type Project struct {
 	CoordWakeTurn      uint64            `json:"coord_wake_turn,omitempty"`    // J9: coordinator turn when CoordWakeAt was sent
 	CoordLastWakeAt    time.Time         `json:"coord_last_wake_at,omitempty"` // J13: last wake or heartbeat delivered
 	WaitKey            string            `json:"wait_key,omitempty"`           // episode key for J4/J6/J7 wait deduplication
+	Alerts             map[string]Alert  `json:"alerts,omitempty"`             // active persisted alert/outage episodes (design.md 6, 7.3)
 	Invariants         map[string]string `json:"invariants,omitempty"`         // active violation per invariant rule and subject (I1–I5)
 	SweepItems         map[string]string `json:"sweep_items,omitempty"`        // active sweep wake key -> probe name
 	SweepUnknown       map[string]string `json:"sweep_unknown,omitempty"`      // active unknown sweep probe -> reason

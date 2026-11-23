@@ -58,3 +58,15 @@ details.done summary { display: flex; align-items: center; min-height: 44px; col
 .pill.blocked { color: var(--blocked-text); background: var(--primary-soft); }
 .kv { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
 .kv span:last-child { color: var(--muted); text-align: right; }
+.ask-card { display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.ask-q { font-weight: 500; overflow-wrap: anywhere; }
+.ask-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.ask-opt { min-height: 44px; padding: 6px 14px; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: var(--radius-sm); font: inherit; font-weight: 500; cursor: pointer; text-align: left; }
+.ask-opt.rec { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+.ask-opt:disabled { opacity: .6; cursor: default; }
+.rec-tag { font-size: 12px; opacity: .85; }
+.ask-err { padding: 8px 10px; background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger-line); border-radius: var(--radius-sm); font-size: 13px; }
+.pair-box { display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--primary-soft); border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: 14px; }
+.pair-form { display: flex; flex-direction: column; gap: 6px; }
+.pair-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.pair-row input { flex: 1 1 140px; min-height: 44px; padding: 0 10px; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: var(--radius-sm); font: inherit; font-family: var(--font-mono); }
