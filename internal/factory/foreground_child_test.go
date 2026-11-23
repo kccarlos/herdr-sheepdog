@@ -357,3 +357,162 @@ func TestQuietWorkerLiveChildSurvivesRestart(t *testing.T) {
 		t.Fatalf("interrupts 20m after child exit = %d, want 1", n)
 	}
 }
+
+// TestQuietWorkerOldHelperOnlyTriggersR21 verifies O24 round 2: a worker whose
+// only descendant is a long-lived helper (etime longer than the current working
+// turn, both on the first turn and on a second turn after idle -> working) is
+// not kept alive and still hits R21 and R22.
+func TestQuietWorkerOldHelperOnlyTriggersR21(t *testing.T) {
+	ctx := context.Background()
+	zero := 0
+
+	t.Run("first turn", func(t *testing.T) {
+		f := newQuietWorkerFixture(t, time.Date(2026, 11, 22, 14, 0, 0, 0, time.UTC))
+		psOldHelper := "" +
+			"    1     0 Ss    5-00:00:00\n" +
+			" 1285     1 S        1:00:00\n" +
+			"25392  1285 Ss+        20:05\n" +
+			"25393 25392 S+         25:00\n"
+		execCalls := f.onPSExec(t, func(hc.ExecParams) (hc.ExecResult, error) {
+			return hc.ExecResult{Code: &zero, Stdout: []byte(psOldHelper)}, nil
+		})
+
+		f.srv.SetScreen(f.worker, "✻ Running go test ./... (10m 05s · esc to interrupt)\n")
+		f.now = f.now.Add(10 * time.Minute)
+		f.eng.passProject(ctx, f.id, false)
+
+		f.srv.SetScreen(f.worker, "✽ Running go test ./... (20m 05s · esc to interrupt)\n")
+		f.now = f.now.Add(10 * time.Minute) // 20m = quiet_minutes -> R21
+		reqsBefore := len(f.srv.Requests())
+		f.eng.passProject(ctx, f.id, false)
+
+		if n := f.interruptsSince(reqsBefore); n != 1 {
+			t.Fatalf("interrupts at quiet_minutes with old helper only = %d, want 1", n)
+		}
+		f.srv.SetScreen(f.worker, "■ Conversation interrupted - tell the model what to do differently.\n")
+		f.now = f.now.Add(15 * time.Second)
+		f.eng.passProject(ctx, f.id, false)
+		f.now = f.now.Add(75 * time.Second) // 90s = interrupt_seconds -> R22
+		f.eng.passProject(ctx, f.id, false)
+
+		got := f.run(t)
+		if got == nil || got.State != flow.PhaseEnded || got.Result != flow.EndStuck {
+			t.Fatalf("after interrupt_seconds run = %+v, want ended(stuck) via R22", got)
+		}
+		if execCalls.Load() == 0 {
+			t.Fatalf("expected child process probe via hc exec, got 0 calls")
+		}
+	})
+
+	t.Run("second turn after idle", func(t *testing.T) {
+		f := newQuietWorkerFixture(t, time.Date(2026, 11, 22, 15, 0, 0, 0, time.UTC))
+		psOldHelper := "" +
+			"    1     0 Ss    5-00:00:00\n" +
+			" 1285     1 S        1:00:00\n" +
+			"25392  1285 Ss+        50:35\n" +
+			"25393 25392 S+         45:00\n"
+		f.onPSExec(t, func(hc.ExecParams) (hc.ExecResult, error) {
+			return hc.ExecResult{Code: &zero, Stdout: []byte(psOldHelper)}, nil
+		})
+
+		// Finish turn 1 (R20 -> idle).
+		f.srv.SetStatus(f.worker, &hc.Status{App: "claude-code", State: "idle"})
+		f.now = f.now.Add(5 * time.Second)
+		f.eng.passProject(ctx, f.id, false)
+		f.now = f.now.Add(25 * time.Second)
+		f.eng.passProject(ctx, f.id, false)
+		if got := f.run(t); got == nil || got.State != flow.PhaseIdle {
+			t.Fatalf("after R20 run = %+v, want idle", got)
+		}
+
+		// Sit idle 30m, then start turn 2 (idle -> working via R27).
+		f.now = f.now.Add(30 * time.Minute)
+		f.srv.SetStatus(f.worker, &hc.Status{App: "claude-code", State: "working"})
+		f.srv.SetScreen(f.worker, "✢ Second turn running (01s · esc to interrupt)\n")
+		f.eng.passProject(ctx, f.id, false)
+
+		// Helper etime (45m) is shorter than total run age (~50m), but longer
+		// than turn 2 (20m) -> must not count as activity, so R21 fires.
+		f.srv.SetScreen(f.worker, "✻ Second turn running (10m 00s · esc to interrupt)\n")
+		f.now = f.now.Add(10 * time.Minute)
+		f.eng.passProject(ctx, f.id, false)
+
+		f.srv.SetScreen(f.worker, "✽ Second turn running (20m 00s · esc to interrupt)\n")
+		f.now = f.now.Add(10 * time.Minute)
+		reqsBefore := len(f.srv.Requests())
+		f.eng.passProject(ctx, f.id, false)
+
+		if n := f.interruptsSince(reqsBefore); n != 1 {
+			t.Fatalf("turn 2 interrupts at quiet_minutes with old helper only = %d, want 1", n)
+		}
+	})
+}
+
+// TestQuietWorkerFreshChildAndGrandchildUnderOldHelperSkipR21 verifies O24
+// round 2: a fresh child started in the current turn, or a fresh grandchild
+// under an old helper started in the current turn, counts as activity and keeps
+// R21 from firing.
+func TestQuietWorkerFreshChildAndGrandchildUnderOldHelperSkipR21(t *testing.T) {
+	ctx := context.Background()
+	zero := 0
+	cases := []struct {
+		name  string
+		psOut string
+	}{
+		{
+			name: "fresh direct child",
+			psOut: "" +
+				"    1     0 Ss    5-00:00:00\n" +
+				" 1285     1 S        1:00:00\n" +
+				"25392  1285 Ss+        25:05\n" +
+				"25393 25392 S+         05:03\n",
+		},
+		{
+			name: "fresh grandchild under old helper",
+			psOut: "" +
+				"    1     0 Ss    5-00:00:00\n" +
+				" 1285     1 S        1:00:00\n" +
+				"25392  1285 Ss+      1:30:00\n" +
+				"25393 25392 S+       1:02:03\n" +
+				"25394 25393 S+         05:03\n",
+		},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newQuietWorkerFixture(t, time.Date(2026, 11, 22, 16+i, 0, 0, 0, time.UTC))
+			execCalls := f.onPSExec(t, func(hc.ExecParams) (hc.ExecResult, error) {
+				return hc.ExecResult{Code: &zero, Stdout: []byte(tc.psOut)}, nil
+			})
+
+			reqsBefore := len(f.srv.Requests())
+			for _, step := range []struct {
+				dt     time.Duration
+				screen string
+			}{
+				{10 * time.Minute, "✻ Running go test ./... (10m 05s · esc to interrupt)\n"},
+				{10 * time.Minute, "✽ Running go test ./... (20m 05s · esc to interrupt)\n"},
+				{2 * time.Minute, "✢ Running go test ./... (22m 05s · esc to interrupt)\n"},
+				{3 * time.Minute, "✻ Running go test ./... (25m 05s · esc to interrupt)\n"},
+			} {
+				f.srv.SetScreen(f.worker, step.screen)
+				f.now = f.now.Add(step.dt)
+				f.eng.passProject(ctx, f.id, false)
+			}
+
+			if n := f.interruptsSince(reqsBefore); n != 0 {
+				t.Fatalf("interrupts while fresh descendant running = %d, want 0", n)
+			}
+			if execCalls.Load() == 0 {
+				t.Fatalf("expected child process probe via hc exec, got 0 calls")
+			}
+			got := f.run(t)
+			if got == nil || got.State != flow.PhaseWorking || !got.InterruptedAt.IsZero() {
+				t.Fatalf("worker run = %+v, want working and not interrupted", got)
+			}
+			if !got.LastActivity.Equal(f.now) {
+				t.Fatalf("LastActivity = %v, want %v", got.LastActivity, f.now)
+			}
+		})
+	}
+}
