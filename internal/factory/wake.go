@@ -26,7 +26,13 @@ func holdWake(s *flow.State, ti int, row, why, ask string, f flow.Facts, bin str
 	if k == "worker_failed" || strings.HasPrefix(k, "reviewer_failed@") {
 		why += fmt.Sprintf("; run `%s factory task retry %s --why \"<why>\"`", bin, t.ID)
 	}
-	s.Project.Wakes = append(s.Project.Wakes, flow.Wake{Key: k, Task: t.ID, Why: row + ": " + why, Facts: taskFacts(t, f, now), At: now})
+	facts := taskFacts(t, f, now)
+	if rc := flow.OpenRecap(t); rc != nil && (rc.Trigger == flow.TriggerOwnerNo || rc.Trigger == flow.TriggerReview) {
+		if words := flow.LatestOwnerGateAnswer(s.Asks, t.ID); words != "" {
+			facts += fmt.Sprintf("; owner answered %q", words)
+		}
+	}
+	s.Project.Wakes = append(s.Project.Wakes, flow.Wake{Key: k, Task: t.ID, Why: row + ": " + why, Facts: facts, At: now})
 	return "wake held for the coordinator"
 }
 
@@ -124,7 +130,7 @@ func coordSummary(s flow.State, bin string, heartbeat bool) string {
 			continue
 		}
 		if len(ls) < maxFactsWakes {
-			st, why := taskStageWhy(t, s.Tasks, s.Settings, s.Project.Started)
+			st, why := taskStageWhy(t, s.Tasks, s.Asks, s.Settings, s.Project.Started)
 			ls = append(ls, fmt.Sprintf("- %s (%s): %s — %s\n", t.ID, st, cmp.Or(t.LastRow, "-"), cmp.Or(why, st)))
 		}
 	}

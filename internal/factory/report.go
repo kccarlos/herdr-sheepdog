@@ -550,6 +550,8 @@ func (o *planOutcome) UnmarshalJSON(data []byte) error {
 type planTask struct {
 	ID        string                      `json:"id"`
 	Title     string                      `json:"title"`
+	Kind      string                      `json:"kind"`
+	Gate      string                      `json:"gate"`
 	Brief     string                      `json:"brief"`
 	ForWhom   string                      `json:"for_whom"`
 	IfSkipped string                      `json:"if_skipped"`
@@ -702,6 +704,13 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, s
 		fails = append(fails, oFails...)
 		t.Priority, pFails = checkPriority(t.ID, t.Priority)
 		fails = append(fails, pFails...)
+		t.Kind, t.Gate = strings.TrimSpace(t.Kind), strings.TrimSpace(t.Gate)
+		if t.Kind != "" && t.Kind != flow.TaskKindDesign {
+			fails = append(fails, fmt.Sprintf("shape: task %q has unknown kind %q (use %q or omit)", t.ID, t.Kind, flow.TaskKindDesign))
+		}
+		if t.Gate != "" && t.Gate != flow.GateOwner {
+			fails = append(fails, fmt.Sprintf("shape: task %q has unknown gate %q (use %q or omit)", t.ID, t.Gate, flow.GateOwner))
+		}
 		fails = append(fails, checkEstimate(t.ID, t.Estimate, s.TaskSizeLimit)...)
 		if err := flow.ValidateCandidates("request", t.Request); err != nil {
 			fails = append(fails, fmt.Sprintf("shape: task %q %s", t.ID, err))
@@ -724,7 +733,7 @@ func checkPlanWith(raw json.RawMessage, existing []flow.Task, parentID string, s
 		}
 		after[t.ID] = t.After
 		tasks[i] = flow.Task{
-			ID: t.ID, Title: flow.CleanText(t.Title), Brief: t.Brief,
+			ID: t.ID, Title: flow.CleanText(t.Title), Kind: t.Kind, Gate: t.Gate, Brief: t.Brief,
 			ForWhom: flow.CleanText(t.ForWhom), IfSkipped: flow.CleanText(t.IfSkipped),
 			Smallest: flow.CleanText(t.Smallest), NotDoing: flow.CleanText(t.NotDoing),
 			Outcomes: outcomes[i], After: t.After, Priority: t.Priority, EstimateLines: t.Estimate, Request: t.Request, SplitFrom: parentID, Attempts: []flow.Attempt{},

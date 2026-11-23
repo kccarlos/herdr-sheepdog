@@ -406,7 +406,7 @@ There is no queue. N10's "a slot is free" is decided by one pure function over a
 | N23 with the worker idle | `idle` | — |
 | N16, N20–N23, N26–N29, N32, N39 | `working` | "Working · model · round 1 of 2", "Checking 3 outcomes" |
 
-Stage is a field of each task row; `GraphViewOf` and `StatusViewOf` read it from the task's last matched row (with ended and parked taking precedence, and a stored-state fallback only before any row has matched), share the same why line, and do not yet emit `idle` (N23 with an idle worker) or `owner_answer`/`owner_gate`.
+Stage is a field of each task row; `GraphViewOf`, `StatusViewOf` and `ProjectsView` emit `owner_gate` (for an open `gate` ask) or `owner_answer` (for any other open gated owner ask, even on an ended task) with the ask's question as the why line, otherwise read the stage from the task's last matched row (with ended and parked taking precedence, and a stored-state fallback only before any row has matched), share the same why line, and do not yet emit `idle` (N23 with an idle worker). Until slice 12 brings `retros[]`, N24 reads a minimal `had_retro` mark on `split_from`.
 
 ## 5. The run table
 

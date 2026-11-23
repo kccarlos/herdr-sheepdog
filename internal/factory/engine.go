@@ -445,7 +445,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		setFlag(&e.hcUnavail, id, unavail)
 		e.reconcileAlertLocked(id, &s, flow.AlertHCUnavailable, unavail, flow.Alert{Kind: flow.AlertHCUnavailable, Cause: cmp.Or(flow.CleanErr(errText(hcErr)), "herdr-core is unreachable"), At: e.now()}, "alert", "")
 	}
-	granted := flow.GrantSlots(candidates, s.Tasks, flow.RunningTasks(s.Tasks, workerState), s.Settings.MaxRunning)
+	granted := flow.GrantSlots(candidates, s.Tasks, flow.RunningTasks(s.Tasks, workerState), s.Settings.MaxRunning, s.Asks...)
 	for _, tid := range poolHeld {
 		granted[tid] = true
 	}
@@ -1238,9 +1238,12 @@ var taskExecutors = map[string]taskExec{
 	flow.AskStopReview:   (*Engine).execStopReviewer,
 	flow.AskTellFindings: (*Engine).execTellFindings,
 	flow.AskOpenRecap:    (*Engine).execOpenRecap,
+	flow.AskOwnerNoRecap: (*Engine).execOwnerNoRecap,
 	flow.AskSizeRecap:    (*Engine).execSizeRecap,
 	flow.AskCIRecap:      (*Engine).execCIRecap,
 	flow.AskTimeRecap:    (*Engine).execTimeRecap,
+	flow.AskOpenN24:      (*Engine).execOpenN24Ask,
+	flow.AskOpenGate:     (*Engine).execOpenGateAsk,
 	flow.AskTellStop:     (*Engine).execTellStop,
 	flow.AskTellDiverged: (*Engine).execTellDiverged,
 	flow.AskTellConflict: (*Engine).execTellConflict,
@@ -1277,7 +1280,7 @@ func actOutage(verb string, f flow.Facts, err error) bool {
 	switch verb {
 	case flow.AskNewAttempt, flow.AskPushPR, flow.AskRerunCI, flow.AskDispatchCI, flow.AskUpdateBranch, flow.AskMerge:
 		return f.GitHubUnavailable
-	case flow.AskStartWorker, flow.AskStartReview, flow.AskNudgeReview, flow.AskStopReview, flow.AskTellFindings, flow.AskTellStop, flow.AskTellDiverged, flow.AskTellConflict, flow.AskTellCI, flow.AskTellBaseRed, flow.AskStopRuns, flow.AskStopCoordinator, flow.AskOpenRecap, flow.AskSizeRecap, flow.AskCIRecap, flow.AskTimeRecap:
+	case flow.AskStartWorker, flow.AskStartReview, flow.AskNudgeReview, flow.AskStopReview, flow.AskTellFindings, flow.AskTellStop, flow.AskTellDiverged, flow.AskTellConflict, flow.AskTellCI, flow.AskTellBaseRed, flow.AskStopRuns, flow.AskStopCoordinator, flow.AskOpenRecap, flow.AskOwnerNoRecap, flow.AskSizeRecap, flow.AskCIRecap, flow.AskTimeRecap:
 		return f.HCUnavailable
 	case flow.AskCleanup:
 		return f.GitHubUnavailable || f.HCUnavailable
@@ -1305,6 +1308,11 @@ func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State
 	// An ended task needs no facts (N1 matches first), and cleanup may
 	// have removed its worktree.
 	task := s.Tasks[ti]
+	if task.SplitFrom != "" {
+		if pi := slices.IndexFunc(s.Tasks, func(p flow.Task) bool { return p.ID == task.SplitFrom }); pi >= 0 {
+			facts.SplitFromHadRetro = s.Tasks[pi].HadRetro
+		}
+	}
 	oa := flow.OpenAttempt(task)
 	if oa != nil && !flow.Ended(task) {
 		a := *oa
@@ -1357,7 +1365,10 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 		facts.BaseRedSpell, facts.BaseRedWoken = "", false
 	}
 	task, now := s.Tasks[ti], e.now()
-	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: task, Settings: s.Settings, Facts: facts, Now: now})
+	if !flow.Ended(task) {
+		e.cancelStaleGateAsksLocked(id, s, ti, now)
+	}
+	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: task, Settings: s.Settings, Facts: facts, Asks: s.Asks, Now: now})
 	e.reconcileCIStalledLocked(id, s, task, r.ID, facts, now)
 	rowChanged := s.Tasks[ti].LastRow != r.ID
 	s.Tasks[ti].LastRow = r.ID
@@ -1391,6 +1402,10 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 	}
 	var decs []string
 	whys := []string{d.Why}
+	asksBefore := make([]string, len(s.Asks))
+	for ai, a := range s.Asks {
+		asksBefore[ai] = a.Status
+	}
 	act := func(k, res, cls, errText string, uncounted bool) { // an outcome replaces the intent or prior uncounted try
 		acts := &s.Tasks[ti].Acts
 		if oa := flow.OpenAttempt(s.Tasks[ti]); oa != nil {
@@ -1474,6 +1489,13 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 		}
 	}
 	e.commitLogLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: facts, Rule: r.ID, Asked: d.Asked, Decision: strings.Join(decs, "; "), Why: strings.Join(whys, "; ")})
+	for ai, a := range s.Asks {
+		if ai >= len(asksBefore) {
+			e.notifyChangeLocked(id, s.Seq, Change{Kind: flow.EvAskOpen, AskID: a.ID, Task: a.Task})
+		} else if asksBefore[ai] != a.Status && a.Status == flow.AskStatusCancelled {
+			e.notifyChangeLocked(id, s.Seq, Change{Kind: flow.EvAskCancel, AskID: a.ID, Task: a.Task})
+		}
+	}
 }
 
 // readTipLocked reads the changed lines at tip and whether it is ahead of H
@@ -2098,6 +2120,11 @@ func (e *Engine) execTellFindings(ctx context.Context, id string, s *flow.State,
 // (allowed split, new, drop: never continue after a review trigger).
 func (e *Engine) execOpenRecap(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	return e.openRecapLocked(ctx, id, s, ti, flow.TriggerReview, []string{"split", "new", "drop"})
+}
+
+// execOwnerNoRecap is N30: open an owner_no recap (allowed split, new, drop).
+func (e *Engine) execOwnerNoRecap(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	return e.openRecapLocked(ctx, id, s, ti, flow.TriggerOwnerNo, []string{"split", "new", "drop"})
 }
 
 // execSizeRecap is N12: open a size recap with the choices it allows now.

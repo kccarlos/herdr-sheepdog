@@ -32,17 +32,21 @@ func (e *Engine) Changes() <-chan Change {
 	return ch
 }
 
-func (e *Engine) commitChangeLocked(id string, s *flow.State, l LogLine, c Change) error {
-	if err := e.commitLocked(id, s, l); err != nil {
-		return err
-	}
-	c.Project, c.Seq = id, s.Seq
+func (e *Engine) notifyChangeLocked(id string, seq int64, c Change) {
+	c.Project, c.Seq = id, seq
 	for _, ch := range e.changeSubs {
 		select {
 		case ch <- c:
 		default:
 		}
 	}
+}
+
+func (e *Engine) commitChangeLocked(id string, s *flow.State, l LogLine, c Change) error {
+	if err := e.commitLocked(id, s, l); err != nil {
+		return err
+	}
+	e.notifyChangeLocked(id, s.Seq, c)
 	return nil
 }
 
@@ -189,6 +193,12 @@ func (e *Engine) answerAskLocked(id string, s *flow.State, ai int, option, why, 
 		appendWake(s, next.Task, "ask_answer:"+next.ID, fmt.Sprintf("%s: %s answered %s (%s)", row, next.AnsweredBy, next.ID, next.Kind), msg, now)
 	}
 	s.Asks[ai] = next
+	if next.Kind == flow.KindGate && next.AnsweredBy == owner && strings.Contains(strings.ToLower(next.Answer), "drop") &&
+		(next.AskedBy == "N24" || strings.HasPrefix(strings.ToLower(strings.TrimSpace(next.Answer)), "drop")) {
+		if ti := slices.IndexFunc(s.Tasks, func(t flow.Task) bool { return t.ID == next.Task }); ti >= 0 && !flow.Ended(s.Tasks[ti]) {
+			s.Tasks[ti].Dropped = &flow.Dropped{Why: "owner chose " + next.Answer}
+		}
+	}
 	return e.commitChangeLocked(id, s, LogLine{By: next.AnsweredBy, Task: next.Task, Input: input, Rule: row, Asked: dec.Asked, Decision: "answered " + next.ID, Why: next.Answer}, Change{Kind: "ask_answer", AskID: next.ID, Task: next.Task})
 }
 
@@ -212,4 +222,71 @@ func openTaskAttempt(tasks []flow.Task, taskID string) *flow.Attempt {
 		return flow.OpenAttempt(tasks[i])
 	}
 	return nil
+}
+
+func (e *Engine) openRuleAskLocked(id string, s *flow.State, ti int, rule, question string, options []string, recommend string, now time.Time) (string, bool, error) {
+	t := s.Tasks[ti]
+	h := ""
+	if a := flow.OpenAttempt(t); a != nil {
+		h = flow.H(*a)
+	}
+	ask, code, why := flow.ValidateAsk(flow.Ask{
+		Kind: flow.KindGate, Task: t.ID, Question: flow.CapRunes(flow.CleanText(question), flow.MaxAskQuestionLen),
+		Options: options, Recommend: recommend,
+	})
+	if code != "" {
+		return "", false, errors.New(code + ": " + why)
+	}
+	ask.ID, ask.Project, ask.Folder, ask.Head, ask.AskedBy = fmt.Sprintf("ask-%s-%d-%d", id, s.Seq+1, len(s.Asks)+1), id, s.Project.Folder, h, rule
+	ask, _, _ = flow.StepAsk(ask, flow.AskEvent{Kind: flow.EvAskOpen}, now)
+	s.Asks = append(s.Asks, ask)
+	return "opened owner gate ask " + ask.ID, false, nil
+}
+
+func (e *Engine) execOpenGateAsk(_ context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	t := s.Tasks[ti]
+	h := ""
+	if a := flow.OpenAttempt(t); a != nil {
+		h = flow.H(*a)
+	}
+	q := fmt.Sprintf("Approve task %s (%s) at %s?", t.ID, t.Title, h[:min(len(h), 7)])
+	return e.openRuleAskLocked(id, s, ti, "N31", q, []string{"Yes, merge", "No, hold"}, "Yes, merge", e.now())
+}
+
+func (e *Engine) execOpenN24Ask(_ context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	t := s.Tasks[ti]
+	q := fmt.Sprintf("Task %s (split from %s after retro) hit review recap — drop it, or tell me how to go on?", t.ID, t.SplitFrom)
+	return e.openRuleAskLocked(id, s, ti, "N24", q, []string{"Drop task", "Continue to coordinator recap"}, "Drop task", e.now())
+}
+
+// cancelStaleGateAsksLocked cancels any open gate ask for task ti whose Head
+// no longer covers H (design.md 7.1).
+func (e *Engine) cancelStaleGateAsksLocked(id string, s *flow.State, ti int, now time.Time) {
+	t := s.Tasks[ti]
+	att := flow.OpenAttempt(t)
+	for ai := range s.Asks {
+		a := s.Asks[ai]
+		if a.Task != t.ID || a.Kind != flow.KindGate || a.Status != flow.AskStatusOpen || a.Head == "" {
+			continue
+		}
+		if att != nil && flow.Covers(*att, a.Head, flow.H(*att)) {
+			continue
+		}
+		next, row, dec := flow.StepAsk(a, flow.AskEvent{Kind: flow.EvAskCancel}, now)
+		s.Asks[ai] = next
+		_ = e.commitChangeLocked(id, s, LogLine{By: "engine", Task: t.ID, Rule: row, Asked: dec.Asked, Decision: "cancelled stale gate ask " + next.ID, Why: "H moved past " + a.Head}, Change{Kind: flow.EvAskCancel, AskID: next.ID, Task: t.ID})
+	}
+}
+
+// cancelTaskDecisionAsksLocked cancels taskID's open decision asks while
+// keeping its gated owner asks alive (N1, design.md 4.1, 7.1, KB-ASK-10).
+func cancelTaskDecisionAsks(s *flow.State, taskID string, now time.Time) int {
+	n := 0
+	for ai := range s.Asks {
+		if a := s.Asks[ai]; a.Task == taskID && a.Kind == flow.KindDecision && a.Status == flow.AskStatusOpen {
+			s.Asks[ai], _, _ = flow.StepAsk(a, flow.AskEvent{Kind: flow.EvAskCancel}, now)
+			n++
+		}
+	}
+	return n
 }
