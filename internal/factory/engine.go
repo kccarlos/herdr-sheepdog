@@ -366,9 +366,19 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		if a := flow.OpenAttempt(*t); a != nil && !flow.Ended(*t) && (a.RunID != "" || a.Run != nil && a.Run.State == flow.PhaseEnded) {
 			wasWorking := a.Run != nil && a.Run.State == flow.PhaseWorking
 			hcChecked = hcChecked || a.RunID != "" && (a.Run == nil || a.Run.State != flow.PhaseEnded)
+			var prevHeld, prevRunHeld []string
+			if !t.Parked && e.HC != nil && a.RunID != "" && len(a.Held) > 0 && a.Run != nil && a.Run.State != flow.PhaseEnded && !a.Run.HandoffSent {
+				prevHeld, prevRunHeld = a.Held, a.Run.Held
+				a.Run.Held, a.Held = appendHeld(slices.Clone(a.Run.Held), a.Held...), nil
+			}
 			r, rerr := e.advanceRunLocked(ctx, id, t.ID, &s, a.RunID, flow.RoleWorker, "claude", &a.Run)
 			hcErr = cmp.Or(hcErr, rerr)
 			save := false
+			if rerr != nil && len(prevHeld) > 0 {
+				a.Held, a.Run.Held = prevHeld, prevRunHeld
+			} else if len(prevHeld) > 0 && len(a.Run.Held) > 0 {
+				save = true
+			}
 			if dt > 0 && rerr == nil && wasWorking {
 				a.Working += dt
 				save = true
