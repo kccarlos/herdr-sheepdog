@@ -16,6 +16,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
 type fakeFactoryProject struct {
@@ -269,8 +270,13 @@ func TestFactoryVoiceBareWordsNeverAnswerAskAndDisplacementRailHolds(t *testing.
 	h.addAgent(authPane, "auth", "codex", herdr.StateWorking)
 	h.addAgent(docsPane, "docs", "codex", herdr.StateWorking)
 	h.block(authPane, "codex-approval-prompt.screen.txt")
-	authLine := h.lastPushText()
-	h.speak(authLine)
+	ap, ok := h.pending()
+	if !ok || ap.SpokenSummary == "" {
+		t.Fatalf("auth pending = %+v, want non-empty spoken summary", ap)
+	}
+	h.sup.OnVoiceEvent(voice.EventPush{Text: ap.SpokenSummary, Urgency: voice.UrgencyIdle, PendingID: ap.ID})
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: ap.SpokenSummary, Final: true})
+	h.sup.OnVoiceEvent(voice.EventTurnComplete{})
 	h.clock.Advance(time.Second)
 
 	// docs blocks unannounced (displacing the pending slot while auth remains told in s.told),
