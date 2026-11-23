@@ -1012,3 +1012,262 @@ func TestOverrideN19bDoesNotSpendGreenOverrideWhenChecksUnread(t *testing.T) {
 		t.Fatalf("after PR.ChecksUnread clears to green: got (%s, %v), want (N19, [record_accept@c1 merge@c1])", r3.ID, d3.Asked)
 	}
 }
+
+// TestOverrideHoldAtN36WhenN19AndN19bDefer checks review round 2 (Carbon Major 1;
+// design.md 4.3b, 4.6 L1, 4.7 N30–N38/N43, 7.3; KB-ASK-16, KB-GIT-20, KB-MRG-9,
+// KB-MRG-10): when overrideCovers holds on an open PR and N19/N19b defer because
+// GitHub is unavailable (!answered || GitHubUnavailable), workflow runs could not
+// be read (PR.ChecksUnread), or PR.Head != H with unknown HeadRel (""), the task
+// must hold quietly at N36 (Asked == nil) rather than falling into N23, N30/N31,
+// N33/N34/N38, or N43.
+func TestOverrideHoldAtN36WhenN19AndN19bDefer(t *testing.T) {
+	outage := func(in *In) {
+		in.Facts.PR.Answered = false
+		in.Facts.PR.Checks = ChecksUnreadable
+		in.Facts.GitHubUnavailable = true
+	}
+	unreadAbsent := func(in *In) {
+		in.Facts.PR.Answered = true
+		in.Facts.GitHubUnavailable = false
+		in.Facts.PR.Checks = ChecksAbsent
+		in.Facts.PR.ChecksUnread = true
+	}
+
+	// Sub-scenario 1: gate: owner / design_gate: owner / prior GateOptionHold
+	// during GitHub outage or PR.ChecksUnread holds at N36 without opening an
+	// orphaned KindGate card at N31 or an owner_no recap at N30, then merges at
+	// N19 once GitHub recovers.
+	t.Run("gate_owner_and_owner_no_hold_at_N36_not_N30_or_N31", func(t *testing.T) {
+		holdNo := func(in *In) {
+			in.Asks = []Ask{answeredN31Ask("ask-hold-prev", "t", "c1", GateOptionHold, now.Add(-2*time.Minute))}
+		}
+		cases := []struct {
+			name string
+			in   In
+		}{
+			{
+				name: "gate_owner_during_github_outage",
+				in:   with(noRounds, gateOwnerTask, withOverride("c1", ChecksPending, false), outage),
+			},
+			{
+				name: "gate_owner_during_checks_unread",
+				in:   with(noRounds, gateOwnerTask, withOverride("c1", ChecksPending, false), unreadAbsent),
+			},
+			{
+				name: "design_gate_owner_during_github_outage",
+				in:   with(noRounds, designTask, designGateOn, withOverride("c1", ChecksPending, false), outage),
+			},
+			{
+				name: "owner_no_prior_hold_during_github_outage",
+				in:   with(noRounds, gateOwnerTask, holdNo, withOverride("c1", ChecksPending, false), outage),
+			},
+			{
+				name: "owner_no_prior_hold_during_checks_unread",
+				in:   with(noRounds, gateOwnerTask, holdNo, withOverride("c1", ChecksPending, false), unreadAbsent),
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				r, d := FirstMatch(TaskRows, tc.in)
+				if r.ID != "N36" || len(d.Asked) != 0 {
+					t.Fatalf("FirstMatch = (%s, asked=%v, why=%q), want (N36, nil) without N30/N31 asks", r.ID, d.Asked, d.Why)
+				}
+				recovered := tc.in
+				recovered.Facts.PR.Answered = true
+				recovered.Facts.GitHubUnavailable = false
+				recovered.Facts.PR.ChecksUnread = false
+				recovered.Facts.PR.Checks = ChecksPending
+				r2, d2 := FirstMatch(TaskRows, recovered)
+				if r2.ID != "N19" || !slices.Equal(d2.Asked, []string{"record_accept@c1", "merge@c1"}) {
+					t.Fatalf("after recovery: got (%s, %v), want (N19, [record_accept@c1 merge@c1])", r2.ID, d2.Asked)
+				}
+			})
+		}
+	})
+
+	// Sub-scenario 2: PR.ChecksUnread on ChecksRed / ChecksStopped* / BaseRed+Behind
+	// or an unreported worktree commit (tipAhead with ended worker) holds at N36
+	// with Asked == nil rather than falling into N33, N34, N38, or N23 (or firing
+	// N36's own ci_stalled / behind_unknown wakes).
+	t.Run("checks_unread_and_outage_hold_at_N36_not_N23_N33_N34_or_N38", func(t *testing.T) {
+		endedWorker := func(in *In) {
+			in.Facts.Worker = Run{State: RunGone}
+			a0(in).Run = &RunRecord{State: PhaseEnded, Result: EndExited}
+		}
+		cases := []struct {
+			name string
+			in   In
+		}{
+			{
+				name: "checks_unread_on_red_override_past_grace_does_not_hit_N33_tell_worker_ci",
+				in: with(noRounds, red, withOverride("c1", ChecksRed, false), func(in *In) {
+					in.Settings.FlakeReruns = 0
+					in.Facts.PR.ChecksUnread = true
+					in.Facts.PR.Failed = []Failure{{Run: "42", Job: "100"}}
+					in.Now = now.Add(time.Hour)
+				}),
+			},
+			{
+				name: "checks_unread_on_stopped_timeout_override_does_not_hit_N34",
+				in: with(noRounds, withOverride("c1", ChecksRed, false), func(in *In) {
+					in.Facts.PR.Checks = ChecksStoppedTimeout
+					in.Facts.PR.ChecksUnread = true
+				}),
+			},
+			{
+				name: "checks_unread_on_stopped_external_override_past_grace_does_not_hit_N34",
+				in: with(noRounds, withOverride("c1", ChecksRed, false), func(in *In) {
+					in.Settings.FlakeReruns = 0
+					in.Facts.PR.Checks = ChecksStoppedExternal
+					in.Facts.PR.ChecksUnread = true
+					in.Now = now.Add(time.Hour)
+				}),
+			},
+			{
+				name: "checks_unread_with_base_red_past_main_red_minutes_does_not_hit_N38",
+				in: with(noRounds, behind, unreadAbsent, withOverride("c1", ChecksGreen, false), func(in *In) {
+					in.Facts.BaseRed = true
+					in.Facts.BaseRedSpell = "base-red-1"
+					in.Facts.BaseRedSince = now
+					in.Now = now.Add(time.Duration(DefaultSettings().MainRedMinutes)*time.Minute + time.Minute)
+				}),
+			},
+			{
+				name: "unreported_tip_and_ended_worker_during_outage_does_not_hit_N23",
+				in:   with(noRounds, tipAheadF, endedWorker, withOverride("c1", ChecksGreen, false), outage),
+			},
+			{
+				name: "unreported_tip_and_ended_worker_during_checks_unread_does_not_hit_N23",
+				in:   with(noRounds, tipAheadF, endedWorker, withOverride("c1", ChecksGreen, false), unreadAbsent),
+			},
+			{
+				name: "checks_unread_past_grace_with_behind_unknown_does_not_wake_at_N36",
+				in: with(noRounds, behindUnkn, unreadAbsent, withOverride("c1", ChecksGreen, false), func(in *In) {
+					in.Now = now.Add(time.Hour)
+				}),
+			},
+			{
+				name: "checks_unread_with_pending_past_ci_stalled_does_not_wake_at_N36",
+				in: with(noRounds, pending, withOverride("c1", ChecksPending, false), func(in *In) {
+					in.Facts.PR.ChecksUnread = true
+					a0(in).PendingChecks = &PendingChecks{Head: "c1", Since: now}
+					in.Now = now.Add(time.Duration(DefaultSettings().CIStalledMinutes)*time.Minute + time.Minute)
+				}),
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				r, d := FirstMatch(TaskRows, tc.in)
+				if r.ID != "N36" || len(d.Asked) != 0 {
+					t.Fatalf("FirstMatch = (%s, asked=%v, why=%q), want (N36, nil)", r.ID, d.Asked, d.Why)
+				}
+			})
+		}
+	})
+
+	// Sub-scenario 3: PR.Head != H with unknown HeadRel ("") holds at N36 with
+	// Asked == nil rather than falling through to N43 (no_rule_matched) or
+	// hitting N23 / N31.
+	t.Run("unknown_HeadRel_with_prHeadNotH_holds_at_N36_not_N43", func(t *testing.T) {
+		unknownHeadRel := func(in *In) {
+			in.Facts.PR.Head, in.Facts.PR.HeadRel = "ext2", ""
+		}
+		cases := []struct {
+			name string
+			in   In
+		}{
+			{
+				name: "green_checks_unknown_HeadRel",
+				in:   with(noRounds, unknownHeadRel, withOverride("c1", ChecksGreen, false)),
+			},
+			{
+				name: "red_checks_unknown_HeadRel",
+				in:   with(noRounds, red, unknownHeadRel, withOverride("c1", ChecksRed, false)),
+			},
+			{
+				name: "gate_owner_and_unreported_tip_unknown_HeadRel",
+				in:   with(noRounds, gateOwnerTask, tipAheadF, unknownHeadRel, withOverride("c1", ChecksGreen, false)),
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				r, d := FirstMatch(TaskRows, tc.in)
+				if r.ID != "N36" || len(d.Asked) != 0 {
+					t.Fatalf("FirstMatch = (%s, asked=%v, why=%q), want (N36, nil)", r.ID, d.Asked, d.Why)
+				}
+			})
+		}
+	})
+}
+
+// TestOpenOverrideAskTargetsHoldAtN31BeforeN42 checks review round 2 (Hydrogen
+// Major 1 / Carbon Major 2; design.md 4.7 N31/N42, 7.1; KB-ASK-13, KB-ASK-15):
+// an open KindOverride ask stores its covered tasks in Ask.Targets (Ask.Task == ""),
+// which counts as an open owner ask for each targeted task so N31 holds before
+// N42 without auto-merging and without opening a duplicate KindGate card on
+// gate: owner tasks.
+func TestOpenOverrideAskTargetsHoldAtN31BeforeN42(t *testing.T) {
+	openOvrCard := Ask{
+		ID:        "ask-ovr-open",
+		Project:   "proj-1",
+		Kind:      KindOverride,
+		Gated:     true,
+		Question:  "Merge T1, T2 now without waiting for CI or review?",
+		Options:   []string{OverrideOptionMerge, OverrideOptionCancel},
+		Recommend: OverrideOptionCancel,
+		Targets: []OverrideTarget{
+			{Task: "T1", PR: 7, Head: "c1", Checks: ChecksPending},
+			{Task: "T2", PR: 8, Head: "c1", Checks: ChecksGreen},
+		},
+		AskedBy: RoleCoordinator,
+		Status:  AskStatusOpen,
+		At:      now.Add(-time.Minute),
+	}
+	n42 := rowByID("N42")
+
+	// 1. Non-gated target T2 with 2 passing reviews + green CI holds at N31 (Asked == nil) instead of merging at N42.
+	t.Run("non_gated_target_holds_at_N31_not_N42", func(t *testing.T) {
+		inT2 := with(func(in *In) {
+			in.Task.ID = "T2"
+			in.Asks = []Ask{openOvrCard}
+		})
+		if n42.When(inT2) {
+			t.Errorf("N42.When(T2) = true while open override card names T2 in Ask.Targets, want false (noOpenOwnerAsk)")
+		}
+		if r, d := FirstMatch(TaskRows, inT2); r.ID != "N31" || len(d.Asked) != 0 {
+			t.Fatalf("FirstMatch = (%s, %v), want (N31, nil)", r.ID, d.Asked)
+		}
+	})
+
+	// 2. gate: owner target T2 holds at N31 without opening a second concurrent KindGate ask.
+	t.Run("gate_owner_target_holds_at_N31_without_duplicate_gate_ask", func(t *testing.T) {
+		inGatedT2 := with(gateOwnerTask, func(in *In) {
+			in.Task.ID = "T2"
+			in.Asks = []Ask{openOvrCard}
+		})
+		if r, d := FirstMatch(TaskRows, inGatedT2); r.ID != "N31" || len(d.Asked) != 0 {
+			t.Fatalf("FirstMatch = (%s, %v), want (N31, nil) without duplicate open_gate_ask", r.ID, d.Asked)
+		}
+	})
+
+	// 3. Unlisted task T3 and answered-No override cards are not held at N31.
+	t.Run("unlisted_or_closed_override_card_does_not_hold_at_N31", func(t *testing.T) {
+		inT3 := with(func(in *In) {
+			in.Task.ID = "T3"
+			in.Asks = []Ask{openOvrCard}
+		})
+		if r, d := FirstMatch(TaskRows, inT3); r.ID != "N42" || !slices.Equal(d.Asked, []string{"record_accept@c1", "merge@c1"}) {
+			t.Fatalf("unlisted T3: FirstMatch = (%s, %v), want (N42, [record_accept@c1 merge@c1])", r.ID, d.Asked)
+		}
+
+		answeredNo := openOvrCard
+		answeredNo.Status, answeredNo.Answer, answeredNo.AnsweredBy, answeredNo.AnsweredAt = AskStatusAnswered, OverrideOptionCancel, "owner", now
+		inAfterNo := with(func(in *In) {
+			in.Task.ID = "T2"
+			in.Asks = []Ask{answeredNo}
+		})
+		if r, d := FirstMatch(TaskRows, inAfterNo); r.ID != "N42" || !slices.Equal(d.Asked, []string{"record_accept@c1", "merge@c1"}) {
+			t.Fatalf("after override card answered No: FirstMatch = (%s, %v), want (N42, [record_accept@c1 merge@c1])", r.ID, d.Asked)
+		}
+	})
+}

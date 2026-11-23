@@ -847,3 +847,177 @@ func TestOverrideN15PROnOtherBaseWakeAndTaskRetry(t *testing.T) {
 		t.Fatalf("expected N15 pr_other_base wake text, got:\n%s", wakeWords.String())
 	}
 }
+
+// TestOpenOverrideAskTargetsHoldAtN31AndShowOwnerAnswerInView checks review
+// round 2 (Hydrogen Major 1 / Carbon Major 2; design.md 4.7 N31/N42, 4.11, 7.1;
+// KB-ASK-13, KB-ASK-15):
+//   - GraphViewOf, StatusViewOf, and ProjectsView treat an open KindOverride
+//     ask whose Targets name a task as an open gated owner ask for that task,
+//     reporting stage "owner_answer" with the card's question (while keeping
+//     "owner_gate" when an open KindGate ask also names the task, and ignoring
+//     unlisted or closed override asks).
+//   - In an engine history where the coordinator opens an override card for
+//     ["T1", "T2"] and both tasks pass two reviews before the owner answers,
+//     w.pass() holds non-gated T2 at N31 (0 merges, never N42) and holds
+//     gate: owner T1 at N31 without opening a second concurrent KindGate card;
+//     once the owner taps "No, wait", T2 merges via N42 and T1 opens its N31
+//     KindGate card.
+func TestOpenOverrideAskTargetsHoldAtN31AndShowOwnerAnswerInView(t *testing.T) {
+	t.Parallel()
+
+	t.Run("view_stage_owner_answer_and_kind_gate_precedence_for_override_targets", func(t *testing.T) {
+		t.Parallel()
+		t0 := time.Date(2026, 11, 23, 14, 0, 0, 0, time.UTC)
+		const ovrQ = "Merge T-ovr, T-both, T-done now without waiting for CI or review?"
+		st := flow.State{
+			Settings: flow.DefaultSettings(),
+			Project:  flow.Project{ID: "proj-ovr-open", Folder: "/tmp/ovr-open", Started: true},
+			Tasks: []flow.Task{
+				{ID: "T-ovr", Title: "feat: open override target", LastRow: "N31", Attempts: []flow.Attempt{{BaseCommit: "b0", Ready: []flow.Ready{{Head: "c1"}}}}},
+				{ID: "T-both", Title: "feat: gate plus override", LastRow: "N31", Attempts: []flow.Attempt{{BaseCommit: "b0", Ready: []flow.Ready{{Head: "c2"}}}}},
+				{ID: "T-done", Title: "feat: done target", Done: &flow.Merged{MergedCommit: "m1"}, LastRow: "N1"},
+				{ID: "T-other", Title: "feat: unlisted", LastRow: "N23", Attempts: []flow.Attempt{{BaseCommit: "b0", RunID: "w-other"}}},
+			},
+			Asks: []flow.Ask{
+				{
+					ID: "a-ovr-open", Kind: flow.KindOverride, Gated: true, Question: ovrQ,
+					Options: []string{flow.OverrideOptionMerge, flow.OverrideOptionCancel}, Recommend: flow.OverrideOptionCancel,
+					Targets: []flow.OverrideTarget{
+						{Task: "T-ovr", PR: 7, Head: "c1", Checks: flow.ChecksPending},
+						{Task: "T-both", PR: 8, Head: "c2", Checks: flow.ChecksGreen},
+						{Task: "T-done", PR: 9, Head: "c3", Checks: flow.ChecksGreen},
+					},
+					Status: flow.AskStatusOpen, At: t0,
+				},
+				{
+					ID: "a-gate-open", Kind: flow.KindGate, Gated: true, Task: "T-both", Head: "c2",
+					Question: "Approve task T-both at c2?", Options: []string{flow.GateOptionMerge, flow.GateOptionHold},
+					Recommend: flow.GateOptionMerge, AskedBy: flow.AskedByN31, Status: flow.AskStatusOpen, At: t0,
+				},
+				{
+					ID: "a-ovr-closed", Kind: flow.KindOverride, Gated: true, Question: "Merge T-other now?",
+					Options: []string{flow.OverrideOptionMerge, flow.OverrideOptionCancel}, Recommend: flow.OverrideOptionCancel,
+					Targets:    []flow.OverrideTarget{{Task: "T-other", PR: 10, Head: "c4", Checks: flow.ChecksGreen}},
+					Status:     flow.AskStatusAnswered,
+					Answer:     flow.OverrideOptionCancel,
+					AnsweredBy: "owner", At: t0, AnsweredAt: t0,
+				},
+			},
+		}
+		logs := []LogLine{
+			{Seq: 1, At: t0, By: "engine", Task: "T-ovr", Rule: "N31", Why: "waiting on an open owner ask"},
+			{Seq: 2, At: t0, By: "engine", Task: "T-both", Rule: "N31", Why: "waiting on an open owner ask"},
+			{Seq: 3, At: t0, By: "engine", Task: "T-other", Rule: "N23", Why: "the worker is working"},
+		}
+
+		gv := GraphViewOf(st, logs)
+		byRef := map[string]TaskView{}
+		for _, tv := range gv.Tasks {
+			byRef[tv.Ref] = tv
+		}
+		sv := StatusViewOf(st, logs)
+		byID := map[string]TaskStatus{}
+		for _, ts := range sv {
+			byID[ts.ID] = ts
+		}
+
+		want := map[string]struct{ stage, why string }{
+			"T-ovr":   {"owner_answer", ovrQ},
+			"T-both":  {"owner_gate", "Approve task T-both at c2?"},
+			"T-done":  {"owner_answer", ovrQ},
+			"T-other": {"working", "Worker is working"},
+		}
+		for id, w := range want {
+			if tv := byRef[id]; tv.Stage != w.stage || tv.WhyWaiting != w.why {
+				t.Errorf("GraphViewOf[%s] = (stage=%q, why=%q), want (%q, %q)", id, tv.Stage, tv.WhyWaiting, w.stage, w.why)
+			}
+			if ts := byID[id]; ts.Stage != w.stage || ts.Stale {
+				t.Errorf("StatusViewOf[%s] = (stage=%q, why=%q, stale=%v), want stage=%q Stale=false", id, ts.Stage, ts.Why, ts.Stale, w.stage)
+			}
+		}
+		if byID["T-ovr"].Why != ovrQ {
+			t.Errorf("StatusViewOf[T-ovr].Why = %q, want %q", byID["T-ovr"].Why, ovrQ)
+		}
+		pv := ProjectsView([]flow.State{st})[0]
+		if pv.Counts["owner_answer"] != 2 || pv.Counts["owner_gate"] != 1 {
+			t.Errorf("ProjectsView Counts = %v, want owner_answer=2 owner_gate=1", pv.Counts)
+		}
+	})
+
+	t.Run("engine_open_override_card_holds_targets_at_N31_until_answered", func(t *testing.T) {
+		t.Parallel()
+		w, _, c1, c2 := setupTwoTaskOverrideWorld(t)
+
+		if err := w.eng.Report(w.coordTok, "ask", json.RawMessage(`{"kind":"override","tasks":["T1","T2"]}`)); err != nil {
+			t.Fatalf("coordinator override ask: %v", err)
+		}
+		ask := w.state().Asks[0]
+
+		// Immediately after opening the card, views must report stage owner_answer with the card's question.
+		gv0 := GraphViewOf(w.state(), nil)
+		for _, tid := range []string{"T1", "T2"} {
+			idx := slices.IndexFunc(gv0.Tasks, func(tv TaskView) bool { return tv.Ref == tid })
+			if idx < 0 || gv0.Tasks[idx].Stage != "owner_answer" || gv0.Tasks[idx].WhyWaiting != ask.Question {
+				t.Fatalf("GraphViewOf[%s] with open override card = %+v, want stage=owner_answer why=%q", tid, gv0.Tasks, ask.Question)
+			}
+		}
+
+		// Before the owner answers the override card, T1 (gate: owner) and T2 (no gate)
+		// both complete two passing review rounds with green CI.
+		writeGHFile(t, w.gh, "view-7.json", `{"number":7,"state":"OPEN","headRefOid":"`+c1+`","mergeable":"MERGEABLE","statusCheckRollup":`+greenRollup+`,"baseRefName":"main"}`)
+		w.edit(func(s *flow.State) {
+			s.Tasks[0].Gate = flow.GateOwner
+			s.Tasks[0].Attempts[0].Rounds = []flow.Round{
+				{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+				{N: 2, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+			}
+			s.Tasks[1].Attempts[0].Rounds = []flow.Round{
+				{N: 1, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass},
+				{N: 2, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass},
+			}
+		})
+
+		// Pass 1 while override card is still open:
+		// - T2 (no gate) must hold at N31 instead of auto-merging at N42;
+		// - T1 (gate: owner) must hold at N31 without opening a second KindGate card.
+		w.pass()
+		st := w.state()
+		if st.Tasks[1].LastRow != "N31" {
+			t.Fatalf("non-gated T2 LastRow with open override card = %q, want N31 (must not merge at N42)", st.Tasks[1].LastRow)
+		}
+		if st.Tasks[0].LastRow != "N31" {
+			t.Fatalf("gated T1 LastRow with open override card = %q, want N31", st.Tasks[0].LastRow)
+		}
+		if merges := ghCalls(t, w.gh, "pr merge"); len(merges) != 0 {
+			t.Fatalf("merged PR while override card was still unanswered: %v", merges)
+		}
+		if len(st.Asks) != 1 {
+			t.Fatalf("expected only the 1 open override card (no duplicate KindGate card on T1), got %+v", st.Asks)
+		}
+
+		sv, err := w.eng.ProjectStatus(st.Project.Folder)
+		if err != nil {
+			t.Fatalf("ProjectStatus: %v", err)
+		}
+		for _, ts := range sv {
+			if (ts.ID == "T1" || ts.ID == "T2") && (ts.Stage != "owner_answer" || ts.Why != ask.Question || ts.Stale) {
+				t.Errorf("ProjectStatus[%s] = %+v, want Stage=owner_answer Why=%q Stale=false", ts.ID, ts, ask.Question)
+			}
+		}
+
+		// Owner answers "No, wait" -> T2 is unblocked and merges via N42; T1 now opens its N31 KindGate card.
+		answerOwnerAsk(t, w.eng, ask.ID, flow.OverrideOptionCancel)
+		w.pass()
+		st = w.state()
+		if st.Tasks[1].LastRow != "N42" {
+			t.Fatalf("after override card answered No, T2 LastRow = %q, want N42", st.Tasks[1].LastRow)
+		}
+		merges := ghCalls(t, w.gh, "pr merge")
+		if len(merges) != 1 || !strings.Contains(merges[0], " 8 ") || !strings.Contains(merges[0], "--match-head-commit "+c2) {
+			t.Fatalf("after override card answered No, pr merge calls = %v, want 1 merge for PR #8 pinned to %s", merges, c2)
+		}
+		if len(st.Asks) != 2 || st.Asks[1].Kind != flow.KindGate || st.Asks[1].Task != "T1" || st.Asks[1].AskedBy != flow.AskedByN31 {
+			t.Fatalf("after override card answered No, expected N31 KindGate ask for T1, got %+v", st.Asks)
+		}
+	})
+}
