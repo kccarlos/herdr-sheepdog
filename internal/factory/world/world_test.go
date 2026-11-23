@@ -1,7 +1,6 @@
 package world
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,7 +20,8 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 )
 
-// TestClaudeArgvGolden checks KB-LCH-2, KB-LCH-4, KB-LCH-9, KB-LCH-11 across the three roles.
+// TestClaudeArgvGolden checks KB-LCH-2, KB-LCH-4, KB-LCH-9, KB-LCH-11 for
+// coordinator and worker launches (reviewers use ClaudeReviewerArgv).
 func TestClaudeArgvGolden(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -33,7 +33,6 @@ func TestClaudeArgvGolden(t *testing.T) {
 	}{
 		{"coordinator", flow.RoleCoordinator, "opus", "high", "bypassPermissions", "testdata/claude_coordinator.golden"},
 		{"worker", flow.RoleWorker, "sonnet", "high", "bypassPermissions", "testdata/claude_worker.golden"},
-		{"reviewer", flow.RoleReviewer, "opus", "high", "dontAsk", "testdata/claude_reviewer.golden"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -48,12 +47,13 @@ func TestClaudeArgvGolden(t *testing.T) {
 		})
 	}
 
-	// KB-LCH-2, KB-LCH-4: never launch with a missing model, effort, permission mode, or unknown role.
+	// KB-LCH-2, KB-LCH-4: never launch with a missing model, effort, permission mode, or non-worker/coordinator role.
 	for _, bad := range [][4]string{
 		{"unknown", "opus", "high", "plan"},
 		{flow.RoleCoordinator, "", "high", "bypassPermissions"},
 		{flow.RoleWorker, "sonnet", "", "bypassPermissions"},
-		{flow.RoleReviewer, "opus", "high", ""},
+		{flow.RoleWorker, "sonnet", "high", ""},
+		{flow.RoleReviewer, "opus", "high", "dontAsk"},
 	} {
 		if got := ClaudeArgv(bad[0], bad[1], bad[2], bad[3]); got != nil {
 			t.Errorf("ClaudeArgv(%v) = %v, want nil", bad, got)
@@ -809,202 +809,6 @@ func TestInspectWorktreeShowsUntrackedDespiteGitConfig(t *testing.T) {
 	}
 }
 
-// TestReadReportS03FixturesAndCases checks design.md 9.3, spike S0.3, KB-REV-5
-// and KB-REV-53 over hctest: S0.3 multi-turn fixtures (both raw VERDICT lines
-// without <report> and <report> tags injected per turn), tag after <hc> and TUI
-// argv echo, code fences, ~200-col hard-wrapped tags and closing tags, tag only
-// in the prompt echo, wrong code (and last-tag-wins), bad JSON, and mid-tag reads.
-func TestReadReportS03FixturesAndCases(t *testing.T) {
-	ctx := context.Background()
-	srv := hctest.New(t)
-	client := hc.NewClient(srv.Path)
-	srv.Add(hc.Terminal{Address: "t1", Name: "rev-test", State: "live", Status: &hc.Status{App: "claude-code", State: "done"}})
-
-	readWith := func(screen, code string) ReportRead {
-		t.Helper()
-		srv.SetScreen("t1", screen)
-		rd, err := ReadReport(ctx, client, "t1", code)
-		if err != nil {
-			t.Fatalf("ReadReport: %v", err)
-		}
-		return rd
-	}
-
-	// 1. S0.3 real 1/2/3-turn stitched fixtures from testdata:
-	//    (a) raw fixtures have only prose + "VERDICT <code> changes" and no <report> -> ReportNotYet;
-	//    (b) replacing each turn's VERDICT line with its <report> tag parses the LAST turn's tag,
-	//        keeps the review notes in Body, and rejects any earlier or made-up code.
-	s03 := []struct {
-		file, code, head string
-		round            int
-	}{
-		{"testdata/s03-read-1.json", "bvrtt2", "c111111", 1},
-		{"testdata/s03-read-2.json", "qn0g3x", "c222222", 2},
-		{"testdata/s03-read-3.json", "dwut53", "c333333", 3},
-	}
-	for _, f := range s03 {
-		rawBytes, err := os.ReadFile(f.file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var rr hc.ReadResult
-		if err := json.Unmarshal(rawBytes, &rr); err != nil {
-			t.Fatal(err)
-		}
-		if got := readWith(rr.Text, f.code); got.Status != ReportNotYet {
-			t.Fatalf("%s raw VERDICT without <report> = %+v, want not_yet", f.file, got)
-		}
-		withTags := rr.Text
-		for _, turn := range s03 {
-			tag := `<report>{"code":"` + turn.code + `","round":` + strconv.Itoa(turn.round) +
-				`,"head":"` + turn.head + `","verdict":"changes","majors":2,"findings":["off-by-one loop bound","divide by zero on empty slice"]}</report>`
-			withTags = strings.ReplaceAll(withTags, "VERDICT "+turn.code+" changes", tag)
-		}
-		got := readWith(withTags, f.code)
-		if got.Status != ReportFound || got.Report.Code != f.code || got.Report.Round != f.round ||
-			got.Report.Head != f.head || got.Report.Verdict != "changes" || got.Report.Majors != 2 ||
-			!strings.Contains(got.Body, "Off-by-one loop bound") {
-			t.Fatalf("%s with <report> = %+v", f.file, got)
-		}
-		if bad := readWith(withTags, "zzzzzz"); bad.Status != ReportInvalid {
-			t.Fatalf("%s wrong code = %+v, want invalid", f.file, bad)
-		}
-		if f.round == 3 {
-			if stale := readWith(withTags, "bvrtt2"); stale.Status != ReportInvalid {
-				t.Fatalf("turn 3 accepted turn 1 code: %+v", stale)
-			}
-		}
-	}
-
-	// 2. Synthetic cases: echo skipping (TUI argv ❯), input box, code fences, line wraps,
-	//    tag only in echo, wrong code, quoted earlier tag vs final tag, bad JSON, cut mid-tag.
-	cases := []struct {
-		name, screen, code string
-		want               ReportStatus
-		verdict, head      string
-	}{
-		{
-			name:   "tag after hc echo",
-			code:   "abc123",
-			screen: "❯ <hc from=\"t10\">End with <report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass|changes\",\"majors\":0,\"findings\":[\"...\"]}</report></hc>\n\n⏺ Looks good.\n  <report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0,\"findings\":[]}</report>\n",
-			want:   ReportFound, verdict: "pass", head: "h1",
-		},
-		{
-			name:   "tag after TUI argv echo",
-			code:   "abc123",
-			screen: "❯ You are the reviewer.\n  End with <report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass|changes\",\"majors\":0,\"findings\":[\"...\"]}</report>\n\n⏺ Checked all callers.\n  <report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0,\"findings\":[]}</report>\n\n────────────────────────────────────────\n❯\n────────────────────────────────────────\n",
-			want:   ReportFound, verdict: "pass", head: "h1",
-		},
-		{
-			name:   "tag inside outer code fence with ANSI",
-			code:   "abc123",
-			screen: "⏺ Review:\n  ```json\n  \x1b[1m<report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0,\"findings\":[]}</report>\x1b[0m\n  ```\n",
-			want:   ReportFound, verdict: "pass", head: "h1",
-		},
-		{
-			name:   "code fence inside report tag is not unwrapped",
-			code:   "abc123",
-			screen: "⏺ Review:\n<report>\n```json\n{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"changes\",\"majors\":1,\"findings\":[\"bug\"]}\n```\n</report>\n",
-			want:   ReportInvalid,
-		},
-		{
-			name:   "tag and closing tag wrapped over 200-col indented lines",
-			code:   "abc123",
-			screen: "⏺ Review:\n  <report>{\"code\":\"abc123\",\"rou\n  nd\":2,\"head\":\"0123456789abcdef\n  fedcba9876543210\",\"verdict\":\"changes\",\"majors\":1,\"findings\":[\"missing guard\"]}</rep\n  ort>\n",
-			want:   ReportFound, verdict: "changes", head: "0123456789abcdeffedcba9876543210",
-		},
-		{
-			name:   "VERDICT-like report tag only in hc echo",
-			code:   "abc123",
-			screen: "❯ <hc from=\"t10\">End with <report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0,\"findings\":[]}</report></hc>\n\n⏺ Reading diff...\n",
-			want:   ReportNotYet,
-		},
-		{
-			name:   "report tag only in TUI argv echo before reply",
-			code:   "abc123",
-			screen: "❯ Review h1 and end with:\n  <report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0,\"findings\":[]}</report>\n",
-			want:   ReportNotYet,
-		},
-		{
-			name:   "wrong code",
-			code:   "abc123",
-			screen: "⏺ Done.\n<report>{\"code\":\"other9\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0,\"findings\":[]}</report>\n",
-			want:   ReportInvalid,
-		},
-		{
-			name:   "later wrong-code tag wins over earlier right-code tag",
-			code:   "abc123",
-			screen: "⏺ Quoted: <report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0,\"findings\":[]}</report>\nFinal: <report>{\"code\":\"stale1\",\"round\":1,\"head\":\"h1\",\"verdict\":\"changes\",\"majors\":1,\"findings\":[\"x\"]}</report>\n",
-			want:   ReportInvalid,
-		},
-		{
-			name:   "bad JSON",
-			code:   "abc123",
-			screen: "⏺ Done.\n<report>{not-json}</report>\n",
-			want:   ReportInvalid,
-		},
-		{
-			name:   "unknown JSON field",
-			code:   "abc123",
-			screen: "⏺ Done.\n<report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0,\"extra\":1}</report>\n",
-			want:   ReportInvalid,
-		},
-		{
-			name:   "extra findings field with unescaped quotes is ignored",
-			code:   "abc123",
-			screen: "⏺ Done.\n<report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"changes\",\"majors\":1,\"findings\":[\"major: Hello(\"x\") is wrong\"]}</report>\n",
-			want:   ReportFound, verdict: "changes", head: "h1",
-		},
-		{
-			name:   "cut mid-tag before closing report",
-			code:   "abc123",
-			screen: "⏺ Done.\n<report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\"",
-			want:   ReportNotYet,
-		},
-		{
-			name:   "cut mid-closing-tag before footer",
-			code:   "abc123",
-			screen: "⏺ Done.\n<report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0,\"findings\":[]}</rep\n────────────────────────────────────────\n❯\n",
-			want:   ReportNotYet,
-		},
-		{
-			name:   "reply mentions an unclosed hc envelope in prose",
-			code:   "abc123",
-			screen: "❯ prompt\n\n⏺ minor: the `<hc from=\"t10\">` envelope is never closed in the doc.\n  <report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0}</report>\n",
-			want:   ReportFound, verdict: "pass", head: "h1",
-		},
-		{
-			name:   "tool output quotes a closed hc envelope above the reply",
-			code:   "abc123",
-			screen: "❯ prompt\n\n⏺ Read(doc.md)\n  <hc from=\"t1\">hi</hc>\n  more\n\n  <report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0}</report>\n",
-			want:   ReportFound, verdict: "pass", head: "h1",
-		},
-		{
-			name:   "earlier input-box rule above the reply, no box at the bottom",
-			code:   "abc123",
-			screen: "────────────────────────────────────────\n❯\n\n⏺ Checked.\n  <report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0}</report>\n",
-			want:   ReportFound, verdict: "pass", head: "h1",
-		},
-		{
-			name:   "draft tag in the bottom input box is not taken",
-			code:   "abc123",
-			screen: "❯ prompt\n\n⏺ Reading.\n\n────────────────────────────────────────\n❯ <report>{\"code\":\"abc123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0}</report>\n────────────────────────────────────────\n",
-			want:   ReportNotYet,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := readWith(tc.screen, tc.code)
-			if got.Status != tc.want {
-				t.Fatalf("status = %s, want %s (read=%+v)", got.Status, tc.want, got)
-			}
-			if tc.want == ReportFound && (got.Report.Verdict != tc.verdict || got.Report.Head != tc.head) {
-				t.Fatalf("parsed report = %+v, want verdict=%s head=%s", got.Report, tc.verdict, tc.head)
-			}
-		})
-	}
-}
-
 // TestReadReportLiveDemoScreen replays the live demo's reviewer screen: the
 // findings sit in the tag with unescaped quotes, and a draft waits in the input
 // box. The tag's findings field is ignored; the findings are the reply text.
@@ -1035,116 +839,19 @@ func TestReadReportLiveDemoScreen(t *testing.T) {
 	}
 }
 
-// TestReadReportWaitsPastMessageAndRequiresComplete verifies spike S0.3's wait
-// and complete rules: non-idle events (message, labels, working status) do not
-// end the wait while working, and an incomplete read returns ReportNotYet.
-func TestReadReportWaitsPastMessageAndRequiresComplete(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	// 1. Over hctest: terminal starts working, emits labels/heartbeat/working events,
-	//    then transitions to done after writing its <report> tag.
-	srv := hctest.New(t)
-	client := hc.NewClient(srv.Path)
-	srv.Add(hc.Terminal{Address: "t1", Name: "rev-wait", State: "live", Status: &hc.Status{App: "claude-code", State: "working"}})
-	srv.SetScreen("t1", "⏺ still working, no tag")
-
-	go func() {
-		for srv.SubscriptionsHandled() == 0 {
-			time.Sleep(5 * time.Millisecond)
-		}
-		srv.Heartbeat()
-		srv.SetLabels("t1", map[string]string{"note": "ping"})
-		srv.SetStatus("t1", &hc.Status{App: "claude-code", State: "working"})
-		time.Sleep(15 * time.Millisecond)
-		srv.SetScreen("t1", "⏺ Finished.\n<report>{\"code\":\"w1code\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0,\"findings\":[]}</report>\n")
-		srv.SetStatus("t1", &hc.Status{App: "claude-code", State: "done"})
-	}()
-
-	rd, err := ReadReport(ctx, client, "t1", "w1code")
-	if err != nil || rd.Status != ReportFound || rd.Report.Verdict != "pass" {
-		t.Fatalf("ReadReport after wait = (%+v, %v), want found/pass", rd, err)
-	}
-
-	// 2. Wire test for literal event type "message" while working, and Complete:false -> ReportNotYet.
-	dir, err := os.MkdirTemp("", "hcr")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	sock := filepath.Join(dir, "hc.sock")
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-
-	complete := false
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer func() { _ = c.Close() }()
-				line, err := bufio.NewReader(c).ReadBytes('\n')
-				if err != nil {
-					return
-				}
-				var req struct {
-					ID     uint64 `json:"id"`
-					Method string `json:"method"`
-				}
-				_ = json.Unmarshal(line, &req)
-				enc := json.NewEncoder(c)
-				switch req.Method {
-				case "terminal.get":
-					_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": hc.Terminal{
-						Address: "t1", State: "live", Status: &hc.Status{State: "working"},
-					}})
-				case "events.subscribe":
-					_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": hc.SubscribeResult{
-						Seq:       1,
-						Terminals: []hc.Terminal{{Address: "t1", State: "live", Status: &hc.Status{State: "working"}}},
-					}})
-					_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "method": "event", "params": map[string]any{
-						"seq": 2, "type": "message", "terminal": "t1", "data": map[string]any{"from": "t2"},
-					}})
-					time.Sleep(10 * time.Millisecond)
-					_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "method": "event", "params": map[string]any{
-						"seq": 3, "type": "status", "terminal": "t1", "data": map[string]any{"status": map[string]any{"state": "done"}, "reported": true},
-					}})
-				case "terminal.read":
-					_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": hc.ReadResult{
-						Complete: complete,
-						How:      "stitched",
-						Text:     "⏺ Done.\n<report>{\"code\":\"m1code\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass\",\"majors\":0,\"findings\":[]}</report>\n",
-					}})
-				}
-			}(conn)
-		}
-	}()
-
-	rawClient := hc.NewClient(sock)
-	if rd, err := ReadReport(ctx, rawClient, "t1", "m1code"); err != nil || rd.Status != ReportNotYet {
-		t.Fatalf("incomplete read = (%+v, %v), want not_yet", rd, err)
-	}
-	complete = true
-	if rd, err := ReadReport(ctx, rawClient, "t1", "m1code"); err != nil || rd.Status != ReportFound {
-		t.Fatalf("complete read after message event = (%+v, %v), want found", rd, err)
-	}
-}
-
 // TestClaudeArgvNeverSwallowsPrompt: no argv may end with a flag that takes
 // several values, or the prompt StartRun appends becomes one of them (seen
 // live: a reviewer started with an empty prompt).
 func TestClaudeArgvNeverSwallowsPrompt(t *testing.T) {
-	for _, mode := range []string{"plan", "dontAsk", "bypassPermissions", "acceptEdits"} {
-		argv := ClaudeArgv(flow.RoleReviewer, "opus", "medium", mode)
+	argvs := [][]string{
+		ClaudeArgv(flow.RoleCoordinator, "opus", "medium", "bypassPermissions"),
+		ClaudeArgv(flow.RoleWorker, "sonnet", "medium", "bypassPermissions"),
+		ClaudeReviewerArgv("opus", "medium", "sheepdog", "/tmp/draft.md"),
+	}
+	for _, argv := range argvs {
 		for _, a := range argv {
 			if a == "--allowedTools" || a == "--disallowedTools" || a == "--allowed-tools" {
-				t.Errorf("%s: %q is a separate argument; use --flag=value so the prompt is not swallowed: %q", mode, a, argv)
+				t.Errorf("%q is a separate argument; use --flag=value so the prompt is not swallowed: %q", a, argv)
 			}
 		}
 	}

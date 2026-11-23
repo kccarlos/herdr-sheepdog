@@ -58,11 +58,7 @@ func (p Paths) Report(id, task string, round int) string {
 // ReviewDraft is a review round's engine-named scratch findings file outside
 // the worktree, passed to --findings <path> (design.md 7.2, spike S-REV-2).
 func (p Paths) ReviewDraft(id, task string, round int, code string) string {
-	name := fmt.Sprintf("%s-r%d.draft.md", task, round)
-	if code != "" {
-		name = fmt.Sprintf("%s-r%d-%s.draft.md", task, round, code)
-	}
-	return filepath.Join(p.project(id), "reports", name)
+	return filepath.Join(p.project(id), "reports", fmt.Sprintf("%s-r%d-%s.draft.md", task, round, code))
 }
 
 // Brief is a task's brief file referenced by a worker handoff note (design.md 4.8).

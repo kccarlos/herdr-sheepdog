@@ -56,7 +56,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "           logged-in agent CLI (claude, codex or agy) plus a canary start")
 	fprintln(w, "           inside herdr-core, gh login and matching origin fetch and push URLs, and")
 	fprintln(w, "           codexbar. Exit 1 on FAIL.")
-	fprintln(w, "flags: --goal TEXT, --max-running N, --proof OUTCOME=CMD, --artifact OUTCOME=PATH, --touched TEXT, --skipped TEXT, --reject WHY, --nothing-to-change, --why TEXT, --child JSON, --kind KIND, --task ID, --option TEXT, --recommend TEXT, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
+	fprintln(w, "flags: --goal TEXT, --max-running N, --proof OUTCOME=CMD, --artifact OUTCOME=PATH, --touched TEXT, --skipped TEXT, --reject WHY, --nothing-to-change, --code CODE, --head SHA, --self-check-misses N, --deletable TEXT, --class TEXT, --not-run TEXT, --findings PATH, --why TEXT, --child JSON, --kind KIND, --task ID, --option TEXT, --recommend TEXT, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
 }
 
 // runFactory dispatches the `sheepdog factory` command group.
@@ -106,7 +106,7 @@ func factoryFlags(name string, stderr io.Writer) *flag.FlagSet {
 func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stderr io.Writer) int {
 	fs := factoryFlags("factory "+sub, stderr)
 	configPath, goal, maxRunning := fs.String("config", "", "config file"), fs.String("goal", "", "project goal"), fs.Int("max-running", 0, "maximum concurrent tasks")
-	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
+	if err := fs.Parse(reorderFactoryArgs(fs, args)); err != nil {
 		return flagExit(err)
 	}
 	maxSet := false
@@ -164,7 +164,7 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 func runFactoryStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := factoryFlags("factory status", stderr)
 	configPath := fs.String("config", "", "config file")
-	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
+	if err := fs.Parse(reorderFactoryArgs(fs, args)); err != nil {
 		return flagExit(err)
 	}
 	if fs.NArg() > 1 {
@@ -208,7 +208,7 @@ func runFactoryStatus(ctx context.Context, args []string, stdout, stderr io.Writ
 func runFactoryLog(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := factoryFlags("factory log", stderr)
 	configPath, n := fs.String("config", "", "config file"), fs.Int("n", 0, "last N lines")
-	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
+	if err := fs.Parse(reorderFactoryArgs(fs, args)); err != nil {
 		return flagExit(err)
 	}
 	if fs.NArg() > 1 {
@@ -272,7 +272,7 @@ func runFactoryTask(ctx context.Context, args []string, stdout, stderr io.Writer
 func parseTwoArgWhy(name string, args []string, stderr io.Writer) (string, string, string, int) {
 	fs := factoryFlags(name, stderr)
 	why := fs.String("why", "", "reason")
-	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
+	if err := fs.Parse(reorderFactoryArgs(fs, args)); err != nil {
 		return "", "", "", flagExit(err)
 	}
 	if fs.NArg() != 2 {
@@ -298,7 +298,7 @@ func runFactoryRecap(ctx context.Context, args []string, stdout, stderr io.Write
 		children = append(children, json.RawMessage(v))
 		return nil
 	})
-	if err := fs.Parse(reorderFactoryDoctorArgs(args[1:])); err != nil {
+	if err := fs.Parse(reorderFactoryArgs(fs, args[1:])); err != nil {
 		return flagExit(err)
 	}
 	if fs.NArg() != 2 {
@@ -496,7 +496,7 @@ func runFactoryReportReview(ctx context.Context, args []string, stdout, stderr i
 	class := fs.String("class", "", "finding class when second of its kind")
 	notRun := fs.String("not-run", "", "checks that could not be run and why")
 	findingsPath := fs.String("findings", "", "path to findings file outside the worktree")
-	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
+	if err := fs.Parse(reorderFactoryArgs(fs, args)); err != nil {
 		return flagExit(err)
 	}
 	seen := map[string]bool{}
@@ -573,7 +573,7 @@ func runFactoryAsk(ctx context.Context, args []string, isReport bool, stdout, st
 	kind, task, rec := fs.String("kind", "", "ask kind"), fs.String("task", "", "task id"), fs.String("recommend", "", "recommended option")
 	var opts []string
 	fs.Func("option", "choice", func(v string) error { opts = append(opts, v); return nil })
-	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
+	if err := fs.Parse(reorderFactoryArgs(fs, args)); err != nil {
 		return flagExit(err)
 	}
 	if fs.NArg() != 1 {
@@ -608,13 +608,12 @@ func postFactoryReport(ctx context.Context, verb string, args json.RawMessage) e
 }
 
 func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	reordered := reorderFactoryDoctorArgs(args)
 	fs := factoryFlags("factory doctor", stderr)
 	folderFlag := fs.String("folder", "", "project folder")
 	configPath := fs.String("config", "", "config file")
 	hcSocket := fs.String("hc-socket", "", "herdr-core socket")
 	noCanary := fs.Bool("no-canary", false, "skip agent CLI canary start")
-	if err := fs.Parse(reordered); err != nil {
+	if err := fs.Parse(reorderFactoryArgs(fs, args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
@@ -655,36 +654,22 @@ func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writ
 	return 0
 }
 
-// reorderFactoryDoctorArgs allows flags to follow [folder] (e.g.
+// reorderFactoryArgs allows flags to follow positional arguments (e.g.
 // `sheepdog factory doctor ~/repo --no-canary`) despite Go's flag.FlagSet
-// stopping at the first positional argument.
-func reorderFactoryDoctorArgs(args []string) []string {
+// stopping at the first positional argument. Value flags are derived from fs
+// so adding a flag to a subcommand never requires updating a separate list.
+func reorderFactoryArgs(fs *flag.FlagSet, args []string) []string {
 	var flags, pos []string
-	valueFlags := map[string]bool{
-		"-goal": true, "--goal": true,
-		"-max-running": true, "--max-running": true,
-		"-why": true, "--why": true,
-		"-child": true, "--child": true,
-		"-folder": true, "--folder": true,
-		"-config": true, "--config": true,
-		"-hc-socket": true, "--hc-socket": true,
-		"-n": true, "--n": true,
-		"-kind": true, "--kind": true, "-task": true, "--task": true,
-		"-option": true, "--option": true, "-recommend": true, "--recommend": true,
-		"-code": true, "--code": true, "-head": true, "--head": true,
-		"-self-check-misses": true, "--self-check-misses": true,
-		"-deletable": true, "--deletable": true, "-class": true, "--class": true,
-		"-not-run": true, "--not-run": true, "-findings": true, "--findings": true,
-	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "--" {
+			flags = append(flags, "--")
 			pos = append(pos, args[i+1:]...)
 			break
 		}
 		if strings.HasPrefix(a, "-") && a != "-" {
 			flags = append(flags, a)
-			if valueFlags[a] && i+1 < len(args) {
+			if flagTakesValue(fs, a) && i+1 < len(args) {
 				i++
 				flags = append(flags, args[i])
 			}
@@ -693,6 +678,25 @@ func reorderFactoryDoctorArgs(args []string) []string {
 		pos = append(pos, a)
 	}
 	return append(flags, pos...)
+}
+
+func flagTakesValue(fs *flag.FlagSet, arg string) bool {
+	if fs == nil || strings.Contains(arg, "=") {
+		return false
+	}
+	name := strings.TrimPrefix(arg, "-")
+	name = strings.TrimPrefix(name, "-")
+	if name == "" || strings.HasPrefix(name, "-") {
+		return false
+	}
+	f := fs.Lookup(name)
+	if f == nil {
+		return false
+	}
+	if bf, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && bf.IsBoolFlag() {
+		return false
+	}
+	return true
 }
 
 func resolveTargetFolder(raw, home string) string {

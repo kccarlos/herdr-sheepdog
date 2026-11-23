@@ -58,7 +58,7 @@ Owner's goal (2026-11-18): a reviewer or a verifier should, most of the time, pa
 |---|---|
 | The number | **First-look pass rate:** the share of tasks whose first reviewed round passed. The engine already records each round, so it costs nothing to keep. It is in the coordinator's facts block and the owner's digest, split by worker model and by template version |
 | The worker checks itself by the reviewer's own list | The questions the reviewer will ask are in the worker's prompt, as what to do before reporting (5.3). The worker has the whole context in its session; a reviewer reading from nothing costs far more |
-| A miss is named | A review report says how many of its findings the worker should have caught itself: a proof that does not pass, a caller it did not list, code for a "not doing" item (a `self-check misses:` reply line). Rework from a hard problem and rework from a skipped self-check are then told apart |
+| A miss is named | A review report says how many of its findings the worker should have caught itself: a proof that does not pass, a caller it did not list, code for a "not doing" item (`--self-check-misses` on `factory report review`, or a `self-check misses:` reply line for Codex). Rework from a hard problem and rework from a skipped self-check are then told apart |
 | It steers who gets the work | The coordinator's routing table (design.md 11.2) gains the first-look pass rate and the self-check misses per worker model. A model that keeps failing its first look on a kind of task stops getting that kind |
 
 A low rate points upstream: at the brief, the scope fields or the worker's self-check. It is not a reason to add review.
@@ -166,11 +166,11 @@ The full texts stay where they live (`reference_repo/ponytail`, the pstack skill
 
 Each is embedded Markdown. `{…}` is filled by the engine from records, never by another agent. The bracket at the end of a line is its source and is stripped before the agent sees it.
 
-The templates in use are `internal/factory/coordinator.md`, `worker.md` and `reviewer.md` (slice 3.5): these drafts, one rule per line, without the lines that name commands of later slices (`ask`, `answer`, `report ask`, `override`, `show`). Where the drafts and the code differ, the code wins:
+The templates in use are `internal/factory/coordinator.md`, `worker.md`, `reviewer_cmd.md` (Claude and `agy`) and `reviewer.md` (Codex transitional, pending its S-REV-2 spike): these drafts, one rule per line, without the lines that name commands of later slices (`ask`, `answer`, `report ask`, `override`, `show`). Where the drafts and the code differ, the code wins:
 
 - A worker that needs a choice, or whose check already passes before it writes anything, reports `report ready --nothing-to-change --why` with the question or the passing output; the coordinator answers with `send-back` or `close` (until `report ask` exists).
 - The reviewer runs in the task's worktree, not a scratch copy (design.md O10), one plain command per check, and a verdict from a changed worktree is thrown away. `minor:` lines are allowed beside `major:`.
-- Only the placeholders the engine fills are used: `{folder} {goal} {sheepdog}`; `{id} {title} {brief} {not_doing} {outcomes} {ready_cmd} {worktree} {branch}`; `{proofs} {rejections} {diff} {kind} {head} {round} {code}`. There is no `{facts}` yet: the coordinator's facts arrive with each wake.
+- Only the placeholders the engine fills are used: `{folder} {goal} {sheepdog}`; `{id} {title} {brief} {not_doing} {outcomes} {ready_cmd} {worktree} {branch}`; `{proofs} {rejections} {diff} {kind} {head} {round} {code} {findings_path}`. There is no `{facts}` yet: the coordinator's facts arrive with each wake.
 - The rule "a rejected finding comes back only with a run" and the empty-`skipped` major are written by the engine beside their facts, so the reviewer template does not repeat them. The design note and milestone fields of 3.3 do not exist yet; the coordinator quotes the owner in each brief.
 
 ### 5.1 Coordinator
@@ -303,34 +303,30 @@ Before you report, review your own work as the reviewer will: [prompts.md 1.2]
 ### 5.4 Reviewer
 
 ```text
-You review one task's change before it can merge. Read only: never edit, commit or push. [KB-REV-63]
-You did not write it, and you are not here to approve it.
+You review task {id}: {title}, before it can merge; you did not write it, and you are not here to approve it. [prompts.md 5.4]
 
-- Read the brief, then the diff you are given, and run the project's checks in your scratch copy.
-- A finding needs a run or a reproduced state: the command and its real output. A risk you
-  reasoned out is not a finding. List what you checked and disproved. [old template]
-- Majors only: wrong, unsafe, loses data, or breaks a caller. Style, naming and "could be
-  cleaner" are not findings. A bug, a product choice and a preference are three things; only the
-  first is yours. [agy.md]
-- The second finding of one kind: name the kind and the change that closes all of it. [retro doc]
-- A fix you propose gets the same restraint as the code: the smallest complete change, nothing
-  for later. Never propose weakening validation, data-loss handling, security or accessibility.
-- A finding the worker rejected with a reason comes back only with a run that proves it. [replay R2]
-- A check you cannot run here goes under "Not run", with the reason. Do not wait on it. [KB-WKT-11]
-- Read the worker's proofs, "touched" and "skipped" first. Re-run each proof. Does it really
-  show the outcome, on the real thing? A proof that cannot fail is a major. An unhandled caller
-  the worker did not list is a major. [prove it works]
-- Count the findings the worker should have caught by its own checks, and say the number.
-- Then answer one more question whatever the verdict: which lines, options or abstractions could
-  go with no loss? "None" is an answer. [agent-delivery]
-- No praise, no summary of the diff. Write your notes to a file as you go if you can. [old template]
+Brief:
+{brief}
 
-{brief} {outcomes} {diff} {rejections} {proofs}
-End with your findings, one per line starting `major:` or `minor:`, each with its file, line and run;
-then lines starting `self-check misses:`, `class:`, `deletable:` and `not run:`; then only this tag,
-with "majors" equal to your `major:` lines:
-<report>{"code":"{code}","round":{round},"head":"{head}","verdict":"pass|changes","majors":0}</report>
+Outcomes:
+{outcomes}{proofs}{rejections}
+
+Read only: never edit files, commit, push or switch branches, and leave the worktree exactly as you found it (no build outputs): a verdict from a changed worktree is thrown away. [KB-REV-63; design.md 7.2]
+Review round {round} ({kind}) at commit {head}: {diff}. Run each check as one plain command from your current folder (no cd, no &&, no pipes). [design.md 9.2]
+Read the worker's proofs, touched and skipped first; re-run each proof and judge whether it really shows its outcome: a proof that cannot fail, or an unhandled caller the worker did not list, is a major. [prove it works; prompts.md 3.4]
+A finding needs a run or a reproduced state, with the command and its real output; a risk you only reasoned out is not a finding. [old template; KB-REV-63]
+`major:` is only for what is wrong, unsafe, loses data, breaks a caller or leaves an outcome unmet; a product choice or a preference is not a finding, and style is at most `minor:`. [agy.md]
+A fix you propose gets the same restraint as the code: the smallest complete change; never propose weakening validation, data-loss handling, security or accessibility. [old template]
+A check you cannot run here goes in `--not-run` with the reason; do not wait on it. [KB-WKT-11; replay R1]
+Write your findings to `{findings_path}` (outside the worktree), one per line starting with plain `major:` or `minor:` (no bullets or bold), each with its file, line and run. [design.md 7.2; spike S-REV-2]
+Submit your verdict with one command (`pass` when 0 `major:` lines, `changes` when >= 1 `major:` line; `--self-check-misses` is a non-negative integer for findings the worker's checks should have caught; `--deletable` is required, `"none"` is an answer; for `pass` with no findings, you may omit the findings flag): [design.md 7.2; prompts.md 3.5]
+
+{sheepdog} factory report review <pass|changes> --code {code} --head {head} --self-check-misses <n> --deletable "<text or none>" --class "<text or none>" --not-run "<text or none>" --findings {findings_path}
+
+On a refusal, fix the named error and run the command again; on success, stop immediately. [design.md 7.2]
 ```
+
+Codex keeps the transitional `<report>` tag template (`internal/factory/reviewer.md`, with `self-check misses:`, `class:`, `deletable:`, and `not run:` reply lines) until its S-REV-2 spike passes (design.md 7.2, 9.2).
 
 ### 5.5 Retro
 
@@ -348,7 +344,7 @@ Every prompt ends with facts the engine builds from records at that moment. An a
 |---|---|
 | Coordinator, at every wake | What woke it and the named way out; tasks waiting on it and why; open asks; pools; free slots; settings that differ from their default; the retro table (design.md 11.2); the last journal entry on a fresh session |
 | Worker | The brief; `not_doing`; the estimate and the cap; the base branch; the report commands with the task filled in; for a fix, the findings file; "pull first" when the engine moved the head |
-| Reviewer | The brief; `not_doing`; the diff range; earlier rounds with their verdicts; the worker's rejections, taken from its `reject` records and from the commit messages since the last round; the worker's proofs with their output; the one-time code, round and head for its tag |
+| Reviewer | The brief; `not_doing`; the diff range; earlier rounds with their verdicts; the worker's rejections, taken from its `reject` records and from the commit messages since the last round; the worker's proofs with their output; the one-time code, round, head and scratch findings path for its `factory report review` command (or `<report>` tag for Codex pending S-REV-2) |
 | Plan reviewer | The plan, the design note, the owner's words, the repo's size and layout |
 | Retro | As the old template: rounds, sizes, the brief, the reviewer and worker models |
 
@@ -375,7 +371,7 @@ One statement of where each thing lands, by the slices of [plan.md](plan.md):
 | `ready --reject`; two passing rounds; the size estimate and cap | design.md 7.2, 4.6, 11.5 | 2 (the review loop) |
 | Plan fields `for_whom`, `if_skipped`, `smallest`, `not_doing`, and `outcomes` each with `proved_by`, with their presence checks | design.md 11.7 | 3 (quality up front) |
 | The `ready` report with a proof per outcome run by the report client, `touched` and `skipped` | design.md 7.2 | 3 |
-| `self-check misses:`, `class:`, `deletable:`, `not run:` lines in the reviewer's reply; the first-look pass rate | design.md 7.2, 11.2 | 3 |
+| `--self-check-misses`, `--class`, `--deletable`, `--not-run` on `factory report review` (and the transitional reply lines for Codex); the first-look pass rate | design.md 7.2, 11.2 | 3 |
 | The templates of section 5 with replay evidence | this file | 3 (slice 1 runs on three short stand-ins) |
 | The engine running the proofs again in a clean checkout, and a per-outcome judgement in the verdict | design.md 11.6 | 10 |
 | The plan review run, its report and the coordinator's answers, `plan_review_rounds` | design.md 11.7, 7.2 | 11 |

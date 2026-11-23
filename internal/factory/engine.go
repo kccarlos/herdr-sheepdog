@@ -809,11 +809,7 @@ func launchArgv(role string, c flow.Candidate, cwd, session string, resume bool)
 		}
 		return world.AgyArgv(c.Model, session, "")
 	case "claude":
-		mode := "bypassPermissions"
-		if role == flow.RoleReviewer {
-			mode = "dontAsk"
-		}
-		return world.ClaudeSessionArgv(role, c.Model, c.Effort, mode, session, resume)
+		return world.ClaudeSessionArgv(role, c.Model, c.Effort, "bypassPermissions", session, resume)
 	}
 	return nil
 }
@@ -1320,7 +1316,7 @@ func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State
 	if oa != nil && !flow.Ended(task) {
 		a := *oa
 		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
-		tip, rel, clean, err := e.git.InspectWorktree(gctx, a.Worktree, flow.H(a))
+		tip, rel, _, err := e.git.InspectWorktree(gctx, a.Worktree, flow.H(a))
 		readyHead := a.BaseCommit
 		if n := len(a.Ready); n > 0 {
 			readyHead = a.Ready[n-1].Head
@@ -1347,7 +1343,7 @@ func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State
 		}
 		facts.Worker = workerRun
 		facts.NoSlot = workerRun.State == flow.RunGone && !hasSlot
-		facts.Tip, facts.TipClean, facts.TipRel = tip, clean, rel
+		facts.Tip, facts.TipRel = tip, rel
 		if len(a.Ready) > 0 { // no PR can exist before the first ready
 			facts.PR = e.readPRLocked(ctx, id, s, ti)
 		}
@@ -1677,10 +1673,6 @@ func workerPrompt(tmpl string, t flow.Task, a flow.Attempt, bin string) string {
 		"{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", bin)
 }
 
-func (e *Engine) reviewerPrompt(ctx context.Context, tmpl string, t flow.Task, a flow.Attempt, h, kind, diff, rejections string, round int) (string, error) {
-	return e.reviewerPromptWith(ctx, tmpl, t, a, h, kind, diff, rejections, round, cmp.Or(e.Bin, "sheepdog"), "")
-}
-
 func (e *Engine) reviewerPromptWith(ctx context.Context, tmpl string, t flow.Task, a flow.Attempt, h, kind, diff, rejections string, round int, bin, findingsPath string) (string, error) {
 	proofs, err := e.proofPrompt(ctx, a, h)
 	if err != nil {
@@ -1988,9 +1980,11 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	if choice.CLI != world.CodexCLI && draftPath != "" && guardTestPath(draftPath) == nil {
 		_ = os.MkdirAll(filepath.Dir(draftPath), 0o700)
 	}
-	argv := launchArgv(flow.RoleReviewer, choice, a.Worktree, "", false)
+	var argv []string
 	if choice.CLI == "claude" {
 		argv = world.ClaudeReviewerArgv(model, effort, bin, draftPath)
+	} else {
+		argv = launchArgv(flow.RoleReviewer, choice, a.Worktree, "", false)
 	}
 	tmpl := reviewerCmdTemplate
 	if choice.CLI == world.CodexCLI {
