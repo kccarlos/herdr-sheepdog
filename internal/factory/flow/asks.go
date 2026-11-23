@@ -59,11 +59,17 @@ type Ask struct {
 type AskEvent struct{ Kind, Answer, Why, By, ProofID, DeviceID string }
 
 var (
-	validAskKinds = []string{KindDecision, KindGate, KindRelease, KindPaidKey, KindDelete, KindInstall, KindReset, KindRule}
+	validAskKinds = []string{KindDecision, KindGate, KindRelease, KindPaidKey, KindDelete, KindInstall, KindReset, KindRule, KindOverride}
 	parenKeyRE    = regexp.MustCompile(`\([^()\s]+\)$`)
 	negWaitRE     = regexp.MustCompile(`^(?:no|not|don't|dont|do not|never|decline|reject|deny|cancel|abort|stop|wait|hold|defer|postpone|skip|pause)(?:$|[\s,.:;-])`)
 	yesOptRE      = regexp.MustCompile(`^yes(?:$|[\s,.:;-])`)
 )
+
+// DelegableAsk reports whether a delegation rule may answer a (design.md 4.3b, 7.1).
+// Slice 14's A1 must call this check.
+func DelegableAsk(a Ask) bool {
+	return a.Kind != KindOverride
+}
 
 // StepAsk applies pure ask table rows A2–A5 (design.md 7.1).
 func StepAsk(a Ask, ev AskEvent, now time.Time) (Ask, string, Decision) {
@@ -74,6 +80,9 @@ func StepAsk(a Ask, ev AskEvent, now time.Time) (Ask, string, Decision) {
 	case (a.Status == AskStatusAnswered || a.Status == AskStatusCancelled) && (ev.Kind == EvAskAnswer || ev.Kind == EvAskCancel):
 		return a, "A5", Decision{Why: RefuseClosed}
 	case a.Status == AskStatusOpen && ev.Kind == EvAskAnswer:
+		if ev.By == "rule" && !DelegableAsk(a) {
+			return a, "", Decision{Why: RefuseNotDelegable}
+		}
 		a.Status, a.Answer, a.Why, a.AnsweredBy, a.AnsweredAt, a.ProofID, a.DeviceID = AskStatusAnswered, ev.Answer, ev.Why, ev.By, now, ev.ProofID, ev.DeviceID
 		return a, "A3", Decision{Asked: []string{map[bool]string{false: AskWake, true: AskDeliverAnswer}[a.RunID != "" && a.AskedBy != RoleCoordinator]}, Why: "ask answered"}
 	case a.Status == AskStatusOpen && ev.Kind == EvAskCancel:
@@ -86,6 +95,7 @@ func StepAsk(a Ask, ev AskEvent, now time.Time) (Ask, string, Decision) {
 // ValidateAsk checks KB-ASK-6, KB-ASK-9 and KB-ASK-15 and returns the cleaned Ask.
 func ValidateAsk(a Ask) (Ask, string, string) {
 	a.Kind, a.Task, a.Gated = strings.TrimSpace(a.Kind), strings.TrimSpace(a.Task), strings.TrimSpace(a.Kind) != KindDecision
+	a.Targets = slices.Clone(a.Targets)
 	q := CleanText(a.Question)
 	switch {
 	case !slices.Contains(validAskKinds, a.Kind):
@@ -208,4 +218,37 @@ func LatestOwnerAskAnswer(asks []Ask, taskID, askedBy string) string {
 		}
 	}
 	return ""
+}
+
+// FormatAskCommand renders the server-formatted command text for an ask card
+// (S0.10, design.md 4.3b, plan.md 7.1).
+func FormatAskCommand(a Ask) string {
+	if a.Kind == KindOverride && len(a.Targets) > 0 {
+		lines := make([]string, len(a.Targets))
+		for i, t := range a.Targets {
+			line := t.Task
+			if t.PR > 0 {
+				line += fmt.Sprintf(" #%d", t.PR)
+			}
+			if t.Head != "" {
+				line += " @ " + t.Head[:min(len(t.Head), 7)]
+			}
+			if t.Checks != "" {
+				line += " · " + string(t.Checks)
+			}
+			if t.Unreported {
+				line += " · has unreported work"
+			}
+			lines[i] = line
+		}
+		return strings.Join(lines, "\n")
+	}
+	cmd := a.Kind
+	if a.Task != "" {
+		cmd += " · " + a.Task
+	}
+	if a.Head != "" {
+		cmd += " @ " + a.Head[:min(len(a.Head), 7)]
+	}
+	return cmd
 }

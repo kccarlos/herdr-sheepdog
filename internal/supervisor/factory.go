@@ -41,6 +41,7 @@ func (s *Supervisor) syncFactoryAsks() {
 	defer s.factoryMu.Unlock()
 	all := s.cfg.Factory.Asks(false)
 	var next []state.PendingAction
+	overrideIDs := map[string]bool{}
 	for _, a := range all {
 		if !a.Gated || a.Status != flow.AskStatusOpen {
 			continue
@@ -49,14 +50,11 @@ func (s *Supervisor) syncFactoryAsks() {
 		for i, lbl := range a.Options {
 			opts[i] = state.Option{Label: lbl, Recommended: lbl == a.Recommend}
 		}
-		cmd := a.Kind
-		if a.Task != "" {
-			cmd += " · " + a.Task
+		pid := factoryAskPrefix + a.ID
+		if a.Kind == flow.KindOverride {
+			overrideIDs[pid] = true
 		}
-		if a.Head != "" {
-			cmd += " @ " + a.Head[:min(len(a.Head), 7)]
-		}
-		next = append(next, state.PendingAction{ID: factoryAskPrefix + a.ID, PaneID: factoryPanePrefix + a.Project, Kind: state.PendingAnswerPrompt, SpokenSummary: a.Question, Question: a.Question, Command: cmd, Options: opts, CreatedAt: a.At})
+		next = append(next, state.PendingAction{ID: pid, PaneID: factoryPanePrefix + a.Project, Kind: state.PendingAnswerPrompt, SpokenSummary: a.Question, Question: a.Question, Command: flow.FormatAskCommand(a), Options: opts, CreatedAt: a.At})
 	}
 	prev := s.store.Snapshot().Session.FactoryAsks
 	s.factoryAsks = next
@@ -66,7 +64,11 @@ func (s *Supervisor) syncFactoryAsks() {
 		if !slices.Contains(prev, p.ID) {
 			s.log.Log(logSource, "pending.created", p.PaneID, s.pendingCreated(p))
 			if s.cfg.Notifier != nil {
-				s.cfg.Notifier.Notify(push.Notification{EventID: "fask:" + p.ID, PendingID: p.ID, PaneID: p.PaneID, Kind: push.KindApproval, Agent: s.cfg.Redactor.String(s.aliasOf(p.PaneID)), Text: s.cfg.Redactor.String(p.Question), Options: s.pushOptions(p.Options), NeedsYou: true})
+				var pushOpts []push.Option
+				if !overrideIDs[p.ID] {
+					pushOpts = s.pushOptions(p.Options)
+				}
+				s.cfg.Notifier.Notify(push.Notification{EventID: "fask:" + p.ID, PendingID: p.ID, PaneID: p.PaneID, Kind: push.KindApproval, Agent: s.cfg.Redactor.String(s.aliasOf(p.PaneID)), Text: s.cfg.Redactor.String(p.Question), Options: pushOpts, NeedsYou: true})
 			}
 		}
 	}

@@ -109,16 +109,21 @@ func (s *Server) handleFactoryView(kind string) http.HandlerFunc {
 	}
 }
 
+type factoryAskView struct {
+	flow.Ask
+	Command string `json:"command,omitempty"`
+}
+
 func (s *Server) handleFactoryAsks(w http.ResponseWriter, _ *http.Request) {
 	asker, ok := s.deps.Factory.(factoryAsker)
 	if !ok {
 		writeError(w, http.StatusServiceUnavailable, "factory is not available")
 		return
 	}
-	asks := []flow.Ask{}
+	asks := []factoryAskView{}
 	for _, a := range asker.Asks(true) {
 		if a.Gated && a.Kind != flow.KindDecision {
-			asks = append(asks, a)
+			asks = append(asks, factoryAskView{Ask: a, Command: flow.FormatAskCommand(a)})
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"protocol": 1, "asks": asks})

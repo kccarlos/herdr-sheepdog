@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 )
 
 // Change is one event on Engine.Changes() (design.md 12.3).
@@ -58,7 +59,7 @@ func (e *Engine) Asks(open bool) []flow.Ask {
 	e.eachStateLocked(func(id string, s flow.State) bool {
 		for _, a := range s.Asks {
 			if !open || a.Status == flow.AskStatusOpen {
-				a.Project, a.Folder, a.Options = cmp.Or(a.Project, id), cmp.Or(a.Folder, s.Project.Folder), slices.Clone(a.Options)
+				a.Project, a.Folder, a.Options, a.Targets = cmp.Or(a.Project, id), cmp.Or(a.Folder, s.Project.Folder), slices.Clone(a.Options), slices.Clone(a.Targets)
 				out = append(out, a)
 			}
 		}
@@ -105,10 +106,16 @@ func (e *Engine) Say(project, text string) error {
 func (e *Engine) acceptAskLocked(id string, s *flow.State, role string, ti int, runID string, args json.RawMessage) error {
 	var req struct {
 		Kind, Task, Question, Recommend string
-		Options                         []string
+		Options, Tasks                  []string
 	}
 	if len(bytes.TrimSpace(args)) == 0 || decodeStrict(args, &req) != nil {
 		return e.refuse(id, "invalid_report", "An ask must carry kind, question, options and recommend.")
+	}
+	if strings.TrimSpace(req.Kind) == flow.KindOverride {
+		return e.acceptOverrideAskLocked(id, s, role, runID, req.Tasks, req.Task)
+	}
+	if len(req.Tasks) > 0 {
+		return e.refuse(id, "invalid_report", "Only override asks accept tasks.")
 	}
 	ask, code, why := flow.ValidateAsk(flow.Ask{Kind: req.Kind, Task: req.Task, Question: req.Question, Options: req.Options, Recommend: req.Recommend})
 	if code != "" {
@@ -134,6 +141,84 @@ func (e *Engine) acceptAskLocked(id string, s *flow.State, role string, ti int, 
 	return e.commitChangeLocked(id, s, LogLine{By: role, Task: ask.Task, Input: map[string]any{"verb": "ask", "id": ask.ID, "kind": ask.Kind, "question": ask.Question, "options": ask.Options, "recommend": ask.Recommend}, Rule: row, Asked: dec.Asked, Decision: "ask opened: " + ask.ID, Why: ask.Question}, Change{Kind: flow.EvAskOpen, AskID: ask.ID, Task: ask.Task})
 }
 
+func (e *Engine) acceptOverrideAskLocked(id string, s *flow.State, role, runID string, rawTasks []string, rawTask string) error {
+	if role != flow.RoleCoordinator {
+		return e.refuse(id, "kind_not_allowed", fmt.Sprintf("A %s may not open an override ask.", role))
+	}
+	if len(rawTasks) == 0 && strings.TrimSpace(rawTask) != "" {
+		rawTasks = []string{rawTask}
+	}
+	if len(rawTasks) == 0 {
+		return e.refuse(id, "invalid_ask", "An override ask must name at least one task.")
+	}
+	seen := make(map[string]bool, len(rawTasks))
+	taskIdxs := make([]int, 0, len(rawTasks))
+	for _, raw := range rawTasks {
+		tid := strings.TrimSpace(raw)
+		if tid == "" || seen[tid] {
+			return e.refuse(id, "invalid_ask", "Override tasks must be distinct non-blank task ids.")
+		}
+		ti := slices.IndexFunc(s.Tasks, func(t flow.Task) bool { return t.ID == tid })
+		if ti < 0 {
+			return e.refuse(id, "invalid_ask", fmt.Sprintf("Unknown task %q.", tid))
+		}
+		if t := s.Tasks[ti]; flow.Ended(t) {
+			return e.refuse(id, "invalid_ask", fmt.Sprintf("Task %q has already ended.", tid))
+		} else if att := flow.OpenAttempt(t); att == nil || len(att.Ready) == 0 {
+			return e.refuse(id, "invalid_ask", fmt.Sprintf("Task %q has no ready report.", tid))
+		}
+		seen[tid] = true
+		taskIdxs = append(taskIdxs, ti)
+	}
+	repoCtx := world.GitRepository(context.Background(), s.Project.Folder)
+	targets := make([]flow.OverrideTarget, 0, len(taskIdxs))
+	names := make([]string, 0, len(taskIdxs))
+	for _, ti := range taskIdxs {
+		t := s.Tasks[ti]
+		att := flow.OpenAttempt(t)
+		h := flow.H(*att)
+		unreported := false
+		if e.git != nil && att.Worktree != "" {
+			gctx, cancel := context.WithTimeout(repoCtx, lockGitTimeout)
+			_, rel, clean, err := e.git.InspectWorktree(gctx, att.Worktree, h)
+			cancel()
+			if err != nil {
+				return err
+			}
+			unreported = !clean || rel == flow.RelAhead || rel == flow.RelDiverged
+		}
+		p := e.prs[att.Worktree]
+		if (!p.Answered || p.State != flow.PROpen || p.Head != h) && att.PR > 0 && e.git != nil {
+			p = e.readPRLocked(repoCtx, id, s, ti)
+		}
+		prNum := att.PR
+		if prNum == 0 && p.State == flow.PROpen {
+			prNum = p.Number
+		}
+		checks := flow.ChecksAbsent
+		if p.Answered && p.State == flow.PROpen && p.Head == h && p.Checks != "" {
+			checks = p.Checks
+		} else if !p.Answered && prNum > 0 {
+			checks = flow.ChecksUnreadable
+		}
+		targets = append(targets, flow.OverrideTarget{Task: t.ID, PR: prNum, Head: h, Checks: checks, Unreported: unreported})
+		names = append(names, t.ID)
+	}
+	ask, row, dec, code, why := e.openEngineAskLocked(id, s, flow.Ask{
+		Kind:      flow.KindOverride,
+		Question:  fmt.Sprintf("Merge %s now without waiting for CI or review?", strings.Join(names, ", ")),
+		Options:   []string{flow.OverrideOptionMerge, flow.OverrideOptionCancel},
+		Recommend: flow.OverrideOptionCancel,
+		Targets:   targets,
+		AskedBy:   role,
+		RunID:     runID,
+	})
+	if code != "" {
+		return e.refuse(id, code, why)
+	}
+	return e.commitChangeLocked(id, s, LogLine{By: role, Input: map[string]any{"verb": "ask", "id": ask.ID, "kind": ask.Kind, "question": ask.Question, "options": ask.Options, "recommend": ask.Recommend, "targets": ask.Targets}, Rule: row, Asked: dec.Asked, Decision: "ask opened: " + ask.ID, Why: ask.Question}, Change{Kind: flow.EvAskOpen, AskID: ask.ID})
+}
+
 func (e *Engine) acceptAnswerLocked(id string, s *flow.State, role string, args json.RawMessage) error {
 	var req struct{ Ask, Option, Why string }
 	if len(bytes.TrimSpace(args)) == 0 || decodeStrict(args, &req) != nil || strings.TrimSpace(req.Ask) == "" || strings.TrimSpace(req.Option) == "" {
@@ -155,7 +240,15 @@ func (e *Engine) answerAskLocked(id string, s *flow.State, ai int, option, why, 
 	if a.Status != flow.AskStatusOpen {
 		return e.refuse(id, flow.RefuseClosed, fmt.Sprintf("Ask %q is already %s.", a.ID, a.Status))
 	}
-	resolved, ok := flow.ResolveAskOption(a.Options, option)
+	var resolved string
+	var ok bool
+	if a.Kind == flow.KindOverride {
+		if slices.Contains(a.Options, option) {
+			resolved, ok = option, true
+		}
+	} else {
+		resolved, ok = flow.ResolveAskOption(a.Options, option)
+	}
 	if a.Gated || proof != (AnswerProof{}) {
 		if code, msg, err := e.verifyProofLocked(a.ID, resolved, flow.CleanText(option), proof, now); err != nil {
 			return err
@@ -167,6 +260,9 @@ func (e *Engine) answerAskLocked(id string, s *flow.State, ai int, option, why, 
 		return e.refuse(id, "invalid_option", fmt.Sprintf("%q is not one of ask %q's options.", option, a.ID))
 	}
 	next, row, dec := flow.StepAsk(a, flow.AskEvent{Kind: flow.EvAskAnswer, Answer: resolved, Why: why, By: by, ProofID: proof.ID, DeviceID: proof.DeviceID}, now)
+	if dec.Why == flow.RefuseNotDelegable {
+		return e.refuse(id, flow.RefuseNotDelegable, fmt.Sprintf("Ask %q (%s) cannot be answered by a delegation rule.", a.ID, a.Kind))
+	}
 	msg := fmt.Sprintf("Answer to %s: %s", next.ID, next.Answer) + map[bool]string{true: " — " + next.Why}[next.Why != ""]
 	input := map[string]any{"verb": "answer", "ask": next.ID, "option": next.Answer, "why": next.Why, "proof_id": next.ProofID, "device_id": next.DeviceID}
 	if slices.Contains(dec.Asked, flow.AskDeliverAnswer) {
@@ -198,6 +294,15 @@ func (e *Engine) answerAskLocked(id string, s *flow.State, ai int, option, why, 
 			s.Tasks[ti].Dropped = &flow.Dropped{Why: "owner chose " + next.Answer}
 		}
 	}
+	if next.Kind == flow.KindOverride && next.AnsweredBy == owner && next.Answer == flow.OverrideOptionMerge {
+		for _, tgt := range next.Targets {
+			if ti := slices.IndexFunc(s.Tasks, func(t flow.Task) bool { return t.ID == tgt.Task }); ti >= 0 && !flow.Ended(s.Tasks[ti]) {
+				if att := flow.OpenAttempt(s.Tasks[ti]); att != nil {
+					att.Overrides = append(att.Overrides, flow.Override{Head: tgt.Head, ChecksShown: tgt.Checks, Spent: false, ProofID: next.ProofID})
+				}
+			}
+		}
+	}
 	return e.commitChangeLocked(id, s, LogLine{By: next.AnsweredBy, Task: next.Task, Input: input, Rule: row, Asked: dec.Asked, Decision: "answered " + next.ID, Why: next.Answer}, Change{Kind: "ask_answer", AskID: next.ID, Task: next.Task})
 }
 
@@ -223,6 +328,18 @@ func openTaskAttempt(tasks []flow.Task, taskID string) *flow.Attempt {
 	return nil
 }
 
+func (e *Engine) openEngineAskLocked(id string, s *flow.State, raw flow.Ask) (flow.Ask, string, flow.Decision, string, string) {
+	raw.Question = flow.CapRunes(flow.CleanText(raw.Question), flow.MaxAskQuestionLen)
+	ask, code, why := flow.ValidateAsk(raw)
+	if code != "" {
+		return flow.Ask{}, "", flow.Decision{}, code, why
+	}
+	ask.ID, ask.Project, ask.Folder = fmt.Sprintf("ask-%s-%d-%d", id, s.Seq+1, len(s.Asks)+1), id, s.Project.Folder
+	ask, row, dec := flow.StepAsk(ask, flow.AskEvent{Kind: flow.EvAskOpen}, e.now())
+	s.Asks = append(s.Asks, ask)
+	return ask, row, dec, "", ""
+}
+
 func (e *Engine) execOpenGateAsk(_ context.Context, id string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
 	t, h := s.Tasks[ti], ""
 	if a := flow.OpenAttempt(t); a != nil {
@@ -232,16 +349,12 @@ func (e *Engine) execOpenGateAsk(_ context.Context, id string, s *flow.State, ti
 	if strings.HasPrefix(f.Ask, flow.AskOpenN24) {
 		rule, q, opts, rec = flow.AskedByN24, fmt.Sprintf("Task %s (split from %s after retro) hit review recap — drop it, or tell me how to go on?", t.ID, t.SplitFrom), []string{flow.N24OptionDrop, flow.N24OptionContinue}, flow.N24OptionDrop
 	}
-	ask, code, why := flow.ValidateAsk(flow.Ask{
-		Kind: flow.KindGate, Task: t.ID, Question: flow.CapRunes(flow.CleanText(q), flow.MaxAskQuestionLen),
-		Options: opts, Recommend: rec,
+	ask, _, _, code, why := e.openEngineAskLocked(id, s, flow.Ask{
+		Kind: flow.KindGate, Task: t.ID, Head: h, AskedBy: rule, Question: q, Options: opts, Recommend: rec,
 	})
 	if code != "" {
 		return "", false, errors.New(code + ": " + why)
 	}
-	ask.ID, ask.Project, ask.Folder, ask.Head, ask.AskedBy = fmt.Sprintf("ask-%s-%d-%d", id, s.Seq+1, len(s.Asks)+1), id, s.Project.Folder, h, rule
-	ask, _, _ = flow.StepAsk(ask, flow.AskEvent{Kind: flow.EvAskOpen}, e.now())
-	s.Asks = append(s.Asks, ask)
 	return "opened owner gate ask " + ask.ID, false, nil
 }
 
