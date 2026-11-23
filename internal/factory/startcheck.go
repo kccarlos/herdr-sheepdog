@@ -232,7 +232,7 @@ func checkStartCLI(ctx context.Context, o DoctorOptions, cli, pkg, loginFix stri
 
 func hcExecNotFound(err error) bool {
 	var rpcErr *hc.Error
-	if !errors.As(err, &rpcErr) || rpcErr.Kind != "exec_failed" {
+	if !errors.As(err, &rpcErr) || rpcErr.Kind != "spawn_failed" {
 		return false
 	}
 	msg := strings.ToLower(rpcErr.Message)
@@ -498,35 +498,63 @@ func globToRegexp(pat string) (*regexp.Regexp, error) {
 			if j >= len(pat) {
 				return nil, fmt.Errorf("unclosed character class in %q", pat)
 			}
-			b.WriteByte('[')
+			var cls strings.Builder
 			if neg {
-				b.WriteString("^/")
+				cls.WriteString("^/")
 			}
-			for k := start; k < j; k++ {
-				switch pat[k] {
-				case '\\':
-					if k+1 < j {
-						if c := pat[k+1]; c == '\\' || c == ']' || c == '-' || c == '^' || c == '[' {
-							b.WriteByte('\\')
-						}
-						b.WriteByte(pat[k+1])
-						k++
-					} else {
-						b.WriteString(`\\`)
-					}
-				case ']':
-					b.WriteString(`\]`)
-				case '-':
-					if k == start || k == j-1 {
-						b.WriteString(`\-`)
-					} else {
-						b.WriteByte('-')
-					}
-				default:
-					b.WriteByte(pat[k])
+			writeClassByte := func(c byte) {
+				if c == '\\' || c == ']' || c == '-' || c == '^' || c == '[' {
+					cls.WriteByte('\\')
 				}
+				cls.WriteByte(c)
 			}
-			b.WriteByte(']')
+			for k := start; k < j; {
+				lo := pat[k]
+				if lo == '\\' {
+					lo, k = pat[k+1], k+2
+				} else {
+					k++
+				}
+				if k+1 < j && pat[k] == '-' {
+					hi := pat[k+1]
+					if hi == '\\' {
+						hi, k = pat[k+2], k+3
+					} else {
+						k += 2
+					}
+					if !neg && lo <= '/' && '/' <= hi {
+						if lo < '/' {
+							writeClassByte(lo)
+							if lo < '.' {
+								cls.WriteString("-.")
+							}
+						}
+						if hi > '/' {
+							cls.WriteByte('0')
+							if hi > '0' {
+								cls.WriteByte('-')
+								writeClassByte(hi)
+							}
+						}
+						continue
+					}
+					writeClassByte(lo)
+					cls.WriteByte('-')
+					writeClassByte(hi)
+					continue
+				}
+				if !neg && lo == '/' {
+					continue
+				}
+				writeClassByte(lo)
+			}
+			if cls.Len() == 0 {
+				b.WriteString(`[^\s\S]`)
+			} else {
+				b.WriteByte('[')
+				b.WriteString(cls.String())
+				b.WriteByte(']')
+			}
 			i = j + 1
 		default:
 			b.WriteString(regexp.QuoteMeta(pat[i : i+1]))
