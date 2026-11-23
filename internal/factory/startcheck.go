@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -106,7 +105,7 @@ func StartChecks(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	}
 	gh := checkStartGH(ctx, o, &r)
 	r.empty = r.view != nil && r.view.DefaultBranchRef.Name == ""
-	out = append(append(out, checkStartCLIs(ctx, o, r)...), gh, checkStartRemote(ctx, o, r), checkPRWorkflow(ctx, o, r))
+	out = append(append(out, checkStartCLIs(ctx, o, r, inHC)...), gh, checkStartRemote(ctx, o, r), checkPRWorkflow(ctx, o, r))
 	if gitFailure != nil {
 		return gitFailure
 	}
@@ -128,10 +127,14 @@ func checkGitVersion(ctx context.Context, o DoctorOptions) onboard.Result {
 	return resOK(name, firstLine(c.Stdout))
 }
 
-func checkStartCLIs(ctx context.Context, o DoctorOptions, r startRepo) []onboard.Result {
+func checkStartCLIs(ctx context.Context, o DoctorOptions, r startRepo, inHC bool) []onboard.Result {
 	var s flow.State
 	if o.DataDir != "" {
-		if id, err := findStoredProject(Paths{DataDir: o.DataDir}, r.root); err == nil {
+		match := underFolderLocal
+		if inHC {
+			match = underFolder
+		}
+		if id, err := findStoredProjectWith(Paths{DataDir: o.DataDir}, r.root, match); err == nil {
 			s, _ = LoadState(Paths{DataDir: o.DataDir}.State(id))
 		}
 	}
@@ -227,13 +230,22 @@ func checkStartCLI(ctx context.Context, o DoctorOptions, cli, pkg, loginFix stri
 	return resOK(name, cli+" is signed in")
 }
 
+func hcExecNotFound(err error) bool {
+	var rpcErr *hc.Error
+	if !errors.As(err, &rpcErr) || rpcErr.Kind != "exec_failed" {
+		return false
+	}
+	msg := strings.ToLower(rpcErr.Message)
+	return strings.Contains(msg, "no such file or directory") || strings.Contains(msg, "not found")
+}
+
 func checkStartGH(ctx context.Context, o DoctorOptions, r *startRepo) onboard.Result {
 	const name, fix = "gh push access", "run: gh auth login (an account with push access to the repo)"
 	if r.slug == "" {
 		return resSkip(name, "no GitHub remote to check access to")
 	}
 	c := o.run(ctx, r.root, "gh", "repo", "view", r.slug, "--json", "defaultBranchRef,viewerPermission")
-	if c.Exit == 127 || errors.Is(c.Err, exec.ErrNotFound) {
+	if c.Exit == 127 || errors.Is(c.Err, exec.ErrNotFound) || hcExecNotFound(c.Err) {
 		return resFail(name, "gh is not installed", "install GitHub CLI (https://cli.github.com), then "+fix)
 	}
 	if why, unk := authProbeUnknown(c); unk {
@@ -412,6 +424,9 @@ type prTrigger struct {
 }
 
 func (t prTrigger) matchesBase(base string) bool {
+	if t.hasBranches && t.hasIgnore {
+		return false
+	}
 	if base == "" {
 		return true
 	}
@@ -427,30 +442,31 @@ func (t prTrigger) matchesBase(base string) bool {
 func matchBranchList(patterns []string, branch string) bool {
 	matched := false
 	for _, p := range patterns {
-		if p == "" {
-			continue
-		}
 		neg := strings.HasPrefix(p, "!")
 		if neg {
 			p = p[1:]
 		}
-		if matchBranchPattern(p, branch) {
+		if p == "" {
+			continue
+		}
+		if re, err := globToRegexp(p); err == nil && re.MatchString(branch) {
 			matched = !neg
 		}
 	}
 	return matched
 }
 
-func matchBranchPattern(pat, branch string) bool {
-	if !strings.Contains(pat, "**") {
-		ok, _ := path.Match(pat, branch)
-		return ok
-	}
+// globToRegexp compiles a GitHub Actions filter pattern (* no slash, ** any,
+// ? one non-slash char, [...] classes, \ escapes) into a full-match regexp.
+func globToRegexp(pat string) (*regexp.Regexp, error) {
 	var b strings.Builder
 	b.WriteByte('^')
 	for i := 0; i < len(pat); {
 		switch {
-		case strings.HasPrefix(pat[i:], "**/"):
+		case pat[i] == '\\' && i+1 < len(pat):
+			b.WriteString(regexp.QuoteMeta(pat[i+1 : i+2]))
+			i += 2
+		case (i == 0 || pat[i-1] == '/') && strings.HasPrefix(pat[i:], "**/"):
 			b.WriteString("(?:.*/)?")
 			i += 3
 		case strings.HasPrefix(pat[i:], "**"):
@@ -462,14 +478,74 @@ func matchBranchPattern(pat, branch string) bool {
 		case pat[i] == '?':
 			b.WriteString("[^/]")
 			i++
+		case pat[i] == '[':
+			j := i + 1
+			neg := j < len(pat) && (pat[j] == '!' || pat[j] == '^')
+			if neg {
+				j++
+			}
+			start := j
+			if j < len(pat) && pat[j] == ']' {
+				j++
+			}
+			for j < len(pat) && pat[j] != ']' {
+				if pat[j] == '\\' && j+1 < len(pat) {
+					j += 2
+					continue
+				}
+				j++
+			}
+			if j >= len(pat) {
+				return nil, fmt.Errorf("unclosed character class in %q", pat)
+			}
+			b.WriteByte('[')
+			if neg {
+				b.WriteString("^/")
+			}
+			for k := start; k < j; k++ {
+				switch pat[k] {
+				case '\\':
+					if k+1 < j {
+						if c := pat[k+1]; c == '\\' || c == ']' || c == '-' || c == '^' || c == '[' {
+							b.WriteByte('\\')
+						}
+						b.WriteByte(pat[k+1])
+						k++
+					} else {
+						b.WriteString(`\\`)
+					}
+				case ']':
+					b.WriteString(`\]`)
+				case '-':
+					if k == start || k == j-1 {
+						b.WriteString(`\-`)
+					} else {
+						b.WriteByte('-')
+					}
+				default:
+					b.WriteByte(pat[k])
+				}
+			}
+			b.WriteByte(']')
+			i = j + 1
 		default:
 			b.WriteString(regexp.QuoteMeta(pat[i : i+1]))
 			i++
 		}
 	}
 	b.WriteByte('$')
-	re, err := regexp.Compile(b.String())
-	return err == nil && re.MatchString(branch)
+	return regexp.Compile(b.String())
+}
+
+func stripYAMLAnchor(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "&") {
+		return s
+	}
+	if i := strings.IndexAny(s, " \t"); i >= 0 {
+		return strings.TrimSpace(s[i:])
+	}
+	return ""
 }
 
 func trimYAMLQuote(s string) string {
@@ -485,7 +561,7 @@ func isYAMLListItem(s string) bool {
 }
 
 func parseYAMLList(v string) []string {
-	v = strings.TrimSpace(v)
+	v = stripYAMLAnchor(v)
 	if v == "" {
 		return nil
 	}
@@ -507,7 +583,7 @@ func parseYAMLList(v string) []string {
 }
 
 func parsePRFlowMap(v string, t *prTrigger) {
-	v = strings.TrimSpace(v)
+	v = stripYAMLAnchor(v)
 	if len(v) < 2 || v[0] != '{' || v[len(v)-1] != '}' {
 		return
 	}
@@ -552,10 +628,7 @@ func parsePRWorkflow(src, base string) (bool, bool) {
 	trimTrigger := func(s string) bool { return isPRTrigger(trimYAMLQuote(s)) }
 	for i, ln := range lines {
 		if k, rest, ok := yamlKey(ln); len(ln) > 0 && ln[0] != ' ' && ln[0] != '\t' && ok && k == "on" {
-			if strings.HasPrefix(rest, "&") {
-				_, rest, _ = strings.Cut(strings.ReplaceAll(rest, "\t", " "), " ")
-			}
-			if rest = strings.TrimSpace(rest); rest != "" {
+			if rest = stripYAMLAnchor(rest); rest != "" {
 				v, _ := collect(i, rest)
 				if len(v) < 2 || (v[0] != '[' || v[len(v)-1] != ']') && (v[0] != '{' || v[len(v)-1] != '}') {
 					return trimTrigger(v), false
@@ -625,7 +698,7 @@ func parsePRWorkflow(src, base string) (bool, bool) {
 								} else {
 									cur.hasBranches = true
 								}
-								if fval != "" {
+								if fval = stripYAMLAnchor(fval); fval != "" {
 									var raw string
 									raw, j = collect(j, fval)
 									*target = parseYAMLList(raw)
@@ -634,9 +707,16 @@ func parsePRWorkflow(src, base string) (bool, bool) {
 								}
 							}
 						}
-					} else if ind > child && listTarget != nil && isYAMLListItem(tr) {
-						if s := trimYAMLQuote(tr[1:]); s != "" {
-							*listTarget = append(*listTarget, s)
+					} else if ind > child && listTarget != nil {
+						if isYAMLListItem(tr) {
+							if s := trimYAMLQuote(tr[1:]); s != "" {
+								*listTarget = append(*listTarget, s)
+							}
+						} else if v := stripYAMLAnchor(tr); strings.HasPrefix(v, "[") {
+							var raw string
+							raw, j = collect(j, v)
+							*listTarget = append(*listTarget, parseYAMLList(raw)...)
+							listTarget = nil
 						}
 					}
 					continue
@@ -647,7 +727,7 @@ func parsePRWorkflow(src, base string) (bool, bool) {
 				}
 				if tk, val, tok := yamlKey(tr); tok && isPRTrigger(tk) {
 					cur = &prTrigger{}
-					if val != "" {
+					if val = stripYAMLAnchor(val); val != "" {
 						var raw string
 						raw, j = collect(j, val)
 						parsePRFlowMap(raw, cur)

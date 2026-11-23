@@ -86,7 +86,7 @@ func TestDoctorAllGreenAndCleansUpProbeTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	env := newFakeEnv("hc", "claude", "agy", "gh", "codexbar")
+	env := newFakeEnv("hc", "claude", "agy", "codexbar")
 	env.handlers["claude auth"] = func(_ string, extra []string, _ []string) CommandOutput {
 		if !slices.Contains(extra, "DISABLE_AUTOUPDATER=1") {
 			t.Errorf("claude auth missing DISABLE_AUTOUPDATER=1: %v", extra)
@@ -115,24 +115,6 @@ func TestDoctorAllGreenAndCleansUpProbeTerminal(t *testing.T) {
 			t.Errorf("agy canary argv = %v", argv)
 		}
 		return CommandOutput{Stdout: "OK\n", Duration: 55 * time.Millisecond}
-	}
-	env.handlers["gh auth"] = func(string, []string, []string) CommandOutput {
-		return CommandOutput{Exit: 0}
-	}
-	env.handlers["git -C"] = func(_ string, _ []string, argv []string) CommandOutput {
-		tail := strings.Join(argv[3:], " ")
-		switch tail {
-		case "rev-parse --show-toplevel":
-			return CommandOutput{Stdout: proj + "\n"}
-		case "remote":
-			return CommandOutput{Stdout: "origin\nupstream\n"}
-		case "symbolic-ref --quiet --short HEAD":
-			return CommandOutput{Stdout: "main\n"}
-		case "remote get-url --all origin", "remote get-url --push --all origin":
-			return CommandOutput{Stdout: "git@github.com:alice/repo.git\n"}
-		default:
-			return CommandOutput{Exit: 1}
-		}
 	}
 	env.handlers["codexbar --version"] = func(string, []string, []string) CommandOutput {
 		return CommandOutput{Stdout: "CodexBar 0.84.0\n"}
