@@ -291,6 +291,23 @@ func TestRowCases(t *testing.T) {
 		{"N12", with(func(in *In) { in.Facts.Lines = 1 }), []string{"open_size_recap@0"}}, // no estimate (cap 0) never turns the check off (KB-CAP-18)
 		{"N13", with(noRounds, ciFailed3), []string{"open_ci_recap@0"}},
 		{"N14", with(noRounds, overTime), []string{"open_time_recap@0"}},
+		{"N15", with(noRounds, prGone, withOverride("c1", ChecksPending, false)), []string{"push_and_open_pr@c1"}},
+		{"N15", with(noRounds, prBehind, withOverride("c1", ChecksPending, false)), []string{"push_and_open_pr@c1"}},
+		{"N15", with(noRounds, prGone, noAnswer, withOverride("c1", ChecksPending, false)), nil},
+		{"N15", with(noRounds, prGone, withOverride("c1", ChecksPending, false), func(in *In) { in.Facts.PR.Number, in.Facts.PR.OtherBase = 7, "release" }), []string{"wake_coordinator@pr_other_base@7@release"}},
+		{"N16", with(noRounds, conflict, withOverride("c1", ChecksGreen, false)), []string{"tell_worker_conflict@c1"}},
+		{"N16", with(noRounds, conflict, withOverride("c1", ChecksGreen, false), func(in *In) {
+			a0(in).Acts = []Act{{Key: "tell_worker_conflict@c1", Result: "done", At: now}}
+		}), nil},
+		{"N17", with(noRounds, pending, waitDep, withOverride("c1", ChecksPending, false)), nil},
+		{"N17", with(noRounds, pending, withOverride("c1", ChecksPending, false), func(in *In) { in.Facts.OtherMergeInFlight = true }), nil},
+		{"N19", with(noRounds, withOverride("c1", ChecksGreen, false)), []string{"record_accept@c1", "merge@c1"}},
+		{"N19", with(noRounds, pending, behind, baseRedF, reviewReq, workingF, withOverride("c1", ChecksPending, false)), []string{"record_accept@c1", "merge@c1"}},
+		{"N19", with(noRounds, red, withOverride("c1", ChecksPending, false), asked, func(in *In) {
+			a0(in).Acts = append(a0(in).Acts, Act{Key: "record_accept@c1", Result: "done", At: now})
+		}), nil},
+		{"N19b", with(noRounds, pending, withOverride("c1", ChecksGreen, false)), []string{"spend_override@c1"}},
+		{"N19b", with(noRounds, red, withOverride("c1", ChecksPending, false)), []string{"spend_override@c1"}},
 		{"N42", with(atCap), []string{"record_accept@c1", "merge@c1"}}, // at the cap is not over it
 		{"N20", with(mergeTip), []string{"move_h_merge_only@m2"}},
 		{"N20", with(func(in *In) { in.Facts.PR.Head, in.Facts.PR.HeadRel, in.Facts.PR.HeadMergeOnly = "m2", RelAhead, true }), []string{"move_h_merge_only@m2"}},
@@ -399,9 +416,24 @@ func TestRowOrder(t *testing.T) {
 		{"N6", "N14", false, with(openRecap, noRounds, overTime)},
 		{"N12", "N13", true, with(overCap, noRounds, ciFailed3)},
 		{"N13", "N14", true, with(noRounds, ciFailed3, overTime)},
-		{"N14", "N20", true, with(noRounds, overTime, mergeTip)},
+		{"N14", "N20", false, with(noRounds, overTime, mergeTip)},
 		{"N14", "N29", false, with(noRounds, overTime)},
 		{"N13", "N29", false, with(noRounds, ciFailed3)},
+		{"N5", "N19", false, with(noRounds, withOverride("c1", ChecksGreen, false), func(in *In) {
+			a0(in).Acts = []Act{{Key: "merge@c1", Result: "failed", Class: ClassSettled, At: now}}
+		})},
+		{"N7", "N15", false, with(noRounds, diverged, prGone, withOverride("c1", ChecksPending, false))},
+		{"N15", "N17", false, with(noRounds, prGone, waitDep, withOverride("c1", ChecksPending, false))},
+		{"N15", "N20", false, with(noRounds, prGone, mergeTip, withOverride("c1", ChecksPending, false))},
+		{"N16", "N17", true, with(noRounds, conflict, waitDep, withOverride("c1", ChecksGreen, false))},
+		{"N16", "N19", false, with(noRounds, conflict, withOverride("c1", ChecksGreen, false))},
+		{"N16", "N19b", false, with(noRounds, conflict, red, withOverride("c1", ChecksGreen, false))},
+		{"N17", "N19", true, with(noRounds, waitDep, withOverride("c1", ChecksGreen, false))},
+		{"N17", "N19b", false, with(noRounds, red, waitDep, withOverride("c1", ChecksGreen, false))},
+		{"N19", "N20", false, with(noRounds, mergeTip, withOverride("c1", ChecksGreen, false))},
+		{"N19b", "N20", true, with(noRounds, red, mergeTip, withOverride("c1", ChecksGreen, false))},
+		{"N19", "N22", false, with(changes, withOverride("c1", ChecksGreen, false))},
+		{"N19b", "N29", false, with(noRounds, red, withOverride("c1", ChecksGreen, false))},
 		{"N20", "N22", true, with(changes, mergeTip)},
 		{"N12", "N23", false, with(overCap, tipAheadF)},
 		{"N22", "N23", true, with(changes, tipAheadF)},
@@ -824,6 +856,8 @@ func TestLadder(t *testing.T) {
 		row, answer string
 		in          In
 	}{
+		{"L1", Passed, with(noRounds, withOverride("c1", ChecksPending, false))},
+		{"L1", Passed, with(changes, withOverride("c1", ChecksGreen, false))},
 		{"L7", Review, with(noRounds)},
 		{"L7", Review, with(func(in *In) { a0(in).Ready = append(a0(in).Ready, Ready{Head: "c2"}) })},
 		{"L8", Review, with(onePass)},
@@ -858,10 +892,10 @@ func TestLadder(t *testing.T) {
 	}
 }
 
-// TestLadderOrder checks L7/L8/L9/L10/L12/L13 ordering and neighbour swaps
+// TestLadderOrder checks L1/L7/L8/L9/L10/L12/L13 ordering and neighbour swaps
 // (design.md 16, KB-REV-62, KB-CAP-1, KB-CAP-9).
 func TestLadderOrder(t *testing.T) {
-	wantIDs := []string{"L7", "L8", "L9", "L10", "L12", "L13", "L-"}
+	wantIDs := []string{"L1", "L7", "L8", "L9", "L10", "L12", "L13", "L-"}
 	var gotIDs []string
 	for _, r := range LadderRows {
 		gotIDs = append(gotIDs, r.ID)
@@ -869,9 +903,23 @@ func TestLadderOrder(t *testing.T) {
 	if !slices.Equal(gotIDs, wantIDs) {
 		t.Fatalf("ladder rows = %v, want %v", gotIDs, wantIDs)
 	}
+	// Neighbours L1 and L7: both hold on an override with no rounds; L1 wins
+	// (Passed), and swapping makes L7 win (Review).
+	ovrNoRounds := with(noRounds, withOverride("c1", ChecksGreen, false))
+	if !LadderRows[0].When(ovrNoRounds) || !LadderRows[1].When(ovrNoRounds) {
+		t.Fatal("expected both L1 and L7 conditions to hold on override with no rounds")
+	}
+	if r, d := FirstMatch(LadderRows, ovrNoRounds); r.ID != "L1" || d.Why != Passed {
+		t.Fatalf("L1 vs L7: got %s (%s), want L1 (%s)", r.ID, d.Why, Passed)
+	}
+	swap17 := slices.Clone(LadderRows)
+	swap17[0], swap17[1] = swap17[1], swap17[0]
+	if r, d := FirstMatch(swap17, ovrNoRounds); r.ID != "L7" || d.Why != Review {
+		t.Fatalf("swapped L1/L7: got %s (%s), want L7 (%s)", r.ID, d.Why, Review)
+	}
 	// Neighbours L7 and L8: disjoint on both noRounds and onePass, so swapping keeps each winner.
 	swap78 := slices.Clone(LadderRows)
-	swap78[0], swap78[1] = swap78[1], swap78[0]
+	swap78[1], swap78[2] = swap78[2], swap78[1]
 	if r, _ := FirstMatch(swap78, with(noRounds)); r.ID != "L7" {
 		t.Fatalf("swapped L7/L8 on noRounds matched %s, want L7", r.ID)
 	}
@@ -880,20 +928,20 @@ func TestLadderOrder(t *testing.T) {
 	}
 	// Neighbours L8 and L9: both hold on onePass; L8 wins, and swapping makes L9 win.
 	in := with(onePass)
-	if !LadderRows[1].When(in) || !LadderRows[2].When(in) {
+	if !LadderRows[2].When(in) || !LadderRows[3].When(in) {
 		t.Fatal("expected both L8 and L9 conditions to hold on onePass")
 	}
 	if r, d := FirstMatch(LadderRows, in); r.ID != "L8" || d.Why != Review {
 		t.Fatalf("L8 vs L9: got %s (%s), want L8 (%s)", r.ID, d.Why, Review)
 	}
 	swap89 := slices.Clone(LadderRows)
-	swap89[1], swap89[2] = swap89[2], swap89[1]
+	swap89[2], swap89[3] = swap89[3], swap89[2]
 	if r, d := FirstMatch(swap89, in); r.ID != "L9" || d.Why != Passed {
 		t.Fatalf("swapped L8/L9: got %s (%s), want L9 (%s)", r.ID, d.Why, Passed)
 	}
 	// Neighbours L9 and L10: disjoint on landing() (pass) and rejected changes.
 	swap910 := slices.Clone(LadderRows)
-	swap910[2], swap910[3] = swap910[3], swap910[2]
+	swap910[3], swap910[4] = swap910[4], swap910[3]
 	if r, _ := FirstMatch(swap910, landing()); r.ID != "L9" {
 		t.Fatalf("swapped L9/L10 on landing() matched %s, want L9", r.ID)
 	}
@@ -905,28 +953,28 @@ func TestLadderOrder(t *testing.T) {
 	rejStreak := with(streakRecap, func(in *In) {
 		a0(in).Rejects = []Reject{{Head: "c1", Round: 3, Why: "wrong"}}
 	})
-	if !LadderRows[3].When(rejStreak) || !LadderRows[4].When(rejStreak) {
+	if !LadderRows[4].When(rejStreak) || !LadderRows[5].When(rejStreak) {
 		t.Fatal("expected both L10 and L12 conditions to hold on rejected streak")
 	}
 	if r, d := FirstMatch(LadderRows, rejStreak); r.ID != "L10" || d.Why != Review {
 		t.Fatalf("L10 vs L12: got %s (%s), want L10 (%s)", r.ID, d.Why, Review)
 	}
 	swap1012 := slices.Clone(LadderRows)
-	swap1012[3], swap1012[4] = swap1012[4], swap1012[3]
+	swap1012[4], swap1012[5] = swap1012[5], swap1012[4]
 	if r, d := FirstMatch(swap1012, rejStreak); r.ID != "L12" || d.Why != RecapAnswer {
 		t.Fatalf("swapped L10/L12: got %s (%s), want L12 (%s)", r.ID, d.Why, RecapAnswer)
 	}
 	// Neighbours L12 and L13: both hold on streakRecap; L12 wins (Recap),
 	// and swapping makes L13 win (Fix).
 	sIn := with(streakRecap)
-	if !LadderRows[4].When(sIn) || !LadderRows[5].When(sIn) {
+	if !LadderRows[5].When(sIn) || !LadderRows[6].When(sIn) {
 		t.Fatal("expected both L12 and L13 conditions to hold on streakRecap")
 	}
 	if r, d := FirstMatch(LadderRows, sIn); r.ID != "L12" || d.Why != RecapAnswer {
 		t.Fatalf("L12 vs L13: got %s (%s), want L12 (%s)", r.ID, d.Why, RecapAnswer)
 	}
 	swap1213 := slices.Clone(LadderRows)
-	swap1213[4], swap1213[5] = swap1213[5], swap1213[4]
+	swap1213[5], swap1213[6] = swap1213[6], swap1213[5]
 	if r, d := FirstMatch(swap1213, sIn); r.ID != "L13" || d.Why != Fix {
 		t.Fatalf("swapped L12/L13: got %s (%s), want L13 (%s)", r.ID, d.Why, Fix)
 	}
