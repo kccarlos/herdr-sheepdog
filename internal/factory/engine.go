@@ -372,7 +372,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		e.passPools, e.passPoolCheck, e.passCoordFallback, e.passBaseHCErr = nil, nil, false, nil
 		delete(e.storeENOSPC, id)
 	}()
-	ctx, cancel := context.WithTimeout(world.GitRepository(ctx, s.Project.Folder), world.GitPassTimeout)
+	ctx, cancel := context.WithTimeout(world.WithProcessTable(world.GitRepository(ctx, s.Project.Folder), time.Duration(s.Settings.StartMinutes)*time.Minute), world.GitPassTimeout)
 	defer cancel()
 	dt := e.passDelta(id)
 	hcChecked, coordErr := e.observeCoordLocked(ctx, id, &s)

@@ -21,6 +21,7 @@ const (
 	gitLocalLimit     = 20 * time.Second
 	gitNetworkLimit   = 40 * time.Second
 	ghRequestLimit    = 30 * time.Second
+	psCommandLimit    = 5 * time.Second
 	GitStageTimeout   = gitLocalLimit + gitReplyGrace + 2*time.Second
 	GitNetworkTimeout = gitNetworkLimit + gitReplyGrace + 2*time.Second
 	GitPassTimeout    = 90 * time.Second
@@ -164,13 +165,15 @@ func (g *Git) run(ctx context.Context, dir, command string, args []string, env m
 	if g == nil || g.client == nil {
 		return hc.ExecResult{}, &GitError{command: command, RPC: errors.New("command requires a herdr-core client")}
 	}
-	dir, err := absolutePath(dir)
-	if err != nil {
-		return hc.ExecResult{}, &GitError{command: command, RPC: err}
+	projectCommand := command == "git" || command == "/bin/sh"
+	if dir != "" || projectCommand || command == "gh" {
+		var err error
+		if dir, err = absolutePath(dir); err != nil {
+			return hc.ExecResult{}, &GitError{command: command, RPC: err}
+		}
 	}
 	folder, _ := ctx.Value(gitRepoKey{}).(string)
 	repo := cmp.Or(folder, dir)
-	projectCommand := command == "git" || command == "/bin/sh"
 	if projectCommand && g.suppressed(repo) {
 		return hc.ExecResult{}, ErrGitSuppressed
 	}
@@ -182,6 +185,8 @@ func (g *Git) run(ctx context.Context, dir, command string, args []string, env m
 	network := verb == "push" || verb == "fetch" || verb == "ls-remote"
 	if command == "gh" {
 		budget = ghRequestLimit
+	} else if command == "ps" {
+		budget = psCommandLimit
 	} else if network {
 		budget = gitNetworkLimit
 	}
