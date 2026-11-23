@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func withOverride(head string, shown Checks, spent bool) func(*In) {
+func withOverride(head string, shown Checks, spent bool) func(*In) { //nolint:unparam // helper kept general for later histories
 	return func(in *In) {
 		a0(in).Overrides = append(a0(in).Overrides, Override{
 			Head:        head,
@@ -23,13 +23,13 @@ func withOverride(head string, shown Checks, spent bool) func(*In) {
 	}
 }
 
-func isAcceptAndMergeAt(asked []string, h string) bool {
+func isAcceptAndMergeAt(asked []string, h string) bool { //nolint:unparam // helper kept general for later histories
 	return len(asked) == 2 &&
 		strings.Contains(asked[0], "accept") && strings.HasSuffix(asked[0], "@"+h) &&
 		asked[1] == key(AskMerge, h)
 }
 
-func isSpendOverrideAt(asked []string, h string) bool {
+func isSpendOverrideAt(asked []string, h string) bool { //nolint:unparam // helper kept general for later histories
 	return len(asked) == 1 && (asked[0] == AskSpendOverride || asked[0] == key(AskSpendOverride, h))
 }
 
