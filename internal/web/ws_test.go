@@ -614,6 +614,12 @@ func TestWSWithoutVoice(t *testing.T) {
 	c.send(wsproto.SimulateText("yes"))
 	in := c.expect(wsproto.TypeTranscript)
 	out := c.expect(wsproto.TypeTranscript)
+	if in.Dir != "in" || in.Text != "yes" || out.Dir != "out" || !strings.Contains(out.Text, "auth asks to run printf") {
+		t.Fatalf("re-ask transcripts = %+v %+v", in, out)
+	}
+	c.send(wsproto.SimulateText("yes"))
+	in = c.expect(wsproto.TypeTranscript)
+	out = c.expect(wsproto.TypeTranscript)
 	if in.Dir != "in" || in.Text != "yes" || out.Dir != "out" || !strings.Contains(out.Text, "Told auth yes") {
 		t.Fatalf("transcripts = %+v %+v", in, out)
 	}

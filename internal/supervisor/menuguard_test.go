@@ -84,10 +84,10 @@ func TestIdleMenuAnswerableByVoice(t *testing.T) {
 		sent   bool
 		reason string
 	}{
-		{"skip by voice", herdr.StateIdle, "Skip it.", true, ""},
+		{"skip by voice", herdr.StateIdle, "Skip it, auth.", true, ""},
 		{"by number", herdr.StateIdle, "option two", true, ""},
 		{"words about something else", herdr.StateIdle, "Tell codex to run the tests.", false, "auth is showing a menu, but the user's last words are not about it"},
-		{"working pane", herdr.StateWorking, "Skip it.", false, "has no pending approval prompt now"},
+		{"working pane", herdr.StateWorking, "Skip it, auth.", false, "has no pending approval prompt now"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t)
@@ -96,6 +96,15 @@ func TestIdleMenuAnswerableByVoice(t *testing.T) {
 			h.clock.Advance(time.Second)
 			h.hear(c.words)
 			_, err := brainHost{s: h.sup}.AnswerPrompt(context.Background(), "w5:p1", skip)
+			if c.words == "option two" {
+				if err == nil || len(h.sendKeysRequests()) != 0 {
+					t.Fatalf("untold bare option two = %v, keys = %v", err, h.sendKeysRequests())
+				}
+				h.playText(h.lastPushText())
+				h.clock.Advance(time.Second)
+				h.hear(c.words)
+				_, err = brainHost{s: h.sup}.AnswerPrompt(context.Background(), "w5:p1", skip)
+			}
 			sent := len(h.sendKeysRequests()) == 1
 			if sent != c.sent {
 				t.Fatalf("sent = %v (err %v), want %v", sent, err, c.sent)
@@ -143,6 +152,7 @@ func TestMenuGuardAfterADecline(t *testing.T) {
 			if !ok || len(p.NoKeys) == 0 {
 				t.Fatalf("pending = %+v", p)
 			}
+			h.playText(p.SpokenSummary)
 			h.hear("No, don't do that.")
 			if _, err := (brainHost{s: h.sup}).AnswerPrompt(context.Background(), "w5:p1", p.NoKeys); err != nil {
 				t.Fatal(err)

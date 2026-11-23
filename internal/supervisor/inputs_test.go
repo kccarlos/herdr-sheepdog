@@ -432,7 +432,7 @@ func TestRevivedPromptKeepsWhenThePaneActuallyBlocked(t *testing.T) {
 	}
 
 	h.clock.Advance(30 * time.Second) // t: the pane has been blocked 30s
-	h.sup.ShepherdInput(InputTyped, "yes please")
+	h.sup.ShepherdInput(InputTyped, "yes please, auth")
 
 	h.clock.Advance(4 * time.Second) // t+4s: send_keys revives the prompt
 	res, err := (brainHost{s: h.sup}).AnswerPrompt(context.Background(), "w5:p1", []string{"y"})

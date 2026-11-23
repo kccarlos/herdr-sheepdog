@@ -368,11 +368,32 @@ transcription, typed text, or a tap on the question — that arrived after
 the prompt appeared (when it was first seen, per pane) and within
 `supervisor.authorise_window_s`, and whose
 own words (never the voice model's `to_supervisor` argument) answer it:
-never empty, and a "no" never approves. Nor can words the user began
-before a question was told to them answer it while another question
-they had heard was still open or had just closed (the displacement rail;
-the daemon then tells them why and asks again, and the exact rule is in
-`internal/supervisor/displaced.go`). A `to_supervisor` call with no
+never empty, and a "no" never approves. A bare spoken or typed answer (approvals and declines alike) never sends keys unless the question was
+`told` before the user's speech began — on voice, a whole spoken turn
+(`playRun`) tells only the newest hand-over (the last question whose
+`pending_id` push, re-asks included, went to the voice), and only when
+the run started after that question became the newest hand-over, named
+its agent by exact alias or spoken name, and played to its end
+(`voice.EventPlayed` from `drained`, or `flushed` within 150 ms
+`cutTolerance`, with told time `max(Start, End - 300 ms)` for client
+drain-report lag; a cut run never tells, and a client without `playback`
+reports never tells by voice); other agents a run names are told
+nothing, so of two questions announced back to back the older may need
+one more re-ask. When the newest hand-over replaced an untold question
+of the same pane, the next run naming that agent tells nothing: it may
+be the old prompt's announcement. On typed routes (`POST /api/turn`, `--voice=off`), the
+text returned to the client tells a question already open when the turn
+began only if it reads out the question's spoken summary. And no other
+open question on another pane may have been told at the same time or
+later. On voice no command or question content is matched, so a known
+limit is that a user may hear `"auth needs approval"` without the full
+command and `auth` still counts as `told`: the rail stops a displaced
+bare answer landing on an unheard agent's question, not model
+paraphrase. Naming the agent authorises unless another agent with an open or recent
+`told` question is named or that pane had a different `told` question
+within `supervisor.authorise_window_s` (`internal/supervisor/displaced.go`;
+when refused, the daemon states why and re-asks once per input, and
+`told` is not persisted across restarts). A `to_supervisor` call with no
 such input since the previous call and the last push is the voice
 model's own initiative and does nothing
 (`supervisor.voice_initiative_ignored`): that is the one relay guard

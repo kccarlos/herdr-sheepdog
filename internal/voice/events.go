@@ -1,5 +1,7 @@
 package voice
 
+import "time"
+
 // Status of the connection to the voice model, mirrored to the browser as
 // wsproto status messages.
 type Status int
@@ -111,6 +113,12 @@ type EventPush struct {
 // (audio played out). Useful for "wait until quiet" logic and tests.
 type EventTurnComplete struct{}
 
+// EventPlayed is emitted when the client confirms a whole spoken run played out.
+type EventPlayed struct {
+	Text       string
+	Start, End time.Time
+}
+
 // EventResumed is emitted after a reconnect. Handle is the resumption
 // handle used (empty when none was available); ContextLost is true when
 // the new connection could not resume the previous conversation, so the
@@ -144,6 +152,7 @@ func (EventToolCall) isEvent()     {}
 func (EventToolResult) isEvent()   {}
 func (EventPush) isEvent()         {}
 func (EventTurnComplete) isEvent() {}
+func (EventPlayed) isEvent()       {}
 func (EventResumed) isEvent()      {}
 func (EventPushUnheard) isEvent()  {}
 func (EventError) isEvent()        {}

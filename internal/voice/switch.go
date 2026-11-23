@@ -726,6 +726,12 @@ func (sw *Switcher) ClientSpeaking(on bool) {
 	}
 }
 
+// PlaybackReports reports whether the current session's client sends playback reports.
+func (sw *Switcher) PlaybackReports() bool {
+	p, ok := sw.cur().(interface{ PlaybackReports() bool })
+	return ok && p.PlaybackReports()
+}
+
 // LastPlayback is the current session's last client playback report.
 func (sw *Switcher) LastPlayback() PlaybackReport {
 	if p, ok := sw.cur().(interface{ LastPlayback() PlaybackReport }); ok {

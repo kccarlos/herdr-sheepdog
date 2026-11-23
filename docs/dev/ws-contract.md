@@ -422,6 +422,11 @@ What the daemon does with them:
   its output transcript: the daemon drops silent output audio before it
   reaches `/ws`, so the model's own timeline is not the stream the
   client played.
+- **Whole runs feed the approval rail.** Each assistant turn (`playRun`)
+  that finishes playing on `drained` or `flushed` within 150 ms of its
+  end emits `voice.EventPlayed {Text, Start, End}` (queued back-to-back
+  turns preserved); a cut run emits none, and a client without
+  `playback` reports emits none ([roles.md](roles.md#the-one-rail)).
 - Each report is logged as `voice.playback {state, played_ms, run_ms}`
   (`run_ms`: audio the daemon sent in that run; a cut adds `cut`,
   `heard`, `said`).

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/cli"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -69,6 +70,18 @@ func (l *lazyPusher) Reset(reason string) error {
 		return r.Reset(reason)
 	}
 	return nil
+}
+
+func (l *lazyPusher) cur() supervisor.Pusher { l.mu.Lock(); defer l.mu.Unlock(); return l.p }
+func (l *lazyPusher) PlaybackReports() bool {
+	pr, ok := l.cur().(interface{ PlaybackReports() bool })
+	return !ok || pr.PlaybackReports()
+}
+func (l *lazyPusher) LastSpeechOnset() (time.Time, bool) {
+	if lo, ok := l.cur().(interface{ LastSpeechOnset() (time.Time, bool) }); ok {
+		return lo.LastSpeechOnset()
+	}
+	return time.Time{}, false
 }
 
 // lazyQuerier lets the supervisor be built (with a non-nil Querier, so
