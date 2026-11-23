@@ -20,6 +20,7 @@ import (
 const (
 	DeviceIOS     = "ios"
 	DeviceIPadOS  = "ipados"
+	DeviceMacOS   = "macos"
 	DeviceBrowser = "browser"
 )
 
@@ -242,6 +243,8 @@ func deviceKindName(kind string) string {
 		return "iPhone"
 	case DeviceIPadOS:
 		return "iPad"
+	case DeviceMacOS:
+		return "Mac"
 	}
 	return "Browser"
 }
