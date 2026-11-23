@@ -32,6 +32,7 @@ type State struct {
 	Project  Project  `json:"project"`
 	Settings Settings `json:"settings"`
 	Tasks    []Task   `json:"tasks"`
+	Asks     []Ask    `json:"asks,omitempty"`
 }
 
 // Alert kinds (design.md 6, 7.3).

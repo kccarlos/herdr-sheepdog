@@ -17,6 +17,7 @@ Read the brief and the code it touches, and list every place your change must re
 Turn each outcome's proof into a check you can run, and run it now: it should fail, and a check that never reaches what it tests proves nothing. [prove it works]
 If the task needs no change, or every outcome's check already passes before you write anything (a test that does not exist yet has not passed), commit nothing and run `{sheepdog} factory report ready --nothing-to-change --why "<why, with the check's passing output>"`. [prompts.md 5.3; replay W8]
 If it needs a choice only the owner can make: before your first commit, write nothing and run `{sheepdog} factory report ready --nothing-to-change --why "<the question, the options, your pick>"`, and the coordinator answers by sending the task back; after a commit that report is refused, so take your pick and name the question and your pick in `--skipped` when you report ready. [replay W1; design.md 7.2]
+When blocked on a decision mid-task, run `{sheepdog} factory report ask "<question>" --option "<choice A>" --option "<choice B>" --recommend "<choice>"` and wait for the coordinator's answer. [prompts.md 5.3; KB-ASK-2]
 
 The smallest complete change:
 No option, wrapper or "for later" code nobody asked for; deleting beats adding (one progress bar here was 1,260 lines; the same brief again came to 165). [Ponytail]

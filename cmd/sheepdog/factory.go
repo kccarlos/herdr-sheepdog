@@ -35,7 +35,7 @@ var factoryDoctorRunner = func(ctx context.Context, o factory.DoctorOptions) []o
 var factoryStartChecks = factory.StartChecks
 
 func printFactoryUsage(w io.Writer) {
-	fprintln(w, "usage: sheepdog factory <start|stop|status|log|plan|task|recap|report|doctor> [flags] [folder]")
+	fprintln(w, "usage: sheepdog factory <start|stop|status|log|plan|task|recap|report|ask|answer|doctor> [flags] [folder]")
 	fprintln(w, "  start <folder> --goal \"<sentence>\" [--max-running N]   start the factory coordinator for a repo")
 	fprintln(w, "  stop [<folder>]                      stop a started factory project and its runs")
 	fprintln(w, "  status [<folder>]                    one line per task: id, title, stage, last logged rule, age and why")
@@ -46,13 +46,16 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "  recap decide <task> <choice> --why \"<why>\" [--child '<json>' ...]  (coordinator only) decide an open recap")
 	fprintln(w, "  report ready [--proof \"<outcome>=<cmd>\" ...] [--artifact \"<outcome>=<path>\" ...] [--touched \"<places>\"] [--skipped \"<what was left out>\"] [--reject \"<why>\"]  (worker only) run proofs and report HEAD ready, or reject findings")
 	fprintln(w, "  report ready --nothing-to-change --why \"<why>\"  (worker only) report that the task needs no change")
+	fprintln(w, "  report ask \"<question>\" --option \"<choice>\" --option \"<choice>\" --recommend \"<choice>\"  (worker/reviewer) ask the coordinator a decision question")
+	fprintln(w, "  ask --kind <kind> [--task <task>] \"<question>\" --option \"<choice>\" --option \"<choice>\" --recommend \"<choice>\"  (coordinator) open an ask (gated kinds go to the owner)")
+	fprintln(w, "  answer <ask> \"<option>\" [--why \"<why>\"]  (coordinator) answer an open decision ask")
 	fprintln(w, "  doctor                               check unattended factory prerequisites:")
 	fprintln(w, "           herdr-core (hc), timed project-volume probe inside herdr-core")
 	fprintln(w, "           (macOS consent prompts and external-disk stalls), at least one")
 	fprintln(w, "           logged-in agent CLI (claude, codex or agy) plus a canary start")
 	fprintln(w, "           inside herdr-core, gh login and matching origin fetch and push URLs, and")
 	fprintln(w, "           codexbar. Exit 1 on FAIL.")
-	fprintln(w, "flags: --goal TEXT, --max-running N, --proof OUTCOME=CMD, --artifact OUTCOME=PATH, --touched TEXT, --skipped TEXT, --reject WHY, --nothing-to-change, --why TEXT, --child JSON, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
+	fprintln(w, "flags: --goal TEXT, --max-running N, --proof OUTCOME=CMD, --artifact OUTCOME=PATH, --touched TEXT, --skipped TEXT, --reject WHY, --nothing-to-change, --why TEXT, --child JSON, --kind KIND, --task ID, --option TEXT, --recommend TEXT, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
 }
 
 // runFactory dispatches the `sheepdog factory` command group.
@@ -76,6 +79,10 @@ func runFactory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return runFactoryTask(ctx, args[1:], stdout, stderr)
 	case "report":
 		return runFactoryReport(ctx, args[1:], stdout, stderr)
+	case "ask":
+		return runFactoryAsk(ctx, args[1:], false, stdout, stderr)
+	case "answer":
+		return runFactoryAnswer(ctx, args[1:], stdout, stderr)
 	case "doctor":
 		return runFactoryDoctor(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
@@ -88,10 +95,15 @@ func runFactory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 }
 
-func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("factory "+sub, flag.ContinueOnError)
+func factoryFlags(name string, stderr io.Writer) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { printFactoryUsage(stderr) }
+	return fs
+}
+
+func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stderr io.Writer) int {
+	fs := factoryFlags("factory "+sub, stderr)
 	configPath, goal, maxRunning := fs.String("config", "", "config file"), fs.String("goal", "", "project goal"), fs.Int("max-running", 0, "maximum concurrent tasks")
 	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
 		return flagExit(err)
@@ -149,9 +161,7 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 // unpersisted in-memory alerts) or falls back to stored state and log.jsonl
 // when the daemon is stopped.
 func runFactoryStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("factory status", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() { printFactoryUsage(stderr) }
+	fs := factoryFlags("factory status", stderr)
 	configPath := fs.String("config", "", "config file")
 	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
 		return flagExit(err)
@@ -195,9 +205,7 @@ func runFactoryStatus(ctx context.Context, args []string, stdout, stderr io.Writ
 // runFactoryLog prints a project's log.jsonl, read straight from the data
 // dir, one line per engine step with the rule behind it.
 func runFactoryLog(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("factory log", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() { printFactoryUsage(stderr) }
+	fs := factoryFlags("factory log", stderr)
 	configPath, n := fs.String("config", "", "config file"), fs.Int("n", 0, "last N lines")
 	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
 		return flagExit(err)
@@ -244,37 +252,33 @@ func runFactoryPlan(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err == nil && !json.Valid(raw) {
 		err = errors.New(args[1] + " is not valid JSON")
 	}
-	if err == nil {
-		err = postFactoryReport(ctx, "plan "+args[0], json.RawMessage(raw))
-	}
 	if err != nil {
 		fprintf(stderr, "sheepdog factory plan %s: %v\n", args[0], err)
 		return 1
 	}
-	fprintf(stdout, "plan %s\n", map[string]string{"apply": "applied", "amend": "amended"}[args[0]])
-	return 0
+	return sendFactoryReport(ctx, "factory plan "+args[0], "plan "+args[0], json.RawMessage(raw), "plan "+map[string]string{"apply": "applied", "amend": "amended"}[args[0]], stdout, stderr)
 }
 
 // runFactoryTask sends `task <action> <task> --why "<why>"` with the run's token.
 func runFactoryTask(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("factory task", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() { printFactoryUsage(stderr) }
-	why := fs.String("why", "", "reason for the command")
+	a0, a1, why, exit := parseTwoArgWhy("factory task", args, stderr)
+	if exit >= 0 {
+		return exit
+	}
+	return sendFactoryReport(ctx, "factory task "+a0, "task", map[string]string{"action": a0, "task": a1, "why": why}, "task "+a1+": "+a0, stdout, stderr)
+}
+
+func parseTwoArgWhy(name string, args []string, stderr io.Writer) (string, string, string, int) {
+	fs := factoryFlags(name, stderr)
+	why := fs.String("why", "", "reason")
 	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
-		return flagExit(err)
+		return "", "", "", flagExit(err)
 	}
 	if fs.NArg() != 2 {
 		printFactoryUsage(stderr)
-		return 2
+		return "", "", "", 2
 	}
-	raw, _ := json.Marshal(map[string]string{"action": fs.Arg(0), "task": fs.Arg(1), "why": *why})
-	if err := postFactoryReport(ctx, "task", raw); err != nil {
-		fprintf(stderr, "sheepdog factory task %s: %v\n", fs.Arg(0), err)
-		return 1
-	}
-	fprintf(stdout, "task %s: %s\n", fs.Arg(1), fs.Arg(0))
-	return 0
+	return fs.Arg(0), fs.Arg(1), *why, -1
 }
 
 // runFactoryRecap sends `recap decide <task> <choice> --why "<why>" [--child '<json>' ...]` with the run's token.
@@ -283,9 +287,7 @@ func runFactoryRecap(ctx context.Context, args []string, stdout, stderr io.Write
 		printFactoryUsage(stderr)
 		return 2
 	}
-	fs := flag.NewFlagSet("factory recap decide", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() { printFactoryUsage(stderr) }
+	fs := factoryFlags("factory recap decide", stderr)
 	why := fs.String("why", "", "reason for the recap decision")
 	var children []json.RawMessage
 	fs.Func("child", "child task JSON (repeatable, for split)", func(v string) error {
@@ -302,13 +304,7 @@ func runFactoryRecap(ctx context.Context, args []string, stdout, stderr io.Write
 		printFactoryUsage(stderr)
 		return 2
 	}
-	raw, _ := json.Marshal(map[string]any{"task": fs.Arg(0), "choice": fs.Arg(1), "why": *why, "children": children})
-	if err := postFactoryReport(ctx, "recap decide", raw); err != nil {
-		fprintf(stderr, "sheepdog factory recap decide: %v\n", err)
-		return 1
-	}
-	fprintf(stdout, "recap %s: %s\n", fs.Arg(0), fs.Arg(1))
-	return 0
+	return sendFactoryReport(ctx, "factory recap decide", "recap decide", map[string]any{"task": fs.Arg(0), "choice": fs.Arg(1), "why": *why, "children": children}, "recap "+fs.Arg(0)+": "+fs.Arg(1), stdout, stderr)
 }
 
 var proofTimeout, proofOutputLimit = 5 * time.Minute, 64 * 1024
@@ -331,13 +327,14 @@ func (l *limitedWriter) Write(p []byte) (int, error) {
 }
 
 func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) >= 1 && args[0] == "ask" {
+		return runFactoryAsk(ctx, args[1:], true, stdout, stderr)
+	}
 	if len(args) < 1 || args[0] != "ready" {
 		printFactoryUsage(stderr)
 		return 2
 	}
-	fs := flag.NewFlagSet("factory report ready", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() { printFactoryUsage(stderr) }
+	fs := factoryFlags("factory report ready", stderr)
 	why := fs.String("reject", "", "reject every finding of the latest review round with a reason")
 	nothing := fs.Bool("nothing-to-change", false, "report that the task needs no change")
 	nothingWhy := fs.String("why", "", "reason for --nothing-to-change")
@@ -409,23 +406,16 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 		if skippedArg != nil {
 			body["skipped"] = *skippedArg
 		}
-		raw, _ := json.Marshal(body)
-		err = postFactoryReport(ctx, "ready", raw)
+		msg := "ready " + head
+		if reject != nil {
+			msg = "rejected " + head
+		} else if *nothing {
+			msg = "nothing to change at " + head
+		}
+		return sendFactoryReport(ctx, "factory report ready", "ready", body, msg, stdout, stderr)
 	}
-	if err != nil {
-		fprintf(stderr, "sheepdog factory report ready: %v\n", err)
-		return 1
-	}
-	if reject != nil {
-		fprintf(stdout, "rejected %s\n", head)
-		return 0
-	}
-	if *nothing {
-		fprintf(stdout, "nothing to change at %s\n", head)
-		return 0
-	}
-	fprintf(stdout, "ready %s\n", head)
-	return 0
+	fprintf(stderr, "sheepdog factory report ready: %v\n", err)
+	return 1
 }
 
 func gitRevParse(ctx context.Context, git *world.Git, args ...string) (string, error) {
@@ -493,23 +483,59 @@ func runProofs(ctx context.Context, git *world.Git, head string, proofs []flow.P
 	return nil
 }
 
+func sendFactoryReport(ctx context.Context, cmd, verb string, body any, okMsg string, stdout, stderr io.Writer) int {
+	raw, _ := json.Marshal(body)
+	if err := postFactoryReport(ctx, verb, raw); err != nil {
+		fprintf(stderr, "sheepdog %s: %v\n", cmd, err)
+		return 1
+	}
+	fprintln(stdout, okMsg)
+	return 0
+}
+
+func runFactoryAsk(ctx context.Context, args []string, isReport bool, stdout, stderr io.Writer) int {
+	name := map[bool]string{false: "factory ask", true: "factory report ask"}[isReport]
+	fs := factoryFlags(name, stderr)
+	kind, task, rec := fs.String("kind", "", "ask kind"), fs.String("task", "", "task id"), fs.String("recommend", "", "recommended option")
+	var opts []string
+	fs.Func("option", "choice", func(v string) error { opts = append(opts, v); return nil })
+	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
+		return flagExit(err)
+	}
+	if fs.NArg() != 1 {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	if isReport && *kind == "" {
+		*kind = flow.KindDecision
+	}
+	return sendFactoryReport(ctx, name, "ask", map[string]any{"kind": *kind, "task": *task, "question": fs.Arg(0), "options": opts, "recommend": *rec}, "ask recorded", stdout, stderr)
+}
+
+func runFactoryAnswer(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	a0, a1, why, exit := parseTwoArgWhy("factory answer", args, stderr)
+	if exit >= 0 {
+		return exit
+	}
+	return sendFactoryReport(ctx, "factory answer", "answer", map[string]string{"ask": a0, "option": a1, "why": why}, "answered "+a0, stdout, stderr)
+}
+
 func postFactoryReport(ctx context.Context, verb string, args json.RawMessage) error {
 	// In a run's terminal the engine set SHEEPDOG_WEB_PORT: no config file needed.
+	url := ""
 	if port, err := strconv.Atoi(os.Getenv("SHEEPDOG_WEB_PORT")); err == nil && port > 0 {
-		return postJSON(ctx, daemon.LocalURL("", port), "/api/factory/report", map[string]any{"token": os.Getenv(runTokenEnv), "verb": verb, "args": args})
-	}
-	cfg, err := config.Load("")
-	if err != nil {
+		url = daemon.LocalURL("", port)
+	} else if cfg, err := config.Load(""); err != nil {
 		return err
+	} else {
+		url = daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port)
 	}
-	return postJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/factory/report", map[string]any{"token": os.Getenv(runTokenEnv), "verb": verb, "args": args})
+	return postJSON(ctx, url, "/api/factory/report", map[string]any{"token": os.Getenv(runTokenEnv), "verb": verb, "args": args})
 }
 
 func runFactoryDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	reordered := reorderFactoryDoctorArgs(args)
-	fs := flag.NewFlagSet("factory doctor", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() { printFactoryUsage(stderr) }
+	fs := factoryFlags("factory doctor", stderr)
 	folderFlag := fs.String("folder", "", "project folder")
 	configPath := fs.String("config", "", "config file")
 	hcSocket := fs.String("hc-socket", "", "herdr-core socket")
@@ -569,6 +595,8 @@ func reorderFactoryDoctorArgs(args []string) []string {
 		"-config": true, "--config": true,
 		"-hc-socket": true, "--hc-socket": true,
 		"-n": true, "--n": true,
+		"-kind": true, "--kind": true, "-task": true, "--task": true,
+		"-option": true, "--option": true, "-recommend": true, "--recommend": true,
 	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]

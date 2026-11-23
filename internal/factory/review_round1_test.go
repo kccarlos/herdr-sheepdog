@@ -181,9 +181,9 @@ func TestReviewerFallbackLogsReason(t *testing.T) {
 }
 
 func TestProbeOmitsUnsupportedAndInconclusiveCLIs(t *testing.T) {
-	facts := probeResolveFacts(context.Background(), []string{"agy", "codex"}, func(_ context.Context, _ string, _ []string, argv ...string) CommandOutput {
-		if argv[0] == "agy" {
-			t.Error("invoked unsupported agy")
+	facts := probeResolveFacts(context.Background(), []string{"unknown", "codex"}, func(_ context.Context, _ string, _ []string, argv ...string) CommandOutput {
+		if argv[0] == "unknown" {
+			t.Error("invoked unsupported cli")
 		}
 		return CommandOutput{Exit: 1, Stderr: "You've hit your usage limit"}
 	})

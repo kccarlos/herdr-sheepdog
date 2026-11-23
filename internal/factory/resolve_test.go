@@ -32,14 +32,13 @@ func TestPlanApplyLaunchChecks(t *testing.T) {
 		t.Fatalf("unknown CLI: err = %v", err)
 	}
 
-	// The engine cannot launch an agy worker yet (Codex can since 5b.5; see
-	// TestPlanApplyAcceptsCodexWorker).
+	// The engine cannot launch a designer role yet (worker, coordinator and
+	// reviewer support claude, codex and agy).
 	s := flow.DefaultSettings()
-	s.Models = map[string][]flow.Candidate{flow.RoleWorker: {{CLI: "agy", Model: "gemini-4-neon-medium", Effort: "medium"}}}
 	eng, id, tok := newCoord(s)
-	err = eng.Report(tok, "plan apply", json.RawMessage(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: x",`+testPlanJSON+`}]}`))
-	if refusalCode(err) != "plan_invalid" || !strings.Contains(err.Error(), "the engine cannot launch agy as worker yet") {
-		t.Fatalf("unsupported worker: err = %v", err)
+	err = eng.Report(tok, "plan apply", json.RawMessage(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: x",`+testPlanJSON+`,"request":{"designer":[{"cli":"agy","model":"gemini-4-neon-medium","effort":"medium"}]}}]}`))
+	if refusalCode(err) != "plan_invalid" || !strings.Contains(err.Error(), "the engine cannot launch agy as designer yet") {
+		t.Fatalf("unsupported role: err = %v", err)
 	}
 	if _, err := os.Stat(eng.Paths.Worktree(id, "T1", 1)); !os.IsNotExist(err) {
 		t.Fatalf("impossible plan allocated a worktree: %v", err)

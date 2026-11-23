@@ -30,10 +30,14 @@ func holdWake(s *flow.State, ti int, row, why, ask string, f flow.Facts, bin str
 	return "wake held for the coordinator"
 }
 
-func holdProjectWake(s *flow.State, k, why, facts string, now time.Time) {
-	if !slices.ContainsFunc(s.Project.Wakes, func(w flow.Wake) bool { return w.Task == "" && w.Key == k }) {
-		s.Project.Wakes = append(s.Project.Wakes, flow.Wake{Key: k, Why: why, Facts: facts, At: now})
+func appendWake(s *flow.State, task, k, why, facts string, now time.Time) {
+	if !slices.ContainsFunc(s.Project.Wakes, func(w flow.Wake) bool { return w.Task == task && w.Key == k }) {
+		s.Project.Wakes = append(s.Project.Wakes, flow.Wake{Key: k, Task: task, Why: why, Facts: facts, At: now})
 	}
+}
+
+func holdProjectWake(s *flow.State, k, why, facts string, now time.Time) {
+	appendWake(s, "", k, why, facts, now)
 }
 
 // The facts block's bounds: a title's characters, the wakes listed.

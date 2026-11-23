@@ -141,7 +141,7 @@ func (e *Engine) observeNoPoolLocked(ctx context.Context, id string, s *flow.Sta
 			continue
 		}
 		need = need || asksWorker
-		if _, r := resolveWorker(t, s.Settings, e.probeLaunchFacts(ctx, flow.RoleWorker, t, s.Settings)); r.Why == "" {
+		if _, r := resolveWorkerReason(t, s.Settings, e.probeLaunchFacts(ctx, flow.RoleWorker, t, s.Settings)); r.Why == "" {
 			usable = true
 		} else if (r.Kind == flow.ReasonPool || r.PoolBlocked) && (poolReason.Why == "" || !r.Reset.IsZero() && (poolReason.Reset.IsZero() || r.Reset.Before(poolReason.Reset))) {
 			poolReason = r
