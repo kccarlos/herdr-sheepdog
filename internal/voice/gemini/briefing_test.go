@@ -93,8 +93,7 @@ func TestBriefingRelations(t *testing.T) {
 func TestSilentBriefingIsResentAfterResume(t *testing.T) {
 	c1, c2 := newFakeConn("c1"), newFakeConn("c2")
 	h := newHarness(t, briefingConfig(), &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2)}})
-	c1.serve(handleMsg("handle-A"))
-	time.Sleep(20 * time.Millisecond)
+	acceptHandle(t, h, c1, "handle-A")
 	if err := h.s.Push("Current focus: docs, open question: approve rm?", voice.UrgencySilent); err != nil {
 		t.Fatal(err)
 	}

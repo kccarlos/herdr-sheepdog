@@ -135,8 +135,7 @@ func TestVertexRateLimitBacksOffOnOneKey(t *testing.T) {
 		t.Fatalf("voice.connect = %v", p)
 	}
 
-	c1.serve(handleMsg("handle-V"))
-	time.Sleep(10 * time.Millisecond)
+	acceptHandle(t, h, c1, "handle-V")
 	t0 := time.Now()
 	c1.fail(errors.New(`websocket: close 1008 (policy violation): RESOURCE_EXHAUSTED retryDelay: "0.2s"`))
 
