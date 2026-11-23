@@ -252,7 +252,7 @@ func deliverFactoryPush(h *harness, pendingID, text string) {
 	h.sup.OnVoiceEvent(voice.EventPush{Text: text, Urgency: voice.UrgencyIdle, PendingID: pendingID})
 	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: text, Final: true})
 	h.sup.OnVoiceEvent(voice.EventTurnComplete{})
-	h.clock.Advance(time.Second)
+	h.clock.Advance(echoWindow + time.Second)
 }
 
 func newDemoFactory() *fakeFactory {
@@ -503,10 +503,18 @@ func TestFactoryVoiceSingleToldAskGateAndOverride(t *testing.T) {
 		// VA1 fixed order: name (T1), question, numbered options (1, 2), recommended option.
 		iName := strings.Index(p.Text, "T1")
 		iQ := strings.Index(p.Text, ask.Question)
-		iOpt1 := strings.Index(p.Text, "1")
-		iOpt2 := strings.Index(p.Text, "2")
-		if iName < 0 || iQ < 0 || iOpt1 < 0 || iOpt2 < 0 || !(iName < iQ && iQ < iOpt1 && iOpt1 < iOpt2) {
-			t.Fatalf("VA1 push text order wrong: %q", p.Text)
+		if iName < 0 || iQ < 0 || iName >= iQ {
+			t.Fatalf("VA1 push text order wrong (name before question): %q", p.Text)
+		}
+		tail := p.Text[iQ+len(ask.Question):]
+		iOpt1 := strings.Index(tail, "1")
+		iLbl1 := strings.Index(tail, "Merge")
+		iOpt2 := strings.Index(tail, "2")
+		iLbl2 := strings.Index(tail, "Hold")
+		iRec := strings.LastIndex(tail, ask.Recommend)
+		if iOpt1 < 0 || iLbl1 < 0 || iOpt2 < 0 || iLbl2 < 0 ||
+			iOpt1 >= iLbl1 || iLbl1 >= iOpt2 || iOpt2 >= iLbl2 || iLbl2 >= iRec {
+			t.Fatalf("VA1 push text order wrong (options and recommendation after question): %q", p.Text)
 		}
 		// SpokenSummary stays ask.Question so pendingSignature is stable.
 		qs := h.sup.FactoryQuestions()

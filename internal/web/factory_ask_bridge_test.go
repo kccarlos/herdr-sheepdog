@@ -591,13 +591,19 @@ func TestFactoryWSVoiceAnswerAndHTTPProofs(t *testing.T) {
 		}
 		return false
 	}, "VA1 spoken push for "+cardID)
+	// Deliver EventPush to mark the ask told without emitting DirOut (which would arm the wall-clock echoWindow in newHarness).
 	h.sup.OnVoiceEvent(voice.EventPush{Text: announced, Urgency: voice.UrgencyIdle, PendingID: cardID})
-	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: announced, Final: true})
-	h.sup.OnVoiceEvent(voice.EventTurnComplete{})
 
 	// 1. Typed text via POST /api/utterance with exact option label never mints proof or answers.
 	if code, body := h.postJSON("/api/utterance", map[string]any{"text": "Cut v1.4"}, nil); code != http.StatusOK {
 		t.Fatalf("POST /api/utterance = %d %s, want 200", code, body)
+	}
+	if _, err := h.sup.Handler()(context.Background(), voice.ToolCall{
+		ID:   "utterance-text-exact",
+		Name: supervisor.ToolToSupervisor,
+		Args: map[string]any{"text": "Cut v1.4"},
+	}); err != nil {
+		t.Fatalf("to_supervisor after /api/utterance: %v", err)
 	}
 	if len(eng.mintedProofs()) != 0 || eng.firstAsk().Status != flow.AskStatusOpen {
 		t.Fatalf("VA3: /api/utterance answered factory ask or minted proof: proofs=%+v ask=%+v", eng.mintedProofs(), eng.firstAsk())
@@ -608,7 +614,7 @@ func TestFactoryWSVoiceAnswerAndHTTPProofs(t *testing.T) {
 	defer func() { _ = c.conn.CloseNow() }()
 	c.expect(wsproto.TypeStatus)
 	c.send(wsproto.SimulateText("Cut v1.4"))
-	waitFor(t, time.Second, func() bool { return len(h.session.sentTexts()) == 1 }, "/ws text reached session")
+	waitFor(t, time.Second, func() bool { return len(h.session.sentTexts()) == 2 }, "/ws text reached session")
 	if _, err := h.sup.Handler()(context.Background(), voice.ToolCall{
 		ID:   "ws-text-exact",
 		Name: supervisor.ToolToSupervisor,
