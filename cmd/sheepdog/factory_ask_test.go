@@ -430,3 +430,168 @@ func TestFactoryAnswerCLIWhenWorkerDiedBetweenPasses(t *testing.T) {
 		t.Fatalf("Attempt.Held = %q, want 1 held answer with Plain JSON and reason", held)
 	}
 }
+
+// TestFactoryAskOverrideCLITwoTasks checks PR 7.1 review B1:
+// `sheepdog factory ask --kind override --task T1 --task T2` accepts repeatable
+// --task flags with no positional question, opens one engine-filled override
+// ask naming both tasks, and `factory report ask --kind override --task T1`
+// reaches the engine's kind_not_allowed refusal instead of exiting 2 locally.
+func TestFactoryAskOverrideCLITwoTasks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+
+	srv := hctest.New(t)
+	srv.OnExec = hctest.GitExec
+	t.Setenv("HC_SOCKET", srv.Path)
+	paths := factory.Paths{DataDir: t.TempDir(), ClaudeConfig: filepath.Join(t.TempDir(), ".claude.json")}
+	eng := factory.New(paths, hc.NewClient(srv.Path))
+
+	repo := filepath.Join(t.TempDir(), "repo")
+	wt1 := filepath.Join(t.TempDir(), "wt1")
+	wt2 := filepath.Join(t.TempDir(), "wt2")
+	gitRun := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		b, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, b)
+		}
+		return strings.TrimSpace(string(b))
+	}
+	if b, err := exec.Command("git", "init", "--initial-branch=main", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, b)
+	}
+	_ = os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main\n"), 0o600)
+	gitRun(repo, "add", "main.go")
+	gitRun(repo, "commit", "-m", "chore: init")
+	baseSHA := gitRun(repo, "rev-parse", "HEAD")
+
+	gitRun(repo, "worktree", "add", "-b", "task/proj-ovr-T1-1", wt1)
+	_ = os.WriteFile(filepath.Join(wt1, "one.go"), []byte("package main\n// one\n"), 0o600)
+	gitRun(wt1, "add", "one.go")
+	gitRun(wt1, "commit", "-m", "feat: one")
+	c1 := gitRun(wt1, "rev-parse", "HEAD")
+
+	gitRun(repo, "worktree", "add", "-b", "task/proj-ovr-T2-1", wt2)
+	_ = os.WriteFile(filepath.Join(wt2, "two.go"), []byte("package main\n// two\n"), 0o600)
+	gitRun(wt2, "add", "two.go")
+	gitRun(wt2, "commit", "-m", "feat: two")
+	c2 := gitRun(wt2, "rev-parse", "HEAD")
+
+	st := flow.State{
+		Seq:      1,
+		Settings: flow.DefaultSettings(),
+		Project: flow.Project{
+			ID: "proj-ovr", Folder: repo, Goal: "Ship two PRs", Started: true,
+			RunID: "coord-1", RunTokenHash: testTokenSHA("tok-coord-ovr"),
+		},
+		Tasks: []flow.Task{
+			{
+				ID: "T1", Title: "feat: one", EstimateLines: 50,
+				Attempts: []flow.Attempt{{
+					BaseCommit: baseSHA, Branch: "task/proj-ovr-T1-1", Worktree: wt1, SizeCap: 100,
+					RunID: "worker-1", RunTokenHash: testTokenSHA("tok-worker-ovr"),
+					Ready: []flow.Ready{{Head: c1}},
+				}},
+			},
+			{
+				ID: "T2", Title: "feat: two", EstimateLines: 50,
+				Attempts: []flow.Attempt{{
+					BaseCommit: baseSHA, Branch: "task/proj-ovr-T2-1", Worktree: wt2, SizeCap: 100,
+					Ready: []flow.Ready{{Head: c2}},
+				}},
+			},
+		},
+	}
+	if err := factory.SaveState(paths.State("proj-ovr"), st); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls int
+	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var req struct {
+			Token string          `json:"token"`
+			Verb  string          `json:"verb"`
+			Args  json.RawMessage `json:"args"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := eng.Report(req.Token, req.Verb, req.Args); err != nil {
+			var ref *factory.Refusal
+			code := http.StatusInternalServerError
+			if errors.As(err, &ref) {
+				code = http.StatusBadRequest
+			}
+			w.WriteHeader(code)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	t.Cleanup(httpSrv.Close)
+	_, port, _ := net.SplitHostPort(httpSrv.Listener.Addr().String())
+	t.Setenv("SHEEPDOG_WEB_PORT", port)
+
+	// Coordinator `sheepdog factory ask --kind override --task T1 --task T2` opens one ask naming both.
+	t.Setenv("SHEEPDOG_RUN_TOKEN", "tok-coord-ovr")
+	var out, errBuf bytes.Buffer
+	code := run(context.Background(), []string{
+		"factory", "ask", "--kind", "override", "--task", "T1", "--task", "T2",
+	}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("factory ask --kind override exit=%d stdout=%q stderr=%q", code, out.String(), errBuf.String())
+	}
+
+	loaded, err := factory.LoadState(paths.State("proj-ovr"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Asks) != 1 {
+		t.Fatalf("State.Asks len = %d, want 1 (%+v)", len(loaded.Asks), loaded.Asks)
+	}
+	ask := loaded.Asks[0]
+	if ask.Kind != flow.KindOverride || !ask.Gated || ask.Status != flow.AskStatusOpen {
+		t.Fatalf("override ask = %+v, want open gated override", ask)
+	}
+	if !slices.Equal(ask.Options, []string{flow.OverrideOptionMerge, flow.OverrideOptionCancel}) || ask.Recommend != flow.OverrideOptionCancel {
+		t.Fatalf("override options/recommend = (%v, %q)", ask.Options, ask.Recommend)
+	}
+	if len(ask.Targets) != 2 || ask.Targets[0].Task != "T1" || ask.Targets[0].Head != c1 || ask.Targets[1].Task != "T2" || ask.Targets[1].Head != c2 {
+		t.Fatalf("override ask.Targets = %+v, want T1@%s and T2@%s", ask.Targets, c1, c2)
+	}
+
+	// Worker running `factory report ask --kind override --task T1` reaches the engine's kind_not_allowed refusal.
+	t.Setenv("SHEEPDOG_RUN_TOKEN", "tok-worker-ovr")
+	out.Reset()
+	errBuf.Reset()
+	code = run(context.Background(), []string{"factory", "report", "ask", "--kind", "override", "--task", "T1"}, &out, &errBuf)
+	if code != 1 || !strings.Contains(errBuf.String(), "kind_not_allowed") {
+		t.Fatalf("worker report ask --kind override: code=%d stderr=%q, want exit 1 with kind_not_allowed", code, errBuf.String())
+	}
+
+	// Positional question with --kind override or multiple --task on non-override exits 2 without calling daemon.
+	t.Setenv("SHEEPDOG_RUN_TOKEN", "tok-coord-ovr")
+	before := calls
+	for _, bad := range [][]string{
+		{"factory", "ask", "--kind", "override", "--task", "T1", "extra question"},
+		{"factory", "ask", "--kind", "release", "--task", "T1", "--task", "T2", "Ship?", "--option", "Yes", "--option", "No", "--recommend", "Yes"},
+	} {
+		out.Reset()
+		errBuf.Reset()
+		if code := run(context.Background(), bad, &out, &errBuf); code != 2 {
+			t.Fatalf("%v code=%d, want 2", bad, code)
+		}
+	}
+	if calls != before {
+		t.Fatalf("malformed CLI invocations posted %d request(s)", calls-before)
+	}
+}

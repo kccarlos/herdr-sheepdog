@@ -40,7 +40,7 @@ case "$1 $2" in
       exit 1 ;;
     esac
   fi
-  cat "$D/view.json" 2>/dev/null || { echo 'no pull requests found for branch "x"' >&2; exit 1; } ;;
+  if [ -f "$D/view-$3.json" ]; then cat "$D/view-$3.json"; else cat "$D/view.json" 2>/dev/null || { echo 'no pull requests found for branch "x"' >&2; exit 1; }; fi ;;
 "pr merge") [ -f "$D/merge_fail" ] && { if [ -s "$D/merge_fail" ]; then cat "$D/merge_fail" >&2; else echo "HTTP 422: Head branch was modified" >&2; fi; exit 1; }; : ;;
 "pr close") [ -f "$D/close_fail" ] && { echo "GraphQL: close failed" >&2; exit 1; }; : ;;
 "run rerun") { [ -f "$D/rerun_fail" ] || [ -f "$D/rerun_fail_$3" ]; } && { echo "HTTP 403: rerun failed" >&2; exit 1; }; : ;;

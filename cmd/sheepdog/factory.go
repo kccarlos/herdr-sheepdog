@@ -49,6 +49,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "  report review <pass|changes> --code <code> --head <sha> --self-check-misses <n> --deletable \"<text>\" [--class \"<text>\"] [--not-run \"<text>\"] [--findings <path>]  (reviewer only) submit a review verdict")
 	fprintln(w, "  report ask \"<question>\" --option \"<choice>\" --option \"<choice>\" --recommend \"<choice>\"  (worker/reviewer) ask the coordinator a decision question")
 	fprintln(w, "  ask --kind <kind> [--task <task>] \"<question>\" --option \"<choice>\" --option \"<choice>\" --recommend \"<choice>\"  (coordinator) open an ask (gated kinds go to the owner)")
+	fprintln(w, "  ask --kind override --task <task> [--task <task> ...]  (coordinator) open an engine-filled override card for the owner")
 	fprintln(w, "  answer <ask> \"<option>\" [--why \"<why>\"]  (coordinator) answer an open decision ask")
 	fprintln(w, "  doctor                               check unattended factory prerequisites:")
 	fprintln(w, "           herdr-core (hc), timed project-volume probe inside herdr-core")
@@ -570,20 +571,32 @@ func sendFactoryReport(ctx context.Context, cmd, verb string, body any, okMsg st
 func runFactoryAsk(ctx context.Context, args []string, isReport bool, stdout, stderr io.Writer) int {
 	name := map[bool]string{false: "factory ask", true: "factory report ask"}[isReport]
 	fs := factoryFlags(name, stderr)
-	kind, task, rec := fs.String("kind", "", "ask kind"), fs.String("task", "", "task id"), fs.String("recommend", "", "recommended option")
-	var opts []string
+	kind, rec := fs.String("kind", "", "ask kind"), fs.String("recommend", "", "recommended option")
+	var tasks, opts []string
+	fs.Func("task", "task id", func(v string) error { tasks = append(tasks, v); return nil })
 	fs.Func("option", "choice", func(v string) error { opts = append(opts, v); return nil })
 	if err := fs.Parse(reorderFactoryArgs(fs, args)); err != nil {
 		return flagExit(err)
 	}
-	if fs.NArg() != 1 {
+	if strings.TrimSpace(*kind) == flow.KindOverride {
+		if fs.NArg() != 0 {
+			printFactoryUsage(stderr)
+			return 2
+		}
+		return sendFactoryReport(ctx, name, "ask", map[string]any{"kind": flow.KindOverride, "tasks": tasks}, "ask recorded", stdout, stderr)
+	}
+	if fs.NArg() != 1 || len(tasks) > 1 {
 		printFactoryUsage(stderr)
 		return 2
+	}
+	task := ""
+	if len(tasks) == 1 {
+		task = tasks[0]
 	}
 	if isReport && *kind == "" {
 		*kind = flow.KindDecision
 	}
-	return sendFactoryReport(ctx, name, "ask", map[string]any{"kind": *kind, "task": *task, "question": fs.Arg(0), "options": opts, "recommend": *rec}, "ask recorded", stdout, stderr)
+	return sendFactoryReport(ctx, name, "ask", map[string]any{"kind": *kind, "task": task, "question": fs.Arg(0), "options": opts, "recommend": *rec}, "ask recorded", stdout, stderr)
 }
 
 func runFactoryAnswer(ctx context.Context, args []string, stdout, stderr io.Writer) int {

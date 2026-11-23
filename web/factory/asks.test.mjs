@@ -1025,3 +1025,48 @@ test('the /factory page shows no card for a worker decision ask meant for the co
     assert.doesNotMatch(asksEl.innerHTML, /\b1 open\b/);
   });
 });
+
+test('override ask card renders its multi-line command with each PR, short H, checks and unreported work, escaped', async (t) => {
+  const overrideAsk = {
+    id: 'ask-ovr-1',
+    project: 'proj-demo',
+    kind: 'override',
+    gated: true,
+    question: 'Merge T1, T2 now without waiting for CI or review?',
+    command: 'T1 #7 @ abcdef1 · red · has unreported work\nT2 #8 @ 9876543 · pending',
+    options: ['Yes, merge now', 'No, wait'],
+    recommend: 'No, wait',
+    targets: [
+      { task: 'T1', pr: 7, head: 'abcdef1234567890', checks: 'red', unreported: true },
+      { task: 'T2', pr: 8, head: '9876543210fedcba', checks: 'pending' },
+    ],
+    at: '2026-11-23T10:00:00Z',
+    status: 'open',
+  };
+
+  await t.test('renderAskCardsHTML includes multi-line command and escapes HTML', () => {
+    const html = renderAskCardsHTML([overrideAsk], {});
+    assert.match(html, /T1 #7 @ abcdef1 · red · has unreported work/);
+    assert.match(html, /T2 #8 @ 9876543 · pending/);
+    assert.match(html, /T1 #7 @ abcdef1 · red · has unreported work\nT2 #8 @ 9876543 · pending/);
+
+    const xss = { ...overrideAsk, id: 'ask-ovr-xss', command: 'T1 <img src=x onerror=alert(1)>' };
+    const xssHtml = renderAskCardsHTML([xss], {});
+    assert.ok(!xssHtml.includes('<img src=x'), 'command must be HTML-escaped');
+    assert.ok(xssHtml.includes('&#60;img') || xssHtml.includes('&lt;img'), 'escaped command tag expected');
+  });
+
+  await t.test('booted /factory page renders override command lines and CSS preserves newlines', async () => {
+    const daemon = fakeFactoryPageDaemon({ daemonId: 'DAEMON_OVR_WEB', asks: [overrideAsk] });
+    const page = await bootFactoryPage(t, daemon);
+    const asksEl = page.doc.getElementById('asks');
+    const card = asksEl.querySelector('[data-ask-id="ask-ovr-1"]');
+    assert.ok(card, 'expected override ask card');
+    assert.match(card.textContent, /T1 #7 @ abcdef1 · red · has unreported work/);
+    assert.match(card.textContent, /T2 #8 @ 9876543 · pending/);
+    assert.ok(card.querySelector('pre'), 'multi-line command should render in a <pre> block');
+
+    const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+    assert.match(css, /\.ask-cmd\b[^}]*white-space:\s*pre-wrap/, 'style.css should preserve newlines on .ask-cmd');
+  });
+});
