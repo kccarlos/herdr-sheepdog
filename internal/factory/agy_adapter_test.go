@@ -124,6 +124,7 @@ func newAgyRig(t *testing.T, models map[string][]flow.Candidate) *agyRig {
 	githubOrigin(t, r.repo)
 	r.gh = installFakeGH(t)
 	r.eng = New(r.paths, r.cl)
+	r.eng.StartCheck = noopStartCheck
 	r.eng.Log = logging.NewJSONLLogger(r.logs)
 	r.eng.Now = func() time.Time { return *r.now }
 	if err := r.eng.Start(r.repo, "Ship agy support", 2); err != nil {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -138,15 +139,59 @@ func checkStartCLIs(ctx context.Context, o DoctorOptions, r startRepo) []onboard
 	for _, c := range projectCandidates(s) {
 		used[c.CLI] = true
 	}
+	order := []string{"claude", world.CodexCLI, world.AgyCLI}
+	probed := make(map[string]onboard.Result, len(order))
+	for _, cli := range order {
+		if !used[cli] {
+			continue
+		}
+		switch cli {
+		case "claude":
+			probed[cli] = checkStartCLI(ctx, o, "claude", "Claude Code", "run: claude auth login", claudeLoggedIn, "claude", "auth", "status", "--json")
+		case world.CodexCLI:
+			probed[cli] = checkStartCLI(ctx, o, "codex", "Codex CLI", "run: codex login", codexLoggedIn, "codex", "login", "status")
+		case world.AgyCLI:
+			probed[cli] = checkStartAgy(ctx, o)
+		}
+	}
+	// O31 (design.md section 6 J1a–J1c): refuse only when every candidate of a
+	// project role (coordinator, worker, reviewer) is positively out.
+	blocked := map[string][]string{}
+	for _, role := range []string{flow.RoleCoordinator, flow.RoleWorker, flow.RoleReviewer} {
+		cands := flow.Candidates(role, flow.Task{}, s.Settings)
+		if len(cands) == 0 {
+			continue
+		}
+		allOut := true
+		for _, c := range cands {
+			if res, ok := probed[c.CLI]; !ok || res.Status != onboard.Fail {
+				allOut = false
+				break
+			}
+		}
+		if !allOut {
+			continue
+		}
+		for _, c := range cands {
+			if !slices.Contains(blocked[c.CLI], role) {
+				blocked[c.CLI] = append(blocked[c.CLI], role)
+			}
+		}
+	}
 	var out []onboard.Result
-	if used["claude"] {
-		out = append(out, checkStartCLI(ctx, o, "claude", "Claude Code", "run: claude auth login", claudeLoggedIn, "claude", "auth", "status", "--json"))
-	}
-	if used[world.CodexCLI] {
-		out = append(out, checkStartCLI(ctx, o, "codex", "Codex CLI", "run: codex login", codexLoggedIn, "codex", "login", "status"))
-	}
-	if used[world.AgyCLI] {
-		out = append(out, checkStartAgy(ctx, o))
+	for _, cli := range order {
+		res, ok := probed[cli]
+		if !ok {
+			continue
+		}
+		if res.Status == onboard.Fail {
+			if roles := blocked[cli]; len(roles) > 0 {
+				res.Detail = fmt.Sprintf("%s, and no other %s candidate is usable", res.Detail, strings.Join(roles, ", "))
+			} else {
+				res.Status = onboard.Warn
+			}
+		}
+		out = append(out, res)
 	}
 	return out
 }
@@ -162,7 +207,7 @@ func checkStartAgy(ctx context.Context, o DoctorOptions) onboard.Result {
 	case agySignedOut(c):
 		return resFail(name, "agy is not signed in", signInFix)
 	default:
-		return resWarn(name, "could not read agy status: "+agyUnreadableReason(c), "run agy models in a terminal and check herdr-core")
+		return resWarn(name, "agy sign-in unknown ("+agyUnreadableReason(c)+")", "run agy models in a terminal and check herdr-core")
 	}
 }
 
@@ -188,10 +233,15 @@ func checkStartGH(ctx context.Context, o DoctorOptions, r *startRepo) onboard.Re
 		return resSkip(name, "no GitHub remote to check access to")
 	}
 	c := o.run(ctx, r.root, "gh", "repo", "view", r.slug, "--json", "defaultBranchRef,viewerPermission")
+	if c.Exit == 127 || errors.Is(c.Err, exec.ErrNotFound) {
+		return resFail(name, "gh is not installed", "install GitHub CLI (https://cli.github.com), then "+fix)
+	}
+	if why, unk := authProbeUnknown(c); unk {
+		return resWarn(name, "gh access to "+r.slug+" "+why, "run: gh repo view "+r.slug)
+	}
 	var v ghRepoView
 	if !cmdOK(c) || json.Unmarshal([]byte(c.Stdout), &v) != nil {
-		return resFail(name, "cannot read "+r.slug+" with gh (not installed, not signed in, or no access): "+cleanReason(firstNonEmpty(c.Stderr, errText(c.Err), "no answer")),
-			"install GitHub CLI (https://cli.github.com) if missing, then "+fix)
+		return resFail(name, "cannot read "+r.slug+" with gh (not signed in or no access): "+cleanReason(firstNonEmpty(c.Stderr, "no answer")), fix)
 	}
 	if p := v.ViewerPermission; p != "WRITE" && p != "MAINTAIN" && p != "ADMIN" {
 		return resFail(name, fmt.Sprintf("your access to %s is %q, not push", r.slug, p), fix)
@@ -225,8 +275,7 @@ func checkStartRemote(ctx context.Context, o DoctorOptions, r startRepo) onboard
 }
 
 // checkPRWorkflow parses the YAML `on:` trigger of workflows on the remote base
-// the engine builds on, not the working tree. Known gap: a `branches:` filter
-// limited to other branches still passes.
+// the engine builds on, not the working tree.
 func checkPRWorkflow(ctx context.Context, o DoctorOptions, r startRepo) onboard.Result {
 	const name = "pr workflow"
 	switch {
@@ -235,9 +284,12 @@ func checkPRWorkflow(ctx context.Context, o DoctorOptions, r startRepo) onboard.
 	case r.slug == "":
 		return resSkip(name, "needs the github remote check above to pass")
 	}
-	ref := r.remote + "/HEAD"
+	ref, base := r.remote+"/HEAD", ""
 	if r.view != nil {
-		ref = r.remote + "/" + r.view.DefaultBranchRef.Name
+		base = r.view.DefaultBranchRef.Name
+		ref = r.remote + "/" + base
+	} else {
+		base = strings.TrimPrefix(gitLine(ctx, o, r.root, "symbolic-ref", "--quiet", "--short", "refs/remotes/"+r.remote+"/HEAD"), r.remote+"/")
 	}
 	if gitLine(ctx, o, r.root, "rev-parse", "--verify", "--quiet", ref) == "" {
 		if r.view != nil {
@@ -250,7 +302,7 @@ func checkPRWorkflow(ctx context.Context, o DoctorOptions, r startRepo) onboard.
 		if ext := filepath.Ext(f); ext != ".yml" && ext != ".yaml" {
 			continue
 		}
-		if hasPR, filtered := parsePRWorkflow(gitOut(ctx, o, r.root, "show", ref+":"+f)); hasPR && !filtered {
+		if hasPR, filtered := parsePRWorkflow(gitOut(ctx, o, r.root, "show", ref+":"+f), base); hasPR && !filtered {
 			return resOK(name, filepath.Base(f)+" on "+ref+" runs on pull requests")
 		} else if hasPR && filteredFile == "" {
 			filteredFile = filepath.Base(f)
@@ -261,8 +313,8 @@ func checkPRWorkflow(ctx context.Context, o DoctorOptions, r startRepo) onboard.
 			"a PR touching only filtered paths gets no checks and waits at N35",
 			"remove paths/paths-ignore from on.pull_request or add an unfiltered PR workflow")
 	}
-	return resFail(name, "no workflow in .github/workflows on "+ref+" runs on pull_request, so no PR would ever get checks",
-		"add .github/workflows/ci.yml with `on: pull_request` that runs your tests, commit it to the base branch and push")
+	return resFail(name, "no workflow in .github/workflows on "+ref+" runs on pull_request for "+firstNonEmpty(base, "the base branch")+", so no PR would ever get checks",
+		"add .github/workflows/ci.yml with `on: pull_request` covering "+firstNonEmpty(base, "the base branch")+" that runs your tests, commit it to the base branch and push")
 }
 
 // checkStartProtection reads protection and rulesets of the base: a required
@@ -351,10 +403,136 @@ func checkStartProtection(ctx context.Context, o DoctorOptions, r startRepo) []o
 
 func isPRTrigger(k string) bool { return k == "pull_request" || k == "pull_request_target" }
 
+type prTrigger struct {
+	hasPaths    bool
+	hasBranches bool
+	branches    []string
+	hasIgnore   bool
+	branchesIgn []string
+}
+
+func (t prTrigger) matchesBase(base string) bool {
+	if base == "" {
+		return true
+	}
+	if t.hasBranches {
+		return matchBranchList(t.branches, base)
+	}
+	if t.hasIgnore {
+		return !matchBranchList(t.branchesIgn, base)
+	}
+	return true
+}
+
+func matchBranchList(patterns []string, branch string) bool {
+	matched := false
+	for _, p := range patterns {
+		if p == "" {
+			continue
+		}
+		neg := strings.HasPrefix(p, "!")
+		if neg {
+			p = p[1:]
+		}
+		if matchBranchPattern(p, branch) {
+			matched = !neg
+		}
+	}
+	return matched
+}
+
+func matchBranchPattern(pat, branch string) bool {
+	if !strings.Contains(pat, "**") {
+		ok, _ := path.Match(pat, branch)
+		return ok
+	}
+	var b strings.Builder
+	b.WriteByte('^')
+	for i := 0; i < len(pat); {
+		switch {
+		case strings.HasPrefix(pat[i:], "**/"):
+			b.WriteString("(?:.*/)?")
+			i += 3
+		case strings.HasPrefix(pat[i:], "**"):
+			b.WriteString(".*")
+			i += 2
+		case pat[i] == '*':
+			b.WriteString("[^/]*")
+			i++
+		case pat[i] == '?':
+			b.WriteString("[^/]")
+			i++
+		default:
+			b.WriteString(regexp.QuoteMeta(pat[i : i+1]))
+			i++
+		}
+	}
+	b.WriteByte('$')
+	re, err := regexp.Compile(b.String())
+	return err == nil && re.MatchString(branch)
+}
+
+func trimYAMLQuote(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && ((s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '"' && s[len(s)-1] == '"')) {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
+func isYAMLListItem(s string) bool {
+	return len(s) > 0 && s[0] == '-' && (len(s) == 1 || s[1] == ' ' || s[1] == '\t')
+}
+
+func parseYAMLList(v string) []string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	if len(v) >= 2 && v[0] == '[' && v[len(v)-1] == ']' {
+		inner := strings.TrimSpace(v[1 : len(v)-1])
+		if inner == "" {
+			return nil
+		}
+		items, _ := yamlFlow(inner)
+		var out []string
+		for _, it := range items {
+			if s := trimYAMLQuote(it); s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return []string{trimYAMLQuote(v)}
+}
+
+func parsePRFlowMap(v string, t *prTrigger) {
+	v = strings.TrimSpace(v)
+	if len(v) < 2 || v[0] != '{' || v[len(v)-1] != '}' {
+		return
+	}
+	items, _ := yamlFlow(v[1 : len(v)-1])
+	for _, it := range items {
+		k, val, ok := yamlKey(it)
+		if !ok {
+			continue
+		}
+		switch k {
+		case "paths", "paths-ignore":
+			t.hasPaths = true
+		case "branches":
+			t.hasBranches, t.branches = true, parseYAMLList(val)
+		case "branches-ignore":
+			t.hasIgnore, t.branchesIgn = true, parseYAMLList(val)
+		}
+	}
+}
+
 // parsePRWorkflow inspects a workflow's top-level YAML `on:` trigger (string,
 // list or map). It returns hasPR when pull_request or pull_request_target is a
-// trigger, and filtered when every such trigger defines paths or paths-ignore.
-func parsePRWorkflow(src string) (bool, bool) {
+// trigger covering base (respecting branches and branches-ignore), and filtered
+// when every such trigger defines paths or paths-ignore.
+func parsePRWorkflow(src, base string) (bool, bool) {
 	lines := strings.Split(strings.ReplaceAll(strings.TrimPrefix(src, "\uFEFF"), "\r\n", "\n"), "\n")
 	for i, ln := range lines {
 		if j := yamlScan(ln, func(j int, c byte) bool {
@@ -364,26 +542,21 @@ func parsePRWorkflow(src string) (bool, bool) {
 		}
 		lines[i] = strings.TrimRight(ln, " \t")
 	}
-	collect := func(i int, b string) string {
+	collect := func(i int, b string) (string, int) {
 		for _, d := yamlFlow(b); len(b) > 0 && (b[0] == '[' || b[0] == '{') && d > 0 && i+1 < len(lines); {
 			i, b = i+1, b+" "+strings.TrimSpace(lines[i+1])
 			_, d = yamlFlow(b)
 		}
-		return b
+		return b, i
 	}
-	isPaths := func(s string) bool { k, _, ok := yamlKey(s); return ok && (k == "paths" || k == "paths-ignore") }
-	trimTrigger := func(s string) bool { return isPRTrigger(strings.Trim(strings.TrimSpace(s), "\"'")) }
-	hasPaths := func(v string) bool {
-		items, _ := yamlFlow(strings.TrimSuffix(strings.TrimPrefix(v, "{"), "}"))
-		return len(v) >= 2 && v[0] == '{' && v[len(v)-1] == '}' && slices.ContainsFunc(items, isPaths)
-	}
+	trimTrigger := func(s string) bool { return isPRTrigger(trimYAMLQuote(s)) }
 	for i, ln := range lines {
 		if k, rest, ok := yamlKey(ln); len(ln) > 0 && ln[0] != ' ' && ln[0] != '\t' && ok && k == "on" {
 			if strings.HasPrefix(rest, "&") {
 				_, rest, _ = strings.Cut(strings.ReplaceAll(rest, "\t", " "), " ")
 			}
 			if rest = strings.TrimSpace(rest); rest != "" {
-				v := collect(i, rest)
+				v, _ := collect(i, rest)
 				if len(v) < 2 || (v[0] != '[' || v[len(v)-1] != ']') && (v[0] != '{' || v[len(v)-1] != '}') {
 					return trimTrigger(v), false
 				}
@@ -394,47 +567,96 @@ func parsePRWorkflow(src string) (bool, bool) {
 				hasPR, unfilt := false, false
 				for _, it := range items {
 					if tk, val, tok := yamlKey(it); tok && isPRTrigger(tk) {
-						hasPR, unfilt = true, unfilt || !hasPaths(val)
+						var tr prTrigger
+						parsePRFlowMap(val, &tr)
+						if tr.matchesBase(base) {
+							hasPR, unfilt = true, unfilt || !tr.hasPaths
+						}
 					} else if !tok && trimTrigger(it) {
 						hasPR, unfilt = true, true
 					}
 				}
 				return hasPR, hasPR && !unfilt
 			}
-			base, child, pr, filt, inPR := -1, -1, 0, 0, false
+			baseInd, child, hasPR, unfilt := -1, -1, false, false
+			var cur *prTrigger
+			var listTarget *[]string
+			finish := func() {
+				if cur != nil && cur.matchesBase(base) {
+					hasPR, unfilt = true, unfilt || !cur.hasPaths
+				}
+				cur, child, listTarget = nil, -1, nil
+			}
 			for j := i + 1; j < len(lines); j++ {
 				tr := strings.TrimSpace(lines[j])
 				if tr == "" {
 					continue
 				}
 				ind := len(lines[j]) - len(strings.TrimLeft(lines[j], " "))
-				if (ind == 0 && tr[0] != '-') || (base >= 0 && ind < base) {
+				if (ind == 0 && tr[0] != '-') || (baseInd >= 0 && ind < baseInd) {
 					break
 				}
-				if base < 0 {
-					base = ind
+				if baseInd < 0 {
+					baseInd = ind
 				}
-				if ind > base {
-					if inPR && child < 0 {
+				if ind > baseInd {
+					if cur == nil {
+						continue
+					}
+					if child < 0 {
 						child = ind
 					}
-					if inPR && ind == child && isPaths(tr) {
-						filt, inPR = filt+1, false
+					if ind == child {
+						if listTarget != nil && isYAMLListItem(tr) {
+							if s := trimYAMLQuote(tr[1:]); s != "" {
+								*listTarget = append(*listTarget, s)
+							}
+							continue
+						}
+						listTarget = nil
+						if fk, fval, fok := yamlKey(tr); fok {
+							switch fk {
+							case "paths", "paths-ignore":
+								cur.hasPaths = true
+							case "branches", "branches-ignore":
+								target := &cur.branches
+								if fk == "branches-ignore" {
+									cur.hasIgnore, target = true, &cur.branchesIgn
+								} else {
+									cur.hasBranches = true
+								}
+								if fval != "" {
+									var raw string
+									raw, j = collect(j, fval)
+									*target = parseYAMLList(raw)
+								} else {
+									listTarget = target
+								}
+							}
+						}
+					} else if ind > child && listTarget != nil && isYAMLListItem(tr) {
+						if s := trimYAMLQuote(tr[1:]); s != "" {
+							*listTarget = append(*listTarget, s)
+						}
 					}
 					continue
 				}
-				inPR, child = false, -1
-				if tr[0] == '-' && (len(tr) == 1 || tr[1] == ' ' || tr[1] == '\t') && trimTrigger(tr[1:]) {
+				finish()
+				if isYAMLListItem(tr) && trimTrigger(tr[1:]) {
 					return true, false
 				}
 				if tk, val, tok := yamlKey(tr); tok && isPRTrigger(tk) {
-					pr, inPR = pr+1, val == ""
-					if val != "" && hasPaths(collect(j, val)) {
-						filt++
+					cur = &prTrigger{}
+					if val != "" {
+						var raw string
+						raw, j = collect(j, val)
+						parsePRFlowMap(raw, cur)
+						finish()
 					}
 				}
 			}
-			return pr > 0, pr > 0 && filt == pr
+			finish()
+			return hasPR, hasPR && !unfilt
 		}
 	}
 	return false, false

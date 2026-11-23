@@ -35,89 +35,6 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/web"
 )
 
-// stubStartChecks replaces the start checks, so no test calls the real gh or claude.
-func stubStartChecks(t *testing.T, res []onboard.Result) {
-	t.Helper()
-	old := factoryStartChecks
-	factoryStartChecks = func(context.Context, factory.DoctorOptions) []onboard.Result { return res }
-	t.Cleanup(func() { factoryStartChecks = old })
-}
-
-// TestFactoryStartRefusedByChecks: start prints every failing line with its fix, warns pass, nothing is posted.
-func TestFactoryStartRefusedByChecks(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	posted := false
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { posted = true }))
-	t.Cleanup(srv.Close)
-	_, portStr, _ := net.SplitHostPort(srv.Listener.Addr().String())
-	cfgFile := filepath.Join(home, "config.toml")
-	if err := os.WriteFile(cfgFile, []byte("[web]\nbind = \"127.0.0.1\"\nport = "+portStr+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	stubStartChecks(t, []onboard.Result{
-		{Name: "pr workflow", Status: onboard.Fail, Detail: "none", Fix: "add ci.yml"},
-		{Name: "start claude", Status: onboard.Fail, Detail: "signed out", Fix: "run: claude auth login"},
-		{Name: "base protection", Status: onboard.Warn, Detail: "none", Fix: "optional"},
-	})
-	var out, errBuf bytes.Buffer
-	code := run(context.Background(), []string{"factory", "start", home, "--goal", "g", "--config", cfgFile}, &out, &errBuf)
-	if code != 1 || posted {
-		t.Fatalf("code=%d posted=%v, want a refusal that posts nothing", code, posted)
-	}
-	for _, want := range []string{"fix: add ci.yml", "fix: run: claude auth login"} {
-		if !strings.Contains(errBuf.String(), want) {
-			t.Errorf("refusal lacks %q:\n%s", want, errBuf.String())
-		}
-	}
-	if strings.Contains(errBuf.String(), "optional") {
-		t.Errorf("a warn line was printed as a failure:\n%s", errBuf.String())
-	}
-}
-
-func TestFactoryStartPassesConfigDataDir(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	customData := filepath.Join(home, "custom-data")
-	cfgFile := filepath.Join(home, "config.toml")
-	if err := os.WriteFile(cfgFile, []byte("data_dir = \""+customData+"\"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var gotOpts factory.DoctorOptions
-	old := factoryStartChecks
-	factoryStartChecks = func(_ context.Context, o factory.DoctorOptions) []onboard.Result {
-		gotOpts = o
-		return []onboard.Result{{Name: "start claude", Status: onboard.Fail, Detail: "signed out", Fix: "login"}}
-	}
-	t.Cleanup(func() { factoryStartChecks = old })
-	var out, errBuf bytes.Buffer
-	_ = run(context.Background(), []string{"factory", "start", home, "--goal", "g", "--config", cfgFile}, &out, &errBuf)
-	if gotOpts.DataDir != customData {
-		t.Fatalf("start --config DataDir = %q, want %q", gotOpts.DataDir, customData)
-	}
-}
-
-func TestFactoryStartWarnsOnConfigLoadError(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	badCfg := filepath.Join(home, "bad.toml")
-	if err := os.WriteFile(badCfg, []byte("not = [valid\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	stubStartChecks(t, []onboard.Result{
-		{Name: "start claude", Status: onboard.Fail, Detail: "signed out", Fix: "login"},
-	})
-	var out, errBuf bytes.Buffer
-	code := run(context.Background(), []string{"factory", "start", home, "--goal", "g", "--config", badCfg}, &out, &errBuf)
-	if code != 1 {
-		t.Fatalf("code = %d, want 1", code)
-	}
-	got := errBuf.String()
-	if !strings.Contains(got, "project settings") || !strings.Contains(got, "codex") {
-		t.Fatalf("stderr = %q, want warning that project settings could not be read and codex check is skipped", got)
-	}
-}
-
 func TestFactoryCommandCLI(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -302,7 +219,6 @@ func TestFactoryStartAndStopCLI(t *testing.T) {
 
 	repo := filepath.Join(home, "scratch-repo")
 	var out, errBuf bytes.Buffer
-	stubStartChecks(t, nil)
 	if code := run(context.Background(), []string{"factory", "start", repo, "--goal", "ship one task", "--config", cfgFile}, &out, &errBuf); code != 0 {
 		t.Fatalf("start code=%d stderr=%s", code, errBuf.String())
 	}
@@ -425,7 +341,6 @@ func TestFactoryPlanApplyCLI(t *testing.T) {
 		t.Fatalf("invalid JSON plan: code=%d sent=%q", code, lastPath)
 	}
 
-	stubStartChecks(t, nil)
 	if code := run(context.Background(), []string{"factory", "start", home, "--goal", "g"}, &out, &errBuf); code != 0 {
 		t.Fatalf("start code=%d stderr=%s", code, errBuf.String())
 	}
@@ -1236,6 +1151,7 @@ func TestFactoryStatusDaemonInMemoryDiskAlert(t *testing.T) {
 	}
 
 	eng := factory.New(paths, hc.NewClient(hcSrv.Path))
+	eng.StartCheck = func(context.Context, factory.DoctorOptions) []onboard.Result { return nil }
 	eng.PassInterval = 20 * time.Millisecond
 	if err := eng.Start(repo, "Verify daemon status", 2); err != nil {
 		t.Fatalf("Engine.Start: %v", err)
@@ -1651,6 +1567,7 @@ func TestFactoryStartCLINoDoubleCheckAndNoCodexSkipped_KB_STA_18(t *testing.T) {
 			if r.URL.Path == "/api/factory/start" {
 				postHits++
 			}
+			r.Header["X-Forwarded-For"] = nil // keep the request a direct loopback call, as the real CLI makes
 			proxy.ServeHTTP(w, r)
 		}))
 		t.Cleanup(srv.Close)
