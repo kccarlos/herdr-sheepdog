@@ -83,17 +83,17 @@ func ValidateAsk(a Ask) (Ask, string, string) {
 	}
 	opts, seen := make([]string, len(a.Options)), make(map[string]bool, len(a.Options))
 	for i, raw := range a.Options {
-		if opt := CleanText(raw); strings.ContainsAny(raw, "\n\r") || opt == "" || seen[opt] || parenKeyRE.MatchString(opt) {
+		opt := CleanText(raw)
+		if strings.ContainsAny(raw, "\n\r") || opt == "" || seen[opt] || parenKeyRE.MatchString(opt) {
 			return Ask{}, "invalid_ask", fmt.Sprintf("Option %q must be unique, non-blank, single-line, and not end with a short parenthetical key.", raw)
-		} else {
-			opts[i], seen[opt] = opt, true
 		}
+		opts[i], seen[opt] = opt, true
 	}
 	a.Question, a.Options, a.Recommend = q, opts, CleanText(a.Recommend)
-	switch {
-	case a.Recommend == "" || !seen[a.Recommend]:
+	if a.Recommend == "" || !seen[a.Recommend] {
 		return Ask{}, "invalid_ask", "Recommended option must be one of the options."
-	case negWaitRE.MatchString(strings.ToLower(a.Recommend)) && !slices.ContainsFunc(opts, func(o string) bool { return yesOptRE.MatchString(strings.ToLower(o)) }):
+	}
+	if negWaitRE.MatchString(strings.ToLower(a.Recommend)) && !slices.ContainsFunc(opts, func(o string) bool { return yesOptRE.MatchString(strings.ToLower(o)) }) {
 		return Ask{}, "invalid_ask", "When the recommended option is negative or wait, another option must start with Yes."
 	}
 	return a, "", ""

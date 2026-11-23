@@ -20,9 +20,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -808,4 +811,880 @@ func TestAskRestartAfterEveryStep(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestWorkerAnswerHeldWhenWorkerDiedOrHCDownBetweenPasses verifies KB-ASK-5,
+// KB-ASK-10, and design.md 2.2 / 7.1 A3: when an idle worker dies or hc becomes
+// unreachable between passes, answering its decision ask succeeds, commits once,
+// holds the answer on Attempt.Held (without losing the coordinator wake), and
+// delivers it to the next worker run.
+func TestWorkerAnswerHeldWhenWorkerDiedOrHCDownBetweenPasses(t *testing.T) {
+	t.Parallel()
+
+	t.Run("worker_died_between_passes", func(t *testing.T) {
+		t.Parallel()
+		r := newAskRig(t)
+		firstWorker := r.workerID
+		if err := r.eng.Report(r.workTok, "ask", json.RawMessage(`{"kind":"decision","question":"Use SQLite or Plain JSON?","options":["SQLite","Plain JSON"],"recommend":"SQLite"}`)); err != nil {
+			t.Fatalf("worker report ask: %v", err)
+		}
+		askID := r.state().Asks[0].ID
+
+		// J12 delivers ask:<id> wake to coordinator and records it in CoordWakesInFlight.
+		r.pass()
+		if st := r.state(); len(st.Project.Wakes) != 0 || len(st.Project.CoordWakesInFlight) != 1 {
+			t.Fatalf("after J12: wakes=%+v inFlight=%+v, want 0 queued and 1 in-flight", st.Project.Wakes, st.Project.CoordWakesInFlight)
+		}
+
+		// Worker dies between passes (no pass() yet; State.Tasks[0].Attempts[0].Run.State is still PhaseIdle).
+		if _, err := r.client.Kill(r.ctx, firstWorker); err != nil {
+			t.Fatal(err)
+		}
+		seqBefore := r.state().Seq
+
+		ansPayload := fmt.Sprintf(`{"ask":%q,"option":"Plain JSON","why":"fewer deps"}`, askID)
+		if err := r.eng.Report(r.coordTok, "answer", json.RawMessage(ansPayload)); err != nil {
+			t.Fatalf("coordinator answer when worker died between passes: %v", err)
+		}
+
+		st := r.state()
+		if st.Seq != seqBefore+1 {
+			t.Fatalf("state seq = %d, want %d (single commit per answer input)", st.Seq, seqBefore+1)
+		}
+		if st.Asks[0].Status != flow.AskStatusAnswered || st.Asks[0].Answer != "Plain JSON" || st.Asks[0].Why != "fewer deps" {
+			t.Fatalf("answered ask = %+v", st.Asks[0])
+		}
+		if held := st.Tasks[0].Attempts[0].Held; len(held) != 1 || !strings.Contains(held[0], "Plain JSON") || !strings.Contains(held[0], "fewer deps") {
+			t.Fatalf("Attempt.Held = %q, want 1 held answer with Plain JSON and reason", held)
+		}
+
+		// Coordinator finishes its turn after answering; next passes observe worker exit and start replacement worker.
+		r.srv.SetStatus(r.coordAddr, &hc.Status{App: "claude-code", State: "working"})
+		r.srv.SetStatus(r.coordAddr, &hc.Status{App: "claude-code", State: "idle"})
+		r.pass()
+		r.now = r.now.Add(65 * time.Second)
+		r.pass()
+
+		if r.workerID == "" || r.workerID == firstWorker {
+			t.Fatalf("replacement worker did not start: first=%q now=%q", firstWorker, r.workerID)
+		}
+		r.waitIdle(r.workerID)
+		texts := strings.Join(workerTexts(t, r.srv, r.client, r.workerID), "\n")
+		if !strings.Contains(texts, "Plain JSON") || !strings.Contains(texts, "fewer deps") {
+			t.Fatalf("replacement worker %s did not receive held answer:\n%s", r.workerID, texts)
+		}
+		if held := r.state().Tasks[0].Attempts[0].Held; len(held) != 0 {
+			t.Fatalf("Attempt.Held not cleared after delivery to replacement worker: %q", held)
+		}
+	})
+
+	t.Run("hc_down_between_passes", func(t *testing.T) {
+		t.Parallel()
+		srv := hctest.New(t)
+		var failHC atomic.Bool
+		proxyPath := methodFailProxy(t, srv.Path, "", &failHC)
+		client := hc.NewClient(proxyPath)
+		repo, _ := initGitRepoWithRemote(t)
+		githubOrigin(t, repo)
+		_ = bindRepoFakeGH(t, repo)
+		paths := testPaths(t)
+
+		var mu sync.Mutex
+		var coordTok, workTok, workerID string
+		srv.OnRun = func(term hc.Terminal, p hc.RunParams) {
+			mu.Lock()
+			defer mu.Unlock()
+			switch p.Labels["sheepdog.role"] {
+			case flow.RoleCoordinator:
+				coordTok = p.Env["SHEEPDOG_RUN_TOKEN"]
+			case flow.RoleWorker:
+				workTok = p.Env["SHEEPDOG_RUN_TOKEN"]
+				workerID = term.Address
+			}
+		}
+
+		now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+		eng := newTestEngine(t, paths, client)
+		eng.Now = func() time.Time { return now }
+		if err := eng.Start(repo, "HC outage during ask answer", 2); err != nil {
+			t.Fatal(err)
+		}
+		id := eng.projectDirs()[0].Name()
+		pass := func(d time.Duration) {
+			now = now.Add(d)
+			eng.passProject(context.Background(), id, false)
+		}
+		waitIdle := func(addr string) {
+			srv.SetStatus(addr, &hc.Status{App: "claude-code", State: "idle"})
+			pass(5 * time.Second)
+			pass(25 * time.Second)
+		}
+		loadSt := func() flow.State {
+			s, err := LoadState(paths.State(id))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return s
+		}
+
+		pass(0) // J7 starts coordinator
+		coordAddr := loadSt().Project.RunID
+		srv.SetStatus(coordAddr, &hc.Status{App: "claude-code", State: "working"})
+		body := `{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: demo change","brief":"Add demo.go.",` + testScopeJSON + `,"outcomes":[{"text":"demo exists","proved_by":"manual: demo.go"}]}]}`
+		if err := eng.Report(coordTok, "plan apply", []byte(body)); err != nil {
+			t.Fatal(err)
+		}
+		waitIdle(coordAddr)
+		pass(0) // N11 worktree
+		pass(0) // N23 starts worker
+		mu.Lock()
+		firstWorker, wtTok := workerID, workTok
+		mu.Unlock()
+		waitIdle(firstWorker)
+		wt := loadSt().Tasks[0].Attempts[0].Worktree
+		_ = commitFile(t, wt, "cache.go", "package demo\n// partial\n")
+
+		if err := eng.Report(wtTok, "ask", json.RawMessage(`{"kind":"decision","question":"Keep cache in SQLite or Plain JSON?","options":["SQLite","Plain JSON"],"recommend":"SQLite"}`)); err != nil {
+			t.Fatalf("worker report ask: %v", err)
+		}
+		askID := loadSt().Asks[0].ID
+		pass(0) // J12 delivers ask wake to coordinator
+
+		// hc goes down between passes; coordinator answers while hc is unreachable.
+		failHC.Store(true)
+		ansPayload := fmt.Sprintf(`{"ask":%q,"option":"Plain JSON","why":"hc down test"}`, askID)
+		if err := eng.Report(coordTok, "answer", json.RawMessage(ansPayload)); err != nil {
+			t.Fatalf("coordinator answer while hc down: %v", err)
+		}
+
+		st := loadSt()
+		if st.Asks[0].Status != flow.AskStatusAnswered || st.Asks[0].Answer != "Plain JSON" {
+			t.Fatalf("answered ask while hc down = %+v", st.Asks[0])
+		}
+		if held := st.Tasks[0].Attempts[0].Held; len(held) != 1 || !strings.Contains(held[0], "Plain JSON") || !strings.Contains(held[0], "hc down test") {
+			t.Fatalf("Attempt.Held while hc down = %q, want held answer", held)
+		}
+
+		// Worker died during the hc outage, then hc recovers.
+		srv.Finish(firstWorker, "exited")
+		failHC.Store(false)
+		pass(5 * time.Second)
+		pass(65 * time.Second)
+
+		mu.Lock()
+		nextWorker := workerID
+		mu.Unlock()
+		if nextWorker == "" || nextWorker == firstWorker {
+			t.Fatalf("replacement worker did not start after hc recovery: first=%q now=%q", firstWorker, nextWorker)
+		}
+		waitIdle(nextWorker)
+		texts := strings.Join(workerTexts(t, srv, client, nextWorker), "\n")
+		if !strings.Contains(texts, "Plain JSON") || !strings.Contains(texts, "hc down test") {
+			t.Fatalf("replacement worker %s did not receive held answer:\n%s", nextWorker, texts)
+		}
+	})
+
+	t.Run("r36_single_commit_when_worker_already_ended", func(t *testing.T) {
+		t.Parallel()
+		r := newAskRig(t)
+		if err := r.eng.Report(r.workTok, "ask", json.RawMessage(`{"kind":"decision","question":"Use mutex or channel?","options":["Mutex","Channel"],"recommend":"Mutex"}`)); err != nil {
+			t.Fatalf("worker report ask: %v", err)
+		}
+		askID := r.state().Asks[0].ID
+		if _, err := r.client.Kill(r.ctx, r.workerID); err != nil {
+			t.Fatal(err)
+		}
+		r.now = r.now.Add(5 * time.Second)
+		r.pass() // R33 transitions worker run to PhaseEnded
+		seqBefore := r.state().Seq
+
+		if err := r.eng.Report(r.coordTok, "answer", json.RawMessage(fmt.Sprintf(`{"ask":%q,"option":"Mutex","why":"simpler"}`, askID))); err != nil {
+			t.Fatalf("answer when worker PhaseEnded: %v", err)
+		}
+		st := r.state()
+		if st.Seq != seqBefore+1 {
+			t.Fatalf("state seq after R36 answer = %d, want %d (single commit of state.json)", st.Seq, seqBefore+1)
+		}
+		if held := st.Tasks[0].Attempts[0].Held; len(held) != 1 || !strings.Contains(held[0], "Mutex") {
+			t.Fatalf("Attempt.Held = %q, want held answer", held)
+		}
+	})
+}
+
+// TestLiveWorkerReceivesHeldAnswerAfterTransientHCSendError verifies KB-ASK-5
+// and design.md 7.3: when a worker asks a decision question and waits idle, a
+// transient hc send error while the coordinator answers leaves the answer
+// command succeeding and holds the message; once hc recovers, a later engine
+// pass delivers the held answer exactly once to the same live idle worker (not
+// only to a new replacement run), with no duplicate after a daemon restart.
+func TestLiveWorkerReceivesHeldAnswerAfterTransientHCSendError(t *testing.T) {
+	t.Parallel()
+	r := newAskRig(t)
+	var failSend atomic.Bool
+	r.client = hc.NewClient(methodFailProxy(t, r.srv.Path, "terminal.send", &failSend))
+	r.newEngine()
+	firstWorker := r.workerID
+
+	if err := r.eng.Report(r.workTok, "ask", json.RawMessage(`{"kind":"decision","question":"Keep cache in SQLite or Plain JSON?","options":["SQLite","Plain JSON"],"recommend":"SQLite"}`)); err != nil {
+		t.Fatalf("worker report ask: %v", err)
+	}
+	askID := r.state().Asks[0].ID
+
+	// J12 delivers ask:<id> wake to coordinator while worker remains idle.
+	r.now = r.now.Add(5 * time.Second)
+	r.pass()
+
+	r.srv.SetStatus(r.coordAddr, &hc.Status{App: "claude-code", State: "working"})
+	workerBefore := len(sendsTo(t, r.srv.Requests(), firstWorker))
+	seqBefore := r.state().Seq
+
+	// hc refuses terminal.send while the coordinator answers; answer still succeeds and holds the message.
+	failSend.Store(true)
+	ansPayload := fmt.Sprintf(`{"ask":%q,"option":"Plain JSON","why":"keep stdlib only"}`, askID)
+	if err := r.eng.Report(r.coordTok, "answer", json.RawMessage(ansPayload)); err != nil {
+		t.Fatalf("coordinator answer during transient hc send error: %v", err)
+	}
+	failSend.Store(false)
+
+	st := r.state()
+	if st.Seq != seqBefore+1 {
+		t.Fatalf("state seq = %d, want %d (single commit per answer)", st.Seq, seqBefore+1)
+	}
+	if st.Asks[0].Status != flow.AskStatusAnswered || st.Asks[0].Answer != "Plain JSON" || st.Asks[0].Why != "keep stdlib only" {
+		t.Fatalf("answered ask = %+v", st.Asks[0])
+	}
+	if got := sendsTo(t, r.srv.Requests(), firstWorker)[workerBefore:]; len(got) != 0 {
+		t.Fatalf("worker received message while hc refused terminal.send: %q", got)
+	}
+	att := st.Tasks[0].Attempts[0]
+	var runHeld []string
+	if att.Run != nil {
+		runHeld = att.Run.Held
+	}
+	if len(att.Held)+len(runHeld) != 1 {
+		t.Fatalf("held messages after refused send = Attempt.Held:%q Run.Held:%q, want 1", att.Held, runHeld)
+	}
+
+	// Coordinator finishes its turn and hc has recovered; later passes deliver the held answer
+	// exactly once to the same live idle worker.
+	r.srv.SetStatus(r.coordAddr, &hc.Status{App: "claude-code", State: "idle"})
+	r.now = r.now.Add(5 * time.Second)
+	r.pass()
+	r.now = r.now.Add(25 * time.Second)
+	r.pass()
+
+	if r.workerID != firstWorker {
+		t.Fatalf("unexpected replacement worker started: first=%q now=%q", firstWorker, r.workerID)
+	}
+	tm, err := r.client.Get(r.ctx, firstWorker)
+	if err != nil || tm.State != "live" {
+		t.Fatalf("worker %s not live after hc recovery: term=%+v err=%v", firstWorker, tm, err)
+	}
+	st = r.state()
+	att = st.Tasks[0].Attempts[0]
+	if len(st.Tasks[0].Attempts) != 1 || att.RunID != firstWorker {
+		t.Fatalf("attempt/run changed unexpectedly: attempts=%+v", st.Tasks[0].Attempts)
+	}
+	gotSends := sendsTo(t, r.srv.Requests(), firstWorker)[workerBefore:]
+	if len(gotSends) != 1 || !strings.Contains(gotSends[0], "Plain JSON") || !strings.Contains(gotSends[0], "keep stdlib only") {
+		t.Fatalf("live idle worker %s sends after hc recovery = %q (Attempt.Held=%q), want 1 delivery with Plain JSON and reason", firstWorker, gotSends, att.Held)
+	}
+	if len(att.Held) != 0 || (att.Run != nil && len(att.Run.Held) != 0) {
+		var rHeld []string
+		if att.Run != nil {
+			rHeld = att.Run.Held
+		}
+		t.Fatalf("held messages not cleared after delivery: Attempt.Held=%q Run.Held=%q", att.Held, rHeld)
+	}
+
+	// Daemon restart and further passes must not re-deliver the answer.
+	r.restart()
+	r.now = r.now.Add(5 * time.Second)
+	r.pass()
+	r.now = r.now.Add(25 * time.Second)
+	r.pass()
+
+	if afterRestart := sendsTo(t, r.srv.Requests(), firstWorker)[workerBefore:]; len(afterRestart) != 1 {
+		t.Fatalf("duplicate or altered sends after restart: %q (want exactly 1)", afterRestart)
+	}
+	if r.workerID != firstWorker {
+		t.Fatalf("replacement worker started after restart: first=%q now=%q", firstWorker, r.workerID)
+	}
+	st = r.state()
+	att = st.Tasks[0].Attempts[0]
+	if len(att.Held) != 0 || (att.Run != nil && len(att.Run.Held) != 0) {
+		var rHeld []string
+		if att.Run != nil {
+			rHeld = att.Run.Held
+		}
+		t.Fatalf("held messages reappeared after restart: Attempt.Held=%q Run.Held=%q", att.Held, rHeld)
+	}
+}
+
+type reviewerAskRig struct {
+	*askRig
+	mu     sync.Mutex
+	revID  string
+	revTok string
+}
+
+func newReviewerAskRig(t *testing.T, reviewRounds int) *reviewerAskRig {
+	t.Helper()
+	r := newAskRig(t)
+	if reviewRounds > 0 {
+		r.edit(func(s *flow.State) { s.Settings.ReviewRounds = reviewRounds })
+	}
+	rr := &reviewerAskRig{askRig: r}
+	prev := r.srv.OnRun
+	r.srv.OnRun = func(term hc.Terminal, p hc.RunParams) {
+		if prev != nil {
+			prev(term, p)
+		}
+		if p.Labels["sheepdog.role"] == flow.RoleReviewer {
+			rr.mu.Lock()
+			rr.revID = term.Address
+			rr.revTok = p.Env["SHEEPDOG_RUN_TOKEN"]
+			rr.mu.Unlock()
+		}
+	}
+	r.commitAndReady("package demo\n", greenRollup, true)
+	r.pass() // N26 pushes and opens PR
+	r.pass() // N29 starts round 1 reviewer
+	if revID, revTok := rr.currentReviewer(); revID == "" || revTok == "" {
+		t.Fatalf("round 1 reviewer did not start: id=%q tok=%q", revID, revTok)
+	}
+	return rr
+}
+
+func (rr *reviewerAskRig) currentReviewer() (string, string) {
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
+	return rr.revID, rr.revTok
+}
+
+// TestReviewerDecisionAskDeliveryAndClosure verifies design.md 5 & 7.1 A3:
+//   - An answer to a live reviewer's decision ask is delivered only to that
+//     asking reviewer run via flow.EvDeliver (stepping PhaseIdle -> PhaseWorking
+//     so N29 does not nudge it on the next pass).
+//   - If that reviewer run has ended, died between passes, or been replaced by
+//     a retry or later review round, the answer is closed with a reason logged
+//     and never pasted to the worker (or Attempt.Held) or to another reviewer.
+func TestReviewerDecisionAskDeliveryAndClosure(t *testing.T) {
+	t.Parallel()
+
+	t.Run("idle_reviewer_receives_answer_via_EvDeliver_without_N29_nudge", func(t *testing.T) {
+		t.Parallel()
+		rr := newReviewerAskRig(t, 1)
+		rev1, revTok1 := rr.currentReviewer()
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "working"})
+		rr.pass()
+
+		if err := rr.eng.Report(revTok1, "ask", json.RawMessage(`{"kind":"decision","question":"Is helper exported intentionally?","options":["Yes","No"],"recommend":"Yes"}`)); err != nil {
+			t.Fatalf("reviewer report ask: %v", err)
+		}
+		askID := rr.state().Asks[0].ID
+
+		// Put reviewer in post-R20 PhaseIdle state before N29 has nudged it.
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "idle"})
+		rr.edit(func(s *flow.State) {
+			run := s.Tasks[0].Attempts[0].Review.Run
+			run.State = flow.PhaseIdle
+			run.Status = "idle"
+			run.StatusSince = rr.now
+		})
+
+		revBefore := len(sendsTo(t, rr.srv.Requests(), rev1))
+		workerBefore := len(sendsTo(t, rr.srv.Requests(), rr.workerID))
+
+		if err := rr.eng.Report(rr.coordTok, "answer", json.RawMessage(fmt.Sprintf(`{"ask":%q,"option":"Yes","why":"public package API"}`, askID))); err != nil {
+			t.Fatalf("answer idle reviewer: %v", err)
+		}
+
+		st := rr.state()
+		rev := st.Tasks[0].Attempts[0].Review
+		if rev == nil || rev.Run == nil || rev.Run.State != flow.PhaseWorking {
+			t.Fatalf("reviewer run state after EvDeliver = %+v, want %q", rev, flow.PhaseWorking)
+		}
+		revSends := sendsTo(t, rr.srv.Requests(), rev1)[revBefore:]
+		if len(revSends) != 1 || !strings.Contains(revSends[0], "Yes") || !strings.Contains(revSends[0], "public package API") {
+			t.Fatalf("reviewer sends = %q, want 1 message with Yes and reason", revSends)
+		}
+
+		// Next pass must not see RunIdle and must not trigger N29's nudge.
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass()
+		if after := sendsTo(t, rr.srv.Requests(), rev1)[revBefore:]; len(after) != 1 {
+			t.Fatalf("N29 wrongly nudged/sent to reviewer after EvDeliver: %q", after)
+		}
+		if workerSends := sendsTo(t, rr.srv.Requests(), rr.workerID)[workerBefore:]; len(workerSends) != 0 || len(rr.state().Tasks[0].Attempts[0].Held) != 0 {
+			t.Fatalf("worker received reviewer answer: sends=%q held=%q", workerSends, rr.state().Tasks[0].Attempts[0].Held)
+		}
+	})
+
+	t.Run("ended_reviewer_never_pastes_to_worker_and_closes_ask", func(t *testing.T) {
+		t.Parallel()
+		rr := newReviewerAskRig(t, 1)
+		rr.edit(func(s *flow.State) { s.Settings.ReviewerRetries = 0 })
+		rev1, revTok1 := rr.currentReviewer()
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "working"})
+		rr.pass()
+
+		if err := rr.eng.Report(revTok1, "ask", json.RawMessage(`{"kind":"decision","question":"Treat missing doc comment as major?","options":["Yes","No"],"recommend":"No"}`)); err != nil {
+			t.Fatalf("reviewer report ask: %v", err)
+		}
+		askID := rr.state().Asks[0].ID
+
+		if _, err := rr.client.Kill(rr.ctx, rev1); err != nil {
+			t.Fatal(err)
+		}
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass() // observes reviewer ended (RunID cleared, Run.State == PhaseEnded)
+
+		workerBefore := len(sendsTo(t, rr.srv.Requests(), rr.workerID))
+		err := rr.eng.Report(rr.coordTok, "answer", json.RawMessage(fmt.Sprintf(`{"ask":%q,"option":"No","why":"optional on internal helpers"}`, askID)))
+		if err != nil && refusalCode(err) != flow.RefuseClosed {
+			t.Fatalf("answer after reviewer ended = %v, want nil (closed) or already_closed", err)
+		}
+
+		st := rr.state()
+		if st.Asks[0].Status == flow.AskStatusOpen {
+			t.Fatalf("ask stayed open after reviewer ended: %+v", st.Asks[0])
+		}
+		if workerSends := sendsTo(t, rr.srv.Requests(), rr.workerID)[workerBefore:]; len(workerSends) != 0 {
+			t.Fatalf("reviewer answer pasted to worker: %q", workerSends)
+		}
+		if held := st.Tasks[0].Attempts[0].Held; len(held) != 0 {
+			t.Fatalf("reviewer answer put onto worker Attempt.Held: %q", held)
+		}
+		rawLog, _ := os.ReadFile(rr.paths.Log(rr.id))
+		if !strings.Contains(string(rawLog), askID) {
+			t.Fatalf("log.jsonl missing ask closure reason for %s:\n%s", askID, rawLog)
+		}
+	})
+
+	t.Run("retry_reviewer_never_receives_previous_reviewer_answer", func(t *testing.T) {
+		t.Parallel()
+		rr := newReviewerAskRig(t, 1)
+		rev1, revTok1 := rr.currentReviewer()
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "working"})
+		rr.pass()
+
+		if err := rr.eng.Report(revTok1, "ask", json.RawMessage(`{"kind":"decision","question":"Accept relaxed timeout?","options":["Yes","No"],"recommend":"Yes"}`)); err != nil {
+			t.Fatalf("reviewer 1 report ask: %v", err)
+		}
+		askID := rr.state().Asks[0].ID
+
+		// Round 1 reviewer dies and N29 starts a retry reviewer rev2.
+		if _, err := rr.client.Kill(rr.ctx, rev1); err != nil {
+			t.Fatal(err)
+		}
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass()
+		rev2, _ := rr.currentReviewer()
+		if rev2 == "" || rev2 == rev1 {
+			t.Fatalf("retry reviewer did not start: rev1=%q rev2=%q", rev1, rev2)
+		}
+
+		rev2Before := len(sendsTo(t, rr.srv.Requests(), rev2))
+		workerBefore := len(sendsTo(t, rr.srv.Requests(), rr.workerID))
+
+		err := rr.eng.Report(rr.coordTok, "answer", json.RawMessage(fmt.Sprintf(`{"ask":%q,"option":"Yes","why":"matches SLA"}`, askID)))
+		if err != nil && refusalCode(err) != flow.RefuseClosed {
+			t.Fatalf("answer old reviewer ask while retry running = %v", err)
+		}
+
+		if got := sendsTo(t, rr.srv.Requests(), rev2)[rev2Before:]; len(got) != 0 {
+			t.Fatalf("retry reviewer %s wrongly received old reviewer %s's answer: %q", rev2, rev1, got)
+		}
+		if workerSends := sendsTo(t, rr.srv.Requests(), rr.workerID)[workerBefore:]; len(workerSends) != 0 || len(rr.state().Tasks[0].Attempts[0].Held) != 0 {
+			t.Fatalf("worker wrongly received old reviewer answer: sends=%q held=%q", workerSends, rr.state().Tasks[0].Attempts[0].Held)
+		}
+		if st := rr.state(); st.Asks[0].Status == flow.AskStatusOpen {
+			t.Fatalf("old reviewer ask stayed open after retry started: %+v", st.Asks[0])
+		}
+		rawLog, _ := os.ReadFile(rr.paths.Log(rr.id))
+		if !strings.Contains(string(rawLog), askID) {
+			t.Fatalf("log.jsonl missing closure record for %s:\n%s", askID, rawLog)
+		}
+	})
+
+	t.Run("new_round_reviewer_never_receives_previous_round_answer", func(t *testing.T) {
+		t.Parallel()
+		rr := newReviewerAskRig(t, 2)
+		rev1, revTok1 := rr.currentReviewer()
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "working"})
+		rr.pass()
+
+		if err := rr.eng.Report(revTok1, "ask", json.RawMessage(`{"kind":"decision","question":"Allow nil config fallback?","options":["Yes","No"],"recommend":"Yes"}`)); err != nil {
+			t.Fatalf("round 1 reviewer ask: %v", err)
+		}
+		askID := rr.state().Asks[0].ID
+
+		// Round 1 passes and N29 starts round 2 reviewer rev2.
+		rr.passReviewRound()
+		rr.pass()
+		rev2, _ := rr.currentReviewer()
+		if rev2 == "" || rev2 == rev1 {
+			t.Fatalf("round 2 reviewer did not start: rev1=%q rev2=%q", rev1, rev2)
+		}
+
+		rev2Before := len(sendsTo(t, rr.srv.Requests(), rev2))
+		workerBefore := len(sendsTo(t, rr.srv.Requests(), rr.workerID))
+
+		err := rr.eng.Report(rr.coordTok, "answer", json.RawMessage(fmt.Sprintf(`{"ask":%q,"option":"Yes","why":"backward compatible"}`, askID)))
+		if err != nil && refusalCode(err) != flow.RefuseClosed {
+			t.Fatalf("answer round 1 ask while round 2 running = %v", err)
+		}
+
+		if got := sendsTo(t, rr.srv.Requests(), rev2)[rev2Before:]; len(got) != 0 {
+			t.Fatalf("round 2 reviewer %s wrongly received round 1's answer: %q", rev2, got)
+		}
+		if workerSends := sendsTo(t, rr.srv.Requests(), rr.workerID)[workerBefore:]; len(workerSends) != 0 || len(rr.state().Tasks[0].Attempts[0].Held) != 0 {
+			t.Fatalf("worker wrongly received round 1 reviewer answer: sends=%q held=%q", workerSends, rr.state().Tasks[0].Attempts[0].Held)
+		}
+		if st := rr.state(); st.Asks[0].Status == flow.AskStatusOpen {
+			t.Fatalf("round 1 reviewer ask stayed open in round 2: %+v", st.Asks[0])
+		}
+	})
+
+	t.Run("reviewer_died_between_passes_closes_without_error_or_worker_paste", func(t *testing.T) {
+		t.Parallel()
+		rr := newReviewerAskRig(t, 1)
+		rev1, revTok1 := rr.currentReviewer()
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "working"})
+		rr.pass()
+
+		if err := rr.eng.Report(revTok1, "ask", json.RawMessage(`{"kind":"decision","question":"Flag unused helper?","options":["Yes","No"],"recommend":"No"}`)); err != nil {
+			t.Fatalf("reviewer ask: %v", err)
+		}
+		askID := rr.state().Asks[0].ID
+
+		// Reviewer dies between passes (no pass() yet; att.Review.RunID still points at rev1).
+		if _, err := rr.client.Kill(rr.ctx, rev1); err != nil {
+			t.Fatal(err)
+		}
+		workerBefore := len(sendsTo(t, rr.srv.Requests(), rr.workerID))
+
+		if err := rr.eng.Report(rr.coordTok, "answer", json.RawMessage(fmt.Sprintf(`{"ask":%q,"option":"No","why":"used by tests"}`, askID))); err != nil {
+			t.Fatalf("answer when reviewer died between passes = %v, want nil (closed with reason logged)", err)
+		}
+
+		st := rr.state()
+		if st.Asks[0].Status == flow.AskStatusOpen {
+			t.Fatalf("ask stayed open after reviewer died between passes: %+v", st.Asks[0])
+		}
+		if workerSends := sendsTo(t, rr.srv.Requests(), rr.workerID)[workerBefore:]; len(workerSends) != 0 || len(st.Tasks[0].Attempts[0].Held) != 0 {
+			t.Fatalf("worker wrongly received dead reviewer answer: sends=%q held=%q", workerSends, st.Tasks[0].Attempts[0].Held)
+		}
+		rawLog, _ := os.ReadFile(rr.paths.Log(rr.id))
+		if !strings.Contains(string(rawLog), askID) {
+			t.Fatalf("log.jsonl missing reason for closed reviewer ask %s:\n%s", askID, rawLog)
+		}
+	})
+}
+
+// TestReviewerDecisionAskAnsweredWhileWorking verifies the round-2 major fix
+// through real engine passes (without hand-editing RunRecord state):
+//   - A live reviewer opens a decision ask and ends its turn (or finishes its
+//     turn after the coordinator answers).
+//   - The coordinator answers while the reviewer run is still PhaseWorking.
+//   - Before delivery, the ask is either still open or answered with delivery
+//     pending; on the next passes when the reviewer becomes idle past
+//     IdleGraceSeconds, the answer is delivered to that reviewer exactly once
+//     (the same way a worker's held messages are), never to the worker.
+//   - N29 neither nudges nor ends the reviewer while its answer is pending or
+//     when delivery completes.
+func TestReviewerDecisionAskAnsweredWhileWorking(t *testing.T) {
+	t.Parallel()
+
+	assertNoN29 := func(t *testing.T, rr *reviewerAskRig, revAddr string) {
+		t.Helper()
+		st := rr.state()
+		att := st.Tasks[0].Attempts[0]
+		for _, act := range att.Acts {
+			if strings.HasPrefix(act.Key, flow.AskNudgeReview+"@") || strings.HasPrefix(act.Key, flow.AskStopReview+"@") {
+				t.Fatalf("N29 fired unexpectedly on reviewer %s: act=%+v", revAddr, act)
+			}
+		}
+		for _, msg := range sendsTo(t, rr.srv.Requests(), revAddr) {
+			if strings.Contains(msg, "no report tag") {
+				t.Fatalf("N29 nudged reviewer %s while answer pending/delivered: %q", revAddr, msg)
+			}
+		}
+		tm, err := rr.client.Get(rr.ctx, revAddr)
+		if err != nil || tm.State != "live" {
+			t.Fatalf("reviewer terminal %s not live: term=%+v err=%v", revAddr, tm, err)
+		}
+		if att.Review == nil || att.Review.Run == nil || att.Review.Run.State == flow.PhaseEnded {
+			t.Fatalf("reviewer run ended unexpectedly: %+v", att.Review)
+		}
+	}
+
+	assertPendingAskState := func(t *testing.T, rr *reviewerAskRig, wantOption, wantWhy string) {
+		t.Helper()
+		st := rr.state()
+		ask := st.Asks[0]
+		rev := st.Tasks[0].Attempts[0].Review
+		switch ask.Status {
+		case flow.AskStatusOpen:
+		case flow.AskStatusAnswered:
+			if rev == nil || rev.Run == nil || len(rev.Run.Held) == 0 {
+				t.Fatalf("ask marked answered while delivery pending, but Review.Run.Held is empty: ask=%+v rev=%+v", ask, rev)
+			}
+			held := strings.Join(rev.Run.Held, "\n")
+			if !strings.Contains(held, wantOption) || !strings.Contains(held, wantWhy) {
+				t.Fatalf("pending Review.Run.Held = %q, want %q and %q", rev.Run.Held, wantOption, wantWhy)
+			}
+		default:
+			t.Fatalf("unexpected ask status while answer pending: %+v", ask)
+		}
+	}
+
+	assertDeliveredOnce := func(t *testing.T, rr *reviewerAskRig, revAddr string, revBefore, workerBefore int, wantOption, wantWhy string) {
+		t.Helper()
+		assertNoN29(t, rr, revAddr)
+		revSends := sendsTo(t, rr.srv.Requests(), revAddr)[revBefore:]
+		if len(revSends) != 1 || !strings.Contains(revSends[0], wantOption) || !strings.Contains(revSends[0], wantWhy) {
+			t.Fatalf("reviewer %s sends after idle = %q, want 1 message with %q and %q", revAddr, revSends, wantOption, wantWhy)
+		}
+		st := rr.state()
+		ask := st.Asks[0]
+		if ask.Status != flow.AskStatusAnswered || ask.Answer != wantOption || ask.Why != wantWhy || ask.AnsweredBy != flow.RoleCoordinator {
+			t.Fatalf("ask after delivery = %+v, want answered(%q, %q, %q)", ask, wantOption, wantWhy, flow.RoleCoordinator)
+		}
+		rev := st.Tasks[0].Attempts[0].Review
+		if rev == nil || rev.Run == nil || rev.Run.State != flow.PhaseWorking || len(rev.Run.Held) != 0 {
+			t.Fatalf("reviewer run after delivery = %+v, want PhaseWorking with empty Held", rev)
+		}
+		if workerSends := sendsTo(t, rr.srv.Requests(), rr.workerID)[workerBefore:]; len(workerSends) != 0 || len(st.Tasks[0].Attempts[0].Held) != 0 {
+			t.Fatalf("worker wrongly received reviewer answer: sends=%q held=%q", workerSends, st.Tasks[0].Attempts[0].Held)
+		}
+	}
+
+	t.Run("reviewer_ends_turn_answered_within_grace_delivered_when_idle", func(t *testing.T) {
+		t.Parallel()
+		rr := newReviewerAskRig(t, 1)
+		rev1, revTok1 := rr.currentReviewer()
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "working"})
+		rr.pass()
+
+		if err := rr.eng.Report(revTok1, "ask", json.RawMessage(`{"kind":"decision","question":"Is helper exported intentionally?","options":["Yes","No"],"recommend":"Yes"}`)); err != nil {
+			t.Fatalf("reviewer report ask: %v", err)
+		}
+		askID := rr.state().Asks[0].ID
+
+		// Reviewer ends its turn waiting for the answer; the first pass observes
+		// Status=="idle" within IdleGraceSeconds (PhaseWorking) and J12 wakes coordinator.
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "idle"})
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass()
+		if st := rr.state(); st.Tasks[0].Attempts[0].Review.Run.State != flow.PhaseWorking {
+			t.Fatalf("reviewer run before answer = %+v, want %q", st.Tasks[0].Attempts[0].Review.Run, flow.PhaseWorking)
+		}
+
+		revBefore := len(sendsTo(t, rr.srv.Requests(), rev1))
+		workerBefore := len(sendsTo(t, rr.srv.Requests(), rr.workerID))
+
+		if err := rr.eng.Report(rr.coordTok, "answer", json.RawMessage(fmt.Sprintf(`{"ask":%q,"option":"Yes","why":"public package API"}`, askID))); err != nil {
+			t.Fatalf("coordinator answer while reviewer working: %v", err)
+		}
+		if got := sendsTo(t, rr.srv.Requests(), rev1)[revBefore:]; len(got) != 0 {
+			t.Fatalf("answer sent before reviewer became idle past grace: %q", got)
+		}
+		assertPendingAskState(t, rr, "Yes", "public package API")
+
+		// Intermediate pass still within IdleGraceSeconds: answer remains pending and N29 stays silent.
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass()
+		assertNoN29(t, rr, rev1)
+		if got := sendsTo(t, rr.srv.Requests(), rev1)[revBefore:]; len(got) != 0 {
+			t.Fatalf("answer sent prematurely within idle grace: %q", got)
+		}
+		assertPendingAskState(t, rr, "Yes", "public package API")
+
+		// Next pass past IdleGraceSeconds: reviewer is idle, so the answer is delivered once without N29 nudge/stop.
+		rr.now = rr.now.Add(20 * time.Second)
+		rr.pass()
+		assertDeliveredOnce(t, rr, rev1, revBefore, workerBefore, "Yes", "public package API")
+
+		// Further passes before and after the reviewer resumes working never re-deliver or trigger N29.
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass()
+		assertDeliveredOnce(t, rr, rev1, revBefore, workerBefore, "Yes", "public package API")
+
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "working"})
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass()
+		assertDeliveredOnce(t, rr, rev1, revBefore, workerBefore, "Yes", "public package API")
+
+		rr.passReviewRound()
+		if st := rr.state(); len(st.Tasks[0].Attempts[0].Rounds) != 1 || st.Tasks[0].Attempts[0].Rounds[0].Verdict != flow.VerdictPass {
+			t.Fatalf("rounds after answered reviewer finished = %+v, want 1 pass round", st.Tasks[0].Attempts[0].Rounds)
+		}
+	})
+
+	t.Run("answered_while_hc_working_then_reviewer_ends_turn", func(t *testing.T) {
+		t.Parallel()
+		rr := newReviewerAskRig(t, 1)
+		rev1, revTok1 := rr.currentReviewer()
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "working"})
+		rr.pass()
+
+		if err := rr.eng.Report(revTok1, "ask", json.RawMessage(`{"kind":"decision","question":"Treat missing validation as major?","options":["Yes","No"],"recommend":"Yes"}`)); err != nil {
+			t.Fatalf("reviewer report ask: %v", err)
+		}
+		askID := rr.state().Asks[0].ID
+
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass() // J12 wakes coordinator while reviewer is still working
+
+		revBefore := len(sendsTo(t, rr.srv.Requests(), rev1))
+		workerBefore := len(sendsTo(t, rr.srv.Requests(), rr.workerID))
+
+		if err := rr.eng.Report(rr.coordTok, "answer", json.RawMessage(fmt.Sprintf(`{"ask":%q,"option":"No","why":"validated at caller"}`, askID))); err != nil {
+			t.Fatalf("coordinator answer while reviewer working: %v", err)
+		}
+
+		// Reviewer stays working on a subsequent pass; answer stays pending.
+		rr.now = rr.now.Add(15 * time.Second)
+		rr.pass()
+		assertNoN29(t, rr, rev1)
+		if got := sendsTo(t, rr.srv.Requests(), rev1)[revBefore:]; len(got) != 0 {
+			t.Fatalf("answer sent while reviewer still working: %q", got)
+		}
+		assertPendingAskState(t, rr, "No", "validated at caller")
+
+		// Reviewer ends its turn -> within grace stays pending, then past grace delivers once.
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "idle"})
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass()
+		assertNoN29(t, rr, rev1)
+		if got := sendsTo(t, rr.srv.Requests(), rev1)[revBefore:]; len(got) != 0 {
+			t.Fatalf("answer sent before idle grace elapsed: %q", got)
+		}
+		assertPendingAskState(t, rr, "No", "validated at caller")
+
+		rr.now = rr.now.Add(20 * time.Second)
+		rr.pass()
+		assertDeliveredOnce(t, rr, rev1, revBefore, workerBefore, "No", "validated at caller")
+
+		rr.srv.SetStatus(rev1, &hc.Status{App: "claude-code", State: "working"})
+		rr.now = rr.now.Add(5 * time.Second)
+		rr.pass()
+		assertDeliveredOnce(t, rr, rev1, revBefore, workerBefore, "No", "validated at caller")
+
+		rr.passReviewRound()
+		if st := rr.state(); len(st.Tasks[0].Attempts[0].Rounds) != 1 || st.Tasks[0].Attempts[0].Rounds[0].Verdict != flow.VerdictPass {
+			t.Fatalf("rounds after answered reviewer finished = %+v, want 1 pass round", st.Tasks[0].Attempts[0].Rounds)
+		}
+	})
+}
+
+// TestProofsStoreSafetyAndPersistence checks proofs.json hygiene (KB-TST-1,
+// design.md 15, 16): real-home Paths are refused, empty DataDir fails clearly
+// instead of minting an unverifiable proof, missing proofs.json starts empty,
+// and unreadable or malformed proofs.json returns an error from MintProof
+// without wiping unexpired proofs.
+func TestProofsStoreSafetyAndPersistence(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no_data_dir_refuses_mint_clearly", func(t *testing.T) {
+		t.Parallel()
+		e := New(Paths{}, nil)
+		if _, err := e.MintProof("ask-1", "Yes", ProofInputTap, "dev-phone-1"); err == nil {
+			t.Fatal("MintProof with empty DataDir succeeded; want clear error instead of minting an unverifiable proof")
+		}
+	})
+
+	t.Run("real_home_refused_by_guard", func(t *testing.T) {
+		t.Parallel()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			t.Skip(err)
+		}
+		e := New(Paths{DataDir: filepath.Join(home, ".local", "share", "sheepdog")}, nil)
+		if _, err := e.MintProof("ask-1", "Yes", ProofInputTap, "dev-phone-1"); err == nil || !strings.Contains(err.Error(), "outside the temp dir") {
+			t.Fatalf("MintProof under real home = %v, want guardTestPath error", err)
+		}
+	})
+
+	t.Run("missing_file_starts_empty_and_persists_0600", func(t *testing.T) {
+		t.Parallel()
+		paths := testPaths(t)
+		e := New(paths, nil)
+		p, err := e.MintProof("ask-1", "Yes", ProofInputTap, "dev-phone-1")
+		if err != nil || p.ID == "" {
+			t.Fatalf("MintProof on missing proofs.json = (%+v, %v)", p, err)
+		}
+		proofPath := filepath.Join(paths.DataDir, "factory", "proofs.json")
+		fi, err := os.Stat(proofPath)
+		if err != nil || fi.Mode().Perm() != 0o600 {
+			t.Fatalf("proofs.json stat = (%v, %v), want mode 0600", fi, err)
+		}
+	})
+
+	t.Run("malformed_proofs_file_errors_without_wiping", func(t *testing.T) {
+		t.Parallel()
+		paths := testPaths(t)
+		e := New(paths, nil)
+		proofPath := filepath.Join(paths.DataDir, "factory", "proofs.json")
+		if err := os.MkdirAll(filepath.Dir(proofPath), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		const corrupt = "{malformed json"
+		if err := os.WriteFile(proofPath, []byte(corrupt), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.MintProof("ask-2", "Yes", ProofInputTap, "dev-phone-1"); err == nil {
+			t.Fatal("MintProof succeeded over malformed proofs.json; want error")
+		}
+		raw, err := os.ReadFile(proofPath)
+		if err != nil || string(raw) != corrupt {
+			t.Fatalf("malformed proofs.json was modified/wiped: err=%v contents=%q", err, raw)
+		}
+	})
+
+	t.Run("unreadable_proofs_file_errors_without_wiping_unexpired_proofs", func(t *testing.T) {
+		t.Parallel()
+		if os.Geteuid() == 0 {
+			t.Skip("root ignores 0000 file mode")
+		}
+		r := newAskRig(t)
+		r.edit(func(s *flow.State) {
+			s.Asks = []flow.Ask{
+				{
+					ID: "ask-rel-1", Project: r.id, Folder: r.repo, Kind: flow.KindRelease, Gated: true,
+					Question: "Tag v1.2.0?", Options: []string{"Yes, tag v1.2.0", "Not now"},
+					Recommend: "Yes, tag v1.2.0", Task: "T1", Head: r.commits[0],
+					AskedBy: flow.RoleCoordinator, RunID: r.coordAddr, At: r.now, Status: flow.AskStatusOpen,
+				},
+				{
+					ID: "ask-gate-1", Project: r.id, Folder: r.repo, Kind: flow.KindGate, Gated: true,
+					Question: "Approve T1?", Options: []string{"Yes, approve", "No, revise"},
+					Recommend: "Yes, approve", Task: "T1", Head: r.commits[0],
+					AskedBy: flow.RoleCoordinator, RunID: r.coordAddr, At: r.now, Status: flow.AskStatusOpen,
+				},
+			}
+		})
+		p1, err := r.eng.MintProof("ask-rel-1", "Yes, tag v1.2.0", ProofInputTap, "dev-phone-1")
+		if err != nil {
+			t.Fatalf("MintProof p1: %v", err)
+		}
+		proofPath := filepath.Join(r.paths.DataDir, "factory", "proofs.json")
+		if err := os.Chmod(proofPath, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(proofPath, 0o600) })
+
+		if _, err := r.eng.MintProof("ask-gate-1", "Yes, approve", ProofInputTap, "dev-phone-1"); err == nil {
+			t.Fatal("MintProof succeeded on unreadable proofs.json; want error")
+		}
+
+		if err := os.Chmod(proofPath, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.eng.Answer("ask-rel-1", "Yes, tag v1.2.0", p1); err != nil {
+			t.Fatalf("unexpired proof p1 was wiped or invalidated by failed MintProof: %v", err)
+		}
+	})
 }
