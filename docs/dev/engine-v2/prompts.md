@@ -347,7 +347,7 @@ Every prompt ends with facts the engine builds from records at that moment. An a
 | Worker | The brief; `not_doing`; the estimate and the cap; the base branch; the report commands with the task filled in; for a fix, the findings file; "pull first" when the engine moved the head |
 | Reviewer | The brief; `not_doing`; the diff range; earlier rounds with their verdicts; the worker's rejections, taken from its `reject` records and from the commit messages since the last round; the worker's proofs with their output; the one-time code, round, head and scratch findings path for its `factory report review` command (or `<report>` tag for Codex pending S-REV-2) |
 | Plan reviewer | The plan, the design note, the owner's words, the repo's size and layout |
-| Retro | As the old template: rounds with report paths, sizes vs estimate, the brief, `not_doing`, outcomes, diff range, initial vs delta mode, the reviewer and worker models; plus the one-time code, head, scratch findings path and `factory report retro` command |
+| Retro | As the old template: rounds, sizes, the brief, the reviewer and worker models; plus the one-time code, head, scratch findings path and `factory report retro` command |
 
 Quota is watched for agents; a worker's facts never name a quota tool (KB-QTA-12).
 
