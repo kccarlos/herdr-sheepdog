@@ -331,7 +331,7 @@ Codex keeps the transitional `<report>` tag template (`internal/factory/reviewer
 
 ### 5.5 Retro
 
-The old retro template is kept nearly as it is (`factory/templates/retro.md`, 37 lines): it was already a filled-in case file with a fixed cause set, and it has replay evidence (PR #671). Three changes: the tag carries the run's one-time code; each of the two changes it gives says whether it is a check to add to the repo or words for a brief; and the fields the engine can no longer fill (tokens) leave until they exist.
+The old retro template is kept nearly as it is (`factory/templates/retro.md`, 37 lines): it was already a filled-in case file with a fixed cause set, and it has replay evidence (PR #671). Four changes: the retro submits via `sheepdog factory report retro <ship|fix|redesign> --code {code} --head {head} --cause <cause> --worker-change "<text>" --worker-change-kind <check|brief> --coordinator-change "<text>" --coordinator-change-kind <check|brief> --findings {findings_path}` (mirroring `report review` in 5.4, with plain `major:` lines in `{findings_path}` outside the worktree instead of a `<report>` JSON block; `second_cause`, `replan`, `worker_model` and `reviewer` stay plain text in `{findings_path}`); the 8-cause line is tested against the single Go cause-set value (`flow.RetroCauses`); each of the two changes says whether it is a repo `check` or `brief` wording; and the fields the engine can no longer fill (tokens) leave until they exist. Low confidence is left out of slice 12 (`KB-RET-6`).
 
 ### 5.6 Verifier
 
@@ -347,7 +347,7 @@ Every prompt ends with facts the engine builds from records at that moment. An a
 | Worker | The brief; `not_doing`; the estimate and the cap; the base branch; the report commands with the task filled in; for a fix, the findings file; "pull first" when the engine moved the head |
 | Reviewer | The brief; `not_doing`; the diff range; earlier rounds with their verdicts; the worker's rejections, taken from its `reject` records and from the commit messages since the last round; the worker's proofs with their output; the one-time code, round, head and scratch findings path for its `factory report review` command (or `<report>` tag for Codex pending S-REV-2) |
 | Plan reviewer | The plan, the design note, the owner's words, the repo's size and layout |
-| Retro | As the old template: rounds, sizes, the brief, the reviewer and worker models |
+| Retro | As the old template: rounds, sizes, the brief, the reviewer and worker models; plus the one-time code, head, scratch findings path and `factory report retro` command |
 
 Quota is watched for agents; a worker's facts never name a quota tool (KB-QTA-12).
 
