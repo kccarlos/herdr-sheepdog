@@ -331,7 +331,7 @@ Reached only when the ladder says "passed" for `H`. `p` is the latest PR snapsho
 | N33 | checks red at `H` | re-runs used for `H` below `flake_reruns`: re-run the failed jobs once (a check that turns green by itself costs no round; set `flake_reruns` to 0 to never re-run a red check). Otherwise tell the worker once per failing run ("pull first" if the engine updated the branch) | CI; then the worker |
 | N34 | checks stopped: cancelled from outside, or a job hit its own time limit | cancelled from outside with re-runs left: re-run. Otherwise (and always for a job's own time limit): wake the coordinator once | CI; then the coordinator |
 | N35 | no checks, past `checks_grace_minutes` | dispatch not used for `H`: dispatch the `dispatch_workflow` setting's workflow if it is set and exists at `H` (else skip to the wake). Dispatched less than `checks_grace_minutes` ago: wait. Otherwise wake the coordinator once, naming the ways out: a change that makes a workflow run for this PR, the owner's override (section 4.3b), or drop. "No checks" is never green. Doctor refuses the start of a repo with no PR workflow, and warns when path filters can leave a PR with none | CI; then the coordinator |
-| N36 | checks pending, unreadable, or absent within `checks_grace_minutes`; or mergeable unknown | — (after `ci_stalled_minutes` the alert `ci_stalled` is raised; until slice 5b builds the alerts table, N36 wakes the coordinator once per `H` when checks stay pending past `ci_stalled_minutes`) | CI |
+| N36 | checks pending, unreadable, or absent within `checks_grace_minutes`; or mergeable unknown | — (when checks are proven `pending` on the current head `H` for `ci_stalled_minutes`, raise the alert `ci_stalled` once for `H` and wake the coordinator once per `H`; clear `ci_stalled` when checks on `H` complete or `H` changes, so a new head starts a new episode only if its checks also stay pending for `ci_stalled_minutes`) | CI |
 | N37 | GitHub requires an approving review | wake the coordinator once. Nobody in the factory can give the approval; doctor lists the repo setting at start, and review comments on the PR are passed to the worker as a file | a GitHub approval |
 | N38 | the base is red (the runs on the base's head commit), and the PR is behind or the comparison is unknown | — until the base has been red for `main_red_minutes`. Then, once: tell the worker of the oldest task held here to merge the base into its branch and say ready (N20 or a normal round follows; a PR that is no longer behind may merge and so repair the base), and wake the coordinator with that way out named | the base branch; then the worker |
 | N39 | the worker run is `working`, or its last turn left a background job younger than `background_job_minutes` | — (it may be about to commit, and a merge would end its job; a stray turn does not undo a pass) | the worker |
@@ -498,9 +498,9 @@ First match wins.
 |---|---|---|---|
 | J1 | a start was asked and doctor has not passed since | doctor runs; on failure its fix lines are shown and the start is dropped; on success the project is marked started | start shell |
 | J2 | never started, or stopped by the owner | no run of this project is alive; the plan and tasks are kept | "Stopped by you" |
-| J3 | a stopping alert is active (`no_pool`, `disk`, `consent_prompt`) and no coordinator run is alive | nothing starts (tasks wait at N10) | "Stopped", with the fix |
+| J3 | a stopping alert is active (`no_pool`, `disk`, `consent_prompt`) and no coordinator run is alive | nothing starts (every new start and restart is held; tasks wait at N10) | "Stopped", with the fix |
 | J4 | a plan exists, every milestone is done, no task is open, and the owner has given no new goal since | the final journal entry; then no coordinator | "Finished" |
-| J5 | the coordinator is signed out | the alert `agents_down` with the at-the-Mac fix; no restart until doctor sees it signed in | running |
+| J5 | the coordinator role is held on sign-out (no configured coordinator candidate has a positive sign-in check) | the alert `agents_down` with the at-the-Mac fix; recheck sign-in on schedule even with no run; use another coordinator candidate only if configured and positively signed in; hold until a positive check for the held candidate or a completed coordinator turn | running |
 | J6 | no coordinator run is alive; a start is not allowed yet (`coordinator_gap_minutes`, `coordinator_starts_per_hour`) | wait; raise `agents_down` if the hourly limit is the reason | running |
 | J7 | no coordinator run is alive | start one: fresh with the goal if there is no plan, else with a handoff built from the store; held wakes are kept for it | "Planning" with no plan, else running |
 | J8 | the coordinator reported an error at the end of a turn | first time: tell it to go on. Again within `quiet_minutes`: stop it (J7 follows) | running |
@@ -511,20 +511,20 @@ First match wins.
 | J13 | no wake for `heartbeat_minutes` and the coordinator is idle | a heartbeat wake | running |
 | J14 | otherwise | — | running ("nothing needs you" when no owner ask is open) |
 
-The owner is told once per alert id, whoever is alive. While a stopping alert is active nothing new starts, whatever row matches: J7 does not start a coordinator and tasks wait at N10. A coordinator that is already alive is still looked after by J8 to J13, and the section shows "Stopped" with the alert's fix.
+The owner is told once per alert episode, whoever is alive. While a stopping alert is active, every new start is held: coordinator (J7), worker (N11, N23), reviewer (N29), and restarts across roles. Runs already live stay managed (a live coordinator keeps getting wakes and heartbeats through J8 to J13), and the section shows "Stopped" with the alert's fix.
 
 Held wakes merge only when their kind and their task are the same. The owner's words (`say`) are a wake marked as the owner's.
 
-**Alerts.** Every alert has one observer that both raises and clears it, and that keeps probing while it is active. A stopped project comes back by itself.
+**Alerts.** An alert is a persisted episode: raised once with its cause and time, logged and shown once per episode, visible in `factory status` even with zero tasks, kept across a restart without repeating, cleared when its own clear evidence is seen, and raised again as a new episode if the cause returns. Every alert has one observer that both raises and clears it, and that keeps probing while it is active. A stopped project comes back by itself. Outage signals (`github_unavailable`, `hc_unavailable`) use the same persisted episode: raised once per outage, kept across a restart without repeating, and cleared on the first good observation.
 
 | Alert | Stops the factory | Raised when | Cleared when |
 |---|---|---|---|
-| `no_pool` | yes | no coordinator candidate has a usable pool, or no worker candidate of any open task has one. (One role's pools being empty stops only the tasks that need that role; they wait at their own rows) | a pool is usable again |
+| `no_pool` | yes | eligible open tasks exist and none has a usable worker candidate, or the plan is empty with no live coordinator and no usable coordinator candidate. A missing coordinator candidate alone does not stop planned work (J7 already holds the coordinator, and workers keep working). Eligible means not done (not ended), not held by a dependency, and not approved and waiting only on CI. A partial shortage holds only the affected tasks at their own rows | a usable candidate appears |
 | `disk` | yes | the disk is over the limit, or a write failed for space | the reading is back under the limit |
 | `consent_prompt` | yes | the volume probe fails. It is run after two blank starts in a row and after two timed-out calls on the project folder. Blank starts with a healthy folder are ordinary start failures (section 4.8, J6), not this alert | the volume probe answers |
-| `main_red` | no: it holds merges and branch updates only (N38), so a task that repairs the base can start and merge | the runs on the base's head commit have been red for `main_red_minutes` | every run on the base's head commit finished and none is red |
-| `ci_stalled` | no | N36 for `ci_stalled_minutes` | the task leaves N36 |
-| `agents_down` | no | the coordinator cannot be kept alive (J5, J6, J9, J10); or agents on two different CLIs started blank in a row while the project folder answers (a herdr-core or CLI fault, counted as an outage, not as each task's failure) | a coordinator run is alive and has taken a turn; an agent has started |
+| `main_red` | no: it does not stop new starts; N38's narrower hold on behind or unknown-behind merges and branch updates stays, so a task that repairs the base can start and merge | the runs on the base's head commit have been red for `main_red_minutes` | a positively known completed good base snapshot (every run on the base's head commit finished and none is red) |
+| `ci_stalled` | no | checks are proven `pending` on the current head `H` at N36 for `ci_stalled_minutes` (once per `H`; unreadable, absent, or unknown checks do not raise it) | checks on `H` complete, or `H` changes (a new head is a new episode only if its checks also stay pending for `ci_stalled_minutes`) |
+| `agents_down` | no | the coordinator cannot be kept alive (J5, J6, J9, J10); or agents on two different CLIs started blank in a row while the project folder answers (a herdr-core or CLI fault, counted as an outage, not as each task's failure) | J5: a positive sign-in check for the held candidate, or a completed turn of a coordinator (a check that times out or cannot run is `unknown (<reason>)`, which is not positive and never counts as signed out, and doctor prints `unknown (<reason>)` rather than "not signed in"; rechecks run on their own schedule even with no run; another coordinator candidate is used only if configured and positively signed in; a healthy unrelated worker never clears it). J6/J9/J10: a coordinator run is alive and has taken a turn. Blank starts: an agent has started |
 
 `agents_down` is a sixth kind; the contract has five (open item O3).
 
@@ -609,17 +609,17 @@ The daemon knows which run is calling from a token in the run's environment (`SH
 | at least one SUCCESS, and the rest SUCCESS, NEUTRAL or SKIPPED | `green` |
 | only NEUTRAL or SKIPPED | `absent` (nothing actually ran) |
 
-A failed read is not a snapshot. `gh` being unreachable is the project fact `github_unavailable`; it holds merges and is never remembered as "not a GitHub repo".
+A failed read is not a snapshot. `gh` being unreachable is the project fact `github_unavailable` (an outage episode, section 6: raised once per outage and cleared on the first good observation); it holds merges and is never remembered as "not a GitHub repo".
 
 **Other observers.**
 
 | Observer | Reads | Gives |
 |---|---|---|
-| hc events (`internal/hc` Subscribe) | terminal status, exit, and "does not exist" | run events. An hc error or outage is the project fact `hc_unavailable`; it never becomes `lost` for every run |
+| hc events (`internal/hc` Subscribe) | terminal status, exit, and "does not exist" | run events. An hc error or outage is the project fact `hc_unavailable` (an outage episode, section 6: raised once per outage and cleared on the first good observation); it never becomes `lost` for every run |
 | Start watcher | the screen of a run in `starting` with no status yet | `screen{class}` from the adapter |
 | Process observer | each live run's terminal: new output (not the adapter's spinner and timer lines), child processes and terminals the run started and their ages, minus the adapter's own helpers | `activity`; the background jobs a turn left behind. **herdr-core has no API for this today** (spike S0.8). Until it has, "quiet" means no status change for `quiet_minutes`, and background jobs are not seen: a known limit of the first version |
 | Git tips | the tip of each worktree with a live worker; its relation to `H`; the delta kind; the changed lines (added plus removed) against the merge base computed now, with the remote base when it is ahead, counted from the patch with `--text` so no attribute or NUL byte hides a line (`--numstat` still calls such a file binary); whether it is clean | `last_tip`, in memory (section 3) |
-| Pools and sign-in | `codexbar usage --json` and each CLI's own sign-in check, every `pool_minutes` and before each start | pool and sign-in facts; run event `pool_floor`; alert `no_pool` |
+| Pools and sign-in | `codexbar usage --json` and each CLI's own sign-in check, every `pool_minutes` (even with no live run while J5 holds) and before each start; a check that times out or cannot run is `unknown (<reason>)`, never positive and never signed out | pool and sign-in facts; run event `pool_floor`; alerts `no_pool`, `agents_down` (J5) |
 | Base branch | the runs on the base's head commit, for push events only | `base_red`; alert `main_red`; a wake on red and on green |
 | Volume probe | a timed read of the project folder through hc | alerts `consent_prompt`, `disk` |
 | Sweep, at daemon start and every `sweep_minutes` | hc terminals with factory labels, `git worktree list`, the local base against the remote | strays and leftovers (section 11.3) |
@@ -718,6 +718,21 @@ Per-CLI differences that are **data**: base command, fixed environment (Claude C
 | Status | The report tag ends the run: the screen is read every pass, after the last prompt echo, with no wait for idle. Non-empty output moves the run to `working`, so a review with no tag that goes quiet ends via R21–R22, an idle run with no tag is nudged once then stopped by N29, and a run older than `review_minutes` is stopped by N29, each retrying under section 4.8 (`reviewer_retries`) |
 
 **Codex as worker and coordinator** (slice 5b.5, PR #740): runs unattended with `--dangerously-bypass-approvals-and-sandbox` and the same `-c` overrides and scoped `CODEX_HOME`. Turn end is read from the current screen (the `Working (... esc to interrupt)` status line reads `working`; the composer line without it reads `idle`; an unrecognised screen or an unchanged `sent_screen_hash` stays silent and keeps the run's state), and a worker's session id is read from its unique `session_meta` rollout in the scoped `CODEX_HOME` (matching `cwd` after start; a coordinator restarts fresh).
+
+**agy as worker, coordinator and reviewer**:
+
+| Fact | Rule |
+|---|---|
+| Launch | `launchCapability` allows `agy` for worker, coordinator and reviewer. Every start runs `env -u GEMINI_API_KEY agy --model <model> --mode auto -i=<first prompt>` (the prompt attached to `-i=`; `GEMINI_API_KEY` is never set or passed, because it switches billing to pay-as-you-go). All three roles use `--mode auto` (edits and safe commands auto-approved): agy has no unattended read-only mode (`--mode plan` prompts interactively on commands outside its literal prefix allow list, and `--sandbox` cannot read a git worktree's main `.git` metadata while still allowing worktree writes), so a reviewer runs in `--mode auto` with its first prompt stating plainly `"do not modify, create or delete any files; read and run tests only"`, backed by the clean-worktree check on the verdict (section 7.2) |
+| Status and turn end | Read from herdr-core's status (`app: antigravity`, spike S0.1): `working` is working, `idle` and `done` (whose `msg` carries the first line of the reply) end the turn after `idle_grace_seconds`, and `blocked` keeps its `kind` (`permission`, `question`, `auth`). A `blocked`/`auth` within the first `start_minutes` of a run (agy's brief startup sign-in check, which clears by itself within seconds) is treated by `ObserveRun` as `starting`, not `blocked` and not signed out; a later `blocked`/`auth` keeps `kind` `auth` |
+| Trust | Handled only by the existing 5b.4 rule (R3 answers the verified bottom folder-trust dialog once per run); nothing pre-edits the owner's agy settings |
+| Session and resume | A worker's session id is the conversation id for that worktree in `~/.gemini/antigravity-cli/history.jsonl`, read through herdr-core only. Resume adds `--conversation <id>` (`env -u GEMINI_API_KEY agy --model <model> --dangerously-skip-permissions --conversation <id> -i=<prompt>`) only when asked, never `-c`. When the id cannot be read, resume is not offered (fresh start with a handoff) |
+| Pool | An `agy` candidate reads the CodexBar `antigravity` pool scoped by model family (`gemini-*` uses Gemini windows; `claude-*`/`gpt-*` uses Claude/GPT `3p` windows; KB-QTA-4); other `agy` models have no pool (`unknown`, which never blocks) |
+| Doctor | `sheepdog factory doctor` checks `agy` when a role's candidates include it: the binary and status are checked through herdr-core, and a missing binary or an unreadable status is reported with its reason (`unknown` is never "fine" and never "signed out") |
+
+Round 3 (C): `--mode auto` still stopped on permission prompts for `sheepdog` commands, so all three `agy` roles start with `--dangerously-skip-permissions` instead; the reviewer keeps its `"do not modify, create or delete any files; read and run tests only"` first-prompt instruction and `GEMINI_API_KEY` is still never set.
+
+Round 4: for an agy reviewer, the report is the `<report>` tag when visible, or else the last bare JSON object line in agy's own reply (after the last prompt echo) whose `code` equals the round's code and that decodes as a valid report (the prompt echo's template never counts), and the reviewer's first prompt asks agy to put the `<report>` tag inside a fenced code block.
 
 Per-CLI differences that need **code**: pre-setting trust for a worktree, the agy sandbox wrapper for read-only runs, listing models.
 

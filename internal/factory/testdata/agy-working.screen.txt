@@ -1,0 +1,18 @@
+
+      ▄▀▀▄        Antigravity CLI 1.5.14
+     ▀▀▀▀▀▀       account@example.invalid (Google AI Ultra)
+    ▀▀▀▀▀▀▀▀      Gemini 4 Carbon (Medium)
+   ▄▀▀    ▀▀▄     ~/repo
+  ▄▀▀      ▀▀▄
+────────────────────────────────────────────────────────────
+> Implement T1 in the worktree.
+
+▸ Thought for 6s, 188 tokens
+  Reading the task files and running tests.
+
+● Read(~/repo/hello.go)
+⣻  Writing implementation...
+────────────────────────────────────────────────────────────────────────────────
+> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)
+────────────────────────────────────────────────────────────────────────────────
+esc to cancel                                  auto · Gemini 4 Carbon · medium
