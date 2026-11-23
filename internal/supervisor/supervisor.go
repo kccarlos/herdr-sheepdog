@@ -465,7 +465,7 @@ type Supervisor struct {
 	// journal is the work journal's own bookkeeping (journal.go).
 	journal journalState
 
-	factoryMu   sync.Mutex // lock order: factoryMu before s.mu
+	factoryMu   sync.Mutex
 	factoryAsks []state.PendingAction
 }
 

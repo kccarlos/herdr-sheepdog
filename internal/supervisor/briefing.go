@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -115,6 +116,7 @@ func stateRank(st herdr.State) int {
 // tally of the rest; then the pending question once more, if any. It
 // returns the sentence and the panes it names.
 func composeBriefing(agents []state.Agent, pending state.PendingAction, now time.Time) (string, []string) {
+	agents = slices.DeleteFunc(agents, func(a state.Agent) bool { return herdr.IsFactoryQuiet(a.Labels, a.State) })
 	if len(agents) == 0 {
 		return "No agents are running.", nil
 	}

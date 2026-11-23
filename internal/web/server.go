@@ -48,6 +48,8 @@ type Supervisor interface {
 	ShepherdInput(kind supervisor.InputKind, text string)
 	TypedTurn(ctx context.Context) (supervisor.TypedReply, error)
 	AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error)
+	AnswerTapDevice(ctx context.Context, id string, option int, deviceID string) (voice.ToolResult, error)
+	FactoryQuestions() []state.PendingAction
 	// ConversationStartedAt and ResetConversation back GET /api/state's
 	// conversation_started_at and POST /api/conversation/reset ("New
 	// conversation", docs/dev/roles.md).

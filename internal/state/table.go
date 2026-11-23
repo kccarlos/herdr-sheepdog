@@ -1,6 +1,7 @@
 package state
 
 import (
+	"maps"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
@@ -86,6 +87,8 @@ type Agent struct {
 	// MaxJournal: one entry per done, idle or blocked transition, read
 	// from the worker's own transcript (docs/dev/roles.md "Worker history").
 	Journal []JournalEntry `json:"journal,omitempty"`
+	// Labels carries terminal labels (such as sheepdog.project and sheepdog.role).
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // JournalEntry is one line of an agent's work journal: what the worker
@@ -394,6 +397,7 @@ func (a Agent) clone() Agent {
 		}
 		a.Journal = j
 	}
+	a.Labels = maps.Clone(a.Labels)
 	return a
 }
 

@@ -62,6 +62,9 @@ type WatcherConfig struct {
 	// closed, instead of leaving a stale row behind after a restart, and
 	// does not re-emit the ones whose state is unchanged.
 	Known map[string]State
+	// KnownLabels optionally carries each seeded pane's last persisted terminal
+	// labels so restart-time close transitions preserve them.
+	KnownLabels map[string]map[string]string
 }
 
 func (c WatcherConfig) withDefaults() WatcherConfig {
@@ -210,7 +213,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 	// the ones that are gone and ensurePane subscribes the rest on sight.
 	for id, st := range w.cfg.Known {
 		if _, ok := w.panes[id]; !ok && id != "" {
-			w.panes[id] = &paneState{id: id, state: st, seeded: true}
+			w.panes[id] = &paneState{id: id, state: st, labels: maps.Clone(w.cfg.KnownLabels[id]), seeded: true}
 		}
 	}
 	if err := w.refreshSnapshot(ctx); err != nil {

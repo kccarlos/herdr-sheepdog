@@ -16,12 +16,45 @@ import (
 // model call on `blocked`, so callers that must not stall run it in a
 // goroutine per transition.
 func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
+	prev, hadPrev := s.store.Get(t.PaneID)
+	labels := t.Labels
+	if len(labels) == 0 {
+		labels = prev.Labels
+	}
+	if herdr.IsFactoryQuiet(labels, t.To) {
+		if !hadPrev {
+			return
+		}
+		reason := "prompt_gone"
+		if t.Closed {
+			reason = "pane_closed"
+		} else if t.Released || t.To == herdr.StateUnknown {
+			reason = "agent_exited"
+		}
+		s.mu.Lock()
+		s.dropPendingFor(t.PaneID, reason)
+		for _, q := range s.store.Questions() {
+			if q.PaneID == t.PaneID {
+				s.dropQuestionLocked(q)
+			}
+		}
+		s.forgetPrompt(t.PaneID)
+		if _, _, err := s.store.Apply(herdr.Transition{PaneID: t.PaneID, Closed: true, Source: t.Source}); err != nil {
+			s.log.Log(logSource, "supervisor.state_error", t.PaneID, map[string]any{"error": err.Error()})
+		}
+		s.syncToldLocked()
+		s.mu.Unlock()
+		s.cfg.WorkerLog.Forget(t.PaneID)
+		s.journal.clearMissing(t.PaneID)
+		s.invalidateBriefing()
+		s.syncNames()
+		return
+	}
 	if t.Released {
 		s.mu.Lock()
 		s.dropPendingFor(t.PaneID, "agent_exited")
 		s.mu.Unlock()
 	}
-	prev, _ := s.store.Get(t.PaneID)
 	var previousQuestion string
 	for _, q := range s.store.Questions() {
 		if q.PaneID == t.PaneID {
@@ -79,9 +112,8 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 	if from == "" {
 		from = prev.State
 	}
-	quiet := herdr.IsFactoryQuiet(t.Labels, t.To)
 	wasBusy := from == herdr.StateWorking || from == herdr.StateBlocked
-	if s.brain != nil && !quiet {
+	if s.brain != nil {
 		alias := row.Alias
 		if alias == "" {
 			alias = prev.Alias
@@ -98,7 +130,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.mu.Unlock()
 		s.cfg.WorkerLog.Forget(t.PaneID)
 		s.journal.clearMissing(t.PaneID)
-		if wasBusy && !quiet {
+		if wasBusy {
 			line := aliasOr(state.Say(prev)) + " has gone away; its pane closed."
 			if t.Released {
 				line = aliasOr(state.Say(prev)) + " has exited while it was busy."
@@ -111,9 +143,6 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 	alias := aliasOr(state.Say(row))
 	switch t.To {
 	case herdr.StateBlocked:
-		if quiet {
-			return
-		}
 		// From is not consulted: a synthetic blocked -> blocked
 		// transition (reprompt.go) takes the same path as a real
 		// working -> blocked one. onBlocked always re-reads and
@@ -137,7 +166,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.mu.Unlock()
 		s.cfg.WorkerLog.Forget(t.PaneID)
 		s.journal.clearMissing(t.PaneID)
-		if wasBusy && !quiet {
+		if wasBusy {
 			s.push(t.PaneID, alias+" has exited while it was busy.", voice.UrgencyInterrupt)
 		}
 	case herdr.StateWorking:
@@ -148,9 +177,6 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.forgetPrompt(t.PaneID)
 		started, justSent := s.startedInstruction(t.PaneID, from)
 		s.mu.Unlock()
-		if quiet {
-			return
-		}
 		if started != "" {
 			s.pushStarted(t.PaneID, alias+" started on "+started+".", justSent)
 		}
@@ -168,7 +194,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		instructed := s.runningShepherdTask(row)
 		finish := from == herdr.StateWorking || s.finishedAfterApproval(prev, from)
 		var stopErr *workerlog.TurnError
-		if !quiet && from != herdr.StateDone && from != "" {
+		if from != herdr.StateDone && from != "" {
 			// The journal entry comes before the announce turn (onDone),
 			// which carries the worker's last message; done -> idle is
 			// the same finish seen again and adds none, and a pane first
@@ -176,9 +202,6 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 			stopErr = s.recordJournal(ctx, row, roots, string(t.To), finish)
 		}
 		s.finishTask(t.PaneID)
-		if quiet {
-			return
-		}
 		if r, ok := s.store.Get(t.PaneID); ok {
 			row = r
 		}

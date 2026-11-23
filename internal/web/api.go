@@ -390,19 +390,14 @@ func (s *Server) pendingView(p *state.PendingAction) *PendingView {
 	return v
 }
 
-type factorySupervisor interface {
-	FactoryQuestions() []state.PendingAction
-	AnswerTapDevice(ctx context.Context, id string, option int, deviceID string) (voice.ToolResult, error)
-}
-
 // questionViews lists the open questions for /api/state.
 func (s *Server) questionViews() []PendingView {
 	out := []PendingView{}
 	for _, q := range s.deps.Store.Questions() {
 		out = append(out, *s.pendingView(&q))
 	}
-	if fs, ok := s.deps.Supervisor.(factorySupervisor); ok {
-		for _, q := range fs.FactoryQuestions() {
+	if s.deps.Supervisor != nil {
+		for _, q := range s.deps.Supervisor.FactoryQuestions() {
 			out = append(out, *s.pendingView(&q))
 		}
 	}
@@ -436,12 +431,7 @@ func (s *Server) handlePendingAnswer(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := s.toolCtx()
 	defer cancel()
-	res, err := voice.ToolResult{}, error(nil)
-	if fs, ok := s.deps.Supervisor.(factorySupervisor); ok {
-		res, err = fs.AnswerTapDevice(ctx, req.ID, req.Option, deviceOf(r))
-	} else {
-		res, err = s.deps.Supervisor.AnswerTap(ctx, req.ID, req.Option)
-	}
+	res, err := s.deps.Supervisor.AnswerTapDevice(ctx, req.ID, req.Option, deviceOf(r))
 	switch {
 	case errors.Is(err, supervisor.ErrPendingGone):
 		writeError(w, http.StatusConflict, supervisor.ErrPendingGone.Error())
