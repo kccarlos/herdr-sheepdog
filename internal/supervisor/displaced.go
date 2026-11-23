@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -149,7 +150,8 @@ type toldState struct {
 	// the window (send_keys revives it), the question was told.
 	stated map[promptKey]statedEntry
 	// persisted is the last Session.ToldPrompts snapshot written to store.
-	persisted []state.ToldPrompt
+	persisted     []state.ToldPrompt
+	factoryQueued map[promptKey]string // open factory asks with a VA1 push queued (promptKey -> line)
 }
 
 // statedEntry is a reply's telling of a question that was not open.
@@ -174,7 +176,7 @@ func (s *Supervisor) restoreTold() {
 	now := s.cfg.Now()
 	s.told.persisted = append([]state.ToldPrompt(nil), saved...)
 	for _, tp := range saved {
-		if tp.PaneID == "" || tp.Sig == "" {
+		if tp.PaneID == "" || tp.Sig == "" || strings.HasPrefix(tp.PaneID, factoryPanePrefix) {
 			continue
 		}
 		if !tp.ClosedAt.IsZero() && now.Sub(tp.ClosedAt) > s.cfg.AuthoriseWindow {
@@ -206,7 +208,7 @@ func (s *Supervisor) persistToldLocked() {
 	}
 	var items []item
 	for k, e := range s.told.told {
-		if e == nil {
+		if e == nil || strings.HasPrefix(k.pane, factoryPanePrefix) {
 			continue
 		}
 		items = append(items, item{
@@ -303,6 +305,9 @@ func (s *Supervisor) openKeysLocked() map[promptKey]state.PendingAction {
 	if p, ok := s.store.Pending(); ok && p.Kind == state.PendingAnswerPrompt {
 		open[keyOf(p)] = p
 	}
+	for _, q := range s.FactoryQuestions() {
+		open[keyOf(q)] = q
+	}
 	return open
 }
 
@@ -345,6 +350,11 @@ func (s *Supervisor) syncToldLocked() {
 	for k, e := range t.stated {
 		if now.Sub(e.at) > s.cfg.AuthoriseWindow {
 			delete(t.stated, k)
+		}
+	}
+	for k := range t.factoryQueued {
+		if _, ok := open[k]; !ok {
+			delete(t.factoryQueued, k)
 		}
 	}
 	s.persistToldLocked()
@@ -438,6 +448,7 @@ func (s *Supervisor) toldKeyForLocked(k promptKey, line, uttID string) {
 	}
 	t.nextOrder++
 	t.told[k] = &toldEntry{seq: s.inputSeq, order: t.nextOrder, line: line, uttID: uttID}
+	delete(t.factoryQueued, k)
 	s.persistToldLocked()
 }
 
@@ -488,6 +499,13 @@ func (s *Supervisor) openByIDLocked(id string) (state.PendingAction, bool) {
 	if id == "" {
 		return state.PendingAction{}, false
 	}
+	if strings.HasPrefix(id, factoryAskPrefix) {
+		asks := s.FactoryQuestions()
+		if i := slices.IndexFunc(asks, func(p state.PendingAction) bool { return p.ID == id }); i >= 0 {
+			return asks[i], true
+		}
+		return state.PendingAction{}, false
+	}
 	if p, ok := s.store.Pending(); ok && p.ID == id && p.Kind == state.PendingAnswerPrompt {
 		return p, true
 	}
@@ -507,10 +525,19 @@ func (s *Supervisor) linePushedLocked(text, pendingID string) {
 		s.told.pushRun = text
 		s.told.cutPush = ""
 	}
-	s.markLineToldLocked(text, pendingID)
+	s.markLineToldLocked(text, pendingID, true)
+	s.clearFactoryQueuedLocked(text)
 }
 
-func (s *Supervisor) markLineToldLocked(text, pendingID string) {
+func (s *Supervisor) clearFactoryQueuedLocked(texts ...string) {
+	for k, queued := range s.told.factoryQueued {
+		if queued != "" && slices.Contains(texts, queued) {
+			delete(s.told.factoryQueued, k)
+		}
+	}
+}
+
+func (s *Supervisor) markLineToldLocked(text, pendingID string, allowFactory bool) {
 	s.syncToldLocked()
 	open := s.openKeysLocked()
 	keys := append([]promptKey(nil), s.told.lines[text]...)
@@ -521,6 +548,9 @@ func (s *Supervisor) markLineToldLocked(text, pendingID string) {
 	}
 	uttID := s.told.lineUtt[text]
 	for _, k := range keys {
+		if !allowFactory && strings.HasPrefix(k.pane, factoryPanePrefix) {
+			continue
+		}
 		q, ok := open[k]
 		if !ok {
 			continue
@@ -544,6 +574,7 @@ func (s *Supervisor) lineUnheardLocked(text string) {
 	if text == "" {
 		return
 	}
+	s.clearFactoryQueuedLocked(text)
 	changed := false
 	for k, e := range s.told.told {
 		if e != nil && e.closedAt.IsZero() && e.line == text {
@@ -657,6 +688,7 @@ func (s *Supervisor) onToldCut(cut *voice.TranscriptCut, heard string) {
 		activePush = s.told.pushRun
 		s.told.pushRun = ""
 	}
+	s.clearFactoryQueuedLocked(activePush, cut.Full)
 	for k, ent := range s.told.told {
 		if ent == nil || !ent.closedAt.IsZero() || ent.line == "" {
 			continue
@@ -674,6 +706,7 @@ func (s *Supervisor) onToldCut(cut *voice.TranscriptCut, heard string) {
 			continue
 		}
 		delete(s.told.told, k)
+		delete(s.told.factoryQueued, k)
 		changed = true
 	}
 	if changed {
@@ -687,7 +720,7 @@ func (s *Supervisor) PushShown(text string, tags map[string]any) {
 	id, _ := tags[tagPendingID].(string)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.markLineToldLocked(text, id)
+	s.markLineToldLocked(text, id, false)
 }
 
 // toldInReply records an orchestrator reply delivered synchronously (e.g.

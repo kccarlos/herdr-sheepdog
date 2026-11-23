@@ -465,8 +465,10 @@ type Supervisor struct {
 	// journal is the work journal's own bookkeeping (journal.go).
 	journal journalState
 
-	factoryMu   sync.Mutex
-	factoryAsks []state.PendingAction
+	factoryOpMu     sync.Mutex // lock order: factoryOpMu -> s.mu -> factoryMu
+	factoryMu       sync.Mutex
+	factoryAsks     []state.PendingAction
+	factoryAskNames map[string]string
 }
 
 // interruptGrace is how long after a user cancel a pane's working -> done
@@ -696,6 +698,7 @@ func (s *Supervisor) SetVoiceConnected(connected bool) {
 	if !already {
 		s.announceStartupPromises()
 	}
+	s.announceFactoryAsks()
 }
 
 // OnVoiceEvent feeds voice session events: connection status maintains
