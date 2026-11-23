@@ -294,10 +294,11 @@ type Server struct {
 	// (docs/dev/design/security.md): the paired devices, open challenges
 	// and tickets, the one-time pairing code, and every long-lived
 	// connection by device.
-	devices *deviceStore
-	auth    *authState
-	enroll  enrollCodes
-	live    liveConns
+	devices       *deviceStore
+	auth          *authState
+	enroll        enrollCodes
+	browserEnroll enrollCodes
+	live          liveConns
 	// activityWatch backs the Live Activity pushes (activity.go).
 	activityWatch activityWatch
 	// limits rate-limits sign-in and pairing per source address; conns
@@ -573,6 +574,9 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"GET /api/factory/projects", accessDevice, s.handleFactoryView("projects")},
 		route{"GET /api/factory/projects/{id}/graph", accessDevice, s.handleFactoryView("graph")},
 		route{"GET /api/factory/projects/{id}/log", accessDevice, s.handleFactoryView("log")},
+		route{"GET /api/factory/asks", accessDevice, s.handleFactoryAsks},
+		route{"POST /api/factory/asks/{id}/answer", accessDevice, s.handleFactoryAskAnswer},
+		route{"POST /api/pair/browser-code", accessDevice, s.handleBrowserCode},
 
 		// This computer only: pairing, debug and internal routes.
 		route{"GET /api/pair", accessLoopback, s.handlePair},
@@ -598,6 +602,7 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"GET /api/context/brain", accessLoopback, s.handleContextBrain},
 		route{"GET /api/context/voice", accessLoopback, s.handleContextVoice},
 		route{"GET /api/context/timeline", accessLoopback, s.handleContextTimeline},
+		route{"GET /api/factory/status", accessLoopback, s.handleFactoryView("status")},
 		route{"POST /api/factory/start", accessLoopback, s.handleFactory("start")},
 		route{"POST /api/factory/stop", accessLoopback, s.handleFactory("stop")},
 		route{"POST /api/factory/report", accessLoopback, s.handleFactory("report")},

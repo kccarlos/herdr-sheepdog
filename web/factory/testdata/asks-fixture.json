@@ -1,0 +1,28 @@
+{
+  "protocol": 1,
+  "asks": [
+    {
+      "id": "ask-demo-1",
+      "project": "proj-demo",
+      "kind": "gate",
+      "gated": true,
+      "question": "Approve the plan for T1?",
+      "options": ["Approve", "Request changes"],
+      "recommend": "Approve",
+      "task": "T1",
+      "at": "2026-11-22T12:00:00Z",
+      "status": "open"
+    },
+    {
+      "id": "ask-demo-2",
+      "project": "proj-demo",
+      "kind": "release",
+      "gated": true,
+      "question": "Tag and publish v0.2.0?",
+      "options": ["Publish v0.2.0", "Hold"],
+      "recommend": "Publish v0.2.0",
+      "at": "2026-11-22T12:00:05Z",
+      "status": "open"
+    }
+  ]
+}

@@ -392,11 +392,15 @@ func readProbedDir(ctx context.Context, client *hc.Client, address string, exitC
 	if err != nil {
 		return ""
 	}
-	i := strings.Index(rr.Text, probedDirStart)
+	return parseProbedDir(rr.Text)
+}
+
+func parseProbedDir(text string) string {
+	i := strings.Index(text, probedDirStart)
 	if i < 0 {
 		return ""
 	}
-	rest := rr.Text[i+len(probedDirStart):]
+	rest := text[i+len(probedDirStart):]
 	j := strings.Index(rest, probedDirEnd)
 	if j < 0 {
 		return ""

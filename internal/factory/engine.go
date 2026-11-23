@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"maps"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
@@ -38,11 +40,20 @@ var lockGitTimeout = world.GitStageTimeout
 // ghTimeout bounds one GitHub executor or snapshot (a push plus gh calls).
 var ghTimeout = time.Minute
 
+// DiskReading is one volume's space reading for the disk alert observer (design.md 6, 7.3).
+type DiskReading struct {
+	Volume      string
+	UsedPercent int
+	Known       bool
+	Unknown     string
+}
+
 // Engine runs the factory loop and handles owner start and stop commands.
 type Engine struct {
 	Paths        Paths
 	HC           *hc.Client
 	Log          logging.Logger
+	Stderr       io.Writer // where unpersistable alerts (e.g. disk ENOSPC) are logged; nil uses os.Stderr
 	PassInterval time.Duration
 	Now          func() time.Time              // wall clock; nil uses time.Now
 	Since        func(time.Time) time.Duration // monotonic elapsed since previous pass; nil uses time.Since (wall delta when Now is set)
@@ -51,17 +62,25 @@ type Engine struct {
 
 	probeLaunch       func(context.Context, []string) flow.ResolveFacts // test hook
 	poolRun           CommandFunc                                       // provider quota reader hook; nil uses hcExecRunner
+	diskRead          func(context.Context, string) DiskReading         // volume space reader hook; nil uses real volume reader
+	writeState        func(string, flow.State) error                    // store write hook; nil uses SaveState
+	writeLog          func(string, LogLine) error                       // log append hook; nil uses AppendLog
+	volumeTimeout     time.Duration                                     // protected-folder probe timeout; 0 uses defaultVolumeTimeout
 	cliProbes         map[string]cachedCLIProbe                         // shared across launches and projects under mu
 	pools             map[string]cachedPool                             // shared per-provider quota readings under mu
 	passPools         map[string]poolReading                            // current pass's immutable pool readings under mu
 	passPoolCheck     func(flow.Candidate) flow.ResolveReason           // current pass's immutable pool check under mu
 	passCoordFallback bool                                              // current pass's J5 fallback sign-in check under mu
 	passBaseHCErr     error                                             // current pass's HC RPC error from observeBaseLocked under mu
+	storeENOSPC       map[string]bool                                   // pending store ENOSPC per project under mu
 	git               *world.Git
 	mu                sync.Mutex
 	wake              chan struct{}
 	lastPass          map[string]time.Time            // monotonic reading of previous pass per project (design.md 2.5)
 	lastSweep         map[string]time.Time            // per-process last sweep per project (design.md 7.3)
+	lastProbe         map[string]time.Time            // per-process last consent/disk probe per project
+	consentStreaks    map[string]string               // consecutive positive consent-probe failure kind per project
+	memAlerts         map[alertKey]pendingAlert       // active alerts kept in memory when store writes fail
 	prs               map[string]flow.PR              // last PR snapshot per attempt worktree (in memory)
 	errs              map[string]string               // last gh or git error per worktree and kind, logged once per change
 	tips              map[string]tipFacts             // last git reading per worktree (in memory)
@@ -69,6 +88,7 @@ type Engine struct {
 	ghUnavail         map[string]bool                 // project fact github_unavailable (design.md 7.3)
 	hcUnavail         map[string]bool                 // project fact hc_unavailable (design.md 7.3)
 	onInvariant       func([]flow.InvariantViolation) // test hook; nil in production
+	changeSubs        []chan Change                   // Ask/Answer/Say subscribers under mu
 }
 
 func (e *Engine) now() time.Time {
@@ -116,7 +136,7 @@ type tipFacts struct {
 
 // New constructs an Engine. Nothing runs or touches disk until Run or Start.
 func New(paths Paths, client *hc.Client) *Engine {
-	e := &Engine{Paths: paths, HC: client, wake: make(chan struct{}, 1), lastSweep: map[string]time.Time{}}
+	e := &Engine{Paths: paths, HC: client, wake: make(chan struct{}, 1), lastSweep: map[string]time.Time{}, lastProbe: map[string]time.Time{}, consentStreaks: map[string]string{}, memAlerts: map[alertKey]pendingAlert{}}
 	e.git = world.NewGit(client, e.now, func(event, folder string) { e.logEvent(event, map[string]string{"folder": folder}) })
 	return e
 }
@@ -142,6 +162,7 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 	} else if err != nil {
 		return err
 	}
+	e.mergeMemAlertsLocked(id, &s)
 	if maxRunning != 0 {
 		s.Settings.MaxRunning = maxRunning
 	}
@@ -160,6 +181,8 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = root, goal, true, nil, nil, nil, "", 0
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastSweep, id)
+	delete(e.lastProbe, id)
+	delete(e.consentStreaks, id)
 	// The owner starting again is slice 1's retry (plan.md: "the owner
 	// starts again"): failed executor acts no longer block their ask.
 	for ti := range s.Tasks {
@@ -260,6 +283,7 @@ func (e *Engine) Stop(project string) error {
 	if err != nil {
 		return err
 	}
+	e.mergeMemAlertsLocked(id, &s)
 	if err := e.stopCoordTerminalsLocked(ctx, id, s); err != nil {
 		return err
 	}
@@ -282,6 +306,8 @@ func (e *Engine) Stop(project string) error {
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastPass, id)
 	delete(e.lastSweep, id)
+	delete(e.lastProbe, id)
+	delete(e.consentStreaks, id)
 	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "stop"}, Rule: "stop", Decision: "stopped", Why: "stopped by owner"})
 }
 
@@ -313,6 +339,14 @@ func (e *Engine) projectDirs() []os.DirEntry {
 	return entries
 }
 
+func (e *Engine) eachStateLocked(fn func(id string, s flow.State) bool) {
+	for _, ent := range e.projectDirs() {
+		if s, err := LoadState(e.Paths.State(ent.Name())); err == nil && !fn(ent.Name(), s) {
+			return
+		}
+	}
+}
+
 func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	pools := e.refreshPools(ctx, id)
 	codexProbe := e.probeCodexHome(ctx, id)
@@ -323,7 +357,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		return
 	}
 	if trim {
-		if err := TrimLog(e.Paths.Log(id), s.Seq); err != nil {
+		if err := e.noteStoreENOSPC(id, TrimLog(e.Paths.Log(id), s.Seq)); err != nil {
 			e.logError("factory.trim_error", id, err)
 		}
 	}
@@ -331,9 +365,13 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		delete(e.lastPass, id)
 		return
 	}
+	e.mergeMemAlertsLocked(id, &s)
 	e.passPools = pools
 	e.passPoolCheck = poolCheck(pools, e.Paths.poolCooldowns(), s.Settings.PoolFloorPercent, e.now())
-	defer func() { e.passPools, e.passPoolCheck, e.passCoordFallback, e.passBaseHCErr = nil, nil, false, nil }()
+	defer func() {
+		e.passPools, e.passPoolCheck, e.passCoordFallback, e.passBaseHCErr = nil, nil, false, nil
+		delete(e.storeENOSPC, id)
+	}()
 	ctx, cancel := context.WithTimeout(world.WithProcessTable(world.GitRepository(ctx, s.Project.Folder), time.Duration(s.Settings.StartMinutes)*time.Minute), world.GitPassTimeout)
 	defer cancel()
 	dt := e.passDelta(id)
@@ -343,10 +381,12 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		e.logError("factory.hc_error", id, coordErr)
 	}
 	e.passCoordFallback = e.observeCoordSignInLocked(ctx, id, &s, e.now())
-	if e.observeBaseLocked(ctx, id, &s); e.passBaseHCErr != nil {
-		hcErr, hcChecked = cmp.Or(hcErr, e.passBaseHCErr), true
+	e.observeBaseLocked(ctx, id, &s)
+	if err := cmp.Or(e.passBaseHCErr, e.observeConsentDiskLocked(ctx, id, &s, e.now())); err != nil {
+		hcErr, hcChecked = cmp.Or(hcErr, err), true
 	}
 	e.sweepProjectLocked(ctx, id, &s, codexProbe)
+	e.checkENOSPCLocked(ctx, id, &s, e.now())
 	baseTried := s.Project.Base != nil && s.Project.Base.Red && flow.Done(s.Project.Acts, flow.AskTellBaseRed+"@"+s.Project.Base.SpellID)
 	var candidates, poolHeld []string
 	queue := func(t flow.Task) {
@@ -362,9 +402,19 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		if a := flow.OpenAttempt(*t); a != nil && !flow.Ended(*t) && (a.RunID != "" || a.Run != nil && a.Run.State == flow.PhaseEnded) {
 			wasWorking := a.Run != nil && a.Run.State == flow.PhaseWorking
 			hcChecked = hcChecked || a.RunID != "" && (a.Run == nil || a.Run.State != flow.PhaseEnded)
+			var prevHeld, prevRunHeld []string
+			if !t.Parked && e.HC != nil && a.RunID != "" && len(a.Held) > 0 && a.Run != nil && a.Run.State != flow.PhaseEnded && !a.Run.HandoffSent {
+				prevHeld, prevRunHeld = a.Held, a.Run.Held
+				a.Run.Held, a.Held = appendHeld(slices.Clone(a.Run.Held), a.Held...), nil
+			}
 			r, rerr := e.advanceRunLocked(ctx, id, t.ID, &s, a.RunID, flow.RoleWorker, "claude", &a.Run)
 			hcErr = cmp.Or(hcErr, rerr)
 			save := false
+			if rerr != nil && len(prevHeld) > 0 {
+				a.Held, a.Run.Held = prevHeld, prevRunHeld
+			} else if len(prevHeld) > 0 && len(a.Run.Held) > 0 {
+				save = true
+			}
 			if dt > 0 && rerr == nil && wasWorking {
 				a.Working += dt
 				save = true
@@ -412,6 +462,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 		for i := range s.Tasks {
 			if ctx.Err() == nil && obs[i] != nil {
 				e.actTaskLocked(ctx, id, &s, i, *obs[i], &baseTried)
+				e.checkENOSPCLocked(ctx, id, &s, e.now())
 			}
 		}
 		now := e.now()
@@ -419,6 +470,13 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 			e.passProjectRulesLocked(ctx, id, &s, now)
 		}
 		e.checkInvariantsLocked(id, &s, skipped, now)
+	}
+	e.checkENOSPCLocked(ctx, id, &s, e.now())
+}
+
+func (e *Engine) checkENOSPCLocked(ctx context.Context, id string, s *flow.State, now time.Time) {
+	if gitFull := e.git != nil && e.git.TakeNoSpace(s.Project.Folder); !s.Project.HasAlert(flow.AlertDisk) && (e.storeENOSPC[id] || gitFull) {
+		e.observeDiskLocked(ctx, id, s, now, gitFull)
 	}
 }
 
@@ -1095,7 +1153,7 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 		term, abort, err = world.StartTerminal(ctx, e.HC, spec, func() error {
 			tok := rand.Text()
 			*hash, *recp, env["SHEEPDOG_RUN_TOKEN"], minted = tokenHash(tok), &rec, tok, true
-			if sErr := SaveState(e.Paths.State(id), *s); sErr != nil {
+			if sErr := e.saveStateLocked(id, *s); sErr != nil {
 				*hash, *recp = prevHash, prevRec
 				e.logError("factory.commit_error", id, sErr)
 				return sErr
@@ -1713,6 +1771,10 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	if save {
 		e.saveLocked(id, *s)
 	}
+	facts.Reviewer.AskPending = a.Review.RunID != "" && ((a.Review.Run != nil && len(a.Review.Run.Held) > 0) ||
+		slices.ContainsFunc(s.Asks, func(ask flow.Ask) bool {
+			return ask.Status == flow.AskStatusOpen && ask.AskedBy == flow.RoleReviewer && ask.RunID == a.Review.RunID
+		}))
 	codex := a.Review.Reviewer.CLI == world.CodexCLI
 	if facts.Reviewer.State == flow.RunGone || !codex && facts.Reviewer.State != flow.RunIdle {
 		return false
@@ -1977,6 +2039,20 @@ func appendHeld(held []string, msgs ...string) []string {
 
 var errNoWorkerRun = errors.New("factory: no worker run")
 
+func (e *Engine) deliverRunLocked(ctx context.Context, rec *flow.RunRecord, s flow.Settings, msg string, urgent bool, now time.Time) (string, flow.Decision, error) {
+	next, row, dec := flow.StepRun(*rec, flow.RunEvent{Kind: flow.EvDeliver, Msg: msg, Urgent: urgent}, s, now)
+	if row.ID == "R36" {
+		return row.ID, dec, errNoWorkerRun
+	}
+	for _, act := range dec.Asked {
+		if err := world.ActRun(ctx, e.HC, next, act, msg); err != nil {
+			return row.ID, dec, err
+		}
+	}
+	*rec = next
+	return row.ID, dec, nil
+}
+
 func (e *Engine) deliverWorkerLocked(ctx context.Context, id, taskID string, s *flow.State, a *flow.Attempt, msg string, urgent bool) error {
 	if a != nil && a.RunID != "" && e.HC != nil && (a.Run == nil || a.Run.State == flow.PhaseWorking && a.Run.Status == "") {
 		if a.Run == nil {
@@ -1995,19 +2071,13 @@ func (e *Engine) deliverWorkerLocked(ctx context.Context, id, taskID string, s *
 		}
 		return errNoWorkerRun
 	}
-	next, row, dec := flow.StepRun(*a.Run, flow.RunEvent{Kind: flow.EvDeliver, Msg: msg, Urgent: urgent}, s.Settings, e.now())
-	if row.ID == "R36" {
+	rowID, dec, err := e.deliverRunLocked(ctx, a.Run, s.Settings, msg, urgent, e.now())
+	if rowID == "R36" {
 		a.Held = appendHeld(a.Held, msg)
-		e.commitLogLocked(id, s, LogLine{By: "engine", Task: taskID, Rule: row.ID, Decision: dec.Why, Why: fmt.Sprintf("worker run %s ended (%s): held on task", a.Run.Address, a.Run.Result)})
+		e.commitLogLocked(id, s, LogLine{By: "engine", Task: taskID, Rule: rowID, Decision: dec.Why, Why: fmt.Sprintf("worker run %s ended (%s): held on task", a.Run.Address, a.Run.Result)})
 		return nil
 	}
-	for _, act := range dec.Asked {
-		if err := world.ActRun(ctx, e.HC, next, act, msg); err != nil {
-			return err
-		}
-	}
-	*a.Run = next
-	return nil
+	return err
 }
 
 func (e *Engine) execTellFindings(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
@@ -2052,13 +2122,9 @@ func (e *Engine) execNudgeReviewer(ctx context.Context, _ string, s *flow.State,
 		return "reviewer already gone", false, nil
 	}
 	msg := fmt.Sprintf("You went idle with no report tag. End your reply with `<report>{\"code\":%q,\"round\":%d,\"head\":%q,\"verdict\":\"pass\"|\"changes\",\"majors\":N}</report>`.", a.Review.Code, a.Review.Round, a.Review.Head)
-	next, _, dec := flow.StepRun(*a.Review.Run, flow.RunEvent{Kind: flow.EvDeliver, Msg: msg}, s.Settings, e.now())
-	for _, act := range dec.Asked {
-		if err := world.ActRun(ctx, e.HC, next, act, msg); err != nil {
-			return "", false, err
-		}
+	if _, _, err := e.deliverRunLocked(ctx, a.Review.Run, s.Settings, msg, false, e.now()); err != nil {
+		return "", false, err
 	}
-	*a.Review.Run = next
 	return fmt.Sprintf("nudged reviewer %s for report tag (round %d)", a.Review.RunID, a.Review.Round), false, nil
 }
 
@@ -2452,8 +2518,23 @@ func (e *Engine) logEvent(typ string, fields map[string]string) {
 	}
 }
 
+func (e *Engine) noteStoreENOSPC(id string, err error) error {
+	if errors.Is(err, syscall.ENOSPC) {
+		setFlag(&e.storeENOSPC, id, true)
+	}
+	return err
+}
+
+func (e *Engine) saveStateLocked(id string, s flow.State) error {
+	return e.noteStoreENOSPC(id, map[bool]func(string, flow.State) error{true: e.writeState, false: SaveState}[e.writeState != nil](e.Paths.State(id), s))
+}
+
+func (e *Engine) appendLogLocked(id string, l LogLine) error {
+	return e.noteStoreENOSPC(id, map[bool]func(string, LogLine) error{true: e.writeLog, false: AppendLog}[e.writeLog != nil](e.Paths.Log(id), l))
+}
+
 func (e *Engine) saveLocked(id string, s flow.State) bool {
-	err := SaveState(e.Paths.State(id), s)
+	err := e.saveStateLocked(id, s)
 	if err != nil {
 		e.logError("factory.commit_error", id, err)
 	}
@@ -2469,12 +2550,15 @@ func (e *Engine) commitLogLocked(id string, s *flow.State, l LogLine) {
 func (e *Engine) commitLocked(id string, s *flow.State, l LogLine) error {
 	s.Seq++
 	l.Seq, l.At, l.Project = s.Seq, time.Now(), id
-	if err := AppendLog(e.Paths.Log(id), l); err != nil {
+	if err := e.appendLogLocked(id, l); err != nil {
+		s.Seq--
 		return err
 	}
-	if err := SaveState(e.Paths.State(id), *s); err != nil {
+	if err := e.saveStateLocked(id, *s); err != nil {
+		s.Seq--
 		return err
 	}
+	e.flushMemAlertsLocked(id, s)
 	if l.By != "engine" {
 		select {
 		case e.wake <- struct{}{}:
