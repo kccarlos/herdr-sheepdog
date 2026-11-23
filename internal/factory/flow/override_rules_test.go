@@ -902,3 +902,113 @@ func TestOverrideResultOwnerLineOR1ToOR6AndOF1ToOF4(t *testing.T) {
 		}
 	})
 }
+
+// TestOverrideReviewRecapReopensAtN25AfterN19bSpendsOverride checks review round 1
+// (Carbon Blocker 2; design.md 4.3b N19b, 4.5 N25, 4.6 L12, 4.9; KB-ASK-16):
+// when an out-of-rounds task's open review recap (opened at N25) is closed by
+// an override Yes and N19b later spends that override because checks got worse,
+// the next pass must reopen a review recap at N25 (and advance to N6) rather
+// than dead-ending on N25 with Asked == nil.
+func TestOverrideReviewRecapReopensAtN25AfterN19bSpendsOverride(t *testing.T) {
+	in := with(streakRecap, pending)
+
+	// Pass 1: out-of-rounds task matches L12 -> N25 and opens its first review recap.
+	r1, d1 := FirstMatch(TaskRows, in)
+	if r1.ID != "N25" || len(d1.Asked) != 1 || !strings.HasPrefix(d1.Asked[0], AskOpenRecap+"@") {
+		t.Fatalf("pass 1 (initial review recap): got (%s, %v), want N25 open_recap", r1.ID, d1.Asked)
+	}
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: d1.Asked[0], Result: "done", At: in.Now})
+	in.Task.Recaps = append(in.Task.Recaps, Recap{Trigger: TriggerReview, Allowed: []string{"split", "new", "drop"}})
+
+	// Pass 2: open review recap holds at N6 and wakes the coordinator once.
+	in.Now = in.Now.Add(PassInterval)
+	r2, d2 := FirstMatch(TaskRows, in)
+	if r2.ID != "N6" || !slices.Equal(d2.Asked, []string{"wake_coordinator@recap@1"}) {
+		t.Fatalf("pass 2 (N6 open recap): got (%s, %v), want (N6, [wake_coordinator@recap@1])", r2.ID, d2.Asked)
+	}
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: d2.Asked[0], Result: "done", At: in.Now})
+
+	// Owner answers "Yes, merge now" to an override card while CI was pending ->
+	// closes Recaps[0] with Choice "override", then CI finishes red before merge.
+	in.Now = in.Now.Add(PassInterval)
+	in.Task.Recaps[0].Decided = &RecapDecision{Choice: "override", Why: "owner override ask-r1", At: in.Now}
+	withOverride("c1", ChecksPending, false)(&in)
+	in.Facts.PR.Checks = ChecksRed
+
+	// Pass 3: checks turned worse (pending -> red) -> N19b asks spend_override@c1.
+	r3, d3 := FirstMatch(TaskRows, in)
+	if r3.ID != "N19b" || !slices.Equal(d3.Asked, []string{"spend_override@c1"}) {
+		t.Fatalf("pass 3 (pending -> red): got (%s, %v), want (N19b, [spend_override@c1])", r3.ID, d3.Asked)
+	}
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: d3.Asked[0], Result: "done", At: in.Now})
+	a0(&in).Overrides[0].Spent = true
+
+	// Pass 4: override is now spent and OpenRecap is nil while L12 still says recap ->
+	// N25 must ask to open a new review recap instead of dead-ending with nil asks.
+	in.Now = in.Now.Add(PassInterval)
+	r4, d4 := FirstMatch(TaskRows, in)
+	if r4.ID != "N25" || len(d4.Asked) != 1 || !strings.HasPrefix(d4.Asked[0], AskOpenRecap+"@") {
+		t.Fatalf("pass 4 (after N19b spent override): got (%s, %v), want N25 to ask %s@... (not dead-end with nil asks)", r4.ID, d4.Asked, AskOpenRecap)
+	}
+	a0(&in).Acts = append(a0(&in).Acts, Act{Key: d4.Asked[0], Result: "done", At: in.Now})
+	in.Task.Recaps = append(in.Task.Recaps, Recap{Trigger: TriggerReview, Allowed: []string{"split", "new", "drop"}})
+
+	// Pass 5: reopened review recap reaches N6 and wakes the coordinator for recap #2.
+	in.Now = in.Now.Add(PassInterval)
+	r5, d5 := FirstMatch(TaskRows, in)
+	if r5.ID != "N6" || !slices.Equal(d5.Asked, []string{"wake_coordinator@recap@2"}) {
+		t.Fatalf("pass 5 (reopened review recap): got (%s, %v), want (N6, [wake_coordinator@recap@2])", r5.ID, d5.Asked)
+	}
+}
+
+// TestOverrideN19bDoesNotSpendGreenOverrideWhenChecksUnread checks review round 1
+// (Hydrogen Major 1; design.md 4.3b, 7.3; KB-MRG-9, KB-MRG-10, KB-GIT-20):
+// when gh pr view answers green check runs at H=c1 but headRuns (actions/runs)
+// fails with a non-interrupt partial error, PRSnapshot sets PR.ChecksUnread=true
+// and PR.Checks=ChecksAbsent while Answered=true and GitHubUnavailable=false.
+// N19b must hold without spending a ChecksGreen override, so once workflow runs
+// become readable again N19 still merges c1.
+func TestOverrideN19bDoesNotSpendGreenOverrideWhenChecksUnread(t *testing.T) {
+	unread := func(in *In) {
+		in.Facts.PR.Answered = true
+		in.Facts.GitHubUnavailable = false
+		in.Facts.PR.Checks = ChecksAbsent
+		in.Facts.PR.ChecksUnread = true
+	}
+
+	// Pass 1 (within checks_grace_minutes): holds safely without merging or spending.
+	in := with(noRounds, withOverride("c1", ChecksGreen, false), unread, func(in *In) {
+		in.Now = now.Add(time.Minute)
+	})
+	r1, d1 := FirstMatch(TaskRows, in)
+	if r1.ID == "N19" || r1.ID == "N19b" {
+		t.Fatalf("within grace with PR.ChecksUnread=true: FirstMatch = (%s, %v), want hold (neither N19 nor N19b)", r1.ID, d1.Asked)
+	}
+	for _, k := range d1.Asked {
+		if strings.HasPrefix(k, AskMerge+"@") || strings.HasPrefix(k, AskSpendOverride) {
+			t.Fatalf("within grace with PR.ChecksUnread=true asked %q (%v), must neither merge nor spend override", k, d1.Asked)
+		}
+	}
+
+	// Past checks_grace_minutes: still must neither merge nor spend the green override.
+	inPastGrace := in
+	inPastGrace.Now = now.Add(time.Hour)
+	r2, d2 := FirstMatch(TaskRows, inPastGrace)
+	if r2.ID == "N19" || r2.ID == "N19b" {
+		t.Fatalf("past grace with PR.ChecksUnread=true: FirstMatch = (%s, %v), want neither N19 nor N19b", r2.ID, d2.Asked)
+	}
+	for _, k := range d2.Asked {
+		if strings.HasPrefix(k, AskMerge+"@") || strings.HasPrefix(k, AskSpendOverride) {
+			t.Fatalf("past grace with PR.ChecksUnread=true asked %q (%v), must neither merge nor spend override", k, d2.Asked)
+		}
+	}
+
+	// Pass 2: workflow runs become readable and confirm green -> unspent override merges via N19.
+	in.Facts.PR.ChecksUnread = false
+	in.Facts.PR.Checks = ChecksGreen
+	in.Now = now.Add(2 * time.Minute)
+	r3, d3 := FirstMatch(TaskRows, in)
+	if r3.ID != "N19" || !slices.Equal(d3.Asked, []string{"record_accept@c1", "merge@c1"}) {
+		t.Fatalf("after PR.ChecksUnread clears to green: got (%s, %v), want (N19, [record_accept@c1 merge@c1])", r3.ID, d3.Asked)
+	}
+}

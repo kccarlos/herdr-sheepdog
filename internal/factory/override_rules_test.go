@@ -8,13 +8,20 @@ package factory
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 )
 
 // TestOverrideHistoryTwoPRsMergeOneAtATimeAndEmitResultLine checks plan.md 7.2
@@ -468,5 +475,373 @@ func TestViewStagesAndWhysForOverrideRowsN15ToN19b(t *testing.T) {
 	n19bWhy := byRef["T-n19b"].WhyWaiting
 	if strings.Contains(n19bWhy, "Merging now") || !strings.Contains(strings.ToLower(n19bWhy), "worse") {
 		t.Errorf("T-n19b WhyWaiting = %q, want checks-got-worse reason and never 'Merging now'", n19bWhy)
+	}
+}
+
+// TestOverrideAcceptRecordedOnlyWhenMergeHappens checks review round 1
+// (Carbon Blocker 1, Hydrogen Minor 1; design.md 3, 4.1 N2, 4.3b N19/N19b, 8,
+// 17.3; KB-MRG-9, KB-MRG-10, KB-TSK-14):
+//   - When execMerge re-reads fresh facts and calls off an N19 merge (e.g. CI
+//     finished red between observeTaskLocked and execMerge), no Accept{By: "override"}
+//     remains recorded, and a subsequent manual merge of the unreviewed head
+//     raises merged_outside_bar at N2.
+//   - When the daemon crashes/restarts before MergePR executes, state.json holds
+//     no premature Accept{By: "override"}, and after N19b spends the override on
+//     red checks, a manual merge of that head still raises merged_outside_bar.
+func TestOverrideAcceptRecordedOnlyWhenMergeHappens(t *testing.T) {
+	t.Parallel()
+	const redRollup = `[{"__typename":"CheckRun","id":101,"name":"unit","workflowName":"CI","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/acme/demo/actions/runs/555/job/101"}]`
+	const redRunsJSON = `{"total_count":1,"workflow_runs":[{"id":555,"status":"completed","conclusion":"failure"}]}`
+
+	t.Run("execMerge_call_off_leaves_no_override_accept_and_manual_merge_wakes_merged_outside_bar", func(t *testing.T) {
+		t.Parallel()
+		w := newRestartWorld(t, "Call off override merge without false accept")
+		w.edit(func(s *flow.State) { s.Settings.FlakeReruns = 0 })
+		w.pass() // J7
+		coordAddr := w.state().Project.RunID
+		w.applyPlan()
+		w.waitIdle(coordAddr)
+		w.pass() // N11
+		w.pass() // N23
+		w.waitIdle(w.workerID)
+		w.commitAndReady("package demo\n// unreviewed c1\n", pendingRollup, true)
+		c1 := w.commits[0]
+		w.pass() // N26 opens PR #7 with pending checks (0 review rounds)
+
+		if err := w.eng.Report(w.coordTok, "ask", json.RawMessage(`{"kind":"override","tasks":["T1"]}`)); err != nil {
+			t.Fatalf("coordinator override ask: %v", err)
+		}
+		answerOwnerAsk(t, w.eng, w.state().Asks[0].ID, flow.OverrideOptionMerge)
+
+		redView := `{"number":7,"state":"OPEN","headRefOid":"` + c1 + `","mergeable":"MERGEABLE","statusCheckRollup":` + redRollup + `,"baseRefName":"main"}`
+		execSrv := hctest.New(t)
+		var prViews atomic.Int32
+		execSrv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+			if len(p.Argv) >= 3 && p.Argv[0] == "gh" && p.Argv[1] == "pr" && p.Argv[2] == "view" && prViews.Add(1) == 2 {
+				// Between observeTaskLocked's snapshot and execMerge's fresh check, CI finishes red.
+				if err := os.WriteFile(filepath.Join(w.gh, "view.json"), []byte(redView), 0o600); err != nil {
+					return hc.ExecResult{}, err
+				}
+				if err := os.WriteFile(filepath.Join(w.gh, "workflow-runs.json"), []byte(redRunsJSON), 0o600); err != nil {
+					return hc.ExecResult{}, err
+				}
+			}
+			return hctest.GitExec(p)
+		}
+		w.eng.git = world.NewGit(hc.NewClient(execSrv.Path), w.eng.now, nil)
+
+		// Pass 1: observeTaskLocked sees pending -> matches N19 -> execMerge sees fresh red -> calls off merge.
+		w.pass()
+		if merges := ghCalls(t, w.gh, "pr merge"); len(merges) != 0 {
+			t.Fatalf("execMerge merged freshly-red PR: %v", merges)
+		}
+		if ac := w.state().Tasks[0].Attempts[0].Accepts; len(ac) != 0 {
+			t.Errorf("after execMerge called off merge, Accepts = %+v, want empty", ac)
+		}
+
+		// Pass 2: N19b marks override Spent without merging.
+		w.pass()
+		st := w.state()
+		if !st.Tasks[0].Attempts[0].Overrides[0].Spent {
+			t.Fatalf("Pass 2 did not spend override on red checks: %+v", st.Tasks[0].Attempts[0].Overrides)
+		}
+		if ac := st.Tasks[0].Attempts[0].Accepts; len(ac) != 0 {
+			t.Errorf("after N19b spent override, Accepts = %+v, want empty", ac)
+		}
+
+		// Pass 3: someone merges PR #7 by hand on GitHub while c1 is still unreviewed and red -> N2 must raise merged_outside_bar.
+		writeGHFile(t, w.gh, "view.json", `{"number":7,"state":"MERGED","headRefOid":"`+c1+`","mergeable":"UNKNOWN","statusCheckRollup":`+redRollup+`,"baseRefName":"main","mergeCommit":{"oid":"manual1111"}}`)
+		w.pass()
+		st = w.state()
+		if st.Tasks[0].Done == nil || st.Tasks[0].Done.MergedCommit != "manual1111" {
+			t.Fatalf("Pass 3 Done = %+v, want manual1111", st.Tasks[0].Done)
+		}
+		if !flow.Done(st.Tasks[0].Attempts[0].Acts, "wake_coordinator@merged_outside_bar") {
+			t.Fatalf("manual merge of unreviewed red commit %s suppressed merged_outside_bar; Accepts=%+v Acts=%+v",
+				c1, st.Tasks[0].Attempts[0].Accepts, st.Tasks[0].Attempts[0].Acts)
+		}
+	})
+
+	t.Run("restart_before_MergePR_leaves_no_override_accept_and_manual_merge_wakes_merged_outside_bar", func(t *testing.T) {
+		t.Parallel()
+		w := newRestartWorld(t, "Restart before MergePR without false accept")
+		w.edit(func(s *flow.State) { s.Settings.FlakeReruns = 0 })
+		w.pass() // J7
+		coordAddr := w.state().Project.RunID
+		w.applyPlan()
+		w.waitIdle(coordAddr)
+		w.pass() // N11
+		w.pass() // N23
+		w.waitIdle(w.workerID)
+		w.commitAndReady("package demo\n// unreviewed c1\n", pendingRollup, true)
+		c1 := w.commits[0]
+		w.pass() // N26 opens PR #7 with pending checks (0 review rounds)
+
+		if err := w.eng.Report(w.coordTok, "ask", json.RawMessage(`{"kind":"override","tasks":["T1"]}`)); err != nil {
+			t.Fatalf("coordinator override ask: %v", err)
+		}
+		answerOwnerAsk(t, w.eng, w.state().Asks[0].ID, flow.OverrideOptionMerge)
+
+		execSrv := hctest.New(t)
+		var prViews atomic.Int32
+		var crashMu sync.Mutex
+		var crashSnap []byte
+		execSrv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+			if len(p.Argv) >= 3 && p.Argv[0] == "gh" && p.Argv[1] == "pr" && p.Argv[2] == "view" && prViews.Add(1) == 2 {
+				// Capture persisted state.json when the daemon crashes inside execMerge before MergePR runs.
+				raw, err := os.ReadFile(w.paths.State(w.id))
+				if err != nil {
+					return hc.ExecResult{}, err
+				}
+				crashMu.Lock()
+				crashSnap = raw
+				crashMu.Unlock()
+				return hc.ExecResult{}, errors.New("daemon crashed before MergePR")
+			}
+			return hctest.GitExec(p)
+		}
+		w.eng.git = world.NewGit(hc.NewClient(execSrv.Path), w.eng.now, nil)
+
+		w.pass()
+		crashMu.Lock()
+		snap := crashSnap
+		crashMu.Unlock()
+		if len(snap) == 0 {
+			t.Fatal("execMerge did not run fresh PR check before MergePR")
+		}
+		if merges := ghCalls(t, w.gh, "pr merge"); len(merges) != 0 {
+			t.Fatalf("MergePR ran despite crash before MergePR: %v", merges)
+		}
+
+		// Restore exact on-disk state.json from the crash instant and restart the daemon.
+		if err := os.WriteFile(w.paths.State(w.id), snap, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		w.restart()
+		if ac := w.state().Tasks[0].Attempts[0].Accepts; len(ac) != 0 {
+			t.Errorf("persisted state.json after restart before MergePR has Accepts = %+v, want empty", ac)
+		}
+
+		// While offline, CI turned red -> restart pass hits N19b and spends the override.
+		writePRJSON(t, w.gh, "view.json", c1, redRollup)
+		writeGHFile(t, w.gh, "workflow-runs.json", redRunsJSON)
+		w.pass()
+		if !w.state().Tasks[0].Attempts[0].Overrides[0].Spent {
+			t.Fatalf("restart pass did not spend override on red checks: %+v", w.state().Tasks[0].Attempts[0].Overrides)
+		}
+
+		// Later manual merge on GitHub while c1 is still unreviewed and red -> N2 must raise merged_outside_bar.
+		writeGHFile(t, w.gh, "view.json", `{"number":7,"state":"MERGED","headRefOid":"`+c1+`","mergeable":"UNKNOWN","statusCheckRollup":`+redRollup+`,"baseRefName":"main","mergeCommit":{"oid":"manual2222"}}`)
+		w.pass()
+		st := w.state()
+		if !flow.Done(st.Tasks[0].Attempts[0].Acts, "wake_coordinator@merged_outside_bar") {
+			t.Fatalf("manual merge after restart before MergePR suppressed merged_outside_bar; Accepts=%+v Acts=%+v",
+				st.Tasks[0].Attempts[0].Accepts, st.Tasks[0].Attempts[0].Acts)
+		}
+	})
+}
+
+// TestOtherMergeInFlightDoesNotStallSiblingAfterAskedRestartOrLeavingMerge
+// checks review round 1 (Carbon Major 1, Hydrogen Major 2; design.md 4.3b N17,
+// 15; KB-MRG-9, KB-MRG-10):
+//   - If T1 crashes in the persisted merge@c1="asked" window and after restart
+//     moves off N19 (e.g. CI turned red -> N19b -> N29), sibling overridden task
+//     T2 does not stall indefinitely at N17 and merges PR #8 via N19.
+//   - If T1 leaves merge while its PR stays open (PR #7 conflicts -> N16, or T1
+//     is parked -> N3), sibling overridden task T2 does not stall at N17 and
+//     merges PR #8 via N19.
+func TestOtherMergeInFlightDoesNotStallSiblingAfterAskedRestartOrLeavingMerge(t *testing.T) {
+	t.Parallel()
+
+	t.Run("restart_in_asked_window_does_not_stall_sibling_at_N17", func(t *testing.T) {
+		t.Parallel()
+		w, _, c1, c2 := setupTwoTaskOverrideWorld(t)
+
+		if err := w.eng.Report(w.coordTok, "ask", json.RawMessage(`{"kind":"override","tasks":["T1","T2"]}`)); err != nil {
+			t.Fatalf("coordinator override ask: %v", err)
+		}
+		answerOwnerAsk(t, w.eng, w.state().Asks[0].ID, flow.OverrideOptionMerge)
+
+		execSrv := hctest.New(t)
+		var crashMu sync.Mutex
+		var crashSnap []byte
+		execSrv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+			if len(p.Argv) >= 3 && p.Argv[0] == "gh" && p.Argv[1] == "pr" && p.Argv[2] == "merge" {
+				// Snapshot state.json in the persisted "asked" window before gh pr merge executes.
+				raw, err := os.ReadFile(w.paths.State(w.id))
+				if err != nil {
+					return hc.ExecResult{}, err
+				}
+				crashMu.Lock()
+				crashSnap = raw
+				crashMu.Unlock()
+				return hc.ExecResult{}, errors.New("daemon crashed in merge asked window")
+			}
+			return hctest.GitExec(p)
+		}
+		w.eng.git = world.NewGit(hc.NewClient(execSrv.Path), w.eng.now, nil)
+
+		w.pass()
+		crashMu.Lock()
+		snap := crashSnap
+		crashMu.Unlock()
+		if len(snap) == 0 {
+			t.Fatal("Pass 1 did not reach gh pr merge")
+		}
+		if err := os.WriteFile(w.paths.State(w.id), snap, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		w.restart()
+
+		if last := flow.LastAct(flow.SinceRetry(w.state().Tasks[0].Attempts[0].Acts), flow.AskMerge+"@"+c1); last == nil || last.Result != "asked" {
+			t.Fatalf("expected persisted merge@%s with Result=asked before restart, got %+v", c1, last)
+		}
+
+		// While offline, T1's CI turned red -> after restart T1 hits N19b then N29, so T2 must merge PR #8.
+		redRollup := `[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"FAILURE"}]`
+		writeGHFile(t, w.gh, "view-7.json", `{"number":7,"state":"OPEN","headRefOid":"`+c1+`","mergeable":"MERGEABLE","statusCheckRollup":`+redRollup+`,"baseRefName":"main"}`)
+		w.pass() // T1 -> N19b (spends override)
+		w.pass() // T1 -> N29; T2 must reach N19 instead of stalling at N17
+
+		st := w.state()
+		if st.Tasks[1].LastRow != "N19" {
+			t.Fatalf("sibling T2 LastRow = %q after T1 left N19 (T1 LastRow=%q), want N19 (not stalled at N17)",
+				st.Tasks[1].LastRow, st.Tasks[0].LastRow)
+		}
+		merges := ghCalls(t, w.gh, "pr merge")
+		if !slices.ContainsFunc(merges, func(m string) bool {
+			return strings.Contains(m, " 8 ") && strings.Contains(m, "--match-head-commit "+c2)
+		}) {
+			t.Fatalf("pr merge calls = %v, want merge for T2's PR #8 pinned to %s", merges, c2)
+		}
+	})
+
+	t.Run("conflict_leaving_merge_while_pr_stays_open_does_not_stall_sibling_at_N17", func(t *testing.T) {
+		t.Parallel()
+		w, _, c1, c2 := setupTwoTaskOverrideWorld(t)
+
+		if err := w.eng.Report(w.coordTok, "ask", json.RawMessage(`{"kind":"override","tasks":["T1","T2"]}`)); err != nil {
+			t.Fatalf("coordinator override ask: %v", err)
+		}
+		answerOwnerAsk(t, w.eng, w.state().Asks[0].ID, flow.OverrideOptionMerge)
+
+		// Pass 1: T1 asks merge@c1 (Result="done"), T2 holds at N17 while T1's merge is in flight.
+		w.pass()
+		if st := w.state(); st.Tasks[0].LastRow != "N19" || st.Tasks[1].LastRow != "N17" {
+			t.Fatalf("Pass 1 rows = (%s, %s), want (N19, N17)", st.Tasks[0].LastRow, st.Tasks[1].LastRow)
+		}
+
+		// PR #7 stays OPEN on GitHub and conflicts with base -> T1 moves to N16, freeing T2 to merge PR #8.
+		writeGHFile(t, w.gh, "view-7.json", `{"number":7,"state":"OPEN","headRefOid":"`+c1+`","mergeable":"CONFLICTING","statusCheckRollup":`+pendingRollup+`,"baseRefName":"main"}`)
+		w.pass() // T1 -> N16
+		w.pass() // ensure T2 sees T1 on N16 even if evaluated after T1
+
+		st := w.state()
+		if st.Tasks[0].LastRow != "N16" {
+			t.Fatalf("T1 LastRow on conflicting PR = %q, want N16", st.Tasks[0].LastRow)
+		}
+		if st.Tasks[1].LastRow != "N19" {
+			t.Fatalf("sibling T2 LastRow = %q while T1 sits at N16, want N19 (not stalled at N17)", st.Tasks[1].LastRow)
+		}
+		merges := ghCalls(t, w.gh, "pr merge")
+		if !slices.ContainsFunc(merges, func(m string) bool {
+			return strings.Contains(m, " 8 ") && strings.Contains(m, "--match-head-commit "+c2)
+		}) {
+			t.Fatalf("pr merge calls = %v, want merge for T2's PR #8 pinned to %s", merges, c2)
+		}
+	})
+
+	t.Run("parked_task_with_open_pr_does_not_stall_sibling_at_N17", func(t *testing.T) {
+		t.Parallel()
+		w, _, _, c2 := setupTwoTaskOverrideWorld(t)
+
+		if err := w.eng.Report(w.coordTok, "ask", json.RawMessage(`{"kind":"override","tasks":["T1","T2"]}`)); err != nil {
+			t.Fatalf("coordinator override ask: %v", err)
+		}
+		answerOwnerAsk(t, w.eng, w.state().Asks[0].ID, flow.OverrideOptionMerge)
+
+		w.pass() // T1 -> N19 (merge@c1 done), T2 -> N17
+		if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"park","task":"T1","why":"hold T1 while PR stays open"}`)); err != nil {
+			t.Fatalf("park T1: %v", err)
+		}
+		w.pass() // T1 -> N3, T2 must reach N19
+		w.pass()
+
+		st := w.state()
+		if st.Tasks[0].LastRow != "N3" {
+			t.Fatalf("parked T1 LastRow = %q, want N3", st.Tasks[0].LastRow)
+		}
+		if st.Tasks[1].LastRow != "N19" {
+			t.Fatalf("sibling T2 LastRow = %q while T1 is parked at N3, want N19 (not stalled at N17)", st.Tasks[1].LastRow)
+		}
+		merges := ghCalls(t, w.gh, "pr merge")
+		if !slices.ContainsFunc(merges, func(m string) bool {
+			return strings.Contains(m, " 8 ") && strings.Contains(m, "--match-head-commit "+c2)
+		}) {
+			t.Fatalf("pr merge calls = %v, want merge for T2's PR #8 pinned to %s", merges, c2)
+		}
+	})
+}
+
+// TestOverrideN15PROnOtherBaseWakeAndTaskRetry checks review round 1
+// (Carbon Minor 1, Hydrogen Major 3; design.md 4.1 N4, 4.3b N15, 7.2, 9.4;
+// KB-MRG-9): when an overridden task's recorded PR targets another base branch
+// (PR.OtherBase != ""), N15 wakes the coordinator once naming `task retry`, and
+// running that exact `task retry` command succeeds (closing the PR and attempt
+// with "PR on another base") rather than failing with nothing_to_retry.
+func TestOverrideN15PROnOtherBaseWakeAndTaskRetry(t *testing.T) {
+	t.Parallel()
+	w := newRestartWorld(t, "Retry overridden PR targeting other base")
+	w.pass() // J7
+	coordAddr := w.state().Project.RunID
+	w.applyPlan()
+	w.waitIdle(coordAddr)
+	w.pass() // N11
+	w.pass() // N23
+	w.waitIdle(w.workerID)
+	w.commitAndReady("package demo\n// c1\n", pendingRollup, true)
+	c1 := w.commits[0]
+	w.pass() // N26 opens PR #7 on main
+
+	if err := w.eng.Report(w.coordTok, "ask", json.RawMessage(`{"kind":"override","tasks":["T1"]}`)); err != nil {
+		t.Fatalf("coordinator override ask: %v", err)
+	}
+	answerOwnerAsk(t, w.eng, w.state().Asks[0].ID, flow.OverrideOptionMerge)
+
+	// PR #7 is retargeted on GitHub to base "release" instead of "main".
+	writeGHFile(t, w.gh, "view.json", `{"number":7,"state":"OPEN","headRefOid":"`+c1+`","mergeable":"MERGEABLE","statusCheckRollup":`+pendingRollup+`,"baseRefName":"release"}`)
+	coordBefore := len(sendsTo(t, w.srv.Requests(), coordAddr))
+	w.pass()
+
+	st := w.state()
+	if st.Tasks[0].LastRow != "N15" {
+		t.Fatalf("LastRow on retargeted override PR = %q, want N15", st.Tasks[0].LastRow)
+	}
+	if merges := ghCalls(t, w.gh, "pr merge"); len(merges) != 0 {
+		t.Fatalf("N15 merged PR targeting non-project base: %v", merges)
+	}
+	if !flow.Done(st.Tasks[0].Attempts[0].Acts, "wake_coordinator@pr_other_base@7@release") {
+		t.Fatalf("N15 missing wake_coordinator@pr_other_base@7@release act: %+v", st.Tasks[0].Attempts[0].Acts)
+	}
+	var wakeWords strings.Builder
+	for _, wk := range st.Project.Wakes {
+		wakeWords.WriteString(wk.Why + "\n")
+	}
+	for _, s := range sendsTo(t, w.srv.Requests(), coordAddr)[coordBefore:] {
+		wakeWords.WriteString(s + "\n")
+	}
+	if strings.Contains(wakeWords.String(), "task retry T1") {
+		if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"retry","task":"T1","why":"PR #7 retargeted to release"}`)); err != nil {
+			t.Fatalf("N15 wake instructed coordinator to run `task retry T1`, but Engine.Report refused it: %v", err)
+		}
+		a0 := w.state().Tasks[0].Attempts[0]
+		if !strings.Contains(a0.Closed, "PR on another base") {
+			t.Fatalf("retried N15 attempt Closed = %q, want note naming PR on another base", a0.Closed)
+		}
+		if closes := ghCalls(t, w.gh, "pr close"); len(closes) != 1 {
+			t.Fatalf("pr close calls after N15 retry = %v, want 1", closes)
+		}
+	} else {
+		t.Fatalf("expected N15 pr_other_base wake text, got:\n%s", wakeWords.String())
 	}
 }
