@@ -63,6 +63,7 @@ type cdWorld struct {
 	probeCalls      int
 	gitENOSPC       bool
 	storeENOSPC     bool
+	stateENOSPC     bool
 	projectDisk     DiskReading
 	dataDisk        DiskReading
 	diskReadPaths   []string
@@ -244,7 +245,7 @@ func (w *cdWorld) newEngine() {
 	}
 	eng.writeState = func(path string, s flow.State) error {
 		w.mu.Lock()
-		full := w.storeENOSPC
+		full := w.storeENOSPC || w.stateENOSPC
 		w.mu.Unlock()
 		if full {
 			return &os.PathError{Op: "write", Path: path, Err: syscall.ENOSPC}
@@ -304,6 +305,12 @@ func (w *cdWorld) setDisks(proj, data DiskReading) {
 func (w *cdWorld) setStoreENOSPC(v bool) {
 	w.mu.Lock()
 	w.storeENOSPC = v
+	w.mu.Unlock()
+}
+
+func (w *cdWorld) setStateENOSPC(v bool) {
+	w.mu.Lock()
+	w.stateENOSPC = v
 	w.mu.Unlock()
 }
 
@@ -923,6 +930,240 @@ func TestPR5b9_RestartPreservesActiveConsentAndDiskWithoutRepeatingLog(t *testin
 		w.pass()
 		if ts, ok := statusAlert(t, w.paths, w.repo, "disk"); ok {
 			t.Fatalf("disk alert must clear on recovery after restart; got %+v", ts)
+		}
+	})
+}
+
+// PR 5b.9 round 2 (Major #1):
+// An ENOSPC from a store write in Start, Stop, or Report (outside a pass)
+// raises the disk alert even when both volumes read below disk_full_percent,
+// and good Start/Stop/Report writes never drop an in-memory alert — they
+// persist it to state.json on the first good write.
+func TestPR5b9R2_OutOfPassStoreENOSPCDoesNotLoseOrDropDiskAlert(t *testing.T) {
+	t.Run("enospc_in_start_stop_report_raises_disk", func(t *testing.T) {
+		for _, op := range []string{"start", "stop", "report"} {
+			t.Run(op, func(t *testing.T) {
+				w := newCDWorld(t, "Out-of-pass ENOSPC "+op)
+				w.setDisks(
+					DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 85, Known: true},
+					DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+				)
+				w.pass()
+
+				var tok string
+				if op == "report" {
+					w.mu.Lock()
+					if len(w.runs) == 0 {
+						w.mu.Unlock()
+						t.Fatal("expected coordinator run with SHEEPDOG_RUN_TOKEN")
+					}
+					tok = w.runs[0].Env["SHEEPDOG_RUN_TOKEN"]
+					w.mu.Unlock()
+				}
+
+				w.setStoreENOSPC(true)
+				var opErr error
+				switch op {
+				case "start":
+					opErr = w.eng.Start(w.repo, "Updated goal under store ENOSPC", 4)
+				case "stop":
+					opErr = w.eng.Stop(w.repo)
+				case "report":
+					opErr = w.eng.Report(tok, "plan apply", json.RawMessage(`{"tasks":[{"id":"T1","estimate_lines":20,"title":"feat: t",`+testPlanJSON+`}]}`))
+				}
+				if opErr == nil {
+					t.Fatalf("%s unexpectedly succeeded under store ENOSPC", op)
+				}
+				// Clear storeENOSPC before the next pass so the pass makes no
+				// failing store write of its own: the disk alert must still be
+				// raised from the out-of-pass ENOSPC in Start/Stop/Report.
+				w.setStoreENOSPC(false)
+
+				w.advanceMinute()
+				w.pass()
+
+				ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, "disk")
+				if !ok {
+					rows, _ := w.eng.ProjectStatus(w.repo)
+					t.Fatalf("store ENOSPC during %s must raise disk alert; got rows=%+v", op, rows)
+				}
+				statusText := strings.Join([]string{ts.ID, ts.Title, ts.Stage, ts.Rule, ts.Why, FormatStatusLine(ts)}, " ")
+				if !strings.Contains(statusText, "/Volumes/DataVol") {
+					t.Errorf("disk alert after %s ENOSPC must name /Volumes/DataVol; got %q", op, statusText)
+				}
+			})
+		}
+	})
+
+	t.Run("first_good_start_stop_report_persists_in_memory_alert", func(t *testing.T) {
+		for _, op := range []string{"start", "stop", "report"} {
+			t.Run(op, func(t *testing.T) {
+				w := newCDWorld(t, "Good write persists alert "+op)
+				var tok string
+				if op == "report" {
+					w.pass()
+					w.mu.Lock()
+					if len(w.runs) == 0 {
+						w.mu.Unlock()
+						t.Fatal("expected coordinator run with SHEEPDOG_RUN_TOKEN")
+					}
+					tok = w.runs[0].Env["SHEEPDOG_RUN_TOKEN"]
+					w.mu.Unlock()
+					w.advanceMinute()
+				}
+
+				w.setDisks(
+					DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 40, Known: true},
+					DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 95, Known: true},
+				)
+				w.setStoreENOSPC(true)
+				w.pass()
+
+				if _, ok := cdEngineStatusAlert(t, w.eng, w.repo, "disk"); !ok {
+					t.Fatal("expected in-memory disk alert after pass ENOSPC")
+				}
+				if blob := persistedAlertBlob(t, w.paths, w.id); strings.Contains(blob, "disk") {
+					t.Fatalf("expected disk alert to be unpersisted before first good write; got %s", blob)
+				}
+
+				w.setStoreENOSPC(false)
+				var opErr error
+				switch op {
+				case "start":
+					opErr = w.eng.Start(w.repo, "Updated goal after space freed", 4)
+				case "stop":
+					opErr = w.eng.Stop(w.repo)
+				case "report":
+					opErr = w.eng.Report(tok, "plan apply", json.RawMessage(`{"tasks":[{"id":"T1","estimate_lines":20,"title":"feat: t",`+testPlanJSON+`}]}`))
+				}
+				if opErr != nil {
+					t.Fatalf("%s after space freed failed: %v", op, opErr)
+				}
+
+				if blob := persistedAlertBlob(t, w.paths, w.id); !strings.Contains(blob, "disk") {
+					t.Fatalf("first good %s write dropped or failed to persist in-memory disk alert; state.json=%s", op, blob)
+				}
+				if _, ok := statusAlert(t, w.paths, w.repo, "disk"); !ok {
+					t.Fatalf("offline ProjectStatus missing disk alert after first good %s write", op)
+				}
+				if _, ok := cdEngineStatusAlert(t, w.eng, w.repo, "disk"); !ok {
+					t.Fatalf("Engine.ProjectStatus missing disk alert after first good %s write", op)
+				}
+
+				w.restart()
+				w.advanceMinute()
+				w.pass()
+				if _, ok := statusAlert(t, w.paths, w.repo, "disk"); !ok {
+					t.Fatalf("disk alert lost across restart after %s", op)
+				}
+			})
+		}
+	})
+}
+
+func diskRaiseLogs(t *testing.T, paths Paths, repo string) []LogLine {
+	t.Helper()
+	var raises []LogLine
+	for _, l := range alertEpisodeLogs(t, paths, repo, "disk") {
+		if !strings.Contains(strings.ToLower(l.Decision), "clear") {
+			raises = append(raises, l)
+		}
+	}
+	return raises
+}
+
+// PR 5b.9 round 2 (Major #2):
+// A disk episode that starts under store ENOSPC and recovers in one step
+// between two passes logs its raise once and shows as cleared; a partial commit
+// (AppendLog succeeded, SaveState failed with ENOSPC) does not log the raise
+// twice on retry.
+func TestPR5b9R2_DiskOneStepRecoveryAndPartialCommitLogging(t *testing.T) {
+	t.Run("one_step_recovery_logs_raise_once_and_clears", func(t *testing.T) {
+		w := newCDWorld(t, "One-step disk recovery")
+		w.setDisks(
+			DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 40, Known: true},
+			DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 95, Known: true},
+		)
+		w.setStoreENOSPC(true)
+		w.pass()
+
+		if _, ok := cdEngineStatusAlert(t, w.eng, w.repo, "disk"); !ok {
+			t.Fatal("expected in-memory disk alert on pass 1")
+		}
+		if got := alertEpisodeLogs(t, w.paths, w.repo, "disk"); len(got) != 0 {
+			t.Fatalf("expected 0 persisted disk log lines while store had ENOSPC, got %+v", got)
+		}
+
+		// Single-step recovery between passes: store becomes writable and volume drops below limit.
+		w.setStoreENOSPC(false)
+		w.setDisks(
+			DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 40, Known: true},
+			DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 60, Known: true},
+		)
+		w.advanceMinute()
+		w.pass()
+
+		if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, "disk"); ok {
+			t.Fatalf("disk alert must clear on one-step recovery; still in live status: %+v", ts)
+		}
+		if ts, ok := statusAlert(t, w.paths, w.repo, "disk"); ok {
+			t.Fatalf("disk alert must clear in offline status; got %+v", ts)
+		}
+		if blob := persistedAlertBlob(t, w.paths, w.id); strings.Contains(blob, "disk") {
+			t.Fatalf("cleared disk alert must not remain in state.json; got %s", blob)
+		}
+
+		if raises := diskRaiseLogs(t, w.paths, w.repo); len(raises) != 1 {
+			t.Fatalf("one-step recovered disk episode must log its raise once; got %d raise entries (%+v)", len(raises), raises)
+		}
+
+		w.advanceMinute()
+		w.pass()
+		if raises := diskRaiseLogs(t, w.paths, w.repo); len(raises) != 1 {
+			t.Fatalf("subsequent pass must not re-log raise; got %d raise entries (%+v)", len(raises), raises)
+		}
+	})
+
+	t.Run("partial_commit_does_not_log_raise_twice_on_retry", func(t *testing.T) {
+		w := newCDWorld(t, "Partial commit disk alert")
+		w.setDisks(
+			DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 40, Known: true},
+			DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 95, Known: true},
+		)
+		w.setStateENOSPC(true)
+		w.pass()
+
+		if _, ok := cdEngineStatusAlert(t, w.eng, w.repo, "disk"); !ok {
+			t.Fatal("expected in-memory disk alert after partial commit")
+		}
+		if blob := persistedAlertBlob(t, w.paths, w.id); strings.Contains(blob, "disk") {
+			t.Fatalf("expected state.json not to hold disk after SaveState ENOSPC; got %s", blob)
+		}
+
+		// Store becomes writable while volume stays >= 90%: retry persists without duplicating log.
+		w.setStateENOSPC(false)
+		w.advanceMinute()
+		w.pass()
+
+		if _, ok := statusAlert(t, w.paths, w.repo, "disk"); !ok {
+			t.Fatal("expected disk alert persisted to state.json on retry")
+		}
+		if blob := persistedAlertBlob(t, w.paths, w.id); !strings.Contains(blob, "disk") {
+			t.Fatalf("state.json missing persisted disk alert after retry; got %s", blob)
+		}
+
+		if raises := diskRaiseLogs(t, w.paths, w.repo); len(raises) != 1 {
+			t.Fatalf("partial commit retry logged disk raise %d times, want 1: %+v", len(raises), raises)
+		}
+
+		w.restart()
+		w.advanceMinute()
+		w.pass()
+		if _, ok := statusAlert(t, w.paths, w.repo, "disk"); !ok {
+			t.Fatal("disk alert disappeared after restart")
+		}
+		if raises := diskRaiseLogs(t, w.paths, w.repo); len(raises) != 1 {
+			t.Fatalf("restart after partial commit retry logged raise %d times, want 1: %+v", len(raises), raises)
 		}
 	})
 }
