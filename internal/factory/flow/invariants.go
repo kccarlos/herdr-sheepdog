@@ -62,21 +62,24 @@ func CheckInvariants(snap InvariantSnapshot) []InvariantViolation {
 					pfx = "parked task " + t.ID + " (stop_runs exhausted)"
 				}
 			case rLive && !snap.Skipped[t.ID]:
-				rev, in := a.Review, In{Task: t, Settings: s.Settings, Now: snap.Now}
+				rev, in, want := a.Review, In{Task: t, Settings: s.Settings, Now: snap.Now}, Review
+				if rev.Role() == RoleRetro {
+					want = RetroAnswer
+				}
 				switch {
 				case OpenRecap(t) != nil:
-					add("I1", t.ID, "task %s has unwanted live reviewer run: recap is open (N6)", t.ID)
+					add("I1", t.ID, "task %s has unwanted live %s run: recap is open (N6)", t.ID, rev.Role())
 				case len(a.Ready) == 0:
-					add("I1", t.ID, "task %s has unwanted live reviewer run: no ready report in attempt", t.ID)
+					add("I1", t.ID, "task %s has unwanted live %s run: no ready report in attempt", t.ID, rev.Role())
 				case rev.Round != len(a.Rounds)+1 || !Covers(a, rev.Head, H(a)):
-					add("I1", t.ID, "task %s has unwanted live reviewer run: round %d/%s no longer matches current round %d/%s", t.ID, rev.Round, rev.Head, len(a.Rounds)+1, H(a))
-				case Ladder(in) != Review:
-					add("I1", t.ID, "task %s has unwanted live reviewer run: ladder says %s", t.ID, Ladder(in))
+					add("I1", t.ID, "task %s has unwanted live %s run: round %d/%s no longer matches current round %d/%s", t.ID, rev.Role(), rev.Round, rev.Head, len(a.Rounds)+1, H(a))
+				case Ladder(in) != want:
+					add("I1", t.ID, "task %s has unwanted live %s run: ladder says %s", t.ID, rev.Role(), Ladder(in))
 				}
 			}
 			for j, on := range [2]bool{wLive, rLive} {
 				if pfx != "" && on {
-					add("I1", t.ID, "%s has live %s run", pfx, [2]string{RoleWorker, RoleReviewer}[j])
+					add("I1", t.ID, "%s has live %s run", pfx, [2]string{RoleWorker, a.Review.Role()}[j])
 				}
 			}
 		}

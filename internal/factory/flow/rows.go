@@ -128,10 +128,18 @@ func ensureRun(in In, role string) (asks []string, backoff bool) {
 	if a == nil {
 		return nil, false
 	}
+	isReview := role == RoleReviewer || role == RoleRetro
+	startAsk, failTag := AskStartWorker, "worker_failed"
+	switch role {
+	case RoleReviewer:
+		startAsk, failTag = AskStartReview, "reviewer_failed"
+	case RoleRetro:
+		startAsk, failTag = AskStartRetro, "retro_failed"
+	}
 	r, round, h, last, tries := in.Facts.Worker, nextRound(*a), headH(in), a.Run, 0
-	if role == RoleReviewer {
+	if isReview {
 		r, last = in.Facts.Reviewer, nil
-		if a.Review != nil && a.Review.Round == round && Covers(*a, a.Review.Head, h) {
+		if a.Review != nil && a.Review.Round == round && Covers(*a, a.Review.Head, h) && a.Review.Role() == role {
 			last, tries = a.Review.Run, a.Review.Retries
 		}
 	}
@@ -143,23 +151,23 @@ func ensureRun(in In, role string) (asks []string, backoff bool) {
 	if last != nil && last.State != PhaseEnded && !inFlight {
 		last = nil
 	}
-	if last == nil && r.State == RunGone {
-		last = &RunRecord{State: PhaseEnded, Result: EndExited}
-	}
 	firstKey := AskStartWorker
-	if role == RoleReviewer {
-		firstKey = key(AskStartReview, round, h)
+	if isReview {
+		firstKey = key(startAsk, round, h)
+	}
+	if last == nil && r.State == RunGone && (!isReview || Done(a.Acts, firstKey)) {
+		last = &RunRecord{State: PhaseEnded, Result: EndExited}
 	}
 	noSlot := in.Facts.NoSlot && !in.probe
 	switch {
 	case (last == nil || inFlight) && !Done(a.Acts, firstKey):
-		if role != RoleReviewer && noSlot {
+		if !isReview && noSlot {
 			return nil, false
 		}
 		return ensure(in, firstKey), false
 	case inFlight || last != nil && last.Result == EndStopped:
-		if role == RoleReviewer {
-			return ensureRepeat(in, key(AskStartReview, round, ContinueResume, h)), false
+		if isReview {
+			return ensureRepeat(in, key(startAsk, round, ContinueResume, h)), false
 		} else if noSlot {
 			return nil, false
 		}
@@ -167,16 +175,16 @@ func ensureRun(in In, role string) (asks []string, backoff bool) {
 	case last == nil:
 		return nil, false
 	case last.Result == EndQuota:
-		if role == RoleReviewer {
-			return ensureRepeat(in, key(AskStartReview, round, ContinueResume, h)), false
+		if isReview {
+			return ensureRepeat(in, key(startAsk, round, ContinueResume, h)), false
 		} else if noSlot {
 			return nil, false
 		}
 		return ensureRepeat(in, key(AskStartWorker, ContinueHandoff)), false
 	case last.Result == EndSignedOut:
 		// Signed-out row is slice 5b.
-	case role == RoleReviewer && tries < in.Settings.ReviewerRetries:
-		return ensureRepeat(in, key(AskStartReview, round, tries+countBase, h)), false
+	case isReview && tries < in.Settings.ReviewerRetries:
+		return ensureRepeat(in, key(startAsk, round, tries+countBase, h)), false
 	case role == RoleWorker && a.Restarts < in.Settings.WorkerRestarts:
 		if workerRestartBackoff(in, last, a.Restarts) {
 			return nil, true
@@ -187,10 +195,10 @@ func ensureRun(in In, role string) (asks []string, backoff bool) {
 		return ensureRepeat(in, workerStartAsk(last, a.Restarts+countBase)), false
 	}
 	// Otherwise it counts as a failure; N5 with retry is PR 5a.3.
-	if role == RoleReviewer {
-		return once(SinceRetry(a.Acts), key(AskWake, "reviewer_failed", round, h)), false
+	if isReview {
+		return once(SinceRetry(a.Acts), key(AskWake, failTag, round, h)), false
 	}
-	return once(SinceRetry(a.Acts), key(AskWake, "worker_failed")), false
+	return once(SinceRetry(a.Acts), key(AskWake, failTag)), false
 }
 
 func workerRestartBackoff(in In, last *RunRecord, restarts int) bool {
@@ -575,7 +583,7 @@ var TaskRows = []Row[In]{
 			return say("the PR head is ahead of H by merges of the base only: H moves to it, no round", ensure(in, key(AskMergeOnly, in.Facts.PR.Head)))(in)
 		}},
 	{ID: "N22", WaitsOn: "the worker", Stage: "working", When: ladderSays(Fix), Then: func(in In) Decision {
-		r := newestCovering(*in.attempt(), headH(in))
+		r := NewestCovering(*in.attempt(), headH(in))
 		return say("the ladder says fix", EnsureRun(in, RoleWorker),
 			ensure(in, key(AskTellFindings, r.N)))(in)
 	}},
@@ -602,8 +610,11 @@ var TaskRows = []Row[In]{
 	{ID: "N26", WaitsOn: "the engine", Stage: "working", When: all(hasAttempt, anyOf(noPR, all(prOpen, prBehindH))), Then: func(in In) Decision {
 		return pushPRDecision(in, unanswered(in), "GitHub does not have H")
 	}},
+	{ID: "N28", WaitsOn: "the retro reviewer", Stage: "working", When: ladderSays(RetroAnswer), Then: func(in In) Decision {
+		return say("the ladder says retro", reviewRowAsks(in, RoleRetro))(in)
+	}},
 	{ID: "N29", WaitsOn: "the reviewer", Stage: "working", When: ladderSays(Review), Then: func(in In) Decision {
-		return say("the ladder says review", n29Asks(in))(in)
+		return say("the ladder says review", reviewRowAsks(in, RoleReviewer))(in)
 	}},
 	{ID: "N30", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: all(ladderSays(Passed), noOverrideCovers, ownerGateNo), Then: func(in In) Decision {
 		return say("the owner answered no to the gate ask", ensure(in, key(AskOwnerNoRecap, len(in.Task.Recaps))))(in)
@@ -809,27 +820,31 @@ func WorkingTime(t Task) time.Duration {
 	return 0
 }
 
-// n29Asks enforces N29's reviewer limits: stop a run whose accumulated live
-// age reached review_minutes; an idle reviewer with no report gets one nudge,
-// then is stopped so 4.8 retries (background-job hold awaits herdr-core).
-func n29Asks(in In) []string {
+// reviewRowAsks enforces N28/N29's reviewer and retro limits: stop a run whose
+// accumulated live age reached review_minutes; an idle run with no report gets
+// one nudge, then is stopped so 4.8 retries (background-job hold awaits herdr-core).
+func reviewRowAsks(in In, role string) []string {
 	r, a, h := in.Facts.Reviewer, in.attempt(), headH(in)
 	if r.State != RunWorking && r.State != RunIdle {
 		if (unanswered(in) || in.Facts.PR.HeadRel == "") && !in.probe { // PR state or head relation unknown: hold until known
 			return nil
 		}
-		return EnsureRun(in, RoleReviewer)
+		return EnsureRun(in, role)
 	}
 	round, tries, age := nextRound(*a), 0, time.Duration(0)
-	if a.Review != nil && a.Review.Round == round && Covers(*a, a.Review.Head, h) {
+	if a.Review != nil && a.Review.Round == round && Covers(*a, a.Review.Head, h) && a.Review.Role() == role {
 		tries, age = a.Review.Retries, a.Review.Age
 	}
-	stopKey := key(AskStopReview, round, tries, h)
+	nudgeAsk, stopAsk := AskNudgeReview, AskStopReview
+	if role == RoleRetro {
+		nudgeAsk, stopAsk = AskNudgeRetro, AskStopRetro
+	}
+	stopKey := key(stopAsk, round, tries, h)
 	if age >= time.Duration(in.Settings.ReviewMinutes)*time.Minute {
 		return ensure(in, stopKey)
 	}
 	if r.State == RunIdle && !r.Refused && !r.AskPending {
-		nudgeKey := key(AskNudgeReview, round, tries, h)
+		nudgeKey := key(nudgeAsk, round, tries, h)
 		if !Done(SinceRetry(in.acts()), nudgeKey) {
 			return ensure(in, nudgeKey)
 		}

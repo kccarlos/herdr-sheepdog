@@ -1339,11 +1339,7 @@ func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State
 	// An ended task needs no facts (N1 matches first), and cleanup may
 	// have removed its worktree.
 	task := s.Tasks[ti]
-	if task.SplitFrom != "" {
-		if pi := slices.IndexFunc(s.Tasks, func(p flow.Task) bool { return p.ID == task.SplitFrom }); pi >= 0 {
-			facts.SplitFromHadRetro = s.Tasks[pi].HadRetro
-		}
-	}
+	facts.SplitFromHadRetro = splitFromHadRetro(s.Tasks, task)
 	oa := flow.OpenAttempt(task)
 	if !flow.Ended(task) {
 		facts.DepsNotDone, facts.DepsDropped = flow.UnmetDeps(task, s.Tasks)
@@ -1386,10 +1382,39 @@ func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State
 		if e.observeReviewLocked(ctx, id, s, ti, &facts, dt) {
 			return facts, false
 		}
+		if !facts.RetroUnavailable {
+			facts.RetroUnavailable = e.retroUnavailableLocked(ctx, task, s.Settings)
+		}
 	} else if oa == nil && !flow.Ended(s.Tasks[ti]) {
 		facts.NoSlot = !hasSlot && !flow.Exhausted(s.Tasks[ti].Acts, flow.AskNewAttempt, s.Settings)
 	}
 	return facts, true
+}
+
+func splitFromHadRetro(tasks []flow.Task, task flow.Task) bool {
+	if task.SplitFrom == "" {
+		return false
+	}
+	pi := slices.IndexFunc(tasks, func(p flow.Task) bool { return p.ID == task.SplitFrom })
+	return pi >= 0 && (len(tasks[pi].Retros) > 0 || tasks[pi].HadRetro)
+}
+
+func (e *Engine) retroUnavailableLocked(ctx context.Context, task flow.Task, settings flow.Settings) bool {
+	rf := e.probeLaunchFacts(ctx, flow.RoleRetro, task, settings)
+	worker := storedWorkerModel(task)
+	workers := []flow.Candidate{worker}
+	if worker.Model == "" {
+		workers = flow.Candidates(flow.RoleWorker, task, settings)
+	}
+	rf.Worker = worker
+	rf.Check = func(c flow.Candidate) flow.ResolveReason {
+		if worker.Model == "" && slices.ContainsFunc(workers, c.SameModel) {
+			return flow.ReviewerDiffers
+		}
+		return launchCapability(flow.RoleRetro)(c)
+	}
+	_, reason := flow.ResolveWithReason(flow.RoleRetro, task, settings, rf)
+	return reason.Why != "" && reason.Kind != flow.ReasonPool && !reason.PoolBlocked
 }
 
 func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti int, facts flow.Facts, baseTried *bool) {

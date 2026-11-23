@@ -552,6 +552,7 @@ These factory settings live in each project's `state.json`, not in the config fi
 | `size_cap_factor` | `2` | 1–5 | A task's size cap is this times its `estimate_lines`; past it the task stops at a size recap. |
 | `continue_lines` | `60` | 0–500 | A recap's `continue` sets the cap to the changed lines now plus this. |
 | `continues_per_task` | `1` | 0–3 | How many times a task may `continue`. |
+| `retros_per_task` | `1` | 0–2 | Maximum retro records a task may use across attempts (0 disables retros); every retro record counts, delta checks included, so at 2 a `FIX` and its delta check use both. |
 | `max_running` | `3` | 1–20 | Maximum concurrent tasks; set at start with `sheepdog factory start --max-running N`. One extra slot beyond `max_running` is available for a task with `priority: "urgent"`. |
 | `flake_reruns` | `1` | 0–3 | How many times the engine re-runs the failed or externally-cancelled jobs of each workflow run per head commit before telling the worker or waking the coordinator (0 disables re-runs). A failed re-run request counts, and nothing is re-run while a check of the PR is still running. |
 | `checks_grace_minutes` | `5` | 1–60 | Minutes to wait for CI checks to appear on a new head commit (and after a workflow dispatch) before dispatching or waking the coordinator. |

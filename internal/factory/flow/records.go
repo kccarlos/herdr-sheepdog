@@ -264,8 +264,14 @@ const (
 )
 
 // SizeRecapAllowed is a size recap's choices: continue only while the task
-// has used fewer than continues_per_task (design.md 4.3).
+// has used fewer than continues_per_task and this attempt's newest counted
+// retro verdict is not FIX (design.md 4.3, KB-RET-4).
 func SizeRecapAllowed(t Task, s Settings) []string {
+	if a := OpenAttempt(t); a != nil {
+		if rs := AttemptRetros(*a); len(rs) > 0 && rs[len(rs)-1].Verdict == VerdictFix {
+			return []string{"split", "new", "drop"}
+		}
+	}
 	used := 0
 	for _, r := range t.Recaps {
 		if r.Decided != nil && r.Decided.Choice == ChoiceContinue {
@@ -372,7 +378,12 @@ type ReviewRun struct {
 }
 
 // Role returns RoleRetro for a retro run in the shared review slot, else RoleReviewer.
-func (r *ReviewRun) Role() string { return RoleReviewer }
+func (r *ReviewRun) Role() string {
+	if r != nil && r.Kind == RoundRetro {
+		return RoleRetro
+	}
+	return RoleReviewer
+}
 
 // Proof is one outcome's evidence attached to a ready report (design.md 3, 7.2):
 // either a command run by the report client or a manual artifact path.
@@ -545,7 +556,8 @@ func ActRetry(acts []Act, key string) (last *Act, tries int) {
 
 func doneActs(acts []Act, key string) []Act {
 	if strings.HasPrefix(key, AskMerge+"@") || strings.HasPrefix(key, AskUpdateBranch+"@") || strings.HasPrefix(key, AskTellDiverged+"@") ||
-		strings.HasPrefix(key, AskNudgeReview+"@") || strings.HasPrefix(key, AskStopReview+"@") {
+		strings.HasPrefix(key, AskNudgeReview+"@") || strings.HasPrefix(key, AskStopReview+"@") ||
+		strings.HasPrefix(key, AskNudgeRetro+"@") || strings.HasPrefix(key, AskStopRetro+"@") {
 		return SinceRetry(acts)
 	}
 	return acts

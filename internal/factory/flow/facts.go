@@ -202,8 +202,8 @@ func CoveringOverride(a Attempt, h string) *Override {
 	return nil
 }
 
-// newestCovering is the newest round that covers h, or nil.
-func newestCovering(a Attempt, h string) *Round {
+// NewestCovering is the newest counted round that covers h, or nil.
+func NewestCovering(a Attempt, h string) *Round {
 	rs := Counted(a)
 	for i := len(rs) - 1; i >= 0; i-- {
 		if Covers(a, rs[i].Head, h) {
@@ -211,6 +211,38 @@ func newestCovering(a Attempt, h string) *Round {
 		}
 	}
 	return nil
+}
+
+// AttemptRetros returns the counted retro rounds in a (after its plan-amend
+// boundary), in order (design.md 3.1, 4.6).
+func AttemptRetros(a Attempt) []Round {
+	var out []Round
+	for _, r := range Counted(a) {
+		if r.Kind == RoundRetro {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// LastRecapDecidedAt returns the newest decided recap timestamp on t, or zero.
+func LastRecapDecidedAt(t Task) time.Time {
+	var last time.Time
+	for _, r := range t.Recaps {
+		if r.Decided != nil && r.Decided.At.After(last) {
+			last = r.Decided.At
+		}
+	}
+	return last
+}
+
+func retroAt(t Task, attempt, round int) time.Time {
+	for i := len(t.Retros) - 1; i >= 0; i-- {
+		if t.Retros[i].Attempt == attempt && t.Retros[i].Round == round {
+			return t.Retros[i].At
+		}
+	}
+	return time.Time{}
 }
 
 func isReviewerRound(r Round) bool { return r.Kind == RoundFull || r.Kind == RoundDelta }
@@ -230,7 +262,7 @@ func LastReviewed(a Attempt) *Round {
 // RejectableRound returns the newest round covering h when it is an unrejected
 // reviewer changes round, or nil otherwise (design.md 7.2).
 func RejectableRound(a Attempt, h string) *Round {
-	r := newestCovering(a, h)
+	r := NewestCovering(a, h)
 	if r == nil || !isReviewerRound(*r) || r.Verdict != VerdictChanges || rejectFor(a, h, r.N) != nil {
 		return nil
 	}
@@ -240,7 +272,7 @@ func RejectableRound(a Attempt, h string) *Round {
 // RejectedRound returns the newest round covering h and its reject when that
 // round is a rejected reviewer changes round (design.md 4.6, L10).
 func RejectedRound(a Attempt, h string) (*Round, *Reject) {
-	r := newestCovering(a, h)
+	r := NewestCovering(a, h)
 	if r == nil || !isReviewerRound(*r) || r.Verdict != VerdictChanges {
 		return nil, nil
 	}
