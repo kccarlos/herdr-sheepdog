@@ -92,9 +92,6 @@ public final class StatusItemController: NSObject {
         return rows
     }
 
-    /// VoiceOver label for the "Pair browser…" menu item.
-    public static var pairBrowserAccessibilityLabel: String { "Pair a local browser with a one-time code" }
-
     private let source: DaemonStatusSource
     private let voice: VoiceControlling
     private let panel: PanelOpening
@@ -105,6 +102,7 @@ public final class StatusItemController: NSObject {
     private let updater: MacUpdater
     private let browserPairing: BrowserPairingClient?
     private let browserPairingPresenter: BrowserPairingPresenting?
+    private var pairBrowserTask: Task<Void, Never>?
     private var statusItem: NSStatusItem?
 
     /// The state the menu shows; the daemon is "down" until it answers.
@@ -255,11 +253,13 @@ public final class StatusItemController: NSObject {
             Task { await updater.start(offer: offer) }
         case .pairBrowser:
             guard let browserPairing, let browserPairingPresenter else { return }
+            if pairBrowserTask != nil { NSApp?.activate(ignoringOtherApps: true); return }
             let log = log
-            Task {
+            pairBrowserTask = Task {
+                defer { self.pairBrowserTask = nil }
                 do { browserPairingPresenter.showCode(BrowserPairingPresentation(code: try await browserPairing.requestCode())) }
                 catch {
-                    let failure = (error as? BrowserPairingError) ?? .serverError(status: 0, message: error.localizedDescription)
+                    let failure = BrowserPairingError.map(error)
                     log.log("could not get browser pairing code: \(failure.title)")
                     browserPairingPresenter.showError(failure)
                 }
@@ -295,7 +295,7 @@ public final class StatusItemController: NSObject {
                 if action == .updateApp {
                     entry.setAccessibilityLabel(MacUpdatePresentation(offer: offer, state: updater.state).accessibilityLabel)
                 } else if action == .pairBrowser {
-                    entry.setAccessibilityLabel(Self.pairBrowserAccessibilityLabel)
+                    entry.setAccessibilityLabel("Pair a local browser with a one-time code")
                 }
                 menu.addItem(entry)
             case .separator:

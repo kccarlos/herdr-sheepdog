@@ -1,11 +1,13 @@
 import Foundation
 import Security
 
-/// This phone's key for one computer (docs/dev/design/security.md "Key
-/// storage"): a P-256 key in the Secure Enclave, tagged with the daemon id,
-/// usable after the first unlock (so a notification's Approve works on a
-/// locked phone), never in backups or iCloud. The Simulator has no Secure
-/// Enclave and gets a software key with the same attributes.
+/// This device's key for one computer (docs/dev/design/security.md "Key
+/// storage"): a P-256 key tagged with the daemon id. On iPhone and iPad it
+/// lives in the Secure Enclave, usable after the first unlock (so a
+/// notification's Approve works on a locked phone) and never in backups or
+/// iCloud. The iOS Simulator gets a software key with the same attributes;
+/// macOS stores a software P-256 key (`hardware: false`) in the Login
+/// Keychain behind the signed app's code-signing ACL.
 public enum DeviceKey {
     /// The keychain tag of the key for a daemon.
     public static func tag(for daemonID: String) -> String { "sheepdog.device.\(daemonID)" }
