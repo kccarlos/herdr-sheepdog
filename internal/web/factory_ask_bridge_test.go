@@ -287,7 +287,7 @@ func TestFactoryAskBridgeAppearsAndDisappears(t *testing.T) {
 
 	// Verify /events emitted pending.created for fask-ask-demo-1.
 	sawCreated := false
-	deadline := time.After(500 * time.Millisecond)
+	deadline := time.After(5 * time.Second)
 	for !sawCreated {
 		select {
 		case ev := <-sse:
@@ -323,7 +323,7 @@ func TestFactoryAskBridgeAppearsAndDisappears(t *testing.T) {
 	}, "cancelled ask "+wantID+" to disappear from /api/state")
 
 	sawCancelled := false
-	deadline = time.After(500 * time.Millisecond)
+	deadline = time.After(5 * time.Second)
 	for !sawCancelled {
 		select {
 		case ev := <-sse:

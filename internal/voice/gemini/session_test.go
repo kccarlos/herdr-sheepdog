@@ -791,9 +791,8 @@ func TestReconnectOnDropResumesAndReplaysAudio(t *testing.T) {
 	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2)}, gate: gate}
 	h := newHarness(t, Config{}, d)
 
-	c1.serve(handleMsg("handle-A"))
-	c1.serve(handleMsg("handle-B"))
-	time.Sleep(20 * time.Millisecond)
+	acceptHandle(t, h, c1, "handle-A")
+	acceptHandle(t, h, c1, "handle-B")
 	// A network drop (not the 1011 the server itself closes with) still
 	// tries to resume first: isServerInternalError's skip-resume fix only
 	// covers the server's own internal-error close (errors_test.go).
@@ -857,8 +856,7 @@ func TestPushDuringReconnectIsDeliveredOnceReconnected(t *testing.T) {
 	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2)}, gate: gate}
 	h := newHarness(t, Config{}, d)
 
-	c1.serve(handleMsg("handle-A"))
-	time.Sleep(20 * time.Millisecond)
+	acceptHandle(t, h, c1, "handle-A")
 	c1.fail(errors.New("websocket: close 1006 (abnormal closure)"))
 	h.waitEvent("reconnecting", func(ev voice.Event) bool {
 		st, ok := ev.(voice.EventStatus)
@@ -894,8 +892,7 @@ func TestGoAwayReconnectsProactively(t *testing.T) {
 	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2)}}
 	h := newHarness(t, Config{}, d)
 
-	c1.serve(handleMsg("handle-G"))
-	time.Sleep(10 * time.Millisecond)
+	acceptHandle(t, h, c1, "handle-G")
 	c1.serve(goAwayMsg(10 * time.Second))
 	ev := h.waitEvent("resumed", func(ev voice.Event) bool { _, ok := ev.(voice.EventResumed); return ok })
 	if ev.(voice.EventResumed).Handle != "handle-G" {
@@ -1000,8 +997,7 @@ func TestRateLimitMidSessionBacksOffAndRotates(t *testing.T) {
 	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2)}}
 	h := newHarness(t, Config{}, d)
 
-	c1.serve(handleMsg("handle-R"))
-	time.Sleep(10 * time.Millisecond)
+	acceptHandle(t, h, c1, "handle-R")
 	t0 := time.Now()
 	c1.fail(errors.New(`received error in response: {"error":{"code":429,"status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"0.2s"}]}}`))
 
@@ -1208,8 +1204,7 @@ func TestDeadResumptionHandleIsDropped(t *testing.T) {
 	d := &fakeDialer{results: []func() (Conn, error){ok(c1), fail(setupErr), ok(c2)}}
 	h := newHarness(t, Config{ReconnectBackoff: 5 * time.Millisecond}, d) // default ResumeAttempts (1)
 
-	c1.serve(handleMsg("handle-A"))
-	time.Sleep(20 * time.Millisecond)
+	acceptHandle(t, h, c1, "handle-A")
 	c1.fail(errors.New("websocket: close 1006 (abnormal closure)"))
 
 	ev := h.waitEvent("resumed", func(ev voice.Event) bool { _, ok := ev.(voice.EventResumed); return ok })
@@ -1239,8 +1234,7 @@ func TestServerInternalErrorSkipsResume(t *testing.T) {
 	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2)}}
 	h := newHarness(t, Config{ReconnectBackoff: 5 * time.Millisecond}, d)
 
-	c1.serve(handleMsg("handle-A"))
-	time.Sleep(20 * time.Millisecond)
+	acceptHandle(t, h, c1, "handle-A")
 	c1.fail(errors.New("websocket: close 1011 (internal server error): Internal error encountered."))
 
 	ev := h.waitEvent("resumed", func(ev voice.Event) bool { _, ok := ev.(voice.EventResumed); return ok })
