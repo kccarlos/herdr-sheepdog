@@ -15,14 +15,14 @@ public struct BrowserPairingCode: Equatable, Sendable {
 
 /// Failures when asking the local daemon for a browser pairing code.
 public enum BrowserPairingError: Error, Equatable, Sendable {
-    case daemonDown, notEnrolled, refused(status: Int, message: String), unimplemented
+    case daemonDown, notEnrolled, rateLimited, serverError(status: Int, message: String)
 
     public var title: String {
         switch self {
         case .daemonDown: return "Sheepdog isn't running"
         case .notEnrolled: return "This Mac app isn't paired with Sheepdog"
-        case .refused: return "Couldn't get a browser pairing code"
-        case .unimplemented: return "Browser pairing isn't available"
+        case .rateLimited: return ""
+        case .serverError: return ""
         }
     }
 
@@ -32,12 +32,10 @@ public enum BrowserPairingError: Error, Equatable, Sendable {
             return "Sheepdog isn't running on this Mac. Start the sheepdog daemon, then choose Pair browser… again."
         case .notEnrolled:
             return "Sheepdog couldn't verify this Mac app's device session. Enable pairing in sheepdog setup, then choose Pair browser… again."
-        case let .refused(status, detail):
-            let text = detail.trimmingCharacters(in: .whitespacesAndNewlines)
-            let suffix = text.isEmpty ? " (HTTP \(status))" : ": \(text)"
-            return "The local daemon refused the request\(suffix). Check that Sheepdog is running normally and try again."
-        case .unimplemented:
-            return "Update Sheepdog and try again."
+        case .rateLimited:
+            return ""
+        case .serverError:
+            return ""
         }
     }
 }
@@ -61,6 +59,25 @@ public struct BrowserPairingPresentation: Equatable, Sendable {
 /// Provides a paired-device session ticket for the local daemon.
 public protocol BrowserPairingSessionProviding {
     func sessionTicket(base: URL) async throws -> SessionTicket
+    func invalidateTicket()
+}
+
+/// Injectable seam over `DeviceKey` so tests can supply an ephemeral in-memory `SecKey`.
+public protocol DeviceKeyProviding: Sendable {
+    var isHardware: Bool { get }
+    func load(daemonID: String) -> SecKey?
+    func loadOrCreate(daemonID: String) throws -> SecKey
+    func publicKey(_ key: SecKey) -> String?
+    func delete(daemonID: String)
+}
+
+public struct SystemDeviceKeyProvider: DeviceKeyProviding {
+    public init() {}
+    public var isHardware: Bool { DeviceKey.isHardware }
+    public func load(daemonID: String) -> SecKey? { DeviceKey.load(daemonID: daemonID) }
+    public func loadOrCreate(daemonID: String) throws -> SecKey { try DeviceKey.loadOrCreate(daemonID: daemonID) }
+    public func publicKey(_ key: SecKey) -> String? { DeviceKey.publicKey(key) }
+    public func delete(daemonID: String) { DeviceKey.delete(daemonID: daemonID) }
 }
 
 /// Shows a short browser-pairing code or a plain-fix error to the user.
@@ -99,7 +116,7 @@ public final class BrowserPairingClient {
             return BrowserPairingCode(code: code, expires: expires, expiresIn: obj["expires_in"] as? Int ?? max(0, Int(expires.timeIntervalSinceNow.rounded())))
         }
         if status == 401 || (status == 403 && (obj["reason"] as? String) == "device_session_required") { throw BrowserPairingError.notEnrolled }
-        throw BrowserPairingError.refused(status: status, message: obj["error"] as? String ?? "")
+        throw BrowserPairingError.serverError(status: status, message: obj["error"] as? String ?? "")
     }
 
     fileprivate static func mapErrors<T>(_ work: () async throws -> T) async throws -> T {
@@ -117,16 +134,20 @@ public final class BrowserPairingClient {
 /// Enrols `Sheepdog.app` using the shared Keychain `DeviceKey`, `KeychainSecretStore`, and `DeviceAuth`.
 public final class MacDeviceSessionProvider: BrowserPairingSessionProviding {
     private let secrets: SecretStore
+    private let keys: DeviceKeyProviding
     private let urlSession: URLSession
-    private let deviceName: String
+    private let deviceName: @Sendable () -> String
 
     public init(
         secrets: SecretStore = KeychainSecretStore(service: "com.github.kccarlos.herdr-sheepdog-mac.daemon", accessibleAfterFirstUnlock: true),
+        keys: DeviceKeyProviding = SystemDeviceKeyProvider(),
         urlSession: URLSession? = nil,
-        deviceName: String = Host.current().localizedName ?? "Sheepdog Mac"
+        deviceName: @escaping @Sendable () -> String = { Host.current().localizedName ?? "Mac" }
     ) {
-        self.secrets = secrets; self.urlSession = urlSession ?? URLSession(configuration: .ephemeral); self.deviceName = deviceName
+        self.secrets = secrets; self.keys = keys; self.urlSession = urlSession ?? URLSession(configuration: .ephemeral); self.deviceName = deviceName
     }
+
+    public func invalidateTicket() {}
 
     public func sessionTicket(base: URL) async throws -> SessionTicket {
         let hello = try await fetchJSON(base.appendingPathComponent("api/hello"))
@@ -155,7 +176,7 @@ public final class MacDeviceSessionProvider: BrowserPairingSessionProviding {
             lease.release(definiteNonEnrollment: true, isComputerPaired: false); throw BrowserPairingError.notEnrolled
         }
         do {
-            let enrolled = try await auth.enroll(code: pairing.code, publicKey: pub, name: deviceName, kind: "ios", hardware: DeviceKey.isHardware)
+            let enrolled = try await auth.enroll(code: pairing.code, publicKey: pub, name: deviceName(), kind: "ios", hardware: DeviceKey.isHardware)
             lease.markCommitted(); lease.release(definiteNonEnrollment: false, isComputerPaired: true)
             return enrolled.deviceID
         } catch {

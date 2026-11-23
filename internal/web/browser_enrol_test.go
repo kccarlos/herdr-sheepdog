@@ -1118,3 +1118,383 @@ func TestFactoryAsksExcludesWorkerDecisionAsks(t *testing.T) {
 		}
 	})
 }
+
+// 6.5 round 2 (D17 / O20): default loopback-only 127.0.0.1 daemon (where
+// GET /api/pair returns ErrLoopback and no link) allows unproxied loopback
+// kind="macos" enrolment without a code, lists the Mac as kind="macos",
+// refuses ticketless local browser-code and ask-answer requests with 403,
+// and lets the enrolled Mac mint a browser short code to answer an ask.
+func TestMacOSEnrollLoopbackOnlyHappyPath(t *testing.T) {
+	now := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	f := newBrowserEnrolFixture(t, []flow.Ask{{
+		ID:        "ask-open-1",
+		Project:   "proj-demo",
+		Kind:      flow.KindGate,
+		Gated:     true,
+		Question:  "Approve the plan for T1?",
+		Options:   []string{"Approve", "Request changes"},
+		Recommend: "Approve",
+		Task:      "T1",
+		At:        now,
+		Status:    flow.AskStatusOpen,
+	}})
+	if err := f.srv.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Default loopback-only daemon has no phone pairing link.
+	wPair := f.doLoopback(http.MethodGet, "/api/pair", nil, "")
+	if wPair.Code != http.StatusOK {
+		t.Fatalf("GET /api/pair = %d %s, want 200", wPair.Code, wPair.Body.String())
+	}
+	var pr PairResponse
+	if err := json.Unmarshal(wPair.Body.Bytes(), &pr); err != nil {
+		t.Fatalf("decode /api/pair: %v", err)
+	}
+	if pr.Link != "" || pr.Error == "" {
+		t.Fatalf("loopback-only /api/pair = %+v, want empty link and ErrLoopback error", pr)
+	}
+
+	// Ticketless loopback rails on a 127.0.0.1 daemon.
+	wNoTicketCode := f.doLoopback(http.MethodPost, "/api/pair/browser-code", nil, "")
+	var codeErr map[string]string
+	_ = json.Unmarshal(wNoTicketCode.Body.Bytes(), &codeErr)
+	if wNoTicketCode.Code != http.StatusForbidden || codeErr["reason"] != "device_session_required" {
+		t.Fatalf("ticketless loopback POST /api/pair/browser-code = %d %v, want 403 device_session_required", wNoTicketCode.Code, codeErr)
+	}
+	wNoTicketAns := f.doLoopback(http.MethodPost, "/api/factory/asks/ask-open-1/answer", map[string]any{"option": "Approve"}, "")
+	if wNoTicketAns.Code != http.StatusForbidden || !strings.Contains(wNoTicketAns.Body.String(), "proof_required") {
+		t.Fatalf("ticketless loopback answer = %d %s, want 403 proof_required", wNoTicketAns.Code, wNoTicketAns.Body.String())
+	}
+
+	// Unproxied loopback Mac enrolment with empty code succeeds and lists as kind="macos".
+	macKey, macPub := newDeviceKey(t)
+	wMac := f.doLoopback(http.MethodPost, "/api/devices/enroll", map[string]any{
+		"code": "", "public_key": macPub, "name": "Studio Mac", "kind": "macos", "hardware": false,
+	}, "")
+	if wMac.Code != http.StatusOK {
+		t.Fatalf("loopback macos enroll = %d %s, want 200", wMac.Code, wMac.Body.String())
+	}
+	var macER EnrollResponse
+	if err := json.Unmarshal(wMac.Body.Bytes(), &macER); err != nil || macER.DeviceID == "" || macER.Name != "Studio Mac" {
+		t.Fatalf("macos enroll response = %s (err=%v)", wMac.Body.String(), err)
+	}
+
+	wDevs := f.doLoopback(http.MethodGet, "/api/devices", nil, "")
+	if wDevs.Code != http.StatusOK {
+		t.Fatalf("GET /api/devices = %d %s", wDevs.Code, wDevs.Body.String())
+	}
+	var devList struct {
+		Devices []Device `json:"devices"`
+	}
+	if err := json.Unmarshal(wDevs.Body.Bytes(), &devList); err != nil {
+		t.Fatalf("decode /api/devices: %v", err)
+	}
+	if len(devList.Devices) != 1 || devList.Devices[0].ID != macER.DeviceID || devList.Devices[0].Kind != "macos" || devList.Devices[0].Name != "Studio Mac" {
+		t.Fatalf("devices = %+v, want single macos device %q", devList.Devices, macER.DeviceID)
+	}
+
+	loggedEnroll := false
+	for _, ev := range f.log.Tail(1000) {
+		if ev.Type == "web.device.enroll" && strings.Contains(string(ev.Payload), macER.DeviceID) && strings.Contains(string(ev.Payload), `"macos"`) {
+			loggedEnroll = true
+			break
+		}
+	}
+	if !loggedEnroll {
+		t.Fatalf("missing web.device.enroll event for macos device %q", macER.DeviceID)
+	}
+
+	// Mac signs in over TLS pin and mints a browser short code; browser enrols and answers ask-open-1.
+	macTicket := f.signInApp(macKey, macER.DeviceID)
+	wShort := f.doLoopback(http.MethodPost, "/api/pair/browser-code", nil, macTicket)
+	if wShort.Code != http.StatusOK {
+		t.Fatalf("Mac POST /api/pair/browser-code = %d %s, want 200", wShort.Code, wShort.Body.String())
+	}
+	var issued struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(wShort.Body.Bytes(), &issued); err != nil || issued.Code == "" {
+		t.Fatalf("decode browser-code: %v (%s)", err, wShort.Body.String())
+	}
+
+	browserKey, browserPub := newDeviceKey(t)
+	wBrowser := f.doLoopback(http.MethodPost, "/api/devices/enroll", map[string]any{
+		"code": issued.Code, "public_key": browserPub, "name": "Local Browser", "kind": DeviceBrowser,
+	}, "")
+	if wBrowser.Code != http.StatusOK {
+		t.Fatalf("browser enroll = %d %s, want 200", wBrowser.Code, wBrowser.Body.String())
+	}
+	var browserER EnrollResponse
+	_ = json.Unmarshal(wBrowser.Body.Bytes(), &browserER)
+	browserCookie := f.signInBrowser(browserKey, browserER.DeviceID)
+
+	wAns := f.doLoopback(http.MethodPost, "/api/factory/asks/ask-open-1/answer", map[string]any{"option": "Approve"}, "", browserCookie)
+	if wAns.Code != http.StatusOK {
+		t.Fatalf("browser answer = %d %s, want 200", wAns.Code, wAns.Body.String())
+	}
+	logBytes, err := os.ReadFile(f.paths.Log("proj-demo"))
+	if err != nil || !strings.Contains(string(logBytes), browserER.DeviceID) {
+		t.Fatalf("factory log missing browser device_id %q (err=%v)", browserER.DeviceID, err)
+	}
+}
+
+// 6.5 round 2 (O20): Mac loopback enrolment and browser short-code issuance
+// leave an active phone QR link identical and usable by a remote iPhone.
+func TestMacOSEnrollLeavesPhoneQRUntouched(t *testing.T) {
+	old := pairSysAddrs
+	pairSysAddrs = func() ([]pair.IfaceAddr, error) {
+		return []pair.IfaceAddr{{Iface: "en0", IP: net.ParseIP("192.168.1.20")}}, nil
+	}
+	t.Cleanup(func() { pairSysAddrs = old })
+
+	f := newBrowserEnrolFixture(t, nil)
+	if err := f.srv.Listen("0.0.0.0:0"); err != nil {
+		t.Fatal(err)
+	}
+
+	wPair := f.doLoopback(http.MethodGet, "/api/pair?new=1", nil, "")
+	if wPair.Code != http.StatusOK {
+		t.Fatalf("GET /api/pair?new=1 = %d %s", wPair.Code, wPair.Body.String())
+	}
+	var qr PairResponse
+	if err := json.Unmarshal(wPair.Body.Bytes(), &qr); err != nil || qr.Link == "" {
+		t.Fatalf("GET /api/pair body = %s (err=%v)", wPair.Body.String(), err)
+	}
+	parsed, err := pair.ParseLink(qr.Link)
+	if err != nil || parsed.Code == "" {
+		t.Fatalf("ParseLink(%q) = %+v, %v", qr.Link, parsed, err)
+	}
+
+	// Enrol Mac via loopback kind="macos" and issue a browser short code.
+	macKey, macPub := newDeviceKey(t)
+	wMac := f.doLoopback(http.MethodPost, "/api/devices/enroll", map[string]any{
+		"code": "", "public_key": macPub, "name": "Studio Mac", "kind": "macos",
+	}, "")
+	if wMac.Code != http.StatusOK {
+		t.Fatalf("loopback macos enroll = %d %s, want 200", wMac.Code, wMac.Body.String())
+	}
+	var macER EnrollResponse
+	_ = json.Unmarshal(wMac.Body.Bytes(), &macER)
+	macTicket := f.signInApp(macKey, macER.DeviceID)
+	wShort := f.doLoopback(http.MethodPost, "/api/pair/browser-code", nil, macTicket)
+	if wShort.Code != http.StatusOK {
+		t.Fatalf("POST /api/pair/browser-code = %d %s, want 200", wShort.Code, wShort.Body.String())
+	}
+
+	// Active phone QR link is unchanged and still enrols a remote iPhone.
+	wPairAgain := f.doLoopback(http.MethodGet, "/api/pair", nil, "")
+	var qrAgain PairResponse
+	_ = json.Unmarshal(wPairAgain.Body.Bytes(), &qrAgain)
+	if qrAgain.Link != qr.Link {
+		t.Fatalf("macos enroll + browser-code changed phone QR link: got %q, want %q", qrAgain.Link, qr.Link)
+	}
+	_, phonePub := newDeviceKey(t)
+	wPhone := f.doRemote(http.MethodPost, "/api/devices/enroll", map[string]any{
+		"code": parsed.Code, "public_key": phonePub, "name": "Test Phone", "kind": DeviceIOS,
+	}, "")
+	if wPhone.Code != http.StatusOK {
+		t.Fatalf("remote iPhone enroll after macos enroll = %d %s, want 200", wPhone.Code, wPhone.Body.String())
+	}
+}
+
+// 6.5 round 2: code rails on kind="macos" (remote/proxied/Funnel/non-loopback
+// Host refusal, non-empty code refusal without burning codes, empty name
+// defaulting to "Mac", shared loopback rate limit, and key-reuse safety).
+func TestMacOSEnrollRailsAndDefaults(t *testing.T) {
+	t.Run("remote_proxied_funnel_and_non_loopback_host_refused", func(t *testing.T) {
+		f := newBrowserEnrolFixture(t, nil)
+		_, pub := newDeviceKey(t)
+
+		post := func(remoteAddr, host string, tlsState *tls.ConnectionState, hdrs map[string]string) *httptest.ResponseRecorder {
+			t.Helper()
+			b, _ := json.Marshal(map[string]any{
+				"code": "", "public_key": pub, "name": "Remote Mac", "kind": "macos",
+			})
+			r := httptest.NewRequest(http.MethodPost, "/api/devices/enroll", bytes.NewReader(b))
+			r.Header.Set("Content-Type", "application/json")
+			r.RemoteAddr, r.Host, r.TLS = remoteAddr, host, tlsState
+			for k, v := range hdrs {
+				r.Header.Set(k, v)
+			}
+			w := httptest.NewRecorder()
+			f.srv.Handler().ServeHTTP(w, r)
+			return w
+		}
+
+		// Remote TLS caller -> 403 loopback_only.
+		wRemote := post("192.0.2.50:5000", "192.0.2.20:7777", &tls.ConnectionState{}, nil)
+		var bodyRemote map[string]string
+		_ = json.Unmarshal(wRemote.Body.Bytes(), &bodyRemote)
+		if wRemote.Code != http.StatusForbidden || bodyRemote["reason"] != "loopback_only" {
+			t.Fatalf("remote macos enroll = %d %s, want 403 loopback_only", wRemote.Code, wRemote.Body.String())
+		}
+
+		// Reverse-proxied loopback caller -> 403 loopback_only.
+		wProxy := post("127.0.0.1:5000", "127.0.0.1:7777", nil, map[string]string{"X-Forwarded-For": "203.0.113.10"})
+		var bodyProxy map[string]string
+		_ = json.Unmarshal(wProxy.Body.Bytes(), &bodyProxy)
+		if wProxy.Code != http.StatusForbidden || bodyProxy["reason"] != "loopback_only" {
+			t.Fatalf("proxied macos enroll = %d %s, want 403 loopback_only", wProxy.Code, wProxy.Body.String())
+		}
+
+		// Active Tailscale Funnel -> 403 loopback_only.
+		f.srv.deps.TailscaleFunnel = func(context.Context, int) (bool, error) { return true, nil }
+		wFunnel := post("127.0.0.1:5000", "127.0.0.1:7777", nil, nil)
+		var bodyFunnel map[string]string
+		_ = json.Unmarshal(wFunnel.Body.Bytes(), &bodyFunnel)
+		if wFunnel.Code != http.StatusForbidden || bodyFunnel["reason"] != "loopback_only" {
+			t.Fatalf("Funnel macos enroll = %d %s, want 403 loopback_only", wFunnel.Code, wFunnel.Body.String())
+		}
+		f.srv.deps.TailscaleFunnel = nil
+		f.now = f.now.Add(10 * time.Second) // expire funnelCache TTL (5s)
+
+		// Non-loopback Host on loopback socket -> 403 (host_not_allowed or loopback_only).
+		wHost := post("127.0.0.1:5000", "evil.example:7777", nil, nil)
+		if wHost.Code != http.StatusForbidden {
+			t.Fatalf("non-loopback Host macos enroll = %d %s, want 403", wHost.Code, wHost.Body.String())
+		}
+
+		if got := len(f.srv.devices.active()); got != 0 {
+			t.Fatalf("active devices after refused macos attempts = %d, want 0", got)
+		}
+	})
+
+	t.Run("non_empty_code_refused_without_burning", func(t *testing.T) {
+		f := newBrowserEnrolFixture(t, nil)
+		_, appTicket := f.enrollAndSignInApp("Existing Phone", DeviceIOS)
+
+		phoneCode, _, _, err := f.srv.enroll.current(f.now, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wShort := f.doLoopback(http.MethodPost, "/api/pair/browser-code", nil, appTicket)
+		if wShort.Code != http.StatusOK {
+			t.Fatalf("POST /api/pair/browser-code = %d %s", wShort.Code, wShort.Body.String())
+		}
+		var issued struct {
+			Code string `json:"code"`
+		}
+		_ = json.Unmarshal(wShort.Body.Bytes(), &issued)
+
+		_, macPub := newDeviceKey(t)
+		wWithPhone := f.doLoopback(http.MethodPost, "/api/devices/enroll", map[string]any{
+			"code": phoneCode, "public_key": macPub, "name": "Studio Mac", "kind": "macos",
+		}, "")
+		if wWithPhone.Code != http.StatusBadRequest || !strings.Contains(strings.ToLower(wWithPhone.Body.String()), "code") {
+			t.Fatalf("macos enroll with phone code = %d %s, want 400 rejecting code", wWithPhone.Code, wWithPhone.Body.String())
+		}
+
+		wWithShort := f.doLoopback(http.MethodPost, "/api/devices/enroll", map[string]any{
+			"code": issued.Code, "public_key": macPub, "name": "Studio Mac", "kind": "macos",
+		}, "")
+		if wWithShort.Code != http.StatusBadRequest || !strings.Contains(strings.ToLower(wWithShort.Body.String()), "code") {
+			t.Fatalf("macos enroll with browser code = %d %s, want 400 rejecting code", wWithShort.Code, wWithShort.Body.String())
+		}
+
+		// Neither code was burned.
+		_, phonePub := newDeviceKey(t)
+		wPhone := f.doRemote(http.MethodPost, "/api/devices/enroll", map[string]any{
+			"code": phoneCode, "public_key": phonePub, "name": "Second Phone", "kind": DeviceIOS,
+		}, "")
+		if wPhone.Code != http.StatusOK {
+			t.Fatalf("phone code after refused macos enroll = %d %s, want 200", wPhone.Code, wPhone.Body.String())
+		}
+		_, browserPub := newDeviceKey(t)
+		wBrowser := f.doLoopback(http.MethodPost, "/api/devices/enroll", map[string]any{
+			"code": issued.Code, "public_key": browserPub, "name": "Local Browser", "kind": DeviceBrowser,
+		}, "")
+		if wBrowser.Code != http.StatusOK {
+			t.Fatalf("browser short code after refused macos enroll = %d %s, want 200", wBrowser.Code, wBrowser.Body.String())
+		}
+	})
+
+	t.Run("empty_name_defaults_to_Mac", func(t *testing.T) {
+		f := newBrowserEnrolFixture(t, nil)
+		_, macPub := newDeviceKey(t)
+		w := f.doLoopback(http.MethodPost, "/api/devices/enroll", map[string]any{
+			"code": "", "public_key": macPub, "name": "   ", "kind": "macos",
+		}, "")
+		if w.Code != http.StatusOK {
+			t.Fatalf("macos enroll with blank name = %d %s, want 200", w.Code, w.Body.String())
+		}
+		var er EnrollResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &er); err != nil || er.Name != "Mac" {
+			t.Fatalf("default macos name = %q (body=%s, err=%v), want %q", er.Name, w.Body.String(), err, "Mac")
+		}
+	})
+
+	t.Run("shared_loopback_rate_limit_blocks_macos", func(t *testing.T) {
+		f := newBrowserEnrolFixture(t, nil)
+		_, pub := newDeviceKey(t)
+		for i := 1; i <= 5; i++ {
+			w := f.doLoopback(http.MethodPost, "/api/devices/enroll", map[string]any{
+				"code": "WRONG-CODE", "public_key": pub, "name": "Test Browser", "kind": DeviceBrowser,
+			}, "")
+			if w.Code != http.StatusGone {
+				t.Fatalf("wrong guess %d = %d %s, want 410", i, w.Code, w.Body.String())
+			}
+		}
+		w6 := f.doLoopback(http.MethodPost, "/api/devices/enroll", map[string]any{
+			"code": "WRONG-CODE", "public_key": pub, "name": "Test Browser", "kind": DeviceBrowser,
+		}, "")
+		if w6.Code != http.StatusTooManyRequests {
+			t.Fatalf("6th wrong guess = %d %s, want 429", w6.Code, w6.Body.String())
+		}
+
+		// macos enrolment shares the loopback enroll bucket and gets 429 rate_limited.
+		_, macPub := newDeviceKey(t)
+		wMac := f.doLoopback(http.MethodPost, "/api/devices/enroll", map[string]any{
+			"code": "", "public_key": macPub, "name": "Studio Mac", "kind": "macos",
+		}, "")
+		var body map[string]string
+		_ = json.Unmarshal(wMac.Body.Bytes(), &body)
+		if wMac.Code != http.StatusTooManyRequests || body["reason"] != "rate_limited" {
+			t.Fatalf("macos enroll while loopback rate-limited = %d %v, want 429 rate_limited", wMac.Code, body)
+		}
+	})
+
+	t.Run("reusing_active_ios_public_key_gives_no_usable_session", func(t *testing.T) {
+		f := newBrowserEnrolFixture(t, nil)
+		_, iosPub := newDeviceKey(t)
+		code, _, _, err := f.srv.enroll.current(f.now, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wIOS := f.doLoopback(http.MethodPost, "/api/devices/enroll", map[string]any{
+			"code": code, "public_key": iosPub, "name": "Owner iPhone", "kind": DeviceIOS,
+		}, "")
+		if wIOS.Code != http.StatusOK {
+			t.Fatalf("ios enroll = %d %s", wIOS.Code, wIOS.Body.String())
+		}
+
+		// Re-enrolling that public key as macos does not let a caller without the private key sign in.
+		wRelabel := f.doLoopback(http.MethodPost, "/api/devices/enroll", map[string]any{
+			"code": "", "public_key": iosPub, "name": "Relabeled Mac", "kind": "macos",
+		}, "")
+		if wRelabel.Code != http.StatusOK {
+			t.Fatalf("macos enroll with existing public key = %d %s, want 200", wRelabel.Code, wRelabel.Body.String())
+		}
+		var er EnrollResponse
+		_ = json.Unmarshal(wRelabel.Body.Bytes(), &er)
+
+		otherKey, _ := newDeviceKey(t)
+		wc := f.doLoopback(http.MethodGet, "/api/auth/challenge", nil, "")
+		var ch ChallengeResponse
+		_ = json.Unmarshal(wc.Body.Bytes(), &ch)
+		sum := sha256.Sum256([]byte(SignedText(f.srv.deps.Computer.ID, f.srv.deps.TLS.Pin(), er.DeviceID, ch.Nonce, f.now.Unix())))
+		sig, err := ecdsa.SignASN1(rand.Reader, otherKey, sum[:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		ws := f.doLoopback(http.MethodPost, "/api/auth/session", map[string]any{
+			"device_id": er.DeviceID, "nonce": ch.Nonce, "time": f.now.Unix(),
+			"signature": base64.StdEncoding.EncodeToString(sig), "client": "app",
+		}, "")
+		var sBody map[string]string
+		_ = json.Unmarshal(ws.Body.Bytes(), &sBody)
+		if ws.Code != http.StatusUnauthorized || sBody["reason"] != "bad_signature" {
+			t.Fatalf("session with wrong private key = %d %v, want 401 bad_signature", ws.Code, sBody)
+		}
+	})
+}

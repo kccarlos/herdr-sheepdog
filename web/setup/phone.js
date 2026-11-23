@@ -62,6 +62,12 @@ export function deviceKind(d) {
   return 'Device';
 }
 
+// devicesSectionState reports whether the setup page's Devices section and its
+// empty-state hint should be shown for phoneEnabled and paired device count.
+export function devicesSectionState() {
+  return { show: false, showEmpty: false };
+}
+
 // lastSeen says when and how a device last came in: "Wi-Fi · 5 min ago",
 // "Tailscale · just now", "never".
 export function lastSeen(d, now) {

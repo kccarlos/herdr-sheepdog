@@ -259,7 +259,7 @@ public final class StatusItemController: NSObject {
             Task {
                 do { browserPairingPresenter.showCode(BrowserPairingPresentation(code: try await browserPairing.requestCode())) }
                 catch {
-                    let failure = (error as? BrowserPairingError) ?? .refused(status: 0, message: error.localizedDescription)
+                    let failure = (error as? BrowserPairingError) ?? .serverError(status: 0, message: error.localizedDescription)
                     log.log("could not get browser pairing code: \(failure.title)")
                     browserPairingPresenter.showError(failure)
                 }
@@ -277,7 +277,7 @@ public final class StatusItemController: NSObject {
         item.menu = menu()
     }
 
-    private func menu() -> NSMenu {
+    func menu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
         for row in Self.rows(for: state, loginItemEnabled: loginItem.isEnabled, voice: voice.state, hotkey: hotkey.shortcut, update: MacUpdatePresentation(offer: offer, state: updater.state)) {
