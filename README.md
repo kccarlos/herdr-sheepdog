@@ -46,6 +46,7 @@ https://github.com/user-attachments/assets/4d0834e2-9d1a-453b-a88b-ff4b75428a5a
 - **iPhone app** — QR pairing, Live Activity, earbud remote, and lock-screen notifications through an end-to-end encrypted relay. [iPhone app →](docs/iphone-app.md)
 - **Mac panel and menu bar** — read the conversation, type, answer and talk in herdr-app; Sheepdog.app supplies the microphone, notifications and a global shortcut. [Mac →](docs/desktop.md)
 - **herdr-app panel and layout** — on herdr.dev's [mods](https://herdr.dev/mods/) and [layouts](https://herdr.dev/layouts/) pages (community). `sheepdog setup` installs both.
+- **unattended factory** — give a GitHub repo a goal and let the daemon drive planning, worktrees, independent review, CI, and squash merge over `herdr-core`, watched at `/factory` with owner asks answered on the card or by voice. [factory →](docs/factory.md)
 - **bring your own models** — one free Gemini key is enough; Gemini Live or GPT-Live for the voice, Gemini, DeepSeek or any OpenAI-compatible endpoint for the brain. [models →](docs/models.md)
 - **measured** — every prompt and harness change merges only past an eval suite with confidence intervals; the losses are published. [evals →](docs/dev/eval/README.md)
 
@@ -92,9 +93,23 @@ brew install --cask kccarlos/tap/sheepdog-app                                   
 
 Something wrong? Run `sheepdog doctor`; every problem prints its fix. [troubleshooting →](docs/troubleshooting.md)
 
+## unattended factory
+
+Give a GitHub repository a goal and let sheepdog run a coordinator, workers in git worktrees, independent reviewers, CI checks, and squash merges over `herdr-core` (`hc`):
+
+```bash
+sheepdog factory doctor ~/repo
+sheepdog factory start ~/repo --goal "Add dark mode to settings"
+sheepdog factory status
+sheepdog factory log
+sheepdog factory stop
+```
+
+Watch tasks, logs, and open asks at `http://127.0.0.1:7777/factory` (loopback only). Gated asks and commit-pinned overrides wait for you: answer on the ask card in the paired iPhone app or a paired local browser on `/factory`, or say the option in a live voice session. [factory guide →](docs/factory.md)
+
 ## docs
 
-[quick start](docs/quick-start.md) · [Mac](docs/desktop.md) · [iPhone app](docs/iphone-app.md) · [remote access](docs/remote-access.md) · [models](docs/models.md) · [commands](docs/commands.md) · [configuration](CONFIG.md) · [troubleshooting](docs/troubleshooting.md) · [safety](docs/safety.md) · [privacy](docs/privacy.md) · [faq](docs/faq.md) · [developer docs](docs/dev/architecture.md)
+[quick start](docs/quick-start.md) · [factory](docs/factory.md) · [Mac](docs/desktop.md) · [iPhone app](docs/iphone-app.md) · [remote access](docs/remote-access.md) · [models](docs/models.md) · [commands](docs/commands.md) · [configuration](CONFIG.md) · [troubleshooting](docs/troubleshooting.md) · [safety](docs/safety.md) · [privacy](docs/privacy.md) · [faq](docs/faq.md) · [developer docs](docs/dev/architecture.md)
 
 ## thanks
 

@@ -20,6 +20,13 @@ sheepdog pair
 - **Android, a laptop or any browser:** point the camera at it, or open
   the link. The browser opens sheepdog's voice page, warns once about the
   certificate (accept it), and pairs itself.
+- **A local browser for `/factory` (Mac):** to answer gated factory asks on
+  `http://127.0.0.1:7777/factory` without turning on phone access, open
+  **Sheepdog.app** in the menu bar and choose **Pair browser…** for a
+  single-use 5-minute `XXXX-XXXX` code (`POST /api/pair/browser-code`), then
+  enter it on `/factory` ([desktop.md](desktop.md#sheepdogapp),
+  [factory.md](factory.md#answer-asks-and-overrides)). Short browser codes are
+  accepted only on loopback.
 
 The code holds the computer's Tailscale address first (when Tailscale is
 running), then its Wi-Fi/LAN address (a private 192.168.x, 10.x or
@@ -92,7 +99,7 @@ that name.
   usual port with its own certificate, made on first start and valid for
   a year.
   Plain HTTP answers only this computer itself (`127.0.0.1`): the local
-  setup, voice and debug pages.
+  setup, voice, debug and factory pages.
 - **Each device has its own key.** The iPhone keeps it in the Secure
   Enclave, a browser in its own storage; it never leaves the device. There
   is no shared password: a photo of an old pairing code is worthless.
@@ -101,9 +108,9 @@ that name.
   device; each scans a new code to come back. **Reset pairing** does that
   and also replaces the certificate, for when you suspect someone copied
   this computer's files.
-- **Debug and internal pages answer only this computer:** the setup page,
-  `/debug`, pairing codes and the herdr hooks. From a phone they answer
-  `403`.
+- **Debug, factory and internal pages answer only this computer:** the setup
+  page, `/debug`, `/factory`, `/api/factory/{status,start,stop,report}`,
+  pairing codes and the herdr hooks. From a phone they answer `403`.
 - **Never expose the port to the open internet:** no port forwarding to
   the internet, no public tunnel, no `0.0.0.0` on a machine with a public
   address.
@@ -127,7 +134,8 @@ code).
 A reverse proxy on the computer itself (such as `tailscale serve` or `caddy`
 forwarding to `127.0.0.1`) still requires a paired device: loopback requests
 carrying `X-Forwarded-*` or `Forwarded` headers do not get automatic local
-access, and `/setup`, `/debug` and pairing codes stay reachable only directly
+access, and `/setup`, `/debug`, `/factory`, `/api/factory/{status,start,stop,report}`
+and pairing codes stay reachable only directly
 at `http://127.0.0.1:7777` on the computer. Paired devices (`sds_` session
 tickets and paired browsers) keep working through private proxies. Public
 tunnels such as Tailscale Funnel are refused (`tailscale funnel reset`); never
