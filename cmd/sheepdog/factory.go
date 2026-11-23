@@ -46,6 +46,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "  recap decide <task> <choice> --why \"<why>\" [--child '<json>' ...]  (coordinator only) decide an open recap")
 	fprintln(w, "  report ready [--proof \"<outcome>=<cmd>\" ...] [--artifact \"<outcome>=<path>\" ...] [--touched \"<places>\"] [--skipped \"<what was left out>\"] [--reject \"<why>\"]  (worker only) run proofs and report HEAD ready, or reject findings")
 	fprintln(w, "  report ready --nothing-to-change --why \"<why>\"  (worker only) report that the task needs no change")
+	fprintln(w, "  report review <pass|changes> --code <code> --head <sha> --self-check-misses <n> --deletable \"<text>\" [--class \"<text>\"] [--not-run \"<text>\"] [--findings <path>]  (reviewer only) submit a review verdict")
 	fprintln(w, "  report ask \"<question>\" --option \"<choice>\" --option \"<choice>\" --recommend \"<choice>\"  (worker/reviewer) ask the coordinator a decision question")
 	fprintln(w, "  ask --kind <kind> [--task <task>] \"<question>\" --option \"<choice>\" --option \"<choice>\" --recommend \"<choice>\"  (coordinator) open an ask (gated kinds go to the owner)")
 	fprintln(w, "  answer <ask> \"<option>\" [--why \"<why>\"]  (coordinator) answer an open decision ask")
@@ -330,6 +331,9 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 	if len(args) >= 1 && args[0] == "ask" {
 		return runFactoryAsk(ctx, args[1:], true, stdout, stderr)
 	}
+	if len(args) >= 1 && args[0] == "review" {
+		return runFactoryReportReview(ctx, args[1:], stdout, stderr)
+	}
 	if len(args) < 1 || args[0] != "ready" {
 		printFactoryUsage(stderr)
 		return 2
@@ -483,6 +487,76 @@ func runProofs(ctx context.Context, git *world.Git, head string, proofs []flow.P
 	return nil
 }
 
+func runFactoryReportReview(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := factoryFlags("factory report review", stderr)
+	code := fs.String("code", "", "round one-time code")
+	head := fs.String("head", "", "reviewed commit SHA")
+	missesRaw := fs.String("self-check-misses", "", "findings the worker's own checks should have caught")
+	deletable := fs.String("deletable", "", "lines, options or abstractions that could go with no loss")
+	class := fs.String("class", "", "finding class when second of its kind")
+	notRun := fs.String("not-run", "", "checks that could not be run and why")
+	findingsPath := fs.String("findings", "", "path to findings file outside the worktree")
+	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
+		return flagExit(err)
+	}
+	seen := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
+	if fs.NArg() != 1 {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	verdict := strings.TrimSpace(fs.Arg(0))
+	if verdict != flow.VerdictPass && verdict != flow.VerdictChanges {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	if !seen["code"] || strings.TrimSpace(*code) == "" || !seen["head"] || strings.TrimSpace(*head) == "" ||
+		!seen["self-check-misses"] || !seen["deletable"] || strings.TrimSpace(*deletable) == "" {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	misses, err := strconv.Atoi(strings.TrimSpace(*missesRaw))
+	if err != nil || misses < 0 {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	findings := ""
+	if seen["findings"] {
+		fp := strings.TrimSpace(*findingsPath)
+		if fp == "" || fp == "-" {
+			printFactoryUsage(stderr)
+			return 2
+		}
+		f, err := os.Open(fp)
+		if err != nil {
+			fprintf(stderr, "sheepdog factory report review: %v\n", err)
+			return 1
+		}
+		raw, rerr := io.ReadAll(io.LimitReader(f, int64(proofOutputLimit)+1))
+		cerr := f.Close()
+		if err := cmp.Or(rerr, cerr); err != nil {
+			fprintf(stderr, "sheepdog factory report review: %v\n", err)
+			return 1
+		}
+		if len(raw) > proofOutputLimit {
+			fprintf(stderr, "sheepdog factory report review: findings file %s is over %d bytes\n", fp, proofOutputLimit)
+			return 1
+		}
+		findings = string(raw)
+	}
+	body := map[string]any{
+		"verdict":           verdict,
+		"code":              *code,
+		"head":              *head,
+		"self_check_misses": misses,
+		"deletable":         *deletable,
+		"class":             *class,
+		"not_run":           *notRun,
+		"findings":          findings,
+	}
+	return sendFactoryReport(ctx, "factory report review", "review", body, "review "+verdict, stdout, stderr)
+}
+
 func sendFactoryReport(ctx context.Context, cmd, verb string, body any, okMsg string, stdout, stderr io.Writer) int {
 	raw, _ := json.Marshal(body)
 	if err := postFactoryReport(ctx, verb, raw); err != nil {
@@ -597,6 +671,10 @@ func reorderFactoryDoctorArgs(args []string) []string {
 		"-n": true, "--n": true,
 		"-kind": true, "--kind": true, "-task": true, "--task": true,
 		"-option": true, "--option": true, "-recommend": true, "--recommend": true,
+		"-code": true, "--code": true, "-head": true, "--head": true,
+		"-self-check-misses": true, "--self-check-misses": true,
+		"-deletable": true, "--deletable": true, "-class": true, "--class": true,
+		"-not-run": true, "--not-run": true, "-findings": true, "--findings": true,
 	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
