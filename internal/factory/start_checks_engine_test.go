@@ -663,6 +663,78 @@ func TestStartChecksPRWorkflowBranches_KB_STA_18(t *testing.T) {
 			},
 			want: onboard.OK,
 		},
+		{
+			name:     "both branches and branches-ignore excluding main fails",
+			workflow: "on:\n  pull_request:\n    branches: ['*']\n    branches-ignore: [main]\njobs: {}\n",
+			want:     onboard.Fail,
+		},
+		{
+			name:     "both branches and branches-ignore matching main fails",
+			workflow: "on:\n  pull_request:\n    branches: [main]\n    branches-ignore: [main]\njobs: {}\n",
+			want:     onboard.Fail,
+		},
+		{
+			name:     "both branches and branches-ignore in flow map fails",
+			workflow: "on: { pull_request: { branches: [main], branches-ignore: [main] } }\njobs: {}\n",
+			want:     onboard.Fail,
+		},
+		{
+			name:     "both branches and branches-ignore on same event is invalid in GitHub Actions",
+			workflow: "on: { pull_request: { branches: [main], branches-ignore: [dev] } }\njobs: {}\n",
+			want:     onboard.Fail,
+		},
+		{
+			name:     "branches pattern with mid-segment **/ requires slash",
+			workflow: "on:\n  pull_request:\n    branches: ['ma**/in']\njobs: {}\n",
+			want:     onboard.Fail,
+		},
+		{
+			name:     "branches-ignore pattern with mid-segment **/ requires slash",
+			workflow: "on:\n  pull_request:\n    branches-ignore: ['ma**/in']\njobs: {}\n",
+			want:     onboard.OK,
+		},
+		{
+			name:     "branches pattern combining ** and character class matches",
+			workflow: "on:\n  pull_request:\n    branches: ['**/v[0-9]']\njobs: {}\n",
+			over: startFake{
+				"gh repo view o/r --json defaultBranchRef,viewerPermission": out(`{"defaultBranchRef":{"name":"release/v1"},"viewerPermission":"WRITE"}`),
+				"refs/remotes/origin/HEAD":                                  out("origin/release/v1"),
+				"rev-parse --verify --quiet origin/release/v1":              out("abc1234\n"),
+				"ls-tree --name-only origin/release/v1 .github/workflows/":  out(".github/workflows/ci.yml"),
+				"show origin/release/v1:.github/workflows/ci.yml":           out("on:\n  pull_request:\n    branches: ['**/v[0-9]']\njobs: {}\n"),
+				"gh api repos/o/r/branches/release%2Fv1":                    out(`{"protected":false}`),
+				"gh api repos/o/r/rules/branches/release%2Fv1":              out("[]"),
+			},
+			want: onboard.OK,
+		},
+		{
+			name:     "branches pattern combining **, prefix, and character class matches",
+			workflow: "on:\n  pull_request:\n    branches: ['releases/**/v[0-9]']\njobs: {}\n",
+			over: startFake{
+				"gh repo view o/r --json defaultBranchRef,viewerPermission":      out(`{"defaultBranchRef":{"name":"releases/2026/v1"},"viewerPermission":"WRITE"}`),
+				"refs/remotes/origin/HEAD":                                       out("origin/releases/2026/v1"),
+				"rev-parse --verify --quiet origin/releases/2026/v1":             out("abc1234\n"),
+				"ls-tree --name-only origin/releases/2026/v1 .github/workflows/": out(".github/workflows/ci.yml"),
+				"show origin/releases/2026/v1:.github/workflows/ci.yml":          out("on:\n  pull_request:\n    branches: ['releases/**/v[0-9]']\njobs: {}\n"),
+				"gh api repos/o/r/branches/releases%2F2026%2Fv1":                 out(`{"protected":false}`),
+				"gh api repos/o/r/rules/branches/releases%2F2026%2Fv1":           out("[]"),
+			},
+			want: onboard.OK,
+		},
+		{
+			name:     "branches negation combining ** and character class excludes matching branch",
+			workflow: "on:\n  pull_request:\n    branches: ['**', '!**/v[0-9]']\njobs: {}\n",
+			over: startFake{
+				"gh repo view o/r --json defaultBranchRef,viewerPermission": out(`{"defaultBranchRef":{"name":"release/v1"},"viewerPermission":"WRITE"}`),
+				"refs/remotes/origin/HEAD":                                  out("origin/release/v1"),
+				"rev-parse --verify --quiet origin/release/v1":              out("abc1234\n"),
+				"ls-tree --name-only origin/release/v1 .github/workflows/":  out(".github/workflows/ci.yml"),
+				"show origin/release/v1:.github/workflows/ci.yml":           out("on:\n  pull_request:\n    branches: ['**', '!**/v[0-9]']\njobs: {}\n"),
+				"gh api repos/o/r/branches/release%2Fv1":                    out(`{"protected":false}`),
+				"gh api repos/o/r/rules/branches/release%2Fv1":              out("[]"),
+			},
+			want: onboard.Fail,
+		},
 	}
 
 	for _, tc := range cases {
@@ -748,4 +820,63 @@ func TestStartChecksGHUnknownAndDoctorCleanup_KB_STA_18(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestStartChecksDaemonLookupIsLexicalOnly_KB_ENV_7(t *testing.T) {
+	dataDir := t.TempDir()
+	realDir := t.TempDir()
+	realRepo := filepath.Join(realDir, "real-repo")
+	if err := os.MkdirAll(realRepo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linkRepo := filepath.Join(realDir, "link-repo")
+	if err := os.Symlink(realRepo, linkRepo); err != nil {
+		t.Fatal(err)
+	}
+	st := flow.State{
+		Project:  flow.Project{ID: "p-real", Folder: realRepo},
+		Settings: flow.DefaultSettings(),
+	}
+	st.Settings.Models = map[string][]flow.Candidate{
+		flow.RoleCoordinator: {{CLI: "codex", Model: "gpt-6.2-sol", Effort: "medium"}},
+		flow.RoleWorker:      {{CLI: "claude", Model: "sonnet", Effort: "medium"}},
+		flow.RoleReviewer:    {{CLI: "claude", Model: "opus", Effort: "medium"}},
+	}
+	if err := SaveState(Paths{DataDir: dataDir}.State("p-real"), st); err != nil {
+		t.Fatal(err)
+	}
+	srv := hctest.New(t)
+	fake := makeStartCheckFake(linkRepo, startFake{
+		"codex login status": {Exit: 1, Stdout: "Not logged in\n"},
+	})
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		c := fake.run(context.Background(), p.Cwd, nil, p.Argv...)
+		return hc.ExecResult{Code: &c.Exit, Stdout: []byte(c.Stdout), Stderr: []byte(c.Stderr)}, nil
+	}
+	// With HCSocket set (daemon mode), StartChecks must NOT call EvalSymlinks locally
+	// to resolve linkRepo -> realRepo; it should only match lexically on r.root.
+	rs := StartChecks(context.Background(), DoctorOptions{Folder: linkRepo, DataDir: dataDir, HCSocket: srv.Path, RunCommand: fake.run})
+	for _, r := range rs {
+		if r.Name == "start codex" {
+			t.Fatalf("daemon-mode StartChecks resolved symlink locally via EvalSymlinks: %+v", r)
+		}
+	}
+}
+
+func TestStartChecksGHMissingViaHC_KB_STA_18(t *testing.T) {
+	root := t.TempDir()
+	srv := hctest.New(t)
+	fake := makeStartCheckFake(root, nil)
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if len(p.Argv) > 0 && p.Argv[0] == "gh" {
+			return hc.ExecResult{}, &hc.Error{Kind: "exec_failed", Message: "spawn gh: No such file or directory"}
+		}
+		c := fake.run(context.Background(), p.Cwd, nil, p.Argv...)
+		return hc.ExecResult{Code: &c.Exit, Stdout: []byte(c.Stdout), Stderr: []byte(c.Stderr)}, nil
+	}
+	rs := StartChecks(context.Background(), DoctorOptions{Folder: root, HCSocket: srv.Path, RunCommand: fake.run})
+	r := findResult(t, rs, "gh push access")
+	if r.Status != onboard.Fail || !strings.Contains(strings.ToLower(r.Detail), "not installed") {
+		t.Fatalf("missing gh via hc = %+v, want Fail (not installed)", r)
+	}
 }

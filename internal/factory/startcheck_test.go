@@ -112,6 +112,8 @@ func TestStartChecksStatuses(t *testing.T) {
 		{"workflow utf8 bom", "\uFEFFon: pull_request\njobs: {}\n", nil, "pr workflow", onboard.OK},
 		{"workflow flow map null values", "on: {pull_request, push}\njobs: {}\n", nil, "pr workflow", onboard.OK},
 		{"workflow anchor block map", "on: &triggers\n  pull_request:\njobs: {}\n", nil, "pr workflow", onboard.OK},
+		{"workflow anchor on pull_request respects branches", "on:\n  pull_request: &pr\n    branches: [other]\njobs: {}\n", nil, "pr workflow", onboard.Fail},
+		{"workflow next-line flow list under branches", "on:\n  pull_request:\n    branches:\n      [main]\njobs: {}\n", nil, "pr workflow", onboard.OK},
 		{"workflow literal true key is not a trigger", "true:\n  pull_request:\njobs: {}\n", nil, "pr workflow", onboard.Fail},
 		{"workflow push only", "on: push\njobs: {}\n", nil, "pr workflow", onboard.Fail},
 		{"workflow pull_request only in if", "on: push\njobs:\n  ci:\n    if: github.event_name == 'pull_request'\n    runs-on: ubuntu-latest\n", nil, "pr workflow", onboard.Fail},
