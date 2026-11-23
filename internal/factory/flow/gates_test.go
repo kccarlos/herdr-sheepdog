@@ -336,9 +336,9 @@ func TestN42NoOpenOwnerAsk(t *testing.T) {
 
 	// Non-blocking asks: open decision ask, answered owner ask, other task's owner ask.
 	for name, ask := range map[string]Ask{
-		"open_decision":     openAsk("ask-dec-1", KindDecision, "t", "c1"),
-		"answered_owner":    answeredAsk("ask-rel-2", KindRelease, "t", "c1", "Yes", "owner", now),
-		"other_task_owner":  openAsk("ask-rel-3", KindRelease, "other", "c1"),
+		"open_decision":    openAsk("ask-dec-1", KindDecision, "t", "c1"),
+		"answered_owner":   answeredAsk("ask-rel-2", KindRelease, "t", "c1", "Yes", "owner", now),
+		"other_task_owner": openAsk("ask-rel-3", KindRelease, "other", "c1"),
 	} {
 		in := with(func(in *In) { in.Asks = []Ask{ask} })
 		if !n42.When(in) {
