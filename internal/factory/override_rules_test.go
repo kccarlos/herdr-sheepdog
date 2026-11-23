@@ -170,9 +170,9 @@ func TestOverrideHistoryPendingToRedSpendsReturnsToN33AndTellsOwnerOnce(t *testi
 	_ = drainChanges(changes)
 
 	// 1. Transient GitHub 503 outage must NOT spend the override or merge.
-	writeGHFile(t, w.gh, "view.err", "HTTP 503: service unavailable")
+	writeGHFile(t, w.gh, "fail", "1") // the fake gh fails every call while this file exists (pr_test.go)
 	w.pass()
-	if err := os.Remove(w.gh + "/view.err"); err != nil {
+	if err := os.Remove(w.gh + "/fail"); err != nil {
 		t.Fatal(err)
 	}
 	if st := w.state(); st.Tasks[0].Attempts[0].Overrides[0].Spent {
@@ -185,7 +185,7 @@ func TestOverrideHistoryPendingToRedSpendsReturnsToN33AndTellsOwnerOnce(t *testi
 	// 2. GitHub recovers and checks finished red -> Pass hits N19b, spends override, and emits OR2 result line once.
 	redRollup := `[{"__typename":"CheckRun","id":101,"name":"unit","workflowName":"CI","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/example/repo/actions/runs/555/job/101"}]`
 	writePRJSON(t, w.gh, "view.json", c1, redRollup)
-	writeGHFile(t, w.gh, "runs.json", `{"workflow_runs":[{"id":555,"status":"completed","conclusion":"failure"}]}`)
+	writeGHFile(t, w.gh, "workflow-runs.json", `{"workflow_runs":[{"id":555,"status":"completed","conclusion":"failure"}]}`)
 	workerBefore := len(sendsTo(t, w.srv.Requests(), w.workerID))
 
 	w.pass()
