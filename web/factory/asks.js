@@ -11,12 +11,13 @@ export function renderAskCardsHTML(asks, state = {}) {
   let html = list.length ? list.map((a) => {
     const busy = state.busyId === a.id;
     const meta = [a.kind && `<span class="chip">${esc(a.kind)}</span>`, a.task && `<code>${esc(a.task)}</code>`].filter(Boolean).join('');
+    const cmd = a.command ? `<pre class="ask-cmd"><code>${esc(a.command)}</code></pre>` : '';
     const opts = (a.options || []).map((opt) => {
       const rec = opt === a.recommend;
       return `<button type="button" class="ask-opt${rec ? ' rec' : ''}" data-ask-id="${esc(a.id)}" data-option="${esc(opt)}" aria-label="${esc(rec ? `${opt} (Recommended)` : opt)}"${busy ? ' disabled' : ''}>${esc(opt)}${rec ? ' <span class="rec-tag">Recommended</span>' : ''}</button>`;
     }).join('');
     const err = state.error && (!state.errorAskId || state.errorAskId === a.id) ? `<p class="ask-err" role="alert">${esc(state.error)}</p>` : '';
-    return `<article class="ask-card" data-ask-id="${esc(a.id)}" aria-label="${esc(a.question)}">${meta ? `<div class="meta">${meta}</div>` : ''}<p class="ask-q">${esc(a.question)}</p><div class="ask-opts" role="group" aria-label="Answer options">${opts}</div>${err}</article>`;
+    return `<article class="ask-card" data-ask-id="${esc(a.id)}" aria-label="${esc(a.question)}">${meta ? `<div class="meta">${meta}</div>` : ''}<p class="ask-q">${esc(a.question)}</p>${cmd}<div class="ask-opts" role="group" aria-label="Answer options">${opts}</div>${err}</article>`;
   }).join('') : '<p class="muted">No open asks right now.</p>';
 
   if (state.needsPairing) {

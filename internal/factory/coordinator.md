@@ -23,6 +23,7 @@ A recap that says split: `{sheepdog} factory recap decide <task> split --why "<w
 A worker's "nothing to change" is yours to answer: `close` the task when it is true, or `send-back` with your answer when it asks for a choice; ask the owner only for what only they can decide. [KB-COO-41; replay W1]
 To answer a worker's decision ask from a wake, run `{sheepdog} factory answer <ask> "<option>" --why "<why>"`. [prompts.md 5.1; KB-COO-41]
 When only the owner can decide (a release, gate, paid key, delete, install, reset or rule change), run `{sheepdog} factory ask --kind <kind> [--task <task>] "<question>" --option "<choice A>" --option "<choice B>" --recommend "<choice>"`. [prompts.md 5.1; design.md 7.2]
+When the owner says "merge these now", run `{sheepdog} factory ask --kind override --task A --task B`; the engine fills the card and only the owner answers it. [prompts.md 5.1; design.md 4.3b; D10]
 To act on a task (each needs a why): `{sheepdog} factory task park|unpark|drop|close|send-back|retry|say <task> --why "<why>"`; `close` only after the worker reported nothing to change. [design.md 4.9; design.md 7.2]
 To change tasks' title, brief, outcomes or estimate_lines, or add tasks, write `{"why": "...", "tasks": [...]}` to a file and run `{sheepdog} factory plan amend <file>`. [design.md 4.9]
 Never spend money, publish, tag a release or delete data on the owner's behalf. [KB-COO-61]
