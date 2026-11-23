@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
@@ -78,8 +79,9 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 	if from == "" {
 		from = prev.State
 	}
+	quiet := herdr.IsFactoryQuiet(t.Labels, t.To)
 	wasBusy := from == herdr.StateWorking || from == herdr.StateBlocked
-	if s.brain != nil {
+	if s.brain != nil && !quiet {
 		alias := row.Alias
 		if alias == "" {
 			alias = prev.Alias
@@ -96,7 +98,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.mu.Unlock()
 		s.cfg.WorkerLog.Forget(t.PaneID)
 		s.journal.clearMissing(t.PaneID)
-		if wasBusy {
+		if wasBusy && !quiet {
 			line := aliasOr(state.Say(prev)) + " has gone away; its pane closed."
 			if t.Released {
 				line = aliasOr(state.Say(prev)) + " has exited while it was busy."
@@ -109,6 +111,9 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 	alias := aliasOr(state.Say(row))
 	switch t.To {
 	case herdr.StateBlocked:
+		if quiet {
+			return
+		}
 		// From is not consulted: a synthetic blocked -> blocked
 		// transition (reprompt.go) takes the same path as a real
 		// working -> blocked one. onBlocked always re-reads and
@@ -132,7 +137,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.mu.Unlock()
 		s.cfg.WorkerLog.Forget(t.PaneID)
 		s.journal.clearMissing(t.PaneID)
-		if wasBusy {
+		if wasBusy && !quiet {
 			s.push(t.PaneID, alias+" has exited while it was busy.", voice.UrgencyInterrupt)
 		}
 	case herdr.StateWorking:
@@ -143,6 +148,9 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.forgetPrompt(t.PaneID)
 		started, justSent := s.startedInstruction(t.PaneID, from)
 		s.mu.Unlock()
+		if quiet {
+			return
+		}
 		if started != "" {
 			s.pushStarted(t.PaneID, alias+" started on "+started+".", justSent)
 		}
@@ -160,7 +168,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		instructed := s.runningShepherdTask(row)
 		finish := from == herdr.StateWorking || s.finishedAfterApproval(prev, from)
 		var stopErr *workerlog.TurnError
-		if from != herdr.StateDone && from != "" {
+		if !quiet && from != herdr.StateDone && from != "" {
 			// The journal entry comes before the announce turn (onDone),
 			// which carries the worker's last message; done -> idle is
 			// the same finish seen again and adds none, and a pane first
@@ -168,6 +176,9 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 			stopErr = s.recordJournal(ctx, row, roots, string(t.To), finish)
 		}
 		s.finishTask(t.PaneID)
+		if quiet {
+			return
+		}
 		if r, ok := s.store.Get(t.PaneID); ok {
 			row = r
 		}
@@ -479,6 +490,9 @@ func (s *Supervisor) forgetPrompt(paneID string) {
 func (s *Supervisor) aliasOf(paneID string) string {
 	if a, ok := s.store.Get(paneID); ok && a.Alias != "" {
 		return a.Alias
+	}
+	if proj, ok := strings.CutPrefix(paneID, factoryPanePrefix); ok && proj != "" {
+		return proj + " factory"
 	}
 	return "another agent"
 }

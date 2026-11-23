@@ -1,10 +1,7 @@
 package herdr
 
-// IsFactoryQuiet reports whether a transition on a terminal with labels to
-// state to should be silenced by the factory quiet rule (design.md 12.1):
-// non-coordinator factory roles (worker, reviewer, checks, helper) are quiet
-// for every state change; coordinator is quiet except when blocked;
-// non-factory terminals are never quiet.
+// IsFactoryQuiet reports whether a factory terminal transition should be
+// silenced: non-coordinator roles always, coordinator except when blocked.
 func IsFactoryQuiet(labels map[string]string, to State) bool {
-	return false
+	return labels["sheepdog.project"] != "" && (labels["sheepdog.role"] != "coordinator" || to != StateBlocked)
 }

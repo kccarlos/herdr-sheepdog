@@ -10,6 +10,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/attention"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/redact"
@@ -463,6 +464,9 @@ type Supervisor struct {
 
 	// journal is the work journal's own bookkeeping (journal.go).
 	journal journalState
+
+	factoryMu   sync.Mutex // lock order: factoryMu before s.mu
+	factoryAsks []state.PendingAction
 }
 
 // interruptGrace is how long after a user cancel a pane's working -> done
@@ -535,11 +539,22 @@ func (s *Supervisor) Run(ctx context.Context) {
 	// Once at startup, the roster is already loaded (state.Open ran
 	// before New): catches a pane whose prompt changed while the daemon
 	// was down, which no post-answer poll ever ran for.
+	var factoryCh <-chan factory.Change
+	if s.cfg.Factory != nil {
+		factoryCh = s.cfg.Factory.Changes()
+		s.syncFactoryAsks()
+	}
 	s.reconcileReprompts(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case _, ok := <-factoryCh:
+			if ok {
+				s.syncFactoryAsks()
+			} else {
+				factoryCh = nil
+			}
 		case <-expiry.C:
 			s.ExpirePending()
 			s.ExpirePromises()

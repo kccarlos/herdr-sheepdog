@@ -2,6 +2,7 @@ package herdr
 
 import (
 	"context"
+	"maps"
 	"sync/atomic"
 	"time"
 )
@@ -111,6 +112,7 @@ type paneState struct {
 	// carried on every Transition.
 	session *AgentSession
 	cwd     string
+	labels  map[string]string
 
 	state State // confirmed state ("" until first emit)
 
@@ -293,6 +295,7 @@ func (w *Watcher) refreshSnapshot(ctx context.Context) error {
 		if a.Cwd != "" {
 			p.cwd = a.Cwd
 		}
+		p.labels = maps.Clone(a.Labels)
 		w.applyEvent(ctx, p, StatusEvent{PaneID: a.PaneID, WorkspaceID: a.WorkspaceID, Agent: a.Agent, State: a.Status, At: at, Source: "snapshot"})
 		if renamed && p.state == before {
 			// The state did not change (a change would have carried the
@@ -447,7 +450,7 @@ func (p *paneState) activate() {
 		return
 	}
 	p.state, p.lastEv, p.lastEvAt = "", "", time.Time{}
-	p.name, p.session = "", nil
+	p.name, p.session, p.labels = "", nil, nil
 	p.released = false
 }
 
@@ -479,6 +482,7 @@ func (w *Watcher) emit(ctx context.Context, p *paneState, to State, at time.Time
 		Released:       released,
 		Source:         source,
 		Cwd:            p.cwd,
+		Labels:         maps.Clone(p.labels),
 	}
 	if p.session != nil {
 		sess := *p.session
@@ -510,6 +514,7 @@ func (w *Watcher) emitRename(ctx context.Context, p *paneState, at time.Time) {
 		Source:         "snapshot",
 		Renamed:        true,
 		Cwd:            p.cwd,
+		Labels:         maps.Clone(p.labels),
 	}
 	if p.session != nil {
 		sess := *p.session
