@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -1350,5 +1352,139 @@ func TestFactoryStatusDaemonInMemoryDiskAlert(t *testing.T) {
 	}
 	if !strings.Contains(offOut.String(), "no tasks yet") {
 		t.Fatalf("offline fallback output = %q, want no tasks yet", offOut.String())
+	}
+}
+
+// TestFactoryStatusCanonicalizesSymlinkBeforeDaemonRequest checks PR 5b.9 round 3:
+// `sheepdog factory status` canonicalizes the folder in the login session before
+// querying GET /api/factory/status, so a symlinked folder still finds its project.
+func TestFactoryStatusCanonicalizesSymlinkBeforeDaemonRequest(t *testing.T) {
+	home := t.TempDir()
+	realHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+
+	dataDir := filepath.Join(home, "data")
+	paths := factory.Paths{DataDir: dataDir}
+	realRepo := filepath.Join(realHome, "real-repo")
+	realSub := filepath.Join(realRepo, "sub", "dir")
+	if err := os.MkdirAll(realSub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linkRepo := filepath.Join(home, "link-repo")
+	if err := os.Symlink(realRepo, linkRepo); err != nil {
+		t.Fatal(err)
+	}
+	linkSub := filepath.Join(linkRepo, "sub", "dir")
+
+	if err := factory.SaveState(paths.State("proj-sym"), flow.State{
+		Seq:      1,
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "proj-sym", Folder: realRepo, Started: true},
+		Tasks:    []flow.Task{{ID: "T1", Title: "feat: symlink status"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	webDir := t.TempDir()
+	elog, err := eventlog.Open(webDir, eventlog.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = elog.Close() })
+	st, err := state.Open(filepath.Join(webDir, "state.json"), state.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	eng := factory.New(paths, nil)
+	tlsID, err := web.LoadTLSIdentity("", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	webSrv, err := web.New(web.Deps{Log: elog, Store: st, DataDir: webDir, TLS: tlsID, Factory: eng})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := webSrv.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	srvCtx, srvCancel := context.WithCancel(context.Background())
+	srvDone := make(chan error, 1)
+	go func() { srvDone <- webSrv.Serve(srvCtx, 100*time.Millisecond) }()
+	t.Cleanup(func() {
+		srvCancel()
+		select {
+		case <-srvDone:
+		case <-time.After(5 * time.Second):
+		}
+	})
+
+	var mu sync.Mutex
+	var gotFolders []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/factory/status" {
+			mu.Lock()
+			gotFolders = append(gotFolders, r.URL.Query().Get("folder"))
+			mu.Unlock()
+		}
+		req, err := http.NewRequestWithContext(r.Context(), r.Method, "http://"+webSrv.Addr()+r.URL.RequestURI(), nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer func() { _ = resp.Body.Close() }()
+		for k, vals := range resp.Header {
+			for _, v := range vals {
+				w.Header().Add(k, v)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
+	}))
+	t.Cleanup(ts.Close)
+
+	_, portStr, err := net.SplitHostPort(ts.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgFile := filepath.Join(home, "config.toml")
+	cfgBody := fmt.Sprintf("data_dir = %q\n\n[web]\nbind = \"127.0.0.1\"\nport = %s\n", dataDir, portStr)
+	if err := os.WriteFile(cfgFile, []byte(cfgBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		arg  string
+		want string
+	}{
+		{linkRepo, realRepo},
+		{linkSub, realSub},
+	}
+	for i, tc := range cases {
+		var out, errBuf bytes.Buffer
+		code := run(context.Background(), []string{"factory", "status", tc.arg, "--config", cfgFile}, &out, &errBuf)
+		if code != 0 {
+			t.Fatalf("status(%q) code=%d stderr=%s", tc.arg, code, errBuf.String())
+		}
+		if !strings.Contains(out.String(), "T1") {
+			t.Fatalf("status(%q) output = %q, want T1", tc.arg, out.String())
+		}
+		mu.Lock()
+		got := gotFolders[i]
+		mu.Unlock()
+		if got != tc.want {
+			t.Fatalf("daemon received folder=%q for %q, want canonical %q", got, tc.arg, tc.want)
+		}
 	}
 }
