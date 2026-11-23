@@ -93,20 +93,6 @@ brew install --cask kccarlos/tap/sheepdog-app                                   
 
 Something wrong? Run `sheepdog doctor`; every problem prints its fix. [troubleshooting →](docs/troubleshooting.md)
 
-## unattended factory
-
-Give a GitHub repository a goal and let sheepdog run a coordinator, workers in git worktrees, independent reviewers, CI checks, and squash merges over `herdr-core` (`hc`):
-
-```bash
-sheepdog factory doctor ~/repo
-sheepdog factory start ~/repo --goal "Add dark mode to settings"
-sheepdog factory status
-sheepdog factory log
-sheepdog factory stop
-```
-
-Watch tasks, logs, and open asks at `http://127.0.0.1:7777/factory` (loopback only). Gated asks and commit-pinned overrides wait for you: answer on the ask card in the paired iPhone app or a paired local browser on `/factory`, or say the option in a live voice session. [factory guide →](docs/factory.md)
-
 ## docs
 
 [quick start](docs/quick-start.md) · [factory](docs/factory.md) · [Mac](docs/desktop.md) · [iPhone app](docs/iphone-app.md) · [remote access](docs/remote-access.md) · [models](docs/models.md) · [commands](docs/commands.md) · [configuration](CONFIG.md) · [troubleshooting](docs/troubleshooting.md) · [safety](docs/safety.md) · [privacy](docs/privacy.md) · [faq](docs/faq.md) · [developer docs](docs/dev/architecture.md)

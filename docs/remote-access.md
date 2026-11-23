@@ -20,13 +20,14 @@ sheepdog pair
 - **Android, a laptop or any browser:** point the camera at it, or open
   the link. The browser opens sheepdog's voice page, warns once about the
   certificate (accept it), and pairs itself.
-- **A local browser for `/factory` (Mac):** to answer gated factory asks on
+- **A local browser for `/factory` (Mac only):** to answer gated factory asks on
   `http://127.0.0.1:7777/factory` without turning on phone access, open
-  **Sheepdog.app** in the menu bar and choose **Pair browser…** for a
-  single-use 5-minute `XXXX-XXXX` code (`POST /api/pair/browser-code`), then
-  enter it on `/factory` ([desktop.md](desktop.md#sheepdogapp),
+  **Sheepdog.app** in the Mac menu bar and choose **Pair browser…** for a
+  single-use 5-minute `XXXX-XXXX` code, then enter it on `/factory`
+  ([desktop.md](desktop.md#sheepdogapp),
   [factory.md](factory.md#answer-asks-and-overrides)). Short browser codes are
-  accepted only on loopback.
+  accepted only on loopback. On Linux (or without `Sheepdog.app`), answer
+  factory asks from the paired iPhone or iPad app or by live voice.
 
 The code holds the computer's Tailscale address first (when Tailscale is
 running), then its Wi-Fi/LAN address (a private 192.168.x, 10.x or
@@ -109,7 +110,7 @@ that name.
   and also replaces the certificate, for when you suspect someone copied
   this computer's files.
 - **Debug, factory and internal pages answer only this computer:** the setup
-  page, `/debug`, `/factory`, `/api/factory/{status,start,stop,report}`,
+  page, `/debug`, `/factory`, the factory status and control endpoints,
   pairing codes and the herdr hooks. From a phone they answer `403`.
 - **Never expose the port to the open internet:** no port forwarding to
   the internet, no public tunnel, no `0.0.0.0` on a machine with a public
@@ -134,7 +135,7 @@ code).
 A reverse proxy on the computer itself (such as `tailscale serve` or `caddy`
 forwarding to `127.0.0.1`) still requires a paired device: loopback requests
 carrying `X-Forwarded-*` or `Forwarded` headers do not get automatic local
-access, and `/setup`, `/debug`, `/factory`, `/api/factory/{status,start,stop,report}`
+access, and `/setup`, `/debug`, `/factory`, the factory status and control endpoints
 and pairing codes stay reachable only directly
 at `http://127.0.0.1:7777` on the computer. Paired devices (`sds_` session
 tickets and paired browsers) keep working through private proxies. Public

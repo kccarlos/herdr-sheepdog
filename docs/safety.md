@@ -31,43 +31,13 @@ changed code. Do not point sheepdog at an agent started with one of these:
 
 ## Factory
 
-The unattended [factory](factory.md) enforces its own rails in code:
+Unlike interactive agents you manage by voice above, the unattended [factory](factory.md) launches its coordinators and workers without interactive tool-approval prompts (`claude --permission-mode bypassPermissions`, `codex --dangerously-bypass-approvals-and-sandbox`, `agy --dangerously-skip-permissions`). Because there is no interactive approval prompt in front of each command, the safety boundary shifts to isolated git worktrees, read-only reviewers with clean-tree checks, GitHub CI and branch protection, role tokens, and owner-proof gated asks enforced in code:
 
-- **Owner proof for gated asks (`AnswerProof`).** Gated ask kinds (`gate`,
-  `release`, `override`, `paid-key`, `delete`, `install`, `reset`, `rule`)
-  cannot be answered by the coordinator, a worker, typed chat text, or a
-  ticketless local HTTP request. Each answer requires an in-process
-  `AnswerProof` (stored in `proofs.json` for 24 hours) minted only by a
-  paired-device tap (a paired phone or a paired local browser on `/factory`) or
-  a live voice session.
-- **No lock-screen quick-reply on factory pushes.** A push notification for a
-  factory ask carries no Approve or Decline button, so you cannot accidentally
-  approve an override or gate from the lock screen. Tap it to open the full
-  card and pick an option, or say the option in a live voice session.
-- **Role separation (`SHEEPDOG_RUN_TOKEN`).** Every factory run receives a
-  random per-run token in its environment (never on its command line, in a
-  file, or in a log; only its SHA-256 hash is kept in `state.json`). The
-  daemon checks the token against the role table so a worker cannot start or
-  stop a project, apply plans, submit reviews, or open gated asks. Because
-  runs share your OS user, the token stops agent mistakes rather than a
-  hostile local process; GitHub branch protection and the factory's acceptance
-  checks are the backstops.
-- **Commit-pinned, non-delegable overrides.** Override cards
-  (`sheepdog factory ask --kind override`) are filled by the engine from live
-  git and GitHub state (task, PR, commit `H`, CI check state, and unreported
-  work), recommend **No, wait**, and can never be delegated to a standing
-  rule. An approved override covers only commit `H` (or clean base merges
-  ahead of it), spends itself and stops merging if CI checks get worse than
-  what the card showed, and still respects merge conflicts, unmet
-  dependencies, and one-merge-at-a-time ordering.
-- **Start checks, clean trees, and proofs.** `sheepdog factory start` runs
-  the start checks of `sheepdog factory doctor` first and refuses on any
-  `FAIL`: `git` 2.38+, a usable CLI for each project role, `gh` push access, a
-  non-empty GitHub remote matching the base branch, a `pull_request` CI
-  workflow on the remote base, and no required approving review on the base.
-  Workers must report ready from a clean worktree with passing proofs for
-  every outcome; a reviewer that leaves a dirty worktree has its round voided
-  and is stopped.
+- **Owner proof for gated asks.** Gated ask kinds (`gate`, `release`, `override`, `paid-key`, `delete`, `install`, `reset`, `rule`) cannot be answered by the coordinator, a worker, typed chat text, or a ticketless local HTTP request. Each answer requires a verified in-process owner proof (stored in `proofs.json` for 24 hours) minted only by a paired-device tap (a paired phone or a paired local browser on `/factory`) or a live voice session.
+- **No lock-screen quick-reply on factory pushes.** A push notification for a factory ask carries no Approve or Decline button, so you cannot accidentally approve an override or gate from the lock screen. Tap it to open the full card and pick an option, or say the option in a live voice session.
+- **Role separation (`SHEEPDOG_RUN_TOKEN`).** Every factory run receives a random per-run token in its environment (never on its command line, in a file, or in a log; only its SHA-256 hash is kept in `state.json`). The daemon checks the token against the role table so a worker cannot start or stop a project, apply plans, submit reviews, or open gated asks. Because runs share your OS user, the token stops agent mistakes rather than a hostile local process; GitHub branch protection and the factory's acceptance checks are the backstops.
+- **Commit-pinned overrides.** Override cards are filled by the engine from live git and GitHub state (task, PR, the reported commit, CI check state, and unreported work) and recommend **No, wait**. An override always needs your confirmation — it cannot be auto-approved by a rule. An approved override covers only that exact commit (or clean base merges ahead of it), spends itself and stops merging if CI checks get worse than what the card showed, and still respects merge conflicts, unmet dependencies, and one-merge-at-a-time ordering.
+- **Start checks, clean trees, and proofs.** `sheepdog factory start` runs all start checks first and refuses on any `FAIL` ([factory.md](factory.md#requirements)). Workers must report ready from a clean worktree with passing proofs for every outcome. Claude and Codex reviewers run in read-only modes (`dontAsk` with read-only tools for Claude, `-s read-only -a never` for Codex); every reviewer (including `agy`) is checked for a clean worktree on verdict, and a dirty worktree voids the round and stops the reviewer.
 
 ## Known limit
 
