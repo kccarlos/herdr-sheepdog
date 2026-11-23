@@ -801,9 +801,9 @@ func (s *Supervisor) push(paneID, text string, u voice.Urgency) {
 // kept promise or a block line is never lost to a reconnect (audit B3).
 // Only a session-less daemon (--voice=off, or no session at all) skips
 // the push outright, logged as supervisor.push_skipped.
-func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[string]any) {
+func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[string]any) bool {
 	if text == "" {
-		return
+		return false
 	}
 	if paneID != "" && u != voice.UrgencySilent {
 		s.setSubject(paneID)
@@ -819,7 +819,7 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 	}
 	tags = s.withPushID(tags)
 	if u != voice.UrgencySilent && !s.noteEventLine(paneID, text, tags) {
-		return
+		return false
 	}
 	if u != voice.UrgencySilent {
 		s.notePromptLine(text, tags) // buried.go
@@ -830,11 +830,11 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 			payload[k] = v
 		}
 		s.log.Log(logSource, "supervisor.push_skipped", paneID, payload)
-		return
+		return false
 	}
 	if err := s.pushTo(text, u, tags); err != nil {
 		s.log.Log(logSource, "supervisor.push_error", paneID, map[string]any{"text": text, "urgency": u.String(), "error": err.Error()})
-		return
+		return false
 	}
 	if u != voice.UrgencySilent && s.brain != nil {
 		// Queued is not spoken: the relay gate moves only when the voice
@@ -842,6 +842,7 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 		// markPushed).
 		s.brain.PushedLinked(s.aliasOf(paneID), text, u.String(), pushLink(tags))
 	}
+	return true
 }
 
 // pushTo hands the line to the pusher, with the tags when it takes them.

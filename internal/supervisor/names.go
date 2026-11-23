@@ -217,6 +217,9 @@ func (s *Supervisor) sayOf(paneID string) string {
 			return n
 		}
 	}
+	if proj, ok := strings.CutPrefix(paneID, factoryPanePrefix); ok && proj != "" {
+		return proj + " factory"
+	}
 	return "another agent"
 }
 

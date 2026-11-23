@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -268,6 +269,7 @@ func (s *Supervisor) resetToldLocked() {
 		}
 	}
 	clear(s.told.stated)
+	clear(s.told.factoryQueued)
 	s.told.pushRun = ""
 	s.told.cutPush = ""
 	s.persistToldLocked()
@@ -352,11 +354,7 @@ func (s *Supervisor) syncToldLocked() {
 			delete(t.stated, k)
 		}
 	}
-	for k := range t.factoryQueued {
-		if _, ok := open[k]; !ok {
-			delete(t.factoryQueued, k)
-		}
-	}
+	maps.DeleteFunc(t.factoryQueued, func(k promptKey, _ string) bool { _, ok := open[k]; return !ok })
 	s.persistToldLocked()
 }
 
@@ -500,9 +498,10 @@ func (s *Supervisor) openByIDLocked(id string) (state.PendingAction, bool) {
 		return state.PendingAction{}, false
 	}
 	if strings.HasPrefix(id, factoryAskPrefix) {
-		asks := s.FactoryQuestions()
-		if i := slices.IndexFunc(asks, func(p state.PendingAction) bool { return p.ID == id }); i >= 0 {
-			return asks[i], true
+		for _, p := range s.FactoryQuestions() {
+			if p.ID == id {
+				return p, true
+			}
 		}
 		return state.PendingAction{}, false
 	}
@@ -530,11 +529,7 @@ func (s *Supervisor) linePushedLocked(text, pendingID string) {
 }
 
 func (s *Supervisor) clearFactoryQueuedLocked(texts ...string) {
-	for k, queued := range s.told.factoryQueued {
-		if queued != "" && slices.Contains(texts, queued) {
-			delete(s.told.factoryQueued, k)
-		}
-	}
+	maps.DeleteFunc(s.told.factoryQueued, func(_ promptKey, q string) bool { return q != "" && slices.Contains(texts, q) })
 }
 
 func (s *Supervisor) markLineToldLocked(text, pendingID string, allowFactory bool) {
@@ -706,7 +701,6 @@ func (s *Supervisor) onToldCut(cut *voice.TranscriptCut, heard string) {
 			continue
 		}
 		delete(s.told.told, k)
-		delete(s.told.factoryQueued, k)
 		changed = true
 	}
 	if changed {

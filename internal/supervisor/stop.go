@@ -123,7 +123,7 @@ func (s *Supervisor) relayStopRest() {
 	}
 	c := s.claimRunLocked([]*shepherdInput{last})
 	c.in.open = false
-	c.text = rest
+	c.text, c.stopRest = rest, true
 	s.replies.Add(1)
 	s.mu.Unlock()
 	go func() {

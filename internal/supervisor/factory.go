@@ -82,15 +82,7 @@ func (s *Supervisor) syncFactoryAsks() {
 	}
 	for _, id := range prev {
 		if !slices.Contains(ids, id) {
-			var paneID string
-			if i := slices.IndexFunc(all, func(a flow.Ask) bool { return factoryAskPrefix+a.ID == id }); i >= 0 {
-				paneID = factoryPanePrefix + all[i].Project
-				if all[i].Status == flow.AskStatusAnswered {
-					s.log.Log(logSource, "pending.confirmed", paneID, map[string]any{"id": id, "kind": state.PendingAnswerPrompt, "answer": all[i].Answer})
-					continue
-				}
-			}
-			s.log.Log(logSource, "pending.cancelled", paneID, map[string]any{"id": id, "kind": state.PendingAnswerPrompt, "reason": "cancelled"})
+			s.logFactoryClosed(id, "", all)
 		}
 	}
 	if !slices.Equal(prev, ids) {
@@ -106,6 +98,17 @@ func (s *Supervisor) syncFactoryAsks() {
 		s.cfg.Notifier.Notify(n)
 	}
 	s.pushFactoryAnnounces(announces)
+}
+
+func (s *Supervisor) logFactoryClosed(id, paneID string, all []flow.Ask) {
+	if i := slices.IndexFunc(all, func(a flow.Ask) bool { return factoryAskPrefix+a.ID == id }); i >= 0 {
+		paneID = factoryPanePrefix + all[i].Project
+		if all[i].Status == flow.AskStatusAnswered {
+			s.log.Log(logSource, "pending.confirmed", paneID, map[string]any{"id": id, "kind": state.PendingAnswerPrompt, "answer": all[i].Answer})
+			return
+		}
+	}
+	s.log.Log(logSource, "pending.cancelled", paneID, map[string]any{"id": id, "kind": state.PendingAnswerPrompt, "reason": "cancelled"})
 }
 
 func (s *Supervisor) announceFactoryAsks() {
@@ -124,7 +127,11 @@ func (s *Supervisor) announceFactoryAsks() {
 
 func (s *Supervisor) pushFactoryAnnounces(announces []factoryAnnounce) {
 	for _, a := range announces {
-		s.pushTagged(a.paneID, a.text, voice.UrgencyIdle, fromDaemon(map[string]any{tagPendingID: a.id, "needs_user": true}))
+		if !s.pushTagged(a.paneID, a.text, voice.UrgencyIdle, fromDaemon(map[string]any{tagPendingID: a.id, "needs_user": true})) {
+			s.mu.Lock()
+			s.clearFactoryQueuedLocked(a.text)
+			s.mu.Unlock()
+		}
 	}
 }
 
@@ -152,9 +159,7 @@ func (s *Supervisor) snapshotFactoryAsksLocked() ([]state.PendingAction, []strin
 	defer s.factoryMu.Unlock()
 	asks, names := slices.Clone(s.factoryAsks), make([]string, len(s.factoryAsks))
 	for i, p := range asks {
-		if names[i] = s.factoryAskNames[p.ID]; names[i] == "" {
-			names[i] = strings.TrimPrefix(p.PaneID, factoryPanePrefix)
-		}
+		names[i] = s.factoryAskNames[p.ID]
 	}
 	return asks, names
 }
@@ -190,6 +195,10 @@ func (s *Supervisor) execFactoryAnswer(p state.PendingAction, option int, inputK
 	}
 	var ref *factory.Refusal
 	gone := errors.As(err, &ref) && (ref.Code == flow.RefuseClosed || ref.Code == "not_found")
+	var all []flow.Ask
+	if gone {
+		all = s.cfg.Factory.Asks(false)
+	}
 	s.mu.Lock()
 	if err != nil {
 		for _, in := range ins {
@@ -201,17 +210,21 @@ func (s *Supervisor) execFactoryAnswer(p state.PendingAction, option int, inputK
 		s.factoryAsks = slices.DeleteFunc(s.factoryAsks, func(x state.PendingAction) bool { return x.ID == p.ID })
 		delete(s.factoryAskNames, p.ID)
 		s.factoryMu.Unlock()
+		had := false
 		_ = s.store.UpdateSession(func(ss *state.Session) {
+			had = slices.Contains(ss.FactoryAsks, p.ID)
 			ss.FactoryAsks = slices.DeleteFunc(ss.FactoryAsks, func(x string) bool { return x == p.ID })
 		})
 		s.closedLocked()
-	}
-	if err == nil {
-		pl := map[string]any{"id": p.ID, "kind": p.Kind, "answer": optLabel, "option": option, "via": inputKind, "device_id": proof.DeviceID, "proof_id": proof.ID}
-		if heard != "" {
-			pl["heard"] = heard
+		if err == nil {
+			pl := map[string]any{"id": p.ID, "kind": p.Kind, "answer": optLabel, "option": option, "via": inputKind, "device_id": proof.DeviceID, "proof_id": proof.ID}
+			if heard != "" {
+				pl["heard"] = heard
+			}
+			s.log.Log(logSource, "pending.confirmed", p.PaneID, pl)
+		} else if had {
+			s.logFactoryClosed(p.ID, p.PaneID, all)
 		}
-		s.log.Log(logSource, "pending.confirmed", p.PaneID, pl)
 	}
 	s.mu.Unlock()
 	s.factoryOpMu.Unlock()
@@ -242,34 +255,26 @@ func (s *Supervisor) answerFactoryTap(id string, option int, deviceID string) (v
 }
 
 func (s *Supervisor) factoryVoiceFastPath(c claim, callID string, daemon, forceSync bool) (voice.ToolResult, bool) {
-	if s.cfg.Factory == nil || forceSync || c.in == nil || c.in.kind != InputVoice || !s.store.Snapshot().Session.VoiceConnected {
+	if s.cfg.Factory == nil || forceSync || c.stopRest || c.in == nil || c.in.kind != InputVoice || !s.store.Snapshot().Session.VoiceConnected {
 		return voice.ToolResult{}, false
 	}
 	if w := BareWord(c.text); w == "stop the factory" || w == "stop factory" || w == "start the factory" || w == "start factory" {
 		return s.factoryControl(strings.HasPrefix(w, "start")), true
 	}
-	if c.retryOf != "" || strings.TrimSpace(c.text) == "" || strings.TrimSpace(c.in.text) == "" {
+	if c.retryOf != "" || len(c.ins) == 0 || strings.TrimSpace(c.text) == "" || strings.TrimSpace(c.in.text) == "" {
 		return voice.ToolResult{}, false
 	}
-	ins := c.ins
-	if len(ins) == 0 {
-		ins = []*shepherdInput{c.in}
-	}
 	s.mu.Lock()
-	for _, in := range ins {
-		if in.kind != InputVoice || in.used || strings.TrimSpace(in.saidBefore) != "" {
-			s.mu.Unlock()
-			return voice.ToolResult{}, false
-		}
-	}
 	asks, names := s.snapshotFactoryAsksLocked()
-	if len(asks) == 0 {
+	if len(asks) == 0 || slices.ContainsFunc(c.ins, func(in *shepherdInput) bool {
+		return in.kind != InputVoice || in.used || strings.TrimSpace(in.saidBefore) != ""
+	}) {
 		s.mu.Unlock()
 		return voice.ToolResult{}, false
 	}
 	s.syncToldLocked()
 	zh := s.ceoChineseLocked()
-	target, targetName, optIdx, clarify, readBack := s.resolveFactoryVoiceLocked(asks, names, c.text, ins[0].began, zh)
+	target, targetName, optIdx, clarify, readBack := s.resolveFactoryVoiceLocked(asks, names, c.text, c.ins[0].began, zh)
 	if optIdx == 0 && clarify == "" {
 		s.mu.Unlock()
 		return voice.ToolResult{}, false
@@ -286,12 +291,12 @@ func (s *Supervisor) factoryVoiceFastPath(c claim, callID string, daemon, forceS
 		s.mu.Unlock()
 		return voice.ToolResult{Spoken: clarify, Clarify: true, Scheduling: voice.UrgencyInterrupt}, true
 	}
-	for _, in := range ins {
+	for _, in := range c.ins {
 		in.used = true
 	}
 	s.mu.Unlock()
 
-	optLabel, gone, err := s.execFactoryAnswer(target, optIdx, factory.ProofInputVoice, factoryVoiceDeviceID, c.text, ins)
+	optLabel, gone, err := s.execFactoryAnswer(target, optIdx, factory.ProofInputVoice, factoryVoiceDeviceID, c.text, c.ins)
 	spoken := pickLang(zh, fmt.Sprintf("Answered %s: %s.", targetName, optLabel), fmt.Sprintf("已回复 %s：%s。", targetName, optLabel))
 	if gone {
 		spoken = pickLang(zh, "That question is already closed.", "这个问题已经关闭了。")
@@ -307,12 +312,9 @@ func (s *Supervisor) resolveFactoryVoiceLocked(asks []state.PendingAction, names
 	var named bool
 	if len(asks) == 1 {
 		target, name = asks[0], names[0]
-		var ok bool
-		if opt, ok = matchFactoryOption(target, text); !ok {
-			opt, ok = matchFactoryNamed(target, name, text)
-			named = ok
-		}
-		if !ok {
+		if o, ok := matchFactoryOption(target, text); ok {
+			opt = o
+		} else if opt, named = matchFactoryNamed(target, name, text); !named {
 			return state.PendingAction{}, "", 0, "", false
 		}
 	} else {
