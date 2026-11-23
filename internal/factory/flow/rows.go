@@ -11,40 +11,47 @@ import (
 // What a row asks for. A key is the verb and the commit or round it is
 // for, so an act in acts[] marks it asked (design.md 3.2, "done once" keys).
 const (
-	AskNewAttempt   = "new_attempt"
-	AskStartWorker  = "start_worker"
-	AskStartReview  = "start_reviewer"
-	AskNudgeReview  = "nudge_reviewer"
-	AskStopReview   = "stop_reviewer"
-	AskTellFindings = "tell_worker_findings"
-	AskOpenRecap    = "open_recap"
-	AskOwnerNoRecap = "open_owner_no_recap"
-	AskSizeRecap    = "open_size_recap"
-	AskCIRecap      = "open_ci_recap"
-	AskTimeRecap    = "open_time_recap"
-	AskOpenN24      = "open_n24_ask"
-	AskOpenGate     = "open_gate_ask"
-	AskTellStop     = "tell_worker_stop"
-	AskTellDiverged = "tell_worker_diverged"
-	AskTellConflict = "tell_worker_conflict"
-	AskMergeOnly    = "move_h_merge_only"
-	AskPushPR       = "push_and_open_pr"
-	AskRerunCI      = "rerun_ci"
-	AskTellCI       = "tell_worker_ci"
-	AskTellBaseRed  = "tell_worker_base_red"
-	AskDispatchCI   = "dispatch_ci"
-	AskUpdateBranch = "update_branch"
-	AskFailUpdate   = "fail_update_branch"
-	AskAccept       = "record_accept"
-	AskMerge        = "merge"
-	AskMarkDone     = "mark_done"
-	AskCleanup      = "cleanup"
-	AskWake         = "wake_coordinator"
-	AskStopRuns     = "stop_runs"
+	AskNewAttempt    = "new_attempt"
+	AskStartWorker   = "start_worker"
+	AskStartReview   = "start_reviewer"
+	AskNudgeReview   = "nudge_reviewer"
+	AskStopReview    = "stop_reviewer"
+	AskTellFindings  = "tell_worker_findings"
+	AskOpenRecap     = "open_recap"
+	AskOwnerNoRecap  = "open_owner_no_recap"
+	AskSizeRecap     = "open_size_recap"
+	AskCIRecap       = "open_ci_recap"
+	AskTimeRecap     = "open_time_recap"
+	AskOpenN24       = "open_n24_ask"
+	AskOpenGate      = "open_gate_ask"
+	AskTellStop      = "tell_worker_stop"
+	AskTellDiverged  = "tell_worker_diverged"
+	AskTellConflict  = "tell_worker_conflict"
+	AskMergeOnly     = "move_h_merge_only"
+	AskPushPR        = "push_and_open_pr"
+	AskRerunCI       = "rerun_ci"
+	AskTellCI        = "tell_worker_ci"
+	AskTellBaseRed   = "tell_worker_base_red"
+	AskDispatchCI    = "dispatch_ci"
+	AskUpdateBranch  = "update_branch"
+	AskFailUpdate    = "fail_update_branch"
+	AskAccept        = "record_accept"
+	AskMerge         = "merge"
+	AskSpendOverride = "spend_override"
+	AskMarkDone      = "mark_done"
+	AskCleanup       = "cleanup"
+	AskWake          = "wake_coordinator"
+	AskStopRuns      = "stop_runs"
 
 	countBase        = 1 // 1-based restart, retry and back-off shift index
 	maxBackoffShift  = 10
 	maxEnsureBackoff = 30 * time.Minute
+)
+
+const (
+	checksRankGreen = iota
+	checksRankPending
+	checksRankRed
 )
 
 // key joins a verb and what it is for: "merge@3f9c".
@@ -319,6 +326,31 @@ func ownerGateNo(in In) bool {
 func splitRetroUnanswered(in In) bool {
 	return in.Task.SplitFrom != "" && in.Facts.SplitFromHadRetro && !OwnerAnsweredN24(in.Asks, in.Task.ID)
 }
+func overrideCovers(in In) bool {
+	a := in.attempt()
+	return a != nil && CoveringOverride(*a, headH(in)) != nil
+}
+func noOverrideCovers(in In) bool   { return !overrideCovers(in) }
+func otherMergeInFlight(in In) bool { return in.Facts.OtherMergeInFlight }
+func checksRank(c Checks) int {
+	switch c {
+	case ChecksGreen:
+		return checksRankGreen
+	case ChecksPending:
+		return checksRankPending
+	default:
+		return checksRankRed
+	}
+}
+func checksWorseThanShown(in In) bool {
+	a := in.attempt()
+	if a == nil {
+		return false
+	}
+	ov := CoveringOverride(*a, headH(in))
+	return ov != nil && checksRank(in.Facts.PR.Checks) > checksRank(ov.ChecksShown)
+}
+func checksNoWorseThanShown(in In) bool { return !checksWorseThanShown(in) }
 
 func checksGrace(in In) time.Duration {
 	return time.Duration(in.Settings.ChecksGraceMinutes) * time.Minute
@@ -334,7 +366,7 @@ func checksAbsentPastGrace(in In) bool {
 }
 func checksSeenNone(in In) bool { return !in.Facts.PR.ChecksUnread } // absent from a failed read is not "no checks"
 func ciReady(c Clause) Clause {
-	return all(ladderSays(Passed), prOpen, prHeadIsH, answered, githubAvail, c)
+	return all(ladderSays(Passed), noOverrideCovers, prOpen, prHeadIsH, answered, githubAvail, c)
 }
 
 func ladderSays(answer string) Clause {
@@ -442,7 +474,7 @@ var TaskRows = []Row[In]{
 	}},
 	// N6 tells a live worker of a size, ci or time recap once to stop (it has no
 	// recap-written report yet, so nothing waits for one).
-	{ID: "N6", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: recapOpen, Then: func(in In) Decision {
+	{ID: "N6", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: all(recapOpen, noOverrideCovers), Then: func(in In) Decision {
 		n, tell, trig := len(in.Task.Recaps), []string(nil), OpenRecap(in.Task).Trigger
 		if (trig == TriggerSize || trig == TriggerCI || trig == TriggerTime) && (in.Facts.Worker.State == RunWorking || in.Facts.Worker.State == RunIdle) {
 			tell = ensure(in, key(AskTellStop, n))
@@ -484,9 +516,8 @@ var TaskRows = []Row[In]{
 	{ID: "N11", WaitsOn: "the engine", Stage: "queued", When: noAttempt, Then: func(in In) Decision {
 		return say("no attempt: start one", ensure(in, AskNewAttempt))(in)
 	}},
-	// N12 has no "no owner override covers H" clause until slice 7.
 	{ID: "N12", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool {
-		return hasAttempt(in) && (in.Facts.LinesTimeout || in.Facts.Lines > in.attempt().SizeCap)
+		return hasAttempt(in) && !overrideCovers(in) && (in.Facts.LinesTimeout || in.Facts.Lines > in.attempt().SizeCap)
 	},
 		Then: func(in In) Decision {
 			why := fmt.Sprintf("%d changed lines, over the size cap %d", in.Facts.Lines, in.attempt().SizeCap)
@@ -495,20 +526,42 @@ var TaskRows = []Row[In]{
 			}
 			return say(why, ensure(in, key(AskSizeRecap, len(in.Task.Recaps))))(in)
 		}},
-	// N13 has no "no owner override covers H" clause until slice 7.
 	{ID: "N13", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: func(in In) bool {
-		return hasAttempt(in) && !ladderSays(Passed)(in) && in.Settings.CIFailsPerHour > 0 && ciFailCount(in) >= in.Settings.CIFailsPerHour
+		return hasAttempt(in) && !overrideCovers(in) && !ladderSays(Passed)(in) && in.Settings.CIFailsPerHour > 0 && ciFailCount(in) >= in.Settings.CIFailsPerHour
 	},
 		Then: func(in In) Decision {
 			why := fmt.Sprintf("%d commits failed CI in the last hour (limit %d)", ciFailCount(in), in.Settings.CIFailsPerHour)
 			return say(why, ensure(in, key(AskCIRecap, len(in.Task.Recaps))))(in)
 		}},
-	// N14 has no "no owner override covers H" clause until slice 7.
-	{ID: "N14", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: all(hasAttempt, overBuildTime),
+	{ID: "N14", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: all(hasAttempt, noOverrideCovers, overBuildTime),
 		Then: func(in In) Decision {
 			why := fmt.Sprintf("worker spent %s working (limit %dh)", WorkingTime(in.Task).Truncate(time.Minute), in.Settings.BuildHours)
 			return say(why, ensure(in, key(AskTimeRecap, len(in.Task.Recaps))))(in)
 		}},
+	{ID: "N15", WaitsOn: "the engine", Stage: "ci", When: all(overrideCovers, anyOf(noPR, all(prOpen, prBehindH))), Then: func(in In) Decision {
+		return pushPRDecision(in, unanswered(in) || githubUnavail(in), "override: GitHub does not have H")
+	}},
+	{ID: "N16", WaitsOn: "the worker", Stage: "working", When: all(overrideCovers, prOpen, prHeadIsH, answered, githubAvail, mergeConflict), Then: func(in In) Decision {
+		return say("override: PR conflicts with the base: tell the worker once to merge the base (never rebase)",
+			EnsureRun(in, RoleWorker), ensure(in, key(AskTellConflict, headH(in))))(in)
+	}},
+	{ID: "N17", WaitsOn: "those tasks", Stage: "waiting_on_dep", When: all(overrideCovers, anyOf(depsNotDone, depsDropped, otherMergeInFlight)), Then: func(in In) Decision {
+		if depsNotDone(in) || depsDropped(in) {
+			return say(n9Why(in))(in)
+		}
+		return say("another merge of this project is in flight")(in)
+	}},
+	{ID: "N19", WaitsOn: "GitHub", Stage: "ci", When: all(overrideCovers, prOpen, prHeadIsH, answered, githubAvail, anyOf(mergeAsked, all(checksSeenNone, checksNoWorseThanShown))), Then: func(in In) Decision {
+		h := headH(in)
+		merge := ensure(in, key(AskMerge, h))
+		if len(merge) == 0 {
+			return say("override covers H and checks are no worse than shown")(in)
+		}
+		return say("override covers H and checks are no worse than shown", ensure(in, key(AskAccept, h)), merge)(in)
+	}},
+	{ID: "N19b", WaitsOn: "the engine", Stage: "ci", When: all(overrideCovers, prOpen, prHeadIsH, answered, githubAvail, checksSeenNone, func(in In) bool { return !mergeAsked(in) && checksWorseThanShown(in) }), Then: func(in In) Decision {
+		return say("checks got worse after the card was made", ensure(in, key(AskSpendOverride, headH(in))))(in)
+	}},
 	{ID: "N20", WaitsOn: "the engine", Stage: "working", When: func(in In) bool {
 		return hasAttempt(in) && ((tipAhead(in) && in.Facts.TipMergeOnly) || prHeadAheadMergeOnly(in))
 	},
@@ -523,7 +576,7 @@ var TaskRows = []Row[In]{
 		return say("the ladder says fix", EnsureRun(in, RoleWorker),
 			ensure(in, key(AskTellFindings, r.N)))(in)
 	}},
-	{ID: "N23", WaitsOn: "the worker", Stage: "working", When: all(hasAttempt, anyOf(noReady, tipAhead)), Then: func(in In) Decision {
+	{ID: "N23", WaitsOn: "the worker", Stage: "working", When: all(hasAttempt, noOverrideCovers, anyOf(noReady, tipAhead)), Then: func(in In) Decision {
 		asked, backoff := ensureRun(in, RoleWorker)
 		if backoff {
 			return Decision{Why: "waiting for worker restart back-off", Hold: true}
@@ -537,25 +590,22 @@ var TaskRows = []Row[In]{
 		return say("split child of a retro task hit recap: ask the owner whether to drop or go on", []string{key(AskOpenN24, headH(in))})(in)
 	}},
 	{ID: "N25", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: ladderSays(RecapAnswer), Then: func(in In) Decision {
-		return say("the ladder says recap", ensure(in, key(AskOpenRecap, "review")))(in)
+		k := key(AskOpenRecap, "review")
+		if n := len(in.Task.Recaps); n > 0 {
+			k = key(AskOpenRecap, "review", n)
+		}
+		return say("the ladder says recap", ensure(in, k))(in)
 	}},
 	{ID: "N26", WaitsOn: "the engine", Stage: "working", When: all(hasAttempt, anyOf(noPR, all(prOpen, prBehindH))), Then: func(in In) Decision {
-		if unanswered(in) && !in.probe { // "no PR" from a failed read is a guess: wait, so push is not spent blindly
-			return Decision{Why: "GitHub did not answer: wait for a snapshot", Hold: true}
-		}
-		if in.Facts.PR.OtherBase != "" {
-			return say(fmt.Sprintf("PR #%d targets base %q instead of the project base: waiting (run `sheepdog factory task retry %s --why \"<why>\"` to start a new attempt)",
-				in.Facts.PR.Number, in.Facts.PR.OtherBase, in.Task.ID), once(SinceRetry(in.acts()), key(AskWake, "pr_other_base", in.Facts.PR.Number, in.Facts.PR.OtherBase)))(in)
-		}
-		return say("GitHub does not have H", ensure(in, key(AskPushPR, headH(in))))(in)
+		return pushPRDecision(in, unanswered(in), "GitHub does not have H")
 	}},
 	{ID: "N29", WaitsOn: "the reviewer", Stage: "working", When: ladderSays(Review), Then: func(in In) Decision {
 		return say("the ladder says review", n29Asks(in))(in)
 	}},
-	{ID: "N30", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: all(ladderSays(Passed), ownerGateNo), Then: func(in In) Decision {
+	{ID: "N30", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: all(ladderSays(Passed), noOverrideCovers, ownerGateNo), Then: func(in In) Decision {
 		return say("the owner answered no to the gate ask", ensure(in, key(AskOwnerNoRecap, len(in.Task.Recaps))))(in)
 	}},
-	{ID: "N31", WaitsOn: "the owner", Stage: "owner_gate", When: all(ladderSays(Passed), anyOf(hasOpenOwnerAsk, func(in In) bool { return ownerGateApplies(in) && !gateYesCoversH(in) })), Then: func(in In) Decision {
+	{ID: "N31", WaitsOn: "the owner", Stage: "owner_gate", When: all(ladderSays(Passed), noOverrideCovers, anyOf(hasOpenOwnerAsk, func(in In) bool { return ownerGateApplies(in) && !gateYesCoversH(in) })), Then: func(in In) Decision {
 		if !hasOpenOwnerAsk(in) && ownerGateApplies(in) && !gateYesCoversH(in) {
 			return say("owner gate applies: ask the owner to approve H", []string{key(AskOpenGate, headH(in))})(in)
 		}
@@ -612,8 +662,11 @@ var TaskRows = []Row[In]{
 		return say("the base branch has been red past main_red_minutes: tell the oldest held task's worker to merge the base and say ready (or land a fix PR directly)",
 			EnsureRun(in, RoleWorker), ensure(in, key(AskTellBaseRed, spell)), wake)(in)
 	}},
-	{ID: "N36", WaitsOn: "CI", Stage: "ci", Why: WhyCI, When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown)),
+	{ID: "N36", WaitsOn: "CI", Stage: "ci", Why: WhyCI, When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown, overrideCovers)),
 		Then: func(in In) Decision {
+			if overrideCovers(in) {
+				return say("override held: waiting for a readable PR snapshot at H")(in)
+			}
 			// Stands in for the ci_stalled alert until slice 5b builds the alerts table.
 			spell := in.attempt().PendingChecks
 			if checksPend(in) && prHeadIsH(in) && answered(in) && githubAvail(in) &&
@@ -655,6 +708,17 @@ var TaskRows = []Row[In]{
 		p := in.Facts.PR
 		return say("no rule matched", once(in.acts(), key(AskWake, "no_rule_matched", headH(in), p.State, p.Checks, p.Mergeable, in.Facts.TipRel)))(in)
 	}},
+}
+
+func pushPRDecision(in In, wait bool, why string) Decision {
+	if wait && !in.probe { // "no PR" from a failed read is a guess: wait, so push is not spent blindly
+		return Decision{Why: "GitHub did not answer: wait for a snapshot", Hold: true}
+	}
+	if in.Facts.PR.OtherBase != "" {
+		return say(fmt.Sprintf("PR #%d targets base %q instead of the project base: waiting (run `sheepdog factory task retry %s --why \"<why>\"` to start a new attempt)",
+			in.Facts.PR.Number, in.Facts.PR.OtherBase, in.Task.ID), once(SinceRetry(in.acts()), key(AskWake, "pr_other_base", in.Facts.PR.Number, in.Facts.PR.OtherBase)))(in)
+	}
+	return say(why, ensure(in, key(AskPushPR, headH(in))))(in)
 }
 
 func n7Kind(in In) string {

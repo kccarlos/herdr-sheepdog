@@ -12,23 +12,84 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 )
 
-// execRecordAccept is N42's accept by the bar at H. N42 asks it with the
-// merge, so both land in one log line and one state write (design.md 3:
-// "written at H in the same step as the merge").
-func (e *Engine) execRecordAccept(_ context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+// execRecordAccept is N42's accept at H; N19 records Accept{By: "override"}
+// inside execMerge only after MergePR succeeds so call-offs and restarts
+// before MergePR leave no accept record (design.md 3, 4.1 N2, 4.3b).
+func (e *Engine) execRecordAccept(_ context.Context, _ string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
 	a := &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
-	h, rounds := flow.H(*a), []int{}
+	return recordAccept(s.Tasks[ti], a, s.Settings, f, flow.H(*a), false), false, nil
+}
+
+func recordAccept(t flow.Task, a *flow.Attempt, settings flow.Settings, f flow.Facts, h string, byOverride bool) string {
+	rounds := []int{}
 	for _, r := range flow.PassingCovering(*a, h) {
 		rounds = append(rounds, r.N)
 	}
-	if !slices.ContainsFunc(a.Accepts, func(ac flow.Accept) bool { return ac.Head == h }) {
-		a.Accepts = append(a.Accepts, flow.Accept{Head: h, By: "bar", Rounds: rounds})
+	ac := flow.Accept{Head: h, By: "bar", Rounds: rounds}
+	msg := fmt.Sprintf("accepted %s by the bar (rounds %v)", h, rounds)
+	if byOverride {
+		ov := flow.CoveringOverride(*a, h)
+		if ov == nil {
+			return ""
+		}
+		ac.By, ac.Waived, ac.ProofID = "override", overrideWaived(t, *a, settings, f, len(rounds)), ov.ProofID
+		msg = fmt.Sprintf("accepted %s by override (waived %v, proof %s)", h, ac.Waived, ov.ProofID)
 	}
-	return fmt.Sprintf("accepted %s by the bar (rounds %v)", h, rounds), false, nil
+	if !slices.ContainsFunc(a.Accepts, func(x flow.Accept) bool { return x.Head == h }) {
+		a.Accepts = append(a.Accepts, ac)
+	}
+	return msg
 }
 
-// execMerge is N42's merge of the snapshot's PR, squash, pinned to H. Before
-// calling GitHub it reads fresh facts and re-tests N42 (design.md 8).
+func overrideWaived(t flow.Task, a flow.Attempt, s flow.Settings, f flow.Facts, passing int) []string {
+	var w []string
+	for _, c := range []struct {
+		on   bool
+		name string
+	}{
+		{passing < s.ReviewRounds, "review"}, {f.PR.Checks != flow.ChecksGreen, "checks"},
+		{f.PR.Behind || f.PR.BehindUnknown, "behind"}, {f.BaseRed, "base_red"},
+		{f.PR.ReviewRequired, "review_required"}, {f.Worker.State == flow.RunWorking, "worker_working"},
+		{f.TipRel == flow.RelAhead, "unreported_tip"}, {f.LinesTimeout || f.Lines > a.SizeCap, "size_cap"},
+		{t.Gate == flow.GateOwner || t.Kind == flow.TaskKindDesign && s.DesignGate == flow.GateOwner, "owner_gate"},
+	} {
+		if c.on {
+			w = append(w, c.name)
+		}
+	}
+	if len(w) == 0 {
+		w = append(w, "bar")
+	}
+	return w
+}
+
+func otherMergeInFlight(tasks []flow.Task, self int) bool {
+	for i, t := range tasks {
+		if i == self || flow.Ended(t) || t.Parked || (t.LastRow != "N19" && t.LastRow != "N41" && t.LastRow != "N42") {
+			continue
+		}
+		if a := flow.OpenAttempt(t); a != nil {
+			if last := flow.LastAct(flow.SinceRetry(a.Acts), flow.AskMerge+"@"+flow.H(*a)); last != nil && (last.Result == "done" || last.Result == "asked") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func spendCoveringOverrides(a *flow.Attempt, head string) {
+	if a == nil {
+		return
+	}
+	for i := range a.Overrides {
+		if !a.Overrides[i].Spent && flow.Covers(*a, a.Overrides[i].Head, head) {
+			a.Overrides[i].Spent = true
+		}
+	}
+}
+
+// execMerge is N42/N19's merge of the snapshot's PR, squash, pinned to H. Before
+// calling GitHub it reads fresh facts and re-tests N42/N19 (design.md 8, 4.3b).
 func (e *Engine) execMerge(ctx context.Context, id string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
 	t, a := s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
 	h, num := flow.H(*a), cmp.Or(a.PR, f.PR.Number)
@@ -53,15 +114,38 @@ func (e *Engine) execMerge(ctx context.Context, id string, s *flow.State, ti int
 		}
 	}
 	p := e.readPRLocked(gctx, id, s, ti)
+	notDone, dropped := flow.UnmetDeps(s.Tasks[ti], s.Tasks)
 	fresh := flow.Facts{
 		PR: p, Tip: tip, TipRel: rel, TipMergeOnly: tipMO, Lines: lines, LinesTimeout: linesTO,
-		Worker: worker, GitHubUnavailable: e.ghUnavail[id] || s.Project.HasAlert(flow.AlertGitHubUnavailable), BaseRed: f.BaseRed, BaseRedSince: f.BaseRedSince, BaseRedSpell: f.BaseRedSpell,
+		Worker: worker, DepsNotDone: notDone, DepsDropped: dropped, OtherMergeInFlight: otherMergeInFlight(s.Tasks, ti),
+		GitHubUnavailable: e.ghUnavail[id] || s.Project.HasAlert(flow.AlertGitHubUnavailable), BaseRed: f.BaseRed, BaseRedSince: f.BaseRedSince, BaseRedSpell: f.BaseRedSpell,
 	}
-	if r, _ := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[ti], Settings: s.Settings, Facts: fresh, Asks: s.Asks, Now: e.now()}); r.ID != "N42" {
-		return fmt.Sprintf("merge called off on fresh check (row %s)", r.ID), true, nil
+	freshRow, _ := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[ti], Settings: s.Settings, Facts: fresh, Asks: s.Asks, Now: e.now()})
+	if freshRow.ID != "N42" && freshRow.ID != "N19" {
+		return fmt.Sprintf("merge called off on fresh check (row %s)", freshRow.ID), true, nil
 	}
 	num = cmp.Or(num, p.Number)
-	return fmt.Sprintf("asked GitHub to merge PR #%d at %s", num, h), false, e.git.MergePR(gctx, s.Project.Folder, num, h, prBody(t))
+	if err := e.git.MergePR(gctx, s.Project.Folder, num, h, prBody(t)); err != nil {
+		return "", false, err
+	}
+	dec := fmt.Sprintf("asked GitHub to merge PR #%d at %s", num, h)
+	if freshRow.ID == "N19" {
+		if adec := recordAccept(t, a, s.Settings, fresh, h, true); adec != "" {
+			dec = adec + "; " + dec
+		}
+	}
+	return dec, false, nil
+}
+
+// execSpendOverride is N19b: mark covering unspent overrides spent so the next pass returns to normal rules.
+func (e *Engine) execSpendOverride(_ context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	a := flow.OpenAttempt(s.Tasks[ti])
+	if a == nil {
+		return "no open attempt", false, nil
+	}
+	h := flow.H(*a)
+	spendCoveringOverrides(a, h)
+	return fmt.Sprintf("spent override for %s (checks got worse)", h), false, nil
 }
 
 // execMarkDone is N2: done{merged commit} from the snapshot that reads merged.
@@ -70,6 +154,9 @@ func (e *Engine) execMarkDone(_ context.Context, _ string, s *flow.State, ti int
 		return "", false, errors.New("factory: done needs a snapshot that reads merged, with its merge commit")
 	}
 	s.Tasks[ti].Done = &flow.Merged{MergedCommit: f.PR.MergedCommit}
+	if a := flow.OpenAttempt(s.Tasks[ti]); a != nil {
+		spendCoveringOverrides(a, cmp.Or(f.PR.Head, flow.H(*a)))
+	}
 	return fmt.Sprintf("done: PR #%d merged as %s", f.PR.Number, f.PR.MergedCommit), false, nil
 }
 
@@ -163,7 +250,7 @@ func (e *Engine) closeOpenPR(ctx context.Context, folder string, a flow.Attempt,
 		return false, nil
 	}
 	p, _, err := e.git.PRSnapshot(ctx, folder, a.Branch, a.PR)
-	if err != nil || p.State != flow.PROpen {
+	if err != nil || p.State != flow.PROpen && p.OtherBase == "" {
 		return false, err
 	}
 	return true, e.git.ClosePR(ctx, folder, a.PR, note)

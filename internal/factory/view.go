@@ -268,6 +268,14 @@ func taskWhy(t flow.Task, a *flow.Attempt, unmet []string, started bool, stage s
 		return "Worker failed, waiting on the coordinator"
 	case stage == "waiting_on_dep" && len(unmet) > 0:
 		return "Waiting on " + strings.Join(unmet, ", ")
+	case r.ID == "N19b":
+		return "Not merged: checks got worse after the override card was made"
+	case r.ID == "N15" || r.ID == "N19":
+		return "Merging now, by your override"
+	case r.ID == "N16":
+		return "PR conflicts with base; telling worker to merge base"
+	case r.ID == "N17":
+		return "Waiting for another merge in flight"
 	case t.HoldWhy != "":
 		return t.HoldWhy
 	case stage == "working" && revActive(a):

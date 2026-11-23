@@ -137,6 +137,8 @@ type Facts struct {
 	BaseRedWoken bool      `json:"base_red_woken,omitempty"`
 	// SplitFromHadRetro reports whether Task.SplitFrom's parent task already had a retro (N24, plan.md 6.2).
 	SplitFromHadRetro bool `json:"split_from_had_retro,omitempty"`
+	// OtherMergeInFlight reports whether another task in this project currently has a merge in flight (N17, plan.md 7.2).
+	OtherMergeInFlight bool `json:"other_merge_in_flight,omitempty"`
 }
 
 // In is what a row sees: the task's records, the settings, the facts, the
@@ -186,6 +188,16 @@ func Covers(a Attempt, x, h string) bool {
 		}
 	}
 	return x == h
+}
+
+// CoveringOverride returns the newest unspent override in a that covers h, or nil (design.md 3, 4.3b).
+func CoveringOverride(a Attempt, h string) *Override {
+	for i := len(a.Overrides) - 1; i >= 0; i-- {
+		if !a.Overrides[i].Spent && a.Overrides[i].Head != "" && Covers(a, a.Overrides[i].Head, h) {
+			return &a.Overrides[i]
+		}
+	}
+	return nil
 }
 
 // newestCovering is the newest round that covers h, or nil.

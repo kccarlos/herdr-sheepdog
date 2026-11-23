@@ -78,7 +78,7 @@ func StatusViewOf(s flow.State, logs []LogLine) []TaskStatus {
 		}
 		ts := TaskStatus{ID: tv.Ref, Title: tv.Title, Stage: tv.Stage, Why: why}
 		if l, ok := lastRow[tv.Ref]; ok {
-			ts.Rule, ts.Why, ts.At, ts.Stale = l.Rule, tv.WhyWaiting, l.At, taskRows[l.Rule].Stage != tv.Stage && (l.Rule != "N31" || tv.Stage != "owner_answer") && !strings.Contains(" "+strings.Join(l.Asked, " ")+" ", " "+flow.AskWake+"@worker_failed ")
+			ts.Rule, ts.Why, ts.At, ts.Stale = l.Rule, tv.WhyWaiting, l.At, taskRows[l.Rule].Stage != tv.Stage && tv.Stage != "owner_answer" && !strings.Contains(" "+strings.Join(l.Asked, " ")+" ", " "+flow.AskWake+"@worker_failed ")
 		}
 		out = append(out, ts)
 	}

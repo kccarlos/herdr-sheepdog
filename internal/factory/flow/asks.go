@@ -139,7 +139,8 @@ func OpenOwnerAskForTask(asks []Ask, taskID string) *Ask {
 	var fallback *Ask
 	for i := range asks {
 		a := &asks[i]
-		if a.Task != taskID || a.Status != AskStatusOpen || !a.Gated {
+		named := taskID != "" && (a.Task == taskID || a.Kind == KindOverride && slices.ContainsFunc(a.Targets, func(t OverrideTarget) bool { return t.Task == taskID }))
+		if !named || a.Status != AskStatusOpen || !a.Gated {
 			continue
 		}
 		if a.Kind == KindGate {
@@ -251,4 +252,110 @@ func FormatAskCommand(a Ask) string {
 		cmd += " @ " + a.Head[:min(len(a.Head), 7)]
 	}
 	return cmd
+}
+
+// AskOverrideResult is the done-once act prefix recorded in the first target
+// task's Task.Acts when an override result line fires (design.md 4.3b, OF1).
+const AskOverrideResult = "override_result"
+
+// OverrideResultEvent is one owner result line ready to fire for an answered-Yes
+// override card (design.md 4.3b OR1–OR6, OF1–OF5; 12.1).
+type OverrideResultEvent struct {
+	AskID string
+	Task  string // first target task ID whose Task.Acts records override_result@<ask_id>
+	Rule  string // OF2, OF3, or OF4
+	Text  string
+}
+
+// OverrideResult derives pending owner result lines over stored state (design.md 4.3b, 12.1).
+func OverrideResult(st State, now time.Time) []OverrideResultEvent {
+	byID := make(map[string]Task, len(st.Tasks))
+	for _, t := range st.Tasks {
+		byID[t.ID] = t
+	}
+	grace := time.Duration(st.Settings.ChecksGraceMinutes) * time.Minute
+	var out []OverrideResultEvent
+	for _, a := range st.Asks {
+		if a.Kind != KindOverride || a.Status != AskStatusAnswered || a.AnsweredBy != "owner" || a.Answer != OverrideOptionMerge || len(a.Targets) == 0 {
+			continue
+		}
+		if first, ok := byID[a.Targets[0].Task]; !ok || Done(first.Acts, AskOverrideResult+"@"+a.ID) {
+			continue
+		}
+		var merged, clauses []string
+		waiting := map[string][]string{}
+		for _, tgt := range a.Targets {
+			t, exists := byID[tgt.Task]
+			att, ov, open := overrideTargetAttempt(t, tgt.Head, a.ProofID)
+			switch {
+			case !exists:
+				clauses = append(clauses, tgt.Task+" not merged: stopped")
+			case t.Done != nil:
+				merged = append(merged, tgt.Task)
+			case ov != nil && ov.Spent:
+				clauses = append(clauses, tgt.Task+" not merged: checks got worse after the card was made")
+			case att != nil && open && overrideConflict(t, *att, tgt.Head, a.AnsweredAt):
+				clauses = append(clauses, tgt.Task+" not merged: conflict with base")
+			case att != nil && open && !Covers(*att, tgt.Head, H(*att)):
+				clauses = append(clauses, tgt.Task+" not merged: newer commit")
+			case att == nil || !open || Ended(t) || t.Parked || t.LastRow == "N4" || t.LastRow == "N5" || t.LastRow == "N7":
+				clauses = append(clauses, tgt.Task+" not merged: stopped")
+			default:
+				notDone, dropped := UnmetDeps(t, st.Tasks)
+				unmet := append(notDone, dropped...)
+				waiting[tgt.Task] = unmet
+				clauses = append(clauses, tgt.Task+map[bool]string{true: " waiting on " + strings.Join(unmet, ", "), false: " waiting"}[len(unmet) > 0])
+			}
+		}
+		if rule := overrideResultRule(waiting, a.AnsweredAt, now, grace); rule != "" {
+			if len(merged) > 0 {
+				clauses = append([]string{strings.Join(merged, ", ") + " merged"}, clauses...)
+			}
+			out = append(out, OverrideResultEvent{AskID: a.ID, Task: a.Targets[0].Task, Rule: rule, Text: strings.Join(clauses, "; ")})
+		}
+	}
+	return out
+}
+
+func overrideTargetAttempt(t Task, head, proofID string) (*Attempt, *Override, bool) {
+	oa := OpenAttempt(t)
+	for i := len(t.Attempts) - 1; i >= 0; i-- {
+		for j := len(t.Attempts[i].Overrides) - 1; j >= 0; j-- {
+			if o := &t.Attempts[i].Overrides[j]; o.Head == head && (proofID == "" || o.ProofID == proofID) {
+				return &t.Attempts[i], o, oa != nil && i == len(t.Attempts)-1
+			}
+		}
+	}
+	return nil, nil, false
+}
+
+func overrideConflict(t Task, a Attempt, cardHead string, answeredAt time.Time) bool {
+	if t.LastRow == "N16" && Covers(a, cardHead, H(a)) {
+		return true
+	}
+	return slices.ContainsFunc(a.Acts, func(act Act) bool {
+		h, ok := strings.CutPrefix(act.Key, AskTellConflict+"@")
+		return ok && act.Result == "done" && !act.At.Before(answeredAt) && Covers(a, cardHead, h)
+	})
+}
+
+func overrideResultRule(waiting map[string][]string, answeredAt, now time.Time, grace time.Duration) string {
+	if len(waiting) == 0 {
+		return "OF2"
+	}
+	allExt := true
+	for _, unmet := range waiting {
+		if len(unmet) == 0 || slices.ContainsFunc(unmet, func(dep string) bool { _, ok := waiting[dep]; return ok }) {
+			allExt = false
+			break
+		}
+	}
+	switch {
+	case allExt:
+		return "OF3"
+	case !answeredAt.IsZero() && now.Sub(answeredAt) >= grace:
+		return "OF4"
+	default:
+		return ""
+	}
 }

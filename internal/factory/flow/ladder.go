@@ -14,9 +14,10 @@ const (
 // roundBase is the number of the first round (design.md 3: round{n}).
 const roundBase = 1
 
-// LadderRows is slice 2's review ladder: L7, L8, L9, L10, L12 and L13 of design.md 4.6.
+// LadderRows is the review ladder: L1, L7, L8, L9, L10, L12 and L13 of design.md 4.6.
 // A row's Decision.Why is its answer; WaitsOn is who that answer waits on.
 var LadderRows = []Row[In]{
+	{ID: "L1", WaitsOn: "the engine", Stage: "ci", Why: WhyCI, When: overrideCovers, Then: answer(Passed)},
 	{ID: "L7", WaitsOn: "the reviewer", Stage: "working", When: noRoundCovers, Then: answer(Review)},
 	{ID: "L8", WaitsOn: "the reviewer", Stage: "working", When: all(coveringIs(VerdictPass), morePassesNeeded), Then: answer(Review)},
 	{ID: "L9", WaitsOn: "the engine", Stage: "ci", Why: WhyCI, When: coveringIs(VerdictPass), Then: answer(Passed)},
