@@ -4,17 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 )
 
 // TestPlanEstimateRequiredAndLimited: estimate_lines is required and a task
@@ -333,70 +333,54 @@ func TestAmendEstimateSizeCapRules(t *testing.T) {
 	}
 }
 
-// fakeGitDiff prepends a git wrapper to PATH that sleeps on `diff` while slow
-// exists, fails on `diff` while fail exists, and delegates everything else to
-// the real git binary.
-func fakeGitDiff(t *testing.T) (slow, fail string) {
+// fakeDiffExec routes engine git calls through an hctest.Server whose `diff`
+// invocations deterministically time out while slow is true, fail while fail is
+// true, and otherwise delegate to hctest.GitExec.
+func fakeDiffExec(t *testing.T, engs ...*Engine) (slow, fail *atomic.Bool, calls *atomic.Int32) {
 	t.Helper()
-	realGit, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatal(err)
+	slow, fail, calls = &atomic.Bool{}, &atomic.Bool{}, &atomic.Int32{}
+	srv := hctest.New(t)
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if len(p.Argv) > 1 && p.Argv[0] == "git" && p.Argv[1] == "diff" {
+			calls.Add(1)
+			if slow.Load() {
+				return hc.ExecResult{TimedOut: true}, nil
+			}
+			if fail.Load() {
+				code := 1
+				return hc.ExecResult{Code: &code, Stderr: []byte("git diff failed\n")}, nil
+			}
+		}
+		return hctest.GitExec(p)
 	}
-	dir := t.TempDir()
-	slow, fail = filepath.Join(dir, "slow"), filepath.Join(dir, "fail")
-	script := "#!/bin/sh\n" +
-		"for arg in \"$@\"; do\n" +
-		"  if [ \"$arg\" = \"diff\" ]; then\n" +
-		"    echo diff >> " + strconv.Quote(slow+".calls") + "\n" +
-		"    if [ -f " + strconv.Quote(slow) + " ]; then exec sleep 3; fi\n" +
-		"    if [ -f " + strconv.Quote(fail) + " ]; then echo 'git diff failed' >&2; exit 1; fi\n" +
-		"  fi\n" +
-		"done\n" +
-		"exec " + strconv.Quote(realGit) + " \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o700); err != nil {
-		t.Fatal(err)
+	for _, eng := range engs {
+		eng.git = world.NewGit(hc.NewClient(srv.Path), eng.now, func(event, folder string) {
+			eng.logEvent(event, map[string]string{"folder": folder})
+		})
 	}
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
-	return slow, fail
+	return slow, fail, calls
 }
 
 // TestChangedLinesTimeoutOpensSizeRecap: a changed-lines read that times out
 // counts as over size_cap (N12 opens a size recap) instead of skipping the
 // pass, and is never cached so after continue a normal read opens no second
 // recap; a non-timeout error still skips the pass.
-func diffCalls(t *testing.T, slow string) int {
-	t.Helper()
-	b, err := os.ReadFile(slow + ".calls")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.Count(string(b), "\n")
-}
-
 func TestChangedLinesTimeoutOpensSizeRecap(t *testing.T) {
-	old := lockGitTimeout
-	lockGitTimeout = 500 * time.Millisecond
-	t.Cleanup(func() { lockGitTimeout = old })
-
 	lErr := newLanding(t)
 	l := newLanding(t).withTokens()
 	writePRJSON(t, l.gh, "view.json", l.c1, "[]")
-	slow, fail := fakeGitDiff(t)
+	slow, fail, calls := fakeDiffExec(t, lErr.eng, l.eng)
 
 	// Non-timeout error skips the pass and opens no recap.
-	if err := os.WriteFile(fail, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	fail.Store(true)
 	lErr.pass()
-	_ = os.Remove(fail)
+	fail.Store(false)
 	if rc := lErr.state().Tasks[0].Recaps; len(rc) != 0 {
 		t.Fatalf("non-timeout error opened recap: %+v", rc)
 	}
 
 	// Timeout opens a size recap via N12, then N6 wakes the coordinator and tells the worker.
-	if err := os.WriteFile(slow, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	slow.Store(true)
 	l.pass() // N12
 	l.pass() // N6: wakes coordinator, tells worker
 	st := l.state()
@@ -411,11 +395,11 @@ func TestChangedLinesTimeoutOpensSizeRecap(t *testing.T) {
 	}
 
 	// Once git diff recovers, continue + next pass must read again and open no second recap.
-	_ = os.Remove(slow)
-	before := diffCalls(t, slow)
+	slow.Store(false)
+	before := calls.Load()
 	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"continue","why":"transient stall"}`, "")
 	l.pass()
-	if got := diffCalls(t, slow) - before; got != 2 {
+	if got := calls.Load() - before; got != 2 {
 		t.Errorf("continue and next pass ran git diff %d times, want 2", got)
 	}
 	if rc := l.state().Tasks[0].Recaps; len(rc) != 1 || flow.OpenRecap(l.state().Tasks[0]) != nil {
@@ -429,14 +413,12 @@ func TestChangedLinesTimeoutOpensSizeRecap(t *testing.T) {
 func TestContinueWhenLineReadFails(t *testing.T) {
 	l1 := newLanding(t).withTokens()
 	l2 := newLanding(t).withTokens()
-	_, fail := fakeGitDiff(t)
+	_, fail, _ := fakeDiffExec(t, l1.eng, l2.eng)
 
 	// 1. With a last good reading (1 line > SizeCap 0): raises from last good reading.
 	l1.edit(func(s *flow.State) { s.Tasks[0].Attempts[0].SizeCap = 0 })
 	l1.pass() // caches good reading (1 line) and opens size recap
-	if err := os.WriteFile(fail, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	fail.Store(true)
 	if err := l1.eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T1","choice":"continue","why":"give room"}`)); err != nil {
 		t.Fatalf("continue with failed line read returned error: %v", err)
 	}
@@ -468,27 +450,52 @@ func TestContinueWhenLineReadFails(t *testing.T) {
 // does not starve SendRun of context, so the worker still gets the continue
 // message; if SendRun itself fails, continue is not committed.
 func TestContinueUnderGitTimeout(t *testing.T) {
-	old := lockGitTimeout
-	lockGitTimeout = 500 * time.Millisecond
-	t.Cleanup(func() { lockGitTimeout = old })
-
 	l := newLanding(t).withTokens()
 	writePRJSON(t, l.gh, "view.json", l.c1, "[]")
-	slow, _ := fakeGitDiff(t)
-	if err := os.WriteFile(slow, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	slow, _, _ := fakeDiffExec(t, l.eng)
+	slow.Store(true)
 	l.pass() // N12: timeout opens size recap
 	l.pass() // N6: wakes coordinator, tells worker to stop
 	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 1 || !strings.Contains(sends[0], "Stop now") {
 		t.Fatalf("worker sends before continue = %q, want one stop", sends)
 	}
 
-	// Keep slow set during continue: ChangedLines times out, SendRun must still succeed.
+	// Shorten lockGitTimeout and block the single git diff call until ctx is done,
+	// stubbing remoteBaseCommit so ChangedLines reaches diff without spawning git.
+	// This proves delivery after a timed-out diff under a nearly exhausted shared context.
 	l.finishWorkerTurn()
-	before := diffCalls(t, slow)
+	base := l.state().Tasks[0].Attempts[0].BaseCommit
+	old := lockGitTimeout
+	lockGitTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { lockGitTimeout = old })
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	srv := hctest.New(t)
+	var continueCalls atomic.Int32
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if len(p.Argv) > 1 && p.Argv[0] == "git" {
+			code := 0
+			switch {
+			case slices.Equal(p.Argv, []string{"git", "remote", "get-url", "origin"}):
+				return hc.ExecResult{Code: &code, Stdout: []byte("https://github.com/acme/demo.git\n")}, nil
+			case slices.Equal(p.Argv, []string{"git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"}):
+				return hc.ExecResult{Code: &code, Stdout: []byte("refs/remotes/origin/main\n")}, nil
+			case slices.Equal(p.Argv, []string{"git", "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main^{commit}"}):
+				return hc.ExecResult{Code: &code, Stdout: []byte(base + "\n")}, nil
+			case p.Argv[1] == "diff":
+				continueCalls.Add(1)
+				<-ctx.Done()
+				return hc.ExecResult{TimedOut: true}, nil
+			}
+		}
+		return hctest.GitExec(p)
+	}
+	l.eng.git = world.NewGit(hc.NewClient(srv.Path), l.eng.now, func(event, folder string) {
+		l.eng.logEvent(event, map[string]string{"folder": folder})
+	})
 	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"continue","why":"git is slow"}`, "")
-	if got := diffCalls(t, slow) - before; got != 1 {
+	lockGitTimeout = old // the rest of the test runs real git; give it the normal limit
+	if got := continueCalls.Load(); got != 1 {
 		t.Errorf("continue ran git diff %d times, want 1", got)
 	}
 	sends := sendsTo(t, l.srv.Requests(), l.worker)
@@ -501,7 +508,6 @@ func TestContinueUnderGitTimeout(t *testing.T) {
 	}
 
 	// If SendRun fails, continue returns an error and does not commit the decision.
-	_ = os.Remove(slow)
 	lFail := newLanding(t).withTokens()
 	lFail.edit(func(s *flow.State) {
 		s.Tasks[0].Attempts[0].RunID = "missing-worker"
