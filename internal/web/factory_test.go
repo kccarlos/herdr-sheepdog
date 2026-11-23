@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -281,5 +282,80 @@ func TestFactoryViewRoutes(t *testing.T) {
 		if w := get(srvNil, path); w.Code != http.StatusServiceUnavailable {
 			t.Fatalf("nil factory %s = %d, want 503", path, w.Code)
 		}
+	}
+}
+
+// TestFactoryStatusLexicalOnly checks PR 5b.9 round 3: GET /api/factory/status
+// runs inside the launchd daemon and must use only the lexical underFolder
+// check without calling filepath.EvalSymlinks on project folders.
+func TestFactoryStatusLexicalOnly(t *testing.T) {
+	dir := t.TempDir()
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	elog, err := eventlog.Open(dir, eventlog.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = elog.Close() })
+	st, err := state.Open(filepath.Join(dir, "state.json"), state.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	paths := factory.Paths{DataDir: dir}
+	missingRepo := filepath.Join(realDir, "unmounted", "repo")
+	if err := factory.SaveState(paths.State("proj-missing"), flow.State{
+		Seq:      1,
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "proj-missing", Folder: missingRepo, Started: true},
+		Tasks:    []flow.Task{{ID: "T1", Title: "feat: unmounted"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	realRepo := filepath.Join(realDir, "real-repo")
+	if err := os.MkdirAll(realRepo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linkRepo := filepath.Join(realDir, "link-repo")
+	if err := os.Symlink(realRepo, linkRepo); err != nil {
+		t.Fatal(err)
+	}
+	if err := factory.SaveState(paths.State("proj-real"), flow.State{
+		Seq:      1,
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "proj-real", Folder: realRepo, Started: true},
+		Tasks:    []flow.Task{{ID: "T2", Title: "feat: real"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	eng := factory.New(paths, nil)
+	srv, err := New(Deps{Log: elog, Store: st, DataDir: dir, Factory: eng})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	getStatus := func(folder string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, "/api/factory/status?folder="+folder+"&data_dir="+dir, nil)
+		r.RemoteAddr, r.Host = "127.0.0.1:5000", "127.0.0.1:7777"
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, r)
+		return w
+	}
+
+	// Lexical subfolder match succeeds even when EvalSymlinks would fail on an unmounted path.
+	wMissing := getStatus(filepath.Join(missingRepo, "internal", "pkg"))
+	if wMissing.Code != http.StatusOK || !strings.Contains(wMissing.Body.String(), `"T1"`) {
+		t.Fatalf("status for lexical subfolder of unmounted repo = %d %s, want 200 with T1", wMissing.Code, wMissing.Body.String())
+	}
+
+	// Uncanonicalized symlink path must not be resolved by the daemon.
+	wLink := getStatus(linkRepo)
+	if wLink.Code == http.StatusOK || !strings.Contains(wLink.Body.String(), "no factory project") {
+		t.Fatalf("status for symlink %q = %d %s, want non-200 no factory project", linkRepo, wLink.Code, wLink.Body.String())
 	}
 }

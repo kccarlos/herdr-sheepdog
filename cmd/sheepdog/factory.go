@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -67,7 +68,7 @@ func runFactory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	case "start", "stop":
 		return runFactoryCmd(ctx, args[0], args[1:], stdout, stderr)
 	case "status":
-		return runFactoryStatus(args[1:], stdout, stderr)
+		return runFactoryStatus(ctx, args[1:], stdout, stderr)
 	case "log":
 		return runFactoryLog(ctx, args[1:], stdout, stderr)
 	case "plan":
@@ -156,9 +157,10 @@ func runFactoryCmd(ctx context.Context, sub string, args []string, stdout, stder
 	return 0
 }
 
-// runFactoryStatus prints one line per task from stored state and log.jsonl
-// without calling hc, git or gh; works when the daemon is stopped.
-func runFactoryStatus(args []string, stdout, stderr io.Writer) int {
+// runFactoryStatus prints one line per task from the running daemon (including
+// unpersisted in-memory alerts) or falls back to stored state and log.jsonl
+// when the daemon is stopped.
+func runFactoryStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := factoryFlags("factory status", stderr)
 	configPath := fs.String("config", "", "config file")
 	if err := fs.Parse(reorderFactoryDoctorArgs(args)); err != nil {
@@ -176,7 +178,16 @@ func runFactoryStatus(args []string, stdout, stderr io.Writer) int {
 	cfg, err := config.Load(*configPath)
 	var tasks []factory.TaskStatus
 	if err == nil {
-		tasks, err = factory.ProjectStatus(factory.Paths{DataDir: cfg.DataDir}, folder)
+		queryFolder := folder
+		if queryFolder != "" {
+			queryFolder = canonicalFolder(queryFolder)
+		}
+		var resp struct{ Tasks []factory.TaskStatus }
+		if getJSON(ctx, daemon.LocalURL(cfg.Web.Bind, cfg.Web.Port), "/api/factory/status?"+url.Values{"folder": {queryFolder}, "data_dir": {cfg.DataDir}}.Encode(), &resp) == nil {
+			tasks = resp.Tasks
+		} else {
+			tasks, err = factory.ProjectStatus(factory.Paths{DataDir: cfg.DataDir}, folder)
+		}
 	}
 	if err != nil {
 		fprintf(stderr, "sheepdog factory status: %v\n", err)
@@ -618,6 +629,27 @@ func resolveTargetFolder(raw, home string) string {
 		return filepath.Join(wd, f)
 	}
 	return filepath.Clean(f)
+}
+
+// canonicalFolder resolves symlinks on path in the owner's login session,
+// retaining any missing suffix below an existing directory.
+func canonicalFolder(path string) string {
+	for cur, tail := filepath.Clean(path), ""; ; {
+		if real, err := filepath.EvalSymlinks(cur); err == nil {
+			if tail == "" {
+				return real
+			}
+			return filepath.Join(real, tail)
+		} else if _, lerr := os.Lstat(cur); lerr == nil || !os.IsNotExist(lerr) {
+			return path
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return path
+		}
+		tail = filepath.Join(filepath.Base(cur), tail)
+		cur = parent
+	}
 }
 
 func resolveFactoryConfig(explicitSocket, configPath, home string) (socket, dataDir string, badCfg *onboard.Result) {

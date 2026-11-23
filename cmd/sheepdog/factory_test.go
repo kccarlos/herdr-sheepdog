@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,14 +17,19 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
+	"github.com/kccarlos/herdr-sheepdog/internal/state"
+	"github.com/kccarlos/herdr-sheepdog/internal/web"
 )
 
 // stubStartChecks replaces the start checks, so no test calls the real gh or claude.
@@ -1177,4 +1183,308 @@ func setFactoryGitSocket(t *testing.T) {
 	srv := hctest.New(t)
 	srv.OnExec = hctest.GitExec
 	t.Setenv("HC_SOCKET", srv.Path)
+}
+
+// TestFactoryStatusDaemonInMemoryDiskAlert checks PR 5b.9 round 2 (Blocker #1):
+// when a daemon is running and its Engine holds an unpersisted in-memory disk
+// alert (store writes fail so state.json does not have the alert), `sheepdog
+// factory status` queries the running daemon and displays the disk alert; when
+// the daemon is stopped, it falls back to offline ProjectStatus.
+func TestFactoryStatusDaemonInMemoryDiskAlert(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+
+	dataDir := filepath.Join(home, "data")
+	paths := factory.Paths{DataDir: dataDir}
+	repo := filepath.Join(home, "repo")
+	if b, err := exec.Command("git", "init", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, b)
+	}
+	if b, err := exec.Command("git", "-C", repo, "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "--allow-empty", "-m", "chore: init").CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v: %s", err, b)
+	}
+
+	hcSrv := hctest.New(t)
+	hcSrv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		argv := p.Argv
+		if len(argv) >= 5 && filepath.Base(argv[0]) == "sh" && argv[1] == "-c" && strings.Contains(argv[2], "<SD_DIR>") {
+			zero := 0
+			target := argv[len(argv)-1]
+			return hc.ExecResult{Code: &zero, Stdout: []byte("<SD_DIR>" + target + "</SD_DIR>\n")}, nil
+		}
+		if len(argv) >= 3 && filepath.Base(argv[0]) == "df" && argv[1] == "-kP" {
+			zero := 0
+			target := filepath.Clean(argv[2])
+			cleanData := filepath.Clean(dataDir)
+			if target == cleanData || strings.HasPrefix(target, cleanData+string(filepath.Separator)) {
+				return hc.ExecResult{
+					Code:   &zero,
+					Stdout: []byte("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk2 1000 950 50 95% /Volumes/DataVol\n"),
+				}, nil
+			}
+			return hc.ExecResult{
+				Code:   &zero,
+				Stdout: []byte("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk1 1000 400 600 40% /Volumes/ProjectVol\n"),
+			}, nil
+		}
+		return hctest.GitExec(p)
+	}
+
+	eng := factory.New(paths, hc.NewClient(hcSrv.Path))
+	eng.PassInterval = 20 * time.Millisecond
+	if err := eng.Start(repo, "Verify daemon status", 2); err != nil {
+		t.Fatalf("Engine.Start: %v", err)
+	}
+
+	projRoot := filepath.Join(dataDir, "factory", "projects")
+	entries, err := os.ReadDir(projRoot)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("project dirs = %+v, err=%v", entries, err)
+	}
+	projDir := filepath.Join(projRoot, entries[0].Name())
+	logFile := paths.Log(entries[0].Name())
+	if err := os.Chmod(logFile, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(projDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(projDir, 0o700)
+		_ = os.Chmod(logFile, 0o600)
+	})
+
+	engCtx, engCancel := context.WithCancel(context.Background())
+	engDone := make(chan struct{})
+	go func() {
+		defer close(engDone)
+		eng.Run(engCtx)
+	}()
+	t.Cleanup(func() {
+		engCancel()
+		<-engDone
+	})
+
+	waitFor(t, func() bool {
+		rows, err := eng.ProjectStatus(repo)
+		if err != nil {
+			return false
+		}
+		for _, ts := range rows {
+			if ts.ID == "ALERT" && ts.Title == "disk" {
+				return true
+			}
+		}
+		return false
+	})
+
+	if raw, err := os.ReadFile(paths.State(entries[0].Name())); err != nil {
+		t.Fatal(err)
+	} else if strings.Contains(string(raw), `"disk"`) {
+		t.Fatalf("expected disk alert to stay unpersisted in memory, but state.json contains it:\n%s", raw)
+	}
+
+	webDir := t.TempDir()
+	elog, err := eventlog.Open(webDir, eventlog.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = elog.Close() })
+	st, err := state.Open(filepath.Join(webDir, "state.json"), state.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	tlsID, err := web.LoadTLSIdentity("", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	webSrv, err := web.New(web.Deps{Log: elog, Store: st, DataDir: webDir, TLS: tlsID, Factory: eng})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := webSrv.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	srvCtx, srvCancel := context.WithCancel(context.Background())
+	srvDone := make(chan error, 1)
+	go func() { srvDone <- webSrv.Serve(srvCtx, 100*time.Millisecond) }()
+	stopSrv := func() {
+		srvCancel()
+		select {
+		case <-srvDone:
+		case <-time.After(5 * time.Second):
+		}
+	}
+	t.Cleanup(stopSrv)
+
+	_, portStr, err := net.SplitHostPort(webSrv.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgFile := filepath.Join(home, "config.toml")
+	cfgBody := fmt.Sprintf("data_dir = %q\n\n[web]\nbind = \"127.0.0.1\"\nport = %s\n", dataDir, portStr)
+	if err := os.WriteFile(cfgFile, []byte(cfgBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, args := range [][]string{
+		{"factory", "status", repo, "--config", cfgFile},
+		{"factory", "status", "--config", cfgFile},
+	} {
+		var out, errBuf bytes.Buffer
+		code := run(context.Background(), args, &out, &errBuf)
+		if code != 0 {
+			t.Fatalf("%v code=%d stderr=%s", args, code, errBuf.String())
+		}
+		if !strings.Contains(out.String(), "ALERT") || !strings.Contains(out.String(), "disk") || !strings.Contains(out.String(), "/Volumes/DataVol") {
+			t.Fatalf("%v did not show in-memory disk alert from running daemon:\n%s", args, out.String())
+		}
+	}
+
+	// When the daemon is stopped, `sheepdog factory status` falls back to offline state.
+	stopSrv()
+	var offOut, offErr bytes.Buffer
+	if code := run(context.Background(), []string{"factory", "status", repo, "--config", cfgFile}, &offOut, &offErr); code != 0 {
+		t.Fatalf("offline fallback status code=%d stderr=%s", code, offErr.String())
+	}
+	if !strings.Contains(offOut.String(), "no tasks yet") {
+		t.Fatalf("offline fallback output = %q, want no tasks yet", offOut.String())
+	}
+}
+
+// TestFactoryStatusCanonicalizesSymlinkBeforeDaemonRequest checks PR 5b.9 round 3:
+// `sheepdog factory status` canonicalizes the folder in the login session before
+// querying GET /api/factory/status, so a symlinked folder still finds its project.
+func TestFactoryStatusCanonicalizesSymlinkBeforeDaemonRequest(t *testing.T) {
+	home := t.TempDir()
+	realHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+
+	dataDir := filepath.Join(home, "data")
+	paths := factory.Paths{DataDir: dataDir}
+	realRepo := filepath.Join(realHome, "real-repo")
+	realSub := filepath.Join(realRepo, "sub", "dir")
+	if err := os.MkdirAll(realSub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linkRepo := filepath.Join(home, "link-repo")
+	if err := os.Symlink(realRepo, linkRepo); err != nil {
+		t.Fatal(err)
+	}
+	linkSub := filepath.Join(linkRepo, "sub", "dir")
+
+	if err := factory.SaveState(paths.State("proj-sym"), flow.State{
+		Seq:      1,
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "proj-sym", Folder: realRepo, Started: true},
+		Tasks:    []flow.Task{{ID: "T1", Title: "feat: symlink status"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	webDir := t.TempDir()
+	elog, err := eventlog.Open(webDir, eventlog.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = elog.Close() })
+	st, err := state.Open(filepath.Join(webDir, "state.json"), state.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	eng := factory.New(paths, nil)
+	tlsID, err := web.LoadTLSIdentity("", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	webSrv, err := web.New(web.Deps{Log: elog, Store: st, DataDir: webDir, TLS: tlsID, Factory: eng})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := webSrv.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	srvCtx, srvCancel := context.WithCancel(context.Background())
+	srvDone := make(chan error, 1)
+	go func() { srvDone <- webSrv.Serve(srvCtx, 100*time.Millisecond) }()
+	t.Cleanup(func() {
+		srvCancel()
+		select {
+		case <-srvDone:
+		case <-time.After(5 * time.Second):
+		}
+	})
+
+	var mu sync.Mutex
+	var gotFolders []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/factory/status" {
+			mu.Lock()
+			gotFolders = append(gotFolders, r.URL.Query().Get("folder"))
+			mu.Unlock()
+		}
+		req, err := http.NewRequestWithContext(r.Context(), r.Method, "http://"+webSrv.Addr()+r.URL.RequestURI(), nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer func() { _ = resp.Body.Close() }()
+		for k, vals := range resp.Header {
+			for _, v := range vals {
+				w.Header().Add(k, v)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
+	}))
+	t.Cleanup(ts.Close)
+
+	_, portStr, err := net.SplitHostPort(ts.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgFile := filepath.Join(home, "config.toml")
+	cfgBody := fmt.Sprintf("data_dir = %q\n\n[web]\nbind = \"127.0.0.1\"\nport = %s\n", dataDir, portStr)
+	if err := os.WriteFile(cfgFile, []byte(cfgBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		arg  string
+		want string
+	}{
+		{linkRepo, realRepo},
+		{linkSub, realSub},
+	}
+	for i, tc := range cases {
+		var out, errBuf bytes.Buffer
+		code := run(context.Background(), []string{"factory", "status", tc.arg, "--config", cfgFile}, &out, &errBuf)
+		if code != 0 {
+			t.Fatalf("status(%q) code=%d stderr=%s", tc.arg, code, errBuf.String())
+		}
+		if !strings.Contains(out.String(), "T1") {
+			t.Fatalf("status(%q) output = %q, want T1", tc.arg, out.String())
+		}
+		mu.Lock()
+		got := gotFolders[i]
+		mu.Unlock()
+		if got != tc.want {
+			t.Fatalf("daemon received folder=%q for %q, want canonical %q", got, tc.arg, tc.want)
+		}
+	}
 }

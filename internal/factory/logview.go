@@ -94,18 +94,41 @@ func StatusViewOf(s flow.State, logs []LogLine) []TaskStatus {
 // started/stored project when folder is empty). It makes no hc, git or gh calls
 // and works when the daemon is stopped.
 func ProjectStatus(paths Paths, folder string) ([]TaskStatus, error) {
-	id, err := findStoredProject(paths, strings.TrimSpace(folder))
+	return (&Engine{Paths: paths}).ProjectStatus(folder)
+}
+
+// ProjectStatus returns status rows for folder, merging any active in-memory
+// alerts (such as an unpersisted disk ENOSPC alert) with stored state.
+func (e *Engine) ProjectStatus(folder string) ([]TaskStatus, error) {
+	return e.projectStatus(folder, underFolderLocal)
+}
+
+// ProjectStatusLexical returns status rows for folder using only lexical path
+// matching (underFolder), without calling EvalSymlinks on project folders.
+func (e *Engine) ProjectStatusLexical(folder string) ([]TaskStatus, error) {
+	return e.projectStatus(folder, underFolder)
+}
+
+func (e *Engine) projectStatus(folder string, match func(root, target string) bool) ([]TaskStatus, error) {
+	id, err := findStoredProjectWith(e.Paths, strings.TrimSpace(folder), match)
 	if err != nil {
 		return nil, err
 	}
-	s, logs, err := (&Engine{Paths: paths}).loadProjectCopy(id)
+	s, logs, err := e.loadProjectCopy(id)
 	if err != nil {
 		return nil, err
 	}
+	e.mu.Lock()
+	e.mergeMemAlertsLocked(id, &s)
+	e.mu.Unlock()
 	return StatusViewOf(s, logs), nil
 }
 
 func findStoredProject(paths Paths, target string) (string, error) {
+	return findStoredProjectWith(paths, target, underFolderLocal)
+}
+
+func findStoredProjectWith(paths Paths, target string, match func(root, target string) bool) (string, error) {
 	dir := filepath.Join(paths.DataDir, "factory", "projects")
 	if err := guardTestPath(dir); err != nil {
 		return "", err
@@ -130,7 +153,7 @@ func findStoredProject(paths Paths, target string) (string, error) {
 			continue
 		}
 		if target != "" {
-			if ent.Name() == target || underFolderLocal(s.Project.Folder, target) {
+			if ent.Name() == target || match(s.Project.Folder, target) {
 				return ent.Name(), nil
 			}
 			continue

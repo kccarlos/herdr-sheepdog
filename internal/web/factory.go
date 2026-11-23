@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -78,6 +79,15 @@ func (s *Server) handleFactoryView(kind string) http.HandlerFunc {
 			v = map[string]any{"protocol": 1, "projects": append([]factory.ProjectView{}, s.deps.Factory.Projects()...)}
 		case "graph":
 			v, err = s.deps.Factory.Graph(id)
+		case "status":
+			e, ok := s.deps.Factory.(*factory.Engine)
+			if q := r.URL.Query(); !ok || q.Get("data_dir") != "" && filepath.Clean(q.Get("data_dir")) != filepath.Clean(e.Paths.DataDir) {
+				err = factory.ErrProjectNotFound
+			} else if tasks, serr := e.ProjectStatusLexical(q.Get("folder")); serr != nil {
+				err = serr
+			} else {
+				v = map[string]any{"tasks": append([]factory.TaskStatus{}, tasks...)}
+			}
 		default:
 			n := 0
 			if raw := r.URL.Query().Get("n"); raw != "" {

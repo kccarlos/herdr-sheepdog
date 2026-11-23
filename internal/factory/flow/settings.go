@@ -53,6 +53,7 @@ type Settings struct {
 	SweepMinutes               int `json:"sweep_minutes"`                  // sweep interval (design.md 7.3, 10.1)
 	PoolFloorPercent           int `json:"pool_floor_percent"`             // 7.3: minimum percent left to start on a pool (design.md 10.1)
 	PoolMinutes                int `json:"pool_minutes"`                   // 7.3: minutes a shared pool reading stays fresh (design.md 10.1)
+	DiskFullPercent            int `json:"disk_full_percent"`              // 6, 7.3: volume used percent raising the disk alert (design.md 10.1)
 	// SecondReviewer reviews the second passing round (L8): opus in a
 	// fresh session, or codex (world.CodexArgv's model).
 	SecondReviewer string `json:"second_reviewer"`
@@ -110,6 +111,7 @@ const (
 const CoordStartsMin, CoordStartsMax, CoordGapMin, CoordGapMax = 1, 10, 1, 60
 const CoordSilentMin, CoordSilentMax, HandoffMin, HandoffMax, HeartbeatMin, HeartbeatMax = 5, 240, 1, 30, 10, 600
 const PoolFloorMax, PoolMin, PoolMax = 50, 1, 60
+const DiskFullMin, DiskFullMax = 50, 99
 
 // DefaultSettings are the engine's defaults: two passing rounds on the final head
 // (design.md 10.1, D12).
@@ -122,7 +124,7 @@ func DefaultSettings() Settings {
 		WorkerRestarts: 3, ReviewerRetries: 2, EnsureFailures: 3, EnsureBackoffMinutes: 1,
 		CoordinatorStartsPerHour: 3, CoordinatorGapMinutes: 10, CoordinatorSilentMinutes: 30, HandoffMinutes: 5, HeartbeatMinutes: 60,
 		ContinuesPerTask: 1, ContinueLines: 60, TaskSizeLimit: 400, SizeCapFactor: 2, MaxRunning: 3,
-		PoolFloorPercent: 5, PoolMinutes: 5, SweepMinutes: 5,
+		PoolFloorPercent: 5, PoolMinutes: 5, SweepMinutes: 5, DiskFullPercent: 90,
 		SecondReviewer: "opus",
 	}
 }
@@ -147,6 +149,7 @@ func (s Settings) Changed() []string {
 		{"coordinator_gap_minutes", s.CoordinatorGapMinutes, d.CoordinatorGapMinutes},
 		{"coordinator_silent_minutes", s.CoordinatorSilentMinutes, d.CoordinatorSilentMinutes},
 		{"coordinator_starts_per_hour", s.CoordinatorStartsPerHour, d.CoordinatorStartsPerHour},
+		{"disk_full_percent", s.DiskFullPercent, d.DiskFullPercent},
 		{"ensure_backoff_minutes", s.EnsureBackoffMinutes, d.EnsureBackoffMinutes},
 		{"ensure_failures", s.EnsureFailures, d.EnsureFailures},
 		{"flake_reruns", s.FlakeReruns, d.FlakeReruns},
@@ -226,6 +229,7 @@ func (s Settings) Validate() error {
 		{"sweep_minutes", s.SweepMinutes, SweepMin, SweepMax},
 		{"pool_floor_percent", s.PoolFloorPercent, 0, PoolFloorMax},
 		{"pool_minutes", s.PoolMinutes, PoolMin, PoolMax},
+		{"disk_full_percent", s.DiskFullPercent, DiskFullMin, DiskFullMax},
 	} {
 		if r.v < r.low || r.v > r.high {
 			return fmt.Errorf("%s %d: allowed %d–%d", r.name, r.v, r.low, r.high)

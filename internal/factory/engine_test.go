@@ -49,6 +49,15 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "test gh shim: write: %v\n", err)
 		os.Exit(2)
 	}
+	// Engine tests must not read the host's disk: the disk alert (5b.9) would
+	// stop every project on a machine past disk_full_percent. Tests of the
+	// alert itself inject Engine.diskRead.
+	dfShim := "#!/bin/sh\nprintf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n/dev/test 1000 100 900 10%% /test-volume\\n'\n"
+	if err := os.WriteFile(filepath.Join(ghBin, "df"), []byte(dfShim), 0o700); err != nil {
+		_ = os.RemoveAll(ghBin)
+		fmt.Fprintf(os.Stderr, "test df shim: write: %v\n", err)
+		os.Exit(2)
+	}
 	if err := os.Setenv("PATH", ghBin+string(os.PathListSeparator)+os.Getenv("PATH")); err != nil {
 		_ = os.RemoveAll(ghBin)
 		fmt.Fprintf(os.Stderr, "test gh shim: setenv PATH: %v\n", err)
