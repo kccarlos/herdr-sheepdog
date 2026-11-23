@@ -6,10 +6,11 @@ const POLL_MS = 3000, GIVE_UP_MS = 8000;
 const $ = (id) => document.getElementById(id);
 const enc = encodeURIComponent;
 const clock = (t, sec) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: sec ? '2-digit' : undefined });
-// stage (design.md 4.11) -> board group label, dot colour; ORDER is the boards' group order.
-const STAGE = { blocked_or_failed: ['blocked', 'blocked'], ci: ['waiting on CI', 'working'], working: ['working', 'working'],
+// stage (design.md 4.11) -> board group label, dot colour, alert flag; ORDER is the boards' group order.
+const STAGE = { owner_gate: ['needs your approval', 'blocked', true], owner_answer: ['waiting on you', 'blocked', true],
+  blocked_or_failed: ['blocked', 'blocked', true], ci: ['waiting on CI', 'working'], working: ['working', 'working'],
   waiting_on_dep: ['waiting on others', 'idle'], queued: ['queued', 'idle'], done: ['done', 'done'] };
-const ORDER = ['blocked_or_failed', 'ci', 'working', 'waiting_on_dep', 'queued'];
+const ORDER = ['owner_gate', 'owner_answer', 'blocked_or_failed', 'ci', 'working', 'waiting_on_dep', 'queued'];
 // A stage this page does not know yet shows under its raw name rather than vanishing.
 const stage = (t) => STAGE[t.stage] || [t.stage || 'unknown', 'idle'];
 let data = null, down = false, lastOK = 0, timer = 0, busy = false, again = false;
@@ -112,8 +113,8 @@ function boardHTML(tasks) {
   if (!tasks.length) h += `<section class="card" aria-label="No tasks"><h2>no tasks yet</h2><p class="muted">The coordinator has not planned this project yet.</p></section>`;
   const other = [...new Set(tasks.map((x) => x.stage))].filter((s) => s !== 'done' && !ORDER.includes(s));
   for (const s of [...ORDER, ...other]) {
-    const rows = tasks.filter((x) => x.stage === s), label = esc(stage(rows[0] || { stage: s })[0]);
-    if (rows.length) h += `<section class="group" aria-label="${label}"><h2${s === 'blocked_or_failed' ? ' class="alert"' : ''}>${label} <span class="count">${rows.length}</span></h2><div class="rows${s === 'blocked_or_failed' ? ' alert' : ''}">${rows.map(rowHTML).join('')}</div></section>`;
+    const rows = tasks.filter((x) => x.stage === s), [rawLabel, , alert] = stage(rows[0] || { stage: s }), label = esc(rawLabel);
+    if (rows.length) h += `<section class="group" aria-label="${label}"><h2${alert ? ' class="alert"' : ''}>${label} <span class="count">${rows.length}</span></h2><div class="rows${alert ? ' alert' : ''}">${rows.map(rowHTML).join('')}</div></section>`;
   }
   if (done.length) h += `<details class="done"><summary>${done.length} done · show them</summary><div class="rows">${done.map(rowHTML).join('')}</div></details>`;
   return h + logHTML(data.log, 'log');
