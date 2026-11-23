@@ -424,6 +424,25 @@ Each is a short script against real CLIs in a private herdr-core, with the captu
 - The new coordinator re-plans what still matters from that list and the approved addendum.
 - PR #672, and the paused tasks' worktrees and branches, are closed or removed only after the owner says so.
 
+**Owner-contract v1 refusal-case mapping (recorded in 8.4, 2026-11-23; `O33` / [design.md](design.md) 12.1 V2).** Before deleting `testdata/factory/owner-contract-v1.json`, all 14 `invalid` cases were mapped to covering Go tests or `LATER` anchors:
+
+| # | Fixture case | Covering Go test(s) or `LATER` anchor |
+|---|---|---|
+| 1 | `unknown ask kind is refused` (`"deploy"`) | `internal/factory/flow/asks_test.go:TestValidateAskRules`, `internal/factory/asks_test.go:TestAskAndAnswerValidationRefusals` (`unknown_kind`) |
+| 2 | `empty ask kind is refused` (`""`) | `internal/factory/flow/asks_test.go:TestValidateAskRules`, `internal/factory/asks_test.go:TestAskAndAnswerValidationRefusals` (`unknown_kind`) |
+| 3 | `gated ask marked gated=false is refused` (`"release"`) | `internal/factory/asks_test.go:TestAskAndAnswerValidationRefusals` (`invalid_report` via `decodeStrict`); structural `Gated` derivation in `internal/factory/flow/asks_test.go:TestAskTableTransitionsA2ToA5`, `TestValidateAskRules`, `internal/factory/flow/override_test.go:TestOverrideAskValidateAndTable`, `internal/factory/asks_test.go:TestAskRolesAndOwnerAnswerProof` |
+| 4 | `answered gated ask without proof_id is refused` | `internal/factory/asks_test.go:TestAskRolesAndOwnerAnswerProof`, `internal/factory/override_test.go:TestOverrideRefusalsRoleProofAndNoReady`, `internal/web/browser_enrol_test.go:TestFactoryAsksListAndAnswerProof`, `internal/web/factory_ask_bridge_test.go:TestFactoryAskTapOwnerProof`, `TestFactoryWSVoiceAnswerAndHTTPProofs`, `internal/web/factory_override_test.go:TestFactoryOverrideCardStateAndProofGuard` (`proof_required`) |
+| 5 | `gated ask answered by coordinator is refused` | Real engine enforcement: `internal/factory/asks_test.go:TestAskRolesAndOwnerAnswerProof`, `internal/factory/override_test.go:TestOverrideRefusalsRoleProofAndNoReady` (`proof_required`); CLI mock-server propagation: `cmd/sheepdog/factory_ask_test.go:TestFactoryAskAndAnswerCLIFlagsAndRefusals` |
+| 6 | `delegating paid-key or reset is refused` | `LATER`: `KB-ASK-18`, plan slice 14 (`A1` / delegation rules). Partial: `internal/factory/flow/override_test.go:TestOverrideNotDelegableInFlow` (`KindOverride` -> `not_delegable`) |
+| 7 | `delegation rule without until is refused` | `LATER`: `KB-ASK-18`, plan slice 14 (`ProposeRule` / `A1`) |
+| 8 | `delegation rule with unknown release_level is refused` | `LATER`: `KB-ASK-18`, plan slice 14 (`ProposeRule` / `A1`) |
+| 9 | `unknown rule type is refused` | `LATER`: `KB-ASK-18`, plan slice 14 (`ProposeRule`) |
+| 10 | `revoking a non-delegation rule without a rule ask proof is refused` | `LATER`: plan slice 14 (`RevokeRule` requires owner `AnswerProof`, else `proof_required`) |
+| 11 | `worker chatter as an alert kind is refused` (`"worker_finished"`) | Structural/partial: v2 has no external alert-submission API (`internal/factory/alerts.go` raises internal `flow.Alert*` constants only). Quiet-rule silencing (`KB-QUI-1`, `KB-QUI-2`): `internal/herdr/factory_quiet_test.go:TestFactoryQuietRule`, `internal/supervisor/factory_quiet_test.go:TestFactoryQuietSupervisor`, `TestFactoryQuietBlockedDecisionsAndBriefing`, `TestFactoryQuietSurvivesRepromptAndRestart` |
+| 12 | `ticketless local device in AnswerProof is refused` (`device_id: "local"`) | `internal/factory/asks_test.go:TestAskRolesAndOwnerAnswerProof`, `internal/factory/override_test.go:TestOverrideRefusalsRoleProofAndNoReady` (`proof_rejected`) |
+| 13 | `typed input in AnswerProof is refused` (`input_kind: "typed"`) | `internal/factory/asks_test.go:TestAskRolesAndOwnerAnswerProof`, `internal/supervisor/factory_voice_test.go:TestFactoryVoiceTypedInputNeverAnswers` (`proof_rejected` / typed never answers) |
+| 14 | `unknown extra JSON key is refused` (on `ask`) | `internal/factory/asks_test.go:TestAskAndAnswerValidationRefusals` (`invalid_report` via `decodeStrict`) |
+
 **Rollback.** `factory/` and the old Python glue are already off `main` (the old code is not in `main`'s history; only the local tag `pre-reset-4df3a038` remains, `O36`). PRs 8.3 and 8.4 are ordinary commits on `main` that `git revert` restores.
 
 ## 7. Slice log

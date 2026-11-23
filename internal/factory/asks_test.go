@@ -404,6 +404,8 @@ func TestAskAndAnswerValidationRefusals(t *testing.T) {
 		{"recommend not in choices", r.workTok, `{"kind":"decision","question":"Pick?","options":["Yes","No"],"recommend":"Maybe"}`, "invalid_ask"},
 		{"parenthetical short key in choice (KB-ASK-9)", r.workTok, `{"kind":"decision","question":"Switch?","options":["Switch (v2)","Keep"],"recommend":"Keep"}`, "invalid_ask"},
 		{"recommended wait without Yes choice (KB-ASK-9)", r.coordTok, `{"kind":"release","question":"Ship?","options":["Ship now","Wait for QA"],"recommend":"Wait for QA"}`, "invalid_ask"},
+		{"gated false key on release ask", r.coordTok, `{"kind":"release","gated":false,"question":"Tag v1.0.0?","options":["Yes, tag v1.0.0","Not now"],"recommend":"Yes, tag v1.0.0"}`, "invalid_report"},
+		{"unknown extra JSON key on ask", r.coordTok, `{"kind":"decision","question":"Keep cache?","options":["Yes","No"],"recommend":"Yes","unexpected_extra_field":true}`, "invalid_report"},
 	}
 	for _, tc := range askRefusals {
 		err := r.eng.Report(tc.tok, "ask", json.RawMessage(tc.payload))
