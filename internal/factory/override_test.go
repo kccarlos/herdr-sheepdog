@@ -87,6 +87,8 @@ func setupTwoTaskOverrideWorld(t *testing.T) (w *restartWorld, tokByTask map[str
 		s.Tasks[0].Attempts[0].PR = 7
 		s.Tasks[1].Attempts[0].PR = 8
 	})
+	writeGHFile(t, w.gh, "view-7.json", `{"number":7,"state":"OPEN","headRefOid":"`+c1+`","mergeable":"MERGEABLE","statusCheckRollup":`+pendingRollup+`,"baseRefName":"main"}`)
+	writeGHFile(t, w.gh, "view-8.json", `{"number":8,"state":"OPEN","headRefOid":"`+c2+`","mergeable":"MERGEABLE","statusCheckRollup":`+greenRollup+`,"baseRefName":"main"}`)
 	w.eng.mu.Lock()
 	if w.eng.prs == nil {
 		w.eng.prs = map[string]flow.PR{}
@@ -350,5 +352,53 @@ func TestOverrideRefusalsRoleProofAndNoReady(t *testing.T) {
 func TestCoordinatorTemplateNamesOverrideCommand(t *testing.T) {
 	if !strings.Contains(coordinatorTemplate, "ask --kind override") || !strings.Contains(coordinatorTemplate, "--task") {
 		t.Fatalf("coordinator.md missing override ask command (--kind override --task):\n%s", coordinatorTemplate)
+	}
+}
+
+// TestOverrideCardFillerReadsFreshPRAndRefusesMergedOrClosed checks PR 7.1 review M2:
+// the card filler reads fresh PR state for each listed task instead of trusting
+// a cached open snapshot in e.prs, refuses a task whose live PR is merged or
+// closed, and reflects freshly-red CI checks on the card.
+func TestOverrideCardFillerReadsFreshPRAndRefusesMergedOrClosed(t *testing.T) {
+	t.Parallel()
+	w, _, c1, _ := setupTwoTaskOverrideWorld(t)
+	wt1 := w.state().Tasks[0].Attempts[0].Worktree
+
+	seedCachedOpenPending := func() {
+		w.eng.mu.Lock()
+		w.eng.prs[wt1] = flow.PR{State: flow.PROpen, Number: 7, Head: c1, Mergeable: flow.MergeableClean, Checks: flow.ChecksPending, Answered: true}
+		w.eng.mu.Unlock()
+	}
+
+	// 1. Cached open PR that is in fact MERGED on GitHub must be refused without opening an ask.
+	seedCachedOpenPending()
+	writeGHFile(t, w.gh, "view-7.json", `{"number":7,"state":"MERGED","headRefOid":"`+c1+`","mergeable":"UNKNOWN","statusCheckRollup":`+greenRollup+`,"baseRefName":"main","mergeCommit":{"oid":"deadbeef1234"}}`)
+	if err := w.eng.Report(w.coordTok, "ask", json.RawMessage(`{"kind":"override","tasks":["T1","T2"]}`)); refusalCode(err) != "invalid_ask" {
+		t.Fatalf("override ask on cached-open/actually-merged PR = %v, want invalid_ask", err)
+	}
+	if got := w.state().Asks; len(got) != 0 {
+		t.Fatalf("refused merged-PR override ask mutated State.Asks: %+v", got)
+	}
+
+	// 2. Cached open PR that is in fact CLOSED on GitHub must also be refused.
+	seedCachedOpenPending()
+	writeGHFile(t, w.gh, "view-7.json", `{"number":7,"state":"CLOSED","headRefOid":"`+c1+`","mergeable":"UNKNOWN","statusCheckRollup":`+pendingRollup+`,"baseRefName":"main"}`)
+	if err := w.eng.Report(w.coordTok, "ask", json.RawMessage(`{"kind":"override","tasks":["T1"]}`)); refusalCode(err) != "invalid_ask" {
+		t.Fatalf("override ask on cached-open/actually-closed PR = %v, want invalid_ask", err)
+	}
+	if got := w.state().Asks; len(got) != 0 {
+		t.Fatalf("refused closed-PR override ask mutated State.Asks: %+v", got)
+	}
+
+	// 3. Cached pending checks that turned red on GitHub must be read fresh onto the card.
+	seedCachedOpenPending()
+	redRollup := `[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"FAILURE"}]`
+	writeGHFile(t, w.gh, "view-7.json", `{"number":7,"state":"OPEN","headRefOid":"`+c1+`","mergeable":"MERGEABLE","statusCheckRollup":`+redRollup+`,"baseRefName":"main"}`)
+	if err := w.eng.Report(w.coordTok, "ask", json.RawMessage(`{"kind":"override","tasks":["T1"]}`)); err != nil {
+		t.Fatalf("override ask on freshly-red open PR: %v", err)
+	}
+	st := w.state()
+	if len(st.Asks) != 1 || len(st.Asks[0].Targets) != 1 || st.Asks[0].Targets[0].Checks != flow.ChecksRed {
+		t.Fatalf("override ask targets = %+v, want fresh ChecksRed", st.Asks)
 	}
 }

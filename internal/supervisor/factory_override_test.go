@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/push"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
 
@@ -99,5 +100,17 @@ func TestFactoryOverridePhoneCardMultiLineCommandAndAPNsNoOptions(t *testing.T) 
 	}
 	if len(notifs[0].Options) != 0 {
 		t.Fatalf("override APNs notification carried quick-reply options %+v, want omitted", notifs[0].Options)
+	}
+	// PR 7.1 review M1: override APNs payload must not carry APPROVAL category quick-reply actions,
+	// nor send KindApproval to the push relay (which derives aps.category = APPROVAL from kind).
+	aps, _ := notifs[0].Payload()["aps"].(map[string]any)
+	if aps["category"] == push.CategoryApproval || aps["category"] != push.CategoryAgent {
+		t.Fatalf("override APNs aps.category = %v, want %q (not %q)", aps["category"], push.CategoryAgent, push.CategoryApproval)
+	}
+	if aps["interruption-level"] != "time-sensitive" {
+		t.Fatalf("override APNs interruption-level = %v, want time-sensitive", aps["interruption-level"])
+	}
+	if notifs[0].Kind == push.KindApproval {
+		t.Fatalf("override push Notification.Kind = %q, must not be %q", notifs[0].Kind, push.KindApproval)
 	}
 }

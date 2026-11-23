@@ -387,3 +387,31 @@ func TestRegisterValidation(t *testing.T) {
 		t.Errorf("unknown token: %v", err)
 	}
 }
+
+// TestNotificationWithoutOptionsHasNoApprovalCategory checks PR 7.1 review M1:
+// an override push carries PendingID and NeedsYou=true with no quick-reply
+// Options, so its APNs payload must not use aps.category = APPROVAL.
+func TestNotificationWithoutOptionsHasNoApprovalCategory(t *testing.T) {
+	n := Notification{
+		EventID: "fask:fask-ovr-1", PendingID: "fask-ovr-1", PaneID: "factory:demo",
+		Agent: "demo", Kind: KindApproval, Text: "Merge T1 now without waiting for CI or review?", NeedsYou: true,
+	}
+	payload := n.Payload()
+	aps := payload["aps"].(map[string]any)
+	if aps["category"] == CategoryApproval || aps["category"] != CategoryAgent {
+		t.Fatalf("aps.category = %v, want %q (not %q) when Options is empty", aps["category"], CategoryAgent, CategoryApproval)
+	}
+	if aps["interruption-level"] != "time-sensitive" {
+		t.Fatalf("aps.interruption-level = %v, want time-sensitive", aps["interruption-level"])
+	}
+	sd := payload["sheepdog"].(map[string]any)
+	if sd["pending_id"] != "fask-ovr-1" {
+		t.Fatalf("sheepdog.pending_id = %v, want fask-ovr-1", sd["pending_id"])
+	}
+	if _, hasOpts := sd["options"]; hasOpts {
+		t.Fatalf("sheepdog.options unexpectedly present: %v", sd["options"])
+	}
+	if got := approval().Payload()["aps"].(map[string]any)["category"]; got != CategoryApproval {
+		t.Fatalf("approval() aps.category = %v, want %q", got, CategoryApproval)
+	}
+}
