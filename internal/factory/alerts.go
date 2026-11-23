@@ -3,6 +3,7 @@ package factory
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
@@ -84,7 +86,10 @@ func (e *Engine) persistAlertLocked(id string, s *flow.State, key string, a flow
 		}
 	}
 	e.logError("factory.commit_error", id, err)
-	if clear && p.alert.Kind == "" {
+	if (clear || !errors.Is(err, syscall.ENOSPC)) && p.alert.Kind == "" {
+		if p.logSeq != 0 {
+			s.Seq--
+		}
 		return
 	}
 	p.alert, p.rule, p.dec = a, rule, dec
@@ -261,6 +266,10 @@ func (e *Engine) observeConsentLocked(ctx context.Context, id string, s *flow.St
 	probe := func(target string) (string, error) {
 		res, timedOut, err := hcBoundedExec(ctx, e.HC, timeout, "sh", "-c", probeScript, "sh", target)
 		if err != nil && !timedOut {
+			var he *hc.Error
+			if errors.As(err, &he) {
+				return "", nil
+			}
 			return "", err
 		}
 		probed, ok := parseProbedDir(string(res.Stdout)), !timedOut && derefExit(res.Code) == 0

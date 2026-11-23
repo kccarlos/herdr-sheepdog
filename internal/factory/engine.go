@@ -1124,7 +1124,7 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 		term, abort, err = world.StartTerminal(ctx, e.HC, spec, func() error {
 			tok := rand.Text()
 			*hash, *recp, env["SHEEPDOG_RUN_TOKEN"], minted = tokenHash(tok), &rec, tok, true
-			if sErr := e.saveStateLocked(e.Paths.State(id), *s); sErr != nil {
+			if sErr := e.saveStateLocked(id, *s); sErr != nil {
 				*hash, *recp = prevHash, prevRec
 				e.logError("factory.commit_error", id, sErr)
 				return sErr
