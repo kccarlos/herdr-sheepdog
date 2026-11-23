@@ -403,7 +403,6 @@ func TestAskAndAnswerValidationRefusals(t *testing.T) {
 		{"duplicate choices", r.workTok, `{"kind":"decision","question":"Pick?","options":["Yes"," Yes "],"recommend":"Yes"}`, "invalid_ask"},
 		{"recommend not in choices", r.workTok, `{"kind":"decision","question":"Pick?","options":["Yes","No"],"recommend":"Maybe"}`, "invalid_ask"},
 		{"parenthetical short key in choice (KB-ASK-9)", r.workTok, `{"kind":"decision","question":"Switch?","options":["Switch (v2)","Keep"],"recommend":"Keep"}`, "invalid_ask"},
-		{"recommended wait without Yes choice (KB-ASK-9)", r.coordTok, `{"kind":"release","question":"Ship?","options":["Ship now","Wait for QA"],"recommend":"Wait for QA"}`, "invalid_ask"},
 		{"gated false key on release ask", r.coordTok, `{"kind":"release","gated":false,"question":"Tag v1.0.0?","options":["Yes, tag v1.0.0","Not now"],"recommend":"Yes, tag v1.0.0"}`, "invalid_report"},
 		{"unknown extra JSON key on ask", r.coordTok, `{"kind":"decision","question":"Keep cache?","options":["Yes","No"],"recommend":"Yes","unexpected_extra_field":true}`, "invalid_report"},
 	}
@@ -474,6 +473,18 @@ func TestAskAndAnswerValidationRefusals(t *testing.T) {
 	prf2, _ := r.eng.MintProof(relID, "Not now", ProofInputTap, "dev-phone-1")
 	if err := r.eng.Answer(relID, "Not now", prf2); refusalCode(err) != "already_closed" {
 		t.Fatalf("second owner answer = %v, want already_closed", err)
+	}
+
+	// AQ3 (O32): a wait/negative recommendation without a Yes choice is accepted,
+	// opens gated, and keeps both options in order with recommend intact.
+	if err := r.eng.Report(r.coordTok, "ask", json.RawMessage(`{"kind":"release","question":"Ship?","options":["Ship now","Wait for QA"],"recommend":"Wait for QA"}`)); err != nil {
+		t.Fatalf("coordinator release ask without Yes option (AQ3): %v", err)
+	}
+	gotAsks := r.state().Asks
+	got := gotAsks[len(gotAsks)-1]
+	if got.Kind != flow.KindRelease || !got.Gated || got.Status != flow.AskStatusOpen ||
+		!slices.Equal(got.Options, []string{"Ship now", "Wait for QA"}) || got.Recommend != "Wait for QA" {
+		t.Fatalf("stored release ask without Yes option = %+v, want open gated release with [Ship now, Wait for QA] recommend Wait for QA", got)
 	}
 }
 
