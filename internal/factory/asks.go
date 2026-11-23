@@ -269,7 +269,7 @@ func (e *Engine) cancelStaleGateAsksLocked(id string, s *flow.State, ti int, now
 		if a.Task != t.ID || a.Kind != flow.KindGate || a.Status != flow.AskStatusOpen || a.Head == "" {
 			continue
 		}
-		if att != nil && flow.Covers(*att, a.Head, flow.H(*att)) {
+		if att == nil && len(t.Attempts) == 0 || att != nil && (len(att.Ready) == 0 && len(t.Attempts) == 1 || flow.Covers(*att, a.Head, flow.H(*att))) {
 			continue
 		}
 		next, row, dec := flow.StepAsk(a, flow.AskEvent{Kind: flow.EvAskCancel}, now)

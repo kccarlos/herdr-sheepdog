@@ -274,6 +274,8 @@ func taskWhy(t flow.Task, a *flow.Attempt, unmet []string, started bool, stage s
 		return fmt.Sprintf("In review round %d", len(a.Rounds)+1)
 	case r.Why == flow.WhyCI:
 		return "Waiting on CI and merge"
+	case r.ID == "N23":
+		return "Worker is working"
 	case r.WaitsOn != "":
 		return "Waiting on " + r.WaitsOn
 	case a == nil:
