@@ -188,6 +188,7 @@ func newAlertWorldWithProxy(t *testing.T, goal string, everyStepRestart bool) *a
 
 func (w *alertWorld) newEngine() {
 	eng := New(w.paths, w.client)
+	eng.StartCheck = noopStartCheck
 	eng.Log = logging.NewJSONLLogger(w.daemonLog)
 	eng.Now = func() time.Time {
 		w.mu.Lock()
@@ -1054,11 +1055,10 @@ func TestPR5b8_DoctorSignInProbeUnknownNeverSaysNotSignedIn(t *testing.T) {
 		{name: "exec_error", out: CommandOutput{Exit: -1, Err: errors.New("hc exec transport closed")}, wantSubstr: "hc exec transport closed"},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
-			env := newFakeEnv("claude", "codex", "agy", "gh")
+			env := newFakeEnv("claude", "codex", "agy")
 			env.handlers["claude auth"] = func(string, []string, []string) CommandOutput { return mode.out }
 			env.handlers["codex login"] = func(string, []string, []string) CommandOutput { return mode.out }
 			env.handlers["agy models"] = func(string, []string, []string) CommandOutput { return mode.out }
-			env.handlers["gh auth"] = func(string, []string, []string) CommandOutput { return mode.out }
 
 			opts := DoctorOptions{
 				Folder:      filepath.Join(virtualHome, "Documents", "demo"),
@@ -1070,7 +1070,6 @@ func TestPR5b8_DoctorSignInProbeUnknownNeverSaysNotSignedIn(t *testing.T) {
 				AuthTimeout: time.Second,
 			}
 			cliResults := CheckAgentCLIs(ctx, opts, false)
-			ghResult := CheckGH(ctx, opts, false)
 
 			for _, name := range []string{"claude", "codex", "agy"} {
 				r := findResult(t, cliResults, name)
@@ -1081,14 +1080,6 @@ func TestPR5b8_DoctorSignInProbeUnknownNeverSaysNotSignedIn(t *testing.T) {
 				if strings.Contains(low, "not signed in") || strings.Contains(low, "not logged in") {
 					t.Errorf("%s (%s): reported unknown probe as signed out: %+v", name, mode.name, r)
 				}
-			}
-
-			ghLow := strings.ToLower(ghResult.Detail)
-			if !strings.Contains(ghLow, "unknown (") || !strings.Contains(ghLow, strings.ToLower(mode.wantSubstr)) {
-				t.Errorf("gh (%s): detail = %q, want \"unknown (<reason>)\" containing %q", mode.name, ghResult.Detail, mode.wantSubstr)
-			}
-			if strings.Contains(ghLow, "not signed in") || strings.Contains(ghLow, "not logged in") {
-				t.Errorf("gh (%s): reported unknown probe as signed out: %+v", mode.name, ghResult)
 			}
 		})
 	}

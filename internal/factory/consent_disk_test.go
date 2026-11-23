@@ -222,6 +222,7 @@ func newCDWorld(t *testing.T, goal string) *cdWorld {
 
 func (w *cdWorld) newEngine() {
 	eng := New(w.paths, w.client)
+	eng.StartCheck = noopStartCheck
 	eng.Log = logging.NewJSONLLogger(w.daemonLog)
 	eng.Stderr = w.stderrBuf
 	eng.volumeTimeout = 80 * time.Millisecond

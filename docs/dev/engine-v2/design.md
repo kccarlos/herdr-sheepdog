@@ -498,7 +498,7 @@ First match wins.
 
 | ID | If | Make sure of | Shown as |
 |---|---|---|---|
-| J1 | a start was asked and doctor has not passed since | doctor runs; on failure its fix lines are shown and the start is dropped; on success the project is marked started | start shell |
+| J1 | a start was asked and doctor has not passed since | the start checks run inside `Engine.Start`, for every caller (CLI, HTTP, voice), as its first step after the folder and goal are read: before the project id is written into the repo's git config and before any state is loaded; on a `fail` line the fix lines are shown, the start is dropped and the stored project is not changed; with no `fail` line the project is marked started. Agent CLIs are judged by J1a–J1d | start shell |
 | J2 | never started, or stopped by the owner | no run of this project is alive; the plan and tasks are kept | "Stopped by you" |
 | J3 | a stopping alert is active (`no_pool`, `disk`, `consent_prompt`) and no coordinator run is alive | nothing starts (every new start and restart is held; tasks wait at N10) | "Stopped", with the fix |
 | J4 | a plan exists, every milestone is done, no task is open, and the owner has given no new goal since | the final journal entry; then no coordinator | "Finished" |
@@ -512,6 +512,17 @@ First match wins.
 | J12 | wakes are held and the coordinator is idle | deliver up to 20 as one batch and keep the rest held | running |
 | J13 | no wake for `heartbeat_minutes` and the coordinator is idle | a heartbeat wake | running |
 | J14 | otherwise | — | running ("nothing needs you" when no owner ask is open) |
+
+**Agent CLIs at start (J1a–J1d).** These are parts of J1, not rows of the table. The start checks probe each agent CLI named in the project's candidate lists once, with the same sign-in check the engine uses at launch (section 7.3). A probe gives one of three answers: signed in, out (positively not installed or positively signed out), or `unknown (<reason>)`. The roles are coordinator, worker and reviewer, each with its project list (section 9.1). A task's own list comes before the project list, so the project list is always the fallback.
+
+| ID | If | Then |
+|---|---|---|
+| J1a | every candidate of a role is on a CLI that is out | `fail`, one line per such CLI, naming the role and the one fix ("claude is not signed in, and no other coordinator candidate is usable. run: claude auth login"). The start is dropped |
+| J1b | a role has no candidate positively signed in, and at least one is `unknown` | `warn` with `unknown (<reason>)`. The start goes on. Unknown never counts as out and never as signed in; J5 and N10 hold later if the CLI is in fact out |
+| J1c | a CLI is out, and every role that lists it has another candidate that is signed in or `unknown` | `warn` with the same fix. The start goes on, and Resolve skips that candidate (section 9.1) |
+| J1d | a start is asked for a project that is running, or one that holds J5's `agents_down` | the same J1a–J1c. A start never clears `agents_down`. If J1a refuses, the project stays as it was: still running and held by J5, which recovers on the next positive check, or still stopped |
+
+The engine's own coordinator restarts (J7) are not starts in this sense. J1 does not run for them; J5 alone holds them.
 
 The owner is told once per alert episode, whoever is alive. While a stopping alert is active, every new start is held: coordinator (J7), worker (N11, N23), reviewer (N29), and restarts across roles. Runs already live stay managed (a live coordinator keeps getting wakes and heartbeats through J8 to J13), and the section shows "Stopped" with the alert's fix.
 
@@ -1222,7 +1233,7 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | O28 | Agent-free initiation of an override card without the coordinator (4.3b, 7.2): from the phone, `/factory`, or a tokenless CLI (`sheepdog factory override` / `POST /api/factory/override`, noting a CLI cannot distinguish a worker shell with `SHEEPDOG_RUN_TOKEN` unset from the owner's terminal). Not blocking slice 7 (D10's coordinator path covers raising the card); decide at the slice 7 review point |
 | O29 | An open multi-task override card whose listed head has moved on one or more tasks (4.3b, 7.1): design 7.1 cancels only stale gate asks (`cancelStaleGateAsksLocked`), while a multi-task override card can be half stale. Safe as-is because `Covers` binds each override to the card's stored head on answer, so a moved task stays on normal rules; whether and when to cancel or annotate a half-stale card is left open |
 | O30 | Whether `KB-LCH-4` ("every start states model and effort, never a CLI default") applies to `doctor.go`'s read-only canary probes (`checkClaude` omits `--effort`; `checkCodex` omits `--model`) or only to engine agent runs |
-| O31 | (**design reviewer settles before 8.1 is briefed**) Once `StartChecks` runs inside `Engine.Start` (J1), whether `checkStartCLIs` should fail when any candidate in `projectCandidates(s)` is missing or signed out (today's CLI rule, which conflicts with J5's hold-and-fallback for a signed-out coordinator on voice/HTTP restarts) or pass whenever each required role has at least one signed-in candidate |
+| O31 | Which agent CLI states refuse a start once `StartChecks` runs inside `Engine.Start` (J1). **Decided (design review, 2026-11-23, section 6 J1a–J1d):** the check is per role, not per CLI. A start fails only when every candidate of the coordinator, worker or reviewer list is on a CLI that is positively not installed or positively signed out. A CLI that is out while each role listing it has another usable candidate is a warning, and so is an `unknown` probe. One rule for CLI, HTTP and voice, and for a project already running or held by J5: a refused start changes nothing stored. Pools, reviewer-differs and model lists are not start checks |
 | O32 | Whether and how to replace `flow/asks.go`'s hand-kept `negWaitRE`/`yesOptRE` regexes for `KB-ASK-9` so no hand-kept word list remains in ask validation |
 | O33 | The old owner-contract document, its fixture, and the two phase 0 documents. **Decided (design review, 2026-11-23, section 12.1 V1, V2):** `docs/dev/factory/owner-contract.md` becomes a pointer page in 8.3. `testdata/factory/owner-contract-v1.json` is retired in 8.4 with no Go golden test: every v2 shape differs from it, and a new fixture would be a hand-kept copy of the Go types; its 14 refusal cases are first mapped to Go tests or to knowledge-base rows marked later. `docs/dev/factory/engine-audit.md` and `baseline.md` are deleted in 8.4, not archived; all four files are in `main`'s history. The deletes wait for the owner's yes with the rest of 8.4 |
 | O34 | Whether sections 4.11 and 16's generated `docs/dev/factory/rules.md` table check is required for version 1 or deferred |

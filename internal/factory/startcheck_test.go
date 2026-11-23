@@ -112,6 +112,8 @@ func TestStartChecksStatuses(t *testing.T) {
 		{"workflow utf8 bom", "\uFEFFon: pull_request\njobs: {}\n", nil, "pr workflow", onboard.OK},
 		{"workflow flow map null values", "on: {pull_request, push}\njobs: {}\n", nil, "pr workflow", onboard.OK},
 		{"workflow anchor block map", "on: &triggers\n  pull_request:\njobs: {}\n", nil, "pr workflow", onboard.OK},
+		{"workflow anchor on pull_request respects branches", "on:\n  pull_request: &pr\n    branches: [other]\njobs: {}\n", nil, "pr workflow", onboard.Fail},
+		{"workflow next-line flow list under branches", "on:\n  pull_request:\n    branches:\n      [main]\njobs: {}\n", nil, "pr workflow", onboard.OK},
 		{"workflow literal true key is not a trigger", "true:\n  pull_request:\njobs: {}\n", nil, "pr workflow", onboard.Fail},
 		{"workflow push only", "on: push\njobs: {}\n", nil, "pr workflow", onboard.Fail},
 		{"workflow pull_request only in if", "on: push\njobs:\n  ci:\n    if: github.event_name == 'pull_request'\n    runs-on: ubuntu-latest\n", nil, "pr workflow", onboard.Fail},
@@ -202,12 +204,13 @@ func TestStartChecksUnfetchedBaseRefFails(t *testing.T) {
 
 // TestStartChecksEscapeBranchName: a default branch with a slash is escaped in API paths.
 func TestStartChecksEscapeBranchName(t *testing.T) {
-	res := runStart(t, goodWorkflow, startFake{
+	const releaseWorkflow = "name: ci\non:\n  pull_request:\n    branches: [release/1.0]\njobs: {}\n"
+	res := runStart(t, releaseWorkflow, startFake{
 		"gh repo view o/r --json defaultBranchRef,viewerPermission": out(`{"defaultBranchRef":{"name":"release/1.0"},"viewerPermission":"WRITE"}`),
 		"refs/remotes/origin/HEAD":                                  out("origin/release/1.0"),
 		"rev-parse --verify --quiet origin/release/1.0":             out("abc1234\n"),
 		"ls-tree --name-only origin/release/1.0 .github/workflows/": out(".github/workflows/ci.yml"),
-		"show origin/release/1.0:.github/workflows/ci.yml":          out(goodWorkflow),
+		"show origin/release/1.0:.github/workflows/ci.yml":          out(releaseWorkflow),
 		"gh api repos/o/r/branches/release%2F1.0":                   out(`{"protected":false}`),
 		"gh api repos/o/r/rules/branches/release%2F1.0":             out("[]"),
 	})
@@ -302,9 +305,9 @@ func TestStartChecksSecondReviewerCodex(t *testing.T) {
 		want  onboard.Status
 	}{
 		{"codex signed in", out("Logged in using ChatGPT\n"), onboard.OK},
-		{"codex signed out", CommandOutput{Exit: 1, Stdout: "Not logged in\n"}, onboard.Fail},
-		{"codex exit 0 not logged in", CommandOutput{Exit: 0, Stderr: "Not logged in\n"}, onboard.Fail},
-		{"codex missing", CommandOutput{Exit: 127}, onboard.Fail},
+		{"codex signed out", CommandOutput{Exit: 1, Stdout: "Not logged in\n"}, onboard.Warn},
+		{"codex exit 0 not logged in", CommandOutput{Exit: 0, Stderr: "Not logged in\n"}, onboard.Warn},
+		{"codex missing", CommandOutput{Exit: 127}, onboard.Warn},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := makeFake(tc.codex)
@@ -313,7 +316,7 @@ func TestStartChecksSecondReviewerCodex(t *testing.T) {
 			if r.Status != tc.want {
 				t.Fatalf("start codex = %+v, want %v", r, tc.want)
 			}
-			if r.Status == onboard.Fail && !strings.Contains(r.Fix, "codex login") {
+			if r.Status == onboard.Warn && !strings.Contains(r.Fix, "codex login") {
 				t.Errorf("start codex fix = %q", r.Fix)
 			}
 		})
