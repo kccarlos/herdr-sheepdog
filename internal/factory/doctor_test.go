@@ -86,7 +86,7 @@ func TestDoctorAllGreenAndCleansUpProbeTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	env := newFakeEnv("hc", "claude", "agy", "gh", "codexbar")
+	env := newFakeEnv("hc", "claude", "agy", "codexbar")
 	env.handlers["claude auth"] = func(_ string, extra []string, _ []string) CommandOutput {
 		if !slices.Contains(extra, "DISABLE_AUTOUPDATER=1") {
 			t.Errorf("claude auth missing DISABLE_AUTOUPDATER=1: %v", extra)
@@ -115,24 +115,6 @@ func TestDoctorAllGreenAndCleansUpProbeTerminal(t *testing.T) {
 			t.Errorf("agy canary argv = %v", argv)
 		}
 		return CommandOutput{Stdout: "OK\n", Duration: 55 * time.Millisecond}
-	}
-	env.handlers["gh auth"] = func(string, []string, []string) CommandOutput {
-		return CommandOutput{Exit: 0}
-	}
-	env.handlers["git -C"] = func(_ string, _ []string, argv []string) CommandOutput {
-		tail := strings.Join(argv[3:], " ")
-		switch tail {
-		case "rev-parse --show-toplevel":
-			return CommandOutput{Stdout: proj + "\n"}
-		case "remote":
-			return CommandOutput{Stdout: "origin\nupstream\n"}
-		case "symbolic-ref --quiet --short HEAD":
-			return CommandOutput{Stdout: "main\n"}
-		case "remote get-url --all origin", "remote get-url --push --all origin":
-			return CommandOutput{Stdout: "git@github.com:alice/repo.git\n"}
-		default:
-			return CommandOutput{Exit: 1}
-		}
 	}
 	env.handlers["codexbar --version"] = func(string, []string, []string) CommandOutput {
 		return CommandOutput{Stdout: "CodexBar 0.84.0\n"}
@@ -169,9 +151,6 @@ func TestDoctorAllGreenAndCleansUpProbeTerminal(t *testing.T) {
 	}
 	if r := findResult(t, rs, "agent clis"); r.Status != onboard.OK || !strings.Contains(r.Detail, "claude, agy") {
 		t.Errorf("agent clis = %+v", r)
-	}
-	if r := findResult(t, rs, "gh"); r.Status != onboard.OK || !strings.Contains(r.Detail, "alice/repo") {
-		t.Errorf("gh = %+v", r)
 	}
 	if r := findResult(t, rs, "codexbar"); r.Status != onboard.OK || !strings.Contains(r.Detail, "CodexBar 0.84.0") {
 		t.Errorf("codexbar = %+v", r)
@@ -466,74 +445,6 @@ func TestCheckAgentCLIsMatrix(t *testing.T) {
 			t.Errorf("codex = %+v", r)
 		}
 	})
-}
-
-func TestCheckGHOrigin(t *testing.T) {
-	ctx := context.Background()
-	tmp := t.TempDir()
-
-	t.Run("missing gh", func(t *testing.T) {
-		env := newFakeEnv()
-		r := CheckGH(ctx, DoctorOptions{TempDir: tmp, LookPath: env.lookPath, RunCommand: env.run}, true)
-		if r.Status != onboard.Warn || !strings.Contains(r.Detail, "local-merge mode") {
-			t.Errorf("missing gh = %+v", r)
-		}
-	})
-
-	t.Run("not logged in", func(t *testing.T) {
-		env := newFakeEnv("gh")
-		env.handlers["gh auth"] = func(string, []string, []string) CommandOutput {
-			return CommandOutput{Exit: 1, Stderr: "not logged in"}
-		}
-		r := CheckGH(ctx, DoctorOptions{TempDir: tmp, LookPath: env.lookPath, RunCommand: env.run}, true)
-		if r.Status != onboard.Warn || !strings.Contains(r.Fix, "gh auth login") {
-			t.Errorf("signed out gh = %+v", r)
-		}
-	})
-
-	for _, tc := range []struct {
-		name, fetch, push string
-		want              onboard.Status
-	}{
-		{"matching origin ignores local default", "https://github.com/acme/fork.git", "git@github.com:acme/fork.git", onboard.OK},
-		{"mismatched origin", "https://github.com/acme/fork.git", "git@github.com:acme/other.git", onboard.Warn},
-		{"missing origin", "", "", onboard.Warn},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			env := newFakeEnv("gh")
-			env.handlers["gh auth"] = func(string, []string, []string) CommandOutput { return CommandOutput{} }
-			env.handlers["gh repo"] = func(string, []string, []string) CommandOutput {
-				t.Fatal("doctor consulted the local gh default")
-				return CommandOutput{}
-			}
-			env.handlers["git -C"] = func(_ string, _ []string, argv []string) CommandOutput {
-				switch strings.Join(argv[3:], " ") {
-				case "rev-parse --show-toplevel":
-					return out(tmp)
-				case "remote get-url --all origin":
-					return out(tc.fetch)
-				case "remote get-url --push --all origin":
-					return out(tc.push)
-				default:
-					return CommandOutput{Exit: 1}
-				}
-			}
-			r := CheckGH(ctx, DoctorOptions{Folder: tmp, TempDir: tmp, LookPath: env.lookPath, RunCommand: env.run}, true)
-			if r.Status != tc.want || tc.want == onboard.Warn && r.Fix == "" {
-				t.Errorf("gh check = %+v, want %s", r, tc.want)
-			}
-		})
-	}
-
-}
-
-func TestCheckGHWithoutProjectVolume(t *testing.T) {
-	env := newFakeEnv("gh")
-	env.handlers["gh auth"] = func(string, []string, []string) CommandOutput { return CommandOutput{} }
-	r := CheckGH(context.Background(), DoctorOptions{TempDir: t.TempDir(), LookPath: env.lookPath, RunCommand: env.run}, false)
-	if r.Status != onboard.OK || !strings.Contains(r.Detail, "origin") || strings.Contains(r.Detail, "pin") {
-		t.Fatalf("gh check without project volume = %+v, want origin check deferred", r)
-	}
 }
 
 func TestCheckCodexbar(t *testing.T) {

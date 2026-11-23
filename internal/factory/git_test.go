@@ -15,7 +15,10 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
+	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
+
+func noopStartCheck(context.Context, DoctorOptions) []onboard.Result { return nil }
 
 func fixtureGit(t *testing.T) *world.Git {
 	t.Helper()
@@ -27,6 +30,7 @@ func fixtureGit(t *testing.T) *world.Git {
 func newGitTestEngine(t *testing.T, paths Paths, client *hc.Client) *Engine {
 	t.Helper()
 	e := New(paths, client)
+	e.StartCheck = noopStartCheck
 	e.probeLaunch = func(context.Context, []string) flow.ResolveFacts { return flow.ResolveFacts{} }
 	srv := hctest.New(t)
 	srv.OnExec = hctest.GitExec

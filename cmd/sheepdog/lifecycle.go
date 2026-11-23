@@ -514,7 +514,11 @@ func getJSON(ctx context.Context, base, path string, v any) error {
 
 // postJSON posts in as JSON to base+path on loopback.
 func postJSON(ctx context.Context, base, path string, in any) error {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	return postJSONTimeout(ctx, base, path, in, 15*time.Second)
+}
+
+func postJSONTimeout(ctx context.Context, base, path string, in any, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	body, err := json.Marshal(in)
 	if err != nil {

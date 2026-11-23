@@ -44,8 +44,7 @@ const probeScript = `d="$1"; while [ ! -e "$d" ] && [ "$d" != "/" ] && [ "$d" !=
 
 // cleanExecScript strips daemon keys and parent Claude Code session markers
 // inside herdr-core's machine.exec while keeping CLAUDE_CODE_* auth/provider
-// settings (matching launch.py's CLEAN_ENV), and exits 127 cleanly when $1 is
-// missing from herdr-core's own PATH.
+// settings, and exits 127 cleanly when $1 is missing from herdr-core's own PATH.
 const cleanExecScript = `for v in $(env | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p'); do case "$v" in CLAUDE_CODE_USE_*|CLAUDE_CODE_SKIP_*|CLAUDE_CODE_DISABLE_*|CLAUDE_CODE_ENABLE_*|CLAUDE_CODE_MAX_*|CLAUDE_CODE_OAUTH_*|CLAUDE_CODE_CLIENT_*|CLAUDE_CODE_API_*) ;; HERDR_*|SHEEPDOG_*|GEMINI_API_KEY*|VERTEX_*|DEEPSEEK_API_KEY|OPENAI_ORCH_API_KEY|GH_REPO|CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_*) unset "$v" ;; esac; done; command -v "$1" >/dev/null 2>&1 || exit 127; exec "$@"`
 
 // CommandOutput is the captured outcome of one child command run by Doctor.
@@ -134,9 +133,9 @@ func resSkip(name, detail string) onboard.Result {
 
 // Doctor runs the factory prerequisite checks in fixed order: herdr-core, the
 // timed project-volume probe inside herdr-core, agent CLI logins + canary
-// starts, gh login + origin validation, and codexbar. When herdr-core is up,
-// child probes execute inside herdr-core's own environment without copying the
-// caller shell's PATH or credentials.
+// starts, and codexbar. When herdr-core is up, child probes execute inside
+// herdr-core's own environment without copying the caller shell's PATH or
+// credentials.
 func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 	customRunner := opts.RunCommand != nil
 	customLookPath := opts.LookPath != nil
@@ -160,7 +159,6 @@ func Doctor(ctx context.Context, opts DoctorOptions) []onboard.Result {
 		o.RunCommand = hcExecRunner(o.HCSocket)
 	}
 	out = append(out, checkAgentCLIs(ctx, o, inHC, customLookPath, volumeOK, probedDir)...)
-	out = append(out, checkGH(ctx, o, inHC, customLookPath, volumeOK, probedDir))
 	out = append(out, checkCodexbar(ctx, o, inHC, customLookPath))
 	if volumeOK {
 		out = append(out, checkSweepLeftovers(ctx, o, hcOK, firstNonEmpty(probedDir, o.Folder))...)
@@ -991,62 +989,6 @@ func extraEnvMap(extraEnv []string) map[string]string {
 		}
 	}
 	return m
-}
-
-// CheckGH checks gh authentication and the project origin.
-func CheckGH(ctx context.Context, o DoctorOptions, volumeOK bool) onboard.Result {
-	customLookPath := o.LookPath != nil
-	o = o.withDefaults()
-	return checkGH(ctx, o, false, customLookPath, volumeOK, "")
-}
-
-func checkGH(ctx context.Context, o DoctorOptions, inHC, customLookPath, volumeOK bool, probedDir string) onboard.Result {
-	const name = "gh"
-	missingRes := resWarn(name, "gh is not on PATH (local-merge mode only)", "install GitHub CLI (https://cli.github.com) and run gh auth login")
-	if customLookPath || !inHC {
-		if _, err := o.LookPath("gh"); err != nil {
-			return missingRes
-		}
-	}
-	authCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
-	authOut := o.RunCommand(authCtx, o.TempDir, nil, "gh", "auth", "status")
-	cancel()
-	if inHC && authOut.Exit == 127 {
-		if _, err := o.LookPath("gh"); err == nil {
-			return resWarn(name, "gh is on PATH locally, but not on herdr-core's PATH (local-merge mode only)", "run: hc server restart")
-		}
-		return missingRes
-	}
-	if why, unk := authProbeUnknown(authOut); unk {
-		if inHC && !customLookPath {
-			if _, err := o.LookPath("gh"); err != nil {
-				return missingRes
-			}
-		}
-		return resWarn(name, "gh sign-in "+why+" (local-merge mode only)", "run: gh auth status")
-	}
-	if authOut.Exit != 0 {
-		return resWarn(name, "gh is not logged in (local-merge mode only)", "run: gh auth login")
-	}
-	if !volumeOK {
-		return resOK(name, "logged in (checking origin requires a reachable project volume)")
-	}
-
-	gitDir := o.Folder
-	if probedDir != "" {
-		gitDir = probedDir
-	}
-	repoRoot := gitLine(ctx, o, gitDir, "rev-parse", "--show-toplevel")
-	if repoRoot == "" {
-		return resWarn(name, fmt.Sprintf("logged in; %s is not a git repo yet (local-merge mode only)", o.Folder),
-			"initialize git and add a GitHub origin remote")
-	}
-
-	slug, err := readGitHubOrigin(ctx, o, repoRoot)
-	if err != nil {
-		return resWarn(name, "logged in; "+cleanReason(err.Error()), originFix(err))
-	}
-	return resOK(name, "logged in; factory GitHub calls target "+slug)
 }
 
 func gitOut(ctx context.Context, o DoctorOptions, dir string, args ...string) string {

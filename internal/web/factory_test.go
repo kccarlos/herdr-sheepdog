@@ -1,12 +1,14 @@
 package web
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +16,9 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
+	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
 
@@ -357,5 +362,88 @@ func TestFactoryStatusLexicalOnly(t *testing.T) {
 	wLink := getStatus(linkRepo)
 	if wLink.Code == http.StatusOK || !strings.Contains(wLink.Body.String(), "no factory project") {
 		t.Fatalf("status for symlink %q = %d %s, want non-200 no factory project", linkRepo, wLink.Code, wLink.Body.String())
+	}
+}
+
+// TestFactoryStartHTTPUsesEngineStartChecks_KB_STA_18 verifies O31 row 10 / J1a:
+// POST /api/factory/start cannot bypass Engine.Start's start checks.
+func TestFactoryStartHTTPUsesEngineStartChecks_KB_STA_18(t *testing.T) {
+	dir := t.TempDir()
+	elog, err := eventlog.Open(dir, eventlog.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = elog.Close() })
+	st, err := state.Open(filepath.Join(dir, "state.json"), state.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	repo := filepath.Join(t.TempDir(), "repo")
+	if b, err := exec.Command("git", "init", "-b", "main", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, b)
+	}
+	hcSrv := hctest.New(t)
+	hcSrv.OnExec = hctest.GitExec
+
+	eng := factory.New(factory.Paths{DataDir: dir}, hc.NewClient(hcSrv.Path))
+	checkCalls := 0
+	eng.StartCheck = func(ctx context.Context, opts factory.DoctorOptions) []onboard.Result {
+		checkCalls++
+		opts.HCSocket = ""
+		opts.RunCommand = func(_ context.Context, _ string, _ []string, argv ...string) factory.CommandOutput {
+			key := strings.Join(argv, " ")
+			switch {
+			case strings.HasSuffix(key, "git --version"):
+				return factory.CommandOutput{Stdout: "git version 2.45.0\n"}
+			case strings.HasSuffix(key, "rev-parse --show-toplevel"):
+				return factory.CommandOutput{Stdout: repo}
+			case strings.HasSuffix(key, "remote get-url --all origin"), strings.HasSuffix(key, "remote get-url --push --all origin"):
+				return factory.CommandOutput{Stdout: "https://github.com/o/r.git"}
+			case strings.HasSuffix(key, "refs/remotes/origin/HEAD"):
+				return factory.CommandOutput{Stdout: "origin/main"}
+			case strings.HasSuffix(key, "rev-parse --verify --quiet origin/main"):
+				return factory.CommandOutput{Stdout: "abc1234\n"}
+			case strings.HasSuffix(key, "fetch --prune origin"):
+				return factory.CommandOutput{}
+			case strings.HasSuffix(key, "claude auth status --json"):
+				return factory.CommandOutput{Stdout: `{"loggedIn":false}`}
+			case strings.HasSuffix(key, "ls-tree --name-only origin/main .github/workflows/"):
+				return factory.CommandOutput{Stdout: ".github/workflows/ci.yml"}
+			case strings.HasSuffix(key, "show origin/main:.github/workflows/ci.yml"):
+				return factory.CommandOutput{Stdout: "on:\n  pull_request:\n    branches: [main]\njobs: {}\n"}
+			case strings.Contains(key, "gh repo view"):
+				return factory.CommandOutput{Stdout: `{"defaultBranchRef":{"name":"main"},"viewerPermission":"WRITE"}`}
+			case strings.Contains(key, "gh api repos/o/r/branches/main"):
+				return factory.CommandOutput{Stdout: `{"protected":false}`}
+			case strings.Contains(key, "gh api repos/o/r/rules/branches/main"):
+				return factory.CommandOutput{Stdout: "[]"}
+			default:
+				return factory.CommandOutput{Exit: 1, Stderr: "unexpected: " + key}
+			}
+		}
+		return factory.StartChecks(ctx, opts)
+	}
+
+	srv, err := New(Deps{Log: elog, Store: st, DataDir: dir, Factory: eng})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body, _ := json.Marshal(map[string]any{"folder": repo, "goal": "ship 8.1"})
+	r := httptest.NewRequest(http.MethodPost, "/api/factory/start", strings.NewReader(string(body)))
+	r.RemoteAddr, r.Host = "127.0.0.1:5000", "127.0.0.1:7777"
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, r)
+
+	if checkCalls != 1 {
+		t.Fatalf("Engine.StartCheck calls = %d, want 1", checkCalls)
+	}
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "claude auth login") {
+		t.Fatalf("POST /api/factory/start = %d %s, want 400 with claude auth login fix", w.Code, w.Body.String())
+	}
+	if got := eng.Projects(); len(got) != 0 {
+		t.Fatalf("refused HTTP start created project state: %+v", got)
 	}
 }

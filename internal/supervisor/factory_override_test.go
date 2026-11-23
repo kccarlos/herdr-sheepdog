@@ -98,6 +98,8 @@ func TestFactoryOverridePhoneCardMultiLineCommandAndAPNsNoOptions(t *testing.T) 
 	}
 
 	// APNs push for an override omits quick-reply options (S0.10, plan.md 7.1).
+	// The push is sent asynchronously, so wait for it as the result test below does.
+	waitFor(t, func() bool { return len(fn.all()) >= 1 }, "override APNs notification")
 	notifs := fn.all()
 	if len(notifs) != 1 {
 		t.Fatalf("APNs notifications = %d (%+v), want 1", len(notifs), notifs)

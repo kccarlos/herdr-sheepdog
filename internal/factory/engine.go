@@ -24,6 +24,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
+	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
 
 //go:embed coordinator.md
@@ -43,6 +44,9 @@ var lockGitTimeout = world.GitStageTimeout
 // ghTimeout bounds one GitHub executor or snapshot (a push plus gh calls).
 var ghTimeout = time.Minute
 
+// startCheckTimeout bounds StartChecks inside Engine.Start (before e.mu).
+const startCheckTimeout = 90 * time.Second
+
 // DiskReading is one volume's space reading for the disk alert observer (design.md 6, 7.3).
 type DiskReading struct {
 	Volume      string
@@ -58,10 +62,11 @@ type Engine struct {
 	Log          logging.Logger
 	Stderr       io.Writer // where unpersistable alerts (e.g. disk ENOSPC) are logged; nil uses os.Stderr
 	PassInterval time.Duration
-	Now          func() time.Time              // wall clock; nil uses time.Now
-	Since        func(time.Time) time.Duration // monotonic elapsed since previous pass; nil uses time.Since (wall delta when Now is set)
-	Bin          string                        // sheepdog binary named in run prompts
-	RunEnv       map[string]string             // added to every run's environment (daemon port)
+	Now          func() time.Time                                      // wall clock; nil uses time.Now
+	Since        func(time.Time) time.Duration                         // monotonic elapsed since previous pass; nil uses time.Since (wall delta when Now is set)
+	Bin          string                                                // sheepdog binary named in run prompts
+	RunEnv       map[string]string                                     // added to every run's environment (daemon port)
+	StartCheck   func(context.Context, DoctorOptions) []onboard.Result // nil runs StartChecks
 
 	probeLaunch       func(context.Context, []string) flow.ResolveFacts // test hook
 	poolRun           CommandFunc                                       // provider quota reader hook; nil uses hcExecRunner
@@ -144,12 +149,33 @@ func New(paths Paths, client *hc.Client) *Engine {
 	return e
 }
 
-// Start records the project (storing its id in local git config), marks it
-// started, and wakes the loop. A non-zero maxRunning sets Settings.MaxRunning.
+// Start runs start checks (J1), records the project (storing its id in local
+// git config), marks it started, and wakes the loop. A non-zero maxRunning
+// sets Settings.MaxRunning.
 func (e *Engine) Start(folder, goal string, maxRunning int) error {
 	folder, goal = strings.TrimSpace(folder), strings.TrimSpace(goal)
 	if folder == "" || goal == "" {
 		return errors.New("folder and goal are required")
+	}
+	check := e.StartCheck
+	if check == nil {
+		check = StartChecks
+	}
+	opts := DoctorOptions{Folder: folder, DataDir: e.Paths.DataDir}
+	if e.HC != nil {
+		opts.HCSocket = e.HC.Socket
+	}
+	checkCtx, checkCancel := context.WithTimeout(context.Background(), startCheckTimeout)
+	results := check(checkCtx, opts)
+	checkCancel()
+	var failed []string
+	for _, r := range results {
+		if r.Status == onboard.Fail {
+			failed = append(failed, r.Line())
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("not starting; fix these first (sheepdog factory doctor %s shows every check):\n%s", folder, strings.Join(failed, "\n"))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
 	defer cancel()
