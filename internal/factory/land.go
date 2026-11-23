@@ -57,7 +57,7 @@ func (e *Engine) execMerge(ctx context.Context, id string, s *flow.State, ti int
 		PR: p, Tip: tip, TipRel: rel, TipMergeOnly: tipMO, Lines: lines, LinesTimeout: linesTO,
 		Worker: worker, GitHubUnavailable: e.ghUnavail[id] || s.Project.HasAlert(flow.AlertGitHubUnavailable), BaseRed: f.BaseRed, BaseRedSince: f.BaseRedSince, BaseRedSpell: f.BaseRedSpell,
 	}
-	if r, _ := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[ti], Settings: s.Settings, Facts: fresh, Now: e.now()}); r.ID != "N42" {
+	if r, _ := flow.FirstMatch(flow.TaskRows, flow.In{Task: s.Tasks[ti], Settings: s.Settings, Facts: fresh, Asks: s.Asks, Now: e.now()}); r.ID != "N42" {
 		return fmt.Sprintf("merge called off on fresh check (row %s)", r.ID), true, nil
 	}
 	num = cmp.Or(num, p.Number)
@@ -77,16 +77,20 @@ func (e *Engine) execMarkDone(_ context.Context, _ string, s *flow.State, ti int
 // and reads fresh PR, hc terminal and worktree facts before acting.
 func (e *Engine) execCleanup(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t := &s.Tasks[ti]
-	if r, _ := flow.FirstMatch(flow.TaskRows, flow.In{Task: *t, Settings: s.Settings, Now: e.now()}); r.ID != "N1" {
+	if r, _ := flow.FirstMatch(flow.TaskRows, flow.In{Task: *t, Settings: s.Settings, Asks: s.Asks, Now: e.now()}); r.ID != "N1" {
 		return "", false, world.Fail(flow.ClassSettled, errors.New("factory: cleanup requires N1"))
 	}
 	if err := e.stopRuns(ctx, taskRuns(id, *t)); err != nil {
 		return "", false, err
 	}
-	stopTaskRuns(t, s.Settings, e.now())
+	now := e.now()
+	stopTaskRuns(t, s.Settings, now)
 	steps := []string{"stopped the task's runs"}
+	if n := cancelTaskDecisionAsks(s, t.ID, now); n > 0 {
+		steps = append(steps, fmt.Sprintf("cancelled %d decision ask(s)", n))
+	}
 	if len(t.Attempts) == 0 {
-		return steps[0], false, nil
+		return strings.Join(steps, "; "), false, nil
 	}
 	a := t.Attempts[len(t.Attempts)-1]
 	gctx, cancel := context.WithTimeout(ctx, ghTimeout)

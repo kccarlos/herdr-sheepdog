@@ -18,9 +18,12 @@ const (
 	AskStopReview   = "stop_reviewer"
 	AskTellFindings = "tell_worker_findings"
 	AskOpenRecap    = "open_recap"
+	AskOwnerNoRecap = "open_owner_no_recap"
 	AskSizeRecap    = "open_size_recap"
 	AskCIRecap      = "open_ci_recap"
 	AskTimeRecap    = "open_time_recap"
+	AskOpenN24      = "open_n24_ask"
+	AskOpenGate     = "open_gate_ask"
 	AskTellStop     = "tell_worker_stop"
 	AskTellDiverged = "tell_worker_diverged"
 	AskTellConflict = "tell_worker_conflict"
@@ -304,6 +307,18 @@ func noReviewRequired(in In) bool     { return !reviewRequired(in) }
 func working(in In) bool              { return in.Facts.Worker.State == RunWorking }
 func notWorking(in In) bool           { return !working(in) }
 func mergeAsked(in In) bool           { return Done(SinceRetry(in.acts()), key(AskMerge, headH(in))) }
+func hasOpenOwnerAsk(in In) bool      { return OpenOwnerAskForTask(in.Asks, in.Task.ID) != nil }
+func noOpenOwnerAsk(in In) bool       { return !hasOpenOwnerAsk(in) }
+func ownerGateApplies(in In) bool {
+	return in.Task.Gate == GateOwner || in.Task.Kind == TaskKindDesign && in.Settings.DesignGate == GateOwner
+}
+func gateYesCoversH(in In) bool { return GateYesCoversH(in.Asks, in.attempt(), in.Task.ID, headH(in)) }
+func ownerGateNo(in In) bool {
+	return ownerGateApplies(in) && !gateYesCoversH(in) && GateNoSinceRecap(in.Asks, in.Task, in.attempt()) != nil
+}
+func splitRetroUnanswered(in In) bool {
+	return in.Task.SplitFrom != "" && in.Facts.SplitFromHadRetro && !OwnerAnsweredN24(in.Asks, in.Task.ID)
+}
 
 func checksGrace(in In) time.Duration {
 	return time.Duration(in.Settings.ChecksGraceMinutes) * time.Minute
@@ -515,6 +530,12 @@ var TaskRows = []Row[In]{
 		}
 		return Decision{Why: "the worker is working", Asked: asked}
 	}},
+	{ID: "N24", WaitsOn: "the owner", Stage: "owner_gate", When: all(ladderSays(RecapAnswer), splitRetroUnanswered), Then: func(in In) Decision {
+		if hasOpenOwnerAsk(in) {
+			return say("split child of a retro task hit recap: waiting on the owner")(in)
+		}
+		return say("split child of a retro task hit recap: ask the owner whether to drop or go on", []string{key(AskOpenN24, headH(in))})(in)
+	}},
 	{ID: "N25", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: ladderSays(RecapAnswer), Then: func(in In) Decision {
 		return say("the ladder says recap", ensure(in, key(AskOpenRecap, "review")))(in)
 	}},
@@ -530,6 +551,15 @@ var TaskRows = []Row[In]{
 	}},
 	{ID: "N29", WaitsOn: "the reviewer", Stage: "working", When: ladderSays(Review), Then: func(in In) Decision {
 		return say("the ladder says review", n29Asks(in))(in)
+	}},
+	{ID: "N30", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: all(ladderSays(Passed), ownerGateNo), Then: func(in In) Decision {
+		return say("the owner answered no to the gate ask", ensure(in, key(AskOwnerNoRecap, len(in.Task.Recaps))))(in)
+	}},
+	{ID: "N31", WaitsOn: "the owner", Stage: "owner_gate", When: all(ladderSays(Passed), anyOf(hasOpenOwnerAsk, func(in In) bool { return ownerGateApplies(in) && !gateYesCoversH(in) })), Then: func(in In) Decision {
+		if !hasOpenOwnerAsk(in) && ownerGateApplies(in) && !gateYesCoversH(in) {
+			return say("owner gate applies: ask the owner to approve H", []string{key(AskOpenGate, headH(in))})(in)
+		}
+		return say("waiting on an open owner ask")(in)
 	}},
 	{ID: "N32", WaitsOn: "the worker", Stage: "working", When: ciReady(mergeConflict), Then: func(in In) Decision {
 		return say("PR conflicts with the base: tell the worker once to merge the base (never rebase)",
@@ -615,7 +645,7 @@ var TaskRows = []Row[In]{
 	{ID: "N41", WaitsOn: "GitHub", Stage: "ci", Why: WhyCI, When: all(ladderSays(Passed), mergeAsked, prOpen, notBehind),
 		Then: say("a merge was asked for H")},
 	{ID: "N42", WaitsOn: "GitHub", Stage: "ci", Why: WhyCI,
-		When: all(ladderSays(Passed), prOpen, prHeadIsH, tipAtOrBehindH, answered, githubAvail, checksGreen, mergeClean, noReviewRequired, notBehind, notWorking),
+		When: all(ladderSays(Passed), prOpen, prHeadIsH, tipAtOrBehindH, answered, githubAvail, checksGreen, mergeClean, noReviewRequired, notBehind, noOpenOwnerAsk, notWorking),
 		Then: func(in In) Decision {
 			h := headH(in)
 			return say("passed, green and mergeable at H", ensure(in, key(AskAccept, h)), ensure(in, key(AskMerge, h)))(in)

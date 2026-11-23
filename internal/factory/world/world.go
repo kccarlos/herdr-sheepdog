@@ -581,7 +581,8 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 			evs = append(evs, flow.RunEvent{Kind: flow.EvStatus, Status: "working"})
 		}
 	}
-	if hash != "" && rec.ScreenHash != "" && hash != rec.ScreenHash {
+	if hash != "" && rec.ScreenHash != "" && hash != rec.ScreenHash ||
+		rec.State == flow.PhaseWorking && hasLiveDescendant(ctx, client, agentPID(t)) {
 		evs = append(evs, flow.RunEvent{Kind: flow.EvActivity, ScreenHash: hash})
 	}
 	// Leave starting runs eligible for R3 while the menu is drawing or unreadable,

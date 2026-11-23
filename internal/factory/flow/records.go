@@ -137,12 +137,18 @@ func (o *Outcome) UnmarshalJSON(data []byte) error {
 }
 
 // PriorityUrgent marks a task for priority scheduling and the extra urgent slot (design.md 4.10).
-const PriorityUrgent = "urgent"
+const (
+	PriorityUrgent = "urgent"
+	TaskKindDesign = "design"
+	GateOwner      = "owner"
+)
 
 // Task is a planned task. It has no phase field: rows derive where it is.
 type Task struct {
 	ID       string    `json:"id"`
 	Title    string    `json:"title"`
+	Kind     string    `json:"kind,omitempty"`
+	Gate     string    `json:"gate,omitempty"`
 	Brief    string    `json:"brief"`
 	Outcomes []Outcome `json:"outcomes"`
 	After    []string  `json:"after,omitempty"`
@@ -156,6 +162,7 @@ type Task struct {
 	EstimateLines int                    `json:"estimate_lines"`
 	Request       map[string][]Candidate `json:"request,omitempty"`
 	SplitFrom     string                 `json:"split_from,omitempty"`
+	HadRetro      bool                   `json:"had_retro,omitempty"`
 	Done          *Merged                `json:"done,omitempty"`
 	Closed        *Closed                `json:"closed,omitempty"`
 	Dropped       *Dropped               `json:"dropped,omitempty"`
@@ -217,6 +224,7 @@ const (
 	TriggerSize    = "size"
 	TriggerCI      = "ci"
 	TriggerTime    = "time"
+	TriggerOwnerNo = "owner_no"
 )
 
 // SizeRecapAllowed is a size recap's choices: continue only while the task

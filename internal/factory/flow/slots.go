@@ -3,6 +3,8 @@ package flow
 import (
 	"cmp"
 	"slices"
+	"strings"
+	"time"
 )
 
 // UrgentExtraSlots is the extra slot beyond max_running for an urgent task (design.md 4.10).
@@ -42,18 +44,29 @@ func RunningTasks(tasks []Task, workerState map[string]RunState) int {
 }
 
 // GrantSlots decides which tasks that reached N10 this pass get a slot
-// (design.md 4.10): urgent first (owner-answered comes in slice 6), then
-// longest remaining critical path of estimate_lines through after, then oldest
-// (index in tasks). Gives up to maxRunning - running slots, plus one extra
-// slot beyond maxRunning for an urgent task.
-func GrantSlots(candidates []string, tasks []Task, running, maxRunning int) map[string]bool {
+// (design.md 4.10, KB-TSK-12): owner-answered first, then urgent, then longest
+// remaining critical path of estimate_lines through after, then oldest (index
+// in tasks). Gives up to maxRunning - running slots, plus one extra slot at the
+// cap (running == maxRunning) for an owner-answered or urgent task.
+func GrantSlots(candidates []string, tasks []Task, running, maxRunning int, asks ...Ask) map[string]bool {
 	byID, age := make(map[string]Task, len(tasks)), make(map[string]int, len(tasks))
 	for i, t := range tasks {
 		byID[t.ID], age[t.ID] = t, i
 	}
+	ownerAns := make(map[string]bool)
+	for _, a := range asks {
+		if a.Task != "" && a.Gated && a.Status == AskStatusAnswered && a.AnsweredBy == "owner" {
+			if last := lastSlotAt(byID[a.Task]); last.IsZero() || a.AnsweredAt.After(last) {
+				ownerAns[a.Task] = true
+			}
+		}
+	}
 	crit := criticalPaths(tasks)
 	ordered := slices.Clone(candidates)
 	slices.SortStableFunc(ordered, func(a, b string) int {
+		if oa, ob := ownerAns[a], ownerAns[b]; oa != ob {
+			return map[bool]int{true: -1, false: 1}[oa]
+		}
 		if ua, ub := byID[a].Priority == PriorityUrgent, byID[b].Priority == PriorityUrgent; ua != ub {
 			return map[bool]int{true: -1, false: 1}[ua]
 		}
@@ -65,7 +78,7 @@ func GrantSlots(candidates []string, tasks []Task, running, maxRunning int) map[
 	granted, used := make(map[string]bool), running
 	for _, id := range ordered {
 		limit := maxRunning
-		if byID[id].Priority == PriorityUrgent {
+		if running == maxRunning && (ownerAns[id] || byID[id].Priority == PriorityUrgent) {
 			limit += UrgentExtraSlots
 		}
 		if used < limit {
@@ -74,6 +87,22 @@ func GrantSlots(candidates []string, tasks []Task, running, maxRunning int) map[
 		}
 	}
 	return granted
+}
+
+func lastSlotAt(t Task) time.Time {
+	var at time.Time
+	scan := func(acts []Act) {
+		for _, act := range acts {
+			if act.Result == "done" && (act.Key == AskNewAttempt || strings.HasPrefix(act.Key, AskStartWorker)) && act.At.After(at) {
+				at = act.At
+			}
+		}
+	}
+	scan(t.Acts)
+	for _, a := range t.Attempts {
+		scan(a.Acts)
+	}
+	return at
 }
 
 // criticalPaths computes, for each non-ended task, the longest remaining chain
