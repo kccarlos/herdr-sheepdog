@@ -461,8 +461,10 @@ func TestContinueUnderGitTimeout(t *testing.T) {
 	}
 
 	// Shorten lockGitTimeout and block the single git diff call until ctx is done,
-	// so ChangedLines deterministically starves its budget while SendRun still succeeds.
+	// stubbing remoteBaseCommit so ChangedLines reaches diff without spawning git.
+	// This proves delivery after a timed-out diff under a nearly exhausted shared context.
 	l.finishWorkerTurn()
+	base := l.state().Tasks[0].Attempts[0].BaseCommit
 	old := lockGitTimeout
 	lockGitTimeout = 200 * time.Millisecond
 	t.Cleanup(func() { lockGitTimeout = old })
@@ -471,10 +473,20 @@ func TestContinueUnderGitTimeout(t *testing.T) {
 	srv := hctest.New(t)
 	var continueCalls atomic.Int32
 	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
-		if len(p.Argv) > 1 && p.Argv[0] == "git" && p.Argv[1] == "diff" {
-			continueCalls.Add(1)
-			<-ctx.Done()
-			return hc.ExecResult{TimedOut: true}, nil
+		if len(p.Argv) > 1 && p.Argv[0] == "git" {
+			code := 0
+			switch {
+			case slices.Equal(p.Argv, []string{"git", "remote", "get-url", "origin"}):
+				return hc.ExecResult{Code: &code, Stdout: []byte("https://github.com/acme/demo.git\n")}, nil
+			case slices.Equal(p.Argv, []string{"git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"}):
+				return hc.ExecResult{Code: &code, Stdout: []byte("refs/remotes/origin/main\n")}, nil
+			case slices.Equal(p.Argv, []string{"git", "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main^{commit}"}):
+				return hc.ExecResult{Code: &code, Stdout: []byte(base + "\n")}, nil
+			case p.Argv[1] == "diff":
+				continueCalls.Add(1)
+				<-ctx.Done()
+				return hc.ExecResult{TimedOut: true}, nil
+			}
 		}
 		return hctest.GitExec(p)
 	}
