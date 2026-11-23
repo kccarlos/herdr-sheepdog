@@ -394,7 +394,7 @@ There is no queue. N10's "a slot is free" is decided by one pure function over a
 
 ### 4.11 What the owner sees
 
-**In code, the stage, the wake and its text are fields of each row**, beside the condition, the thing to make sure of and "waits on". The table below, the wake list in section 10 and the run matrix in section 5 are printed from the rows by the table printer and checked against this file in `go test`; nobody keeps them by hand. As printed today:
+**In code, the stage and the why line are fields of each row** (`flow.Row`: `ID`, `WaitsOn`, `Stage`, `Why`), beside the condition and the thing to make sure of; the wake is part of what the row asks for. The rows are the only copy (rule V3 in 12.1): the table below describes them as read on 2026-11-23. As read today:
 
 | Matching rule | Stage | Why line |
 |---|---|---|
@@ -985,12 +985,13 @@ Every surface reads a **view**: a pure function of the stored state. The JSON sh
 | Override result | one short line per answered-Yes override card (voice, APNs, log; no card) | `flow.OverrideResult` over state (section 4.3b) |
 | Quiet rule | labels on every factory terminal | set at every start; enforced where it is today (`herdr.IsFactoryQuiet`) |
 
-**One source for the shapes (V1, V2).**
+**One source for the shapes and the tables (V1–V3).**
 
 | ID | Rule |
 |---|---|
 | V1 | A shape the owner's surfaces read is defined once, by the JSON tags of the Go type that the engine returns. No hand-kept copy of the shapes (a fixture file or a contract document) is kept beside the code |
 | V2 | Owner contract v1 (the Python engine's boundary) is superseded. `docs/dev/factory/owner-contract.md` is a pointer to this section, 12.3, 7.1 and section 6. Each refusal case of its old fixture is covered by a Go test or by a knowledge-base row marked later; none was dropped without one |
+| V3 | A rule table is defined once, by its rows in `internal/factory/flow`. No generated or printed copy is kept beside the code and no test compares one. A reviewer reads a table change as the changed row in the diff; the owner reads the rule that matched in `sheepdog factory log` and the debug view, from `log.jsonl`. The tables in this file describe the rows; where they differ, the code is right |
 
 **Order of building the surfaces (owner decision D14).** The web first: one factory page in the daemon's existing web, beside setup, voice and debug, with the factory section, the ask and override cards, and the log, the same content as the approved boards. The iOS and iPad boards follow once the web version has been used. Neither client has any factory code today.
 
@@ -1111,17 +1112,27 @@ The old tests are not ported. [knowledge-base.md](knowledge-base.md) lists each 
 
 | Layer | What | How |
 |---|---|---|
-| Table checks | The last row of each rule table is "no rule matched"; every row names who it waits on; the run and ask matrices have no empty cell; no numeric literal in a rule; the generated table document matches `docs/dev/factory/rules.md` | `go test`; a table change must regenerate the document, so a reviewer sees it |
+| Table checks | The last row of each rule table is "no rule matched"; every row names who it waits on; the run and ask matrices have no empty cell; no numeric literal in a rule | `go test` |
 | A case per row | Every row has at least one case that lands on it and on no earlier row | A row with no case fails the suite |
 | Order | For every pair of rows that can both hold (neighbours or not; the property generator finds the pairs), a case where both hold that fixes which one wins. For neighbours the suite is also run with the pair swapped and must fail. The ladder (L1–L13) and "making sure a run is alive" are tables and get the same tests | Catches a decorative table (SDF-54: reversing the rows kept the tests green) |
 | Properties | Random histories of records and facts: the invariants hold; every row can be reached; a second pass with nothing changed asks for nothing new; an accepted record is never lost | Property-based tests over `flow`, which is pure |
 | Histories | The pass-by-pass histories of [notes/table-audit.md](notes/table-audit.md) (happy path, review that never converges, size cap, the base moving, each CI class, failures, people acting outside the engine, the coordinator, the run table) are the first fixtures. Each asserts the row at every pass, that no normal pass lands on "no rule matched", and that nothing is asked for twice | Written before the rules they test |
-| Behaviour | One scripted history per knowledge-base behaviour | Each test names its `KB-…` id. A script lists ids with no test and ids mapped to nothing |
+| Behaviour | Pitfalls that no table row stands behind (K3) | Each test names its `KB-…` id |
 | Settings | Each setting refuses a value outside its range, and the table checks pass at each setting's minimum and maximum. (Running every behaviour test at every extreme is not done: too much surface for the first versions) | — |
-| Restart | Each behaviour test replayed with a restart after every step | The end must match the run without restarts |
+| Restart | Representative engine histories (review rounds, red-then-green CI, killed worker, killed coordinator, decision asks) replayed with a restart after every step | The end state, acts and asks must match the run without restarts |
 | Adapters | The argv for every role, permission and continue kind, per CLI; the screen classes | Golden files; the flags come from each CLI's `--help`; the screens are captured real ones (the fixtures in `factory/test/fixtures` are kept) |
 | World | The checks rollup and snapshot against JSON captured from real PRs (#665, #669 and #671 each have skipped checks); git against temporary repos; hc against `herdrtest` | — |
 | End to end | One toy project: start, plan, one task through evidence and review to merge, one ask, stop and start again | A private hc, scripted fake agent CLIs, a fake `gh`. Then one real run on a scratch repo before cutover |
+
+**What 'tested' means for a knowledge-base row (K1–K5).**
+
+| ID | Rule |
+|---|---|
+| K1 | Cutover step C2 is met by `make test` passing on the commit the version 1 exit run used, and by that run's record. No count of `KB-…` ids in test files is a gate, and no script lists ids without a test |
+| K2 | A knowledge-base row whose "Maps to" class is `RULE` or `LADDER` is tested by that table's own tests: a row with no case fails, and a pair in the wrong order fails. It needs no test that names its `KB-…` id. A row id that only appears later in the cell does not count |
+| K3 | A row needs a test that names its `KB-…` id when its Kind is PITFALL, its "Maps to" is not `LATER`, `NOT-NEEDED` or `NOT-CARRIED`, and its "Maps to" class is neither `RULE` nor `LADDER`; a GAP or CONFLICT row counts when it says "fixed after the check", whatever it names. "Names" means the id appears in a `_test.go` file under `internal/` or `cmd/`, on the test that guards it. Once the set is empty, one test in `internal/docscheck` keeps it empty, and fails on a named id that knowledge-base.md does not hold |
+| K4 | A fault found by the exit run or in the field is fixed with a test that names its `KB-…` row; if no row tells it, the fix adds the row |
+| K5 | A row's "Maps to" cell is the only place its status lives. The PR that builds a `LATER` row's behaviour, or moves a row later, changes the cell in the same PR. No other file counts the rows |
 
 **Hygiene.** Every path comes from one function that tests override; one test fails on a personal path or name in code, docs or fixtures, and on files a test run left behind; a guard test fails if any test touches the real home, a real daemon, the owner's hc or GitHub. End-to-end runs remove what they start (terminals, worktrees, trusted-folder entries).
 
@@ -1187,6 +1198,8 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | Worker-run review; a fallback to the first installed CLI; workers opening owner asks; values frozen for a running task; a docs-only exemption from review; a hand-kept list of generated files; an unbounded first `continue`; telling the worker about red checks during a review | **Not carried** | Each is a cause named in critique.md, or contradicts an owner decision |
 | Merging with no CI after a grace time; merging when checks cannot be read | **Not carried** (assumption A1; owner decision D12) | "No checks is never green". A repo with no PR workflow is refused at start. The owner's override is the one way to merge without checks |
 | Follow-up speech after an override `waiting` line; OF4 grace on outages, owner stops, or long sequential cards | **Not carried** (section 4.3b) | One line per override card keeps voice quiet; a daemon outage, owner stop, or large healthy card crossing `checks_grace_minutes` from `answered_at` reports remaining targets as `waiting`, leaves their overrides live, and records later outcomes in `log.jsonl` and the digest |
+| A scripted history for every RULE-kind knowledge-base row whose class is not a rule table | **Not carried** (section 16 K2, K3) | Such a row is checked by the review of the PR that built it and by the exit run where the run passes it (K2, K3) |
+| A generated table document (`docs/dev/factory/rules.md`) and a table printer (V3) | **Not carried** (section 12.1 V3) | The rows in `internal/factory/flow` are the only copy; a reviewer reads changes in `rows.go` and the owner reads matched rules in `sheepdog factory log` |
 
 ### 17.4 Open items
 
@@ -1225,8 +1238,8 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | O31 | (**design reviewer settles before 8.1 is briefed**) Once `StartChecks` runs inside `Engine.Start` (J1), whether `checkStartCLIs` should fail when any candidate in `projectCandidates(s)` is missing or signed out (today's CLI rule, which conflicts with J5's hold-and-fallback for a signed-out coordinator on voice/HTTP restarts) or pass whenever each required role has at least one signed-in candidate |
 | O32 | Whether and how to replace `flow/asks.go`'s hand-kept `negWaitRE`/`yesOptRE` regexes for `KB-ASK-9` so no hand-kept word list remains in ask validation |
 | O33 | The old owner-contract document, its fixture, and the two phase 0 documents. **Decided (design review, 2026-11-23, section 12.1 V1, V2):** `docs/dev/factory/owner-contract.md` becomes a pointer page in 8.3. `testdata/factory/owner-contract-v1.json` is retired in 8.4 with no Go golden test: every v2 shape differs from it, and a new fixture would be a hand-kept copy of the Go types; its 14 refusal cases are first mapped to Go tests or to knowledge-base rows marked later. `docs/dev/factory/engine-audit.md` and `baseline.md` are deleted in 8.4, not archived; all four files are in `main`'s history. The deletes wait for the owner's yes with the rest of 8.4 |
-| O34 | Whether sections 4.11 and 16's generated `docs/dev/factory/rules.md` table check is required for version 1 or deferred |
-| O35 | (**settle before 8.4**) What C2's "all have passing tests" means given 427 version 1 rows in [knowledge-base.md](knowledge-base.md) with 88 distinct `KB-…` ids named under `internal/` and `cmd/` and 342 rows unnamed — which classes need dedicated tests, which are met by the slice 8.2 exit run, and which move later (including `KB-STA-20`) |
+| O34 | **Decided (design review, 2026-11-23, section 12.1 V3):** dropped. The rows in `flow` are the only copy; no printer, no generated document, no check |
+| O35 | **Decided (design review, 2026-11-23, section 16 K1–K5):** C2 is `make test` plus the exit run's record, not an id count; named tests are required only for PITFALL rows whose class is not a rule table, as a follow-up after 8.4 and before C6; `KB-STA-20` is `LATER` |
 | O36 | (**owner decision, settle before 8.4**) Where the old `factory/` history is kept now that `main` has no commit that ever held `factory/` and the owner deleted the remote copy of `pre-reset-4df3a038` on 2026-11-22 keeping only a local tag — whether the local tag is enough, and whether [knowledge-base.md](knowledge-base.md)'s citations of old files must stay reachable |
 
 ### 17.5 The audit by simulation, and what it means
