@@ -276,7 +276,7 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 	if res, ok := s.resetConfirmFastPath(ctx, text); ok {
 		return res, false
 	}
-	if res, ok := s.factoryVoiceFastPath(c, forceSync); ok {
+	if res, ok := s.factoryVoiceFastPath(c, callID, daemon, forceSync); ok {
 		return res, false
 	}
 	sync := (s.cfg.ReplyWait < 0 || forceSync) && !daemon
