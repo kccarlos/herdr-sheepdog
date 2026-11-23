@@ -90,9 +90,6 @@ func agySession(ctx context.Context, client *hc.Client, cwd string, started time
 	return id
 }
 
-func isAgyTerminal(t hc.Terminal) bool {
-	return t.Labels["sheepdog.cli"] == AgyCLI || ArgvCLI(t.Argv) == AgyCLI || (t.Status != nil && t.Status.App == "antigravity")
-}
 func isRuleLine(ln string) bool {
 	return strings.HasPrefix(strings.TrimSpace(ln), "────────") && strings.Trim(strings.TrimSpace(ln), "─") == ""
 }
@@ -116,59 +113,4 @@ func agyInputAnchor(lines []string) int {
 		}
 	}
 	return -1
-}
-
-// parseAgyReport strips agy's input box, echoed `> ` prompt and `▸`/`●` blocks.
-func parseAgyReport(text, code string) ReportRead {
-	lines := strings.Split(strings.TrimRight(ansiRe.ReplaceAllString(strings.ReplaceAll(text, "\r\n", "\n"), ""), "\n \t"), "\n")
-	if anc := agyInputAnchor(lines); anc >= 0 {
-		lines = lines[:anc]
-	}
-	promptIdx, lastBlock := -1, -1
-	for i, ln := range lines {
-		if isAgyPromptLine(ln) && (i == 0 || isRuleLine(lines[i-1])) {
-			promptIdx, lastBlock = i, -1
-		} else if isAgyBlockHeader(ln) {
-			lastBlock = i
-		}
-	}
-	var out []string
-	if lastBlock < 0 && promptIdx >= 0 {
-		start := len(lines)
-		for i := promptIdx + 1; i < len(lines); i++ {
-			if strings.Contains(lines[i], `"majors":<n>}`) {
-				start = i + 1
-				break
-			}
-			if start == len(lines) && strings.TrimSpace(lines[i]) == "" {
-				start = i + 1
-			}
-		}
-		out = lines[start:]
-	} else {
-		inBlock, afterPrompt := false, promptIdx < 0
-		for i := max(promptIdx, 0); i < len(lines); i++ {
-			if ln := lines[i]; isAgyBlockHeader(ln) {
-				inBlock, afterPrompt = i != lastBlock || !strings.HasPrefix(ln, "▸"), true
-				if !inBlock && i+1 < len(lines) && strings.TrimSpace(lines[i+1]) != "" {
-					i++
-				}
-			} else if inBlock {
-				inBlock = strings.TrimSpace(ln) != ""
-			} else if afterPrompt {
-				out = append(out, ln)
-			}
-		}
-	}
-	if rd := parseReportTag(strings.TrimSpace(strings.Join(out, "\n")), code); rd.Status != ReportNotYet || code == "" {
-		return rd
-	}
-	for i := len(out) - 1; i >= 0; i-- {
-		raw := strings.TrimSpace(out[i])
-		if rep, ok := decodeReportJSON(raw); ok && rep.Code == code &&
-			rep.Round > 0 && rep.Head != "" && (rep.Verdict == flow.VerdictPass || rep.Verdict == flow.VerdictChanges) && rep.Majors >= 0 {
-			return ReportRead{Status: ReportFound, Report: rep, Raw: raw, Body: strings.TrimSpace(strings.Join(out[:i], "\n"))}
-		}
-	}
-	return ReportRead{Status: ReportNotYet}
 }

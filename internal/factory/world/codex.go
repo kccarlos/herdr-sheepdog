@@ -100,7 +100,7 @@ var (
 	codexReplyRe   = regexp.MustCompile(`(?m)^•[ \t]`)
 )
 
-// ReadCodexReport is ReadReport for a Codex run. Codex sends herdr-core no
+// ReadCodexReport reads a Codex reviewer's <report> tag. Codex sends herdr-core no
 // status (spike S0.3), so it reads now instead of waiting for idle: the tag
 // itself ends the run. The prompt echo (it holds the tag's template) is cut
 // away first: a tag counts only after a reply line below the last echo.

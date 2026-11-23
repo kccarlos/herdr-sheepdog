@@ -86,7 +86,7 @@ func TestDaemonProjectPathsUseMachineExec(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		prompt, err := eng.reviewerPrompt(ctx, "{proofs}", flow.Task{}, a, "c1", "", "", "", 1)
+		prompt, err := eng.reviewerPromptWith(ctx, "{proofs}", flow.Task{}, a, "c1", "", "", "", 1, "sheepdog", "")
 		done <- result{prompt, err}
 	}()
 	select {

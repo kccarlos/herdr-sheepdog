@@ -77,13 +77,13 @@ type RunSpec struct {
 	Labels, Env                     map[string]string // Env holds secrets: never argv
 }
 
-// ClaudeArgv returns the launch argv for Claude Code across the three roles,
-// stating model, effort and permission mode explicitly, skipping the bypass
-// confirmation dialog in bypass modes, and disabling the auto-updater
-// (KB-LCH-2, KB-LCH-4, KB-LCH-9, KB-LCH-11).
+// ClaudeArgv returns the launch argv for Claude Code coordinator and worker
+// runs, stating model, effort and permission mode explicitly, skipping the
+// bypass confirmation dialog in bypass modes, and disabling the auto-updater
+// (KB-LCH-2, KB-LCH-4, KB-LCH-9, KB-LCH-11). Reviewers use ClaudeReviewerArgv.
 func ClaudeArgv(role, model, effort, permissionMode string) []string {
 	model, effort, permissionMode = strings.TrimSpace(model), strings.TrimSpace(effort), strings.TrimSpace(permissionMode)
-	if (role != flow.RoleCoordinator && role != flow.RoleWorker && role != flow.RoleReviewer) ||
+	if (role != flow.RoleCoordinator && role != flow.RoleWorker) ||
 		model == "" || effort == "" || permissionMode == "" {
 		return nil
 	}
@@ -91,16 +91,25 @@ func ClaudeArgv(role, model, effort, permissionMode string) []string {
 	if permissionMode == "bypassPermissions" {
 		argv = append(argv, "--settings", `{"skipDangerousModePermissionPrompt":true}`)
 	}
-	if permissionMode == "dontAsk" {
-		// A reviewer never waits on a prompt (seen live: plan mode waited 20
-		// minutes on a shell prompt, then reviewed without running tests).
-		// dontAsk denies anything not listed; the list is read-only plus
-		// the usual test runners, and never Edit or Write.
-		// One argument with "=": --allowedTools takes many values and would
-		// otherwise swallow the prompt that StartTerminal appends (seen live).
-		argv = append(argv, "--allowedTools="+reviewerTools)
-	}
 	return argv
+}
+
+// ClaudeReviewerArgv returns the launch argv for a Claude Code reviewer with
+// the read-only base tools plus Bash(<bin> factory report review:*) and
+// Edit(//<findingsPath>) for that round's scratch findings file (design.md 9.2,
+// spike S-REV-2, KB-REV-4).
+func ClaudeReviewerArgv(model, effort, bin, findingsPath string) []string {
+	model, effort, bin, findingsPath = strings.TrimSpace(model), strings.TrimSpace(effort), strings.TrimSpace(bin), strings.TrimSpace(findingsPath)
+	if model == "" || effort == "" || findingsPath == "" || !filepath.IsAbs(findingsPath) {
+		return nil
+	}
+	trimmed := strings.TrimPrefix(filepath.Clean(findingsPath), "/")
+	if trimmed == "" {
+		return nil
+	}
+	bin = cmp.Or(bin, "sheepdog")
+	tools := reviewerTools + " Bash(" + bin + " factory report review:*) Edit(//" + trimmed + ")"
+	return []string{"env", "DISABLE_AUTOUPDATER=1", "claude", "--model", model, "--effort", effort, "--permission-mode", "dontAsk", "--allowedTools=" + tools}
 }
 
 // NewUUID returns a random version-4 UUID for Claude session ids (spike S0.8).
@@ -637,10 +646,10 @@ func ActRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, act, msg
 
 const reportReadLines = 4000
 
-// ReportStatus is the parsing outcome of ReadReport (design.md 9.3).
+// ReportStatus is the parsing outcome of ReadCodexReport (design.md 9.3).
 type ReportStatus string
 
-// The three outcomes of ReadReport.
+// The three outcomes of ReadCodexReport.
 const (
 	ReportNotYet  ReportStatus = "not_yet"
 	ReportFound   ReportStatus = "found"
@@ -672,59 +681,6 @@ var (
 	wrapIndentRe = regexp.MustCompile("\r?\n[ \t>]*")
 	nonSlugRe    = regexp.MustCompile(`[^a-z0-9]+`)
 )
-
-// ReadReport waits until term is idle/done, reads its stitched output, skips
-// everything up to and including the last prompt echo, and parses the last
-// <report>...</report> tag (design.md 9.3, spike S0.3); the reply text above
-// that tag is the findings (Body).
-func ReadReport(ctx context.Context, client *hc.Client, term, code string) (ReportRead, error) {
-	if client == nil || strings.TrimSpace(term) == "" {
-		return ReportRead{}, errors.New("world: ReadReport requires hc client and terminal")
-	}
-	t, err := waitReportIdle(ctx, client, term)
-	if err != nil {
-		return ReportRead{}, err
-	}
-	res, err := client.Read(ctx, term, reportReadLines)
-	if err != nil || (!res.Complete && !isAgyTerminal(t)) {
-		return ReportRead{Status: ReportNotYet}, err
-	}
-	if isAgyTerminal(t) {
-		return parseAgyReport(res.Text, code), nil
-	}
-	return parseReportText(res.Text, code), nil
-}
-
-func waitReportIdle(ctx context.Context, client *hc.Client, term string) (hc.Terminal, error) {
-	t, err := client.Get(ctx, term)
-	if err != nil || termIdle(t) {
-		return t, err
-	}
-	sub, err := client.Subscribe(ctx, hc.SubscribeFilter{Terminal: term})
-	if err != nil {
-		return t, err
-	}
-	defer func() { _ = sub.Close() }()
-	if _, snap := sub.Snapshot(); len(snap) == 0 || termIdle(snap[0]) {
-		return t, nil
-	}
-	for n := range sub.Events() {
-		var sd hc.StatusData
-		var td hc.TurnData
-		if (n.Method == "missed" && (len(n.Terminals) == 0 || termIdle(n.Terminals[0]))) ||
-			(n.Method == "event" && (n.Type == "finished" || n.Type == "removed" || n.Type == "lost" ||
-				(n.Type == "status" && n.DecodeData(&sd) == nil && sd.Status != nil && stateIdle(sd.Status.State)) ||
-				(n.Type == "turn" && n.DecodeData(&td) == nil && stateIdle(td.State)))) {
-			return t, nil
-		}
-	}
-	return t, cmp.Or(ctx.Err(), sub.Err())
-}
-
-func termIdle(t hc.Terminal) bool {
-	return t.State != "live" || (t.Status != nil && stateIdle(t.Status.State))
-}
-func stateIdle(s string) bool { return s == "idle" || s == "done" || s == "error" }
 
 func parseReportText(text, code string) ReportRead {
 	clean := ansiRe.ReplaceAllString(strings.ReplaceAll(text, "\r\n", "\n"), "")

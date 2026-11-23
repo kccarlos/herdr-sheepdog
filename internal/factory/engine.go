@@ -35,6 +35,9 @@ var workerTemplate string
 //go:embed reviewer.md
 var reviewerTemplate string
 
+//go:embed reviewer_cmd.md
+var reviewerCmdTemplate string
+
 var lockGitTimeout = world.GitStageTimeout
 
 // ghTimeout bounds one GitHub executor or snapshot (a push plus gh calls).
@@ -811,11 +814,7 @@ func launchArgv(role string, c flow.Candidate, cwd, session string, resume bool)
 		}
 		return world.AgyArgv(c.Model, session, "")
 	case "claude":
-		mode := "bypassPermissions"
-		if role == flow.RoleReviewer {
-			mode = "dontAsk"
-		}
-		return world.ClaudeSessionArgv(role, c.Model, c.Effort, mode, session, resume)
+		return world.ClaudeSessionArgv(role, c.Model, c.Effort, "bypassPermissions", session, resume)
 	}
 	return nil
 }
@@ -1686,13 +1685,22 @@ func workerPrompt(tmpl string, t flow.Task, a flow.Attempt, bin string) string {
 		"{worktree}", a.Worktree, "{branch}", a.Branch, "{sheepdog}", bin)
 }
 
-func (e *Engine) reviewerPrompt(ctx context.Context, tmpl string, t flow.Task, a flow.Attempt, h, kind, diff, rejections string, round int) (string, error) {
+func (e *Engine) reviewerPromptWith(ctx context.Context, tmpl string, t flow.Task, a flow.Attempt, h, kind, diff, rejections string, round int, bin, findingsPath string) (string, error) {
 	proofs, err := e.proofPrompt(ctx, a, h)
 	if err != nil {
 		return "", err
 	}
 	return fill(tmpl, "{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
-		"{outcomes}", bullets(t.Outcomes), "{proofs}", proofs, "{rejections}", rejections, "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code), nil
+		"{outcomes}", bullets(t.Outcomes), "{proofs}", proofs, "{rejections}", rejections, "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code,
+		"{sheepdog}", bin, "{findings_path}", findingsPath), nil
+}
+
+func (e *Engine) reviewDraftPath(id, task string, round int, code string) string {
+	p := e.Paths.ReviewDraft(id, task, round, code)
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
 }
 
 func readyCmd(bin string, outcomes []flow.Outcome) string {
@@ -1791,6 +1799,18 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		}
 		return false
 	}
+	if a.Review.Run != nil && a.Review.Run.State == flow.PhaseEnded && a.Review.RunID != "" {
+		if err := e.stopRuns(ctx, []string{a.Review.RunID}); err != nil {
+			e.logError("factory.hc_error", id, err)
+			return true
+		}
+		a.Review.RunID, a.Review.RunTokenHash = "", ""
+		if !e.saveLocked(id, *s) {
+			return true
+		}
+		facts.Reviewer = a.Review.Run.TaskRun()
+		return false
+	}
 	wasLive := a.Review.Run != nil && a.Review.Run.State != "" && a.Review.Run.State != flow.PhaseEnded
 	var err error
 	if facts.Reviewer, err = e.advanceRunLocked(ctx, id, t.ID, s, a.Review.RunID, flow.RoleReviewer, cmp.Or(a.Review.Reviewer.CLI, "claude"), &a.Review.Run); err != nil {
@@ -1803,6 +1823,10 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		save = true
 	}
 	if a.Review.Run != nil && a.Review.Run.State == flow.PhaseEnded && a.Review.RunID != "" {
+		if err := e.stopRuns(ctx, []string{a.Review.RunID}); err != nil {
+			e.logError("factory.hc_error", id, err)
+			return true
+		}
 		a.Review.RunID, a.Review.RunTokenHash = "", ""
 		save = true
 	}
@@ -1813,16 +1837,11 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		slices.ContainsFunc(s.Asks, func(ask flow.Ask) bool {
 			return ask.Status == flow.AskStatusOpen && ask.AskedBy == flow.RoleReviewer && ask.RunID == a.Review.RunID
 		}))
-	codex := a.Review.Reviewer.CLI == world.CodexCLI
-	if facts.Reviewer.State == flow.RunGone || !codex && facts.Reviewer.State != flow.RunIdle {
+	if a.Review.Reviewer.CLI != world.CodexCLI || facts.Reviewer.State == flow.RunGone {
 		return false
 	}
 	rctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
-	read := world.ReadReport
-	if codex {
-		read = world.ReadCodexReport
-	}
-	rd, err := read(rctx, e.HC, a.Review.RunID, a.Review.Code)
+	rd, err := world.ReadCodexReport(rctx, e.HC, a.Review.RunID, a.Review.Code)
 	cancel()
 	if err != nil {
 		e.logError("factory.hc_error", id, err)
@@ -1969,17 +1988,30 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	}
 	a.Review.Kind = cmp.Or(a.Review.Kind, kind)
 	kind = a.Review.Kind
-	model, effort := choice.Model, choice.Effort
-	argv := launchArgv(flow.RoleReviewer, choice, a.Worktree, "", false)
+	model, effort, bin := choice.Model, choice.Effort, cmp.Or(e.Bin, "sheepdog")
+	draftPath := e.reviewDraftPath(id, t.ID, round, a.Review.Code)
+	if choice.CLI != world.CodexCLI && draftPath != "" && guardTestPath(draftPath) == nil {
+		_ = os.MkdirAll(filepath.Dir(draftPath), 0o700)
+	}
+	var argv []string
+	if choice.CLI == "claude" {
+		argv = world.ClaudeReviewerArgv(model, effort, bin, draftPath)
+	} else {
+		argv = launchArgv(flow.RoleReviewer, choice, a.Worktree, "", false)
+	}
+	tmpl := reviewerCmdTemplate
+	if choice.CLI == world.CodexCLI {
+		tmpl = reviewerTemplate
+	}
 	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
 	defer cancel()
-	prompt, err := e.reviewerPrompt(gctx, reviewerTemplate, *t, *a, h, kind, diff, e.rejectionPrompt(id, t.ID, *a, h), round)
+	prompt, err := e.reviewerPromptWith(gctx, tmpl, *t, *a, h, kind, diff, e.rejectionPrompt(id, t.ID, *a, h), round, bin, draftPath)
 	if err != nil {
 		a.Review = prev
 		return "", true, err
 	}
 	if choice.CLI == world.AgyCLI {
-		prompt = "Do not modify, create or delete any files; read and run tests only. Put the <report> tag inside a fenced code block.\n\n" + prompt
+		prompt = "Do not modify, create or delete any files; read and run tests only (except writing findings to " + draftPath + ").\n\n" + prompt
 	}
 	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, &a.Review.Run, adopt, flow.RunRecord{Role: flow.RoleReviewer, CLI: choice.CLI}, world.RunSpec{
 		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
@@ -2156,17 +2188,25 @@ func (e *Engine) execTimeRecap(ctx context.Context, id string, s *flow.State, ti
 	return e.openRecapLocked(ctx, id, s, ti, flow.TriggerTime, flow.SizeRecapAllowed(s.Tasks[ti], s.Settings))
 }
 
-// execNudgeReviewer is N29: nudge an idle reviewer with no report tag once.
-func (e *Engine) execNudgeReviewer(ctx context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
-	a := flow.OpenAttempt(s.Tasks[ti])
+// execNudgeReviewer is N29: nudge an idle reviewer with no verdict once.
+func (e *Engine) execNudgeReviewer(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+	t := s.Tasks[ti]
+	a := flow.OpenAttempt(t)
 	if a == nil || a.Review == nil || a.Review.Run == nil || a.Review.RunID == "" {
 		return "reviewer already gone", false, nil
 	}
-	msg := fmt.Sprintf("You went idle with no report tag. End your reply with `<report>{\"code\":%q,\"round\":%d,\"head\":%q,\"verdict\":\"pass\"|\"changes\",\"majors\":N}</report>`.", a.Review.Code, a.Review.Round, a.Review.Head)
+	var msg string
+	if a.Review.Reviewer.CLI == world.CodexCLI {
+		msg = fmt.Sprintf("You went idle with no report tag. End your reply with `<report>{\"code\":%q,\"round\":%d,\"head\":%q,\"verdict\":\"pass\"|\"changes\",\"majors\":N}</report>`.", a.Review.Code, a.Review.Round, a.Review.Head)
+	} else {
+		bin := cmp.Or(e.Bin, "sheepdog")
+		draft := e.reviewDraftPath(id, t.ID, a.Review.Round, a.Review.Code)
+		msg = fmt.Sprintf("You went idle without submitting a verdict. Write any findings to %s and run `%s factory report review <pass|changes> --code %s --head %s --self-check-misses <n> --deletable \"<text or none>\" --findings %s` (omit the findings flag on pass with no findings).", draft, bin, a.Review.Code, a.Review.Head, draft)
+	}
 	if _, _, err := e.deliverRunLocked(ctx, a.Review.Run, s.Settings, msg, false, e.now()); err != nil {
 		return "", false, err
 	}
-	return fmt.Sprintf("nudged reviewer %s for report tag (round %d)", a.Review.RunID, a.Review.Round), false, nil
+	return fmt.Sprintf("nudged reviewer %s for verdict (round %d)", a.Review.RunID, a.Review.Round), false, nil
 }
 
 // execStopReviewer is N29: stop a reviewer that stayed idle with no report
