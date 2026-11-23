@@ -554,3 +554,99 @@ func TestFactoryWSNoProofPathPairedTapAnswers(t *testing.T) {
 		t.Fatalf("ask after paired device tap = %+v, want answered by %s with proof %s", a, dev.id, proofs[0].ID)
 	}
 }
+
+// O25 test 6 (web/HTTP half, VA3, VA7, VA9): InputTyped (/api/utterance and /ws SimulateText)
+// never mints a proof or answers a told factory ask; ticketless HTTP taps still fail 403
+// proof_required; paired device taps still succeed; live voice over /ws matching an engine
+// option after EventPush mints ProofInputVoice ("voice-session") and answers the ask.
+func TestFactoryWSVoiceAnswerAndHTTPProofs(t *testing.T) {
+	eng := newWebFakeFactory()
+	h := newHarness(t, harnessOpts{voice: true, factory: eng})
+	startSupervisorRun(t, h)
+
+	const askID = "ask-demo-o25-ws"
+	const cardID = "fask-" + askID
+	eng.openAsk(flow.Ask{
+		ID:        askID,
+		Project:   "demo",
+		Kind:      flow.KindRelease,
+		Gated:     true,
+		Question:  "Cut release v1.4 now?",
+		Options:   []string{"Cut v1.4", "Hold"},
+		Recommend: "Cut v1.4",
+		Task:      "T1",
+		At:        time.Now().UTC(),
+	})
+
+	// Wait for VA1 spoken push tagged pending_id=fask-ask-demo-o25-ws, then deliver EventPush.
+	var announced string
+	waitFor(t, 500*time.Millisecond, func() bool {
+		pushes := h.session.pushed()
+		tags := h.session.taggedPushes()
+		for i, tg := range tags {
+			if tg != nil && tg["pending_id"] == cardID && i < len(pushes) {
+				announced = pushes[i]
+				return true
+			}
+		}
+		return false
+	}, "VA1 spoken push for "+cardID)
+	h.sup.OnVoiceEvent(voice.EventPush{Text: announced, Urgency: voice.UrgencyIdle, PendingID: cardID})
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: announced, Final: true})
+	h.sup.OnVoiceEvent(voice.EventTurnComplete{})
+
+	// 1. Typed text via POST /api/utterance with exact option label never mints proof or answers.
+	if code, body := h.postJSON("/api/utterance", map[string]any{"text": "Cut v1.4"}, nil); code != http.StatusOK {
+		t.Fatalf("POST /api/utterance = %d %s, want 200", code, body)
+	}
+	if len(eng.mintedProofs()) != 0 || eng.firstAsk().Status != flow.AskStatusOpen {
+		t.Fatalf("VA3: /api/utterance answered factory ask or minted proof: proofs=%+v ask=%+v", eng.mintedProofs(), eng.firstAsk())
+	}
+
+	// 2. Typed text via /ws SimulateText with exact option label never mints proof or answers.
+	c := dialWS(t, h)
+	defer func() { _ = c.conn.CloseNow() }()
+	c.expect(wsproto.TypeStatus)
+	c.send(wsproto.SimulateText("Cut v1.4"))
+	waitFor(t, time.Second, func() bool { return len(h.session.sentTexts()) == 1 }, "/ws text reached session")
+	if _, err := h.sup.Handler()(context.Background(), voice.ToolCall{
+		ID:   "ws-text-exact",
+		Name: supervisor.ToolToSupervisor,
+		Args: map[string]any{"text": "Cut v1.4"},
+	}); err != nil {
+		t.Fatalf("to_supervisor after /ws text: %v", err)
+	}
+	if len(eng.mintedProofs()) != 0 || eng.firstAsk().Status != flow.AskStatusOpen {
+		t.Fatalf("VA3: /ws SimulateText answered factory ask or minted proof: proofs=%+v ask=%+v", eng.mintedProofs(), eng.firstAsk())
+	}
+
+	// 3. Ticketless loopback HTTP taps still fail 403 proof_required on both routes.
+	var errBody map[string]any
+	if code, _ := h.postJSON("/api/pending/answer", map[string]any{"id": cardID, "option": 1}, &errBody); code != http.StatusForbidden {
+		t.Fatalf("VA9: ticketless /api/pending/answer = %d %v, want 403", code, errBody)
+	}
+	errBody = nil
+	if code, _ := h.postJSON("/api/factory/asks/"+askID+"/answer", map[string]any{"option": "Cut v1.4"}, &errBody); code != http.StatusForbidden {
+		t.Fatalf("VA9: ticketless /api/factory/asks/{id}/answer = %d %v, want 403", code, errBody)
+	}
+
+	// 4. Live voice over /ws with exact option label after EventPush mints ProofInputVoice and answers.
+	c.sendAudio([]byte{1, 2, 3, 4})
+	waitFor(t, time.Second, func() bool { return h.session.sentFrames() == 1 }, "/ws audio reached session")
+	h.session.emit(voice.EventTranscript{Dir: voice.DirIn, Text: "Cut v1.4", Final: true})
+	c.expect(wsproto.TypeTranscript)
+	if _, err := h.sup.Handler()(context.Background(), voice.ToolCall{
+		ID:   "ws-voice-exact",
+		Name: supervisor.ToolToSupervisor,
+		Args: map[string]any{"text": "Cut v1.4"},
+	}); err != nil {
+		t.Fatalf("to_supervisor from live /ws voice: %v", err)
+	}
+	proofs := eng.mintedProofs()
+	if len(proofs) != 1 || proofs[0].InputKind != factory.ProofInputVoice || proofs[0].DeviceID != "voice-session" {
+		t.Fatalf("VA7: live /ws voice proofs = %+v, want 1 ProofInputVoice for voice-session", proofs)
+	}
+	if a := eng.firstAsk(); a.Status != flow.AskStatusAnswered || a.Answer != "Cut v1.4" || a.DeviceID != "voice-session" || a.ProofID != proofs[0].ID {
+		t.Fatalf("VA7: ask after live /ws voice = %+v, want answered Cut v1.4 by voice-session", a)
+	}
+}
