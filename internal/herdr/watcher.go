@@ -2,6 +2,7 @@ package herdr
 
 import (
 	"context"
+	"maps"
 	"sync/atomic"
 	"time"
 )
@@ -39,8 +40,9 @@ type Transition struct {
 	// directory; the supervisor reads the worker's own transcript from
 	// them (docs/dev/iteration-2.md WP4). Not logged: a session names a
 	// transcript on disk.
-	Session *AgentSession `json:"-"`
-	Cwd     string        `json:"-"`
+	Session *AgentSession     `json:"-"`
+	Cwd     string            `json:"-"`
+	Labels  map[string]string `json:"labels,omitempty"`
 }
 
 // WatcherConfig tunes the Watcher; zero values take the defaults below.
@@ -60,6 +62,9 @@ type WatcherConfig struct {
 	// closed, instead of leaving a stale row behind after a restart, and
 	// does not re-emit the ones whose state is unchanged.
 	Known map[string]State
+	// KnownLabels optionally carries each seeded pane's last persisted terminal
+	// labels so restart-time close transitions preserve them.
+	KnownLabels map[string]map[string]string
 }
 
 func (c WatcherConfig) withDefaults() WatcherConfig {
@@ -108,8 +113,10 @@ type paneState struct {
 
 	// session and cwd are the latest snapshot's agent_session and cwd,
 	// carried on every Transition.
-	session *AgentSession
-	cwd     string
+	session     *AgentSession
+	cwd         string
+	labels      map[string]string
+	labelsKnown bool
 
 	state State // confirmed state ("" until first emit)
 
@@ -207,7 +214,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 	// the ones that are gone and ensurePane subscribes the rest on sight.
 	for id, st := range w.cfg.Known {
 		if _, ok := w.panes[id]; !ok && id != "" {
-			w.panes[id] = &paneState{id: id, state: st, seeded: true}
+			w.panes[id] = &paneState{id: id, state: st, labels: maps.Clone(w.cfg.KnownLabels[id]), labelsKnown: true, seeded: true}
 		}
 	}
 	if err := w.refreshSnapshot(ctx); err != nil {
@@ -292,6 +299,7 @@ func (w *Watcher) refreshSnapshot(ctx context.Context) error {
 		if a.Cwd != "" {
 			p.cwd = a.Cwd
 		}
+		p.labels, p.labelsKnown = maps.Clone(a.Labels), true
 		w.applyEvent(ctx, p, StatusEvent{PaneID: a.PaneID, WorkspaceID: a.WorkspaceID, Agent: a.Agent, State: a.Status, At: at, Source: "snapshot"})
 		if renamed && p.state == before {
 			// The state did not change (a change would have carried the
@@ -390,6 +398,9 @@ func (w *Watcher) applyEvent(ctx context.Context, p *paneState, ev StatusEvent) 
 	if ev.WorkspaceID != "" {
 		p.workspace = ev.WorkspaceID
 	}
+	if !p.labelsKnown {
+		return
+	}
 	if ev.State != StateUnknown {
 		p.activate()
 	}
@@ -478,6 +489,7 @@ func (w *Watcher) emit(ctx context.Context, p *paneState, to State, at time.Time
 		Released:       released,
 		Source:         source,
 		Cwd:            p.cwd,
+		Labels:         maps.Clone(p.labels),
 	}
 	if p.session != nil {
 		sess := *p.session
@@ -509,6 +521,7 @@ func (w *Watcher) emitRename(ctx context.Context, p *paneState, at time.Time) {
 		Source:         "snapshot",
 		Renamed:        true,
 		Cwd:            p.cwd,
+		Labels:         maps.Clone(p.labels),
 	}
 	if p.session != nil {
 		sess := *p.session

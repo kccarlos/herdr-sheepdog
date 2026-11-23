@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
@@ -15,12 +16,45 @@ import (
 // model call on `blocked`, so callers that must not stall run it in a
 // goroutine per transition.
 func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
+	prev, hadPrev := s.store.Get(t.PaneID)
+	labels := t.Labels
+	if len(labels) == 0 {
+		labels = prev.Labels
+	}
+	if herdr.IsFactoryQuiet(labels, t.To) {
+		if !hadPrev {
+			return
+		}
+		reason := "prompt_gone"
+		if t.Closed {
+			reason = "pane_closed"
+		} else if t.Released || t.To == herdr.StateUnknown {
+			reason = "agent_exited"
+		}
+		s.mu.Lock()
+		s.dropPendingFor(t.PaneID, reason)
+		for _, q := range s.store.Questions() {
+			if q.PaneID == t.PaneID {
+				s.dropQuestionLocked(q)
+			}
+		}
+		s.forgetPrompt(t.PaneID)
+		if _, _, err := s.store.Apply(herdr.Transition{PaneID: t.PaneID, Closed: true, Source: t.Source}); err != nil {
+			s.log.Log(logSource, "supervisor.state_error", t.PaneID, map[string]any{"error": err.Error()})
+		}
+		s.syncToldLocked()
+		s.mu.Unlock()
+		s.cfg.WorkerLog.Forget(t.PaneID)
+		s.journal.clearMissing(t.PaneID)
+		s.invalidateBriefing()
+		s.syncNames()
+		return
+	}
 	if t.Released {
 		s.mu.Lock()
 		s.dropPendingFor(t.PaneID, "agent_exited")
 		s.mu.Unlock()
 	}
-	prev, _ := s.store.Get(t.PaneID)
 	var previousQuestion string
 	for _, q := range s.store.Questions() {
 		if q.PaneID == t.PaneID {
@@ -479,6 +513,9 @@ func (s *Supervisor) forgetPrompt(paneID string) {
 func (s *Supervisor) aliasOf(paneID string) string {
 	if a, ok := s.store.Get(paneID); ok && a.Alias != "" {
 		return a.Alias
+	}
+	if proj, ok := strings.CutPrefix(paneID, factoryPanePrefix); ok && proj != "" {
+		return proj + " factory"
 	}
 	return "another agent"
 }

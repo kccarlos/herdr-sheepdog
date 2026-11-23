@@ -1,6 +1,7 @@
 package state
 
 import (
+	"maps"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
@@ -86,6 +87,8 @@ type Agent struct {
 	// MaxJournal: one entry per done, idle or blocked transition, read
 	// from the worker's own transcript (docs/dev/roles.md "Worker history").
 	Journal []JournalEntry `json:"journal,omitempty"`
+	// Labels carries terminal labels (such as sheepdog.project and sheepdog.role).
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // JournalEntry is one line of an agent's work journal: what the worker
@@ -351,6 +354,7 @@ type Session struct {
 	// ToldPrompts are the prompts told to the user, oldest first, open or
 	// recently closed, so the displacement rail survives a restart.
 	ToldPrompts []ToldPrompt `json:"told_prompts,omitempty"`
+	FactoryAsks []string     `json:"factory_asks,omitempty"`
 }
 
 // MaxInvestigations is how many investigation records the session keeps
@@ -394,6 +398,7 @@ func (a Agent) clone() Agent {
 		}
 		a.Journal = j
 	}
+	a.Labels = maps.Clone(a.Labels)
 	return a
 }
 
@@ -445,6 +450,7 @@ func (t Table) clone() Table {
 		out.Session.Investigations = nil
 	}
 	out.Session.ToldPrompts = append([]ToldPrompt(nil), t.Session.ToldPrompts...)
+	out.Session.FactoryAsks = append([]string(nil), t.Session.FactoryAsks...)
 	return out
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -173,6 +174,9 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 	}
 	if t.Cwd != "" && a.Cwd != t.Cwd {
 		a.Cwd, changed = t.Cwd, true
+	}
+	if len(t.Labels) > 0 && !maps.Equal(a.Labels, t.Labels) {
+		a.Labels, changed = maps.Clone(t.Labels), true
 	}
 	if identity {
 		changed = true

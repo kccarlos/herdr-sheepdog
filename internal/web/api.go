@@ -175,12 +175,18 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	if s.deps.HerdrBackends != nil {
 		herdrBackends = s.deps.HerdrBackends(r.Context())
 	}
+	qs, pending := s.questionViews(), s.pendingView(snap.PendingAction)
+	if pending == nil {
+		if i := slices.IndexFunc(qs, func(q PendingView) bool { return strings.HasPrefix(q.ID, "fask-") }); i >= 0 {
+			pending = &qs[i]
+		}
+	}
 	writeJSON(w, http.StatusOK, StateResponse{
 		Agents:                views,
 		AttentionCounts:       counts,
 		SpaceMutes:            mutes,
-		PendingAction:         s.pendingView(snap.PendingAction),
-		Questions:             s.questionViews(),
+		PendingAction:         pending,
+		Questions:             qs,
 		Session:               snap.Session,
 		Voice:                 s.voiceInfo(hs),
 		Settings:              s.settings(),
@@ -378,6 +384,8 @@ func (s *Server) pendingView(p *state.PendingAction) *PendingView {
 	v := &PendingView{PendingAction: *p, Summary: p.SpokenSummary, Options: supervisor.PendingOptions(*p)}
 	if row, ok := s.deps.Store.Get(p.PaneID); ok {
 		v.Agent = row.Alias
+	} else if proj, ok := strings.CutPrefix(p.PaneID, "factory:"); ok && proj != "" {
+		v.Agent = proj + " factory"
 	}
 	return v
 }
@@ -387,6 +395,11 @@ func (s *Server) questionViews() []PendingView {
 	out := []PendingView{}
 	for _, q := range s.deps.Store.Questions() {
 		out = append(out, *s.pendingView(&q))
+	}
+	if s.deps.Supervisor != nil {
+		for _, q := range s.deps.Supervisor.FactoryQuestions() {
+			out = append(out, *s.pendingView(&q))
+		}
 	}
 	return out
 }
@@ -418,7 +431,7 @@ func (s *Server) handlePendingAnswer(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := s.toolCtx()
 	defer cancel()
-	res, err := s.deps.Supervisor.AnswerTap(ctx, req.ID, req.Option)
+	res, err := s.deps.Supervisor.AnswerTapDevice(ctx, req.ID, req.Option, deviceOf(r))
 	switch {
 	case errors.Is(err, supervisor.ErrPendingGone):
 		writeError(w, http.StatusConflict, supervisor.ErrPendingGone.Error())
