@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -17,26 +18,25 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
-// Real macOS `hc exec --timeout 5 -- /bin/ps -ax -o pid=,ppid=,stat=` output
-// shapes recorded in the PR 5b.7b (O24) spike against a scratch hc terminal.
-const (
-	o24PSLiveTree = "" +
-		"    1     0 Ss  \n" +
-		" 1285     1 S   \n" +
-		"25392  1285 Ss+ \n" +
-		"25393 25392 S+  \n" +
-		"25394 25393 S+  \n"
-	o24PSNoChild = "" +
-		"    1     0 Ss  \n" +
-		" 1285     1 S   \n" +
-		"25392  1285 Ss+ \n" +
-		"26000  1285 S   \n"
-	o24PSZombieOnly = "" +
-		"    1     0 Ss  \n" +
-		" 1285     1 S   \n" +
-		"25392  1285 Ss+ \n" +
-		"25393 25392 Z+  \n"
-)
+func fmtPSEtime(d time.Duration) string {
+	s := max(int(d/time.Second), 0)
+	if h := s / 3600; h > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", h, (s%3600)/60, s%60)
+	}
+	return fmt.Sprintf("%02d:%02d", s/60, s%60)
+}
+
+func o24PS(agentAge time.Duration, extra ...string) string {
+	var b strings.Builder
+	b.WriteString("    1     0 Ss    5-00:00:00\n")
+	b.WriteString(" 1285     1 S       10:00:00\n")
+	fmt.Fprintf(&b, "25392  1285 Ss+   %10s\n", fmtPSEtime(agentAge))
+	for _, line := range extra {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
 
 type quietWorkerFixture struct {
 	srv    *hctest.Server
@@ -139,16 +139,29 @@ func (f *quietWorkerFixture) onPSExec(t *testing.T, fn func(hc.ExecParams) (hc.E
 
 // TestQuietWorkerWithLiveChildSkipsR21AndR22 verifies PR 5b.7b (O24): when a
 // working agent's screen only ticks a stripped timer while its foreground
-// process has a live descendant (e.g. folded `go test`), neither R21 nor R22
-// fires.
+// process has a live descendant started 10m after the agent (e.g. folded
+// `go test`), neither R21 nor R22 fires.
 func TestQuietWorkerWithLiveChildSkipsR21AndR22(t *testing.T) {
 	ctx := context.Background()
-	f := newQuietWorkerFixture(t, time.Date(2026, 11, 22, 10, 0, 0, 0, time.UTC))
+	start := time.Date(2026, 11, 22, 10, 0, 0, 0, time.UTC)
+	agentBorn := start.Add(time.Second)
+	helperBorn := agentBorn.Add(2 * time.Second)
+	cmdBorn := agentBorn.Add(10 * time.Minute)
+	f := newQuietWorkerFixture(t, start)
 
 	zero := 0
 	execCalls := f.onPSExec(t, func(hc.ExecParams) (hc.ExecResult, error) {
-		return hc.ExecResult{Code: &zero, Stdout: []byte(o24PSLiveTree)}, nil
+		out := o24PS(f.now.Sub(agentBorn),
+			fmt.Sprintf("25393 25392 S+    %10s", fmtPSEtime(f.now.Sub(helperBorn))),
+			fmt.Sprintf("25394 25393 S+    %10s", fmtPSEtime(f.now.Sub(cmdBorn))),
+		)
+		return hc.ExecResult{Code: &zero, Stdout: []byte(out)}, nil
 	})
+
+	// Worker works normally for 10m, then launches a quiet command.
+	f.srv.SetScreen(f.worker, "✢ Starting go test ./... (04s · esc to interrupt)\n")
+	f.now = start.Add(10*time.Minute + 5*time.Second)
+	f.eng.passProject(ctx, f.id, false)
 
 	reqsBefore := len(f.srv.Requests())
 	// Advance well past quiet_minutes (20m) and quiet_minutes + interrupt_seconds (21m30s).
@@ -156,10 +169,10 @@ func TestQuietWorkerWithLiveChildSkipsR21AndR22(t *testing.T) {
 		dt     time.Duration
 		screen string
 	}{
-		{10 * time.Minute, "✻ Running go test ./... (10m 05s · esc to interrupt)\n"},
-		{10 * time.Minute, "✽ Running go test ./... (20m 05s · esc to interrupt)\n"},
-		{2 * time.Minute, "✢ Running go test ./... (22m 05s · esc to interrupt)\n"},
-		{3 * time.Minute, "✻ Running go test ./... (25m 05s · esc to interrupt)\n"},
+		{10 * time.Minute, "✻ Starting go test ./... (10m 04s · esc to interrupt)\n"},
+		{10 * time.Minute, "✽ Starting go test ./... (20m 04s · esc to interrupt)\n"},
+		{2 * time.Minute, "✢ Starting go test ./... (22m 04s · esc to interrupt)\n"},
+		{3 * time.Minute, "✻ Starting go test ./... (25m 04s · esc to interrupt)\n"},
 	} {
 		f.srv.SetScreen(f.worker, step.screen)
 		f.now = f.now.Add(step.dt)
@@ -194,16 +207,25 @@ func TestQuietWorkerWithoutChildTriggersR21AndR22(t *testing.T) {
 	ctx := context.Background()
 	zero := 0
 	for _, tc := range []struct {
-		name  string
-		psOut string
+		name   string
+		zombie bool
 	}{
-		{"no children", o24PSNoChild},
-		{"zombie child only", o24PSZombieOnly},
+		{"no children", false},
+		{"zombie child only", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newQuietWorkerFixture(t, time.Date(2026, 11, 22, 11, 0, 0, 0, time.UTC))
+			start := time.Date(2026, 11, 22, 11, 0, 0, 0, time.UTC)
+			agentBorn := start.Add(time.Second)
+			zombieBorn := agentBorn.Add(5 * time.Minute)
+			f := newQuietWorkerFixture(t, start)
 			execCalls := f.onPSExec(t, func(hc.ExecParams) (hc.ExecResult, error) {
-				return hc.ExecResult{Code: &zero, Stdout: []byte(tc.psOut)}, nil
+				var out string
+				if tc.zombie {
+					out = o24PS(f.now.Sub(agentBorn), fmt.Sprintf("25393 25392 Z+    %10s", fmtPSEtime(f.now.Sub(zombieBorn))))
+				} else {
+					out = o24PS(f.now.Sub(agentBorn), "26000  1285 S          10:00")
+				}
+				return hc.ExecResult{Code: &zero, Stdout: []byte(out)}, nil
 			})
 
 			f.srv.SetScreen(f.worker, "✻ Running go test ./... (10m 05s · esc to interrupt)\n")
@@ -303,25 +325,36 @@ func TestQuietWorkerFailedOrTimedOutChildReadChangesNothing(t *testing.T) {
 }
 
 // TestQuietWorkerLiveChildSurvivesRestart verifies PR 5b.7b (O24) is
-// restart-safe: LastActivity updated by live child activity persists in
-// state.json across an Engine restart, so a daemon restart neither falsely
-// interrupts an active child nor resets the quiet clock once the child exits.
+// restart-safe: LastActivity updated by a live descendant started 10m after
+// the agent persists in state.json across an Engine restart, and once that
+// command exits (leaving only the 2s session helper), R21 fires after
+// quiet_minutes from the persisted LastActivity.
 func TestQuietWorkerLiveChildSurvivesRestart(t *testing.T) {
 	ctx := context.Background()
-	f := newQuietWorkerFixture(t, time.Date(2026, 11, 22, 13, 0, 0, 0, time.UTC))
+	start := time.Date(2026, 11, 22, 13, 0, 0, 0, time.UTC)
+	agentBorn := start.Add(time.Second)
+	helperBorn := agentBorn.Add(2 * time.Second)
+	cmdBorn := agentBorn.Add(10 * time.Minute)
+	f := newQuietWorkerFixture(t, start)
 
 	zero := 0
 	var liveChild atomic.Bool
 	liveChild.Store(true)
 	f.onPSExec(t, func(hc.ExecParams) (hc.ExecResult, error) {
+		lines := []string{fmt.Sprintf("25393 25392 S+    %10s", fmtPSEtime(f.now.Sub(helperBorn)))}
 		if liveChild.Load() {
-			return hc.ExecResult{Code: &zero, Stdout: []byte(o24PSLiveTree)}, nil
+			lines = append(lines, fmt.Sprintf("25394 25393 S+    %10s", fmtPSEtime(f.now.Sub(cmdBorn))))
 		}
-		return hc.ExecResult{Code: &zero, Stdout: []byte(o24PSNoChild)}, nil
+		return hc.ExecResult{Code: &zero, Stdout: []byte(o24PS(f.now.Sub(agentBorn), lines...))}, nil
 	})
 
+	// Launch quiet command 10m after agent boot.
+	f.srv.SetScreen(f.worker, "✢ Starting go test ./... (04s · esc to interrupt)\n")
+	f.now = start.Add(10*time.Minute + 5*time.Second)
+	f.eng.passProject(ctx, f.id, false)
+
 	// Child runs quietly for 18 minutes before daemon restart.
-	f.srv.SetScreen(f.worker, "✻ Running go test ./... (18m 00s · esc to interrupt)\n")
+	f.srv.SetScreen(f.worker, "✻ Starting go test ./... (18m 04s · esc to interrupt)\n")
 	f.now = f.now.Add(18 * time.Minute)
 	f.eng.passProject(ctx, f.id, false)
 
@@ -330,9 +363,9 @@ func TestQuietWorkerLiveChildSurvivesRestart(t *testing.T) {
 	eng2.Log = logging.NewJSONLLogger(&bytes.Buffer{})
 	eng2.Now = func() time.Time { return f.now }
 
-	// At t=21m (past quiet_minutes from initial R8), child is still alive -> no R21.
+	// At 21m past command start (past quiet_minutes), child is still alive -> no R21.
 	reqsBefore := len(f.srv.Requests())
-	f.srv.SetScreen(f.worker, "✽ Running go test ./... (21m 00s · esc to interrupt)\n")
+	f.srv.SetScreen(f.worker, "✽ Starting go test ./... (21m 04s · esc to interrupt)\n")
 	f.now = f.now.Add(3 * time.Minute)
 	eng2.passProject(ctx, f.id, true)
 	if n := f.interruptsSince(reqsBefore); n != 0 {
@@ -342,15 +375,15 @@ func TestQuietWorkerLiveChildSurvivesRestart(t *testing.T) {
 		t.Fatalf("after restart with live child run = %+v, want working with LastActivity=%v", got, f.now)
 	}
 
-	// Child exits; quiet clock starts from the persisted LastActivity (t=21m).
+	// Command exits (2s session helper remains); quiet clock runs from persisted LastActivity.
 	liveChild.Store(false)
-	f.now = f.now.Add(10 * time.Minute) // t=31m: only 10m since last child activity -> still no R21
+	f.now = f.now.Add(10 * time.Minute) // 10m since last child activity -> still no R21
 	eng2.passProject(ctx, f.id, false)
 	if n := f.interruptsSince(reqsBefore); n != 0 {
 		t.Fatalf("interrupts 10m after child exit = %d, want 0", n)
 	}
 
-	// At t=41m (20m = quiet_minutes after child exited at t=21m) -> R21 fires once.
+	// 20m = quiet_minutes after child exited -> R21 fires once even with helper alive.
 	f.now = f.now.Add(10 * time.Minute)
 	eng2.passProject(ctx, f.id, false)
 	if n := f.interruptsSince(reqsBefore); n != 1 {
@@ -358,23 +391,37 @@ func TestQuietWorkerLiveChildSurvivesRestart(t *testing.T) {
 	}
 }
 
-// TestQuietWorkerOldHelperOnlyTriggersR21 verifies O24 round 2: a worker whose
-// only descendant is a long-lived helper (etime longer than the current working
-// turn, both on the first turn and on a second turn after idle -> working) is
-// not kept alive and still hits R21 and R22.
-func TestQuietWorkerOldHelperOnlyTriggersR21(t *testing.T) {
+// TestQuietWorkerStartupHelperOnlyTriggersR21 verifies O24 round 3: a session
+// helper started 2s after the agent never counts as activity on turn 1, later
+// turns (after idle or via R18 held send), or after a daemon restart, so R21
+// and R22 fire as before.
+func TestQuietWorkerStartupHelperOnlyTriggersR21(t *testing.T) {
 	ctx := context.Background()
 	zero := 0
 
+	assertR21AndR22 := func(t *testing.T, f *quietWorkerFixture, eng *Engine, reqsBefore int, label string) {
+		t.Helper()
+		if n := f.interruptsSince(reqsBefore); n != 1 {
+			t.Fatalf("%s: interrupts at quiet_minutes = %d, want 1", label, n)
+		}
+		f.srv.SetScreen(f.worker, "■ Conversation interrupted - tell the model what to do differently.\n")
+		f.now = f.now.Add(15 * time.Second)
+		eng.passProject(ctx, f.id, false)
+		f.now = f.now.Add(75 * time.Second) // 90s = interrupt_seconds -> R22
+		eng.passProject(ctx, f.id, false)
+		if got := f.run(t); got == nil || got.State != flow.PhaseEnded || got.Result != flow.EndStuck {
+			t.Fatalf("%s: after interrupt_seconds run = %+v, want ended(stuck) via R22", label, got)
+		}
+	}
+
 	t.Run("first turn", func(t *testing.T) {
-		f := newQuietWorkerFixture(t, time.Date(2026, 11, 22, 14, 0, 0, 0, time.UTC))
-		psOldHelper := "" +
-			"    1     0 Ss    5-00:00:00\n" +
-			" 1285     1 S        1:00:00\n" +
-			"25392  1285 Ss+        20:05\n" +
-			"25393 25392 S+         25:00\n"
+		start := time.Date(2026, 11, 22, 14, 0, 0, 0, time.UTC)
+		agentBorn := start.Add(time.Second)
+		helperBorn := agentBorn.Add(2 * time.Second)
+		f := newQuietWorkerFixture(t, start)
 		execCalls := f.onPSExec(t, func(hc.ExecParams) (hc.ExecResult, error) {
-			return hc.ExecResult{Code: &zero, Stdout: []byte(psOldHelper)}, nil
+			out := o24PS(f.now.Sub(agentBorn), fmt.Sprintf("25393 25392 S+    %10s", fmtPSEtime(f.now.Sub(helperBorn))))
+			return hc.ExecResult{Code: &zero, Stdout: []byte(out)}, nil
 		})
 
 		f.srv.SetScreen(f.worker, "✻ Running go test ./... (10m 05s · esc to interrupt)\n")
@@ -386,33 +433,20 @@ func TestQuietWorkerOldHelperOnlyTriggersR21(t *testing.T) {
 		reqsBefore := len(f.srv.Requests())
 		f.eng.passProject(ctx, f.id, false)
 
-		if n := f.interruptsSince(reqsBefore); n != 1 {
-			t.Fatalf("interrupts at quiet_minutes with old helper only = %d, want 1", n)
-		}
-		f.srv.SetScreen(f.worker, "■ Conversation interrupted - tell the model what to do differently.\n")
-		f.now = f.now.Add(15 * time.Second)
-		f.eng.passProject(ctx, f.id, false)
-		f.now = f.now.Add(75 * time.Second) // 90s = interrupt_seconds -> R22
-		f.eng.passProject(ctx, f.id, false)
-
-		got := f.run(t)
-		if got == nil || got.State != flow.PhaseEnded || got.Result != flow.EndStuck {
-			t.Fatalf("after interrupt_seconds run = %+v, want ended(stuck) via R22", got)
-		}
+		assertR21AndR22(t, f, f.eng, reqsBefore, "first turn")
 		if execCalls.Load() == 0 {
 			t.Fatalf("expected child process probe via hc exec, got 0 calls")
 		}
 	})
 
 	t.Run("second turn after idle", func(t *testing.T) {
-		f := newQuietWorkerFixture(t, time.Date(2026, 11, 22, 15, 0, 0, 0, time.UTC))
-		psOldHelper := "" +
-			"    1     0 Ss    5-00:00:00\n" +
-			" 1285     1 S        1:00:00\n" +
-			"25392  1285 Ss+        50:35\n" +
-			"25393 25392 S+         45:00\n"
+		start := time.Date(2026, 11, 22, 15, 0, 0, 0, time.UTC)
+		agentBorn := start.Add(time.Second)
+		helperBorn := agentBorn.Add(2 * time.Second)
+		f := newQuietWorkerFixture(t, start)
 		f.onPSExec(t, func(hc.ExecParams) (hc.ExecResult, error) {
-			return hc.ExecResult{Code: &zero, Stdout: []byte(psOldHelper)}, nil
+			out := o24PS(f.now.Sub(agentBorn), fmt.Sprintf("25393 25392 S+    %10s", fmtPSEtime(f.now.Sub(helperBorn))))
+			return hc.ExecResult{Code: &zero, Stdout: []byte(out)}, nil
 		})
 
 		// Finish turn 1 (R20 -> idle).
@@ -431,8 +465,6 @@ func TestQuietWorkerOldHelperOnlyTriggersR21(t *testing.T) {
 		f.srv.SetScreen(f.worker, "✢ Second turn running (01s · esc to interrupt)\n")
 		f.eng.passProject(ctx, f.id, false)
 
-		// Helper etime (45m) is shorter than total run age (~50m), but longer
-		// than turn 2 (20m) -> must not count as activity, so R21 fires.
 		f.srv.SetScreen(f.worker, "✻ Second turn running (10m 00s · esc to interrupt)\n")
 		f.now = f.now.Add(10 * time.Minute)
 		f.eng.passProject(ctx, f.id, false)
@@ -442,58 +474,127 @@ func TestQuietWorkerOldHelperOnlyTriggersR21(t *testing.T) {
 		reqsBefore := len(f.srv.Requests())
 		f.eng.passProject(ctx, f.id, false)
 
-		if n := f.interruptsSince(reqsBefore); n != 1 {
-			t.Fatalf("turn 2 interrupts at quiet_minutes with old helper only = %d, want 1", n)
+		assertR21AndR22(t, f, f.eng, reqsBefore, "second turn after idle")
+	})
+
+	t.Run("second turn via held message without idle", func(t *testing.T) {
+		start := time.Date(2026, 11, 22, 16, 0, 0, 0, time.UTC)
+		agentBorn := start.Add(time.Second)
+		helperBorn := agentBorn.Add(2 * time.Second)
+		f := newQuietWorkerFixture(t, start)
+		f.onPSExec(t, func(hc.ExecParams) (hc.ExecResult, error) {
+			out := o24PS(f.now.Sub(agentBorn), fmt.Sprintf("25393 25392 S+    %10s", fmtPSEtime(f.now.Sub(helperBorn))))
+			return hc.ExecResult{Code: &zero, Stdout: []byte(out)}, nil
+		})
+
+		// Queue a held message so R18 delivers turn 2 without visiting PhaseIdle.
+		st, err := LoadState(f.paths.State(f.id))
+		if err != nil {
+			t.Fatal(err)
 		}
+		st.Tasks[0].Attempts[0].Run.Held = []string{"follow-up turn"}
+		if err := SaveState(f.paths.State(f.id), st); err != nil {
+			t.Fatal(err)
+		}
+		f.srv.SetStatus(f.worker, &hc.Status{App: "claude-code", State: "idle"})
+		f.now = f.now.Add(5 * time.Second)
+		f.eng.passProject(ctx, f.id, false)
+		f.now = f.now.Add(25 * time.Second) // R18 sends held message, stays PhaseWorking
+		f.eng.passProject(ctx, f.id, false)
+		if got := f.run(t); got == nil || got.State != flow.PhaseWorking || len(got.Held) != 0 {
+			t.Fatalf("after R18 run = %+v, want working with Held drained", got)
+		}
+
+		f.srv.SetScreen(f.worker, "✻ Running go test ./... (10m 05s · esc to interrupt)\n")
+		f.now = f.now.Add(10 * time.Minute)
+		f.eng.passProject(ctx, f.id, false)
+
+		f.srv.SetScreen(f.worker, "✽ Running go test ./... (20m 05s · esc to interrupt)\n")
+		f.now = f.now.Add(10 * time.Minute)
+		reqsBefore := len(f.srv.Requests())
+		f.eng.passProject(ctx, f.id, false)
+
+		assertR21AndR22(t, f, f.eng, reqsBefore, "second turn via R18")
+	})
+
+	t.Run("after restart", func(t *testing.T) {
+		start := time.Date(2026, 11, 22, 17, 0, 0, 0, time.UTC)
+		agentBorn := start.Add(time.Second)
+		helperBorn := agentBorn.Add(2 * time.Second)
+		f := newQuietWorkerFixture(t, start)
+		f.onPSExec(t, func(hc.ExecParams) (hc.ExecResult, error) {
+			out := o24PS(f.now.Sub(agentBorn), fmt.Sprintf("25393 25392 S+    %10s", fmtPSEtime(f.now.Sub(helperBorn))))
+			return hc.ExecResult{Code: &zero, Stdout: []byte(out)}, nil
+		})
+
+		f.srv.SetScreen(f.worker, "✻ Running go test ./... (10m 05s · esc to interrupt)\n")
+		f.now = f.now.Add(10 * time.Minute)
+		f.eng.passProject(ctx, f.id, false)
+
+		// Daemon restarts mid-turn while only the 2s helper is running.
+		eng2 := newGitTestEngine(t, f.paths, f.client)
+		eng2.Log = logging.NewJSONLLogger(&bytes.Buffer{})
+		eng2.Now = func() time.Time { return f.now }
+
+		f.srv.SetScreen(f.worker, "✽ Running go test ./... (20m 05s · esc to interrupt)\n")
+		f.now = f.now.Add(10 * time.Minute) // 20m = quiet_minutes -> R21
+		reqsBefore := len(f.srv.Requests())
+		eng2.passProject(ctx, f.id, true)
+
+		assertR21AndR22(t, f, eng2, reqsBefore, "after restart")
 	})
 }
 
-// TestQuietWorkerFreshChildAndGrandchildUnderOldHelperSkipR21 verifies O24
-// round 2: a fresh child started in the current turn, or a fresh grandchild
-// under an old helper started in the current turn, counts as activity and keeps
-// R21 from firing.
-func TestQuietWorkerFreshChildAndGrandchildUnderOldHelperSkipR21(t *testing.T) {
+// TestQuietWorkerChildAndGrandchildAfterStartSkipR21 verifies O24 round 3: a
+// child started 10m after the agent, either directly or as a grandchild under a
+// 2s startup helper, counts as activity and keeps R21 and R22 from firing.
+func TestQuietWorkerChildAndGrandchildAfterStartSkipR21(t *testing.T) {
 	ctx := context.Background()
 	zero := 0
 	cases := []struct {
-		name  string
-		psOut string
+		name      string
+		underHelp bool
 	}{
-		{
-			name: "fresh direct child",
-			psOut: "" +
-				"    1     0 Ss    5-00:00:00\n" +
-				" 1285     1 S        1:00:00\n" +
-				"25392  1285 Ss+        25:05\n" +
-				"25393 25392 S+         05:03\n",
-		},
-		{
-			name: "fresh grandchild under old helper",
-			psOut: "" +
-				"    1     0 Ss    5-00:00:00\n" +
-				" 1285     1 S        1:00:00\n" +
-				"25392  1285 Ss+      1:30:00\n" +
-				"25393 25392 S+       1:02:03\n" +
-				"25394 25393 S+         05:03\n",
-		},
+		{"direct child started 10m after agent", false},
+		{"grandchild started 10m after agent under 2s helper", true},
 	}
 
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newQuietWorkerFixture(t, time.Date(2026, 11, 22, 16+i, 0, 0, 0, time.UTC))
+			start := time.Date(2026, 11, 22, 18+i, 0, 0, 0, time.UTC)
+			agentBorn := start.Add(time.Second)
+			helperBorn := agentBorn.Add(2 * time.Second)
+			cmdBorn := agentBorn.Add(10 * time.Minute)
+			f := newQuietWorkerFixture(t, start)
 			execCalls := f.onPSExec(t, func(hc.ExecParams) (hc.ExecResult, error) {
-				return hc.ExecResult{Code: &zero, Stdout: []byte(tc.psOut)}, nil
+				var out string
+				if tc.underHelp {
+					out = o24PS(f.now.Sub(agentBorn),
+						fmt.Sprintf("25393 25392 S+    %10s", fmtPSEtime(f.now.Sub(helperBorn))),
+						fmt.Sprintf("25394 25393 S+    %10s", fmtPSEtime(f.now.Sub(cmdBorn))),
+					)
+				} else {
+					out = o24PS(f.now.Sub(agentBorn),
+						fmt.Sprintf("25393 25392 S+    %10s", fmtPSEtime(f.now.Sub(cmdBorn))),
+					)
+				}
+				return hc.ExecResult{Code: &zero, Stdout: []byte(out)}, nil
 			})
+
+			// Advance to 10m05s when the command starts and establish baseline screen hash.
+			f.srv.SetScreen(f.worker, "✢ Starting go test ./... (04s · esc to interrupt)\n")
+			f.now = start.Add(10*time.Minute + 5*time.Second)
+			f.eng.passProject(ctx, f.id, false)
 
 			reqsBefore := len(f.srv.Requests())
 			for _, step := range []struct {
 				dt     time.Duration
 				screen string
 			}{
-				{10 * time.Minute, "✻ Running go test ./... (10m 05s · esc to interrupt)\n"},
-				{10 * time.Minute, "✽ Running go test ./... (20m 05s · esc to interrupt)\n"},
-				{2 * time.Minute, "✢ Running go test ./... (22m 05s · esc to interrupt)\n"},
-				{3 * time.Minute, "✻ Running go test ./... (25m 05s · esc to interrupt)\n"},
+				{10 * time.Minute, "✻ Starting go test ./... (10m 04s · esc to interrupt)\n"},
+				{10 * time.Minute, "✽ Starting go test ./... (20m 04s · esc to interrupt)\n"},
+				{2 * time.Minute, "✢ Starting go test ./... (22m 04s · esc to interrupt)\n"},
+				{3 * time.Minute, "✻ Starting go test ./... (25m 04s · esc to interrupt)\n"},
 			} {
 				f.srv.SetScreen(f.worker, step.screen)
 				f.now = f.now.Add(step.dt)
@@ -501,7 +602,7 @@ func TestQuietWorkerFreshChildAndGrandchildUnderOldHelperSkipR21(t *testing.T) {
 			}
 
 			if n := f.interruptsSince(reqsBefore); n != 0 {
-				t.Fatalf("interrupts while fresh descendant running = %d, want 0", n)
+				t.Fatalf("interrupts while qualifying descendant running = %d, want 0", n)
 			}
 			if execCalls.Load() == 0 {
 				t.Fatalf("expected child process probe via hc exec, got 0 calls")

@@ -14,37 +14,37 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 )
 
-// Real macOS `hc exec --timeout 5 -- /bin/ps -ax -o pid=,ppid=,stat=` output
-// shapes captured in the PR 5b.7b (O24) spike against a scratch hc terminal.
+// Realistic macOS `ps -ax -o pid=,ppid=,stat=,etime=` output shapes where every
+// child's elapsed time is at most its parent's elapsed time.
 const (
 	psOutputLiveChild = "" +
-		"    1     0 Ss  \n" +
-		" 1285     1 S   \n" +
-		"25392  1285 Ss+ \n" +
-		"25393 25392 S+  \n"
+		"    1     0 Ss    5-00:00:00\n" +
+		" 1285     1 S        1:00:00\n" +
+		"25392  1285 Ss+        25:00\n" +
+		"25393 25392 S+         15:00\n"
 	psOutputLiveGrandchild = "" +
-		"    1     0 Ss  \n" +
-		" 1285     1 S   \n" +
-		"25392  1285 Ss+ \n" +
-		"25393 25392 S+  \n" +
-		"25394 25393 S+  \n"
+		"    1     0 Ss    5-00:00:00\n" +
+		" 1285     1 S        1:00:00\n" +
+		"25392  1285 Ss+        25:00\n" +
+		"25393 25392 S+         24:58\n" +
+		"25394 25393 S+         15:00\n"
 	psOutputNoChild = "" +
-		"    1     0 Ss  \n" +
-		" 1285     1 S   \n" +
-		"25392  1285 Ss+ \n" +
-		"26000  1285 S   \n"
+		"    1     0 Ss    5-00:00:00\n" +
+		" 1285     1 S        1:00:00\n" +
+		"25392  1285 Ss+        25:00\n" +
+		"26000  1285 S          10:00\n"
 	psOutputZombieOnly = "" +
-		"    1     0 Ss  \n" +
-		" 1285     1 S   \n" +
-		"25392  1285 Ss+ \n" +
-		"25393 25392 Z+  \n"
+		"    1     0 Ss    5-00:00:00\n" +
+		" 1285     1 S        1:00:00\n" +
+		"25392  1285 Ss+        25:00\n" +
+		"25393 25392 Z+         15:00\n"
 )
 
 // TestObserveRunLiveChildActivity verifies PR 5b.7b (O24) at the world observer
 // boundary: on a working run with an unchanged screen, a bounded hc exec ps
 // check emits EvActivity iff the agent process (foreground.pid) has at least
-// one live non-zombie descendant; an unreadable or timed-out check is unknown
-// and changes nothing.
+// one live non-zombie descendant started at least start_minutes after the agent;
+// an unreadable or timed-out check is unknown and changes nothing.
 func TestObserveRunLiveChildActivity(t *testing.T) {
 	ctx := context.Background()
 	zero, one := 0, 1
@@ -146,8 +146,8 @@ func TestObserveRunLiveChildActivity(t *testing.T) {
 				State:          flow.PhaseWorking,
 				Status:         "working",
 				StatusReported: true,
-				StartedAt:      time.Now().Add(-time.Minute),
-				LastActivity:   time.Now().Add(-time.Minute),
+				StartedAt:      time.Now().Add(-25*time.Minute - time.Second),
+				LastActivity:   time.Now().Add(-25 * time.Minute),
 			}
 			// Establish baseline screen hash.
 			baseEvs, err := ObserveRun(ctx, client, rec)
@@ -244,11 +244,13 @@ func runObserveChildActivityCase(t *testing.T, rec flow.RunRecord, psOut string)
 	})
 }
 
-// TestObserveRunChildTurnAgeAndHelperFiltering verifies O24 round 2: a
-// descendant counts as activity only if its elapsed time is shorter than the
-// run's current working turn (since idle -> working, or StartedAt for the
-// first turn), while still traversing through old helpers to fresh grandchildren.
-func TestObserveRunChildTurnAgeAndHelperFiltering(t *testing.T) {
+// TestObserveRunChildAgentRelativeAge verifies O24 round 3: a live non-zombie
+// descendant counts as activity iff agentEtime - childEtime >= start_minutes,
+// read from the same ps output. Startup helpers (e.g. started 2s after the
+// agent) never count on turn 1, later turns, or adopted/restarted runs, while
+// commands started later (e.g. 10m after the agent) count both directly and as
+// grandchildren under a helper.
+func TestObserveRunChildAgentRelativeAge(t *testing.T) {
 	now := time.Now()
 	firstTurn := flow.RunRecord{
 		ID:             "r1",
@@ -258,19 +260,30 @@ func TestObserveRunChildTurnAgeAndHelperFiltering(t *testing.T) {
 		State:          flow.PhaseWorking,
 		Status:         "working",
 		StatusReported: true,
-		StartedAt:      now.Add(-20 * time.Minute),
+		StartedAt:      now.Add(-20*time.Minute - time.Second),
 		LastActivity:   now.Add(-20 * time.Minute),
 	}
 
-	// Build a second-turn RunRecord via flow.StepRun: started 2h ago, idle 1h ago,
-	// delivered new turn 10m ago (so turn age is 10m while run age is 2h).
+	// Build a second-turn RunRecord via flow.StepRun: started 2h0m1s ago, idle 1h ago,
+	// delivered new turn 10m ago.
 	def := flow.DefaultSettings()
-	secondTurn := flow.RunRecord{ID: "r1", Address: "t1", CLI: "claude", Role: flow.RoleWorker, State: flow.PhaseStarting, StartedAt: now.Add(-2 * time.Hour), LastActivity: now.Add(-2 * time.Hour)}
+	secondTurn := flow.RunRecord{ID: "r1", Address: "t1", CLI: "claude", Role: flow.RoleWorker, State: flow.PhaseStarting, StartedAt: now.Add(-2*time.Hour - time.Second), LastActivity: now.Add(-2 * time.Hour)}
 	secondTurn, _, _ = flow.StepRun(secondTurn, flow.RunEvent{Kind: flow.EvStatus, Status: "working"}, def, now.Add(-2*time.Hour+5*time.Second))
 	secondTurn, _, _ = flow.StepRun(secondTurn, flow.RunEvent{Kind: flow.EvStatus, Status: "idle"}, def, now.Add(-1*time.Hour-20*time.Second))
 	secondTurn, _, _ = flow.StepRun(secondTurn, flow.RunEvent{Kind: flow.EvTick}, def, now.Add(-1*time.Hour))
 	secondTurn, _, _ = flow.StepRun(secondTurn, flow.RunEvent{Kind: flow.EvDeliver, Msg: "next turn"}, def, now.Add(-10*time.Minute))
 	secondTurn, _, _ = flow.StepRun(secondTurn, flow.RunEvent{Kind: flow.EvStatus, Status: "working"}, def, now.Add(-9*time.Minute-55*time.Second))
+
+	// Adopted/restarted run record with no StartedAt timestamp.
+	noStartedAt := flow.RunRecord{
+		ID:             "r1",
+		Address:        "t1",
+		CLI:            "claude",
+		Role:           flow.RoleWorker,
+		State:          flow.PhaseWorking,
+		Status:         "working",
+		StatusReported: true,
+	}
 
 	cases := []struct {
 		name         string
@@ -279,61 +292,116 @@ func TestObserveRunChildTurnAgeAndHelperFiltering(t *testing.T) {
 		wantActivity bool
 	}{
 		{
-			name: "first turn old helper only is not active",
+			name: "first turn helper started 2s after agent is not active",
 			rec:  firstTurn,
 			psOut: "" +
 				"    1     0 Ss    5-00:00:00\n" +
 				"25392     1 Ss+        20:00\n" +
-				"25393 25392 S+         25:00\n",
+				"25393 25392 S+         19:58\n",
 			wantActivity: false,
 		},
 		{
-			name: "first turn fresh child is active",
+			name: "first turn child started 10m after agent is active",
 			rec:  firstTurn,
 			psOut: "" +
 				"    1     0 Ss    5-00:00:00\n" +
 				"25392     1 Ss+        20:00\n" +
-				"25393 25392 S+         05:03\n",
+				"25393 25392 S+         10:00\n",
 			wantActivity: true,
 		},
 		{
-			name: "first turn fresh grandchild under old helper is active",
+			name: "first turn grandchild started 10m after agent under 2s helper is active",
 			rec:  firstTurn,
 			psOut: "" +
 				"    1     0 Ss    5-00:00:00\n" +
 				"25392     1 Ss+        20:00\n" +
-				"25393 25392 S+         45:00\n" +
-				"25394 25393 S+         05:03\n",
+				"25393 25392 S+         19:58\n" +
+				"25394 25393 S+         10:00\n",
 			wantActivity: true,
 		},
 		{
-			name: "first turn old grandchild under old helper is not active",
+			name: "first turn grandchild started 5s after agent under 2s helper is not active",
 			rec:  firstTurn,
 			psOut: "" +
 				"    1     0 Ss    5-00:00:00\n" +
 				"25392     1 Ss+        20:00\n" +
-				"25393 25392 S+         45:00\n" +
-				"25394 25393 S+         25:00\n",
+				"25393 25392 S+         19:58\n" +
+				"25394 25393 S+         19:55\n",
 			wantActivity: false,
 		},
 		{
-			name: "second turn helper older than turn but younger than run is not active",
+			name: "second turn helper started 2s after agent is not active",
 			rec:  secondTurn,
 			psOut: "" +
 				"    1     0 Ss    5-00:00:00\n" +
 				"25392     1 Ss+      2:00:00\n" +
-				"25393 25392 S+         25:00\n",
+				"25393 25392 S+       1:59:58\n",
 			wantActivity: false,
 		},
 		{
-			name: "second turn fresh grandchild under old helper is active",
+			name: "second turn grandchild started 10m after agent under 2s helper is active",
 			rec:  secondTurn,
 			psOut: "" +
 				"    1     0 Ss    5-00:00:00\n" +
 				"25392     1 Ss+      2:00:00\n" +
-				"25393 25392 S+       1:30:00\n" +
-				"25394 25393 S+         05:03\n",
+				"25393 25392 S+       1:59:58\n" +
+				"25394 25393 S+       1:50:00\n",
 			wantActivity: true,
+		},
+		{
+			name: "boundary child started exactly start_minutes after agent is active",
+			rec:  firstTurn,
+			psOut: "" +
+				"    1     0 Ss    5-00:00:00\n" +
+				"25392     1 Ss+        20:00\n" +
+				"25393 25392 S+         18:00\n",
+			wantActivity: true,
+		},
+		{
+			name: "boundary child started 1s before start_minutes after agent is not active",
+			rec:  firstTurn,
+			psOut: "" +
+				"    1     0 Ss    5-00:00:00\n" +
+				"25392     1 Ss+        20:00\n" +
+				"25393 25392 S+         18:01\n",
+			wantActivity: false,
+		},
+		{
+			name: "grandchild under helper with unreadable etime still counts",
+			rec:  firstTurn,
+			psOut: "" +
+				"    1     0 Ss    5-00:00:00\n" +
+				"25392     1 Ss+        20:00\n" +
+				"25393 25392 S+             -\n" +
+				"25394 25393 S+         10:00\n",
+			wantActivity: true,
+		},
+		{
+			name: "missing etime column is unknown and not active",
+			rec:  firstTurn,
+			psOut: "" +
+				"    1     0 Ss\n" +
+				"25392     1 Ss+\n" +
+				"25393 25392 S+\n",
+			wantActivity: false,
+		},
+		{
+			name: "adopted run without StartedAt counts child started 10m after agent",
+			rec:  noStartedAt,
+			psOut: "" +
+				"    1     0 Ss    5-00:00:00\n" +
+				"25392     1 Ss+        20:00\n" +
+				"25393 25392 S+         10:00\n",
+			wantActivity: true,
+		},
+		{
+			name: "adopted run without StartedAt ignores helper started 2s after agent",
+			rec:  noStartedAt,
+			psOut: "" +
+				"    1     0 Ss    5-00:00:00\n" +
+				"25392     1 Ss+        20:00\n" +
+				"25393 25392 S+         19:58\n",
+			wantActivity: false,
 		},
 	}
 
@@ -347,23 +415,27 @@ func TestObserveRunChildTurnAgeAndHelperFiltering(t *testing.T) {
 }
 
 // TestObserveRunChildEtimeParsing checks ps etime parsing for mm:ss, hh:mm:ss,
-// and dd-hh:mm:ss (`05:03`, `1:02:03`, `2-01:02:03`) and malformed inputs.
+// and dd-hh:mm:ss (`05:03`, `1:02:03`, `2-01:02:03`) and malformed inputs using
+// realistic parent/child etimes (childEtime <= agentEtime).
 func TestObserveRunChildEtimeParsing(t *testing.T) {
 	now := time.Now()
 	cases := []struct {
 		name         string
-		etime        string
-		turnAge      time.Duration
+		agentEtime   string
+		agentAge     time.Duration
+		childEtime   string
 		wantActivity bool
 	}{
-		{"mm:ss shorter than turn", "05:03", 10 * time.Minute, true},
-		{"mm:ss longer than turn", "05:03", 4 * time.Minute, false},
-		{"hh:mm:ss shorter than turn", "1:02:03", 2 * time.Hour, true},
-		{"hh:mm:ss longer than turn", "1:02:03", 1 * time.Hour, false},
-		{"dd-hh:mm:ss shorter than turn", "2-01:02:03", 50 * time.Hour, true},
-		{"dd-hh:mm:ss longer than turn", "2-01:02:03", 48 * time.Hour, false},
-		{"malformed etime is not active", "not-an-etime", 10 * time.Hour, false},
-		{"out of range seconds is not active", "05:99", 10 * time.Hour, false},
+		{"mm:ss child started 10m after agent", "15:03", 15*time.Minute + 4*time.Second, "05:03", true},
+		{"mm:ss helper started 2s after agent", "05:05", 5*time.Minute + 6*time.Second, "05:03", false},
+		{"hh:mm:ss child started 10m after agent", "1:12:03", 1*time.Hour + 12*time.Minute + 4*time.Second, "1:02:03", true},
+		{"hh:mm:ss helper started 2s after agent", "1:02:05", 1*time.Hour + 2*time.Minute + 6*time.Second, "1:02:03", false},
+		{"dd-hh:mm:ss child started 10m after agent", "2-01:12:03", 49*time.Hour + 12*time.Minute + 4*time.Second, "2-01:02:03", true},
+		{"dd-hh:mm:ss helper started 2s after agent", "2-01:02:05", 49*time.Hour + 2*time.Minute + 6*time.Second, "2-01:02:03", false},
+		{"malformed child etime is not active", "20:00", 20*time.Minute + time.Second, "not-an-etime", false},
+		{"out of range seconds is not active", "20:00", 20*time.Minute + time.Second, "05:99", false},
+		{"zero-day missing hours is not active", "20:00", 20*time.Minute + time.Second, "0-05:03", false},
+		{"malformed agent etime is not active", "not-an-etime", 20*time.Minute + time.Second, "05:03", false},
 	}
 
 	for _, tc := range cases {
@@ -376,16 +448,45 @@ func TestObserveRunChildEtimeParsing(t *testing.T) {
 				State:          flow.PhaseWorking,
 				Status:         "working",
 				StatusReported: true,
-				StartedAt:      now.Add(-tc.turnAge),
-				LastActivity:   now.Add(-tc.turnAge),
+				StartedAt:      now.Add(-tc.agentAge),
+				LastActivity:   now.Add(-tc.agentAge),
 			}
 			psOut := "" +
-				"    1     0 Ss    5-00:00:00\n" +
-				"25392     1 Ss+      2:00:00\n" +
-				"25393 25392 S+    " + tc.etime + "\n"
+				"    1     0 Ss   10-00:00:00\n" +
+				"25392     1 Ss+   " + tc.agentEtime + "\n" +
+				"25393 25392 S+    " + tc.childEtime + "\n"
 			if got := runObserveChildActivityCase(t, rec, psOut); got != tc.wantActivity {
-				t.Fatalf("etime=%q turnAge=%v: EvActivity = %t, want %t", tc.etime, tc.turnAge, got, tc.wantActivity)
+				t.Fatalf("agent=%q child=%q: EvActivity = %t, want %t", tc.agentEtime, tc.childEtime, got, tc.wantActivity)
 			}
 		})
+	}
+}
+
+// TestParseEtime checks ps elapsed-time parsing directly without socket I/O.
+func TestParseEtime(t *testing.T) {
+	cases := []struct {
+		in     string
+		want   time.Duration
+		wantOK bool
+	}{
+		{"00:00", 0, true},
+		{"05:03", 5*time.Minute + 3*time.Second, true},
+		{"1:02:03", time.Hour + 2*time.Minute + 3*time.Second, true},
+		{"2-01:02:03", 49*time.Hour + 2*time.Minute + 3*time.Second, true},
+		{"0-01:02:03", time.Hour + 2*time.Minute + 3*time.Second, true},
+		{"0-05:03", 0, false},
+		{"0-99:00:00", 0, false},
+		{"05:99", 0, false},
+		{"60:00", 0, false},
+		{"-05:03", 0, false},
+		{"+05:03", 0, false},
+		{"not-an-etime", 0, false},
+		{"100001-00:00:00", 0, false},
+	}
+	for _, tc := range cases {
+		got, ok := parseEtime(tc.in)
+		if ok != tc.wantOK || got != tc.want {
+			t.Errorf("parseEtime(%q) = (%v, %t), want (%v, %t)", tc.in, got, ok, tc.want, tc.wantOK)
+		}
 	}
 }
