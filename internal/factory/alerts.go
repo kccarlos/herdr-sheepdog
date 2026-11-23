@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
@@ -86,7 +85,7 @@ func (e *Engine) persistAlertLocked(id string, s *flow.State, key string, a flow
 		}
 	}
 	e.logError("factory.commit_error", id, err)
-	if (clear || !errors.Is(err, syscall.ENOSPC)) && p.alert.Kind == "" {
+	if (clear || a.Kind != flow.AlertDisk) && p.alert.Kind == "" {
 		if p.logSeq != 0 {
 			s.Seq--
 		}
