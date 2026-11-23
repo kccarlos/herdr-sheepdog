@@ -15,6 +15,9 @@ const (
 	EvAskOpen, EvAskAnswer, EvAskCancel                                                            = "ask_open", "answer", "cancel"
 	AskNotifyOwner, AskDeliverAnswer, RefuseClosed                                                 = "notify_owner", "deliver_answer", "already_closed"
 	MaxAskQuestionLen, MinAskOptions, MaxAskOptions                                                = 300, 2, 9
+	GateOptionMerge, GateOptionHold                                                                = "Merge", "Hold"
+	N24OptionDrop, N24OptionContinue                                                               = "Drop", "Continue"
+	AskedByN24, AskedByN31                                                                         = "N24", "N31"
 )
 
 // Ask is one structured question stored in State.Asks (design.md 3, 7.1).
@@ -107,4 +110,91 @@ func ResolveAskOption(options []string, raw string) (string, bool) {
 		return options[n-1], true
 	}
 	return "", false
+}
+
+// OpenOwnerAskForTask returns an open gated owner ask naming taskID (preferring
+// KindGate when both exist), or nil (design.md 4.11, N31, N42).
+func OpenOwnerAskForTask(asks []Ask, taskID string) *Ask {
+	var fallback *Ask
+	for i := range asks {
+		a := &asks[i]
+		if a.Task != taskID || a.Status != AskStatusOpen || !a.Gated {
+			continue
+		}
+		if a.Kind == KindGate {
+			return a
+		}
+		if fallback == nil {
+			fallback = a
+		}
+	}
+	return fallback
+}
+
+// OwnerAnsweredN24 reports whether the owner already answered an N24 ask for taskID.
+func OwnerAnsweredN24(asks []Ask, taskID string) bool {
+	return slices.ContainsFunc(asks, func(a Ask) bool {
+		return a.Task == taskID && a.AskedBy == AskedByN24 && a.Status == AskStatusAnswered && a.AnsweredBy == "owner"
+	})
+}
+
+// GateYesCoversH reports whether the owner's latest N31 gate answer covering h
+// is GateOptionMerge (N31, design.md 3.1, 4.7).
+func GateYesCoversH(asks []Ask, att *Attempt, taskID, h string) bool {
+	if att == nil {
+		return false
+	}
+	var latest *Ask
+	for i := range asks {
+		a := &asks[i]
+		if a.Task == taskID && a.Kind == KindGate && a.AskedBy == AskedByN31 && a.Status == AskStatusAnswered &&
+			a.AnsweredBy == "owner" && a.Head != "" && Covers(*att, a.Head, h) &&
+			(latest == nil || !a.AnsweredAt.Before(latest.AnsweredAt)) {
+			latest = a
+		}
+	}
+	return latest != nil && strings.TrimSpace(latest.Answer) == GateOptionMerge
+}
+
+// GateNoSinceRecap returns an owner GateOptionHold on an N31 ask in this
+// attempt with no recap decided since, or nil (N30, design.md 4.7).
+func GateNoSinceRecap(asks []Ask, t Task, att *Attempt) *Ask {
+	if att == nil {
+		return nil
+	}
+	var lastRecap time.Time
+	for _, rc := range t.Recaps {
+		if rc.Decided != nil && rc.Decided.At.After(lastRecap) {
+			lastRecap = rc.Decided.At
+		}
+	}
+	for i := len(asks) - 1; i >= 0; i-- {
+		a := &asks[i]
+		inAttempt := a.Head != "" && (slices.ContainsFunc(att.Ready, func(r Ready) bool { return r.Head == a.Head }) ||
+			slices.ContainsFunc(att.MergeOnly, func(m Advance) bool { return m.From == a.Head || m.To == a.Head }))
+		if a.Task == t.ID && a.Kind == KindGate && a.AskedBy == AskedByN31 && a.Status == AskStatusAnswered &&
+			a.AnsweredBy == "owner" && strings.TrimSpace(a.Answer) == GateOptionHold && inAttempt &&
+			(lastRecap.IsZero() || a.AnsweredAt.After(lastRecap)) {
+			return a
+		}
+	}
+	return nil
+}
+
+// AskAnswerWords formats an answered ask's chosen option and optional reason.
+func AskAnswerWords(a Ask) string {
+	if a.Why != "" {
+		return a.Answer + " — " + a.Why
+	}
+	return a.Answer
+}
+
+// LatestOwnerAskAnswer returns the owner's latest answered ask words for taskID and askedBy.
+func LatestOwnerAskAnswer(asks []Ask, taskID, askedBy string) string {
+	for i := len(asks) - 1; i >= 0; i-- {
+		if a := asks[i]; a.Task == taskID && a.AskedBy == askedBy && a.Status == AskStatusAnswered && a.AnsweredBy == "owner" {
+			return AskAnswerWords(a)
+		}
+	}
+	return ""
 }

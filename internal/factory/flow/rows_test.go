@@ -300,6 +300,7 @@ func TestRowCases(t *testing.T) {
 		{"N22", with(changes), []string{"tell_worker_findings@1"}},
 		{"N23", with(notReady, noRounds, prGone), []string{"start_worker"}},
 		{"N23", with(notReady, noRounds, prGone, waitDep), []string{"start_worker"}}, // open attempt with unmet deps still matches an attempt row, not N9
+		{"N24", with(streakRecap, splitOfRetro), []string{"open_n24_ask@c1"}},
 		{"N25", with(streakRecap), []string{"open_recap@review"}},
 		{"N26", with(noRounds, prGone), []string{"push_and_open_pr@c1"}},
 		{"N26", with(noRounds, prGone, func(in *In) { in.Facts.PR.Number, in.Facts.PR.OtherBase = 7, "release" }), []string{"wake_coordinator@pr_other_base@7@release"}},
@@ -309,6 +310,10 @@ func TestRowCases(t *testing.T) {
 		{"N29", with(noRounds), []string{"start_reviewer@1@c1"}},
 		{"N29", with(onePass), []string{"start_reviewer@2@c1"}},
 		{"N29", with(changes, rejected), []string{"start_reviewer@2@c1"}}, // L10: reject consumes no round number
+		{"N30", with(gateOwnerTask, func(in *In) {
+			in.Asks = []Ask{answeredN31Ask("ask-gate-no", "t", "c1", GateOptionHold, now)}
+		}), []string{"open_owner_no_recap@0"}},
+		{"N31", with(gateOwnerTask), []string{"open_gate_ask@c1"}},
 		{"N32", with(conflict), []string{"tell_worker_conflict@c1"}},
 		{"N33", with(red, func(in *In) { in.Facts.PR.Failed = []Failure{{Run: "42"}} }), []string{"rerun_ci@42@@c1"}},
 		{"N34", with(func(in *In) { in.Facts.PR.Checks = ChecksStoppedExternal; in.Facts.PR.Failed = []Failure{{Run: "43"}} }), []string{"rerun_ci@43@@c1"}},
@@ -401,10 +406,16 @@ func TestRowOrder(t *testing.T) {
 		{"N12", "N23", false, with(overCap, tipAheadF)},
 		{"N22", "N23", true, with(changes, tipAheadF)},
 		{"N22", "N26", false, with(changes, prBehind)},
-		{"N23", "N25", true, with(streakRecap, tipAheadF)},
+		{"N23", "N24", true, with(streakRecap, splitOfRetro, tipAheadF)},
+		{"N24", "N25", true, with(streakRecap, splitOfRetro)},
+		{"N23", "N25", false, with(streakRecap, tipAheadF)},
 		{"N25", "N26", true, with(streakRecap, prGone)},
 		{"N23", "N36", false, with(tipAheadF, pending)},
 		{"N26", "N29", true, with(noRounds, prGone)},
+		{"N30", "N31", true, with(gateOwnerTask, func(in *In) {
+			in.Asks = []Ask{answeredN31Ask("ask-gate-no", "t", "c1", GateOptionHold, now)}
+		})},
+		{"N31", "N32", true, with(gateOwnerTask, conflict)},
 		{"N32", "N33", true, with(conflict, red)},
 		{"N32", "N36", false, with(conflict, pending)},
 		{"N32", "N37", false, with(conflict, reviewReq)},

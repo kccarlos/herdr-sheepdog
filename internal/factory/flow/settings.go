@@ -62,6 +62,8 @@ type Settings struct {
 	DispatchWorkflow string `json:"dispatch_workflow,omitempty"`
 	// Models maps each role to its ordered candidate list (design.md 9.1, 10.1).
 	Models map[string][]Candidate `json:"models,omitempty"`
+	// DesignGate gates design tasks (kind: design) at N30/N31 when set to "owner" (design.md 10.1, 11.4).
+	DesignGate string `json:"design_gate,omitempty"`
 }
 
 // Range limits for each setting.
@@ -187,6 +189,9 @@ func (s Settings) Changed() []string {
 	if len(s.Models) > 0 {
 		out = append(out, "models "+strings.Join(slices.Sorted(maps.Keys(s.Models)), ","))
 	}
+	if s.DesignGate != "" {
+		out = append(out, "design_gate "+s.DesignGate)
+	}
 	return out
 }
 
@@ -240,6 +245,9 @@ func (s Settings) Validate() error {
 	}
 	if w := s.DispatchWorkflow; w != "" && !WorkflowFile.MatchString(w) {
 		return fmt.Errorf("dispatch_workflow %q: a .yml or .yaml file name under .github/workflows (letters, digits, . _ -; no path)", w)
+	}
+	if s.DesignGate != "" && s.DesignGate != GateOwner && s.DesignGate != "review" {
+		return fmt.Errorf("design_gate %q: allowed owner, review, or empty", s.DesignGate)
 	}
 	return ValidateCandidates("models", s.Models)
 }

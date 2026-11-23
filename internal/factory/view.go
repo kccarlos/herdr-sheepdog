@@ -126,7 +126,7 @@ func graphViewOf(s flow.State, lastLog map[string]LogLine) GraphView {
 	}
 	tasks := make([]TaskView, 0, len(s.Tasks))
 	for i, t := range s.Tasks {
-		stage, why := taskStageWhy(t, s.Tasks, s.Settings, s.Project.Started)
+		stage, why := taskStageWhy(t, s.Tasks, s.Asks, s.Settings, s.Project.Started)
 		l, model, term, rounds := lastLog[t.ID], "", "", 0
 		if n := len(t.Attempts); n > 0 {
 			rounds = len(slices.DeleteFunc(slices.Clone(flow.Counted(t.Attempts[n-1])), func(r flow.Round) bool { return r.Kind == flow.RoundSendBack }))
@@ -214,7 +214,13 @@ func (e *Engine) loadProjectCopy(project string) (flow.State, []LogLine, error) 
 	return s, logs, nil
 }
 
-func taskStageWhy(t flow.Task, tasks []flow.Task, settings flow.Settings, started bool) (string, string) {
+func taskStageWhy(t flow.Task, tasks []flow.Task, asks []flow.Ask, settings flow.Settings, started bool) (string, string) {
+	if a := flow.OpenOwnerAskForTask(asks, t.ID); a != nil {
+		if a.Kind == flow.KindGate {
+			return "owner_gate", a.Question
+		}
+		return "owner_answer", a.Question
+	}
 	if flow.Ended(t) {
 		return "done", ""
 	}
@@ -268,6 +274,8 @@ func taskWhy(t flow.Task, a *flow.Attempt, unmet []string, started bool, stage s
 		return fmt.Sprintf("In review round %d", len(a.Rounds)+1)
 	case r.Why == flow.WhyCI:
 		return "Waiting on CI and merge"
+	case r.ID == "N23":
+		return "Worker is working"
 	case r.WaitsOn != "":
 		return "Waiting on " + r.WaitsOn
 	case a == nil:
