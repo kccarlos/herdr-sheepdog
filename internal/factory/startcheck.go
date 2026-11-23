@@ -168,9 +168,14 @@ func checkStartAgy(ctx context.Context, o DoctorOptions) onboard.Result {
 
 func checkStartCLI(ctx context.Context, o DoctorOptions, cli, pkg, loginFix string,
 	ok func(CommandOutput) bool, argv ...string) onboard.Result {
-	name, c := "start "+cli, o.run(ctx, o.TempDir, argv...)
-	if c.Err != nil || c.Exit == 127 {
+	name, env := "start "+cli, map[bool][]string{true: {"DISABLE_AUTOUPDATER=1"}}[cli == "claude"]
+	cCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
+	c := o.RunCommand(cCtx, o.TempDir, env, argv...)
+	cancel()
+	if c.Exit == 127 || errors.Is(c.Err, exec.ErrNotFound) {
 		return resFail(name, cli+" is not installed", "install "+pkg+", then "+loginFix)
+	} else if why, unk := authProbeUnknown(c); unk {
+		return resWarn(name, cli+" sign-in "+why, "run: "+strings.Join(argv, " "))
 	} else if !ok(c) {
 		return resFail(name, cli+" is not signed in", loginFix)
 	}
