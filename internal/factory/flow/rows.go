@@ -365,6 +365,7 @@ func checksAbsentPastGrace(in In) bool {
 	return in.Facts.PR.Checks == ChecksAbsent && in.Now.Sub(in.Facts.PR.HeadSince) >= checksGrace(in)
 }
 func checksSeenNone(in In) bool { return !in.Facts.PR.ChecksUnread } // absent from a failed read is not "no checks"
+func checksUnread(in In) bool   { return in.Facts.PR.ChecksUnread }
 func ciReady(c Clause) Clause {
 	return all(ladderSays(Passed), prOpen, prHeadIsH, answered, githubAvail, c)
 }
@@ -539,14 +540,7 @@ var TaskRows = []Row[In]{
 			return say(why, ensure(in, key(AskTimeRecap, len(in.Task.Recaps))))(in)
 		}},
 	{ID: "N15", WaitsOn: "the engine", Stage: "ci", When: all(overrideCovers, anyOf(noPR, all(prOpen, prBehindH))), Then: func(in In) Decision {
-		if (unanswered(in) || githubUnavail(in)) && !in.probe {
-			return Decision{Why: "GitHub did not answer: wait for a snapshot", Hold: true}
-		}
-		if in.Facts.PR.OtherBase != "" {
-			return say(fmt.Sprintf("PR #%d targets base %q instead of the project base: waiting (run `sheepdog factory task retry %s --why \"<why>\"` to start a new attempt)",
-				in.Facts.PR.Number, in.Facts.PR.OtherBase, in.Task.ID), once(SinceRetry(in.acts()), key(AskWake, "pr_other_base", in.Facts.PR.Number, in.Facts.PR.OtherBase)))(in)
-		}
-		return say("override: GitHub does not have H", ensure(in, key(AskPushPR, headH(in))))(in)
+		return pushPRDecision(in, unanswered(in) || githubUnavail(in), "override: GitHub does not have H")
 	}},
 	{ID: "N16", WaitsOn: "the worker", Stage: "working", When: all(overrideCovers, prOpen, prHeadIsH, answered, githubAvail, mergeConflict), Then: func(in In) Decision {
 		return say("override: PR conflicts with the base: tell the worker once to merge the base (never rebase)",
@@ -558,11 +552,15 @@ var TaskRows = []Row[In]{
 		}
 		return say("another merge of this project is in flight")(in)
 	}},
-	{ID: "N19", WaitsOn: "GitHub", Stage: "ci", When: all(overrideCovers, prOpen, prHeadIsH, answered, githubAvail, anyOf(mergeAsked, checksNoWorseThanShown)), Then: func(in In) Decision {
+	{ID: "N19", WaitsOn: "GitHub", Stage: "ci", When: all(overrideCovers, prOpen, prHeadIsH, answered, githubAvail, anyOf(mergeAsked, all(checksSeenNone, checksNoWorseThanShown))), Then: func(in In) Decision {
 		h := headH(in)
-		return say("override covers H and checks are no worse than shown", ensure(in, key(AskAccept, h)), ensure(in, key(AskMerge, h)))(in)
+		merge := ensure(in, key(AskMerge, h))
+		if len(merge) == 0 {
+			return say("override covers H and checks are no worse than shown")(in)
+		}
+		return say("override covers H and checks are no worse than shown", ensure(in, key(AskAccept, h)), merge)(in)
 	}},
-	{ID: "N19b", WaitsOn: "the engine", Stage: "ci", When: all(overrideCovers, prOpen, prHeadIsH, answered, githubAvail, func(in In) bool { return !mergeAsked(in) && checksWorseThanShown(in) }), Then: func(in In) Decision {
+	{ID: "N19b", WaitsOn: "the engine", Stage: "ci", When: all(overrideCovers, prOpen, prHeadIsH, answered, githubAvail, checksSeenNone, func(in In) bool { return !mergeAsked(in) && checksWorseThanShown(in) }), Then: func(in In) Decision {
 		return say("checks got worse after the card was made", ensure(in, key(AskSpendOverride, headH(in))))(in)
 	}},
 	{ID: "N20", WaitsOn: "the engine", Stage: "working", When: func(in In) bool {
@@ -593,17 +591,14 @@ var TaskRows = []Row[In]{
 		return say("split child of a retro task hit recap: ask the owner whether to drop or go on", []string{key(AskOpenN24, headH(in))})(in)
 	}},
 	{ID: "N25", WaitsOn: "the coordinator", Stage: "blocked_or_failed", When: ladderSays(RecapAnswer), Then: func(in In) Decision {
-		return say("the ladder says recap", ensure(in, key(AskOpenRecap, "review")))(in)
+		k := key(AskOpenRecap, "review")
+		if n := len(in.Task.Recaps); n > 0 {
+			k = key(AskOpenRecap, "review", n)
+		}
+		return say("the ladder says recap", ensure(in, k))(in)
 	}},
 	{ID: "N26", WaitsOn: "the engine", Stage: "working", When: all(hasAttempt, anyOf(noPR, all(prOpen, prBehindH))), Then: func(in In) Decision {
-		if unanswered(in) && !in.probe { // "no PR" from a failed read is a guess: wait, so push is not spent blindly
-			return Decision{Why: "GitHub did not answer: wait for a snapshot", Hold: true}
-		}
-		if in.Facts.PR.OtherBase != "" {
-			return say(fmt.Sprintf("PR #%d targets base %q instead of the project base: waiting (run `sheepdog factory task retry %s --why \"<why>\"` to start a new attempt)",
-				in.Facts.PR.Number, in.Facts.PR.OtherBase, in.Task.ID), once(SinceRetry(in.acts()), key(AskWake, "pr_other_base", in.Facts.PR.Number, in.Facts.PR.OtherBase)))(in)
-		}
-		return say("GitHub does not have H", ensure(in, key(AskPushPR, headH(in))))(in)
+		return pushPRDecision(in, unanswered(in), "GitHub does not have H")
 	}},
 	{ID: "N29", WaitsOn: "the reviewer", Stage: "working", When: ladderSays(Review), Then: func(in In) Decision {
 		return say("the ladder says review", n29Asks(in))(in)
@@ -668,7 +663,7 @@ var TaskRows = []Row[In]{
 		return say("the base branch has been red past main_red_minutes: tell the oldest held task's worker to merge the base and say ready (or land a fix PR directly)",
 			EnsureRun(in, RoleWorker), ensure(in, key(AskTellBaseRed, spell)), wake)(in)
 	}},
-	{ID: "N36", WaitsOn: "CI", Stage: "ci", Why: WhyCI, When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown)),
+	{ID: "N36", WaitsOn: "CI", Stage: "ci", Why: WhyCI, When: all(ladderSays(Passed), prOpen, anyOf(checksPend, checksUnreadable, unanswered, githubUnavail, checksAbsentInGrace, mergeUnkn, prBehindUnknown, all(overrideCovers, checksUnread))),
 		Then: func(in In) Decision {
 			// Stands in for the ci_stalled alert until slice 5b builds the alerts table.
 			spell := in.attempt().PendingChecks
@@ -711,6 +706,17 @@ var TaskRows = []Row[In]{
 		p := in.Facts.PR
 		return say("no rule matched", once(in.acts(), key(AskWake, "no_rule_matched", headH(in), p.State, p.Checks, p.Mergeable, in.Facts.TipRel)))(in)
 	}},
+}
+
+func pushPRDecision(in In, wait bool, why string) Decision {
+	if wait && !in.probe { // "no PR" from a failed read is a guess: wait, so push is not spent blindly
+		return Decision{Why: "GitHub did not answer: wait for a snapshot", Hold: true}
+	}
+	if in.Facts.PR.OtherBase != "" {
+		return say(fmt.Sprintf("PR #%d targets base %q instead of the project base: waiting (run `sheepdog factory task retry %s --why \"<why>\"` to start a new attempt)",
+			in.Facts.PR.Number, in.Facts.PR.OtherBase, in.Task.ID), once(SinceRetry(in.acts()), key(AskWake, "pr_other_base", in.Facts.PR.Number, in.Facts.PR.OtherBase)))(in)
+	}
+	return say(why, ensure(in, key(AskPushPR, headH(in))))(in)
 }
 
 func n7Kind(in In) string {

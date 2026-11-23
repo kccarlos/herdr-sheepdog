@@ -1438,8 +1438,13 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 		}
 		*acts = append(*acts, entry)
 	}
+	var deferredAccept string
 	for i, ask := range d.Asked {
 		verb, _, _ := strings.Cut(ask, "@")
+		if verb == flow.AskAccept && r.ID == "N19" {
+			deferredAccept = ask
+			continue
+		}
 		if verb == flow.AskWake {
 			act(ask, "done", "", "", false)
 			if strings.HasPrefix(ask, flow.AskWake+"@base_red_held@") {
@@ -1486,6 +1491,9 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 			whys = append(whys, err.Error())
 		} else {
 			act(ask, "done", "", "", false)
+			if verb == flow.AskMerge && deferredAccept != "" {
+				act(deferredAccept, "done", "", "", false)
+			}
 			decs = append(decs, dec)
 		}
 		if verb == flow.AskTellBaseRed {

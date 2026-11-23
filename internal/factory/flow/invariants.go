@@ -40,7 +40,7 @@ func CheckInvariants(snap InvariantSnapshot) []InvariantViolation {
 		for i, a := range t.Attempts {
 			openCount += map[bool]int{true: 1}[a.Closed == ""]
 			for _, act := range a.Acts {
-				if head, ok := strings.CutPrefix(act.Key, AskMerge+"@"); ok && (head == "" || !slices.ContainsFunc(a.Accepts, func(ac Accept) bool { return ac.Head == head })) {
+				if head, ok := strings.CutPrefix(act.Key, AskMerge+"@"); ok && act.Result == "done" && (head == "" || !slices.ContainsFunc(a.Accepts, func(ac Accept) bool { return ac.Head == head })) {
 					add("I4", t.ID, "task %s attempt %d asked merge for %q without an accept record", t.ID, i+1, head)
 				}
 			}
