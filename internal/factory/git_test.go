@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -152,26 +150,24 @@ func TestHungGitDoesNotSkipHealthyProjectInSameTick(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	bin, err := exec.LookPath("git")
+	wt, err := filepath.EvalSymlinks(hung.wt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	shim := t.TempDir()
-	if err := os.WriteFile(filepath.Join(shim, "git"), []byte("#!/bin/sh\n"+
-		"if [ -f .fixture-hung ]; then exec sleep 20; fi\nexec "+strconv.Quote(bin)+" \"$@\"\n"), 0o700); err != nil {
-		t.Fatal(err)
+
+	srv := hctest.New(t)
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if cwd, err := filepath.EvalSymlinks(p.Cwd); err == nil && cwd == wt {
+			return hc.ExecResult{TimedOut: true}, nil
+		}
+		return hctest.GitExec(p)
 	}
-	if err := os.WriteFile(filepath.Join(hung.wt, ".fixture-hung"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", shim+":"+os.Getenv("PATH"))
-	oldTimeout := lockGitTimeout
-	t.Cleanup(func() { lockGitTimeout = oldTimeout })
-	lockGitTimeout = 1200 * time.Millisecond
+	eng.git = world.NewGit(hc.NewClient(srv.Path), eng.now, func(event, folder string) {
+		eng.logEvent(event, map[string]string{"folder": folder})
+	})
 
 	eng.PassInterval, eng.wake = time.Hour, nil
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	done := make(chan struct{})
 	go func() {
