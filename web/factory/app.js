@@ -1,9 +1,10 @@
-// The factory page (design.md 12.1, the FactoryWeb* boards): read-only, polls the
-// W0 views. Nothing here writes; the ask and override cards come with slice 6.
+// The factory page (design.md 12.1, the FactoryWeb* boards): polls the factory
+// views and delegates ask answers and browser pairing to asks.js.
+import { esc, isOwnerAsk, renderAskCardsHTML, createAskFlow, browserAskDeps } from './asks.js';
+
 const POLL_MS = 3000, GIVE_UP_MS = 8000;
 const $ = (id) => document.getElementById(id);
 const enc = encodeURIComponent;
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const clock = (t, sec) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: sec ? '2-digit' : undefined });
 // stage (design.md 4.11) -> board group label, dot colour; ORDER is the boards' group order.
 const STAGE = { blocked_or_failed: ['blocked', 'blocked'], ci: ['waiting on CI', 'working'], working: ['working', 'working'],
@@ -13,10 +14,17 @@ const ORDER = ['blocked_or_failed', 'ci', 'working', 'waiting_on_dep', 'queued']
 const stage = (t) => STAGE[t.stage] || [t.stage || 'unknown', 'idle'];
 let data = null, down = false, lastOK = 0, timer = 0, busy = false, again = false;
 const started = Date.now();
+const askFlow = createAskFlow(browserAskDeps());
+const askUI = { busyId: '', error: '', errorAskId: '', needsPairing: false, pairMessage: '', pairError: '', pairingBusy: false, pending: null };
 
-async function get(url) {
+async function get(url, retried = false) {
   const r = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(2 * POLL_MS) });
   const body = await r.json().catch(() => ({}));
+  if (r.status === 401 && !retried) {
+    const auth = await askFlow.reauth();
+    if (auth.ok) { askUI.needsPairing = false; return get(url, true); }
+    throw Object.assign(new Error(body.error || 'HTTP 401'), { http: true, needsPairing: auth.needsPairing, pairMessage: auth.message });
+  }
   if (!r.ok) throw Object.assign(new Error(body.error || `HTTP ${r.status}`), { http: true });
   return body;
 }
@@ -35,17 +43,17 @@ async function poll() {
   const [want, task] = route();
   let next = data, off = false;
   try {
-    const { projects = [] } = await get('/api/factory/projects');
+    const [{ projects = [] }, { asks = [] }] = await Promise.all([get('/api/factory/projects'), get('/api/factory/asks')]);
     const p = projects.some((x) => x.id === want) ? want : (projects[0]?.id || '');
     let graph = null, log = [], problem = '';
     if (p) {
       try {
         [graph, { lines: log }] = await Promise.all([get(`/api/factory/projects/${enc(p)}/graph`), get(`/api/factory/projects/${enc(p)}/log?n=100`)]);
-      } catch (e) { if (!e.http) throw e; problem = e.message; }
+      } catch (e) { if (!e.http) throw e; if (e.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: e.pairMessage || '' }); problem = e.message; }
     }
-    next = { projects, p, task, graph, log: log || [], problem };
+    next = { projects, asks, p, task, graph, log: log || [], problem };
   } catch (e) {
-    if (e.http) next = { projects: [], p: '', task, graph: null, log: [], problem: e.message };
+    if (e.http) { if (e.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: e.pairMessage || '' }); next = { projects: [], asks: [], p: '', task, graph: null, log: [], problem: e.message }; }
     else off = true;
   }
   busy = false;
@@ -84,6 +92,8 @@ function render() {
   $('aside').hidden = !!t;
   set($('main'), t ? taskHTML(t) : boardHTML(tasks));
   set($('projects'), `<h2>projects</h2>${data.projects.map(projHTML).join('') || '<p class="muted">None yet.</p>'}`);
+  const asks = (data.asks || []).filter(isOwnerAsk);
+  set($('asks'), `<div class="head"><h2>asks for you</h2>${asks.length ? `<span>${asks.length} open</span>` : ''}</div>${renderAskCardsHTML(asks, askUI)}`);
   const runs = tasks.filter((x) => x.terminal);
   set($('agents'), `<div class="head"><h2>agents</h2><span>${runs.length} running</span></div>` + (runs.map((x) =>
     `<div class="agent"><span class="dot ${stage(x)[1]}" aria-hidden="true"></span><span><code>${esc(x.ref)}</code> ${esc(x.model || 'worker')} · ${esc(x.why_waiting || stage(x)[0])}</span></div>`).join('') || '<p class="muted">No workers running.</p>'));
@@ -138,6 +148,37 @@ function taskHTML(t) {
     kv('model', t.model || 'not started') + kv('waits on', t.why_waiting) + kv('after', t.after.join(', ')) + kv('unblocks', t.dependents.join(', ')) +
     kv('layer', String(t.layer)) + '</section></aside></div>';
 }
+
+async function submitAnswer(askId, option) {
+  Object.assign(askUI, { busyId: askId, error: '', errorAskId: '', pairError: '' });
+  render();
+  const res = await askFlow.answer(askId, option).catch((e) => ({ ok: false, message: e.message || 'Network error.' }));
+  askUI.busyId = '';
+  if (res.ok) { Object.assign(askUI, { needsPairing: false, pending: null }); render(); return poll(); }
+  if (res.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: res.message, pending: { askId, option } });
+  else Object.assign(askUI, { error: res.message || 'Could not record answer.', errorAskId: askId });
+  render();
+}
+
+$('asks').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-ask-id][data-option]');
+  if (btn && !askUI.busyId) submitAnswer(btn.dataset.askId, btn.dataset.option);
+});
+$('asks').addEventListener('submit', async (e) => {
+  const form = e.target.closest('form[data-pair-form]');
+  if (!form || askUI.pairingBusy) return;
+  e.preventDefault();
+  const code = form.elements.code?.value || '';
+  Object.assign(askUI, { pairingBusy: true, pairError: '' });
+  render();
+  const res = await askFlow.pairWithCode(code).catch((err) => ({ ok: false, message: err.message || 'Pairing failed.' }));
+  askUI.pairingBusy = false;
+  if (!res.ok) { askUI.pairError = res.message || 'Pairing failed.'; return render(); }
+  const pending = askUI.pending;
+  Object.assign(askUI, { needsPairing: false, pending: null });
+  render();
+  if (pending) await submitAnswer(pending.askId, pending.option); else poll();
+});
 
 $('retry').addEventListener('click', poll);
 addEventListener('hashchange', () => { scrollTo(0, 0); poll(); });
