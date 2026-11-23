@@ -387,17 +387,12 @@ func restartHistories() []restartHistory {
 				}},
 				passStep("N26 push and open PR", 0),
 				passStep("N29 start round 1", 0),
-				{"round 1 changes R9", func(w *restartWorld) {
-					w.setReviewerVerdict(flow.VerdictChanges, 1)
-					w.now = w.now.Add(5 * time.Second)
-					w.pass()
-				}},
 				{"round 1 changes verdict", func(w *restartWorld) {
-					w.now = w.now.Add(25 * time.Second)
-					w.pass()
+					w.setReviewerVerdict(flow.VerdictChanges, 1)
 				}},
 				passStep("N22 tell findings", 0),
-				{"commit c2 and ready", func(w *restartWorld) {
+				{"worker idle and ready c2", func(w *restartWorld) {
+					w.waitIdle(w.workerID)
 					w.commitAndReady("package demo\n// fixed\n", greenRollup, false)
 				}},
 				{"N26 push c2", func(w *restartWorld) {
