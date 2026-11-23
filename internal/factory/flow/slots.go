@@ -46,7 +46,7 @@ func RunningTasks(tasks []Task, workerState map[string]RunState) int {
 // longest remaining critical path of estimate_lines through after, then oldest
 // (index in tasks). Gives up to maxRunning - running slots, plus one extra
 // slot beyond maxRunning for an urgent task.
-func GrantSlots(candidates []string, tasks []Task, running, maxRunning int) map[string]bool {
+func GrantSlots(candidates []string, tasks []Task, running, maxRunning int, _ ...Ask) map[string]bool {
 	byID, age := make(map[string]Task, len(tasks)), make(map[string]int, len(tasks))
 	for i, t := range tasks {
 		byID[t.ID], age[t.ID] = t, i

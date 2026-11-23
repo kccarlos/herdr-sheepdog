@@ -134,14 +134,17 @@ type Facts struct {
 	BaseRedSince time.Time `json:"base_red_since,omitempty"`
 	BaseRedSpell string    `json:"base_red_spell,omitempty"`
 	BaseRedWoken bool      `json:"base_red_woken,omitempty"`
+	// SplitFromHadRetro reports whether Task.SplitFrom's parent task already had a retro (N24, plan.md 6.2).
+	SplitFromHadRetro bool `json:"split_from_had_retro,omitempty"`
 }
 
-// In is what a row sees: the task's records, the settings, the facts and
-// the time (design.md 2.1).
+// In is what a row sees: the task's records, the settings, the facts, the
+// project's asks and the time (design.md 2.1).
 type In struct {
 	Task     Task
 	Settings Settings
 	Facts    Facts
+	Asks     []Ask
 	Now      time.Time
 	probe    bool
 }

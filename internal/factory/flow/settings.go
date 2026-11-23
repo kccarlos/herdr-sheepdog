@@ -62,6 +62,8 @@ type Settings struct {
 	DispatchWorkflow string `json:"dispatch_workflow,omitempty"`
 	// Models maps each role to its ordered candidate list (design.md 9.1, 10.1).
 	Models map[string][]Candidate `json:"models,omitempty"`
+	// DesignGate gates design tasks (kind: design) at N30/N31 when set to "owner" (design.md 10.1, 11.4).
+	DesignGate string `json:"design_gate,omitempty"`
 }
 
 // Range limits for each setting.
