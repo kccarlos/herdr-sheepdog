@@ -15,6 +15,9 @@ const (
 	EvAskOpen, EvAskAnswer, EvAskCancel                                                            = "ask_open", "answer", "cancel"
 	AskNotifyOwner, AskDeliverAnswer, RefuseClosed                                                 = "notify_owner", "deliver_answer", "already_closed"
 	MaxAskQuestionLen, MinAskOptions, MaxAskOptions                                                = 300, 2, 9
+	GateOptionMerge, GateOptionHold                                                                = "Merge", "Hold"
+	N24OptionDrop, N24OptionContinue                                                               = "Drop", "Continue"
+	AskedByN24, AskedByN31                                                                         = "N24", "N31"
 )
 
 // Ask is one structured question stored in State.Asks (design.md 3, 7.1).
@@ -109,16 +112,6 @@ func ResolveAskOption(options []string, raw string) (string, bool) {
 	return "", false
 }
 
-// IsYesAnswer reports whether an ask answer starts with Yes.
-func IsYesAnswer(ans string) bool {
-	return yesOptRE.MatchString(strings.ToLower(strings.TrimSpace(ans)))
-}
-
-// IsNoAnswer reports whether an ask answer is negative or wait.
-func IsNoAnswer(ans string) bool {
-	return negWaitRE.MatchString(strings.ToLower(strings.TrimSpace(ans)))
-}
-
 // OpenOwnerAskForTask returns an open gated owner ask naming taskID (preferring
 // KindGate when both exist), or nil (design.md 4.11, N31, N42).
 func OpenOwnerAskForTask(asks []Ask, taskID string) *Ask {
@@ -138,49 +131,33 @@ func OpenOwnerAskForTask(asks []Ask, taskID string) *Ask {
 	return fallback
 }
 
-// HasOpenOwnerAsk reports whether any open gated owner ask names taskID.
-func HasOpenOwnerAsk(asks []Ask, taskID string) bool { return OpenOwnerAskForTask(asks, taskID) != nil }
-
-// HasOpenGateAsk reports whether an open gate ask for taskID already covers h.
-func HasOpenGateAsk(asks []Ask, att *Attempt, taskID, h string) bool {
-	for _, a := range asks {
-		if a.Task == taskID && a.Kind == KindGate && a.Status == AskStatusOpen && (a.Head == "" || att != nil && Covers(*att, a.Head, h)) {
-			return true
-		}
-	}
-	return false
-}
-
-// OwnerAnsweredGate reports whether the owner already answered a gate ask for taskID (N24).
-func OwnerAnsweredGate(asks []Ask, taskID string) bool {
+// OwnerAnsweredN24 reports whether the owner already answered an N24 ask for taskID.
+func OwnerAnsweredN24(asks []Ask, taskID string) bool {
 	return slices.ContainsFunc(asks, func(a Ask) bool {
-		return a.Task == taskID && a.Kind == KindGate && a.Status == AskStatusAnswered && a.AnsweredBy == "owner"
+		return a.Task == taskID && a.AskedBy == AskedByN24 && a.Status == AskStatusAnswered && a.AnsweredBy == "owner"
 	})
 }
 
-// GateYesCoversH reports whether an owner yes on a gate ask covers h (N31, design.md 3.1).
+// GateYesCoversH reports whether the owner's latest N31 gate answer covering h
+// is GateOptionMerge (N31, design.md 3.1, 4.7).
 func GateYesCoversH(asks []Ask, att *Attempt, taskID, h string) bool {
 	if att == nil {
 		return false
 	}
-	return slices.ContainsFunc(asks, func(a Ask) bool {
-		return a.Task == taskID && a.Kind == KindGate && a.Status == AskStatusAnswered &&
-			a.AnsweredBy == "owner" && IsYesAnswer(a.Answer) && a.Head != "" && Covers(*att, a.Head, h)
-	})
+	var latest *Ask
+	for i := range asks {
+		a := &asks[i]
+		if a.Task == taskID && a.Kind == KindGate && a.AskedBy == AskedByN31 && a.Status == AskStatusAnswered &&
+			a.AnsweredBy == "owner" && a.Head != "" && Covers(*att, a.Head, h) &&
+			(latest == nil || !a.AnsweredAt.Before(latest.AnsweredAt)) {
+			latest = a
+		}
+	}
+	return latest != nil && strings.TrimSpace(latest.Answer) == GateOptionMerge
 }
 
-func attemptHasHead(a Attempt, head string) bool {
-	if head == "" || head == a.BaseCommit {
-		return true
-	}
-	if slices.ContainsFunc(a.Ready, func(r Ready) bool { return r.Head == head }) {
-		return true
-	}
-	return slices.ContainsFunc(a.MergeOnly, func(m Advance) bool { return m.From == head || m.To == head })
-}
-
-// GateNoSinceRecap returns an owner no on a gate ask in this attempt with no
-// recap decided since, or nil (N30, design.md 4.7).
+// GateNoSinceRecap returns an owner GateOptionHold on an N31 ask in this
+// attempt with no recap decided since, or nil (N30, design.md 4.7).
 func GateNoSinceRecap(asks []Ask, t Task, att *Attempt) *Ask {
 	if att == nil {
 		return nil
@@ -193,8 +170,10 @@ func GateNoSinceRecap(asks []Ask, t Task, att *Attempt) *Ask {
 	}
 	for i := len(asks) - 1; i >= 0; i-- {
 		a := &asks[i]
-		if a.Task == t.ID && a.Kind == KindGate && a.Status == AskStatusAnswered &&
-			a.AnsweredBy == "owner" && IsNoAnswer(a.Answer) && attemptHasHead(*att, a.Head) &&
+		inAttempt := a.Head != "" && (slices.ContainsFunc(att.Ready, func(r Ready) bool { return r.Head == a.Head }) ||
+			slices.ContainsFunc(att.MergeOnly, func(m Advance) bool { return m.From == a.Head || m.To == a.Head }))
+		if a.Task == t.ID && a.Kind == KindGate && a.AskedBy == AskedByN31 && a.Status == AskStatusAnswered &&
+			a.AnsweredBy == "owner" && strings.TrimSpace(a.Answer) == GateOptionHold && inAttempt &&
 			(lastRecap.IsZero() || a.AnsweredAt.After(lastRecap)) {
 			return a
 		}
@@ -202,14 +181,19 @@ func GateNoSinceRecap(asks []Ask, t Task, att *Attempt) *Ask {
 	return nil
 }
 
-// LatestOwnerGateAnswer returns the owner's latest answered gate ask words for taskID.
-func LatestOwnerGateAnswer(asks []Ask, taskID string) string {
+// AskAnswerWords formats an answered ask's chosen option and optional reason.
+func AskAnswerWords(a Ask) string {
+	if a.Why != "" {
+		return a.Answer + " — " + a.Why
+	}
+	return a.Answer
+}
+
+// LatestOwnerAskAnswer returns the owner's latest answered ask words for taskID and askedBy.
+func LatestOwnerAskAnswer(asks []Ask, taskID, askedBy string) string {
 	for i := len(asks) - 1; i >= 0; i-- {
-		if a := asks[i]; a.Task == taskID && a.Kind == KindGate && a.Status == AskStatusAnswered && a.AnsweredBy == "owner" {
-			if a.Why != "" {
-				return a.Answer + " — " + a.Why
-			}
-			return a.Answer
+		if a := asks[i]; a.Task == taskID && a.AskedBy == askedBy && a.Status == AskStatusAnswered && a.AnsweredBy == "owner" {
+			return AskAnswerWords(a)
 		}
 	}
 	return ""

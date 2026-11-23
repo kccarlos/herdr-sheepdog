@@ -90,7 +90,7 @@ func (e *Engine) execCleanup(ctx context.Context, id string, s *flow.State, ti i
 		steps = append(steps, fmt.Sprintf("cancelled %d decision ask(s)", n))
 	}
 	if len(t.Attempts) == 0 {
-		return steps[0], false, nil
+		return strings.Join(steps, "; "), false, nil
 	}
 	a := t.Attempts[len(t.Attempts)-1]
 	gctx, cancel := context.WithTimeout(ctx, ghTimeout)

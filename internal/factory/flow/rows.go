@@ -307,7 +307,7 @@ func noReviewRequired(in In) bool     { return !reviewRequired(in) }
 func working(in In) bool              { return in.Facts.Worker.State == RunWorking }
 func notWorking(in In) bool           { return !working(in) }
 func mergeAsked(in In) bool           { return Done(SinceRetry(in.acts()), key(AskMerge, headH(in))) }
-func hasOpenOwnerAsk(in In) bool      { return HasOpenOwnerAsk(in.Asks, in.Task.ID) }
+func hasOpenOwnerAsk(in In) bool      { return OpenOwnerAskForTask(in.Asks, in.Task.ID) != nil }
 func noOpenOwnerAsk(in In) bool       { return !hasOpenOwnerAsk(in) }
 func ownerGateApplies(in In) bool {
 	return in.Task.Gate == GateOwner || in.Task.Kind == TaskKindDesign && in.Settings.DesignGate == GateOwner
@@ -317,7 +317,7 @@ func ownerGateNo(in In) bool {
 	return ownerGateApplies(in) && !gateYesCoversH(in) && GateNoSinceRecap(in.Asks, in.Task, in.attempt()) != nil
 }
 func splitRetroUnanswered(in In) bool {
-	return in.Task.SplitFrom != "" && in.Facts.SplitFromHadRetro && !OwnerAnsweredGate(in.Asks, in.Task.ID)
+	return in.Task.SplitFrom != "" && in.Facts.SplitFromHadRetro && !OwnerAnsweredN24(in.Asks, in.Task.ID)
 }
 
 func checksGrace(in In) time.Duration {
@@ -531,7 +531,7 @@ var TaskRows = []Row[In]{
 		return Decision{Why: "the worker is working", Asked: asked}
 	}},
 	{ID: "N24", WaitsOn: "the owner", Stage: "owner_gate", When: all(ladderSays(RecapAnswer), splitRetroUnanswered), Then: func(in In) Decision {
-		if HasOpenGateAsk(in.Asks, in.attempt(), in.Task.ID, headH(in)) {
+		if hasOpenOwnerAsk(in) {
 			return say("split child of a retro task hit recap: waiting on the owner")(in)
 		}
 		return say("split child of a retro task hit recap: ask the owner whether to drop or go on", []string{key(AskOpenN24, headH(in))})(in)
@@ -556,7 +556,7 @@ var TaskRows = []Row[In]{
 		return say("the owner answered no to the gate ask", ensure(in, key(AskOwnerNoRecap, len(in.Task.Recaps))))(in)
 	}},
 	{ID: "N31", WaitsOn: "the owner", Stage: "owner_gate", When: all(ladderSays(Passed), anyOf(hasOpenOwnerAsk, func(in In) bool { return ownerGateApplies(in) && !gateYesCoversH(in) })), Then: func(in In) Decision {
-		if ownerGateApplies(in) && !gateYesCoversH(in) && !HasOpenGateAsk(in.Asks, in.attempt(), in.Task.ID, headH(in)) {
+		if !hasOpenOwnerAsk(in) && ownerGateApplies(in) && !gateYesCoversH(in) {
 			return say("owner gate applies: ask the owner to approve H", []string{key(AskOpenGate, headH(in))})(in)
 		}
 		return say("waiting on an open owner ask")(in)

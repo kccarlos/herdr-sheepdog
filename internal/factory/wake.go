@@ -27,9 +27,16 @@ func holdWake(s *flow.State, ti int, row, why, ask string, f flow.Facts, bin str
 		why += fmt.Sprintf("; run `%s factory task retry %s --why \"<why>\"`", bin, t.ID)
 	}
 	facts := taskFacts(t, f, now)
-	if rc := flow.OpenRecap(t); rc != nil && (rc.Trigger == flow.TriggerOwnerNo || rc.Trigger == flow.TriggerReview) {
-		if words := flow.LatestOwnerGateAnswer(s.Asks, t.ID); words != "" {
-			facts += fmt.Sprintf("; owner answered %q", words)
+	if rc := flow.OpenRecap(t); rc != nil {
+		switch rc.Trigger {
+		case flow.TriggerOwnerNo:
+			if a := flow.GateNoSinceRecap(s.Asks, t, flow.OpenAttempt(t)); a != nil {
+				facts += fmt.Sprintf("; owner answered %q", flow.AskAnswerWords(*a))
+			}
+		case flow.TriggerReview:
+			if words := flow.LatestOwnerAskAnswer(s.Asks, t.ID, flow.AskedByN24); words != "" {
+				facts += fmt.Sprintf("; owner answered %q", words)
+			}
 		}
 	}
 	s.Project.Wakes = append(s.Project.Wakes, flow.Wake{Key: k, Task: t.ID, Why: row + ": " + why, Facts: facts, At: now})

@@ -1238,11 +1238,11 @@ var taskExecutors = map[string]taskExec{
 	flow.AskStopReview:   (*Engine).execStopReviewer,
 	flow.AskTellFindings: (*Engine).execTellFindings,
 	flow.AskOpenRecap:    (*Engine).execOpenRecap,
-	flow.AskOwnerNoRecap: (*Engine).execOwnerNoRecap,
+	flow.AskOwnerNoRecap: (*Engine).execOpenRecap,
 	flow.AskSizeRecap:    (*Engine).execSizeRecap,
 	flow.AskCIRecap:      (*Engine).execCIRecap,
 	flow.AskTimeRecap:    (*Engine).execTimeRecap,
-	flow.AskOpenN24:      (*Engine).execOpenN24Ask,
+	flow.AskOpenN24:      (*Engine).execOpenGateAsk,
 	flow.AskOpenGate:     (*Engine).execOpenGateAsk,
 	flow.AskTellStop:     (*Engine).execTellStop,
 	flow.AskTellDiverged: (*Engine).execTellDiverged,
@@ -1365,8 +1365,8 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 		facts.BaseRedSpell, facts.BaseRedWoken = "", false
 	}
 	task, now := s.Tasks[ti], e.now()
-	if !flow.Ended(task) {
-		e.cancelStaleGateAsksLocked(id, s, ti, now)
+	if !flow.Ended(task) && !e.cancelStaleGateAsksLocked(id, s, ti, now) {
+		return
 	}
 	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: task, Settings: s.Settings, Facts: facts, Asks: s.Asks, Now: now})
 	e.reconcileCIStalledLocked(id, s, task, r.ID, facts, now)
@@ -1488,7 +1488,10 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 			break
 		}
 	}
-	e.commitLogLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: facts, Rule: r.ID, Asked: d.Asked, Decision: strings.Join(decs, "; "), Why: strings.Join(whys, "; ")})
+	if err := e.commitLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: facts, Rule: r.ID, Asked: d.Asked, Decision: strings.Join(decs, "; "), Why: strings.Join(whys, "; ")}); err != nil {
+		e.logError("factory.commit_error", id, err)
+		return
+	}
 	for ai, a := range s.Asks {
 		if ai >= len(asksBefore) {
 			e.notifyChangeLocked(id, s.Seq, Change{Kind: flow.EvAskOpen, AskID: a.ID, Task: a.Task})
@@ -2116,15 +2119,13 @@ func (e *Engine) execTellFindings(ctx context.Context, id string, s *flow.State,
 	return fmt.Sprintf("told worker findings from round %d", r.N), false, e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false)
 }
 
-// execOpenRecap is N25: open a review-triggered recap once per attempt
-// (allowed split, new, drop: never continue after a review trigger).
-func (e *Engine) execOpenRecap(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
-	return e.openRecapLocked(ctx, id, s, ti, flow.TriggerReview, []string{"split", "new", "drop"})
-}
-
-// execOwnerNoRecap is N30: open an owner_no recap (allowed split, new, drop).
-func (e *Engine) execOwnerNoRecap(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
-	return e.openRecapLocked(ctx, id, s, ti, flow.TriggerOwnerNo, []string{"split", "new", "drop"})
+// execOpenRecap is N25 (review) and N30 (owner_no): allowed split, new, drop.
+func (e *Engine) execOpenRecap(ctx context.Context, id string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
+	trig := flow.TriggerReview
+	if strings.HasPrefix(f.Ask, flow.AskOwnerNoRecap) {
+		trig = flow.TriggerOwnerNo
+	}
+	return e.openRecapLocked(ctx, id, s, ti, trig, []string{"split", "new", "drop"})
 }
 
 // execSizeRecap is N12: open a size recap with the choices it allows now.

@@ -270,7 +270,7 @@ The row that opens a recap also stores its allowed choices. `continue` is allowe
 
 | ID | If | Make sure of | Waits on |
 |---|---|---|---|
-| N24 | the ladder says "recap" for `H`; the task is a split child of a task that already had a retro; and the owner has not answered for this task | one owner ask: "drop it, or tell me how to go on?". No recap yet: there is one decider at a time. "Drop" marks the task dropped | the owner |
+| N24 | the ladder says "recap" for `H`; the task is a split child of a task that already had a retro; and the owner has not answered N24 for this task | one owner ask (`asked_by: N24`) with fixed engine options `Drop` (recommended) and `Continue`: "drop it, or tell me how to go on?". No recap yet: there is one decider at a time. Exact `Drop` on N24 marks the task dropped | the owner |
 | N25 | the ladder says "recap" for `H` | open a recap, trigger `review` (allowed: split, new, drop), with the owner's words when N24 came first | the coordinator |
 | N26 | GitHub does not have `H` (no open PR for this attempt, or the PR head is behind `H`) | `H` is pushed and one PR is open for the branch (section 9.4) | the engine |
 | N27 | (from the evidence increment on) no evidence covers `H`, and no owner override covers `H` | the task's checks run at `H` (section 11.6) | the engine |
@@ -325,8 +325,8 @@ Reached only when the ladder says "passed" for `H`. `p` is the latest PR snapsho
 
 | ID | If | Make sure of | Waits on |
 |---|---|---|---|
-| N30 | an owner gate applies to this task (the setting `design_gate` for a design task, or the plan field `gate: owner`), the owner answered no in this attempt, and no recap was decided since | open a recap, trigger `owner_no` (allowed: split, new, drop), with the owner's words | the coordinator |
-| N31 | an open owner ask names this task, or an owner gate applies and no yes covers `H` | the gate ask is open, naming `H` | the owner |
+| N30 | an owner gate applies to this task (the setting `design_gate` for a design task, or the plan field `gate: owner`), the owner's latest N31 gate answer at a commit in this attempt is `Hold` (not superseded by a covering `Merge`), and no recap was decided since | open a recap, trigger `owner_no` (allowed: split, new, drop), with the owner's words | the coordinator |
+| N31 | an open owner ask names this task, or an owner gate applies and no N31 `Merge` answer covers `H` | when no owner ask is open for the task, open the N31 gate ask (`asked_by: N31`) naming `H` with fixed engine options `Merge` (recommended) and `Hold` | the owner |
 | N32 | conflict with the base | tell the worker once: merge the base into the branch, never rebase | the worker |
 | N33 | checks red at `H` | re-runs used for `H` below `flake_reruns`: re-run the failed jobs once (a check that turns green by itself costs no round; set `flake_reruns` to 0 to never re-run a red check). Otherwise tell the worker once per failing run ("pull first" if the engine updated the branch) | CI; then the worker |
 | N34 | checks stopped: cancelled from outside, or a job hit its own time limit | cancelled from outside with re-runs left: re-run. Otherwise (and always for a job's own time limit): wake the coordinator once | CI; then the coordinator |
@@ -388,7 +388,7 @@ Each is a record, accepted by the table in section 7.2. The rules above then lan
 
 ### 4.10 Scheduling
 
-There is no queue. N10's "a slot is free" is decided by one pure function over all tasks that have reached N10, in this order: a task the owner just answered, then `priority: urgent`, then the critical path, then oldest. One slot beyond `max_running` may be used by a task the owner just answered or an urgent one. A milestone is open when every earlier milestone is done and its gate task (section 11.4) is done.
+There is no queue. N10's "a slot is free" is decided by one pure function over all tasks that have reached N10, in this order: a task the owner just answered (a gated owner ask answered after the task's last slot grant, or before its first slot), then `priority: urgent`, then the critical path, then oldest. One slot beyond `max_running` may be used by a task the owner just answered or an urgent one. A milestone is open when every earlier milestone is done and its gate task (section 11.4) is done.
 
 ### 4.11 What the owner sees
 
@@ -562,6 +562,7 @@ Whether an `ask_open` or an `answer` is valid at all (who may send it, the owner
   3. **Factory ask routes (`GET /api/factory/asks`, `POST /api/factory/asks/{id}/answer`).** Both are `accessDevice`. `GET /api/factory/asks` returns `{"protocol": 1, "asks": [...]}` with open asks from `Engine.Asks(true)` (empty array `[]`, never `null`). `POST /api/factory/asks/{id}/answer` accepts `{"option"}`, refuses any request without a paired device session (`deviceOf(r) == ""` or `"local"`) with `403` (`code: "proof_required"`, KB-ASK-19), and for an authenticated browser or phone session mints an in-process `AnswerProof` (`Engine.MintProof(..., ProofInputTap, dev)`) and calls `Engine.Answer`, recording `device_id` on the ask and in the project's factory log (`log.jsonl`).
   4. **`/factory` web ask cards and automatic re-auth (`web/factory/*`).** `/factory` polls `GET /api/factory/asks` and renders open asks as cards. Answering from an unenrolled browser shows on-demand instructions to pair with a short code from the Mac menu-bar app (never fetching a code automatically). After a daemon restart clears in-memory tickets, an enrolled browser silently re-authenticates with its non-extractable WebCrypto P-256 key (`GET /api/auth/challenge` + `POST /api/auth/session`) and completes the answer without pairing again.
 - **Never delegable:** an override, a paid key, a quota reset, a release with no stated scope, a rule change.
+- **Engine-opened gate asks vs coordinator gate asks.** Engine rules write fixed option constants (`N31`: `Merge` / `Hold`, recommend `Merge`; `N24`: `Drop` / `Continue`, recommend `Drop`), and engine classification compares the trimmed answer for exact equality with those constants for that rule (`asked_by` `"N31"` or `"N24"`), with no word list or regex. A `gate` ask opened by the coordinator with free options holds merge while open like any open owner ask, wakes the coordinator on answer (`A3`), and is never classified by `N24`, `N30` or `N31` (it neither satisfies `N31` nor drops the task).
 - An ask about a task stores the commit it was asked at. A yes is a record at that commit. On any pass, an open gate ask whose commit no longer covers the task's `H` is cancelled, so the owner is never asked about a commit that is gone.
 - Workers and reviewers open only `decision` asks; the coordinator turns one into an owner ask when the owner must decide. (The old engine let workers open owner kinds. This is a deliberate change: the owner hears from one voice.)
 - Asks never expire on a timer. The engine owns ask status; the supervisor's `fask-` card is a view of open owner asks and changes when the engine says so, not on a 2 s poll.

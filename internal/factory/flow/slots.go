@@ -3,6 +3,8 @@ package flow
 import (
 	"cmp"
 	"slices"
+	"strings"
+	"time"
 )
 
 // UrgentExtraSlots is the extra slot beyond max_running for an urgent task (design.md 4.10).
@@ -54,7 +56,9 @@ func GrantSlots(candidates []string, tasks []Task, running, maxRunning int, asks
 	ownerAns := make(map[string]bool)
 	for _, a := range asks {
 		if a.Task != "" && a.Gated && a.Status == AskStatusAnswered && a.AnsweredBy == "owner" {
-			ownerAns[a.Task] = true
+			if last := lastSlotAt(byID[a.Task]); last.IsZero() || a.AnsweredAt.After(last) {
+				ownerAns[a.Task] = true
+			}
 		}
 	}
 	crit := criticalPaths(tasks)
@@ -83,6 +87,22 @@ func GrantSlots(candidates []string, tasks []Task, running, maxRunning int, asks
 		}
 	}
 	return granted
+}
+
+func lastSlotAt(t Task) time.Time {
+	var at time.Time
+	scan := func(acts []Act) {
+		for _, act := range acts {
+			if act.Result == "done" && (act.Key == AskNewAttempt || strings.HasPrefix(act.Key, AskStartWorker)) && act.At.After(at) {
+				at = act.At
+			}
+		}
+	}
+	scan(t.Acts)
+	for _, a := range t.Attempts {
+		scan(a.Acts)
+	}
+	return at
 }
 
 // criticalPaths computes, for each non-ended task, the longest remaining chain
