@@ -136,6 +136,8 @@ type Facts struct {
 	BaseRedWoken bool      `json:"base_red_woken,omitempty"`
 	// SplitFromHadRetro reports whether Task.SplitFrom's parent task already had a retro (N24, plan.md 6.2).
 	SplitFromHadRetro bool `json:"split_from_had_retro,omitempty"`
+	// OtherMergeInFlight reports whether another task in this project currently has a merge in flight (N17, plan.md 7.2).
+	OtherMergeInFlight bool `json:"other_merge_in_flight,omitempty"`
 }
 
 // In is what a row sees: the task's records, the settings, the facts, the

@@ -252,3 +252,17 @@ func FormatAskCommand(a Ask) string {
 	}
 	return cmd
 }
+
+// OverrideResultEvent is one owner result line ready to fire for an answered-Yes
+// override card (design.md 4.3b OR1–OR6, OF1–OF5; 12.1).
+type OverrideResultEvent struct {
+	AskID string
+	Task  string // first target task ID whose Task.Acts records override_result@<ask_id>
+	Rule  string // OF2, OF3, or OF4
+	Text  string
+}
+
+// OverrideResult derives pending owner result lines over stored state (design.md 4.3b, 12.1).
+func OverrideResult(_ State, _ time.Time) []OverrideResultEvent {
+	return nil
+}

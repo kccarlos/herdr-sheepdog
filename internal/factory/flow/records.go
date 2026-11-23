@@ -417,9 +417,11 @@ type Override struct {
 
 // Accept records that the bar (or an override) accepted a commit.
 type Accept struct {
-	Head   string `json:"head"`
-	By     string `json:"by"` // bar or override
-	Rounds []int  `json:"rounds"`
+	Head    string   `json:"head"`
+	By      string   `json:"by"` // bar or override
+	Rounds  []int    `json:"rounds"`
+	Waived  []string `json:"waived,omitempty"`
+	ProofID string   `json:"proof_id,omitempty"`
 }
 
 // Failure classes and retry marker of section 8 (design.md 4.9, 8).

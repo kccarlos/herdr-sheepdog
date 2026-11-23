@@ -21,6 +21,7 @@ type Change struct {
 	Kind    string `json:"kind"`
 	AskID   string `json:"ask_id,omitempty"`
 	Task    string `json:"task,omitempty"`
+	Text    string `json:"text,omitempty"`
 	Seq     int64  `json:"seq,omitempty"`
 }
 
