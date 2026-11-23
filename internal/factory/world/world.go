@@ -685,7 +685,7 @@ func ReadReport(ctx context.Context, client *hc.Client, term, code string) (Repo
 		return ReportRead{}, err
 	}
 	res, err := client.Read(ctx, term, reportReadLines)
-	if err != nil || !res.Complete {
+	if err != nil || (!res.Complete && !isAgyTerminal(t)) {
 		return ReportRead{Status: ReportNotYet}, err
 	}
 	if isAgyTerminal(t) {
