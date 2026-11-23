@@ -13,7 +13,7 @@ public enum DeviceKey {
     /// True when keys live in the Secure Enclave (the enroll call's
     /// `hardware`).
     public static var isHardware: Bool {
-        #if targetEnvironment(simulator)
+        #if targetEnvironment(simulator) || os(macOS)
         return false
         #else
         return true
@@ -38,17 +38,20 @@ public enum DeviceKey {
     public static func loadOrCreate(daemonID: String) throws -> SecKey {
         if let key = load(daemonID: daemonID) { return key }
         var error: Unmanaged<CFError>?
+        var privateAttrs: [String: Any] = [
+            kSecAttrIsPermanent as String: true,
+            kSecAttrApplicationTag as String: Data(tag(for: daemonID).utf8),
+        ]
+        #if !os(macOS)
         guard let access = SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly, isHardware ? .privateKeyUsage : [], &error) else {
             throw error!.takeRetainedValue() as Error
         }
+        privateAttrs[kSecAttrAccessControl as String] = access
+        #endif
         var attributes: [String: Any] = [
             kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
             kSecAttrKeySizeInBits as String: 256,
-            kSecPrivateKeyAttrs as String: [
-                kSecAttrIsPermanent as String: true,
-                kSecAttrApplicationTag as String: Data(tag(for: daemonID).utf8),
-                kSecAttrAccessControl as String: access,
-            ] as [String: Any],
+            kSecPrivateKeyAttrs as String: privateAttrs,
         ]
         if isHardware {
             attributes[kSecAttrTokenID as String] = kSecAttrTokenIDSecureEnclave

@@ -56,6 +56,7 @@ public final class StatusItemController: NSObject {
         rows += [
             .separator,
             .item(title: "Open panel", action: .openPanel, enabled: true, checked: false),
+            .item(title: "Pair browser…", action: .pairBrowser, enabled: daemonUp, checked: false),
             .separator,
             .item(title: "Talk", action: .talk, enabled: daemonUp && (!voice.heldHere || voice.muted), checked: false),
             .item(title: "Mute", action: .toggleMute, enabled: voice.heldHere, checked: voice.muted),
@@ -92,7 +93,7 @@ public final class StatusItemController: NSObject {
     }
 
     /// VoiceOver label for the "Pair browser…" menu item.
-    public static var pairBrowserAccessibilityLabel: String { "" }
+    public static var pairBrowserAccessibilityLabel: String { "Pair a local browser with a one-time code" }
 
     private let source: DaemonStatusSource
     private let voice: VoiceControlling
@@ -253,7 +254,16 @@ public final class StatusItemController: NSObject {
             let updater = updater
             Task { await updater.start(offer: offer) }
         case .pairBrowser:
-            break
+            guard let browserPairing, let browserPairingPresenter else { return }
+            let log = log
+            Task {
+                do { browserPairingPresenter.showCode(BrowserPairingPresentation(code: try await browserPairing.requestCode())) }
+                catch {
+                    let failure = (error as? BrowserPairingError) ?? .refused(status: 0, message: error.localizedDescription)
+                    log.log("could not get browser pairing code: \(failure.title)")
+                    browserPairingPresenter.showError(failure)
+                }
+            }
         }
     }
 
@@ -284,6 +294,8 @@ public final class StatusItemController: NSObject {
                 entry.representedObject = ActionBox(action)
                 if action == .updateApp {
                     entry.setAccessibilityLabel(MacUpdatePresentation(offer: offer, state: updater.state).accessibilityLabel)
+                } else if action == .pairBrowser {
+                    entry.setAccessibilityLabel(Self.pairBrowserAccessibilityLabel)
                 }
                 menu.addItem(entry)
             case .separator:
