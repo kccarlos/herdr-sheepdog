@@ -321,7 +321,11 @@ func TestEveryRunStartNamesModelAndEffort(t *testing.T) {
 		}
 		if wantRole == flow.RoleReviewer {
 			prompt := p.Argv[len(p.Argv)-1]
-			for _, line := range []string{"self-check misses:", "class:", "deletable:", "not run:"} {
+			wantFields := []string{"--self-check-misses", "--class", "--deletable", "--not-run"}
+			if idx == 3 {
+				wantFields = []string{"self-check misses:", "class:", "deletable:", "not run:"}
+			}
+			for _, line := range wantFields {
 				if !strings.Contains(prompt, line) {
 					t.Errorf("reviewer prompt (run %d) missing %q:\n%s", idx, line, prompt)
 				}

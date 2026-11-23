@@ -22,7 +22,12 @@ type situation struct {
 	Run, Says, Never         []string
 }
 
-var templates = map[string]*string{"coordinator": &coordinatorTemplate, "worker": &workerTemplate, "reviewer": &reviewerTemplate}
+var templates = map[string]*string{
+	"coordinator":    &coordinatorTemplate,
+	"worker":         &workerTemplate,
+	"reviewer":       &reviewerCmdTemplate,
+	"reviewer-codex": &reviewerTemplate,
+}
 
 // filled builds role's prompt from tmpl through the engine's own fill, on a
 // fixed task whose round 1 at c1 was rejected (so the reviewer gets R2's facts).
@@ -39,7 +44,7 @@ func filled(role, tmpl string) string {
 		return workerPrompt(tmpl, t, a, "sheepdog")
 	}
 	e := &Engine{}
-	prompt, err := e.reviewerPrompt(context.Background(), tmpl, t, a, "c1", flow.RoundFull, "git diff b..c1", e.rejectionPrompt("p", "T1", a, "c1"), 2)
+	prompt, err := e.reviewerPromptWith(context.Background(), tmpl, t, a, "c1", flow.RoundFull, "git diff b..c1", e.rejectionPrompt("p", "T1", a, "c1"), 2, "sheepdog", "/tmp/draft.md")
 	if err != nil {
 		panic(err)
 	}

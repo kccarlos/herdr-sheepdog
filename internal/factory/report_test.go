@@ -1621,73 +1621,6 @@ func TestParseReplyLinesTolerance(t *testing.T) {
 		}
 	})
 
-	t.Run("real claude pass opening with self-check misses", func(t *testing.T) {
-		ctx := context.Background()
-		srv := hctest.New(t)
-		srv.Add(hc.Terminal{Address: "t-cl", Name: "rev-cl", State: "live", Status: &hc.Status{App: "claude-code", State: "done"}})
-		srv.SetScreen("t-cl", "❯ Review round 1\n  <report>{\"code\":\"c123\",\"round\":1,\"head\":\"h1\",\"verdict\":\"pass|changes\",\"majors\":<n>}</report>\n\n"+
-			"⏺ Bash(git diff)\n"+
-			"  ⎿  deletable: fake in diff\n"+
-			"     major: fake in diff\n\n"+
-			"⏺ self-check misses: 0\nclass: none\ndeletable: none\nnot run: none\n"+
-			`<report>{"code":"c123","round":1,"head":"h1","verdict":"pass","majors":0}</report>`+"\n")
-		rd, err := world.ReadReport(ctx, hc.NewClient(srv.Path), "t-cl", "c123")
-		if err != nil || rd.Status != world.ReportFound {
-			t.Fatalf("ReadReport = (%+v, %v), want found", rd, err)
-		}
-		rl := parseReplyLines(rd.Body)
-		if !rl.hasMisses || rl.badMisses || rl.misses != 0 || rl.majors != 0 || rl.deletable != "none" {
-			t.Fatalf("claude pass parseReplyLines = %+v (body=%q)", rl, rd.Body)
-		}
-	})
-
-	t.Run("real claude table right before the reply lines", func(t *testing.T) {
-		ctx := context.Background()
-		srv := hctest.New(t)
-		srv.Add(hc.Terminal{Address: "t-tb", Name: "rev-tb", State: "live", Status: &hc.Status{App: "claude-code", State: "done"}})
-		srv.SetScreen("t-tb", "❯ Review round 1\n\n"+
-			"⏺ Bash(cat notes.txt)\n"+
-			"  ⎿  deletable: fake in tool output\n\n"+
-			"⏺ Checked:\n"+
-			"  ┌──────┬────────┐\n"+
-			"  │ file │ result │\n"+
-			"  ├──────┼────────┤\n"+
-			"  │ a.go │ ok     │\n"+
-			"  └──────┴────────┘\n"+
-			"  self-check misses: 0\n"+
-			"  deletable: none\n"+
-			`<report>{"code":"c789","round":1,"head":"h1","verdict":"pass","majors":0}</report>`+"\n")
-		rd, err := world.ReadReport(ctx, hc.NewClient(srv.Path), "t-tb", "c789")
-		if err != nil || rd.Status != world.ReportFound {
-			t.Fatalf("ReadReport = (%+v, %v), want found", rd, err)
-		}
-		rl := parseReplyLines(rd.Body)
-		if !rl.hasMisses || rl.badMisses || rl.misses != 0 || rl.majors != 0 || rl.deletable != "none" {
-			t.Fatalf("table reply parseReplyLines = %+v (body=%q)", rl, rd.Body)
-		}
-	})
-
-	t.Run("real claude tool output with its own bullets", func(t *testing.T) {
-		ctx := context.Background()
-		srv := hctest.New(t)
-		srv.Add(hc.Terminal{Address: "t-bu", Name: "rev-bu", State: "live", Status: &hc.Status{App: "claude-code", State: "done"}})
-		srv.SetScreen("t-bu", "❯ Review round 1\n\n"+
-			"⏺ Bash(cat NOTES.md)\n"+
-			"  ⎿  intro\n"+
-			"     • major: fake bullet in tool output\n"+
-			"     ⏺ deletable: fake in tool output\n\n"+
-			"⏺ self-check misses: 0\n"+
-			"  deletable: none\n"+
-			`<report>{"code":"c790","round":1,"head":"h1","verdict":"pass","majors":0}</report>`+"\n")
-		rd, err := world.ReadReport(ctx, hc.NewClient(srv.Path), "t-bu", "c790")
-		if err != nil || rd.Status != world.ReportFound {
-			t.Fatalf("ReadReport = (%+v, %v), want found", rd, err)
-		}
-		if rl := parseReplyLines(rd.Body); !rl.hasMisses || rl.majors != 0 || rl.deletable != "none" {
-			t.Fatalf("bulleted tool output parseReplyLines = %+v (body=%q)", rl, rd.Body)
-		}
-	})
-
 	t.Run("real codex wrapped command then output", func(t *testing.T) {
 		ctx := context.Background()
 		srv := hctest.New(t)
@@ -1734,9 +1667,9 @@ func TestParseReplyLinesTolerance(t *testing.T) {
 	})
 }
 
-// TestVerdictRefusalTellsReviewerOnce checks that a refused verdict sends the
-// refusal reason to the reviewer run once so it can fix and re-send, never
-// loops on repeated refusals, and accepts the corrected reply.
+// TestVerdictRefusalTellsReviewerOnce checks that a refused Codex screen-tag
+// verdict sends the refusal reason to the reviewer run once so it can fix and
+// re-send, never loops on repeated refusals, and accepts the corrected reply.
 func TestVerdictRefusalTellsReviewerOnce(t *testing.T) {
 	ctx := context.Background()
 	srv := hctest.New(t)
@@ -1757,8 +1690,7 @@ func TestVerdictRefusalTellsReviewerOnce(t *testing.T) {
 	gitIn(t, wt.Path, "commit", "-m", "feat: x")
 	c1 := gitIn(t, wt.Path, "rev-parse", "HEAD")
 
-	pastMS := uint64(time.Now().Add(-time.Minute).UnixMilli())
-	srv.Add(hc.Terminal{Address: "t-rev", Name: "rev-1", State: "live", Status: &hc.Status{App: "claude-code", State: "done"}, StatusMS: &pastMS})
+	srv.Add(hc.Terminal{Address: "t-rev", Name: "rev-1", State: "live"})
 	st := flow.State{
 		Seq:      1,
 		Project:  flow.Project{ID: projID, Folder: repo, Started: true, RunID: "t-coord"},
@@ -1770,7 +1702,7 @@ func TestVerdictRefusalTellsReviewerOnce(t *testing.T) {
 				Ready: []flow.Ready{{Head: c1}},
 				Review: &flow.ReviewRun{
 					RunID: "t-rev", Round: 1, Head: c1, Code: "code1",
-					Reviewer: flow.Reviewer{CLI: "claude", Model: "opus", Effort: "medium"},
+					Reviewer: flow.Reviewer{CLI: world.CodexCLI, Model: codexModel, Effort: "high"},
 				},
 			}},
 		}},
@@ -1780,8 +1712,8 @@ func TestVerdictRefusalTellsReviewerOnce(t *testing.T) {
 	}
 
 	// First refusal: missing deletable line -> reviewer is told why once.
-	srv.SetScreen("t-rev", "❯ Review round 1\n\n⏺ Looks good.\nself-check misses: 0\n"+
-		`<report>{"code":"code1","round":1,"head":"`+c1+`","verdict":"pass","majors":0}</report>`+"\n")
+	srv.SetScreen("t-rev", "› Review round 1\n\n• Looks good.\n• self-check misses: 0\n"+
+		`  <report>{"code":"code1","round":1,"head":"`+c1+`","verdict":"pass","majors":0}</report>`+"\n")
 	eng.passProject(ctx, projID, false)
 	sends := sendsTo(t, srv.Requests(), "t-rev")
 	if len(sends) != 1 || !strings.Contains(sends[0], "deletable:") {
@@ -1790,16 +1722,16 @@ func TestVerdictRefusalTellsReviewerOnce(t *testing.T) {
 
 	// Second pass with same invalid screen, and third with a different invalid screen: never sent again.
 	eng.passProject(ctx, projID, false)
-	srv.SetScreen("t-rev", "❯ Your verdict was refused\n\n⏺ Still missing misses.\ndeletable: none\n"+
-		`<report>{"code":"code1","round":1,"head":"`+c1+`","verdict":"pass","majors":0}</report>`+"\n")
+	srv.SetScreen("t-rev", "› Your verdict was refused\n\n• Still missing misses.\n• deletable: none\n"+
+		`  <report>{"code":"code1","round":1,"head":"`+c1+`","verdict":"pass","majors":0}</report>`+"\n")
 	eng.passProject(ctx, projID, false)
 	if got := sendsTo(t, srv.Requests(), "t-rev"); len(got) != 1 {
 		t.Fatalf("repeated refusals sent %d times, want 1: %q", len(got), got)
 	}
 
 	// Reviewer fixes its reply and re-sends: accepted right away.
-	srv.SetScreen("t-rev", "❯ Your verdict was refused\n\n⏺ self-check misses: 0\ndeletable: none\n"+
-		`<report>{"code":"code1","round":1,"head":"`+c1+`","verdict":"pass","majors":0}</report>`+"\n")
+	srv.SetScreen("t-rev", "› Your verdict was refused\n\n• self-check misses: 0\n• deletable: none\n"+
+		`  <report>{"code":"code1","round":1,"head":"`+c1+`","verdict":"pass","majors":0}</report>`+"\n")
 	eng.passProject(ctx, projID, false)
 	cur, err := LoadState(paths.State(projID))
 	if err != nil {

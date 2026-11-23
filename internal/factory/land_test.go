@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,13 +32,22 @@ type landing struct {
 	paths                                Paths
 	log                                  *bytes.Buffer
 	gh, id, repo, wt, branch, c1, worker string
+	revMu                                sync.Mutex
+	revToks                              map[string]string
 }
 
 func newLanding(t *testing.T) *landing {
 	t.Helper()
 	ctx := context.Background()
 	srv := hctest.New(t)
-	l := &landing{t: t, srv: srv, client: hc.NewClient(srv.Path), paths: testPaths(t), log: &bytes.Buffer{}}
+	l := &landing{t: t, srv: srv, client: hc.NewClient(srv.Path), paths: testPaths(t), log: &bytes.Buffer{}, revToks: map[string]string{}}
+	srv.OnRun = func(term hc.Terminal, p hc.RunParams) {
+		if p.Labels["sheepdog.role"] == flow.RoleReviewer {
+			l.revMu.Lock()
+			l.revToks[term.Address] = p.Env["SHEEPDOG_RUN_TOKEN"]
+			l.revMu.Unlock()
+		}
+	}
 	repo, base := initGitRepoWithRemote(t)
 	githubOrigin(t, repo)
 	l.repo, l.gh = repo, bindRepoFakeGH(t, repo)
@@ -86,6 +96,12 @@ func startRun(ctx context.Context, client *hc.Client, spec world.RunSpec) (strin
 }
 
 func (l *landing) pass() { l.eng.passProject(context.Background(), l.id, false) }
+
+func (l *landing) reviewerToken(runID string) string {
+	l.revMu.Lock()
+	defer l.revMu.Unlock()
+	return l.revToks[runID]
+}
 
 func (l *landing) state() flow.State {
 	s, err := LoadState(l.paths.State(l.id))
