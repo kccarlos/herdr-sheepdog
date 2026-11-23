@@ -673,7 +673,9 @@ func TestOtherMergeInFlightDoesNotStallSiblingAfterAskedRestartOrLeavingMerge(t 
 					return hc.ExecResult{}, err
 				}
 				crashMu.Lock()
-				crashSnap = raw
+				if crashSnap == nil { // a real crash stops at the first merge; later merges never run
+					crashSnap = raw
+				}
 				crashMu.Unlock()
 				return hc.ExecResult{}, errors.New("daemon crashed in merge asked window")
 			}
