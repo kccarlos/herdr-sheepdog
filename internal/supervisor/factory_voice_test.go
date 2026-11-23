@@ -1251,3 +1251,94 @@ func TestFactoryVoiceConcurrentCloseAndSingleUseInput(t *testing.T) {
 		}
 	})
 }
+
+// O25 review round 1 (VA3, VA4, VA8): barge-in stop relay (relayStopRest)
+// strips leading stop words and relays the remainder; that remainder is not a
+// whole owner utterance and must never answer a factory ask (gate or override).
+func TestFactoryVoiceStopRestNeverAnswersAsk(t *testing.T) {
+	cases := []struct {
+		name     string
+		kind     string
+		opts     []string
+		rec      string
+		bargeIn  string
+		wantRest string
+		exact    string
+	}{
+		{
+			name:     "override_stop_rest",
+			kind:     flow.KindOverride,
+			opts:     []string{flow.OverrideOptionMerge, flow.OverrideOptionCancel},
+			rec:      flow.OverrideOptionCancel,
+			bargeIn:  "No, wait, yes, merge now",
+			wantRest: "yes, merge now",
+			exact:    flow.OverrideOptionMerge,
+		},
+		{
+			name:     "gate_stop_rest",
+			kind:     flow.KindGate,
+			opts:     []string{"Merge", "Hold"},
+			rec:      "Merge",
+			bargeIn:  "Wait, hold on, merge?",
+			wantRest: "merge?",
+			exact:    "Merge",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			eng := newDemoFactory()
+			m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Standing by after stop.", "")})
+			h := newBrainHarness(t, m, func(c *Config) {
+				c.Factory = eng
+				c.bareAnswers = false
+			})
+			startFactorySupervisor(t, h)
+
+			ask := flow.Ask{
+				ID:        "ask-demo-" + tc.name,
+				Project:   "demo",
+				Kind:      tc.kind,
+				Gated:     true,
+				Question:  "Proceed with " + tc.name + "?",
+				Options:   tc.opts,
+				Recommend: tc.rec,
+				Task:      "T1",
+				At:        t0,
+			}
+			eng.openAsk(ask)
+			cardID := factoryAskPrefix + ask.ID
+			p, _ := waitFactoryPush(t, h, cardID)
+			deliverFactoryPush(h, cardID, p.Text)
+
+			// Owner barges in with a stop lead followed by an option-like remainder;
+			// voice calls stop(), which runs relayStopRest over the stripped tail.
+			h.hear(tc.bargeIn)
+			_ = h.call(ToolStop, nil)
+			h.sup.replies.Wait()
+
+			if ev := h.log.ofType("supervisor.stop_rest"); len(ev) != 1 || payload(ev[0])["text"] != tc.wantRest {
+				t.Fatalf("supervisor.stop_rest = %+v, want 1 event with text=%q", ev, tc.wantRest)
+			}
+			if got := eng.askByID(ask.ID); got.Status != flow.AskStatusOpen || len(eng.mintedProofs()) != 0 {
+				t.Fatalf("VA3/VA4: stop-relayed remainder from %q answered ask or minted proof: ask=%+v proofs=%+v", tc.bargeIn, got, eng.mintedProofs())
+			}
+			if turns := h.log.count("brain.turn"); turns != 1 {
+				t.Fatalf("VA3/VA4: stop-relayed remainder should reach orchestrator, brain.turn=%d", turns)
+			}
+
+			// A whole owner utterance matching an engine option still answers the ask.
+			h.clock.Advance(time.Second)
+			_ = h.say(tc.exact)
+			if got := eng.askByID(ask.ID); got.Status != flow.AskStatusAnswered || got.Answer != tc.exact || got.DeviceID != "voice-session" {
+				t.Fatalf("VA4/VA7: whole utterance %q did not answer ask: %+v", tc.exact, got)
+			}
+			if proofs := eng.mintedProofs(); len(proofs) != 1 || proofs[0].InputKind != factory.ProofInputVoice {
+				t.Fatalf("VA7: minted proofs = %+v, want 1 ProofInputVoice", proofs)
+			}
+			if confirmed := h.log.ofType("pending.confirmed"); len(confirmed) != 1 || payload(confirmed[0])["heard"] != tc.exact {
+				t.Fatalf("VA8: pending.confirmed = %+v, want heard=%q", confirmed, tc.exact)
+			}
+		})
+	}
+}
