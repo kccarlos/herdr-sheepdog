@@ -17,8 +17,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,7 +97,7 @@ func newCDWorld(t *testing.T, goal string) *cdWorld {
 		dataDisk:    DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
 	}
 	w.hcOnline.Store(true)
-	w.proxySock = cdAttachHCProxy(t, srv.Path, &w.hcOnline)
+	w.proxySock = attachHCProxy(t, srv.Path, &w.hcOnline)
 	w.client = hc.NewClient(w.proxySock)
 
 	srv.OnRun = func(term hc.Terminal, p hc.RunParams) {
@@ -277,9 +275,10 @@ func (w *cdWorld) pass() {
 	w.eng.passProject(w.ctx, w.id, trim)
 }
 
-func (w *cdWorld) advance(d time.Duration) {
+// advanceMinute moves the fake clock one minute.
+func (w *cdWorld) advanceMinute() {
 	w.mu.Lock()
-	w.now = w.now.Add(d)
+	w.now = w.now.Add(time.Minute)
 	w.mu.Unlock()
 }
 
@@ -402,18 +401,6 @@ func cdUnwrapExecArgv(argv []string) []string {
 	return argv
 }
 
-// cdStatusAlert checks offline `sheepdog factory status` (ProjectStatus +
-// FormatStatusLine) for an active alert row matching kind. Mirrors 5b.8's
-// statusAlert helper.
-func cdStatusAlert(t *testing.T, paths Paths, folder, kind string) (TaskStatus, bool) {
-	t.Helper()
-	rows, err := ProjectStatus(paths, folder)
-	if err != nil {
-		t.Fatalf("ProjectStatus(%s): %v", folder, err)
-	}
-	return findAlertRow(rows, kind)
-}
-
 // cdEngineStatusAlert checks live `Engine.ProjectStatus(folder)` (which merges
 // active in-memory alerts such as an unpersisted disk ENOSPC alert).
 func cdEngineStatusAlert(t *testing.T, eng *Engine, folder, kind string) (TaskStatus, bool) {
@@ -436,116 +423,6 @@ func findAlertRow(rows []TaskStatus, kind string) (TaskStatus, bool) {
 	return TaskStatus{}, false
 }
 
-// cdPersistedAlertBlob returns the persisted project JSON outside non-alert
-// fields so tests verify alert persistence without coupling to 5b.8's private
-// struct field names. Mirrors 5b.8's persistedAlertBlob helper.
-func cdPersistedAlertBlob(t *testing.T, paths Paths, id string) string {
-	t.Helper()
-	raw, err := os.ReadFile(paths.State(id))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatal(err)
-	}
-	var proj map[string]json.RawMessage
-	if p, ok := doc["project"]; ok {
-		_ = json.Unmarshal(p, &proj)
-	}
-	for _, nonAlert := range []string{
-		"id", "folder", "goal", "started", "new_goal", "new_goal_tasks",
-		"run_id", "run_token_sha256", "run",
-		"coord_dialog_stucks", "coord_error_at", "coord_error_turn",
-		"coord_wake_at", "coord_wakes_in_flight", "coord_wake_turn", "coord_last_wake_at",
-		"wait_key", "base", "invariants", "sweep_items", "sweep_unknown", "wakes", "acts",
-	} {
-		delete(proj, nonAlert)
-	}
-	delete(doc, "seq")
-	delete(doc, "settings")
-	delete(doc, "tasks")
-	projBytes, _ := json.Marshal(proj)
-	doc["project"] = projBytes
-	out, _ := json.Marshal(doc)
-	return string(out)
-}
-
-// cdAlertLogs returns log.jsonl entries recording an alert episode event for
-// kind. Mirrors 5b.8's alertEpisodeLogs helper.
-func cdAlertLogs(t *testing.T, paths Paths, folder, kind string) []LogLine {
-	t.Helper()
-	lines, _, err := ProjectLog(context.Background(), paths, folder, 0)
-	if err != nil {
-		t.Fatalf("ProjectLog: %v", err)
-	}
-	var out []LogLine
-	for _, l := range lines {
-		hay := strings.Join(append([]string{l.Rule, l.Decision, l.Why}, l.Asked...), " ")
-		if l.Input != nil {
-			b, _ := json.Marshal(l.Input)
-			hay += " " + string(b)
-		}
-		if strings.Contains(hay, kind) {
-			out = append(out, l)
-		}
-	}
-	return out
-}
-
-// cdAttachHCProxy creates a toggleable Unix socket proxy to srvPath so tests
-// can simulate an hc outage and recovery. Mirrors 5b.8's attachHCProxy helper.
-func cdAttachHCProxy(t *testing.T, srvPath string, online *atomic.Bool) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("", "sd-cdp-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(filepath.Join(dir, "hc.sock")) > 95 {
-		_ = os.RemoveAll(dir)
-		dir, err = os.MkdirTemp("/tmp", "sd-cdp-")
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	sock := filepath.Join(dir, "hc.sock")
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
-		_ = os.RemoveAll(dir)
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = ln.Close()
-		_ = os.RemoveAll(dir)
-	})
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			if !online.Load() {
-				_ = c.Close()
-				continue
-			}
-			up, err := net.Dial("unix", srvPath)
-			if err != nil {
-				_ = c.Close()
-				continue
-			}
-			go func() {
-				defer func() { _ = c.Close(); _ = up.Close() }()
-				_, _ = io.Copy(up, c)
-			}()
-			go func() {
-				defer func() { _ = c.Close(); _ = up.Close() }()
-				_, _ = io.Copy(c, up)
-			}()
-		}
-	}()
-	return sock
-}
-
 // Decision 1 & 4 (KB-ENV-4, KB-ENV-5):
 // A simulated folder stall (fake hc probe timing out twice consecutively while
 // temp dir answers) raises consent_prompt once, holds new starts, keeps probing
@@ -561,7 +438,7 @@ func TestPR5b9_ConsentPromptTwoTimeoutsRaisesOnceAndClearsOnGoodProbe(t *testing
 	if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, "consent_prompt"); ok {
 		t.Fatalf("single probe timeout must not raise consent_prompt; got %+v", ts)
 	}
-	w.advance(time.Minute)
+	w.advanceMinute()
 	w.setFolderProbe(cdProbeOK)
 	w.pass()
 	if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, "consent_prompt"); ok {
@@ -569,7 +446,7 @@ func TestPR5b9_ConsentPromptTwoTimeoutsRaisesOnceAndClearsOnGoodProbe(t *testing
 	}
 
 	// Now two consecutive timeouts: first timeout does not raise, second raises.
-	w.advance(time.Minute)
+	w.advanceMinute()
 	w.setFolderProbe(cdProbeTimeout)
 	w.pass()
 	if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, "consent_prompt"); ok {
@@ -577,7 +454,7 @@ func TestPR5b9_ConsentPromptTwoTimeoutsRaisesOnceAndClearsOnGoodProbe(t *testing
 	}
 
 	runsBeforeRaise := w.runCount()
-	w.advance(time.Minute)
+	w.advanceMinute()
 	w.pass()
 
 	ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, "consent_prompt")
@@ -585,16 +462,16 @@ func TestPR5b9_ConsentPromptTwoTimeoutsRaisesOnceAndClearsOnGoodProbe(t *testing
 		rows, _ := w.eng.ProjectStatus(w.repo)
 		t.Fatalf("expected consent_prompt in factory status after two consecutive probe timeouts; got rows=%+v", rows)
 	}
-	if _, ok := cdStatusAlert(t, w.paths, w.repo, "consent_prompt"); !ok {
+	if _, ok := statusAlert(t, w.paths, w.repo, "consent_prompt"); !ok {
 		t.Fatalf("expected consent_prompt persisted to offline ProjectStatus")
 	}
-	if blob := cdPersistedAlertBlob(t, w.paths, w.id); !strings.Contains(blob, "consent_prompt") {
+	if blob := persistedAlertBlob(t, w.paths, w.id); !strings.Contains(blob, "consent_prompt") {
 		t.Fatalf("state.json must persist consent_prompt; got %s", blob)
 	}
 	if !strings.Contains(ts.Why+ts.Title, filepath.Base(w.repo)) && !strings.Contains(ts.Why+ts.Title, "consent") && !strings.Contains(ts.Why+ts.Title, "folder") {
 		t.Errorf("consent_prompt status should explain folder/cause: %+v", ts)
 	}
-	logsAfterRaise := cdAlertLogs(t, w.paths, w.repo, "consent_prompt")
+	logsAfterRaise := alertEpisodeLogs(t, w.paths, w.repo, "consent_prompt")
 	if len(logsAfterRaise) != 1 {
 		t.Fatalf("expected exactly 1 consent_prompt log entry on raise, got %d: %+v", len(logsAfterRaise), logsAfterRaise)
 	}
@@ -604,12 +481,12 @@ func TestPR5b9_ConsentPromptTwoTimeoutsRaisesOnceAndClearsOnGoodProbe(t *testing
 
 	// While active, another pass probes again, holds starts, and does NOT log again.
 	probesBefore := w.getProbeCalls()
-	w.advance(time.Minute)
+	w.advanceMinute()
 	w.pass()
 	if w.getProbeCalls() <= probesBefore {
 		t.Fatalf("active consent_prompt must be probed again on every pass (calls stayed %d)", probesBefore)
 	}
-	if got := cdAlertLogs(t, w.paths, w.repo, "consent_prompt"); len(got) != 1 {
+	if got := alertEpisodeLogs(t, w.paths, w.repo, "consent_prompt"); len(got) != 1 {
 		t.Fatalf("consent_prompt must log once per episode, got %d entries: %+v", len(got), got)
 	}
 	if w.runCount() != runsBeforeRaise {
@@ -617,13 +494,13 @@ func TestPR5b9_ConsentPromptTwoTimeoutsRaisesOnceAndClearsOnGoodProbe(t *testing
 	}
 
 	// First good probe clears consent_prompt and allows starts to resume.
-	w.advance(time.Minute)
+	w.advanceMinute()
 	w.setFolderProbe(cdProbeOK)
 	w.pass()
 	if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, "consent_prompt"); ok {
 		t.Fatalf("first good probe must clear consent_prompt; still active: %+v", ts)
 	}
-	if blob := cdPersistedAlertBlob(t, w.paths, w.id); strings.Contains(blob, "consent_prompt") {
+	if blob := persistedAlertBlob(t, w.paths, w.id); strings.Contains(blob, "consent_prompt") {
 		t.Fatalf("cleared consent_prompt must be removed from state.json; got %s", blob)
 	}
 }
@@ -640,17 +517,17 @@ func TestPR5b9_ConsentPromptTwoBlankResultsRaisesOnceAndClearsOnGoodProbe(t *tes
 		t.Fatalf("single blank probe result must not raise consent_prompt; got %+v", ts)
 	}
 
-	w.advance(time.Minute)
+	w.advanceMinute()
 	w.pass()
 	if _, ok := cdEngineStatusAlert(t, w.eng, w.repo, "consent_prompt"); !ok {
 		rows, _ := w.eng.ProjectStatus(w.repo)
 		t.Fatalf("expected consent_prompt after two consecutive blank probe results; got rows=%+v", rows)
 	}
-	if logs := cdAlertLogs(t, w.paths, w.repo, "consent_prompt"); len(logs) != 1 {
+	if logs := alertEpisodeLogs(t, w.paths, w.repo, "consent_prompt"); len(logs) != 1 {
 		t.Fatalf("expected 1 consent_prompt log entry, got %d: %+v", len(logs), logs)
 	}
 
-	w.advance(time.Minute)
+	w.advanceMinute()
 	w.setFolderProbe(cdProbeOK)
 	w.pass()
 	if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, "consent_prompt"); ok {
@@ -667,22 +544,22 @@ func TestPR5b9_ConsentPromptHCOutageAndInconclusiveNeverRaiseConsent(t *testing.
 		w := newCDWorld(t, "HC outage not consent")
 		w.hcOnline.Store(false)
 		for range 3 {
-			w.advance(time.Minute)
+			w.advanceMinute()
 			w.pass()
 		}
 		if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, "consent_prompt"); ok {
 			t.Fatalf("hc outage must never raise consent_prompt; got %+v", ts)
 		}
-		if logs := cdAlertLogs(t, w.paths, w.repo, "consent_prompt"); len(logs) != 0 {
+		if logs := alertEpisodeLogs(t, w.paths, w.repo, "consent_prompt"); len(logs) != 0 {
 			t.Fatalf("hc outage must not log consent_prompt; got %+v", logs)
 		}
 
 		// Once hc recovers and the project folder actually stalls twice, consent_prompt raises.
 		w.hcOnline.Store(true)
 		w.setFolderProbe(cdProbeTimeout)
-		w.advance(time.Minute)
+		w.advanceMinute()
 		w.pass()
-		w.advance(time.Minute)
+		w.advanceMinute()
 		w.pass()
 		if _, ok := cdEngineStatusAlert(t, w.eng, w.repo, "consent_prompt"); !ok {
 			t.Fatalf("expected consent_prompt once hc is online and project folder stalls twice")
@@ -694,21 +571,21 @@ func TestPR5b9_ConsentPromptHCOutageAndInconclusiveNeverRaiseConsent(t *testing.
 		w.setFolderProbe(cdProbeTimeout)
 		w.setTmpProbeTimeout(true)
 		for range 3 {
-			w.advance(time.Minute)
+			w.advanceMinute()
 			w.pass()
 		}
 		if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, "consent_prompt"); ok {
 			t.Fatalf("inconclusive stall (both repo and temp dir timing out) must not raise consent_prompt; got %+v", ts)
 		}
-		if logs := cdAlertLogs(t, w.paths, w.repo, "consent_prompt"); len(logs) != 0 {
+		if logs := alertEpisodeLogs(t, w.paths, w.repo, "consent_prompt"); len(logs) != 0 {
 			t.Fatalf("inconclusive stall must not log consent_prompt; got %+v", logs)
 		}
 
 		// Once temp dir answers while project folder still stalls twice, consent_prompt raises.
 		w.setTmpProbeTimeout(false)
-		w.advance(time.Minute)
+		w.advanceMinute()
 		w.pass()
-		w.advance(time.Minute)
+		w.advanceMinute()
 		w.pass()
 		if _, ok := cdEngineStatusAlert(t, w.eng, w.repo, "consent_prompt"); !ok {
 			t.Fatalf("expected consent_prompt once temp dir answers and project folder stalls twice")
@@ -756,7 +633,7 @@ func TestPR5b9_DiskENOSPCStaysVisibleInMemoryAndClearsOnRecovery(t *testing.T) {
 
 	// Second pass while store still fails: probed again, still visible, still holds starts.
 	readsBefore := w.getDiskReadCalls()
-	w.advance(time.Minute)
+	w.advanceMinute()
 	w.pass()
 	if w.getDiskReadCalls() <= readsBefore {
 		t.Fatalf("active disk alert must be probed again on every pass (reads stayed %d)", readsBefore)
@@ -768,12 +645,12 @@ func TestPR5b9_DiskENOSPCStaysVisibleInMemoryAndClearsOnRecovery(t *testing.T) {
 	// Store becomes writable again while data volume is still >= 90%:
 	// alert is persisted on the first successful write without duplicating logs.
 	w.setStoreENOSPC(false)
-	w.advance(time.Minute)
+	w.advanceMinute()
 	w.pass()
-	if _, ok := cdStatusAlert(t, w.paths, w.repo, "disk"); !ok {
+	if _, ok := statusAlert(t, w.paths, w.repo, "disk"); !ok {
 		t.Fatalf("disk alert must be persisted to state.json on first successful write")
 	}
-	if blob := cdPersistedAlertBlob(t, w.paths, w.id); !strings.Contains(blob, "disk") {
+	if blob := persistedAlertBlob(t, w.paths, w.id); !strings.Contains(blob, "disk") {
 		t.Fatalf("state.json must contain persisted disk alert after store recovers; got %s", blob)
 	}
 
@@ -782,12 +659,12 @@ func TestPR5b9_DiskENOSPCStaysVisibleInMemoryAndClearsOnRecovery(t *testing.T) {
 		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 40, Known: true},
 		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 60, Known: true},
 	)
-	w.advance(time.Minute)
+	w.advanceMinute()
 	w.pass()
 	if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, "disk"); ok {
 		t.Fatalf("disk alert must clear once writes succeed and volumes read under threshold; still active: %+v", ts)
 	}
-	if ts, ok := cdStatusAlert(t, w.paths, w.repo, "disk"); ok {
+	if ts, ok := statusAlert(t, w.paths, w.repo, "disk"); ok {
 		t.Fatalf("disk alert must be cleared from persisted ProjectStatus; still active: %+v", ts)
 	}
 }
@@ -818,7 +695,7 @@ func TestPR5b9_DiskGitENOSPCRaisesWithProjectVolumeAndClearsOnRecovery(t *testin
 
 	// Recovery: git writes succeed and both volumes read under threshold.
 	w.setGitENOSPC(false)
-	w.advance(time.Minute)
+	w.advanceMinute()
 	w.pass()
 	if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, "disk"); ok {
 		t.Fatalf("disk alert must clear after git ENOSPC recovers and readings are under threshold; got %+v", ts)
@@ -857,7 +734,7 @@ func TestPR5b9_DiskVolumeThresholdBothVolumesUnknownAndCustomSetting(t *testing.
 			DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 89, Known: true},
 			DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
 		)
-		w.advance(time.Minute)
+		w.advanceMinute()
 		w.pass()
 		if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, "disk"); ok {
 			t.Fatalf("project volume at 89%% (< 90) must clear disk; still active: %+v", ts)
@@ -886,7 +763,7 @@ func TestPR5b9_DiskVolumeThresholdBothVolumesUnknownAndCustomSetting(t *testing.
 			DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 30, Known: true},
 			DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 80, Known: true},
 		)
-		w.advance(time.Minute)
+		w.advanceMinute()
 		w.pass()
 		if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, "disk"); ok {
 			t.Fatalf("data volume at 80%% must clear disk; still active: %+v", ts)
@@ -909,7 +786,7 @@ func TestPR5b9_DiskVolumeThresholdBothVolumesUnknownAndCustomSetting(t *testing.
 			DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 95, Known: true},
 			DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
 		)
-		w.advance(time.Minute)
+		w.advanceMinute()
 		w.pass()
 		if _, ok := cdEngineStatusAlert(t, w.eng, w.repo, "disk"); !ok {
 			t.Fatalf("95%% reading must raise disk")
@@ -919,7 +796,7 @@ func TestPR5b9_DiskVolumeThresholdBothVolumesUnknownAndCustomSetting(t *testing.
 			DiskReading{Known: false, Unknown: "statfs timeout"},
 			DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
 		)
-		w.advance(time.Minute)
+		w.advanceMinute()
 		w.pass()
 		if _, ok := cdEngineStatusAlert(t, w.eng, w.repo, "disk"); !ok {
 			t.Fatalf("unknown volume reading must never clear an active disk alert")
@@ -942,7 +819,7 @@ func TestPR5b9_DiskVolumeThresholdBothVolumesUnknownAndCustomSetting(t *testing.
 			DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 74, Known: true},
 			DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
 		)
-		w.advance(time.Minute)
+		w.advanceMinute()
 		w.pass()
 		if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, "disk"); ok {
 			t.Fatalf("74%% with disk_full_percent=75 must clear disk; got %+v", ts)
@@ -959,13 +836,13 @@ func TestPR5b9_RestartPreservesActiveConsentAndDiskWithoutRepeatingLog(t *testin
 		w := newCDWorld(t, "Restart consent alert")
 		w.setFolderProbe(cdProbeTimeout)
 		w.pass()
-		w.advance(time.Minute)
+		w.advanceMinute()
 		w.pass()
 
-		if _, ok := cdStatusAlert(t, w.paths, w.repo, "consent_prompt"); !ok {
+		if _, ok := statusAlert(t, w.paths, w.repo, "consent_prompt"); !ok {
 			t.Fatalf("expected persisted consent_prompt before restart")
 		}
-		if logs := cdAlertLogs(t, w.paths, w.repo, "consent_prompt"); len(logs) != 1 {
+		if logs := alertEpisodeLogs(t, w.paths, w.repo, "consent_prompt"); len(logs) != 1 {
 			t.Fatalf("expected 1 consent_prompt log before restart, got %d", len(logs))
 		}
 
@@ -973,12 +850,12 @@ func TestPR5b9_RestartPreservesActiveConsentAndDiskWithoutRepeatingLog(t *testin
 		w.restart()
 		runsAfterRestart := w.runCount()
 		probesBefore := w.getProbeCalls()
-		w.advance(time.Minute)
+		w.advanceMinute()
 		w.pass()
-		w.advance(time.Minute)
+		w.advanceMinute()
 		w.pass()
 
-		if _, ok := cdStatusAlert(t, w.paths, w.repo, "consent_prompt"); !ok {
+		if _, ok := statusAlert(t, w.paths, w.repo, "consent_prompt"); !ok {
 			t.Fatalf("consent_prompt must survive restart")
 		}
 		if w.getProbeCalls() <= probesBefore {
@@ -987,15 +864,15 @@ func TestPR5b9_RestartPreservesActiveConsentAndDiskWithoutRepeatingLog(t *testin
 		if w.runCount() != runsAfterRestart {
 			t.Fatalf("consent_prompt must keep holding starts after restart; runs=%d want %d", w.runCount(), runsAfterRestart)
 		}
-		if logs := cdAlertLogs(t, w.paths, w.repo, "consent_prompt"); len(logs) != 1 {
+		if logs := alertEpisodeLogs(t, w.paths, w.repo, "consent_prompt"); len(logs) != 1 {
 			t.Fatalf("active consent_prompt must not repeat its log line across restart; got %d entries: %+v", len(logs), logs)
 		}
 
 		// Recover after restart.
-		w.advance(time.Minute)
+		w.advanceMinute()
 		w.setFolderProbe(cdProbeOK)
 		w.pass()
-		if ts, ok := cdStatusAlert(t, w.paths, w.repo, "consent_prompt"); ok {
+		if ts, ok := statusAlert(t, w.paths, w.repo, "consent_prompt"); ok {
 			t.Fatalf("consent_prompt must clear on good probe after restart; got %+v", ts)
 		}
 	})
@@ -1008,10 +885,10 @@ func TestPR5b9_RestartPreservesActiveConsentAndDiskWithoutRepeatingLog(t *testin
 		)
 		w.pass()
 
-		if _, ok := cdStatusAlert(t, w.paths, w.repo, "disk"); !ok {
+		if _, ok := statusAlert(t, w.paths, w.repo, "disk"); !ok {
 			t.Fatalf("expected persisted disk alert before restart")
 		}
-		if logs := cdAlertLogs(t, w.paths, w.repo, "disk"); len(logs) != 1 {
+		if logs := alertEpisodeLogs(t, w.paths, w.repo, "disk"); len(logs) != 1 {
 			t.Fatalf("expected 1 disk log before restart, got %d", len(logs))
 		}
 
@@ -1019,12 +896,12 @@ func TestPR5b9_RestartPreservesActiveConsentAndDiskWithoutRepeatingLog(t *testin
 		w.restart()
 		runsAfterRestart := w.runCount()
 		readsBefore := w.getDiskReadCalls()
-		w.advance(time.Minute)
+		w.advanceMinute()
 		w.pass()
-		w.advance(time.Minute)
+		w.advanceMinute()
 		w.pass()
 
-		if _, ok := cdStatusAlert(t, w.paths, w.repo, "disk"); !ok {
+		if _, ok := statusAlert(t, w.paths, w.repo, "disk"); !ok {
 			t.Fatalf("disk alert must survive restart")
 		}
 		if w.getDiskReadCalls() <= readsBefore {
@@ -1033,7 +910,7 @@ func TestPR5b9_RestartPreservesActiveConsentAndDiskWithoutRepeatingLog(t *testin
 		if w.runCount() != runsAfterRestart {
 			t.Fatalf("disk alert must keep holding starts after restart; runs=%d want %d", w.runCount(), runsAfterRestart)
 		}
-		if logs := cdAlertLogs(t, w.paths, w.repo, "disk"); len(logs) != 1 {
+		if logs := alertEpisodeLogs(t, w.paths, w.repo, "disk"); len(logs) != 1 {
 			t.Fatalf("active disk alert must not repeat its log line across restart; got %d entries: %+v", len(logs), logs)
 		}
 
@@ -1042,9 +919,9 @@ func TestPR5b9_RestartPreservesActiveConsentAndDiskWithoutRepeatingLog(t *testin
 			DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 50, Known: true},
 			DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
 		)
-		w.advance(time.Minute)
+		w.advanceMinute()
 		w.pass()
-		if ts, ok := cdStatusAlert(t, w.paths, w.repo, "disk"); ok {
+		if ts, ok := statusAlert(t, w.paths, w.repo, "disk"); ok {
 			t.Fatalf("disk alert must clear on recovery after restart; got %+v", ts)
 		}
 	})
