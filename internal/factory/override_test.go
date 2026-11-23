@@ -36,7 +36,7 @@ const pendingRollup = `[{"__typename":"CheckRun","name":"ci","status":"IN_PROGRE
 // setupTwoTaskOverrideWorld plans T1 and T2 (max_running 2), starts both
 // workers, commits and reports ready for both tasks, and records open PR
 // snapshots (T1: PR #7 pending, T2: PR #8 green) in state and memory.
-func setupTwoTaskOverrideWorld(t *testing.T) (w *restartWorld, tokByTask map[string]string, c1, c2 string) {
+func setupTwoTaskOverrideWorld(t *testing.T) (w *restartWorld, tokByTask map[string]string, c1, c2 string) { //nolint:unparam // the token map is kept for later 7.x histories
 	t.Helper()
 	w = newRestartWorld(t, "Ship two stacked PRs")
 	tokByTask = map[string]string{}
