@@ -20,6 +20,8 @@ public struct MenuItemSpec: Equatable {
         case openMicrophoneSettings
         /// The daemon updates itself (`MacUpdater`, `POST /api/update`).
         case updateApp
+        /// Request a one-time short code to pair a local browser (`POST /api/pair/browser-code`).
+        case pairBrowser
     }
 
     public enum Row: Equatable {
@@ -89,6 +91,9 @@ public final class StatusItemController: NSObject {
         return rows
     }
 
+    /// VoiceOver label for the "Pair browser…" menu item.
+    public static var pairBrowserAccessibilityLabel: String { "" }
+
     private let source: DaemonStatusSource
     private let voice: VoiceControlling
     private let panel: PanelOpening
@@ -97,6 +102,8 @@ public final class StatusItemController: NSObject {
     private let log: AppLogging
     private let quit: () -> Void
     private let updater: MacUpdater
+    private let browserPairing: BrowserPairingClient?
+    private let browserPairingPresenter: BrowserPairingPresenting?
     private var statusItem: NSStatusItem?
 
     /// The state the menu shows; the daemon is "down" until it answers.
@@ -125,6 +132,8 @@ public final class StatusItemController: NSObject {
         loginItem: LoginItemControlling,
         log: AppLogging,
         updater: MacUpdater? = nil,
+        browserPairing: BrowserPairingClient? = nil,
+        browserPairingPresenter: BrowserPairingPresenting? = nil,
         quit: @escaping () -> Void = { NSApp.terminate(nil) }
     ) {
         self.updater = updater ?? MacUpdater(
@@ -138,6 +147,8 @@ public final class StatusItemController: NSObject {
         self.hotkey = hotkey
         self.loginItem = loginItem
         self.log = log
+        self.browserPairing = browserPairing
+        self.browserPairingPresenter = browserPairingPresenter
         self.quit = quit
         super.init()
         self.updater.onChange = { [weak self] in
@@ -241,6 +252,8 @@ public final class StatusItemController: NSObject {
             guard let offer else { return }
             let updater = updater
             Task { await updater.start(offer: offer) }
+        case .pairBrowser:
+            break
         }
     }
 
