@@ -82,8 +82,10 @@ the QR once more.
 ### What we do not defend against
 
 - **Malware on the computer, or anyone with the user's login there.** It
-  can read the daemon's data directory and keys, and talk to loopback.
-  The agents themselves run as the user too.
+  can read or edit the daemon's data directory and keys, talk to loopback,
+  and enrol a `kind: "macos"` key on loopback without a code (the backstop
+  is visibility in `/setup`'s Devices list and `web.device.enroll` /
+  `device_id` audit logs). The agents themselves run as the user too.
 - **Someone using the computer's unlocked session.** They can open the
   setup page and pair their own phone. The setup page is loopback-only,
   so this needs the computer itself, and the other devices get the
@@ -512,6 +514,7 @@ run the whole path against the pair fixture daemon.
 |---|---|---|---|
 | iPhone, iPad | Secure Enclave P-256 (`kSecAttrTokenIDSecureEnclave`), `.privateKeyUsage`, accessible after first unlock, this device only. One key per daemon, tagged `sheepdog.device.<daemon id>`. | Daemon id, name, addresses, pin, next pin, certificate expiry, device id, paired date in the Keychain (this device only). The ticket in memory only. | "After first unlock" lets a notification's Approve work while the phone is locked. The key is not in backups and not in iCloud Keychain; a restored or new phone pairs again. |
 | iOS Simulator | Software P-256 key in the Keychain, same attributes | Same | No Secure Enclave. The enroll call says `hardware: false`. |
+| macOS menu-bar app (`Sheepdog.app`) | Software P-256 key in the Login Keychain (`hardware: false`), one key per daemon, tagged `sheepdog.device.<daemon id>`, isolated by the signed app's code-signing ACL. | Device id in the Login Keychain (`KeychainSecretStore`, keyed `mac.device.<daemon id>`); ticket in memory only; TLS pin read from `GET /api/hello` at sign-in. | Enrols on demand over unproxied loopback (`kind: "macos"`, no code) on first **Pair browser…** click; does not use `kSecAttrAccessControl` or Data Protection Keychain. |
 | Browser | WebCrypto ECDSA P-256, `extractable: false`, `["sign"]`, stored as a `CryptoKey` in IndexedDB, keyed by daemon id | Device id in IndexedDB; ticket in the `HttpOnly` cookie | Per origin: `https://192.168.1.20:7777`, `https://100.x:7777` and `https://mac.tailnet.ts.net:7777` are three devices. Private windows keep nothing. Clearing site data, or Safari's tracking prevention after long disuse, removes the key; the browser scans a new QR. |
 | Daemon | Not applicable | `<data_dir>/tls/` (TLS key, certificate, next key during rotation, daemon id), `<data_dir>/devices.json` (0600: id, name, kind, public key, created, last seen, last network kind, hardware flag). | The push device list gets a `device_id` link, so revoking a device also drops its push registration and content key. `web.token` is removed from the config. |
 
@@ -524,12 +527,14 @@ Push content keys are already per phone and stay as they are
 
 ### 7.1 The devices list
 
-On the setup page (loopback only), a "Devices" section:
+On the setup page (loopback only), a "Devices" section — shown whenever
+phone access is on or at least one device is paired (so loopback-only
+users can see and revoke the Mac app and paired browsers):
 
-- Each row: **name** (editable), **kind** (iPhone, iPad, Android ·
-  Chrome, Mac · Safari), **last seen** (with the network: Tailscale,
-  Wi-Fi, this computer) and **Revoke**. Revoke drops the device's
-  tickets, closes its connections and removes its push registration.
+- Each row: **name** (editable), **kind** (iPhone, iPad, Mac, Browser),
+  **last seen** (with the network: Tailscale, Wi-Fi, this computer) and
+  **Revoke**. Revoke drops the device's tickets, closes its connections
+  and removes its push registration.
 - **Disconnect all devices.** Revokes every device. The certificate,
   pin and daemon id stay, so the next QR scan is an ordinary pairing.
   Confirm: "Every phone and browser will need to scan the code again."
@@ -537,8 +542,10 @@ On the setup page (loopback only), a "Devices" section:
   certificate and pin; the daemon id stays. Use it after a suspected compromise.
   Confirm: "Every phone and browser will need to scan the code again,
   and each will show a security warning until it does."
-- An empty list says: "No devices yet. Scan the code above with the
-  Sheepdog app or your phone's camera."
+- When phone access is on and the list is empty, it says: "No devices
+  yet. Scan the code above with the Sheepdog app or your phone's camera."
+  When phone access is off and no devices are paired, the Devices section
+  stays hidden.
 
 A device can also unpair itself (`DELETE /api/devices/self`). The app
 calls it, best effort, when the user removes a computer in Settings ▸

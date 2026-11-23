@@ -53,6 +53,11 @@ state and how many agents need you. From its menu you can:
   You can choose Control+Space or Control+Option+Space instead.
 - **Open the panel**, choose **Launch at login**, or quit the app. Launch at
   login is off until you turn it on.
+- **Pair browser…** to get a one-time short code for a local browser (for
+  example the `/factory` page). On first use, Sheepdog.app enrols itself with
+  the local daemon over loopback — no phone access required — and appears as
+  a **Mac** row in the Devices list on `sheepdog setup`'s `/setup` page, where
+  you can rename or revoke it.
 - **herdr: tui / core** to switch the daemon between running herdr-tui and
   herdr-core backends after confirming.
 - **Update** when the menu says **Update available**. It does what

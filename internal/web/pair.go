@@ -323,9 +323,9 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch req.Kind {
-	case DeviceIOS, DeviceIPadOS, DeviceBrowser:
+	case DeviceIOS, DeviceIPadOS, DeviceMacOS, DeviceBrowser:
 	default:
-		writeError(w, http.StatusBadRequest, "kind must be ios, ipados or browser")
+		writeError(w, http.StatusBadRequest, "kind must be ios, ipados, macos or browser")
 		return
 	}
 	_, pub, err := parseDeviceKey(req.PublicKey)
@@ -333,20 +333,32 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "public_key: "+err.Error())
 		return
 	}
-	if remote && req.Kind == DeviceBrowser && isBrowserShortCode(req.Code) {
-		s.log.Log(logSource, "web.pair.code_refused", "", map[string]any{"reason": "loopback_only", "remote": r.RemoteAddr})
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Browser short codes can only be used on this computer.", "reason": "loopback_only"})
-		return
-	}
-	if reason := s.burnEnrollCode(req.Kind, req.Code, !remote, now); reason != "" {
-		blocked := s.limits.fail("enroll", src, badCodesPerMinute, now)
-		s.log.Log(logSource, "web.pair.code_refused", "", map[string]any{"reason": reason, "remote": r.RemoteAddr})
-		if !remote && blocked {
-			writeRateLimited(w)
+	if req.Kind == DeviceMacOS {
+		if remote || !isLoopbackHost(r.Host) {
+			s.log.Log(logSource, "web.pair.code_refused", "", map[string]any{"reason": "loopback_only", "remote": r.RemoteAddr})
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Mac enrolment is only allowed on this computer.", "reason": "loopback_only"})
 			return
 		}
-		writeJSON(w, http.StatusGone, map[string]string{"error": "This code was already used or has expired. Show a new code on your computer and scan it.", "reason": reason})
-		return
+		if strings.TrimSpace(req.Code) != "" {
+			writeError(w, http.StatusBadRequest, "macos enrolment does not take a code")
+			return
+		}
+	} else {
+		if remote && req.Kind == DeviceBrowser && isBrowserShortCode(req.Code) {
+			s.log.Log(logSource, "web.pair.code_refused", "", map[string]any{"reason": "loopback_only", "remote": r.RemoteAddr})
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Browser short codes can only be used on this computer.", "reason": "loopback_only"})
+			return
+		}
+		if reason := s.burnEnrollCode(req.Kind, req.Code, !remote, now); reason != "" {
+			blocked := s.limits.fail("enroll", src, badCodesPerMinute, now)
+			s.log.Log(logSource, "web.pair.code_refused", "", map[string]any{"reason": reason, "remote": r.RemoteAddr})
+			if !remote && blocked {
+				writeRateLimited(w)
+				return
+			}
+			writeJSON(w, http.StatusGone, map[string]string{"error": "This code was already used or has expired. Show a new code on your computer and scan it.", "reason": reason})
+			return
+		}
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
