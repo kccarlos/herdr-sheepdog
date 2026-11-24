@@ -674,13 +674,22 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 		if s.Project.CoordDialogStucks >= 2 {
 			e.logEvent("factory.coordinator_stuck", map[string]string{"project": id, "count": fmt.Sprint(s.Project.CoordDialogStucks), "why": d.Why})
 			e.reconcileAlertLocked(id, s, flow.AlertAgentsDown+"@j10", true, flow.Alert{Kind: flow.AlertAgentsDown, Cause: d.Why, At: now, Rule: "J10", Scope: "j10_stuck"}, "alert", "")
+			if !e.cleanLocked(id) {
+				return
+			}
 		}
 		e.commitLogLocked(id, s, LogLine{By: "engine", Rule: r.ID, Asked: d.Asked, Decision: map[bool]string{true: "coordinator stuck at dialog twice in a row; owner attention needed", false: fmt.Sprintf("coordinator stuck at dialog (count %d)", s.Project.CoordDialogStucks)}[s.Project.CoordDialogStucks >= 2], Why: d.Why})
+		if !e.cleanLocked(id) {
+			return
+		}
 		r, d = match()
 	}
 	if r.ID == "J6" || (r.ID == "J4" && !flow.RunLive(s.Project.RunID, s.Project.Run)) {
 		if capWhy, capped := flow.CoordHourlyCap(s.Project, s.Settings, now); r.ID == "J6" && capped {
 			e.reconcileAlertLocked(id, s, flow.AlertAgentsDown+"@j6", true, flow.Alert{Kind: flow.AlertAgentsDown, Cause: capWhy, At: now, Rule: "J6", Scope: "j6_cap"}, "alert", "")
+			if !e.cleanLocked(id) {
+				return
+			}
 		}
 		e.logProjectWaitLocked(id, s, r.ID, cmp.Or(map[string]string{"J4": "finished"}[r.ID], "waiting"), d.Why, r.ID+":"+d.Why)
 		return
@@ -710,6 +719,9 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 		clearCoordTrack(&s.Project, true, false)
 		if s.Project.CoordSilentStops = map[bool]int{true: s.Project.CoordSilentStops + 1}[r.ID == "J9"]; s.Project.CoordSilentStops >= 2 {
 			e.reconcileAlertLocked(id, s, flow.AlertAgentsDown+"@j9", true, flow.Alert{Kind: flow.AlertAgentsDown, Cause: d.Why, At: now, Rule: "J9", Scope: "j9_silent"}, "alert", "")
+			if !e.cleanLocked(id) {
+				return
+			}
 		}
 		commit("stopped coordinator")
 	case flow.AskDeliverWakes:
