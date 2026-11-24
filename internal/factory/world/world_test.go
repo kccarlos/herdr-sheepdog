@@ -186,6 +186,53 @@ func TestStartRunOmitsDuplicateDisableAutoupdaterEnv(t *testing.T) {
 	}
 }
 
+// TestStartTerminalRespectsHerdrSpaceLabel checks that StartTerminal sends a
+// caller-supplied herdr.space while still generating a fresh herdr.tab per
+// terminal and preserving herdr.seen=0, NoParent and NoNotify.
+func TestStartTerminalRespectsHerdrSpaceLabel(t *testing.T) {
+	srv := hctest.New(t)
+	var runs []hc.RunParams
+	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) { runs = append(runs, p) }
+	client := hc.NewClient(srv.Path)
+	ctx := context.Background()
+	cwd := t.TempDir()
+	claudeCfg := filepath.Join(t.TempDir(), ".claude.json")
+	argv := ClaudeArgv(flow.RoleWorker, "sonnet", "high", "bypassPermissions")
+
+	for _, name := range []string{"worker-space-1", "worker-space-2"} {
+		_, _, err := StartTerminal(ctx, client, RunSpec{
+			Name:         name,
+			Cwd:          cwd,
+			ClaudeConfig: claudeCfg,
+			Argv:         argv,
+			Labels:       map[string]string{"herdr.space": "proj-1a2b3c4d", "sheepdog.role": flow.RoleWorker},
+		}, nil)
+		if err != nil {
+			t.Fatalf("StartTerminal(%s): %v", name, err)
+		}
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected 2 terminal.run requests, got %d", len(runs))
+	}
+	for i, got := range runs {
+		if got.Labels["herdr.space"] != "proj-1a2b3c4d" {
+			t.Errorf("run %d: herdr.space = %q, want %q", i, got.Labels["herdr.space"], "proj-1a2b3c4d")
+		}
+		if got.Labels["herdr.tab"] == "" {
+			t.Errorf("run %d: herdr.tab is empty", i)
+		}
+		if got.Labels["herdr.seen"] != "0" {
+			t.Errorf("run %d: herdr.seen = %q, want 0", i, got.Labels["herdr.seen"])
+		}
+		if !got.NoParent || !got.NoNotify {
+			t.Errorf("run %d: NoParent=%v NoNotify=%v, want both true", i, got.NoParent, got.NoNotify)
+		}
+	}
+	if runs[0].Labels["herdr.tab"] == runs[1].Labels["herdr.tab"] {
+		t.Errorf("both runs got the same herdr.tab %q, want distinct tabs", runs[0].Labels["herdr.tab"])
+	}
+}
+
 // TestRunStateOutageAndChildProcessGroupStop checks Neon M8 (d) and (e):
 // closed hc socket returns an error (never RunGone), and StopRun kills a child
 // spawned in the same process group (`sh -c 'sleep 60 & wait'`).
