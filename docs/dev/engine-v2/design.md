@@ -836,6 +836,7 @@ These are mechanics: how a thing is done once a row has asked for it. They decid
 | Scratch copies | The clean checkout for a check run and a reviewer's scratch copy are removed when that run ends |
 | Stop | Ending a run ends its whole process group, then checks nothing is left |
 | Terminal names | Built from project, task, attempt and round, and fitted to herdr-core's rule `^[a-z][a-z0-9_.-]{0,31}$` (task ids come from the plan and may have capitals): lower case, other characters made `-`; a name that changed or is too long becomes its first 23 characters, `-` and 8 hex characters of its hash |
+| Where a run shows | Every run carries `herdr.space` = its project id, so Herdr shows a project's runs as one space, the same one after a restart. `herdr.tab` is a new id for every terminal: two runs in one tab would be shown as a split and resize each other. These labels are display only: a run is still found by `sheepdog.run` and its creation time. A run has no parent terminal: a child ends with its parent, and a daemon under launchd has none. |
 | Messages | Long content is a file path. Another agent's output is passed as a file to read, marked untrusted |
 
 ## 10. The coordinator
