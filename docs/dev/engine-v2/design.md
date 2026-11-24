@@ -545,7 +545,7 @@ Held wakes merge only when their kind and their task are the same. The owner's w
 **Notes on `consent_prompt` and `disk` (5b.9).**
 - `consent_prompt` is raised only on positive evidence from a protected-folder probe of the project folder through herdr-core: two consecutive probe timeouts (while the temp folder answers) or two consecutive blank results (exit 0 with empty output / no probed directory). An hc outage or any inconclusive failure (for example both the project folder and temp folder timing out, or an RPC error) is `hc_unavailable` or `unknown (<reason>)`, never `consent_prompt`. It clears on the first good probe.
 - `disk` is raised only on positive evidence: an `ENOSPC` from a store or git write, or either the project folder's volume or the data directory's volume reading at or above `disk_full_percent` (default 90, range 50–99). Both volumes are measured and named in the alert; an unreadable volume is `unknown (<reason>)` and never raises or clears `disk`. It clears when a write succeeds and both readings are below `disk_full_percent`.
-- When the store cannot write (for example on `ENOSPC`), `disk` stays active in memory, is shown by `factory status`, and is logged to stderr; it is persisted to `state.json` on the first successful write.
+- When a raise cannot be committed (for example the store returns `ENOSPC`), the alert is held in memory: `factory status` shows it, it holds starts, and `disk` is logged to stderr once. Its raise is committed first on every pass until that succeeds. Nothing else about an alert is kept in memory. A clear that cannot be committed did not happen: the alert stays active until a clear commits, and if the cause returns first the episode goes on.
 - Both `consent_prompt` and `disk` are stopping alerts (they hold new starts across roles per section 6 / J3) and are probed again on every pass while active.
 
 The coordinator is started in the project's repo folder, never a home folder or another project's.
@@ -1099,7 +1099,7 @@ Deleted against this: about 3,250 lines of Go glue, 21,460 lines of Python and 1
   pool-cooldowns.json              per-(CLI, pool) quota cooldown reset timestamps (mode 0600)
   codex-home/                      shared CODEX_HOME symlinked to ~/.codex/auth.json
   projects/<id>/state.json         project, plan, settings, tasks with their records, runs, asks, alerts, seq
-  projects/<id>/log.jsonl          append-only: one line per pass, with the rule that matched and what was asked for
+  projects/<id>/log.jsonl          one line per pass, with the rule that matched and what was asked for (append-only, except that lines past the state's seq are dropped, see below)
   projects/<id>/worktrees/         git worktrees per task attempt (<task>-<attempt>/)
   projects/<id>/briefs/            task brief markdown files (<task>.md) for worker handoffs
   projects/<id>/reports/           review round findings (<task>-r<n>.md) and scratch drafts (<task>-r<n>-<code>.draft.md)
@@ -1109,15 +1109,26 @@ Deleted against this: about 3,250 lines of Go glue, 21,460 lines of Python and 1
 ```
 
 - `state.json` is the one source of truth. It is written with a temporary file and a rename, mode 0600, as the daemon writes its other state. It keeps no run token, only its SHA-256.
-- `log.jsonl` is the audit trail and the owner's factory log. A line: `{seq, at, project, by, wake, task, input, facts, rule, asked, decision, why, model}` (in v1, `LogLine` writes `seq, at, project, by, task, input, facts, rule, asked, decision, why`). On start, lines past the state's `seq` are dropped (a crash between the two writes). A refused report or command changes no record, so it goes to the daemon's event log, not here.
+- `log.jsonl` is the audit trail and the owner's factory log. A line: `{seq, at, project, by, wake, task, input, facts, rule, asked, decision, why, model}` (in v1, `LogLine` writes `seq, at, project, by, task, input, facts, rule, asked, decision, why`). A refused report or command changes no record, so it goes to the daemon's event log, not here.
 - Settings are stored in `state.json` (and later `engine.json` by scope). There is no layered settings file and nothing is read from `~/.config`.
 - Done tasks stay in `state.json` in v1 (archiving to `projects/<id>/archive.json` on milestone close is a later slice). *Estimate, not measured:* a few hundred tasks is about 1 MB, written a few times a minute.
 - New data files are added to `CONFIG.md`'s data table (`internal/factory/store.go`).
+
+**One commit, two files.**
+- **S1.** A commit appends its line to `log.jsonl`, then writes `state.json` with that line's `seq`. `state.json` is the truth: a line counts only when a state with its `seq` or a later one is written.
+- **S2.** If either write fails, the commit did not happen. The engine writes nothing more for that project until it has read `state.json` again and dropped every log line past that state's `seq`, a torn last line, and any line that does not parse. It is the same step as on start, so a failed write and a crash at the same point leave the same two files.
+- **S2b.** After a failed write the engine also sends nothing to a run of that project until the store is clean again.
+- **S2c.** A dirty store becomes clean only after a write succeeds: the drop, then the loaded state written back unchanged.
+- **S3.** No line stays without its state, and no two lines share a `seq`. The next pass decides again from `state.json` and the world, and logs what it then decides. A change saved before the failed commit (a run's label and token, an `asked` intent) stays, and the line of that step may never be written. The `seq` of a dropped line is used again.
+- **S3b.** An input (a report, `say`, an answer, start, stop) whose commit failed is refused to its sender with the error; `stop` still stops the project's runs first. The engine does not redo it; the sender sends it again.
+- **S4.** Status and the log views show lines only up to the state's `seq`.
+- **S5.** What the world already did in the failed step: a start or a merge is found by its saved label or intent and is not done twice; a keyed act finds its work done; a message to a run may be sent a second time, once. A push to the owner's phone or voice is sent only after a commit, so never twice and never for a dropped line (principle 4, section 8 "Restart", section 15).
 
 ## 15. Errors and recovery
 
 | Failure | What happens | Why it converges |
 |---|---|---|
+| A store write fails | No further write or send for that project until the store is trimmed and written back; inputs are refused (`stop` still stops the runs first) | Section 14, S2–S5 |
 | Daemon crash or restart | One pass over every open task reads the stored records and fresh facts and lands on the same rows | Nothing depends on what a previous pass meant to do |
 | Crash after an executor acted, before its result was stored | The same thing is asked for again; the executor finds it already done | Keys; executors ask the world first |
 | An executor keeps failing | Back-off per key; after `ensure_failures`, row N5: the task waits on the coordinator and nothing re-fires | Section 8 |

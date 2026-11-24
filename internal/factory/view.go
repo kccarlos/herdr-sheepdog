@@ -193,6 +193,7 @@ func (e *Engine) loadProjectCopy(project string) (flow.State, []LogLine, error) 
 	if project == "" || project == "." || project == ".." || strings.ContainsAny(project, `/\`) {
 		return flow.State{}, nil, ErrProjectNotFound
 	}
+	// Read state.json before log.jsonl (the order matters for lockless CLI reads, S4).
 	s, err := LoadState(e.Paths.State(project))
 	if os.IsNotExist(err) {
 		return flow.State{}, nil, ErrProjectNotFound
@@ -206,7 +207,7 @@ func (e *Engine) loadProjectCopy(project string) (flow.State, []LogLine, error) 
 	var logs []LogLine
 	for _, raw := range bytes.Split(data, []byte("\n")) {
 		var l LogLine
-		if json.Unmarshal(raw, &l) == nil {
+		if json.Unmarshal(raw, &l) == nil && l.Seq <= s.Seq {
 			logs = append(logs, l)
 		}
 	}
