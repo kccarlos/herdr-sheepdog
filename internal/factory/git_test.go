@@ -209,9 +209,13 @@ func TestHungGitDoesNotSkipHealthyProjectInSameTick(t *testing.T) {
 
 func TestTruncatedChangedLinesOpensSizeRecap(t *testing.T) {
 	l := newLanding(t)
+	commitFile(t, l.repo, ".gitattributes", "gen/big.pbx linguist-generated\n")
+	gitIn(t, l.repo, "push", "origin", "main")
+	gitIn(t, l.wt, "fetch", "origin")
+	commitFile(t, l.wt, "gen/big.pbx", strings.Repeat("// gen\n", 500))
 	srv := hctest.New(t)
 	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
-		if p.Argv[1] == "diff" {
+		if len(p.Argv) > 1 && p.Argv[0] == "git" && p.Argv[1] == "diff" && p.Env["GIT_ATTR_SOURCE"] == "" {
 			code := 0
 			return hc.ExecResult{Code: &code, Truncated: true}, nil
 		}
