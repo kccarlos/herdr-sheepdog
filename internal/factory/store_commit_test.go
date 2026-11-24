@@ -897,3 +897,268 @@ func TestStore_StopStillStopsRunsOnADirtyStore(t *testing.T) {
 		t.Fatalf("log.jsonl changed on failed Stop (must return error without a commit):\nbefore:\n%s\nafter:\n%s", logBefore, logAfter)
 	}
 }
+
+// Test 10 (S2 — r1 review: NeonH Finding 1 / Carbon Major 2):
+// When observeReviewLocked dirties the store on its Review.Age save (or enters
+// dirty), it must not write reports/<task>-r<n>.md or stop the live Codex
+// reviewer terminal; on the next healthy pass, the verdict commits cleanly.
+func TestStore_DirtyStoreDoesNotDestroyCodexVerdict(t *testing.T) {
+	ctx := context.Background()
+	srv, eng, paths, id, c1 := codexRound2(t)
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev := st.Tasks[0].Attempts[0].Review
+	reply := "• All checks pass.\nself-check misses: 0\ndeletable: none\n" +
+		`<report>{"code":"` + rev.Code + `","round":2,"head":"` + c1 + `","verdict":"pass","majors":0}</report>` + "\n"
+	srv.SetScreen(rev.RunID, codexScreen(rev.Code, c1, reply))
+	time.Sleep(2 * time.Millisecond) // ensure passDelta > 0 so Review.Age triggers saveLocked
+
+	var failedAgeSave atomic.Bool
+	eng.writeState = func(path string, s flow.State) error {
+		if len(s.Tasks) > 0 && len(s.Tasks[0].Attempts) > 0 &&
+			s.Tasks[0].Attempts[0].Review != nil && len(s.Tasks[0].Attempts[0].Rounds) == 1 &&
+			failedAgeSave.CompareAndSwap(false, true) {
+			return errors.New("transient state write failure on Review.Age")
+		}
+		return SaveState(path, s)
+	}
+
+	eng.passProject(ctx, id) // Review.Age save fails -> store dirty before acceptVerdictLocked
+	if !failedAgeSave.Load() {
+		t.Fatal("setup bug: Review.Age save did not fire")
+	}
+	if _, err := eng.HC.Get(ctx, rev.RunID); err != nil {
+		t.Fatalf("live Codex reviewer %q was stopped/removed on a dirty store: %v", rev.RunID, err)
+	}
+	if _, err := os.Stat(paths.Report(id, "T1", 2)); !os.IsNotExist(err) {
+		t.Fatalf("report file %s was written while store was dirty (err=%v)", paths.Report(id, "T1", 2), err)
+	}
+
+	eng.passProject(ctx, id) // store healthy: verdict must now commit cleanly
+	stAfter, _ := assertLogInvariants(t, paths.State(id), paths.Log(id))
+	rounds := stAfter.Tasks[0].Attempts[0].Rounds
+	if len(rounds) != 2 || rounds[1].Verdict != flow.VerdictPass {
+		t.Fatalf("rounds after recovery = %+v, want 2 passing rounds (verdict was lost)", rounds)
+	}
+	if _, err := os.Stat(paths.Report(id, "T1", 2)); err != nil {
+		t.Fatalf("report file missing after healthy recovery pass: %v", err)
+	}
+}
+
+// Test 11 (S2 — r1 review: NeonH Finding 2 / Carbon Major 1):
+// When an earlier write in the same pass already dirtied the store, a later
+// task at N9 must not poison e.waits with an uncommitted waiting key; on the
+// next healthy pass it writes its N9 waiting line (matching crash + restart).
+func TestStore_WaitingLineWrittenWhenStoreAlreadyDirtyEarlierInPass(t *testing.T) {
+	w := newStoreWorld(t, "N9 waiting line after earlier failed commit in same pass")
+	w.seedIdleCoordAndWarmUp() // T1 is parked
+
+	w.edit(func(s *flow.State) {
+		s.Tasks = append(s.Tasks,
+			flow.Task{ID: "T0", Title: "feat: independent", EstimateLines: 20},
+			flow.Task{ID: "T2", Title: "feat: waits on T1", After: []string{"T1"}, EstimateLines: 20},
+		)
+	})
+
+	var failedT0 atomic.Bool
+	w.setWriteHooks(nil, func(path string, l LogLine) error {
+		if l.Task == "T0" && l.Rule == "N11" && failedT0.CompareAndSwap(false, true) {
+			return errors.New("log write failed on T0 N11")
+		}
+		return AppendLog(path, l)
+	})
+
+	w.pass() // T0 fails commit -> store dirty -> T2 runs on dirty store
+	if !failedT0.Load() {
+		t.Fatal("setup bug: T0 did not attempt N11 commit")
+	}
+
+	w.advanceMinute()
+	w.pass() // healthy recovery pass
+
+	_, lines := assertLogInvariants(t, w.paths.State(w.id), w.paths.Log(w.id))
+	var waits int
+	for _, l := range lines {
+		if l.Task == "T2" && l.Rule == "N9" && l.Decision == "waiting" {
+			waits++
+		}
+	}
+	if waits != 1 {
+		t.Fatalf("T2 N9 waiting lines after recovery = %d, want 1 (same as restart)", waits)
+	}
+}
+
+// Test 12 (S2 — r1 review: NeonH Finding 3 / Carbon Major 4):
+// readPRLocked must not retain an uncommitted PR snapshot in e.prs after a
+// failed pr_snapshot commit; on the next healthy pass, pr_snapshot is written
+// once, matching crash + restart.
+func TestStore_PRSnapshotLineWrittenAfterFailedCommit(t *testing.T) {
+	l := newLanding(t)
+	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
+
+	var failedOnce atomic.Bool
+	l.eng.writeLog = func(path string, line LogLine) error {
+		if line.Rule == "pr_snapshot" && failedOnce.CompareAndSwap(false, true) {
+			return errors.New("log write failed on pr_snapshot")
+		}
+		return AppendLog(path, line)
+	}
+
+	l.pass()
+	if !failedOnce.Load() {
+		t.Fatal("setup bug: pr_snapshot did not attempt a commit on pass 1")
+	}
+
+	l.pass() // healthy pass: must write pr_snapshot once, matching a restart
+	_, lines := assertLogInvariants(t, l.paths.State(l.id), l.paths.Log(l.id))
+	var snaps int
+	for _, ln := range lines {
+		if ln.Rule == "pr_snapshot" {
+			snaps++
+		}
+	}
+	if snaps != 1 {
+		t.Fatalf("pr_snapshot lines after recovery = %d, want 1", snaps)
+	}
+}
+
+// Test 13 (S2b — r1 review: NeonH Finding 4):
+// Inside a pass executor (actTaskLocked -> execTellConflict -> deliverWorkerLocked),
+// if advanceRunLocked fails a state write and dirties the store, deliverWorkerLocked
+// must not send to the worker terminal.
+func TestStore_DeliverWorkerDoesNotSendAfterAdvanceRunWriteFail(t *testing.T) {
+	w := newStoreWorld(t, "No worker send after advanceRunLocked write fail in actTaskLocked")
+	past := w.now.Add(-time.Minute)
+	pastMS := uint64(past.UnixMilli())
+
+	w.srv.Add(hc.Terminal{
+		Address:  "w1",
+		Name:     "w1",
+		State:    "live",
+		Labels:   map[string]string{"sheepdog.project": w.id, "sheepdog.role": flow.RoleWorker, "sheepdog.run": "run-w1"},
+		Status:   &hc.Status{App: "claude-code", State: "idle"},
+		Reported: true,
+		StatusMS: &pastMS,
+	})
+	w.edit(func(s *flow.State) {
+		s.Tasks = []flow.Task{{
+			ID:            "T1",
+			Title:         "feat: conflict",
+			EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap:    100,
+				BaseCommit: w.baseSHA,
+				Branch:     "T1-1",
+				PR:         7,
+				RunID:      "w1",
+				Run: &flow.RunRecord{
+					ID: "run-w1", Address: "w1", Role: flow.RoleWorker,
+					CLI: "claude", State: flow.PhaseWorking, Status: "", // triggers advanceRunLocked in deliverWorkerLocked
+					StartedAt: past, LastActivity: past,
+				},
+				Ready: []flow.Ready{{Head: "c1"}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: "full", Head: "c1", Verdict: flow.VerdictPass},
+					{N: 2, Kind: "full", Head: "c1", Verdict: flow.VerdictPass},
+				},
+			}},
+		}}
+	})
+
+	var failedSave atomic.Bool
+	w.setWriteHooks(func(path string, s flow.State) error {
+		if failedSave.CompareAndSwap(false, true) {
+			return errors.New("state save failed in advanceRunLocked")
+		}
+		return SaveState(path, s)
+	}, nil)
+
+	s := w.state()
+	var baseTried bool
+	facts := flow.Facts{
+		Tip:    "c1",
+		TipRel: flow.RelSame,
+		Worker: flow.Run{State: flow.RunWorking},
+		PR: flow.PR{
+			Answered:  true,
+			State:     flow.PROpen,
+			Number:    7,
+			Head:      "c1",
+			Mergeable: flow.MergeableConflict,
+			Checks:    flow.ChecksGreen,
+		},
+	}
+
+	w.eng.mu.Lock()
+	w.eng.actTaskLocked(w.ctx, w.id, &s, 0, facts, &baseTried)
+	w.eng.mu.Unlock()
+
+	if !failedSave.Load() {
+		t.Fatal("setup bug: advanceRunLocked did not attempt a state save")
+	}
+	if sends := sendsTo(t, w.srv.Requests(), "w1"); len(sends) != 0 {
+		t.Fatalf("sent to worker w1 after advanceRunLocked write failure dirtied store (S2b): %q, want 0 sends", sends)
+	}
+}
+
+// Test 14 (S2b — r1 review: Carbon Major 3):
+// During Report("plan amend") across multiple tasks, if task 1's advanceRunLocked
+// inside deliverWorkerLocked fails a write and dirties the store, neither task 1's
+// worker nor task 2's worker may receive a send while dirty.
+func TestStore_DeliverWorkerDoesNotSendAfterFailedSaveInAdvanceRun(t *testing.T) {
+	w := newStoreWorld(t, "No worker send after failed save in deliverWorkerLocked")
+	coordTok := "coord-amend-tok"
+	past := w.now.Add(-time.Minute)
+	pastMS := uint64(past.UnixMilli())
+
+	for _, addr := range []string{"worker1", "worker2"} {
+		w.srv.Add(hc.Terminal{
+			Address:  addr,
+			Name:     addr,
+			State:    "live",
+			Labels:   map[string]string{"sheepdog.project": w.id, "sheepdog.role": flow.RoleWorker, "sheepdog.run": "run-" + addr},
+			Status:   &hc.Status{App: "claude-code", State: "idle"},
+			Reported: true,
+			StatusMS: &pastMS,
+		})
+	}
+	mkTask := func(tid, addr string) flow.Task {
+		return flow.Task{
+			ID: tid, Title: "feat: " + tid, Brief: "old", ForWhom: "u", IfSkipped: "b",
+			Smallest: "s", NotDoing: "n", Outcomes: []flow.Outcome{{Text: "ok", ProvedBy: "test: go test ./..."}},
+			EstimateLines: 20,
+			Attempts: []flow.Attempt{{
+				BaseCommit: w.baseSHA,
+				RunID:      addr,
+				Run: &flow.RunRecord{
+					ID: "run-" + addr, Address: addr, Role: flow.RoleWorker,
+					CLI: "claude", State: flow.PhaseWorking, Status: "", // triggers advanceRunLocked in deliverWorkerLocked
+					StartedAt: past, LastActivity: past,
+				},
+			}},
+		}
+	}
+	w.edit(func(s *flow.State) {
+		s.Project.RunTokenHash = tokenHash(coordTok)
+		s.Tasks = []flow.Task{mkTask("T1", "worker1"), mkTask("T2", "worker2")}
+	})
+
+	w.restart()
+	var writes atomic.Int32
+	w.setWriteHooks(func(path string, s flow.State) error {
+		if writes.Add(1) == 1 {
+			return SaveState(path, s) // 1st call: freshLocked write-back succeeds
+		}
+		return errors.New("state save failed in advanceRunLocked")
+	}, nil)
+
+	amend := json.RawMessage(`{"why":"tighten scope","tasks":[{"id":"T1","brief":"new 1"},{"id":"T2","brief":"new 2"}]}`)
+	if err := w.eng.Report(coordTok, "plan amend", amend); err == nil {
+		t.Fatal("Report(plan amend) succeeded when writeState failed; want error")
+	}
+	if s1, s2 := sendsTo(t, w.srv.Requests(), "worker1"), sendsTo(t, w.srv.Requests(), "worker2"); len(s1) != 0 || len(s2) != 0 {
+		t.Fatalf("sent to workers after failed write dirtied store (S2b): worker1=%q worker2=%q, want 0 sends", s1, s2)
+	}
+}
