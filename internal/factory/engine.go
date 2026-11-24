@@ -84,6 +84,7 @@ type Engine struct {
 	passCoordFallback bool                                              // current pass's J5 fallback sign-in check under mu
 	passBaseHCErr     error                                             // current pass's HC RPC error from observeBaseLocked under mu
 	storeENOSPC       map[string]bool                                   // pending store ENOSPC per project under mu
+	logClean          map[string]bool                                   // true after TrimLog + state write-back succeeded under mu
 	git               *world.Git
 	mu                sync.Mutex
 	wake              chan struct{}
@@ -194,7 +195,9 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 	} else if err != nil {
 		return err
 	}
-	e.mergeMemAlertsLocked(id, &s)
+	if err := e.freshLocked(id, s); err != nil {
+		return err
+	}
 	if maxRunning != 0 {
 		s.Settings.MaxRunning = maxRunning
 	}
@@ -315,7 +318,7 @@ func (e *Engine) Stop(project string) error {
 	if err != nil {
 		return err
 	}
-	e.mergeMemAlertsLocked(id, &s)
+	freshErr := e.freshLocked(id, s)
 	if err := e.stopCoordTerminalsLocked(ctx, id, s); err != nil {
 		return err
 	}
@@ -325,6 +328,9 @@ func (e *Engine) Stop(project string) error {
 	}
 	if err := e.stopRuns(ctx, runs); err != nil {
 		return err
+	}
+	if freshErr != nil {
+		return freshErr
 	}
 	now := e.now()
 	for ti := range s.Tasks {
@@ -340,17 +346,21 @@ func (e *Engine) Stop(project string) error {
 	delete(e.lastSweep, id)
 	delete(e.lastProbe, id)
 	delete(e.consentStreaks, id)
-	return e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "stop"}, Rule: "stop", Decision: "stopped", Why: "stopped by owner"})
+	if err := e.commitLocked(id, &s, LogLine{By: "owner", Input: map[string]string{"cmd": "stop"}, Rule: "stop", Decision: "stopped", Why: "stopped by owner"}); err != nil {
+		return err
+	}
+	maps.DeleteFunc(e.memAlerts, func(k alertKey, _ pendingAlert) bool { return k.id == id })
+	return nil
 }
 
 // Run drives the periodic pass loop until ctx is cancelled.
 func (e *Engine) Run(ctx context.Context) {
 	t := time.NewTicker(cmp.Or(e.PassInterval, flow.PassInterval))
 	defer t.Stop()
-	for trim := true; ; trim = false {
+	for {
 		for _, ent := range e.projectDirs() {
 			if ctx.Err() == nil && ent.IsDir() {
-				e.passProject(ctx, ent.Name(), trim)
+				e.passProject(ctx, ent.Name())
 			}
 		}
 		select {
@@ -379,7 +389,7 @@ func (e *Engine) eachStateLocked(fn func(id string, s flow.State) bool) {
 	}
 }
 
-func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
+func (e *Engine) passProject(ctx context.Context, id string, _ ...bool) {
 	pools := e.refreshPools(ctx, id)
 	codexProbe := e.probeCodexHome(ctx, id)
 	e.mu.Lock()
@@ -388,16 +398,14 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	if err != nil {
 		return
 	}
-	if trim {
-		if err := e.noteStoreENOSPC(id, TrimLog(e.Paths.Log(id), s.Seq)); err != nil {
-			e.logError("factory.trim_error", id, err)
-		}
+	if err := e.freshLocked(id, s); err != nil {
+		e.logError("factory.trim_error", id, err)
 	}
 	if !s.Project.Started {
 		delete(e.lastPass, id)
 		return
 	}
-	e.mergeMemAlertsLocked(id, &s)
+	e.flushMemAlertsLocked(id, &s)
 	e.passPools = pools
 	e.passPoolCheck = poolCheck(pools, e.Paths.poolCooldowns(), s.Settings.PoolFloorPercent, e.now())
 	defer func() {
@@ -419,6 +427,9 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 	}
 	e.sweepProjectLocked(ctx, id, &s, codexProbe)
 	e.checkENOSPCLocked(ctx, id, &s, e.now())
+	if !e.cleanLocked(id) {
+		return
+	}
 	baseTried := s.Project.Base != nil && s.Project.Base.Red && flow.Done(s.Project.Acts, flow.AskTellBaseRed+"@"+s.Project.Base.SpellID)
 	var candidates, poolHeld []string
 	queue := func(t flow.Task) {
@@ -1012,6 +1023,9 @@ func (e *Engine) stopCoordTerminalsLocked(ctx context.Context, id string, s flow
 }
 
 func (e *Engine) sendCoordLocked(ctx context.Context, id string, s *flow.State, msg string, now time.Time, armWake bool) error {
+	if !e.cleanLocked(id) {
+		return errStoreDirty
+	}
 	if err := world.SendRun(ctx, e.HC, s.Project.RunID, msg); err != nil {
 		e.logError("factory.exec_error", id, err)
 		return err
@@ -1101,6 +1115,10 @@ events:
 				continue events
 			}
 			before = next
+		}
+		if len(dec.Asked) > 0 && !e.cleanLocked(id) {
+			**recp = old
+			return old.TaskRun(), nil
 		}
 		for _, act := range dec.Asked {
 			msg := ev.Msg
@@ -1522,6 +1540,9 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 			if !e.saveLocked(id, *s) {
 				return
 			}
+		}
+		if !e.cleanLocked(id) {
+			return
 		}
 		f := facts
 		f.Ask = ask
@@ -1991,7 +2012,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	var ref *Refusal
 	if errors.As(err, &ref) {
 		facts.Reviewer.Refused = true
-		if e.HC != nil && a.Review != nil && a.Review.RunID != "" && !a.Review.RefusalSent {
+		if e.HC != nil && a.Review != nil && a.Review.RunID != "" && !a.Review.RefusalSent && e.cleanLocked(id) {
 			msg := fmt.Sprintf("Your verdict was refused (%s). Fix it and end with the report tag again.", ref.Why)
 			sctx, scancel := context.WithTimeout(ctx, lockGitTimeout)
 			sendErr := world.SendRun(sctx, e.HC, a.Review.RunID, msg)
@@ -2752,12 +2773,50 @@ func (e *Engine) noteStoreENOSPC(id string, err error) error {
 	return err
 }
 
+var errStoreDirty = errors.New("factory: store dirty")
+
+func (e *Engine) cleanLocked(id string) bool {
+	if clean, seen := e.logClean[id]; seen {
+		return clean
+	}
+	_, sErr := os.Stat(e.Paths.State(id))
+	_, lErr := os.Stat(e.Paths.Log(id))
+	return os.IsNotExist(sErr) && os.IsNotExist(lErr) && e.markStoreLocked(id, nil) == nil
+}
+
+func (e *Engine) markStoreLocked(id string, err error) error {
+	if e.logClean == nil {
+		e.logClean = map[string]bool{}
+	}
+	if e.logClean[id] = err == nil; err != nil {
+		maps.DeleteFunc(e.waits, func(k, _ string) bool { return k == id || strings.HasPrefix(k, id+"/") })
+	}
+	return e.noteStoreENOSPC(id, err)
+}
+
+func (e *Engine) freshLocked(id string, s flow.State) error {
+	if e.logClean[id] {
+		return nil
+	}
+	err := TrimLog(e.Paths.Log(id), s.Seq)
+	if _, sErr := os.Stat(e.Paths.State(id)); err == nil && !os.IsNotExist(sErr) {
+		err = map[bool]func(string, flow.State) error{true: e.writeState, false: SaveState}[e.writeState != nil](e.Paths.State(id), s)
+	}
+	return e.markStoreLocked(id, err)
+}
+
 func (e *Engine) saveStateLocked(id string, s flow.State) error {
-	return e.noteStoreENOSPC(id, map[bool]func(string, flow.State) error{true: e.writeState, false: SaveState}[e.writeState != nil](e.Paths.State(id), s))
+	if !e.cleanLocked(id) {
+		return errStoreDirty
+	}
+	return e.markStoreLocked(id, map[bool]func(string, flow.State) error{true: e.writeState, false: SaveState}[e.writeState != nil](e.Paths.State(id), s))
 }
 
 func (e *Engine) appendLogLocked(id string, l LogLine) error {
-	return e.noteStoreENOSPC(id, map[bool]func(string, LogLine) error{true: e.writeLog, false: AppendLog}[e.writeLog != nil](e.Paths.Log(id), l))
+	if !e.cleanLocked(id) {
+		return errStoreDirty
+	}
+	return e.markStoreLocked(id, map[bool]func(string, LogLine) error{true: e.writeLog, false: AppendLog}[e.writeLog != nil](e.Paths.Log(id), l))
 }
 
 func (e *Engine) saveLocked(id string, s flow.State) bool {
@@ -2785,7 +2844,6 @@ func (e *Engine) commitLocked(id string, s *flow.State, l LogLine) error {
 		s.Seq--
 		return err
 	}
-	e.flushMemAlertsLocked(id, s)
 	if l.By != "engine" {
 		select {
 		case e.wake <- struct{}{}:
