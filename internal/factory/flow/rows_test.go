@@ -1882,3 +1882,147 @@ func TestN29UnclassifiedPRHeadHoldsReviewer(t *testing.T) {
 		t.Fatalf("exhausted start_reviewer with unclassified PR head = %s, want N5", r.ID)
 	}
 }
+
+// TestN33N34BehindMatrix covers every cell of the PR B decision table
+// (finding 9, seq 139 run 45337206494) plus the round-2 review correction:
+// N33/N34 only match when not behind, or when H is an updated head
+// (done move_h_merge_only@H) and the base is not red; and never re-run on a
+// behind PR.
+func TestN33N34BehindMatrix(t *testing.T) {
+	redSeq139 := func(in *In) {
+		in.Facts.PR.Checks = ChecksRed
+		in.Facts.PR.Failed = []Failure{{Run: "45337206494", Job: "100"}}
+	}
+	extCancel := func(in *In) {
+		in.Facts.PR.Checks = ChecksStoppedExternal
+		in.Facts.PR.Failed = []Failure{{Run: "55001", Job: "10"}}
+	}
+	timeoutCancel := func(in *In) {
+		in.Facts.PR.Checks = ChecksStoppedTimeout
+		in.Facts.PR.Failed = []Failure{{Run: "55002", Job: "30"}}
+	}
+	updatedM2 := func(in *In) {
+		movedToM2(in)
+		a0(in).Acts = append(a0(in).Acts, Act{Key: key(AskMergeOnly, "m2"), Result: "done", At: now})
+	}
+	updateRefused := func(in *In) {
+		a0(in).Acts = []Act{
+			{Key: "update_branch@c1", Result: "failed", Class: ClassTransient, Err: "HTTP 403", At: now},
+			{Key: "update_branch@c1", Result: "failed", Class: ClassTransient, Err: "HTTP 403", At: now.Add(time.Minute)},
+			{Key: "update_branch@c1", Result: "failed", Class: ClassTransient, Err: "HTTP 403", At: now.Add(3 * time.Minute)},
+		}
+	}
+
+	cases := []struct {
+		name  string
+		in    In
+		row   string
+		asked []string
+	}{
+		{"red behind base green not updated -> N40 update", with(redSeq139, behind), "N40", []string{"update_branch@c1"}},
+		{"red behind base red not updated -> N38 hold", with(redSeq139, behind, baseRedF), "N38", nil},
+		{"red behind updated head base green -> N33 tell no rerun", with(redSeq139, behind, updatedM2), "N33", []string{"tell_worker_ci@45337206494@m2"}},
+		{"red behind updated head base red -> N38 hold", with(redSeq139, behind, updatedM2, baseRedF), "N38", nil},
+		{"red not behind -> N33 rerun as today", with(redSeq139), "N33", []string{"rerun_ci@45337206494@100@c1"}},
+		{"red behind unknown -> N33 rerun as today", with(redSeq139, behindUnkn), "N33", []string{"rerun_ci@45337206494@100@c1"}},
+		{"ext cancel behind base green not updated -> N40 update", with(extCancel, behind), "N40", []string{"update_branch@c1"}},
+		{"ext cancel behind base red not updated -> N38 hold", with(extCancel, behind, baseRedF), "N38", nil},
+		{"ext cancel behind updated head base green -> N34 wake no rerun", with(extCancel, behind, updatedM2), "N34", []string{"wake_coordinator@checks_stopped@external@m2"}},
+		{"ext cancel behind updated head base red -> N38 hold", with(extCancel, behind, updatedM2, baseRedF), "N38", nil},
+		{"timeout behind base green not updated -> N40 update", with(timeoutCancel, behind), "N40", []string{"update_branch@c1"}},
+		{"timeout behind base red not updated -> N38 hold", with(timeoutCancel, behind, baseRedF), "N38", nil},
+		{"timeout behind updated head base green -> N34 wake", with(timeoutCancel, behind, updatedM2), "N34", []string{"wake_coordinator@checks_stopped@limit@m2"}},
+		{"timeout behind updated head base red -> N38 hold", with(timeoutCancel, behind, updatedM2, baseRedF), "N38", nil},
+		{"red behind update refused ensure_failures times -> N5 wake", with(redSeq139, behind, updateRefused), "N5", []string{"wake_coordinator@failed@update_branch@c1"}},
+	}
+	for _, c := range cases {
+		r, d := FirstMatch(TaskRows, c.in)
+		if r.ID != c.row || !slices.Equal(d.Asked, c.asked) {
+			t.Errorf("%s: got %s %v (%s), want %s %v", c.name, r.ID, d.Asked, d.Why, c.row, c.asked)
+		}
+	}
+}
+
+// TestN33N34BehindUpdatedHeadKeepsRerunOrWaitWaits verifies review item B1:
+// on a behind, updated head, only the re-run ask in rerunOrWait is guarded;
+// all three bounded waits (unfinished checks, ChecksUnread within grace, and
+// an already-dispatched re-run within grace) must still hold, and once each
+// grace window expires N33/N34 proceed to tell/wake with zero re-runs.
+func TestN33N34BehindUpdatedHeadKeepsRerunOrWaitWaits(t *testing.T) {
+	grace := time.Duration(DefaultSettings().ChecksGraceMinutes) * time.Minute
+	updatedM2 := func(in *In) {
+		movedToM2(in)
+		a0(in).Acts = append(a0(in).Acts, Act{Key: key(AskMergeOnly, "m2"), Result: "done", At: now})
+	}
+	redM2 := func(in *In) {
+		in.Facts.PR.Checks = ChecksRed
+		in.Facts.PR.Failed = []Failure{{Run: "45337206500", Job: "200"}}
+	}
+	extM2 := func(in *In) {
+		in.Facts.PR.Checks = ChecksStoppedExternal
+		in.Facts.PR.Failed = []Failure{{Run: "55001", Job: "10"}}
+	}
+
+	// 1. Unfinished checks beside a red/ext-cancelled job still wait (no tell/wake, no rerun).
+	for _, c := range []struct {
+		name, row string
+		f         func(*In)
+	}{
+		{"N33 red behind updated while running", "N33", redM2},
+		{"N34 ext cancel behind updated while running", "N34", extM2},
+	} {
+		in := with(c.f, behind, updatedM2, func(in *In) { in.Facts.PR.Running = true })
+		if r, d := FirstMatch(TaskRows, in); r.ID != c.row || len(d.Asked) != 0 {
+			t.Errorf("%s: got %s %v, want %s wait (nil asks)", c.name, r.ID, d.Asked, c.row)
+		}
+	}
+
+	// 2. Unreadable workflow run list within checks_grace_minutes waits instead of emitting
+	// tell_worker_ci@none@m2 / wake_coordinator@checks_stopped@external@m2; past grace it proceeds.
+	for _, c := range []struct {
+		name, row string
+		checks    Checks
+		afterAsk  []string
+	}{
+		{"N33 red behind updated ChecksUnread", "N33", ChecksRed, []string{"tell_worker_ci@none@m2"}},
+		{"N34 ext cancel behind updated ChecksUnread", "N34", ChecksStoppedExternal, []string{"wake_coordinator@checks_stopped@external@m2"}},
+	} {
+		unread := with(behind, updatedM2, func(in *In) {
+			in.Facts.PR.Checks = c.checks
+			in.Facts.PR.ChecksUnread = true
+			in.Facts.PR.Failed = []Failure{{Run: "", Job: "200", Name: "check"}}
+		})
+		if r, d := FirstMatch(TaskRows, unread); r.ID != c.row || len(d.Asked) != 0 {
+			t.Errorf("%s within grace: got %s %v, want %s wait (nil asks)", c.name, r.ID, d.Asked, c.row)
+		}
+		unread.Now = now.Add(grace)
+		if r, d := FirstMatch(TaskRows, unread); r.ID != c.row || !slices.Equal(d.Asked, c.afterAsk) {
+			t.Errorf("%s past grace: got %s %v, want %s %v", c.name, r.ID, d.Asked, c.row, c.afterAsk)
+		}
+	}
+
+	// 3. Re-run already dispatched before base moved still waits within grace, never re-runs
+	// a second failing run, and tells/wakes without re-running once grace expires.
+	for _, c := range []struct {
+		name, row string
+		checks    Checks
+		afterAsk  []string
+	}{
+		{"N33 red behind updated in-flight rerun", "N33", ChecksRed, []string{"tell_worker_ci@42@m2", "tell_worker_ci@55@m2"}},
+		{"N34 ext cancel behind updated in-flight rerun", "N34", ChecksStoppedExternal, []string{"wake_coordinator@checks_stopped@external@m2"}},
+	} {
+		inFlight := with(behind, updatedM2, func(in *In) {
+			in.Facts.PR.Checks = c.checks
+			in.Facts.PR.Failed = []Failure{{Run: "42", Job: "100"}, {Run: "55", Job: "500"}}
+			a0(in).Acts = append(a0(in).Acts, Act{Key: "rerun_ci@42@100@m2", Result: "done", At: now})
+			in.Now = now.Add(time.Minute)
+		})
+		if r, d := FirstMatch(TaskRows, inFlight); r.ID != c.row || len(d.Asked) != 0 {
+			t.Errorf("%s within grace: got %s %v, want %s wait (nil asks)", c.name, r.ID, d.Asked, c.row)
+		}
+		inFlight.Now = now.Add(grace)
+		if r, d := FirstMatch(TaskRows, inFlight); r.ID != c.row || !slices.Equal(d.Asked, c.afterAsk) {
+			t.Errorf("%s past grace: got %s %v, want %s %v", c.name, r.ID, d.Asked, c.row, c.afterAsk)
+		}
+	}
+}
