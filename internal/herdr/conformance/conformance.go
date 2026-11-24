@@ -772,6 +772,10 @@ func unsentDesktopInputBlocksPrompts(t *testing.T, newDriver NewDriver) {
 	for _, tc := range cases {
 		t.Run(tc.kind, func(t *testing.T) {
 			d := newDriver(t)
+			if _, ok := d.Backend().(supervisor.ANSIReader); !ok {
+				// Unsupported on backends without ANSIReader (herdr-core): hc send waits for typing to pause.
+				return
+			}
 			ctx := testContext(t)
 			store := watchState(t, ctx, d.Backend())
 			pane, err := d.NewAgent(ctx, t.TempDir(), tc.kind)
