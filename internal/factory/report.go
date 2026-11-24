@@ -1146,14 +1146,18 @@ func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args js
 		if a == nil {
 			return e.refuse(id, "no_worker", fmt.Sprintf("Task %q has no open attempt to message.", t.ID))
 		}
+		if st := taskRows[t.LastRow].Stage; a.Run != nil && a.Run.State == flow.PhaseEnded && (st == "ci" || st == "owner_gate") && t.HoldWhy == "" {
+			return e.refuse(id, "no_worker", fmt.Sprintf("Task %s's worker is stopped and nothing will start it; use send-back.", t.ID))
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
 		defer cancel()
-		if _, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, "Message from the coordinator: "+why, false, ""); errors.Is(err, errNoWorkerRun) {
+		dec, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, "Message from the coordinator: "+why, false, "the coordinator's message")
+		if errors.Is(err, errNoWorkerRun) {
 			return e.refuse(id, "no_worker", fmt.Sprintf("Task %q has no worker run to message.", t.ID))
 		} else if err != nil {
 			return err
 		}
-		line.Decision = "said to worker"
+		line.Decision = dec
 	default:
 		return e.refuse(id, "invalid_report", fmt.Sprintf("%q is not a task command; use park, unpark, drop, close, send-back, retry or say.", req.Action))
 	}

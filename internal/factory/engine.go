@@ -497,12 +497,21 @@ func (e *Engine) passProject(ctx context.Context, id string, _ ...bool) {
 				}
 			}
 		}
-		granted := flow.GrantSlots(candidates, s.Tasks, flow.RunningTasks(s.Tasks, workerState), s.Settings.MaxRunning, s.Asks...)
+		running := flow.RunningTasks(s.Tasks, workerState)
+		granted := flow.GrantSlots(candidates, s.Tasks, running, s.Settings.MaxRunning, s.Asks...)
+		refused := slices.DeleteFunc(candidates, func(cid string) bool { return granted[cid] })
+		obsFacts, ghUnavail := make(map[string]flow.Facts, len(obs)), e.ghUnavail[id] || s.Project.HasAlert(flow.AlertGitHubUnavailable)
 		for i, t := range s.Tasks {
-			if obs[i] != nil && granted[t.ID] {
-				obs[i].NoSlot = false
+			if obs[i] != nil {
+				if granted[t.ID] {
+					obs[i].NoSlot = false
+				}
+				f := *obs[i]
+				f.GitHubUnavailable = ghUnavail
+				obsFacts[t.ID] = f
 			}
 		}
+		yieldIDs := flow.YieldSlots(len(refused), running, len(granted), s.Settings.MaxRunning, s.Tasks, obsFacts, workerState, s.Asks, s.Settings, now)
 		e.observeNoPoolLocked(ctx, id, &s, obs, now)
 		ranTasks := false
 		for i := range s.Tasks {
@@ -510,6 +519,30 @@ func (e *Engine) passProject(ctx context.Context, id string, _ ...bool) {
 				ranTasks = true
 				e.actTaskLocked(ctx, id, &s, i, *obs[i], &baseTried)
 				e.checkENOSPCLocked(ctx, id, &s, e.now())
+			}
+		}
+		for _, tid := range yieldIDs {
+			if ctx.Err() != nil || !e.cleanLocked(id) {
+				break
+			}
+			ti := slices.IndexFunc(s.Tasks, func(t flow.Task) bool { return t.ID == tid })
+			if ti < 0 {
+				continue
+			}
+			if a := flow.OpenAttempt(s.Tasks[ti]); a == nil || a.RunID == "" {
+				continue
+			} else if r, rerr := e.advanceRunLocked(ctx, id, tid, &s, a.RunID, flow.RoleWorker, "claude", &a.Run); rerr != nil {
+				e.logError("factory.hc_error", id, rerr)
+			} else if r.State != flow.RunIdle {
+			} else if !e.cleanLocked(id) {
+				break
+			} else if err := e.stopRuns(context.WithoutCancel(ctx), []string{a.RunID}); err != nil {
+				e.logError("factory.exec_error", id, err)
+			} else {
+				stopWorkerRec(a, s.Settings, e.now(), true)
+				if !e.commitLogLocked(id, &s, LogLine{By: "engine", Task: tid, Rule: "slot", Decision: "stopped idle worker", Why: "waits on CI; " + strings.Join(refused, ", ") + " has no slot"}) {
+					break
+				}
 			}
 		}
 		now = e.now()

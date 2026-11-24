@@ -1,14 +1,17 @@
 package factory
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +19,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
+	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
 // TestSchedulingDepsAndCap checks PR 4.1 (KB-TSK-16, design.md 4.2, 4.10):
@@ -783,10 +787,11 @@ func TestBackoffRestartIsNoCandidate(t *testing.T) {
 	}
 }
 
-// TestIdleWorkerWaitingOnCIHoldsSlot pins today's rule for O38 (C4, trial 22:00-22:28):
-// T3 passed review and waits on CI at N36 with its worker live and idle; it
-// holds the single slot until its worker run is gone, so T5 at N22 waits.
-func TestIdleWorkerWaitingOnCIHoldsSlot(t *testing.T) {
+// TestIdleWorkerWaitingOnCIYieldsSlotToRestart checks O38 (trial 22:13-22:20):
+// T3 passed review and waits on CI at N36 with its worker live and idle while
+// T5 wants to restart at N22 on max_running 1. Pass 1 stops T3's idle worker
+// (EndStopped, rule slot) while T5 waits at N22; pass 2 restarts T5 at N22.
+func TestIdleWorkerWaitingOnCIYieldsSlotToRestart(t *testing.T) {
 	ctx := context.Background()
 	srv := hctest.New(t)
 	client := hc.NewClient(srv.Path)
@@ -795,11 +800,11 @@ func TestIdleWorkerWaitingOnCIHoldsSlot(t *testing.T) {
 	githubOrigin(t, repo)
 	gh := bindRepoFakeGH(t, repo)
 
-	now := time.Date(2026, 11, 22, 22, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 11, 22, 22, 13, 51, 0, time.UTC)
 	endedAt := now.Add(-5 * time.Minute)
 	eng := newTestEngine(t, paths, client)
 	eng.Now = func() time.Time { return now }
-	if err := eng.Start(repo, "O38 idle worker holds slot", 1); err != nil {
+	if err := eng.Start(repo, "O38 idle worker yields slot to restart", 1); err != nil {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
@@ -832,6 +837,7 @@ func TestIdleWorkerWaitingOnCIHoldsSlot(t *testing.T) {
 				SizeCap: 600, BaseCommit: base, Branch: br3, Worktree: wt3, PR: 3, RunID: w3,
 				Run: &flow.RunRecord{
 					Role: flow.RoleWorker, CLI: "claude", Address: w3,
+					SessionID: "sess-t3", Resumable: true,
 					State: flow.PhaseIdle, Status: "idle", StatusSince: now.Add(-time.Minute), StatusReported: true,
 				},
 				Ready: []flow.Ready{{Head: c3}},
@@ -863,17 +869,40 @@ func TestIdleWorkerWaitingOnCIHoldsSlot(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Pass 1: T3 stays N36, its idle worker is stopped (EndStopped, rule slot); T5 waits at N22.
 	eng.passProject(ctx, id, false)
 
 	st, err = LoadState(paths.State(id))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Tasks[0].LastRow != "N36" || st.Tasks[0].Attempts[0].RunID != w3 {
-		t.Errorf("T3 after pass = row:%q run_id:%q, want N36 keeping idle worker %q", st.Tasks[0].LastRow, st.Tasks[0].Attempts[0].RunID, w3)
+	a3 := st.Tasks[0].Attempts[0]
+	if st.Tasks[0].LastRow != "N36" || a3.RunID != "" || a3.Run == nil || a3.Run.State != flow.PhaseEnded || a3.Run.Result != flow.EndStopped || !a3.Run.Resumable {
+		t.Fatalf("T3 after pass 1 = row:%q run_id:%q run:%+v, want N36 ended(stopped) resumable", st.Tasks[0].LastRow, a3.RunID, a3.Run)
 	}
-	if st.Tasks[1].LastRow != "N22" || st.Tasks[1].Attempts[0].RunID != "" {
-		t.Fatalf("T5 started while T3's idle worker held the slot: row=%q run_id=%q", st.Tasks[1].LastRow, st.Tasks[1].Attempts[0].RunID)
+	if _, err := client.Get(ctx, w3); !errors.Is(err, hc.ErrNotFound) {
+		t.Errorf("T3 worker terminal %s still present after yield: err=%v", w3, err)
+	}
+	if slotLines := logRules(t, paths.Log(id), "slot"); len(slotLines) != 1 || slotLines[0].Task != "T3" || slotLines[0].Decision != "stopped idle worker" {
+		t.Errorf("slot log lines after pass 1 = %+v, want 1 stopped idle worker line for T3", slotLines)
+	}
+	if st.Tasks[1].LastRow != "N22" || st.Tasks[1].Attempts[0].RunID != "" || st.Tasks[1].HoldWhy != "no slot is free" {
+		t.Fatalf("T5 after pass 1 = row:%q run_id:%q hold:%q, want N22 waiting no slot is free", st.Tasks[1].LastRow, st.Tasks[1].Attempts[0].RunID, st.Tasks[1].HoldWhy)
+	}
+
+	// Pass 2: T5 restarts at N22 on the freed slot; T3 stays N36 with no worker.
+	now = now.Add(flow.PassInterval)
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Tasks[1].LastRow != "N22" || st.Tasks[1].Attempts[0].RunID == "" || !flow.Done(st.Tasks[1].Attempts[0].Acts, flow.AskStartWorker+"@"+flow.ContinueResume+"@1") {
+		t.Fatalf("T5 after pass 2 = row:%q run_id:%q acts:%+v, want N22 restarted via start_worker@resume@1", st.Tasks[1].LastRow, st.Tasks[1].Attempts[0].RunID, st.Tasks[1].Attempts[0].Acts)
+	}
+	if st.Tasks[0].LastRow != "N36" || st.Tasks[0].Attempts[0].RunID != "" {
+		t.Errorf("T3 after pass 2 = row:%q run_id:%q, want N36 with no worker", st.Tasks[0].LastRow, st.Tasks[0].Attempts[0].RunID)
 	}
 }
 
@@ -1194,5 +1223,1077 @@ func TestClockAdvancePastBackoffRespectsMaxRunning(t *testing.T) {
 	}
 	if st.Tasks[1].HoldWhy != "no slot is free" {
 		t.Errorf("T2 HoldWhy = %q, want %q (row=%q)", st.Tasks[1].HoldWhy, "no slot is free", st.Tasks[1].LastRow)
+	}
+}
+
+// TestCIWaitYieldsSlotToNewAttempt replays c-live.txt (O38, max_running 1):
+// T1 has two passed rounds, checks IN_PROGRESS, and an idle worker; T2 has no
+// attempt. Pass 1 keeps T1 at N36, stops its idle worker (EndStopped, one log
+// line rule "slot"), and holds T2 at N10 "no slot is free". Pass 2 starts T2
+// at N11 (new_attempt) with no start_worker for T1. When T1's checks turn
+// green, T1 merges at N42 with no worker.
+func TestCIWaitYieldsSlotToNewAttempt(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := bindRepoFakeGH(t, repo)
+
+	now := time.Date(2026, 11, 24, 4, 48, 3, 0, time.UTC)
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return now }
+	if err := eng.Start(repo, "PR C live check (c-live replay)", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wt1, br1, c1 := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+	writeOpenPRView(t, gh, 139, c1, "["+ciCheck("ci", "IN_PROGRESS", "", "1391", "13901")+"]")
+
+	w1, err := startRun(ctx, client, world.RunSpec{Name: "worker-t1-clive", Cwd: wt1, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTerminalStatusAt(t, srv, client, w1, "idle", now.Add(-time.Minute))
+
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Tasks = []flow.Task{
+		{
+			ID: "T1", Title: "chore(ci): add slow marker and c-live note", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: base, Branch: br1, Worktree: wt1, PR: 139, RunID: w1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: w1,
+					SessionID: "sess-t1-clive", Resumable: true,
+					State: flow.PhaseIdle, Status: "idle", StatusSince: now.Add(-time.Minute), StatusReported: true,
+				},
+				Ready: []flow.Ready{{Head: c1}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-5 * time.Minute)}},
+			}},
+		},
+		{
+			ID: "T2", Title: "chore(notes): append T2 to c-live", EstimateLines: 50,
+			Outcomes: []flow.Outcome{{Text: "T2 note appended", ProvedBy: "cmd: true"}},
+		},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pass 1: T1 stays N36, its idle worker is stopped (EndStopped, one rule "slot" line); T2 waits at N10.
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a1 := st.Tasks[0].Attempts[0]
+	if st.Tasks[0].LastRow != "N36" || a1.RunID != "" || a1.Run == nil || a1.Run.State != flow.PhaseEnded || a1.Run.Result != flow.EndStopped || !a1.Run.Resumable {
+		t.Fatalf("T1 after pass 1 = row:%q run_id:%q run:%+v, want N36 ended(stopped) resumable", st.Tasks[0].LastRow, a1.RunID, a1.Run)
+	}
+	if _, err := client.Get(ctx, w1); !errors.Is(err, hc.ErrNotFound) {
+		t.Errorf("T1 worker %s still present in hc after yield: err=%v", w1, err)
+	}
+	slotLines := logRules(t, paths.Log(id), "slot")
+	if len(slotLines) != 1 || slotLines[0].Task != "T1" || slotLines[0].Decision != "stopped idle worker" || !strings.Contains(slotLines[0].Why, "T2") {
+		t.Errorf("slot log lines after pass 1 = %+v, want 1 stopped idle worker line for T1 naming T2", slotLines)
+	}
+	if st.Tasks[1].LastRow != "N10" || st.Tasks[1].HoldWhy != "no slot is free" || flow.OpenAttempt(st.Tasks[1]) != nil {
+		t.Fatalf("T2 after pass 1 = row:%q hold:%q attempts:%d, want N10 no slot is free with 0 attempts", st.Tasks[1].LastRow, st.Tasks[1].HoldWhy, len(st.Tasks[1].Attempts))
+	}
+	if n10 := logRules(t, paths.Log(id), "N10"); len(n10) != 1 || n10[0].Task != "T2" || n10[0].Why != "no slot is free" {
+		t.Errorf("N10 log lines after pass 1 = %+v, want 1 line for T2 no slot is free", n10)
+	}
+
+	// Pass 2: T2 opens attempt 1 at N11 (new_attempt); no start_worker for T1.
+	now = now.Add(flow.PassInterval)
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a2 := flow.OpenAttempt(st.Tasks[1])
+	if st.Tasks[1].LastRow != "N11" || a2 == nil || !flow.Done(a2.Acts, flow.AskNewAttempt) {
+		t.Fatalf("T2 after pass 2 = row:%q attempt:%+v, want N11 with new_attempt done", st.Tasks[1].LastRow, a2)
+	}
+	if n11 := logRules(t, paths.Log(id), "N11"); len(n11) != 1 || n11[0].Task != "T2" || !slices.Equal(n11[0].Asked, []string{flow.AskNewAttempt}) {
+		t.Errorf("N11 log lines after pass 2 = %+v, want 1 new_attempt line for T2", n11)
+	}
+	if st.Tasks[0].LastRow != "N36" || st.Tasks[0].Attempts[0].RunID != "" || flow.Count(st.Tasks[0].Attempts[0].Acts, flow.AskStartWorker+"@"+flow.ContinueResume) != 0 {
+		t.Errorf("T1 after pass 2 = row:%q run_id:%q acts:%+v, want N36 with no start_worker", st.Tasks[0].LastRow, st.Tasks[0].Attempts[0].RunID, st.Tasks[0].Attempts[0].Acts)
+	}
+
+	// Checks turn green: T1 merges at N42 with no worker started.
+	writeOpenPRView(t, gh, 139, c1, greenRollup)
+	now = now.Add(flow.PassInterval)
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a1 = st.Tasks[0].Attempts[0]
+	if st.Tasks[0].LastRow != "N42" || a1.RunID != "" || !flow.Done(a1.Acts, flow.AskAccept+"@"+c1) || !flow.Done(a1.Acts, flow.AskMerge+"@"+c1) {
+		t.Fatalf("T1 after green checks = row:%q run_id:%q acts:%+v, want N42 accept+merge with no worker", st.Tasks[0].LastRow, a1.RunID, a1.Acts)
+	}
+	if merges := ghCalls(t, gh, "pr merge"); len(merges) != 1 {
+		t.Errorf("pr merge calls = %q, want 1", merges)
+	}
+	if n42 := logRules(t, paths.Log(id), "N42"); len(n42) != 1 || n42[0].Task != "T1" {
+		t.Errorf("N42 log lines = %+v, want 1 line for T1", n42)
+	}
+}
+
+// TestRedCIAfterYieldWaitsForSlot checks O38's red-after-yield path: T1 is
+// stopped, T2 is working on the single slot, and T1's CI turns red with no
+// re-runs left -> N33 holds the CI tell ("held for the next worker: …"), stores
+// "no slot is free", and leaves only one live worker. When T2 goes idle at N36,
+// T2 is stopped and T1 resumes on the next pass via start_worker@resume with
+// Restarts 0 and the held CI text in its prompt.
+func TestRedCIAfterYieldWaitsForSlot(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := bindRepoFakeGH(t, repo)
+
+	var launched []hc.RunParams
+	srv.OnRun = func(_ hc.Terminal, p hc.RunParams) {
+		if p.Labels["sheepdog.role"] == flow.RoleWorker {
+			launched = append(launched, p)
+		}
+	}
+
+	now := time.Date(2026, 11, 24, 5, 0, 0, 0, time.UTC)
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return now }
+	if err := eng.Start(repo, "Red CI after yield waits for slot", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wt1, br1, c1 := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+	wt2, br2, c2 := makeSlotWorktree(t, ctx, paths, repo, id, "T2", "t2.go")
+	writeOpenPRView(t, gh, 1, c1, checkRollup("FAILURE", "44714", "1001"))
+	writeGHFile(t, gh, "workflow-runs.json", `{"total_count":1,"workflow_runs":[{"id":44714,"status":"completed","conclusion":"failure"}]}`)
+	writeOpenPRView(t, gh, 2, c2, "["+ciCheck("ci", "IN_PROGRESS", "", "202", "2002")+"]")
+
+	w2, err := startRun(ctx, client, world.RunSpec{Name: "worker-t2-working", Cwd: wt2, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTerminalStatusAt(t, srv, client, w2, "working", now.Add(-time.Minute))
+
+	const t1Session = "11111111-2222-4333-8444-555555555555"
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Settings.FlakeReruns = 0
+	st.Tasks = []flow.Task{
+		{
+			ID: "T1", Title: "feat: T1 red after yield", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: base, Branch: br1, Worktree: wt1, PR: 1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: "worker-t1-stopped",
+					SessionID: t1Session, Resumable: true,
+					State: flow.PhaseEnded, Result: flow.EndStopped, EndedAt: now.Add(-2 * time.Minute),
+				},
+				Ready: []flow.Ready{{Head: c1}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-10 * time.Minute)}},
+			}},
+		},
+		{
+			ID: "T2", Title: "feat: T2 working on slot", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: base, Branch: br2, Worktree: wt2, PR: 2, RunID: w2,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: w2,
+					SessionID: "22222222-2222-4333-8444-555555555555", Resumable: true,
+					State: flow.PhaseWorking, Status: "working", StatusSince: now.Add(-time.Minute), StatusReported: true,
+				},
+				Ready: []flow.Ready{{Head: c2}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-10 * time.Minute)}},
+			}},
+		},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pass 1: T2 is working -> T1 holds CI tell via R36, stores "no slot is free", still 1 live worker.
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Tasks[0].LastRow != "N33" || st.Tasks[0].HoldWhy != "no slot is free" || st.Tasks[0].Attempts[0].RunID != "" {
+		t.Fatalf("T1 after pass 1 = row:%q hold:%q run_id:%q, want N33 / no slot is free / no worker", st.Tasks[0].LastRow, st.Tasks[0].HoldWhy, st.Tasks[0].Attempts[0].RunID)
+	}
+	if held := st.Tasks[0].Attempts[0].Held; len(held) != 1 || !strings.Contains(held[0], "44714") {
+		t.Fatalf("T1 Held after pass 1 = %q, want 1 CI failure message naming run 44714", held)
+	}
+	if n33 := logRules(t, paths.Log(id), "N33"); len(n33) != 1 || !strings.HasPrefix(n33[0].Decision, "held for the next worker:") {
+		t.Errorf("N33 log after pass 1 = %+v, want Decision starting with %q", n33, "held for the next worker:")
+	}
+	if st.Tasks[1].Attempts[0].RunID != w2 || len(launched) != 0 {
+		t.Fatalf("working T2 was disrupted or second worker launched: T2 run_id=%q launched=%d", st.Tasks[1].Attempts[0].RunID, len(launched))
+	}
+	if slotLines := logRules(t, paths.Log(id), "slot"); len(slotLines) != 0 {
+		t.Errorf("slot log lines while T2 working = %+v, want 0", slotLines)
+	}
+
+	// T2 goes idle at N36 -> pass 2 stops T2's idle worker.
+	setTerminalStatusAt(t, srv, client, w2, "idle", now)
+	now = now.Add(time.Minute)
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a2 := st.Tasks[1].Attempts[0]
+	if st.Tasks[1].LastRow != "N36" || a2.RunID != "" || a2.Run == nil || a2.Run.State != flow.PhaseEnded || a2.Run.Result != flow.EndStopped {
+		t.Fatalf("T2 after going idle at N36 = row:%q run_id:%q run:%+v, want N36 ended(stopped)", st.Tasks[1].LastRow, a2.RunID, a2.Run)
+	}
+	if slotLines := logRules(t, paths.Log(id), "slot"); len(slotLines) != 1 || slotLines[0].Task != "T2" {
+		t.Errorf("slot log lines after T2 idle = %+v, want 1 line for T2", slotLines)
+	}
+
+	// Pass 3: T1 resumes via start_worker@resume with Restarts 0 and the held CI text in its prompt.
+	now = now.Add(flow.PassInterval)
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a1 := st.Tasks[0].Attempts[0]
+	if a1.RunID == "" || a1.Restarts != 0 || !flow.Done(a1.Acts, flow.AskStartWorker+"@"+flow.ContinueResume) || len(a1.Held) != 0 {
+		t.Fatalf("T1 after pass 3 = run_id:%q restarts:%d held:%q acts:%+v, want resumed worker with Restarts=0 and cleared Held", a1.RunID, a1.Restarts, a1.Held, a1.Acts)
+	}
+	if len(launched) != 1 {
+		t.Fatalf("launched workers = %d, want 1", len(launched))
+	}
+	prompt := launched[0].Argv[len(launched[0].Argv)-1]
+	if !slices.Contains(launched[0].Argv, "--resume") || !slices.Contains(launched[0].Argv, t1Session) || !strings.Contains(prompt, "CI failed on PR #1") || !strings.Contains(prompt, "44714") {
+		t.Errorf("resumed worker argv = %q, want --resume %s and held CI prompt naming PR #1 / 44714", launched[0].Argv, t1Session)
+	}
+}
+
+// TestRedCIAfterYieldBehindOwnerGate checks O38 hole 3 and round-2 correction 3:
+// T1 is stopped, T2 is idle at N31 with its gate ask open, and T1 turns red.
+// Pass 1 yields T2's worker; pass 2 resumes T1. Later the owner answers T2's
+// N31 gate ask with the real no option (flow.GateOptionHold; a Merge yes needs
+// no worker) -> N30 opens an owner_no recap, coordinator amends and decides
+// new, and T2 starts on the extra slot while T1 is still working.
+func TestRedCIAfterYieldBehindOwnerGate(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := bindRepoFakeGH(t, repo)
+
+	now := time.Date(2026, 11, 24, 6, 0, 0, 0, time.UTC)
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return now }
+	if err := eng.Start(repo, "Red CI behind owner gate", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wt1, br1, c1 := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+	wt2, br2, c2 := makeSlotWorktree(t, ctx, paths, repo, id, "T2", "t2.go")
+	writeOpenPRView(t, gh, 1, c1, checkRollup("FAILURE", "44714", "1001"))
+	writeGHFile(t, gh, "workflow-runs.json", `{"total_count":1,"workflow_runs":[{"id":44714,"status":"completed","conclusion":"failure"}]}`)
+	writeOpenPRView(t, gh, 2, c2, greenRollup)
+
+	w2, err := startRun(ctx, client, world.RunSpec{Name: "worker-t2-gate", Cwd: wt2, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTerminalStatusAt(t, srv, client, w2, "idle", now.Add(-time.Minute))
+
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Project.RunTokenHash = tokenHash("tok-coord")
+	st.Settings.FlakeReruns = 0
+	st.Asks = []flow.Ask{{
+		ID: "ask-t2-gate", Project: id, Kind: flow.KindGate, Gated: true,
+		Task: "T2", Head: c2, AskedBy: flow.AskedByN31,
+		Question: "Approve T2 for merge?", Options: []string{flow.GateOptionMerge, flow.GateOptionHold},
+		Recommend: flow.GateOptionMerge, Status: flow.AskStatusOpen, At: now.Add(-2 * time.Minute),
+	}}
+	st.Tasks = []flow.Task{
+		{
+			ID: "T1", Title: "feat: T1 red after yield", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: base, Branch: br1, Worktree: wt1, PR: 1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: "worker-t1-stopped",
+					SessionID: "11111111-2222-4333-8444-555555555555", Resumable: true,
+					State: flow.PhaseEnded, Result: flow.EndStopped, EndedAt: now.Add(-3 * time.Minute),
+				},
+				Ready: []flow.Ready{{Head: c1}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-10 * time.Minute)}},
+			}},
+		},
+		{
+			ID: "T2", Title: "feat: T2 at owner gate", Gate: flow.GateOwner, EstimateLines: 50,
+			Brief:    "Initial gated implementation.",
+			Outcomes: []flow.Outcome{{Text: "T2 works", ProvedBy: "cmd: true"}},
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: base, Branch: br2, Worktree: wt2, PR: 2, RunID: w2,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: w2,
+					SessionID: "22222222-2222-4333-8444-555555555555", Resumable: true,
+					State: flow.PhaseIdle, Status: "idle", StatusSince: now.Add(-time.Minute), StatusReported: true,
+				},
+				Ready: []flow.Ready{{Head: c2}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-10 * time.Minute)}},
+			}},
+		},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pass 1: T2 idle at N31 (owner_gate) yields its worker so red T1 can restart next pass.
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a2 := st.Tasks[1].Attempts[0]
+	if st.Tasks[1].LastRow != "N31" || a2.RunID != "" || a2.Run == nil || a2.Run.State != flow.PhaseEnded || a2.Run.Result != flow.EndStopped {
+		t.Fatalf("T2 after pass 1 = row:%q run_id:%q run:%+v, want N31 ended(stopped)", st.Tasks[1].LastRow, a2.RunID, a2.Run)
+	}
+	if slotLines := logRules(t, paths.Log(id), "slot"); len(slotLines) != 1 || slotLines[0].Task != "T2" {
+		t.Errorf("slot log lines after pass 1 = %+v, want 1 line for T2", slotLines)
+	}
+
+	// Pass 2: T1 resumes on the freed slot and works.
+	now = now.Add(flow.PassInterval)
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1Run := st.Tasks[0].Attempts[0].RunID
+	if t1Run == "" || st.Tasks[0].Attempts[0].Restarts != 0 {
+		t.Fatalf("T1 after pass 2 = run_id:%q restarts:%d, want resumed worker with Restarts=0", t1Run, st.Tasks[0].Attempts[0].Restarts)
+	}
+	setTerminalStatusAt(t, srv, client, t1Run, "working", now)
+
+	// Owner answers T2's gate ask with the real no option (Hold; Merge needs no worker).
+	now = now.Add(time.Minute)
+	answerOwnerAsk(t, eng, "ask-t2-gate", flow.GateOptionHold)
+
+	// Pass 3: N30 opens owner_no recap for T2 while T1 keeps working.
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := flow.OpenRecap(st.Tasks[1]); st.Tasks[1].LastRow != "N30" || rec == nil || rec.Trigger != flow.TriggerOwnerNo {
+		t.Fatalf("T2 after owner Hold = row:%q recap:%+v, want N30 owner_no recap", st.Tasks[1].LastRow, rec)
+	}
+
+	// Coordinator amends T2 and decides new; T2 then takes the owner-answered extra slot alongside live T1.
+	if err := eng.Report("tok-coord", "plan amend", json.RawMessage(`{"why":"owner chose Hold on gate","tasks":[{"id":"T2","brief":"Revised brief after owner Hold."}]}`)); err != nil {
+		t.Fatalf("plan amend: %v", err)
+	}
+	if err := eng.Report("tok-coord", "recap decide", json.RawMessage(`{"task":"T2","choice":"new","why":"rework after owner Hold"}`)); err != nil {
+		t.Fatalf("recap decide new: %v", err)
+	}
+
+	now = now.Add(flow.PassInterval)
+	eng.passProject(ctx, id, false) // N11 opens attempt 2 on the extra slot
+	now = now.Add(flow.PassInterval)
+	eng.passProject(ctx, id, false) // N23 starts worker on attempt 2
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Tasks[1].Attempts) != 2 || st.Tasks[1].Attempts[1].RunID == "" {
+		t.Fatalf("T2 after owner Hold + recap new = attempts:%d latest:%+v, want attempt 2 with live worker on extra slot", len(st.Tasks[1].Attempts), flow.OpenAttempt(st.Tasks[1]))
+	}
+	if st.Tasks[0].Attempts[0].RunID != t1Run {
+		t.Errorf("T1 worker changed while T2 used extra slot: got %q, want %q", st.Tasks[0].Attempts[0].RunID, t1Run)
+	}
+}
+
+// TestRedCIBehindBlockedHolderWaits pins O38's accepted unbounded wait
+// (design.md 4.10): T2 idle at N5 (stage blocked_or_failed) keeps its slot, so
+// red T1 gets no stop and waits with "no slot is free".
+func TestRedCIBehindBlockedHolderWaits(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := bindRepoFakeGH(t, repo)
+
+	now := time.Date(2026, 11, 24, 7, 0, 0, 0, time.UTC)
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return now }
+	if err := eng.Start(repo, "Red CI behind blocked holder waits", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wt1, br1, c1 := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+	wt2, br2, c2 := makeSlotWorktree(t, ctx, paths, repo, id, "T2", "t2.go")
+	writeOpenPRView(t, gh, 1, c1, checkRollup("FAILURE", "44714", "1001"))
+	writeGHFile(t, gh, "workflow-runs.json", `{"total_count":1,"workflow_runs":[{"id":44714,"status":"completed","conclusion":"failure"}]}`)
+
+	w2, err := startRun(ctx, client, world.RunSpec{Name: "worker-t2-blocked", Cwd: wt2, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTerminalStatusAt(t, srv, client, w2, "idle", now.Add(-time.Minute))
+
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Settings.FlakeReruns = 0
+	st.Tasks = []flow.Task{
+		{
+			ID: "T1", Title: "feat: T1 red waiting on slot", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: base, Branch: br1, Worktree: wt1, PR: 1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: "worker-t1-stopped",
+					SessionID: "11111111-2222-4333-8444-555555555555", Resumable: true,
+					State: flow.PhaseEnded, Result: flow.EndStopped, EndedAt: now.Add(-3 * time.Minute),
+				},
+				Ready: []flow.Ready{{Head: c1}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-10 * time.Minute)}},
+			}},
+		},
+		{
+			ID: "T2", Title: "feat: T2 idle at N5", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: base, Branch: br2, Worktree: wt2, RunID: w2,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: w2,
+					SessionID: "22222222-2222-4333-8444-555555555555", Resumable: true,
+					State: flow.PhaseIdle, Status: "idle", StatusSince: now.Add(-time.Minute), StatusReported: true,
+				},
+				Ready:   []flow.Ready{{Head: c2}},
+				Rounds:  []flow.Round{},
+				Accepts: []flow.Accept{},
+				Acts: []flow.Act{
+					{Key: flow.AskStartWorker, Result: "done", At: now.Add(-10 * time.Minute)},
+					{Key: flow.AskPushPR + "@" + c2, Result: "failed", Class: flow.ClassSettled, Err: "push rejected", At: now.Add(-2 * time.Minute)},
+					{Key: flow.AskWake + "@failed@" + flow.AskPushPR + "@" + c2, Result: "done", At: now.Add(-time.Minute)},
+				},
+			}},
+		},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	eng.passProject(ctx, id, false)
+	now = now.Add(flow.PassInterval)
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Tasks[1].LastRow != "N5" || st.Tasks[1].Attempts[0].RunID != w2 {
+		t.Fatalf("T2 at N5 did not keep its worker: row=%q run_id=%q (want N5 / %q)", st.Tasks[1].LastRow, st.Tasks[1].Attempts[0].RunID, w2)
+	}
+	if countRPC(srv, "terminal.kill") != 0 {
+		t.Errorf("terminal.kill called %d times for N5 holder, want 0", countRPC(srv, "terminal.kill"))
+	}
+	if slotLines := logRules(t, paths.Log(id), "slot"); len(slotLines) != 0 {
+		t.Errorf("slot log lines for N5 holder = %+v, want 0", slotLines)
+	}
+	if st.Tasks[0].LastRow != "N33" || st.Tasks[0].HoldWhy != "no slot is free" || st.Tasks[0].Attempts[0].RunID != "" {
+		t.Fatalf("T1 behind N5 holder = row:%q hold:%q run_id:%q, want N33 / no slot is free / no worker", st.Tasks[0].LastRow, st.Tasks[0].HoldWhy, st.Tasks[0].Attempts[0].RunID)
+	}
+}
+
+// TestYieldSkipsWorkerNoLongerIdle checks O38's pre-stop re-read: if an idle
+// CI-waiting worker turns working between the pass's first worker read and the
+// yield stop after the act loop, the re-read observes PhaseWorking and skips
+// the kill (0 terminal.kill, 0 slot lines).
+func TestYieldSkipsWorkerNoLongerIdle(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := bindRepoFakeGH(t, repo)
+
+	now := time.Date(2026, 11, 24, 8, 0, 0, 0, time.UTC)
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return now }
+	if err := eng.Start(repo, "Yield skips worker no longer idle", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wt1, br1, c1 := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+	writeOpenPRView(t, gh, 1, c1, "["+ciCheck("ci", "IN_PROGRESS", "", "101", "1001")+"]")
+
+	w1, err := startRun(ctx, client, world.RunSpec{Name: "worker-t1-flip", Cwd: wt1, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTerminalStatusAt(t, srv, client, w1, "idle", now.Add(-time.Minute))
+
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Tasks = []flow.Task{
+		{
+			ID: "T1", Title: "feat: T1 turns working before yield", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: base, Branch: br1, Worktree: wt1, PR: 1, RunID: w1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: w1,
+					SessionID: "sess-t1-flip", Resumable: true,
+					State: flow.PhaseIdle, Status: "idle", StatusSince: now.Add(-time.Minute), StatusReported: true,
+				},
+				Ready: []flow.Ready{{Head: c1}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-10 * time.Minute)}},
+			}},
+		},
+		{ID: "T2", Title: "feat: T2 queued", EstimateLines: 50},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	// Flip w1 from idle to working during actTaskLocked (after the pass's first
+	// worker read and before the post-act-loop yield re-read).
+	var flipped atomic.Bool
+	eng.writeLog = func(path string, l LogLine) error {
+		if l.Task == "T2" && l.Rule == "N10" && flipped.CompareAndSwap(false, true) {
+			setTerminalStatusAt(t, srv, client, w1, "working", now)
+		}
+		return AppendLog(path, l)
+	}
+
+	eng.passProject(ctx, id, false)
+
+	if !flipped.Load() {
+		t.Fatal("test setup bug: N10 log hook did not fire to flip w1 to working")
+	}
+	if kills := countRPC(srv, "terminal.kill"); kills != 0 {
+		t.Fatalf("terminal.kill called %d times after w1 turned working, want 0", kills)
+	}
+	if _, err := client.Get(ctx, w1); err != nil {
+		t.Fatalf("w1 not live in hc after turning working: %v", err)
+	}
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a1 := st.Tasks[0].Attempts[0]
+	if a1.RunID != w1 || a1.Run == nil || a1.Run.State != flow.PhaseWorking {
+		t.Fatalf("T1 after re-read = run_id:%q run:%+v, want live %s in PhaseWorking", a1.RunID, a1.Run, w1)
+	}
+	if slotLines := logRules(t, paths.Log(id), "slot"); len(slotLines) != 0 {
+		t.Errorf("slot log lines = %+v, want 0", slotLines)
+	}
+}
+
+// TestYieldStoreDirtyStopsNothing checks O38 hole 2 and round-2 correction 4:
+// when writeState fails in the worker loop, OR during the yield loop's
+// advanceRunLocked re-read just before the kill, cleanLocked stops nothing (0
+// HC kills, 0 slot lines); once healthy, the next pass stops the idle worker.
+func TestYieldStoreDirtyStopsNothing(t *testing.T) {
+	setup := func(t *testing.T, initialPhase string) (context.Context, *hctest.Server, *hc.Client, Paths, *Engine, string, string, *time.Time) {
+		t.Helper()
+		ctx := context.Background()
+		srv := hctest.New(t)
+		client := hc.NewClient(srv.Path)
+		paths := testPaths(t)
+		repo, base := initGitRepoWithRemote(t)
+		githubOrigin(t, repo)
+		gh := bindRepoFakeGH(t, repo)
+
+		now := time.Date(2026, 11, 24, 8, 30, 0, 0, time.UTC)
+		eng := newTestEngine(t, paths, client)
+		eng.Now = func() time.Time { return now }
+		if err := eng.Start(repo, "Yield dirty store stops nothing", 1); err != nil {
+			t.Fatal(err)
+		}
+		id := eng.projectDirs()[0].Name()
+		srv.Add(hc.Terminal{
+			Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+			Labels: testCoordLabels(id, "run-elsewhere"),
+			Status: &hc.Status{App: "claude-code", State: "working"},
+		})
+
+		wt1, br1, c1 := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+		writeOpenPRView(t, gh, 1, c1, "["+ciCheck("ci", "IN_PROGRESS", "", "101", "1001")+"]")
+		w1, err := startRun(ctx, client, world.RunSpec{Name: "worker-t1-dirty", Cwd: wt1, Argv: []string{"sh"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv.SetScreen(w1, "screen-1")
+		setTerminalStatusAt(t, srv, client, w1, "idle", now.Add(-time.Minute))
+
+		st, err := LoadState(paths.State(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Project.RunID = "coord-elsewhere"
+		st.Tasks = []flow.Task{
+			{
+				ID: "T1", Title: "feat: T1 waiting on CI", EstimateLines: 50,
+				Attempts: []flow.Attempt{{
+					SizeCap: 100, BaseCommit: base, Branch: br1, Worktree: wt1, PR: 1, RunID: w1,
+					Run: &flow.RunRecord{
+						Role: flow.RoleWorker, CLI: "claude", Address: w1,
+						SessionID: "sess-t1-dirty", Resumable: true,
+						State: initialPhase, Status: "idle", StatusSince: now.Add(-time.Minute), StatusReported: true,
+					},
+					Ready: []flow.Ready{{Head: c1}},
+					Rounds: []flow.Round{
+						{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+						{N: 2, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+					},
+					Accepts: []flow.Accept{},
+					Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-10 * time.Minute)}},
+				}},
+			},
+			{ID: "T2", Title: "feat: T2 queued", EstimateLines: 50},
+		}
+		if err := SaveState(paths.State(id), st); err != nil {
+			t.Fatal(err)
+		}
+		return ctx, srv, client, paths, eng, id, w1, &now
+	}
+
+	t.Run("dirty_in_worker_loop", func(t *testing.T) {
+		ctx, srv, client, paths, eng, id, w1, now := setup(t, flow.PhaseWorking)
+
+		var failedWorkerSave atomic.Bool
+		eng.writeState = func(path string, s flow.State) error {
+			if len(s.Tasks) > 0 && len(s.Tasks[0].Attempts) > 0 && s.Tasks[0].Attempts[0].Run != nil &&
+				s.Tasks[0].Attempts[0].Run.State == flow.PhaseIdle && failedWorkerSave.CompareAndSwap(false, true) {
+				return errors.New("state write failed in worker loop")
+			}
+			return SaveState(path, s)
+		}
+
+		eng.passProject(ctx, id, false)
+
+		if !failedWorkerSave.Load() {
+			t.Fatal("test setup bug: worker-loop writeState failure did not trigger")
+		}
+		if kills := countRPC(srv, "terminal.kill"); kills != 0 {
+			t.Fatalf("terminal.kill called %d times with dirty store from worker loop, want 0", kills)
+		}
+		if _, err := client.Get(ctx, w1); err != nil {
+			t.Fatalf("w1 not live after dirty worker-loop pass: %v", err)
+		}
+		if slotLines := logRules(t, paths.Log(id), "slot"); len(slotLines) != 0 {
+			t.Errorf("slot log lines after dirty pass = %+v, want 0", slotLines)
+		}
+
+		// Recovery pass succeeds and stops the idle worker.
+		*now = now.Add(flow.PassInterval)
+		eng.passProject(ctx, id, false)
+		st, err := LoadState(paths.State(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a1 := st.Tasks[0].Attempts[0]; a1.RunID != "" || a1.Run == nil || a1.Run.Result != flow.EndStopped {
+			t.Fatalf("T1 after healthy recovery pass = run_id:%q run:%+v, want ended(stopped)", a1.RunID, a1.Run)
+		}
+	})
+
+	t.Run("dirty_in_yield_reread", func(t *testing.T) {
+		ctx, srv, client, paths, eng, id, w1, now := setup(t, flow.PhaseIdle)
+
+		var armed, failedRereadSave atomic.Bool
+		eng.writeState = func(path string, s flow.State) error {
+			if armed.CompareAndSwap(true, false) {
+				failedRereadSave.Store(true)
+				return errors.New("state write failed in yield re-read")
+			}
+			err := SaveState(path, s)
+			if err == nil && len(s.Tasks) > 1 && s.Tasks[1].LastRow == "N10" && !failedRereadSave.Load() {
+				srv.SetScreen(w1, "screen-2")
+				armed.Store(true)
+			}
+			return err
+		}
+
+		eng.passProject(ctx, id, false)
+
+		if !failedRereadSave.Load() {
+			t.Fatal("test setup bug: yield re-read writeState failure did not trigger")
+		}
+		if kills := countRPC(srv, "terminal.kill"); kills != 0 {
+			t.Fatalf("terminal.kill called %d times after yield re-read dirtied store, want 0", kills)
+		}
+		if _, err := client.Get(ctx, w1); err != nil {
+			t.Fatalf("w1 not live after dirty yield re-read pass: %v", err)
+		}
+		if slotLines := logRules(t, paths.Log(id), "slot"); len(slotLines) != 0 {
+			t.Errorf("slot log lines after dirty yield re-read = %+v, want 0", slotLines)
+		}
+
+		// Recovery pass succeeds and stops the idle worker.
+		*now = now.Add(flow.PassInterval)
+		eng.passProject(ctx, id, false)
+		st, err := LoadState(paths.State(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a1 := st.Tasks[0].Attempts[0]; a1.RunID != "" || a1.Run == nil || a1.Run.Result != flow.EndStopped {
+			t.Fatalf("T1 after healthy recovery pass = run_id:%q run:%+v, want ended(stopped)", a1.RunID, a1.Run)
+		}
+	})
+}
+
+// TestYieldCommitFails checks O38 hole 2 (design.md 4.10): when the kill
+// succeeds and writeLog fails on the "slot" line, state.json still holds the
+// live worker record. On the next healthy pass, R33 records the gone terminal
+// as exited/lost (not stopped), so a later restart obeys back-off and is
+// counted (Restarts 1).
+func TestYieldCommitFails(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := bindRepoFakeGH(t, repo)
+
+	now := time.Date(2026, 11, 24, 9, 0, 0, 0, time.UTC)
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return now }
+	if err := eng.Start(repo, "Yield commit fails is counted exit", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wt1, br1, c1 := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+	writeOpenPRView(t, gh, 1, c1, "["+ciCheck("ci", "IN_PROGRESS", "", "101", "1001")+"]")
+	w1, err := startRun(ctx, client, world.RunSpec{Name: "worker-t1-commitfail", Cwd: wt1, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTerminalStatusAt(t, srv, client, w1, "idle", now.Add(-time.Minute))
+
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Settings.FlakeReruns = 0
+	st.Settings.EnsureBackoffMinutes = 1
+	st.Tasks = []flow.Task{
+		{
+			ID: "T1", Title: "feat: T1 yield commit fails", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: base, Branch: br1, Worktree: wt1, PR: 1, RunID: w1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: w1,
+					SessionID: "11111111-2222-4333-8444-555555555555", Resumable: true,
+					State: flow.PhaseIdle, Status: "idle", StatusSince: now.Add(-time.Minute), StatusReported: true,
+				},
+				Ready: []flow.Ready{{Head: c1}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-10 * time.Minute)}},
+			}},
+		},
+		{ID: "T2", Title: "feat: T2 queued", EstimateLines: 50},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	var failedSlot atomic.Bool
+	eng.writeLog = func(path string, l LogLine) error {
+		if l.Rule == "slot" && failedSlot.CompareAndSwap(false, true) {
+			return errors.New("log write failed on slot line")
+		}
+		return AppendLog(path, l)
+	}
+
+	// Pass 1: kill succeeds in hc, commit fails on the slot log line -> state.json keeps w1 live.
+	eng.passProject(ctx, id, false)
+
+	if !failedSlot.Load() {
+		t.Fatal("yield stop did not attempt to write the slot log line")
+	}
+	if _, err := client.Get(ctx, w1); !errors.Is(err, hc.ErrNotFound) {
+		t.Fatalf("w1 still present in hc after kill: err=%v", err)
+	}
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a1 := st.Tasks[0].Attempts[0]; a1.RunID != w1 || a1.Run == nil || a1.Run.State != flow.PhaseIdle {
+		t.Fatalf("state.json mutated despite failed slot commit: run_id=%q run=%+v", a1.RunID, a1.Run)
+	}
+
+	// Pass 2 (healthy): R33 sees the gone terminal on the live record -> ended(lost/exited), not stopped.
+	now = now.Add(flow.PassInterval)
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a1 := st.Tasks[0].Attempts[0]
+	if a1.RunID != "" || a1.Run == nil || a1.Run.State != flow.PhaseEnded ||
+		(a1.Run.Result != flow.EndExited && a1.Run.Result != flow.EndLost) {
+		t.Fatalf("T1 after pass 2 = run_id:%q run:%+v, want ended(exited|lost) via R33", a1.RunID, a1.Run)
+	}
+	if r33 := logRules(t, paths.Log(id), "R33"); len(r33) != 1 || r33[0].Task != "T1" {
+		t.Errorf("R33 log lines after pass 2 = %+v, want 1 line for T1", r33)
+	}
+
+	// Free T2's slot and turn T1 red: T1 is in back-off inside 1m, then restarts counted (Restarts == 1).
+	st.Tasks[1].Done = &flow.Merged{MergedCommit: "m2"}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+	writeOpenPRView(t, gh, 1, c1, checkRollup("FAILURE", "44714", "1001"))
+	writeGHFile(t, gh, "workflow-runs.json", `{"total_count":1,"workflow_runs":[{"id":44714,"status":"completed","conclusion":"failure"}]}`)
+
+	// Inside 1m EnsureBackoffMinutes: held in back-off (no worker launched yet).
+	now = now.Add(15 * time.Second)
+	eng.passProject(ctx, id, false)
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a1 := st.Tasks[0].Attempts[0]; a1.RunID != "" || a1.Restarts != 0 {
+		t.Fatalf("T1 restarted during exit back-off: run_id=%q restarts=%d", a1.RunID, a1.Restarts)
+	}
+
+	// Past 1m back-off: restarts via counted start_worker@resume@1 with Restarts == 1.
+	now = now.Add(time.Minute)
+	eng.passProject(ctx, id, false)
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a1 = st.Tasks[0].Attempts[0]
+	if a1.RunID == "" || a1.Restarts != 1 || !flow.Done(a1.Acts, flow.AskStartWorker+"@"+flow.ContinueResume+"@1") {
+		t.Fatalf("T1 after exit back-off = run_id:%q restarts:%d acts:%+v, want counted restart (Restarts=1)", a1.RunID, a1.Restarts, a1.Acts)
+	}
+}
+
+// TestYieldStopFailureIsNotN5 checks O38 hole 2 (design.md 4.10): when the
+// yield stop fails before the kill for four passes, it is logged via logError
+// and retried without recording any counted act or moving T1 to N5; T1 stays
+// at N36 and yields once HC recovers.
+func TestYieldStopFailureIsNotN5(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := bindRepoFakeGH(t, repo)
+
+	var logBuf bytes.Buffer
+	now := time.Date(2026, 11, 24, 9, 30, 0, 0, time.UTC)
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return now }
+	eng.Log = logging.NewJSONLLogger(&logBuf)
+	if err := eng.Start(repo, "Yield stop failure is not N5", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wt1, br1, c1 := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+	writeOpenPRView(t, gh, 1, c1, "["+ciCheck("ci", "IN_PROGRESS", "", "101", "1001")+"]")
+	w1, err := startRun(ctx, client, world.RunSpec{Name: "worker-t1-stoperr", Cwd: wt1, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTerminalStatusAt(t, srv, client, w1, "idle", now.Add(-time.Minute))
+
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Settings.EnsureFailures = 3
+	st.Tasks = []flow.Task{
+		{
+			ID: "T1", Title: "feat: T1 stop errors", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: base, Branch: br1, Worktree: wt1, PR: 1, RunID: w1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: w1,
+					SessionID: "sess-t1-stoperr", Resumable: true,
+					State: flow.PhaseIdle, Status: "idle", StatusSince: now.Add(-time.Minute), StatusReported: true,
+				},
+				Ready: []flow.Ready{{Head: c1}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-10 * time.Minute)}},
+			}},
+		},
+		{ID: "T2", Title: "feat: T2 queued", EstimateLines: 50},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	var failKill atomic.Bool
+	failKill.Store(true)
+	eng.HC = hc.NewClient(methodFailProxy(t, srv.Path, "terminal.kill", &failKill))
+
+	// Four failing passes (exceeding EnsureFailures=3): T1 stays N36, never N5, no stop_runs act.
+	for i := range 4 {
+		eng.passProject(ctx, id, false)
+		now = now.Add(2 * time.Minute)
+		st, err = LoadState(paths.State(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Tasks[0].LastRow != "N36" || st.Tasks[0].Attempts[0].RunID != w1 {
+			t.Fatalf("pass %d: T1 = row:%q run_id:%q, want N36 keeping %q", i+1, st.Tasks[0].LastRow, st.Tasks[0].Attempts[0].RunID, w1)
+		}
+		if flow.Count(st.Tasks[0].Attempts[0].Acts, flow.AskStopRuns) != 0 || flow.HasExhausted(st.Tasks[0].Attempts[0].Acts, st.Settings) {
+			t.Fatalf("pass %d: yield stop failure polluted acts: %+v", i+1, st.Tasks[0].Attempts[0].Acts)
+		}
+		if len(st.Project.Wakes) != 0 {
+			t.Fatalf("pass %d: yield stop failure queued wake: %+v", i+1, st.Project.Wakes)
+		}
+		if flow.OpenAttempt(st.Tasks[1]) != nil {
+			t.Fatalf("pass %d: T2 started while w1 stop failed", i+1)
+		}
+	}
+	if got := strings.Count(logBuf.String(), "terminal.kill failed"); got < 4 {
+		t.Fatalf("daemon log recorded %d terminal.kill failures across 4 passes, want >= 4:\n%s", got, logBuf.String())
+	}
+
+	// Recovery: pass 5 stops T1's idle worker; pass 6 opens T2's attempt.
+	failKill.Store(false)
+	eng.passProject(ctx, id, false)
+	now = now.Add(flow.PassInterval)
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a1 := st.Tasks[0].Attempts[0]; a1.RunID != "" || a1.Run == nil || a1.Run.Result != flow.EndStopped {
+		t.Fatalf("T1 after recovery = run_id:%q run:%+v, want ended(stopped)", a1.RunID, a1.Run)
+	}
+	if flow.OpenAttempt(st.Tasks[1]) == nil {
+		t.Fatalf("T2 did not start after yield stop recovered: row=%q", st.Tasks[1].LastRow)
 	}
 }
