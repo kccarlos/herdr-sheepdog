@@ -192,3 +192,46 @@ func TestSettingsGuardsCoordinatorTableMovedAndJ4Cancel(t *testing.T) {
 		}
 	}
 }
+
+func TestSettingsSaveEmptyValueLogDecision(t *testing.T) {
+	t.Parallel()
+	r := newAskRig(t)
+	a1, err := r.eng.ProposeSetting(r.id, "design_gate", "owner", "dev-browser-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p1, err := r.eng.MintProof(a1.ID, flow.RuleOptionSave, ProofInputTap, "dev-browser-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.eng.Answer(a1.ID, flow.RuleOptionSave, p1); err != nil {
+		t.Fatal(err)
+	}
+	lines := readRawLogLines(t, r.paths.Log(r.id))
+	if got := lines[len(lines)-1].Decision; got != "saved design_gate owner (was empty)" {
+		t.Errorf("save from empty decision = %q, want %q", got, "saved design_gate owner (was empty)")
+	}
+	a2, err := r.eng.ProposeSetting(r.id, "design_gate", "", "dev-browser-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, err := r.eng.MintProof(a2.ID, flow.RuleOptionSave, ProofInputTap, "dev-browser-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.eng.Answer(a2.ID, flow.RuleOptionSave, p2); err != nil {
+		t.Fatal(err)
+	}
+	lines = readRawLogLines(t, r.paths.Log(r.id))
+	if got := lines[len(lines)-1].Decision; got != "saved design_gate empty (was owner)" {
+		t.Errorf("save to empty decision = %q, want %q", got, "saved design_gate empty (was owner)")
+	}
+}
+
+func TestSettingsRowsNilOnError(t *testing.T) {
+	t.Parallel()
+	r := newAskRig(t)
+	if rows, err := r.eng.SettingRows("no-such-project"); err == nil || rows != nil {
+		t.Fatalf("SettingRows(unknown) = (len=%d, %v), want (nil, error)", len(rows), err)
+	}
+}

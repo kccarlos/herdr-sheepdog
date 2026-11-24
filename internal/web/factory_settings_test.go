@@ -69,3 +69,10 @@ func TestFactorySettingsRoutes(t *testing.T) {
 		t.Fatalf("saved MaxRunning = %d (err=%v), want 2", st.Settings.MaxRunning, err)
 	}
 }
+
+func TestFactorySettingsBlankProjectIDReturns404(t *testing.T) {
+	f := newBrowserEnrolFixture(t, nil)
+	if w := f.doLoopback(http.MethodGet, "/api/factory/projects/%20/settings", nil, ""); w.Code != http.StatusNotFound {
+		t.Fatalf("GET /api/factory/projects/%%20/settings = %d %s, want 404", w.Code, w.Body.String())
+	}
+}

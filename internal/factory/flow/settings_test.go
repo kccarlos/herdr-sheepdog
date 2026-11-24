@@ -181,3 +181,30 @@ func TestSettingsWithRefusalsRepairProblemAndNote(t *testing.T) {
 		t.Error("second_reviewer Note mismatch: empty when unset, non-empty when models.reviewer is set")
 	}
 }
+
+func TestSettingsMaxRoundsLowerBoundWhenReviewRoundsInvalid(t *testing.T) {
+	// 1. Hand-edited review_rounds=0 must not allow setting max_rounds=0 or negative (SE4).
+	sBadRR := DefaultSettings()
+	sBadRR.ReviewRounds = 0
+	if _, err := sBadRR.With("max_rounds", "0"); err == nil {
+		t.Error("With(max_rounds=0) succeeded when stored review_rounds=0; want refusal")
+	}
+
+	// 2. Stored (review_rounds=0, max_rounds=0) must mark max_rounds with a Problem (SE7)
+	//    and must not block repairing review_rounds first (plan 14.1).
+	sBothZero := DefaultSettings()
+	sBothZero.ReviewRounds, sBothZero.MaxRounds = 0, 0
+	if mr := findRow(t, sBothZero.Rows(), "max_rounds"); mr.Min < ReviewRoundsMin || mr.Problem == "" {
+		t.Errorf("max_rounds row = %+v, want Min>=%d and non-empty Problem", mr, ReviewRoundsMin)
+	}
+	if _, err := sBothZero.With("review_rounds", "2"); err != nil {
+		t.Errorf("repairing review_rounds first from (0,0) failed: %v", err)
+	}
+
+	// 3. Hand-edited review_rounds=12 must not produce inverted Min > Max on max_rounds.
+	sHighRR := DefaultSettings()
+	sHighRR.ReviewRounds = 12
+	if mr := findRow(t, sHighRR.Rows(), "max_rounds"); mr.Min > mr.Max {
+		t.Errorf("max_rounds row has inverted range Min=%d > Max=%d", mr.Min, mr.Max)
+	}
+}
