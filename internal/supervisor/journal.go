@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -167,7 +168,7 @@ func rootsFromProcessInfo(info herdr.ProcessInfo) workerlog.ProcessRoots {
 }
 
 func (s *Supervisor) paneRoots(ctx context.Context, row state.Agent) workerlog.ProcessRoots {
-	if row.PaneID == "" || s.noProcessInfo.Load() {
+	if row.PaneID == "" || hc.IsRemote(row.PaneID) || s.noProcessInfo.Load() {
 		return workerlog.ProcessRoots{}
 	}
 	if row.Kind != "" && !workerlog.SupportsKind(row.Kind) {
@@ -202,7 +203,7 @@ func workerSessionWithRoots(row state.Agent, roots workerlog.ProcessRoots) worke
 		Source: row.SessionSource,
 		Kind:   row.SessionKind,
 		Value:  row.SessionValue,
-		Cwd:    row.Cwd,
+		Cwd:    hc.LocalCwd(row.PaneID, row.Cwd),
 	}
 }
 

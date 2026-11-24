@@ -18,6 +18,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/fsaccess"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
@@ -224,9 +225,14 @@ func spaceFolder(w herdr.WorkspaceInfo, panes []herdr.PaneInfo, readable func(st
 		}
 		linked = w.Worktree.Linked
 	}
-	if path == "" && len(panes) > 0 {
-		if raw = panes[0].Cwd; readable(raw) {
-			path = herdr.RealDir(raw)
+	if path == "" {
+		for _, p := range panes {
+			if raw = hc.LocalCwd(p.PaneID, p.Cwd); raw != "" {
+				if readable(raw) {
+					path = herdr.RealDir(raw)
+				}
+				break
+			}
 		}
 	}
 	if path == "" && raw != "" && !readable(raw) {

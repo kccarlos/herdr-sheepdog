@@ -25,6 +25,15 @@ func Address(pane string) string { return strings.Replace(pane, RemoteSep, "/", 
 // machine. Its processes and files live on that machine, not this one.
 func IsRemote(id string) bool { return strings.ContainsAny(id, "/"+RemoteSep) }
 
+// LocalCwd returns cwd when id is a local terminal, or "" when id is on an
+// added machine (whose paths belong to that machine, not this one).
+func LocalCwd(id, cwd string) string {
+	if IsRemote(id) {
+		return ""
+	}
+	return cwd
+}
+
 // UnmarshalJSON decodes a terminal record and maps its address and parent
 // to pane ids.
 func (t *Terminal) UnmarshalJSON(b []byte) error {

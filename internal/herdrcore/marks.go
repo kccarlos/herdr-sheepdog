@@ -139,7 +139,7 @@ func (b *Backend) applyMarkEvent(ctx context.Context, n hc.Notification) {
 		b.replaceMarks(n.Terminals)
 		return
 	}
-	if n.Method != "event" || !isLocal(n.Terminal) {
+	if n.Method != "event" {
 		return
 	}
 	switch n.Type {
@@ -339,14 +339,13 @@ func (b *Backend) AllMarks(ctx context.Context) (map[string]herdr.Marks, error) 
 // currentMarks is the marks a write decides on: the cache while RunMarks
 // is live, else a read.
 func (b *Backend) currentMarks(ctx context.Context, address string) (herdr.Marks, error) {
-	if isLocal(address) {
-		b.cache.mu.Lock()
-		m, ok := b.cache.marks[address]
-		live := b.cache.live
-		b.cache.mu.Unlock()
-		if live && ok {
-			return m, nil
-		}
+	address = hc.PaneID(address)
+	b.cache.mu.Lock()
+	m, ok := b.cache.marks[address]
+	live := b.cache.live
+	b.cache.mu.Unlock()
+	if live && ok {
+		return m, nil
 	}
 	t, err := b.pane(ctx, address)
 	if err != nil {
@@ -355,11 +354,8 @@ func (b *Backend) currentMarks(ctx context.Context, address string) (herdr.Marks
 	return marksOf(t), nil
 }
 
-// pane reads a live local terminal; any other address is no pane.
+// pane reads a live terminal; any other address is no pane.
 func (b *Backend) pane(ctx context.Context, address string) (hc.Terminal, error) {
-	if !isLocal(address) {
-		return hc.Terminal{}, fmt.Errorf("%w: %s is not a local terminal", herdr.ErrPaneNotFound, address)
-	}
 	t, err := b.client.Get(ctx, address)
 	if err != nil {
 		return hc.Terminal{}, translate(err)
@@ -403,6 +399,7 @@ func (b *Backend) SetPinned(ctx context.Context, paneID string, pinned bool) (he
 // two raise-only writes cannot cross; the cache is set before the call, so
 // the labels event that echoes it is not taken for another client's write.
 func (b *Backend) writeMarks(ctx context.Context, address string, decide func(herdr.Marks) (map[string]string, bool)) (herdr.Marks, error) {
+	address = hc.PaneID(address)
 	b.markWrite.Lock()
 	defer b.markWrite.Unlock()
 	current, err := b.currentMarks(ctx, address)

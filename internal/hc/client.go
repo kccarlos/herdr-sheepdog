@@ -200,7 +200,8 @@ func (c *Client) Remove(ctx context.Context, terminal string) (RemoveResult, err
 	var result RemoveResult
 	err := c.Call(ctx, "terminal.rm", struct {
 		Terminal string `json:"terminal"`
-	}{Terminal: terminal}, &result)
+	}{Terminal: Address(terminal)}, &result)
+	result.Removed = PaneID(result.Removed)
 	return result, err
 }
 

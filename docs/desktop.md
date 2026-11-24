@@ -187,6 +187,7 @@ Agents in terminals on a machine you added to herdr with `hc machine add` show
 up like the ones on this Mac: in the panel, on the phone and to the voice, with
 their status. The file browser is not offered for them, because their folders
 are on the other machine.
+Spaces and changes are not offered for remote agents either.
 
 ## Move between Mac and phone
 

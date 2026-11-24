@@ -10,6 +10,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
 // execRecordAccept is N42's accept at H; N19 records Accept{By: "override"}
@@ -203,8 +204,8 @@ func (e *Engine) execCleanup(ctx context.Context, id string, s *flow.State, ti i
 		}
 		var live []string
 		for _, tm := range list.Terminals {
-			if tm.State == "live" && tm.Cwd != "" {
-				live = append(live, tm.Cwd)
+			if cwd := hc.LocalCwd(tm.Address, tm.Cwd); tm.State == "live" && cwd != "" {
+				live = append(live, cwd)
 			}
 		}
 		keep := slices.ContainsFunc(live, func(dir string) bool { return underFolder(a.Worktree, dir) })

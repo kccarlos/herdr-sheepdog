@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/files"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 )
 
@@ -34,11 +35,7 @@ func (s *Server) filesRoot(r *http.Request) (root *files.Root, pane, space strin
 		if !ok {
 			return nil, "", "", errNoAgent
 		}
-		dir = row.Cwd
-		if strings.Contains(pane, "~") {
-			// An agent on an added machine: its folder is not on this computer.
-			return nil, pane, "", errNoCwd
-		}
+		dir = hc.LocalCwd(pane, row.Cwd)
 	} else {
 		a, ok := s.deps.Supervisor.(AgentActions)
 		if !ok || s.deps.Supervisor == nil {

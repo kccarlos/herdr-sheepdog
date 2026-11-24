@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -39,6 +40,9 @@ func (s *Supervisor) Handler() voice.ToolHandler {
 
 // workspaceDir returns the pane's working directory from herdr, or "".
 func (s *Supervisor) workspaceDir(ctx context.Context, row state.Agent) string {
+	if hc.IsRemote(row.PaneID) {
+		return ""
+	}
 	agents, err := s.herdr.ListAgents(ctx)
 	if err != nil {
 		return ""

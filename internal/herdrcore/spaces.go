@@ -110,11 +110,13 @@ func spaceName(first hc.Terminal) string {
 	if dir == "" {
 		return ""
 	}
-	if g, ok := herdr.GitInfo(dir); ok {
-		return g.Repo
-	}
-	if home, err := os.UserHomeDir(); err == nil && filepath.Clean(dir) == filepath.Clean(home) {
-		return "~"
+	if local := hc.LocalCwd(first.Address, dir); local != "" {
+		if g, ok := herdr.GitInfo(local); ok {
+			return g.Repo
+		}
+		if home, err := os.UserHomeDir(); err == nil && filepath.Clean(local) == filepath.Clean(home) {
+			return "~"
+		}
 	}
 	return filepath.Base(dir)
 }

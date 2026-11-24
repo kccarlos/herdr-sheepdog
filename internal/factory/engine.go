@@ -952,6 +952,9 @@ func (e *Engine) coordTerminalsLocked(ctx context.Context, id string, rec *flow.
 	}
 	var owned []hc.Terminal
 	for _, t := range list.Terminals {
+		if hc.IsRemote(t.Address) {
+			continue
+		}
 		label := t.Labels["sheepdog.run"]
 		known := rec != nil && rec.ID != "" && label == rec.ID
 		if known && rec.CreatedMS != 0 && rec.CreatedMS != t.CreatedMS {
@@ -1241,7 +1244,7 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 func (e *Engine) lookupLaunchTerminal(ctx context.Context, name string, adopt bool) (hc.Terminal, error) {
 	if e.HC != nil && adopt {
 		t, err := e.HC.Get(ctx, name)
-		if err == nil {
+		if err == nil && !hc.IsRemote(t.Address) {
 			return t, nil
 		}
 		if err != nil && !errors.Is(err, hc.ErrNotFound) {

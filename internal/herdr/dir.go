@@ -3,6 +3,8 @@ package herdr
 import (
 	"os"
 	"path/filepath"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
 // RealDir is path made absolute with every symlink resolved, or "" when it
@@ -38,10 +40,11 @@ func PaneDirs(snap Snapshot, allow func(string) bool) []PaneDir {
 	var dirs []PaneDir
 	seen := map[string]bool{}
 	for _, p := range snap.Panes {
-		if allow != nil && !allow(p.Cwd) {
+		cwd := hc.LocalCwd(p.PaneID, p.Cwd)
+		if cwd == "" || (allow != nil && !allow(cwd)) {
 			continue
 		}
-		path := RealDir(p.Cwd)
+		path := RealDir(cwd)
 		if path == "" || seen[path] {
 			continue
 		}

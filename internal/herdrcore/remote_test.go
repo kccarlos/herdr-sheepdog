@@ -45,13 +45,15 @@ func TestSubscribeAcceptsBothRemoteForms(t *testing.T) {
 // must accept raw "box/t4" addresses just like "box~t4" (currently blocked by
 // dead isLocal checking !strings.Contains(address, "/")).
 func TestMarksAcceptRawRemoteAddress(t *testing.T) {
+	// MarkSeen to the current turn first, so MarkUnread has something to write
+	// (it writes nothing when the terminal already reads as unread).
 	b, srv := newBackend(t)
 	ctx := testContext(t)
 	term := reported("box/t4", "claude-code", "done")
 	term.Turn = 3
 	srv.Add(term)
 
-	if _, err := b.MarkSeen(ctx, "box/t4", 2); err != nil {
+	if _, err := b.MarkSeen(ctx, "box/t4", 3); err != nil {
 		t.Fatalf("MarkSeen(box/t4) error = %v, want nil", err)
 	}
 	if _, err := b.MarkUnread(ctx, "box/t4"); err != nil {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/cli"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -142,15 +143,14 @@ func (s *Supervisor) startInvestigation(ctx context.Context, paneID string, req 
 	if question == "" {
 		return brain.InvestigationStart{}, errors.New("investigate needs a question")
 	}
+	// An agent on an added machine has its files and session there: a local
+	// read-only fork or CLI query would run against this machine instead.
+	if hc.IsRemote(paneID) {
+		return brain.InvestigationStart{}, errors.New("investigate: the agent runs on another machine; read its screen instead")
+	}
 	plan, err := s.planInvestigation(ctx, row, req, question)
 	if err != nil {
 		return brain.InvestigationStart{}, err
-	}
-	// An agent on an added machine (pane id "box~t4") has its files and
-	// session there: a local read-only fork would start in a folder this
-	// computer does not have. Its screen is still readable.
-	if strings.Contains(paneID, "~") {
-		return brain.InvestigationStart{}, errors.New("investigate: the agent runs on another machine; read its screen instead")
 	}
 	workspace := s.workspaceDir(ctx, row)
 	if workspace == "" {

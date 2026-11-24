@@ -66,7 +66,7 @@ func (f *fleetFeed) handle(ctx context.Context, n hc.Notification) bool {
 		f.b.signalResync()
 		return true
 	}
-	if n.Method != "event" || !isLocal(n.Terminal) {
+	if n.Method != "event" {
 		return true
 	}
 	switch n.Type {

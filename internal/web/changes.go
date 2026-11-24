@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/files"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
 // The changes view (docs/dev/ws-contract.md "Changes"): a read-only look at
@@ -140,20 +141,21 @@ func (s *Server) changesRepo(ctx context.Context, pane string) (gitRunner, *Chan
 	if !ok {
 		return gitRunner{}, nil, errNoAgent
 	}
-	if row.Cwd == "" {
+	cwd := hc.LocalCwd(pane, row.Cwd)
+	if cwd == "" {
 		return gitRunner{}, &ChangesResponse{Reason: "no_cwd", Files: []ChangedFile{}}, nil
 	}
-	if info, err := os.Stat(row.Cwd); err != nil || !info.IsDir() {
+	if info, err := os.Stat(cwd); err != nil || !info.IsDir() {
 		return gitRunner{}, &ChangesResponse{Reason: "no_cwd", Files: []ChangedFile{}}, nil
 	}
-	if err := files.CheckRoot(row.Cwd, s.deps.DataDir); err != nil {
+	if err := files.CheckRoot(cwd, s.deps.DataDir); err != nil {
 		return gitRunner{}, nil, err
 	}
 	bin := s.deps.GitBin
 	if bin == "" {
 		bin = "git"
 	}
-	out, _, err := gitRunner{bin: bin, dir: row.Cwd}.run(ctx, 64<<10, false, "rev-parse", "--show-toplevel")
+	out, _, err := gitRunner{bin: bin, dir: cwd}.run(ctx, 64<<10, false, "rev-parse", "--show-toplevel")
 	if errors.Is(err, errNoGit) {
 		return gitRunner{}, &ChangesResponse{Reason: "no_git", Files: []ChangedFile{}}, nil
 	}

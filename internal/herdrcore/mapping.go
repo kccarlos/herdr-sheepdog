@@ -25,12 +25,8 @@ const (
 
 func knownKind(kind string) bool { return slices.Contains(knownKinds, kind) }
 
-// isLocal reports whether address is a terminal of this machine; an address
-// on an added machine (rohan/t7) holds a slash.
-func isLocal(address string) bool { return !strings.Contains(address, "/") }
-
-// isPane reports whether t is a live local terminal.
-func isPane(t hc.Terminal) bool { return t.State == stateLive && isLocal(t.Address) }
+// isPane reports whether t is a live terminal.
+func isPane(t hc.Terminal) bool { return t.State == stateLive }
 
 // kindOf names the program in t: the reported app, else the foreground
 // program, else the start program.

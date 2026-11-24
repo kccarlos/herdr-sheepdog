@@ -16,6 +16,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/fsaccess"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -271,6 +272,9 @@ func spaceDir(snap herdr.Snapshot, id string) (spawnDir, error) {
 	}
 	if first.PaneID == "" {
 		return spawnDir{}, fmt.Errorf("%w: %s", ErrNoSuchSpace, id)
+	}
+	if hc.IsRemote(first.PaneID) {
+		return spawnDir{}, fmt.Errorf("the space %s runs on another machine", label)
 	}
 	path := herdr.RealDir(first.Cwd)
 	for _, w := range snap.Workspaces {
