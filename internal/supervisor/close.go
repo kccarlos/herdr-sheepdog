@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
@@ -90,16 +91,20 @@ func (s *Supervisor) protectedWhy(row state.Agent) string {
 	if s.cfg.OwnPane != "" && row.PaneID == s.cfg.OwnPane {
 		return "runs in the pane sheepdog itself runs in"
 	}
-	cwd := herdr.RealDir(row.Cwd)
+	raw := hc.LocalCwd(row.PaneID, row.Cwd)
+	if raw == "" {
+		return ""
+	}
+	cwd := herdr.RealDir(raw)
 	if cwd == "" {
-		cwd = filepath.Clean(row.Cwd)
+		cwd = filepath.Clean(raw)
 	}
 	for _, d := range s.cfg.ProtectedDirs {
 		p := herdr.RealDir(d)
 		if p == "" {
 			p = filepath.Clean(d)
 		}
-		if row.Cwd != "" && cwd == p {
+		if cwd == p {
 			return "works in sheepdog's own directory, where the user's own session supervising sheepdog usually runs"
 		}
 	}

@@ -25,12 +25,8 @@ const (
 
 func knownKind(kind string) bool { return slices.Contains(knownKinds, kind) }
 
-// isLocal reports whether address is a terminal of this machine; an address
-// on an added machine (rohan/t7) holds a slash.
-func isLocal(address string) bool { return !strings.Contains(address, "/") }
-
-// isPane reports whether t is a live local terminal.
-func isPane(t hc.Terminal) bool { return t.State == stateLive && isLocal(t.Address) }
+// isPane reports whether t is a live terminal.
+func isPane(t hc.Terminal) bool { return t.State == stateLive }
 
 // kindOf names the program in t: the reported app, else the foreground
 // program, else the start program.
@@ -130,7 +126,7 @@ func agentInfo(t hc.Terminal, state herdr.State) herdr.AgentInfo {
 		Status:         state,
 		Agent:          kindOf(t),
 		Name:           t.Name,
-		Cwd:            cwdOf(t),
+		Cwd:            hc.LocalCwd(t.Address, cwdOf(t)),
 		TerminalTitle:  t.Title,
 		StateChangeSeq: t.Turn,
 		Labels:         maps.Clone(t.Labels),
@@ -145,8 +141,8 @@ func paneInfo(t hc.Terminal, state herdr.State) herdr.PaneInfo {
 		TabID:         t.Labels[labelTab],
 		Status:        state,
 		Agent:         agentKind(t),
-		Cwd:           cwdOf(t),
+		Cwd:           hc.LocalCwd(t.Address, cwdOf(t)),
 		TerminalTitle: t.Title,
-		PhoneShell:    t.Labels[spawnLabel] == shellValue,
+		PhoneShell:    !hc.IsRemote(t.Address) && t.Labels[spawnLabel] == shellValue,
 	}
 }

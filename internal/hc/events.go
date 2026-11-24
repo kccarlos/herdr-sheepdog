@@ -24,6 +24,7 @@ func (c *Client) Subscribe(ctx context.Context, filter SubscribeFilter) (*Subscr
 
 	stopHandshake := context.AfterFunc(callCtx, func() { _ = conn.Close() })
 	const requestID uint64 = 1
+	filter.Terminal = Address(filter.Terminal)
 	request := wireRequest{
 		JSONRPC: "2.0",
 		ID:      requestID,
@@ -219,7 +220,7 @@ func decodeNotification(message incomingMessage) (Notification, bool, error) {
 			Method:   message.Method,
 			Seq:      params.Seq,
 			Type:     params.Type,
-			Terminal: params.Terminal,
+			Terminal: PaneID(params.Terminal),
 			Data:     params.Data,
 		}, true, nil
 	case "heartbeat":

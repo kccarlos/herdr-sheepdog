@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
 
 // Attachments (docs/dev/ws-contract.md "Attachments"): the app uploads a
@@ -79,6 +81,10 @@ func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
 	pane := r.PathValue("pane_id")
 	if _, ok := s.deps.Store.Get(pane); !ok {
 		writeError(w, http.StatusNotFound, "not a tracked agent")
+		return
+	}
+	if hc.IsRemote(pane) {
+		writeError(w, http.StatusForbidden, "attachments are not available for agents on another machine")
 		return
 	}
 	// The multipart headers and boundary fit easily in the extra 64 KB.

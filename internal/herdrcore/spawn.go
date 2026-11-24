@@ -29,9 +29,15 @@ func (b *Backend) CreateWorkspace(ctx context.Context, cwd, _ string) (herdr.Pan
 // When the anchor pane has known dimensions, the new terminal inherits
 // its size so the new agent does not start in a wrong-sized pane.
 func (b *Backend) SplitPane(ctx context.Context, paneID, cwd string) (herdr.PaneInfo, error) {
+	if hc.IsRemote(paneID) {
+		return herdr.PaneInfo{}, fmt.Errorf("herdrcore: cannot split remote terminal %s", paneID)
+	}
 	anchor, err := b.client.Get(ctx, paneID)
 	if err != nil {
 		return herdr.PaneInfo{}, translate(err)
+	}
+	if hc.IsRemote(anchor.Address) {
+		return herdr.PaneInfo{}, fmt.Errorf("herdrcore: cannot split remote terminal %s", paneID)
 	}
 	space := spaceOf(anchor)
 	if space == "" {
@@ -69,6 +75,11 @@ func (b *Backend) openShell(ctx context.Context, cwd, space, role string, size *
 
 // ProcessInfo reports the terminal's shell and foreground program.
 func (b *Backend) ProcessInfo(ctx context.Context, paneID string) (herdr.ProcessInfo, error) {
+	if hc.IsRemote(paneID) {
+		// Its PIDs are another machine's: matching them against this
+		// machine's processes would read the wrong session log.
+		return herdr.ProcessInfo{PaneID: paneID}, nil
+	}
 	t, err := b.client.Get(ctx, paneID)
 	if err != nil {
 		return herdr.ProcessInfo{}, translate(err)
@@ -97,6 +108,9 @@ func pid32(pid int) uint32 {
 // not found. The caller polls GetAgent until the agent reports, shows a
 // question or gives up. name is a placeholder (hc cannot rename).
 func (b *Backend) StartAgent(ctx context.Context, paneID, _, kind string, args []string, timeout time.Duration) error {
+	if hc.IsRemote(paneID) {
+		return fmt.Errorf("herdrcore: cannot start a local agent in remote terminal %s", paneID)
+	}
 	if !knownKind(kind) {
 		return fmt.Errorf("herdrcore: unknown agent kind %q", kind)
 	}

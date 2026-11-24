@@ -300,7 +300,7 @@ func StopLabeledRun(ctx context.Context, client *hc.Client, id, label string, cr
 		return nil
 	}
 	pid := 0
-	if t.PID != nil && *t.PID > 1 && *t.PID != os.Getpid() && *t.PID != syscall.Getpgrp() {
+	if !hc.IsRemote(t.Address) && t.PID != nil && *t.PID > 1 && *t.PID != os.Getpid() && *t.PID != syscall.Getpgrp() {
 		pid = *t.PID
 		_ = syscall.Kill(-pid, syscall.SIGTERM)
 	}
@@ -617,10 +617,12 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 	}
 	if rec.Role == flow.RoleWorker && rec.SessionID == "" {
 		var sid string
-		if rec.CLI == CodexCLI && len(codexHome) > 0 {
-			sid = codexSession(codexHome[0], t.Cwd, rec.StartedAt)
-		} else if rec.CLI == AgyCLI {
-			sid = agySession(ctx, client, t.Cwd, rec.StartedAt)
+		if cwd := hc.LocalCwd(t.Address, t.Cwd); cwd != "" {
+			if rec.CLI == CodexCLI && len(codexHome) > 0 {
+				sid = codexSession(codexHome[0], cwd, rec.StartedAt)
+			} else if rec.CLI == AgyCLI {
+				sid = agySession(ctx, client, cwd, rec.StartedAt)
+			}
 		}
 		if sid != "" {
 			evs = append(evs, flow.RunEvent{Kind: flow.EvSession, SessionID: sid})

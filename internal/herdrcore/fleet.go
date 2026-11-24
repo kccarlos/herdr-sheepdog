@@ -34,7 +34,7 @@ type fleetFeed struct {
 	agents map[string]string
 }
 
-// agentSet maps the addresses of live local agent terminals to their kinds.
+// agentSet maps the addresses of live agent terminals to their kinds.
 func agentSet(terminals []hc.Terminal) map[string]string {
 	set := make(map[string]string)
 	for _, t := range terminals {
@@ -66,7 +66,7 @@ func (f *fleetFeed) handle(ctx context.Context, n hc.Notification) bool {
 		f.b.signalResync()
 		return true
 	}
-	if n.Method != "event" || !isLocal(n.Terminal) {
+	if n.Method != "event" {
 		return true
 	}
 	switch n.Type {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/files"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 )
 
@@ -34,7 +35,7 @@ func (s *Server) filesRoot(r *http.Request) (root *files.Root, pane, space strin
 		if !ok {
 			return nil, "", "", errNoAgent
 		}
-		dir = row.Cwd
+		dir = hc.LocalCwd(pane, row.Cwd)
 	} else {
 		a, ok := s.deps.Supervisor.(AgentActions)
 		if !ok || s.deps.Supervisor == nil {

@@ -18,6 +18,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/fsaccess"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
@@ -148,6 +149,9 @@ func (s *Supervisor) Spaces(ctx context.Context) (SpacesView, error) {
 	}
 	taken := map[string]bool{}
 	for _, w := range snap.Workspaces {
+		if remoteOnlyWorkspace(snap, w) {
+			continue
+		}
 		sp := spaceOf(snap, w, rows, access.OK)
 		sp.Commands = append([]WrapUp{}, cmds[sp.Path]...)
 		if m, ok := s.SpaceMutedPath(sp.Path); ok {
@@ -182,7 +186,7 @@ func spaceOf(snap herdr.Snapshot, w herdr.WorkspaceInfo, rows map[string]state.A
 	sp := Space{ID: w.WorkspaceID, Name: w.Label, Agents: []SpaceAgent{}, Shells: []string{}}
 	var panes []herdr.PaneInfo
 	for _, p := range snap.Panes {
-		if p.WorkspaceID == w.WorkspaceID {
+		if p.WorkspaceID == w.WorkspaceID && !hc.IsRemote(p.PaneID) {
 			panes = append(panes, p)
 		}
 	}
@@ -224,15 +228,37 @@ func spaceFolder(w herdr.WorkspaceInfo, panes []herdr.PaneInfo, readable func(st
 		}
 		linked = w.Worktree.Linked
 	}
-	if path == "" && len(panes) > 0 {
-		if raw = panes[0].Cwd; readable(raw) {
-			path = herdr.RealDir(raw)
+	if path == "" {
+		for _, p := range panes {
+			if c := hc.LocalCwd(p.PaneID, p.Cwd); c != "" {
+				raw = c
+				if readable(raw) {
+					path = herdr.RealDir(raw)
+				}
+				break
+			}
 		}
 	}
 	if path == "" && raw != "" && !readable(raw) {
 		return raw, true, linked
 	}
 	return path, false, linked
+}
+
+func remoteOnlyWorkspace(snap herdr.Snapshot, w herdr.WorkspaceInfo) bool {
+	if w.Worktree != nil {
+		return false
+	}
+	remote := false
+	for _, p := range snap.Panes {
+		if p.WorkspaceID == w.WorkspaceID {
+			if !hc.IsRemote(p.PaneID) {
+				return false
+			}
+			remote = true
+		}
+	}
+	return remote
 }
 
 // paneLess orders pane ids by workspace, then pane number (w2:p10 after

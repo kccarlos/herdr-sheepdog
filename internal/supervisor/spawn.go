@@ -16,6 +16,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/fsaccess"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -264,10 +265,19 @@ func (s *Supervisor) startAgent(ctx context.Context, req spawnStart) (started, e
 func spaceDir(snap herdr.Snapshot, id string) (spawnDir, error) {
 	label := snap.WorkspaceLabel(id)
 	var first herdr.PaneInfo
+	var remote bool
 	for _, p := range snap.Panes {
-		if p.WorkspaceID == id && (first.PaneID == "" || paneLess(p.PaneID, first.PaneID)) {
+		if p.WorkspaceID != id {
+			continue
+		}
+		if hc.IsRemote(p.PaneID) {
+			remote = true
+		} else if first.PaneID == "" || paneLess(p.PaneID, first.PaneID) {
 			first = p
 		}
+	}
+	if first.PaneID == "" && remote {
+		return spawnDir{}, fmt.Errorf("the space %s runs on another machine", label)
 	}
 	if first.PaneID == "" {
 		return spawnDir{}, fmt.Errorf("%w: %s", ErrNoSuchSpace, id)

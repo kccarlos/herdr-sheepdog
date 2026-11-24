@@ -18,9 +18,7 @@ func (b *Backend) Subscribe(ctx context.Context, paneID string) <-chan herdr.Sta
 	out := make(chan herdr.StatusEvent, 16)
 	go func() {
 		defer close(out)
-		if !isLocal(paneID) {
-			return
-		}
+		paneID = hc.PaneID(paneID)
 		feed := &paneFeed{b: b, paneID: paneID, out: out, last: herdr.StateUnknown}
 		b.stream(ctx, "status:"+paneID, paneID, hc.SubscribeFilter{Terminal: paneID}, feed.serve)
 	}()

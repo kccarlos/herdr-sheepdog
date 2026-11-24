@@ -110,15 +110,15 @@ func TestMarksFromLabels(t *testing.T) {
 			term := reported("t1", "claude-code", tc.status)
 			term.Turn, term.Labels = tc.turn, tc.labels
 			srv.Add(term)
-			// A remote terminal and a finished one are not panes.
+			// A finished terminal is not a pane; a remote one is, as mac~t7.
 			srv.Add(reported("mac/t7", "claude-code", "done"))
 			finished := reported("t2", "claude-code", "done")
 			finished.State = "finished"
 			srv.Add(finished)
 
 			got := allMarks(t, b)
-			if len(got) != 1 {
-				t.Fatalf("AllMarks = %+v, want only t1", got)
+			if _, ok := got["mac~t7"]; len(got) != 2 || !ok {
+				t.Fatalf("AllMarks = %+v, want t1 and mac~t7", got)
 			}
 			if !reflect.DeepEqual(got["t1"], tc.want) {
 				t.Fatalf("marks = %+v, want %+v", got["t1"], tc.want)
@@ -319,15 +319,30 @@ func TestMarksResyncAfterMissedAndAfterAReconnect(t *testing.T) {
 	}
 }
 
-func TestMarkWritesRefuseTerminalsThatAreNotLocalPanes(t *testing.T) {
+// A terminal on an added machine is a pane under its slash-free id; marks
+// reach herdr-core under its real address.
+func TestMarkWritesReachRemoteTerminals(t *testing.T) {
 	b, srv := newBackend(t)
 	ctx := testContext(t)
 	srv.Add(reported("mac/t7", "claude-code", "done"))
+
+	if _, err := b.SetPinned(ctx, "mac~t7", true); err != nil {
+		t.Fatalf("SetPinned(mac~t7) error = %v", err)
+	}
+	reqs := requestParams[map[string]any](t, srv, "terminal.label")
+	if len(reqs) == 0 || reqs[len(reqs)-1]["terminal"] != "mac/t7" {
+		t.Fatalf("terminal.label requests = %+v, want terminal mac/t7", reqs)
+	}
+}
+
+func TestMarkWritesRefuseTerminalsThatAreNotLocalPanes(t *testing.T) {
+	b, srv := newBackend(t)
+	ctx := testContext(t)
 	finished := reported("t2", "claude-code", "done")
 	finished.State = "finished"
 	srv.Add(finished)
 
-	for _, pane := range []string{"mac/t7", "t2", "t99"} {
+	for _, pane := range []string{"t2", "t99", "mac~t99"} {
 		if _, err := b.MarkSeen(ctx, pane, 1); !errors.Is(err, herdr.ErrPaneNotFound) {
 			t.Errorf("MarkSeen(%s) error = %v, want ErrPaneNotFound", pane, err)
 		}
