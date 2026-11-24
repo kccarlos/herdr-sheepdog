@@ -653,6 +653,12 @@ func TestReportReviewDirtyWorktreeRV7(t *testing.T) {
 	t.Run("ended review with already-gone terminal clears RunID cleanly", func(t *testing.T) {
 		f := newReviewTestFixture(t)
 		st, _ := LoadState(f.eng.Paths.State(f.id))
+		st.Project.Started = false
+		if err := SaveState(f.eng.Paths.State(f.id), st); err != nil {
+			t.Fatal(err)
+		}
+		f.eng.passProject(context.Background(), f.id, true)
+		st.Project.Started = true
 		st.Tasks[0].Attempts[0].Review.RunID = "nonexistent-term"
 		st.Tasks[0].Attempts[0].Review.RunTokenHash = ""
 		st.Tasks[0].Attempts[0].Review.Run = &flow.RunRecord{Role: flow.RoleReviewer, State: flow.PhaseEnded, Result: flow.EndError}
