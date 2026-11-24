@@ -18,7 +18,7 @@ Words: the **owner** is the person. The **coordinator** is the one Opus agent pe
 | D6 | "The table's structure is fixed, but the numbers in the rows' conditions are parameters"; "I want those numbers to be adjustable while it runs, this is very important" | chat | Section 10.1 |
 | D7 | Asked whether the transitions were too complex and whether there is a simpler abstraction, "a discussion, not a decision"; later: "I don't want to make this loop too complex; over-engineering is not good either" | chat, a preference | Section 17.3 sorts every gap found into "version 1", "later" or "not carried" |
 | D8 | Offered two forms (A: keep the transition tables; B: one ordered table of "what does this task need next"), the owner answered "I think B is more reasonable" | chat, decision | Sections 2 and 4. **This changes the form D2 asked for** |
-| D9 | "I want a mechanism that proves the task really met its goal"; pointed to pstack's "prove it works". Later agreed: the mechanism of section 11.6, as the first increment after version 1 | chat, decision | Section 11.6. Version 1's bar is green CI, two passing reviews, and the worker's own proofs run by the report client on its ready report; the engine running them again is increment 1 |
+| D9 | "I want a mechanism that proves the task really met its goal"; pointed to pstack's "prove it works". Later agreed: the mechanism of section 11.6, as the first increment after version 1 (slice 10, **parked 2026-11-23 by the owner**, see [plan.md](plan.md) §2) | chat, decision | Section 11.6. Version 1's bar is green CI, two passing reviews, and the worker's own proofs run by the report client on its ready report; the engine running them again (slice 10) is parked |
 | D10 | "Sometimes I need to override: several PRs are stacked and I tell the orchestrator to merge them all and fix problems afterwards." Agreed: a one-off card listing each PR, approved only by the owner, never delegable; red CI may be merged if the card names it; a conflict or a changed commit is not merged | chat, decision | Sections 4.3b and 4.9 (the override) |
 | D11 | Agreed: a setting is changed only through a card the daemon proves, never directly from a terminal | chat, decision | Sections 7.2 and 10.1 |
 | D13 | "The system prompts have to be designed together with the engine; left to the implementing agents they will not see the whole." Learn from the old engine's good prompts, and from pstack, Ponytail and the factory talk. Always a design first, and keep questioning scope | chat, decision | [prompts.md](prompts.md); section 11.7 |
@@ -54,7 +54,7 @@ Agent processes and owner asks are different: they really are driven by events. 
 | A5 | One engine loop for all projects is enough (a few projects, events seconds apart) | One loop per project; nothing else changes |
 | A6 | JSON files are enough for storage. The daemon has no SQLite today | Swap the store only |
 | A7 | Reviewers submit verdicts via `sheepdog factory report review` over the daemon's run-token HTTP channel, writing findings to an engine-named scratch file outside the worktree (`--findings <path>`, sections 7.2, 9.3); Codex stays on its screen-tag reader until its S-REV-2 spike runs | — |
-| A8 | The engine runs each task's own checks and keeps the result as evidence (section 11.6). Confirmed by the owner as the first increment after version 1 (D9). Its cost on a real project is not measured | It stays out, and the bar stays green CI plus reviews |
+| A8 | The engine runs each task's own checks and keeps the result as evidence (section 11.6). Confirmed by the owner as the first increment after version 1 (D9), then **parked on 2026-11-23** ([plan.md](plan.md) §2) after 23 run logs and 38 verdicts showed 0 rounds spent on failing tests | Revisit only if real projects show such rounds; meanwhile the bar stays green CI, two passing reviews, and client-run ready proofs |
 
 ## 1. The shape in one page
 
@@ -126,7 +126,7 @@ executor finishes → its result is a record (done, or failed with a class) → 
 
 ### 2.4 Where executors run
 
-The daemon can be a launchd service (*not verified by me; `internal/service` exists*), and a launchd process has no macOS consent for `~/Documents` or a removable volume: git hangs there. So every git, gh and codexbar call goes through herdr-core (`hc exec`), which runs in the owner's login session, with a time limit. This is one helper in `world`; nothing calls `os/exec` on a project folder. A timeout is a failed result like any other.
+The daemon runs as a launchd service (verified live in slice 5b.11, #737), and a launchd process has no macOS consent for `~/Documents` or a removable volume: git hangs there. So every git, gh and codexbar call goes through herdr-core (`hc exec`), which runs in the owner's login session, with a time limit. This is one helper in `world`; nothing calls `os/exec` on a project folder. A timeout is a failed result like any other.
 
 ### 2.5 The clock
 
@@ -402,13 +402,14 @@ There is no queue. N10's "a slot is free" is decided by one pure function over a
 | N1, N2 | `done` | — |
 | N3–N8, N12–N14, N25, N30, N43, and N18, N34, N35, N41 once they wait on the coordinator | `blocked_or_failed` | the rule's reason and who it waits on |
 | N33–N38, N40–N42 | `ci` | "Waiting on CI, 18 min" |
-| N15, N18, N19, N19b | `ci` | "Merging now, by your override" (`N19b`: "Not merged: checks got worse after the override card was made") |
+| N15, N18, N19 | `ci` | "Merging now, by your override" |
+| N19b | `ci` | "Not merged: checks got worse after the override card was made" |
 | N9, N17 | `waiting_on_dep` | "After SDF-53" |
 | N10, N11 | `queued` | the first failing reason |
 | N23 with the worker idle | `idle` | — |
 | N16, N20–N23, N26–N29, N32, N39 | `working` | "Working · model · round 1 of 2", "Checking 3 outcomes" |
 
-Stage is a field of each task row; `GraphViewOf`, `StatusViewOf` and `ProjectsView` emit `owner_gate` (for an open `gate` ask) or `owner_answer` (for any other open gated owner ask, even on an ended task) with the ask's question as the why line, otherwise read the stage from the task's last matched row (with ended and parked taking precedence, and a stored-state fallback only before any row has matched), share the same why line, and do not yet emit `idle` (N23 with an idle worker). Until slice 12 brings `retros[]`, N24 reads a minimal `had_retro` mark on `split_from`.
+Stage is a field of each task row; `GraphViewOf`, `StatusViewOf` and `ProjectsView` emit `owner_gate` (for an open `gate` ask) or `owner_answer` (for any other open gated owner ask, even on an ended task) with the ask's question as the why line (rendered at the top of `/factory` above `blocked_or_failed`, slice 9 #777), otherwise read the stage from the task's last matched row (with ended and parked taking precedence, `HoldWhy` winning over row-id cases, and a stored-state fallback only before any row has matched), share the same why line, and do not yet emit `idle` (N23 with an idle worker). Until slice 12 brings `retros[]`, N24 reads a minimal `had_retro` mark on `split_from`.
 
 ## 5. The run table
 
@@ -566,7 +567,7 @@ Whether an `ask_open` or an `answer` is valid at all (who may send it, the owner
 - **Ask records and kinds.** Project asks live in `State.Asks` (`projects/<id>/state.json`) and carry `id`, `project`, `folder`, `kind`, `gated` (`kind != "decision"`), `question`, `options`, `recommend`, `task`, `head`, `asked_by`, `run_id`, `at`, `status` (`open`, `answered`, `cancelled`), `answer`, `why`, `answered_at`, `answered_by` (`coordinator`, `owner`, `rule`), `proof_id` and `device_id`. The closed v1 ask kinds are `decision`, `gate`, `release`, `paid-key`, `delete`, `install`, `reset`, `rule` and `override`; any other or empty kind is refused `unknown_kind`.
 - **Who an ask belongs to.** A `decision` ask (a worker asking the coordinator) belongs to its task and is cancelled when the task ends. Every other kind belongs to the project, may name the task it is about, and outlives the worker and the task: a release question once died with its worker's terminal (field note 31). When a task's original worker run has ended or been replaced before its `decision` ask is answered, `A3` delivers the answer to the task's open attempt worker (or holds it in `Attempt.Held` for the next worker start, KB-ASK-10); when the coordinator opened a gated ask, `A3` delivers/wakes the coordinator with the owner's answer.
 - **Gated kinds** are all kinds except `decision`: their answer needs the daemon's proof of the owner's tap or words, or a delegation rule where one is allowed.
-- **The owner's proof** means: the answer came from a device that holds a session ticket from the daemon, or from the owner's live voice. In-process (`internal/factory/proof.go`), `Engine.MintProof(askID, option, inputKind, deviceID)` mints a short-lived `AnswerProof` (`prf-` + 12 hex characters, persisted in `<data_dir>/factory/proofs.json` mode `0600` with 24 h retention), refusing `deviceID == ""` or `"local"` and any `inputKind` other than `"tap"` or `"voice"` (`proof_rejected`); `Engine.Answer(askID, option, proof)` requires a verified minted proof on every gated ask (`proof_required` when empty, `proof_rejected` when unminted, expired, mismatched on `ask_id` or `option`, `"local"`, or non-`tap`/`voice`) and logs `device_id`. A paired phone holds a ticket. So does a browser that has enrolled with the daemon: the factory web page may then answer every ask, the never-delegable kinds included, exactly as a paired phone does (owner decision D15). **An answer to a gated ask that comes from this computer with no ticket is never the owner's**, whatever page or origin it claims: the setup page's origin check stops another website in the browser, not a program on the machine, and agents run as the owner's user. This guard is not in the daemon yet (spike S0.9 found no such check: `AnswerTap` takes no device), so slice 6 builds it. It is not about which screen the owner used. **A browser on this computer enrols with a short code** that the owner reads in the Mac menu-bar app and types into the page (owner decision D17); the daemon hands a browser short code only to an authenticated device session (`POST /api/pair/browser-code` refuses ticketless loopback with `403 device_session_required`), which `Sheepdog.app` obtains after enrolling its key; a pure-Go daemon cannot distinguish `Sheepdog.app` from another process running as the same OS user.
+- **The owner's proof** means: the answer came from a device that holds a session ticket from the daemon, or from the owner's live voice. In-process (`internal/factory/proof.go`), `Engine.MintProof(askID, option, inputKind, deviceID)` mints a short-lived `AnswerProof` (`prf-` + 12 hex characters, persisted in `<data_dir>/factory/proofs.json` mode `0600` with 24 h retention), refusing `deviceID == ""` or `"local"` and any `inputKind` other than `"tap"` or `"voice"` (`proof_rejected`); `Engine.Answer(askID, option, proof)` requires a verified minted proof on every gated ask (`proof_required` when empty, `proof_rejected` when unminted, expired, mismatched on `ask_id` or `option`, `"local"`, or non-`tap`/`voice`) and logs `device_id`. A paired phone holds a ticket. So does a browser that has enrolled with the daemon: the factory web page may then answer every ask, the never-delegable kinds included, exactly as a paired phone does (owner decision D15). **An answer to a gated ask that comes from this computer with no ticket is never the owner's**, whatever page or origin it claims: the setup page's origin check stops another website in the browser, not a program on the machine, and agents run as the owner's user. Enforced in `AnswerTapDevice`, `POST /api/factory/asks/{id}/answer`, and `Engine.MintProof`/`Answer` (built in slice 6). It is not about which screen the owner used. **A browser on this computer enrols with a short code** that the owner reads in the Mac menu-bar app and types into the page (owner decision D17); the daemon hands a browser short code only to an authenticated device session (`POST /api/pair/browser-code` refuses ticketless loopback with `403 device_session_required`), which `Sheepdog.app` obtains after enrolling its key; a pure-Go daemon cannot distinguish `Sheepdog.app` from another process running as the same OS user.
 - **Voice answers to factory asks (O25, post-slice-7 follow-up PR; supersedes the slice 6.3 tap-only scope).** Owner decision (2026-11-22, final): "语音直接认可就好" — whoever talks to the engine over its live voice session is the owner. A spoken answer counts as the owner's answer for every open gated factory ask, including `gate`, `release`, `paid-key`, `delete`, `install`, `reset`, `rule`, and `override`. No extra phone confirmation, no speaker check, and no `/ws` ticket binding for voice. Proofs for web and browser answers stay as they are (D15, D17, O20).
 
   | ID | Area | Rule |
@@ -617,7 +618,7 @@ Every report and command enters here. Valid: it becomes a record. Not valid, or 
 | `review` (`verdict`) | the reviewer run the engine started for that round (`SHEEPDOG_RUN_TOKEN`) | `sheepdog factory report review <pass|changes> --code <code> --head <sha> --self-check-misses <n> --deletable "<text>" [--class "<text>"] [--not-run "<text>"] [--findings <path>]`; rules RV1–RV8 below hold (strict JSON, matching `code` and `head`, exact `major:` line count agrees with `verdict`, non-negative `self_check_misses` and non-empty `deletable` within 500 runes, `findings` at most 64 KiB, `H` still covered, and the worktree is clean including untracked files). (A separate judgement per outcome becomes a required field with the evidence increment) | `invalid_token`, `kind_not_allowed`, `already_closed`, `invalid_report` (names exact field or count mismatch; reviewer stays alive to fix and re-run), `head_moved` (tells reviewer to stop and wait; next pass voids and stops it as `ended(stopped)`), `dirty_tree` (marks `a.Review.Run` `ended(error)`, clears token keeping `RunID`, wakes loop; next pass stops `RunID`, counting against `reviewer_retries`, section 4.8) |
 | plan review report (from the plan-review slice) | the plan reviewer run the engine started | the tag carries that run's one-time code; each finding names a task and one of `delete`, `shrink`, `merge`, `split`, `design-first`, with a why | `invalid_report` |
 | the coordinator's answer to a plan finding (from the plan-review slice) | the coordinator | each finding is answered done, or rejected with a why; then the plan is submitted again | `finding_unanswered` |
-| `retro` | the retro run the engine started (`SHEEPDOG_RUN_TOKEN`, review slot with `kind: retro`) | `sheepdog factory report retro <ship\|fix\|redesign> --code <code> --head <sha> --cause <cause> --worker-change "<text>" --worker-change-kind <check\|brief> --coordinator-change "<text>" --coordinator-change-kind <check\|brief> [--findings <path>]`; mirrors RV1–RV8: strict JSON, matching `code` and `head`, `verdict` in `{ship, fix, redesign}`, `cause` in the fixed 8-cause set (one Go value tested against `retro.md`), non-empty cleaned worker and coordinator changes (≤500 runes each) with kind `check` or `brief`, `findings` at most 64 KiB, exact `major:` lines counted by `countExactMajors` (`ship` needs 0, `fix` needs ≥1), `H` still covered (`RV6`), and worktree clean (`RV7`); low confidence is left out of slice 12, so no confidence flag is sent yet | `invalid_token`, `kind_not_allowed`, `already_closed`, `invalid_report` (names bad field or count mismatch; the task's retro is not used and the run stays alive to fix and re-run), `head_moved`, `dirty_tree` (voids the run as `ended(error)`, counting against `reviewer_retries`) |
+| `retro` (coming in slice 12) | the retro run the engine started (`SHEEPDOG_RUN_TOKEN`, review slot with `kind: retro`) | `sheepdog factory report retro <ship\|fix\|redesign> --code <code> --head <sha> --cause <cause> --worker-change "<text>" --worker-change-kind <check\|brief> --coordinator-change "<text>" --coordinator-change-kind <check\|brief> [--findings <path>]`; mirrors RV1–RV8: strict JSON, matching `code` and `head`, `verdict` in `{ship, fix, redesign}`, `cause` in the fixed 8-cause set (one Go value tested against `retro.md`), non-empty cleaned worker and coordinator changes (≤500 runes each) with kind `check` or `brief`, `findings` at most 64 KiB, exact `major:` lines counted by `countExactMajors` (`ship` needs 0, `fix` needs ≥1), `H` still covered (`RV6`), and worktree clean (`RV7`); low confidence is left out of slice 12, so no confidence flag is sent yet | `invalid_token`, `kind_not_allowed`, `already_closed`, `invalid_report` (names bad field or count mismatch; the task's retro is not used and the run stays alive to fix and re-run), `head_moved`, `dirty_tree` (voids the run as `ended(error)`, counting against `reviewer_retries`) |
 | `ask` | a worker or reviewer (kind `decision`, `sheepdog factory report ask "<question>" --option ... --recommend ...`); the coordinator (any kind, `sheepdog factory ask --kind <kind> [--task <task>] "<question>" --option ... --recommend ...`; for an override `--kind override --task A --task B`, and the engine fills the card); the owner (kind `override`, from the phone, the factory page, or `sheepdog factory override` in a terminal with no run's token) | known kind; 2 to 9 distinct non-blank options; a recommended one among the options; one single-line question of 1 to 300 characters; no option ends with a short word in parentheses such as `Switch (v2)` (KB-ASK-9) | `unknown_kind`, `invalid_ask`, `kind_not_allowed` |
 | `answer` | the coordinator (kind `decision`, `sheepdog factory answer <ask> "<option>" [--why "<why>"]`); the owner, with the daemon's in-process `AnswerProof` (`Engine.MintProof` + `Engine.Answer`) of a paired-device tap or live spoken words; a delegation rule | the ask exists and is `open`; the option matches an entry of `ask.options` (or its 1-based index); an optional `--why` is at most 500 characters; a gated kind has a verified `AnswerProof` (`input_kind` in `tap, voice` and `device_id` non-empty and not `"local"`) | `not_found`, `already_closed`, `invalid_option`, `proof_required`, `proof_rejected`, `kind_not_allowed`, `invalid_report`, `not_delegable` |
 | `plan apply`, `plan amend` | the coordinator | the plan checks pass (section 11.7); an amend has a why | `plan_invalid`, with every failing check |
@@ -944,7 +945,7 @@ No new table. A design task is a task with `kind: design`:
 
 ### 11.6 Evidence: proving the task met its goal
 
-*Asked for by the owner and confirmed (D9): the worker's proofs on its ready report are version 1; the engine's own run of them is the first increment.* It follows pstack's "prove it works": check the real thing, not a self-report, and prefer a script anyone can run again.
+*Asked for by the owner and confirmed (D9): the worker's proofs on its ready report are version 1; the engine's own run of them (slice 10) was **parked by the owner on 2026-11-23** ([plan.md](plan.md) §2) after 23 kept run logs and 38 review verdicts showed zero rounds spent on failing tests.* It follows pstack's "prove it works": check the real thing, not a self-report, and prefer a script anyone can run again.
 
 | Step | Who | What |
 |---|---|---|
@@ -1014,29 +1015,29 @@ Every surface reads a **view**: a pure function of the stored state. The JSON sh
 | V2 | Owner contract v1 (the Python engine's boundary) is superseded. `docs/dev/factory/owner-contract.md` is a pointer to this section, 12.3, 7.1 and section 6. Each refusal case of its old fixture is covered by a Go test or by a knowledge-base row marked later; none was dropped without one |
 | V3 | A rule table is defined once, by its rows in `internal/factory/flow`. No generated or printed copy is kept beside the code and no test compares one. A reviewer reads a table change as the changed row in the diff; the owner reads the rule that matched in `sheepdog factory log` and the debug view, from `log.jsonl`. The tables in this file describe the rows; where they differ, the code is right |
 
-**Order of building the surfaces (owner decision D14).** The web first: one factory page in the daemon's existing web, beside setup, voice and debug, with the factory section, the ask and override cards, and the log, the same content as the approved boards. The iOS and iPad boards follow once the web version has been used. Neither client has any factory code today.
+**Order of building the surfaces (owner decision D14).** The web first: one factory page in the daemon's existing web, beside setup, voice and debug, with the factory section, the ask and override cards, and the log, the same content as the approved boards. The web `/factory` page (`web/factory/*`, `internal/web/factory.go`) is built and serving on `main` (slice 9, #777); the iOS and iPad boards follow.
 
 ### 12.2 Today's Go code
 
-Sources: [notes/go-surface-notes.md](notes/go-surface-notes.md). Line counts are today's.
+Sources: [notes/go-surface-notes.md](notes/go-surface-notes.md) (historical pre-v2 baseline); status below updated to `main` after slices 1–9.
 
-| Code | Lines | Fate |
+| Code | Lines | State on `main` |
 |---|---|---|
-| `internal/factory/proof.go` | 314 | **Gone from `main`; rebuilt in slice 6.** The engine mints and verifies `AnswerProof` in process (`MintProof`, `Answer`) |
-| `internal/factory/doctor.go` | 1,700 | **Keep,** minus the engine and Python checks; add the "Running now" part from the sweep |
-| `internal/factory/contract.go` | 1,385 | **Gone from `main`.** Its ask, view and refusal shapes live in `flow` and `factory` |
-| `internal/factory/client.go` | 728 | **Gone from `main`.** Its method set becomes the engine's Go methods |
-| `internal/factory/tick.go` | 834 | **Gone from `main`.** The loop is a goroutine in the daemon. Keep its two rules: nothing runs until a project is started; tests resolve paths away from the real home |
-| `internal/factory/engine.go`, `python.go`, `factory_embed.go` | 423, 368, ~20 | **Old Python glue gone from `main`** (`internal/factory/engine.go` is now the v2 engine) |
-| `internal/web/factory.go`, the loopback proof route | 83 | **Loopback proof route gone from `main`** (`internal/web/factory.go` now serves v2's factory routes) |
-| `internal/supervisor/factory.go` | 796 | **Gone from `main`** (spike S0.9, 2026-11-20), with the answer guard it held; slice 6 builds the guard again on the engine |
-| `internal/herdr/factory.go`, `supervisor/factory_quiet.go` | 40, 50 | **Gone from `main`; rebuilt in slice 6.** Coordinator rule follows the addendum (blocked speaks; done and idle are silent) |
-| `cmd/sheepdog/factory.go` | — | Keep `doctor`; `python-*` gone; add `start`, `stop`, `status`, `log`, `report` (`ready`, `ask`), `ask`, `answer`, and the coordinator verbs |
+| `internal/factory/proof.go` | ~80 | **Rebuilt in slice 6.** The engine mints and verifies `AnswerProof` in process (`MintProof`, `Answer`, stored in `proofs.json`) |
+| `internal/factory/doctor.go`, `startcheck.go` | ~1,258 / ~807 | **Kept and trimmed for v2:** old engine and Python checks removed from `doctor.go`; `StartChecks` lives in `startcheck.go` and runs at `Engine.Start` (J1, slice 8.1); "Running now" summary from the sweep remains later |
+| `internal/factory/contract.go` | — | **Gone from `main`.** Ask, view and refusal shapes live in `flow` and `factory` |
+| `internal/factory/client.go` | — | **Gone from `main`.** Replaced by `Engine`'s Go methods |
+| `internal/factory/tick.go` | — | **Gone from `main`.** The 15 s loop runs in `internal/factory/engine.go` |
+| `internal/factory/engine.go`, `python.go`, `factory_embed.go` | — | **Old Python glue gone from `main`** (`internal/factory/engine.go` is the v2 engine) |
+| `internal/web/factory.go`, the loopback proof route | — | **Loopback proof route gone from `main`** (`internal/web/factory.go` serves v2's nine `/api/factory/*` routes) |
+| `internal/supervisor/factory.go` | ~454 | **Rebuilt in slice 6 + O25/O32:** bridges `Engine.Changes()` to `fask-` cards, O25 live voice answers, override results, and O32 no-quick-reply pushes |
+| `internal/herdr/factory.go` (`IsFactoryQuiet`) | ~7 | **Rebuilt in slice 6.** `internal/supervisor/factory_quiet.go` does not exist on `main` (callers live in `internal/supervisor/{decisions,reprompt,transitions,briefing}.go`, tested by `factory_quiet_test.go`). Coordinator rule follows the addendum (`blocked` speaks; `done` and `idle` are silent; non-coordinator factory roles silent) |
+| `cmd/sheepdog/factory.go` | ~777 | **Built for v2:** `python-*` gone; has `start`, `stop`, `status`, `log`, `plan` (`apply`, `amend`), `task` (`park`, `unpark`, `drop`, `close`, `send-back`, `retry`, `say`), `recap decide`, `report` (`ready`, `review`, `ask`), `ask` (including `--kind override`), `answer`, and `doctor` |
 | `Makefile` `test-factory`, the CI factory job | — | **Gone from `main`** |
-| `factory/` (Python, tests, templates) | ~41,000 | **Gone from `main`** |
-| `docs/dev/factory/owner-contract.md`, `engine-audit.md`, `baseline.md`; `testdata/factory/owner-contract-v1.json` | 481, 391, 127; 1,147 | **Pointer page in 8.3; the other three deleted in 8.4** (O33). The full texts stay in git history |
+| `factory/` (Python, tests, templates) | — | **Gone from `main`** |
+| `docs/dev/factory/owner-contract.md`, `engine-audit.md`, `baseline.md`; `testdata/factory/owner-contract-v1.json` | — | **Pointer page (`owner-contract.md`, #767); the other three deleted in 8.4 (#770)** (O33). The full texts stay in git history |
 
-Not built in Go today and needed by the approved design: alerts to push and voice, the digest, `say`, rules read-back, the graph endpoint, `stop`, owner touch. They become calls on the engine interface, which is cheaper than through a CLI.
+Still deferred to later slices: `Digest`, `Rules` / `ProposeRule` / `RevokeRule` read-back (slice 14), `Alerts` to push and voice, and `Touch`. `Projects`, `Graph`, `LogLines`, `Asks`, `Start`, `Stop`, `Say`, `MintProof`, `Answer`, `Report`, and `Changes` are built on `main`.
 
 ### 12.3 The engine's Go interface
 
@@ -1093,18 +1094,24 @@ Deleted against this: about 3,250 lines of Go glue, 21,460 lines of Python and 1
 
 ```
 <data_dir>/factory/
-  engine.json                  project index, settings for every project, asks for "everywhere"
-  projects/<id>/state.json     project, plan, settings, tasks with their records, runs, asks, alerts, pending work, seq
-  projects/<id>/log.jsonl      append-only: one line per pass, with the rule that matched and what was asked for
-  projects/<id>/journal/*.md   journal entries (section 11.1)
-  projects/<id>/reports/       findings, recaps, retro records, briefs
+  proofs.json                      verified owner AnswerProof records (mode 0600, 24 h retention)
+  pool-cooldowns.json              per-(CLI, pool) quota cooldown reset timestamps (mode 0600)
+  codex-home/                      shared CODEX_HOME symlinked to ~/.codex/auth.json
+  projects/<id>/state.json         project, plan, settings, tasks with their records, runs, asks, alerts, seq
+  projects/<id>/log.jsonl          append-only: one line per pass, with the rule that matched and what was asked for
+  projects/<id>/worktrees/         git worktrees per task attempt (<task>-<attempt>/)
+  projects/<id>/briefs/            task brief markdown files (<task>.md) for worker handoffs
+  projects/<id>/reports/           review round findings (<task>-r<n>.md) and scratch drafts (<task>-r<n>-<code>.draft.md)
+  engine.json                      (later slice) project index, global settings, asks for "everywhere"
+  projects/<id>/journal/*.md       (later slice, slice 13) journal entries (section 11.1)
+  projects/<id>/archive.json       (later slice) archived done tasks after milestone close
 ```
 
 - `state.json` is the one source of truth. It is written with a temporary file and a rename, mode 0600, as the daemon writes its other state. It keeps no run token, only its SHA-256.
-- `log.jsonl` is the audit trail and the owner's factory log. A line: `{seq, at, project, by, wake, task, input, facts, rule, asked, decision, why, model}`. On start, lines past the state's `seq` are dropped (a crash between the two writes). A refused report or command changes no record, so it goes to the daemon's event log, not here.
-- Settings are stored in `state.json` or `engine.json` by scope. There is no layered settings file and nothing is read from `~/.config`.
-- Done tasks stay in `state.json` until their milestone closes, then move to `projects/<id>/archive.json`. *Estimate, not measured:* a few hundred tasks is about 1 MB, written a few times a minute.
-- New data files are added to `CONFIG.md`'s data table.
+- `log.jsonl` is the audit trail and the owner's factory log. A line: `{seq, at, project, by, wake, task, input, facts, rule, asked, decision, why, model}` (in v1, `LogLine` writes `seq, at, project, by, task, input, facts, rule, asked, decision, why`). On start, lines past the state's `seq` are dropped (a crash between the two writes). A refused report or command changes no record, so it goes to the daemon's event log, not here.
+- Settings are stored in `state.json` (and later `engine.json` by scope). There is no layered settings file and nothing is read from `~/.config`.
+- Done tasks stay in `state.json` in v1 (archiving to `projects/<id>/archive.json` on milestone close is a later slice). *Estimate, not measured:* a few hundred tasks is about 1 MB, written a few times a minute.
+- New data files are added to `CONFIG.md`'s data table (`internal/factory/store.go`).
 
 ## 15. Errors and recovery
 
@@ -1141,7 +1148,7 @@ The old tests are not ported. [knowledge-base.md](knowledge-base.md) lists each 
 | Behaviour | Pitfalls that no table row stands behind (K3) | Each test names its `KB-…` id |
 | Settings | Each setting refuses a value outside its range, and the table checks pass at each setting's minimum and maximum. (Running every behaviour test at every extreme is not done: too much surface for the first versions) | — |
 | Restart | Representative engine histories (review rounds, red-then-green CI, killed worker, killed coordinator, decision asks) replayed with a restart after every step | The end state, acts and asks must match the run without restarts |
-| Adapters | The argv for every role, permission and continue kind, per CLI; the screen classes | Golden files; the flags come from each CLI's `--help`; the screens are captured real ones (the fixtures in `factory/test/fixtures` are kept) |
+| Adapters | The argv for every role, permission and continue kind, per CLI; the screen classes | Golden files; the flags come from each CLI's `--help`; the screens are captured real ones (fixtures live in `internal/factory/testdata/` and `internal/factory/world/testdata/`) |
 | World | The checks rollup and snapshot against JSON captured from real PRs (#665, #669 and #671 each have skipped checks); git against temporary repos; hc against `herdrtest` | — |
 | End to end | One toy project: start, plan, one task through evidence and review to merge, one ask, stop and start again | A private hc, scripted fake agent CLIs, a fake `gh`. Then one real run on a scratch repo before cutover |
 
@@ -1172,7 +1179,7 @@ From the research notes; none was tested by running an agent.
 | U3 | Whether a changed model or effort survives a resume, per CLI | resume |
 | U4 | The exact screen text when a CLI hits its usage limit; no fixture exists | R5 |
 | U5 | Retired for Claude and `agy` reviewers (they use `report review`, section 7.2, 9.3). Codex remains on its screen-tag reader (`ReadCodexReport`, verified in spike S0.3) until its S-REV-2 spike runs | A7 |
-| U6 | Whether the daemon runs under launchd on the owner's machine, and whether `hc exec` then has the folder access the daemon lacks | section 2.4 |
+| U6 | **Verified (5b.11, #737):** the daemon runs under launchd on the owner's machine, and `hc exec` provides the folder access the daemon lacks (`world/git.go`, `world/github.go`) | section 2.4 |
 | U12 | What herdr-core can report about a terminal (output activity, child processes, the owner typing or quitting an agent) and whether killing a terminal ends its process group. The reviewer found no API for the first three | the run table's quiet and background-job rows; "the owner quit it" in 4.8 |
 | U13 | Whether a Claude or Codex reviewer can build and run in a scratch copy while unable to write the branch. Only agy has a known mechanism | 9.1 |
 | U7 | Branch protection and merge-queue settings of the sheepdog repo | N37–N42 |
@@ -1201,7 +1208,7 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | Merged outside the bar, never-delegable kinds, asks outliving a worker, dropped dependencies, amend of a started task, owner's "merge as it is" | In (sections 4.9, 7) | Safety or a dead end |
 | Pools: usable, floor, next candidate | In (sections 4.8, 7.3, 9.1) | Hands-off at night |
 | Merge queue, required review, flake re-run, CI counting, executor rules | In (sections 4.7, 9.4) | Real GitHub behaviour |
-| Evidence | The first increment after version 1 (11.6; owner decision D9) | Its cost is not measured, and version 1 should stay thin |
+| Evidence | Originally the first increment after version 1 (11.6; owner decision D9); **parked 2026-11-23 by the owner** ([plan.md](plan.md) §2) | Across 23 kept run logs and 38 review verdicts, 0 rounds were spent on failing tests; CI and reviewers already catch them |
 | Time limit per attempt | In (N14) | One row |
 | Token budget per task | Later | Needs a reader per CLI |
 | Cheap sync (a local test merge in place of a full CI run on update) | Later | Saves CI minutes; needs the check runner first |
@@ -1227,11 +1234,11 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 
 | # | Item |
 |---|---|
-| O1 | Evidence (11.6) is decided but not in version 1. Its cost on a real project is unknown (U11) and is measured by spike S0.7 before the increment starts |
+| O1 | Evidence (11.6) is **parked (2026-11-23, [plan.md](plan.md) §2)** after 23 kept run logs and 38 review verdicts showed zero rounds spent on failing tests; revisit only if real projects show such rounds (spike S0.7 deferred with slice 10) |
 | O2 | A third review round happens by itself after two that asked for changes (L13). In the old engine the coordinator granted it. Code is more hands-off; the cost is one automatic round on tasks a coordinator would have stopped. `retro_from_round` set to 2 removes it |
 | O3 | The contract has five alert kinds. `agents_down` is a sixth |
 | O4 | Approved board text says "engine and Python" (FactoryStartShell, FactoryTerminal). With a Go engine that line must change |
-| O5 | The contract and one board still name a `/factory` page that the addendum replaced with the space-page section |
+| O5 | **Resolved (D14, slice 9 #777, and O33 #767):** `/factory` is the v1 web board (`web/factory/`), and `docs/dev/factory/owner-contract.md` is now a pointer page to this document |
 | O6 | Order is form B's failure mode. The order tests of section 16 are the guard; whether they are enough is judged at each review point of [plan.md](plan.md), with real rows |
 | O7 | The ladder (4.6) treats review, retro, recap and owner as one loop at four levels. The levels are not alike (three retro verdicts, four recap choices). If the special cases grow, split the function per level rather than adding conditions |
 | O8 | The picture of the tables (`transitions.html`, published privately for the owner) was redrawn for form B from the tables of this file. Its "Try it" panel is a simplified illustration, and its interactions were not tested in a browser |

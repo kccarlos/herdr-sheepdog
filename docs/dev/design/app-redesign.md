@@ -1,8 +1,6 @@
 # App redesign: several computers, iPhone and iPad
 
-*Decided 2026-10-21. Nothing here is built yet. The screenshots below are
-throwaway SwiftUI mockups from the proposal, not the app and not the final
-look.*
+*Built and shipped (see [ios/docs/dev/architecture.md](../../../ios/docs/dev/architecture.md)); kept as the design record. Decided 2026-10-21; the screenshots below are throwaway SwiftUI mockups from the proposal.*
 
 This covers five pieces that share one design pass:
 

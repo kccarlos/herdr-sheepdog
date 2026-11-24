@@ -69,7 +69,7 @@ The app sends what `web/voice/app.js` sends, in the same order:
 - **Drains.** With a daemon whose `bot-ready` lists `feedback`, every
   time the player runs dry `PlaybackQueue` also records a `drain`
   (`{"type":"drain","at":…,"buffer_ms":…,"played_ms":…,"received_ms":…,"reason":"dry"|"early"}`,
-  daemon docs/ws-contract.md "Feedback and drains") and the app sends it.
+  [`docs/dev/ws-contract.md`](../../../docs/dev/ws-contract.md) "Feedback and drains") and the app sends it.
   `early` means the player node said it had finished well before the
   predicted playhead (an engine restart discards scheduled buffers), and
   `buffer_ms` is the audio that never played. Diagnostic only.
@@ -81,7 +81,7 @@ The app sends what `web/voice/app.js` sends, in the same order:
   `DaemonClient.sendFeedback`), then a success haptic and "Noted". The
   voice session is untouched. VoiceOver reads it as "Mark this moment",
   with a "Mark a pause" action that files Paused at once. The daemon
-  keeps a 30 s snapshot with each mark; `sheepdog feedback` diagnoses it.
+  keeps a 30 s snapshot with each mark; `sheepdog dev feedback` diagnoses it.
 - **Ping.** Every 5 s the app sends a JSON `ping` carrying `gated_frames`,
   `peak`, the playback counters (`underruns`, `drains`, `buffer_ms`,
   `rate`, `stretched_ms`) and `audio_state`. If a ping has no `pong` after
@@ -95,7 +95,7 @@ The app sends what `web/voice/app.js` sends, in the same order:
 ### The protocol handshake
 
 The app and the daemon ship separately, so `/ws` carries an integer
-protocol version (daemon docs/ws-contract.md "Protocol version and
+protocol version ([`docs/dev/ws-contract.md`](../../../docs/dev/ws-contract.md) "Protocol version and
 handshake"; this app speaks 1 and works with daemons from 1 up).
 `ProtocolHandshake` (SheepdogKit, pure, `ProtocolHandshakeTests`) is the
 state machine; `VoiceSocket` feeds it every control message and a 2 s
