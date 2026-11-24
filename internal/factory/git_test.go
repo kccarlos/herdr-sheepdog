@@ -456,7 +456,7 @@ func TestCodexReviewerUsesStoredWorktree(t *testing.T) {
 
 func TestProjectLogUsesStoredLookup(t *testing.T) {
 	paths := testPaths(t)
-	if err := SaveState(paths.State("stopped"), flow.State{Project: flow.Project{ID: "stopped", Folder: t.TempDir()}}); err != nil {
+	if err := SaveState(paths.State("stopped"), flow.State{Seq: 1, Project: flow.Project{ID: "stopped", Folder: t.TempDir()}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := AppendLog(paths.Log("stopped"), LogLine{Seq: 1, Decision: "stopped"}); err != nil {

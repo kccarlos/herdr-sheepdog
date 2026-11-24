@@ -366,8 +366,11 @@ func TestCIRerunNotRepeatedAfterFailedCommit(t *testing.T) {
 	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "44714", "100"))
-	if err := os.Chmod(l.paths.Log(l.id), 0o400); err != nil { // the commit's log append fails
-		t.Fatal(err)
+	l.eng.writeLog = func(path string, line LogLine) error {
+		if line.Rule == "N33" {
+			return os.ErrPermission
+		}
+		return AppendLog(path, line)
 	}
 	l.pass()
 	l.pass()

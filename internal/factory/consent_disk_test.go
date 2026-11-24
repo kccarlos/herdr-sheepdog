@@ -1041,14 +1041,39 @@ func TestPR5b9R2_OutOfPassStoreENOSPCDoesNotLoseOrDropDiskAlert(t *testing.T) {
 					t.Fatalf("%s after space freed failed: %v", op, opErr)
 				}
 
-				if blob := persistedAlertBlob(t, w.paths, w.id); !strings.Contains(blob, "disk") {
-					t.Fatalf("first good %s write dropped or failed to persist in-memory disk alert; state.json=%s", op, blob)
+				if op == "stop" {
+					// Stop drops the project's held alerts and writes no raise line for a stopped project.
+					if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, "disk"); ok {
+						t.Fatalf("Stop must drop held in-memory disk alert; got %+v", ts)
+					}
+					if blob := persistedAlertBlob(t, w.paths, w.id); strings.Contains(blob, "disk") {
+						t.Fatalf("Stop must not persist unlogged disk alert to state.json; got %s", blob)
+					}
+					if raises := diskRaiseLogs(t, w.paths, w.repo); len(raises) != 0 {
+						t.Fatalf("Stop must not log a disk raise on a stopped project; got %+v", raises)
+					}
+					return
 				}
-				if _, ok := statusAlert(t, w.paths, w.repo, "disk"); !ok {
-					t.Fatalf("offline ProjectStatus missing disk alert after first good %s write", op)
+
+				// Start/Report do not merge held alerts into state.json without their raise line;
+				// the held alert stays visible in memory and commits on the next pass.
+				if blob := persistedAlertBlob(t, w.paths, w.id); strings.Contains(blob, "disk") {
+					t.Fatalf("good %s must not write held disk alert into state.json without a raise line; state.json=%s", op, blob)
 				}
 				if _, ok := cdEngineStatusAlert(t, w.eng, w.repo, "disk"); !ok {
-					t.Fatalf("Engine.ProjectStatus missing disk alert after first good %s write", op)
+					t.Fatalf("good %s dropped held in-memory disk alert before next pass", op)
+				}
+
+				w.advanceMinute()
+				w.pass()
+				if blob := persistedAlertBlob(t, w.paths, w.id); !strings.Contains(blob, "disk") {
+					t.Fatalf("next pass after good %s failed to flush held disk alert to state.json; state.json=%s", op, blob)
+				}
+				if _, ok := statusAlert(t, w.paths, w.repo, "disk"); !ok {
+					t.Fatalf("offline ProjectStatus missing disk alert after next pass following %s", op)
+				}
+				if raises := diskRaiseLogs(t, w.paths, w.repo); len(raises) != 1 {
+					t.Fatalf("expected 1 disk raise log line after flush following %s, got %d: %+v", op, len(raises), raises)
 				}
 
 				w.restart()

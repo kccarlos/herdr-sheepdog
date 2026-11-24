@@ -614,7 +614,7 @@ func TestFactoryLogCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	paths := factory.Paths{DataDir: data}
-	if err := factory.SaveState(paths.State("proj-1"), flow.State{Project: flow.Project{ID: "proj-1", Started: true}}); err != nil {
+	if err := factory.SaveState(paths.State("proj-1"), flow.State{Seq: 2, Project: flow.Project{ID: "proj-1", Started: true}}); err != nil {
 		t.Fatal(err)
 	}
 	at := time.Date(2026, 11, 19, 18, 0, 0, 0, time.UTC)
@@ -639,6 +639,7 @@ func TestFactoryLogCLI(t *testing.T) {
 	// With reviewed tasks, factory log appends the project's first-look pass rate
 	// and verdict lines display each round's self-check misses.
 	if err := factory.SaveState(paths.State("proj-1"), flow.State{
+		Seq:     3,
 		Project: flow.Project{ID: "proj-1", Started: true},
 		Tasks: []flow.Task{
 			{ID: "T1", Attempts: []flow.Attempt{{Rounds: []flow.Round{{N: 1, Kind: flow.RoundFull, Verdict: flow.VerdictPass}}}}},
@@ -679,6 +680,7 @@ func TestFactoryStatusCLI(t *testing.T) {
 	repo := filepath.Join(home, "demo-repo") // not a git repo: proves no git call
 	paths := factory.Paths{DataDir: data}
 	st := flow.State{
+		Seq:      3,
 		Settings: flow.DefaultSettings(),
 		Project:  flow.Project{ID: "proj-1", Folder: repo, Started: false},
 		Tasks: []flow.Task{

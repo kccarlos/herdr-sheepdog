@@ -120,8 +120,11 @@ func TestTrimLog(t *testing.T) {
 	if err := os.WriteFile(path, []byte("junk\n{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if TrimLog(path, 2) == nil {
-		t.Fatal("a corrupt line that is not the last was accepted")
+	if err := TrimLog(path, 2); err != nil {
+		t.Fatalf("unparseable line should be dropped, not error: %v", err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "{}\n" {
+		t.Fatalf("unparseable line not dropped: %q", data)
 	}
 	// A whole last line whose newline never made it is torn too; otherwise
 	// the next append would glue two records onto one line.
