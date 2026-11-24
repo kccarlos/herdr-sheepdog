@@ -158,7 +158,7 @@ func (e *Engine) observeCoordSignInLocked(ctx context.Context, id string, s *flo
 	case runSignedOut:
 		heldCLI = cmp.Or(run.CLI, "claude")
 		delete(e.cliProbes, heldCLI)
-	case flow.AllTasksEnded(s.Tasks) && !s.Project.NewGoal && len(s.Project.Wakes) == 0:
+	case flow.ProjectFinished(s.Project, s.Tasks):
 		return false
 	}
 	facts := e.probeLaunchFacts(ctx, flow.RoleCoordinator, flow.Task{}, s.Settings)

@@ -1505,3 +1505,68 @@ func TestPR5b8_OutageEpisodesGitHubAndHCUnavailable(t *testing.T) {
 		})
 	})
 }
+
+// TestFinishedProjectSignedOutNoAgentsDown verifies finding 11 (alerts.go:192):
+// once a project has finished through J4, a held wake combined with a signed-out
+// coordinator CLI must not raise agents_down or start a coordinator.
+func TestFinishedProjectSignedOutNoAgentsDown(t *testing.T) {
+	w := newAlertWorld(t, "Finished sign-out check", false)
+	w.edit(func(s *flow.State) {
+		s.Settings.Models = map[string][]flow.Candidate{
+			flow.RoleCoordinator: {{CLI: "claude", Model: "opus", Effort: "high"}},
+		}
+	})
+	w.pass() // J7 starts coord 1
+	coord1 := w.state().Project.RunID
+	if coord1 == "" {
+		t.Fatal("expected initial coordinator launch")
+	}
+
+	w.edit(func(s *flow.State) {
+		s.Tasks = []flow.Task{{
+			ID: "T1", Title: "feat: done", Brief: "b", EstimateLines: 20,
+			Done:     &flow.Merged{MergedCommit: "m1"},
+			Outcomes: []flow.Outcome{{Text: "ok", ProvedBy: "manual: t1"}},
+		}}
+	})
+
+	// Finish through J4: ask final journal, stop coordinator, log finished.
+	w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "idle"})
+	w.advance(5 * time.Second)
+	w.pass()
+	w.advance(25 * time.Second)
+	w.pass() // J4 asks final journal
+	w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+	w.advance(5 * time.Second)
+	w.pass()
+	w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "idle"})
+	w.advance(5 * time.Second)
+	w.pass()
+	w.advance(25 * time.Second)
+	w.pass() // J4 stops coordinator
+	w.advance(15 * time.Second)
+	w.pass() // J4 logs finished
+
+	if st := w.state(); st.Project.RunID != "" || w.roleRunCount(flow.RoleCoordinator) != 1 {
+		t.Fatalf("project did not finish cleanly: runID=%q coordRuns=%d", st.Project.RunID, w.roleRunCount(flow.RoleCoordinator))
+	}
+
+	// Hold a wake after the finish and sign out the coordinator CLI.
+	w.edit(func(s *flow.State) {
+		s.Project.Wakes = []flow.Wake{{Key: "sweep@orphan", Why: "leftover branch", Facts: "task/orphan", At: w.now}}
+	})
+	w.setClaudeProbe(scriptedProbe{signedIn: false})
+	w.advance(time.Duration(w.state().Settings.PoolMinutes+w.state().Settings.CoordinatorGapMinutes+1) * time.Minute)
+	w.pass()
+	w.pass()
+
+	if st := w.state(); st.Project.HasAlert(flow.AlertAgentsDown) {
+		t.Fatalf("finished project with held wake raised agents_down: %+v", st.Project.Alerts)
+	}
+	if ts, active := statusAlert(t, w.paths, w.repo, "agents_down"); active {
+		t.Fatalf("finished project status showed agents_down: %+v", ts)
+	}
+	if w.roleRunCount(flow.RoleCoordinator) != 1 || w.state().Project.RunID != "" {
+		t.Fatalf("finished project restarted coordinator: runs=%d runID=%q", w.roleRunCount(flow.RoleCoordinator), w.state().Project.RunID)
+	}
+}

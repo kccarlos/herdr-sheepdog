@@ -213,7 +213,7 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 			holdProjectWake(&s, "new_goal", "owner gave a new goal", "goal: "+goal, e.now())
 		}
 	}
-	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = root, goal, true, nil, nil, nil, "", 0
+	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Finished, s.Project.Acts, s.Project.Base, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = root, goal, true, false, nil, nil, nil, "", 0
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastSweep, id)
 	delete(e.lastProbe, id)
@@ -340,7 +340,7 @@ func (e *Engine) Stop(project string) error {
 		stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
 		reconcileCoordWakes(&s.Project)
 	}
-	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = "", "", nil, false, nil, nil, false, 0, nil, "", 0
+	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Finished, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = "", "", nil, false, false, nil, nil, false, 0, nil, "", 0
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastPass, id)
 	delete(e.lastSweep, id)
@@ -691,7 +691,28 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 				return
 			}
 		}
-		e.logProjectWaitLocked(id, s, r.ID, cmp.Or(map[string]string{"J4": "finished"}[r.ID], "waiting"), d.Why, r.ID+":"+d.Why)
+		key, finishing := r.ID+":"+d.Why, r.ID == "J4" && !s.Project.Finished
+		var cancelled []flow.Ask
+		if finishing {
+			s.Project.Finished = true
+			for ai, a := range s.Asks {
+				if a.Status == flow.AskStatusOpen {
+					s.Asks[ai], _, _ = flow.StepAsk(a, flow.AskEvent{Kind: flow.EvAskCancel}, now)
+					cancelled = append(cancelled, s.Asks[ai])
+				}
+			}
+		}
+		saved := false
+		if s.Project.WaitKey != key {
+			saved = e.logProjectWaitLocked(id, s, r.ID, cmp.Or(map[string]string{"J4": "finished"}[r.ID], "waiting"), d.Why, key)
+		} else if finishing {
+			saved = e.saveLocked(id, *s)
+		}
+		if saved {
+			for _, a := range cancelled {
+				e.notifyChangeLocked(id, s.Seq, Change{Kind: flow.EvAskCancel, AskID: a.ID, Task: a.Task})
+			}
+		}
 		return
 	}
 	if r.ID != "J7" && s.Project.WaitKey != "" {
@@ -742,12 +763,12 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 	}
 }
 
-func (e *Engine) logProjectWaitLocked(id string, s *flow.State, row, decision, why, key string) {
+func (e *Engine) logProjectWaitLocked(id string, s *flow.State, row, decision, why, key string) bool {
 	if s.Project.WaitKey == key {
-		return
+		return false
 	}
 	s.Project.WaitKey = key
-	e.commitLogLocked(id, s, LogLine{By: "engine", Rule: row, Decision: decision, Why: why})
+	return e.commitLogLocked(id, s, LogLine{By: "engine", Rule: row, Decision: decision, Why: why})
 }
 
 type launchWait struct{ Why, Key string }
@@ -2609,7 +2630,7 @@ func (e *Engine) observeBaseLocked(ctx context.Context, id string, s *flow.State
 	wakeKey := kind + "@" + spell
 	actKey := flow.AskWake + "@" + wakeKey
 	var asked []string
-	if flow.Count(s.Project.Acts, actKey) == 0 {
+	if flow.Count(s.Project.Acts, actKey) == 0 && !s.Project.Finished {
 		s.Project.Acts = append(s.Project.Acts, flow.Act{Key: actKey, Result: "done", At: now})
 		holdProjectWake(s, wakeKey, "base_observer: "+why, fmt.Sprintf("branch %s; run %d; conclusion %s; head %s", res.Branch, res.ID, res.Conclusion, res.HeadSHA), now)
 		asked = []string{actKey}

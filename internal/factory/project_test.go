@@ -27,6 +27,7 @@ type projectHarness struct {
 	client *hc.Client
 	paths  Paths
 	repo   string
+	gh     string
 	eng    *Engine
 	logBuf *bytes.Buffer
 	id     string
@@ -36,10 +37,23 @@ type projectHarness struct {
 
 func newProjectHarness(t *testing.T, goal string) *projectHarness {
 	t.Helper()
+	return newProjectHarnessIn(t, initGitRepo(t), "", goal)
+}
+
+func newGitProjectHarness(t *testing.T, goal string) *projectHarness {
+	t.Helper()
+	repo, _ := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := bindRepoFakeGH(t, repo)
+	return newProjectHarnessIn(t, repo, gh, goal)
+}
+
+func newProjectHarnessIn(t *testing.T, repo, gh, goal string) *projectHarness {
+	t.Helper()
 	srv := hctest.New(t)
 	h := &projectHarness{
 		t: t, srv: srv, client: hc.NewClient(srv.Path),
-		paths: testPaths(t), repo: initGitRepo(t),
+		paths: testPaths(t), repo: repo, gh: gh,
 		logBuf: &bytes.Buffer{},
 		now:    time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC),
 	}
@@ -80,6 +94,22 @@ func (h *projectHarness) coordIdleWithStatus(addr, status string) {
 	h.pass() // R9/R17 records StatusSince
 	h.now = h.now.Add(25 * time.Second)
 	h.pass() // R20 -> PhaseIdle
+}
+
+func (h *projectHarness) setCoordWorking(addr string) {
+	h.srv.SetStatus(addr, &hc.Status{App: "claude-code", State: "working"})
+	h.srv.SetScreen(addr, "working "+h.now.Format(time.RFC3339Nano))
+	h.now = h.now.Add(5 * time.Second)
+	h.pass()
+}
+
+func (h *projectHarness) finishThroughJ4(coord string) {
+	h.t.Helper()
+	h.coordIdleWithStatus(coord, "idle") // J4 asks final journal
+	h.setCoordWorking(coord)
+	h.coordIdleWithStatus(coord, "idle") // J4 stops coordinator
+	h.now = h.now.Add(15 * time.Second)
+	h.pass() // J4 logs finished
 }
 
 // TestJ4NoRestartAfterLastTaskEnds verifies J4: once a plan exists and every
@@ -679,4 +709,309 @@ func TestJ6AndJ4LogOncePerChange(t *testing.T) {
 	if len(j4) != 1 || j4[0].Decision != "finished" || !strings.Contains(j4[0].Why, "Finished") {
 		t.Fatalf("J4 finished log = %+v, want 1 finished line", j4)
 	}
+}
+
+// TestFinishedProjectWakesStartNoCoordinator verifies finding 11 (seq 236-238):
+// after finishing through J4, base_red then base_green on new heads record no
+// wake_coordinator@base_... act and hold no wake; a sweep notice holds a wake;
+// passing for 2 * heartbeat_minutes keeps one run ever, empty RunID, no second
+// J7 line, no heartbeat act, and J4 still "finished" logged once.
+func TestFinishedProjectWakesStartNoCoordinator(t *testing.T) {
+	t.Parallel()
+	h := newGitProjectHarness(t, "Goal 1")
+	h.pass() // J7 starts coord 1
+	coord1 := h.state().Project.RunID
+	h.edit(func(s *flow.State) {
+		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: done", Done: &flow.Merged{MergedCommit: "m1"}}}
+	})
+	h.finishThroughJ4(coord1)
+	if j4 := logRules(t, h.paths.Log(h.id), "J4"); len(j4) != 3 || j4[2].Decision != "finished" {
+		t.Fatalf("J4 log lines at finish = %+v, want 3 ending in finished", j4)
+	}
+
+	// Base turns red, then green on a new head: no wake_coordinator@base_... act and no wake.
+	redHead := commitBaseHead(t, h.repo, h.gh, "red1")
+	writeCountedBaseRun(t, h.gh, 101, redHead, "failure")
+	h.now = h.now.Add(15 * time.Second)
+	h.pass()
+
+	greenHead := commitBaseHead(t, h.repo, h.gh, "green1")
+	writeCountedBaseRun(t, h.gh, 102, greenHead, "success")
+	h.now = h.now.Add(15 * time.Second)
+	h.pass()
+
+	st := h.state()
+	for _, a := range st.Project.Acts {
+		if strings.HasPrefix(a.Key, flow.AskWake+"@base_") {
+			t.Fatalf("base observer recorded wake act on finished project: %+v", a)
+		}
+	}
+	if len(st.Project.Wakes) != 0 {
+		t.Fatalf("base red/green on finished project held wakes: %+v", st.Project.Wakes)
+	}
+
+	// A sweep notice holds a wake after the finish; passing for 2 * heartbeat_minutes
+	// must never start a coordinator or fire a heartbeat.
+	gitIn(t, h.repo, "branch", "task/orphan-after-finish")
+	h.now = h.now.Add(time.Duration(st.Settings.SweepMinutes+1) * time.Minute)
+	h.pass()
+
+	hasSweepWake := false
+	for _, w := range h.state().Project.Wakes {
+		if strings.HasPrefix(w.Key, "sweep@") {
+			hasSweepWake = true
+		}
+	}
+	if !hasSweepWake {
+		t.Fatalf("expected sweep notice to hold a wake: %+v", h.state().Project.Wakes)
+	}
+
+	hb := time.Duration(st.Settings.HeartbeatMinutes) * time.Minute
+	for range 2 {
+		h.now = h.now.Add(hb)
+		h.pass()
+	}
+
+	st = h.state()
+	if len(h.runs) != 1 || st.Project.RunID != "" {
+		t.Fatalf("finished project restarted coordinator: runs=%d runID=%q", len(h.runs), st.Project.RunID)
+	}
+	if j7 := logRules(t, h.paths.Log(h.id), "J7"); len(j7) != 1 {
+		t.Fatalf("J7 log lines = %+v, want only the initial start", j7)
+	}
+	for _, a := range st.Project.Acts {
+		if a.Key == flow.AskHeartbeat || strings.HasPrefix(a.Key, flow.AskHeartbeat+"@") {
+			t.Fatalf("finished project recorded heartbeat act: %+v", a)
+		}
+	}
+	if j13 := logRules(t, h.paths.Log(h.id), "J13"); len(j13) != 0 {
+		t.Fatalf("J13 log lines on finished project = %+v, want none", j13)
+	}
+	if j4 := logRules(t, h.paths.Log(h.id), "J4"); len(j4) != 3 || j4[2].Decision != "finished" || !strings.Contains(j4[2].Why, "Finished") {
+		t.Fatalf("J4 log lines after wakes = %+v, want 3 ending in single Finished line", j4)
+	}
+}
+
+// TestFinishedSurvivesStoppingAlert verifies finding 11 (round 1 probe 4 and
+// round 3 note): the finished fact survives a stopping alert (J3 clears
+// WaitKey) and subsequent base_green / held wakes still start no coordinator;
+// "finished" is logged once before the alert and once after the alert clears
+// (not repeated per pass, and not suppressed across an alert episode).
+func TestFinishedSurvivesStoppingAlert(t *testing.T) {
+	t.Parallel()
+	h := newGitProjectHarness(t, "Goal 1")
+	diskPct := 20
+	h.eng.diskRead = func(context.Context, string) DiskReading {
+		return DiskReading{Volume: "/test", UsedPercent: diskPct, Known: true}
+	}
+	h.pass() // J7 starts coord 1
+	coord1 := h.state().Project.RunID
+	h.edit(func(s *flow.State) {
+		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: done", Done: &flow.Merged{MergedCommit: "m1"}}}
+	})
+	h.finishThroughJ4(coord1)
+
+	countFinished := func() int {
+		n := 0
+		for _, l := range logRules(t, h.paths.Log(h.id), "J4") {
+			if l.Decision == "finished" {
+				n++
+			}
+		}
+		return n
+	}
+	if got := countFinished(); got != 1 {
+		t.Fatalf("finished log lines before alert = %d, want 1", got)
+	}
+
+	// Hold a sweep wake and raise a stopping alert (disk full -> J3 clears WaitKey).
+	gitIn(t, h.repo, "branch", "task/orphan-during-alert")
+	diskPct = 99
+	h.now = h.now.Add(time.Duration(h.state().Settings.SweepMinutes+1) * time.Minute)
+	h.pass()
+	if !h.state().Project.HasAlert(flow.AlertDisk) {
+		t.Fatalf("expected stopping disk alert to be raised: %+v", h.state().Project.Alerts)
+	}
+
+	// Clear the stopping alert, then observe base_red -> base_green and pass twice.
+	diskPct = 20
+	h.now = h.now.Add(time.Minute)
+	h.pass()
+	if h.state().Project.HasAlert(flow.AlertDisk) {
+		t.Fatalf("disk alert did not clear: %+v", h.state().Project.Alerts)
+	}
+
+	redHead := commitBaseHead(t, h.repo, h.gh, "red1")
+	writeCountedBaseRun(t, h.gh, 101, redHead, "failure")
+	h.now = h.now.Add(time.Minute)
+	h.pass()
+	greenHead := commitBaseHead(t, h.repo, h.gh, "green1")
+	writeCountedBaseRun(t, h.gh, 102, greenHead, "success")
+	h.now = h.now.Add(time.Duration(h.state().Settings.CoordinatorGapMinutes+1) * time.Minute)
+	h.pass()
+	h.pass()
+
+	if len(h.runs) != 1 || h.state().Project.RunID != "" {
+		t.Fatalf("finished project restarted after stopping alert cleared: runs=%d runID=%q", len(h.runs), h.state().Project.RunID)
+	}
+	if j7 := logRules(t, h.paths.Log(h.id), "J7"); len(j7) != 1 {
+		t.Fatalf("J7 log lines after stopping alert = %+v, want 1", j7)
+	}
+	if got := countFinished(); got != 2 {
+		t.Fatalf("finished log lines across 1 alert episode = %d, want 2 (once before alert, once after alert cleared)", got)
+	}
+}
+
+// TestQuotaEndedCoordinatorRestartsBeforeFinish pins finding 11 (round 1 probe 1):
+// when the coordinator ends by EndQuota with a wake put back while the last task
+// is still open and that task then merges, J7 restarts the coordinator, J12
+// delivers the wake, and J4 asks for the final journal line before finishing.
+func TestQuotaEndedCoordinatorRestartsBeforeFinish(t *testing.T) {
+	t.Parallel()
+	h := newProjectHarness(t, "Quota before finish")
+	h.pass() // J7 starts coord 1
+	coord1 := h.state().Project.RunID
+	h.edit(func(s *flow.State) {
+		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: open", Parked: true}}
+		s.Project.Wakes = []flow.Wake{{Key: "worker_note", Task: "T1", Why: "review note", Facts: "note body", At: h.now}}
+	})
+
+	// J12 delivers the wake to coord 1 (moving it to CoordWakesInFlight).
+	h.coordIdleWithStatus(coord1, "idle")
+
+	// Coord 1 ends by quota; reconcileCoordWakes puts the wake back.
+	h.srv.Finish(coord1, "exited")
+	h.edit(func(s *flow.State) {
+		s.Project.Run.State = flow.PhaseEnded
+		s.Project.Run.Result = flow.EndQuota
+	})
+	h.now = h.now.Add(15 * time.Second)
+	h.pass()
+	if st := h.state(); st.Project.RunID != "" || len(st.Project.Wakes) != 1 || st.Project.Wakes[0].Key != "worker_note" {
+		t.Fatalf("after quota end: runID=%q wakes=%+v, want empty runID and put-back worker_note wake", st.Project.RunID, st.Project.Wakes)
+	}
+
+	// The last task merges before the restart gap expires.
+	h.edit(func(s *flow.State) {
+		s.Tasks[0].Done = &flow.Merged{MergedCommit: "m1"}
+	})
+	h.now = h.now.Add(time.Duration(h.state().Settings.CoordinatorGapMinutes+1) * time.Minute)
+	h.pass() // J7 starts coord 2
+
+	coord2 := h.state().Project.RunID
+	if len(h.runs) != 2 || coord2 == "" || coord2 == coord1 {
+		t.Fatalf("quota-ended coordinator with put-back wake did not restart: runs=%d runID=%q", len(h.runs), coord2)
+	}
+
+	// Coord 2 goes idle -> J12 delivers the put-back wake -> then J4 asks final_journal.
+	h.coordIdleWithStatus(coord2, "idle")
+	h.setCoordWorking(coord2)
+	h.coordIdleWithStatus(coord2, "idle")
+
+	sends := sendsTo(t, h.srv.Requests(), coord2)
+	if len(sends) != 2 || !strings.Contains(sends[0], "note body") || !strings.Contains(strings.ToLower(sends[1]), "final journal") {
+		t.Fatalf("coord2 sends = %q, want put-back wake then final journal", sends)
+	}
+	if j7 := logRules(t, h.paths.Log(h.id), "J7"); len(j7) != 2 {
+		t.Fatalf("J7 log lines = %+v, want 2", j7)
+	}
+	if j12 := logRules(t, h.paths.Log(h.id), "J12"); len(j12) < 2 {
+		t.Fatalf("J12 log lines = %+v, want >= 2 (deliver to coord1 and coord2)", j12)
+	}
+	if j4 := logRules(t, h.paths.Log(h.id), "J4"); len(j4) != 1 || j4[0].Decision != "asked coordinator for final journal line" {
+		t.Fatalf("J4 log lines = %+v, want 1 final_journal line", j4)
+	}
+}
+
+// TestFinishedProjectReopen pins finding 11's reopen contract:
+// Start with a different goal launches one coordinator and delivers a wake held
+// since the finish; Start with the same goal and a held wake launches one
+// coordinator then finishes again; Start with the same goal and no wake starts
+// no coordinator.
+func TestFinishedProjectReopen(t *testing.T) {
+	t.Parallel()
+
+	t.Run("different_goal_delivers_held_wake", func(t *testing.T) {
+		t.Parallel()
+		h := newProjectHarness(t, "Goal 1")
+		h.pass() // J7 starts coord 1
+		coord1 := h.state().Project.RunID
+		h.edit(func(s *flow.State) {
+			s.Tasks = []flow.Task{{ID: "T1", Title: "feat: done", Done: &flow.Merged{MergedCommit: "m1"}}}
+		})
+		h.finishThroughJ4(coord1)
+
+		// Record a wake held since the finish, then reopen with a different goal.
+		h.edit(func(s *flow.State) {
+			s.Project.Wakes = []flow.Wake{{Key: "sweep@leftover", Why: "leftover branch", Facts: "branch task/leftover", At: h.now}}
+		})
+		if err := h.eng.Start(h.repo, "Goal 2", 2); err != nil {
+			t.Fatal(err)
+		}
+		h.now = h.now.Add(15 * time.Second)
+		h.pass() // J7 starts coord 2
+
+		coord2 := h.state().Project.RunID
+		if len(h.runs) != 2 || coord2 == "" || coord2 == coord1 {
+			t.Fatalf("different goal did not start coordinator: runs=%d runID=%q", len(h.runs), coord2)
+		}
+		h.coordIdleWithStatus(coord2, "idle") // J12 delivers held wake in first batch
+		sends := sendsTo(t, h.srv.Requests(), coord2)
+		if len(sends) != 1 || !strings.Contains(sends[0], "branch task/leftover") {
+			t.Fatalf("coord2 first batch = %q, want 1 send containing held wake", sends)
+		}
+	})
+
+	t.Run("same_goal_with_held_wake", func(t *testing.T) {
+		t.Parallel()
+		h := newProjectHarness(t, "Goal 1")
+		h.pass() // J7 starts coord 1
+		coord1 := h.state().Project.RunID
+		h.edit(func(s *flow.State) {
+			s.Tasks = []flow.Task{{ID: "T1", Title: "feat: done", Done: &flow.Merged{MergedCommit: "m1"}}}
+		})
+		h.finishThroughJ4(coord1)
+
+		h.edit(func(s *flow.State) {
+			s.Project.Wakes = []flow.Wake{{Key: "sweep@leftover", Why: "leftover branch", Facts: "branch task/leftover", At: h.now}}
+		})
+		if err := h.eng.Start(h.repo, "Goal 1", 2); err != nil {
+			t.Fatal(err)
+		}
+		h.now = h.now.Add(15 * time.Second)
+		h.pass() // J7 starts coord 2
+
+		coord2 := h.state().Project.RunID
+		if len(h.runs) != 2 || coord2 == "" || coord2 == coord1 {
+			t.Fatalf("same goal with held wake did not start coordinator: runs=%d runID=%q", len(h.runs), coord2)
+		}
+		h.coordIdleWithStatus(coord2, "idle") // J12 delivers held wake
+		h.setCoordWorking(coord2)
+		h.finishThroughJ4(coord2)
+		if len(h.runs) != 2 || h.state().Project.RunID != "" {
+			t.Fatalf("same goal with held wake did not finish again: runs=%d runID=%q", len(h.runs), h.state().Project.RunID)
+		}
+	})
+
+	t.Run("same_goal_no_held_wake", func(t *testing.T) {
+		t.Parallel()
+		h := newProjectHarness(t, "Goal 1")
+		h.pass() // J7 starts coord 1
+		coord1 := h.state().Project.RunID
+		h.edit(func(s *flow.State) {
+			s.Tasks = []flow.Task{{ID: "T1", Title: "feat: done", Done: &flow.Merged{MergedCommit: "m1"}}}
+		})
+		h.finishThroughJ4(coord1)
+
+		if err := h.eng.Start(h.repo, "Goal 1", 2); err != nil {
+			t.Fatal(err)
+		}
+		h.now = h.now.Add(15 * time.Second)
+		h.pass()
+		h.now = h.now.Add(15 * time.Second)
+		h.pass()
+		if len(h.runs) != 1 || h.state().Project.RunID != "" {
+			t.Fatalf("same goal with no held wake started a coordinator: runs=%d runID=%q", len(h.runs), h.state().Project.RunID)
+		}
+	})
 }

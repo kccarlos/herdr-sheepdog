@@ -102,6 +102,9 @@ func (e *Engine) Say(project, text string) error {
 	if err := e.freshLocked(id, s); err != nil {
 		return err
 	}
+	if s.Project.Finished {
+		return e.refuse(id, flow.RefuseClosed, "the project is finished; start it with a different goal")
+	}
 	if msg == "" {
 		return e.refuse(id, "why_missing", "Say requires non-empty text.")
 	}
