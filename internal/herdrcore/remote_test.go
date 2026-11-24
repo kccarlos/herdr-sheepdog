@@ -14,7 +14,7 @@ import (
 
 // Blocking probe (NeonH §1.3, Carbon §2/§5): herdrcore.Subscribe must stream
 // live status events for remote panes whether addressed as "box~t4" or raw
-// "box/t4" (isLocal must not reject raw "box/t4").
+// "box/t4".
 func TestSubscribeAcceptsBothRemoteForms(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -42,8 +42,7 @@ func TestSubscribeAcceptsBothRemoteForms(t *testing.T) {
 }
 
 // Blocking probe (NeonH §1.3, Carbon §2): MarkSeen, MarkUnread and SetPinned
-// must accept raw "box/t4" addresses just like "box~t4" (currently blocked by
-// dead isLocal checking !strings.Contains(address, "/")).
+// must accept raw "box/t4" addresses just like "box~t4".
 func TestMarksAcceptRawRemoteAddress(t *testing.T) {
 	// MarkSeen to the current turn first, so MarkUnread has something to write
 	// (it writes nothing when the terminal already reads as unread).

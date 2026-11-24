@@ -42,7 +42,7 @@ func marksOf(t hc.Terminal) herdr.Marks {
 	return m
 }
 
-// markCache is the marks of every live local terminal, kept current by
+// markCache is the marks of every live terminal, kept current by
 // RunMarks. It is only trusted while that subscription is live.
 type markCache struct {
 	mu    sync.Mutex
@@ -64,7 +64,7 @@ type echo struct {
 // that changed nothing sends no event) while still holding a burst of writes.
 const maxEchoes = 64
 
-// RunMarks keeps the marks of every local terminal current from one
+// RunMarks keeps the marks of every live terminal current from one
 // unfiltered subscription, until ctx ends. It re-reads everything after a
 // reconnect or a missed notification. While it runs, AllMarks and the
 // writes read the cache instead of asking herdr-core.
@@ -311,7 +311,7 @@ func sameMarks(a, b herdr.Marks) bool {
 // sees changes while RunMarks runs.
 func (b *Backend) MarkChanges() <-chan string { return b.changes }
 
-// AllMarks returns the marks of every live local terminal, by address.
+// AllMarks returns the marks of every live terminal, by address.
 func (b *Backend) AllMarks(ctx context.Context) (map[string]herdr.Marks, error) {
 	b.cache.mu.Lock()
 	if b.cache.live {

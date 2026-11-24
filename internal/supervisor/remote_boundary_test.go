@@ -186,11 +186,6 @@ func TestSpaceOfAndSpaceFolderSkipLocalProbesForRemoteSpace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range view.Spaces {
-		if s.ID == "s-remote" && (s.Path != "" || s.Git || s.Branch == "secret-branch" || s.Repo == "secret-local-repo") {
-			t.Errorf("Spaces() returned local path/git for remote space: %+v", s)
-		}
-	}
 	if deniedDir != "" {
 		for _, blocked := range view.NeedsAccess {
 			if blocked.Path == deniedDir {

@@ -48,7 +48,7 @@ type spaceSet struct {
 
 func newSpaceSet() *spaceSet { return &spaceSet{byID: map[string]*space{}} }
 
-// add counts t, a live local terminal in state, into its space. A terminal
+// add counts t, a live terminal in state, into its space. A terminal
 // with no space label is no one's.
 func (s *spaceSet) add(t hc.Terminal, state herdr.State) {
 	id := spaceOf(t)

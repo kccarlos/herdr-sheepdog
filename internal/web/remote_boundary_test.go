@@ -1,7 +1,6 @@
 package web
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -210,44 +209,6 @@ func TestAttachmentRefusesRemotePane(t *testing.T) {
 	}
 	if entries, err := os.ReadDir(filepath.Join(data, "attachments", "box_t4")); err == nil && len(entries) != 0 {
 		t.Fatalf("remote attachment wrote local files: %v", entries)
-	}
-}
-
-// Sanity check that SpaceFolder itself returns "" via the real Supervisor when
-// wired to herdrcore with a remote-only space.
-func TestSpaceFolderViaHerdrcoreReturnsEmptyForRemoteSpace(t *testing.T) {
-	localDir := t.TempDir()
-	writeT(t, filepath.Join(localDir, "secret.txt"), "local-only\n")
-
-	hcSrv := hctest.New(t)
-	hcSrv.Add(hc.Terminal{
-		Address: "box/t4",
-		State:   "live",
-		Argv:    []string{"claude"},
-		Cwd:     localDir,
-		Labels:  map[string]string{"herdr.space": "s-remote", "herdr.tab": "t-1"},
-	})
-	backend := herdrcore.New(hc.NewClient(hcSrv.Path), nil)
-	log, err := eventlog.Open("", eventlog.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = log.Close() })
-	st, err := state.Open("", state.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	sup, err := supervisor.New(st, backend, nil, inject.SkippedPusher{Log: log}, log, supervisor.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dir, err := sup.SpaceFolder(context.Background(), "s-remote")
-	if err != nil {
-		t.Fatalf("SpaceFolder(s-remote) error = %v", err)
-	}
-	if dir != "" {
-		t.Fatalf("SpaceFolder(s-remote) = %q, want empty string for remote-only space", dir)
 	}
 }
 

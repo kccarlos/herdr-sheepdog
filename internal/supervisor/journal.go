@@ -206,7 +206,7 @@ func workerSessionWithRoots(row state.Agent, roots workerlog.ProcessRoots) worke
 		Source: row.SessionSource,
 		Kind:   row.SessionKind,
 		Value:  row.SessionValue,
-		Cwd:    hc.LocalCwd(row.PaneID, row.Cwd),
+		Cwd:    row.Cwd,
 	}
 }
 

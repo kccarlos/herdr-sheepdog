@@ -50,9 +50,3 @@ func (t *Terminal) UnmarshalJSON(b []byte) error {
 	}
 	return nil
 }
-
-// wire is the filter as herdr-core takes it: the terminal as an hc address.
-func (f SubscribeFilter) wire() SubscribeFilter {
-	f.Terminal = Address(f.Terminal)
-	return f
-}

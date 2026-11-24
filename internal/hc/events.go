@@ -24,11 +24,12 @@ func (c *Client) Subscribe(ctx context.Context, filter SubscribeFilter) (*Subscr
 
 	stopHandshake := context.AfterFunc(callCtx, func() { _ = conn.Close() })
 	const requestID uint64 = 1
+	filter.Terminal = Address(filter.Terminal)
 	request := wireRequest{
 		JSONRPC: "2.0",
 		ID:      requestID,
 		Method:  "events.subscribe",
-		Params:  filter.wire(),
+		Params:  filter,
 	}
 	if err := json.NewEncoder(conn).Encode(request); err != nil {
 		stopHandshake()

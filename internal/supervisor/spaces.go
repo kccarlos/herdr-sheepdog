@@ -186,7 +186,7 @@ func spaceOf(snap herdr.Snapshot, w herdr.WorkspaceInfo, rows map[string]state.A
 	sp := Space{ID: w.WorkspaceID, Name: w.Label, Agents: []SpaceAgent{}, Shells: []string{}}
 	var panes []herdr.PaneInfo
 	for _, p := range snap.Panes {
-		if p.WorkspaceID == w.WorkspaceID {
+		if p.WorkspaceID == w.WorkspaceID && !hc.IsRemote(p.PaneID) {
 			panes = append(panes, p)
 		}
 	}

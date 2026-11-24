@@ -183,11 +183,13 @@ offers the voice controls when it finds Sheepdog.app in `/Applications` or
 
 ## Agents on other machines
 
-Agents in terminals on a machine you added to herdr with `hc machine add` show
-up like the ones on this Mac: in the panel, on the phone and to the voice, with
-their status. The file browser is not offered for them, because their folders
-are on the other machine.
-Spaces and changes are not offered for remote agents either.
+Agents in terminals on a machine you added to herdr-core with `hc machine add`
+show up like the ones on this Mac: in the panel, in
+[the iPhone app](iphone-app.md#agents-on-other-machines) and to the voice, with
+their status, screen reads, prompts, answers and focus in herdr-app. Features
+that read or open a folder on this Mac — file browsing, Changes, attachments,
+Spaces, the phone shell and local investigations — are unavailable for remote
+agents, because their folders live on the other machine.
 
 ## Move between Mac and phone
 

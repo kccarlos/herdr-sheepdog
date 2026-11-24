@@ -10,7 +10,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 )
 
-// ListAgents returns the live local agent terminals.
+// ListAgents returns the live agent terminals.
 func (b *Backend) ListAgents(ctx context.Context) ([]herdr.AgentInfo, error) {
 	snap, err := b.Snapshot(ctx)
 	if err != nil {
@@ -21,7 +21,7 @@ func (b *Backend) ListAgents(ctx context.Context) ([]herdr.AgentInfo, error) {
 
 // GetAgent returns one agent by address or name. The error matches
 // herdr.ErrAgentNotFound when there is no such terminal or it is not a
-// live local agent.
+// live agent.
 func (b *Backend) GetAgent(ctx context.Context, target string) (herdr.AgentInfo, error) {
 	t, err := b.client.Get(ctx, target)
 	if err != nil {
@@ -82,7 +82,7 @@ func (b *Backend) endLaunch(address string) {
 	b.mu.Unlock()
 }
 
-// Snapshot lists the live local terminals as panes, and the agents among
+// Snapshot lists the live terminals as panes, and the agents among
 // them. Workspaces are the herdr-app spaces the terminals' labels name
 // (spaces.go).
 func (b *Backend) Snapshot(ctx context.Context) (herdr.Snapshot, error) {

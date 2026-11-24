@@ -33,7 +33,10 @@ voice session, `SceneCoordinator`, "Take it back"),
 - Old herdr (before herdr-app on herdr-core). A TUI or the existing `/voice`
   web page may serve those users later.
 - A windowed Mac app, Mac Catalyst, or "Designed for iPad" on the Mac.
-- Agents on remote machines in v1, and any remote daemon in v1.
+- Agents on remote machines in v1 (since lifted for machines added to
+  herdr-core with `hc machine add`; see
+  [desktop.md](../../desktop.md#agents-on-other-machines)), and any remote
+  daemon in v1.
 - Terminal, agent list, Spaces and shells: herdr-app already has them.
 
 **Decisions made by the owner** (not reopened here)
@@ -552,8 +555,10 @@ planned here): the loopback proxy and computer switcher, a pairing code.
 - **Launching.** `open sheepdog://talk` could be taken by the iOS app if it
   runs on the Mac as "Designed for iPad". If seen, use `open -a Sheepdog` only.
 - **Laptop sleep.** A daemon on a sleeping laptop is unreachable from the
-  phone: a known v1 limit. Remote agents stay unwatched (the hc-backend
-  `isLocal` filter); lifting that is a separate product decision.
+  phone: a known v1 limit. (Update: agents on machines added to herdr-core
+  with `hc machine add` are now watched over the same daemon; folder-backed
+  features stay local to this Mac — see
+  [desktop.md](../../desktop.md#agents-on-other-machines).)
 - **IME.** Only one commit was measured; the retest may add a guard.
 - **Where the panel's code lives.** It is in this repo at `mods/sheepdog/`,
   so it shares the classification fixtures, protocol fixtures and CI with the
