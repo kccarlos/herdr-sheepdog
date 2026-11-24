@@ -61,7 +61,9 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 	if id == "" {
 		return e.refuse("", "invalid_token", "The token matches no run the factory started.")
 	}
-	e.mergeMemAlertsLocked(id, &s)
+	if err := e.freshLocked(id, s); err != nil {
+		return err
+	}
 	if want != "" && role != want {
 		return e.refuse(id, "kind_not_allowed", fmt.Sprintf("A %s may not send %s; only the %s may.", role, verb, want))
 	}
