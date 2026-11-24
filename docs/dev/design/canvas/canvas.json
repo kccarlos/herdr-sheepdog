@@ -1117,6 +1117,270 @@
    "h": 1840,
    "title": "Factory web — home, dark",
    "expand": "fill"
+  },
+  "FactoryWebLifeHome.dc.html": {
+   "x": 0,
+   "y": 35062,
+   "w": 1440,
+   "h": 2171,
+   "title": "Factory web, life cycle — the page with everything in place, light",
+   "expand": "fill"
+  },
+  "FactoryWebLifeHomeDark.dc.html": {
+   "x": 0,
+   "y": 40011,
+   "w": 1440,
+   "h": 2171,
+   "title": "Factory web, life cycle — the page with everything in place, dark",
+   "expand": "fill"
+  },
+  "FactoryWebLifeHome360.dc.html": {
+   "x": 0,
+   "y": 44960,
+   "w": 360,
+   "h": 3775,
+   "title": "Factory web, life cycle — the page with everything in place, 360 px wide",
+   "expand": "fill"
+  },
+  "FactoryWebNewProject.dc.html": {
+   "x": 1520,
+   "y": 35062,
+   "w": 1440,
+   "h": 4206,
+   "title": "Factory web, life cycle — new project, light",
+   "expand": "fill"
+  },
+  "FactoryWebNewProjectDark.dc.html": {
+   "x": 1520,
+   "y": 40011,
+   "w": 1440,
+   "h": 4206,
+   "title": "Factory web, life cycle — new project, dark",
+   "expand": "fill"
+  },
+  "FactoryWebNewProject360.dc.html": {
+   "x": 1520,
+   "y": 44960,
+   "w": 360,
+   "h": 7728,
+   "title": "Factory web, life cycle — new project, 360 px wide",
+   "expand": "fill"
+  },
+  "FactoryWebStartChecks.dc.html": {
+   "x": 3040,
+   "y": 35062,
+   "w": 1440,
+   "h": 2068,
+   "title": "Factory web, life cycle — start checks, light",
+   "expand": "fill"
+  },
+  "FactoryWebStartChecksDark.dc.html": {
+   "x": 3040,
+   "y": 40011,
+   "w": 1440,
+   "h": 2068,
+   "title": "Factory web, life cycle — start checks, dark",
+   "expand": "fill"
+  },
+  "FactoryWebStartChecks360.dc.html": {
+   "x": 3040,
+   "y": 44960,
+   "w": 360,
+   "h": 4841,
+   "title": "Factory web, life cycle — start checks, 360 px wide",
+   "expand": "fill"
+  },
+  "FactoryWebPairing.dc.html": {
+   "x": 4560,
+   "y": 35062,
+   "w": 1440,
+   "h": 2171,
+   "title": "Factory web, life cycle — pairing at the first write, light",
+   "expand": "fill"
+  },
+  "FactoryWebPairingDark.dc.html": {
+   "x": 4560,
+   "y": 40011,
+   "w": 1440,
+   "h": 2171,
+   "title": "Factory web, life cycle — pairing at the first write, dark",
+   "expand": "fill"
+  },
+  "FactoryWebPairing360.dc.html": {
+   "x": 4560,
+   "y": 44960,
+   "w": 360,
+   "h": 5248,
+   "title": "Factory web, life cycle — pairing at the first write, 360 px wide",
+   "expand": "fill"
+  },
+  "FactoryWebProjectActions.dc.html": {
+   "x": 6080,
+   "y": 35062,
+   "w": 1440,
+   "h": 3223,
+   "title": "Factory web, life cycle — stop, resume, new goal, reopen, light",
+   "expand": "fill"
+  },
+  "FactoryWebProjectActionsDark.dc.html": {
+   "x": 6080,
+   "y": 40011,
+   "w": 1440,
+   "h": 3223,
+   "title": "Factory web, life cycle — stop, resume, new goal, reopen, dark",
+   "expand": "fill"
+  },
+  "FactoryWebProjectActions360.dc.html": {
+   "x": 6080,
+   "y": 44960,
+   "w": 360,
+   "h": 6005,
+   "title": "Factory web, life cycle — stop, resume, new goal, reopen, 360 px wide",
+   "expand": "fill"
+  },
+  "FactoryWebSettings.dc.html": {
+   "x": 7600,
+   "y": 35062,
+   "w": 1440,
+   "h": 4589,
+   "title": "Factory web, life cycle — the settings panel, light",
+   "expand": "fill"
+  },
+  "FactoryWebSettingsDark.dc.html": {
+   "x": 7600,
+   "y": 40011,
+   "w": 1440,
+   "h": 4589,
+   "title": "Factory web, life cycle — the settings panel, dark",
+   "expand": "fill"
+  },
+  "FactoryWebSettings360.dc.html": {
+   "x": 7600,
+   "y": 44960,
+   "w": 360,
+   "h": 5642,
+   "title": "Factory web, life cycle — the settings panel, 360 px wide",
+   "expand": "fill"
+  },
+  "FactoryWebReadBack.dc.html": {
+   "x": 9120,
+   "y": 35062,
+   "w": 1440,
+   "h": 2667,
+   "title": "Factory web, life cycle — settings refusals and the read-back, light",
+   "expand": "fill"
+  },
+  "FactoryWebReadBackDark.dc.html": {
+   "x": 9120,
+   "y": 40011,
+   "w": 1440,
+   "h": 2667,
+   "title": "Factory web, life cycle — settings refusals and the read-back, dark",
+   "expand": "fill"
+  },
+  "FactoryWebReadBack360.dc.html": {
+   "x": 9120,
+   "y": 44960,
+   "w": 360,
+   "h": 5257,
+   "title": "Factory web, life cycle — settings refusals and the read-back, 360 px wide",
+   "expand": "fill"
+  },
+  "FactoryWebModels.dc.html": {
+   "x": 10640,
+   "y": 35062,
+   "w": 1440,
+   "h": 2989,
+   "title": "Factory web, life cycle — models per role, light",
+   "expand": "fill"
+  },
+  "FactoryWebModelsDark.dc.html": {
+   "x": 10640,
+   "y": 40011,
+   "w": 1440,
+   "h": 2989,
+   "title": "Factory web, life cycle — models per role, dark",
+   "expand": "fill"
+  },
+  "FactoryWebModels360.dc.html": {
+   "x": 10640,
+   "y": 44960,
+   "w": 360,
+   "h": 7149,
+   "title": "Factory web, life cycle — models per role, 360 px wide",
+   "expand": "fill"
+  },
+  "FactoryWebTaskLife.dc.html": {
+   "x": 12160,
+   "y": 35062,
+   "w": 1440,
+   "h": 3413,
+   "title": "Factory web, life cycle — task view and step bar, light",
+   "expand": "fill"
+  },
+  "FactoryWebTaskLifeDark.dc.html": {
+   "x": 12160,
+   "y": 40011,
+   "w": 1440,
+   "h": 3413,
+   "title": "Factory web, life cycle — task view and step bar, dark",
+   "expand": "fill"
+  },
+  "FactoryWebTaskLife360.dc.html": {
+   "x": 12160,
+   "y": 44960,
+   "w": 360,
+   "h": 6006,
+   "title": "Factory web, life cycle — task view and step bar, 360 px wide",
+   "expand": "fill"
+  },
+  "FactoryWebLog.dc.html": {
+   "x": 13680,
+   "y": 35062,
+   "w": 1440,
+   "h": 1837,
+   "title": "Factory web, life cycle — the log, light",
+   "expand": "fill"
+  },
+  "FactoryWebLogDark.dc.html": {
+   "x": 13680,
+   "y": 40011,
+   "w": 1440,
+   "h": 1837,
+   "title": "Factory web, life cycle — the log, dark",
+   "expand": "fill"
+  },
+  "FactoryWebLog360.dc.html": {
+   "x": 13680,
+   "y": 44960,
+   "w": 360,
+   "h": 4026,
+   "title": "Factory web, life cycle — the log, 360 px wide",
+   "expand": "fill"
+  },
+  "FactoryWebGraph.dc.html": {
+   "x": 15200,
+   "y": 35062,
+   "w": 1440,
+   "h": 2381,
+   "title": "Factory web, life cycle — the task graph, light",
+   "expand": "fill"
+  },
+  "FactoryWebGraphDark.dc.html": {
+   "x": 15200,
+   "y": 40011,
+   "w": 1440,
+   "h": 2381,
+   "title": "Factory web, life cycle — the task graph, dark",
+   "expand": "fill"
+  },
+  "FactoryWebGraph360.dc.html": {
+   "x": 15200,
+   "y": 44960,
+   "w": 360,
+   "h": 3083,
+   "title": "Factory web, life cycle — the task graph, 360 px wide",
+   "expand": "fill"
   }
  },
  "createdOnFiles": {
@@ -1150,7 +1414,11 @@
   "p3b",
   "p3note",
   "engine1",
-  "p4"
+  "p4",
+  "p4b",
+  "p4bdark",
+  "p4b360",
+  "p4bnote"
  ],
  "notes": {
   "p1": {
@@ -1269,6 +1537,34 @@
    "text": "Part 4 — Factory web page (the first owner interface to build)",
    "kind": "title1",
    "maxW": 9190
+  },
+  "p4b": {
+   "x": 0,
+   "y": 34822,
+   "text": "Part 4b — Factory web: the whole life cycle (slice 14, PR 14.0), light",
+   "kind": "title1",
+   "maxW": 16640
+  },
+  "p4bdark": {
+   "x": 0,
+   "y": 39771,
+   "text": "Part 4b — the same boards, dark",
+   "kind": "title1",
+   "maxW": 16640
+  },
+  "p4b360": {
+   "x": 0,
+   "y": 44720,
+   "text": "Part 4b — the same boards, 360 px wide",
+   "kind": "title1",
+   "maxW": 16640
+  },
+  "p4bnote": {
+   "x": 16760,
+   "y": 35062,
+   "w": 640,
+   "fill": "orange",
+   "text": "Part 4b: decisions (slice 14, PR 14.0, round 2)\nDrawn from the page as built (web/factory), not from the older home board: no send box, no usage pools. New means proposed, not built.\n\n• Where things live. Main column: tasks with the list / graph switch, the goal, the project bar (state word, one sentence, only that state's actions), the task groups, log, settings. Under 760 px the order is: tasks and project bar, asks for you, the task groups, log, projects, settings, agents. Aside: projects (state word on each line, New project under the list), asks for you, agents.\n• New project opens a form in the main column, like the task view. Its models and max running rows are the settings rows with the defaults; nothing is stored before the start, so no Change and no read-back there.\n• Start checks show the check's own name, detail and fix. A fix that starts \"run:\" is a block with Copy, marked \"in a terminal\"; the block holds the command only, up to the first \" (\" or \", then \", and the rest is text under it.\n• Pairing: one box, opened beside the control that needed it. What was asked for is kept and sent after Pair. The missing-app help is a fold that is always there, because the page cannot see the menu bar.\n• Stop always asks first, in place. Focus lands on Keep it running. The page gives no count and no roles of running agents.\n• Settings: a row gets its Change button only while its field differs from the stored value; the read-back takes the row's place until answered. Save is recommended: bold outline and the word, never a fill (one orange button per screen: Start, or New project on the empty page).\n• Steps: words and icons, never colour alone. A fifth state, ended, for the last step of a dropped or closed task; parked is the now step with its text. The compact bar always has the current step written beside it.\n• Log marks: merged, held up, asked you, you. The toggle is \"show routine checks\".\n• Graph view takes the full width; the aside cards move under it. Nodes keep one size, so a wide layer scrolls inside the graph's own box. Focus or hover draws a node's own edges and neighbours strong and dims the rest.\n• Each light board has a dark copy and a 360 px copy below it.\n\nOpen questions are in docs/dev/design/canvas/slice14-wording.md and the design report."
   }
  },
  "order": [
@@ -1414,7 +1710,40 @@
   "FactoryWebLoading.dc.html",
   "FactoryWebOffline.dc.html",
   "FactoryWebPhone.dc.html",
-  "FactoryWebHomeDark.dc.html"
+  "FactoryWebHomeDark.dc.html",
+  "FactoryWebLifeHome.dc.html",
+  "FactoryWebLifeHomeDark.dc.html",
+  "FactoryWebLifeHome360.dc.html",
+  "FactoryWebNewProject.dc.html",
+  "FactoryWebNewProjectDark.dc.html",
+  "FactoryWebNewProject360.dc.html",
+  "FactoryWebStartChecks.dc.html",
+  "FactoryWebStartChecksDark.dc.html",
+  "FactoryWebStartChecks360.dc.html",
+  "FactoryWebPairing.dc.html",
+  "FactoryWebPairingDark.dc.html",
+  "FactoryWebPairing360.dc.html",
+  "FactoryWebProjectActions.dc.html",
+  "FactoryWebProjectActionsDark.dc.html",
+  "FactoryWebProjectActions360.dc.html",
+  "FactoryWebSettings.dc.html",
+  "FactoryWebSettingsDark.dc.html",
+  "FactoryWebSettings360.dc.html",
+  "FactoryWebReadBack.dc.html",
+  "FactoryWebReadBackDark.dc.html",
+  "FactoryWebReadBack360.dc.html",
+  "FactoryWebModels.dc.html",
+  "FactoryWebModelsDark.dc.html",
+  "FactoryWebModels360.dc.html",
+  "FactoryWebTaskLife.dc.html",
+  "FactoryWebTaskLifeDark.dc.html",
+  "FactoryWebTaskLife360.dc.html",
+  "FactoryWebLog.dc.html",
+  "FactoryWebLogDark.dc.html",
+  "FactoryWebLog360.dc.html",
+  "FactoryWebGraph.dc.html",
+  "FactoryWebGraphDark.dc.html",
+  "FactoryWebGraph360.dc.html"
  ],
  "pages": [
   {
