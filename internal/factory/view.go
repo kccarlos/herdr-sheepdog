@@ -38,6 +38,7 @@ type GraphView struct {
 type TaskView struct {
 	Ref          string   `json:"ref"`
 	Title        string   `json:"title"`
+	Brief        string   `json:"brief,omitempty"`
 	Stage        string   `json:"stage"`
 	WhyWaiting   string   `json:"why_waiting,omitempty"`
 	After        []string `json:"after"`
@@ -135,7 +136,7 @@ func graphViewOf(s flow.State, lastRow map[string]LogLine) GraphView {
 			model, term = storedWorkerModel(t).Model, a.RunID
 		}
 		tasks = append(tasks, TaskView{
-			Ref: t.ID, Title: t.Title, Stage: stage, WhyWaiting: why, After: append([]string{}, t.After...), Dependents: append([]string{}, deps[t.ID]...),
+			Ref: t.ID, Title: t.Title, Brief: t.Brief, Stage: stage, WhyWaiting: why, After: append([]string{}, t.After...), Dependents: append([]string{}, deps[t.ID]...),
 			Layer: layers[i], Rounds: rounds, Model: model, Terminal: term, LastRule: l.Rule, LastDecision: l.Decision,
 		})
 	}

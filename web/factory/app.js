@@ -1,6 +1,8 @@
 // The factory page (design.md 12.1, the FactoryWeb* boards): polls the factory
 // views and delegates ask answers and browser pairing to asks.js.
 import { esc, isOwnerAsk, renderAskCardsHTML, createAskFlow, browserAskDeps } from './asks.js';
+import { renderMarkdown } from '../static/markdown.js';
+import { goalTitle } from './goal.js';
 
 const POLL_MS = 3000, GIVE_UP_MS = 8000;
 const $ = (id) => document.getElementById(id);
@@ -101,15 +103,19 @@ function render() {
 }
 
 const counts = (c = {}) => Object.entries(c).map(([k, n]) => `${n} ${(STAGE[k] || [k])[0]}`).join(' · ');
-const projHTML = (pr) => `<a class="proj" href="#${enc(pr.id)}"${pr.id === data.p ? ' aria-current="true"' : ''}><b>${esc(pr.goal || pr.id)}</b>` +
+const projHTML = (pr) => `<a class="proj" href="#${enc(pr.id)}"${pr.id === data.p ? ' aria-current="true"' : ''}><span class="proj-title">${esc(goalTitle(pr.goal, pr.id))}</span>` +
   `<span class="muted">${pr.error ? esc(pr.error) : (pr.running ? 'running' : 'stopped') + (counts(pr.counts) ? ' · ' + esc(counts(pr.counts)) : '')}</span></a>`;
 
 function boardHTML(tasks) {
   const pr = data.projects.find((x) => x.id === data.p);
   const done = tasks.filter((x) => x.stage === 'done');
-  let h = `<div class="head"><h1>tasks</h1>${pr ? `<span>${esc(pr.goal || pr.id)} · ${done.length} of ${tasks.length} done</span>` : ''}</div>`;
+  let h = `<div class="head"><h1>tasks</h1>${pr ? `<span>${done.length} of ${tasks.length} done</span>` : ''}</div>`;
   if (data.problem) return h + `<section class="card" role="status"><h2>can't show the factory</h2><p class="muted">${esc(data.problem)}</p></section>`;
   if (!pr) return h + `<section class="card" aria-label="No tasks"><h2>nothing running</h2><p class="muted">No factory projects on this computer. Start one in a terminal with <code>sheepdog factory start &lt;folder&gt; --goal "…"</code>; it shows here within seconds.</p></section>`;
+  const title = goalTitle(pr.goal, pr.id);
+  h += `<p class="goal-title">${esc(title)}</p>`;
+  const rawGoal = (pr.goal || '').trim();
+  if (rawGoal && rawGoal !== title) h += `<details class="goal-full"><summary>full project goal</summary><div class="md-body">${renderMarkdown(pr.goal)}</div></details>`;
   if (!tasks.length) h += `<section class="card" aria-label="No tasks"><h2>no tasks yet</h2><p class="muted">The coordinator has not planned this project yet.</p></section>`;
   const other = [...new Set(tasks.map((x) => x.stage))].filter((s) => s !== 'done' && !ORDER.includes(s));
   for (const s of [...ORDER, ...other]) {
@@ -133,9 +139,10 @@ function rowHTML(t) {
 // t.rounds counts finished review rounds; why_waiting names the one running ("In review round 2").
 const roundsDone = (t) => t.rounds ? `${t.rounds} round${t.rounds > 1 ? 's' : ''} done` : '';
 
+const logWhy = (l) => (l.by === 'owner' && l.decision === 'started' && l.why ? goalTitle(l.why, '') : l.why);
 const logHTML = (lines, title, empty = 'Nothing logged yet.') => `<section class="card" aria-label="${title}"><h2>${title}</h2>` + (lines.length
   ? `<ul class="log">${lines.slice().reverse().map((l) => `<li><time datetime="${esc(l.at)}">${clock(l.at, true)}</time> ${esc(l.by)}` +
-    `${l.task ? ` <code>${esc(l.task)}</code>` : ''} <b>${esc(l.decision)}</b> <span class="muted">${esc(l.why)}</span></li>`).join('')}</ul>`
+    `${l.task ? ` <code>${esc(l.task)}</code>` : ''} <b>${esc(l.decision)}</b> <span class="muted">${esc(logWhy(l))}</span></li>`).join('')}</ul>`
   : `<p class="muted">${empty}</p>`) + '</section>';
 
 function taskHTML(t) {
@@ -143,6 +150,7 @@ function taskHTML(t) {
   return `<a class="back" href="#${enc(data.p)}">‹ board</a><div class="task-head"><div class="meta"><code>${esc(t.ref)}</code>` +
     `<span class="pill ${dot}"><span class="dot ${dot}" aria-hidden="true"></span>${esc(label)} · ${esc(t.why_waiting || label)}</span>` +
     `${t.terminal ? `<span>run ${esc(t.terminal)}</span>` : ''}</div><h1>${esc(t.title)}</h1></div><div class="cols"><div class="col-main">` +
+    `${t.brief && t.brief.trim() ? `<section class="card" aria-label="Brief"><h2>brief</h2><div class="md-body">${renderMarkdown(t.brief)}</div></section>` : ''}` +
     `<section class="card" aria-label="Verdict"><h2>the ladder says: ${esc(t.last_decision || 'nothing yet')}</h2><span class="muted">` +
     `${t.last_rule ? `rule ${esc(t.last_rule)}` : 'No step logged for this task yet.'}${t.rounds ? ` · review ${roundsDone(t)}` : ''}</span></section>` +
     logHTML(data.log.filter((l) => l.task === t.ref), 'recent log', data.log.length ? 'No log lines for this task in the last 100.' : undefined) + `</div><aside><section class="card" aria-label="Who worked on it"><h2>agents</h2>` +

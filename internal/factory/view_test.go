@@ -626,3 +626,47 @@ func TestTrailingPRSnapshotDoesNotBlankTaskDetail(t *testing.T) {
 		t.Errorf("StatusViewOf[T2] = (rule=%q, why=%q), want empty rule and '(no logged row)'", s[1].Rule, s[1].Why)
 	}
 }
+
+func TestGraphViewTaskBrief(t *testing.T) {
+	wantBrief := "## Scope\n\n- Render task brief on `#project/task`\n- Keep board rows compact"
+	st := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "p-brief", Started: true},
+		Tasks: []flow.Task{
+			{ID: "T1", Title: "feat: has brief", Brief: wantBrief},
+			{ID: "T2", Title: "feat: empty brief"},
+		},
+	}
+
+	g := GraphViewOf(st, nil)
+	if len(g.Tasks) != 2 {
+		t.Fatalf("len(g.Tasks) = %d, want 2", len(g.Tasks))
+	}
+	if g.Tasks[0].Brief != wantBrief {
+		t.Errorf("GraphViewOf[T1].Brief = %q, want %q", g.Tasks[0].Brief, wantBrief)
+	}
+	if g.Tasks[1].Brief != "" {
+		t.Errorf("GraphViewOf[T2].Brief = %q, want empty", g.Tasks[1].Brief)
+	}
+
+	raw, err := json.Marshal(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	tasks, ok := doc["tasks"].([]any)
+	if !ok || len(tasks) != 2 {
+		t.Fatalf("unexpected tasks JSON: %s", raw)
+	}
+	t1 := tasks[0].(map[string]any)
+	if got, ok := t1["brief"]; !ok || got != wantBrief {
+		t.Errorf("T1 JSON brief = (%v, ok=%v), want (%q, true); raw=%s", got, ok, wantBrief, raw)
+	}
+	t2 := tasks[1].(map[string]any)
+	if got, hasBrief := t2["brief"]; hasBrief {
+		t.Errorf("T2 JSON unexpectedly marshaled brief = %v (want omitted when empty); raw=%s", got, raw)
+	}
+}
