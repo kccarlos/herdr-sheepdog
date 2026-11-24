@@ -519,6 +519,15 @@ First match wins.
 
 At the finish every open ask is cancelled, a coordinator's open question included: it is not waited for.
 
+**Project states (slice 14, 10.1 SE11).** A project is in exactly one state, and the view carries it as one field. The table holds on every door (page, CLI, voice). The two bold cells change today's code, which clears `finished` on every start and every stop, so that a same-goal start on a finished project asks for the final journal line again and starts a coordinator. A stop never leaves an agent running: J4 records `finished` when it first matches, while the coordinator may still be writing its final journal line, so a finished project can have a live run and stop ends it. Whether a project has a live run is read from the same recorded runs a stop acts on, and every door offers stop on a finished project while one is alive. Voice follows the state: "start the factory" skips finished projects, and "stop everything" names a finished project only when a run was ended.
+
+| State | Is | Start, same goal | Start, new goal | Stop |
+|---|---|---|---|---|
+| none (not a value of the view's state: a project that does not exist has no view) | no stored project for the folder | — | first start: the start checks, chosen settings allowed (SE10), started | refused `not_found` |
+| `running` | started and not finished | the owner's retry, as today | a new goal (J-rows: the coordinator is woken, or started) | stopped; every run ends |
+| `stopped` | not started and not finished | resumes | starts with the new goal | nothing to do; stays `stopped` |
+| `finished` | recorded finished (J4), whether or not it is started: finished wins | **refused `already_closed` with the fix to give a new goal, unless a wake is held (J4); nothing is cleared and no coordinator starts** | reopens | **every run still alive ends (the coordinator on its final journal line); the project stays `finished`**. With no run alive nothing changes and nothing is logged |
+
 **Agent CLIs at start (J1a–J1d).** These are parts of J1, not rows of the table. The start checks probe each agent CLI named in the project's candidate lists once, with the same sign-in check the engine uses at launch (section 7.3). A probe gives one of three answers: signed in, out (positively not installed or positively signed out), or `unknown (<reason>)`. The roles are coordinator, worker and reviewer, each with its project list (section 9.1). A task's own list comes before the project list, so the project list is always the fallback.
 
 | ID | If | Then |
@@ -569,7 +578,7 @@ The coordinator is started in the project's repo folder, never a home folder or 
 | A4 | `open` | `cancel` | — | `cancelled` | — |
 | A5 | `answered`, `cancelled` | `answer`, `cancel` | — | same | refuse `already_closed` |
 
-Whether an `ask_open` or an `answer` is valid at all (who may send it, the owner's proof) is the acceptance table's job, below. All six cells (two states × two events, plus the two ways to open) are rows. Delegation (`A1`) arrives in slice 14; until then every valid `ask_open` matches `A2`.
+Whether an `ask_open` or an `answer` is valid at all (who may send it, the owner's proof) is the acceptance table's job, below. All six cells (two states × two events, plus the two ways to open) are rows. Delegation (`A1`) arrives in a later slice (the owner left it out of slice 14 on 2026-11-24); until then every valid `ask_open` matches `A2`.
 
 - **Ask records and kinds.** Project asks live in `State.Asks` (`projects/<id>/state.json`) and carry `id`, `project`, `folder`, `kind`, `gated` (`kind != "decision"`), `question`, `options`, `recommend`, `task`, `head`, `asked_by`, `run_id`, `at`, `status` (`open`, `answered`, `cancelled`), `answer`, `why`, `answered_at`, `answered_by` (`coordinator`, `owner`, `rule`), `proof_id` and `device_id`. The closed v1 ask kinds are `decision`, `gate`, `release`, `paid-key`, `delete`, `install`, `reset`, `rule` and `override`; any other or empty kind is refused `unknown_kind`.
 - **Who an ask belongs to.** A `decision` ask (a worker asking the coordinator) belongs to its task and is cancelled when the task ends. Every other kind belongs to the project, may name the task it is about, and outlives the worker and the task: a release question once died with its worker's terminal (field note 31). When a task's original worker run has ended or been replaced before its `decision` ask is answered, `A3` delivers the answer to the task's open attempt worker (or holds it in `Attempt.Held` for the next worker start, KB-ASK-10); when the coordinator opened a gated ask, `A3` delivers/wakes the coordinator with the owner's answer.
@@ -632,8 +641,8 @@ Every report and command enters here. Valid: it becomes a record. Not valid, or 
 | recap decision | the coordinator | the task is not ended; a recap is open; the choice is in its allowed set; a why is given; split: the children pass the plan checks; new: the brief was amended since the recap opened | `already_closed`, `no_recap`, `not_allowed` (naming the allowed set) |
 | `park`, `unpark`, `drop`, `close`, `retry`, `send-back` | the coordinator | the task is not ended; a why is given; `close` only after a "nothing to change" report | `already_closed`, `why_missing` |
 | `say <run>` | the coordinator | the run is alive | `run_ended` |
-| start, stop, say, `touch` | the owner: by voice, a paired device or the factory page, or `sheepdog factory start` and `stop` in a terminal that carries no run's token | a start is always recorded (J1 then runs doctor); a run's terminal is refused, so a worker cannot stop the factory; `say` on a finished project is refused `already_closed`, with the fix to start a different goal | `kind_not_allowed`, `already_closed` |
-| a setting change | the owner by voice, phone or the factory page; the coordinator; or `sheepdog factory set` from a terminal that carries no run's token (a worker's or reviewer's terminal is refused: they open only `decision` asks). Each only raises an ask of kind `rule` | the value is in its range; it is saved only when the owner answers that ask with the daemon's proof. A terminal is never taken for the owner: a worker has a shell too | `out_of_range`, `proof_required`, `kind_not_allowed` |
+| start, stop, say, `touch` | the owner: by voice, a paired device or the factory page, or `sheepdog factory start` and `stop` in a terminal that carries no run's token | a start is always recorded (J1 then runs doctor); a run's terminal is refused, so a worker cannot stop the factory; a start or stop through the factory page's own routes needs a session ticket, which the terminal's routes do not (10.1 SE10, slice 14: the ticket names the device, it does not stop a local program); a same-goal start on a finished project with no held wake is refused `already_closed`, and a stop there ends any run still alive and keeps it finished (section 6, project states); `say` on a finished project is refused `already_closed`, with the fix to start a different goal | `kind_not_allowed`, `already_closed`, `proof_required` |
+| a setting change | the owner by voice, phone or the factory page; the coordinator; or `sheepdog factory set` from a terminal that carries no run's token (a worker's or reviewer's terminal is refused: they open only `decision` asks). Each only raises an ask of kind `rule`. **Built in slice 14 (10.1, SE1–SE14):** the factory page only, and the proposal itself needs a session ticket; a typed proposal by the coordinator, voice and `sheepdog factory set` are not built | the setting exists and the change leaves no row newly out of range (checked when proposed and again when saved, SE4); a `models.<role>` value names CLIs and models the engine can launch; it is saved only when the owner answers that ask `Save` with the daemon's proof, from the ask's typed `set` field, which only the engine writes; a start never changes a setting of a project that exists (SE10). A terminal is never taken for the owner: a worker has a shell too | `unknown_setting`, `out_of_range`, `not_launchable`, `unchanged`, `proof_required`, `kind_not_allowed` |
 
 Two rules hold for every row. A report from a run whose task has ended, and a command on an ended task, is refused `already_closed`. Every why or reason (a reject, nothing to change, a recap decision, a task command, a plan amend) is cleaned before it is stored, logged or put in a prompt (control characters and line breaks become spaces, runs of spaces become one); an empty one is `why_missing`, and one over 500 characters is `invalid_report`.
 
@@ -868,9 +877,9 @@ These are mechanics: how a thing is done once a row has asked for it. They decid
 **Owner decision D6.** The tables' **rows** are code; every **number** a rule uses is a named setting.
 
 - There is one settings table. A rule gets its numbers from it and from nowhere else: **no number is written inside a rule.** A test fails on a numeric literal in the rule tables.
-- Each setting has a name, a default, an allowed range and a scope: every project, or one project (the project's value wins).
+- Each setting has a name, a default, an allowed range and a scope: every project, or one project (the project's value wins). Until an "every project" store exists the only scope is one project (SE3 below).
 - A change is an ask of kind `rule` and nothing else (owner decision D11): the owner says it by voice, phone or the factory page, or `sheepdog factory set` raises it from a terminal that carries no run's token; the engine reads it back with its scope ("This project: review rounds 3. Save?"), and saves it only with the daemon's proof of the owner's answer. It is in force from the next pass, with no restart, and is written to the log.
-- The coordinator can **propose** a change (it becomes that same ask). It cannot make one.
+- The coordinator can **propose** a change (it becomes that same ask). It cannot make one. (Until a typed proposal is built for it, its `rule` ask is free text whose answer changes nothing: SE1.)
 - A value outside its range is refused with the range in the reply.
 - A running task goes on under the new value. Nothing is recomputed backwards: a round already run stays run. (The old engine kept a running task on the values it started with; this is a deliberate change that follows from D6.)
 
@@ -896,7 +905,26 @@ These are mechanics: how a thing is done once a row has asked for it. They decid
 | `pool_floor_percent`, `pool_minutes`, `sweep_minutes` | 5, 5, 5 | 0–50, 1–60, 1–60 | section 7.3 |
 | `disk_full_percent` | 90 | 50–99 | section 6, 7.3 (`disk` alert) |
 
-Settings that are choices, not numbers, are set the same way: `design_gate` (review model or owner), `delegation` (kinds, scope, until), `notify_level`, `merge_policy`, `project_priority`, `models` per role, `verify` (section 11.6). Until `models` and candidate lists exist (slice 5b), `second_reviewer` (section 9.2) is the one choice built.
+Settings that are choices, not numbers, are set the same way: `design_gate` (review model or owner), `delegation` (kinds, scope, until), `notify_level`, `merge_policy`, `project_priority`, `models` per role, `verify` (section 11.6). Until `models` and candidate lists exist (slice 5b), `second_reviewer` (section 9.2) is the one choice built. From slice 14 each role's candidate list is a row of the same table, named `models.<role>` and written `<cli>/<model>/<effort>` in order.
+
+**How a change is built (slice 14; owner decisions 2026-11-24).** The owner asked for settings, the models per role included, to be changed on the factory page with a read-back and a confirm, and left delegation and changes asked by voice for later. [plan.md](plan.md) slice 14 cuts it; these decisions fill the gaps the cut found.
+
+| ID | Decision |
+|---|---|
+| SE1 | A proposed change is an ask of kind `rule` that carries a typed field, `set{name, value, was}`. Only the engine writes it (`Engine.ProposeSetting`); a run's `ask` report cannot. A setting is saved from that field alone, never from the question's or an option's text. The engine writes the question (the read-back, "This project: review rounds 3 (now 2). Save?"; a setting's plain name is its key with spaces for underscores) and the two options, `Save` (recommended) and `Keep current` |
+| SE2 | Proposing needs a session ticket, checked before the value; saving needs the owner's `AnswerProof` on that ask (D11). No `sheepdog factory set` is built, so no terminal can propose. **How strong this is:** as strong as D15 and D17 and no stronger. A caller with no ticket is refused, but any program running as the owner can still enrol its own key (7.1, "What this stops, and what it does not"). From this slice a ticket also starts projects and chooses which CLI and account spend quota, so nothing later may rely on more than D15 and D17 give |
+| SE3 | The only scope is this project: `State.Settings`. The read-back always says "This project:" |
+| SE4 | A change is checked row by row when it is proposed and again when it is saved (one setting's range can depend on another: `max_rounds` is at least `review_rounds`). It is refused only when, after it, a row is not allowed that was allowed before, so a stored bad value can always be repaired. The refusal names the setting the owner changed and what to change first. The engine refuses; it does not clamp (the old engine did, `KB-REV-18`). A save that no longer fits is refused; the ask stays open |
+| SE5 | One open proposal per setting and project: a new one cancels the open one (`A4`) |
+| SE6 | An empty value means the default. Going back to the default is a change like any other; there is no revoke |
+| SE7 | A stored value that is not allowed (a hand edit) is marked in the settings view with its range; the engine does not stop a running project over it. A setting that is not used is marked too (`second_reviewer` while `models.reviewer` is set). `Validate` still refuses a bad value at the next start, so the owner repairs it in the panel before resuming |
+| SE8 | A saved value is in force from the next pass. A `models.<role>` change applies to the next run the engine starts for that role; a live run is not restarted |
+| SE9 | The ask reaches the phone and voice like every open gated ask (`A2`, O25), and may be confirmed there. Asking for a change by voice is not built. A saved change wakes no coordinator: the facts block already lists every setting that differs from its default |
+| SE10 | A start or stop from the factory page goes through its own routes, which need a session ticket; checking a folder needs none and writes nothing. The terminal's loopback routes are unchanged (7.2), **so the ticket stops no local program from starting or stopping a project**: it puts the device in the log and gives a paired phone routes to use later. Settings may be chosen at a project's first start, as part of the owner's start, and the start checks judge them. On a project that exists a setting changes only through its ask, with no exception: a start that carries a different value, `--max-running` included, is refused, in a sentence that names the setting and the settings panel on the factory page |
+| SE11 | Reopening a finished project is a start with a new goal (J4). A project is in one of the states of the table in section 6, and the view carries that one state |
+| SE12 | The page's new screens are drawn on the design canvas and reviewed by a second reviewer before any code PR (plan.md PR 14.0) |
+| SE13 | A change may be proposed and saved on a stopped or a finished project: a setting is state, and nothing has to run. So the owner sets the models before reopening. A proposal still open when a project finishes is cancelled with the other asks (J4) |
+| SE14 | What "no terminal" covers: every factory step, on a Mac with `Sheepdog.app` installed (the browser's short code comes from it, D17), on a machine whose start checks pass. A failed start check is shown with its fix as the check writes it; a fix that is a command is shown as one. A Mac with only the daemon, and Linux, have no way to pair a browser until the owner decides on D17 |
 
 The engine's own machinery has a few fixed numbers that are not rules about work: the loop's 15 s tick, the 2 × tick per-pass duration cap (30 s), how often GitHub is read, and the report client's limits on a proof (5 minutes, 64 KiB of output). They are constants in code.
 
@@ -1045,7 +1073,7 @@ Sources: [notes/go-surface-notes.md](notes/go-surface-notes.md) (historical pre-
 | `factory/` (Python, tests, templates) | — | **Gone from `main`** |
 | `docs/dev/factory/owner-contract.md`, `engine-audit.md`, `baseline.md`; `testdata/factory/owner-contract-v1.json` | — | **Pointer page (`owner-contract.md`, #767); the other three deleted in 8.4 (#770)** (O33). The full texts stay in git history |
 
-Still deferred to later slices: `Digest`, `Rules` / `ProposeRule` / `RevokeRule` read-back (slice 14), `Alerts` to push and voice, and `Touch`. `Projects`, `Graph`, `LogLines`, `Asks`, `Start`, `Stop`, `Say`, `MintProof`, `Answer`, `Report`, and `Changes` are built on `main`.
+Still deferred to later slices: `Digest`, `Rules` / `ProposeRule` / `RevokeRule` (delegation; left out of slice 14), `Alerts` to push and voice, and `Touch`. Slice 14 adds `SettingRows`, `ProposeSetting`, `StartSet` and `CheckStart` (10.1 SE1–SE14). `Projects`, `Graph`, `LogLines`, `Asks`, `Start`, `Stop`, `Say`, `MintProof`, `Answer`, `Report`, and `Changes` are built on `main`.
 
 ### 12.3 The engine's Go interface
 
@@ -1233,7 +1261,8 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | Cheap sync (a local test merge in place of a full CI run on update) | Later | Saves CI minutes; needs the check runner first |
 | A cap on PRs in CI at once | Later | Cost control |
 | Milestone gates, verify task, critical path, digest | Later slices | Not needed to run one project |
-| Changing a setting, delegation, rule read-back | Slice 14 | — |
+| Changing a setting on the factory page, with its read-back | Slice 14 | — |
+| Delegation rules; asking for a setting change by voice; `sheepdog factory set`; "every project" scope | Later (left out of slice 14, 2026-11-24) | — |
 | Alerts to push and voice | A later slice | — |
 | Design loop | A later slice | — |
 | Secrets (a prompt at the Mac, scopes, reviewers refused) | Later, its own increment | The old engine had a separate tool; nothing in version 1 needs a new secret |
