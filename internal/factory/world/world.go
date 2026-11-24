@@ -112,6 +112,12 @@ func ClaudeReviewerArgv(model, effort, bin, findingsPath string) []string {
 	return []string{"env", "DISABLE_AUTOUPDATER=1", "claude", "--model", model, "--effort", effort, "--permission-mode", "dontAsk", "--allowedTools=" + tools}
 }
 
+// ClaudeRetroArgv returns the launch argv for a Claude Code retro run with the
+// read-only base tools plus Bash(<bin> factory report retro:*) and
+// Edit(//<findingsPath>) for that round's scratch findings file (design.md 9.2,
+// KB-RET-12, KB-RET-15). Stub for PR 12.2 TDD step 1.
+func ClaudeRetroArgv(model, effort, bin, findingsPath string) []string { return nil }
+
 // NewUUID returns a random version-4 UUID for Claude session ids (spike S0.8).
 func NewUUID() string {
 	var b [16]byte

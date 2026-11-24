@@ -1,0 +1,591 @@
+package factory
+
+// PR 12.2, TDD step 1: failing tests for retro run lifecycle on the shared
+// Attempt.Review slot, launchCapability/launchArgv/ClaudeRetroArgv,
+// runByTokenLocked role isolation (r2 B1, KB-RET-12), view "In retro" +
+// TaskView.Rounds exclusion, N28 launch/nudge/stop/retry -> M4 fallback,
+// acceptAmendLocked, and answerAskLocked (plan.md 12.2, design.md 4.5, 4.6,
+// 4.8, 7.2, 9.2, 9.3, KB-RET-1, KB-RET-9, KB-RET-12, KB-RET-15).
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+)
+
+// TestLaunchCapabilityAndWiringForRoleRetro checks plan.md 12.2, design.md 9.2,
+// and KB-RET-1/KB-RET-15: launchCapability accepts claude and agy for RoleRetro
+// and refuses codex (until S-REV-2); launchArgv clears agy session on RoleRetro;
+// taskExecutors, actOutage and stopReviewRec all handle retro runs.
+func TestLaunchCapabilityAndWiringForRoleRetro(t *testing.T) {
+	for _, tc := range []struct {
+		cli    string
+		wantOK bool
+	}{
+		{"claude", true},
+		{world.AgyCLI, true},
+		{world.CodexCLI, false},
+		{"unknown", false},
+	} {
+		got := launchCapability(flow.RoleRetro)(flow.Candidate{CLI: tc.cli, Model: "m", Effort: "high"})
+		if (got.Why == "") != tc.wantOK {
+			t.Errorf("launchCapability(retro)(%s) = %q, want ok=%v", tc.cli, got.Why, tc.wantOK)
+		}
+	}
+
+	// agy retro runs are always fresh (never --conversation even if resume=true).
+	agyArgv := launchArgv(flow.RoleRetro, flow.Candidate{CLI: world.AgyCLI, Model: agyReviewModel, Effort: "high"}, "/wt", agyHistoryConvID, true)
+	if slices.Contains(agyArgv, "--conversation") || slices.Contains(agyArgv, agyHistoryConvID) {
+		t.Errorf("launchArgv(retro, agy, resume=true) = %q, must stay fresh without --conversation", agyArgv)
+	}
+
+	// taskExecutors and actOutage wire AskStartRetro, AskNudgeRetro, AskStopRetro.
+	for _, verb := range []string{flow.AskStartRetro, flow.AskNudgeRetro, flow.AskStopRetro} {
+		if taskExecutors[verb] == nil {
+			t.Errorf("taskExecutors[%q] is nil", verb)
+		}
+		if !actOutage(verb, flow.Facts{HCUnavailable: true}, nil) {
+			t.Errorf("actOutage(%q, HCUnavailable=true) = false, want true", verb)
+		}
+	}
+
+	// stopReviewRec preserves RoleRetro when rev.Kind == RoundRetro.
+	rev := &flow.ReviewRun{Kind: flow.RoundRetro, Round: 4, Head: "c1", RunID: "term-retro"}
+	stopReviewRec(rev, flow.DefaultSettings(), time.Now().UTC())
+	if rev.Run == nil || rev.Run.Role != flow.RoleRetro || rev.Run.State != flow.PhaseEnded || rev.Run.Result != flow.EndStopped {
+		t.Fatalf("stopReviewRec on RoundRetro = %+v, want Role=retro ended(stopped)", rev.Run)
+	}
+}
+
+// TestRetroTokenRoleIsolationKBRET12 checks r2 B1, plan.md 12.2, design.md 7.2,
+// and KB-RET-12: runByTokenLocked returns flow.RoleRetro for a retro run token
+// (via a.Review.Role()), so report review is refused kind_not_allowed at
+// report.go:65 without recording a round or writing a report file.
+func TestRetroTokenRoleIsolationKBRET12(t *testing.T) {
+	f := newReviewTestFixture(t)
+	st, err := LoadState(f.eng.Paths.State(f.id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Tasks[0].Attempts[0].Review.Kind = flow.RoundRetro
+	st.Tasks[0].Attempts[0].Review.Run.Role = flow.RoleRetro
+	if err := SaveState(f.eng.Paths.State(f.id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("runByTokenLocked returns RoleRetro", func(t *testing.T) {
+		f.eng.mu.Lock()
+		pid, _, role, ti, runID := f.eng.runByTokenLocked(f.revTok)
+		f.eng.mu.Unlock()
+		if pid != f.id || role != flow.RoleRetro || ti != 0 || runID != "term-rev-1" {
+			t.Fatalf("runByTokenLocked(retroTok) = (%q, %q, %d, %q), want (%q, %q, 0, %q)",
+				pid, role, ti, runID, f.id, flow.RoleRetro, "term-rev-1")
+		}
+	})
+
+	t.Run("retro token refused report review pass (KB-RET-12, r2 B1)", func(t *testing.T) {
+		f.logs.Reset()
+		err := f.eng.Report(f.revTok, "review", validPassPayload(t, f.code, f.c1))
+		if got := refusalCode(err); got != "kind_not_allowed" {
+			t.Fatalf("Report(retroTok, review pass) = %v (code %q), want kind_not_allowed", err, got)
+		}
+		if !strings.Contains(err.Error(), flow.RoleRetro) {
+			t.Errorf("refusal %q should name role %q", err.Error(), flow.RoleRetro)
+		}
+		gotState, err := LoadState(f.eng.Paths.State(f.id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gotState.Seq != 1 || len(gotState.Tasks[0].Attempts[0].Rounds) != 0 || len(gotState.Tasks[0].Retros) != 0 {
+			t.Fatalf("refused retro report review mutated state: seq=%d rounds=%+v retros=%+v",
+				gotState.Seq, gotState.Tasks[0].Attempts[0].Rounds, gotState.Tasks[0].Retros)
+		}
+		if _, statErr := os.Stat(f.eng.Paths.Report(f.id, "T1", 1)); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("refused retro report review wrote report file: stat=%v", statErr)
+		}
+	})
+
+	t.Run("retro token refused report review changes with real hostile capture", func(t *testing.T) {
+		body := mustReviewPayload(t, map[string]any{
+			"verdict":           flow.VerdictChanges,
+			"code":              f.code,
+			"head":              f.c1,
+			"self_check_misses": 1,
+			"deletable":         "none",
+			"findings":          hostileFindingsText,
+		})
+		err := f.eng.Report(f.revTok, "review", body)
+		if got := refusalCode(err); got != "kind_not_allowed" {
+			t.Fatalf("Report(retroTok, review changes) = %v (code %q), want kind_not_allowed", err, got)
+		}
+		gotState, _ := LoadState(f.eng.Paths.State(f.id))
+		if gotState.Seq != 1 || len(gotState.Tasks[0].Attempts[0].Rounds) != 0 {
+			t.Fatalf("refused changes mutated state: seq=%d rounds=%+v", gotState.Seq, gotState.Tasks[0].Attempts[0].Rounds)
+		}
+	})
+
+	t.Run("retro token refused report ready names retro role", func(t *testing.T) {
+		err := f.eng.Report(f.revTok, "ready", json.RawMessage(`{"head":"`+f.c1+`"}`))
+		if got := refusalCode(err); got != "kind_not_allowed" {
+			t.Fatalf("Report(retroTok, ready) = %v (code %q), want kind_not_allowed", err, got)
+		}
+		if !strings.Contains(err.Error(), flow.RoleRetro) {
+			t.Errorf("refusal %q should name role %q", err.Error(), flow.RoleRetro)
+		}
+	})
+}
+
+// TestRetroViewInRetroAndRoundsExclusion checks plan.md 12.2 and KB-RET-9:
+// view.go shows "In retro" for an active RoundRetro run and excludes RoundRetro
+// from TaskView.Rounds alongside RoundSendBack.
+func TestRetroViewInRetroAndRoundsExclusion(t *testing.T) {
+	st := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "proj-retro-view", Folder: "/tmp/demo", Started: true},
+		Tasks: []flow.Task{
+			{
+				ID:      "T1",
+				Title:   "feat: active retro",
+				LastRow: "N28",
+				Attempts: []flow.Attempt{{
+					BaseCommit: "000",
+					RunID:      "worker-t1",
+					Ready:      []flow.Ready{{Head: "c1"}},
+					Rounds: []flow.Round{
+						{N: 1, Kind: flow.RoundFull, Head: "c0", Verdict: flow.VerdictChanges, Majors: 1},
+						{N: 2, Kind: flow.RoundDelta, Head: "c0b", Verdict: flow.VerdictChanges, Majors: 1},
+						{N: 3, Kind: flow.RoundDelta, Head: "c1", Verdict: flow.VerdictChanges, Majors: 1},
+					},
+					Review: &flow.ReviewRun{
+						RunID:    "rev-demo-t1-1-4",
+						Round:    4,
+						Kind:     flow.RoundRetro,
+						Head:     "c1",
+						Reviewer: flow.Reviewer{CLI: world.AgyCLI, Model: agyReviewModel, Effort: "high"},
+					},
+				}},
+			},
+			{
+				ID:      "T2",
+				Title:   "feat: completed retro excluded from Rounds",
+				LastRow: "N22",
+				Attempts: []flow.Attempt{{
+					BaseCommit: "000",
+					RunID:      "worker-t2",
+					Ready:      []flow.Ready{{Head: "c1"}},
+					Rounds: []flow.Round{
+						{N: 1, Kind: flow.RoundFull, Head: "c0", Verdict: flow.VerdictChanges, Majors: 1},
+						{N: 2, Kind: flow.RoundSendBack, Head: "c0", Verdict: flow.VerdictChanges, Why: "missing case"},
+						{N: 3, Kind: flow.RoundDelta, Head: "c0b", Verdict: flow.VerdictChanges, Majors: 1},
+						{N: 4, Kind: flow.RoundDelta, Head: "c1", Verdict: flow.VerdictChanges, Majors: 1},
+						{N: 5, Kind: flow.RoundRetro, Head: "c1", Verdict: flow.VerdictFix, Majors: 1},
+					},
+				}},
+			},
+		},
+	}
+
+	g := GraphViewOf(st, nil)
+	if len(g.Tasks) != 2 {
+		t.Fatalf("len(Tasks) = %d, want 2", len(g.Tasks))
+	}
+	t1, t2 := g.Tasks[0], g.Tasks[1]
+	if t1.Stage != "working" || t1.WhyWaiting != "In retro" || t1.Model != agyReviewModel || t1.Terminal != "rev-demo-t1-1-4" || t1.Rounds != 3 {
+		t.Errorf("T1 active retro view = %+v, want stage=working why=%q model=%q terminal=rev-demo-t1-1-4 rounds=3",
+			t1, "In retro", agyReviewModel)
+	}
+	if t2.Rounds != 3 {
+		t.Errorf("T2 Rounds = %d, want 3 (RoundRetro and RoundSendBack excluded)", t2.Rounds)
+	}
+}
+
+// setupRetroRig prepares an agyRig with task T1 pushed to PR #1 at c1 and
+// three prior reviewer rounds (rounds 2 and 3 with majors > 0) so the next
+// pass triggers L11 -> N28 (retro).
+func setupRetroRig(t *testing.T, retroCand flow.Candidate) (*agyRig, string, string) {
+	t.Helper()
+	r := newAgyRig(t, map[string][]flow.Candidate{
+		flow.RoleCoordinator: {{CLI: world.AgyCLI, Model: agyCoordModel, Effort: "medium"}},
+		flow.RoleWorker:      {{CLI: world.AgyCLI, Model: agyWorkerModel, Effort: "medium"}},
+		flow.RoleReviewer:    {{CLI: world.AgyCLI, Model: agyCoordModel, Effort: "medium"}},
+		flow.RoleRetro:       {retroCand},
+	})
+	r.pass() // J7 coordinator
+	coordTok := (*r.runs)[0].Env["SHEEPDOG_RUN_TOKEN"]
+	plan := `{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: retro target","brief":"Add calc.go handling all integers.",` + testScopeJSON + `,"outcomes":[{"text":"calc exists","proved_by":"manual: calc.go"}]}]}`
+	if err := r.eng.Report(coordTok, "plan apply", []byte(plan)); err != nil {
+		t.Fatalf("plan apply: %v", err)
+	}
+	r.pass() // N11 worktree
+	r.pass() // N23 worker
+	wt := r.state().Tasks[0].Attempts[0].Worktree
+	workerTok := r.last().Env["SHEEPDOG_RUN_TOKEN"]
+	if err := os.WriteFile(filepath.Join(wt, "calc.go"), []byte("package demo\nfunc Calc(n int) int { return n }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "add", "calc.go")
+	gitIn(t, wt, "commit", "-m", "feat: add calc")
+	c1 := gitIn(t, wt, "rev-parse", "HEAD")
+	writePRJSON(t, r.gh, "pr.json", c1, greenRollup)
+	if err := r.eng.Report(workerTok, "ready", []byte(`{"head":"`+c1+`","proofs":[{"outcome":"calc exists","artifact":"calc.go"}],"touched":"calc.go","skipped":""}`)); err != nil {
+		t.Fatalf("ready: %v", err)
+	}
+	r.pass() // N26 pushes and opens PR
+	writePRJSON(t, r.gh, "view.json", c1, greenRollup)
+
+	r1Path := r.paths.Report(r.id, "T1", 1)
+	r2Path := r.paths.Report(r.id, "T1", 2)
+	r3Path := r.paths.Report(r.id, "T1", 3)
+	r.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Rounds = []flow.Round{
+			{N: 1, Kind: flow.RoundFull, Head: c1, Reviewer: flow.Reviewer{CLI: world.AgyCLI, Model: agyCoordModel, Effort: "medium"}, Verdict: flow.VerdictChanges, Majors: 1, ReportPath: r1Path},
+			{N: 2, Kind: flow.RoundDelta, Head: c1, Reviewer: flow.Reviewer{CLI: world.AgyCLI, Model: agyCoordModel, Effort: "medium"}, Verdict: flow.VerdictChanges, Majors: 1, ReportPath: r2Path},
+			{N: 3, Kind: flow.RoundDelta, Head: c1, Reviewer: flow.Reviewer{CLI: world.AgyCLI, Model: agyCoordModel, Effort: "medium"}, Verdict: flow.VerdictChanges, Majors: 2, ReportPath: r3Path},
+		}
+	})
+	return r, c1, workerTok
+}
+
+// TestRetroRunLaunchClaudeAndAgy checks plan.md 12.2, design.md 4.5 N28, 9.2,
+// 9.3, KB-RET-1, and KB-RET-15: N28 launches a retro run on Attempt.Review with
+// Kind=RoundRetro, Role=RoleRetro, retroPrompt (case file + scratch findings
+// path outside worktree + report retro command + no <report>), ClaudeRetroArgv
+// for Claude, agy read-only prefix for agy, "In retro" view, and L5 delta mode.
+func TestRetroRunLaunchClaudeAndAgy(t *testing.T) {
+	t.Run("agy initial retro launch via L11 and N28", func(t *testing.T) {
+		r, c1, _ := setupRetroRig(t, flow.Candidate{CLI: world.AgyCLI, Model: agyReviewModel, Effort: "high"})
+		runsBefore := len(*r.runs)
+		r.pass() // L11 -> N28 launches retro
+
+		st := r.state()
+		if st.Tasks[0].LastRow != "N28" {
+			t.Fatalf("LastRow = %q, want N28 (recaps=%+v)", st.Tasks[0].LastRow, st.Tasks[0].Recaps)
+		}
+		if len(*r.runs) != runsBefore+1 {
+			t.Fatalf("runs = %d, want %d (retro launch)", len(*r.runs), runsBefore+1)
+		}
+		a := st.Tasks[0].Attempts[0]
+		if a.Review == nil || a.Review.Kind != flow.RoundRetro || a.Review.Role() != flow.RoleRetro ||
+			a.Review.Round != 4 || a.Review.Head != c1 || a.Review.RunID == "" {
+			t.Fatalf("a.Review = %+v, want active RoundRetro round 4 at %s", a.Review, c1)
+		}
+		if a.Review.Run == nil || a.Review.Run.Role != flow.RoleRetro {
+			t.Fatalf("a.Review.Run = %+v, want Role=%q", a.Review.Run, flow.RoleRetro)
+		}
+		runParams := r.last()
+		if runParams.Labels["sheepdog.role"] != flow.RoleRetro {
+			t.Errorf("terminal label sheepdog.role = %q, want %q", runParams.Labels["sheepdog.role"], flow.RoleRetro)
+		}
+		assertAgyFreshArgv(t, "retro", agyReviewModel, runParams,
+			"Do not modify, create or delete any files; read and run tests only",
+			"factory report retro",
+			"--code "+a.Review.Code,
+			"--head "+c1,
+			r.paths.Report(r.id, "T1", 3),
+		)
+		prompt, _ := strings.CutPrefix(runParams.Argv[len(runParams.Argv)-1], "-i=")
+		if strings.Contains(prompt, "<report>") || strings.Contains(prompt, "factory report review") {
+			t.Errorf("retro prompt must use report retro, not <report> or report review:\n%s", prompt)
+		}
+		findingsPath := extractFindingsPath(prompt)
+		if findingsPath == "" || !filepath.IsAbs(findingsPath) {
+			t.Fatalf("retro prompt missing absolute --findings <path>:\n%s", prompt)
+		}
+		assertScratchPathOutsideWorktree(t, findingsPath, a.Worktree, r.paths.Report(r.id, "T1", 4))
+
+		gv := GraphViewOf(st, nil)
+		if gv.Tasks[0].WhyWaiting != "In retro" {
+			t.Errorf("GraphViewOf WhyWaiting = %q, want %q", gv.Tasks[0].WhyWaiting, "In retro")
+		}
+	})
+
+	t.Run("claude retro launch uses ClaudeRetroArgv and report retro prompt", func(t *testing.T) {
+		r, c1, _ := setupRetroRig(t, flow.Candidate{CLI: "claude", Model: "opus", Effort: "high"})
+		r.eng.Bin = "/opt/bin/sheepdog"
+		runsBefore := len(*r.runs)
+		r.pass() // L11 -> N28 launches Claude retro
+
+		st := r.state()
+		if st.Tasks[0].LastRow != "N28" || len(*r.runs) != runsBefore+1 {
+			t.Fatalf("LastRow=%q runs=%d (before=%d), want N28 with Claude retro launch", st.Tasks[0].LastRow, len(*r.runs), runsBefore)
+		}
+		runParams := r.last()
+		if world.ArgvCLI(runParams.Argv) != "claude" {
+			t.Fatalf("expected claude retro argv, got %q", runParams.Argv)
+		}
+		prompt := runParams.Argv[len(runParams.Argv)-1]
+		if !strings.Contains(prompt, "/opt/bin/sheepdog factory report retro") || !strings.Contains(prompt, c1) {
+			t.Fatalf("claude retro prompt missing `/opt/bin/sheepdog factory report retro` or head %s:\n%s", c1, prompt)
+		}
+		if strings.Contains(prompt, "<report>") {
+			t.Errorf("claude retro prompt still contains <report>:\n%s", prompt)
+		}
+		findingsPath := extractFindingsPath(prompt)
+		if findingsPath == "" || !filepath.IsAbs(findingsPath) {
+			t.Fatalf("claude retro prompt missing absolute --findings <path>:\n%s", prompt)
+		}
+		assertScratchPathOutsideWorktree(t, findingsPath, st.Tasks[0].Attempts[0].Worktree, r.paths.Report(r.id, "T1", 4))
+
+		allowed := ""
+		for _, arg := range runParams.Argv[:len(runParams.Argv)-1] {
+			if v, ok := strings.CutPrefix(arg, "--allowedTools="); ok {
+				allowed = v
+			}
+		}
+		if !strings.Contains(allowed, "Bash(/opt/bin/sheepdog factory report retro:*)") {
+			t.Errorf("claude retro argv missing Bash(/opt/bin/sheepdog factory report retro:*):\n%s", allowed)
+		}
+		if strings.Contains(allowed, "report review") || strings.Contains(allowed, "Write(") {
+			t.Errorf("claude retro argv contains forbidden rule:\n%s", allowed)
+		}
+		wantEditA := "Edit(//" + strings.TrimPrefix(findingsPath, "/") + ")"
+		wantEditB := "Edit(//" + findingsPath + ")"
+		if !strings.Contains(allowed, wantEditA) && !strings.Contains(allowed, wantEditB) {
+			t.Errorf("claude retro argv Edit rule does not match %q:\n%s", findingsPath, allowed)
+		}
+	})
+
+	t.Run("L5 delta check retro launch after prior FIX", func(t *testing.T) {
+		r, c1, workerTok := setupRetroRig(t, flow.Candidate{CLI: world.AgyCLI, Model: agyReviewModel, Effort: "high"})
+		wt := r.state().Tasks[0].Attempts[0].Worktree
+		// Seed a prior retro FIX at round 4 on c1, then worker commits c2 and reports ready.
+		r.edit(func(s *flow.State) {
+			a := &s.Tasks[0].Attempts[0]
+			a.Rounds = append(a.Rounds, flow.Round{
+				N: 4, Kind: flow.RoundRetro, Head: c1,
+				Reviewer:   flow.Reviewer{CLI: world.AgyCLI, Model: agyReviewModel, Effort: "high"},
+				Verdict:    flow.VerdictFix,
+				Majors:     1,
+				ReportPath: r.paths.Report(r.id, "T1", 4),
+			})
+			s.Tasks[0].Retros = []flow.Retro{{
+				Attempt:               1,
+				Round:                 4,
+				Cause:                 "patch-shaped-fix",
+				WorkerChange:          "handle negative inputs in one branch",
+				WorkerChangeKind:      flow.ChangeKindCheck,
+				CoordinatorChange:     "include negative cases in outcomes",
+				CoordinatorChangeKind: flow.ChangeKindBrief,
+				At:                    *r.now,
+			}}
+		})
+		if err := os.WriteFile(filepath.Join(wt, "calc.go"), []byte("package demo\nfunc Calc(n int) int { if n < 0 { return -n }; return n }\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, wt, "add", "calc.go")
+		gitIn(t, wt, "commit", "-m", "fix: handle negative inputs")
+		c2 := gitIn(t, wt, "rev-parse", "HEAD")
+		if err := r.eng.Report(workerTok, "ready", []byte(`{"head":"`+c2+`","proofs":[{"outcome":"calc exists","artifact":"calc.go"}],"touched":"calc.go","skipped":""}`)); err != nil {
+			t.Fatalf("ready c2: %v", err)
+		}
+		r.pass() // N26 pushes c2
+		writePRJSON(t, r.gh, "view.json", c2, greenRollup)
+		runsBefore := len(*r.runs)
+		r.pass() // L5 -> N28 delta retro launch
+
+		st := r.state()
+		a := st.Tasks[0].Attempts[0]
+		if st.Tasks[0].LastRow != "N28" || len(*r.runs) != runsBefore+1 {
+			t.Fatalf("L5 delta retro: LastRow=%q runs=%d (before=%d)", st.Tasks[0].LastRow, len(*r.runs), runsBefore)
+		}
+		if a.Review == nil || a.Review.Kind != flow.RoundRetro || a.Review.Round != 5 || a.Review.Head != c2 {
+			t.Fatalf("L5 delta retro Review = %+v, want RoundRetro round 5 at %s", a.Review, c2)
+		}
+		prompt, _ := strings.CutPrefix(r.last().Argv[len(r.last().Argv)-1], "-i=")
+		if !strings.Contains(strings.ToLower(prompt), "delta") || !strings.Contains(prompt, c2) {
+			t.Errorf("L5 delta retro prompt missing delta mode or head %s:\n%s", c2, prompt)
+		}
+	})
+}
+
+// TestRetroRunNudgeStopRetryToM4Fallback checks plan.md 12.2, design.md 4.6 M4,
+// 4.8, and section 5 R20: an idle agy retro run with no report is nudged once
+// naming `factory report retro`, stopped as EndStuck, retried up to
+// reviewer_retries (repeating a single candidate in a fresh session via
+// reviewChoiceReason), and once retries are exhausted observeReviewLocked sets
+// Facts.RetroUnavailable so the task falls through L12 -> N25 (open_recap@review
+// with [split, new, drop]) -> N6, leaving zero retro rounds in state.json.
+func TestRetroRunNudgeStopRetryToM4Fallback(t *testing.T) {
+	r, c1, _ := setupRetroRig(t, flow.Candidate{CLI: world.AgyCLI, Model: agyReviewModel, Effort: "high"})
+	r.edit(func(s *flow.State) { s.Settings.ReviewerRetries = 1 })
+
+	// Start 1 (initial): L11 -> N28 launches retro.
+	r.pass()
+	st := r.state()
+	if st.Tasks[0].LastRow != "N28" || st.Tasks[0].Attempts[0].Review == nil || st.Tasks[0].Attempts[0].Review.RunID == "" {
+		t.Fatalf("initial retro did not start: LastRow=%q review=%+v", st.Tasks[0].LastRow, st.Tasks[0].Attempts[0].Review)
+	}
+	firstID := st.Tasks[0].Attempts[0].Review.RunID
+
+	// Retro finishes turn without calling report retro -> R9 -> R20 -> N28 nudges once.
+	r.srv.SetStatus(firstID, &hc.Status{App: "antigravity", State: "done", Msg: "Done looking."})
+	*r.now = r.now.Add(5 * time.Second)
+	r.pass()
+	*r.now = r.now.Add(25 * time.Second)
+	r.pass()
+
+	sends := sendsTo(t, r.srv.Requests(), firstID)
+	if len(sends) != 1 {
+		t.Fatalf("expected 1 N28 nudge send to %s, got %d: %q", firstID, len(sends), sends)
+	}
+	if !strings.Contains(sends[0], "factory report retro") || strings.Contains(sends[0], "factory report review") || strings.Contains(sends[0], "<report>") {
+		t.Errorf("N28 nudge = %q, want `factory report retro` (not report review or <report>)", sends[0])
+	}
+
+	// Still idle after nudge -> N28 stops retro as EndStuck.
+	*r.now = r.now.Add(5 * time.Second)
+	r.pass()
+	*r.now = r.now.Add(25 * time.Second)
+	r.pass()
+
+	if _, err := r.cl.Get(context.Background(), firstID); !errors.Is(err, hc.ErrNotFound) {
+		t.Errorf("first retro terminal %s still exists after stop_retro: err=%v", firstID, err)
+	}
+	st = r.state()
+	if rv := st.Tasks[0].Attempts[0].Review; rv == nil || rv.Run == nil || rv.Run.State != flow.PhaseEnded || rv.Run.Result != flow.EndStuck || rv.Run.Role != flow.RoleRetro {
+		t.Fatalf("after stop_retro: Review=%+v, want Role=retro ended(stuck)", rv)
+	}
+
+	// Start 2 (retry 1 of 1): reviewChoiceReason repeats the single retro candidate in a fresh session.
+	r.pass()
+	st = r.state()
+	rv := st.Tasks[0].Attempts[0].Review
+	if st.Tasks[0].LastRow != "N28" || rv == nil || rv.RunID == "" || rv.RunID == firstID || rv.Retries != 1 {
+		t.Fatalf("retry retro = LastRow=%q Review=%+v, want fresh RunID with Retries=1", st.Tasks[0].LastRow, rv)
+	}
+	if !slices.Contains(rv.FailedModels, world.AgyCLI+"/"+agyReviewModel) {
+		t.Errorf("FailedModels = %v, want %q recorded", rv.FailedModels, world.AgyCLI+"/"+agyReviewModel)
+	}
+	secondID := rv.RunID
+
+	// Retry also goes idle -> nudged once -> stopped as EndStuck (retries now exhausted).
+	r.srv.SetStatus(secondID, &hc.Status{App: "antigravity", State: "done", Msg: "Still no report."})
+	*r.now = r.now.Add(5 * time.Second)
+	r.pass()
+	*r.now = r.now.Add(25 * time.Second)
+	r.pass() // nudge_retro@4@1@c1
+	*r.now = r.now.Add(5 * time.Second)
+	r.pass()
+	*r.now = r.now.Add(25 * time.Second)
+	r.pass() // stop_retro@4@1@c1
+
+	// Next pass: retries exhausted -> observeReviewLocked sets RetroUnavailable (M4) -> L12 -> N25.
+	r.pass()
+	st = r.state()
+	if st.Tasks[0].LastRow != "N25" {
+		t.Fatalf("after exhausted retro retries: LastRow = %q, want N25 (M4 fallback)", st.Tasks[0].LastRow)
+	}
+	rc := flow.OpenRecap(st.Tasks[0])
+	if rc == nil || rc.Trigger != flow.TriggerReview || !slices.Equal(rc.Allowed, []string{"split", "new", "drop"}) {
+		t.Fatalf("M4 fallback recap = %+v, want open review recap [split new drop]", rc)
+	}
+	if len(st.Tasks[0].Retros) != 0 {
+		t.Errorf("exhausted retro recorded t.Retros = %+v, want empty", st.Tasks[0].Retros)
+	}
+	for _, rnd := range st.Tasks[0].Attempts[0].Rounds {
+		if rnd.Kind == flow.RoundRetro {
+			t.Errorf("exhausted retro recorded RoundRetro in a.Rounds: %+v", rnd)
+		}
+	}
+	// Log records N25 with open_recap@review and retro_unavailable:true.
+	logBytes, err := os.ReadFile(r.paths.Log(r.id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logBytes), `"rule":"N25"`) ||
+		!strings.Contains(string(logBytes), `"retro_unavailable":true`) ||
+		!strings.Contains(string(logBytes), "open_recap@review") {
+		t.Errorf("log.jsonl missing N25 M4 fallback markers for head %s:\n%s", c1, string(logBytes))
+	}
+}
+
+// TestRetroAmendRequestAndAnswerAsk checks plan.md 12.2's remaining two shared-slot
+// hooks: acceptAmendLocked compares t.Request[a.Review.Role()] (so amending
+// request.retro stops a live retro run and amending request.reviewer does not),
+// and answerAskLocked delivers answers to a live retro run when AskedBy == RoleRetro.
+func TestRetroAmendRequestAndAnswerAsk(t *testing.T) {
+	t.Run("acceptAmendLocked stops live retro only on request.retro change", func(t *testing.T) {
+		l := newLanding(t).withTokens()
+		ctx := context.Background()
+		retroID, err := startRun(ctx, l.client, world.RunSpec{Name: "rev-t1-4", Cwd: l.wt, Argv: []string{"sh"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		l.srv.SetStatus(retroID, &hc.Status{App: "claude-code", State: "working"})
+		l.edit(func(s *flow.State) {
+			a := &s.Tasks[0].Attempts[0]
+			a.Review = &flow.ReviewRun{
+				RunID: retroID, Round: 4, Kind: flow.RoundRetro, Head: l.c1, Code: "retcode123",
+				Run: &flow.RunRecord{Address: retroID, Role: flow.RoleRetro, CLI: "claude", State: flow.PhaseWorking},
+			}
+		})
+
+		// Amending request.reviewer must NOT stop the live RoundRetro run.
+		l.report("tok-coord", "plan amend", `{"why":"change reviewer","tasks":[{"id":"T1","request":{"reviewer":[{"cli":"claude","model":"opus","effort":"high"}]}}]}`, "")
+		if rs, err := termState(ctx, l.client, retroID); err != nil || rs == flow.RunGone {
+			t.Fatalf("amending request.reviewer stopped live RoundRetro run: state=%s err=%v", rs, err)
+		}
+
+		// Amending request.retro MUST stop the live RoundRetro run.
+		l.report("tok-coord", "plan amend", `{"why":"change retro model","tasks":[{"id":"T1","request":{"retro":[{"cli":"claude","model":"opus","effort":"high"}]}}]}`, "")
+		if rs, err := termState(ctx, l.client, retroID); err != nil || rs != flow.RunGone {
+			t.Fatalf("amending request.retro did not stop live RoundRetro run: state=%s err=%v", rs, err)
+		}
+		if rv := l.state().Tasks[0].Attempts[0].Review; rv == nil || rv.RunID != "" || rv.Run == nil || rv.Run.Role != flow.RoleRetro {
+			t.Fatalf("after retro request amend: Review=%+v, want stopped RoleRetro", rv)
+		}
+	})
+
+	t.Run("answerAskLocked delivers RoleRetro ask to retro terminal, not worker", func(t *testing.T) {
+		l := newLanding(t).withTokens()
+		ctx := context.Background()
+		retroID, err := startRun(ctx, l.client, world.RunSpec{
+			Name: "rev-t1-ask", Cwd: l.wt, Argv: []string{"sh"},
+			Labels: map[string]string{"sheepdog.run": "run-retro-ask"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		l.srv.SetStatus(retroID, &hc.Status{App: "claude-code", State: "idle"})
+		l.edit(func(s *flow.State) {
+			a := &s.Tasks[0].Attempts[0]
+			a.Run = &flow.RunRecord{Address: l.worker, Role: flow.RoleWorker, CLI: "claude", State: flow.PhaseIdle}
+			a.Review = &flow.ReviewRun{
+				RunID: retroID, Round: 4, Kind: flow.RoundRetro, Head: l.c1, Code: "retcode123",
+				Run: &flow.RunRecord{ID: "run-retro-ask", Address: retroID, Role: flow.RoleRetro, CLI: "claude", State: flow.PhaseIdle},
+			}
+			s.Asks = []flow.Ask{{
+				ID:        "ask-retro-1",
+				Project:   l.id,
+				Kind:      flow.KindDecision,
+				Task:      "T1",
+				Question:  "Should retro inspect generated fixtures too?",
+				Options:   []string{"Yes", "No"},
+				Recommend: "No",
+				Status:    flow.AskStatusOpen,
+				AskedBy:   flow.RoleRetro,
+				RunID:     retroID,
+			}}
+		})
+
+		l.report("tok-coord", "answer", `{"ask":"ask-retro-1","option":"No","why":"source files only"}`, "")
+
+		if got := sendsTo(t, l.srv.Requests(), l.worker); len(got) != 0 {
+			t.Fatalf("RoleRetro ask answer leaked to worker: %q", got)
+		}
+		if got := sendsTo(t, l.srv.Requests(), retroID); len(got) != 1 || !strings.Contains(got[0], "Answer to ask-retro-1: No") {
+			t.Fatalf("RoleRetro ask answer sends to retro = %q, want 1 delivery", got)
+		}
+	})
+}

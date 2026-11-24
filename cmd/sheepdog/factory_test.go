@@ -1063,7 +1063,7 @@ func TestFactoryTemplatesNameRealCommands(t *testing.T) {
 	printFactoryUsage(&usage)
 	lines := strings.Split(usage.String(), "\n")
 	flags := lines[slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, "flags: ") })]
-	for _, role := range []string{"coordinator", "worker", "reviewer"} {
+	for _, role := range []string{"coordinator", "worker", "reviewer", "retro"} {
 		raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "factory", role+".md"))
 		if err != nil {
 			t.Fatal(err)
